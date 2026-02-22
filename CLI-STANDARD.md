@@ -43,23 +43,23 @@ Note: Many popular tools (git, docker) silently accept interleaved options via G
 
 Every command supports:
 
-| Flag | Purpose |
-|------|---------|
-| `--help`, `-h` | Show usage (to stdout, exit 0) |
-| `--version` | Show version (to stdout, exit 0; top-level only) |
-| `--verbose`, `-v` | Increase output verbosity (stackable: `-vv`) |
-| `--quiet`, `-q` | Suppress non-essential output |
-| `--no-color` | Disable colored output |
-| `--yes`, `-y` | Skip confirmation prompts (where applicable) |
+| Flag              | Purpose                                          |
+|-------------------|--------------------------------------------------|
+| `--help`, `-h`    | Show usage (to stdout, exit 0)                   |
+| `--version`       | Show version (to stdout, exit 0; top-level only) |
+| `--verbose`, `-v` | Increase output verbosity (stackable: `-vv`)     |
+| `--quiet`, `-q`   | Suppress non-essential output                    |
+| `--no-color`      | Disable colored output                           |
+| `--yes`, `-y`     | Skip confirmation prompts (where applicable)     |
 
 ### Verbosity Mapping
 
-| Flags | Log Level |
-|-------|-----------|
-| (default) | Info |
-| `-v` | Debug |
-| `-q` | Warn |
-| `-qq` | Error only |
+| Flags     | Log Level  |
+|-----------|------------|
+| (default) | Info       |
+| `-v`      | Debug      |
+| `-q`      | Warn       |
+| `-qq`     | Error only |
 
 `-vv` reserved for future trace-level output if needed.
 
@@ -95,14 +95,14 @@ For commands that produce long output (e.g., `yoloai log`), pipe through a pager
 
 ## Exit Codes
 
-| Code | Meaning |
-|------|---------|
-| 0 | Success |
-| 1 | General error |
-| 2 | Usage error (bad arguments, missing required args) — requires Cobra customization; Cobra returns 1 for all errors by default |
-| 3 | Configuration error (bad config file, missing required config) — project-specific |
-| 128+N | Terminated by signal N (POSIX convention) |
-| 130 | Interrupted by SIGINT / Ctrl+C (128+2) |
+| Code  | Meaning                                                                                                                      |
+|-------|------------------------------------------------------------------------------------------------------------------------------|
+| 0     | Success                                                                                                                      |
+| 1     | General error                                                                                                                |
+| 2     | Usage error (bad arguments, missing required args) — requires Cobra customization; Cobra returns 1 for all errors by default |
+| 3     | Configuration error (bad config file, missing required config) — project-specific                                            |
+| 128+N | Terminated by signal N (POSIX convention)                                                                                    |
+| 130   | Interrupted by SIGINT / Ctrl+C (128+2)                                                                                       |
 
 ## Signal Handling
 

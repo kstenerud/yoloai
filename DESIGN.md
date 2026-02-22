@@ -7,27 +7,27 @@ Run Claude CLI with `--dangerously-skip-permissions` inside disposable, isolated
 ## Architecture
 
 ```
-┌──────────────────────────────────────────────────┐
-│  Host (any machine with Docker)                  │
-│                                                  │
-│  yoloai CLI (Go binary)                           │
-│    │                                             │
-│    ├─ docker run ──► sandbox-1  ← ephemeral      │
-│    │                  ├ tmux                     │
-│    │                  ├ claude --dangerously-... │
-│    │                  ├ /work ──► project dirs   │
-│    │                  └ /claude-state            │
-│    │                                             │
-│    ├─ docker run ──► sandbox-2                   │
-│    └─ ...                                        │
-│                                                  │
-│  ~/.yoloai/sandboxes/<name>/  ← persistent state   │
+┌───────────────────────────────────────────────────────────┐
+│  Host (any machine with Docker)                           │
+│                                                           │
+│  yoloai CLI (Go binary)                                   │
+│    │                                                      │
+│    ├─ docker run ──► sandbox-1  ← ephemeral               │
+│    │                  ├ tmux                              │
+│    │                  ├ claude --dangerously-...          │
+│    │                  ├ /work ──► project dirs            │
+│    │                  └ /claude-state                     │
+│    │                                                      │
+│    ├─ docker run ──► sandbox-2                            │
+│    └─ ...                                                 │
+│                                                           │
+│  ~/.yoloai/sandboxes/<name>/  ← persistent state          │
 │    ├── work/          (overlay upper dirs or full copies) │
-│    ├── claude-state/  (Claude's ~/.claude)       │
-│    ├── log.txt        (session output)           │
-│    ├── prompt.txt     (initial prompt)           │
-│    └── meta.json      (config, paths, status)    │
-└──────────────────────────────────────────────────┘
+│    ├── claude-state/  (Claude's ~/.claude)                │
+│    ├── log.txt        (session output)                    │
+│    ├── prompt.txt     (initial prompt)                    │
+│    └── meta.json      (config, paths, status)             │
+└───────────────────────────────────────────────────────────┘
 ```
 
 ### Container Technology: Docker
@@ -361,13 +361,13 @@ Implemented as `docker exec yoloai-<name> <command>`, with `-i` added when stdin
 
 Lists all sandboxes with their current status.
 
-| Column | Description |
-|--------|-------------|
-| NAME | Sandbox name |
-| STATUS | `running`, `stopped`, `exited` (Claude exited but container up) |
-| PROFILE | Profile name or `(base)` |
-| AGE | Time since creation |
-| PRIMARY | Primary directory path |
+| Column  | Description                                                     |
+|---------|-----------------------------------------------------------------|
+| NAME    | Sandbox name                                                    |
+| STATUS  | `running`, `stopped`, `exited` (Claude exited but container up) |
+| PROFILE | Profile name or `(base)`                                        |
+| AGE     | Time since creation                                             |
+| PRIMARY | Primary directory path                                          |
 
 Options:
 - `--running`: Show only running sandboxes.

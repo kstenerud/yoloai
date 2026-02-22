@@ -22,18 +22,18 @@ See also: global `CLAUDE.md` for language-agnostic naming philosophy and comment
 
 Enable these linters in `.golangci.yml`:
 
-| Linter | Purpose |
-|--------|---------|
-| errcheck | Unchecked error returns |
-| govet | Suspicious constructs (`go vet`) |
-| staticcheck | Advanced static analysis |
-| unused | Unused code |
-| ineffassign | Ineffectual assignments |
-| gosec | Security issues |
-| errorlint | Error wrapping/comparison mistakes |
-| revive | Extensible linter (replaces golint) |
-| gocritic | Opinionated style and performance checks |
-| sloglint | Consistent `log/slog` usage |
+| Linter      | Purpose                                  |
+|-------------|------------------------------------------|
+| errcheck    | Unchecked error returns                  |
+| govet       | Suspicious constructs (`go vet`)         |
+| staticcheck | Advanced static analysis                 |
+| unused      | Unused code                              |
+| ineffassign | Ineffectual assignments                  |
+| gosec       | Security issues                          |
+| errorlint   | Error wrapping/comparison mistakes       |
+| revive      | Extensible linter (replaces golint)      |
+| gocritic    | Opinionated style and performance checks |
+| sloglint    | Consistent `log/slog` usage              |
 
 Linters to skip: `exhaustruct` (forces filling every struct field — noisy, fights zero values), `varnamelen` (conflicts with Go's short-variable conventions).
 
@@ -77,16 +77,16 @@ Everything under `internal/` is private to this module — prevents accidental e
 
 Follow Go conventions — [Effective Go](https://go.dev/doc/effective_go) and [Go Code Review Comments](https://go.dev/wiki/CodeReviewComments) are authoritative.
 
-| Thing | Convention | Example |
-|-------|-----------|---------|
-| Packages | short, lowercase, no underscores | `sandbox`, `config` |
-| Exported types | `MixedCaps` | `SandboxManager` |
-| Unexported types | `mixedCaps` | `overlayState` |
-| Functions/methods | `MixedCaps` / `mixedCaps` | `CreateSandbox()`, `buildArgs()` |
-| Constants | `MixedCaps` | `DefaultDiskLimit` (not `DEFAULT_DISK_LIMIT`) |
-| Interfaces | name by method + `-er` when single-method | `Reader`, `ContainerRunner` |
-| Receivers | 1-2 letters, consistent within type | `s` for `*Sandbox`, `m` for `*Manager` |
-| Acronyms | all-caps | `URL`, `HTTP`, `ID`, `API` |
+| Thing             | Convention                                | Example                                       |
+|-------------------|-------------------------------------------|-----------------------------------------------|
+| Packages          | short, lowercase, no underscores          | `sandbox`, `config`                           |
+| Exported types    | `MixedCaps`                               | `SandboxManager`                              |
+| Unexported types  | `mixedCaps`                               | `overlayState`                                |
+| Functions/methods | `MixedCaps` / `mixedCaps`                 | `CreateSandbox()`, `buildArgs()`              |
+| Constants         | `MixedCaps`                               | `DefaultDiskLimit` (not `DEFAULT_DISK_LIMIT`) |
+| Interfaces        | name by method + `-er` when single-method | `Reader`, `ContainerRunner`                   |
+| Receivers         | 1-2 letters, consistent within type       | `s` for `*Sandbox`, `m` for `*Manager`        |
+| Acronyms          | all-caps                                  | `URL`, `HTTP`, `ID`, `API`                    |
 
 Never use underscores in Go names (except in test functions: `Test_xxx`). Never use `self` or `this` for receivers.
 
@@ -143,12 +143,12 @@ if err != nil {
 
 Domain packages return typed errors (e.g., `ConfigError`, `SandboxNotFoundError`) and sentinel errors. The root Cobra command handler inspects errors with `errors.As` / `errors.Is` and maps them to exit codes:
 
-| Error Type | Exit Code |
-|-----------|-----------|
-| (none) | 0 — success |
-| General / unknown | 1 |
-| Usage error (bad args, missing required) | 2 |
-| Configuration error | 3 |
+| Error Type                               | Exit Code   |
+|------------------------------------------|-------------|
+| (none)                                   | 0 — success |
+| General / unknown                        | 1           |
+| Usage error (bad args, missing required) | 2           |
+| Configuration error                      | 3           |
 
 Cobra customization required: set `SilenceErrors: true` and `SilenceUsage: true` on the root command, then handle error formatting and exit codes in a custom `RunE` wrapper or post-run error handler.
 
