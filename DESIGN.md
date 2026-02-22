@@ -98,6 +98,8 @@ defaults:
   auto_commit_interval: 0               # seconds between auto-commits in :copy dirs; 0 = disabled
   ports: []                             # default port mappings; profile ports are additive
   env: {}                               # environment variables passed to container; profile env merges with defaults
+  network_isolated: false               # true to enable network isolation by default
+  network_allow: []                     # additional domains to allow (additive with agent defaults)
   resources:
     cpus: 4                           # docker --cpus
     memory: 8g                        # docker --memory
@@ -124,9 +126,11 @@ profiles:
 
 - `defaults` apply to all sandboxes regardless of profile.
 - `defaults.claude_files` controls what files are copied into the sandbox's `claude-state/` directory on first run. Set to `home` to copy standard files from `$HOME/.claude/` (convenient but non-portable). Set to a list of paths (relative to `$HOME` or absolute) for deterministic setups. Omit entirely to copy nothing (safe default). Profile `claude_files` **replaces** (not merges with) defaults.
-- `defaults.mounts` and profile `mounts` are bind mounts added at container run time.
+- `defaults.mounts` and profile `mounts` are bind mounts added at container run time. Profile mounts are **additive** (merged with defaults, no deduplication — duplicates are a user error).
 - `defaults.resources` sets baseline limits. Profiles can override individual values.
 - `defaults.env` sets environment variables passed to the container via `docker run -e`. Profile `env` is merged with defaults (profile values win on conflict). Note: `ANTHROPIC_API_KEY` is injected via file-based bind mount, not `env` — see Credential Management.
+- `defaults.network_isolated` enables network isolation for all sandboxes. Profile can override. CLI `--network-isolated` flag overrides config.
+- `defaults.network_allow` lists additional allowed domains. Profile `network_allow` is additive with defaults. CLI `--network-allow` is additive with config.
 - Profile Docker images are defined by the Dockerfiles in `~/.yoloai/profiles/<name>/`, not in this config. The config only holds runtime settings (mounts, resources, claude_files).
 
 #### Directory Mappings in Profiles
@@ -163,7 +167,7 @@ defaults:
     - tailscale up --authkey=${TAILSCALE_AUTHKEY}
 ```
 
-`cap_add`, `devices`, and `setup` are available but not in the default config. `setup` commands run at container start before Claude launches.
+`cap_add`, `devices`, and `setup` are available in both `defaults` and profiles but not shown in the default config. Profile values are **additive** (merged with defaults). `setup` commands run at container start before Claude launches, in order (defaults first, then profile).
 
 Config values support `${VAR}` environment variable interpolation from the host environment (following Docker Compose conventions). This allows secrets like `${TAILSCALE_AUTHKEY}` to be referenced in config without hardcoding. Unset variables produce an error at sandbox creation time (fail-fast, not silent empty string).
 
@@ -208,16 +212,16 @@ The primary directory **must** have `:rw` or `:copy` — error otherwise.
 
 ```
 # Copy primary (safe, reviewable), deps read-only
-yoloai newfix-build --prompt "fix the build" ./my-app:copy ./shared-lib ./common-types
+yoloai new fix-build --prompt "fix the build" ./my-app:copy ./shared-lib ./common-types
 
 # Live-edit primary, one dep also writable
-yoloai newmy-task ./my-app:rw ./shared-lib:rw ./common-types
+yoloai new my-task ./my-app:rw ./shared-lib:rw ./common-types
 
 # Custom mount points for tools that need specific paths
-yoloai newmy-task ./my-app:copy=/opt/myapp ./shared-lib=/usr/local/lib/shared ./common-types
+yoloai new my-task ./my-app:copy=/opt/myapp ./shared-lib=/usr/local/lib/shared ./common-types
 
 # Error: primary has no write access
-yoloai newmy-task ./my-app ./shared-lib
+yoloai new my-task ./my-app ./shared-lib
 ```
 
 Name is required. If omitted, an error is shown with a helpful message suggesting a name based on the primary directory basename.
@@ -256,6 +260,7 @@ Options:
 - `--network-isolated`: Allow only Anthropic API traffic. Claude can function but cannot access other external services, download arbitrary binaries, or exfiltrate code.
 - `--network-allow <domain>`: Allow traffic to specific additional domains (can be repeated). Combines with `--network-isolated`. Added to the agent's default allowlist (see below).
 - `--network-none`: Run with `--network none` for full network isolation (Claude API calls will also fail — only useful for offline tasks with pre-cached models).
+- `--port <host:container>`: Expose a container port on the host (can be repeated). Example: `--port 3000:3000` for web dev. Without this, container services are not reachable from the host browser.
 
 **Default network allowlist (v1, Claude Code):**
 
@@ -266,7 +271,6 @@ Options:
 | `sentry.io` | Error reporting (recommended) |
 
 The allowlist is agent-specific. v2 multi-agent support will add per-agent defaults (e.g., OpenAI endpoints for Codex, provider-specific endpoints for Aider/Goose). `--network-allow` domains are additive.
-- `--port <host:container>`: Expose a container port on the host (can be repeated). Example: `--port 3000:3000` for web dev. Without this, container services are not reachable from the host browser.
 
 **Workflow:**
 
@@ -372,7 +376,7 @@ Before applying, shows a summary via `git diff --stat` (files changed, insertion
 
 ### `yoloai destroy`
 
-`docker stop` + `docker rm` the container. Removes `~/.yoloai/sandboxes/<name>/` entirely. No special overlay cleanup needed — the kernel tears down the mount namespace when the container stops.
+`docker stop` + `docker rm` the container (and proxy sidecar if `--network-isolated`). Removes `~/.yoloai/sandboxes/<name>/` entirely. No special overlay cleanup needed — the kernel tears down the mount namespace when the container stops.
 
 Asks for confirmation if Claude is still running.
 
@@ -512,7 +516,7 @@ The user sets `ANTHROPIC_API_KEY` in their host shell profile. yoloai reads it f
 - **Runs as non-root** inside the container (user `yoloai` matching host UID/GID). This is required because Claude CLI refuses `--dangerously-skip-permissions` as root.
 - **`CAP_SYS_ADMIN` capability** is granted to the container when using the overlay copy strategy (the default). This is required for overlayfs mounts inside the container. It is a broad capability — it also permits other mount operations and namespace manipulation. The container's namespace isolation limits the blast radius, but this is a tradeoff: overlay gives instant setup and space efficiency at the cost of a wider capability grant. Users concerned about this can set `copy_strategy: full` to avoid the capability entirely.
 - **Dangerous directory detection:** The tool refuses to mount `$HOME`, `/`, or system directories unless `:force` is appended, preventing accidental exposure of your entire filesystem.
-- **Security design needs dedicated research.** The security story around Docker + Claude (credential handling, network isolation, privilege escalation, exfiltration vectors) needs dedicated research into best practices before finalizing. The `setup` commands and `cap_add`/`devices` fields enable significant privilege escalation with insufficient documentation of risks. Ad-hoc mitigations risk missing the bigger picture.
+- **Privilege escalation via recipes:** The `setup` commands and `cap_add`/`devices` config fields enable significant privilege escalation. These are power-user features for advanced setups (e.g., Tailscale, GPU passthrough) but have no guardrails — a misconfigured recipe could undermine container isolation. Document risks clearly when these features are used.
 
 ## Resolved Design Decisions
 
