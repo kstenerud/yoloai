@@ -1,26 +1,18 @@
-# Critique
+# Critique — Round 2
 
-Design-vs-research audit. Checked every claim in DESIGN.md against RESEARCH.md for backing evidence.
+Second design-vs-research audit. Focused on factual accuracy of security claims, internal consistency, and design gaps.
 
 ## Applied
 
-- **C1.** "Fence" phantom reference — removed from DESIGN.md. Could not be verified.
-- **C2.** `--append-system-prompt` — VERIFIED as a real Claude CLI flag. No fix needed.
-- **C3.** `/work` directory collision claims — ALL VERIFIED (Google Cloud Build, Kaniko, Tekton use `/workspace`; VS Code Dev Containers and GitHub Codespaces use `/workspaces`; `/work` is not in the FHS and not used by any major tool). No fix needed.
-- **C4.** `--storage-opt size=` — confirmed broken on macOS Docker Desktop (requires overlay2 + XFS + pquota). Commented out in DESIGN.md config with limitation documented.
-- **C5.** Port forwarding — added `--port` CLI flag and `ports` config option to DESIGN.md.
-- **C6.** Network isolation — rewrote to use internal Docker network + proxy sidecar + iptables + DNS control, based on new RESEARCH.md "Network Isolation Research" section.
-- **C7.** Credential management — rewrote to use file-based injection via bind mount to `/run/secrets/`, based on new RESEARCH.md "Credential Management for Docker Containers" section.
-- **C9.** Multi-agent scope — added explicit v1 scope note: Claude Code only, multi-agent deferred to v2.
-- **C10.** Resource defaults — added rationale comment (Claude CLI ~2GB RSS + build tooling).
-- **C11.** Docker-in-LXC — added `keyctl=1` requirement for unprivileged containers, noted runc 1.3.x issues.
-- **C12.** UID/GID matching — specified mechanism: `usermod`/`groupmod` in entrypoint, handle exit code 12, `gosu` for privilege drop, `tini` as PID 1.
-- **C13.** Overlay detection — specified: check `/proc/filesystems`, check `CAP_SYS_ADMIN` via `CapEff`, test mount, cache result. Follows containers/storage pattern.
+- **C14.** `CAP_SYS_ADMIN` does NOT include `CAP_NET_ADMIN` — fixed in both DESIGN.md and RESEARCH.md. Both capabilities must be explicitly granted via `--cap-add`. Container startup section updated to list both.
+- **C15.** Claude Code proxy support — researched and documented in new RESEARCH.md section "Claude Code Proxy Support Research". Claude Code (npm) honors `HTTP_PROXY`/`HTTPS_PROXY` via undici's `EnvHttpProxyAgent`. Native binary (Bun) does NOT — base image must use npm install. DESIGN.md updated with proxy env var requirement in container startup, npm requirement in base image, and note about v2 per-agent proxy verification.
+- **C16.** Container startup credential reference — changed from "ANTHROPIC_API_KEY from host environment" to "API key injected via file-based bind mount at `/run/secrets/`" with cross-reference to Credential Management section.
+- **C17.** `env` config field — added to config schema (defaults + profiles, merged with profile winning on conflict). SSH agent forwarding advice updated to use the new field. Note added that `ANTHROPIC_API_KEY` uses file-based injection, not `env`.
+- **C18.** Proxy container lifecycle — specified: per-sandbox (`yoloai-<name>-proxy`), created during `yoloai new --network-isolated`, stopped/started/destroyed alongside sandbox, proxy image built during `yoloai build`, allowlist stored in `meta.json`.
+- **C19.** Default network allowlist — specified per-agent defaults (v1 Claude Code: `api.anthropic.com`, `statsig.anthropic.com`, `sentry.io`). v2 will add per-agent defaults for other agents. `--network-allow` is additive.
+- **C20.** Architecture diagram — fixed `/claude-state` to `~/.claude (per-sandbox state)` to match actual mount at `/home/yoloai/.claude`.
+- **C21.** RESEARCH.md filesystem isolation intro — updated from "current design uses full directory copies" to "design uses overlayfs by default with full directory copies as a fallback."
 
 ## Deferred
 
 (none)
-
-## Previously Deferred, Now Applied
-
-- **C8.** Path consistency — switched from `/work/<dirname>/` to mirrored host paths as the default mount behavior. Configs, error messages, and symlinks work without translation. Custom paths still available via `=<path>` override. The `/work` prefix was considered but rejected — path consistency outweighs the minor safety benefit, and dangerous directory detection already prevents mounting over system paths.

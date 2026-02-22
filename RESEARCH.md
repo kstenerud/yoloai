@@ -260,7 +260,7 @@ The following tools were identified but not analyzed in depth. Included for comp
 
 ## Alternative Filesystem Isolation Approaches
 
-The current design uses full directory copies (`:copy` mode) with git-based diffing. Several copy-on-write (COW) filesystem technologies could replace or complement this approach, trading portability for speed and space efficiency.
+The design uses overlayfs by default for `:copy` mode, with full directory copies as a fallback. This section documents the research that led to that decision, evaluating several copy-on-write (COW) filesystem technologies.
 
 ### OverlayFS
 
@@ -1178,7 +1178,7 @@ However, iptables has its own limitations:
 
 2. **Proxy allowlist (layer 2):** The proxy (Squid, tinyproxy, or a custom Go proxy) enforces domain-based allowlisting. Only `api.anthropic.com` (and user-specified `--network-allow` domains) are permitted. HTTPS traffic is handled via `CONNECT` tunneling (no MITM needed — the proxy sees the domain from the `CONNECT` request and can allow/deny based on that).
 
-3. **iptables inside container (layer 3, defense-in-depth):** Even on the internal network, add iptables rules inside the sandbox container to ensure only the proxy's IP is reachable on allowed ports. This prevents bypass via any container-to-container communication other than the proxy. Requires `CAP_NET_ADMIN` (which yoloai may already grant for overlayfs via `CAP_SYS_ADMIN` — `CAP_SYS_ADMIN` is a superset that includes `CAP_NET_ADMIN` capabilities).
+3. **iptables inside container (layer 3, defense-in-depth):** Even on the internal network, add iptables rules inside the sandbox container to ensure only the proxy's IP is reachable on allowed ports. This prevents bypass via any container-to-container communication other than the proxy. Requires `CAP_NET_ADMIN` (a separate Linux capability from `CAP_SYS_ADMIN` — both must be explicitly granted via `--cap-add`).
 
 4. **DNS control (layer 4):** Configure the sandbox container to use the proxy container as its DNS server (or a controlled resolver). The proxy resolves DNS on behalf of the sandbox. Block UDP 53 outbound from the sandbox in iptables. This mitigates DNS exfiltration.
 
@@ -1206,7 +1206,7 @@ However, iptables has its own limitations:
 
 3. **CDN IP rotation:** If using iptables with IP-based rules (like the devcontainer approach), CDN IP changes can break access. The proxy approach avoids this because it resolves domains at connection time, not at setup time.
 
-4. **`CAP_SYS_ADMIN` / `CAP_NET_ADMIN`:** The iptables-inside-container approach requires capabilities. yoloai already grants `CAP_SYS_ADMIN` for overlayfs, which is a superset. For `copy_strategy: full` (no overlay), `CAP_NET_ADMIN` alone suffices.
+4. **`CAP_SYS_ADMIN` / `CAP_NET_ADMIN`:** The iptables-inside-container approach requires `CAP_NET_ADMIN`. This is a separate capability from `CAP_SYS_ADMIN` (used for overlayfs) — both must be granted when using overlay + network isolation. For `copy_strategy: full` (no overlay), `CAP_NET_ADMIN` alone suffices.
 
 5. **Proxy as SPOF:** If the proxy container crashes, the sandbox loses all network access. This is actually a security feature (fail-closed).
 
@@ -1218,5 +1218,69 @@ The original design proposed a proxy inside the sandbox container. Based on this
 - Add iptables rules inside the sandbox as defense-in-depth (configured by entrypoint before privilege drop).
 - Control DNS resolution to mitigate exfiltration.
 - Document the DNS exfiltration limitation explicitly.
+
+---
+
+## Claude Code Proxy Support Research
+
+Research into whether Claude Code honors HTTP_PROXY/HTTPS_PROXY environment variables, critical for yoloai's `--network-isolated` feature which routes all traffic through a proxy sidecar on an `--internal` Docker network.
+
+### npm Installation (Node.js)
+
+Claude Code's npm installation (`@anthropic-ai/claude-code`) honors `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY` environment variables. It uses undici's `EnvHttpProxyAgent` with `setGlobalDispatcher()` to apply proxy settings globally to all fetch requests. This was introduced around v1.0.93 (with a regression fixed by ~v1.0.97).
+
+The Anthropic Node.js SDK (`@anthropic-ai/sdk`) does NOT read proxy env vars automatically — it relies on the global dispatcher set by Claude Code's startup code. The SDK also supports explicit proxy configuration via `fetchOptions` with an `undici.ProxyAgent`, but this is for SDK consumers, not relevant to yoloai (we don't modify Claude Code's source).
+
+**Required Node.js version:** 18+ for Claude Code, 20 LTS+ for the SDK.
+
+**Source:** [Claude Code network configuration docs](https://code.claude.com/docs/en/network-config), [anthropic-sdk-typescript](https://github.com/anthropics/anthropic-sdk-typescript)
+
+### Native Binary Installation (Bun)
+
+The native binary installation bundles a Bun runtime. Bun's `fetch()` does NOT honor `HTTP_PROXY`/`HTTPS_PROXY` env vars. This means the native binary cannot route API calls through a proxy. Known bug tracked in [#14165](https://github.com/anthropics/claude-code/issues/14165) and [#21298](https://github.com/anthropics/claude-code/issues/21298), still reported as of v2.1.20 (February 2026).
+
+**Implication for yoloai:** The base Docker image MUST install Claude Code via npm (`npm i -g @anthropic-ai/claude-code`), not the native binary. This is already the case in the current design.
+
+### Proxy Protocol Support
+
+- **HTTP forward proxy:** Supported (CONNECT tunneling for HTTPS).
+- **SOCKS proxy:** NOT supported. Claude Code explicitly does not support SOCKS proxies.
+- **MITM/TLS inspection:** Supported if the proxy CA certificate is provided via `NODE_EXTRA_CA_CERTS=/path/to/ca.pem`. No certificate pinning detected.
+- **Client certificates:** Supported via `CLAUDE_CODE_CLIENT_CERT` for mTLS environments.
+
+**Source:** [Claude Code network configuration docs](https://code.claude.com/docs/en/network-config)
+
+### Required Domains
+
+Based on Claude Code's network requirements:
+
+| Domain | Purpose | Required? |
+|--------|---------|-----------|
+| `api.anthropic.com` | API calls | Yes |
+| `statsig.anthropic.com` | Telemetry/feature flags | Recommended (may affect functionality) |
+| `sentry.io` | Error reporting | Optional (blocking may cause non-fatal errors) |
+| `claude.ai` | OAuth authentication (Pro/Max/Team plans) | Only if using OAuth, not API key |
+| `platform.claude.com` | Console authentication | Only if using OAuth, not API key |
+
+For yoloai v1 (API key auth), the minimum allowlist is `api.anthropic.com`. Telemetry domains (`statsig.anthropic.com`, `sentry.io`) are recommended to avoid potential issues with feature flag checks.
+
+**Source:** [Claude Code devcontainer init-firewall.sh](https://github.com/anthropics/claude-code/blob/main/.devcontainer/init-firewall.sh), [Claude Code network config docs](https://code.claude.com/docs/en/network-config)
+
+### How Competitors Handle Proxy Routing
+
+Neither of the two major sandbox implementations relies on `HTTP_PROXY` env vars:
+
+- **sandbox-runtime:** Removes the network namespace entirely (Linux). Traffic flows through Unix domain sockets to host-side proxies. The application has no choice — it literally cannot create external sockets.
+- **Docker Sandboxes:** VM-level proxy interception. The microVM's network stack routes through the proxy transparently. The application is unaware.
+
+yoloai's approach (internal Docker network + `HTTP_PROXY` env vars) is less invasive but depends on the application honoring the env vars. This works for Claude Code's npm installation but would need verification for each new agent in v2.
+
+### Design Implications for yoloai
+
+1. Base image must use npm installation of Claude Code (already the case).
+2. Container environment must include `HTTPS_PROXY=http://<proxy-sidecar>:<port>` and `HTTP_PROXY=http://<proxy-sidecar>:<port>`.
+3. Proxy sidecar must be an HTTP forward proxy (not SOCKS). Squid, tinyproxy, or a custom Go proxy all work.
+4. No MITM/TLS inspection needed for domain-based allowlisting — HTTPS `CONNECT` tunneling exposes the target domain.
+5. For v2 multi-agent support, proxy compatibility must be verified per agent. Agents using non-standard HTTP clients or bundled runtimes (like Bun) may not work.
 
 ---

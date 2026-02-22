@@ -18,7 +18,7 @@ Run Claude CLI with `--dangerously-skip-permissions` inside disposable, isolated
 │    │                  ├ tmux                              │
 │    │                  ├ claude --dangerously-...          │
 │    │                  ├ project dirs (mirrored host paths)            │
-│    │                  └ /claude-state                     │
+│    │                  └ ~/.claude (per-sandbox state)     │
 │    │                                                      │
 │    ├─ docker run ──► sandbox-2                            │
 │    └─ ...                                                 │
@@ -54,7 +54,7 @@ The Docker container is disposable — it can crash, be destroyed, be recreated.
 
 **Base image (`yoloai-base`):** Minimal foundation, rebuilt occasionally.
 - Node.js (for Claude CLI)
-- Claude CLI (`@anthropic-ai/claude-code`)
+- Claude CLI via npm (`npm i -g @anthropic-ai/claude-code`) — npm installation required, not native binary (native binary bundles Bun which ignores proxy env vars, breaking `--network-isolated`)
 - tmux
 - git
 - Common dev tools (build-essential, python3, etc.)
@@ -97,6 +97,7 @@ defaults:
                                         # full: traditional full copy (portable, all reads VM-local)
   auto_commit_interval: 0               # seconds between auto-commits in :copy dirs; 0 = disabled
   ports: []                             # default port mappings; profile ports are additive
+  env: {}                               # environment variables passed to container; profile env merges with defaults
   resources:
     cpus: 4                           # docker --cpus
     memory: 8g                        # docker --memory
@@ -116,6 +117,8 @@ profiles:
       memory: 16g
     ports:
       - "8080:8080"
+    env:
+      GOPATH: /home/yoloai/go
   node-dev: {}
 ```
 
@@ -123,6 +126,7 @@ profiles:
 - `defaults.claude_files` controls what files are copied into the sandbox's `claude-state/` directory on first run. Set to `home` to copy standard files from `$HOME/.claude/` (convenient but non-portable). Set to a list of paths (relative to `$HOME` or absolute) for deterministic setups. Omit entirely to copy nothing (safe default). Profile `claude_files` **replaces** (not merges with) defaults.
 - `defaults.mounts` and profile `mounts` are bind mounts added at container run time.
 - `defaults.resources` sets baseline limits. Profiles can override individual values.
+- `defaults.env` sets environment variables passed to the container via `docker run -e`. Profile `env` is merged with defaults (profile values win on conflict). Note: `ANTHROPIC_API_KEY` is injected via file-based bind mount, not `env` — see Credential Management.
 - Profile Docker images are defined by the Dockerfiles in `~/.yoloai/profiles/<name>/`, not in this config. The config only holds runtime settings (mounts, resources, claude_files).
 
 #### Directory Mappings in Profiles
@@ -250,8 +254,18 @@ Options:
 - `--prompt <text>`: Initial prompt/task for Claude (see Prompt Mechanism below).
 - `--model <model>`: Claude model to use. If omitted, uses Claude CLI's default.
 - `--network-isolated`: Allow only Anthropic API traffic. Claude can function but cannot access other external services, download arbitrary binaries, or exfiltrate code.
-- `--network-allow <domain>`: Allow traffic to specific additional domains (can be repeated). Combines with `--network-isolated`.
+- `--network-allow <domain>`: Allow traffic to specific additional domains (can be repeated). Combines with `--network-isolated`. Added to the agent's default allowlist (see below).
 - `--network-none`: Run with `--network none` for full network isolation (Claude API calls will also fail — only useful for offline tasks with pre-cached models).
+
+**Default network allowlist (v1, Claude Code):**
+
+| Domain | Purpose |
+|--------|---------|
+| `api.anthropic.com` | API calls (required) |
+| `statsig.anthropic.com` | Telemetry/feature flags (recommended) |
+| `sentry.io` | Error reporting (recommended) |
+
+The allowlist is agent-specific. v2 multi-agent support will add per-agent defaults (e.g., OpenAI endpoints for Codex, provider-specific endpoints for Aider/Goose). `--network-allow` domains are additive.
 - `--port <host:container>`: Expose a container port on the host (can be repeated). Example: `--port 3000:3000` for web dev. Without this, container services are not reachable from the host browser.
 
 **Workflow:**
@@ -300,6 +314,7 @@ Before creating the sandbox:
 
 1. Generate a **sandbox context file** at `/yoloai/context.md` describing the environment for Claude: which directory is primary, which are dependencies, mount paths and access mode of each (read-only / read-write / copy), available tools, and how auto-save works. This file lives outside the work tree in the `/yoloai/` internal directory, so it never pollutes project files, git baselines, or diffs. Claude is pointed to it via `--append-system-prompt` or inclusion in the initial prompt.
 2. Start Docker container (as non-root user `yoloai`) with:
+   - When `--network-isolated`: `HTTPS_PROXY` and `HTTP_PROXY` env vars pointing to the proxy sidecar (required — Claude Code's npm installation uses undici's `EnvHttpProxyAgent` to honor these; see RESEARCH.md "Claude Code Proxy Support Research")
    - `:copy` directories: overlay strategy mounts originals as overlayfs lower layers with upper dirs from sandbox state; full copy strategy mounts copies from sandbox state. Both at their mount point (mirrored host path or custom `=<path>`, read-write)
    - `:rw` directories bind-mounted at their mount point (mirrored host path or custom `=<path>`, read-write)
    - Default (no suffix) directories bind-mounted at their mount point (mirrored host path or custom `=<path>`, read-only)
@@ -307,8 +322,8 @@ Before creating the sandbox:
    - Files listed in `claude_files` (from config) copied into `claude-state/` on first run
    - Config mounts from defaults + profile
    - Resource limits from defaults + profile
-   - `ANTHROPIC_API_KEY` from host environment
-   - `CAP_SYS_ADMIN` capability (required for overlayfs mounts inside the container; omitted when `copy_strategy: full`)
+   - API key injected via file-based bind mount at `/run/secrets/` (see Credential Management)
+   - `CAP_SYS_ADMIN` capability (required for overlayfs mounts inside the container; omitted when `copy_strategy: full`). `CAP_NET_ADMIN` added when `--network-isolated` is used (required for iptables rules; independent capability, not included in `CAP_SYS_ADMIN`)
    - Container name: `yoloai-<name>`
    - User: `yoloai` (UID/GID matching host user)
    - `/yoloai/` internal directory for sandbox context file and overlay working directories (not mounted from host — ephemeral, lives on the container filesystem)
@@ -484,13 +499,15 @@ The user sets `ANTHROPIC_API_KEY` in their host shell profile. yoloai reads it f
 - **`:copy` directories** protect your originals. Changes only land when you explicitly `yoloai apply`.
 - **`:rw` directories** give Claude direct read/write access. Use only when you've committed your work or don't mind destructive changes. The tool warns if it detects uncommitted git changes.
 - **API key exposure:** The `ANTHROPIC_API_KEY` is injected via file-based credential injection (bind-mounted at `/run/secrets/`, read by entrypoint, host file cleaned up immediately). This hides the key from `docker inspect`, `docker commit`, and `docker logs`. The key is still present in the agent process's environment (unavoidable — CLI agents expect env vars). Use scoped API keys with spending limits where possible. See RESEARCH.md "Credential Management for Docker Containers" for the full analysis of approaches and tradeoffs.
-- **SSH keys:** If you mount `~/.ssh` into the container (even read-only), Claude can read private keys. Prefer SSH agent forwarding: add `- ${SSH_AUTH_SOCK}:${SSH_AUTH_SOCK}:ro` to `mounts` and `- SSH_AUTH_SOCK=${SSH_AUTH_SOCK}` to `env` in config. This passes the socket without exposing key material.
+- **SSH keys:** If you mount `~/.ssh` into the container (even read-only), Claude can read private keys. Prefer SSH agent forwarding: add `${SSH_AUTH_SOCK}:${SSH_AUTH_SOCK}:ro` to `mounts` and `SSH_AUTH_SOCK: ${SSH_AUTH_SOCK}` to `env` in config. This passes the socket without exposing key material.
 - **Network access** is unrestricted by default (required for Claude API calls). Claude can download binaries, connect to external services, or exfiltrate code. Use `--network-isolated` to allow only Anthropic API traffic, `--network-allow <domain>` for finer control, or `--network-none` for full isolation.
 - **Network isolation implementation:** `--network-isolated` uses a layered approach based on verified production implementations (Anthropic's sandbox-runtime, Docker Sandboxes, and Anthropic's own devcontainer firewall):
   1. **Network topology:** The sandbox container runs on a Docker `--internal` network with no route to the internet. A separate proxy sidecar container bridges the internal and external networks — it is the only exit.
   2. **Proxy allowlist:** The proxy sidecar (a lightweight forward proxy) allowlists Anthropic API domains by default. HTTPS traffic uses `CONNECT` tunneling (no MITM — the proxy sees the domain from the `CONNECT` request). `--network-allow <domain>` adds domains to the allowlist.
-  3. **iptables defense-in-depth:** Inside the sandbox container, iptables rules restrict outbound traffic to only the proxy's IP and port. This prevents bypass via any path other than the proxy. Requires `CAP_NET_ADMIN` (included in `CAP_SYS_ADMIN` which is already granted for overlayfs; for `copy_strategy: full`, `CAP_NET_ADMIN` alone is added when `--network-isolated` is used). The entrypoint configures iptables rules while running as root, then drops privileges via `gosu` — Claude never has `CAP_NET_ADMIN`.
+  3. **iptables defense-in-depth:** Inside the sandbox container, iptables rules restrict outbound traffic to only the proxy's IP and port. This prevents bypass via any path other than the proxy. Requires `CAP_NET_ADMIN` (a separate capability from `CAP_SYS_ADMIN` — both must be granted when using overlay + `--network-isolated`; for `copy_strategy: full`, only `CAP_NET_ADMIN` is added). The entrypoint configures iptables rules while running as root, then drops privileges via `gosu` — Claude never has `CAP_NET_ADMIN`.
   4. **DNS control:** The sandbox container uses the proxy sidecar as its DNS resolver. Direct outbound DNS (UDP 53) is blocked by iptables. This mitigates the DNS exfiltration vector demonstrated by CVE-2025-55284.
+  **Proxy sidecar lifecycle:** yoloai manages the proxy container automatically. On `yoloai new --network-isolated`, a proxy container (`yoloai-<name>-proxy`) is created on both the internal and external networks, configured with the allowlist from defaults + `--network-allow` domains. The proxy container is stopped/started/destroyed alongside the sandbox container. The proxy image (`yoloai-proxy`) is a lightweight Go binary or pre-configured tinyproxy; it is built during `yoloai build` alongside the base image. The allowlist is stored in `meta.json` for sandbox recreation.
+
   Known limitations: DNS exfiltration is mitigated but not fully eliminated — the proxy's DNS resolver must forward queries upstream, and data can be encoded in subdomain queries. Domain fronting remains theoretically possible on CDNs that haven't disabled it. These limitations are shared by all production implementations including Docker Sandboxes and Anthropic's own devcontainer. See RESEARCH.md "Network Isolation Research" for detailed analysis of bypass vectors.
 - **Runs as non-root** inside the container (user `yoloai` matching host UID/GID). This is required because Claude CLI refuses `--dangerously-skip-permissions` as root.
 - **`CAP_SYS_ADMIN` capability** is granted to the container when using the overlay copy strategy (the default). This is required for overlayfs mounts inside the container. It is a broad capability — it also permits other mount operations and namespace manipulation. The container's namespace isolation limits the blast radius, but this is a tradeoff: overlay gives instant setup and space efficiency at the cost of a wider capability grant. Users concerned about this can set `copy_strategy: full` to avoid the capability entirely.
