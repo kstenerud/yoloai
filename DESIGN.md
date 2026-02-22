@@ -470,6 +470,7 @@ The `ANTHROPIC_API_KEY` environment variable is passed from the host into the co
 5. ~~**Auto-destroy?**~~ No. Sandboxes persist until explicitly destroyed.
 6. ~~**Git integration?**~~ Yes. Copy mode auto-inits git for clean diffs. `yoloai apply` excludes `.git/`.
 7. ~~**Default mode?**~~ All dirs read-only by default. Per-directory `:rw` (live) or `:copy` (staged) suffixes. Primary must have one of these.
+9. ~~**Container work directory?**~~ `/work/<dirname>/` for project mounts, `/yoloai/` for internals. `/work` is not defined by the FHS, not created by any major Linux distro, not used by any Docker official image or common build tool, and not used by any CI system. The obvious alternatives are worse: `/workspace` collides with Google Cloud Build, Kaniko, and Tekton; `/workspaces` collides with VS Code Dev Containers and GitHub Codespaces.
 8. ~~**Copy strategy?**~~ OverlayFS by default (`copy_strategy: auto`). The original directory is bind-mounted read-only as the overlayfs lower layer; writes go to an upper directory in sandbox state. Git provides diff/apply on the merged view. Falls back to full copy if overlayfs isn't available. Works cross-platform — Docker on macOS/Windows runs a Linux VM, so overlayfs works inside the container regardless of host OS. VirtioFS overhead for macOS host reads is acceptable (70-90% native after page cache warms). Config option `copy_strategy: full` available for users who prefer the traditional full-copy approach or want to avoid `CAP_SYS_ADMIN`.
 
 ## Design Considerations
