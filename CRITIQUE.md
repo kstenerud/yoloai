@@ -1,19 +1,25 @@
-# Critique — Round 4
+# Critique — Round 5
 
-Fourth design-vs-research audit. Focused on completeness gaps, command consistency, and unspecified behaviors.
+Fifth design audit. Focused on profiles redesign, directory UX, and design gaps.
 
 ## Applied
 
-- **C29.** Resolved Design Decisions numbering — swapped items 8 and 9 to restore sequential order.
-- **C30.** `yoloai init` missing from commands table — added to Commands section.
-- **C31.** Proxy sidecar in `stop`/`start` — added proxy sidecar handling to both commands (`restart` inherits via stop+start).
-- **C32.** `--network-allow` without `--network-isolated` — specified that `--network-allow` implies `--network-isolated` (both CLI and config). Added mutual exclusivity with `--network-none`.
-- **C33.** `yoloai build` proxy image — added proxy image (`yoloai-proxy`) to build section; simplified duplicate description in proxy sidecar lifecycle to cross-reference.
-- **C34.** `log.txt` and `prompt.txt` container access — added explicit bind-mounts at `/yoloai/log.txt` and `/yoloai/prompt.txt` to Container Startup. Updated `/yoloai/` description and tmux/prompt references to use the bind-mounted paths.
-- **C35.** `--network-none` mutual exclusivity — added "Mutually exclusive with `--network-isolated` and `--network-allow`" to `--network-none` description.
-- **C36.** `auto_commit_interval` delivery — specified `YOLOAI_AUTO_COMMIT_INTERVAL` environment variable as the delivery mechanism.
-- **C37.** RESEARCH.md Docker Sandbox version discrepancy — clarified that 4.50+ is sandboxes GA, 4.58+ is network policy features.
+- **C38.** Directory UX redesign — separated workdir (positional) from aux dirs (`-d` flag). Updated CLI syntax, all examples, profiles, and command listing.
+- **C39.** Profiles redesign — moved profile configs out of `config.yaml` into individual `~/.yoloai/profiles/<name>/profile.yaml` files. Added `yoloai profile` subcommands (create/list/delete) with templates. Consolidated merge rules into dedicated Profiles section.
+- **C40.** `yoloai start --resume` — added `--resume` flag that re-feeds original prompt with continuation preamble.
+- **C41.** `yoloai tail` — replaced `yoloai log -f` with dedicated `yoloai tail` command.
+- **C42.** `yoloai stop` agent behavior — documented SIGTERM behavior, agent state persistence, and stop/start semantics.
+- **C43.** Credential management industry expectations — added subsection covering rotation, vault integration, OAuth gaps, and assessment that file-based injection is industry-standard for this level.
+- **C44.** `--network-none` warning — added prominent warning that most agents need network access for API endpoints.
+- **C45.** Config template generation — deferred to v2 as resolved design decision #10.
+- **C46.** GOPATH example — replaced with `GOMODCACHE` and added clarifying comment in profile.yaml example.
+- **C47.** `yoloai restart` documentation — added use cases (corrupted env, config changes, wedged agent).
+- **C48.** `yoloai list` AGENT column — added AGENT column showing configured agent.
 
 ## Deferred
 
-(none)
+- **tmux alternatives research** — whether tmux is the right choice, competitors (zellij, screen), alternative approaches to session reconnection. Needs dedicated research before changing.
+- **Network allowlist as firewall rules** — whether per-agent allowlists should be replaced with a more general firewall-rules approach. Needs research into UX implications.
+- **Per-agent vs unified network rules** — whether agent-specific allowlists add complexity without benefit. Related to the firewall rules question above.
+- **`yoloai build` timestamp-based rebuilds** — incremental rebuild based on file timestamps. Needs research into Docker layer caching interaction.
+- **New competitors analysis** — HN thread (item 47113567) mentions new competitors. Needs research pass for RESEARCH.md.

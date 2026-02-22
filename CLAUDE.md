@@ -20,11 +20,11 @@ Design and research phase. No code yet.
 - Docker containers with persistent state in `~/.yoloai/sandboxes/<name>/`.
 - Containers are ephemeral; state (work dirs, agent-state, logs, meta.json) lives on host. Credentials injected via file-based bind mount (not env vars).
 - Agent abstraction: per-agent definitions specify install, launch command, API key env vars, state directory, network allowlist, and prompt delivery mode. v1 ships Claude and Codex.
-- Directories mounted at mirrored host paths by default (path consistency). Custom paths via `=<path>` override.
+- CLI separates workdir (primary project dir, positional) from aux dirs (`-d` flag). Directories mounted at mirrored host paths by default. Custom paths via `=<path>` override.
 - `:copy` directories use overlayfs by default (instant setup, deltas-only) with full-copy fallback. Both use git for diff/apply.
 - `:rw` directories are live bind-mounts. Default (no suffix) is read-only.
-- Profile system: user-supplied Dockerfiles in `~/.yoloai/profiles/<name>/`.
-- Config in `~/.yoloai/config.yaml` with defaults + named profiles.
+- Profile system: each profile is a directory in `~/.yoloai/profiles/<name>/` containing a `Dockerfile` and `profile.yaml` (runtime config).
+- Config in `~/.yoloai/config.yaml` with global defaults only. Profile-specific config lives in `profile.yaml` files.
 
 ## Workflow Conventions
 

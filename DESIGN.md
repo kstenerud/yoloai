@@ -63,9 +63,11 @@ The Docker container is disposable — it can crash, be destroyed, be recreated.
 ```
 ~/.yoloai/profiles/
 ├── go-dev/
-│   └── Dockerfile       ← FROM yoloai-base; RUN apt-get install ...
+│   ├── Dockerfile       ← FROM yoloai-base; RUN apt-get install ...
+│   └── profile.yaml     ← runtime config (mounts, env, resources, workdir, directories)
 └── node-dev/
-    └── Dockerfile
+    ├── Dockerfile
+    └── profile.yaml
 ```
 
 `yoloai build` with no arguments rebuilds the base image. `yoloai build <profile>` rebuilds that profile's image. `yoloai build --all` rebuilds everything (base first, then all profiles).
@@ -105,52 +107,17 @@ defaults:
     # disk: 10g                        # docker --storage-opt size= (Linux with XFS + pquota only; not supported on macOS Docker Desktop)
                                         # Rationale: cpus/memory sized for Claude Code + build tooling running concurrently.
                                         # Claude CLI itself uses ~2GB RSS; the rest covers builds, tests, language servers.
-
-# Named profiles
-profiles:
-  go-dev:
-    agent_files:                     # replaces defaults (no merge)
-      - .claude/CLAUDE.md
-      - /shared/configs/go-claude-settings.json   # team-shared config
-    mounts:
-      - ~/.ssh:/home/yoloai/.ssh:ro
-    resources:                        # override defaults per profile
-      memory: 16g
-    ports:
-      - "8080:8080"
-    env:
-      GOPATH: /home/yoloai/go
-  node-dev: {}
 ```
 
-- `defaults` apply to all sandboxes regardless of profile.
+`config.yaml` contains only `defaults` — settings applied to every sandbox. Profile-specific configuration lives in separate `profile.yaml` files (see Profiles section).
+
 - `defaults.agent` selects the agent to launch. Valid values: `claude`, `codex`. Determines the launch command, API key env vars, state directory, network allowlist, and prompt delivery mode. CLI `--agent` overrides config.
 - `defaults.agent_files` controls what files are copied into the sandbox's `agent-state/` directory on first run. Set to `home` to copy from the agent's default state directory (`~/.claude/` for Claude, `~/.codex/` for Codex). Set to a list of paths (relative to `$HOME` or absolute) for deterministic setups. Omit entirely to copy nothing (safe default). Profile `agent_files` **replaces** (not merges with) defaults.
-- `defaults.mounts` and profile `mounts` are bind mounts added at container run time. Profile mounts are **additive** (merged with defaults, no deduplication — duplicates are a user error).
+- `defaults.mounts` are bind mounts added at container run time. Profile mounts are **additive** (merged with defaults, no deduplication — duplicates are a user error).
 - `defaults.resources` sets baseline limits. Profiles can override individual values.
 - `defaults.env` sets environment variables passed to the container via `docker run -e`. Profile `env` is merged with defaults (profile values win on conflict). Note: API keys (e.g., `ANTHROPIC_API_KEY`, `CODEX_API_KEY`) are injected via file-based bind mount, not `env` — see Credential Management.
 - `defaults.network_isolated` enables network isolation for all sandboxes. Profile can override. CLI `--network-isolated` flag overrides config.
 - `defaults.network_allow` lists additional allowed domains. Non-empty `network_allow` implies `network_isolated: true`. Profile `network_allow` is additive with defaults. CLI `--network-allow` is additive with config.
-- Profile Docker images are defined by the Dockerfiles in `~/.yoloai/profiles/<name>/`, not in this config. The config only holds runtime settings (mounts, resources, agent_files).
-
-#### Directory Mappings in Profiles
-
-For setups users repeat often, profiles support a `directories` section so the elaborate configurations live in YAML and the CLI stays clean:
-
-```yaml
-profiles:
-  my-project:
-    directories:
-      - path: /home/user/my-app
-        mode: copy
-      - path: /home/user/shared-lib
-        mode: rw
-        mount: /usr/local/lib/shared    # custom mount point (default: mirrors host path)
-      - path: /home/user/common-types
-        # default: read-only
-```
-
-CLI arguments for one-offs, config for repeatability — same options available in both. When both CLI directories and profile directories are specified, CLI directories take precedence.
 
 #### Recipes (advanced)
 
@@ -171,27 +138,90 @@ defaults:
 
 Config values support `${VAR}` environment variable interpolation from the host environment (following Docker Compose conventions). This allows secrets like `${TAILSCALE_AUTHKEY}` to be referenced in config without hardcoding. Unset variables produce an error at sandbox creation time (fail-fast, not silent empty string).
 
-### 3. CLI (`yoloai`)
+### 3. Profiles
+
+Profiles live in `~/.yoloai/profiles/<name>/`, each containing a `Dockerfile` and a `profile.yaml`:
+
+```
+~/.yoloai/profiles/<name>/
+├── Dockerfile        ← FROM yoloai-base
+└── profile.yaml      ← runtime config
+```
+
+**`profile.yaml` format:**
+
+```yaml
+# ~/.yoloai/profiles/my-project/profile.yaml
+workdir:
+  path: /home/user/my-app
+  mode: copy                            # copy or rw (required for workdir)
+directories:
+  - path: /home/user/shared-lib
+    mode: rw
+    mount: /usr/local/lib/shared        # custom mount point (default: mirrors host path)
+  - path: /home/user/common-types
+    # default: read-only
+agent_files:
+  - .claude/CLAUDE.md
+  - /shared/configs/claude-settings.json  # absolute paths for team setups
+mounts:
+  - ~/.ssh:/home/yoloai/.ssh:ro
+resources:
+  memory: 16g
+ports:
+  - "8080:8080"
+env:
+  GOMODCACHE: /home/yoloai/go/pkg/mod   # Go module cache (not source code — no conflict with mirrored paths)
+```
+
+CLI workdir **replaces** profile workdir. CLI `-d` dirs are **additive** with profile dirs. CLI arguments for one-offs, config for repeatability — same options available in both.
+
+**Profile merge rules** (profile values merge with `defaults` from `config.yaml`):
+
+| Field           | Merge behavior                                    |
+|-----------------|---------------------------------------------------|
+| `agent_files`   | Profile replaces defaults (no merge)              |
+| `mounts`        | Additive (no deduplication — duplicates are user error) |
+| `resources`     | Profile overrides individual values               |
+| `ports`         | Additive                                          |
+| `env`           | Merged (profile wins on conflict)                 |
+| `cap_add`       | Additive                                          |
+| `devices`       | Additive                                          |
+| `setup`         | Additive (defaults first, then profile)           |
+| `network_allow` | Additive                                          |
+| `workdir`       | Profile provides default, CLI replaces            |
+| `directories`   | Profile provides defaults, CLI `-d` is additive   |
+
+**`yoloai profile` commands:**
+
+- `yoloai profile create <name> [--template <tpl>]` — Create a profile directory with a scaffold Dockerfile and minimal `profile.yaml`. Templates: `base` (default), `go`, `node`, `python`, `rust`. Creates pre-filled files tailored to the language/stack.
+- `yoloai profile list` — List all profiles in `~/.yoloai/profiles/`.
+- `yoloai profile delete <name>` — Delete a profile directory. Asks for confirmation if any sandbox references the profile.
+
+### 4. CLI (`yoloai`)
 
 Single Go binary. No runtime dependencies — just the binary and Docker.
 
 ## Commands
 
 ```
-yoloai new [options] <name> <dir> [<dir>...]   Create and start a sandbox
+yoloai new [options] <name> [<workdir>] [-d <auxdir>...]  Create and start a sandbox
 yoloai list                                    List sandboxes and their status
 yoloai attach <name>                           Attach to a sandbox's tmux session
 yoloai status <name>                           Show detailed sandbox info
 yoloai log <name>                              Show sandbox session log
-yoloai log -f <name>                           Tail sandbox session log
+yoloai tail <name>                             Tail sandbox session log in real time
 yoloai diff <name>                             Show changes the agent made
 yoloai apply <name>                            Copy changes back to original dirs
 yoloai exec <name> <command>                   Run a command inside the sandbox
 yoloai stop <name>                             Stop a sandbox (preserving state)
-yoloai start <name>                            Start a stopped sandbox
+yoloai start [--resume] <name>                 Start a stopped sandbox
 yoloai restart <name>                          Restart the agent in an existing sandbox
 yoloai destroy <name>                          Stop and remove a sandbox
 yoloai build [profile|--all]                   Build/rebuild Docker image(s)
+yoloai profile create <name> [--template <tpl>]  Create a profile with scaffold
+yoloai profile list                            List profiles
+yoloai profile delete <name>                   Delete a profile
 yoloai init                                    First-time setup (dirs, config, base image)
 ```
 
@@ -224,7 +254,13 @@ The agent definition determines the default prompt delivery mode. `--prompt` sel
 
 ### `yoloai new`
 
-The first directory is the **primary** project — the agent's working directory. All directories are **bind-mounted read-only by default** at their original absolute host paths (mirrored paths).
+`yoloai new [options] <name> [<workdir>] [-d <auxdir>...]`
+
+The **workdir** is the single primary project directory — the agent's working directory. It is positional (after name) and must have `:rw` or `:copy` — error otherwise. The workdir is optional if a profile provides one.
+
+**`-d` / `--dir`** specifies auxiliary directories (repeatable). Default read-only. Additive with profile directories.
+
+When both CLI and profile provide directories: CLI workdir **replaces** profile workdir. CLI `-d` dirs are **additive** with profile dirs.
 
 Directory argument syntax: `<path>[:<suffixes>][=<mount-point>]`
 
@@ -236,35 +272,38 @@ Suffixes (combinable in any order):
 Mount point:
 - `=<path>` — mount at a custom container path instead of the mirrored host path
 
-The primary directory **must** have `:rw` or `:copy` — error otherwise.
+All directories are **bind-mounted read-only by default** at their original absolute host paths (mirrored paths).
 
 ```
-# Copy primary (safe, reviewable), deps read-only
-yoloai new fix-build --prompt "fix the build" ./my-app:copy ./shared-lib ./common-types
+# Copy workdir (safe, reviewable), aux dirs read-only
+yoloai new fix-build --prompt "fix the build" ./my-app:copy -d ./shared-lib -d ./common-types
 
-# Live-edit primary, one dep also writable
-yoloai new my-task ./my-app:rw ./shared-lib:rw ./common-types
+# Live-edit workdir, one aux dir also writable
+yoloai new my-task ./my-app:rw -d ./shared-lib:rw -d ./common-types
 
 # Custom mount points for tools that need specific paths
-yoloai new my-task ./my-app:copy=/opt/myapp ./shared-lib=/usr/local/lib/shared ./common-types
+yoloai new my-task ./my-app:copy=/opt/myapp -d ./shared-lib=/usr/local/lib/shared -d ./common-types
 
-# Error: primary has no write access
-yoloai new my-task ./my-app ./shared-lib
+# Use profile workdir, add extra aux dir from CLI
+yoloai new my-task --profile my-project -d ./extra-lib
+
+# Error: workdir has no write access
+yoloai new my-task ./my-app -d ./shared-lib
 ```
 
-Name is required. If omitted, an error is shown with a helpful message suggesting a name based on the primary directory basename.
+Name is required. If omitted, an error is shown with a helpful message suggesting a name based on the workdir basename.
 
 Example layout inside the container (assuming cwd is `/home/user/projects`):
 
 ```
-yoloai new my-task ./my-app:copy ./shared-lib:rw ./common-types
+yoloai new my-task ./my-app:copy -d ./shared-lib:rw -d ./common-types
 ```
 
 ```
 /home/user/projects/
-├── my-app/          ← primary (copied, read-write, diff/apply available)
-├── shared-lib/      ← dependency (bind-mounted, read-write, live)
-└── common-types/    ← dependency (bind-mounted, read-only)
+├── my-app/          ← workdir (copied, read-write, diff/apply available)
+├── shared-lib/      ← aux dir (bind-mounted, read-write, live)
+└── common-types/    ← aux dir (bind-mounted, read-only)
 ```
 
 Paths inside the container mirror the host — configs, error messages, and symlinks work without translation.
@@ -272,13 +311,13 @@ Paths inside the container mirror the host — configs, error messages, and syml
 With custom mount points:
 
 ```
-yoloai new my-task ./my-app:copy=/opt/myapp ./shared-lib=/usr/local/lib/shared ./common-types
+yoloai new my-task ./my-app:copy=/opt/myapp -d ./shared-lib=/usr/local/lib/shared -d ./common-types
 ```
 
 ```
-/opt/myapp/                          ← primary (copied, agent's cwd)
-/usr/local/lib/shared/               ← dependency (bind-mounted, read-only)
-/home/user/projects/common-types/    ← dependency (mirrored host path, read-only)
+/opt/myapp/                          ← workdir (copied, agent's cwd)
+/usr/local/lib/shared/               ← aux dir (bind-mounted, read-only)
+/home/user/projects/common-types/    ← aux dir (mirrored host path, read-only)
 ```
 
 Options:
@@ -288,7 +327,7 @@ Options:
 - `--agent <name>`: Agent to use (`claude`, `codex`). Overrides `defaults.agent` from config.
 - `--network-isolated`: Allow only the agent's required API traffic. The agent can function but cannot access other external services, download arbitrary binaries, or exfiltrate code.
 - `--network-allow <domain>`: Allow traffic to specific additional domains (can be repeated). Implies `--network-isolated`. Added to the agent's default allowlist (see below).
-- `--network-none`: Run with `--network none` for full network isolation (agent API calls will also fail — only useful for offline tasks with pre-cached models). Mutually exclusive with `--network-isolated` and `--network-allow`.
+- `--network-none`: Run with `--network none` for full network isolation (agent API calls will also fail). Mutually exclusive with `--network-isolated` and `--network-allow`. **Warning:** Most agents (Claude, Codex) require network access to reach their API endpoints. This flag is only useful for agents with locally-hosted models or for testing container setup without agent execution.
 - `--port <host:container>`: Expose a container port on the host (can be repeated). Example: `--port 3000:3000` for web dev. Without this, container services are not reachable from the host browser.
 
 **Default network allowlist (per agent):**
@@ -313,7 +352,7 @@ The allowlist is agent-specific — each agent's definition includes its require
 
 **Workflow:**
 
-1. Error if primary directory has no `:rw` or `:copy` suffix.
+1. Error if workdir has no `:rw` or `:copy` suffix.
 2. Error if any two directories resolve to the same absolute container path (mirrored host path or custom `=<path>`).
 3. For each `:copy` directory, set up an isolated writable view using one of two strategies (selected by `copy_strategy` config, default `auto`):
 
@@ -355,7 +394,7 @@ Before creating the sandbox:
 
 ### Container Startup
 
-1. Generate a **sandbox context file** at `/yoloai/context.md` describing the environment for the agent: which directory is primary, which are dependencies, mount paths and access mode of each (read-only / read-write / copy), available tools, and how auto-save works. This file lives outside the work tree in the `/yoloai/` internal directory, so it never pollutes project files, git baselines, or diffs. The agent is pointed to it via agent-specific mechanisms (`--append-system-prompt` for Claude, inclusion in the initial prompt for Codex).
+1. Generate a **sandbox context file** at `/yoloai/context.md` describing the environment for the agent: which directory is the workdir, which are auxiliary, mount paths and access mode of each (read-only / read-write / copy), available tools, and how auto-save works. This file lives outside the work tree in the `/yoloai/` internal directory, so it never pollutes project files, git baselines, or diffs. The agent is pointed to it via agent-specific mechanisms (`--append-system-prompt` for Claude, inclusion in the initial prompt for Codex).
 2. Start Docker container (as non-root user `yoloai`) with:
    - When `--network-isolated`: `HTTPS_PROXY` and `HTTP_PROXY` env vars pointing to the proxy sidecar (required — Claude Code's npm installation honors these via undici; Codex proxy support is TBD — see RESEARCH.md)
    - `:copy` directories: overlay strategy mounts originals as overlayfs lower layers with upper dirs from sandbox state; full copy strategy mounts copies from sandbox state. Both at their mount point (mirrored host path or custom `=<path>`, read-write)
@@ -435,7 +474,9 @@ Asks for confirmation if the agent is still running.
 
 `yoloai log <name>` displays the session log (`log.txt`) for the named sandbox.
 
-`yoloai log -f <name>` tails the log in real time (like `tail -f`).
+### `yoloai tail`
+
+`yoloai tail <name>` tails the session log in real time (like `tail -f`).
 
 ### `yoloai exec`
 
@@ -451,9 +492,10 @@ Lists all sandboxes with their current status.
 |---------|----------------------------------------------------------------|
 | NAME    | Sandbox name                                                   |
 | STATUS  | `running`, `stopped`, `exited` (agent exited but container up) |
+| AGENT   | Agent name (`claude`, `codex`)                                 |
 | PROFILE | Profile name or `(base)`                                       |
 | AGE     | Time since creation                                            |
-| PRIMARY | Primary directory path                                         |
+| WORKDIR | Working directory path                                         |
 
 Options:
 - `--running`: Show only running sandboxes.
@@ -478,18 +520,22 @@ Profile Dockerfiles that install private dependencies (e.g., `RUN go mod downloa
 
 `yoloai stop <name>` stops a sandbox container (and proxy sidecar if `--network-isolated`), preserving all state (work directory, agent-state, logs). The container can be restarted later without losing progress.
 
+Internally, `docker stop` sends SIGTERM and the agent terminates. The agent's state directory persists on the host. `yoloai start` relaunches a fresh agent process with state intact — Claude preserves session history (resumes context); Codex starts fresh (no built-in session persistence). Think of stop/start as pausing the sandbox environment, not the agent's thought process. Use `--resume` with `start` to re-feed the original task prompt.
+
 ### `yoloai start`
 
-`yoloai start <name>` ensures the sandbox is running — idempotent "get it running, however needed":
+`yoloai start [--resume] <name>` ensures the sandbox is running — idempotent "get it running, however needed":
 - If the container is stopped: starts it (and proxy sidecar if `--network-isolated`). The entrypoint re-establishes overlayfs mounts (mounts don't survive `docker stop` — this is by design; the upper directory persists on the host and the entrypoint re-mounts idempotently).
 - If the container is running but the agent has exited: relaunches the agent in the existing tmux session.
 - If already running: no-op.
 
 This eliminates the need to diagnose *why* a sandbox isn't running before choosing a command.
 
+**`--resume` flag:** When used, the agent is relaunched with the original prompt from `prompt.txt` prefixed with a preamble: "You were previously working on the following task and were interrupted. The work directory contains your progress so far. Continue where you left off:" followed by the original prompt text. Without `--resume`, `yoloai start` relaunches the agent in interactive mode with no prompt (user attaches and gives instructions manually).
+
 ### `yoloai restart`
 
-`yoloai restart <name>` is equivalent to `yoloai stop <name>` followed by `yoloai start <name>`. Useful for a clean restart of the entire sandbox environment.
+`yoloai restart <name>` is equivalent to `yoloai stop <name>` followed by `yoloai start <name>`. Use cases: recovering from a corrupted container environment, applying config changes that require a fresh container (e.g., new mounts or resource limits), or restarting a wedged agent process.
 
 ### Image Cleanup
 
@@ -499,12 +545,14 @@ Docker images (`yoloai-base`, `yoloai-<profile>`) accumulate indefinitely. A cle
 
 ```
 ~/.yoloai/
-├── config.yaml                  ← defaults + profile runtime config
+├── config.yaml                  ← global defaults (no profiles — those live in profiles/)
 ├── profiles/
 │   ├── go-dev/
-│   │   └── Dockerfile           ← FROM yoloai-base
+│   │   ├── Dockerfile           ← FROM yoloai-base
+│   │   └── profile.yaml        ← runtime config (mounts, env, resources, workdir, directories)
 │   └── node-dev/
-│       └── Dockerfile
+│       ├── Dockerfile
+│       └── profile.yaml
 └── sandboxes/
     └── <name>/
         ├── meta.json            ← original paths, mode, profile, timestamps
@@ -512,8 +560,8 @@ Docker images (`yoloai-base`, `yoloai-<profile>`) accumulate indefinitely. A cle
         ├── log.txt              ← tmux session log
         ├── agent-state/         ← agent's state directory (per-sandbox, read-write)
         └── work/                ← overlay upper dirs (deltas) or full copies, for :copy dirs only
-            ├── <primary>/       ← if primary is :copy
-            └── <dep>/           ← if dep is :copy
+            ├── <workdir>/       ← if workdir is :copy
+            └── <auxdir>/        ← if aux dir is :copy
 ```
 
 ## Credential Management
@@ -532,6 +580,12 @@ API keys are injected via **file-based credential injection** following OWASP an
 The user sets the appropriate API key in their host shell profile (`ANTHROPIC_API_KEY` for Claude, `CODEX_API_KEY` or `OPENAI_API_KEY` for Codex). yoloai reads the required key(s) from the host environment at sandbox creation time based on the agent definition.
 
 **Future directions:** Credential proxy (the MITM approach used by Docker Sandboxes) could provide stronger isolation by keeping the API key entirely outside the container. If CLI agents add `ANTHROPIC_API_KEY_FILE` support, the env var export step can be eliminated. macOS Keychain integration (cco's approach) could serve as an alternative credential source. These are deferred to future versions.
+
+**Industry expectations:** yoloai's file-based injection follows OWASP and CIS guidance and matches what Docker official images (MySQL, Postgres) and most competitors (deva.sh, cco) use. Key gaps vs. enterprise expectations:
+- **Credential rotation/expiry:** Not supported. Most users use long-lived API keys. Not a v1 blocker, but enterprise users expect time-scoped credentials.
+- **Vault integration:** HashiCorp Vault, AWS Secrets Manager, GCP Secret Manager are expected in enterprise tooling. Deferred.
+- **OAuth/SSO:** Claude supports OAuth for Pro/Max/Team plans. v1 supports API key auth only. Docker Sandboxes supports OAuth but reports it as broken (docker/for-mac#7842).
+- **Assessment:** File-based injection is the industry standard for developer tools at this level. Credential proxy and vault integration are enterprise features for future versions.
 
 ## Prerequisites
 
@@ -574,14 +628,15 @@ The user sets the appropriate API key in their host shell profile (`ANTHROPIC_AP
 ## Resolved Design Decisions
 
 1. ~~**Headless mode?**~~ Agent definition specifies prompt delivery mode. Claude always uses interactive mode via tmux (`--prompt` fed via `tmux send-keys`). Codex uses headless mode (`codex exec`) when `--prompt` is provided, interactive mode otherwise. Tmux used in all cases for logging and attach.
-2. ~~**Multiple mounts?**~~ Yes. First dir is primary (cwd), rest are dependencies. Error on container path collision.
+2. ~~**Multiple mounts?**~~ Yes. Workdir is primary (cwd), aux dirs are dependencies. Error on container path collision.
 3. ~~**Dotfiles/tools?**~~ Config file with defaults + profiles. Profiles use user-supplied Dockerfiles for full flexibility.
 4. ~~**Resource limits?**~~ Configurable in `config.yaml` with sensible defaults.
 5. ~~**Auto-destroy?**~~ No. Sandboxes persist until explicitly destroyed.
 6. ~~**Git integration?**~~ Yes. Copy mode auto-inits git for clean diffs. `yoloai apply` excludes `.git/`.
-7. ~~**Default mode?**~~ All dirs read-only by default. Per-directory `:rw` (live) or `:copy` (staged) suffixes. Primary must have one of these.
+7. ~~**Default mode?**~~ All dirs read-only by default. Per-directory `:rw` (live) or `:copy` (staged) suffixes. Workdir must have one of these.
 8. ~~**Container work directory?**~~ Directories are mounted at their original host paths (mirrored) by default, so configs, error messages, and symlinks work without translation. Custom paths available via `=<path>` override. `/yoloai/` reserved for internals. The `/work` prefix was considered but rejected — path consistency (matching host paths) outweighs the minor safety benefit, and dangerous directory detection already prevents mounting over system paths.
 9. ~~**Copy strategy?**~~ OverlayFS by default (`copy_strategy: auto`). The original directory is bind-mounted read-only as the overlayfs lower layer; writes go to an upper directory in sandbox state. Git provides diff/apply on the merged view. Falls back to full copy if overlayfs isn't available. Works cross-platform — Docker on macOS/Windows runs a Linux VM, so overlayfs works inside the container regardless of host OS. VirtioFS overhead for macOS host reads is acceptable (70-90% native after page cache warms). Config option `copy_strategy: full` available for users who prefer the traditional full-copy approach or want to avoid `CAP_SYS_ADMIN`.
+10. ~~**Config template generation?**~~ Deferred to v2. `yoloai config generate --agent codex` would generate a starter config tailored to a specific agent with recommended settings.
 
 ## Design Considerations
 
