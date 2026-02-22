@@ -4,6 +4,8 @@
 
 Run Claude CLI with `--dangerously-skip-permissions` inside disposable, isolated containers so that Claude can work autonomously without constant permission prompts. Project directories are presented as isolated writable views inside the container. The user reviews changes via `yoloai diff` and applies them back to the originals via `yoloai apply` when satisfied.
 
+**Scope:** v1 targets Claude Code as the primary agent. The architecture supports other CLI agents (Codex, Aider, Goose — see RESEARCH.md "Multi-Agent Support Research") but agent-specific abstractions are deferred to v2. The entrypoint, prompt delivery, and state management are Claude-specific in v1.
+
 ## Architecture
 
 ```
@@ -56,7 +58,7 @@ The Docker container is disposable — it can crash, be destroyed, be recreated.
 - tmux
 - git
 - Common dev tools (build-essential, python3, etc.)
-- **Non-root user** (`yoloai`, matching host UID/GID via entrypoint at container run time — not baked into the image at build time, so images are portable across machines) — Claude CLI refuses `--dangerously-skip-permissions` as root
+- **Non-root user** (`yoloai`, UID/GID matching host user via entrypoint). Image builds with a placeholder user (UID 1001). At container start, the entrypoint runs as root: `usermod -u $HOST_UID yoloai && groupmod -g $HOST_GID yoloai` (handling exit code 12 for chown failures on mounted volumes), fixes ownership on container-managed directories, then drops privileges via `gosu yoloai`. Uses `tini` as PID 1 (`--init` or explicit `ENTRYPOINT`). Images are portable across machines since UID/GID are set at run time, not build time. Claude CLI refuses `--dangerously-skip-permissions` as root
 
 **Profile images (`yoloai-<profile>`):** Derived from base, one per profile. Users supply a `Dockerfile` per profile with `FROM yoloai-base`. This avoids the limitations of auto-generating Dockerfiles from package lists and gives full flexibility (PPAs, tarballs, custom install steps).
 
@@ -94,10 +96,13 @@ defaults:
                                         # overlay: overlayfs lower layer (instant, deltas-only, needs CAP_SYS_ADMIN)
                                         # full: traditional full copy (portable, all reads VM-local)
   auto_commit_interval: 0               # seconds between auto-commits in :copy dirs; 0 = disabled
+  ports: []                             # default port mappings; profile ports are additive
   resources:
     cpus: 4                           # docker --cpus
     memory: 8g                        # docker --memory
-    disk: 10g                         # docker --storage-opt size=
+    # disk: 10g                        # docker --storage-opt size= (Linux with XFS + pquota only; not supported on macOS Docker Desktop)
+                                        # Rationale: cpus/memory sized for Claude Code + build tooling running concurrently.
+                                        # Claude CLI itself uses ~2GB RSS; the rest covers builds, tests, language servers.
 
 # Named profiles
 profiles:
@@ -109,6 +114,8 @@ profiles:
       - ~/.ssh:/home/yoloai/.ssh:ro
     resources:                        # override defaults per profile
       memory: 16g
+    ports:
+      - "8080:8080"
   node-dev: {}
 ```
 
@@ -243,6 +250,7 @@ Options:
 - `--network-isolated`: Allow only Anthropic API traffic. Claude can function but cannot access other external services, download arbitrary binaries, or exfiltrate code.
 - `--network-allow <domain>`: Allow traffic to specific additional domains (can be repeated). Combines with `--network-isolated`.
 - `--network-none`: Run with `--network none` for full network isolation (Claude API calls will also fail — only useful for offline tasks with pre-cached models).
+- `--port <host:container>`: Expose a container port on the host (can be repeated). Example: `--port 3000:3000` for web dev. Without this, container services are not reachable from the host browser.
 
 **Workflow:**
 
@@ -263,6 +271,12 @@ Options:
    - If the copy has no `.git/`, `git init` + `git add -A` + `git commit -m "initial"` to create a baseline.
 
    Both strategies produce the same result from the user's perspective: a protected, writable view with git-based diff/apply. The overlay strategy is instant and space-efficient; the full copy strategy is more portable. `auto` tries overlay first, falls back to full copy if `CAP_SYS_ADMIN` is unavailable or the kernel doesn't support nested overlayfs.
+
+   **`auto` detection strategy** (following the pattern used by containers/storage, Podman, and Docker itself):
+   1. Check `/proc/filesystems` for `overlay` — if absent, skip to full copy.
+   2. Check `CAP_SYS_ADMIN` via `/proc/self/status` `CapEff` bitmask (bit 21) — if absent, skip to full copy.
+   3. Attempt a test mount in a temp directory (`mount -t overlay` with `lowerdir`, `upperdir`, `workdir`). This is the authoritative test — it validates kernel support, security profiles (seccomp, AppArmor), and backing filesystem compatibility simultaneously. If it fails, fall back to full copy.
+   4. Cache the result in `~/.yoloai/cache/overlay-support`, invalidated on kernel or Docker version change.
 
    Note: `git add -A` naturally honors `.gitignore` if one is present, so gitignored files (e.g., `node_modules`) won't clutter `yoloai diff` output regardless of strategy.
 4. If `auto_commit_interval` > 0, start a background auto-commit loop for `:copy` directories inside the container for recovery. Disabled by default.
@@ -426,16 +440,27 @@ Docker images (`yoloai-base`, `yoloai-<profile>`) accumulate indefinitely. A cle
             └── <dep>/           ← if dep is :copy
 ```
 
-## Claude Authentication
+## Credential Management
 
-The `ANTHROPIC_API_KEY` environment variable is passed from the host into the container. The user sets this once in their shell profile on the host.
+API keys are injected via **file-based credential injection** following OWASP and CIS Docker Benchmark guidance (never pass secrets as environment variables to `docker run`):
+
+1. yoloai writes the API key to a temporary file on the host.
+2. The file is bind-mounted read-only into the container at `/run/secrets/anthropic_api_key`.
+3. The container entrypoint reads the file, exports `ANTHROPIC_API_KEY` to the environment (since Claude CLI expects it as an env var), then launches the agent.
+4. The host-side temp file is cleaned up immediately after container start.
+
+**What this protects against:** `docker inspect` does not show the key. `docker commit` does not capture it. `docker logs` does not leak it. No temp file lingers on host disk. Image layers never contain the key.
+
+**Accepted tradeoff:** The agent process has the API key in its environment (unavoidable — CLI agents read credentials from env vars). `/proc/<pid>/environ` exposes it to same-user processes inside the container. This is acceptable because the agent already has full use of the key.
+
+The user sets `ANTHROPIC_API_KEY` in their host shell profile. yoloai reads it from the host environment at sandbox creation time.
 
 ## Prerequisites
 
 - Docker installed and running (clear error message if Docker daemon is not available)
 - Distribution: binary download from GitHub releases, `go install`, or Homebrew. No runtime dependencies — Go compiles to a static binary.
 - `ANTHROPIC_API_KEY` set in environment
-- If running from inside an LXC container: nesting enabled (`security.nesting=true`). Available on any LXC/LXD host — Proxmox exposes this as a checkbox, but it's a standard LXC feature.
+- If running from inside an LXC container: nesting enabled (`security.nesting=true`). Unprivileged containers also need `keyctl=1` (Proxmox: `features: nesting=1,keyctl=1`). Available on any LXC/LXD host — Proxmox exposes this as a checkbox, but it's a standard LXC feature. Note: runc 1.3.x has known issues with Docker inside LXC containers.
 - **Windows/WSL:** Expected to work via Docker Desktop + WSL2. Known limitations: path translation between Windows and WSL paths, UID/GID mapping differences, `.gitignore` line ending handling. Not a primary target but should degrade gracefully.
 
 ## First-Run Experience
@@ -452,10 +477,15 @@ The `ANTHROPIC_API_KEY` environment variable is passed from the host into the co
 - **All directories are read-only by default.** You explicitly opt in to write access per directory via `:rw` (live) or `:copy` (staged).
 - **`:copy` directories** protect your originals. Changes only land when you explicitly `yoloai apply`.
 - **`:rw` directories** give Claude direct read/write access. Use only when you've committed your work or don't mind destructive changes. The tool warns if it detects uncommitted git changes.
-- **API key exposure:** The `ANTHROPIC_API_KEY` is visible inside the container. Claude (or code Claude runs) could exfiltrate it. Use scoped API keys with spending limits where possible. Do not use sandboxes for untrusted workloads. A file-based approach (mount a file containing the key, read it in the entrypoint) would reduce casual exposure via `docker inspect` and process listing. Docker secrets are another option for Swarm deployments.
+- **API key exposure:** The `ANTHROPIC_API_KEY` is injected via file-based credential injection (bind-mounted at `/run/secrets/`, read by entrypoint, host file cleaned up immediately). This hides the key from `docker inspect`, `docker commit`, and `docker logs`. The key is still present in the agent process's environment (unavoidable — CLI agents expect env vars). Use scoped API keys with spending limits where possible. See RESEARCH.md "Credential Management for Docker Containers" for the full analysis of approaches and tradeoffs.
 - **SSH keys:** If you mount `~/.ssh` into the container (even read-only), Claude can read private keys. Prefer SSH agent forwarding via config (`SSH_AUTH_SOCK` passthrough) over mounting key files directly.
 - **Network access** is unrestricted by default (required for Claude API calls). Claude can download binaries, connect to external services, or exfiltrate code. Use `--network-isolated` to allow only Anthropic API traffic, `--network-allow <domain>` for finer control, or `--network-none` for full isolation.
-- **Network isolation implementation:** `--network-isolated` uses a proxy-based approach (proven by Anthropic's sandbox-runtime, Trail of Bits, and Fence). The container runs on an isolated Docker network with no direct internet access. A lightweight HTTP/SOCKS proxy inside the container is the only exit — it whitelists Anthropic API domains by default. `--network-allow <domain>` adds domains to the proxy whitelist. Known limitation: this only covers HTTP/HTTPS traffic. Raw TCP and SSH connections bypass the proxy (a constraint shared with Anthropic's own implementation; see GitHub issues #11481, #24091). Network isolation is a v1 requirement — real CVEs demonstrate the threat (CVE-2025-55284: DNS exfiltration, Claude Pirate: File API exfiltration), and competitors treat it as table stakes (Codex disables network by default).
+- **Network isolation implementation:** `--network-isolated` uses a layered approach based on verified production implementations (Anthropic's sandbox-runtime, Docker Sandboxes, and Anthropic's own devcontainer firewall):
+  1. **Network topology:** The sandbox container runs on a Docker `--internal` network with no route to the internet. A separate proxy sidecar container bridges the internal and external networks — it is the only exit.
+  2. **Proxy allowlist:** The proxy sidecar (a lightweight forward proxy) allowlists Anthropic API domains by default. HTTPS traffic uses `CONNECT` tunneling (no MITM — the proxy sees the domain from the `CONNECT` request). `--network-allow <domain>` adds domains to the allowlist.
+  3. **iptables defense-in-depth:** Inside the sandbox container, iptables rules restrict outbound traffic to only the proxy's IP and port. This prevents bypass via any path other than the proxy. Requires `CAP_NET_ADMIN` (included in `CAP_SYS_ADMIN` which is already granted for overlayfs; for `copy_strategy: full`, `CAP_NET_ADMIN` alone is added when `--network-isolated` is used).
+  4. **DNS control:** The sandbox container uses the proxy sidecar as its DNS resolver. Direct outbound DNS (UDP 53) is blocked by iptables. This mitigates the DNS exfiltration vector demonstrated by CVE-2025-55284.
+  Known limitations: DNS exfiltration is mitigated but not fully eliminated — the proxy's DNS resolver must forward queries upstream, and data can be encoded in subdomain queries. Domain fronting remains theoretically possible on CDNs that haven't disabled it. These limitations are shared by all production implementations including Docker Sandboxes and Anthropic's own devcontainer. See RESEARCH.md "Network Isolation Research" for detailed analysis of bypass vectors.
 - **Runs as non-root** inside the container (user `yoloai` matching host UID/GID). This is required because Claude CLI refuses `--dangerously-skip-permissions` as root.
 - **`CAP_SYS_ADMIN` capability** is granted to the container when using the overlay copy strategy (the default). This is required for overlayfs mounts inside the container. It is a broad capability — it also permits other mount operations and namespace manipulation. The container's namespace isolation limits the blast radius, but this is a tradeoff: overlay gives instant setup and space efficiency at the cost of a wider capability grant. Users concerned about this can set `copy_strategy: full` to avoid the capability entirely.
 - **Dangerous directory detection:** The tool refuses to mount `$HOME`, `/`, or system directories unless `:force` is appended, preventing accidental exposure of your entire filesystem.

@@ -1,6 +1,6 @@
 # yoloai
 
-Sandboxed AI coding agent runner. Runs AI CLI agents (Claude, Codex, Aider, Goose, etc.) inside disposable Docker containers with copy/diff/apply workflow.
+Sandboxed AI coding agent runner. Runs Claude Code inside disposable Docker containers with copy/diff/apply workflow. Multi-agent support (Codex, Aider, Goose, etc.) planned for v2.
 
 ## Project Status
 
@@ -9,7 +9,7 @@ Design and research phase. No code yet.
 ## Key Files
 
 - `DESIGN.md` — Architecture, commands, config format, workflows, security considerations, resolved decisions.
-- `RESEARCH.md` — Competitive landscape (8 tools analyzed in depth, 9 more cataloged), community pain points, security incidents, alternative filesystem isolation approaches, feature comparison table, multi-agent CLI research.
+- `RESEARCH.md` — Competitive landscape (8 tools analyzed in depth, 9 more cataloged), community pain points, security incidents, alternative filesystem isolation approaches, feature comparison table, multi-agent CLI research, credential management research, network isolation research.
 - `CRITIQUE.md` — Rolling critique document. After a critique pass, findings are applied to DESIGN.md and RESEARCH.md, then CRITIQUE.md is emptied for the next round.
 - `CLI-STANDARD.md` — CLI design conventions: argument ordering (options first), flag naming, exit codes, error messages, help text format.
 - `CODING-STANDARD.md` — Code style: Go 1.22+, gofmt, golangci-lint, Cobra, project structure, naming, error handling, dependency policy.
@@ -18,7 +18,7 @@ Design and research phase. No code yet.
 
 - Go binary, no runtime deps — just the binary and Docker.
 - Docker containers with persistent state in `~/.yoloai/sandboxes/<name>/`.
-- Containers are ephemeral; state (work dirs, claude-state, logs, meta.json) lives on host.
+- Containers are ephemeral; state (work dirs, claude-state, logs, meta.json) lives on host. Credentials injected via file-based bind mount (not env vars).
 - `:copy` directories use overlayfs by default (instant setup, deltas-only) with full-copy fallback. Both use git for diff/apply.
 - `:rw` directories are live bind-mounts. Default (no suffix) is read-only.
 - Profile system: user-supplied Dockerfiles in `~/.yoloai/profiles/<name>/`.
