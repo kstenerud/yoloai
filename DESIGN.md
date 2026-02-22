@@ -10,7 +10,7 @@ Run Claude CLI with `--dangerously-skip-permissions` inside disposable, isolated
 ┌──────────────────────────────────────────────────┐
 │  Host (any machine with Docker)                  │
 │                                                  │
-│  yoloai CLI (Python script)                      │
+│  yoloai CLI (Go binary)                           │
 │    │                                             │
 │    ├─ docker run ──► sandbox-1  ← ephemeral      │
 │    │                  ├ tmux                     │
@@ -158,7 +158,7 @@ Config values support `${VAR}` environment variable interpolation from the host 
 
 ### 3. CLI Script (`yoloai`)
 
-Single Python script. No external dependencies beyond the standard library and Docker.
+Single Go binary. No runtime dependencies — just the binary and Docker.
 
 ## Commands
 
@@ -432,8 +432,8 @@ The `ANTHROPIC_API_KEY` environment variable is passed from the host into the co
 
 ## Prerequisites
 
-- Python 3.10+ (floor on Ubuntu 22.04+, Debian 12+, Fedora 40+, Arch; macOS users with Docker will have this)
 - Docker installed and running (clear error message if Docker daemon is not available)
+- Distribution: binary download from GitHub releases, `go install`, or Homebrew. No runtime dependencies — Go compiles to a static binary.
 - `ANTHROPIC_API_KEY` set in environment
 - If running from inside an LXC container: nesting enabled (`security.nesting=true`). Available on any LXC/LXD host — Proxmox exposes this as a checkbox, but it's a standard LXC feature.
 - **Windows/WSL:** Expected to work via Docker Desktop + WSL2. Known limitations: path translation between Windows and WSL paths, UID/GID mapping differences, `.gitignore` line ending handling. Not a primary target but should degrade gracefully.

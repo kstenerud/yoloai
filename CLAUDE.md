@@ -12,11 +12,11 @@ Design and research phase. No code yet.
 - `RESEARCH.md` — Competitive landscape (8 tools analyzed in depth, 9 more cataloged), community pain points, security incidents, alternative filesystem isolation approaches, feature comparison table, multi-agent CLI research.
 - `CRITIQUE.md` — Rolling critique document. After a critique pass, findings are applied to DESIGN.md and RESEARCH.md, then CRITIQUE.md is emptied for the next round.
 - `CLI-STANDARD.md` — CLI design conventions: argument ordering (options first), flag naming, exit codes, error messages, help text format.
-- `CODING-STANDARD.md` — Code style: Python 3.10+, ruff, pytest, project structure, naming, error handling, dependency policy.
+- `CODING-STANDARD.md` — Code style: Go 1.22+, gofmt, golangci-lint, Cobra, project structure, naming, error handling, dependency policy.
 
 ## Architecture (from DESIGN.md)
 
-- Python 3.10+ CLI script, no external deps beyond stdlib + Docker.
+- Go binary, no runtime deps — just the binary and Docker.
 - Docker containers with persistent state in `~/.yoloai/sandboxes/<name>/`.
 - Containers are ephemeral; state (work dirs, claude-state, logs, meta.json) lives on host.
 - `:copy` directories use overlayfs by default (instant setup, deltas-only) with full-copy fallback. Both use git for diff/apply.

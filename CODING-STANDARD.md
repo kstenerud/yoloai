@@ -2,218 +2,222 @@
 
 Reference for consistent code style and practices across the yoloai codebase.
 
-Based on PEP 8, PEP 257, PEP 484, Google Python Style Guide, and community conventions — filtered for a modern Python 3.10+ CLI project where navigability, clarity, and maintainability matter most.
+Based on Effective Go, Go Code Review Comments, Google Go Style Guide, and Uber Go Style Guide — filtered for a modern Go 1.22+ CLI project where navigability, clarity, and maintainability matter most.
 
 See also: global `CLAUDE.md` for language-agnostic naming philosophy and comment principles.
 
-## Language and Runtime
+## Language and Toolchain
 
-- **Python 3.10+** (minimum supported version)
-- Use type hints throughout — all function signatures, return types, and non-obvious locals
-- **Type checker:** mypy (strict mode). Type hints without a checker are cosmetic. Configure in `pyproject.toml`.
-- Use `from __future__ import annotations` in all modules. This makes all annotations strings at runtime, which avoids forward reference issues and enables newer syntax on older Python. Note: this can break libraries that inspect annotations at runtime (e.g., Pydantic v1) — test accordingly if adding such dependencies.
+- **Go 1.22+** (latest stable)
+- `gofmt` mandatory — non-negotiable, runs on save
+- `goimports` for import grouping and cleanup
+- Module path: `github.com/<org>/yoloai` (update when repo is created)
 
 ## Formatting and Linting
 
-- **Formatter:** ruff format (black-compatible, faster)
-- **Linter:** ruff (replaces flake8, isort, pyflakes, etc.)
-- **Line length:** 100 characters (PEP 8 allows up to 99 for teams; we use 100 for consistency with the CLI standard)
-- **Quotes:** double quotes for strings (ruff format default)
-- Configure in `pyproject.toml` — no separate config files for formatting/linting
+- **Formatter:** `gofmt` (mandatory, zero configuration)
+- **Linter:** `golangci-lint` with curated linter list
 
-### Ruff Rule Sets
+### golangci-lint Configuration
 
-Explicitly enable these rule sets in `pyproject.toml`:
+Enable these linters in `.golangci.yml`:
 
-| Code | Rules | Purpose |
-|------|-------|---------|
-| `E`, `W` | pycodestyle | Basic style errors and warnings |
-| `F` | pyflakes | Unused imports, undefined names |
-| `I` | isort | Import ordering |
-| `UP` | pyupgrade | Upgrade syntax to modern Python |
-| `C4` | flake8-comprehensions | Simplify comprehensions |
-| `SIM` | flake8-simplify | Simplify code constructs |
-| `TCH` | flake8-type-checking | Move type-only imports behind `TYPE_CHECKING` |
-| `PTH` | flake8-use-pathlib | Prefer `pathlib` over `os.path` |
-| `RET` | flake8-return | Simplify return statements |
-| `D` | pydocstyle | Docstring conventions (Google style) |
+| Linter | Purpose |
+|--------|---------|
+| errcheck | Unchecked error returns |
+| govet | Suspicious constructs (`go vet`) |
+| staticcheck | Advanced static analysis |
+| unused | Unused code |
+| ineffassign | Ineffectual assignments |
+| gosec | Security issues |
+| errorlint | Error wrapping/comparison mistakes |
+| revive | Extensible linter (replaces golint) |
+| gocritic | Opinionated style and performance checks |
+| sloglint | Consistent `log/slog` usage |
 
-Use `per-file-ignores` for exceptions:
-- `__init__.py`: allow unused imports (`F401`) — re-exports are intentional
-- `tests/**`: relax type annotation requirements (`ANN`), allow assertions (`S101`)
-
-### Pre-commit
-
-Use [pre-commit](https://pre-commit.com/) to enforce formatting and linting before commits. Hooks: `ruff check --fix`, `ruff format`, `mypy`.
+Linters to skip: `exhaustruct` (forces filling every struct field — noisy, fights zero values), `varnamelen` (conflicts with Go's short-variable conventions).
 
 ## Project Structure
 
 ```
 yoloai/
-├── pyproject.toml          # Project metadata, deps, tool config
-├── src/
-│   └── yoloai/
-│       ├── __init__.py
-│       ├── py.typed         # PEP 561 marker for type checker support
-│       ├── cli/             # CLI entry points and argument parsing
-│       ├── core/            # Business logic (sandbox lifecycle, etc.)
-│       ├── agents/          # Agent preset definitions
-│       ├── docker/          # Docker client interactions
-│       └── config/          # Config file parsing, profiles
-├── tests/
-│   ├── unit/                # Fast, no external deps
-│   │   ├── test_sandbox.py  # Mirrors src/yoloai/core/sandbox.py
-│   │   └── ...
-│   ├── integration/         # Needs Docker
-│   └── conftest.py          # Shared fixtures (top-level)
-└── resources/               # Dockerfiles, templates, static assets
+├── go.mod
+├── go.sum
+├── cmd/yoloai/main.go        # Entry point (thin — parse flags, call run)
+├── internal/                  # All private packages
+│   ├── cmd/                   # Cobra command definitions
+│   ├── sandbox/               # Sandbox lifecycle
+│   ├── docker/                # Docker client wrapper
+│   ├── config/                # Config parsing (Viper)
+│   └── agent/                 # Agent preset definitions
+├── resources/                 # Dockerfiles, templates
+└── testdata/                  # Test fixtures
 ```
+
+Everything under `internal/` is private to this module — prevents accidental external imports.
+
+## CLI Framework
+
+- **Cobra** for command definitions, **Viper** for configuration
+- One file per command under `internal/cmd/`
+- Use `RunE` (not `Run`) so commands return errors for proper propagation
+- Viper for config file + env var + flag binding with struct unmarshaling
+- Commands are thin — parse args, call into domain packages, format output
 
 ## File Organization
 
-- **One primary class per module.** Small helper types used only by that class can live in the same file. File name matches the primary type: class `SandboxManager` → `sandbox_manager.py`.
+- **One primary type per file.** Small helper types used only by that type can live in the same file. File name matches the primary type: type `SandboxManager` → `sandbox_manager.go`.
+- **File names:** `snake_case.go` (Go convention).
+- **`doc.go`** for package-level documentation in larger packages.
 - **Files over 400 lines:** consider whether there are multiple responsibilities that should be split.
 - **Functions over 40 lines:** consider whether it can be decomposed into named steps.
 - These aren't hard limits — a long file with one coherent responsibility is fine. A short file with three unrelated concerns is not.
 
-## Testing
-
-- **Framework:** pytest
-- **Test location:** `tests/` directory. Within `unit/` and `integration/`, mirror `src/yoloai/` structure.
-- **Naming:** `test_<module>.py` files, `test_<behavior>` functions. Test names describe the scenario: `test_create_sandbox_fails_when_docker_unavailable` not `test_create`.
-- **Fixtures:** prefer factory functions over complex fixture hierarchies. Use `conftest.py` at the appropriate directory level — shared fixtures at the top, module-specific fixtures in subdirectories.
-- **Mocking:** mock at the boundary (Docker client, filesystem), not internal functions
-- **Markers:** use `@pytest.mark.integration` for tests requiring Docker. Register custom markers in `pyproject.toml`.
-- **Parametrize:** use `@pytest.mark.parametrize` to reduce test duplication for multiple inputs/scenarios.
-- Run with: `pytest tests/unit` (fast), `pytest tests/integration` (needs Docker)
-- All new functionality requires tests. Bug fixes require a regression test.
-
 ## Naming
 
-Follow PEP 8 conventions:
+Follow Go conventions — [Effective Go](https://go.dev/doc/effective_go) and [Go Code Review Comments](https://go.dev/wiki/CodeReviewComments) are authoritative.
 
 | Thing | Convention | Example |
 |-------|-----------|---------|
-| Modules | `snake_case` | `sandbox_lifecycle.py` |
-| Classes | `PascalCase` | `SandboxManager` |
-| Functions/methods | `snake_case` | `create_sandbox()` |
-| Constants | `UPPER_SNAKE_CASE` | `DEFAULT_DISK_LIMIT` |
-| Private | `_leading_underscore` | `_build_docker_args()` |
-| Type variables | `PascalCase`, short | `T`, `ConfigT` |
-| Type aliases | `PascalCase` | `AgentConfig` |
+| Packages | short, lowercase, no underscores | `sandbox`, `config` |
+| Exported types | `MixedCaps` | `SandboxManager` |
+| Unexported types | `mixedCaps` | `overlayState` |
+| Functions/methods | `MixedCaps` / `mixedCaps` | `CreateSandbox()`, `buildArgs()` |
+| Constants | `MixedCaps` | `DefaultDiskLimit` (not `DEFAULT_DISK_LIMIT`) |
+| Interfaces | name by method + `-er` when single-method | `Reader`, `ContainerRunner` |
+| Receivers | 1-2 letters, consistent within type | `s` for `*Sandbox`, `m` for `*Manager` |
+| Acronyms | all-caps | `URL`, `HTTP`, `ID`, `API` |
 
-Names describe **what**, not **how** — except where "how" distinguishes specializations (e.g., `hash_lookup` vs `linear_lookup`).
+Never use underscores in Go names (except in test functions: `Test_xxx`). Never use `self` or `this` for receivers.
 
 ### Clarity over brevity
 
 Names must be understandable to someone unfamiliar with the codebase. When you encounter a variable mid-function, its role should be obvious without scrolling to its declaration.
 
-- **Spell words out:** `container_name` not `ctr_nm`, `directory` not `dir`
+- **Spell words out:** `containerName` not `ctrNm`, `directory` not `dir`
 - **Accepted short forms** (universal enough to need no explanation): `i`, `j`, `k` (loop indices), `args` (arguments), `ctx` (context), `src`/`dst` (source/destination), `tmp` (temporary), `err` (error), `fmt` (format), `fn` (function), `idx` (index), `msg` (message), `cmd` (command), `cfg` (config)
 - **A name that needs a comment to explain it is too short or too vague** — rename it instead of adding the comment
-- **Parameters are part of the public interface** — a function signature should read almost like documentation: `create_sandbox(name: str, agent: AgentPreset, directories: list[Path])` over `create_sandbox(n: str, a: AgentPreset, d: list[Path])`
+- **Parameters are part of the public interface** — a function signature should read almost like documentation: `CreateSandbox(name string, agent AgentPreset, directories []string)` over `CreateSandbox(n string, a AgentPreset, d []string)`
 
 ## Imports
 
-Order (enforced by ruff `I` rules):
+Three groups, separated by blank lines (enforced by `goimports`):
+
 1. Standard library
 2. Third-party packages
-3. Local imports
+3. Local packages (`github.com/<org>/yoloai/...`)
 
-Blank line between each group. Use absolute imports from the package root: `from yoloai.core.sandbox import Sandbox`, not relative imports. This is stricter than PEP 8 (which permits explicit relative imports) but simpler — every import shows its full path.
+```go
+import (
+	"context"
+	"fmt"
+
+	"github.com/docker/docker/client"
+	"github.com/spf13/cobra"
+
+	"github.com/<org>/yoloai/internal/sandbox"
+)
+```
+
+- **No dot imports** (`import . "pkg"`) — makes the namespace unpredictable
+- **Blank imports** (`import _ "pkg"`) only in `main.go` or test files
 
 ## Error Handling
 
-- Use custom exception hierarchy rooted at `YoloaiError`
-- Catch specific exceptions, not bare `except:`
-- Validate at system boundaries (CLI input, config files, Docker responses), trust internal code
-- Error messages: lowercase, no trailing period, actionable (same as CLI standard)
-- Never swallow exceptions silently — log or re-raise
-- Include context in exceptions: what was being done, what went wrong
+- Wrap errors with context: `fmt.Errorf("create sandbox %q: %w", name, err)`
+- Inspect errors with `errors.Is` and `errors.As`
+- **Sentinel errors** use `Err` prefix: `var ErrSandboxNotFound = errors.New("sandbox not found")`
+- Custom error types for rich context when callers need structured information
+- Never `panic` in library code — return errors
+- Happy path at minimal indentation (early returns for errors)
 
-```python
-class YoloaiError(Exception):
-    """Base for all yoloai errors."""
-
-class ConfigError(YoloaiError):
-    """Invalid or missing configuration."""
-
-class SandboxError(YoloaiError):
-    """Sandbox lifecycle failure."""
-
-class AgentError(YoloaiError):
-    """Agent setup or execution failure."""
+```go
+result, err := doSomething()
+if err != nil {
+	return fmt.Errorf("doing something: %w", err)
+}
+// happy path continues here, unindented
 ```
 
-## Docstrings and Comments
+## Testing
 
-- **Module-level:** Every source file starts with `# ABOUTME: <purpose>` (project convention for quick scanning). Additionally, public modules should have a PEP 257 module docstring for `help()` and documentation generators.
-- **Public API:** Docstrings on public classes and functions. Use imperative mood: "Create a sandbox" not "Creates a sandbox" (PEP 257).
-- **Docstring format:** Google style. Use `Args:`, `Returns:`, `Raises:` sections for functions with non-obvious parameters or behavior.
-- **No docstrings** on private helpers, test functions, or obvious one-liners
-- **Comments:** Reserve for non-obvious "why" — not "what". Keep current or delete.
-- **No commented-out code.** Use version control.
-
-```python
-def create_sandbox(name: str, agent: str, directories: list[Path]) -> Sandbox:
-    """Create a new sandbox with the given agent preset.
-
-    Args:
-        name: Unique sandbox identifier.
-        agent: Agent preset name (e.g., "claude", "codex").
-        directories: Host directories to mount in the sandbox.
-
-    Returns:
-        The created sandbox, not yet started.
-
-    Raises:
-        ConfigError: If the agent preset is unknown.
-        SandboxError: If a sandbox with this name already exists.
-    """
-```
+- **Framework:** `testing` stdlib + `testify/assert` for readability
+- **Table-driven tests** as the standard pattern for multiple cases
+- `t.Helper()` on all test helper functions
+- **Build tags** for slow tests: `//go:build integration` at the top of integration test files
+- **Mocking:** define interfaces at the consumption site, not the implementation site. Mock via interface satisfaction.
+- Test file naming: `xxx_test.go` alongside the code it tests
+- Test function naming: `TestCreateSandbox_FailsWhenDockerUnavailable` — describe the scenario
+- Run with: `go test ./...` (fast), `go test -tags=integration ./...` (needs Docker)
+- All new functionality requires tests. Bug fixes require a regression test.
 
 ## Logging
 
-- Use the `logging` module, not `print()` for diagnostic output
-- Logger per module: `logger = logging.getLogger(__name__)`
-- CLI layer configures the root logger based on `--verbose` / `--quiet`
-- Log levels: `DEBUG` for tracing, `INFO` for normal operations, `WARNING` for recoverable issues, `ERROR` for failures
+- **`log/slog`** (stdlib, Go 1.21+) — not `log` or `fmt.Println`
+- Logger per component via `slog.With("component", "sandbox")`
+- `TextHandler` for development, `JSONHandler` for production
+- CLI layer configures the handler based on `--verbose` / `--quiet`
+- Log levels: `Debug` for tracing, `Info` for normal operations, `Warn` for recoverable issues, `Error` for failures
+
+## Docker Interactions
+
+- Use **`github.com/docker/docker/client`** (official SDK), not subprocess calls to `docker` CLI
+- Wrap behind interfaces for testability
+- `context.Context` on all Docker operations
+- Handle Docker daemon not running with a clear error message
+- All container names prefixed with `yoloai-`
 
 ## Configuration and Constants
 
-- No magic strings — use constants or enums
-- Config parsing isolated in `config/` module; rest of code receives typed dataclasses
+- No magic strings — use constants or typed values
+- Config parsing isolated in `internal/config/`; rest of code receives typed structs
 - Default values defined in one place, not scattered
 - Environment variable names prefixed with `YOLOAI_` for yoloai-specific vars
 
 ## Dependencies
 
-- Minimize external dependencies. Justify each one.
-- Pin in `pyproject.toml` with compatible ranges (`>=1.0,<2` or `~=1.0`)
-- Core deps (always needed): Click (CLI), Docker SDK, PyYAML
-- Dev deps: pytest, ruff, mypy, pre-commit
-- No vendoring unless required for distribution
+- **Minimal** — Go culture favors the standard library. Justify each dependency.
+- `go.mod` with compatible version ranges
+- **Core deps** (always needed): Cobra (CLI), Viper (config), Docker SDK
+- **Dev deps:** golangci-lint, testify
+- No vendoring unless required for reproducible builds in air-gapped environments
 
-## CLI Implementation
+## Code Organization Patterns
 
-- Use **Click** for argument parsing (declarative, composable, well-documented)
-- One file per command in `cli/` — keeps each command self-contained
-- Commands are thin — parse args, call into `core/`, format output
-- No business logic in CLI layer
+- **Accept interfaces, return structs** — define interfaces at the point of consumption, not alongside the implementation
+- **Small interfaces** (1-2 methods) — the bigger the interface, the weaker the abstraction
+- **Constructor injection** via `NewXxx` functions:
+  ```go
+  func NewSandboxManager(docker DockerClient, cfg Config) *SandboxManager {
+      return &SandboxManager{docker: docker, cfg: cfg}
+  }
+  ```
+- **`context.Context` as first parameter** for all I/O operations
+- **No global mutable state** — pass dependencies through constructors or function parameters
 
-## Docker Interactions
+## Documentation
 
-- Use the **Docker SDK for Python** (`docker` package), not subprocess calls to `docker` CLI
-- Wrap Docker SDK calls in a thin abstraction layer for testability
-- Handle Docker daemon not running with a clear error message
-- All container names prefixed with `yoloai-`
+- **godoc conventions:** comments start with the name being documented
+  ```go
+  // SandboxManager handles sandbox lifecycle operations.
+  type SandboxManager struct { ... }
+
+  // Create creates a new sandbox with the given agent preset.
+  func (m *SandboxManager) Create(ctx context.Context, name string) (*Sandbox, error) {
+  ```
+- Package comments in `doc.go` or above the `package` declaration
+- **`// ABOUTME:`** project convention for quick scanning (supplemental to godoc, not a replacement)
+- No documentation on unexported helpers, test functions, or obvious one-liners
+- **No commented-out code.** Use version control.
 
 ## What to Avoid
 
-- **Premature abstraction** — don't create a base class or interface until you have two implementations. One concrete type is simpler than one interface + one implementation.
-- **Over-engineering** — three similar lines of code are better than a premature helper function. Build what's needed now.
-- **`print()` for diagnostics** — use `logging`. `print()` is for program output only.
-- **Bare `except:`** — always catch specific exception types
-- **Mutable default arguments** — use `None` and assign inside the function
-- **Wildcard imports** (`from module import *`) — makes the namespace unpredictable
+- **`init()` abuse** — avoid `init()` except for truly global setup (e.g., registering a driver). Prefer explicit initialization in `main()` or constructors.
+- **Package-level mutable variables** — these are hidden global state. Pass dependencies through constructors.
+- **Over-engineering with interfaces** — don't create an interface until you have a consumer that needs the abstraction (testing counts as a consumer). One concrete type is simpler than one interface + one implementation.
+- **Premature abstraction** — three similar lines of code are better than a premature helper function. Build what's needed now.
+- **`self`/`this` receivers** — use short, idiomatic names (`s`, `m`, `c`)
+- **`SCREAMING_SNAKE` constants** — Go uses `MixedCaps` for everything
+- **Hungarian notation** — Go doesn't use type prefixes/suffixes in names
+- **Bare `panic`** in library code — always return errors
 - **Global mutable state** — pass dependencies through constructors or function parameters
