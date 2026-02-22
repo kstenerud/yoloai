@@ -89,7 +89,11 @@ defaults:
   mounts:
     - ~/.gitconfig:/home/yolo/.gitconfig:ro
 
-  max_copy_size: 1g                    # max size per :copy dir; error if exceeded
+  copy_strategy: auto                   # auto | overlay | full
+                                        # auto: use overlayfs where available, fall back to full copy
+                                        # overlay: overlayfs lower layer (instant, deltas-only, needs CAP_SYS_ADMIN)
+                                        # full: traditional full copy (portable, all reads VM-local)
+  max_copy_size: 1g                    # max size per :copy dir; error if exceeded (full copy only)
   auto_commit_interval: 0               # seconds between auto-commits in :copy dirs; 0 = disabled
   resources:
     cpus: 4                           # docker --cpus
@@ -242,11 +246,25 @@ Options:
 
 1. Error if primary directory has no `:rw` or `:copy` suffix.
 2. Error if any two directories resolve to the same absolute container path (default `/work/<dirname>/` or custom `=<path>`).
-3. For each `:copy` directory:
+3. For each `:copy` directory, set up an isolated writable view using one of two strategies (selected by `copy_strategy` config, default `auto`):
+
+   **Overlay strategy** (default when available):
+   - Bind-mount the original directory read-only as the overlayfs lower layer.
+   - Create an empty upper directory in `~/.yolo/sandboxes/<name>/work/<dirname>/` for writes.
+   - Mount overlayfs merging lower + upper at the container mount point. Claude sees the full project; writes go to upper only. Original directory is inherently protected (read-only lower layer).
+   - Inside the container, `git init` + `git add -A` + `git commit -m "initial"` on the merged view to create a baseline.
+   - If the directory is already a git repo, record the current HEAD SHA in `meta.json` and use it as the baseline instead.
+   - Requires `CAP_SYS_ADMIN` capability on the container (not full `--privileged`).
+
+   **Full copy strategy** (fallback):
    - If the directory is a git repo, record the current HEAD SHA in `meta.json`.
    - Copy to `~/.yolo/sandboxes/<name>/work/<dirname>/`. Error if directory size exceeds `max_copy_size` (default 1GB). Everything is copied regardless of `.gitignore` — the size limit is the guardrail.
    - If the copy already has a `.git/` directory (from the original repo), use the recorded SHA as the baseline — `yolo diff` will diff against it.
-   - If the copy has no `.git/`, `git init` + `git add -A` + `git commit -m "initial"` to create a baseline. Note: `git add -A` naturally honors `.gitignore` if one is present, so copied-but-gitignored files (e.g., `node_modules`) won't clutter `yolo diff` output. These are separate concerns: what gets copied vs what gets tracked for diffs.
+   - If the copy has no `.git/`, `git init` + `git add -A` + `git commit -m "initial"` to create a baseline.
+
+   Both strategies produce the same result from the user's perspective: a protected, writable view with git-based diff/apply. The overlay strategy is instant and space-efficient; the full copy strategy is more portable. `auto` tries overlay first, falls back to full copy if `CAP_SYS_ADMIN` is unavailable or the kernel doesn't support nested overlayfs.
+
+   Note: `git add -A` naturally honors `.gitignore` if one is present, so gitignored files (e.g., `node_modules`) won't clutter `yolo diff` output regardless of strategy.
 4. If `auto_commit_interval` > 0, start a background auto-commit loop for `:copy` directories inside the container for recovery. Disabled by default.
 5. Store original paths, modes, and mapping in `meta.json`.
 6. Start Docker container (see Container Startup below).
@@ -266,7 +284,7 @@ Before creating the sandbox:
 
 1. Generate a **sandbox context file** (placed in the primary directory as `.sandbox-context.md`) describing the environment for Claude: which directory is primary, which are dependencies, mount paths and access mode of each (read-only / read-write / copy), available tools, and how auto-save works. This file is excluded from the git baseline (added to `.gitignore` in synthetic repos) and excluded from `yolo apply`.
 2. Start Docker container (as non-root user `yolo`) with:
-   - `:copy` directories mounted from sandbox state at their mount point (custom or `/work/<dirname>`, read-write)
+   - `:copy` directories: overlay strategy mounts originals as overlayfs lower layers with upper dirs from sandbox state; full copy strategy mounts copies from sandbox state. Both at their mount point (custom or `/work/<dirname>`, read-write)
    - `:rw` directories bind-mounted at their mount point (custom or `/work/<dirname>`, read-write)
    - Default (no suffix) directories bind-mounted at their mount point (custom or `/work/<dirname>`, read-only)
    - `claude-state/` mounted at `/home/yolo/.claude` (read-write, per-sandbox)
@@ -274,6 +292,7 @@ Before creating the sandbox:
    - Config mounts from defaults + profile
    - Resource limits from defaults + profile
    - `ANTHROPIC_API_KEY` from host environment
+   - `CAP_SYS_ADMIN` capability (required for overlayfs mounts inside the container; omitted when `copy_strategy: full`)
    - Container name: `yolo-<name>`
    - User: `yolo` (UID/GID matching host user)
 3. Run `setup` commands from config (if any).
@@ -313,7 +332,7 @@ Read-only directories are skipped (no changes possible).
 
 ### `yolo apply`
 
-For `:copy` directories only. Generates a patch from the git diff in the sandbox copy and applies it to the original directory. This handles additions, modifications, and deletions. For dirs that had no original git repo, excludes the synthetic `.git/` directory created by yolo.
+For `:copy` directories only. Generates a patch from `git diff` in the sandbox (whether overlay-merged or full-copy) and applies it to the original directory. This handles additions, modifications, and deletions. Works identically regardless of `copy_strategy` — git provides the diff in both cases. For dirs that had no original git repo, excludes the synthetic `.git/` directory created by yolo.
 
 Performs a `--dry-run` first and shows a summary before prompting for confirmation.
 
@@ -402,6 +421,7 @@ The `ANTHROPIC_API_KEY` environment variable is passed from the host into the co
 - **SSH keys:** If you mount `~/.ssh` into the container (even read-only), Claude can read private keys. Prefer SSH agent forwarding via config (`SSH_AUTH_SOCK` passthrough) over mounting key files directly.
 - **Network access** is unrestricted by default (required for Claude API calls). Claude can download binaries, connect to external services, or exfiltrate code. Use `--network-isolated` to allow only Anthropic API traffic, `--network-allow <domain>` for finer control, or `--network-none` for full isolation.
 - **Runs as non-root** inside the container (user `yolo` matching host UID/GID). This is required because Claude CLI refuses `--dangerously-skip-permissions` as root.
+- **`CAP_SYS_ADMIN` capability** is granted to the container when using the overlay copy strategy (the default). This is required for overlayfs mounts inside the container. It is a broad capability — it also permits other mount operations and namespace manipulation. The container's namespace isolation limits the blast radius, but this is a tradeoff: overlay gives instant setup and space efficiency at the cost of a wider capability grant. Users concerned about this can set `copy_strategy: full` to avoid the capability entirely.
 - **Dangerous directory detection:** The tool refuses to mount `$HOME`, `/`, or system directories unless `:force` is appended, preventing accidental exposure of your entire filesystem.
 - **Security design needs dedicated research.** The security story around Docker + Claude (credential handling, network isolation, privilege escalation, exfiltration vectors) needs dedicated research into best practices before finalizing. The `setup` commands and `cap_add`/`devices` fields enable significant privilege escalation with insufficient documentation of risks. Ad-hoc mitigations risk missing the bigger picture.
 
@@ -414,3 +434,4 @@ The `ANTHROPIC_API_KEY` environment variable is passed from the host into the co
 5. ~~**Auto-destroy?**~~ No. Sandboxes persist until explicitly destroyed.
 6. ~~**Git integration?**~~ Yes. Copy mode auto-inits git for clean diffs. `yolo apply` excludes `.git/`.
 7. ~~**Default mode?**~~ All dirs read-only by default. Per-directory `:rw` (live) or `:copy` (staged) suffixes. Primary must have one of these.
+8. ~~**Copy strategy?**~~ OverlayFS by default (`copy_strategy: auto`). The original directory is bind-mounted read-only as the overlayfs lower layer; writes go to an upper directory in sandbox state. Git provides diff/apply on the merged view. Falls back to full copy if overlayfs isn't available. Works cross-platform — Docker on macOS/Windows runs a Linux VM, so overlayfs works inside the container regardless of host OS. VirtioFS overhead for macOS host reads is acceptable (70-90% native after page cache warms). Config option `copy_strategy: full` available for users who prefer the traditional full-copy approach or want to avoid `CAP_SYS_ADMIN`.
