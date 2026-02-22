@@ -1,6 +1,6 @@
 # yoloai
 
-Sandboxed AI coding agent runner. Runs Claude Code inside disposable Docker containers with copy/diff/apply workflow. Multi-agent support (Codex, Aider, Goose, etc.) planned for v2.
+Sandboxed AI coding agent runner. Runs AI coding CLI agents (Claude Code, Codex) inside disposable Docker containers with copy/diff/apply workflow. Additional agents (Aider, Goose, etc.) in future versions.
 
 ## Project Status
 
@@ -18,7 +18,8 @@ Design and research phase. No code yet.
 
 - Go binary, no runtime deps — just the binary and Docker.
 - Docker containers with persistent state in `~/.yoloai/sandboxes/<name>/`.
-- Containers are ephemeral; state (work dirs, claude-state, logs, meta.json) lives on host. Credentials injected via file-based bind mount (not env vars).
+- Containers are ephemeral; state (work dirs, agent-state, logs, meta.json) lives on host. Credentials injected via file-based bind mount (not env vars).
+- Agent abstraction: per-agent definitions specify install, launch command, API key env vars, state directory, network allowlist, and prompt delivery mode. v1 ships Claude and Codex.
 - Directories mounted at mirrored host paths by default (path consistency). Custom paths via `=<path>` override.
 - `:copy` directories use overlayfs by default (instant setup, deltas-only) with full-copy fallback. Both use git for diff/apply.
 - `:rw` directories are live bind-mounts. Default (no suffix) is read-only.
@@ -48,6 +49,6 @@ Design and research phase. No code yet.
 
 - Copy/diff/apply is the core differentiator — protect originals, review before landing.
 - Overlayfs + git is the preferred `:copy` strategy (instant setup, git-based diff). `copy_strategy: auto | overlay | full` config option.
-- Safe defaults: read-only mounts, no implicit `claude_files` inheritance, name required (no auto-generation), dirty repo warning (not error).
+- Safe defaults: read-only mounts, no implicit `agent_files` inheritance, name required (no auto-generation), dirty repo warning (not error).
 - CLI for one-offs, config for repeatability (same options in both).
 - Security requires dedicated research — don't finalize ad-hoc. `CAP_SYS_ADMIN` tradeoff is documented.

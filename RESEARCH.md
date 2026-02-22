@@ -432,7 +432,12 @@ ZFS and Btrfs are too host-dependent to serve as primary mechanisms (require the
 
 ## AI Coding CLI Agents: Multi-Agent Support Research
 
-This section documents the headless/Docker characteristics of major AI coding CLI agents, to inform yoloai's multi-agent abstraction design.
+This section documents the headless/Docker characteristics of major AI coding CLI agents. Claude Code and Codex are supported in v1; additional agents are researched for future versions.
+
+**Known research gaps (v1):**
+- **Codex proxy support:** Whether the static Rust binary honors `HTTP_PROXY`/`HTTPS_PROXY` env vars is unverified. Critical for `--network-isolated` mode. If Codex ignores proxy env vars, `--network-isolated` with Codex would require iptables-only enforcement (no proxy-based domain allowlisting for the agent's own traffic).
+- **Codex required network domains:** Only `api.openai.com` is confirmed. Additional domains (telemetry, model downloads) may be required.
+- **Codex TUI behavior in tmux:** Interactive mode (`codex --yolo` without `exec`) behavior in tmux is unverified.
 
 ### Viable Agents
 
@@ -1273,7 +1278,7 @@ Neither of the two major sandbox implementations relies on `HTTP_PROXY` env vars
 - **sandbox-runtime:** Removes the network namespace entirely (Linux). Traffic flows through Unix domain sockets to host-side proxies. The application has no choice — it literally cannot create external sockets.
 - **Docker Sandboxes:** VM-level proxy interception. The microVM's network stack routes through the proxy transparently. The application is unaware.
 
-yoloai's approach (internal Docker network + `HTTP_PROXY` env vars) is less invasive but depends on the application honoring the env vars. This works for Claude Code's npm installation but would need verification for each new agent in v2.
+yoloai's approach (internal Docker network + `HTTP_PROXY` env vars) is less invasive but depends on the application honoring the env vars. This works for Claude Code's npm installation. **Codex (static Rust binary) proxy support is unverified** — the binary may not honor proxy env vars, which would require relying solely on the iptables + internal network layers for enforcement with Codex.
 
 ### Design Implications for yoloai
 
