@@ -284,7 +284,7 @@ mount -t overlay overlay \
 - Nested overlayfs-on-overlayfs (Docker uses overlay2 internally) works on kernel 5.11+ but is unreliable on older kernels. Fallback: `fuse-overlayfs` (userspace implementation, available via package managers).
 
 **Limitations:**
-- **Linux only.** No macOS equivalent (macOS `mount -t union` is broken since Sierra and effectively abandoned by Apple).
+- **Requires a Linux kernel** — no native macOS equivalent (macOS `mount -t union` is broken since Sierra and effectively abandoned by Apple). However, Docker on macOS runs a Linux VM (`virtualization.framework`), so overlayfs works inside Docker containers on macOS — the container sees a Linux kernel regardless of the host OS. The caveat is that bind-mounted host directories cross the VM boundary (via VirtioFS or gRPC-FUSE), and overlayfs-on-top-of-VirtioFS may have xattr or inode compatibility issues that need validation.
 - File timestamps may not be preserved during copy-up. Metacopy feature (kernel `CONFIG_OVERLAY_FS_METACOPY`) optimizes metadata-only changes but has security caveats with untrusted directories.
 - 128 lower layer limit (practical limit ~122 due to mount option size); irrelevant for our use case (single lower layer).
 - CVE-2023-2640 and CVE-2023-32629: privilege escalation via overlayfs xattrs — mitigated in patched kernels.
@@ -372,7 +372,7 @@ bwrap --overlay-src /original --overlay /upper /work /merged -- /bin/bash
 | Approach | Setup time | Space | Diff mechanism | Apply-back | macOS | Needs special host FS |
 |----------|-----------|-------|----------------|------------|-------|----------------------|
 | **Current (full copy + git)** | Slow (proportional to size) | Full duplicate | git diff | git patch | Yes | No |
-| **OverlayFS + git** | Instant | Deltas only | git diff (ignores non-project noise) | git patch | No | No |
+| **OverlayFS + git** | Instant | Deltas only | git diff (ignores non-project noise) | git patch | Yes (inside Docker's Linux VM) | No |
 | **ZFS clone** | Instant | Deltas only | `zfs diff` (file list only) | Manual (rsync/patch) | Experimental | Yes (ZFS) |
 | **Btrfs snapshot** | Instant | Deltas only | `btrfs send` (binary stream) | Manual (rsync/patch) | No | Yes (Btrfs) |
 | **APFS clone** | Instant (file-level) | Deltas only | None built-in | Manual | Yes (native) | No (but macOS only) |
@@ -394,9 +394,21 @@ This eliminates the upfront copy (the main performance cost for large projects) 
 **Requirements:** `CAP_SYS_ADMIN` inside the Docker container (or kernel 5.11+ with user namespaces and `-o userxattr`). Both are available in our architecture since we control the `docker run` invocation.
 
 **Cross-platform story:**
-- **Linux:** OverlayFS + git. Instant setup, deltas-only storage.
-- **macOS:** Falls back to current full copy + git. Docker on macOS runs a Linux VM, so overlayfs *could* work inside the container even on a macOS host — needs validation. If it works, the optimization is transparent and cross-platform.
-- **Older kernels:** Falls back to full copy + git.
+Docker on macOS (and Windows) runs a Linux VM — containers see a Linux kernel regardless of host OS. This means overlayfs technically works inside Docker containers on all platforms. However, there's a meaningful performance tradeoff on non-Linux hosts:
+
+Bind-mounted host directories cross the VM boundary via VirtioFS (or gRPC-FUSE on older Docker Desktop). With overlayfs, the host directory becomes the read-only lower layer. Every read of an unmodified file goes through VirtioFS on every access — there's no local copy. With a full copy, all reads are local to the VM's filesystem.
+
+| | Setup | Reads (unmodified files) | Writes | Disk |
+|---|---|---|---|---|
+| **Full copy** | Slow (proportional to project size) | Fast (local to VM) | Fast (local) | Full duplicate |
+| **Overlay (Linux host)** | Instant | Fast (local filesystem) | Fast (upper layer) | Deltas only |
+| **Overlay (macOS host)** | Instant | Slower (VirtioFS per access) | Fast (upper layer is local) | Deltas only |
+
+For read-heavy workloads (builds, IDE indexing, grep across codebase), the full copy may actually outperform overlay on macOS because all reads are local after the initial copy. For write-heavy or quick-turnaround workflows on large projects, overlay wins because there's no setup delay.
+
+- **Linux:** OverlayFS + git. Best case — instant setup, all I/O local.
+- **macOS/Windows:** Tradeoff. Overlay gives instant setup but reads hit VirtioFS. Full copy gives slow setup but fast reads. Could auto-select based on project size: overlay for large projects (where copy time dominates), full copy for small projects (where read performance matters more). Or let the user choose.
+- **Older Docker/kernels:** Falls back to full copy + git.
 
 This is a **post-v1 optimization** — the current full-copy approach works everywhere and is simpler to implement and debug. The overlayfs optimization is worth adding once the core workflow is stable, primarily to improve startup time and reduce disk usage for large projects.
 
