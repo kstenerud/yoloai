@@ -33,6 +33,17 @@ Design and research phase. No code yet.
 - **Cross-platform awareness:** Always consider Linux, macOS (Docker Desktop + VirtioFS), and Windows/WSL. Note platform-specific tradeoffs explicitly.
 - **Commit granularity:** One commit per logical change. Research, design updates, and critique application get separate commits.
 
+## Critique Principles
+
+- **Research must be verified.** Agents can hallucinate and make mistakes. Don't trust claims without checking sources.
+- **Focus on what affects the design.** Small research inaccuracies (e.g., numbers off by 10%) aren't worth critiquing if they don't change any design decision.
+- **User sentiment is high-signal.** Community pain points and praise tell us where competitors succeed and fail. Learn from their examples.
+- **The design must be backed by research.** Assumptions are dangerous and difficult to back out of once implementation starts. If a design claim lacks research backing, flag it.
+- **Cross-reference both directions.** Check that design claims have research backing, and that research recommendations have been incorporated into the design.
+- **Platform-specific claims need platform-specific verification.** Something that works on Linux may not work on macOS Docker Desktop (e.g., `--storage-opt size=`). Always note which platforms a claim applies to.
+- **Security claims need the highest scrutiny.** A wrong security assumption (e.g., "env vars are safe for secrets") can undermine user trust and is hardest to fix after launch.
+- **Separate facts from tradeoffs.** Research establishes facts; the design makes tradeoff decisions based on those facts. A critique should distinguish "this fact is wrong" from "this tradeoff deserves discussion."
+
 ## Design Principles
 
 - Copy/diff/apply is the core differentiator — protect originals, review before landing.
