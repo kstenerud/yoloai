@@ -17,7 +17,7 @@ Run Claude CLI with `--dangerously-skip-permissions` inside disposable, isolated
 │    ├─ docker run ──► sandbox-1  ← ephemeral               │
 │    │                  ├ tmux                              │
 │    │                  ├ claude --dangerously-...          │
-│    │                  ├ /work ──► project dirs            │
+│    │                  ├ project dirs (mirrored host paths)            │
 │    │                  └ /claude-state                     │
 │    │                                                      │
 │    ├─ docker run ──► sandbox-2                            │
@@ -371,7 +371,7 @@ Asks for confirmation if Claude is still running.
 
 `yoloai exec <name> <command>` runs a command inside the sandbox container without attaching to tmux. Useful for debugging (`yoloai exec my-sandbox bash`) or quick operations (`yoloai exec my-sandbox npm install foo`).
 
-Implemented as `docker exec yoloai-<name> <command>`, with `-i` added when stdin is a pipe/TTY and `-t` added when stdin is a TTY. This allows both interactive use (`yoloai exec my-sandbox bash`) and non-interactive use (`yoloai exec my-sandbox ls /work`, `echo "test" | yoloai exec my-sandbox cat`).
+Implemented as `docker exec yoloai-<name> <command>`, with `-i` added when stdin is a pipe/TTY and `-t` added when stdin is a TTY. This allows both interactive use (`yoloai exec my-sandbox bash`) and non-interactive use (`yoloai exec my-sandbox ls`, `echo "test" | yoloai exec my-sandbox cat`).
 
 ### `yoloai list`
 
@@ -399,6 +399,8 @@ Options:
 `yoloai build --all` rebuilds everything: base image first, then all profile images.
 
 Useful after modifying a profile's Dockerfile or when the base image needs updating (e.g., new Claude CLI version).
+
+Profile Dockerfiles that install private dependencies (e.g., `RUN go mod download` from a private repo, `RUN npm install` from a private registry) need build-time credentials. yoloai passes host credentials to Docker BuildKit via `--secret` so they're available during the build but never stored in image layers. Example: `RUN --mount=type=secret,id=npmrc,target=/root/.npmrc npm install` in the Dockerfile, with yoloai automatically providing `~/.npmrc` as the secret source. Supported secret sources are documented in `yoloai build --help`.
 
 ### `yoloai stop`
 
@@ -457,6 +459,8 @@ API keys are injected via **file-based credential injection** following OWASP an
 
 The user sets `ANTHROPIC_API_KEY` in their host shell profile. yoloai reads it from the host environment at sandbox creation time.
 
+**Future directions:** Credential proxy (the MITM approach used by Docker Sandboxes) could provide stronger isolation by keeping the API key entirely outside the container. If CLI agents add `ANTHROPIC_API_KEY_FILE` support, the env var export step can be eliminated. macOS Keychain integration (cco's approach) could serve as an alternative credential source. These are deferred to future versions.
+
 ## Prerequisites
 
 - Docker installed and running (clear error message if Docker daemon is not available)
@@ -480,12 +484,12 @@ The user sets `ANTHROPIC_API_KEY` in their host shell profile. yoloai reads it f
 - **`:copy` directories** protect your originals. Changes only land when you explicitly `yoloai apply`.
 - **`:rw` directories** give Claude direct read/write access. Use only when you've committed your work or don't mind destructive changes. The tool warns if it detects uncommitted git changes.
 - **API key exposure:** The `ANTHROPIC_API_KEY` is injected via file-based credential injection (bind-mounted at `/run/secrets/`, read by entrypoint, host file cleaned up immediately). This hides the key from `docker inspect`, `docker commit`, and `docker logs`. The key is still present in the agent process's environment (unavoidable — CLI agents expect env vars). Use scoped API keys with spending limits where possible. See RESEARCH.md "Credential Management for Docker Containers" for the full analysis of approaches and tradeoffs.
-- **SSH keys:** If you mount `~/.ssh` into the container (even read-only), Claude can read private keys. Prefer SSH agent forwarding via config (`SSH_AUTH_SOCK` passthrough) over mounting key files directly.
+- **SSH keys:** If you mount `~/.ssh` into the container (even read-only), Claude can read private keys. Prefer SSH agent forwarding: add `- ${SSH_AUTH_SOCK}:${SSH_AUTH_SOCK}:ro` to `mounts` and `- SSH_AUTH_SOCK=${SSH_AUTH_SOCK}` to `env` in config. This passes the socket without exposing key material.
 - **Network access** is unrestricted by default (required for Claude API calls). Claude can download binaries, connect to external services, or exfiltrate code. Use `--network-isolated` to allow only Anthropic API traffic, `--network-allow <domain>` for finer control, or `--network-none` for full isolation.
 - **Network isolation implementation:** `--network-isolated` uses a layered approach based on verified production implementations (Anthropic's sandbox-runtime, Docker Sandboxes, and Anthropic's own devcontainer firewall):
   1. **Network topology:** The sandbox container runs on a Docker `--internal` network with no route to the internet. A separate proxy sidecar container bridges the internal and external networks — it is the only exit.
   2. **Proxy allowlist:** The proxy sidecar (a lightweight forward proxy) allowlists Anthropic API domains by default. HTTPS traffic uses `CONNECT` tunneling (no MITM — the proxy sees the domain from the `CONNECT` request). `--network-allow <domain>` adds domains to the allowlist.
-  3. **iptables defense-in-depth:** Inside the sandbox container, iptables rules restrict outbound traffic to only the proxy's IP and port. This prevents bypass via any path other than the proxy. Requires `CAP_NET_ADMIN` (included in `CAP_SYS_ADMIN` which is already granted for overlayfs; for `copy_strategy: full`, `CAP_NET_ADMIN` alone is added when `--network-isolated` is used).
+  3. **iptables defense-in-depth:** Inside the sandbox container, iptables rules restrict outbound traffic to only the proxy's IP and port. This prevents bypass via any path other than the proxy. Requires `CAP_NET_ADMIN` (included in `CAP_SYS_ADMIN` which is already granted for overlayfs; for `copy_strategy: full`, `CAP_NET_ADMIN` alone is added when `--network-isolated` is used). The entrypoint configures iptables rules while running as root, then drops privileges via `gosu` — Claude never has `CAP_NET_ADMIN`.
   4. **DNS control:** The sandbox container uses the proxy sidecar as its DNS resolver. Direct outbound DNS (UDP 53) is blocked by iptables. This mitigates the DNS exfiltration vector demonstrated by CVE-2025-55284.
   Known limitations: DNS exfiltration is mitigated but not fully eliminated — the proxy's DNS resolver must forward queries upstream, and data can be encoded in subdomain queries. Domain fronting remains theoretically possible on CDNs that haven't disabled it. These limitations are shared by all production implementations including Docker Sandboxes and Anthropic's own devcontainer. See RESEARCH.md "Network Isolation Research" for detailed analysis of bypass vectors.
 - **Runs as non-root** inside the container (user `yoloai` matching host UID/GID). This is required because Claude CLI refuses `--dangerously-skip-permissions` as root.

@@ -379,7 +379,7 @@ bwrap --overlay-src /original --overlay /upper /work /merged -- /bin/bash
 | **APFS clone** | Slow for dirs (~2min/77k files) | Deltas only | None built-in | Manual | Yes (native) | No (but macOS only) |
 | **FUSE overlay + git** | Instant | Deltas only | git diff | git patch | Partial (CLI only) | No |
 
-### Recommendation
+### Design Approach
 
 **OverlayFS for the mount, git for the diff** — combining both techniques gives the best result:
 
@@ -424,7 +424,7 @@ On macOS, bind-mounted host directories cross the VM boundary via VirtioFS. With
 - **Older Docker/kernels:** Falls back to full copy + git.
 - **Config override:** `copy_strategy: overlay | full | auto` for users who want explicit control. `auto` (default) uses overlay where available, falls back to full copy.
 
-OverlayFS is the recommended default strategy for v1 (`copy_strategy: auto`). Full copy serves as the portable fallback. See DESIGN.md for the full specification including entrypoint idempotency, `CAP_SYS_ADMIN` requirements, and cross-platform behavior.
+OverlayFS is the default strategy for v1 (`copy_strategy: auto`). Full copy serves as the portable fallback. See DESIGN.md for the full specification including entrypoint idempotency, `CAP_SYS_ADMIN` requirements, and cross-platform behavior.
 
 ZFS and Btrfs are too host-dependent to serve as primary mechanisms (require the host filesystem to be ZFS/Btrfs). APFS clones are not instant for directories. FUSE-based overlays on macOS have reliability concerns (Finder issues, FUSE-T maturity). Docker volumes eliminate VirtioFS overhead but don't save setup time.
 
@@ -861,7 +861,7 @@ docker build --secret id=mytoken,src=./token.txt .
 
 BuildKit secrets are for *build time*, not *run time*. They are relevant when building profile base images that need to pull from private registries or install licensed tools. They are NOT relevant for passing `ANTHROPIC_API_KEY` to running containers.
 
-For yoloai's profile system (`~/.yoloai/profiles/<name>/Dockerfile`), BuildKit secrets should be documented as the way to handle private dependencies during `docker build`. This protects credentials from leaking into built images.
+yoloai's profile system (`~/.yoloai/profiles/<name>/Dockerfile`) supports BuildKit secrets for handling private dependencies during `docker build`, protecting credentials from leaking into built images (see DESIGN.md `yoloai build` section).
 
 **Cross-platform:** Works everywhere BuildKit works (Docker 18.09+, enabled by default in Docker Desktop and recent Docker Engine).
 
@@ -886,7 +886,7 @@ Recommends regular secret rotation so stolen credentials have limited lifetime. 
 
 The Cloud Native Computing Foundation recommends that "secrets should be injected at runtime within the workloads through non-persistent mechanisms that are immune to leaks via logs, audit, or system dumps (i.e., in-memory shared volumes instead of environment variables)."
 
-### Summary and Recommendation for yoloai
+### Summary and Design Approach
 
 **Approach comparison:**
 
@@ -899,7 +899,7 @@ The Cloud Native Computing Foundation recommends that "secrets should be injecte
 | Credential proxy | Hidden | N/A (never in container) | N/A | No | Very High | Partial |
 | Docker Swarm secrets | Hidden | Hidden | Hidden | No (tmpfs) | N/A (requires Swarm) | All |
 
-**Recommended approach for yoloai v1:**
+**Approach adopted for yoloai v1:**
 
 **File-based injection via bind mount to tmpfs**, combining sections 3 and 5:
 
@@ -924,7 +924,7 @@ The Cloud Native Computing Foundation recommends that "secrets should be injecte
 - Credential proxy (Docker Sandbox approach) could be added as an advanced option in a later version.
 - If agents add support for reading API keys from files (e.g., `ANTHROPIC_API_KEY_FILE`), we can skip the env var export entirely and get even stronger isolation.
 - macOS Keychain integration (cco's approach) could be added as a credential source option.
-- BuildKit secrets should be documented for profile Dockerfile builds that need private dependencies.
+- BuildKit secrets are supported for profile Dockerfile builds that need private dependencies (see DESIGN.md `yoloai build` section).
 
 ---
 
@@ -1143,9 +1143,9 @@ However, iptables has its own limitations:
 | **Google Agent Sandbox** | Kubernetes controller with gVisor isolation | Yes — GKE production, open source |
 | **SequentialRead firewall** | Docker Compose internal network + nginx proxy per domain | Yes — documented with examples |
 
-### 6. Practical Recommendation for yoloai
+### 6. Design Approach for yoloai
 
-#### Recommended approach: internal network + proxy container + iptables fallback
+#### Adopted approach: internal network + proxy container + iptables fallback
 
 **Architecture:**
 
@@ -1210,14 +1210,12 @@ However, iptables has its own limitations:
 
 5. **Proxy as SPOF:** If the proxy container crashes, the sandbox loses all network access. This is actually a security feature (fail-closed).
 
-#### Comparison with DESIGN.md's current proposal
+#### Changes applied to DESIGN.md
 
-The current design says: "A lightweight HTTP/SOCKS proxy inside the container is the only exit — it whitelists Anthropic API domains by default."
-
-**Recommended changes:**
+The original design proposed a proxy inside the sandbox container. Based on this research, DESIGN.md was updated to:
 - Move the proxy **outside** the sandbox container (into a sidecar). A proxy inside the sandbox can be killed or reconfigured by Claude. A separate container on a separate network is tamper-resistant.
 - Use Docker `--internal` network topology as the primary enforcement mechanism, not just proxy environment variables.
-- Add iptables rules inside the sandbox as defense-in-depth.
+- Add iptables rules inside the sandbox as defense-in-depth (configured by entrypoint before privilege drop).
 - Control DNS resolution to mitigate exfiltration.
 - Document the DNS exfiltration limitation explicitly.
 
