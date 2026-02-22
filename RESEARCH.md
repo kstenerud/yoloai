@@ -258,6 +258,152 @@ The following tools were identified but not analyzed in depth. Included for comp
 
 ---
 
+## Alternative Filesystem Isolation Approaches
+
+The current design uses full directory copies (`:copy` mode) with git-based diffing. Several copy-on-write (COW) filesystem technologies could replace or complement this approach, trading portability for speed and space efficiency.
+
+### OverlayFS
+
+The most directly applicable alternative. Layers a writable "upper" directory over a read-only "lower" directory; changes (including deletions via whiteout character devices) go to upper only.
+
+```
+mount -t overlay overlay \
+  -o lowerdir=/original,upperdir=/changes,workdir=/tmp/ovl \
+  /merged
+```
+
+**How it maps to yolo-claude's workflow:**
+- **Setup:** Instant mount instead of full copy — zero startup time regardless of project size.
+- **Diff:** The upper directory *is* the diff. [overlayfs-tools](https://github.com/kmxz/overlayfs-tools) provides `diff` and `merge` commands for extracting/applying changes. Whiteout files represent deletions natively.
+- **Apply:** Copy upper directory contents back to original, interpreting whiteouts as deletions.
+- **Space:** Only modified/created files consume disk.
+
+**Requirements inside Docker:**
+- `CAP_SYS_ADMIN` capability (not full `--privileged`).
+- Kernel 5.11+ for unprivileged overlayfs in user namespaces; `-o userxattr` mount option uses `user.overlay.*` instead of `trusted.overlay.*`.
+- Nested overlayfs-on-overlayfs (Docker uses overlay2 internally) works on kernel 5.11+ but is unreliable on older kernels. Fallback: `fuse-overlayfs` (userspace implementation, available via package managers).
+
+**Limitations:**
+- **Linux only.** No macOS equivalent (macOS `mount -t union` is broken since Sierra and effectively abandoned by Apple).
+- File timestamps may not be preserved during copy-up. Metacopy feature (kernel `CONFIG_OVERLAY_FS_METACOPY`) optimizes metadata-only changes but has security caveats with untrusted directories.
+- 128 lower layer limit (practical limit ~122 due to mount option size); irrelevant for our use case (single lower layer).
+- CVE-2023-2640 and CVE-2023-32629: privilege escalation via overlayfs xattrs — mitigated in patched kernels.
+
+### ZFS Snapshots and Clones
+
+`zfs snapshot` + `zfs clone` creates instant COW copies sharing all blocks with the parent. Zero initial space consumption.
+
+**Strengths:**
+- Snapshot creation: milliseconds, regardless of dataset size.
+- `zfs diff` shows changed files (format: `M /path`, `+ /path`, `- /path`, `R /old -> /new`). Note: shows *which* files changed, not content diffs — still need traditional diff tools for content.
+- ARC (Adaptive Replacement Cache) sharing means multiple clones of the same data are very cache-friendly.
+- Docker has a ZFS storage driver that uses ZFS datasets for image layers.
+
+**Critical limitation for our use case:** No merge-back primitive. `zfs promote` reverses the clone/parent relationship (replacement, not merge). Applying changes back requires file-level tools (rsync, patch). This negates much of the benefit — we'd still need git or rsync for the apply step.
+
+**Availability:**
+- Linux: Ubuntu ships ZFS kernel module; Red Hat and SUSE exclude it (CDDL/GPL license conflict). Manual install on Fedora, Debian, Arch.
+- macOS: OpenZFS on OS X exists but is experimental/community-maintained. Apple dropped native ZFS in 2009.
+- Windows: OpenZFS on Windows is beta quality with stability issues.
+- **Verdict:** Too niche for a general-purpose tool. Requires the host filesystem to be ZFS — can't be assumed.
+
+### Btrfs Subvolume Snapshots
+
+Similar COW semantics to ZFS. `btrfs subvolume snapshot` is instant and writable by default.
+
+**Strengths:**
+- GPL-licensed, mainline Linux kernel — no licensing issues.
+- `btrfs send/receive` can extract incremental changes between snapshots (binary instruction stream, not text diffs).
+- Docker has a Btrfs storage driver.
+- Writable snapshots by default (more flexible than ZFS which requires snapshot → clone).
+
+**Limitations:**
+- Same merge-back problem as ZFS — no built-in way to selectively apply changes back.
+- Send/receive produces a binary stream, not standard diffs.
+- RAID5/6 still not production-ready in 2026.
+- Performance degrades with quota groups (qgroups) enabled.
+- Requires host filesystem to be Btrfs — even less common than ZFS in practice.
+
+### APFS Clones (macOS)
+
+macOS APFS supports instant file-level COW clones via `cp -c`. Clones share data blocks until modified.
+
+**Strengths:**
+- Native on all modern macOS. No additional software.
+- Instant regardless of file size.
+- Works at file granularity — could clone individual project files.
+
+**Limitations:**
+- File-level only, no directory-level overlay semantics. Can't layer a writable view over a read-only base.
+- APFS snapshots are volume-level and read-only — can't mount as writable overlays.
+- Doesn't help with diff/apply workflow — you'd still need git or rsync to identify changes.
+- `tmutil` only works on the boot drive.
+
+### FUSE-Based Overlays
+
+**fuse-overlayfs:** Userspace overlayfs implementation. Primary use: rootless containers on Linux. Same logical behavior as kernel overlayfs but runs as a FUSE daemon.
+- 2-3x slower than kernel overlayfs due to userspace context switches.
+- Uses reflinks on XFS/Btrfs for efficient copy-up.
+- Available via package managers. Good fallback when kernel overlayfs isn't available unprivileged.
+
+**unionfs-fuse:** Works on macOS via macFUSE or FUSE-T (kextless, NFS-based, better performance than macFUSE). However, known issues with Finder compatibility (file copy operations fail with error -50). Works for command-line use cases.
+
+**FUSE-T:** Modern macOS FUSE implementation using NFSv4 local server instead of kernel extension. Better performance and stability than macFUSE. No kernel crashes or lock-ups. macOS 26 adds native FSKit backend as an alternative.
+
+### Bubblewrap
+
+Lightweight Linux sandboxing tool (used by Flatpak). Has built-in overlay support:
+
+```
+bwrap --overlay-src /original --overlay /upper /work /merged -- /bin/bash
+```
+
+- Unprivileged via user namespaces. No daemon. No Docker dependency.
+- Requires Linux 4.0+ for overlay support.
+- Production-ready (powers Flatpak sandboxing).
+- Could be used as a lighter-weight alternative to Docker for Linux-only deployments, though outside yolo-claude's current Docker-based architecture.
+
+### Docker's Own Container Diff
+
+`docker diff <container>` tracks all filesystem changes in the container's writable layer. On its own, too noisy for code review — it captures everything (installed packages, temp files, logs), not just project changes. However, combining it with git inside the container solves the noise problem (see Recommendation below).
+
+### Comparison for yolo-claude's `:copy` Workflow
+
+| Approach | Setup time | Space | Diff mechanism | Apply-back | macOS | Needs special host FS |
+|----------|-----------|-------|----------------|------------|-------|----------------------|
+| **Current (full copy + git)** | Slow (proportional to size) | Full duplicate | git diff | git patch | Yes | No |
+| **OverlayFS + git** | Instant | Deltas only | git diff (ignores non-project noise) | git patch | No | No |
+| **ZFS clone** | Instant | Deltas only | `zfs diff` (file list only) | Manual (rsync/patch) | Experimental | Yes (ZFS) |
+| **Btrfs snapshot** | Instant | Deltas only | `btrfs send` (binary stream) | Manual (rsync/patch) | No | Yes (Btrfs) |
+| **APFS clone** | Instant (file-level) | Deltas only | None built-in | Manual | Yes (native) | No (but macOS only) |
+| **FUSE overlay + git** | Instant | Deltas only | git diff | git patch | Partial (CLI only) | No |
+
+### Recommendation
+
+**OverlayFS for the mount, git for the diff** — combining both techniques gives the best result:
+
+1. Mount the original project directory as the overlayfs lower layer (read-only).
+2. Empty upper directory receives all writes — instant setup, no copy, space-efficient.
+3. `git init` + `git add -A` + `git commit` on the merged view to create the baseline.
+4. Claude works on the merged view. Changes go to the upper layer, but git only tracks project files — installed packages in `/usr/lib`, temp files in `/tmp`, and other system-level noise are outside the git tree and invisible to `git diff`.
+5. `yolo diff` uses `git diff` as today — clean, familiar output.
+6. `yolo apply` uses `git diff | git apply` as today — handles additions, modifications, and deletions.
+
+This eliminates the upfront copy (the main performance cost for large projects) while keeping the same git-based diff/apply workflow. No whiteout interpretation needed, no new diff format to parse — git handles everything.
+
+**Requirements:** `CAP_SYS_ADMIN` inside the Docker container (or kernel 5.11+ with user namespaces and `-o userxattr`). Both are available in our architecture since we control the `docker run` invocation.
+
+**Cross-platform story:**
+- **Linux:** OverlayFS + git. Instant setup, deltas-only storage.
+- **macOS:** Falls back to current full copy + git. Docker on macOS runs a Linux VM, so overlayfs *could* work inside the container even on a macOS host — needs validation. If it works, the optimization is transparent and cross-platform.
+- **Older kernels:** Falls back to full copy + git.
+
+This is a **post-v1 optimization** — the current full-copy approach works everywhere and is simpler to implement and debug. The overlayfs optimization is worth adding once the core workflow is stable, primarily to improve startup time and reduce disk usage for large projects.
+
+ZFS and Btrfs are too host-dependent to serve as primary mechanisms (require the host filesystem to be ZFS/Btrfs). APFS clones lack overlay semantics. FUSE-based overlays on macOS have reliability concerns (Finder issues, FUSE-T maturity) but could serve as an intermediate option if kernel overlayfs isn't available.
+
+---
+
 ## Design Implications
 
 ### Must-haves informed by research:
