@@ -1,16 +1,18 @@
-# Critique — Round 3
+# Critique — Round 4
 
-Third design-vs-research audit. Focused on internal consistency, formatting, and design principle violations.
+Fourth design-vs-research audit. Focused on completeness gaps, command consistency, and unspecified behaviors.
 
 ## Applied
 
-- **C22.** CLI usage examples — fixed 4 missing spaces (`yoloai newmy-task` → `yoloai new my-task`).
-- **C23.** Stale "needs dedicated research" — rewritten to focus on the remaining valid concern (`setup`/`cap_add`/`devices` privilege escalation risks) now that credential and network research is complete.
-- **C24.** `mounts` merge behavior — specified as additive (merged with defaults, no deduplication).
-- **C25.** Network isolation config equivalents — added `network_isolated` and `network_allow` to config schema (defaults + profiles). CLI flags override/add to config values.
-- **C26.** Recipe field documentation — added merge behavior (additive), availability (defaults + profiles), and execution order (defaults first, then profile) for `cap_add`, `devices`, `setup`.
-- **C27.** `yoloai destroy` proxy cleanup — added "(and proxy sidecar if `--network-isolated`)" to destroy description.
-- **C28.** `--port` option placement — moved above the allowlist table to keep all `--` options grouped together.
+- **C29.** Resolved Design Decisions numbering — swapped items 8 and 9 to restore sequential order.
+- **C30.** `yoloai init` missing from commands table — added to Commands section.
+- **C31.** Proxy sidecar in `stop`/`start` — added proxy sidecar handling to both commands (`restart` inherits via stop+start).
+- **C32.** `--network-allow` without `--network-isolated` — specified that `--network-allow` implies `--network-isolated` (both CLI and config). Added mutual exclusivity with `--network-none`.
+- **C33.** `yoloai build` proxy image — added proxy image (`yoloai-proxy`) to build section; simplified duplicate description in proxy sidecar lifecycle to cross-reference.
+- **C34.** `log.txt` and `prompt.txt` container access — added explicit bind-mounts at `/yoloai/log.txt` and `/yoloai/prompt.txt` to Container Startup. Updated `/yoloai/` description and tmux/prompt references to use the bind-mounted paths.
+- **C35.** `--network-none` mutual exclusivity — added "Mutually exclusive with `--network-isolated` and `--network-allow`" to `--network-none` description.
+- **C36.** `auto_commit_interval` delivery — specified `YOLOAI_AUTO_COMMIT_INTERVAL` environment variable as the delivery mechanism.
+- **C37.** RESEARCH.md Docker Sandbox version discrepancy — clarified that 4.50+ is sandboxes GA, 4.58+ is network policy features.
 
 ## Deferred
 

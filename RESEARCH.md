@@ -1005,7 +1005,7 @@ Architecture:
 
 #### Docker Sandboxes (Docker Inc.)
 
-Docker's official sandbox product (Docker Desktop 4.58+, Docker Engine 29.1.5+):
+Docker's official sandbox product (sandboxes GA in Docker Desktop 4.50+; network policy features in 4.58+, Docker Engine 29.1.5+):
 - Each sandbox runs in its own **microVM** with its own Docker daemon.
 - A filtering proxy at `host.docker.internal:3128` handles all HTTP/HTTPS traffic.
 - Raw TCP and UDP connections to external services are **blocked** (not just unproxied — actually blocked).

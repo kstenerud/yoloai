@@ -130,7 +130,7 @@ profiles:
 - `defaults.resources` sets baseline limits. Profiles can override individual values.
 - `defaults.env` sets environment variables passed to the container via `docker run -e`. Profile `env` is merged with defaults (profile values win on conflict). Note: `ANTHROPIC_API_KEY` is injected via file-based bind mount, not `env` — see Credential Management.
 - `defaults.network_isolated` enables network isolation for all sandboxes. Profile can override. CLI `--network-isolated` flag overrides config.
-- `defaults.network_allow` lists additional allowed domains. Profile `network_allow` is additive with defaults. CLI `--network-allow` is additive with config.
+- `defaults.network_allow` lists additional allowed domains. Non-empty `network_allow` implies `network_isolated: true`. Profile `network_allow` is additive with defaults. CLI `--network-allow` is additive with config.
 - Profile Docker images are defined by the Dockerfiles in `~/.yoloai/profiles/<name>/`, not in this config. The config only holds runtime settings (mounts, resources, claude_files).
 
 #### Directory Mappings in Profiles
@@ -192,6 +192,7 @@ yoloai start <name>                            Start a stopped sandbox
 yoloai restart <name>                          Restart Claude in an existing sandbox
 yoloai destroy <name>                          Stop and remove a sandbox
 yoloai build [profile|--all]                   Build/rebuild Docker image(s)
+yoloai init                                    First-time setup (dirs, config, base image)
 ```
 
 ### `yoloai new`
@@ -258,8 +259,8 @@ Options:
 - `--prompt <text>`: Initial prompt/task for Claude (see Prompt Mechanism below).
 - `--model <model>`: Claude model to use. If omitted, uses Claude CLI's default.
 - `--network-isolated`: Allow only Anthropic API traffic. Claude can function but cannot access other external services, download arbitrary binaries, or exfiltrate code.
-- `--network-allow <domain>`: Allow traffic to specific additional domains (can be repeated). Combines with `--network-isolated`. Added to the agent's default allowlist (see below).
-- `--network-none`: Run with `--network none` for full network isolation (Claude API calls will also fail — only useful for offline tasks with pre-cached models).
+- `--network-allow <domain>`: Allow traffic to specific additional domains (can be repeated). Implies `--network-isolated`. Added to the agent's default allowlist (see below).
+- `--network-none`: Run with `--network none` for full network isolation (Claude API calls will also fail — only useful for offline tasks with pre-cached models). Mutually exclusive with `--network-isolated` and `--network-allow`.
 - `--port <host:container>`: Expose a container port on the host (can be repeated). Example: `--port 3000:3000` for web dev. Without this, container services are not reachable from the host browser.
 
 **Default network allowlist (v1, Claude Code):**
@@ -299,7 +300,7 @@ The allowlist is agent-specific. v2 multi-agent support will add per-agent defau
    4. Cache the result in `~/.yoloai/cache/overlay-support`, invalidated on kernel or Docker version change.
 
    Note: `git add -A` naturally honors `.gitignore` if one is present, so gitignored files (e.g., `node_modules`) won't clutter `yoloai diff` output regardless of strategy.
-4. If `auto_commit_interval` > 0, start a background auto-commit loop for `:copy` directories inside the container for recovery. Disabled by default.
+4. If `auto_commit_interval` > 0, start a background auto-commit loop for `:copy` directories inside the container for recovery. The interval is passed to the container via the `YOLOAI_AUTO_COMMIT_INTERVAL` environment variable. Disabled by default.
 5. Store original paths, modes, and mapping in `meta.json`.
 6. Start Docker container (see Container Startup below).
 
@@ -324,18 +325,20 @@ Before creating the sandbox:
    - Default (no suffix) directories bind-mounted at their mount point (mirrored host path or custom `=<path>`, read-only)
    - `claude-state/` mounted at `/home/yoloai/.claude` (read-write, per-sandbox)
    - Files listed in `claude_files` (from config) copied into `claude-state/` on first run
+   - `log.txt` from sandbox state bind-mounted at `/yoloai/log.txt` (read-write, for tmux `pipe-pane`)
+   - `prompt.txt` from sandbox state bind-mounted at `/yoloai/prompt.txt` (read-only, if provided)
    - Config mounts from defaults + profile
    - Resource limits from defaults + profile
    - API key injected via file-based bind mount at `/run/secrets/` (see Credential Management)
    - `CAP_SYS_ADMIN` capability (required for overlayfs mounts inside the container; omitted when `copy_strategy: full`). `CAP_NET_ADMIN` added when `--network-isolated` is used (required for iptables rules; independent capability, not included in `CAP_SYS_ADMIN`)
    - Container name: `yoloai-<name>`
    - User: `yoloai` (UID/GID matching host user)
-   - `/yoloai/` internal directory for sandbox context file and overlay working directories (not mounted from host — ephemeral, lives on the container filesystem)
+   - `/yoloai/` internal directory for sandbox context file, overlay working directories, and bind-mounted state files (`log.txt`, `prompt.txt`)
 3. Run `setup` commands from config (if any).
-4. Start tmux session named `main` with logging to `log.txt` (`tmux pipe-pane`).
+4. Start tmux session named `main` with logging to `/yoloai/log.txt` (`tmux pipe-pane`).
 5. Inside tmux: `cd <primary-mount-point> && claude --dangerously-skip-permissions [--model X]`
 6. Wait ~3s for Claude to initialize.
-7. If `prompt.txt` exists, feed it via `tmux load-buffer` + `tmux paste-buffer` + `tmux send-keys Enter Enter`.
+7. If `/yoloai/prompt.txt` exists, feed it via `tmux load-buffer` + `tmux paste-buffer` + `tmux send-keys Enter Enter`.
 
 ### Prompt Mechanism
 
@@ -415,7 +418,9 @@ Options:
 
 `yoloai build <profile>` rebuilds a specific profile's image (which derives from `yoloai-base`).
 
-`yoloai build --all` rebuilds everything: base image first, then all profile images.
+`yoloai build --all` rebuilds everything: base image first, then the proxy image (`yoloai-proxy`), then all profile images.
+
+`yoloai build` and `yoloai build --all` also build the proxy sidecar image (`yoloai-proxy`), a lightweight forward proxy (Go binary or tinyproxy) used by `--network-isolated`.
 
 Useful after modifying a profile's Dockerfile or when the base image needs updating (e.g., new Claude CLI version).
 
@@ -423,12 +428,12 @@ Profile Dockerfiles that install private dependencies (e.g., `RUN go mod downloa
 
 ### `yoloai stop`
 
-`yoloai stop <name>` stops a sandbox container, preserving all state (work directory, claude-state, logs). The container can be restarted later without losing progress.
+`yoloai stop <name>` stops a sandbox container (and proxy sidecar if `--network-isolated`), preserving all state (work directory, claude-state, logs). The container can be restarted later without losing progress.
 
 ### `yoloai start`
 
 `yoloai start <name>` ensures the sandbox is running — idempotent "get it running, however needed":
-- If the container is stopped: starts it. The entrypoint re-establishes overlayfs mounts (mounts don't survive `docker stop` — this is by design; the upper directory persists on the host and the entrypoint re-mounts idempotently).
+- If the container is stopped: starts it (and proxy sidecar if `--network-isolated`). The entrypoint re-establishes overlayfs mounts (mounts don't survive `docker stop` — this is by design; the upper directory persists on the host and the entrypoint re-mounts idempotently).
 - If the container is running but Claude has exited: relaunches Claude in the existing tmux session.
 - If already running: no-op.
 
@@ -510,7 +515,7 @@ The user sets `ANTHROPIC_API_KEY` in their host shell profile. yoloai reads it f
   2. **Proxy allowlist:** The proxy sidecar (a lightweight forward proxy) allowlists Anthropic API domains by default. HTTPS traffic uses `CONNECT` tunneling (no MITM — the proxy sees the domain from the `CONNECT` request). `--network-allow <domain>` adds domains to the allowlist.
   3. **iptables defense-in-depth:** Inside the sandbox container, iptables rules restrict outbound traffic to only the proxy's IP and port. This prevents bypass via any path other than the proxy. Requires `CAP_NET_ADMIN` (a separate capability from `CAP_SYS_ADMIN` — both must be granted when using overlay + `--network-isolated`; for `copy_strategy: full`, only `CAP_NET_ADMIN` is added). The entrypoint configures iptables rules while running as root, then drops privileges via `gosu` — Claude never has `CAP_NET_ADMIN`.
   4. **DNS control:** The sandbox container uses the proxy sidecar as its DNS resolver. Direct outbound DNS (UDP 53) is blocked by iptables. This mitigates the DNS exfiltration vector demonstrated by CVE-2025-55284.
-  **Proxy sidecar lifecycle:** yoloai manages the proxy container automatically. On `yoloai new --network-isolated`, a proxy container (`yoloai-<name>-proxy`) is created on both the internal and external networks, configured with the allowlist from defaults + `--network-allow` domains. The proxy container is stopped/started/destroyed alongside the sandbox container. The proxy image (`yoloai-proxy`) is a lightweight Go binary or pre-configured tinyproxy; it is built during `yoloai build` alongside the base image. The allowlist is stored in `meta.json` for sandbox recreation.
+  **Proxy sidecar lifecycle:** yoloai manages the proxy container automatically. On `yoloai new --network-isolated`, a proxy container (`yoloai-<name>-proxy`) is created on both the internal and external networks, configured with the allowlist from defaults + `--network-allow` domains. The proxy container is stopped/started/destroyed alongside the sandbox container. The proxy image (`yoloai-proxy`) is built by `yoloai build` (see `yoloai build` section). The allowlist is stored in `meta.json` for sandbox recreation.
 
   Known limitations: DNS exfiltration is mitigated but not fully eliminated — the proxy's DNS resolver must forward queries upstream, and data can be encoded in subdomain queries. Domain fronting remains theoretically possible on CDNs that haven't disabled it. These limitations are shared by all production implementations including Docker Sandboxes and Anthropic's own devcontainer. See RESEARCH.md "Network Isolation Research" for detailed analysis of bypass vectors.
 - **Runs as non-root** inside the container (user `yoloai` matching host UID/GID). This is required because Claude CLI refuses `--dangerously-skip-permissions` as root.
@@ -527,8 +532,8 @@ The user sets `ANTHROPIC_API_KEY` in their host shell profile. yoloai reads it f
 5. ~~**Auto-destroy?**~~ No. Sandboxes persist until explicitly destroyed.
 6. ~~**Git integration?**~~ Yes. Copy mode auto-inits git for clean diffs. `yoloai apply` excludes `.git/`.
 7. ~~**Default mode?**~~ All dirs read-only by default. Per-directory `:rw` (live) or `:copy` (staged) suffixes. Primary must have one of these.
-9. ~~**Container work directory?**~~ Directories are mounted at their original host paths (mirrored) by default, so configs, error messages, and symlinks work without translation. Custom paths available via `=<path>` override. `/yoloai/` reserved for internals. The `/work` prefix was considered but rejected — path consistency (matching host paths) outweighs the minor safety benefit, and dangerous directory detection already prevents mounting over system paths.
-8. ~~**Copy strategy?**~~ OverlayFS by default (`copy_strategy: auto`). The original directory is bind-mounted read-only as the overlayfs lower layer; writes go to an upper directory in sandbox state. Git provides diff/apply on the merged view. Falls back to full copy if overlayfs isn't available. Works cross-platform — Docker on macOS/Windows runs a Linux VM, so overlayfs works inside the container regardless of host OS. VirtioFS overhead for macOS host reads is acceptable (70-90% native after page cache warms). Config option `copy_strategy: full` available for users who prefer the traditional full-copy approach or want to avoid `CAP_SYS_ADMIN`.
+8. ~~**Container work directory?**~~ Directories are mounted at their original host paths (mirrored) by default, so configs, error messages, and symlinks work without translation. Custom paths available via `=<path>` override. `/yoloai/` reserved for internals. The `/work` prefix was considered but rejected — path consistency (matching host paths) outweighs the minor safety benefit, and dangerous directory detection already prevents mounting over system paths.
+9. ~~**Copy strategy?**~~ OverlayFS by default (`copy_strategy: auto`). The original directory is bind-mounted read-only as the overlayfs lower layer; writes go to an upper directory in sandbox state. Git provides diff/apply on the merged view. Falls back to full copy if overlayfs isn't available. Works cross-platform — Docker on macOS/Windows runs a Linux VM, so overlayfs works inside the container regardless of host OS. VirtioFS overhead for macOS host reads is acceptable (70-90% native after page cache warms). Config option `copy_strategy: full` available for users who prefer the traditional full-copy approach or want to avoid `CAP_SYS_ADMIN`.
 
 ## Design Considerations
 
