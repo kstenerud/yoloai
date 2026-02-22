@@ -1,4 +1,4 @@
-# yolo-claude
+# yoloai
 
 Sandboxed Claude CLI runner. Runs Claude Code with `--dangerously-skip-permissions` inside disposable Docker containers with copy/diff/apply workflow.
 
@@ -15,12 +15,12 @@ Design and research phase. No code yet.
 ## Architecture (from DESIGN.md)
 
 - Python 3.10+ CLI script, no external deps beyond stdlib + Docker.
-- Docker containers with persistent state in `~/.yolo/sandboxes/<name>/`.
+- Docker containers with persistent state in `~/.yoloai/sandboxes/<name>/`.
 - Containers are ephemeral; state (work dirs, claude-state, logs, meta.json) lives on host.
 - `:copy` directories use overlayfs by default (instant setup, deltas-only) with full-copy fallback. Both use git for diff/apply.
 - `:rw` directories are live bind-mounts. Default (no suffix) is read-only.
-- Profile system: user-supplied Dockerfiles in `~/.yolo/profiles/<name>/`.
-- Config in `~/.yolo/config.yaml` with defaults + named profiles.
+- Profile system: user-supplied Dockerfiles in `~/.yoloai/profiles/<name>/`.
+- Config in `~/.yoloai/config.yaml` with defaults + named profiles.
 
 ## Workflow Conventions
 

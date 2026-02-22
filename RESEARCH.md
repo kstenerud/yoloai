@@ -184,7 +184,7 @@ tmux send-keys -t agent1 'Build the REST API' Enter Enter  # Double Enter needed
 
 **claude-compose-sandbox** ([whisller/claude-compose-sandbox](https://github.com/whisller/claude-compose-sandbox)): Docker Compose based, notable for SSH agent forwarding (credentials via agent, not mounted keys).
 
-**nono** ([always-further/nono](https://github.com/always-further/nono)): Kernel-level isolation via Landlock (Linux) / Seatbelt (macOS). Irreversible restrictions. Basic audit trail with session JSON and merkle roots (signed attestation is "Coming Soon" per issues #130, #127). Created 2026-01-31, self-described "early alpha." Most security-focused option in concept.
+**nono** ([always-further/nono](https://github.com/always-further/nono)): Kernel-level isolation via Landlock (Linux) / Seatbelt (macOS). Irreversible restrictions. Basic audit trail with session JSON and merkle roots (signed attestation is "Coming Soon" per issues #130, #127). Created 2026-01-31, self-described "early alpha." Most security-focused option in concept. Known friction: SSL cert verification blocked under kernel sandbox (issue #93), Seatbelt blocks `network-bind` (issue #131).
 
 ---
 
@@ -245,7 +245,7 @@ The following tools were identified but not analyzed in depth. Included for comp
 
 *Note: This table covers a subset of the landscape. See section 8 for additional tools.*
 
-| Feature | deva.sh | TextCortex | Docker Sandbox | rsh3khar | cco | sandbox-runtime | **yolo-claude** |
+| Feature | deva.sh | TextCortex | Docker Sandbox | rsh3khar | cco | sandbox-runtime | **yoloai** |
 |---------|---------|------------|----------------|----------|-----|-----------------|-----------------|
 | Copy/diff/apply workflow | No | No (git branch + diff review) | No (file sync) | No (auto-commit) | No | No | **Yes** |
 | Per-sandbox Claude state | No | No | No | No | No | No | **Yes** |
@@ -272,7 +272,7 @@ mount -t overlay overlay \
   /merged
 ```
 
-**How it maps to yolo-claude's workflow:**
+**How it maps to yoloai's workflow:**
 - **Setup:** Instant mount instead of full copy — zero startup time regardless of project size.
 - **Diff:** The upper directory *is* the diff. [overlayfs-tools](https://github.com/kmxz/overlayfs-tools) provides `diff` and `merge` commands for extracting/applying changes. Whiteout files represent deletions natively.
 - **Apply:** Copy upper directory contents back to original, interpreting whiteouts as deletions.
@@ -362,13 +362,13 @@ bwrap --overlay-src /original --overlay /upper /work /merged -- /bin/bash
 - Unprivileged via user namespaces. No daemon. No Docker dependency.
 - Requires Linux 4.0+ for overlay support.
 - Production-ready (powers Flatpak sandboxing).
-- Could be used as a lighter-weight alternative to Docker for Linux-only deployments, though outside yolo-claude's current Docker-based architecture.
+- Could be used as a lighter-weight alternative to Docker for Linux-only deployments, though outside yoloai's current Docker-based architecture.
 
 ### Docker's Own Container Diff
 
 `docker diff <container>` tracks all filesystem changes in the container's writable layer. On its own, too noisy for code review — it captures everything (installed packages, temp files, logs), not just project changes. However, combining it with git inside the container solves the noise problem (see Recommendation below).
 
-### Comparison for yolo-claude's `:copy` Workflow
+### Comparison for yoloai's `:copy` Workflow
 
 | Approach | Setup time | Space | Diff mechanism | Apply-back | macOS | Needs special host FS |
 |----------|-----------|-------|----------------|------------|-------|----------------------|
@@ -387,8 +387,8 @@ bwrap --overlay-src /original --overlay /upper /work /merged -- /bin/bash
 2. Empty upper directory receives all writes — instant setup, no copy, space-efficient.
 3. `git init` + `git add -A` + `git commit` on the merged view to create the baseline.
 4. Claude works on the merged view. Changes go to the upper layer, but git only tracks project files — installed packages in `/usr/lib`, temp files in `/tmp`, and other system-level noise are outside the git tree and invisible to `git diff`.
-5. `yolo diff` uses `git diff` as today — clean, familiar output.
-6. `yolo apply` uses `git diff | git apply` as today — handles additions, modifications, and deletions.
+5. `yoloai diff` uses `git diff` as today — clean, familiar output.
+6. `yoloai apply` uses `git diff | git apply` as today — handles additions, modifications, and deletions.
 
 This eliminates the upfront copy (the main performance cost for large projects) while keeping the same git-based diff/apply workflow. No whiteout interpretation needed, no new diff format to parse — git handles everything.
 
@@ -399,7 +399,7 @@ Docker on macOS (and Windows) runs a Linux VM — containers see a Linux kernel 
 
 On macOS, bind-mounted host directories cross the VM boundary via VirtioFS. With overlayfs, the host directory becomes the read-only lower layer and unmodified file reads go through VirtioFS. Initial concern was that this would be significantly slower than a full copy (where all reads are VM-local). However, research shows this concern is **partially overstated**:
 
-- Modern VirtioFS (Docker Desktop 4.6+) achieves **70-90% of native read performance**, up from ~20% with the old osxfs/gRPC-FUSE. Real-world benchmarks: MySQL import 90% faster, PHP composer install 87% faster, TypeScript app boot 80% faster vs the old implementation.
+- Modern VirtioFS (Docker Desktop 4.6+) achieves **70-90% of native read performance**. The remaining gap concentrates in stat-heavy operations (~3x slowdown for find/ls-lR/mtime checks); content reads of cached files are near-native. For historical context, VirtioFS was a major improvement over the old osxfs/gRPC-FUSE (MySQL import 90% faster, PHP composer install 87% faster, TypeScript app boot 80% faster vs gRPC-FUSE).
 - The VM's page cache serves repeated reads — after first access of a file, subsequent reads don't cross the VM boundary. The "every read hits VirtioFS" concern only applies to cold/first access of each file.
 - The remaining ~3x slowdown vs native is concentrated in **stat-heavy operations** (find, ls -lR, build tools checking mtimes of thousands of files). Content reads of cached files are near-native.
 - Docker Desktop 4.31-4.33+ added further VirtioFS caching optimizations (extended directory cache timeouts, reduced FUSE operations).
@@ -424,32 +424,8 @@ On macOS, bind-mounted host directories cross the VM boundary via VirtioFS. With
 - **Older Docker/kernels:** Falls back to full copy + git.
 - **Config override:** `copy_strategy: overlay | full | auto` for users who want explicit control. `auto` (default) uses overlay where available, falls back to full copy.
 
-This is a **post-v1 optimization** — the current full-copy approach works everywhere and is simpler to implement and debug. The overlayfs optimization is worth adding once the core workflow is stable, primarily to improve startup time and reduce disk usage for large projects.
+OverlayFS is the recommended default strategy for v1 (`copy_strategy: auto`). Full copy serves as the portable fallback. See DESIGN.md for the full specification including entrypoint idempotency, `CAP_SYS_ADMIN` requirements, and cross-platform behavior.
 
 ZFS and Btrfs are too host-dependent to serve as primary mechanisms (require the host filesystem to be ZFS/Btrfs). APFS clones are not instant for directories. FUSE-based overlays on macOS have reliability concerns (Finder issues, FUSE-T maturity). Docker volumes eliminate VirtioFS overhead but don't save setup time.
 
 ---
-
-## Design Implications
-
-### Must-haves informed by research:
-1. **Inject a sandbox context file** telling Claude about its environment (stolen from rsh3khar)
-2. **Double Enter for tmux send-keys** — Claude Code requires it
-3. **Sleep delay** between launching Claude and sending the prompt
-4. **Non-root execution** — create a user inside the container to avoid the root rejection
-5. **CLAUDE.md must carry over** — top complaint about Docker Sandboxes
-6. **Read-only mounts for dependency dirs** by default (stolen from deva.sh)
-7. **License the project on day one** (learned from TextCortex)
-8. **Cross-platform testing** in CI from the start
-
-### Should-haves:
-9. **Periodic git commits inside sandbox copy** (like rsh3khar's 60s auto-commit) for recovery
-10. **SSH agent forwarding** option instead of mounting keys (stolen from claude-compose-sandbox)
-11. **Dangerous directory detection** — warn if mounting `$HOME` or system dirs (stolen from deva.sh)
-12. **Network policy option** — at minimum, support `--network none` for paranoid mode
-
-### Nice-to-haves (post-v1):
-13. **Credential proxy** instead of passing env vars directly
-14. **Notification on Claude exit** (webhook, file flag)
-15. **Port forwarding** for web dev workflows
-16. **Multi-agent support** (multiple Claude instances in one sandbox)
