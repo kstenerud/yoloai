@@ -284,7 +284,7 @@ mount -t overlay overlay \
 - Nested overlayfs-on-overlayfs (Docker uses overlay2 internally) works on kernel 5.11+ but is unreliable on older kernels. Fallback: `fuse-overlayfs` (userspace implementation, available via package managers).
 
 **Limitations:**
-- **Requires a Linux kernel** — no native macOS equivalent (macOS `mount -t union` is broken since Sierra and effectively abandoned by Apple). However, Docker on macOS runs a Linux VM (`virtualization.framework`), so overlayfs works inside Docker containers on macOS — the container sees a Linux kernel regardless of the host OS. The caveat is that bind-mounted host directories cross the VM boundary (via VirtioFS or gRPC-FUSE), and overlayfs-on-top-of-VirtioFS may have xattr or inode compatibility issues that need validation.
+- **Requires a Linux kernel** — no native macOS equivalent (macOS `mount -t union` is broken since Sierra and effectively abandoned by Apple). However, Docker on macOS runs a Linux VM (`virtualization.framework`), so overlayfs works inside Docker containers on macOS — the container sees a Linux kernel regardless of the host OS. Bind-mounted host directories cross the VM boundary via VirtioFS; see Recommendation section for performance analysis.
 - File timestamps may not be preserved during copy-up. Metacopy feature (kernel `CONFIG_OVERLAY_FS_METACOPY`) optimizes metadata-only changes but has security caveats with untrusted directories.
 - 128 lower layer limit (practical limit ~122 due to mount option size); irrelevant for our use case (single lower layer).
 - CVE-2023-2640 and CVE-2023-32629: privilege escalation via overlayfs xattrs — mitigated in patched kernels.
@@ -326,18 +326,19 @@ Similar COW semantics to ZFS. `btrfs subvolume snapshot` is instant and writable
 
 ### APFS Clones (macOS)
 
-macOS APFS supports instant file-level COW clones via `cp -c`. Clones share data blocks until modified.
+macOS APFS supports COW file clones via `cp -c`. Clones share data blocks until modified.
 
 **Strengths:**
 - Native on all modern macOS. No additional software.
-- Instant regardless of file size.
-- Works at file granularity — could clone individual project files.
+- Instant for individual files regardless of size.
 
 **Limitations:**
+- **Not instant for directories.** Recursive cloning requires per-file metadata operations. Benchmark: 77k files (2GB) took ~2 minutes. Typical projects (1k-10k files) would still take seconds to tens of seconds — faster than a full copy but not "instant."
 - File-level only, no directory-level overlay semantics. Can't layer a writable view over a read-only base.
 - APFS snapshots are volume-level and read-only — can't mount as writable overlays.
 - Doesn't help with diff/apply workflow — you'd still need git or rsync to identify changes.
 - `tmutil` only works on the boot drive.
+- Even after cloning, the clone would still be shared into Docker via VirtioFS — doesn't avoid VM boundary overhead.
 
 ### FUSE-Based Overlays
 
@@ -375,7 +376,7 @@ bwrap --overlay-src /original --overlay /upper /work /merged -- /bin/bash
 | **OverlayFS + git** | Instant | Deltas only | git diff (ignores non-project noise) | git patch | Yes (inside Docker's Linux VM) | No |
 | **ZFS clone** | Instant | Deltas only | `zfs diff` (file list only) | Manual (rsync/patch) | Experimental | Yes (ZFS) |
 | **Btrfs snapshot** | Instant | Deltas only | `btrfs send` (binary stream) | Manual (rsync/patch) | No | Yes (Btrfs) |
-| **APFS clone** | Instant (file-level) | Deltas only | None built-in | Manual | Yes (native) | No (but macOS only) |
+| **APFS clone** | Slow for dirs (~2min/77k files) | Deltas only | None built-in | Manual | Yes (native) | No (but macOS only) |
 | **FUSE overlay + git** | Instant | Deltas only | git diff | git patch | Partial (CLI only) | No |
 
 ### Recommendation
@@ -394,25 +395,38 @@ This eliminates the upfront copy (the main performance cost for large projects) 
 **Requirements:** `CAP_SYS_ADMIN` inside the Docker container (or kernel 5.11+ with user namespaces and `-o userxattr`). Both are available in our architecture since we control the `docker run` invocation.
 
 **Cross-platform story:**
-Docker on macOS (and Windows) runs a Linux VM — containers see a Linux kernel regardless of host OS. This means overlayfs technically works inside Docker containers on all platforms. However, there's a meaningful performance tradeoff on non-Linux hosts:
+Docker on macOS (and Windows) runs a Linux VM — containers see a Linux kernel regardless of host OS. OverlayFS works inside Docker containers on all platforms.
 
-Bind-mounted host directories cross the VM boundary via VirtioFS (or gRPC-FUSE on older Docker Desktop). With overlayfs, the host directory becomes the read-only lower layer. Every read of an unmodified file goes through VirtioFS on every access — there's no local copy. With a full copy, all reads are local to the VM's filesystem.
+On macOS, bind-mounted host directories cross the VM boundary via VirtioFS. With overlayfs, the host directory becomes the read-only lower layer and unmodified file reads go through VirtioFS. Initial concern was that this would be significantly slower than a full copy (where all reads are VM-local). However, research shows this concern is **partially overstated**:
 
-| | Setup | Reads (unmodified files) | Writes | Disk |
-|---|---|---|---|---|
-| **Full copy** | Slow (proportional to project size) | Fast (local to VM) | Fast (local) | Full duplicate |
-| **Overlay (Linux host)** | Instant | Fast (local filesystem) | Fast (upper layer) | Deltas only |
-| **Overlay (macOS host)** | Instant | Slower (VirtioFS per access) | Fast (upper layer is local) | Deltas only |
+- Modern VirtioFS (Docker Desktop 4.6+) achieves **70-90% of native read performance**, up from ~20% with the old osxfs/gRPC-FUSE. Real-world benchmarks: MySQL import 90% faster, PHP composer install 87% faster, TypeScript app boot 80% faster vs the old implementation.
+- The VM's page cache serves repeated reads — after first access of a file, subsequent reads don't cross the VM boundary. The "every read hits VirtioFS" concern only applies to cold/first access of each file.
+- The remaining ~3x slowdown vs native is concentrated in **stat-heavy operations** (find, ls -lR, build tools checking mtimes of thousands of files). Content reads of cached files are near-native.
+- Docker Desktop 4.31-4.33+ added further VirtioFS caching optimizations (extended directory cache timeouts, reduced FUSE operations).
 
-For read-heavy workloads (builds, IDE indexing, grep across codebase), the full copy may actually outperform overlay on macOS because all reads are local after the initial copy. For write-heavy or quick-turnaround workflows on large projects, overlay wins because there's no setup delay.
+| | Setup | Cold reads | Warm reads (cached) | Writes | Disk |
+|---|---|---|---|---|---|
+| **Full copy** | Slow (proportional to size) | Fast (VM-local) | Fast | Fast | Full duplicate |
+| **Overlay (Linux host)** | Instant | Fast (local FS) | Fast | Fast (upper) | Deltas only |
+| **Overlay (macOS host)** | Instant | ~3x slower (VirtioFS) | Near-native (page cache) | Fast (upper) | Deltas only |
+
+**Alternative strategies investigated for macOS:**
+
+- **APFS clonefile (`cp -c`):** Instant for individual files but **not for directories** — 77k files took ~2 minutes due to per-file metadata operations. Also doesn't help with reads since the clone would still be shared via VirtioFS. Not viable.
+- **Docker named volumes:** Live inside the VM's ext4 filesystem, so reads are fully local. But populating them (rsync/docker cp) costs the same as a full copy — no setup time advantage.
+- **Docker synchronized file shares (Mutagen-based):** Creates an ext4 cache inside the VM with bidirectional sync. 2-10x faster than bind mounts. Overlayfs on the cache would have native read performance. But requires a **paid Docker subscription** (Pro/Team/Business).
+- **OrbStack:** Third-party Docker Desktop alternative with heavily optimized VirtioFS, achieving 75-95% of native macOS performance. But requires switching products.
+
+**Conclusion:** The overlayfs approach is viable on macOS with acceptable performance for most development workflows. Stat-heavy cold operations (initial build, first `grep` across codebase) will be slower than a full copy, but cached/warm operations are near-native. For most users, instant setup and space efficiency outweigh the cold-read penalty.
 
 - **Linux:** OverlayFS + git. Best case — instant setup, all I/O local.
-- **macOS/Windows:** Tradeoff. Overlay gives instant setup but reads hit VirtioFS. Full copy gives slow setup but fast reads. Could auto-select based on project size: overlay for large projects (where copy time dominates), full copy for small projects (where read performance matters more). Or let the user choose.
+- **macOS/Windows:** OverlayFS + git. Instant setup, warm reads near-native. Cold stat-heavy operations ~3x slower than full copy. Acceptable tradeoff for most workflows.
 - **Older Docker/kernels:** Falls back to full copy + git.
+- **Config override:** `copy_strategy: overlay | full | auto` for users who want explicit control. `auto` (default) uses overlay where available, falls back to full copy.
 
 This is a **post-v1 optimization** — the current full-copy approach works everywhere and is simpler to implement and debug. The overlayfs optimization is worth adding once the core workflow is stable, primarily to improve startup time and reduce disk usage for large projects.
 
-ZFS and Btrfs are too host-dependent to serve as primary mechanisms (require the host filesystem to be ZFS/Btrfs). APFS clones lack overlay semantics. FUSE-based overlays on macOS have reliability concerns (Finder issues, FUSE-T maturity) but could serve as an intermediate option if kernel overlayfs isn't available.
+ZFS and Btrfs are too host-dependent to serve as primary mechanisms (require the host filesystem to be ZFS/Btrfs). APFS clones are not instant for directories. FUSE-based overlays on macOS have reliability concerns (Finder issues, FUSE-T maturity). Docker volumes eliminate VirtioFS overhead but don't save setup time.
 
 ---
 
