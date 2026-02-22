@@ -5,7 +5,7 @@
 ### 1. deva.sh (formerly claude-code-yolo)
 
 **Repo:** [thevibeworks/claude-code-yolo](https://github.com/thevibeworks/claude-code-yolo)
-**Stars:** ~160 | **Language:** Bash | **Status:** Active, rebranded to "deva.sh"
+**Stars:** 7 | **Language:** Bash | **Status:** Active, rebranded to "deva.sh"
 
 **What it does:** Bash script that launches Claude Code (and Codex, Gemini) inside Docker with `--dangerously-skip-permissions`. Supports multi-auth contexts, granular read-only/read-write mount control, and multiple agents.
 
@@ -23,6 +23,8 @@
 - No session logging or output capture
 - No mechanism to review changes before they land
 - Complex auth system (5 methods) may intimidate new users
+
+**Community:** Zero external adoption. No Reddit or HN mentions. Issue tracker has 168 issues but ~98 are bot-generated changelog entries tracking upstream Claude releases (~70 real issues).
 
 **Lessons:** Read-only mounts for dependencies are a good default. UID/GID matching avoids permission headaches. Dangerous directory detection is a nice safety net.
 
@@ -62,7 +64,7 @@
 ### 3. claude-sandbox (rsh3khar)
 
 **Repo:** [rsh3khar/claude-sandbox](https://github.com/rsh3khar/claude-sandbox)
-**Stars:** ~small | **Status:** Active
+**Stars:** 0 | **Status:** Active (created 2026-01-24, ~4 weeks old)
 
 **What it does:** Bash installer + Docker container. Auto-commits to GitHub every 60 seconds. Container destroyed on exit.
 
@@ -125,17 +127,84 @@ tmux send-keys -t agent1 'Build the REST API' Enter Enter  # Double Enter needed
 
 ---
 
-### 5. Other Notable Tools
+### 5. cco
 
-**cco** ([nikvdp/cco](https://github.com/nikvdp/cco)): Zero-config thin wrapper. Got HN front page. Appeals to "just make it work" crowd. Minimal — no profiles, no diff, no multi-dir.
+**Repo:** [nikvdp/cco](https://github.com/nikvdp/cco)
+**Stars:** 167 | **Language:** Bash | **Status:** Active (HN front page, 36 merged PRs)
 
-**Trail of Bits devcontainer** ([trailofbits/claude-code-devcontainer](https://github.com/trailofbits/claude-code-devcontainer)): Security audit focused. Firewall rules restricting outbound to whitelisted domains. Reference implementation for secure setups.
+**What it does:** Multi-backend sandbox wrapper that auto-selects the best isolation mechanism available: macOS `sandbox-exec`, Linux `bubblewrap`, Docker as fallback. Supports Claude Code, Codex, Opencode, Pi, and factory.ai's droid.
+
+**Strengths:**
+- Multi-backend architecture — adapts to host OS automatically
+- macOS Keychain integration for credential extraction
+- BPF-based TIOCSTI sandbox escape mitigation
+- Git worktree auto-detection
+- `--safe` flag for stricter filesystem isolation
+- Zero-config "just make it work" UX
+
+**Weaknesses:**
+- Native sandbox mode exposes entire host filesystem read-only (issue #5) — significant security gap
+- Fresh container per session loses installed packages (issue #34)
+- No copy/diff/apply workflow
+- No session logging or profiles
+
+**Lessons:** Multi-backend approach is appealing but introduces complexity. Native sandbox modes can give a false sense of security if they expose the full filesystem. Keychain integration is a smart credential approach for macOS.
+
+---
+
+### 6. Anthropic sandbox-runtime
+
+**Repo:** [anthropic-experimental/sandbox-runtime](https://github.com/anthropic-experimental/sandbox-runtime)
+**Stars:** 3,117 | **Status:** Active (official Anthropic open-source)
+
+**What it does:** OS-level sandboxing using bubblewrap (Linux) / Seatbelt (macOS). No container needed. Reduces Claude Code permission prompts by 84% internally at Anthropic.
+
+**Strengths:**
+- Largest community adoption (more stars than all other tools combined)
+- Native OS-level isolation — no Docker dependency
+- Integrated into Claude Code's own permission system
+- 84% reduction in permission prompts
+
+**Weaknesses:**
+- Claude can autonomously disable sandbox in auto-allow mode
+- Config fallback silently disables filesystem read restrictions
+- Data exfiltration via IP address when `allowLocalBinding` is true
+- Data exfiltration via DNS resolution
+- Linux proxy bypass (uses env vars that programs can ignore)
+- Domain fronting can bypass network filtering
+- Leaks dotfiles when sigkilled
+
+**Lessons:** OS-level sandboxing is convenient but has inherent bypass routes. The security issues here validate our Docker-based isolation approach where the sandbox boundary is a container, not just process-level restrictions.
+
+---
+
+### 7. Other Notable Tools
+
+**Trail of Bits devcontainer** ([trailofbits/claude-code-devcontainer](https://github.com/trailofbits/claude-code-devcontainer)): Security audit focused. Documents firewall rules for restricting outbound to whitelisted domains (guidance only — not enforced by default; users must manually configure iptables/ipset rules). Reference implementation for secure setups.
 
 **claude-compose-sandbox** ([whisller/claude-compose-sandbox](https://github.com/whisller/claude-compose-sandbox)): Docker Compose based, notable for SSH agent forwarding (credentials via agent, not mounted keys).
 
-**Anthropic sandbox-runtime** ([anthropic-experimental/sandbox-runtime](https://github.com/anthropic-experimental/sandbox-runtime)): Official open-source. Uses bubblewrap (Linux) / Seatbelt (macOS) at OS level. No container needed. Reduces prompts by 84% internally.
+**nono** ([always-further/nono](https://github.com/always-further/nono)): Kernel-level isolation via Landlock (Linux) / Seatbelt (macOS). Irreversible restrictions. Basic audit trail with session JSON and merkle roots (signed attestation is "Coming Soon" per issues #130, #127). Created 2026-01-31, self-described "early alpha." Most security-focused option in concept.
 
-**nono** ([always-further/nono](https://github.com/always-further/nono)): Kernel-level isolation via Landlock (Linux) / Seatbelt (macOS). Irreversible restrictions. Cryptographic audit chains. Most security-focused option.
+---
+
+### 8. Additional Landscape
+
+The following tools were identified but not analyzed in depth. Included for completeness — the sandboxing landscape has 30+ tools; the sections above cover the most instructive ones.
+
+| Tool | Stars | Approach | Notes |
+|------|-------|----------|-------|
+| boxlite-ai/boxlite | 1,189 | Micro-VM engine | Each sandbox runs its own kernel. No daemon. Embeddable. |
+| coder/agentapi | 1,214 | HTTP API wrapper | Multi-agent control interface over sandboxed agents. |
+| cloudflare/sandbox-sdk | 905 | Cloud edge sandbox | Cloudflare Workers integration. Major vendor backing. |
+| RchGrav/claudebox | 896 | Docker profiles | Pre-configured dev profiles per language stack. Closest to our profile concept. |
+| rivet-dev/sandbox-agent | 896 | HTTP/SSE API | Universal API for controlling Claude/Codex/Amp inside sandboxes. Rust binary. |
+| tomascupr/sandstorm | 375 | Cloud sandbox | One-call deployment. API + CLI + Slack. |
+| disler/agent-sandbox-skill | 318 | Claude Code skill | Manages sandboxes from *within* Claude Code. Novel approach. |
+| sadjow/claude-code-nix | 216 | Nix | Nix-based isolation of the Node runtime. |
+| PACHAKUTlQ/ClaudeCage | 134 | Bubblewrap | Single portable executable, drop-in `claude` replacement. No Docker needed. |
+
+**Approach categories not fully explored:** macOS `sandbox-exec` tools (5+ projects), Nix-based isolation, micro-VM alternatives (boxlite, Fly.io Sprites, E2B), commercial platforms (E2B, Daytona, Fly.io Sprites, Northflank, Vercel Sandbox), HTTP API wrappers (agentapi, sandbox-agent).
 
 ---
 
@@ -163,20 +232,29 @@ tmux send-keys -t agent1 'Build the REST API' Enter Enter  # Double Enter needed
 - Claude deleting a user's entire Mac home directory (viral Reddit post)
 - 13% of AI agent skills on ClawHub contain critical security flaws (Snyk study)
 - GTG-1002 threat actor weaponized Claude Code for cyber espionage (Anthropic disclosure)
-- 17+ users accidentally exposed credentials via CLAUDE.md → GitHub auto-creation bug
+- Credential exposure via CLAUDE.md and related vectors: Claude creating issues in the public anthropics/claude-code repo exposing schemas and configs (issue #13797), ignoring CLAUDE.md security guidelines (issue #2142), malicious repo settings redirecting API keys via `ANTHROPIC_BASE_URL` (CVE-2026-21852)
+- CVE-2025-55284: API key theft via DNS exfiltration from Claude Code
+- CVE-2026-24052: SSRF in Claude Code's WebFetch trusted domain verification
+- Zero-click DXT flaw: Exposed 10,000+ users to RCE via Claude Desktop Extensions
+- Issue #27430: Claude autonomously published fabricated technical claims to 8+ platforms over 72 hours
+- Claude Pirate research (Embrace The Red): Demonstrated abuse of Anthropic's File API for data exfiltration
 
 ---
 
-## What Makes Our Design Unique
+## Feature Comparison
 
-| Feature | deva.sh | claude-code-sandbox | Docker Sandbox | rsh3khar | **yolo-claude** |
-|---------|---------|-------------------|----------------|----------|-----------------|
-| Copy/diff/apply workflow | No | No (git branch) | No (file sync) | No | **Yes** |
-| Per-sandbox Claude state | No | No | No | No | **Yes** |
-| Session logging | No | Web terminal | No | No | **Yes** |
-| User-supplied Dockerfiles | No | Custom Dockerfile | Templates | No | **Yes** |
-| Multi-directory with primary/dep | Partial | No | No | Worktrees | **Yes** |
-| Review before applying changes | No | Diff review (git) | No | No | **Yes (core feature)** |
+*Note: This table covers a subset of the landscape. See section 8 for additional tools.*
+
+| Feature | deva.sh | TextCortex | Docker Sandbox | rsh3khar | cco | sandbox-runtime | **yolo-claude** |
+|---------|---------|------------|----------------|----------|-----|-----------------|-----------------|
+| Copy/diff/apply workflow | No | No (git branch + diff review) | No (file sync) | No (auto-commit) | No | No | **Yes** |
+| Per-sandbox Claude state | No | No | No | No | No | No | **Yes** |
+| Session logging | No | Web terminal | No | No | No | No | **Yes** |
+| User-supplied Dockerfiles | No | Custom Dockerfile | Templates | No | No | N/A (no container) | **Yes** |
+| Multi-directory with primary/dep | Partial | No | No | Worktrees | No | N/A | **Yes** |
+| Review before applying changes | No | Diff review (git) | No | No | No | No | **Yes (core feature)** |
+| Multi-backend isolation | No | No | MicroVM | No | Yes (sandbox-exec/bwrap/Docker) | Yes (bwrap/Seatbelt) | No (Docker only) |
+| No Docker dependency | No | No | Docker Desktop | No | Yes (native modes) | Yes | No |
 
 ---
 
