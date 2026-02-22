@@ -429,3 +429,155 @@ OverlayFS is the recommended default strategy for v1 (`copy_strategy: auto`). Fu
 ZFS and Btrfs are too host-dependent to serve as primary mechanisms (require the host filesystem to be ZFS/Btrfs). APFS clones are not instant for directories. FUSE-based overlays on macOS have reliability concerns (Finder issues, FUSE-T maturity). Docker volumes eliminate VirtioFS overhead but don't save setup time.
 
 ---
+
+## AI Coding CLI Agents: Multi-Agent Support Research
+
+This section documents the headless/Docker characteristics of major AI coding CLI agents, to inform yoloai's multi-agent abstraction design.
+
+### Viable Agents
+
+#### Claude Code
+
+- **Install:** `npm i -g @anthropic-ai/claude-code`
+- **Headless command:** `claude --dangerously-skip-permissions -p "task"`
+- **API key env vars:** `ANTHROPIC_API_KEY`
+- **State dir:** `~/.claude/`
+- **Model selection:** `--model <model>`
+- **Sandbox bypass:** `--dangerously-skip-permissions`
+- **Runtime:** Node.js
+- **Root restriction:** Refuses to run as root
+- **Docker quirks:** Requires tmux with double-Enter workaround to submit prompts; needs non-root user
+
+#### OpenAI Codex
+
+- **Install:** Static binary download or `npm i -g @openai/codex`
+- **Headless command:** `codex exec --yolo "task"`
+- **API key env vars:** `CODEX_API_KEY` (preferred), `OPENAI_API_KEY` (fallback)
+- **State dir:** `~/.codex/`
+- **Model selection:** `--model <model>` or `-m <model>` (e.g., `gpt-5-codex`, `gpt-5-codex-mini`)
+- **Sandbox bypass:** `--yolo` (alias `--dangerously-bypass-approvals-and-sandbox`)
+- **Runtime:** Rust (statically-linked musl binary, zero runtime deps)
+- **Root restriction:** None found, but convention is non-root
+- **Docker quirks:** `codex exec` avoids TUI entirely — no tmux needed; `--skip-git-repo-check` useful outside repos; Landlock sandbox may fail in containers (use `--yolo`)
+- **Sources:** [CLI reference](https://developers.openai.com/codex/cli/reference/), [Security docs](https://developers.openai.com/codex/security/)
+
+#### Aider
+
+- **Install:** `pip install aider-chat` (Python 3.9–3.12) or official Docker images (`paulgauthier/aider`)
+- **Headless command:** `aider --message "task" --yes-always --no-pretty`
+- **API key env vars:** `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `DEEPSEEK_API_KEY`, `GEMINI_API_KEY`, + many more via LiteLLM
+- **State dir:** Dotfiles in project dir (`.aider.conf.yml`, `.aider.chat.history.md`, `.aider.tags.cache.*`, etc.)
+- **Model selection:** `--model <model>` with LiteLLM identifiers; shortcut flags: `--opus`, `--sonnet`, `--4o`, `--deepseek`
+- **Sandbox bypass:** `--yes-always` (but does NOT auto-approve shell commands — known issue #3903)
+- **Runtime:** Python 3.9–3.12 (does not support 3.13+)
+- **Root restriction:** None (official Docker image runs as UID 1000 `appuser`)
+- **Docker quirks:** Official image sets `HOME=/app` so state files persist on mounted volume; no global git config — must set `user.name`/`user.email` in repo local config; auto-commits by default (disable with `--no-auto-commits`)
+- **Sources:** [Scripting docs](https://aider.chat/docs/scripting.html), [Docker docs](https://aider.chat/docs/install/docker.html)
+
+#### Goose (Block)
+
+- **Install:** Install script (`curl ... | CONFIGURE=false bash`) or `brew install block-goose-cli`
+- **Headless command:** `goose run -t "task"` (or `-i file.md`, or `--recipe recipe.yaml`)
+- **API key env vars:** `GOOSE_PROVIDER` + provider-specific keys (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_API_KEY`, etc. — 25+ providers)
+- **State dir:** `~/.config/goose/` (Linux); `~/Library/Application Support/Block/goose/` (macOS); overridable via `GOOSE_PATH_ROOT`
+- **Model selection:** `--provider <provider> --model <model>` or env vars `GOOSE_PROVIDER`/`GOOSE_MODEL`
+- **Sandbox bypass:** `GOOSE_MODE=auto` env var
+- **Runtime:** Rust binary (precompiled); Node.js needed for MCP extensions
+- **Root restriction:** None (official Docker example runs as root)
+- **Docker quirks:** Keyring does not work in Docker — must set `GOOSE_DISABLE_KEYRING=1`; recommended headless env vars: `GOOSE_MODE=auto`, `GOOSE_CONTEXT_STRATEGY=summarize`, `GOOSE_MAX_TURNS=50`, `GOOSE_DISABLE_SESSION_NAMING=true`
+- **Sources:** [Environment variables](https://block.github.io/goose/docs/guides/environment-variables/), [Headless tutorial](https://block.github.io/goose/docs/tutorials/headless-goose/)
+
+#### Cline CLI
+
+- **Install:** `npm i -g cline`
+- **Headless command:** `cline -y "task"`
+- **API key env vars:** `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or other provider keys
+- **State dir:** `~/.cline/` (overridable via `CLINE_DATA_HOME`)
+- **Model selection:** `-m <model>` flag
+- **Sandbox bypass:** `-y` flag (full autonomy)
+- **Runtime:** Node.js 20+
+- **Root restriction:** None found
+- **Docker quirks:** Node.js only, no Docker image needed
+- **Security warning:** Cline CLI 2.3.0 suffered a supply chain attack (Feb 2026) — stolen npm token injected malicious code affecting ~4,000 downloads. Pin versions carefully.
+- **Sources:** [CLI reference](https://docs.cline.bot/cline-cli/cli-reference), [Supply chain attack report](https://thehackernews.com/2026/02/cline-cli-230-supply-chain-attack.html)
+
+#### Continue CLI
+
+- **Install:** `npm i -g @continuedev/cli`
+- **Headless command:** `cn -p "task"`
+- **API key env vars:** `CONTINUE_API_KEY` + provider-specific keys
+- **State dir:** `~/.continue/`
+- **Model selection:** `--config <path-or-name>` for config-based model selection
+- **Sandbox bypass:** `--allow "Write()" --ask "Bash(curl*)"` granular permissions
+- **Runtime:** Node.js 20+
+- **Root restriction:** None found
+- **Docker quirks:** Designed for CI/CD; auto-detects non-TTY and runs headless
+- **Sources:** [CLI docs](https://docs.continue.dev/guides/cli), [CLI quickstart](https://docs.continue.dev/cli/quickstart)
+
+#### Amp (Sourcegraph)
+
+- **Install:** `npm i -g @sourcegraph/amp` or install script
+- **Headless command:** `amp -x "task"` (auto-enabled when stdout is redirected)
+- **API key env vars:** `AMP_API_KEY` (requires Sourcegraph account)
+- **State dir:** `~/.config/amp/`
+- **Model selection:** None — Amp auto-selects models
+- **Sandbox bypass:** `--dangerously-allow-all`
+- **Runtime:** Node.js
+- **Root restriction:** None found
+- **Docker quirks:** Headless mode uses paid credits only; requires network access to Sourcegraph API
+- **Sources:** [Amp manual](https://ampcode.com/manual), [Amp -x docs](https://ampcode.com/news/amp-x)
+
+#### OpenHands
+
+- **Install:** Install script or `uv tool install openhands --python 3.12`
+- **Headless command:** `openhands --headless -t "task"` (or `-f file.md`)
+- **API key env vars:** `LLM_API_KEY`, `LLM_MODEL` (requires `--override-with-envs` flag)
+- **State dir:** `~/.openhands/`
+- **Model selection:** `LLM_MODEL` env var (LiteLLM format: `openai/gpt-4o`, `anthropic/claude-sonnet-4-20250514`)
+- **Sandbox bypass:** Implicit in headless mode
+- **Runtime:** Python 3.12+ (CLI); Docker (server mode)
+- **Root restriction:** Permission issues if `~/.openhands` is root-owned
+- **Docker quirks:** CLI mode needs no Docker; server mode requires Docker + has `host.docker.internal` resolution issues in DinD; sandbox startup ~15 seconds; 4GB RAM minimum
+- **Sources:** [CLI installation](https://docs.openhands.dev/openhands/usage/cli/installation), [Troubleshooting](https://docs.openhands.dev/openhands/usage/troubleshooting/troubleshooting)
+
+#### SWE-agent
+
+- **Install:** `pip install -e .` from source + Docker for sandboxing
+- **Headless command:** `sweagent run --agent.model.name=<model> --problem_statement.text="task"`
+- **API key env vars:** `keys.cfg` file with `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, etc.
+- **State dir:** `trajectories/` output directory
+- **Model selection:** `--agent.model.name=<provider/model>` (LiteLLM format)
+- **Sandbox bypass:** N/A (always headless, always sandboxed via Docker)
+- **Runtime:** Python 3.10+ and Docker (required)
+- **Root restriction:** N/A
+- **Docker quirks:** Docker required for sandboxed execution; Docker-in-Docker fails (SWE-ReX hardcodes localhost); image builds can be brittle per-repo
+- **Sources:** [SWE-agent GitHub](https://github.com/SWE-agent/SWE-agent), [Models and keys](https://swe-agent.com/latest/installation/keys/)
+
+### Not Viable
+
+| Agent | Reason |
+|-------|--------|
+| **Mentat** | Transitional (old Python CLI archived Jan 2025, new npm CLI at 0.1.0). No documented headless mode. |
+| **GPT-Engineer** | Abandoned; team pivoted to Lovable (commercial SaaS). |
+| **GPT-Pilot** | No headless mode (interactive by design). Docker setup broken (missing docker-compose.yml). |
+
+### Cross-Agent Patterns
+
+**What varies:**
+1. Binary name and install method — no two agents are alike
+2. Headless flag — `-p`, `exec --yolo`, `--message`, `run -t`, `-y`, `-p`, `-x`, `--headless -t`
+3. API key env vars — each agent has its own naming convention
+4. State/config directory — all different locations
+5. Model selection — `--model`, `-m`, `--provider`+`--model`, auto-select, config-based
+6. Sandbox bypass — `--dangerously-skip-permissions`, `--yolo`, `--yes-always`, `GOOSE_MODE=auto`, `-y`, `--dangerously-allow-all`
+7. Runtime — Rust (static binary), Python (various versions), Node.js
+
+**What's consistent:**
+1. All accept a text prompt (positional arg, flag, or stdin)
+2. All use environment variables for API keys
+3. All have some concept of "auto-approve everything" for autonomous mode
+4. All produce file changes in the working directory
+5. None require a GUI
+6. All work with git repos (some require it, some recommend it)
+
+---

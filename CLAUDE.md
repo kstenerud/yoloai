@@ -1,6 +1,6 @@
 # yoloai
 
-Sandboxed Claude CLI runner. Runs Claude Code with `--dangerously-skip-permissions` inside disposable Docker containers with copy/diff/apply workflow.
+Sandboxed AI coding agent runner. Runs AI CLI agents (Claude, Codex, Aider, Goose, etc.) inside disposable Docker containers with copy/diff/apply workflow.
 
 ## Project Status
 
@@ -9,8 +9,10 @@ Design and research phase. No code yet.
 ## Key Files
 
 - `DESIGN.md` — Architecture, commands, config format, workflows, security considerations, resolved decisions.
-- `RESEARCH.md` — Competitive landscape (8 tools analyzed in depth, 9 more cataloged), community pain points, security incidents, alternative filesystem isolation approaches, feature comparison table.
+- `RESEARCH.md` — Competitive landscape (8 tools analyzed in depth, 9 more cataloged), community pain points, security incidents, alternative filesystem isolation approaches, feature comparison table, multi-agent CLI research.
 - `CRITIQUE.md` — Rolling critique document. After a critique pass, findings are applied to DESIGN.md and RESEARCH.md, then CRITIQUE.md is emptied for the next round.
+- `CLI-STANDARD.md` — CLI design conventions: argument ordering (options first), flag naming, exit codes, error messages, help text format.
+- `CODING-STANDARD.md` — Code style: Python 3.10+, ruff, pytest, project structure, naming, error handling, dependency policy.
 
 ## Architecture (from DESIGN.md)
 
