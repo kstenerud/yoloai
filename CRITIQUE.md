@@ -19,4 +19,8 @@ Design-vs-research audit. Checked every claim in DESIGN.md against RESEARCH.md f
 
 ## Deferred
 
-- **C8.** Path consistency — design mounts at `/work/<dirname>/` which contradicts the Docker Sandbox research lesson ("Path consistency matters — mount at same paths to avoid confusion"). Trade-offs need discussion before resolving. **NEEDS DISCUSSION.**
+(none)
+
+## Previously Deferred, Now Applied
+
+- **C8.** Path consistency — switched from `/work/<dirname>/` to mirrored host paths as the default mount behavior. Configs, error messages, and symlinks work without translation. Custom paths still available via `=<path>` override. The `/work` prefix was considered but rejected — path consistency outweighs the minor safety benefit, and dangerous directory detection already prevents mounting over system paths.

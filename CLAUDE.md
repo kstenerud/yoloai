@@ -19,6 +19,7 @@ Design and research phase. No code yet.
 - Go binary, no runtime deps — just the binary and Docker.
 - Docker containers with persistent state in `~/.yoloai/sandboxes/<name>/`.
 - Containers are ephemeral; state (work dirs, claude-state, logs, meta.json) lives on host. Credentials injected via file-based bind mount (not env vars).
+- Directories mounted at mirrored host paths by default (path consistency). Custom paths via `=<path>` override.
 - `:copy` directories use overlayfs by default (instant setup, deltas-only) with full-copy fallback. Both use git for diff/apply.
 - `:rw` directories are live bind-mounts. Default (no suffix) is read-only.
 - Profile system: user-supplied Dockerfiles in `~/.yoloai/profiles/<name>/`.

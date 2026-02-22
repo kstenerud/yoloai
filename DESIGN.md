@@ -137,7 +137,7 @@ profiles:
         mode: copy
       - path: /home/user/shared-lib
         mode: rw
-        mount: /usr/local/lib/shared    # custom mount point (default: /work/<basename>/)
+        mount: /usr/local/lib/shared    # custom mount point (default: mirrors host path)
       - path: /home/user/common-types
         # default: read-only
 ```
@@ -188,7 +188,7 @@ yoloai build [profile|--all]                   Build/rebuild Docker image(s)
 
 ### `yoloai new`
 
-The first directory is the **primary** project — Claude's working directory. All directories are **bind-mounted read-only by default** under `/work/<dirname>/`.
+The first directory is the **primary** project — Claude's working directory. All directories are **bind-mounted read-only by default** at their original absolute host paths (mirrored paths).
 
 Directory argument syntax: `<path>[:<suffixes>][=<mount-point>]`
 
@@ -198,7 +198,7 @@ Suffixes (combinable in any order):
 - `:force` — override dangerous directory detection
 
 Mount point:
-- `=<path>` — mount at a custom container path instead of `/work/<dirname>/`
+- `=<path>` — mount at a custom container path instead of the mirrored host path
 
 The primary directory **must** have `:rw` or `:copy` — error otherwise.
 
@@ -218,29 +218,31 @@ yoloai newmy-task ./my-app ./shared-lib
 
 Name is required. If omitted, an error is shown with a helpful message suggesting a name based on the primary directory basename.
 
-Example layout inside the container:
+Example layout inside the container (assuming cwd is `/home/user/projects`):
 
 ```
-yoloai newmy-task ./my-app:copy ./shared-lib:rw ./common-types
+yoloai new my-task ./my-app:copy ./shared-lib:rw ./common-types
 ```
 
 ```
-/work/
+/home/user/projects/
 ├── my-app/          ← primary (copied, read-write, diff/apply available)
 ├── shared-lib/      ← dependency (bind-mounted, read-write, live)
 └── common-types/    ← dependency (bind-mounted, read-only)
 ```
 
+Paths inside the container mirror the host — configs, error messages, and symlinks work without translation.
+
 With custom mount points:
 
 ```
-yoloai newmy-task ./my-app:copy=/opt/myapp ./shared-lib=/usr/local/lib/shared ./common-types
+yoloai new my-task ./my-app:copy=/opt/myapp ./shared-lib=/usr/local/lib/shared ./common-types
 ```
 
 ```
-/opt/myapp/                  ← primary (copied, Claude's cwd)
-/usr/local/lib/shared/       ← dependency (bind-mounted, read-only)
-/work/common-types/          ← dependency (default location, read-only)
+/opt/myapp/                          ← primary (copied, Claude's cwd)
+/usr/local/lib/shared/               ← dependency (bind-mounted, read-only)
+/home/user/projects/common-types/    ← dependency (mirrored host path, read-only)
 ```
 
 Options:
@@ -255,18 +257,18 @@ Options:
 **Workflow:**
 
 1. Error if primary directory has no `:rw` or `:copy` suffix.
-2. Error if any two directories resolve to the same absolute container path (default `/work/<dirname>/` or custom `=<path>`).
+2. Error if any two directories resolve to the same absolute container path (mirrored host path or custom `=<path>`).
 3. For each `:copy` directory, set up an isolated writable view using one of two strategies (selected by `copy_strategy` config, default `auto`):
 
    **Overlay strategy** (default when available):
-   - Host side: bind-mount the original directory read-only into the container. Provide an empty upper directory from `~/.yoloai/sandboxes/<name>/work/<dirname>/`.
-   - Container side (entrypoint): mount overlayfs merging lower (original, read-only) + upper at the container mount point (`/work/<dirname>/`). Claude sees the full project; writes go to upper only. Original directory is inherently protected (read-only lower layer). The entrypoint must be idempotent — use `mkdir -p` for directories and check `mountpoint -q` before mounting, so it handles both fresh starts and restarts cleanly.
+   - Host side: bind-mount the original directory read-only into the container at its original absolute path. Provide an empty upper directory from `~/.yoloai/sandboxes/<name>/work/<dirname>/`.
+   - Container side (entrypoint): mount overlayfs merging lower (original, read-only) + upper at the mirrored host path. Claude sees the full project; writes go to upper only. Original directory is inherently protected (read-only lower layer). The entrypoint must be idempotent — use `mkdir -p` for directories and check `mountpoint -q` before mounting, so it handles both fresh starts and restarts cleanly.
    - After overlay mount: `git init` + `git add -A` + `git commit -m "initial"` on the merged view to create a baseline. If the directory is already a git repo, record the current HEAD SHA in `meta.json` and use it as the baseline instead.
    - Requires `CAP_SYS_ADMIN` capability on the container (not full `--privileged`).
 
    **Full copy strategy** (fallback):
    - If the directory is a git repo, record the current HEAD SHA in `meta.json`.
-   - Copy to `~/.yoloai/sandboxes/<name>/work/<dirname>/`. Everything is copied regardless of `.gitignore` — the `disk` resource limit (container-level) is the storage guardrail for both copy strategies.
+   - Copy to `~/.yoloai/sandboxes/<name>/work/<dirname>/`, then mount at the mirrored host path inside the container. Everything is copied regardless of `.gitignore`.
    - If the copy already has a `.git/` directory (from the original repo), use the recorded SHA as the baseline — `yoloai diff` will diff against it.
    - If the copy has no `.git/`, `git init` + `git add -A` + `git commit -m "initial"` to create a baseline.
 
@@ -298,9 +300,9 @@ Before creating the sandbox:
 
 1. Generate a **sandbox context file** at `/yoloai/context.md` describing the environment for Claude: which directory is primary, which are dependencies, mount paths and access mode of each (read-only / read-write / copy), available tools, and how auto-save works. This file lives outside the work tree in the `/yoloai/` internal directory, so it never pollutes project files, git baselines, or diffs. Claude is pointed to it via `--append-system-prompt` or inclusion in the initial prompt.
 2. Start Docker container (as non-root user `yoloai`) with:
-   - `:copy` directories: overlay strategy mounts originals as overlayfs lower layers with upper dirs from sandbox state; full copy strategy mounts copies from sandbox state. Both at their mount point (custom or `/work/<dirname>`, read-write)
-   - `:rw` directories bind-mounted at their mount point (custom or `/work/<dirname>`, read-write)
-   - Default (no suffix) directories bind-mounted at their mount point (custom or `/work/<dirname>`, read-only)
+   - `:copy` directories: overlay strategy mounts originals as overlayfs lower layers with upper dirs from sandbox state; full copy strategy mounts copies from sandbox state. Both at their mount point (mirrored host path or custom `=<path>`, read-write)
+   - `:rw` directories bind-mounted at their mount point (mirrored host path or custom `=<path>`, read-write)
+   - Default (no suffix) directories bind-mounted at their mount point (mirrored host path or custom `=<path>`, read-only)
    - `claude-state/` mounted at `/home/yoloai/.claude` (read-write, per-sandbox)
    - Files listed in `claude_files` (from config) copied into `claude-state/` on first run
    - Config mounts from defaults + profile
@@ -500,7 +502,7 @@ The user sets `ANTHROPIC_API_KEY` in their host shell profile. yoloai reads it f
 5. ~~**Auto-destroy?**~~ No. Sandboxes persist until explicitly destroyed.
 6. ~~**Git integration?**~~ Yes. Copy mode auto-inits git for clean diffs. `yoloai apply` excludes `.git/`.
 7. ~~**Default mode?**~~ All dirs read-only by default. Per-directory `:rw` (live) or `:copy` (staged) suffixes. Primary must have one of these.
-9. ~~**Container work directory?**~~ `/work/<dirname>/` for project mounts, `/yoloai/` for internals. `/work` is not defined by the FHS, not created by any major Linux distro, not used by any Docker official image or common build tool, and not used by any CI system. The obvious alternatives are worse: `/workspace` collides with Google Cloud Build, Kaniko, and Tekton; `/workspaces` collides with VS Code Dev Containers and GitHub Codespaces.
+9. ~~**Container work directory?**~~ Directories are mounted at their original host paths (mirrored) by default, so configs, error messages, and symlinks work without translation. Custom paths available via `=<path>` override. `/yoloai/` reserved for internals. The `/work` prefix was considered but rejected — path consistency (matching host paths) outweighs the minor safety benefit, and dangerous directory detection already prevents mounting over system paths.
 8. ~~**Copy strategy?**~~ OverlayFS by default (`copy_strategy: auto`). The original directory is bind-mounted read-only as the overlayfs lower layer; writes go to an upper directory in sandbox state. Git provides diff/apply on the merged view. Falls back to full copy if overlayfs isn't available. Works cross-platform — Docker on macOS/Windows runs a Linux VM, so overlayfs works inside the container regardless of host OS. VirtioFS overhead for macOS host reads is acceptable (70-90% native after page cache warms). Config option `copy_strategy: full` available for users who prefer the traditional full-copy approach or want to avoid `CAP_SYS_ADMIN`.
 
 ## Design Considerations
