@@ -12,8 +12,8 @@ Based on POSIX Utility Conventions, GNU Coding Standards, and [clig.dev](https:/
 yoloai <command> [options] <positional-args...>
 ```
 
-Good: `yoloai new --agent claude --profile gpu my-sandbox ./src ./lib`
-Bad:  `yoloai new my-sandbox --agent claude ./src --profile gpu ./lib`
+Good: `yoloai new --profile go-dev --prompt "fix the build" my-sandbox ./src ./lib`
+Bad:  `yoloai new my-sandbox --profile go-dev ./src --prompt "fix the build" ./lib`
 
 Support `--` to terminate option processing (POSIX Guideline 10):
 
@@ -52,6 +52,17 @@ Every command supports:
 | `--no-color` | Disable colored output |
 | `--yes`, `-y` | Skip confirmation prompts (where applicable) |
 
+### Verbosity Mapping
+
+| Flags | Log Level |
+|-------|-----------|
+| (default) | Info |
+| `-v` | Debug |
+| `-q` | Warn |
+| `-qq` | Error only |
+
+`-vv` reserved for future trace-level output if needed.
+
 ## Output
 
 - Normal output goes to **stdout**
@@ -76,7 +87,7 @@ When color is disabled, also disable progress animations and spinners.
 
 - Long-running operations (>1 second) should show progress on stderr
 - Disable animations when not a TTY (use static updates or no progress instead)
-- First visible response within 100ms of invocation
+- Acknowledge receipt within 100ms (e.g., spinner or status line) — not final output. Go starts in <5ms; this is about UX for slow operations like `yoloai new`
 
 ### Pager
 
@@ -88,7 +99,7 @@ For commands that produce long output (e.g., `yoloai log`), pipe through a pager
 |------|---------|
 | 0 | Success |
 | 1 | General error |
-| 2 | Usage error (bad arguments, missing required args) |
+| 2 | Usage error (bad arguments, missing required args) — requires Cobra customization; Cobra returns 1 for all errors by default |
 | 3 | Configuration error (bad config file, missing required config) — project-specific |
 | 128+N | Terminated by signal N (POSIX convention) |
 | 130 | Interrupted by SIGINT / Ctrl+C (128+2) |
@@ -101,7 +112,7 @@ For commands that produce long output (e.g., `yoloai log`), pipe through a pager
 
 ## Error Messages
 
-Format: `yoloai: <message>`
+Format: `yoloai: <message>` (requires `SilenceErrors: true` on Cobra's root command with custom error formatting — Cobra's default is `Error: <message>`)
 
 - Start with lowercase
 - No trailing period
@@ -131,27 +142,32 @@ Bad:  Error: NotFoundError - The specified sandbox could not be located in the s
 
 ## Help Text
 
-Format for each command:
+Align with Cobra's standard output format (used by kubectl, gh, hugo):
 
 ```
-Usage: yoloai <command> [options] <required-arg> [optional-arg]
+Description of what the command does. Can be multiple sentences
+for important details.
 
-Description of what the command does (one sentence).
+Usage:
+  yoloai new [flags] <name> <dir> [<dir>...]
 
-Arguments:
-  <name>         Sandbox name
-  <dir>          Project directory to mount
+Flags:
+      --profile string   Resource profile to use
+      --prompt string    Initial prompt/task for Claude
+      --model string     Claude model to use
+  -h, --help             Help for new
 
-Options:
-  -a, --agent <agent>     Agent preset (default: claude)
-  -p, --profile <name>    Resource profile to use
-  -h, --help              Show this help
+Global Flags:
+  -v, --verbose   Increase output verbosity
+  -q, --quiet     Suppress non-essential output
+      --no-color  Disable colored output
 
 Examples:
   yoloai new my-sandbox ./my-project
-  yoloai new --agent codex --profile gpu my-sandbox ./src ./lib
+  yoloai new --profile go-dev --prompt "fix the build" my-sandbox ./src ./lib
 ```
 
-- Order: Usage line, description, arguments, options, examples
+- Long description first, then `Usage:`, `Flags:`, `Global Flags:`, `Examples:`
+- Positional args described in the usage line and long description — no separate "Arguments:" section
 - `--help` output goes to stdout and exits 0
 - Wrap at 80 columns

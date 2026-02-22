@@ -156,7 +156,7 @@ defaults:
 
 Config values support `${VAR}` environment variable interpolation from the host environment (following Docker Compose conventions). This allows secrets like `${TAILSCALE_AUTHKEY}` to be referenced in config without hardcoding. Unset variables produce an error at sandbox creation time (fail-fast, not silent empty string).
 
-### 3. CLI Script (`yoloai`)
+### 3. CLI (`yoloai`)
 
 Single Go binary. No runtime dependencies — just the binary and Docker.
 
