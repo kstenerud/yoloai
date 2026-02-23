@@ -83,7 +83,7 @@ defaults:
   # Options:
   #   agent_files: home               # copy from agent's default state dir (~/.claude/ for Claude, ~/.codex/ for Codex)
   #   agent_files:                    # explicit file list (deterministic, for team setups)
-  #     - .claude/CLAUDE.md           #   paths relative to $HOME
+  #     - ~/.claude/CLAUDE.md         #   ~ expands to $HOME
   #     - /path/to/shared/settings    #   absolute paths for deterministic setups
   #   (omit agent_files entirely)     # nothing copied — safe default
   # Profile agent_files replaces defaults (no merge).
@@ -112,7 +112,7 @@ defaults:
 `config.yaml` contains only `defaults` — settings applied to every sandbox. Profile-specific configuration lives in separate `profile.yaml` files (see Profiles section).
 
 - `defaults.agent` selects the agent to launch. Valid values: `claude`, `codex`. Determines the launch command, API key env vars, state directory, network allowlist, and prompt delivery mode. CLI `--agent` overrides config.
-- `defaults.agent_files` controls what files are copied into the sandbox's `agent-state/` directory on first run. Set to `home` to copy from the agent's default state directory (`~/.claude/` for Claude, `~/.codex/` for Codex). Set to a list of paths (relative to `$HOME` or absolute) for deterministic setups. Omit entirely to copy nothing (safe default). Profile `agent_files` **replaces** (not merges with) defaults.
+- `defaults.agent_files` controls what files are copied into the sandbox's `agent-state/` directory on first run. Set to `home` to copy from the agent's default state directory (`~/.claude/` for Claude, `~/.codex/` for Codex). Set to a list of paths (`~/` or absolute) for deterministic setups. Relative paths without `~/` are an error. Omit entirely to copy nothing (safe default). Profile `agent_files` **replaces** (not merges with) defaults.
 - `defaults.mounts` are bind mounts added at container run time. Profile mounts are **additive** (merged with defaults, no deduplication — duplicates are a user error).
 - `defaults.resources` sets baseline limits. Profiles can override individual values.
 - `defaults.env` sets environment variables passed to the container via `docker run -e`. Profile `env` is merged with defaults (profile values win on conflict). Note: API keys (e.g., `ANTHROPIC_API_KEY`, `CODEX_API_KEY`) are injected via file-based bind mount, not `env` — see Credential Management.
@@ -162,8 +162,8 @@ directories:
   - path: /home/user/common-types
     # default: read-only
 agent_files:
-  - .claude/CLAUDE.md
-  - /shared/configs/claude-settings.json  # absolute paths for team setups
+  - ~/.claude/CLAUDE.md                    # ~ expands to $HOME
+  - /shared/configs/claude-settings.json   # absolute path for team setups
 mounts:
   - ~/.ssh:/home/yoloai/.ssh:ro
 resources:
