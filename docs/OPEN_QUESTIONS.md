@@ -32,61 +32,61 @@ These were deferred from MVP but might be cheap to add and valuable for dogfoodi
 
 ### Entrypoint / Container Startup
 
-15. **Entrypoint configuration passing** — The entrypoint needs to know: agent command, startup delay, submit sequence, overlay mount info (list of lowerdir/upperdir/mountpoint tuples), iptables rules, setup commands. Some are env vars (HOST_UID, HOST_GID, YOLOAI_AGENT_CMD). How are overlay mount info, iptables rules, and setup commands passed? Env vars? A bind-mounted config file?
+15. ~~**Entrypoint configuration passing**~~ — **Resolved:** Bind-mounted JSON config file at `/yoloai/config.json`. Entrypoint reads all configuration from it — agent command, startup delay, UID/GID, submit sequence, and later overlay mounts, iptables rules, setup commands. Single source of truth from the start; no env vars.
 
-16. **`setup` commands — execution mechanism** — "Run setup commands from config (if any)" — how do they get into the container? Passed as env var? Written to a script and bind-mounted? Run by the entrypoint or by yoloai via docker exec after container start?
+16. ~~**`setup` commands — execution mechanism**~~ — **Resolved:** Post-MVP. Setup commands written to a bind-mounted script, executed by entrypoint before launching agent.
 
-17. **tmux behavior when agent exits** — If the agent completes or crashes, does tmux exit (bringing down the container)? Or stay alive with `remain-on-exit`? Affects: `yoloai list` STATUS detection, `yoloai start` "agent exited but container running" case, and whether log capture continues.
+17. ~~**tmux behavior when agent exits**~~ — **Resolved:** `remain-on-exit on` — container stays up after agent exits. User can still attach and see final output. Container only stops on explicit `yoloai stop`/`destroy`.
 
-18. **Context file content and delivery** — The design says "generate a sandbox context file" but doesn't specify the template/format. For Claude: `--append-system-prompt`. For Codex: "inclusion in the initial prompt." Does the entrypoint prepend context.md to prompt.txt? Or is it a separate mechanism?
+18. ~~**Context file content and delivery**~~ — **Resolved:** Post-MVP. Context file generated on host, bind-mounted read-only. Claude gets it via `--append-system-prompt`, Codex via prompt prepend.
 
 ### Diff / Apply
 
-19. **Untracked files in diff/apply** — If the agent creates new files but doesn't `git add` them, `git diff <baseline>` won't include them. Apply generates a patch via `git diff` — untracked files excluded. Should we `git add -A` before diffing to capture everything?
+19. ~~**Untracked files in diff/apply**~~ — **Resolved:** `git add -A` before diffing to capture untracked files. Runs in the sandbox copy, not the user's original.
 
-20. **Multiple `:copy` directories in diff/apply** — Both workdir and aux dirs can be `:copy`. Does diff show all? With headers? Does apply run all at once or per-directory with separate confirmations? What if one apply succeeds but another fails?
+20. ~~**Multiple `:copy` directories in diff/apply**~~ — **Resolved:** Post-MVP (MVP has single workdir, no aux dirs). Show all with headers per directory. Apply all at once with single confirmation. If one fails, stop and report which failed. User can re-run with `[-- <path>...]` to apply selectively. Future: cherry-picking agent commits as a post-v1 feature.
 
-21. **Overlay apply — patch transfer to host** — Overlay apply runs `git diff` inside the container via docker exec. The patch needs to reach the host for `git apply`. Via docker exec stdout? A temp file in a shared mount?
+21. ~~**Overlay apply — patch transfer to host**~~ — **Resolved:** Capture `git diff` output from `docker exec` stdout, pipe to `git apply` on host. No temp file needed.
 
 ### Agent Files
 
-22. **`agent_files: home` — scope** — Copy the entire `~/.claude/` directory? Just top-level files? Including subdirs and session history? What if the directory doesn't exist (user uses native installer)?
+22. ~~**`agent_files: home` — scope**~~ — **Resolved:** Post-MVP. Copy entire agent state directory excluding session history and caches. If directory doesn't exist, skip silently. Runtime state tracked in `state.json` (alongside `meta.json`).
 
-23. **`agent_files` — "first run" detection** — "Copied into agent-state/ on first run." Keyed on agent-state/ being empty? A marker file? What if the user wants to re-seed?
+23. ~~**`agent_files` — "first run" detection**~~ — **Resolved:** Post-MVP. Initialization detected by presence of `state.json` in agent-state directory. No `state.json` = not initialized. To re-seed, delete `state.json`.
 
 ### Build / Resources
 
-24. **How does the binary find Dockerfile and entrypoint at runtime?** They live in `resources/` during development. The shipped binary is standalone — are these embedded via `go:embed`? Or must they exist on disk?
+24. ~~**How does the binary find Dockerfile and entrypoint at runtime?**~~ — **Resolved:** `go:embed` bundles defaults. On first run, seed `~/.yoloai/Dockerfile.base` and `entrypoint.sh` if they don't exist. Build always reads from `~/.yoloai/`, not embedded copies. User can edit for fast iteration.
 
-25. **Codex binary download URL and versioning** — "Static Rust binary download" — from where? What URL? How is the version pinned? Is this in the Dockerfile?
+25. ~~**Codex binary download URL and versioning**~~ — **Resolved:** Post-MVP (Codex deferred). Pin version in Dockerfile when implemented.
 
-26. **`yoloai build --secret` — which secrets are automatically provided?** The design says yoloai automatically provides `~/.npmrc`. Is this automatic for every build or opt-in? What other secrets are supported?
+26. ~~**`yoloai build --secret` — which secrets are automatically provided?**~~ — **Resolved:** Post-MVP. Auto-provide `~/.npmrc` if it exists. No other automatic secrets. Additional secrets via `--secret` flag.
 
 ### Network Isolation
 
-27. **Docker network naming and lifecycle** — `--internal` network — per-sandbox (`yoloai-<name>-net`)? Shared across sandboxes? Created/destroyed alongside the sandbox?
+27. ~~**Docker network naming and lifecycle**~~ — **Resolved:** Post-MVP. Per-sandbox network: `yoloai-<name>-net`. Created during `yoloai new --network-isolated`, destroyed during `yoloai destroy`.
 
-28. **Proxy allowlist file format** — "Loaded from a config file; reloadable via SIGUSR1" — what format? One domain per line? JSON? Where in the proxy container?
+28. ~~**Proxy allowlist file format**~~ — **Resolved:** Post-MVP. One domain per line, `#` comments. Bind-mounted file in proxy container.
 
-29. **Proxy Go source location** — Where does the ~200-300 line proxy live in the repo? `internal/proxy/`? `cmd/proxy/`? `resources/proxy/`?
+29. ~~**Proxy Go source location**~~ — **Resolved:** Post-MVP. `cmd/proxy/main.go` — separate binary in its own container, belongs in `cmd/`.
 
 ### Lifecycle Edge Cases
 
-30. **`yoloai start` when container was removed** — "Recreate from meta.json." Does this re-run full container creation logic minus the copy step? What about credential injection (temp file was already cleaned up)?
+30. ~~**`yoloai start` when container was removed**~~ — **Resolved:** Re-run full container creation logic from `meta.json`, skip copy step. Credential injection: create new temp file each time (ephemeral by design).
 
-31. **`yoloai list` STATUS "exited" detection** — How to detect "agent exited but container up"? Docker exec + pgrep? Tmux session status check?
+31. ~~**`yoloai list` STATUS "exited" detection**~~ — **Resolved:** `docker exec tmux list-panes -t main -F '#{pane_dead}'`. Combined with Docker container state gives: running, exited, stopped, removed.
 
 ### Miscellaneous
 
-32. **Dangerous directory list** — `$HOME`, `/`, and "system directories." What's the explicit list? Platform-specific (macOS has `/System`, `/Library`)?
+32. ~~**Dangerous directory list**~~ — **Resolved:** `$HOME`, `/`, plus platform-specific: macOS (`/System`, `/Library`, `/Applications`), Linux (`/usr`, `/etc`, `/var`, `/boot`, `/bin`, `/sbin`, `/lib`). Simple string match on absolute path — no subdirectory blocking.
 
-33. **`yoloai diff` for `:rw` — why docker exec?** `:rw` is a bind mount — the host directory IS the container directory. We could just run `git diff` on the host directly. Is docker exec needed?
+33. ~~**`yoloai diff` for `:rw` — why docker exec?**~~ — **Resolved:** `:rw` runs `git diff` directly on host (bind mount = same files). Docker exec only needed for overlay.
 
-34. **No workdir and no profile** — Workdir is optional if profile provides one. What if neither provides a workdir? What error message?
+34. ~~**No workdir and no profile**~~ — **Resolved:** Error: "no workdir specified and no default workdir in profile" (exit 2). Workdir required for MVP.
 
-35. **`auto_commit_interval` implementation** — "Background auto-commit loop inside the container." Shell script? Separate binary? Spawned by entrypoint? What commit message and author?
+35. ~~**`auto_commit_interval` implementation**~~ — **Resolved:** Post-MVP. Shell script loop spawned by entrypoint. `git add -A && git commit` with author `yoloai <yoloai@localhost>`, UTC timestamp message. Skips if no changes. Creates commit history for future cherry-pick feature.
 
-36. **Profile without a Dockerfile** — Can a profile have just `profile.yaml` and no Dockerfile (using base image)? Or is Dockerfile required?
+36. ~~**Profile without a Dockerfile**~~ — **Resolved:** Profile creation always seeds a Dockerfile — if profile doesn't provide one, copy from base. Every profile has an explicit Dockerfile. Binary updates don't silently change behavior on existing profiles.
 
 ## UX Issues (from workflow simulation)
 

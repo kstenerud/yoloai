@@ -125,7 +125,7 @@ The Docker container is disposable — it can crash, be destroyed, be recreated.
 ```
 
 Field notes:
-- **No `status` field.** Container state (`running`/`stopped`/`exited`) is queried live from Docker, not stored.
+- **No `status` field.** Container state (`running`/`stopped`/`exited`) is queried live from Docker, not stored. Runtime state (whether agent files have been initialized) is tracked separately in `state.json` alongside `meta.json` — no `state.json` = not initialized.
 - **`baseline_sha`** — only for `:copy` dirs that were git repos. `null` for non-git dirs (which use the synthetic initial commit).
 - **`network.mode`** — `"none"`, `"isolated"`, or `"default"`. Drives proxy sidecar lifecycle.
 - **`network.allow`** — the fully resolved allowlist (agent defaults + config + CLI), stored so the proxy can be recreated on restart.
@@ -142,6 +142,7 @@ Field notes:
 - **Claude Code:** Node.js 20 LTS + npm installation (`npm i -g @anthropic-ai/claude-code`) — npm required, not native binary (native binary bundles Bun which ignores proxy env vars, segfaults on Debian bookworm AMD64, and auto-updates). npm is deprecated but still published and is the only reliable Docker/proxy path. See RESEARCH.md "Claude Code Installation Research"
 - **Codex:** Static Rust binary download (musl-linked, zero runtime dependencies, ~zero image bloat)
 - **Non-root user** (`yoloai`, UID/GID matching host user via entrypoint). Image builds with a placeholder user (UID 1001). At container start, the entrypoint runs as root: `usermod -u $HOST_UID yoloai && groupmod -g $HOST_GID yoloai` (handling exit code 12 for chown failures on mounted volumes), fixes ownership on container-managed directories, then drops privileges via `gosu yoloai`. Uses `tini` as PID 1 (`--init` or explicit `ENTRYPOINT`). Images are portable across machines since UID/GID are set at run time, not build time. Claude Code refuses `--dangerously-skip-permissions` as root; Codex does not enforce this but convention is non-root
+- **Entrypoint:** Default Dockerfile and entrypoint.sh are embedded in the binary via `go:embed`. On first run, these are seeded to `~/.yoloai/` if they don't exist. `yoloai build` always reads from `~/.yoloai/`, not from embedded copies. Users can edit for fast iteration without rebuilding yoloai itself. The entrypoint reads all configuration from a bind-mounted `/yoloai/config.json` file containing agent_command, startup_delay, submit_sequence, host_uid, host_gid, and later overlay_mounts, iptables_rules, setup_script. No environment variables are used for configuration passing.
 
 **Profile images (`yoloai-<profile>`):** Derived from base, one per profile. Users supply a `Dockerfile` per profile with `FROM yoloai-base`. This avoids the limitations of auto-generating Dockerfiles from package lists and gives full flexibility (PPAs, tarballs, custom install steps).
 
@@ -156,6 +157,8 @@ Field notes:
 ```
 
 `yoloai build` with no arguments rebuilds the base image. `yoloai build <profile>` rebuilds that profile's image. `yoloai build --all` rebuilds everything (base first, then all profiles).
+
+Profile creation always seeds a Dockerfile. If the template doesn't provide one, `yoloai profile create` copies from the base image Dockerfile. Every profile has an explicit Dockerfile, preventing binary updates from silently changing behavior on existing profiles.
 
 ### 2. Config File (`~/.yoloai/config.yaml`)
 
@@ -493,7 +496,7 @@ The allowlist is agent-specific — each agent's definition includes its require
 Before creating the sandbox (all checks run before any state is created on disk):
 - **Duplicate name detection:** Error if a sandbox with the same name already exists.
 - **Missing API key:** Error if the required API key for the selected agent is not set in the host environment.
-- **Dangerous directory detection:** Error if any mount target is `$HOME`, `/`, or a system directory. Override with `:force` suffix (e.g., `$HOME:force`, `$HOME:rw:force`).
+- **Dangerous directory detection:** Error if any mount target is `$HOME`, `/`, macOS system directories (`/System`, `/Library`, `/Applications`), or Linux system directories (`/usr`, `/etc`, `/var`, `/boot`, `/bin`, `/sbin`, `/lib`). Simple string match on absolute path. Override with `:force` suffix (e.g., `$HOME:force`, `$HOME:rw:force`).
 - **Dirty git repo detection:** If any `:rw` or `:copy` directory is a git repo with uncommitted changes, warn with specifics and prompt for confirmation:
   ```
   WARNING: ./my-app has uncommitted changes (3 files modified, 1 untracked)
@@ -504,7 +507,8 @@ Before creating the sandbox (all checks run before any state is created on disk)
 ### Container Startup
 
 1. Generate a **sandbox context file** on the host (in the sandbox state directory) describing the environment for the agent: which directory is the workdir, which are auxiliary, mount paths and access mode of each (read-only / read-write / copy), available tools, and how auto-save works. Bind-mounted read-only into the container at `/yoloai/context.md` (same pattern as `log.txt` and `prompt.txt`). This file lives outside the work tree so it never pollutes project files, git baselines, or diffs. The agent is pointed to it via agent-specific mechanisms (`--append-system-prompt` for Claude, inclusion in the initial prompt for Codex).
-2. Start Docker container (as non-root user `yoloai`) with:
+2. Generate `/yoloai/config.json` on the host (in the sandbox state directory) containing all entrypoint configuration: agent_command, startup_delay, submit_sequence, host_uid, host_gid, and later overlay_mounts, iptables_rules, setup_script. This is bind-mounted into the container and read by the entrypoint.
+3. Start Docker container (as non-root user `yoloai`) with:
    - When `--network-isolated`: `HTTPS_PROXY` and `HTTP_PROXY` env vars pointing to the proxy sidecar (required — Claude Code's npm installation honors these via undici; Codex proxy support is TBD — see RESEARCH.md)
    - `:copy` directories: overlay strategy mounts originals as overlayfs lower layers with upper dirs from sandbox state; full copy strategy mounts copies from sandbox state. Both at their mount point (mirrored host path or custom `=<path>`, read-write)
    - `:rw` directories bind-mounted at their mount point (mirrored host path or custom `=<path>`, read-write)
@@ -513,18 +517,19 @@ Before creating the sandbox (all checks run before any state is created on disk)
    - Files listed in `agent_files` (from config) copied into `agent-state/` on first run
    - `log.txt` from sandbox state bind-mounted at `/yoloai/log.txt` (read-write, for tmux `pipe-pane`)
    - `prompt.txt` from sandbox state bind-mounted at `/yoloai/prompt.txt` (read-only, if provided)
+   - `/yoloai/config.json` bind-mounted read-only
    - Config mounts from defaults + profile
    - Resource limits from defaults + profile
    - API key(s) injected via file-based bind mount at `/run/secrets/` — env var names from agent definition (see Credential Management)
    - `CAP_SYS_ADMIN` capability (required for overlayfs mounts inside the container; omitted when `copy_strategy: full`). `CAP_NET_ADMIN` added when `--network-isolated` is used (required for iptables rules; independent capability, not included in `CAP_SYS_ADMIN`)
    - Container name: `yoloai-<name>`
    - User: `yoloai` (UID/GID matching host user)
-   - `/yoloai/` internal directory for sandbox context file, overlay working directories, and bind-mounted state files (`log.txt`, `prompt.txt`)
-3. Run `setup` commands from config (if any).
-4. Start tmux session named `main` with logging to `/yoloai/log.txt` (`tmux pipe-pane`).
-5. Inside tmux: launch the agent using the command from its agent definition (e.g., `claude --dangerously-skip-permissions [--model X]` or `codex --yolo`)
-6. Wait for the agent to initialize (interactive mode only). Implementation should poll for the agent's ready indicator (e.g., prompt appearance in tmux output) with a timeout, rather than a fixed sleep. The ~3s figure in the agent definitions table is a typical observed startup time, not a hardcoded delay.
-7. Prompt delivery depends on the agent's prompt mode:
+   - `/yoloai/` internal directory for sandbox context file, overlay working directories, and bind-mounted state files (`log.txt`, `prompt.txt`, `config.json`)
+4. Run `setup` commands from config (if any).
+5. Start tmux session named `main` with logging to `/yoloai/log.txt` (`tmux pipe-pane`) and `remain-on-exit on` (container stays up after agent exits, only stops on explicit `yoloai stop` or `yoloai destroy`).
+6. Inside tmux: launch the agent using the command from its agent definition (e.g., `claude --dangerously-skip-permissions [--model X]` or `codex --yolo`)
+7. Wait for the agent to initialize (interactive mode only). Implementation should poll for the agent's ready indicator (e.g., prompt appearance in tmux output) with a timeout, rather than a fixed sleep. The ~3s figure in the agent definitions table is a typical observed startup time, not a hardcoded delay.
+8. Prompt delivery depends on the agent's prompt mode:
    - **Interactive mode** (Claude default, Codex without `--prompt`): If `/yoloai/prompt.txt` exists, feed it via `tmux load-buffer` + `tmux paste-buffer` + `tmux send-keys` with the agent's submit sequence (`Enter Enter` for Claude, `Enter` for Codex).
    - **Headless mode** (Codex with `--prompt`): Prompt passed as CLI argument in the launch command (e.g., `codex exec --yolo "PROMPT"`). No `tmux send-keys` needed.
 
@@ -555,13 +560,13 @@ Detach with standard tmux `Ctrl-b d` — container keeps running.
 
 ### `yoloai status <name>`
 
-Shows sandbox details from `meta.json`: profile, directories with their access modes (read-only / rw / copy), creation time, and whether the agent is still running (checks if the agent process is alive inside the container).
+Shows sandbox details from `meta.json`: profile, directories with their access modes (read-only / rw / copy), creation time, and whether the agent is still running. Agent status is detected via `docker exec tmux list-panes -t main -F '#{pane_dead}'` combined with Docker container state for full status.
 
 ### `yoloai diff`
 
-For `:copy` directories: runs `git diff` + `git status` against the baseline (the recorded HEAD SHA for existing repos, or the synthetic initial commit for non-git dirs). Shows exactly what the agent changed with proper diff formatting. For the full copy strategy, runs on the host (reads `work/` directly). For the overlay strategy, runs inside the container via `docker exec` (the merged view requires the overlay mount). Same as `yoloai apply` — see that section for details.
+For `:copy` directories: runs `git add -A` (to capture untracked files created by the agent) then `git diff` + `git status` against the baseline (the recorded HEAD SHA for existing repos, or the synthetic initial commit for non-git dirs). Shows exactly what the agent changed with proper diff formatting. For the full copy strategy, runs on the host (reads `work/` directly). For the overlay strategy, runs inside the container via `docker exec` (the merged view requires the overlay mount). Same as `yoloai apply` — see that section for details.
 
-For `:rw` directories: requires the container to be running (live bind mount). If the original is a git repo, runs `git diff` inside the container via `docker exec`. Otherwise, notes that diff is not available for live-mounted dirs without git.
+For `:rw` directories: runs `git diff` directly on the host (same files via bind mount). Does not require the container to be running. If the original is not a git repo, notes that diff is not available for live-mounted dirs without git.
 
 Read-only directories are skipped (no changes possible).
 
@@ -641,6 +646,7 @@ Internally, `docker stop` sends SIGTERM and the agent terminates. The agent's st
 ### `yoloai start`
 
 `yoloai start [--resume] <name>` ensures the sandbox is running — idempotent "get it running, however needed":
+- If the container has been removed: re-run full container creation from `meta.json` (skipping the copy step for `:copy` directories — state already exists in `work/`). Create a new credential temp file (ephemeral by design).
 - If the container is stopped: starts it (and proxy sidecar if `--network-isolated`). The entrypoint re-establishes overlayfs mounts (mounts don't survive `docker stop` — this is by design; the upper directory persists on the host and the entrypoint re-mounts idempotently).
 - If the container is running but the agent has exited: relaunches the agent in the existing tmux session.
 - If already running: no-op.
@@ -666,6 +672,8 @@ Docker images (`yoloai-base`, `yoloai-<profile>`) accumulate indefinitely. A cle
 ```
 ~/.yoloai/
 ├── config.yaml                  ← global defaults (no profiles — those live in profiles/)
+├── Dockerfile                   ← seeded from embedded defaults, user-editable
+├── entrypoint.sh                ← seeded from embedded defaults, user-editable
 ├── cache/
 │   └── overlay-support          ← cached overlay detection result
 ├── profiles/
@@ -678,6 +686,7 @@ Docker images (`yoloai-base`, `yoloai-<profile>`) accumulate indefinitely. A cle
 └── sandboxes/
     └── <name>/
         ├── meta.json            ← original paths, mode, profile, timestamps
+        ├── state.json           ← runtime state (agent files initialized, etc.)
         ├── prompt.txt           ← initial prompt (if provided)
         ├── log.txt              ← tmux session log
         ├── agent-state/         ← agent's state directory (per-sandbox, read-write)
@@ -746,7 +755,7 @@ The `--no-start` flag can be used with `yoloai new` to perform setup without sta
   Known limitations: DNS exfiltration is mitigated but not fully eliminated — the proxy's DNS resolver must forward queries upstream, and data can be encoded in subdomain queries. Domain fronting remains theoretically possible on CDNs that haven't disabled it. These limitations are shared by all production implementations including Docker Sandboxes and Anthropic's own devcontainer. See RESEARCH.md "Network Isolation Research" for detailed analysis of bypass vectors.
 - **Runs as non-root** inside the container (user `yoloai` matching host UID/GID). Claude Code requires this (refuses `--dangerously-skip-permissions` as root); Codex runs non-root by convention.
 - **`CAP_SYS_ADMIN` capability** is granted to the container when using the overlay copy strategy (the default). This is required for overlayfs mounts inside the container. It is a broad capability — it also permits other mount operations and namespace manipulation. The container's namespace isolation limits the blast radius, but this is a tradeoff: overlay gives instant setup and space efficiency at the cost of a wider capability grant. Users concerned about this can set `copy_strategy: full` to avoid the capability entirely.
-- **Dangerous directory detection:** The tool refuses to mount `$HOME`, `/`, or system directories unless `:force` is appended, preventing accidental exposure of your entire filesystem.
+- **Dangerous directory detection:** The tool refuses to mount `$HOME`, `/`, macOS system directories (`/System`, `/Library`, `/Applications`), or Linux system directories (`/usr`, `/etc`, `/var`, `/boot`, `/bin`, `/sbin`, `/lib`) unless `:force` is appended, preventing accidental exposure of your entire filesystem.
 - **Privilege escalation via recipes:** The `setup` commands and `cap_add`/`devices` config fields enable significant privilege escalation. These are power-user features for advanced setups (e.g., Tailscale, GPU passthrough) but have no guardrails — a misconfigured recipe could undermine container isolation. Document risks clearly when these features are used.
 
 ## Resolved Design Decisions
