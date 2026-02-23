@@ -933,6 +933,72 @@ The Cloud Native Computing Foundation recommends that "secrets should be injecte
 
 ---
 
+## Environment Variable Interpolation in Config Files
+
+Research into whether config files should support `${VAR}` environment variable interpolation, based on how other tools handle this and user sentiment.
+
+### User Demand When Interpolation Is Absent
+
+Demand is consistently high across the infrastructure tooling ecosystem:
+
+- **Prometheus (#2357):** One of the most controversial decisions in the project. The maintainer's rejection received **149 thumbs-down reactions**. Users cited keeping secrets out of config files, simplifying containerized deployments, and twelve-factor app methodology.
+- **Helm (#10026):** 138 thumbs-up. Open since August 2021, still unresolved. Users describe maintaining separate `values.yaml` per environment as "daunting." Helm maintainers raised a security concern: malicious chart authors could exfiltrate sensitive env vars from users' machines.
+- **Kustomize (#775, #388):** Explicitly rejects env var substitution as an "eschewed feature." Users resort to piping through `envsubst`: `kustomize build . | envsubst | kubectl apply -f -`.
+- **Viper (#418):** Go config library. Closed as wontfix — maintainers prefer `BindEnv`/`AutomaticEnv` at the API level over in-file interpolation.
+- **Nginx:** No native support. Spawned an entire ecosystem of `envsubst` workarounds with its own pitfall: `envsubst` replaces Nginx's built-in `$host`, `$connection` etc. The common hack is exporting `DOLLAR="$"` and using `${DOLLAR}` in templates.
+
+The `envsubst` pipe pattern is so pervasive it has dedicated blog posts, tutorials, and purpose-built kubectl plugins.
+
+### User Pain When Interpolation Is Present
+
+Every tool that implements interpolation acquires a long tail of escaping bugs, silent data corruption, and confused users.
+
+**Docker Compose — the canonical cautionary tale:**
+
+- **Passwords with `$` silently truncate.** A password like `MyP@ssw0rd$Example$123` has `$Example` replaced with empty string. No error — users get a wrong password and debug authentication failures for hours.
+- **The `$$` escape broke in v2.29.0** ([docker/compose#12005](https://github.com/docker/compose/issues/12005)). Working Compose files suddenly needed `$$$$` instead of `$$`. Users: "Wild that this has been open for so long, and now out of nowhere we need four dollar signs."
+- **Regex patterns break.** `^/(sys|proc|dev|host|etc)($|/)` produces `Invalid interpolation format` ([docker/compose#4485](https://github.com/docker/compose/issues/4485)).
+- **4 confusing "env" concepts.** `.env`, `--env-file`, `env_file:`, and `environment:` all use the term "env" but do different things. The first two affect interpolation; the last two affect the container. Users constantly conflate them.
+
+**Other tools:**
+
+- **Vector (#17343):** Performs substitution BEFORE YAML parsing. Passwords starting with `\C` or `>` break YAML parsing entirely. Standard YAML escaping doesn't help because substitution happens before quotes are interpreted.
+- **OpenTelemetry (#3914):** Maintainers found interpolation "diverges so much from YAML it requires a dedicated parser" and "increases exposure to security bugs." The `$$` escape and YAML's own escape sequences interact badly.
+- **Cross-tool `$` problem:** Komodo (#559), ddev (#3355), CircleCI, django-environ (#271) all have dollar-sign escaping issues. Passwords are the #1 victim.
+
+**The primary footgun:** `$` in values silently interpreted as variable references. Users don't get errors — they get wrong values and spend hours debugging.
+
+### Middle-Ground Approaches
+
+| Tool | Approach | Tradeoff |
+|------|----------|----------|
+| **Spring Boot** | Any config key overridable by env var with matching name (uppercased, dots→underscores). No in-file syntax needed. | Cleanest for "override per environment" but requires framework support. |
+| **Viper (Go)** | `BindEnv`/`AutomaticEnv` at API level. Rejected in-file interpolation. | Config files stay static and readable. Override happens in code. |
+| **BOSH** | Uses `(())` syntax instead of `${}`. Variables can come from files, env vars, or a variable store. | Avoids `$` collision entirely. Unfamiliar syntax. |
+| **OTel** | Interpolation restricted to **scalar values only** — mapping keys cannot be substituted. `${ENV:-default}` supported. | Limits blast radius. Still has `$` escaping issues. |
+| **Redpanda Connect** | `${VAR}` everywhere, but fields marked "secret" in schema get automatic scrubbing during config export. `--secrets` flag enables vault lookup at runtime. | Field-level awareness. Secrets outside designated fields aren't scrubbed. |
+| **SOPS** | Encrypt specific values in-place using age/PGP keys. Config structure remains readable; secret values are ciphertext. | Avoids interpolation entirely. Decryption at deploy time. |
+
+### Summary
+
+| Dimension | Finding |
+|-----------|---------|
+| Demand when absent | Very high. Users are vocal and persistent. `envsubst` workaround is universal. |
+| Pain when present | Significant. Silent data corruption from `$` in passwords. Escaping breaks across versions. Confusing semantics. |
+| Primary use case | Secrets (API keys, auth tokens) and per-environment overrides (ports, hostnames). |
+| Primary footgun | `$` in values silently interpreted as variable references — wrong values, no errors. |
+| Pre-parse vs post-parse | Pre-YAML substitution is fragile (Vector, Loki). Post-parse is safer but more complex. |
+| Best middle grounds | Spring Boot / Viper (override at API level, no in-file syntax), BOSH (`(())` avoids `$` collision), OTel (scalar-only restriction). |
+| Security concern | Helm maintainers: interpolation can enable exfiltration of env vars by malicious config authors. |
+
+### Implications for yoloai
+
+yoloai's current design uses `${VAR}` interpolation following Docker Compose conventions. The primary legitimate use case is secrets in `setup` commands (e.g., `${TAILSCALE_AUTHKEY}`). For paths and other structural config, the risk of silent `$` corruption exists but is low in practice — path values rarely contain `$`. The design already requires unset variables to produce errors (fail-fast), which avoids the worst class of Docker Compose bugs (silent empty-string substitution).
+
+Current decision: keep `${VAR}` interpolation as designed. Revisit if users report confusion or silent corruption issues.
+
+---
+
 ## Network Isolation Research
 
 Research into Docker network isolation mechanisms for an AI coding sandbox tool, focusing on verified approaches used in production.
