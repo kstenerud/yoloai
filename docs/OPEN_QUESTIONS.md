@@ -162,6 +162,24 @@ These were deferred from MVP but might be cheap to add and valuable for dogfoodi
 
 75. ~~**Codex follow-up limitation undocumented**~~ — **Deferred.** Codex is post-MVP. Document the session persistence limitation when Codex is implemented.
 
+## UX Issues — Round 3 (from workflow simulation)
+
+76. ~~**`yoloai diff` and `yoloai log` should auto-page when stdout is a TTY**~~ — **Resolved:** `yoloai diff` and `yoloai log` should auto-page through `$PAGER` / `less -R` when stdout is a TTY, matching `git diff`/`git log` behavior. Piping (`yoloai diff my-task | less`) already works since both output raw to stdout; auto-paging is the polished default.
+
+77. **No `yoloai wait` command for scripting/CI** — **Deferred.** No built-in way to block until the agent finishes — must poll `yoloai list --json`. A `yoloai wait <name> [--timeout <duration>]` that blocks until agent exit (returning the agent's exit code) would enable CI workflows. Related to deferred `yoloai run` (#56) — `run` is sugar on top of `wait`. Post-MVP.
+
+78. ~~**Multiple `:copy` sandboxes from same source — sequential apply conflicts**~~ — **Removed.** The "compare two approaches in parallel" scenario is contrived — in practice you'd use `reset` or `--replace` to iterate sequentially. Accidental overlap (forgot a sandbox exists) is already covered by `git apply` error wrapping (#59).
+
+79. ~~**`yoloai apply` auto-starting container for overlay should print a message**~~ — **Resolved:** Print "Starting container for overlay diff..." to stderr when auto-starting a stopped container during `yoloai apply`. Consistent with CLI-STANDARD.md progress-on-stderr convention.
+
+80. ~~**Cannot add `--port` after sandbox creation**~~ — **Resolved:** Docker limitation — port mappings cannot be added to running containers. Document in `--port` help text: "Ports must be specified at creation time. To add ports later, use `yoloai new --replace`." No code change, just documentation.
+
+81. ~~**`:rw` diff shows all uncommitted changes, not just agent changes**~~ — **Resolved:** Inherent to `:rw` mode — `git diff` runs against HEAD on the live directory, so pre-existing uncommitted changes are mixed with agent changes. Document in `yoloai diff` help: "For `:rw` directories, diff shows all uncommitted changes relative to HEAD, not just agent changes. Use `:copy` mode for clean agent-only diffs."
+
+82. ~~**Post-creation output should adapt to whether `--prompt` was given**~~ — **Resolved:** Context-aware next-command suggestions after `yoloai new`: without `--prompt`, suggest `yoloai attach <name>` (agent is waiting for input); with `--prompt`, suggest `yoloai tail <name>` to watch progress.
+
+83. ~~**`yoloai new` output should show resolved configuration**~~ — **Resolved:** Creation output shows a brief summary of resolved settings: agent, profile (or "base"), workdir path + mode, copy strategy, network mode. Confirms what was actually configured when options come from defaults + profile + CLI.
+
 ## Post-MVP (Codex and cleanup)
 
 37. **Codex proxy support** — Whether Codex's static Rust binary honors `HTTP_PROXY`/`HTTPS_PROXY` env vars is unverified (DESIGN.md line 340, RESEARCH.md). Critical for `--network-isolated` mode with Codex. If it ignores proxy env vars, would need iptables-only enforcement.

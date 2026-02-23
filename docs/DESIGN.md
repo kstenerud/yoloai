@@ -436,7 +436,7 @@ Options:
 - `--network-isolated`: Allow only the agent's required API traffic. The agent can function but cannot access other external services, download arbitrary binaries, or exfiltrate code.
 - `--network-allow <domain>`: Allow traffic to specific additional domains (can be repeated). Implies `--network-isolated`. Added to the agent's default allowlist (see below).
 - `--network-none`: Run with `--network none` for full network isolation (agent API calls will also fail). Mutually exclusive with `--network-isolated` and `--network-allow`. **Warning:** Most agents (Claude, Codex) require network access to reach their API endpoints. This flag is only useful for agents with locally-hosted models or for testing container setup without agent execution.
-- `--port <host:container>`: Expose a container port on the host (can be repeated). Example: `--port 3000:3000` for web dev. Without this, container services are not reachable from the host browser.
+- `--port <host:container>`: Expose a container port on the host (can be repeated). Example: `--port 3000:3000` for web dev. Without this, container services are not reachable from the host browser. Ports must be specified at creation time — Docker does not support adding port mappings to running containers. To add ports later, use `yoloai new --replace`.
 - `--replace`: Destroy existing sandbox of the same name before creating. Shorthand for `yoloai destroy <name> && yoloai new <name>`.
 - `--no-start`: Create sandbox without starting the container. Useful for setup-only operations.
 
@@ -555,6 +555,35 @@ Without `--prompt`, you get a normal interactive session waiting for input.
 
 The agent is launched with the prompt as a CLI argument (e.g., `codex exec --yolo "PROMPT"`) inside tmux. Tmux is still used for logging (`pipe-pane`) and `yoloai attach`. The agent runs to completion; no `tmux send-keys` needed. Without `--prompt`, Codex falls back to interactive mode.
 
+### Creation Output
+
+After `yoloai new` completes, print a brief summary of resolved settings followed by context-aware next-command suggestions:
+
+```
+Sandbox fix-bug created
+  Agent:    claude
+  Profile:  go-dev
+  Workdir:  /home/user/projects/my-app (copy)
+  Network:  isolated
+  Strategy: overlay
+
+Run 'yoloai tail fix-bug' to watch progress
+    'yoloai attach fix-bug' to interact
+    'yoloai diff fix-bug' when done
+```
+
+When no `--prompt` was given, the agent is waiting for input — lead with `attach`:
+
+```
+Sandbox explore created
+  Agent:    claude
+  Workdir:  /home/user/projects/my-app (copy)
+
+Run 'yoloai attach explore' to start working
+```
+
+Profile and network lines are omitted when using defaults (base image, unrestricted network). Strategy line is omitted when using `full` copy (only shown for overlay since it implies `CAP_SYS_ADMIN`).
+
 ### `yoloai attach`
 
 Runs `docker exec -it yoloai-<name> tmux attach -t main`.
@@ -584,7 +613,7 @@ Shows sandbox details from `meta.json`: profile, directories with their access m
 
 For `:copy` directories: runs `git add -A` (to capture untracked files created by the agent) then `git diff` + `git status` against the baseline (the recorded HEAD SHA for existing repos, or the synthetic initial commit for non-git dirs). Shows exactly what the agent changed with proper diff formatting. For the full copy strategy, runs on the host (reads `work/` directly). For the overlay strategy, runs inside the container via `docker exec` (the merged view requires the overlay mount). Same as `yoloai apply` — see that section for details.
 
-For `:rw` directories: runs `git diff` directly on the host (same files via bind mount). Does not require the container to be running. If the original is not a git repo, notes that diff is not available for live-mounted dirs without git.
+For `:rw` directories: runs `git diff` directly on the host (same files via bind mount). Does not require the container to be running. If the original is not a git repo, notes that diff is not available for live-mounted dirs without git. Note: for `:rw` directories, diff shows all uncommitted changes relative to HEAD, not just changes made by the agent. Pre-existing uncommitted changes are mixed in. Use `:copy` mode for clean agent-only diffs.
 
 Read-only directories are skipped (no changes possible).
 
@@ -597,7 +626,7 @@ Options:
 
 `yoloai apply <name> [-- <path>...]`
 
-For `:copy` directories only. For the **full copy** strategy, runs entirely on the host — reads from `work/<encoded-path>/`, generates a patch via `git diff`, and applies it to the original host directory. Does not require the container to be running. For the **overlay** strategy, requires the container to be running (the merged view only exists when overlayfs is mounted). If the container is stopped, `apply` auto-starts it and leaves it in whatever state it was before (running if it was running, stopped if it needs to be stopped again). Runs `git diff` inside the container via `docker exec`. This handles additions, modifications, and deletions. Works identically from the user's perspective regardless of `copy_strategy` — git provides the diff in both cases. For dirs that had no original git repo, excludes the synthetic `.git/` directory created by yoloai.
+For `:copy` directories only. For the **full copy** strategy, runs entirely on the host — reads from `work/<encoded-path>/`, generates a patch via `git diff`, and applies it to the original host directory. Does not require the container to be running. For the **overlay** strategy, requires the container to be running (the merged view only exists when overlayfs is mounted). If the container is stopped, `apply` auto-starts it (printing "Starting container for overlay diff..." to stderr) and leaves it in whatever state it was before (running if it was running, stopped if it needs to be stopped again). Runs `git diff` inside the container via `docker exec`. This handles additions, modifications, and deletions. Works identically from the user's perspective regardless of `copy_strategy` — git provides the diff in both cases. For dirs that had no original git repo, excludes the synthetic `.git/` directory created by yoloai.
 
 Without `-- <path>...`, applies all changes. With `-- <path>...`, applies only changes to the specified files or directories (relative to workdir). The `--` separator is required to distinguish paths from sandbox names.
 

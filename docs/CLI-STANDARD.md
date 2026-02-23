@@ -91,7 +91,7 @@ When color is disabled, also disable progress animations and spinners.
 
 ### Pager
 
-For commands that produce long output (e.g., `yoloai log`), pipe through a pager when stdout is a TTY. Respect `PAGER` environment variable; default to `less -R` (or no pager if unavailable).
+For commands that produce long output (`yoloai diff`, `yoloai log`), pipe through a pager when stdout is a TTY. Respect `PAGER` environment variable; default to `less -R` (or no pager if unavailable).
 
 ## Exit Codes
 
