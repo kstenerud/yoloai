@@ -993,9 +993,12 @@ Every tool that implements interpolation acquires a long tail of escaping bugs, 
 
 ### Implications for yoloai
 
-yoloai's current design uses `${VAR}` interpolation following Docker Compose conventions. The primary legitimate use case is secrets in `setup` commands (e.g., `${TAILSCALE_AUTHKEY}`). For paths and other structural config, the risk of silent `$` corruption exists but is low in practice — path values rarely contain `$`. The design already requires unset variables to produce errors (fail-fast), which avoids the worst class of Docker Compose bugs (silent empty-string substitution).
+yoloai's design decisions based on this research:
 
-Current decision: keep `${VAR}` interpolation as designed. Revisit if users report confusion or silent corruption issues.
+1. **Braced-only syntax:** Only `${VAR}` is recognized. Bare `$VAR` is treated as literal text. This eliminates the primary footgun — passwords like `p4ssw0rd$5`, regex patterns like `($|/)`, and other `$`-containing strings are safe. The only collision possible is a literal `${` sequence in a value (e.g., `p4ssw${rd}`), which is extremely rare in practice.
+2. **Post-parse interpolation:** Interpolation runs after YAML parsing, so expanded values cannot break YAML syntax (avoiding the Vector/Loki class of bugs where substituted values containing `:`, `#`, `{` etc. corrupt the parse).
+3. **Fail-fast on unset variables:** Unset variables produce an error at sandbox creation time, avoiding Docker Compose's worst bug (silent empty-string substitution).
+4. **Broad scope:** Interpolation applies to all config values. The braced-only restriction makes this safe enough for v1. Revisit with field-level scoping if users report issues.
 
 ---
 

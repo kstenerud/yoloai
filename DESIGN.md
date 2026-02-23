@@ -136,7 +136,7 @@ defaults:
 
 `cap_add`, `devices`, and `setup` are available in both `defaults` and profiles but not shown in the default config. Profile values are **additive** (merged with defaults). `setup` commands run at container start before the agent launches, in order (defaults first, then profile).
 
-Config values support `${VAR}` environment variable interpolation from the host environment (following Docker Compose conventions). This allows secrets like `${TAILSCALE_AUTHKEY}` to be referenced in config without hardcoding. Unset variables produce an error at sandbox creation time (fail-fast, not silent empty string).
+**Environment variable interpolation:** Config values (in both `config.yaml` and `profile.yaml`) support `${VAR}` interpolation from the host environment. Only the braced syntax `${VAR}` is recognized — bare `$VAR` is **not** interpolated and treated as literal text. This avoids the class of bugs where `$` in passwords, regex patterns, or shell strings is silently misinterpreted (a well-documented pain point with Docker Compose's unbraced `$VAR` support — see RESEARCH.md). Interpolation is applied after YAML parsing, so expanded values cannot break YAML syntax. Unset variables produce an error at sandbox creation time (fail-fast, not silent empty string).
 
 ### 3. Profiles
 
