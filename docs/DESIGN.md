@@ -138,7 +138,7 @@ Field notes:
 ### 1. Docker Images
 
 **Base image (`yoloai-base`):** Based on Debian slim. Minimal foundation with common tools, rebuilt occasionally. Debian slim over Ubuntu (smaller) or Alpine (musl incompatibilities with Node.js/npm).
-- Common tools: tmux, git, build-essential, python3, etc.
+- Common tools: tmux, git, build-essential, python3, jq, etc.
 - **Claude Code:** Node.js 20 LTS + npm installation (`npm i -g @anthropic-ai/claude-code`) — npm required, not native binary (native binary bundles Bun which ignores proxy env vars, segfaults on Debian bookworm AMD64, and auto-updates). npm is deprecated but still published and is the only reliable Docker/proxy path. See RESEARCH.md "Claude Code Installation Research"
 - **Codex:** Static Rust binary download (musl-linked, zero runtime dependencies, ~zero image bloat)
 - **Non-root user** (`yoloai`, UID/GID matching host user via entrypoint). Image builds with a placeholder user (UID 1001). At container start, the entrypoint runs as root: `usermod -u $HOST_UID yoloai && groupmod -g $HOST_GID yoloai` (handling exit code 12 for chown failures on mounted volumes), fixes ownership on container-managed directories, then drops privileges via `gosu yoloai`. Uses `tini` as PID 1 (`--init` or explicit `ENTRYPOINT`). Images are portable across machines since UID/GID are set at run time, not build time. Claude Code refuses `--dangerously-skip-permissions` as root; Codex does not enforce this but convention is non-root
@@ -313,7 +313,6 @@ yoloai new [options] <name> [<workdir>] [-d <auxdir>...]  Create and start a san
 yoloai list                                    List sandboxes and their status
 yoloai attach <name>                           Attach to a sandbox's tmux session
 yoloai show <name>                             Show sandbox configuration and state
-yoloai status <name>                           Show detailed sandbox info
 yoloai log <name>                              Show sandbox session log
 yoloai tail <name>                             Tail sandbox session log in real time
 yoloai diff <name>                             Show changes the agent made
@@ -599,15 +598,12 @@ Displays sandbox configuration and state:
 - Profile (name or "(base)")
 - Prompt (first 200 chars from `prompt.txt`, or "(none)")
 - Workdir (resolved absolute path)
+- Directories with access modes (read-only / rw / copy)
 - Creation time
 - Baseline SHA (for `:copy` directories that were git repos, or "(synthetic)" for non-git dirs)
 - Container ID
 
-Reads from `meta.json` and queries live Docker state. Useful for quick inspection without listing all sandboxes.
-
-### `yoloai status <name>`
-
-Shows sandbox details from `meta.json`: profile, directories with their access modes (read-only / rw / copy), creation time, and whether the agent is still running. Agent status is detected via `docker exec tmux list-panes -t main -F '#{pane_dead}'` combined with Docker container state for full status.
+Reads from `meta.json` and queries live Docker state. Agent status is detected via `docker exec tmux list-panes -t main -F '#{pane_dead}'` combined with Docker container state for full status (running / stopped / done / failed). Useful for quick inspection without listing all sandboxes.
 
 ### `yoloai diff`
 
@@ -652,7 +648,7 @@ Options:
 
 ### `yoloai log`
 
-`yoloai log <name>` displays the session log (`log.txt`) for the named sandbox. Outputs raw to stdout (no pager). User composes with unix tools: `yoloai log my-task | less`, `yoloai log my-task | tail -100`, `yoloai log my-task | grep error`.
+`yoloai log <name>` displays the session log (`log.txt`) for the named sandbox. Auto-pages through `$PAGER` / `less -R` when stdout is a TTY, matching `git log` behavior. When piped (stdout is not a TTY), outputs raw for composition with unix tools: `yoloai log my-task | tail -100`, `yoloai log my-task | grep error`.
 
 ### `yoloai tail`
 

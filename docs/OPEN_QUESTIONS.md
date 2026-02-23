@@ -134,7 +134,7 @@ These were deferred from MVP but might be cheap to add and valuable for dogfoodi
 
 61. ~~**First-time base image build is slow and poorly communicated**~~ — **Resolved:** Clear "Building base image (first run only, ~2-5 minutes)..." message during auto-build on first `yoloai new`.
 
-62. ~~**`yoloai log` has no tail or search**~~ — **Resolved:** No `--tail`, no pager. Raw stdout output. User composes with unix tools (`| less`, `| tail`, `| grep`). Unix philosophy.
+62. ~~**`yoloai log` has no tail or search**~~ — **Resolved:** ~~No `--tail`, no pager. Raw stdout output. User composes with unix tools.~~ Superseded by #76: auto-page through `$PAGER` / `less -R` when stdout is a TTY.
 
 63. ~~**No way to see what prompt was given to a sandbox**~~ — **Resolved:** Include `yoloai show <name>` in MVP. Displays all sandbox details: name, status, agent, profile, prompt, workdir (resolved path), creation time, baseline SHA, container ID. Essential for dogfooding/debugging.
 
@@ -179,6 +179,10 @@ These were deferred from MVP but might be cheap to add and valuable for dogfoodi
 82. ~~**Post-creation output should adapt to whether `--prompt` was given**~~ — **Resolved:** Context-aware next-command suggestions after `yoloai new`: without `--prompt`, suggest `yoloai attach <name>` (agent is waiting for input); with `--prompt`, suggest `yoloai tail <name>` to watch progress.
 
 83. ~~**`yoloai new` output should show resolved configuration**~~ — **Resolved:** Creation output shows a brief summary of resolved settings: agent, profile (or "base"), workdir path + mode, copy strategy, network mode. Confirms what was actually configured when options come from defaults + profile + CLI.
+
+84. ~~**`show` and `status` commands overlap**~~ — **Resolved:** Merge into single `yoloai show` command. `show` now includes directories with access modes (from `status`). `status` removed from command table.
+
+85. ~~**Entrypoint JSON parsing**~~ — **Resolved:** Install `jq` in the base image. The entrypoint reads `/yoloai/config.json` via `jq` for all configuration (agent_command, startup_delay, submit_sequence, host_uid, host_gid, etc.). Simpler and more robust than shell-only JSON parsing.
 
 ## Post-MVP (Codex and cleanup)
 
