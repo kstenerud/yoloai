@@ -178,19 +178,22 @@ CLI workdir **replaces** profile workdir. CLI `-d` dirs are **additive** with pr
 
 **Profile merge rules** (profile values merge with `defaults` from `config.yaml`):
 
-| Field           | Merge behavior                                    |
-|-----------------|---------------------------------------------------|
-| `agent_files`   | Profile replaces defaults (no merge)              |
-| `mounts`        | Additive (no deduplication — duplicates are user error) |
-| `resources`     | Profile overrides individual values               |
-| `ports`         | Additive                                          |
-| `env`           | Merged (profile wins on conflict)                 |
-| `cap_add`       | Additive                                          |
-| `devices`       | Additive                                          |
-| `setup`         | Additive (defaults first, then profile)           |
-| `network_allow` | Additive                                          |
-| `workdir`       | Profile provides default, CLI replaces            |
-| `directories`   | Profile provides defaults, CLI `-d` is additive   |
+| Field                  | Merge behavior                                           |
+|------------------------|----------------------------------------------------------|
+| `agent_files`          | Profile replaces defaults (no merge)                     |
+| `mounts`               | Additive (no deduplication — duplicates are user error)  |
+| `resources`            | Profile overrides individual values                      |
+| `ports`                | Additive                                                 |
+| `env`                  | Merged (profile wins on conflict)                        |
+| `cap_add`              | Additive                                                 |
+| `devices`              | Additive                                                 |
+| `setup`                | Additive (defaults first, then profile)                  |
+| `network_isolated`     | Profile overrides default. CLI overrides profile.        |
+| `network_allow`        | Additive                                                 |
+| `copy_strategy`        | Profile overrides default                                |
+| `auto_commit_interval` | Profile overrides default                                |
+| `workdir`              | Profile provides default, CLI replaces                   |
+| `directories`          | Profile provides defaults, CLI `-d` is additive          |
 
 **`yoloai profile` commands:**
 
