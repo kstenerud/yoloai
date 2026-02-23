@@ -8,13 +8,15 @@ Design and research phase. No code yet.
 
 ## Key Files
 
-- `DESIGN.md` — Architecture, commands, config format, workflows, security considerations, resolved decisions.
-- `RESEARCH.md` — Competitive landscape (8 tools analyzed in depth, 9 more cataloged), community pain points, security incidents, alternative filesystem isolation approaches, feature comparison table, multi-agent CLI research, credential management research, network isolation research.
-- `CRITIQUE.md` — Rolling critique document. After a critique pass, findings are applied to DESIGN.md and RESEARCH.md, then CRITIQUE.md is emptied for the next round.
-- `CLI-STANDARD.md` — CLI design conventions: argument ordering (options first), flag naming, exit codes, error messages, help text format.
-- `CODING-STANDARD.md` — Code style: Go 1.22+, gofmt, golangci-lint, Cobra, project structure, naming, error handling, dependency policy.
-- `PLAN.md` — Current MVP implementation plan (phases, architecture decisions, file inventory).
-- `OPEN_QUESTIONS.md` — Questions encountered during design/implementation that need resolution. Add new questions here as they come up; resolve before the relevant phase begins.
+All design/planning documents live in `docs/`:
+
+- `docs/DESIGN.md` — Architecture, commands, config format, workflows, security considerations, resolved decisions.
+- `docs/RESEARCH.md` — Competitive landscape (8 tools analyzed in depth, 9 more cataloged), community pain points, security incidents, alternative filesystem isolation approaches, feature comparison table, multi-agent CLI research, credential management research, network isolation research.
+- `docs/CRITIQUE.md` — Rolling critique document. After a critique pass, findings are applied to DESIGN.md and RESEARCH.md, then CRITIQUE.md is emptied for the next round.
+- `docs/CLI-STANDARD.md` — CLI design conventions: argument ordering (options first), flag naming, exit codes, error messages, help text format.
+- `docs/CODING-STANDARD.md` — Code style: Go 1.22+, gofmt, golangci-lint, Cobra, project structure, naming, error handling, dependency policy.
+- `docs/PLAN.md` — Current MVP implementation plan (phases, architecture decisions, file inventory).
+- `docs/OPEN_QUESTIONS.md` — Questions encountered during design/implementation that need resolution. Add new questions here as they come up; resolve before the relevant phase begins.
 
 ## Architecture (from DESIGN.md)
 
