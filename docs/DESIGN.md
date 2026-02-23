@@ -312,17 +312,18 @@ Single Go binary. No runtime dependencies — just the binary and Docker.
 yoloai new [options] <name> [<workdir>] [-d <auxdir>...]  Create and start a sandbox
 yoloai list                                    List sandboxes and their status
 yoloai attach <name>                           Attach to a sandbox's tmux session
+yoloai show <name>                             Show sandbox configuration and state
 yoloai status <name>                           Show detailed sandbox info
 yoloai log <name>                              Show sandbox session log
 yoloai tail <name>                             Tail sandbox session log in real time
 yoloai diff <name>                             Show changes the agent made
 yoloai apply <name>                            Copy changes back to original dirs
 yoloai exec <name> <command>                   Run a command inside the sandbox
-yoloai stop <name>                             Stop a sandbox (preserving state)
+yoloai stop <name>...                          Stop sandboxes (preserving state)
 yoloai start [--resume] <name>                 Start a stopped sandbox
 yoloai restart <name>                          Restart the agent in an existing sandbox
 yoloai reset <name>                            Re-copy workdir and reset git baseline
-yoloai destroy <name>                          Stop and remove a sandbox
+yoloai destroy <name>...                       Stop and remove sandboxes
 yoloai build [profile|--all]                   Build/rebuild Docker image(s)
 yoloai profile create <name> [--template <tpl>]  Create a profile with scaffold
 yoloai profile list                            List profiles
@@ -436,6 +437,7 @@ Options:
 - `--network-allow <domain>`: Allow traffic to specific additional domains (can be repeated). Implies `--network-isolated`. Added to the agent's default allowlist (see below).
 - `--network-none`: Run with `--network none` for full network isolation (agent API calls will also fail). Mutually exclusive with `--network-isolated` and `--network-allow`. **Warning:** Most agents (Claude, Codex) require network access to reach their API endpoints. This flag is only useful for agents with locally-hosted models or for testing container setup without agent execution.
 - `--port <host:container>`: Expose a container port on the host (can be repeated). Example: `--port 3000:3000` for web dev. Without this, container services are not reachable from the host browser.
+- `--replace`: Destroy existing sandbox of the same name before creating. Shorthand for `yoloai destroy <name> && yoloai new <name>`.
 - `--no-start`: Create sandbox without starting the container. Useful for setup-only operations.
 
 **Default network allowlist (per agent):**
@@ -494,9 +496,10 @@ The allowlist is agent-specific — each agent's definition includes its require
 ### Safety Checks
 
 Before creating the sandbox (all checks run before any state is created on disk):
-- **Duplicate name detection:** Error if a sandbox with the same name already exists.
+- **Duplicate name detection:** Error if a sandbox with the same name already exists (unless `--replace` is used).
 - **Missing API key:** Error if the required API key for the selected agent is not set in the host environment.
-- **Dangerous directory detection:** Error if any mount target is `$HOME`, `/`, macOS system directories (`/System`, `/Library`, `/Applications`), or Linux system directories (`/usr`, `/etc`, `/var`, `/boot`, `/bin`, `/sbin`, `/lib`). Simple string match on absolute path. Override with `:force` suffix (e.g., `$HOME:force`, `$HOME:rw:force`).
+- **Dangerous directory detection:** Error if any mount target is `$HOME`, `/`, macOS system directories (`/System`, `/Library`, `/Applications`), or Linux system directories (`/usr`, `/etc`, `/var`, `/boot`, `/bin`, `/sbin`, `/lib`). Simple string match on absolute path. Override with `:force` suffix (e.g., `$HOME:force`, `$HOME:rw:force`), which downgrades to a warning.
+- **Path overlap detection:** Error if any two sandbox mounts have path prefix overlap (one resolved path starts with the other). Applies to all mount combinations (`:rw`/`:rw`, `:rw`/`:copy`, `:copy`/`:copy`). Check: does either resolved absolute path start with the other? Override with `:force` suffix on the overlapping path (e.g., `./parent:rw`, `./parent/child:copy:force`), which downgrades to a warning. `:force` is the explicit escape hatch for both dangerous directory and path overlap detection.
 - **Dirty git repo detection:** If any `:rw` or `:copy` directory is a git repo with uncommitted changes, warn with specifics and prompt for confirmation:
   ```
   WARNING: ./my-app has uncommitted changes (3 files modified, 1 untracked)
@@ -558,6 +561,21 @@ Runs `docker exec -it yoloai-<name> tmux attach -t main`.
 
 Detach with standard tmux `Ctrl-b d` — container keeps running.
 
+### `yoloai show <name>`
+
+Displays sandbox configuration and state:
+- Name
+- Status (running / stopped / done / failed)
+- Agent (claude, codex, etc.)
+- Profile (name or "(base)")
+- Prompt (first 200 chars from `prompt.txt`, or "(none)")
+- Workdir (resolved absolute path)
+- Creation time
+- Baseline SHA (for `:copy` directories that were git repos, or "(synthetic)" for non-git dirs)
+- Container ID
+
+Reads from `meta.json` and queries live Docker state. Useful for quick inspection without listing all sandboxes.
+
 ### `yoloai status <name>`
 
 Shows sandbox details from `meta.json`: profile, directories with their access modes (read-only / rw / copy), creation time, and whether the agent is still running. Agent status is detected via `docker exec tmux list-panes -t main -F '#{pane_dead}'` combined with Docker container state for full status.
@@ -570,6 +588,8 @@ For `:rw` directories: runs `git diff` directly on the host (same files via bind
 
 Read-only directories are skipped (no changes possible).
 
+**Warning when agent is running:** If the tmux pane is still alive (agent hasn't exited), prints "Note: agent is still running; diff may be incomplete" before showing the diff.
+
 Options:
 - `--stat`: Show summary (files changed, insertions, deletions) instead of full diff.
 
@@ -577,23 +597,33 @@ Options:
 
 `yoloai apply <name> [-- <path>...]`
 
-For `:copy` directories only. For the **full copy** strategy, runs entirely on the host — reads from `work/<encoded-path>/`, generates a patch via `git diff`, and applies it to the original host directory. Does not require the container to be running. For the **overlay** strategy, requires the container to be running (the merged view only exists when overlayfs is mounted); runs `git diff` inside the container via `docker exec`. This handles additions, modifications, and deletions. Works identically from the user's perspective regardless of `copy_strategy` — git provides the diff in both cases. For dirs that had no original git repo, excludes the synthetic `.git/` directory created by yoloai.
+For `:copy` directories only. For the **full copy** strategy, runs entirely on the host — reads from `work/<encoded-path>/`, generates a patch via `git diff`, and applies it to the original host directory. Does not require the container to be running. For the **overlay** strategy, requires the container to be running (the merged view only exists when overlayfs is mounted). If the container is stopped, `apply` auto-starts it and leaves it in whatever state it was before (running if it was running, stopped if it needs to be stopped again). Runs `git diff` inside the container via `docker exec`. This handles additions, modifications, and deletions. Works identically from the user's perspective regardless of `copy_strategy` — git provides the diff in both cases. For dirs that had no original git repo, excludes the synthetic `.git/` directory created by yoloai.
 
 Without `-- <path>...`, applies all changes. With `-- <path>...`, applies only changes to the specified files or directories (relative to workdir). The `--` separator is required to distinguish paths from sandbox names.
 
-Before applying, shows a summary via `git diff --stat` (files changed, insertions, deletions) and verifies the patch applies cleanly via `git apply --check`. Prompts for confirmation before proceeding.
+Before applying, shows a summary via `git diff --stat` (files changed, insertions, deletions) and verifies the patch applies cleanly via `git apply --check`. Prompts for confirmation before proceeding. If `git apply` fails, the error is wrapped with context explaining why the patch failed (e.g., "changes to handler.go conflict with changes already in your working directory — the patch expected line 42 to be 'func foo()' but found 'func bar()'. This typically means the original file was edited after the agent made its changes.").
 
 `:rw` directories need no apply — changes are already live. Read-only directories have no changes.
 
 ### `yoloai destroy`
 
+`yoloai destroy <name>...`
+
 `docker stop` + `docker rm` the container (and proxy sidecar if `--network-isolated`). Removes `~/.yoloai/sandboxes/<name>/` entirely. No special overlay cleanup needed — the kernel tears down the mount namespace when the container stops.
 
-Asks for confirmation if the agent is still running.
+Accepts multiple sandbox names (e.g., `yoloai destroy sandbox1 sandbox2 sandbox3`) with a single confirmation prompt showing all sandboxes to be destroyed.
+
+**Smart confirmation:** Confirmation is only required when the agent is still running or unapplied changes exist (detected via `git diff` on `:copy` directories). If the sandbox is stopped/exited with no unapplied changes, destruction proceeds without prompting. `--yes` skips all confirmation regardless.
+
+Options:
+- `--all`: Destroy all sandboxes (confirmation required unless `--yes` is also provided).
+- `--yes`: Skip confirmation prompts.
+
+**Smart confirmation:** Confirmation is only required when the agent is still running or unapplied changes exist (detected via `git diff` on `:copy` directories). If the sandbox is stopped/exited with no unapplied changes, destruction proceeds without prompting. `--yes` skips all confirmation regardless.
 
 ### `yoloai log`
 
-`yoloai log <name>` displays the session log (`log.txt`) for the named sandbox.
+`yoloai log <name>` displays the session log (`log.txt`) for the named sandbox. Outputs raw to stdout (no pager). User composes with unix tools: `yoloai log my-task | less`, `yoloai log my-task | tail -100`, `yoloai log my-task | grep error`.
 
 ### `yoloai tail`
 
@@ -612,11 +642,13 @@ Lists all sandboxes with their current status.
 | Column  | Description                                                    |
 |---------|----------------------------------------------------------------|
 | NAME    | Sandbox name                                                   |
-| STATUS  | `running`, `stopped`, `exited` (agent exited but container up) |
+| STATUS  | `running`, `stopped`, `done` (exit 0), `failed` (non-zero exit) |
 | AGENT   | Agent name (`claude`, `codex`)                                 |
 | PROFILE | Profile name or `(base)`                                       |
 | AGE     | Time since creation                                            |
 | WORKDIR | Working directory path                                         |
+
+Agent exit status is detected via `tmux list-panes -t main -F '#{pane_dead_status}'` when `#{pane_dead}` is 1. Non-zero exit code shows STATUS as "failed"; exit 0 shows as "done". Running containers with live panes show "running"; stopped containers show "stopped".
 
 Options:
 - `--running`: Show only running sandboxes.
@@ -639,9 +671,14 @@ Profile Dockerfiles that install private dependencies (e.g., `RUN go mod downloa
 
 ### `yoloai stop`
 
-`yoloai stop <name>` stops a sandbox container (and proxy sidecar if `--network-isolated`), preserving all state (work directory, agent-state, logs). The container can be restarted later without losing progress.
+`yoloai stop <name>...` stops sandbox containers (and proxy sidecars if `--network-isolated`), preserving all state (work directory, agent-state, logs). Containers can be restarted later without losing progress.
+
+Accepts multiple sandbox names (e.g., `yoloai stop sandbox1 sandbox2 sandbox3`). With `--all`, stops all running sandboxes.
 
 Internally, `docker stop` sends SIGTERM and the agent terminates. The agent's state directory persists on the host. `yoloai start` relaunches a fresh agent process with state intact — Claude preserves session history (resumes context); Codex starts fresh (no built-in session persistence). Think of stop/start as pausing the sandbox environment, not the agent's thought process. Use `--resume` with `start` to re-feed the original task prompt.
+
+Options:
+- `--all`: Stop all running sandboxes.
 
 ### `yoloai start`
 
@@ -661,7 +698,11 @@ This eliminates the need to diagnose *why* a sandbox isn't running before choosi
 
 ### `yoloai reset`
 
-`yoloai reset <name>` re-copies the workdir from the original host directory and resets the git baseline. The container is stopped and restarted. Sandbox configuration (`meta.json`) and agent state (agent-state directory) are preserved. Use case: retry the same task with a fresh workspace after the agent has made undesired changes. Only affects `:copy` directories — `:rw` directories reference the original and have no sandbox copy to reset.
+`yoloai reset <name>` re-copies the workdir from the original host directory and resets the git baseline. The container is stopped and restarted. Sandbox configuration (`meta.json`) is preserved. By default, agent state (agent-state directory) is preserved and the original prompt from `prompt.txt` is re-sent to the agent after reset. Use case: retry the same task with a fresh workspace after the agent has made undesired changes. Only affects `:copy` directories — `:rw` directories reference the original and have no sandbox copy to reset.
+
+Options:
+- `--no-prompt`: Skip re-sending the prompt after reset.
+- `--clean`: Wipe agent-state in addition to re-copying workdir. Full reset of both workspace and agent memory.
 
 ### Image Cleanup
 
@@ -731,7 +772,7 @@ The user sets the appropriate API key in their host shell profile (`ANTHROPIC_AP
 `yoloai` with no arguments shows help/usage. When `yoloai new` is run for the first time, auto-setup performs:
 1. Create `~/.yoloai/` directory structure if absent.
 2. Write a default `config.yaml` with sensible defaults if missing.
-3. Build the base image if missing.
+3. Build the base image if missing. Prints "Building base image (first run only, ~2-5 minutes)..." with Docker build output streamed to show progress.
 4. Print shell completion instructions and a quick-start guide.
 
 The `--no-start` flag can be used with `yoloai new` to perform setup without starting a container: `yoloai new --no-start temp-setup ./my-app`.
