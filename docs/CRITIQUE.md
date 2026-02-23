@@ -1,35 +1,21 @@
-# Critique — Round 6
+# Critique — Round 7
 
-Implementor's perspective audit. Could an implementor build this system without requiring clarification?
+Post-PLAN.md refresh audit. Focus: contradictions between documents, stale references, and gaps that would block or confuse an implementor.
 
 ## Applied
 
-- **C49.** `meta.json` schema — added full schema with field notes to DESIGN.md. No status field (queried live from Docker). Stores resolved creation-time config for sandbox lifecycle.
-- **C50.** Overlayfs workdir parameter — specified `upper/` and `work/` subdirectories under `work/<encoded-path>/` for overlayfs `upperdir` and `workdir` mount options.
-- **C51.** `work/<dirname>/` collision risk — resolved with caret encoding of absolute host paths (e.g., `/home/user/my-app` → `^2Fhome^2Fuser^2Fmy-app`). Fully reversible, no collisions.
-- **C52.** Git baseline timing — overlay: entrypoint runs git init after mounting overlayfs. Full copy: host-side yoloai runs git init before container start.
-- **C53.** Context file timing — generated on host, bind-mounted read-only at `/yoloai/context.md` (same pattern as log.txt and prompt.txt).
-- **C54.** `--resume` without `prompt.txt` — error.
-- **C56.** Base image distro — Debian slim. Smaller than Ubuntu, avoids Alpine musl incompatibilities with Node.js/npm.
-- **C57.** `copy_strategy: overlay` when unavailable — error (don't silently degrade an explicit choice).
-- **C58.** `~` expansion scope — all path-valued fields in both config files. Bare relative paths are an error everywhere.
-- **C59.** Agent field in merge rules — added. Profile overrides default, CLI `--agent` overrides both.
-- **C60.** Custom mount for profile workdir — added optional `mount` field to workdir in profile.yaml.
-- **C61.** Resume prompt delivery — always interactive mode (user may want to follow up or redirect).
-- **C62.** `yoloai apply` execution context — full copy: host-side (reads `work/` directly, no container needed). Overlay: inside container via `docker exec` (merged view requires overlay mount).
-- **C63.** `yoloai diff` for `:rw` — requires running container (live bind mount), runs via `docker exec`.
-- **C64.** Copy tool — `cp -a` (preserves permissions, symlinks, metadata, including `.git/`).
-- **C65.** `yoloai version` — added to command listing.
-- **C66.** Duplicate sandbox name — error before creating any state.
-- **C67.** Missing API key — error before creating any state.
-- **C68.** `~/.yoloai/cache/` — added to Directory Layout.
-- **C69.** Startup delay — poll for agent ready indicator with timeout, not fixed sleep.
-- **C70.** Debug/verbose mode — added `--verbose` / `-v` global flag and `YOLOAI_VERBOSE=1`.
+- **C71.** DESIGN.md non-root user section — replaced `$HOST_UID`/`$HOST_GID` env vars with config.json/jq reference.
+- **C72.** DESIGN.md `auto_commit_interval` — replaced `YOLOAI_AUTO_COMMIT_INTERVAL` env var reference with `config.json`.
+- **C73.** DESIGN.md `baseline_sha` — changed from "null for non-git dirs" to "always present" (synthetic commit SHA stored). Simplifies diff logic.
+- **C74.** OPEN_QUESTIONS #5 — replaced `YOLOAI_STARTUP_DELAY` env var with `config.json startup_delay`.
+- **C75.** DESIGN.md `yoloai destroy` — removed duplicate "Smart confirmation" paragraph.
+- **C76.** CODING-STANDARD.md — marked Viper as post-MVP dep, updated core deps list to Cobra + Docker SDK only.
+- **C77.** CODING-STANDARD.md — fixed godoc example receiver from `m` to `manager`.
+- **C78.** DESIGN.md directory layout — added `config.json` to sandbox state directory listing.
+- **C79.** DESIGN.md `:force` on workdir — `:force` no longer suppresses the default `:copy` mode. `./my-app:force` means `./my-app:copy:force`.
+- **C80.** `yoloai tail` — removed from MVP. Users pipe `yoloai log` to `tail` or use `tail -f` on the log file directly (path from `yoloai show`). Moved to deferred.
+- **C81.** DESIGN.md `yoloai diff` — removed redundant `git status` (everything is captured by `git add -A` + `git diff`).
 
 ## Deferred
 
 (none)
-
-## Previously Deferred, Now Applied
-
-- **C55.** Proxy implementation — researched tinyproxy, Squid, Nginx, mitmproxy, custom Go proxy. Chose custom Go proxy (~200-300 lines using goproxy/cproxy). Tinyproxy has unfixed CVE-2025-63938 in all released versions. See RESEARCH.md "Proxy Sidecar Research".

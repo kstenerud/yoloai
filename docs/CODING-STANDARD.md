@@ -58,10 +58,10 @@ Everything under `internal/` is private to this module — prevents accidental e
 
 ## CLI Framework
 
-- **Cobra** for command definitions, **Viper** for configuration
+- **Cobra** for command definitions
 - One file per command under `internal/cli/`
 - Use `RunE` (not `Run`) so commands return errors for proper propagation
-- Viper for config file + env var + flag binding with struct unmarshaling
+- **Viper** deferred to post-MVP — MVP uses CLI flags + hardcoded defaults only. When added, Viper handles config file + env var + flag binding with struct unmarshaling
 - Commands are thin — parse args, call into domain packages, format output
 
 ## File Organization
@@ -191,7 +191,8 @@ Cobra customization required: set `SilenceErrors: true` and `SilenceUsage: true`
 
 - **Minimal** — Go culture favors the standard library. Justify each dependency.
 - `go.mod` managed by `go mod tidy`. Respect major version path convention (`/v2`). Reproducible builds via `go.sum`
-- **Core deps** (always needed): Cobra (CLI), Viper (config), Docker SDK. Viper pulls ~15 transitive dependencies — justified by config file + env var + flag precedence binding, which is non-trivial to replicate. If Viper proves too heavy, the fallback is Cobra flags + `go-yaml` + a thin config struct
+- **Core deps** (always needed): Cobra (CLI), Docker SDK
+- **Post-MVP dep:** Viper (config). Pulls ~15 transitive dependencies — justified by config file + env var + flag precedence binding, which is non-trivial to replicate. If Viper proves too heavy, the fallback is Cobra flags + `go-yaml` + a thin config struct
 - **Dev deps:** golangci-lint, testify
 - No vendoring unless required for reproducible builds in air-gapped environments
 
@@ -245,7 +246,7 @@ func NewSandboxManager(docker DockerClient, cfg Config) *SandboxManager {
   type SandboxManager struct { ... }
 
   // Create creates a new sandbox with the given agent preset.
-  func (m *SandboxManager) Create(ctx context.Context, name string) (*Sandbox, error) {
+  func (manager *SandboxManager) Create(ctx context.Context, name string) (*Sandbox, error) {
   ```
 - Package comments in `doc.go` or above the `package` declaration
 - **`// ABOUTME:`** project convention for quick scanning (supplemental to godoc, not a replacement)

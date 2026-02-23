@@ -6,11 +6,11 @@ No code exists yet. All design docs are complete (DESIGN.md, CODING-STANDARD.md,
 
 ## What's In / What's Deferred
 
-**MVP commands:** `build`, `new`, `attach`, `show`, `diff`, `apply`, `list`, `log`, `tail`, `exec`, `stop`, `start`, `destroy`, `reset`, `completion`, `version`
+**MVP commands:** `build`, `new`, `attach`, `show`, `diff`, `apply`, `list`, `log`, `exec`, `stop`, `start`, `destroy`, `reset`, `completion`, `version`
 
 **MVP features:** Full-copy only (Claude only), credential injection, `--model`, `--prompt-file`/stdin, `--replace`, `--no-start`, `--stat` on diff, `--yes` on apply/destroy, `--no-prompt`/`--clean` on reset, `--all`/multi-name on stop/destroy, smart destroy confirmation, dangerous directory detection, dirty git repo warning, path overlap detection, `YOLOAI_SANDBOX` env var, context-aware creation output, auto-paging for diff/log, shell completion, version info.
 
-**Deferred:** overlay strategy, network isolation/proxy, profiles, Codex agent, Viper config file parsing, `auto_commit_interval`, custom mount points (`=<path>`), `agent_files`, env var interpolation, context file, aux dirs (`-d`), `--resume`, `restart`, `wait`, `run`.
+**Deferred:** overlay strategy, network isolation/proxy, profiles, Codex agent, Viper config file parsing, `auto_commit_interval`, custom mount points (`=<path>`), `agent_files`, env var interpolation, context file, aux dirs (`-d`), `--resume`, `restart`, `wait`, `run`, `tail`.
 
 ## Implementation Phases
 
@@ -22,7 +22,7 @@ Compilable Go project with Cobra CLI that prints help text. No Docker, no functi
 - `go.mod` (`github.com/kstenerud/yoloai`), `Makefile` (`build`, `test`, `lint`), `.golangci.yml`
 - `cmd/yoloai/main.go` — thin entry point, `signal.NotifyContext`, calls root command
 - `internal/cli/root.go` — root Cobra command, `SilenceErrors: true`, `SilenceUsage: true`, custom error→exit code mapping (0/1/2/3)
-- `internal/cli/*.go` — stub commands for: `build`, `new`, `attach`, `show`, `diff`, `apply`, `list`, `log`, `tail`, `exec`, `stop`, `start`, `destroy`, `reset`, `completion`, `version`
+- `internal/cli/*.go` — stub commands for: `build`, `new`, `attach`, `show`, `diff`, `apply`, `list`, `log`, `exec`, `stop`, `start`, `destroy`, `reset`, `completion`, `version`
 
 **Verify:** `go build ./...` compiles, `./yoloai --help` shows all commands with correct descriptions.
 
@@ -177,9 +177,7 @@ Profile and network lines omitted when using defaults. Strategy line omitted for
 
 **`yoloai list`:** Scan sandboxes dir, load meta.json for each, query Docker for status. Format table: NAME | STATUS | AGENT | AGE | WORKDIR. Status uses same done/failed detection as `show`.
 
-**`yoloai log`:** Read `~/.yoloai/sandboxes/<name>/log.txt`. Auto-page through `$PAGER` / `less -R` when stdout is a TTY. Raw output when piped.
-
-**`yoloai tail`:** Tail `log.txt` in real time (like `tail -f`).
+**`yoloai log`:** Read `~/.yoloai/sandboxes/<name>/log.txt`. Auto-page through `$PAGER` / `less -R` when stdout is a TTY. Raw output when piped. For real-time following, users can find the log path via `yoloai show` and use `tail -f` directly.
 
 **`yoloai exec`:** `docker exec yoloai-<name> <command>`, with `-i` when stdin is pipe/TTY and `-t` when stdin is TTY.
 
@@ -278,7 +276,7 @@ Viper deferred to post-MVP.
 | `cmd/yoloai/main.go` | Entry point |
 | `internal/cli/root.go` | Root command, error→exit code |
 | `internal/cli/pager.go` | Auto-paging utility (diff, log) |
-| `internal/cli/{build,new,attach,show,diff,apply,list,log,tail,exec,stop,start,destroy,reset,completion,version}.go` | Command definitions |
+| `internal/cli/{build,new,attach,show,diff,apply,list,log,exec,stop,start,destroy,reset,completion,version}.go` | Command definitions |
 | `internal/sandbox/paths.go` | Caret encoding (full spec), dir layout |
 | `internal/sandbox/meta.go` | meta.json types and I/O |
 | `internal/sandbox/parse.go` | Dir arg parsing (`:copy`/`:rw`/`:force`) |

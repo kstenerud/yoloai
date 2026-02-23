@@ -126,7 +126,7 @@ The Docker container is disposable — it can crash, be destroyed, be recreated.
 
 Field notes:
 - **No `status` field.** Container state (`running`/`stopped`/`exited`) is queried live from Docker, not stored. Runtime state (whether agent files have been initialized) is tracked separately in `state.json` alongside `meta.json` — no `state.json` = not initialized.
-- **`baseline_sha`** — only for `:copy` dirs that were git repos. `null` for non-git dirs (which use the synthetic initial commit).
+- **`baseline_sha`** — always present for `:copy` dirs. For git repos, the HEAD SHA at copy time. For non-git dirs, the SHA of the synthetic initial commit (`git init` + `git add -A` + `git commit`). Never null — `yoloai diff` always uses `git diff <baseline_sha>` with no special cases.
 - **`network.mode`** — `"none"`, `"isolated"`, or `"default"`. Drives proxy sidecar lifecycle.
 - **`network.allow`** — the fully resolved allowlist (agent defaults + config + CLI), stored so the proxy can be recreated on restart.
 - **`model`** — `null` if the agent's default was used.
@@ -141,7 +141,7 @@ Field notes:
 - Common tools: tmux, git, build-essential, python3, jq, etc.
 - **Claude Code:** Node.js 20 LTS + npm installation (`npm i -g @anthropic-ai/claude-code`) — npm required, not native binary (native binary bundles Bun which ignores proxy env vars, segfaults on Debian bookworm AMD64, and auto-updates). npm is deprecated but still published and is the only reliable Docker/proxy path. See RESEARCH.md "Claude Code Installation Research"
 - **Codex:** Static Rust binary download (musl-linked, zero runtime dependencies, ~zero image bloat)
-- **Non-root user** (`yoloai`, UID/GID matching host user via entrypoint). Image builds with a placeholder user (UID 1001). At container start, the entrypoint runs as root: `usermod -u $HOST_UID yoloai && groupmod -g $HOST_GID yoloai` (handling exit code 12 for chown failures on mounted volumes), fixes ownership on container-managed directories, then drops privileges via `gosu yoloai`. Uses `tini` as PID 1 (`--init` or explicit `ENTRYPOINT`). Images are portable across machines since UID/GID are set at run time, not build time. Claude Code refuses `--dangerously-skip-permissions` as root; Codex does not enforce this but convention is non-root
+- **Non-root user** (`yoloai`, UID/GID matching host user via entrypoint). Image builds with a placeholder user (UID 1001). At container start, the entrypoint runs as root: reads `host_uid`/`host_gid` from `/yoloai/config.json` via `jq`, runs `usermod -u <uid> yoloai && groupmod -g <gid> yoloai` (handling exit code 12 for chown failures on mounted volumes), fixes ownership on container-managed directories, then drops privileges via `gosu yoloai`. Uses `tini` as PID 1 (`--init` or explicit `ENTRYPOINT`). Images are portable across machines since UID/GID are set at run time, not build time. Claude Code refuses `--dangerously-skip-permissions` as root; Codex does not enforce this but convention is non-root
 - **Entrypoint:** Default Dockerfile and entrypoint.sh are embedded in the binary via `go:embed`. On first run, these are seeded to `~/.yoloai/` if they don't exist. `yoloai build` always reads from `~/.yoloai/`, not from embedded copies. Users can edit for fast iteration without rebuilding yoloai itself. The entrypoint reads all configuration from a bind-mounted `/yoloai/config.json` file containing agent_command, startup_delay, submit_sequence, host_uid, host_gid, and later overlay_mounts, iptables_rules, setup_script. No environment variables are used for configuration passing.
 
 **Profile images (`yoloai-<profile>`):** Derived from base, one per profile. Users supply a `Dockerfile` per profile with `FROM yoloai-base`. This avoids the limitations of auto-generating Dockerfiles from package lists and gives full flexibility (PPAs, tarballs, custom install steps).
@@ -314,7 +314,6 @@ yoloai list                                    List sandboxes and their status
 yoloai attach <name>                           Attach to a sandbox's tmux session
 yoloai show <name>                             Show sandbox configuration and state
 yoloai log <name>                              Show sandbox session log
-yoloai tail <name>                             Tail sandbox session log in real time
 yoloai diff <name>                             Show changes the agent made
 yoloai apply <name>                            Copy changes back to original dirs
 yoloai exec <name> <command>                   Run a command inside the sandbox
@@ -461,7 +460,7 @@ The allowlist is agent-specific — each agent's definition includes its require
 
 **Workflow:**
 
-1. Apply `:copy` suffix to workdir if no suffix is given. Error if workdir has `:force` without `:rw` or `:copy`.
+1. Apply `:copy` suffix to workdir if no mode suffix (`:rw` or `:copy`) is given — `:force` is a modifier, not a mode, so `./my-app:force` is treated as `./my-app:copy:force`.
 2. Error if any two directories resolve to the same absolute container path (mirrored host path or custom `=<path>`).
 3. For each `:copy` directory, set up an isolated writable view using one of two strategies (selected by `copy_strategy` config, default `auto`):
 
@@ -488,7 +487,7 @@ The allowlist is agent-specific — each agent's definition includes its require
    4. Cache the result in `~/.yoloai/cache/overlay-support`, invalidated on kernel or Docker version change.
 
    Note: `git add -A` naturally honors `.gitignore` if one is present, so gitignored files (e.g., `node_modules`) won't clutter `yoloai diff` output regardless of strategy.
-4. If `auto_commit_interval` > 0, start a background auto-commit loop for `:copy` directories inside the container for recovery. The interval is passed to the container via the `YOLOAI_AUTO_COMMIT_INTERVAL` environment variable. Disabled by default.
+4. If `auto_commit_interval` > 0, start a background auto-commit loop for `:copy` directories inside the container for recovery. The interval is passed to the container via `config.json`. Disabled by default.
 5. Store original paths, modes, and mapping in `meta.json`.
 6. Start Docker container (see Container Startup below).
 
@@ -607,7 +606,7 @@ Reads from `meta.json` and queries live Docker state. Agent status is detected v
 
 ### `yoloai diff`
 
-For `:copy` directories: runs `git add -A` (to capture untracked files created by the agent) then `git diff` + `git status` against the baseline (the recorded HEAD SHA for existing repos, or the synthetic initial commit for non-git dirs). Shows exactly what the agent changed with proper diff formatting. For the full copy strategy, runs on the host (reads `work/` directly). For the overlay strategy, runs inside the container via `docker exec` (the merged view requires the overlay mount). Same as `yoloai apply` — see that section for details.
+For `:copy` directories: runs `git add -A` (to capture untracked files created by the agent) then `git diff` against the baseline (the recorded HEAD SHA for existing repos, or the synthetic initial commit for non-git dirs). Shows exactly what the agent changed with proper diff formatting. For the full copy strategy, runs on the host (reads `work/` directly). For the overlay strategy, runs inside the container via `docker exec` (the merged view requires the overlay mount). Same as `yoloai apply` — see that section for details.
 
 For `:rw` directories: runs `git diff` directly on the host (same files via bind mount). Does not require the container to be running. If the original is not a git repo, notes that diff is not available for live-mounted dirs without git. Note: for `:rw` directories, diff shows all uncommitted changes relative to HEAD, not just changes made by the agent. Pre-existing uncommitted changes are mixed in. Use `:copy` mode for clean agent-only diffs.
 
@@ -644,15 +643,9 @@ Options:
 - `--all`: Destroy all sandboxes (confirmation required unless `--yes` is also provided).
 - `--yes`: Skip confirmation prompts.
 
-**Smart confirmation:** Confirmation is only required when the agent is still running or unapplied changes exist (detected via `git diff` on `:copy` directories). If the sandbox is stopped/exited with no unapplied changes, destruction proceeds without prompting. `--yes` skips all confirmation regardless.
-
 ### `yoloai log`
 
 `yoloai log <name>` displays the session log (`log.txt`) for the named sandbox. Auto-pages through `$PAGER` / `less -R` when stdout is a TTY, matching `git log` behavior. When piped (stdout is not a TTY), outputs raw for composition with unix tools: `yoloai log my-task | tail -100`, `yoloai log my-task | grep error`.
-
-### `yoloai tail`
-
-`yoloai tail <name>` tails the session log in real time (like `tail -f`).
 
 ### `yoloai exec`
 
@@ -752,6 +745,7 @@ Docker images (`yoloai-base`, `yoloai-<profile>`) accumulate indefinitely. A cle
 └── sandboxes/
     └── <name>/
         ├── meta.json            ← original paths, mode, profile, timestamps
+        ├── config.json          ← entrypoint configuration (bind-mounted into container)
         ├── state.json           ← runtime state (agent files initialized, etc.)
         ├── prompt.txt           ← initial prompt (if provided)
         ├── log.txt              ← tmux session log

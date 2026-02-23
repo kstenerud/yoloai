@@ -12,7 +12,7 @@ Questions encountered during design and implementation that need resolution. Res
 
 4. ~~**gosu**~~ — **Resolved:** Install from GitHub releases (static binary). Standard for Debian images.
 
-5. ~~**Claude ready indicator**~~ — **Resolved:** Fixed 3-second delay for MVP, configurable via `YOLOAI_STARTUP_DELAY`. Polling deferred.
+5. ~~**Claude ready indicator**~~ — **Resolved:** Fixed 3-second delay for MVP, configurable via `config.json` `startup_delay`. Polling deferred.
 
 6. ~~**Caret encoding scope**~~ — **Resolved:** Implement the full caret encoding spec. Trivial to implement and avoids platform-specific assumptions.
 
