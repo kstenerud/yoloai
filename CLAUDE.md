@@ -13,6 +13,8 @@ Design and research phase. No code yet.
 - `CRITIQUE.md` — Rolling critique document. After a critique pass, findings are applied to DESIGN.md and RESEARCH.md, then CRITIQUE.md is emptied for the next round.
 - `CLI-STANDARD.md` — CLI design conventions: argument ordering (options first), flag naming, exit codes, error messages, help text format.
 - `CODING-STANDARD.md` — Code style: Go 1.22+, gofmt, golangci-lint, Cobra, project structure, naming, error handling, dependency policy.
+- `PLAN.md` — Current MVP implementation plan (phases, architecture decisions, file inventory).
+- `OPEN_QUESTIONS.md` — Questions encountered during design/implementation that need resolution. Add new questions here as they come up; resolve before the relevant phase begins.
 
 ## Architecture (from DESIGN.md)
 
