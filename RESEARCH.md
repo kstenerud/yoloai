@@ -1002,6 +1002,65 @@ yoloai's design decisions based on this research:
 
 ---
 
+## Proxy Sidecar Research
+
+Evaluation of forward proxy options for yoloai's `--network-isolated` sidecar. Requirements: HTTPS CONNECT tunneling with domain allowlist (no MITM), lightweight (runs per sandbox), configurable allowlist, logging.
+
+### Options Evaluated
+
+| Criterion                | Tinyproxy        | Squid          | Nginx+Module   | mitmproxy  | Go Custom       |
+|--------------------------|------------------|----------------|----------------|------------|-----------------|
+| CONNECT domain allowlist | Yes              | Yes            | Yes (awkward)  | Partial    | Yes             |
+| Image size (compressed)  | ~3 MB            | ~8-18 MB       | ~49 MB         | ~150+ MB   | ~5-10 MB        |
+| Memory (idle)            | ~2-3 MB          | ~20-50 MB      | ~5-10 MB       | ~50+ MB    | ~5-10 MB        |
+| Config reload            | SIGUSR1          | squid -k reconf| nginx -s reload| Script     | Full control    |
+| Actively maintained      | Minimal          | Yes            | Third-party    | Yes        | Self-maintained |
+| Security track record    | CVEs unfixed     | Good           | N/A            | Good       | Self-maintained |
+| Implementation effort    | Config only      | Config only    | Config + build | Config     | ~200-300 lines  |
+
+### Tinyproxy — functional but security concerns
+
+Tinyproxy (C-based, ~3 MB image) meets core requirements. `FilterDefaultDeny Yes` + `FilterType fnmatch` + `ConnectPort 443` provides domain-based CONNECT filtering. SIGUSR1 reloads config. Maintainer confirmed domain filtering works for HTTPS CONNECT ([issue #345](https://github.com/tinyproxy/tinyproxy/issues/345)).
+
+**Security concern:** CVE-2025-63938 (integer overflow in port parsing, allows filter bypass) is fixed in master commit `3c0fde9` (October 2025) but **no released version contains this fix**. Latest release is 1.11.2 (May 2024). Release cadence is slow — security patches sit unreleased for months. 116 open issues.
+
+Would need to build from master, not a tagged release. The port filter bypass is partially mitigated by yoloai's iptables rules (defense-in-depth), but relying on unreleased security fixes for a security-critical component is a risk.
+
+### Squid — overkill
+
+Full-featured, excellent ACL system, actively maintained. But ~20-50 MB memory baseline even with caching disabled. Designed for enterprise caching proxies, not lightweight per-sandbox sidecars. Configuration is powerful but verbose for this simple use case.
+
+### Nginx — wrong tool
+
+Requires third-party `ngx_http_proxy_connect_module` patch. Forward proxying is not nginx's design intent. ~49 MB image. Configuration model is unintuitive for allowlist-based forward proxying.
+
+### mitmproxy — wrong tool, too large
+
+~150+ MB image (Python runtime). Designed for interception and debugging, not production forward proxying. Allowlist model (`allow_hosts`) is an afterthought with reported inconsistencies.
+
+### Custom Go proxy — chosen approach
+
+A purpose-built Go forward proxy using `elazarl/goproxy` (6.6k stars) or `smarty/cproxy` (181 stars, designed for exactly this use case). ~200-300 lines of Go. Compiles to a static binary in a `FROM scratch` image (~5 MB).
+
+Core pattern ([Eli Bendersky's writeup](https://eli.thegreenplace.net/2022/go-and-proxy-servers-part-2-https-proxies/)): parse CONNECT request, check domain against allowlist, `net.Dial` to target, `http.Hijacker` to get raw connection, bidirectional `io.Copy`.
+
+Advantages:
+- Integrates naturally with yoloai's Go codebase
+- Single static binary, minimal image and memory footprint
+- No external CVE risk or release-cadence dependency
+- Full control over allowlist format, reload (SIGUSR1), logging
+- Exact feature match — no unused capabilities
+
+### Decision
+
+Custom Go proxy. The modest implementation cost (~200-300 lines) buys independence from tinyproxy's unfixed CVEs and slow release cadence, with equivalent size and performance.
+
+### DNS: Separate Concern
+
+None of the proxy options serve as a DNS resolver. DESIGN.md specifies the sandbox uses the proxy sidecar as its DNS resolver with direct outbound DNS blocked by iptables. This requires a lightweight DNS forwarder (e.g., dnsmasq, ~500 KB) running alongside the proxy in the sidecar container. DNS-level domain filtering is not needed — iptables blocks direct DNS and all HTTP/HTTPS must go through the proxy. The DNS forwarder simply resolves queries upstream for the proxy's own outbound connections.
+
+---
+
 ## Network Isolation Research
 
 Research into Docker network isolation mechanisms for an AI coding sandbox tool, focusing on verified approaches used in production.

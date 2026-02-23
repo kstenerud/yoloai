@@ -28,4 +28,8 @@ Implementor's perspective audit. Could an implementor build this system without 
 
 ## Deferred
 
-- **C55.** Proxy implementation — prefer tinyproxy if it supports HTTPS CONNECT with domain allowlist, custom Go binary as fallback. Needs dedicated research.
+(none)
+
+## Previously Deferred, Now Applied
+
+- **C55.** Proxy implementation — researched tinyproxy, Squid, Nginx, mitmproxy, custom Go proxy. Chose custom Go proxy (~200-300 lines using goproxy/cproxy). Tinyproxy has unfixed CVE-2025-63938 in all released versions. See RESEARCH.md "Proxy Sidecar Research".

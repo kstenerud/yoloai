@@ -583,7 +583,7 @@ Options:
 
 `yoloai build --all` rebuilds everything: base image first, then the proxy image (`yoloai-proxy`), then all profile images.
 
-`yoloai build` and `yoloai build --all` also build the proxy sidecar image (`yoloai-proxy`), a lightweight forward proxy used by `--network-isolated`. Implementation TBD — prefer tinyproxy if it meets requirements (HTTPS CONNECT tunneling with domain allowlist), custom Go binary as fallback. See RESEARCH.md for proxy evaluation.
+`yoloai build` and `yoloai build --all` also build the proxy sidecar image (`yoloai-proxy`), a purpose-built Go forward proxy (~200-300 lines) used by `--network-isolated`. Compiled as a static binary in a `FROM scratch` image (~5 MB). Uses HTTPS CONNECT tunneling with domain-based allowlist (no MITM). Allowlist loaded from a config file; reloadable via SIGUSR1. Logs allowed/denied requests. See RESEARCH.md "Proxy Sidecar Research" for the evaluation of alternatives.
 
 Useful after modifying a profile's Dockerfile or when the base image needs updating (e.g., new Claude CLI version).
 
