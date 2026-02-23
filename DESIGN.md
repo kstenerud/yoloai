@@ -6,6 +6,33 @@ Run AI coding CLI agents (Claude Code, Codex, and others) with their sandbox-byp
 
 **Scope:** v1 ships with Claude Code and OpenAI Codex. The architecture is agent-agnostic — Docker, overlayfs, network isolation, diff/apply are not agent-specific. Adding a new agent requires only a new agent definition (install command, launch command, API key env vars, state directory). See RESEARCH.md "Multi-Agent Support Research" for additional agents researched.
 
+## Value Proposition
+
+**The gap in the market:** Existing tools either give the agent live access to your files (risky — one bad command and your work is gone) or provide isolation without a review workflow (you have to manually figure out what changed). No tool lets an agent work freely while protecting your originals and giving you a clean review step before changes land.
+
+**Core differentiator — copy/diff/apply:** yoloai is the only tool where your originals are protected by default. The agent works on an isolated copy; you review exactly what changed via `yoloai diff` and choose what to keep via `yoloai apply`. Every other tool in the space (Docker Sandboxes, cco, deva.sh, sandbox-runtime) either live-mounts your files or syncs changes immediately.
+
+**What yoloai does that nobody else does:**
+
+- **Copy/diff/apply workflow.** Protected originals, git-based diffs, explicit apply. Docker Sandboxes does bidirectional file sync (immediate, no review). cco and deva.sh are live-mount only. The archived TextCortex project came closest with git branch + diff review, but is gone.
+- **Per-sandbox agent state.** Each sandbox gets its own agent configuration and session history. Every other tool either shares the host's agent config (losing isolation) or starts fresh (losing context). yoloai's `agent_files` system seeds each sandbox independently.
+- **Workdir + aux dir model with per-directory access control.** Explicit separation of the primary project (`:copy` or `:rw`) from dependencies (read-only by default). Most tools mount a single directory. deva.sh has partial multi-directory support but no workdir/aux distinction.
+- **Profile system with user-supplied Dockerfiles.** Reproducible environments with full flexibility — not limited to package lists or pre-built templates. Paired with `profile.yaml` for runtime config (mounts, directories, resources).
+
+**Strong but shared with some competitors:**
+
+- **Network isolation with domain allowlisting.** Docker Sandboxes and sandbox-runtime also have this. yoloai's layered approach (internal network + proxy sidecar + iptables + DNS control) is the most thorough among open-source options.
+- **Agent-agnostic design.** deva.sh and cco also support multiple agents. yoloai's agent definition abstraction is cleaner but the capability isn't unique.
+- **Session logging.** Several tools have some form of this.
+
+**Where competitors are stronger:**
+
+- **Docker Sandboxes:** Hypervisor-level isolation (stronger than containers), credential proxy (key never enters VM). But: no user config carryover, no port forwarding, broken OAuth, ~3x I/O penalty on macOS.
+- **cco:** Zero-config UX, multi-backend (no Docker needed on macOS/Linux), Keychain integration. But: exposes entire host filesystem read-only, no copy/diff/apply, no profiles.
+- **sandbox-runtime:** Native OS-level isolation, no Docker needed, largest community (3k+ stars). But: known bypass routes (DNS exfiltration, proxy bypass), Claude can autonomously disable it.
+
+**The pitch:** yoloai is the only tool that lets an AI agent work freely in a disposable sandbox while protecting your originals — you review exactly what changed and choose what to keep.
+
 ## Architecture
 
 ```
