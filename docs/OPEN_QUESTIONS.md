@@ -114,6 +114,54 @@ These were deferred from MVP but might be cheap to add and valuable for dogfoodi
 
 52. ~~**Re-use prompt after destroy**~~ — **Deferred.** `yoloai reset` (#45) covers the main retry case without destroying.
 
+## UX Issues — Round 2 (from workflow simulation)
+
+53. **No read-only/investigation mode shortcut** — User wants Claude to investigate something without changing code, but `:copy` copies the whole project. No quick way to say "mount read-only, just let the agent look." `:rw` avoids the copy but semantically means writes are allowed. A `--read-only` flag or bare `:ro` suffix on workdir would let investigation tasks skip the copy entirely.
+
+54. **`yoloai reset` does not re-send the prompt** — After reset, the agent restarts but the original prompt is not re-sent. User has to attach and manually re-type. `reset` should re-feed the original prompt by default (the whole point is "try again"), with `--no-prompt` to suppress.
+
+55. **No way to send a new prompt without attaching** — After reset or start, user may want to provide a different prompt without attaching interactively. No `yoloai prompt <name> "new instructions"` command. Breaks scriptability and adds friction to iterate-and-retry loops.
+
+56. **Quick successive tasks have too much ceremony** — Three small bug fixes require 12 commands (new, apply, destroy ×3). A `yoloai run . --prompt "fix bug"` that creates a temp sandbox, waits for completion, shows diff, prompts for apply, and auto-destroys would cut this to 3 commands.
+
+57. **No indication of agent completion vs. crash** — `yoloai list` shows "exited" but doesn't distinguish clean exit from crash. `pane_dead_status` from tmux provides the exit code. `yoloai list` should show "done" vs "failed" (or at least the exit code).
+
+58. **`yoloai list` doesn't show unapplied changes** — User with multiple sandboxes must run `yoloai diff` on each to find which have changes. A `CHANGES` column (e.g., `+15 -3` or `3 files`) in `yoloai list` would save multiple commands.
+
+59. **Multiple sandbox conflict detection is absent** — Two sandboxes copy the same project and modify overlapping files. `git apply --check` catches conflicts, but the error should explain why ("changes to handler.go conflict with changes already applied") rather than raw git output. No way to predict conflicts before applying.
+
+60. **No bulk destroy or stop** — Cleaning up multiple sandboxes requires individual `yoloai destroy` with confirmation each time. `yoloai destroy name1 name2 name3` with single confirmation, or `yoloai destroy --all`, would streamline cleanup.
+
+61. **First-time base image build is slow and poorly communicated** — First `yoloai new` triggers a 2-5 minute Docker build. User expects to start working and sees scrolling Docker output. Should clearly state "Building base image (first run only, 2-5 minutes)" with progress indication.
+
+62. **`yoloai log` has no tail or search** — For 30+ minute tasks, the log is thousands of lines. No `--tail N` option (only `yoloai tail` for live following). Adding `--tail N` and defaulting to a pager when stdout is a TTY would help.
+
+63. **No way to see what prompt was given to a sandbox** — With multiple sandboxes, user forgets what each was asked to do. `yoloai list` shows name and workdir but not the prompt. `yoloai status <name>` (or `yoloai show <name>`) should display the prompt (or first 80 chars).
+
+64. **`YOLOAI_SANDBOX` is awkward for multi-sandbox workflows** — With three active sandboxes, `YOLOAI_SANDBOX=fix-bug-1 yoloai diff` is more typing than `yoloai diff fix-bug-1`. The env var only helps single-sandbox sessions. Document accordingly rather than treating it as general convenience.
+
+65. **`yoloai apply` on overlay requires container running** — Overlay apply needs the merged view, so the container must be up. If user stops the container first (natural when "done"), then tries to apply, it fails. `yoloai apply` should auto-start the container when needed for overlay, or the error should clearly explain and suggest `yoloai start` first.
+
+66. **No `yoloai new --replace` for iterate-and-retry** — User repeatedly creates sandboxes with the same name for the same project, differing only in prompt. Each time: destroy old, create new. A `--replace` flag that destroys the existing sandbox first would streamline this to one command.
+
+67. **`yoloai reset` preserves agent-state, which may work against the user** — Reset re-copies workdir but preserves agent-state (session history). Agent remembers its previous failed attempt and may repeat mistakes. No `--clean` flag to wipe agent-state for a truly fresh start. Only option is destroy + new.
+
+68. **Workdir `.` has no confirmation of resolved path** — If user runs `yoloai new fix-bug .` from the wrong directory, sandbox gets the wrong project. The creation output should show the resolved absolute path: `Creating sandbox 'fix-bug' for /home/user/projects/my-app...` to catch mistakes.
+
+69. **No inline prompt entry on `yoloai new` without `--prompt`** — If user forgets `--prompt`, they get an interactive session and must attach. More natural for quick tasks: prompt inline at creation. Consider `--edit` flag to open `$EDITOR` (like `git commit` without `-m`).
+
+70. **No `yoloai diff` safety note while agent is running** — `yoloai diff` while agent is actively writing shows a point-in-time snapshot that may include partial changes. Not dangerous (git handles this), but the output should note "agent is still running; diff may be incomplete."
+
+71. **No way to inspect profile configuration** — User can't remember what workdir or directories a profile configures without reading the YAML file manually. `yoloai profile show <name>` would eliminate this friction.
+
+72. **Shell quoting for `--prompt` is painful** — Multi-line or complex prompts require shell escaping. `--prompt-file` helps but requires a temp file. `--edit` flag to open `$EDITOR` (like `git commit` without `-m`) would be the most ergonomic for non-trivial prompts.
+
+73. **`yoloai destroy` confirms even when unnecessary** — Destroying a stopped sandbox with no unapplied changes still prompts. Confirmation should only trigger when agent is running or changes exist. Otherwise destroy immediately.
+
+74. **No warning when `:rw` workdir overlaps with existing sandbox** — Two sandboxes with `:rw` access to the same directory cause data races. Should warn when new sandbox's `:rw` workdir overlaps with an existing sandbox.
+
+75. **Codex follow-up limitation undocumented** — Codex uses headless `exec` mode with no session persistence. After exit, user can't ask follow-up questions. Should document this and suggest Claude for iterative workflows.
+
 ## Post-MVP (Codex and cleanup)
 
 37. **Codex proxy support** — Whether Codex's static Rust binary honors `HTTP_PROXY`/`HTTPS_PROXY` env vars is unverified (DESIGN.md line 340, RESEARCH.md). Critical for `--network-isolated` mode with Codex. If it ignores proxy env vars, would need iptables-only enforcement.
