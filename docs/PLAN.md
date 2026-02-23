@@ -112,8 +112,8 @@ The largest phase — implements the core creation workflow.
 - `UsageError` type (exit 2), `ConfigError` type (exit 3)
 
 `internal/sandbox/safety.go`:
-- `IsDangerousDir(path string) bool` — checks against `$HOME`, `/`, macOS system dirs, Linux system dirs
-- `CheckPathOverlap(dirs []DirMount) error` — checks if any two resolved paths have prefix overlap
+- `IsDangerousDir(path string) bool` — resolves symlinks (`filepath.EvalSymlinks`) then checks against `$HOME`, `/`, macOS system dirs, Linux system dirs
+- `CheckPathOverlap(dirs []DirMount) error` — resolves symlinks then checks if any two resolved paths have prefix overlap
 - `CheckDirtyRepo(path string) (warning string, err error)` — checks for uncommitted git changes
 
 `internal/sandbox/manager.go`:
