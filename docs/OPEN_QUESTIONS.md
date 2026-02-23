@@ -90,37 +90,29 @@ These were deferred from MVP but might be cheap to add and valuable for dogfoodi
 
 ## UX Issues (from workflow simulation)
 
-Simulated common workflows (one-off fix, iterative dev, interactive session, first-time setup, profile-based daily use). These are friction points.
+41. ~~**`.:copy` boilerplate**~~ — **Resolved:** Workdir defaults to `:copy` (the tool's core philosophy). `yoloai new fix-bug .` works. `:rw` requires explicit suffix. Safe default preserved.
 
-### High friction — affects every session
+42. ~~**Implicit workdir from cwd**~~ — **Resolved:** Keep workdir explicit (`.` required). One character is low friction and avoids accidental sandboxing of wrong directory.
 
-41. **`.:copy` is boilerplate for the most common case.** The overwhelming use case is "sandbox my current directory as a copy" — the entire point of the tool. Currently: `yoloai new fix-bug .:copy`. Typing `.:copy` on every invocation is friction. Should workdir default to `:copy` (since `:copy` IS the tool's philosophy)? Then `yoloai new fix-bug .` works. `:rw` would still require explicit opt-in, keeping the safe-default principle.
+43. ~~**Sandbox name repetition**~~ — **Resolved:** Shell completion via `yoloai completion` (Cobra built-in) in MVP. `YOLOAI_SANDBOX` env var as fallback when name arg is omitted — explicit arg always wins. No special `yoloai use` command; users just `export YOLOAI_SANDBOX=fix-bug`.
 
-42. **Implicit workdir from cwd.** Related to above. When you're already in your project directory (common case), should `yoloai new fix-bug` without a workdir argument default to `.:copy`? That gives the minimal: `yoloai new fix-bug --prompt "fix the build"`. Currently this errors because no workdir and no profile. But "I'm in my project dir, sandbox it" is the primary workflow.
+44. ~~**No `--prompt-file` or stdin**~~ — **Resolved:** Add `--prompt-file <path>`. Both `--prompt -` and `--prompt-file -` read from stdin.
 
-43. **Sandbox name typed 5-6 times per workflow.** `new`, `attach`, `diff`, `apply`, `destroy` — the name appears in every command. Shell tab-completion (Cobra supports this) is essential. Should be generated as part of `yoloai init` or documented prominently. Consider also: if only one sandbox exists, should commands default to it? e.g., `yoloai diff` with no name when there's only one sandbox.
+45. ~~**No reset/retry workflow**~~ — **Resolved:** Add `yoloai reset <name>` — re-copies workdir from original, resets git baseline, keeps sandbox config and agent-state.
 
-44. **No `--prompt-file` or stdin prompt.** Long or complex prompts are painful as `--prompt "..."` on the command line. Shell quoting, line breaks, and escaping make this worse. Consider: `--prompt-file <path>` to read from a file, or `--prompt -` to read from stdin (pipe-friendly).
+46. ~~**First-time setup friction**~~ — **Resolved:** `yoloai new` auto-detects missing setup: creates `~/.yoloai/` if absent, builds base image if missing. `yoloai init` dropped. `yoloai new --no-start` for setup-only (create sandbox without starting container).
 
-### Medium friction — affects common workflows
+47. ~~**No default profile**~~ — **Resolved:** Add `defaults.profile` to config.yaml. CLI `--profile` overrides. `--no-profile` to explicitly use base image.
 
-45. **No reset/retry workflow.** Iterative development means create → try → destroy → create again with the same options. Currently: retype the entire `yoloai new` command. Consider `yoloai reset <name>` — re-copy the workdir (restoring to original state) while keeping the same sandbox config. Avoids destroy + re-create cycle.
+48. ~~**`yoloai diff` no summary mode**~~ — **Resolved:** Add `--stat` flag (passes through to `git diff --stat`).
 
-46. **First-time setup is multiple steps.** New user experience: install → `yoloai init` → wait for base image build (slow) → set API key → `yoloai new`. Three failure points before first use. Should `yoloai new` auto-detect missing setup and offer to run init + build inline? Or at least: detect no base image and say "Run `yoloai build` first" with a clear message, rather than a cryptic Docker error.
+49. ~~**`yoloai apply` all-or-nothing**~~ — **Resolved:** `yoloai apply <name> [-- <path>...]` to apply specific files only.
 
-47. **No default profile in config.** If a user always works with one profile, they type `--profile go-dev` on every `yoloai new`. Config has `defaults.agent` but no `defaults.profile`. Should it?
+50. ~~**Shell completion setup**~~ — **Resolved:** `yoloai completion` command in MVP. Print setup instructions after first-run auto-setup during `yoloai new`.
 
-48. **`yoloai diff` has no summary mode.** When the agent made many changes, full diff output is noisy. Consider `--stat` (like `git diff --stat`) for a quick overview of which files changed and how much, before diving into the full diff.
+51. ~~**"Is it done?" check**~~ — **Deferred.** Hard to detect agent idle vs working. `yoloai tail` and `yoloai list` are sufficient for v1.
 
-49. **`yoloai apply` is all-or-nothing.** No way to apply changes to specific files. If the agent changed 10 files and you only want 3 of them, you must apply all or none. Consider `yoloai apply <name> [-- <path>...]` to apply specific files only.
-
-### Low friction — nice to have
-
-50. **Shell completion setup.** Cobra has built-in completion generation (`yoloai completion bash/zsh/fish`). This is critical for the name-repetition problem but needs to be generated and installed. Should `yoloai init` offer to set up shell completion? Or at least print instructions?
-
-51. **No quick "is it done?" check.** `yoloai list` shows "running" but that doesn't distinguish "agent is actively working" from "agent finished and is waiting for input." `yoloai tail` works but requires watching output. A status indicator for "agent idle" vs "agent working" would help but may be hard to detect.
-
-52. **No way to re-use a prompt after destroy.** Once a sandbox is destroyed, the prompt is gone. In iterative workflows where you want to try the same task differently (different model, different profile), you retype the prompt. A prompt history or `yoloai new --like <old-name>` (clone config from existing/destroyed sandbox) could help, but this is probably over-engineering for v1.
+52. ~~**Re-use prompt after destroy**~~ — **Deferred.** `yoloai reset` (#45) covers the main retry case without destroying.
 
 ## Post-MVP (Codex and cleanup)
 

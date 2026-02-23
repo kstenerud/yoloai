@@ -163,6 +163,7 @@ Field notes:
 # Always applied to every sandbox
 defaults:
   agent: claude                          # which agent to launch (claude, codex); CLI --agent overrides
+  # profile: my-project                  # default profile to use; CLI --profile overrides; --no-profile uses base image
   # Files/dirs copied into agent-state/ on first sandbox run.
   # These seed the agent's environment. Sandbox gets its own copy (not bind-mounted).
   # Options:
@@ -269,6 +270,7 @@ CLI workdir **replaces** profile workdir. CLI `-d` dirs are **additive** with pr
 | Field                  | Merge behavior                                           |
 |------------------------|----------------------------------------------------------|
 | `agent`                | Profile overrides default. CLI `--agent` overrides both. |
+| `profile`              | Defaults provide fallback. CLI `--profile` overrides. `--no-profile` uses base image. |
 | `agent_files`          | Profile replaces defaults (no merge)                     |
 | `mounts`               | Additive (no deduplication — duplicates are user error)  |
 | `resources`            | Profile overrides individual values                      |
@@ -297,6 +299,10 @@ Single Go binary. No runtime dependencies — just the binary and Docker.
 **Global flags:**
 - `--verbose` / `-v`: Enable verbose output showing Docker commands, mount operations, config resolution, and entrypoint activity. Essential for troubleshooting overlay mount failures, proxy startup issues, and entrypoint errors. Also settable via `YOLOAI_VERBOSE=1`.
 
+**Environment Variables:**
+- `YOLOAI_SANDBOX`: Default sandbox name for commands that accept `<name>`. Explicit `<name>` argument always takes precedence. Example: `YOLOAI_SANDBOX=my-task yoloai diff` is equivalent to `yoloai diff my-task`.
+- `YOLOAI_VERBOSE`: Set to `1` to enable verbose output (same as `--verbose` flag).
+
 ## Commands
 
 ```
@@ -312,12 +318,13 @@ yoloai exec <name> <command>                   Run a command inside the sandbox
 yoloai stop <name>                             Stop a sandbox (preserving state)
 yoloai start [--resume] <name>                 Start a stopped sandbox
 yoloai restart <name>                          Restart the agent in an existing sandbox
+yoloai reset <name>                            Re-copy workdir and reset git baseline
 yoloai destroy <name>                          Stop and remove a sandbox
 yoloai build [profile|--all]                   Build/rebuild Docker image(s)
 yoloai profile create <name> [--template <tpl>]  Create a profile with scaffold
 yoloai profile list                            List profiles
 yoloai profile delete <name>                   Delete a profile
-yoloai init                                    First-time setup (dirs, config, base image)
+yoloai completion [bash|zsh|fish|powershell]   Generate shell completion script
 yoloai version                                 Show version information
 ```
 
@@ -352,7 +359,7 @@ The agent definition determines the default prompt delivery mode. `--prompt` sel
 
 `yoloai new [options] <name> [<workdir>] [-d <auxdir>...]`
 
-The **workdir** is the single primary project directory — the agent's working directory. It is positional (after name) and must have `:rw` or `:copy` — error otherwise. The workdir is optional if a profile provides one.
+The **workdir** is the single primary project directory — the agent's working directory. It is positional (after name) and defaults to `:copy` mode if no suffix is given. The `:rw` suffix must be explicit. The workdir is optional if a profile provides one.
 
 **`-d` / `--dir`** specifies auxiliary directories (repeatable). Default read-only. Additive with profile directories.
 
@@ -371,20 +378,20 @@ Mount point:
 All directories are **bind-mounted read-only by default** at their original absolute host paths (mirrored paths).
 
 ```
-# Copy workdir (safe, reviewable), aux dirs read-only
-yoloai new fix-build --prompt "fix the build" ./my-app:copy -d ./shared-lib -d ./common-types
+# Copy workdir (safe, reviewable), aux dirs read-only (workdir defaults to :copy)
+yoloai new fix-build --prompt "fix the build" ./my-app -d ./shared-lib -d ./common-types
 
 # Live-edit workdir, one aux dir also writable
 yoloai new my-task ./my-app:rw -d ./shared-lib:rw -d ./common-types
 
 # Custom mount points for tools that need specific paths
-yoloai new my-task ./my-app:copy=/opt/myapp -d ./shared-lib=/usr/local/lib/shared -d ./common-types
+yoloai new my-task ./my-app=/opt/myapp -d ./shared-lib=/usr/local/lib/shared -d ./common-types
 
 # Use profile workdir, add extra aux dir from CLI
 yoloai new my-task --profile my-project -d ./extra-lib
 
-# Error: workdir has no write access
-yoloai new my-task ./my-app -d ./shared-lib
+# Explicit :copy suffix also works
+yoloai new my-task ./my-app:copy -d ./shared-lib
 ```
 
 Name is required. If omitted, an error is shown with a helpful message suggesting a name based on the workdir basename.
@@ -392,7 +399,7 @@ Name is required. If omitted, an error is shown with a helpful message suggestin
 Example layout inside the container (assuming cwd is `/home/user/projects`):
 
 ```
-yoloai new my-task ./my-app:copy -d ./shared-lib:rw -d ./common-types
+yoloai new my-task ./my-app -d ./shared-lib:rw -d ./common-types
 ```
 
 ```
@@ -407,7 +414,7 @@ Paths inside the container mirror the host — configs, error messages, and syml
 With custom mount points:
 
 ```
-yoloai new my-task ./my-app:copy=/opt/myapp -d ./shared-lib=/usr/local/lib/shared -d ./common-types
+yoloai new my-task ./my-app=/opt/myapp -d ./shared-lib=/usr/local/lib/shared -d ./common-types
 ```
 
 ```
@@ -418,13 +425,15 @@ yoloai new my-task ./my-app:copy=/opt/myapp -d ./shared-lib=/usr/local/lib/share
 
 Options:
 - `--profile <name>`: Use a profile's derived image and mounts. No profile = base image + defaults only.
-- `--prompt <text>`: Initial prompt/task for the agent (see Prompt Mechanism below).
+- `--prompt <text>`: Initial prompt/task for the agent (see Prompt Mechanism below). Use `--prompt -` to read from stdin.
+- `--prompt-file <path>`: Read prompt from a file. Use `--prompt-file -` to read from stdin.
 - `--model <model>`: Model to use. Passed to the agent's `--model` flag. If omitted, uses the agent's default.
 - `--agent <name>`: Agent to use (`claude`, `codex`). Overrides `defaults.agent` from config.
 - `--network-isolated`: Allow only the agent's required API traffic. The agent can function but cannot access other external services, download arbitrary binaries, or exfiltrate code.
 - `--network-allow <domain>`: Allow traffic to specific additional domains (can be repeated). Implies `--network-isolated`. Added to the agent's default allowlist (see below).
 - `--network-none`: Run with `--network none` for full network isolation (agent API calls will also fail). Mutually exclusive with `--network-isolated` and `--network-allow`. **Warning:** Most agents (Claude, Codex) require network access to reach their API endpoints. This flag is only useful for agents with locally-hosted models or for testing container setup without agent execution.
 - `--port <host:container>`: Expose a container port on the host (can be repeated). Example: `--port 3000:3000` for web dev. Without this, container services are not reachable from the host browser.
+- `--no-start`: Create sandbox without starting the container. Useful for setup-only operations.
 
 **Default network allowlist (per agent):**
 
@@ -448,7 +457,7 @@ The allowlist is agent-specific — each agent's definition includes its require
 
 **Workflow:**
 
-1. Error if workdir has no `:rw` or `:copy` suffix.
+1. Apply `:copy` suffix to workdir if no suffix is given. Error if workdir has `:force` without `:rw` or `:copy`.
 2. Error if any two directories resolve to the same absolute container path (mirrored host path or custom `=<path>`).
 3. For each `:copy` directory, set up an isolated writable view using one of two strategies (selected by `copy_strategy` config, default `auto`):
 
@@ -556,9 +565,16 @@ For `:rw` directories: requires the container to be running (live bind mount). I
 
 Read-only directories are skipped (no changes possible).
 
+Options:
+- `--stat`: Show summary (files changed, insertions, deletions) instead of full diff.
+
 ### `yoloai apply`
 
+`yoloai apply <name> [-- <path>...]`
+
 For `:copy` directories only. For the **full copy** strategy, runs entirely on the host — reads from `work/<encoded-path>/`, generates a patch via `git diff`, and applies it to the original host directory. Does not require the container to be running. For the **overlay** strategy, requires the container to be running (the merged view only exists when overlayfs is mounted); runs `git diff` inside the container via `docker exec`. This handles additions, modifications, and deletions. Works identically from the user's perspective regardless of `copy_strategy` — git provides the diff in both cases. For dirs that had no original git repo, excludes the synthetic `.git/` directory created by yoloai.
+
+Without `-- <path>...`, applies all changes. With `-- <path>...`, applies only changes to the specified files or directories (relative to workdir). The `--` separator is required to distinguish paths from sandbox names.
 
 Before applying, shows a summary via `git diff --stat` (files changed, insertions, deletions) and verifies the patch applies cleanly via `git apply --check`. Prompts for confirmation before proceeding.
 
@@ -637,6 +653,10 @@ This eliminates the need to diagnose *why* a sandbox isn't running before choosi
 
 `yoloai restart <name>` is equivalent to `yoloai stop <name>` followed by `yoloai start <name>`. Use cases: recovering from a corrupted container environment, applying config changes that require a fresh container (e.g., new mounts or resource limits), or restarting a wedged agent process.
 
+### `yoloai reset`
+
+`yoloai reset <name>` re-copies the workdir from the original host directory and resets the git baseline. The container is stopped and restarted. Sandbox configuration (`meta.json`) and agent state (agent-state directory) are preserved. Use case: retry the same task with a fresh workspace after the agent has made undesired changes. Only affects `:copy` directories — `:rw` directories reference the original and have no sandbox copy to reset.
+
 ### Image Cleanup
 
 Docker images (`yoloai-base`, `yoloai-<profile>`) accumulate indefinitely. A cleanup mechanism is needed but deferred pending research into Docker's image lifecycle: base images are shared parents of profile images, profile images may have running containers, layer caching means "removing" doesn't necessarily free space, and `docker image prune` vs `docker rmi` have different semantics. Half-baked pruning could break running sandboxes or nuke images the user spent time building.
@@ -699,11 +719,13 @@ The user sets the appropriate API key in their host shell profile (`ANTHROPIC_AP
 
 ## First-Run Experience
 
-`yoloai` with no arguments shows help/usage. `yoloai init` performs first-time setup:
-1. Create `~/.yoloai/` directory structure.
-2. Write a default `config.yaml` with sensible defaults.
-3. Build the base image.
-4. Print a quick-start guide.
+`yoloai` with no arguments shows help/usage. When `yoloai new` is run for the first time, auto-setup performs:
+1. Create `~/.yoloai/` directory structure if absent.
+2. Write a default `config.yaml` with sensible defaults if missing.
+3. Build the base image if missing.
+4. Print shell completion instructions and a quick-start guide.
+
+The `--no-start` flag can be used with `yoloai new` to perform setup without starting a container: `yoloai new --no-start temp-setup ./my-app`.
 
 ## Security Considerations
 
@@ -735,7 +757,7 @@ The user sets the appropriate API key in their host shell profile (`ANTHROPIC_AP
 4. ~~**Resource limits?**~~ Configurable in `config.yaml` with sensible defaults.
 5. ~~**Auto-destroy?**~~ No. Sandboxes persist until explicitly destroyed.
 6. ~~**Git integration?**~~ Yes. Copy mode auto-inits git for clean diffs. `yoloai apply` excludes `.git/`.
-7. ~~**Default mode?**~~ All dirs read-only by default. Per-directory `:rw` (live) or `:copy` (staged) suffixes. Workdir must have one of these.
+7. ~~**Default mode?**~~ All dirs read-only by default. Per-directory `:rw` (live) or `:copy` (staged) suffixes. Workdir defaults to `:copy` if no suffix given; `:rw` must be explicit.
 8. ~~**Container work directory?**~~ Directories are mounted at their original host paths (mirrored) by default, so configs, error messages, and symlinks work without translation. Custom paths available via `=<path>` override. `/yoloai/` reserved for internals. The `/work` prefix was considered but rejected — path consistency (matching host paths) outweighs the minor safety benefit, and dangerous directory detection already prevents mounting over system paths.
 9. ~~**Copy strategy?**~~ OverlayFS by default (`copy_strategy: auto`). The original directory is bind-mounted read-only as the overlayfs lower layer; writes go to an upper directory in sandbox state. Git provides diff/apply on the merged view. Falls back to full copy if overlayfs isn't available. Works cross-platform — Docker on macOS/Windows runs a Linux VM, so overlayfs works inside the container regardless of host OS. VirtioFS overhead for macOS host reads is acceptable (70-90% native after page cache warms). Config option `copy_strategy: full` available for users who prefer the traditional full-copy approach or want to avoid `CAP_SYS_ADMIN`.
 10. ~~**Config template generation?**~~ Deferred to v2. `yoloai config generate --agent codex` would generate a starter config tailored to a specific agent with recommended settings.
