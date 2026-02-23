@@ -85,10 +85,10 @@ Follow Go conventions — [Effective Go](https://go.dev/doc/effective_go) and [G
 | Functions/methods | `MixedCaps` / `mixedCaps`                 | `CreateSandbox()`, `buildArgs()`              |
 | Constants         | `MixedCaps`                               | `DefaultDiskLimit` (not `DEFAULT_DISK_LIMIT`) |
 | Interfaces        | name by method + `-er` when single-method | `Reader`, `ContainerRunner`                   |
-| Receivers         | 1-2 letters, consistent within type       | `s` for `*Sandbox`, `m` for `*Manager`        |
+| Receivers         | descriptive, like any other variable      | `sandbox` for `*Sandbox`, `mgr` for `*Manager` |
 | Acronyms          | all-caps                                  | `URL`, `HTTP`, `ID`, `API`                    |
 
-Never use underscores in Go names (except in test functions: `Test_xxx`). Never use `self` or `this` for receivers.
+Never use underscores in Go names (except in test functions: `Test_xxx`). Receivers are named descriptively like any other variable — not 1-2 letter abbreviations, and not `self` or `this`.
 
 ### Clarity over brevity
 
@@ -258,7 +258,8 @@ func NewSandboxManager(docker DockerClient, cfg Config) *SandboxManager {
 - **Package-level mutable variables** — hidden global state. Pass dependencies through constructors or function parameters.
 - **Over-engineering with interfaces** — don't create an interface until you have a consumer that needs the abstraction (testing counts as a consumer). One concrete type is simpler than one interface + one implementation.
 - **Premature abstraction** — three similar lines of code are better than a premature helper function. Build what's needed now.
-- **`self`/`this` receivers** — use short, idiomatic names (`s`, `m`, `c`)
+- **`self`/`this` receivers** — name receivers descriptively like any other variable
+- **1-2 letter receivers** — `s`, `m`, `c` are cryptic; use `sandbox`, `mgr`, `client`
 - **`SCREAMING_SNAKE` constants** — Go uses `MixedCaps` for everything
 - **Hungarian notation** — Go doesn't use type prefixes/suffixes in names
 - **Bare `panic`** in library code — always return errors
