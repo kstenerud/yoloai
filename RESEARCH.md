@@ -984,11 +984,11 @@ Every tool that implements interpolation acquires a long tail of escaping bugs, 
 | Dimension | Finding |
 |-----------|---------|
 | Demand when absent | Very high. Users are vocal and persistent. `envsubst` workaround is universal. |
-| Pain when present | Significant. Silent data corruption from `$` in passwords. Escaping breaks across versions. Confusing semantics. |
+| Pain when present | Significant when bare `$VAR` is supported. Silent data corruption from `$` in passwords. Escaping breaks across versions. Confusing semantics. Braced-only `${VAR}` eliminates most of this — bare `$` is left alone. |
 | Primary use case | Secrets (API keys, auth tokens) and per-environment overrides (ports, hostnames). |
-| Primary footgun | `$` in values silently interpreted as variable references — wrong values, no errors. |
+| Primary footgun | Bare `$VAR` syntax: `$` in values silently interpreted as variable references — wrong values, no errors. Braced-only `${VAR}` reduces the collision surface to literal `${` sequences, which are extremely rare in practice. |
 | Pre-parse vs post-parse | Pre-YAML substitution is fragile (Vector, Loki). Post-parse is safer but more complex. |
-| Best middle grounds | Spring Boot / Viper (override at API level, no in-file syntax), BOSH (`(())` avoids `$` collision), OTel (scalar-only restriction). |
+| Best middle grounds | Spring Boot / Viper (override at API level, no in-file syntax), BOSH (`(())` avoids `$` collision), OTel (scalar-only restriction). Braced-only `${VAR}` + post-parse + fail-fast is a simpler alternative that addresses the same concerns. |
 | Security concern | Helm maintainers: interpolation can enable exfiltration of env vars by malicious config authors. |
 
 ### Implications for yoloai
