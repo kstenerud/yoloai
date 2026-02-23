@@ -46,13 +46,71 @@ The Docker container is disposable — it can crash, be destroyed, be recreated.
 - **`agent-state/`** — the agent's state directory (session history, settings)
 - **`prompt.txt`** — the initial prompt to feed the agent
 - **`log.txt`** — captured tmux output for post-mortem review
-- **`meta.json`** — original paths, mode, profile, timestamps, status, `yoloai_version` (for format migration on upgrades)
+- **`meta.json`** — sandbox configuration captured at creation time. Used by all lifecycle commands to reconstruct the container environment on restart.
+
+**`meta.json` schema:**
+
+```json
+{
+  "yoloai_version": "1.0.0",
+  "name": "fix-build",
+  "created_at": "2025-01-15T10:30:00Z",
+
+  "agent": "claude",
+  "profile": "go-dev",
+  "model": "claude-sonnet-4-5-20250929",
+
+  "copy_strategy": "overlay",
+
+  "network": {
+    "mode": "isolated",
+    "allow": ["api.anthropic.com", "statsig.anthropic.com", "sentry.io"]
+  },
+
+  "workdir": {
+    "host_path": "/home/user/projects/my-app",
+    "mount_path": "/home/user/projects/my-app",
+    "mode": "copy",
+    "baseline_sha": "a1b2c3d4..."
+  },
+
+  "directories": [
+    {
+      "host_path": "/home/user/projects/shared-lib",
+      "mount_path": "/usr/local/lib/shared",
+      "mode": "rw"
+    },
+    {
+      "host_path": "/home/user/projects/common-types",
+      "mount_path": "/home/user/projects/common-types",
+      "mode": "ro"
+    }
+  ],
+
+  "has_prompt": true,
+
+  "ports": ["8080:8080"],
+  "resources": {
+    "cpus": 4,
+    "memory": "8g"
+  }
+}
+```
+
+Field notes:
+- **No `status` field.** Container state (`running`/`stopped`/`exited`) is queried live from Docker, not stored.
+- **`baseline_sha`** — only for `:copy` dirs that were git repos. `null` for non-git dirs (which use the synthetic initial commit).
+- **`network.mode`** — `"none"`, `"isolated"`, or `"default"`. Drives proxy sidecar lifecycle.
+- **`network.allow`** — the fully resolved allowlist (agent defaults + config + CLI), stored so the proxy can be recreated on restart.
+- **`model`** — `null` if the agent's default was used.
+- **`has_prompt`** — whether `prompt.txt` exists. The prompt content lives in `prompt.txt`, not here.
+- **`workdir` and `directories`** store the resolved state at creation time. The `work/` subdirectory for each `:copy` dir is derived from `host_path` via caret encoding (not stored).
 
 ## Components
 
 ### 1. Docker Images
 
-**Base image (`yoloai-base`):** Minimal foundation with common tools, rebuilt occasionally.
+**Base image (`yoloai-base`):** Based on Debian slim. Minimal foundation with common tools, rebuilt occasionally. Debian slim over Ubuntu (smaller) or Alpine (musl incompatibilities with Node.js/npm).
 - Common tools: tmux, git, build-essential, python3, etc.
 - **Claude Code:** Node.js + npm installation (`npm i -g @anthropic-ai/claude-code`) — npm required, not native binary (native binary bundles Bun which ignores proxy env vars, breaking `--network-isolated`)
 - **Codex:** Static Rust binary download (musl-linked, zero runtime dependencies, ~zero image bloat)
@@ -138,6 +196,8 @@ defaults:
 
 **Environment variable interpolation:** Config values (in both `config.yaml` and `profile.yaml`) support `${VAR}` interpolation from the host environment. Only the braced syntax `${VAR}` is recognized — bare `$VAR` is **not** interpolated and treated as literal text. This avoids the class of bugs where `$` in passwords, regex patterns, or shell strings is silently misinterpreted (a well-documented pain point with Docker Compose's unbraced `$VAR` support — see RESEARCH.md). Interpolation is applied after YAML parsing, so expanded values cannot break YAML syntax. Unset variables produce an error at sandbox creation time (fail-fast, not silent empty string).
 
+**Tilde expansion:** `~/` is expanded to `$HOME` in all path-valued fields across both `config.yaml` and `profile.yaml` (`agent_files`, `mounts`, `workdir.path`, `directories[].path`). Bare relative paths (without `~/`) are an error in all path fields.
+
 ### 3. Profiles
 
 Profiles live in `~/.yoloai/profiles/<name>/`, each containing a `Dockerfile` and a `profile.yaml`:
@@ -155,6 +215,7 @@ Profiles live in `~/.yoloai/profiles/<name>/`, each containing a `Dockerfile` an
 workdir:
   path: /home/user/my-app
   mode: copy                            # copy or rw (required for workdir)
+  # mount: /opt/myapp                   # optional custom mount point (default: mirrors host path)
 directories:
   - path: /home/user/shared-lib
     mode: rw
@@ -180,6 +241,7 @@ CLI workdir **replaces** profile workdir. CLI `-d` dirs are **additive** with pr
 
 | Field                  | Merge behavior                                           |
 |------------------------|----------------------------------------------------------|
+| `agent`                | Profile overrides default. CLI `--agent` overrides both. |
 | `agent_files`          | Profile replaces defaults (no merge)                     |
 | `mounts`               | Additive (no deduplication — duplicates are user error)  |
 | `resources`            | Profile overrides individual values                      |
@@ -205,6 +267,9 @@ CLI workdir **replaces** profile workdir. CLI `-d` dirs are **additive** with pr
 
 Single Go binary. No runtime dependencies — just the binary and Docker.
 
+**Global flags:**
+- `--verbose` / `-v`: Enable verbose output showing Docker commands, mount operations, config resolution, and entrypoint activity. Essential for troubleshooting overlay mount failures, proxy startup issues, and entrypoint errors. Also settable via `YOLOAI_VERBOSE=1`.
+
 ## Commands
 
 ```
@@ -226,6 +291,7 @@ yoloai profile create <name> [--template <tpl>]  Create a profile with scaffold
 yoloai profile list                            List profiles
 yoloai profile delete <name>                   Delete a profile
 yoloai init                                    First-time setup (dirs, config, base image)
+yoloai version                                 Show version information
 ```
 
 ### Agent Definitions
@@ -360,18 +426,20 @@ The allowlist is agent-specific — each agent's definition includes its require
 3. For each `:copy` directory, set up an isolated writable view using one of two strategies (selected by `copy_strategy` config, default `auto`):
 
    **Overlay strategy** (default when available):
-   - Host side: bind-mount the original directory read-only into the container at its original absolute path. Provide an empty upper directory from `~/.yoloai/sandboxes/<name>/work/<dirname>/`.
-   - Container side (entrypoint): mount overlayfs merging lower (original, read-only) + upper at the mirrored host path. The agent sees the full project; writes go to upper only. Original directory is inherently protected (read-only lower layer). The entrypoint must be idempotent — use `mkdir -p` for directories and check `mountpoint -q` before mounting, so it handles both fresh starts and restarts cleanly.
-   - After overlay mount: `git init` + `git add -A` + `git commit -m "initial"` on the merged view to create a baseline. If the directory is already a git repo, record the current HEAD SHA in `meta.json` and use it as the baseline instead.
+   - Host side: bind-mount the original directory read-only into the container at its original absolute path. Provide an empty upper directory from `~/.yoloai/sandboxes/<name>/work/<encoded-path>/`, where `<encoded-path>` is the absolute host path with path separators and filesystem-unsafe characters encoded using [caret encoding](https://github.com/kstenerud/caret-encoding) (e.g., `/home/user/my-app` → `^2Fhome^2Fuser^2Fmy-app`). This is fully reversible and avoids collisions when multiple directories share the same basename.
+   - Container side (entrypoint): mount overlayfs with `lowerdir` (original, read-only), `upperdir` (from host `work/<encoded-path>/upper/`), and `workdir` (from host `work/<encoded-path>/work/` — required by overlayfs for atomic copy-up operations) merged at the mirrored host path. The agent sees the full project; writes go to upper only. Original directory is inherently protected (read-only lower layer). The entrypoint must be idempotent — use `mkdir -p` for directories and check `mountpoint -q` before mounting, so it handles both fresh starts and restarts cleanly.
+   - After overlay mount, the entrypoint creates the git baseline on the merged view: `git init` + `git add -A` + `git commit -m "initial"`. If the directory is already a git repo, the baseline SHA was recorded in `meta.json` by host-side yoloai at sandbox creation time — the entrypoint skips git init.
    - Requires `CAP_SYS_ADMIN` capability on the container (not full `--privileged`).
 
    **Full copy strategy** (fallback):
+   All steps run on the host via yoloai before container start:
    - If the directory is a git repo, record the current HEAD SHA in `meta.json`.
-   - Copy to `~/.yoloai/sandboxes/<name>/work/<dirname>/`, then mount at the mirrored host path inside the container. Everything is copied regardless of `.gitignore`.
+   - Copy via `cp -a` to `~/.yoloai/sandboxes/<name>/work/<encoded-path>/` (same caret-encoding scheme as overlay), then mount at the mirrored host path inside the container. `cp -a` preserves permissions, symlinks, and all metadata. Everything is copied including `.git/` and files ignored by `.gitignore`.
    - If the copy already has a `.git/` directory (from the original repo), use the recorded SHA as the baseline — `yoloai diff` will diff against it.
    - If the copy has no `.git/`, `git init` + `git add -A` + `git commit -m "initial"` to create a baseline.
+   The container receives a ready-to-use directory with a git baseline already established.
 
-   Both strategies produce the same result from the user's perspective: a protected, writable view with git-based diff/apply. The overlay strategy is instant and space-efficient; the full copy strategy is more portable. `auto` tries overlay first, falls back to full copy if `CAP_SYS_ADMIN` is unavailable or the kernel doesn't support nested overlayfs.
+   Both strategies produce the same result from the user's perspective: a protected, writable view with git-based diff/apply. The overlay strategy is instant and space-efficient; the full copy strategy is more portable. `auto` tries overlay first, falls back to full copy if `CAP_SYS_ADMIN` is unavailable or the kernel doesn't support nested overlayfs. Explicitly setting `copy_strategy: overlay` when overlay is not available is an error (the user asked for something specific — don't silently degrade).
 
    **`auto` detection strategy** (following the pattern used by containers/storage, Podman, and Docker itself):
    1. Check `/proc/filesystems` for `overlay` — if absent, skip to full copy.
@@ -386,7 +454,9 @@ The allowlist is agent-specific — each agent's definition includes its require
 
 ### Safety Checks
 
-Before creating the sandbox:
+Before creating the sandbox (all checks run before any state is created on disk):
+- **Duplicate name detection:** Error if a sandbox with the same name already exists.
+- **Missing API key:** Error if the required API key for the selected agent is not set in the host environment.
 - **Dangerous directory detection:** Error if any mount target is `$HOME`, `/`, or a system directory. Override with `:force` suffix (e.g., `$HOME:force`, `$HOME:rw:force`).
 - **Dirty git repo detection:** If any `:rw` or `:copy` directory is a git repo with uncommitted changes, warn with specifics and prompt for confirmation:
   ```
@@ -397,7 +467,7 @@ Before creating the sandbox:
 
 ### Container Startup
 
-1. Generate a **sandbox context file** at `/yoloai/context.md` describing the environment for the agent: which directory is the workdir, which are auxiliary, mount paths and access mode of each (read-only / read-write / copy), available tools, and how auto-save works. This file lives outside the work tree in the `/yoloai/` internal directory, so it never pollutes project files, git baselines, or diffs. The agent is pointed to it via agent-specific mechanisms (`--append-system-prompt` for Claude, inclusion in the initial prompt for Codex).
+1. Generate a **sandbox context file** on the host (in the sandbox state directory) describing the environment for the agent: which directory is the workdir, which are auxiliary, mount paths and access mode of each (read-only / read-write / copy), available tools, and how auto-save works. Bind-mounted read-only into the container at `/yoloai/context.md` (same pattern as `log.txt` and `prompt.txt`). This file lives outside the work tree so it never pollutes project files, git baselines, or diffs. The agent is pointed to it via agent-specific mechanisms (`--append-system-prompt` for Claude, inclusion in the initial prompt for Codex).
 2. Start Docker container (as non-root user `yoloai`) with:
    - When `--network-isolated`: `HTTPS_PROXY` and `HTTP_PROXY` env vars pointing to the proxy sidecar (required — Claude Code's npm installation honors these via undici; Codex proxy support is TBD — see RESEARCH.md)
    - `:copy` directories: overlay strategy mounts originals as overlayfs lower layers with upper dirs from sandbox state; full copy strategy mounts copies from sandbox state. Both at their mount point (mirrored host path or custom `=<path>`, read-write)
@@ -417,7 +487,7 @@ Before creating the sandbox:
 3. Run `setup` commands from config (if any).
 4. Start tmux session named `main` with logging to `/yoloai/log.txt` (`tmux pipe-pane`).
 5. Inside tmux: launch the agent using the command from its agent definition (e.g., `claude --dangerously-skip-permissions [--model X]` or `codex --yolo`)
-6. Wait ~3s for the agent to initialize (interactive mode only).
+6. Wait for the agent to initialize (interactive mode only). Implementation should poll for the agent's ready indicator (e.g., prompt appearance in tmux output) with a timeout, rather than a fixed sleep. The ~3s figure in the agent definitions table is a typical observed startup time, not a hardcoded delay.
 7. Prompt delivery depends on the agent's prompt mode:
    - **Interactive mode** (Claude default, Codex without `--prompt`): If `/yoloai/prompt.txt` exists, feed it via `tmux load-buffer` + `tmux paste-buffer` + `tmux send-keys` with the agent's submit sequence (`Enter Enter` for Claude, `Enter` for Codex).
    - **Headless mode** (Codex with `--prompt`): Prompt passed as CLI argument in the launch command (e.g., `codex exec --yolo "PROMPT"`). No `tmux send-keys` needed.
@@ -453,15 +523,15 @@ Shows sandbox details from `meta.json`: profile, directories with their access m
 
 ### `yoloai diff`
 
-For `:copy` directories: runs `git diff` + `git status` against the baseline (the recorded HEAD SHA for existing repos, or the synthetic initial commit for non-git dirs). Shows exactly what the agent changed with proper diff formatting.
+For `:copy` directories: runs `git diff` + `git status` against the baseline (the recorded HEAD SHA for existing repos, or the synthetic initial commit for non-git dirs). Shows exactly what the agent changed with proper diff formatting. For the full copy strategy, runs on the host (reads `work/` directly). For the overlay strategy, runs inside the container via `docker exec` (the merged view requires the overlay mount). Same as `yoloai apply` — see that section for details.
 
-For `:rw` directories: if the original is a git repo, runs `git diff` against it. Otherwise, notes that diff is not available for live-mounted dirs without git.
+For `:rw` directories: requires the container to be running (live bind mount). If the original is a git repo, runs `git diff` inside the container via `docker exec`. Otherwise, notes that diff is not available for live-mounted dirs without git.
 
 Read-only directories are skipped (no changes possible).
 
 ### `yoloai apply`
 
-For `:copy` directories only. Generates a patch from `git diff` in the sandbox (whether overlay-merged or full-copy) and applies it to the original directory. This handles additions, modifications, and deletions. Works identically regardless of `copy_strategy` — git provides the diff in both cases. For dirs that had no original git repo, excludes the synthetic `.git/` directory created by yoloai.
+For `:copy` directories only. For the **full copy** strategy, runs entirely on the host — reads from `work/<encoded-path>/`, generates a patch via `git diff`, and applies it to the original host directory. Does not require the container to be running. For the **overlay** strategy, requires the container to be running (the merged view only exists when overlayfs is mounted); runs `git diff` inside the container via `docker exec`. This handles additions, modifications, and deletions. Works identically from the user's perspective regardless of `copy_strategy` — git provides the diff in both cases. For dirs that had no original git repo, excludes the synthetic `.git/` directory created by yoloai.
 
 Before applying, shows a summary via `git diff --stat` (files changed, insertions, deletions) and verifies the patch applies cleanly via `git apply --check`. Prompts for confirmation before proceeding.
 
@@ -513,7 +583,7 @@ Options:
 
 `yoloai build --all` rebuilds everything: base image first, then the proxy image (`yoloai-proxy`), then all profile images.
 
-`yoloai build` and `yoloai build --all` also build the proxy sidecar image (`yoloai-proxy`), a lightweight forward proxy (Go binary or tinyproxy) used by `--network-isolated`.
+`yoloai build` and `yoloai build --all` also build the proxy sidecar image (`yoloai-proxy`), a lightweight forward proxy used by `--network-isolated`. Implementation TBD — prefer tinyproxy if it meets requirements (HTTPS CONNECT tunneling with domain allowlist), custom Go binary as fallback. See RESEARCH.md for proxy evaluation.
 
 Useful after modifying a profile's Dockerfile or when the base image needs updating (e.g., new Claude CLI version).
 
@@ -534,7 +604,7 @@ Internally, `docker stop` sends SIGTERM and the agent terminates. The agent's st
 
 This eliminates the need to diagnose *why* a sandbox isn't running before choosing a command.
 
-**`--resume` flag:** When used, the agent is relaunched with the original prompt from `prompt.txt` prefixed with a preamble: "You were previously working on the following task and were interrupted. The work directory contains your progress so far. Continue where you left off:" followed by the original prompt text. Without `--resume`, `yoloai start` relaunches the agent in interactive mode with no prompt (user attaches and gives instructions manually).
+**`--resume` flag:** When used, the agent is relaunched in **interactive mode** (regardless of the original prompt delivery mode) with the original prompt from `prompt.txt` prefixed with a preamble: "You were previously working on the following task and were interrupted. The work directory contains your progress so far. Continue where you left off:" followed by the original prompt text. Interactive mode is always used for resume because the user may want to follow up or redirect. Error if the sandbox has no `prompt.txt` (was created without `--prompt`). Without `--resume`, `yoloai start` relaunches the agent in interactive mode with no prompt (user attaches and gives instructions manually).
 
 ### `yoloai restart`
 
@@ -549,6 +619,8 @@ Docker images (`yoloai-base`, `yoloai-<profile>`) accumulate indefinitely. A cle
 ```
 ~/.yoloai/
 ├── config.yaml                  ← global defaults (no profiles — those live in profiles/)
+├── cache/
+│   └── overlay-support          ← cached overlay detection result
 ├── profiles/
 │   ├── go-dev/
 │   │   ├── Dockerfile           ← FROM yoloai-base
@@ -563,8 +635,8 @@ Docker images (`yoloai-base`, `yoloai-<profile>`) accumulate indefinitely. A cle
         ├── log.txt              ← tmux session log
         ├── agent-state/         ← agent's state directory (per-sandbox, read-write)
         └── work/                ← overlay upper dirs (deltas) or full copies, for :copy dirs only
-            ├── <workdir>/       ← if workdir is :copy
-            └── <auxdir>/        ← if aux dir is :copy
+            ├── ^2Fhome^2Fuser^2Fmy-app/    ← caret-encoded host path
+            └── ^2Fhome^2Fuser^2Fshared/    ← (one subdir per :copy directory)
 ```
 
 ## Credential Management
