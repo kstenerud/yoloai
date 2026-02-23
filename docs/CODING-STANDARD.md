@@ -11,7 +11,7 @@ See also: global `CLAUDE.md` for language-agnostic naming philosophy and comment
 - **Go 1.22+** (latest stable)
 - `gofmt` mandatory — non-negotiable, runs on save
 - `goimports` for import grouping and cleanup
-- Module path: `github.com/<org>/yoloai` (update when repo is created)
+- Module path: `github.com/kstenerud/yoloai` (update when repo is created)
 
 ## Formatting and Linting
 
@@ -105,7 +105,7 @@ Three groups, separated by blank lines (enforced by `goimports`):
 
 1. Standard library
 2. Third-party packages
-3. Local packages (`github.com/<org>/yoloai/...`)
+3. Local packages (`github.com/kstenerud/yoloai/...`)
 
 ```go
 import (
@@ -115,7 +115,7 @@ import (
 	"github.com/docker/docker/client"
 	"github.com/spf13/cobra"
 
-	"github.com/<org>/yoloai/internal/sandbox"
+	"github.com/kstenerud/yoloai/internal/sandbox"
 )
 ```
 

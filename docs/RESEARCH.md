@@ -1416,4 +1416,43 @@ yoloai's approach (internal Docker network + `HTTP_PROXY` env vars) is less inva
 4. No MITM/TLS inspection needed for domain-based allowlisting — HTTPS `CONNECT` tunneling exposes the target domain.
 5. For v2 multi-agent support, proxy compatibility must be verified per agent. Agents using non-standard HTTP clients or bundled runtimes (like Bun) may not work.
 
+## Claude Code Installation Research
+
+Researched February 2026. The npm installation path was deprecated in late January 2026 (v2.1.15), but remains the only viable option for Docker containers that need proxy support.
+
+### Official Installation Methods
+
+| Method | Command | Runtime | Proxy support | Docker suitability |
+|--------|---------|---------|---------------|-------------------|
+| Native installer | `curl -fsSL https://claude.ai/install.sh \| bash` | Bun (bundled) | Broken (Bun fetch ignores HTTP_PROXY) | Poor |
+| npm (deprecated) | `npm i -g @anthropic-ai/claude-code` | Node.js | Full (undici honors proxy vars) | Good |
+| Homebrew | `brew install --cask claude-code` | Bun (bundled) | Broken | N/A |
+
+### Why npm Remains the Right Choice for Docker
+
+**Native installer problems:**
+
+1. **Proxy support broken.** The native binary uses two HTTP clients: axios (with `https-proxy-agent`) for OAuth/auth — honors `HTTP_PROXY`/`HTTPS_PROXY`; and Bun's native `fetch()` for API streaming — **ignores** proxy env vars. Issue [#14165](https://github.com/anthropics/claude-code/issues/14165) open since December 2025, still unresolved. Duplicate [#21298](https://github.com/anthropics/claude-code/issues/21298) also open.
+2. **Segfaults on Debian bookworm AMD64.** The `claude install` subcommand segfaults in Debian bookworm-slim AMD64 Docker containers. ARM64 works. Issue [#12044](https://github.com/anthropics/claude-code/issues/12044) closed as "not planned."
+3. **AVX CPU requirement.** Bun requires AVX instructions. VMs/VPS hosts without AVX passthrough crash with "CPU lacks AVX support." Issue [#19904](https://github.com/anthropics/claude-code/issues/19904).
+4. **Auto-updates.** The native installer updates automatically in the background — undesirable for reproducible Docker images where we control versions.
+5. **`NODE_EXTRA_CA_CERTS` partially broken.** undici's dispatcher doesn't inherit Bun's patched CA store. Issue [#25977](https://github.com/anthropics/claude-code/issues/25977).
+
+**npm is still viable:**
+
+- Package `@anthropic-ai/claude-code` continues to be published and updated on npm.
+- Anthropic's own reference `.devcontainer/Dockerfile` in the `anthropics/claude-code` repo still uses npm (`npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}`).
+- The deprecation warning is cosmetic — the package works correctly.
+- Issue [#20058](https://github.com/anthropics/claude-code/issues/20058) argues against removing the npm path.
+
+### Node.js Version
+
+Anthropic's devcontainer uses Node.js 20. This is the safe choice — it's what Anthropic tests against. Install via NodeSource APT repository for Debian.
+
+### Risks to Monitor
+
+- **npm package removal:** If Anthropic stops publishing the npm package, we lose proxy support. This would block `--network-isolated` with Claude Code.
+- **Bun proxy fix:** If issue [#14165](https://github.com/anthropics/claude-code/issues/14165) is resolved, the native binary becomes viable and we could drop the ~100MB Node.js dependency from the base image.
+- **Node.js 20 EOL:** Node.js 20 reaches end-of-life April 2026. Will need to migrate to Node.js 22 LTS before then, after verifying Claude Code compatibility.
+
 ---

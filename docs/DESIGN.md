@@ -139,7 +139,7 @@ Field notes:
 
 **Base image (`yoloai-base`):** Based on Debian slim. Minimal foundation with common tools, rebuilt occasionally. Debian slim over Ubuntu (smaller) or Alpine (musl incompatibilities with Node.js/npm).
 - Common tools: tmux, git, build-essential, python3, etc.
-- **Claude Code:** Node.js + npm installation (`npm i -g @anthropic-ai/claude-code`) — npm required, not native binary (native binary bundles Bun which ignores proxy env vars, breaking `--network-isolated`)
+- **Claude Code:** Node.js 20 LTS + npm installation (`npm i -g @anthropic-ai/claude-code`) — npm required, not native binary (native binary bundles Bun which ignores proxy env vars, segfaults on Debian bookworm AMD64, and auto-updates). npm is deprecated but still published and is the only reliable Docker/proxy path. See RESEARCH.md "Claude Code Installation Research"
 - **Codex:** Static Rust binary download (musl-linked, zero runtime dependencies, ~zero image bloat)
 - **Non-root user** (`yoloai`, UID/GID matching host user via entrypoint). Image builds with a placeholder user (UID 1001). At container start, the entrypoint runs as root: `usermod -u $HOST_UID yoloai && groupmod -g $HOST_GID yoloai` (handling exit code 12 for chown failures on mounted volumes), fixes ownership on container-managed directories, then drops privileges via `gosu yoloai`. Uses `tini` as PID 1 (`--init` or explicit `ENTRYPOINT`). Images are portable across machines since UID/GID are set at run time, not build time. Claude Code refuses `--dangerously-skip-permissions` as root; Codex does not enforce this but convention is non-root
 

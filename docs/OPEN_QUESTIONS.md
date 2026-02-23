@@ -4,29 +4,29 @@ Questions encountered during design and implementation that need resolution. Res
 
 ## Pre-Implementation (resolve before coding starts)
 
-1. **Go module path** — `github.com/<org>/yoloai` is a placeholder in CODING-STANDARD.md. What is the actual GitHub org/username?
+1. ~~**Go module path**~~ — **Resolved:** `github.com/kstenerud/yoloai`.
 
-2. **Node.js version** — Plan proposes Node.js 22 LTS via NodeSource APT repo. Is this confirmed as current LTS and compatible with Claude Code?
+2. ~~**Node.js version**~~ — **Resolved:** Node.js 20 LTS via NodeSource. Anthropic's own devcontainer uses Node 20 + npm install. The native Claude Code installer (curl script) is not suitable: bundles Bun with broken proxy support (issue #14165), segfaults on Debian bookworm AMD64 (#12044), and auto-updates. npm install shows a deprecation warning but remains the only reliable path for Docker/proxy use. See RESEARCH.md "Claude Code Installation Research".
 
-3. **tini** — Plan proposes `docker run --init` (Docker's built-in tini) rather than installing tini in the image. Simpler, but means the flag must always be passed. Any concerns?
+3. ~~**tini**~~ — **Resolved:** Use `docker run --init` (Docker's built-in tini). Simpler than installing in image. We control all container creation in code so the flag is always passed.
 
-4. **gosu** — Plan proposes installing from GitHub releases (static binary). Standard choice for Debian-based Docker images (used by official MySQL/Postgres). Agreed?
+4. ~~**gosu**~~ — **Resolved:** Install from GitHub releases (static binary). Standard for Debian images.
 
-5. **Claude ready indicator** — MVP uses a fixed 3-second delay (configurable via `YOLOAI_STARTUP_DELAY` env var) before feeding the prompt via tmux send-keys. Polling for a ready indicator is deferred. Acceptable for dogfooding?
+5. ~~**Claude ready indicator**~~ — **Resolved:** Fixed 3-second delay for MVP, configurable via `YOLOAI_STARTUP_DELAY`. Polling deferred.
 
-6. **Caret encoding scope** — MVP only encodes `/` → `^2F` (the only filesystem-unsafe character in absolute POSIX paths). The full caret encoding spec supports more characters, but they don't appear in paths. Sufficient?
+6. ~~**Caret encoding scope**~~ — **Resolved:** Implement the full caret encoding spec. Trivial to implement and avoids platform-specific assumptions.
 
 ## Deferred Items Worth Reconsidering
 
 These were deferred from MVP but might be cheap to add and valuable for dogfooding:
 
-7. **`--model` flag** — Lets you pick a cheaper/faster model for iteration. Trivial to implement (pass through to agent command). Worth including in MVP?
+7. ~~**`--model` flag**~~ — **Resolved:** Include in MVP. Trivial pass-through to agent command.
 
-8. **`yoloai exec`** — Run ad-hoc commands inside the sandbox. Useful for debugging during dogfooding. Simple wrapper around `docker exec`.
+8. ~~**`yoloai exec`**~~ — **Resolved:** Include in MVP. Simple `docker exec` wrapper, useful for debugging.
 
-9. **Dangerous directory detection** — Error on `$HOME`, `/`, system dirs. Small validation function. Prevents footgun during early use.
+9. ~~**Dangerous directory detection**~~ — **Resolved:** Include in MVP. Small validation function.
 
-10. **Dirty git repo warning** — Warn if workdir has uncommitted changes. Prevents surprise data in the copy. Small git status check.
+10. ~~**Dirty git repo warning**~~ — **Resolved:** Include in MVP. Small git status check.
 
 ## Post-MVP (resolve before relevant feature is implemented)
 

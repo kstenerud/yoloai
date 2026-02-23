@@ -7,7 +7,7 @@ No code exists yet. All design docs are complete (DESIGN.md, CODING-STANDARD.md,
 ## Issues to Resolve Before Coding
 
 1. **Go module path** — `github.com/<org>/yoloai` is a placeholder. Need actual org/username.
-2. **Node.js version** — Use Node.js 22 LTS (current LTS) via NodeSource APT repo.
+2. **Node.js version** — Use Node.js 20 LTS (current LTS) via NodeSource APT repo.
 3. **tini** — Use `docker run --init` (Docker's built-in tini). Avoids installing in image.
 4. **gosu** — Install from GitHub releases (static binary). Standard for Debian images.
 5. **Claude ready indicator** — MVP uses fixed 3-second delay (configurable via env var). Polling deferred.
@@ -15,9 +15,9 @@ No code exists yet. All design docs are complete (DESIGN.md, CODING-STANDARD.md,
 
 ## What's In / What's Deferred
 
-**MVP includes:** `build`, `new` (full-copy only, Claude only), `attach`, `diff`, `apply`, `list`, `stop`, `start`, `destroy`, `log`, credential injection.
+**MVP includes:** `build`, `new` (full-copy only, Claude only), `attach`, `diff`, `apply`, `list`, `stop`, `start`, `destroy`, `log`, `exec`, credential injection, `--model` flag, dangerous directory detection, dirty git repo warning.
 
-**Deferred:** overlay strategy, network isolation/proxy, profiles, Codex agent, `init`, `tail`/`exec`/`restart`/`status`/`version`, `--resume`, config file parsing (Viper), `auto_commit_interval`, custom mount points (`=<path>`), `agent_files`, env var interpolation, context file, aux dirs (`-d`), dirty git warnings, dangerous dir detection, `--model` flag.
+**Deferred:** overlay strategy, network isolation/proxy, profiles, Codex agent, `init`, `tail`/`restart`/`status`/`version`, `--resume`, config file parsing (Viper), `auto_commit_interval`, custom mount points (`=<path>`), `agent_files`, env var interpolation, context file, aux dirs (`-d`).
 
 ## Implementation Phases
 
@@ -75,7 +75,7 @@ Pure Go, fully unit-testable without Docker.
 `resources/Dockerfile.base`:
 - `FROM debian:bookworm-slim`
 - Install: tmux, git, build-essential, python3, curl, ca-certificates, gnupg
-- Node.js 22 LTS via NodeSource
+- Node.js 20 LTS via NodeSource
 - Claude Code: `npm install -g @anthropic-ai/claude-code`
 - gosu from GitHub releases
 - Create user `yoloai` (UID 1001 placeholder)
