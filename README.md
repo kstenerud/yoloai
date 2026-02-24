@@ -192,4 +192,4 @@ make VERSION=1.0.0 build
 
 ## License
 
-TBD
+[MIT](LICENSE)
