@@ -110,7 +110,7 @@ These were deferred from MVP but might be cheap to add and valuable for dogfoodi
 
 50. ~~**Shell completion setup**~~ — **Resolved:** `yoloai completion` command in MVP. Print setup instructions after first-run auto-setup during `yoloai new`.
 
-51. ~~**"Is it done?" check**~~ — **Deferred.** Hard to detect agent idle vs working. `yoloai tail` and `yoloai list` are sufficient for v1.
+51. ~~**"Is it done?" check**~~ — **Deferred.** Hard to detect agent idle vs working. `yoloai log` and `yoloai list` are sufficient for v1.
 
 52. ~~**Re-use prompt after destroy**~~ — **Deferred.** `yoloai reset` (#45) covers the main retry case without destroying.
 

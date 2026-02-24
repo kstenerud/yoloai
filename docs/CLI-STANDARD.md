@@ -149,7 +149,7 @@ Description of what the command does. Can be multiple sentences
 for important details.
 
 Usage:
-  yoloai new [flags] <name> <dir> [<dir>...]
+  yoloai new [flags] <name> [<workdir>]
 
 Flags:
       --profile string   Resource profile to use

@@ -2,7 +2,7 @@
 
 ## Context
 
-No code exists yet. All design docs are complete (DESIGN.md, CODING-STANDARD.md, CLI-STANDARD.md). All pre-implementation questions resolved (see OPEN_QUESTIONS.md #1–85). The goal is a working MVP that can dogfood — run `yoloai new fix-build --prompt "fix the build" ~/Projects/yoloai:copy`, have Claude Code work inside a container, then `yoloai diff` / `yoloai apply` to review and land changes.
+No code exists yet. All design docs are complete (DESIGN.md, CODING-STANDARD.md, CLI-STANDARD.md). All pre-implementation questions resolved (see OPEN_QUESTIONS.md #1–90). The goal is a working MVP that can dogfood — run `yoloai new fix-build --prompt "fix the build" ~/Projects/yoloai:copy`, have Claude Code work inside a container, then `yoloai diff` / `yoloai apply` to review and land changes.
 
 ## What's In / What's Deferred
 
@@ -244,7 +244,7 @@ The core differentiator.
 
 **`yoloai start`:** Check state — if already running with live agent: no-op; if running but agent exited (tmux pane dead): relaunch agent in existing tmux session (`tmux respawn-pane` or kill dead pane and create new one with agent command); if stopped: `ContainerStart` (entrypoint re-establishes mounts); if container removed: recreate from meta.json (skip copy step, create new credential temp file). Print confirmation.
 
-**`yoloai destroy`:** Accepts multiple names (e.g., `yoloai destroy s1 s2 s3`). `--all` flag. Smart confirmation: only prompt when agent is still running or unapplied changes exist (check via `git diff` on `:copy` dirs). `--yes` skips all confirmation. `docker stop` + `docker rm` + `os.RemoveAll` sandbox dir.
+**`yoloai destroy`:** Accepts multiple names (e.g., `yoloai destroy s1 s2 s3`). `--all` flag. Smart confirmation: only prompt when agent is still running or unapplied changes exist (check via `git status --porcelain` on host-side work directory, consistent with `list` CHANGES detection). `--yes` skips all confirmation. `docker stop` + `docker rm` + `os.RemoveAll` sandbox dir.
 
 **`yoloai reset`:** Full re-copy of workdir from original host directory with git baseline reset. Steps:
 1. Stop the container (if running)
@@ -329,5 +329,5 @@ Viper deferred to post-MVP.
 
 1. **Entrypoint fragility** — UID/GID + secrets + tmux + prompt delivery in one script. Mitigate: test manually early (Phase 3).
 2. **tmux timing** — 3s delay may not suffice on slow machines. Mitigate: configurable via `config.json` `startup_delay`.
-3. **Large copies** — `cp -a` with `node_modules` is slow. Known limitation of full-copy. Overlay (post-MVP) solves this.
+3. **Large copies** — `cp -rp` with `node_modules` is slow. Known limitation of full-copy. Overlay (post-MVP) solves this.
 4. **Docker SDK version compat** — Pin to latest `github.com/docker/docker` v28.x (the `+incompatible` suffix is expected). SDK auto-negotiates API version with older engines. Test on Docker Desktop for Mac.

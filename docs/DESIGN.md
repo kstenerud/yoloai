@@ -326,7 +326,7 @@ yoloai build [profile|--all]                   Build/rebuild Docker image(s)  (p
 yoloai profile create <name> [--template <tpl>]  Create a profile with scaffold  [POST-MVP]
 yoloai profile list                            List profiles  [POST-MVP]
 yoloai profile delete <name>                   Delete a profile  [POST-MVP]
-yoloai x <extension> [options] [name] [workdir]  Run a user-defined extension  [POST-MVP]
+yoloai x <extension> <name> [args...] [--flags...]  Run a user-defined extension  [POST-MVP]
 yoloai completion [bash|zsh|fish|powershell]   Generate shell completion script
 yoloai version                                 Show version information
 ```
@@ -583,7 +583,7 @@ Sandbox explore created
 Run 'yoloai attach explore' to start working (Ctrl-b d to detach)
 ```
 
-Profile and network lines are omitted when using defaults (base image, unrestricted network). Strategy line is omitted when using `full` copy (only shown for overlay since it implies `CAP_SYS_ADMIN`).
+Profile, network, and ports lines are omitted when using defaults (base image, unrestricted network, no ports). Strategy line is omitted when using `full` copy (only shown for overlay since it implies `CAP_SYS_ADMIN`).
 
 ### `yoloai attach`
 
@@ -830,9 +830,9 @@ args:
     description: "Existing sandbox to recreate"
 
 action: |
+  workdir="$(jq -r .workdir.host_path ~/.yoloai/sandboxes/"${existing}"/meta.json)"
   yoloai destroy --yes "${existing}"
-  yoloai new "${name}" "$(yoloai show "${existing}" --json | jq -r .workdir)" \
-    --replace --yes
+  yoloai new "${name}" "${workdir}"
 ```
 
 **The action script is not limited to `yoloai new`** — it can call any yoloai command (`exec`, `destroy`, `diff`), chain multiple commands, use conditionals, or call external tools. yoloai is just the argument parser and executor; the script defines the behavior.
@@ -845,7 +845,7 @@ action: |
 
 - Extension name derived from filename (e.g., `lint.yaml` → `lint`). Must not collide with built-in yoloai commands.
 - `args` are positional and order matters — parsed in definition order after `name`.
-- `flags` support `short` (single char), `default` (string), and `description`.
+- `flags` support `short` (single char), `default` (string), and `description`. Flag names and shorts must not collide with yoloai's global flags (`--verbose`/`-v`, `--quiet`/`-q`, `--yes`/`-y`, `--no-color`, `--help`/`-h`) — error at parse time if they do.
 - Missing required args (no `default`) produce a usage error with the extension's arg definitions.
 - The `action` field is required.
 
