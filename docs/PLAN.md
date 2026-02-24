@@ -8,7 +8,7 @@ No code exists yet. All design docs are complete (DESIGN.md, CODING-STANDARD.md,
 
 **MVP commands:** `build`, `new`, `attach`, `show`, `diff`, `apply`, `list`, `log`, `exec`, `stop`, `start`, `destroy`, `reset`, `completion`, `version`
 
-**MVP features:** Full-copy only (Claude only), credential injection, `--model` (with built-in aliases), `--prompt-file`/stdin, `--replace`, `--no-start`, `--network-none`, `--stat` on diff, `--yes` on apply/destroy, `--no-prompt`/`--clean` on reset, `--all`/multi-name on stop/destroy, smart destroy confirmation, dangerous directory detection, dirty git repo warning, path overlap detection, `YOLOAI_SANDBOX` env var, context-aware creation output, auto-paging for diff/log, shell completion, version info.
+**MVP features:** Full-copy only (Claude only), credential injection, `--model` (with built-in aliases), `--prompt-file`/stdin, `--replace`, `--no-start`, `--network-none`, `--` agent arg passthrough, `--stat` on diff, `--yes` on apply/destroy, `--no-prompt`/`--clean` on reset, `--all`/multi-name on stop/destroy, smart destroy confirmation, dangerous directory detection, dirty git repo warning, path overlap detection, `YOLOAI_SANDBOX` env var, context-aware creation output, auto-paging for diff/log, shell completion, version info.
 
 **Deferred:** overlay strategy, network isolation/proxy, profiles, Codex agent, Viper config file parsing, `auto_commit_interval`, custom mount points (`=<path>`), `agent_files`, env var interpolation, context file, aux dirs (`-d`), `--resume`, `restart`, `wait`, `run`, `tail`.
 
@@ -143,7 +143,7 @@ The core creation workflow — depends on Phase 4a infrastructure.
   9. Git baseline: if `.git/` exists record HEAD SHA, else `git init + git add -A + git commit`
   10. Always store baseline SHA in meta.json
   11. Write meta.json, prompt.txt (from `--prompt`, `--prompt-file`, or `--prompt -` for stdin), empty log.txt
-  12. Generate `/yoloai/config.json` with host_uid, host_gid, agent_command (including `--model` and `--agent` if specified), startup_delay, submit_sequence
+  12. Generate `/yoloai/config.json` with host_uid, host_gid, agent_command (including `--model`, `--agent`, and any `--` passthrough args), startup_delay, submit_sequence
   13. Create API key temp file via `os.CreateTemp` with `0600` permissions (defer cleanup). Crash-safe: accept that SIGKILL leaves a temp file (same tradeoff as Docker Compose).
   14. If `--no-start`, stop here — print creation output and exit
   15. Create + start Docker container with mounts:
@@ -157,7 +157,7 @@ The core creation workflow — depends on Phase 4a infrastructure.
   17. Wait for container entrypoint to read secrets (poll for agent process start with 5s timeout), then clean up temp key file
   18. Print context-aware creation output
 
-Wire `yoloai new` — parse `--prompt`/`-p` (including `-` for stdin), `--prompt-file`/`-f` (including `-` for stdin) — mutually exclusive, error if both provided — `--model`/`-m` (resolve built-in aliases from agent definition before passing to agent, pass through unknown values as-is), `--agent` (validate: only `claude` for MVP, error on anything else), `--network-none` (sets Docker `NetworkMode: "none"`), `--replace`, `--no-start`, `--yes`, name, workdir positional args.
+Wire `yoloai new` — parse `--prompt`/`-p` (including `-` for stdin), `--prompt-file`/`-f` (including `-` for stdin) — mutually exclusive, error if both provided — `--model`/`-m` (resolve built-in aliases from agent definition before passing to agent, pass through unknown values as-is), `--agent` (validate: only `claude` for MVP, error on anything else), `--network-none` (sets Docker `NetworkMode: "none"`), `--replace`, `--no-start`, `--yes`, name, workdir positional args. Collect `--` trailing args via Cobra's `ArgsAfter`/`cmd.Flags().ArgsLenAtDash()` and append verbatim to agent_command in config.json.
 
 **Creation output (with prompt):**
 ```

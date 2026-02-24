@@ -439,6 +439,7 @@ Options:
 - `--replace`: Destroy existing sandbox of the same name before creating. Shorthand for `yoloai destroy <name> && yoloai new <name>`. Inherits destroy's smart confirmation — prompts when the existing sandbox has a running agent or unapplied changes. `--yes` skips confirmation.
 - `--no-start`: Create sandbox without starting the container. Useful for setup-only operations.
 - `--yes`: Skip confirmation prompts (dirty repo warning). For scripting.
+- `-- <args>...`: Pass remaining arguments directly to the agent CLI invocation. Appended verbatim to the agent command. Example: `yoloai new fix-bug . -- --max-turns 5` passes `--max-turns 5` to Claude Code. First-class flags (`--model`) take precedence if duplicated.
 
 **Default network allowlist (per agent):**
 
