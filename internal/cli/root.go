@@ -7,24 +7,9 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/spf13/cobra"
 )
-
-// UsageError indicates bad arguments or missing required args (exit code 2).
-type UsageError struct {
-	Err error
-}
-
-func (err *UsageError) Error() string { return err.Err.Error() }
-func (err *UsageError) Unwrap() error { return err.Err }
-
-// ConfigError indicates a configuration problem (exit code 3).
-type ConfigError struct {
-	Err error
-}
-
-func (err *ConfigError) Error() string { return err.Err.Error() }
-func (err *ConfigError) Unwrap() error { return err.Err }
 
 // Execute runs the root command and returns the exit code.
 func Execute(ctx context.Context, version, commit, date string) int {
@@ -37,12 +22,12 @@ func Execute(ctx context.Context, version, commit, date string) int {
 
 	fmt.Fprintf(os.Stderr, "yoloai: %s\n", err) //nolint:errcheck // best-effort stderr write
 
-	var usageErr *UsageError
+	var usageErr *sandbox.UsageError
 	if errors.As(err, &usageErr) {
 		return 2
 	}
 
-	var configErr *ConfigError
+	var configErr *sandbox.ConfigError
 	if errors.As(err, &configErr) {
 		return 3
 	}
