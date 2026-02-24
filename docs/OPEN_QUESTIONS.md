@@ -198,10 +198,10 @@ These were deferred from MVP but might be cheap to add and valuable for dogfoodi
 
 ## Post-MVP (Extensions)
 
-87. **Extension shell script security** — The action script runs with the user's privileges and can do anything. Document risks clearly. Consider whether extensions from untrusted sources need a review/approval step (e.g., `yoloai x --install <url>` that shows the script before enabling).
+87. ~~**Extension shell script security**~~ — **Resolved.** Initial release: documentation only (warn users to review scripts, same trust model as Makefiles). Follow-up: review-on-first-run — display action script and prompt for confirmation on first execution or after modification (track script hash to detect changes).
 
-88. **Extension discovery and sharing** — How do users find and share extensions? Options: curated repository on GitHub, `yoloai x --install <url>`, or just "copy YAML files." Start with manual file copying; add install/registry later if demand exists.
+88. ~~**Extension discovery and sharing**~~ — **Resolved.** Manual file copying — users share YAML files via gists, repos, blog posts. Format is already self-contained. `--install <url>` and curated repos are future enhancements if demand exists.
 
-89. **Agent-agnostic extensions** — When `agent` is omitted from the YAML, the extension works with any agent. The `$agent` variable lets the script branch (`if [ "$agent" = "claude" ]; then ...`). Is this sufficient, or should there be a structured per-agent action mechanism?
+89. ~~**Agent-agnostic extensions**~~ — **Resolved.** Shell branching on `$agent` is sufficient — no structured per-agent action sections. For very different agents, create separate extension files. The `agent` field accepts a string or list: `agent: claude`, `agent: [claude, codex]`. Omit `agent` entirely for any-agent compatibility. yoloai validates the current agent against the list before running the action.
 
-90. **Extension arg validation** — Should extensions support type constraints (e.g., `type: path` to validate that an arg is an existing directory), or just pass strings through? Power users may prefer no validation; validation prevents confusing errors deep in the action script.
+90. ~~**Extension arg validation**~~ — **Resolved.** No type validation — all args and flags are passed as strings. Errors surface naturally from the commands in the action script (e.g., `yoloai new` errors on nonexistent workdir). Keeps the YAML simple and doesn't limit what extensions can do.

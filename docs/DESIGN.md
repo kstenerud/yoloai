@@ -732,7 +732,7 @@ Options:
 
 Extensions are user-defined custom commands. Each extension is a separate YAML file in `~/.yoloai/extensions/` that defines its own arguments, flags, and a shell script action. `x` is short for "extension" to the command vocabulary. This is a power-user feature.
 
-Extensions are **agent-specific** — the YAML declares which agent it's designed for. Users can create multiple extensions for the same task across different agents (e.g., `lint-claude.yaml`, `lint-codex.yaml`), or write agent-agnostic extensions that use the `$agent` variable to branch.
+Extensions declare which agents they support via the `agent` field — a single string (`agent: claude`), a list (`agent: [claude, codex]`), or omitted entirely for any-agent compatibility. yoloai validates the current agent against this list before running the action. For extensions supporting multiple agents, the `$agent` variable lets the script branch on the active agent. For extensions that are fundamentally different per agent, create separate files (e.g., `lint-claude.yaml`, `lint-codex.yaml`).
 
 **Extension format:**
 
@@ -741,7 +741,7 @@ Each extension is a standalone YAML file — self-contained, shareable, no exter
 ```yaml
 # ~/.yoloai/extensions/lint.yaml
 description: "Lint and fix code issues"
-agent: claude                         # optional: restrict to specific agent
+agent: claude                         # optional: string or list (e.g., [claude, codex]); omit for any agent
 
 args:
   - name: directory
