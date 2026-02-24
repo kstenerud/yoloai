@@ -150,28 +150,6 @@ func newNewCmd(version string) *cobra.Command {
 	return cmd
 }
 
-func newDiffCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "diff <name>",
-		Short: "Show changes the agent made",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(_ *cobra.Command, _ []string) error {
-			return errNotImplemented
-		},
-	}
-}
-
-func newApplyCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "apply <name>",
-		Short: "Copy changes back to original directories",
-		Args:  cobra.MinimumNArgs(1),
-		RunE: func(_ *cobra.Command, _ []string) error {
-			return errNotImplemented
-		},
-	}
-}
-
 func newStopCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "stop <name>...",
