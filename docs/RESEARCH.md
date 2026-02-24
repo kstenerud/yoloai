@@ -1456,3 +1456,112 @@ Anthropic's devcontainer uses Node.js 20 as of February 2026, but Node 20 reache
 - **Node.js 20 EOL:** Node.js 20 reaches end-of-life April 2026. yoloai uses Node.js 22 LTS (maintenance until April 2027) to avoid this. Claude Code's `engines` field (`>=18.0.0`) confirms compatibility.
 
 ---
+
+## Go Libraries vs Shell Commands: Copy and Git
+
+Evaluation of replacing `cp -rp` and `git` CLI exec calls with pure-Go libraries. Conducted February 2026.
+
+### Current Usage
+
+yoloai shells out to external commands for two categories of operations:
+
+**File copying** (1 call site):
+- `create.go:632` — `cp -rp <src> <dst>` via `copyDir()` for `:copy` mode workdir setup.
+
+**Git operations** (5 implemented call sites, ~8 more planned in Phase 6):
+- `create.go:528` — `runGitCmd()`: fire-and-forget `git init`, `git config`, `git add -A`, `git commit` for baseline creation.
+- `create.go:517` — `gitHeadSHA()`: `git rev-parse HEAD` to capture baseline SHA.
+- `safety.go:94` — `CheckDirtyRepo()`: `git status --porcelain` to detect uncommitted changes.
+- `inspect.go:63` — `detectChanges()`: `git status --porcelain` for sandbox change detection.
+- Phase 6 (planned): `git diff --binary`, `git diff --stat`, `git add -A`, `git apply`, `git apply --check`, `git apply --unsafe-paths --directory=<path>`.
+
+### `otiai10/copy` vs `cp -rp`
+
+**Library:** [github.com/otiai10/copy](https://github.com/otiai10/copy)
+**Version evaluated:** v1.14.1 (January 2025)
+**Stars:** ~769 | **License:** MIT | **Maintenance:** Moderate (dependabot activity, occasional features)
+
+**Dependencies:** Minimal — only `golang.org/x/sync` and `golang.org/x/sys` in production. Test-only dep `otiai10/mint` excluded from binary.
+
+**API:** Single entry point `Copy(src, dest, ...Options)` with an `Options` struct controlling symlinks, permissions, filtering, concurrency, and error handling.
+
+| Criterion | `otiai10/copy` | `cp -rp` |
+|---|---|---|
+| Dependencies | 2 (`x/sync`, `x/sys`) | 0 |
+| Portability | Pure Go — compiles anywhere | POSIX — Linux/macOS. Windows/WSL needs special handling |
+| Performance | Default settings get `copy_file_range` on Linux 5.3+ via Go stdlib. Optional `NumOfWorkers` for parallelism | Single-threaded, highly optimized at syscall level |
+| Symlinks | Configurable: `Deep` (follow), `Shallow` (recreate), `Skip` | Platform default behavior |
+| Permissions | `PreservePermission`, `PreserveOwner`, `PreserveTimes` | All preserved via `-p` |
+| Filtering | `Skip` callback — can exclude `.git`, `node_modules`, etc. | No built-in filtering |
+| xattrs | **Not supported** — silently dropped | Preserved on Linux |
+| Sparse files | **Not supported** — fully materialized at destination | Handled correctly |
+| Error handling | Go errors, `OnError` callback for partial failures | Exit code + stderr, all-or-nothing |
+| Testability | Can inject `fs.FS`, mock filesystem | Requires real filesystem |
+
+**Key limitations:**
+- No xattr support (SELinux labels, macOS resource forks silently dropped).
+- No sparse file awareness (sparse files become fully allocated).
+- `Specials: true` reads device content via `io.Copy` instead of `mknod` — blocks on most devices.
+- Socket handling regression in v1.14.1 on Docker-mounted macOS volumes (issue #173).
+- Setting `CopyBufferSize` disables kernel `copy_file_range` optimization (wraps writer, stripping `ReaderFrom` interface).
+- No COW fast-path (`FICLONE`/`clonefile`) — attempted and reverted, not in any release.
+
+**Assessment:** The `Skip` callback is genuinely useful (filtering `.git` during copy), and pure-Go portability is cleaner than shelling out. But `cp -rp` works, has zero deps, and handles edge cases (xattrs, sparse files) that the library doesn't. The copy operation is not a pain point today. **Not worth the churn now** — revisit if `Skip` filtering or Windows support becomes needed.
+
+### `go-git` vs `git` CLI
+
+**Library:** [github.com/go-git/go-git](https://github.com/go-git/go-git) (v5)
+**Version evaluated:** v5.16.5 (February 2026)
+**Stars:** ~7,215 | **License:** Apache-2.0 | **Maintenance:** Active (10 releases in 13 months, 298 contributors)
+
+**Dependencies:** 23 direct dependencies including `go-crypto`, `go-billy`, `gods`, `go-diff`, `ssh_config`, `x/crypto`, `x/net`, `x/sys`, `x/text`. Heavy transitive tree. For comparison, shelling out to git requires zero Go dependencies.
+
+**Notable users:** Gitea, Pulumi, Keybase, FluxCD. Imported by 4,756+ Go modules.
+
+| Operation | `go-git` support | `git` CLI |
+|---|---|---|
+| `git init` | Full (`PlainInit`) | Full |
+| `git add -A` | Full (`AddWithOptions{All: true}`), bug with deleted files fixed Jan 2023 | Full |
+| `git commit` | Full (`Worktree.Commit`) | Full |
+| `git rev-parse HEAD` | Full (`repo.Head().Hash()`) | Full |
+| `git status --porcelain` | Functional equivalent (`Worktree.Status()`) | Full |
+| `git diff --binary` | **Not supported.** Binary files detected but produce empty chunks — cannot generate binary diff content | Full |
+| `git diff --stat` | Partial — `Patch.Stats()` gives data but no built-in formatter | Full |
+| `git diff -- <paths>` | Manual filtering only (iterate `Changes` slice) | Full |
+| `git apply` | **Not supported at all** | Full |
+| `git apply --check` | **Not supported** | Full |
+| `git apply --unsafe-paths --directory=<path>` | **Not supported** | Full |
+
+**Performance:**
+
+| Operation | `go-git` | `git` CLI | Notes |
+|---|---|---|---|
+| `Status()` (small Node.js project) | 7-8 seconds | <1 second | Hashes all untracked files unnecessarily |
+| `Status()` (large frontend project) | 46 seconds | <1 second | No stat caching for untracked files |
+| `Add()` in large repo | O(n) per file (calls `Status()` internally) | O(1) per file | Adding N files = O(n^2) |
+| Clone (moby/moby, 32k commits) | ~1m20s, 320MB RAM | ~1m20s, 45MB RAM | Same wall time, ~7x more memory |
+
+A recent merge (PR #1747, February 2026) adds mtime/size-based skip for tracked files in `Status()`, mimicking git CLI behavior. Does not fix the untracked files performance problem.
+
+**Key limitations:**
+- **No `git apply` at all** — the entire `apply` command is absent. No `--check`, `--unsafe-paths`, or `--directory` equivalents.
+- **No binary diff content** — `FilePatch.IsBinary()` detects binary files but `Chunks()` returns empty. Cannot generate `git diff --binary` output.
+- **Patches may be malformed** for files without trailing newlines (missing `\ No newline at end of file` marker), making them incompatible with `git apply`.
+- **Merge is fast-forward only** — no three-way merge.
+- **No stash, rebase, cherry-pick, revert.**
+- **Index format limited to v2** — repos with v3/v4 index cannot be read.
+- **`file://` transport shells out to git binary anyway** — partially defeats the pure-Go purpose.
+- **No git worktree support.**
+
+**Third-party supplement:** [bluekeyes/go-gitdiff](https://github.com/bluekeyes/go-gitdiff) (142 stars, v0.8.1, January 2025) provides patch parsing and application including binary patches, but with strict mode only (no fuzzy matching), no `--unsafe-paths`/`--directory`, and no `--check` dry-run.
+
+**Assessment: No.** go-git is missing `git diff --binary` and `git apply` — both are core to yoloai's copy/diff/apply workflow. These aren't edge cases; they're the exact operations that make yoloai's differentiator work. Even for operations it does support (`init`, `add`, `commit`, `status`), it's measurably slower and adds 23 dependencies vs zero. The testability advantage (in-memory repos) doesn't justify the cost when temp-directory-based test helpers already work well. yoloai already requires Docker, so requiring git on the host is not an additional burden.
+
+### Decision
+
+| Library | Decision | Rationale |
+|---|---|---|
+| `otiai10/copy` | **Not now** | Works but doesn't solve a real problem. Revisit for `Skip` filtering or Windows support |
+| `go-git` | **No** | Missing `git diff --binary` and `git apply` — both core to the copy/diff/apply workflow |
+
+---
