@@ -32,8 +32,6 @@ func registerCommands(root *cobra.Command, version, commit, date string) {
 	)
 }
 
-var errNotImplemented = fmt.Errorf("not implemented")
-
 func newBuildCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "build [profile]",
@@ -154,9 +152,36 @@ func newCompletionCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "completion [bash|zsh|fish|powershell]",
 		Short: "Generate shell completion script",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(_ *cobra.Command, _ []string) error {
-			return errNotImplemented
+		Long: `Generate shell completion script for the specified shell.
+
+To load completions:
+
+Bash:
+  source <(yoloai completion bash)
+
+Zsh:
+  source <(yoloai completion zsh)
+
+Fish:
+  yoloai completion fish | source
+
+PowerShell:
+  yoloai completion powershell | Out-String | Invoke-Expression`,
+		Args:      cobra.ExactArgs(1),
+		ValidArgs: []string{"bash", "zsh", "fish", "powershell"},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			switch args[0] {
+			case "bash":
+				return cmd.Root().GenBashCompletionV2(cmd.OutOrStdout(), true)
+			case "zsh":
+				return cmd.Root().GenZshCompletion(cmd.OutOrStdout())
+			case "fish":
+				return cmd.Root().GenFishCompletion(cmd.OutOrStdout(), true)
+			case "powershell":
+				return cmd.Root().GenPowerShellCompletionWithDesc(cmd.OutOrStdout())
+			default:
+				return sandbox.NewUsageError("unsupported shell: %s (valid: bash, zsh, fish, powershell)", args[0])
+			}
 		},
 	}
 }

@@ -16,9 +16,12 @@ func newShowCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "show <name>",
 		Short: "Show sandbox configuration and state",
-		Args:  cobra.ExactArgs(1),
+		Args: cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			name := args[0]
+			name, _, err := resolveName(cmd, args)
+			if err != nil {
+				return err
+			}
 
 			ctx := cmd.Context()
 			client, err := docker.NewClient(ctx)

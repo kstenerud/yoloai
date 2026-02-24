@@ -17,10 +17,16 @@ func newExecCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "exec <name> <command> [args...]",
 		Short: "Run a command inside a sandbox",
-		Args:  cobra.MinimumNArgs(2),
+		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			name := args[0]
-			cmdArgs := args[1:]
+			name, rest, err := resolveName(cmd, args)
+			if err != nil {
+				return err
+			}
+			if len(rest) == 0 {
+				return sandbox.NewUsageError("command is required")
+			}
+			cmdArgs := rest
 
 			ctx := cmd.Context()
 			client, err := docker.NewClient(ctx)

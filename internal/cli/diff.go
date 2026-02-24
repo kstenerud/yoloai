@@ -24,10 +24,10 @@ func newDiffCmd() *cobra.Command {
 				paths = args[dashIdx:]
 			}
 
-			if len(positional) != 1 {
-				return sandbox.NewUsageError("expected exactly one sandbox name")
+			name, _, err := resolveName(cmd, positional)
+			if err != nil {
+				return err
 			}
-			name := positional[0]
 
 			stat, _ := cmd.Flags().GetBool("stat")
 

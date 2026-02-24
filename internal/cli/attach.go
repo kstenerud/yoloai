@@ -15,9 +15,12 @@ func newAttachCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "attach <name>",
 		Short: "Attach to a sandbox's tmux session",
-		Args:  cobra.ExactArgs(1),
+		Args: cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			name := args[0]
+			name, _, err := resolveName(cmd, args)
+			if err != nil {
+				return err
+			}
 
 			ctx := cmd.Context()
 			client, err := docker.NewClient(ctx)

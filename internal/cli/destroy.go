@@ -43,9 +43,14 @@ func newDestroyCmd() *cobra.Command {
 				}
 			} else {
 				if len(args) == 0 {
-					return sandbox.NewUsageError("at least one sandbox name is required (or use --all)")
+					envName := os.Getenv(EnvSandboxName)
+					if envName == "" {
+						return sandbox.NewUsageError("at least one sandbox name is required (or use --all or set YOLOAI_SANDBOX)")
+					}
+					names = []string{envName}
+				} else {
+					names = args
 				}
-				names = args
 			}
 
 			// Smart confirmation (unless --yes)

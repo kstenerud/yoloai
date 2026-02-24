@@ -13,9 +13,12 @@ func newResetCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "reset <name>",
 		Short: "Re-copy workdir and reset git baseline",
-		Args:  cobra.ExactArgs(1),
+		Args: cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			name := args[0]
+			name, _, err := resolveName(cmd, args)
+			if err != nil {
+				return err
+			}
 			noPrompt, _ := cmd.Flags().GetBool("no-prompt")
 			clean, _ := cmd.Flags().GetBool("clean")
 
