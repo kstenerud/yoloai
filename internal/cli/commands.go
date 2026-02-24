@@ -48,7 +48,7 @@ func newBuildCmd() *cobra.Command {
 			}
 			yoloaiDir := filepath.Join(homeDir, ".yoloai")
 
-			if err := docker.SeedResources(yoloaiDir); err != nil {
+			if _, err := docker.SeedResources(yoloaiDir); err != nil { //nolint:errcheck // explicit build always rebuilds
 				return err
 			}
 

@@ -4,6 +4,8 @@ import (
 	"archive/tar"
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,12 +18,32 @@ import (
 	"github.com/docker/docker/api/types/build"
 )
 
-// SeedResources copies embedded Dockerfile.base and entrypoint.sh to the
-// target directory if they don't already exist. Called before build to
-// ensure user-editable copies are in place.
-func SeedResources(targetDir string) error {
+const checksumFile = ".resource-checksums"
+
+// SeedResult describes what happened during resource seeding.
+type SeedResult struct {
+	Changed   bool     // files were created or updated — image rebuild needed
+	Conflicts []string // files with user customizations that weren't overwritten
+}
+
+// SeedResources writes embedded Dockerfile.base and entrypoint.sh to the
+// target directory, respecting user customizations.
+//
+// For each file, the logic is:
+//  1. File missing → write it, record checksum.
+//  2. File matches last-seeded checksum (unmodified by user) AND embedded
+//     version changed → overwrite, update checksum.
+//  3. File differs from last-seeded checksum (user customized) AND embedded
+//     version changed → write <file>.new, add to Conflicts.
+//  4. Embedded version unchanged → nothing to do.
+//
+// Returns a SeedResult indicating whether a rebuild is needed and whether
+// any conflicts were detected.
+func SeedResources(targetDir string) (SeedResult, error) {
+	var result SeedResult
+
 	if err := os.MkdirAll(targetDir, 0750); err != nil {
-		return fmt.Errorf("create directory %s: %w", targetDir, err)
+		return result, fmt.Errorf("create directory %s: %w", targetDir, err)
 	}
 
 	files := []struct {
@@ -32,17 +54,90 @@ func SeedResources(targetDir string) error {
 		{"entrypoint.sh", embeddedEntrypoint},
 	}
 
+	checksums := loadChecksums(targetDir)
+
 	for _, f := range files {
 		path := filepath.Join(targetDir, f.name)
-		if _, err := os.Stat(path); err == nil {
-			continue // file exists, don't overwrite
+		embeddedSum := sha256Hex(f.content)
+
+		existing, readErr := os.ReadFile(path) //nolint:gosec // G304: targetDir is ~/.yoloai/, not user input
+
+		if readErr != nil {
+			// File missing → write it
+			if err := os.WriteFile(path, f.content, 0600); err != nil {
+				return result, fmt.Errorf("write %s: %w", f.name, err)
+			}
+			checksums[f.name] = embeddedSum
+			result.Changed = true
+			continue
 		}
-		if err := os.WriteFile(path, f.content, 0600); err != nil {
-			return fmt.Errorf("write %s: %w", f.name, err)
+
+		existingSum := sha256Hex(existing)
+
+		if existingSum == embeddedSum {
+			// On-disk matches embedded — ensure checksum is recorded
+			checksums[f.name] = embeddedSum
+			continue
+		}
+
+		// Content differs. Was the file modified by the user?
+		lastSeeded, hasRecord := checksums[f.name]
+		userModified := hasRecord && existingSum != lastSeeded
+
+		// No checksum record (pre-manifest upgrade): conservatively assume
+		// user customization since the content differs from embedded.
+		if !hasRecord {
+			userModified = true
+		}
+
+		if userModified {
+			// User customized — don't overwrite, write .new for them to review
+			newPath := path + ".new"
+			if err := os.WriteFile(newPath, f.content, 0600); err != nil {
+				return result, fmt.Errorf("write %s: %w", f.name+".new", err)
+			}
+			result.Conflicts = append(result.Conflicts, f.name)
+		} else {
+			// Not user-modified (matches last-seeded) — safe to overwrite
+			if err := os.WriteFile(path, f.content, 0600); err != nil {
+				return result, fmt.Errorf("write %s: %w", f.name, err)
+			}
+			checksums[f.name] = embeddedSum
+			result.Changed = true
 		}
 	}
 
-	return nil
+	if err := saveChecksums(targetDir, checksums); err != nil {
+		return result, fmt.Errorf("save resource checksums: %w", err)
+	}
+
+	return result, nil
+}
+
+func sha256Hex(data []byte) string {
+	h := sha256.Sum256(data)
+	return hex.EncodeToString(h[:])
+}
+
+func loadChecksums(dir string) map[string]string {
+	path := filepath.Join(dir, checksumFile)
+	data, err := os.ReadFile(path) //nolint:gosec // G304: dir is ~/.yoloai/
+	if err != nil {
+		return make(map[string]string)
+	}
+	var m map[string]string
+	if err := json.Unmarshal(data, &m); err != nil {
+		return make(map[string]string)
+	}
+	return m
+}
+
+func saveChecksums(dir string, checksums map[string]string) error {
+	data, err := json.MarshalIndent(checksums, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dir, checksumFile), data, 0600)
 }
 
 // BuildBaseImage builds the yoloai-base Docker image from the Dockerfile

@@ -62,12 +62,18 @@ func (m *Manager) EnsureSetup(ctx context.Context) error {
 		}
 	}
 
-	// Seed Dockerfile.base and entrypoint.sh
-	if err := docker.SeedResources(yoloaiDir); err != nil {
+	// Seed Dockerfile.base and entrypoint.sh (overwrites if embedded version changed)
+	seedResult, err := docker.SeedResources(yoloaiDir)
+	if err != nil {
 		return fmt.Errorf("seed resources: %w", err)
 	}
 
-	// Check if base image exists; build if missing
+	for _, name := range seedResult.Conflicts {
+		fmt.Fprintf(m.output, "WARNING: %s has local changes; new version written to %s.new\n", name, name)          //nolint:errcheck // best-effort output
+		fmt.Fprintf(m.output, "  Review changes and run 'yoloai build' when ready\n")                                //nolint:errcheck // best-effort output
+	}
+
+	// Build base image if missing or if embedded resources were updated
 	exists, err := imageExists(ctx, m.client, "yoloai-base")
 	if err != nil {
 		return fmt.Errorf("check base image: %w", err)
@@ -76,6 +82,11 @@ func (m *Manager) EnsureSetup(ctx context.Context) error {
 		fmt.Fprintln(m.output, "Building base image (first run only, this may take a few minutes)...") //nolint:errcheck // best-effort output
 		if err := docker.BuildBaseImage(ctx, m.client, yoloaiDir, m.output, m.logger); err != nil {
 			return fmt.Errorf("build base image: %w", err)
+		}
+	} else if seedResult.Changed {
+		fmt.Fprintln(m.output, "Base image resources updated, rebuilding...") //nolint:errcheck // best-effort output
+		if err := docker.BuildBaseImage(ctx, m.client, yoloaiDir, m.output, m.logger); err != nil {
+			return fmt.Errorf("rebuild base image: %w", err)
 		}
 	}
 

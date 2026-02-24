@@ -3,6 +3,8 @@ package sandbox
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -163,12 +165,51 @@ func TestEnsureSetup_SkipsBuildWhenImageExists(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
 
+	// Pre-seed resources so SeedResources reports no changes
+	yoloaiDir := filepath.Join(tmpDir, ".yoloai")
+	_, err := docker.SeedResources(yoloaiDir)
+	require.NoError(t, err)
+
 	mock := &mockClient{} // imageExistsErr is nil → image exists
 	mgr := NewManager(mock, slog.Default(), io.Discard)
 
-	err := mgr.EnsureSetup(context.Background())
+	err = mgr.EnsureSetup(context.Background())
 	require.NoError(t, err)
-	assert.False(t, mock.buildCalled, "ImageBuild should not be called when image exists")
+	assert.False(t, mock.buildCalled, "ImageBuild should not be called when image exists and resources unchanged")
+}
+
+func TestEnsureSetup_RebuildWhenResourcesChanged(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	// First seed to establish checksum manifest
+	yoloaiDir := filepath.Join(tmpDir, ".yoloai")
+	_, err := docker.SeedResources(yoloaiDir)
+	require.NoError(t, err)
+
+	// Simulate a binary upgrade: write stale content with matching checksums
+	// (so SeedResources sees "unmodified by user" but "differs from embedded")
+	staleContent := []byte("# old version")
+	require.NoError(t, os.WriteFile(filepath.Join(yoloaiDir, "entrypoint.sh"), staleContent, 0600))
+	// Update checksum to match stale content (not user-modified, just old version)
+	checksumPath := filepath.Join(yoloaiDir, ".resource-checksums")
+	checksumData, err := os.ReadFile(checksumPath) //nolint:gosec // G304: test code
+	require.NoError(t, err)
+	var checksums map[string]string
+	require.NoError(t, json.Unmarshal(checksumData, &checksums))
+	checksums["entrypoint.sh"] = fmt.Sprintf("%x", sha256.Sum256(staleContent))
+	updated, err := json.Marshal(checksums)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(checksumPath, updated, 0600))
+
+	mock := &mockClient{} // image exists
+	var output bytes.Buffer
+	mgr := NewManager(mock, slog.Default(), &output)
+
+	err = mgr.EnsureSetup(context.Background())
+	require.NoError(t, err)
+	assert.True(t, mock.buildCalled, "ImageBuild should be called when resources changed")
+	assert.Contains(t, output.String(), "resources updated")
 }
 
 func TestEnsureSetup_BuildsWhenImageMissing(t *testing.T) {
