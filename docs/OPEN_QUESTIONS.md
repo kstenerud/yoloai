@@ -195,3 +195,13 @@ These were deferred from MVP but might be cheap to add and valuable for dogfoodi
 39. **Codex TUI behavior in tmux** — Interactive mode (`codex --yolo` without `exec`) behavior in tmux is unverified (RESEARCH.md).
 
 40. **Image cleanup mechanism** — Docker images accumulate indefinitely. Cleanup is deferred pending research into Docker's image lifecycle (DESIGN.md line 642). Needs design for safe pruning that doesn't break running sandboxes.
+
+## Post-MVP (Extensions)
+
+87. **Extension shell script security** — The action script runs with the user's privileges and can do anything. Document risks clearly. Consider whether extensions from untrusted sources need a review/approval step (e.g., `yoloai x --install <url>` that shows the script before enabling).
+
+88. **Extension discovery and sharing** — How do users find and share extensions? Options: curated repository on GitHub, `yoloai x --install <url>`, or just "copy YAML files." Start with manual file copying; add install/registry later if demand exists.
+
+89. **Agent-agnostic extensions** — When `agent` is omitted from the YAML, the extension works with any agent. The `$agent` variable lets the script branch (`if [ "$agent" = "claude" ]; then ...`). Is this sufficient, or should there be a structured per-agent action mechanism?
+
+90. **Extension arg validation** — Should extensions support type constraints (e.g., `type: path` to validate that an arg is an existing directory), or just pass strings through? Power users may prefer no validation; validation prevents confusing errors deep in the action script.

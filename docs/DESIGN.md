@@ -326,6 +326,7 @@ yoloai build [profile|--all]                   Build/rebuild Docker image(s)  (p
 yoloai profile create <name> [--template <tpl>]  Create a profile with scaffold  [POST-MVP]
 yoloai profile list                            List profiles  [POST-MVP]
 yoloai profile delete <name>                   Delete a profile  [POST-MVP]
+yoloai x <extension> [options] [name] [workdir]  Run a user-defined extension  [POST-MVP]
 yoloai completion [bash|zsh|fish|powershell]   Generate shell completion script
 yoloai version                                 Show version information
 ```
@@ -725,6 +726,129 @@ Options:
 - `--no-prompt`: Skip re-sending the prompt after reset.
 - `--clean`: Wipe agent-state in addition to re-copying workdir. Full reset of both workspace and agent memory.
 
+### [POST-MVP] `yoloai x` (Extensions)
+
+`yoloai x <extension> <name> [args...] [--flags...]`
+
+Extensions are user-defined custom commands. Each extension is a separate YAML file in `~/.yoloai/extensions/` that defines its own arguments, flags, and a shell script action. `x` is short for "extension" to the command vocabulary. This is a power-user feature.
+
+Extensions are **agent-specific** — the YAML declares which agent it's designed for. Users can create multiple extensions for the same task across different agents (e.g., `lint-claude.yaml`, `lint-codex.yaml`), or write agent-agnostic extensions that use the `$agent` variable to branch.
+
+**Extension format:**
+
+Each extension is a standalone YAML file — self-contained, shareable, no external dependencies.
+
+```yaml
+# ~/.yoloai/extensions/lint.yaml
+description: "Lint and fix code issues"
+agent: claude                         # optional: restrict to specific agent
+
+args:
+  - name: directory
+    description: "Directory to lint"
+
+flags:
+  - name: severity
+    short: s
+    description: "Minimum severity to fix"
+    default: "warning"
+  - name: max-turns
+    description: "Maximum agent turns"
+    default: "5"
+
+action: |
+  yoloai new "${name}" "${directory}" \
+    --model sonnet \
+    --prompt "Find and fix all ${severity}-level and above linting issues. Run the linter, fix what it finds, repeat until clean." \
+    -- --max-turns "${max_turns}"
+```
+
+**Usage:**
+
+```
+# Run the lint extension — creates sandbox "my-lint", lints ./src
+yoloai x lint my-lint ./src
+
+# Override a flag
+yoloai x lint my-lint ./src --severity error
+
+# Short flag
+yoloai x lint my-lint ./src -s error --max-turns 10
+```
+
+**How it works:**
+
+1. yoloai finds `~/.yoloai/extensions/lint.yaml` and parses its `args` and `flags` definitions.
+2. yoloai parses the user's command line against those definitions — `name` is always the first positional (built-in), then extension-defined `args` follow.
+3. If `agent` is specified in the YAML and doesn't match the current `--agent` / `defaults.agent`, error with a message suggesting the right extension.
+4. All captured values are set as environment variables and the `action` script is executed via `sh -c`.
+
+**Variables available to the action script:**
+
+| Variable      | Source                                       |
+|---------------|----------------------------------------------|
+| `$name`       | Sandbox name (first positional, always required) |
+| `$agent`      | Resolved agent name (`--agent` / `defaults.agent`) |
+| `$<arg_name>` | Each defined arg, by its `name` field        |
+| `$<flag_name>`| Each defined flag, by its `name` field (default applied if not provided) |
+
+Flags with hyphens in their name are available with underscores: `--max-turns` → `$max_turns`.
+
+**More examples:**
+
+```yaml
+# ~/.yoloai/extensions/review.yaml
+description: "Code review with configurable focus"
+agent: claude
+
+args:
+  - name: directory
+    description: "Directory to review"
+
+flags:
+  - name: focus
+    short: f
+    description: "Review focus area"
+    default: "bugs and security"
+  - name: model
+    short: m
+    description: "Model to use"
+    default: "opus"
+
+action: |
+  yoloai new "${name}" "${directory}" \
+    --model "${model}" \
+    --prompt "Review this codebase. Focus on: ${focus}. Provide a detailed report with file locations and suggested fixes."
+```
+
+```yaml
+# ~/.yoloai/extensions/iterate.yaml
+description: "Destroy and recreate a sandbox with the same settings"
+
+args:
+  - name: existing
+    description: "Existing sandbox to recreate"
+
+action: |
+  yoloai destroy --yes "${existing}"
+  yoloai new "${name}" "$(yoloai show "${existing}" --json | jq -r .workdir)" \
+    --replace --yes
+```
+
+**The action script is not limited to `yoloai new`** — it can call any yoloai command (`exec`, `destroy`, `diff`), chain multiple commands, use conditionals, or call external tools. yoloai is just the argument parser and executor; the script defines the behavior.
+
+**Listing extensions:**
+
+`yoloai x --list` scans `~/.yoloai/extensions/` and shows each extension's name, description, agent, and defined args/flags.
+
+**Validation:**
+
+- Extension name derived from filename (e.g., `lint.yaml` → `lint`). Must not collide with built-in yoloai commands.
+- `args` are positional and order matters — parsed in definition order after `name`.
+- `flags` support `short` (single char), `default` (string), and `description`.
+- Missing required args (no `default`) produce a usage error with the extension's arg definitions.
+- The `action` field is required.
+
 ### Image Cleanup
 
 Docker images (`yoloai-base`, `yoloai-<profile>`) accumulate indefinitely. A cleanup mechanism is needed but deferred pending research into Docker's image lifecycle: base images are shared parents of profile images, profile images may have running containers, layer caching means "removing" doesn't necessarily free space, and `docker image prune` vs `docker rmi` have different semantics. Half-baked pruning could break running sandboxes or nuke images the user spent time building.
@@ -738,6 +862,9 @@ Docker images (`yoloai-base`, `yoloai-<profile>`) accumulate indefinitely. A cle
 ├── entrypoint.sh                ← seeded from embedded defaults, user-editable
 ├── cache/
 │   └── overlay-support          ← cached overlay detection result
+├── extensions/
+│   ├── lint.yaml                ← user-defined extension (one file per command)
+│   └── review.yaml
 ├── profiles/
 │   ├── go-dev/
 │   │   ├── Dockerfile           ← FROM yoloai-base
