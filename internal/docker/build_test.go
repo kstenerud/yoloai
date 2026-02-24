@@ -63,7 +63,7 @@ func TestSeedResources_OverwritesUnmodifiedFiles(t *testing.T) {
 	// to match the modified file — simulating "last seeded was this old version."
 	staleContent := []byte("# old seeded version\n")
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "entrypoint.sh"), staleContent, 0600))
-	checksums := loadChecksums(dir)
+	checksums, _ := loadChecksums(dir)
 	checksums["entrypoint.sh"] = sha256Hex(staleContent) // checksum matches on-disk
 	require.NoError(t, saveChecksums(dir, checksums))
 
@@ -93,7 +93,7 @@ func TestSeedResources_ConflictOnUserCustomization(t *testing.T) {
 
 	// Simulate embedded version change by tampering with the checksum
 	// to differ from both on-disk and the real embedded content.
-	checksums := loadChecksums(dir)
+	checksums, _ := loadChecksums(dir)
 	checksums["entrypoint.sh"] = sha256Hex([]byte("# original seeded version"))
 	require.NoError(t, saveChecksums(dir, checksums))
 
@@ -103,6 +103,7 @@ func TestSeedResources_ConflictOnUserCustomization(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, result.Changed, "should not report changed when conflict detected")
 	assert.Contains(t, result.Conflicts, "entrypoint.sh")
+	assert.False(t, result.ManifestMissing, "manifest exists, just has user modifications")
 
 	// User's file should be preserved
 	content, err := os.ReadFile(filepath.Join(dir, "entrypoint.sh")) //nolint:gosec // G304: test code with temp dir
@@ -130,6 +131,7 @@ func TestSeedResources_NoManifestAssumesUserCustomization(t *testing.T) {
 	assert.True(t, result.Changed)
 	// entrypoint.sh differs from embedded with no manifest → conflict
 	assert.Contains(t, result.Conflicts, "entrypoint.sh")
+	assert.True(t, result.ManifestMissing, "should report manifest missing")
 
 	// User's file preserved
 	content, err := os.ReadFile(filepath.Join(dir, "entrypoint.sh")) //nolint:gosec // G304: test code with temp dir

@@ -22,8 +22,9 @@ const checksumFile = ".resource-checksums"
 
 // SeedResult describes what happened during resource seeding.
 type SeedResult struct {
-	Changed   bool     // files were created or updated — image rebuild needed
-	Conflicts []string // files with user customizations that weren't overwritten
+	Changed         bool     // files were created or updated — image rebuild needed
+	Conflicts       []string // files with user customizations that weren't overwritten
+	ManifestMissing bool     // checksum manifest was missing or corrupt (first run after upgrade)
 }
 
 // SeedResources writes embedded Dockerfile.base and entrypoint.sh to the
@@ -54,7 +55,8 @@ func SeedResources(targetDir string) (SeedResult, error) {
 		{"entrypoint.sh", embeddedEntrypoint},
 	}
 
-	checksums := loadChecksums(targetDir)
+	checksums, manifestOK := loadChecksums(targetDir)
+	result.ManifestMissing = !manifestOK
 
 	for _, f := range files {
 		path := filepath.Join(targetDir, f.name)
@@ -119,17 +121,20 @@ func sha256Hex(data []byte) string {
 	return hex.EncodeToString(h[:])
 }
 
-func loadChecksums(dir string) map[string]string {
+// loadChecksums reads the checksum manifest. Returns the map and true if the
+// manifest was loaded successfully, or an empty map and false if it was missing
+// or corrupt.
+func loadChecksums(dir string) (map[string]string, bool) {
 	path := filepath.Join(dir, checksumFile)
 	data, err := os.ReadFile(path) //nolint:gosec // G304: dir is ~/.yoloai/
 	if err != nil {
-		return make(map[string]string)
+		return make(map[string]string), false
 	}
 	var m map[string]string
 	if err := json.Unmarshal(data, &m); err != nil {
-		return make(map[string]string)
+		return make(map[string]string), false
 	}
-	return m
+	return m, true
 }
 
 func saveChecksums(dir string, checksums map[string]string) error {

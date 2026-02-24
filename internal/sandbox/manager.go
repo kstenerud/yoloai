@@ -68,9 +68,17 @@ func (m *Manager) EnsureSetup(ctx context.Context) error {
 		return fmt.Errorf("seed resources: %w", err)
 	}
 
-	for _, name := range seedResult.Conflicts {
-		fmt.Fprintf(m.output, "WARNING: %s has local changes; new version written to %s.new\n", name, name)          //nolint:errcheck // best-effort output
-		fmt.Fprintf(m.output, "  Review changes and run 'yoloai build' when ready\n")                                //nolint:errcheck // best-effort output
+	if len(seedResult.Conflicts) > 0 {
+		if seedResult.ManifestMissing {
+			fmt.Fprintln(m.output, "WARNING: resource checksum manifest (~/.yoloai/.resource-checksums) is missing or corrupt.") //nolint:errcheck // best-effort output
+			fmt.Fprintln(m.output, "  Cannot determine if the following files have local changes:")                              //nolint:errcheck // best-effort output
+		}
+		for _, name := range seedResult.Conflicts {
+			fmt.Fprintf(m.output, "WARNING: %s differs from the expected version; new version written to %s.new\n", name, name) //nolint:errcheck // best-effort output
+		}
+		fmt.Fprintln(m.output, "  To accept the new version: mv ~/.yoloai/<file>.new ~/.yoloai/<file>")                 //nolint:errcheck // best-effort output
+		fmt.Fprintln(m.output, "  To keep your version:      rm ~/.yoloai/<file>.new")                                  //nolint:errcheck // best-effort output
+		fmt.Fprintln(m.output, "  Then run 'yoloai build' to rebuild the base image.")                                  //nolint:errcheck // best-effort output
 	}
 
 	// Build base image if missing or if embedded resources were updated
