@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"github.com/kstenerud/yoloai/internal/docker"
+	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/spf13/cobra"
 )
 
@@ -14,7 +15,7 @@ import (
 func registerCommands(root *cobra.Command, version, commit, date string) {
 	root.AddCommand(
 		newBuildCmd(),
-		newNewCmd(),
+		newNewCmd(version),
 		newAttachCmd(),
 		newShowCmd(),
 		newDiffCmd(),
@@ -70,15 +71,83 @@ func newBuildCmd() *cobra.Command {
 	}
 }
 
-func newNewCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "new [flags] <name> [<workdir>]",
+func newNewCmd(version string) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "new [flags] <name> [<workdir>] [-- <agent-args>...]",
 		Short: "Create and start a sandbox",
-		Args:  cobra.RangeArgs(1, 2),
-		RunE: func(_ *cobra.Command, _ []string) error {
-			return errNotImplemented
+		Args:  cobra.ArbitraryArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			// Parse positional args considering --
+			dashIdx := cmd.ArgsLenAtDash()
+			var positional, passthrough []string
+			if dashIdx < 0 {
+				positional = args
+			} else {
+				positional = args[:dashIdx]
+				passthrough = args[dashIdx:]
+			}
+
+			if len(positional) < 1 {
+				return sandbox.NewUsageError("sandbox name is required")
+			}
+			if len(positional) > 2 {
+				return sandbox.NewUsageError("too many positional arguments (expected <name> [<workdir>])")
+			}
+
+			name := positional[0]
+			workdirArg := "."
+			if len(positional) > 1 {
+				workdirArg = positional[1]
+			}
+
+			prompt, _ := cmd.Flags().GetString("prompt")
+			promptFile, _ := cmd.Flags().GetString("prompt-file")
+			model, _ := cmd.Flags().GetString("model")
+			agentName, _ := cmd.Flags().GetString("agent")
+			networkNone, _ := cmd.Flags().GetBool("network-none")
+			ports, _ := cmd.Flags().GetStringArray("port")
+			replace, _ := cmd.Flags().GetBool("replace")
+			noStart, _ := cmd.Flags().GetBool("no-start")
+			yes, _ := cmd.Flags().GetBool("yes")
+
+			ctx := cmd.Context()
+			client, err := docker.NewClient(ctx)
+			if err != nil {
+				return err
+			}
+			defer client.Close() //nolint:errcheck // best-effort cleanup
+
+			mgr := sandbox.NewManager(client, slog.Default(), cmd.ErrOrStderr())
+
+			return mgr.Create(ctx, sandbox.CreateOptions{
+				Name:        name,
+				WorkdirArg:  workdirArg,
+				Agent:       agentName,
+				Model:       model,
+				Prompt:      prompt,
+				PromptFile:  promptFile,
+				NetworkNone: networkNone,
+				Ports:       ports,
+				Replace:     replace,
+				NoStart:     noStart,
+				Yes:         yes,
+				Passthrough: passthrough,
+				Version:     version,
+			})
 		},
 	}
+
+	cmd.Flags().StringP("prompt", "p", "", "Prompt text for the agent")
+	cmd.Flags().StringP("prompt-file", "f", "", "File containing the prompt")
+	cmd.Flags().StringP("model", "m", "", "Model name or alias")
+	cmd.Flags().String("agent", "claude", "Agent to use")
+	cmd.Flags().Bool("network-none", false, "Disable network access")
+	cmd.Flags().StringArray("port", nil, "Port mapping (host:container)")
+	cmd.Flags().Bool("replace", false, "Replace existing sandbox")
+	cmd.Flags().Bool("no-start", false, "Create but don't start the container")
+	cmd.Flags().BoolP("yes", "y", false, "Skip confirmations")
+
+	return cmd
 }
 
 func newAttachCmd() *cobra.Command {
