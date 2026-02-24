@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 
 	cerrdefs "github.com/containerd/errdefs"
-	"github.com/docker/docker/api/types/container"
 	"github.com/kstenerud/yoloai/internal/docker"
 )
 
@@ -87,26 +86,6 @@ func (m *Manager) EnsureSetup(ctx context.Context) error {
 			return fmt.Errorf("write config.yaml: %w", err)
 		}
 		fmt.Fprintln(m.output, "Tip: enable shell completions with 'yoloai completion --help'") //nolint:errcheck // best-effort output
-	}
-
-	return nil
-}
-
-// Destroy stops and removes the container, then deletes the sandbox directory.
-// Minimal stub — full implementation in Phase 7.
-func (m *Manager) Destroy(ctx context.Context, name string, _ bool) error {
-	containerName := "yoloai-" + name
-
-	// Stop container (ignore errors — may not be running)
-	_ = m.client.ContainerStop(ctx, containerName, container.StopOptions{})
-
-	// Remove container (ignore errors — may not exist)
-	_ = m.client.ContainerRemove(ctx, containerName, container.RemoveOptions{Force: true})
-
-	// Remove sandbox directory
-	sandboxDir := Dir(name)
-	if err := os.RemoveAll(sandboxDir); err != nil {
-		return fmt.Errorf("remove sandbox directory: %w", err)
 	}
 
 	return nil

@@ -150,50 +150,6 @@ func newNewCmd(version string) *cobra.Command {
 	return cmd
 }
 
-func newStopCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "stop <name>...",
-		Short: "Stop sandboxes (preserving state)",
-		Args:  cobra.MinimumNArgs(1),
-		RunE: func(_ *cobra.Command, _ []string) error {
-			return errNotImplemented
-		},
-	}
-}
-
-func newStartCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "start <name>",
-		Short: "Start a stopped sandbox",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(_ *cobra.Command, _ []string) error {
-			return errNotImplemented
-		},
-	}
-}
-
-func newDestroyCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "destroy <name>...",
-		Short: "Stop and remove sandboxes",
-		Args:  cobra.MinimumNArgs(1),
-		RunE: func(_ *cobra.Command, _ []string) error {
-			return errNotImplemented
-		},
-	}
-}
-
-func newResetCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "reset <name>",
-		Short: "Re-copy workdir and reset git baseline",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(_ *cobra.Command, _ []string) error {
-			return errNotImplemented
-		},
-	}
-}
-
 func newCompletionCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "completion [bash|zsh|fish|powershell]",
