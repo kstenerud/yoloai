@@ -2,7 +2,11 @@ package cli
 
 import (
 	"fmt"
+	"log/slog"
+	"os"
+	"path/filepath"
 
+	"github.com/kstenerud/yoloai/internal/docker"
 	"github.com/spf13/cobra"
 )
 
@@ -34,8 +38,34 @@ func newBuildCmd() *cobra.Command {
 		Use:   "build [profile]",
 		Short: "Build or rebuild Docker image(s)",
 		Args:  cobra.MaximumNArgs(1),
-		RunE: func(_ *cobra.Command, _ []string) error {
-			return errNotImplemented
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) > 0 {
+				return fmt.Errorf("profiles not yet implemented")
+			}
+
+			homeDir, err := os.UserHomeDir()
+			if err != nil {
+				return fmt.Errorf("get home directory: %w", err)
+			}
+			yoloaiDir := filepath.Join(homeDir, ".yoloai")
+
+			if err := docker.SeedResources(yoloaiDir); err != nil {
+				return err
+			}
+
+			ctx := cmd.Context()
+			client, err := docker.NewClient(ctx)
+			if err != nil {
+				return err
+			}
+			defer client.Close() //nolint:errcheck // best-effort cleanup
+
+			if err := docker.BuildBaseImage(ctx, client, yoloaiDir, os.Stderr, slog.Default()); err != nil {
+				return err
+			}
+
+			_, err = fmt.Fprintln(cmd.OutOrStdout(), "Base image yoloai-base built successfully")
+			return err
 		},
 	}
 }

@@ -1,0 +1,45 @@
+FROM debian:bookworm-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    tmux \
+    git \
+    build-essential \
+    python3 \
+    curl \
+    ca-certificates \
+    gnupg \
+    jq \
+    && rm -rf /var/lib/apt/lists/*
+
+# Node.js 22 LTS via NodeSource
+ARG NODE_MAJOR=22
+RUN mkdir -p /etc/apt/keyrings \
+    && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
+       | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg \
+    && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_${NODE_MAJOR}.x nodistro main" \
+       > /etc/apt/sources.list.d/nodesource.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+# Claude Code via npm
+RUN npm install -g @anthropic-ai/claude-code
+
+# gosu for dropping privileges
+ARG GOSU_VERSION=1.17
+RUN curl -fsSL "https://github.com/tianon/gosu/releases/download/${GOSU_VERSION}/gosu-$(dpkg --print-architecture)" \
+      -o /usr/local/bin/gosu \
+    && chmod +x /usr/local/bin/gosu \
+    && gosu --version
+
+# Non-root user (placeholder UID/GID — entrypoint adjusts at runtime)
+RUN groupadd -g 1001 yoloai \
+    && useradd -m -u 1001 -g yoloai -s /bin/bash yoloai
+
+# Internal directory for sandbox state files
+RUN mkdir -p /yoloai && chown yoloai:yoloai /yoloai
+
+COPY entrypoint.sh /yoloai/entrypoint.sh
+RUN chmod +x /yoloai/entrypoint.sh
+
+ENTRYPOINT ["/yoloai/entrypoint.sh"]
