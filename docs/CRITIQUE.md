@@ -1,49 +1,36 @@
-# Critique — Round 11
+# Critique — Round 12
 
-Comprehensive pre-implementation audit after extensions design addition. Focus: cross-document consistency, stale references, extension design correctness, MVP plan completeness.
+Post-Round-11 audit. Focus: incomplete fixes from Round 11, remaining stale references, example consistency.
 
 ## Findings
 
-### Cross-Document Consistency
+### Incomplete Fixes from Round 11
 
-- **C139.** PLAN.md Risks section (line 332) still says "Large copies — `cp -a` with `node_modules` is slow." Should be `cp -rp` — this was the last remaining `cp -a` reference missed in Round 10.
+- **C149.** DESIGN.md destroy smart confirmation (line 643) still says "detected via `git diff` on `:copy` directories." C146 fixed this in PLAN.md (line 247) but missed the same text in DESIGN.md. Should be `git status --porcelain` — consistent with PLAN.md and DESIGN.md's own `yoloai list` CHANGES column (line 671).
 
-- **C140.** DESIGN.md command table (line 329) shows `yoloai x <extension> [options] [name] [workdir]` with `[name]` as optional, but the detailed section specifies `<name>` as always required (first positional, built-in). The command table should use `<name>` to match.
+- **C150.** C145 was marked as applied ("Added `Ports:` line to creation output examples in both PLAN.md and DESIGN.md") but only the omission *rule* was updated — no actual creation output example with a `Ports:` line was added to either document. Add an example (analogous to the `Network: none` example) showing `Ports:` in creation output when `--port` is used.
 
-- **C141.** DESIGN.md extensions `iterate.yaml` example (lines 824-836) is logically broken. It runs `yoloai destroy --yes "${existing}"` first, then tries `yoloai show "${existing}" --json | jq -r .workdir` — but the sandbox metadata was already deleted by destroy. Fix: capture the workdir before destroying.
-
-- **C142.** The `iterate.yaml` example uses `yoloai show "${existing}" --json`, but `--json` is not documented on `yoloai show` — only `yoloai list` has `--json`. Either add `--json` to `yoloai show` or use a different approach (e.g., read meta.json directly via `jq`).
-
-- **C143.** CLI-STANDARD.md help text example (line 152) shows `yoloai new [flags] <name> <dir> [<dir>...]` — outdated. Should be `yoloai new [flags] <name> [<workdir>]` since aux dirs (`-d`) are `[POST-MVP]`.
-
-- **C144.** PLAN.md context line (line 5) says "OPEN_QUESTIONS.md #1–85" but questions now go through #90. Should say "#1–90".
-
-- **C145.** PLAN.md Phase 4b creation output examples don't include a `Ports:` line for when `--port` is used. Ports are non-default (similar to `Network: none`) and should be shown in creation output when specified. DESIGN.md creation output section also lacks this.
-
-- **C146.** PLAN.md Phase 7 destroy (line 247) says "check via `git diff` on `:copy` dirs" for smart confirmation, but CHANGES detection was updated to `git status --porcelain` in Round 10. Destroy's unapplied change detection should also use `git status --porcelain` for consistency (catches untracked files too).
-
-- **C147.** DESIGN.md extensions validation section mentions name collision with built-in commands, but doesn't address flag name collision with yoloai's global flags (`--verbose`, `-v`, `--yes`, `-y`, `--quiet`, `-q`, `--no-color`). Since extensions use their own arg parsing (not Cobra), there's no technical collision — but it's confusing UX if `yoloai x lint my-lint . --verbose` is ambiguous. Worth a note.
+- **C151.** PLAN.md creation output rule (line 182) says "Profile and network lines omitted when using defaults" but doesn't mention ports. DESIGN.md (line 586) correctly says "Profile, network, and ports lines are omitted when using defaults." PLAN.md should match.
 
 ### Stale References
 
-- **C148.** OPEN_QUESTIONS.md #51 still references "`yoloai tail` and `yoloai list`" — `tail` was removed. Should reference `yoloai log` instead.
+- **C152.** PLAN.md deferred features list (line 13) still includes `tail` at the end. `yoloai tail` was renamed to `yoloai log` (which is in MVP, line 9). Remove `tail` from the deferred list.
+
+### Example Consistency
+
+- **C153.** CLI-STANDARD.md argument ordering examples (lines 15-16) show `yoloai new ... my-sandbox ./src ./lib` with two positional directories after the name. The current `yoloai new` syntax is `<name> [<workdir>]` — `./lib` would be an unrecognized extra positional. Same issue in the help text Examples section (line 167). Update both to use single workdir (e.g., `my-sandbox ./src`).
 
 ## Applied
 
-- **C139.** Fixed last `cp -a` → `cp -rp` in PLAN.md Risks section.
-- **C140.** Changed `[name]` → `<name>` in DESIGN.md command table for `yoloai x`.
-- **C141.** Fixed `iterate.yaml` example to read meta.json before destroying the sandbox.
-- **C142.** Replaced `yoloai show --json` with direct `jq` read of meta.json (avoids undocumented flag).
-- **C143.** Updated CLI-STANDARD.md help text example to `<name> [<workdir>]`.
-- **C144.** Updated PLAN.md context line from #1–85 to #1–90.
-- **C145.** Added `Ports:` line to creation output examples in both PLAN.md and DESIGN.md.
-- **C146.** Changed destroy smart confirmation from `git diff` to `git status --porcelain` in PLAN.md.
-- **C147.** Added flag collision note to DESIGN.md extensions validation section.
-- **C148.** Fixed stale `yoloai tail` → `yoloai log` in OPEN_QUESTIONS.md #51.
+- **C149.** Fixed DESIGN.md destroy smart confirmation from `git diff` to `git status --porcelain` (missed in C146).
+- **C150.** Added `Ports:` creation output example to both DESIGN.md and PLAN.md.
+- **C151.** Updated PLAN.md creation output rule to mention ports (matching DESIGN.md).
+- **C152.** Removed stale `tail` from PLAN.md deferred features list.
+- **C153.** Updated CLI-STANDARD.md argument ordering and help text examples to use single workdir.
 
 ## Needs Input
 
-(none)
+(none — all fixable autonomously)
 
 ## Noted (acceptable)
 

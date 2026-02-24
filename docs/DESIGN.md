@@ -583,6 +583,18 @@ Sandbox explore created
 Run 'yoloai attach explore' to start working (Ctrl-b d to detach)
 ```
 
+When `--port` is used:
+
+```
+Sandbox web-dev created
+  Agent:    claude
+  Workdir:  /home/user/projects/my-app (copy)
+  Ports:    3000:3000
+
+Run 'yoloai attach web-dev' to interact (Ctrl-b d to detach)
+    'yoloai diff web-dev' when done
+```
+
 Profile, network, and ports lines are omitted when using defaults (base image, unrestricted network, no ports). Strategy line is omitted when using `full` copy (only shown for overlay since it implies `CAP_SYS_ADMIN`).
 
 ### `yoloai attach`
@@ -640,7 +652,7 @@ Before applying, shows a summary via `git diff --stat` (files changed, insertion
 
 Accepts multiple sandbox names (e.g., `yoloai destroy sandbox1 sandbox2 sandbox3`) with a single confirmation prompt showing all sandboxes to be destroyed.
 
-**Smart confirmation:** Confirmation is only required when the agent is still running or unapplied changes exist (detected via `git diff` on `:copy` directories). If the sandbox is stopped/exited with no unapplied changes, destruction proceeds without prompting. `--yes` skips all confirmation regardless.
+**Smart confirmation:** Confirmation is only required when the agent is still running or unapplied changes exist (detected via `git status --porcelain` on the host-side work directory, consistent with `list` CHANGES detection). If the sandbox is stopped/exited with no unapplied changes, destruction proceeds without prompting. `--yes` skips all confirmation regardless.
 
 Options:
 - `--all`: Destroy all sandboxes (confirmation required unless `--yes` is also provided).

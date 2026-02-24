@@ -12,8 +12,8 @@ Based on POSIX Utility Conventions, GNU Coding Standards, and [clig.dev](https:/
 yoloai <command> [options] <positional-args...>
 ```
 
-Good: `yoloai new --profile go-dev --prompt "fix the build" my-sandbox ./src ./lib`
-Bad:  `yoloai new my-sandbox --profile go-dev ./src --prompt "fix the build" ./lib`
+Good: `yoloai new --profile go-dev --prompt "fix the build" my-sandbox ./src`
+Bad:  `yoloai new my-sandbox --profile go-dev ./src --prompt "fix the build"`
 
 Support `--` to terminate option processing (POSIX Guideline 10):
 
@@ -164,7 +164,7 @@ Global Flags:
 
 Examples:
   yoloai new my-sandbox ./my-project
-  yoloai new --profile go-dev --prompt "fix the build" my-sandbox ./src ./lib
+  yoloai new --profile go-dev --prompt "fix the build" my-sandbox ./src
 ```
 
 - Long description first, then `Usage:`, `Flags:`, `Global Flags:`, `Examples:`

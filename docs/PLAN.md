@@ -10,7 +10,7 @@ No code exists yet. All design docs are complete (DESIGN.md, CODING-STANDARD.md,
 
 **MVP features:** Full-copy only (Claude only), credential injection, `--model` (with built-in aliases), `--prompt-file`/stdin, `--replace`, `--no-start`, `--network-none`, `--port`, `--` agent arg passthrough, `--stat` on diff, `--yes` on apply/destroy, `--no-prompt`/`--clean` on reset, `--all`/multi-name on stop/destroy, smart destroy confirmation, dangerous directory detection, dirty git repo warning, path overlap detection, `YOLOAI_SANDBOX` env var, context-aware creation output, auto-paging for diff/log, shell completion, version info.
 
-**Deferred:** overlay strategy, network isolation/proxy, profiles, Codex agent, Viper config file parsing, `auto_commit_interval`, custom mount points (`=<path>`), `agent_files`, env var interpolation, context file, aux dirs (`-d`), `--resume`, `restart`, `wait`, `run`, `tail`.
+**Deferred:** overlay strategy, network isolation/proxy, profiles, Codex agent, Viper config file parsing, `auto_commit_interval`, custom mount points (`=<path>`), `agent_files`, env var interpolation, context file, aux dirs (`-d`), `--resume`, `restart`, `wait`, `run`.
 
 ## Implementation Phases
 
@@ -179,7 +179,18 @@ Sandbox explore created
 Run 'yoloai attach explore' to start working (Ctrl-b d to detach)
 ```
 
-Profile and network lines omitted when using defaults (base image, unrestricted network). When `--network-none` is used, show `Network: none` (non-default, so not omitted). Strategy line omitted for full copy.
+Profile, network, and ports lines omitted when using defaults (base image, unrestricted network, no ports). When `--network-none` is used, show `Network: none` (non-default, so not omitted). Strategy line omitted for full copy.
+
+**Creation output (with `--port`):**
+```
+Sandbox web-dev created
+  Agent:    claude
+  Workdir:  /home/user/projects/my-app (copy)
+  Ports:    3000:3000
+
+Run 'yoloai attach web-dev' to interact (Ctrl-b d to detach)
+    'yoloai diff web-dev' when done
+```
 
 **Creation output (with `--network-none`):**
 ```
