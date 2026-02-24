@@ -1,4 +1,4 @@
-// Package docker wraps the Docker SDK for yoloai's container operations.
+// Package docker wraps the Docker SDK for yoloAI's container operations.
 package docker
 
 import (
@@ -15,7 +15,7 @@ import (
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 )
 
-// Client wraps the subset of Docker SDK methods used by yoloai.
+// Client wraps the subset of Docker SDK methods used by yoloAI.
 // Defined as an interface for testability — later phases mock this
 // in unit tests without requiring a real Docker daemon.
 type Client interface {

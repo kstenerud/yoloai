@@ -2,7 +2,7 @@
 
 ## Goal
 
-Thin interface wrapping the Docker SDK methods yoloai needs. Enables mocking for unit tests in later phases. No functionality beyond verifying Docker connectivity.
+Thin interface wrapping the Docker SDK methods yoloAI needs. Enables mocking for unit tests in later phases. No functionality beyond verifying Docker connectivity.
 
 ## Prerequisites
 

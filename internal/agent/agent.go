@@ -1,4 +1,4 @@
-// Package agent defines built-in agent definitions for yoloai.
+// Package agent defines built-in agent definitions for yoloAI.
 package agent
 
 import "time"

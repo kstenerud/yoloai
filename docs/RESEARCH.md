@@ -245,7 +245,7 @@ The following tools were identified but not analyzed in depth. Included for comp
 
 *Note: This table covers a subset of the landscape. See section 8 for additional tools.*
 
-| Feature | deva.sh | TextCortex | Docker Sandbox | rsh3khar | cco | sandbox-runtime | **yoloai** |
+| Feature | deva.sh | TextCortex | Docker Sandbox | rsh3khar | cco | sandbox-runtime | **yoloAI** |
 |---------|---------|------------|----------------|----------|-----|-----------------|-----------------|
 | Copy/diff/apply workflow | No | No (git branch + diff review) | No (file sync) | No (auto-commit) | No | No | **Yes** |
 | Per-sandbox Claude state | No | No | No | No | No | No | **Yes** |
@@ -272,7 +272,7 @@ mount -t overlay overlay \
   /merged
 ```
 
-**How it maps to yoloai's workflow:**
+**How it maps to yoloAI's workflow:**
 - **Setup:** Instant mount instead of full copy — zero startup time regardless of project size.
 - **Diff:** The upper directory *is* the diff. [overlayfs-tools](https://github.com/kmxz/overlayfs-tools) provides `diff` and `merge` commands for extracting/applying changes. Whiteout files represent deletions natively.
 - **Apply:** Copy upper directory contents back to original, interpreting whiteouts as deletions.
@@ -362,13 +362,13 @@ bwrap --overlay-src /original --overlay /upper /work /merged -- /bin/bash
 - Unprivileged via user namespaces. No daemon. No Docker dependency.
 - Requires Linux 4.0+ for overlay support.
 - Production-ready (powers Flatpak sandboxing).
-- Could be used as a lighter-weight alternative to Docker for Linux-only deployments, though outside yoloai's current Docker-based architecture.
+- Could be used as a lighter-weight alternative to Docker for Linux-only deployments, though outside yoloAI's current Docker-based architecture.
 
 ### Docker's Own Container Diff
 
 `docker diff <container>` tracks all filesystem changes in the container's writable layer. On its own, too noisy for code review — it captures everything (installed packages, temp files, logs), not just project changes. However, combining it with git inside the container solves the noise problem (see Recommendation below).
 
-### Comparison for yoloai's `:copy` Workflow
+### Comparison for yoloAI's `:copy` Workflow
 
 | Approach | Setup time | Space | Diff mechanism | Apply-back | macOS | Needs special host FS |
 |----------|-----------|-------|----------------|------------|-------|----------------------|
@@ -611,13 +611,13 @@ Environment variables passed via `docker run -e` are exposed through multiple ve
 
 7. **Image layers** — Secrets set via `ENV` in Dockerfiles persist in image layers and are recoverable via `docker history` or exported tarballs. This applies to build-time, not runtime `-e` flags, but is a common confusion point. ([Xygeni](https://xygeni.io/blog/dockerfile-secrets-why-layers-keep-your-sensitive-data-forever/))
 
-**Risk assessment for yoloai's threat model:**
+**Risk assessment for yoloAI's threat model:**
 
-- **docker inspect** — REAL risk. Anyone with Docker socket access (which yoloai users inherently have) can see the key. Mitigated by the fact that the user is the one who provided the key in the first place — this is a self-exposure vector, not an escalation. The risk increases if a malicious process on the host enumerates Docker containers.
+- **docker inspect** — REAL risk. Anyone with Docker socket access (which yoloAI users inherently have) can see the key. Mitigated by the fact that the user is the one who provided the key in the first place — this is a self-exposure vector, not an escalation. The risk increases if a malicious process on the host enumerates Docker containers.
 - **/proc/1/environ** — REAL risk inside the container. If Claude Code or any tool it installs has a vulnerability, the API key is trivially accessible. However, the AI agent already has the key to make API calls — the concern is more about exfiltration by a *different* compromised process in the same container.
 - **docker logs** — LOW risk. Depends on logging driver configuration. Default json-file driver does not include env vars in log output unless `--details` is used.
 - **docker commit** — LOW risk. Users are unlikely to commit running sandbox containers, but worth documenting.
-- **--link** — NOT APPLICABLE. yoloai doesn't link containers.
+- **--link** — NOT APPLICABLE. yoloAI doesn't link containers.
 
 ### 2. Docker Swarm Secrets
 
@@ -639,9 +639,9 @@ Docker Compose provides a secrets mechanism that works without Swarm, but it is 
 
 However, Compose secrets require Docker Compose. They cannot be used with plain `docker run`.
 
-**Relevance to yoloai:**
+**Relevance to yoloAI:**
 
-Not directly usable. yoloai uses `docker run`, not Swarm services or Docker Compose. We would need to implement the same pattern ourselves (mount a file at `/run/secrets/`), which is the file-based injection approach covered in section 3.
+Not directly usable. yoloAI uses `docker run`, not Swarm services or Docker Compose. We would need to implement the same pattern ourselves (mount a file at `/run/secrets/`), which is the file-based injection approach covered in section 3.
 
 **Platform notes:**
 - Linux: secrets backed by tmpfs (in-memory, never hits disk).
@@ -728,7 +728,7 @@ Docker Sandbox (GA in Docker Desktop 4.50+) uses an HTTP/HTTPS filtering proxy t
 - Windows: Via Hyper-V.
 - Linux: Degraded — no microVM, container-based sandbox only.
 
-**Complexity:** HIGH. Implementing a credential-injecting MITM proxy is a major undertaking. Docker builds this into Docker Desktop infrastructure. For yoloai to replicate this, we would need:
+**Complexity:** HIGH. Implementing a credential-injecting MITM proxy is a major undertaking. Docker builds this into Docker Desktop infrastructure. For yoloAI to replicate this, we would need:
 - An HTTP/HTTPS proxy process running on the host (e.g., mitmproxy or a custom Go proxy).
 - CA certificate generation and injection into the container's trust store.
 - Provider-specific request matching and header injection logic.
@@ -737,7 +737,7 @@ Docker Sandbox (GA in Docker Desktop 4.50+) uses an HTTP/HTTPS filtering proxy t
 
 **Production use:** Docker Sandbox is the only tool using this approach. It is production-quality but proprietary to Docker Desktop.
 
-**Assessment for yoloai:** The credential proxy is the gold standard for credential isolation, but the implementation cost is prohibitive for v1. Worth considering for a future version or as an optional advanced mode. The simpler file-based injection gets us 80% of the benefit at 10% of the cost.
+**Assessment for yoloAI:** The credential proxy is the gold standard for credential isolation, but the implementation cost is prohibitive for v1. Worth considering for a future version or as an optional advanced mode. The simpler file-based injection gets us 80% of the benefit at 10% of the cost.
 
 ### 5. tmpfs-Mounted Secrets
 
@@ -862,11 +862,11 @@ docker build --secret id=mytoken,src=./token.txt .
 - Source can be a file or environment variable (`type=file` or `type=env`).
 - Maximum size: 500 KB.
 
-**Relevance to yoloai:**
+**Relevance to yoloAI:**
 
 BuildKit secrets are for *build time*, not *run time*. They are relevant when building profile base images that need to pull from private registries or install licensed tools. They are NOT relevant for passing `ANTHROPIC_API_KEY` to running containers.
 
-yoloai's profile system (`~/.yoloai/profiles/<name>/Dockerfile`) supports BuildKit secrets for handling private dependencies during `docker build`, protecting credentials from leaking into built images (see DESIGN.md `yoloai build` section).
+yoloAI's profile system (`~/.yoloai/profiles/<name>/Dockerfile`) supports BuildKit secrets for handling private dependencies during `docker build`, protecting credentials from leaking into built images (see DESIGN.md `yoloai build` section).
 
 **Cross-platform:** Works everywhere BuildKit works (Docker 18.09+, enabled by default in Docker Desktop and recent Docker Engine).
 
@@ -904,11 +904,11 @@ The Cloud Native Computing Foundation recommends that "secrets should be injecte
 | Credential proxy | Hidden | N/A (never in container) | N/A | No | Very High | Partial |
 | Docker Swarm secrets | Hidden | Hidden | Hidden | No (tmpfs) | N/A (requires Swarm) | All |
 
-**Approach adopted for yoloai v1:**
+**Approach adopted for yoloAI v1:**
 
 **File-based injection via bind mount to tmpfs**, combining sections 3 and 5:
 
-1. yoloai creates a tmpfs directory on the host (Linux: native tmpfs; macOS/Windows: a temp file with immediate cleanup after container start).
+1. yoloAI creates a tmpfs directory on the host (Linux: native tmpfs; macOS/Windows: a temp file with immediate cleanup after container start).
 2. API key is written to a file in this directory.
 3. The file is bind-mounted read-only into the container at `/run/secrets/anthropic_api_key`.
 4. The container entrypoint reads the file, exports to env var (since Claude Code and other agents expect `ANTHROPIC_API_KEY` in the environment), then the agent runs.
@@ -991,9 +991,9 @@ Every tool that implements interpolation acquires a long tail of escaping bugs, 
 | Best middle grounds | Spring Boot / Viper (override at API level, no in-file syntax), BOSH (`(())` avoids `$` collision), OTel (scalar-only restriction). Braced-only `${VAR}` + post-parse + fail-fast is a simpler alternative that addresses the same concerns. |
 | Security concern | Helm maintainers: interpolation can enable exfiltration of env vars by malicious config authors. |
 
-### Implications for yoloai
+### Implications for yoloAI
 
-yoloai's design decisions based on this research:
+yoloAI's design decisions based on this research:
 
 1. **Braced-only syntax:** Only `${VAR}` is recognized. Bare `$VAR` is treated as literal text. This eliminates the primary footgun — passwords like `p4ssw0rd$5`, regex patterns like `($|/)`, and other `$`-containing strings are safe. The only collision possible is a literal `${` sequence in a value (e.g., `p4ssw${rd}`), which is extremely rare in practice.
 2. **Post-parse interpolation:** Interpolation runs after YAML parsing, so expanded values cannot break YAML syntax (avoiding the Vector/Loki class of bugs where substituted values containing `:`, `#`, `{` etc. corrupt the parse).
@@ -1004,7 +1004,7 @@ yoloai's design decisions based on this research:
 
 ## Proxy Sidecar Research
 
-Evaluation of forward proxy options for yoloai's `--network-isolated` sidecar. Requirements: HTTPS CONNECT tunneling with domain allowlist (no MITM), lightweight (runs per sandbox), configurable allowlist, logging.
+Evaluation of forward proxy options for yoloAI's `--network-isolated` sidecar. Requirements: HTTPS CONNECT tunneling with domain allowlist (no MITM), lightweight (runs per sandbox), configurable allowlist, logging.
 
 ### Options Evaluated
 
@@ -1024,7 +1024,7 @@ Tinyproxy (C-based, ~3 MB image) meets core requirements. `FilterDefaultDeny Yes
 
 **Security concern:** CVE-2025-63938 (integer overflow in port parsing, allows filter bypass) is fixed in master commit `3c0fde9` (October 2025) but **no released version contains this fix**. Latest release is 1.11.2 (May 2024). Release cadence is slow — security patches sit unreleased for months. 116 open issues.
 
-Would need to build from master, not a tagged release. The port filter bypass is partially mitigated by yoloai's iptables rules (defense-in-depth), but relying on unreleased security fixes for a security-critical component is a risk.
+Would need to build from master, not a tagged release. The port filter bypass is partially mitigated by yoloAI's iptables rules (defense-in-depth), but relying on unreleased security fixes for a security-critical component is a risk.
 
 ### Squid — overkill
 
@@ -1045,7 +1045,7 @@ A purpose-built Go forward proxy using `elazarl/goproxy` (6.6k stars) or `smarty
 Core pattern ([Eli Bendersky's writeup](https://eli.thegreenplace.net/2022/go-and-proxy-servers-part-2-https-proxies/)): parse CONNECT request, check domain against allowlist, `net.Dial` to target, `http.Hijacker` to get raw connection, bidirectional `io.Copy`.
 
 Advantages:
-- Integrates naturally with yoloai's Go codebase
+- Integrates naturally with yoloAI's Go codebase
 - Single static binary, minimal image and memory footprint
 - No external CVE risk or release-cadence dependency
 - Full control over allowlist format, reload (SIGUSR1), logging
@@ -1073,7 +1073,7 @@ The `none` network driver completely removes all network interfaces from a conta
 
 **Source:** [Docker Docs — None network driver](https://docs.docker.com/engine/network/drivers/none/)
 
-**Implications for yoloai:** Useful for `--network-none` mode (offline tasks). Unusable when Claude needs API access because there is no mechanism to selectively permit traffic — it is all-or-nothing.
+**Implications for yoloAI:** Useful for `--network-none` mode (offline tasks). Unusable when Claude needs API access because there is no mechanism to selectively permit traffic — it is all-or-nothing.
 
 #### `--internal` flag on custom networks
 
@@ -1081,7 +1081,7 @@ The `none` network driver completely removes all network interfaces from a conta
 
 **Source:** [Docker Docs — docker network create](https://docs.docker.com/reference/cli/docker/network/create/), [Docker Docs — Networking](https://docs.docker.com/engine/network/)
 
-**Implications for yoloai:** This is the foundation for the proxy-gateway pattern. Put the sandbox container on an `--internal` network, and place a proxy container on both the internal network and a normal (internet-connected) network. The sandbox can only reach the proxy; the proxy decides what reaches the internet.
+**Implications for yoloAI:** This is the foundation for the proxy-gateway pattern. Put the sandbox container on an `--internal` network, and place a proxy container on both the internal network and a normal (internet-connected) network. The sandbox can only reach the proxy; the proxy decides what reaches the internet.
 
 #### Host-level firewall rules (DOCKER-USER chain)
 
@@ -1212,7 +1212,7 @@ Fixed in Claude Code v1.0.4 (June 2025) by removing networking utilities from th
 
 An attacker uses a legitimate CDN domain (e.g., `cloudfront.net`) in the TLS SNI field but sets a different `Host:` header to route to an attacker-controlled origin behind the same CDN. This bypasses domain-based allowlists that inspect only the SNI or DNS name.
 
-**Practical risk for yoloai:** Low-to-moderate. Domain fronting requires that both the allowed domain and the attacker's domain are served from the same CDN. Major CDN providers (AWS CloudFront, Google, Cloudflare) have banned domain fronting. However, it remains possible on some smaller CDNs. A proxy performing TLS inspection (MITM) can detect SNI/Host mismatches, but MITM adds complexity and breaks certificate pinning.
+**Practical risk for yoloAI:** Low-to-moderate. Domain fronting requires that both the allowed domain and the attacker's domain are served from the same CDN. Major CDN providers (AWS CloudFront, Google, Cloudflare) have banned domain fronting. However, it remains possible on some smaller CDNs. A proxy performing TLS inspection (MITM) can detect SNI/Host mismatches, but MITM adds complexity and breaks certificate pinning.
 
 **Source:** [MITRE ATT&CK — T1090.004](https://attack.mitre.org/techniques/T1090/004/), [Wikipedia — Domain fronting](https://en.wikipedia.org/wiki/Domain_fronting), [Compass Security — Bypassing Web Filters Part 3](https://blog.compass-security.com/2025/03/bypassing-web-filters-part-3-domain-fronting/)
 
@@ -1262,7 +1262,7 @@ However, iptables has its own limitations:
 
 **Source:** [Collabnix — Under the Hood: Docker Desktop for Mac](https://collabnix.com/how-docker-for-mac-works-under-the-hood/), [Docker Community Forums — iptable manipulation in Docker for Mac](https://forums.docker.com/t/iptable-manipulation-in-docker-for-mac/48193)
 
-**Key insight for yoloai:** Because Docker on macOS and Windows always runs in a Linux VM, iptables inside the container works on all platforms. The `CAP_NET_ADMIN` approach (rules inside the container) is the most portable. Host-level `DOCKER-USER` rules only work reliably on native Linux.
+**Key insight for yoloAI:** Because Docker on macOS and Windows always runs in a Linux VM, iptables inside the container works on all platforms. The `CAP_NET_ADMIN` approach (rules inside the container) is the most portable. Host-level `DOCKER-USER` rules only work reliably on native Linux.
 
 ### 5. Existing Open-Source Implementations
 
@@ -1276,7 +1276,7 @@ However, iptables has its own limitations:
 | **Google Agent Sandbox** | Kubernetes controller with gVisor isolation | Yes — GKE production, open source |
 | **SequentialRead firewall** | Docker Compose internal network + nginx proxy per domain | Yes — documented with examples |
 
-### 6. Design Approach for yoloai
+### 6. Design Approach for yoloAI
 
 #### Adopted approach: internal network + proxy container + iptables fallback
 
@@ -1323,7 +1323,7 @@ However, iptables has its own limitations:
 - **DNS control** addresses the CVE-2025-55284 vector.
 - **Cross-platform:** Works on Linux, macOS (Docker Desktop), and WSL2 because all layers operate inside Docker's Linux VM.
 - **No MITM needed:** HTTPS `CONNECT` tunneling lets the proxy see the target domain without decrypting traffic.
-- **Implementable in Go:** yoloai creates the Docker network, starts the proxy container, and configures the sandbox container. The proxy can be a small Go binary or a pre-configured Squid image.
+- **Implementable in Go:** yoloAI creates the Docker network, starts the proxy container, and configures the sandbox container. The proxy can be a small Go binary or a pre-configured Squid image.
 
 #### What the proxy container needs
 
@@ -1356,13 +1356,13 @@ The original design proposed a proxy inside the sandbox container. Based on this
 
 ## Claude Code Proxy Support Research
 
-Research into whether Claude Code honors HTTP_PROXY/HTTPS_PROXY environment variables, critical for yoloai's `--network-isolated` feature which routes all traffic through a proxy sidecar on an `--internal` Docker network.
+Research into whether Claude Code honors HTTP_PROXY/HTTPS_PROXY environment variables, critical for yoloAI's `--network-isolated` feature which routes all traffic through a proxy sidecar on an `--internal` Docker network.
 
 ### npm Installation (Node.js)
 
 Claude Code's npm installation (`@anthropic-ai/claude-code`) honors `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY` environment variables. It uses undici's `EnvHttpProxyAgent` with `setGlobalDispatcher()` to apply proxy settings globally to all fetch requests. This was introduced around v1.0.93 (with a regression fixed by ~v1.0.97).
 
-The Anthropic Node.js SDK (`@anthropic-ai/sdk`) does NOT read proxy env vars automatically — it relies on the global dispatcher set by Claude Code's startup code. The SDK also supports explicit proxy configuration via `fetchOptions` with an `undici.ProxyAgent`, but this is for SDK consumers, not relevant to yoloai (we don't modify Claude Code's source).
+The Anthropic Node.js SDK (`@anthropic-ai/sdk`) does NOT read proxy env vars automatically — it relies on the global dispatcher set by Claude Code's startup code. The SDK also supports explicit proxy configuration via `fetchOptions` with an `undici.ProxyAgent`, but this is for SDK consumers, not relevant to yoloAI (we don't modify Claude Code's source).
 
 **Required Node.js version:** 18+ for Claude Code, 20 LTS+ for the SDK.
 
@@ -1372,7 +1372,7 @@ The Anthropic Node.js SDK (`@anthropic-ai/sdk`) does NOT read proxy env vars aut
 
 The native binary installation bundles a Bun runtime. Bun's `fetch()` does NOT honor `HTTP_PROXY`/`HTTPS_PROXY` env vars. This means the native binary cannot route API calls through a proxy. Known bug tracked in [#14165](https://github.com/anthropics/claude-code/issues/14165) and [#21298](https://github.com/anthropics/claude-code/issues/21298), still reported as of v2.1.20 (February 2026).
 
-**Implication for yoloai:** The base Docker image MUST install Claude Code via npm (`npm i -g @anthropic-ai/claude-code`), not the native binary. This is already the case in the current design.
+**Implication for yoloAI:** The base Docker image MUST install Claude Code via npm (`npm i -g @anthropic-ai/claude-code`), not the native binary. This is already the case in the current design.
 
 ### Proxy Protocol Support
 
@@ -1395,7 +1395,7 @@ Based on Claude Code's network requirements:
 | `claude.ai` | OAuth authentication (Pro/Max/Team plans) | Only if using OAuth, not API key |
 | `platform.claude.com` | Console authentication | Only if using OAuth, not API key |
 
-For yoloai v1 (API key auth), the minimum allowlist is `api.anthropic.com`. Telemetry domains (`statsig.anthropic.com`, `sentry.io`) are recommended to avoid potential issues with feature flag checks.
+For yoloAI v1 (API key auth), the minimum allowlist is `api.anthropic.com`. Telemetry domains (`statsig.anthropic.com`, `sentry.io`) are recommended to avoid potential issues with feature flag checks.
 
 **Source:** [Claude Code devcontainer init-firewall.sh](https://github.com/anthropics/claude-code/blob/main/.devcontainer/init-firewall.sh), [Claude Code network config docs](https://code.claude.com/docs/en/network-config)
 
@@ -1406,9 +1406,9 @@ Neither of the two major sandbox implementations relies on `HTTP_PROXY` env vars
 - **sandbox-runtime:** Removes the network namespace entirely (Linux). Traffic flows through Unix domain sockets to host-side proxies. The application has no choice — it literally cannot create external sockets.
 - **Docker Sandboxes:** VM-level proxy interception. The microVM's network stack routes through the proxy transparently. The application is unaware.
 
-yoloai's approach (internal Docker network + `HTTP_PROXY` env vars) is less invasive but depends on the application honoring the env vars. This works for Claude Code's npm installation. **Codex (static Rust binary) proxy support is unverified** — the binary may not honor proxy env vars, which would require relying solely on the iptables + internal network layers for enforcement with Codex.
+yoloAI's approach (internal Docker network + `HTTP_PROXY` env vars) is less invasive but depends on the application honoring the env vars. This works for Claude Code's npm installation. **Codex (static Rust binary) proxy support is unverified** — the binary may not honor proxy env vars, which would require relying solely on the iptables + internal network layers for enforcement with Codex.
 
-### Design Implications for yoloai
+### Design Implications for yoloAI
 
 1. Base image must use npm installation of Claude Code (already the case).
 2. Container environment must include `HTTPS_PROXY=http://<proxy-sidecar>:<port>` and `HTTP_PROXY=http://<proxy-sidecar>:<port>`.
@@ -1453,7 +1453,7 @@ Anthropic's devcontainer uses Node.js 20 as of February 2026, but Node 20 reache
 
 - **npm package removal:** If Anthropic stops publishing the npm package, we lose proxy support. This would block `--network-isolated` with Claude Code.
 - **Bun proxy fix:** If issue [#14165](https://github.com/anthropics/claude-code/issues/14165) is resolved, the native binary becomes viable and we could drop the ~100MB Node.js dependency from the base image.
-- **Node.js 20 EOL:** Node.js 20 reaches end-of-life April 2026. yoloai uses Node.js 22 LTS (maintenance until April 2027) to avoid this. Claude Code's `engines` field (`>=18.0.0`) confirms compatibility.
+- **Node.js 20 EOL:** Node.js 20 reaches end-of-life April 2026. yoloAI uses Node.js 22 LTS (maintenance until April 2027) to avoid this. Claude Code's `engines` field (`>=18.0.0`) confirms compatibility.
 
 ---
 
@@ -1463,7 +1463,7 @@ Evaluation of replacing `cp -rp` and `git` CLI exec calls with pure-Go libraries
 
 ### Current Usage
 
-yoloai shells out to external commands for two categories of operations:
+yoloAI shells out to external commands for two categories of operations:
 
 **File copying** (1 call site):
 - `create.go:632` — `cp -rp <src> <dst>` via `copyDir()` for `:copy` mode workdir setup.
@@ -1555,7 +1555,7 @@ A recent merge (PR #1747, February 2026) adds mtime/size-based skip for tracked 
 
 **Third-party supplement:** [bluekeyes/go-gitdiff](https://github.com/bluekeyes/go-gitdiff) (142 stars, v0.8.1, January 2025) provides patch parsing and application including binary patches, but with strict mode only (no fuzzy matching), no `--unsafe-paths`/`--directory`, and no `--check` dry-run.
 
-**Assessment: No.** go-git is missing `git diff --binary` and `git apply` — both are core to yoloai's copy/diff/apply workflow. These aren't edge cases; they're the exact operations that make yoloai's differentiator work. Even for operations it does support (`init`, `add`, `commit`, `status`), it's measurably slower and adds 23 dependencies vs zero. The testability advantage (in-memory repos) doesn't justify the cost when temp-directory-based test helpers already work well. yoloai already requires Docker, so requiring git on the host is not an additional burden.
+**Assessment: No.** go-git is missing `git diff --binary` and `git apply` — both are core to yoloAI's copy/diff/apply workflow. These aren't edge cases; they're the exact operations that make yoloAI's differentiator work. Even for operations it does support (`init`, `add`, `commit`, `status`), it's measurably slower and adds 23 dependencies vs zero. The testability advantage (in-memory repos) doesn't justify the cost when temp-directory-based test helpers already work well. yoloAI already requires Docker, so requiring git on the host is not an additional burden.
 
 ### Decision
 

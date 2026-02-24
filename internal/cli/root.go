@@ -1,4 +1,4 @@
-// Package cli defines the Cobra command tree for the yoloai CLI.
+// Package cli defines the Cobra command tree for the yoloAI CLI.
 package cli
 
 import (

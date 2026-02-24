@@ -31,7 +31,7 @@ type CreateOptions struct {
 	NoStart     bool     // --no-start flag
 	Yes         bool     // --yes flag (skip confirmations)
 	Passthrough []string // args after -- passed to agent
-	Version     string   // yoloai version for meta.json
+	Version     string   // yoloAI version for meta.json
 }
 
 // sandboxState holds resolved state computed during preparation.
@@ -484,7 +484,7 @@ func parsePortBindings(ports []string) (nat.PortMap, nat.PortSet, error) {
 // removeGitDirs recursively removes all .git entries (files and directories)
 // from root. This strips git metadata from a copied working tree so that
 // hooks, LFS filters, submodule links, and worktree links don't interfere
-// with yoloai's internal git operations.
+// with yoloAI's internal git operations.
 func removeGitDirs(root string) error {
 	var toRemove []string
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {

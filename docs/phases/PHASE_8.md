@@ -495,7 +495,7 @@ The test uses `--no-start` to create the sandbox without starting the agent, the
 
 ### 5. Completion caching
 
-Cobra's generated completion scripts are static — they reflect the command tree at generation time. If the user adds a new version of yoloai with new commands, they need to regenerate the completion script. This is standard Cobra behavior and documented in the `Long` help text.
+Cobra's generated completion scripts are static — they reflect the command tree at generation time. If the user adds a new version of yoloAI with new commands, they need to regenerate the completion script. This is standard Cobra behavior and documented in the `Long` help text.
 
 ### 6. `stop` and `destroy` env var interaction with `--all`
 

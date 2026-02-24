@@ -1,6 +1,6 @@
 # Coding Standard
 
-Reference for consistent code style and practices across the yoloai codebase.
+Reference for consistent code style and practices across the yoloAI codebase.
 
 Based on Effective Go, Go Code Review Comments, Google Go Style Guide, and Uber Go Style Guide — filtered for a modern Go 1.22+ CLI project where navigability, clarity, and maintainability matter most.
 

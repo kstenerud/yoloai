@@ -1,4 +1,4 @@
-// Package main is the entry point for the yoloai CLI.
+// Package main is the entry point for the yoloAI CLI.
 package main
 
 import (

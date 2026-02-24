@@ -308,7 +308,7 @@ The `exec gosu yoloai bash -c '...'` pattern requires careful quoting to pass va
 
 ### 2. NodeSource availability
 
-NodeSource's GPG key and repository URL could change. The Dockerfile is user-editable in `~/.yoloai/`, so users can fix this without waiting for a yoloai release. Pin a specific Node major version via `ARG NODE_MAJOR=22`.
+NodeSource's GPG key and repository URL could change. The Dockerfile is user-editable in `~/.yoloai/`, so users can fix this without waiting for a yoloAI release. Pin a specific Node major version via `ARG NODE_MAJOR=22`.
 
 ### 3. Image build time
 

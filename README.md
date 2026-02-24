@@ -1,4 +1,4 @@
-# yoloai
+# yoloAI
 
 Sandboxed AI coding agent runner. Runs AI coding agents (Claude Code, Codex) inside disposable Docker containers with a copy/diff/apply workflow.
 
@@ -6,7 +6,7 @@ Your originals are protected — the agent works on an isolated copy, you review
 
 ## Why
 
-Existing approaches either give the agent live access to your files (risky) or isolate it without a clean way to review and land changes. yoloai gives you both: full isolation with git-based diff/apply to bridge the gap.
+Existing approaches either give the agent live access to your files (risky) or isolate it without a clean way to review and land changes. yoloAI gives you both: full isolation with git-based diff/apply to bridge the gap.
 
 ## Requirements
 
@@ -22,7 +22,7 @@ make build
 sudo mv yoloai /usr/local/bin/  # or add to PATH
 ```
 
-On first run, yoloai automatically builds its base Docker image and creates `~/.yoloai/`.
+On first run, yoloAI automatically builds its base Docker image and creates `~/.yoloai/`.
 
 ## Quick Start
 

@@ -56,7 +56,7 @@ func newRootCmd(version, commit, date string) *cobra.Command
 Root command configuration:
 - `Use: "yoloai"`
 - `Short: "Sandboxed AI coding agent runner"`
-- `Long`: Multi-sentence description of what yoloai does
+- `Long`: Multi-sentence description of what yoloAI does
 - `SilenceErrors: true`
 - `SilenceUsage: true`
 

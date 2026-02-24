@@ -1,6 +1,6 @@
 # CLI Design Standard
 
-Reference for consistent CLI behavior across all yoloai commands.
+Reference for consistent CLI behavior across all yoloAI commands.
 
 Based on POSIX Utility Conventions, GNU Coding Standards, and [clig.dev](https://clig.dev/).
 

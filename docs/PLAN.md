@@ -1,4 +1,4 @@
-# Plan: yoloai MVP for Dogfooding
+# Plan: yoloAI MVP for Dogfooding
 
 ## Context
 
@@ -104,7 +104,7 @@ Later additions (post-MVP): `overlay_mounts`, `iptables_rules`, `setup_script`.
 
 `internal/docker/build.go`:
 - `SeedResources(targetDir string)` — copies embedded `resources/Dockerfile.base` and `resources/entrypoint.sh` to `targetDir` (i.e., `~/.yoloai/`) if they don't already exist. Uses `go:embed` for the source files.
-- `BuildBaseImage(ctx, client, logger)` — creates build context tar from `~/.yoloai/` (Dockerfile.base + entrypoint.sh), calls `client.ImageBuild`, streams output. Always reads from `~/.yoloai/`, never from embedded copies — users can edit these files for fast iteration without rebuilding yoloai.
+- `BuildBaseImage(ctx, client, logger)` — creates build context tar from `~/.yoloai/` (Dockerfile.base + entrypoint.sh), calls `client.ImageBuild`, streams output. Always reads from `~/.yoloai/`, never from embedded copies — users can edit these files for fast iteration without rebuilding yoloAI.
 
 Wire `yoloai build` command. Call `SeedResources` before building.
 

@@ -666,7 +666,7 @@ Naive byte-level truncation can split a multi-byte UTF-8 character. Use `[]rune(
 
 ### 7. Pager fallback
 
-`less` may not be installed on minimal systems (e.g., Alpine-based containers, though yoloai runs on the host). Fallback chain: `$PAGER` → `less -R` → direct copy to stdout. Users on minimal systems can set `PAGER=cat` or `PAGER=more`.
+`less` may not be installed on minimal systems (e.g., Alpine-based containers, though yoloAI runs on the host). Fallback chain: `$PAGER` → `less -R` → direct copy to stdout. Users on minimal systems can set `PAGER=cat` or `PAGER=more`.
 
 ### 8. `attach` with `-i` stdin detection
 

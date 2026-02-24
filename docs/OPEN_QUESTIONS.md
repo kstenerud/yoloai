@@ -208,6 +208,6 @@ These were deferred from MVP but might be cheap to add and valuable for dogfoodi
 
 88. ~~**Extension discovery and sharing**~~ — **Resolved.** Manual file copying — users share YAML files via gists, repos, blog posts. Format is already self-contained. `--install <url>` and curated repos are future enhancements if demand exists.
 
-89. ~~**Agent-agnostic extensions**~~ — **Resolved.** Shell branching on `$agent` is sufficient — no structured per-agent action sections. For very different agents, create separate extension files. The `agent` field accepts a string or list: `agent: claude`, `agent: [claude, codex]`. Omit `agent` entirely for any-agent compatibility. yoloai validates the current agent against the list before running the action.
+89. ~~**Agent-agnostic extensions**~~ — **Resolved.** Shell branching on `$agent` is sufficient — no structured per-agent action sections. For very different agents, create separate extension files. The `agent` field accepts a string or list: `agent: claude`, `agent: [claude, codex]`. Omit `agent` entirely for any-agent compatibility. yoloAI validates the current agent against the list before running the action.
 
 90. ~~**Extension arg validation**~~ — **Resolved.** No type validation — all args and flags are passed as strings. Errors surface naturally from the commands in the action script (e.g., `yoloai new` errors on nonexistent workdir). Keeps the YAML simple and doesn't limit what extensions can do.
