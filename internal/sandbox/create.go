@@ -125,7 +125,7 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 	if !hasAPIKey && !hasAuth {
 		return nil, fmt.Errorf("no authentication found: set %s or provide OAuth credentials (%s): %w",
 			strings.Join(agentDef.APIKeyEnvVars, "/"),
-			describeAuthFiles(agentDef),
+			describeSeedAuthFiles(agentDef),
 			ErrMissingAPIKey)
 	}
 
@@ -176,11 +176,9 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 		}
 	}
 
-	// Copy auth files into agent-state (for OAuth support)
-	if !hasAPIKey {
-		if _, err := copyAuthFiles(agentDef, sandboxDir); err != nil {
-			return nil, fmt.Errorf("copy auth files: %w", err)
-		}
+	// Copy seed files into agent-state (config, OAuth credentials, etc.)
+	if _, err := copySeedFiles(agentDef, sandboxDir, hasAPIKey); err != nil {
+		return nil, fmt.Errorf("copy seed files: %w", err)
 	}
 
 	// Copy workdir
@@ -691,42 +689,51 @@ func hasAnyAPIKey(agentDef *agent.Definition) bool {
 	return false
 }
 
-// hasAnyAuthFile returns true if any of the agent's auth files exist on disk.
+// hasAnyAuthFile returns true if any auth-only seed files exist on disk.
 func hasAnyAuthFile(agentDef *agent.Definition) bool {
-	for _, af := range agentDef.AuthFiles {
-		if _, err := os.Stat(expandTilde(af.HostPath)); err == nil {
-			return true
+	for _, sf := range agentDef.SeedFiles {
+		if sf.AuthOnly {
+			if _, err := os.Stat(expandTilde(sf.HostPath)); err == nil {
+				return true
+			}
 		}
 	}
 	return false
 }
 
-// describeAuthFiles returns a human-readable description of expected auth file paths.
-func describeAuthFiles(agentDef *agent.Definition) string {
+// describeSeedAuthFiles returns a human-readable description of expected auth file paths.
+func describeSeedAuthFiles(agentDef *agent.Definition) string {
 	var paths []string
-	for _, af := range agentDef.AuthFiles {
-		paths = append(paths, af.HostPath)
+	for _, sf := range agentDef.SeedFiles {
+		if sf.AuthOnly {
+			paths = append(paths, sf.HostPath)
+		}
 	}
 	return strings.Join(paths, ", ")
 }
 
-// copyAuthFiles copies auth files from the host into the sandbox's agent-state directory.
+// copySeedFiles copies seed files from the host into the sandbox's agent-state directory.
+// Files with AuthOnly=true are skipped when hasAPIKey is true.
 // Returns true if any files were copied. Skips files that don't exist on the host.
-func copyAuthFiles(agentDef *agent.Definition, sandboxDir string) (bool, error) {
+func copySeedFiles(agentDef *agent.Definition, sandboxDir string, hasAPIKey bool) (bool, error) {
 	copied := false
 	agentStateDir := filepath.Join(sandboxDir, "agent-state")
 
-	for _, af := range agentDef.AuthFiles {
-		hostPath := expandTilde(af.HostPath)
+	for _, sf := range agentDef.SeedFiles {
+		if sf.AuthOnly && hasAPIKey {
+			continue // auth file not needed when API key is set
+		}
+
+		hostPath := expandTilde(sf.HostPath)
 		if _, err := os.Stat(hostPath); err != nil {
 			continue // skip missing files
 		}
 
-		targetPath := filepath.Join(agentStateDir, af.TargetPath)
+		targetPath := filepath.Join(agentStateDir, sf.TargetPath)
 
 		// Ensure parent directory exists
 		if err := os.MkdirAll(filepath.Dir(targetPath), 0750); err != nil {
-			return copied, fmt.Errorf("create dir for %s: %w", af.TargetPath, err)
+			return copied, fmt.Errorf("create dir for %s: %w", sf.TargetPath, err)
 		}
 
 		data, err := os.ReadFile(hostPath) //nolint:gosec // G304: path is from agent definition, not user input

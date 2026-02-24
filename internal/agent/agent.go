@@ -13,12 +13,13 @@ const (
 	PromptModeHeadless PromptMode = "headless"
 )
 
-// AuthFile describes a host file that provides authentication credentials.
+// SeedFile describes a host file to copy into the agent's state directory.
 // HostPath supports ~ for the user's home directory, expanded at runtime.
 // TargetPath is relative to the agent's StateDir.
-type AuthFile struct {
-	HostPath   string // e.g., "~/.claude/.credentials.json"
-	TargetPath string // relative to StateDir, e.g., ".credentials.json"
+type SeedFile struct {
+	HostPath   string // e.g., "~/.claude/settings.json"
+	TargetPath string // relative to StateDir, e.g., "settings.json"
+	AuthOnly   bool   // if true, only required when no API key is set
 }
 
 // Definition describes an agent's install, launch, and behavioral characteristics.
@@ -28,7 +29,7 @@ type Definition struct {
 	HeadlessCmd    string
 	PromptMode     PromptMode
 	APIKeyEnvVars  []string
-	AuthFiles      []AuthFile
+	SeedFiles      []SeedFile
 	StateDir       string
 	SubmitSequence string
 	StartupDelay   time.Duration
@@ -43,8 +44,9 @@ var agents = map[string]*Definition{
 		HeadlessCmd:    `claude -p "PROMPT" --dangerously-skip-permissions`,
 		PromptMode:     PromptModeInteractive,
 		APIKeyEnvVars: []string{"ANTHROPIC_API_KEY"},
-		AuthFiles: []AuthFile{
-			{HostPath: "~/.claude/.credentials.json", TargetPath: ".credentials.json"},
+		SeedFiles: []SeedFile{
+			{HostPath: "~/.claude/.credentials.json", TargetPath: ".credentials.json", AuthOnly: true},
+			{HostPath: "~/.claude/settings.json", TargetPath: "settings.json"},
 		},
 		StateDir:       "/home/yoloai/.claude/",
 		SubmitSequence: "Enter Enter",
