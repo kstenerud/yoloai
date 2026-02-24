@@ -3,13 +3,10 @@ set -euo pipefail
 
 # --- Run as root ---
 
-# Read config
+# Read config (only UID/GID needed in root context; agent config read by inner bash)
 CONFIG="/yoloai/config.json"
 HOST_UID=$(jq -r '.host_uid' "$CONFIG")
 HOST_GID=$(jq -r '.host_gid' "$CONFIG")
-AGENT_COMMAND=$(jq -r '.agent_command' "$CONFIG")
-STARTUP_DELAY=$(jq -r '.startup_delay' "$CONFIG")
-SUBMIT_SEQUENCE=$(jq -r '.submit_sequence' "$CONFIG")
 
 # Remap UID/GID to match host user
 CURRENT_UID=$(id -u yoloai)
@@ -43,9 +40,11 @@ fi
 exec gosu yoloai bash -c '
 set -euo pipefail
 
-AGENT_COMMAND='"'"'"$AGENT_COMMAND"'"'"'
-STARTUP_DELAY='"$STARTUP_DELAY"'
-SUBMIT_SEQUENCE='"'"'"$SUBMIT_SEQUENCE"'"'"'
+# Read agent config directly (avoids shell quoting issues passing through gosu)
+CONFIG="/yoloai/config.json"
+AGENT_COMMAND=$(jq -r .agent_command "$CONFIG")
+STARTUP_DELAY=$(jq -r .startup_delay "$CONFIG")
+SUBMIT_SEQUENCE=$(jq -r .submit_sequence "$CONFIG")
 
 # Start tmux session with logging and remain-on-exit
 tmux new-session -d -s main -x 200 -y 50
