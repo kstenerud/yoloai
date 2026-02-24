@@ -439,7 +439,7 @@ Options:
 - `--replace`: Destroy existing sandbox of the same name before creating. Shorthand for `yoloai destroy <name> && yoloai new <name>`. Inherits destroy's smart confirmation — prompts when the existing sandbox has a running agent or unapplied changes. `--yes` skips confirmation.
 - `--no-start`: Create sandbox without starting the container. Useful for setup-only operations.
 - `--yes`: Skip confirmation prompts (dirty repo warning). For scripting.
-- `-- <args>...`: Pass remaining arguments directly to the agent CLI invocation. Appended verbatim to the agent command. Example: `yoloai new fix-bug . -- --max-turns 5` passes `--max-turns 5` to Claude Code. First-class flags (`--model`) take precedence if duplicated.
+- `-- <args>...`: Pass remaining arguments directly to the agent CLI invocation. Appended verbatim after yoloai's built-in flags in the agent command. Example: `yoloai new fix-bug . --model opus -- --max-turns 5` produces `claude --dangerously-skip-permissions --model claude-opus-4-latest --max-turns 5`. **Do not duplicate first-class flags** (e.g., `--model`) in passthrough args — behavior is undefined (depends on the agent's CLI parser, which typically uses last-wins semantics).
 
 **Default network allowlist (per agent):**
 
@@ -476,7 +476,7 @@ The allowlist is agent-specific — each agent's definition includes its require
    **Full copy strategy** (fallback):
    All steps run on the host via yoloai before container start:
    - If the directory is a git repo, record the current HEAD SHA in `meta.json`.
-   - Copy via `cp -a` to `~/.yoloai/sandboxes/<name>/work/<encoded-path>/` (same caret-encoding scheme as overlay), then mount at the mirrored host path inside the container. `cp -a` preserves permissions, symlinks, and all metadata. Everything is copied including `.git/` and files ignored by `.gitignore`.
+   - Copy via `cp -rp` to `~/.yoloai/sandboxes/<name>/work/<encoded-path>/` (same caret-encoding scheme as overlay), then mount at the mirrored host path inside the container. `cp -rp` preserves permissions, timestamps, and symlinks (POSIX-portable; `cp -a` is GNU-specific and unavailable on macOS). Everything is copied including `.git/` and files ignored by `.gitignore`.
    - If the copy already has a `.git/` directory (from the original repo), use the recorded SHA as the baseline — `yoloai diff` will diff against it.
    - If the copy has no `.git/`, `git init` + `git add -A` + `git commit -m "initial"` to create a baseline.
    The container receives a ready-to-use directory with a git baseline already established.
@@ -667,7 +667,7 @@ Lists all sandboxes with their current status.
 | PROFILE | Profile name or `(base)`                                       |
 | AGE     | Time since creation                                            |
 | WORKDIR | Working directory path                                         |
-| CHANGES | `yes` if unapplied changes exist, `no` if clean, `-` if unknown. Detected via `git diff --quiet` on the host-side work directory (no Docker needed). |
+| CHANGES | `yes` if unapplied changes exist, `no` if clean, `-` if unknown. Detected via `git status --porcelain` on the host-side work directory (any output = changes; read-only, catches both tracked modifications and untracked files; no Docker needed). |
 
 Agent exit status is detected via `tmux list-panes -t main -F '#{pane_dead_status}'` when `#{pane_dead}` is 1. Non-zero exit code shows STATUS as "failed"; exit 0 shows as "done". Running containers with live panes show "running"; stopped containers show "stopped".
 

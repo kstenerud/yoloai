@@ -8,7 +8,7 @@ No code exists yet. All design docs are complete (DESIGN.md, CODING-STANDARD.md,
 
 **MVP commands:** `build`, `new`, `attach`, `show`, `diff`, `apply`, `list`, `log`, `exec`, `stop`, `start`, `destroy`, `reset`, `completion`, `version`
 
-**MVP features:** Full-copy only (Claude only), credential injection, `--model` (with built-in aliases), `--prompt-file`/stdin, `--replace`, `--no-start`, `--network-none`, `--` agent arg passthrough, `--stat` on diff, `--yes` on apply/destroy, `--no-prompt`/`--clean` on reset, `--all`/multi-name on stop/destroy, smart destroy confirmation, dangerous directory detection, dirty git repo warning, path overlap detection, `YOLOAI_SANDBOX` env var, context-aware creation output, auto-paging for diff/log, shell completion, version info.
+**MVP features:** Full-copy only (Claude only), credential injection, `--model` (with built-in aliases), `--prompt-file`/stdin, `--replace`, `--no-start`, `--network-none`, `--port`, `--` agent arg passthrough, `--stat` on diff, `--yes` on apply/destroy, `--no-prompt`/`--clean` on reset, `--all`/multi-name on stop/destroy, smart destroy confirmation, dangerous directory detection, dirty git repo warning, path overlap detection, `YOLOAI_SANDBOX` env var, context-aware creation output, auto-paging for diff/log, shell completion, version info.
 
 **Deferred:** overlay strategy, network isolation/proxy, profiles, Codex agent, Viper config file parsing, `auto_commit_interval`, custom mount points (`=<path>`), `agent_files`, env var interpolation, context file, aux dirs (`-d`), `--resume`, `restart`, `wait`, `run`, `tail`.
 
@@ -39,11 +39,11 @@ Pure Go, fully unit-testable without Docker.
 - `WorkDir(name string, hostPath string) string` — `.../work/<encoded-path>/`
 
 `internal/sandbox/meta.go`:
-- `Meta` struct matching simplified MVP meta.json (no network, no directories array, no ports/resources)
+- `Meta` struct matching simplified MVP meta.json (no directories array, no resources). Includes `NetworkMode` field (`""` for default, `"none"` for `--network-none`) and `Ports` field (`[]string`, e.g. `["3000:3000"]`) so `yoloai start` can reconstruct the container correctly.
 - `SaveMeta(path, meta)`, `LoadMeta(path)`
 
 `internal/agent/agent.go`:
-- `Definition` struct: Name, InteractiveCmd, APIKeyEnvVars, StateDir, SubmitSequence, StartupDelay
+- `Definition` struct: Name, InteractiveCmd, APIKeyEnvVars, StateDir, SubmitSequence, StartupDelay, ModelAliases (map[string]string for alias resolution, e.g. `"sonnet"` → `"claude-sonnet-4-latest"`)
 - `GetAgent(name string)` — returns Claude definition
 
 `internal/sandbox/parse.go`:
@@ -143,21 +143,22 @@ The core creation workflow — depends on Phase 4a infrastructure.
   9. Git baseline: if `.git/` exists record HEAD SHA, else `git init + git add -A + git commit`
   10. Always store baseline SHA in meta.json
   11. Write meta.json, prompt.txt (from `--prompt`, `--prompt-file`, or `--prompt -` for stdin), empty log.txt
-  12. Generate `/yoloai/config.json` with host_uid, host_gid, agent_command (including `--model`, `--agent`, and any `--` passthrough args), startup_delay, submit_sequence
-  13. Create API key temp file via `os.CreateTemp` with `0600` permissions (defer cleanup). Crash-safe: accept that SIGKILL leaves a temp file (same tradeoff as Docker Compose).
-  14. If `--no-start`, stop here — print creation output and exit
-  15. Create + start Docker container with mounts:
+  12. Resolve model alias: look up `--model` value in agent definition's `ModelAliases` map; if found, substitute the mapped value; if not found, pass through as-is (allows full model names like `claude-sonnet-4-5-20250929`)
+  13. Generate `/yoloai/config.json` with host_uid, host_gid, agent_command (built-in flags first — `--dangerously-skip-permissions`, resolved `--model` — then `--` passthrough args appended after), startup_delay, submit_sequence
+  14. Create API key temp file via `os.CreateTemp` with `0600` permissions (defer cleanup). Crash-safe: accept that SIGKILL leaves a temp file (same tradeoff as Docker Compose).
+  15. If `--no-start`, stop here — print creation output and exit
+  16. Create + start Docker container with mounts:
       - `work/<encoded-path>/` → mirrored host path (rw)
       - `agent-state/` → `/home/yoloai/.claude/` (rw)
       - `log.txt` → `/yoloai/log.txt` (rw)
       - `prompt.txt` → `/yoloai/prompt.txt` (ro, if exists)
       - `config.json` → `/yoloai/config.json` (ro)
       - temp key file → `/run/secrets/ANTHROPIC_API_KEY` (ro)
-  16. Container config: image `yoloai-base`, name `yoloai-<name>`, `--init`, working dir = mirrored host path, `NetworkMode: "none"` if `--network-none`
-  17. Wait for container entrypoint to read secrets (poll for agent process start with 5s timeout), then clean up temp key file
-  18. Print context-aware creation output
+  17. Container config: image `yoloai-base`, name `yoloai-<name>`, `--init`, working dir = mirrored host path, `NetworkMode: "none"` if `--network-none`, `HostConfig.PortBindings` from `--port` flags
+  18. Wait for container entrypoint to read secrets (poll for agent process start with 5s timeout), then clean up temp key file
+  19. Print context-aware creation output
 
-Wire `yoloai new` — parse `--prompt`/`-p` (including `-` for stdin), `--prompt-file`/`-f` (including `-` for stdin) — mutually exclusive, error if both provided — `--model`/`-m` (resolve built-in aliases from agent definition before passing to agent, pass through unknown values as-is), `--agent` (validate: only `claude` for MVP, error on anything else), `--network-none` (sets Docker `NetworkMode: "none"`), `--replace`, `--no-start`, `--yes`, name, workdir positional args. Collect `--` trailing args via Cobra's `ArgsAfter`/`cmd.Flags().ArgsLenAtDash()` and append verbatim to agent_command in config.json.
+Wire `yoloai new` — parse `--prompt`/`-p` (including `-` for stdin), `--prompt-file`/`-f` (including `-` for stdin) — mutually exclusive, error if both provided — `--model`/`-m` (resolve built-in aliases via agent definition's `ModelAliases` map: if value found, substitute; if not, pass through as-is), `--agent` (validate: only `claude` for MVP, error on anything else), `--network-none` (sets Docker `NetworkMode: "none"`), `--port` (repeatable string flag, parsed as `host:container` pairs into `HostConfig.PortBindings`), `--replace`, `--no-start`, `--yes`, name, workdir positional args. Collect `--` trailing args via Cobra's `cmd.ArgsLenAtDash()` — returns the index of `--` in positional args (-1 if absent); slice positionals at that index (everything before = name/workdir, everything after = agent passthrough args). Append passthrough args verbatim to agent_command in config.json.
 
 **Creation output (with prompt):**
 ```
@@ -178,7 +179,18 @@ Sandbox explore created
 Run 'yoloai attach explore' to start working (Ctrl-b d to detach)
 ```
 
-Profile and network lines omitted when using defaults. Strategy line omitted for full copy.
+Profile and network lines omitted when using defaults (base image, unrestricted network). When `--network-none` is used, show `Network: none` (non-default, so not omitted). Strategy line omitted for full copy.
+
+**Creation output (with `--network-none`):**
+```
+Sandbox offline-test created
+  Agent:    claude
+  Workdir:  /home/user/projects/my-app (copy)
+  Network:  none
+
+Run 'yoloai attach offline-test' to interact (Ctrl-b d to detach)
+    'yoloai diff offline-test' when done
+```
 
 **Verify:** Integration: `yoloai new test-sandbox /tmp/test-project:copy` creates sandbox, `docker ps` shows `yoloai-test-sandbox`.
 
@@ -188,7 +200,7 @@ Profile and network lines omitted when using defaults. Strategy line omitted for
 
 **`yoloai show`:** Load `meta.json`, query Docker for container state. Display: name, status (running/stopped/done/failed), agent, prompt (first 200 chars), workdir, directories with access modes, creation time, baseline SHA, container ID. Profile line omitted for MVP (profiles deferred — add back when implemented). Status detection order: check Docker container state FIRST — if stopped/removed, status is "stopped" without querying tmux. Only if the container is running, use `docker exec tmux list-panes -t main -F '#{pane_dead}'` to distinguish running/done/failed. Done (exit 0) vs failed (non-zero) via `pane_dead_status`.
 
-**`yoloai list`:** Scan sandboxes dir, load meta.json for each, query Docker for status. Format table: NAME | STATUS | AGENT | AGE | WORKDIR | CHANGES. PROFILE column omitted for MVP (profiles deferred — add back when implemented). Status uses same done/failed detection as `show`. CHANGES column: run `git diff --quiet` on the host-side work directory for each sandbox — `yes` if non-zero exit, `no` if zero, `-` if work dir missing or not a git repo.
+**`yoloai list`:** Scan sandboxes dir, load meta.json for each, query Docker for status. Format table: NAME | STATUS | AGENT | AGE | WORKDIR | CHANGES. PROFILE column omitted for MVP (profiles deferred — add back when implemented). Status uses same done/failed detection as `show`. CHANGES column: run `git status --porcelain` on the host-side work directory for each sandbox — `yes` if any output (catches both tracked modifications and untracked files), `no` if empty, `-` if work dir missing or not a git repo.
 
 **`yoloai log`:** Read `~/.yoloai/sandboxes/<name>/log.txt`. Auto-page through `$PAGER` / `less -R` when stdout is a TTY. Raw output when piped. For real-time following, users can find the log path via `yoloai show` and use `tail -f` directly.
 
@@ -237,7 +249,7 @@ The core differentiator.
 **`yoloai reset`:** Full re-copy of workdir from original host directory with git baseline reset. Steps:
 1. Stop the container (if running)
 2. Delete `work/<encoded-path>/` (the sandbox copy)
-3. Re-copy workdir from original host dir via `cp -a` to `work/<encoded-path>/`
+3. Re-copy workdir from original host dir via `cp -rp` to `work/<encoded-path>/`
 4. Re-create git baseline: if `.git/` exists in copy, record new HEAD SHA; else `git init + git add -A + git commit`
 5. Update `baseline_sha` in `meta.json`
 6. If `--clean`, also delete and recreate `agent-state/` directory

@@ -126,7 +126,7 @@ These were deferred from MVP but might be cheap to add and valuable for dogfoodi
 
 57. ~~**No indication of agent completion vs. crash**~~ — **Resolved:** `yoloai list` shows "done" (exit 0) vs "failed" (non-zero) using tmux `pane_dead_status`. Not just "exited."
 
-58. ~~**`yoloai list` doesn't show unapplied changes**~~ — **Deferred.** Running `git diff --stat` for every sandbox on every `list` is a performance risk (especially overlay requiring running container). `yoloai diff --stat <name>` is the fast check.
+58. ~~**`yoloai list` doesn't show unapplied changes**~~ — **Resolved.** CHANGES column added using `git status --porcelain` on host-side work directory — lightweight (read-only, short-circuits), catches both tracked modifications and untracked files, no Docker needed.
 
 59. ~~**Multiple sandbox conflict detection is absent**~~ — **Resolved:** Include better error messaging — wrap `git apply` failures with context explaining why the patch failed. Predictive conflict detection deferred.
 
@@ -184,7 +184,7 @@ These were deferred from MVP but might be cheap to add and valuable for dogfoodi
 
 85. ~~**Entrypoint JSON parsing**~~ — **Resolved:** Install `jq` in the base image. The entrypoint reads `/yoloai/config.json` via `jq` for all configuration (agent_command, startup_delay, submit_sequence, host_uid, host_gid, etc.). Simpler and more robust than shell-only JSON parsing.
 
-86. ~~**Agent CLI arg passthrough**~~ — **Resolved:** `yoloai new fix-bug . -- --max-turns 5` passes everything after `--` verbatim to the agent command. Appended to agent_command in config.json. First-class flags (`--model`) take precedence if duplicated. Standard `--` convention (npm, docker, cargo). High value for dogfooding — agents have many flags yoloai doesn't need to wrap.
+86. ~~**Agent CLI arg passthrough**~~ — **Resolved:** `yoloai new fix-bug . -- --max-turns 5` passes everything after `--` verbatim to the agent command. Passthrough args are appended after yoloai's built-in flags (e.g., `claude --dangerously-skip-permissions --model claude-opus-4-latest --max-turns 5`). Duplicating first-class flags in passthrough is undefined behavior (depends on agent's CLI parser). Standard `--` convention (npm, docker, cargo). High value for dogfooding — agents have many flags yoloai doesn't need to wrap.
 
 ## Post-MVP (Codex and cleanup)
 
