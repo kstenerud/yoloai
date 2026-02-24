@@ -75,6 +75,7 @@ func detectChanges(workDir string) string {
 func execInContainer(ctx context.Context, client docker.Client, containerID string, cmd []string) (string, error) {
 	execResp, err := client.ContainerExecCreate(ctx, containerID, container.ExecOptions{
 		Cmd:          cmd,
+		User:         "yoloai",
 		AttachStdout: true,
 		AttachStderr: true,
 	})

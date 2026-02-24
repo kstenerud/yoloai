@@ -54,7 +54,7 @@ func newExecCmd() *cobra.Command {
 			} else {
 				dockerArgs = append(dockerArgs, "-i")
 			}
-			dockerArgs = append(dockerArgs, containerName)
+			dockerArgs = append(dockerArgs, "-u", "yoloai", containerName)
 			dockerArgs = append(dockerArgs, cmdArgs...)
 
 			slog.Debug("exec in container", "container", containerName, "cmd", cmdArgs)
