@@ -4,7 +4,7 @@
 
 Run AI coding CLI agents (Claude Code, Codex, and others) with their sandbox-bypass flags inside disposable, isolated containers so that the agent can work autonomously without constant permission prompts. Project directories are presented as isolated writable views inside the container. The user reviews changes via `yoloai diff` and applies them back to the originals via `yoloai apply` when satisfied.
 
-**Scope:** v1 ships with Claude Code and OpenAI Codex. The architecture is agent-agnostic — Docker, overlayfs, network isolation, diff/apply are not agent-specific. Adding a new agent requires only a new agent definition (install command, launch command, API key env vars, state directory). See RESEARCH.md "Multi-Agent Support Research" for additional agents researched.
+**Scope:** v1 ships with Claude Code and OpenAI Codex (Codex is `[POST-MVP]`). The architecture is agent-agnostic — Docker, overlayfs, network isolation, diff/apply are not agent-specific. Adding a new agent requires only a new agent definition (install command, launch command, API key env vars, state directory). See RESEARCH.md "Multi-Agent Support Research" for additional agents researched.
 
 ## Value Proposition
 
@@ -140,11 +140,11 @@ Field notes:
 **Base image (`yoloai-base`):** Based on Debian slim. Minimal foundation with common tools, rebuilt occasionally. Debian slim over Ubuntu (smaller) or Alpine (musl incompatibilities with Node.js/npm).
 - Common tools: tmux, git, build-essential, python3, jq, etc.
 - **Claude Code:** Node.js 22 LTS + npm installation (`npm i -g @anthropic-ai/claude-code`) — npm required, not native binary (native binary bundles Bun which ignores proxy env vars, segfaults on Debian bookworm AMD64, and auto-updates). npm is deprecated but still published and is the only reliable Docker/proxy path. See RESEARCH.md "Claude Code Installation Research"
-- **Codex:** Static Rust binary download (musl-linked, zero runtime dependencies, ~zero image bloat)
-- **Non-root user** (`yoloai`, UID/GID matching host user via entrypoint). Image builds with a placeholder user (UID 1001). At container start, the entrypoint runs as root: reads `host_uid`/`host_gid` from `/yoloai/config.json` via `jq`, runs `usermod -u <uid> yoloai && groupmod -g <gid> yoloai` (handling exit code 12 for chown failures on mounted volumes), fixes ownership on container-managed directories, then drops privileges via `gosu yoloai`. Uses `tini` as PID 1 (`--init` or explicit `ENTRYPOINT`). Images are portable across machines since UID/GID are set at run time, not build time. Claude Code refuses `--dangerously-skip-permissions` as root; Codex does not enforce this but convention is non-root
+- **[POST-MVP] Codex:** Static Rust binary download (musl-linked, zero runtime dependencies, ~zero image bloat)
+- **Non-root user** (`yoloai`, UID/GID matching host user via entrypoint). Image builds with a placeholder user (UID 1001). At container start, the entrypoint runs as root: reads `host_uid`/`host_gid` from `/yoloai/config.json` via `jq`, runs `usermod -u <uid> yoloai && groupmod -g <gid> yoloai` (exit code 12 means "can't update /etc/passwd" — if the UID already matches the desired UID, this is a no-op; otherwise log a warning and continue), fixes ownership on container-managed directories, then drops privileges via `gosu yoloai`. Uses `tini` as PID 1 (`--init` or explicit `ENTRYPOINT`). Images are portable across machines since UID/GID are set at run time, not build time. Claude Code refuses `--dangerously-skip-permissions` as root; Codex does not enforce this but convention is non-root
 - **Entrypoint:** Default Dockerfile and entrypoint.sh are embedded in the binary via `go:embed`. On first run, these are seeded to `~/.yoloai/` if they don't exist. `yoloai build` always reads from `~/.yoloai/`, not from embedded copies. Users can edit for fast iteration without rebuilding yoloai itself. The entrypoint reads all configuration from a bind-mounted `/yoloai/config.json` file containing agent_command, startup_delay, submit_sequence, host_uid, host_gid, and later overlay_mounts, iptables_rules, setup_script. No environment variables are used for configuration passing.
 
-**Profile images (`yoloai-<profile>`):** Derived from base, one per profile. Users supply a `Dockerfile` per profile with `FROM yoloai-base`. This avoids the limitations of auto-generating Dockerfiles from package lists and gives full flexibility (PPAs, tarballs, custom install steps).
+**[POST-MVP] Profile images (`yoloai-<profile>`):** Derived from base, one per profile. Users supply a `Dockerfile` per profile with `FROM yoloai-base`. This avoids the limitations of auto-generating Dockerfiles from package lists and gives full flexibility (PPAs, tarballs, custom install steps).
 
 ```
 ~/.yoloai/profiles/
@@ -167,7 +167,7 @@ Profile creation always seeds a Dockerfile. If the template doesn't provide one,
 defaults:
   agent: claude                          # which agent to launch (claude, codex); CLI --agent overrides
   # profile: my-project                  # default profile to use; CLI --profile overrides; --no-profile uses base image
-  # Files/dirs copied into agent-state/ on first sandbox run.
+  # [POST-MVP] Files/dirs copied into agent-state/ on first sandbox run.
   # These seed the agent's environment. Sandbox gets its own copy (not bind-mounted).
   # Options:
   #   agent_files: home               # copy from agent's default state dir (~/.claude/ for Claude, ~/.codex/ for Codex)
@@ -181,15 +181,15 @@ defaults:
   mounts:
     - ~/.gitconfig:/home/yoloai/.gitconfig:ro
 
-  copy_strategy: auto                   # auto | overlay | full
+  copy_strategy: auto                   # [POST-MVP] auto | overlay | full (MVP uses full copy only)
                                         # auto: use overlayfs where available, fall back to full copy
                                         # overlay: overlayfs lower layer (instant, deltas-only, needs CAP_SYS_ADMIN)
                                         # full: traditional full copy (portable, all reads VM-local)
-  auto_commit_interval: 0               # seconds between auto-commits in :copy dirs; 0 = disabled
+  auto_commit_interval: 0               # [POST-MVP] seconds between auto-commits in :copy dirs; 0 = disabled
   ports: []                             # default port mappings; profile ports are additive
   env: {}                               # environment variables passed to container; profile env merges with defaults
-  network_isolated: false               # true to enable network isolation by default
-  network_allow: []                     # additional domains to allow (additive with agent defaults)
+  network_isolated: false               # [POST-MVP] true to enable network isolation by default
+  network_allow: []                     # [POST-MVP] additional domains to allow (additive with agent defaults)
   resources:
     cpus: 4                           # docker --cpus
     memory: 8g                        # docker --memory
@@ -201,14 +201,14 @@ defaults:
 `config.yaml` contains only `defaults` — settings applied to every sandbox. Profile-specific configuration lives in separate `profile.yaml` files (see Profiles section).
 
 - `defaults.agent` selects the agent to launch. Valid values: `claude`, `codex`. Determines the launch command, API key env vars, state directory, network allowlist, and prompt delivery mode. CLI `--agent` overrides config.
-- `defaults.agent_files` controls what files are copied into the sandbox's `agent-state/` directory on first run. Set to `home` to copy from the agent's default state directory (`~/.claude/` for Claude, `~/.codex/` for Codex). Set to a list of paths (`~/` or absolute) for deterministic setups. Relative paths without `~/` are an error. Omit entirely to copy nothing (safe default). Profile `agent_files` **replaces** (not merges with) defaults.
+- **[POST-MVP]** `defaults.agent_files` controls what files are copied into the sandbox's `agent-state/` directory on first run. Set to `home` to copy from the agent's default state directory (`~/.claude/` for Claude, `~/.codex/` for Codex). Set to a list of paths (`~/` or absolute) for deterministic setups. Relative paths without `~/` are an error. Omit entirely to copy nothing (safe default). Profile `agent_files` **replaces** (not merges with) defaults.
 - `defaults.mounts` are bind mounts added at container run time. Profile mounts are **additive** (merged with defaults, no deduplication — duplicates are a user error).
 - `defaults.resources` sets baseline limits. Profiles can override individual values.
 - `defaults.env` sets environment variables passed to the container via `docker run -e`. Profile `env` is merged with defaults (profile values win on conflict). Note: API keys (e.g., `ANTHROPIC_API_KEY`, `CODEX_API_KEY`) are injected via file-based bind mount, not `env` — see Credential Management.
-- `defaults.network_isolated` enables network isolation for all sandboxes. Profile can override. CLI `--network-isolated` flag overrides config.
-- `defaults.network_allow` lists additional allowed domains. Non-empty `network_allow` implies `network_isolated: true`. Profile `network_allow` is additive with defaults. CLI `--network-allow` is additive with config.
+- **[POST-MVP]** `defaults.network_isolated` enables network isolation for all sandboxes. Profile can override. CLI `--network-isolated` flag overrides config.
+- **[POST-MVP]** `defaults.network_allow` lists additional allowed domains. Non-empty `network_allow` implies `network_isolated: true`. Profile `network_allow` is additive with defaults. CLI `--network-allow` is additive with config.
 
-#### Recipes (advanced)
+#### [POST-MVP] Recipes (advanced)
 
 For advanced setups like Tailscale inside containers:
 
@@ -225,11 +225,11 @@ defaults:
 
 `cap_add`, `devices`, and `setup` are available in both `defaults` and profiles but not shown in the default config. Profile values are **additive** (merged with defaults). `setup` commands run at container start before the agent launches, in order (defaults first, then profile).
 
-**Environment variable interpolation:** Config values (in both `config.yaml` and `profile.yaml`) support `${VAR}` interpolation from the host environment. Only the braced syntax `${VAR}` is recognized — bare `$VAR` is **not** interpolated and treated as literal text. This avoids the class of bugs where `$` in passwords, regex patterns, or shell strings is silently misinterpreted (a well-documented pain point with Docker Compose's unbraced `$VAR` support — see RESEARCH.md). Interpolation is applied after YAML parsing, so expanded values cannot break YAML syntax. Unset variables produce an error at sandbox creation time (fail-fast, not silent empty string).
+**[POST-MVP] Environment variable interpolation:** Config values (in both `config.yaml` and `profile.yaml`) support `${VAR}` interpolation from the host environment. Only the braced syntax `${VAR}` is recognized — bare `$VAR` is **not** interpolated and treated as literal text. This avoids the class of bugs where `$` in passwords, regex patterns, or shell strings is silently misinterpreted (a well-documented pain point with Docker Compose's unbraced `$VAR` support — see RESEARCH.md). Interpolation is applied after YAML parsing, so expanded values cannot break YAML syntax. Unset variables produce an error at sandbox creation time (fail-fast, not silent empty string).
 
-**Tilde expansion:** `~/` is expanded to `$HOME` in all path-valued fields across both `config.yaml` and `profile.yaml` (`agent_files`, `mounts`, `workdir.path`, `directories[].path`). Bare relative paths (without `~/`) are an error in all path fields.
+**[POST-MVP] Tilde expansion:** `~/` is expanded to `$HOME` in all path-valued fields across both `config.yaml` and `profile.yaml` (`agent_files`, `mounts`, `workdir.path`, `directories[].path`). Bare relative paths (without `~/`) are an error in all path fields.
 
-### 3. Profiles
+### 3. [POST-MVP] Profiles
 
 Profiles live in `~/.yoloai/profiles/<name>/`, each containing a `Dockerfile` and a `profile.yaml`:
 
@@ -309,7 +309,7 @@ Single Go binary. No runtime dependencies — just the binary and Docker.
 ## Commands
 
 ```
-yoloai new [options] <name> [<workdir>] [-d <auxdir>...]  Create and start a sandbox
+yoloai new [options] <name> [<workdir>] [-d <auxdir>...]  Create and start a sandbox  (aux dirs [POST-MVP])
 yoloai list                                    List sandboxes and their status
 yoloai attach <name>                           Attach to a sandbox's tmux session
 yoloai show <name>                             Show sandbox configuration and state
@@ -318,23 +318,23 @@ yoloai diff <name>                             Show changes the agent made
 yoloai apply <name>                            Copy changes back to original dirs
 yoloai exec <name> <command>                   Run a command inside the sandbox
 yoloai stop <name>...                          Stop sandboxes (preserving state)
-yoloai start [--resume] <name>                 Start a stopped sandbox
-yoloai restart <name>                          Restart the agent in an existing sandbox
+yoloai start [--resume] <name>                 Start a stopped sandbox  (--resume [POST-MVP])
+yoloai restart <name>                          Restart the agent in an existing sandbox  [POST-MVP]
 yoloai reset <name>                            Re-copy workdir and reset git baseline
 yoloai destroy <name>...                       Stop and remove sandboxes
-yoloai build [profile|--all]                   Build/rebuild Docker image(s)
-yoloai profile create <name> [--template <tpl>]  Create a profile with scaffold
-yoloai profile list                            List profiles
-yoloai profile delete <name>                   Delete a profile
+yoloai build [profile|--all]                   Build/rebuild Docker image(s)  (profile/--all [POST-MVP])
+yoloai profile create <name> [--template <tpl>]  Create a profile with scaffold  [POST-MVP]
+yoloai profile list                            List profiles  [POST-MVP]
+yoloai profile delete <name>                   Delete a profile  [POST-MVP]
 yoloai completion [bash|zsh|fish|powershell]   Generate shell completion script
 yoloai version                                 Show version information
 ```
 
 ### Agent Definitions
 
-Built-in agent definitions (v1). Each agent specifies its install method, launch commands, API key requirements, and behavioral characteristics. No user-defined agents in v1.
+Built-in agent definitions (v1). Each agent specifies its install method, launch commands, API key requirements, and behavioral characteristics. No user-defined agents in v1. **Codex is `[POST-MVP]`** — MVP implements Claude only.
 
-| Field                         | Claude                                                    | Codex                                          |
+| Field                         | Claude                                                    | Codex [POST-MVP]                               |
 |-------------------------------|-----------------------------------------------------------|------------------------------------------------|
 | Install                       | `npm i -g @anthropic-ai/claude-code`                      | Static binary download                         |
 | Runtime                       | Node.js                                                   | None (static musl binary)                      |
@@ -345,6 +345,7 @@ Built-in agent definitions (v1). Each agent specifies its install method, launch
 | API key env vars              | `ANTHROPIC_API_KEY`                                       | `CODEX_API_KEY` (preferred), `OPENAI_API_KEY` (fallback) |
 | State directory               | `~/.claude/`                                              | `~/.codex/`                                    |
 | Model flag                    | `--model <model>`                                         | `--model <model>`                              |
+| Model aliases                 | `sonnet` → `claude-sonnet-4-latest`, `opus` → `claude-opus-4-latest`, `haiku` → `claude-haiku-4-latest` | TBD |
 | Non-root required             | Yes (refuses as root)                                     | No (convention is non-root)                    |
 | Proxy support                 | Yes (npm install only, not native binary)                 | TBD (research needed)                          |
 | Default network allowlist     | `api.anthropic.com`, `statsig.anthropic.com`, `sentry.io` | `api.openai.com` (minimum; additional TBD)     |
@@ -363,9 +364,9 @@ The agent definition determines the default prompt delivery mode. `--prompt` sel
 
 The **workdir** is the single primary project directory — the agent's working directory. It is positional (after name) and defaults to `:copy` mode if no suffix is given. The `:rw` suffix must be explicit. The workdir is optional if a profile provides one.
 
-**`-d` / `--dir`** specifies auxiliary directories (repeatable). Default read-only. Additive with profile directories.
+**[POST-MVP]** **`-d` / `--dir`** specifies auxiliary directories (repeatable). Default read-only. Additive with profile directories.
 
-When both CLI and profile provide directories: CLI workdir **replaces** profile workdir. CLI `-d` dirs are **additive** with profile dirs.
+**[POST-MVP]** When both CLI and profile provide directories: CLI workdir **replaces** profile workdir. CLI `-d` dirs are **additive** with profile dirs.
 
 Directory argument syntax: `<path>[:<suffixes>][=<mount-point>]`
 
@@ -374,7 +375,7 @@ Suffixes (combinable in any order):
 - `:copy` — copied to sandbox state, read-write, diff/apply available
 - `:force` — override dangerous directory detection
 
-Mount point:
+**[POST-MVP]** Mount point:
 - `=<path>` — mount at a custom container path instead of the mirrored host path
 
 All directories are **bind-mounted read-only by default** at their original absolute host paths (mirrored paths).
@@ -426,16 +427,16 @@ yoloai new my-task ./my-app=/opt/myapp -d ./shared-lib=/usr/local/lib/shared -d 
 ```
 
 Options:
-- `--profile <name>`: Use a profile's derived image and mounts. No profile = base image + defaults only.
-- `--prompt <text>`: Initial prompt/task for the agent (see Prompt Mechanism below). Use `--prompt -` to read from stdin.
-- `--prompt-file <path>`: Read prompt from a file. Use `--prompt-file -` to read from stdin.
-- `--model <model>`: Model to use. Passed to the agent's `--model` flag. If omitted, uses the agent's default.
+- **[POST-MVP]** `--profile <name>`: Use a profile's derived image and mounts. No profile = base image + defaults only.
+- `--prompt` / `-p` `<text>`: Initial prompt/task for the agent (see Prompt Mechanism below). Use `--prompt -` to read from stdin. Mutually exclusive with `--prompt-file`.
+- `--prompt-file` / `-f` `<path>`: Read prompt from a file. Use `--prompt-file -` to read from stdin. Mutually exclusive with `--prompt`.
+- `--model` / `-m` `<model>`: Model to use. Passed to the agent's `--model` flag. If omitted, uses the agent's default. Accepts built-in aliases (see Agent Definitions) or full model names. **[POST-MVP]** User-configurable aliases in config.yaml, plus version pinning to prevent surprise behavior changes.
 - `--agent <name>`: Agent to use (`claude`, `codex`). Overrides `defaults.agent` from config.
-- `--network-isolated`: Allow only the agent's required API traffic. The agent can function but cannot access other external services, download arbitrary binaries, or exfiltrate code.
-- `--network-allow <domain>`: Allow traffic to specific additional domains (can be repeated). Implies `--network-isolated`. Added to the agent's default allowlist (see below).
-- `--network-none`: Run with `--network none` for full network isolation (agent API calls will also fail). Mutually exclusive with `--network-isolated` and `--network-allow`. **Warning:** Most agents (Claude, Codex) require network access to reach their API endpoints. This flag is only useful for agents with locally-hosted models or for testing container setup without agent execution.
+- **[POST-MVP]** `--network-isolated`: Allow only the agent's required API traffic. The agent can function but cannot access other external services, download arbitrary binaries, or exfiltrate code.
+- **[POST-MVP]** `--network-allow <domain>`: Allow traffic to specific additional domains (can be repeated). Implies `--network-isolated`. Added to the agent's default allowlist (see below).
+- `--network-none`: Run with `--network none` for full network isolation (agent API calls will also fail). Mutually exclusive with `--network-isolated` and `--network-allow`. **Warning:** Most agents (Claude, Codex) require network access to reach their API endpoints. This flag is useful for testing container setup without agent execution or for agents with locally-hosted models.
 - `--port <host:container>`: Expose a container port on the host (can be repeated). Example: `--port 3000:3000` for web dev. Without this, container services are not reachable from the host browser. Ports must be specified at creation time — Docker does not support adding port mappings to running containers. To add ports later, use `yoloai new --replace`.
-- `--replace`: Destroy existing sandbox of the same name before creating. Shorthand for `yoloai destroy <name> && yoloai new <name>`.
+- `--replace`: Destroy existing sandbox of the same name before creating. Shorthand for `yoloai destroy <name> && yoloai new <name>`. Inherits destroy's smart confirmation — prompts when the existing sandbox has a running agent or unapplied changes. `--yes` skips confirmation.
 - `--no-start`: Create sandbox without starting the container. Useful for setup-only operations.
 - `--yes`: Skip confirmation prompts (dirty repo warning). For scripting.
 
@@ -465,7 +466,7 @@ The allowlist is agent-specific — each agent's definition includes its require
 2. Error if any two directories resolve to the same absolute container path (mirrored host path or custom `=<path>`).
 3. For each `:copy` directory, set up an isolated writable view using one of two strategies (selected by `copy_strategy` config, default `auto`):
 
-   **Overlay strategy** (default when available):
+   **[POST-MVP] Overlay strategy** (default when available):
    - Host side: bind-mount the original directory read-only into the container at its original absolute path. Provide an empty upper directory from `~/.yoloai/sandboxes/<name>/work/<encoded-path>/`, where `<encoded-path>` is the absolute host path with path separators and filesystem-unsafe characters encoded using [caret encoding](https://github.com/kstenerud/caret-encoding) (e.g., `/home/user/my-app` → `^2Fhome^2Fuser^2Fmy-app`). This is fully reversible and avoids collisions when multiple directories share the same basename.
    - Container side (entrypoint): mount overlayfs with `lowerdir` (original, read-only), `upperdir` (from host `work/<encoded-path>/upper/`), and `workdir` (from host `work/<encoded-path>/work/` — required by overlayfs for atomic copy-up operations) merged at the mirrored host path. The agent sees the full project; writes go to upper only. Original directory is inherently protected (read-only lower layer). The entrypoint must be idempotent — use `mkdir -p` for directories and check `mountpoint -q` before mounting, so it handles both fresh starts and restarts cleanly.
    - After overlay mount, the entrypoint creates the git baseline on the merged view: `git init` + `git add -A` + `git commit -m "initial"`. If the directory is already a git repo, the baseline SHA was recorded in `meta.json` by host-side yoloai at sandbox creation time — the entrypoint skips git init.
@@ -479,16 +480,16 @@ The allowlist is agent-specific — each agent's definition includes its require
    - If the copy has no `.git/`, `git init` + `git add -A` + `git commit -m "initial"` to create a baseline.
    The container receives a ready-to-use directory with a git baseline already established.
 
-   Both strategies produce the same result from the user's perspective: a protected, writable view with git-based diff/apply. The overlay strategy is instant and space-efficient; the full copy strategy is more portable. `auto` tries overlay first, falls back to full copy if `CAP_SYS_ADMIN` is unavailable or the kernel doesn't support nested overlayfs. Explicitly setting `copy_strategy: overlay` when overlay is not available is an error (the user asked for something specific — don't silently degrade).
+   **MVP uses the full copy strategy only.** Both strategies produce the same result from the user's perspective: a protected, writable view with git-based diff/apply. The overlay strategy is instant and space-efficient; the full copy strategy is more portable. `auto` tries overlay first, falls back to full copy if `CAP_SYS_ADMIN` is unavailable or the kernel doesn't support nested overlayfs. Explicitly setting `copy_strategy: overlay` when overlay is not available is an error (the user asked for something specific — don't silently degrade).
 
-   **`auto` detection strategy** (following the pattern used by containers/storage, Podman, and Docker itself):
+   **[POST-MVP] `auto` detection strategy** (following the pattern used by containers/storage, Podman, and Docker itself):
    1. Check `/proc/filesystems` for `overlay` — if absent, skip to full copy.
    2. Check `CAP_SYS_ADMIN` via `/proc/self/status` `CapEff` bitmask (bit 21) — if absent, skip to full copy.
    3. Attempt a test mount in a temp directory (`mount -t overlay` with `lowerdir`, `upperdir`, `workdir`). This is the authoritative test — it validates kernel support, security profiles (seccomp, AppArmor), and backing filesystem compatibility simultaneously. If it fails, fall back to full copy.
    4. Cache the result in `~/.yoloai/cache/overlay-support`, invalidated on kernel or Docker version change.
 
    Note: `git add -A` naturally honors `.gitignore` if one is present, so gitignored files (e.g., `node_modules`) won't clutter `yoloai diff` output regardless of strategy.
-4. If `auto_commit_interval` > 0, start a background auto-commit loop for `:copy` directories inside the container for recovery. The interval is passed to the container via `config.json`. Disabled by default.
+4. **[POST-MVP]** If `auto_commit_interval` > 0, start a background auto-commit loop for `:copy` directories inside the container for recovery. The interval is passed to the container via `config.json`. Disabled by default.
 5. Store original paths, modes, and mapping in `meta.json`.
 6. Start Docker container (see Container Startup below).
 
@@ -508,29 +509,29 @@ Before creating the sandbox (all checks run before any state is created on disk)
 
 ### Container Startup
 
-1. Generate a **sandbox context file** on the host (in the sandbox state directory) describing the environment for the agent: which directory is the workdir, which are auxiliary, mount paths and access mode of each (read-only / read-write / copy), available tools, and how auto-save works. Bind-mounted read-only into the container at `/yoloai/context.md` (same pattern as `log.txt` and `prompt.txt`). This file lives outside the work tree so it never pollutes project files, git baselines, or diffs. The agent is pointed to it via agent-specific mechanisms (`--append-system-prompt` for Claude, inclusion in the initial prompt for Codex).
+1. **[POST-MVP]** Generate a **sandbox context file** on the host (in the sandbox state directory) describing the environment for the agent: which directory is the workdir, which are auxiliary, mount paths and access mode of each (read-only / read-write / copy), available tools, and how auto-save works. Bind-mounted read-only into the container at `/yoloai/context.md` (same pattern as `log.txt` and `prompt.txt`). This file lives outside the work tree so it never pollutes project files, git baselines, or diffs. The agent is pointed to it via agent-specific mechanisms (`--append-system-prompt` for Claude, inclusion in the initial prompt for Codex).
 2. Generate `/yoloai/config.json` on the host (in the sandbox state directory) containing all entrypoint configuration: agent_command, startup_delay, submit_sequence, host_uid, host_gid, and later overlay_mounts, iptables_rules, setup_script. This is bind-mounted into the container and read by the entrypoint.
 3. Start Docker container (as non-root user `yoloai`) with:
-   - When `--network-isolated`: `HTTPS_PROXY` and `HTTP_PROXY` env vars pointing to the proxy sidecar (required — Claude Code's npm installation honors these via undici; Codex proxy support is TBD — see RESEARCH.md)
+   - **[POST-MVP]** When `--network-isolated`: `HTTPS_PROXY` and `HTTP_PROXY` env vars pointing to the proxy sidecar (required — Claude Code's npm installation honors these via undici; Codex proxy support is TBD — see RESEARCH.md)
    - `:copy` directories: overlay strategy mounts originals as overlayfs lower layers with upper dirs from sandbox state; full copy strategy mounts copies from sandbox state. Both at their mount point (mirrored host path or custom `=<path>`, read-write)
    - `:rw` directories bind-mounted at their mount point (mirrored host path or custom `=<path>`, read-write)
    - Default (no suffix) directories bind-mounted at their mount point (mirrored host path or custom `=<path>`, read-only)
    - `agent-state/` mounted at the agent's state directory path (read-write, per-sandbox)
-   - Files listed in `agent_files` (from config) copied into `agent-state/` on first run
+   - **[POST-MVP]** Files listed in `agent_files` (from config) copied into `agent-state/` on first run
    - `log.txt` from sandbox state bind-mounted at `/yoloai/log.txt` (read-write, for tmux `pipe-pane`)
    - `prompt.txt` from sandbox state bind-mounted at `/yoloai/prompt.txt` (read-only, if provided)
    - `/yoloai/config.json` bind-mounted read-only
    - Config mounts from defaults + profile
    - Resource limits from defaults + profile
    - API key(s) injected via file-based bind mount at `/run/secrets/` — env var names from agent definition (see Credential Management)
-   - `CAP_SYS_ADMIN` capability (required for overlayfs mounts inside the container; omitted when `copy_strategy: full`). `CAP_NET_ADMIN` added when `--network-isolated` is used (required for iptables rules; independent capability, not included in `CAP_SYS_ADMIN`)
+   - **[POST-MVP]** `CAP_SYS_ADMIN` capability (required for overlayfs mounts inside the container; omitted when `copy_strategy: full`). `CAP_NET_ADMIN` added when `--network-isolated` is used (required for iptables rules; independent capability, not included in `CAP_SYS_ADMIN`)
    - Container name: `yoloai-<name>`
    - User: `yoloai` (UID/GID matching host user)
    - `/yoloai/` internal directory for sandbox context file, overlay working directories, and bind-mounted state files (`log.txt`, `prompt.txt`, `config.json`)
-4. Run `setup` commands from config (if any).
+4. **[POST-MVP]** Run `setup` commands from config (if any).
 5. Start tmux session named `main` with logging to `/yoloai/log.txt` (`tmux pipe-pane`) and `remain-on-exit on` (container stays up after agent exits, only stops on explicit `yoloai stop` or `yoloai destroy`).
 6. Inside tmux: launch the agent using the command from its agent definition (e.g., `claude --dangerously-skip-permissions [--model X]` or `codex --yolo`)
-7. Wait for the agent to initialize (interactive mode only). Implementation should poll for the agent's ready indicator (e.g., prompt appearance in tmux output) with a timeout, rather than a fixed sleep. The ~3s figure in the agent definitions table is a typical observed startup time, not a hardcoded delay.
+7. Wait for the agent to initialize (interactive mode only). MVP uses a configurable fixed delay (`startup_delay` in `config.json`, default ~3s). Future improvement: poll for the agent's ready indicator (e.g., prompt appearance in tmux output) with a timeout, rather than a fixed sleep.
 8. Prompt delivery depends on the agent's prompt mode:
    - **Interactive mode** (Claude default, Codex without `--prompt`): If `/yoloai/prompt.txt` exists, feed it via `tmux load-buffer` + `tmux paste-buffer` + `tmux send-keys` with the agent's submit sequence (`Enter Enter` for Claude, `Enter` for Codex).
    - **Headless mode** (Codex with `--prompt`): Prompt passed as CLI argument in the launch command (e.g., `codex exec --yolo "PROMPT"`). No `tmux send-keys` needed.
@@ -566,7 +567,7 @@ Sandbox fix-bug created
   Network:  isolated
   Strategy: overlay
 
-Run 'yoloai attach fix-bug' to interact
+Run 'yoloai attach fix-bug' to interact (Ctrl-b d to detach)
     'yoloai diff fix-bug' when done
 ```
 
@@ -577,7 +578,7 @@ Sandbox explore created
   Agent:    claude
   Workdir:  /home/user/projects/my-app (copy)
 
-Run 'yoloai attach explore' to start working
+Run 'yoloai attach explore' to start working (Ctrl-b d to detach)
 ```
 
 Profile and network lines are omitted when using defaults (base image, unrestricted network). Strategy line is omitted when using `full` copy (only shown for overlay since it implies `CAP_SYS_ADMIN`).
@@ -665,6 +666,7 @@ Lists all sandboxes with their current status.
 | PROFILE | Profile name or `(base)`                                       |
 | AGE     | Time since creation                                            |
 | WORKDIR | Working directory path                                         |
+| CHANGES | `yes` if unapplied changes exist, `no` if clean, `-` if unknown. Detected via `git diff --quiet` on the host-side work directory (no Docker needed). |
 
 Agent exit status is detected via `tmux list-panes -t main -F '#{pane_dead_status}'` when `#{pane_dead}` is 1. Non-zero exit code shows STATUS as "failed"; exit 0 shows as "done". Running containers with live panes show "running"; stopped containers show "stopped".
 
@@ -677,15 +679,15 @@ Options:
 
 `yoloai build` with no arguments rebuilds the base image (`yoloai-base`).
 
-`yoloai build <profile>` rebuilds a specific profile's image (which derives from `yoloai-base`).
+**[POST-MVP]** `yoloai build <profile>` rebuilds a specific profile's image (which derives from `yoloai-base`).
 
-`yoloai build --all` rebuilds everything: base image first, then the proxy image (`yoloai-proxy`), then all profile images.
+**[POST-MVP]** `yoloai build --all` rebuilds everything: base image first, then the proxy image (`yoloai-proxy`), then all profile images.
 
-`yoloai build` and `yoloai build --all` also build the proxy sidecar image (`yoloai-proxy`), a purpose-built Go forward proxy (~200-300 lines) used by `--network-isolated`. Compiled as a static binary in a `FROM scratch` image (~5 MB). Uses HTTPS CONNECT tunneling with domain-based allowlist (no MITM). Allowlist loaded from a config file; reloadable via SIGUSR1. Logs allowed/denied requests. See RESEARCH.md "Proxy Sidecar Research" for the evaluation of alternatives.
+**[POST-MVP]** `yoloai build` and `yoloai build --all` also build the proxy sidecar image (`yoloai-proxy`), a purpose-built Go forward proxy (~200-300 lines) used by `--network-isolated`. Compiled as a static binary in a `FROM scratch` image (~5 MB). Uses HTTPS CONNECT tunneling with domain-based allowlist (no MITM). Allowlist loaded from a config file; reloadable via SIGUSR1. Logs allowed/denied requests. See RESEARCH.md "Proxy Sidecar Research" for the evaluation of alternatives.
 
 Useful after modifying a profile's Dockerfile or when the base image needs updating (e.g., new Claude CLI version).
 
-Profile Dockerfiles that install private dependencies (e.g., `RUN go mod download` from a private repo, `RUN npm install` from a private registry) need build-time credentials. yoloai passes host credentials to Docker BuildKit via `--secret` so they're available during the build but never stored in image layers. Example: `RUN --mount=type=secret,id=npmrc,target=/root/.npmrc npm install` in the Dockerfile, with yoloai automatically providing `~/.npmrc` as the secret source. Supported secret sources are documented in `yoloai build --help`.
+**[POST-MVP]** Profile Dockerfiles that install private dependencies (e.g., `RUN go mod download` from a private repo, `RUN npm install` from a private registry) need build-time credentials. yoloai passes host credentials to Docker BuildKit via `--secret` so they're available during the build but never stored in image layers. Example: `RUN --mount=type=secret,id=npmrc,target=/root/.npmrc npm install` in the Dockerfile, with yoloai automatically providing `~/.npmrc` as the secret source. Supported secret sources are documented in `yoloai build --help`.
 
 ### `yoloai stop`
 
@@ -708,9 +710,9 @@ Options:
 
 This eliminates the need to diagnose *why* a sandbox isn't running before choosing a command.
 
-**`--resume` flag:** When used, the agent is relaunched in **interactive mode** (regardless of the original prompt delivery mode) with the original prompt from `prompt.txt` prefixed with a preamble: "You were previously working on the following task and were interrupted. The work directory contains your progress so far. Continue where you left off:" followed by the original prompt text. Interactive mode is always used for resume because the user may want to follow up or redirect. Error if the sandbox has no `prompt.txt` (was created without `--prompt`). Without `--resume`, `yoloai start` relaunches the agent in interactive mode with no prompt (user attaches and gives instructions manually).
+**[POST-MVP] `--resume` flag:** When used, the agent is relaunched in **interactive mode** (regardless of the original prompt delivery mode) with the original prompt from `prompt.txt` prefixed with a preamble: "You were previously working on the following task and were interrupted. The work directory contains your progress so far. Continue where you left off:" followed by the original prompt text. Interactive mode is always used for resume because the user may want to follow up or redirect. Error if the sandbox has no `prompt.txt` (was created without `--prompt`). Without `--resume`, `yoloai start` relaunches the agent in interactive mode with no prompt (user attaches and gives instructions manually).
 
-### `yoloai restart`
+### [POST-MVP] `yoloai restart`
 
 `yoloai restart <name>` is equivalent to `yoloai stop <name>` followed by `yoloai start <name>`. Use cases: recovering from a corrupted container environment, applying config changes that require a fresh container (e.g., new mounts or resource limits), or restarting a wedged agent process.
 
@@ -805,7 +807,7 @@ The `--no-start` flag can be used with `yoloai new` to perform setup without sta
 - **API key exposure:** The `ANTHROPIC_API_KEY` is injected via file-based credential injection (bind-mounted at `/run/secrets/`, read by entrypoint, host file cleaned up immediately). This hides the key from `docker inspect`, `docker commit`, and `docker logs`. The key is still present in the agent process's environment (unavoidable — CLI agents expect env vars). Use scoped API keys with spending limits where possible. See RESEARCH.md "Credential Management for Docker Containers" for the full analysis of approaches and tradeoffs.
 - **SSH keys:** If you mount `~/.ssh` into the container (even read-only), the agent can read private keys. Prefer SSH agent forwarding: add `${SSH_AUTH_SOCK}:${SSH_AUTH_SOCK}:ro` to `mounts` and `SSH_AUTH_SOCK: ${SSH_AUTH_SOCK}` to `env` in config. This passes the socket without exposing key material.
 - **Network access** is unrestricted by default (required for agent API calls). The agent can download binaries, connect to external services, or exfiltrate code. Use `--network-isolated` to restrict traffic to the agent's required API domains, `--network-allow <domain>` for finer control, or `--network-none` for full isolation.
-- **Network isolation implementation:** `--network-isolated` uses a layered approach based on verified production implementations (Anthropic's sandbox-runtime, Docker Sandboxes, and Anthropic's own devcontainer firewall):
+- **[POST-MVP] Network isolation implementation:** `--network-isolated` uses a layered approach based on verified production implementations (Anthropic's sandbox-runtime, Docker Sandboxes, and Anthropic's own devcontainer firewall):
   1. **Network topology:** The sandbox container runs on a Docker `--internal` network with no route to the internet. A separate proxy sidecar container bridges the internal and external networks — it is the only exit.
   2. **Proxy allowlist:** The proxy sidecar (a lightweight forward proxy) allowlists Anthropic API domains by default. HTTPS traffic uses `CONNECT` tunneling (no MITM — the proxy sees the domain from the `CONNECT` request). `--network-allow <domain>` adds domains to the allowlist.
   3. **iptables defense-in-depth:** Inside the sandbox container, iptables rules restrict outbound traffic to only the proxy's IP and port. This prevents bypass via any path other than the proxy. Requires `CAP_NET_ADMIN` (a separate capability from `CAP_SYS_ADMIN` — both must be granted when using overlay + `--network-isolated`; for `copy_strategy: full`, only `CAP_NET_ADMIN` is added). The entrypoint configures iptables rules while running as root, then drops privileges via `gosu` — the agent never has `CAP_NET_ADMIN`.
@@ -814,9 +816,9 @@ The `--no-start` flag can be used with `yoloai new` to perform setup without sta
 
   Known limitations: DNS exfiltration is mitigated but not fully eliminated — the proxy's DNS resolver must forward queries upstream, and data can be encoded in subdomain queries. Domain fronting remains theoretically possible on CDNs that haven't disabled it. These limitations are shared by all production implementations including Docker Sandboxes and Anthropic's own devcontainer. See RESEARCH.md "Network Isolation Research" for detailed analysis of bypass vectors.
 - **Runs as non-root** inside the container (user `yoloai` matching host UID/GID). Claude Code requires this (refuses `--dangerously-skip-permissions` as root); Codex runs non-root by convention.
-- **`CAP_SYS_ADMIN` capability** is granted to the container when using the overlay copy strategy (the default). This is required for overlayfs mounts inside the container. It is a broad capability — it also permits other mount operations and namespace manipulation. The container's namespace isolation limits the blast radius, but this is a tradeoff: overlay gives instant setup and space efficiency at the cost of a wider capability grant. Users concerned about this can set `copy_strategy: full` to avoid the capability entirely.
+- **[POST-MVP] `CAP_SYS_ADMIN` capability** is granted to the container when using the overlay copy strategy (the default). This is required for overlayfs mounts inside the container. It is a broad capability — it also permits other mount operations and namespace manipulation. The container's namespace isolation limits the blast radius, but this is a tradeoff: overlay gives instant setup and space efficiency at the cost of a wider capability grant. Users concerned about this can set `copy_strategy: full` to avoid the capability entirely.
 - **Dangerous directory detection:** The tool refuses to mount `$HOME`, `/`, macOS system directories (`/System`, `/Library`, `/Applications`), or Linux system directories (`/usr`, `/etc`, `/var`, `/boot`, `/bin`, `/sbin`, `/lib`) unless `:force` is appended, preventing accidental exposure of your entire filesystem.
-- **Privilege escalation via recipes:** The `setup` commands and `cap_add`/`devices` config fields enable significant privilege escalation. These are power-user features for advanced setups (e.g., Tailscale, GPU passthrough) but have no guardrails — a misconfigured recipe could undermine container isolation. Document risks clearly when these features are used.
+- **[POST-MVP] Privilege escalation via recipes:** The `setup` commands and `cap_add`/`devices` config fields enable significant privilege escalation. These are power-user features for advanced setups (e.g., Tailscale, GPU passthrough) but have no guardrails — a misconfigured recipe could undermine container isolation. Document risks clearly when these features are used.
 
 ## Resolved Design Decisions
 
@@ -833,6 +835,6 @@ The `--no-start` flag can be used with `yoloai new` to perform setup without sta
 
 ## Design Considerations
 
-### Overlay + existing `.git/` directories
+### [POST-MVP] Overlay + existing `.git/` directories
 
 When the original directory is a git repo, `.git/` is in the overlay lower layer (read-only). Git operations inside the sandbox (add, commit, etc.) write to `.git/` internals (objects, index, refs), and these writes go to the overlay upper directory via copy-on-write. The agent sees the full project; writes go to upper only. This means: (a) the upper directory will contain modified `.git/` files alongside project changes, and (b) `yoloai diff` must diff against the *original* repo's HEAD SHA (recorded in `meta.json`), not whatever HEAD the sandbox has moved to. This works correctly because `meta.json` records the original HEAD at sandbox creation time, and `yoloai diff` uses `git diff <original-HEAD>` regardless of subsequent commits inside the sandbox.

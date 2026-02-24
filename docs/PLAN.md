@@ -8,7 +8,7 @@ No code exists yet. All design docs are complete (DESIGN.md, CODING-STANDARD.md,
 
 **MVP commands:** `build`, `new`, `attach`, `show`, `diff`, `apply`, `list`, `log`, `exec`, `stop`, `start`, `destroy`, `reset`, `completion`, `version`
 
-**MVP features:** Full-copy only (Claude only), credential injection, `--model`, `--prompt-file`/stdin, `--replace`, `--no-start`, `--stat` on diff, `--yes` on apply/destroy, `--no-prompt`/`--clean` on reset, `--all`/multi-name on stop/destroy, smart destroy confirmation, dangerous directory detection, dirty git repo warning, path overlap detection, `YOLOAI_SANDBOX` env var, context-aware creation output, auto-paging for diff/log, shell completion, version info.
+**MVP features:** Full-copy only (Claude only), credential injection, `--model` (with built-in aliases), `--prompt-file`/stdin, `--replace`, `--no-start`, `--network-none`, `--stat` on diff, `--yes` on apply/destroy, `--no-prompt`/`--clean` on reset, `--all`/multi-name on stop/destroy, smart destroy confirmation, dangerous directory detection, dirty git repo warning, path overlap detection, `YOLOAI_SANDBOX` env var, context-aware creation output, auto-paging for diff/log, shell completion, version info.
 
 **Deferred:** overlay strategy, network isolation/proxy, profiles, Codex agent, Viper config file parsing, `auto_commit_interval`, custom mount points (`=<path>`), `agent_files`, env var interpolation, context file, aux dirs (`-d`), `--resume`, `restart`, `wait`, `run`, `tail`.
 
@@ -76,7 +76,7 @@ Pure Go, fully unit-testable without Docker.
 - Copy entrypoint script
 
 `resources/entrypoint.sh` (~50 lines):
-1. Run as root: `usermod -u $(jq -r .host_uid /yoloai/config.json) yoloai`, `groupmod -g $(jq -r .host_gid /yoloai/config.json) yoloai` (handle exit code 12)
+1. Run as root: `usermod -u $(jq -r .host_uid /yoloai/config.json) yoloai`, `groupmod -g $(jq -r .host_gid /yoloai/config.json) yoloai` (exit code 12 = "can't update /etc/passwd" — check if UID already matches desired, if so treat as no-op; otherwise log warning and continue)
 2. Fix ownership on `/yoloai` and home dir
 3. Read `/run/secrets/*`, export filename=content as env vars
 4. Drop to yoloai user via gosu
@@ -100,13 +100,11 @@ Later additions (post-MVP): `overlay_mounts`, `iptables_rules`, `setup_script`.
 
 Wire `yoloai build` command. Call `SeedResources` before building.
 
-**Verify:** `yoloai build` produces `yoloai-base` image. `docker run --rm --init yoloai-base claude --version` works.
+**Verify:** `yoloai build` produces `yoloai-base` image. `docker run --rm --init yoloai-base claude --version` works. Also verify `--init` (tini PID 1) + `exec tmux wait-for` interaction: `docker stop` should send SIGTERM through tini to `tmux wait-for`, causing clean container shutdown.
 
-### Phase 4: Sandbox Creation (`yoloai new`)
+### Phase 4a: Sandbox Infrastructure
 
-The largest phase — implements the core creation workflow.
-
-**Create:**
+Error types, safety checks, manager struct, and first-run setup — all testable independently before the creation workflow.
 
 `internal/sandbox/errors.go`:
 - `ErrSandboxNotFound`, `ErrSandboxExists`, `ErrDockerUnavailable`, `ErrMissingAPIKey`
@@ -126,20 +124,27 @@ The largest phase — implements the core creation workflow.
   4. Print shell completion instructions on first run (detect via absence of `~/.yoloai/config.yaml`)
   5. Write default `config.yaml` if missing
 
-- `Create(ctx, CreateOptions) error`:
+**Verify:** Unit tests for safety checks (dangerous dirs, path overlap, dirty repo). Unit test for `EnsureSetup` with mocked Docker client (verifies directory creation, resource seeding, image check).
+
+### Phase 4b: Sandbox Creation (`yoloai new`)
+
+The core creation workflow — depends on Phase 4a infrastructure.
+
+`internal/sandbox/manager.go` (continued):
+- `Create(ctx, CreateOptions) error` — decompose into helper methods (`prepareSandboxState`, `createContainer`, `deliverPrompt`) called sequentially:
   1. Call `EnsureSetup(ctx)` — idempotent first-run auto-setup
   2. Parse workdir arg — extract path, resolve to absolute, validate `:copy`/`:rw`/`:force`
-  3. Run safety checks: dangerous directory detection, path overlap detection
-  4. Validate: name non-empty, no duplicate sandbox (unless `--replace`), workdir exists, ANTHROPIC_API_KEY set
+  3. Validate: name non-empty, no duplicate sandbox (unless `--replace`), workdir exists, `--prompt`/`--prompt-file` mutually exclusive, ANTHROPIC_API_KEY set
+  4. Run safety checks: dangerous directory detection, path overlap detection (requires valid, existing paths from step 3)
   5. If `--replace`, destroy existing sandbox first
   6. Dirty git repo warning — prompt for confirmation if uncommitted changes detected (skippable with `--yes`)
   7. Create dir structure: `~/.yoloai/sandboxes/<name>/`, `work/`, `agent-state/`
-  8. `cp -a` workdir to `work/<encoded-path>/`
+  8. Copy workdir to `work/<encoded-path>/` via `os/exec` `cp -rp` (POSIX-portable; `-a` is GNU-specific and unavailable on macOS). Preserves permissions, timestamps, and symlinks.
   9. Git baseline: if `.git/` exists record HEAD SHA, else `git init + git add -A + git commit`
   10. Always store baseline SHA in meta.json
   11. Write meta.json, prompt.txt (from `--prompt`, `--prompt-file`, or `--prompt -` for stdin), empty log.txt
   12. Generate `/yoloai/config.json` with host_uid, host_gid, agent_command (including `--model` and `--agent` if specified), startup_delay, submit_sequence
-  13. Create API key temp file (defer cleanup)
+  13. Create API key temp file via `os.CreateTemp` with `0600` permissions (defer cleanup). Crash-safe: accept that SIGKILL leaves a temp file (same tradeoff as Docker Compose).
   14. If `--no-start`, stop here — print creation output and exit
   15. Create + start Docker container with mounts:
       - `work/<encoded-path>/` → mirrored host path (rw)
@@ -148,11 +153,11 @@ The largest phase — implements the core creation workflow.
       - `prompt.txt` → `/yoloai/prompt.txt` (ro, if exists)
       - `config.json` → `/yoloai/config.json` (ro)
       - temp key file → `/run/secrets/ANTHROPIC_API_KEY` (ro)
-  16. Container config: image `yoloai-base`, name `yoloai-<name>`, `--init`, working dir = mirrored host path
+  16. Container config: image `yoloai-base`, name `yoloai-<name>`, `--init`, working dir = mirrored host path, `NetworkMode: "none"` if `--network-none`
   17. Wait for container entrypoint to read secrets (poll for agent process start with 5s timeout), then clean up temp key file
   18. Print context-aware creation output
 
-Wire `yoloai new` — parse `--prompt` (including `-` for stdin), `--prompt-file` (including `-` for stdin), `--model`, `--agent` (validate: only `claude` for MVP, error on anything else), `--replace`, `--no-start`, `--yes`, name, workdir positional args.
+Wire `yoloai new` — parse `--prompt`/`-p` (including `-` for stdin), `--prompt-file`/`-f` (including `-` for stdin) — mutually exclusive, error if both provided — `--model`/`-m` (resolve built-in aliases from agent definition before passing to agent, pass through unknown values as-is), `--agent` (validate: only `claude` for MVP, error on anything else), `--network-none` (sets Docker `NetworkMode: "none"`), `--replace`, `--no-start`, `--yes`, name, workdir positional args.
 
 **Creation output (with prompt):**
 ```
@@ -160,7 +165,7 @@ Sandbox fix-bug created
   Agent:    claude
   Workdir:  /home/user/projects/my-app (copy)
 
-Run 'yoloai attach fix-bug' to interact
+Run 'yoloai attach fix-bug' to interact (Ctrl-b d to detach)
     'yoloai diff fix-bug' when done
 ```
 
@@ -170,20 +175,20 @@ Sandbox explore created
   Agent:    claude
   Workdir:  /home/user/projects/my-app (copy)
 
-Run 'yoloai attach explore' to start working
+Run 'yoloai attach explore' to start working (Ctrl-b d to detach)
 ```
 
 Profile and network lines omitted when using defaults. Strategy line omitted for full copy.
 
-**Verify:** Unit tests for arg parsing, safety checks. Integration: `yoloai new test-sandbox /tmp/test-project:copy` creates sandbox, `docker ps` shows `yoloai-test-sandbox`.
+**Verify:** Integration: `yoloai new test-sandbox /tmp/test-project:copy` creates sandbox, `docker ps` shows `yoloai-test-sandbox`.
 
 ### Phase 5: Inspection and Output
 
 **`yoloai attach`:** `os/exec` → `docker exec -it yoloai-<name> tmux attach -t main`. (SDK doesn't handle raw TTY well for interactive tmux — justified exception to "use SDK not CLI".)
 
-**`yoloai show`:** Load `meta.json`, query Docker for container state. Display: name, status (running/stopped/done/failed), agent, prompt (first 200 chars), workdir, directories with access modes, creation time, baseline SHA, container ID. Profile line omitted for MVP (profiles deferred — add back when implemented). Agent status detected via `docker exec tmux list-panes -t main -F '#{pane_dead}'` combined with Docker container state. Done (exit 0) vs failed (non-zero) via `pane_dead_status`.
+**`yoloai show`:** Load `meta.json`, query Docker for container state. Display: name, status (running/stopped/done/failed), agent, prompt (first 200 chars), workdir, directories with access modes, creation time, baseline SHA, container ID. Profile line omitted for MVP (profiles deferred — add back when implemented). Status detection order: check Docker container state FIRST — if stopped/removed, status is "stopped" without querying tmux. Only if the container is running, use `docker exec tmux list-panes -t main -F '#{pane_dead}'` to distinguish running/done/failed. Done (exit 0) vs failed (non-zero) via `pane_dead_status`.
 
-**`yoloai list`:** Scan sandboxes dir, load meta.json for each, query Docker for status. Format table: NAME | STATUS | AGENT | AGE | WORKDIR. PROFILE column omitted for MVP (profiles deferred — add back when implemented). Status uses same done/failed detection as `show`.
+**`yoloai list`:** Scan sandboxes dir, load meta.json for each, query Docker for status. Format table: NAME | STATUS | AGENT | AGE | WORKDIR | CHANGES. PROFILE column omitted for MVP (profiles deferred — add back when implemented). Status uses same done/failed detection as `show`. CHANGES column: run `git diff --quiet` on the host-side work directory for each sandbox — `yes` if non-zero exit, `no` if zero, `-` if work dir missing or not a git repo.
 
 **`yoloai log`:** Read `~/.yoloai/sandboxes/<name>/log.txt`. Auto-page through `$PAGER` / `less -R` when stdout is a TTY. Raw output when piped. For real-time following, users can find the log path via `yoloai show` and use `tail -f` directly.
 
@@ -213,7 +218,7 @@ The core differentiator.
 - Show summary via `git diff --stat <baseline_sha>`
 - Dry-run: `git apply --check` on original host dir
 - Prompt: `Apply these changes to /path/to/original? [y/N]` (skip with `--yes`)
-- Apply: `git apply` on original host dir. For non-git original dirs, use `git apply --unsafe-paths --directory=<path>` to apply without requiring a git repo context
+- Apply: For original git repos, `git apply` from within the repo. For non-git original dirs, `git apply --unsafe-paths --directory=<path>` to apply without requiring a git repo context. Test this edge case early — `git apply` behavior outside a git repo has subtleties.
 - On failure: wrap `git apply` error with context explaining why (e.g., "changes to handler.go conflict with changes already in your working directory — the patch expected line 42 to be 'func foo()' but found 'func bar()'")
 - `[-- <path>...]`: apply only changes to specified files/directories (relative to workdir)
 
@@ -266,7 +271,7 @@ Options: `--no-prompt` (skip re-sending prompt), `--clean` (also wipe `agent-sta
 - **`SandboxManager`** is the central orchestrator. CLI commands are thin (parse args → call manager method).
 - **git via `os/exec`** — simpler than go-git for our needs (diff, apply, init, add, commit, rev-parse).
 - **`docker exec` for attach via `os/exec`** — justified exception to "use SDK" rule for interactive TTY.
-- **No Viper for MVP** — CLI flags + hardcoded defaults. Config file parsing comes post-MVP.
+- **No Viper for MVP** — CLI flags + hardcoded defaults. Config file parsing comes post-MVP. `EnsureSetup` writes a default `config.yaml` for user reference and future use, but MVP does not read it — all settings come from CLI flags and hardcoded defaults.
 - **Entrypoint as shell script** — natural for UID/GID, secrets, tmux. ~50 lines. Go binary would add cross-compilation complexity.
 - **`jq` in base image** — entrypoint reads `/yoloai/config.json` via `jq` for all configuration. Simpler and more robust than shell-only JSON parsing.
 - **Pager utility** (`internal/cli/pager.go`) — reusable auto-paging for `diff` and `log`. Uses `$PAGER` / `less -R` when stdout is TTY, raw output when piped.
@@ -278,7 +283,7 @@ Options: `--no-prompt` (skip re-sending prompt), `--clean` (also wipe `agent-sta
 
 ```
 github.com/spf13/cobra         # CLI framework
-github.com/docker/docker        # Docker SDK
+github.com/docker/docker        # Docker SDK (pin to latest v28.x+incompatible; +incompatible is a Go modules artifact, not a stability concern — SDK auto-negotiates API version with older Docker daemons)
 github.com/stretchr/testify     # Test assertions (dev)
 ```
 
@@ -313,4 +318,4 @@ Viper deferred to post-MVP.
 1. **Entrypoint fragility** — UID/GID + secrets + tmux + prompt delivery in one script. Mitigate: test manually early (Phase 3).
 2. **tmux timing** — 3s delay may not suffice on slow machines. Mitigate: configurable via `config.json` `startup_delay`.
 3. **Large copies** — `cp -a` with `node_modules` is slow. Known limitation of full-copy. Overlay (post-MVP) solves this.
-4. **Docker SDK version compat** — Pin to known-good version, test on Docker Desktop for Mac.
+4. **Docker SDK version compat** — Pin to latest `github.com/docker/docker` v28.x (the `+incompatible` suffix is expected). SDK auto-negotiates API version with older engines. Test on Docker Desktop for Mac.

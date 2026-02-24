@@ -92,7 +92,7 @@ These were deferred from MVP but might be cheap to add and valuable for dogfoodi
 
 41. ~~**`.:copy` boilerplate**~~ — **Resolved:** Workdir defaults to `:copy` (the tool's core philosophy). `yoloai new fix-bug .` works. `:rw` requires explicit suffix. Safe default preserved.
 
-42. ~~**Implicit workdir from cwd**~~ — **Resolved:** Keep workdir explicit (`.` required). One character is low friction and avoids accidental sandboxing of wrong directory.
+42. ~~**Implicit workdir from cwd**~~ — **Resolved (firm decision — do not revisit):** Keep workdir explicit (`.` required). One character is low friction and avoids accidental sandboxing of wrong directory. This is a deliberate safety choice: implicit cwd defaulting is a footgun that leads to sandboxing the wrong directory. This has been discussed multiple times and the decision is final.
 
 43. ~~**Sandbox name repetition**~~ — **Resolved:** Shell completion via `yoloai completion` (Cobra built-in) in MVP. `YOLOAI_SANDBOX` env var as fallback when name arg is omitted — explicit arg always wins. No special `yoloai use` command; users just `export YOLOAI_SANDBOX=fix-bug`.
 
@@ -176,7 +176,7 @@ These were deferred from MVP but might be cheap to add and valuable for dogfoodi
 
 81. ~~**`:rw` diff shows all uncommitted changes, not just agent changes**~~ — **Resolved:** Inherent to `:rw` mode — `git diff` runs against HEAD on the live directory, so pre-existing uncommitted changes are mixed with agent changes. Document in `yoloai diff` help: "For `:rw` directories, diff shows all uncommitted changes relative to HEAD, not just agent changes. Use `:copy` mode for clean agent-only diffs."
 
-82. ~~**Post-creation output should adapt to whether `--prompt` was given**~~ — **Resolved:** Context-aware next-command suggestions after `yoloai new`: without `--prompt`, suggest `yoloai attach <name>` (agent is waiting for input); with `--prompt`, suggest `yoloai tail <name>` to watch progress.
+82. ~~**Post-creation output should adapt to whether `--prompt` was given**~~ — **Resolved:** Context-aware next-command suggestions after `yoloai new`: without `--prompt`, suggest `yoloai attach <name>` (agent is waiting for input); with `--prompt`, suggest `yoloai attach <name>` to interact and `yoloai diff <name>` when done.
 
 83. ~~**`yoloai new` output should show resolved configuration**~~ — **Resolved:** Creation output shows a brief summary of resolved settings: agent, profile (or "base"), workdir path + mode, copy strategy, network mode. Confirms what was actually configured when options come from defaults + profile + CLI.
 
