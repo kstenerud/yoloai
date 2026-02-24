@@ -48,7 +48,7 @@ yoloai/
 │   ├── cli/                   # Cobra command definitions
 │   ├── sandbox/               # Sandbox lifecycle
 │   ├── docker/                # Docker client wrapper
-│   ├── config/                # Config parsing (Viper)
+│   ├── config/                # Config parsing (Viper, post-MVP)
 │   └── agent/                 # Agent preset definitions
 ├── resources/                 # Dockerfiles, templates
 └── testdata/                  # Test fixtures

@@ -1447,12 +1447,12 @@ Researched February 2026. The npm installation path was deprecated in late Janua
 
 ### Node.js Version
 
-Anthropic's devcontainer uses Node.js 20. This is the safe choice — it's what Anthropic tests against. Install via NodeSource APT repository for Debian.
+Anthropic's devcontainer uses Node.js 20 as of February 2026, but Node 20 reaches EOL April 2026. Claude Code's `engines` field requires `>=18.0.0` — Node.js 22 LTS (maintenance until April 2027) is within range and avoids shipping with an EOL runtime. No Node 22-specific incompatibilities found. Install via NodeSource APT repository for Debian.
 
 ### Risks to Monitor
 
 - **npm package removal:** If Anthropic stops publishing the npm package, we lose proxy support. This would block `--network-isolated` with Claude Code.
 - **Bun proxy fix:** If issue [#14165](https://github.com/anthropics/claude-code/issues/14165) is resolved, the native binary becomes viable and we could drop the ~100MB Node.js dependency from the base image.
-- **Node.js 20 EOL:** Node.js 20 reaches end-of-life April 2026. Will need to migrate to Node.js 22 LTS before then, after verifying Claude Code compatibility.
+- **Node.js 20 EOL:** Node.js 20 reaches end-of-life April 2026. yoloai uses Node.js 22 LTS (maintenance until April 2027) to avoid this. Claude Code's `engines` field (`>=18.0.0`) confirms compatibility.
 
 ---

@@ -68,7 +68,7 @@ Pure Go, fully unit-testable without Docker.
 `resources/Dockerfile.base`:
 - `FROM debian:bookworm-slim`
 - Install: tmux, git, build-essential, python3, curl, ca-certificates, gnupg, jq
-- Node.js 20 LTS via NodeSource
+- Node.js 22 LTS via NodeSource
 - Claude Code: `npm install -g @anthropic-ai/claude-code`
 - gosu from GitHub releases
 - Create user `yoloai` (UID 1001 placeholder)
@@ -83,7 +83,7 @@ Pure Go, fully unit-testable without Docker.
 5. Start tmux session `main` with `pipe-pane` to `/yoloai/log.txt` and `remain-on-exit on`
 6. Inside tmux: launch agent command from config.json (`jq -r .agent_command /yoloai/config.json`)
 7. If `/yoloai/prompt.txt` exists: sleep `$(jq -r .startup_delay /yoloai/config.json)`, `tmux load-buffer` + `tmux paste-buffer` + `tmux send-keys` with submit sequence from config.json (`jq -r .submit_sequence /yoloai/config.json`)
-8. Wait for tmux session to end
+8. Wait indefinitely to keep container alive: `exec tmux wait-for yoloai-exit` (blocks forever since nothing signals this channel; container only stops on explicit `docker stop`). With `remain-on-exit on`, the tmux session persists even after the agent exits.
 
 **`/yoloai/config.json` fields (MVP):**
 - `host_uid` (int) — host user UID
@@ -95,9 +95,10 @@ Pure Go, fully unit-testable without Docker.
 Later additions (post-MVP): `overlay_mounts`, `iptables_rules`, `setup_script`.
 
 `internal/docker/build.go`:
-- `BuildBaseImage(ctx, client, logger)` — creates build context tar from `resources/`, calls `client.ImageBuild`, streams output
+- `SeedResources(targetDir string)` — copies embedded `resources/Dockerfile.base` and `resources/entrypoint.sh` to `targetDir` (i.e., `~/.yoloai/`) if they don't already exist. Uses `go:embed` for the source files.
+- `BuildBaseImage(ctx, client, logger)` — creates build context tar from `~/.yoloai/` (Dockerfile.base + entrypoint.sh), calls `client.ImageBuild`, streams output. Always reads from `~/.yoloai/`, never from embedded copies — users can edit these files for fast iteration without rebuilding yoloai.
 
-Wire `yoloai build` command.
+Wire `yoloai build` command. Call `SeedResources` before building.
 
 **Verify:** `yoloai build` produces `yoloai-base` image. `docker run --rm --init yoloai-base claude --version` works.
 
@@ -118,32 +119,40 @@ The largest phase — implements the core creation workflow.
 
 `internal/sandbox/manager.go`:
 - `SandboxManager` struct (holds docker.Client, slog.Logger)
+- `EnsureSetup(ctx)` — first-run auto-setup, called at the start of `Create`:
+  1. Create `~/.yoloai/` directory structure if absent (`sandboxes/`, `profiles/`, `cache/`)
+  2. Seed `~/.yoloai/Dockerfile.base` and `entrypoint.sh` from embedded resources (via `SeedResources`) if absent
+  3. Build base image if missing (check via Docker image inspect; print "Building base image (first run only, ~2-5 minutes)..." with streamed output)
+  4. Print shell completion instructions on first run (detect via absence of `~/.yoloai/config.yaml`)
+  5. Write default `config.yaml` if missing
+
 - `Create(ctx, CreateOptions) error`:
-  1. Parse workdir arg — extract path, resolve to absolute, validate `:copy`/`:rw`/`:force`
-  2. Run safety checks: dangerous directory detection, path overlap detection
-  3. Validate: name non-empty, no duplicate sandbox (unless `--replace`), workdir exists, ANTHROPIC_API_KEY set
-  4. If `--replace`, destroy existing sandbox first
-  5. Dirty git repo warning — prompt for confirmation if uncommitted changes detected
-  6. Create dir structure: `~/.yoloai/sandboxes/<name>/`, `work/`, `agent-state/`
-  7. `cp -a` workdir to `work/<encoded-path>/`
-  8. Git baseline: if `.git/` exists record HEAD SHA, else `git init + git add -A + git commit`
-  9. Always store baseline SHA in meta.json
-  10. Write meta.json, prompt.txt (from `--prompt`, `--prompt-file`, or stdin), empty log.txt
-  11. Generate `/yoloai/config.json` with host_uid, host_gid, agent_command (including `--model` if specified), startup_delay, submit_sequence
-  12. Create API key temp file (defer cleanup)
-  13. If `--no-start`, stop here — print creation output and exit
-  14. Create + start Docker container with mounts:
+  1. Call `EnsureSetup(ctx)` — idempotent first-run auto-setup
+  2. Parse workdir arg — extract path, resolve to absolute, validate `:copy`/`:rw`/`:force`
+  3. Run safety checks: dangerous directory detection, path overlap detection
+  4. Validate: name non-empty, no duplicate sandbox (unless `--replace`), workdir exists, ANTHROPIC_API_KEY set
+  5. If `--replace`, destroy existing sandbox first
+  6. Dirty git repo warning — prompt for confirmation if uncommitted changes detected (skippable with `--yes`)
+  7. Create dir structure: `~/.yoloai/sandboxes/<name>/`, `work/`, `agent-state/`
+  8. `cp -a` workdir to `work/<encoded-path>/`
+  9. Git baseline: if `.git/` exists record HEAD SHA, else `git init + git add -A + git commit`
+  10. Always store baseline SHA in meta.json
+  11. Write meta.json, prompt.txt (from `--prompt`, `--prompt-file`, or `--prompt -` for stdin), empty log.txt
+  12. Generate `/yoloai/config.json` with host_uid, host_gid, agent_command (including `--model` and `--agent` if specified), startup_delay, submit_sequence
+  13. Create API key temp file (defer cleanup)
+  14. If `--no-start`, stop here — print creation output and exit
+  15. Create + start Docker container with mounts:
       - `work/<encoded-path>/` → mirrored host path (rw)
       - `agent-state/` → `/home/yoloai/.claude/` (rw)
       - `log.txt` → `/yoloai/log.txt` (rw)
       - `prompt.txt` → `/yoloai/prompt.txt` (ro, if exists)
       - `config.json` → `/yoloai/config.json` (ro)
       - temp key file → `/run/secrets/ANTHROPIC_API_KEY` (ro)
-  15. Container config: image `yoloai-base`, name `yoloai-<name>`, `--init`, working dir = mirrored host path
-  16. Clean up temp key file
-  17. Print context-aware creation output
+  16. Container config: image `yoloai-base`, name `yoloai-<name>`, `--init`, working dir = mirrored host path
+  17. Wait for container entrypoint to read secrets (poll for agent process start with 5s timeout), then clean up temp key file
+  18. Print context-aware creation output
 
-Wire `yoloai new` — parse `--prompt`, `--prompt-file`, `--model`, `--replace`, `--no-start`, name, workdir positional args.
+Wire `yoloai new` — parse `--prompt` (including `-` for stdin), `--prompt-file` (including `-` for stdin), `--model`, `--agent` (validate: only `claude` for MVP, error on anything else), `--replace`, `--no-start`, `--yes`, name, workdir positional args.
 
 **Creation output (with prompt):**
 ```
@@ -151,8 +160,7 @@ Sandbox fix-bug created
   Agent:    claude
   Workdir:  /home/user/projects/my-app (copy)
 
-Run 'yoloai tail fix-bug' to watch progress
-    'yoloai attach fix-bug' to interact
+Run 'yoloai attach fix-bug' to interact
     'yoloai diff fix-bug' when done
 ```
 
@@ -173,9 +181,9 @@ Profile and network lines omitted when using defaults. Strategy line omitted for
 
 **`yoloai attach`:** `os/exec` → `docker exec -it yoloai-<name> tmux attach -t main`. (SDK doesn't handle raw TTY well for interactive tmux — justified exception to "use SDK not CLI".)
 
-**`yoloai show`:** Load `meta.json`, query Docker for container state. Display: name, status (running/stopped/done/failed), agent, profile (or "(base)"), prompt (first 200 chars), workdir, directories with access modes, creation time, baseline SHA, container ID. Agent status detected via `docker exec tmux list-panes -t main -F '#{pane_dead}'` combined with Docker container state. Done (exit 0) vs failed (non-zero) via `pane_dead_status`.
+**`yoloai show`:** Load `meta.json`, query Docker for container state. Display: name, status (running/stopped/done/failed), agent, prompt (first 200 chars), workdir, directories with access modes, creation time, baseline SHA, container ID. Profile line omitted for MVP (profiles deferred — add back when implemented). Agent status detected via `docker exec tmux list-panes -t main -F '#{pane_dead}'` combined with Docker container state. Done (exit 0) vs failed (non-zero) via `pane_dead_status`.
 
-**`yoloai list`:** Scan sandboxes dir, load meta.json for each, query Docker for status. Format table: NAME | STATUS | AGENT | AGE | WORKDIR. Status uses same done/failed detection as `show`.
+**`yoloai list`:** Scan sandboxes dir, load meta.json for each, query Docker for status. Format table: NAME | STATUS | AGENT | AGE | WORKDIR. PROFILE column omitted for MVP (profiles deferred — add back when implemented). Status uses same done/failed detection as `show`.
 
 **`yoloai log`:** Read `~/.yoloai/sandboxes/<name>/log.txt`. Auto-page through `$PAGER` / `less -R` when stdout is a TTY. Raw output when piped. For real-time following, users can find the log path via `yoloai show` and use `tail -f` directly.
 
@@ -193,7 +201,6 @@ The core differentiator.
 **`yoloai diff`:**
 - Load meta.json, get baseline SHA
 - Run `git add -A` (capture untracked files) then `git diff <baseline_sha>` in `work/<encoded-path>/`
-- If original had no `.git/`, exclude synthetic git dir: `git diff <baseline_sha> -- ':!.git'`
 - Use `git diff --binary` to capture binary file changes in patch
 - Auto-page through `$PAGER` / `less -R` when stdout is TTY
 - Print warning "Note: agent is still running; diff may be incomplete" when tmux pane is alive
@@ -206,7 +213,7 @@ The core differentiator.
 - Show summary via `git diff --stat <baseline_sha>`
 - Dry-run: `git apply --check` on original host dir
 - Prompt: `Apply these changes to /path/to/original? [y/N]` (skip with `--yes`)
-- Apply: `git apply` on original host dir
+- Apply: `git apply` on original host dir. For non-git original dirs, use `git apply --unsafe-paths --directory=<path>` to apply without requiring a git repo context
 - On failure: wrap `git apply` error with context explaining why (e.g., "changes to handler.go conflict with changes already in your working directory — the patch expected line 42 to be 'func foo()' but found 'func bar()'")
 - `[-- <path>...]`: apply only changes to specified files/directories (relative to workdir)
 
@@ -218,11 +225,21 @@ The core differentiator.
 
 **`yoloai stop`:** Docker SDK `ContainerStop`. Accepts multiple names (e.g., `yoloai stop s1 s2 s3`). `--all` flag stops all running sandboxes. Print confirmation per sandbox.
 
-**`yoloai start`:** Check state — if running: no-op; if stopped: `ContainerStart`; if container removed: recreate from meta.json (skip copy step, create new credential temp file). Print confirmation.
+**`yoloai start`:** Check state — if already running with live agent: no-op; if running but agent exited (tmux pane dead): relaunch agent in existing tmux session (`tmux respawn-pane` or kill dead pane and create new one with agent command); if stopped: `ContainerStart` (entrypoint re-establishes mounts); if container removed: recreate from meta.json (skip copy step, create new credential temp file). Print confirmation.
 
 **`yoloai destroy`:** Accepts multiple names (e.g., `yoloai destroy s1 s2 s3`). `--all` flag. Smart confirmation: only prompt when agent is still running or unapplied changes exist (check via `git diff` on `:copy` dirs). `--yes` skips all confirmation. `docker stop` + `docker rm` + `os.RemoveAll` sandbox dir.
 
-**`yoloai reset`:** Re-copy workdir from original host directory, reset git baseline. Container stopped and restarted. `meta.json` preserved. By default re-sends original prompt from `prompt.txt`. Options: `--no-prompt` (skip re-sending prompt), `--clean` (also wipe `agent-state/` for full reset).
+**`yoloai reset`:** Full re-copy of workdir from original host directory with git baseline reset. Steps:
+1. Stop the container (if running)
+2. Delete `work/<encoded-path>/` (the sandbox copy)
+3. Re-copy workdir from original host dir via `cp -a` to `work/<encoded-path>/`
+4. Re-create git baseline: if `.git/` exists in copy, record new HEAD SHA; else `git init + git add -A + git commit`
+5. Update `baseline_sha` in `meta.json`
+6. If `--clean`, also delete and recreate `agent-state/` directory
+7. Start container (entrypoint runs as normal)
+8. If `prompt.txt` exists and `--no-prompt` not set, wait for agent ready and re-send prompt via tmux
+
+Options: `--no-prompt` (skip re-sending prompt), `--clean` (also wipe `agent-state/` for full reset).
 
 **Verify:** Full lifecycle: new → stop → start → destroy. Reset: new with prompt → make changes → reset → verify clean workdir.
 
@@ -253,6 +270,7 @@ The core differentiator.
 - **Entrypoint as shell script** — natural for UID/GID, secrets, tmux. ~50 lines. Go binary would add cross-compilation complexity.
 - **`jq` in base image** — entrypoint reads `/yoloai/config.json` via `jq` for all configuration. Simpler and more robust than shell-only JSON parsing.
 - **Pager utility** (`internal/cli/pager.go`) — reusable auto-paging for `diff` and `log`. Uses `$PAGER` / `less -R` when stdout is TTY, raw output when piped.
+- **Verbose flag** — use Cobra's `CountP` (not `BoolP`) for `--verbose` / `-v` to preserve the stacking contract from CLI-STANDARD.md (`-v` = Debug, `-vv` = reserved). MVP only uses the first level.
 - **Reusable confirmation prompt** — shared helper for apply, destroy, and dirty repo warning confirmations.
 - **Error types** map to exit codes in root command handler.
 

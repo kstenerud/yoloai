@@ -139,7 +139,7 @@ Field notes:
 
 **Base image (`yoloai-base`):** Based on Debian slim. Minimal foundation with common tools, rebuilt occasionally. Debian slim over Ubuntu (smaller) or Alpine (musl incompatibilities with Node.js/npm).
 - Common tools: tmux, git, build-essential, python3, jq, etc.
-- **Claude Code:** Node.js 20 LTS + npm installation (`npm i -g @anthropic-ai/claude-code`) — npm required, not native binary (native binary bundles Bun which ignores proxy env vars, segfaults on Debian bookworm AMD64, and auto-updates). npm is deprecated but still published and is the only reliable Docker/proxy path. See RESEARCH.md "Claude Code Installation Research"
+- **Claude Code:** Node.js 22 LTS + npm installation (`npm i -g @anthropic-ai/claude-code`) — npm required, not native binary (native binary bundles Bun which ignores proxy env vars, segfaults on Debian bookworm AMD64, and auto-updates). npm is deprecated but still published and is the only reliable Docker/proxy path. See RESEARCH.md "Claude Code Installation Research"
 - **Codex:** Static Rust binary download (musl-linked, zero runtime dependencies, ~zero image bloat)
 - **Non-root user** (`yoloai`, UID/GID matching host user via entrypoint). Image builds with a placeholder user (UID 1001). At container start, the entrypoint runs as root: reads `host_uid`/`host_gid` from `/yoloai/config.json` via `jq`, runs `usermod -u <uid> yoloai && groupmod -g <gid> yoloai` (handling exit code 12 for chown failures on mounted volumes), fixes ownership on container-managed directories, then drops privileges via `gosu yoloai`. Uses `tini` as PID 1 (`--init` or explicit `ENTRYPOINT`). Images are portable across machines since UID/GID are set at run time, not build time. Claude Code refuses `--dangerously-skip-permissions` as root; Codex does not enforce this but convention is non-root
 - **Entrypoint:** Default Dockerfile and entrypoint.sh are embedded in the binary via `go:embed`. On first run, these are seeded to `~/.yoloai/` if they don't exist. `yoloai build` always reads from `~/.yoloai/`, not from embedded copies. Users can edit for fast iteration without rebuilding yoloai itself. The entrypoint reads all configuration from a bind-mounted `/yoloai/config.json` file containing agent_command, startup_delay, submit_sequence, host_uid, host_gid, and later overlay_mounts, iptables_rules, setup_script. No environment variables are used for configuration passing.
@@ -437,6 +437,7 @@ Options:
 - `--port <host:container>`: Expose a container port on the host (can be repeated). Example: `--port 3000:3000` for web dev. Without this, container services are not reachable from the host browser. Ports must be specified at creation time — Docker does not support adding port mappings to running containers. To add ports later, use `yoloai new --replace`.
 - `--replace`: Destroy existing sandbox of the same name before creating. Shorthand for `yoloai destroy <name> && yoloai new <name>`.
 - `--no-start`: Create sandbox without starting the container. Useful for setup-only operations.
+- `--yes`: Skip confirmation prompts (dirty repo warning). For scripting.
 
 **Default network allowlist (per agent):**
 
@@ -498,7 +499,7 @@ Before creating the sandbox (all checks run before any state is created on disk)
 - **Missing API key:** Error if the required API key for the selected agent is not set in the host environment.
 - **Dangerous directory detection:** Error if any mount target is `$HOME`, `/`, macOS system directories (`/System`, `/Library`, `/Applications`), or Linux system directories (`/usr`, `/etc`, `/var`, `/boot`, `/bin`, `/sbin`, `/lib`). All paths are resolved through symlinks (`filepath.EvalSymlinks`) before checking — a symlink to `$HOME` is caught the same as `$HOME` itself. Simple string match on the resolved absolute path. Override with `:force` suffix (e.g., `$HOME:force`, `$HOME:rw:force`), which downgrades to a warning.
 - **Path overlap detection:** Error if any two sandbox mounts have path prefix overlap (one resolved path starts with the other). All paths are resolved through symlinks before checking. Applies to all mount combinations (`:rw`/`:rw`, `:rw`/`:copy`, `:copy`/`:copy`). Check: does either resolved absolute path start with the other? Override with `:force` suffix on the overlapping path (e.g., `./parent:rw`, `./parent/child:copy:force`), which downgrades to a warning. `:force` is the explicit escape hatch for both dangerous directory and path overlap detection.
-- **Dirty git repo detection:** If any `:rw` or `:copy` directory is a git repo with uncommitted changes, warn with specifics and prompt for confirmation:
+- **Dirty git repo detection:** If any `:rw` or `:copy` directory is a git repo with uncommitted changes, warn with specifics and prompt for confirmation (skippable with `--yes` for scripting):
   ```
   WARNING: ./my-app has uncommitted changes (3 files modified, 1 untracked)
   These changes will be visible to the agent and could be modified or lost.
@@ -565,8 +566,7 @@ Sandbox fix-bug created
   Network:  isolated
   Strategy: overlay
 
-Run 'yoloai tail fix-bug' to watch progress
-    'yoloai attach fix-bug' to interact
+Run 'yoloai attach fix-bug' to interact
     'yoloai diff fix-bug' when done
 ```
 
