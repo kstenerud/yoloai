@@ -1,0 +1,20 @@
+version: "2"
+
+linters:
+  enable:
+    - errcheck
+    - govet
+    - staticcheck
+    - unused
+    - ineffassign
+    - gosec
+    - errorlint
+    - revive
+    - gocritic
+    - sloglint
+  disable:
+    - exhaustruct
+    - varnamelen
+
+run:
+  timeout: 2m
