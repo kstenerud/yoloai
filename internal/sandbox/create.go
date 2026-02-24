@@ -579,6 +579,7 @@ func createSecretsDir(agentDef *agent.Definition) (string, error) {
 		return "", fmt.Errorf("create secrets temp dir: %w", err)
 	}
 
+	wrote := false
 	for _, key := range agentDef.APIKeyEnvVars {
 		value := os.Getenv(key)
 		if value == "" {
@@ -589,6 +590,12 @@ func createSecretsDir(agentDef *agent.Definition) (string, error) {
 			_ = os.RemoveAll(tmpDir)
 			return "", fmt.Errorf("write secret %s: %w", key, err)
 		}
+		wrote = true
+	}
+
+	if !wrote {
+		_ = os.RemoveAll(tmpDir)
+		return "", nil
 	}
 
 	return tmpDir, nil
