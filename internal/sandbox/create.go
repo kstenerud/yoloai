@@ -120,10 +120,13 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 		return nil, NewUsageError("workdir does not exist: %s", workdir.Path)
 	}
 
-	for _, key := range agentDef.APIKeyEnvVars {
-		if os.Getenv(key) == "" {
-			return nil, fmt.Errorf("%s is not set: %w", key, ErrMissingAPIKey)
-		}
+	hasAPIKey := hasAnyAPIKey(agentDef)
+	hasAuth := hasAnyAuthFile(agentDef)
+	if !hasAPIKey && !hasAuth {
+		return nil, fmt.Errorf("no authentication found: set %s or provide OAuth credentials (%s): %w",
+			strings.Join(agentDef.APIKeyEnvVars, "/"),
+			describeAuthFiles(agentDef),
+			ErrMissingAPIKey)
 	}
 
 	// Safety checks
@@ -170,6 +173,13 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 	} {
 		if err := os.MkdirAll(dir, 0750); err != nil {
 			return nil, fmt.Errorf("create directory %s: %w", dir, err)
+		}
+	}
+
+	// Copy auth files into agent-state (for OAuth support)
+	if !hasAPIKey {
+		if _, err := copyAuthFiles(agentDef, sandboxDir); err != nil {
+			return nil, fmt.Errorf("copy auth files: %w", err)
 		}
 	}
 
@@ -650,6 +660,80 @@ func buildMounts(state *sandboxState, secretsDir string) []mount.Mount {
 	}
 
 	return mounts
+}
+
+// expandTilde replaces a leading ~ with the user's home directory.
+func expandTilde(path string) string {
+	if !strings.HasPrefix(path, "~") {
+		return path
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return path
+	}
+	return filepath.Join(home, path[1:])
+}
+
+// hasAnyAPIKey returns true if any of the agent's required API key env vars are set.
+func hasAnyAPIKey(agentDef *agent.Definition) bool {
+	for _, key := range agentDef.APIKeyEnvVars {
+		if os.Getenv(key) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// hasAnyAuthFile returns true if any of the agent's auth files exist on disk.
+func hasAnyAuthFile(agentDef *agent.Definition) bool {
+	for _, af := range agentDef.AuthFiles {
+		if _, err := os.Stat(expandTilde(af.HostPath)); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// describeAuthFiles returns a human-readable description of expected auth file paths.
+func describeAuthFiles(agentDef *agent.Definition) string {
+	var paths []string
+	for _, af := range agentDef.AuthFiles {
+		paths = append(paths, af.HostPath)
+	}
+	return strings.Join(paths, ", ")
+}
+
+// copyAuthFiles copies auth files from the host into the sandbox's agent-state directory.
+// Returns true if any files were copied. Skips files that don't exist on the host.
+func copyAuthFiles(agentDef *agent.Definition, sandboxDir string) (bool, error) {
+	copied := false
+	agentStateDir := filepath.Join(sandboxDir, "agent-state")
+
+	for _, af := range agentDef.AuthFiles {
+		hostPath := expandTilde(af.HostPath)
+		if _, err := os.Stat(hostPath); err != nil {
+			continue // skip missing files
+		}
+
+		targetPath := filepath.Join(agentStateDir, af.TargetPath)
+
+		// Ensure parent directory exists
+		if err := os.MkdirAll(filepath.Dir(targetPath), 0750); err != nil {
+			return copied, fmt.Errorf("create dir for %s: %w", af.TargetPath, err)
+		}
+
+		data, err := os.ReadFile(hostPath) //nolint:gosec // G304: path is from agent definition, not user input
+		if err != nil {
+			return copied, fmt.Errorf("read %s: %w", hostPath, err)
+		}
+
+		if err := os.WriteFile(targetPath, data, 0600); err != nil {
+			return copied, fmt.Errorf("write %s: %w", targetPath, err)
+		}
+		copied = true
+	}
+
+	return copied, nil
 }
 
 // copyDir copies a directory tree using cp -rp.

@@ -218,6 +218,11 @@ func (m *Manager) recreateContainer(ctx context.Context, name string, meta *Meta
 
 	sandboxDir := Dir(name)
 
+	// Refresh auth files from host (handles OAuth token refresh between restarts)
+	if _, err := copyAuthFiles(agentDef, sandboxDir); err != nil {
+		return fmt.Errorf("refresh auth files: %w", err)
+	}
+
 	// Read existing config.json
 	configData, err := os.ReadFile(filepath.Join(sandboxDir, "config.json")) //nolint:gosec // path is sandbox-controlled
 	if err != nil {

@@ -13,6 +13,14 @@ const (
 	PromptModeHeadless PromptMode = "headless"
 )
 
+// AuthFile describes a host file that provides authentication credentials.
+// HostPath supports ~ for the user's home directory, expanded at runtime.
+// TargetPath is relative to the agent's StateDir.
+type AuthFile struct {
+	HostPath   string // e.g., "~/.claude/.credentials.json"
+	TargetPath string // relative to StateDir, e.g., ".credentials.json"
+}
+
 // Definition describes an agent's install, launch, and behavioral characteristics.
 type Definition struct {
 	Name           string
@@ -20,6 +28,7 @@ type Definition struct {
 	HeadlessCmd    string
 	PromptMode     PromptMode
 	APIKeyEnvVars  []string
+	AuthFiles      []AuthFile
 	StateDir       string
 	SubmitSequence string
 	StartupDelay   time.Duration
@@ -33,7 +42,10 @@ var agents = map[string]*Definition{
 		InteractiveCmd: "claude --dangerously-skip-permissions",
 		HeadlessCmd:    `claude -p "PROMPT" --dangerously-skip-permissions`,
 		PromptMode:     PromptModeInteractive,
-		APIKeyEnvVars:  []string{"ANTHROPIC_API_KEY"},
+		APIKeyEnvVars: []string{"ANTHROPIC_API_KEY"},
+		AuthFiles: []AuthFile{
+			{HostPath: "~/.claude/.credentials.json", TargetPath: ".credentials.json"},
+		},
 		StateDir:       "/home/yoloai/.claude/",
 		SubmitSequence: "Enter Enter",
 		StartupDelay:   3 * time.Second,
