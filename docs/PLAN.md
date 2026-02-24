@@ -16,8 +16,8 @@ No code exists yet. All design docs are complete (DESIGN.md, CODING-STANDARD.md,
 
 Detailed, self-contained implementation plans live in `docs/phases/PHASE_<N>.md`. Each phase file contains exact types, signatures, implementation steps, tests, and verification commands — enough for an agent to implement the phase without reading DESIGN.md. Only the next phase to implement gets a detailed plan; future phases stay as summaries below.
 
-**Completed phase plans:** (none yet)
-**Current phase plan:** `docs/phases/PHASE_0.md`
+**Completed phase plans:** `docs/phases/PHASE_0.md`
+**Current phase plan:** `docs/phases/PHASE_1.md`
 
 ## Implementation Phases
 
@@ -41,7 +41,7 @@ Pure Go, fully unit-testable without Docker.
 
 `internal/sandbox/paths.go`:
 - `EncodePath(hostPath string) string` — full [caret encoding](https://github.com/kstenerud/caret-encoding) spec (not just `/` → `^2F`)
-- `DecodePath(encoded string) string` — reverse
+- `DecodePath(encoded string) (string, error)` — reverse; returns error on malformed caret sequences
 - `SandboxDir(name string) string` — `~/.yoloai/sandboxes/<name>/`
 - `WorkDir(name string, hostPath string) string` — `.../work/<encoded-path>/`
 
