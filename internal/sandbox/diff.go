@@ -3,7 +3,6 @@ package sandbox
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 )
 
@@ -59,7 +58,7 @@ func generateRWDiff(workDir string, paths []string, stat bool) (*DiffResult, err
 		}, nil
 	}
 
-	args := []string{"-C", workDir, "diff"}
+	args := []string{"diff"}
 	if stat {
 		args = append(args, "--stat")
 	}
@@ -69,7 +68,7 @@ func generateRWDiff(workDir string, paths []string, stat bool) (*DiffResult, err
 		args = append(args, paths...)
 	}
 
-	cmd := exec.Command("git", args...) //nolint:gosec // G204: workDir is sandbox-controlled path
+	cmd := newGitCmd(workDir, args...)
 	output, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("git diff: %w", err)
@@ -89,7 +88,7 @@ func generateCopyDiff(workDir, baselineSHA string, paths []string, stat bool) (*
 		return nil, err
 	}
 
-	args := []string{"-C", workDir, "diff"}
+	args := []string{"diff"}
 	if stat {
 		args = append(args, "--stat")
 	} else {
@@ -101,7 +100,7 @@ func generateCopyDiff(workDir, baselineSHA string, paths []string, stat bool) (*
 		args = append(args, paths...)
 	}
 
-	cmd := exec.Command("git", args...) //nolint:gosec // G204: workDir is sandbox-controlled path
+	cmd := newGitCmd(workDir, args...)
 	output, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("git diff: %w", err)

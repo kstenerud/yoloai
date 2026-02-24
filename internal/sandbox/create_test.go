@@ -138,59 +138,7 @@ func TestParsePortBindings_Empty(t *testing.T) {
 	assert.Nil(t, portSet)
 }
 
-func TestGitBaseline_ExistingRepo(t *testing.T) {
-	dir := t.TempDir()
-	initGitRepo(t, dir)
-	writeTestFile(t, dir, "file.txt", "hello")
-	gitAdd(t, dir, ".")
-	gitCommit(t, dir, "initial")
-
-	sha, err := gitBaseline(dir)
-	require.NoError(t, err)
-	assert.Len(t, sha, 40)
-}
-
-func TestGitBaseline_WorktreeLink(t *testing.T) {
-	// Create a main repo
-	mainDir := t.TempDir()
-	initGitRepo(t, mainDir)
-	writeTestFile(t, mainDir, "file.txt", "hello")
-	gitAdd(t, mainDir, ".")
-	gitCommit(t, mainDir, "initial")
-
-	// Create a worktree
-	worktreeDir := filepath.Join(t.TempDir(), "wt")
-	runGit(t, mainDir, "worktree", "add", worktreeDir, "-b", "test-branch")
-
-	// Simulate cp -rp of the worktree (copy all files including .git file)
-	copyDir := t.TempDir()
-	for _, name := range []string{"file.txt", ".git"} {
-		src := filepath.Join(worktreeDir, name)
-		dst := filepath.Join(copyDir, name)
-		data, err := os.ReadFile(src) //nolint:gosec // test code
-		require.NoError(t, err)
-		info, err := os.Stat(src)
-		require.NoError(t, err)
-		require.NoError(t, os.WriteFile(dst, data, info.Mode()))
-	}
-
-	// Verify .git is a file (worktree link), not a directory
-	info, err := os.Lstat(filepath.Join(copyDir, ".git"))
-	require.NoError(t, err)
-	assert.False(t, info.IsDir(), ".git should be a file (worktree link)")
-
-	// gitBaseline should disconnect from original and create fresh baseline
-	sha, err := gitBaseline(copyDir)
-	require.NoError(t, err)
-	assert.Len(t, sha, 40)
-
-	// Verify .git is now a directory (standalone repo)
-	info, err = os.Lstat(filepath.Join(copyDir, ".git"))
-	require.NoError(t, err)
-	assert.True(t, info.IsDir(), ".git should now be a directory (standalone repo)")
-}
-
-func TestGitBaseline_NonGitDir(t *testing.T) {
+func TestGitBaseline_FreshInit(t *testing.T) {
 	dir := t.TempDir()
 	writeTestFile(t, dir, "file.txt", "hello")
 
@@ -198,7 +146,70 @@ func TestGitBaseline_NonGitDir(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, sha, 40)
 
-	// Verify git repo was created
+	// Verify git repo was created with the file tracked
 	_, err = os.Stat(filepath.Join(dir, ".git"))
 	assert.NoError(t, err)
+}
+
+func TestGitBaseline_EmptyDir(t *testing.T) {
+	dir := t.TempDir()
+
+	sha, err := gitBaseline(dir)
+	require.NoError(t, err)
+	assert.Len(t, sha, 40, "allow-empty should produce a valid commit")
+}
+
+// removeGitDirs tests
+
+func TestRemoveGitDirs_TopLevel(t *testing.T) {
+	dir := t.TempDir()
+	gitDir := filepath.Join(dir, ".git")
+	require.NoError(t, os.MkdirAll(filepath.Join(gitDir, "objects"), 0750))
+	writeTestFile(t, dir, "file.txt", "hello")
+
+	require.NoError(t, removeGitDirs(dir))
+
+	assert.NoDirExists(t, gitDir)
+	assert.FileExists(t, filepath.Join(dir, "file.txt"))
+}
+
+func TestRemoveGitDirs_Submodule(t *testing.T) {
+	dir := t.TempDir()
+	submod := filepath.Join(dir, "submod")
+	require.NoError(t, os.MkdirAll(submod, 0750))
+	writeTestFile(t, submod, "code.go", "package main")
+	// Submodule .git is a file pointing to parent repo
+	writeTestFile(t, submod, ".git", "gitdir: ../../.git/modules/submod")
+
+	require.NoError(t, removeGitDirs(dir))
+
+	assert.NoFileExists(t, filepath.Join(submod, ".git"))
+	assert.FileExists(t, filepath.Join(submod, "code.go"))
+}
+
+func TestRemoveGitDirs_Nested(t *testing.T) {
+	dir := t.TempDir()
+
+	// Top-level .git dir
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, ".git", "hooks"), 0750))
+
+	// Nested submodule with .git file
+	nested := filepath.Join(dir, "a", "b")
+	require.NoError(t, os.MkdirAll(nested, 0750))
+	writeTestFile(t, nested, ".git", "gitdir: ../../../.git/modules/a/b")
+	writeTestFile(t, nested, "main.go", "package main")
+
+	require.NoError(t, removeGitDirs(dir))
+
+	assert.NoDirExists(t, filepath.Join(dir, ".git"))
+	assert.NoFileExists(t, filepath.Join(nested, ".git"))
+	assert.FileExists(t, filepath.Join(nested, "main.go"))
+}
+
+func TestRemoveGitDirs_NoGit(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, dir, "file.txt", "hello")
+
+	require.NoError(t, removeGitDirs(dir))
+	assert.FileExists(t, filepath.Join(dir, "file.txt"))
 }

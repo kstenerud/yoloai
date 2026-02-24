@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -28,26 +27,26 @@ func GeneratePatch(name string, paths []string) (patch []byte, stat string, err 
 	}
 
 	// Generate binary patch
-	patchArgs := []string{"-C", workDir, "diff", "--binary", baselineSHA}
+	patchArgs := []string{"diff", "--binary", baselineSHA}
 	if len(paths) > 0 {
 		patchArgs = append(patchArgs, "--")
 		patchArgs = append(patchArgs, paths...)
 	}
 
-	patchCmd := exec.Command("git", patchArgs...) //nolint:gosec // G204: workDir is sandbox-controlled path
+	patchCmd := newGitCmd(workDir, patchArgs...)
 	patchOut, err := patchCmd.Output()
 	if err != nil {
 		return nil, "", fmt.Errorf("git diff (patch): %w", err)
 	}
 
 	// Generate stat summary
-	statArgs := []string{"-C", workDir, "diff", "--stat", baselineSHA}
+	statArgs := []string{"diff", "--stat", baselineSHA}
 	if len(paths) > 0 {
 		statArgs = append(statArgs, "--")
 		statArgs = append(statArgs, paths...)
 	}
 
-	statCmd := exec.Command("git", statArgs...) //nolint:gosec // G204: workDir is sandbox-controlled path
+	statCmd := newGitCmd(workDir, statArgs...)
 	statOut, err := statCmd.Output()
 	if err != nil {
 		return nil, "", fmt.Errorf("git diff (stat): %w", err)
@@ -119,8 +118,8 @@ func withTempGitDir(fn func(tmpDir string) error) error {
 // runGitApply executes `git apply` with the given args, feeding the
 // patch via stdin. Returns the combined output on error.
 func runGitApply(dir string, patch []byte, args ...string) error {
-	fullArgs := append([]string{"-C", dir, "apply"}, args...)
-	cmd := exec.Command("git", fullArgs...) //nolint:gosec // G204: dir is sandbox-controlled path
+	applyArgs := append([]string{"apply"}, args...)
+	cmd := newGitCmd(dir, applyArgs...)
 	cmd.Stdin = bytes.NewReader(patch)
 	output, err := cmd.CombinedOutput()
 	if err != nil {

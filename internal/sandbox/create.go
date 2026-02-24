@@ -184,6 +184,13 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 		}
 	}
 
+	// Strip git metadata from copy before creating fresh baseline
+	if workdir.Mode == "copy" {
+		if err := removeGitDirs(workCopyDir); err != nil {
+			return nil, fmt.Errorf("remove git metadata: %w", err)
+		}
+	}
+
 	// Git baseline
 	var baselineSHA string
 	if workdir.Mode == "copy" {
@@ -474,28 +481,40 @@ func parsePortBindings(ports []string) (nat.PortMap, nat.PortSet, error) {
 	return portMap, portSet, nil
 }
 
-// gitBaseline records or creates a git baseline for the work copy.
-// Handles git worktree source directories: if .git is a file (worktree
-// link pointing back to the original repo), removes it and creates a
-// fresh standalone baseline. Without this, git operations in the copy
-// would operate on the original repo's objects — a safety violation.
-func gitBaseline(workDir string) (string, error) {
-	gitPath := filepath.Join(workDir, ".git")
-	info, err := os.Lstat(gitPath)
-	if err == nil {
-		if !info.IsDir() {
-			// .git is a file (worktree link), not a directory.
-			// Remove it to disconnect from the original repo.
-			if err := os.Remove(gitPath); err != nil {
-				return "", fmt.Errorf("remove worktree .git link: %w", err)
-			}
-			// Fall through to create a fresh standalone baseline.
-		} else {
-			// Regular .git directory — use existing HEAD as baseline.
-			return gitHeadSHA(workDir)
+// removeGitDirs recursively removes all .git entries (files and directories)
+// from root. This strips git metadata from a copied working tree so that
+// hooks, LFS filters, submodule links, and worktree links don't interfere
+// with yoloai's internal git operations.
+func removeGitDirs(root string) error {
+	var toRemove []string
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
 		}
+		if d.Name() == ".git" {
+			toRemove = append(toRemove, path)
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("walk for .git entries: %w", err)
 	}
 
+	// Remove in reverse order so nested entries are removed before parents.
+	for i := len(toRemove) - 1; i >= 0; i-- {
+		if err := os.RemoveAll(toRemove[i]); err != nil {
+			return fmt.Errorf("remove %s: %w", toRemove[i], err)
+		}
+	}
+	return nil
+}
+
+// gitBaseline creates a fresh git baseline for the work copy.
+// Assumes all .git entries have already been removed by removeGitDirs.
+func gitBaseline(workDir string) (string, error) {
 	cmds := [][]string{
 		{"init"},
 		{"config", "user.email", "yoloai@localhost"},
@@ -512,9 +531,16 @@ func gitBaseline(workDir string) (string, error) {
 	return gitHeadSHA(workDir)
 }
 
+// newGitCmd builds an exec.Cmd for git with hooks disabled.
+// All internal git operations use this to prevent copied hooks from firing.
+func newGitCmd(dir string, args ...string) *exec.Cmd {
+	fullArgs := append([]string{"-c", "core.hooksPath=/dev/null", "-C", dir}, args...)
+	return exec.Command("git", fullArgs...) //nolint:gosec // G204: dir is sandbox-controlled path
+}
+
 // gitHeadSHA returns the HEAD commit SHA for the given git repo.
 func gitHeadSHA(dir string) (string, error) {
-	cmd := exec.Command("git", "-C", dir, "rev-parse", "HEAD") //nolint:gosec // G204: dir is sandbox-controlled path
+	cmd := newGitCmd(dir, "rev-parse", "HEAD")
 	output, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("git rev-parse HEAD: %w", err)
@@ -524,8 +550,7 @@ func gitHeadSHA(dir string) (string, error) {
 
 // runGitCmd executes a git command in the given directory.
 func runGitCmd(dir string, args ...string) error {
-	fullArgs := append([]string{"-C", dir}, args...)
-	cmd := exec.Command("git", fullArgs...) //nolint:gosec // G204: dir is sandbox-controlled path
+	cmd := newGitCmd(dir, args...)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("git %s: %s: %w", args[0], strings.TrimSpace(string(output)), err)
 	}
