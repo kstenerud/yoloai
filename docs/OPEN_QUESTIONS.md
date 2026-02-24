@@ -186,6 +186,12 @@ These were deferred from MVP but might be cheap to add and valuable for dogfoodi
 
 86. ~~**Agent CLI arg passthrough**~~ — **Resolved:** `yoloai new fix-bug . -- --max-turns 5` passes everything after `--` verbatim to the agent command. Passthrough args are appended after yoloai's built-in flags (e.g., `claude --dangerously-skip-permissions --model claude-opus-4-latest --max-turns 5`). Duplicating first-class flags in passthrough is undefined behavior (depends on agent's CLI parser). Standard `--` convention (npm, docker, cargo). High value for dogfooding — agents have many flags yoloai doesn't need to wrap.
 
+## Git Worktree Compatibility
+
+91. ~~**Worktree source directories — .git file link is unsafe after copy**~~ — **Resolved (Phase 4b bugfix).** When the source directory is a git worktree, `.git` is a file (not a directory) containing a `gitdir:` pointer back to the main repo. After `cp -rp`, the copy's `.git` file still points to the original repo's object store — git operations in the container would affect the host repo. Fix: `gitBaseline` now uses `os.Lstat` to detect `.git` files, removes the worktree link, and creates a fresh standalone baseline via `git init`. The baseline SHA is different from the original HEAD but that's correct — diff/apply only need a baseline representing the copy's initial state.
+
+92. ~~**Git worktrees as a copy strategy (instead of cp -rp)**~~ — **Resolved: not pursuing.** `git worktree add` would be near-instant and share the object store, but has fundamental problems for coding agents: (a) `.gitignore`d files (`node_modules/`, build artifacts, `.env`) are not included — agents can't build or test without them; (b) worktree branches/refs are visible in the original repo — agent git operations pollute the host; (c) only works for git repos, not arbitrary directories. The planned overlayfs strategy (post-MVP) solves the same performance problem without these limitations.
+
 ## Post-MVP (Codex and cleanup)
 
 37. **Codex proxy support** — Whether Codex's static Rust binary honors `HTTP_PROXY`/`HTTPS_PROXY` env vars is unverified (DESIGN.md line 340, RESEARCH.md). Critical for `--network-isolated` mode with Codex. If it ignores proxy env vars, would need iptables-only enforcement.

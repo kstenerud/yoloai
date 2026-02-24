@@ -150,6 +150,46 @@ func TestGitBaseline_ExistingRepo(t *testing.T) {
 	assert.Len(t, sha, 40)
 }
 
+func TestGitBaseline_WorktreeLink(t *testing.T) {
+	// Create a main repo
+	mainDir := t.TempDir()
+	initGitRepo(t, mainDir)
+	writeTestFile(t, mainDir, "file.txt", "hello")
+	gitAdd(t, mainDir, ".")
+	gitCommit(t, mainDir, "initial")
+
+	// Create a worktree
+	worktreeDir := filepath.Join(t.TempDir(), "wt")
+	runGit(t, mainDir, "worktree", "add", worktreeDir, "-b", "test-branch")
+
+	// Simulate cp -rp of the worktree (copy all files including .git file)
+	copyDir := t.TempDir()
+	for _, name := range []string{"file.txt", ".git"} {
+		src := filepath.Join(worktreeDir, name)
+		dst := filepath.Join(copyDir, name)
+		data, err := os.ReadFile(src) //nolint:gosec // test code
+		require.NoError(t, err)
+		info, err := os.Stat(src)
+		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(dst, data, info.Mode()))
+	}
+
+	// Verify .git is a file (worktree link), not a directory
+	info, err := os.Lstat(filepath.Join(copyDir, ".git"))
+	require.NoError(t, err)
+	assert.False(t, info.IsDir(), ".git should be a file (worktree link)")
+
+	// gitBaseline should disconnect from original and create fresh baseline
+	sha, err := gitBaseline(copyDir)
+	require.NoError(t, err)
+	assert.Len(t, sha, 40)
+
+	// Verify .git is now a directory (standalone repo)
+	info, err = os.Lstat(filepath.Join(copyDir, ".git"))
+	require.NoError(t, err)
+	assert.True(t, info.IsDir(), ".git should now be a directory (standalone repo)")
+}
+
 func TestGitBaseline_NonGitDir(t *testing.T) {
 	dir := t.TempDir()
 	writeTestFile(t, dir, "file.txt", "hello")

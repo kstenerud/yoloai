@@ -475,10 +475,25 @@ func parsePortBindings(ports []string) (nat.PortMap, nat.PortSet, error) {
 }
 
 // gitBaseline records or creates a git baseline for the work copy.
+// Handles git worktree source directories: if .git is a file (worktree
+// link pointing back to the original repo), removes it and creates a
+// fresh standalone baseline. Without this, git operations in the copy
+// would operate on the original repo's objects — a safety violation.
 func gitBaseline(workDir string) (string, error) {
-	gitDir := filepath.Join(workDir, ".git")
-	if _, err := os.Stat(gitDir); err == nil {
-		return gitHeadSHA(workDir)
+	gitPath := filepath.Join(workDir, ".git")
+	info, err := os.Lstat(gitPath)
+	if err == nil {
+		if !info.IsDir() {
+			// .git is a file (worktree link), not a directory.
+			// Remove it to disconnect from the original repo.
+			if err := os.Remove(gitPath); err != nil {
+				return "", fmt.Errorf("remove worktree .git link: %w", err)
+			}
+			// Fall through to create a fresh standalone baseline.
+		} else {
+			// Regular .git directory — use existing HEAD as baseline.
+			return gitHeadSHA(workDir)
+		}
 	}
 
 	cmds := [][]string{
