@@ -19,6 +19,7 @@ import (
 )
 
 const checksumFile = ".resource-checksums"
+const lastBuildFile = ".last-build-checksum"
 
 // SeedResult describes what happened during resource seeding.
 type SeedResult struct {
@@ -145,9 +146,25 @@ func saveChecksums(dir string, checksums map[string]string) error {
 	return os.WriteFile(filepath.Join(dir, checksumFile), data, 0600)
 }
 
+// NeedsBuild returns true if the Docker image needs to be (re)built because
+// the on-disk resource files have changed since the last successful build.
+func NeedsBuild(sourceDir string) bool {
+	current := buildInputsChecksum(sourceDir)
+	if current == "" {
+		return true // can't read files → need build
+	}
+	last, err := os.ReadFile(filepath.Join(sourceDir, lastBuildFile)) //nolint:gosec // G304: sourceDir is ~/.yoloai/
+	if err != nil {
+		return true // no record → need build
+	}
+	return string(last) != current
+}
+
 // BuildBaseImage builds the yoloai-base Docker image from the Dockerfile
 // and entrypoint in the given directory. Build output is streamed to the
 // provided writer (typically os.Stderr for user-visible progress).
+// On success, records a checksum of the build inputs so NeedsBuild can
+// detect when a rebuild is required.
 func BuildBaseImage(ctx context.Context, client Client, sourceDir string, output io.Writer, logger *slog.Logger) error {
 	buildCtx, err := createBuildContext(sourceDir)
 	if err != nil {
@@ -166,7 +183,39 @@ func BuildBaseImage(ctx context.Context, client Client, sourceDir string, output
 	}
 	defer resp.Body.Close() //nolint:errcheck // best-effort cleanup
 
-	return streamBuildOutput(resp.Body, output)
+	if err := streamBuildOutput(resp.Body, output); err != nil {
+		return err
+	}
+
+	// Record build inputs checksum for NeedsBuild
+	if sum := buildInputsChecksum(sourceDir); sum != "" {
+		_ = os.WriteFile(filepath.Join(sourceDir, lastBuildFile), []byte(sum), 0600) // best-effort
+	}
+
+	return nil
+}
+
+// RecordBuildChecksum writes the current build inputs checksum to disk.
+// Exported for testing; production code uses BuildBaseImage which records
+// automatically on success.
+func RecordBuildChecksum(sourceDir string) {
+	if sum := buildInputsChecksum(sourceDir); sum != "" {
+		_ = os.WriteFile(filepath.Join(sourceDir, lastBuildFile), []byte(sum), 0600)
+	}
+}
+
+// buildInputsChecksum computes a combined SHA-256 of the build input files.
+func buildInputsChecksum(sourceDir string) string {
+	h := sha256.New()
+	for _, name := range []string{"Dockerfile.base", "entrypoint.sh"} {
+		data, err := os.ReadFile(filepath.Join(sourceDir, name)) //nolint:gosec // G304: sourceDir is ~/.yoloai/
+		if err != nil {
+			return ""
+		}
+		h.Write([]byte(name))
+		h.Write(data)
+	}
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 // createBuildContext creates an in-memory tar archive containing the

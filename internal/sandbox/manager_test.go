@@ -165,10 +165,11 @@ func TestEnsureSetup_SkipsBuildWhenImageExists(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
 
-	// Pre-seed resources so SeedResources reports no changes
+	// Pre-seed resources and simulate a prior successful build
 	yoloaiDir := filepath.Join(tmpDir, ".yoloai")
 	_, err := docker.SeedResources(yoloaiDir)
 	require.NoError(t, err)
+	docker.RecordBuildChecksum(yoloaiDir)
 
 	mock := &mockClient{} // imageExistsErr is nil → image exists
 	mgr := NewManager(mock, slog.Default(), io.Discard)

@@ -70,18 +70,20 @@ func (m *Manager) EnsureSetup(ctx context.Context) error {
 
 	if len(seedResult.Conflicts) > 0 {
 		if seedResult.ManifestMissing {
-			fmt.Fprintln(m.output, "WARNING: resource checksum manifest (~/.yoloai/.resource-checksums) is missing or corrupt.") //nolint:errcheck // best-effort output
-			fmt.Fprintln(m.output, "  Cannot determine if the following files have local changes:")                              //nolint:errcheck // best-effort output
+			fmt.Fprintln(m.output, "NOTE: yoloAI has updated resource files, but some differ from the new version.") //nolint:errcheck // best-effort output
+			fmt.Fprintln(m.output, "  If you have not customized these files, accept the new versions below.")       //nolint:errcheck // best-effort output
+		} else {
+			fmt.Fprintln(m.output, "NOTE: some resource files have local changes and were not overwritten.") //nolint:errcheck // best-effort output
 		}
 		for _, name := range seedResult.Conflicts {
-			fmt.Fprintf(m.output, "WARNING: %s differs from the expected version; new version written to %s.new\n", name, name) //nolint:errcheck // best-effort output
+			fmt.Fprintf(m.output, "  %s: new version written to ~/.yoloai/%s.new\n", name, name)                                              //nolint:errcheck // best-effort output
+			fmt.Fprintf(m.output, "    accept: mv ~/.yoloai/%s.new ~/.yoloai/%s\n", name, name)                                               //nolint:errcheck // best-effort output
+			fmt.Fprintf(m.output, "    keep:   rm ~/.yoloai/%s.new\n", name)                                                                  //nolint:errcheck // best-effort output
 		}
-		fmt.Fprintln(m.output, "  To accept the new version: mv ~/.yoloai/<file>.new ~/.yoloai/<file>")                 //nolint:errcheck // best-effort output
-		fmt.Fprintln(m.output, "  To keep your version:      rm ~/.yoloai/<file>.new")                                  //nolint:errcheck // best-effort output
-		fmt.Fprintln(m.output, "  Then run 'yoloai build' to rebuild the base image.")                                  //nolint:errcheck // best-effort output
+		fmt.Fprintln(m.output, "  Then run 'yoloai build' to rebuild the base image.") //nolint:errcheck // best-effort output
 	}
 
-	// Build base image if missing or if embedded resources were updated
+	// Build base image if missing or if on-disk resources differ from last build
 	exists, err := imageExists(ctx, m.client, "yoloai-base")
 	if err != nil {
 		return fmt.Errorf("check base image: %w", err)
@@ -91,7 +93,7 @@ func (m *Manager) EnsureSetup(ctx context.Context) error {
 		if err := docker.BuildBaseImage(ctx, m.client, yoloaiDir, m.output, m.logger); err != nil {
 			return fmt.Errorf("build base image: %w", err)
 		}
-	} else if seedResult.Changed {
+	} else if docker.NeedsBuild(yoloaiDir) {
 		fmt.Fprintln(m.output, "Base image resources updated, rebuilding...") //nolint:errcheck // best-effort output
 		if err := docker.BuildBaseImage(ctx, m.client, yoloaiDir, m.output, m.logger); err != nil {
 			return fmt.Errorf("rebuild base image: %w", err)
