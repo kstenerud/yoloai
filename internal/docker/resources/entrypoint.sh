@@ -23,7 +23,12 @@ if [ "$CURRENT_UID" != "$HOST_UID" ]; then
 fi
 
 # Fix ownership on container-managed directories
-chown -R yoloai:yoloai /yoloai /home/yoloai
+# Some files under /yoloai are bind-mounted read-only; chown on those is expected to fail.
+chown -R yoloai:yoloai /home/yoloai
+chown yoloai:yoloai /yoloai
+for f in /yoloai/*; do
+    chown yoloai:yoloai "$f" 2>/dev/null || true
+done
 
 # Read secrets and export as env vars
 if [ -d /run/secrets ]; then
