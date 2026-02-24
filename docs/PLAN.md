@@ -8,9 +8,16 @@ No code exists yet. All design docs are complete (DESIGN.md, CODING-STANDARD.md,
 
 **MVP commands:** `build`, `new`, `attach`, `show`, `diff`, `apply`, `list`, `log`, `exec`, `stop`, `start`, `destroy`, `reset`, `completion`, `version`
 
-**MVP features:** Full-copy only (Claude only), credential injection, `--model` (with built-in aliases), `--prompt-file`/stdin, `--replace`, `--no-start`, `--network-none`, `--port`, `--` agent arg passthrough, `--stat` on diff, `--yes` on apply/destroy, `--no-prompt`/`--clean` on reset, `--all`/multi-name on stop/destroy, smart destroy confirmation, dangerous directory detection, dirty git repo warning, path overlap detection, `YOLOAI_SANDBOX` env var, context-aware creation output, auto-paging for diff/log, shell completion, version info.
+**MVP features:** Full-copy only (Claude and test agents), credential injection, `--model` (with built-in aliases), `--agent` (`claude`, `test`), `--prompt-file`/stdin, `--replace`, `--no-start`, `--network-none`, `--port`, `--` agent arg passthrough, `--stat` on diff, `--yes` on apply/destroy, `--no-prompt`/`--clean` on reset, `--all`/multi-name on stop/destroy, smart destroy confirmation, dangerous directory detection, dirty git repo warning, path overlap detection, `YOLOAI_SANDBOX` env var, context-aware creation output, auto-paging for diff/log, shell completion, version info.
 
 **Deferred:** overlay strategy, network isolation/proxy, profiles, Codex agent, Viper config file parsing, `auto_commit_interval`, custom mount points (`=<path>`), `agent_files`, env var interpolation, context file, aux dirs (`-d`), `--resume`, `restart`, `wait`, `run`.
+
+## Per-Phase Implementation Plans
+
+Detailed, self-contained implementation plans live in `docs/phases/PHASE_<N>.md`. Each phase file contains exact types, signatures, implementation steps, tests, and verification commands — enough for an agent to implement the phase without reading DESIGN.md. Only the next phase to implement gets a detailed plan; future phases stay as summaries below.
+
+**Completed phase plans:** (none yet)
+**Current phase plan:** `docs/phases/PHASE_0.md`
 
 ## Implementation Phases
 
@@ -43,8 +50,9 @@ Pure Go, fully unit-testable without Docker.
 - `SaveMeta(path, meta)`, `LoadMeta(path)`
 
 `internal/agent/agent.go`:
-- `Definition` struct: Name, InteractiveCmd, APIKeyEnvVars, StateDir, SubmitSequence, StartupDelay, ModelAliases (map[string]string for alias resolution, e.g. `"sonnet"` → `"claude-sonnet-4-latest"`)
-- `GetAgent(name string)` — returns Claude definition
+- `Definition` struct: Name, InteractiveCmd, HeadlessCmd, APIKeyEnvVars, StateDir, SubmitSequence, StartupDelay, ModelAliases (map[string]string for alias resolution, e.g. `"sonnet"` → `"claude-sonnet-4-latest"`), PromptMode (interactive or headless)
+- `GetAgent(name string)` — returns Claude or test definition
+- Test agent definition: InteractiveCmd `bash`, HeadlessCmd `sh -c "PROMPT"`, no API key env vars, no state dir, SubmitSequence `Enter`, StartupDelay 0, no model aliases, PromptMode headless (with prompt) / interactive (without)
 
 `internal/sandbox/parse.go`:
 - `ParseDirArg(arg string) (path, mode string, force bool, err error)` — splits path from `:copy`/`:rw`/`:force` suffixes
@@ -158,7 +166,7 @@ The core creation workflow — depends on Phase 4a infrastructure.
   18. Wait for container entrypoint to read secrets (poll for agent process start with 5s timeout), then clean up temp key file
   19. Print context-aware creation output
 
-Wire `yoloai new` — parse `--prompt`/`-p` (including `-` for stdin), `--prompt-file`/`-f` (including `-` for stdin) — mutually exclusive, error if both provided — `--model`/`-m` (resolve built-in aliases via agent definition's `ModelAliases` map: if value found, substitute; if not, pass through as-is), `--agent` (validate: only `claude` for MVP, error on anything else), `--network-none` (sets Docker `NetworkMode: "none"`), `--port` (repeatable string flag, parsed as `host:container` pairs into `HostConfig.PortBindings`), `--replace`, `--no-start`, `--yes`, name, workdir positional args. Collect `--` trailing args via Cobra's `cmd.ArgsLenAtDash()` — returns the index of `--` in positional args (-1 if absent); slice positionals at that index (everything before = name/workdir, everything after = agent passthrough args). Append passthrough args verbatim to agent_command in config.json.
+Wire `yoloai new` — parse `--prompt`/`-p` (including `-` for stdin), `--prompt-file`/`-f` (including `-` for stdin) — mutually exclusive, error if both provided — `--model`/`-m` (resolve built-in aliases via agent definition's `ModelAliases` map: if value found, substitute; if not, pass through as-is), `--agent` (validate: `claude` or `test` for MVP, error on anything else), `--network-none` (sets Docker `NetworkMode: "none"`), `--port` (repeatable string flag, parsed as `host:container` pairs into `HostConfig.PortBindings`), `--replace`, `--no-start`, `--yes`, name, workdir positional args. Collect `--` trailing args via Cobra's `cmd.ArgsLenAtDash()` — returns the index of `--` in positional args (-1 if absent); slice positionals at that index (everything before = name/workdir, everything after = agent passthrough args). Append passthrough args verbatim to agent_command in config.json.
 
 **Creation output (with prompt):**
 ```
@@ -331,7 +339,7 @@ Viper deferred to post-MVP.
 | `internal/sandbox/manager.go` | All sandbox operations |
 | `internal/docker/client.go` | Docker SDK wrapper interface |
 | `internal/docker/build.go` | Image build logic |
-| `internal/agent/agent.go` | Agent definitions (Claude) |
+| `internal/agent/agent.go` | Agent definitions (Claude, test) |
 | `resources/Dockerfile.base` | Base Docker image |
 | `resources/entrypoint.sh` | Container entrypoint |
 | Test files | `*_test.go` alongside each package |

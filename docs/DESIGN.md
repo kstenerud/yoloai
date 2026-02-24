@@ -4,7 +4,7 @@
 
 Run AI coding CLI agents (Claude Code, Codex, and others) with their sandbox-bypass flags inside disposable, isolated containers so that the agent can work autonomously without constant permission prompts. Project directories are presented as isolated writable views inside the container. The user reviews changes via `yoloai diff` and applies them back to the originals via `yoloai apply` when satisfied.
 
-**Scope:** v1 ships with Claude Code and OpenAI Codex (Codex is `[POST-MVP]`). The architecture is agent-agnostic — Docker, overlayfs, network isolation, diff/apply are not agent-specific. Adding a new agent requires only a new agent definition (install command, launch command, API key env vars, state directory). See RESEARCH.md "Multi-Agent Support Research" for additional agents researched.
+**Scope:** v1 ships with Claude Code, a deterministic test agent, and OpenAI Codex (Codex is `[POST-MVP]`). The architecture is agent-agnostic — Docker, overlayfs, network isolation, diff/apply are not agent-specific. Adding a new agent requires only a new agent definition (install command, launch command, API key env vars, state directory). See RESEARCH.md "Multi-Agent Support Research" for additional agents researched.
 
 ## Value Proposition
 
@@ -200,7 +200,7 @@ defaults:
 
 `config.yaml` contains only `defaults` — settings applied to every sandbox. Profile-specific configuration lives in separate `profile.yaml` files (see Profiles section).
 
-- `defaults.agent` selects the agent to launch. Valid values: `claude`, `codex`. Determines the launch command, API key env vars, state directory, network allowlist, and prompt delivery mode. CLI `--agent` overrides config.
+- `defaults.agent` selects the agent to launch. Valid values: `claude`, `test`, `codex`. Determines the launch command, API key env vars, state directory, network allowlist, and prompt delivery mode. CLI `--agent` overrides config.
 - **[POST-MVP]** `defaults.agent_files` controls what files are copied into the sandbox's `agent-state/` directory on first run. Set to `home` to copy from the agent's default state directory (`~/.claude/` for Claude, `~/.codex/` for Codex). Set to a list of paths (`~/` or absolute) for deterministic setups. Relative paths without `~/` are an error. Omit entirely to copy nothing (safe default). Profile `agent_files` **replaces** (not merges with) defaults.
 - `defaults.mounts` are bind mounts added at container run time. Profile mounts are **additive** (merged with defaults, no deduplication — duplicates are a user error).
 - `defaults.resources` sets baseline limits. Profiles can override individual values.
@@ -333,24 +333,24 @@ yoloai version                                 Show version information
 
 ### Agent Definitions
 
-Built-in agent definitions (v1). Each agent specifies its install method, launch commands, API key requirements, and behavioral characteristics. No user-defined agents in v1. **Codex is `[POST-MVP]`** — MVP implements Claude only.
+Built-in agent definitions (v1). Each agent specifies its install method, launch commands, API key requirements, and behavioral characteristics. No user-defined agents in v1. **Codex is `[POST-MVP]`** — MVP implements Claude and test agents.
 
-| Field                         | Claude                                                    | Codex [POST-MVP]                               |
-|-------------------------------|-----------------------------------------------------------|------------------------------------------------|
-| Install                       | `npm i -g @anthropic-ai/claude-code`                      | Static binary download                         |
-| Runtime                       | Node.js                                                   | None (static musl binary)                      |
-| Interactive cmd               | `claude --dangerously-skip-permissions`                   | `codex --yolo`                                 |
-| Headless cmd                  | `claude -p "PROMPT" --dangerously-skip-permissions`       | `codex exec --yolo "PROMPT"`                   |
-| Default prompt mode           | interactive                                               | headless (with prompt) / interactive (without) |
-| Submit sequence (interactive) | `Enter Enter` (double) + 3s startup delay                 | `Enter` + 3s startup delay                     |
-| API key env vars              | `ANTHROPIC_API_KEY`                                       | `CODEX_API_KEY` (preferred), `OPENAI_API_KEY` (fallback) |
-| State directory               | `~/.claude/`                                              | `~/.codex/`                                    |
-| Model flag                    | `--model <model>`                                         | `--model <model>`                              |
-| Model aliases                 | `sonnet` → `claude-sonnet-4-latest`, `opus` → `claude-opus-4-latest`, `haiku` → `claude-haiku-4-latest` | TBD |
-| Non-root required             | Yes (refuses as root)                                     | No (convention is non-root)                    |
-| Proxy support                 | Yes (npm install only, not native binary)                 | TBD (research needed)                          |
-| Default network allowlist     | `api.anthropic.com`, `statsig.anthropic.com`, `sentry.io` | `api.openai.com` (minimum; additional TBD)     |
-| Extra env vars / quirks       | —                                                         | `--skip-git-repo-check` useful outside repos; Landlock fails in containers (use `--yolo`) |
+| Field                         | Claude                                                    | test                                           | Codex [POST-MVP]                               |
+|-------------------------------|-----------------------------------------------------------|-------------------------------------------------|------------------------------------------------|
+| Install                       | `npm i -g @anthropic-ai/claude-code`                      | (none — bash is built-in)                       | Static binary download                         |
+| Runtime                       | Node.js                                                   | None                                            | None (static musl binary)                      |
+| Interactive cmd               | `claude --dangerously-skip-permissions`                   | `bash`                                          | `codex --yolo`                                 |
+| Headless cmd                  | `claude -p "PROMPT" --dangerously-skip-permissions`       | `sh -c "PROMPT"`                                | `codex exec --yolo "PROMPT"`                   |
+| Default prompt mode           | interactive                                               | headless (with prompt) / interactive (without)  | headless (with prompt) / interactive (without) |
+| Submit sequence (interactive) | `Enter Enter` (double) + 3s startup delay                 | `Enter` + 0s startup delay                      | `Enter` + 3s startup delay                     |
+| API key env vars              | `ANTHROPIC_API_KEY`                                       | (none)                                          | `CODEX_API_KEY` (preferred), `OPENAI_API_KEY` (fallback) |
+| State directory               | `~/.claude/`                                              | (none)                                          | `~/.codex/`                                    |
+| Model flag                    | `--model <model>`                                         | (ignored)                                       | `--model <model>`                              |
+| Model aliases                 | `sonnet` → `claude-sonnet-4-latest`, `opus` → `claude-opus-4-latest`, `haiku` → `claude-haiku-4-latest` | (none) | TBD |
+| Non-root required             | Yes (refuses as root)                                     | No                                              | No (convention is non-root)                    |
+| Proxy support                 | Yes (npm install only, not native binary)                 | N/A                                             | TBD (research needed)                          |
+| Default network allowlist     | `api.anthropic.com`, `statsig.anthropic.com`, `sentry.io` | (none)                                          | `api.openai.com` (minimum; additional TBD)     |
+| Extra env vars / quirks       | —                                                         | Deterministic shell-based agent for development and bug report reproduction. No API key needed. Prompt IS the shell script. | `--skip-git-repo-check` useful outside repos; Landlock fails in containers (use `--yolo`) |
 
 **Prompt delivery modes:**
 
@@ -432,7 +432,7 @@ Options:
 - `--prompt` / `-p` `<text>`: Initial prompt/task for the agent (see Prompt Mechanism below). Use `--prompt -` to read from stdin. Mutually exclusive with `--prompt-file`.
 - `--prompt-file` / `-f` `<path>`: Read prompt from a file. Use `--prompt-file -` to read from stdin. Mutually exclusive with `--prompt`.
 - `--model` / `-m` `<model>`: Model to use. Passed to the agent's `--model` flag. If omitted, uses the agent's default. Accepts built-in aliases (see Agent Definitions) or full model names. **[POST-MVP]** User-configurable aliases in config.yaml, plus version pinning to prevent surprise behavior changes.
-- `--agent <name>`: Agent to use (`claude`, `codex`). Overrides `defaults.agent` from config.
+- `--agent <name>`: Agent to use (`claude`, `test`, `codex`). Overrides `defaults.agent` from config.
 - **[POST-MVP]** `--network-isolated`: Allow only the agent's required API traffic. The agent can function but cannot access other external services, download arbitrary binaries, or exfiltrate code.
 - **[POST-MVP]** `--network-allow <domain>`: Allow traffic to specific additional domains (can be repeated). Implies `--network-isolated`. Added to the agent's default allowlist (see below).
 - `--network-none`: Run with `--network none` for full network isolation (agent API calls will also fail). Mutually exclusive with `--network-isolated` and `--network-allow`. **Warning:** Most agents (Claude, Codex) require network access to reach their API endpoints. This flag is useful for testing container setup without agent execution or for agents with locally-hosted models.
@@ -676,7 +676,7 @@ Lists all sandboxes with their current status.
 |---------|----------------------------------------------------------------|
 | NAME    | Sandbox name                                                   |
 | STATUS  | `running`, `stopped`, `done` (exit 0), `failed` (non-zero exit) |
-| AGENT   | Agent name (`claude`, `codex`)                                 |
+| AGENT   | Agent name (`claude`, `test`, `codex`)                         |
 | PROFILE | Profile name or `(base)`                                       |
 | AGE     | Time since creation                                            |
 | WORKDIR | Working directory path                                         |
