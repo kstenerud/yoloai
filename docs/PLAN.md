@@ -16,8 +16,8 @@ No code exists yet. All design docs are complete (DESIGN.md, CODING-STANDARD.md,
 
 Detailed, self-contained implementation plans live in `docs/phases/PHASE_<N>.md`. Each phase file contains exact types, signatures, implementation steps, tests, and verification commands — enough for an agent to implement the phase without reading DESIGN.md. Only the next phase to implement gets a detailed plan; future phases stay as summaries below.
 
-**Completed phase plans:** `docs/phases/PHASE_0.md`, `docs/phases/PHASE_1.md`, `docs/phases/PHASE_2.md`, `docs/phases/PHASE_3.md`
-**Current phase plan:** `docs/phases/PHASE_4a.md`
+**Completed phase plans:** `docs/phases/PHASE_0.md`, `docs/phases/PHASE_1.md`, `docs/phases/PHASE_2.md`, `docs/phases/PHASE_3.md`, `docs/phases/PHASE_4a.md`
+**Current phase plan:** `docs/phases/PHASE_4b.md`
 
 ## Implementation Phases
 
