@@ -150,28 +150,6 @@ func newNewCmd(version string) *cobra.Command {
 	return cmd
 }
 
-func newAttachCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "attach <name>",
-		Short: "Attach to a sandbox's tmux session",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(_ *cobra.Command, _ []string) error {
-			return errNotImplemented
-		},
-	}
-}
-
-func newShowCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "show <name>",
-		Short: "Show sandbox configuration and state",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(_ *cobra.Command, _ []string) error {
-			return errNotImplemented
-		},
-	}
-}
-
 func newDiffCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "diff <name>",
@@ -188,39 +166,6 @@ func newApplyCmd() *cobra.Command {
 		Use:   "apply <name>",
 		Short: "Copy changes back to original directories",
 		Args:  cobra.MinimumNArgs(1),
-		RunE: func(_ *cobra.Command, _ []string) error {
-			return errNotImplemented
-		},
-	}
-}
-
-func newListCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "list",
-		Short: "List sandboxes and their status",
-		Args:  cobra.NoArgs,
-		RunE: func(_ *cobra.Command, _ []string) error {
-			return errNotImplemented
-		},
-	}
-}
-
-func newLogCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "log <name>",
-		Short: "Show sandbox session log",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(_ *cobra.Command, _ []string) error {
-			return errNotImplemented
-		},
-	}
-}
-
-func newExecCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "exec <name> <command> [args...]",
-		Short: "Run a command inside a sandbox",
-		Args:  cobra.MinimumNArgs(2),
 		RunE: func(_ *cobra.Command, _ []string) error {
 			return errNotImplemented
 		},
