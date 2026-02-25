@@ -68,11 +68,19 @@ tmux send-keys -t main "exec $AGENT_COMMAND" Enter
 # If prompt exists, wait for agent to be ready and deliver it
 if [ -f /yoloai/prompt.txt ]; then
     if [ -n "$READY_PATTERN" ] && [ "$READY_PATTERN" != "null" ]; then
-        # Poll tmux output for the ready pattern (max 60s)
+        # Auto-accept confirmation prompts (workspace trust, etc.) until agent is ready
         MAX_WAIT=60
         WAITED=0
         while [ $WAITED -lt $MAX_WAIT ]; do
-            if tmux capture-pane -t main -p 2>/dev/null | grep -qF "$READY_PATTERN"; then
+            PANE=$(tmux capture-pane -t main -p 2>/dev/null || true)
+            # Auto-accept confirmation prompts first (they may contain the ready pattern character)
+            if echo "$PANE" | grep -qF "Enter to confirm"; then
+                tmux send-keys -t main Enter
+                sleep 2
+                WAITED=$((WAITED + 2))
+                continue
+            fi
+            if echo "$PANE" | grep -qF "$READY_PATTERN"; then
                 break
             fi
             sleep 1
