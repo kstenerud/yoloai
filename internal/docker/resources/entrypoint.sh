@@ -68,13 +68,20 @@ if [ -f /yoloai/prompt.txt ]; then
             sleep 1
             WAITED=$((WAITED + 1))
         done
+        # Wait for agent to fully settle (auto-update, notifications, etc.)
+        sleep 5
     else
         # Fallback to fixed delay if no ready pattern configured
         sleep "$STARTUP_DELAY"
     fi
     tmux load-buffer /yoloai/prompt.txt
     tmux paste-buffer -t main
-    tmux send-keys -t main $SUBMIT_SEQUENCE
+    # Send submit keys individually with delay to ensure TUI processes each
+    sleep 1
+    for key in $SUBMIT_SEQUENCE; do
+        tmux send-keys -t main "$key"
+        sleep 0.5
+    done
 fi
 
 # Block forever — container stops only on explicit docker stop
