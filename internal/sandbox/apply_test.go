@@ -787,6 +787,348 @@ func TestAdvanceBaseline_NewCommitsStillVisible(t *testing.T) {
 	assert.Equal(t, "new commit", commits[0].Subject)
 }
 
+// ResolveRef tests
+
+func TestResolveRef_FullSHA(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	createCopySandboxWithCommits(t, tmpDir, "test-resolve-full", "/tmp/project", []struct {
+		subject  string
+		filename string
+		content  string
+	}{
+		{"add feature", "feature.txt", "feature\n"},
+	})
+
+	commits, err := ListCommitsBeyondBaseline("test-resolve-full")
+	require.NoError(t, err)
+	require.Len(t, commits, 1)
+
+	resolved, err := ResolveRef("test-resolve-full", commits[0].SHA)
+	require.NoError(t, err)
+	assert.Equal(t, commits[0].SHA, resolved.SHA)
+	assert.Equal(t, "add feature", resolved.Subject)
+}
+
+func TestResolveRef_ShortSHA(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	createCopySandboxWithCommits(t, tmpDir, "test-resolve-short", "/tmp/project", []struct {
+		subject  string
+		filename string
+		content  string
+	}{
+		{"add feature", "feature.txt", "feature\n"},
+	})
+
+	commits, err := ListCommitsBeyondBaseline("test-resolve-short")
+	require.NoError(t, err)
+	require.Len(t, commits, 1)
+
+	// Use first 7 chars
+	resolved, err := ResolveRef("test-resolve-short", commits[0].SHA[:7])
+	require.NoError(t, err)
+	assert.Equal(t, commits[0].SHA, resolved.SHA)
+}
+
+func TestResolveRef_NotFound(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	createCopySandboxWithCommits(t, tmpDir, "test-resolve-nf", "/tmp/project", []struct {
+		subject  string
+		filename string
+		content  string
+	}{
+		{"add feature", "feature.txt", "feature\n"},
+	})
+
+	_, err := ResolveRef("test-resolve-nf", "deadbeef")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "not found")
+}
+
+// ResolveRefs tests
+
+func TestResolveRefs_SingleRef(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	createCopySandboxWithCommits(t, tmpDir, "test-resolverefs-single", "/tmp/project", []struct {
+		subject  string
+		filename string
+		content  string
+	}{
+		{"first", "a.txt", "a\n"},
+		{"second", "b.txt", "b\n"},
+	})
+
+	commits, err := ListCommitsBeyondBaseline("test-resolverefs-single")
+	require.NoError(t, err)
+	require.Len(t, commits, 2)
+
+	resolved, err := ResolveRefs("test-resolverefs-single", []string{commits[1].SHA[:7]})
+	require.NoError(t, err)
+	require.Len(t, resolved, 1)
+	assert.Equal(t, commits[1].SHA, resolved[0].SHA)
+}
+
+func TestResolveRefs_Range(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	createCopySandboxWithCommits(t, tmpDir, "test-resolverefs-range", "/tmp/project", []struct {
+		subject  string
+		filename string
+		content  string
+	}{
+		{"first", "a.txt", "a\n"},
+		{"second", "b.txt", "b\n"},
+		{"third", "c.txt", "c\n"},
+	})
+
+	commits, err := ListCommitsBeyondBaseline("test-resolverefs-range")
+	require.NoError(t, err)
+	require.Len(t, commits, 3)
+
+	// Range first..third = second and third (exclusive start, inclusive end)
+	rangeRef := commits[0].SHA[:7] + ".." + commits[2].SHA[:7]
+	resolved, err := ResolveRefs("test-resolverefs-range", []string{rangeRef})
+	require.NoError(t, err)
+	require.Len(t, resolved, 2)
+	assert.Equal(t, "second", resolved[0].Subject)
+	assert.Equal(t, "third", resolved[1].Subject)
+}
+
+func TestResolveRefs_NotFound(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	createCopySandboxWithCommits(t, tmpDir, "test-resolverefs-nf", "/tmp/project", []struct {
+		subject  string
+		filename string
+		content  string
+	}{
+		{"first", "a.txt", "a\n"},
+	})
+
+	_, err := ResolveRefs("test-resolverefs-nf", []string{"deadbeef"})
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "not found")
+}
+
+// ContiguousPrefixEnd tests
+
+func TestContiguousPrefixEnd_AllApplied(t *testing.T) {
+	commits := []CommitInfo{
+		{SHA: "aaa", Subject: "A"},
+		{SHA: "bbb", Subject: "B"},
+		{SHA: "ccc", Subject: "C"},
+	}
+	applied := map[string]bool{"aaa": true, "bbb": true, "ccc": true}
+	assert.Equal(t, 2, ContiguousPrefixEnd(commits, applied))
+}
+
+func TestContiguousPrefixEnd_PartialPrefix(t *testing.T) {
+	commits := []CommitInfo{
+		{SHA: "aaa", Subject: "A"},
+		{SHA: "bbb", Subject: "B"},
+		{SHA: "ccc", Subject: "C"},
+	}
+	// Applied A and B but not C
+	applied := map[string]bool{"aaa": true, "bbb": true}
+	assert.Equal(t, 1, ContiguousPrefixEnd(commits, applied))
+}
+
+func TestContiguousPrefixEnd_Gap(t *testing.T) {
+	commits := []CommitInfo{
+		{SHA: "aaa", Subject: "A"},
+		{SHA: "bbb", Subject: "B"},
+		{SHA: "ccc", Subject: "C"},
+	}
+	// Applied A and C (gap at B) — prefix is just A
+	applied := map[string]bool{"aaa": true, "ccc": true}
+	assert.Equal(t, 0, ContiguousPrefixEnd(commits, applied))
+}
+
+func TestContiguousPrefixEnd_NoPrefix(t *testing.T) {
+	commits := []CommitInfo{
+		{SHA: "aaa", Subject: "A"},
+		{SHA: "bbb", Subject: "B"},
+		{SHA: "ccc", Subject: "C"},
+	}
+	// Applied C and D but not A — no contiguous prefix from start
+	applied := map[string]bool{"ccc": true}
+	assert.Equal(t, -1, ContiguousPrefixEnd(commits, applied))
+}
+
+func TestContiguousPrefixEnd_Empty(t *testing.T) {
+	commits := []CommitInfo{
+		{SHA: "aaa", Subject: "A"},
+	}
+	applied := map[string]bool{}
+	assert.Equal(t, -1, ContiguousPrefixEnd(commits, applied))
+}
+
+// GenerateFormatPatchForRefs tests
+
+func TestGenerateFormatPatchForRefs_Single(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	createCopySandboxWithCommits(t, tmpDir, "test-fpref-single", "/tmp/project", []struct {
+		subject  string
+		filename string
+		content  string
+	}{
+		{"first", "a.txt", "a\n"},
+		{"second", "b.txt", "b\n"},
+	})
+
+	commits, err := ListCommitsBeyondBaseline("test-fpref-single")
+	require.NoError(t, err)
+	require.Len(t, commits, 2)
+
+	// Only generate patch for the second commit
+	patchDir, files, err := GenerateFormatPatchForRefs("test-fpref-single", []string{commits[1].SHA})
+	require.NoError(t, err)
+	defer os.RemoveAll(patchDir) //nolint:errcheck
+
+	require.Len(t, files, 1)
+	data, _ := os.ReadFile(filepath.Join(patchDir, files[0])) //nolint:gosec
+	assert.Contains(t, string(data), "second")
+}
+
+func TestGenerateFormatPatchForRefs_Multiple(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	createCopySandboxWithCommits(t, tmpDir, "test-fpref-multi", "/tmp/project", []struct {
+		subject  string
+		filename string
+		content  string
+	}{
+		{"first", "a.txt", "a\n"},
+		{"second", "b.txt", "b\n"},
+		{"third", "c.txt", "c\n"},
+	})
+
+	commits, err := ListCommitsBeyondBaseline("test-fpref-multi")
+	require.NoError(t, err)
+	require.Len(t, commits, 3)
+
+	// Only generate patches for first and third
+	patchDir, files, err := GenerateFormatPatchForRefs("test-fpref-multi", []string{commits[0].SHA, commits[2].SHA})
+	require.NoError(t, err)
+	defer os.RemoveAll(patchDir) //nolint:errcheck
+
+	require.Len(t, files, 2)
+}
+
+// AdvanceBaselineTo tests
+
+func TestAdvanceBaselineTo_UpdatesMeta(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	name := "test-advto-meta"
+	createCopySandboxWithCommits(t, tmpDir, name, "/tmp/project", []struct {
+		subject  string
+		filename string
+		content  string
+	}{
+		{"first", "a.txt", "a\n"},
+		{"second", "b.txt", "b\n"},
+		{"third", "c.txt", "c\n"},
+	})
+
+	commits, err := ListCommitsBeyondBaseline(name)
+	require.NoError(t, err)
+	require.Len(t, commits, 3)
+
+	// Advance to second commit (not HEAD)
+	require.NoError(t, AdvanceBaselineTo(name, commits[1].SHA))
+
+	// Verify meta has the second commit's SHA
+	meta, err := LoadMeta(Dir(name))
+	require.NoError(t, err)
+	assert.Equal(t, commits[1].SHA, meta.Workdir.BaselineSHA)
+
+	// Only third commit should remain visible
+	remaining, err := ListCommitsBeyondBaseline(name)
+	require.NoError(t, err)
+	require.Len(t, remaining, 1)
+	assert.Equal(t, "third", remaining[0].Subject)
+}
+
+// Selective apply end-to-end test
+
+func TestSelectiveApplyFlow(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	name := "test-selective-e2e"
+	createCopySandboxWithCommits(t, tmpDir, name, "/tmp/project", []struct {
+		subject  string
+		filename string
+		content  string
+	}{
+		{"add A", "a.txt", "a content\n"},
+		{"add B", "b.txt", "b content\n"},
+		{"add C", "c.txt", "c content\n"},
+	})
+
+	commits, err := ListCommitsBeyondBaseline(name)
+	require.NoError(t, err)
+	require.Len(t, commits, 3)
+
+	// Resolve first two commits
+	resolved, err := ResolveRefs(name, []string{commits[0].SHA[:7], commits[1].SHA[:7]})
+	require.NoError(t, err)
+	require.Len(t, resolved, 2)
+
+	// Generate patches for selected commits
+	shas := []string{resolved[0].SHA, resolved[1].SHA}
+	patchDir, files, err := GenerateFormatPatchForRefs(name, shas)
+	require.NoError(t, err)
+	defer os.RemoveAll(patchDir) //nolint:errcheck
+
+	// Create target
+	targetDir := filepath.Join(tmpDir, "target-selective")
+	require.NoError(t, os.MkdirAll(targetDir, 0750))
+	initGitRepo(t, targetDir)
+	writeTestFile(t, targetDir, "file.txt", "original content\n")
+	gitAdd(t, targetDir, ".")
+	gitCommit(t, targetDir, "initial")
+
+	// Apply
+	require.NoError(t, ApplyFormatPatch(patchDir, files, targetDir))
+
+	// Verify only A and B exist, not C
+	assert.FileExists(t, filepath.Join(targetDir, "a.txt"))
+	assert.FileExists(t, filepath.Join(targetDir, "b.txt"))
+	assert.NoFileExists(t, filepath.Join(targetDir, "c.txt"))
+
+	// Verify contiguous prefix advancement
+	appliedSet := map[string]bool{
+		commits[0].SHA: true,
+		commits[1].SHA: true,
+	}
+	prefixEnd := ContiguousPrefixEnd(commits, appliedSet)
+	assert.Equal(t, 1, prefixEnd) // advances to index 1 (commit B)
+
+	// Advance baseline
+	require.NoError(t, AdvanceBaselineTo(name, commits[prefixEnd].SHA))
+
+	// Only C should remain
+	remaining, err := ListCommitsBeyondBaseline(name)
+	require.NoError(t, err)
+	require.Len(t, remaining, 1)
+	assert.Equal(t, "add C", remaining[0].Subject)
+}
+
 // End-to-end flow tests
 
 func TestApplyFlow_CommitsOnly(t *testing.T) {

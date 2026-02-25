@@ -114,6 +114,97 @@ func generateCopyDiff(workDir, baselineSHA string, paths []string, stat bool) (*
 	}, nil
 }
 
+// CommitDiffOptions controls commit-level diff generation.
+type CommitDiffOptions struct {
+	Name string // sandbox name
+	Ref  string // single SHA or "sha..sha" range
+	Stat bool   // true for --stat summary only
+}
+
+// GenerateCommitDiff produces a diff for a specific commit or range
+// within the sandbox work copy. Only works for :copy mode sandboxes.
+func GenerateCommitDiff(opts CommitDiffOptions) (*DiffResult, error) {
+	workDir, _, mode, err := loadDiffContext(opts.Name)
+	if err != nil {
+		return nil, err
+	}
+
+	if mode == "rw" {
+		return nil, fmt.Errorf("commit diff is not available for :rw directories")
+	}
+
+	if err := stageUntracked(workDir); err != nil {
+		return nil, err
+	}
+
+	args := []string{"diff"}
+	if opts.Stat {
+		args = append(args, "--stat")
+	} else {
+		args = append(args, "--binary")
+	}
+
+	// Single SHA → show that commit's diff (sha~1..sha)
+	// Range "a..b" → pass directly
+	if strings.Contains(opts.Ref, "..") {
+		args = append(args, opts.Ref)
+	} else {
+		args = append(args, opts.Ref+"~1", opts.Ref)
+	}
+
+	cmd := newGitCmd(workDir, args...)
+	output, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("git diff %s: %w", opts.Ref, err)
+	}
+
+	result := strings.TrimRight(string(output), "\n")
+	return &DiffResult{
+		Output:  result,
+		WorkDir: workDir,
+		Mode:    "copy",
+		Empty:   len(result) == 0,
+	}, nil
+}
+
+// CommitInfoWithStat extends CommitInfo with a per-commit stat summary.
+type CommitInfoWithStat struct {
+	CommitInfo
+	Stat string // output of git diff --stat for this commit
+}
+
+// ListCommitsWithStats returns commits beyond baseline with per-commit
+// --stat summaries. Returns an empty slice if HEAD == baseline.
+func ListCommitsWithStats(name string) ([]CommitInfoWithStat, error) {
+	commits, err := ListCommitsBeyondBaseline(name)
+	if err != nil {
+		return nil, err
+	}
+	if len(commits) == 0 {
+		return nil, nil
+	}
+
+	workDir, _, _, err := loadDiffContext(name)
+	if err != nil {
+		return nil, err
+	}
+
+	result := make([]CommitInfoWithStat, len(commits))
+	for i, c := range commits {
+		cmd := newGitCmd(workDir, "diff", "--stat", c.SHA+"~1", c.SHA)
+		output, statErr := cmd.Output()
+		if statErr != nil {
+			return nil, fmt.Errorf("git diff --stat %s: %w", c.SHA, statErr)
+		}
+		result[i] = CommitInfoWithStat{
+			CommitInfo: c,
+			Stat:       strings.TrimRight(string(output), "\n"),
+		}
+	}
+
+	return result, nil
+}
+
 // stageUntracked runs `git add -A` in the work directory to capture
 // files created by the agent that are not yet tracked.
 func stageUntracked(workDir string) error {

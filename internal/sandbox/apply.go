@@ -257,6 +257,188 @@ var errorsAs = func(err error, target any) bool {
 	}
 }
 
+// ResolveRef resolves a short SHA prefix to a full 40-char SHA among
+// commits beyond the baseline. Returns an error if the ref is ambiguous
+// (matches multiple commits) or not found.
+func ResolveRef(name, ref string) (CommitInfo, error) {
+	commits, err := ListCommitsBeyondBaseline(name)
+	if err != nil {
+		return CommitInfo{}, err
+	}
+
+	ref = strings.ToLower(ref)
+	var matches []CommitInfo
+	for _, c := range commits {
+		if strings.HasPrefix(strings.ToLower(c.SHA), ref) {
+			matches = append(matches, c)
+		}
+	}
+
+	switch len(matches) {
+	case 0:
+		return CommitInfo{}, fmt.Errorf("ref %q not found among sandbox commits", ref)
+	case 1:
+		return matches[0], nil
+	default:
+		return CommitInfo{}, fmt.Errorf("ref %q is ambiguous — matches %d commits", ref, len(matches))
+	}
+}
+
+// ResolveRefs resolves a list of ref strings (short SHAs or "sha..sha" ranges)
+// to an ordered list of CommitInfo. For ranges, all commits between the two
+// endpoints (inclusive of end, exclusive of start) are included.
+// The returned list preserves chronological order within the sandbox.
+func ResolveRefs(name string, refs []string) ([]CommitInfo, error) {
+	allCommits, err := ListCommitsBeyondBaseline(name)
+	if err != nil {
+		return nil, err
+	}
+
+	// Build SHA index for fast lookup
+	shaIndex := make(map[string]int) // full SHA → index in allCommits
+	for i, c := range allCommits {
+		shaIndex[strings.ToLower(c.SHA)] = i
+	}
+
+	// Resolve short SHA to full
+	resolve := func(ref string) (string, error) {
+		ref = strings.ToLower(ref)
+		var found string
+		for _, c := range allCommits {
+			if strings.HasPrefix(strings.ToLower(c.SHA), ref) {
+				if found != "" {
+					return "", fmt.Errorf("ref %q is ambiguous — matches multiple commits", ref)
+				}
+				found = strings.ToLower(c.SHA)
+			}
+		}
+		if found == "" {
+			return "", fmt.Errorf("ref %q not found among sandbox commits", ref)
+		}
+		return found, nil
+	}
+
+	selected := make(map[string]bool) // full SHA (lowered) → true
+	for _, ref := range refs {
+		if before, after, isRange := strings.Cut(ref, ".."); isRange {
+			startSHA, err := resolve(before)
+			if err != nil {
+				return nil, err
+			}
+			endSHA, err := resolve(after)
+			if err != nil {
+				return nil, err
+			}
+			startIdx, endIdx := shaIndex[startSHA], shaIndex[endSHA]
+			if startIdx > endIdx {
+				return nil, fmt.Errorf("invalid range: %s is after %s", before, after)
+			}
+			// Range is exclusive of start, inclusive of end (git convention)
+			for i := startIdx + 1; i <= endIdx; i++ {
+				selected[strings.ToLower(allCommits[i].SHA)] = true
+			}
+		} else {
+			fullSHA, err := resolve(ref)
+			if err != nil {
+				return nil, err
+			}
+			selected[fullSHA] = true
+		}
+	}
+
+	// Return in chronological order
+	var result []CommitInfo
+	for _, c := range allCommits {
+		if selected[strings.ToLower(c.SHA)] {
+			result = append(result, c)
+		}
+	}
+
+	return result, nil
+}
+
+// GenerateFormatPatchForRefs creates .patch files for specific commits (by SHA)
+// within the sandbox work copy. Returns the temp directory and sorted file list.
+// The caller is responsible for os.RemoveAll(patchDir).
+func GenerateFormatPatchForRefs(name string, shas []string) (patchDir string, files []string, err error) {
+	workDir, _, mode, loadErr := loadDiffContext(name)
+	if loadErr != nil {
+		return "", nil, loadErr
+	}
+
+	if mode == "rw" {
+		return "", nil, fmt.Errorf("format-patch is not available for :rw directories")
+	}
+
+	patchDir, err = os.MkdirTemp("", "yoloai-format-patch-*")
+	if err != nil {
+		return "", nil, fmt.Errorf("create temp dir: %w", err)
+	}
+
+	for _, sha := range shas {
+		cmd := newGitCmd(workDir, "format-patch", "-1", "--output-directory="+patchDir, sha)
+		if output, runErr := cmd.CombinedOutput(); runErr != nil {
+			os.RemoveAll(patchDir) //nolint:errcheck,gosec // best-effort cleanup
+			return "", nil, fmt.Errorf("git format-patch -1 %s: %s: %w", sha, strings.TrimSpace(string(output)), runErr)
+		}
+	}
+
+	// Read and sort patch files
+	entries, err := os.ReadDir(patchDir)
+	if err != nil {
+		os.RemoveAll(patchDir) //nolint:errcheck,gosec // best-effort cleanup
+		return "", nil, fmt.Errorf("read patch dir: %w", err)
+	}
+
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".patch") {
+			files = append(files, e.Name())
+		}
+	}
+	sort.Strings(files)
+
+	return patchDir, files, nil
+}
+
+// AdvanceBaselineTo updates the sandbox's baseline SHA to the given commit.
+// Unlike AdvanceBaseline (which advances to HEAD), this advances to an
+// arbitrary commit — used after selective apply.
+func AdvanceBaselineTo(name, sha string) error {
+	sandboxDir, err := RequireSandboxDir(name)
+	if err != nil {
+		return err
+	}
+
+	meta, err := LoadMeta(sandboxDir)
+	if err != nil {
+		return err
+	}
+
+	if meta.Workdir.Mode == "rw" {
+		return nil
+	}
+
+	meta.Workdir.BaselineSHA = sha
+	return SaveMeta(sandboxDir, meta)
+}
+
+// ContiguousPrefixEnd finds how far the baseline can safely advance after
+// a selective apply. Given the full ordered list of commits beyond baseline
+// and the set of applied SHAs, it returns the index (in allCommits) of the
+// last commit in the contiguous prefix starting from index 0.
+// Returns -1 if no contiguous prefix exists (first commit wasn't applied).
+func ContiguousPrefixEnd(allCommits []CommitInfo, appliedSHAs map[string]bool) int {
+	end := -1
+	for i, c := range allCommits {
+		if appliedSHAs[c.SHA] {
+			end = i
+		} else {
+			break
+		}
+	}
+	return end
+}
+
 // AdvanceBaseline updates the sandbox's baseline SHA to the current HEAD
 // of its work copy. This should be called after a successful apply so that
 // subsequent diff/apply operations don't re-show already-applied commits.

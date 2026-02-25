@@ -220,6 +220,147 @@ func TestLoadDiffContext_SandboxNotFound(t *testing.T) {
 	assert.ErrorIs(t, err, ErrSandboxNotFound)
 }
 
+// GenerateCommitDiff tests
+
+func TestGenerateCommitDiff_SingleCommit(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	workDir := createCopySandboxWithCommits(t, tmpDir, "test-cdiff-single", "/tmp/project", []struct {
+		subject  string
+		filename string
+		content  string
+	}{
+		{"add feature", "feature.txt", "feature content\n"},
+		{"add other", "other.txt", "other content\n"},
+	})
+
+	// Get SHA of first commit
+	commits, err := ListCommitsBeyondBaseline("test-cdiff-single")
+	require.NoError(t, err)
+	require.Len(t, commits, 2)
+
+	result, err := GenerateCommitDiff(CommitDiffOptions{
+		Name: "test-cdiff-single",
+		Ref:  commits[0].SHA,
+	})
+	require.NoError(t, err)
+	assert.False(t, result.Empty)
+	assert.Contains(t, result.Output, "feature.txt")
+	assert.NotContains(t, result.Output, "other.txt")
+	_ = workDir
+}
+
+func TestGenerateCommitDiff_Range(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	createCopySandboxWithCommits(t, tmpDir, "test-cdiff-range", "/tmp/project", []struct {
+		subject  string
+		filename string
+		content  string
+	}{
+		{"first", "a.txt", "a\n"},
+		{"second", "b.txt", "b\n"},
+		{"third", "c.txt", "c\n"},
+	})
+
+	commits, err := ListCommitsBeyondBaseline("test-cdiff-range")
+	require.NoError(t, err)
+	require.Len(t, commits, 3)
+
+	// Range: first..third should include second and third
+	ref := commits[0].SHA + ".." + commits[2].SHA
+	result, err := GenerateCommitDiff(CommitDiffOptions{
+		Name: "test-cdiff-range",
+		Ref:  ref,
+	})
+	require.NoError(t, err)
+	assert.False(t, result.Empty)
+	assert.Contains(t, result.Output, "b.txt")
+	assert.Contains(t, result.Output, "c.txt")
+}
+
+func TestGenerateCommitDiff_Stat(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	createCopySandboxWithCommits(t, tmpDir, "test-cdiff-stat", "/tmp/project", []struct {
+		subject  string
+		filename string
+		content  string
+	}{
+		{"add feature", "feature.txt", "feature content\n"},
+	})
+
+	commits, err := ListCommitsBeyondBaseline("test-cdiff-stat")
+	require.NoError(t, err)
+	require.Len(t, commits, 1)
+
+	result, err := GenerateCommitDiff(CommitDiffOptions{
+		Name: "test-cdiff-stat",
+		Ref:  commits[0].SHA,
+		Stat: true,
+	})
+	require.NoError(t, err)
+	assert.False(t, result.Empty)
+	assert.Contains(t, result.Output, "feature.txt")
+	assert.Contains(t, result.Output, "1 file changed")
+}
+
+func TestGenerateCommitDiff_RWError(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	hostDir := filepath.Join(tmpDir, "rw-dir")
+	require.NoError(t, os.MkdirAll(hostDir, 0750))
+	createRWSandbox(t, tmpDir, "test-cdiff-rw", hostDir)
+
+	_, err := GenerateCommitDiff(CommitDiffOptions{
+		Name: "test-cdiff-rw",
+		Ref:  "abc123",
+	})
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), ":rw directories")
+}
+
+// ListCommitsWithStats tests
+
+func TestListCommitsWithStats_NoCommits(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	createCopySandbox(t, tmpDir, "test-lcws-none", "/tmp/project")
+
+	commits, err := ListCommitsWithStats("test-lcws-none")
+	require.NoError(t, err)
+	assert.Empty(t, commits)
+}
+
+func TestListCommitsWithStats_HasStats(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	createCopySandboxWithCommits(t, tmpDir, "test-lcws-stats", "/tmp/project", []struct {
+		subject  string
+		filename string
+		content  string
+	}{
+		{"add feature", "feature.txt", "feature content\n"},
+		{"add other", "other.txt", "other content\n"},
+	})
+
+	commits, err := ListCommitsWithStats("test-lcws-stats")
+	require.NoError(t, err)
+	require.Len(t, commits, 2)
+	assert.Equal(t, "add feature", commits[0].Subject)
+	assert.Contains(t, commits[0].Stat, "feature.txt")
+	assert.Equal(t, "add other", commits[1].Subject)
+	assert.Contains(t, commits[1].Stat, "other.txt")
+}
+
+// loadDiffContext tests
+
 func TestLoadDiffContext_NoBaseline(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)

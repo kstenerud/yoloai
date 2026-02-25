@@ -11,19 +11,24 @@ import (
 
 func newApplyCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "apply <name> [-- <path>...]",
+		Use:   "apply <name> [<ref>...] [-- <path>...]",
 		Short: "Apply agent changes back to original directory",
 		Long: `Apply agent changes back to the original directory.
 
 By default, individual commits are preserved using git format-patch/am.
 Uncommitted (WIP) changes are applied as unstaged modifications.
 
+Specific commits can be cherry-picked by providing ref arguments:
+  yoloai apply mybox abc123 def456       # specific commits
+  yoloai apply mybox abc123..def456      # range
+  yoloai apply mybox                     # all (unchanged behavior)
+
 Use --squash to flatten everything into a single unstaged patch (legacy behavior).
 Use --patches to export .patch files without applying them.`,
 		GroupID: groupWorkflow,
 		Args:    cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			name, paths, err := resolveName(cmd, args)
+			name, rest, err := resolveName(cmd, args)
 			if err != nil {
 				return err
 			}
@@ -33,6 +38,17 @@ Use --patches to export .patch files without applying them.`,
 			patchesDir, _ := cmd.Flags().GetString("patches")
 			noWIP, _ := cmd.Flags().GetBool("no-wip")
 			force, _ := cmd.Flags().GetBool("force")
+
+			// Parse refs and paths from remaining args
+			refs, paths := parseApplyArgs(rest, cmd)
+
+			// Validate mutually exclusive options
+			if len(refs) > 0 && squash {
+				return fmt.Errorf("--squash cannot be used with commit refs — they are mutually exclusive")
+			}
+			if len(refs) > 0 && len(paths) > 0 {
+				return fmt.Errorf("commit refs and path filters cannot be combined")
+			}
 
 			// Load metadata for target directory and mode validation
 			meta, err := sandbox.LoadMeta(sandbox.Dir(name))
@@ -45,6 +61,11 @@ Use --patches to export .patch files without applying them.`,
 
 			// Best-effort agent-running warning
 			agentRunningWarning(cmd, name)
+
+			// Selective apply: specific commit refs
+			if len(refs) > 0 {
+				return applySelectedCommits(cmd, name, refs, meta, yes, force)
+			}
 
 			// --squash: legacy behavior — flatten everything into one unstaged patch
 			if squash {
@@ -170,6 +191,129 @@ Use --patches to export .patch files without applying them.`,
 	cmd.Flags().Bool("force", false, "Proceed even if host repo has uncommitted changes")
 
 	return cmd
+}
+
+// parseApplyArgs separates ref arguments from path arguments.
+// Refs appear between the sandbox name and "--"; paths appear after "--".
+// Without "--", all remaining args are treated as refs if they look like
+// hex SHA prefixes or ranges, otherwise all are treated as paths.
+func parseApplyArgs(rest []string, cmd *cobra.Command) (refs []string, paths []string) {
+	if len(rest) == 0 {
+		return nil, nil
+	}
+
+	dashAt := cmd.ArgsLenAtDash()
+	if dashAt >= 0 {
+		// Explicit "--" separator. Account for name already consumed.
+		beforeDash := dashAt - 1
+		if beforeDash < 0 {
+			beforeDash = 0
+		}
+		if beforeDash > len(rest) {
+			beforeDash = len(rest)
+		}
+		refs = rest[:beforeDash]
+		paths = rest[beforeDash:]
+		return refs, paths
+	}
+
+	// No "--": check if all args look like refs
+	allRefs := true
+	for _, arg := range rest {
+		if !looksLikeRef(arg) {
+			allRefs = false
+			break
+		}
+	}
+
+	if allRefs {
+		return rest, nil
+	}
+
+	// If the first arg doesn't look like a ref, they're all paths (backward compat)
+	return nil, rest
+}
+
+// applySelectedCommits cherry-picks specific commits into the target.
+func applySelectedCommits(cmd *cobra.Command, name string, refs []string, meta *sandbox.Meta, yes, force bool) error {
+	targetDir := meta.Workdir.HostPath
+	if !sandbox.IsGitRepo(targetDir) {
+		return fmt.Errorf("selective apply requires a git target directory — %s is not a git repository", targetDir)
+	}
+
+	// Resolve refs to full SHAs
+	resolved, err := sandbox.ResolveRefs(name, refs)
+	if err != nil {
+		return err
+	}
+
+	if len(resolved) == 0 {
+		_, err = fmt.Fprintln(cmd.OutOrStdout(), "No commits matched")
+		return err
+	}
+
+	// Pre-flight: dirty repo check
+	warning, checkErr := sandbox.CheckDirtyRepo(targetDir)
+	if checkErr != nil {
+		return checkErr
+	}
+	if warning != "" && !force {
+		return fmt.Errorf("target repo has uncommitted changes (%s)\n"+
+			"commit or stash them first, or use --force to proceed anyway", warning)
+	}
+
+	// Show summary
+	out := cmd.OutOrStdout()
+	fmt.Fprintf(out, "Commits to apply (%d):\n", len(resolved)) //nolint:errcheck
+	for _, c := range resolved {
+		fmt.Fprintf(out, "  %.12s %s\n", c.SHA, c.Subject) //nolint:errcheck
+	}
+	fmt.Fprintln(out) //nolint:errcheck
+
+	// Confirmation
+	if !yes {
+		prompt := fmt.Sprintf("Apply to %s? [y/N] ", targetDir)
+		if !sandbox.Confirm(prompt, os.Stdin, cmd.ErrOrStderr()) {
+			return nil
+		}
+	}
+
+	// Generate patches for selected commits only
+	shas := make([]string, len(resolved))
+	for i, c := range resolved {
+		shas[i] = c.SHA
+	}
+
+	patchDir, files, err := sandbox.GenerateFormatPatchForRefs(name, shas)
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(patchDir) //nolint:errcheck
+
+	if err := sandbox.ApplyFormatPatch(patchDir, files, targetDir); err != nil {
+		return err
+	}
+	fmt.Fprintf(out, "%d commit(s) applied to %s\n", len(files), targetDir) //nolint:errcheck
+
+	// Advance baseline using contiguous prefix logic
+	allCommits, err := sandbox.ListCommitsBeyondBaseline(name)
+	if err != nil {
+		return fmt.Errorf("advance baseline: %w", err)
+	}
+
+	appliedSet := make(map[string]bool, len(resolved))
+	for _, c := range resolved {
+		appliedSet[c.SHA] = true
+	}
+
+	prefixEnd := sandbox.ContiguousPrefixEnd(allCommits, appliedSet)
+	if prefixEnd >= 0 {
+		if err := sandbox.AdvanceBaselineTo(name, allCommits[prefixEnd].SHA); err != nil {
+			return fmt.Errorf("advance baseline: %w", err)
+		}
+	}
+
+	return nil
 }
 
 // applySquash implements the legacy squashed-patch behavior.
