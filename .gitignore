@@ -16,5 +16,8 @@ coverage.html
 .DS_Store
 Thumbs.db
 
+# Claude Code
+.claude/
+
 # Temporary files
 *.tmp
