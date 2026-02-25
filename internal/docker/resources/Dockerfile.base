@@ -4,6 +4,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     tmux \
     git \
     build-essential \
+    cmake \
+    clang \
     python3 \
     python3-pip \
     python3-venv \
@@ -18,6 +20,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     file \
     unzip \
     openssh-client \
+    pkg-config \
+    libssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Node.js 22 LTS via NodeSource
@@ -30,6 +34,22 @@ RUN mkdir -p /etc/apt/keyrings \
     && apt-get update \
     && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
+
+# Go (latest stable)
+ARG GO_VERSION=1.24.1
+RUN curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-$(dpkg --print-architecture | sed 's/i386/386/').tar.gz" \
+      -o /tmp/go.tar.gz \
+    && tar -C /usr/local -xzf /tmp/go.tar.gz \
+    && rm /tmp/go.tar.gz
+ENV PATH="/usr/local/go/bin:${PATH}"
+
+# Rust via rustup (installed system-wide)
+ENV RUSTUP_HOME=/usr/local/rustup \
+    CARGO_HOME=/usr/local/cargo \
+    PATH="/usr/local/cargo/bin:${PATH}"
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+      | sh -s -- -y --default-toolchain stable --profile minimal --no-modify-path \
+    && chmod -R a+rw "$RUSTUP_HOME" "$CARGO_HOME"
 
 # Claude Code via npm (not native binary — native bundles Bun which ignores
 # proxy env vars and auto-updates; see RESEARCH.md "Claude Code Installation")
