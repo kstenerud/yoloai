@@ -182,6 +182,11 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 		return nil, fmt.Errorf("copy seed files: %w", err)
 	}
 
+	// Ensure container-required settings (e.g., skip bypass permissions prompt)
+	if err := ensureContainerSettings(agentDef, sandboxDir); err != nil {
+		return nil, fmt.Errorf("ensure container settings: %w", err)
+	}
+
 	// Copy workdir
 	if workdir.Mode == "copy" {
 		if err := copyDir(workdir.Path, workCopyDir); err != nil {
@@ -772,6 +777,42 @@ func copySeedFiles(agentDef *agent.Definition, sandboxDir string, hasAPIKey bool
 	}
 
 	return copied, nil
+}
+
+// ensureContainerSettings merges required container settings into agent-state/settings.json.
+// For agents using --dangerously-skip-permissions, ensures the bypass prompt is skipped.
+func ensureContainerSettings(agentDef *agent.Definition, sandboxDir string) error {
+	if agentDef.StateDir == "" {
+		return nil
+	}
+
+	if !strings.Contains(agentDef.InteractiveCmd, "--dangerously-skip-permissions") {
+		return nil
+	}
+
+	settingsPath := filepath.Join(sandboxDir, "agent-state", "settings.json")
+
+	var settings map[string]any
+	data, err := os.ReadFile(settingsPath) //nolint:gosec // path is sandbox-controlled
+	if err != nil {
+		if os.IsNotExist(err) {
+			settings = make(map[string]any)
+		} else {
+			return err
+		}
+	} else {
+		if err := json.Unmarshal(data, &settings); err != nil {
+			return err
+		}
+	}
+
+	settings["skipDangerousModePermissionPrompt"] = true
+
+	out, err := json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(settingsPath, out, 0600)
 }
 
 // copyDir copies a directory tree using cp -rp.
