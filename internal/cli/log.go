@@ -21,9 +21,9 @@ func newLogCmd() *cobra.Command {
 				return err
 			}
 
-			sandboxDir := sandbox.Dir(name)
-			if _, err := os.Stat(sandboxDir); err != nil {
-				return sandbox.ErrSandboxNotFound
+			sandboxDir, err := sandbox.RequireSandboxDir(name)
+			if err != nil {
+				return err
 			}
 
 			logPath := filepath.Join(sandboxDir, "log.txt")

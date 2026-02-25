@@ -1,10 +1,9 @@
 package cli
 
 import (
+	"context"
 	"fmt"
-	"log/slog"
 
-	"github.com/kstenerud/yoloai/internal/docker"
 	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/spf13/cobra"
 )
@@ -23,25 +22,18 @@ func newResetCmd() *cobra.Command {
 			noPrompt, _ := cmd.Flags().GetBool("no-prompt")
 			clean, _ := cmd.Flags().GetBool("clean")
 
-			ctx := cmd.Context()
-			client, err := docker.NewClient(ctx)
-			if err != nil {
+			return withManager(cmd, func(ctx context.Context, mgr *sandbox.Manager) error {
+				if err := mgr.Reset(ctx, sandbox.ResetOptions{
+					Name:     name,
+					Clean:    clean,
+					NoPrompt: noPrompt,
+				}); err != nil {
+					return err
+				}
+
+				_, err = fmt.Fprintf(cmd.OutOrStdout(), "Sandbox %s reset\n", name)
 				return err
-			}
-			defer client.Close() //nolint:errcheck // best-effort cleanup
-
-			mgr := sandbox.NewManager(client, slog.Default(), cmd.ErrOrStderr())
-
-			if err := mgr.Reset(ctx, sandbox.ResetOptions{
-				Name:     name,
-				Clean:    clean,
-				NoPrompt: noPrompt,
-			}); err != nil {
-				return err
-			}
-
-			_, err = fmt.Fprintf(cmd.OutOrStdout(), "Sandbox %s reset\n", name)
-			return err
+			})
 		},
 	}
 

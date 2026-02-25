@@ -147,9 +147,9 @@ func DetectStatus(ctx context.Context, client docker.Client, containerName strin
 
 // InspectSandbox loads metadata and queries Docker for a single sandbox.
 func InspectSandbox(ctx context.Context, client docker.Client, name string) (*Info, error) {
-	sandboxDir := Dir(name)
-	if _, err := os.Stat(sandboxDir); err != nil {
-		return nil, ErrSandboxNotFound
+	sandboxDir, err := RequireSandboxDir(name)
+	if err != nil {
+		return nil, err
 	}
 
 	meta, err := LoadMeta(sandboxDir)
@@ -157,7 +157,7 @@ func InspectSandbox(ctx context.Context, client docker.Client, name string) (*In
 		return nil, fmt.Errorf("load metadata: %w", err)
 	}
 
-	status, containerID, err := DetectStatus(ctx, client, "yoloai-"+name)
+	status, containerID, err := DetectStatus(ctx, client, ContainerName(name))
 	if err != nil {
 		return nil, err
 	}

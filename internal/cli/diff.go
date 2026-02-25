@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -65,19 +66,15 @@ func newDiffCmd() *cobra.Command {
 // agentRunningWarning prints a warning to stderr if the agent is still running.
 // Silently skips if Docker is unavailable or inspection fails.
 func agentRunningWarning(cmd *cobra.Command, name string) {
-	ctx := cmd.Context()
-	client, err := docker.NewClient(ctx)
-	if err != nil {
-		return
-	}
-	defer client.Close() //nolint:errcheck // best-effort cleanup
+	_ = withClient(cmd, func(ctx context.Context, client docker.Client) error {
+		info, err := sandbox.InspectSandbox(ctx, client, name)
+		if err != nil {
+			return nil // silently skip
+		}
 
-	info, err := sandbox.InspectSandbox(ctx, client, name)
-	if err != nil {
-		return
-	}
-
-	if info.Status == sandbox.StatusRunning {
-		fmt.Fprintln(cmd.ErrOrStderr(), "Note: agent is still running; diff may be incomplete") //nolint:errcheck // best-effort warning
-	}
+		if info.Status == sandbox.StatusRunning {
+			fmt.Fprintln(cmd.ErrOrStderr(), "Note: agent is still running; diff may be incomplete") //nolint:errcheck // best-effort warning
+		}
+		return nil
+	})
 }

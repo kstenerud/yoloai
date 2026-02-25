@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"text/tabwriter"
@@ -18,41 +19,36 @@ func newListCmd() *cobra.Command {
 		GroupID: groupInspect,
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			ctx := cmd.Context()
-			client, err := docker.NewClient(ctx)
-			if err != nil {
-				return err
-			}
-			defer client.Close() //nolint:errcheck // best-effort cleanup
+			return withClient(cmd, func(ctx context.Context, client docker.Client) error {
+				infos, err := sandbox.ListSandboxes(ctx, client)
+				if err != nil {
+					return err
+				}
 
-			infos, err := sandbox.ListSandboxes(ctx, client)
-			if err != nil {
-				return err
-			}
+				if len(infos) == 0 {
+					fmt.Fprintln(cmd.OutOrStdout(), "No sandboxes found") //nolint:errcheck // best-effort output
+					return nil
+				}
 
-			if len(infos) == 0 {
-				fmt.Fprintln(cmd.OutOrStdout(), "No sandboxes found") //nolint:errcheck // best-effort output
+				w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 3, ' ', 0)
+				fmt.Fprintln(w, "NAME\tSTATUS\tAGENT\tAGE\tWORKDIR\tCHANGES") //nolint:errcheck // best-effort output
+				for _, info := range infos {
+					fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", //nolint:errcheck // best-effort output
+						info.Meta.Name,
+						info.Status,
+						info.Meta.Agent,
+						sandbox.FormatAge(info.Meta.CreatedAt),
+						info.Meta.Workdir.HostPath,
+						info.HasChanges,
+					)
+				}
+				if err := w.Flush(); err != nil {
+					return err
+				}
+
+				slog.Debug("list complete", "count", len(infos))
 				return nil
-			}
-
-			w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 3, ' ', 0)
-			fmt.Fprintln(w, "NAME\tSTATUS\tAGENT\tAGE\tWORKDIR\tCHANGES") //nolint:errcheck // best-effort output
-			for _, info := range infos {
-				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", //nolint:errcheck // best-effort output
-					info.Meta.Name,
-					info.Status,
-					info.Meta.Agent,
-					sandbox.FormatAge(info.Meta.CreatedAt),
-					info.Meta.Workdir.HostPath,
-					info.HasChanges,
-				)
-			}
-			if err := w.Flush(); err != nil {
-				return err
-			}
-
-			slog.Debug("list complete", "count", len(infos))
-			return nil
+			})
 		},
 	}
 }

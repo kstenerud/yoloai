@@ -80,7 +80,7 @@ func (m *Manager) Create(ctx context.Context, opts CreateOptions) (string, error
 		return "", nil
 	}
 
-	if err := m.createAndStartContainer(ctx, state); err != nil {
+	if err := m.launchContainer(ctx, state); err != nil {
 		return "", err
 	}
 
@@ -303,9 +303,10 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 	}, nil
 }
 
-// createAndStartContainer creates the Docker container, starts it,
-// and cleans up credential temp files.
-func (m *Manager) createAndStartContainer(ctx context.Context, state *sandboxState) error {
+// launchContainer creates a Docker container from sandboxState, starts it,
+// and cleans up credential temp files. Used by both initial creation and
+// recreation from meta.json.
+func (m *Manager) launchContainer(ctx context.Context, state *sandboxState) error {
 	secretsDir, err := createSecretsDir(state.agent)
 	if err != nil {
 		return fmt.Errorf("create secrets: %w", err)
@@ -335,8 +336,8 @@ func (m *Manager) createAndStartContainer(ctx context.Context, state *sandboxSta
 		Mounts:       mounts,
 	}
 
-	containerName := "yoloai-" + state.name
-	resp, err := m.client.ContainerCreate(ctx, config, hostConfig, nil, nil, containerName)
+	cname := ContainerName(state.name)
+	resp, err := m.client.ContainerCreate(ctx, config, hostConfig, nil, nil, cname)
 	if err != nil {
 		return fmt.Errorf("create container: %w", err)
 	}
@@ -794,6 +795,31 @@ func copySeedFiles(agentDef *agent.Definition, sandboxDir string, hasAPIKey bool
 	return copied, nil
 }
 
+// readJSONMap reads a JSON file into a map, returning an empty map if the file doesn't exist.
+func readJSONMap(path string) (map[string]any, error) {
+	data, err := os.ReadFile(path) //nolint:gosec // path is sandbox-controlled
+	if err != nil {
+		if os.IsNotExist(err) {
+			return make(map[string]any), nil
+		}
+		return nil, err
+	}
+	var m map[string]any
+	if err := json.Unmarshal(data, &m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
+// writeJSONMap marshals a map and writes it as indented JSON to the given path.
+func writeJSONMap(path string, m map[string]any) error {
+	out, err := json.MarshalIndent(m, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, out, 0600)
+}
+
 // ensureContainerSettings merges required container settings into agent-state/settings.json.
 // For agents using --dangerously-skip-permissions, ensures the bypass prompt is skipped.
 func ensureContainerSettings(agentDef *agent.Definition, sandboxDir string) error {
@@ -807,27 +833,14 @@ func ensureContainerSettings(agentDef *agent.Definition, sandboxDir string) erro
 
 	settingsPath := filepath.Join(sandboxDir, "agent-state", "settings.json")
 
-	var settings map[string]any
-	data, err := os.ReadFile(settingsPath) //nolint:gosec // path is sandbox-controlled
+	settings, err := readJSONMap(settingsPath)
 	if err != nil {
-		if os.IsNotExist(err) {
-			settings = make(map[string]any)
-		} else {
-			return err
-		}
-	} else {
-		if err := json.Unmarshal(data, &settings); err != nil {
-			return err
-		}
+		return err
 	}
 
 	settings["skipDangerousModePermissionPrompt"] = true
 
-	out, err := json.MarshalIndent(settings, "", "  ")
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(settingsPath, out, 0600)
+	return writeJSONMap(settingsPath, settings)
 }
 
 // ensureHomeSeedConfig patches home-seed/.claude.json to set installMethod to
@@ -850,27 +863,14 @@ func ensureHomeSeedConfig(agentDef *agent.Definition, sandboxDir string) error {
 
 	configPath := filepath.Join(sandboxDir, "home-seed", ".claude.json")
 
-	var config map[string]any
-	data, err := os.ReadFile(configPath) //nolint:gosec // path is sandbox-controlled
+	config, err := readJSONMap(configPath)
 	if err != nil {
-		if os.IsNotExist(err) {
-			config = make(map[string]any)
-		} else {
-			return err
-		}
-	} else {
-		if err := json.Unmarshal(data, &config); err != nil {
-			return err
-		}
+		return err
 	}
 
 	config["installMethod"] = "npm-global"
 
-	out, err := json.MarshalIndent(config, "", "  ")
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(configPath, out, 0600)
+	return writeJSONMap(configPath, config)
 }
 
 // copyDir copies a directory tree using cp -rp.

@@ -2,7 +2,6 @@ package sandbox
 
 import (
 	"fmt"
-	"os"
 	"strings"
 )
 
@@ -123,9 +122,9 @@ func stageUntracked(workDir string) error {
 
 // loadDiffContext loads the metadata and resolves paths needed for diff.
 func loadDiffContext(name string) (workDir string, baselineSHA string, mode string, err error) {
-	sandboxDir := Dir(name)
-	if _, statErr := os.Stat(sandboxDir); statErr != nil {
-		return "", "", "", ErrSandboxNotFound
+	sandboxDir, dirErr := RequireSandboxDir(name)
+	if dirErr != nil {
+		return "", "", "", dirErr
 	}
 
 	meta, loadErr := LoadMeta(sandboxDir)

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"time"
 
 	cerrdefs "github.com/containerd/errdefs"
 	"github.com/docker/docker/api/types/container"
@@ -23,12 +22,11 @@ type ResetOptions struct {
 // Stop stops a sandbox's container via Docker SDK.
 // Returns nil if the container is already stopped or removed.
 func (m *Manager) Stop(ctx context.Context, name string) error {
-	if _, err := os.Stat(Dir(name)); err != nil {
-		return ErrSandboxNotFound
+	if _, err := RequireSandboxDir(name); err != nil {
+		return err
 	}
 
-	containerName := "yoloai-" + name
-	if err := m.client.ContainerStop(ctx, containerName, container.StopOptions{}); err != nil {
+	if err := m.client.ContainerStop(ctx, ContainerName(name), container.StopOptions{}); err != nil {
 		if cerrdefs.IsNotFound(err) || isNotRunningErr(err) {
 			return nil
 		}
@@ -39,16 +37,18 @@ func (m *Manager) Stop(ctx context.Context, name string) error {
 
 // Start ensures a sandbox is running — idempotent.
 func (m *Manager) Start(ctx context.Context, name string) error {
-	if _, err := os.Stat(Dir(name)); err != nil {
-		return ErrSandboxNotFound
-	}
-
-	meta, err := LoadMeta(Dir(name))
+	sandboxDir, err := RequireSandboxDir(name)
 	if err != nil {
 		return err
 	}
 
-	status, _, err := DetectStatus(ctx, m.client, "yoloai-"+name)
+	meta, err := LoadMeta(sandboxDir)
+	if err != nil {
+		return err
+	}
+
+	cname := ContainerName(name)
+	status, _, err := DetectStatus(ctx, m.client, cname)
 	if err != nil {
 		return fmt.Errorf("detect status: %w", err)
 	}
@@ -66,7 +66,7 @@ func (m *Manager) Start(ctx context.Context, name string) error {
 		return nil
 
 	case StatusStopped:
-		if err := m.client.ContainerStart(ctx, "yoloai-"+name, container.StartOptions{}); err != nil {
+		if err := m.client.ContainerStart(ctx, cname, container.StartOptions{}); err != nil {
 			return fmt.Errorf("start container: %w", err)
 		}
 		fmt.Fprintf(m.output, "Sandbox %s started\n", name) //nolint:errcheck // best-effort output
@@ -88,17 +88,17 @@ func (m *Manager) Start(ctx context.Context, name string) error {
 // Always destroys unconditionally — confirmation logic is handled by the
 // CLI layer via NeedsConfirmation before calling this method.
 func (m *Manager) Destroy(ctx context.Context, name string, _ bool) error {
-	if _, err := os.Stat(Dir(name)); err != nil {
-		return ErrSandboxNotFound
+	if _, err := RequireSandboxDir(name); err != nil {
+		return err
 	}
 
-	containerName := "yoloai-" + name
+	cname := ContainerName(name)
 
 	// Stop container (ignore errors — may not be running)
-	_ = m.client.ContainerStop(ctx, containerName, container.StopOptions{})
+	_ = m.client.ContainerStop(ctx, cname, container.StopOptions{})
 
 	// Remove container (ignore errors — may not exist)
-	_ = m.client.ContainerRemove(ctx, containerName, container.RemoveOptions{Force: true})
+	_ = m.client.ContainerRemove(ctx, cname, container.RemoveOptions{Force: true})
 
 	// Remove sandbox directory
 	if err := os.RemoveAll(Dir(name)); err != nil {
@@ -111,11 +111,12 @@ func (m *Manager) Destroy(ctx context.Context, name string, _ bool) error {
 // Reset re-copies the workdir from the original host directory and resets
 // the git baseline. Stops and restarts the container.
 func (m *Manager) Reset(ctx context.Context, opts ResetOptions) error {
-	if _, err := os.Stat(Dir(opts.Name)); err != nil {
-		return ErrSandboxNotFound
+	sandboxDir, err := RequireSandboxDir(opts.Name)
+	if err != nil {
+		return err
 	}
 
-	meta, err := LoadMeta(Dir(opts.Name))
+	meta, err := LoadMeta(sandboxDir)
 	if err != nil {
 		return err
 	}
@@ -152,13 +153,13 @@ func (m *Manager) Reset(ctx context.Context, opts ResetOptions) error {
 
 	// Update meta.json
 	meta.Workdir.BaselineSHA = newSHA
-	if err := SaveMeta(Dir(opts.Name), meta); err != nil {
+	if err := SaveMeta(sandboxDir, meta); err != nil {
 		return err
 	}
 
 	// Optionally wipe agent-state
 	if opts.Clean {
-		agentStateDir := filepath.Join(Dir(opts.Name), "agent-state")
+		agentStateDir := filepath.Join(sandboxDir, "agent-state")
 		if err := os.RemoveAll(agentStateDir); err != nil {
 			return fmt.Errorf("remove agent-state: %w", err)
 		}
@@ -168,7 +169,7 @@ func (m *Manager) Reset(ctx context.Context, opts ResetOptions) error {
 	}
 
 	// Handle --no-prompt by temporarily hiding prompt.txt
-	promptPath := filepath.Join(Dir(opts.Name), "prompt.txt")
+	promptPath := filepath.Join(sandboxDir, "prompt.txt")
 	promptBackup := promptPath + ".bak"
 	if opts.NoPrompt {
 		if _, err := os.Stat(promptPath); err == nil {
@@ -187,7 +188,7 @@ func (m *Manager) Reset(ctx context.Context, opts ResetOptions) error {
 // destruction. Returns true if the agent is running or unapplied changes
 // exist. Returns a reason string for the confirmation prompt.
 func (m *Manager) NeedsConfirmation(ctx context.Context, name string) (bool, string) {
-	status, _, err := DetectStatus(ctx, m.client, "yoloai-"+name)
+	status, _, err := DetectStatus(ctx, m.client, ContainerName(name))
 	if err != nil {
 		return false, ""
 	}
@@ -230,16 +231,7 @@ func (m *Manager) recreateContainer(ctx context.Context, name string, meta *Meta
 		return fmt.Errorf("read config.json: %w", err)
 	}
 
-	// Create fresh secrets
-	secretsDir, err := createSecretsDir(agentDef)
-	if err != nil {
-		return fmt.Errorf("create secrets: %w", err)
-	}
-	if secretsDir != "" {
-		defer os.RemoveAll(secretsDir) //nolint:errcheck // best-effort cleanup
-	}
-
-	// Build sandbox state for mount construction
+	// Build sandbox state for container launch
 	workdir, err := ParseDirArg(meta.Workdir.HostPath + ":" + meta.Workdir.Mode)
 	if err != nil {
 		return fmt.Errorf("parse workdir: %w", err)
@@ -258,42 +250,7 @@ func (m *Manager) recreateContainer(ctx context.Context, name string, meta *Meta
 		configJSON:  configData,
 	}
 
-	mounts := buildMounts(state, secretsDir)
-	portBindings, exposedPorts, err := parsePortBindings(meta.Ports)
-	if err != nil {
-		return err
-	}
-
-	config := &container.Config{
-		Image:        "yoloai-base",
-		WorkingDir:   meta.Workdir.MountPath,
-		ExposedPorts: exposedPorts,
-	}
-
-	initFlag := true
-	hostConfig := &container.HostConfig{
-		Init:         &initFlag,
-		NetworkMode:  container.NetworkMode(meta.NetworkMode),
-		PortBindings: portBindings,
-		Mounts:       mounts,
-	}
-
-	containerName := "yoloai-" + name
-	resp, err := m.client.ContainerCreate(ctx, config, hostConfig, nil, nil, containerName)
-	if err != nil {
-		return fmt.Errorf("create container: %w", err)
-	}
-
-	if err := m.client.ContainerStart(ctx, resp.ID, container.StartOptions{}); err != nil {
-		return fmt.Errorf("start container: %w", err)
-	}
-
-	// Wait briefly for entrypoint to read secrets before cleanup
-	if secretsDir != "" {
-		time.Sleep(1 * time.Second)
-	}
-
-	return nil
+	return m.launchContainer(ctx, state)
 }
 
 // relaunchAgent relaunches the agent in the existing tmux session.
@@ -311,8 +268,7 @@ func (m *Manager) relaunchAgent(ctx context.Context, name string, _ *Meta) error
 		return fmt.Errorf("parse config.json: %w", err)
 	}
 
-	containerName := "yoloai-" + name
-	_, err = execInContainer(ctx, m.client, containerName, []string{
+	_, err = execInContainer(ctx, m.client, ContainerName(name), []string{
 		"tmux", "respawn-pane", "-t", "main", "-k", cfg.AgentCommand,
 	})
 	if err != nil {

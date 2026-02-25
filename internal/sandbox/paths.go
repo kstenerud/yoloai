@@ -143,12 +143,26 @@ func parseHex(s string) (uint32, error) {
 	return result, nil
 }
 
+// ContainerName returns the Docker container name for a sandbox.
+func ContainerName(name string) string {
+	return "yoloai-" + name
+}
+
 // Dir returns the host-side state directory for a sandbox.
 //
 //	~/.yoloai/sandboxes/<name>/
 func Dir(name string) string {
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".yoloai", "sandboxes", name)
+}
+
+// RequireSandboxDir returns the sandbox directory path after verifying it exists.
+func RequireSandboxDir(name string) (string, error) {
+	dir := Dir(name)
+	if _, err := os.Stat(dir); err != nil {
+		return "", ErrSandboxNotFound
+	}
+	return dir, nil
 }
 
 // WorkDir returns the host-side work directory for a specific

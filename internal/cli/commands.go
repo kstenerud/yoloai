@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"os"
@@ -77,19 +78,14 @@ func newBuildCmd() *cobra.Command {
 				return err
 			}
 
-			ctx := cmd.Context()
-			client, err := docker.NewClient(ctx)
-			if err != nil {
-				return err
-			}
-			defer client.Close() //nolint:errcheck // best-effort cleanup
+			return withClient(cmd, func(ctx context.Context, client docker.Client) error {
+				if err := docker.BuildBaseImage(ctx, client, yoloaiDir, os.Stderr, slog.Default()); err != nil {
+					return err
+				}
 
-			if err := docker.BuildBaseImage(ctx, client, yoloaiDir, os.Stderr, slog.Default()); err != nil {
+				_, err := fmt.Fprintln(cmd.OutOrStdout(), "Base image yoloai-base built successfully")
 				return err
-			}
-
-			_, err = fmt.Fprintln(cmd.OutOrStdout(), "Base image yoloai-base built successfully")
-			return err
+			})
 		},
 	}
 }
@@ -135,46 +131,39 @@ func newNewCmd(version string) *cobra.Command {
 			detach, _ := cmd.Flags().GetBool("detach")
 			yes, _ := cmd.Flags().GetBool("yes")
 
-			ctx := cmd.Context()
-			client, err := docker.NewClient(ctx)
-			if err != nil {
-				return err
-			}
-			defer client.Close() //nolint:errcheck // best-effort cleanup
+			return withManager(cmd, func(ctx context.Context, mgr *sandbox.Manager) error {
+				sandboxName, err := mgr.Create(ctx, sandbox.CreateOptions{
+					Name:        name,
+					WorkdirArg:  workdirArg,
+					Agent:       agentName,
+					Model:       model,
+					Prompt:      prompt,
+					PromptFile:  promptFile,
+					NetworkNone: networkNone,
+					Ports:       ports,
+					Replace:     replace,
+					NoStart:     noStart,
+					Detach:      detach,
+					Yes:         yes,
+					Passthrough: passthrough,
+					Version:     version,
+				})
+				if err != nil {
+					return err
+				}
 
-			mgr := sandbox.NewManager(client, slog.Default(), cmd.ErrOrStderr())
+				if sandboxName == "" || detach || noStart {
+					return nil
+				}
 
-			sandboxName, err := mgr.Create(ctx, sandbox.CreateOptions{
-				Name:        name,
-				WorkdirArg:  workdirArg,
-				Agent:       agentName,
-				Model:       model,
-				Prompt:      prompt,
-				PromptFile:  promptFile,
-				NetworkNone: networkNone,
-				Ports:       ports,
-				Replace:     replace,
-				NoStart:     noStart,
-				Detach:      detach,
-				Yes:         yes,
-				Passthrough: passthrough,
-				Version:     version,
+				// Wait for tmux session to be ready before attaching
+				containerName := sandbox.ContainerName(sandboxName)
+				if err := waitForTmux(containerName, 30*time.Second); err != nil {
+					return fmt.Errorf("waiting for tmux session: %w", err)
+				}
+
+				return attachToSandbox(containerName)
 			})
-			if err != nil {
-				return err
-			}
-
-			if sandboxName == "" || detach || noStart {
-				return nil
-			}
-
-			// Wait for tmux session to be ready before attaching
-			containerName := "yoloai-" + sandboxName
-			if err := waitForTmux(containerName, 30*time.Second); err != nil {
-				return fmt.Errorf("waiting for tmux session: %w", err)
-			}
-
-			return attachToSandbox(containerName)
 		},
 	}
 

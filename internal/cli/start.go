@@ -1,9 +1,8 @@
 package cli
 
 import (
-	"log/slog"
+	"context"
 
-	"github.com/kstenerud/yoloai/internal/docker"
 	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/spf13/cobra"
 )
@@ -20,16 +19,9 @@ func newStartCmd() *cobra.Command {
 				return err
 			}
 
-			ctx := cmd.Context()
-			client, err := docker.NewClient(ctx)
-			if err != nil {
-				return err
-			}
-			defer client.Close() //nolint:errcheck // best-effort cleanup
-
-			mgr := sandbox.NewManager(client, slog.Default(), cmd.ErrOrStderr())
-
-			return mgr.Start(ctx, name)
+			return withManager(cmd, func(ctx context.Context, mgr *sandbox.Manager) error {
+				return mgr.Start(ctx, name)
+			})
 		},
 	}
 }

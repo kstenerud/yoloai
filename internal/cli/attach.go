@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"os"
@@ -23,33 +24,28 @@ func newAttachCmd() *cobra.Command {
 				return err
 			}
 
-			ctx := cmd.Context()
-			client, err := docker.NewClient(ctx)
-			if err != nil {
-				return err
-			}
-			defer client.Close() //nolint:errcheck // best-effort cleanup
+			return withClient(cmd, func(ctx context.Context, client docker.Client) error {
+				info, err := sandbox.InspectSandbox(ctx, client, name)
+				if err != nil {
+					return err
+				}
 
-			info, err := sandbox.InspectSandbox(ctx, client, name)
-			if err != nil {
-				return err
-			}
+				switch info.Status {
+				case sandbox.StatusRunning, sandbox.StatusDone, sandbox.StatusFailed:
+					// OK — user can attach to see output
+				default:
+					return fmt.Errorf("sandbox %q: %w", name, sandbox.ErrContainerNotRunning)
+				}
 
-			switch info.Status {
-			case sandbox.StatusRunning, sandbox.StatusDone, sandbox.StatusFailed:
-				// OK — user can attach to see output
-			default:
-				return fmt.Errorf("sandbox %q: %w", name, sandbox.ErrContainerNotRunning)
-			}
+				containerName := sandbox.ContainerName(name)
+				slog.Debug("attaching to tmux session", "container", containerName)
 
-			containerName := "yoloai-" + name
-			slog.Debug("attaching to tmux session", "container", containerName)
-
-			c := exec.Command("docker", "exec", "-it", "-u", "yoloai", containerName, "tmux", "attach", "-t", "main") //nolint:gosec // G204: containerName is validated sandbox name
-			c.Stdin = os.Stdin
-			c.Stdout = os.Stdout
-			c.Stderr = os.Stderr
-			return c.Run()
+				c := exec.Command("docker", "exec", "-it", "-u", "yoloai", containerName, "tmux", "attach", "-t", "main") //nolint:gosec // G204: containerName is validated sandbox name
+				c.Stdin = os.Stdin
+				c.Stdout = os.Stdout
+				c.Stderr = os.Stderr
+				return c.Run()
+			})
 		},
 	}
 }

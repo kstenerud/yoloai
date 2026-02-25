@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"os"
@@ -20,74 +21,69 @@ func newDestroyCmd() *cobra.Command {
 			all, _ := cmd.Flags().GetBool("all")
 			yes, _ := cmd.Flags().GetBool("yes")
 
-			ctx := cmd.Context()
-			client, err := docker.NewClient(ctx)
-			if err != nil {
-				return err
-			}
-			defer client.Close() //nolint:errcheck // best-effort cleanup
+			return withClient(cmd, func(ctx context.Context, client docker.Client) error {
+				mgr := sandbox.NewManager(client, slog.Default(), cmd.ErrOrStderr())
 
-			mgr := sandbox.NewManager(client, slog.Default(), cmd.ErrOrStderr())
-
-			var names []string
-			if all {
-				infos, err := sandbox.ListSandboxes(ctx, client)
-				if err != nil {
-					return err
-				}
-				if len(infos) == 0 {
-					_, err = fmt.Fprintln(cmd.OutOrStdout(), "No sandboxes to destroy")
-					return err
-				}
-				for _, info := range infos {
-					names = append(names, info.Meta.Name)
-				}
-			} else {
-				if len(args) == 0 {
-					envName := os.Getenv(EnvSandboxName)
-					if envName == "" {
-						return sandbox.NewUsageError("at least one sandbox name is required (or use --all or set YOLOAI_SANDBOX)")
+				var names []string
+				if all {
+					infos, err := sandbox.ListSandboxes(ctx, client)
+					if err != nil {
+						return err
 					}
-					names = []string{envName}
+					if len(infos) == 0 {
+						_, err = fmt.Fprintln(cmd.OutOrStdout(), "No sandboxes to destroy")
+						return err
+					}
+					for _, info := range infos {
+						names = append(names, info.Meta.Name)
+					}
 				} else {
-					names = args
+					if len(args) == 0 {
+						envName := os.Getenv(EnvSandboxName)
+						if envName == "" {
+							return sandbox.NewUsageError("at least one sandbox name is required (or use --all or set YOLOAI_SANDBOX)")
+						}
+						names = []string{envName}
+					} else {
+						names = args
+					}
 				}
-			}
 
-			// Smart confirmation (unless --yes)
-			if !yes {
-				var warnings []string
+				// Smart confirmation (unless --yes)
+				if !yes {
+					var warnings []string
+					for _, name := range names {
+						needs, reason := mgr.NeedsConfirmation(ctx, name)
+						if needs {
+							warnings = append(warnings, fmt.Sprintf("  %s: %s", name, reason))
+						}
+					}
+					if len(warnings) > 0 {
+						fmt.Fprintln(cmd.ErrOrStderr(), "The following sandboxes have active work:") //nolint:errcheck // best-effort output
+						for _, w := range warnings {
+							fmt.Fprintln(cmd.ErrOrStderr(), w) //nolint:errcheck // best-effort output
+						}
+						if !sandbox.Confirm("Destroy all listed sandboxes? [y/N] ", os.Stdin, cmd.ErrOrStderr()) {
+							return nil
+						}
+					}
+				}
+
+				var errs []error
 				for _, name := range names {
-					needs, reason := mgr.NeedsConfirmation(ctx, name)
-					if needs {
-						warnings = append(warnings, fmt.Sprintf("  %s: %s", name, reason))
+					if err := mgr.Destroy(ctx, name, true); err != nil {
+						fmt.Fprintf(os.Stderr, "Warning: destroy %s: %v\n", name, err) //nolint:errcheck // best-effort output
+						errs = append(errs, err)
+					} else {
+						fmt.Fprintf(cmd.OutOrStdout(), "Destroyed %s\n", name) //nolint:errcheck // best-effort output
 					}
 				}
-				if len(warnings) > 0 {
-					fmt.Fprintln(cmd.ErrOrStderr(), "The following sandboxes have active work:") //nolint:errcheck // best-effort output
-					for _, w := range warnings {
-						fmt.Fprintln(cmd.ErrOrStderr(), w) //nolint:errcheck // best-effort output
-					}
-					if !sandbox.Confirm("Destroy all listed sandboxes? [y/N] ", os.Stdin, cmd.ErrOrStderr()) {
-						return nil
-					}
-				}
-			}
 
-			var errs []error
-			for _, name := range names {
-				if err := mgr.Destroy(ctx, name, true); err != nil {
-					fmt.Fprintf(os.Stderr, "Warning: destroy %s: %v\n", name, err) //nolint:errcheck // best-effort output
-					errs = append(errs, err)
-				} else {
-					fmt.Fprintf(cmd.OutOrStdout(), "Destroyed %s\n", name) //nolint:errcheck // best-effort output
+				if len(errs) > 0 {
+					return fmt.Errorf("failed to destroy %d sandbox(es)", len(errs))
 				}
-			}
-
-			if len(errs) > 0 {
-				return fmt.Errorf("failed to destroy %d sandbox(es)", len(errs))
-			}
-			return nil
+				return nil
+			})
 		},
 	}
 
