@@ -634,15 +634,44 @@ Options:
 
 ### `yoloai apply`
 
-`yoloai apply <name> [-- <path>...]`
+`yoloai apply <name> [--squash | --patches <dir>] [--no-wip] [--force] [-- <path>...]`
 
-For `:copy` directories only. For the **full copy** strategy, runs entirely on the host — reads from `work/<encoded-path>/`, generates a patch via `git diff`, and applies it to the original host directory. Does not require the container to be running. For the **overlay** strategy, requires the container to be running (the merged view only exists when overlayfs is mounted). If the container is stopped, `apply` auto-starts it (printing "Starting container for overlay diff..." to stderr) and leaves it in whatever state it was before (running if it was running, stopped if it needs to be stopped again). Runs `git diff` inside the container via `docker exec`. This handles additions, modifications, and deletions. Works identically from the user's perspective regardless of `copy_strategy` — git provides the diff in both cases. For dirs that had no original git repo, excludes the synthetic `.git/` directory created by yoloAI.
+For `:copy` directories only. `:rw` directories need no apply — changes are already live. Read-only directories have no changes. For dirs that had no original git repo, excludes the synthetic `.git/` directory created by yoloAI.
 
-Without `-- <path>...`, applies all changes. With `-- <path>...`, applies only changes to the specified files or directories (relative to workdir). The `--` separator is required to distinguish paths from sandbox names.
+**Strategy selection:** For the **full copy** strategy, runs entirely on the host — reads from `work/<encoded-path>/`. Does not require the container to be running. For the **overlay** strategy, requires the container to be running (the merged view only exists when overlayfs is mounted). If the container is stopped, `apply` auto-starts it (printing "Starting container for overlay diff..." to stderr) and leaves it in whatever state it was before. Works identically from the user's perspective regardless of `copy_strategy`.
 
-Before applying, shows a summary via `git diff --stat` (files changed, insertions, deletions) and verifies the patch applies cleanly via `git apply --check`. Prompts for confirmation before proceeding. If `git apply` fails, the error is wrapped with context explaining why the patch failed (e.g., "changes to handler.go conflict with changes already in your working directory — the patch expected line 42 to be 'func foo()' but found 'func bar()'. This typically means the original file was edited after the agent made its changes.").
+**Default behavior (commit-preserving):**
 
-`:rw` directories need no apply — changes are already live. Read-only directories have no changes.
+1. Get baseline SHA from `meta.json`.
+2. Check for commits beyond baseline (`git rev-list <baseline>..HEAD` in the work copy).
+3. If commits exist:
+   - `git format-patch <baseline>..HEAD` in the work copy → temp directory.
+   - Show summary: "N commits to apply (+ uncommitted changes)" with `git log --oneline <baseline>..HEAD`.
+   - `git am --3way *.patch` on the host repo — preserves commit messages, authorship, and individual commits.
+   - If uncommitted changes also exist in the work copy (and `--no-wip` not set): `git diff HEAD` → `git apply` on the host (left unstaged).
+4. If no commits beyond baseline:
+   - Apply uncommitted changes as an unstaged patch via `git diff <baseline>` → `git apply` on the host.
+
+Without `-- <path>...`, applies all changes. With `-- <path>...`, `git format-patch` filters to commits touching those paths and `git diff` is scoped to those paths. The `--` separator is required to distinguish paths from sandbox names.
+
+**Pre-flight checks:**
+
+- If the host repo has uncommitted changes, warns and aborts (suggest `git stash` or commit first). Overridable with `--force`.
+- If there are no changes at all (no commits beyond baseline, no uncommitted changes), informs the user and exits 0.
+- If the agent is still running, prints "Note: agent is still running; apply may be incomplete" before proceeding.
+
+**Conflict handling:**
+
+- `git am --3way` is used by default for 3-way merge support.
+- If a patch conflicts, `git am` stops at the conflicting commit. Earlier commits remain applied. yoloAI prints which commit conflicted and reminds the user of `git am --continue` (after resolving), `git am --skip` (skip that commit), or `git am --abort` (undo all applied commits).
+- Uncommitted changes (WIP) are only applied after all commits succeed. If the WIP `git apply` fails, the error is reported but successfully applied commits are not undone.
+
+**Options:**
+
+- `--squash`: Flatten all changes (commits + uncommitted) into a single unstaged patch. This is the legacy behavior — generates one `git diff <baseline>` and applies it with `git apply`. Shows a summary via `git diff --stat` and verifies cleanly with `git apply --check` before prompting for confirmation. Useful when you want to review everything as a single diff before committing.
+- `--no-wip`: Skip uncommitted changes, only apply commits. Has no effect with `--squash` (which always includes everything). Has no effect when there are no commits beyond baseline.
+- `--patches <dir>`: Export `.patch` files to the specified directory instead of applying. Also exports `wip.diff` if uncommitted changes exist (unless `--no-wip`). Prints instructions for manual application (`git am --3way <dir>/*.patch`). Useful for selective commit application — the user can delete unwanted `.patch` files before running `git am`, or use standard git tools (`git rebase -i`, `git cherry-pick`) after importing.
+- `--force`: Proceed even if the host repo has uncommitted changes.
 
 ### `yoloai destroy`
 

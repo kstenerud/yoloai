@@ -44,7 +44,9 @@ These were deferred from MVP but might be cheap to add and valuable for dogfoodi
 
 19. ~~**Untracked files in diff/apply**~~ — **Resolved:** `git add -A` before diffing to capture untracked files. Runs in the sandbox copy, not the user's original.
 
-20. ~~**Multiple `:copy` directories in diff/apply**~~ — **Resolved:** Post-MVP (MVP has single workdir, no aux dirs). Show all with headers per directory. Apply all at once with single confirmation. If one fails, stop and report which failed. User can re-run with `[-- <path>...]` to apply selectively. Future: cherry-picking agent commits as a post-v1 feature.
+20. ~~**Multiple `:copy` directories in diff/apply**~~ — **Resolved:** Post-MVP (MVP has single workdir, no aux dirs). Show all with headers per directory. Apply all at once with single confirmation. If one fails, stop and report which failed. User can re-run with `[-- <path>...]` to apply selectively.
+
+86. ~~**Commit-preserving apply**~~ — **Resolved:** `yoloai apply` now preserves individual commits by default using `git format-patch` + `git am --3way`. Uncommitted changes are applied as unstaged on top. `--squash` for legacy single-patch behavior. `--patches <dir>` exports `.patch` files for manual curation (selective apply via deleting unwanted patches, or standard git tools like `git rebase -i` / `git cherry-pick`). `--no-wip` to skip uncommitted changes. See DESIGN.md `yoloai apply` section.
 
 21. ~~**Overlay apply — patch transfer to host**~~ — **Resolved:** Capture `git diff` output from `docker exec` stdout, pipe to `git apply` on host. No temp file needed.
 
@@ -84,7 +86,7 @@ These were deferred from MVP but might be cheap to add and valuable for dogfoodi
 
 34. ~~**No workdir and no profile**~~ — **Resolved:** Error: "no workdir specified and no default workdir in profile" (exit 2). Workdir required for MVP.
 
-35. ~~**`auto_commit_interval` implementation**~~ — **Resolved:** Post-MVP. Shell script loop spawned by entrypoint. `git add -A && git commit` with author `yoloai <yoloai@localhost>`, UTC timestamp message. Skips if no changes. Creates commit history for future cherry-pick feature.
+35. ~~**`auto_commit_interval` implementation**~~ — **Resolved:** Post-MVP. Shell script loop spawned by entrypoint. `git add -A && git commit` with author `yoloai <yoloai@localhost>`, UTC timestamp message. Skips if no changes. Creates commit history that `yoloai apply` preserves as individual commits (see #86).
 
 36. ~~**Profile without a Dockerfile**~~ — **Resolved:** Profile creation always seeds a Dockerfile — if profile doesn't provide one, copy from base. Every profile has an explicit Dockerfile. Binary updates don't silently change behavior on existing profiles.
 
