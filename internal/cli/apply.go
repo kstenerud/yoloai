@@ -134,6 +134,13 @@ Use --patches to export .patch files without applying them.`,
 				fmt.Fprintf(out, "%d commit(s) applied to %s\n", len(files), targetDir) //nolint:errcheck
 			}
 
+			// Advance baseline past applied commits (skip for path-filtered applies)
+			if len(paths) == 0 {
+				if err := sandbox.AdvanceBaseline(name); err != nil {
+					return fmt.Errorf("advance baseline: %w", err)
+				}
+			}
+
 			// Apply WIP changes
 			if hasWIP {
 				wipPatch, _, wipErr := sandbox.GenerateWIPDiff(name, paths)
@@ -194,6 +201,13 @@ func applySquash(cmd *cobra.Command, name string, paths []string, meta *sandbox.
 
 	if err := sandbox.ApplyPatch(patch, targetDir, isGit); err != nil {
 		return err
+	}
+
+	// Advance baseline past applied changes (skip for path-filtered applies)
+	if len(paths) == 0 {
+		if err := sandbox.AdvanceBaseline(name); err != nil {
+			return fmt.Errorf("advance baseline: %w", err)
+		}
 	}
 
 	_, err = fmt.Fprintf(cmd.OutOrStdout(), "Changes applied to %s\n", targetDir)

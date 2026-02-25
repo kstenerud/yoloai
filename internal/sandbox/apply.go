@@ -257,6 +257,35 @@ var errorsAs = func(err error, target any) bool {
 	}
 }
 
+// AdvanceBaseline updates the sandbox's baseline SHA to the current HEAD
+// of its work copy. This should be called after a successful apply so that
+// subsequent diff/apply operations don't re-show already-applied commits.
+// For :rw mode sandboxes, this is a no-op.
+func AdvanceBaseline(name string) error {
+	sandboxDir, err := RequireSandboxDir(name)
+	if err != nil {
+		return err
+	}
+
+	meta, err := LoadMeta(sandboxDir)
+	if err != nil {
+		return err
+	}
+
+	if meta.Workdir.Mode == "rw" {
+		return nil
+	}
+
+	workDir := WorkDir(name, meta.Workdir.HostPath)
+	sha, err := gitHeadSHA(workDir)
+	if err != nil {
+		return err
+	}
+
+	meta.Workdir.BaselineSHA = sha
+	return SaveMeta(sandboxDir, meta)
+}
+
 // GenerateFormatPatch creates .patch files (one per commit) for commits
 // beyond the baseline. Returns the temp directory path and sorted list
 // of .patch filenames. The caller is responsible for os.RemoveAll(patchDir).

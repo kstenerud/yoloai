@@ -683,6 +683,110 @@ func TestApplyFormatPatch_PreservesAuthorship(t *testing.T) {
 	assert.Equal(t, "my commit message", strings.TrimSpace(string(out)))
 }
 
+// AdvanceBaseline tests
+
+func TestAdvanceBaseline_UpdatesMeta(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	name := "test-advance-meta"
+	createCopySandboxWithCommits(t, tmpDir, name, "/tmp/project", []struct {
+		subject  string
+		filename string
+		content  string
+	}{
+		{"add feature", "feature.txt", "feature\n"},
+	})
+
+	// Before: commits visible
+	commits, err := ListCommitsBeyondBaseline(name)
+	require.NoError(t, err)
+	require.Len(t, commits, 1)
+
+	// Advance baseline
+	require.NoError(t, AdvanceBaseline(name))
+
+	// After: no commits beyond baseline
+	commits, err = ListCommitsBeyondBaseline(name)
+	require.NoError(t, err)
+	assert.Empty(t, commits)
+
+	// Verify meta.json has new SHA
+	meta, err := LoadMeta(Dir(name))
+	require.NoError(t, err)
+	workDir := WorkDir(name, meta.Workdir.HostPath)
+	headSHA := gitHEAD(t, workDir)
+	assert.Equal(t, headSHA, meta.Workdir.BaselineSHA)
+}
+
+func TestAdvanceBaseline_DiffEmptyAfterAdvance(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	name := "test-advance-diff"
+	createCopySandboxWithCommits(t, tmpDir, name, "/tmp/project", []struct {
+		subject  string
+		filename string
+		content  string
+	}{
+		{"change file", "file.txt", "changed\n"},
+	})
+
+	// Before: diff is non-empty
+	patch, _, err := GeneratePatch(name, nil)
+	require.NoError(t, err)
+	assert.NotEmpty(t, patch)
+
+	// Advance baseline
+	require.NoError(t, AdvanceBaseline(name))
+
+	// After: diff is empty
+	patch, stat, err := GeneratePatch(name, nil)
+	require.NoError(t, err)
+	assert.Empty(t, patch)
+	assert.Empty(t, stat)
+}
+
+func TestAdvanceBaseline_RWNoop(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	hostDir := filepath.Join(tmpDir, "rw-dir")
+	require.NoError(t, os.MkdirAll(hostDir, 0750))
+	createRWSandbox(t, tmpDir, "test-advance-rw", hostDir)
+
+	// Should return nil (no-op)
+	assert.NoError(t, AdvanceBaseline("test-advance-rw"))
+}
+
+func TestAdvanceBaseline_NewCommitsStillVisible(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	name := "test-advance-new"
+	workDir := createCopySandboxWithCommits(t, tmpDir, name, "/tmp/project", []struct {
+		subject  string
+		filename string
+		content  string
+	}{
+		{"old commit", "old.txt", "old\n"},
+	})
+
+	// Advance baseline past old commit
+	require.NoError(t, AdvanceBaseline(name))
+
+	// Add a new commit after advancing
+	writeTestFile(t, workDir, "new.txt", "new\n")
+	gitAdd(t, workDir, ".")
+	gitCommit(t, workDir, "new commit")
+
+	// Only new commit should be visible
+	commits, err := ListCommitsBeyondBaseline(name)
+	require.NoError(t, err)
+	require.Len(t, commits, 1)
+	assert.Equal(t, "new commit", commits[0].Subject)
+}
+
 // End-to-end flow tests
 
 func TestApplyFlow_CommitsOnly(t *testing.T) {
