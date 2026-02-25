@@ -86,11 +86,11 @@ if [ -f /yoloai/prompt.txt ]; then
             sleep 1
             WAITED=$((WAITED + 1))
         done
-        # Wait for screen to stabilize (no changes for 2 consecutive checks)
+        # Wait for screen to stabilize (no changes for 1 consecutive check)
         PREV=""
         STABLE=0
-        while [ $STABLE -lt 2 ] && [ $WAITED -lt $MAX_WAIT ]; do
-            sleep 1
+        while [ $STABLE -lt 1 ] && [ $WAITED -lt $MAX_WAIT ]; do
+            sleep 0.5
             WAITED=$((WAITED + 1))
             CURR=$(tmux capture-pane -t main -p 2>/dev/null || true)
             if [ "$CURR" = "$PREV" ]; then
@@ -107,10 +107,10 @@ if [ -f /yoloai/prompt.txt ]; then
     tmux load-buffer /yoloai/prompt.txt
     tmux paste-buffer -t main
     # Send submit keys individually with delay to ensure TUI processes each
-    sleep 1
+    sleep 0.5
     for key in $SUBMIT_SEQUENCE; do
         tmux send-keys -t main "$key"
-        sleep 0.5
+        sleep 0.2
     done
 fi
 
