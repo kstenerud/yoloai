@@ -61,7 +61,7 @@ func newBuildCmd() *cobra.Command {
 		Use:     "build [profile]",
 		Short:   "Build or rebuild Docker image(s)",
 		GroupID: groupAdmin,
-		Args:  cobra.MaximumNArgs(1),
+		Args:    cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) > 0 {
 				return fmt.Errorf("profiles not yet implemented")
@@ -99,7 +99,7 @@ func newNewCmd(version string) *cobra.Command {
 		Use:     "new [flags] <name> [<workdir>] [-- <agent-args>...]",
 		Short:   "Create and start a sandbox",
 		GroupID: groupWorkflow,
-		Args:  cobra.ArbitraryArgs,
+		Args:    cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Parse positional args considering --
 			dashIdx := cmd.ArgsLenAtDash()
@@ -258,7 +258,7 @@ func newVersionCmd(version, commit, date string) *cobra.Command {
 		Use:     "version",
 		Short:   "Show version information",
 		GroupID: groupAdmin,
-		Args:  cobra.NoArgs,
+		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			_, err := fmt.Fprintf(cmd.OutOrStdout(), "yoloai version %s (commit: %s, built: %s)\n", version, commit, date)
 			return err

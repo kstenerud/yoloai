@@ -161,7 +161,7 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 		return nil, fmt.Errorf("check repo status: %w", err)
 	}
 	if dirtyMsg != "" && !opts.Yes {
-		fmt.Fprintf(m.output, "WARNING: %s has uncommitted changes (%s)\n", workdir.Path, dirtyMsg) //nolint:errcheck // best-effort output
+		fmt.Fprintf(m.output, "WARNING: %s has uncommitted changes (%s)\n", workdir.Path, dirtyMsg)         //nolint:errcheck // best-effort output
 		fmt.Fprintln(m.output, "These changes will be visible to the agent and could be modified or lost.") //nolint:errcheck // best-effort output
 		if !Confirm("Continue? [y/N] ", os.Stdin, m.output) {
 			return nil, nil // user cancelled
@@ -355,9 +355,9 @@ func (m *Manager) printCreationOutput(state *sandboxState, autoAttach bool) {
 		return
 	}
 
-	fmt.Fprintf(m.output, "Sandbox %s created\n", state.name)                                 //nolint:errcheck // best-effort output
-	fmt.Fprintf(m.output, "  Agent:    %s\n", state.agent.Name)                               //nolint:errcheck // best-effort output
-	fmt.Fprintf(m.output, "  Workdir:  %s (%s)\n", state.workdir.Path, state.workdir.Mode)    //nolint:errcheck // best-effort output
+	fmt.Fprintf(m.output, "Sandbox %s created\n", state.name)                              //nolint:errcheck // best-effort output
+	fmt.Fprintf(m.output, "  Agent:    %s\n", state.agent.Name)                            //nolint:errcheck // best-effort output
+	fmt.Fprintf(m.output, "  Workdir:  %s (%s)\n", state.workdir.Path, state.workdir.Mode) //nolint:errcheck // best-effort output
 	if state.networkMode == "none" {
 		fmt.Fprintln(m.output, "  Network:  none") //nolint:errcheck // best-effort output
 	}

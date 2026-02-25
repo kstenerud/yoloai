@@ -329,4 +329,3 @@ func isNotRunningErr(err error) bool {
 	// but Docker returns it as a generic error. Check common patterns.
 	return cerrdefs.IsConflict(err)
 }
-

@@ -45,7 +45,7 @@ var agents = map[string]*Definition{
 		InteractiveCmd: "claude --dangerously-skip-permissions",
 		HeadlessCmd:    `claude -p "PROMPT" --dangerously-skip-permissions`,
 		PromptMode:     PromptModeInteractive,
-		APIKeyEnvVars: []string{"ANTHROPIC_API_KEY"},
+		APIKeyEnvVars:  []string{"ANTHROPIC_API_KEY"},
 		SeedFiles: []SeedFile{
 			{HostPath: "~/.claude/.credentials.json", TargetPath: ".credentials.json", AuthOnly: true},
 			{HostPath: "~/.claude/settings.json", TargetPath: "settings.json"},

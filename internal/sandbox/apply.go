@@ -130,9 +130,9 @@ func runGitApply(dir string, patch []byte, args ...string) error {
 
 // Regex patterns for common git apply errors.
 var (
-	rePatchFailed    = regexp.MustCompile(`error: patch failed: ([^:]+):(\d+)`)
-	reDoesNotExist   = regexp.MustCompile(`error: ([^:]+): does not exist in working directory`)
-	reAlreadyExists  = regexp.MustCompile(`error: ([^:]+): already exists in working directory`)
+	rePatchFailed   = regexp.MustCompile(`error: patch failed: ([^:]+):(\d+)`)
+	reDoesNotExist  = regexp.MustCompile(`error: ([^:]+): does not exist in working directory`)
+	reAlreadyExists = regexp.MustCompile(`error: ([^:]+): already exists in working directory`)
 )
 
 // formatApplyError wraps a cryptic git apply error with human-readable

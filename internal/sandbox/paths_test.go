@@ -99,8 +99,8 @@ func TestDecodePath_RoundTrip(t *testing.T) {
 
 func TestDecodePath_CaseInsensitive(t *testing.T) {
 	tests := []struct {
-		name    string
-		input   string
+		name     string
+		input    string
 		expected string
 	}{
 		{"lowercase hex", "^2f", "/"},

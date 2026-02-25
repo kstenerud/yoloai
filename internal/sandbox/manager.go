@@ -76,9 +76,9 @@ func (m *Manager) EnsureSetup(ctx context.Context) error {
 			fmt.Fprintln(m.output, "NOTE: some resource files have local changes and were not overwritten.") //nolint:errcheck // best-effort output
 		}
 		for _, name := range seedResult.Conflicts {
-			fmt.Fprintf(m.output, "  %s: new version written to ~/.yoloai/%s.new\n", name, name)                                              //nolint:errcheck // best-effort output
-			fmt.Fprintf(m.output, "    accept: mv ~/.yoloai/%s.new ~/.yoloai/%s\n", name, name)                                               //nolint:errcheck // best-effort output
-			fmt.Fprintf(m.output, "    keep:   rm ~/.yoloai/%s.new\n", name)                                                                  //nolint:errcheck // best-effort output
+			fmt.Fprintf(m.output, "  %s: new version written to ~/.yoloai/%s.new\n", name, name) //nolint:errcheck // best-effort output
+			fmt.Fprintf(m.output, "    accept: mv ~/.yoloai/%s.new ~/.yoloai/%s\n", name, name)  //nolint:errcheck // best-effort output
+			fmt.Fprintf(m.output, "    keep:   rm ~/.yoloai/%s.new\n", name)                     //nolint:errcheck // best-effort output
 		}
 		fmt.Fprintln(m.output, "  Then run 'yoloai build' to rebuild the base image.") //nolint:errcheck // best-effort output
 	}

@@ -29,9 +29,9 @@ var errMockNotImplemented = fmt.Errorf("mock: not implemented")
 
 // mockClient implements docker.Client for testing.
 type mockClient struct {
-	imageExistsErr error  // error returned by ImageInspectWithRaw
-	buildCalled    bool   // whether ImageBuild was invoked
-	buildErr       error  // error returned by ImageBuild
+	imageExistsErr error // error returned by ImageInspectWithRaw
+	buildCalled    bool  // whether ImageBuild was invoked
+	buildErr       error // error returned by ImageBuild
 }
 
 // Compile-time check.
