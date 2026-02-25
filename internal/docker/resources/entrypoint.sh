@@ -68,8 +68,20 @@ if [ -f /yoloai/prompt.txt ]; then
             sleep 1
             WAITED=$((WAITED + 1))
         done
-        # Wait for agent to fully settle (auto-update, notifications, etc.)
-        sleep 5
+        # Wait for screen to stabilize (no changes for 2 consecutive checks)
+        PREV=""
+        STABLE=0
+        while [ $STABLE -lt 2 ] && [ $WAITED -lt $MAX_WAIT ]; do
+            sleep 1
+            WAITED=$((WAITED + 1))
+            CURR=$(tmux capture-pane -t main -p 2>/dev/null || true)
+            if [ "$CURR" = "$PREV" ]; then
+                STABLE=$((STABLE + 1))
+            else
+                STABLE=0
+            fi
+            PREV="$CURR"
+        done
     else
         # Fallback to fixed delay if no ready pattern configured
         sleep "$STARTUP_DELAY"
