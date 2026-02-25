@@ -1,16 +1,26 @@
 # yoloAI
 
-Sandboxed AI coding agent runner. Runs AI coding agents (Claude Code, Codex) inside disposable Docker containers with a copy/diff/apply workflow.
+Sandboxed AI coding agent runner. Run AI coding agents (Claude Code, and more coming) inside disposable Docker containers with a copy/diff/apply workflow.
 
-Your originals are protected — the agent works on an isolated copy, you review what changed with `yoloai diff`, and choose what to keep with `yoloai apply`.
+Your originals are never touched — the agent works on an isolated copy, you review what changed with `yoloai diff`, and choose what to keep with `yoloai apply`.
 
-## Why
+> **Early beta.** The core workflow is solid, but rough edges remain. [Issues and feedback welcome.](https://github.com/kstenerud/yoloai/issues)
 
-Existing approaches either give the agent live access to your files (risky) or isolate it without a clean way to review and land changes. yoloAI gives you both: full isolation with git-based diff/apply to bridge the gap.
+## Why yoloAI?
+
+AI coding agents are powerful, but giving them live access to your files is risky — one bad command and your work is gone. Existing sandboxing tools either provide isolation without a review workflow (you have to figure out what changed yourself), or sync changes immediately with no way to approve them first.
+
+yoloAI gives you both: **full isolation** and **a clean review step**.
+
+- **Your files are protected.** The agent works on an isolated copy inside a Docker container. Your originals are never modified.
+- **Git-based review.** `yoloai diff` shows you exactly what the agent changed. `yoloai apply` patches your project only when you're ready.
+- **Run agents without permission prompts.** The container is disposable, so agents run with their sandbox-bypass flags (e.g., `--dangerously-skip-permissions`). No more clicking "approve" on every file edit.
+- **Persistent agent state.** Each sandbox keeps its own agent session history and configuration, so the agent retains context across stops and restarts.
+- **Retry from scratch.** `yoloai reset` re-copies your original and lets the agent try again — no leftover state from the failed attempt.
 
 ## Requirements
 
-- Go 1.24+
+- Go 1.24+ (to build from source)
 - Docker
 
 ## Install
@@ -22,47 +32,73 @@ make build
 sudo mv yoloai /usr/local/bin/  # or add to PATH
 ```
 
-On first run, yoloAI automatically builds its base Docker image and creates `~/.yoloai/`.
+On first run, yoloAI automatically builds its base Docker image (~2 min) and creates `~/.yoloai/`.
 
 ## Quick Start
 
 ```bash
-# Set your API key
+# 1. Authenticate — either set an API key:
 export ANTHROPIC_API_KEY=sk-ant-...
+#    ...or if you've already run `claude login`, yoloAI will automatically
+#    copy your OAuth credentials (~/.claude/.credentials.json) into the sandbox.
 
-# Create a sandbox (copies your project into an isolated container)
+# 2. Create a sandbox and watch the agent work
+#    (auto-attaches to the tmux session; Ctrl-B, D to detach)
 yoloai new fix-bug ./my-project --prompt "fix the failing tests"
 
-# Watch the agent work
-yoloai attach fix-bug
-# Ctrl-B, D to detach
-
-# Review what changed
+# 3. Review what changed
 yoloai diff fix-bug
 
-# Apply changes back to your original project
+# 4. Apply changes back to your original project
 yoloai apply fix-bug
 
-# Clean up
+# 5. Clean up
 yoloai destroy fix-bug
 ```
 
+### Interactive mode (no prompt)
+
+If you omit `--prompt`, yoloAI starts Claude Code in interactive mode and auto-attaches so you can work directly in the sandboxed session:
+
+```bash
+yoloai new explore ./my-project
+# You're now inside Claude Code, running in the container.
+# Ctrl-B, D to detach; yoloai attach explore to reconnect.
+```
+
 ## Commands
+
+**Core Workflow**
 
 | Command | Description |
 |---------|-------------|
 | `yoloai new <name> [workdir]` | Create and start a sandbox |
 | `yoloai attach <name>` | Attach to the agent's tmux session |
-| `yoloai show <name>` | Show sandbox configuration and state |
-| `yoloai list` | List all sandboxes |
-| `yoloai log <name>` | Show session log |
 | `yoloai diff <name>` | Show changes the agent made |
 | `yoloai apply <name>` | Apply changes back to original directory |
-| `yoloai exec <name> <cmd>` | Run a command inside the sandbox |
+
+**Lifecycle**
+
+| Command | Description |
+|---------|-------------|
 | `yoloai stop <name>...` | Stop sandboxes (preserving state) |
 | `yoloai start <name>` | Start a stopped sandbox |
-| `yoloai destroy <name>...` | Stop and remove sandboxes |
 | `yoloai reset <name>` | Re-copy workdir and reset to original state |
+| `yoloai destroy <name>...` | Stop and remove sandboxes |
+
+**Inspection**
+
+| Command | Description |
+|---------|-------------|
+| `yoloai list` | List sandboxes and their status (alias: `ls`) |
+| `yoloai show <name>` | Show sandbox configuration and state |
+| `yoloai log <name>` | Show session log |
+| `yoloai exec <name> <cmd>` | Run a command inside the sandbox |
+
+**Admin**
+
+| Command | Description |
+|---------|-------------|
 | `yoloai build` | Build or rebuild the base Docker image |
 | `yoloai completion <shell>` | Generate shell completion (bash/zsh/fish/powershell) |
 | `yoloai version` | Show version information |
@@ -72,7 +108,7 @@ All commands that take `<name>` support the `YOLOAI_SANDBOX` environment variabl
 ```bash
 export YOLOAI_SANDBOX=fix-bug
 yoloai diff      # equivalent to: yoloai diff fix-bug
-yoloai show      # equivalent to: yoloai show fix-bug
+yoloai attach    # equivalent to: yoloai attach fix-bug
 ```
 
 ## Workdir Modes
@@ -92,40 +128,58 @@ yoloai new task1 ./my-project
 yoloai new task2 ./my-project:rw
 ```
 
-## Agents
+## Agents and Models
+
+The current release ships with Claude Code as the default (and only) agent. More agents are planned — see [Roadmap](#roadmap).
 
 | Agent | API Key | Description |
 |-------|---------|-------------|
 | `claude` (default) | `ANTHROPIC_API_KEY` | Claude Code in interactive mode |
 
+You can select a model using shorthand aliases or full model names:
+
 ```bash
-# Use a specific model
-yoloai new task ./my-project --model sonnet
-yoloai new task ./my-project --model opus
+yoloai new task ./my-project --model sonnet   # claude-sonnet-4-latest
+yoloai new task ./my-project --model opus     # claude-opus-4-latest
+yoloai new task ./my-project --model haiku    # claude-haiku-4-latest
+yoloai new task ./my-project --model claude-sonnet-4-20250514  # exact model
 ```
 
 ## Key Flags
 
+### Creating sandboxes
+
 ```bash
-# Provide a prompt (headless mode)
+# Prompt (headless — agent runs the task autonomously)
 yoloai new task ./project --prompt "refactor the auth module"
 yoloai new task ./project --prompt-file instructions.md
+echo "fix the build" | yoloai new task ./project --prompt -   # from stdin
 
-# Create without starting
+# Create without starting the container
 yoloai new task ./project --no-start
 
-# Replace an existing sandbox
+# Create without auto-attaching
+yoloai new task ./project --detach
+
+# Replace an existing sandbox with the same name
 yoloai new task ./project --replace
 
+# Pass extra arguments directly to the agent CLI
+yoloai new task ./project -- --allowedTools "Edit,Write,Bash"
+
+# Disable network access entirely
+yoloai new task ./project --network-none
+
+# Expose a container port to the host
+yoloai new task ./project --port 3000:3000
+```
+
+### Managing sandboxes
+
+```bash
 # Skip confirmation prompts
 yoloai destroy task --yes
 yoloai apply task --yes
-
-# Disable network access
-yoloai new task ./project --network-none
-
-# Port forwarding
-yoloai new task ./project --port 3000:3000
 
 # Stop/destroy all sandboxes
 yoloai stop --all
@@ -135,23 +189,52 @@ yoloai destroy --all --yes
 yoloai reset task
 yoloai reset task --clean       # also wipe agent memory
 yoloai reset task --no-prompt   # don't re-send prompt
+```
 
-# Diff options
-yoloai diff task --stat              # summary only
-yoloai diff task -- src/handler.go   # filter to specific paths
+### Reviewing changes
+
+```bash
+# Full diff
+yoloai diff task
+
+# Summary only (files changed, insertions, deletions)
+yoloai diff task --stat
+
+# Filter to specific paths
+yoloai diff task -- src/handler.go
 ```
 
 ## How It Works
 
-1. `yoloai new` copies your project into `~/.yoloai/sandboxes/<name>/work/`, creates a git baseline commit, and launches a Docker container running the agent.
+1. **`yoloai new`** copies your project into `~/.yoloai/sandboxes/<name>/work/`, creates a git baseline commit, and launches a Docker container running the agent.
 
-2. The agent works inside the container on the copy. Your original files are never touched.
+2. **The agent works inside the container** on the copy. Your original files are never touched.
 
-3. `yoloai diff` shows a git diff between the baseline and the agent's current state — including new files, deletions, and binary changes.
+3. **`yoloai diff`** shows a git diff between the baseline and the agent's current state — including new files, deletions, and binary changes.
 
-4. `yoloai apply` generates a patch and applies it to your original directory. It does a dry-run check first and prompts for confirmation.
+4. **`yoloai apply`** generates a patch and applies it to your original directory. It does a dry-run check first and prompts for confirmation.
 
-5. `yoloai reset` re-copies the original and resets the baseline, letting you retry the same task from scratch.
+5. **`yoloai reset`** re-copies the original and resets the baseline, letting you retry the same task from scratch.
+
+## Configuration
+
+On first run, yoloAI creates `~/.yoloai/config.yaml` with sensible defaults:
+
+```yaml
+defaults:
+  agent: claude
+
+  mounts:
+    - ~/.gitconfig:/home/yoloai/.gitconfig:ro
+
+  ports: []
+
+  resources:
+    cpus: 4
+    memory: 8g
+```
+
+You can edit this file to change the default agent, add persistent bind mounts (like SSH config or tool configs), adjust resource limits, or set default port mappings. These defaults apply to all new sandboxes.
 
 ## Sandbox State
 
@@ -171,11 +254,37 @@ Containers are ephemeral — if removed, `yoloai start` recreates them from `met
 
 ## Security
 
-- **Read-only by default.** Workdirs use `:copy` mode unless you explicitly opt into `:rw`.
-- **Dangerous directory detection.** Refuses to mount `$HOME`, `/`, or system directories without `:force`.
-- **Dirty repo warning.** Prompts if your workdir has uncommitted git changes.
-- **Credential injection via files.** API keys are mounted as read-only files at `/run/secrets/`, not passed as environment variables. Host temp files are cleaned up after container start.
+- **Originals are protected.** Workdirs use `:copy` mode by default — the agent works on an isolated copy, never your original files. Opt into `:rw` explicitly for live access.
+- **Dangerous directory detection.** Refuses to mount `$HOME`, `/`, or system directories. Append `:force` to override (e.g., `$HOME:force`).
+- **Dirty repo warning.** Prompts if your workdir has uncommitted git changes, so you don't lose work.
+- **Credential injection via files.** API keys are mounted as read-only files at `/run/secrets/`, not passed as environment variables. Temp files on the host are cleaned up after container start.
 - **Non-root execution.** Containers run as a non-root user with UID/GID matching your host user.
+
+## Roadmap
+
+yoloAI is under active development. Here's what's planned after the current MVP:
+
+**More agents**
+- OpenAI Codex support (the architecture is agent-agnostic — adding an agent is a definition, not a rewrite)
+- Community-requested agents (Aider, Goose, etc.)
+
+**Network isolation**
+- Domain-based allowlisting — let the agent reach its API but nothing else (`--network-isolated`, `--network-allow <domain>`)
+- Proxy sidecar for fine-grained traffic control
+
+**Profiles**
+- Reusable environment definitions (`~/.yoloai/profiles/<name>/`) with user-supplied Dockerfiles
+- Per-profile config: custom mounts, resource limits, environment variables
+
+**Overlayfs copy strategy**
+- Instant sandbox setup using overlayfs instead of full copy (space-efficient, fast for large repos)
+
+**Other**
+- Auxiliary directory mounts (`-d` flag for read-only dependencies)
+- Custom mount points (`=<path>` syntax)
+- Auto-commit intervals for crash recovery
+- Config file generation (`yoloai config generate`)
+- User-defined extensions (`yoloai x <extension>`)
 
 ## Development
 
@@ -185,9 +294,6 @@ make test           # Run unit tests
 make lint           # Run golangci-lint
 make integration    # Run integration tests (requires Docker)
 make clean          # Remove binary
-
-# Build with custom version
-make VERSION=1.0.0 build
 ```
 
 ## License
