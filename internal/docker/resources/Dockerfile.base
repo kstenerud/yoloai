@@ -5,10 +5,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     build-essential \
     python3 \
+    python3-pip \
+    python3-venv \
     curl \
+    wget \
     ca-certificates \
     gnupg \
     jq \
+    ripgrep \
+    fd-find \
+    less \
+    file \
+    unzip \
+    openssh-client \
     && rm -rf /var/lib/apt/lists/*
 
 # Node.js 22 LTS via NodeSource
