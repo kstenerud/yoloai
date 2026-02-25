@@ -11,20 +11,11 @@ import (
 
 func newDiffCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "diff <name> [-- <path>...]",
+		Use:   "diff <name> [<path>...]",
 		Short: "Show changes the agent made",
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			dashIdx := cmd.ArgsLenAtDash()
-			var positional, paths []string
-			if dashIdx < 0 {
-				positional = args
-			} else {
-				positional = args[:dashIdx]
-				paths = args[dashIdx:]
-			}
-
-			name, _, err := resolveName(cmd, positional)
+			name, paths, err := resolveName(cmd, args)
 			if err != nil {
 				return err
 			}

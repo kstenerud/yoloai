@@ -10,20 +10,11 @@ import (
 
 func newApplyCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "apply <name> [-- <path>...]",
+		Use:   "apply <name> [<path>...]",
 		Short: "Apply agent changes back to original directory",
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			dashIdx := cmd.ArgsLenAtDash()
-			var positional, paths []string
-			if dashIdx < 0 {
-				positional = args
-			} else {
-				positional = args[:dashIdx]
-				paths = args[dashIdx:]
-			}
-
-			name, _, err := resolveName(cmd, positional)
+			name, paths, err := resolveName(cmd, args)
 			if err != nil {
 				return err
 			}
