@@ -1,10 +1,10 @@
 # yoloAI
 
-Sandboxed AI coding agent runner. Run AI coding agents (Claude Code, and more coming) inside disposable Docker containers with a copy/diff/apply workflow.
+Sandboxed AI coding agent runner. Run AI coding agents inside disposable Docker containers with a copy/diff/apply workflow.
 
 Your originals are never touched — the agent works on an isolated copy, you review what changed with `yoloai diff`, and choose what to keep with `yoloai apply`.
 
-> **Early beta.** The core workflow is solid, but rough edges remain. [Issues and feedback welcome.](https://github.com/kstenerud/yoloai/issues)
+> **MVP — early access.** This is a minimal viable release with the core copy/diff/apply workflow and Claude Code support. It works, but expect rough edges. More agents, profiles, network isolation, and other features are on the [roadmap](#roadmap). [Issues and feedback welcome.](https://github.com/kstenerud/yoloai/issues)
 
 ## Why yoloAI?
 
@@ -130,7 +130,7 @@ yoloai new task2 ./my-project:rw
 
 ## Agents and Models
 
-The current release ships with Claude Code as the default (and only) agent. More agents are planned — see [Roadmap](#roadmap).
+This MVP ships with Claude Code as the only supported agent. The architecture is agent-agnostic — more agents are planned (see [Roadmap](#roadmap)).
 
 | Agent | API Key | Description |
 |-------|---------|-------------|
@@ -262,7 +262,7 @@ Containers are ephemeral — if removed, `yoloai start` recreates them from `met
 
 ## Roadmap
 
-yoloAI is under active development. Here's what's planned after the current MVP:
+yoloAI is under active development. The current MVP covers the core copy/diff/apply workflow with Claude Code. Here's what's planned next:
 
 **More agents**
 - OpenAI Codex support (the architecture is agent-agnostic — adding an agent is a definition, not a rewrite)
