@@ -52,8 +52,11 @@ tmux new-session -d -s main -x 200 -y 50
 tmux set-option -t main remain-on-exit on
 tmux pipe-pane -t main "cat >> /yoloai/log.txt"
 
-# Launch agent inside tmux
-tmux send-keys -t main "$AGENT_COMMAND" Enter
+# Auto-detach clients when agent exits (pane dies)
+tmux set-hook -t main pane-died "detach-client"
+
+# Launch agent inside tmux (exec replaces shell so agent exit = pane exit)
+tmux send-keys -t main "exec $AGENT_COMMAND" Enter
 
 # If prompt exists, wait for agent to be ready and deliver it
 if [ -f /yoloai/prompt.txt ]; then
