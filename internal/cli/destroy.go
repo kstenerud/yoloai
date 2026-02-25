@@ -12,9 +12,10 @@ import (
 
 func newDestroyCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "destroy <name>...",
-		Short: "Stop and remove sandboxes",
-		Args:  cobra.ArbitraryArgs,
+		Use:     "destroy <name>...",
+		Short:   "Stop and remove sandboxes",
+		GroupID: groupLifecycle,
+		Args:    cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			all, _ := cmd.Flags().GetBool("all")
 			yes, _ := cmd.Flags().GetBool("yes")

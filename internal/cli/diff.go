@@ -11,9 +11,10 @@ import (
 
 func newDiffCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "diff <name> [<path>...]",
-		Short: "Show changes the agent made",
-		Args:  cobra.ArbitraryArgs,
+		Use:     "diff <name> [<path>...]",
+		Short:   "Show changes the agent made",
+		GroupID: groupWorkflow,
+		Args:    cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name, paths, err := resolveName(cmd, args)
 			if err != nil {

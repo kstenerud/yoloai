@@ -12,9 +12,10 @@ import (
 
 func newStopCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "stop <name>...",
-		Short: "Stop sandboxes (preserving state)",
-		Args:  cobra.ArbitraryArgs,
+		Use:     "stop <name>...",
+		Short:   "Stop sandboxes (preserving state)",
+		GroupID: groupLifecycle,
+		Args:    cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			all, _ := cmd.Flags().GetBool("all")
 

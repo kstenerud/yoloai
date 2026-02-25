@@ -15,9 +15,10 @@ import (
 
 func newExecCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "exec <name> <command> [args...]",
-		Short: "Run a command inside a sandbox",
-		Args: cobra.MinimumNArgs(1),
+		Use:     "exec <name> <command> [args...]",
+		Short:   "Run a command inside a sandbox",
+		GroupID: groupInspect,
+		Args:    cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name, rest, err := resolveName(cmd, args)
 			if err != nil {

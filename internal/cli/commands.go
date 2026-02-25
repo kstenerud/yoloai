@@ -13,22 +13,44 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// Command group IDs for help output.
+const (
+	groupWorkflow  = "workflow"
+	groupLifecycle = "lifecycle"
+	groupInspect   = "inspect"
+	groupAdmin     = "admin"
+)
+
 // registerCommands adds all subcommands to the root command.
 func registerCommands(root *cobra.Command, version, commit, date string) {
+	root.AddGroup(
+		&cobra.Group{ID: groupWorkflow, Title: "Core Workflow:"},
+		&cobra.Group{ID: groupLifecycle, Title: "Lifecycle:"},
+		&cobra.Group{ID: groupInspect, Title: "Inspection:"},
+		&cobra.Group{ID: groupAdmin, Title: "Admin:"},
+	)
+
 	root.AddCommand(
-		newBuildCmd(),
+		// Workflow
 		newNewCmd(version),
 		newAttachCmd(),
-		newShowCmd(),
 		newDiffCmd(),
 		newApplyCmd(),
-		newListCmd(),
-		newLogCmd(),
-		newExecCmd(),
-		newStopCmd(),
+
+		// Lifecycle
 		newStartCmd(),
+		newStopCmd(),
 		newDestroyCmd(),
 		newResetCmd(),
+
+		// Inspection
+		newListCmd(),
+		newShowCmd(),
+		newLogCmd(),
+		newExecCmd(),
+
+		// Admin
+		newBuildCmd(),
 		newCompletionCmd(),
 		newVersionCmd(version, commit, date),
 	)
@@ -36,8 +58,9 @@ func registerCommands(root *cobra.Command, version, commit, date string) {
 
 func newBuildCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "build [profile]",
-		Short: "Build or rebuild Docker image(s)",
+		Use:     "build [profile]",
+		Short:   "Build or rebuild Docker image(s)",
+		GroupID: groupAdmin,
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) > 0 {
@@ -73,8 +96,9 @@ func newBuildCmd() *cobra.Command {
 
 func newNewCmd(version string) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "new [flags] <name> [<workdir>] [-- <agent-args>...]",
-		Short: "Create and start a sandbox",
+		Use:     "new [flags] <name> [<workdir>] [-- <agent-args>...]",
+		Short:   "Create and start a sandbox",
+		GroupID: groupWorkflow,
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Parse positional args considering --
@@ -170,8 +194,9 @@ func newNewCmd(version string) *cobra.Command {
 
 func newCompletionCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "completion [bash|zsh|fish|powershell]",
-		Short: "Generate shell completion script",
+		Use:     "completion [bash|zsh|fish|powershell]",
+		Short:   "Generate shell completion script",
+		GroupID: groupAdmin,
 		Long: `Generate shell completion script for the specified shell.
 
 To load completions:
@@ -230,8 +255,9 @@ func attachToSandbox(containerName string) error {
 
 func newVersionCmd(version, commit, date string) *cobra.Command {
 	return &cobra.Command{
-		Use:   "version",
-		Short: "Show version information",
+		Use:     "version",
+		Short:   "Show version information",
+		GroupID: groupAdmin,
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			_, err := fmt.Fprintf(cmd.OutOrStdout(), "yoloai version %s (commit: %s, built: %s)\n", version, commit, date)

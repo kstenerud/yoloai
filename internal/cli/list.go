@@ -15,6 +15,7 @@ func newListCmd() *cobra.Command {
 		Use:     "list",
 		Aliases: []string{"ls"},
 		Short:   "List sandboxes and their status",
+		GroupID: groupInspect,
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx := cmd.Context()

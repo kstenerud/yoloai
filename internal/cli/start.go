@@ -10,9 +10,10 @@ import (
 
 func newStartCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "start <name>",
-		Short: "Start a stopped sandbox",
-		Args: cobra.ArbitraryArgs,
+		Use:     "start <name>",
+		Short:   "Start a stopped sandbox",
+		GroupID: groupLifecycle,
+		Args:    cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name, _, err := resolveName(cmd, args)
 			if err != nil {

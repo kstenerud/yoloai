@@ -11,9 +11,10 @@ import (
 
 func newLogCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "log <name>",
-		Short: "Show sandbox session log",
-		Args: cobra.ArbitraryArgs,
+		Use:     "log <name>",
+		Short:   "Show sandbox session log",
+		GroupID: groupInspect,
+		Args:    cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name, _, err := resolveName(cmd, args)
 			if err != nil {

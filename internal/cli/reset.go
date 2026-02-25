@@ -11,9 +11,10 @@ import (
 
 func newResetCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "reset <name>",
-		Short: "Re-copy workdir and reset git baseline",
-		Args: cobra.ArbitraryArgs,
+		Use:     "reset <name>",
+		Short:   "Re-copy workdir and reset git baseline",
+		GroupID: groupLifecycle,
+		Args:    cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name, _, err := resolveName(cmd, args)
 			if err != nil {

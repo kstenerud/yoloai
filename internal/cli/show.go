@@ -14,9 +14,10 @@ import (
 
 func newShowCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "show <name>",
-		Short: "Show sandbox configuration and state",
-		Args: cobra.ArbitraryArgs,
+		Use:     "show <name>",
+		Short:   "Show sandbox configuration and state",
+		GroupID: groupInspect,
+		Args:    cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name, _, err := resolveName(cmd, args)
 			if err != nil {

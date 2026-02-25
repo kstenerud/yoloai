@@ -10,9 +10,10 @@ import (
 
 func newApplyCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "apply <name> [<path>...]",
-		Short: "Apply agent changes back to original directory",
-		Args:  cobra.ArbitraryArgs,
+		Use:     "apply <name> [<path>...]",
+		Short:   "Apply agent changes back to original directory",
+		GroupID: groupWorkflow,
+		Args:    cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name, paths, err := resolveName(cmd, args)
 			if err != nil {
