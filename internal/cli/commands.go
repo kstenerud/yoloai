@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"time"
 
 	"github.com/kstenerud/yoloai/internal/docker"
 	"github.com/kstenerud/yoloai/internal/sandbox"
@@ -106,6 +108,7 @@ func newNewCmd(version string) *cobra.Command {
 			ports, _ := cmd.Flags().GetStringArray("port")
 			replace, _ := cmd.Flags().GetBool("replace")
 			noStart, _ := cmd.Flags().GetBool("no-start")
+			detach, _ := cmd.Flags().GetBool("detach")
 			yes, _ := cmd.Flags().GetBool("yes")
 
 			ctx := cmd.Context()
@@ -117,7 +120,7 @@ func newNewCmd(version string) *cobra.Command {
 
 			mgr := sandbox.NewManager(client, slog.Default(), cmd.ErrOrStderr())
 
-			return mgr.Create(ctx, sandbox.CreateOptions{
+			sandboxName, err := mgr.Create(ctx, sandbox.CreateOptions{
 				Name:        name,
 				WorkdirArg:  workdirArg,
 				Agent:       agentName,
@@ -128,10 +131,26 @@ func newNewCmd(version string) *cobra.Command {
 				Ports:       ports,
 				Replace:     replace,
 				NoStart:     noStart,
+				Detach:      detach,
 				Yes:         yes,
 				Passthrough: passthrough,
 				Version:     version,
 			})
+			if err != nil {
+				return err
+			}
+
+			if sandboxName == "" || detach || noStart {
+				return nil
+			}
+
+			// Wait for tmux session to be ready before attaching
+			containerName := "yoloai-" + sandboxName
+			if err := waitForTmux(containerName, 30*time.Second); err != nil {
+				return fmt.Errorf("waiting for tmux session: %w", err)
+			}
+
+			return attachToSandbox(containerName)
 		},
 	}
 
@@ -143,6 +162,7 @@ func newNewCmd(version string) *cobra.Command {
 	cmd.Flags().StringArray("port", nil, "Port mapping (host:container)")
 	cmd.Flags().Bool("replace", false, "Replace existing sandbox")
 	cmd.Flags().Bool("no-start", false, "Create but don't start the container")
+	cmd.Flags().BoolP("detach", "d", false, "Don't auto-attach after creation")
 	cmd.Flags().BoolP("yes", "y", false, "Skip confirmations")
 
 	return cmd
@@ -184,6 +204,28 @@ PowerShell:
 			}
 		},
 	}
+}
+
+// waitForTmux polls until the tmux session is ready in the container.
+func waitForTmux(containerName string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		c := exec.Command("docker", "exec", containerName, "gosu", "yoloai", "tmux", "has-session", "-t", "main") //nolint:gosec // G204: containerName is validated sandbox name
+		if err := c.Run(); err == nil {
+			return nil
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	return fmt.Errorf("tmux session not ready after %s", timeout)
+}
+
+// attachToSandbox attaches to the tmux session in a running container.
+func attachToSandbox(containerName string) error {
+	c := exec.Command("docker", "exec", "-it", "-u", "yoloai", containerName, "tmux", "attach", "-t", "main") //nolint:gosec // G204: containerName is validated sandbox name
+	c.Stdin = os.Stdin
+	c.Stdout = os.Stdout
+	c.Stderr = os.Stderr
+	return c.Run()
 }
 
 func newVersionCmd(version, commit, date string) *cobra.Command {

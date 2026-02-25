@@ -44,13 +44,14 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 
 	// Step 2: Create sandbox with --no-start (no API keys needed)
 	sandboxName := "integ-test"
-	require.NoError(t, mgr.Create(ctx, CreateOptions{
+	_, err = mgr.Create(ctx, CreateOptions{
 		Name:       sandboxName,
 		WorkdirArg: projectDir,
 		Agent:      "claude",
 		NoStart:    true,
 		Version:    "test",
-	}))
+	})
+	require.NoError(t, err)
 
 	// Step 3: Verify directory structure
 	sandboxDir := Dir(sandboxName)

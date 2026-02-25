@@ -32,6 +32,7 @@ type CreateOptions struct {
 	Yes         bool     // --yes flag (skip confirmations)
 	Passthrough []string // args after -- passed to agent
 	Version     string   // yoloAI version for meta.json
+	Detach      bool     // --detach flag (skip auto-attach)
 }
 
 // sandboxState holds resolved state computed during preparation.
@@ -60,30 +61,32 @@ type containerConfig struct {
 }
 
 // Create creates and optionally starts a new sandbox.
-func (m *Manager) Create(ctx context.Context, opts CreateOptions) error {
+// Returns the sandbox name on success (empty if user cancelled or no-start).
+func (m *Manager) Create(ctx context.Context, opts CreateOptions) (string, error) {
 	if err := m.EnsureSetup(ctx); err != nil {
-		return err
+		return "", err
 	}
 
 	state, err := m.prepareSandboxState(ctx, opts)
 	if err != nil {
-		return err
+		return "", err
 	}
 	if state == nil {
-		return nil // user cancelled
+		return "", nil // user cancelled
 	}
 
 	if opts.NoStart {
-		m.printCreationOutput(state)
-		return nil
+		m.printCreationOutput(state, false)
+		return "", nil
 	}
 
 	if err := m.createAndStartContainer(ctx, state); err != nil {
-		return err
+		return "", err
 	}
 
-	m.printCreationOutput(state)
-	return nil
+	autoAttach := !opts.Detach
+	m.printCreationOutput(state, autoAttach)
+	return state.name, nil
 }
 
 // prepareSandboxState handles validation, safety checks, directory
@@ -346,7 +349,8 @@ func (m *Manager) createAndStartContainer(ctx context.Context, state *sandboxSta
 }
 
 // printCreationOutput prints the context-aware summary.
-func (m *Manager) printCreationOutput(state *sandboxState) {
+// When autoAttach is true, the attach hint is suppressed (we're about to attach).
+func (m *Manager) printCreationOutput(state *sandboxState, autoAttach bool) {
 	if state == nil {
 		return
 	}
@@ -361,6 +365,10 @@ func (m *Manager) printCreationOutput(state *sandboxState) {
 		fmt.Fprintf(m.output, "  Ports:    %s\n", strings.Join(state.ports, ", ")) //nolint:errcheck // best-effort output
 	}
 	fmt.Fprintln(m.output) //nolint:errcheck // best-effort output
+
+	if autoAttach {
+		return
+	}
 
 	if state.hasPrompt {
 		fmt.Fprintf(m.output, "Run 'yoloai attach %s' to interact (Ctrl-b d to detach)\n", state.name) //nolint:errcheck // best-effort output
