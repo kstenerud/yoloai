@@ -34,6 +34,7 @@ type Definition struct {
 	StateDir       string
 	SubmitSequence string
 	StartupDelay   time.Duration
+	ReadyPattern   string // grep pattern in tmux output that signals agent is ready for input
 	ModelFlag      string
 	ModelAliases   map[string]string
 }
@@ -53,6 +54,7 @@ var agents = map[string]*Definition{
 		StateDir:       "/home/yoloai/.claude/",
 		SubmitSequence: "Enter Enter",
 		StartupDelay:   3 * time.Second,
+		ReadyPattern:   "❯",
 		ModelFlag:      "--model",
 		ModelAliases: map[string]string{
 			"sonnet": "claude-sonnet-4-latest",

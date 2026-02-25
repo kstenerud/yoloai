@@ -44,6 +44,7 @@ set -euo pipefail
 CONFIG="/yoloai/config.json"
 AGENT_COMMAND=$(jq -r .agent_command "$CONFIG")
 STARTUP_DELAY=$(jq -r .startup_delay "$CONFIG")
+READY_PATTERN=$(jq -r .ready_pattern "$CONFIG")
 SUBMIT_SEQUENCE=$(jq -r .submit_sequence "$CONFIG")
 
 # Start tmux session with logging and remain-on-exit
@@ -54,9 +55,23 @@ tmux pipe-pane -t main "cat >> /yoloai/log.txt"
 # Launch agent inside tmux
 tmux send-keys -t main "$AGENT_COMMAND" Enter
 
-# If prompt exists, deliver it after startup delay
+# If prompt exists, wait for agent to be ready and deliver it
 if [ -f /yoloai/prompt.txt ]; then
-    sleep "$STARTUP_DELAY"
+    if [ -n "$READY_PATTERN" ] && [ "$READY_PATTERN" != "null" ]; then
+        # Poll tmux output for the ready pattern (max 60s)
+        MAX_WAIT=60
+        WAITED=0
+        while [ $WAITED -lt $MAX_WAIT ]; do
+            if tmux capture-pane -t main -p 2>/dev/null | grep -qF "$READY_PATTERN"; then
+                break
+            fi
+            sleep 1
+            WAITED=$((WAITED + 1))
+        done
+    else
+        # Fallback to fixed delay if no ready pattern configured
+        sleep "$STARTUP_DELAY"
+    fi
     tmux load-buffer /yoloai/prompt.txt
     tmux paste-buffer -t main
     tmux send-keys -t main $SUBMIT_SEQUENCE

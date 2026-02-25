@@ -55,6 +55,7 @@ type containerConfig struct {
 	HostGID        int    `json:"host_gid"`
 	AgentCommand   string `json:"agent_command"`
 	StartupDelay   int    `json:"startup_delay"`
+	ReadyPattern   string `json:"ready_pattern"`
 	SubmitSequence string `json:"submit_sequence"`
 }
 
@@ -422,6 +423,7 @@ func buildContainerConfig(agentDef *agent.Definition, agentCommand string) ([]by
 		HostGID:        os.Getgid(),
 		AgentCommand:   agentCommand,
 		StartupDelay:   int(agentDef.StartupDelay / time.Millisecond),
+		ReadyPattern:   agentDef.ReadyPattern,
 		SubmitSequence: agentDef.SubmitSequence,
 	}
 	return json.MarshalIndent(cfg, "", "  ")
