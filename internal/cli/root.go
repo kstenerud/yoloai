@@ -40,9 +40,10 @@ func newRootCmd(version, commit, date string) *cobra.Command {
 	rootCmd := &cobra.Command{
 		Use:   "yoloai",
 		Short: "Sandboxed AI coding agent runner",
-		Long: `Run AI coding CLI agents inside disposable Docker containers with
-copy/diff/apply workflow. Your originals are protected — the agent works on
-an isolated copy, you review what changed, and choose what to keep.`,
+		Long: `Run AI coding agents in full-auto mode, safely. Agents run with
+safety checks disabled inside disposable Docker containers — they work fast
+and unattended while your originals stay protected. When done, review the
+diff and apply what you want to keep.`,
 		SilenceErrors: true,
 		SilenceUsage:  true,
 	}
