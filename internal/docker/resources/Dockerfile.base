@@ -31,8 +31,10 @@ RUN mkdir -p /etc/apt/keyrings \
     && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
 
-# Claude Code via npm
+# Claude Code via npm (not native binary — native bundles Bun which ignores
+# proxy env vars and auto-updates; see RESEARCH.md "Claude Code Installation")
 RUN npm install -g @anthropic-ai/claude-code
+ENV DISABLE_INSTALLATION_CHECKS=1
 
 # gosu for dropping privileges
 ARG GOSU_VERSION=1.17

@@ -191,6 +191,11 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 		return nil, fmt.Errorf("ensure container settings: %w", err)
 	}
 
+	// Fix install method in seeded .claude.json (host has "native", container uses npm)
+	if err := ensureHomeSeedConfig(agentDef, sandboxDir); err != nil {
+		return nil, fmt.Errorf("ensure home seed config: %w", err)
+	}
+
 	// Copy workdir
 	if workdir.Mode == "copy" {
 		if err := copyDir(workdir.Path, workCopyDir); err != nil {
@@ -823,6 +828,49 @@ func ensureContainerSettings(agentDef *agent.Definition, sandboxDir string) erro
 		return err
 	}
 	return os.WriteFile(settingsPath, out, 0600)
+}
+
+// ensureHomeSeedConfig patches home-seed/.claude.json to set installMethod to
+// "npm-global". The host file typically has "native" since the user's local
+// Claude Code uses the native installer, but inside the container we install
+// via npm. Without this fix Claude Code shows spurious warnings about missing
+// ~/.local/bin/claude and PATH misconfiguration.
+func ensureHomeSeedConfig(agentDef *agent.Definition, sandboxDir string) error {
+	// Only relevant for agents that seed .claude.json into HomeDir
+	var hasHomeSeed bool
+	for _, sf := range agentDef.SeedFiles {
+		if sf.HomeDir && sf.TargetPath == ".claude.json" {
+			hasHomeSeed = true
+			break
+		}
+	}
+	if !hasHomeSeed {
+		return nil
+	}
+
+	configPath := filepath.Join(sandboxDir, "home-seed", ".claude.json")
+
+	var config map[string]any
+	data, err := os.ReadFile(configPath) //nolint:gosec // path is sandbox-controlled
+	if err != nil {
+		if os.IsNotExist(err) {
+			config = make(map[string]any)
+		} else {
+			return err
+		}
+	} else {
+		if err := json.Unmarshal(data, &config); err != nil {
+			return err
+		}
+	}
+
+	config["installMethod"] = "npm-global"
+
+	out, err := json.MarshalIndent(config, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(configPath, out, 0600)
 }
 
 // copyDir copies a directory tree using cp -rp.
