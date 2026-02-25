@@ -56,3 +56,5 @@ All design/planning documents live in `docs/`:
 - Safe defaults: read-only mounts, no implicit `agent_files` inheritance, name required (no auto-generation), dirty repo warning (not error).
 - CLI for one-offs, config for repeatability (same options in both).
 - Security requires dedicated research — don't finalize ad-hoc. `CAP_SYS_ADMIN` tradeoff is documented.
+- **Don't reinvent the wheel.** Before designing a feature, check if existing tools (git, docker, unix utilities) already provide a workflow that solves the problem. Leverage them rather than building a bespoke solution.
+- **Ecosystem ergonomics.** The tool should fit naturally within unix philosophy, git workflows, and the CLI ecosystem. Compose well with pipes, familiar tools, and established conventions. A tool that complements the ecosystem is far better than one that needs workarounds to fit user workflows.
