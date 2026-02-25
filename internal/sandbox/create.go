@@ -170,6 +170,7 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 		sandboxDir,
 		filepath.Join(sandboxDir, "work"),
 		filepath.Join(sandboxDir, "agent-state"),
+		filepath.Join(sandboxDir, "home-seed"),
 	} {
 		if err := os.MkdirAll(dir, 0750); err != nil {
 			return nil, fmt.Errorf("create directory %s: %w", dir, err)
@@ -652,6 +653,22 @@ func buildMounts(state *sandboxState, secretsDir string) []mount.Mount {
 		ReadOnly: true,
 	})
 
+	// Home-seed files (individual file mounts into /home/yoloai/)
+	for _, sf := range state.agent.SeedFiles {
+		if !sf.HomeDir {
+			continue
+		}
+		src := filepath.Join(state.sandboxDir, "home-seed", sf.TargetPath)
+		if _, err := os.Stat(src); err != nil {
+			continue // skip if not seeded
+		}
+		mounts = append(mounts, mount.Mount{
+			Type:   mount.TypeBind,
+			Source: src,
+			Target: "/home/yoloai/" + sf.TargetPath,
+		})
+	}
+
 	// Secrets
 	if secretsDir != "" {
 		for _, key := range state.agent.APIKeyEnvVars {
@@ -712,12 +729,15 @@ func describeSeedAuthFiles(agentDef *agent.Definition) string {
 	return strings.Join(paths, ", ")
 }
 
-// copySeedFiles copies seed files from the host into the sandbox's agent-state directory.
+// copySeedFiles copies seed files from the host into the sandbox.
 // Files with AuthOnly=true are skipped when hasAPIKey is true.
+// Files with HomeDir=true go to home-seed/ (mounted at /home/yoloai/);
+// others go to agent-state/ (mounted at StateDir).
 // Returns true if any files were copied. Skips files that don't exist on the host.
 func copySeedFiles(agentDef *agent.Definition, sandboxDir string, hasAPIKey bool) (bool, error) {
 	copied := false
 	agentStateDir := filepath.Join(sandboxDir, "agent-state")
+	homeSeedDir := filepath.Join(sandboxDir, "home-seed")
 
 	for _, sf := range agentDef.SeedFiles {
 		if sf.AuthOnly && hasAPIKey {
@@ -729,7 +749,11 @@ func copySeedFiles(agentDef *agent.Definition, sandboxDir string, hasAPIKey bool
 			continue // skip missing files
 		}
 
-		targetPath := filepath.Join(agentStateDir, sf.TargetPath)
+		baseDir := agentStateDir
+		if sf.HomeDir {
+			baseDir = homeSeedDir
+		}
+		targetPath := filepath.Join(baseDir, sf.TargetPath)
 
 		// Ensure parent directory exists
 		if err := os.MkdirAll(filepath.Dir(targetPath), 0750); err != nil {

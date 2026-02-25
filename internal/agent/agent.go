@@ -20,6 +20,7 @@ type SeedFile struct {
 	HostPath   string // e.g., "~/.claude/settings.json"
 	TargetPath string // relative to StateDir, e.g., "settings.json"
 	AuthOnly   bool   // if true, only required when no API key is set
+	HomeDir    bool   // if true, TargetPath is relative to /home/yoloai/ instead of StateDir
 }
 
 // Definition describes an agent's install, launch, and behavioral characteristics.
@@ -47,6 +48,7 @@ var agents = map[string]*Definition{
 		SeedFiles: []SeedFile{
 			{HostPath: "~/.claude/.credentials.json", TargetPath: ".credentials.json", AuthOnly: true},
 			{HostPath: "~/.claude/settings.json", TargetPath: "settings.json"},
+			{HostPath: "~/.claude.json", TargetPath: ".claude.json", HomeDir: true},
 		},
 		StateDir:       "/home/yoloai/.claude/",
 		SubmitSequence: "Enter Enter",
