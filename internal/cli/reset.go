@@ -21,12 +21,18 @@ func newResetCmd() *cobra.Command {
 			}
 			noPrompt, _ := cmd.Flags().GetBool("no-prompt")
 			clean, _ := cmd.Flags().GetBool("clean")
+			noRestart, _ := cmd.Flags().GetBool("no-restart")
+
+			if clean && noRestart {
+				return sandbox.NewUsageError("cannot wipe agent state while agent is running; use --clean without --no-restart, or stop the agent first")
+			}
 
 			return withManager(cmd, func(ctx context.Context, mgr *sandbox.Manager) error {
 				if err := mgr.Reset(ctx, sandbox.ResetOptions{
-					Name:     name,
-					Clean:    clean,
-					NoPrompt: noPrompt,
+					Name:      name,
+					Clean:     clean,
+					NoPrompt:  noPrompt,
+					NoRestart: noRestart,
 				}); err != nil {
 					return err
 				}
@@ -39,6 +45,7 @@ func newResetCmd() *cobra.Command {
 
 	cmd.Flags().Bool("no-prompt", false, "Skip re-sending prompt after reset")
 	cmd.Flags().Bool("clean", false, "Also wipe agent-state directory")
+	cmd.Flags().Bool("no-restart", false, "Keep agent running, reset workspace in-place")
 
 	return cmd
 }

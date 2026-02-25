@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
@@ -578,4 +579,161 @@ func TestReset_OriginalMissing(t *testing.T) {
 	err := mgr.Reset(context.Background(), ResetOptions{Name: name})
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "original directory no longer exists")
+}
+
+// --no-restart tests
+
+func TestReset_NoRestart_SyncsWorkdir(t *testing.T) {
+	if _, err := exec.LookPath("rsync"); err != nil {
+		t.Skip("rsync not installed")
+	}
+
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	// Create original source directory
+	origDir := filepath.Join(tmpDir, "original")
+	require.NoError(t, os.MkdirAll(origDir, 0750))
+	writeTestFile(t, origDir, "file.txt", "original content\n")
+
+	// Create sandbox with work copy
+	name := "test-reset-norestart"
+	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
+	workDir := filepath.Join(sandboxDir, "work", EncodePath(origDir))
+	require.NoError(t, os.MkdirAll(workDir, 0750))
+
+	// Set up work copy with baseline
+	writeTestFile(t, workDir, "file.txt", "original content\n")
+	initGitRepo(t, workDir)
+	gitAdd(t, workDir, ".")
+	gitCommit(t, workDir, "yoloai baseline")
+	sha := gitHEAD(t, workDir)
+
+	meta := &Meta{
+		Name:      name,
+		Agent:     "claude",
+		HasPrompt: true,
+		CreatedAt: time.Now(),
+		Workdir: WorkdirMeta{
+			HostPath:    origDir,
+			MountPath:   origDir,
+			Mode:        "copy",
+			BaselineSHA: sha,
+		},
+	}
+	require.NoError(t, SaveMeta(sandboxDir, meta))
+
+	// Simulate agent changes in work copy
+	writeTestFile(t, workDir, "file.txt", "modified by agent\n")
+	writeTestFile(t, workDir, "agent-new.txt", "agent created this\n")
+
+	// Simulate upstream changes in original
+	writeTestFile(t, origDir, "file.txt", "updated upstream\n")
+	writeTestFile(t, origDir, "upstream-new.txt", "new upstream file\n")
+
+	// Mock: container is running
+	mock := &lifecycleMockClient{
+		containerInspectFn: func(_ context.Context, _ string) (container.InspectResponse, error) {
+			return container.InspectResponse{
+				ContainerJSONBase: &container.ContainerJSONBase{
+					ID:    "abc123def456",
+					State: &container.State{Running: true},
+				},
+			}, nil
+		},
+	}
+
+	mgr := newLifecycleMgr(mock)
+
+	// Reset with --no-restart. sendResetNotification will fail (no config.json
+	// and exec mock not wired), but workspace sync and baseline should succeed.
+	_ = mgr.Reset(context.Background(), ResetOptions{Name: name, NoRestart: true})
+
+	// Verify work copy was synced from updated original
+	content, err := os.ReadFile(filepath.Join(workDir, "file.txt")) //nolint:gosec // test
+	require.NoError(t, err)
+	assert.Equal(t, "updated upstream\n", string(content))
+
+	// Verify new upstream file was synced
+	content, err = os.ReadFile(filepath.Join(workDir, "upstream-new.txt")) //nolint:gosec // test
+	require.NoError(t, err)
+	assert.Equal(t, "new upstream file\n", string(content))
+
+	// Verify agent-created file was removed (rsync --delete)
+	assert.NoFileExists(t, filepath.Join(workDir, "agent-new.txt"))
+
+	// Verify new baseline SHA in meta
+	updatedMeta, err := LoadMeta(sandboxDir)
+	require.NoError(t, err)
+	assert.NotEmpty(t, updatedMeta.Workdir.BaselineSHA)
+	assert.NotEqual(t, sha, updatedMeta.Workdir.BaselineSHA)
+}
+
+func TestReset_NoRestart_FallsBackWhenNotRunning(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	// Create original source directory
+	origDir := filepath.Join(tmpDir, "original")
+	require.NoError(t, os.MkdirAll(origDir, 0750))
+	writeTestFile(t, origDir, "file.txt", "original content\n")
+
+	// Create sandbox with work copy
+	name := "test-reset-norestart-fallback"
+	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
+	workDir := filepath.Join(sandboxDir, "work", EncodePath(origDir))
+	require.NoError(t, os.MkdirAll(workDir, 0750))
+
+	writeTestFile(t, workDir, "file.txt", "original content\n")
+	initGitRepo(t, workDir)
+	gitAdd(t, workDir, ".")
+	gitCommit(t, workDir, "yoloai baseline")
+	sha := gitHEAD(t, workDir)
+
+	meta := &Meta{
+		Name:      name,
+		Agent:     "claude",
+		CreatedAt: time.Now(),
+		Workdir: WorkdirMeta{
+			HostPath:    origDir,
+			MountPath:   origDir,
+			Mode:        "copy",
+			BaselineSHA: sha,
+		},
+	}
+	require.NoError(t, SaveMeta(sandboxDir, meta))
+
+	// Modify work copy
+	writeTestFile(t, workDir, "file.txt", "modified by agent\n")
+
+	// Mock: container not found (removed)
+	mock := &lifecycleMockClient{
+		containerStopFn: func(_ context.Context, _ string, _ container.StopOptions) error {
+			return fmt.Errorf("not found: %w", cerrdefs.ErrNotFound)
+		},
+		containerInspectFn: func(_ context.Context, _ string) (container.InspectResponse, error) {
+			return container.InspectResponse{}, fmt.Errorf("not found: %w", cerrdefs.ErrNotFound)
+		},
+	}
+
+	var output bytes.Buffer
+	mgr := NewManager(mock, slog.Default(), &output)
+
+	// Reset with --no-restart; container not running → falls back to default path.
+	// Default path will fail at Start (no config.json), but re-copy should happen.
+	_ = mgr.Reset(context.Background(), ResetOptions{Name: name, NoRestart: true})
+
+	// Verify fallback message was printed
+	assert.Contains(t, output.String(), "Container is not running, falling back to restart")
+
+	// Verify work copy was re-copied from original (default reset behavior)
+	content, err := os.ReadFile(filepath.Join(workDir, "file.txt")) //nolint:gosec // test
+	require.NoError(t, err)
+	assert.Equal(t, "original content\n", string(content))
+
+	// Verify new baseline SHA in meta
+	updatedMeta, err := LoadMeta(sandboxDir)
+	require.NoError(t, err)
+	assert.NotEmpty(t, updatedMeta.Workdir.BaselineSHA)
+	assert.NotEqual(t, sha, updatedMeta.Workdir.BaselineSHA)
 }

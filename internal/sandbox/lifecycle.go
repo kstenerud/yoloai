@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 
 	cerrdefs "github.com/containerd/errdefs"
 	"github.com/docker/docker/api/types/container"
@@ -14,9 +16,10 @@ import (
 
 // ResetOptions holds parameters for the reset command.
 type ResetOptions struct {
-	Name     string
-	Clean    bool // also wipe agent-state directory
-	NoPrompt bool // skip re-sending prompt after reset
+	Name      string
+	Clean     bool // also wipe agent-state directory
+	NoPrompt  bool // skip re-sending prompt after reset
+	NoRestart bool // keep agent running, reset workspace in-place
 }
 
 // Stop stops a sandbox's container via Docker SDK.
@@ -123,6 +126,19 @@ func (m *Manager) Reset(ctx context.Context, opts ResetOptions) error {
 
 	if meta.Workdir.Mode == "rw" {
 		return fmt.Errorf("reset is not applicable for :rw directories — changes are already in the original")
+	}
+
+	// Check if we can do an in-place reset (--no-restart)
+	if opts.NoRestart {
+		status, _, err := DetectStatus(ctx, m.client, ContainerName(opts.Name))
+		if err != nil || status != StatusRunning {
+			fmt.Fprintf(m.output, "Container is not running, falling back to restart\n") //nolint:errcheck // best-effort output
+			opts.NoRestart = false
+		}
+	}
+
+	if opts.NoRestart {
+		return m.resetInPlace(ctx, opts, meta, sandboxDir)
 	}
 
 	// Stop the container (if running)
@@ -276,6 +292,89 @@ func (m *Manager) relaunchAgent(ctx context.Context, name string, _ *Meta) error
 	}
 
 	return nil
+}
+
+// resetInPlace resets the workspace while the agent is still running.
+// Syncs files from host, recreates git baseline, and notifies the agent via tmux.
+func (m *Manager) resetInPlace(ctx context.Context, opts ResetOptions, meta *Meta, sandboxDir string) error {
+	workDir := WorkDir(opts.Name, meta.Workdir.HostPath)
+
+	// Re-sync workdir from host (bind-mount makes changes visible in container)
+	if err := rsyncDir(meta.Workdir.HostPath, workDir); err != nil {
+		return fmt.Errorf("rsync workdir: %w", err)
+	}
+
+	// Strip git metadata from the synced copy (host repo's .git dirs)
+	if err := removeGitDirs(workDir); err != nil {
+		return fmt.Errorf("remove git dirs: %w", err)
+	}
+
+	// Re-create git baseline (host-side, visible in container via bind-mount)
+	newSHA, err := gitBaseline(workDir)
+	if err != nil {
+		return fmt.Errorf("re-create git baseline: %w", err)
+	}
+
+	// Update meta.json
+	meta.Workdir.BaselineSHA = newSHA
+	if err := SaveMeta(sandboxDir, meta); err != nil {
+		return err
+	}
+
+	// Notify agent via tmux
+	return m.sendResetNotification(ctx, opts.Name, sandboxDir, opts.NoPrompt, meta.HasPrompt)
+}
+
+// rsyncDir syncs contents of src into dst using rsync.
+// Trailing slashes ensure rsync copies contents, not the directory itself.
+func rsyncDir(src, dst string) error {
+	cmd := exec.Command("rsync", "-a", "--delete", src+"/", dst+"/")
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("rsync: %s: %w", strings.TrimSpace(string(output)), err)
+	}
+	return nil
+}
+
+const resetNotification = "[yoloai] Workspace has been reset to match the current host directory. " +
+	"All previous changes have been reverted and any new upstream changes are now present. " +
+	"Re-read files before assuming their contents."
+
+// sendResetNotification delivers a notification (and optionally the prompt)
+// to the running agent via tmux load-buffer + paste-buffer + send-keys.
+func (m *Manager) sendResetNotification(ctx context.Context, name, sandboxDir string, noPrompt, hasPrompt bool) error {
+	// Read config.json for submit_sequence
+	configData, err := os.ReadFile(filepath.Join(sandboxDir, "config.json")) //nolint:gosec // path is sandbox-controlled
+	if err != nil {
+		return fmt.Errorf("read config.json: %w", err)
+	}
+
+	var cfg containerConfig
+	if err := json.Unmarshal(configData, &cfg); err != nil {
+		return fmt.Errorf("parse config.json: %w", err)
+	}
+
+	// Build script to deliver notification via tmux.
+	// $1 carries the notification text (positional arg avoids shell injection).
+	appendPrompt := ":"
+	if !noPrompt && hasPrompt {
+		appendPrompt = `printf '\n\n' >> /tmp/yoloai-reset.txt; cat /yoloai/prompt.txt >> /tmp/yoloai-reset.txt`
+	}
+
+	script := fmt.Sprintf(`printf '%%s' "$1" > /tmp/yoloai-reset.txt
+%s
+tmux load-buffer /tmp/yoloai-reset.txt
+tmux paste-buffer -t main
+sleep 0.5
+for key in %s; do
+    tmux send-keys -t main "$key"
+    sleep 0.2
+done
+rm -f /tmp/yoloai-reset.txt`, appendPrompt, cfg.SubmitSequence)
+
+	_, err = execInContainer(ctx, m.client, ContainerName(name), []string{
+		"bash", "-c", script, "_", resetNotification,
+	})
+	return err
 }
 
 // isNotRunningErr checks if an error indicates the container is not running.
