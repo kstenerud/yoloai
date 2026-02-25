@@ -8,7 +8,7 @@ No code exists yet. All design docs are complete (DESIGN.md, CODING-STANDARD.md,
 
 **MVP commands:** `build`, `new`, `attach`, `show`, `diff`, `apply`, `list`, `log`, `exec`, `stop`, `start`, `destroy`, `reset`, `completion`, `version`
 
-**MVP features:** Full-copy only (Claude and test agents), credential injection, `--model` (with built-in aliases), `--agent` (`claude`, `test`), `--prompt-file`/stdin, `--replace`, `--no-start`, `--network-none`, `--port`, `--` agent arg passthrough, `--stat` on diff, `--yes` on apply/destroy, `--no-prompt`/`--clean` on reset, `--all`/multi-name on stop/destroy, smart destroy confirmation, dangerous directory detection, dirty git repo warning, path overlap detection, `YOLOAI_SANDBOX` env var, context-aware creation output, auto-paging for diff/log, shell completion, version info.
+**MVP features:** Full-copy only (Claude and test agents), credential injection, `--model` (with built-in aliases), `--agent` (`claude`, `test`), `--prompt-file`/stdin, `--replace`, `--no-start`, `--network-none`, `--port`, `--` agent arg passthrough, `--stat` on diff, `--yes` on apply/destroy, `--no-prompt`/`--clean`/`--no-restart` on reset, `--all`/multi-name on stop/destroy, smart destroy confirmation, dangerous directory detection, dirty git repo warning, path overlap detection, `YOLOAI_SANDBOX` env var, context-aware creation output, auto-paging for diff/log, shell completion, version info.
 
 **Deferred:** overlay strategy, network isolation/proxy, profiles, Codex agent, Viper config file parsing, `auto_commit_interval`, custom mount points (`=<path>`), `agent_files`, env var interpolation, context file, aux dirs (`-d`), `--resume`, `restart`, `wait`, `run`.
 
@@ -265,9 +265,11 @@ The core differentiator.
 
 **`yoloai destroy`:** Accepts multiple names (e.g., `yoloai destroy s1 s2 s3`). `--all` flag. Smart confirmation: only prompt when agent is still running or unapplied changes exist (check via `git status --porcelain` on host-side work directory, consistent with `list` CHANGES detection). `--yes` skips all confirmation. `docker stop` + `docker rm` + `os.RemoveAll` sandbox dir.
 
-**`yoloai reset`:** Full re-copy of workdir from original host directory with git baseline reset. Steps:
+**`yoloai reset`:** Full re-copy of workdir from original host directory with git baseline reset. Two modes:
+
+**Default (restart):**
 1. Stop the container (if running)
-2. Delete `work/<encoded-path>/` (the sandbox copy)
+2. Delete `work/<encoded-path>/` contents
 3. Re-copy workdir from original host dir via `cp -rp` to `work/<encoded-path>/`
 4. Re-create git baseline: if `.git/` exists in copy, record new HEAD SHA; else `git init + git add -A + git commit`
 5. Update `baseline_sha` in `meta.json`
@@ -275,7 +277,14 @@ The core differentiator.
 7. Start container (entrypoint runs as normal)
 8. If `prompt.txt` exists and `--no-prompt` not set, wait for agent ready and re-send prompt via tmux
 
-Options: `--no-prompt` (skip re-sending prompt), `--clean` (also wipe `agent-state/` for full reset).
+**`--no-restart` (keep agent running, MVP uses full copy strategy only):**
+1. Re-sync workdir from host: `rsync -a --delete` from original host dir to `work/<encoded-path>/` on the host (bind-mount makes changes immediately visible in container)
+2. Re-create git baseline inside container via `docker exec` (`git add -A && git commit -m "yoloai baseline" --allow-empty`)
+3. Update `baseline_sha` in `meta.json`
+4. Send notification to agent via tmux `send-keys`: notification text + original prompt from `prompt.txt` (or notification only if `--no-prompt`)
+5. Notification text: `"[yoloai] Workspace has been reset to match the current host directory. All previous changes have been reverted and any new upstream changes are now present. Re-read files before assuming their contents."`
+
+Options: `--no-prompt` (skip re-sending prompt, applies to both modes), `--clean` (also wipe `agent-state/`, mutually exclusive with `--no-restart`), `--no-restart` (keep agent running, reset workspace in-place, send notification). `--no-restart` when container is not running falls back to default behavior.
 
 **Verify:** Full lifecycle: new → stop → start → destroy. Reset: new with prompt → make changes → reset → verify clean workdir.
 

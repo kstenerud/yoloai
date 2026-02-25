@@ -761,11 +761,43 @@ This eliminates the need to diagnose *why* a sandbox isn't running before choosi
 
 ### `yoloai reset`
 
-`yoloai reset <name>` re-copies the workdir from the original host directory and resets the git baseline. The container is stopped and restarted. Sandbox configuration (`meta.json`) is preserved. By default, agent state (agent-state directory) is preserved and the original prompt from `prompt.txt` is re-sent to the agent after reset. Use case: retry the same task with a fresh workspace after the agent has made undesired changes. Only affects `:copy` directories — `:rw` directories reference the original and have no sandbox copy to reset.
+`yoloai reset <name>` re-copies the workdir from the original host directory and resets the git baseline. Sandbox configuration (`meta.json`) is preserved. Only affects `:copy` directories — `:rw` directories reference the original and have no sandbox copy to reset.
+
+**Default behavior (restart):**
+
+By default, the container is stopped and restarted. The agent loses its conversational context but gets a clean workspace synced from the host. Use case: retry the same task with a fresh workspace after the agent has made undesired changes.
+
+1. Stop the container (if running)
+2. Delete `work/<encoded-path>/` contents
+3. Re-copy workdir from original host dir via `cp -rp`
+4. Re-create git baseline
+5. Update `baseline_sha` in `meta.json`
+6. If `--clean`, also delete and recreate `agent-state/` directory
+7. Start container (entrypoint runs as normal)
+8. If `prompt.txt` exists and `--no-prompt` not set, wait for agent ready and re-send prompt via tmux
+
+**`--no-restart` behavior (keep agent running):**
+
+The agent stays running and retains its conversational context while the workspace is reset underneath it. Use case: host repo got new upstream commits (user merged a PR, fetched), user wants to update the agent's copy without losing conversational context.
+
+1. Re-sync workdir from host while container is running:
+   - Full copy strategy: `rsync -a --delete` from original host dir to `work/<encoded-path>/` on the host (bind-mount makes changes immediately visible in container)
+   - [POST-MVP] Overlay strategy: `docker exec` to unmount overlay, clear upper/work dirs, remount overlay (lower dir already reflects latest host state)
+2. Re-create git baseline inside container via `docker exec` (`git add -A && git commit -m "yoloai baseline" --allow-empty`)
+3. Update `baseline_sha` in `meta.json`
+4. Send notification to agent via tmux `send-keys`:
+   - Default (with prompt): notification text + original prompt from `prompt.txt`
+   - With `--no-prompt`: notification text only
+5. Notification text: `"[yoloai] Workspace has been reset to match the current host directory. All previous changes have been reverted and any new upstream changes are now present. Re-read files before assuming their contents."`
 
 Options:
-- `--no-prompt`: Skip re-sending the prompt after reset.
-- `--clean`: Wipe agent-state in addition to re-copying workdir. Full reset of both workspace and agent memory.
+- `--no-prompt`: Skip re-sending the prompt after reset (applies to both default and `--no-restart` modes).
+- `--clean`: Wipe agent-state in addition to re-copying workdir. Full reset of both workspace and agent memory. Mutually exclusive with `--no-restart` — error if both specified: "Cannot wipe agent state while agent is running. Use --clean without --no-restart, or stop the agent first."
+- `--no-restart`: Keep the agent running instead of stopping/restarting. Resets the workspace in-place and sends a notification to the agent. Requires the agent to be idle (if the agent is actively writing, results are undefined — caveat, not enforced).
+
+Constraints:
+- `--clean` + `--no-restart` is an error (see above).
+- `--no-restart` when container is not running: falls back to default behavior (start the container).
 
 ### [POST-MVP] `yoloai x` (Extensions)
 
