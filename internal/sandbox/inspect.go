@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -34,6 +35,7 @@ type Info struct {
 	Status      Status
 	ContainerID string // 12-char short ID, empty if removed
 	HasChanges  string // "yes", "no", or "-" (unknown/not applicable)
+	DiskUsage   string // human-readable size, e.g. "42.0MB"
 }
 
 // FormatAge returns a human-readable duration string (e.g., "2h", "3d", "5m").
@@ -48,6 +50,44 @@ func FormatAge(created time.Time) string {
 		return fmt.Sprintf("%dh", int(d.Hours()))
 	default:
 		return fmt.Sprintf("%dd", int(d.Hours()/24))
+	}
+}
+
+// DirSize recursively calculates the total size of all files under path.
+func DirSize(path string) (int64, error) {
+	var size int64
+	err := filepath.WalkDir(path, func(_ string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !d.IsDir() {
+			info, err := d.Info()
+			if err != nil {
+				return err
+			}
+			size += info.Size()
+		}
+		return nil
+	})
+	return size, err
+}
+
+// FormatSize returns a human-readable size string (e.g., "1.2GB", "340KB").
+func FormatSize(bytes int64) string {
+	const (
+		kb = 1024
+		mb = 1024 * kb
+		gb = 1024 * mb
+	)
+	switch {
+	case bytes >= gb:
+		return fmt.Sprintf("%.1fGB", float64(bytes)/float64(gb))
+	case bytes >= mb:
+		return fmt.Sprintf("%.1fMB", float64(bytes)/float64(mb))
+	case bytes >= kb:
+		return fmt.Sprintf("%dKB", bytes/kb)
+	default:
+		return fmt.Sprintf("%dB", bytes)
 	}
 }
 
@@ -165,11 +205,17 @@ func InspectSandbox(ctx context.Context, client docker.Client, name string) (*In
 	workDir := WorkDir(name, meta.Workdir.HostPath)
 	changes := detectChanges(workDir)
 
+	diskUsage := "-"
+	if size, err := DirSize(sandboxDir); err == nil {
+		diskUsage = FormatSize(size)
+	}
+
 	return &Info{
 		Meta:        meta,
 		Status:      status,
 		ContainerID: containerID,
 		HasChanges:  changes,
+		DiskUsage:   diskUsage,
 	}, nil
 }
 
