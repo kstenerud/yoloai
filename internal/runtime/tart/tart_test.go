@@ -9,10 +9,10 @@ import (
 	"github.com/kstenerud/yoloai/internal/runtime"
 )
 
-func TestVMName(t *testing.T) {
-	r := &Runtime{}
-	assert.Equal(t, "yoloai-mysandbox", r.vmName("mysandbox"))
-	assert.Equal(t, "yoloai-test-box", r.vmName("test-box"))
+func TestSandboxName(t *testing.T) {
+	assert.Equal(t, "mysandbox", sandboxName("yoloai-mysandbox"))
+	assert.Equal(t, "test-box", sandboxName("yoloai-test-box"))
+	assert.Equal(t, "plain", sandboxName("plain")) // no prefix — returns as-is
 }
 
 func TestExecArgs(t *testing.T) {

@@ -82,8 +82,7 @@ func New(_ context.Context) (*Runtime, error) {
 // the instance config to the sandbox directory.
 func (r *Runtime) Create(ctx context.Context, cfg runtime.InstanceConfig) error {
 	// Clone the base image to create an instance-specific VM
-	vmName := r.vmName(cfg.Name)
-	if _, err := r.runTart(ctx, "clone", cfg.ImageRef, vmName); err != nil {
+	if _, err := r.runTart(ctx, "clone", cfg.ImageRef, cfg.Name); err != nil {
 		return fmt.Errorf("clone VM: %w", err)
 	}
 
@@ -92,16 +91,15 @@ func (r *Runtime) Create(ctx context.Context, cfg runtime.InstanceConfig) error 
 
 // Start boots the VM in the background and runs the setup script.
 func (r *Runtime) Start(ctx context.Context, name string) error {
-	vmName := r.vmName(name)
-	sandboxPath := filepath.Join(r.sandboxDir, name)
+	sandboxPath := filepath.Join(r.sandboxDir, sandboxName(name))
 
 	// Check if already running
-	if r.isRunning(ctx, vmName) {
+	if r.isRunning(ctx, name) {
 		return nil
 	}
 
 	// Build tart run arguments
-	args := r.buildRunArgs(vmName, sandboxPath)
+	args := r.buildRunArgs(name, sandboxPath)
 
 	// Open log file for stderr capture
 	logPath := filepath.Join(sandboxPath, vmLogFileName)
@@ -138,14 +136,14 @@ func (r *Runtime) Start(ctx context.Context, name string) error {
 	logFile.Close() //nolint:errcheck,gosec // best-effort
 
 	// Wait for VM to become accessible
-	if err := r.waitForBoot(ctx, vmName); err != nil {
+	if err := r.waitForBoot(ctx, name); err != nil {
 		// Attempt cleanup
 		r.killByPID(sandboxPath)
 		return fmt.Errorf("wait for VM boot: %w", err)
 	}
 
 	// Deliver setup script via shared directory and run it
-	if err := r.runSetupScript(ctx, vmName, sandboxPath); err != nil {
+	if err := r.runSetupScript(ctx, name, sandboxPath); err != nil {
 		return fmt.Errorf("run setup script: %w", err)
 	}
 
@@ -154,19 +152,17 @@ func (r *Runtime) Start(ctx context.Context, name string) error {
 
 // Stop stops the VM with a clean shutdown.
 func (r *Runtime) Stop(ctx context.Context, name string) error {
-	vmName := r.vmName(name)
-
-	if !r.vmExists(ctx, vmName) {
+	if !r.vmExists(ctx, name) {
 		return nil
 	}
 
-	if !r.isRunning(ctx, vmName) {
+	if !r.isRunning(ctx, name) {
 		return nil
 	}
 
-	if _, err := r.runTart(ctx, "stop", vmName); err != nil {
+	if _, err := r.runTart(ctx, "stop", name); err != nil {
 		// Fall back to PID-based kill if tart stop fails
-		sandboxPath := filepath.Join(r.sandboxDir, name)
+		sandboxPath := filepath.Join(r.sandboxDir, sandboxName(name))
 		r.killByPID(sandboxPath)
 	}
 
@@ -175,19 +171,18 @@ func (r *Runtime) Stop(ctx context.Context, name string) error {
 
 // Remove deletes the VM and cleans up the PID file.
 func (r *Runtime) Remove(ctx context.Context, name string) error {
-	vmName := r.vmName(name)
-	sandboxPath := filepath.Join(r.sandboxDir, name)
+	sandboxPath := filepath.Join(r.sandboxDir, sandboxName(name))
 
 	// Stop first if running
 	_ = r.Stop(ctx, name)
 
-	if !r.vmExists(ctx, vmName) {
+	if !r.vmExists(ctx, name) {
 		// Clean up stale PID file
 		_ = os.Remove(filepath.Join(sandboxPath, pidFileName))
 		return nil
 	}
 
-	if _, err := r.runTart(ctx, "delete", vmName); err != nil {
+	if _, err := r.runTart(ctx, "delete", name); err != nil {
 		return fmt.Errorf("delete VM: %w", err)
 	}
 
@@ -198,27 +193,23 @@ func (r *Runtime) Remove(ctx context.Context, name string) error {
 
 // Inspect returns the current state of the VM instance.
 func (r *Runtime) Inspect(ctx context.Context, name string) (runtime.InstanceInfo, error) {
-	vmName := r.vmName(name)
-
-	if !r.vmExists(ctx, vmName) {
+	if !r.vmExists(ctx, name) {
 		return runtime.InstanceInfo{}, runtime.ErrNotFound
 	}
 
 	return runtime.InstanceInfo{
-		Running: r.isRunning(ctx, vmName),
+		Running: r.isRunning(ctx, name),
 	}, nil
 }
 
 // Exec runs a command inside the VM via tart exec and returns the result.
 // The user parameter is ignored — tart exec runs as the VM's logged-in user.
 func (r *Runtime) Exec(ctx context.Context, name string, cmd []string, _ string) (runtime.ExecResult, error) {
-	vmName := r.vmName(name)
-
-	if !r.isRunning(ctx, vmName) {
+	if !r.isRunning(ctx, name) {
 		return runtime.ExecResult{}, runtime.ErrNotRunning
 	}
 
-	args := execArgs(vmName, cmd...)
+	args := execArgs(name, cmd...)
 
 	c := exec.CommandContext(ctx, r.tartBin, args...) //nolint:gosec // G204: vmName and cmd are from validated sandbox state
 	var stdout, stderr bytes.Buffer
@@ -251,9 +242,7 @@ func (r *Runtime) Exec(ctx context.Context, name string, cmd []string, _ string)
 // out to tart exec with stdin/stdout/stderr connected.
 // The user parameter is ignored — tart exec runs as the VM's logged-in user.
 func (r *Runtime) InteractiveExec(ctx context.Context, name string, cmd []string, _ string) error {
-	vmName := r.vmName(name)
-
-	args := execArgs(vmName, cmd...)
+	args := execArgs(name, cmd...)
 
 	c := exec.CommandContext(ctx, r.tartBin, args...) //nolint:gosec // G204: vmName and cmd are from validated sandbox state
 	c.Stdin = os.Stdin
@@ -267,10 +256,14 @@ func (r *Runtime) Close() error {
 	return nil
 }
 
-// vmName returns the Tart VM name for a sandbox instance.
-// Prefixed to avoid collisions with user VMs.
-func (r *Runtime) vmName(sandboxName string) string {
-	return "yoloai-" + sandboxName
+// instancePrefix is prepended to sandbox names by the sandbox package
+// to form instance names. We strip it to recover the sandbox name for
+// constructing file-system paths.
+const instancePrefix = "yoloai-"
+
+// sandboxName strips the instance prefix to recover the sandbox name.
+func sandboxName(instanceName string) string {
+	return strings.TrimPrefix(instanceName, instancePrefix)
 }
 
 // buildRunArgs constructs the arguments for tart run.
