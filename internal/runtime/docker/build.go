@@ -1,3 +1,5 @@
+// Package docker provides Docker image seeding and building logic for yoloai-base.
+// ABOUTME: Handles resource checksums, conflict detection, and build streaming.
 package docker
 
 import (
@@ -16,6 +18,7 @@ import (
 	"time"
 
 	"github.com/docker/docker/api/types/build"
+	dockerclient "github.com/docker/docker/client"
 )
 
 const checksumFile = ".resource-checksums"
@@ -161,12 +164,35 @@ func NeedsBuild(sourceDir string) bool {
 	return string(last) != current
 }
 
-// BuildBaseImage builds the yoloai-base Docker image from the Dockerfile
+// RecordBuildChecksum writes the current build inputs checksum to disk.
+// Exported for testing; production code uses buildBaseImage which records
+// automatically on success.
+func RecordBuildChecksum(sourceDir string) {
+	if sum := buildInputsChecksum(sourceDir); sum != "" {
+		_ = os.WriteFile(filepath.Join(sourceDir, lastBuildFile), []byte(sum), 0600)
+	}
+}
+
+// buildInputsChecksum computes a combined SHA-256 of the build input files.
+func buildInputsChecksum(sourceDir string) string {
+	h := sha256.New()
+	for _, name := range []string{"Dockerfile.base", "entrypoint.sh", "tmux.conf"} {
+		data, err := os.ReadFile(filepath.Join(sourceDir, name)) //nolint:gosec // G304: sourceDir is ~/.yoloai/
+		if err != nil {
+			return ""
+		}
+		h.Write([]byte(name))
+		h.Write(data)
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// buildBaseImage builds the yoloai-base Docker image from the Dockerfile
 // and entrypoint in the given directory. Build output is streamed to the
 // provided writer (typically os.Stderr for user-visible progress).
 // On success, records a checksum of the build inputs so NeedsBuild can
 // detect when a rebuild is required.
-func BuildBaseImage(ctx context.Context, client Client, sourceDir string, output io.Writer, logger *slog.Logger) error {
+func buildBaseImage(ctx context.Context, client *dockerclient.Client, sourceDir string, output io.Writer, logger *slog.Logger) error {
 	buildCtx, err := createBuildContext(sourceDir)
 	if err != nil {
 		return fmt.Errorf("create build context: %w", err)
@@ -194,29 +220,6 @@ func BuildBaseImage(ctx context.Context, client Client, sourceDir string, output
 	}
 
 	return nil
-}
-
-// RecordBuildChecksum writes the current build inputs checksum to disk.
-// Exported for testing; production code uses BuildBaseImage which records
-// automatically on success.
-func RecordBuildChecksum(sourceDir string) {
-	if sum := buildInputsChecksum(sourceDir); sum != "" {
-		_ = os.WriteFile(filepath.Join(sourceDir, lastBuildFile), []byte(sum), 0600)
-	}
-}
-
-// buildInputsChecksum computes a combined SHA-256 of the build input files.
-func buildInputsChecksum(sourceDir string) string {
-	h := sha256.New()
-	for _, name := range []string{"Dockerfile.base", "entrypoint.sh", "tmux.conf"} {
-		data, err := os.ReadFile(filepath.Join(sourceDir, name)) //nolint:gosec // G304: sourceDir is ~/.yoloai/
-		if err != nil {
-			return ""
-		}
-		h.Write([]byte(name))
-		h.Write(data)
-	}
-	return hex.EncodeToString(h.Sum(nil))
 }
 
 // createBuildContext creates an in-memory tar archive containing the

@@ -5,11 +5,10 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"time"
 
-	"github.com/kstenerud/yoloai/internal/docker"
+	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/spf13/cobra"
 )
@@ -75,12 +74,8 @@ func newBuildCmd() *cobra.Command {
 			}
 			yoloaiDir := filepath.Join(homeDir, ".yoloai")
 
-			if _, err := docker.SeedResources(yoloaiDir); err != nil { //nolint:errcheck // explicit build always rebuilds
-				return err
-			}
-
-			return withClient(cmd, func(ctx context.Context, client docker.Client) error {
-				if err := docker.BuildBaseImage(ctx, client, yoloaiDir, os.Stderr, slog.Default()); err != nil {
+			return withRuntime(cmd, func(ctx context.Context, rt runtime.Runtime) error {
+				if err := rt.EnsureImage(ctx, yoloaiDir, os.Stderr, slog.Default(), true); err != nil {
 					return err
 				}
 
@@ -132,7 +127,8 @@ func newNewCmd(version string) *cobra.Command {
 			attach, _ := cmd.Flags().GetBool("attach")
 			yes, _ := cmd.Flags().GetBool("yes")
 
-			return withManager(cmd, func(ctx context.Context, mgr *sandbox.Manager) error {
+			return withRuntime(cmd, func(ctx context.Context, rt runtime.Runtime) error {
+				mgr := sandbox.NewManager(rt, slog.Default(), cmd.InOrStdin(), cmd.ErrOrStderr())
 				sandboxName, err := mgr.Create(ctx, sandbox.CreateOptions{
 					Name:        name,
 					WorkdirArg:  workdirArg,
@@ -158,12 +154,12 @@ func newNewCmd(version string) *cobra.Command {
 				}
 
 				// Wait for tmux session to be ready before attaching
-				containerName := sandbox.ContainerName(sandboxName)
-				if err := waitForTmux(ctx, containerName, 30*time.Second); err != nil {
+				containerName := sandbox.InstanceName(sandboxName)
+				if err := waitForTmux(ctx, rt, containerName, 30*time.Second); err != nil {
 					return fmt.Errorf("waiting for tmux session: %w", err)
 				}
 
-				return attachToSandbox(containerName)
+				return attachToSandbox(ctx, rt, containerName)
 			})
 		},
 	}
@@ -223,7 +219,7 @@ PowerShell:
 
 // waitForTmux polls until the tmux session is ready in the container.
 // Returns early if the container stops running or the context is cancelled.
-func waitForTmux(ctx context.Context, containerName string, timeout time.Duration) error {
+func waitForTmux(ctx context.Context, rt runtime.Runtime, containerName string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		// Check if context was cancelled (e.g. Ctrl+C)
@@ -232,13 +228,14 @@ func waitForTmux(ctx context.Context, containerName string, timeout time.Duratio
 		}
 
 		// Check if container is still running
-		inspect := exec.CommandContext(ctx, "docker", "inspect", "--format", "{{.State.Running}}", containerName) //nolint:gosec // G204: containerName is validated sandbox name
-		if out, err := inspect.Output(); err != nil || string(out) == "false\n" {
+		info, err := rt.Inspect(ctx, containerName)
+		if err != nil || !info.Running {
 			return fmt.Errorf("container %s is not running", containerName)
 		}
 
-		c := exec.CommandContext(ctx, "docker", "exec", containerName, "gosu", "yoloai", "tmux", "has-session", "-t", "main") //nolint:gosec // G204: containerName is validated sandbox name
-		if err := c.Run(); err == nil {
+		// Check if tmux session exists
+		_, err = rt.Exec(ctx, containerName, []string{"tmux", "has-session", "-t", "main"}, "yoloai")
+		if err == nil {
 			return nil
 		}
 
@@ -253,12 +250,8 @@ func waitForTmux(ctx context.Context, containerName string, timeout time.Duratio
 }
 
 // attachToSandbox attaches to the tmux session in a running container.
-func attachToSandbox(containerName string) error {
-	c := exec.Command("docker", "exec", "-it", "-u", "yoloai", containerName, "tmux", "attach", "-t", "main") //nolint:gosec // G204: containerName is validated sandbox name
-	c.Stdin = os.Stdin
-	c.Stdout = os.Stdout
-	c.Stderr = os.Stderr
-	return c.Run()
+func attachToSandbox(ctx context.Context, rt runtime.Runtime, containerName string) error {
+	return rt.InteractiveExec(ctx, containerName, []string{"tmux", "attach", "-t", "main"}, "yoloai")
 }
 
 func newVersionCmd(version, commit, date string) *cobra.Command {

@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/kstenerud/yoloai/internal/docker"
+	dockerrt "github.com/kstenerud/yoloai/internal/runtime/docker"
 )
 
 // errSetupPreview signals that the user chose [p] to preview the merged
@@ -166,7 +166,7 @@ func (m *Manager) promptTmuxSetup(userConfig string, noConfig bool) error {
 	case "p":
 		fmt.Fprintln(m.output)                                  //nolint:errcheck // best-effort output
 		fmt.Fprintln(m.output, "--- yoloai defaults ---")       //nolint:errcheck // best-effort output
-		fmt.Fprint(m.output, string(docker.EmbeddedTmuxConf())) //nolint:errcheck // best-effort output
+		fmt.Fprint(m.output, string(dockerrt.EmbeddedTmuxConf())) //nolint:errcheck // best-effort output
 		if !noConfig && userConfig != "" {
 			fmt.Fprintln(m.output)                        //nolint:errcheck // best-effort output
 			fmt.Fprintln(m.output, "--- your config ---") //nolint:errcheck // best-effort output

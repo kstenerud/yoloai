@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"os"
 
-	"github.com/kstenerud/yoloai/internal/docker"
+	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/spf13/cobra"
 )
@@ -20,12 +20,12 @@ func newStopCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			all, _ := cmd.Flags().GetBool("all")
 
-			return withClient(cmd, func(ctx context.Context, client docker.Client) error {
-				mgr := sandbox.NewManager(client, slog.Default(), cmd.InOrStdin(), cmd.ErrOrStderr())
+			return withRuntime(cmd, func(ctx context.Context, rt runtime.Runtime) error {
+				mgr := sandbox.NewManager(rt, slog.Default(), cmd.InOrStdin(), cmd.ErrOrStderr())
 
 				var names []string
 				if all {
-					infos, err := sandbox.ListSandboxes(ctx, client)
+					infos, err := sandbox.ListSandboxes(ctx, rt)
 					if err != nil {
 						return err
 					}

@@ -1,3 +1,4 @@
+// Package docker embeds Docker build resources (Dockerfile, entrypoint, tmux config).
 package docker
 
 import _ "embed"

@@ -13,88 +13,64 @@ import (
 	"strings"
 	"testing"
 
-	cerrdefs "github.com/containerd/errdefs"
-	"github.com/docker/docker/api/types"
-	"github.com/docker/docker/api/types/build"
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/image"
-	"github.com/docker/docker/api/types/network"
-	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/kstenerud/yoloai/internal/docker"
+	"github.com/kstenerud/yoloai/internal/runtime"
+	dockerrt "github.com/kstenerud/yoloai/internal/runtime/docker"
 )
 
 var errMockNotImplemented = fmt.Errorf("mock: not implemented")
 
-// mockClient implements docker.Client for testing.
-type mockClient struct {
-	imageExistsErr error // error returned by ImageInspectWithRaw
-	buildCalled    bool  // whether ImageBuild was invoked
-	buildErr       error // error returned by ImageBuild
+// mockRuntime implements runtime.Runtime for testing.
+type mockRuntime struct {
+	imageExistsResult bool  // returned by ImageExists
+	imageExistsErr    error // error returned by ImageExists
+	ensureImageCalled bool  // whether EnsureImage was invoked
+	ensureImageErr    error // error returned by EnsureImage
 }
 
 // Compile-time check.
-var _ docker.Client = (*mockClient)(nil)
+var _ runtime.Runtime = (*mockRuntime)(nil)
 
-func (m *mockClient) ImageBuild(_ context.Context, _ io.Reader, _ build.ImageBuildOptions) (build.ImageBuildResponse, error) {
-	m.buildCalled = true
-	if m.buildErr != nil {
-		return build.ImageBuildResponse{}, m.buildErr
-	}
-	body := io.NopCloser(bytes.NewReader([]byte("{\"stream\":\"done\\n\"}\n")))
-	return build.ImageBuildResponse{Body: body}, nil
+func (m *mockRuntime) EnsureImage(_ context.Context, _ string, _ io.Writer, _ *slog.Logger, _ bool) error {
+	m.ensureImageCalled = true
+	return m.ensureImageErr
 }
 
-func (m *mockClient) ImageInspectWithRaw(_ context.Context, _ string) (image.InspectResponse, []byte, error) {
-	if m.imageExistsErr != nil {
-		return image.InspectResponse{}, nil, m.imageExistsErr
-	}
-	return image.InspectResponse{}, nil, nil
+func (m *mockRuntime) ImageExists(_ context.Context, _ string) (bool, error) {
+	return m.imageExistsResult, m.imageExistsErr
 }
 
-func (m *mockClient) ContainerCreate(_ context.Context, _ *container.Config, _ *container.HostConfig, _ *network.NetworkingConfig, _ *ocispec.Platform, _ string) (container.CreateResponse, error) {
-	return container.CreateResponse{}, errMockNotImplemented
-}
-
-func (m *mockClient) ContainerStart(_ context.Context, _ string, _ container.StartOptions) error {
+func (m *mockRuntime) Create(_ context.Context, _ runtime.InstanceConfig) error {
 	return errMockNotImplemented
 }
 
-func (m *mockClient) ContainerStop(_ context.Context, _ string, _ container.StopOptions) error {
+func (m *mockRuntime) Start(_ context.Context, _ string) error {
 	return errMockNotImplemented
 }
 
-func (m *mockClient) ContainerRemove(_ context.Context, _ string, _ container.RemoveOptions) error {
+func (m *mockRuntime) Stop(_ context.Context, _ string) error {
 	return errMockNotImplemented
 }
 
-func (m *mockClient) ContainerList(_ context.Context, _ container.ListOptions) ([]container.Summary, error) {
-	return nil, errMockNotImplemented
+func (m *mockRuntime) Remove(_ context.Context, _ string) error {
+	return errMockNotImplemented
 }
 
-func (m *mockClient) ContainerInspect(_ context.Context, _ string) (container.InspectResponse, error) {
-	return container.InspectResponse{}, errMockNotImplemented
+func (m *mockRuntime) Inspect(_ context.Context, _ string) (runtime.InstanceInfo, error) {
+	return runtime.InstanceInfo{}, errMockNotImplemented
 }
 
-func (m *mockClient) ContainerExecCreate(_ context.Context, _ string, _ container.ExecOptions) (container.ExecCreateResponse, error) {
-	return container.ExecCreateResponse{}, errMockNotImplemented
+func (m *mockRuntime) Exec(_ context.Context, _ string, _ []string, _ string) (runtime.ExecResult, error) {
+	return runtime.ExecResult{}, errMockNotImplemented
 }
 
-func (m *mockClient) ContainerExecAttach(_ context.Context, _ string, _ container.ExecAttachOptions) (types.HijackedResponse, error) {
-	return types.HijackedResponse{}, errMockNotImplemented
+func (m *mockRuntime) InteractiveExec(_ context.Context, _ string, _ []string, _ string) error {
+	return errMockNotImplemented
 }
 
-func (m *mockClient) ContainerExecInspect(_ context.Context, _ string) (container.ExecInspect, error) {
-	return container.ExecInspect{}, errMockNotImplemented
-}
-
-func (m *mockClient) Ping(_ context.Context) (types.Ping, error) {
-	return types.Ping{}, errMockNotImplemented
-}
-
-func (m *mockClient) Close() error {
+func (m *mockRuntime) Close() error {
 	return nil
 }
 
@@ -102,7 +78,7 @@ func TestEnsureSetup_CreatesDirectories(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
 
-	mock := &mockClient{} // image exists (no error)
+	mock := &mockRuntime{} // image exists (no error)
 	mgr := NewManager(mock, slog.Default(), strings.NewReader(""), io.Discard)
 
 	err := mgr.EnsureSetup(context.Background())
@@ -120,7 +96,7 @@ func TestEnsureSetup_WritesConfigOnFirstRun(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
 
-	mock := &mockClient{}
+	mock := &mockRuntime{}
 	var output bytes.Buffer
 	mgr := NewManager(mock, slog.Default(), strings.NewReader(""), &output)
 
@@ -146,7 +122,7 @@ func TestEnsureSetup_SkipsConfigOnSubsequentRun(t *testing.T) {
 	customContent := []byte("# custom config\nsetup_complete: true\ndefaults:\n  agent: claude\n")
 	require.NoError(t, os.WriteFile(filepath.Join(yoloaiDir, "config.yaml"), customContent, 0600))
 
-	mock := &mockClient{}
+	mock := &mockRuntime{}
 	var output bytes.Buffer
 	mgr := NewManager(mock, slog.Default(), strings.NewReader(""), &output)
 
@@ -168,16 +144,16 @@ func TestEnsureSetup_SkipsBuildWhenImageExists(t *testing.T) {
 
 	// Pre-seed resources and simulate a prior successful build
 	yoloaiDir := filepath.Join(tmpDir, ".yoloai")
-	_, err := docker.SeedResources(yoloaiDir)
+	_, err := dockerrt.SeedResources(yoloaiDir)
 	require.NoError(t, err)
-	docker.RecordBuildChecksum(yoloaiDir)
+	dockerrt.RecordBuildChecksum(yoloaiDir)
 
-	mock := &mockClient{} // imageExistsErr is nil → image exists
+	mock := &mockRuntime{} // EnsureImage returns nil (success)
 	mgr := NewManager(mock, slog.Default(), strings.NewReader(""), io.Discard)
 
 	err = mgr.EnsureSetup(context.Background())
 	require.NoError(t, err)
-	assert.False(t, mock.buildCalled, "ImageBuild should not be called when image exists and resources unchanged")
+	assert.True(t, mock.ensureImageCalled, "EnsureImage should be called")
 }
 
 func TestEnsureSetup_RebuildWhenResourcesChanged(t *testing.T) {
@@ -186,7 +162,7 @@ func TestEnsureSetup_RebuildWhenResourcesChanged(t *testing.T) {
 
 	// First seed to establish checksum manifest
 	yoloaiDir := filepath.Join(tmpDir, ".yoloai")
-	_, err := docker.SeedResources(yoloaiDir)
+	_, err := dockerrt.SeedResources(yoloaiDir)
 	require.NoError(t, err)
 
 	// Simulate a binary upgrade: write stale content with matching checksums
@@ -204,28 +180,24 @@ func TestEnsureSetup_RebuildWhenResourcesChanged(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(checksumPath, updated, 0600))
 
-	mock := &mockClient{} // image exists
+	mock := &mockRuntime{} // EnsureImage returns nil (success)
 	var output bytes.Buffer
 	mgr := NewManager(mock, slog.Default(), strings.NewReader(""), &output)
 
 	err = mgr.EnsureSetup(context.Background())
 	require.NoError(t, err)
-	assert.True(t, mock.buildCalled, "ImageBuild should be called when resources changed")
-	assert.Contains(t, output.String(), "resources updated")
+	assert.True(t, mock.ensureImageCalled, "EnsureImage should be called when resources changed")
 }
 
 func TestEnsureSetup_BuildsWhenImageMissing(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
 
-	mock := &mockClient{
-		imageExistsErr: fmt.Errorf("not found: %w", cerrdefs.ErrNotFound),
-	}
+	mock := &mockRuntime{} // EnsureImage returns nil (success)
 	var output bytes.Buffer
 	mgr := NewManager(mock, slog.Default(), strings.NewReader(""), &output)
 
 	err := mgr.EnsureSetup(context.Background())
 	require.NoError(t, err)
-	assert.True(t, mock.buildCalled, "ImageBuild should be called when image is missing")
-	assert.Contains(t, output.String(), "Building base image")
+	assert.True(t, mock.ensureImageCalled, "EnsureImage should be called when image is missing")
 }

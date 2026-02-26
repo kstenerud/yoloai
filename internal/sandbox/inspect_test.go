@@ -8,23 +8,23 @@ import (
 	"testing"
 	"time"
 
-	cerrdefs "github.com/containerd/errdefs"
-	"github.com/docker/docker/api/types/container"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/kstenerud/yoloai/internal/runtime"
 )
 
-// inspectMockClient extends mockClient to support ContainerInspect for inspect tests.
-type inspectMockClient struct {
-	mockClient
-	containerInspectFn func(ctx context.Context, id string) (container.InspectResponse, error)
+// inspectMockRuntime extends mockRuntime to support Inspect for inspect tests.
+type inspectMockRuntime struct {
+	mockRuntime
+	inspectFn func(ctx context.Context, name string) (runtime.InstanceInfo, error)
 }
 
-func (m *inspectMockClient) ContainerInspect(ctx context.Context, id string) (container.InspectResponse, error) {
-	if m.containerInspectFn != nil {
-		return m.containerInspectFn(ctx, id)
+func (m *inspectMockRuntime) Inspect(ctx context.Context, name string) (runtime.InstanceInfo, error) {
+	if m.inspectFn != nil {
+		return m.inspectFn(ctx, name)
 	}
-	return container.InspectResponse{}, errMockNotImplemented
+	return runtime.InstanceInfo{}, errMockNotImplemented
 }
 
 // FormatAge tests
@@ -98,7 +98,7 @@ func TestInspectSandbox_NotFound(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
 
-	mock := &inspectMockClient{}
+	mock := &inspectMockRuntime{}
 	_, err := InspectSandbox(context.Background(), mock, "nonexistent")
 	assert.ErrorIs(t, err, ErrSandboxNotFound)
 }
@@ -122,9 +122,9 @@ func TestInspectSandbox_Removed(t *testing.T) {
 	}
 	require.NoError(t, SaveMeta(sandboxDir, meta))
 
-	mock := &inspectMockClient{
-		containerInspectFn: func(_ context.Context, _ string) (container.InspectResponse, error) {
-			return container.InspectResponse{}, fmt.Errorf("not found: %w", cerrdefs.ErrNotFound)
+	mock := &inspectMockRuntime{
+		inspectFn: func(_ context.Context, _ string) (runtime.InstanceInfo, error) {
+			return runtime.InstanceInfo{}, fmt.Errorf("not found: %w", runtime.ErrNotFound)
 		},
 	}
 
@@ -143,7 +143,7 @@ func TestListSandboxes_Empty(t *testing.T) {
 	// Create sandboxes dir but leave it empty
 	require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, ".yoloai", "sandboxes"), 0750))
 
-	mock := &inspectMockClient{}
+	mock := &inspectMockRuntime{}
 	result, err := ListSandboxes(context.Background(), mock)
 	require.NoError(t, err)
 	assert.Empty(t, result)
@@ -174,9 +174,9 @@ func TestListSandboxes_SkipsBroken(t *testing.T) {
 	brokenDir := filepath.Join(sandboxesDir, "broken")
 	require.NoError(t, os.MkdirAll(brokenDir, 0750))
 
-	mock := &inspectMockClient{
-		containerInspectFn: func(_ context.Context, _ string) (container.InspectResponse, error) {
-			return container.InspectResponse{}, fmt.Errorf("not found: %w", cerrdefs.ErrNotFound)
+	mock := &inspectMockRuntime{
+		inspectFn: func(_ context.Context, _ string) (runtime.InstanceInfo, error) {
+			return runtime.InstanceInfo{}, fmt.Errorf("not found: %w", runtime.ErrNotFound)
 		},
 	}
 

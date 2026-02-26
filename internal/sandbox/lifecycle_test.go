@@ -13,52 +13,52 @@ import (
 	"testing"
 	"time"
 
-	cerrdefs "github.com/containerd/errdefs"
-	"github.com/docker/docker/api/types/container"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/kstenerud/yoloai/internal/runtime"
 )
 
-// lifecycleMockClient extends mockClient for lifecycle tests.
-type lifecycleMockClient struct {
-	mockClient
-	containerStopFn    func(ctx context.Context, id string, opts container.StopOptions) error
-	containerStartFn   func(ctx context.Context, id string, opts container.StartOptions) error
-	containerRemoveFn  func(ctx context.Context, id string, opts container.RemoveOptions) error
-	containerInspectFn func(ctx context.Context, id string) (container.InspectResponse, error)
+// lifecycleMockRuntime extends mockRuntime for lifecycle tests.
+type lifecycleMockRuntime struct {
+	mockRuntime
+	stopFn    func(ctx context.Context, name string) error
+	startFn   func(ctx context.Context, name string) error
+	removeFn  func(ctx context.Context, name string) error
+	inspectFn func(ctx context.Context, name string) (runtime.InstanceInfo, error)
 }
 
-func (m *lifecycleMockClient) ContainerStop(ctx context.Context, id string, opts container.StopOptions) error {
-	if m.containerStopFn != nil {
-		return m.containerStopFn(ctx, id, opts)
+func (m *lifecycleMockRuntime) Stop(ctx context.Context, name string) error {
+	if m.stopFn != nil {
+		return m.stopFn(ctx, name)
 	}
 	return nil
 }
 
-func (m *lifecycleMockClient) ContainerStart(ctx context.Context, id string, opts container.StartOptions) error {
-	if m.containerStartFn != nil {
-		return m.containerStartFn(ctx, id, opts)
+func (m *lifecycleMockRuntime) Start(ctx context.Context, name string) error {
+	if m.startFn != nil {
+		return m.startFn(ctx, name)
 	}
 	return nil
 }
 
-func (m *lifecycleMockClient) ContainerRemove(ctx context.Context, id string, opts container.RemoveOptions) error {
-	if m.containerRemoveFn != nil {
-		return m.containerRemoveFn(ctx, id, opts)
+func (m *lifecycleMockRuntime) Remove(ctx context.Context, name string) error {
+	if m.removeFn != nil {
+		return m.removeFn(ctx, name)
 	}
 	return nil
 }
 
-func (m *lifecycleMockClient) ContainerInspect(ctx context.Context, id string) (container.InspectResponse, error) {
-	if m.containerInspectFn != nil {
-		return m.containerInspectFn(ctx, id)
+func (m *lifecycleMockRuntime) Inspect(ctx context.Context, name string) (runtime.InstanceInfo, error) {
+	if m.inspectFn != nil {
+		return m.inspectFn(ctx, name)
 	}
-	return container.InspectResponse{}, errMockNotImplemented
+	return runtime.InstanceInfo{}, errMockNotImplemented
 }
 
-// newLifecycleMgr creates a Manager with the given mock client and a discard output.
-func newLifecycleMgr(client *lifecycleMockClient) *Manager {
-	return NewManager(client, slog.Default(), strings.NewReader(""), io.Discard)
+// newLifecycleMgr creates a Manager with the given mock runtime and a discard output.
+func newLifecycleMgr(rt *lifecycleMockRuntime) *Manager {
+	return NewManager(rt, slog.Default(), strings.NewReader(""), io.Discard)
 }
 
 // createTestSandbox creates a sandbox directory with meta.json for lifecycle tests.
@@ -89,8 +89,8 @@ func TestStop_Running(t *testing.T) {
 	createTestSandbox(t, tmpDir, "test-stop", "/tmp/project", "copy")
 
 	stopCalled := false
-	mock := &lifecycleMockClient{
-		containerStopFn: func(_ context.Context, _ string, _ container.StopOptions) error {
+	mock := &lifecycleMockRuntime{
+		stopFn: func(_ context.Context, _ string) error {
 			stopCalled = true
 			return nil
 		},
@@ -108,9 +108,10 @@ func TestStop_AlreadyStopped(t *testing.T) {
 
 	createTestSandbox(t, tmpDir, "test-stop-already", "/tmp/project", "copy")
 
-	mock := &lifecycleMockClient{
-		containerStopFn: func(_ context.Context, _ string, _ container.StopOptions) error {
-			return fmt.Errorf("conflict: %w", cerrdefs.ErrConflict)
+	// Runtime.Stop returns nil when already stopped (contract guarantee).
+	mock := &lifecycleMockRuntime{
+		stopFn: func(_ context.Context, _ string) error {
+			return nil
 		},
 	}
 
@@ -125,9 +126,10 @@ func TestStop_ContainerRemoved(t *testing.T) {
 
 	createTestSandbox(t, tmpDir, "test-stop-removed", "/tmp/project", "copy")
 
-	mock := &lifecycleMockClient{
-		containerStopFn: func(_ context.Context, _ string, _ container.StopOptions) error {
-			return fmt.Errorf("not found: %w", cerrdefs.ErrNotFound)
+	// Runtime.Stop returns nil when instance not found (contract guarantee).
+	mock := &lifecycleMockRuntime{
+		stopFn: func(_ context.Context, _ string) error {
+			return nil
 		},
 	}
 
@@ -140,7 +142,7 @@ func TestStop_SandboxNotFound(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
 
-	mock := &lifecycleMockClient{}
+	mock := &lifecycleMockRuntime{}
 	mgr := newLifecycleMgr(mock)
 	err := mgr.Stop(context.Background(), "nonexistent")
 	assert.ErrorIs(t, err, ErrSandboxNotFound)
@@ -154,24 +156,17 @@ func TestStart_AlreadyRunning(t *testing.T) {
 
 	createTestSandbox(t, tmpDir, "test-start-running", "/tmp/project", "copy")
 
-	mock := &lifecycleMockClient{
-		containerInspectFn: func(_ context.Context, _ string) (container.InspectResponse, error) {
-			return container.InspectResponse{
-				ContainerJSONBase: &container.ContainerJSONBase{
-					ID:    "abc123def456",
-					State: &container.State{Running: true},
-				},
-			}, nil
+	mock := &lifecycleMockRuntime{
+		inspectFn: func(_ context.Context, _ string) (runtime.InstanceInfo, error) {
+			return runtime.InstanceInfo{Running: true}, nil
 		},
 	}
-	// Mock exec for tmux pane detection — return "running" (pane alive)
-	mock.mockClient = mockClient{}
 
 	var output bytes.Buffer
 	mgr := NewManager(mock, slog.Default(), strings.NewReader(""), &output)
 
-	// DetectStatus will call ContainerInspect (running=true),
-	// then try execInContainer for tmux. Since our mock returns errMockNotImplemented
+	// DetectStatus will call Inspect (running=true),
+	// then try Exec for tmux. Since our mock returns errMockNotImplemented
 	// for exec, DetectStatus defaults to StatusRunning.
 	err := mgr.Start(context.Background(), "test-start-running")
 	require.NoError(t, err)
@@ -185,17 +180,12 @@ func TestStart_Stopped(t *testing.T) {
 	createTestSandbox(t, tmpDir, "test-start-stopped", "/tmp/project", "copy")
 
 	startCalled := false
-	mock := &lifecycleMockClient{
-		containerInspectFn: func(_ context.Context, _ string) (container.InspectResponse, error) {
+	mock := &lifecycleMockRuntime{
+		inspectFn: func(_ context.Context, _ string) (runtime.InstanceInfo, error) {
 			running := startCalled // after start, report as running
-			return container.InspectResponse{
-				ContainerJSONBase: &container.ContainerJSONBase{
-					ID:    "abc123def456",
-					State: &container.State{Running: running},
-				},
-			}, nil
+			return runtime.InstanceInfo{Running: running}, nil
 		},
-		containerStartFn: func(_ context.Context, _ string, _ container.StartOptions) error {
+		startFn: func(_ context.Context, _ string) error {
 			startCalled = true
 			return nil
 		},
@@ -214,7 +204,7 @@ func TestStart_SandboxNotFound(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
 
-	mock := &lifecycleMockClient{}
+	mock := &lifecycleMockRuntime{}
 	mgr := newLifecycleMgr(mock)
 	err := mgr.Start(context.Background(), "nonexistent")
 	assert.ErrorIs(t, err, ErrSandboxNotFound)
@@ -226,9 +216,9 @@ func TestStart_Removed(t *testing.T) {
 
 	createTestSandbox(t, tmpDir, "test-start-removed", "/tmp/project", "copy")
 
-	mock := &lifecycleMockClient{
-		containerInspectFn: func(_ context.Context, _ string) (container.InspectResponse, error) {
-			return container.InspectResponse{}, fmt.Errorf("not found: %w", cerrdefs.ErrNotFound)
+	mock := &lifecycleMockRuntime{
+		inspectFn: func(_ context.Context, _ string) (runtime.InstanceInfo, error) {
+			return runtime.InstanceInfo{}, fmt.Errorf("not found: %w", runtime.ErrNotFound)
 		},
 	}
 
@@ -250,14 +240,9 @@ func TestNeedsConfirmation_Running(t *testing.T) {
 
 	createTestSandbox(t, tmpDir, "test-confirm-running", "/tmp/project", "copy")
 
-	mock := &lifecycleMockClient{
-		containerInspectFn: func(_ context.Context, _ string) (container.InspectResponse, error) {
-			return container.InspectResponse{
-				ContainerJSONBase: &container.ContainerJSONBase{
-					ID:    "abc123def456",
-					State: &container.State{Running: true},
-				},
-			}, nil
+	mock := &lifecycleMockRuntime{
+		inspectFn: func(_ context.Context, _ string) (runtime.InstanceInfo, error) {
+			return runtime.InstanceInfo{Running: true}, nil
 		},
 	}
 
@@ -298,15 +283,10 @@ func TestNeedsConfirmation_ChangesExist(t *testing.T) {
 	// Make changes in work dir
 	writeTestFile(t, workDir, "file.txt", "modified")
 
-	mock := &lifecycleMockClient{
-		containerInspectFn: func(_ context.Context, _ string) (container.InspectResponse, error) {
+	mock := &lifecycleMockRuntime{
+		inspectFn: func(_ context.Context, _ string) (runtime.InstanceInfo, error) {
 			// Container not running
-			return container.InspectResponse{
-				ContainerJSONBase: &container.ContainerJSONBase{
-					ID:    "abc123def456",
-					State: &container.State{Running: false},
-				},
-			}, nil
+			return runtime.InstanceInfo{Running: false}, nil
 		},
 	}
 
@@ -344,14 +324,9 @@ func TestNeedsConfirmation_NoChanges(t *testing.T) {
 	}
 	require.NoError(t, SaveMeta(sandboxDir, meta))
 
-	mock := &lifecycleMockClient{
-		containerInspectFn: func(_ context.Context, _ string) (container.InspectResponse, error) {
-			return container.InspectResponse{
-				ContainerJSONBase: &container.ContainerJSONBase{
-					ID:    "abc123def456",
-					State: &container.State{Running: false},
-				},
-			}, nil
+	mock := &lifecycleMockRuntime{
+		inspectFn: func(_ context.Context, _ string) (runtime.InstanceInfo, error) {
+			return runtime.InstanceInfo{Running: false}, nil
 		},
 	}
 
@@ -369,7 +344,7 @@ func TestDestroy_RemovesDir(t *testing.T) {
 
 	createTestSandbox(t, tmpDir, "test-destroy", "/tmp/project", "copy")
 
-	mock := &lifecycleMockClient{}
+	mock := &lifecycleMockRuntime{}
 	mgr := newLifecycleMgr(mock)
 
 	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", "test-destroy")
@@ -384,7 +359,7 @@ func TestDestroy_SandboxNotFound(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
 
-	mock := &lifecycleMockClient{}
+	mock := &lifecycleMockRuntime{}
 	mgr := newLifecycleMgr(mock)
 	err := mgr.Destroy(context.Background(), "nonexistent", true)
 	assert.ErrorIs(t, err, ErrSandboxNotFound)
@@ -433,15 +408,15 @@ func TestReset_RecopiesWorkdir(t *testing.T) {
 	// Reset needs Start to work, which needs Docker. Stop will also
 	// try Docker. Since we just want to test the re-copy logic,
 	// mock everything to succeed/no-op.
-	mock := &lifecycleMockClient{
+	mock := &lifecycleMockRuntime{
 		// Stop: already stopped
-		containerStopFn: func(_ context.Context, _ string, _ container.StopOptions) error {
-			return fmt.Errorf("not found: %w", cerrdefs.ErrNotFound)
+		stopFn: func(_ context.Context, _ string) error {
+			return nil // runtime returns nil when instance not found
 		},
 		// Start: container removed, recreate will fail (no config.json), but
 		// we still check the re-copy happened
-		containerInspectFn: func(_ context.Context, _ string) (container.InspectResponse, error) {
-			return container.InspectResponse{}, fmt.Errorf("not found: %w", cerrdefs.ErrNotFound)
+		inspectFn: func(_ context.Context, _ string) (runtime.InstanceInfo, error) {
+			return runtime.InstanceInfo{}, fmt.Errorf("not found: %w", runtime.ErrNotFound)
 		},
 	}
 
@@ -500,12 +475,12 @@ func TestReset_Clean(t *testing.T) {
 	}
 	require.NoError(t, SaveMeta(sandboxDir, meta))
 
-	mock := &lifecycleMockClient{
-		containerStopFn: func(_ context.Context, _ string, _ container.StopOptions) error {
-			return fmt.Errorf("not found: %w", cerrdefs.ErrNotFound)
+	mock := &lifecycleMockRuntime{
+		stopFn: func(_ context.Context, _ string) error {
+			return nil // runtime returns nil when instance not found
 		},
-		containerInspectFn: func(_ context.Context, _ string) (container.InspectResponse, error) {
-			return container.InspectResponse{}, fmt.Errorf("not found: %w", cerrdefs.ErrNotFound)
+		inspectFn: func(_ context.Context, _ string) (runtime.InstanceInfo, error) {
+			return runtime.InstanceInfo{}, fmt.Errorf("not found: %w", runtime.ErrNotFound)
 		},
 	}
 
@@ -527,7 +502,7 @@ func TestReset_RWMode_Error(t *testing.T) {
 	require.NoError(t, os.MkdirAll(hostDir, 0750))
 	createRWSandbox(t, tmpDir, "test-reset-rw", hostDir)
 
-	mock := &lifecycleMockClient{}
+	mock := &lifecycleMockRuntime{}
 	mgr := newLifecycleMgr(mock)
 
 	err := mgr.Reset(context.Background(), ResetOptions{Name: "test-reset-rw"})
@@ -571,9 +546,9 @@ func TestReset_OriginalMissing(t *testing.T) {
 	// Delete the original
 	require.NoError(t, os.RemoveAll(origDir))
 
-	mock := &lifecycleMockClient{
-		containerStopFn: func(_ context.Context, _ string, _ container.StopOptions) error {
-			return fmt.Errorf("not found: %w", cerrdefs.ErrNotFound)
+	mock := &lifecycleMockRuntime{
+		stopFn: func(_ context.Context, _ string) error {
+			return nil // runtime returns nil when instance not found
 		},
 	}
 
@@ -634,14 +609,9 @@ func TestReset_NoRestart_SyncsWorkdir(t *testing.T) {
 	writeTestFile(t, origDir, "upstream-new.txt", "new upstream file\n")
 
 	// Mock: container is running
-	mock := &lifecycleMockClient{
-		containerInspectFn: func(_ context.Context, _ string) (container.InspectResponse, error) {
-			return container.InspectResponse{
-				ContainerJSONBase: &container.ContainerJSONBase{
-					ID:    "abc123def456",
-					State: &container.State{Running: true},
-				},
-			}, nil
+	mock := &lifecycleMockRuntime{
+		inspectFn: func(_ context.Context, _ string) (runtime.InstanceInfo, error) {
+			return runtime.InstanceInfo{Running: true}, nil
 		},
 	}
 
@@ -709,12 +679,12 @@ func TestReset_NoRestart_FallsBackWhenNotRunning(t *testing.T) {
 	writeTestFile(t, workDir, "file.txt", "modified by agent\n")
 
 	// Mock: container not found (removed)
-	mock := &lifecycleMockClient{
-		containerStopFn: func(_ context.Context, _ string, _ container.StopOptions) error {
-			return fmt.Errorf("not found: %w", cerrdefs.ErrNotFound)
+	mock := &lifecycleMockRuntime{
+		stopFn: func(_ context.Context, _ string) error {
+			return nil // runtime returns nil when instance not found
 		},
-		containerInspectFn: func(_ context.Context, _ string) (container.InspectResponse, error) {
-			return container.InspectResponse{}, fmt.Errorf("not found: %w", cerrdefs.ErrNotFound)
+		inspectFn: func(_ context.Context, _ string) (runtime.InstanceInfo, error) {
+			return runtime.InstanceInfo{}, fmt.Errorf("not found: %w", runtime.ErrNotFound)
 		},
 	}
 

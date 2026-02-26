@@ -8,10 +8,9 @@ import (
 	"os"
 	"os/exec"
 
-	"github.com/kstenerud/yoloai/internal/docker"
+	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/spf13/cobra"
-	"golang.org/x/term"
 )
 
 func newExecCmd() *cobra.Command {
@@ -30,8 +29,8 @@ func newExecCmd() *cobra.Command {
 			}
 			cmdArgs := rest
 
-			return withClient(cmd, func(ctx context.Context, client docker.Client) error {
-				info, err := sandbox.InspectSandbox(ctx, client, name)
+			return withRuntime(cmd, func(ctx context.Context, rt runtime.Runtime) error {
+				info, err := sandbox.InspectSandbox(ctx, rt, name)
 				if err != nil {
 					return err
 				}
@@ -41,26 +40,9 @@ func newExecCmd() *cobra.Command {
 				}
 
 				containerName := sandbox.ContainerName(name)
-				isTTY := term.IsTerminal(int(os.Stdin.Fd())) //nolint:gosec // fd conversion is safe on all supported platforms
-
-				var dockerArgs []string
-				dockerArgs = append(dockerArgs, "exec")
-				if isTTY {
-					dockerArgs = append(dockerArgs, "-it")
-				} else {
-					dockerArgs = append(dockerArgs, "-i")
-				}
-				dockerArgs = append(dockerArgs, "-u", "yoloai", containerName)
-				dockerArgs = append(dockerArgs, cmdArgs...)
-
 				slog.Debug("exec in container", "container", containerName, "cmd", cmdArgs)
 
-				c := exec.Command("docker", dockerArgs...) //nolint:gosec // G204: dockerArgs built from validated sandbox name and user command
-				c.Stdin = os.Stdin
-				c.Stdout = os.Stdout
-				c.Stderr = os.Stderr
-
-				if err := c.Run(); err != nil {
+				if err := rt.InteractiveExec(ctx, containerName, cmdArgs, "yoloai"); err != nil {
 					var exitErr *exec.ExitError
 					if errors.As(err, &exitErr) {
 						os.Exit(exitErr.ExitCode())

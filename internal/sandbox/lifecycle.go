@@ -10,8 +10,6 @@ import (
 	"strings"
 	"time"
 
-	cerrdefs "github.com/containerd/errdefs"
-	"github.com/docker/docker/api/types/container"
 	"github.com/kstenerud/yoloai/internal/agent"
 )
 
@@ -23,20 +21,13 @@ type ResetOptions struct {
 	NoRestart bool // keep agent running, reset workspace in-place
 }
 
-// Stop stops a sandbox's container via Docker SDK.
-// Returns nil if the container is already stopped or removed.
+// Stop stops a sandbox's instance.
+// Returns nil if the instance is already stopped or removed.
 func (m *Manager) Stop(ctx context.Context, name string) error {
 	if _, err := RequireSandboxDir(name); err != nil {
 		return err
 	}
-
-	if err := m.client.ContainerStop(ctx, ContainerName(name), container.StopOptions{}); err != nil {
-		if cerrdefs.IsNotFound(err) || isNotRunningErr(err) {
-			return nil
-		}
-		return fmt.Errorf("stop container: %w", err)
-	}
-	return nil
+	return m.runtime.Stop(ctx, InstanceName(name))
 }
 
 // Start ensures a sandbox is running — idempotent.
@@ -51,8 +42,8 @@ func (m *Manager) Start(ctx context.Context, name string) error {
 		return err
 	}
 
-	cname := ContainerName(name)
-	status, _, err := DetectStatus(ctx, m.client, cname)
+	cname := InstanceName(name)
+	status, _, err := DetectStatus(ctx, m.runtime, cname)
 	if err != nil {
 		return fmt.Errorf("detect status: %w", err)
 	}
@@ -70,18 +61,18 @@ func (m *Manager) Start(ctx context.Context, name string) error {
 		return nil
 
 	case StatusStopped:
-		if err := m.client.ContainerStart(ctx, cname, container.StartOptions{}); err != nil {
+		if err := m.runtime.Start(ctx, cname); err != nil {
 			return fmt.Errorf("start container: %w", err)
 		}
 
 		// Verify container stays running (catches immediate crashes)
 		time.Sleep(1 * time.Second)
-		info, inspectErr := m.client.ContainerInspect(ctx, cname)
+		info, inspectErr := m.runtime.Inspect(ctx, cname)
 		if inspectErr != nil {
 			return fmt.Errorf("inspect container after start: %w", inspectErr)
 		}
-		if !info.State.Running {
-			return fmt.Errorf("container exited immediately (exit code %d) — run 'docker logs %s' to see what went wrong", info.State.ExitCode, cname)
+		if !info.Running {
+			return fmt.Errorf("container exited immediately — run 'docker logs %s' to see what went wrong", cname)
 		}
 
 		fmt.Fprintf(m.output, "Sandbox %s started\n", name) //nolint:errcheck // best-effort output
@@ -107,13 +98,13 @@ func (m *Manager) Destroy(ctx context.Context, name string, _ bool) error {
 		return err
 	}
 
-	cname := ContainerName(name)
+	cname := InstanceName(name)
 
-	// Stop container (ignore errors — may not be running)
-	_ = m.client.ContainerStop(ctx, cname, container.StopOptions{})
+	// Stop instance (ignore errors — may not be running)
+	_ = m.runtime.Stop(ctx, cname)
 
-	// Remove container (ignore errors — may not exist)
-	_ = m.client.ContainerRemove(ctx, cname, container.RemoveOptions{Force: true})
+	// Remove instance (ignore errors — may not exist)
+	_ = m.runtime.Remove(ctx, cname)
 
 	// Remove sandbox directory
 	if err := os.RemoveAll(Dir(name)); err != nil {
@@ -142,7 +133,7 @@ func (m *Manager) Reset(ctx context.Context, opts ResetOptions) error {
 
 	// Check if we can do an in-place reset (--no-restart)
 	if opts.NoRestart {
-		status, _, err := DetectStatus(ctx, m.client, ContainerName(opts.Name))
+		status, _, err := DetectStatus(ctx, m.runtime, InstanceName(opts.Name))
 		if err != nil || status != StatusRunning {
 			fmt.Fprintf(m.output, "Container is not running, falling back to restart\n") //nolint:errcheck // best-effort output
 			opts.NoRestart = false
@@ -216,7 +207,7 @@ func (m *Manager) Reset(ctx context.Context, opts ResetOptions) error {
 // destruction. Returns true if the agent is running or unapplied changes
 // exist. Returns a reason string for the confirmation prompt.
 func (m *Manager) NeedsConfirmation(ctx context.Context, name string) (bool, string) {
-	status, _, err := DetectStatus(ctx, m.client, ContainerName(name))
+	status, _, err := DetectStatus(ctx, m.runtime, InstanceName(name))
 	if err != nil {
 		return false, ""
 	}
@@ -303,7 +294,7 @@ func (m *Manager) relaunchAgent(ctx context.Context, name string, _ *Meta) error
 		return fmt.Errorf("parse config.json: %w", err)
 	}
 
-	_, err = execInContainer(ctx, m.client, ContainerName(name), []string{
+	_, err = execInContainer(ctx, m.runtime, InstanceName(name), []string{
 		"tmux", "respawn-pane", "-t", "main", "-k", cfg.AgentCommand,
 	})
 	if err != nil {
@@ -390,16 +381,9 @@ for key in %s; do
 done
 rm -f /tmp/yoloai-reset.txt`, appendPrompt, cfg.SubmitSequence)
 
-	_, err = execInContainer(ctx, m.client, ContainerName(name), []string{
+	_, err = execInContainer(ctx, m.runtime, InstanceName(name), []string{
 		"bash", "-c", script, "_", resetNotification,
 	})
 	return err
 }
 
-// isNotRunningErr checks if an error indicates the container is not running.
-// Docker SDK returns different error types for this across versions.
-func isNotRunningErr(err error) bool {
-	// containerd/errdefs doesn't have a specific "not running" type,
-	// but Docker returns it as a generic error. Check common patterns.
-	return cerrdefs.IsConflict(err)
-}

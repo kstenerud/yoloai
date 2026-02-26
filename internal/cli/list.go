@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"text/tabwriter"
 
-	"github.com/kstenerud/yoloai/internal/docker"
+	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/spf13/cobra"
 )
@@ -19,8 +19,8 @@ func newListCmd() *cobra.Command {
 		GroupID: groupInspect,
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return withClient(cmd, func(ctx context.Context, client docker.Client) error {
-				infos, err := sandbox.ListSandboxes(ctx, client)
+			return withRuntime(cmd, func(ctx context.Context, rt runtime.Runtime) error {
+				infos, err := sandbox.ListSandboxes(ctx, rt)
 				if err != nil {
 					return err
 				}

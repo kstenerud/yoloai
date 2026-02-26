@@ -10,10 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/mount"
-	"github.com/docker/go-connections/nat"
 	"github.com/kstenerud/yoloai/internal/agent"
+	"github.com/kstenerud/yoloai/internal/runtime"
 )
 
 // CreateOptions holds all parameters for sandbox creation.
@@ -314,7 +312,7 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 	}, nil
 }
 
-// launchContainer creates a Docker container from sandboxState, starts it,
+// launchContainer creates a sandbox instance from sandboxState, starts it,
 // and cleans up credential temp files. Used by both initial creation and
 // recreation from meta.json.
 func (m *Manager) launchContainer(ctx context.Context, state *sandboxState) error {
@@ -328,32 +326,27 @@ func (m *Manager) launchContainer(ctx context.Context, state *sandboxState) erro
 
 	mounts := buildMounts(state, secretsDir)
 
-	portBindings, exposedPorts, err := parsePortBindings(state.ports)
+	ports, err := parsePortBindings(state.ports)
 	if err != nil {
 		return err
 	}
 
-	config := &container.Config{
-		Image:        "yoloai-base",
-		WorkingDir:   state.workdir.Path,
-		ExposedPorts: exposedPorts,
+	cname := InstanceName(state.name)
+	cfg := runtime.InstanceConfig{
+		Name:        cname,
+		ImageRef:    "yoloai-base",
+		WorkingDir:  state.workdir.Path,
+		Mounts:      mounts,
+		Ports:       ports,
+		NetworkMode: state.networkMode,
+		UseInit:     true,
 	}
 
-	initFlag := true
-	hostConfig := &container.HostConfig{
-		Init:         &initFlag,
-		NetworkMode:  container.NetworkMode(state.networkMode),
-		PortBindings: portBindings,
-		Mounts:       mounts,
+	if err := m.runtime.Create(ctx, cfg); err != nil {
+		return err
 	}
 
-	cname := ContainerName(state.name)
-	resp, err := m.client.ContainerCreate(ctx, config, hostConfig, nil, nil, cname)
-	if err != nil {
-		return fmt.Errorf("create container: %w", err)
-	}
-
-	if err := m.client.ContainerStart(ctx, resp.ID, container.StartOptions{}); err != nil {
+	if err := m.runtime.Start(ctx, cname); err != nil {
 		return fmt.Errorf("start container: %w", err)
 	}
 
@@ -364,13 +357,12 @@ func (m *Manager) launchContainer(ctx context.Context, state *sandboxState) erro
 
 	// Verify container is still running (catches immediate crashes)
 	time.Sleep(1 * time.Second)
-	info, err := m.client.ContainerInspect(ctx, cname)
+	info, err := m.runtime.Inspect(ctx, cname)
 	if err != nil {
 		return fmt.Errorf("inspect container after start: %w", err)
 	}
-	if !info.State.Running {
-		exitCode := info.State.ExitCode
-		return fmt.Errorf("container exited immediately (exit code %d) — run 'docker logs %s' to see what went wrong", exitCode, cname)
+	if !info.Running {
+		return fmt.Errorf("container exited immediately — run 'docker logs %s' to see what went wrong", cname)
 	}
 
 	return nil
@@ -503,35 +495,26 @@ func readPrompt(prompt, promptFile string) (string, error) {
 	return "", nil
 }
 
-// parsePortBindings converts ["host:container", ...] to Docker port types.
-func parsePortBindings(ports []string) (nat.PortMap, nat.PortSet, error) {
+// parsePortBindings converts ["host:container", ...] to runtime port mappings.
+func parsePortBindings(ports []string) ([]runtime.PortMapping, error) {
 	if len(ports) == 0 {
-		return nil, nil, nil
+		return nil, nil
 	}
 
-	portMap := nat.PortMap{}
-	portSet := nat.PortSet{}
-
+	var result []runtime.PortMapping
 	for _, p := range ports {
 		parts := strings.SplitN(p, ":", 2)
 		if len(parts) != 2 {
-			return nil, nil, NewUsageError("invalid port format %q (expected host:container)", p)
+			return nil, NewUsageError("invalid port format %q (expected host:container)", p)
 		}
-		hostPort := parts[0]
-		containerPort := parts[1]
-
-		port, err := nat.NewPort("tcp", containerPort)
-		if err != nil {
-			return nil, nil, NewUsageError("invalid container port %q: %s", containerPort, err)
-		}
-
-		portMap[port] = append(portMap[port], nat.PortBinding{
-			HostPort: hostPort,
+		result = append(result, runtime.PortMapping{
+			HostPort:     parts[0],
+			InstancePort: parts[1],
+			Protocol:     "tcp",
 		})
-		portSet[port] = struct{}{}
 	}
 
-	return portMap, portSet, nil
+	return result, nil
 }
 
 // createSecretsDir creates a temp directory with one file per API key.
@@ -568,20 +551,18 @@ func createSecretsDir(agentDef *agent.Definition) (string, error) {
 	return tmpDir, nil
 }
 
-// buildMounts constructs the Docker bind mounts for the container.
-func buildMounts(state *sandboxState, secretsDir string) []mount.Mount {
-	var mounts []mount.Mount
+// buildMounts constructs the bind mounts for the sandbox instance.
+func buildMounts(state *sandboxState, secretsDir string) []runtime.MountSpec {
+	var mounts []runtime.MountSpec
 
 	// Work directory
 	if state.workdir.Mode == "copy" {
-		mounts = append(mounts, mount.Mount{
-			Type:   mount.TypeBind,
+		mounts = append(mounts, runtime.MountSpec{
 			Source: state.workCopyDir,
 			Target: state.workdir.Path,
 		})
 	} else {
-		mounts = append(mounts, mount.Mount{
-			Type:   mount.TypeBind,
+		mounts = append(mounts, runtime.MountSpec{
 			Source: state.workdir.Path,
 			Target: state.workdir.Path,
 		})
@@ -589,24 +570,21 @@ func buildMounts(state *sandboxState, secretsDir string) []mount.Mount {
 
 	// Agent state directory
 	if state.agent.StateDir != "" {
-		mounts = append(mounts, mount.Mount{
-			Type:   mount.TypeBind,
+		mounts = append(mounts, runtime.MountSpec{
 			Source: filepath.Join(state.sandboxDir, "agent-state"),
 			Target: state.agent.StateDir,
 		})
 	}
 
 	// Log file
-	mounts = append(mounts, mount.Mount{
-		Type:   mount.TypeBind,
+	mounts = append(mounts, runtime.MountSpec{
 		Source: filepath.Join(state.sandboxDir, "log.txt"),
 		Target: "/yoloai/log.txt",
 	})
 
 	// Prompt file
 	if state.hasPrompt {
-		mounts = append(mounts, mount.Mount{
-			Type:     mount.TypeBind,
+		mounts = append(mounts, runtime.MountSpec{
 			Source:   filepath.Join(state.sandboxDir, "prompt.txt"),
 			Target:   "/yoloai/prompt.txt",
 			ReadOnly: true,
@@ -614,8 +592,7 @@ func buildMounts(state *sandboxState, secretsDir string) []mount.Mount {
 	}
 
 	// Config file
-	mounts = append(mounts, mount.Mount{
-		Type:     mount.TypeBind,
+	mounts = append(mounts, runtime.MountSpec{
 		Source:   filepath.Join(state.sandboxDir, "config.json"),
 		Target:   "/yoloai/config.json",
 		ReadOnly: true,
@@ -630,8 +607,7 @@ func buildMounts(state *sandboxState, secretsDir string) []mount.Mount {
 		if _, err := os.Stat(src); err != nil {
 			continue // skip if not seeded
 		}
-		mounts = append(mounts, mount.Mount{
-			Type:   mount.TypeBind,
+		mounts = append(mounts, runtime.MountSpec{
 			Source: src,
 			Target: "/home/yoloai/" + sf.TargetPath,
 		})
@@ -641,8 +617,7 @@ func buildMounts(state *sandboxState, secretsDir string) []mount.Mount {
 	if state.tmuxConf == "default+host" || state.tmuxConf == "host" {
 		tmuxConfPath := expandTilde("~/.tmux.conf")
 		if _, err := os.Stat(tmuxConfPath); err == nil {
-			mounts = append(mounts, mount.Mount{
-				Type:     mount.TypeBind,
+			mounts = append(mounts, runtime.MountSpec{
 				Source:   tmuxConfPath,
 				Target:   "/home/yoloai/.tmux.conf",
 				ReadOnly: true,
@@ -653,8 +628,7 @@ func buildMounts(state *sandboxState, secretsDir string) []mount.Mount {
 	// Secrets
 	if secretsDir != "" {
 		for _, key := range state.agent.APIKeyEnvVars {
-			mounts = append(mounts, mount.Mount{
-				Type:     mount.TypeBind,
+			mounts = append(mounts, runtime.MountSpec{
 				Source:   filepath.Join(secretsDir, key),
 				Target:   filepath.Join("/run/secrets", key),
 				ReadOnly: true,

@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kstenerud/yoloai/internal/docker"
+	dockerrt "github.com/kstenerud/yoloai/internal/runtime/docker"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -34,11 +34,11 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 	))
 
 	// Connect to Docker
-	client, err := docker.NewClient(ctx)
+	rt, err := dockerrt.New(ctx)
 	require.NoError(t, err, "Docker must be running for integration tests")
-	defer client.Close() //nolint:errcheck // test cleanup
+	defer rt.Close() //nolint:errcheck // test cleanup
 
-	mgr := NewManager(client, slog.Default(), strings.NewReader(""), io.Discard)
+	mgr := NewManager(rt, slog.Default(), strings.NewReader(""), io.Discard)
 
 	// Step 1: EnsureSetup (builds base image if needed)
 	require.NoError(t, mgr.EnsureSetup(ctx))
@@ -74,7 +74,7 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 	// Give the container a moment to start
 	time.Sleep(2 * time.Second)
 
-	status, containerID, err := DetectStatus(ctx, client, "yoloai-"+sandboxName)
+	status, containerID, err := DetectStatus(ctx, rt, "yoloai-"+sandboxName)
 	require.NoError(t, err)
 	assert.NotEmpty(t, containerID)
 	// Status should be running, done, or failed (agent may fail without API key)
@@ -86,7 +86,7 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 	// Give Docker a moment to stop
 	time.Sleep(1 * time.Second)
 
-	status, _, err = DetectStatus(ctx, client, "yoloai-"+sandboxName)
+	status, _, err = DetectStatus(ctx, rt, "yoloai-"+sandboxName)
 	require.NoError(t, err)
 	assert.Equal(t, StatusStopped, status)
 
@@ -127,7 +127,7 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 	assert.NoDirExists(t, sandboxDir)
 
 	// Container should be gone
-	status, _, err = DetectStatus(ctx, client, "yoloai-"+sandboxName)
+	status, _, err = DetectStatus(ctx, rt, "yoloai-"+sandboxName)
 	require.NoError(t, err)
 	assert.Equal(t, StatusRemoved, status)
 }

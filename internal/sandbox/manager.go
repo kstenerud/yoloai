@@ -9,8 +9,7 @@ import (
 	"os"
 	"path/filepath"
 
-	cerrdefs "github.com/containerd/errdefs"
-	"github.com/kstenerud/yoloai/internal/docker"
+	"github.com/kstenerud/yoloai/internal/runtime"
 	"golang.org/x/term"
 )
 
@@ -34,20 +33,20 @@ defaults:
 
 // Manager is the central orchestrator for sandbox operations.
 type Manager struct {
-	client docker.Client
-	logger *slog.Logger
-	input  io.Reader
-	output io.Writer
+	runtime runtime.Runtime
+	logger  *slog.Logger
+	input   io.Reader
+	output  io.Writer
 }
 
-// NewManager creates a Manager with the given Docker client, logger,
+// NewManager creates a Manager with the given runtime, logger,
 // input reader for interactive prompts, and output writer for user-facing messages.
-func NewManager(client docker.Client, logger *slog.Logger, input io.Reader, output io.Writer) *Manager {
+func NewManager(rt runtime.Runtime, logger *slog.Logger, input io.Reader, output io.Writer) *Manager {
 	return &Manager{
-		client: client,
-		logger: logger,
-		input:  input,
-		output: output,
+		runtime: rt,
+		logger:  logger,
+		input:   input,
+		output:  output,
 	}
 }
 
@@ -102,42 +101,9 @@ func (m *Manager) EnsureSetupNonInteractive(ctx context.Context) error {
 		}
 	}
 
-	// Seed Dockerfile.base and entrypoint.sh (overwrites if embedded version changed)
-	seedResult, err := docker.SeedResources(yoloaiDir)
-	if err != nil {
-		return fmt.Errorf("seed resources: %w", err)
-	}
-
-	if len(seedResult.Conflicts) > 0 {
-		if seedResult.ManifestMissing {
-			fmt.Fprintln(m.output, "NOTE: yoloAI has updated resource files, but some differ from the new version.") //nolint:errcheck // best-effort output
-			fmt.Fprintln(m.output, "  If you have not customized these files, accept the new versions below.")       //nolint:errcheck // best-effort output
-		} else {
-			fmt.Fprintln(m.output, "NOTE: some resource files have local changes and were not overwritten.") //nolint:errcheck // best-effort output
-		}
-		for _, name := range seedResult.Conflicts {
-			fmt.Fprintf(m.output, "  %s: new version written to ~/.yoloai/%s.new\n", name, name) //nolint:errcheck // best-effort output
-			fmt.Fprintf(m.output, "    accept: mv ~/.yoloai/%s.new ~/.yoloai/%s\n", name, name)  //nolint:errcheck // best-effort output
-			fmt.Fprintf(m.output, "    keep:   rm ~/.yoloai/%s.new\n", name)                     //nolint:errcheck // best-effort output
-		}
-		fmt.Fprintln(m.output, "  Then run 'yoloai build' to rebuild the base image.") //nolint:errcheck // best-effort output
-	}
-
-	// Build base image if missing or if on-disk resources differ from last build
-	exists, err := imageExists(ctx, m.client, "yoloai-base")
-	if err != nil {
-		return fmt.Errorf("check base image: %w", err)
-	}
-	if !exists {
-		fmt.Fprintln(m.output, "Building base image (first run only, this may take a few minutes)...") //nolint:errcheck // best-effort output
-		if err := docker.BuildBaseImage(ctx, m.client, yoloaiDir, m.output, m.logger); err != nil {
-			return fmt.Errorf("build base image: %w", err)
-		}
-	} else if docker.NeedsBuild(yoloaiDir) {
-		fmt.Fprintln(m.output, "Base image resources updated, rebuilding...") //nolint:errcheck // best-effort output
-		if err := docker.BuildBaseImage(ctx, m.client, yoloaiDir, m.output, m.logger); err != nil {
-			return fmt.Errorf("rebuild base image: %w", err)
-		}
+	// Seed resources and build/rebuild base image as needed
+	if err := m.runtime.EnsureImage(ctx, yoloaiDir, m.output, m.logger, false); err != nil {
+		return err
 	}
 
 	// Write default config.yaml on first run
@@ -160,14 +126,3 @@ func (m *Manager) isInteractive() bool {
 	return false
 }
 
-// imageExists checks if a Docker image with the given tag exists.
-func imageExists(ctx context.Context, client docker.Client, tag string) (bool, error) {
-	_, _, err := client.ImageInspectWithRaw(ctx, tag)
-	if err == nil {
-		return true, nil
-	}
-	if cerrdefs.IsNotFound(err) {
-		return false, nil
-	}
-	return false, err
-}

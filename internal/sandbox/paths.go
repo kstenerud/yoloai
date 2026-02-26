@@ -143,9 +143,14 @@ func parseHex(s string) (uint32, error) {
 	return result, nil
 }
 
-// ContainerName returns the Docker container name for a sandbox.
-func ContainerName(name string) string {
+// InstanceName returns the runtime instance name for a sandbox.
+func InstanceName(name string) string {
 	return "yoloai-" + name
+}
+
+// ContainerName is an alias for InstanceName (deprecated).
+func ContainerName(name string) string {
+	return InstanceName(name)
 }
 
 // Dir returns the host-side state directory for a sandbox.

@@ -1,8 +1,8 @@
 package sandbox
 
 import (
-	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -11,10 +11,7 @@ import (
 	"strings"
 	"time"
 
-	cerrdefs "github.com/containerd/errdefs"
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/pkg/stdcopy"
-	"github.com/kstenerud/yoloai/internal/docker"
+	"github.com/kstenerud/yoloai/internal/runtime"
 )
 
 // Status represents the current state of a sandbox.
@@ -111,82 +108,52 @@ func detectChanges(workDir string) string {
 	return "no"
 }
 
-// execInContainer runs a command inside a container and returns stdout.
-func execInContainer(ctx context.Context, client docker.Client, containerID string, cmd []string) (string, error) {
-	execResp, err := client.ContainerExecCreate(ctx, containerID, container.ExecOptions{
-		Cmd:          cmd,
-		User:         "yoloai",
-		AttachStdout: true,
-		AttachStderr: true,
-	})
+// execInContainer runs a command inside a sandbox instance and returns stdout.
+func execInContainer(ctx context.Context, rt runtime.Runtime, containerID string, cmd []string) (string, error) {
+	result, err := rt.Exec(ctx, containerID, cmd, "yoloai")
 	if err != nil {
-		return "", fmt.Errorf("exec create: %w", err)
+		return "", err
 	}
-
-	resp, err := client.ContainerExecAttach(ctx, execResp.ID, container.ExecAttachOptions{})
-	if err != nil {
-		return "", fmt.Errorf("exec attach: %w", err)
-	}
-	defer resp.Close()
-
-	var stdout, stderr bytes.Buffer
-	if _, err := stdcopy.StdCopy(&stdout, &stderr, resp.Reader); err != nil {
-		return "", fmt.Errorf("exec read: %w", err)
-	}
-
-	inspectResp, err := client.ContainerExecInspect(ctx, execResp.ID)
-	if err != nil {
-		return "", fmt.Errorf("exec inspect: %w", err)
-	}
-	if inspectResp.ExitCode != 0 {
-		return "", fmt.Errorf("exec exited with code %d: %s", inspectResp.ExitCode, strings.TrimSpace(stderr.String()))
-	}
-
-	return strings.TrimSpace(stdout.String()), nil
+	return result.Stdout, nil
 }
 
-// DetectStatus queries Docker and tmux to determine sandbox status.
-func DetectStatus(ctx context.Context, client docker.Client, containerName string) (Status, string, error) {
-	info, err := client.ContainerInspect(ctx, containerName)
+// DetectStatus queries the runtime and tmux to determine sandbox status.
+func DetectStatus(ctx context.Context, rt runtime.Runtime, containerName string) (Status, string, error) {
+	info, err := rt.Inspect(ctx, containerName)
 	if err != nil {
-		if cerrdefs.IsNotFound(err) {
+		if errors.Is(err, runtime.ErrNotFound) {
 			return StatusRemoved, "", nil
 		}
 		return "", "", fmt.Errorf("inspect container: %w", err)
 	}
 
-	shortID := info.ID
-	if len(shortID) > 12 {
-		shortID = shortID[:12]
-	}
-
-	if !info.State.Running {
-		return StatusStopped, shortID, nil
+	if !info.Running {
+		return StatusStopped, "", nil
 	}
 
 	// Query tmux pane state
-	output, err := execInContainer(ctx, client, containerName, []string{
+	output, err := execInContainer(ctx, rt, containerName, []string{
 		"tmux", "list-panes", "-t", "main", "-F", "#{pane_dead} #{pane_dead_status}",
 	})
 	if err != nil {
 		// tmux query failed — default to running (safest assumption)
-		return StatusRunning, shortID, nil
+		return StatusRunning, "", nil
 	}
 
 	fields := strings.Fields(output)
 	if len(fields) < 1 || fields[0] == "0" {
-		return StatusRunning, shortID, nil
+		return StatusRunning, "", nil
 	}
 
 	// Pane is dead
 	if len(fields) >= 2 && fields[1] == "0" {
-		return StatusDone, shortID, nil
+		return StatusDone, "", nil
 	}
-	return StatusFailed, shortID, nil
+	return StatusFailed, "", nil
 }
 
-// InspectSandbox loads metadata and queries Docker for a single sandbox.
-func InspectSandbox(ctx context.Context, client docker.Client, name string) (*Info, error) {
+// InspectSandbox loads metadata and queries the runtime for a single sandbox.
+func InspectSandbox(ctx context.Context, rt runtime.Runtime, name string) (*Info, error) {
 	sandboxDir, err := RequireSandboxDir(name)
 	if err != nil {
 		return nil, err
@@ -197,7 +164,7 @@ func InspectSandbox(ctx context.Context, client docker.Client, name string) (*In
 		return nil, fmt.Errorf("load metadata: %w", err)
 	}
 
-	status, containerID, err := DetectStatus(ctx, client, ContainerName(name))
+	status, containerID, err := DetectStatus(ctx, rt, InstanceName(name))
 	if err != nil {
 		return nil, err
 	}
@@ -220,7 +187,7 @@ func InspectSandbox(ctx context.Context, client docker.Client, name string) (*In
 }
 
 // ListSandboxes scans ~/.yoloai/sandboxes/ and returns info for all sandboxes.
-func ListSandboxes(ctx context.Context, client docker.Client) ([]*Info, error) {
+func ListSandboxes(ctx context.Context, rt runtime.Runtime) ([]*Info, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, fmt.Errorf("get home directory: %w", err)
@@ -240,7 +207,7 @@ func ListSandboxes(ctx context.Context, client docker.Client) ([]*Info, error) {
 		if !entry.IsDir() {
 			continue
 		}
-		info, err := InspectSandbox(ctx, client, entry.Name())
+		info, err := InspectSandbox(ctx, rt, entry.Name())
 		if err != nil {
 			continue // skip broken sandboxes
 		}

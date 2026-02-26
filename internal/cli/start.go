@@ -3,8 +3,10 @@ package cli
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
+	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/spf13/cobra"
 )
@@ -23,7 +25,8 @@ func newStartCmd() *cobra.Command {
 
 			attach, _ := cmd.Flags().GetBool("attach")
 
-			return withManager(cmd, func(ctx context.Context, mgr *sandbox.Manager) error {
+			return withRuntime(cmd, func(ctx context.Context, rt runtime.Runtime) error {
+				mgr := sandbox.NewManager(rt, slog.Default(), cmd.InOrStdin(), cmd.ErrOrStderr())
 				if err := mgr.Start(ctx, name); err != nil {
 					return err
 				}
@@ -32,12 +35,12 @@ func newStartCmd() *cobra.Command {
 					return nil
 				}
 
-				containerName := sandbox.ContainerName(name)
-				if err := waitForTmux(ctx, containerName, 30*time.Second); err != nil {
+				containerName := sandbox.InstanceName(name)
+				if err := waitForTmux(ctx, rt, containerName, 30*time.Second); err != nil {
 					return fmt.Errorf("waiting for tmux session: %w", err)
 				}
 
-				return attachToSandbox(containerName)
+				return attachToSandbox(ctx, rt, containerName)
 			})
 		},
 	}

@@ -6,7 +6,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/kstenerud/yoloai/internal/docker"
+	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/spf13/cobra"
 )
@@ -222,8 +222,8 @@ func diffRef(cmd *cobra.Command, name, ref string, stat bool) error {
 // agentRunningWarning prints a warning to stderr if the agent is still running.
 // Silently skips if Docker is unavailable or inspection fails.
 func agentRunningWarning(cmd *cobra.Command, name string) {
-	_ = withClient(cmd, func(ctx context.Context, client docker.Client) error {
-		info, err := sandbox.InspectSandbox(ctx, client, name)
+	_ = withRuntime(cmd, func(ctx context.Context, rt runtime.Runtime) error {
+		info, err := sandbox.InspectSandbox(ctx, rt, name)
 		if err != nil {
 			return nil // silently skip
 		}

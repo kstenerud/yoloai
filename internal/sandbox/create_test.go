@@ -6,11 +6,11 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/docker/go-connections/nat"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/kstenerud/yoloai/internal/agent"
+	"github.com/kstenerud/yoloai/internal/runtime"
 )
 
 func TestResolveModel_Alias(t *testing.T) {
@@ -112,31 +112,23 @@ func TestReadPrompt_StdinDash(t *testing.T) {
 }
 
 func TestParsePortBindings_Valid(t *testing.T) {
-	portMap, portSet, err := parsePortBindings([]string{"3000:3000", "8080:80"})
+	mappings, err := parsePortBindings([]string{"3000:3000", "8080:80"})
 	require.NoError(t, err)
+	require.Len(t, mappings, 2)
 
-	port3000, _ := nat.NewPort("tcp", "3000")
-	port80, _ := nat.NewPort("tcp", "80")
-
-	require.Contains(t, portMap, port3000)
-	assert.Equal(t, "3000", portMap[port3000][0].HostPort)
-	require.Contains(t, portMap, port80)
-	assert.Equal(t, "8080", portMap[port80][0].HostPort)
-
-	assert.Contains(t, portSet, port3000)
-	assert.Contains(t, portSet, port80)
+	assert.Equal(t, runtime.PortMapping{HostPort: "3000", InstancePort: "3000", Protocol: "tcp"}, mappings[0])
+	assert.Equal(t, runtime.PortMapping{HostPort: "8080", InstancePort: "80", Protocol: "tcp"}, mappings[1])
 }
 
 func TestParsePortBindings_Invalid(t *testing.T) {
-	_, _, err := parsePortBindings([]string{"invalid"})
+	_, err := parsePortBindings([]string{"invalid"})
 	require.Error(t, err)
 }
 
 func TestParsePortBindings_Empty(t *testing.T) {
-	portMap, portSet, err := parsePortBindings(nil)
+	mappings, err := parsePortBindings(nil)
 	require.NoError(t, err)
-	assert.Nil(t, portMap)
-	assert.Nil(t, portSet)
+	assert.Nil(t, mappings)
 }
 
 func TestGitBaseline_FreshInit(t *testing.T) {

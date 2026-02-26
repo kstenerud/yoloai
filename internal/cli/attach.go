@@ -4,10 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"os"
-	"os/exec"
 
-	"github.com/kstenerud/yoloai/internal/docker"
+	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/spf13/cobra"
 )
@@ -24,8 +22,8 @@ func newAttachCmd() *cobra.Command {
 				return err
 			}
 
-			return withClient(cmd, func(ctx context.Context, client docker.Client) error {
-				info, err := sandbox.InspectSandbox(ctx, client, name)
+			return withRuntime(cmd, func(ctx context.Context, rt runtime.Runtime) error {
+				info, err := sandbox.InspectSandbox(ctx, rt, name)
 				if err != nil {
 					return err
 				}
@@ -40,11 +38,7 @@ func newAttachCmd() *cobra.Command {
 				containerName := sandbox.ContainerName(name)
 				slog.Debug("attaching to tmux session", "container", containerName)
 
-				c := exec.Command("docker", "exec", "-it", "-u", "yoloai", containerName, "tmux", "attach", "-t", "main") //nolint:gosec // G204: containerName is validated sandbox name
-				c.Stdin = os.Stdin
-				c.Stdout = os.Stdout
-				c.Stderr = os.Stderr
-				return c.Run()
+				return rt.InteractiveExec(ctx, containerName, []string{"tmux", "attach", "-t", "main"}, "yoloai")
 			})
 		},
 	}

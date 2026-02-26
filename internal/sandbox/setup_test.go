@@ -81,7 +81,7 @@ func setupTestManager(t *testing.T, input string) (*Manager, *bytes.Buffer, stri
 	require.NoError(t, os.WriteFile(filepath.Join(yoloaiDir, "config.yaml"), []byte(defaultConfigYAML), 0600))
 
 	var output bytes.Buffer
-	mock := &mockClient{}
+	mock := &mockRuntime{}
 	mgr := NewManager(mock, slog.Default(), strings.NewReader(input), &output)
 	return mgr, &output, tmpDir
 }
@@ -213,6 +213,6 @@ func TestRunNewUserSetup_EOF_DefaultsToY(t *testing.T) {
 	assert.Equal(t, "default", cfg.TmuxConf)
 }
 
-// mockClient is defined in manager_test.go — we can use it here since
+// mockRuntime is defined in manager_test.go — we can use it here since
 // both are in the sandbox package. This test just needs a valid Manager.
 var _ io.Reader = strings.NewReader("") // compile check
