@@ -194,11 +194,11 @@ These were deferred from MVP but might be cheap to add and valuable for dogfoodi
 
 92. ~~**Git worktrees as a copy strategy (instead of cp -rp)**~~ — **Resolved: not pursuing.** `git worktree add` would be near-instant and share the object store, but has fundamental problems for coding agents: (a) `.gitignore`d files (`node_modules/`, build artifacts, `.env`) are not included — agents can't build or test without them; (b) worktree branches/refs are visible in the original repo — agent git operations pollute the host; (c) only works for git repos, not arbitrary directories. The planned overlayfs strategy (post-MVP) solves the same performance problem without these limitations.
 
-## Post-MVP (Only if people complain)
+## Unresolved (prioritize based on user feedback)
 
 93. **MCP server support inside containers** — Claude Code's MCP config (`settings.json`, `~/.claude.json`) gets seeded into the container, but MCP servers themselves don't work: stdio servers need their binary/script installed in the container (not available), and network servers reference `localhost` which resolves to the container, not the host. Possible solutions: custom profiles with MCP dependencies installed, or host-network passthrough. Low priority unless users report this as a blocker — MCP-heavy users are power users who could build a custom profile.
 
-## Post-MVP (Codex and cleanup)
+## Unresolved (Codex and cleanup)
 
 37. **Codex proxy support** — Whether Codex's static Rust binary honors `HTTP_PROXY`/`HTTPS_PROXY` env vars is unverified (DESIGN.md line 340, RESEARCH.md). Critical for `--network-isolated` mode with Codex. If it ignores proxy env vars, would need iptables-only enforcement.
 
@@ -208,7 +208,7 @@ These were deferred from MVP but might be cheap to add and valuable for dogfoodi
 
 40. **Image cleanup mechanism** — Docker images accumulate indefinitely. Cleanup is deferred pending research into Docker's image lifecycle (DESIGN.md line 642). Needs design for safe pruning that doesn't break running sandboxes.
 
-## Post-MVP (Extensions)
+## Unresolved (Extensions)
 
 87. ~~**Extension shell script security**~~ — **Resolved.** Initial release: documentation only (warn users to review scripts, same trust model as Makefiles). Follow-up: review-on-first-run — display action script and prompt for confirmation on first execution or after modification (track script hash to detect changes).
 

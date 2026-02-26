@@ -4,7 +4,7 @@
 
 Run AI coding CLI agents (Claude Code, Codex, and others) with their sandbox-bypass flags inside disposable, isolated containers so that the agent can work autonomously without constant permission prompts. Project directories are presented as isolated writable views inside the container. The user reviews changes via `yoloai diff` and applies them back to the originals via `yoloai apply` when satisfied.
 
-**Scope:** v1 ships with Claude Code, a deterministic test agent, and OpenAI Codex (Codex is `[POST-MVP]`). The architecture is agent-agnostic — Docker, overlayfs, network isolation, diff/apply are not agent-specific. Adding a new agent requires only a new agent definition (install command, launch command, API key env vars, state directory). See RESEARCH.md "Multi-Agent Support Research" for additional agents researched.
+**Scope:** MVP shipped with Claude Code and a deterministic test agent. OpenAI Codex, overlay strategy, network isolation, profiles, Viper config, and aux dirs are planned for post-MVP. The architecture is agent-agnostic — Docker, overlayfs, network isolation, diff/apply are not agent-specific. Adding a new agent requires only a new agent definition (install command, launch command, API key env vars, state directory). See RESEARCH.md "Multi-Agent Support Research" for additional agents researched.
 
 ## Value Proposition
 
@@ -84,14 +84,14 @@ The Docker container is disposable — it can crash, be destroyed, be recreated.
   "created_at": "2025-01-15T10:30:00Z",
 
   "agent": "claude",
-  "profile": "go-dev",
+  "profile": "go-dev",                    // [POST-MVP] profile name
   "model": "claude-sonnet-4-5-20250929",
 
-  "copy_strategy": "overlay",
+  "copy_strategy": "overlay",             // [POST-MVP] "overlay" | "full"
 
   "network": {
-    "mode": "isolated",
-    "allow": ["api.anthropic.com", "statsig.anthropic.com", "sentry.io"]
+    "mode": "isolated",                   // MVP: flat "network_mode" string ("none" or "")
+    "allow": ["api.anthropic.com", "statsig.anthropic.com", "sentry.io"]  // [POST-MVP]
   },
 
   "workdir": {
@@ -101,7 +101,7 @@ The Docker container is disposable — it can crash, be destroyed, be recreated.
     "baseline_sha": "a1b2c3d4..."
   },
 
-  "directories": [
+  "directories": [                        // [POST-MVP] aux dirs
     {
       "host_path": "/home/user/projects/shared-lib",
       "mount_path": "/usr/local/lib/shared",
@@ -117,7 +117,7 @@ The Docker container is disposable — it can crash, be destroyed, be recreated.
   "has_prompt": true,
 
   "ports": ["8080:8080"],
-  "resources": {
+  "resources": {                          // [POST-MVP] stored in meta; MVP applies from config only
     "cpus": 4,
     "memory": "8g"
   }
@@ -137,12 +137,15 @@ Field notes:
 
 ### 1. Docker Images
 
-**Base image (`yoloai-base`):** Based on Debian slim. Minimal foundation with common tools, rebuilt occasionally. Debian slim over Ubuntu (smaller) or Alpine (musl incompatibilities with Node.js/npm).
-- Common tools: tmux, git, build-essential, python3, jq, etc.
+**Base image (`yoloai-base`):** Based on Debian slim. Development-ready foundation with common tools, rebuilt occasionally. Debian slim over Ubuntu (smaller) or Alpine (musl incompatibilities with Node.js/npm).
+- Common tools: tmux, git, build-essential, cmake, clang, python3, python3-pip, python3-venv, curl, wget, jq, ripgrep, fd-find, less, file, unzip, openssh-client, pkg-config, libssl-dev
+- Go 1.24.1 (from official tarball)
+- Rust via rustup (stable toolchain, system-wide install)
+- golangci-lint
 - **Claude Code:** Node.js 22 LTS + npm installation (`npm i -g @anthropic-ai/claude-code`) — npm required, not native binary (native binary bundles Bun which ignores proxy env vars, segfaults on Debian bookworm AMD64, and auto-updates). npm is deprecated but still published and is the only reliable Docker/proxy path. See RESEARCH.md "Claude Code Installation Research"
 - **[POST-MVP] Codex:** Static Rust binary download (musl-linked, zero runtime dependencies, ~zero image bloat)
 - **Non-root user** (`yoloai`, UID/GID matching host user via entrypoint). Image builds with a placeholder user (UID 1001). At container start, the entrypoint runs as root: reads `host_uid`/`host_gid` from `/yoloai/config.json` via `jq`, runs `usermod -u <uid> yoloai && groupmod -g <gid> yoloai` (exit code 12 means "can't update /etc/passwd" — if the UID already matches the desired UID, this is a no-op; otherwise log a warning and continue), fixes ownership on container-managed directories, then drops privileges via `gosu yoloai`. Uses `tini` as PID 1 (`--init` or explicit `ENTRYPOINT`). Images are portable across machines since UID/GID are set at run time, not build time. Claude Code refuses `--dangerously-skip-permissions` as root; Codex does not enforce this but convention is non-root
-- **Entrypoint:** Default Dockerfile and entrypoint.sh are embedded in the binary via `go:embed`. On first run, these are seeded to `~/.yoloai/` if they don't exist. `yoloai build` always reads from `~/.yoloai/`, not from embedded copies. Users can edit for fast iteration without rebuilding yoloAI itself. The entrypoint reads all configuration from a bind-mounted `/yoloai/config.json` file containing agent_command, startup_delay, submit_sequence, host_uid, host_gid, and later overlay_mounts, iptables_rules, setup_script. No environment variables are used for configuration passing.
+- **Entrypoint:** Default `Dockerfile.base`, `entrypoint.sh`, and `tmux.conf` are embedded in the binary via `go:embed`. On first run, these are seeded to `~/.yoloai/` if they don't exist. `yoloai build` always reads from `~/.yoloai/`, not from embedded copies. Users can edit for fast iteration without rebuilding yoloAI itself. The entrypoint reads all configuration from a bind-mounted `/yoloai/config.json` file containing `agent_command`, `startup_delay`, `ready_pattern`, `submit_sequence`, `tmux_conf`, `host_uid`, `host_gid`, and later `overlay_mounts`, `iptables_rules`, `setup_script`. No environment variables are used for configuration passing.
 
 **[POST-MVP] Profile images (`yoloai-<profile>`):** Derived from base, one per profile. Users supply a `Dockerfile` per profile with `FROM yoloai-base`. This avoids the limitations of auto-generating Dockerfiles from package lists and gives full flexibility (PPAs, tarballs, custom install steps).
 
@@ -184,7 +187,7 @@ defaults:
   mounts:
     - ~/.gitconfig:/home/yoloai/.gitconfig:ro
 
-  tmux_conf: default+host                 # [POST-MVP] default+host | default | host | none (see Tmux Configuration)
+  tmux_conf: default+host                 # default+host | default | host | none (see Tmux Configuration)
   copy_strategy: auto                   # [POST-MVP] auto | overlay | full (MVP uses full copy only)
                                         # auto: use overlayfs where available, fall back to full copy
                                         # overlay: overlayfs lower layer (instant, deltas-only, needs CAP_SYS_ADMIN)
@@ -305,6 +308,8 @@ Single Go binary. No runtime dependencies — just the binary and Docker.
 
 **Global flags:**
 - `--verbose` / `-v`: Enable verbose output showing Docker commands, mount operations, config resolution, and entrypoint activity. Essential for troubleshooting overlay mount failures, proxy startup issues, and entrypoint errors. Also settable via `YOLOAI_VERBOSE=1`.
+- `--quiet` / `-q`: Suppress non-essential output. `-q` for warn-only, `-qq` for error-only.
+- `--no-color`: Disable colored output.
 
 **Environment Variables:**
 - `YOLOAI_SANDBOX`: Default sandbox name for commands that accept `<name>`. Explicit `<name>` argument always takes precedence. Example: `YOLOAI_SANDBOX=my-task yoloai diff` is equivalent to `yoloai diff my-task`.
@@ -314,11 +319,11 @@ Single Go binary. No runtime dependencies — just the binary and Docker.
 
 ```
 yoloai new [options] [-a] <name> [<workdir>] [-d <auxdir>...]  Create and start a sandbox  (aux dirs [POST-MVP])
-yoloai list                                    List sandboxes and their status
+yoloai list (alias: ls)                        List sandboxes and their status
 yoloai attach <name>                           Attach to a sandbox's tmux session
 yoloai show <name>                             Show sandbox configuration and state
 yoloai log <name>                              Show sandbox session log
-yoloai diff <name>                             Show changes the agent made
+yoloai diff <name> [<ref>] [-- <path>...]       Show changes the agent made
 yoloai apply <name>                            Copy changes back to original dirs
 yoloai exec <name> <command>                   Run a command inside the sandbox
 yoloai stop <name>...                          Stop sandboxes (preserving state)
@@ -331,7 +336,7 @@ yoloai profile create <name> [--template <tpl>]  Create a profile with scaffold 
 yoloai profile list                            List profiles  [POST-MVP]
 yoloai profile delete <name>                   Delete a profile  [POST-MVP]
 yoloai x <extension> <name> [args...] [--flags...]  Run a user-defined extension  [POST-MVP]
-yoloai setup [--power-user]                    Interactive first-time setup  [POST-MVP]
+yoloai setup                                   Run interactive setup  (--power-user [POST-MVP])
 yoloai completion [bash|zsh|fish|powershell]   Generate shell completion script
 yoloai version                                 Show version information
 ```
@@ -347,15 +352,21 @@ Built-in agent definitions (v1). Each agent specifies its install method, launch
 | Interactive cmd               | `claude --dangerously-skip-permissions`                   | `bash`                                          | `codex --yolo`                                 |
 | Headless cmd                  | `claude -p "PROMPT" --dangerously-skip-permissions`       | `sh -c "PROMPT"`                                | `codex exec --yolo "PROMPT"`                   |
 | Default prompt mode           | interactive                                               | headless (with prompt) / interactive (without)  | headless (with prompt) / interactive (without) |
-| Submit sequence (interactive) | `Enter Enter` (double) + 3s startup delay                 | `Enter` + 0s startup delay                      | `Enter` + 3s startup delay                     |
+| Submit sequence (interactive) | `Enter Enter` (double) + ready-pattern polling            | `Enter` + 0s startup delay                      | `Enter` + 3s startup delay                     |
 | API key env vars              | `ANTHROPIC_API_KEY`                                       | (none)                                          | `CODEX_API_KEY` (preferred), `OPENAI_API_KEY` (fallback) |
 | State directory               | `~/.claude/`                                              | (none)                                          | `~/.codex/`                                    |
 | Model flag                    | `--model <model>`                                         | (ignored)                                       | `--model <model>`                              |
 | Model aliases                 | `sonnet` → `claude-sonnet-4-latest`, `opus` → `claude-opus-4-latest`, `haiku` → `claude-haiku-4-latest` | (none) | TBD |
+| Ready pattern                 | `❯` (polls tmux output; replaces fixed delay)             | (none — uses fixed delay)                       | TBD                                            |
+| Seed files                    | `.credentials.json` (auth-only), `settings.json`, `.claude.json` (home dir) | (none)                | TBD                                            |
 | Non-root required             | Yes (refuses as root)                                     | No                                              | No (convention is non-root)                    |
 | Proxy support                 | Yes (npm install only, not native binary)                 | N/A                                             | TBD (research needed)                          |
 | Default network allowlist     | `api.anthropic.com`, `statsig.anthropic.com`, `sentry.io` | (none)                                          | `api.openai.com` (minimum; additional TBD)     |
 | Extra env vars / quirks       | —                                                         | Deterministic shell-based agent for development and bug report reproduction. No API key needed. Prompt IS the shell script. | `--skip-git-repo-check` useful outside repos; Landlock fails in containers (use `--yolo`) |
+
+**Ready pattern:** Agents can specify a `ready_pattern` — a string the entrypoint polls for in the tmux pane output to determine when the agent is ready to receive a prompt. This replaces the fixed startup delay with responsive detection. Claude uses `❯` (the prompt character). While polling, the entrypoint auto-accepts confirmation prompts (e.g., workspace trust dialogs) by detecting "Enter to confirm" and sending Enter. After the pattern is found, the entrypoint waits for screen output to stabilize before delivering the prompt. Agents without a ready pattern fall back to the fixed `startup_delay`.
+
+**Seed files:** Agents can specify files to copy from the host into the container's agent-state directory at sandbox creation time. These seed agent configuration and credentials without bind-mounting (sandbox gets its own copy). Claude seeds `.credentials.json` (auth-only — skipped when `ANTHROPIC_API_KEY` is set), `settings.json` (Claude Code settings), and `.claude.json` (from home dir — global Claude config). The `auth_only` flag means the file is only needed when no API key is provided via environment variable.
 
 **Prompt delivery modes:**
 
@@ -537,10 +548,11 @@ Before creating the sandbox (all checks run before any state is created on disk)
    - User: `yoloai` (UID/GID matching host user)
    - `/yoloai/` internal directory for sandbox context file, overlay working directories, and bind-mounted state files (`log.txt`, `prompt.txt`, `config.json`)
 4. **[POST-MVP]** Run `setup` commands from config (if any).
-5. Start tmux session named `main` with logging to `/yoloai/log.txt` (`tmux pipe-pane`) and `remain-on-exit on` (container stays up after agent exits, only stops on explicit `yoloai stop` or `yoloai destroy`).
-6. Inside tmux: launch the agent using the command from its agent definition (e.g., `claude --dangerously-skip-permissions [--model X]` or `codex --yolo`)
-7. Wait for the agent to initialize (interactive mode only). MVP uses a configurable fixed delay (`startup_delay` in `config.json`, default ~3s). Future improvement: poll for the agent's ready indicator (e.g., prompt appearance in tmux output) with a timeout, rather than a fixed sleep.
-8. Prompt delivery depends on the agent's prompt mode:
+5. Start tmux session named `main` with logging to `/yoloai/log.txt` (`tmux pipe-pane`) and `remain-on-exit on` (container stays up after agent exits, only stops on explicit `yoloai stop` or `yoloai destroy`). Tmux config sourced based on the `tmux_conf` value in `config.json` (see Tmux Configuration).
+6. Inside tmux: launch the agent using the command from its agent definition (e.g., `claude --dangerously-skip-permissions [--model X]` or `codex --yolo`).
+7. Start a background monitor that polls `#{pane_dead}` — when the agent exits, all attached tmux clients are auto-detached so the user's terminal returns cleanly instead of showing a dead pane.
+8. Wait for the agent to initialize (interactive mode only). If the agent defines a `ready_pattern`, poll the tmux pane output for it (with a 60s timeout), auto-accepting confirmation prompts along the way and waiting for screen output to stabilize. Otherwise, fall back to a fixed `startup_delay`.
+9. Prompt delivery depends on the agent's prompt mode:
    - **Interactive mode** (Claude default, Codex without `--prompt`): If `/yoloai/prompt.txt` exists, feed it via `tmux load-buffer` + `tmux paste-buffer` + `tmux send-keys` with the agent's submit sequence (`Enter Enter` for Claude, `Enter` for Codex).
    - **Headless mode** (Codex with `--prompt`): Prompt passed as CLI argument in the launch command (e.g., `codex exec --yolo "PROMPT"`). No `tmux send-keys` needed.
 
@@ -615,13 +627,17 @@ Displays sandbox configuration and state:
 - Name
 - Status (running / stopped / done / failed)
 - Agent (claude, codex, etc.)
-- Profile (name or "(base)")
+- Model (if specified)
+- [POST-MVP] Profile (name or "(base)")
 - Prompt (first 200 chars from `prompt.txt`, or "(none)")
-- Workdir (resolved absolute path)
-- Directories with access modes (read-only / rw / copy)
+- Workdir (resolved absolute path with mode)
+- Network (if non-default, e.g., "none")
+- Ports (if any)
+- [POST-MVP] Directories with access modes (read-only / rw / copy)
 - Creation time
 - Baseline SHA (for `:copy` directories that were git repos, or "(synthetic)" for non-git dirs)
 - Container ID
+- Changes (yes/no/- — same detection as `list`)
 
 Reads from `meta.json` and queries live Docker state. Agent status is detected via `docker exec tmux list-panes -t main -F '#{pane_dead}'` combined with Docker container state for full status (running / stopped / done / failed). Useful for quick inspection without listing all sandboxes.
 
@@ -637,6 +653,9 @@ Read-only directories are skipped (no changes possible).
 
 Options:
 - `--stat`: Show summary (files changed, insertions, deletions) instead of full diff.
+- `--log`: List individual agent commits beyond baseline (with commit SHA and subject). Combine with `--stat` to include per-commit file change summaries. Also notes uncommitted changes if present.
+- `<ref>`: Show diff for a specific commit (hex SHA prefix, 4+ chars) or range (`sha..sha`). Without `--`, auto-detected by hex pattern; with `--`, everything after is treated as path filters.
+- `-- <path>...`: Filter diff output to specific paths (relative to workdir).
 
 ### `yoloai apply`
 
@@ -712,14 +731,16 @@ Lists all sandboxes with their current status.
 | NAME    | Sandbox name                                                   |
 | STATUS  | `running`, `stopped`, `done` (exit 0), `failed` (non-zero exit) |
 | AGENT   | Agent name (`claude`, `test`, `codex`)                         |
-| PROFILE | Profile name or `(base)`                                       |
+| PROFILE | [POST-MVP] Profile name or `(base)`                            |
 | AGE     | Time since creation                                            |
 | WORKDIR | Working directory path                                         |
 | CHANGES | `yes` if unapplied changes exist, `no` if clean, `-` if unknown. Detected via `git status --porcelain` on the host-side work directory (any output = changes; read-only, catches both tracked modifications and untracked files; no Docker needed). |
 
 Agent exit status is detected via `tmux list-panes -t main -F '#{pane_dead_status}'` when `#{pane_dead}` is 1. Non-zero exit code shows STATUS as "failed"; exit 0 shows as "done". Running containers with live panes show "running"; stopped containers show "stopped".
 
-Options:
+Alias: `yoloai ls`.
+
+[POST-MVP] Options:
 - `--running`: Show only running sandboxes.
 - `--stopped`: Show only stopped sandboxes.
 - `--json`: Output as JSON for scripting.
@@ -1056,11 +1077,11 @@ After all prompts complete successfully, set `setup_complete: true` in `config.y
 Setup complete. To re-run setup at any time: yoloai setup
 ```
 
-### [POST-MVP] `yoloai setup`
+### `yoloai setup`
 
 Dedicated interactive setup command. Always runs the full new-user experience regardless of `setup_complete` — treats it as if `setup_complete` is false. This lets users redo their choices if they regret something. Shows current settings as defaults in prompts (e.g., if `tmux_conf` is already `host`, the `[n]` option is pre-selected).
 
-**`--power-user` flag:** Skip all interactive prompts. For automation (Ansible, dotfiles scripts, CI):
+**[POST-MVP] `--power-user` flag:** Skip all interactive prompts. For automation (Ansible, dotfiles scripts, CI):
 - No `~/.tmux.conf` exists → set `tmux_conf: default` (yoloai defaults only).
 - `~/.tmux.conf` exists → set `tmux_conf: default+host` (yoloai defaults + user config, no questions asked — assume they know what they want). Power users who want *only* their config can set `tmux_conf: host` in `config.yaml` directly. Power users who want *only* yoloai defaults can supply an empty `~/.tmux.conf`.
 - Perform non-interactive steps (directory creation, image build).

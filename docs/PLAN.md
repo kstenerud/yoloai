@@ -1,8 +1,8 @@
-# Plan: yoloAI MVP for Dogfooding
+# Plan: yoloAI MVP for Dogfooding (Completed)
 
 ## Context
 
-No code exists yet. All design docs are complete (DESIGN.md, CODING-STANDARD.md, CLI-STANDARD.md). All pre-implementation questions resolved (see OPEN_QUESTIONS.md #1–90). The goal is a working MVP that can dogfood — run `yoloai new fix-build --prompt "fix the build" ~/Projects/yoloai:copy`, have Claude Code work inside a container, then `yoloai diff` / `yoloai apply` to review and land changes.
+MVP is complete and public (beta). All phases (0–8) have been implemented. This document is retained as a historical reference for how the MVP was built. Post-MVP work (overlay strategy, network isolation, profiles, Codex agent, Viper config, aux dirs, etc.) is tracked separately.
 
 ## What's In / What's Deferred
 
@@ -16,8 +16,7 @@ No code exists yet. All design docs are complete (DESIGN.md, CODING-STANDARD.md,
 
 Detailed, self-contained implementation plans live in `docs/phases/PHASE_<N>.md`. Each phase file contains exact types, signatures, implementation steps, tests, and verification commands — enough for an agent to implement the phase without reading DESIGN.md. Only the next phase to implement gets a detailed plan; future phases stay as summaries below.
 
-**Completed phase plans:** `docs/phases/PHASE_0.md`, `docs/phases/PHASE_1.md`, `docs/phases/PHASE_2.md`, `docs/phases/PHASE_3.md`, `docs/phases/PHASE_4a.md`, `docs/phases/PHASE_4b.md`
-**Current phase plan:** `docs/phases/PHASE_5.md`
+**All phase plans (completed):** `docs/phases/PHASE_0.md` through `docs/phases/PHASE_8.md`
 
 ## Implementation Phases
 

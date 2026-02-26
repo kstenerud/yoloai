@@ -4,7 +4,7 @@ Sandboxed AI coding agent runner. Runs AI coding CLI agents (Claude Code, Codex)
 
 ## Project Status
 
-MVP is public (beta). Breaking changes are allowed but must be tracked in `docs/BREAKING-CHANGES.md`.
+Post-MVP development. MVP is public (beta). Breaking changes are allowed but must be tracked in `docs/BREAKING-CHANGES.md`.
 
 ## Key Files
 
@@ -15,7 +15,7 @@ All design/planning documents live in `docs/`:
 - `docs/CRITIQUE.md` — Rolling critique document. After a critique pass, findings are applied to DESIGN.md and RESEARCH.md, then CRITIQUE.md is emptied for the next round.
 - `docs/CLI-STANDARD.md` — CLI design conventions: argument ordering (options first), flag naming, exit codes, error messages, help text format.
 - `docs/CODING-STANDARD.md` — Code style: Go 1.22+, gofmt, golangci-lint, Cobra, project structure, naming, error handling, dependency policy.
-- `docs/PLAN.md` — Current MVP implementation plan (phases, architecture decisions, file inventory).
+- `docs/PLAN.md` — Completed MVP implementation plan (phases, architecture decisions, file inventory). Historical reference for how the MVP was built.
 - `docs/OPEN_QUESTIONS.md` — Questions encountered during design/implementation that need resolution. Add new questions here as they come up; resolve before the relevant phase begins.
 - `docs/BREAKING-CHANGES.md` — Tracks breaking changes made during beta. Each entry documents previous behavior, new behavior, rationale, and migration steps. Include in release notes.
 
