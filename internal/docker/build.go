@@ -54,6 +54,7 @@ func SeedResources(targetDir string) (SeedResult, error) {
 	}{
 		{"Dockerfile.base", embeddedDockerfile},
 		{"entrypoint.sh", embeddedEntrypoint},
+		{"tmux.conf", embeddedTmuxConf},
 	}
 
 	checksums, manifestOK := loadChecksums(targetDir)
@@ -207,7 +208,7 @@ func RecordBuildChecksum(sourceDir string) {
 // buildInputsChecksum computes a combined SHA-256 of the build input files.
 func buildInputsChecksum(sourceDir string) string {
 	h := sha256.New()
-	for _, name := range []string{"Dockerfile.base", "entrypoint.sh"} {
+	for _, name := range []string{"Dockerfile.base", "entrypoint.sh", "tmux.conf"} {
 		data, err := os.ReadFile(filepath.Join(sourceDir, name)) //nolint:gosec // G304: sourceDir is ~/.yoloai/
 		if err != nil {
 			return ""
@@ -230,6 +231,7 @@ func createBuildContext(sourceDir string) (io.Reader, error) {
 	}{
 		{"Dockerfile.base", "Dockerfile"},
 		{"entrypoint.sh", "entrypoint.sh"},
+		{"tmux.conf", "tmux.conf"},
 	}
 
 	for _, f := range files {

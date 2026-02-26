@@ -22,7 +22,7 @@ func newDestroyCmd() *cobra.Command {
 			yes, _ := cmd.Flags().GetBool("yes")
 
 			return withClient(cmd, func(ctx context.Context, client docker.Client) error {
-				mgr := sandbox.NewManager(client, slog.Default(), cmd.ErrOrStderr())
+				mgr := sandbox.NewManager(client, slog.Default(), cmd.InOrStdin(), cmd.ErrOrStderr())
 
 				var names []string
 				if all {

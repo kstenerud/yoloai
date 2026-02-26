@@ -253,6 +253,12 @@ func (m *Manager) recreateContainer(ctx context.Context, name string, meta *Meta
 		return fmt.Errorf("parse workdir: %w", err)
 	}
 
+	// Extract tmux_conf from config.json
+	var cfgJSON containerConfig
+	if err := json.Unmarshal(configData, &cfgJSON); err != nil {
+		return fmt.Errorf("parse config.json: %w", err)
+	}
+
 	state := &sandboxState{
 		name:        name,
 		sandboxDir:  sandboxDir,
@@ -263,6 +269,7 @@ func (m *Manager) recreateContainer(ctx context.Context, name string, meta *Meta
 		hasPrompt:   meta.HasPrompt,
 		networkMode: meta.NetworkMode,
 		ports:       meta.Ports,
+		tmuxConf:    cfgJSON.TmuxConf,
 		configJSON:  configData,
 	}
 

@@ -57,7 +57,7 @@ func TestBuildAgentCommand_InteractiveFallback(t *testing.T) {
 
 func TestBuildContainerConfig_ValidJSON(t *testing.T) {
 	agentDef := agent.GetAgent("claude")
-	data, err := buildContainerConfig(agentDef, "claude --dangerously-skip-permissions")
+	data, err := buildContainerConfig(agentDef, "claude --dangerously-skip-permissions", "default+host")
 	require.NoError(t, err)
 
 	var cfg containerConfig
@@ -69,6 +69,7 @@ func TestBuildContainerConfig_ValidJSON(t *testing.T) {
 	assert.Equal(t, "Enter Enter", cfg.SubmitSequence)
 	assert.Equal(t, os.Getuid(), cfg.HostUID)
 	assert.Equal(t, os.Getgid(), cfg.HostGID)
+	assert.Equal(t, "default+host", cfg.TmuxConf)
 }
 
 func TestReadPrompt_DirectText(t *testing.T) {

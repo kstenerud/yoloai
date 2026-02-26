@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -57,7 +58,7 @@ func (m *lifecycleMockClient) ContainerInspect(ctx context.Context, id string) (
 
 // newLifecycleMgr creates a Manager with the given mock client and a discard output.
 func newLifecycleMgr(client *lifecycleMockClient) *Manager {
-	return NewManager(client, slog.Default(), io.Discard)
+	return NewManager(client, slog.Default(), strings.NewReader(""), io.Discard)
 }
 
 // createTestSandbox creates a sandbox directory with meta.json for lifecycle tests.
@@ -167,7 +168,7 @@ func TestStart_AlreadyRunning(t *testing.T) {
 	mock.mockClient = mockClient{}
 
 	var output bytes.Buffer
-	mgr := NewManager(mock, slog.Default(), &output)
+	mgr := NewManager(mock, slog.Default(), strings.NewReader(""), &output)
 
 	// DetectStatus will call ContainerInspect (running=true),
 	// then try execInContainer for tmux. Since our mock returns errMockNotImplemented
@@ -200,7 +201,7 @@ func TestStart_Stopped(t *testing.T) {
 	}
 
 	var output bytes.Buffer
-	mgr := NewManager(mock, slog.Default(), &output)
+	mgr := NewManager(mock, slog.Default(), strings.NewReader(""), &output)
 
 	err := mgr.Start(context.Background(), "test-start-stopped")
 	require.NoError(t, err)
@@ -717,7 +718,7 @@ func TestReset_NoRestart_FallsBackWhenNotRunning(t *testing.T) {
 	}
 
 	var output bytes.Buffer
-	mgr := NewManager(mock, slog.Default(), &output)
+	mgr := NewManager(mock, slog.Default(), strings.NewReader(""), &output)
 
 	// Reset with --no-restart; container not running → falls back to default path.
 	// Default path will fail at Start (no config.json), but re-copy should happen.

@@ -23,7 +23,7 @@ func withClient(cmd *cobra.Command, fn func(ctx context.Context, client docker.C
 // withManager creates a Docker client and sandbox manager, calls fn, and ensures cleanup.
 func withManager(cmd *cobra.Command, fn func(ctx context.Context, mgr *sandbox.Manager) error) error {
 	return withClient(cmd, func(ctx context.Context, client docker.Client) error {
-		mgr := sandbox.NewManager(client, slog.Default(), cmd.ErrOrStderr())
+		mgr := sandbox.NewManager(client, slog.Default(), cmd.InOrStdin(), cmd.ErrOrStderr())
 		return fn(ctx, mgr)
 	})
 }

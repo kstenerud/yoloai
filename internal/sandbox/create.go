@@ -46,6 +46,7 @@ type sandboxState struct {
 	hasPrompt   bool
 	networkMode string
 	ports       []string
+	tmuxConf    string
 	meta        *Meta
 	configJSON  []byte
 }
@@ -58,6 +59,7 @@ type containerConfig struct {
 	StartupDelay   int    `json:"startup_delay"`
 	ReadyPattern   string `json:"ready_pattern"`
 	SubmitSequence string `json:"submit_sequence"`
+	TmuxConf       string `json:"tmux_conf"`
 }
 
 // Create creates and optionally starts a new sandbox.
@@ -162,7 +164,7 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 	if dirtyMsg != "" && !opts.Yes {
 		fmt.Fprintf(m.output, "WARNING: %s has uncommitted changes (%s)\n", workdir.Path, dirtyMsg)         //nolint:errcheck // best-effort output
 		fmt.Fprintln(m.output, "These changes will be visible to the agent and could be modified or lost.") //nolint:errcheck // best-effort output
-		if !Confirm("Continue? [y/N] ", os.Stdin, m.output) {
+		if !Confirm("Continue? [y/N] ", m.input, m.output) {
 			return nil, nil // user cancelled
 		}
 	}
@@ -239,8 +241,18 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 	// Build agent command
 	agentCommand := buildAgentCommand(agentDef, model, promptText, opts.Passthrough)
 
+	// Read tmux_conf from config.yaml
+	ycfg, err := loadConfig()
+	if err != nil {
+		return nil, fmt.Errorf("load config: %w", err)
+	}
+	tmuxConf := ycfg.TmuxConf
+	if tmuxConf == "" {
+		tmuxConf = "default" // fallback if not set
+	}
+
 	// Build config.json
-	configData, err := buildContainerConfig(agentDef, agentCommand)
+	configData, err := buildContainerConfig(agentDef, agentCommand, tmuxConf)
 	if err != nil {
 		return nil, fmt.Errorf("build config.json: %w", err)
 	}
@@ -297,6 +309,7 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 		hasPrompt:   hasPrompt,
 		networkMode: networkMode,
 		ports:       opts.Ports,
+		tmuxConf:    tmuxConf,
 		meta:        meta,
 		configJSON:  configData,
 	}, nil
@@ -430,7 +443,7 @@ func shellEscapeForDoubleQuotes(s string) string {
 }
 
 // buildContainerConfig creates the config.json content.
-func buildContainerConfig(agentDef *agent.Definition, agentCommand string) ([]byte, error) {
+func buildContainerConfig(agentDef *agent.Definition, agentCommand string, tmuxConf string) ([]byte, error) {
 	cfg := containerConfig{
 		HostUID:        os.Getuid(),
 		HostGID:        os.Getgid(),
@@ -438,6 +451,7 @@ func buildContainerConfig(agentDef *agent.Definition, agentCommand string) ([]by
 		StartupDelay:   int(agentDef.StartupDelay / time.Millisecond),
 		ReadyPattern:   agentDef.ReadyPattern,
 		SubmitSequence: agentDef.SubmitSequence,
+		TmuxConf:       tmuxConf,
 	}
 	return json.MarshalIndent(cfg, "", "  ")
 }
@@ -687,6 +701,19 @@ func buildMounts(state *sandboxState, secretsDir string) []mount.Mount {
 			Source: src,
 			Target: "/home/yoloai/" + sf.TargetPath,
 		})
+	}
+
+	// Host tmux config (when tmux_conf is default+host or host)
+	if state.tmuxConf == "default+host" || state.tmuxConf == "host" {
+		tmuxConfPath := expandTilde("~/.tmux.conf")
+		if _, err := os.Stat(tmuxConfPath); err == nil {
+			mounts = append(mounts, mount.Mount{
+				Type:     mount.TypeBind,
+				Source:   tmuxConfPath,
+				Target:   "/home/yoloai/.tmux.conf",
+				ReadOnly: true,
+			})
+		}
 	}
 
 	// Secrets

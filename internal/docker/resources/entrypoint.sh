@@ -46,9 +46,30 @@ AGENT_COMMAND=$(jq -r .agent_command "$CONFIG")
 STARTUP_DELAY=$(jq -r .startup_delay "$CONFIG")
 READY_PATTERN=$(jq -r .ready_pattern "$CONFIG")
 SUBMIT_SEQUENCE=$(jq -r .submit_sequence "$CONFIG")
+TMUX_CONF=$(jq -r .tmux_conf "$CONFIG")
 
-# Start tmux session with logging and remain-on-exit
-tmux new-session -d -s main -x 200 -y 50
+# Start tmux session with config based on tmux_conf setting
+case "$TMUX_CONF" in
+    default+host)
+        tmux -f /yoloai/tmux.conf new-session -d -s main -x 200 -y 50
+        if [ -f /home/yoloai/.tmux.conf ]; then
+            tmux source-file /home/yoloai/.tmux.conf
+        fi
+        ;;
+    default)
+        tmux -f /yoloai/tmux.conf new-session -d -s main -x 200 -y 50
+        ;;
+    host)
+        if [ -f /home/yoloai/.tmux.conf ]; then
+            tmux -f /home/yoloai/.tmux.conf new-session -d -s main -x 200 -y 50
+        else
+            tmux new-session -d -s main -x 200 -y 50
+        fi
+        ;;
+    *)
+        tmux new-session -d -s main -x 200 -y 50
+        ;;
+esac
 tmux set-option -t main remain-on-exit on
 tmux pipe-pane -t main "cat >> /yoloai/log.txt"
 

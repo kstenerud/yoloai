@@ -28,6 +28,10 @@ func TestSeedResources_CreatesFiles(t *testing.T) {
 	entrypoint, err := os.ReadFile(filepath.Join(targetDir, "entrypoint.sh")) //nolint:gosec // G304: test code with temp dir
 	require.NoError(t, err)
 	assert.Equal(t, embeddedEntrypoint, entrypoint)
+
+	tmuxConf, err := os.ReadFile(filepath.Join(targetDir, "tmux.conf")) //nolint:gosec // G304: test code with temp dir
+	require.NoError(t, err)
+	assert.Equal(t, embeddedTmuxConf, tmuxConf)
 }
 
 func TestSeedResources_NoChangeWhenCurrent(t *testing.T) {
@@ -147,10 +151,13 @@ func TestCreateBuildContext_ValidTar(t *testing.T) {
 
 	dockerfileContent := []byte("FROM debian:slim\n")
 	entrypointContent := []byte("#!/bin/bash\necho hello\n")
+	tmuxConfContent := []byte("set -g mouse on\n")
 
 	err := os.WriteFile(filepath.Join(dir, "Dockerfile.base"), dockerfileContent, 0600)
 	require.NoError(t, err)
 	err = os.WriteFile(filepath.Join(dir, "entrypoint.sh"), entrypointContent, 0600)
+	require.NoError(t, err)
+	err = os.WriteFile(filepath.Join(dir, "tmux.conf"), tmuxConfContent, 0600)
 	require.NoError(t, err)
 
 	reader, err := createBuildContext(dir)
@@ -179,6 +186,10 @@ func TestCreateBuildContext_ValidTar(t *testing.T) {
 	// Verify entrypoint.sh
 	assert.Contains(t, found, "entrypoint.sh")
 	assert.Equal(t, entrypointContent, found["entrypoint.sh"])
+
+	// Verify tmux.conf
+	assert.Contains(t, found, "tmux.conf")
+	assert.Equal(t, tmuxConfContent, found["tmux.conf"])
 
 	// Should not contain Dockerfile.base
 	assert.NotContains(t, found, "Dockerfile.base")

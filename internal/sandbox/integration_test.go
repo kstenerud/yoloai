@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -37,7 +38,7 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 	require.NoError(t, err, "Docker must be running for integration tests")
 	defer client.Close() //nolint:errcheck // test cleanup
 
-	mgr := NewManager(client, slog.Default(), io.Discard)
+	mgr := NewManager(client, slog.Default(), strings.NewReader(""), io.Discard)
 
 	// Step 1: EnsureSetup (builds base image if needed)
 	require.NoError(t, mgr.EnsureSetup(ctx))

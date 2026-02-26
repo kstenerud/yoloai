@@ -10,10 +10,13 @@ import (
 
 	cerrdefs "github.com/containerd/errdefs"
 	"github.com/kstenerud/yoloai/internal/docker"
+	"golang.org/x/term"
 )
 
 const defaultConfigYAML = `# yoloai configuration
 # See https://github.com/kstenerud/yoloai for documentation
+
+setup_complete: false
 
 defaults:
   agent: claude
@@ -32,15 +35,17 @@ defaults:
 type Manager struct {
 	client docker.Client
 	logger *slog.Logger
+	input  io.Reader
 	output io.Writer
 }
 
 // NewManager creates a Manager with the given Docker client, logger,
-// and output writer for user-facing messages.
-func NewManager(client docker.Client, logger *slog.Logger, output io.Writer) *Manager {
+// input reader for interactive prompts, and output writer for user-facing messages.
+func NewManager(client docker.Client, logger *slog.Logger, input io.Reader, output io.Writer) *Manager {
 	return &Manager{
 		client: client,
 		logger: logger,
+		input:  input,
 		output: output,
 	}
 }
@@ -109,7 +114,36 @@ func (m *Manager) EnsureSetup(ctx context.Context) error {
 		fmt.Fprintln(m.output, "Tip: enable shell completions with 'yoloai completion --help'") //nolint:errcheck // best-effort output
 	}
 
+	// Run new-user experience if setup_complete is false
+	cfg, err := loadConfig()
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+	if !cfg.SetupComplete {
+		if !m.isInteractive() {
+			// Non-TTY: auto-configure without prompts (power-user behavior)
+			if err := m.setTmuxConf("default+host"); err != nil {
+				return fmt.Errorf("set tmux_conf: %w", err)
+			}
+			if err := updateConfigFields(map[string]string{"setup_complete": "true"}); err != nil {
+				return fmt.Errorf("set setup_complete: %w", err)
+			}
+		} else {
+			if err := m.runNewUserSetup(); err != nil {
+				return err
+			}
+		}
+	}
+
 	return nil
+}
+
+// isInteractive returns true if m.input is a TTY (terminal).
+func (m *Manager) isInteractive() bool {
+	if f, ok := m.input.(*os.File); ok {
+		return term.IsTerminal(int(f.Fd()))
+	}
+	return false
 }
 
 // imageExists checks if a Docker image with the given tag exists.

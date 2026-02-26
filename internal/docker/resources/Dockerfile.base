@@ -75,6 +75,7 @@ RUN groupadd -g 1001 yoloai \
 # Internal directory for sandbox state files
 RUN mkdir -p /yoloai && chown yoloai:yoloai /yoloai
 
+COPY tmux.conf /yoloai/tmux.conf
 COPY entrypoint.sh /yoloai/entrypoint.sh
 RUN chmod +x /yoloai/entrypoint.sh
 

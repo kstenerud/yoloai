@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	cerrdefs "github.com/containerd/errdefs"
@@ -102,7 +103,7 @@ func TestEnsureSetup_CreatesDirectories(t *testing.T) {
 	t.Setenv("HOME", tmpDir)
 
 	mock := &mockClient{} // image exists (no error)
-	mgr := NewManager(mock, slog.Default(), io.Discard)
+	mgr := NewManager(mock, slog.Default(), strings.NewReader(""), io.Discard)
 
 	err := mgr.EnsureSetup(context.Background())
 	require.NoError(t, err)
@@ -121,7 +122,7 @@ func TestEnsureSetup_WritesConfigOnFirstRun(t *testing.T) {
 
 	mock := &mockClient{}
 	var output bytes.Buffer
-	mgr := NewManager(mock, slog.Default(), &output)
+	mgr := NewManager(mock, slog.Default(), strings.NewReader(""), &output)
 
 	err := mgr.EnsureSetup(context.Background())
 	require.NoError(t, err)
@@ -139,20 +140,20 @@ func TestEnsureSetup_SkipsConfigOnSubsequentRun(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
 
-	// Pre-create config.yaml with custom content
+	// Pre-create config.yaml with custom content (valid YAML, setup already done)
 	yoloaiDir := filepath.Join(tmpDir, ".yoloai")
 	require.NoError(t, os.MkdirAll(yoloaiDir, 0750))
-	customContent := []byte("# custom config\n")
+	customContent := []byte("# custom config\nsetup_complete: true\ndefaults:\n  agent: claude\n")
 	require.NoError(t, os.WriteFile(filepath.Join(yoloaiDir, "config.yaml"), customContent, 0600))
 
 	mock := &mockClient{}
 	var output bytes.Buffer
-	mgr := NewManager(mock, slog.Default(), &output)
+	mgr := NewManager(mock, slog.Default(), strings.NewReader(""), &output)
 
 	err := mgr.EnsureSetup(context.Background())
 	require.NoError(t, err)
 
-	// Config should be preserved
+	// Config should be preserved (setup_complete is true, so no modification)
 	content, err := os.ReadFile(filepath.Join(yoloaiDir, "config.yaml")) //nolint:gosec // G304: test code with temp dir
 	require.NoError(t, err)
 	assert.Equal(t, customContent, content)
@@ -172,7 +173,7 @@ func TestEnsureSetup_SkipsBuildWhenImageExists(t *testing.T) {
 	docker.RecordBuildChecksum(yoloaiDir)
 
 	mock := &mockClient{} // imageExistsErr is nil → image exists
-	mgr := NewManager(mock, slog.Default(), io.Discard)
+	mgr := NewManager(mock, slog.Default(), strings.NewReader(""), io.Discard)
 
 	err = mgr.EnsureSetup(context.Background())
 	require.NoError(t, err)
@@ -205,7 +206,7 @@ func TestEnsureSetup_RebuildWhenResourcesChanged(t *testing.T) {
 
 	mock := &mockClient{} // image exists
 	var output bytes.Buffer
-	mgr := NewManager(mock, slog.Default(), &output)
+	mgr := NewManager(mock, slog.Default(), strings.NewReader(""), &output)
 
 	err = mgr.EnsureSetup(context.Background())
 	require.NoError(t, err)
@@ -221,7 +222,7 @@ func TestEnsureSetup_BuildsWhenImageMissing(t *testing.T) {
 		imageExistsErr: fmt.Errorf("not found: %w", cerrdefs.ErrNotFound),
 	}
 	var output bytes.Buffer
-	mgr := NewManager(mock, slog.Default(), &output)
+	mgr := NewManager(mock, slog.Default(), strings.NewReader(""), &output)
 
 	err := mgr.EnsureSetup(context.Background())
 	require.NoError(t, err)
