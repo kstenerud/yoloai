@@ -144,7 +144,12 @@ func (r *Runtime) Start(ctx context.Context, name string) error {
 	if err := r.waitForBoot(ctx, name, procDone); err != nil {
 		// Attempt cleanup
 		r.killByPID(sandboxPath)
-		return fmt.Errorf("wait for VM boot: %w", err)
+		// Include log file contents and the command for diagnostics
+		detail := fmt.Sprintf("command: %s %s", r.tartBin, strings.Join(args, " "))
+		if logData, readErr := os.ReadFile(logPath); readErr == nil && len(logData) > 0 { //nolint:gosec // G304: path within sandbox dir
+			detail += fmt.Sprintf("\nVM log output:\n%s", strings.TrimSpace(string(logData)))
+		}
+		return fmt.Errorf("wait for VM boot: %w\n%s", err, detail)
 	}
 
 	// Deliver setup script via shared directory and run it
