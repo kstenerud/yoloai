@@ -595,10 +595,14 @@ func (r *Runtime) runSetupScript(ctx context.Context, vmName, sandboxPath string
 		return fmt.Errorf("patch config working dir: %w", err)
 	}
 
-	// Write setup script to sandbox dir (it's shared via VirtioFS)
+	// Write setup script and tmux config to sandbox dir (shared via VirtioFS)
 	scriptPath := filepath.Join(sandboxPath, "setup.sh")
 	if err := os.WriteFile(scriptPath, embeddedSetupScript, 0755); err != nil { //nolint:gosec // G306: script needs exec permission
 		return fmt.Errorf("write setup script: %w", err)
+	}
+	tmuxConfPath := filepath.Join(sandboxPath, "tmux.conf")
+	if err := os.WriteFile(tmuxConfPath, embeddedTmuxConf, 0600); err != nil {
+		return fmt.Errorf("write tmux.conf: %w", err)
 	}
 
 	// Run the setup script in the background inside the VM.
