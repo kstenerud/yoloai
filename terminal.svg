@@ -17,7 +17,9 @@
 <line x1="0" y1="150" x2="800" y2="150" stroke="#30363d" stroke-width="1" />
 <text x="10" y="173" fill="#39d353">❯ <tspan fill="#ffffff">Let's do something dangerous!</tspan></text>
 <line x1="0" y1="185" x2="800" y2="185" stroke="#30363d" stroke-width="1" />
-<text x="30" y="202" fill="#8b949e">__ bypass permissions on <rect x="238" y="205" width="8" height="18" fill="#58a6ff"><animate attributeName="opacity" values="1;0;1" dur="1s" repeatCount="indefinite" /></rect></text>
+<text x="30" y="207" fill="#c23720">__ bypass permissions on</text>
+<rect x="310" y="158" width="8" height="18" fill="#58a6ff">
+<animate attributeName="opacity" values="1;0;1" dur="1s" repeatCount="indefinite" />
+</rect>
 </g>
 </svg>
-
