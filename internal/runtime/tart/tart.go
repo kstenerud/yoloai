@@ -81,7 +81,8 @@ func New(_ context.Context) (*Runtime, error) {
 // Create creates a new VM instance by cloning the base image and writing
 // the instance config to the sandbox directory.
 func (r *Runtime) Create(ctx context.Context, cfg runtime.InstanceConfig) error {
-	// Remove any leftover VM with the same name (idempotent)
+	// Stop any stale processes and remove leftover VM (idempotent)
+	r.stopVM(ctx, cfg.Name)
 	if r.vmExists(ctx, cfg.Name) {
 		if _, err := r.runTart(ctx, "delete", cfg.Name); err != nil {
 			return fmt.Errorf("remove existing VM: %w", err)
@@ -169,20 +170,7 @@ func (r *Runtime) Start(ctx context.Context, name string) error {
 
 // Stop stops the VM with a clean shutdown.
 func (r *Runtime) Stop(ctx context.Context, name string) error {
-	if !r.vmExists(ctx, name) {
-		return nil
-	}
-
-	if !r.isRunning(ctx, name) {
-		return nil
-	}
-
-	if _, err := r.runTart(ctx, "stop", name); err != nil {
-		// Fall back to PID-based kill if tart stop fails
-		sandboxPath := filepath.Join(r.sandboxDir, sandboxName(name))
-		r.killByPID(sandboxPath)
-	}
-
+	r.stopVM(ctx, name)
 	return nil
 }
 
@@ -517,6 +505,31 @@ func (r *Runtime) runSetupScript(ctx context.Context, vmName, sandboxPath string
 	}
 
 	return nil
+}
+
+// stopVM attempts to stop a VM using tart stop, then kills any stale
+// tart run processes for the given VM name. This is the definitive way
+// to ensure no lingering processes hold VM slots.
+func (r *Runtime) stopVM(ctx context.Context, vmName string) {
+	// Try graceful stop first
+	_, _ = r.runTart(ctx, "stop", vmName)
+
+	// Kill any stale "tart run" processes matching this VM name.
+	// pgrep -f matches the full command line.
+	pgrepCmd := exec.CommandContext(ctx, "pgrep", "-f", fmt.Sprintf("tart run.*%s", vmName)) //nolint:gosec // G204: vmName is from validated sandbox state
+	out, err := pgrepCmd.Output()
+	if err != nil {
+		return // no matching processes
+	}
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		pid, err := strconv.Atoi(strings.TrimSpace(line))
+		if err != nil {
+			continue
+		}
+		if proc, findErr := os.FindProcess(pid); findErr == nil {
+			_ = proc.Signal(syscall.SIGTERM)
+		}
+	}
 }
 
 // killByPID reads the PID file and kills the process.
