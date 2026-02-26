@@ -17,7 +17,7 @@ func TestLoadConfig_Default(t *testing.T) {
 	require.NoError(t, os.MkdirAll(yoloaiDir, 0750))
 	require.NoError(t, os.WriteFile(filepath.Join(yoloaiDir, "config.yaml"), []byte(defaultConfigYAML), 0600))
 
-	cfg, err := loadConfig()
+	cfg, err := LoadConfig()
 	require.NoError(t, err)
 	assert.False(t, cfg.SetupComplete)
 	assert.Empty(t, cfg.TmuxConf)
@@ -37,7 +37,7 @@ defaults:
 `
 	require.NoError(t, os.WriteFile(filepath.Join(yoloaiDir, "config.yaml"), []byte(content), 0600))
 
-	cfg, err := loadConfig()
+	cfg, err := LoadConfig()
 	require.NoError(t, err)
 	assert.True(t, cfg.SetupComplete)
 	assert.Equal(t, "default+host", cfg.TmuxConf)
@@ -47,7 +47,7 @@ func TestLoadConfig_MissingFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
 
-	cfg, err := loadConfig()
+	cfg, err := LoadConfig()
 	require.NoError(t, err)
 	assert.False(t, cfg.SetupComplete)
 	assert.Empty(t, cfg.TmuxConf)
@@ -66,7 +66,7 @@ func TestUpdateConfigFields_SetupComplete(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	cfg, err := loadConfig()
+	cfg, err := LoadConfig()
 	require.NoError(t, err)
 	assert.True(t, cfg.SetupComplete)
 }
@@ -85,7 +85,7 @@ func TestUpdateConfigFields_TmuxConf(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	cfg, err := loadConfig()
+	cfg, err := LoadConfig()
 	require.NoError(t, err)
 	assert.True(t, cfg.SetupComplete)
 	assert.Equal(t, "default+host", cfg.TmuxConf)

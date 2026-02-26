@@ -438,7 +438,7 @@ func TestBuildMounts_IncludesSecrets(t *testing.T) {
 
 func TestPrintCreationOutput_Basic(t *testing.T) {
 	var buf bytes.Buffer
-	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), &buf)
+	mgr := NewManager(&mockRuntime{}, "docker", slog.Default(), strings.NewReader(""), &buf)
 
 	agentDef := agent.GetAgent("claude")
 	state := &sandboxState{
@@ -459,7 +459,7 @@ func TestPrintCreationOutput_Basic(t *testing.T) {
 
 func TestPrintCreationOutput_AutoAttach(t *testing.T) {
 	var buf bytes.Buffer
-	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), &buf)
+	mgr := NewManager(&mockRuntime{}, "docker", slog.Default(), strings.NewReader(""), &buf)
 
 	state := &sandboxState{
 		name:    "test",
@@ -475,7 +475,7 @@ func TestPrintCreationOutput_AutoAttach(t *testing.T) {
 
 func TestPrintCreationOutput_WithPrompt(t *testing.T) {
 	var buf bytes.Buffer
-	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), &buf)
+	mgr := NewManager(&mockRuntime{}, "docker", slog.Default(), strings.NewReader(""), &buf)
 
 	state := &sandboxState{
 		name:      "test",
@@ -491,7 +491,7 @@ func TestPrintCreationOutput_WithPrompt(t *testing.T) {
 
 func TestPrintCreationOutput_NetworkNone(t *testing.T) {
 	var buf bytes.Buffer
-	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), &buf)
+	mgr := NewManager(&mockRuntime{}, "docker", slog.Default(), strings.NewReader(""), &buf)
 
 	state := &sandboxState{
 		name:        "test",
@@ -507,7 +507,7 @@ func TestPrintCreationOutput_NetworkNone(t *testing.T) {
 
 func TestPrintCreationOutput_WithPorts(t *testing.T) {
 	var buf bytes.Buffer
-	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), &buf)
+	mgr := NewManager(&mockRuntime{}, "docker", slog.Default(), strings.NewReader(""), &buf)
 
 	state := &sandboxState{
 		name:    "test",
@@ -524,7 +524,7 @@ func TestPrintCreationOutput_WithPorts(t *testing.T) {
 
 func TestPrintCreationOutput_NilState(t *testing.T) {
 	var buf bytes.Buffer
-	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), &buf)
+	mgr := NewManager(&mockRuntime{}, "docker", slog.Default(), strings.NewReader(""), &buf)
 
 	mgr.printCreationOutput(nil, false)
 
@@ -538,7 +538,7 @@ func TestPrepareSandboxState_MissingName(t *testing.T) {
 	t.Setenv("HOME", tmpDir)
 	t.Setenv("ANTHROPIC_API_KEY", "sk-test")
 
-	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), io.Discard)
+	mgr := NewManager(&mockRuntime{}, "docker", slog.Default(), strings.NewReader(""), io.Discard)
 
 	_, err := mgr.prepareSandboxState(context.TODO(), CreateOptions{
 		Name:       "",
@@ -553,7 +553,7 @@ func TestPrepareSandboxState_UnknownAgent(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
 
-	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), io.Discard)
+	mgr := NewManager(&mockRuntime{}, "docker", slog.Default(), strings.NewReader(""), io.Discard)
 
 	_, err := mgr.prepareSandboxState(context.TODO(), CreateOptions{
 		Name:       "test",
@@ -568,7 +568,7 @@ func TestPrepareSandboxState_WorkdirMissing(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
 
-	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), io.Discard)
+	mgr := NewManager(&mockRuntime{}, "docker", slog.Default(), strings.NewReader(""), io.Discard)
 
 	_, err := mgr.prepareSandboxState(context.TODO(), CreateOptions{
 		Name:       "test",
@@ -587,7 +587,7 @@ func TestPrepareSandboxState_SandboxExists(t *testing.T) {
 	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", "existing")
 	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
 
-	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), io.Discard)
+	mgr := NewManager(&mockRuntime{}, "docker", slog.Default(), strings.NewReader(""), io.Discard)
 
 	_, err := mgr.prepareSandboxState(context.TODO(), CreateOptions{
 		Name:       "existing",
@@ -602,7 +602,7 @@ func TestPrepareSandboxState_ConflictingPromptFlags(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
 
-	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), io.Discard)
+	mgr := NewManager(&mockRuntime{}, "docker", slog.Default(), strings.NewReader(""), io.Discard)
 
 	_, err := mgr.prepareSandboxState(context.TODO(), CreateOptions{
 		Name:       "test",
@@ -620,7 +620,7 @@ func TestPrepareSandboxState_MissingAPIKey(t *testing.T) {
 	t.Setenv("HOME", tmpDir)
 	t.Setenv("ANTHROPIC_API_KEY", "")
 
-	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), io.Discard)
+	mgr := NewManager(&mockRuntime{}, "docker", slog.Default(), strings.NewReader(""), io.Discard)
 
 	_, err := mgr.prepareSandboxState(context.TODO(), CreateOptions{
 		Name:       "test",
@@ -636,7 +636,7 @@ func TestPrepareSandboxState_DangerousDir(t *testing.T) {
 	t.Setenv("HOME", tmpDir)
 	t.Setenv("ANTHROPIC_API_KEY", "sk-test")
 
-	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), io.Discard)
+	mgr := NewManager(&mockRuntime{}, "docker", slog.Default(), strings.NewReader(""), io.Discard)
 
 	_, err := mgr.prepareSandboxState(context.TODO(), CreateOptions{
 		Name:       "test",
@@ -654,7 +654,7 @@ func TestPrepareSandboxState_DangerousDirForce(t *testing.T) {
 
 	// HOME is classified as dangerous. Use :rw:force to avoid copying.
 	var buf bytes.Buffer
-	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader("y\n"), &buf)
+	mgr := NewManager(&mockRuntime{}, "docker", slog.Default(), strings.NewReader("y\n"), &buf)
 
 	_, err := mgr.prepareSandboxState(context.TODO(), CreateOptions{
 		Name:       "test",

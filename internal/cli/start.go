@@ -26,7 +26,8 @@ func newStartCmd() *cobra.Command {
 			attach, _ := cmd.Flags().GetBool("attach")
 
 			return withRuntime(cmd, func(ctx context.Context, rt runtime.Runtime) error {
-				mgr := sandbox.NewManager(rt, slog.Default(), cmd.InOrStdin(), cmd.ErrOrStderr())
+				backend := resolveBackend(cmd)
+				mgr := sandbox.NewManager(rt, backend, slog.Default(), cmd.InOrStdin(), cmd.ErrOrStderr())
 				if err := mgr.Start(ctx, name); err != nil {
 					return err
 				}

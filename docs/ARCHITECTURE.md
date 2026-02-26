@@ -34,7 +34,7 @@ Dependency direction: `cmd/yoloai` → `cli` → `sandbox` + `runtime`; `sandbox
 
 | File | Purpose |
 |------|---------|
-| `root.go` | Root Cobra command, global flags (`-v`, `-q`, `--no-color`), `Execute()` with exit code mapping. |
+| `root.go` | Root Cobra command, global flags (`-v`, `-q`, `--no-color`, `--backend`), `Execute()` with exit code mapping. |
 | `commands.go` | `registerCommands()` — registers all subcommands. Also contains `newNewCmd`, `newBuildCmd`, `newCompletionCmd`, `newVersionCmd`, and `attachToSandbox`/`waitForTmux` helpers. |
 | `apply.go` | `yoloai apply` — apply changes back to host. Squash and selective-commit modes, `--export` for `.patch` files. |
 | `attach.go` | `yoloai attach` — attach to sandbox tmux session via `runtime.InteractiveExec`. |
@@ -49,7 +49,7 @@ Dependency direction: `cmd/yoloai` → `cli` → `sandbox` + `runtime`; `sandbox
 | `start.go` | `yoloai start` — start a stopped sandbox (recreates container if removed). |
 | `stop.go` | `yoloai stop` — stop a running sandbox. |
 | `envname.go` | `resolveName()` — resolves sandbox name from args or `YOLOAI_SANDBOX` env var. |
-| `helpers.go` | `withRuntime()`, `withManager()` — create Runtime / Manager for command handlers. |
+| `helpers.go` | `withRuntime()`, `withManager()` — create Runtime / Manager for command handlers. `resolveBackend()` — determines backend name from `--backend` flag > `defaults.backend` config > `"docker"` default. |
 | `pager.go` | `RunPager()` — pipe output through `$PAGER` or `less` when stdout is a TTY. |
 | `envname_test.go` | Tests for name resolution. |
 | `pager_test.go` | Tests for pager. |
@@ -83,7 +83,7 @@ Dependency direction: `cmd/yoloai` → `cli` → `sandbox` + `runtime`; `sandbox
 | `diff.go` | `GenerateDiff()`, `GenerateDiffStat()`, `GenerateCommitDiff()`, `ListCommitsWithStats()` — diff generation for both `:copy` and `:rw` modes. |
 | `apply.go` | `GeneratePatch()`, `CheckPatch()`, `ApplyPatch()` — squash apply via `git apply`. `GenerateFormatPatch()`, `ApplyFormatPatch()` — per-commit apply via `git am`. `ListCommitsBeyondBaseline()`, `AdvanceBaseline()`, `AdvanceBaselineTo()`. |
 | `inspect.go` | `DetectStatus()` — queries runtime + tmux for sandbox state. `InspectSandbox()`, `ListSandboxes()` — metadata + live status. `execInContainer()` helper uses `runtime.Exec()`. |
-| `meta.go` | `Meta` / `WorkdirMeta` structs, `SaveMeta()` / `LoadMeta()` — sandbox metadata persistence as `meta.json`. |
+| `meta.go` | `Meta` / `WorkdirMeta` structs, `SaveMeta()` / `LoadMeta()` — sandbox metadata persistence as `meta.json`. `Meta.Backend` records which runtime backend was used to create the sandbox. |
 | `paths.go` | `EncodePath()` / `DecodePath()` — caret encoding for filesystem-safe names. `InstanceName()` (and deprecated alias `ContainerName()`), `Dir()`, `WorkDir()`, `RequireSandboxDir()`. |
 | `parse.go` | `ParseDirArg()` — parses `path:copy`, `path:rw`, `path:force` suffixes into `DirArg`. |
 | `safety.go` | `IsDangerousDir()`, `CheckPathOverlap()`, `CheckDirtyRepo()` — pre-creation safety checks. |
@@ -96,10 +96,10 @@ Dependency direction: `cmd/yoloai` → `cli` → `sandbox` + `runtime`; `sandbox
 ## Key Types
 
 ### `sandbox.Manager`
-Central orchestrator. Holds a `runtime.Runtime`, logger, and I/O streams. All sandbox operations go through it: `Create()`, `Start()`, `Stop()`, `Destroy()`, `Reset()`, `EnsureSetup()`.
+Central orchestrator. Holds a `runtime.Runtime`, backend name, logger, and I/O streams. All sandbox operations go through it: `Create()`, `Start()`, `Stop()`, `Destroy()`, `Reset()`, `EnsureSetup()`. The backend name is stored so it can be persisted in `Meta` at sandbox creation time.
 
 ### `sandbox.Meta` / `sandbox.WorkdirMeta`
-Persisted as `meta.json` in each sandbox dir. Records creation-time state: agent, model, workdir path/mode/baseline SHA, network mode, ports.
+Persisted as `meta.json` in each sandbox dir. Records creation-time state: agent, model, workdir path/mode/baseline SHA, network mode, ports, backend.
 
 ### `sandbox.CreateOptions`
 All parameters for `Manager.Create()`. Mirrors CLI flags: name, workdir, agent, model, prompt, network, ports, replace, attach, passthrough args.
@@ -276,8 +276,8 @@ Manager.Start (sandbox/lifecycle.go)
 **Add a new runtime backend:**
 1. Create `internal/runtime/<name>/` package
 2. Implement the `runtime.Runtime` interface
-3. Register in `cli/helpers.go:newRuntime()` (currently hardcoded to Docker)
-4. Update config to allow selecting backend (future work)
+3. Register in `cli/helpers.go:newRuntime()` — switch on the backend name resolved by `resolveBackend()`
+4. Backend is selectable via `--backend` flag or `defaults.backend` config
 
 ## Testing
 

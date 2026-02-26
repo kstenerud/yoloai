@@ -21,7 +21,8 @@ func newStopCmd() *cobra.Command {
 			all, _ := cmd.Flags().GetBool("all")
 
 			return withRuntime(cmd, func(ctx context.Context, rt runtime.Runtime) error {
-				mgr := sandbox.NewManager(rt, slog.Default(), cmd.InOrStdin(), cmd.ErrOrStderr())
+				backend := resolveBackend(cmd)
+				mgr := sandbox.NewManager(rt, backend, slog.Default(), cmd.InOrStdin(), cmd.ErrOrStderr())
 
 				var names []string
 				if all {

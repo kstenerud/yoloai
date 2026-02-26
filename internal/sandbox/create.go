@@ -239,7 +239,7 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 	agentCommand := buildAgentCommand(agentDef, model, promptText, opts.Passthrough)
 
 	// Read tmux_conf from config.yaml
-	ycfg, err := loadConfig()
+	ycfg, err := LoadConfig()
 	if err != nil {
 		return nil, fmt.Errorf("load config: %w", err)
 	}
@@ -265,6 +265,7 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 		YoloaiVersion: opts.Version,
 		Name:          opts.Name,
 		CreatedAt:     time.Now(),
+		Backend:       m.backend,
 		Agent:         opts.Agent,
 		Model:         model,
 		Workdir: WorkdirMeta{

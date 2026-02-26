@@ -83,6 +83,15 @@ yoloai new task ./my-project --model haiku    # claude-haiku-4-latest
 yoloai new task ./my-project --model claude-sonnet-4-20250514  # exact model
 ```
 
+## Global Flags
+
+| Flag | Description |
+|------|-------------|
+| `-v` | Verbose output |
+| `-q` | Quiet output |
+| `--no-color` | Disable color output |
+| `--backend <name>` | Runtime backend to use (default: `docker`). Overrides `defaults.backend` in config. |
+
 ## Key Flags
 
 ### Creating sandboxes
@@ -161,6 +170,7 @@ On first run, yoloAI creates `~/.yoloai/config.yaml` with sensible defaults:
 ```yaml
 defaults:
   agent: claude
+  backend: docker    # Runtime backend: "docker" (default), "tart" (planned)
 
   mounts:
     - ~/.gitconfig:/home/yoloai/.gitconfig:ro
@@ -172,7 +182,9 @@ defaults:
     memory: 8g
 ```
 
-You can edit this file to change the default agent, add persistent bind mounts (like SSH config or tool configs), adjust resource limits, or set default port mappings. These defaults apply to all new sandboxes.
+You can edit this file to change the default agent, runtime backend, add persistent bind mounts (like SSH config or tool configs), adjust resource limits, or set default port mappings. These defaults apply to all new sandboxes.
+
+Backend resolution order: `--backend` CLI flag > `defaults.backend` in config > `"docker"` default.
 
 ## Sandbox State
 
@@ -180,7 +192,7 @@ All sandbox state lives on the host at `~/.yoloai/sandboxes/<name>/`:
 
 ```
 ~/.yoloai/sandboxes/<name>/
-  meta.json       # sandbox config (paths, mode, baseline SHA)
+  meta.json       # sandbox config (paths, mode, baseline SHA, backend)
   config.json     # container entrypoint config
   prompt.txt      # initial prompt (if provided)
   log.txt         # tmux session log

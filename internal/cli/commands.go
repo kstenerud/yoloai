@@ -128,7 +128,8 @@ func newNewCmd(version string) *cobra.Command {
 			yes, _ := cmd.Flags().GetBool("yes")
 
 			return withRuntime(cmd, func(ctx context.Context, rt runtime.Runtime) error {
-				mgr := sandbox.NewManager(rt, slog.Default(), cmd.InOrStdin(), cmd.ErrOrStderr())
+				backend := resolveBackend(cmd)
+				mgr := sandbox.NewManager(rt, backend, slog.Default(), cmd.InOrStdin(), cmd.ErrOrStderr())
 				sandboxName, err := mgr.Create(ctx, sandbox.CreateOptions{
 					Name:        name,
 					WorkdirArg:  workdirArg,

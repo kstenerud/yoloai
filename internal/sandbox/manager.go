@@ -34,16 +34,18 @@ defaults:
 // Manager is the central orchestrator for sandbox operations.
 type Manager struct {
 	runtime runtime.Runtime
+	backend string
 	logger  *slog.Logger
 	input   io.Reader
 	output  io.Writer
 }
 
-// NewManager creates a Manager with the given runtime, logger,
+// NewManager creates a Manager with the given runtime, backend name, logger,
 // input reader for interactive prompts, and output writer for user-facing messages.
-func NewManager(rt runtime.Runtime, logger *slog.Logger, input io.Reader, output io.Writer) *Manager {
+func NewManager(rt runtime.Runtime, backend string, logger *slog.Logger, input io.Reader, output io.Writer) *Manager {
 	return &Manager{
 		runtime: rt,
+		backend: backend,
 		logger:  logger,
 		input:   input,
 		output:  output,
@@ -58,7 +60,7 @@ func (m *Manager) EnsureSetup(ctx context.Context) error {
 	}
 
 	// Run new-user experience if setup_complete is false
-	cfg, err := loadConfig()
+	cfg, err := LoadConfig()
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}

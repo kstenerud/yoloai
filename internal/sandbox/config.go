@@ -8,14 +8,15 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// yoloaiConfig holds the subset of config.yaml fields that the Go code reads.
-type yoloaiConfig struct {
+// YoloaiConfig holds the subset of config.yaml fields that the Go code reads.
+type YoloaiConfig struct {
 	SetupComplete bool   `yaml:"setup_complete"`
 	TmuxConf      string `yaml:"tmux_conf"` // from defaults.tmux_conf
+	Backend       string `yaml:"backend"`   // from defaults.backend
 }
 
-// loadConfig reads ~/.yoloai/config.yaml and extracts known fields.
-func loadConfig() (*yoloaiConfig, error) {
+// LoadConfig reads ~/.yoloai/config.yaml and extracts known fields.
+func LoadConfig() (*YoloaiConfig, error) {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return nil, fmt.Errorf("get home directory: %w", err)
@@ -25,7 +26,7 @@ func loadConfig() (*yoloaiConfig, error) {
 	data, err := os.ReadFile(configPath) //nolint:gosec // G304: path is ~/.yoloai/config.yaml
 	if err != nil {
 		if os.IsNotExist(err) {
-			return &yoloaiConfig{}, nil
+			return &YoloaiConfig{}, nil
 		}
 		return nil, fmt.Errorf("read config.yaml: %w", err)
 	}
@@ -36,7 +37,7 @@ func loadConfig() (*yoloaiConfig, error) {
 		return nil, fmt.Errorf("parse config.yaml: %w", err)
 	}
 
-	cfg := &yoloaiConfig{}
+	cfg := &YoloaiConfig{}
 
 	if doc.Kind != yaml.DocumentNode || len(doc.Content) == 0 {
 		return cfg, nil
@@ -56,8 +57,11 @@ func loadConfig() (*yoloaiConfig, error) {
 		case "defaults":
 			if val.Kind == yaml.MappingNode {
 				for j := 0; j < len(val.Content)-1; j += 2 {
-					if val.Content[j].Value == "tmux_conf" {
+					switch val.Content[j].Value {
+					case "tmux_conf":
 						cfg.TmuxConf = val.Content[j+1].Value
+					case "backend":
+						cfg.Backend = val.Content[j+1].Value
 					}
 				}
 			}

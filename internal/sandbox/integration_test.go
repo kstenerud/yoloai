@@ -38,7 +38,7 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 	require.NoError(t, err, "Docker must be running for integration tests")
 	defer rt.Close() //nolint:errcheck // test cleanup
 
-	mgr := NewManager(rt, slog.Default(), strings.NewReader(""), io.Discard)
+	mgr := NewManager(rt, "docker", slog.Default(), strings.NewReader(""), io.Discard)
 
 	// Step 1: EnsureSetup (builds base image if needed)
 	require.NoError(t, mgr.EnsureSetup(ctx))

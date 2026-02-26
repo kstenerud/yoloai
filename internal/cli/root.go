@@ -41,7 +41,7 @@ func newRootCmd(version, commit, date string) *cobra.Command {
 		Use:   "yoloai",
 		Short: "Sandboxed AI coding agent runner",
 		Long: `Run AI coding agents in full-auto mode, safely. Agents run with
-safety checks disabled inside disposable Docker containers — they work fast
+safety checks disabled inside disposable sandboxes — they work fast
 and unattended while your originals stay protected. When done, review the
 diff and apply what you want to keep.`,
 		SilenceErrors: true,
@@ -51,6 +51,7 @@ diff and apply what you want to keep.`,
 	rootCmd.PersistentFlags().CountP("verbose", "v", "Increase output verbosity (-v for debug, -vv reserved)")
 	rootCmd.PersistentFlags().CountP("quiet", "q", "Suppress non-essential output (-q for warn, -qq for error only)")
 	rootCmd.PersistentFlags().Bool("no-color", false, "Disable colored output")
+	rootCmd.PersistentFlags().String("backend", "", "Runtime backend (docker, tart)")
 
 	registerCommands(rootCmd, version, commit, date)
 

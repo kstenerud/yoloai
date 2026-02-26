@@ -14,6 +14,7 @@ type Meta struct {
 	YoloaiVersion string    `json:"yoloai_version"`
 	Name          string    `json:"name"`
 	CreatedAt     time.Time `json:"created_at"`
+	Backend       string    `json:"backend"` // "docker" or "tart"
 
 	Agent string `json:"agent"`
 	Model string `json:"model,omitempty"`

@@ -58,7 +58,7 @@ func (m *lifecycleMockRuntime) Inspect(ctx context.Context, name string) (runtim
 
 // newLifecycleMgr creates a Manager with the given mock runtime and a discard output.
 func newLifecycleMgr(rt *lifecycleMockRuntime) *Manager {
-	return NewManager(rt, slog.Default(), strings.NewReader(""), io.Discard)
+	return NewManager(rt, "docker", slog.Default(), strings.NewReader(""), io.Discard)
 }
 
 // createTestSandbox creates a sandbox directory with meta.json for lifecycle tests.
@@ -163,7 +163,7 @@ func TestStart_AlreadyRunning(t *testing.T) {
 	}
 
 	var output bytes.Buffer
-	mgr := NewManager(mock, slog.Default(), strings.NewReader(""), &output)
+	mgr := NewManager(mock, "docker", slog.Default(), strings.NewReader(""), &output)
 
 	// DetectStatus will call Inspect (running=true),
 	// then try Exec for tmux. Since our mock returns errMockNotImplemented
@@ -192,7 +192,7 @@ func TestStart_Stopped(t *testing.T) {
 	}
 
 	var output bytes.Buffer
-	mgr := NewManager(mock, slog.Default(), strings.NewReader(""), &output)
+	mgr := NewManager(mock, "docker", slog.Default(), strings.NewReader(""), &output)
 
 	err := mgr.Start(context.Background(), "test-start-stopped")
 	require.NoError(t, err)
@@ -689,7 +689,7 @@ func TestReset_NoRestart_FallsBackWhenNotRunning(t *testing.T) {
 	}
 
 	var output bytes.Buffer
-	mgr := NewManager(mock, slog.Default(), strings.NewReader(""), &output)
+	mgr := NewManager(mock, "docker", slog.Default(), strings.NewReader(""), &output)
 
 	// Reset with --no-restart; container not running → falls back to default path.
 	// Default path will fail at Start (no config.json), but re-copy should happen.

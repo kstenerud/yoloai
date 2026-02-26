@@ -82,7 +82,7 @@ func setupTestManager(t *testing.T, input string) (*Manager, *bytes.Buffer, stri
 
 	var output bytes.Buffer
 	mock := &mockRuntime{}
-	mgr := NewManager(mock, slog.Default(), strings.NewReader(input), &output)
+	mgr := NewManager(mock, "docker", slog.Default(), strings.NewReader(input), &output)
 	return mgr, &output, tmpDir
 }
 
@@ -96,7 +96,7 @@ func TestRunNewUserSetup_LargeConfig_AutoConfigures(t *testing.T) {
 	err := mgr.runNewUserSetup()
 	require.NoError(t, err)
 
-	cfg, err := loadConfig()
+	cfg, err := LoadConfig()
 	require.NoError(t, err)
 	assert.True(t, cfg.SetupComplete)
 	assert.Equal(t, "default+host", cfg.TmuxConf)
@@ -108,7 +108,7 @@ func TestRunNewUserSetup_NoConfig_AnswerY(t *testing.T) {
 	err := mgr.runNewUserSetup()
 	require.NoError(t, err)
 
-	cfg, err := loadConfig()
+	cfg, err := LoadConfig()
 	require.NoError(t, err)
 	assert.True(t, cfg.SetupComplete)
 	assert.Equal(t, "default", cfg.TmuxConf)
@@ -121,7 +121,7 @@ func TestRunNewUserSetup_NoConfig_AnswerEmpty(t *testing.T) {
 	err := mgr.runNewUserSetup()
 	require.NoError(t, err)
 
-	cfg, err := loadConfig()
+	cfg, err := LoadConfig()
 	require.NoError(t, err)
 	assert.True(t, cfg.SetupComplete)
 	assert.Equal(t, "default", cfg.TmuxConf)
@@ -133,7 +133,7 @@ func TestRunNewUserSetup_NoConfig_AnswerN(t *testing.T) {
 	err := mgr.runNewUserSetup()
 	require.NoError(t, err)
 
-	cfg, err := loadConfig()
+	cfg, err := LoadConfig()
 	require.NoError(t, err)
 	assert.True(t, cfg.SetupComplete)
 	assert.Equal(t, "none", cfg.TmuxConf)
@@ -146,7 +146,7 @@ func TestRunNewUserSetup_NoConfig_AnswerP(t *testing.T) {
 	assert.ErrorIs(t, err, errSetupPreview)
 
 	// setup_complete should NOT be set
-	cfg, err := loadConfig()
+	cfg, err := LoadConfig()
 	require.NoError(t, err)
 	assert.False(t, cfg.SetupComplete)
 
@@ -163,7 +163,7 @@ func TestRunNewUserSetup_SmallConfig_AnswerY(t *testing.T) {
 	err := mgr.runNewUserSetup()
 	require.NoError(t, err)
 
-	cfg, err := loadConfig()
+	cfg, err := LoadConfig()
 	require.NoError(t, err)
 	assert.True(t, cfg.SetupComplete)
 	assert.Equal(t, "default+host", cfg.TmuxConf)
@@ -178,7 +178,7 @@ func TestRunNewUserSetup_SmallConfig_AnswerN(t *testing.T) {
 	err := mgr.runNewUserSetup()
 	require.NoError(t, err)
 
-	cfg, err := loadConfig()
+	cfg, err := LoadConfig()
 	require.NoError(t, err)
 	assert.True(t, cfg.SetupComplete)
 	assert.Equal(t, "host", cfg.TmuxConf)
@@ -207,7 +207,7 @@ func TestRunNewUserSetup_EOF_DefaultsToY(t *testing.T) {
 	err := mgr.runNewUserSetup()
 	require.NoError(t, err)
 
-	cfg, err := loadConfig()
+	cfg, err := LoadConfig()
 	require.NoError(t, err)
 	assert.True(t, cfg.SetupComplete)
 	assert.Equal(t, "default", cfg.TmuxConf)

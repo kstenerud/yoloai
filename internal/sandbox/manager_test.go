@@ -79,7 +79,7 @@ func TestEnsureSetup_CreatesDirectories(t *testing.T) {
 	t.Setenv("HOME", tmpDir)
 
 	mock := &mockRuntime{} // image exists (no error)
-	mgr := NewManager(mock, slog.Default(), strings.NewReader(""), io.Discard)
+	mgr := NewManager(mock, "docker", slog.Default(), strings.NewReader(""), io.Discard)
 
 	err := mgr.EnsureSetup(context.Background())
 	require.NoError(t, err)
@@ -98,7 +98,7 @@ func TestEnsureSetup_WritesConfigOnFirstRun(t *testing.T) {
 
 	mock := &mockRuntime{}
 	var output bytes.Buffer
-	mgr := NewManager(mock, slog.Default(), strings.NewReader(""), &output)
+	mgr := NewManager(mock, "docker", slog.Default(), strings.NewReader(""), &output)
 
 	err := mgr.EnsureSetup(context.Background())
 	require.NoError(t, err)
@@ -124,7 +124,7 @@ func TestEnsureSetup_SkipsConfigOnSubsequentRun(t *testing.T) {
 
 	mock := &mockRuntime{}
 	var output bytes.Buffer
-	mgr := NewManager(mock, slog.Default(), strings.NewReader(""), &output)
+	mgr := NewManager(mock, "docker", slog.Default(), strings.NewReader(""), &output)
 
 	err := mgr.EnsureSetup(context.Background())
 	require.NoError(t, err)
@@ -149,7 +149,7 @@ func TestEnsureSetup_SkipsBuildWhenImageExists(t *testing.T) {
 	dockerrt.RecordBuildChecksum(yoloaiDir)
 
 	mock := &mockRuntime{} // EnsureImage returns nil (success)
-	mgr := NewManager(mock, slog.Default(), strings.NewReader(""), io.Discard)
+	mgr := NewManager(mock, "docker", slog.Default(), strings.NewReader(""), io.Discard)
 
 	err = mgr.EnsureSetup(context.Background())
 	require.NoError(t, err)
@@ -182,7 +182,7 @@ func TestEnsureSetup_RebuildWhenResourcesChanged(t *testing.T) {
 
 	mock := &mockRuntime{} // EnsureImage returns nil (success)
 	var output bytes.Buffer
-	mgr := NewManager(mock, slog.Default(), strings.NewReader(""), &output)
+	mgr := NewManager(mock, "docker", slog.Default(), strings.NewReader(""), &output)
 
 	err = mgr.EnsureSetup(context.Background())
 	require.NoError(t, err)
@@ -195,7 +195,7 @@ func TestEnsureSetup_BuildsWhenImageMissing(t *testing.T) {
 
 	mock := &mockRuntime{} // EnsureImage returns nil (success)
 	var output bytes.Buffer
-	mgr := NewManager(mock, slog.Default(), strings.NewReader(""), &output)
+	mgr := NewManager(mock, "docker", slog.Default(), strings.NewReader(""), &output)
 
 	err := mgr.EnsureSetup(context.Background())
 	require.NoError(t, err)
