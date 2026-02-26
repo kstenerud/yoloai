@@ -74,6 +74,10 @@ func (m *mockRuntime) Close() error {
 	return nil
 }
 
+func (m *mockRuntime) DiagHint(instanceName string) string {
+	return "check logs for " + instanceName
+}
+
 func TestEnsureSetup_CreatesDirectories(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)

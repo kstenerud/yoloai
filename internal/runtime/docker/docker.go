@@ -244,6 +244,11 @@ func (r *Runtime) Close() error {
 	return r.client.Close()
 }
 
+// DiagHint returns a Docker-specific hint for checking logs.
+func (r *Runtime) DiagHint(instanceName string) string {
+	return fmt.Sprintf("run 'docker logs %s' to see what went wrong", instanceName)
+}
+
 // convertMounts converts runtime.MountSpec to Docker mount.Mount.
 func convertMounts(specs []runtime.MountSpec) []mount.Mount {
 	if len(specs) == 0 {

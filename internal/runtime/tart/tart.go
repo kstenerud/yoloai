@@ -256,6 +256,12 @@ func (r *Runtime) Close() error {
 	return nil
 }
 
+// DiagHint returns a Tart-specific hint for checking logs.
+func (r *Runtime) DiagHint(instanceName string) string {
+	logPath := filepath.Join(r.sandboxDir, sandboxName(instanceName), vmLogFileName)
+	return fmt.Sprintf("check VM log at %s", logPath)
+}
+
 // instancePrefix is prepended to sandbox names by the sandbox package
 // to form instance names. We strip it to recover the sandbox name for
 // constructing file-system paths.

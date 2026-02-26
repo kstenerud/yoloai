@@ -87,4 +87,9 @@ type Runtime interface {
 
 	// Close releases any resources held by the runtime.
 	Close() error
+
+	// DiagHint returns a backend-specific hint for how to check logs when
+	// an instance fails to start or crashes. The hint is included in error
+	// messages shown to the user.
+	DiagHint(instanceName string) string
 }

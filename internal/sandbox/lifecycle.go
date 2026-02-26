@@ -62,17 +62,17 @@ func (m *Manager) Start(ctx context.Context, name string) error {
 
 	case StatusStopped:
 		if err := m.runtime.Start(ctx, cname); err != nil {
-			return fmt.Errorf("start container: %w", err)
+			return fmt.Errorf("start instance: %w", err)
 		}
 
-		// Verify container stays running (catches immediate crashes)
+		// Verify instance stays running (catches immediate crashes)
 		time.Sleep(1 * time.Second)
 		info, inspectErr := m.runtime.Inspect(ctx, cname)
 		if inspectErr != nil {
-			return fmt.Errorf("inspect container after start: %w", inspectErr)
+			return fmt.Errorf("inspect instance after start: %w", inspectErr)
 		}
 		if !info.Running {
-			return fmt.Errorf("container exited immediately — run 'docker logs %s' to see what went wrong", cname)
+			return fmt.Errorf("instance exited immediately — %s", m.runtime.DiagHint(cname))
 		}
 
 		fmt.Fprintf(m.output, "Sandbox %s started\n", name) //nolint:errcheck // best-effort output

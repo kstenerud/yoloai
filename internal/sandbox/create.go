@@ -348,7 +348,7 @@ func (m *Manager) launchContainer(ctx context.Context, state *sandboxState) erro
 	}
 
 	if err := m.runtime.Start(ctx, cname); err != nil {
-		return fmt.Errorf("start container: %w", err)
+		return fmt.Errorf("start instance: %w", err)
 	}
 
 	// Wait briefly for entrypoint to read secrets before cleanup
@@ -356,14 +356,14 @@ func (m *Manager) launchContainer(ctx context.Context, state *sandboxState) erro
 		time.Sleep(1 * time.Second)
 	}
 
-	// Verify container is still running (catches immediate crashes)
+	// Verify instance is still running (catches immediate crashes)
 	time.Sleep(1 * time.Second)
 	info, err := m.runtime.Inspect(ctx, cname)
 	if err != nil {
-		return fmt.Errorf("inspect container after start: %w", err)
+		return fmt.Errorf("inspect instance after start: %w", err)
 	}
 	if !info.Running {
-		return fmt.Errorf("container exited immediately — run 'docker logs %s' to see what went wrong", cname)
+		return fmt.Errorf("instance exited immediately — %s", m.runtime.DiagHint(cname))
 	}
 
 	return nil
