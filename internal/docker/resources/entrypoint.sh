@@ -19,9 +19,9 @@ if [ "$CURRENT_UID" != "$HOST_UID" ]; then
     usermod -u "$HOST_UID" yoloai 2>/dev/null || true
 fi
 
-# Fix ownership on container-managed directories
-# Some files under /yoloai are bind-mounted read-only; chown on those is expected to fail.
-chown -R yoloai:yoloai /home/yoloai
+# Fix ownership on container-managed directories.
+# Some files may be bind-mounted read-only; chown on those is expected to fail.
+chown -R yoloai:yoloai /home/yoloai 2>/dev/null || true
 chown yoloai:yoloai /yoloai
 for f in /yoloai/*; do
     chown yoloai:yoloai "$f" 2>/dev/null || true

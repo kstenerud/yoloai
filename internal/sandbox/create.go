@@ -371,7 +371,7 @@ func (m *Manager) launchContainer(ctx context.Context, state *sandboxState) erro
 	}
 	if !info.State.Running {
 		exitCode := info.State.ExitCode
-		return fmt.Errorf("container exited immediately (exit code %d) — check docker logs %s", exitCode, cname)
+		return fmt.Errorf("container exited immediately (exit code %d) — run 'docker logs %s' to see what went wrong", exitCode, cname)
 	}
 
 	return nil

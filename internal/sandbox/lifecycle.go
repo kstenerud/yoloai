@@ -81,7 +81,7 @@ func (m *Manager) Start(ctx context.Context, name string) error {
 			return fmt.Errorf("inspect container after start: %w", inspectErr)
 		}
 		if !info.State.Running {
-			return fmt.Errorf("container exited immediately (exit code %d) — check docker logs %s", info.State.ExitCode, cname)
+			return fmt.Errorf("container exited immediately (exit code %d) — run 'docker logs %s' to see what went wrong", info.State.ExitCode, cname)
 		}
 
 		fmt.Fprintf(m.output, "Sandbox %s started\n", name) //nolint:errcheck // best-effort output
