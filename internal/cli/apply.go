@@ -59,6 +59,8 @@ Use --patches to export .patch files without applying them.`,
 				return fmt.Errorf("apply is not needed for :rw directories — changes are already live")
 			}
 
+			fmt.Fprintf(cmd.OutOrStdout(), "Target: %s\n\n", meta.Workdir.HostPath) //nolint:errcheck
+
 			// Best-effort agent-running warning
 			agentRunningWarning(cmd, name)
 
@@ -327,9 +329,8 @@ func applySquash(cmd *cobra.Command, name string, paths []string, meta *sandbox.
 		return err
 	}
 
-	fmt.Fprintln(cmd.OutOrStdout(), stat) //nolint:errcheck
-
 	targetDir := meta.Workdir.HostPath
+	fmt.Fprintln(cmd.OutOrStdout(), stat) //nolint:errcheck
 	isGit := sandbox.IsGitRepo(targetDir)
 
 	if err := sandbox.CheckPatch(patch, targetDir, isGit); err != nil {
