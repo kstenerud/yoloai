@@ -32,7 +32,8 @@ Or skip the prompt and drop into an interactive session:
 ```bash
 yoloai new -a explore ./my-project
 # You're inside Claude Code, running in the container.
-# Ctrl-B, D to detach. yoloai attach explore to reconnect.
+#   Ctrl-B, D to detach.
+#   yoloai attach explore to reconnect.
 ```
 
 ## Why?
