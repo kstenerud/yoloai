@@ -272,12 +272,14 @@ func (r *Runtime) Exec(ctx context.Context, name string, cmd []string, _ string)
 }
 
 // InteractiveExec runs a command interactively inside the VM by shelling
-// out to tart exec with stdin/stdout/stderr connected.
+// out to tart exec with stdin/stdout/stderr connected and PTY allocated.
 // The user parameter is ignored — tart exec runs as the VM's logged-in user.
 func (r *Runtime) InteractiveExec(ctx context.Context, name string, cmd []string, _ string) error {
-	args := execArgs(name, cmd...)
+	// -i attaches stdin, -t allocates a PTY (like docker exec -it)
+	args := []string{"exec", "-i", "-t", name}
+	args = append(args, cmd...)
 
-	c := exec.CommandContext(ctx, r.tartBin, args...) //nolint:gosec // G204: vmName and cmd are from validated sandbox state
+	c := exec.CommandContext(ctx, r.tartBin, args...) //nolint:gosec // G204: name and cmd are from validated sandbox state
 	c.Stdin = os.Stdin
 	c.Stdout = os.Stdout
 	c.Stderr = os.Stderr
