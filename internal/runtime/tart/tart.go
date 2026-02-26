@@ -527,6 +527,23 @@ func isFatalExecError(stderr string) bool {
 	return false
 }
 
+// vmHomeDir is the home directory of the default user in Cirrus Labs base images.
+const vmHomeDir = "/Users/admin"
+
+// dockerHomeDir is the home directory used by Docker-based sandboxes.
+const dockerHomeDir = "/home/yoloai"
+
+// remapTargetPath translates Docker-style paths to macOS VM paths.
+func remapTargetPath(target string) string {
+	if strings.HasPrefix(target, dockerHomeDir+"/") {
+		return vmHomeDir + strings.TrimPrefix(target, dockerHomeDir)
+	}
+	if target == dockerHomeDir {
+		return vmHomeDir
+	}
+	return target
+}
+
 // runSetupScript creates mount symlinks, writes the embedded setup script
 // to the shared directory, and executes it inside the VM.
 func (r *Runtime) runSetupScript(ctx context.Context, vmName, sandboxPath string, mounts []runtime.MountSpec) error {
@@ -534,6 +551,8 @@ func (r *Runtime) runSetupScript(ctx context.Context, vmName, sandboxPath string
 
 	// Create symlinks from expected mount targets to VirtioFS paths
 	for _, m := range mounts {
+		target := remapTargetPath(m.Target)
+
 		var vfsPath string
 		if strings.HasPrefix(m.Source, sandboxPath+"/") {
 			// Source is under the sandbox dir — accessible via the yoloai share
@@ -548,14 +567,14 @@ func (r *Runtime) runSetupScript(ctx context.Context, vmName, sandboxPath string
 			continue // skip files outside sandbox dir (can't share via VirtioFS)
 		}
 
-		if vfsPath == m.Target {
+		if vfsPath == target {
 			continue // no symlink needed
 		}
-		parent := filepath.Dir(m.Target)
-		symlinkCmd := fmt.Sprintf("sudo mkdir -p '%s' && sudo ln -sfn '%s' '%s'", parent, vfsPath, m.Target)
+		parent := filepath.Dir(target)
+		symlinkCmd := fmt.Sprintf("mkdir -p '%s' && ln -sfn '%s' '%s'", parent, vfsPath, target)
 		args := execArgs(vmName, "bash", "-c", symlinkCmd)
 		if _, err := r.runTart(ctx, args...); err != nil {
-			return fmt.Errorf("create mount symlink for %s: %w", m.Target, err)
+			return fmt.Errorf("create mount symlink for %s: %w", target, err)
 		}
 	}
 
