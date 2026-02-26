@@ -354,7 +354,7 @@ func BuildMountSymlinkCmds(mounts []runtime.MountSpec, dirNames map[string]strin
 // execArgs builds the arguments for tart exec.
 // tart exec syntax: tart exec <vm-name> <command> [args...]
 func execArgs(vmName string, cmd ...string) []string {
-	args := []string{"exec", vmName, "--"}
+	args := []string{"exec", vmName}
 	return append(args, cmd...)
 }
 
