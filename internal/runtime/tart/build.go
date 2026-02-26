@@ -148,18 +148,28 @@ func (r *Runtime) pullImage(ctx context.Context, imageRef string, output io.Writ
 
 // bootForProvisioning boots a VM, runs provision commands, then shuts it down.
 func (r *Runtime) bootForProvisioning(ctx context.Context, vmName string, output io.Writer, logger *slog.Logger) error {
+	// Capture tart run output to a temp log for debugging
+	vmLog, err := os.CreateTemp("", "yoloai-tart-*.log")
+	if err != nil {
+		return fmt.Errorf("create VM log: %w", err)
+	}
+	vmLogPath := vmLog.Name()
+	defer os.Remove(vmLogPath) //nolint:errcheck // best-effort cleanup
+
 	// Start the VM in the background for provisioning
 	cmd := exec.CommandContext(ctx, r.tartBin, "run", "--no-graphics", vmName) //nolint:gosec // G204
-	cmd.Stdout = io.Discard
-	cmd.Stderr = io.Discard
+	cmd.Stdout = vmLog
+	cmd.Stderr = vmLog
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
 	if err := cmd.Start(); err != nil {
+		_ = vmLog.Close()
 		return fmt.Errorf("start VM for provisioning: %w", err)
 	}
 
 	pid := cmd.Process.Pid
 	_ = cmd.Process.Release()
+	_ = vmLog.Close()
 
 	// Ensure cleanup: stop the VM when done (regardless of success/failure)
 	defer func() {
@@ -174,8 +184,12 @@ func (r *Runtime) bootForProvisioning(ctx context.Context, vmName string, output
 	}()
 
 	// Wait for VM to be accessible
-	fmt.Fprintln(output, "Waiting for VM to boot...") //nolint:errcheck // best-effort
+	fmt.Fprintln(output, "Waiting for VM to boot (macOS VMs can take 30-60s)...") //nolint:errcheck // best-effort
 	if err := r.waitForBoot(ctx, vmName); err != nil {
+		// Show tart run output on failure to aid debugging
+		if logData, readErr := os.ReadFile(vmLogPath); readErr == nil && len(logData) > 0 { //nolint:gosec // G304: temp file we created
+			fmt.Fprintf(output, "tart run output:\n%s\n", string(logData)) //nolint:errcheck,gosec // best-effort diagnostic output
+		}
 		return fmt.Errorf("vm did not become accessible: %w", err)
 	}
 
@@ -184,7 +198,7 @@ func (r *Runtime) bootForProvisioning(ctx context.Context, vmName string, output
 		fmt.Fprintf(output, "Provisioning step %d/%d...\n", i+1, len(provisionCommands)) //nolint:errcheck // best-effort
 		logger.Debug("provisioning", "step", i+1, "command", cmdStr)
 
-		args := execArgs(vmUser, vmName, "bash", "-c", cmdStr)
+		args := execArgs(vmName, "bash", "-c", cmdStr)
 		provCmd := exec.CommandContext(ctx, r.tartBin, args...) //nolint:gosec // G204
 		provCmd.Stdout = output
 		provCmd.Stderr = output

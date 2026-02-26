@@ -16,10 +16,9 @@ func TestVMName(t *testing.T) {
 }
 
 func TestExecArgs(t *testing.T) {
-	args := execArgs("admin", "yoloai-test", "bash", "-c", "echo hello")
+	args := execArgs("yoloai-test", "bash", "-c", "echo hello")
 	assert.Equal(t, []string{
-		"exec", "--user", "admin", "--password", "admin",
-		"yoloai-test", "--", "bash", "-c", "echo hello",
+		"exec", "yoloai-test", "--", "bash", "-c", "echo hello",
 	}, args)
 }
 

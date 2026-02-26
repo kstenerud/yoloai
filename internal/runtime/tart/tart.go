@@ -19,12 +19,6 @@ import (
 )
 
 const (
-	// vmUser is the default user in Cirrus Labs base macOS images.
-	vmUser = "admin"
-
-	// vmPassword is the default password in Cirrus Labs base macOS images.
-	vmPassword = "admin"
-
 	// pidFileName stores the tart run process ID.
 	pidFileName = "tart.pid"
 
@@ -216,19 +210,15 @@ func (r *Runtime) Inspect(ctx context.Context, name string) (runtime.InstanceInf
 }
 
 // Exec runs a command inside the VM via tart exec and returns the result.
-func (r *Runtime) Exec(ctx context.Context, name string, cmd []string, user string) (runtime.ExecResult, error) {
+// The user parameter is ignored — tart exec runs as the VM's logged-in user.
+func (r *Runtime) Exec(ctx context.Context, name string, cmd []string, _ string) (runtime.ExecResult, error) {
 	vmName := r.vmName(name)
 
 	if !r.isRunning(ctx, vmName) {
 		return runtime.ExecResult{}, runtime.ErrNotRunning
 	}
 
-	execUser := user
-	if execUser == "" {
-		execUser = vmUser
-	}
-
-	args := execArgs(execUser, vmName, cmd...)
+	args := execArgs(vmName, cmd...)
 
 	c := exec.CommandContext(ctx, r.tartBin, args...) //nolint:gosec // G204: vmName and cmd are from validated sandbox state
 	var stdout, stderr bytes.Buffer
@@ -259,15 +249,11 @@ func (r *Runtime) Exec(ctx context.Context, name string, cmd []string, user stri
 
 // InteractiveExec runs a command interactively inside the VM by shelling
 // out to tart exec with stdin/stdout/stderr connected.
-func (r *Runtime) InteractiveExec(ctx context.Context, name string, cmd []string, user string) error {
+// The user parameter is ignored — tart exec runs as the VM's logged-in user.
+func (r *Runtime) InteractiveExec(ctx context.Context, name string, cmd []string, _ string) error {
 	vmName := r.vmName(name)
 
-	execUser := user
-	if execUser == "" {
-		execUser = vmUser
-	}
-
-	args := execArgs(execUser, vmName, cmd...)
+	args := execArgs(vmName, cmd...)
 
 	c := exec.CommandContext(ctx, r.tartBin, args...) //nolint:gosec // G204: vmName and cmd are from validated sandbox state
 	c.Stdin = os.Stdin
@@ -365,9 +351,10 @@ func BuildMountSymlinkCmds(mounts []runtime.MountSpec, dirNames map[string]strin
 	return cmds
 }
 
-// execArgs builds the arguments for tart exec with user and password.
-func execArgs(user, vmName string, cmd ...string) []string {
-	args := []string{"exec", "--user", user, "--password", vmPassword, vmName, "--"}
+// execArgs builds the arguments for tart exec.
+// tart exec syntax: tart exec <vm-name> <command> [args...]
+func execArgs(vmName string, cmd ...string) []string {
+	args := []string{"exec", vmName, "--"}
 	return append(args, cmd...)
 }
 
@@ -417,9 +404,13 @@ func (r *Runtime) isRunning(ctx context.Context, vmName string) bool {
 // waitForBoot polls until the VM responds to tart exec or the timeout expires.
 func (r *Runtime) waitForBoot(ctx context.Context, vmName string) error {
 	deadline := time.Now().Add(bootTimeout)
+	var lastErr error
 
 	for {
 		if time.Now().After(deadline) {
+			if lastErr != nil {
+				return fmt.Errorf("vm did not become accessible within %s: %w", bootTimeout, lastErr)
+			}
 			return fmt.Errorf("vm did not become accessible within %s", bootTimeout)
 		}
 
@@ -430,11 +421,15 @@ func (r *Runtime) waitForBoot(ctx context.Context, vmName string) error {
 		}
 
 		// Try a simple command via tart exec
-		args := execArgs(vmUser, vmName, "true")
+		args := execArgs(vmName, "true")
 		cmd := exec.CommandContext(ctx, r.tartBin, args...) //nolint:gosec // G204
-		if err := cmd.Run(); err == nil {
+		var stderr bytes.Buffer
+		cmd.Stderr = &stderr
+		err := cmd.Run()
+		if err == nil {
 			return nil
 		}
+		lastErr = fmt.Errorf("%w: %s", err, strings.TrimSpace(stderr.String()))
 
 		// Brief sleep before retry
 		select {
@@ -460,7 +455,7 @@ func (r *Runtime) runSetupScript(ctx context.Context, vmName, sandboxPath string
 	// Run the setup script in the background inside the VM
 	setupCmd := fmt.Sprintf("nohup %s/setup.sh %q </dev/null >%s/setup.log 2>&1 &",
 		vmSharedDir, vmSharedDir, vmSharedDir)
-	args := execArgs(vmUser, vmName, "bash", "-c", setupCmd)
+	args := execArgs(vmName, "bash", "-c", setupCmd)
 	_, err := r.runTart(ctx, args...)
 	if err != nil {
 		return fmt.Errorf("exec setup script: %w", err)
