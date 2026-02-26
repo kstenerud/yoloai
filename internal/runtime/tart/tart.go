@@ -533,13 +533,23 @@ const vmHomeDir = "/Users/admin"
 // dockerHomeDir is the home directory used by Docker-based sandboxes.
 const dockerHomeDir = "/home/yoloai"
 
-// remapTargetPath translates Docker-style paths to macOS VM paths.
+// remapTargetPath translates Docker/Linux-style mount targets to macOS VM paths.
+// - /home/yoloai/... → /Users/admin/...
+// - /yoloai/... → /Users/admin/.yoloai/... (sandbox control files)
+// - /Users/<host-user>/... → /Users/admin/host/... (host-mirrored workdirs)
 func remapTargetPath(target string) string {
 	if strings.HasPrefix(target, dockerHomeDir+"/") {
 		return vmHomeDir + strings.TrimPrefix(target, dockerHomeDir)
 	}
 	if target == dockerHomeDir {
 		return vmHomeDir
+	}
+	if strings.HasPrefix(target, "/yoloai/") {
+		return vmHomeDir + "/.yoloai" + strings.TrimPrefix(target, "/yoloai")
+	}
+	// Host-mirrored paths (e.g. /Users/karlstenerud/project) — place under admin home
+	if strings.HasPrefix(target, "/Users/") && !strings.HasPrefix(target, vmHomeDir) {
+		return vmHomeDir + "/host" + target
 	}
 	return target
 }
@@ -578,6 +588,11 @@ func (r *Runtime) runSetupScript(ctx context.Context, vmName, sandboxPath string
 		}
 	}
 
+	// Patch config.json to remap working_dir for macOS VM paths
+	if err := r.patchConfigWorkingDir(sandboxPath); err != nil {
+		return fmt.Errorf("patch config working dir: %w", err)
+	}
+
 	// Write setup script to sandbox dir (it's shared via VirtioFS)
 	scriptPath := filepath.Join(sandboxPath, "setup.sh")
 	if err := os.WriteFile(scriptPath, embeddedSetupScript, 0755); err != nil { //nolint:gosec // G306: script needs exec permission
@@ -592,6 +607,34 @@ func (r *Runtime) runSetupScript(ctx context.Context, vmName, sandboxPath string
 	_, err := r.runTart(ctx, args...)
 	if err != nil {
 		return fmt.Errorf("exec setup script: %w", err)
+	}
+
+	return nil
+}
+
+// patchConfigWorkingDir reads config.json, remaps working_dir for macOS, and writes it back.
+func (r *Runtime) patchConfigWorkingDir(sandboxPath string) error {
+	cfgPath := filepath.Join(sandboxPath, "config.json")
+	data, err := os.ReadFile(cfgPath) //nolint:gosec // G304: path within sandbox dir
+	if err != nil {
+		return err
+	}
+
+	var raw map[string]interface{}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+
+	if wd, ok := raw["working_dir"].(string); ok {
+		remapped := remapTargetPath(wd)
+		if remapped != wd {
+			raw["working_dir"] = remapped
+			out, err := json.MarshalIndent(raw, "", "  ")
+			if err != nil {
+				return err
+			}
+			return os.WriteFile(cfgPath, out, 0600)
+		}
 	}
 
 	return nil
