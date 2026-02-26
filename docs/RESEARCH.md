@@ -1649,3 +1649,95 @@ Keybinding changes (prefix, splits, pane navigation) deliberately excluded — t
 - [Prevent Tmux from Starting a Login Shell (Nick Janetakis)](https://nickjanetakis.com/blog/prevent-tmux-from-starting-a-login-shell-by-default) — login shell explanation
 
 ---
+
+## macOS VM Sandbox Research
+
+### Context
+
+yoloAI uses Linux Docker containers as disposable sandboxes. macOS-native development (xcodebuild, Swift, Xcode SDKs) cannot run in Linux containers. This section evaluates macOS VM solutions as an alternative sandbox backend for Apple Silicon Macs.
+
+### Apple macOS SLA Virtualization Terms
+
+- Up to **2 additional macOS instances** allowed per Apple-branded computer already running macOS.
+- Permitted purposes: software development, testing, macOS Server, personal use.
+- Must run on Apple hardware. Non-Apple hardware is a license violation.
+- **Hard 2 concurrent macOS VM limit** enforced at the Virtualization.framework level (XNU kernel). Applies to all tools built on Virtualization.framework. Cannot be worked around without unsupported kernel modification.
+
+### Tool Evaluation
+
+#### Tart (Cirrus Labs) — Recommended
+
+**License:** Fair Source (free under 100 CPU cores). **Stars:** ~5,000. **Latest:** v2.31.0 (Feb 2026).
+
+- Full CLI: `tart create`, `clone`, `run`, `stop`, `delete`, `suspend`, `exec`, `pull`, `push`.
+- `tart exec` runs commands inside VM via gRPC guest agent (no SSH needed).
+- `tart clone` uses APFS copy-on-write (instant, no extra disk until divergence).
+- OCI registry push/pull for image distribution.
+- VirtioFS directory sharing via `--dir` flag.
+- ~15s cold boot, ~5s resume from suspend.
+- Active development, regular releases.
+
+**Assessment:** Best fit for yoloAI. CLI maps closely to Docker workflow. APFS clone enables disposable VMs. `tart exec` provides Docker-exec-like functionality. Free for personal use.
+
+#### Anka (Veertu) — Alternative
+
+**License:** Proprietary commercial. Free "Anka Develop" tier (single VM, laptops only). Paid tiers for CI/enterprise (contact sales).
+
+- `anka run` is explicitly Docker-like: mounts CWD, executes command, returns exit code.
+- `anka run -v /host/path:/vm/path` for volume mounts.
+- Instant shadow-copy clones. ~5s from suspend, ~25s cold boot.
+- REST API via Anka Build Cloud for fleet management.
+
+**Assessment:** Most Docker-like interface (`anka run`), but proprietary licensing and opaque pricing. Best for users who already have Anka infrastructure.
+
+#### Parallels Desktop
+
+**License:** Commercial, $120+/yr subscription.
+
+- `prlctl exec` for command execution. `prlctl clone`, `prlctl snapshot`.
+- Snapshot support for macOS guests (PD 20+).
+- Well-documented CLI.
+
+**Assessment:** Feature-complete but expensive. Impractical as a required dependency for an open-source tool.
+
+#### UTM
+
+**License:** Apache 2.0 (open source). **Stars:** ~33,000.
+
+- `utmctl` CLI is limited (list, start, stop, suspend only).
+- No `exec` equivalent. No programmatic VM creation from CLI.
+- GUI-oriented design.
+
+**Assessment:** Popular but wrong fit. Lacks the CLI depth for programmatic sandbox management.
+
+#### Not Applicable
+
+- **Lima:** Linux guests only. Cannot run macOS.
+- **OrbStack:** Linux containers and VMs only.
+- **Docker on macOS:** Cannot run macOS containers. Docker-OSX requires Linux KVM (not available on macOS).
+
+### Emerging Projects (2025-2026)
+
+- **Apple Containerization Framework** (WWDC 2025): Open source. Sub-second Linux container startup on macOS 26+. Linux guests only — not applicable for macOS sandboxing, but could replace Docker for yoloAI's existing Linux sandbox backend.
+- **VibeBox** / **Vibe**: Open source Rust tools for LLM agent sandboxing. Linux guests only. Validate that the "VM sandbox for AI agents" space is active.
+- **VirtualBuddy**: Open source macOS VM manager. GUI-only, no CLI. Not suitable for programmatic use.
+- **Code-Hex/vz**: Go bindings for Apple's Virtualization.framework. Could be used to build a native macOS VM backend without shelling out to Tart, but reimplements what Tart already provides.
+
+### Key Findings
+
+1. **2-VM concurrent limit is inescapable.** Kernel-enforced on Apple Silicon. Users can run at most 2 macOS sandboxes simultaneously per Mac.
+2. **No macOS "container" equivalent exists.** Unlike Linux where containers provide sub-second isolation, macOS sandboxing requires full VMs with 5-25 second startup times.
+3. **Tart is the strongest candidate** for yoloAI. Complete CLI, `tart exec` (gRPC agent), APFS cloning, OCI image distribution, free for personal use.
+4. **The LLM agent sandbox space is active** but all current projects (Vibe, VibeBox) use Linux guests. macOS guest support would be novel.
+5. **Apple SLA allows this use case** (development/testing on Apple hardware, up to 2 VMs). Service bureau / time-sharing use is prohibited.
+
+### Comparison Matrix
+
+| Tool | macOS Guest | CLI/Exec | Snapshots | Clone/Reset | Dir Sharing | Startup | License |
+|------|:-----------:|:--------:|:---------:|:-----------:|:-----------:|:-------:|---------|
+| Tart | Yes | `tart exec` (gRPC) | Suspend only | APFS CoW | VirtioFS | ~5-15s | Fair Source |
+| Anka | Yes | `anka run` | Yes | Shadow copy | Auto-mount | ~5-25s | Proprietary |
+| Parallels | Yes | `prlctl exec` | Yes (PD 20+) | `prlctl clone` | Shared folders | ~15s | $120+/yr |
+| UTM | Yes | Limited | QEMU only | Manual | VirtioFS | ~15-20s | Apache 2.0 |
+| Lima | No | N/A | N/A | N/A | N/A | N/A | Apache 2.0 |
+| OrbStack | No | N/A | N/A | N/A | N/A | N/A | Commercial |

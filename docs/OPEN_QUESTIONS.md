@@ -198,6 +198,17 @@ These were deferred from MVP but might be cheap to add and valuable for dogfoodi
 
 93. **MCP server support inside containers** — Claude Code's MCP config (`settings.json`, `~/.claude.json`) gets seeded into the container, but MCP servers themselves don't work: stdio servers need their binary/script installed in the container (not available), and network servers reference `localhost` which resolves to the container, not the host. Possible solutions: custom profiles with MCP dependencies installed, or host-network passthrough. Low priority unless users report this as a blocker — MCP-heavy users are power users who could build a custom profile.
 
+## macOS Sandbox Backend
+
+94. **macOS VM backend for native development** — yoloAI's Linux Docker containers cannot run xcodebuild, Swift, or Xcode SDKs. Supporting macOS-native development requires a VM-based sandbox backend. Tart (Cirrus Labs) is the leading candidate (see RESEARCH.md "macOS VM Sandbox Research"). Key open questions:
+    - **Architecture:** How does yoloAI abstract over Docker (Linux) and Tart (macOS) backends? Shared interface with per-backend implementations? Or separate command paths?
+    - **Image management:** macOS VM images are ~30-70 GB (vs. ~1 GB for Linux Docker images). How to handle first-run image download? Pre-built images via OCI registry?
+    - **2-VM limit:** Apple enforces a hard 2 concurrent macOS VM limit per Mac. How does yoloAI communicate and enforce this? Error on third sandbox? Queue?
+    - **Xcode installation:** Xcode is ~30 GB and requires Apple ID to download. How to pre-install in base images? `xcode-select --install` for CLI tools only?
+    - **Agent compatibility:** Do Claude Code and other agents work correctly inside macOS VMs? Any differences from Linux container behavior?
+    - **Diff/apply workflow:** Does the copy/diff/apply workflow work unchanged? Tart's VirtioFS sharing may behave differently from Docker bind mounts.
+    - **Startup time:** ~5-15 seconds is acceptable but noticeably slower than Docker. Does this affect UX enough to require UI changes (progress indicator)?
+
 ## Unresolved (Codex and cleanup)
 
 37. **Codex proxy support** — Whether Codex's static Rust binary honors `HTTP_PROXY`/`HTTPS_PROXY` env vars is unverified (DESIGN.md line 340, RESEARCH.md). Critical for `--network-isolated` mode with Codex. If it ignores proxy env vars, would need iptables-only enforcement.

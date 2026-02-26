@@ -21,6 +21,14 @@ yoloAI is under active development. The current MVP covers the core copy/diff/ap
 
 - Instant sandbox setup using overlayfs instead of full copy (space-efficient, fast for large repos)
 
+## macOS sandbox backend
+
+- macOS-native development (xcodebuild, Swift, Xcode SDKs) requires macOS VMs instead of Linux containers.
+- Tart (Cirrus Labs) is the leading candidate: `tart exec` for command execution, APFS clone for disposable VMs, VirtioFS for directory sharing, OCI registry for image distribution.
+- Apple's Virtualization.framework enforces a hard 2 concurrent macOS VM limit per Mac.
+- Startup is ~5-15 seconds (vs. sub-second for Linux containers).
+- See RESEARCH.md "macOS VM Sandbox Research" for full evaluation.
+
 ## Other
 
 - Auxiliary directory mounts (`-d` flag for read-only dependencies)
