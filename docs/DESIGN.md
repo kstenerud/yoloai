@@ -181,6 +181,7 @@ defaults:
   mounts:
     - ~/.gitconfig:/home/yoloai/.gitconfig:ro
 
+  tmux_conf: auto                        # [POST-MVP] auto | default | host | none (see Tmux Configuration)
   copy_strategy: auto                   # [POST-MVP] auto | overlay | full (MVP uses full copy only)
                                         # auto: use overlayfs where available, fall back to full copy
                                         # overlay: overlayfs lower layer (instant, deltas-only, needs CAP_SYS_ADMIN)
@@ -327,6 +328,7 @@ yoloai profile create <name> [--template <tpl>]  Create a profile with scaffold 
 yoloai profile list                            List profiles  [POST-MVP]
 yoloai profile delete <name>                   Delete a profile  [POST-MVP]
 yoloai x <extension> <name> [args...] [--flags...]  Run a user-defined extension  [POST-MVP]
+yoloai setup [--power-user]                    Interactive first-time setup  [POST-MVP]
 yoloai completion [bash|zsh|fish|powershell]   Generate shell completion script
 yoloai version                                 Show version information
 ```
@@ -1001,6 +1003,89 @@ The user sets the appropriate API key in their host shell profile (`ANTHROPIC_AP
 4. Print shell completion instructions and a quick-start guide.
 
 The `--no-start` flag can be used with `yoloai new` to perform setup without starting a container: `yoloai new --no-start temp-setup ./my-app`.
+
+### [POST-MVP] `yoloai setup`
+
+Interactive setup wizard. Lets users configure preferences up front rather than being prompted piecemeal during `yoloai new`. Can be re-run at any time to change settings.
+
+**`--power-user` flag:** Skip all interactive prompts and assume the user has already configured everything they want in `config.yaml` and their environment. Designed for automation (Ansible, dotfiles scripts, CI). With `--power-user`, `setup` only performs the non-interactive steps (directory creation, image build) and exits.
+
+**Setup steps:**
+
+1. Create `~/.yoloai/` directory structure if absent.
+2. Write a default `config.yaml` with sensible defaults if missing.
+3. **Tmux configuration** (see Tmux Configuration below): detect host `~/.tmux.conf`, offer yoloai's recommended defaults for new users.
+4. Build the base image if missing.
+5. Print shell completion instructions and a quick-start guide.
+
+Without `yoloai setup`, these steps happen lazily on first `yoloai new` instead. `setup` just front-loads them so users can answer all questions in one sitting.
+
+## Tmux Configuration
+
+yoloAI sandboxes use tmux for agent interaction. Tmux's out-of-the-box defaults are notoriously hostile to new users (no mouse scroll, escape delay, login shells on every pane, tiny scrollback). At the same time, experienced tmux users have carefully tuned configs they don't want overridden.
+
+### Container tmux defaults
+
+The container ships a `/yoloai/tmux.conf` with sensible defaults sourced before user config:
+
+```
+# --- yoloai sensible defaults ---
+# Mouse support (scroll, click, resize)
+set -g mouse on
+
+# No escape delay (critical for vim/neovim)
+set -sg escape-time 0
+
+# Color support
+set -g default-terminal "tmux-256color"
+
+# Window/pane numbering from 1 (matches keyboard layout)
+set -g base-index 1
+setw -g pane-base-index 1
+
+# Larger scrollback (default 2000 is tiny)
+set -g history-limit 50000
+
+# Non-login shell (prevents .bash_profile re-sourcing on every pane)
+set -g default-command "${SHELL}"
+
+# Auto-renumber windows on close
+set -g renumber-windows on
+
+# Longer message display (default 750ms too fast to read)
+set -g display-time 4000
+
+# Forward focus events (vim autoread, etc.)
+set -g focus-events on
+
+# System clipboard via OSC 52
+set -g set-clipboard on
+```
+
+### User config handling
+
+The `tmux_conf` setting in `config.yaml` controls how user tmux config interacts with the container defaults:
+
+```yaml
+defaults:
+  tmux_conf: auto    # auto | default | host | none
+```
+
+- **`auto`** (default): Heuristic detection. If `~/.tmux.conf` exists on the host and has more than ~10 non-comment, non-blank lines, treat as power user → behave like `host`. Otherwise → behave like `default`.
+- **`default`**: Use only yoloai's sensible defaults. No host config mounted.
+- **`host`**: Bind-mount `~/.tmux.conf` (read-only) into the container. Sourced *after* yoloai defaults, so user settings override. Power users get their familiar bindings, prefix key, theme, etc.
+- **`none`**: Raw tmux with no config. For debugging or users who want full control via profile Dockerfiles.
+
+The `auto` heuristic: a small config (≤10 significant lines) likely means a new user who cobbled together just enough to make tmux work. A large config means deliberate customization. During `yoloai setup`, if `auto` detects a small-or-missing config, it prompts: "Would you like yoloai's recommended tmux defaults in sandboxes?" and stores the answer. With `--power-user`, `auto` behaves like `host` if `~/.tmux.conf` exists, `default` otherwise — no prompts.
+
+### Entrypoint integration
+
+The entrypoint sources tmux config in order:
+
+1. `/yoloai/tmux.conf` (yoloai defaults — always present unless `tmux_conf: none`)
+2. `/home/yoloai/.tmux.conf` (user config — only present when `tmux_conf: host` or `auto` detected power user)
+
+This is implemented by passing `-f /yoloai/tmux.conf` to `tmux new-session` for the defaults, then sourcing the user config if present via `tmux source-file`. User settings win on conflict since they're sourced second.
 
 ## Security Considerations
 

@@ -1565,3 +1565,87 @@ A recent merge (PR #1747, February 2026) adds mtime/size-based skip for tracked 
 | `go-git` | **No** | Missing `git diff --binary` and `git apply` — both core to the copy/diff/apply workflow |
 
 ---
+
+## Tmux Defaults Research
+
+yoloAI sandboxes use tmux for agent interaction. Research into common beginner complaints and established "sensible defaults" projects to inform the container's default tmux configuration.
+
+### Top beginner pain points (ranked by frequency across Reddit, HN, dev.to, GitHub issues)
+
+**Tier 1 — nearly universal complaints:**
+
+1. **Mouse scroll doesn't work.** `set -g mouse` is off by default. Scroll wheel does nothing or sends garbage. Single most cited "what the hell?" moment.
+2. **Colors broken/garbled.** Mismatch between terminal capabilities and what tmux advertises. Fix: `set -g default-terminal "tmux-256color"` with `terminal-overrides` for true color.
+3. **Escape key delay.** tmux waits 500ms after Escape to check for escape sequences. Vim/neovim users experience maddening mode-switch delay. Fix: `set -sg escape-time 0`.
+4. **Copy/paste broken.** tmux has its own paste buffer separate from system clipboard. Mouse selection with `mouse on` copies only to tmux buffer. Keyboard copy mode requires learning new keybindings.
+5. **Windows start at 0.** 0 key is far right of keyboard, window 0 is far left of status bar. `prefix + 1` goes to the second window.
+
+**Tier 2 — very common:**
+
+6. **Prefix key (Ctrl-b) is awkward.** Uncomfortable hand stretch. Screen veterans expect Ctrl-a.
+7. **Split keybindings are cryptic.** `%` for vertical, `"` for horizontal. Most configs rebind to `|` and `-`.
+8. **New panes don't preserve working directory.** New pane starts in tmux server's start directory, not current directory.
+9. **Status bar is ugly/uninformative.**
+10. **Login shell sourced on every pane.** See below.
+
+**Tier 3 — notable:**
+
+11. Scrollback buffer too small (2000 lines default).
+12. Status messages disappear too quickly (750ms default).
+13. `aggressive-resize` off — multiple clients shrink all windows to smallest.
+14. Focus events not forwarded — vim `autoread` doesn't work.
+15. `renumber-windows` off — closing window 2 of 3 leaves gap.
+
+### The login shell problem
+
+Tmux launches login shells by default (equivalent to `bash --login`). Every new pane sources `~/.bash_profile`, causing:
+- PATH grows with duplicate entries on every pane
+- Slow startup from expensive `.bash_profile` operations
+- Background processes may spawn multiple times
+- Subtle environment corruption
+
+The tmux maintainer considers this intentional (GitHub issue #1937). Fix: `set -g default-command "${SHELL}"` launches non-login interactive shells (only reads `.bashrc`).
+
+Two separate settings interact:
+- `default-shell /bin/bash` — which binary to use (needed when `$SHELL` is wrong, e.g., in Docker containers where it may point to `/bin/sh`)
+- `default-command "${SHELL}"` — how to launch it (without `-l`, so non-login)
+
+Most Linux users only need the second. Both are needed in containers or when `$SHELL` is misconfigured.
+
+### Established "sensible defaults" projects
+
+**tmux-sensible** (tmux-plugins/tmux-sensible): "Basic settings everyone can agree on." Philosophy: only fill gaps, never override existing settings. Sets: `escape-time 0`, `history-limit 50000`, `display-time 4000`, `status-interval 5`, `default-terminal screen-256color`, `focus-events on`, `aggressive-resize on`.
+
+**Oh My Tmux** (gpakosz/.tmux): Complete configuration framework. Much heavier — full theme, dual prefix, vim-style navigation, mouse toggle, copy-mode with vi bindings. More than we need but validates the importance of sane defaults.
+
+**Community consensus "sane defaults"** across dozens of blog posts and gists converges on a remarkably consistent set: `mouse on`, `escape-time 0`, `base-index 1`, `history-limit 50000`, `default-terminal tmux-256color`, `renumber-windows on`, `default-command "${SHELL}"`.
+
+### Recommendations for yoloAI container
+
+Ship sensible defaults that fix Tier 1-2 complaints. Skip keybinding changes (prefix, splits) — those are personal preference, not fixes.
+
+| Setting | Value | Fixes |
+|---|---|---|
+| `mouse` | `on` | #1: scroll, click, resize |
+| `escape-time` | `0` | #3: vim escape delay |
+| `default-terminal` | `tmux-256color` | #2: color support |
+| `base-index` | `1` | #5: keyboard-layout match |
+| `pane-base-index` | `1` | #5: same |
+| `history-limit` | `50000` | #11: adequate scrollback |
+| `default-command` | `${SHELL}` | #10: non-login shell |
+| `renumber-windows` | `on` | #15: no gaps |
+| `display-time` | `4000` | #12: readable messages |
+| `focus-events` | `on` | #14: vim autoread |
+| `set-clipboard` | `on` | #4: system clipboard via OSC 52 |
+
+Keybinding changes (prefix, splits, pane navigation) deliberately excluded — they're preference, not fixes, and would conflict with power user muscle memory.
+
+### Sources
+
+- [tmux-plugins/tmux-sensible](https://github.com/tmux-plugins/tmux-sensible) — canonical sensible defaults plugin
+- [gpakosz/.tmux](https://github.com/gpakosz/.tmux) — comprehensive config framework
+- [tmux issue #1937](https://github.com/tmux/tmux/issues/1937) — maintainer position on login shell default
+- [tmux FAQ (official wiki)](https://github.com/tmux/tmux/wiki/FAQ) — TERM/color guidance
+- [Prevent Tmux from Starting a Login Shell (Nick Janetakis)](https://nickjanetakis.com/blog/prevent-tmux-from-starting-a-login-shell-by-default) — login shell explanation
+
+---
