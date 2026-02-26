@@ -394,18 +394,11 @@ func (r *Runtime) vmExists(ctx context.Context, vmName string) bool {
 	return false
 }
 
-// isRunning checks if the VM is running using tart list and PID cross-check.
+// isRunning checks if the VM is running by attempting a trivial exec.
 func (r *Runtime) isRunning(ctx context.Context, vmName string) bool {
-	out, err := r.runTart(ctx, "list", "--quiet", "--state", "running")
-	if err != nil {
-		return false
-	}
-	for _, line := range strings.Split(out, "\n") {
-		if strings.TrimSpace(line) == vmName {
-			return true
-		}
-	}
-	return false
+	args := execArgs(vmName, "true")
+	cmd := exec.CommandContext(ctx, r.tartBin, args...) //nolint:gosec // G204
+	return cmd.Run() == nil
 }
 
 // waitForBoot polls until the VM responds to tart exec or the timeout expires.
