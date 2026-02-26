@@ -2,7 +2,7 @@
 
 **Fearless YOLO for your agent.**
 
-Let AI coding agents go wild — inside a disposable Docker container. Your files are never touched. When the agent's done, review what changed with `yoloai diff` and cherry-pick what you want with `yoloai apply`. No permission prompts, no anxiety, no cleanup.
+Let AI coding agents go wild — inside a disposable Docker container. Your files are never touched. When the agent's done, review what changed with `yoloai diff` and cherry-pick what you want with `yoloai apply`. No permission prompts, no anxiety, no messy cleanup.
 
 ![terminal](terminal.svg)
 
