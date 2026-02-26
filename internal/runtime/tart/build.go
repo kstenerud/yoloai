@@ -167,25 +167,26 @@ func (r *Runtime) bootForProvisioning(ctx context.Context, vmName string, output
 		return fmt.Errorf("start VM for provisioning: %w", err)
 	}
 
-	pid := cmd.Process.Pid
-	_ = cmd.Process.Release()
-	_ = vmLog.Close()
+	// Monitor the tart run process so we can detect early exits
+	procDone := make(chan error, 1)
+	go func() {
+		procDone <- cmd.Wait()
+		_ = vmLog.Close()
+	}()
 
 	// Ensure cleanup: stop the VM when done (regardless of success/failure)
 	defer func() {
 		logger.Debug("stopping provisioning VM", "vm", vmName)
 		stopCmd := exec.CommandContext(ctx, r.tartBin, "stop", vmName) //nolint:gosec // G204
 		if err := stopCmd.Run(); err != nil {
-			// Fall back to killing by PID
-			if proc, findErr := os.FindProcess(pid); findErr == nil {
-				_ = proc.Signal(syscall.SIGTERM)
-			}
+			// Fall back to killing the process
+			_ = cmd.Process.Kill()
 		}
 	}()
 
 	// Wait for VM to be accessible
 	fmt.Fprintln(output, "Waiting for VM to boot (macOS VMs can take 30-60s)...") //nolint:errcheck // best-effort
-	if err := r.waitForBoot(ctx, vmName); err != nil {
+	if err := r.waitForBoot(ctx, vmName, procDone); err != nil {
 		// Show tart run output on failure to aid debugging
 		if logData, readErr := os.ReadFile(vmLogPath); readErr == nil && len(logData) > 0 { //nolint:gosec // G304: temp file we created
 			fmt.Fprintf(output, "tart run output:\n%s\n", string(logData)) //nolint:errcheck,gosec // best-effort diagnostic output

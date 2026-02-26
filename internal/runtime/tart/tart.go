@@ -127,16 +127,21 @@ func (r *Runtime) Start(ctx context.Context, name string) error {
 	if err := os.WriteFile(pidPath, []byte(strconv.Itoa(cmd.Process.Pid)), 0600); err != nil {
 		// Kill the process we just started if we can't track it
 		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
 		logFile.Close() //nolint:errcheck,gosec // best-effort
 		return fmt.Errorf("write PID file: %w", err)
 	}
 
-	// Release the process (don't wait for it)
-	_ = cmd.Process.Release()
-	logFile.Close() //nolint:errcheck,gosec // best-effort
+	// Monitor the tart run process in the background so we can detect
+	// early exits. The channel receives the error (nil on clean exit).
+	procDone := make(chan error, 1)
+	go func() {
+		procDone <- cmd.Wait()
+		logFile.Close() //nolint:errcheck,gosec // best-effort
+	}()
 
-	// Wait for VM to become accessible
-	if err := r.waitForBoot(ctx, name); err != nil {
+	// Wait for VM to become accessible, or detect early process exit
+	if err := r.waitForBoot(ctx, name, procDone); err != nil {
 		// Attempt cleanup
 		r.killByPID(sandboxPath)
 		return fmt.Errorf("wait for VM boot: %w", err)
@@ -401,8 +406,9 @@ func (r *Runtime) isRunning(ctx context.Context, vmName string) bool {
 }
 
 // waitForBoot polls until the VM responds to tart exec or the timeout expires.
-// Returns immediately on fatal errors (VM not found, bad command syntax).
-func (r *Runtime) waitForBoot(ctx context.Context, vmName string) error {
+// Returns immediately on fatal errors (VM not found, bad command syntax) or
+// if the tart run process exits early (procDone fires).
+func (r *Runtime) waitForBoot(ctx context.Context, vmName string, procDone <-chan error) error {
 	deadline := time.Now().Add(bootTimeout)
 	var lastErr error
 
@@ -414,7 +420,13 @@ func (r *Runtime) waitForBoot(ctx context.Context, vmName string) error {
 			return fmt.Errorf("vm did not become accessible within %s", bootTimeout)
 		}
 
+		// Check if tart run process exited early
 		select {
+		case procErr := <-procDone:
+			if procErr != nil {
+				return fmt.Errorf("tart run exited: %w", procErr)
+			}
+			return fmt.Errorf("tart run exited unexpectedly with no error")
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
@@ -438,8 +450,13 @@ func (r *Runtime) waitForBoot(ctx context.Context, vmName string) error {
 			return fmt.Errorf("tart exec failed: %w", lastErr)
 		}
 
-		// Brief sleep before retry
+		// Brief sleep before retry, also watching for process exit
 		select {
+		case procErr := <-procDone:
+			if procErr != nil {
+				return fmt.Errorf("tart run exited: %w", procErr)
+			}
+			return fmt.Errorf("tart run exited unexpectedly with no error")
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-waitTick():
