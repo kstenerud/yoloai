@@ -579,11 +579,15 @@ func (r *Runtime) runSetupScript(ctx context.Context, vmName, sandboxPath string
 			continue // skip files outside sandbox dir (can't share via VirtioFS)
 		}
 
+		// Clean trailing slashes — ln treats /foo/ as "inside /foo" not "replace /foo"
+		target = strings.TrimRight(target, "/")
+
 		if vfsPath == target {
 			continue // no symlink needed
 		}
 		parent := filepath.Dir(target)
-		symlinkCmd := fmt.Sprintf("mkdir -p '%s' && ln -sfn '%s' '%s'", parent, vfsPath, target)
+		// Remove existing dir/file before symlinking (ln -sfn won't replace a directory)
+		symlinkCmd := fmt.Sprintf("mkdir -p '%s' && rm -rf '%s' && ln -sfn '%s' '%s'", parent, target, vfsPath, target)
 		args := execArgs(vmName, "bash", "-c", symlinkCmd)
 		if _, err := r.runTart(ctx, args...); err != nil {
 			return fmt.Errorf("create mount symlink for %s: %w", target, err)
