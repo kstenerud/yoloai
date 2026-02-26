@@ -306,20 +306,36 @@ func sandboxName(instanceName string) string {
 }
 
 // buildRunArgs constructs the arguments for tart run.
-// Each mount gets a VirtioFS --dir share with a sanitized name.
+// Only directories outside the sandbox path get their own VirtioFS share;
+// everything under sandboxPath is already accessible via the yoloai share.
 func (r *Runtime) buildRunArgs(vmName, sandboxPath string, mounts []runtime.MountSpec) []string {
 	args := []string{"run", "--no-graphics"}
 
 	// Share the sandbox directory into the VM
 	args = append(args, "--dir", fmt.Sprintf("%s:%s", sharedDirName, sandboxPath))
 
-	// Add VirtioFS shares for each mount
-	for i, m := range mounts {
-		dirName := fmt.Sprintf("mount%d", i)
+	// Add VirtioFS shares for directory mounts outside the sandbox dir.
+	// VirtioFS only supports directories, not individual files.
+	for _, m := range mounts {
+		// Skip anything under the sandbox dir (already shared)
+		if strings.HasPrefix(m.Source, sandboxPath+"/") || m.Source == sandboxPath {
+			continue
+		}
+		// Skip files — VirtioFS only supports directories
+		if info, err := os.Stat(m.Source); err != nil || !info.IsDir() {
+			continue
+		}
+		dirName := mountDirName(m.Source)
 		args = append(args, "--dir", fmt.Sprintf("%s:%s", dirName, m.Source))
 	}
 
 	return append(args, vmName)
+}
+
+// mountDirName generates a VirtioFS share name from a host path.
+func mountDirName(hostPath string) string {
+	// Use the last path component, prefixed to avoid collisions
+	return "m-" + filepath.Base(hostPath)
 }
 
 // BuildNetworkArgs returns network-related arguments for tart run based on
@@ -514,10 +530,24 @@ func isFatalExecError(stderr string) bool {
 // runSetupScript creates mount symlinks, writes the embedded setup script
 // to the shared directory, and executes it inside the VM.
 func (r *Runtime) runSetupScript(ctx context.Context, vmName, sandboxPath string, mounts []runtime.MountSpec) error {
+	vmSharedDir := filepath.Join(sharedDirVMPath, sharedDirName)
+
 	// Create symlinks from expected mount targets to VirtioFS paths
-	for i, m := range mounts {
-		dirName := fmt.Sprintf("mount%d", i)
-		vfsPath := filepath.Join(sharedDirVMPath, dirName)
+	for _, m := range mounts {
+		var vfsPath string
+		if strings.HasPrefix(m.Source, sandboxPath+"/") {
+			// Source is under the sandbox dir — accessible via the yoloai share
+			relPath := strings.TrimPrefix(m.Source, sandboxPath+"/")
+			vfsPath = filepath.Join(vmSharedDir, relPath)
+		} else if m.Source == sandboxPath {
+			vfsPath = vmSharedDir
+		} else if info, err := os.Stat(m.Source); err == nil && info.IsDir() {
+			// External directory — has its own VirtioFS share
+			vfsPath = filepath.Join(sharedDirVMPath, mountDirName(m.Source))
+		} else {
+			continue // skip files outside sandbox dir (can't share via VirtioFS)
+		}
+
 		if vfsPath == m.Target {
 			continue // no symlink needed
 		}
@@ -534,9 +564,6 @@ func (r *Runtime) runSetupScript(ctx context.Context, vmName, sandboxPath string
 	if err := os.WriteFile(scriptPath, embeddedSetupScript, 0755); err != nil { //nolint:gosec // G306: script needs exec permission
 		return fmt.Errorf("write setup script: %w", err)
 	}
-
-	// The shared dir appears at /Volumes/My Shared Files/yoloai inside the VM
-	vmSharedDir := filepath.Join(sharedDirVMPath, sharedDirName)
 
 	// Run the setup script in the background inside the VM.
 	// Paths must be quoted — VirtioFS mount path contains spaces.

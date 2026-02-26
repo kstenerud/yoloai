@@ -2,6 +2,7 @@
 package tart
 
 import (
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -24,16 +25,32 @@ func TestExecArgs(t *testing.T) {
 
 func TestBuildRunArgs(t *testing.T) {
 	r := &Runtime{tartBin: "/usr/local/bin/tart"}
+	sandboxPath := t.TempDir()
+
+	// Create an external dir that actually exists (for os.Stat check)
+	extDir := t.TempDir()
+
 	mounts := []runtime.MountSpec{
-		{Source: "/Users/karl/project", Target: "/Users/karl/project"},
+		// External dir — should get its own --dir share
+		{Source: extDir, Target: "/Users/karl/project"},
+		// Sandbox-internal dir — should be skipped (already in yoloai share)
+		{Source: sandboxPath + "/agent-state", Target: "/home/yoloai/.claude/"},
+		// File mount — should be skipped (VirtioFS only supports dirs)
+		{Source: sandboxPath + "/config.json", Target: "/yoloai/config.json"},
 	}
-	args := r.buildRunArgs("yoloai-test", "/home/user/.yoloai/sandboxes/test", mounts)
+	args := r.buildRunArgs("yoloai-test", sandboxPath, mounts)
 
 	assert.Contains(t, args, "run")
 	assert.Contains(t, args, "--no-graphics")
 	assert.Contains(t, args, "--dir")
-	assert.Contains(t, args, "yoloai:/home/user/.yoloai/sandboxes/test")
-	assert.Contains(t, args, "mount0:/Users/karl/project")
+	assert.Contains(t, args, "yoloai:"+sandboxPath)
+	// External dir should have its own share
+	assert.Contains(t, args, "m-"+filepath.Base(extDir)+":"+extDir)
+	// Sandbox-internal and file mounts should NOT appear
+	for _, a := range args {
+		assert.NotContains(t, a, "agent-state")
+		assert.NotContains(t, a, "config.json")
+	}
 	// VM name must be last argument
 	assert.Equal(t, "yoloai-test", args[len(args)-1])
 }
