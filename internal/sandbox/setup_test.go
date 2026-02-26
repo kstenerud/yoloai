@@ -143,7 +143,7 @@ func TestRunNewUserSetup_NoConfig_AnswerP(t *testing.T) {
 	mgr, output, _ := setupTestManager(t, "p\n")
 
 	err := mgr.runNewUserSetup()
-	assert.ErrorIs(t, err, ErrSetupPreview)
+	assert.ErrorIs(t, err, errSetupPreview)
 
 	// setup_complete should NOT be set
 	cfg, err := loadConfig()
@@ -191,7 +191,7 @@ func TestRunNewUserSetup_SmallConfig_AnswerP(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, ".tmux.conf"), []byte(tmuxConf), 0600))
 
 	err := mgr.runNewUserSetup()
-	assert.ErrorIs(t, err, ErrSetupPreview)
+	assert.ErrorIs(t, err, errSetupPreview)
 
 	// Should print both sections
 	assert.Contains(t, output.String(), "yoloai defaults")

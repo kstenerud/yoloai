@@ -12,9 +12,9 @@ import (
 	"github.com/kstenerud/yoloai/internal/docker"
 )
 
-// ErrSetupPreview signals that the user chose [p] to preview the merged
+// errSetupPreview signals that the user chose [p] to preview the merged
 // tmux config and the setup should exit cleanly without setting setup_complete.
-var ErrSetupPreview = errors.New("setup preview requested")
+var errSetupPreview = errors.New("setup preview requested")
 
 // tmuxConfigClass describes the user's existing tmux configuration.
 type tmuxConfigClass int
@@ -66,16 +66,21 @@ func countSignificantLines(content string) int {
 
 // RunSetup runs the interactive setup unconditionally, regardless of
 // setup_complete. Used by `yoloai setup` to let users redo their choices.
-// Returns ErrSetupPreview if the user chose [p].
 func (m *Manager) RunSetup(ctx context.Context) error {
 	if err := m.EnsureSetupNonInteractive(ctx); err != nil {
 		return err
 	}
-	return m.runNewUserSetup()
+	if err := m.runNewUserSetup(); err != nil {
+		if errors.Is(err, errSetupPreview) {
+			return nil
+		}
+		return err
+	}
+	return nil
 }
 
 // runNewUserSetup orchestrates the interactive first-run setup prompts.
-// Returns ErrSetupPreview if the user chose [p].
+// Returns errSetupPreview if the user chose [p].
 func (m *Manager) runNewUserSetup() error {
 	class, userConfig := classifyTmuxConfig()
 
@@ -168,7 +173,7 @@ func (m *Manager) promptTmuxSetup(userConfig string, noConfig bool) error {
 			fmt.Fprint(m.output, userConfig)                    //nolint:errcheck // best-effort output
 		}
 		fmt.Fprintln(m.output) //nolint:errcheck // best-effort output
-		return ErrSetupPreview
+		return errSetupPreview
 
 	default:
 		// Treat unknown input as Y (default)

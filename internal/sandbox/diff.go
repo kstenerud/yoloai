@@ -205,12 +205,6 @@ func ListCommitsWithStats(name string) ([]CommitInfoWithStat, error) {
 	return result, nil
 }
 
-// stageUntracked runs `git add -A` in the work directory to capture
-// files created by the agent that are not yet tracked.
-func stageUntracked(workDir string) error {
-	return runGitCmd(workDir, "add", "-A")
-}
-
 // loadDiffContext loads the metadata and resolves paths needed for diff.
 func loadDiffContext(name string) (workDir string, baselineSHA string, mode string, err error) {
 	sandboxDir, dirErr := RequireSandboxDir(name)

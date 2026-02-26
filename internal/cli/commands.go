@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -150,9 +149,6 @@ func newNewCmd(version string) *cobra.Command {
 					Passthrough: passthrough,
 					Version:     version,
 				})
-				if errors.Is(err, sandbox.ErrSetupPreview) {
-					return nil // clean exit after preview
-				}
 				if err != nil {
 					return err
 				}

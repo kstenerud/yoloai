@@ -2,6 +2,7 @@ package sandbox
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -73,7 +74,9 @@ func (m *Manager) EnsureSetup(ctx context.Context) error {
 			}
 		} else {
 			if err := m.runNewUserSetup(); err != nil {
-				return err
+				if !errors.Is(err, errSetupPreview) {
+					return err
+				}
 			}
 		}
 	}
