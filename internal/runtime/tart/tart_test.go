@@ -216,6 +216,29 @@ func TestPlatformDetection(t *testing.T) {
 	assert.False(t, isAppleSilicon())
 }
 
+func TestIsFatalExecError(t *testing.T) {
+	fatal := []string{
+		"Unknown option '--user'",
+		"executable file not found in $PATH",
+		"VM 'yoloai-test' does not exist",
+		"no such file or directory",
+		"Usage: tart exec <vm-name>",
+	}
+	for _, s := range fatal {
+		assert.True(t, isFatalExecError(s), "should be fatal: %s", s)
+	}
+
+	notFatal := []string{
+		"connection refused",
+		"VM agent is not running",
+		"timeout waiting for response",
+		"",
+	}
+	for _, s := range notFatal {
+		assert.False(t, isFatalExecError(s), "should NOT be fatal: %s", s)
+	}
+}
+
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsStr(s, substr))
 }

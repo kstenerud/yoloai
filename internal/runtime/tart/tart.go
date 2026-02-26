@@ -402,6 +402,7 @@ func (r *Runtime) isRunning(ctx context.Context, vmName string) bool {
 }
 
 // waitForBoot polls until the VM responds to tart exec or the timeout expires.
+// Returns immediately on fatal errors (VM not found, bad command syntax).
 func (r *Runtime) waitForBoot(ctx context.Context, vmName string) error {
 	deadline := time.Now().Add(bootTimeout)
 	var lastErr error
@@ -429,7 +430,14 @@ func (r *Runtime) waitForBoot(ctx context.Context, vmName string) error {
 		if err == nil {
 			return nil
 		}
-		lastErr = fmt.Errorf("%w: %s", err, strings.TrimSpace(stderr.String()))
+
+		stderrStr := strings.TrimSpace(stderr.String())
+		lastErr = fmt.Errorf("%w: %s", err, stderrStr)
+
+		// Fail fast on errors that won't resolve by retrying
+		if isFatalExecError(stderrStr) {
+			return fmt.Errorf("tart exec failed: %w", lastErr)
+		}
 
 		// Brief sleep before retry
 		select {
@@ -438,6 +446,25 @@ func (r *Runtime) waitForBoot(ctx context.Context, vmName string) error {
 		case <-waitTick():
 		}
 	}
+}
+
+// isFatalExecError returns true if the tart exec error indicates a problem
+// that won't resolve by retrying (e.g., bad syntax, VM not found).
+func isFatalExecError(stderr string) bool {
+	lower := strings.ToLower(stderr)
+	fatalPatterns := []string{
+		"unknown option",
+		"executable file not found",
+		"does not exist",
+		"no such",
+		"usage:",
+	}
+	for _, p := range fatalPatterns {
+		if strings.Contains(lower, p) {
+			return true
+		}
+	}
+	return false
 }
 
 // runSetupScript writes the embedded setup script to the shared directory
