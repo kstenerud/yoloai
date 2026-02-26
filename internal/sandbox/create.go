@@ -57,6 +57,7 @@ type containerConfig struct {
 	ReadyPattern   string `json:"ready_pattern"`
 	SubmitSequence string `json:"submit_sequence"`
 	TmuxConf       string `json:"tmux_conf"`
+	WorkingDir     string `json:"working_dir"`
 }
 
 // Create creates and optionally starts a new sandbox.
@@ -249,7 +250,7 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 	}
 
 	// Build config.json
-	configData, err := buildContainerConfig(agentDef, agentCommand, tmuxConf)
+	configData, err := buildContainerConfig(agentDef, agentCommand, tmuxConf, workdir.Path)
 	if err != nil {
 		return nil, fmt.Errorf("build config.json: %w", err)
 	}
@@ -446,7 +447,7 @@ func shellEscapeForDoubleQuotes(s string) string {
 }
 
 // buildContainerConfig creates the config.json content.
-func buildContainerConfig(agentDef *agent.Definition, agentCommand string, tmuxConf string) ([]byte, error) {
+func buildContainerConfig(agentDef *agent.Definition, agentCommand string, tmuxConf string, workingDir string) ([]byte, error) {
 	cfg := containerConfig{
 		HostUID:        os.Getuid(),
 		HostGID:        os.Getgid(),
@@ -455,6 +456,7 @@ func buildContainerConfig(agentDef *agent.Definition, agentCommand string, tmuxC
 		ReadyPattern:   agentDef.ReadyPattern,
 		SubmitSequence: agentDef.SubmitSequence,
 		TmuxConf:       tmuxConf,
+		WorkingDir:     workingDir,
 	}
 	return json.MarshalIndent(cfg, "", "  ")
 }
