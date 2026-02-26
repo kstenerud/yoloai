@@ -4,6 +4,8 @@
 
 Let AI coding agents go wild — inside a disposable Docker container. Your files are never touched. When the agent's done, review what changed with `yoloai diff` and cherry-pick what you want with `yoloai apply`. No permission prompts, no anxiety, no cleanup.
 
+![terminal](terminal.svg)
+
 > MVP — early access. Core workflow works, rough edges expected. [Feedback welcome.](https://github.com/kstenerud/yoloai/issues)
 
 ## The workflow
