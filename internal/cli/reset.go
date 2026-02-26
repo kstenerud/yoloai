@@ -27,7 +27,8 @@ func newResetCmd() *cobra.Command {
 				return sandbox.NewUsageError("cannot wipe agent state while agent is running; use --clean without --no-restart, or stop the agent first")
 			}
 
-			return withManager(cmd, func(ctx context.Context, mgr *sandbox.Manager) error {
+			backend := resolveBackendForSandbox(name)
+			return withManager(cmd, backend, func(ctx context.Context, mgr *sandbox.Manager) error {
 				if err := mgr.Reset(ctx, sandbox.ResetOptions{
 					Name:      name,
 					Clean:     clean,

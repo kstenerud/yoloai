@@ -20,8 +20,17 @@ func newStopCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			all, _ := cmd.Flags().GetBool("all")
 
-			return withRuntime(cmd, func(ctx context.Context, rt runtime.Runtime) error {
-				backend := resolveBackend(cmd)
+			// Resolve backend: from first named sandbox, or config default for --all
+			backend := resolveBackendFromConfig()
+			if !all && len(args) > 0 {
+				backend = resolveBackendForSandbox(args[0])
+			} else if !all {
+				if envName := os.Getenv(EnvSandboxName); envName != "" {
+					backend = resolveBackendForSandbox(envName)
+				}
+			}
+
+			return withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
 				mgr := sandbox.NewManager(rt, backend, slog.Default(), cmd.InOrStdin(), cmd.ErrOrStderr())
 
 				var names []string

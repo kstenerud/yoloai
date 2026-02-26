@@ -25,3 +25,13 @@ Tracks breaking changes made during beta. Each entry should be included in relea
 **Rationale:** Mouse mode breaks copy/paste in many terminal emulators, and the clipboard workarounds (OSC 52, MouseDragEnd1Pane pipe-and-cancel) don't work reliably across all setups. Broken copy is worse UX than needing a keybinding to scroll.
 
 **Migration:** If you prefer mouse mode, add `set -g mouse on` to your own `~/.tmux.conf` or a custom profile's tmux config.
+
+### `--backend` moved from global flag to per-command flag
+
+**Previous behavior:** `--backend` was a global flag available on all commands.
+
+**New behavior:** `--backend` is a local flag on `new`, `build`, and `setup` only. Lifecycle commands (`start`, `stop`, `destroy`, `reset`, `attach`, `exec`, `show`) read the backend from the sandbox's `meta.json` automatically. `list` uses the config default.
+
+**Rationale:** The backend is a property of the sandbox, not the CLI invocation. Lifecycle commands should use the backend the sandbox was created with, not require the user to remember and pass it every time.
+
+**Migration:** Remove `--backend` from lifecycle command invocations. If you were passing `--backend` to `start`/`stop`/etc., it now happens automatically via `meta.json`.

@@ -29,7 +29,8 @@ func newExecCmd() *cobra.Command {
 			}
 			cmdArgs := rest
 
-			return withRuntime(cmd, func(ctx context.Context, rt runtime.Runtime) error {
+			backend := resolveBackendForSandbox(name)
+			return withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
 				info, err := sandbox.InspectSandbox(ctx, rt, name)
 				if err != nil {
 					return err

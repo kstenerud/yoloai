@@ -19,7 +19,8 @@ func newListCmd() *cobra.Command {
 		GroupID: groupInspect,
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return withRuntime(cmd, func(ctx context.Context, rt runtime.Runtime) error {
+			backend := resolveBackendFromConfig()
+			return withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
 				infos, err := sandbox.ListSandboxes(ctx, rt)
 				if err != nil {
 					return err
@@ -47,7 +48,7 @@ func newListCmd() *cobra.Command {
 					return err
 				}
 
-				slog.Debug("list complete", "count", len(infos))
+				slog.Debug("list complete", "count", len(infos)) //nolint:gosec // G706: count is len(), not user input
 				return nil
 			})
 		},

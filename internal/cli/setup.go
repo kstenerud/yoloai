@@ -8,15 +8,20 @@ import (
 )
 
 func newSetupCmd() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:     "setup",
 		Short:   "Run interactive setup",
 		GroupID: groupAdmin,
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return withManager(cmd, func(ctx context.Context, mgr *sandbox.Manager) error {
+			backend := resolveBackend(cmd)
+			return withManager(cmd, backend, func(ctx context.Context, mgr *sandbox.Manager) error {
 				return mgr.RunSetup(ctx)
 			})
 		},
 	}
+
+	cmd.Flags().String("backend", "", "Runtime backend (docker, tart)")
+
+	return cmd
 }

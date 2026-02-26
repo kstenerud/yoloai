@@ -35,7 +35,7 @@ Dependency direction: `cmd/yoloai` → `cli` → `sandbox` + `runtime`; `sandbox
 
 | File | Purpose |
 |------|---------|
-| `root.go` | Root Cobra command, global flags (`-v`, `-q`, `--no-color`, `--backend`), `Execute()` with exit code mapping. |
+| `root.go` | Root Cobra command, global flags (`-v`, `-q`, `--no-color`), `Execute()` with exit code mapping. |
 | `commands.go` | `registerCommands()` — registers all subcommands. Also contains `newNewCmd`, `newBuildCmd`, `newCompletionCmd`, `newVersionCmd`, and `attachToSandbox`/`waitForTmux` helpers. |
 | `apply.go` | `yoloai apply` — apply changes back to host. Squash and selective-commit modes, `--export` for `.patch` files. |
 | `attach.go` | `yoloai attach` — attach to sandbox tmux session via `runtime.InteractiveExec`. |
@@ -50,7 +50,7 @@ Dependency direction: `cmd/yoloai` → `cli` → `sandbox` + `runtime`; `sandbox
 | `start.go` | `yoloai start` — start a stopped sandbox (recreates container if removed). |
 | `stop.go` | `yoloai stop` — stop a running sandbox. |
 | `envname.go` | `resolveName()` — resolves sandbox name from args or `YOLOAI_SANDBOX` env var. |
-| `helpers.go` | `withRuntime()`, `withManager()` — create Runtime / Manager for command handlers. `resolveBackend()` — determines backend name from `--backend` flag > `defaults.backend` config > `"docker"` default. |
+| `helpers.go` | `withRuntime()`, `withManager()` — create Runtime / Manager for command handlers. `resolveBackend()` reads `--backend` flag (on new/build/setup). `resolveBackendForSandbox()` reads `meta.json`. `resolveBackendFromConfig()` reads config default. |
 | `pager.go` | `RunPager()` — pipe output through `$PAGER` or `less` when stdout is a TTY. |
 | `envname_test.go` | Tests for name resolution. |
 | `pager_test.go` | Tests for pager. |
@@ -292,7 +292,7 @@ Manager.Start (sandbox/lifecycle.go)
 1. Create `internal/runtime/<name>/` package
 2. Implement the `runtime.Runtime` interface
 3. Register in `cli/helpers.go:newRuntime()` — switch on the backend name resolved by `resolveBackend()`
-4. Backend is selectable via `--backend` flag or `defaults.backend` config
+4. Backend is selectable via `--backend` flag (on new/build/setup) or `defaults.backend` config. Lifecycle commands read backend from sandbox `meta.json`.
 
 ## Testing
 

@@ -222,7 +222,8 @@ func diffRef(cmd *cobra.Command, name, ref string, stat bool) error {
 // agentRunningWarning prints a warning to stderr if the agent is still running.
 // Silently skips if Docker is unavailable or inspection fails.
 func agentRunningWarning(cmd *cobra.Command, name string) {
-	_ = withRuntime(cmd, func(ctx context.Context, rt runtime.Runtime) error {
+	backend := resolveBackendForSandbox(name)
+	_ = withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
 		info, err := sandbox.InspectSandbox(ctx, rt, name)
 		if err != nil {
 			return nil // silently skip

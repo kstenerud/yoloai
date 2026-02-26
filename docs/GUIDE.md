@@ -90,11 +90,12 @@ yoloai new task ./my-project --model claude-sonnet-4-20250514  # exact model
 | `-v` | Verbose output |
 | `-q` | Quiet output |
 | `--no-color` | Disable color output |
-| `--backend <name>` | Runtime backend to use (default: `docker`). Overrides `defaults.backend` in config. |
 
 ## Key Flags
 
 ### Creating sandboxes
+
+`--backend <name>` selects the runtime backend (`docker` or `tart`). Available on `new`, `build`, and `setup`. Lifecycle commands (`start`, `stop`, etc.) read the backend from the sandbox's `meta.json` automatically.
 
 ```bash
 # Prompt (headless — agent runs the task autonomously)
@@ -185,7 +186,7 @@ defaults:
 
 You can edit this file to change the default agent, runtime backend, add persistent bind mounts (like SSH config or tool configs), adjust resource limits, or set default port mappings. These defaults apply to all new sandboxes.
 
-Backend resolution order: `--backend` CLI flag > `defaults.backend` in config > `"docker"` default.
+Backend resolution: `new`/`build`/`setup` use `--backend` flag > `defaults.backend` in config > `"docker"`. Lifecycle commands read the backend from the sandbox's `meta.json`, falling back to config default.
 
 ## Sandbox State
 

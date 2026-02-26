@@ -51,7 +51,6 @@ diff and apply what you want to keep.`,
 	rootCmd.PersistentFlags().CountP("verbose", "v", "Increase output verbosity (-v for debug, -vv reserved)")
 	rootCmd.PersistentFlags().CountP("quiet", "q", "Suppress non-essential output (-q for warn, -qq for error only)")
 	rootCmd.PersistentFlags().Bool("no-color", false, "Disable colored output")
-	rootCmd.PersistentFlags().String("backend", "", "Runtime backend (docker, tart)")
 
 	registerCommands(rootCmd, version, commit, date)
 

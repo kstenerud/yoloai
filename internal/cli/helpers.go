@@ -13,8 +13,6 @@ import (
 )
 
 // newRuntime creates a runtime.Runtime for the given backend name.
-// Currently only Docker is supported; future backends (Tart, etc.) will
-// be dispatched here.
 func newRuntime(ctx context.Context, backend string) (runtime.Runtime, error) {
 	switch backend {
 	case "docker", "":
@@ -26,11 +24,30 @@ func newRuntime(ctx context.Context, backend string) (runtime.Runtime, error) {
 	}
 }
 
-// resolveBackend determines the backend name from CLI flag, config, or default.
+// resolveBackend determines the backend name from --backend flag, then config,
+// then default. Used by commands that accept a --backend flag (new, build, setup).
 func resolveBackend(cmd *cobra.Command) string {
 	if b, _ := cmd.Flags().GetString("backend"); b != "" {
 		return b
 	}
+	return resolveBackendFromConfig()
+}
+
+// resolveBackendForSandbox reads the backend from a sandbox's meta.json.
+// Falls back to config default if meta.json can't be read.
+// Used by lifecycle commands that operate on an existing sandbox.
+func resolveBackendForSandbox(name string) string {
+	meta, err := sandbox.LoadMeta(sandbox.Dir(name))
+	if err == nil && meta.Backend != "" {
+		return meta.Backend
+	}
+	return resolveBackendFromConfig()
+}
+
+// resolveBackendFromConfig reads the backend from config.yaml, falling back
+// to "docker". Used by commands that don't have a specific sandbox context
+// (e.g., list, stop --all).
+func resolveBackendFromConfig() string {
 	cfg, err := sandbox.LoadConfig()
 	if err == nil && cfg.Backend != "" {
 		return cfg.Backend
@@ -38,10 +55,8 @@ func resolveBackend(cmd *cobra.Command) string {
 	return "docker"
 }
 
-// withRuntime creates a runtime, calls fn, and ensures cleanup.
-func withRuntime(cmd *cobra.Command, fn func(ctx context.Context, rt runtime.Runtime) error) error {
-	ctx := cmd.Context()
-	backend := resolveBackend(cmd)
+// withRuntime creates a runtime for the given backend, calls fn, and ensures cleanup.
+func withRuntime(ctx context.Context, backend string, fn func(ctx context.Context, rt runtime.Runtime) error) error {
 	rt, err := newRuntime(ctx, backend)
 	if err != nil {
 		return fmt.Errorf("connect to runtime: %w", err)
@@ -51,9 +66,8 @@ func withRuntime(cmd *cobra.Command, fn func(ctx context.Context, rt runtime.Run
 }
 
 // withManager creates a runtime and sandbox manager, calls fn, and ensures cleanup.
-func withManager(cmd *cobra.Command, fn func(ctx context.Context, mgr *sandbox.Manager) error) error {
-	return withRuntime(cmd, func(ctx context.Context, rt runtime.Runtime) error {
-		backend := resolveBackend(cmd)
+func withManager(cmd *cobra.Command, backend string, fn func(ctx context.Context, mgr *sandbox.Manager) error) error {
+	return withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
 		mgr := sandbox.NewManager(rt, backend, slog.Default(), cmd.InOrStdin(), cmd.ErrOrStderr())
 		return fn(ctx, mgr)
 	})

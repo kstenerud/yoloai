@@ -58,9 +58,9 @@ func registerCommands(root *cobra.Command, version, commit, date string) {
 }
 
 func newBuildCmd() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:     "build [profile]",
-		Short:   "Build or rebuild Docker image(s)",
+		Short:   "Build or rebuild base image",
 		GroupID: groupAdmin,
 		Args:    cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -74,16 +74,21 @@ func newBuildCmd() *cobra.Command {
 			}
 			yoloaiDir := filepath.Join(homeDir, ".yoloai")
 
-			return withRuntime(cmd, func(ctx context.Context, rt runtime.Runtime) error {
+			backend := resolveBackend(cmd)
+			return withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
 				if err := rt.EnsureImage(ctx, yoloaiDir, os.Stderr, slog.Default(), true); err != nil {
 					return err
 				}
 
-				_, err := fmt.Fprintln(cmd.OutOrStdout(), "Base image yoloai-base built successfully")
+				_, err := fmt.Fprintln(cmd.OutOrStdout(), "Base image built successfully")
 				return err
 			})
 		},
 	}
+
+	cmd.Flags().String("backend", "", "Runtime backend (docker, tart)")
+
+	return cmd
 }
 
 func newNewCmd(version string) *cobra.Command {
@@ -127,8 +132,8 @@ func newNewCmd(version string) *cobra.Command {
 			attach, _ := cmd.Flags().GetBool("attach")
 			yes, _ := cmd.Flags().GetBool("yes")
 
-			return withRuntime(cmd, func(ctx context.Context, rt runtime.Runtime) error {
-				backend := resolveBackend(cmd)
+			backend := resolveBackend(cmd)
+			return withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
 				mgr := sandbox.NewManager(rt, backend, slog.Default(), cmd.InOrStdin(), cmd.ErrOrStderr())
 				sandboxName, err := mgr.Create(ctx, sandbox.CreateOptions{
 					Name:        name,
@@ -169,6 +174,7 @@ func newNewCmd(version string) *cobra.Command {
 	cmd.Flags().StringP("prompt-file", "f", "", "File containing the prompt")
 	cmd.Flags().StringP("model", "m", "", "Model name or alias")
 	cmd.Flags().String("agent", "claude", "Agent to use")
+	cmd.Flags().String("backend", "", "Runtime backend (docker, tart)")
 	cmd.Flags().Bool("network-none", false, "Disable network access")
 	cmd.Flags().StringArray("port", nil, "Port mapping (host:container)")
 	cmd.Flags().Bool("replace", false, "Replace existing sandbox")
