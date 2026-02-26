@@ -81,6 +81,13 @@ func New(_ context.Context) (*Runtime, error) {
 // Create creates a new VM instance by cloning the base image and writing
 // the instance config to the sandbox directory.
 func (r *Runtime) Create(ctx context.Context, cfg runtime.InstanceConfig) error {
+	// Remove any leftover VM with the same name (idempotent)
+	if r.vmExists(ctx, cfg.Name) {
+		if _, err := r.runTart(ctx, "delete", cfg.Name); err != nil {
+			return fmt.Errorf("remove existing VM: %w", err)
+		}
+	}
+
 	// Clone the base image to create an instance-specific VM
 	if _, err := r.runTart(ctx, "clone", cfg.ImageRef, cfg.Name); err != nil {
 		return fmt.Errorf("clone VM: %w", err)
