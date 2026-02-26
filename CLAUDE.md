@@ -10,6 +10,7 @@ Post-MVP development. MVP is public (beta). Breaking changes are allowed but mus
 
 All design/planning documents live in `docs/`:
 
+- `docs/ARCHITECTURE.md` — Code navigation guide: package map, file index, key types, command→code map, data flows, "where to change" recipes, testing. Keep in sync when architecture changes.
 - `docs/DESIGN.md` — Architecture, commands, config format, workflows, security considerations, resolved decisions.
 - `docs/RESEARCH.md` — Competitive landscape (8 tools analyzed in depth, 9 more cataloged), community pain points, security incidents, alternative filesystem isolation approaches, feature comparison table, multi-agent CLI research, credential management research, network isolation research.
 - `docs/CRITIQUE.md` — Rolling critique document. After a critique pass, findings are applied to DESIGN.md and RESEARCH.md, then CRITIQUE.md is emptied for the next round.
