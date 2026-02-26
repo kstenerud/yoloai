@@ -32,7 +32,7 @@ type CreateOptions struct {
 	Yes         bool     // --yes flag (skip confirmations)
 	Passthrough []string // args after -- passed to agent
 	Version     string   // yoloAI version for meta.json
-	Detach      bool     // --detach flag (skip auto-attach)
+	Attach      bool     // --attach flag (auto-attach after creation)
 }
 
 // sandboxState holds resolved state computed during preparation.
@@ -84,8 +84,7 @@ func (m *Manager) Create(ctx context.Context, opts CreateOptions) (string, error
 		return "", err
 	}
 
-	autoAttach := !opts.Detach
-	m.printCreationOutput(state, autoAttach)
+	m.printCreationOutput(state, opts.Attach)
 	return state.name, nil
 }
 

@@ -128,7 +128,7 @@ func newNewCmd(version string) *cobra.Command {
 			ports, _ := cmd.Flags().GetStringArray("port")
 			replace, _ := cmd.Flags().GetBool("replace")
 			noStart, _ := cmd.Flags().GetBool("no-start")
-			detach, _ := cmd.Flags().GetBool("detach")
+			attach, _ := cmd.Flags().GetBool("attach")
 			yes, _ := cmd.Flags().GetBool("yes")
 
 			return withManager(cmd, func(ctx context.Context, mgr *sandbox.Manager) error {
@@ -143,7 +143,7 @@ func newNewCmd(version string) *cobra.Command {
 					Ports:       ports,
 					Replace:     replace,
 					NoStart:     noStart,
-					Detach:      detach,
+					Attach:      attach,
 					Yes:         yes,
 					Passthrough: passthrough,
 					Version:     version,
@@ -152,7 +152,7 @@ func newNewCmd(version string) *cobra.Command {
 					return err
 				}
 
-				if sandboxName == "" || detach || noStart {
+				if sandboxName == "" || !attach || noStart {
 					return nil
 				}
 
@@ -175,7 +175,7 @@ func newNewCmd(version string) *cobra.Command {
 	cmd.Flags().StringArray("port", nil, "Port mapping (host:container)")
 	cmd.Flags().Bool("replace", false, "Replace existing sandbox")
 	cmd.Flags().Bool("no-start", false, "Create but don't start the container")
-	cmd.Flags().BoolP("detach", "d", false, "Don't auto-attach after creation")
+	cmd.Flags().BoolP("attach", "a", false, "Auto-attach after creation")
 	cmd.Flags().BoolP("yes", "y", false, "Skip confirmations")
 
 	return cmd

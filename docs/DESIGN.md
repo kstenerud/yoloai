@@ -309,7 +309,7 @@ Single Go binary. No runtime dependencies — just the binary and Docker.
 ## Commands
 
 ```
-yoloai new [options] <name> [<workdir>] [-d <auxdir>...]  Create and start a sandbox  (aux dirs [POST-MVP])
+yoloai new [options] [-a] <name> [<workdir>] [-d <auxdir>...]  Create and start a sandbox  (aux dirs [POST-MVP])
 yoloai list                                    List sandboxes and their status
 yoloai attach <name>                           Attach to a sandbox's tmux session
 yoloai show <name>                             Show sandbox configuration and state
@@ -318,7 +318,7 @@ yoloai diff <name>                             Show changes the agent made
 yoloai apply <name>                            Copy changes back to original dirs
 yoloai exec <name> <command>                   Run a command inside the sandbox
 yoloai stop <name>...                          Stop sandboxes (preserving state)
-yoloai start [--resume] <name>                 Start a stopped sandbox  (--resume [POST-MVP])
+yoloai start [-a] [--resume] <name>             Start a stopped sandbox  (--resume [POST-MVP])
 yoloai restart <name>                          Restart the agent in an existing sandbox  [POST-MVP]
 yoloai reset <name>                            Re-copy workdir and reset git baseline
 yoloai destroy <name>...                       Stop and remove sandboxes
@@ -438,6 +438,7 @@ Options:
 - `--network-none`: Run with `--network none` for full network isolation (agent API calls will also fail). Mutually exclusive with `--network-isolated` and `--network-allow`. **Warning:** Most agents (Claude, Codex) require network access to reach their API endpoints. This flag is useful for testing container setup without agent execution or for agents with locally-hosted models.
 - `--port <host:container>`: Expose a container port on the host (can be repeated). Example: `--port 3000:3000` for web dev. Without this, container services are not reachable from the host browser. Ports must be specified at creation time — Docker does not support adding port mappings to running containers. To add ports later, use `yoloai new --replace`.
 - `--replace`: Destroy existing sandbox of the same name before creating. Shorthand for `yoloai destroy <name> && yoloai new <name>`. Inherits destroy's smart confirmation — prompts when the existing sandbox has a running agent or unapplied changes. `--yes` skips confirmation.
+- `--attach` / `-a`: Auto-attach to the tmux session after creation. Without this flag, the sandbox starts in the background and prints `yoloai attach <name>` as a hint.
 - `--no-start`: Create sandbox without starting the container. Useful for setup-only operations.
 - `--yes`: Skip confirmation prompts (dirty repo warning). For scripting.
 - `-- <args>...`: Pass remaining arguments directly to the agent CLI invocation. Appended verbatim after yoloAI's built-in flags in the agent command. Example: `yoloai new fix-bug . --model opus -- --max-turns 5` produces `claude --dangerously-skip-permissions --model claude-opus-4-latest --max-turns 5`. **Do not duplicate first-class flags** (e.g., `--model`) in passthrough args — behavior is undefined (depends on the agent's CLI parser, which typically uses last-wins semantics).
@@ -745,13 +746,15 @@ Options:
 
 ### `yoloai start`
 
-`yoloai start [--resume] <name>` ensures the sandbox is running — idempotent "get it running, however needed":
+`yoloai start [-a|--attach] [--resume] <name>` ensures the sandbox is running — idempotent "get it running, however needed". Like `new`, starts detached by default.
 - If the container has been removed: re-run full container creation from `meta.json` (skipping the copy step for `:copy` directories — state already exists in `work/`). Create a new credential temp file (ephemeral by design).
 - If the container is stopped: starts it (and proxy sidecar if `--network-isolated`). The entrypoint re-establishes overlayfs mounts (mounts don't survive `docker stop` — this is by design; the upper directory persists on the host and the entrypoint re-mounts idempotently).
 - If the container is running but the agent has exited: relaunches the agent in the existing tmux session.
 - If already running: no-op.
 
 This eliminates the need to diagnose *why* a sandbox isn't running before choosing a command.
+
+**`-a`/`--attach` flag:** After the sandbox is running, automatically attach to the tmux session (equivalent to running `yoloai attach <name>` immediately after). Saves a round-trip for the common workflow of starting a sandbox and then interacting with it.
 
 **[POST-MVP] `--resume` flag:** When used, the agent is relaunched in **interactive mode** (regardless of the original prompt delivery mode) with the original prompt from `prompt.txt` prefixed with a preamble: "You were previously working on the following task and were interrupted. The work directory contains your progress so far. Continue where you left off:" followed by the original prompt text. Interactive mode is always used for resume because the user may want to follow up or redirect. Error if the sandbox has no `prompt.txt` (was created without `--prompt`). Without `--resume`, `yoloai start` relaunches the agent in interactive mode with no prompt (user attaches and gives instructions manually).
 

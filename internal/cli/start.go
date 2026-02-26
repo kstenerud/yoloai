@@ -2,13 +2,15 @@ package cli
 
 import (
 	"context"
+	"fmt"
+	"time"
 
 	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/spf13/cobra"
 )
 
 func newStartCmd() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:     "start <name>",
 		Short:   "Start a stopped sandbox",
 		GroupID: groupLifecycle,
@@ -19,9 +21,28 @@ func newStartCmd() *cobra.Command {
 				return err
 			}
 
+			attach, _ := cmd.Flags().GetBool("attach")
+
 			return withManager(cmd, func(ctx context.Context, mgr *sandbox.Manager) error {
-				return mgr.Start(ctx, name)
+				if err := mgr.Start(ctx, name); err != nil {
+					return err
+				}
+
+				if !attach {
+					return nil
+				}
+
+				containerName := sandbox.ContainerName(name)
+				if err := waitForTmux(containerName, 30*time.Second); err != nil {
+					return fmt.Errorf("waiting for tmux session: %w", err)
+				}
+
+				return attachToSandbox(containerName)
 			})
 		},
 	}
+
+	cmd.Flags().BoolP("attach", "a", false, "Auto-attach after starting")
+
+	return cmd
 }
