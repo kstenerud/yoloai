@@ -5,6 +5,7 @@ package tart
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -24,6 +25,9 @@ const (
 
 	// vmLogFileName captures tart run stderr for debugging.
 	vmLogFileName = "vm.log"
+
+	// tartConfigFileName stores the instance config for Start to use.
+	tartConfigFileName = "tart-instance.json"
 
 	// sharedDirName is the VirtioFS share name used for yoloai state.
 	sharedDirName = "yoloai"
@@ -94,6 +98,16 @@ func (r *Runtime) Create(ctx context.Context, cfg runtime.InstanceConfig) error 
 		return fmt.Errorf("clone VM: %w", err)
 	}
 
+	// Save instance config so Start can read mounts/network/ports
+	sandboxPath := filepath.Join(r.sandboxDir, sandboxName(cfg.Name))
+	cfgData, err := json.Marshal(cfg)
+	if err != nil {
+		return fmt.Errorf("marshal instance config: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(sandboxPath, tartConfigFileName), cfgData, 0600); err != nil {
+		return fmt.Errorf("write instance config: %w", err)
+	}
+
 	return nil
 }
 
@@ -106,8 +120,19 @@ func (r *Runtime) Start(ctx context.Context, name string) error {
 		return nil
 	}
 
+	// Load instance config saved by Create
+	var cfg runtime.InstanceConfig
+	cfgPath := filepath.Join(sandboxPath, tartConfigFileName)
+	cfgData, err := os.ReadFile(cfgPath) //nolint:gosec // G304: path within sandbox dir
+	if err != nil {
+		return fmt.Errorf("read instance config: %w", err)
+	}
+	if err := json.Unmarshal(cfgData, &cfg); err != nil {
+		return fmt.Errorf("parse instance config: %w", err)
+	}
+
 	// Build tart run arguments
-	args := r.buildRunArgs(name, sandboxPath)
+	args := r.buildRunArgs(name, sandboxPath, cfg.Mounts)
 
 	// Open log file for stderr capture
 	logPath := filepath.Join(sandboxPath, vmLogFileName)
@@ -164,7 +189,7 @@ func (r *Runtime) Start(ctx context.Context, name string) error {
 	}
 
 	// Deliver setup script via shared directory and run it
-	if err := r.runSetupScript(ctx, name, sandboxPath); err != nil {
+	if err := r.runSetupScript(ctx, name, sandboxPath, cfg.Mounts); err != nil {
 		return fmt.Errorf("run setup script: %w", err)
 	}
 
@@ -281,11 +306,18 @@ func sandboxName(instanceName string) string {
 }
 
 // buildRunArgs constructs the arguments for tart run.
-func (r *Runtime) buildRunArgs(vmName, sandboxPath string) []string {
+// Each mount gets a VirtioFS --dir share with a sanitized name.
+func (r *Runtime) buildRunArgs(vmName, sandboxPath string, mounts []runtime.MountSpec) []string {
 	args := []string{"run", "--no-graphics"}
 
 	// Share the sandbox directory into the VM
 	args = append(args, "--dir", fmt.Sprintf("%s:%s", sharedDirName, sandboxPath))
+
+	// Add VirtioFS shares for each mount
+	for i, m := range mounts {
+		dirName := fmt.Sprintf("mount%d", i)
+		args = append(args, "--dir", fmt.Sprintf("%s:%s", dirName, m.Source))
+	}
 
 	return append(args, vmName)
 }
@@ -479,9 +511,24 @@ func isFatalExecError(stderr string) bool {
 	return false
 }
 
-// runSetupScript writes the embedded setup script to the shared directory
-// and executes it inside the VM.
-func (r *Runtime) runSetupScript(ctx context.Context, vmName, sandboxPath string) error {
+// runSetupScript creates mount symlinks, writes the embedded setup script
+// to the shared directory, and executes it inside the VM.
+func (r *Runtime) runSetupScript(ctx context.Context, vmName, sandboxPath string, mounts []runtime.MountSpec) error {
+	// Create symlinks from expected mount targets to VirtioFS paths
+	for i, m := range mounts {
+		dirName := fmt.Sprintf("mount%d", i)
+		vfsPath := filepath.Join(sharedDirVMPath, dirName)
+		if vfsPath == m.Target {
+			continue // no symlink needed
+		}
+		parent := filepath.Dir(m.Target)
+		symlinkCmd := fmt.Sprintf("sudo mkdir -p '%s' && sudo ln -sfn '%s' '%s'", parent, vfsPath, m.Target)
+		args := execArgs(vmName, "bash", "-c", symlinkCmd)
+		if _, err := r.runTart(ctx, args...); err != nil {
+			return fmt.Errorf("create mount symlink for %s: %w", m.Target, err)
+		}
+	}
+
 	// Write setup script to sandbox dir (it's shared via VirtioFS)
 	scriptPath := filepath.Join(sandboxPath, "setup.sh")
 	if err := os.WriteFile(scriptPath, embeddedSetupScript, 0755); err != nil { //nolint:gosec // G306: script needs exec permission

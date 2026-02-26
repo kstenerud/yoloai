@@ -24,12 +24,16 @@ func TestExecArgs(t *testing.T) {
 
 func TestBuildRunArgs(t *testing.T) {
 	r := &Runtime{tartBin: "/usr/local/bin/tart"}
-	args := r.buildRunArgs("yoloai-test", "/home/user/.yoloai/sandboxes/test")
+	mounts := []runtime.MountSpec{
+		{Source: "/Users/karl/project", Target: "/Users/karl/project"},
+	}
+	args := r.buildRunArgs("yoloai-test", "/home/user/.yoloai/sandboxes/test", mounts)
 
 	assert.Contains(t, args, "run")
 	assert.Contains(t, args, "--no-graphics")
 	assert.Contains(t, args, "--dir")
 	assert.Contains(t, args, "yoloai:/home/user/.yoloai/sandboxes/test")
+	assert.Contains(t, args, "mount0:/Users/karl/project")
 	// VM name must be last argument
 	assert.Equal(t, "yoloai-test", args[len(args)-1])
 }
