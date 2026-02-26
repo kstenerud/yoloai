@@ -1,8 +1,10 @@
 package cli
 
 import (
-	"fmt"
+	"context"
+	"errors"
 
+	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/spf13/cobra"
 )
 
@@ -13,12 +15,13 @@ func newSetupCmd() *cobra.Command {
 		GroupID: groupAdmin,
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			_, err := fmt.Fprintln(cmd.ErrOrStderr(), "Interactive setup command is not yet implemented.")
-			if err != nil {
+			return withManager(cmd, func(ctx context.Context, mgr *sandbox.Manager) error {
+				err := mgr.RunSetup(ctx)
+				if errors.Is(err, sandbox.ErrSetupPreview) {
+					return nil // clean exit after preview
+				}
 				return err
-			}
-			_, err = fmt.Fprintln(cmd.ErrOrStderr(), "To change settings, edit ~/.yoloai/config.yaml directly.")
-			return err
+			})
 		},
 	}
 }

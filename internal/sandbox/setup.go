@@ -2,6 +2,7 @@ package sandbox
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -61,6 +62,16 @@ func countSignificantLines(content string) int {
 		count++
 	}
 	return count
+}
+
+// RunSetup runs the interactive setup unconditionally, regardless of
+// setup_complete. Used by `yoloai setup` to let users redo their choices.
+// Returns ErrSetupPreview if the user chose [p].
+func (m *Manager) RunSetup(ctx context.Context) error {
+	if err := m.EnsureSetupNonInteractive(ctx); err != nil {
+		return err
+	}
+	return m.runNewUserSetup()
 }
 
 // runNewUserSetup orchestrates the interactive first-run setup prompts.

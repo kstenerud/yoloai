@@ -53,6 +53,38 @@ func NewManager(client docker.Client, logger *slog.Logger, input io.Reader, outp
 // EnsureSetup performs first-run auto-setup. Idempotent — safe to call
 // before every sandbox operation.
 func (m *Manager) EnsureSetup(ctx context.Context) error {
+	if err := m.EnsureSetupNonInteractive(ctx); err != nil {
+		return err
+	}
+
+	// Run new-user experience if setup_complete is false
+	cfg, err := loadConfig()
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+	if !cfg.SetupComplete {
+		if !m.isInteractive() {
+			// Non-TTY: auto-configure without prompts (power-user behavior)
+			if err := m.setTmuxConf("default+host"); err != nil {
+				return fmt.Errorf("set tmux_conf: %w", err)
+			}
+			if err := updateConfigFields(map[string]string{"setup_complete": "true"}); err != nil {
+				return fmt.Errorf("set setup_complete: %w", err)
+			}
+		} else {
+			if err := m.runNewUserSetup(); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
+// EnsureSetupNonInteractive performs the non-interactive portion of first-run
+// setup: directory creation, resource seeding, image building, and default
+// config writing. Does not run interactive prompts.
+func (m *Manager) EnsureSetupNonInteractive(ctx context.Context) error {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return fmt.Errorf("get home directory: %w", err)
@@ -112,27 +144,6 @@ func (m *Manager) EnsureSetup(ctx context.Context) error {
 			return fmt.Errorf("write config.yaml: %w", err)
 		}
 		fmt.Fprintln(m.output, "Tip: enable shell completions with 'yoloai completion --help'") //nolint:errcheck // best-effort output
-	}
-
-	// Run new-user experience if setup_complete is false
-	cfg, err := loadConfig()
-	if err != nil {
-		return fmt.Errorf("load config: %w", err)
-	}
-	if !cfg.SetupComplete {
-		if !m.isInteractive() {
-			// Non-TTY: auto-configure without prompts (power-user behavior)
-			if err := m.setTmuxConf("default+host"); err != nil {
-				return fmt.Errorf("set tmux_conf: %w", err)
-			}
-			if err := updateConfigFields(map[string]string{"setup_complete": "true"}); err != nil {
-				return fmt.Errorf("set setup_complete: %w", err)
-			}
-		} else {
-			if err := m.runNewUserSetup(); err != nil {
-				return err
-			}
-		}
 	}
 
 	return nil
