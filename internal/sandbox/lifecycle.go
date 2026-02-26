@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	cerrdefs "github.com/containerd/errdefs"
 	"github.com/docker/docker/api/types/container"
@@ -72,6 +73,17 @@ func (m *Manager) Start(ctx context.Context, name string) error {
 		if err := m.client.ContainerStart(ctx, cname, container.StartOptions{}); err != nil {
 			return fmt.Errorf("start container: %w", err)
 		}
+
+		// Verify container stays running (catches immediate crashes)
+		time.Sleep(1 * time.Second)
+		info, inspectErr := m.client.ContainerInspect(ctx, cname)
+		if inspectErr != nil {
+			return fmt.Errorf("inspect container after start: %w", inspectErr)
+		}
+		if !info.State.Running {
+			return fmt.Errorf("container exited immediately (exit code %d) — check docker logs %s", info.State.ExitCode, cname)
+		}
+
 		fmt.Fprintf(m.output, "Sandbox %s started\n", name) //nolint:errcheck // best-effort output
 		return nil
 

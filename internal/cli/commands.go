@@ -163,7 +163,7 @@ func newNewCmd(version string) *cobra.Command {
 
 				// Wait for tmux session to be ready before attaching
 				containerName := sandbox.ContainerName(sandboxName)
-				if err := waitForTmux(containerName, 30*time.Second); err != nil {
+				if err := waitForTmux(ctx, containerName, 30*time.Second); err != nil {
 					return fmt.Errorf("waiting for tmux session: %w", err)
 				}
 
@@ -226,14 +226,32 @@ PowerShell:
 }
 
 // waitForTmux polls until the tmux session is ready in the container.
-func waitForTmux(containerName string, timeout time.Duration) error {
+// Returns early if the container stops running or the context is cancelled.
+func waitForTmux(ctx context.Context, containerName string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		c := exec.Command("docker", "exec", containerName, "gosu", "yoloai", "tmux", "has-session", "-t", "main") //nolint:gosec // G204: containerName is validated sandbox name
+		// Check if context was cancelled (e.g. Ctrl+C)
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+
+		// Check if container is still running
+		inspect := exec.CommandContext(ctx, "docker", "inspect", "--format", "{{.State.Running}}", containerName) //nolint:gosec // G204: containerName is validated sandbox name
+		if out, err := inspect.Output(); err != nil || string(out) == "false\n" {
+			return fmt.Errorf("container %s is not running", containerName)
+		}
+
+		c := exec.CommandContext(ctx, "docker", "exec", containerName, "gosu", "yoloai", "tmux", "has-session", "-t", "main") //nolint:gosec // G204: containerName is validated sandbox name
 		if err := c.Run(); err == nil {
 			return nil
 		}
-		time.Sleep(500 * time.Millisecond)
+
+		// Context-aware sleep
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(500 * time.Millisecond):
+		}
 	}
 	return fmt.Errorf("tmux session not ready after %s", timeout)
 }

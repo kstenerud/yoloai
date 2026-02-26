@@ -363,6 +363,17 @@ func (m *Manager) launchContainer(ctx context.Context, state *sandboxState) erro
 		time.Sleep(1 * time.Second)
 	}
 
+	// Verify container is still running (catches immediate crashes)
+	time.Sleep(1 * time.Second)
+	info, err := m.client.ContainerInspect(ctx, cname)
+	if err != nil {
+		return fmt.Errorf("inspect container after start: %w", err)
+	}
+	if !info.State.Running {
+		exitCode := info.State.ExitCode
+		return fmt.Errorf("container exited immediately (exit code %d) — check docker logs %s", exitCode, cname)
+	}
+
 	return nil
 }
 

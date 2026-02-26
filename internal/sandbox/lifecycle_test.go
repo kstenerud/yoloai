@@ -187,10 +187,11 @@ func TestStart_Stopped(t *testing.T) {
 	startCalled := false
 	mock := &lifecycleMockClient{
 		containerInspectFn: func(_ context.Context, _ string) (container.InspectResponse, error) {
+			running := startCalled // after start, report as running
 			return container.InspectResponse{
 				ContainerJSONBase: &container.ContainerJSONBase{
 					ID:    "abc123def456",
-					State: &container.State{Running: false},
+					State: &container.State{Running: running},
 				},
 			}, nil
 		},

@@ -33,7 +33,7 @@ func newStartCmd() *cobra.Command {
 				}
 
 				containerName := sandbox.ContainerName(name)
-				if err := waitForTmux(containerName, 30*time.Second); err != nil {
+				if err := waitForTmux(ctx, containerName, 30*time.Second); err != nil {
 					return fmt.Errorf("waiting for tmux session: %w", err)
 				}
 
