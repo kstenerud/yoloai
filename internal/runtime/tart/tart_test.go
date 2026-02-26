@@ -15,6 +15,14 @@ func TestVMName(t *testing.T) {
 	assert.Equal(t, "yoloai-test-box", r.vmName("test-box"))
 }
 
+func TestExecArgs(t *testing.T) {
+	args := execArgs("admin", "yoloai-test", "bash", "-c", "echo hello")
+	assert.Equal(t, []string{
+		"exec", "--user", "admin", "--password", "admin",
+		"yoloai-test", "--", "bash", "-c", "echo hello",
+	}, args)
+}
+
 func TestBuildRunArgs(t *testing.T) {
 	r := &Runtime{tartBin: "/usr/local/bin/tart"}
 	args := r.buildRunArgs("yoloai-test", "/home/user/.yoloai/sandboxes/test")

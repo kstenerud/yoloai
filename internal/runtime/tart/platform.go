@@ -16,6 +16,9 @@ var (
 // bootPollInterval controls how often waitForBoot polls the VM.
 var bootPollInterval = 2 * time.Second
 
+// bootTimeout is the maximum time to wait for a VM to become accessible.
+var bootTimeout = 5 * time.Minute
+
 // waitTick returns a channel that fires after bootPollInterval.
 func waitTick() <-chan time.Time {
 	return time.After(bootPollInterval)

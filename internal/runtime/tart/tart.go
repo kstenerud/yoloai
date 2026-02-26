@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/sandbox"
@@ -20,6 +21,9 @@ import (
 const (
 	// vmUser is the default user in Cirrus Labs base macOS images.
 	vmUser = "admin"
+
+	// vmPassword is the default password in Cirrus Labs base macOS images.
+	vmPassword = "admin"
 
 	// pidFileName stores the tart run process ID.
 	pidFileName = "tart.pid"
@@ -224,8 +228,7 @@ func (r *Runtime) Exec(ctx context.Context, name string, cmd []string, user stri
 		execUser = vmUser
 	}
 
-	args := []string{"exec", "--user", execUser, vmName, "--"}
-	args = append(args, cmd...)
+	args := execArgs(execUser, vmName, cmd...)
 
 	c := exec.CommandContext(ctx, r.tartBin, args...) //nolint:gosec // G204: vmName and cmd are from validated sandbox state
 	var stdout, stderr bytes.Buffer
@@ -264,8 +267,7 @@ func (r *Runtime) InteractiveExec(ctx context.Context, name string, cmd []string
 		execUser = vmUser
 	}
 
-	args := []string{"exec", "--user", execUser, vmName, "--"}
-	args = append(args, cmd...)
+	args := execArgs(execUser, vmName, cmd...)
 
 	c := exec.CommandContext(ctx, r.tartBin, args...) //nolint:gosec // G204: vmName and cmd are from validated sandbox state
 	c.Stdin = os.Stdin
@@ -363,6 +365,12 @@ func BuildMountSymlinkCmds(mounts []runtime.MountSpec, dirNames map[string]strin
 	return cmds
 }
 
+// execArgs builds the arguments for tart exec with user and password.
+func execArgs(user, vmName string, cmd ...string) []string {
+	args := []string{"exec", "--user", user, "--password", vmPassword, vmName, "--"}
+	return append(args, cmd...)
+}
+
 // runTart executes a tart command and returns stdout.
 func (r *Runtime) runTart(ctx context.Context, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, r.tartBin, args...) //nolint:gosec // G204: args are constructed internally
@@ -406,9 +414,15 @@ func (r *Runtime) isRunning(ctx context.Context, vmName string) bool {
 	return false
 }
 
-// waitForBoot polls until the VM responds to tart exec or the context is cancelled.
+// waitForBoot polls until the VM responds to tart exec or the timeout expires.
 func (r *Runtime) waitForBoot(ctx context.Context, vmName string) error {
+	deadline := time.Now().Add(bootTimeout)
+
 	for {
+		if time.Now().After(deadline) {
+			return fmt.Errorf("vm did not become accessible within %s", bootTimeout)
+		}
+
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -416,7 +430,8 @@ func (r *Runtime) waitForBoot(ctx context.Context, vmName string) error {
 		}
 
 		// Try a simple command via tart exec
-		cmd := exec.CommandContext(ctx, r.tartBin, "exec", "--user", vmUser, vmName, "--", "true") //nolint:gosec // G204
+		args := execArgs(vmUser, vmName, "true")
+		cmd := exec.CommandContext(ctx, r.tartBin, args...) //nolint:gosec // G204
 		if err := cmd.Run(); err == nil {
 			return nil
 		}
@@ -443,9 +458,10 @@ func (r *Runtime) runSetupScript(ctx context.Context, vmName, sandboxPath string
 	vmSharedDir := filepath.Join(sharedDirVMPath, sharedDirName)
 
 	// Run the setup script in the background inside the VM
-	_, err := r.runTart(ctx, "exec", "--user", vmUser, vmName, "--",
-		"bash", "-c", fmt.Sprintf("nohup %s/setup.sh %q </dev/null >%s/setup.log 2>&1 &",
-			vmSharedDir, vmSharedDir, vmSharedDir))
+	setupCmd := fmt.Sprintf("nohup %s/setup.sh %q </dev/null >%s/setup.log 2>&1 &",
+		vmSharedDir, vmSharedDir, vmSharedDir)
+	args := execArgs(vmUser, vmName, "bash", "-c", setupCmd)
+	_, err := r.runTart(ctx, args...)
 	if err != nil {
 		return fmt.Errorf("exec setup script: %w", err)
 	}

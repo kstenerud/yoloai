@@ -184,7 +184,8 @@ func (r *Runtime) bootForProvisioning(ctx context.Context, vmName string, output
 		fmt.Fprintf(output, "Provisioning step %d/%d...\n", i+1, len(provisionCommands)) //nolint:errcheck // best-effort
 		logger.Debug("provisioning", "step", i+1, "command", cmdStr)
 
-		provCmd := exec.CommandContext(ctx, r.tartBin, "exec", "--user", vmUser, vmName, "--", "bash", "-c", cmdStr) //nolint:gosec // G204
+		args := execArgs(vmUser, vmName, "bash", "-c", cmdStr)
+		provCmd := exec.CommandContext(ctx, r.tartBin, args...) //nolint:gosec // G204
 		provCmd.Stdout = output
 		provCmd.Stderr = output
 
