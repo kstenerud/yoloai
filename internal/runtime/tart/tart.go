@@ -116,8 +116,11 @@ func (r *Runtime) Start(ctx context.Context, name string) error {
 		return fmt.Errorf("open VM log: %w", err)
 	}
 
-	// Start tart run as a background process
-	cmd := exec.CommandContext(ctx, r.tartBin, args...) //nolint:gosec // G204: args are constructed from validated config
+	// Start tart run as a background process.
+	// Use exec.Command (not CommandContext) because tart run is a long-lived
+	// process that must survive after Start returns. CommandContext would kill
+	// it when the parent's context is cancelled.
+	cmd := exec.Command(r.tartBin, args...) //nolint:gosec // G204: args are constructed from validated config
 	cmd.Stderr = logFile
 	cmd.Stdout = logFile
 	// Detach the process from the parent so it survives
