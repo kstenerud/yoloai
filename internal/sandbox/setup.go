@@ -106,13 +106,13 @@ func (m *Manager) runNewUserSetup() error {
 func (m *Manager) promptTmuxSetup(userConfig string, noConfig bool) error {
 	fmt.Fprintln(m.output) //nolint:errcheck // best-effort output
 	if noConfig {
-		fmt.Fprintln(m.output, "yoloai uses tmux in sandboxes. No ~/.tmux.conf found, so we'll") //nolint:errcheck // best-effort output
+		fmt.Fprintln(m.output, "yoloai uses tmux in sandboxes. No ~/.tmux.conf found, so we'll")           //nolint:errcheck // best-effort output
 		fmt.Fprintln(m.output, "include sensible defaults (mouse scroll, colors, vim-friendly settings).") //nolint:errcheck // best-effort output
 	} else {
-		fmt.Fprintln(m.output, "yoloai uses tmux in sandboxes. Your tmux config is minimal, so we'll") //nolint:errcheck // best-effort output
+		fmt.Fprintln(m.output, "yoloai uses tmux in sandboxes. Your tmux config is minimal, so we'll")     //nolint:errcheck // best-effort output
 		fmt.Fprintln(m.output, "include sensible defaults (mouse scroll, colors, vim-friendly settings).") //nolint:errcheck // best-effort output
-		fmt.Fprintln(m.output)          //nolint:errcheck // best-effort output
-		fmt.Fprintln(m.output, "Your config (~/.tmux.conf):") //nolint:errcheck // best-effort output
+		fmt.Fprintln(m.output)                                                                             //nolint:errcheck // best-effort output
+		fmt.Fprintln(m.output, "Your config (~/.tmux.conf):")                                              //nolint:errcheck // best-effort output
 		for _, line := range strings.Split(strings.TrimRight(userConfig, "\n"), "\n") {
 			fmt.Fprintf(m.output, "  %s\n", line) //nolint:errcheck // best-effort output
 		}
@@ -122,12 +122,12 @@ func (m *Manager) promptTmuxSetup(userConfig string, noConfig bool) error {
 
 	if noConfig {
 		fmt.Fprintln(m.output, "  [Y] Use yoloai defaults")                                //nolint:errcheck // best-effort output
-		fmt.Fprintln(m.output, "  [n] Use raw tmux (no config)")                            //nolint:errcheck // best-effort output
-		fmt.Fprintln(m.output, "  [p] Print yoloai defaults and exit (for manual review)")  //nolint:errcheck // best-effort output
+		fmt.Fprintln(m.output, "  [n] Use raw tmux (no config)")                           //nolint:errcheck // best-effort output
+		fmt.Fprintln(m.output, "  [p] Print yoloai defaults and exit (for manual review)") //nolint:errcheck // best-effort output
 	} else {
 		fmt.Fprintln(m.output, "  [Y] Use yoloai defaults + your config (yours overrides on conflict)") //nolint:errcheck // best-effort output
 		fmt.Fprintln(m.output, "  [n] Use only your config as-is")                                      //nolint:errcheck // best-effort output
-		fmt.Fprintln(m.output, "  [p] Print merged config and exit (for manual review)")                 //nolint:errcheck // best-effort output
+		fmt.Fprintln(m.output, "  [p] Print merged config and exit (for manual review)")                //nolint:errcheck // best-effort output
 	}
 
 	fmt.Fprint(m.output, "\nChoice [Y/n/p]: ") //nolint:errcheck // best-effort output
@@ -164,13 +164,13 @@ func (m *Manager) promptTmuxSetup(userConfig string, noConfig bool) error {
 		return m.setSetupComplete()
 
 	case "p":
-		fmt.Fprintln(m.output) //nolint:errcheck // best-effort output
-		fmt.Fprintln(m.output, "--- yoloai defaults ---") //nolint:errcheck // best-effort output
-		fmt.Fprint(m.output, string(docker.EmbeddedTmuxConf()))  //nolint:errcheck // best-effort output
+		fmt.Fprintln(m.output)                                  //nolint:errcheck // best-effort output
+		fmt.Fprintln(m.output, "--- yoloai defaults ---")       //nolint:errcheck // best-effort output
+		fmt.Fprint(m.output, string(docker.EmbeddedTmuxConf())) //nolint:errcheck // best-effort output
 		if !noConfig && userConfig != "" {
-			fmt.Fprintln(m.output)                              //nolint:errcheck // best-effort output
-			fmt.Fprintln(m.output, "--- your config ---")       //nolint:errcheck // best-effort output
-			fmt.Fprint(m.output, userConfig)                    //nolint:errcheck // best-effort output
+			fmt.Fprintln(m.output)                        //nolint:errcheck // best-effort output
+			fmt.Fprintln(m.output, "--- your config ---") //nolint:errcheck // best-effort output
+			fmt.Fprint(m.output, userConfig)              //nolint:errcheck // best-effort output
 		}
 		fmt.Fprintln(m.output) //nolint:errcheck // best-effort output
 		return errSetupPreview

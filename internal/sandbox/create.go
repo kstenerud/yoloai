@@ -534,7 +534,6 @@ func parsePortBindings(ports []string) (nat.PortMap, nat.PortSet, error) {
 	return portMap, portSet, nil
 }
 
-
 // createSecretsDir creates a temp directory with one file per API key.
 // Returns empty string if no keys are needed.
 func createSecretsDir(agentDef *agent.Definition) (string, error) {
@@ -666,7 +665,6 @@ func buildMounts(state *sandboxState, secretsDir string) []mount.Mount {
 	return mounts
 }
 
-
 // hasAnyAPIKey returns true if any of the agent's required API key env vars are set.
 func hasAnyAPIKey(agentDef *agent.Definition) bool {
 	for _, key := range agentDef.APIKeyEnvVars {
@@ -745,7 +743,6 @@ func copySeedFiles(agentDef *agent.Definition, sandboxDir string, hasAPIKey bool
 	return copied, nil
 }
 
-
 // ensureContainerSettings merges required container settings into agent-state/settings.json.
 // For agents using --dangerously-skip-permissions, ensures the bypass prompt is skipped.
 func ensureContainerSettings(agentDef *agent.Definition, sandboxDir string) error {
@@ -798,4 +795,3 @@ func ensureHomeSeedConfig(agentDef *agent.Definition, sandboxDir string) error {
 
 	return writeJSONMap(configPath, config)
 }
-

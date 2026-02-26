@@ -155,7 +155,7 @@ func (m *Manager) EnsureSetupNonInteractive(ctx context.Context) error {
 // isInteractive returns true if m.input is a TTY (terminal).
 func (m *Manager) isInteractive() bool {
 	if f, ok := m.input.(*os.File); ok {
-		return term.IsTerminal(int(f.Fd()))
+		return term.IsTerminal(int(f.Fd())) //nolint:gosec // file descriptor fits in int on all supported platforms
 	}
 	return false
 }

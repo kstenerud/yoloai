@@ -2,6 +2,7 @@ package sandbox
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"log/slog"
 	"os"
@@ -538,7 +539,7 @@ func TestPrepareSandboxState_MissingName(t *testing.T) {
 
 	mgr := NewManager(&mockClient{}, slog.Default(), strings.NewReader(""), io.Discard)
 
-	_, err := mgr.prepareSandboxState(nil, CreateOptions{
+	_, err := mgr.prepareSandboxState(context.TODO(), CreateOptions{
 		Name:       "",
 		WorkdirArg: tmpDir,
 		Agent:      "test",
@@ -553,7 +554,7 @@ func TestPrepareSandboxState_UnknownAgent(t *testing.T) {
 
 	mgr := NewManager(&mockClient{}, slog.Default(), strings.NewReader(""), io.Discard)
 
-	_, err := mgr.prepareSandboxState(nil, CreateOptions{
+	_, err := mgr.prepareSandboxState(context.TODO(), CreateOptions{
 		Name:       "test",
 		WorkdirArg: tmpDir,
 		Agent:      "nonexistent-agent",
@@ -568,7 +569,7 @@ func TestPrepareSandboxState_WorkdirMissing(t *testing.T) {
 
 	mgr := NewManager(&mockClient{}, slog.Default(), strings.NewReader(""), io.Discard)
 
-	_, err := mgr.prepareSandboxState(nil, CreateOptions{
+	_, err := mgr.prepareSandboxState(context.TODO(), CreateOptions{
 		Name:       "test",
 		WorkdirArg: "/nonexistent/path",
 		Agent:      "test",
@@ -587,7 +588,7 @@ func TestPrepareSandboxState_SandboxExists(t *testing.T) {
 
 	mgr := NewManager(&mockClient{}, slog.Default(), strings.NewReader(""), io.Discard)
 
-	_, err := mgr.prepareSandboxState(nil, CreateOptions{
+	_, err := mgr.prepareSandboxState(context.TODO(), CreateOptions{
 		Name:       "existing",
 		WorkdirArg: tmpDir,
 		Agent:      "test",
@@ -602,7 +603,7 @@ func TestPrepareSandboxState_ConflictingPromptFlags(t *testing.T) {
 
 	mgr := NewManager(&mockClient{}, slog.Default(), strings.NewReader(""), io.Discard)
 
-	_, err := mgr.prepareSandboxState(nil, CreateOptions{
+	_, err := mgr.prepareSandboxState(context.TODO(), CreateOptions{
 		Name:       "test",
 		WorkdirArg: tmpDir,
 		Agent:      "test",
@@ -620,7 +621,7 @@ func TestPrepareSandboxState_MissingAPIKey(t *testing.T) {
 
 	mgr := NewManager(&mockClient{}, slog.Default(), strings.NewReader(""), io.Discard)
 
-	_, err := mgr.prepareSandboxState(nil, CreateOptions{
+	_, err := mgr.prepareSandboxState(context.TODO(), CreateOptions{
 		Name:       "test",
 		WorkdirArg: tmpDir,
 		Agent:      "claude",
@@ -636,7 +637,7 @@ func TestPrepareSandboxState_DangerousDir(t *testing.T) {
 
 	mgr := NewManager(&mockClient{}, slog.Default(), strings.NewReader(""), io.Discard)
 
-	_, err := mgr.prepareSandboxState(nil, CreateOptions{
+	_, err := mgr.prepareSandboxState(context.TODO(), CreateOptions{
 		Name:       "test",
 		WorkdirArg: "/",
 		Agent:      "claude",
@@ -654,7 +655,7 @@ func TestPrepareSandboxState_DangerousDirForce(t *testing.T) {
 	var buf bytes.Buffer
 	mgr := NewManager(&mockClient{}, slog.Default(), strings.NewReader("y\n"), &buf)
 
-	_, err := mgr.prepareSandboxState(nil, CreateOptions{
+	_, err := mgr.prepareSandboxState(context.TODO(), CreateOptions{
 		Name:       "test",
 		WorkdirArg: tmpDir + ":rw:force",
 		Agent:      "claude",

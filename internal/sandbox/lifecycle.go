@@ -347,7 +347,7 @@ func (m *Manager) resetInPlace(ctx context.Context, opts ResetOptions, meta *Met
 // rsyncDir syncs contents of src into dst using rsync.
 // Trailing slashes ensure rsync copies contents, not the directory itself.
 func rsyncDir(src, dst string) error {
-	cmd := exec.Command("rsync", "-a", "--delete", src+"/", dst+"/")
+	cmd := exec.Command("rsync", "-a", "--delete", src+"/", dst+"/") //nolint:gosec // src and dst are internal paths, not user-controlled
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("rsync: %s: %w", strings.TrimSpace(string(output)), err)
 	}
