@@ -675,12 +675,18 @@ func hasAnyAPIKey(agentDef *agent.Definition) bool {
 	return false
 }
 
-// hasAnyAuthFile returns true if any auth-only seed files exist on disk.
+// hasAnyAuthFile returns true if any auth-only seed files exist on disk
+// or can be read from the macOS Keychain.
 func hasAnyAuthFile(agentDef *agent.Definition) bool {
 	for _, sf := range agentDef.SeedFiles {
 		if sf.AuthOnly {
 			if _, err := os.Stat(expandTilde(sf.HostPath)); err == nil {
 				return true
+			}
+			if sf.KeychainService != "" {
+				if _, err := keychainReader(sf.KeychainService); err == nil {
+					return true
+				}
 			}
 		}
 	}
@@ -714,7 +720,21 @@ func copySeedFiles(agentDef *agent.Definition, sandboxDir string, hasAPIKey bool
 		}
 
 		hostPath := expandTilde(sf.HostPath)
-		if _, err := os.Stat(hostPath); err != nil {
+
+		var data []byte
+		if _, err := os.Stat(hostPath); err == nil {
+			fileData, readErr := os.ReadFile(hostPath) //nolint:gosec // G304: path is from agent definition, not user input
+			if readErr != nil {
+				return copied, fmt.Errorf("read %s: %w", hostPath, readErr)
+			}
+			data = fileData
+		} else if sf.KeychainService != "" {
+			keychainData, keychainErr := keychainReader(sf.KeychainService)
+			if keychainErr != nil {
+				continue // neither file nor keychain available
+			}
+			data = keychainData
+		} else {
 			continue // skip missing files
 		}
 
@@ -727,11 +747,6 @@ func copySeedFiles(agentDef *agent.Definition, sandboxDir string, hasAPIKey bool
 		// Ensure parent directory exists
 		if err := os.MkdirAll(filepath.Dir(targetPath), 0750); err != nil {
 			return copied, fmt.Errorf("create dir for %s: %w", sf.TargetPath, err)
-		}
-
-		data, err := os.ReadFile(hostPath) //nolint:gosec // G304: path is from agent definition, not user input
-		if err != nil {
-			return copied, fmt.Errorf("read %s: %w", hostPath, err)
 		}
 
 		if err := os.WriteFile(targetPath, data, 0600); err != nil {

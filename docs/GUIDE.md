@@ -195,7 +195,7 @@ Containers are ephemeral — if removed, `yoloai start` recreates them from `met
 - **Originals are protected.** Workdirs use `:copy` mode by default — the agent works on an isolated copy, never your original files. Opt into `:rw` explicitly for live access.
 - **Dangerous directory detection.** Refuses to mount `$HOME`, `/`, or system directories. Append `:force` to override (e.g., `$HOME:force`).
 - **Dirty repo warning.** Prompts if your workdir has uncommitted git changes, so you don't lose work.
-- **Credential injection via files.** API keys are mounted as read-only files at `/run/secrets/`, not passed as environment variables. Temp files on the host are cleaned up after container start.
+- **Credential injection via files.** API keys are mounted as read-only files at `/run/secrets/`, not passed as environment variables. Temp files on the host are cleaned up after container start. On macOS, yoloai also checks the macOS Keychain for Claude Code OAuth credentials (service `Claude Code-credentials`). If you're logged in via `claude` CLI, yoloai will automatically detect your credentials even without `~/.claude/.credentials.json` on disk.
 - **Non-root execution.** Containers run as a non-root user with UID/GID matching your host user.
 
 ## Development

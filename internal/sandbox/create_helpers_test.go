@@ -3,6 +3,7 @@ package sandbox
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
@@ -665,4 +666,107 @@ func TestPrepareSandboxState_DangerousDirForce(t *testing.T) {
 		assert.NotContains(t, err.Error(), "dangerous directory")
 	}
 	assert.Contains(t, buf.String(), "WARNING: mounting dangerous directory")
+}
+
+// Keychain fallback tests
+
+func TestHasAnyAuthFile_KeychainFallback(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	// No credentials file on disk
+	agentDef := agent.GetAgent("claude")
+
+	// Override keychainReader to return credentials
+	origReader := keychainReader
+	keychainReader = func(service string) ([]byte, error) {
+		if service == "Claude Code-credentials" {
+			return []byte(`{"token":"from-keychain"}`), nil
+		}
+		return nil, fmt.Errorf("not found")
+	}
+	defer func() { keychainReader = origReader }()
+
+	assert.True(t, hasAnyAuthFile(agentDef))
+}
+
+func TestHasAnyAuthFile_KeychainFallbackFails(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	agentDef := agent.GetAgent("claude")
+
+	// Override keychainReader to always fail
+	origReader := keychainReader
+	keychainReader = func(_ string) ([]byte, error) {
+		return nil, fmt.Errorf("not found")
+	}
+	defer func() { keychainReader = origReader }()
+
+	assert.False(t, hasAnyAuthFile(agentDef))
+}
+
+func TestCopySeedFiles_KeychainFallback(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	sandboxDir := filepath.Join(tmpDir, "sandbox")
+	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, "agent-state"), 0750))
+	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, "home-seed"), 0750))
+
+	agentDef := agent.GetAgent("claude")
+
+	// Override keychainReader to return credentials
+	origReader := keychainReader
+	keychainReader = func(service string) ([]byte, error) {
+		if service == "Claude Code-credentials" {
+			return []byte(`{"token":"from-keychain"}`), nil
+		}
+		return nil, fmt.Errorf("not found")
+	}
+	defer func() { keychainReader = origReader }()
+
+	copied, err := copySeedFiles(agentDef, sandboxDir, false) // hasAPIKey=false
+	require.NoError(t, err)
+	assert.True(t, copied)
+
+	// Credentials from keychain should be written to agent-state
+	data, err := os.ReadFile(filepath.Join(sandboxDir, "agent-state", ".credentials.json")) //nolint:gosec // test path
+	require.NoError(t, err)
+	assert.Equal(t, `{"token":"from-keychain"}`, string(data))
+}
+
+func TestCopySeedFiles_KeychainSkippedWhenFileExists(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	// Create the credentials file on disk
+	claudeDir := filepath.Join(tmpDir, ".claude")
+	require.NoError(t, os.MkdirAll(claudeDir, 0750))
+	require.NoError(t, os.WriteFile(filepath.Join(claudeDir, ".credentials.json"), []byte(`{"token":"from-file"}`), 0600))
+
+	sandboxDir := filepath.Join(tmpDir, "sandbox")
+	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, "agent-state"), 0750))
+	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, "home-seed"), 0750))
+
+	agentDef := agent.GetAgent("claude")
+
+	// Override keychainReader — should NOT be called since file exists
+	origReader := keychainReader
+	keychainCalled := false
+	keychainReader = func(_ string) ([]byte, error) {
+		keychainCalled = true
+		return []byte(`{"token":"from-keychain"}`), nil
+	}
+	defer func() { keychainReader = origReader }()
+
+	copied, err := copySeedFiles(agentDef, sandboxDir, false)
+	require.NoError(t, err)
+	assert.True(t, copied)
+	assert.False(t, keychainCalled, "keychainReader should not be called when file exists")
+
+	// Should have the file contents, not keychain
+	data, err := os.ReadFile(filepath.Join(sandboxDir, "agent-state", ".credentials.json")) //nolint:gosec // test path
+	require.NoError(t, err)
+	assert.Equal(t, `{"token":"from-file"}`, string(data))
 }

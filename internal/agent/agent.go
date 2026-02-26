@@ -17,10 +17,11 @@ const (
 // HostPath supports ~ for the user's home directory, expanded at runtime.
 // TargetPath is relative to the agent's StateDir.
 type SeedFile struct {
-	HostPath   string // e.g., "~/.claude/settings.json"
-	TargetPath string // relative to StateDir, e.g., "settings.json"
-	AuthOnly   bool   // if true, only required when no API key is set
-	HomeDir    bool   // if true, TargetPath is relative to /home/yoloai/ instead of StateDir
+	HostPath        string // e.g., "~/.claude/settings.json"
+	TargetPath      string // relative to StateDir, e.g., "settings.json"
+	AuthOnly        bool   // if true, only required when no API key is set
+	HomeDir         bool   // if true, TargetPath is relative to /home/yoloai/ instead of StateDir
+	KeychainService string // macOS Keychain service name; used as fallback when HostPath is missing
 }
 
 // Definition describes an agent's install, launch, and behavioral characteristics.
@@ -47,7 +48,7 @@ var agents = map[string]*Definition{
 		PromptMode:     PromptModeInteractive,
 		APIKeyEnvVars:  []string{"ANTHROPIC_API_KEY"},
 		SeedFiles: []SeedFile{
-			{HostPath: "~/.claude/.credentials.json", TargetPath: ".credentials.json", AuthOnly: true},
+			{HostPath: "~/.claude/.credentials.json", TargetPath: ".credentials.json", AuthOnly: true, KeychainService: "Claude Code-credentials"},
 			{HostPath: "~/.claude/settings.json", TargetPath: "settings.json"},
 			{HostPath: "~/.claude.json", TargetPath: ".claude.json", HomeDir: true},
 		},

@@ -21,6 +21,7 @@ func TestGetAgent_Claude(t *testing.T) {
 	assert.Equal(t, "~/.claude/.credentials.json", def.SeedFiles[0].HostPath)
 	assert.Equal(t, ".credentials.json", def.SeedFiles[0].TargetPath)
 	assert.True(t, def.SeedFiles[0].AuthOnly)
+	assert.Equal(t, "Claude Code-credentials", def.SeedFiles[0].KeychainService)
 	assert.Equal(t, "~/.claude/settings.json", def.SeedFiles[1].HostPath)
 	assert.Equal(t, "settings.json", def.SeedFiles[1].TargetPath)
 	assert.False(t, def.SeedFiles[1].AuthOnly)
