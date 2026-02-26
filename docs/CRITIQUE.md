@@ -116,6 +116,28 @@ The user-cancelled path already returns `("", nil)` cleanly. The preview path sh
 | 7 | Viper may not be needed | Low | Before config expansion |
 | 8 | `ErrSetupPreview` flow control via error | Low | Anytime |
 
+## Test Coverage Gaps (February 2026)
+
+Test count: 239 passing in `internal/sandbox/`, 6 in `internal/cli/`, covering ~80% of sandbox functions. Remaining gaps:
+
+### Needs Docker (integration tests, not unit-testable)
+
+- `launchContainer()` — container create/start, secrets cleanup, crash detection
+- `recreateContainer()` — rebuild from meta.json
+- `resetInPlace()` rsync path — sends tmux commands, resyncs while running
+- `sendResetNotification()`, `relaunchAgent()` — tmux exec inside container
+- `execInContainer()` — Docker exec create/attach/inspect flow
+- `DetectStatus()` — queries Docker + tmux pane state
+- `docker.BuildBaseImage()`, `docker.NeedsBuild()`
+
+### CLI command layer (thin wrappers, low risk)
+
+The entire `internal/cli/` package beyond `resolveName` and `RunPager` — all commands (`new`, `attach`, `diff`, `apply`, `destroy`, `reset`, `start`, `stop`, `list`, `show`, `log`, `exec`). These are Cobra `RunE` functions that parse flags, call Manager methods, and format output. The sandbox package tests cover the underlying logic; CLI tests would mostly verify flag parsing and output formatting.
+
+### Confirm helper
+
+`Confirm()` in `confirm.go` — reads y/N from stdin. Trivial function, tested indirectly through lifecycle tests that use Manager with mocked stdin.
+
 ## Verdict
 
 The architecture is in good shape for what it does today. No critical issues. The main structural concern is that the `sandbox` package concentration will become a bottleneck as overlay, profiles, and network isolation land. Splitting it along the workspace/setup seams before those features arrive is the highest-value structural change. The other findings are minor and can be addressed opportunistically.
