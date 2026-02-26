@@ -491,8 +491,9 @@ func (r *Runtime) runSetupScript(ctx context.Context, vmName, sandboxPath string
 	// The shared dir appears at /Volumes/My Shared Files/yoloai inside the VM
 	vmSharedDir := filepath.Join(sharedDirVMPath, sharedDirName)
 
-	// Run the setup script in the background inside the VM
-	setupCmd := fmt.Sprintf("nohup %s/setup.sh %q </dev/null >%s/setup.log 2>&1 &",
+	// Run the setup script in the background inside the VM.
+	// Paths must be quoted — VirtioFS mount path contains spaces.
+	setupCmd := fmt.Sprintf("nohup '%s/setup.sh' '%s' </dev/null >'%s/setup.log' 2>&1 &",
 		vmSharedDir, vmSharedDir, vmSharedDir)
 	args := execArgs(vmName, "bash", "-c", setupCmd)
 	_, err := r.runTart(ctx, args...)
