@@ -11,8 +11,9 @@ import (
 // YoloaiConfig holds the subset of config.yaml fields that the Go code reads.
 type YoloaiConfig struct {
 	SetupComplete bool   `yaml:"setup_complete"`
-	TmuxConf      string `yaml:"tmux_conf"` // from defaults.tmux_conf
-	Backend       string `yaml:"backend"`   // from defaults.backend
+	TmuxConf      string `yaml:"tmux_conf"`   // from defaults.tmux_conf
+	Backend       string `yaml:"backend"`      // from defaults.backend
+	TartImage     string `yaml:"tart_image"`   // from defaults.tart_image — custom base VM image for tart backend
 }
 
 // LoadConfig reads ~/.yoloai/config.yaml and extracts known fields.
@@ -62,6 +63,8 @@ func LoadConfig() (*YoloaiConfig, error) {
 						cfg.TmuxConf = val.Content[j+1].Value
 					case "backend":
 						cfg.Backend = val.Content[j+1].Value
+					case "tart_image":
+						cfg.TartImage = val.Content[j+1].Value
 					}
 				}
 			}

@@ -7,6 +7,7 @@ import (
 
 	"github.com/kstenerud/yoloai/internal/runtime"
 	dockerrt "github.com/kstenerud/yoloai/internal/runtime/docker"
+	tartrt "github.com/kstenerud/yoloai/internal/runtime/tart"
 	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/spf13/cobra"
 )
@@ -19,7 +20,7 @@ func newRuntime(ctx context.Context, backend string) (runtime.Runtime, error) {
 	case "docker", "":
 		return dockerrt.New(ctx)
 	case "tart":
-		return nil, fmt.Errorf("tart backend is not yet implemented")
+		return tartrt.New(ctx)
 	default:
 		return nil, fmt.Errorf("unknown backend: %q (valid: docker, tart)", backend)
 	}

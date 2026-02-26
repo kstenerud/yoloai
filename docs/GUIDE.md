@@ -170,7 +170,8 @@ On first run, yoloAI creates `~/.yoloai/config.yaml` with sensible defaults:
 ```yaml
 defaults:
   agent: claude
-  backend: docker    # Runtime backend: "docker" (default), "tart" (planned)
+  backend: docker    # Runtime backend: "docker" (default) or "tart" (macOS VMs)
+  # tart_image: ghcr.io/cirruslabs/macos-sequoia-base:latest  # Custom base VM for tart backend
 
   mounts:
     - ~/.gitconfig:/home/yoloai/.gitconfig:ro

@@ -10,6 +10,7 @@ internal/agent/      → Agent plugin definitions (Claude, test)
 internal/cli/        → Cobra command tree and CLI plumbing
 internal/runtime/    → Pluggable runtime interface (backend-agnostic types and errors)
 internal/runtime/docker/ → Docker implementation of runtime.Runtime
+internal/runtime/tart/   → Tart (macOS VM) implementation of runtime.Runtime
 internal/sandbox/    → Core logic: create, lifecycle, diff, apply, inspect, config
 ```
 
@@ -73,6 +74,17 @@ Dependency direction: `cmd/yoloai` → `cli` → `sandbox` + `runtime`; `sandbox
 | `build_test.go` | Unit tests for build/seed logic. |
 | `docker_integration_test.go` | Integration tests requiring Docker daemon. Build tag: `integration`. |
 
+### `internal/runtime/tart/`
+
+| File | Purpose |
+|------|---------|
+| `tart.go` | `Runtime` struct — implements `Runtime` interface, shells out to `tart` CLI. VM lifecycle via `tart clone/run/stop/delete`, exec via `tart exec`. PID file + `tart list` for process management. |
+| `build.go` | `EnsureImage()` — pulls Cirrus Labs macOS base image, provisions dev tools via `tart exec` (Homebrew, Node.js, Xcode CLI tools, tmux, git, jq, ripgrep). Supports `defaults.tart_image` config override. |
+| `resources.go` | `//go:embed` for setup.sh. |
+| `platform.go` | Platform detection helpers (macOS, Apple Silicon). Testable via variable overrides. |
+| `resources/setup.sh` | Post-boot setup script (embedded at compile time). Creates mount symlinks, injects secrets, launches tmux + agent. |
+| `tart_test.go` | Unit tests for arg building, error mapping, network flags, mount symlinks. |
+
 ### `internal/sandbox/`
 
 | File | Purpose |
@@ -119,6 +131,9 @@ Configuration for `Runtime.Create()`. Describes image, command, working director
 ### `runtime.DockerRuntime`
 Docker implementation of `Runtime` interface. Wraps Docker SDK client. Defined in `internal/runtime/docker/`.
 
+### `runtime.TartRuntime`
+Tart (macOS VM) implementation of `Runtime` interface. Shells out to `tart` CLI for all operations. PID-based process management with `tart list` cross-check. VirtioFS mounts with symlink path mapping. Defined in `internal/runtime/tart/`.
+
 ## Command → Code Map
 
 | CLI Command | Entry Point | Core Logic |
@@ -135,7 +150,7 @@ Docker implementation of `Runtime` interface. Wraps Docker SDK client. Defined i
 | `yoloai show` | `cli/show.go:newShowCmd` | `sandbox.InspectSandbox()` in `sandbox/inspect.go` |
 | `yoloai log` | `cli/log.go:newLogCmd` | Reads `log.txt` from sandbox dir |
 | `yoloai exec` | `cli/exec.go:newExecCmd` | `runtime.InteractiveExec` into running container |
-| `yoloai build` | `cli/commands.go:newBuildCmd` | `runtime.EnsureImage()` via `DockerRuntime` in `runtime/docker/build.go` |
+| `yoloai build` | `cli/commands.go:newBuildCmd` | `runtime.EnsureImage()` via active backend (`runtime/docker/build.go` or `runtime/tart/build.go`) |
 | `yoloai setup` | `cli/setup.go:newSetupCmd` | `sandbox.Manager.RunSetup()` in `sandbox/setup.go` |
 | `yoloai completion` | `cli/commands.go:newCompletionCmd` | Cobra's built-in completion generators |
 | `yoloai version` | `cli/commands.go:newVersionCmd` | Prints build-time version info |

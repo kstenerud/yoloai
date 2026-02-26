@@ -33,6 +33,10 @@ var _ runtime.Runtime = (*Runtime)(nil)
 
 // New creates a Runtime and verifies the Docker daemon is reachable.
 func New(ctx context.Context) (*Runtime, error) {
+	if _, err := exec.LookPath("docker"); err != nil {
+		return nil, fmt.Errorf("docker is not installed, install it from https://docs.docker.com/get-docker/")
+	}
+
 	cli, err := dockerclient.NewClientWithOpts(
 		dockerclient.FromEnv,
 		dockerclient.WithAPIVersionNegotiation(),
@@ -44,7 +48,7 @@ func New(ctx context.Context) (*Runtime, error) {
 	_, err = cli.Ping(ctx)
 	if err != nil {
 		_ = cli.Close()
-		return nil, fmt.Errorf("connect to Docker: %w (is Docker running?)", err)
+		return nil, fmt.Errorf("docker daemon is not responding, start Docker Desktop or run 'sudo systemctl start docker'")
 	}
 
 	return &Runtime{client: cli}, nil
