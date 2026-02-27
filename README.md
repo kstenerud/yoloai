@@ -2,7 +2,7 @@
 
 **Fearless YOLO for your agent.**
 
-Let AI coding agents go **wild** (inside a disposable Docker container). Your files are never touched. When the agent's done, review what changed with `yoloai diff` and cherry-pick what you want with `yoloai apply`. No permission prompts, no anxiety, no messy cleanup.
+Let AI coding agents go **wild** (inside a disposable container or VM). Your files are never touched. When the agent's done, review what changed with `yoloai diff` and cherry-pick what you want with `yoloai apply`. No permission prompts, no anxiety, no messy cleanup.
 
 ![terminal](terminal.svg)
 
@@ -53,9 +53,21 @@ make build
 sudo mv yoloai /usr/local/bin/  # or add to PATH
 ```
 
-On first run, yoloAI builds its base Docker image (~2 min) and creates `~/.yoloai/`.
+On first run, yoloAI builds its base image (~2 min, depending on backend type) and creates `~/.yoloai/`.
 
-**Requirements:** Docker, Go 1.24+ (build only)
+**Requirements:**
+
+For building: Go 1.24+
+
+For running:
+
+| Backend  | Supported Hosts                  | Dependencies                                                       |
+|----------|----------------------------------|--------------------------------------------------------------------|
+| docker   | Linux, macOS, Windows (WSL2)     | [Docker Engine](https://docs.docker.com/engine/install/) or [Docker Desktop](https://docs.docker.com/get-docker/) |
+| tart     | macOS (Apple Silicon only)       | [Tart](https://github.com/cirruslabs/tart) (`brew install cirruslabs/cli/tart`) |
+| seatbelt | macOS (any architecture)         | None (uses built-in `sandbox-exec`)                                |
+
+Use `yoloai info backends` to check which backends are available on your system.
 
 ## Learn more
 
