@@ -24,8 +24,8 @@ All design/planning documents live in `docs/`:
 
 ## Architecture (from DESIGN.md)
 
-- Go binary, no runtime deps — just the binary and Docker (or Tart for macOS VMs).
-- Pluggable runtime backend via `runtime.Runtime` interface in `internal/runtime/`. Two backends: Docker (`internal/runtime/docker/`) and Tart (`internal/runtime/tart/`). CLI dispatches via `newRuntime()` in `internal/cli/helpers.go`. No backend-specific types leak outside their packages.
+- Go binary, no runtime deps — just the binary and Docker (or Tart for macOS VMs, or Seatbelt for lightweight macOS sandboxing).
+- Pluggable runtime backend via `runtime.Runtime` interface in `internal/runtime/`. Three backends: Docker (`internal/runtime/docker/`), Tart (`internal/runtime/tart/`), and Seatbelt (`internal/runtime/seatbelt/`). CLI dispatches via `newRuntime()` in `internal/cli/helpers.go`. No backend-specific types leak outside their packages.
 - Docker containers or Tart VMs with persistent state in `~/.yoloai/sandboxes/<name>/`.
 - Containers are ephemeral; state (work dirs, agent-state, logs, meta.json) lives on host. Credentials injected via file-based bind mount (not env vars).
 - Agent abstraction: per-agent definitions specify install, launch command, API key env vars, state directory, network allowlist, and prompt delivery mode. v1 ships Claude and Codex.
