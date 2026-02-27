@@ -28,6 +28,10 @@ func GenerateProfile(cfg runtime.InstanceConfig, sandboxDir, homeDir string) str
 	b.WriteString("(allow sysctl-read)\n")
 	b.WriteString("(allow file-read-metadata)\n\n")
 
+	// --- Root directory entry (needed by bash/dyld to resolve paths) ---
+	b.WriteString("; Root directory listing\n")
+	b.WriteString("(allow file-read* (literal \"/\"))\n\n")
+
 	// --- System libraries and binaries ---
 	b.WriteString("; System libraries, frameworks, and binaries\n")
 	for _, path := range systemReadPaths() {
@@ -81,6 +85,7 @@ func GenerateProfile(cfg runtime.InstanceConfig, sandboxDir, homeDir string) str
 
 	// --- Pseudo-terminals ---
 	b.WriteString("; Pseudo-terminal access (required for tmux/agent)\n")
+	b.WriteString("(allow file-ioctl)\n") // terminal control (tcsetattr, TIOCGWINSZ, etc.)
 	b.WriteString("(allow file-read* file-write* (regex #\"/dev/pty.*\"))\n")
 	b.WriteString("(allow file-read* file-write* (regex #\"/dev/tty.*\"))\n")
 	b.WriteString("(allow file-read* file-write* (literal \"/dev/ptmx\"))\n")
