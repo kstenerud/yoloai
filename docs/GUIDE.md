@@ -36,6 +36,9 @@ Full reference for commands, flags, configuration, and internals. For a quick ov
 | Command | Description |
 |---------|-------------|
 | `yoloai build` | Build or rebuild the base Docker image |
+| `yoloai config get [key]` | Print configuration values (all settings or a specific key) |
+| `yoloai config set <key> <value>` | Set a configuration value |
+| `yoloai setup` | Re-run interactive first-run setup |
 | `yoloai completion <shell>` | Generate shell completion (bash/zsh/fish/powershell) |
 | `yoloai version` | Show version information |
 
@@ -166,27 +169,31 @@ yoloai diff task -- src/handler.go
 
 ## Configuration
 
-On first run, yoloAI creates `~/.yoloai/config.yaml` with sensible defaults:
+On first run, yoloAI creates `~/.yoloai/config.yaml`. Use `yoloai config` to view and change settings:
 
-```yaml
-defaults:
-  agent: claude
-  backend: docker    # Runtime backend: "docker" (default) or "tart" (macOS VMs)
-  # tart_image: ghcr.io/cirruslabs/macos-sequoia-base:latest  # Custom base VM for tart backend
+```bash
+# Show all settings with effective values (defaults + overrides)
+yoloai config get
 
-  mounts:
-    - ~/.gitconfig:/home/yoloai/.gitconfig:ro
+# Get a specific setting
+yoloai config get defaults.backend
 
-  ports: []
-
-  resources:
-    cpus: 4
-    memory: 8g
+# Change a setting
+yoloai config set defaults.backend tart
 ```
 
-You can edit this file to change the default agent, runtime backend, add persistent bind mounts (like SSH config or tool configs), adjust resource limits, or set default port mappings. These defaults apply to all new sandboxes.
+### Settings
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `setup_complete` | `false` | Set to `true` after first-run setup completes |
+| `defaults.backend` | `docker` | Runtime backend: `docker`, `tart`, `seatbelt` |
+| `defaults.tart_image` | (empty) | Custom base VM image for tart backend |
+| `defaults.tmux_conf` | (set by setup) | Tmux config mode: `default+host`, `default`, `host`, `none` |
 
 Backend resolution: `new`/`build`/`setup` use `--backend` flag > `defaults.backend` in config > `"docker"`. Lifecycle commands read the backend from the sandbox's `meta.json`, falling back to config default.
+
+You can also edit `~/.yoloai/config.yaml` directly — `config set` preserves comments and formatting.
 
 ## Sandbox State
 

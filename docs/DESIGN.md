@@ -171,49 +171,47 @@ setup_complete: false
 
 # Always applied to every sandbox
 defaults:
-  agent: claude                          # which agent to launch (claude, codex); CLI --agent overrides
-  # profile: my-project                  # default profile to use; CLI --profile overrides; --no-profile uses base image
-  # [POST-MVP] Files/dirs copied into agent-state/ on first sandbox run.
-  # These seed the agent's environment. Sandbox gets its own copy (not bind-mounted).
-  # Options:
-  #   agent_files: home               # copy from agent's default state dir (~/.claude/ for Claude, ~/.codex/ for Codex)
-  #   agent_files:                    # explicit file list (deterministic, for team setups)
-  #     - ~/.claude/CLAUDE.md         #   ~ expands to $HOME
-  #     - /path/to/shared/settings    #   absolute paths for deterministic setups
-  #   (omit agent_files entirely)     # nothing copied — safe default
-  # Profile agent_files replaces defaults (no merge).
-  # agent_files: home
+  backend: docker                       # Runtime backend: docker, tart, seatbelt
+  # tart_image:                         # Custom base VM image (tart backend only)
+  tmux_conf: default+host               # default+host | default | host | none (see Tmux Configuration)
 
-  mounts:
-    - ~/.gitconfig:/home/yoloai/.gitconfig:ro
-
-  tmux_conf: default+host                 # default+host | default | host | none (see Tmux Configuration)
-  copy_strategy: auto                   # [POST-MVP] auto | overlay | full (MVP uses full copy only)
-                                        # auto: use overlayfs where available, fall back to full copy
-                                        # overlay: overlayfs lower layer (instant, deltas-only, needs CAP_SYS_ADMIN)
-                                        # full: traditional full copy (portable, all reads VM-local)
-  auto_commit_interval: 0               # [POST-MVP] seconds between auto-commits in :copy dirs; 0 = disabled
-  ports: []                             # default port mappings; profile ports are additive
-  env: {}                               # environment variables passed to container; profile env merges with defaults
-  network_isolated: false               # [POST-MVP] true to enable network isolation by default
-  network_allow: []                     # [POST-MVP] additional domains to allow (additive with agent defaults)
-  resources:
-    cpus: 4                           # docker --cpus
-    memory: 8g                        # docker --memory
-    # disk: 10g                        # docker --storage-opt size= (Linux with XFS + pquota only; not supported on macOS Docker Desktop)
-                                        # Rationale: cpus/memory sized for Claude Code + build tooling running concurrently.
-                                        # Claude CLI itself uses ~2GB RSS; the rest covers builds, tests, language servers.
+  # --- POST-MVP fields (not yet implemented) ---
+  # agent: claude                        # [POST-MVP] which agent to launch (claude, codex); CLI --agent overrides
+  # profile: my-project                  # [POST-MVP] default profile to use; CLI --profile overrides
+  # agent_files: home                    # [POST-MVP] files seeded into agent-state/ on first run
+  # mounts:                              # [POST-MVP] bind mounts added at container run time
+  #   - ~/.gitconfig:/home/yoloai/.gitconfig:ro
+  # copy_strategy: auto                  # [POST-MVP] auto | overlay | full (MVP uses full copy only)
+  # auto_commit_interval: 0              # [POST-MVP] seconds between auto-commits in :copy dirs; 0 = disabled
+  # ports: []                            # [POST-MVP] default port mappings; profile ports are additive
+  # env: {}                              # [POST-MVP] environment variables passed to container
+  # network_isolated: false              # [POST-MVP] true to enable network isolation by default
+  # network_allow: []                    # [POST-MVP] additional domains to allow (additive with agent defaults)
+  # resources:                           # [POST-MVP] container resource limits
+  #   cpus: 4                            # docker --cpus
+  #   memory: 8g                         # docker --memory
 ```
+
+Settings are managed via `yoloai config get/set` or by editing `~/.yoloai/config.yaml` directly.
 
 `config.yaml` contains only `defaults` — settings applied to every sandbox. Profile-specific configuration lives in separate `profile.yaml` files (see Profiles section).
 
-- `defaults.agent` selects the agent to launch. Valid values: `claude`, `test`, `codex`. Determines the launch command, API key env vars, state directory, network allowlist, and prompt delivery mode. CLI `--agent` overrides config.
-- **[POST-MVP]** `defaults.agent_files` controls what files are copied into the sandbox's `agent-state/` directory on first run. Set to `home` to copy from the agent's default state directory (`~/.claude/` for Claude, `~/.codex/` for Codex). Set to a list of paths (`~/` or absolute) for deterministic setups. Relative paths without `~/` are an error. Omit entirely to copy nothing (safe default). Profile `agent_files` **replaces** (not merges with) defaults.
-- `defaults.mounts` are bind mounts added at container run time. Profile mounts are **additive** (merged with defaults, no deduplication — duplicates are a user error).
-- `defaults.resources` sets baseline limits. Profiles can override individual values.
-- `defaults.env` sets environment variables passed to the container via `docker run -e`. Profile `env` is merged with defaults (profile values win on conflict). Note: API keys (e.g., `ANTHROPIC_API_KEY`, `CODEX_API_KEY`) are injected via file-based bind mount, not `env` — see Credential Management.
-- **[POST-MVP]** `defaults.network_isolated` enables network isolation for all sandboxes. Profile can override. CLI `--network-isolated` flag overrides config.
-- **[POST-MVP]** `defaults.network_allow` lists additional allowed domains. Non-empty `network_allow` implies `network_isolated: true`. Profile `network_allow` is additive with defaults. CLI `--network-allow` is additive with config.
+**Implemented settings:**
+
+- `defaults.backend` selects the runtime backend. Valid values: `docker`, `tart`, `seatbelt`. CLI `--backend` overrides config.
+- `defaults.tart_image` overrides the base VM image for the tart backend.
+- `defaults.tmux_conf` controls how user tmux config interacts with the container. Set by the interactive first-run setup. Values: `default+host`, `default`, `host`, `none` (see Tmux Configuration).
+
+**Post-MVP settings (not yet parsed from config):**
+
+- `defaults.agent` will select the agent to launch. Currently the `--agent` flag defaults to `claude` in the CLI.
+- `defaults.agent_files` will control what files are copied into the sandbox's `agent-state/` directory on first run. Set to `home` to copy from the agent's default state directory (`~/.claude/` for Claude, `~/.codex/` for Codex). Set to a list of paths (`~/` or absolute) for deterministic setups. Relative paths without `~/` are an error. Omit entirely to copy nothing (safe default). Profile `agent_files` **replaces** (not merges with) defaults.
+- `defaults.mounts` will be bind mounts added at container run time. Profile mounts are **additive** (merged with defaults, no deduplication — duplicates are a user error).
+- `defaults.ports` will be default port mappings. Profile ports are additive.
+- `defaults.resources` will set baseline limits. Profiles can override individual values.
+- `defaults.env` will set environment variables passed to the container via `docker run -e`. Profile `env` is merged with defaults (profile values win on conflict). Note: API keys (e.g., `ANTHROPIC_API_KEY`, `CODEX_API_KEY`) are injected via file-based bind mount, not `env` — see Credential Management.
+- `defaults.network_isolated` will enable network isolation for all sandboxes. Profile can override. CLI `--network-isolated` flag overrides config.
+- `defaults.network_allow` will list additional allowed domains. Non-empty `network_allow` implies `network_isolated: true`. Profile `network_allow` is additive with defaults. CLI `--network-allow` is additive with config.
 
 #### [POST-MVP] Recipes (advanced)
 
@@ -332,6 +330,8 @@ yoloai restart <name>                          Restart the agent in an existing 
 yoloai reset <name>                            Re-copy workdir and reset git baseline
 yoloai destroy <name>...                       Stop and remove sandboxes
 yoloai build [profile|--all]                   Build/rebuild Docker image(s)  (profile/--all [POST-MVP])
+yoloai config get [key]                        Print configuration values (all or specific key)
+yoloai config set <key> <value>                Set a configuration value
 yoloai profile create <name> [--template <tpl>]  Create a profile with scaffold  [POST-MVP]
 yoloai profile list                            List profiles  [POST-MVP]
 yoloai profile delete <name>                   Delete a profile  [POST-MVP]
@@ -1183,13 +1183,13 @@ Implemented by passing `-f /yoloai/tmux.conf` to `tmux new-session` when applica
 1. ~~**Headless mode?**~~ Agent definition specifies prompt delivery mode. Claude always uses interactive mode via tmux (`--prompt` fed via `tmux send-keys`). Codex uses headless mode (`codex exec`) when `--prompt` is provided, interactive mode otherwise. Tmux used in all cases for logging and attach.
 2. ~~**Multiple mounts?**~~ Yes. Workdir is primary (cwd), aux dirs are dependencies. Error on container path collision.
 3. ~~**Dotfiles/tools?**~~ Config file with defaults + profiles. Profiles use user-supplied Dockerfiles for full flexibility.
-4. ~~**Resource limits?**~~ Configurable in `config.yaml` with sensible defaults.
+4. ~~**Resource limits?**~~ [POST-MVP] Will be configurable in `config.yaml` under `defaults.resources`.
 5. ~~**Auto-destroy?**~~ No. Sandboxes persist until explicitly destroyed.
 6. ~~**Git integration?**~~ Yes. Copy mode auto-inits git for clean diffs. `yoloai apply` excludes `.git/`.
 7. ~~**Default mode?**~~ All dirs read-only by default. Per-directory `:rw` (live) or `:copy` (staged) suffixes. Workdir defaults to `:copy` if no suffix given; `:rw` must be explicit.
 8. ~~**Container work directory?**~~ Directories are mounted at their original host paths (mirrored) by default, so configs, error messages, and symlinks work without translation. Custom paths available via `=<path>` override. `/yoloai/` reserved for internals. The `/work` prefix was considered but rejected — path consistency (matching host paths) outweighs the minor safety benefit, and dangerous directory detection already prevents mounting over system paths.
 9. ~~**Copy strategy?**~~ OverlayFS by default (`copy_strategy: auto`). The original directory is bind-mounted read-only as the overlayfs lower layer; writes go to an upper directory in sandbox state. Git provides diff/apply on the merged view. Falls back to full copy if overlayfs isn't available. Works cross-platform — Docker on macOS/Windows runs a Linux VM, so overlayfs works inside the container regardless of host OS. VirtioFS overhead for macOS host reads is acceptable (70-90% native after page cache warms). Config option `copy_strategy: full` available for users who prefer the traditional full-copy approach or want to avoid `CAP_SYS_ADMIN`.
-10. ~~**Config template generation?**~~ Deferred to v2. `yoloai config generate --agent codex` would generate a starter config tailored to a specific agent with recommended settings.
+10. ~~**Config template generation?**~~ Addressed by `yoloai config get/set`. `config get` shows all known settings with effective values (defaults + overrides). Agent-specific config generation deferred to v2.
 
 ## Design Considerations
 
