@@ -37,7 +37,11 @@ Use --patches to export .patch files without applying them.`,
 			squash, _ := cmd.Flags().GetBool("squash")
 			patchesDir, _ := cmd.Flags().GetString("patches")
 			if patchesDir != "" {
-				patchesDir = sandbox.ExpandTilde(patchesDir)
+				var expandErr error
+				patchesDir, expandErr = sandbox.ExpandPath(patchesDir)
+				if expandErr != nil {
+					return fmt.Errorf("expand patches path: %w", expandErr)
+				}
 			}
 			noWIP, _ := cmd.Flags().GetBool("no-wip")
 			force, _ := cmd.Flags().GetBool("force")

@@ -9,6 +9,69 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// ExpandPath tests
+
+func TestExpandPath_KnownVar(t *testing.T) {
+	home, err := os.UserHomeDir()
+	require.NoError(t, err)
+
+	result, err := ExpandPath("${HOME}/projects")
+	require.NoError(t, err)
+	assert.Equal(t, home+"/projects", result)
+}
+
+func TestExpandPath_ChainedVars(t *testing.T) {
+	t.Setenv("VAR1", "/first")
+	t.Setenv("VAR2", "second")
+
+	result, err := ExpandPath("${VAR1}/${VAR2}")
+	require.NoError(t, err)
+	assert.Equal(t, "/first/second", result)
+}
+
+func TestExpandPath_BareVarLiteral(t *testing.T) {
+	t.Setenv("VAR", "expanded")
+
+	result, err := ExpandPath("$VAR/path")
+	require.NoError(t, err)
+	assert.Equal(t, "$VAR/path", result, "bare $VAR must not be expanded")
+}
+
+func TestExpandPath_UnsetVar(t *testing.T) {
+	_, err := ExpandPath("${YOLOAI_TEST_UNSET_VAR_XYZ}/path")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "YOLOAI_TEST_UNSET_VAR_XYZ")
+	assert.Contains(t, err.Error(), "not set")
+}
+
+func TestExpandPath_UnclosedBrace(t *testing.T) {
+	_, err := ExpandPath("${UNCLOSED")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "unclosed")
+}
+
+func TestExpandPath_TildeAndVar(t *testing.T) {
+	t.Setenv("MYDIR", "projects")
+	home, err := os.UserHomeDir()
+	require.NoError(t, err)
+
+	result, err := ExpandPath("~/${MYDIR}/foo")
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(home, "projects/foo"), result)
+}
+
+func TestExpandPath_NoVars(t *testing.T) {
+	result, err := ExpandPath("/plain/path")
+	require.NoError(t, err)
+	assert.Equal(t, "/plain/path", result)
+}
+
+func TestExpandPath_Empty(t *testing.T) {
+	result, err := ExpandPath("")
+	require.NoError(t, err)
+	assert.Equal(t, "", result)
+}
+
 // ExpandTilde tests
 
 func TestExpandTilde_Home(t *testing.T) {

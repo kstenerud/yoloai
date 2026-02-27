@@ -491,7 +491,10 @@ func readPrompt(prompt, promptFile string) (string, error) {
 	}
 
 	if promptFile != "" {
-		promptFile = ExpandTilde(promptFile)
+		promptFile, err := ExpandPath(promptFile)
+		if err != nil {
+			return "", fmt.Errorf("expand prompt file path: %w", err)
+		}
 		data, err := os.ReadFile(promptFile) //nolint:gosec // G304: path is from user-provided --prompt-file flag
 		if err != nil {
 			return "", fmt.Errorf("read prompt file: %w", err)

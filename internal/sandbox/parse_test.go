@@ -82,6 +82,22 @@ func TestParseDirArg_TildeExpansion(t *testing.T) {
 	assert.Equal(t, "copy", result.Mode)
 }
 
+func TestParseDirArg_EnvVarExpansion(t *testing.T) {
+	home, err := os.UserHomeDir()
+	require.NoError(t, err)
+
+	result, err := ParseDirArg("${HOME}/somedir:copy")
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(home, "somedir"), result.Path)
+	assert.Equal(t, "copy", result.Mode)
+}
+
+func TestParseDirArg_EnvVarUnset(t *testing.T) {
+	_, err := ParseDirArg("${YOLOAI_TEST_NONEXISTENT}/dir:copy")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "expand path")
+}
+
 func TestParseDirArg_PathWithColons(t *testing.T) {
 	// Unknown suffixes stay as part of the path.
 	result, err := ParseDirArg("/path/to/file:with:colons")
