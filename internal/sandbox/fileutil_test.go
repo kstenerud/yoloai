@@ -72,6 +72,36 @@ func TestExpandPath_Empty(t *testing.T) {
 	assert.Equal(t, "", result)
 }
 
+func TestExpandPath_EmptyVarName(t *testing.T) {
+	_, err := ExpandPath("${}/path")
+	assert.Error(t, err, "empty var name should error")
+}
+
+func TestExpandPath_SetButEmpty(t *testing.T) {
+	t.Setenv("EMPTY_VAR", "")
+
+	result, err := ExpandPath("/prefix/${EMPTY_VAR}/suffix")
+	require.NoError(t, err)
+	assert.Equal(t, "/prefix//suffix", result, "set-but-empty var should expand to empty string")
+}
+
+func TestExpandPath_ValueContainsDollarBrace(t *testing.T) {
+	t.Setenv("TRICKY", "has${NESTED}inside")
+
+	result, err := ExpandPath("/start/${TRICKY}/end")
+	require.NoError(t, err)
+	assert.Equal(t, "/start/has${NESTED}inside/end", result, "must not re-expand values")
+}
+
+func TestExpandPath_AdjacentVars(t *testing.T) {
+	t.Setenv("AA", "hello")
+	t.Setenv("BB", "world")
+
+	result, err := ExpandPath("${AA}${BB}")
+	require.NoError(t, err)
+	assert.Equal(t, "helloworld", result)
+}
+
 // ExpandTilde tests
 
 func TestExpandTilde_Home(t *testing.T) {
