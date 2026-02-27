@@ -4,7 +4,7 @@ Sandboxed AI coding agent runner. Runs AI coding CLI agents (Claude Code, Codex)
 
 ## Project Status
 
-Post-MVP development. MVP is public (beta). Breaking changes are allowed but must be tracked in `docs/BREAKING-CHANGES.md`.
+Public beta. Breaking changes are allowed but must be tracked in `docs/BREAKING-CHANGES.md`.
 
 ## Key Files
 
@@ -16,7 +16,7 @@ All design/planning documents live in `docs/`:
 - `docs/CRITIQUE.md` — Rolling critique document. After a critique pass, findings are applied to DESIGN.md and RESEARCH.md, then CRITIQUE.md is emptied for the next round.
 - `docs/CLI-STANDARD.md` — CLI design conventions: argument ordering (options first), flag naming, exit codes, error messages, help text format.
 - `docs/CODING-STANDARD.md` — Code style: Go 1.22+, gofmt, golangci-lint, Cobra, project structure, naming, error handling, dependency policy.
-- `docs/PLAN.md` — Completed MVP implementation plan (phases, architecture decisions, file inventory). Historical reference for how the MVP was built.
+- `docs/PLAN.md` — Completed initial implementation plan (phases, architecture decisions, file inventory). Historical reference for how yoloAI was built.
 - `docs/OPEN_QUESTIONS.md` — Questions encountered during design/implementation that need resolution. Add new questions here as they come up; resolve before the relevant phase begins.
 - `docs/GUIDE.md` — Full usage reference: commands, flags, workdir modes, agents/models, configuration, sandbox state, security, development.
 - `docs/ROADMAP.md` — Future plans: agents, network isolation, profiles, overlayfs, etc.

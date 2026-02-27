@@ -1,6 +1,6 @@
 # Open Questions
 
-Questions encountered during design and implementation that need resolution. Resolve each before the relevant implementation phase begins.
+Questions encountered during design and implementation that need resolution. Resolve each before the relevant implementation begins.
 
 ## Pre-Implementation (resolve before coding starts)
 

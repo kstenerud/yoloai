@@ -71,7 +71,7 @@ yoloai new task2 ./my-project:rw
 
 ## Agents and Models
 
-This MVP ships with Claude Code as the only supported agent. The architecture is agent-agnostic — more agents are planned (see [Roadmap](ROADMAP.md)).
+yoloai currently ships with Claude Code as the only supported agent. The architecture is agent-agnostic — more agents are planned (see [Roadmap](ROADMAP.md)).
 
 | Agent | API Key | Description |
 |-------|---------|-------------|

@@ -10,7 +10,7 @@ Architecture review — February 2026. Assessed implementation against design do
 - Package boundaries (agent/sandbox/docker/cli) are clear at the top level.
 - Coding standards are being followed consistently.
 - Test coverage is solid (4,375 lines of test code, 18 test files).
-- The MVP delivers what the design promised — no major gaps between spec and implementation.
+- The implementation delivers what the design promised — no major gaps between spec and implementation.
 
 ## Findings
 
@@ -79,13 +79,13 @@ The current `create.go` flow is 920 lines and will grow with overlay code paths.
 
 Go's JSON unmarshaling handles missing fields gracefully (zero values), so this works today. But as the schema evolves across beta, explicitly tracking the version would make migration logic cleaner.
 
-**Recommendation:** Add a `Version int` field to Meta. Existing meta.json files without it unmarshal to `Version: 0`, which is a valid sentinel for "MVP-era schema." Worth adding to OPEN_QUESTIONS for discussion.
+**Recommendation:** Add a `Version int` field to Meta. Existing meta.json files without it unmarshal to `Version: 0`, which is a valid sentinel for "initial schema." Worth adding to OPEN_QUESTIONS for discussion.
 
 **When:** When aux dirs or other schema changes ship.
 
 ### 7. Viper may not be needed (Low)
 
-**Observation:** The design calls for Viper post-MVP for config file + env var + flag precedence binding. But the current approach — raw YAML manipulation with `updateConfigFields` preserving comments — is simpler and more predictable. Viper pulls ~15 transitive dependencies.
+**Observation:** The design calls for Viper for config file + env var + flag precedence binding. But the current approach — raw YAML manipulation with `updateConfigFields` preserving comments — is simpler and more predictable. Viper pulls ~15 transitive dependencies.
 
 Profiles will have their own `profile.yaml`. The main thing Viper gives is precedence binding (env > config > flag), which could be built with a thin layer over `go-yaml` + Cobra flags. The design already notes this as a fallback.
 

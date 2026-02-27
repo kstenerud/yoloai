@@ -48,7 +48,7 @@ yoloai/
 │   ├── cli/                   # Cobra command definitions
 │   ├── sandbox/               # Sandbox lifecycle
 │   ├── docker/                # Docker client wrapper
-│   ├── config/                # Config parsing (Viper, post-MVP)
+│   ├── config/                # Config parsing (Viper, planned)
 │   └── agent/                 # Agent preset definitions
 ├── resources/                 # Dockerfiles, templates
 └── testdata/                  # Test fixtures
@@ -61,7 +61,7 @@ Everything under `internal/` is private to this module — prevents accidental e
 - **Cobra** for command definitions
 - One file per command under `internal/cli/`
 - Use `RunE` (not `Run`) so commands return errors for proper propagation
-- **Viper** deferred to post-MVP — MVP uses CLI flags + hardcoded defaults only. When added, Viper handles config file + env var + flag binding with struct unmarshaling
+- **Viper** deferred — currently using CLI flags + go-yaml config. When added, Viper handles config file + env var + flag binding with struct unmarshaling
 - Commands are thin — parse args, call into domain packages, format output
 
 ## File Organization
@@ -192,7 +192,7 @@ Cobra customization required: set `SilenceErrors: true` and `SilenceUsage: true`
 - **Minimal** — Go culture favors the standard library. Justify each dependency.
 - `go.mod` managed by `go mod tidy`. Respect major version path convention (`/v2`). Reproducible builds via `go.sum`
 - **Core deps** (always needed): Cobra (CLI), Docker SDK
-- **Post-MVP dep:** Viper (config). Pulls ~15 transitive dependencies — justified by config file + env var + flag precedence binding, which is non-trivial to replicate. If Viper proves too heavy, the fallback is Cobra flags + `go-yaml` + a thin config struct
+- **Planned dep:** Viper (config). Pulls ~15 transitive dependencies — justified by config file + env var + flag precedence binding, which is non-trivial to replicate. If Viper proves too heavy, the fallback is Cobra flags + `go-yaml` + a thin config struct
 - **Dev deps:** golangci-lint, testify
 - No vendoring unless required for reproducible builds in air-gapped environments
 

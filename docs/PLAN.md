@@ -1,16 +1,16 @@
-# Plan: yoloAI MVP for Dogfooding (Completed)
+# Plan: yoloAI Initial Implementation (Completed)
 
 ## Context
 
-MVP is complete and public (beta). All phases (0–8) have been implemented. This document is retained as a historical reference for how the MVP was built. Post-MVP work (overlay strategy, network isolation, profiles, Codex agent, Viper config, aux dirs, etc.) is tracked separately.
+The initial implementation is complete and public (beta). All phases (0–8) have been implemented. This document is retained as a historical reference for how yoloAI was built. Planned work (overlay strategy, network isolation, profiles, Codex agent, Viper config, aux dirs, etc.) is tracked separately.
 
 ## What's In / What's Deferred
 
-**MVP commands:** `build`, `new`, `attach`, `show`, `diff`, `apply`, `list`, `log`, `exec`, `stop`, `start`, `destroy`, `reset`, `completion`, `version`
+**Implemented commands:** `build`, `new`, `attach`, `show`, `diff`, `apply`, `list`, `log`, `exec`, `stop`, `start`, `destroy`, `reset`, `completion`, `version`
 
-**MVP features:** Full-copy only (Claude and test agents), credential injection, `--model` (with built-in aliases), `--agent` (`claude`, `test`), `--prompt-file`/stdin, `--replace`, `--no-start`, `--network-none`, `--port`, `--` agent arg passthrough, `--stat` on diff, `--yes` on apply/destroy, `--no-prompt`/`--clean`/`--no-restart` on reset, `--all`/multi-name on stop/destroy, smart destroy confirmation, dangerous directory detection, dirty git repo warning, path overlap detection, `YOLOAI_SANDBOX` env var, context-aware creation output, auto-paging for diff/log, shell completion, version info.
+**Implemented features:** Full-copy only (Claude and test agents), credential injection, `--model` (with built-in aliases), `--agent` (`claude`, `test`), `--prompt-file`/stdin, `--replace`, `--no-start`, `--network-none`, `--port`, `--` agent arg passthrough, `--stat` on diff, `--yes` on apply/destroy, `--no-prompt`/`--clean`/`--no-restart` on reset, `--all`/multi-name on stop/destroy, smart destroy confirmation, dangerous directory detection, dirty git repo warning, path overlap detection, `YOLOAI_SANDBOX` env var, context-aware creation output, auto-paging for diff/log, shell completion, version info. Tilde expansion and `${VAR}` environment variable interpolation for CLI path inputs have since been implemented.
 
-**Deferred:** overlay strategy, network isolation/proxy, profiles, Codex agent, Viper config file parsing, `auto_commit_interval`, custom mount points (`=<path>`), `agent_files`, env var interpolation, context file, aux dirs (`-d`), `--resume`, `restart`, `wait`, `run`.
+**Planned:** overlay strategy, network isolation/proxy, profiles, Codex agent, Viper config file parsing, `auto_commit_interval`, custom mount points (`=<path>`), `agent_files`, config file path expansion, context file, aux dirs (`-d`), `--resume`, `restart`, `wait`, `run`.
 
 ## Per-Phase Implementation Plans
 
@@ -99,7 +99,7 @@ Pure Go, fully unit-testable without Docker.
 - `startup_delay` (int) — seconds to wait before sending prompt
 - `submit_sequence` (string) — tmux send-keys sequence (e.g., `"Enter Enter"`)
 
-Later additions (post-MVP): `overlay_mounts`, `iptables_rules`, `setup_script`.
+Later additions (planned): `overlay_mounts`, `iptables_rules`, `setup_script`.
 
 `internal/docker/build.go`:
 - `SeedResources(targetDir string)` — copies embedded `resources/Dockerfile.base` and `resources/entrypoint.sh` to `targetDir` (i.e., `~/.yoloai/`) if they don't already exist. Uses `go:embed` for the source files.
@@ -310,7 +310,7 @@ Options: `--no-prompt` (skip re-sending prompt, applies to both modes), `--clean
 - **`SandboxManager`** is the central orchestrator. CLI commands are thin (parse args → call manager method).
 - **git via `os/exec`** — simpler than go-git for our needs (diff, apply, init, add, commit, rev-parse).
 - **`docker exec` for attach via `os/exec`** — justified exception to "use SDK" rule for interactive TTY.
-- **No Viper for MVP** — CLI flags + hardcoded defaults. Config file parsing comes post-MVP. `EnsureSetup` writes a default `config.yaml` for user reference and future use, but MVP does not read it — all settings come from CLI flags and hardcoded defaults.
+- **No Viper initially** — CLI flags + hardcoded defaults. Config file parsing is planned. `EnsureSetup` writes a default `config.yaml` for user reference and future use.
 - **Entrypoint as shell script** — natural for UID/GID, secrets, tmux. ~50 lines. Go binary would add cross-compilation complexity.
 - **`jq` in base image** — entrypoint reads `/yoloai/config.json` via `jq` for all configuration. Simpler and more robust than shell-only JSON parsing.
 - **Pager utility** (`internal/cli/pager.go`) — reusable auto-paging for `diff` and `log`. Uses `$PAGER` / `less -R` when stdout is TTY, raw output when piped.
@@ -326,7 +326,7 @@ github.com/docker/docker        # Docker SDK (pin to latest v28.x+incompatible; 
 github.com/stretchr/testify     # Test assertions (dev)
 ```
 
-Viper deferred to post-MVP.
+Viper deferred.
 
 ## File Inventory
 
@@ -356,5 +356,5 @@ Viper deferred to post-MVP.
 
 1. **Entrypoint fragility** — UID/GID + secrets + tmux + prompt delivery in one script. Mitigate: test manually early (Phase 3).
 2. **tmux timing** — 3s delay may not suffice on slow machines. Mitigate: configurable via `config.json` `startup_delay`.
-3. **Large copies** — `cp -rp` with `node_modules` is slow. Known limitation of full-copy. Overlay (post-MVP) solves this.
+3. **Large copies** — `cp -rp` with `node_modules` is slow. Known limitation of full-copy. Overlay (planned) solves this.
 4. **Docker SDK version compat** — Pin to latest `github.com/docker/docker` v28.x (the `+incompatible` suffix is expected). SDK auto-negotiates API version with older engines. Test on Docker Desktop for Mac.

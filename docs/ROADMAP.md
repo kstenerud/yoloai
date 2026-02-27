@@ -1,6 +1,6 @@
 # yoloAI Roadmap
 
-yoloAI is under active development. The current MVP covers the core copy/diff/apply workflow with Claude Code. Here's what's planned next.
+yoloAI is under active development. yoloai currently covers the core copy/diff/apply workflow with Claude Code. Here's what's planned next.
 
 ## More agents
 
