@@ -42,6 +42,9 @@ RUN curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-$(dpkg --print-architect
     && tar -C /usr/local -xzf /tmp/go.tar.gz \
     && rm /tmp/go.tar.gz
 ENV PATH="/usr/local/go/bin:${PATH}"
+# Also set via profile.d so shells started fresh (e.g. by AI coding agents)
+# pick up the path even when Docker ENV is not inherited.
+RUN echo 'export PATH="/usr/local/go/bin:$PATH"' > /etc/profile.d/golang.sh
 
 # golangci-lint
 RUN GOPATH=/tmp/gopath go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest \
@@ -55,6 +58,7 @@ ENV RUSTUP_HOME=/usr/local/rustup \
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
       | sh -s -- -y --default-toolchain stable --profile minimal --no-modify-path \
     && chmod -R a+rw "$RUSTUP_HOME" "$CARGO_HOME"
+RUN echo 'export PATH="/usr/local/cargo/bin:$PATH"' > /etc/profile.d/cargo.sh
 
 # Claude Code via npm (not native binary — native bundles Bun which ignores
 # proxy env vars and auto-updates; see RESEARCH.md "Claude Code Installation")
