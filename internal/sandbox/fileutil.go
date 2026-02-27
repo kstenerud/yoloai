@@ -49,8 +49,8 @@ func removeGitDirs(root string) error {
 	return nil
 }
 
-// expandTilde replaces a leading ~ with the user's home directory.
-func expandTilde(path string) string {
+// ExpandTilde replaces a leading ~ with the user's home directory.
+func ExpandTilde(path string) string {
 	if !strings.HasPrefix(path, "~") {
 		return path
 	}

@@ -9,17 +9,17 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// expandTilde tests
+// ExpandTilde tests
 
 func TestExpandTilde_Home(t *testing.T) {
 	home, err := os.UserHomeDir()
 	require.NoError(t, err)
 
-	assert.Equal(t, filepath.Join(home, ".config"), expandTilde("~/.config"))
+	assert.Equal(t, filepath.Join(home, ".config"), ExpandTilde("~/.config"))
 }
 
 func TestExpandTilde_NoTilde(t *testing.T) {
-	assert.Equal(t, "/usr/local/bin", expandTilde("/usr/local/bin"))
+	assert.Equal(t, "/usr/local/bin", ExpandTilde("/usr/local/bin"))
 }
 
 func TestExpandTilde_TildeOnly(t *testing.T) {
@@ -27,12 +27,12 @@ func TestExpandTilde_TildeOnly(t *testing.T) {
 	require.NoError(t, err)
 
 	// "~" with nothing after → just home dir
-	assert.Equal(t, home, expandTilde("~"))
+	assert.Equal(t, home, ExpandTilde("~"))
 }
 
 func TestExpandTilde_Relative(t *testing.T) {
 	// No tilde → returned unchanged
-	assert.Equal(t, "relative/path", expandTilde("relative/path"))
+	assert.Equal(t, "relative/path", ExpandTilde("relative/path"))
 }
 
 // copyDir tests

@@ -58,6 +58,7 @@ func ParseDirArg(arg string) (*DirArg, error) {
 		remaining = remaining[:idx]
 	}
 
+	remaining = ExpandTilde(remaining)
 	absPath, err := filepath.Abs(remaining)
 	if err != nil {
 		return nil, fmt.Errorf("resolve path %q: %w", remaining, err)

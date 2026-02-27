@@ -72,6 +72,16 @@ func TestParseDirArg_AbsolutePath(t *testing.T) {
 	assert.Equal(t, filepath.Join(cwd, "relative/path"), result.Path)
 }
 
+func TestParseDirArg_TildeExpansion(t *testing.T) {
+	home, err := os.UserHomeDir()
+	require.NoError(t, err)
+
+	result, err := ParseDirArg("~/somedir:copy")
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(home, "somedir"), result.Path)
+	assert.Equal(t, "copy", result.Mode)
+}
+
 func TestParseDirArg_PathWithColons(t *testing.T) {
 	// Unknown suffixes stay as part of the path.
 	result, err := ParseDirArg("/path/to/file:with:colons")

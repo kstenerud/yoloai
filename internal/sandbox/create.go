@@ -491,6 +491,7 @@ func readPrompt(prompt, promptFile string) (string, error) {
 	}
 
 	if promptFile != "" {
+		promptFile = ExpandTilde(promptFile)
 		data, err := os.ReadFile(promptFile) //nolint:gosec // G304: path is from user-provided --prompt-file flag
 		if err != nil {
 			return "", fmt.Errorf("read prompt file: %w", err)
@@ -621,7 +622,7 @@ func buildMounts(state *sandboxState, secretsDir string) []runtime.MountSpec {
 
 	// Host tmux config (when tmux_conf is default+host or host)
 	if state.tmuxConf == "default+host" || state.tmuxConf == "host" {
-		tmuxConfPath := expandTilde("~/.tmux.conf")
+		tmuxConfPath := ExpandTilde("~/.tmux.conf")
 		if _, err := os.Stat(tmuxConfPath); err == nil {
 			mounts = append(mounts, runtime.MountSpec{
 				Source:   tmuxConfPath,
@@ -660,7 +661,7 @@ func hasAnyAPIKey(agentDef *agent.Definition) bool {
 func hasAnyAuthFile(agentDef *agent.Definition) bool {
 	for _, sf := range agentDef.SeedFiles {
 		if sf.AuthOnly {
-			if _, err := os.Stat(expandTilde(sf.HostPath)); err == nil {
+			if _, err := os.Stat(ExpandTilde(sf.HostPath)); err == nil {
 				return true
 			}
 			if sf.KeychainService != "" {
@@ -699,7 +700,7 @@ func copySeedFiles(agentDef *agent.Definition, sandboxDir string, hasAPIKey bool
 			continue // auth file not needed when API key is set
 		}
 
-		hostPath := expandTilde(sf.HostPath)
+		hostPath := ExpandTilde(sf.HostPath)
 
 		var data []byte
 		if _, err := os.Stat(hostPath); err == nil {
