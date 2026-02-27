@@ -9,6 +9,6 @@ import "fmt"
 // keychainReader is a no-op on non-darwin platforms.
 var keychainReader = readKeychainPassword
 
-func readKeychainPassword(service string) ([]byte, error) {
+func readKeychainPassword(_ string) ([]byte, error) {
 	return nil, fmt.Errorf("keychain not available on this platform")
 }
