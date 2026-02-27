@@ -84,43 +84,47 @@ tmux send-keys -t main "cd $WORKING_DIR && exec $AGENT_COMMAND" Enter
     done
 ) &
 
+# --- Wait for agent ready, auto-accept trust/confirmation prompts ---
+# Always run this loop so interactive "Enter to confirm" prompts (workspace trust,
+# permissions mode) are handled even when no prompt file is provided.
+if [ -n "$READY_PATTERN" ] && [ "$READY_PATTERN" != "null" ]; then
+    MAX_WAIT=60
+    WAITED=0
+    while [ $WAITED -lt $MAX_WAIT ]; do
+        PANE=$(tmux capture-pane -t main -p 2>/dev/null || true)
+        if echo "$PANE" | grep -qF "Enter to confirm"; then
+            tmux send-keys -t main Enter
+            sleep 2
+            WAITED=$((WAITED + 2))
+            continue
+        fi
+        if echo "$PANE" | grep -qF "$READY_PATTERN"; then
+            break
+        fi
+        sleep 1
+        WAITED=$((WAITED + 1))
+    done
+    # Wait for screen to stabilize
+    PREV=""
+    STABLE=0
+    while [ $STABLE -lt 1 ] && [ $WAITED -lt $MAX_WAIT ]; do
+        sleep 0.5
+        WAITED=$((WAITED + 1))
+        CURR=$(tmux capture-pane -t main -p 2>/dev/null || true)
+        if [ "$CURR" = "$PREV" ]; then
+            STABLE=$((STABLE + 1))
+        else
+            STABLE=0
+        fi
+        PREV="$CURR"
+    done
+else
+    sleep "$STARTUP_DELAY"
+fi
+
 # --- Deliver prompt if present ---
 PROMPT_FILE="$SHARED_DIR/prompt.txt"
 if [ -f "$PROMPT_FILE" ]; then
-    if [ -n "$READY_PATTERN" ] && [ "$READY_PATTERN" != "null" ]; then
-        MAX_WAIT=60
-        WAITED=0
-        while [ $WAITED -lt $MAX_WAIT ]; do
-            PANE=$(tmux capture-pane -t main -p 2>/dev/null || true)
-            if echo "$PANE" | grep -qF "Enter to confirm"; then
-                tmux send-keys -t main Enter
-                sleep 2
-                WAITED=$((WAITED + 2))
-                continue
-            fi
-            if echo "$PANE" | grep -qF "$READY_PATTERN"; then
-                break
-            fi
-            sleep 1
-            WAITED=$((WAITED + 1))
-        done
-        # Wait for screen to stabilize
-        PREV=""
-        STABLE=0
-        while [ $STABLE -lt 1 ] && [ $WAITED -lt $MAX_WAIT ]; do
-            sleep 0.5
-            WAITED=$((WAITED + 1))
-            CURR=$(tmux capture-pane -t main -p 2>/dev/null || true)
-            if [ "$CURR" = "$PREV" ]; then
-                STABLE=$((STABLE + 1))
-            else
-                STABLE=0
-            fi
-            PREV="$CURR"
-        done
-    else
-        sleep "$STARTUP_DELAY"
-    fi
     tmux load-buffer "$PROMPT_FILE"
     tmux paste-buffer -t main
     sleep 0.5
