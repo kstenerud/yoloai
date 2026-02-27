@@ -31,20 +31,17 @@ func newConfigGetCmd() *cobra.Command {
 		Short: "Print configuration value(s)",
 		Long: `Print configuration values from ~/.yoloai/config.yaml.
 
-Without arguments, prints the entire config file.
+Without arguments, prints all settings with effective values (defaults + overrides).
 With a dotted key (e.g., defaults.backend), prints just that value.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 0 {
-				data, err := sandbox.ReadConfigRaw()
+				out, err := sandbox.GetEffectiveConfig()
 				if err != nil {
 					return err
 				}
-				if data != nil {
-					_, err = fmt.Fprint(cmd.OutOrStdout(), string(data))
-					return err
-				}
-				return nil
+				_, err = fmt.Fprint(cmd.OutOrStdout(), out)
+				return err
 			}
 
 			value, found, err := sandbox.GetConfigValue(args[0])

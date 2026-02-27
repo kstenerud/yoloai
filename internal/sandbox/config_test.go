@@ -199,6 +199,7 @@ func TestGetConfigValue_NotFound(t *testing.T) {
 	content := "setup_complete: true\n"
 	require.NoError(t, os.WriteFile(filepath.Join(yoloaiDir, "config.yaml"), []byte(content), 0600))
 
+	// Unknown key: not found
 	_, found, err := GetConfigValue("nonexistent")
 	require.NoError(t, err)
 	assert.False(t, found)
@@ -208,11 +209,81 @@ func TestGetConfigValue_NotFound(t *testing.T) {
 	assert.False(t, found)
 }
 
+func TestGetConfigValue_FallsBackToDefault(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	yoloaiDir := filepath.Join(tmpDir, ".yoloai")
+	require.NoError(t, os.MkdirAll(yoloaiDir, 0750))
+	content := "setup_complete: true\n"
+	require.NoError(t, os.WriteFile(filepath.Join(yoloaiDir, "config.yaml"), []byte(content), 0600))
+
+	// Known key not in file returns its default
+	val, found, err := GetConfigValue("defaults.backend")
+	require.NoError(t, err)
+	assert.True(t, found)
+	assert.Equal(t, "docker", val)
+}
+
 func TestGetConfigValue_MissingFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
 
+	// Unknown key with no file: not found
 	_, found, err := GetConfigValue("anything")
 	require.NoError(t, err)
 	assert.False(t, found)
+
+	// Known key with no file: returns default
+	val, found, err := GetConfigValue("defaults.backend")
+	require.NoError(t, err)
+	assert.True(t, found)
+	assert.Equal(t, "docker", val)
+}
+
+func TestGetEffectiveConfig_Defaults(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	out, err := GetEffectiveConfig()
+	require.NoError(t, err)
+	assert.Contains(t, out, "setup_complete: false")
+	assert.Contains(t, out, "backend: docker")
+	assert.Contains(t, out, "tart_image:")
+	assert.Contains(t, out, "tmux_conf:")
+}
+
+func TestGetEffectiveConfig_WithOverrides(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	yoloaiDir := filepath.Join(tmpDir, ".yoloai")
+	require.NoError(t, os.MkdirAll(yoloaiDir, 0750))
+	content := "setup_complete: true\ndefaults:\n  backend: tart\n"
+	require.NoError(t, os.WriteFile(filepath.Join(yoloaiDir, "config.yaml"), []byte(content), 0600))
+
+	out, err := GetEffectiveConfig()
+	require.NoError(t, err)
+	assert.Contains(t, out, "setup_complete: true")
+	assert.Contains(t, out, "backend: tart")
+	// Defaults for unset keys still present
+	assert.Contains(t, out, "tart_image:")
+	assert.Contains(t, out, "tmux_conf:")
+}
+
+func TestGetEffectiveConfig_ExtraKeys(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	yoloaiDir := filepath.Join(tmpDir, ".yoloai")
+	require.NoError(t, os.MkdirAll(yoloaiDir, 0750))
+	content := "setup_complete: true\ncustom_key: myvalue\n"
+	require.NoError(t, os.WriteFile(filepath.Join(yoloaiDir, "config.yaml"), []byte(content), 0600))
+
+	out, err := GetEffectiveConfig()
+	require.NoError(t, err)
+	// Custom keys from the file should appear too
+	assert.Contains(t, out, "custom_key: myvalue")
+	// And defaults still present
+	assert.Contains(t, out, "backend: docker")
 }

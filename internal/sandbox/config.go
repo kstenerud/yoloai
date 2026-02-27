@@ -19,6 +19,21 @@ type YoloaiConfig struct {
 	TartImage     string `yaml:"tart_image"` // from defaults.tart_image — custom base VM image for tart backend
 }
 
+// knownSetting defines a config key with its default value.
+type knownSetting struct {
+	Path    string
+	Default string
+}
+
+// knownSettings lists every config key the code recognizes, with defaults.
+// Used by GetEffectiveConfig and GetConfigValue to fill in unset values.
+var knownSettings = []knownSetting{
+	{"setup_complete", "false"},
+	{"defaults.backend", "docker"},
+	{"defaults.tart_image", ""},
+	{"defaults.tmux_conf", ""},
+}
+
 // ConfigPath returns the path to ~/.yoloai/config.yaml.
 func ConfigPath() (string, error) {
 	homeDir, err := os.UserHomeDir()
@@ -102,9 +117,74 @@ func ReadConfigRaw() ([]byte, error) {
 	return data, nil
 }
 
+// GetEffectiveConfig returns YAML showing all known settings with their
+// effective values (file overrides + defaults), plus any extra keys from the
+// file that aren't in the known settings list.
+func GetEffectiveConfig() (string, error) {
+	// Build node tree with all known defaults.
+	root := &yaml.Node{Kind: yaml.MappingNode}
+	for _, s := range knownSettings {
+		setYAMLField(root, s.Path, s.Default)
+	}
+
+	// Overlay values from the actual config file.
+	data, err := ReadConfigRaw()
+	if err != nil {
+		return "", err
+	}
+	if data != nil {
+		var doc yaml.Node
+		if err := yaml.Unmarshal(data, &doc); err == nil {
+			if doc.Kind == yaml.DocumentNode && len(doc.Content) > 0 {
+				if src := doc.Content[0]; src.Kind == yaml.MappingNode {
+					mergeNodes(root, src)
+				}
+			}
+		}
+	}
+
+	doc := yaml.Node{Kind: yaml.DocumentNode, Content: []*yaml.Node{root}}
+	out, err := yaml.Marshal(&doc)
+	if err != nil {
+		return "", fmt.Errorf("marshal effective config: %w", err)
+	}
+	return string(out), nil
+}
+
+// mergeNodes recursively copies values from src into dst, overwriting
+// existing scalar values and adding keys that don't exist in dst.
+func mergeNodes(dst, src *yaml.Node) {
+	for i := 0; i < len(src.Content)-1; i += 2 {
+		key := src.Content[i].Value
+		val := src.Content[i+1]
+
+		if val.Kind == yaml.MappingNode {
+			dstChild := getOrCreateMapping(dst, key)
+			mergeNodes(dstChild, val)
+		} else {
+			setScalar(dst, key, val)
+		}
+	}
+}
+
+// setScalar sets a scalar key in a mapping node, overwriting if it exists.
+func setScalar(parent *yaml.Node, key string, val *yaml.Node) {
+	for i := 0; i < len(parent.Content)-1; i += 2 {
+		if parent.Content[i].Value == key {
+			parent.Content[i+1].Value = val.Value
+			parent.Content[i+1].Tag = val.Tag
+			return
+		}
+	}
+	keyNode := &yaml.Node{Kind: yaml.ScalarNode, Value: key}
+	valNode := &yaml.Node{Kind: yaml.ScalarNode, Value: val.Value, Tag: val.Tag}
+	parent.Content = append(parent.Content, keyNode, valNode)
+}
+
 // GetConfigValue reads a value at the given dotted path from config.yaml.
 // Returns the raw string value for scalars, or marshaled YAML for
-// mappings/sequences. The bool return indicates whether the key was found.
+// mappings/sequences. Falls back to the default for known settings.
+// The bool return indicates whether the key was found (in file or defaults).
 func GetConfigValue(path string) (string, bool, error) {
 	configPath, err := ConfigPath()
 	if err != nil {
@@ -113,7 +193,7 @@ func GetConfigValue(path string) (string, bool, error) {
 	data, err := os.ReadFile(configPath) //nolint:gosec // G304: path is ~/.yoloai/config.yaml
 	if err != nil {
 		if os.IsNotExist(err) {
-			return "", false, nil
+			return knownDefault(path)
 		}
 		return "", false, fmt.Errorf("read config.yaml: %w", err)
 	}
@@ -124,11 +204,11 @@ func GetConfigValue(path string) (string, bool, error) {
 	}
 
 	if doc.Kind != yaml.DocumentNode || len(doc.Content) == 0 {
-		return "", false, nil
+		return knownDefault(path)
 	}
 	root := doc.Content[0]
 	if root.Kind != yaml.MappingNode {
-		return "", false, nil
+		return knownDefault(path)
 	}
 
 	parts := splitDottedPath(path)
@@ -143,7 +223,7 @@ func GetConfigValue(path string) (string, bool, error) {
 			}
 		}
 		if !found {
-			return "", false, nil
+			return knownDefault(path)
 		}
 	}
 
@@ -157,6 +237,16 @@ func GetConfigValue(path string) (string, bool, error) {
 		return "", false, fmt.Errorf("marshal subtree: %w", err)
 	}
 	return string(out), true, nil
+}
+
+// knownDefault returns the default value for a known setting path.
+func knownDefault(path string) (string, bool, error) {
+	for _, s := range knownSettings {
+		if s.Path == path {
+			return s.Default, true, nil
+		}
+	}
+	return "", false, nil
 }
 
 // UpdateConfigFields updates specific fields in config.yaml using yaml.Node

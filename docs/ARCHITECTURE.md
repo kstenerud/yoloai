@@ -115,7 +115,7 @@ Dependency direction: `cmd/yoloai` → `cli` → `sandbox` + `runtime`; `sandbox
 | `paths.go` | `EncodePath()` / `DecodePath()` — caret encoding for filesystem-safe names. `InstanceName()` (and deprecated alias `ContainerName()`), `Dir()`, `WorkDir()`, `RequireSandboxDir()`. |
 | `parse.go` | `ParseDirArg()` — parses `path:copy`, `path:rw`, `path:force` suffixes into `DirArg`. |
 | `safety.go` | `IsDangerousDir()`, `CheckPathOverlap()`, `CheckDirtyRepo()` — pre-creation safety checks. |
-| `config.go` | `LoadConfig()`, `UpdateConfigFields()`, `ConfigPath()`, `ReadConfigRaw()`, `GetConfigValue()` — read/write `~/.yoloai/config.yaml` preserving YAML comments via `yaml.Node`. Dotted-path get/set for CLI `config get/set` commands. |
+| `config.go` | `LoadConfig()`, `UpdateConfigFields()`, `ConfigPath()`, `ReadConfigRaw()`, `GetConfigValue()`, `GetEffectiveConfig()` — read/write `~/.yoloai/config.yaml` preserving YAML comments via `yaml.Node`. Dotted-path get/set with default fallback for CLI `config get/set` commands. |
 | `setup.go` | `RunSetup()`, `runNewUserSetup()` — interactive tmux configuration setup. Classifies user's tmux config, prompts for preferences. |
 | `confirm.go` | `Confirm()` — simple y/N interactive prompt. |
 | `errors.go` | `UsageError` (exit 2), `ConfigError` (exit 3), sentinel errors (`ErrSandboxNotFound`, `ErrSandboxExists`, etc.). |
@@ -168,7 +168,7 @@ Tart (macOS VM) implementation of `Runtime` interface. Shells out to `tart` CLI 
 | `yoloai exec` | `cli/exec.go:newExecCmd` | `runtime.InteractiveExec` into running container |
 | `yoloai info backends` | `cli/info.go:newInfoBackendsCmd` | Probes each backend via `newRuntime()` |
 | `yoloai build` | `cli/commands.go:newBuildCmd` | `runtime.EnsureImage()` via active backend (`runtime/docker/build.go` or `runtime/tart/build.go`) |
-| `yoloai config get` | `cli/config.go:newConfigGetCmd` | `sandbox.ReadConfigRaw()` / `sandbox.GetConfigValue()` |
+| `yoloai config get` | `cli/config.go:newConfigGetCmd` | `sandbox.GetEffectiveConfig()` / `sandbox.GetConfigValue()` |
 | `yoloai config set` | `cli/config.go:newConfigSetCmd` | `sandbox.UpdateConfigFields()` |
 | `yoloai setup` | `cli/setup.go:newSetupCmd` | `sandbox.Manager.RunSetup()` in `sandbox/setup.go` |
 | `yoloai completion` | `cli/commands.go:newCompletionCmd` | Cobra's built-in completion generators |
