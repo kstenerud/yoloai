@@ -152,7 +152,7 @@ func GetEffectiveConfig() (string, error) {
 }
 
 // mergeNodes recursively copies values from src into dst, overwriting
-// existing scalar values and adding keys that don't exist in dst.
+// existing values and adding keys that don't exist in dst.
 func mergeNodes(dst, src *yaml.Node) {
 	for i := 0; i < len(src.Content)-1; i += 2 {
 		key := src.Content[i].Value
@@ -162,23 +162,23 @@ func mergeNodes(dst, src *yaml.Node) {
 			dstChild := getOrCreateMapping(dst, key)
 			mergeNodes(dstChild, val)
 		} else {
-			setScalar(dst, key, val)
+			setNodeValue(dst, key, val)
 		}
 	}
 }
 
-// setScalar sets a scalar key in a mapping node, overwriting if it exists.
-func setScalar(parent *yaml.Node, key string, val *yaml.Node) {
+// setNodeValue sets a key in a mapping node to the given value node,
+// replacing any existing value. Works for all node kinds (scalar,
+// sequence, mapping).
+func setNodeValue(parent *yaml.Node, key string, val *yaml.Node) {
 	for i := 0; i < len(parent.Content)-1; i += 2 {
 		if parent.Content[i].Value == key {
-			parent.Content[i+1].Value = val.Value
-			parent.Content[i+1].Tag = val.Tag
+			parent.Content[i+1] = val
 			return
 		}
 	}
 	keyNode := &yaml.Node{Kind: yaml.ScalarNode, Value: key}
-	valNode := &yaml.Node{Kind: yaml.ScalarNode, Value: val.Value, Tag: val.Tag}
-	parent.Content = append(parent.Content, keyNode, valNode)
+	parent.Content = append(parent.Content, keyNode, val)
 }
 
 // GetConfigValue reads a value at the given dotted path from config.yaml.
