@@ -19,6 +19,19 @@ if [ ! -L "$HOME/.claude" ]; then
     ln -sf "$SANDBOX_DIR/agent-state" "$HOME/.claude"
 fi
 
+# Symlink home-seed files (e.g. .claude.json) into HOME
+HOME_SEED="$SANDBOX_DIR/home-seed"
+if [ -d "$HOME_SEED" ]; then
+    for f in "$HOME_SEED"/*  "$HOME_SEED"/.*; do
+        [ -f "$f" ] || continue
+        name=$(basename "$f")
+        [ "$name" = "." ] || [ "$name" = ".." ] && continue
+        if [ ! -e "$HOME/$name" ]; then
+            ln -sf "$f" "$HOME/$name"
+        fi
+    done
+fi
+
 # --- Read secrets and export as env vars ---
 SECRETS_DIR="$SANDBOX_DIR/secrets"
 if [ -d "$SECRETS_DIR" ]; then
