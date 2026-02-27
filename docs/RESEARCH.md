@@ -587,6 +587,69 @@ This section documents the headless/Docker characteristics of major AI coding CL
 
 ---
 
+## Shell Mode: Pre-Installed Agents with Interactive Shell
+
+**Idea:** Instead of launching a specific agent, yoloai could offer a mode that drops the user into a tmux shell inside the sandbox with all supported agents pre-installed and ready to use. The user picks which agent to run (or switches between them) interactively.
+
+### Prior Art: pixels
+
+**Repo:** [deevus/pixels](https://github.com/deevus/pixels)
+**Language:** Go | **Status:** Active
+
+**What it does:** Go CLI that provisions disposable Linux containers on TrueNAS SCALE via Incus, pre-loaded with multiple AI coding agents. Uses [mise](https://mise.jdx.dev/) (polyglot tool version manager) to install Claude Code, Codex, and OpenCode asynchronously via a background systemd service (`pixels-devtools`).
+
+**Architecture:**
+- Control plane: Go CLI communicating with TrueNAS via WebSocket API
+- Compute: Incus containers (not Docker)
+- Storage: ZFS datasets with snapshot-based checkpointing
+- Networking: nftables rules for egress filtering (three modes: unrestricted, agent allowlist, custom allowlist)
+- Access: SSH-based console (`pixels console`) and exec (`pixels exec`)
+
+**Key workflow — checkpoint and clone:**
+```
+pixels create base --egress agent --console
+pixels checkpoint create base --label ready
+pixels create task1 --from base:ready
+pixels create task2 --from base:ready
+```
+
+This creates a base container, saves a ZFS snapshot, then clones identical copies for parallel tasks. The checkpoint/clone pattern avoids re-provisioning.
+
+**Agent provisioning pattern:**
+- mise installs Node.js LTS, then Claude Code, Codex, OpenCode as npm/binary packages
+- Installation runs asynchronously after container creation via systemd service
+- Progress visible via `pixels exec mybox -- sudo journalctl -fu pixels-devtools`
+- Provisioning can be skipped entirely (`--no-provision`) or dev tools skipped via config
+
+**What's relevant to yoloai:**
+1. **Multi-agent provisioning via mise** — mise handles Node.js, Python, Go, Rust, and arbitrary tools with a single `.mise.toml` config. This could replace yoloai's per-agent Dockerfile install logic with a unified tool manager.
+2. **Shell-first workflow** — pixels doesn't auto-launch an agent. It drops you into a shell (via SSH) where all agents are available. You choose what to run.
+3. **Blueprint for agent support** — pixels supports Claude Code, Codex, and OpenCode with a simple provisioning model. Its agent install patterns (npm globals, binary downloads) could inform yoloai's agent definitions.
+4. **Checkpoint/clone for parallel work** — ZFS snapshots enable instant cloning. Analogous to yoloai's overlayfs plans but at the storage layer.
+
+### How This Could Work in yoloai
+
+**Minimal change:** A new `--shell` flag on `yoloai new` (or a `yoloai shell` command) that:
+1. Creates a sandbox with all agents pre-installed (Claude Code, Codex, Aider, etc.)
+2. Drops into tmux inside the container — no agent auto-launched
+3. User runs agents manually, switches between them, uses standard CLI tools
+
+**What changes vs. current design:**
+- Current: one agent per sandbox, auto-launched in tmux
+- Shell mode: all agents installed, user-driven, tmux session is a plain shell
+
+**Provisioning approach options:**
+1. **Fat base image** — pre-bake all agents into the Docker image. Slower build, faster create.
+2. **mise-based** — install mise in base image, provision agents on first start (like pixels). Flexible but slower first start.
+3. **Layered images** — base image + per-agent layers. User picks which layers to include.
+
+**Open questions:**
+- Should shell mode sandboxes still support `yoloai diff` / `yoloai apply`? (Probably yes — the copy/diff/apply workflow is orthogonal to how the agent is launched.)
+- How to handle API keys for multiple agents? Currently one agent = one set of env vars. Shell mode needs all keys available.
+- Should this replace the current agent-launch model or complement it? (Complement — the auto-launch model is better for scripting and CI.)
+
+---
+
 ## Credential Management for Docker Containers
 
 Research into secure approaches for passing API keys (primarily `ANTHROPIC_API_KEY`) into Docker containers. The current design passes keys as environment variables via `docker run -e`. This section evaluates the risks, alternatives, and what competitors actually do.
