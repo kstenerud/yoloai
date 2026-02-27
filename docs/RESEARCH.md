@@ -1741,3 +1741,136 @@ yoloAI uses Linux Docker containers as disposable sandboxes. macOS-native develo
 | UTM | Yes | Limited | QEMU only | Manual | VirtioFS | ~15-20s | Apache 2.0 |
 | Lima | No | N/A | N/A | N/A | N/A | N/A | Apache 2.0 |
 | OrbStack | No | N/A | N/A | N/A | N/A | N/A | Commercial |
+
+
+## macOS Process and Filesystem Isolation Technologies
+
+Research into native macOS isolation mechanisms that could provide container-like or jail-like process isolation without a full VM. Motivated by the question: can we offer a lightweight, fast isolation mode on macOS alongside the existing Tart VM backend?
+
+### Why macOS Lacks Linux-Style Containers
+
+Darwin/XNU has **no namespace support**. Linux containers depend on six namespace types (PID, mount, network, UTS, IPC, user) plus cgroups for resource control. macOS has none of these:
+
+- **No PID namespaces:** All processes share a single PID space.
+- **No mount namespaces:** All processes see the same filesystem tree (chroot exists but is blocked by SIP).
+- **No network namespaces:** All processes share the same network stack.
+- **No user namespaces:** No unprivileged isolation mechanism.
+- **No cgroups:** No kernel-level resource control (CPU, memory limits per process group).
+
+This is the fundamental reason Linux-style containers cannot exist on macOS. Every macOS "container" solution either uses VMs (Virtualization.framework) or process-level sandboxing (Seatbelt).
+
+Mach ports have per-task namespaces, but this is an IPC mechanism, not an isolation boundary. POSIX process groups and sessions provide no isolation — they are organizational constructs for signal delivery and terminal control.
+
+### sandbox-exec (Seatbelt / TrustedBSD MAC Framework)
+
+The macOS sandbox system, internally codenamed "Seatbelt," is a policy module for the TrustedBSD Mandatory Access Control (MAC) framework within XNU. The `sandbox-exec` CLI wraps `sandbox_init()` to place a child process into a sandbox defined by a profile.
+
+**Architecture:** Sandbox.kext hooks into MACF at the kernel level. `sandboxd` daemon exposes `com.apple.sandboxd` XPC service. `libsandbox` contains a TinyScheme-based interpreter that compiles SBPL profiles into binary representation for the kernel.
+
+**Profile syntax (SBPL):** Profiles are written in a Scheme dialect. Basic structure:
+
+```scheme
+(version 1)
+(deny default)                              ; deny everything by default
+(allow file-read-data (subpath "/usr/lib"))  ; allow reading /usr/lib
+(allow process-exec (literal "/usr/bin/python3"))
+(allow network-outbound (remote ip "localhost:*"))
+```
+
+Filter types: `(literal "/exact/path")`, `(subpath "/dir")`, `(regex "^/pattern")`, `(remote ip "host:port")`.
+
+Major operation categories (~90 filter predicates as of macOS 15):
+- **File:** `file-read*`, `file-write*`, `file-read-metadata`, `file-read-xattr`, `file-write-xattr`
+- **Process:** `process-exec`, `process-fork`, `signal`
+- **Network:** `network-outbound`, `network-inbound`, `network-bind`
+- **Mach IPC:** `mach-lookup`, `mach-register`, `mach-priv*`
+- **POSIX IPC:** `ipc-posix-shm*`, `ipc-posix-sem*`
+- **System:** `sysctl-read`, `sysctl-write`
+- **IOKit:** `iokit-open`, `iokit-set-properties`
+
+The profile language is **not officially documented by Apple** — it is considered an "Apple System Private Interface." Apple's own profiles in `/System/Library/Sandbox/Profiles/` and `/usr/share/sandbox/` serve as the most reliable reference.
+
+Profiles support `(import "profile-name")` for composition and accept runtime parameters via `-D` flag (e.g., `-D HOME=/Users/admin`).
+
+**Deprecation status — critical nuance:**
+- **Deprecated:** The public C API (`sandbox_init()`, `sandbox_init_with_parameters()`) since ~macOS 10.12. The `sandbox-exec` man page carries a deprecation notice.
+- **NOT deprecated:** The underlying kernel subsystem (Sandbox.kext, MACF hooks). Used by Apple for all system services, App Sandbox enforcement, first-party apps. Will not be removed as long as Apple uses it internally.
+- **Practical reality:** The "deprecation" signals Apple's preference for higher-level App Sandbox entitlements. The low-level APIs remain functional on macOS 15 (Sequoia).
+
+**No sandbox nesting.** If a process is already sandboxed and attempts to apply another sandbox, it fails with `sandbox_apply: Operation not permitted`. Child processes inherit the parent's restrictions, but you cannot add a second layer. Tools with built-in sandboxes (Chrome, Swift compiler) fail inside `sandbox-exec`. Workarounds: Chrome's `--no-sandbox`, Swift's `--disable-sandbox`.
+
+**Security strength:** Meaningful boundary but not impenetrable. Primary escape vector is Mach services — sandboxed processes communicate with system services listed in their `mach-lookup` allowlist. Recent CVEs: jhftss uncovered 10+ escape vulnerabilities via Mach services (2024-2025). CVE-2025-31258 (XPC handling in RemoteViewServices). CVE-2025-24277 (`osanalyticshelperd` escape + privesc). CVE-2025-31191 (security-scoped bookmark escape, discovered by Microsoft). Assessment: raises the bar significantly, regularly patched, should not be considered equivalent to VM-level isolation.
+
+**Real-world usage:**
+- **Chromium:** Custom `.sb` profiles compiled at runtime via `Seatbelt::Compile`, per-process-type (renderer, GPU, utility, network).
+- **OpenAI Codex CLI:** Seatbelt on macOS, Landlock on Linux. Restricts network + limits filesystem writes to workspace.
+- **Google Gemini CLI:** Uses `sandbox-exec` for agent isolation.
+- **Anthropic sandbox-runtime:** npm package wrapping `sandbox-exec` with dynamically generated profiles, glob-pattern filesystem rules, violation monitoring.
+
+Sources: [Chromium Mac Sandbox V2](https://chromium.googlesource.com/chromium/src/+/HEAD/sandbox/mac/seatbelt_sandbox_design.md), [sandbox-exec overview](https://jmmv.dev/2019/11/macos-sandbox-exec.html), [HackTricks macOS Sandbox](https://book.hacktricks.wiki/en/macos-hardening/macos-security-and-privilege-escalation/macos-security-protections/macos-sandbox/index.html), [jhftss sandbox escapes](https://jhftss.github.io/A-New-Era-of-macOS-Sandbox-Escapes/), [Codex sandbox-exec issue](https://github.com/openai/codex/issues/215), [Anthropic sandbox-runtime](https://github.com/anthropic-experimental/sandbox-runtime), [CVE-2025-31191](https://www.microsoft.com/en-us/security/blog/2025/05/01/analyzing-cve-2025-31191-a-macos-security-scoped-bookmarks-based-sandbox-escape/)
+
+### Other Native Isolation Mechanisms
+
+**chroot:** Exists on macOS but **blocked by SIP**. Even with SIP disabled: root can trivially escape via `fchdir()`, no network/IPC/process isolation, requires root. Not viable.
+
+**App Sandbox (entitlements-based):** Not App Store-only — any signed binary can use it. But designed around Apple's container model (`~/Library/Containers/<bundle-id>/`). Cannot specify arbitrary filesystem paths, insufficient granularity for dynamic agent sandboxing, requires code-signing. Wrong abstraction.
+
+**MAC Framework (MACF):** The kernel infrastructure underneath Seatbelt. Ships policy modules: Sandbox.kext, AMFI, Quarantine.kext, ALF.kext, TMSafetyNet.kext. Custom MACF policies require kernel extensions, blocked by SIP. Not usable by third parties.
+
+**XPC/launchd sandboxing:** launchd plists can specify `SandboxProfile` key. Designed for long-lived services with static configs, not ephemeral per-task sandboxing. Awkward fit.
+
+### Third-Party Tools
+
+**[Anthropic sandbox-runtime](https://github.com/anthropic-experimental/sandbox-runtime):** Early research preview. Dynamically generates Seatbelt profiles on macOS, bubblewrap + Landlock + seccomp on Linux. Glob-pattern filesystem rules, mandatory deny paths for sensitive files, violation monitoring. Used by Claude Code.
+
+**[SandVault](https://github.com/webcoyote/sandvault):** Runs AI agents in a separate macOS user account combined with `sandbox-exec`. User-level filesystem isolation + Seatbelt. Key limitation: no nested sandboxes, so Swift compiler and other self-sandboxing tools fail.
+
+**[MacBox](https://github.com/srdjan/macbox):** Git worktrees for code isolation + `sandbox-exec` for process sandboxing. "Friendly" sandbox: network and subprocess allowed, file writes restricted to worktree and temp dirs.
+
+**[Alcoholless (alcless)](https://github.com/AkihiroSuda/alcless):** By Akihiro Suda (rootless Docker author). Runs commands as a separate macOS user via `sudo`/`su`/`pam_launchd`/`rsync`. Copies working directory, runs isolated, syncs back. Simple and robust but user-level isolation only (no network or Mach port restriction).
+
+**[OSXIEC](https://github.com/Okerew/osxiec):** Experimental native Docker-like solution. APFS disk images, user/group ID isolation, VLANs. SIP-compatible. Intended as quick testing tool, not production runtime.
+
+**firejail / bubblewrap:** Neither has a macOS port. Both depend on Linux namespaces and seccomp.
+
+### Apple Containerization (macOS 26)
+
+First-party container runtime announced WWDC 2025. Open-source, Swift, Apple Silicon optimized. Runs OCI-compliant Linux containers, each in its own lightweight VM via Virtualization.framework (unlike Docker Desktop's single shared VM).
+
+Benchmarks (RepoFlow, M4 Mac mini, Apple Container v0.6.0 vs Docker Desktop v4.47.0):
+
+| Metric | Apple Container | Docker Desktop |
+|---|---|---|
+| Cold start | 0.92s | 0.21s |
+| CPU (1 thread) | 11,080 events/s | 10,940 events/s |
+| CPU (all threads) | 55,416 events/s | 53,882 events/s |
+| Memory throughput | 108,588 MiB/s | 81,634 MiB/s |
+| Idle overhead | Very low | High |
+
+Slower cold start (boots VM per container) but better CPU/memory throughput. Uses EXT4 on block device (not VirtioFS). Requires macOS 26 Tahoe for full functionality, Apple Silicon. No Compose equivalent, early-stage tooling.
+
+**Linux guests only** — cannot run macOS containers. Relevant as a potential replacement for Docker in yoloAI's Linux sandbox backend, not for macOS sandboxing.
+
+Sources: [WWDC 2025](https://developer.apple.com/videos/play/wwdc2025/346/), [Apple Containerization GitHub](https://github.com/apple/containerization), [RepoFlow benchmarks](https://www.repoflow.io/blog/benchmarking-apple-containers-vs-docker-desktop), [The New Stack comparison](https://thenewstack.io/apple-containers-on-macos-a-technical-comparison-with-docker/)
+
+### Feasibility Assessment
+
+| Technology | FS Isolation | Network Isolation | Security | Root | SIP OK | Complexity |
+|---|---|---|---|---|---|---|
+| sandbox-exec | Good (path-level) | Partial (localhost vs all) | Medium | No | Yes | Low-Medium |
+| User account + sandbox-exec | Good | Partial | Medium-High | Yes | Yes | Medium |
+| App Sandbox | Poor (container model) | Yes | Medium | No | Yes | Medium |
+| chroot | Weak | None | Very Low | Yes | **No** | Low |
+| MACF custom policy | N/A | N/A | N/A | N/A | **No** | N/A |
+| Virtualization.framework VM | Strong | Strong | Very High | No | Yes | High |
+| Apple Containerization | Strong (per-container VM) | Strong | Very High | No | Yes | Medium |
+| Tart VM | Strong | Strong | Very High | No | Yes | Medium-High |
+
+### Key Findings
+
+1. **sandbox-exec is the only viable lightweight option.** No root, SIP-compatible, path-level filesystem isolation, partial network control. Used by Codex CLI, Gemini CLI, and Claude Code's own sandbox-runtime.
+2. **The nesting limitation is critical.** sandbox-exec cannot nest. If the AI agent itself uses sandbox-exec internally (as Claude Code does), the inner sandbox will fail. This may require disabling the agent's built-in sandbox when running under yoloAI's sandbox.
+3. **Network filtering is coarse.** sandbox-exec can allow all outbound traffic or restrict to localhost only. Cannot whitelist specific remote hosts (e.g., allow `api.anthropic.com` but block everything else). For fine-grained network control, a proxy sidecar or VM is needed.
+4. **"Deprecated" is misleading.** Apple uses Seatbelt for everything. The deprecation notice is about the public API, not the subsystem. Functionally stable on macOS 15.
+5. **Apple Containerization is the long-term play** for Linux guests. Once macOS 26 is widely deployed, it could replace Docker as yoloAI's Linux container backend with better performance and per-container VM isolation.
+6. **No macOS-native container solution exists or is planned.** For running macOS guests in isolation, Tart VMs remain the only option. Apple Containerization is Linux-only.
