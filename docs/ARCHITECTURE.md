@@ -10,7 +10,8 @@ internal/agent/      → Agent plugin definitions (Claude, test)
 internal/cli/        → Cobra command tree and CLI plumbing
 internal/runtime/    → Pluggable runtime interface (backend-agnostic types and errors)
 internal/runtime/docker/ → Docker implementation of runtime.Runtime
-internal/runtime/tart/   → Tart (macOS VM) implementation of runtime.Runtime
+internal/runtime/tart/       → Tart (macOS VM) implementation of runtime.Runtime
+internal/runtime/seatbelt/   → Seatbelt (macOS sandbox-exec) implementation of runtime.Runtime
 internal/sandbox/    → Core logic: create, lifecycle, diff, apply, inspect, config
 ```
 
@@ -44,6 +45,7 @@ Dependency direction: `cmd/yoloai` → `cli` → `sandbox` + `runtime`; `sandbox
 | `exec.go` | `yoloai exec` — run commands inside a running sandbox container. |
 | `list.go` | `yoloai list` — tabular listing of all sandboxes with status. |
 | `log.go` | `yoloai log` — display sandbox session log (log.txt). |
+| `info.go` | `yoloai info` parent command and `info backends` subcommand. Shows available runtime backends with availability status. |
 | `reset.go` | `yoloai reset` — re-copy workdir from host, reset git baseline. |
 | `setup.go` | `yoloai setup` — re-run interactive first-run setup. |
 | `show.go` | `yoloai show` — display sandbox config, meta, and status. |
@@ -84,6 +86,19 @@ Dependency direction: `cmd/yoloai` → `cli` → `sandbox` + `runtime`; `sandbox
 | `platform.go` | Platform detection helpers (macOS, Apple Silicon). Testable via variable overrides. |
 | `resources/setup.sh` | Post-boot setup script (embedded at compile time). Creates mount symlinks, injects secrets, launches tmux + agent. |
 | `tart_test.go` | Unit tests for arg building, error mapping, network flags, mount symlinks. |
+
+### `internal/runtime/seatbelt/`
+
+| File | Purpose |
+|------|---------|
+| `seatbelt.go` | `Runtime` struct — implements `Runtime` interface using macOS `sandbox-exec`. PID file management, background process, per-sandbox tmux socket. |
+| `profile.go` | `GenerateProfile()` — builds SBPL (Seatbelt Profile Language) profiles from `InstanceConfig`. Maps mounts to file-access rules, controls network. |
+| `build.go` | `EnsureImage()` / `ImageExists()` — verifies prerequisites (sandbox-exec, tmux, jq). No image to build. |
+| `resources.go` | `//go:embed` for entrypoint.sh and tmux.conf. |
+| `platform.go` | Platform detection (macOS only, no Apple Silicon requirement). Testable via variable override. |
+| `resources/entrypoint.sh` | Entrypoint script (embedded at compile time). Sets up HOME redirection, secrets, per-sandbox tmux socket, launches agent. |
+| `resources/tmux.conf` | Default tmux config (embedded at compile time). |
+| `seatbelt_test.go` | Unit tests for profile generation, platform detection, tmux socket injection. |
 
 ### `internal/sandbox/`
 
@@ -150,6 +165,7 @@ Tart (macOS VM) implementation of `Runtime` interface. Shells out to `tart` CLI 
 | `yoloai show` | `cli/show.go:newShowCmd` | `sandbox.InspectSandbox()` in `sandbox/inspect.go` |
 | `yoloai log` | `cli/log.go:newLogCmd` | Reads `log.txt` from sandbox dir |
 | `yoloai exec` | `cli/exec.go:newExecCmd` | `runtime.InteractiveExec` into running container |
+| `yoloai info backends` | `cli/info.go:newInfoBackendsCmd` | Probes each backend via `newRuntime()` |
 | `yoloai build` | `cli/commands.go:newBuildCmd` | `runtime.EnsureImage()` via active backend (`runtime/docker/build.go` or `runtime/tart/build.go`) |
 | `yoloai setup` | `cli/setup.go:newSetupCmd` | `sandbox.Manager.RunSetup()` in `sandbox/setup.go` |
 | `yoloai completion` | `cli/commands.go:newCompletionCmd` | Cobra's built-in completion generators |

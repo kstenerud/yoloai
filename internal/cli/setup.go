@@ -21,7 +21,7 @@ func newSetupCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().String("backend", "", "Runtime backend (docker, tart)")
+	cmd.Flags().String("backend", "", "Runtime backend (see 'yoloai info backends')")
 
 	return cmd
 }

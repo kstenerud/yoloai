@@ -47,6 +47,7 @@ func registerCommands(root *cobra.Command, version, commit, date string) {
 		newListCmd(),
 		newShowCmd(),
 		newLogCmd(),
+		newInfoCmd(),
 		newExecCmd(),
 
 		// Admin
@@ -86,7 +87,7 @@ func newBuildCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().String("backend", "", "Runtime backend (docker, tart)")
+	cmd.Flags().String("backend", "", "Runtime backend (see 'yoloai info backends')")
 
 	return cmd
 }
@@ -174,7 +175,7 @@ func newNewCmd(version string) *cobra.Command {
 	cmd.Flags().StringP("prompt-file", "f", "", "File containing the prompt")
 	cmd.Flags().StringP("model", "m", "", "Model name or alias")
 	cmd.Flags().String("agent", "claude", "Agent to use")
-	cmd.Flags().String("backend", "", "Runtime backend (docker, tart)")
+	cmd.Flags().String("backend", "", "Runtime backend (see 'yoloai info backends')")
 	cmd.Flags().Bool("network-none", false, "Disable network access")
 	cmd.Flags().StringArray("port", nil, "Port mapping (host:container)")
 	cmd.Flags().Bool("replace", false, "Replace existing sandbox")
