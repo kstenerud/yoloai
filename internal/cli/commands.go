@@ -52,6 +52,7 @@ func registerCommands(root *cobra.Command, version, commit, date string) {
 
 		// Admin
 		newBuildCmd(),
+		newConfigCmd(),
 		newSetupCmd(),
 		newCompletionCmd(),
 		newVersionCmd(version, commit, date),

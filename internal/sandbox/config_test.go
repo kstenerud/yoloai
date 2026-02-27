@@ -61,7 +61,7 @@ func TestUpdateConfigFields_SetupComplete(t *testing.T) {
 	require.NoError(t, os.MkdirAll(yoloaiDir, 0750))
 	require.NoError(t, os.WriteFile(filepath.Join(yoloaiDir, "config.yaml"), []byte(defaultConfigYAML), 0600))
 
-	err := updateConfigFields(map[string]string{
+	err := UpdateConfigFields(map[string]string{
 		"setup_complete": "true",
 	})
 	require.NoError(t, err)
@@ -79,7 +79,7 @@ func TestUpdateConfigFields_TmuxConf(t *testing.T) {
 	require.NoError(t, os.MkdirAll(yoloaiDir, 0750))
 	require.NoError(t, os.WriteFile(filepath.Join(yoloaiDir, "config.yaml"), []byte(defaultConfigYAML), 0600))
 
-	err := updateConfigFields(map[string]string{
+	err := UpdateConfigFields(map[string]string{
 		"defaults.tmux_conf": "default+host",
 		"setup_complete":     "true",
 	})
@@ -105,7 +105,7 @@ defaults:
 `
 	require.NoError(t, os.WriteFile(filepath.Join(yoloaiDir, "config.yaml"), []byte(content), 0600))
 
-	err := updateConfigFields(map[string]string{
+	err := UpdateConfigFields(map[string]string{
 		"setup_complete": "true",
 	})
 	require.NoError(t, err)
@@ -120,4 +120,99 @@ func TestSplitDottedPath(t *testing.T) {
 	assert.Equal(t, []string{"a"}, splitDottedPath("a"))
 	assert.Equal(t, []string{"a", "b"}, splitDottedPath("a.b"))
 	assert.Equal(t, []string{"defaults", "tmux_conf"}, splitDottedPath("defaults.tmux_conf"))
+}
+
+func TestConfigPath(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	p, err := ConfigPath()
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(tmpDir, ".yoloai", "config.yaml"), p)
+}
+
+func TestReadConfigRaw_MissingFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	data, err := ReadConfigRaw()
+	require.NoError(t, err)
+	assert.Nil(t, data)
+}
+
+func TestReadConfigRaw_ExistingFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	yoloaiDir := filepath.Join(tmpDir, ".yoloai")
+	require.NoError(t, os.MkdirAll(yoloaiDir, 0750))
+	content := "setup_complete: true\n"
+	require.NoError(t, os.WriteFile(filepath.Join(yoloaiDir, "config.yaml"), []byte(content), 0600))
+
+	data, err := ReadConfigRaw()
+	require.NoError(t, err)
+	assert.Equal(t, content, string(data))
+}
+
+func TestGetConfigValue_Scalar(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	yoloaiDir := filepath.Join(tmpDir, ".yoloai")
+	require.NoError(t, os.MkdirAll(yoloaiDir, 0750))
+	content := "setup_complete: true\ndefaults:\n  backend: seatbelt\n  tmux_conf: default+host\n"
+	require.NoError(t, os.WriteFile(filepath.Join(yoloaiDir, "config.yaml"), []byte(content), 0600))
+
+	val, found, err := GetConfigValue("setup_complete")
+	require.NoError(t, err)
+	assert.True(t, found)
+	assert.Equal(t, "true", val)
+
+	val, found, err = GetConfigValue("defaults.backend")
+	require.NoError(t, err)
+	assert.True(t, found)
+	assert.Equal(t, "seatbelt", val)
+}
+
+func TestGetConfigValue_Mapping(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	yoloaiDir := filepath.Join(tmpDir, ".yoloai")
+	require.NoError(t, os.MkdirAll(yoloaiDir, 0750))
+	content := "defaults:\n  backend: docker\n  tmux_conf: default\n"
+	require.NoError(t, os.WriteFile(filepath.Join(yoloaiDir, "config.yaml"), []byte(content), 0600))
+
+	val, found, err := GetConfigValue("defaults")
+	require.NoError(t, err)
+	assert.True(t, found)
+	assert.Contains(t, val, "backend: docker")
+	assert.Contains(t, val, "tmux_conf: default")
+}
+
+func TestGetConfigValue_NotFound(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	yoloaiDir := filepath.Join(tmpDir, ".yoloai")
+	require.NoError(t, os.MkdirAll(yoloaiDir, 0750))
+	content := "setup_complete: true\n"
+	require.NoError(t, os.WriteFile(filepath.Join(yoloaiDir, "config.yaml"), []byte(content), 0600))
+
+	_, found, err := GetConfigValue("nonexistent")
+	require.NoError(t, err)
+	assert.False(t, found)
+
+	_, found, err = GetConfigValue("defaults.nonexistent")
+	require.NoError(t, err)
+	assert.False(t, found)
+}
+
+func TestGetConfigValue_MissingFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	_, found, err := GetConfigValue("anything")
+	require.NoError(t, err)
+	assert.False(t, found)
 }

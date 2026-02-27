@@ -1,5 +1,8 @@
 package sandbox
 
+// ABOUTME: Config loading, reading, and writing for ~/.yoloai/config.yaml.
+// ABOUTME: Provides dotted-path get/set with YAML comment preservation.
+
 import (
 	"fmt"
 	"os"
@@ -16,13 +19,21 @@ type YoloaiConfig struct {
 	TartImage     string `yaml:"tart_image"` // from defaults.tart_image — custom base VM image for tart backend
 }
 
-// LoadConfig reads ~/.yoloai/config.yaml and extracts known fields.
-func LoadConfig() (*YoloaiConfig, error) {
+// ConfigPath returns the path to ~/.yoloai/config.yaml.
+func ConfigPath() (string, error) {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
-		return nil, fmt.Errorf("get home directory: %w", err)
+		return "", fmt.Errorf("get home directory: %w", err)
 	}
-	configPath := filepath.Join(homeDir, ".yoloai", "config.yaml")
+	return filepath.Join(homeDir, ".yoloai", "config.yaml"), nil
+}
+
+// LoadConfig reads ~/.yoloai/config.yaml and extracts known fields.
+func LoadConfig() (*YoloaiConfig, error) {
+	configPath, err := ConfigPath()
+	if err != nil {
+		return nil, err
+	}
 
 	data, err := os.ReadFile(configPath) //nolint:gosec // G304: path is ~/.yoloai/config.yaml
 	if err != nil {
@@ -74,14 +85,87 @@ func LoadConfig() (*YoloaiConfig, error) {
 	return cfg, nil
 }
 
-// updateConfigFields updates specific fields in config.yaml using yaml.Node
-// manipulation to preserve comments and formatting.
-func updateConfigFields(fields map[string]string) error {
-	homeDir, err := os.UserHomeDir()
+// ReadConfigRaw reads the raw bytes of config.yaml. Returns nil, nil if the
+// file does not exist.
+func ReadConfigRaw() ([]byte, error) {
+	configPath, err := ConfigPath()
 	if err != nil {
-		return fmt.Errorf("get home directory: %w", err)
+		return nil, err
 	}
-	configPath := filepath.Join(homeDir, ".yoloai", "config.yaml")
+	data, err := os.ReadFile(configPath) //nolint:gosec // G304: path is ~/.yoloai/config.yaml
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("read config.yaml: %w", err)
+	}
+	return data, nil
+}
+
+// GetConfigValue reads a value at the given dotted path from config.yaml.
+// Returns the raw string value for scalars, or marshaled YAML for
+// mappings/sequences. The bool return indicates whether the key was found.
+func GetConfigValue(path string) (string, bool, error) {
+	configPath, err := ConfigPath()
+	if err != nil {
+		return "", false, err
+	}
+	data, err := os.ReadFile(configPath) //nolint:gosec // G304: path is ~/.yoloai/config.yaml
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", false, nil
+		}
+		return "", false, fmt.Errorf("read config.yaml: %w", err)
+	}
+
+	var doc yaml.Node
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		return "", false, fmt.Errorf("parse config.yaml: %w", err)
+	}
+
+	if doc.Kind != yaml.DocumentNode || len(doc.Content) == 0 {
+		return "", false, nil
+	}
+	root := doc.Content[0]
+	if root.Kind != yaml.MappingNode {
+		return "", false, nil
+	}
+
+	parts := splitDottedPath(path)
+	node := root
+	for _, part := range parts {
+		found := false
+		for i := 0; i < len(node.Content)-1; i += 2 {
+			if node.Content[i].Value == part {
+				node = node.Content[i+1]
+				found = true
+				break
+			}
+		}
+		if !found {
+			return "", false, nil
+		}
+	}
+
+	if node.Kind == yaml.ScalarNode {
+		return node.Value, true, nil
+	}
+
+	// For mappings/sequences, marshal the subtree.
+	out, err := yaml.Marshal(node)
+	if err != nil {
+		return "", false, fmt.Errorf("marshal subtree: %w", err)
+	}
+	return string(out), true, nil
+}
+
+// UpdateConfigFields updates specific fields in config.yaml using yaml.Node
+// manipulation to preserve comments and formatting.
+func UpdateConfigFields(fields map[string]string) error {
+	configPath, err := ConfigPath()
+	if err != nil {
+		return err
+	}
 
 	data, err := os.ReadFile(configPath) //nolint:gosec // G304: path is ~/.yoloai/config.yaml
 	if err != nil {

@@ -192,14 +192,14 @@ func (m *Manager) promptTmuxSetup(userConfig string, noConfig bool) error {
 
 // setTmuxConf writes the tmux_conf setting to config.yaml.
 func (m *Manager) setTmuxConf(value string) error {
-	return updateConfigFields(map[string]string{
+	return UpdateConfigFields(map[string]string{
 		"defaults.tmux_conf": value,
 	})
 }
 
 // setSetupComplete marks setup as done and prints the completion message.
 func (m *Manager) setSetupComplete() error {
-	if err := updateConfigFields(map[string]string{
+	if err := UpdateConfigFields(map[string]string{
 		"setup_complete": "true",
 	}); err != nil {
 		return err

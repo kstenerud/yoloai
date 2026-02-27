@@ -15,20 +15,13 @@ import (
 
 const defaultConfigYAML = `# yoloai configuration
 # See https://github.com/kstenerud/yoloai for documentation
+# Run 'yoloai config set <key> <value>' to change settings.
+#
+# Available settings:
+#   defaults.backend      Runtime backend: docker, tart, seatbelt
+#   defaults.tart_image   Custom base VM image (tart backend only)
 
 setup_complete: false
-
-defaults:
-  agent: claude
-
-  mounts:
-    - ~/.gitconfig:/home/yoloai/.gitconfig:ro
-
-  ports: []
-
-  resources:
-    cpus: 4
-    memory: 8g
 `
 
 // Manager is the central orchestrator for sandbox operations.
@@ -70,7 +63,7 @@ func (m *Manager) EnsureSetup(ctx context.Context) error {
 			if err := m.setTmuxConf("default+host"); err != nil {
 				return fmt.Errorf("set tmux_conf: %w", err)
 			}
-			if err := updateConfigFields(map[string]string{"setup_complete": "true"}); err != nil {
+			if err := UpdateConfigFields(map[string]string{"setup_complete": "true"}); err != nil {
 				return fmt.Errorf("set setup_complete: %w", err)
 			}
 		} else {

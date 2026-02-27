@@ -110,7 +110,7 @@ func TestEnsureSetup_WritesConfigOnFirstRun(t *testing.T) {
 	configPath := filepath.Join(tmpDir, ".yoloai", "config.yaml")
 	content, err := os.ReadFile(configPath) //nolint:gosec // G304: test code with temp dir
 	require.NoError(t, err)
-	assert.Contains(t, string(content), "agent: claude")
+	assert.Contains(t, string(content), "setup_complete")
 
 	// Check completion hint was printed
 	assert.Contains(t, output.String(), "completion")
