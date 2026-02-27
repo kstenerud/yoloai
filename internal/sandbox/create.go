@@ -190,9 +190,12 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 		return nil, fmt.Errorf("ensure container settings: %w", err)
 	}
 
-	// Fix install method in seeded .claude.json (host has "native", container uses npm)
-	if err := ensureHomeSeedConfig(agentDef, sandboxDir); err != nil {
-		return nil, fmt.Errorf("ensure home seed config: %w", err)
+	// Fix install method in seeded .claude.json (host has "native", container uses npm).
+	// Skip for seatbelt — it runs the host's native Claude Code, not npm-installed.
+	if m.backend != "seatbelt" {
+		if err := ensureHomeSeedConfig(agentDef, sandboxDir); err != nil {
+			return nil, fmt.Errorf("ensure home seed config: %w", err)
+		}
 	}
 
 	// Copy workdir
@@ -737,6 +740,7 @@ func copySeedFiles(agentDef *agent.Definition, sandboxDir string, hasAPIKey bool
 
 // ensureContainerSettings merges required container settings into agent-state/settings.json.
 // For agents using --dangerously-skip-permissions, ensures the bypass prompt is skipped.
+// Also disables Claude Code's built-in sandbox-exec to prevent nesting failures.
 func ensureContainerSettings(agentDef *agent.Definition, sandboxDir string) error {
 	if agentDef.StateDir == "" {
 		return nil
@@ -754,6 +758,11 @@ func ensureContainerSettings(agentDef *agent.Definition, sandboxDir string) erro
 	}
 
 	settings["skipDangerousModePermissionPrompt"] = true
+
+	// Disable Claude Code's built-in sandbox-exec to prevent nesting failures.
+	// sandbox-exec cannot be nested — an inner sandbox-exec inherits the outer
+	// profile's restrictions and typically fails.
+	settings["sandbox"] = map[string]interface{}{"enabled": false}
 
 	return writeJSONMap(settingsPath, settings)
 }
