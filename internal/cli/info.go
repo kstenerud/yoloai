@@ -22,11 +22,11 @@ type backendInfo struct {
 
 // backendDetail holds extended information shown by `info backends <name>`.
 type backendDetail struct {
-	Environment  string
-	Platforms    string
-	Requires     string
-	InstallHint  string
-	Tradeoffs    []string
+	Environment string
+	Platforms   string
+	Requires    string
+	InstallHint string
+	Tradeoffs   []string
 }
 
 // knownBackends is the registry of all supported backends.
@@ -163,17 +163,17 @@ func showBackendDetail(cmd *cobra.Command, name string) error {
 		}
 	}
 
-	fmt.Fprintf(out, "Backend:     %s\n", b.Name)         //nolint:errcheck
-	fmt.Fprintf(out, "Description: %s\n", b.Description)  //nolint:errcheck
-	fmt.Fprintf(out, "Available:   %s\n", avail)           //nolint:errcheck
-	fmt.Fprintf(out, "Environment: %s\n", d.Environment)   //nolint:errcheck
-	fmt.Fprintf(out, "Platforms:   %s\n", d.Platforms)      //nolint:errcheck
-	fmt.Fprintf(out, "Requires:    %s\n", d.Requires)       //nolint:errcheck
+	fmt.Fprintf(out, "Backend:     %s\n", b.Name)        //nolint:errcheck
+	fmt.Fprintf(out, "Description: %s\n", b.Description) //nolint:errcheck
+	fmt.Fprintf(out, "Available:   %s\n", avail)         //nolint:errcheck
+	fmt.Fprintf(out, "Environment: %s\n", d.Environment) //nolint:errcheck
+	fmt.Fprintf(out, "Platforms:   %s\n", d.Platforms)   //nolint:errcheck
+	fmt.Fprintf(out, "Requires:    %s\n", d.Requires)    //nolint:errcheck
 	if d.InstallHint != "" {
 		fmt.Fprintf(out, "Install:     %s\n", d.InstallHint) //nolint:errcheck
 	}
-	fmt.Fprintln(out)                                       //nolint:errcheck
-	fmt.Fprintln(out, "Tradeoffs:")                         //nolint:errcheck
+	fmt.Fprintln(out)               //nolint:errcheck
+	fmt.Fprintln(out, "Tradeoffs:") //nolint:errcheck
 	for _, t := range d.Tradeoffs {
 		fmt.Fprintf(out, "  - %s\n", t) //nolint:errcheck
 	}
@@ -188,6 +188,6 @@ func checkBackend(ctx context.Context, name string) (available bool, note string
 	if err != nil {
 		return false, err.Error()
 	}
-	rt.Close() //nolint:errcheck // best-effort cleanup
+	rt.Close() //nolint:errcheck,gosec // best-effort cleanup
 	return true, ""
 }

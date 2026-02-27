@@ -35,6 +35,10 @@ All design/planning documents live in `docs/`:
 - Profile system: each profile is a directory in `~/.yoloai/profiles/<name>/` containing a `Dockerfile` and `profile.yaml` (runtime config).
 - Config in `~/.yoloai/config.yaml` with global defaults only. Profile-specific config lives in `profile.yaml` files.
 
+## Code Quality Gate
+
+**Before considering any code change complete, run `make check`.** This runs gofmt verification, golangci-lint, go mod tidy check, and all tests. All must pass before committing. If `make check` fails, fix the issues before proceeding. Subagents implementing code changes must include `make check` as a final step.
+
 ## Workflow Conventions
 
 - **Critique cycle:** Write a critique in CRITIQUE.md, apply corrections to DESIGN.md/RESEARCH.md, mark critique as done, empty CRITIQUE.md for the next round.

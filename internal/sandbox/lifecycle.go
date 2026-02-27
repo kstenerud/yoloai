@@ -386,4 +386,3 @@ rm -f /tmp/yoloai-reset.txt`, appendPrompt, cfg.SubmitSequence)
 	})
 	return err
 }
-

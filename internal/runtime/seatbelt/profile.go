@@ -35,14 +35,14 @@ func GenerateProfile(cfg runtime.InstanceConfig, sandboxDir, homeDir string) str
 	// --- System libraries and binaries ---
 	b.WriteString("; System libraries, frameworks, and binaries\n")
 	for _, path := range systemReadPaths() {
-		b.WriteString(fmt.Sprintf("(allow file-read* (subpath %q))\n", path))
+		fmt.Fprintf(&b, "(allow file-read* (subpath %q))\n", path)
 	}
 	b.WriteString("\n")
 
 	// --- Temp directories ---
 	b.WriteString("; Temporary directories\n")
 	for _, path := range tempPaths() {
-		b.WriteString(fmt.Sprintf("(allow file-read* file-write* (subpath %q))\n", path))
+		fmt.Fprintf(&b, "(allow file-read* file-write* (subpath %q))\n", path)
 	}
 	b.WriteString("\n")
 
@@ -56,7 +56,7 @@ func GenerateProfile(cfg runtime.InstanceConfig, sandboxDir, homeDir string) str
 
 	// --- Sandbox directory (always read-write) ---
 	b.WriteString("; Sandbox directory\n")
-	b.WriteString(fmt.Sprintf("(allow file-read* file-write* (subpath %q))\n\n", sandboxDir))
+	fmt.Fprintf(&b, "(allow file-read* file-write* (subpath %q))\n\n", sandboxDir)
 
 	// --- Mount-derived filesystem rules ---
 	b.WriteString("; Mount-derived filesystem rules\n")
@@ -65,16 +65,16 @@ func GenerateProfile(cfg runtime.InstanceConfig, sandboxDir, homeDir string) str
 			continue
 		}
 		if m.ReadOnly {
-			b.WriteString(fmt.Sprintf("(allow file-read* (subpath %q))\n", m.Source))
+			fmt.Fprintf(&b, "(allow file-read* (subpath %q))\n", m.Source)
 		} else {
-			b.WriteString(fmt.Sprintf("(allow file-read* file-write* (subpath %q))\n", m.Source))
+			fmt.Fprintf(&b, "(allow file-read* file-write* (subpath %q))\n", m.Source)
 		}
 	}
 	b.WriteString("\n")
 
 	// --- Home directory (read for .gitconfig etc.) ---
 	b.WriteString("; Home directory (limited read access)\n")
-	b.WriteString(fmt.Sprintf("(allow file-read* (subpath %q))\n\n", homeDir))
+	fmt.Fprintf(&b, "(allow file-read* (subpath %q))\n\n", homeDir)
 
 	// --- Network ---
 	b.WriteString("; Network access\n")

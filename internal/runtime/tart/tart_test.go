@@ -105,7 +105,7 @@ func TestBuildMountSymlinkCmds(t *testing.T) {
 		{Source: "/Users/karl/.yoloai/sandboxes/test/agent-state", Target: "/home/admin/.claude/"},
 	}
 	dirNames := map[string]string{
-		"/Users/karl/project":                                  "workdir",
+		"/Users/karl/project":                            "workdir",
 		"/Users/karl/.yoloai/sandboxes/test/agent-state": "agent-state",
 	}
 

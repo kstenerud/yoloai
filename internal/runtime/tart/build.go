@@ -69,8 +69,8 @@ func (r *Runtime) EnsureImage(ctx context.Context, sourceDir string, output io.W
 	}
 
 	if !baseExists {
-		fmt.Fprintf(output, "Pulling base macOS VM image (%s)...\n", baseImage) //nolint:errcheck // best-effort
-		fmt.Fprintln(output, "This is a one-time download (~30 GB) and may take a while.")              //nolint:errcheck // best-effort
+		fmt.Fprintf(output, "Pulling base macOS VM image (%s)...\n", baseImage)            //nolint:errcheck // best-effort
+		fmt.Fprintln(output, "This is a one-time download (~30 GB) and may take a while.") //nolint:errcheck // best-effort
 
 		if err := r.pullImage(ctx, baseImage, output); err != nil {
 			return fmt.Errorf("pull base image: %w", err)

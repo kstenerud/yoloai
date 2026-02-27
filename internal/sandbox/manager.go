@@ -127,4 +127,3 @@ func (m *Manager) isInteractive() bool {
 	}
 	return false
 }
-

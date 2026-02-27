@@ -66,7 +66,7 @@ func newShowCmd() *cobra.Command {
 					fmt.Fprintf(w, "Container:   %s\n", info.ContainerID) //nolint:errcheck // best-effort output
 				}
 
-				fmt.Fprintf(w, "Disk Usage:  %s\n", info.DiskUsage)   //nolint:errcheck // best-effort output
+				fmt.Fprintf(w, "Disk Usage:  %s\n", info.DiskUsage)  //nolint:errcheck // best-effort output
 				fmt.Fprintf(w, "Changes:     %s\n", info.HasChanges) //nolint:errcheck // best-effort output
 
 				slog.Debug("show complete", "sandbox", name)

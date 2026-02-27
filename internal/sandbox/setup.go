@@ -164,8 +164,8 @@ func (m *Manager) promptTmuxSetup(userConfig string, noConfig bool) error {
 		return m.setSetupComplete()
 
 	case "p":
-		fmt.Fprintln(m.output)                                  //nolint:errcheck // best-effort output
-		fmt.Fprintln(m.output, "--- yoloai defaults ---")       //nolint:errcheck // best-effort output
+		fmt.Fprintln(m.output)                                    //nolint:errcheck // best-effort output
+		fmt.Fprintln(m.output, "--- yoloai defaults ---")         //nolint:errcheck // best-effort output
 		fmt.Fprint(m.output, string(dockerrt.EmbeddedTmuxConf())) //nolint:errcheck // best-effort output
 		if !noConfig && userConfig != "" {
 			fmt.Fprintln(m.output)                        //nolint:errcheck // best-effort output
