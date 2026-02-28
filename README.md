@@ -39,6 +39,34 @@ yoloai new explore ./my-project
 
 Agents: **Claude Code** (default), **Gemini CLI** (`-a gemini`). Use `yoloai info agents` to list available agents.
 
+## Iterative workflow
+
+For longer tasks, work in a commit-by-commit loop. Keep two terminals open in your project directory — one for yoloAI, one for your normal shell. Start with a clean git repo.
+
+```
+┌─ YOLO shell ──────────────────────┬─ Outer shell ─────────────────────┐
+│                                   │                                   │
+│ yoloai new myproject . -a         │                                   │
+│                                   │                                   │
+│ # Tell the agent what to do,      │                                   │
+│ # have it commit when done.       │                                   │
+│                                   │ yoloai apply myproject            │
+│                                   │ # Review and accept the commits.  │
+│                                   │                                   │
+│ # ... next task, next commit ...  │                                   │
+│                                   │ yoloai apply myproject            │
+│                                   │                                   │
+│                                   │ # When you have a good set of     │
+│                                   │ # commits, push:                  │
+│                                   │ git push                          │
+│                                   │                                   │
+│                                   │ # Done? Tear it down:             │
+│                                   │ yoloai destroy myproject          │
+└───────────────────────────────────┴───────────────────────────────────┘
+```
+
+The agent works on an isolated copy, so you can keep iterating without risk. Each `apply` patches the real project with only the new commits since the last apply.
+
 ## Why?
 
 - **Your files are untouchable.** The agent works on an isolated copy. Originals never change until you say so.
