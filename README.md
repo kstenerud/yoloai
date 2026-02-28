@@ -67,7 +67,7 @@ For running:
 | tart     | macOS (Apple Silicon only)       | [Tart](https://github.com/cirruslabs/tart) (`brew install cirruslabs/cli/tart`) |
 | seatbelt | macOS (any architecture)         | None (uses built-in `sandbox-exec`)                                |
 
-Use `yoloai info backends` to check which backends are available on your system.
+Use `yoloai system backends` to check which backends are available on your system.
 
 ## Learn more
 

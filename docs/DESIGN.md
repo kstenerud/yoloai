@@ -316,29 +316,43 @@ Single Go binary. No runtime dependencies — just the binary and Docker.
 ## Commands
 
 ```
-yoloai new [options] [-a] <name> [<workdir>] [-d <auxdir>...]  Create and start a sandbox  (aux dirs [PLANNED])
-yoloai list (alias: ls)                        List sandboxes and their status
-yoloai attach <name>                           Attach to a sandbox's tmux session
-yoloai show <name>                             Show sandbox configuration and state
-yoloai log <name>                              Show sandbox session log
-yoloai diff <name> [<ref>] [-- <path>...]       Show changes the agent made
-yoloai apply <name>                            Copy changes back to original dirs
-yoloai exec <name> <command>                   Run a command inside the sandbox
-yoloai stop <name>...                          Stop sandboxes (preserving state)
-yoloai start [-a] [--resume] <name>             Start a stopped sandbox  (--resume [PLANNED])
-yoloai restart <name>                          Restart the agent in an existing sandbox  [PLANNED]
-yoloai reset <name>                            Re-copy workdir and reset git baseline
-yoloai destroy <name>...                       Stop and remove sandboxes
-yoloai build [profile|--all]                   Build/rebuild Docker image(s)  (profile/--all [PLANNED])
-yoloai config get [key]                        Print configuration values (all or specific key)
-yoloai config set <key> <value>                Set a configuration value
-yoloai profile create <name> [--template <tpl>]  Create a profile with scaffold  [PLANNED]
-yoloai profile list                            List profiles  [PLANNED]
-yoloai profile delete <name>                   Delete a profile  [PLANNED]
-yoloai x <extension> <name> [args...] [--flags...]  Run a user-defined extension  [PLANNED]
-yoloai setup                                   Run interactive setup  (--power-user [PLANNED])
-yoloai completion [bash|zsh|fish|powershell]   Generate shell completion script
-yoloai version                                 Show version information
+Core Workflow:
+  yoloai new [options] [-a] <name> [<workdir>] [-d <auxdir>...]  Create and start a sandbox  (aux dirs [PLANNED])
+  yoloai attach <name>                           Attach to a sandbox's tmux session
+  yoloai diff <name> [<ref>] [-- <path>...]       Show changes the agent made
+  yoloai apply <name>                            Copy changes back to original dirs
+
+Lifecycle:
+  yoloai start [-a] [--resume] <name>             Start a stopped sandbox  (--resume [PLANNED])
+  yoloai stop <name>...                          Stop sandboxes (preserving state)
+  yoloai destroy <name>...                       Stop and remove sandboxes
+  yoloai reset <name>                            Re-copy workdir and reset git baseline
+  yoloai restart <name>                          Restart the agent in an existing sandbox  [PLANNED]
+
+Inspection:
+  yoloai system                                  System information and management
+  yoloai system info                             Show version, paths, disk usage, backend availability
+  yoloai system agents [name]                    List available agents
+  yoloai system backends [name]                  List available runtime backends
+  yoloai system build [profile|--all]            Build/rebuild Docker image(s)  (profile/--all [PLANNED])
+  yoloai system setup                            Run interactive setup  (--power-user [PLANNED])
+  yoloai sandbox                                 Sandbox inspection
+  yoloai sandbox list                            List sandboxes and their status
+  yoloai sandbox info <name>                     Show sandbox configuration and state
+  yoloai sandbox log <name>                      Show sandbox session log
+  yoloai sandbox exec <name> <command>           Run a command inside the sandbox
+  yoloai ls                                      List sandboxes (shortcut for 'sandbox list')
+  yoloai log <name>                              Show sandbox log (shortcut for 'sandbox log')
+
+Admin:
+  yoloai config get [key]                        Print configuration values (all or specific key)
+  yoloai config set <key> <value>                Set a configuration value
+  yoloai profile create <name> [--template <tpl>]  Create a profile with scaffold  [PLANNED]
+  yoloai profile list                            List profiles  [PLANNED]
+  yoloai profile delete <name>                   Delete a profile  [PLANNED]
+  yoloai x <extension> <name> [args...] [--flags...]  Run a user-defined extension  [PLANNED]
+  yoloai completion [bash|zsh|fish|powershell]   Generate shell completion script
+  yoloai version                                 Show version information
 ```
 
 ### Agent Definitions
@@ -621,7 +635,7 @@ Runs `docker exec -it yoloai-<name> tmux attach -t main`.
 
 Detach with standard tmux `Ctrl-b d` — container keeps running.
 
-### `yoloai show <name>`
+### `yoloai sandbox info <name>`
 
 Displays sandbox configuration and state:
 - Name
@@ -712,17 +726,17 @@ Options:
 - `--all`: Destroy all sandboxes (confirmation required unless `--yes` is also provided).
 - `--yes`: Skip confirmation prompts.
 
-### `yoloai log`
+### `yoloai sandbox log` / `yoloai log`
 
 `yoloai log <name>` displays the session log (`log.txt`) for the named sandbox. Auto-pages through `$PAGER` / `less -R` when stdout is a TTY, matching `git log` behavior. When piped (stdout is not a TTY), outputs raw for composition with unix tools: `yoloai log my-task | tail -100`, `yoloai log my-task | grep error`.
 
-### `yoloai exec`
+### `yoloai sandbox exec`
 
 `yoloai exec <name> <command>` runs a command inside the sandbox container without attaching to tmux. Useful for debugging (`yoloai exec my-sandbox bash`) or quick operations (`yoloai exec my-sandbox npm install foo`).
 
 Implemented as `docker exec yoloai-<name> <command>`, with `-i` added when stdin is a pipe/TTY and `-t` added when stdin is a TTY. This allows both interactive use (`yoloai exec my-sandbox bash`) and non-interactive use (`yoloai exec my-sandbox ls`, `echo "test" | yoloai exec my-sandbox cat`).
 
-### `yoloai list`
+### `yoloai sandbox list` / `yoloai ls`
 
 Lists all sandboxes with their current status.
 
@@ -738,26 +752,26 @@ Lists all sandboxes with their current status.
 
 Agent exit status is detected via `tmux list-panes -t main -F '#{pane_dead_status}'` when `#{pane_dead}` is 1. Non-zero exit code shows STATUS as "failed"; exit 0 shows as "done". Running containers with live panes show "running"; stopped containers show "stopped".
 
-Alias: `yoloai ls`.
+Top-level shortcut: `yoloai ls`.
 
 [PLANNED] Options:
 - `--running`: Show only running sandboxes.
 - `--stopped`: Show only stopped sandboxes.
 - `--json`: Output as JSON for scripting.
 
-### `yoloai build`
+### `yoloai system build`
 
-`yoloai build` with no arguments rebuilds the base image (`yoloai-base`).
+`yoloai system build` with no arguments rebuilds the base image (`yoloai-base`).
 
-**[PLANNED]** `yoloai build <profile>` rebuilds a specific profile's image (which derives from `yoloai-base`).
+**[PLANNED]** `yoloai system build <profile>` rebuilds a specific profile's image (which derives from `yoloai-base`).
 
-**[PLANNED]** `yoloai build --all` rebuilds everything: base image first, then the proxy image (`yoloai-proxy`), then all profile images.
+**[PLANNED]** `yoloai system build --all` rebuilds everything: base image first, then the proxy image (`yoloai-proxy`), then all profile images.
 
-**[PLANNED]** `yoloai build` and `yoloai build --all` also build the proxy sidecar image (`yoloai-proxy`), a purpose-built Go forward proxy (~200-300 lines) used by `--network-isolated`. Compiled as a static binary in a `FROM scratch` image (~5 MB). Uses HTTPS CONNECT tunneling with domain-based allowlist (no MITM). Allowlist loaded from a config file; reloadable via SIGUSR1. Logs allowed/denied requests. See RESEARCH.md "Proxy Sidecar Research" for the evaluation of alternatives.
+**[PLANNED]** `yoloai system build` and `yoloai system build --all` also build the proxy sidecar image (`yoloai-proxy`), a purpose-built Go forward proxy (~200-300 lines) used by `--network-isolated`. Compiled as a static binary in a `FROM scratch` image (~5 MB). Uses HTTPS CONNECT tunneling with domain-based allowlist (no MITM). Allowlist loaded from a config file; reloadable via SIGUSR1. Logs allowed/denied requests. See RESEARCH.md "Proxy Sidecar Research" for the evaluation of alternatives.
 
 Useful after modifying a profile's Dockerfile or when the base image needs updating (e.g., new Claude CLI version).
 
-**[PLANNED]** Profile Dockerfiles that install private dependencies (e.g., `RUN go mod download` from a private repo, `RUN npm install` from a private registry) need build-time credentials. yoloAI passes host credentials to Docker BuildKit via `--secret` so they're available during the build but never stored in image layers. Example: `RUN --mount=type=secret,id=npmrc,target=/root/.npmrc npm install` in the Dockerfile, with yoloAI automatically providing `~/.npmrc` as the secret source. Supported secret sources are documented in `yoloai build --help`.
+**[PLANNED]** Profile Dockerfiles that install private dependencies (e.g., `RUN go mod download` from a private repo, `RUN npm install` from a private registry) need build-time credentials. yoloAI passes host credentials to Docker BuildKit via `--secret` so they're available during the build but never stored in image layers. Example: `RUN --mount=type=secret,id=npmrc,target=/root/.npmrc npm install` in the Dockerfile, with yoloAI automatically providing `~/.npmrc` as the secret source. Supported secret sources are documented in `yoloai system build --help`.
 
 ### `yoloai stop`
 
@@ -1074,10 +1088,10 @@ For the no-config case, `[n]` means raw tmux defaults (equivalent to `tmux_conf:
 After all prompts complete successfully, set `setup_complete: true` in `config.yaml` and print:
 
 ```
-Setup complete. To re-run setup at any time: yoloai setup
+Setup complete. To re-run setup at any time: yoloai system setup
 ```
 
-### `yoloai setup`
+### `yoloai system setup`
 
 Dedicated interactive setup command. Always runs the full new-user experience regardless of `setup_complete` — treats it as if `setup_complete` is false. This lets users redo their choices if they regret something. Shows current settings as defaults in prompts (e.g., if `tmux_conf` is already `host`, the `[n]` option is pre-selected).
 

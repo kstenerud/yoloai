@@ -26,19 +26,26 @@ Full reference for commands, flags, configuration, and internals. For a quick ov
 
 | Command | Description |
 |---------|-------------|
-| `yoloai list` | List sandboxes and their status (alias: `ls`) |
-| `yoloai show <name>` | Show sandbox configuration and state |
-| `yoloai log <name>` | Show session log |
-| `yoloai exec <name> <cmd>` | Run a command inside the sandbox |
+| `yoloai system` | System information and management |
+| `yoloai system info` | Show version, paths, disk usage, backend availability |
+| `yoloai system agents [name]` | List available agents |
+| `yoloai system backends [name]` | List available runtime backends |
+| `yoloai system build` | Build or rebuild the base Docker image |
+| `yoloai system setup` | Re-run interactive first-run setup |
+| `yoloai sandbox` | Sandbox inspection |
+| `yoloai sandbox list` | List sandboxes and their status |
+| `yoloai sandbox info <name>` | Show sandbox configuration and state |
+| `yoloai sandbox log <name>` | Show session log |
+| `yoloai sandbox exec <name> <cmd>` | Run a command inside the sandbox |
+| `yoloai ls` | List sandboxes (shortcut for `sandbox list`) |
+| `yoloai log <name>` | Show sandbox log (shortcut for `sandbox log`) |
 
 **Admin**
 
 | Command | Description |
 |---------|-------------|
-| `yoloai build` | Build or rebuild the base Docker image |
 | `yoloai config get [key]` | Print configuration values (all settings or a specific key) |
 | `yoloai config set <key> <value>` | Set a configuration value |
-| `yoloai setup` | Re-run interactive first-run setup |
 | `yoloai completion <shell>` | Generate shell completion (bash/zsh/fish/powershell) |
 | `yoloai version` | Show version information |
 

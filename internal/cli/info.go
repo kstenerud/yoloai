@@ -1,7 +1,7 @@
 package cli
 
-// ABOUTME: `yoloai info` parent command and `info backends` subcommand.
-// Shows system information such as available runtime backends.
+// ABOUTME: Backend and agent info commands, and helpers shared with
+// ABOUTME: system_info.go (checkBackend, knownBackends, etc.).
 
 import (
 	"context"
@@ -90,19 +90,7 @@ var knownBackendsByName = func() map[string]*backendInfo {
 	return m
 }()
 
-func newInfoCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:     "info",
-		Short:   "Show system information",
-		GroupID: groupInspect,
-	}
-
-	cmd.AddCommand(newInfoBackendsCmd())
-	cmd.AddCommand(newInfoAgentsCmd())
-	return cmd
-}
-
-func newInfoBackendsCmd() *cobra.Command {
+func newSystemBackendsCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "backends [name]",
 		Short: "List available runtime backends",
@@ -194,7 +182,7 @@ func checkBackend(ctx context.Context, name string) (available bool, note string
 	return true, ""
 }
 
-func newInfoAgentsCmd() *cobra.Command {
+func newSystemAgentsCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "agents [name]",
 		Short: "List available agents",

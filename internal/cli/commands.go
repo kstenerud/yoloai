@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/kstenerud/yoloai/internal/runtime"
@@ -44,53 +42,36 @@ func registerCommands(root *cobra.Command, version, commit, date string) {
 		newResetCmd(),
 
 		// Inspection
-		newListCmd(),
-		newShowCmd(),
-		newLogCmd(),
-		newInfoCmd(),
-		newExecCmd(),
+		newSystemCmd(version, commit, date),
+		newSandboxCmd(),
+		newLsAliasCmd(),
+		newLogAliasCmd(),
 
 		// Admin
-		newBuildCmd(),
 		newConfigCmd(),
-		newSetupCmd(),
 		newCompletionCmd(),
 		newVersionCmd(version, commit, date),
 	)
 }
 
-func newBuildCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:     "build [profile]",
-		Short:   "Build or rebuild base image",
-		GroupID: groupAdmin,
-		Args:    cobra.MaximumNArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if len(args) > 0 {
-				return fmt.Errorf("profiles not yet implemented")
-			}
-
-			homeDir, err := os.UserHomeDir()
-			if err != nil {
-				return fmt.Errorf("get home directory: %w", err)
-			}
-			yoloaiDir := filepath.Join(homeDir, ".yoloai")
-
-			backend := resolveBackend(cmd)
-			return withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
-				if err := rt.EnsureImage(ctx, yoloaiDir, os.Stderr, slog.Default(), true); err != nil {
-					return err
-				}
-
-				_, err := fmt.Fprintln(cmd.OutOrStdout(), "Base image built successfully")
-				return err
-			})
-		},
+func newLsAliasCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:     "ls",
+		Short:   "List sandboxes (shortcut for 'sandbox list')",
+		GroupID: groupInspect,
+		Args:    cobra.NoArgs,
+		RunE:    runList,
 	}
+}
 
-	cmd.Flags().String("backend", "", "Runtime backend (see 'yoloai info backends')")
-
-	return cmd
+func newLogAliasCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:     "log <name>",
+		Short:   "Show sandbox log (shortcut for 'sandbox log')",
+		GroupID: groupInspect,
+		Args:    cobra.ArbitraryArgs,
+		RunE:    runLog,
+	}
 }
 
 func newNewCmd(version string) *cobra.Command {
@@ -176,7 +157,7 @@ func newNewCmd(version string) *cobra.Command {
 	cmd.Flags().StringP("prompt-file", "f", "", "File containing the prompt")
 	cmd.Flags().StringP("model", "m", "", "Model name or alias")
 	cmd.Flags().String("agent", "claude", "Agent to use")
-	cmd.Flags().String("backend", "", "Runtime backend (see 'yoloai info backends')")
+	cmd.Flags().String("backend", "", "Runtime backend (see 'yoloai system backends')")
 	cmd.Flags().Bool("network-none", false, "Disable network access")
 	cmd.Flags().StringArray("port", nil, "Port mapping (host:container)")
 	cmd.Flags().Bool("replace", false, "Replace existing sandbox")

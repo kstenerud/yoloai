@@ -37,19 +37,21 @@ Dependency direction: `cmd/yoloai` → `cli` → `sandbox` + `runtime`; `sandbox
 | File | Purpose |
 |------|---------|
 | `root.go` | Root Cobra command, global flags (`-v`, `-q`, `--no-color`), `Execute()` with exit code mapping. |
-| `commands.go` | `registerCommands()` — registers all subcommands. Also contains `newNewCmd`, `newBuildCmd`, `newCompletionCmd`, `newVersionCmd`, and `attachToSandbox`/`waitForTmux` helpers. |
+| `commands.go` | `registerCommands()` — registers all subcommands. Also contains `newNewCmd`, `newLsAliasCmd`, `newLogAliasCmd`, `newCompletionCmd`, `newVersionCmd`, and `attachToSandbox`/`waitForTmux` helpers. |
 | `config.go` | `yoloai config get/set` — read and write `config.yaml` values via dotted paths. |
 | `apply.go` | `yoloai apply` — apply changes back to host. Squash and selective-commit modes, `--export` for `.patch` files. |
 | `attach.go` | `yoloai attach` — attach to sandbox tmux session via `runtime.InteractiveExec`. |
 | `diff.go` | `yoloai diff` — show agent changes. Supports `--stat`, `--log`, commit refs, and ranges. |
 | `destroy.go` | `yoloai destroy` — stop and remove sandbox with confirmation logic. |
-| `exec.go` | `yoloai exec` — run commands inside a running sandbox container. |
-| `list.go` | `yoloai list` — tabular listing of all sandboxes with status. |
-| `log.go` | `yoloai log` — display sandbox session log (log.txt). |
-| `info.go` | `yoloai info` parent command and `info backends` subcommand. Shows available runtime backends with availability status. |
+| `system.go` | `yoloai system` parent command with `build` and `setup` subcommands. |
+| `system_info.go` | `yoloai system info` — displays version, paths, disk usage, backend availability. |
+| `sandbox_cmd.go` | `yoloai sandbox` parent command grouping sandbox inspection subcommands. |
+| `sandbox_info.go` | `yoloai sandbox info` — display sandbox config, meta, and status. |
+| `exec.go` | `yoloai sandbox exec` — run commands inside a running sandbox container. |
+| `list.go` | `yoloai sandbox list` / `yoloai ls` — tabular listing of all sandboxes with status. |
+| `log.go` | `yoloai sandbox log` / `yoloai log` — display sandbox session log (log.txt). |
+| `info.go` | Backend and agent info commands (`system backends`, `system agents`), plus shared helpers (`checkBackend`, `knownBackends`). |
 | `reset.go` | `yoloai reset` — re-copy workdir from host, reset git baseline. |
-| `setup.go` | `yoloai setup` — re-run interactive first-run setup. |
-| `show.go` | `yoloai show` — display sandbox config, meta, and status. |
 | `start.go` | `yoloai start` — start a stopped sandbox (recreates container if removed). |
 | `stop.go` | `yoloai stop` — stop a running sandbox. |
 | `envname.go` | `resolveName()` — resolves sandbox name from args or `YOLOAI_SANDBOX` env var. |
@@ -162,15 +164,19 @@ Tart (macOS VM) implementation of `Runtime` interface. Shells out to `tart` CLI 
 | `yoloai stop` | `cli/stop.go:newStopCmd` | `sandbox.Manager.Stop()` in `sandbox/lifecycle.go` |
 | `yoloai destroy` | `cli/destroy.go:newDestroyCmd` | `sandbox.Manager.Destroy()` in `sandbox/lifecycle.go` |
 | `yoloai reset` | `cli/reset.go:newResetCmd` | `sandbox.Manager.Reset()` in `sandbox/lifecycle.go` |
-| `yoloai list` | `cli/list.go:newListCmd` | `sandbox.ListSandboxes()` in `sandbox/inspect.go` |
-| `yoloai show` | `cli/show.go:newShowCmd` | `sandbox.InspectSandbox()` in `sandbox/inspect.go` |
-| `yoloai log` | `cli/log.go:newLogCmd` | Reads `log.txt` from sandbox dir |
-| `yoloai exec` | `cli/exec.go:newExecCmd` | `runtime.InteractiveExec` into running container |
-| `yoloai info backends` | `cli/info.go:newInfoBackendsCmd` | Probes each backend via `newRuntime()` |
-| `yoloai build` | `cli/commands.go:newBuildCmd` | `runtime.EnsureImage()` via active backend (`runtime/docker/build.go` or `runtime/tart/build.go`) |
+| `yoloai system info` | `cli/system_info.go:newSystemInfoCmd` | Version, paths, disk usage, backend availability |
+| `yoloai system agents` | `cli/info.go:newSystemAgentsCmd` | Lists agent definitions from `agent` package |
+| `yoloai system backends` | `cli/info.go:newSystemBackendsCmd` | Probes each backend via `newRuntime()` |
+| `yoloai system build` | `cli/system.go:newSystemBuildCmd` | `runtime.EnsureImage()` via active backend (`runtime/docker/build.go` or `runtime/tart/build.go`) |
+| `yoloai system setup` | `cli/system.go:newSystemSetupCmd` | `sandbox.Manager.RunSetup()` in `sandbox/setup.go` |
+| `yoloai sandbox list` | `cli/list.go:newSandboxListCmd` | `sandbox.ListSandboxes()` in `sandbox/inspect.go` |
+| `yoloai sandbox info` | `cli/sandbox_info.go:newSandboxInfoCmd` | `sandbox.InspectSandbox()` in `sandbox/inspect.go` |
+| `yoloai sandbox log` | `cli/log.go:newSandboxLogCmd` | Reads `log.txt` from sandbox dir |
+| `yoloai sandbox exec` | `cli/exec.go:newSandboxExecCmd` | `runtime.InteractiveExec` into running container |
+| `yoloai ls` | `cli/commands.go:newLsAliasCmd` | Shortcut for `sandbox list` (calls `runList`) |
+| `yoloai log` | `cli/commands.go:newLogAliasCmd` | Shortcut for `sandbox log` (calls `runLog`) |
 | `yoloai config get` | `cli/config.go:newConfigGetCmd` | `sandbox.GetEffectiveConfig()` / `sandbox.GetConfigValue()` |
 | `yoloai config set` | `cli/config.go:newConfigSetCmd` | `sandbox.UpdateConfigFields()` |
-| `yoloai setup` | `cli/setup.go:newSetupCmd` | `sandbox.Manager.RunSetup()` in `sandbox/setup.go` |
 | `yoloai completion` | `cli/commands.go:newCompletionCmd` | Cobra's built-in completion generators |
 | `yoloai version` | `cli/commands.go:newVersionCmd` | Prints build-time version info |
 
