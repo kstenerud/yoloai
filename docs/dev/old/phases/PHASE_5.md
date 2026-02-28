@@ -177,7 +177,7 @@ func newExecCmd() *cobra.Command
 
 ### 1. `attach` and `exec` use `os/exec` → `docker` CLI (not Docker SDK)
 
-Docker SDK's `HijackedResponse` doesn't handle raw TTY, terminal resize (`SIGWINCH`), or signal forwarding for interactive tmux sessions. This is consistent with PLAN.md's explicit note: "SDK doesn't handle raw TTY well for interactive tmux — justified exception."
+Docker SDK's `HijackedResponse` doesn't handle raw TTY, terminal resize (`SIGWINCH`), or signal forwarding for interactive tmux sessions. This is consistent with [PLAN.md](../PLAN.md)'s explicit note: "SDK doesn't handle raw TTY well for interactive tmux — justified exception."
 
 ### 2. `log` reads host file directly
 
@@ -205,7 +205,7 @@ Convenience alias via Cobra's `Aliases` field. Both `yoloai list` and `yoloai ls
 
 ### 7. No `--json`, `--running`, `--stopped` flags
 
-MVP keeps `list` simple per PLAN.md. Filtering and structured output deferred.
+MVP keeps `list` simple per [PLAN.md](../PLAN.md). Filtering and structured output deferred.
 
 ### 8. Each command gets its own CLI file
 

@@ -31,7 +31,7 @@ This runs the same checks as CI: formatting, linting, `go mod tidy` verification
 
 - Go code is formatted with `gofmt`
 - Linting via `golangci-lint` (see `.golangci.yml` for config)
-- See `docs/CODING-STANDARD.md` for project conventions
+- See `docs/dev/CODING-STANDARD.md` for project conventions
 
 ## Commit Style
 

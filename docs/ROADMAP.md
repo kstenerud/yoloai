@@ -1,38 +1,20 @@
 # yoloAI Roadmap
 
-yoloAI is under active development. yoloai currently covers the core copy/diff/apply workflow with Claude Code. Here's what's planned next.
+Core copy/diff/apply workflow with Claude Code ships today. Docker, Tart, and Seatbelt backends are implemented.
 
-## More agents
+For the full list of designed-but-unimplemented features, see [dev/plans/TODO.md](dev/plans/TODO.md). For design specs, see [design/](design/).
 
-- OpenAI Codex support (the architecture is agent-agnostic — adding an agent is a definition, not a rewrite)
-- Community-requested agents (Aider, Goose, etc.)
+## Next up
 
-## Network isolation
+- **Overlayfs copy strategy** — instant sandbox setup, space-efficient for large repos
+- **Network isolation** — domain-based allowlisting via proxy sidecar (`--network-isolated`)
+- **Profiles** — reusable environment definitions with user-supplied Dockerfiles
+- **Codex agent** — OpenAI Codex support (architecture is agent-agnostic)
 
-- Domain-based allowlisting — let the agent reach its API but nothing else (`--network-isolated`, `--network-allow <domain>`)
-- Proxy sidecar for fine-grained traffic control
+## Also planned
 
-## Profiles
-
-- Reusable environment definitions (`~/.yoloai/profiles/<name>/`) with user-supplied Dockerfiles
-- Per-profile config: custom mounts, resource limits, environment variables
-
-## Overlayfs copy strategy
-
-- Instant sandbox setup using overlayfs instead of full copy (space-efficient, fast for large repos)
-
-## macOS sandbox backend
-
-- macOS-native development (xcodebuild, Swift, Xcode SDKs) requires macOS VMs instead of Linux containers.
-- Tart (Cirrus Labs) is the leading candidate: `tart exec` for command execution, APFS clone for disposable VMs, VirtioFS for directory sharing, OCI registry for image distribution.
-- Apple's Virtualization.framework enforces a hard 2 concurrent macOS VM limit per Mac.
-- Startup is ~5-15 seconds (vs. sub-second for Linux containers).
-- See RESEARCH.md "macOS VM Sandbox Research" for full evaluation.
-
-## Other
-
-- Auxiliary directory mounts (`-d` flag for read-only dependencies)
-- Custom mount points (`=<path>` syntax)
+- Auxiliary directory mounts (`-d` flag)
+- User-defined extensions (`yoloai x`)
 - Auto-commit intervals for crash recovery
-- Config file generation (`yoloai config generate`)
-- User-defined extensions (`yoloai x <extension>`)
+- macOS VM backend improvements (Tart)
+- Community-requested agents (Aider, Goose, etc.)

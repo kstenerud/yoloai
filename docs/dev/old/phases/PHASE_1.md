@@ -389,7 +389,7 @@ make test
 
 ### 2. `DecodePath` return signature
 
-PLAN.md shows `DecodePath(encoded string) string` but decoding can fail on malformed input. The phase plan uses `(string, error)` instead. This is the right call — malformed caret sequences should be caught, not silently produce garbage. PLAN.md should be updated if we want strict consistency.
+[PLAN.md](../PLAN.md) shows `DecodePath(encoded string) string` but decoding can fail on malformed input. The phase plan uses `(string, error)` instead. This is the right call — malformed caret sequences should be caught, not silently produce garbage. [PLAN.md](../PLAN.md) should be updated if we want strict consistency.
 
 ### 3. Caret encoding scope for MVP paths
 

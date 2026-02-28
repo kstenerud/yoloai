@@ -1,6 +1,6 @@
 # Architecture
 
-Code navigation guide for the yoloAI codebase. Focused on the implemented code, not aspirational features (see DESIGN.md for those).
+Code navigation guide for the yoloAI codebase. Focused on the implemented code, not aspirational features (see [design/](../design/README.md) for those).
 
 ## Package Map
 

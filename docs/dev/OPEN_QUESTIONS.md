@@ -46,7 +46,7 @@ These were deferred from MVP but might be cheap to add and valuable for dogfoodi
 
 20. ~~**Multiple `:copy` directories in diff/apply**~~ — **Resolved:** Post-MVP (MVP has single workdir, no aux dirs). Show all with headers per directory. Apply all at once with single confirmation. If one fails, stop and report which failed. User can re-run with `[-- <path>...]` to apply selectively.
 
-86. ~~**Commit-preserving apply**~~ — **Resolved:** `yoloai apply` now preserves individual commits by default using `git format-patch` + `git am --3way`. Uncommitted changes are applied as unstaged on top. `--squash` for legacy single-patch behavior. `--patches <dir>` exports `.patch` files for manual curation (selective apply via deleting unwanted patches, or standard git tools like `git rebase -i` / `git cherry-pick`). `--no-wip` to skip uncommitted changes. See DESIGN.md `yoloai apply` section.
+86. ~~**Commit-preserving apply**~~ — **Resolved:** `yoloai apply` now preserves individual commits by default using `git format-patch` + `git am --3way`. Uncommitted changes are applied as unstaged on top. `--squash` for legacy single-patch behavior. `--patches <dir>` exports `.patch` files for manual curation (selective apply via deleting unwanted patches, or standard git tools like `git rebase -i` / `git cherry-pick`). `--no-wip` to skip uncommitted changes. See [commands.md](../design/commands.md) `yoloai apply` section.
 
 21. ~~**Overlay apply — patch transfer to host**~~ — **Resolved:** Capture `git diff` output from `docker exec` stdout, pipe to `git apply` on host. No temp file needed.
 
@@ -211,13 +211,13 @@ These were deferred from MVP but might be cheap to add and valuable for dogfoodi
 
 ## Unresolved (Codex and cleanup)
 
-37. **Codex proxy support** — Whether Codex's static Rust binary honors `HTTP_PROXY`/`HTTPS_PROXY` env vars is unverified (DESIGN.md line 340, RESEARCH.md). Critical for `--network-isolated` mode with Codex. If it ignores proxy env vars, would need iptables-only enforcement.
+37. **Codex proxy support** — Whether Codex's static Rust binary honors `HTTP_PROXY`/`HTTPS_PROXY` env vars is unverified (see [commands.md](../design/commands.md), RESEARCH.md). Critical for `--network-isolated` mode with Codex. If it ignores proxy env vars, would need iptables-only enforcement.
 
-38. **Codex required network domains** — Only `api.openai.com` is confirmed (DESIGN.md line 341/445). Additional domains (telemetry, model downloads) may be required.
+38. **Codex required network domains** — Only `api.openai.com` is confirmed (see [commands.md](../design/commands.md)). Additional domains (telemetry, model downloads) may be required.
 
 39. **Codex TUI behavior in tmux** — Interactive mode (`codex --yolo` without `exec`) behavior in tmux is unverified (RESEARCH.md).
 
-40. **Image cleanup mechanism** — Docker images accumulate indefinitely. Cleanup is deferred pending research into Docker's image lifecycle (DESIGN.md line 642). Needs design for safe pruning that doesn't break running sandboxes.
+40. **Image cleanup mechanism** — Docker images accumulate indefinitely. Cleanup is deferred pending research into Docker's image lifecycle (see [commands.md](../design/commands.md)). Needs design for safe pruning that doesn't break running sandboxes.
 
 ## Unresolved (Extensions)
 

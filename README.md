@@ -73,7 +73,7 @@ Use `yoloai system backends` to check which backends are available on your syste
 
 - **[Usage Guide](docs/GUIDE.md)** — commands, flags, workdir modes, configuration, security
 - **[Roadmap](docs/ROADMAP.md)** — upcoming agents, network isolation, profiles, overlayfs
-- **[Architecture](docs/ARCHITECTURE.md)** — code navigation for contributors
+- **[Architecture](docs/dev/ARCHITECTURE.md)** — code navigation for contributors
 
 ## License
 

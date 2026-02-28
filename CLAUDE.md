@@ -8,21 +8,32 @@ Public beta. Breaking changes are allowed but must be tracked in `docs/BREAKING-
 
 ## Key Files
 
-All design/planning documents live in `docs/`:
+User-facing docs live in `docs/`:
 
-- `docs/ARCHITECTURE.md` — Code navigation guide: package map, file index, key types, command→code map, data flows, "where to change" recipes, testing. Keep in sync when architecture changes.
-- `docs/DESIGN.md` — Architecture, commands, config format, workflows, security considerations, resolved decisions.
-- `docs/RESEARCH.md` — Competitive landscape (8 tools analyzed in depth, 9 more cataloged), community pain points, security incidents, alternative filesystem isolation approaches, feature comparison table, multi-agent CLI research, credential management research, network isolation research.
-- `docs/CRITIQUE.md` — Rolling critique document. After a critique pass, findings are applied to DESIGN.md and RESEARCH.md, then CRITIQUE.md is emptied for the next round.
-- `docs/CLI-STANDARD.md` — CLI design conventions: argument ordering (options first), flag naming, exit codes, error messages, help text format.
-- `docs/CODING-STANDARD.md` — Code style: Go 1.22+, gofmt, golangci-lint, Cobra, project structure, naming, error handling, dependency policy.
-- `docs/PLAN.md` — Completed initial implementation plan (phases, architecture decisions, file inventory). Historical reference for how yoloAI was built.
-- `docs/OPEN_QUESTIONS.md` — Questions encountered during design/implementation that need resolution. Add new questions here as they come up; resolve before the relevant phase begins.
 - `docs/GUIDE.md` — Full usage reference: commands, flags, workdir modes, agents/models, configuration, sandbox state, security, development.
-- `docs/ROADMAP.md` — Future plans: agents, network isolation, profiles, overlayfs, etc.
 - `docs/BREAKING-CHANGES.md` — Tracks breaking changes made during beta. Each entry documents previous behavior, new behavior, rationale, and migration steps. Include in release notes.
+- `docs/ROADMAP.md` — Future plans: agents, network isolation, profiles, overlayfs, etc.
 
-## Architecture (from DESIGN.md)
+Design specs live in `docs/design/`:
+
+- `docs/design/README.md` — Goal, value prop, architecture, directory layout, prerequisites, resolved decisions.
+- `docs/design/commands.md` — Command table, agent definitions, all command specs.
+- `docs/design/config.md` — Docker images, config.yaml format, recipes, profiles.
+- `docs/design/setup.md` — First-run experience, tmux configuration.
+- `docs/design/security.md` — Credential management, security considerations.
+
+Development docs live in `docs/dev/`:
+
+- `docs/dev/ARCHITECTURE.md` — Code navigation guide: package map, file index, key types, command→code map, data flows, "where to change" recipes, testing. Keep in sync when architecture changes.
+- `docs/dev/CODING-STANDARD.md` — Code style: Go 1.22+, gofmt, golangci-lint, Cobra, project structure, naming, error handling, dependency policy.
+- `docs/dev/CLI-STANDARD.md` — CLI design conventions: argument ordering (options first), flag naming, exit codes, error messages, help text format.
+- `docs/dev/RESEARCH.md` — Competitive landscape, community pain points, security incidents, feature comparison, multi-agent CLI research, credential management research, network isolation research.
+- `docs/dev/CRITIQUE.md` — Rolling critique document. After a critique pass, findings are applied to design docs and RESEARCH.md, then CRITIQUE.md is emptied for the next round.
+- `docs/dev/OPEN_QUESTIONS.md` — Questions encountered during design/implementation that need resolution.
+- `docs/dev/plans/TODO.md` — Consolidated list of designed-but-unimplemented features with design references.
+- `docs/dev/old/PLAN.md` — Historical implementation plan (phases, architecture decisions). Reference for how yoloAI was built.
+
+## Architecture (from design docs)
 
 - Go binary, no runtime deps — just the binary and Docker (or Tart for macOS VMs, or Seatbelt for lightweight macOS sandboxing).
 - Pluggable runtime backend via `runtime.Runtime` interface in `internal/runtime/`. Three backends: Docker (`internal/runtime/docker/`), Tart (`internal/runtime/tart/`), and Seatbelt (`internal/runtime/seatbelt/`). CLI dispatches via `newRuntime()` in `internal/cli/helpers.go`. No backend-specific types leak outside their packages.
@@ -41,8 +52,8 @@ All design/planning documents live in `docs/`:
 
 ## Workflow Conventions
 
-- **Critique cycle:** Write a critique in CRITIQUE.md, apply corrections to DESIGN.md/RESEARCH.md, mark critique as done, empty CRITIQUE.md for the next round.
-- **Research before design changes:** When a design question comes up (e.g., "should we use overlayfs?"), research it first in RESEARCH.md with verified facts, then update DESIGN.md based on findings.
+- **Critique cycle:** Write a critique in `docs/dev/CRITIQUE.md`, apply corrections to design docs and `docs/dev/RESEARCH.md`, mark critique as done, empty CRITIQUE.md for the next round.
+- **Research before design changes:** When a design question comes up (e.g., "should we use overlayfs?"), research it first in `docs/dev/RESEARCH.md` with verified facts, then update design docs based on findings.
 - **Factual accuracy matters:** Star counts, feature claims, and security assertions must be verified. Don't repeat marketing language or unverifiable numbers.
 - **Cross-platform awareness:** Always consider Linux, macOS (Docker Desktop + VirtioFS), and Windows/WSL. Note platform-specific tradeoffs explicitly.
 - **Commit granularity:** One commit per logical change. Research, design updates, and critique application get separate commits.

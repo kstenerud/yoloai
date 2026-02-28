@@ -452,7 +452,7 @@ The test agent's headless command is `sh -c "PROMPT"`. The prompt text is substi
 
 ### 3. Credential temp file timing
 
-The temp key file must exist during container start (entrypoint reads `/run/secrets/` immediately). Cleanup after 1 second is heuristic — the entrypoint reads secrets in its first few lines, well before the 1s wait. For extra safety, the file is also cleaned up via `defer` in case of errors. SIGKILL can still leave orphaned temp files — accepted tradeoff per PLAN.md.
+The temp key file must exist during container start (entrypoint reads `/run/secrets/` immediately). Cleanup after 1 second is heuristic — the entrypoint reads secrets in its first few lines, well before the 1s wait. For extra safety, the file is also cleaned up via `defer` in case of errors. SIGKILL can still leave orphaned temp files — accepted tradeoff per [PLAN.md](../PLAN.md).
 
 ### 4. Destroy stub for --replace
 

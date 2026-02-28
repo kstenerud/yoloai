@@ -14,9 +14,9 @@ The initial implementation is complete and public (beta). All phases (0–8) hav
 
 ## Per-Phase Implementation Plans
 
-Detailed, self-contained implementation plans live in `docs/phases/PHASE_<N>.md`. Each phase file contains exact types, signatures, implementation steps, tests, and verification commands — enough for an agent to implement the phase without reading DESIGN.md. Only the next phase to implement gets a detailed plan; future phases stay as summaries below.
+Detailed, self-contained implementation plans live in `phases/PHASE_<N>.md`. Each phase file contains exact types, signatures, implementation steps, tests, and verification commands — enough for an agent to implement the phase without reading the design docs. Only the next phase to implement gets a detailed plan; future phases stay as summaries below.
 
-**All phase plans (completed):** `docs/phases/PHASE_0.md` through `docs/phases/PHASE_8.md`
+**All phase plans (completed):** `phases/PHASE_0.md` through `phases/PHASE_8.md`
 
 ## Implementation Phases
 
@@ -314,7 +314,7 @@ Options: `--no-prompt` (skip re-sending prompt, applies to both modes), `--clean
 - **Entrypoint as shell script** — natural for UID/GID, secrets, tmux. ~50 lines. Go binary would add cross-compilation complexity.
 - **`jq` in base image** — entrypoint reads `/yoloai/config.json` via `jq` for all configuration. Simpler and more robust than shell-only JSON parsing.
 - **Pager utility** (`internal/cli/pager.go`) — reusable auto-paging for `diff` and `log`. Uses `$PAGER` / `less -R` when stdout is TTY, raw output when piped.
-- **Verbose flag** — use Cobra's `CountP` (not `BoolP`) for `--verbose` / `-v` to preserve the stacking contract from CLI-STANDARD.md (`-v` = Debug, `-vv` = reserved). MVP only uses the first level.
+- **Verbose flag** — use Cobra's `CountP` (not `BoolP`) for `--verbose` / `-v` to preserve the stacking contract from [CLI-STANDARD.md](../CLI-STANDARD.md) (`-v` = Debug, `-vv` = reserved). MVP only uses the first level.
 - **Reusable confirmation prompt** — shared helper for apply, destroy, and dirty repo warning confirmations.
 - **Error types** map to exit codes in root command handler.
 

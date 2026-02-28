@@ -4,7 +4,7 @@
 
 ## Context
 
-yoloai needs machine-readable output for scripting, CI pipelines, and tool integration. The CLI-STANDARD.md already mentions `--json` as a convention. This adds a global `--json` persistent flag that switches all command output from human-readable text to structured JSON.
+yoloai needs machine-readable output for scripting, CI pipelines, and tool integration. The [CLI-STANDARD.md](../CLI-STANDARD.md) already mentions `--json` as a convention. This adds a global `--json` persistent flag that switches all command output from human-readable text to structured JSON.
 
 ## Design Decisions
 
@@ -119,9 +119,9 @@ Each outputs a result object on success.
 
 ## Documentation Updates
 
-- `docs/CLI-STANDARD.md` — Expand `--json` line into a section documenting: flag behavior, error format, interactive command rejection, `--yes` requirement
-- `docs/GUIDE.md` — Add `--json` to global flags table, add usage examples
-- `docs/ARCHITECTURE.md` — Add `json.go` to file index
+- `docs/dev/CLI-STANDARD.md` — Expand `--json` line into a section documenting: flag behavior, error format, interactive command rejection, `--yes` requirement
+- `docs/GUIDE.md` (at `../../GUIDE.md`) — Add `--json` to global flags table, add usage examples
+- `docs/dev/ARCHITECTURE.md` (at `../ARCHITECTURE.md`) — Add `json.go` to file index
 
 ## Implementation Order
 

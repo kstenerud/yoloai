@@ -15,7 +15,7 @@ Compilable Go project with a Cobra CLI that prints help text for all MVP command
 |------|-------------|
 | `go.mod` | Module definition: `github.com/kstenerud/yoloai`, Go 1.22 |
 | `Makefile` | `build`, `test`, `lint` targets |
-| `.golangci.yml` | Linter config per CODING-STANDARD.md |
+| `.golangci.yml` | Linter config per [CODING-STANDARD.md](../../CODING-STANDARD.md) |
 | `cmd/yoloai/main.go` | Thin entry point: signal handling, root command execution, exit code |
 | `internal/cli/root.go` | Root Cobra command, global flags, error-to-exit-code mapping |
 | `internal/cli/commands.go` | All stub subcommand registrations |

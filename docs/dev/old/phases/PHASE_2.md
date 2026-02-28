@@ -107,7 +107,7 @@ The `*dockerclient.Client` returned by `NewClientWithOpts` already implements al
    go get github.com/docker/docker@latest
    go mod tidy
    ```
-   This will pull in transitive dependencies. The `+incompatible` suffix in go.sum is expected and not a stability concern (see PLAN.md dependencies section).
+   This will pull in transitive dependencies. The `+incompatible` suffix in go.sum is expected and not a stability concern (see [PLAN.md](../PLAN.md) dependencies section).
 
 2. **Create `internal/docker/client.go`:**
    - Define the `Client` interface with all methods listed above
