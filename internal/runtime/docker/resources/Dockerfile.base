@@ -71,6 +71,12 @@ RUN npm install -g @google/gemini-cli
 # OpenAI Codex CLI via npm
 RUN npm install -g @openai/codex
 
+# Agent launcher shortcuts (yolo-<agent> runs with full permissions bypassed)
+RUN printf '#!/bin/sh\nexec claude --dangerously-skip-permissions "$@"\n' > /usr/local/bin/yolo-claude \
+    && printf '#!/bin/sh\nexec codex --dangerously-bypass-approvals-and-sandbox "$@"\n' > /usr/local/bin/yolo-codex \
+    && printf '#!/bin/sh\nexec gemini --yolo "$@"\n' > /usr/local/bin/yolo-gemini \
+    && chmod +x /usr/local/bin/yolo-claude /usr/local/bin/yolo-codex /usr/local/bin/yolo-gemini
+
 # gosu for dropping privileges
 ARG GOSU_VERSION=1.17
 RUN curl -fsSL "https://github.com/tianon/gosu/releases/download/${GOSU_VERSION}/gosu-$(dpkg --print-architecture)" \

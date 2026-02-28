@@ -187,7 +187,7 @@ func buildShellAgent() *Definition {
 	return &Definition{
 		Name:           "shell",
 		Description:    "Bash shell with all agents' credentials seeded",
-		InteractiveCmd: "bash",
+		InteractiveCmd: `bash -c 'printf "\n  yoloai shell — launch any agent with yolo-<name>\n  Available: yolo-claude  yolo-codex  yolo-gemini\n\n"; exec bash'`,
 		HeadlessCmd:    `sh -c "PROMPT"`,
 		PromptMode:     PromptModeHeadless,
 		APIKeyEnvVars:  apiKeys,

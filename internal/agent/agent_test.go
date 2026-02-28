@@ -127,7 +127,9 @@ func TestGetAgent_Shell(t *testing.T) {
 
 	assert.Equal(t, "shell", def.Name)
 	assert.NotEmpty(t, def.Description)
-	assert.Equal(t, "bash", def.InteractiveCmd)
+	assert.Contains(t, def.InteractiveCmd, "yolo-claude")
+	assert.Contains(t, def.InteractiveCmd, "yolo-codex")
+	assert.Contains(t, def.InteractiveCmd, "yolo-gemini")
 	assert.Contains(t, def.HeadlessCmd, "sh -c")
 	assert.Equal(t, PromptModeHeadless, def.PromptMode)
 	assert.Equal(t, "", def.StateDir)
