@@ -107,8 +107,8 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 	}
 
 	// Validate
-	if opts.Name == "" {
-		return nil, NewUsageError("sandbox name is required")
+	if err := ValidateName(opts.Name); err != nil {
+		return nil, err
 	}
 
 	agentDef := agent.GetAgent(opts.Agent)

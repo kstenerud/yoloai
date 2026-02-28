@@ -141,6 +141,66 @@ func TestDecodePath_Errors(t *testing.T) {
 	}
 }
 
+func TestValidateName(t *testing.T) {
+	t.Run("valid names", func(t *testing.T) {
+		for _, name := range []string{
+			"myproject",
+			"my-project",
+			"my_project",
+			"my.project",
+			"Project123",
+			"a",
+			"1test",
+		} {
+			assert.NoError(t, ValidateName(name), "expected %q to be valid", name)
+		}
+	})
+
+	t.Run("empty", func(t *testing.T) {
+		err := ValidateName("")
+		assert.EqualError(t, err, "sandbox name is required")
+	})
+
+	t.Run("too long", func(t *testing.T) {
+		long := string(make([]byte, 57))
+		for i := range long {
+			long = long[:i] + "a" + long[i+1:]
+		}
+		err := ValidateName(long)
+		assert.ErrorContains(t, err, "must be at most 56 characters")
+	})
+
+	t.Run("max length is ok", func(t *testing.T) {
+		name := string(make([]byte, 56))
+		for i := range name {
+			name = name[:i] + "a" + name[i+1:]
+		}
+		assert.NoError(t, ValidateName(name))
+	})
+
+	t.Run("path-like names", func(t *testing.T) {
+		for _, name := range []string{"/home/user/project", `\Users\foo`} {
+			err := ValidateName(name)
+			assert.ErrorContains(t, err, "looks like a path", "name: %q", name)
+		}
+	})
+
+	t.Run("invalid characters", func(t *testing.T) {
+		for _, name := range []string{
+			".",
+			"..",
+			"-leading-dash",
+			"has space",
+			"has/slash",
+			"has:colon",
+			"_leading",
+		} {
+			err := ValidateName(name)
+			assert.Error(t, err, "expected %q to be invalid", name)
+		}
+	})
+}
+
 func TestDir(t *testing.T) {
 	home, err := os.UserHomeDir()
 	require.NoError(t, err)

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"unicode/utf8"
 )
@@ -141,6 +142,33 @@ func parseHex(s string) (uint32, error) {
 		}
 	}
 	return result, nil
+}
+
+// maxNameLength is the maximum allowed sandbox name length.
+// Docker container names are limited to 63 chars; with the "yoloai-" prefix (7 chars),
+// the name portion can be at most 56.
+const maxNameLength = 56
+
+// validNameRe matches sandbox names: starts with a letter or digit, then
+// letters, digits, underscores, dots, or hyphens.
+var validNameRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]*$`)
+
+// ValidateName checks that a sandbox name is safe for use in filesystem paths
+// and Docker container names.
+func ValidateName(name string) error {
+	if name == "" {
+		return NewUsageError("sandbox name is required")
+	}
+	if len(name) > maxNameLength {
+		return NewUsageError("invalid sandbox name: must be at most %d characters (got %d)", maxNameLength, len(name))
+	}
+	if name[0] == '/' || name[0] == '\\' {
+		return NewUsageError("invalid sandbox name %q: looks like a path (did you swap the arguments?)", name)
+	}
+	if !validNameRe.MatchString(name) {
+		return NewUsageError("invalid sandbox name %q: must start with a letter or digit and contain only letters, digits, underscores, dots, or hyphens", name)
+	}
+	return nil
 }
 
 // InstanceName returns the runtime instance name for a sandbox.
