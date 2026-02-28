@@ -4,6 +4,8 @@ package seatbelt
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -216,5 +218,112 @@ func TestBuildExecCommand_TmuxDetection(t *testing.T) {
 	}
 	if otherCmd.Args[1] != "-f" {
 		t.Error("sandbox-exec should have -f flag")
+	}
+}
+
+func TestMountSymlinks(t *testing.T) {
+	// Create a source directory
+	srcDir := t.TempDir()
+
+	// Create a target path in a temp area
+	targetBase := t.TempDir()
+	targetPath := filepath.Join(targetBase, "nested", "target")
+
+	mounts := []runtime.MountSpec{
+		{Source: srcDir, Target: targetPath, ReadOnly: true},
+	}
+
+	created, err := mountSymlinks(mounts)
+	if err != nil {
+		t.Fatalf("mountSymlinks failed: %v", err)
+	}
+	defer func() {
+		for _, p := range created {
+			_ = os.Remove(p)
+		}
+	}()
+
+	if len(created) != 1 {
+		t.Fatalf("expected 1 symlink, got %d", len(created))
+	}
+	if created[0] != targetPath {
+		t.Errorf("expected symlink at %q, got %q", targetPath, created[0])
+	}
+
+	// Verify symlink points to source
+	resolved, err := os.Readlink(targetPath)
+	if err != nil {
+		t.Fatalf("readlink failed: %v", err)
+	}
+	if resolved != srcDir {
+		t.Errorf("symlink points to %q, want %q", resolved, srcDir)
+	}
+}
+
+func TestMountSymlinks_SkipSecrets(t *testing.T) {
+	srcDir := t.TempDir()
+
+	mounts := []runtime.MountSpec{
+		{Source: srcDir, Target: "/run/secrets/API_KEY", ReadOnly: true},
+	}
+
+	created, err := mountSymlinks(mounts)
+	if err != nil {
+		t.Fatalf("mountSymlinks failed: %v", err)
+	}
+	if len(created) != 0 {
+		t.Errorf("expected no symlinks for secrets, got %d", len(created))
+	}
+}
+
+func TestMountSymlinks_SkipSamePath(t *testing.T) {
+	mounts := []runtime.MountSpec{
+		{Source: "/same/path", Target: "/same/path", ReadOnly: true},
+	}
+
+	created, err := mountSymlinks(mounts)
+	if err != nil {
+		t.Fatalf("mountSymlinks failed: %v", err)
+	}
+	if len(created) != 0 {
+		t.Errorf("expected no symlinks for same path, got %d", len(created))
+	}
+}
+
+func TestMountSymlinks_SkipFiles(t *testing.T) {
+	// Create a source file (not a directory)
+	tmpDir := t.TempDir()
+	srcFile := filepath.Join(tmpDir, "file.txt")
+	if err := os.WriteFile(srcFile, []byte("test"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	targetBase := t.TempDir()
+	targetPath := filepath.Join(targetBase, "target-file")
+
+	mounts := []runtime.MountSpec{
+		{Source: srcFile, Target: targetPath, ReadOnly: true},
+	}
+
+	created, err := mountSymlinks(mounts)
+	if err != nil {
+		t.Fatalf("mountSymlinks failed: %v", err)
+	}
+	if len(created) != 0 {
+		t.Errorf("expected no symlinks for file source, got %d", len(created))
+	}
+}
+
+func TestMountSymlinks_SkipEmptySource(t *testing.T) {
+	mounts := []runtime.MountSpec{
+		{Source: "", Target: "/some/target", ReadOnly: true},
+	}
+
+	created, err := mountSymlinks(mounts)
+	if err != nil {
+		t.Fatalf("mountSymlinks failed: %v", err)
+	}
+	if len(created) != 0 {
+		t.Errorf("expected no symlinks for empty source, got %d", len(created))
 	}
 }

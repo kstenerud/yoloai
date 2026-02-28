@@ -33,6 +33,9 @@ const (
 
 	// tmuxSocketName is the per-sandbox tmux socket filename.
 	tmuxSocketName = "tmux.sock"
+
+	// symlinkManifestName tracks mount symlinks for cleanup.
+	symlinkManifestName = "mount-symlinks.txt"
 )
 
 // Runtime implements runtime.Runtime using macOS sandbox-exec.
@@ -126,6 +129,19 @@ func (r *Runtime) Create(_ context.Context, cfg runtime.InstanceConfig) error {
 	tmuxConfPath := filepath.Join(sandboxPath, "tmux.conf")
 	if err := os.WriteFile(tmuxConfPath, embeddedTmuxConf, 0600); err != nil {
 		return fmt.Errorf("write tmux.conf: %w", err)
+	}
+
+	// Create symlinks for mounts where Target != Source so the sandboxed
+	// process can find directories at the expected paths.
+	symlinks, err := mountSymlinks(cfg.Mounts)
+	if err != nil {
+		return fmt.Errorf("create mount symlinks: %w", err)
+	}
+	if len(symlinks) > 0 {
+		manifest := strings.Join(symlinks, "\n") + "\n"
+		if err := os.WriteFile(filepath.Join(sandboxPath, symlinkManifestName), []byte(manifest), 0600); err != nil {
+			return fmt.Errorf("write symlink manifest: %w", err)
+		}
 	}
 
 	return nil
@@ -227,6 +243,20 @@ func (r *Runtime) Remove(ctx context.Context, name string) error {
 
 	_ = r.Stop(ctx, name)
 
+	// Clean up mount symlinks
+	manifestPath := filepath.Join(sandboxPath, symlinkManifestName)
+	if data, err := os.ReadFile(manifestPath); err == nil { //nolint:gosec // G304: path within sandbox dir
+		for _, linkPath := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+			if linkPath == "" {
+				continue
+			}
+			_ = os.Remove(linkPath)
+			// Try to remove empty parent dirs we may have created
+			parent := filepath.Dir(linkPath)
+			_ = os.Remove(parent) // only succeeds if empty
+		}
+	}
+
 	// Clean up seatbelt-specific files
 	for _, f := range []string{
 		pidFileName,
@@ -236,6 +266,7 @@ func (r *Runtime) Remove(ctx context.Context, name string) error {
 		tmuxSocketName,
 		"entrypoint.sh",
 		"tmux.conf",
+		symlinkManifestName,
 	} {
 		_ = os.Remove(filepath.Join(sandboxPath, f))
 	}
@@ -319,6 +350,36 @@ func (r *Runtime) Close() error {
 func (r *Runtime) DiagHint(instanceName string) string {
 	logPath := filepath.Join(r.sandboxDir, sandboxName(instanceName), processLogFileName)
 	return fmt.Sprintf("check log at %s", logPath)
+}
+
+// mountSymlinks creates symlinks from Target → Source for mounts where the
+// paths differ, allowing the sandboxed process to find directories at the
+// expected target path. Returns the list of created symlink paths.
+func mountSymlinks(mounts []runtime.MountSpec) ([]string, error) {
+	var created []string
+	for _, m := range mounts {
+		if m.Source == "" || m.Source == m.Target {
+			continue
+		}
+		// Skip secrets — they're handled separately
+		if strings.HasPrefix(m.Target, "/run/secrets/") {
+			continue
+		}
+		// Only symlink directories, not individual files
+		info, err := os.Stat(m.Source)
+		if err != nil || !info.IsDir() {
+			continue
+		}
+		// Create parent directory if needed
+		if err := os.MkdirAll(filepath.Dir(m.Target), 0750); err != nil { //nolint:gosec // G301: parent dirs for mount symlinks
+			return created, fmt.Errorf("create parent for symlink %s: %w", m.Target, err)
+		}
+		if err := os.Symlink(m.Source, m.Target); err != nil {
+			return created, fmt.Errorf("create symlink %s -> %s: %w", m.Target, m.Source, err)
+		}
+		created = append(created, m.Target)
+	}
+	return created, nil
 }
 
 // --- Internal helpers ---
