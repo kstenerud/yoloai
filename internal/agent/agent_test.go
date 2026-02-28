@@ -13,6 +13,7 @@ func TestGetAgent_Claude(t *testing.T) {
 	require.NotNil(t, def)
 
 	assert.Equal(t, "claude", def.Name)
+	assert.NotEmpty(t, def.Description)
 	assert.Equal(t, "claude --dangerously-skip-permissions", def.InteractiveCmd)
 	assert.Contains(t, def.HeadlessCmd, "claude -p")
 	assert.Equal(t, PromptModeInteractive, def.PromptMode)
@@ -37,11 +38,17 @@ func TestGetAgent_Claude(t *testing.T) {
 	assert.Equal(t, "claude-haiku-4-latest", def.ModelAliases["haiku"])
 }
 
+func TestAllAgentNames(t *testing.T) {
+	names := AllAgentNames()
+	assert.Equal(t, []string{"claude", "test"}, names)
+}
+
 func TestGetAgent_Test(t *testing.T) {
 	def := GetAgent("test")
 	require.NotNil(t, def)
 
 	assert.Equal(t, "test", def.Name)
+	assert.NotEmpty(t, def.Description)
 	assert.Equal(t, "bash", def.InteractiveCmd)
 	assert.Contains(t, def.HeadlessCmd, "sh -c")
 	assert.Equal(t, PromptModeHeadless, def.PromptMode)

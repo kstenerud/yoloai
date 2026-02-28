@@ -1,7 +1,10 @@
 // Package agent defines built-in agent definitions for yoloAI.
 package agent
 
-import "time"
+import (
+	"sort"
+	"time"
+)
 
 // PromptMode determines how the agent receives its initial prompt.
 type PromptMode string
@@ -27,6 +30,7 @@ type SeedFile struct {
 // Definition describes an agent's install, launch, and behavioral characteristics.
 type Definition struct {
 	Name           string
+	Description    string
 	InteractiveCmd string
 	HeadlessCmd    string
 	PromptMode     PromptMode
@@ -43,6 +47,7 @@ type Definition struct {
 var agents = map[string]*Definition{
 	"claude": {
 		Name:           "claude",
+		Description:    "Anthropic Claude Code — AI coding assistant",
 		InteractiveCmd: "claude --dangerously-skip-permissions",
 		HeadlessCmd:    `claude -p "PROMPT" --dangerously-skip-permissions`,
 		PromptMode:     PromptModeInteractive,
@@ -65,6 +70,7 @@ var agents = map[string]*Definition{
 	},
 	"test": {
 		Name:           "test",
+		Description:    "Bash shell for testing and development",
 		InteractiveCmd: "bash",
 		HeadlessCmd:    `sh -c "PROMPT"`,
 		PromptMode:     PromptModeHeadless,
@@ -81,4 +87,14 @@ var agents = map[string]*Definition{
 // Returns nil if the agent is not known.
 func GetAgent(name string) *Definition {
 	return agents[name]
+}
+
+// AllAgentNames returns sorted agent names for stable iteration.
+func AllAgentNames() []string {
+	names := make([]string, 0, len(agents))
+	for name := range agents {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }

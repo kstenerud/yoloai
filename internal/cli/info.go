@@ -9,6 +9,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	"github.com/kstenerud/yoloai/internal/agent"
 	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/spf13/cobra"
 )
@@ -97,6 +98,7 @@ func newInfoCmd() *cobra.Command {
 	}
 
 	cmd.AddCommand(newInfoBackendsCmd())
+	cmd.AddCommand(newInfoAgentsCmd())
 	return cmd
 }
 
@@ -190,4 +192,68 @@ func checkBackend(ctx context.Context, name string) (available bool, note string
 	}
 	rt.Close() //nolint:errcheck,gosec // best-effort cleanup
 	return true, ""
+}
+
+func newInfoAgentsCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "agents [name]",
+		Short: "List available agents",
+		Args:  cobra.MaximumNArgs(1),
+		ValidArgsFunction: func(_ *cobra.Command, _ []string, _ string) ([]string, cobra.ShellCompDirective) {
+			return agent.AllAgentNames(), cobra.ShellCompDirectiveNoFileComp
+		},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 1 {
+				return showAgentDetail(cmd, args[0])
+			}
+			return listAgents(cmd)
+		},
+	}
+}
+
+// listAgents displays the summary table of all agents.
+func listAgents(cmd *cobra.Command) error {
+	w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 3, ' ', 0)
+	fmt.Fprintln(w, "AGENT\tDESCRIPTION\tPROMPT MODE") //nolint:errcheck
+
+	for _, name := range agent.AllAgentNames() {
+		def := agent.GetAgent(name)
+		fmt.Fprintf(w, "%s\t%s\t%s\n", def.Name, def.Description, def.PromptMode) //nolint:errcheck
+	}
+
+	return w.Flush()
+}
+
+// showAgentDetail displays detailed information about a single agent.
+func showAgentDetail(cmd *cobra.Command, name string) error {
+	def := agent.GetAgent(name)
+	if def == nil {
+		return sandbox.NewUsageError("unknown agent %q (valid: %s)", name, strings.Join(agent.AllAgentNames(), ", "))
+	}
+
+	out := cmd.OutOrStdout()
+
+	fmt.Fprintf(out, "Agent:       %s\n", def.Name)        //nolint:errcheck
+	fmt.Fprintf(out, "Description: %s\n", def.Description) //nolint:errcheck
+	fmt.Fprintf(out, "Prompt mode: %s\n", def.PromptMode)  //nolint:errcheck
+
+	if len(def.APIKeyEnvVars) > 0 {
+		fmt.Fprintf(out, "API keys:    %s\n", strings.Join(def.APIKeyEnvVars, ", ")) //nolint:errcheck
+	}
+	if def.StateDir != "" {
+		fmt.Fprintf(out, "State dir:   %s\n", def.StateDir) //nolint:errcheck
+	}
+	if def.ModelFlag != "" {
+		fmt.Fprintf(out, "Model flag:  %s\n", def.ModelFlag) //nolint:errcheck
+	}
+
+	if len(def.ModelAliases) > 0 {
+		fmt.Fprintln(out)                   //nolint:errcheck
+		fmt.Fprintln(out, "Model aliases:") //nolint:errcheck
+		for alias, model := range def.ModelAliases {
+			fmt.Fprintf(out, "  %s → %s\n", alias, model) //nolint:errcheck
+		}
+	}
+
+	return nil
 }
