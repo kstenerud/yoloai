@@ -344,3 +344,22 @@ func TestMountSymlinks_SkipExistingTarget(t *testing.T) {
 		t.Errorf("expected no symlinks for existing target, got %d", len(created))
 	}
 }
+
+func TestMountSymlinks_SkipUnreachableParent(t *testing.T) {
+	srcDir := t.TempDir()
+
+	// Use a path under a read-only system directory that can't be created.
+	// On macOS /home is managed by auto_master; on all platforms /dev is
+	// not a normal writable directory.
+	mounts := []runtime.MountSpec{
+		{Source: srcDir, Target: "/dev/null/impossible/.state"},
+	}
+
+	created, err := mountSymlinks(mounts)
+	if err != nil {
+		t.Fatalf("mountSymlinks should skip unreachable paths, got error: %v", err)
+	}
+	if len(created) != 0 {
+		t.Errorf("expected no symlinks for unreachable parent, got %d", len(created))
+	}
+}

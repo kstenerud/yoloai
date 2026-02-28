@@ -375,9 +375,11 @@ func mountSymlinks(mounts []runtime.MountSpec) ([]string, error) {
 		if _, err := os.Lstat(m.Target); err == nil {
 			continue
 		}
-		// Create parent directory if needed
+		// Create parent directory if needed. Skip unreachable paths
+		// (e.g., /home/yoloai/.claude/ — macOS restricts /home via
+		// auto_master; the entrypoint handles these internally).
 		if err := os.MkdirAll(filepath.Dir(m.Target), 0750); err != nil { //nolint:gosec // G301: parent dirs for mount symlinks
-			return created, fmt.Errorf("create parent for symlink %s: %w", m.Target, err)
+			continue
 		}
 		if err := os.Symlink(m.Source, m.Target); err != nil {
 			return created, fmt.Errorf("create symlink %s -> %s: %w", m.Target, m.Source, err)
