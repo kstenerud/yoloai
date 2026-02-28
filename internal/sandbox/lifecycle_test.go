@@ -350,7 +350,7 @@ func TestDestroy_RemovesDir(t *testing.T) {
 	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", "test-destroy")
 	assert.DirExists(t, sandboxDir)
 
-	err := mgr.Destroy(context.Background(), "test-destroy", true)
+	err := mgr.Destroy(context.Background(), "test-destroy")
 	require.NoError(t, err)
 	assert.NoDirExists(t, sandboxDir)
 }
@@ -361,7 +361,7 @@ func TestDestroy_SandboxNotFound(t *testing.T) {
 
 	mock := &lifecycleMockRuntime{}
 	mgr := newLifecycleMgr(mock)
-	err := mgr.Destroy(context.Background(), "nonexistent", true)
+	err := mgr.Destroy(context.Background(), "nonexistent")
 	assert.ErrorIs(t, err, ErrSandboxNotFound)
 }
 
@@ -721,7 +721,7 @@ func TestDestroy_BrokenSandbox(t *testing.T) {
 	mock := &lifecycleMockRuntime{}
 	mgr := newLifecycleMgr(mock)
 
-	err := mgr.Destroy(context.Background(), "broken", true)
+	err := mgr.Destroy(context.Background(), "broken")
 	require.NoError(t, err)
 	assert.NoDirExists(t, sandboxDir)
 }

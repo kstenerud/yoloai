@@ -93,7 +93,7 @@ func (m *Manager) Start(ctx context.Context, name string) error {
 // Destroy stops the container, removes it, and deletes the sandbox directory.
 // Always destroys unconditionally — confirmation logic is handled by the
 // CLI layer via NeedsConfirmation before calling this method.
-func (m *Manager) Destroy(ctx context.Context, name string, _ bool) error {
+func (m *Manager) Destroy(ctx context.Context, name string) error {
 	if _, err := RequireSandboxDir(name); err != nil {
 		return err
 	}

@@ -245,30 +245,8 @@ func (r *Runtime) Exec(ctx context.Context, name string, cmd []string, _ string)
 	args := execArgs(name, cmd...)
 
 	c := exec.CommandContext(ctx, r.tartBin, args...) //nolint:gosec // G204: vmName and cmd are from validated sandbox state
-	var stdout, stderr bytes.Buffer
-	c.Stdout = &stdout
-	c.Stderr = &stderr
 
-	err := c.Run()
-	exitCode := 0
-	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok { //nolint:errorlint // ExitError is concrete type
-			exitCode = exitErr.ExitCode()
-		} else {
-			return runtime.ExecResult{}, fmt.Errorf("exec in VM: %w", err)
-		}
-	}
-
-	result := runtime.ExecResult{
-		Stdout:   strings.TrimSpace(stdout.String()),
-		ExitCode: exitCode,
-	}
-
-	if exitCode != 0 {
-		return result, fmt.Errorf("exec exited with code %d: %s", exitCode, strings.TrimSpace(stderr.String()))
-	}
-
-	return result, nil
+	return runtime.RunCmdExec(c)
 }
 
 // InteractiveExec runs a command interactively inside the VM by shelling

@@ -3,7 +3,6 @@
 package seatbelt
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -302,30 +301,7 @@ func (r *Runtime) Exec(_ context.Context, name string, cmd []string, _ string) (
 
 	execCmd := r.buildExecCommand(sandboxPath, cmd)
 
-	var stdout, stderr bytes.Buffer
-	execCmd.Stdout = &stdout
-	execCmd.Stderr = &stderr
-
-	err := execCmd.Run()
-	exitCode := 0
-	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok { //nolint:errorlint // ExitError is concrete type
-			exitCode = exitErr.ExitCode()
-		} else {
-			return runtime.ExecResult{}, fmt.Errorf("exec: %w", err)
-		}
-	}
-
-	result := runtime.ExecResult{
-		Stdout:   strings.TrimSpace(stdout.String()),
-		ExitCode: exitCode,
-	}
-
-	if exitCode != 0 {
-		return result, fmt.Errorf("exec exited with code %d: %s", exitCode, strings.TrimSpace(stderr.String()))
-	}
-
-	return result, nil
+	return runtime.RunCmdExec(execCmd)
 }
 
 // InteractiveExec runs a command interactively. For tmux commands, injects

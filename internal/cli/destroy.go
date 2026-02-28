@@ -93,7 +93,7 @@ func newDestroyCmd() *cobra.Command {
 
 				var errs []error
 				for _, name := range names {
-					if err := mgr.Destroy(ctx, name, true); err != nil {
+					if err := mgr.Destroy(ctx, name); err != nil {
 						fmt.Fprintf(os.Stderr, "Warning: destroy %s: %v\n", name, err) //nolint:errcheck // best-effort output
 						errs = append(errs, err)
 					} else {

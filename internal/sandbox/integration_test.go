@@ -123,7 +123,7 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 	assert.Contains(t, string(applied), "fmt.Println")
 
 	// Step 8: Destroy
-	require.NoError(t, mgr.Destroy(ctx, sandboxName, true))
+	require.NoError(t, mgr.Destroy(ctx, sandboxName))
 	assert.NoDirExists(t, sandboxDir)
 
 	// Container should be gone

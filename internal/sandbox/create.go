@@ -200,7 +200,7 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 	// --replace: destroy existing sandbox
 	if opts.Replace {
 		if _, err := os.Stat(sandboxDir); err == nil {
-			if err := m.Destroy(ctx, opts.Name, true); err != nil {
+			if err := m.Destroy(ctx, opts.Name); err != nil {
 				return nil, fmt.Errorf("replace existing sandbox: %w", err)
 			}
 		}

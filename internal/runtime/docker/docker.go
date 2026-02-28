@@ -137,10 +137,16 @@ func (r *Runtime) Create(ctx context.Context, cfg runtime.InstanceConfig) error 
 	return nil
 }
 
-// Start starts a stopped Docker container.
+// Start starts a stopped Docker container. Returns nil if already running.
 func (r *Runtime) Start(ctx context.Context, name string) error {
 	if err := r.client.ContainerStart(ctx, name, container.StartOptions{}); err != nil {
-		return mapDockerError(err)
+		if cerrdefs.IsConflict(err) {
+			return nil // already running
+		}
+		if cerrdefs.IsNotFound(err) {
+			return runtime.ErrNotFound
+		}
+		return err
 	}
 	return nil
 }
@@ -294,18 +300,4 @@ func convertPorts(ports []runtime.PortMapping) (nat.PortMap, nat.PortSet) {
 	}
 
 	return portMap, portSet
-}
-
-// mapDockerError maps Docker SDK errors to runtime sentinel errors.
-func mapDockerError(err error) error {
-	if err == nil {
-		return nil
-	}
-	if cerrdefs.IsNotFound(err) {
-		return runtime.ErrNotFound
-	}
-	if cerrdefs.IsConflict(err) {
-		return runtime.ErrNotRunning
-	}
-	return err
 }

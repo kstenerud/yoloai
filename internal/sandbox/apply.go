@@ -2,6 +2,7 @@ package sandbox
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -236,32 +237,11 @@ func HasUncommittedChanges(name string) (bool, error) {
 
 	// git diff --quiet exits 1 when there are differences
 	var exitErr *exec.ExitError
-	if ok := errorAs(err, &exitErr); ok && exitErr.ExitCode() == 1 {
+	if ok := errors.As(err, &exitErr); ok && exitErr.ExitCode() == 1 {
 		return true, nil
 	}
 
 	return false, fmt.Errorf("git diff --quiet: %w", err)
-}
-
-// errorAs is a helper wrapping errors.As for exec.ExitError.
-func errorAs(err error, target **exec.ExitError) bool {
-	return errorsAs(err, target)
-}
-
-// errorsAs is a package-level variable to allow the errors.As call.
-// This exists because importing "errors" directly would shadow the
-// fmt.Errorf error wrapping used elsewhere in this file.
-var errorsAs = func(err error, target any) bool {
-	switch t := target.(type) {
-	case **exec.ExitError:
-		e, ok := err.(*exec.ExitError) //nolint:errorlint // need concrete type
-		if ok {
-			*t = e
-		}
-		return ok
-	default:
-		return false
-	}
 }
 
 // ResolveRef resolves a short SHA prefix to a full 40-char SHA among
@@ -670,14 +650,14 @@ func ApplyFormatPatch(patchDir string, files []string, targetDir string) error {
 	cmd := newGitCmd(targetDir, args...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return formatAMError(err, output, targetDir)
+		return formatAMError(output, targetDir)
 	}
 
 	return nil
 }
 
 // formatAMError wraps a git am failure with actionable guidance.
-func formatAMError(_ error, output []byte, targetDir string) error {
+func formatAMError(output []byte, targetDir string) error {
 	msg := strings.TrimSpace(string(output))
 	return fmt.Errorf("git am failed in %s:\n%s\n\nTo resolve:\n"+
 		"  cd %s\n"+
