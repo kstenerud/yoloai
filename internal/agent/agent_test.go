@@ -67,9 +67,34 @@ func TestGetAgent_Gemini(t *testing.T) {
 	assert.Equal(t, "gemini-2.5-flash", def.ModelAliases["flash"])
 }
 
+func TestGetAgent_Codex(t *testing.T) {
+	def := GetAgent("codex")
+	require.NotNil(t, def)
+
+	assert.Equal(t, "codex", def.Name)
+	assert.NotEmpty(t, def.Description)
+	assert.Equal(t, "codex --dangerously-bypass-approvals-and-sandbox", def.InteractiveCmd)
+	assert.Contains(t, def.HeadlessCmd, "codex exec")
+	assert.Equal(t, PromptModeInteractive, def.PromptMode)
+	assert.Equal(t, []string{"CODEX_API_KEY", "OPENAI_API_KEY"}, def.APIKeyEnvVars)
+	require.Len(t, def.SeedFiles, 2)
+	assert.Equal(t, "~/.codex/auth.json", def.SeedFiles[0].HostPath)
+	assert.Equal(t, "auth.json", def.SeedFiles[0].TargetPath)
+	assert.True(t, def.SeedFiles[0].AuthOnly)
+	assert.Equal(t, "~/.codex/config.toml", def.SeedFiles[1].HostPath)
+	assert.Equal(t, "config.toml", def.SeedFiles[1].TargetPath)
+	assert.False(t, def.SeedFiles[1].AuthOnly)
+	assert.Equal(t, "/home/yoloai/.codex/", def.StateDir)
+	assert.Equal(t, "Enter", def.SubmitSequence)
+	assert.Equal(t, 3*time.Second, def.StartupDelay)
+	assert.Equal(t, "›", def.ReadyPattern)
+	assert.Equal(t, "--model", def.ModelFlag)
+	assert.Nil(t, def.ModelAliases)
+}
+
 func TestAllAgentNames(t *testing.T) {
 	names := AllAgentNames()
-	assert.Equal(t, []string{"claude", "gemini", "test"}, names)
+	assert.Equal(t, []string{"claude", "codex", "gemini", "test"}, names)
 }
 
 func TestGetAgent_Test(t *testing.T) {
@@ -94,5 +119,4 @@ func TestGetAgent_Test(t *testing.T) {
 func TestGetAgent_Unknown(t *testing.T) {
 	assert.Nil(t, GetAgent("unknown"))
 	assert.Nil(t, GetAgent(""))
-	assert.Nil(t, GetAgent("codex"))
 }

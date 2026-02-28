@@ -387,15 +387,15 @@ func TestPromptAgentSetup_SelectSecond(t *testing.T) {
 
 	cfg, err := LoadConfig()
 	require.NoError(t, err)
-	assert.Equal(t, "gemini", cfg.Agent)
+	assert.Equal(t, "codex", cfg.Agent)
 }
 
 // --- Full multi-step flow tests ---
 
 func TestRunNewUserSetup_FullFlow_MacOS(t *testing.T) {
 	setMacOSARMPlatform(t)
-	// tmux=y, backend=2(seatbelt), agent=2(gemini)
-	mgr, output, _ := setupTestManager(t, "y\n2\n2\n")
+	// tmux=y, backend=2(seatbelt), agent=3(gemini)
+	mgr, output, _ := setupTestManager(t, "y\n2\n3\n")
 
 	err := mgr.runNewUserSetup(context.Background())
 	require.NoError(t, err)
@@ -428,8 +428,8 @@ func TestRunNewUserSetup_FullFlow_Linux_SkipsBackend(t *testing.T) {
 
 func TestRunNewUserSetup_LargeConfig_StillAsksBackendAndAgent(t *testing.T) {
 	setMacOSARMPlatform(t)
-	// Large tmux → auto-configure, but backend=3(tart), agent=2(gemini)
-	mgr, output, tmpDir := setupTestManager(t, "3\n2\n")
+	// Large tmux → auto-configure, but backend=3(tart), agent=3(gemini)
+	mgr, output, tmpDir := setupTestManager(t, "3\n3\n")
 
 	tmuxConf := strings.Repeat("set -g option value\n", 15)
 	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, ".tmux.conf"), []byte(tmuxConf), 0600))
