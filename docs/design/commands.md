@@ -57,26 +57,26 @@ Admin:
 
 ### Agent Definitions
 
-Built-in agent definitions (v1). Each agent specifies its install method, launch commands, API key requirements, and behavioral characteristics. No user-defined agents in v1. **Codex is `[PLANNED]`** — currently implements Claude and test agents.
+Built-in agent definitions (v1). Each agent specifies its install method, launch commands, API key requirements, and behavioral characteristics. No user-defined agents in v1. **Codex is `[PLANNED]`** — currently implements Claude, Gemini, and test agents.
 
-| Field                         | Claude                                                    | test                                           | Codex [PLANNED]                               |
-|-------------------------------|-----------------------------------------------------------|-------------------------------------------------|------------------------------------------------|
-| Install                       | `npm i -g @anthropic-ai/claude-code`                      | (none — bash is built-in)                       | Static binary download                         |
-| Runtime                       | Node.js                                                   | None                                            | None (static musl binary)                      |
-| Interactive cmd               | `claude --dangerously-skip-permissions`                   | `bash`                                          | `codex --yolo`                                 |
-| Headless cmd                  | `claude -p "PROMPT" --dangerously-skip-permissions`       | `sh -c "PROMPT"`                                | `codex exec --yolo "PROMPT"`                   |
-| Default prompt mode           | interactive                                               | headless (with prompt) / interactive (without)  | headless (with prompt) / interactive (without) |
-| Submit sequence (interactive) | `Enter Enter` (double) + ready-pattern polling            | `Enter` + 0s startup delay                      | `Enter` + 3s startup delay                     |
-| API key env vars              | `ANTHROPIC_API_KEY`                                       | (none)                                          | `CODEX_API_KEY` (preferred), `OPENAI_API_KEY` (fallback) |
-| State directory               | `~/.claude/`                                              | (none)                                          | `~/.codex/`                                    |
-| Model flag                    | `--model <model>`                                         | (ignored)                                       | `--model <model>`                              |
-| Model aliases                 | `sonnet` → `claude-sonnet-4-latest`, `opus` → `claude-opus-4-latest`, `haiku` → `claude-haiku-4-latest` | (none) | TBD |
-| Ready pattern                 | `❯` (polls tmux output; replaces fixed delay)             | (none — uses fixed delay)                       | TBD                                            |
-| Seed files                    | `.credentials.json` (auth-only), `settings.json`, `.claude.json` (home dir) | (none)                | TBD                                            |
-| Non-root required             | Yes (refuses as root)                                     | No                                              | No (convention is non-root)                    |
-| Proxy support                 | Yes (npm install only, not native binary)                 | N/A                                             | TBD (research needed)                          |
-| Default network allowlist     | `api.anthropic.com`, `statsig.anthropic.com`, `sentry.io` | (none)                                          | `api.openai.com` (minimum; additional TBD)     |
-| Extra env vars / quirks       | —                                                         | Deterministic shell-based agent for development and bug report reproduction. No API key needed. Prompt IS the shell script. | `--skip-git-repo-check` useful outside repos; Landlock fails in containers (use `--yolo`) |
+| Field                         | Claude                                                    | Gemini                                          | test                                           | Codex [PLANNED]                               |
+|-------------------------------|-----------------------------------------------------------|-------------------------------------------------|-------------------------------------------------|------------------------------------------------|
+| Install                       | `npm i -g @anthropic-ai/claude-code`                      | `npm i -g @google/gemini-cli`                   | (none — bash is built-in)                       | Static binary download                         |
+| Runtime                       | Node.js                                                   | Node.js                                         | None                                            | None (static musl binary)                      |
+| Interactive cmd               | `claude --dangerously-skip-permissions`                   | `gemini --yolo`                                 | `bash`                                          | `codex --yolo`                                 |
+| Headless cmd                  | `claude -p "PROMPT" --dangerously-skip-permissions`       | `gemini -p "PROMPT" --yolo`                     | `sh -c "PROMPT"`                                | `codex exec --yolo "PROMPT"`                   |
+| Default prompt mode           | interactive                                               | interactive                                     | headless (with prompt) / interactive (without)  | headless (with prompt) / interactive (without) |
+| Submit sequence (interactive) | `Enter Enter` (double) + ready-pattern polling            | `Enter` + 3s startup delay                      | `Enter` + 0s startup delay                      | `Enter` + 3s startup delay                     |
+| API key env vars              | `ANTHROPIC_API_KEY`                                       | `GEMINI_API_KEY`                                | (none)                                          | `CODEX_API_KEY` (preferred), `OPENAI_API_KEY` (fallback) |
+| State directory               | `~/.claude/`                                              | `~/.gemini/`                                    | (none)                                          | `~/.codex/`                                    |
+| Model flag                    | `--model <model>`                                         | `--model <model>`                               | (ignored)                                       | `--model <model>`                              |
+| Model aliases                 | `sonnet` → `claude-sonnet-4-latest`, `opus` → `claude-opus-4-latest`, `haiku` → `claude-haiku-4-latest` | `pro` → `gemini-2.5-pro`, `flash` → `gemini-2.5-flash` | (none) | TBD |
+| Ready pattern                 | `❯` (polls tmux output; replaces fixed delay)             | (none — uses startup delay; needs testing)      | (none — uses fixed delay)                       | TBD                                            |
+| Seed files                    | `.credentials.json` (auth-only), `settings.json`, `.claude.json` (home dir) | `settings.json`        | (none)                | TBD                                            |
+| Non-root required             | Yes (refuses as root)                                     | No                                              | No                                              | No (convention is non-root)                    |
+| Proxy support                 | Yes (npm install only, not native binary)                 | TBD                                             | N/A                                             | TBD (research needed)                          |
+| Default network allowlist     | `api.anthropic.com`, `statsig.anthropic.com`, `sentry.io` | `generativelanguage.googleapis.com`             | (none)                                          | `api.openai.com` (minimum; additional TBD)     |
+| Extra env vars / quirks       | —                                                         | Sandbox disabled by default; `--yolo` auto-approves tool calls. OAuth login also supported but API key is the primary auth path. | Deterministic shell-based agent for development and bug report reproduction. No API key needed. Prompt IS the shell script. | `--skip-git-repo-check` useful outside repos; Landlock fails in containers (use `--yolo`) |
 
 **Ready pattern:** Agents can specify a `ready_pattern` — a string the entrypoint polls for in the tmux pane output to determine when the agent is ready to receive a prompt. This replaces the fixed startup delay with responsive detection. Claude uses `❯` (the prompt character). While polling, the entrypoint auto-accepts confirmation prompts (e.g., workspace trust dialogs) by detecting "Enter to confirm" and sending Enter. After the pattern is found, the entrypoint waits for screen output to stabilize before delivering the prompt. Agents without a ready pattern fall back to the fixed `startup_delay`.
 
@@ -182,6 +182,13 @@ Options:
 | `api.anthropic.com`     | API calls (required)                  |
 | `statsig.anthropic.com` | Telemetry/feature flags (recommended) |
 | `sentry.io`             | Error reporting (recommended)         |
+
+**Gemini CLI:**
+
+| Domain                                 | Purpose                       |
+|----------------------------------------|-------------------------------|
+| `generativelanguage.googleapis.com`    | API calls (required)          |
+| `cloudcode-pa.googleapis.com`          | OAuth auth route (recommended)|
 
 **Codex:**
 

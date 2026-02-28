@@ -68,6 +68,26 @@ var agents = map[string]*Definition{
 			"haiku":  "claude-haiku-4-latest",
 		},
 	},
+	"gemini": {
+		Name:           "gemini",
+		Description:    "Google Gemini CLI — AI coding assistant",
+		InteractiveCmd: "gemini --yolo",
+		HeadlessCmd:    `gemini -p "PROMPT" --yolo`,
+		PromptMode:     PromptModeInteractive,
+		APIKeyEnvVars:  []string{"GEMINI_API_KEY"},
+		SeedFiles: []SeedFile{
+			{HostPath: "~/.gemini/settings.json", TargetPath: "settings.json"},
+		},
+		StateDir:       "/home/yoloai/.gemini/",
+		SubmitSequence: "Enter",
+		StartupDelay:   3 * time.Second,
+		ReadyPattern:   "",
+		ModelFlag:      "--model",
+		ModelAliases: map[string]string{
+			"pro":   "gemini-2.5-pro",
+			"flash": "gemini-2.5-flash",
+		},
+	},
 	"test": {
 		Name:           "test",
 		Description:    "Bash shell for testing and development",

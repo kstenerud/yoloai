@@ -38,9 +38,32 @@ func TestGetAgent_Claude(t *testing.T) {
 	assert.Equal(t, "claude-haiku-4-latest", def.ModelAliases["haiku"])
 }
 
+func TestGetAgent_Gemini(t *testing.T) {
+	def := GetAgent("gemini")
+	require.NotNil(t, def)
+
+	assert.Equal(t, "gemini", def.Name)
+	assert.NotEmpty(t, def.Description)
+	assert.Equal(t, "gemini --yolo", def.InteractiveCmd)
+	assert.Contains(t, def.HeadlessCmd, "gemini -p")
+	assert.Equal(t, PromptModeInteractive, def.PromptMode)
+	assert.Equal(t, []string{"GEMINI_API_KEY"}, def.APIKeyEnvVars)
+	require.Len(t, def.SeedFiles, 1)
+	assert.Equal(t, "~/.gemini/settings.json", def.SeedFiles[0].HostPath)
+	assert.Equal(t, "settings.json", def.SeedFiles[0].TargetPath)
+	assert.False(t, def.SeedFiles[0].AuthOnly)
+	assert.Equal(t, "/home/yoloai/.gemini/", def.StateDir)
+	assert.Equal(t, "Enter", def.SubmitSequence)
+	assert.Equal(t, 3*time.Second, def.StartupDelay)
+	assert.Equal(t, "", def.ReadyPattern)
+	assert.Equal(t, "--model", def.ModelFlag)
+	assert.Equal(t, "gemini-2.5-pro", def.ModelAliases["pro"])
+	assert.Equal(t, "gemini-2.5-flash", def.ModelAliases["flash"])
+}
+
 func TestAllAgentNames(t *testing.T) {
 	names := AllAgentNames()
-	assert.Equal(t, []string{"claude", "test"}, names)
+	assert.Equal(t, []string{"claude", "gemini", "test"}, names)
 }
 
 func TestGetAgent_Test(t *testing.T) {

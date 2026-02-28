@@ -65,6 +65,9 @@ RUN echo 'export PATH="/usr/local/cargo/bin:$PATH"' > /etc/profile.d/cargo.sh
 RUN npm install -g @anthropic-ai/claude-code
 ENV DISABLE_INSTALLATION_CHECKS=1
 
+# Gemini CLI via npm
+RUN npm install -g @google/gemini-cli
+
 # gosu for dropping privileges
 ARG GOSU_VERSION=1.17
 RUN curl -fsSL "https://github.com/tianon/gosu/releases/download/${GOSU_VERSION}/gosu-$(dpkg --print-architecture)" \

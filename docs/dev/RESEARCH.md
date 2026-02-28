@@ -466,6 +466,22 @@ This section documents the headless/Docker characteristics of major AI coding CL
 - **Docker quirks:** `codex exec` avoids TUI entirely — no tmux needed; `--skip-git-repo-check` useful outside repos; Landlock sandbox may fail in containers (use `--yolo`)
 - **Sources:** [CLI reference](https://developers.openai.com/codex/cli/reference/), [Security docs](https://developers.openai.com/codex/security/)
 
+#### Google Gemini CLI
+
+- **Install:** `npm i -g @google/gemini-cli` → binary: `gemini`
+- **Headless command:** `gemini -p "task" --yolo`
+- **Interactive with prompt:** `gemini -i "task"` (starts interactive session with initial prompt)
+- **API key env vars:** `GEMINI_API_KEY`
+- **State dir:** `~/.gemini/` (contains `settings.json`)
+- **Model selection:** `--model <model>` or `-m <model>` (e.g., `gemini-2.5-pro`, `gemini-2.5-flash`)
+- **Sandbox bypass:** `--yolo` auto-approves all tool calls; sandbox is disabled by default
+- **Runtime:** Node.js 20+
+- **Root restriction:** None found
+- **Auth alternatives:** OAuth login via browser flow (caches credentials locally); API key is the primary supported path
+- **Network domains:** `generativelanguage.googleapis.com` (API), `cloudcode-pa.googleapis.com` (OAuth)
+- **Docker quirks:** Ink-based TUI; ready pattern needs empirical testing with `tmux capture-pane`. The `>` prompt character may cause false positives with grep.
+- **Sources:** [GitHub repo](https://github.com/GoogleCloudPlatform/gemini-cli), [npm package](https://www.npmjs.com/package/@google/gemini-cli)
+
 #### Aider
 
 - **Install:** `pip install aider-chat` (Python 3.9–3.12) or official Docker images (`paulgauthier/aider`)
