@@ -11,8 +11,9 @@ Let AI coding agents go **wild** (inside a disposable container or VM). Your fil
 ## The workflow
 
 ```bash
-# Authenticate (API key or `claude login` OAuth — yoloAI picks it up automatically)
-export ANTHROPIC_API_KEY=sk-ant-...
+# Authenticate (API key or OAuth — yoloAI picks up existing credentials automatically)
+export ANTHROPIC_API_KEY=sk-ant-...   # Claude Code
+export GEMINI_API_KEY=...             # Gemini CLI (or `gemini` OAuth login)
 
 # 1. Spin up a sandbox — agent starts working immediately
 yoloai new fix-bug ./my-project --prompt "fix the failing tests"
@@ -30,11 +31,13 @@ yoloai destroy fix-bug
 Or skip the prompt and drop into an interactive session:
 
 ```bash
-yoloai new -a explore ./my-project
-# You're inside Claude Code, running in tmux in the container.
+yoloai new explore ./my-project
+# You're inside the agent, running in tmux in the sandbox.
 #   Ctrl-B, D to detach.
 #   yoloai attach explore to reconnect.
 ```
+
+Agents: **Claude Code** (default), **Gemini CLI** (`-a gemini`). Use `yoloai info agents` to list available agents.
 
 ## Why?
 
