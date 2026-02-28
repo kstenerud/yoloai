@@ -16,10 +16,16 @@ const EnvSandboxName = "YOLOAI_SANDBOX"
 // Returns a UsageError if no name is available from either source.
 func resolveName(_ *cobra.Command, args []string) (string, []string, error) {
 	if len(args) >= 1 {
+		if err := sandbox.ValidateName(args[0]); err != nil {
+			return "", nil, err
+		}
 		return args[0], args[1:], nil
 	}
 
 	if envName := os.Getenv(EnvSandboxName); envName != "" {
+		if err := sandbox.ValidateName(envName); err != nil {
+			return "", nil, err
+		}
 		return envName, nil, nil
 	}
 

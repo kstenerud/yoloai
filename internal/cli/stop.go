@@ -55,8 +55,16 @@ func newStopCmd() *cobra.Command {
 						if envName == "" {
 							return sandbox.NewUsageError("at least one sandbox name is required (or use --all or set YOLOAI_SANDBOX)")
 						}
+						if err := sandbox.ValidateName(envName); err != nil {
+							return err
+						}
 						names = []string{envName}
 					} else {
+						for _, name := range args {
+							if err := sandbox.ValidateName(name); err != nil {
+								return err
+							}
+						}
 						names = args
 					}
 				}
