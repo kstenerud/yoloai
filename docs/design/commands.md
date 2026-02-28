@@ -35,6 +35,7 @@ Inspection:
   yoloai system agents [name]                    List available agents
   yoloai system backends [name]                  List available runtime backends
   yoloai system build [profile|--all]            Build/rebuild Docker image(s)  (profile/--all [PLANNED])
+  yoloai system prune                            Remove orphaned backend resources and stale temp files
   yoloai system setup                            Run interactive setup  (--power-user [PLANNED])
   yoloai sandbox                                 Sandbox inspection
   yoloai sandbox list                            List sandboxes and their status
@@ -479,6 +480,26 @@ Top-level shortcut: `yoloai ls`.
 Useful after modifying a profile's Dockerfile or when the base image needs updating (e.g., new Claude CLI version).
 
 **[PLANNED]** Profile Dockerfiles that install private dependencies (e.g., `RUN go mod download` from a private repo, `RUN npm install` from a private registry) need build-time credentials. yoloAI passes host credentials to Docker BuildKit via `--secret` so they're available during the build but never stored in image layers. Example: `RUN --mount=type=secret,id=npmrc,target=/root/.npmrc npm install` in the Dockerfile, with yoloAI automatically providing `~/.npmrc` as the secret source. Supported secret sources are documented in `yoloai system build --help`.
+
+### `yoloai system prune`
+
+`yoloai system prune` scans for orphaned backend resources and stale temporary files, reports what it finds, and (after confirmation) removes them.
+
+**What gets pruned:**
+
+- **Docker:** Containers named `yoloai-*` that have no corresponding sandbox directory.
+- **Tart:** VMs named `yoloai-*` that have no corresponding sandbox directory.
+- **Seatbelt:** No-op (no central instance registry; processes are tied to sandbox dirs).
+- **Cross-backend:** `/tmp/yoloai-*` directories older than 1 hour (leaked secrets, apply, format-patch temps).
+
+**Broken sandbox warnings:** Sandbox directories with missing or corrupt `meta.json` are reported as warnings (with full path and suggested `yoloai destroy` command) but are NOT deleted — they may contain recoverable work.
+
+**What is NOT pruned:** Docker images and build cache (affects all Docker usage, not just yoloai). Orphaned seatbelt processes (complex detection, low frequency).
+
+Options:
+- `--dry-run`: Report only, don't ask or remove.
+- `-y`/`--yes`: Skip confirmation prompt.
+- `--backend`: Override runtime backend (default from config).
 
 ### `yoloai stop`
 

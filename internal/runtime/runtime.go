@@ -15,6 +15,17 @@ var (
 	ErrNotRunning = errors.New("instance not running")
 )
 
+// PruneItem describes a single orphaned resource found during pruning.
+type PruneItem struct {
+	Kind string // "container", "vm"
+	Name string // instance name
+}
+
+// PruneResult summarizes orphaned resources found by a backend.
+type PruneResult struct {
+	Items []PruneItem
+}
+
 // MountSpec describes a bind mount from host into the sandbox instance.
 type MountSpec struct {
 	Source   string
@@ -85,6 +96,11 @@ type Runtime interface {
 	// Stdin/stdout/stderr are connected to the current terminal.
 	// If workDir is non-empty, the command runs in that directory.
 	InteractiveExec(ctx context.Context, name string, cmd []string, user string, workDir string) error
+
+	// Prune removes orphaned backend resources. knownInstances lists instance
+	// names that have valid sandbox directories; anything else named yoloai-*
+	// is considered orphaned. When dryRun is true, reports without removing.
+	Prune(ctx context.Context, knownInstances []string, dryRun bool, output io.Writer) (PruneResult, error)
 
 	// Close releases any resources held by the runtime.
 	Close() error
