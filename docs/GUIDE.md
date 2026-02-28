@@ -229,11 +229,14 @@ yoloai config set defaults.backend tart
 |-----|---------|-------------|
 | `setup_complete` | `false` | Set to `true` after first-run setup completes |
 | `defaults.agent` | `claude` | Agent to use: `claude`, `codex`, `gemini` |
+| `defaults.model` | (empty) | Model name or alias passed to the agent |
 | `defaults.backend` | `docker` | Runtime backend: `docker`, `tart`, `seatbelt` |
 | `defaults.tart_image` | (empty) | Custom base VM image for tart backend |
 | `defaults.tmux_conf` | (set by setup) | Tmux config mode: `default+host`, `default`, `host`, `none` |
 
 Agent resolution: `new` uses `--agent` flag > `defaults.agent` in config > `"claude"`.
+
+Model resolution: `new` uses `--model` flag > `defaults.model` in config > `""` (empty = agent's default model).
 
 Backend resolution: `new`/`build`/`setup` use `--backend` flag > `defaults.backend` in config > `"docker"`. Lifecycle commands read the backend from the sandbox's `meta.json`, falling back to config default.
 

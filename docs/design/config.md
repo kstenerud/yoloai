@@ -42,8 +42,10 @@ defaults:
   # tart_image:                         # Custom base VM image (tart backend only)
   tmux_conf: default+host               # default+host | default | host | none (see setup.md)
 
+  agent: claude                           # Agent to launch: claude, codex, gemini; CLI --agent overrides
+  # model:                               # Model name or alias; CLI --model overrides
+
   # --- Planned fields (not yet implemented) ---
-  # agent: claude                        # [PLANNED] which agent to launch (claude, codex); CLI --agent overrides
   # profile: my-project                  # [PLANNED] default profile to use; CLI --profile overrides
   # agent_files: home                    # [PLANNED] files seeded into agent-state/ on first run
   # mounts:                              # [PLANNED] bind mounts added at container run time
@@ -68,10 +70,10 @@ Settings are managed via `yoloai config get/set` or by editing `~/.yoloai/config
 - `defaults.backend` selects the runtime backend. Valid values: `docker`, `tart`, `seatbelt`. CLI `--backend` overrides config.
 - `defaults.tart_image` overrides the base VM image for the tart backend.
 - `defaults.tmux_conf` controls how user tmux config interacts with the container. Set by the interactive first-run setup. Values: `default+host`, `default`, `host`, `none` (see [setup.md](setup.md#tmux-configuration)).
+- `defaults.agent` selects the agent to launch. Valid values: `claude`, `codex`, `gemini`. CLI `--agent` overrides config.
+- `defaults.model` sets the model name or alias passed to the agent. Empty means the agent uses its own default. CLI `--model` overrides config.
 
 **Planned settings (not yet parsed from config):**
-
-- `defaults.agent` will select the agent to launch. Currently the `--agent` flag defaults to `claude` in the CLI.
 - `defaults.agent_files` will control what files are copied into the sandbox's `agent-state/` directory on first run. Set to `home` to copy from the agent's default state directory (`~/.claude/` for Claude, `~/.codex/` for Codex). Set to a list of paths (`~/` or absolute) for deterministic setups. Relative paths without `~/` are an error. Omit entirely to copy nothing (safe default). Profile `agent_files` **replaces** (not merges with) defaults.
 - `defaults.mounts` will be bind mounts added at container run time. Profile mounts are **additive** (merged with defaults, no deduplication — duplicates are a user error).
 - `defaults.ports` will be default port mappings. Profile ports are additive.

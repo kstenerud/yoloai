@@ -87,6 +87,25 @@ func resolveAgentFromConfig() string {
 	return "claude"
 }
 
+// resolveModel determines the model name from --model flag, then config,
+// then empty string (agent's default). Used by the new command.
+func resolveModel(cmd *cobra.Command) string {
+	if m, _ := cmd.Flags().GetString("model"); m != "" {
+		return m
+	}
+	return resolveModelFromConfig()
+}
+
+// resolveModelFromConfig reads the model from config.yaml, falling back
+// to "" (no default model — agent uses its own).
+func resolveModelFromConfig() string {
+	cfg, err := sandbox.LoadConfig()
+	if err == nil && cfg.Model != "" {
+		return cfg.Model
+	}
+	return ""
+}
+
 // withManager creates a runtime and sandbox manager, calls fn, and ensures cleanup.
 func withManager(cmd *cobra.Command, backend string, fn func(ctx context.Context, mgr *sandbox.Manager) error) error {
 	return withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {

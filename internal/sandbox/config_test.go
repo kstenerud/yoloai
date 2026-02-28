@@ -72,6 +72,34 @@ func TestLoadConfig_AgentOverride(t *testing.T) {
 	assert.Equal(t, "gemini", cfg.Agent)
 }
 
+func TestLoadConfig_ModelDefault(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	yoloaiDir := filepath.Join(tmpDir, ".yoloai")
+	require.NoError(t, os.MkdirAll(yoloaiDir, 0750))
+	require.NoError(t, os.WriteFile(filepath.Join(yoloaiDir, "config.yaml"), []byte(defaultConfigYAML), 0600))
+
+	cfg, err := LoadConfig()
+	require.NoError(t, err)
+	assert.Empty(t, cfg.Model) // Not set in file; empty means agent's default
+}
+
+func TestLoadConfig_ModelOverride(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	yoloaiDir := filepath.Join(tmpDir, ".yoloai")
+	require.NoError(t, os.MkdirAll(yoloaiDir, 0750))
+
+	content := "setup_complete: true\ndefaults:\n  model: o3\n"
+	require.NoError(t, os.WriteFile(filepath.Join(yoloaiDir, "config.yaml"), []byte(content), 0600))
+
+	cfg, err := LoadConfig()
+	require.NoError(t, err)
+	assert.Equal(t, "o3", cfg.Model)
+}
+
 func TestLoadConfig_MissingFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)

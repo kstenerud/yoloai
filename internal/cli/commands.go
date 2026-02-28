@@ -106,7 +106,7 @@ func newNewCmd(version string) *cobra.Command {
 
 			prompt, _ := cmd.Flags().GetString("prompt")
 			promptFile, _ := cmd.Flags().GetString("prompt-file")
-			model, _ := cmd.Flags().GetString("model")
+			model := resolveModel(cmd)
 			agentName := resolveAgent(cmd)
 			networkNone, _ := cmd.Flags().GetBool("network-none")
 			ports, _ := cmd.Flags().GetStringArray("port")

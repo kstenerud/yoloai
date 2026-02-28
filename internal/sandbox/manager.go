@@ -20,6 +20,7 @@ const defaultConfigYAML = `# yoloai configuration
 #
 # Available settings:
 #   defaults.agent        Agent to use: claude, codex, gemini
+#   defaults.model        Model name or alias passed to the agent
 #   defaults.backend      Runtime backend: docker, tart, seatbelt
 #   defaults.tart_image   Custom base VM image (tart backend only)
 
