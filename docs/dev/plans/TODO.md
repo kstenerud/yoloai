@@ -10,7 +10,7 @@ Create a plan file in this directory before starting implementation.
 | Overlayfs copy strategy | [config.md](../../design/config.md) | — | `copy_strategy: auto \| overlay \| full`; instant setup, space-efficient |
 | Network isolation | [commands.md](../../design/commands.md), [security.md](../../design/security.md) | — | `--network-isolated`, proxy sidecar, iptables, DNS control |
 | Profiles | [config.md](../../design/config.md) | — | `~/.yoloai/profiles/<name>/` with Dockerfile + profile.yaml |
-| Codex agent | [commands.md](../../design/commands.md) | — | Static Rust binary, headless mode, `codex --yolo` |
+| Codex agent | [commands.md](../../design/commands.md) | — | Agent definition exists; needs end-to-end testing and polish |
 | [DONE] Aux dirs (`-d`) | [commands.md](../../design/commands.md) | — | Repeatable flag for auxiliary directories |
 | [DONE] Custom mount points (`=<path>`) | [commands.md](../../design/commands.md) | — | Mount directories at custom container paths |
 | Extensions (`yoloai x`) | [commands.md](../../design/commands.md) | — | User-defined YAML commands in `~/.yoloai/extensions/` |
