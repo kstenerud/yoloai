@@ -1,6 +1,7 @@
 package sandbox
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -31,6 +32,7 @@ type Manager struct {
 	backend string
 	logger  *slog.Logger
 	input   io.Reader
+	scanner *bufio.Scanner // shared scanner for multi-step interactive prompts
 	output  io.Writer
 }
 
@@ -42,7 +44,28 @@ func NewManager(rt runtime.Runtime, backend string, logger *slog.Logger, input i
 		backend: backend,
 		logger:  logger,
 		input:   input,
+		scanner: bufio.NewScanner(input),
 		output:  output,
+	}
+}
+
+// readLine reads a single line from the shared scanner, returning early if ctx
+// is cancelled. On EOF, returns ("", nil) so callers can treat it as a default.
+func (m *Manager) readLine(ctx context.Context) (string, error) {
+	ch := make(chan string, 1)
+	go func() {
+		if m.scanner.Scan() {
+			ch <- m.scanner.Text()
+		} else {
+			ch <- ""
+		}
+	}()
+
+	select {
+	case <-ctx.Done():
+		return "", ctx.Err()
+	case line := <-ch:
+		return line, nil
 	}
 }
 

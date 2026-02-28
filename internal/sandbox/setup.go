@@ -1,5 +1,8 @@
 package sandbox
 
+// ABOUTME: Interactive first-run setup: tmux config, default backend, default agent.
+// ABOUTME: Multi-step prompts with platform-aware backend detection.
+
 import (
 	"bufio"
 	"context"
@@ -7,14 +10,23 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
 
+	"github.com/kstenerud/yoloai/internal/agent"
 	dockerrt "github.com/kstenerud/yoloai/internal/runtime/docker"
 )
 
 // errSetupPreview signals that the user chose [p] to preview the merged
 // tmux config and the setup should exit cleanly without setting setup_complete.
 var errSetupPreview = errors.New("setup preview requested")
+
+// detectedOS and detectedArch are variables so tests can override them.
+var (
+	detectedOS   = func() string { return runtime.GOOS }
+	detectedArch = func() string { return runtime.GOARCH }
+)
 
 // tmuxConfigClass describes the user's existing tmux configuration.
 type tmuxConfigClass int
@@ -26,6 +38,12 @@ const (
 )
 
 const significantLineThreshold = 10
+
+// setupOption describes a numbered choice in a setup prompt.
+type setupOption struct {
+	name  string
+	blurb string
+}
 
 // classifyTmuxConfig reads ~/.tmux.conf and returns its classification
 // and content. Returns tmuxConfigNone with empty content if the file
@@ -64,6 +82,37 @@ func countSignificantLines(content string) int {
 	return count
 }
 
+// availableBackends returns the backends available on this platform.
+func availableBackends() []setupOption {
+	opts := []setupOption{
+		{"docker", "Linux containers; portable, lightweight, fast"},
+	}
+	if detectedOS() == "darwin" {
+		opts = append(opts, setupOption{
+			"seatbelt", "macOS sandbox; near-instant, uses host tools, less isolation",
+		})
+		if detectedArch() == "arm64" {
+			opts = append(opts, setupOption{
+				"tart", "macOS VMs; native macOS env, strong isolation, heavier",
+			})
+		}
+	}
+	return opts
+}
+
+// availableAgents returns the non-test agents available.
+func availableAgents() []setupOption {
+	var opts []setupOption
+	for _, name := range agent.AllAgentNames() {
+		if name == "test" {
+			continue
+		}
+		def := agent.GetAgent(name)
+		opts = append(opts, setupOption{name, def.Description})
+	}
+	return opts
+}
+
 // RunSetup runs the interactive setup unconditionally, regardless of
 // setup_complete. Used by `yoloai setup` to let users redo their choices.
 func (m *Manager) RunSetup(ctx context.Context) error {
@@ -80,8 +129,10 @@ func (m *Manager) RunSetup(ctx context.Context) error {
 }
 
 // runNewUserSetup orchestrates the interactive first-run setup prompts.
-// Returns errSetupPreview if the user chose [p].
+// Steps: tmux config → default backend → default agent → mark complete.
+// Returns errSetupPreview if the user chose [p] in the tmux prompt.
 func (m *Manager) runNewUserSetup(ctx context.Context) error {
+	// Step 1: Tmux config
 	class, userConfig := classifyTmuxConfig()
 
 	switch class {
@@ -90,19 +141,33 @@ func (m *Manager) runNewUserSetup(ctx context.Context) error {
 		if err := m.setTmuxConf("default+host"); err != nil {
 			return err
 		}
-		return m.setSetupComplete()
 
 	case tmuxConfigNone:
-		return m.promptTmuxSetup(ctx, "", true)
+		if err := m.promptTmuxSetup(ctx, "", true); err != nil {
+			return err
+		}
 
 	case tmuxConfigSmall:
-		return m.promptTmuxSetup(ctx, userConfig, false)
+		if err := m.promptTmuxSetup(ctx, userConfig, false); err != nil {
+			return err
+		}
 	}
 
-	return nil
+	// Step 2: Default backend (skip if only one option)
+	if err := m.promptBackendSetup(ctx); err != nil {
+		return err
+	}
+
+	// Step 3: Default agent (skip if only one option)
+	if err := m.promptAgentSetup(ctx); err != nil {
+		return err
+	}
+
+	return m.setSetupComplete()
 }
 
 // promptTmuxSetup shows the tmux config prompt and handles the user's choice.
+// Sets tmux_conf but does NOT mark setup_complete (caller handles that).
 func (m *Manager) promptTmuxSetup(ctx context.Context, userConfig string, noConfig bool) error {
 	fmt.Fprintln(m.output) //nolint:errcheck // best-effort output
 	if noConfig {
@@ -132,7 +197,7 @@ func (m *Manager) promptTmuxSetup(ctx context.Context, userConfig string, noConf
 
 	fmt.Fprint(m.output, "\nChoice [Y/n/p]: ") //nolint:errcheck // best-effort output
 
-	line, err := readLine(ctx, m.input)
+	line, err := m.readLine(ctx)
 	if err != nil {
 		return err
 	}
@@ -141,27 +206,15 @@ func (m *Manager) promptTmuxSetup(ctx context.Context, userConfig string, noConf
 	switch answer {
 	case "", "y", "yes":
 		if noConfig {
-			if err := m.setTmuxConf("default"); err != nil {
-				return err
-			}
-		} else {
-			if err := m.setTmuxConf("default+host"); err != nil {
-				return err
-			}
+			return m.setTmuxConf("default")
 		}
-		return m.setSetupComplete()
+		return m.setTmuxConf("default+host")
 
 	case "n", "no":
 		if noConfig {
-			if err := m.setTmuxConf("none"); err != nil {
-				return err
-			}
-		} else {
-			if err := m.setTmuxConf("host"); err != nil {
-				return err
-			}
+			return m.setTmuxConf("none")
 		}
-		return m.setSetupComplete()
+		return m.setTmuxConf("host")
 
 	case "p":
 		fmt.Fprintln(m.output)                                    //nolint:errcheck // best-effort output
@@ -178,16 +231,84 @@ func (m *Manager) promptTmuxSetup(ctx context.Context, userConfig string, noConf
 	default:
 		// Treat unknown input as Y (default)
 		if noConfig {
-			if err := m.setTmuxConf("default"); err != nil {
-				return err
-			}
-		} else {
-			if err := m.setTmuxConf("default+host"); err != nil {
-				return err
-			}
+			return m.setTmuxConf("default")
 		}
-		return m.setSetupComplete()
+		return m.setTmuxConf("default+host")
 	}
+}
+
+// promptBackendSetup asks which runtime backend to use as default.
+// Skipped when only one backend is available on the platform (e.g. Linux).
+func (m *Manager) promptBackendSetup(ctx context.Context) error {
+	backends := availableBackends()
+	if len(backends) <= 1 {
+		return nil
+	}
+
+	fmt.Fprintln(m.output)                             //nolint:errcheck // best-effort output
+	fmt.Fprintln(m.output, "Default runtime backend:") //nolint:errcheck // best-effort output
+	fmt.Fprintln(m.output)                             //nolint:errcheck // best-effort output
+
+	for i, b := range backends {
+		fmt.Fprintf(m.output, "  [%d] %-10s %s\n", i+1, b.name, b.blurb) //nolint:errcheck // best-effort output
+	}
+
+	fmt.Fprint(m.output, "\nChoice [1]: ") //nolint:errcheck // best-effort output
+
+	line, err := m.readLine(ctx)
+	if err != nil {
+		return err
+	}
+	answer := strings.TrimSpace(line)
+
+	idx := 0 // default to first option
+	if answer != "" {
+		n, err := strconv.Atoi(answer)
+		if err == nil && n >= 1 && n <= len(backends) {
+			idx = n - 1
+		}
+	}
+
+	return UpdateConfigFields(map[string]string{
+		"defaults.backend": backends[idx].name,
+	})
+}
+
+// promptAgentSetup asks which agent to use as default.
+// Skipped when only one non-test agent is available.
+func (m *Manager) promptAgentSetup(ctx context.Context) error {
+	agents := availableAgents()
+	if len(agents) <= 1 {
+		return nil
+	}
+
+	fmt.Fprintln(m.output)                   //nolint:errcheck // best-effort output
+	fmt.Fprintln(m.output, "Default agent:") //nolint:errcheck // best-effort output
+	fmt.Fprintln(m.output)                   //nolint:errcheck // best-effort output
+
+	for i, a := range agents {
+		fmt.Fprintf(m.output, "  [%d] %-10s %s\n", i+1, a.name, a.blurb) //nolint:errcheck // best-effort output
+	}
+
+	fmt.Fprint(m.output, "\nChoice [1]: ") //nolint:errcheck // best-effort output
+
+	line, err := m.readLine(ctx)
+	if err != nil {
+		return err
+	}
+	answer := strings.TrimSpace(line)
+
+	idx := 0 // default to first option
+	if answer != "" {
+		n, err := strconv.Atoi(answer)
+		if err == nil && n >= 1 && n <= len(agents) {
+			idx = n - 1
+		}
+	}
+
+	return UpdateConfigFields(map[string]string{
+		"defaults.agent": agents[idx].name,
+	})
 }
 
 // setTmuxConf writes the tmux_conf setting to config.yaml.
