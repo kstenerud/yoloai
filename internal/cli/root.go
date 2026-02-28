@@ -54,5 +54,11 @@ diff and apply what you want to keep.`,
 
 	registerCommands(rootCmd, version, commit, date)
 
+	// Customize help flag description to mention per-command usage
+	rootCmd.InitDefaultHelpFlag()
+	if f := rootCmd.Flags().Lookup("help"); f != nil {
+		f.Usage = "Help for yoloai (use with any command: yoloai <command> -h)"
+	}
+
 	return rootCmd
 }
