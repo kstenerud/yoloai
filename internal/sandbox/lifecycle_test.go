@@ -179,25 +179,25 @@ func TestStart_Stopped(t *testing.T) {
 
 	createTestSandbox(t, tmpDir, "test-start-stopped", "/tmp/project", "copy")
 
-	startCalled := false
+	removeCalled := false
 	mock := &lifecycleMockRuntime{
 		inspectFn: func(_ context.Context, _ string) (runtime.InstanceInfo, error) {
-			running := startCalled // after start, report as running
-			return runtime.InstanceInfo{Running: running}, nil
+			return runtime.InstanceInfo{Running: false}, nil
 		},
-		startFn: func(_ context.Context, _ string) error {
-			startCalled = true
+		removeFn: func(_ context.Context, _ string) error {
+			removeCalled = true
 			return nil
 		},
 	}
 
-	var output bytes.Buffer
-	mgr := NewManager(mock, "docker", slog.Default(), strings.NewReader(""), &output)
+	mgr := newLifecycleMgr(mock)
 
+	// After remove, Start routes to recreateContainer which fails
+	// (no config.json) — same pattern as TestStart_Removed.
 	err := mgr.Start(context.Background(), "test-start-stopped")
-	require.NoError(t, err)
-	assert.True(t, startCalled)
-	assert.Contains(t, output.String(), "started")
+	assert.Error(t, err)
+	assert.True(t, removeCalled, "should remove stopped container before recreating")
+	assert.Contains(t, err.Error(), "config.json")
 }
 
 func TestStart_SandboxNotFound(t *testing.T) {

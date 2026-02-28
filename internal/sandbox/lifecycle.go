@@ -8,7 +8,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/kstenerud/yoloai/internal/agent"
 )
@@ -61,20 +60,12 @@ func (m *Manager) Start(ctx context.Context, name string) error {
 		return nil
 
 	case StatusStopped:
-		if err := m.runtime.Start(ctx, cname); err != nil {
-			return fmt.Errorf("start instance: %w", err)
+		if err := m.runtime.Remove(ctx, cname); err != nil {
+			return fmt.Errorf("remove stopped instance: %w", err)
 		}
-
-		// Verify instance stays running (catches immediate crashes)
-		time.Sleep(1 * time.Second)
-		info, inspectErr := m.runtime.Inspect(ctx, cname)
-		if inspectErr != nil {
-			return fmt.Errorf("inspect instance after start: %w", inspectErr)
+		if err := m.recreateContainer(ctx, name, meta); err != nil {
+			return err
 		}
-		if !info.Running {
-			return fmt.Errorf("instance exited immediately — %s", m.runtime.DiagHint(cname))
-		}
-
 		fmt.Fprintf(m.output, "Sandbox %s started\n", name) //nolint:errcheck // best-effort output
 		return nil
 
