@@ -330,7 +330,7 @@ func (r *Runtime) Exec(_ context.Context, name string, cmd []string, _ string) (
 
 // InteractiveExec runs a command interactively. For tmux commands, injects
 // the per-sandbox socket. For other commands, runs under sandbox-exec.
-func (r *Runtime) InteractiveExec(_ context.Context, name string, cmd []string, _ string) error {
+func (r *Runtime) InteractiveExec(_ context.Context, name string, cmd []string, _ string, _ string) error {
 	sandboxPath := filepath.Join(r.sandboxDir, sandboxName(name))
 
 	execCmd := r.buildExecCommand(sandboxPath, cmd)

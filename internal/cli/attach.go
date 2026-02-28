@@ -39,7 +39,7 @@ func newAttachCmd() *cobra.Command {
 				containerName := sandbox.ContainerName(name)
 				slog.Debug("attaching to tmux session", "container", containerName)
 
-				return rt.InteractiveExec(ctx, containerName, []string{"tmux", "attach", "-t", "main"}, "yoloai")
+				return rt.InteractiveExec(ctx, containerName, []string{"tmux", "attach", "-t", "main"}, "yoloai", "")
 			})
 		},
 	}

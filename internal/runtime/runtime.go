@@ -83,7 +83,8 @@ type Runtime interface {
 
 	// InteractiveExec runs a command interactively (with TTY) inside an instance.
 	// Stdin/stdout/stderr are connected to the current terminal.
-	InteractiveExec(ctx context.Context, name string, cmd []string, user string) error
+	// If workDir is non-empty, the command runs in that directory.
+	InteractiveExec(ctx context.Context, name string, cmd []string, user string, workDir string) error
 
 	// Close releases any resources held by the runtime.
 	Close() error

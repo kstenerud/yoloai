@@ -224,10 +224,13 @@ func (r *Runtime) Exec(ctx context.Context, name string, cmd []string, user stri
 
 // InteractiveExec runs an interactive command inside a Docker container
 // by shelling out to `docker exec -it`.
-func (r *Runtime) InteractiveExec(ctx context.Context, name string, cmd []string, user string) error {
+func (r *Runtime) InteractiveExec(ctx context.Context, name string, cmd []string, user string, workDir string) error {
 	args := []string{"exec", "-it"}
 	if user != "" {
 		args = append(args, "-u", user)
+	}
+	if workDir != "" {
+		args = append(args, "-w", workDir)
 	}
 	args = append(args, name)
 	args = append(args, cmd...)

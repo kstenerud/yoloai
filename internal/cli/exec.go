@@ -42,7 +42,7 @@ func newSandboxExecCmd() *cobra.Command {
 				containerName := sandbox.ContainerName(name)
 				slog.Debug("exec in container", "container", containerName, "cmd", cmdArgs)
 
-				if err := rt.InteractiveExec(ctx, containerName, cmdArgs, "yoloai"); err != nil {
+				if err := rt.InteractiveExec(ctx, containerName, cmdArgs, "yoloai", info.Meta.Workdir.MountPath); err != nil {
 					var exitErr *exec.ExitError
 					if errors.As(err, &exitErr) {
 						os.Exit(exitErr.ExitCode())

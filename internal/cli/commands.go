@@ -244,7 +244,7 @@ func waitForTmux(ctx context.Context, rt runtime.Runtime, containerName string, 
 
 // attachToSandbox attaches to the tmux session in a running container.
 func attachToSandbox(ctx context.Context, rt runtime.Runtime, containerName string) error {
-	return rt.InteractiveExec(ctx, containerName, []string{"tmux", "attach", "-t", "main"}, "yoloai")
+	return rt.InteractiveExec(ctx, containerName, []string{"tmux", "attach", "-t", "main"}, "yoloai", "")
 }
 
 func newVersionCmd(version, commit, date string) *cobra.Command {
