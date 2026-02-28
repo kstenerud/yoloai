@@ -43,6 +43,6 @@ Create a plan file in this directory before starting implementation.
 | `network_allow` | [config.md](../../design/config.md) | Additional allowed domains |
 | `resources` | [config.md](../../design/config.md) | Container resource limits (cpus, memory) |
 | Recipes (`cap_add`, `devices`, `setup`) | [config.md](../../design/config.md) | Advanced setups (Tailscale, GPU) |
-| Tilde expansion in config | [config.md](../../design/config.md) | `~/` expanded in path-valued fields |
-| Env var interpolation in config | [config.md](../../design/config.md) | `${VAR}` syntax in config values |
+| [DONE] Tilde expansion in paths | [config.md](../../design/config.md) | `~/` expanded via `ExpandPath()` in dir args, prompt files, etc. |
+| [DONE] Env var interpolation in paths | [config.md](../../design/config.md) | `${VAR}` syntax via `ExpandPath()` in dir args, prompt files, etc. |
 | User-configurable model aliases | [commands.md](../../design/commands.md) | Custom aliases + version pinning |
