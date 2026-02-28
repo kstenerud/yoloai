@@ -37,13 +37,13 @@ func encodeRune(builder *strings.Builder, r rune) {
 	case cp <= 0xFF:
 		fmt.Fprintf(builder, "^%02X", cp)
 	case cp <= 0xFFF:
-		fmt.Fprintf(builder, "^g%03X", cp)
+		fmt.Fprintf(builder, "^w%03X", cp)
 	case cp <= 0xFFFF:
-		fmt.Fprintf(builder, "^h%04X", cp)
+		fmt.Fprintf(builder, "^x%04X", cp)
 	case cp <= 0xFFFFF:
-		fmt.Fprintf(builder, "^i%05X", cp)
+		fmt.Fprintf(builder, "^y%05X", cp)
 	default:
-		fmt.Fprintf(builder, "^j%06X", cp)
+		fmt.Fprintf(builder, "^z%06X", cp)
 	}
 }
 
@@ -88,16 +88,16 @@ func DecodePath(encoded string) (string, error) {
 		hexDigits := 2
 		modifier := encoded[i]
 		switch modifier {
-		case 'g', 'G':
+		case 'w', 'W', 'g', 'G':
 			hexDigits = 3
 			i++
-		case 'h', 'H':
+		case 'x', 'X', 'h', 'H':
 			hexDigits = 4
 			i++
-		case 'i', 'I':
+		case 'y', 'Y', 'i', 'I':
 			hexDigits = 5
 			i++
-		case 'j', 'J':
+		case 'z', 'Z', 'j', 'J':
 			hexDigits = 6
 			i++
 		}

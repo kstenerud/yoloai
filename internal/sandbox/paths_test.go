@@ -60,9 +60,9 @@ func TestEncodePath_NonASCII(t *testing.T) {
 		expected string
 	}{
 		{"latin extended", "/données", "^2Fdonn^E9es"},
-		{"polish", "/Łódź", "^2F^g141^F3d^g17A"},
-		{"cjk", "/日本", "^2F^h65E5^h672C"},
-		{"emoji", "/test/🎉", "^2Ftest^2F^i1F389"},
+		{"polish", "/Łódź", "^2F^w141^F3d^w17A"},
+		{"cjk", "/日本", "^2F^x65E5^x672C"},
+		{"emoji", "/test/🎉", "^2Ftest^2F^y1F389"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -105,9 +105,12 @@ func TestDecodePath_CaseInsensitive(t *testing.T) {
 	}{
 		{"lowercase hex", "^2f", "/"},
 		{"uppercase hex", "^2F", "/"},
-		{"lowercase modifier", "^g141", "Ł"},
-		{"uppercase modifier", "^G141", "Ł"},
-		{"mixed case hex", "^h00e9", "é"},
+		{"lowercase modifier", "^w141", "Ł"},
+		{"uppercase modifier", "^W141", "Ł"},
+		{"mixed case hex", "^x00e9", "é"},
+		{"old modifier g", "^g141", "Ł"},
+		{"old modifier G", "^G141", "Ł"},
+		{"old modifier h", "^h00e9", "é"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -126,8 +129,9 @@ func TestDecodePath_Errors(t *testing.T) {
 		{"truncated at caret", "^"},
 		{"truncated hex", "^2"},
 		{"invalid hex", "^ZZ"},
-		{"truncated with modifier", "^g14"},
-		{"truncated modifier only", "^g"},
+		{"truncated with modifier", "^w14"},
+		{"truncated modifier only", "^w"},
+		{"truncated old modifier", "^g14"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
