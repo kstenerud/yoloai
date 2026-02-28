@@ -104,19 +104,27 @@ By default, directories are mounted at their original absolute host paths (mirro
 
 ## Agents and Models
 
-yoloai currently ships with Claude Code as the only supported agent. The architecture is agent-agnostic — more agents are planned (see [Roadmap](ROADMAP.md)).
+yoloai ships with multiple agents. The architecture is agent-agnostic — more agents are planned (see [Roadmap](ROADMAP.md)).
 
 | Agent | API Key | Description |
 |-------|---------|-------------|
 | `claude` (default) | `ANTHROPIC_API_KEY` | Claude Code in interactive mode |
+| `gemini` | `GEMINI_API_KEY` | Gemini CLI in interactive mode |
 
-You can select a model using shorthand aliases or full model names:
+Codex (`codex`) is defined but still undergoing testing — see the roadmap for status.
+
+You can select a model using shorthand aliases or full model names. Aliases are agent-specific — use `yoloai system agents <name>` to see the full list for each agent.
 
 ```bash
+# Claude model aliases
 yoloai new task ./my-project --model sonnet   # claude-sonnet-4-latest
 yoloai new task ./my-project --model opus     # claude-opus-4-latest
 yoloai new task ./my-project --model haiku    # claude-haiku-4-latest
 yoloai new task ./my-project --model claude-sonnet-4-20250514  # exact model
+
+# Gemini model aliases
+yoloai new task ./my-project --agent gemini --model pro    # gemini-2.5-pro
+yoloai new task ./my-project --agent gemini --model flash  # gemini-2.5-flash
 ```
 
 ## Global Flags
@@ -241,7 +249,7 @@ All sandbox state lives on the host at `~/.yoloai/sandboxes/<name>/`:
   config.json     # container entrypoint config
   prompt.txt      # initial prompt (if provided)
   log.txt         # tmux session log
-  agent-state/    # agent's persistent state (e.g., ~/.claude/)
+  agent-state/    # agent's persistent state (e.g., ~/.claude/, ~/.gemini/)
   work/           # isolated copy of your project
 ```
 
@@ -252,7 +260,7 @@ Containers are ephemeral — if removed, `yoloai start` recreates them from `met
 - **Originals are protected.** Workdirs use `:copy` mode by default — the agent works on an isolated copy, never your original files. Opt into `:rw` explicitly for live access.
 - **Dangerous directory detection.** Refuses to mount `$HOME`, `/`, or system directories. Append `:force` to override (e.g., `$HOME:force`).
 - **Dirty repo warning.** Prompts if your workdir has uncommitted git changes, so you don't lose work.
-- **Credential injection via files.** API keys are mounted as read-only files at `/run/secrets/`, not passed as environment variables. Temp files on the host are cleaned up after container start. On macOS, yoloai also checks the macOS Keychain for Claude Code OAuth credentials (service `Claude Code-credentials`). If you're logged in via `claude` CLI, yoloai will automatically detect your credentials even without `~/.claude/.credentials.json` on disk.
+- **Credential injection via files.** API keys are mounted as read-only files at `/run/secrets/`, not passed as environment variables. Temp files on the host are cleaned up after container start. Some agents support additional credential sources — for example, on macOS, yoloai checks the macOS Keychain for Claude Code OAuth credentials (service `Claude Code-credentials`). If you're logged in via `claude` CLI, yoloai will automatically detect your credentials even without `~/.claude/.credentials.json` on disk.
 - **Non-root execution.** Containers run as a non-root user with UID/GID matching your host user.
 
 ## Development

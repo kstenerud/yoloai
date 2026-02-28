@@ -6,7 +6,7 @@
 
 Run AI coding CLI agents (Claude Code, Codex, and others) with their sandbox-bypass flags inside disposable, isolated containers so that the agent can work autonomously without constant permission prompts. Project directories are presented as isolated writable views inside the container. The user reviews changes via `yoloai diff` and applies them back to the originals via `yoloai apply` when satisfied.
 
-**Scope:** Currently ships with Claude Code and a deterministic test agent. OpenAI Codex, overlay strategy, network isolation, profiles, Viper config, and aux dirs are planned. The architecture is agent-agnostic — Docker, overlayfs, network isolation, diff/apply are not agent-specific. Adding a new agent requires only a new agent definition (install command, launch command, API key env vars, state directory). See [RESEARCH.md](../dev/RESEARCH.md) "Multi-Agent Support Research" for additional agents researched.
+**Scope:** Currently ships with Claude Code, Gemini CLI, and a deterministic test agent. Codex is defined but undergoing testing. Overlay strategy, network isolation, profiles, Viper config, and aux dirs are planned. The architecture is agent-agnostic — Docker, overlayfs, network isolation, diff/apply are not agent-specific. Adding a new agent requires only a new agent definition (install command, launch command, API key env vars, state directory). See [RESEARCH.md](../dev/RESEARCH.md) "Multi-Agent Support Research" for additional agents researched.
 
 ## Value Proposition
 
@@ -93,7 +93,7 @@ The Docker container is disposable — it can crash, be destroyed, be recreated.
 
   "network": {
     "mode": "isolated",                   // Currently a flat "network_mode" string ("none" or "")
-    "allow": ["api.anthropic.com", "statsig.anthropic.com", "sentry.io"]  // [PLANNED]
+    "allow": ["api.anthropic.com", "statsig.anthropic.com", "sentry.io"]  // [PLANNED] per-agent defaults; this example shows Claude's
   },
 
   "workdir": {

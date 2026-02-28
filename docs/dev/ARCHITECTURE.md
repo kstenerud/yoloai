@@ -6,7 +6,7 @@ Code navigation guide for the yoloAI codebase. Focused on the implemented code, 
 
 ```
 cmd/yoloai/          → Binary entry point
-internal/agent/      → Agent plugin definitions (Claude, test)
+internal/agent/      → Agent plugin definitions (Claude, Gemini, Codex, test, shell)
 internal/cli/        → Cobra command tree and CLI plumbing
 internal/runtime/    → Pluggable runtime interface (backend-agnostic types and errors)
 internal/runtime/docker/ → Docker implementation of runtime.Runtime
@@ -29,7 +29,7 @@ Dependency direction: `cmd/yoloai` → `cli` → `sandbox` + `runtime`; `sandbox
 
 | File | Purpose |
 |------|---------|
-| `agent.go` | `Definition` struct and built-in agent registry (`claude`, `test`). `GetAgent()` lookup. |
+| `agent.go` | `Definition` struct and built-in agent registry (`claude`, `gemini`, `codex`, `test`, `shell`). `GetAgent()` lookup. |
 | `agent_test.go` | Unit tests for agent definitions. |
 
 ### `internal/cli/`
@@ -138,7 +138,7 @@ All parameters for `Manager.Create()`. Mirrors CLI flags: name, workdir, auxilia
 Input/output for `GenerateDiff()`. Supports path filtering and stat-only mode. `DiffResult` carries the diff text, workdir, mode, and empty flag.
 
 ### `agent.Definition`
-Describes an agent's commands (interactive/headless), prompt delivery mode, API key env vars, seed files, state directory, tmux submit sequence, model flag/aliases. Built-in: `claude` and `test`.
+Describes an agent's commands (interactive/headless), prompt delivery mode, API key env vars, seed files, state directory, tmux submit sequence, model flag/aliases. Built-in: `claude`, `gemini`, `codex`, `test`, and `shell`.
 
 ### `runtime.Runtime`
 Pluggable runtime interface for backend abstraction. Methods: `Create()`, `Start()`, `Stop()`, `Remove()`, `Inspect()`, `Exec()`, `InteractiveExec()`, `EnsureImage()`, `Close()`. Allows swapping container/VM backends.
@@ -265,7 +265,7 @@ Manager.Start (sandbox/lifecycle.go)
 │       ├── config.json      # Container runtime config (agent cmd, tmux settings)
 │       ├── prompt.txt       # Agent prompt (if provided)
 │       ├── log.txt          # Session log
-│       ├── agent-state/     # Mounted at agent's StateDir (e.g., /home/yoloai/.claude/)
+│       ├── agent-state/     # Mounted at agent's StateDir (e.g., /home/yoloai/.claude/, /home/yoloai/.gemini/)
 │       ├── home-seed/       # Files mounted individually into /home/yoloai/
 │       └── work/
 │           └── <caret-encoded-path>/  # Copy of workdir with internal git repo

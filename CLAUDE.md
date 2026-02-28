@@ -1,6 +1,6 @@
 # yoloAI
 
-Sandboxed AI coding agent runner. Runs AI coding CLI agents (Claude Code, Codex) inside disposable Docker containers with copy/diff/apply workflow. Additional agents (Aider, Goose, etc.) in future versions.
+Sandboxed AI coding agent runner. Runs AI coding CLI agents (Claude Code, Gemini, Codex) inside disposable Docker containers with copy/diff/apply workflow. Additional agents (Aider, Goose, etc.) in future versions.
 
 ## Project Status
 

@@ -452,7 +452,7 @@ Lists all sandboxes with their current status.
 |---------|----------------------------------------------------------------|
 | NAME    | Sandbox name                                                   |
 | STATUS  | `running`, `stopped`, `done` (exit 0), `failed` (non-zero exit) |
-| AGENT   | Agent name (`claude`, `test`, `codex`)                         |
+| AGENT   | Agent name (`claude`, `gemini`, `codex`, `test`)               |
 | PROFILE | [PLANNED] Profile name or `(base)`                            |
 | AGE     | Time since creation                                            |
 | WORKDIR | Working directory path                                         |
@@ -477,7 +477,7 @@ Top-level shortcut: `yoloai ls`.
 
 **[PLANNED]** `yoloai system build` and `yoloai system build --all` also build the proxy sidecar image (`yoloai-proxy`), a purpose-built Go forward proxy (~200-300 lines) used by `--network-isolated`. Compiled as a static binary in a `FROM scratch` image (~5 MB). Uses HTTPS CONNECT tunneling with domain-based allowlist (no MITM). Allowlist loaded from a config file; reloadable via SIGUSR1. Logs allowed/denied requests. See [RESEARCH.md](../dev/RESEARCH.md) "Proxy Sidecar Research" for the evaluation of alternatives.
 
-Useful after modifying a profile's Dockerfile or when the base image needs updating (e.g., new Claude CLI version).
+Useful after modifying a profile's Dockerfile or when the base image needs updating (e.g., new agent CLI versions).
 
 **[PLANNED]** Profile Dockerfiles that install private dependencies (e.g., `RUN go mod download` from a private repo, `RUN npm install` from a private registry) need build-time credentials. yoloAI passes host credentials to Docker BuildKit via `--secret` so they're available during the build but never stored in image layers. Example: `RUN --mount=type=secret,id=npmrc,target=/root/.npmrc npm install` in the Dockerfile, with yoloAI automatically providing `~/.npmrc` as the secret source. Supported secret sources are documented in `yoloai system build --help`.
 

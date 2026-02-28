@@ -1,6 +1,6 @@
 # yoloAI Roadmap
 
-Core copy/diff/apply workflow with Claude Code ships today. Docker, Tart, and Seatbelt backends are implemented.
+Core copy/diff/apply workflow ships today with Claude Code and Gemini CLI agents. Docker, Tart, and Seatbelt backends are implemented.
 
 For the full list of designed-but-unimplemented features, see [dev/plans/TODO.md](dev/plans/TODO.md). For design specs, see [design/](design/).
 
@@ -9,7 +9,7 @@ For the full list of designed-but-unimplemented features, see [dev/plans/TODO.md
 - **Overlayfs copy strategy** — instant sandbox setup, space-efficient for large repos
 - **Network isolation** — domain-based allowlisting via proxy sidecar (`--network-isolated`)
 - **Profiles** — reusable environment definitions with user-supplied Dockerfiles
-- **Codex agent** — OpenAI Codex support (architecture is agent-agnostic)
+- **Codex agent** — testing and polish (agent definition exists, needs verification)
 
 ## Also planned
 
