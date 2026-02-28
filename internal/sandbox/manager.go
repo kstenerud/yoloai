@@ -68,7 +68,7 @@ func (m *Manager) EnsureSetup(ctx context.Context) error {
 				return fmt.Errorf("set setup_complete: %w", err)
 			}
 		} else {
-			if err := m.runNewUserSetup(); err != nil {
+			if err := m.runNewUserSetup(ctx); err != nil {
 				if !errors.Is(err, errSetupPreview) {
 					return err
 				}

@@ -70,7 +70,7 @@ func (m *Manager) RunSetup(ctx context.Context) error {
 	if err := m.EnsureSetupNonInteractive(ctx); err != nil {
 		return err
 	}
-	if err := m.runNewUserSetup(); err != nil {
+	if err := m.runNewUserSetup(ctx); err != nil {
 		if errors.Is(err, errSetupPreview) {
 			return nil
 		}
@@ -81,7 +81,7 @@ func (m *Manager) RunSetup(ctx context.Context) error {
 
 // runNewUserSetup orchestrates the interactive first-run setup prompts.
 // Returns errSetupPreview if the user chose [p].
-func (m *Manager) runNewUserSetup() error {
+func (m *Manager) runNewUserSetup(ctx context.Context) error {
 	class, userConfig := classifyTmuxConfig()
 
 	switch class {
@@ -93,17 +93,17 @@ func (m *Manager) runNewUserSetup() error {
 		return m.setSetupComplete()
 
 	case tmuxConfigNone:
-		return m.promptTmuxSetup("", true)
+		return m.promptTmuxSetup(ctx, "", true)
 
 	case tmuxConfigSmall:
-		return m.promptTmuxSetup(userConfig, false)
+		return m.promptTmuxSetup(ctx, userConfig, false)
 	}
 
 	return nil
 }
 
 // promptTmuxSetup shows the tmux config prompt and handles the user's choice.
-func (m *Manager) promptTmuxSetup(userConfig string, noConfig bool) error {
+func (m *Manager) promptTmuxSetup(ctx context.Context, userConfig string, noConfig bool) error {
 	fmt.Fprintln(m.output) //nolint:errcheck // best-effort output
 	if noConfig {
 		fmt.Fprintln(m.output, "yoloai uses tmux in sandboxes. No ~/.tmux.conf found, so we'll")           //nolint:errcheck // best-effort output
@@ -132,11 +132,11 @@ func (m *Manager) promptTmuxSetup(userConfig string, noConfig bool) error {
 
 	fmt.Fprint(m.output, "\nChoice [Y/n/p]: ") //nolint:errcheck // best-effort output
 
-	scanner := bufio.NewScanner(m.input)
-	answer := ""
-	if scanner.Scan() {
-		answer = strings.TrimSpace(strings.ToLower(scanner.Text()))
+	line, err := readLine(ctx, m.input)
+	if err != nil {
+		return err
 	}
+	answer := strings.TrimSpace(strings.ToLower(line))
 
 	switch answer {
 	case "", "y", "yes":

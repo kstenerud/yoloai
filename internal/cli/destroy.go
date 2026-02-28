@@ -73,7 +73,11 @@ func newDestroyCmd() *cobra.Command {
 						for _, w := range warnings {
 							fmt.Fprintln(cmd.ErrOrStderr(), w) //nolint:errcheck // best-effort output
 						}
-						if !sandbox.Confirm("Destroy all listed sandboxes? [y/N] ", os.Stdin, cmd.ErrOrStderr()) {
+						confirmed, confirmErr := sandbox.Confirm(cmd.Context(), "Destroy all listed sandboxes? [y/N] ", os.Stdin, cmd.ErrOrStderr())
+						if confirmErr != nil {
+							return confirmErr
+						}
+						if !confirmed {
 							return nil
 						}
 					}

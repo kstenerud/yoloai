@@ -11,6 +11,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// exitCodeSIGINT is the conventional exit code for SIGINT (128 + signal 2).
+const exitCodeSIGINT = 130
+
 // Execute runs the root command and returns the exit code.
 func Execute(ctx context.Context, version, commit, date string) int {
 	rootCmd := newRootCmd(version, commit, date)
@@ -18,6 +21,10 @@ func Execute(ctx context.Context, version, commit, date string) int {
 	err := rootCmd.ExecuteContext(ctx)
 	if err == nil {
 		return 0
+	}
+
+	if errors.Is(err, context.Canceled) {
+		return exitCodeSIGINT
 	}
 
 	fmt.Fprintf(os.Stderr, "yoloai: %s\n", err) //nolint:errcheck // best-effort stderr write

@@ -145,7 +145,11 @@ Use --patches to export .patch files without applying them.`,
 			// Confirmation
 			if !yes {
 				prompt := fmt.Sprintf("Apply to %s? [y/N] ", targetDir)
-				if !sandbox.Confirm(prompt, os.Stdin, cmd.ErrOrStderr()) {
+				confirmed, confirmErr := sandbox.Confirm(cmd.Context(), prompt, os.Stdin, cmd.ErrOrStderr())
+				if confirmErr != nil {
+					return confirmErr
+				}
+				if !confirmed {
 					return nil
 				}
 			}
@@ -282,7 +286,11 @@ func applySelectedCommits(cmd *cobra.Command, name string, refs []string, meta *
 	// Confirmation
 	if !yes {
 		prompt := fmt.Sprintf("Apply to %s? [y/N] ", targetDir)
-		if !sandbox.Confirm(prompt, os.Stdin, cmd.ErrOrStderr()) {
+		confirmed, confirmErr := sandbox.Confirm(cmd.Context(), prompt, os.Stdin, cmd.ErrOrStderr())
+		if confirmErr != nil {
+			return confirmErr
+		}
+		if !confirmed {
 			return nil
 		}
 	}
@@ -351,7 +359,11 @@ func applySquash(cmd *cobra.Command, name string, paths []string, meta *sandbox.
 
 	if !yes {
 		prompt := fmt.Sprintf("Apply these changes to %s? [y/N] ", targetDir)
-		if !sandbox.Confirm(prompt, os.Stdin, cmd.ErrOrStderr()) {
+		confirmed, confirmErr := sandbox.Confirm(cmd.Context(), prompt, os.Stdin, cmd.ErrOrStderr())
+		if confirmErr != nil {
+			return confirmErr
+		}
+		if !confirmed {
 			return nil
 		}
 	}
@@ -389,7 +401,11 @@ func applySquashMulti(cmd *cobra.Command, name string, paths []string, _ *sandbo
 	}
 
 	if !yes {
-		if !sandbox.Confirm("Apply these changes? [y/N] ", os.Stdin, cmd.ErrOrStderr()) {
+		confirmed, confirmErr := sandbox.Confirm(cmd.Context(), "Apply these changes? [y/N] ", os.Stdin, cmd.ErrOrStderr())
+		if confirmErr != nil {
+			return confirmErr
+		}
+		if !confirmed {
 			return nil
 		}
 	}

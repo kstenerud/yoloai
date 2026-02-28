@@ -2,6 +2,7 @@ package sandbox
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"log/slog"
 	"os"
@@ -93,7 +94,7 @@ func TestRunNewUserSetup_LargeConfig_AutoConfigures(t *testing.T) {
 	tmuxConf := strings.Repeat("set -g option value\n", 15)
 	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, ".tmux.conf"), []byte(tmuxConf), 0600))
 
-	err := mgr.runNewUserSetup()
+	err := mgr.runNewUserSetup(context.Background())
 	require.NoError(t, err)
 
 	cfg, err := LoadConfig()
@@ -105,7 +106,7 @@ func TestRunNewUserSetup_LargeConfig_AutoConfigures(t *testing.T) {
 func TestRunNewUserSetup_NoConfig_AnswerY(t *testing.T) {
 	mgr, output, _ := setupTestManager(t, "y\n")
 
-	err := mgr.runNewUserSetup()
+	err := mgr.runNewUserSetup(context.Background())
 	require.NoError(t, err)
 
 	cfg, err := LoadConfig()
@@ -118,7 +119,7 @@ func TestRunNewUserSetup_NoConfig_AnswerY(t *testing.T) {
 func TestRunNewUserSetup_NoConfig_AnswerEmpty(t *testing.T) {
 	mgr, _, _ := setupTestManager(t, "\n")
 
-	err := mgr.runNewUserSetup()
+	err := mgr.runNewUserSetup(context.Background())
 	require.NoError(t, err)
 
 	cfg, err := LoadConfig()
@@ -130,7 +131,7 @@ func TestRunNewUserSetup_NoConfig_AnswerEmpty(t *testing.T) {
 func TestRunNewUserSetup_NoConfig_AnswerN(t *testing.T) {
 	mgr, _, _ := setupTestManager(t, "n\n")
 
-	err := mgr.runNewUserSetup()
+	err := mgr.runNewUserSetup(context.Background())
 	require.NoError(t, err)
 
 	cfg, err := LoadConfig()
@@ -142,7 +143,7 @@ func TestRunNewUserSetup_NoConfig_AnswerN(t *testing.T) {
 func TestRunNewUserSetup_NoConfig_AnswerP(t *testing.T) {
 	mgr, output, _ := setupTestManager(t, "p\n")
 
-	err := mgr.runNewUserSetup()
+	err := mgr.runNewUserSetup(context.Background())
 	assert.ErrorIs(t, err, errSetupPreview)
 
 	// setup_complete should NOT be set
@@ -160,7 +161,7 @@ func TestRunNewUserSetup_SmallConfig_AnswerY(t *testing.T) {
 	tmuxConf := "set -g mouse on\n"
 	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, ".tmux.conf"), []byte(tmuxConf), 0600))
 
-	err := mgr.runNewUserSetup()
+	err := mgr.runNewUserSetup(context.Background())
 	require.NoError(t, err)
 
 	cfg, err := LoadConfig()
@@ -175,7 +176,7 @@ func TestRunNewUserSetup_SmallConfig_AnswerN(t *testing.T) {
 	tmuxConf := "set -g mouse on\n"
 	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, ".tmux.conf"), []byte(tmuxConf), 0600))
 
-	err := mgr.runNewUserSetup()
+	err := mgr.runNewUserSetup(context.Background())
 	require.NoError(t, err)
 
 	cfg, err := LoadConfig()
@@ -190,7 +191,7 @@ func TestRunNewUserSetup_SmallConfig_AnswerP(t *testing.T) {
 	tmuxConf := "set -g mouse on\n"
 	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, ".tmux.conf"), []byte(tmuxConf), 0600))
 
-	err := mgr.runNewUserSetup()
+	err := mgr.runNewUserSetup(context.Background())
 	assert.ErrorIs(t, err, errSetupPreview)
 
 	// Should print both sections
@@ -204,7 +205,7 @@ func TestRunNewUserSetup_EOF_DefaultsToY(t *testing.T) {
 
 	// No tmux config → noConfig path. EOF from scanner → answer is ""
 	// which maps to the default (Y) behavior.
-	err := mgr.runNewUserSetup()
+	err := mgr.runNewUserSetup(context.Background())
 	require.NoError(t, err)
 
 	cfg, err := LoadConfig()

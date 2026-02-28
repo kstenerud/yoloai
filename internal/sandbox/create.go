@@ -227,7 +227,11 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 			fmt.Fprintf(m.output, "WARNING: %s has uncommitted changes (%s)\n", strings.SplitN(w, ": ", 2)[0], strings.SplitN(w, ": ", 2)[1]) //nolint:errcheck // best-effort output
 		}
 		fmt.Fprintln(m.output, "These changes will be visible to the agent and could be modified or lost.") //nolint:errcheck // best-effort output
-		if !Confirm("Continue? [y/N] ", m.input, m.output) {
+		confirmed, confirmErr := Confirm(ctx, "Continue? [y/N] ", m.input, m.output)
+		if confirmErr != nil {
+			return nil, confirmErr
+		}
+		if !confirmed {
 			return nil, nil // user cancelled
 		}
 	}
