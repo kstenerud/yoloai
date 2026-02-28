@@ -203,7 +203,7 @@ func TestBuildExecCommand_TmuxDetection(t *testing.T) {
 	sandboxPath := "/Users/test/.yoloai/sandboxes/mybox"
 
 	// tmux command should use buildTmuxCommand
-	tmuxCmd := r.buildExecCommand(sandboxPath, []string{"tmux", "list-sessions"}, "")
+	tmuxCmd := r.buildExecCommand(sandboxPath, []string{"tmux", "list-sessions"})
 	if tmuxCmd.Args[0] != "tmux" {
 		t.Error("tmux command should be dispatched to tmux binary")
 	}
@@ -212,7 +212,7 @@ func TestBuildExecCommand_TmuxDetection(t *testing.T) {
 	}
 
 	// Non-tmux command should use sandbox-exec
-	otherCmd := r.buildExecCommand(sandboxPath, []string{"bash", "-c", "echo hello"}, "")
+	otherCmd := r.buildExecCommand(sandboxPath, []string{"bash", "-c", "echo hello"})
 	if otherCmd.Args[0] != "/usr/bin/sandbox-exec" {
 		t.Errorf("non-tmux command should use sandbox-exec, got %q", otherCmd.Args[0])
 	}
