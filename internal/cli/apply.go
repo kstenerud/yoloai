@@ -327,6 +327,11 @@ func applySelectedCommits(cmd *cobra.Command, name string, refs []string, meta *
 
 // applySquash implements the legacy squashed-patch behavior.
 func applySquash(cmd *cobra.Command, name string, paths []string, meta *sandbox.Meta, yes bool) error {
+	// Check for aux :copy dirs
+	if len(meta.Directories) > 0 {
+		return applySquashMulti(cmd, name, paths, meta, yes)
+	}
+
 	patch, stat, err := sandbox.GeneratePatch(name, paths)
 	if err != nil {
 		return err
@@ -364,6 +369,50 @@ func applySquash(cmd *cobra.Command, name string, paths []string, meta *sandbox.
 
 	_, err = fmt.Fprintf(cmd.OutOrStdout(), "Changes applied to %s\n", targetDir)
 	return err
+}
+
+// applySquashMulti applies squashed patches for multiple :copy directories.
+func applySquashMulti(cmd *cobra.Command, name string, paths []string, _ *sandbox.Meta, yes bool) error {
+	patches, err := sandbox.GenerateMultiPatch(name, paths)
+	if err != nil {
+		return err
+	}
+	if len(patches) == 0 {
+		_, err = fmt.Fprintln(cmd.OutOrStdout(), "No changes to apply")
+		return err
+	}
+
+	out := cmd.OutOrStdout()
+	for _, ps := range patches {
+		fmt.Fprintf(out, "=== %s (%s) ===\n", ps.HostPath, ps.Mode) //nolint:errcheck
+		fmt.Fprintln(out, ps.Stat)                                  //nolint:errcheck
+	}
+
+	if !yes {
+		if !sandbox.Confirm("Apply these changes? [y/N] ", os.Stdin, cmd.ErrOrStderr()) {
+			return nil
+		}
+	}
+
+	for _, ps := range patches {
+		isGit := sandbox.IsGitRepo(ps.HostPath)
+		if err := sandbox.CheckPatch(ps.Patch, ps.HostPath, isGit); err != nil {
+			return fmt.Errorf("%s: %w", ps.HostPath, err)
+		}
+		if err := sandbox.ApplyPatch(ps.Patch, ps.HostPath, isGit); err != nil {
+			return fmt.Errorf("%s: %w", ps.HostPath, err)
+		}
+		fmt.Fprintf(out, "Changes applied to %s\n", ps.HostPath) //nolint:errcheck
+	}
+
+	// Advance baseline for workdir
+	if len(paths) == 0 {
+		if err := sandbox.AdvanceBaseline(name); err != nil {
+			return fmt.Errorf("advance baseline: %w", err)
+		}
+	}
+
+	return nil
 }
 
 // exportPatches writes .patch files and optional wip.diff to the given directory.

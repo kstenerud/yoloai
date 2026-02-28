@@ -17,7 +17,7 @@ Single Go binary. No runtime dependencies — just the binary and Docker.
 
 ```
 Core Workflow:
-  yoloai new [options] [-a] <name> <workdir> [-d <auxdir>...]    Create and start a sandbox  (aux dirs [PLANNED])
+  yoloai new [options] [-a] <name> <workdir> [-d <auxdir>...]    Create and start a sandbox
   yoloai attach <name>                           Attach to a sandbox's tmux session
   yoloai diff <name> [<ref>] [-- <path>...]       Show changes the agent made
   yoloai apply <name>                            Copy changes back to original dirs
@@ -95,7 +95,7 @@ The agent definition determines the default prompt delivery mode. `--prompt` sel
 
 The **workdir** is the single primary project directory — the agent's working directory. It is positional (after name) and defaults to `:copy` mode if no suffix is given. The `:rw` suffix must be explicit. **[PLANNED]** The workdir will become optional when a profile provides one; currently it is always required.
 
-**[PLANNED]** **`-d` / `--dir`** specifies auxiliary directories (repeatable). Default read-only. Additive with profile directories.
+**`-d` / `--dir`** specifies auxiliary directories (repeatable). Default read-only. Additive with profile directories.
 
 **[PLANNED]** When both CLI and profile provide directories: CLI workdir **replaces** profile workdir. CLI `-d` dirs are **additive** with profile dirs.
 
@@ -106,7 +106,7 @@ Suffixes (combinable in any order):
 - `:copy` — copied to sandbox state, read-write, diff/apply available
 - `:force` — override dangerous directory detection
 
-**[PLANNED]** Mount point:
+Mount point:
 - `=<path>` — mount at a custom container path instead of the mirrored host path
 
 All directories are **bind-mounted read-only by default** at their original absolute host paths (mirrored paths).

@@ -235,3 +235,92 @@ func loadDiffContext(name string) (workDir string, baselineSHA string, mode stri
 
 	return workDir, baselineSHA, mode, nil
 }
+
+// DiffContext holds the resolved paths needed for diff/apply on one directory.
+type DiffContext struct {
+	HostPath    string // original host path (for display)
+	WorkDir     string // path to diff against (work copy for :copy, host path for :rw)
+	BaselineSHA string // baseline SHA for :copy dirs
+	Mode        string // "copy" or "rw"
+}
+
+// LoadAllDiffContexts returns diff contexts for workdir + all aux dirs
+// that have diffable content (:copy or :rw). Read-only dirs are skipped.
+func LoadAllDiffContexts(name string) ([]DiffContext, error) {
+	sandboxDir, err := RequireSandboxDir(name)
+	if err != nil {
+		return nil, err
+	}
+
+	meta, err := LoadMeta(sandboxDir)
+	if err != nil {
+		return nil, err
+	}
+
+	var contexts []DiffContext
+
+	// Workdir
+	switch meta.Workdir.Mode {
+	case "copy":
+		contexts = append(contexts, DiffContext{
+			HostPath:    meta.Workdir.HostPath,
+			WorkDir:     WorkDir(name, meta.Workdir.HostPath),
+			BaselineSHA: meta.Workdir.BaselineSHA,
+			Mode:        "copy",
+		})
+	case "rw":
+		contexts = append(contexts, DiffContext{
+			HostPath: meta.Workdir.HostPath,
+			WorkDir:  meta.Workdir.HostPath,
+			Mode:     "rw",
+		})
+	}
+
+	// Aux dirs
+	for _, d := range meta.Directories {
+		switch d.Mode {
+		case "copy":
+			contexts = append(contexts, DiffContext{
+				HostPath:    d.HostPath,
+				WorkDir:     WorkDir(name, d.HostPath),
+				BaselineSHA: d.BaselineSHA,
+				Mode:        "copy",
+			})
+		case "rw":
+			contexts = append(contexts, DiffContext{
+				HostPath: d.HostPath,
+				WorkDir:  d.HostPath,
+				Mode:     "rw",
+			})
+			// "ro" dirs are skipped
+		}
+	}
+
+	return contexts, nil
+}
+
+// GenerateMultiDiff produces diffs for all diffable directories in the sandbox.
+// Returns one DiffResult per directory that has changes.
+func GenerateMultiDiff(name string, stat bool) ([]*DiffResult, error) {
+	contexts, err := LoadAllDiffContexts(name)
+	if err != nil {
+		return nil, err
+	}
+
+	var results []*DiffResult
+	for _, dc := range contexts {
+		var result *DiffResult
+		if dc.Mode == "rw" {
+			result, err = generateRWDiff(dc.WorkDir, nil, stat)
+		} else {
+			result, err = generateCopyDiff(dc.WorkDir, dc.BaselineSHA, nil, stat)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("diff %s: %w", dc.HostPath, err)
+		}
+		result.WorkDir = dc.HostPath // use host path for display
+		results = append(results, result)
+	}
+
+	return results, nil
+}

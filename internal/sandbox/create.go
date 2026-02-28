@@ -27,6 +27,7 @@ type CreateOptions struct {
 	Replace     bool     // --replace flag
 	NoStart     bool     // --no-start flag
 	Yes         bool     // --yes flag (skip confirmations)
+	AuxDirArgs  []string // raw -d arguments (path with optional :copy/:rw/:force/=mount suffixes)
 	Passthrough []string // args after -- passed to agent
 	Version     string   // yoloAI version for meta.json
 	Attach      bool     // --attach flag (auto-attach after creation)
@@ -38,6 +39,7 @@ type sandboxState struct {
 	sandboxDir  string
 	workdir     *DirArg
 	workCopyDir string
+	auxDirs     []*DirArg
 	agent       *agent.Definition
 	model       string
 	hasPrompt   bool
@@ -141,7 +143,21 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 			ErrMissingAPIKey)
 	}
 
-	// Safety checks
+	// Parse auxiliary directories
+	var auxDirs []*DirArg
+	for _, auxArg := range opts.AuxDirArgs {
+		auxDir, auxErr := ParseDirArg(auxArg)
+		if auxErr != nil {
+			return nil, NewUsageError("invalid directory %q: %s", auxArg, auxErr)
+		}
+		// Aux dirs default to read-only (empty mode means "ro")
+		if _, auxStatErr := os.Stat(auxDir.Path); auxStatErr != nil {
+			return nil, NewUsageError("directory does not exist: %s", auxDir.Path)
+		}
+		auxDirs = append(auxDirs, auxDir)
+	}
+
+	// Safety checks — workdir
 	if IsDangerousDir(workdir.Path) {
 		if workdir.Force {
 			fmt.Fprintf(m.output, "WARNING: mounting dangerous directory %s\n", workdir.Path) //nolint:errcheck // best-effort output
@@ -150,8 +166,34 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 		}
 	}
 
-	if err := CheckPathOverlap([]string{workdir.Path}); err != nil {
+	// Safety checks — aux dirs
+	for _, ad := range auxDirs {
+		if IsDangerousDir(ad.Path) {
+			if ad.Force {
+				fmt.Fprintf(m.output, "WARNING: mounting dangerous directory %s\n", ad.Path) //nolint:errcheck // best-effort output
+			} else {
+				return nil, NewUsageError("refusing to mount dangerous directory %s (use :force to override)", ad.Path)
+			}
+		}
+	}
+
+	// Collect all host paths for overlap check
+	allPaths := []string{workdir.Path}
+	for _, ad := range auxDirs {
+		allPaths = append(allPaths, ad.Path)
+	}
+	if err := CheckPathOverlap(allPaths); err != nil {
 		return nil, NewUsageError("%s", err)
+	}
+
+	// Check for duplicate container mount paths
+	mountPaths := map[string]string{workdir.ResolvedMountPath(): workdir.Path}
+	for _, ad := range auxDirs {
+		mp := ad.ResolvedMountPath()
+		if prev, exists := mountPaths[mp]; exists {
+			return nil, NewUsageError("duplicate container mount path %s (from %s and %s)", mp, prev, ad.Path)
+		}
+		mountPaths[mp] = ad.Path
 	}
 
 	// --replace: destroy existing sandbox
@@ -163,13 +205,26 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 		}
 	}
 
-	// Dirty repo warning
-	dirtyMsg, err := CheckDirtyRepo(workdir.Path)
-	if err != nil {
-		return nil, fmt.Errorf("check repo status: %w", err)
+	// Dirty repo warnings (workdir + aux :copy/:rw dirs)
+	var dirtyWarnings []string
+	if msg, checkErr := CheckDirtyRepo(workdir.Path); checkErr != nil {
+		return nil, fmt.Errorf("check repo status: %w", checkErr)
+	} else if msg != "" {
+		dirtyWarnings = append(dirtyWarnings, fmt.Sprintf("%s: %s", workdir.Path, msg))
 	}
-	if dirtyMsg != "" && !opts.Yes {
-		fmt.Fprintf(m.output, "WARNING: %s has uncommitted changes (%s)\n", workdir.Path, dirtyMsg)         //nolint:errcheck // best-effort output
+	for _, ad := range auxDirs {
+		if ad.Mode == "copy" || ad.Mode == "rw" {
+			if msg, checkErr := CheckDirtyRepo(ad.Path); checkErr != nil {
+				return nil, fmt.Errorf("check repo status: %w", checkErr)
+			} else if msg != "" {
+				dirtyWarnings = append(dirtyWarnings, fmt.Sprintf("%s: %s", ad.Path, msg))
+			}
+		}
+	}
+	if len(dirtyWarnings) > 0 && !opts.Yes {
+		for _, w := range dirtyWarnings {
+			fmt.Fprintf(m.output, "WARNING: %s has uncommitted changes (%s)\n", strings.SplitN(w, ": ", 2)[0], strings.SplitN(w, ": ", 2)[1]) //nolint:errcheck // best-effort output
+		}
 		fmt.Fprintln(m.output, "These changes will be visible to the agent and could be modified or lost.") //nolint:errcheck // best-effort output
 		if !Confirm("Continue? [y/N] ", m.input, m.output) {
 			return nil, nil // user cancelled
@@ -246,6 +301,38 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 		baselineSHA = sha
 	}
 
+	// Copy and baseline aux dirs
+	var dirMetas []DirMeta
+	for _, ad := range auxDirs {
+		mode := ad.Mode
+		if mode == "" {
+			mode = "ro"
+		}
+
+		dm := DirMeta{
+			HostPath:  ad.Path,
+			MountPath: ad.ResolvedMountPath(),
+			Mode:      mode,
+		}
+
+		if ad.Mode == "copy" {
+			auxWorkDir := WorkDir(opts.Name, ad.Path)
+			if err := copyDir(ad.Path, auxWorkDir); err != nil {
+				return nil, fmt.Errorf("copy aux dir %s: %w", ad.Path, err)
+			}
+			if err := removeGitDirs(auxWorkDir); err != nil {
+				return nil, fmt.Errorf("remove git metadata in aux dir %s: %w", ad.Path, err)
+			}
+			sha, err := gitBaseline(auxWorkDir)
+			if err != nil {
+				return nil, fmt.Errorf("git baseline for aux dir %s: %w", ad.Path, err)
+			}
+			dm.BaselineSHA = sha
+		}
+
+		dirMetas = append(dirMetas, dm)
+	}
+
 	// Read prompt
 	promptText, err := readPrompt(opts.Prompt, opts.PromptFile)
 	if err != nil {
@@ -270,7 +357,7 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 	}
 
 	// Build config.json
-	configData, err := buildContainerConfig(agentDef, agentCommand, tmuxConf, workdir.Path)
+	configData, err := buildContainerConfig(agentDef, agentCommand, tmuxConf, workdir.ResolvedMountPath())
 	if err != nil {
 		return nil, fmt.Errorf("build config.json: %w", err)
 	}
@@ -291,10 +378,11 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 		Model:         model,
 		Workdir: WorkdirMeta{
 			HostPath:    workdir.Path,
-			MountPath:   workdir.Path,
+			MountPath:   workdir.ResolvedMountPath(),
 			Mode:        workdir.Mode,
 			BaselineSHA: baselineSHA,
 		},
+		Directories: dirMetas,
 		HasPrompt:   hasPrompt,
 		NetworkMode: networkMode,
 		Ports:       opts.Ports,
@@ -324,6 +412,7 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 		sandboxDir:  sandboxDir,
 		workdir:     workdir,
 		workCopyDir: workCopyDir,
+		auxDirs:     auxDirs,
 		agent:       agentDef,
 		model:       model,
 		hasPrompt:   hasPrompt,
@@ -358,7 +447,7 @@ func (m *Manager) launchContainer(ctx context.Context, state *sandboxState) erro
 	cfg := runtime.InstanceConfig{
 		Name:        cname,
 		ImageRef:    "yoloai-base",
-		WorkingDir:  state.workdir.Path,
+		WorkingDir:  state.workdir.ResolvedMountPath(),
 		Mounts:      mounts,
 		Ports:       ports,
 		NetworkMode: state.networkMode,
@@ -401,6 +490,17 @@ func (m *Manager) printCreationOutput(state *sandboxState, autoAttach bool) {
 	fmt.Fprintf(m.output, "Sandbox %s created\n", state.name)                              //nolint:errcheck // best-effort output
 	fmt.Fprintf(m.output, "  Agent:    %s\n", state.agent.Name)                            //nolint:errcheck // best-effort output
 	fmt.Fprintf(m.output, "  Workdir:  %s (%s)\n", state.workdir.Path, state.workdir.Mode) //nolint:errcheck // best-effort output
+	for _, ad := range state.auxDirs {
+		mode := ad.Mode
+		if mode == "" {
+			mode = "ro"
+		}
+		if ad.MountPath != "" {
+			fmt.Fprintf(m.output, "  Dir:      %s → %s (%s)\n", ad.Path, ad.MountPath, mode) //nolint:errcheck // best-effort output
+		} else {
+			fmt.Fprintf(m.output, "  Dir:      %s (%s)\n", ad.Path, mode) //nolint:errcheck // best-effort output
+		}
+	}
 	if state.networkMode == "none" {
 		fmt.Fprintln(m.output, "  Network:  none") //nolint:errcheck // best-effort output
 	}
@@ -587,13 +687,37 @@ func buildMounts(state *sandboxState, secretsDir string) []runtime.MountSpec {
 	if state.workdir.Mode == "copy" {
 		mounts = append(mounts, runtime.MountSpec{
 			Source: state.workCopyDir,
-			Target: state.workdir.Path,
+			Target: state.workdir.ResolvedMountPath(),
 		})
 	} else {
 		mounts = append(mounts, runtime.MountSpec{
-			Source: state.workdir.Path,
-			Target: state.workdir.Path,
+			Source:   state.workdir.Path,
+			Target:   state.workdir.ResolvedMountPath(),
+			ReadOnly: state.workdir.Mode != "rw" && state.workdir.Mode != "copy",
 		})
+	}
+
+	// Auxiliary directories
+	for _, ad := range state.auxDirs {
+		mountTarget := ad.ResolvedMountPath()
+		switch ad.Mode {
+		case "copy":
+			mounts = append(mounts, runtime.MountSpec{
+				Source: WorkDir(state.name, ad.Path),
+				Target: mountTarget,
+			})
+		case "rw":
+			mounts = append(mounts, runtime.MountSpec{
+				Source: ad.Path,
+				Target: mountTarget,
+			})
+		default: // read-only (empty mode or explicit "ro")
+			mounts = append(mounts, runtime.MountSpec{
+				Source:   ad.Path,
+				Target:   mountTarget,
+				ReadOnly: true,
+			})
+		}
 	}
 
 	// Agent state directory

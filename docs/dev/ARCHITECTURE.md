@@ -128,11 +128,11 @@ Dependency direction: `cmd/yoloai` → `cli` → `sandbox` + `runtime`; `sandbox
 ### `sandbox.Manager`
 Central orchestrator. Holds a `runtime.Runtime`, backend name, logger, and I/O streams. All sandbox operations go through it: `Create()`, `Start()`, `Stop()`, `Destroy()`, `Reset()`, `EnsureSetup()`. The backend name is stored so it can be persisted in `Meta` at sandbox creation time.
 
-### `sandbox.Meta` / `sandbox.WorkdirMeta`
-Persisted as `meta.json` in each sandbox dir. Records creation-time state: agent, model, workdir path/mode/baseline SHA, network mode, ports, backend.
+### `sandbox.Meta` / `sandbox.WorkdirMeta` / `sandbox.DirectoryMeta`
+Persisted as `meta.json` in each sandbox dir. Records creation-time state: agent, model, workdir path/mode/baseline SHA, auxiliary directories (via `Directories` field), network mode, ports, backend. Each directory (workdir and aux dirs) has its own `DirectoryMeta` with host path, mount path, mode, and baseline SHA.
 
 ### `sandbox.CreateOptions`
-All parameters for `Manager.Create()`. Mirrors CLI flags: name, workdir, agent, model, prompt, network, ports, replace, attach, passthrough args.
+All parameters for `Manager.Create()`. Mirrors CLI flags: name, workdir, auxiliary directories (`AuxDirs`), agent, model, prompt, network, ports, replace, attach, passthrough args.
 
 ### `sandbox.DiffOptions` / `sandbox.DiffResult`
 Input/output for `GenerateDiff()`. Supports path filtering and stat-only mode. `DiffResult` carries the diff text, workdir, mode, and empty flag.
@@ -190,14 +190,14 @@ newNewCmd (cli/commands.go)
     → Manager.Create (sandbox/create.go)
       → EnsureSetup: create dirs, seed resources, build image, write config.yaml
       → prepareSandboxState:
-          ParseDirArg → validate name/agent/workdir → safety checks
-          → copyDir (cp -rp) → removeGitDirs → gitBaseline (git init + commit)
+          ParseDirArg → validate name/agent/workdir/auxdirs → safety checks
+          → copyDir (cp -rp) for each :copy directory → removeGitDirs → gitBaseline (git init + commit)
           → copySeedFiles → ensureContainerSettings
           → readPrompt → resolveModel → buildAgentCommand
-          → SaveMeta (meta.json) → write prompt.txt, log.txt, config.json
+          → SaveMeta (meta.json with Directories field) → write prompt.txt, log.txt, config.json
       → launchContainer:
           createSecretsDir (temp files from env vars)
-          → buildMounts → runtime.Create → runtime.Start
+          → buildMounts (workdir + aux dirs) → runtime.Create → runtime.Start
           → runtime.Inspect (verify running) → cleanup secrets
 ```
 
@@ -206,9 +206,11 @@ newNewCmd (cli/commands.go)
 ```
 newDiffCmd (cli/diff.go)
   → GenerateDiff (sandbox/diff.go)
-    → loadDiffContext: LoadMeta → resolve workDir + baselineSHA
-    → :copy mode: stageUntracked (git add -A) → git diff --binary <baseline>
-    → :rw mode: git diff HEAD on live host dir
+    → loadDiffContext: LoadMeta → resolve all directories from meta.Directories
+    → For each directory:
+      → :copy mode: stageUntracked (git add -A) → git diff --binary <baseline>
+      → :rw mode: git diff HEAD on live host dir
+    → Combine diffs with directory-prefixed headers
 ```
 
 ### Apply (`yoloai apply`)
@@ -218,20 +220,22 @@ Two modes — squash and selective:
 **Squash (default):**
 ```
 applySquash (cli/apply.go)
-  → GeneratePatch (sandbox/apply.go): git diff --binary against baseline
-  → CheckPatch: git apply --check
-  → Confirm with user
-  → ApplyPatch: git apply
-  → AdvanceBaseline: update meta.json baseline SHA to HEAD
+  → For each :copy directory in meta.Directories:
+    → GeneratePatch (sandbox/apply.go): git diff --binary against baseline
+    → CheckPatch: git apply --check
+    → Confirm with user
+    → ApplyPatch: git apply
+    → AdvanceBaseline: update meta.json baseline SHA to HEAD
 ```
 
 **Selective (commit refs):**
 ```
 applySelectedCommits (cli/apply.go)
-  → ResolveRefs (sandbox/apply.go): resolve short SHAs / ranges
-  → GenerateFormatPatchForRefs: git format-patch per commit
-  → ApplyFormatPatch: git am --3way
-  → AdvanceBaselineTo: advance baseline to contiguous prefix
+  → For each :copy directory in meta.Directories:
+    → ResolveRefs (sandbox/apply.go): resolve short SHAs / ranges
+    → GenerateFormatPatchForRefs: git format-patch per commit
+    → ApplyFormatPatch: git am --3way
+    → AdvanceBaselineTo: advance baseline to contiguous prefix
 ```
 
 ### Container Start/Restart (`yoloai start`)
@@ -290,9 +294,9 @@ Manager.Start (sandbox/lifecycle.go)
 3. `SeedResources()` in `internal/runtime/docker/build.go` handles deploying them to `~/.yoloai/`
 
 **Change how sandbox state is persisted:**
-1. Modify `Meta` / `WorkdirMeta` in `internal/sandbox/meta.go`
+1. Modify `Meta` / `DirectoryMeta` in `internal/sandbox/meta.go`
 2. Update `prepareSandboxState()` in `internal/sandbox/create.go` where meta is populated
-3. Update any consumers that `LoadMeta()` and use the changed fields
+3. Update any consumers that `LoadMeta()` and use the changed fields (e.g., diff, apply, inspect, reset)
 
 **Change diff/apply behavior:**
 1. Diff generation: `internal/sandbox/diff.go`
@@ -300,7 +304,7 @@ Manager.Start (sandbox/lifecycle.go)
 3. CLI presentation: `internal/cli/diff.go` and `internal/cli/apply.go`
 
 **Change container creation (mounts, networking):**
-1. Mount construction: `buildMounts()` in `internal/sandbox/create.go` → populates `runtime.MountSpec`
+1. Mount construction: `buildMounts()` in `internal/sandbox/create.go` → populates `runtime.MountSpec` from meta.Directories (workdir + aux dirs)
 2. Container config: `launchContainer()` in `internal/sandbox/create.go` → builds `runtime.InstanceConfig`
 3. Port parsing: `parsePortBindings()` in `internal/sandbox/create.go` → populates `runtime.PortMapping`
 4. Runtime creation: `runtime.Create()` in `internal/runtime/docker/docker.go`

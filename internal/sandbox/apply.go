@@ -589,6 +589,69 @@ func GenerateWIPDiff(name string, paths []string) (patch []byte, stat string, er
 	return patchOut, strings.TrimRight(string(statOut), "\n"), nil
 }
 
+// PatchSet holds patch data for a single directory.
+type PatchSet struct {
+	HostPath string // original host path (for display)
+	Mode     string // "copy"
+	Patch    []byte
+	Stat     string
+}
+
+// GenerateMultiPatch produces patches for all :copy directories.
+// :rw dirs are skipped (changes are already live).
+func GenerateMultiPatch(name string, paths []string) ([]PatchSet, error) {
+	contexts, err := LoadAllDiffContexts(name)
+	if err != nil {
+		return nil, err
+	}
+
+	var patches []PatchSet
+	for _, dc := range contexts {
+		if dc.Mode != "copy" {
+			continue
+		}
+
+		if err := stageUntracked(dc.WorkDir); err != nil {
+			return nil, fmt.Errorf("stage untracked in %s: %w", dc.HostPath, err)
+		}
+
+		patchArgs := []string{"diff", "--binary", dc.BaselineSHA}
+		if len(paths) > 0 {
+			patchArgs = append(patchArgs, "--")
+			patchArgs = append(patchArgs, paths...)
+		}
+		patchCmd := newGitCmd(dc.WorkDir, patchArgs...)
+		patchOut, err := patchCmd.Output()
+		if err != nil {
+			return nil, fmt.Errorf("git diff (patch) in %s: %w", dc.HostPath, err)
+		}
+
+		if len(patchOut) == 0 {
+			continue
+		}
+
+		statArgs := []string{"diff", "--stat", dc.BaselineSHA}
+		if len(paths) > 0 {
+			statArgs = append(statArgs, "--")
+			statArgs = append(statArgs, paths...)
+		}
+		statCmd := newGitCmd(dc.WorkDir, statArgs...)
+		statOut, err := statCmd.Output()
+		if err != nil {
+			return nil, fmt.Errorf("git diff (stat) in %s: %w", dc.HostPath, err)
+		}
+
+		patches = append(patches, PatchSet{
+			HostPath: dc.HostPath,
+			Mode:     dc.Mode,
+			Patch:    patchOut,
+			Stat:     strings.TrimRight(string(statOut), "\n"),
+		})
+	}
+
+	return patches, nil
+}
+
 // ApplyFormatPatch applies .patch files to a target git directory using
 // git am --3way. On failure, returns an error with guidance about
 // git am --continue/--skip/--abort.

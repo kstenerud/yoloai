@@ -9,7 +9,6 @@ import (
 )
 
 // Meta holds sandbox configuration captured at creation time.
-// Simplified for MVP: single workdir only, no directories array, no resources.
 type Meta struct {
 	YoloaiVersion string    `json:"yoloai_version"`
 	Name          string    `json:"name"`
@@ -19,7 +18,8 @@ type Meta struct {
 	Agent string `json:"agent"`
 	Model string `json:"model,omitempty"`
 
-	Workdir WorkdirMeta `json:"workdir"`
+	Workdir     WorkdirMeta `json:"workdir"`
+	Directories []DirMeta   `json:"directories,omitempty"`
 
 	HasPrompt   bool     `json:"has_prompt"`
 	NetworkMode string   `json:"network_mode,omitempty"`
@@ -31,6 +31,15 @@ type WorkdirMeta struct {
 	HostPath    string `json:"host_path"`
 	MountPath   string `json:"mount_path"`
 	Mode        string `json:"mode"`
+	BaselineSHA string `json:"baseline_sha,omitempty"`
+}
+
+// DirMeta stores resolved directory state at creation time.
+// Used for both workdir and auxiliary directories.
+type DirMeta struct {
+	HostPath    string `json:"host_path"`
+	MountPath   string `json:"mount_path"`
+	Mode        string `json:"mode"` // "copy", "rw", "ro"
 	BaselineSHA string `json:"baseline_sha,omitempty"`
 }
 

@@ -63,6 +63,16 @@ Examples:
 			}
 
 			// Default: monolithic diff
+			// Check if sandbox has aux dirs — if so, use multi-dir diff
+			meta, metaErr := sandbox.LoadMeta(sandbox.Dir(name))
+			if metaErr != nil {
+				return metaErr
+			}
+
+			if len(meta.Directories) > 0 && len(paths) == 0 {
+				return diffMultiDir(cmd, name, stat)
+			}
+
 			opts := sandbox.DiffOptions{
 				Name:  name,
 				Paths: paths,
@@ -234,4 +244,43 @@ func agentRunningWarning(cmd *cobra.Command, name string) {
 		}
 		return nil
 	})
+}
+
+// diffMultiDir shows diffs for all diffable directories with per-dir headers.
+func diffMultiDir(cmd *cobra.Command, name string, stat bool) error {
+	results, err := sandbox.GenerateMultiDiff(name, stat)
+	if err != nil {
+		return err
+	}
+
+	allEmpty := true
+	for _, r := range results {
+		if !r.Empty {
+			allEmpty = false
+			break
+		}
+	}
+
+	if allEmpty {
+		_, err = fmt.Fprintln(cmd.OutOrStdout(), "No changes")
+		return err
+	}
+
+	var sb strings.Builder
+	for _, r := range results {
+		if r.Empty {
+			continue
+		}
+		fmt.Fprintf(&sb, "=== %s (%s) ===\n", r.WorkDir, r.Mode)
+		sb.WriteString(r.Output)
+		sb.WriteString("\n\n")
+	}
+
+	output := strings.TrimRight(sb.String(), "\n") + "\n"
+	if stat {
+		_, err = fmt.Fprint(cmd.OutOrStdout(), output)
+		return err
+	}
+
+	return RunPager(strings.NewReader(output))
 }

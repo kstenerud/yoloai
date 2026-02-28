@@ -112,3 +112,41 @@ func TestParseDirArg_PathWithColons(t *testing.T) {
 	assert.Equal(t, "/path/to/file:with", result.Path)
 	assert.Equal(t, "copy", result.Mode)
 }
+
+func TestParseDirArg_MountPath(t *testing.T) {
+	dir := t.TempDir()
+	app := filepath.Join(dir, "app")
+	require.NoError(t, os.MkdirAll(app, 0750))
+
+	tests := []struct {
+		name              string
+		input             string
+		expectedPath      string
+		expectedMountPath string
+		expectedMode      string
+		expectedForce     bool
+	}{
+		{"mount path only", app + "=/opt/app", app, "/opt/app", "", false},
+		{"mount path with rw", app + ":rw=/opt/app", app, "/opt/app", "rw", false},
+		{"mount path with copy and force", app + ":copy:force=/opt/app", app, "/opt/app", "copy", true},
+		{"no mount path", app, app, "", "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := ParseDirArg(tt.input)
+			require.NoError(t, err)
+			assert.Equal(t, tt.expectedPath, result.Path)
+			assert.Equal(t, tt.expectedMountPath, result.MountPath)
+			assert.Equal(t, tt.expectedMode, result.Mode)
+			assert.Equal(t, tt.expectedForce, result.Force)
+		})
+	}
+}
+
+func TestDirArg_ResolvedMountPath(t *testing.T) {
+	d := &DirArg{Path: "/host/path", MountPath: "/container/path"}
+	assert.Equal(t, "/container/path", d.ResolvedMountPath())
+
+	d2 := &DirArg{Path: "/host/path"}
+	assert.Equal(t, "/host/path", d2.ResolvedMountPath())
+}

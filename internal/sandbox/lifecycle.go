@@ -170,6 +170,31 @@ func (m *Manager) Reset(ctx context.Context, opts ResetOptions) error {
 		return fmt.Errorf("re-create git baseline: %w", err)
 	}
 
+	// Reset aux :copy dirs
+	for i, d := range meta.Directories {
+		if d.Mode != "copy" {
+			continue
+		}
+		auxWorkDir := WorkDir(opts.Name, d.HostPath)
+		if err := os.RemoveAll(auxWorkDir); err != nil {
+			return fmt.Errorf("remove aux work copy %s: %w", d.HostPath, err)
+		}
+		if _, err := os.Stat(d.HostPath); err != nil {
+			return fmt.Errorf("original aux directory no longer exists: %s", d.HostPath)
+		}
+		if err := copyDir(d.HostPath, auxWorkDir); err != nil {
+			return fmt.Errorf("re-copy aux dir %s: %w", d.HostPath, err)
+		}
+		if err := removeGitDirs(auxWorkDir); err != nil {
+			return fmt.Errorf("remove git metadata in aux dir %s: %w", d.HostPath, err)
+		}
+		auxSHA, auxErr := gitBaseline(auxWorkDir)
+		if auxErr != nil {
+			return fmt.Errorf("git baseline for aux dir %s: %w", d.HostPath, auxErr)
+		}
+		meta.Directories[i].BaselineSHA = auxSHA
+	}
+
 	// Update meta.json
 	meta.Workdir.BaselineSHA = newSHA
 	if err := SaveMeta(sandboxDir, meta); err != nil {
@@ -262,11 +287,22 @@ func (m *Manager) recreateContainer(ctx context.Context, name string, meta *Meta
 		return fmt.Errorf("parse config.json: %w", err)
 	}
 
+	// Rebuild aux dir args from meta
+	var auxDirs []*DirArg
+	for _, d := range meta.Directories {
+		auxDirs = append(auxDirs, &DirArg{
+			Path:      d.HostPath,
+			MountPath: d.MountPath,
+			Mode:      d.Mode,
+		})
+	}
+
 	state := &sandboxState{
 		name:        name,
 		sandboxDir:  sandboxDir,
 		workdir:     workdir,
 		workCopyDir: WorkDir(name, meta.Workdir.HostPath),
+		auxDirs:     auxDirs,
 		agent:       agentDef,
 		model:       meta.Model,
 		hasPrompt:   meta.HasPrompt,

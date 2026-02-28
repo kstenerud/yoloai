@@ -76,6 +76,32 @@ yoloai new task1 ./my-project
 yoloai new task2 ./my-project:rw
 ```
 
+## Auxiliary Directories
+
+You can mount additional directories alongside your workdir using the `-d` / `--dir` flag (repeatable). Auxiliary directories are read-only by default.
+
+```bash
+# Read-only auxiliary directories
+yoloai new mybox . -d /path/to/lib
+
+# Copy-mode auxiliary directory (isolated, diff/apply available)
+yoloai new mybox . -d /path/to/lib:copy
+
+# Writable bind-mount auxiliary directory
+yoloai new mybox . -d /path/to/lib:rw
+
+# Custom mount point for workdir
+yoloai new mybox ./app=/opt/app
+
+# Custom mount point for auxiliary directory
+yoloai new mybox . -d ./lib=/opt/lib
+
+# Multiple auxiliary directories
+yoloai new mybox ./app -d ./shared-lib -d ./common-types
+```
+
+By default, directories are mounted at their original absolute host paths (mirrored paths). Use `=<path>` to mount at a custom container path instead.
+
 ## Agents and Models
 
 yoloai currently ships with Claude Code as the only supported agent. The architecture is agent-agnostic — more agents are planned (see [Roadmap](ROADMAP.md)).

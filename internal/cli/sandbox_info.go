@@ -56,6 +56,14 @@ func newSandboxInfoCmd() *cobra.Command {
 
 				fmt.Fprintf(w, "Workdir:     %s (%s)\n", meta.Workdir.HostPath, meta.Workdir.Mode) //nolint:errcheck
 
+				for _, d := range meta.Directories {
+					if d.MountPath != d.HostPath {
+						fmt.Fprintf(w, "Dir:         %s → %s (%s)\n", d.HostPath, d.MountPath, d.Mode) //nolint:errcheck
+					} else {
+						fmt.Fprintf(w, "Dir:         %s (%s)\n", d.HostPath, d.Mode) //nolint:errcheck
+					}
+				}
+
 				if meta.NetworkMode != "" {
 					fmt.Fprintf(w, "Network:     %s\n", meta.NetworkMode) //nolint:errcheck
 				}

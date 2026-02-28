@@ -11,7 +11,8 @@ Create a plan file in this directory before starting implementation.
 | Network isolation | [commands.md](../../design/commands.md), [security.md](../../design/security.md) | — | `--network-isolated`, proxy sidecar, iptables, DNS control |
 | Profiles | [config.md](../../design/config.md) | — | `~/.yoloai/profiles/<name>/` with Dockerfile + profile.yaml |
 | Codex agent | [commands.md](../../design/commands.md) | — | Static Rust binary, headless mode, `codex --yolo` |
-| Aux dirs (`-d`) | [commands.md](../../design/commands.md) | — | Repeatable flag for auxiliary directories |
+| [DONE] Aux dirs (`-d`) | [commands.md](../../design/commands.md) | — | Repeatable flag for auxiliary directories |
+| [DONE] Custom mount points (`=<path>`) | [commands.md](../../design/commands.md) | — | Mount directories at custom container paths |
 | Extensions (`yoloai x`) | [commands.md](../../design/commands.md) | — | User-defined YAML commands in `~/.yoloai/extensions/` |
 | Sandbox context file | [commands.md](../../design/commands.md) | — | `/yoloai/context.md` describing environment for the agent |
 

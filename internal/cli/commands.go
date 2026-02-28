@@ -76,7 +76,7 @@ func newLogAliasCmd() *cobra.Command {
 
 func newNewCmd(version string) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:     "new [flags] <name> <workdir> [-- <agent-args>...]",
+		Use:     "new [flags] <name> <workdir> [-d <dir>...] [-- <agent-args>...]",
 		Short:   "Create and start a sandbox",
 		GroupID: groupWorkflow,
 		Args:    cobra.ArbitraryArgs,
@@ -110,6 +110,7 @@ func newNewCmd(version string) *cobra.Command {
 			agentName, _ := cmd.Flags().GetString("agent")
 			networkNone, _ := cmd.Flags().GetBool("network-none")
 			ports, _ := cmd.Flags().GetStringArray("port")
+			dirs, _ := cmd.Flags().GetStringArray("dir")
 			replace, _ := cmd.Flags().GetBool("replace")
 			noStart, _ := cmd.Flags().GetBool("no-start")
 			attach, _ := cmd.Flags().GetBool("attach")
@@ -121,6 +122,7 @@ func newNewCmd(version string) *cobra.Command {
 				sandboxName, err := mgr.Create(ctx, sandbox.CreateOptions{
 					Name:        name,
 					WorkdirArg:  workdirArg,
+					AuxDirArgs:  dirs,
 					Agent:       agentName,
 					Model:       model,
 					Prompt:      prompt,
@@ -160,6 +162,7 @@ func newNewCmd(version string) *cobra.Command {
 	cmd.Flags().String("backend", "", "Runtime backend (see 'yoloai system backends')")
 	cmd.Flags().Bool("network-none", false, "Disable network access")
 	cmd.Flags().StringArray("port", nil, "Port mapping (host:container)")
+	cmd.Flags().StringArrayP("dir", "d", nil, "Auxiliary directory (repeatable, default read-only)")
 	cmd.Flags().Bool("replace", false, "Replace existing sandbox")
 	cmd.Flags().Bool("no-start", false, "Create but don't start the container")
 	cmd.Flags().BoolP("attach", "a", false, "Auto-attach after creation")

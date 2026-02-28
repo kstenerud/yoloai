@@ -173,6 +173,19 @@ func InspectSandbox(ctx context.Context, rt runtime.Runtime, name string) (*Info
 	workDir := WorkDir(name, meta.Workdir.HostPath)
 	changes := detectChanges(workDir)
 
+	// Also check aux :copy dirs for changes
+	if changes == "no" {
+		for _, d := range meta.Directories {
+			if d.Mode == "copy" {
+				auxWorkDir := WorkDir(name, d.HostPath)
+				if detectChanges(auxWorkDir) == "yes" {
+					changes = "yes"
+					break
+				}
+			}
+		}
+	}
+
 	diskUsage := "-"
 	if size, err := DirSize(sandboxDir); err == nil {
 		diskUsage = FormatSize(size)
