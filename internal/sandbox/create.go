@@ -60,6 +60,7 @@ type containerConfig struct {
 	SubmitSequence string `json:"submit_sequence"`
 	TmuxConf       string `json:"tmux_conf"`
 	WorkingDir     string `json:"working_dir"`
+	StateDirName   string `json:"state_dir_name"`
 }
 
 // Create creates and optionally starts a new sandbox.
@@ -569,6 +570,10 @@ func shellEscapeForDoubleQuotes(s string) string {
 
 // buildContainerConfig creates the config.json content.
 func buildContainerConfig(agentDef *agent.Definition, agentCommand string, tmuxConf string, workingDir string) ([]byte, error) {
+	var stateDirName string
+	if agentDef.StateDir != "" {
+		stateDirName = filepath.Base(agentDef.StateDir)
+	}
 	cfg := containerConfig{
 		HostUID:        os.Getuid(),
 		HostGID:        os.Getgid(),
@@ -578,6 +583,7 @@ func buildContainerConfig(agentDef *agent.Definition, agentCommand string, tmuxC
 		SubmitSequence: agentDef.SubmitSequence,
 		TmuxConf:       tmuxConf,
 		WorkingDir:     workingDir,
+		StateDirName:   stateDirName,
 	}
 	return json.MarshalIndent(cfg, "", "  ")
 }

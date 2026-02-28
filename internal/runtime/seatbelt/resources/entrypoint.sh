@@ -14,9 +14,10 @@ TMUX_SOCK="$SANDBOX_DIR/tmux.sock"
 export HOME="$SANDBOX_DIR/home"
 mkdir -p "$HOME"
 
-# Symlink .claude to agent-state so Claude Code resolves ~/.claude/ inside sandbox
-if [ ! -L "$HOME/.claude" ]; then
-    ln -sf "$SANDBOX_DIR/agent-state" "$HOME/.claude"
+# Symlink agent state dir (e.g. .claude, .gemini) to agent-state
+STATE_DIR_NAME=$(jq -r '.state_dir_name // empty' "$CONFIG")
+if [ -n "$STATE_DIR_NAME" ] && [ ! -L "$HOME/$STATE_DIR_NAME" ]; then
+    ln -sf "$SANDBOX_DIR/agent-state" "$HOME/$STATE_DIR_NAME"
 fi
 
 # Symlink home-seed files (e.g. .claude.json) into HOME

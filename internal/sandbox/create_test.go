@@ -74,6 +74,28 @@ func TestBuildContainerConfig_ValidJSON(t *testing.T) {
 	assert.Equal(t, os.Getuid(), cfg.HostUID)
 	assert.Equal(t, os.Getgid(), cfg.HostGID)
 	assert.Equal(t, "default+host", cfg.TmuxConf)
+	assert.Equal(t, ".claude", cfg.StateDirName)
+}
+
+func TestBuildContainerConfig_StateDirName(t *testing.T) {
+	tests := []struct {
+		agent    string
+		expected string
+	}{
+		{"claude", ".claude"},
+		{"gemini", ".gemini"},
+		{"test", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.agent, func(t *testing.T) {
+			agentDef := agent.GetAgent(tt.agent)
+			data, err := buildContainerConfig(agentDef, "cmd", "default", "/tmp")
+			require.NoError(t, err)
+			var cfg containerConfig
+			require.NoError(t, json.Unmarshal(data, &cfg))
+			assert.Equal(t, tt.expected, cfg.StateDirName)
+		})
+	}
 }
 
 func TestReadPrompt_DirectText(t *testing.T) {
