@@ -76,7 +76,7 @@ func newLogAliasCmd() *cobra.Command {
 
 func newNewCmd(version string) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:     "new [flags] <name> [<workdir>] [-- <agent-args>...]",
+		Use:     "new [flags] <name> <workdir> [-- <agent-args>...]",
 		Short:   "Create and start a sandbox",
 		GroupID: groupWorkflow,
 		Args:    cobra.ArbitraryArgs,
@@ -94,15 +94,15 @@ func newNewCmd(version string) *cobra.Command {
 			if len(positional) < 1 {
 				return sandbox.NewUsageError("sandbox name is required")
 			}
+			if len(positional) < 2 {
+				return sandbox.NewUsageError("workdir is required\n\nUsage: yoloai new [flags] <name> <workdir> [-- <agent-args>...]\n\nExample: yoloai new %s .", positional[0])
+			}
 			if len(positional) > 2 {
-				return sandbox.NewUsageError("too many positional arguments (expected <name> [<workdir>])")
+				return sandbox.NewUsageError("too many positional arguments (expected <name> <workdir>)")
 			}
 
 			name := positional[0]
-			workdirArg := "."
-			if len(positional) > 1 {
-				workdirArg = positional[1]
-			}
+			workdirArg := positional[1]
 
 			prompt, _ := cmd.Flags().GetString("prompt")
 			promptFile, _ := cmd.Flags().GetString("prompt-file")

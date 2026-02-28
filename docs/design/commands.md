@@ -17,7 +17,7 @@ Single Go binary. No runtime dependencies — just the binary and Docker.
 
 ```
 Core Workflow:
-  yoloai new [options] [-a] <name> [<workdir>] [-d <auxdir>...]  Create and start a sandbox  (aux dirs [PLANNED])
+  yoloai new [options] [-a] <name> <workdir> [-d <auxdir>...]    Create and start a sandbox  (aux dirs [PLANNED])
   yoloai attach <name>                           Attach to a sandbox's tmux session
   yoloai diff <name> [<ref>] [-- <path>...]       Show changes the agent made
   yoloai apply <name>                            Copy changes back to original dirs
@@ -91,9 +91,9 @@ The agent definition determines the default prompt delivery mode. `--prompt` sel
 
 ### `yoloai new`
 
-`yoloai new [options] <name> [<workdir>] [-d <auxdir>...]`
+`yoloai new [options] <name> <workdir> [-d <auxdir>...]`
 
-The **workdir** is the single primary project directory — the agent's working directory. It is positional (after name) and defaults to `:copy` mode if no suffix is given. The `:rw` suffix must be explicit. The workdir is optional if a profile provides one.
+The **workdir** is the single primary project directory — the agent's working directory. It is positional (after name) and defaults to `:copy` mode if no suffix is given. The `:rw` suffix must be explicit. **[PLANNED]** The workdir will become optional when a profile provides one; currently it is always required.
 
 **[PLANNED]** **`-d` / `--dir`** specifies auxiliary directories (repeatable). Default read-only. Additive with profile directories.
 
