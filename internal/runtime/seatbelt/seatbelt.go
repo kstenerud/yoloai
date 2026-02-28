@@ -497,7 +497,19 @@ func (r *Runtime) buildExecCommand(sandboxPath string, cmd []string) *exec.Cmd {
 	profilePath := filepath.Join(sandboxPath, profileFileName)
 	args := []string{"-f", profilePath}
 	args = append(args, cmd...)
-	return exec.Command(r.sandboxExecBin, args...) //nolint:gosec // G204: args from validated sandbox state
+	c := exec.Command(r.sandboxExecBin, args...) //nolint:gosec // G204: args from validated sandbox state
+
+	// Set working directory from saved config so exec behaves like
+	// docker exec (inherits the container's working directory).
+	cfgPath := filepath.Join(sandboxPath, seatbeltConfigFileName)
+	if data, err := os.ReadFile(cfgPath); err == nil { //nolint:gosec // G304: path from validated sandbox state
+		var cfg runtime.InstanceConfig
+		if err := json.Unmarshal(data, &cfg); err == nil && cfg.WorkingDir != "" {
+			c.Dir = cfg.WorkingDir
+		}
+	}
+
+	return c
 }
 
 // buildTmuxCommand injects the per-sandbox socket into a tmux command.
