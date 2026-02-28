@@ -106,8 +106,9 @@ func (m *Manager) Destroy(ctx context.Context, name string, _ bool) error {
 	// Remove instance (ignore errors — may not exist)
 	_ = m.runtime.Remove(ctx, cname)
 
-	// Remove sandbox directory
-	if err := os.RemoveAll(Dir(name)); err != nil {
+	// Remove sandbox directory. Some files (e.g. Go module cache) are
+	// read-only, so make everything writable first.
+	if err := forceRemoveAll(Dir(name)); err != nil {
 		return fmt.Errorf("remove sandbox directory: %w", err)
 	}
 
@@ -421,4 +422,24 @@ rm -f /tmp/yoloai-reset.txt`, appendPrompt, cfg.SubmitSequence)
 		"bash", "-c", script, "_", resetNotification,
 	})
 	return err
+}
+
+// forceRemoveAll removes a directory tree, making read-only entries writable
+// first (e.g. Go module cache files are installed read-only).
+func forceRemoveAll(path string) error {
+	// First pass: ensure all directories are writable so their contents can
+	// be removed. We only need to fix directories — os.RemoveAll handles
+	// read-only files fine once the parent directory is writable.
+	_ = filepath.WalkDir(path, func(p string, d os.DirEntry, err error) error {
+		if err != nil {
+			// If the directory isn't readable/executable, fix it and retry.
+			_ = os.Chmod(p, 0o700) //nolint:errcheck,gosec // best-effort; 0700 needed for directory traversal before removal
+			return nil
+		}
+		if d.IsDir() {
+			_ = os.Chmod(p, 0o700) //nolint:errcheck,gosec // best-effort; 0700 needed for directory traversal before removal
+		}
+		return nil
+	})
+	return os.RemoveAll(path)
 }
