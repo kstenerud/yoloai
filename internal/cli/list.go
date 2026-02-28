@@ -34,6 +34,18 @@ func newListCmd() *cobra.Command {
 				w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 3, ' ', 0)
 				fmt.Fprintln(w, "NAME\tSTATUS\tAGENT\tAGE\tSIZE\tWORKDIR\tCHANGES") //nolint:errcheck // best-effort output
 				for _, info := range infos {
+					if info.Status == sandbox.StatusBroken {
+						fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", //nolint:errcheck // best-effort output
+							info.Meta.Name,
+							info.Status,
+							"-",
+							"-",
+							info.DiskUsage,
+							"-",
+							"-",
+						)
+						continue
+					}
 					fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", //nolint:errcheck // best-effort output
 						info.Meta.Name,
 						info.Status,

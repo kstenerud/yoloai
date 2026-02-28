@@ -583,9 +583,13 @@ func TestPrepareSandboxState_SandboxExists(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
 
-	// Create existing sandbox dir
+	// Create existing sandbox dir with valid meta.json
 	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", "existing")
 	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
+	require.NoError(t, SaveMeta(sandboxDir, &Meta{
+		Name:  "existing",
+		Agent: "test",
+	}))
 
 	mgr := NewManager(&mockRuntime{}, "docker", slog.Default(), strings.NewReader(""), io.Discard)
 

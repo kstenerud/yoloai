@@ -709,3 +709,19 @@ func TestReset_NoRestart_FallsBackWhenNotRunning(t *testing.T) {
 	assert.NotEmpty(t, updatedMeta.Workdir.BaselineSHA)
 	assert.NotEqual(t, sha, updatedMeta.Workdir.BaselineSHA)
 }
+
+func TestDestroy_BrokenSandbox(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	// Create sandbox dir without meta.json (broken sandbox)
+	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", "broken")
+	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
+
+	mock := &lifecycleMockRuntime{}
+	mgr := newLifecycleMgr(mock)
+
+	err := mgr.Destroy(context.Background(), "broken", true)
+	require.NoError(t, err)
+	assert.NoDirExists(t, sandboxDir)
+}

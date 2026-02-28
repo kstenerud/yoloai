@@ -149,7 +149,7 @@ func TestListSandboxes_Empty(t *testing.T) {
 	assert.Empty(t, result)
 }
 
-func TestListSandboxes_SkipsBroken(t *testing.T) {
+func TestListSandboxes_IncludesBroken(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
 
@@ -182,6 +182,24 @@ func TestListSandboxes_SkipsBroken(t *testing.T) {
 
 	result, err := ListSandboxes(context.Background(), mock)
 	require.NoError(t, err)
-	require.Len(t, result, 1)
-	assert.Equal(t, "valid", result[0].Meta.Name)
+	require.Len(t, result, 2)
+
+	// Find valid and broken sandboxes (order depends on ReadDir)
+	var validInfo, brokenInfo *Info
+	for _, info := range result {
+		switch info.Meta.Name {
+		case "valid":
+			validInfo = info
+		case "broken":
+			brokenInfo = info
+		}
+	}
+
+	require.NotNil(t, validInfo)
+	assert.Equal(t, StatusRemoved, validInfo.Status)
+
+	require.NotNil(t, brokenInfo)
+	assert.Equal(t, StatusBroken, brokenInfo.Status)
+	assert.Equal(t, "-", brokenInfo.HasChanges)
+	assert.Equal(t, "-", brokenInfo.DiskUsage)
 }

@@ -1,9 +1,13 @@
 package sandbox
 
 import (
+	"context"
 	"encoding/json"
+	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -205,4 +209,49 @@ func TestRemoveGitDirs_NoGit(t *testing.T) {
 
 	require.NoError(t, removeGitDirs(dir))
 	assert.FileExists(t, filepath.Join(dir, "file.txt"))
+}
+
+func TestCreate_CleansUpIncompleteOnNew(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	// Create sandbox dir without meta.json (incomplete from prior failure)
+	name := "incomplete"
+	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
+	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
+
+	// prepareSandboxState should auto-clean the incomplete dir.
+	// It will fail later (no agent, etc.) but the key assertion is
+	// that it does NOT return ErrSandboxExists.
+	mgr := NewManager(&mockRuntime{}, "docker", slog.Default(), strings.NewReader(""), io.Discard)
+	_, err := mgr.Create(context.Background(), CreateOptions{
+		Name:       name,
+		WorkdirArg: tmpDir,
+		Agent:      "test",
+		Version:    "test",
+	})
+	// Will fail for other reasons (no API key etc.), but must NOT be ErrSandboxExists
+	assert.NotErrorIs(t, err, ErrSandboxExists)
+}
+
+func TestCreate_CleansUpOnPrepareFail(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	name := "cleanup-test"
+	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
+
+	// Use test agent which needs no API key, but provide a nonexistent workdir
+	// so preparation fails after directory creation.
+	mgr := NewManager(&mockRuntime{}, "docker", slog.Default(), strings.NewReader(""), io.Discard)
+	_, err := mgr.Create(context.Background(), CreateOptions{
+		Name:       name,
+		WorkdirArg: filepath.Join(tmpDir, "nonexistent"),
+		Agent:      "test",
+		Version:    "test",
+	})
+	require.Error(t, err)
+
+	// Sandbox directory should not exist (cleaned up on failure)
+	assert.NoDirExists(t, sandboxDir)
 }

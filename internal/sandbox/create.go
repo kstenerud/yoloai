@@ -81,6 +81,9 @@ func (m *Manager) Create(ctx context.Context, opts CreateOptions) (string, error
 	}
 
 	if err := m.launchContainer(ctx, state); err != nil {
+		// Clean up sandbox directory and attempt container removal
+		_ = os.RemoveAll(state.sandboxDir)
+		_ = m.runtime.Remove(ctx, InstanceName(state.name))
 		return "", err
 	}
 
@@ -112,7 +115,13 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 
 	sandboxDir := Dir(opts.Name)
 	if _, err := os.Stat(sandboxDir); err == nil && !opts.Replace {
-		return nil, fmt.Errorf("sandbox %q already exists (use --replace to recreate): %w", opts.Name, ErrSandboxExists)
+		// Directory exists — check if it's a complete sandbox
+		if _, metaErr := LoadMeta(sandboxDir); metaErr != nil {
+			// Broken sandbox (no valid meta.json) — auto-clean
+			_ = os.RemoveAll(sandboxDir)
+		} else {
+			return nil, fmt.Errorf("sandbox %q already exists (use --replace to recreate): %w", opts.Name, ErrSandboxExists)
+		}
 	}
 
 	if opts.Prompt != "" && opts.PromptFile != "" {
@@ -179,6 +188,14 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 			return nil, fmt.Errorf("create directory %s: %w", dir, err)
 		}
 	}
+
+	// Cleanup sandbox directory on failure
+	success := false
+	defer func() {
+		if !success {
+			_ = os.RemoveAll(sandboxDir)
+		}
+	}()
 
 	// Copy seed files into agent-state (config, OAuth credentials, etc.)
 	if _, err := copySeedFiles(agentDef, sandboxDir, hasAPIKey); err != nil {
@@ -301,6 +318,7 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 		return nil, fmt.Errorf("write config.json: %w", err)
 	}
 
+	success = true
 	return &sandboxState{
 		name:        opts.Name,
 		sandboxDir:  sandboxDir,

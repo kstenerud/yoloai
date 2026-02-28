@@ -24,6 +24,7 @@ const (
 	StatusFailed  Status = "failed"  // container running, agent exited with error (non-zero)
 	StatusStopped Status = "stopped" // container stopped (docker stop)
 	StatusRemoved Status = "removed" // container removed but sandbox dir exists
+	StatusBroken  Status = "broken"  // sandbox dir exists but meta.json missing/invalid
 )
 
 // Info holds the combined metadata and live state for a sandbox.
@@ -209,7 +210,14 @@ func ListSandboxes(ctx context.Context, rt runtime.Runtime) ([]*Info, error) {
 		}
 		info, err := InspectSandbox(ctx, rt, entry.Name())
 		if err != nil {
-			continue // skip broken sandboxes
+			// Include broken sandboxes with minimal info
+			result = append(result, &Info{
+				Meta:       &Meta{Name: entry.Name()},
+				Status:     StatusBroken,
+				HasChanges: "-",
+				DiskUsage:  "-",
+			})
+			continue
 		}
 		result = append(result, info)
 	}
