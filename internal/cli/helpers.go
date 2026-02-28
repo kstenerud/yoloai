@@ -68,6 +68,25 @@ func withRuntime(ctx context.Context, backend string, fn func(ctx context.Contex
 	return fn(ctx, rt)
 }
 
+// resolveAgent determines the agent name from --agent flag, then config,
+// then default. Used by the new command.
+func resolveAgent(cmd *cobra.Command) string {
+	if a, _ := cmd.Flags().GetString("agent"); a != "" {
+		return a
+	}
+	return resolveAgentFromConfig()
+}
+
+// resolveAgentFromConfig reads the agent from config.yaml, falling back
+// to "claude".
+func resolveAgentFromConfig() string {
+	cfg, err := sandbox.LoadConfig()
+	if err == nil && cfg.Agent != "" {
+		return cfg.Agent
+	}
+	return "claude"
+}
+
 // withManager creates a runtime and sandbox manager, calls fn, and ensures cleanup.
 func withManager(cmd *cobra.Command, backend string, fn func(ctx context.Context, mgr *sandbox.Manager) error) error {
 	return withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {

@@ -17,6 +17,7 @@ type YoloaiConfig struct {
 	TmuxConf      string `yaml:"tmux_conf"`  // from defaults.tmux_conf
 	Backend       string `yaml:"backend"`    // from defaults.backend
 	TartImage     string `yaml:"tart_image"` // from defaults.tart_image — custom base VM image for tart backend
+	Agent         string `yaml:"agent"`      // from defaults.agent
 }
 
 // knownSetting defines a config key with its default value.
@@ -32,6 +33,7 @@ var knownSettings = []knownSetting{
 	{"defaults.backend", "docker"},
 	{"defaults.tart_image", ""},
 	{"defaults.tmux_conf", ""},
+	{"defaults.agent", "claude"},
 }
 
 // ConfigPath returns the path to ~/.yoloai/config.yaml.
@@ -91,6 +93,8 @@ func LoadConfig() (*YoloaiConfig, error) {
 						cfg.Backend = val.Content[j+1].Value
 					case "tart_image":
 						cfg.TartImage = val.Content[j+1].Value
+					case "agent":
+						cfg.Agent = val.Content[j+1].Value
 					}
 				}
 			}

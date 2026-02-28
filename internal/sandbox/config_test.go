@@ -41,6 +41,35 @@ defaults:
 	require.NoError(t, err)
 	assert.True(t, cfg.SetupComplete)
 	assert.Equal(t, "default+host", cfg.TmuxConf)
+	assert.Equal(t, "claude", cfg.Agent)
+}
+
+func TestLoadConfig_AgentDefault(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	yoloaiDir := filepath.Join(tmpDir, ".yoloai")
+	require.NoError(t, os.MkdirAll(yoloaiDir, 0750))
+	require.NoError(t, os.WriteFile(filepath.Join(yoloaiDir, "config.yaml"), []byte(defaultConfigYAML), 0600))
+
+	cfg, err := LoadConfig()
+	require.NoError(t, err)
+	assert.Empty(t, cfg.Agent) // Not set in file; caller uses knownSettings default
+}
+
+func TestLoadConfig_AgentOverride(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	yoloaiDir := filepath.Join(tmpDir, ".yoloai")
+	require.NoError(t, os.MkdirAll(yoloaiDir, 0750))
+
+	content := "setup_complete: true\ndefaults:\n  agent: gemini\n"
+	require.NoError(t, os.WriteFile(filepath.Join(yoloaiDir, "config.yaml"), []byte(content), 0600))
+
+	cfg, err := LoadConfig()
+	require.NoError(t, err)
+	assert.Equal(t, "gemini", cfg.Agent)
 }
 
 func TestLoadConfig_MissingFile(t *testing.T) {
@@ -251,6 +280,7 @@ func TestGetEffectiveConfig_Defaults(t *testing.T) {
 	assert.Contains(t, out, "backend: docker")
 	assert.Contains(t, out, "tart_image:")
 	assert.Contains(t, out, "tmux_conf:")
+	assert.Contains(t, out, "agent: claude")
 }
 
 func TestGetEffectiveConfig_WithOverrides(t *testing.T) {
