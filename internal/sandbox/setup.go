@@ -104,7 +104,7 @@ func availableBackends() []setupOption {
 func availableAgents() []setupOption {
 	var opts []setupOption
 	for _, name := range agent.AllAgentNames() {
-		if name == "test" {
+		if name == "test" || name == "shell" {
 			continue
 		}
 		def := agent.GetAgent(name)

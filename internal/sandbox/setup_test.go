@@ -362,6 +362,7 @@ func TestAvailableAgents_ExcludesTest(t *testing.T) {
 	agents := availableAgents()
 	for _, a := range agents {
 		assert.NotEqual(t, "test", a.name)
+		assert.NotEqual(t, "shell", a.name)
 	}
 	assert.GreaterOrEqual(t, len(agents), 2, "should have at least claude and gemini")
 }

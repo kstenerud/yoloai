@@ -760,19 +760,39 @@ func buildMounts(state *sandboxState, secretsDir string) []runtime.MountSpec {
 		ReadOnly: true,
 	})
 
-	// Home-seed files (individual file mounts into /home/yoloai/)
+	// Home-seed files and directories (mounted into /home/yoloai/)
+	mountedDirs := map[string]bool{}
 	for _, sf := range state.agent.SeedFiles {
 		if !sf.HomeDir {
 			continue
 		}
-		src := filepath.Join(state.sandboxDir, "home-seed", sf.TargetPath)
-		if _, err := os.Stat(src); err != nil {
-			continue // skip if not seeded
+		// For nested paths (e.g., ".claude/settings.json"), mount the
+		// top-level directory once rather than individual files. This lets
+		// agents create new state files at runtime.
+		if strings.Contains(sf.TargetPath, "/") {
+			topDir := strings.SplitN(sf.TargetPath, "/", 2)[0]
+			if mountedDirs[topDir] {
+				continue
+			}
+			src := filepath.Join(state.sandboxDir, "home-seed", topDir)
+			if _, err := os.Stat(src); err != nil {
+				continue
+			}
+			mounts = append(mounts, runtime.MountSpec{
+				Source: src,
+				Target: "/home/yoloai/" + topDir,
+			})
+			mountedDirs[topDir] = true
+		} else {
+			src := filepath.Join(state.sandboxDir, "home-seed", sf.TargetPath)
+			if _, err := os.Stat(src); err != nil {
+				continue // skip if not seeded
+			}
+			mounts = append(mounts, runtime.MountSpec{
+				Source: src,
+				Target: "/home/yoloai/" + sf.TargetPath,
+			})
 		}
-		mounts = append(mounts, runtime.MountSpec{
-			Source: src,
-			Target: "/home/yoloai/" + sf.TargetPath,
-		})
 	}
 
 	// Host tmux config (when tmux_conf is default+host or host)
@@ -851,8 +871,22 @@ func copySeedFiles(agentDef *agent.Definition, sandboxDir string, hasAPIKey bool
 	homeSeedDir := filepath.Join(sandboxDir, "home-seed")
 
 	for _, sf := range agentDef.SeedFiles {
-		if sf.AuthOnly && hasAPIKey {
-			continue // auth file not needed when API key is set
+		if sf.AuthOnly {
+			if len(sf.OwnerAPIKeys) > 0 {
+				// Per-file API key check (used by shell agent)
+				skip := false
+				for _, key := range sf.OwnerAPIKeys {
+					if os.Getenv(key) != "" {
+						skip = true
+						break
+					}
+				}
+				if skip {
+					continue
+				}
+			} else if hasAPIKey {
+				continue // auth file not needed when API key is set
+			}
 		}
 
 		hostPath := ExpandTilde(sf.HostPath)
@@ -898,7 +932,12 @@ func copySeedFiles(agentDef *agent.Definition, sandboxDir string, hasAPIKey bool
 // Agent-specific adjustments:
 //   - Claude Code: skip --dangerously-skip-permissions prompt, disable nested sandbox-exec.
 //   - Gemini CLI: disable folder-trust prompt (the container IS the sandbox).
+//   - Shell: apply each real agent's settings into home-seed subdirectories.
 func ensureContainerSettings(agentDef *agent.Definition, sandboxDir string) error {
+	if agentDef.Name == "shell" {
+		return ensureShellContainerSettings(sandboxDir)
+	}
+
 	if agentDef.StateDir == "" {
 		return nil
 	}
@@ -936,6 +975,48 @@ func ensureContainerSettings(agentDef *agent.Definition, sandboxDir string) erro
 	default:
 		return nil
 	}
+}
+
+// ensureShellContainerSettings applies each real agent's container settings
+// to its home-seed subdirectory (e.g., home-seed/.claude/settings.json).
+func ensureShellContainerSettings(sandboxDir string) error {
+	for _, name := range agent.RealAgents() {
+		def := agent.GetAgent(name)
+		if def.StateDir == "" {
+			continue
+		}
+		dirBase := filepath.Base(def.StateDir)
+		settingsPath := filepath.Join(sandboxDir, "home-seed", dirBase, "settings.json")
+
+		switch name {
+		case "claude":
+			settings, err := readJSONMap(settingsPath)
+			if err != nil {
+				return err
+			}
+			settings["skipDangerousModePermissionPrompt"] = true
+			settings["sandbox"] = map[string]interface{}{"enabled": false}
+			if err := writeJSONMap(settingsPath, settings); err != nil {
+				return err
+			}
+
+		case "gemini":
+			settings, err := readJSONMap(settingsPath)
+			if err != nil {
+				return err
+			}
+			security, _ := settings["security"].(map[string]interface{})
+			if security == nil {
+				security = map[string]interface{}{}
+			}
+			security["folderTrust"] = map[string]interface{}{"enabled": false}
+			settings["security"] = security
+			if err := writeJSONMap(settingsPath, settings); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // ensureHomeSeedConfig patches home-seed/.claude.json to set installMethod to

@@ -94,7 +94,7 @@ func TestGetAgent_Codex(t *testing.T) {
 
 func TestAllAgentNames(t *testing.T) {
 	names := AllAgentNames()
-	assert.Equal(t, []string{"claude", "codex", "gemini", "test"}, names)
+	assert.Equal(t, []string{"claude", "codex", "gemini", "shell", "test"}, names)
 }
 
 func TestGetAgent_Test(t *testing.T) {
@@ -114,6 +114,59 @@ func TestGetAgent_Test(t *testing.T) {
 	assert.Equal(t, time.Duration(0), def.StartupDelay)
 	assert.Equal(t, "", def.ModelFlag)
 	assert.Nil(t, def.ModelAliases)
+}
+
+func TestRealAgents(t *testing.T) {
+	names := RealAgents()
+	assert.Equal(t, []string{"claude", "codex", "gemini"}, names)
+}
+
+func TestGetAgent_Shell(t *testing.T) {
+	def := GetAgent("shell")
+	require.NotNil(t, def)
+
+	assert.Equal(t, "shell", def.Name)
+	assert.NotEmpty(t, def.Description)
+	assert.Equal(t, "bash", def.InteractiveCmd)
+	assert.Contains(t, def.HeadlessCmd, "sh -c")
+	assert.Equal(t, PromptModeHeadless, def.PromptMode)
+	assert.Equal(t, "", def.StateDir)
+	assert.Equal(t, "Enter", def.SubmitSequence)
+	assert.Equal(t, time.Duration(0), def.StartupDelay)
+	assert.Equal(t, "", def.ModelFlag)
+	assert.Nil(t, def.ModelAliases)
+
+	// Should have API keys from all real agents (deduplicated)
+	assert.Contains(t, def.APIKeyEnvVars, "ANTHROPIC_API_KEY")
+	assert.Contains(t, def.APIKeyEnvVars, "GEMINI_API_KEY")
+	assert.Contains(t, def.APIKeyEnvVars, "CODEX_API_KEY")
+	assert.Contains(t, def.APIKeyEnvVars, "OPENAI_API_KEY")
+
+	// Should have seed files from all real agents
+	assert.NotEmpty(t, def.SeedFiles)
+
+	// All seed files should be HomeDir=true
+	for _, sf := range def.SeedFiles {
+		assert.True(t, sf.HomeDir, "shell agent seed file %s should have HomeDir=true", sf.TargetPath)
+	}
+
+	// Check that non-HomeDir files from real agents got remapped with dir prefix
+	var targetPaths []string
+	for _, sf := range def.SeedFiles {
+		targetPaths = append(targetPaths, sf.TargetPath)
+	}
+	assert.Contains(t, targetPaths, ".claude/.credentials.json")
+	assert.Contains(t, targetPaths, ".claude/settings.json")
+	assert.Contains(t, targetPaths, ".claude.json") // was already HomeDir, unchanged
+	assert.Contains(t, targetPaths, ".codex/auth.json")
+	assert.Contains(t, targetPaths, ".codex/config.toml")
+	assert.Contains(t, targetPaths, ".gemini/oauth_creds.json")
+	assert.Contains(t, targetPaths, ".gemini/settings.json")
+
+	// Each seed file should have OwnerAPIKeys set
+	for _, sf := range def.SeedFiles {
+		assert.NotNil(t, sf.OwnerAPIKeys, "shell agent seed file %s should have OwnerAPIKeys set", sf.TargetPath)
+	}
 }
 
 func TestGetAgent_Unknown(t *testing.T) {

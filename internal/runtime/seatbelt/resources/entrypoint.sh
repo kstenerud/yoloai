@@ -24,7 +24,7 @@ fi
 HOME_SEED="$SANDBOX_DIR/home-seed"
 if [ -d "$HOME_SEED" ]; then
     for f in "$HOME_SEED"/*  "$HOME_SEED"/.*; do
-        [ -f "$f" ] || continue
+        [ -e "$f" ] || continue
         name=$(basename "$f")
         [ "$name" = "." ] || [ "$name" = ".." ] && continue
         if [ ! -e "$HOME/$name" ]; then
