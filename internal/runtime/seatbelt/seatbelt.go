@@ -300,7 +300,7 @@ func (r *Runtime) Exec(_ context.Context, name string, cmd []string, _ string) (
 		return runtime.ExecResult{}, runtime.ErrNotRunning
 	}
 
-	execCmd := r.buildExecCommand(sandboxPath, cmd)
+	execCmd := r.buildExecCommand(sandboxPath, cmd, "")
 
 	var stdout, stderr bytes.Buffer
 	execCmd.Stdout = &stdout
@@ -330,10 +330,10 @@ func (r *Runtime) Exec(_ context.Context, name string, cmd []string, _ string) (
 
 // InteractiveExec runs a command interactively. For tmux commands, injects
 // the per-sandbox socket. For other commands, runs under sandbox-exec.
-func (r *Runtime) InteractiveExec(_ context.Context, name string, cmd []string, _ string, _ string) error {
+func (r *Runtime) InteractiveExec(_ context.Context, name string, cmd []string, _ string, workDir string) error {
 	sandboxPath := filepath.Join(r.sandboxDir, sandboxName(name))
 
-	execCmd := r.buildExecCommand(sandboxPath, cmd)
+	execCmd := r.buildExecCommand(sandboxPath, cmd, workDir)
 	execCmd.Stdin = os.Stdin
 	execCmd.Stdout = os.Stdout
 	execCmd.Stderr = os.Stderr
@@ -488,7 +488,7 @@ func (r *Runtime) waitForTmux(ctx context.Context, sandboxPath string, procDone 
 // buildExecCommand constructs the exec.Cmd for running a command.
 // Tmux commands get the per-sandbox socket injected; other commands
 // run under sandbox-exec with the SBPL profile.
-func (r *Runtime) buildExecCommand(sandboxPath string, cmd []string) *exec.Cmd {
+func (r *Runtime) buildExecCommand(sandboxPath string, cmd []string, workDir string) *exec.Cmd {
 	if len(cmd) > 0 && cmd[0] == "tmux" {
 		return r.buildTmuxCommand(sandboxPath, cmd)
 	}
@@ -499,13 +499,17 @@ func (r *Runtime) buildExecCommand(sandboxPath string, cmd []string) *exec.Cmd {
 	args = append(args, cmd...)
 	c := exec.Command(r.sandboxExecBin, args...) //nolint:gosec // G204: args from validated sandbox state
 
-	// Set working directory from saved config so exec behaves like
-	// docker exec (inherits the container's working directory).
-	cfgPath := filepath.Join(sandboxPath, seatbeltConfigFileName)
-	if data, err := os.ReadFile(cfgPath); err == nil { //nolint:gosec // G304: path from validated sandbox state
-		var cfg runtime.InstanceConfig
-		if err := json.Unmarshal(data, &cfg); err == nil && cfg.WorkingDir != "" {
-			c.Dir = cfg.WorkingDir
+	// Use the workDir passed by the caller (from meta.json MountPath).
+	// Fall back to saved config for backward compatibility.
+	if workDir != "" {
+		c.Dir = workDir
+	} else {
+		cfgPath := filepath.Join(sandboxPath, seatbeltConfigFileName)
+		if data, err := os.ReadFile(cfgPath); err == nil { //nolint:gosec // G304: path from validated sandbox state
+			var cfg runtime.InstanceConfig
+			if err := json.Unmarshal(data, &cfg); err == nil && cfg.WorkingDir != "" {
+				c.Dir = cfg.WorkingDir
+			}
 		}
 	}
 
