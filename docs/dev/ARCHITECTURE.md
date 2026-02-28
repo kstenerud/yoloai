@@ -29,7 +29,7 @@ Dependency direction: `cmd/yoloai` → `cli` → `sandbox` + `runtime`; `sandbox
 
 | File | Purpose |
 |------|---------|
-| `agent.go` | `Definition` struct and built-in agent registry (`claude`, `gemini`, `codex`, `test`, `shell`). `GetAgent()` lookup. |
+| `agent.go` | `Definition` struct and built-in agent registry (`aider`, `claude`, `codex`, `gemini`, `opencode`, `test`, `shell`). `GetAgent()` lookup. |
 | `agent_test.go` | Unit tests for agent definitions. |
 
 ### `internal/cli/`
@@ -138,7 +138,7 @@ All parameters for `Manager.Create()`. Mirrors CLI flags: name, workdir, auxilia
 Input/output for `GenerateDiff()`. Supports path filtering and stat-only mode. `DiffResult` carries the diff text, workdir, mode, and empty flag.
 
 ### `agent.Definition`
-Describes an agent's commands (interactive/headless), prompt delivery mode, API key env vars, seed files, state directory, tmux submit sequence, model flag/aliases. Built-in: `claude`, `gemini`, `codex`, `test`, and `shell`.
+Describes an agent's commands (interactive/headless), prompt delivery mode, API key env vars, seed files, state directory, tmux submit sequence, model flag/aliases. Built-in: `aider`, `claude`, `codex`, `gemini`, `opencode`, `test`, and `shell`.
 
 ### `runtime.Runtime`
 Pluggable runtime interface for backend abstraction. Methods: `Create()`, `Start()`, `Stop()`, `Remove()`, `Inspect()`, `Exec()`, `InteractiveExec()`, `EnsureImage()`, `Close()`. Allows swapping container/VM backends.

@@ -71,11 +71,19 @@ RUN npm install -g @google/gemini-cli
 # OpenAI Codex CLI via npm
 RUN npm install -g @openai/codex
 
+# Aider via pip (AI pair programming tool)
+RUN pip install --break-system-packages aider-chat
+
+# OpenCode via npm (open-source AI coding agent)
+RUN npm install -g opencode-ai
+
 # Agent launcher shortcuts (yolo-<agent> runs with full permissions bypassed)
-RUN printf '#!/bin/sh\nexec claude --dangerously-skip-permissions "$@"\n' > /usr/local/bin/yolo-claude \
+RUN printf '#!/bin/sh\nexec aider --yes-always "$@"\n' > /usr/local/bin/yolo-aider \
+    && printf '#!/bin/sh\nexec claude --dangerously-skip-permissions "$@"\n' > /usr/local/bin/yolo-claude \
     && printf '#!/bin/sh\nexec codex --dangerously-bypass-approvals-and-sandbox "$@"\n' > /usr/local/bin/yolo-codex \
     && printf '#!/bin/sh\nexec gemini --yolo "$@"\n' > /usr/local/bin/yolo-gemini \
-    && chmod +x /usr/local/bin/yolo-claude /usr/local/bin/yolo-codex /usr/local/bin/yolo-gemini
+    && printf '#!/bin/sh\nexec opencode "$@"\n' > /usr/local/bin/yolo-opencode \
+    && chmod +x /usr/local/bin/yolo-aider /usr/local/bin/yolo-claude /usr/local/bin/yolo-codex /usr/local/bin/yolo-gemini /usr/local/bin/yolo-opencode
 
 # gosu for dropping privileges
 ARG GOSU_VERSION=1.17

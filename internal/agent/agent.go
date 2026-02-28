@@ -50,6 +50,29 @@ type Definition struct {
 }
 
 var agents = map[string]*Definition{
+	"aider": {
+		Name:           "aider",
+		Description:    "Aider — AI pair programming in your terminal",
+		InteractiveCmd: "aider --yes-always",
+		HeadlessCmd:    `aider --message "PROMPT" --yes-always --no-pretty --no-fancy-input`,
+		PromptMode:     PromptModeInteractive,
+		APIKeyEnvVars:  []string{"ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "DEEPSEEK_API_KEY", "OPENROUTER_API_KEY"},
+		SeedFiles: []SeedFile{
+			{HostPath: "~/.aider.conf.yml", TargetPath: ".aider.conf.yml", HomeDir: true},
+		},
+		StateDir:       "",
+		SubmitSequence: "Enter",
+		StartupDelay:   3 * time.Second,
+		ReadyPattern:   "> $",
+		ModelFlag:      "--model",
+		ModelAliases: map[string]string{
+			"sonnet":   "sonnet",
+			"opus":     "opus",
+			"haiku":    "haiku",
+			"deepseek": "deepseek",
+			"flash":    "flash",
+		},
+	},
 	"claude": {
 		Name:           "claude",
 		Description:    "Anthropic Claude Code — AI coding assistant",
@@ -93,6 +116,28 @@ var agents = map[string]*Definition{
 		ModelAliases: map[string]string{
 			"pro":   "gemini-2.5-pro",
 			"flash": "gemini-2.5-flash",
+		},
+	},
+	"opencode": {
+		Name:           "opencode",
+		Description:    "OpenCode — open-source AI coding agent",
+		InteractiveCmd: "opencode",
+		HeadlessCmd:    `opencode run "PROMPT"`,
+		PromptMode:     PromptModeHeadless,
+		APIKeyEnvVars:  []string{"ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY"},
+		SeedFiles: []SeedFile{
+			{HostPath: "~/.local/share/opencode/auth.json", TargetPath: "auth.json", AuthOnly: true},
+			{HostPath: "~/.config/opencode/config.json", TargetPath: "config.json", HomeDir: true},
+		},
+		StateDir:       "/home/yoloai/.local/share/opencode/",
+		SubmitSequence: "Enter",
+		StartupDelay:   3 * time.Second,
+		ReadyPattern:   "",
+		ModelFlag:      "--model",
+		ModelAliases: map[string]string{
+			"sonnet": "anthropic/claude-sonnet-4-5-latest",
+			"opus":   "anthropic/claude-opus-4-latest",
+			"haiku":  "anthropic/claude-haiku-4-5-latest",
 		},
 	},
 	"codex": {
@@ -187,7 +232,7 @@ func buildShellAgent() *Definition {
 	return &Definition{
 		Name:           "shell",
 		Description:    "Bash shell with all agents' credentials seeded",
-		InteractiveCmd: `bash -c 'printf "\n  yoloai shell — launch any agent with yolo-<name>\n  Available: yolo-claude  yolo-codex  yolo-gemini\n\n"; exec bash'`,
+		InteractiveCmd: `bash -c 'printf "\n  yoloai shell — launch any agent with yolo-<name>\n  Available: yolo-aider  yolo-claude  yolo-codex  yolo-gemini  yolo-opencode\n\n"; exec bash'`,
 		HeadlessCmd:    `sh -c "PROMPT"`,
 		PromptMode:     PromptModeHeadless,
 		APIKeyEnvVars:  apiKeys,

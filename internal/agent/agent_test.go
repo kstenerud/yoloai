@@ -8,6 +8,33 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestGetAgent_Aider(t *testing.T) {
+	def := GetAgent("aider")
+	require.NotNil(t, def)
+
+	assert.Equal(t, "aider", def.Name)
+	assert.NotEmpty(t, def.Description)
+	assert.Equal(t, "aider --yes-always", def.InteractiveCmd)
+	assert.Contains(t, def.HeadlessCmd, "aider --message")
+	assert.Equal(t, PromptModeInteractive, def.PromptMode)
+	assert.Equal(t, []string{"ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "DEEPSEEK_API_KEY", "OPENROUTER_API_KEY"}, def.APIKeyEnvVars)
+	require.Len(t, def.SeedFiles, 1)
+	assert.Equal(t, "~/.aider.conf.yml", def.SeedFiles[0].HostPath)
+	assert.Equal(t, ".aider.conf.yml", def.SeedFiles[0].TargetPath)
+	assert.True(t, def.SeedFiles[0].HomeDir)
+	assert.False(t, def.SeedFiles[0].AuthOnly)
+	assert.Equal(t, "", def.StateDir)
+	assert.Equal(t, "Enter", def.SubmitSequence)
+	assert.Equal(t, 3*time.Second, def.StartupDelay)
+	assert.Equal(t, "> $", def.ReadyPattern)
+	assert.Equal(t, "--model", def.ModelFlag)
+	assert.Equal(t, "sonnet", def.ModelAliases["sonnet"])
+	assert.Equal(t, "opus", def.ModelAliases["opus"])
+	assert.Equal(t, "haiku", def.ModelAliases["haiku"])
+	assert.Equal(t, "deepseek", def.ModelAliases["deepseek"])
+	assert.Equal(t, "flash", def.ModelAliases["flash"])
+}
+
 func TestGetAgent_Claude(t *testing.T) {
 	def := GetAgent("claude")
 	require.NotNil(t, def)
@@ -67,6 +94,34 @@ func TestGetAgent_Gemini(t *testing.T) {
 	assert.Equal(t, "gemini-2.5-flash", def.ModelAliases["flash"])
 }
 
+func TestGetAgent_OpenCode(t *testing.T) {
+	def := GetAgent("opencode")
+	require.NotNil(t, def)
+
+	assert.Equal(t, "opencode", def.Name)
+	assert.NotEmpty(t, def.Description)
+	assert.Equal(t, "opencode", def.InteractiveCmd)
+	assert.Contains(t, def.HeadlessCmd, "opencode run")
+	assert.Equal(t, PromptModeHeadless, def.PromptMode)
+	assert.Equal(t, []string{"ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY"}, def.APIKeyEnvVars)
+	require.Len(t, def.SeedFiles, 2)
+	assert.Equal(t, "~/.local/share/opencode/auth.json", def.SeedFiles[0].HostPath)
+	assert.Equal(t, "auth.json", def.SeedFiles[0].TargetPath)
+	assert.True(t, def.SeedFiles[0].AuthOnly)
+	assert.Equal(t, "~/.config/opencode/config.json", def.SeedFiles[1].HostPath)
+	assert.Equal(t, "config.json", def.SeedFiles[1].TargetPath)
+	assert.True(t, def.SeedFiles[1].HomeDir)
+	assert.False(t, def.SeedFiles[1].AuthOnly)
+	assert.Equal(t, "/home/yoloai/.local/share/opencode/", def.StateDir)
+	assert.Equal(t, "Enter", def.SubmitSequence)
+	assert.Equal(t, 3*time.Second, def.StartupDelay)
+	assert.Equal(t, "", def.ReadyPattern)
+	assert.Equal(t, "--model", def.ModelFlag)
+	assert.Equal(t, "anthropic/claude-sonnet-4-5-latest", def.ModelAliases["sonnet"])
+	assert.Equal(t, "anthropic/claude-opus-4-latest", def.ModelAliases["opus"])
+	assert.Equal(t, "anthropic/claude-haiku-4-5-latest", def.ModelAliases["haiku"])
+}
+
 func TestGetAgent_Codex(t *testing.T) {
 	def := GetAgent("codex")
 	require.NotNil(t, def)
@@ -94,7 +149,7 @@ func TestGetAgent_Codex(t *testing.T) {
 
 func TestAllAgentNames(t *testing.T) {
 	names := AllAgentNames()
-	assert.Equal(t, []string{"claude", "codex", "gemini", "shell", "test"}, names)
+	assert.Equal(t, []string{"aider", "claude", "codex", "gemini", "opencode", "shell", "test"}, names)
 }
 
 func TestGetAgent_Test(t *testing.T) {
@@ -118,7 +173,7 @@ func TestGetAgent_Test(t *testing.T) {
 
 func TestRealAgents(t *testing.T) {
 	names := RealAgents()
-	assert.Equal(t, []string{"claude", "codex", "gemini"}, names)
+	assert.Equal(t, []string{"aider", "claude", "codex", "gemini", "opencode"}, names)
 }
 
 func TestGetAgent_Shell(t *testing.T) {
@@ -130,6 +185,8 @@ func TestGetAgent_Shell(t *testing.T) {
 	assert.Contains(t, def.InteractiveCmd, "yolo-claude")
 	assert.Contains(t, def.InteractiveCmd, "yolo-codex")
 	assert.Contains(t, def.InteractiveCmd, "yolo-gemini")
+	assert.Contains(t, def.InteractiveCmd, "yolo-aider")
+	assert.Contains(t, def.InteractiveCmd, "yolo-opencode")
 	assert.Contains(t, def.HeadlessCmd, "sh -c")
 	assert.Equal(t, PromptModeHeadless, def.PromptMode)
 	assert.Equal(t, "", def.StateDir)
@@ -143,6 +200,8 @@ func TestGetAgent_Shell(t *testing.T) {
 	assert.Contains(t, def.APIKeyEnvVars, "GEMINI_API_KEY")
 	assert.Contains(t, def.APIKeyEnvVars, "CODEX_API_KEY")
 	assert.Contains(t, def.APIKeyEnvVars, "OPENAI_API_KEY")
+	assert.Contains(t, def.APIKeyEnvVars, "DEEPSEEK_API_KEY")
+	assert.Contains(t, def.APIKeyEnvVars, "OPENROUTER_API_KEY")
 
 	// Should have seed files from all real agents
 	assert.NotEmpty(t, def.SeedFiles)
@@ -164,6 +223,9 @@ func TestGetAgent_Shell(t *testing.T) {
 	assert.Contains(t, targetPaths, ".codex/config.toml")
 	assert.Contains(t, targetPaths, ".gemini/oauth_creds.json")
 	assert.Contains(t, targetPaths, ".gemini/settings.json")
+	assert.Contains(t, targetPaths, ".aider.conf.yml") // was already HomeDir, unchanged
+	assert.Contains(t, targetPaths, "opencode/auth.json")
+	assert.Contains(t, targetPaths, "config.json") // was already HomeDir, unchanged
 
 	// Each seed file should have OwnerAPIKeys set
 	for _, sf := range def.SeedFiles {

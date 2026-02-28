@@ -163,7 +163,7 @@ Options:
 - `--prompt` / `-p` `<text>`: Initial prompt/task for the agent (see Prompt Mechanism below). Use `--prompt -` to read from stdin. Mutually exclusive with `--prompt-file`.
 - `--prompt-file` / `-f` `<path>`: Read prompt from a file. Use `--prompt-file -` to read from stdin. Mutually exclusive with `--prompt`.
 - `--model` / `-m` `<model>`: Model to use. Passed to the agent's `--model` flag. If omitted, uses the agent's default. Accepts built-in aliases (see Agent Definitions) or full model names. **[PLANNED]** User-configurable aliases in config.yaml, plus version pinning to prevent surprise behavior changes.
-- `--agent <name>`: Agent to use (`claude`, `codex`, `gemini`, `shell`, `test`). Overrides `defaults.agent` from config.
+- `--agent <name>`: Agent to use (`aider`, `claude`, `codex`, `gemini`, `opencode`, `shell`, `test`). Overrides `defaults.agent` from config.
 - **[PLANNED]** `--network-isolated`: Allow only the agent's required API traffic. The agent can function but cannot access other external services, download arbitrary binaries, or exfiltrate code.
 - **[PLANNED]** `--network-allow <domain>`: Allow traffic to specific additional domains (can be repeated). Implies `--network-isolated`. Added to the agent's default allowlist (see below).
 - `--network-none`: Run with `--network none` for full network isolation (agent API calls will also fail). Mutually exclusive with `--network-isolated` and `--network-allow`. **Warning:** Most agents (Claude, Codex) require network access to reach their API endpoints. This flag is useful for testing container setup without agent execution or for agents with locally-hosted models.
@@ -452,7 +452,7 @@ Lists all sandboxes with their current status.
 |---------|----------------------------------------------------------------|
 | NAME    | Sandbox name                                                   |
 | STATUS  | `running`, `stopped`, `done` (exit 0), `failed` (non-zero exit) |
-| AGENT   | Agent name (`claude`, `gemini`, `codex`, `test`)               |
+| AGENT   | Agent name (`aider`, `claude`, `codex`, `gemini`, `opencode`, `test`) |
 | PROFILE | [PLANNED] Profile name or `(base)`                            |
 | AGE     | Time since creation                                            |
 | WORKDIR | Working directory path                                         |

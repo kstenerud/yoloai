@@ -228,7 +228,7 @@ yoloai config set defaults.backend tart
 | Key | Default | Description |
 |-----|---------|-------------|
 | `setup_complete` | `false` | Set to `true` after first-run setup completes |
-| `defaults.agent` | `claude` | Agent to use: `claude`, `codex`, `gemini` |
+| `defaults.agent` | `claude` | Agent to use: `aider`, `claude`, `codex`, `gemini`, `opencode` |
 | `defaults.model` | (empty) | Model name or alias passed to the agent |
 | `defaults.backend` | `docker` | Runtime backend: `docker`, `tart`, `seatbelt` |
 | `defaults.tart_image` | (empty) | Custom base VM image for tart backend |

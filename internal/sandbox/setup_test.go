@@ -377,7 +377,7 @@ func TestPromptAgentSetup_DefaultSelectsFirst(t *testing.T) {
 
 	cfg, err := LoadConfig()
 	require.NoError(t, err)
-	assert.Equal(t, "claude", cfg.Agent)
+	assert.Equal(t, "aider", cfg.Agent)
 }
 
 func TestPromptAgentSetup_SelectSecond(t *testing.T) {
@@ -388,14 +388,14 @@ func TestPromptAgentSetup_SelectSecond(t *testing.T) {
 
 	cfg, err := LoadConfig()
 	require.NoError(t, err)
-	assert.Equal(t, "codex", cfg.Agent)
+	assert.Equal(t, "claude", cfg.Agent)
 }
 
 // --- Full multi-step flow tests ---
 
 func TestRunNewUserSetup_FullFlow_MacOS(t *testing.T) {
 	setMacOSARMPlatform(t)
-	// tmux=y, backend=2(seatbelt), agent=3(gemini)
+	// tmux=y, backend=2(seatbelt), agent=3(codex)
 	mgr, output, _ := setupTestManager(t, "y\n2\n3\n")
 
 	err := mgr.runNewUserSetup(context.Background())
@@ -406,13 +406,13 @@ func TestRunNewUserSetup_FullFlow_MacOS(t *testing.T) {
 	assert.True(t, cfg.SetupComplete)
 	assert.Equal(t, "default", cfg.TmuxConf)
 	assert.Equal(t, "seatbelt", cfg.Backend)
-	assert.Equal(t, "gemini", cfg.Agent)
+	assert.Equal(t, "codex", cfg.Agent)
 	assert.Contains(t, output.String(), "Setup complete")
 }
 
 func TestRunNewUserSetup_FullFlow_Linux_SkipsBackend(t *testing.T) {
 	setLinuxPlatform(t)
-	// tmux=y, (no backend prompt), agent=1(claude)
+	// tmux=y, (no backend prompt), agent=1(aider)
 	mgr, output, _ := setupTestManager(t, "y\n1\n")
 
 	err := mgr.runNewUserSetup(context.Background())
@@ -422,14 +422,14 @@ func TestRunNewUserSetup_FullFlow_Linux_SkipsBackend(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, cfg.SetupComplete)
 	assert.Equal(t, "default", cfg.TmuxConf)
-	assert.Equal(t, "claude", cfg.Agent)
+	assert.Equal(t, "aider", cfg.Agent)
 	assert.NotContains(t, output.String(), "Default runtime backend")
 	assert.Contains(t, output.String(), "Default agent")
 }
 
 func TestRunNewUserSetup_LargeConfig_StillAsksBackendAndAgent(t *testing.T) {
 	setMacOSARMPlatform(t)
-	// Large tmux → auto-configure, but backend=3(tart), agent=3(gemini)
+	// Large tmux → auto-configure, but backend=3(tart), agent=3(codex)
 	mgr, output, tmpDir := setupTestManager(t, "3\n3\n")
 
 	tmuxConf := strings.Repeat("set -g option value\n", 15)
@@ -443,7 +443,7 @@ func TestRunNewUserSetup_LargeConfig_StillAsksBackendAndAgent(t *testing.T) {
 	assert.True(t, cfg.SetupComplete)
 	assert.Equal(t, "default+host", cfg.TmuxConf)
 	assert.Equal(t, "tart", cfg.Backend)
-	assert.Equal(t, "gemini", cfg.Agent)
+	assert.Equal(t, "codex", cfg.Agent)
 	assert.Contains(t, output.String(), "Default runtime backend")
 	assert.Contains(t, output.String(), "Default agent")
 }
