@@ -79,7 +79,7 @@ func expandEnvBraced(s string) (string, error) {
 		// Find closing "}".
 		end := strings.IndexByte(s[i:], '}')
 		if end < 0 {
-			return "", fmt.Errorf("unclosed ${ in path %q", s)
+			return "", fmt.Errorf("unclosed ${ in %q", s)
 		}
 		varName := s[i : i+end]
 		i += end + 1 // skip past "}"

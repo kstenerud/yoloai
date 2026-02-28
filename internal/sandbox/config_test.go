@@ -145,6 +145,72 @@ defaults:
 	assert.Contains(t, string(data), "my preferred agent")
 }
 
+func TestLoadConfig_ExpandsEnvVars(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+	t.Setenv("YOLOAI_TEST_AGENT", "gemini")
+	t.Setenv("YOLOAI_TEST_BACKEND", "tart")
+
+	yoloaiDir := filepath.Join(tmpDir, ".yoloai")
+	require.NoError(t, os.MkdirAll(yoloaiDir, 0750))
+
+	content := "defaults:\n  agent: ${YOLOAI_TEST_AGENT}\n  backend: ${YOLOAI_TEST_BACKEND}\n"
+	require.NoError(t, os.WriteFile(filepath.Join(yoloaiDir, "config.yaml"), []byte(content), 0600))
+
+	cfg, err := LoadConfig()
+	require.NoError(t, err)
+	assert.Equal(t, "gemini", cfg.Agent)
+	assert.Equal(t, "tart", cfg.Backend)
+}
+
+func TestLoadConfig_UnsetEnvVarError(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	yoloaiDir := filepath.Join(tmpDir, ".yoloai")
+	require.NoError(t, os.MkdirAll(yoloaiDir, 0750))
+
+	content := "defaults:\n  agent: ${YOLOAI_DEFINITELY_NOT_SET}\n"
+	require.NoError(t, os.WriteFile(filepath.Join(yoloaiDir, "config.yaml"), []byte(content), 0600))
+
+	_, err := LoadConfig()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "defaults.agent")
+	assert.Contains(t, err.Error(), "YOLOAI_DEFINITELY_NOT_SET")
+}
+
+func TestLoadConfig_UnclosedBraceError(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	yoloaiDir := filepath.Join(tmpDir, ".yoloai")
+	require.NoError(t, os.MkdirAll(yoloaiDir, 0750))
+
+	content := "defaults:\n  backend: ${UNCLOSED\n"
+	require.NoError(t, os.WriteFile(filepath.Join(yoloaiDir, "config.yaml"), []byte(content), 0600))
+
+	_, err := LoadConfig()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "defaults.backend")
+	assert.Contains(t, err.Error(), "unclosed")
+}
+
+func TestLoadConfig_BareVarNotExpanded(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+	t.Setenv("YOLOAI_TEST_VAR", "should-not-appear")
+
+	yoloaiDir := filepath.Join(tmpDir, ".yoloai")
+	require.NoError(t, os.MkdirAll(yoloaiDir, 0750))
+
+	content := "defaults:\n  agent: $YOLOAI_TEST_VAR\n"
+	require.NoError(t, os.WriteFile(filepath.Join(yoloaiDir, "config.yaml"), []byte(content), 0600))
+
+	cfg, err := LoadConfig()
+	require.NoError(t, err)
+	assert.Equal(t, "$YOLOAI_TEST_VAR", cfg.Agent, "bare $VAR must not be expanded")
+}
+
 func TestSplitDottedPath(t *testing.T) {
 	assert.Equal(t, []string{"a"}, splitDottedPath("a"))
 	assert.Equal(t, []string{"a", "b"}, splitDottedPath("a.b"))

@@ -86,15 +86,21 @@ func LoadConfig() (*YoloaiConfig, error) {
 		case "defaults":
 			if val.Kind == yaml.MappingNode {
 				for j := 0; j < len(val.Content)-1; j += 2 {
-					switch val.Content[j].Value {
+					fieldName := val.Content[j].Value
+					raw := val.Content[j+1].Value
+					expanded, err := expandEnvBraced(raw)
+					if err != nil {
+						return nil, fmt.Errorf("defaults.%s: %w", fieldName, err)
+					}
+					switch fieldName {
 					case "tmux_conf":
-						cfg.TmuxConf = val.Content[j+1].Value
+						cfg.TmuxConf = expanded
 					case "backend":
-						cfg.Backend = val.Content[j+1].Value
+						cfg.Backend = expanded
 					case "tart_image":
-						cfg.TartImage = val.Content[j+1].Value
+						cfg.TartImage = expanded
 					case "agent":
-						cfg.Agent = val.Content[j+1].Value
+						cfg.Agent = expanded
 					}
 				}
 			}
