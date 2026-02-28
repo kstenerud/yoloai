@@ -76,6 +76,8 @@ var agents = map[string]*Definition{
 		PromptMode:     PromptModeInteractive,
 		APIKeyEnvVars:  []string{"GEMINI_API_KEY"},
 		SeedFiles: []SeedFile{
+			{HostPath: "~/.gemini/oauth_creds.json", TargetPath: "oauth_creds.json", AuthOnly: true},
+			{HostPath: "~/.gemini/google_accounts.json", TargetPath: "google_accounts.json", AuthOnly: true},
 			{HostPath: "~/.gemini/settings.json", TargetPath: "settings.json"},
 		},
 		StateDir:       "/home/yoloai/.gemini/",
