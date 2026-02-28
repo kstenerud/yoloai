@@ -256,6 +256,50 @@ func TestEnsureContainerSettings_PreservesExisting(t *testing.T) {
 	assert.Equal(t, true, settings["skipDangerousModePermissionPrompt"])
 }
 
+func TestEnsureContainerSettings_GeminiDisablesFolderTrust(t *testing.T) {
+	sandboxDir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, "agent-state"), 0750))
+
+	agentDef := agent.GetAgent("gemini")
+	require.NoError(t, ensureContainerSettings(agentDef, sandboxDir))
+
+	settings, err := readJSONMap(filepath.Join(sandboxDir, "agent-state", "settings.json"))
+	require.NoError(t, err)
+
+	security, ok := settings["security"].(map[string]interface{})
+	require.True(t, ok)
+	folderTrust, ok := security["folderTrust"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, false, folderTrust["enabled"])
+}
+
+func TestEnsureContainerSettings_GeminiPreservesAuthSettings(t *testing.T) {
+	sandboxDir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, "agent-state"), 0750))
+
+	// Pre-populate settings with auth config (as would come from seed file)
+	settingsPath := filepath.Join(sandboxDir, "agent-state", "settings.json")
+	require.NoError(t, writeJSONMap(settingsPath, map[string]any{
+		"security": map[string]any{
+			"auth": map[string]any{"selectedType": "oauth-personal"},
+		},
+	}))
+
+	agentDef := agent.GetAgent("gemini")
+	require.NoError(t, ensureContainerSettings(agentDef, sandboxDir))
+
+	settings, err := readJSONMap(settingsPath)
+	require.NoError(t, err)
+
+	security := settings["security"].(map[string]interface{})
+	// folderTrust should be disabled
+	folderTrust := security["folderTrust"].(map[string]interface{})
+	assert.Equal(t, false, folderTrust["enabled"])
+	// auth should be preserved
+	auth := security["auth"].(map[string]interface{})
+	assert.Equal(t, "oauth-personal", auth["selectedType"])
+}
+
 // ensureHomeSeedConfig tests
 
 func TestEnsureHomeSeedConfig_SetsInstallMethod(t *testing.T) {

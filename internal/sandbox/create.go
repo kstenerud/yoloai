@@ -885,32 +885,47 @@ func copySeedFiles(agentDef *agent.Definition, sandboxDir string, hasAPIKey bool
 }
 
 // ensureContainerSettings merges required container settings into agent-state/settings.json.
-// For agents using --dangerously-skip-permissions, ensures the bypass prompt is skipped.
-// Also disables Claude Code's built-in sandbox-exec to prevent nesting failures.
+// Agent-specific adjustments:
+//   - Claude Code: skip --dangerously-skip-permissions prompt, disable nested sandbox-exec.
+//   - Gemini CLI: disable folder-trust prompt (the container IS the sandbox).
 func ensureContainerSettings(agentDef *agent.Definition, sandboxDir string) error {
 	if agentDef.StateDir == "" {
 		return nil
 	}
 
-	if !strings.Contains(agentDef.InteractiveCmd, "--dangerously-skip-permissions") {
-		return nil
-	}
-
 	settingsPath := filepath.Join(sandboxDir, "agent-state", "settings.json")
 
-	settings, err := readJSONMap(settingsPath)
-	if err != nil {
-		return err
+	switch agentDef.Name {
+	case "claude":
+		settings, err := readJSONMap(settingsPath)
+		if err != nil {
+			return err
+		}
+		settings["skipDangerousModePermissionPrompt"] = true
+		// Disable Claude Code's built-in sandbox-exec to prevent nesting failures.
+		// sandbox-exec cannot be nested — an inner sandbox-exec inherits the outer
+		// profile's restrictions and typically fails.
+		settings["sandbox"] = map[string]interface{}{"enabled": false}
+		return writeJSONMap(settingsPath, settings)
+
+	case "gemini":
+		settings, err := readJSONMap(settingsPath)
+		if err != nil {
+			return err
+		}
+		// Preserve existing security settings (e.g. auth.selectedType) while
+		// disabling folder trust — the container is already sandboxed.
+		security, _ := settings["security"].(map[string]interface{})
+		if security == nil {
+			security = map[string]interface{}{}
+		}
+		security["folderTrust"] = map[string]interface{}{"enabled": false}
+		settings["security"] = security
+		return writeJSONMap(settingsPath, settings)
+
+	default:
+		return nil
 	}
-
-	settings["skipDangerousModePermissionPrompt"] = true
-
-	// Disable Claude Code's built-in sandbox-exec to prevent nesting failures.
-	// sandbox-exec cannot be nested — an inner sandbox-exec inherits the outer
-	// profile's restrictions and typically fails.
-	settings["sandbox"] = map[string]interface{}{"enabled": false}
-
-	return writeJSONMap(settingsPath, settings)
 }
 
 // ensureHomeSeedConfig patches home-seed/.claude.json to set installMethod to
