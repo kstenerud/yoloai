@@ -327,3 +327,20 @@ func TestMountSymlinks_SkipEmptySource(t *testing.T) {
 		t.Errorf("expected no symlinks for empty source, got %d", len(created))
 	}
 }
+
+func TestMountSymlinks_SkipExistingTarget(t *testing.T) {
+	srcDir := t.TempDir()
+	targetDir := t.TempDir() // target already exists as a real directory
+
+	mounts := []runtime.MountSpec{
+		{Source: srcDir, Target: targetDir},
+	}
+
+	created, err := mountSymlinks(mounts)
+	if err != nil {
+		t.Fatalf("mountSymlinks failed: %v", err)
+	}
+	if len(created) != 0 {
+		t.Errorf("expected no symlinks for existing target, got %d", len(created))
+	}
+}

@@ -370,6 +370,11 @@ func mountSymlinks(mounts []runtime.MountSpec) ([]string, error) {
 		if err != nil || !info.IsDir() {
 			continue
 		}
+		// Skip if target already exists on the host (e.g., copy-mode workdir
+		// where Target is the original host path that still exists).
+		if _, err := os.Lstat(m.Target); err == nil {
+			continue
+		}
 		// Create parent directory if needed
 		if err := os.MkdirAll(filepath.Dir(m.Target), 0750); err != nil { //nolint:gosec // G301: parent dirs for mount symlinks
 			return created, fmt.Errorf("create parent for symlink %s: %w", m.Target, err)
