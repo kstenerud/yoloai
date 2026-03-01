@@ -75,6 +75,8 @@ Settings are managed via `yoloai config get/set` or by editing `~/.yoloai/config
 - `defaults.model` sets the model name or alias passed to the agent. Empty means the agent uses its own default. CLI `--model` overrides config.
 - `defaults.env` sets environment variables forwarded to the container. Values are written as files in `/run/secrets/` (same mechanism as API keys). API keys take precedence if a name conflicts. Supports `${VAR}` expansion. Set via `yoloai config set defaults.env.NAME value`. Profile `env` merges with defaults (profile values win on conflict).
 
+Agents may define `AuthHintEnvVars` — environment variables that indicate authentication is configured through a non-API-key mechanism (e.g. local model server). When any of these vars are set (in host env or `defaults.env`), the auth check passes without requiring a cloud API key.
+
 **Use case: local models with Aider.** Aider can use local model servers (Ollama, LM Studio, vLLM) via environment variables. Example:
 
 ```yaml

@@ -34,29 +34,31 @@ type SeedFile struct {
 
 // Definition describes an agent's install, launch, and behavioral characteristics.
 type Definition struct {
-	Name           string
-	Description    string
-	InteractiveCmd string
-	HeadlessCmd    string
-	PromptMode     PromptMode
-	APIKeyEnvVars  []string
-	SeedFiles      []SeedFile
-	StateDir       string
-	SubmitSequence string
-	StartupDelay   time.Duration
-	ReadyPattern   string // grep pattern in tmux output that signals agent is ready for input
-	ModelFlag      string
-	ModelAliases   map[string]string
+	Name            string
+	Description     string
+	InteractiveCmd  string
+	HeadlessCmd     string
+	PromptMode      PromptMode
+	APIKeyEnvVars   []string
+	AuthHintEnvVars []string // env vars indicating auth is configured without a cloud API key (e.g. local model servers)
+	SeedFiles       []SeedFile
+	StateDir        string
+	SubmitSequence  string
+	StartupDelay    time.Duration
+	ReadyPattern    string // grep pattern in tmux output that signals agent is ready for input
+	ModelFlag       string
+	ModelAliases    map[string]string
 }
 
 var agents = map[string]*Definition{
 	"aider": {
-		Name:           "aider",
-		Description:    "Aider — AI pair programming in your terminal",
-		InteractiveCmd: "aider --yes-always",
-		HeadlessCmd:    `aider --message "PROMPT" --yes-always --no-pretty --no-fancy-input`,
-		PromptMode:     PromptModeInteractive,
-		APIKeyEnvVars:  []string{"ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "DEEPSEEK_API_KEY", "OPENROUTER_API_KEY"},
+		Name:            "aider",
+		Description:     "Aider — AI pair programming in your terminal",
+		InteractiveCmd:  "aider --yes-always",
+		HeadlessCmd:     `aider --message "PROMPT" --yes-always --no-pretty --no-fancy-input`,
+		PromptMode:      PromptModeInteractive,
+		APIKeyEnvVars:   []string{"ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "DEEPSEEK_API_KEY", "OPENROUTER_API_KEY"},
+		AuthHintEnvVars: []string{"OLLAMA_API_BASE", "OPENAI_API_BASE"},
 		SeedFiles: []SeedFile{
 			{HostPath: "~/.aider.conf.yml", TargetPath: ".aider.conf.yml", HomeDir: true},
 		},

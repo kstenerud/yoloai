@@ -864,3 +864,90 @@ func TestCopySeedFiles_KeychainSkippedWhenFileExists(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, `{"token":"from-file"}`, string(data))
 }
+
+// hasAnyAuthHint tests
+
+func TestHasAnyAuthHint_NoHintVars(t *testing.T) {
+	agentDef := agent.GetAgent("claude")
+	assert.False(t, hasAnyAuthHint(agentDef, nil))
+}
+
+func TestHasAnyAuthHint_HostEnvSet(t *testing.T) {
+	agentDef := agent.GetAgent("aider")
+	t.Setenv("OLLAMA_API_BASE", "http://localhost:11434")
+	assert.True(t, hasAnyAuthHint(agentDef, nil))
+}
+
+func TestHasAnyAuthHint_ConfigEnvSet(t *testing.T) {
+	agentDef := agent.GetAgent("aider")
+	configEnv := map[string]string{
+		"OLLAMA_API_BASE": "http://localhost:11434",
+	}
+	assert.True(t, hasAnyAuthHint(agentDef, configEnv))
+}
+
+func TestHasAnyAuthHint_NeitherSet(t *testing.T) {
+	agentDef := agent.GetAgent("aider")
+	// Clear all aider's AuthHintEnvVars
+	for _, key := range agentDef.AuthHintEnvVars {
+		t.Setenv(key, "")
+	}
+	assert.False(t, hasAnyAuthHint(agentDef, nil))
+}
+
+// Error message tests
+
+func TestPrepareSandboxState_MissingAPIKeyErrorNoEmptyParens(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	agentDef := agent.GetAgent("aider")
+	// Clear all aider API key env vars
+	for _, key := range agentDef.APIKeyEnvVars {
+		t.Setenv(key, "")
+	}
+	// Clear all aider auth hint env vars
+	for _, key := range agentDef.AuthHintEnvVars {
+		t.Setenv(key, "")
+	}
+
+	mgr := NewManager(&mockRuntime{}, "docker", slog.Default(), strings.NewReader(""), io.Discard)
+
+	_, err := mgr.prepareSandboxState(context.TODO(), CreateOptions{
+		Name:       "test",
+		WorkdirArg: tmpDir,
+		Agent:      "aider",
+	})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrMissingAPIKey)
+	errMsg := err.Error()
+	assert.NotContains(t, errMsg, "()", "error message should not contain empty parens")
+	assert.Contains(t, errMsg, "local models", "error should mention local models")
+	assert.Contains(t, errMsg, "OLLAMA_API_BASE", "error should mention OLLAMA_API_BASE")
+}
+
+func TestPrepareSandboxState_MissingAPIKeyErrorWithAuthFiles(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+	t.Setenv("ANTHROPIC_API_KEY", "")
+
+	// Override keychainReader to fail
+	origReader := keychainReader
+	keychainReader = func(_ string) ([]byte, error) {
+		return nil, fmt.Errorf("not found")
+	}
+	defer func() { keychainReader = origReader }()
+
+	mgr := NewManager(&mockRuntime{}, "docker", slog.Default(), strings.NewReader(""), io.Discard)
+
+	_, err := mgr.prepareSandboxState(context.TODO(), CreateOptions{
+		Name:       "test",
+		WorkdirArg: tmpDir,
+		Agent:      "claude",
+	})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrMissingAPIKey)
+	errMsg := err.Error()
+	assert.Contains(t, errMsg, ".credentials.json", "error should mention .credentials.json from AuthOnly seed files")
+	assert.NotContains(t, errMsg, "local models", "claude has no AuthHintEnvVars, should not mention local models")
+}

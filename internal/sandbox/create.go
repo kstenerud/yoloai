@@ -135,13 +135,25 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 		return nil, NewUsageError("workdir does not exist: %s", workdir.Path)
 	}
 
+	// Load config early — needed for auth hint check and later for tmux_conf.
+	ycfg, err := LoadConfig()
+	if err != nil {
+		return nil, fmt.Errorf("load config: %w", err)
+	}
+
 	hasAPIKey := hasAnyAPIKey(agentDef)
 	hasAuth := hasAnyAuthFile(agentDef)
-	if !hasAPIKey && !hasAuth {
-		return nil, fmt.Errorf("no authentication found: set %s or provide OAuth credentials (%s): %w",
-			strings.Join(agentDef.APIKeyEnvVars, "/"),
-			describeSeedAuthFiles(agentDef),
-			ErrMissingAPIKey)
+	hasAuthHint := hasAnyAuthHint(agentDef, ycfg.Env)
+	if !hasAPIKey && !hasAuth && !hasAuthHint {
+		msg := fmt.Sprintf("no authentication found for %s: set %s",
+			agentDef.Name, strings.Join(agentDef.APIKeyEnvVars, "/"))
+		if authDesc := describeSeedAuthFiles(agentDef); authDesc != "" {
+			msg += fmt.Sprintf(" or provide OAuth credentials (%s)", authDesc)
+		}
+		if len(agentDef.AuthHintEnvVars) > 0 {
+			msg += fmt.Sprintf(", or set %s for local models", strings.Join(agentDef.AuthHintEnvVars, "/"))
+		}
+		return nil, fmt.Errorf("%s: %w", msg, ErrMissingAPIKey)
 	}
 
 	// Parse auxiliary directories
@@ -351,11 +363,7 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 	// Build agent command
 	agentCommand := buildAgentCommand(agentDef, model, promptText, opts.Passthrough)
 
-	// Read tmux_conf from config.yaml
-	ycfg, err := LoadConfig()
-	if err != nil {
-		return nil, fmt.Errorf("load config: %w", err)
-	}
+	// Read tmux_conf from config (loaded earlier for auth check)
 	tmuxConf := ycfg.TmuxConf
 	if tmuxConf == "" {
 		tmuxConf = "default" // fallback if not set
@@ -864,6 +872,21 @@ func hasAnyAuthFile(agentDef *agent.Definition) bool {
 					return true
 				}
 			}
+		}
+	}
+	return false
+}
+
+// hasAnyAuthHint returns true if any of the agent's auth hint env vars are set
+// in the host environment or in the config env map. This allows agents like
+// aider to work with local model servers (Ollama, LM Studio) without a cloud API key.
+func hasAnyAuthHint(agentDef *agent.Definition, configEnv map[string]string) bool {
+	for _, key := range agentDef.AuthHintEnvVars {
+		if os.Getenv(key) != "" {
+			return true
+		}
+		if configEnv[key] != "" {
+			return true
 		}
 	}
 	return false

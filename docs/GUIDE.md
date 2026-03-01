@@ -127,6 +127,22 @@ yoloai new task ./my-project --agent gemini --model pro    # gemini-2.5-pro
 yoloai new task ./my-project --agent gemini --model flash  # gemini-2.5-flash
 ```
 
+### Local Models (Aider)
+
+Aider supports local model servers like Ollama and LM Studio. To use aider without a cloud API key, set the appropriate environment variable:
+
+```bash
+export OLLAMA_API_BASE=http://host.docker.internal:11434
+```
+
+Or configure it persistently:
+
+```bash
+yoloai config set defaults.env.OLLAMA_API_BASE http://host.docker.internal:11434
+```
+
+The `host.docker.internal` hostname allows the container to reach services running on the host machine.
+
 ## Global Flags
 
 | Flag | Description |
