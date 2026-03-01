@@ -502,11 +502,8 @@ func (m *Manager) launchContainer(ctx context.Context, state *sandboxState) erro
 
 	cname := InstanceName(state.name)
 
-	// For non-Docker backends, network-isolated falls back to default networking
-	effectiveNetworkMode := state.networkMode
 	if state.networkMode == "isolated" && m.backend != "docker" {
-		fmt.Fprintf(m.output, "WARNING: domain-based network isolation not supported with %s backend; running with full network access\n", m.backend) //nolint:errcheck // best-effort output
-		effectiveNetworkMode = ""
+		return fmt.Errorf("--network-isolated requires the docker backend (%s does not support domain-based filtering)", m.backend)
 	}
 
 	instanceCfg := runtime.InstanceConfig{
@@ -515,7 +512,7 @@ func (m *Manager) launchContainer(ctx context.Context, state *sandboxState) erro
 		WorkingDir:  state.workdir.ResolvedMountPath(),
 		Mounts:      mounts,
 		Ports:       ports,
-		NetworkMode: effectiveNetworkMode,
+		NetworkMode: state.networkMode,
 		UseInit:     true,
 	}
 	if state.networkMode == "isolated" && m.backend == "docker" {
