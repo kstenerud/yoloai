@@ -156,6 +156,12 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 		return nil, fmt.Errorf("%s: %w", msg, ErrMissingAPIKey)
 	}
 
+	// When auth is only via local model server, a model must be specified
+	// so the agent knows which model to use.
+	if !hasAPIKey && !hasAuth && hasAuthHint && opts.Model == "" && ycfg.Model == "" {
+		return nil, NewUsageError("a model is required when using a local model server: use --model or 'yoloai config set defaults.model <model>'")
+	}
+
 	// Parse auxiliary directories
 	var auxDirs []*DirArg
 	for _, auxArg := range opts.AuxDirArgs {
