@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 
 	"gopkg.in/yaml.v3"
 )
@@ -198,6 +199,32 @@ func GetEffectiveConfig() (string, error) {
 		}
 	}
 
+	// Sort collection settings alphabetically by key for stable output.
+	for _, cs := range knownCollectionSettings {
+		if cs.Kind != yaml.MappingNode {
+			continue
+		}
+		parts := splitDottedPath(cs.Path)
+		node := root
+		for _, p := range parts {
+			found := false
+			for i := 0; i < len(node.Content)-1; i += 2 {
+				if node.Content[i].Value == p {
+					node = node.Content[i+1]
+					found = true
+					break
+				}
+			}
+			if !found {
+				node = nil
+				break
+			}
+		}
+		if node != nil && node.Kind == yaml.MappingNode {
+			sortMappingNode(node)
+		}
+	}
+
 	doc := yaml.Node{Kind: yaml.DocumentNode, Content: []*yaml.Node{root}}
 	out, err := yaml.Marshal(&doc)
 	if err != nil {
@@ -286,7 +313,10 @@ func GetConfigValue(path string) (string, bool, error) {
 		return node.Value, true, nil
 	}
 
-	// For mappings/sequences, marshal the subtree.
+	// For mappings/sequences, sort and marshal the subtree.
+	if node.Kind == yaml.MappingNode {
+		sortMappingNode(node)
+	}
 	out, err := yaml.Marshal(node)
 	if err != nil {
 		return "", false, fmt.Errorf("marshal subtree: %w", err)
@@ -392,6 +422,30 @@ func getOrCreateMapping(parent *yaml.Node, key string) *yaml.Node {
 	mapNode := &yaml.Node{Kind: yaml.MappingNode}
 	parent.Content = append(parent.Content, keyNode, mapNode)
 	return mapNode
+}
+
+// sortMappingNode sorts a mapping node's key-value pairs alphabetically by key.
+func sortMappingNode(node *yaml.Node) {
+	n := len(node.Content) / 2
+	if n < 2 {
+		return
+	}
+
+	type kv struct {
+		key *yaml.Node
+		val *yaml.Node
+	}
+	pairs := make([]kv, n)
+	for i := 0; i < n; i++ {
+		pairs[i] = kv{node.Content[i*2], node.Content[i*2+1]}
+	}
+	sort.Slice(pairs, func(i, j int) bool {
+		return pairs[i].key.Value < pairs[j].key.Value
+	})
+	for i, p := range pairs {
+		node.Content[i*2] = p.key
+		node.Content[i*2+1] = p.val
+	}
 }
 
 // splitDottedPath splits "a.b.c" into ["a", "b", "c"].
