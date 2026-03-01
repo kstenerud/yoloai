@@ -80,9 +80,15 @@ if [ "$NETWORK_ISOLATED" = "true" ]; then
     # Allow established/related connections
     iptables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
 
-    # Allow DNS to Docker's internal resolver only (UDP+TCP)
-    iptables -A OUTPUT -d 127.0.0.11 -p udp --dport 53 -j ACCEPT
-    iptables -A OUTPUT -d 127.0.0.11 -p tcp --dport 53 -j ACCEPT
+    # Allow DNS to configured nameservers (UDP+TCP).
+    # On user-defined networks Docker uses 127.0.0.11; on the default bridge
+    # it uses the host's DNS (e.g. 192.168.65.7 on Docker Desktop).
+    # Reading /etc/resolv.conf covers both cases.
+    for ns in $(grep '^nameserver' /etc/resolv.conf | awk '{print $2}'); do
+        iptables -A OUTPUT -d "$ns" -p udp --dport 53 -j ACCEPT
+        iptables -A OUTPUT -d "$ns" -p tcp --dport 53 -j ACCEPT
+        debug_log "allow DNS to $ns"
+    done
 
     # Allow traffic to allowlisted IPs
     iptables -A OUTPUT -m set --match-set allowed-domains dst -j ACCEPT
