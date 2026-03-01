@@ -40,6 +40,12 @@ type PortMapping struct {
 	Protocol     string // default "tcp"
 }
 
+// ResourceLimits holds converted resource constraints for the runtime backend.
+type ResourceLimits struct {
+	NanoCPUs int64 // CPU limit in Docker NanoCPUs (cpus * 1e9)
+	Memory   int64 // Memory limit in bytes
+}
+
 // InstanceConfig holds the parameters for creating a sandbox instance.
 type InstanceConfig struct {
 	Name        string
@@ -50,6 +56,7 @@ type InstanceConfig struct {
 	NetworkMode string // "" = default, "none" = no network, "isolated" = allowlist only
 	CapAdd      []string
 	UseInit     bool
+	Resources   *ResourceLimits
 }
 
 // InstanceInfo holds the inspected state of a sandbox instance.

@@ -169,8 +169,9 @@ env:
 #   - /shared/configs/claude-settings.json
 # [PLANNED] mounts:                       # bind mounts added at container run time
 #   - ~/.ssh:/home/yoloai/.ssh:ro
-# [PLANNED] resources:                    # container resource limits
-#   memory: 16g
+resources:                    # container resource limits
+  cpus: "4"
+  memory: 16g
 # [PLANNED] cap_add:
 #   - NET_ADMIN
 # [PLANNED] devices:
@@ -215,7 +216,7 @@ The full merge table for reference:
 | [PLANNED] `profile`              | Defaults provide fallback. CLI `--profile` overrides. `--no-profile` uses base image. |
 | [PLANNED] `agent_files`          | Profile **replaces** defaults (no merge)                 |
 | [PLANNED] `mounts`               | Additive (no deduplication — duplicates are user error)  |
-| [PLANNED] `resources`            | Profile overrides individual values                      |
+| `resources`            | Profile overrides individual values                      |
 | [PLANNED] `cap_add`              | Additive                                                 |
 | [PLANNED] `devices`              | Additive                                                 |
 | [PLANNED] `setup`                | Additive (defaults first, then profile)                  |

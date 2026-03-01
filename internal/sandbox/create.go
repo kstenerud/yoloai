@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -35,6 +36,8 @@ type CreateOptions struct {
 	Version         string   // yoloAI version for meta.json
 	Attach          bool     // --attach flag (auto-attach after creation)
 	Debug           bool     // --debug flag (enable entrypoint debug logging)
+	CPUs            string   // --cpus flag (e.g., "4", "2.5")
+	Memory          string   // --memory flag (e.g., "8g", "512m")
 }
 
 // sandboxState holds resolved state computed during preparation.
@@ -54,6 +57,7 @@ type sandboxState struct {
 	networkAllow []string
 	ports        []string
 	tmuxConf     string
+	resources    *ResourceLimits
 	meta         *Meta
 	configJSON   []byte
 }
@@ -141,6 +145,7 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 
 	// Profile resolution: load profile chain, merge config, resolve image.
 	var profileName, imageRef string
+	var resources *ResourceLimits
 	mergedEnv := ycfg.Env
 	if opts.Profile != "" {
 		if err := ValidateProfileName(opts.Profile); err != nil {
@@ -171,6 +176,11 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 		}
 
 		mergedEnv = merged.Env
+
+		if merged.Resources != nil {
+			r := *merged.Resources
+			resources = &r
+		}
 
 		// Profile workdir: use if CLI didn't provide one
 		if opts.WorkdirArg == "" && merged.Workdir != nil {
@@ -215,6 +225,25 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 		if err := EnsureProfileImage(ctx, m.runtime, opts.Profile, m.backend, m.output, m.logger, false); err != nil {
 			return nil, fmt.Errorf("build profile image: %w", err)
 		}
+	}
+
+	// Resources from base config (if profile didn't set them)
+	if resources == nil && ycfg.Resources != nil {
+		r := *ycfg.Resources
+		resources = &r
+	}
+	// CLI overrides for resources
+	if opts.CPUs != "" {
+		if resources == nil {
+			resources = &ResourceLimits{}
+		}
+		resources.CPUs = opts.CPUs
+	}
+	if opts.Memory != "" {
+		if resources == nil {
+			resources = &ResourceLimits{}
+		}
+		resources.Memory = opts.Memory
 	}
 
 	// Parse workdir (may have been set from profile above)
@@ -561,6 +590,7 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 		networkAllow: networkAllow,
 		ports:        opts.Ports,
 		tmuxConf:     tmuxConf,
+		resources:    resources,
 		meta:         meta,
 		configJSON:   configData,
 	}, nil
@@ -623,6 +653,16 @@ func (m *Manager) launchContainer(ctx context.Context, state *sandboxState) erro
 		NetworkMode: dockerNetworkMode,
 		UseInit:     true,
 	}
+
+	// Convert resource limits
+	if state.resources != nil {
+		rtResources, err := parseResourceLimits(state.resources)
+		if err != nil {
+			return err
+		}
+		instanceCfg.Resources = rtResources
+	}
+
 	if state.networkMode == "isolated" && m.backend == "docker" {
 		instanceCfg.CapAdd = []string{"NET_ADMIN"}
 	}
@@ -1299,4 +1339,72 @@ func readLogTail(path string, n int) string {
 		lines = lines[len(lines)-n:]
 	}
 	return strings.Join(lines, "\n")
+}
+
+// parseResourceLimits converts user-facing string resource limits to
+// runtime-level int64 values (NanoCPUs, bytes).
+func parseResourceLimits(rl *ResourceLimits) (*runtime.ResourceLimits, error) {
+	result := &runtime.ResourceLimits{}
+
+	if rl.CPUs != "" {
+		cpus, err := strconv.ParseFloat(rl.CPUs, 64)
+		if err != nil || cpus <= 0 {
+			return nil, fmt.Errorf("invalid cpus value %q: must be a positive number (e.g., 4, 2.5)", rl.CPUs)
+		}
+		result.NanoCPUs = int64(cpus * 1e9)
+	}
+
+	if rl.Memory != "" {
+		mem, err := parseMemoryString(rl.Memory)
+		if err != nil {
+			return nil, err
+		}
+		result.Memory = mem
+	}
+
+	if result.NanoCPUs == 0 && result.Memory == 0 {
+		return nil, nil
+	}
+	return result, nil
+}
+
+// parseMemoryString parses a Docker-style memory string (e.g., "512m", "8g")
+// into bytes. Supported suffixes: b, k, m, g (case-insensitive).
+func parseMemoryString(s string) (int64, error) {
+	if s == "" {
+		return 0, nil
+	}
+
+	s = strings.TrimSpace(s)
+	if len(s) == 0 {
+		return 0, fmt.Errorf("empty memory value")
+	}
+
+	// Check for suffix
+	lastChar := strings.ToLower(s[len(s)-1:])
+	var multiplier int64 = 1
+	numStr := s
+
+	switch lastChar {
+	case "b":
+		numStr = s[:len(s)-1]
+	case "k":
+		multiplier = 1024
+		numStr = s[:len(s)-1]
+	case "m":
+		multiplier = 1024 * 1024
+		numStr = s[:len(s)-1]
+	case "g":
+		multiplier = 1024 * 1024 * 1024
+		numStr = s[:len(s)-1]
+	default:
+		// No suffix — treat as bytes
+	}
+
+	val, err := strconv.ParseFloat(numStr, 64)
+	if err != nil || val <= 0 {
+		return 0, fmt.Errorf("invalid memory value %q: must be a positive number with optional suffix (b, k, m, g)", s)
+	}
+
+	return int64(val * float64(multiplier)), nil
 }

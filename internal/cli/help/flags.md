@@ -22,6 +22,8 @@ CREATING SANDBOXES (yoloai new)
   --replace           Replace existing sandbox with same name
   --no-start          Create without starting
   --yes, -y           Skip confirmations
+  --cpus <num>        CPU limit (e.g., 4, 2.5)
+  --memory <size>     Memory limit (e.g., 8g, 512m)
 
 REVIEWING AND APPLYING
 

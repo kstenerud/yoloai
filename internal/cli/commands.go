@@ -138,6 +138,8 @@ func newNewCmd(version string) *cobra.Command {
 			attach, _ := cmd.Flags().GetBool("attach")
 			yes, _ := cmd.Flags().GetBool("yes")
 
+			cpus, _ := cmd.Flags().GetString("cpus")
+			memory, _ := cmd.Flags().GetString("memory")
 			debug, _ := cmd.Flags().GetBool("debug")
 
 			backend := resolveBackend(cmd)
@@ -163,6 +165,8 @@ func newNewCmd(version string) *cobra.Command {
 					Passthrough:     passthrough,
 					Version:         version,
 					Debug:           debug,
+					CPUs:            cpus,
+					Memory:          memory,
 				})
 				if err != nil {
 					return err
@@ -198,6 +202,8 @@ func newNewCmd(version string) *cobra.Command {
 	cmd.Flags().Bool("no-start", false, "Create but don't start the container")
 	cmd.Flags().BoolP("attach", "a", false, "Auto-attach after creation")
 	cmd.Flags().BoolP("yes", "y", false, "Skip confirmations")
+	cmd.Flags().String("cpus", "", "CPU limit (e.g., 4, 2.5)")
+	cmd.Flags().String("memory", "", "Memory limit (e.g., 8g, 512m)")
 
 	return cmd
 }

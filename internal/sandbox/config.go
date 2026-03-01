@@ -20,6 +20,13 @@ type YoloaiConfig struct {
 	Agent     string            `yaml:"agent"`      // agent
 	Model     string            `yaml:"model"`      // model
 	Env       map[string]string `yaml:"env"`        // env — environment variables passed to container
+	Resources *ResourceLimits   `yaml:"resources"`  // resources — container resource limits
+}
+
+// ResourceLimits holds container resource constraints (CPU, memory).
+type ResourceLimits struct {
+	CPUs   string `yaml:"cpus" json:"cpus,omitempty"`
+	Memory string `yaml:"memory" json:"memory,omitempty"`
 }
 
 // knownSetting defines a config key with its default value.
@@ -36,6 +43,8 @@ var knownSettings = []knownSetting{
 	{"tmux_conf", ""},
 	{"agent", "claude"},
 	{"model", ""},
+	{"resources.cpus", ""},
+	{"resources.memory", ""},
 }
 
 // knownCollectionSetting defines a non-scalar config key (map or list)
@@ -118,6 +127,23 @@ func LoadConfig() (*YoloaiConfig, error) {
 					}
 					if subKey == "image" {
 						cfg.TartImage = subExpanded
+					}
+				}
+			}
+		case "resources":
+			if val.Kind == yaml.MappingNode {
+				cfg.Resources = &ResourceLimits{}
+				for k := 0; k < len(val.Content)-1; k += 2 {
+					subKey := val.Content[k].Value
+					subExpanded, subErr := expandEnvBraced(val.Content[k+1].Value)
+					if subErr != nil {
+						return nil, fmt.Errorf("resources.%s: %w", subKey, subErr)
+					}
+					switch subKey {
+					case "cpus":
+						cfg.Resources.CPUs = subExpanded
+					case "memory":
+						cfg.Resources.Memory = subExpanded
 					}
 				}
 			}

@@ -41,7 +41,7 @@ Create a plan file in this directory before starting implementation.
 | [DONE] `env` | [config.md](../../design/config.md) | Environment variables forwarded to container via /run/secrets/ |
 | `network_isolated` | [config.md](../../design/config.md) | Enable network isolation by default |
 | `network_allow` | [config.md](../../design/config.md) | Additional allowed domains |
-| `resources` | [config.md](../../design/config.md) | Container resource limits (cpus, memory) |
+| [DONE] `resources` | [config.md](../../design/config.md) | Container resource limits (cpus, memory) |
 | Recipes (`cap_add`, `devices`, `setup`) | [config.md](../../design/config.md) | Advanced setups (Tailscale, GPU) |
 | [DONE] Tilde expansion in paths | [config.md](../../design/config.md) | `~/` expanded via `ExpandPath()` in dir args, prompt files, etc. Config path fields will get tilde expansion when implemented. |
 | [DONE] Env var interpolation | [config.md](../../design/config.md) | `${VAR}` syntax in CLI path args and config.yaml values via `expandEnvBraced()` |

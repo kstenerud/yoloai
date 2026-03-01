@@ -703,3 +703,83 @@ func TestResolveProfileImage(t *testing.T) {
 		t.Errorf("image = %q, want %q", img, "yoloai-base")
 	}
 }
+
+func TestLoadProfile_Resources(t *testing.T) {
+	yaml := `
+resources:
+  cpus: "2"
+  memory: 4g
+`
+	setupProfileDir(t, "res-profile", yaml)
+
+	cfg, err := LoadProfile("res-profile")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if cfg.Resources == nil {
+		t.Fatal("Resources is nil")
+	}
+	if cfg.Resources.CPUs != "2" {
+		t.Errorf("Resources.CPUs = %q, want %q", cfg.Resources.CPUs, "2")
+	}
+	if cfg.Resources.Memory != "4g" {
+		t.Errorf("Resources.Memory = %q, want %q", cfg.Resources.Memory, "4g")
+	}
+}
+
+func TestMergeProfileChain_ResourcesPerFieldOverride(t *testing.T) {
+	home := setupProfileDir(t, "res-parent", "resources:\n  cpus: \"4\"\n  memory: 8g\n")
+
+	childDir := filepath.Join(home, ".yoloai", "profiles", "res-child")
+	if err := os.MkdirAll(childDir, 0750); err != nil {
+		t.Fatal(err)
+	}
+	// Child only overrides memory, cpus should be preserved from parent
+	if err := os.WriteFile(filepath.Join(childDir, "profile.yaml"),
+		[]byte("extends: res-parent\nresources:\n  memory: 16g\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	base := &YoloaiConfig{}
+
+	chain := []string{"base", "res-parent", "res-child"}
+	merged, err := MergeProfileChain(base, chain)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if merged.Resources == nil {
+		t.Fatal("Resources is nil")
+	}
+	if merged.Resources.CPUs != "4" {
+		t.Errorf("Resources.CPUs = %q, want %q (parent value should be preserved)", merged.Resources.CPUs, "4")
+	}
+	if merged.Resources.Memory != "16g" {
+		t.Errorf("Resources.Memory = %q, want %q (child should override)", merged.Resources.Memory, "16g")
+	}
+}
+
+func TestMergeProfileChain_ResourcesFromBaseConfig(t *testing.T) {
+	setupProfileDir(t, "no-res", "agent: claude\n")
+
+	base := &YoloaiConfig{
+		Resources: &ResourceLimits{CPUs: "2", Memory: "4g"},
+	}
+
+	chain := []string{"base", "no-res"}
+	merged, err := MergeProfileChain(base, chain)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if merged.Resources == nil {
+		t.Fatal("Resources is nil (should come from base config)")
+	}
+	if merged.Resources.CPUs != "2" {
+		t.Errorf("Resources.CPUs = %q, want %q", merged.Resources.CPUs, "2")
+	}
+	if merged.Resources.Memory != "4g" {
+		t.Errorf("Resources.Memory = %q, want %q", merged.Resources.Memory, "4g")
+	}
+}

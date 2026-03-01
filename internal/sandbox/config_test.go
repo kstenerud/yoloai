@@ -417,3 +417,38 @@ func TestGetEffectiveConfig_ExtraKeys(t *testing.T) {
 	// And defaults still present
 	assert.Contains(t, out, "backend: docker")
 }
+
+func TestLoadConfig_Resources(t *testing.T) {
+	dir := configDir(t)
+
+	content := "resources:\n  cpus: \"4\"\n  memory: 8g\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
+
+	cfg, err := LoadConfig()
+	require.NoError(t, err)
+	require.NotNil(t, cfg.Resources)
+	assert.Equal(t, "4", cfg.Resources.CPUs)
+	assert.Equal(t, "8g", cfg.Resources.Memory)
+}
+
+func TestLoadConfig_ResourcesPartial(t *testing.T) {
+	dir := configDir(t)
+
+	content := "resources:\n  memory: 4g\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
+
+	cfg, err := LoadConfig()
+	require.NoError(t, err)
+	require.NotNil(t, cfg.Resources)
+	assert.Empty(t, cfg.Resources.CPUs)
+	assert.Equal(t, "4g", cfg.Resources.Memory)
+}
+
+func TestLoadConfig_ResourcesEmpty(t *testing.T) {
+	dir := configDir(t)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(defaultConfigYAML), 0600))
+
+	cfg, err := LoadConfig()
+	require.NoError(t, err)
+	assert.Nil(t, cfg.Resources)
+}

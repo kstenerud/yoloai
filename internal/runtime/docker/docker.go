@@ -130,6 +130,15 @@ func (r *Runtime) Create(ctx context.Context, cfg runtime.InstanceConfig) error 
 		CapAdd:       cfg.CapAdd,
 	}
 
+	if cfg.Resources != nil {
+		if cfg.Resources.NanoCPUs > 0 {
+			hostConfig.NanoCPUs = cfg.Resources.NanoCPUs
+		}
+		if cfg.Resources.Memory > 0 {
+			hostConfig.Memory = cfg.Resources.Memory
+		}
+	}
+
 	_, err := r.client.ContainerCreate(ctx, containerConfig, hostConfig, &network.NetworkingConfig{}, nil, cfg.Name)
 	if err != nil {
 		return fmt.Errorf("create container: %w", err)

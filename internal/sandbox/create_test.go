@@ -292,3 +292,112 @@ func TestBuildContainerConfig_NetworkIsolated(t *testing.T) {
 	assert.True(t, cfg.NetworkIsolated)
 	assert.Equal(t, domains, cfg.AllowedDomains)
 }
+
+func TestParseResourceLimits(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   *ResourceLimits
+		wantCPU int64
+		wantMem int64
+		wantNil bool
+		wantErr bool
+	}{
+		{
+			name:    "both set",
+			input:   &ResourceLimits{CPUs: "4", Memory: "8g"},
+			wantCPU: 4_000_000_000,
+			wantMem: 8 * 1024 * 1024 * 1024,
+		},
+		{
+			name:    "cpus only",
+			input:   &ResourceLimits{CPUs: "2.5"},
+			wantCPU: 2_500_000_000,
+		},
+		{
+			name:    "memory only",
+			input:   &ResourceLimits{Memory: "512m"},
+			wantMem: 512 * 1024 * 1024,
+		},
+		{
+			name:    "neither set",
+			input:   &ResourceLimits{},
+			wantNil: true,
+		},
+		{
+			name:    "invalid cpus",
+			input:   &ResourceLimits{CPUs: "abc"},
+			wantErr: true,
+		},
+		{
+			name:    "invalid memory",
+			input:   &ResourceLimits{Memory: "xyz"},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := parseResourceLimits(tt.input)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if tt.wantNil {
+				if result != nil {
+					t.Errorf("expected nil result, got %+v", result)
+				}
+				return
+			}
+			if result == nil {
+				t.Fatal("expected non-nil result")
+			}
+			if result.NanoCPUs != tt.wantCPU {
+				t.Errorf("NanoCPUs = %d, want %d", result.NanoCPUs, tt.wantCPU)
+			}
+			if result.Memory != tt.wantMem {
+				t.Errorf("Memory = %d, want %d", result.Memory, tt.wantMem)
+			}
+		})
+	}
+}
+
+func TestParseMemoryString(t *testing.T) {
+	tests := []struct {
+		input   string
+		want    int64
+		wantErr bool
+	}{
+		{"1g", 1024 * 1024 * 1024, false},
+		{"512m", 512 * 1024 * 1024, false},
+		{"1024k", 1024 * 1024, false},
+		{"1048576b", 1048576, false},
+		{"1048576", 1048576, false},        // no suffix = bytes
+		{"0.5g", 512 * 1024 * 1024, false}, // fractional
+		{"", 0, false},
+		{"abc", 0, true},
+		{"-1g", 0, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got, err := parseMemoryString(tt.input)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tt.want {
+				t.Errorf("parseMemoryString(%q) = %d, want %d", tt.input, got, tt.want)
+			}
+		})
+	}
+}

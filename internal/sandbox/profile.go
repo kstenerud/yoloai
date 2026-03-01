@@ -23,6 +23,7 @@ type ProfileConfig struct {
 	Ports       []string          // port mappings
 	Workdir     *ProfileWorkdir   // nil if not specified
 	Directories []ProfileDir      // empty if not specified
+	Resources   *ResourceLimits   // resource limits (cpus, memory)
 }
 
 // ProfileWorkdir defines a workdir from a profile.
@@ -50,6 +51,7 @@ type MergedConfig struct {
 	Ports       []string          // additive across chain
 	Workdir     *ProfileWorkdir   // from nearest profile that specifies one (child wins)
 	Directories []ProfileDir      // additive across chain
+	Resources   *ResourceLimits   // from per-field merge across chain
 }
 
 // ProfileDirPath returns the host-side directory for a profile.
@@ -265,6 +267,23 @@ func LoadProfile(name string) (*ProfileConfig, error) {
 					}
 				}
 			}
+		case "resources":
+			if val.Kind == yaml.MappingNode {
+				cfg.Resources = &ResourceLimits{}
+				for k := 0; k < len(val.Content)-1; k += 2 {
+					subKey := val.Content[k].Value
+					subExpanded, subErr := expandEnvBraced(val.Content[k+1].Value)
+					if subErr != nil {
+						return nil, fmt.Errorf("resources.%s: %w", subKey, subErr)
+					}
+					switch subKey {
+					case "cpus":
+						cfg.Resources.CPUs = subExpanded
+					case "memory":
+						cfg.Resources.Memory = subExpanded
+					}
+				}
+			}
 			// Unknown fields are silently ignored
 		}
 	}
@@ -358,6 +377,16 @@ func MergeProfileChain(base *YoloaiConfig, chain []string) (*MergedConfig, error
 		}
 	}
 
+	if base.Resources != nil {
+		merged.Resources = &ResourceLimits{}
+		if base.Resources.CPUs != "" {
+			merged.Resources.CPUs = base.Resources.CPUs
+		}
+		if base.Resources.Memory != "" {
+			merged.Resources.Memory = base.Resources.Memory
+		}
+	}
+
 	// Apply each non-base profile in order
 	for _, name := range chain {
 		if name == "base" {
@@ -402,6 +431,19 @@ func MergeProfileChain(base *YoloaiConfig, chain []string) (*MergedConfig, error
 		// Workdir: child wins over parent
 		if profile.Workdir != nil {
 			merged.Workdir = profile.Workdir
+		}
+
+		// Resources: per-field override
+		if profile.Resources != nil {
+			if merged.Resources == nil {
+				merged.Resources = &ResourceLimits{}
+			}
+			if profile.Resources.CPUs != "" {
+				merged.Resources.CPUs = profile.Resources.CPUs
+			}
+			if profile.Resources.Memory != "" {
+				merged.Resources.Memory = profile.Resources.Memory
+			}
 		}
 	}
 
