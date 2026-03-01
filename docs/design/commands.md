@@ -93,9 +93,11 @@ The agent definition determines the default prompt delivery mode. `--prompt` sel
 
 ### `yoloai new`
 
-`yoloai new [options] <name> <workdir> [-d <auxdir>...]`
+`yoloai new [options] <name> [<workdir>] [-d <auxdir>...]`
 
-The **workdir** is the single primary project directory — the agent's working directory. It is positional (after name) and defaults to `:copy` mode if no suffix is given. The `:rw` suffix must be explicit. **[PLANNED]** The workdir will become optional when a profile provides one; currently it is always required.
+The **name** is always required (no auto-generation).
+
+The **workdir** is the single primary project directory — the agent's working directory. It is positional (after name) and defaults to `:copy` mode if no suffix is given. The `:rw` suffix must be explicit. **[PLANNED]** When `--profile` is set and the profile provides a workdir, `<workdir>` is optional (profile workdir is used as default). If the profile has no workdir and `<workdir>` is omitted, error: "workdir is required (profile '<name>' doesn't provide one)". Without `--profile`, `<workdir>` is always required.
 
 **`-d` / `--dir`** specifies auxiliary directories (repeatable). Default read-only. Additive with profile directories.
 
@@ -160,7 +162,7 @@ yoloai new my-task ./my-app=/opt/myapp -d ./shared-lib=/usr/local/lib/shared -d 
 ```
 
 Options:
-- **[PLANNED]** `--profile <name>`: Use a profile's derived image and mounts. No profile = base image + defaults only.
+- **[PLANNED]** `--profile <name>`: Use a profile's derived image and runtime config. No profile = base image + defaults only. The profile name and resolved image ref (`yoloai-<profile>`) are stored in `meta.json` so lifecycle commands recreate containers with the correct image. Auto-builds missing or stale images on demand (see [config.md](config.md#1-docker-images)).
 - `--prompt` / `-p` `<text>`: Initial prompt/task for the agent (see Prompt Mechanism below). Use `--prompt -` to read from stdin. Mutually exclusive with `--prompt-file`.
 - `--prompt-file` / `-f` `<path>`: Read prompt from a file. Use `--prompt-file -` to read from stdin. Mutually exclusive with `--prompt`.
 - `--model` / `-m` `<model>`: Model to use. Passed to the agent's `--model` flag. If omitted, uses the agent's default. Accepts built-in aliases (see Agent Definitions) or full model names. **[PLANNED]** User-configurable aliases in config.yaml, plus version pinning to prevent surprise behavior changes.
