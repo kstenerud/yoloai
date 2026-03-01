@@ -672,7 +672,7 @@ func parsePortBindings(ports []string) ([]runtime.PortMapping, error) {
 // Env vars are written first; API keys overwrite on conflict (take precedence).
 // Returns empty string if nothing was written.
 func createSecretsDir(agentDef *agent.Definition, envVars map[string]string) (string, error) {
-	if len(agentDef.APIKeyEnvVars) == 0 && len(envVars) == 0 {
+	if len(agentDef.APIKeyEnvVars) == 0 && len(agentDef.AuthHintEnvVars) == 0 && len(envVars) == 0 {
 		return "", nil
 	}
 
@@ -692,8 +692,8 @@ func createSecretsDir(agentDef *agent.Definition, envVars map[string]string) (st
 		wrote = true
 	}
 
-	// Write API keys (overwrites env vars on conflict — API keys take precedence)
-	for _, key := range agentDef.APIKeyEnvVars {
+	// Write host env vars for API keys and auth hints (overwrites config env on conflict)
+	for _, key := range append(agentDef.APIKeyEnvVars, agentDef.AuthHintEnvVars...) {
 		value := os.Getenv(key)
 		if value == "" {
 			continue
