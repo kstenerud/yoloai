@@ -50,7 +50,7 @@ Admin:
   yoloai config get [key]                        Print configuration values (all or specific key)
   yoloai config set <key> <value>                Set a configuration value
   yoloai config reset <key>                      Remove key from config, reverting to internal default
-  yoloai profile create <name> [--template <tpl>]  Create a profile with scaffold  [PLANNED]
+  yoloai profile create <name>                     Create a profile with scaffold  [PLANNED]
   yoloai profile list                            List profiles  [PLANNED]
   yoloai profile delete <name>                   Delete a profile  [PLANNED]
   yoloai x <extension> <name> [args...] [--flags...]  Run a user-defined extension  [PLANNED]
