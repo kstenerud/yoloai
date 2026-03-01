@@ -6,6 +6,7 @@ package cli
 import (
 	"embed"
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 
@@ -63,7 +64,8 @@ func runHelp(topic string) error {
 		return fmt.Errorf("reading help topic: %w", err)
 	}
 
-	return RunPager(strings.NewReader(string(content)))
+	_, err = os.Stdout.Write(content)
+	return err
 }
 
 // topicError is a user-facing error with formatted help suggestions.
