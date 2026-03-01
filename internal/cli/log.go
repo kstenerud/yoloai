@@ -14,12 +14,14 @@ import (
 )
 
 func newSandboxLogCmd() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "log <name>",
 		Short: "Show sandbox session log",
 		Args:  cobra.ArbitraryArgs,
 		RunE:  runLog,
 	}
+	cmd.Flags().Bool("no-strip", false, "Show raw output with ANSI escape sequences")
+	return cmd
 }
 
 // runLog is the shared implementation for `sandbox log` and the `log` alias.
@@ -45,6 +47,11 @@ func runLog(cmd *cobra.Command, args []string) error {
 	}
 	defer f.Close() //nolint:errcheck
 
-	_, err = io.Copy(cmd.OutOrStdout(), f)
+	noStrip, _ := cmd.Flags().GetBool("no-strip")
+	if noStrip {
+		_, err = io.Copy(cmd.OutOrStdout(), f)
+	} else {
+		err = stripANSI(cmd.OutOrStdout(), f)
+	}
 	return err
 }

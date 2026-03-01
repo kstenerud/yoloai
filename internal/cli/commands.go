@@ -66,13 +66,15 @@ func newLsAliasCmd() *cobra.Command {
 }
 
 func newLogAliasCmd() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:     "log <name>",
 		Short:   "Show sandbox log (shortcut for 'sandbox log')",
 		GroupID: groupInspect,
 		Args:    cobra.ArbitraryArgs,
 		RunE:    runLog,
 	}
+	cmd.Flags().Bool("no-strip", false, "Show raw output with ANSI escape sequences")
+	return cmd
 }
 
 func newNewCmd(version string) *cobra.Command {
