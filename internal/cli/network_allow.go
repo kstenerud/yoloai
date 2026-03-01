@@ -106,13 +106,17 @@ done`
 					execArgs = append(execArgs, newDomains...)
 					_, err := rt.Exec(ctx, sandbox.InstanceName(name), execArgs, "0")
 					if err != nil {
-						fmt.Fprintf(w, "Warning: failed to update running container: %v\n", err) //nolint:errcheck // best-effort output
-						fmt.Fprintf(w, "Changes saved — will take effect on next start\n")       //nolint:errcheck // best-effort output
+						if !jsonEnabled(cmd) {
+							fmt.Fprintf(w, "Warning: failed to update running container: %v\n", err) //nolint:errcheck // best-effort output
+							fmt.Fprintf(w, "Changes saved — will take effect on next start\n")       //nolint:errcheck // best-effort output
+						}
 					} else {
 						live = true
-						fmt.Fprintf(w, "Allowed %s (live)\n", strings.Join(newDomains, ", ")) //nolint:errcheck // best-effort output
+						if !jsonEnabled(cmd) {
+							fmt.Fprintf(w, "Allowed %s (live)\n", strings.Join(newDomains, ", ")) //nolint:errcheck // best-effort output
+						}
 					}
-				} else {
+				} else if !jsonEnabled(cmd) {
 					fmt.Fprintf(w, "Allowed %s (will take effect on next start)\n", strings.Join(newDomains, ", ")) //nolint:errcheck // best-effort output
 				}
 

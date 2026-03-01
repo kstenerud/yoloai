@@ -311,6 +311,13 @@ func newVersionCmd(version, commit, date string) *cobra.Command {
 		GroupID: groupAdmin,
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if jsonEnabled(cmd) {
+				return writeJSON(cmd.OutOrStdout(), map[string]string{
+					"version": version,
+					"commit":  commit,
+					"date":    date,
+				})
+			}
 			_, err := fmt.Fprintf(cmd.OutOrStdout(), "yoloai version %s (commit: %s, built: %s)\n", version, commit, date)
 			return err
 		},

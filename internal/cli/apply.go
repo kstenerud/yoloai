@@ -383,6 +383,14 @@ func applySelectedCommits(cmd *cobra.Command, name string, refs []string, meta *
 		}
 	}
 
+	if jsonEnabled(cmd) {
+		return writeJSON(cmd.OutOrStdout(), applyResult{
+			Target:         targetDir,
+			CommitsApplied: len(files),
+			Method:         "selective",
+		})
+	}
+
 	return nil
 }
 
@@ -409,7 +417,9 @@ func applySquash(cmd *cobra.Command, name string, paths []string, meta *sandbox.
 	}
 
 	targetDir := meta.Workdir.HostPath
-	fmt.Fprintln(cmd.OutOrStdout(), stat) //nolint:errcheck
+	if !jsonEnabled(cmd) {
+		fmt.Fprintln(cmd.OutOrStdout(), stat) //nolint:errcheck
+	}
 	isGit := sandbox.IsGitRepo(targetDir)
 
 	if err := sandbox.CheckPatch(patch, targetDir, isGit); err != nil {
@@ -438,6 +448,14 @@ func applySquash(cmd *cobra.Command, name string, paths []string, meta *sandbox.
 		}
 	}
 
+	if jsonEnabled(cmd) {
+		return writeJSON(cmd.OutOrStdout(), applyResult{
+			Target:     targetDir,
+			WIPApplied: true,
+			Method:     "squash",
+		})
+	}
+
 	_, err = fmt.Fprintf(cmd.OutOrStdout(), "Changes applied to %s\n", targetDir)
 	return err
 }
@@ -459,10 +477,13 @@ func applySquashMulti(cmd *cobra.Command, name string, paths []string, _ *sandbo
 		return err
 	}
 
+	isJSON := jsonEnabled(cmd)
 	out := cmd.OutOrStdout()
-	for _, ps := range patches {
-		fmt.Fprintf(out, "=== %s (%s) ===\n", ps.HostPath, ps.Mode) //nolint:errcheck
-		fmt.Fprintln(out, ps.Stat)                                  //nolint:errcheck
+	if !isJSON {
+		for _, ps := range patches {
+			fmt.Fprintf(out, "=== %s (%s) ===\n", ps.HostPath, ps.Mode) //nolint:errcheck
+			fmt.Fprintln(out, ps.Stat)                                  //nolint:errcheck
+		}
 	}
 
 	if !yes {
@@ -483,7 +504,9 @@ func applySquashMulti(cmd *cobra.Command, name string, paths []string, _ *sandbo
 		if err := sandbox.ApplyPatch(ps.Patch, ps.HostPath, isGit); err != nil {
 			return fmt.Errorf("%s: %w", ps.HostPath, err)
 		}
-		fmt.Fprintf(out, "Changes applied to %s\n", ps.HostPath) //nolint:errcheck
+		if !isJSON {
+			fmt.Fprintf(out, "Changes applied to %s\n", ps.HostPath) //nolint:errcheck
+		}
 	}
 
 	// Advance baseline for workdir
@@ -491,6 +514,14 @@ func applySquashMulti(cmd *cobra.Command, name string, paths []string, _ *sandbo
 		if err := sandbox.AdvanceBaseline(name); err != nil {
 			return fmt.Errorf("advance baseline: %w", err)
 		}
+	}
+
+	if isJSON {
+		return writeJSON(out, applyResult{
+			Target:     "multi",
+			WIPApplied: true,
+			Method:     "squash",
+		})
 	}
 
 	return nil
@@ -502,6 +533,7 @@ func exportPatches(cmd *cobra.Command, name string, paths []string, commits []sa
 		return fmt.Errorf("create patches directory: %w", err)
 	}
 
+	isJSON := jsonEnabled(cmd)
 	out := cmd.OutOrStdout()
 
 	if len(commits) > 0 {
@@ -521,7 +553,9 @@ func exportPatches(cmd *cobra.Command, name string, paths []string, commits []sa
 			if err := os.WriteFile(dst, data, 0600); err != nil {
 				return fmt.Errorf("write patch %s: %w", f, err)
 			}
-			fmt.Fprintf(out, "  %s\n", dst) //nolint:errcheck
+			if !isJSON {
+				fmt.Fprintf(out, "  %s\n", dst) //nolint:errcheck
+			}
 		}
 	}
 
@@ -535,12 +569,14 @@ func exportPatches(cmd *cobra.Command, name string, paths []string, commits []sa
 			if err := os.WriteFile(dst, wipPatch, 0600); err != nil {
 				return fmt.Errorf("write wip.diff: %w", err)
 			}
-			fmt.Fprintf(out, "  %s\n", dst) //nolint:errcheck
+			if !isJSON {
+				fmt.Fprintf(out, "  %s\n", dst) //nolint:errcheck
+			}
 		}
 	}
 
-	if jsonEnabled(cmd) {
-		return writeJSON(cmd.OutOrStdout(), applyResult{
+	if isJSON {
+		return writeJSON(out, applyResult{
 			Target:         dir,
 			CommitsApplied: len(commits),
 			WIPApplied:     hasWIP,

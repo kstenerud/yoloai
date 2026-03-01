@@ -8,6 +8,7 @@ import (
 
 	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v3"
 )
 
 func newConfigCmd() *cobra.Command {
@@ -41,6 +42,13 @@ With a dotted key (e.g., backend), prints just that value.`,
 				if err != nil {
 					return err
 				}
+				if jsonEnabled(cmd) {
+					var m map[string]any
+					if err := yaml.Unmarshal([]byte(out), &m); err != nil {
+						return fmt.Errorf("parse config: %w", err)
+					}
+					return writeJSON(cmd.OutOrStdout(), m)
+				}
 				_, err = fmt.Fprint(cmd.OutOrStdout(), out)
 				return err
 			}
@@ -50,7 +58,16 @@ With a dotted key (e.g., backend), prints just that value.`,
 				return err
 			}
 			if !found {
+				if jsonEnabled(cmd) {
+					return fmt.Errorf("key %q not found", args[0])
+				}
 				os.Exit(1)
+			}
+			if jsonEnabled(cmd) {
+				return writeJSON(cmd.OutOrStdout(), map[string]string{
+					"key":   args[0],
+					"value": value,
+				})
 			}
 			_, err = fmt.Fprintln(cmd.OutOrStdout(), value)
 			return err

@@ -59,45 +59,47 @@ func runSystemPrune(cmd *cobra.Command, backend string, dryRun, yes bool) error 
 		return fmt.Errorf("scan temp files: %w", err)
 	}
 
-	// 4. Print broken sandbox warnings (always shown).
-	for _, bs := range brokenSandboxes {
-		fmt.Fprintf(output, "Warning: broken sandbox at %s — use 'yoloai destroy %s' to remove\n", bs.path, bs.name) //nolint:errcheck
+	isJSON := jsonEnabled(cmd)
+
+	// 4. Print broken sandbox warnings (human-readable only).
+	if !isJSON {
+		for _, bs := range brokenSandboxes {
+			fmt.Fprintf(output, "Warning: broken sandbox at %s — use 'yoloai destroy %s' to remove\n", bs.path, bs.name) //nolint:errcheck
+		}
 	}
 
 	// 5. Check if there's anything to prune.
 	totalItems := len(scanResult.Items) + len(staleTempDirs)
 	if totalItems == 0 {
-		if jsonEnabled(cmd) {
-			key := "items_removed"
-			if dryRun {
-				key = "items_found"
-			}
-			return writeJSON(cmd.OutOrStdout(), map[string]any{key: []string{}})
+		if isJSON {
+			return writePruneJSON(cmd, scanResult, staleTempDirs, dryRun)
 		}
 		fmt.Fprintln(output, "Nothing to prune.") //nolint:errcheck
 		return nil
 	}
 
-	// 6. Report what was found.
-	if len(scanResult.Items) > 0 {
-		fmt.Fprintln(output, "Orphaned resources:") //nolint:errcheck
-		for _, item := range scanResult.Items {
-			fmt.Fprintf(output, "  %s %s\n", item.Kind, item.Name) //nolint:errcheck
+	// 6. Report what was found (human-readable only).
+	if !isJSON {
+		if len(scanResult.Items) > 0 {
+			fmt.Fprintln(output, "Orphaned resources:") //nolint:errcheck
+			for _, item := range scanResult.Items {
+				fmt.Fprintf(output, "  %s %s\n", item.Kind, item.Name) //nolint:errcheck
+			}
+			fmt.Fprintln(output) //nolint:errcheck
 		}
-		fmt.Fprintln(output) //nolint:errcheck
-	}
 
-	if len(staleTempDirs) > 0 {
-		fmt.Fprintln(output, "Stale temporary files:") //nolint:errcheck
-		for _, path := range staleTempDirs {
-			fmt.Fprintf(output, "  %s\n", path) //nolint:errcheck
+		if len(staleTempDirs) > 0 {
+			fmt.Fprintln(output, "Stale temporary files:") //nolint:errcheck
+			for _, path := range staleTempDirs {
+				fmt.Fprintf(output, "  %s\n", path) //nolint:errcheck
+			}
+			fmt.Fprintln(output) //nolint:errcheck
 		}
-		fmt.Fprintln(output) //nolint:errcheck
 	}
 
 	// 7. If dry-run, stop here.
 	if dryRun {
-		if jsonEnabled(cmd) {
+		if isJSON {
 			return writePruneJSON(cmd, scanResult, staleTempDirs, true)
 		}
 		return nil
@@ -124,8 +126,10 @@ func runSystemPrune(cmd *cobra.Command, backend string, dryRun, yes bool) error 
 		if err != nil {
 			return err
 		}
-		for _, item := range scanResult.Items {
-			fmt.Fprintf(output, "Removed %s %s\n", item.Kind, item.Name) //nolint:errcheck
+		if !isJSON {
+			for _, item := range scanResult.Items {
+				fmt.Fprintf(output, "Removed %s %s\n", item.Kind, item.Name) //nolint:errcheck
+			}
 		}
 	}
 
@@ -133,11 +137,13 @@ func runSystemPrune(cmd *cobra.Command, backend string, dryRun, yes bool) error 
 	if _, err := sandbox.PruneTempFiles(false, 1*time.Hour); err != nil {
 		return fmt.Errorf("remove temp files: %w", err)
 	}
-	for _, path := range staleTempDirs {
-		fmt.Fprintf(output, "Removed temp dir %s\n", path) //nolint:errcheck
+	if !isJSON {
+		for _, path := range staleTempDirs {
+			fmt.Fprintf(output, "Removed temp dir %s\n", path) //nolint:errcheck
+		}
 	}
 
-	if jsonEnabled(cmd) {
+	if isJSON {
 		return writePruneJSON(cmd, scanResult, staleTempDirs, false)
 	}
 
@@ -151,7 +157,7 @@ func writePruneJSON(cmd *cobra.Command, scanResult runtime.PruneResult, staleTem
 		Name string `json:"name"`
 	}
 
-	var items []pruneItem
+	items := make([]pruneItem, 0, len(scanResult.Items)+len(staleTempDirs))
 	for _, item := range scanResult.Items {
 		items = append(items, pruneItem{Kind: item.Kind, Name: item.Name})
 	}
@@ -159,11 +165,10 @@ func writePruneJSON(cmd *cobra.Command, scanResult runtime.PruneResult, staleTem
 		items = append(items, pruneItem{Kind: "temp_dir", Name: path})
 	}
 
-	key := "items_removed"
-	if dryRun {
-		key = "items_found"
-	}
-	return writeJSON(cmd.OutOrStdout(), map[string]any{key: items})
+	return writeJSON(cmd.OutOrStdout(), map[string]any{
+		"items":   items,
+		"dry_run": dryRun,
+	})
 }
 
 type brokenSandbox struct {

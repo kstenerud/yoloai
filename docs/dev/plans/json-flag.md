@@ -121,7 +121,7 @@ Each outputs a result object on success.
 
 **`internal/cli/network_allow.go`** (`sandbox network-allow`) — Output `{"name", "domains_added": [...], "live": true/false}`.
 
-**`internal/cli/system_prune.go`** (`system prune`) — `requireYesForJSON()`. Output `{"items_removed": [...]}`. With `--dry-run`, output `{"items_found": [...]}`.
+**`internal/cli/system_prune.go`** (`system prune`) — `requireYesForJSON()`. Output `{"items": [...], "dry_run": bool}`. Fixed key regardless of mode; `dry_run` field distinguishes scan from removal.
 
 ### Interactive Command Guards
 
