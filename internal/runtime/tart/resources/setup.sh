@@ -7,6 +7,9 @@ set -euo pipefail
 # Arguments: path to the yoloai shared directory inside the VM
 SHARED_DIR="${1:?usage: setup.sh <shared-dir>}"
 
+# Capture all setup output to log.txt
+exec > >(tee -a "$SHARED_DIR/log.txt") 2>&1
+
 CONFIG="$SHARED_DIR/config.json"
 
 # --- Create symlinks for VirtioFS mounts ---

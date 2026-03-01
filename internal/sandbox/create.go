@@ -517,6 +517,10 @@ func (m *Manager) launchContainer(ctx context.Context, state *sandboxState) erro
 		return fmt.Errorf("inspect instance after start: %w", err)
 	}
 	if !info.Running {
+		logPath := filepath.Join(state.sandboxDir, "log.txt")
+		if tail := readLogTail(logPath, 20); tail != "" {
+			return fmt.Errorf("instance exited immediately:\n%s", tail)
+		}
 		return fmt.Errorf("instance exited immediately — %s", m.runtime.DiagHint(cname))
 	}
 
@@ -1138,4 +1142,18 @@ func ensureHomeSeedConfig(agentDef *agent.Definition, sandboxDir string) error {
 	config["installMethod"] = "npm-global"
 
 	return writeJSONMap(configPath, config)
+}
+
+// readLogTail returns the last n lines of the file at path.
+// Returns empty string on any error or if the file is empty.
+func readLogTail(path string, n int) string {
+	data, err := os.ReadFile(path) //nolint:gosec // G304: path is constructed from sandbox dir
+	if err != nil || len(data) == 0 {
+		return ""
+	}
+	lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
+	if len(lines) > n {
+		lines = lines[len(lines)-n:]
+	}
+	return strings.Join(lines, "\n")
 }

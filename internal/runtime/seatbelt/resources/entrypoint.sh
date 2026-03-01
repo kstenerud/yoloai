@@ -7,6 +7,9 @@ set -euo pipefail
 # Arguments: path to the sandbox directory
 SANDBOX_DIR="${1:?usage: entrypoint.sh <sandbox-dir>}"
 
+# Capture all entrypoint output to log.txt
+exec > >(tee -a "$SANDBOX_DIR/log.txt") 2>&1
+
 CONFIG="$SANDBOX_DIR/config.json"
 TMUX_SOCK="$SANDBOX_DIR/tmux.sock"
 

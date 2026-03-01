@@ -1,6 +1,9 @@
 #!/bin/bash
 set -euo pipefail
 
+# Capture all entrypoint output to log.txt (preserves docker logs via tee)
+exec > >(tee -a /yoloai/log.txt) 2>&1
+
 # --- Run as root ---
 
 # Read config (only UID/GID needed in root context; agent config read by inner bash)
