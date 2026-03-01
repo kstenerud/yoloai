@@ -28,7 +28,7 @@ type knownSetting struct {
 	Default string
 }
 
-// knownSettings lists every config key the code recognizes, with defaults.
+// knownSettings lists every scalar config key the code recognizes, with defaults.
 // Used by GetEffectiveConfig and GetConfigValue to fill in unset values.
 var knownSettings = []knownSetting{
 	{"setup_complete", "false"},
@@ -37,6 +37,19 @@ var knownSettings = []knownSetting{
 	{"defaults.tmux_conf", ""},
 	{"defaults.agent", "claude"},
 	{"defaults.model", ""},
+}
+
+// knownCollectionSetting defines a non-scalar config key (map or list)
+// with its default YAML node kind.
+type knownCollectionSetting struct {
+	Path string
+	Kind yaml.Kind // yaml.MappingNode or yaml.SequenceNode
+}
+
+// knownCollectionSettings lists non-scalar config keys shown in effective config.
+// Each appears as an empty mapping ({}) or sequence ([]) when not set by the user.
+var knownCollectionSettings = []knownCollectionSetting{
+	{"defaults.env", yaml.MappingNode},
 }
 
 // ConfigPath returns the path to ~/.yoloai/config.yaml.
@@ -157,6 +170,16 @@ func GetEffectiveConfig() (string, error) {
 	root := &yaml.Node{Kind: yaml.MappingNode}
 	for _, s := range knownSettings {
 		setYAMLField(root, s.Path, s.Default)
+	}
+
+	// Add non-scalar defaults (maps/lists) as empty containers.
+	for _, cs := range knownCollectionSettings {
+		parts := splitDottedPath(cs.Path)
+		parent := root
+		for _, p := range parts[:len(parts)-1] {
+			parent = getOrCreateMapping(parent, p)
+		}
+		setNodeValue(parent, parts[len(parts)-1], &yaml.Node{Kind: cs.Kind})
 	}
 
 	// Overlay values from the actual config file.

@@ -437,6 +437,7 @@ func TestGetEffectiveConfig_Defaults(t *testing.T) {
 	assert.Contains(t, out, "tart_image:")
 	assert.Contains(t, out, "tmux_conf:")
 	assert.Contains(t, out, "agent: claude")
+	assert.Contains(t, out, "env: {}")
 }
 
 func TestGetEffectiveConfig_WithOverrides(t *testing.T) {
