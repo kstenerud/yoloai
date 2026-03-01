@@ -140,6 +140,9 @@ func (m *Manager) Reset(ctx context.Context, opts ResetOptions) error {
 	// Stop the container (if running)
 	_ = m.Stop(ctx, opts.Name)
 
+	// Truncate log so each run starts fresh
+	_ = os.Truncate(filepath.Join(sandboxDir, "log.txt"), 0)
+
 	workDir := WorkDir(opts.Name, meta.Workdir.HostPath)
 
 	// Delete work copy

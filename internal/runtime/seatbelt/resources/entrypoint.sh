@@ -22,7 +22,7 @@ debug_log "entrypoint starting (sandbox=$SANDBOX_DIR)"
 # --- Set up HOME redirection ---
 debug_log "setting up HOME redirection"
 export HOME="$SANDBOX_DIR/home"
-mkdir -p "$HOME"
+mkdir -p "$HOME" "$HOME/.local/bin"
 
 # Symlink agent state dir (e.g. .claude, .gemini) to agent-state
 STATE_DIR_NAME=$(jq -r '.state_dir_name // empty' "$CONFIG")
@@ -117,6 +117,12 @@ if [ -n "$READY_PATTERN" ] && [ "$READY_PATTERN" != "null" ]; then
     while [ $WAITED -lt $MAX_WAIT ]; do
         PANE=$(tmux -S "$TMUX_SOCK" capture-pane -t main -p 2>/dev/null || true)
         if echo "$PANE" | grep -qF "Enter to confirm"; then
+            # Bypass permissions dialog defaults to "No, exit" — navigate to
+            # "Yes, I accept" before confirming.
+            if echo "$PANE" | grep -qF "Yes, I accept"; then
+                tmux -S "$TMUX_SOCK" send-keys -t main Down
+                sleep 0.5
+            fi
             tmux -S "$TMUX_SOCK" send-keys -t main Enter
             sleep 2
             WAITED=$((WAITED + 2))
