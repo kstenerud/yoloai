@@ -50,6 +50,49 @@ fi
 # documentation URLs). Only set if not already provided via secrets/env.
 export BROWSER="${BROWSER:-true}"
 
+# --- Network isolation (iptables + ipset) ---
+NETWORK_ISOLATED=$(jq -r '.network_isolated // false' "$CONFIG")
+if [ "$NETWORK_ISOLATED" = "true" ]; then
+    debug_log "setting up network isolation with iptables+ipset"
+
+    # Create ipset for allowed IPs
+    ipset create allowed-domains hash:net 2>/dev/null || ipset flush allowed-domains
+
+    # Resolve each allowed domain and add IPs to ipset
+    ALLOWED_DOMAINS=$(jq -r '.allowed_domains // [] | .[]' "$CONFIG")
+    for domain in $ALLOWED_DOMAINS; do
+        ips=$(dig +short A "$domain" 2>/dev/null || true)
+        for ip in $ips; do
+            # Skip CNAME lines (contain dots but are not IPs)
+            if echo "$ip" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'; then
+                ipset add allowed-domains "$ip" 2>/dev/null || true
+                debug_log "allow $domain -> $ip"
+            fi
+        done
+    done
+
+    # Flush existing rules
+    iptables -F OUTPUT 2>/dev/null || true
+
+    # Allow loopback
+    iptables -A OUTPUT -o lo -j ACCEPT
+
+    # Allow established/related connections
+    iptables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+
+    # Allow DNS to Docker's internal resolver only (UDP+TCP)
+    iptables -A OUTPUT -d 127.0.0.11 -p udp --dport 53 -j ACCEPT
+    iptables -A OUTPUT -d 127.0.0.11 -p tcp --dport 53 -j ACCEPT
+
+    # Allow traffic to allowlisted IPs
+    iptables -A OUTPUT -m set --match-set allowed-domains dst -j ACCEPT
+
+    # Reject everything else (REJECT gives immediate feedback, unlike DROP)
+    iptables -A OUTPUT -j REJECT --reject-with icmp-port-unreachable
+
+    debug_log "network isolation rules applied"
+fi
+
 debug_log "dropping privileges to yoloai"
 
 # --- Drop privileges and run as yoloai ---

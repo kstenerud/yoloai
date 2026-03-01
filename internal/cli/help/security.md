@@ -29,8 +29,16 @@ NETWORK ISOLATION
 
      yoloai new task . --network-none
 
-  Agents have a default network allowlist. Use --network-none for
-  maximum isolation.
+  Allow only agent API traffic (blocks everything else):
+
+     yoloai new task . --network-isolated
+
+  Add extra domains to the allowlist:
+
+     yoloai new task . --network-allow api.example.com
+
+  Each agent has a default allowlist (e.g., api.anthropic.com for
+  Claude). Use --network-none for maximum isolation.
 
 NON-ROOT EXECUTION
 

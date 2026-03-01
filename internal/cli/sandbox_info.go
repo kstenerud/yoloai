@@ -65,7 +65,11 @@ func newSandboxInfoCmd() *cobra.Command {
 				}
 
 				if meta.NetworkMode != "" {
-					fmt.Fprintf(w, "Network:     %s\n", meta.NetworkMode) //nolint:errcheck
+					if meta.NetworkMode == "isolated" && len(meta.NetworkAllow) > 0 {
+						fmt.Fprintf(w, "Network:     isolated (%s)\n", strings.Join(meta.NetworkAllow, ", ")) //nolint:errcheck
+					} else {
+						fmt.Fprintf(w, "Network:     %s\n", meta.NetworkMode) //nolint:errcheck
+					}
 				}
 				if len(meta.Ports) > 0 {
 					fmt.Fprintf(w, "Ports:       %s\n", strings.Join(meta.Ports, ", ")) //nolint:errcheck

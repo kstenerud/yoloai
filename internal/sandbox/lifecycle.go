@@ -308,18 +308,19 @@ func (m *Manager) recreateContainer(ctx context.Context, name string, meta *Meta
 	}
 
 	state := &sandboxState{
-		name:        name,
-		sandboxDir:  sandboxDir,
-		workdir:     workdir,
-		workCopyDir: WorkDir(name, meta.Workdir.HostPath),
-		auxDirs:     auxDirs,
-		agent:       agentDef,
-		model:       meta.Model,
-		hasPrompt:   meta.HasPrompt,
-		networkMode: meta.NetworkMode,
-		ports:       meta.Ports,
-		tmuxConf:    cfgJSON.TmuxConf,
-		configJSON:  configData,
+		name:         name,
+		sandboxDir:   sandboxDir,
+		workdir:      workdir,
+		workCopyDir:  WorkDir(name, meta.Workdir.HostPath),
+		auxDirs:      auxDirs,
+		agent:        agentDef,
+		model:        meta.Model,
+		hasPrompt:    meta.HasPrompt,
+		networkMode:  meta.NetworkMode,
+		networkAllow: meta.NetworkAllow,
+		ports:        meta.Ports,
+		tmuxConf:     cfgJSON.TmuxConf,
+		configJSON:   configData,
 	}
 
 	return m.launchContainer(ctx, state)

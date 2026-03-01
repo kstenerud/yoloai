@@ -951,3 +951,74 @@ func TestPrepareSandboxState_MissingAPIKeyErrorWithAuthFiles(t *testing.T) {
 	assert.Contains(t, errMsg, ".credentials.json", "error should mention .credentials.json from AuthOnly seed files")
 	assert.NotContains(t, errMsg, "local models", "claude has no AuthHintEnvVars, should not mention local models")
 }
+
+func TestPrintCreationOutput_NetworkIsolated(t *testing.T) {
+	var buf bytes.Buffer
+	mgr := NewManager(&mockRuntime{}, "docker", slog.Default(), strings.NewReader(""), &buf)
+
+	state := &sandboxState{
+		name:         "test",
+		workdir:      &DirArg{Path: "/project", Mode: "copy"},
+		agent:        agent.GetAgent("test"),
+		networkMode:  "isolated",
+		networkAllow: []string{"api.anthropic.com", "sentry.io"},
+	}
+
+	mgr.printCreationOutput(state, false)
+
+	assert.Contains(t, buf.String(), "Network:  isolated (2 allowed domains)")
+}
+
+func TestPrepareSandboxState_NetworkIsolatedSetsAllowlist(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+	t.Setenv("ANTHROPIC_API_KEY", "sk-test")
+
+	// Create a workdir subdirectory to avoid dangerous directory detection
+	workDir := filepath.Join(tmpDir, "project")
+	require.NoError(t, os.MkdirAll(workDir, 0750))
+
+	mgr := NewManager(&mockRuntime{}, "docker", slog.Default(), strings.NewReader("y\n"), io.Discard)
+
+	state, err := mgr.prepareSandboxState(context.TODO(), CreateOptions{
+		Name:            "test",
+		WorkdirArg:      workDir,
+		Agent:           "claude",
+		NetworkIsolated: true,
+		Version:         "test",
+	})
+	require.NoError(t, err)
+	require.NotNil(t, state)
+
+	assert.Equal(t, "isolated", state.networkMode)
+	assert.Contains(t, state.networkAllow, "api.anthropic.com")
+	assert.Contains(t, state.networkAllow, "statsig.anthropic.com")
+	assert.Contains(t, state.networkAllow, "sentry.io")
+}
+
+func TestPrepareSandboxState_NetworkAllowAddsExtraDomains(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+	t.Setenv("ANTHROPIC_API_KEY", "sk-test")
+
+	// Create a workdir subdirectory to avoid dangerous directory detection
+	workDir := filepath.Join(tmpDir, "project")
+	require.NoError(t, os.MkdirAll(workDir, 0750))
+
+	mgr := NewManager(&mockRuntime{}, "docker", slog.Default(), strings.NewReader("y\n"), io.Discard)
+
+	state, err := mgr.prepareSandboxState(context.TODO(), CreateOptions{
+		Name:            "test",
+		WorkdirArg:      workDir,
+		Agent:           "claude",
+		NetworkIsolated: true,
+		NetworkAllow:    []string{"api.example.com"},
+		Version:         "test",
+	})
+	require.NoError(t, err)
+	require.NotNil(t, state)
+
+	assert.Equal(t, "isolated", state.networkMode)
+	assert.Contains(t, state.networkAllow, "api.anthropic.com")
+	assert.Contains(t, state.networkAllow, "api.example.com")
+}

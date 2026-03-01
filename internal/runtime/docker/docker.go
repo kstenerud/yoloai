@@ -127,6 +127,7 @@ func (r *Runtime) Create(ctx context.Context, cfg runtime.InstanceConfig) error 
 		NetworkMode:  container.NetworkMode(cfg.NetworkMode),
 		PortBindings: portBindings,
 		Mounts:       mounts,
+		CapAdd:       cfg.CapAdd,
 	}
 
 	_, err := r.client.ContainerCreate(ctx, containerConfig, hostConfig, &network.NetworkingConfig{}, nil, cfg.Name)

@@ -34,21 +34,22 @@ type SeedFile struct {
 
 // Definition describes an agent's install, launch, and behavioral characteristics.
 type Definition struct {
-	Name            string
-	Description     string
-	InteractiveCmd  string
-	HeadlessCmd     string
-	PromptMode      PromptMode
-	APIKeyEnvVars   []string
-	AuthHintEnvVars []string // env vars indicating auth is configured without a cloud API key (e.g. local model servers)
-	SeedFiles       []SeedFile
-	StateDir        string
-	SubmitSequence  string
-	StartupDelay    time.Duration
-	ReadyPattern    string // grep pattern in tmux output that signals agent is ready for input
-	ModelFlag       string
-	ModelAliases    map[string]string
-	ModelPrefixes   map[string]string // env var → model prefix (e.g. OLLAMA_API_BASE → "ollama_chat/")
+	Name             string
+	Description      string
+	InteractiveCmd   string
+	HeadlessCmd      string
+	PromptMode       PromptMode
+	APIKeyEnvVars    []string
+	AuthHintEnvVars  []string // env vars indicating auth is configured without a cloud API key (e.g. local model servers)
+	SeedFiles        []SeedFile
+	StateDir         string
+	SubmitSequence   string
+	StartupDelay     time.Duration
+	ReadyPattern     string // grep pattern in tmux output that signals agent is ready for input
+	ModelFlag        string
+	ModelAliases     map[string]string
+	ModelPrefixes    map[string]string // env var → model prefix (e.g. OLLAMA_API_BASE → "ollama_chat/")
+	NetworkAllowlist []string          // domains allowed when network-isolated
 }
 
 var agents = map[string]*Definition{
@@ -102,6 +103,7 @@ var agents = map[string]*Definition{
 			"opus":   "claude-opus-4-latest",
 			"haiku":  "claude-haiku-4-latest",
 		},
+		NetworkAllowlist: []string{"api.anthropic.com", "statsig.anthropic.com", "sentry.io"},
 	},
 	"gemini": {
 		Name:           "gemini",
@@ -124,6 +126,7 @@ var agents = map[string]*Definition{
 			"pro":   "gemini-2.5-pro",
 			"flash": "gemini-2.5-flash",
 		},
+		NetworkAllowlist: []string{"generativelanguage.googleapis.com", "cloudcode-pa.googleapis.com"},
 	},
 	"opencode": {
 		Name:           "opencode",
@@ -158,12 +161,13 @@ var agents = map[string]*Definition{
 			{HostPath: "~/.codex/auth.json", TargetPath: "auth.json", AuthOnly: true},
 			{HostPath: "~/.codex/config.toml", TargetPath: "config.toml"},
 		},
-		StateDir:       "/home/yoloai/.codex/",
-		SubmitSequence: "Enter",
-		StartupDelay:   3 * time.Second,
-		ReadyPattern:   "›",
-		ModelFlag:      "--model",
-		ModelAliases:   nil,
+		StateDir:         "/home/yoloai/.codex/",
+		SubmitSequence:   "Enter",
+		StartupDelay:     3 * time.Second,
+		ReadyPattern:     "›",
+		ModelFlag:        "--model",
+		ModelAliases:     nil,
+		NetworkAllowlist: []string{"api.openai.com"},
 	},
 	"test": {
 		Name:           "test",
@@ -216,6 +220,8 @@ func buildShellAgent() *Definition {
 	var seedFiles []SeedFile
 	seen := map[string]bool{}
 	var apiKeys []string
+	seenDomains := map[string]bool{}
+	var networkAllowlist []string
 
 	for _, name := range RealAgents() {
 		ag := agents[name]
@@ -234,22 +240,29 @@ func buildShellAgent() *Definition {
 				apiKeys = append(apiKeys, key)
 			}
 		}
+		for _, domain := range ag.NetworkAllowlist {
+			if !seenDomains[domain] {
+				seenDomains[domain] = true
+				networkAllowlist = append(networkAllowlist, domain)
+			}
+		}
 	}
 
 	return &Definition{
-		Name:           "shell",
-		Description:    "Bash shell with all agents' credentials seeded",
-		InteractiveCmd: `bash -c 'printf "\n  yoloai shell — launch any agent with yolo-<name>\n  Available: yolo-aider  yolo-claude  yolo-codex  yolo-gemini  yolo-opencode\n\n"; exec bash'`,
-		HeadlessCmd:    `sh -c "PROMPT"`,
-		PromptMode:     PromptModeHeadless,
-		APIKeyEnvVars:  apiKeys,
-		SeedFiles:      seedFiles,
-		StateDir:       "",
-		SubmitSequence: "Enter",
-		StartupDelay:   0,
-		ReadyPattern:   "",
-		ModelFlag:      "",
-		ModelAliases:   nil,
+		Name:             "shell",
+		Description:      "Bash shell with all agents' credentials seeded",
+		InteractiveCmd:   `bash -c 'printf "\n  yoloai shell — launch any agent with yolo-<name>\n  Available: yolo-aider  yolo-claude  yolo-codex  yolo-gemini  yolo-opencode\n\n"; exec bash'`,
+		HeadlessCmd:      `sh -c "PROMPT"`,
+		PromptMode:       PromptModeHeadless,
+		APIKeyEnvVars:    apiKeys,
+		SeedFiles:        seedFiles,
+		StateDir:         "",
+		SubmitSequence:   "Enter",
+		StartupDelay:     0,
+		ReadyPattern:     "",
+		ModelFlag:        "",
+		ModelAliases:     nil,
+		NetworkAllowlist: networkAllowlist,
 	}
 }
 

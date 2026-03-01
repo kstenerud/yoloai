@@ -113,8 +113,20 @@ func newNewCmd(version string) *cobra.Command {
 			model := resolveModel(cmd)
 			agentName := resolveAgent(cmd)
 			networkNone, _ := cmd.Flags().GetBool("network-none")
+			networkIsolated, _ := cmd.Flags().GetBool("network-isolated")
+			networkAllow, _ := cmd.Flags().GetStringArray("network-allow")
 			ports, _ := cmd.Flags().GetStringArray("port")
 			dirs, _ := cmd.Flags().GetStringArray("dir")
+
+			// --network-allow implies --network-isolated
+			if len(networkAllow) > 0 {
+				networkIsolated = true
+			}
+
+			// Mutual exclusivity checks
+			if networkNone && networkIsolated {
+				return sandbox.NewUsageError("--network-none and --network-isolated are mutually exclusive")
+			}
 			replace, _ := cmd.Flags().GetBool("replace")
 			noStart, _ := cmd.Flags().GetBool("no-start")
 			attach, _ := cmd.Flags().GetBool("attach")
@@ -126,22 +138,24 @@ func newNewCmd(version string) *cobra.Command {
 			return withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
 				mgr := sandbox.NewManager(rt, backend, slog.Default(), cmd.InOrStdin(), cmd.ErrOrStderr())
 				sandboxName, err := mgr.Create(ctx, sandbox.CreateOptions{
-					Name:        name,
-					WorkdirArg:  workdirArg,
-					AuxDirArgs:  dirs,
-					Agent:       agentName,
-					Model:       model,
-					Prompt:      prompt,
-					PromptFile:  promptFile,
-					NetworkNone: networkNone,
-					Ports:       ports,
-					Replace:     replace,
-					NoStart:     noStart,
-					Attach:      attach,
-					Yes:         yes,
-					Passthrough: passthrough,
-					Version:     version,
-					Debug:       debug,
+					Name:            name,
+					WorkdirArg:      workdirArg,
+					AuxDirArgs:      dirs,
+					Agent:           agentName,
+					Model:           model,
+					Prompt:          prompt,
+					PromptFile:      promptFile,
+					NetworkNone:     networkNone,
+					NetworkIsolated: networkIsolated,
+					NetworkAllow:    networkAllow,
+					Ports:           ports,
+					Replace:         replace,
+					NoStart:         noStart,
+					Attach:          attach,
+					Yes:             yes,
+					Passthrough:     passthrough,
+					Version:         version,
+					Debug:           debug,
 				})
 				if err != nil {
 					return err
@@ -168,6 +182,8 @@ func newNewCmd(version string) *cobra.Command {
 	cmd.Flags().String("agent", "", "Agent to use (default from config or claude)")
 	cmd.Flags().String("backend", "", "Runtime backend (see 'yoloai system backends')")
 	cmd.Flags().Bool("network-none", false, "Disable network access")
+	cmd.Flags().Bool("network-isolated", false, "Allow only agent API traffic (iptables allowlist)")
+	cmd.Flags().StringArray("network-allow", nil, "Extra domain to allow when network-isolated (repeatable, implies --network-isolated)")
 	cmd.Flags().StringArray("port", nil, "Port mapping (host:container)")
 	cmd.Flags().StringArrayP("dir", "d", nil, "Auxiliary directory (repeatable, default read-only)")
 	cmd.Flags().Bool("replace", false, "Replace existing sandbox")

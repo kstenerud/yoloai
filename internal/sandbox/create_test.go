@@ -61,7 +61,7 @@ func TestBuildAgentCommand_InteractiveFallback(t *testing.T) {
 
 func TestBuildContainerConfig_ValidJSON(t *testing.T) {
 	agentDef := agent.GetAgent("claude")
-	data, err := buildContainerConfig(agentDef, "claude --dangerously-skip-permissions", "default+host", "/Users/test/project", false)
+	data, err := buildContainerConfig(agentDef, "claude --dangerously-skip-permissions", "default+host", "/Users/test/project", false, false, nil)
 	require.NoError(t, err)
 
 	var cfg containerConfig
@@ -75,6 +75,8 @@ func TestBuildContainerConfig_ValidJSON(t *testing.T) {
 	assert.Equal(t, os.Getgid(), cfg.HostGID)
 	assert.Equal(t, "default+host", cfg.TmuxConf)
 	assert.Equal(t, ".claude", cfg.StateDirName)
+	assert.False(t, cfg.NetworkIsolated)
+	assert.Empty(t, cfg.AllowedDomains)
 }
 
 func TestBuildContainerConfig_StateDirName(t *testing.T) {
@@ -89,7 +91,7 @@ func TestBuildContainerConfig_StateDirName(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.agent, func(t *testing.T) {
 			agentDef := agent.GetAgent(tt.agent)
-			data, err := buildContainerConfig(agentDef, "cmd", "default", "/tmp", false)
+			data, err := buildContainerConfig(agentDef, "cmd", "default", "/tmp", false, false, nil)
 			require.NoError(t, err)
 			var cfg containerConfig
 			require.NoError(t, json.Unmarshal(data, &cfg))
@@ -276,4 +278,17 @@ func TestCreate_CleansUpOnPrepareFail(t *testing.T) {
 
 	// Sandbox directory should not exist (cleaned up on failure)
 	assert.NoDirExists(t, sandboxDir)
+}
+
+func TestBuildContainerConfig_NetworkIsolated(t *testing.T) {
+	agentDef := agent.GetAgent("claude")
+	domains := []string{"api.anthropic.com", "sentry.io"}
+	data, err := buildContainerConfig(agentDef, "claude", "default", "/tmp", false, true, domains)
+	require.NoError(t, err)
+
+	var cfg containerConfig
+	require.NoError(t, json.Unmarshal(data, &cfg))
+
+	assert.True(t, cfg.NetworkIsolated)
+	assert.Equal(t, domains, cfg.AllowedDomains)
 }

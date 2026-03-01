@@ -16,53 +16,58 @@ import (
 
 // CreateOptions holds all parameters for sandbox creation.
 type CreateOptions struct {
-	Name        string
-	WorkdirArg  string   // raw workdir argument (path with optional :copy/:rw/:force suffixes)
-	Agent       string   // agent name (e.g., "claude", "test")
-	Model       string   // model name or alias (e.g., "sonnet", "claude-sonnet-4-latest")
-	Prompt      string   // prompt text (from --prompt)
-	PromptFile  string   // prompt file path (from --prompt-file)
-	NetworkNone bool     // --network-none flag
-	Ports       []string // --port flags (e.g., ["3000:3000"])
-	Replace     bool     // --replace flag
-	NoStart     bool     // --no-start flag
-	Yes         bool     // --yes flag (skip confirmations)
-	AuxDirArgs  []string // raw -d arguments (path with optional :copy/:rw/:force/=mount suffixes)
-	Passthrough []string // args after -- passed to agent
-	Version     string   // yoloAI version for meta.json
-	Attach      bool     // --attach flag (auto-attach after creation)
-	Debug       bool     // --debug flag (enable entrypoint debug logging)
+	Name            string
+	WorkdirArg      string   // raw workdir argument (path with optional :copy/:rw/:force suffixes)
+	Agent           string   // agent name (e.g., "claude", "test")
+	Model           string   // model name or alias (e.g., "sonnet", "claude-sonnet-4-latest")
+	Prompt          string   // prompt text (from --prompt)
+	PromptFile      string   // prompt file path (from --prompt-file)
+	NetworkNone     bool     // --network-none flag
+	NetworkIsolated bool     // --network-isolated flag
+	NetworkAllow    []string // --network-allow flags
+	Ports           []string // --port flags (e.g., ["3000:3000"])
+	Replace         bool     // --replace flag
+	NoStart         bool     // --no-start flag
+	Yes             bool     // --yes flag (skip confirmations)
+	AuxDirArgs      []string // raw -d arguments (path with optional :copy/:rw/:force/=mount suffixes)
+	Passthrough     []string // args after -- passed to agent
+	Version         string   // yoloAI version for meta.json
+	Attach          bool     // --attach flag (auto-attach after creation)
+	Debug           bool     // --debug flag (enable entrypoint debug logging)
 }
 
 // sandboxState holds resolved state computed during preparation.
 type sandboxState struct {
-	name        string
-	sandboxDir  string
-	workdir     *DirArg
-	workCopyDir string
-	auxDirs     []*DirArg
-	agent       *agent.Definition
-	model       string
-	hasPrompt   bool
-	networkMode string
-	ports       []string
-	tmuxConf    string
-	meta        *Meta
-	configJSON  []byte
+	name         string
+	sandboxDir   string
+	workdir      *DirArg
+	workCopyDir  string
+	auxDirs      []*DirArg
+	agent        *agent.Definition
+	model        string
+	hasPrompt    bool
+	networkMode  string
+	networkAllow []string
+	ports        []string
+	tmuxConf     string
+	meta         *Meta
+	configJSON   []byte
 }
 
 // containerConfig is the serializable form of /yoloai/config.json.
 type containerConfig struct {
-	HostUID        int    `json:"host_uid"`
-	HostGID        int    `json:"host_gid"`
-	AgentCommand   string `json:"agent_command"`
-	StartupDelay   int    `json:"startup_delay"`
-	ReadyPattern   string `json:"ready_pattern"`
-	SubmitSequence string `json:"submit_sequence"`
-	TmuxConf       string `json:"tmux_conf"`
-	WorkingDir     string `json:"working_dir"`
-	StateDirName   string `json:"state_dir_name"`
-	Debug          bool   `json:"debug,omitempty"`
+	HostUID         int      `json:"host_uid"`
+	HostGID         int      `json:"host_gid"`
+	AgentCommand    string   `json:"agent_command"`
+	StartupDelay    int      `json:"startup_delay"`
+	ReadyPattern    string   `json:"ready_pattern"`
+	SubmitSequence  string   `json:"submit_sequence"`
+	TmuxConf        string   `json:"tmux_conf"`
+	WorkingDir      string   `json:"working_dir"`
+	StateDirName    string   `json:"state_dir_name"`
+	Debug           bool     `json:"debug,omitempty"`
+	NetworkIsolated bool     `json:"network_isolated,omitempty"`
+	AllowedDomains  []string `json:"allowed_domains,omitempty"`
 }
 
 // Create creates and optionally starts a new sandbox.
@@ -396,16 +401,21 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 		tmuxConf = "default" // fallback if not set
 	}
 
-	// Build config.json
-	configData, err := buildContainerConfig(agentDef, agentCommand, tmuxConf, workdir.ResolvedMountPath(), opts.Debug)
-	if err != nil {
-		return nil, fmt.Errorf("build config.json: %w", err)
-	}
-
-	// Determine network mode
+	// Determine network mode and allowlist
 	networkMode := ""
+	var networkAllow []string
 	if opts.NetworkNone {
 		networkMode = "none"
+	} else if opts.NetworkIsolated {
+		networkMode = "isolated"
+		networkAllow = append(networkAllow, agentDef.NetworkAllowlist...)
+		networkAllow = append(networkAllow, opts.NetworkAllow...)
+	}
+
+	// Build config.json
+	configData, err := buildContainerConfig(agentDef, agentCommand, tmuxConf, workdir.ResolvedMountPath(), opts.Debug, networkMode == "isolated", networkAllow)
+	if err != nil {
+		return nil, fmt.Errorf("build config.json: %w", err)
 	}
 
 	// Write state files
@@ -422,10 +432,11 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 			Mode:        workdir.Mode,
 			BaselineSHA: baselineSHA,
 		},
-		Directories: dirMetas,
-		HasPrompt:   hasPrompt,
-		NetworkMode: networkMode,
-		Ports:       opts.Ports,
+		Directories:  dirMetas,
+		HasPrompt:    hasPrompt,
+		NetworkMode:  networkMode,
+		NetworkAllow: networkAllow,
+		Ports:        opts.Ports,
 	}
 
 	if err := SaveMeta(sandboxDir, meta); err != nil {
@@ -448,19 +459,20 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 
 	success = true
 	return &sandboxState{
-		name:        opts.Name,
-		sandboxDir:  sandboxDir,
-		workdir:     workdir,
-		workCopyDir: workCopyDir,
-		auxDirs:     auxDirs,
-		agent:       agentDef,
-		model:       model,
-		hasPrompt:   hasPrompt,
-		networkMode: networkMode,
-		ports:       opts.Ports,
-		tmuxConf:    tmuxConf,
-		meta:        meta,
-		configJSON:  configData,
+		name:         opts.Name,
+		sandboxDir:   sandboxDir,
+		workdir:      workdir,
+		workCopyDir:  workCopyDir,
+		auxDirs:      auxDirs,
+		agent:        agentDef,
+		model:        model,
+		hasPrompt:    hasPrompt,
+		networkMode:  networkMode,
+		networkAllow: networkAllow,
+		ports:        opts.Ports,
+		tmuxConf:     tmuxConf,
+		meta:         meta,
+		configJSON:   configData,
 	}, nil
 }
 
@@ -489,14 +501,25 @@ func (m *Manager) launchContainer(ctx context.Context, state *sandboxState) erro
 	}
 
 	cname := InstanceName(state.name)
+
+	// For non-Docker backends, network-isolated falls back to default networking
+	effectiveNetworkMode := state.networkMode
+	if state.networkMode == "isolated" && m.backend != "docker" {
+		fmt.Fprintf(m.output, "WARNING: domain-based network isolation not supported with %s backend; running with full network access\n", m.backend) //nolint:errcheck // best-effort output
+		effectiveNetworkMode = ""
+	}
+
 	instanceCfg := runtime.InstanceConfig{
 		Name:        cname,
 		ImageRef:    "yoloai-base",
 		WorkingDir:  state.workdir.ResolvedMountPath(),
 		Mounts:      mounts,
 		Ports:       ports,
-		NetworkMode: state.networkMode,
+		NetworkMode: effectiveNetworkMode,
 		UseInit:     true,
+	}
+	if state.networkMode == "isolated" && m.backend == "docker" {
+		instanceCfg.CapAdd = []string{"NET_ADMIN"}
 	}
 
 	if err := m.runtime.Create(ctx, instanceCfg); err != nil {
@@ -550,8 +573,11 @@ func (m *Manager) printCreationOutput(state *sandboxState, autoAttach bool) {
 			fmt.Fprintf(m.output, "  Dir:      %s (%s)\n", ad.Path, mode) //nolint:errcheck // best-effort output
 		}
 	}
-	if state.networkMode == "none" {
+	switch state.networkMode {
+	case "none":
 		fmt.Fprintln(m.output, "  Network:  none") //nolint:errcheck // best-effort output
+	case "isolated":
+		fmt.Fprintf(m.output, "  Network:  isolated (%d allowed domains)\n", len(state.networkAllow)) //nolint:errcheck // best-effort output
 	}
 	if len(state.ports) > 0 {
 		fmt.Fprintf(m.output, "  Ports:    %s\n", strings.Join(state.ports, ", ")) //nolint:errcheck // best-effort output
@@ -635,22 +661,24 @@ func shellEscapeForDoubleQuotes(s string) string {
 }
 
 // buildContainerConfig creates the config.json content.
-func buildContainerConfig(agentDef *agent.Definition, agentCommand string, tmuxConf string, workingDir string, debug bool) ([]byte, error) {
+func buildContainerConfig(agentDef *agent.Definition, agentCommand string, tmuxConf string, workingDir string, debug bool, networkIsolated bool, allowedDomains []string) ([]byte, error) {
 	var stateDirName string
 	if agentDef.StateDir != "" {
 		stateDirName = filepath.Base(agentDef.StateDir)
 	}
 	cfg := containerConfig{
-		HostUID:        os.Getuid(),
-		HostGID:        os.Getgid(),
-		AgentCommand:   agentCommand,
-		StartupDelay:   int(agentDef.StartupDelay / time.Millisecond),
-		ReadyPattern:   agentDef.ReadyPattern,
-		SubmitSequence: agentDef.SubmitSequence,
-		TmuxConf:       tmuxConf,
-		WorkingDir:     workingDir,
-		StateDirName:   stateDirName,
-		Debug:          debug,
+		HostUID:         os.Getuid(),
+		HostGID:         os.Getgid(),
+		AgentCommand:    agentCommand,
+		StartupDelay:    int(agentDef.StartupDelay / time.Millisecond),
+		ReadyPattern:    agentDef.ReadyPattern,
+		SubmitSequence:  agentDef.SubmitSequence,
+		TmuxConf:        tmuxConf,
+		WorkingDir:      workingDir,
+		StateDirName:    stateDirName,
+		Debug:           debug,
+		NetworkIsolated: networkIsolated,
+		AllowedDomains:  allowedDomains,
 	}
 	return json.MarshalIndent(cfg, "", "  ")
 }

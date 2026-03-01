@@ -33,6 +33,7 @@ func TestGetAgent_Aider(t *testing.T) {
 	assert.Equal(t, "haiku", def.ModelAliases["haiku"])
 	assert.Equal(t, "deepseek", def.ModelAliases["deepseek"])
 	assert.Equal(t, "flash", def.ModelAliases["flash"])
+	assert.Nil(t, def.NetworkAllowlist)
 }
 
 func TestGetAgent_Claude(t *testing.T) {
@@ -63,6 +64,7 @@ func TestGetAgent_Claude(t *testing.T) {
 	assert.Equal(t, "claude-sonnet-4-latest", def.ModelAliases["sonnet"])
 	assert.Equal(t, "claude-opus-4-latest", def.ModelAliases["opus"])
 	assert.Equal(t, "claude-haiku-4-latest", def.ModelAliases["haiku"])
+	assert.Equal(t, []string{"api.anthropic.com", "statsig.anthropic.com", "sentry.io"}, def.NetworkAllowlist)
 }
 
 func TestGetAgent_Gemini(t *testing.T) {
@@ -92,6 +94,7 @@ func TestGetAgent_Gemini(t *testing.T) {
 	assert.Equal(t, "--model", def.ModelFlag)
 	assert.Equal(t, "gemini-2.5-pro", def.ModelAliases["pro"])
 	assert.Equal(t, "gemini-2.5-flash", def.ModelAliases["flash"])
+	assert.Equal(t, []string{"generativelanguage.googleapis.com", "cloudcode-pa.googleapis.com"}, def.NetworkAllowlist)
 }
 
 func TestGetAgent_OpenCode(t *testing.T) {
@@ -145,6 +148,7 @@ func TestGetAgent_Codex(t *testing.T) {
 	assert.Equal(t, "›", def.ReadyPattern)
 	assert.Equal(t, "--model", def.ModelFlag)
 	assert.Nil(t, def.ModelAliases)
+	assert.Equal(t, []string{"api.openai.com"}, def.NetworkAllowlist)
 }
 
 func TestAllAgentNames(t *testing.T) {
@@ -169,6 +173,7 @@ func TestGetAgent_Test(t *testing.T) {
 	assert.Equal(t, time.Duration(0), def.StartupDelay)
 	assert.Equal(t, "", def.ModelFlag)
 	assert.Nil(t, def.ModelAliases)
+	assert.Nil(t, def.NetworkAllowlist)
 }
 
 func TestRealAgents(t *testing.T) {
@@ -231,6 +236,11 @@ func TestGetAgent_Shell(t *testing.T) {
 	for _, sf := range def.SeedFiles {
 		assert.NotNil(t, sf.OwnerAPIKeys, "shell agent seed file %s should have OwnerAPIKeys set", sf.TargetPath)
 	}
+
+	// Should have network allowlist from all real agents
+	assert.Contains(t, def.NetworkAllowlist, "api.anthropic.com")
+	assert.Contains(t, def.NetworkAllowlist, "generativelanguage.googleapis.com")
+	assert.Contains(t, def.NetworkAllowlist, "api.openai.com")
 }
 
 func TestGetAgent_Unknown(t *testing.T) {

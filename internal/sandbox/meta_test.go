@@ -96,3 +96,30 @@ func TestMeta_WithPortsAndNetwork(t *testing.T) {
 	assert.Equal(t, "none", loaded.NetworkMode)
 	assert.Equal(t, []string{"3000:3000", "8080:8080"}, loaded.Ports)
 }
+
+func TestMeta_NetworkAllowRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+
+	original := &Meta{
+		YoloaiVersion: "1.0.0",
+		Name:          "iso-test",
+		CreatedAt:     time.Date(2025, 6, 1, 12, 0, 0, 0, time.UTC),
+		Agent:         "claude",
+		Workdir: WorkdirMeta{
+			HostPath:  "/tmp/project",
+			MountPath: "/tmp/project",
+			Mode:      "copy",
+		},
+		NetworkMode:  "isolated",
+		NetworkAllow: []string{"api.anthropic.com", "sentry.io"},
+	}
+
+	err := SaveMeta(dir, original)
+	require.NoError(t, err)
+
+	loaded, err := LoadMeta(dir)
+	require.NoError(t, err)
+
+	assert.Equal(t, "isolated", loaded.NetworkMode)
+	assert.Equal(t, []string{"api.anthropic.com", "sentry.io"}, loaded.NetworkAllow)
+}

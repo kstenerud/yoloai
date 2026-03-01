@@ -47,7 +47,8 @@ type InstanceConfig struct {
 	WorkingDir  string
 	Mounts      []MountSpec
 	Ports       []PortMapping
-	NetworkMode string // "" = default, "none" = isolated
+	NetworkMode string // "" = default, "none" = no network, "isolated" = allowlist only
+	CapAdd      []string
 	UseInit     bool
 }
 

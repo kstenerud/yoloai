@@ -22,6 +22,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     openssh-client \
     pkg-config \
     libssl-dev \
+    iptables \
+    ipset \
+    dnsutils \
     && rm -rf /var/lib/apt/lists/*
 
 # Node.js 22 LTS via NodeSource
