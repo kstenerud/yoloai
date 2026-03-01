@@ -36,6 +36,10 @@ if [ -d /run/secrets ]; then
     done
 fi
 
+# Suppress browser-open attempts inside the sandbox (agents may try to open
+# documentation URLs). Only set if not already provided via secrets/env.
+export BROWSER="${BROWSER:-true}"
+
 # --- Drop privileges and run as yoloai ---
 exec gosu yoloai bash -c '
 set -euo pipefail

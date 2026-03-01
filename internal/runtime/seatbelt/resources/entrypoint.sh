@@ -43,6 +43,10 @@ if [ -d "$SECRETS_DIR" ]; then
     done
 fi
 
+# Suppress browser-open attempts inside the sandbox (agents may try to open
+# documentation URLs). Only set if not already provided via secrets/env.
+export BROWSER="${BROWSER:-true}"
+
 # --- Read agent config ---
 AGENT_COMMAND=$(jq -r '.agent_command' "$CONFIG")
 STARTUP_DELAY=$(jq -r '.startup_delay' "$CONFIG")
