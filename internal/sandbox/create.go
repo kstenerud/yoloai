@@ -1015,16 +1015,6 @@ func buildMounts(state *sandboxState, secretsDir string) []runtime.MountSpec {
 		ReadOnly: true,
 	})
 
-	// Context file (sandbox environment description for AI agents)
-	contextPath := filepath.Join(state.sandboxDir, "context.md")
-	if _, err := os.Stat(contextPath); err == nil {
-		mounts = append(mounts, runtime.MountSpec{
-			Source:   contextPath,
-			Target:   "/yoloai/context.md",
-			ReadOnly: true,
-		})
-	}
-
 	// Home-seed files and directories (mounted into /home/yoloai/)
 	mountedDirs := map[string]bool{}
 	for _, sf := range state.agent.SeedFiles {

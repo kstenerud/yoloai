@@ -154,13 +154,13 @@ func TestWriteContextFiles_WritesContextAndRef(t *testing.T) {
 		t.Error("context.md missing header")
 	}
 
-	// Check agent ref file exists
+	// Check agent instruction file contains full context (inlined, not a pointer)
 	refData, err := os.ReadFile(filepath.Join(sandboxDir, "agent-state", "CLAUDE.md")) //nolint:gosec // G304: test helper path
 	if err != nil {
-		t.Fatalf("read agent ref file: %v", err)
+		t.Fatalf("read agent instruction file: %v", err)
 	}
-	if !strings.Contains(string(refData), "/yoloai/context.md") {
-		t.Error("agent ref file missing context.md reference")
+	if !strings.Contains(string(refData), "# Sandbox Environment") {
+		t.Error("agent instruction file missing inlined context")
 	}
 }
 

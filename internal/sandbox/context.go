@@ -84,22 +84,21 @@ func writeDir(b *strings.Builder, mountPath, hostPath, mode string, isWorkdir bo
 }
 
 // WriteContextFiles writes the sandbox context file and optional per-agent
-// reference file into the sandbox directory.
+// instruction file into the sandbox directory.
 func WriteContextFiles(sandboxDir string, meta *Meta, agentDef *agent.Definition) error {
 	content := GenerateContext(meta)
 
-	// Write context.md at sandbox root
+	// Write context.md at sandbox root (reference copy)
 	contextPath := filepath.Join(sandboxDir, "context.md")
 	if err := os.WriteFile(contextPath, []byte(content), 0600); err != nil {
 		return fmt.Errorf("write context.md: %w", err)
 	}
 
-	// Write per-agent reference file into agent-state if configured
+	// Write full context inline into the agent's native instruction file
 	if agentDef.ContextFile != "" && agentDef.StateDir != "" {
 		refPath := filepath.Join(sandboxDir, "agent-state", agentDef.ContextFile)
-		refContent := "Read /yoloai/context.md for information about your sandbox environment.\n"
-		if err := os.WriteFile(refPath, []byte(refContent), 0600); err != nil {
-			return fmt.Errorf("write agent context ref %s: %w", agentDef.ContextFile, err)
+		if err := os.WriteFile(refPath, []byte(content), 0600); err != nil {
+			return fmt.Errorf("write agent context file %s: %w", agentDef.ContextFile, err)
 		}
 	}
 
