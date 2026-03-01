@@ -27,7 +27,7 @@ Lifecycle:
   yoloai stop <name>...                          Stop sandboxes (preserving state)
   yoloai destroy <name>...                       Stop and remove sandboxes
   yoloai reset <name>                            Re-copy workdir and reset git baseline
-  yoloai restart <name>                          Restart the agent in an existing sandbox  [PLANNED]
+  yoloai restart [-a] <name>                     Restart the agent in an existing sandbox
 
 Inspection:
   yoloai system                                  System information and management
@@ -527,9 +527,11 @@ This eliminates the need to diagnose *why* a sandbox isn't running before choosi
 
 **[PLANNED] `--resume` flag:** When used, the agent is relaunched in **interactive mode** (regardless of the original prompt delivery mode) with the original prompt from `prompt.txt` prefixed with a preamble: "You were previously working on the following task and were interrupted. The work directory contains your progress so far. Continue where you left off:" followed by the original prompt text. Interactive mode is always used for resume because the user may want to follow up or redirect. Error if the sandbox has no `prompt.txt` (was created without `--prompt`). Without `--resume`, `yoloai start` relaunches the agent in interactive mode with no prompt (user attaches and gives instructions manually).
 
-### [PLANNED] `yoloai restart`
+### `yoloai restart`
 
-`yoloai restart <name>` is equivalent to `yoloai stop <name>` followed by `yoloai start <name>`. Use cases: recovering from a corrupted container environment, applying config changes that require a fresh container (e.g., new mounts or resource limits), or restarting a wedged agent process.
+`yoloai restart [-a|--attach] <name>` is equivalent to `yoloai stop <name>` followed by `yoloai start <name>`. Use cases: recovering from a corrupted container environment, applying config changes that require a fresh container (e.g., new mounts or resource limits), or restarting a wedged agent process.
+
+**`-a`/`--attach` flag:** After the sandbox is restarted, automatically attach to the tmux session.
 
 ### `yoloai reset`
 

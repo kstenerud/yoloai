@@ -193,6 +193,10 @@ yoloai apply task --yes
 yoloai stop --all
 yoloai destroy --all --yes
 
+# Restart agent (stop + start, preserving workspace)
+yoloai restart task
+yoloai restart task -a          # restart and auto-attach
+
 # Reset workdir (re-copy from original, restart agent)
 yoloai reset task
 yoloai reset task --clean       # also wipe agent memory

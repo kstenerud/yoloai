@@ -38,6 +38,7 @@ func registerCommands(root *cobra.Command, version, commit, date string) {
 		// Lifecycle
 		newStartCmd(),
 		newStopCmd(),
+		newRestartCmd(),
 		newDestroyCmd(),
 		newResetCmd(),
 

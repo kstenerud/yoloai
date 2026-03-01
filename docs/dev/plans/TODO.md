@@ -20,7 +20,7 @@ Create a plan file in this directory before starting implementation.
 
 | Feature | Design Reference | Plan | Notes |
 |---------|-----------------|------|-------|
-| `restart` | [commands.md](../../design/commands.md) | — | `stop` + `start` equivalent |
+| ~~`restart`~~ | [commands.md](../../design/commands.md) | — | Implemented |
 | `--resume` on `start` | [commands.md](../../design/commands.md) | — | Re-feed original prompt with continuation preamble |
 | `--power-user` on `setup` | [setup.md](../../design/setup.md) | — | Non-interactive setup for automation |
 | `profile create` | [config.md](../../design/config.md) | — | Scaffold Dockerfile + profile.yaml |
