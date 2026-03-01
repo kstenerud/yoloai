@@ -506,13 +506,21 @@ func (m *Manager) launchContainer(ctx context.Context, state *sandboxState) erro
 		return fmt.Errorf("--network-isolated requires the docker backend (%s does not support domain-based filtering)", m.backend)
 	}
 
+	// Map internal network modes to Docker-understood values.
+	// "isolated" uses default bridge networking; iptables rules inside the
+	// container handle the actual domain-based filtering.
+	dockerNetworkMode := state.networkMode
+	if dockerNetworkMode == "isolated" {
+		dockerNetworkMode = ""
+	}
+
 	instanceCfg := runtime.InstanceConfig{
 		Name:        cname,
 		ImageRef:    "yoloai-base",
 		WorkingDir:  state.workdir.ResolvedMountPath(),
 		Mounts:      mounts,
 		Ports:       ports,
-		NetworkMode: state.networkMode,
+		NetworkMode: dockerNetworkMode,
 		UseInit:     true,
 	}
 	if state.networkMode == "isolated" && m.backend == "docker" {
