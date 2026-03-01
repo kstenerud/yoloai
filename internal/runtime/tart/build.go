@@ -123,7 +123,7 @@ func (r *Runtime) ImageExists(ctx context.Context, imageRef string) (bool, error
 }
 
 // resolveBaseImage returns the base image to use, checking for a config
-// override in defaults.tart.image.
+// override in tart.image.
 func (r *Runtime) resolveBaseImage(_ string) string {
 	if r.baseImageOverride != "" {
 		return r.baseImageOverride

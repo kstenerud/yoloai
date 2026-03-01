@@ -71,15 +71,17 @@ func TestClassifyTmuxConfig_Large(t *testing.T) {
 }
 
 // setupTestManager creates a Manager with the given input and a temp HOME
-// with a default config.yaml. Returns the Manager, output buffer, and HOME dir.
+// with profiles/base/config.yaml and state.yaml. Returns the Manager, output buffer, and HOME dir.
 func setupTestManager(t *testing.T, input string) (*Manager, *bytes.Buffer, string) {
 	t.Helper()
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
 
 	yoloaiDir := filepath.Join(tmpDir, ".yoloai")
-	require.NoError(t, os.MkdirAll(yoloaiDir, 0750))
-	require.NoError(t, os.WriteFile(filepath.Join(yoloaiDir, "config.yaml"), []byte(defaultConfigYAML), 0600))
+	baseDir := filepath.Join(yoloaiDir, "profiles", "base")
+	require.NoError(t, os.MkdirAll(baseDir, 0750))
+	require.NoError(t, os.WriteFile(filepath.Join(baseDir, "config.yaml"), []byte(defaultConfigYAML), 0600))
+	require.NoError(t, SaveState(&State{}))
 
 	var output bytes.Buffer
 	mock := &mockRuntime{}
@@ -141,9 +143,12 @@ func TestRunNewUserSetup_LargeConfig_AutoConfigures(t *testing.T) {
 	err := mgr.runNewUserSetup(context.Background())
 	require.NoError(t, err)
 
+	state, err := LoadState()
+	require.NoError(t, err)
+	assert.True(t, state.SetupComplete)
+
 	cfg, err := LoadConfig()
 	require.NoError(t, err)
-	assert.True(t, cfg.SetupComplete)
 	assert.Equal(t, "default+host", cfg.TmuxConf)
 }
 
@@ -155,9 +160,12 @@ func TestRunNewUserSetup_NoConfig_AnswerY(t *testing.T) {
 	err := mgr.runNewUserSetup(context.Background())
 	require.NoError(t, err)
 
+	state, err := LoadState()
+	require.NoError(t, err)
+	assert.True(t, state.SetupComplete)
+
 	cfg, err := LoadConfig()
 	require.NoError(t, err)
-	assert.True(t, cfg.SetupComplete)
 	assert.Equal(t, "default", cfg.TmuxConf)
 	assert.Contains(t, output.String(), "Setup complete")
 }
@@ -170,9 +178,12 @@ func TestRunNewUserSetup_NoConfig_AnswerEmpty(t *testing.T) {
 	err := mgr.runNewUserSetup(context.Background())
 	require.NoError(t, err)
 
+	state, err := LoadState()
+	require.NoError(t, err)
+	assert.True(t, state.SetupComplete)
+
 	cfg, err := LoadConfig()
 	require.NoError(t, err)
-	assert.True(t, cfg.SetupComplete)
 	assert.Equal(t, "default", cfg.TmuxConf)
 }
 
@@ -184,9 +195,12 @@ func TestRunNewUserSetup_NoConfig_AnswerN(t *testing.T) {
 	err := mgr.runNewUserSetup(context.Background())
 	require.NoError(t, err)
 
+	state, err := LoadState()
+	require.NoError(t, err)
+	assert.True(t, state.SetupComplete)
+
 	cfg, err := LoadConfig()
 	require.NoError(t, err)
-	assert.True(t, cfg.SetupComplete)
 	assert.Equal(t, "none", cfg.TmuxConf)
 }
 
@@ -198,9 +212,9 @@ func TestRunNewUserSetup_NoConfig_AnswerP(t *testing.T) {
 	assert.ErrorIs(t, err, errSetupPreview)
 
 	// setup_complete should NOT be set (preview exits early)
-	cfg, err := LoadConfig()
+	state, err := LoadState()
 	require.NoError(t, err)
-	assert.False(t, cfg.SetupComplete)
+	assert.False(t, state.SetupComplete)
 
 	assert.Contains(t, output.String(), "yoloai defaults")
 }
@@ -216,9 +230,12 @@ func TestRunNewUserSetup_SmallConfig_AnswerY(t *testing.T) {
 	err := mgr.runNewUserSetup(context.Background())
 	require.NoError(t, err)
 
+	state, err := LoadState()
+	require.NoError(t, err)
+	assert.True(t, state.SetupComplete)
+
 	cfg, err := LoadConfig()
 	require.NoError(t, err)
-	assert.True(t, cfg.SetupComplete)
 	assert.Equal(t, "default+host", cfg.TmuxConf)
 }
 
@@ -233,9 +250,12 @@ func TestRunNewUserSetup_SmallConfig_AnswerN(t *testing.T) {
 	err := mgr.runNewUserSetup(context.Background())
 	require.NoError(t, err)
 
+	state, err := LoadState()
+	require.NoError(t, err)
+	assert.True(t, state.SetupComplete)
+
 	cfg, err := LoadConfig()
 	require.NoError(t, err)
-	assert.True(t, cfg.SetupComplete)
 	assert.Equal(t, "host", cfg.TmuxConf)
 }
 
@@ -261,9 +281,12 @@ func TestRunNewUserSetup_EOF_DefaultsToY(t *testing.T) {
 	err := mgr.runNewUserSetup(context.Background())
 	require.NoError(t, err)
 
+	state, err := LoadState()
+	require.NoError(t, err)
+	assert.True(t, state.SetupComplete)
+
 	cfg, err := LoadConfig()
 	require.NoError(t, err)
-	assert.True(t, cfg.SetupComplete)
 	assert.Equal(t, "default", cfg.TmuxConf)
 }
 
@@ -401,9 +424,12 @@ func TestRunNewUserSetup_FullFlow_MacOS(t *testing.T) {
 	err := mgr.runNewUserSetup(context.Background())
 	require.NoError(t, err)
 
+	state, err := LoadState()
+	require.NoError(t, err)
+	assert.True(t, state.SetupComplete)
+
 	cfg, err := LoadConfig()
 	require.NoError(t, err)
-	assert.True(t, cfg.SetupComplete)
 	assert.Equal(t, "default", cfg.TmuxConf)
 	assert.Equal(t, "seatbelt", cfg.Backend)
 	assert.Equal(t, "codex", cfg.Agent)
@@ -418,9 +444,12 @@ func TestRunNewUserSetup_FullFlow_Linux_SkipsBackend(t *testing.T) {
 	err := mgr.runNewUserSetup(context.Background())
 	require.NoError(t, err)
 
+	state, err := LoadState()
+	require.NoError(t, err)
+	assert.True(t, state.SetupComplete)
+
 	cfg, err := LoadConfig()
 	require.NoError(t, err)
-	assert.True(t, cfg.SetupComplete)
 	assert.Equal(t, "default", cfg.TmuxConf)
 	assert.Equal(t, "aider", cfg.Agent)
 	assert.NotContains(t, output.String(), "Default runtime backend")
@@ -438,9 +467,12 @@ func TestRunNewUserSetup_LargeConfig_StillAsksBackendAndAgent(t *testing.T) {
 	err := mgr.runNewUserSetup(context.Background())
 	require.NoError(t, err)
 
+	state, err := LoadState()
+	require.NoError(t, err)
+	assert.True(t, state.SetupComplete)
+
 	cfg, err := LoadConfig()
 	require.NoError(t, err)
-	assert.True(t, cfg.SetupComplete)
 	assert.Equal(t, "default+host", cfg.TmuxConf)
 	assert.Equal(t, "tart", cfg.Backend)
 	assert.Equal(t, "codex", cfg.Agent)
@@ -448,6 +480,6 @@ func TestRunNewUserSetup_LargeConfig_StillAsksBackendAndAgent(t *testing.T) {
 	assert.Contains(t, output.String(), "Default agent")
 }
 
-// mockRuntime is defined in manager_test.go — we can use it here since
+// mockRuntime is defined above — we can use it here since
 // both are in the sandbox package. This test just needs a valid Manager.
 var _ io.Reader = strings.NewReader("") // compile check

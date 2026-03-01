@@ -73,8 +73,8 @@ Dependency direction: `cmd/yoloai` → `cli` → `sandbox` + `runtime`; `sandbox
 |------|---------|
 | `docker.go` | `DockerRuntime` struct — implements `Runtime` interface, wraps Docker SDK. `NewDockerRuntime()` with daemon ping. |
 | `build.go` | `EnsureImage()` — builds `yoloai-base` image. `NeedsBuild()` / `RecordBuildChecksum()` for rebuild detection. Tar context creation, build output streaming. Moved from old `internal/docker/build.go`. |
-| `resources.go` | `//go:embed` for Dockerfile.base, entrypoint.sh, tmux.conf. `SeedResources()` writes them to `~/.yoloai/` respecting user customizations. Moved from old `internal/docker/resources.go`. |
-| `resources/Dockerfile.base` | Container Dockerfile (embedded at compile time). |
+| `resources.go` | `//go:embed` for Dockerfile, entrypoint.sh, tmux.conf. `SeedResources()` writes them to `~/.yoloai/profiles/base/` respecting user customizations. Moved from old `internal/docker/resources.go`. |
+| `resources/Dockerfile` | Container Dockerfile (embedded at compile time). |
 | `resources/entrypoint.sh` | Container entrypoint script (embedded at compile time). |
 | `resources/tmux.conf` | Default tmux config (embedded at compile time). |
 | `build_test.go` | Unit tests for build/seed logic. |
@@ -118,7 +118,9 @@ Dependency direction: `cmd/yoloai` → `cli` → `sandbox` + `runtime`; `sandbox
 | `paths.go` | `EncodePath()` / `DecodePath()` — caret encoding for filesystem-safe names. `InstanceName()` (and deprecated alias `ContainerName()`), `Dir()`, `WorkDir()`, `RequireSandboxDir()`. |
 | `parse.go` | `ParseDirArg()` — parses `path:copy`, `path:rw`, `path:force` suffixes into `DirArg`. |
 | `safety.go` | `IsDangerousDir()`, `CheckPathOverlap()`, `CheckDirtyRepo()` — pre-creation safety checks. |
-| `config.go` | `LoadConfig()`, `UpdateConfigFields()`, `DeleteConfigField()`, `ConfigPath()`, `ReadConfigRaw()`, `GetConfigValue()`, `GetEffectiveConfig()` — read/write `~/.yoloai/config.yaml` preserving YAML comments via `yaml.Node`. Dotted-path get/set/delete with default fallback for CLI `config get/set/reset` commands. |
+| `config.go` | `LoadConfig()`, `UpdateConfigFields()`, `DeleteConfigField()`, `ConfigPath()`, `ReadConfigRaw()`, `GetConfigValue()`, `GetEffectiveConfig()` — read/write `~/.yoloai/profiles/base/config.yaml` preserving YAML comments via `yaml.Node`. Dotted-path get/set/delete with default fallback for CLI `config get/set/reset` commands. |
+| `state.go` | `LoadState()`, `SaveState()` — read/write `~/.yoloai/state.yaml` containing global state like `setup_complete`. |
+| `migration.go` | `MigrateConfigIfNeeded()` — handles migration from old config structure (`~/.yoloai/config.yaml` with `defaults:` nesting) to new structure (`~/.yoloai/profiles/base/config.yaml` with flat keys). |
 | `setup.go` | `RunSetup()`, `runNewUserSetup()` — interactive tmux configuration setup. Classifies user's tmux config, prompts for preferences. |
 | `confirm.go` | `Confirm()` — simple y/N interactive prompt. |
 | `errors.go` | `UsageError` (exit 2), `ConfigError` (exit 3), sentinel errors (`ErrSandboxNotFound`, `ErrSandboxExists`, etc.). |
@@ -256,12 +258,15 @@ Manager.Start (sandbox/lifecycle.go)
 
 ```
 ~/.yoloai/
-├── config.yaml              # Global config (setup_complete, defaults)
-├── Dockerfile.base          # Seeded from embedded, user-customizable
-├── entrypoint.sh            # Seeded from embedded, user-customizable
-├── tmux.conf                # Seeded from embedded, user-customizable
-├── .resource-checksums      # Tracks seeded file checksums
-├── .last-build-checksum     # Tracks last image build inputs
+├── state.yaml               # Global state (setup_complete)
+├── profiles/
+│   └── base/
+│       ├── config.yaml      # Global config (flat keys, no defaults: nesting)
+│       ├── Dockerfile       # Seeded from embedded, user-customizable
+│       ├── entrypoint.sh    # Seeded from embedded, user-customizable
+│       ├── tmux.conf        # Seeded from embedded, user-customizable
+│       ├── .checksums       # Tracks seeded file checksums
+│       └── .last-build-checksum  # Tracks last image build inputs
 ├── sandboxes/
 │   └── <name>/
 │       ├── meta.json        # Sandbox metadata (agent, workdir, baseline SHA)
@@ -272,7 +277,6 @@ Manager.Start (sandbox/lifecycle.go)
 │       ├── home-seed/       # Files mounted individually into /home/yoloai/
 │       └── work/
 │           └── <caret-encoded-path>/  # Copy of workdir with internal git repo
-├── profiles/                # (future) Profile directories
 └── cache/                   # (future) Cache directory
 ```
 
@@ -294,7 +298,7 @@ Manager.Start (sandbox/lifecycle.go)
 **Change container setup (Dockerfile, entrypoint):**
 1. Edit files in `internal/runtime/docker/resources/`
 2. They're embedded at compile time via `//go:embed` in `internal/runtime/docker/resources.go`
-3. `SeedResources()` in `internal/runtime/docker/build.go` handles deploying them to `~/.yoloai/`
+3. `SeedResources()` in `internal/runtime/docker/build.go` handles deploying them to `~/.yoloai/profiles/base/`
 
 **Change how sandbox state is persisted:**
 1. Modify `Meta` / `DirectoryMeta` in `internal/sandbox/meta.go`
@@ -320,6 +324,8 @@ Manager.Start (sandbox/lifecycle.go)
 1. `LoadConfig()` / `UpdateConfigFields()` / `DeleteConfigField()` in `internal/sandbox/config.go`
 2. Add new fields to `YoloaiConfig` struct and the YAML node walker
 3. CLI `config get/set/reset` commands in `internal/cli/config.go`
+4. Config is now located at `~/.yoloai/profiles/base/config.yaml` with flat keys (no `defaults:` nesting)
+5. Global state like `setup_complete` is stored in `~/.yoloai/state.yaml` via `LoadState()`/`SaveState()` in `internal/sandbox/state.go`
 
 **Add a new runtime backend:**
 1. Create `internal/runtime/<name>/` package

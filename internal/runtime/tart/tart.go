@@ -40,7 +40,7 @@ const (
 type Runtime struct {
 	tartBin           string // path to tart binary
 	sandboxDir        string // ~/.yoloai/sandboxes/ base path
-	baseImageOverride string // custom base image from config (defaults.tart.image)
+	baseImageOverride string // custom base image from config (tart.image)
 }
 
 // Compile-time check.

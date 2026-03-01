@@ -43,8 +43,8 @@ Development docs live in `docs/dev/`:
 - CLI separates workdir (primary project dir, positional) from aux dirs (`-d` flag). Directories mounted at mirrored host paths by default. Custom paths via `=<path>` override.
 - `:copy` directories use overlayfs by default (instant setup, deltas-only) with full-copy fallback. Both use git for diff/apply.
 - `:rw` directories are live bind-mounts. Default (no suffix) is read-only.
-- Profile system: each profile is a directory in `~/.yoloai/profiles/<name>/` containing a `Dockerfile` and `profile.yaml` (runtime config).
-- Config in `~/.yoloai/config.yaml` with global defaults only. Profile-specific config lives in `profile.yaml` files.
+- Profile system: each profile is a directory in `~/.yoloai/profiles/<name>/` containing a `Dockerfile` and `config.yaml`. The base profile at `~/.yoloai/profiles/base/` is auto-created if missing and serves as the default. "base" is a reserved profile name.
+- Config in `~/.yoloai/profiles/base/config.yaml` with flat schema (e.g., `backend`, `agent`, `tart.image`). Operational state (`setup_complete`) lives in `~/.yoloai/state.yaml`, separate from user preferences.
 
 ## Code Quality Gate
 

@@ -166,7 +166,7 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 	// When auth is only via local model server, a model must be specified
 	// so the agent knows which model to use.
 	if !hasAPIKey && !hasAuth && hasAuthHint && opts.Model == "" && ycfg.Model == "" {
-		return nil, NewUsageError("a model is required when using a local model server: use --model or 'yoloai config set defaults.model <model>'")
+		return nil, NewUsageError("a model is required when using a local model server: use --model or 'yoloai config set model <model>'")
 	}
 
 	// Warn if a local model server URL points to localhost but the backend

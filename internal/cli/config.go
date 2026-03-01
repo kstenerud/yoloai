@@ -30,10 +30,10 @@ func newConfigGetCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "get [key]",
 		Short: "Print configuration value(s)",
-		Long: `Print configuration values from ~/.yoloai/config.yaml.
+		Long: `Print configuration values from ~/.yoloai/profiles/base/config.yaml.
 
 Without arguments, prints all settings with effective values (defaults + overrides).
-With a dotted key (e.g., defaults.backend), prints just that value.`,
+With a dotted key (e.g., backend), prints just that value.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 0 {
@@ -62,9 +62,9 @@ func newConfigSetCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "set <key> <value>",
 		Short: "Set a configuration value",
-		Long: `Set a configuration value in ~/.yoloai/config.yaml.
+		Long: `Set a configuration value in ~/.yoloai/profiles/base/config.yaml.
 
-Uses dotted paths for nested keys (e.g., defaults.backend).
+Uses dotted paths for nested keys (e.g., tart.image).
 Creates the config file if it doesn't exist.
 Preserves comments and formatting.`,
 		Args: cobra.ExactArgs(2),
@@ -96,10 +96,10 @@ func newConfigResetCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "reset <key>",
 		Short: "Reset a configuration value to its default",
-		Long: `Remove a key from ~/.yoloai/config.yaml, reverting it to the internal default.
+		Long: `Remove a key from ~/.yoloai/profiles/base/config.yaml, reverting it to the internal default.
 
-Works at any level: a single value (defaults.backend), a map entry
-(defaults.env.OLLAMA_API_BASE), or an entire section (defaults.tart).`,
+Works at any level: a single value (backend), a map entry
+(env.OLLAMA_API_BASE), or an entire section (tart).`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			return sandbox.DeleteConfigField(args[0])

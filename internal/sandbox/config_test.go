@@ -9,48 +9,42 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestLoadConfig_Default(t *testing.T) {
+// configDir creates the profiles/base/ directory structure needed for config tests.
+func configDir(t *testing.T) string {
+	t.Helper()
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
+	dir := filepath.Join(tmpDir, ".yoloai", "profiles", "base")
+	require.NoError(t, os.MkdirAll(dir, 0750))
+	return dir
+}
 
-	yoloaiDir := filepath.Join(tmpDir, ".yoloai")
-	require.NoError(t, os.MkdirAll(yoloaiDir, 0750))
-	require.NoError(t, os.WriteFile(filepath.Join(yoloaiDir, "config.yaml"), []byte(defaultConfigYAML), 0600))
+func TestLoadConfig_Default(t *testing.T) {
+	dir := configDir(t)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(defaultConfigYAML), 0600))
 
 	cfg, err := LoadConfig()
 	require.NoError(t, err)
-	assert.False(t, cfg.SetupComplete)
 	assert.Empty(t, cfg.TmuxConf)
 }
 
 func TestLoadConfig_WithTmuxConf(t *testing.T) {
-	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
+	dir := configDir(t)
 
-	yoloaiDir := filepath.Join(tmpDir, ".yoloai")
-	require.NoError(t, os.MkdirAll(yoloaiDir, 0750))
-
-	content := `setup_complete: true
-defaults:
-  tmux_conf: default+host
-  agent: claude
+	content := `tmux_conf: default+host
+agent: claude
 `
-	require.NoError(t, os.WriteFile(filepath.Join(yoloaiDir, "config.yaml"), []byte(content), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
 
 	cfg, err := LoadConfig()
 	require.NoError(t, err)
-	assert.True(t, cfg.SetupComplete)
 	assert.Equal(t, "default+host", cfg.TmuxConf)
 	assert.Equal(t, "claude", cfg.Agent)
 }
 
 func TestLoadConfig_AgentDefault(t *testing.T) {
-	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
-
-	yoloaiDir := filepath.Join(tmpDir, ".yoloai")
-	require.NoError(t, os.MkdirAll(yoloaiDir, 0750))
-	require.NoError(t, os.WriteFile(filepath.Join(yoloaiDir, "config.yaml"), []byte(defaultConfigYAML), 0600))
+	dir := configDir(t)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(defaultConfigYAML), 0600))
 
 	cfg, err := LoadConfig()
 	require.NoError(t, err)
@@ -58,14 +52,10 @@ func TestLoadConfig_AgentDefault(t *testing.T) {
 }
 
 func TestLoadConfig_AgentOverride(t *testing.T) {
-	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
+	dir := configDir(t)
 
-	yoloaiDir := filepath.Join(tmpDir, ".yoloai")
-	require.NoError(t, os.MkdirAll(yoloaiDir, 0750))
-
-	content := "setup_complete: true\ndefaults:\n  agent: gemini\n"
-	require.NoError(t, os.WriteFile(filepath.Join(yoloaiDir, "config.yaml"), []byte(content), 0600))
+	content := "agent: gemini\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
 
 	cfg, err := LoadConfig()
 	require.NoError(t, err)
@@ -73,12 +63,8 @@ func TestLoadConfig_AgentOverride(t *testing.T) {
 }
 
 func TestLoadConfig_ModelDefault(t *testing.T) {
-	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
-
-	yoloaiDir := filepath.Join(tmpDir, ".yoloai")
-	require.NoError(t, os.MkdirAll(yoloaiDir, 0750))
-	require.NoError(t, os.WriteFile(filepath.Join(yoloaiDir, "config.yaml"), []byte(defaultConfigYAML), 0600))
+	dir := configDir(t)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(defaultConfigYAML), 0600))
 
 	cfg, err := LoadConfig()
 	require.NoError(t, err)
@@ -86,14 +72,10 @@ func TestLoadConfig_ModelDefault(t *testing.T) {
 }
 
 func TestLoadConfig_ModelOverride(t *testing.T) {
-	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
+	dir := configDir(t)
 
-	yoloaiDir := filepath.Join(tmpDir, ".yoloai")
-	require.NoError(t, os.MkdirAll(yoloaiDir, 0750))
-
-	content := "setup_complete: true\ndefaults:\n  model: o3\n"
-	require.NoError(t, os.WriteFile(filepath.Join(yoloaiDir, "config.yaml"), []byte(content), 0600))
+	content := "model: o3\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
 
 	cfg, err := LoadConfig()
 	require.NoError(t, err)
@@ -101,14 +83,10 @@ func TestLoadConfig_ModelOverride(t *testing.T) {
 }
 
 func TestLoadConfig_EnvMap(t *testing.T) {
-	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
+	dir := configDir(t)
 
-	yoloaiDir := filepath.Join(tmpDir, ".yoloai")
-	require.NoError(t, os.MkdirAll(yoloaiDir, 0750))
-
-	content := "defaults:\n  env:\n    OLLAMA_API_BASE: http://host.docker.internal:11434\n    CUSTOM_VAR: myvalue\n"
-	require.NoError(t, os.WriteFile(filepath.Join(yoloaiDir, "config.yaml"), []byte(content), 0600))
+	content := "env:\n  OLLAMA_API_BASE: http://host.docker.internal:11434\n  CUSTOM_VAR: myvalue\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
 
 	cfg, err := LoadConfig()
 	require.NoError(t, err)
@@ -118,15 +96,11 @@ func TestLoadConfig_EnvMap(t *testing.T) {
 }
 
 func TestLoadConfig_EnvExpansion(t *testing.T) {
-	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
+	dir := configDir(t)
 	t.Setenv("YOLOAI_TEST_HOST", "localhost")
 
-	yoloaiDir := filepath.Join(tmpDir, ".yoloai")
-	require.NoError(t, os.MkdirAll(yoloaiDir, 0750))
-
-	content := "defaults:\n  env:\n    API_BASE: http://${YOLOAI_TEST_HOST}:11434\n"
-	require.NoError(t, os.WriteFile(filepath.Join(yoloaiDir, "config.yaml"), []byte(content), 0600))
+	content := "env:\n  API_BASE: http://${YOLOAI_TEST_HOST}:11434\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
 
 	cfg, err := LoadConfig()
 	require.NoError(t, err)
@@ -135,27 +109,19 @@ func TestLoadConfig_EnvExpansion(t *testing.T) {
 }
 
 func TestLoadConfig_EnvExpansionError(t *testing.T) {
-	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
+	dir := configDir(t)
 
-	yoloaiDir := filepath.Join(tmpDir, ".yoloai")
-	require.NoError(t, os.MkdirAll(yoloaiDir, 0750))
-
-	content := "defaults:\n  env:\n    BAD_VAR: ${DEFINITELY_NOT_SET}\n"
-	require.NoError(t, os.WriteFile(filepath.Join(yoloaiDir, "config.yaml"), []byte(content), 0600))
+	content := "env:\n  BAD_VAR: ${DEFINITELY_NOT_SET}\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
 
 	_, err := LoadConfig()
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "defaults.env.BAD_VAR")
+	assert.Contains(t, err.Error(), "env.BAD_VAR")
 }
 
 func TestLoadConfig_EnvEmpty(t *testing.T) {
-	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
-
-	yoloaiDir := filepath.Join(tmpDir, ".yoloai")
-	require.NoError(t, os.MkdirAll(yoloaiDir, 0750))
-	require.NoError(t, os.WriteFile(filepath.Join(yoloaiDir, "config.yaml"), []byte(defaultConfigYAML), 0600))
+	dir := configDir(t)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(defaultConfigYAML), 0600))
 
 	cfg, err := LoadConfig()
 	require.NoError(t, err)
@@ -168,126 +134,83 @@ func TestLoadConfig_MissingFile(t *testing.T) {
 
 	cfg, err := LoadConfig()
 	require.NoError(t, err)
-	assert.False(t, cfg.SetupComplete)
 	assert.Empty(t, cfg.TmuxConf)
 }
 
-func TestUpdateConfigFields_SetupComplete(t *testing.T) {
-	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
-
-	yoloaiDir := filepath.Join(tmpDir, ".yoloai")
-	require.NoError(t, os.MkdirAll(yoloaiDir, 0750))
-	require.NoError(t, os.WriteFile(filepath.Join(yoloaiDir, "config.yaml"), []byte(defaultConfigYAML), 0600))
-
-	err := UpdateConfigFields(map[string]string{
-		"setup_complete": "true",
-	})
-	require.NoError(t, err)
-
-	cfg, err := LoadConfig()
-	require.NoError(t, err)
-	assert.True(t, cfg.SetupComplete)
-}
-
 func TestUpdateConfigFields_TmuxConf(t *testing.T) {
-	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
-
-	yoloaiDir := filepath.Join(tmpDir, ".yoloai")
-	require.NoError(t, os.MkdirAll(yoloaiDir, 0750))
-	require.NoError(t, os.WriteFile(filepath.Join(yoloaiDir, "config.yaml"), []byte(defaultConfigYAML), 0600))
+	dir := configDir(t)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(defaultConfigYAML), 0600))
 
 	err := UpdateConfigFields(map[string]string{
-		"defaults.tmux_conf": "default+host",
-		"setup_complete":     "true",
+		"tmux_conf": "default+host",
 	})
 	require.NoError(t, err)
 
 	cfg, err := LoadConfig()
 	require.NoError(t, err)
-	assert.True(t, cfg.SetupComplete)
 	assert.Equal(t, "default+host", cfg.TmuxConf)
 }
 
 func TestUpdateConfigFields_PreservesComments(t *testing.T) {
-	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
-
-	yoloaiDir := filepath.Join(tmpDir, ".yoloai")
-	require.NoError(t, os.MkdirAll(yoloaiDir, 0750))
+	dir := configDir(t)
 
 	content := `# yoloai configuration
-setup_complete: false
-defaults:
-  agent: claude # my preferred agent
+agent: claude # my preferred agent
 `
-	require.NoError(t, os.WriteFile(filepath.Join(yoloaiDir, "config.yaml"), []byte(content), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
 
 	err := UpdateConfigFields(map[string]string{
-		"setup_complete": "true",
+		"backend": "tart",
 	})
 	require.NoError(t, err)
 
 	// Re-read raw content to verify comment is preserved
-	data, err := os.ReadFile(filepath.Join(yoloaiDir, "config.yaml")) //nolint:gosec // G304: test code
+	data, err := os.ReadFile(filepath.Join(dir, "config.yaml")) //nolint:gosec // G304: test code
 	require.NoError(t, err)
 	assert.Contains(t, string(data), "my preferred agent")
 }
 
 func TestDeleteConfigField_Scalar(t *testing.T) {
-	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
+	dir := configDir(t)
+	content := "backend: tart\nagent: gemini\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
 
-	yoloaiDir := filepath.Join(tmpDir, ".yoloai")
-	require.NoError(t, os.MkdirAll(yoloaiDir, 0750))
-	content := "setup_complete: true\ndefaults:\n  backend: tart\n  agent: gemini\n"
-	require.NoError(t, os.WriteFile(filepath.Join(yoloaiDir, "config.yaml"), []byte(content), 0600))
-
-	require.NoError(t, DeleteConfigField("defaults.backend"))
+	require.NoError(t, DeleteConfigField("backend"))
 
 	// backend should be gone from file, agent preserved
-	data, err := os.ReadFile(filepath.Join(yoloaiDir, "config.yaml")) //nolint:gosec // G304: test code
+	data, err := os.ReadFile(filepath.Join(dir, "config.yaml")) //nolint:gosec // G304: test code
 	require.NoError(t, err)
 	assert.NotContains(t, string(data), "backend")
 	assert.Contains(t, string(data), "agent: gemini")
 
 	// GetConfigValue should fall back to default
-	val, found, err := GetConfigValue("defaults.backend")
+	val, found, err := GetConfigValue("backend")
 	require.NoError(t, err)
 	assert.True(t, found)
 	assert.Equal(t, "docker", val)
 }
 
 func TestDeleteConfigField_MapEntry(t *testing.T) {
-	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
+	dir := configDir(t)
+	content := "env:\n  FOO: bar\n  BAZ: qux\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
 
-	yoloaiDir := filepath.Join(tmpDir, ".yoloai")
-	require.NoError(t, os.MkdirAll(yoloaiDir, 0750))
-	content := "defaults:\n  env:\n    FOO: bar\n    BAZ: qux\n"
-	require.NoError(t, os.WriteFile(filepath.Join(yoloaiDir, "config.yaml"), []byte(content), 0600))
+	require.NoError(t, DeleteConfigField("env.FOO"))
 
-	require.NoError(t, DeleteConfigField("defaults.env.FOO"))
-
-	data, err := os.ReadFile(filepath.Join(yoloaiDir, "config.yaml")) //nolint:gosec // G304: test code
+	data, err := os.ReadFile(filepath.Join(dir, "config.yaml")) //nolint:gosec // G304: test code
 	require.NoError(t, err)
 	assert.NotContains(t, string(data), "FOO")
 	assert.Contains(t, string(data), "BAZ: qux")
 }
 
 func TestDeleteConfigField_EntireSection(t *testing.T) {
-	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
+	dir := configDir(t)
+	content := "env:\n  FOO: bar\nbackend: tart\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
 
-	yoloaiDir := filepath.Join(tmpDir, ".yoloai")
-	require.NoError(t, os.MkdirAll(yoloaiDir, 0750))
-	content := "setup_complete: true\ndefaults:\n  env:\n    FOO: bar\n  backend: tart\n"
-	require.NoError(t, os.WriteFile(filepath.Join(yoloaiDir, "config.yaml"), []byte(content), 0600))
+	require.NoError(t, DeleteConfigField("env"))
 
-	require.NoError(t, DeleteConfigField("defaults.env"))
-
-	data, err := os.ReadFile(filepath.Join(yoloaiDir, "config.yaml")) //nolint:gosec // G304: test code
+	data, err := os.ReadFile(filepath.Join(dir, "config.yaml")) //nolint:gosec // G304: test code
 	require.NoError(t, err)
 	assert.NotContains(t, string(data), "FOO")
 	assert.NotContains(t, string(data), "env")
@@ -295,16 +218,12 @@ func TestDeleteConfigField_EntireSection(t *testing.T) {
 }
 
 func TestDeleteConfigField_NonexistentKey(t *testing.T) {
-	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
-
-	yoloaiDir := filepath.Join(tmpDir, ".yoloai")
-	require.NoError(t, os.MkdirAll(yoloaiDir, 0750))
-	content := "setup_complete: true\n"
-	require.NoError(t, os.WriteFile(filepath.Join(yoloaiDir, "config.yaml"), []byte(content), 0600))
+	dir := configDir(t)
+	content := "backend: docker\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
 
 	// Should not error on missing key
-	require.NoError(t, DeleteConfigField("defaults.nonexistent"))
+	require.NoError(t, DeleteConfigField("nonexistent"))
 }
 
 func TestDeleteConfigField_MissingFile(t *testing.T) {
@@ -312,20 +231,16 @@ func TestDeleteConfigField_MissingFile(t *testing.T) {
 	t.Setenv("HOME", tmpDir)
 
 	// Should not error when config file doesn't exist
-	require.NoError(t, DeleteConfigField("defaults.backend"))
+	require.NoError(t, DeleteConfigField("backend"))
 }
 
 func TestLoadConfig_ExpandsEnvVars(t *testing.T) {
-	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
+	dir := configDir(t)
 	t.Setenv("YOLOAI_TEST_AGENT", "gemini")
 	t.Setenv("YOLOAI_TEST_BACKEND", "tart")
 
-	yoloaiDir := filepath.Join(tmpDir, ".yoloai")
-	require.NoError(t, os.MkdirAll(yoloaiDir, 0750))
-
-	content := "defaults:\n  agent: ${YOLOAI_TEST_AGENT}\n  backend: ${YOLOAI_TEST_BACKEND}\n"
-	require.NoError(t, os.WriteFile(filepath.Join(yoloaiDir, "config.yaml"), []byte(content), 0600))
+	content := "agent: ${YOLOAI_TEST_AGENT}\nbackend: ${YOLOAI_TEST_BACKEND}\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
 
 	cfg, err := LoadConfig()
 	require.NoError(t, err)
@@ -334,47 +249,35 @@ func TestLoadConfig_ExpandsEnvVars(t *testing.T) {
 }
 
 func TestLoadConfig_UnsetEnvVarError(t *testing.T) {
-	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
+	dir := configDir(t)
 
-	yoloaiDir := filepath.Join(tmpDir, ".yoloai")
-	require.NoError(t, os.MkdirAll(yoloaiDir, 0750))
-
-	content := "defaults:\n  agent: ${YOLOAI_DEFINITELY_NOT_SET}\n"
-	require.NoError(t, os.WriteFile(filepath.Join(yoloaiDir, "config.yaml"), []byte(content), 0600))
+	content := "agent: ${YOLOAI_DEFINITELY_NOT_SET}\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
 
 	_, err := LoadConfig()
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "defaults.agent")
+	assert.Contains(t, err.Error(), "agent")
 	assert.Contains(t, err.Error(), "YOLOAI_DEFINITELY_NOT_SET")
 }
 
 func TestLoadConfig_UnclosedBraceError(t *testing.T) {
-	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
+	dir := configDir(t)
 
-	yoloaiDir := filepath.Join(tmpDir, ".yoloai")
-	require.NoError(t, os.MkdirAll(yoloaiDir, 0750))
-
-	content := "defaults:\n  backend: ${UNCLOSED\n"
-	require.NoError(t, os.WriteFile(filepath.Join(yoloaiDir, "config.yaml"), []byte(content), 0600))
+	content := "backend: ${UNCLOSED\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
 
 	_, err := LoadConfig()
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "defaults.backend")
+	assert.Contains(t, err.Error(), "backend")
 	assert.Contains(t, err.Error(), "unclosed")
 }
 
 func TestLoadConfig_BareVarNotExpanded(t *testing.T) {
-	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
+	dir := configDir(t)
 	t.Setenv("YOLOAI_TEST_VAR", "should-not-appear")
 
-	yoloaiDir := filepath.Join(tmpDir, ".yoloai")
-	require.NoError(t, os.MkdirAll(yoloaiDir, 0750))
-
-	content := "defaults:\n  agent: $YOLOAI_TEST_VAR\n"
-	require.NoError(t, os.WriteFile(filepath.Join(yoloaiDir, "config.yaml"), []byte(content), 0600))
+	content := "agent: $YOLOAI_TEST_VAR\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
 
 	cfg, err := LoadConfig()
 	require.NoError(t, err)
@@ -384,7 +287,7 @@ func TestLoadConfig_BareVarNotExpanded(t *testing.T) {
 func TestSplitDottedPath(t *testing.T) {
 	assert.Equal(t, []string{"a"}, splitDottedPath("a"))
 	assert.Equal(t, []string{"a", "b"}, splitDottedPath("a.b"))
-	assert.Equal(t, []string{"defaults", "tmux_conf"}, splitDottedPath("defaults.tmux_conf"))
+	assert.Equal(t, []string{"tart", "image"}, splitDottedPath("tart.image"))
 }
 
 func TestConfigPath(t *testing.T) {
@@ -393,7 +296,7 @@ func TestConfigPath(t *testing.T) {
 
 	p, err := ConfigPath()
 	require.NoError(t, err)
-	assert.Equal(t, filepath.Join(tmpDir, ".yoloai", "config.yaml"), p)
+	assert.Equal(t, filepath.Join(tmpDir, ".yoloai", "profiles", "base", "config.yaml"), p)
 }
 
 func TestReadConfigRaw_MissingFile(t *testing.T) {
@@ -406,13 +309,9 @@ func TestReadConfigRaw_MissingFile(t *testing.T) {
 }
 
 func TestReadConfigRaw_ExistingFile(t *testing.T) {
-	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
-
-	yoloaiDir := filepath.Join(tmpDir, ".yoloai")
-	require.NoError(t, os.MkdirAll(yoloaiDir, 0750))
-	content := "setup_complete: true\n"
-	require.NoError(t, os.WriteFile(filepath.Join(yoloaiDir, "config.yaml"), []byte(content), 0600))
+	dir := configDir(t)
+	content := "backend: docker\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
 
 	data, err := ReadConfigRaw()
 	require.NoError(t, err)
@@ -420,71 +319,45 @@ func TestReadConfigRaw_ExistingFile(t *testing.T) {
 }
 
 func TestGetConfigValue_Scalar(t *testing.T) {
-	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
+	dir := configDir(t)
+	content := "backend: seatbelt\ntmux_conf: default+host\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
 
-	yoloaiDir := filepath.Join(tmpDir, ".yoloai")
-	require.NoError(t, os.MkdirAll(yoloaiDir, 0750))
-	content := "setup_complete: true\ndefaults:\n  backend: seatbelt\n  tmux_conf: default+host\n"
-	require.NoError(t, os.WriteFile(filepath.Join(yoloaiDir, "config.yaml"), []byte(content), 0600))
-
-	val, found, err := GetConfigValue("setup_complete")
-	require.NoError(t, err)
-	assert.True(t, found)
-	assert.Equal(t, "true", val)
-
-	val, found, err = GetConfigValue("defaults.backend")
+	val, found, err := GetConfigValue("backend")
 	require.NoError(t, err)
 	assert.True(t, found)
 	assert.Equal(t, "seatbelt", val)
 }
 
 func TestGetConfigValue_Mapping(t *testing.T) {
-	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
+	dir := configDir(t)
+	content := "tart:\n  image: myimage\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
 
-	yoloaiDir := filepath.Join(tmpDir, ".yoloai")
-	require.NoError(t, os.MkdirAll(yoloaiDir, 0750))
-	content := "defaults:\n  backend: docker\n  tmux_conf: default\n"
-	require.NoError(t, os.WriteFile(filepath.Join(yoloaiDir, "config.yaml"), []byte(content), 0600))
-
-	val, found, err := GetConfigValue("defaults")
+	val, found, err := GetConfigValue("tart")
 	require.NoError(t, err)
 	assert.True(t, found)
-	assert.Contains(t, val, "backend: docker")
-	assert.Contains(t, val, "tmux_conf: default")
+	assert.Contains(t, val, "image: myimage")
 }
 
 func TestGetConfigValue_NotFound(t *testing.T) {
-	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
-
-	yoloaiDir := filepath.Join(tmpDir, ".yoloai")
-	require.NoError(t, os.MkdirAll(yoloaiDir, 0750))
-	content := "setup_complete: true\n"
-	require.NoError(t, os.WriteFile(filepath.Join(yoloaiDir, "config.yaml"), []byte(content), 0600))
+	dir := configDir(t)
+	content := "backend: docker\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
 
 	// Unknown key: not found
 	_, found, err := GetConfigValue("nonexistent")
 	require.NoError(t, err)
 	assert.False(t, found)
-
-	_, found, err = GetConfigValue("defaults.nonexistent")
-	require.NoError(t, err)
-	assert.False(t, found)
 }
 
 func TestGetConfigValue_FallsBackToDefault(t *testing.T) {
-	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
-
-	yoloaiDir := filepath.Join(tmpDir, ".yoloai")
-	require.NoError(t, os.MkdirAll(yoloaiDir, 0750))
-	content := "setup_complete: true\n"
-	require.NoError(t, os.WriteFile(filepath.Join(yoloaiDir, "config.yaml"), []byte(content), 0600))
+	dir := configDir(t)
+	content := "agent: claude\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
 
 	// Known key not in file returns its default
-	val, found, err := GetConfigValue("defaults.backend")
+	val, found, err := GetConfigValue("backend")
 	require.NoError(t, err)
 	assert.True(t, found)
 	assert.Equal(t, "docker", val)
@@ -500,7 +373,7 @@ func TestGetConfigValue_MissingFile(t *testing.T) {
 	assert.False(t, found)
 
 	// Known key with no file: returns default
-	val, found, err := GetConfigValue("defaults.backend")
+	val, found, err := GetConfigValue("backend")
 	require.NoError(t, err)
 	assert.True(t, found)
 	assert.Equal(t, "docker", val)
@@ -512,7 +385,6 @@ func TestGetEffectiveConfig_Defaults(t *testing.T) {
 
 	out, err := GetEffectiveConfig()
 	require.NoError(t, err)
-	assert.Contains(t, out, "setup_complete: false")
 	assert.Contains(t, out, "backend: docker")
 	assert.Contains(t, out, "image:")
 	assert.Contains(t, out, "tmux_conf:")
@@ -521,17 +393,12 @@ func TestGetEffectiveConfig_Defaults(t *testing.T) {
 }
 
 func TestGetEffectiveConfig_WithOverrides(t *testing.T) {
-	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
-
-	yoloaiDir := filepath.Join(tmpDir, ".yoloai")
-	require.NoError(t, os.MkdirAll(yoloaiDir, 0750))
-	content := "setup_complete: true\ndefaults:\n  backend: tart\n"
-	require.NoError(t, os.WriteFile(filepath.Join(yoloaiDir, "config.yaml"), []byte(content), 0600))
+	dir := configDir(t)
+	content := "backend: tart\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
 
 	out, err := GetEffectiveConfig()
 	require.NoError(t, err)
-	assert.Contains(t, out, "setup_complete: true")
 	assert.Contains(t, out, "backend: tart")
 	// Defaults for unset keys still present
 	assert.Contains(t, out, "image:")
@@ -539,13 +406,9 @@ func TestGetEffectiveConfig_WithOverrides(t *testing.T) {
 }
 
 func TestGetEffectiveConfig_ExtraKeys(t *testing.T) {
-	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
-
-	yoloaiDir := filepath.Join(tmpDir, ".yoloai")
-	require.NoError(t, os.MkdirAll(yoloaiDir, 0750))
-	content := "setup_complete: true\ncustom_key: myvalue\n"
-	require.NoError(t, os.WriteFile(filepath.Join(yoloaiDir, "config.yaml"), []byte(content), 0600))
+	dir := configDir(t)
+	content := "custom_key: myvalue\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
 
 	out, err := GetEffectiveConfig()
 	require.NoError(t, err)

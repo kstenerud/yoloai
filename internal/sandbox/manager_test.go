@@ -111,24 +111,41 @@ func TestEnsureSetup_WritesConfigOnFirstRun(t *testing.T) {
 	err := mgr.EnsureSetup(context.Background())
 	require.NoError(t, err)
 
-	configPath := filepath.Join(tmpDir, ".yoloai", "config.yaml")
+	configPath := filepath.Join(tmpDir, ".yoloai", "profiles", "base", "config.yaml")
 	content, err := os.ReadFile(configPath) //nolint:gosec // G304: test code with temp dir
 	require.NoError(t, err)
-	assert.Contains(t, string(content), "setup_complete")
+	assert.Contains(t, string(content), "agent")
 
 	// Check completion hint was printed
 	assert.Contains(t, output.String(), "completion")
+}
+
+func TestEnsureSetup_WritesStateOnFirstRun(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	mock := &mockRuntime{}
+	mgr := NewManager(mock, "docker", slog.Default(), strings.NewReader(""), io.Discard)
+
+	err := mgr.EnsureSetup(context.Background())
+	require.NoError(t, err)
+
+	statePath := filepath.Join(tmpDir, ".yoloai", "state.yaml")
+	_, err = os.Stat(statePath)
+	require.NoError(t, err, "state.yaml should exist")
 }
 
 func TestEnsureSetup_SkipsConfigOnSubsequentRun(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
 
-	// Pre-create config.yaml with custom content (valid YAML, setup already done)
+	// Pre-create config.yaml and state.yaml
 	yoloaiDir := filepath.Join(tmpDir, ".yoloai")
-	require.NoError(t, os.MkdirAll(yoloaiDir, 0750))
-	customContent := []byte("# custom config\nsetup_complete: true\ndefaults:\n  agent: claude\n")
-	require.NoError(t, os.WriteFile(filepath.Join(yoloaiDir, "config.yaml"), customContent, 0600))
+	baseDir := filepath.Join(yoloaiDir, "profiles", "base")
+	require.NoError(t, os.MkdirAll(baseDir, 0750))
+	customContent := []byte("# custom config\nagent: claude\n")
+	require.NoError(t, os.WriteFile(filepath.Join(baseDir, "config.yaml"), customContent, 0600))
+	require.NoError(t, SaveState(&State{SetupComplete: true}))
 
 	mock := &mockRuntime{}
 	var output bytes.Buffer
@@ -137,8 +154,8 @@ func TestEnsureSetup_SkipsConfigOnSubsequentRun(t *testing.T) {
 	err := mgr.EnsureSetup(context.Background())
 	require.NoError(t, err)
 
-	// Config should be preserved (setup_complete is true, so no modification)
-	content, err := os.ReadFile(filepath.Join(yoloaiDir, "config.yaml")) //nolint:gosec // G304: test code with temp dir
+	// Config should be preserved
+	content, err := os.ReadFile(filepath.Join(baseDir, "config.yaml")) //nolint:gosec // G304: test code with temp dir
 	require.NoError(t, err)
 	assert.Equal(t, customContent, content)
 
@@ -150,11 +167,11 @@ func TestEnsureSetup_SkipsBuildWhenImageExists(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
 
-	// Pre-seed resources and simulate a prior successful build
-	yoloaiDir := filepath.Join(tmpDir, ".yoloai")
-	_, err := dockerrt.SeedResources(yoloaiDir)
+	// Pre-seed resources to profiles/base/ and simulate a prior successful build
+	baseDir := filepath.Join(tmpDir, ".yoloai", "profiles", "base")
+	_, err := dockerrt.SeedResources(baseDir)
 	require.NoError(t, err)
-	dockerrt.RecordBuildChecksum(yoloaiDir)
+	dockerrt.RecordBuildChecksum(baseDir)
 
 	mock := &mockRuntime{} // EnsureImage returns nil (success)
 	mgr := NewManager(mock, "docker", slog.Default(), strings.NewReader(""), io.Discard)
@@ -169,16 +186,15 @@ func TestEnsureSetup_RebuildWhenResourcesChanged(t *testing.T) {
 	t.Setenv("HOME", tmpDir)
 
 	// First seed to establish checksum manifest
-	yoloaiDir := filepath.Join(tmpDir, ".yoloai")
-	_, err := dockerrt.SeedResources(yoloaiDir)
+	baseDir := filepath.Join(tmpDir, ".yoloai", "profiles", "base")
+	_, err := dockerrt.SeedResources(baseDir)
 	require.NoError(t, err)
 
 	// Simulate a binary upgrade: write stale content with matching checksums
-	// (so SeedResources sees "unmodified by user" but "differs from embedded")
 	staleContent := []byte("# old version")
-	require.NoError(t, os.WriteFile(filepath.Join(yoloaiDir, "entrypoint.sh"), staleContent, 0600))
-	// Update checksum to match stale content (not user-modified, just old version)
-	checksumPath := filepath.Join(yoloaiDir, ".resource-checksums")
+	require.NoError(t, os.WriteFile(filepath.Join(baseDir, "entrypoint.sh"), staleContent, 0600))
+	// Update checksum to match stale content
+	checksumPath := filepath.Join(baseDir, ".resource-checksums")
 	checksumData, err := os.ReadFile(checksumPath) //nolint:gosec // G304: test code
 	require.NoError(t, err)
 	var checksums map[string]string

@@ -1,6 +1,6 @@
 package sandbox
 
-// ABOUTME: Config loading, reading, and writing for ~/.yoloai/config.yaml.
+// ABOUTME: Config loading, reading, and writing for ~/.yoloai/profiles/base/config.yaml.
 // ABOUTME: Provides dotted-path get/set with YAML comment preservation.
 
 import (
@@ -14,13 +14,12 @@ import (
 
 // YoloaiConfig holds the subset of config.yaml fields that the Go code reads.
 type YoloaiConfig struct {
-	SetupComplete bool              `yaml:"setup_complete"`
-	TmuxConf      string            `yaml:"tmux_conf"`  // from defaults.tmux_conf
-	Backend       string            `yaml:"backend"`    // from defaults.backend
-	TartImage     string            `yaml:"tart_image"` // from defaults.tart.image — custom base VM image for tart backend
-	Agent         string            `yaml:"agent"`      // from defaults.agent
-	Model         string            `yaml:"model"`      // from defaults.model
-	Env           map[string]string `yaml:"env"`        // from defaults.env — environment variables passed to container
+	TmuxConf  string            `yaml:"tmux_conf"`  // tmux_conf
+	Backend   string            `yaml:"backend"`    // backend
+	TartImage string            `yaml:"tart_image"` // tart.image — custom base VM image for tart backend
+	Agent     string            `yaml:"agent"`      // agent
+	Model     string            `yaml:"model"`      // model
+	Env       map[string]string `yaml:"env"`        // env — environment variables passed to container
 }
 
 // knownSetting defines a config key with its default value.
@@ -32,12 +31,11 @@ type knownSetting struct {
 // knownSettings lists every scalar config key the code recognizes, with defaults.
 // Used by GetEffectiveConfig and GetConfigValue to fill in unset values.
 var knownSettings = []knownSetting{
-	{"setup_complete", "false"},
-	{"defaults.backend", "docker"},
-	{"defaults.tart.image", ""},
-	{"defaults.tmux_conf", ""},
-	{"defaults.agent", "claude"},
-	{"defaults.model", ""},
+	{"backend", "docker"},
+	{"tart.image", ""},
+	{"tmux_conf", ""},
+	{"agent", "claude"},
+	{"model", ""},
 }
 
 // knownCollectionSetting defines a non-scalar config key (map or list)
@@ -50,26 +48,26 @@ type knownCollectionSetting struct {
 // knownCollectionSettings lists non-scalar config keys shown in effective config.
 // Each appears as an empty mapping ({}) or sequence ([]) when not set by the user.
 var knownCollectionSettings = []knownCollectionSetting{
-	{"defaults.env", yaml.MappingNode},
+	{"env", yaml.MappingNode},
 }
 
-// ConfigPath returns the path to ~/.yoloai/config.yaml.
+// ConfigPath returns the path to ~/.yoloai/profiles/base/config.yaml.
 func ConfigPath() (string, error) {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("get home directory: %w", err)
 	}
-	return filepath.Join(homeDir, ".yoloai", "config.yaml"), nil
+	return filepath.Join(homeDir, ".yoloai", "profiles", "base", "config.yaml"), nil
 }
 
-// LoadConfig reads ~/.yoloai/config.yaml and extracts known fields.
+// LoadConfig reads ~/.yoloai/profiles/base/config.yaml and extracts known fields.
 func LoadConfig() (*YoloaiConfig, error) {
 	configPath, err := ConfigPath()
 	if err != nil {
 		return nil, err
 	}
 
-	data, err := os.ReadFile(configPath) //nolint:gosec // G304: path is ~/.yoloai/config.yaml
+	data, err := os.ReadFile(configPath) //nolint:gosec // G304: path is ~/.yoloai/profiles/base/config.yaml
 	if err != nil {
 		if os.IsNotExist(err) {
 			return &YoloaiConfig{}, nil
@@ -98,61 +96,55 @@ func LoadConfig() (*YoloaiConfig, error) {
 		val := root.Content[i+1]
 
 		switch key.Value {
-		case "setup_complete":
-			cfg.SetupComplete = val.Value == "true"
-		case "defaults":
+		case "env":
 			if val.Kind == yaml.MappingNode {
-				for j := 0; j < len(val.Content)-1; j += 2 {
-					fieldName := val.Content[j].Value
-					fieldVal := val.Content[j+1]
-
-					// Nested mappings — handle before scalar extraction
-					switch fieldName {
-					case "env":
-						if fieldVal.Kind == yaml.MappingNode {
-							cfg.Env = make(map[string]string, len(fieldVal.Content)/2)
-							for k := 0; k < len(fieldVal.Content)-1; k += 2 {
-								envKey := fieldVal.Content[k].Value
-								envExpanded, envErr := expandEnvBraced(fieldVal.Content[k+1].Value)
-								if envErr != nil {
-									return nil, fmt.Errorf("defaults.env.%s: %w", envKey, envErr)
-								}
-								cfg.Env[envKey] = envExpanded
-							}
-						}
-						continue
-					case "tart":
-						if fieldVal.Kind == yaml.MappingNode {
-							for k := 0; k < len(fieldVal.Content)-1; k += 2 {
-								subKey := fieldVal.Content[k].Value
-								subExpanded, subErr := expandEnvBraced(fieldVal.Content[k+1].Value)
-								if subErr != nil {
-									return nil, fmt.Errorf("defaults.tart.%s: %w", subKey, subErr)
-								}
-								if subKey == "image" {
-									cfg.TartImage = subExpanded
-								}
-							}
-						}
-						continue
+				cfg.Env = make(map[string]string, len(val.Content)/2)
+				for k := 0; k < len(val.Content)-1; k += 2 {
+					envKey := val.Content[k].Value
+					envExpanded, envErr := expandEnvBraced(val.Content[k+1].Value)
+					if envErr != nil {
+						return nil, fmt.Errorf("env.%s: %w", envKey, envErr)
 					}
-
-					expanded, err := expandEnvBraced(fieldVal.Value)
-					if err != nil {
-						return nil, fmt.Errorf("defaults.%s: %w", fieldName, err)
+					cfg.Env[envKey] = envExpanded
+				}
+			}
+		case "tart":
+			if val.Kind == yaml.MappingNode {
+				for k := 0; k < len(val.Content)-1; k += 2 {
+					subKey := val.Content[k].Value
+					subExpanded, subErr := expandEnvBraced(val.Content[k+1].Value)
+					if subErr != nil {
+						return nil, fmt.Errorf("tart.%s: %w", subKey, subErr)
 					}
-					switch fieldName {
-					case "tmux_conf":
-						cfg.TmuxConf = expanded
-					case "backend":
-						cfg.Backend = expanded
-					case "agent":
-						cfg.Agent = expanded
-					case "model":
-						cfg.Model = expanded
+					if subKey == "image" {
+						cfg.TartImage = subExpanded
 					}
 				}
 			}
+		case "tmux_conf":
+			expanded, err := expandEnvBraced(val.Value)
+			if err != nil {
+				return nil, fmt.Errorf("tmux_conf: %w", err)
+			}
+			cfg.TmuxConf = expanded
+		case "backend":
+			expanded, err := expandEnvBraced(val.Value)
+			if err != nil {
+				return nil, fmt.Errorf("backend: %w", err)
+			}
+			cfg.Backend = expanded
+		case "agent":
+			expanded, err := expandEnvBraced(val.Value)
+			if err != nil {
+				return nil, fmt.Errorf("agent: %w", err)
+			}
+			cfg.Agent = expanded
+		case "model":
+			expanded, err := expandEnvBraced(val.Value)
+			if err != nil {
+				return nil, fmt.Errorf("model: %w", err)
+			}
+			cfg.Model = expanded
 		}
 	}
 
@@ -166,7 +158,7 @@ func ReadConfigRaw() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	data, err := os.ReadFile(configPath) //nolint:gosec // G304: path is ~/.yoloai/config.yaml
+	data, err := os.ReadFile(configPath) //nolint:gosec // G304: path is ~/.yoloai/profiles/base/config.yaml
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
@@ -262,7 +254,7 @@ func GetConfigValue(path string) (string, bool, error) {
 	if err != nil {
 		return "", false, err
 	}
-	data, err := os.ReadFile(configPath) //nolint:gosec // G304: path is ~/.yoloai/config.yaml
+	data, err := os.ReadFile(configPath) //nolint:gosec // G304: path is ~/.yoloai/profiles/base/config.yaml
 	if err != nil {
 		if os.IsNotExist(err) {
 			return knownDefault(path)
@@ -330,7 +322,7 @@ func UpdateConfigFields(fields map[string]string) error {
 		return err
 	}
 
-	data, err := os.ReadFile(configPath) //nolint:gosec // G304: path is ~/.yoloai/config.yaml
+	data, err := os.ReadFile(configPath) //nolint:gosec // G304: path is ~/.yoloai/profiles/base/config.yaml
 	if err != nil {
 		return fmt.Errorf("read config.yaml: %w", err)
 	}
@@ -372,7 +364,7 @@ func DeleteConfigField(path string) error {
 		return err
 	}
 
-	data, err := os.ReadFile(configPath) //nolint:gosec // G304: path is ~/.yoloai/config.yaml
+	data, err := os.ReadFile(configPath) //nolint:gosec // G304: path is ~/.yoloai/profiles/base/config.yaml
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil // nothing to delete

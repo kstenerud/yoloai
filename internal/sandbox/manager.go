@@ -14,18 +14,18 @@ import (
 	"golang.org/x/term"
 )
 
-const defaultConfigYAML = `# yoloai configuration
+const defaultConfigYAML = `# yoloai base profile configuration
 # See https://github.com/kstenerud/yoloai for documentation
 # Run 'yoloai config set <key> <value>' to change settings.
 #
 # Available settings:
-#   defaults.agent        Agent to use: aider, claude, codex, gemini, opencode
-#   defaults.model        Model name or alias passed to the agent
-#   defaults.backend      Runtime backend: docker, tart, seatbelt
-#   defaults.tart.image   Custom base VM image (tart backend only)
-#   defaults.env.<NAME>   Environment variable passed to container
+#   agent        Agent to use: aider, claude, codex, gemini, opencode
+#   model        Model name or alias passed to the agent
+#   backend      Runtime backend: docker, tart, seatbelt
+#   tart.image   Custom base VM image (tart backend only)
+#   env.<NAME>   Environment variable passed to container
 
-setup_complete: false
+{}
 `
 
 // Manager is the central orchestrator for sandbox operations.
@@ -79,18 +79,18 @@ func (m *Manager) EnsureSetup(ctx context.Context) error {
 	}
 
 	// Run new-user experience if setup_complete is false
-	cfg, err := LoadConfig()
+	state, err := LoadState()
 	if err != nil {
-		return fmt.Errorf("load config: %w", err)
+		return fmt.Errorf("load state: %w", err)
 	}
-	if !cfg.SetupComplete {
+	if !state.SetupComplete {
 		if !m.isInteractive() {
 			// Non-TTY: auto-configure without prompts (power-user behavior)
 			if err := m.setTmuxConf("default+host"); err != nil {
 				return fmt.Errorf("set tmux_conf: %w", err)
 			}
-			if err := UpdateConfigFields(map[string]string{"setup_complete": "true"}); err != nil {
-				return fmt.Errorf("set setup_complete: %w", err)
+			if err := SaveState(&State{SetupComplete: true}); err != nil {
+				return fmt.Errorf("save state: %w", err)
 			}
 		} else {
 			if err := m.runNewUserSetup(ctx); err != nil {
@@ -105,14 +105,19 @@ func (m *Manager) EnsureSetup(ctx context.Context) error {
 }
 
 // EnsureSetupNonInteractive performs the non-interactive portion of first-run
-// setup: directory creation, resource seeding, image building, and default
-// config writing. Does not run interactive prompts.
+// setup: migration, directory creation, resource seeding, image building,
+// and default config writing. Does not run interactive prompts.
 func (m *Manager) EnsureSetupNonInteractive(ctx context.Context) error {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return fmt.Errorf("get home directory: %w", err)
 	}
 	yoloaiDir := filepath.Join(homeDir, ".yoloai")
+
+	// Migrate old layout before anything else
+	if err := MigrateIfNeeded(yoloaiDir); err != nil {
+		return fmt.Errorf("migrate: %w", err)
+	}
 
 	// Create directory structure
 	for _, sub := range []string{"sandboxes", "profiles", "cache"} {
@@ -122,18 +127,31 @@ func (m *Manager) EnsureSetupNonInteractive(ctx context.Context) error {
 		}
 	}
 
+	baseProfileDir := filepath.Join(yoloaiDir, "profiles", "base")
+	if err := os.MkdirAll(baseProfileDir, 0750); err != nil {
+		return fmt.Errorf("create %s: %w", baseProfileDir, err)
+	}
+
 	// Seed resources and build/rebuild base image as needed
-	if err := m.runtime.EnsureImage(ctx, yoloaiDir, m.output, m.logger, false); err != nil {
+	if err := m.runtime.EnsureImage(ctx, baseProfileDir, m.output, m.logger, false); err != nil {
 		return err
 	}
 
 	// Write default config.yaml on first run
-	configPath := filepath.Join(yoloaiDir, "config.yaml")
+	configPath := filepath.Join(baseProfileDir, "config.yaml")
 	if _, err := os.Stat(configPath); err != nil {
 		if err := os.WriteFile(configPath, []byte(defaultConfigYAML), 0600); err != nil {
 			return fmt.Errorf("write config.yaml: %w", err)
 		}
 		fmt.Fprintln(m.output, "Tip: enable shell completions with 'yoloai completion --help'") //nolint:errcheck // best-effort output
+	}
+
+	// Write default state.yaml if missing
+	statePath := filepath.Join(yoloaiDir, "state.yaml")
+	if _, err := os.Stat(statePath); os.IsNotExist(err) {
+		if err := SaveState(&State{}); err != nil {
+			return fmt.Errorf("write state.yaml: %w", err)
+		}
 	}
 
 	return nil

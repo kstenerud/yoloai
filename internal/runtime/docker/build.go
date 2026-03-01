@@ -31,7 +31,7 @@ type SeedResult struct {
 	ManifestMissing bool     // checksum manifest was missing or corrupt (first run after upgrade)
 }
 
-// SeedResources writes embedded Dockerfile.base and entrypoint.sh to the
+// SeedResources writes embedded Dockerfile and entrypoint.sh to the
 // target directory, respecting user customizations.
 //
 // For each file, the logic is:
@@ -55,7 +55,7 @@ func SeedResources(targetDir string) (SeedResult, error) {
 		name    string
 		content []byte
 	}{
-		{"Dockerfile.base", embeddedDockerfile},
+		{"Dockerfile", embeddedDockerfile},
 		{"entrypoint.sh", embeddedEntrypoint},
 		{"tmux.conf", embeddedTmuxConf},
 	}
@@ -176,7 +176,7 @@ func RecordBuildChecksum(sourceDir string) {
 // buildInputsChecksum computes a combined SHA-256 of the build input files.
 func buildInputsChecksum(sourceDir string) string {
 	h := sha256.New()
-	for _, name := range []string{"Dockerfile.base", "entrypoint.sh", "tmux.conf"} {
+	for _, name := range []string{"Dockerfile", "entrypoint.sh", "tmux.conf"} {
 		data, err := os.ReadFile(filepath.Join(sourceDir, name)) //nolint:gosec // G304: sourceDir is ~/.yoloai/
 		if err != nil {
 			return ""
@@ -223,7 +223,7 @@ func buildBaseImage(ctx context.Context, client *dockerclient.Client, sourceDir 
 }
 
 // createBuildContext creates an in-memory tar archive containing the
-// Dockerfile (renamed from Dockerfile.base) and entrypoint.sh from sourceDir.
+// Dockerfile and entrypoint.sh from sourceDir.
 func createBuildContext(sourceDir string) (io.Reader, error) {
 	var buf bytes.Buffer
 	tw := tar.NewWriter(&buf)
@@ -232,7 +232,7 @@ func createBuildContext(sourceDir string) (io.Reader, error) {
 		diskName string // filename on disk
 		tarName  string // filename in the tar archive
 	}{
-		{"Dockerfile.base", "Dockerfile"},
+		{"Dockerfile", "Dockerfile"},
 		{"entrypoint.sh", "entrypoint.sh"},
 		{"tmux.conf", "tmux.conf"},
 	}

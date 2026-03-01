@@ -51,8 +51,9 @@ func newSystemBuildCmd() *cobra.Command {
 			yoloaiDir := filepath.Join(homeDir, ".yoloai")
 
 			backend := resolveBackend(cmd)
+			baseProfileDir := filepath.Join(yoloaiDir, "profiles", "base")
 			return withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
-				if err := rt.EnsureImage(ctx, yoloaiDir, os.Stderr, slog.Default(), true); err != nil {
+				if err := rt.EnsureImage(ctx, baseProfileDir, os.Stderr, slog.Default(), true); err != nil {
 					return err
 				}
 

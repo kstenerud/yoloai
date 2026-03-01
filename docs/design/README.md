@@ -139,15 +139,19 @@ Field notes:
 
 ```
 ~/.yoloai/
-├── config.yaml                  ← global defaults (no profiles — those live in profiles/)
-├── Dockerfile                   ← seeded from embedded defaults, user-editable
-├── entrypoint.sh                ← seeded from embedded defaults, user-editable
+├── state.yaml                   ← global state (setup_complete)
 ├── cache/
 │   └── overlay-support          ← cached overlay detection result
 ├── extensions/
 │   ├── lint.yaml                ← user-defined extension (one file per command)
 │   └── review.yaml
 ├── profiles/
+│   ├── base/
+│   │   ├── config.yaml          ← global defaults (no nesting — flat keys)
+│   │   ├── Dockerfile           ← seeded from embedded defaults, user-editable
+│   │   ├── entrypoint.sh        ← seeded from embedded defaults, user-editable
+│   │   ├── tmux.conf            ← seeded from embedded defaults, user-editable
+│   │   └── .checksums           ← tracks seeded file checksums
 │   ├── go-dev/
 │   │   ├── Dockerfile           ← FROM yoloai-base
 │   │   └── profile.yaml        ← runtime config (mounts, env, resources, workdir, directories)

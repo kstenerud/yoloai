@@ -270,7 +270,7 @@ func (m *Manager) promptBackendSetup(ctx context.Context) error {
 	}
 
 	return UpdateConfigFields(map[string]string{
-		"defaults.backend": backends[idx].name,
+		"backend": backends[idx].name,
 	})
 }
 
@@ -307,22 +307,20 @@ func (m *Manager) promptAgentSetup(ctx context.Context) error {
 	}
 
 	return UpdateConfigFields(map[string]string{
-		"defaults.agent": agents[idx].name,
+		"agent": agents[idx].name,
 	})
 }
 
 // setTmuxConf writes the tmux_conf setting to config.yaml.
 func (m *Manager) setTmuxConf(value string) error {
 	return UpdateConfigFields(map[string]string{
-		"defaults.tmux_conf": value,
+		"tmux_conf": value,
 	})
 }
 
 // setSetupComplete marks setup as done and prints the completion message.
 func (m *Manager) setSetupComplete() error {
-	if err := UpdateConfigFields(map[string]string{
-		"setup_complete": "true",
-	}); err != nil {
+	if err := SaveState(&State{SetupComplete: true}); err != nil {
 		return err
 	}
 	fmt.Fprintln(m.output, "\nSetup complete. To re-run setup at any time: yoloai setup") //nolint:errcheck // best-effort output

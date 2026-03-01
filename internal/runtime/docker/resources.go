@@ -3,7 +3,7 @@ package docker
 
 import _ "embed"
 
-//go:embed resources/Dockerfile.base
+//go:embed resources/Dockerfile
 var embeddedDockerfile []byte
 
 //go:embed resources/entrypoint.sh
