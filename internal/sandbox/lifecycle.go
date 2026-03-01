@@ -459,6 +459,32 @@ func patchConfigDebug(sandboxDir string, debug bool) error {
 	return nil
 }
 
+// PatchConfigAllowedDomains reads config.json, updates the allowed_domains
+// field, and writes it back. Used by network-allow to persist domain changes.
+func PatchConfigAllowedDomains(sandboxDir string, domains []string) error {
+	configPath := filepath.Join(sandboxDir, "config.json")
+	data, err := os.ReadFile(configPath) //nolint:gosec // path is sandbox-controlled
+	if err != nil {
+		return fmt.Errorf("read config.json for domain patch: %w", err)
+	}
+
+	var cfg containerConfig
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return fmt.Errorf("parse config.json for domain patch: %w", err)
+	}
+
+	cfg.AllowedDomains = domains
+	updated, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal config.json for domain patch: %w", err)
+	}
+
+	if err := os.WriteFile(configPath, updated, 0600); err != nil {
+		return fmt.Errorf("write config.json for domain patch: %w", err)
+	}
+	return nil
+}
+
 // forceRemoveAll removes a directory tree, making read-only entries writable
 // first (e.g. Go module cache files are installed read-only).
 func forceRemoveAll(path string) error {

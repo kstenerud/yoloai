@@ -42,6 +42,7 @@ Inspection:
   yoloai sandbox info <name>                     Show sandbox configuration and state
   yoloai sandbox log <name>                      Show sandbox session log
   yoloai sandbox exec <name> <command>           Run a command inside the sandbox
+  yoloai sandbox network-allow <name> <domain>  Allow additional domains in an isolated sandbox
   yoloai ls                                      List sandboxes (shortcut for 'sandbox list')
   yoloai log <name>                              Show sandbox log (shortcut for 'sandbox log')
 
@@ -446,6 +447,12 @@ Options:
 `yoloai exec <name> <command>` runs a command inside the sandbox container without attaching to tmux. Useful for debugging (`yoloai exec my-sandbox bash`) or quick operations (`yoloai exec my-sandbox npm install foo`).
 
 Implemented as `docker exec yoloai-<name> <command>`, with `-i` added when stdin is a pipe/TTY and `-t` added when stdin is a TTY. This allows both interactive use (`yoloai exec my-sandbox bash`) and non-interactive use (`yoloai exec my-sandbox ls`, `echo "test" | yoloai exec my-sandbox cat`).
+
+### `yoloai sandbox network-allow`
+
+`yoloai sandbox network-allow <name> <domain>...` adds domains to the allowlist of a network-isolated sandbox. Changes are persisted to meta.json and config.json so they survive container restarts. If the container is running, ipset rules are live-patched via `docker exec` (as root, using `dig` + `ipset add`).
+
+Requires `network_mode == "isolated"`. Errors if the sandbox uses `--network-none` or has no network restrictions. Duplicate domains are silently skipped (idempotent). If the container is stopped, changes are saved and take effect on the next start.
 
 ### `yoloai sandbox list` / `yoloai ls`
 

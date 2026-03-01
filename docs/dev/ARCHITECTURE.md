@@ -48,6 +48,7 @@ Dependency direction: `cmd/yoloai` → `cli` → `sandbox` + `runtime`; `sandbox
 | `sandbox_cmd.go` | `yoloai sandbox` parent command grouping sandbox inspection subcommands. |
 | `sandbox_info.go` | `yoloai sandbox info` — display sandbox config, meta, and status. |
 | `exec.go` | `yoloai sandbox exec` — run commands inside a running sandbox container. |
+| `network_allow.go` | `yoloai sandbox network-allow` — add domains to a network-isolated sandbox at runtime. |
 | `list.go` | `yoloai sandbox list` / `yoloai ls` — tabular listing of all sandboxes with status. |
 | `log.go` | `yoloai sandbox log` / `yoloai log` — display sandbox session log (log.txt). |
 | `info.go` | Backend and agent info commands (`system backends`, `system agents`), plus shared helpers (`checkBackend`, `knownBackends`). |
@@ -173,6 +174,7 @@ Tart (macOS VM) implementation of `Runtime` interface. Shells out to `tart` CLI 
 | `yoloai sandbox info` | `cli/sandbox_info.go:newSandboxInfoCmd` | `sandbox.InspectSandbox()` in `sandbox/inspect.go` |
 | `yoloai sandbox log` | `cli/log.go:newSandboxLogCmd` | Reads `log.txt` from sandbox dir |
 | `yoloai sandbox exec` | `cli/exec.go:newSandboxExecCmd` | `runtime.InteractiveExec` into running container |
+| `yoloai sandbox network-allow` | `cli/network_allow.go:newSandboxNetworkAllowCmd` | `sandbox.PatchConfigAllowedDomains()` + `runtime.Exec` ipset update |
 | `yoloai ls` | `cli/commands.go:newLsAliasCmd` | Shortcut for `sandbox list` (calls `runList`) |
 | `yoloai log` | `cli/commands.go:newLogAliasCmd` | Shortcut for `sandbox log` (calls `runLog`) |
 | `yoloai config get` | `cli/config.go:newConfigGetCmd` | `sandbox.GetEffectiveConfig()` / `sandbox.GetConfigValue()` |
