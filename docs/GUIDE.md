@@ -233,6 +233,7 @@ yoloai config set defaults.backend tart
 | `defaults.backend` | `docker` | Runtime backend: `docker`, `tart`, `seatbelt` |
 | `defaults.tart_image` | (empty) | Custom base VM image for tart backend |
 | `defaults.tmux_conf` | (set by setup) | Tmux config mode: `default+host`, `default`, `host`, `none` |
+| `defaults.env.<NAME>` | (empty) | Environment variable forwarded to container |
 
 Agent resolution: `new` uses `--agent` flag > `defaults.agent` in config > `"claude"`.
 

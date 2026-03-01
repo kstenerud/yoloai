@@ -433,7 +433,12 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 // and cleans up credential temp files. Used by both initial creation and
 // recreation from meta.json.
 func (m *Manager) launchContainer(ctx context.Context, state *sandboxState) error {
-	secretsDir, err := createSecretsDir(state.agent)
+	cfg, err := LoadConfig()
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+
+	secretsDir, err := createSecretsDir(state.agent, cfg.Env)
 	if err != nil {
 		return fmt.Errorf("create secrets: %w", err)
 	}
@@ -449,7 +454,7 @@ func (m *Manager) launchContainer(ctx context.Context, state *sandboxState) erro
 	}
 
 	cname := InstanceName(state.name)
-	cfg := runtime.InstanceConfig{
+	instanceCfg := runtime.InstanceConfig{
 		Name:        cname,
 		ImageRef:    "yoloai-base",
 		WorkingDir:  state.workdir.ResolvedMountPath(),
@@ -459,7 +464,7 @@ func (m *Manager) launchContainer(ctx context.Context, state *sandboxState) erro
 		UseInit:     true,
 	}
 
-	if err := m.runtime.Create(ctx, cfg); err != nil {
+	if err := m.runtime.Create(ctx, instanceCfg); err != nil {
 		return err
 	}
 
@@ -655,10 +660,11 @@ func parsePortBindings(ports []string) ([]runtime.PortMapping, error) {
 	return result, nil
 }
 
-// createSecretsDir creates a temp directory with one file per API key.
-// Returns empty string if no keys are needed.
-func createSecretsDir(agentDef *agent.Definition) (string, error) {
-	if len(agentDef.APIKeyEnvVars) == 0 {
+// createSecretsDir creates a temp directory with one file per env var / API key.
+// Env vars are written first; API keys overwrite on conflict (take precedence).
+// Returns empty string if nothing was written.
+func createSecretsDir(agentDef *agent.Definition, envVars map[string]string) (string, error) {
+	if len(agentDef.APIKeyEnvVars) == 0 && len(envVars) == 0 {
 		return "", nil
 	}
 
@@ -668,13 +674,23 @@ func createSecretsDir(agentDef *agent.Definition) (string, error) {
 	}
 
 	wrote := false
+
+	// Write env vars first
+	for k, v := range envVars {
+		if err := os.WriteFile(filepath.Join(tmpDir, k), []byte(v), 0600); err != nil {
+			_ = os.RemoveAll(tmpDir)
+			return "", fmt.Errorf("write env %s: %w", k, err)
+		}
+		wrote = true
+	}
+
+	// Write API keys (overwrites env vars on conflict — API keys take precedence)
 	for _, key := range agentDef.APIKeyEnvVars {
 		value := os.Getenv(key)
 		if value == "" {
 			continue
 		}
-		keyPath := filepath.Join(tmpDir, key)
-		if err := os.WriteFile(keyPath, []byte(value), 0600); err != nil { //nolint:gosec // G703: key is from agent definition, not user input
+		if err := os.WriteFile(filepath.Join(tmpDir, key), []byte(value), 0600); err != nil { //nolint:gosec // G703: key is from agent definition, not user input
 			_ = os.RemoveAll(tmpDir)
 			return "", fmt.Errorf("write secret %s: %w", key, err)
 		}
@@ -807,12 +823,16 @@ func buildMounts(state *sandboxState, secretsDir string) []runtime.MountSpec {
 		}
 	}
 
-	// Secrets
+	// Secrets (env vars + API keys)
 	if secretsDir != "" {
-		for _, key := range state.agent.APIKeyEnvVars {
+		entries, _ := os.ReadDir(secretsDir)
+		for _, e := range entries {
+			if e.IsDir() {
+				continue
+			}
 			mounts = append(mounts, runtime.MountSpec{
-				Source:   filepath.Join(secretsDir, key),
-				Target:   filepath.Join("/run/secrets", key),
+				Source:   filepath.Join(secretsDir, e.Name()),
+				Target:   filepath.Join("/run/secrets", e.Name()),
 				ReadOnly: true,
 			})
 		}

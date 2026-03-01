@@ -53,7 +53,7 @@ defaults:
   # copy_strategy: auto                  # [PLANNED] auto | overlay | full (currently full copy only)
   # auto_commit_interval: 0              # [PLANNED] seconds between auto-commits in :copy dirs; 0 = disabled
   # ports: []                            # [PLANNED] default port mappings; profile ports are additive
-  # env: {}                              # [PLANNED] environment variables passed to container
+  env: {}                                # Environment variables forwarded to container via /run/secrets/
   # network_isolated: false              # [PLANNED] true to enable network isolation by default
   # network_allow: []                    # [PLANNED] additional domains to allow (additive with agent defaults)
   # resources:                           # [PLANNED] container resource limits
@@ -72,13 +72,23 @@ Settings are managed via `yoloai config get/set` or by editing `~/.yoloai/config
 - `defaults.tmux_conf` controls how user tmux config interacts with the container. Set by the interactive first-run setup. Values: `default+host`, `default`, `host`, `none` (see [setup.md](setup.md#tmux-configuration)).
 - `defaults.agent` selects the agent to launch. Valid values: `aider`, `claude`, `codex`, `gemini`, `opencode`. CLI `--agent` overrides config.
 - `defaults.model` sets the model name or alias passed to the agent. Empty means the agent uses its own default. CLI `--model` overrides config.
+- `defaults.env` sets environment variables forwarded to the container. Values are written as files in `/run/secrets/` (same mechanism as API keys). API keys take precedence if a name conflicts. Supports `${VAR}` expansion. Set via `yoloai config set defaults.env.NAME value`. Profile `env` merges with defaults (profile values win on conflict).
+
+**Use case: local models with Aider.** Aider can use local model servers (Ollama, LM Studio, vLLM) via environment variables. Example:
+
+```yaml
+defaults:
+  env:
+    OLLAMA_API_BASE: http://host.docker.internal:11434
+```
+
+With profiles (future), a "local-models" profile can bundle env, network config, and Dockerfile additions for a turnkey local-model setup.
 
 **Planned settings (not yet parsed from config):**
 - `defaults.agent_files` will control what files are copied into the sandbox's `agent-state/` directory on first run. Set to `home` to copy from the agent's default state directory (`~/.claude/` for Claude, `~/.codex/` for Codex). Set to a list of paths (`~/` or absolute) for deterministic setups. Relative paths without `~/` are an error. Omit entirely to copy nothing (safe default). Profile `agent_files` **replaces** (not merges with) defaults.
 - `defaults.mounts` will be bind mounts added at container run time. Profile mounts are **additive** (merged with defaults, no deduplication — duplicates are a user error).
 - `defaults.ports` will be default port mappings. Profile ports are additive.
 - `defaults.resources` will set baseline limits. Profiles can override individual values.
-- `defaults.env` will set environment variables passed to the container via `docker run -e`. Profile `env` is merged with defaults (profile values win on conflict). Note: API keys (e.g., `ANTHROPIC_API_KEY`, `CODEX_API_KEY`) are injected via file-based bind mount, not `env` — see [security.md](security.md#credential-management).
 - `defaults.network_isolated` will enable network isolation for all sandboxes. Profile can override. CLI `--network-isolated` flag overrides config.
 - `defaults.network_allow` will list additional allowed domains. Non-empty `network_allow` implies `network_isolated: true`. Profile `network_allow` is additive with defaults. CLI `--network-allow` is additive with config.
 

@@ -38,7 +38,7 @@ Create a plan file in this directory before starting implementation.
 | `auto_commit_interval` | [config.md](../../design/config.md) | Background auto-commit for `:copy` dirs |
 | `agent_files` | [config.md](../../design/config.md) | Files seeded into agent-state/ on first run |
 | `mounts` | [config.md](../../design/config.md) | Bind mounts added at container run time |
-| `env` | [config.md](../../design/config.md) | Environment variables passed to container |
+| [DONE] `env` | [config.md](../../design/config.md) | Environment variables forwarded to container via /run/secrets/ |
 | `network_isolated` | [config.md](../../design/config.md) | Enable network isolation by default |
 | `network_allow` | [config.md](../../design/config.md) | Additional allowed domains |
 | `resources` | [config.md](../../design/config.md) | Container resource limits (cpus, memory) |

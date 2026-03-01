@@ -13,12 +13,13 @@ import (
 
 // YoloaiConfig holds the subset of config.yaml fields that the Go code reads.
 type YoloaiConfig struct {
-	SetupComplete bool   `yaml:"setup_complete"`
-	TmuxConf      string `yaml:"tmux_conf"`  // from defaults.tmux_conf
-	Backend       string `yaml:"backend"`    // from defaults.backend
-	TartImage     string `yaml:"tart_image"` // from defaults.tart_image — custom base VM image for tart backend
-	Agent         string `yaml:"agent"`      // from defaults.agent
-	Model         string `yaml:"model"`      // from defaults.model
+	SetupComplete bool              `yaml:"setup_complete"`
+	TmuxConf      string            `yaml:"tmux_conf"`  // from defaults.tmux_conf
+	Backend       string            `yaml:"backend"`    // from defaults.backend
+	TartImage     string            `yaml:"tart_image"` // from defaults.tart_image — custom base VM image for tart backend
+	Agent         string            `yaml:"agent"`      // from defaults.agent
+	Model         string            `yaml:"model"`      // from defaults.model
+	Env           map[string]string `yaml:"env"`        // from defaults.env — environment variables passed to container
 }
 
 // knownSetting defines a config key with its default value.
@@ -89,8 +90,25 @@ func LoadConfig() (*YoloaiConfig, error) {
 			if val.Kind == yaml.MappingNode {
 				for j := 0; j < len(val.Content)-1; j += 2 {
 					fieldName := val.Content[j].Value
-					raw := val.Content[j+1].Value
-					expanded, err := expandEnvBraced(raw)
+					fieldVal := val.Content[j+1]
+
+					// env is a mapping, not a scalar — handle separately
+					if fieldName == "env" {
+						if fieldVal.Kind == yaml.MappingNode {
+							cfg.Env = make(map[string]string, len(fieldVal.Content)/2)
+							for k := 0; k < len(fieldVal.Content)-1; k += 2 {
+								envKey := fieldVal.Content[k].Value
+								envExpanded, envErr := expandEnvBraced(fieldVal.Content[k+1].Value)
+								if envErr != nil {
+									return nil, fmt.Errorf("defaults.env.%s: %w", envKey, envErr)
+								}
+								cfg.Env[envKey] = envExpanded
+							}
+						}
+						continue
+					}
+
+					expanded, err := expandEnvBraced(fieldVal.Value)
 					if err != nil {
 						return nil, fmt.Errorf("defaults.%s: %w", fieldName, err)
 					}

@@ -100,6 +100,68 @@ func TestLoadConfig_ModelOverride(t *testing.T) {
 	assert.Equal(t, "o3", cfg.Model)
 }
 
+func TestLoadConfig_EnvMap(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	yoloaiDir := filepath.Join(tmpDir, ".yoloai")
+	require.NoError(t, os.MkdirAll(yoloaiDir, 0750))
+
+	content := "defaults:\n  env:\n    OLLAMA_API_BASE: http://host.docker.internal:11434\n    CUSTOM_VAR: myvalue\n"
+	require.NoError(t, os.WriteFile(filepath.Join(yoloaiDir, "config.yaml"), []byte(content), 0600))
+
+	cfg, err := LoadConfig()
+	require.NoError(t, err)
+	require.Len(t, cfg.Env, 2)
+	assert.Equal(t, "http://host.docker.internal:11434", cfg.Env["OLLAMA_API_BASE"])
+	assert.Equal(t, "myvalue", cfg.Env["CUSTOM_VAR"])
+}
+
+func TestLoadConfig_EnvExpansion(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+	t.Setenv("YOLOAI_TEST_HOST", "localhost")
+
+	yoloaiDir := filepath.Join(tmpDir, ".yoloai")
+	require.NoError(t, os.MkdirAll(yoloaiDir, 0750))
+
+	content := "defaults:\n  env:\n    API_BASE: http://${YOLOAI_TEST_HOST}:11434\n"
+	require.NoError(t, os.WriteFile(filepath.Join(yoloaiDir, "config.yaml"), []byte(content), 0600))
+
+	cfg, err := LoadConfig()
+	require.NoError(t, err)
+	require.Len(t, cfg.Env, 1)
+	assert.Equal(t, "http://localhost:11434", cfg.Env["API_BASE"])
+}
+
+func TestLoadConfig_EnvExpansionError(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	yoloaiDir := filepath.Join(tmpDir, ".yoloai")
+	require.NoError(t, os.MkdirAll(yoloaiDir, 0750))
+
+	content := "defaults:\n  env:\n    BAD_VAR: ${DEFINITELY_NOT_SET}\n"
+	require.NoError(t, os.WriteFile(filepath.Join(yoloaiDir, "config.yaml"), []byte(content), 0600))
+
+	_, err := LoadConfig()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "defaults.env.BAD_VAR")
+}
+
+func TestLoadConfig_EnvEmpty(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	yoloaiDir := filepath.Join(tmpDir, ".yoloai")
+	require.NoError(t, os.MkdirAll(yoloaiDir, 0750))
+	require.NoError(t, os.WriteFile(filepath.Join(yoloaiDir, "config.yaml"), []byte(defaultConfigYAML), 0600))
+
+	cfg, err := LoadConfig()
+	require.NoError(t, err)
+	assert.Nil(t, cfg.Env)
+}
+
 func TestLoadConfig_MissingFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)

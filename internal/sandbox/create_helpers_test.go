@@ -87,7 +87,7 @@ func TestCreateSecretsDir_WithKey(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "sk-test-secret")
 	agentDef := agent.GetAgent("claude")
 
-	dir, err := createSecretsDir(agentDef)
+	dir, err := createSecretsDir(agentDef, nil)
 	require.NoError(t, err)
 	require.NotEmpty(t, dir)
 	defer os.RemoveAll(dir) //nolint:errcheck
@@ -101,7 +101,7 @@ func TestCreateSecretsDir_NoKey(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "")
 	agentDef := agent.GetAgent("claude")
 
-	dir, err := createSecretsDir(agentDef)
+	dir, err := createSecretsDir(agentDef, nil)
 	require.NoError(t, err)
 	assert.Empty(t, dir)
 }
@@ -109,7 +109,53 @@ func TestCreateSecretsDir_NoKey(t *testing.T) {
 func TestCreateSecretsDir_NoEnvVars(t *testing.T) {
 	agentDef := agent.GetAgent("test")
 
-	dir, err := createSecretsDir(agentDef)
+	dir, err := createSecretsDir(agentDef, nil)
+	require.NoError(t, err)
+	assert.Empty(t, dir)
+}
+
+func TestCreateSecretsDir_WithEnvVars(t *testing.T) {
+	agentDef := agent.GetAgent("test") // no API keys
+	envVars := map[string]string{
+		"OLLAMA_API_BASE": "http://host.docker.internal:11434",
+		"CUSTOM_VAR":      "myvalue",
+	}
+
+	dir, err := createSecretsDir(agentDef, envVars)
+	require.NoError(t, err)
+	require.NotEmpty(t, dir)
+	defer os.RemoveAll(dir) //nolint:errcheck
+
+	content, err := os.ReadFile(filepath.Join(dir, "OLLAMA_API_BASE")) //nolint:gosec
+	require.NoError(t, err)
+	assert.Equal(t, "http://host.docker.internal:11434", string(content))
+
+	content, err = os.ReadFile(filepath.Join(dir, "CUSTOM_VAR")) //nolint:gosec
+	require.NoError(t, err)
+	assert.Equal(t, "myvalue", string(content))
+}
+
+func TestCreateSecretsDir_APIKeyOverridesEnv(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "sk-real-key")
+	agentDef := agent.GetAgent("claude")
+	envVars := map[string]string{
+		"ANTHROPIC_API_KEY": "should-be-overwritten",
+	}
+
+	dir, err := createSecretsDir(agentDef, envVars)
+	require.NoError(t, err)
+	require.NotEmpty(t, dir)
+	defer os.RemoveAll(dir) //nolint:errcheck
+
+	content, err := os.ReadFile(filepath.Join(dir, "ANTHROPIC_API_KEY")) //nolint:gosec
+	require.NoError(t, err)
+	assert.Equal(t, "sk-real-key", string(content), "API key should override env var")
+}
+
+func TestCreateSecretsDir_EmptyBoth(t *testing.T) {
+	agentDef := agent.GetAgent("test")
+
+	dir, err := createSecretsDir(agentDef, map[string]string{})
 	require.NoError(t, err)
 	assert.Empty(t, dir)
 }

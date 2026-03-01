@@ -23,6 +23,7 @@ const defaultConfigYAML = `# yoloai configuration
 #   defaults.model        Model name or alias passed to the agent
 #   defaults.backend      Runtime backend: docker, tart, seatbelt
 #   defaults.tart_image   Custom base VM image (tart backend only)
+#   defaults.env.<NAME>   Environment variable passed to container
 
 setup_complete: false
 `

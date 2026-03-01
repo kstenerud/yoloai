@@ -1953,3 +1953,18 @@ Sources: [WWDC 2025](https://developer.apple.com/videos/play/wwdc2025/346/), [Ap
 4. **"Deprecated" is misleading.** Apple uses Seatbelt for everything. The deprecation notice is about the public API, not the subsystem. Functionally stable on macOS 15.
 5. **Apple Containerization is the long-term play** for Linux guests. Once macOS 26 is widely deployed, it could replace Docker as yoloAI's Linux container backend with better performance and per-container VM isolation.
 6. **No macOS-native container solution exists or is planned.** For running macOS guests in isolation, Tart VMs remain the only option. Apple Containerization is Linux-only.
+
+## Aider Local-Model Integration
+
+Aider supports local model servers via environment variables and model name conventions.
+
+**Ollama:** Set `OLLAMA_API_BASE=http://host.docker.internal:11434` and use model format `ollama_chat/<model>` (e.g., `ollama_chat/llama3`). `host.docker.internal` resolves to the host on macOS and Windows Docker Desktop. On Linux, `--add-host=host.docker.internal:host-gateway` is needed (future enhancement).
+
+**Other local servers:** LM Studio, vLLM, and llama.cpp's server all expose OpenAI-compatible APIs. Aider connects via `OPENAI_API_BASE` pointed at the local endpoint, with `OPENAI_API_KEY` set to any non-empty value (local servers don't validate keys).
+
+**Network considerations:** Local model servers run on the host. Containers reach the host via `host.docker.internal` (macOS/Windows) or `--add-host` (Linux). Network-isolated sandboxes (`--network-none`) cannot reach local servers — this is by design. Future profile support could add `--add-host` configuration.
+
+**Profile vision:** A "local-models" profile would bundle:
+- `env` entries for model server URLs
+- Network configuration for host access
+- Optional Dockerfile additions for model-specific dependencies

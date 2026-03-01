@@ -108,7 +108,7 @@ Dependency direction: `cmd/yoloai` → `cli` → `sandbox` + `runtime`; `sandbox
 | File | Purpose |
 |------|---------|
 | `manager.go` | `Manager` struct — central orchestrator. Holds a `runtime.Runtime`. `EnsureSetup()` / `EnsureSetupNonInteractive()` for first-run auto-setup (dirs, resources, image, config). |
-| `create.go` | `Create()` — full sandbox creation: validate, safety checks, copy workdir, git baseline, seed files, build mounts, launch container. Also contains `launchContainer()`, `buildMounts()`, `createSecretsDir()`, `copySeedFiles()`. On macOS, when a seed file with `KeychainService` set is not found on disk, the system falls back to reading credentials from the macOS Keychain (via `security find-generic-password`). Platform-specific code is in `keychain_darwin.go` / `keychain_other.go`. |
+| `create.go` | `Create()` — full sandbox creation: validate, safety checks, copy workdir, git baseline, seed files, build mounts, launch container. Also contains `launchContainer()`, `buildMounts()`, `createSecretsDir()` (writes config env vars + API keys from host env to /run/secrets/), `copySeedFiles()`. On macOS, when a seed file with `KeychainService` set is not found on disk, the system falls back to reading credentials from the macOS Keychain (via `security find-generic-password`). Platform-specific code is in `keychain_darwin.go` / `keychain_other.go`. |
 | `lifecycle.go` | `Start()`, `Stop()`, `Destroy()`, `Reset()` — sandbox lifecycle. `recreateContainer()` and `relaunchAgent()` for restart scenarios. `resetInPlace()` for `--no-restart` resets. |
 | `diff.go` | `GenerateDiff()`, `GenerateDiffStat()`, `GenerateCommitDiff()`, `ListCommitsWithStats()` — diff generation for both `:copy` and `:rw` modes. |
 | `apply.go` | `GeneratePatch()`, `CheckPatch()`, `ApplyPatch()` — squash apply via `git apply`. `GenerateFormatPatch()`, `ApplyFormatPatch()` — per-commit apply via `git am`. `ListCommitsBeyondBaseline()`, `AdvanceBaseline()`, `AdvanceBaselineTo()`. |
@@ -196,7 +196,7 @@ newNewCmd (cli/commands.go)
           → readPrompt → resolveModel → buildAgentCommand
           → SaveMeta (meta.json with Directories field) → write prompt.txt, log.txt, config.json
       → launchContainer:
-          createSecretsDir (temp files from env vars)
+          createSecretsDir (config env vars + API keys from host env)
           → buildMounts (workdir + aux dirs) → runtime.Create → runtime.Start
           → runtime.Inspect (verify running) → cleanup secrets
 ```
