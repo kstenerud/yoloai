@@ -118,6 +118,7 @@ Dependency direction: `cmd/yoloai` → `cli` → `sandbox` + `runtime`; `sandbox
 | `paths.go` | `EncodePath()` / `DecodePath()` — caret encoding for filesystem-safe names. `InstanceName()` (and deprecated alias `ContainerName()`), `Dir()`, `WorkDir()`, `RequireSandboxDir()`. |
 | `parse.go` | `ParseDirArg()` — parses `path:copy`, `path:rw`, `path:force` suffixes into `DirArg`. |
 | `safety.go` | `IsDangerousDir()`, `CheckPathOverlap()`, `CheckDirtyRepo()` — pre-creation safety checks. |
+| `context.go` | `GenerateContext()` — builds markdown description of sandbox environment (dirs, network, resources). `WriteContextFiles()` — writes `context.md` to sandbox dir and inlines context into agent instruction file (e.g., `CLAUDE.md`). |
 | `config.go` | `LoadConfig()`, `UpdateConfigFields()`, `DeleteConfigField()`, `ConfigPath()`, `ReadConfigRaw()`, `GetConfigValue()`, `GetEffectiveConfig()` — read/write `~/.yoloai/profiles/base/config.yaml` preserving YAML comments via `yaml.Node`. Dotted-path get/set/delete with default fallback for CLI `config get/set/reset` commands. |
 | `state.go` | `LoadState()`, `SaveState()` — read/write `~/.yoloai/state.yaml` containing global state like `setup_complete`. |
 | `migration.go` | `MigrateConfigIfNeeded()` — handles migration from old config structure (`~/.yoloai/config.yaml` with `defaults:` nesting) to new structure (`~/.yoloai/profiles/base/config.yaml` with flat keys). |
@@ -141,7 +142,7 @@ All parameters for `Manager.Create()`. Mirrors CLI flags: name, workdir, auxilia
 Input/output for `GenerateDiff()`. Supports path filtering and stat-only mode. `DiffResult` carries the diff text, workdir, mode, and empty flag.
 
 ### `agent.Definition`
-Describes an agent's commands (interactive/headless), prompt delivery mode, API key env vars, seed files, state directory, tmux submit sequence, model flag/aliases. Built-in: `aider`, `claude`, `codex`, `gemini`, `opencode`, `test`, and `shell`.
+Describes an agent's commands (interactive/headless), prompt delivery mode, API key env vars, seed files, state directory, tmux submit sequence, model flag/aliases, and `ContextFile` (native instruction file for sandbox context injection). Built-in: `aider`, `claude`, `codex`, `gemini`, `opencode`, `test`, and `shell`.
 
 ### `runtime.Runtime`
 Pluggable runtime interface for backend abstraction. Methods: `Create()`, `Start()`, `Stop()`, `Remove()`, `Inspect()`, `Exec()`, `InteractiveExec()`, `EnsureImage()`, `Close()`. Allows swapping container/VM backends.
@@ -200,6 +201,7 @@ newNewCmd (cli/commands.go)
           → copySeedFiles → ensureContainerSettings
           → readPrompt → resolveModel → buildAgentCommand
           → SaveMeta (meta.json with Directories field) → write prompt.txt, log.txt, config.json
+          → WriteContextFiles (context.md + agent instruction file)
       → launchContainer:
           createSecretsDir (config env vars + API keys from host env)
           → buildMounts (workdir + aux dirs) → runtime.Create → runtime.Start
@@ -271,6 +273,7 @@ Manager.Start (sandbox/lifecycle.go)
 │   └── <name>/
 │       ├── meta.json        # Sandbox metadata (agent, workdir, baseline SHA)
 │       ├── config.json      # Container runtime config (agent cmd, tmux settings)
+│       ├── context.md       # Sandbox environment description (dirs, network, resources)
 │       ├── prompt.txt       # Agent prompt (if provided)
 │       ├── log.txt          # Session log
 │       ├── agent-state/     # Mounted at agent's StateDir (e.g., /home/yoloai/.claude/, /home/yoloai/.gemini/)
