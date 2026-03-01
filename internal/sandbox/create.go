@@ -42,25 +42,26 @@ type CreateOptions struct {
 
 // sandboxState holds resolved state computed during preparation.
 type sandboxState struct {
-	name         string
-	sandboxDir   string
-	workdir      *DirArg
-	workCopyDir  string
-	auxDirs      []*DirArg
-	agent        *agent.Definition
-	model        string
-	profile      string
-	imageRef     string
-	env          map[string]string // merged env (base + profile chain)
-	hasPrompt    bool
-	networkMode  string
-	networkAllow []string
-	ports        []string
-	configMounts []string // extra bind mounts from config/profile (host:container[:ro])
-	tmuxConf     string
-	resources    *ResourceLimits
-	meta         *Meta
-	configJSON   []byte
+	name             string
+	sandboxDir       string
+	workdir          *DirArg
+	workCopyDir      string
+	auxDirs          []*DirArg
+	agent            *agent.Definition
+	model            string
+	profile          string
+	imageRef         string
+	env              map[string]string // merged env (base + profile chain)
+	hasPrompt        bool
+	promptSourcePath string // overrides default prompt.txt path for /yoloai/prompt.txt mount
+	networkMode      string
+	networkAllow     []string
+	ports            []string
+	configMounts     []string // extra bind mounts from config/profile (host:container[:ro])
+	tmuxConf         string
+	resources        *ResourceLimits
+	meta             *Meta
+	configJSON       []byte
 }
 
 // containerConfig is the serializable form of /yoloai/config.json.
@@ -77,6 +78,7 @@ type containerConfig struct {
 	Debug           bool     `json:"debug,omitempty"`
 	NetworkIsolated bool     `json:"network_isolated,omitempty"`
 	AllowedDomains  []string `json:"allowed_domains,omitempty"`
+	Passthrough     []string `json:"passthrough,omitempty"`
 }
 
 // Create creates and optionally starts a new sandbox.
@@ -566,7 +568,7 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 	}
 
 	// Build config.json
-	configData, err := buildContainerConfig(agentDef, agentCommand, tmuxConf, workdir.ResolvedMountPath(), opts.Debug, networkMode == "isolated", networkAllow)
+	configData, err := buildContainerConfig(agentDef, agentCommand, tmuxConf, workdir.ResolvedMountPath(), opts.Debug, networkMode == "isolated", networkAllow, opts.Passthrough)
 	if err != nil {
 		return nil, fmt.Errorf("build config.json: %w", err)
 	}
@@ -855,7 +857,7 @@ func shellEscapeForDoubleQuotes(s string) string {
 }
 
 // buildContainerConfig creates the config.json content.
-func buildContainerConfig(agentDef *agent.Definition, agentCommand string, tmuxConf string, workingDir string, debug bool, networkIsolated bool, allowedDomains []string) ([]byte, error) {
+func buildContainerConfig(agentDef *agent.Definition, agentCommand string, tmuxConf string, workingDir string, debug bool, networkIsolated bool, allowedDomains []string, passthrough []string) ([]byte, error) {
 	var stateDirName string
 	if agentDef.StateDir != "" {
 		stateDirName = filepath.Base(agentDef.StateDir)
@@ -873,6 +875,7 @@ func buildContainerConfig(agentDef *agent.Definition, agentCommand string, tmuxC
 		Debug:           debug,
 		NetworkIsolated: networkIsolated,
 		AllowedDomains:  allowedDomains,
+		Passthrough:     passthrough,
 	}
 	return json.MarshalIndent(cfg, "", "  ")
 }
@@ -1042,8 +1045,12 @@ func buildMounts(state *sandboxState, secretsDir string) []runtime.MountSpec {
 
 	// Prompt file
 	if state.hasPrompt {
+		promptSource := filepath.Join(state.sandboxDir, "prompt.txt")
+		if state.promptSourcePath != "" {
+			promptSource = state.promptSourcePath
+		}
 		mounts = append(mounts, runtime.MountSpec{
-			Source:   filepath.Join(state.sandboxDir, "prompt.txt"),
+			Source:   promptSource,
 			Target:   "/yoloai/prompt.txt",
 			ReadOnly: true,
 		})

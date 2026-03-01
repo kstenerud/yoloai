@@ -15,7 +15,7 @@ Create a plan file in this directory before starting implementation.
 
 | Feature | Design Reference | Plan | Notes |
 |---------|-----------------|------|-------|
-| `--resume` on `start` | [commands.md](../../design/commands.md) | — | Re-feed original prompt with continuation preamble |
+| ~~`--resume` on `start`~~ | [commands.md](../../design/commands.md) | — | Done |
 | `--power-user` on `setup` | [setup.md](../../design/setup.md) | — | Non-interactive setup for automation |
 | `list` filters | [commands.md](../../design/commands.md) | — | `--running`, `--stopped` |
 

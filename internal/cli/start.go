@@ -24,6 +24,7 @@ func newStartCmd() *cobra.Command {
 			}
 
 			attach, _ := cmd.Flags().GetBool("attach")
+			resume, _ := cmd.Flags().GetBool("resume")
 
 			if jsonEnabled(cmd) && attach {
 				return fmt.Errorf("--json and --attach are incompatible")
@@ -32,7 +33,7 @@ func newStartCmd() *cobra.Command {
 			backend := resolveBackendForSandbox(name)
 			return withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
 				mgr := sandbox.NewManager(rt, backend, slog.Default(), cmd.InOrStdin(), cmd.ErrOrStderr())
-				if err := mgr.Start(ctx, name); err != nil {
+				if err := mgr.Start(ctx, name, resume); err != nil {
 					return err
 				}
 
@@ -58,6 +59,7 @@ func newStartCmd() *cobra.Command {
 	}
 
 	cmd.Flags().BoolP("attach", "a", false, "Auto-attach after starting")
+	cmd.Flags().Bool("resume", false, "Re-feed original prompt with continuation preamble")
 
 	return cmd
 }

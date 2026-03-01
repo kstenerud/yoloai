@@ -3,6 +3,7 @@ package sandbox
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -26,6 +27,7 @@ type lifecycleMockRuntime struct {
 	startFn   func(ctx context.Context, name string) error
 	removeFn  func(ctx context.Context, name string) error
 	inspectFn func(ctx context.Context, name string) (runtime.InstanceInfo, error)
+	execFn    func(ctx context.Context, name string, cmd []string, user string) (runtime.ExecResult, error)
 }
 
 func (m *lifecycleMockRuntime) Stop(ctx context.Context, name string) error {
@@ -54,6 +56,13 @@ func (m *lifecycleMockRuntime) Inspect(ctx context.Context, name string) (runtim
 		return m.inspectFn(ctx, name)
 	}
 	return runtime.InstanceInfo{}, errMockNotImplemented
+}
+
+func (m *lifecycleMockRuntime) Exec(ctx context.Context, name string, cmd []string, user string) (runtime.ExecResult, error) {
+	if m.execFn != nil {
+		return m.execFn(ctx, name, cmd, user)
+	}
+	return m.mockRuntime.Exec(ctx, name, cmd, user)
 }
 
 // newLifecycleMgr creates a Manager with the given mock runtime and a discard output.
@@ -168,7 +177,7 @@ func TestStart_AlreadyRunning(t *testing.T) {
 	// DetectStatus will call Inspect (running=true),
 	// then try Exec for tmux. Since our mock returns errMockNotImplemented
 	// for exec, DetectStatus defaults to StatusRunning.
-	err := mgr.Start(context.Background(), "test-start-running")
+	err := mgr.Start(context.Background(), "test-start-running", false)
 	require.NoError(t, err)
 	assert.Contains(t, output.String(), "already running")
 }
@@ -194,7 +203,7 @@ func TestStart_Stopped(t *testing.T) {
 
 	// After remove, Start routes to recreateContainer which fails
 	// (no config.json) — same pattern as TestStart_Removed.
-	err := mgr.Start(context.Background(), "test-start-stopped")
+	err := mgr.Start(context.Background(), "test-start-stopped", false)
 	assert.Error(t, err)
 	assert.True(t, removeCalled, "should remove stopped container before recreating")
 	assert.Contains(t, err.Error(), "config.json")
@@ -206,7 +215,7 @@ func TestStart_SandboxNotFound(t *testing.T) {
 
 	mock := &lifecycleMockRuntime{}
 	mgr := newLifecycleMgr(mock)
-	err := mgr.Start(context.Background(), "nonexistent")
+	err := mgr.Start(context.Background(), "nonexistent", false)
 	assert.ErrorIs(t, err, ErrSandboxNotFound)
 }
 
@@ -226,10 +235,171 @@ func TestStart_Removed(t *testing.T) {
 
 	// recreateContainer will fail because there's no config.json,
 	// but we're testing that Start routes to recreateContainer for StatusRemoved.
-	err := mgr.Start(context.Background(), "test-start-removed")
+	err := mgr.Start(context.Background(), "test-start-removed", false)
 	assert.Error(t, err)
 	// Should be a recreateContainer error (config.json missing), not a routing error
 	assert.Contains(t, err.Error(), "config.json")
+}
+
+func TestStart_Resume_RequiresPrompt(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	// Create sandbox WITHOUT HasPrompt
+	createTestSandbox(t, tmpDir, "test-resume-noprompt", "/tmp/project", "copy")
+
+	mock := &lifecycleMockRuntime{
+		inspectFn: func(_ context.Context, _ string) (runtime.InstanceInfo, error) {
+			return runtime.InstanceInfo{Running: false}, nil
+		},
+	}
+
+	mgr := newLifecycleMgr(mock)
+	err := mgr.Start(context.Background(), "test-resume-noprompt", true)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "--resume requires a sandbox created with --prompt")
+}
+
+func TestStart_Resume_DoneStatus(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	name := "test-resume-done"
+	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
+	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
+
+	// Create meta with HasPrompt=true
+	meta := &Meta{
+		Name:      name,
+		Agent:     "claude",
+		HasPrompt: true,
+		CreatedAt: time.Now(),
+		Workdir: WorkdirMeta{
+			HostPath:  "/tmp/project",
+			MountPath: "/tmp/project",
+			Mode:      "copy",
+		},
+	}
+	require.NoError(t, SaveMeta(sandboxDir, meta))
+
+	// Write prompt.txt
+	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, "prompt.txt"), []byte("Write hello world"), 0600))
+
+	// Write config.json
+	cfg := containerConfig{
+		AgentCommand:   "claude --dangerously-skip-permissions --print \"Write hello world\"",
+		SubmitSequence: "Enter",
+		ReadyPattern:   "> $",
+	}
+	cfgData, err := json.MarshalIndent(cfg, "", "  ")
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, "config.json"), cfgData, 0600))
+
+	// Track exec calls
+	var execCalls [][]string
+	mock := &lifecycleMockRuntime{
+		inspectFn: func(_ context.Context, _ string) (runtime.InstanceInfo, error) {
+			return runtime.InstanceInfo{Running: true}, nil
+		},
+	}
+	// Override Exec to capture calls
+	mock.execFn = func(_ context.Context, _ string, cmd []string, _ string) (runtime.ExecResult, error) {
+		execCalls = append(execCalls, cmd)
+		// Status detection: tmux list-panes — return "1 0" to indicate done (pane dead, exit 0)
+		if len(cmd) > 0 && cmd[0] == "tmux" && len(cmd) > 1 && cmd[1] == "list-panes" {
+			return runtime.ExecResult{Stdout: "1 0\n"}, nil
+		}
+		// respawn-pane will succeed
+		if len(cmd) > 0 && cmd[0] == "tmux" && len(cmd) > 1 && cmd[1] == "respawn-pane" {
+			return runtime.ExecResult{}, nil
+		}
+		// Other tmux commands (wait for ready, etc.) may fail but that's OK
+		return runtime.ExecResult{ExitCode: 1}, fmt.Errorf("mock error")
+	}
+
+	mgr := newLifecycleMgr(mock)
+	_ = mgr.Start(context.Background(), name, true)
+	// The sendResumePrompt exec might fail but the respawn should have happened
+	// We just check that the respawn used interactive command (no headless prompt)
+
+	// Find the respawn-pane exec call
+	foundRespawn := false
+	for _, call := range execCalls {
+		if len(call) >= 5 && call[0] == "tmux" && call[1] == "respawn-pane" {
+			foundRespawn = true
+			// The command should be the interactive version (no "PROMPT" substitution)
+			agentCmd := call[5]
+			assert.NotContains(t, agentCmd, "Write hello world", "resume should use interactive command, not headless")
+			assert.Contains(t, agentCmd, "claude", "command should contain agent name")
+		}
+	}
+	assert.True(t, foundRespawn, "should have called tmux respawn-pane")
+}
+
+func TestStart_Resume_StoppedStatus(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	name := "test-resume-stopped"
+	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
+	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
+
+	meta := &Meta{
+		Name:      name,
+		Agent:     "claude",
+		HasPrompt: true,
+		CreatedAt: time.Now(),
+		Workdir: WorkdirMeta{
+			HostPath:  "/tmp/project",
+			MountPath: "/tmp/project",
+			Mode:      "copy",
+		},
+	}
+	require.NoError(t, SaveMeta(sandboxDir, meta))
+
+	// Write prompt.txt
+	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, "prompt.txt"), []byte("Write hello world"), 0600))
+
+	// Write config.json with headless command
+	cfg := containerConfig{
+		AgentCommand:   "claude --dangerously-skip-permissions --print \"Write hello world\"",
+		SubmitSequence: "Enter",
+		ReadyPattern:   "> $",
+	}
+	cfgData, err := json.MarshalIndent(cfg, "", "  ")
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, "config.json"), cfgData, 0600))
+
+	mock := &lifecycleMockRuntime{
+		inspectFn: func(_ context.Context, _ string) (runtime.InstanceInfo, error) {
+			// Container exists but stopped
+			return runtime.InstanceInfo{Running: false}, nil
+		},
+		removeFn: func(_ context.Context, _ string) error {
+			return nil
+		},
+	}
+
+	mgr := newLifecycleMgr(mock)
+
+	// Start with resume will call prepareResumeFiles then recreateContainer.
+	// recreateContainer will fail (no work dir, no secrets etc.) but we can check
+	// that resume-prompt.txt was created and config.json was patched.
+	_ = mgr.Start(context.Background(), name, true)
+
+	// Verify config.json was patched to interactive command
+	updatedCfgData, err := os.ReadFile(filepath.Join(sandboxDir, "config.json")) //nolint:gosec // test file in controlled temp dir
+	require.NoError(t, err)
+	var updatedCfg containerConfig
+	require.NoError(t, json.Unmarshal(updatedCfgData, &updatedCfg))
+	assert.NotContains(t, updatedCfg.AgentCommand, "Write hello world",
+		"config.json should have interactive command after resume prep")
+	assert.Contains(t, updatedCfg.AgentCommand, "claude",
+		"config.json should still reference the agent")
+
+	// resume-prompt.txt is cleaned up by defer, so it may not exist anymore.
+	// But we can verify the config.json patch was permanent (design spec says
+	// interactive command is correct for future starts).
 }
 
 // NeedsConfirmation tests

@@ -69,7 +69,7 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 	assert.FileExists(t, filepath.Join(workDir, "main.go"))
 
 	// Step 4: Start the container
-	require.NoError(t, mgr.Start(ctx, sandboxName))
+	require.NoError(t, mgr.Start(ctx, sandboxName, false))
 
 	// Give the container a moment to start
 	time.Sleep(2 * time.Second)

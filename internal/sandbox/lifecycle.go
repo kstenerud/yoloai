@@ -12,6 +12,9 @@ import (
 	"github.com/kstenerud/yoloai/internal/agent"
 )
 
+const resumePreamble = "You were previously working on the following task and were interrupted. " +
+	"The work directory contains your progress so far. Continue where you left off:\n\n"
+
 // ResetOptions holds parameters for the reset command.
 type ResetOptions struct {
 	Name      string
@@ -31,7 +34,7 @@ func (m *Manager) Stop(ctx context.Context, name string) error {
 }
 
 // Start ensures a sandbox is running — idempotent.
-func (m *Manager) Start(ctx context.Context, name string) error {
+func (m *Manager) Start(ctx context.Context, name string, resume bool) error {
 	sandboxDir, err := RequireSandboxDir(name)
 	if err != nil {
 		return err
@@ -47,6 +50,9 @@ func (m *Manager) Start(ctx context.Context, name string) error {
 	if err != nil {
 		return fmt.Errorf("detect status: %w", err)
 	}
+	if resume && !meta.HasPrompt {
+		return fmt.Errorf("--resume requires a sandbox created with --prompt")
+	}
 
 	switch status {
 	case StatusRunning:
@@ -54,8 +60,14 @@ func (m *Manager) Start(ctx context.Context, name string) error {
 		return nil
 
 	case StatusDone, StatusFailed:
-		if err := m.relaunchAgent(ctx, name, meta); err != nil {
-			return err
+		if resume {
+			if err := m.relaunchAgentWithResume(ctx, name, meta); err != nil {
+				return err
+			}
+		} else {
+			if err := m.relaunchAgent(ctx, name, meta); err != nil {
+				return err
+			}
 		}
 		fmt.Fprintf(m.output, "Agent relaunched in sandbox %s\n", name) //nolint:errcheck // best-effort output
 		return nil
@@ -64,14 +76,26 @@ func (m *Manager) Start(ctx context.Context, name string) error {
 		if err := m.runtime.Remove(ctx, cname); err != nil {
 			return fmt.Errorf("remove stopped instance: %w", err)
 		}
-		if err := m.recreateContainer(ctx, name, meta); err != nil {
+		if resume {
+			if err := m.prepareResumeFiles(name, meta); err != nil {
+				return err
+			}
+			defer m.cleanupResumeFiles(name)
+		}
+		if err := m.recreateContainer(ctx, name, meta, resume); err != nil {
 			return err
 		}
 		fmt.Fprintf(m.output, "Sandbox %s started\n", name) //nolint:errcheck // best-effort output
 		return nil
 
 	case StatusRemoved:
-		if err := m.recreateContainer(ctx, name, meta); err != nil {
+		if resume {
+			if err := m.prepareResumeFiles(name, meta); err != nil {
+				return err
+			}
+			defer m.cleanupResumeFiles(name)
+		}
+		if err := m.recreateContainer(ctx, name, meta, resume); err != nil {
 			return err
 		}
 		fmt.Fprintf(m.output, "Sandbox %s recreated and started\n", name) //nolint:errcheck // best-effort output
@@ -228,7 +252,7 @@ func (m *Manager) Reset(ctx context.Context, opts ResetOptions) error {
 	}
 
 	// Start the container
-	return m.Start(ctx, opts.Name)
+	return m.Start(ctx, opts.Name, false)
 }
 
 // NeedsConfirmation checks if a sandbox requires confirmation before
@@ -258,7 +282,7 @@ func (m *Manager) NeedsConfirmation(ctx context.Context, name string) (bool, str
 }
 
 // recreateContainer creates a new Docker container from meta.json.
-func (m *Manager) recreateContainer(ctx context.Context, name string, meta *Meta) error {
+func (m *Manager) recreateContainer(ctx context.Context, name string, meta *Meta, resume bool) error {
 	agentDef := agent.GetAgent(meta.Agent)
 	if agentDef == nil {
 		return fmt.Errorf("unknown agent: %s", meta.Agent)
@@ -346,6 +370,10 @@ func (m *Manager) recreateContainer(ctx context.Context, name string, meta *Meta
 		configJSON:   configData,
 	}
 
+	if resume {
+		state.promptSourcePath = filepath.Join(sandboxDir, "resume-prompt.txt")
+	}
+
 	return m.launchContainer(ctx, state)
 }
 
@@ -372,6 +400,144 @@ func (m *Manager) relaunchAgent(ctx context.Context, name string, _ *Meta) error
 	}
 
 	return nil
+}
+
+// relaunchAgentWithResume relaunches the agent in interactive mode and sends
+// the resume prompt (preamble + original prompt) via tmux.
+func (m *Manager) relaunchAgentWithResume(ctx context.Context, name string, meta *Meta) error {
+	sandboxDir := Dir(name)
+
+	configData, err := os.ReadFile(filepath.Join(sandboxDir, "config.json")) //nolint:gosec // path is sandbox-controlled
+	if err != nil {
+		return fmt.Errorf("read config.json: %w", err)
+	}
+
+	var cfg containerConfig
+	if err := json.Unmarshal(configData, &cfg); err != nil {
+		return fmt.Errorf("parse config.json: %w", err)
+	}
+
+	agentDef := agent.GetAgent(meta.Agent)
+	if agentDef == nil {
+		return fmt.Errorf("unknown agent: %s", meta.Agent)
+	}
+
+	// Build interactive command (no headless prompt baked in)
+	interactiveCmd := buildAgentCommand(agentDef, meta.Model, "", cfg.Passthrough)
+
+	// Respawn with interactive command
+	_, err = execInContainer(ctx, m.runtime, InstanceName(name), []string{
+		"tmux", "respawn-pane", "-t", "main", "-k", interactiveCmd,
+	})
+	if err != nil {
+		return fmt.Errorf("relaunch agent: %w", err)
+	}
+
+	// Deliver resume prompt after agent is ready
+	return m.sendResumePrompt(ctx, name, sandboxDir, cfg)
+}
+
+// sendResumePrompt waits for the agent to be ready and delivers the resume
+// prompt (preamble + original prompt) via tmux load-buffer/paste-buffer.
+func (m *Manager) sendResumePrompt(ctx context.Context, name, sandboxDir string, cfg containerConfig) error {
+	promptData, err := os.ReadFile(filepath.Join(sandboxDir, "prompt.txt")) //nolint:gosec // path is sandbox-controlled
+	if err != nil {
+		return fmt.Errorf("read prompt.txt: %w", err)
+	}
+
+	resumeText := resumePreamble + string(promptData)
+
+	// Build a wait-for-ready + deliver script.
+	// Uses ready_pattern or startup_delay from config.json, following
+	// the same logic as the entrypoint.
+	var waitCmd string
+	switch {
+	case cfg.ReadyPattern != "":
+		// Poll tmux capture-pane output for the ready pattern
+		waitCmd = fmt.Sprintf(`for i in $(seq 1 60); do
+    if tmux capture-pane -t main -p 2>/dev/null | grep -q '%s'; then
+        break
+    fi
+    sleep 1
+done`, cfg.ReadyPattern)
+	case cfg.StartupDelay > 0:
+		delaySec := cfg.StartupDelay / 1000
+		if delaySec < 1 {
+			delaySec = 1
+		}
+		waitCmd = fmt.Sprintf("sleep %d", delaySec)
+	default:
+		waitCmd = "sleep 3"
+	}
+
+	script := fmt.Sprintf(`%s
+printf '%%s' "$1" > /tmp/yoloai-resume.txt
+tmux load-buffer /tmp/yoloai-resume.txt
+tmux paste-buffer -t main
+sleep 0.5
+for key in %s; do
+    tmux send-keys -t main "$key"
+    sleep 0.2
+done
+rm -f /tmp/yoloai-resume.txt`, waitCmd, cfg.SubmitSequence)
+
+	_, err = execInContainer(ctx, m.runtime, InstanceName(name), []string{
+		"bash", "-c", "nohup bash -c '" + strings.ReplaceAll(script, "'", "'\"'\"'") + "' _ \"$1\" >/dev/null 2>&1 &", "_", resumeText,
+	})
+	return err
+}
+
+// prepareResumeFiles writes the resume-prompt.txt and patches config.json
+// for resume mode (interactive command).
+func (m *Manager) prepareResumeFiles(name string, meta *Meta) error {
+	sandboxDir := Dir(name)
+
+	// Read original prompt
+	promptData, err := os.ReadFile(filepath.Join(sandboxDir, "prompt.txt")) //nolint:gosec // path is sandbox-controlled
+	if err != nil {
+		return fmt.Errorf("read prompt.txt: %w", err)
+	}
+
+	// Write resume-prompt.txt (preamble + original prompt)
+	resumeText := resumePreamble + string(promptData)
+	if err := os.WriteFile(filepath.Join(sandboxDir, "resume-prompt.txt"), []byte(resumeText), 0600); err != nil {
+		return fmt.Errorf("write resume-prompt.txt: %w", err)
+	}
+
+	// Patch config.json: replace agent_command with interactive version
+	configPath := filepath.Join(sandboxDir, "config.json")
+	configData, err := os.ReadFile(configPath) //nolint:gosec // path is sandbox-controlled
+	if err != nil {
+		return fmt.Errorf("read config.json: %w", err)
+	}
+
+	var cfg containerConfig
+	if err := json.Unmarshal(configData, &cfg); err != nil {
+		return fmt.Errorf("parse config.json: %w", err)
+	}
+
+	agentDef := agent.GetAgent(meta.Agent)
+	if agentDef == nil {
+		return fmt.Errorf("unknown agent: %s", meta.Agent)
+	}
+
+	cfg.AgentCommand = buildAgentCommand(agentDef, meta.Model, "", cfg.Passthrough)
+
+	updated, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal config.json: %w", err)
+	}
+
+	if err := os.WriteFile(configPath, updated, 0600); err != nil {
+		return fmt.Errorf("write config.json: %w", err)
+	}
+
+	return nil
+}
+
+// cleanupResumeFiles removes the temporary resume-prompt.txt file.
+func (m *Manager) cleanupResumeFiles(name string) {
+	_ = os.Remove(filepath.Join(Dir(name), "resume-prompt.txt"))
 }
 
 // resetInPlace resets the workspace while the agent is still running.
