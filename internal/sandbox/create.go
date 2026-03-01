@@ -381,8 +381,9 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 	}
 	hasPrompt := promptText != ""
 
-	// Resolve model alias
+	// Resolve model alias and apply provider prefix if needed
 	model := resolveModel(agentDef, opts.Model)
+	model = applyModelPrefix(agentDef, model, ycfg.Env)
 
 	// Build agent command
 	agentCommand := buildAgentCommand(agentDef, model, promptText, opts.Passthrough)
@@ -571,6 +572,24 @@ func resolveModel(agentDef *agent.Definition, model string) string {
 	if agentDef.ModelAliases != nil {
 		if resolved, ok := agentDef.ModelAliases[model]; ok {
 			return resolved
+		}
+	}
+	return model
+}
+
+// applyModelPrefix adds a provider prefix to the model name when needed.
+// For example, when using aider with OLLAMA_API_BASE, the model must be
+// prefixed with "ollama_chat/" for litellm to route it correctly.
+func applyModelPrefix(agentDef *agent.Definition, model string, configEnv map[string]string) string {
+	if model == "" || strings.Contains(model, "/") {
+		return model
+	}
+	if agentDef.ModelPrefixes == nil {
+		return model
+	}
+	for envVar, prefix := range agentDef.ModelPrefixes {
+		if os.Getenv(envVar) != "" || configEnv[envVar] != "" {
+			return prefix + model
 		}
 	}
 	return model

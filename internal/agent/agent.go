@@ -48,6 +48,7 @@ type Definition struct {
 	ReadyPattern    string // grep pattern in tmux output that signals agent is ready for input
 	ModelFlag       string
 	ModelAliases    map[string]string
+	ModelPrefixes   map[string]string // env var → model prefix (e.g. OLLAMA_API_BASE → "ollama_chat/")
 }
 
 var agents = map[string]*Definition{
@@ -73,6 +74,10 @@ var agents = map[string]*Definition{
 			"haiku":    "haiku",
 			"deepseek": "deepseek",
 			"flash":    "flash",
+		},
+		ModelPrefixes: map[string]string{
+			"OLLAMA_API_BASE": "ollama_chat/",
+			"OPENAI_API_BASE": "openai/",
 		},
 	},
 	"claude": {
