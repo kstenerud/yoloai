@@ -22,8 +22,7 @@ func TestHelpCmd_NoArgs_ShowsQuickstart(t *testing.T) {
 	require.NoError(t, cmd.Execute())
 
 	// quickstart.md content should contain the basic workflow
-	// (RunPager writes to os.Stdout, so we can't capture it directly in unit tests;
-	// instead we test runHelp logic and topic resolution separately below)
+	// (topic resolution tested separately below)
 }
 
 func TestTopicLookup_Primary(t *testing.T) {

@@ -100,7 +100,8 @@ Examples:
 				return err
 			}
 
-			return RunPager(strings.NewReader(result.Output + "\n"))
+			_, err = fmt.Fprintln(cmd.OutOrStdout(), result.Output)
+			return err
 		},
 	}
 
@@ -226,7 +227,8 @@ func diffRef(cmd *cobra.Command, name, ref string, stat bool) error {
 		return err
 	}
 
-	return RunPager(strings.NewReader(result.Output + "\n"))
+	_, err = fmt.Fprintln(cmd.OutOrStdout(), result.Output)
+	return err
 }
 
 // agentRunningWarning prints a warning to stderr if the agent is still running.
@@ -282,5 +284,6 @@ func diffMultiDir(cmd *cobra.Command, name string, stat bool) error {
 		return err
 	}
 
-	return RunPager(strings.NewReader(output))
+	_, err = fmt.Fprint(cmd.OutOrStdout(), output)
+	return err
 }

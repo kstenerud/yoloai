@@ -5,6 +5,7 @@ package cli
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 
@@ -44,5 +45,6 @@ func runLog(cmd *cobra.Command, args []string) error {
 	}
 	defer f.Close() //nolint:errcheck
 
-	return RunPager(f)
+	_, err = io.Copy(cmd.OutOrStdout(), f)
+	return err
 }
