@@ -21,8 +21,20 @@ debug_log "entrypoint starting (sandbox=$SANDBOX_DIR)"
 
 # --- Set up HOME redirection ---
 debug_log "setting up HOME redirection"
+ORIGINAL_HOME="$HOME"
 export HOME="$SANDBOX_DIR/home"
-mkdir -p "$HOME" "$HOME/.local/bin"
+mkdir -p "$HOME/.local/bin"
+export PATH="$HOME/.local/bin:$PATH"
+
+# Symlink CLI tools from the original HOME so agents find their own binaries
+# (e.g. Claude Code checks ~/.local/bin/claude for native installs)
+if [ -d "$ORIGINAL_HOME/.local/bin" ]; then
+    for bin in "$ORIGINAL_HOME/.local/bin"/*; do
+        [ -x "$bin" ] || continue
+        binname=$(basename "$bin")
+        [ ! -e "$HOME/.local/bin/$binname" ] && ln -sf "$bin" "$HOME/.local/bin/$binname"
+    done
+fi
 
 # Symlink agent state dir (e.g. .claude, .gemini) to agent-state
 STATE_DIR_NAME=$(jq -r '.state_dir_name // empty' "$CONFIG")
