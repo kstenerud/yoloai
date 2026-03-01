@@ -60,6 +60,8 @@ func newProfileCreateCmd() *cobra.Command {
 #   - "8080:8080"
 # env:
 #   MY_VAR: value
+# mounts:                    # extra bind mounts (host:container[:ro])
+#   - ~/.gitconfig:/home/yoloai/.gitconfig:ro
 # network:
 #   isolated: true           # enable network isolation
 #   allow:                   # domains allowed when isolated

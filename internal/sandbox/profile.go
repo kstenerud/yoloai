@@ -25,6 +25,7 @@ type ProfileConfig struct {
 	Directories []ProfileDir      // empty if not specified
 	Resources   *ResourceLimits   // resource limits (cpus, memory)
 	Network     *NetworkConfig    // network isolation settings
+	Mounts      []string          // extra bind mounts (host:container[:ro])
 }
 
 // ProfileWorkdir defines a workdir from a profile.
@@ -54,6 +55,7 @@ type MergedConfig struct {
 	Directories []ProfileDir      // additive across chain
 	Resources   *ResourceLimits   // from per-field merge across chain
 	Network     *NetworkConfig    // isolated overrides (last wins), allow additive
+	Mounts      []string          // additive across chain (host:container[:ro])
 }
 
 // ProfileDirPath returns the host-side directory for a profile.
@@ -221,6 +223,16 @@ func LoadProfile(name string) (*ProfileConfig, error) {
 			if val.Kind == yaml.SequenceNode {
 				for _, item := range val.Content {
 					cfg.Ports = append(cfg.Ports, item.Value)
+				}
+			}
+		case "mounts":
+			if val.Kind == yaml.SequenceNode {
+				for _, item := range val.Content {
+					expanded, expandErr := expandEnvBraced(item.Value)
+					if expandErr != nil {
+						return nil, fmt.Errorf("mounts[]: %w", expandErr)
+					}
+					cfg.Mounts = append(cfg.Mounts, expanded)
 				}
 			}
 		case "workdir":
@@ -416,6 +428,11 @@ func MergeProfileChain(base *YoloaiConfig, chain []string) (*MergedConfig, error
 		}
 	}
 
+	if len(base.Mounts) > 0 {
+		merged.Mounts = make([]string, len(base.Mounts))
+		copy(merged.Mounts, base.Mounts)
+	}
+
 	// Apply each non-base profile in order
 	for _, name := range chain {
 		if name == "base" {
@@ -483,6 +500,9 @@ func MergeProfileChain(base *YoloaiConfig, chain []string) (*MergedConfig, error
 			merged.Network.Isolated = profile.Network.Isolated
 			merged.Network.Allow = append(merged.Network.Allow, profile.Network.Allow...)
 		}
+
+		// Mounts: additive
+		merged.Mounts = append(merged.Mounts, profile.Mounts...)
 	}
 
 	return merged, nil

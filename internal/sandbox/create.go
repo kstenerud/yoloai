@@ -56,6 +56,7 @@ type sandboxState struct {
 	networkMode  string
 	networkAllow []string
 	ports        []string
+	configMounts []string // extra bind mounts from config/profile (host:container[:ro])
 	tmuxConf     string
 	resources    *ResourceLimits
 	meta         *Meta
@@ -146,6 +147,7 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 	// Profile resolution: load profile chain, merge config, resolve image.
 	var profileName, imageRef string
 	var resources *ResourceLimits
+	var mergedMounts []string
 	mergedEnv := ycfg.Env
 	if opts.Profile != "" {
 		if err := ValidateProfileName(opts.Profile); err != nil {
@@ -225,6 +227,9 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 			opts.NetworkAllow = append(merged.Network.Allow, opts.NetworkAllow...)
 		}
 
+		// Mounts: additive from merged profile chain
+		mergedMounts = merged.Mounts
+
 		// Resolve image ref
 		imageRef = ResolveProfileImage(opts.Profile, chain)
 		profileName = opts.Profile
@@ -241,6 +246,11 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 		resources = &r
 	}
 
+	// Mounts from base config (if profile didn't set them)
+	if opts.Profile == "" && len(ycfg.Mounts) > 0 {
+		mergedMounts = ycfg.Mounts
+	}
+
 	// Network from base config (if profile didn't set it and CLI didn't override)
 	if opts.Profile == "" && ycfg.Network != nil && !opts.NetworkNone && !opts.NetworkIsolated {
 		if ycfg.Network.Isolated {
@@ -248,6 +258,19 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 		}
 		opts.NetworkAllow = append(ycfg.Network.Allow, opts.NetworkAllow...)
 	}
+	// Validate and expand config mounts
+	for i, m := range mergedMounts {
+		spec, parseErr := parseConfigMount(m)
+		if parseErr != nil {
+			return nil, fmt.Errorf("invalid mount %q: %w", m, parseErr)
+		}
+		// Re-store with expanded host path
+		mergedMounts[i] = spec.Source + ":" + spec.Target
+		if spec.ReadOnly {
+			mergedMounts[i] += ":ro"
+		}
+	}
+
 	// CLI overrides for resources
 	if opts.CPUs != "" {
 		if resources == nil {
@@ -570,6 +593,7 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 		NetworkAllow: networkAllow,
 		Ports:        opts.Ports,
 		Resources:    resources,
+		Mounts:       mergedMounts,
 	}
 
 	if err := SaveMeta(sandboxDir, meta); err != nil {
@@ -610,6 +634,7 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 		networkMode:  networkMode,
 		networkAllow: networkAllow,
 		ports:        opts.Ports,
+		configMounts: mergedMounts,
 		tmuxConf:     tmuxConf,
 		resources:    resources,
 		meta:         meta,
@@ -1078,6 +1103,15 @@ func buildMounts(state *sandboxState, secretsDir string) []runtime.MountSpec {
 		}
 	}
 
+	// Config/profile mounts (host:container[:ro])
+	for _, m := range state.configMounts {
+		spec, err := parseConfigMount(m)
+		if err != nil {
+			continue // skip unparseable mounts (validated at creation time)
+		}
+		mounts = append(mounts, spec)
+	}
+
 	// Secrets (env vars + API keys)
 	if secretsDir != "" {
 		entries, _ := os.ReadDir(secretsDir)
@@ -1428,4 +1462,33 @@ func parseMemoryString(s string) (int64, error) {
 	}
 
 	return int64(val * float64(multiplier)), nil
+}
+
+// parseConfigMount parses a "host:container[:ro]" mount string into a MountSpec.
+// The host path is expanded (tilde and ${VAR}).
+func parseConfigMount(s string) (runtime.MountSpec, error) {
+	parts := strings.SplitN(s, ":", 3)
+	if len(parts) < 2 {
+		return runtime.MountSpec{}, fmt.Errorf("expected host:container[:ro] format")
+	}
+
+	hostPath, err := ExpandPath(parts[0])
+	if err != nil {
+		return runtime.MountSpec{}, fmt.Errorf("expand host path: %w", err)
+	}
+
+	spec := runtime.MountSpec{
+		Source: hostPath,
+		Target: parts[1],
+	}
+
+	if len(parts) == 3 {
+		if parts[2] == "ro" {
+			spec.ReadOnly = true
+		} else {
+			return runtime.MountSpec{}, fmt.Errorf("unknown mount option %q (expected \"ro\")", parts[2])
+		}
+	}
+
+	return spec, nil
 }

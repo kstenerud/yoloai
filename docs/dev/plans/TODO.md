@@ -27,6 +27,5 @@ Create a plan file in this directory before starting implementation.
 | `copy_strategy` | [config.md](../../design/config.md) | `auto \| overlay \| full` |
 | `auto_commit_interval` | [config.md](../../design/config.md) | Background auto-commit for `:copy` dirs |
 | `agent_files` | [config.md](../../design/config.md) | Files seeded into agent-state/ on first run |
-| `mounts` | [config.md](../../design/config.md) | Bind mounts added at container run time |
 | Recipes (`cap_add`, `devices`, `setup`) | [config.md](../../design/config.md) | Advanced setups (Tailscale, GPU) |
 | User-configurable model aliases | [commands.md](../../design/commands.md) | Custom aliases + version pinning |

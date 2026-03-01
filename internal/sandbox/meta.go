@@ -28,6 +28,7 @@ type Meta struct {
 	NetworkAllow []string        `json:"network_allow,omitempty"`
 	Ports        []string        `json:"ports,omitempty"`
 	Resources    *ResourceLimits `json:"resources,omitempty"`
+	Mounts       []string        `json:"mounts,omitempty"`
 }
 
 // WorkdirMeta stores the resolved workdir state at creation time.

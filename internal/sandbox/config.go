@@ -22,6 +22,7 @@ type YoloaiConfig struct {
 	Env       map[string]string `yaml:"env"`        // env — environment variables passed to container
 	Resources *ResourceLimits   `yaml:"resources"`  // resources — container resource limits
 	Network   *NetworkConfig    `yaml:"network"`    // network — network isolation settings
+	Mounts    []string          `yaml:"mounts"`     // mounts — extra bind mounts (host:container[:ro])
 }
 
 // ResourceLimits holds container resource constraints (CPU, memory).
@@ -66,6 +67,7 @@ type knownCollectionSetting struct {
 // Each appears as an empty mapping ({}) or sequence ([]) when not set by the user.
 var knownCollectionSettings = []knownCollectionSetting{
 	{"env", yaml.MappingNode},
+	{"mounts", yaml.SequenceNode},
 	{"network.allow", yaml.SequenceNode},
 }
 
@@ -154,6 +156,16 @@ func LoadConfig() (*YoloaiConfig, error) {
 					case "memory":
 						cfg.Resources.Memory = subExpanded
 					}
+				}
+			}
+		case "mounts":
+			if val.Kind == yaml.SequenceNode {
+				for _, item := range val.Content {
+					expanded, expandErr := expandEnvBraced(item.Value)
+					if expandErr != nil {
+						return nil, fmt.Errorf("mounts[]: %w", expandErr)
+					}
+					cfg.Mounts = append(cfg.Mounts, expanded)
 				}
 			}
 		case "network":

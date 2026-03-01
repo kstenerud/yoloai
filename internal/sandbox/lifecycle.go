@@ -341,6 +341,7 @@ func (m *Manager) recreateContainer(ctx context.Context, name string, meta *Meta
 		networkMode:  meta.NetworkMode,
 		networkAllow: meta.NetworkAllow,
 		ports:        meta.Ports,
+		configMounts: meta.Mounts,
 		tmuxConf:     cfgJSON.TmuxConf,
 		configJSON:   configData,
 	}
