@@ -446,8 +446,7 @@ func TestMergeProfileChain_SingleProfile(t *testing.T) {
 	setupProfileDir(t, "simple", "agent: gemini\nmodel: flash\n")
 
 	base := &YoloaiConfig{
-		Agent:    "claude",
-		TmuxConf: "default",
+		Agent: "claude",
 	}
 
 	chain := []string{"base", "simple"}
@@ -461,9 +460,6 @@ func TestMergeProfileChain_SingleProfile(t *testing.T) {
 	}
 	if merged.Model != "flash" {
 		t.Errorf("Model = %q, want %q", merged.Model, "flash")
-	}
-	if merged.TmuxConf != "default" {
-		t.Errorf("TmuxConf = %q, want %q", merged.TmuxConf, "default")
 	}
 }
 

@@ -19,27 +19,35 @@ func configDir(t *testing.T) string {
 	return dir
 }
 
+// globalConfigDir creates the ~/.yoloai/ directory structure for global config tests.
+func globalConfigDir(t *testing.T) string {
+	t.Helper()
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+	dir := filepath.Join(tmpDir, ".yoloai")
+	require.NoError(t, os.MkdirAll(dir, 0750))
+	return dir
+}
+
 func TestLoadConfig_Default(t *testing.T) {
 	dir := configDir(t)
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(defaultConfigYAML), 0600))
 
 	cfg, err := LoadConfig()
 	require.NoError(t, err)
-	assert.Empty(t, cfg.TmuxConf)
+	assert.Empty(t, cfg.Agent) // default config has no agent set
 }
 
-func TestLoadConfig_WithTmuxConf(t *testing.T) {
-	dir := configDir(t)
+func TestLoadGlobalConfig_WithTmuxConf(t *testing.T) {
+	dir := globalConfigDir(t)
 
 	content := `tmux_conf: default+host
-agent: claude
 `
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
 
-	cfg, err := LoadConfig()
+	cfg, err := LoadGlobalConfig()
 	require.NoError(t, err)
 	assert.Equal(t, "default+host", cfg.TmuxConf)
-	assert.Equal(t, "claude", cfg.Agent)
 }
 
 func TestLoadConfig_AgentDefault(t *testing.T) {
@@ -128,24 +136,24 @@ func TestLoadConfig_EnvEmpty(t *testing.T) {
 	assert.Nil(t, cfg.Env)
 }
 
-func TestLoadConfig_ModelAliases(t *testing.T) {
-	dir := configDir(t)
+func TestLoadGlobalConfig_ModelAliases(t *testing.T) {
+	dir := globalConfigDir(t)
 
 	content := "model_aliases:\n  sonnet: claude-sonnet-4-20250514\n  fast: claude-haiku-4-latest\n"
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
 
-	cfg, err := LoadConfig()
+	cfg, err := LoadGlobalConfig()
 	require.NoError(t, err)
 	require.Len(t, cfg.ModelAliases, 2)
 	assert.Equal(t, "claude-sonnet-4-20250514", cfg.ModelAliases["sonnet"])
 	assert.Equal(t, "claude-haiku-4-latest", cfg.ModelAliases["fast"])
 }
 
-func TestLoadConfig_ModelAliasesEmpty(t *testing.T) {
-	dir := configDir(t)
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(defaultConfigYAML), 0600))
+func TestLoadGlobalConfig_ModelAliasesEmpty(t *testing.T) {
+	dir := globalConfigDir(t)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(defaultGlobalConfigYAML), 0600))
 
-	cfg, err := LoadConfig()
+	cfg, err := LoadGlobalConfig()
 	require.NoError(t, err)
 	assert.Nil(t, cfg.ModelAliases)
 }
@@ -156,19 +164,19 @@ func TestLoadConfig_MissingFile(t *testing.T) {
 
 	cfg, err := LoadConfig()
 	require.NoError(t, err)
-	assert.Empty(t, cfg.TmuxConf)
+	assert.Empty(t, cfg.Agent)
 }
 
-func TestUpdateConfigFields_TmuxConf(t *testing.T) {
-	dir := configDir(t)
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(defaultConfigYAML), 0600))
+func TestUpdateGlobalConfigFields_TmuxConf(t *testing.T) {
+	dir := globalConfigDir(t)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(defaultGlobalConfigYAML), 0600))
 
-	err := UpdateConfigFields(map[string]string{
+	err := UpdateGlobalConfigFields(map[string]string{
 		"tmux_conf": "default+host",
 	})
 	require.NoError(t, err)
 
-	cfg, err := LoadConfig()
+	cfg, err := LoadGlobalConfig()
 	require.NoError(t, err)
 	assert.Equal(t, "default+host", cfg.TmuxConf)
 }
@@ -342,13 +350,24 @@ func TestReadConfigRaw_ExistingFile(t *testing.T) {
 
 func TestGetConfigValue_Scalar(t *testing.T) {
 	dir := configDir(t)
-	content := "backend: seatbelt\ntmux_conf: default+host\n"
+	content := "backend: seatbelt\n"
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
 
 	val, found, err := GetConfigValue("backend")
 	require.NoError(t, err)
 	assert.True(t, found)
 	assert.Equal(t, "seatbelt", val)
+}
+
+func TestGetConfigValue_GlobalKey(t *testing.T) {
+	dir := globalConfigDir(t)
+	content := "tmux_conf: default+host\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
+
+	val, found, err := GetConfigValue("tmux_conf")
+	require.NoError(t, err)
+	assert.True(t, found)
+	assert.Equal(t, "default+host", val)
 }
 
 func TestGetConfigValue_Mapping(t *testing.T) {
@@ -409,7 +428,8 @@ func TestGetEffectiveConfig_Defaults(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, out, "backend: docker")
 	assert.Contains(t, out, "image:")
-	assert.Contains(t, out, "tmux_conf:")
+	assert.Contains(t, out, "tmux_conf:")        // global default
+	assert.Contains(t, out, "model_aliases: {}") // global default
 	assert.Contains(t, out, "agent: claude")
 	assert.Contains(t, out, "env: {}")
 }
@@ -424,7 +444,7 @@ func TestGetEffectiveConfig_WithOverrides(t *testing.T) {
 	assert.Contains(t, out, "backend: tart")
 	// Defaults for unset keys still present
 	assert.Contains(t, out, "image:")
-	assert.Contains(t, out, "tmux_conf:")
+	assert.Contains(t, out, "tmux_conf:") // from global defaults
 }
 
 func TestGetEffectiveConfig_ExtraKeys(t *testing.T) {
@@ -473,4 +493,94 @@ func TestLoadConfig_ResourcesEmpty(t *testing.T) {
 	cfg, err := LoadConfig()
 	require.NoError(t, err)
 	assert.Nil(t, cfg.Resources)
+}
+
+func TestGlobalConfigPath(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	p, err := GlobalConfigPath()
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(tmpDir, ".yoloai", "config.yaml"), p)
+}
+
+func TestLoadGlobalConfig_MissingFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	cfg, err := LoadGlobalConfig()
+	require.NoError(t, err)
+	assert.Empty(t, cfg.TmuxConf)
+	assert.Nil(t, cfg.ModelAliases)
+}
+
+func TestLoadGlobalConfig_Default(t *testing.T) {
+	dir := globalConfigDir(t)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(defaultGlobalConfigYAML), 0600))
+
+	cfg, err := LoadGlobalConfig()
+	require.NoError(t, err)
+	assert.Empty(t, cfg.TmuxConf)
+	assert.Nil(t, cfg.ModelAliases)
+}
+
+func TestLoadGlobalConfig_EnvExpansion(t *testing.T) {
+	dir := globalConfigDir(t)
+	t.Setenv("YOLOAI_TEST_TMUX", "default+host")
+
+	content := "tmux_conf: ${YOLOAI_TEST_TMUX}\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
+
+	cfg, err := LoadGlobalConfig()
+	require.NoError(t, err)
+	assert.Equal(t, "default+host", cfg.TmuxConf)
+}
+
+func TestIsGlobalKey(t *testing.T) {
+	assert.True(t, IsGlobalKey("tmux_conf"))
+	assert.True(t, IsGlobalKey("model_aliases"))
+	assert.True(t, IsGlobalKey("model_aliases.fast"))
+	assert.False(t, IsGlobalKey("agent"))
+	assert.False(t, IsGlobalKey("backend"))
+	assert.False(t, IsGlobalKey("env"))
+	assert.False(t, IsGlobalKey("env.FOO"))
+}
+
+func TestDeleteGlobalConfigField(t *testing.T) {
+	dir := globalConfigDir(t)
+	content := "tmux_conf: default\nmodel_aliases:\n  fast: haiku\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
+
+	require.NoError(t, DeleteGlobalConfigField("tmux_conf"))
+
+	cfg, err := LoadGlobalConfig()
+	require.NoError(t, err)
+	assert.Empty(t, cfg.TmuxConf)
+	assert.Equal(t, "haiku", cfg.ModelAliases["fast"])
+}
+
+func TestDeleteGlobalConfigField_MissingFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	require.NoError(t, DeleteGlobalConfigField("tmux_conf"))
+}
+
+func TestReadGlobalConfigRaw_MissingFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	data, err := ReadGlobalConfigRaw()
+	require.NoError(t, err)
+	assert.Nil(t, data)
+}
+
+func TestReadGlobalConfigRaw_ExistingFile(t *testing.T) {
+	dir := globalConfigDir(t)
+	content := "tmux_conf: default\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
+
+	data, err := ReadGlobalConfigRaw()
+	require.NoError(t, err)
+	assert.Equal(t, content, string(data))
 }

@@ -44,7 +44,7 @@ Development docs live in `docs/dev/`:
 - `:copy` directories use overlayfs by default (instant setup, deltas-only) with full-copy fallback. Both use git for diff/apply.
 - `:rw` directories are live bind-mounts. Default (no suffix) is read-only.
 - Profile system: each profile is a directory in `~/.yoloai/profiles/<name>/` containing a `Dockerfile` and `config.yaml`. The base profile at `~/.yoloai/profiles/base/` is auto-created if missing and serves as the default. "base" is a reserved profile name.
-- Config in `~/.yoloai/profiles/base/config.yaml` with flat schema (e.g., `backend`, `agent`, `tart.image`). Operational state (`setup_complete`) lives in `~/.yoloai/state.yaml`, separate from user preferences.
+- Two config files: global config (`~/.yoloai/config.yaml`) for user preferences (tmux_conf, model_aliases) and profile config (`~/.yoloai/profiles/base/config.yaml`) for profile-overridable defaults (agent, model, backend, env, etc.). `IsGlobalKey()` routes config commands to the correct file. Operational state (`setup_complete`) lives in `~/.yoloai/state.yaml`.
 
 ## Code Quality Gate
 

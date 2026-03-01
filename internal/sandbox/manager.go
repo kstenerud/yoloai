@@ -12,6 +12,7 @@ import (
 
 	"github.com/kstenerud/yoloai/internal/runtime"
 	"golang.org/x/term"
+	"gopkg.in/yaml.v3"
 )
 
 const defaultConfigYAML = `# yoloai base profile configuration
@@ -24,6 +25,17 @@ const defaultConfigYAML = `# yoloai base profile configuration
 #   backend      Runtime backend: docker, tart, seatbelt
 #   tart.image   Custom base VM image (tart backend only)
 #   env.<NAME>   Environment variable passed to container
+
+{}
+`
+
+const defaultGlobalConfigYAML = `# yoloai global configuration
+# These settings apply to all sandboxes regardless of profile.
+# Run 'yoloai config set <key> <value>' to change settings.
+#
+# Available settings:
+#   tmux_conf                Tmux configuration: default, default+host
+#   model_aliases.<alias>    Custom model alias (overrides agent built-in aliases)
 
 {}
 `
@@ -146,6 +158,19 @@ func (m *Manager) EnsureSetupNonInteractive(ctx context.Context) error {
 		fmt.Fprintln(m.output, "Tip: enable shell completions with 'yoloai completion --help'") //nolint:errcheck // best-effort output
 	}
 
+	// Write default global config.yaml if missing
+	globalConfigPath := filepath.Join(yoloaiDir, "config.yaml")
+	if _, err := os.Stat(globalConfigPath); os.IsNotExist(err) {
+		if err := os.WriteFile(globalConfigPath, []byte(defaultGlobalConfigYAML), 0600); err != nil {
+			return fmt.Errorf("write global config.yaml: %w", err)
+		}
+	}
+
+	// Migration: move tmux_conf from base profile config to global config
+	if err := migrateGlobalSettings(configPath, globalConfigPath); err != nil {
+		return fmt.Errorf("migrate global settings: %w", err)
+	}
+
 	// Write default state.yaml if missing
 	statePath := filepath.Join(yoloaiDir, "state.yaml")
 	if _, err := os.Stat(statePath); os.IsNotExist(err) {
@@ -154,6 +179,97 @@ func (m *Manager) EnsureSetupNonInteractive(ctx context.Context) error {
 		}
 	}
 
+	return nil
+}
+
+// migrateGlobalSettings moves tmux_conf and model_aliases from base profile
+// config to global config if they exist in the profile but not in global.
+func migrateGlobalSettings(profileConfigPath, globalConfigPath string) error {
+	profileData, err := os.ReadFile(profileConfigPath) //nolint:gosec // G304: constructed path
+	if err != nil {
+		return nil // nothing to migrate
+	}
+
+	globalData, err := os.ReadFile(globalConfigPath) //nolint:gosec // G304: constructed path
+	if err != nil {
+		return nil // can't migrate without target
+	}
+
+	var profileDoc, globalDoc yaml.Node
+	if err := yaml.Unmarshal(profileData, &profileDoc); err != nil {
+		return nil
+	}
+	if err := yaml.Unmarshal(globalData, &globalDoc); err != nil {
+		return nil
+	}
+
+	if profileDoc.Kind != yaml.DocumentNode || len(profileDoc.Content) == 0 {
+		return nil
+	}
+	profileRoot := profileDoc.Content[0]
+	if profileRoot.Kind != yaml.MappingNode {
+		return nil
+	}
+
+	if globalDoc.Kind != yaml.DocumentNode || len(globalDoc.Content) == 0 {
+		return nil
+	}
+	globalRoot := globalDoc.Content[0]
+	if globalRoot.Kind != yaml.MappingNode {
+		return nil
+	}
+
+	migrated := false
+	for _, key := range []string{"tmux_conf", "model_aliases"} {
+		profileVal := findYAMLValue(profileRoot, key)
+		if profileVal == nil {
+			continue
+		}
+		globalVal := findYAMLValue(globalRoot, key)
+		if globalVal != nil {
+			continue // already in global config
+		}
+
+		// Copy to global
+		keyNode := &yaml.Node{Kind: yaml.ScalarNode, Value: key}
+		globalRoot.Content = append(globalRoot.Content, keyNode, profileVal)
+
+		// Remove from profile
+		deleteYAMLField(profileRoot, key)
+		migrated = true
+	}
+
+	if !migrated {
+		return nil
+	}
+
+	// Write both files
+	globalOut, err := yaml.Marshal(&globalDoc)
+	if err != nil {
+		return fmt.Errorf("marshal global config: %w", err)
+	}
+	if err := os.WriteFile(globalConfigPath, globalOut, 0600); err != nil {
+		return fmt.Errorf("write global config: %w", err)
+	}
+
+	profileOut, err := yaml.Marshal(&profileDoc)
+	if err != nil {
+		return fmt.Errorf("marshal profile config: %w", err)
+	}
+	if err := os.WriteFile(profileConfigPath, profileOut, 0600); err != nil {
+		return fmt.Errorf("write profile config: %w", err)
+	}
+
+	return nil
+}
+
+// findYAMLValue returns the value node for a top-level key in a mapping.
+func findYAMLValue(root *yaml.Node, key string) *yaml.Node {
+	for i := 0; i < len(root.Content)-1; i += 2 {
+		if root.Content[i].Value == key {
+			return root.Content[i+1]
+		}
+	}
 	return nil
 }
 

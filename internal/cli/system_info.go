@@ -28,11 +28,17 @@ func newSystemInfoCmd(version, commit, date string) *cobra.Command {
 			fmt.Fprintf(out, "Commit:      %s\n", commit)  //nolint:errcheck
 			fmt.Fprintf(out, "Built:       %s\n", date)    //nolint:errcheck
 
-			configPath, err := sandbox.ConfigPath()
+			globalConfigPath, err := sandbox.GlobalConfigPath()
 			if err != nil {
-				configPath = "(unknown)"
+				globalConfigPath = "(unknown)"
 			}
-			fmt.Fprintf(out, "Config:      %s\n", configPath) //nolint:errcheck
+			fmt.Fprintf(out, "Config:      %s\n", globalConfigPath) //nolint:errcheck
+
+			profileConfigPath, err := sandbox.ConfigPath()
+			if err != nil {
+				profileConfigPath = "(unknown)"
+			}
+			fmt.Fprintf(out, "Profile:     %s\n", profileConfigPath) //nolint:errcheck
 
 			homeDir, err := os.UserHomeDir()
 			if err != nil {
@@ -73,9 +79,14 @@ func newSystemInfoCmd(version, commit, date string) *cobra.Command {
 
 // writeSystemInfoJSON outputs system info as JSON.
 func writeSystemInfoJSON(cmd *cobra.Command, version, commit, date string) error {
-	configPath, err := sandbox.ConfigPath()
+	globalConfigPath, err := sandbox.GlobalConfigPath()
 	if err != nil {
-		configPath = ""
+		globalConfigPath = ""
+	}
+
+	profileConfigPath, err := sandbox.ConfigPath()
+	if err != nil {
+		profileConfigPath = ""
 	}
 
 	homeDir, err := os.UserHomeDir()
@@ -108,23 +119,25 @@ func writeSystemInfoJSON(cmd *cobra.Command, version, commit, date string) error
 	}
 
 	result := struct {
-		Version      string          `json:"version"`
-		Commit       string          `json:"commit"`
-		Date         string          `json:"date"`
-		ConfigPath   string          `json:"config_path"`
-		DataDir      string          `json:"data_dir"`
-		SandboxesDir string          `json:"sandboxes_dir"`
-		DiskUsage    string          `json:"disk_usage"`
-		Backends     []backendStatus `json:"backends"`
+		Version           string          `json:"version"`
+		Commit            string          `json:"commit"`
+		Date              string          `json:"date"`
+		ConfigPath        string          `json:"config_path"`
+		ProfileConfigPath string          `json:"profile_config_path"`
+		DataDir           string          `json:"data_dir"`
+		SandboxesDir      string          `json:"sandboxes_dir"`
+		DiskUsage         string          `json:"disk_usage"`
+		Backends          []backendStatus `json:"backends"`
 	}{
-		Version:      version,
-		Commit:       commit,
-		Date:         date,
-		ConfigPath:   configPath,
-		DataDir:      dataDir,
-		SandboxesDir: sandboxesDir,
-		DiskUsage:    diskUsage,
-		Backends:     backends,
+		Version:           version,
+		Commit:            commit,
+		Date:              date,
+		ConfigPath:        globalConfigPath,
+		ProfileConfigPath: profileConfigPath,
+		DataDir:           dataDir,
+		SandboxesDir:      sandboxesDir,
+		DiskUsage:         diskUsage,
+		Backends:          backends,
 	}
 
 	return writeJSON(cmd.OutOrStdout(), result)

@@ -38,7 +38,7 @@ Dependency direction: `cmd/yoloai` → `cli` → `sandbox` + `runtime`; `sandbox
 |------|---------|
 | `root.go` | Root Cobra command, global flags (`-v`, `-q`, `--no-color`, `--json`), `Execute()` with exit code mapping (JSON errors to stderr when `--json`). |
 | `commands.go` | `registerCommands()` — registers all subcommands. Also contains `newNewCmd`, `newLsAliasCmd`, `newLogAliasCmd`, `newCompletionCmd`, `newVersionCmd`, and `attachToSandbox`/`waitForTmux` helpers. |
-| `config.go` | `yoloai config get/set/reset` — read, write, and delete `config.yaml` values via dotted paths. |
+| `config.go` | `yoloai config get/set/reset` — read, write, and delete config values via dotted paths. Routes global keys (tmux_conf, model_aliases) to `~/.yoloai/config.yaml`, profile keys to `~/.yoloai/profiles/base/config.yaml`. |
 | `apply.go` | `yoloai apply` — apply changes back to host. Squash and selective-commit modes, `--export` for `.patch` files. |
 | `attach.go` | `yoloai attach` — attach to sandbox tmux session via `runtime.InteractiveExec`. |
 | `diff.go` | `yoloai diff` — show agent changes. Supports `--stat`, `--log`, commit refs, and ranges. |
@@ -121,7 +121,7 @@ Dependency direction: `cmd/yoloai` → `cli` → `sandbox` + `runtime`; `sandbox
 | `parse.go` | `ParseDirArg()` — parses `path:copy`, `path:rw`, `path:force` suffixes into `DirArg`. |
 | `safety.go` | `IsDangerousDir()`, `CheckPathOverlap()`, `CheckDirtyRepo()` — pre-creation safety checks. |
 | `context.go` | `GenerateContext()` — builds markdown description of sandbox environment (dirs, network, resources). `WriteContextFiles()` — writes `context.md` to sandbox dir and inlines context into agent instruction file (e.g., `CLAUDE.md`). |
-| `config.go` | `LoadConfig()`, `UpdateConfigFields()`, `DeleteConfigField()`, `ConfigPath()`, `ReadConfigRaw()`, `GetConfigValue()`, `GetEffectiveConfig()` — read/write `~/.yoloai/profiles/base/config.yaml` preserving YAML comments via `yaml.Node`. Dotted-path get/set/delete with default fallback for CLI `config get/set/reset` commands. |
+| `config.go` | Profile config (`LoadConfig()`, `UpdateConfigFields()`, etc.) and global config (`LoadGlobalConfig()`, `UpdateGlobalConfigFields()`, etc.). Profile config at `~/.yoloai/profiles/base/config.yaml`, global at `~/.yoloai/config.yaml`. `IsGlobalKey()` routes keys to correct file. YAML comment-preserving via `yaml.Node`. |
 | `state.go` | `LoadState()`, `SaveState()` — read/write `~/.yoloai/state.yaml` containing global state like `setup_complete`. |
 | `migration.go` | `MigrateConfigIfNeeded()` — handles migration from old config structure (`~/.yoloai/config.yaml` with `defaults:` nesting) to new structure (`~/.yoloai/profiles/base/config.yaml` with flat keys). |
 | `setup.go` | `RunSetup()`, `runNewUserSetup()` — interactive tmux configuration setup. Classifies user's tmux config, prompts for preferences. |
@@ -183,8 +183,8 @@ Tart (macOS VM) implementation of `Runtime` interface. Shells out to `tart` CLI 
 | `yoloai ls` | `cli/commands.go:newLsAliasCmd` | Shortcut for `sandbox list` (calls `runList`) |
 | `yoloai log` | `cli/commands.go:newLogAliasCmd` | Shortcut for `sandbox log` (calls `runLog`) |
 | `yoloai config get` | `cli/config.go:newConfigGetCmd` | `sandbox.GetEffectiveConfig()` / `sandbox.GetConfigValue()` |
-| `yoloai config set` | `cli/config.go:newConfigSetCmd` | `sandbox.UpdateConfigFields()` |
-| `yoloai config reset` | `cli/config.go:newConfigResetCmd` | `sandbox.DeleteConfigField()` |
+| `yoloai config set` | `cli/config.go:newConfigSetCmd` | `sandbox.UpdateConfigFields()` or `sandbox.UpdateGlobalConfigFields()` via `IsGlobalKey()` |
+| `yoloai config reset` | `cli/config.go:newConfigResetCmd` | `sandbox.DeleteConfigField()` or `sandbox.DeleteGlobalConfigField()` via `IsGlobalKey()` |
 | `yoloai completion` | `cli/commands.go:newCompletionCmd` | Cobra's built-in completion generators |
 | `yoloai version` | `cli/commands.go:newVersionCmd` | Prints build-time version info |
 
@@ -265,7 +265,7 @@ Manager.Start (sandbox/lifecycle.go)
 ├── state.yaml               # Global state (setup_complete)
 ├── profiles/
 │   └── base/
-│       ├── config.yaml      # Global config (flat keys, no defaults: nesting)
+│       ├── config.yaml      # Profile defaults (agent, model, backend, env, etc.)
 │       ├── Dockerfile       # Seeded from embedded, user-customizable
 │       ├── entrypoint.sh    # Seeded from embedded, user-customizable
 │       ├── tmux.conf        # Seeded from embedded, user-customizable
@@ -325,12 +325,14 @@ Manager.Start (sandbox/lifecycle.go)
 1. `DetectStatus()` in `internal/sandbox/inspect.go` — queries `runtime.Inspect()` and tmux via `runtime.Exec()`
 2. Status constants are in the same file
 
-**Change config.yaml handling:**
-1. `LoadConfig()` / `UpdateConfigFields()` / `DeleteConfigField()` in `internal/sandbox/config.go`
-2. Add new fields to `YoloaiConfig` struct and the YAML node walker
-3. CLI `config get/set/reset` commands in `internal/cli/config.go`
-4. Config is now located at `~/.yoloai/profiles/base/config.yaml` with flat keys (no `defaults:` nesting)
-5. Global state like `setup_complete` is stored in `~/.yoloai/state.yaml` via `LoadState()`/`SaveState()` in `internal/sandbox/state.go`
+**Change config handling:**
+1. Profile config: `LoadConfig()` / `UpdateConfigFields()` / `DeleteConfigField()` in `internal/sandbox/config.go`
+2. Global config: `LoadGlobalConfig()` / `UpdateGlobalConfigFields()` / `DeleteGlobalConfigField()` in `internal/sandbox/config.go`
+3. `IsGlobalKey()` determines routing — add new global keys to `globalKnownSettings` or `globalKnownCollectionSettings`
+4. Add new profile fields to `YoloaiConfig` struct and the YAML node walker
+5. CLI `config get/set/reset` commands in `internal/cli/config.go` route via `IsGlobalKey()`
+6. Profile config at `~/.yoloai/profiles/base/config.yaml`, global config at `~/.yoloai/config.yaml`
+7. Global state like `setup_complete` is stored in `~/.yoloai/state.yaml` via `LoadState()`/`SaveState()` in `internal/sandbox/state.go`
 
 **Add a new runtime backend:**
 1. Create `internal/runtime/<name>/` package

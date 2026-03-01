@@ -129,7 +129,7 @@ yoloai new task ./my-project --agent gemini --model flash  # gemini-2.5-flash
 
 ### Custom Model Aliases
 
-You can define custom model aliases or pin versions in your config:
+You can define custom model aliases or pin versions in your global config (`~/.yoloai/config.yaml`):
 
 ```bash
 # Pin sonnet to a specific version
@@ -268,7 +268,11 @@ yoloai diff task -- src/handler.go
 
 ## Configuration
 
-On first run, yoloAI creates `~/.yoloai/config.yaml`. Use `yoloai config` to view and change settings:
+On first run, yoloAI creates two config files:
+- `~/.yoloai/config.yaml` — global settings (tmux_conf, model_aliases)
+- `~/.yoloai/profiles/base/config.yaml` — profile defaults (agent, model, backend, env, etc.)
+
+Use `yoloai config` to view and change settings (keys are automatically routed to the correct file):
 
 ```bash
 # Show all settings with effective values (defaults + overrides)
@@ -296,8 +300,9 @@ yoloai config reset defaults.env.OLLAMA_API_BASE
 | `defaults.model` | (empty) | Model name or alias passed to the agent |
 | `defaults.backend` | `docker` | Runtime backend: `docker`, `tart`, `seatbelt` |
 | `defaults.tart.image` | (empty) | Custom base VM image for tart backend |
-| `defaults.tmux_conf` | (set by setup) | Tmux config mode: `default+host`, `default`, `host`, `none` |
 | `defaults.env.<NAME>` | (empty) | Environment variable forwarded to container |
+| `tmux_conf` | (set by setup) | Tmux config mode (global config) |
+| `model_aliases.<alias>` | (empty) | Custom model alias (global config) |
 
 Agent resolution: `new` uses `--agent` flag > `defaults.agent` in config > `"claude"`.
 
@@ -305,7 +310,7 @@ Model resolution: `new` uses `--model` flag > `defaults.model` in config > `""` 
 
 Backend resolution: `new`/`build`/`setup` use `--backend` flag > `defaults.backend` in config > `"docker"`. Lifecycle commands read the backend from the sandbox's `meta.json`, falling back to config default.
 
-You can also edit `~/.yoloai/config.yaml` directly — `config set` preserves comments and formatting.
+You can also edit the config files directly — `config set` preserves comments and formatting.
 
 ## Sandbox State
 

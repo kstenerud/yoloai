@@ -311,9 +311,9 @@ func (m *Manager) promptAgentSetup(ctx context.Context) error {
 	})
 }
 
-// setTmuxConf writes the tmux_conf setting to config.yaml.
+// setTmuxConf writes the tmux_conf setting to the global config.yaml.
 func (m *Manager) setTmuxConf(value string) error {
-	return UpdateConfigFields(map[string]string{
+	return UpdateGlobalConfigFields(map[string]string{
 		"tmux_conf": value,
 	})
 }

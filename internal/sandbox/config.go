@@ -1,7 +1,7 @@
 package sandbox
 
-// ABOUTME: Config loading, reading, and writing for ~/.yoloai/profiles/base/config.yaml.
-// ABOUTME: Provides dotted-path get/set with YAML comment preservation.
+// ABOUTME: Config loading for profile (~/.yoloai/profiles/base/config.yaml) and
+// ABOUTME: global (~/.yoloai/config.yaml) configs. Provides dotted-path get/set.
 
 import (
 	"fmt"
@@ -14,16 +14,14 @@ import (
 
 // YoloaiConfig holds the subset of config.yaml fields that the Go code reads.
 type YoloaiConfig struct {
-	TmuxConf     string            `yaml:"tmux_conf"`     // tmux_conf
-	Backend      string            `yaml:"backend"`       // backend
-	TartImage    string            `yaml:"tart_image"`    // tart.image — custom base VM image for tart backend
-	Agent        string            `yaml:"agent"`         // agent
-	Model        string            `yaml:"model"`         // model
-	Env          map[string]string `yaml:"env"`           // env — environment variables passed to container
-	ModelAliases map[string]string `yaml:"model_aliases"` // model_aliases — user-defined model alias overrides
-	Resources    *ResourceLimits   `yaml:"resources"`     // resources — container resource limits
-	Network      *NetworkConfig    `yaml:"network"`       // network — network isolation settings
-	Mounts       []string          `yaml:"mounts"`        // mounts — extra bind mounts (host:container[:ro])
+	Backend   string            `yaml:"backend"`    // backend
+	TartImage string            `yaml:"tart_image"` // tart.image — custom base VM image for tart backend
+	Agent     string            `yaml:"agent"`      // agent
+	Model     string            `yaml:"model"`      // model
+	Env       map[string]string `yaml:"env"`        // env — environment variables passed to container
+	Resources *ResourceLimits   `yaml:"resources"`  // resources — container resource limits
+	Network   *NetworkConfig    `yaml:"network"`    // network — network isolation settings
+	Mounts    []string          `yaml:"mounts"`     // mounts — extra bind mounts (host:container[:ro])
 }
 
 // ResourceLimits holds container resource constraints (CPU, memory).
@@ -38,6 +36,13 @@ type NetworkConfig struct {
 	Allow    []string `yaml:"allow" json:"allow,omitempty"`
 }
 
+// GlobalConfig holds user preferences from ~/.yoloai/config.yaml.
+// These settings apply to all sandboxes regardless of profile.
+type GlobalConfig struct {
+	TmuxConf     string            `yaml:"tmux_conf"`
+	ModelAliases map[string]string `yaml:"model_aliases"`
+}
+
 // knownSetting defines a config key with its default value.
 type knownSetting struct {
 	Path    string
@@ -49,7 +54,6 @@ type knownSetting struct {
 var knownSettings = []knownSetting{
 	{"backend", "docker"},
 	{"tart.image", ""},
-	{"tmux_conf", ""},
 	{"agent", "claude"},
 	{"model", ""},
 	{"resources.cpus", ""},
@@ -68,9 +72,18 @@ type knownCollectionSetting struct {
 // Each appears as an empty mapping ({}) or sequence ([]) when not set by the user.
 var knownCollectionSettings = []knownCollectionSetting{
 	{"env", yaml.MappingNode},
-	{"model_aliases", yaml.MappingNode},
 	{"mounts", yaml.SequenceNode},
 	{"network.allow", yaml.SequenceNode},
+}
+
+// globalKnownSettings lists scalar config keys belonging to the global config.
+var globalKnownSettings = []knownSetting{
+	{"tmux_conf", ""},
+}
+
+// globalKnownCollectionSettings lists non-scalar config keys belonging to global config.
+var globalKnownCollectionSettings = []knownCollectionSetting{
+	{"model_aliases", yaml.MappingNode},
 }
 
 // ConfigPath returns the path to ~/.yoloai/profiles/base/config.yaml.
@@ -80,6 +93,15 @@ func ConfigPath() (string, error) {
 		return "", fmt.Errorf("get home directory: %w", err)
 	}
 	return filepath.Join(homeDir, ".yoloai", "profiles", "base", "config.yaml"), nil
+}
+
+// GlobalConfigPath returns the path to ~/.yoloai/config.yaml.
+func GlobalConfigPath() (string, error) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("get home directory: %w", err)
+	}
+	return filepath.Join(homeDir, ".yoloai", "config.yaml"), nil
 }
 
 // LoadConfig reads ~/.yoloai/profiles/base/config.yaml and extracts known fields.
@@ -128,18 +150,6 @@ func LoadConfig() (*YoloaiConfig, error) {
 						return nil, fmt.Errorf("env.%s: %w", envKey, envErr)
 					}
 					cfg.Env[envKey] = envExpanded
-				}
-			}
-		case "model_aliases":
-			if val.Kind == yaml.MappingNode {
-				cfg.ModelAliases = make(map[string]string, len(val.Content)/2)
-				for k := 0; k < len(val.Content)-1; k += 2 {
-					aliasKey := val.Content[k].Value
-					aliasExpanded, aliasErr := expandEnvBraced(val.Content[k+1].Value)
-					if aliasErr != nil {
-						return nil, fmt.Errorf("model_aliases.%s: %w", aliasKey, aliasErr)
-					}
-					cfg.ModelAliases[aliasKey] = aliasExpanded
 				}
 			}
 		case "tart":
@@ -199,12 +209,6 @@ func LoadConfig() (*YoloaiConfig, error) {
 					}
 				}
 			}
-		case "tmux_conf":
-			expanded, err := expandEnvBraced(val.Value)
-			if err != nil {
-				return nil, fmt.Errorf("tmux_conf: %w", err)
-			}
-			cfg.TmuxConf = expanded
 		case "backend":
 			expanded, err := expandEnvBraced(val.Value)
 			if err != nil {
@@ -229,6 +233,65 @@ func LoadConfig() (*YoloaiConfig, error) {
 	return cfg, nil
 }
 
+// LoadGlobalConfig reads ~/.yoloai/config.yaml and extracts global settings.
+func LoadGlobalConfig() (*GlobalConfig, error) {
+	configPath, err := GlobalConfigPath()
+	if err != nil {
+		return nil, err
+	}
+
+	data, err := os.ReadFile(configPath) //nolint:gosec // G304: path is ~/.yoloai/config.yaml
+	if err != nil {
+		if os.IsNotExist(err) {
+			return &GlobalConfig{}, nil
+		}
+		return nil, fmt.Errorf("read global config.yaml: %w", err)
+	}
+
+	var doc yaml.Node
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		return nil, fmt.Errorf("parse global config.yaml: %w", err)
+	}
+
+	cfg := &GlobalConfig{}
+
+	if doc.Kind != yaml.DocumentNode || len(doc.Content) == 0 {
+		return cfg, nil
+	}
+	root := doc.Content[0]
+	if root.Kind != yaml.MappingNode {
+		return cfg, nil
+	}
+
+	for i := 0; i < len(root.Content)-1; i += 2 {
+		key := root.Content[i]
+		val := root.Content[i+1]
+
+		switch key.Value {
+		case "tmux_conf":
+			expanded, expandErr := expandEnvBraced(val.Value)
+			if expandErr != nil {
+				return nil, fmt.Errorf("tmux_conf: %w", expandErr)
+			}
+			cfg.TmuxConf = expanded
+		case "model_aliases":
+			if val.Kind == yaml.MappingNode {
+				cfg.ModelAliases = make(map[string]string, len(val.Content)/2)
+				for k := 0; k < len(val.Content)-1; k += 2 {
+					aliasKey := val.Content[k].Value
+					aliasExpanded, aliasErr := expandEnvBraced(val.Content[k+1].Value)
+					if aliasErr != nil {
+						return nil, fmt.Errorf("model_aliases.%s: %w", aliasKey, aliasErr)
+					}
+					cfg.ModelAliases[aliasKey] = aliasExpanded
+				}
+			}
+		}
+	}
+
+	return cfg, nil
+}
+
 // ReadConfigRaw reads the raw bytes of config.yaml. Returns nil, nil if the
 // file does not exist.
 func ReadConfigRaw() ([]byte, error) {
@@ -246,17 +309,67 @@ func ReadConfigRaw() ([]byte, error) {
 	return data, nil
 }
 
+// ReadGlobalConfigRaw reads the raw bytes of the global config.yaml.
+// Returns nil, nil if the file does not exist.
+func ReadGlobalConfigRaw() ([]byte, error) {
+	configPath, err := GlobalConfigPath()
+	if err != nil {
+		return nil, err
+	}
+	data, err := os.ReadFile(configPath) //nolint:gosec // G304: path is ~/.yoloai/config.yaml
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("read global config.yaml: %w", err)
+	}
+	return data, nil
+}
+
+// isGlobalKey returns true if the top-level key belongs to global config
+// rather than profile config.
+func isGlobalKey(path string) bool {
+	top := splitDottedPath(path)[0]
+	for _, s := range globalKnownSettings {
+		if splitDottedPath(s.Path)[0] == top {
+			return true
+		}
+	}
+	for _, cs := range globalKnownCollectionSettings {
+		if splitDottedPath(cs.Path)[0] == top {
+			return true
+		}
+	}
+	return false
+}
+
+// IsGlobalKey is the exported version for use by CLI commands.
+func IsGlobalKey(path string) bool {
+	return isGlobalKey(path)
+}
+
 // GetEffectiveConfig returns YAML showing all known settings with their
 // effective values (file overrides + defaults), plus any extra keys from the
-// file that aren't in the known settings list.
+// files that aren't in the known settings list.
 func GetEffectiveConfig() (string, error) {
-	// Build node tree with all known defaults.
+	// Build node tree with all known defaults (both global and profile).
 	root := &yaml.Node{Kind: yaml.MappingNode}
+	for _, s := range globalKnownSettings {
+		setYAMLField(root, s.Path, s.Default)
+	}
 	for _, s := range knownSettings {
 		setYAMLField(root, s.Path, s.Default)
 	}
 
 	// Add non-scalar defaults (maps/lists) as empty containers.
+	for _, cs := range globalKnownCollectionSettings {
+		parts := splitDottedPath(cs.Path)
+		parent := root
+		for _, p := range parts[:len(parts)-1] {
+			parent = getOrCreateMapping(parent, p)
+		}
+		setNodeValue(parent, parts[len(parts)-1], &yaml.Node{Kind: cs.Kind})
+	}
 	for _, cs := range knownCollectionSettings {
 		parts := splitDottedPath(cs.Path)
 		parent := root
@@ -266,7 +379,23 @@ func GetEffectiveConfig() (string, error) {
 		setNodeValue(parent, parts[len(parts)-1], &yaml.Node{Kind: cs.Kind})
 	}
 
-	// Overlay values from the actual config file.
+	// Overlay values from the global config file.
+	globalData, err := ReadGlobalConfigRaw()
+	if err != nil {
+		return "", err
+	}
+	if globalData != nil {
+		var doc yaml.Node
+		if err := yaml.Unmarshal(globalData, &doc); err == nil {
+			if doc.Kind == yaml.DocumentNode && len(doc.Content) > 0 {
+				if src := doc.Content[0]; src.Kind == yaml.MappingNode {
+					mergeNodes(root, src)
+				}
+			}
+		}
+	}
+
+	// Overlay values from the profile config file.
 	data, err := ReadConfigRaw()
 	if err != nil {
 		return "", err
@@ -323,34 +452,47 @@ func setNodeValue(parent *yaml.Node, key string, val *yaml.Node) {
 	parent.Content = append(parent.Content, keyNode, val)
 }
 
-// GetConfigValue reads a value at the given dotted path from config.yaml.
+// GetConfigValue reads a value at the given dotted path from the appropriate
+// config file. Global keys (tmux_conf, model_aliases) are read from
+// ~/.yoloai/config.yaml; profile keys from ~/.yoloai/profiles/base/config.yaml.
 // Returns the raw string value for scalars, or marshaled YAML for
 // mappings/sequences. Falls back to the default for known settings.
 // The bool return indicates whether the key was found (in file or defaults).
 func GetConfigValue(path string) (string, bool, error) {
-	configPath, err := ConfigPath()
+	var configPath string
+	var err error
+	var defaults []knownSetting
+
+	if isGlobalKey(path) {
+		configPath, err = GlobalConfigPath()
+		defaults = globalKnownSettings
+	} else {
+		configPath, err = ConfigPath()
+		defaults = knownSettings
+	}
 	if err != nil {
 		return "", false, err
 	}
-	data, err := os.ReadFile(configPath) //nolint:gosec // G304: path is ~/.yoloai/profiles/base/config.yaml
+
+	data, err := os.ReadFile(configPath) //nolint:gosec // G304: path from GlobalConfigPath/ConfigPath
 	if err != nil {
 		if os.IsNotExist(err) {
-			return knownDefault(path)
+			return knownDefaultFrom(path, defaults)
 		}
-		return "", false, fmt.Errorf("read config.yaml: %w", err)
+		return "", false, fmt.Errorf("read config: %w", err)
 	}
 
 	var doc yaml.Node
 	if err := yaml.Unmarshal(data, &doc); err != nil {
-		return "", false, fmt.Errorf("parse config.yaml: %w", err)
+		return "", false, fmt.Errorf("parse config: %w", err)
 	}
 
 	if doc.Kind != yaml.DocumentNode || len(doc.Content) == 0 {
-		return knownDefault(path)
+		return knownDefaultFrom(path, defaults)
 	}
 	root := doc.Content[0]
 	if root.Kind != yaml.MappingNode {
-		return knownDefault(path)
+		return knownDefaultFrom(path, defaults)
 	}
 
 	parts := splitDottedPath(path)
@@ -365,7 +507,7 @@ func GetConfigValue(path string) (string, bool, error) {
 			}
 		}
 		if !found {
-			return knownDefault(path)
+			return knownDefaultFrom(path, defaults)
 		}
 	}
 
@@ -382,9 +524,10 @@ func GetConfigValue(path string) (string, bool, error) {
 	return string(out), true, nil
 }
 
-// knownDefault returns the default value for a known setting path.
-func knownDefault(path string) (string, bool, error) {
-	for _, s := range knownSettings {
+// knownDefaultFrom returns the default value for a known setting path
+// from the given defaults list.
+func knownDefaultFrom(path string, defaults []knownSetting) (string, bool, error) {
+	for _, s := range defaults {
 		if s.Path == path {
 			return s.Default, true, nil
 		}
@@ -472,6 +615,91 @@ func DeleteConfigField(path string) error {
 
 	if err := os.WriteFile(configPath, out, 0600); err != nil {
 		return fmt.Errorf("write config.yaml: %w", err)
+	}
+
+	return nil
+}
+
+// UpdateGlobalConfigFields updates specific fields in the global config.yaml
+// using yaml.Node manipulation to preserve comments and formatting.
+func UpdateGlobalConfigFields(fields map[string]string) error {
+	configPath, err := GlobalConfigPath()
+	if err != nil {
+		return err
+	}
+
+	data, err := os.ReadFile(configPath) //nolint:gosec // G304: path is ~/.yoloai/config.yaml
+	if err != nil {
+		return fmt.Errorf("read global config.yaml: %w", err)
+	}
+
+	var doc yaml.Node
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		return fmt.Errorf("parse global config.yaml: %w", err)
+	}
+
+	if doc.Kind != yaml.DocumentNode || len(doc.Content) == 0 {
+		return fmt.Errorf("global config.yaml has unexpected structure")
+	}
+	root := doc.Content[0]
+	if root.Kind != yaml.MappingNode {
+		return fmt.Errorf("global config.yaml root is not a mapping")
+	}
+
+	for fieldPath, value := range fields {
+		setYAMLField(root, fieldPath, value)
+	}
+
+	out, err := yaml.Marshal(&doc)
+	if err != nil {
+		return fmt.Errorf("marshal global config.yaml: %w", err)
+	}
+
+	if err := os.WriteFile(configPath, out, 0600); err != nil {
+		return fmt.Errorf("write global config.yaml: %w", err)
+	}
+
+	return nil
+}
+
+// DeleteGlobalConfigField removes a key at a dotted path from the global config.yaml.
+// Returns nil if the file doesn't exist or the key is already absent.
+func DeleteGlobalConfigField(path string) error {
+	configPath, err := GlobalConfigPath()
+	if err != nil {
+		return err
+	}
+
+	data, err := os.ReadFile(configPath) //nolint:gosec // G304: path is ~/.yoloai/config.yaml
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("read global config.yaml: %w", err)
+	}
+
+	var doc yaml.Node
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		return fmt.Errorf("parse global config.yaml: %w", err)
+	}
+
+	if doc.Kind != yaml.DocumentNode || len(doc.Content) == 0 {
+		return nil
+	}
+	root := doc.Content[0]
+	if root.Kind != yaml.MappingNode {
+		return nil
+	}
+
+	deleteYAMLField(root, path)
+
+	out, err := yaml.Marshal(&doc)
+	if err != nil {
+		return fmt.Errorf("marshal global config.yaml: %w", err)
+	}
+
+	if err := os.WriteFile(configPath, out, 0600); err != nil {
+		return fmt.Errorf("write global config.yaml: %w", err)
 	}
 
 	return nil

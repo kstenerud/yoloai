@@ -71,7 +71,7 @@ func TestClassifyTmuxConfig_Large(t *testing.T) {
 }
 
 // setupTestManager creates a Manager with the given input and a temp HOME
-// with profiles/base/config.yaml and state.yaml. Returns the Manager, output buffer, and HOME dir.
+// with profiles/base/config.yaml, global config.yaml, and state.yaml. Returns the Manager, output buffer, and HOME dir.
 func setupTestManager(t *testing.T, input string) (*Manager, *bytes.Buffer, string) {
 	t.Helper()
 	tmpDir := t.TempDir()
@@ -81,6 +81,7 @@ func setupTestManager(t *testing.T, input string) (*Manager, *bytes.Buffer, stri
 	baseDir := filepath.Join(yoloaiDir, "profiles", "base")
 	require.NoError(t, os.MkdirAll(baseDir, 0750))
 	require.NoError(t, os.WriteFile(filepath.Join(baseDir, "config.yaml"), []byte(defaultConfigYAML), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(yoloaiDir, "config.yaml"), []byte(defaultGlobalConfigYAML), 0600))
 	require.NoError(t, SaveState(&State{}))
 
 	var output bytes.Buffer
@@ -147,9 +148,9 @@ func TestRunNewUserSetup_LargeConfig_AutoConfigures(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, state.SetupComplete)
 
-	cfg, err := LoadConfig()
+	gcfg, err := LoadGlobalConfig()
 	require.NoError(t, err)
-	assert.Equal(t, "default+host", cfg.TmuxConf)
+	assert.Equal(t, "default+host", gcfg.TmuxConf)
 }
 
 func TestRunNewUserSetup_NoConfig_AnswerY(t *testing.T) {
@@ -164,9 +165,9 @@ func TestRunNewUserSetup_NoConfig_AnswerY(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, state.SetupComplete)
 
-	cfg, err := LoadConfig()
+	gcfg, err := LoadGlobalConfig()
 	require.NoError(t, err)
-	assert.Equal(t, "default", cfg.TmuxConf)
+	assert.Equal(t, "default", gcfg.TmuxConf)
 	assert.Contains(t, output.String(), "Setup complete")
 }
 
@@ -182,9 +183,9 @@ func TestRunNewUserSetup_NoConfig_AnswerEmpty(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, state.SetupComplete)
 
-	cfg, err := LoadConfig()
+	gcfg, err := LoadGlobalConfig()
 	require.NoError(t, err)
-	assert.Equal(t, "default", cfg.TmuxConf)
+	assert.Equal(t, "default", gcfg.TmuxConf)
 }
 
 func TestRunNewUserSetup_NoConfig_AnswerN(t *testing.T) {
@@ -199,9 +200,9 @@ func TestRunNewUserSetup_NoConfig_AnswerN(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, state.SetupComplete)
 
-	cfg, err := LoadConfig()
+	gcfg, err := LoadGlobalConfig()
 	require.NoError(t, err)
-	assert.Equal(t, "none", cfg.TmuxConf)
+	assert.Equal(t, "none", gcfg.TmuxConf)
 }
 
 func TestRunNewUserSetup_NoConfig_AnswerP(t *testing.T) {
@@ -234,9 +235,9 @@ func TestRunNewUserSetup_SmallConfig_AnswerY(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, state.SetupComplete)
 
-	cfg, err := LoadConfig()
+	gcfg, err := LoadGlobalConfig()
 	require.NoError(t, err)
-	assert.Equal(t, "default+host", cfg.TmuxConf)
+	assert.Equal(t, "default+host", gcfg.TmuxConf)
 }
 
 func TestRunNewUserSetup_SmallConfig_AnswerN(t *testing.T) {
@@ -254,9 +255,9 @@ func TestRunNewUserSetup_SmallConfig_AnswerN(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, state.SetupComplete)
 
-	cfg, err := LoadConfig()
+	gcfg, err := LoadGlobalConfig()
 	require.NoError(t, err)
-	assert.Equal(t, "host", cfg.TmuxConf)
+	assert.Equal(t, "host", gcfg.TmuxConf)
 }
 
 func TestRunNewUserSetup_SmallConfig_AnswerP(t *testing.T) {
@@ -285,9 +286,9 @@ func TestRunNewUserSetup_EOF_DefaultsToY(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, state.SetupComplete)
 
-	cfg, err := LoadConfig()
+	gcfg, err := LoadGlobalConfig()
 	require.NoError(t, err)
-	assert.Equal(t, "default", cfg.TmuxConf)
+	assert.Equal(t, "default", gcfg.TmuxConf)
 }
 
 // --- Backend prompt tests ---
@@ -428,9 +429,12 @@ func TestRunNewUserSetup_FullFlow_MacOS(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, state.SetupComplete)
 
+	gcfg, err := LoadGlobalConfig()
+	require.NoError(t, err)
+	assert.Equal(t, "default", gcfg.TmuxConf)
+
 	cfg, err := LoadConfig()
 	require.NoError(t, err)
-	assert.Equal(t, "default", cfg.TmuxConf)
 	assert.Equal(t, "seatbelt", cfg.Backend)
 	assert.Equal(t, "codex", cfg.Agent)
 	assert.Contains(t, output.String(), "Setup complete")
@@ -448,9 +452,12 @@ func TestRunNewUserSetup_FullFlow_Linux_SkipsBackend(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, state.SetupComplete)
 
+	gcfg, err := LoadGlobalConfig()
+	require.NoError(t, err)
+	assert.Equal(t, "default", gcfg.TmuxConf)
+
 	cfg, err := LoadConfig()
 	require.NoError(t, err)
-	assert.Equal(t, "default", cfg.TmuxConf)
 	assert.Equal(t, "aider", cfg.Agent)
 	assert.NotContains(t, output.String(), "Default runtime backend")
 	assert.Contains(t, output.String(), "Default agent")
@@ -471,9 +478,12 @@ func TestRunNewUserSetup_LargeConfig_StillAsksBackendAndAgent(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, state.SetupComplete)
 
+	gcfg, err := LoadGlobalConfig()
+	require.NoError(t, err)
+	assert.Equal(t, "default+host", gcfg.TmuxConf)
+
 	cfg, err := LoadConfig()
 	require.NoError(t, err)
-	assert.Equal(t, "default+host", cfg.TmuxConf)
 	assert.Equal(t, "tart", cfg.Backend)
 	assert.Equal(t, "codex", cfg.Agent)
 	assert.Contains(t, output.String(), "Default runtime backend")

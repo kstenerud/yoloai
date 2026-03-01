@@ -1,6 +1,7 @@
 package cli
 
-// ABOUTME: CLI commands for reading and writing yoloai config.yaml settings.
+// ABOUTME: CLI commands for reading and writing yoloai configuration settings.
+// ABOUTME: Routes global keys to ~/.yoloai/config.yaml, others to profile config.
 
 import (
 	"fmt"
@@ -31,10 +32,13 @@ func newConfigGetCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "get [key]",
 		Short: "Print configuration value(s)",
-		Long: `Print configuration values from ~/.yoloai/profiles/base/config.yaml.
+		Long: `Print configuration values.
 
 Without arguments, prints all settings with effective values (defaults + overrides).
-With a dotted key (e.g., backend), prints just that value.`,
+With a dotted key (e.g., backend), prints just that value.
+
+Global settings (tmux_conf, model_aliases) are stored in ~/.yoloai/config.yaml.
+Profile settings are stored in ~/.yoloai/profiles/base/config.yaml.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 0 {
@@ -79,33 +83,54 @@ func newConfigSetCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "set <key> <value>",
 		Short: "Set a configuration value",
-		Long: `Set a configuration value in ~/.yoloai/profiles/base/config.yaml.
+		Long: `Set a configuration value.
 
 Uses dotted paths for nested keys (e.g., tart.image).
 Creates the config file if it doesn't exist.
-Preserves comments and formatting.`,
+Preserves comments and formatting.
+
+Global settings (tmux_conf, model_aliases) are stored in ~/.yoloai/config.yaml.
+Profile settings are stored in ~/.yoloai/profiles/base/config.yaml.`,
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			configPath, err := sandbox.ConfigPath()
-			if err != nil {
-				return err
-			}
-
-			// Create config file if it doesn't exist.
-			if _, err := os.Stat(configPath); os.IsNotExist(err) {
-				dir := configPath[:len(configPath)-len("/config.yaml")]
-				if err := os.MkdirAll(dir, 0750); err != nil {
-					return fmt.Errorf("create config directory: %w", err)
+			if sandbox.IsGlobalKey(args[0]) {
+				configPath, err := sandbox.GlobalConfigPath()
+				if err != nil {
+					return err
 				}
-				if err := os.WriteFile(configPath, []byte("{}\n"), 0600); err != nil {
-					return fmt.Errorf("create config.yaml: %w", err)
+				if _, err := os.Stat(configPath); os.IsNotExist(err) {
+					dir := configPath[:len(configPath)-len("/config.yaml")]
+					if err := os.MkdirAll(dir, 0750); err != nil {
+						return fmt.Errorf("create config directory: %w", err)
+					}
+					if err := os.WriteFile(configPath, []byte("{}\n"), 0600); err != nil {
+						return fmt.Errorf("create config.yaml: %w", err)
+					}
 				}
-			}
-
-			if err := sandbox.UpdateConfigFields(map[string]string{
-				args[0]: args[1],
-			}); err != nil {
-				return err
+				if err := sandbox.UpdateGlobalConfigFields(map[string]string{
+					args[0]: args[1],
+				}); err != nil {
+					return err
+				}
+			} else {
+				configPath, err := sandbox.ConfigPath()
+				if err != nil {
+					return err
+				}
+				if _, err := os.Stat(configPath); os.IsNotExist(err) {
+					dir := configPath[:len(configPath)-len("/config.yaml")]
+					if err := os.MkdirAll(dir, 0750); err != nil {
+						return fmt.Errorf("create config directory: %w", err)
+					}
+					if err := os.WriteFile(configPath, []byte("{}\n"), 0600); err != nil {
+						return fmt.Errorf("create config.yaml: %w", err)
+					}
+				}
+				if err := sandbox.UpdateConfigFields(map[string]string{
+					args[0]: args[1],
+				}); err != nil {
+					return err
+				}
 			}
 
 			if jsonEnabled(cmd) {
@@ -124,13 +149,22 @@ func newConfigResetCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "reset <key>",
 		Short: "Reset a configuration value to its default",
-		Long: `Remove a key from ~/.yoloai/profiles/base/config.yaml, reverting it to the internal default.
+		Long: `Remove a key from configuration, reverting it to the internal default.
 
 Works at any level: a single value (backend), a map entry
-(env.OLLAMA_API_BASE), or an entire section (tart).`,
+(env.OLLAMA_API_BASE), or an entire section (tart).
+
+Global settings (tmux_conf, model_aliases) are stored in ~/.yoloai/config.yaml.
+Profile settings are stored in ~/.yoloai/profiles/base/config.yaml.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := sandbox.DeleteConfigField(args[0]); err != nil {
+			var err error
+			if sandbox.IsGlobalKey(args[0]) {
+				err = sandbox.DeleteGlobalConfigField(args[0])
+			} else {
+				err = sandbox.DeleteConfigField(args[0])
+			}
+			if err != nil {
 				return err
 			}
 			if jsonEnabled(cmd) {

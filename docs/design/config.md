@@ -19,7 +19,7 @@
 ```
 ~/.yoloai/profiles/
 ├── base/
-│   ├── config.yaml      ← global defaults (flat keys, no defaults: nesting)
+│   ├── config.yaml      ← profile defaults (agent, model, backend, env, etc.)
 │   ├── Dockerfile       ← seeded from embedded defaults, user-editable
 │   ├── entrypoint.sh    ← seeded from embedded defaults, user-editable
 │   ├── tmux.conf        ← seeded from embedded defaults, user-editable
@@ -35,14 +35,23 @@
 
 **Explicit rebuild:** `yoloai system build` with no arguments rebuilds the base image. `yoloai system build <profile>` rebuilds that profile's image (building base first if stale; error if profile has no Dockerfile). `yoloai system build --all` rebuilds everything (base first, then all profiles with Dockerfiles). Use explicit rebuild after editing a Dockerfile to pick up changes without creating a new sandbox.
 
-### 2. Config File (`~/.yoloai/profiles/base/config.yaml`)
+### 2. Config Files
+
+**Global config (`~/.yoloai/config.yaml`)** — user preferences, not per-profile:
+
+```yaml
+tmux_conf: default+host               # default+host | default | host | none (see setup.md)
+# model_aliases:                       # Custom model alias overrides
+#   fast: claude-haiku-4-latest
+```
+
+**Base profile config (`~/.yoloai/profiles/base/config.yaml`)**:
 
 ```yaml
 # Always applied to every sandbox
 backend: docker                       # Runtime backend: docker, tart, seatbelt
 # tart:                               # Tart backend settings
 #   image:                            # Custom base VM image
-tmux_conf: default+host               # default+host | default | host | none (see setup.md)
 
 agent: claude                           # Agent to launch: aider, claude, codex, gemini, opencode; CLI --agent overrides
 # model:                               # Model name or alias; CLI --model overrides
@@ -63,7 +72,7 @@ env: {}                                # Environment variables forwarded to cont
 #   memory: 8g                         # docker --memory
 ```
 
-Settings are managed via `yoloai config get/set` or by editing `~/.yoloai/profiles/base/config.yaml` directly.
+Settings are managed via `yoloai config get/set` (keys are automatically routed to the correct file) or by editing the config files directly.
 
 `config.yaml` contains default settings applied to every sandbox. Profile-specific configuration lives in separate `profile.yaml` files (see [Profiles](#3-planned-profiles)).
 
@@ -71,7 +80,7 @@ Settings are managed via `yoloai config get/set` or by editing `~/.yoloai/profil
 
 - `backend` selects the runtime backend. Valid values: `docker`, `tart`, `seatbelt`. CLI `--backend` overrides config.
 - `tart.image` overrides the base VM image for the tart backend.
-- `tmux_conf` controls how user tmux config interacts with the container. Set by the interactive first-run setup. Values: `default+host`, `default`, `host`, `none` (see [setup.md](setup.md#tmux-configuration)).
+- `tmux_conf` (global config) controls how user tmux config interacts with the container. Set by the interactive first-run setup. Values: `default+host`, `default`, `host`, `none` (see [setup.md](setup.md#tmux-configuration)).
 - `agent` selects the agent to launch. Valid values: `aider`, `claude`, `codex`, `gemini`, `opencode`. CLI `--agent` overrides config.
 - `model` sets the model name or alias passed to the agent. Empty means the agent uses its own default. CLI `--model` overrides config.
 - `env` sets environment variables forwarded to the container. Values are written as files in `/run/secrets/` (same mechanism as API keys). API keys take precedence if a name conflicts. Supports `${VAR}` expansion. Set via `yoloai config set env.NAME value`. Profile `env` merges with defaults (profile values win on conflict).

@@ -146,12 +146,17 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 		return nil, fmt.Errorf("load config: %w", err)
 	}
 
+	gcfg, err := LoadGlobalConfig()
+	if err != nil {
+		return nil, fmt.Errorf("load global config: %w", err)
+	}
+
 	// Profile resolution: load profile chain, merge config, resolve image.
 	var profileName, imageRef string
 	var resources *ResourceLimits
 	var mergedMounts []string
 	mergedEnv := ycfg.Env
-	userAliases := ycfg.ModelAliases
+	userAliases := gcfg.ModelAliases
 	if opts.Profile != "" {
 		if err := ValidateProfileName(opts.Profile); err != nil {
 			return nil, err
@@ -181,7 +186,6 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 		}
 
 		mergedEnv = merged.Env
-		userAliases = merged.ModelAliases
 
 		if merged.Resources != nil {
 			r := *merged.Resources
@@ -552,8 +556,8 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 	// Build agent command
 	agentCommand := buildAgentCommand(agentDef, model, promptText, opts.Passthrough)
 
-	// Read tmux_conf from config (loaded earlier for auth check)
-	tmuxConf := ycfg.TmuxConf
+	// Read tmux_conf from global config
+	tmuxConf := gcfg.TmuxConf
 	if tmuxConf == "" {
 		tmuxConf = "default" // fallback if not set
 	}
