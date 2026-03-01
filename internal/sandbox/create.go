@@ -20,6 +20,7 @@ type CreateOptions struct {
 	WorkdirArg      string   // raw workdir argument (path with optional :copy/:rw/:force suffixes)
 	Agent           string   // agent name (e.g., "claude", "test")
 	Model           string   // model name or alias (e.g., "sonnet", "claude-sonnet-4-latest")
+	Profile         string   // profile name (from --profile flag)
 	Prompt          string   // prompt text (from --prompt)
 	PromptFile      string   // prompt file path (from --prompt-file)
 	NetworkNone     bool     // --network-none flag
@@ -45,6 +46,9 @@ type sandboxState struct {
 	auxDirs      []*DirArg
 	agent        *agent.Definition
 	model        string
+	profile      string
+	imageRef     string
+	env          map[string]string // merged env (base + profile chain)
 	hasPrompt    bool
 	networkMode  string
 	networkAllow []string
@@ -104,15 +108,6 @@ func (m *Manager) Create(ctx context.Context, opts CreateOptions) (string, error
 // prepareSandboxState handles validation, safety checks, directory
 // creation, workdir copy, git baseline, and meta/config writing.
 func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (*sandboxState, error) {
-	// Parse workdir
-	workdir, err := ParseDirArg(opts.WorkdirArg)
-	if err != nil {
-		return nil, NewUsageError("invalid workdir: %s", err)
-	}
-	if workdir.Mode == "" {
-		workdir.Mode = "copy"
-	}
-
 	// Validate
 	if err := ValidateName(opts.Name); err != nil {
 		return nil, err
@@ -138,19 +133,109 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 		return nil, NewUsageError("--prompt and --prompt-file are mutually exclusive")
 	}
 
-	if _, err := os.Stat(workdir.Path); err != nil {
-		return nil, NewUsageError("workdir does not exist: %s", workdir.Path)
-	}
-
 	// Load config early — needed for auth hint check and later for tmux_conf.
 	ycfg, err := LoadConfig()
 	if err != nil {
 		return nil, fmt.Errorf("load config: %w", err)
 	}
 
+	// Profile resolution: load profile chain, merge config, resolve image.
+	var profileName, imageRef string
+	mergedEnv := ycfg.Env
+	if opts.Profile != "" {
+		if err := ValidateProfileName(opts.Profile); err != nil {
+			return nil, err
+		}
+		chain, chainErr := ResolveProfileChain(opts.Profile)
+		if chainErr != nil {
+			return nil, chainErr
+		}
+		merged, mergeErr := MergeProfileChain(ycfg, chain)
+		if mergeErr != nil {
+			return nil, fmt.Errorf("merge profile chain: %w", mergeErr)
+		}
+		if err := ValidateProfileBackend(merged.Backend, m.backend); err != nil {
+			return nil, err
+		}
+
+		// Apply merged values where CLI didn't override
+		if opts.Agent == ycfg.Agent && merged.Agent != "" {
+			opts.Agent = merged.Agent
+			agentDef = agent.GetAgent(opts.Agent)
+			if agentDef == nil {
+				return nil, NewUsageError("unknown agent from profile: %s", opts.Agent)
+			}
+		}
+		if opts.Model == "" && merged.Model != "" {
+			opts.Model = merged.Model
+		}
+
+		mergedEnv = merged.Env
+
+		// Profile workdir: use if CLI didn't provide one
+		if opts.WorkdirArg == "" && merged.Workdir != nil {
+			wdPath, wdErr := ExpandPath(merged.Workdir.Path)
+			if wdErr != nil {
+				return nil, fmt.Errorf("expand profile workdir path: %w", wdErr)
+			}
+			suffix := ""
+			if merged.Workdir.Mode != "" {
+				suffix = ":" + merged.Workdir.Mode
+			}
+			if merged.Workdir.Mount != "" {
+				suffix += "=" + merged.Workdir.Mount
+			}
+			opts.WorkdirArg = wdPath + suffix
+		}
+
+		// Profile directories: prepend before CLI aux dirs
+		for _, pd := range merged.Directories {
+			dirPath, dirErr := ExpandPath(pd.Path)
+			if dirErr != nil {
+				return nil, fmt.Errorf("expand profile directory path: %w", dirErr)
+			}
+			arg := dirPath
+			if pd.Mode != "" {
+				arg += ":" + pd.Mode
+			}
+			if pd.Mount != "" {
+				arg += "=" + pd.Mount
+			}
+			opts.AuxDirArgs = append([]string{arg}, opts.AuxDirArgs...)
+		}
+
+		// Profile ports: additive
+		opts.Ports = append(merged.Ports, opts.Ports...)
+
+		// Resolve image ref
+		imageRef = ResolveProfileImage(opts.Profile, chain)
+		profileName = opts.Profile
+
+		// Build profile image if needed (Docker only)
+		if err := EnsureProfileImage(ctx, m.runtime, opts.Profile, m.backend, m.output, m.logger, false); err != nil {
+			return nil, fmt.Errorf("build profile image: %w", err)
+		}
+	}
+
+	// Parse workdir (may have been set from profile above)
+	if opts.WorkdirArg == "" {
+		return nil, NewUsageError("no workdir specified and no default workdir in profile")
+	}
+	workdir, err := ParseDirArg(opts.WorkdirArg)
+	if err != nil {
+		return nil, NewUsageError("invalid workdir: %s", err)
+	}
+	if workdir.Mode == "" {
+		workdir.Mode = "copy"
+	}
+
+	if _, err := os.Stat(workdir.Path); err != nil {
+		return nil, NewUsageError("workdir does not exist: %s", workdir.Path)
+	}
+
 	hasAPIKey := hasAnyAPIKey(agentDef)
 	hasAuth := hasAnyAuthFile(agentDef)
-	hasAuthHint := hasAnyAuthHint(agentDef, ycfg.Env)
+	hasAuthHint := hasAnyAuthHint(agentDef, mergedEnv)
 	if !hasAPIKey && !hasAuth && !hasAuthHint {
 		msg := fmt.Sprintf("no authentication found for %s: set %s",
 			agentDef.Name, strings.Join(agentDef.APIKeyEnvVars, "/"))
@@ -174,7 +259,7 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 	// itself, not the host machine.
 	if m.backend != "seatbelt" {
 		for _, key := range agentDef.AuthHintEnvVars {
-			for _, val := range []string{os.Getenv(key), ycfg.Env[key]} {
+			for _, val := range []string{os.Getenv(key), mergedEnv[key]} {
 				if val != "" && containsLocalhost(val) {
 					hint := "use the host's routable IP instead"
 					if m.backend == "docker" {
@@ -390,7 +475,7 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 
 	// Resolve model alias and apply provider prefix if needed
 	model := resolveModel(agentDef, opts.Model)
-	model = applyModelPrefix(agentDef, model, ycfg.Env)
+	model = applyModelPrefix(agentDef, model, mergedEnv)
 
 	// Build agent command
 	agentCommand := buildAgentCommand(agentDef, model, promptText, opts.Passthrough)
@@ -424,6 +509,8 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 		Name:          opts.Name,
 		CreatedAt:     time.Now(),
 		Backend:       m.backend,
+		Profile:       profileName,
+		ImageRef:      imageRef,
 		Agent:         opts.Agent,
 		Model:         model,
 		Workdir: WorkdirMeta{
@@ -466,6 +553,9 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 		auxDirs:      auxDirs,
 		agent:        agentDef,
 		model:        model,
+		profile:      profileName,
+		imageRef:     imageRef,
+		env:          mergedEnv,
 		hasPrompt:    hasPrompt,
 		networkMode:  networkMode,
 		networkAllow: networkAllow,
@@ -480,12 +570,17 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 // and cleans up credential temp files. Used by both initial creation and
 // recreation from meta.json.
 func (m *Manager) launchContainer(ctx context.Context, state *sandboxState) error {
-	cfg, err := LoadConfig()
-	if err != nil {
-		return fmt.Errorf("load config: %w", err)
+	// Use pre-merged env from state if available, otherwise load from config.
+	envVars := state.env
+	if envVars == nil {
+		cfg, cfgErr := LoadConfig()
+		if cfgErr != nil {
+			return fmt.Errorf("load config: %w", cfgErr)
+		}
+		envVars = cfg.Env
 	}
 
-	secretsDir, err := createSecretsDir(state.agent, cfg.Env)
+	secretsDir, err := createSecretsDir(state.agent, envVars)
 	if err != nil {
 		return fmt.Errorf("create secrets: %w", err)
 	}
@@ -514,9 +609,14 @@ func (m *Manager) launchContainer(ctx context.Context, state *sandboxState) erro
 		dockerNetworkMode = ""
 	}
 
+	resolvedImage := state.imageRef
+	if resolvedImage == "" {
+		resolvedImage = "yoloai-base"
+	}
+
 	instanceCfg := runtime.InstanceConfig{
 		Name:        cname,
-		ImageRef:    "yoloai-base",
+		ImageRef:    resolvedImage,
 		WorkingDir:  state.workdir.ResolvedMountPath(),
 		Mounts:      mounts,
 		Ports:       ports,
@@ -564,8 +664,11 @@ func (m *Manager) printCreationOutput(state *sandboxState, autoAttach bool) {
 		return
 	}
 
-	fmt.Fprintf(m.output, "Sandbox %s created\n", state.name)                              //nolint:errcheck // best-effort output
-	fmt.Fprintf(m.output, "  Agent:    %s\n", state.agent.Name)                            //nolint:errcheck // best-effort output
+	fmt.Fprintf(m.output, "Sandbox %s created\n", state.name)   //nolint:errcheck // best-effort output
+	fmt.Fprintf(m.output, "  Agent:    %s\n", state.agent.Name) //nolint:errcheck // best-effort output
+	if state.profile != "" {
+		fmt.Fprintf(m.output, "  Profile:  %s\n", state.profile) //nolint:errcheck // best-effort output
+	}
 	fmt.Fprintf(m.output, "  Workdir:  %s (%s)\n", state.workdir.Path, state.workdir.Mode) //nolint:errcheck // best-effort output
 	for _, ad := range state.auxDirs {
 		mode := ad.Mode

@@ -14,7 +14,7 @@
 - **Non-root user** (`yoloai`, UID/GID matching host user via entrypoint). Image builds with a placeholder user (UID 1001). At container start, the entrypoint runs as root: reads `host_uid`/`host_gid` from `/yoloai/config.json` via `jq`, runs `usermod -u <uid> yoloai && groupmod -g <gid> yoloai` (exit code 12 means "can't update /etc/passwd" — if the UID already matches the desired UID, this is a no-op; otherwise log a warning and continue), fixes ownership on container-managed directories, then drops privileges via `gosu yoloai`. Uses `tini` as PID 1 (`--init` or explicit `ENTRYPOINT`). Images are portable across machines since UID/GID are set at run time, not build time. Claude Code refuses `--dangerously-skip-permissions` as root; Codex does not enforce this but convention is non-root
 - **Entrypoint:** Default `Dockerfile`, `entrypoint.sh`, and `tmux.conf` are embedded in the binary via `go:embed`. On first run, these are seeded to `~/.yoloai/profiles/base/` if they don't exist. `yoloai build` always reads from `~/.yoloai/profiles/base/`, not from embedded copies. Users can edit for fast iteration without rebuilding yoloAI itself. The entrypoint reads all configuration from a bind-mounted `/yoloai/config.json` file containing `agent_command`, `startup_delay`, `ready_pattern`, `submit_sequence`, `tmux_conf`, `host_uid`, `host_gid`, and later `overlay_mounts`, `iptables_rules`, `setup_script`. No environment variables are used for configuration passing.
 
-**[PLANNED] Profile images (`yoloai-<profile>`):** Derived from base, one per profile. Users supply an optional `Dockerfile` per profile with `FROM yoloai-base`. This avoids the limitations of auto-generating Dockerfiles from package lists and gives full flexibility (PPAs, tarballs, custom install steps). Profiles without a Dockerfile use `yoloai-base` directly.
+**Profile images (`yoloai-<profile>`):** Derived from base, one per profile. Users supply an optional `Dockerfile` per profile with `FROM yoloai-base`. This avoids the limitations of auto-generating Dockerfiles from package lists and gives full flexibility (PPAs, tarballs, custom install steps). Profiles without a Dockerfile use `yoloai-base` directly.
 
 ```
 ~/.yoloai/profiles/
@@ -116,7 +116,7 @@ defaults:
 
 **[PLANNED] Tilde expansion in config files:** `~/` will be expanded to `$HOME` in path-valued fields across both `config.yaml` and `profile.yaml` (`agent_files`, `mounts`, `workdir.path`, `directories[].path`). Bare relative paths (without `~/`) are an error in all path fields. Currently no path-valued fields are parsed from config — tilde expansion will be added alongside those fields. CLI path inputs already support `~/` expansion.
 
-### 3. [PLANNED] Profiles
+### 3. Profiles
 
 Profiles live in `~/.yoloai/profiles/<name>/`, containing a `profile.yaml` and optionally a `Dockerfile`:
 
@@ -126,7 +126,11 @@ Profiles live in `~/.yoloai/profiles/<name>/`, containing a `profile.yaml` and o
 └── Dockerfile        ← optional; FROM yoloai-base (Docker backend only)
 ```
 
-**Profile.yaml mirrors config.yaml.** The profile format uses the same field names and structure as the `defaults` section of `config.yaml`, plus profile-specific fields (`workdir`, `directories`). Users learn one config format. Backend-specific fields (`backend`, `tart.image`, Dockerfile) are optional — omit them for backend-agnostic profiles.
+**Name validation:** Profile names follow the same rules as sandbox names — must match `^[a-zA-Z0-9][a-zA-Z0-9_.-]*$`, max 56 characters. The name `base` is reserved and cannot be used for user profiles. Profile names become Docker image tags (`yoloai-<profile>`), so the character restrictions ensure compatibility with Docker's naming rules.
+
+**Profile.yaml mirrors config.yaml.** The profile format uses the same field names and structure as `config.yaml`, plus profile-specific fields (`workdir`, `directories`). Users learn one config format. Backend-specific fields (`backend`, `tart.image`, Dockerfile) are optional — omit them for backend-agnostic profiles.
+
+**Implemented profile fields:** `agent`, `model`, `backend`, `tart.image`, `env`, `ports`, `workdir`, `directories`. Other config.yaml fields (`agent_files`, `mounts`, `resources`, etc.) will be supported in profile.yaml as they are implemented. Unknown fields are silently ignored — profiles written for future versions won't break on older ones.
 
 **Backend handling:**
 - `backend` in profile — optional constraint. If set, error when the user's backend doesn't match. If omitted, the profile works with any backend.
@@ -135,12 +139,22 @@ Profiles live in `~/.yoloai/profiles/<name>/`, containing a `profile.yaml` and o
 
 **Sandbox metadata:** When a profile is used, `meta.json` records the profile name and the resolved image ref (`yoloai-<profile>` or `yoloai-base`). Lifecycle commands (`start`, `reset`, `restart`) use the stored image ref to recreate containers correctly — they do not re-resolve the profile. This means profile changes (Dockerfile or yaml) only take effect on new sandboxes, not existing ones.
 
+**Profile image building:** Profile image building is Docker-specific — handled outside the backend-agnostic `Runtime` interface. The sandbox manager calls `Runtime.EnsureImage()` for the base image as before, then uses Docker-specific build logic for profile images when the Docker backend is active and the profile has a Dockerfile. Tart and Seatbelt backends skip profile image building entirely (Tart uses `tart.image` override; Seatbelt has no image concept).
+
+**Profile image staleness:** A profile image (`yoloai-<profile>`) is considered stale when: (a) it doesn't exist, (b) the profile's Dockerfile has changed since last build (tracked via checksum, same pattern as base image), or (c) `yoloai-base` has been rebuilt since the profile image was last built. Stale images are automatically rebuilt during `yoloai new --profile`.
+
+**Profile inheritance:** Profiles can extend other profiles via the `extends` field, forming a chain rooted at base. Config merging, image resolution, and image building all follow this chain. The merge order is: base config.yaml → each profile in extends order → CLI flags. Cycles are detected (error on revisit). The `extends` field defaults to `"base"` if omitted.
+
+**Profile image chain:** Each profile with a Dockerfile builds `yoloai-<name>` FROM its parent's image. Profiles without Dockerfiles inherit their parent's resolved image. Staleness cascades: rebuilding a parent triggers rebuilds of all descendants that have Dockerfiles.
+
 **`profile.yaml` format:**
 
 ```yaml
 # ~/.yoloai/profiles/my-project/profile.yaml
 
-# --- Same fields as config.yaml defaults (all optional) ---
+extends: base                             # parent profile (default: base)
+
+# --- Same fields as config.yaml (all optional) ---
 # backend: docker                         # constrain to a specific backend; omit for any
 agent: claude                             # override default agent
 # model: sonnet                           # override default model
@@ -184,7 +198,7 @@ directories:
 
 CLI workdir **replaces** profile workdir. CLI `-d` dirs are **additive** with profile dirs. CLI arguments for one-offs, config for repeatability — same options available in both.
 
-**Merge rule:** Scalars override (profile over default, CLI over both). Lists are additive. Maps are merged (profile wins on conflict). Exception: `agent_files` replaces entirely (not additive — it's a coherent set).
+**Merge rule:** Merging is iterative across the inheritance chain: base config.yaml → each profile in extends order → CLI flags. Scalars override (child profile over parent, CLI over all). Lists are additive. Maps are merged (later profile wins on conflict). Exception: `agent_files` replaces entirely (not additive — it's a coherent set).
 
 The full merge table for reference:
 
@@ -212,7 +226,7 @@ The full merge table for reference:
 
 **`yoloai profile` commands:**
 
-- `yoloai profile create <name> [--template <tpl>]` — Create a profile directory with a scaffold `profile.yaml`. Templates: `base` (default), `go`, `node`, `python`, `rust`. Creates pre-filled files tailored to the language/stack. Docker templates also include a `Dockerfile`.
+- `yoloai profile create <name>` — Create a profile directory with a scaffold `profile.yaml` containing commented-out examples of all supported fields. [DEFERRED] `--template <tpl>` flag with language-specific scaffolds (`go`, `node`, `python`, `rust`).
 - `yoloai profile list` — List all profiles in `~/.yoloai/profiles/`.
 - `yoloai profile delete <name>` — Delete a profile directory. Asks for confirmation if any sandbox references the profile.
 

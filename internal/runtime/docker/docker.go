@@ -28,7 +28,7 @@ type Runtime struct {
 	client *dockerclient.Client
 }
 
-// Compile-time check.
+// Compile-time checks.
 var _ runtime.Runtime = (*Runtime)(nil)
 
 // New creates a Runtime and verifies the Docker daemon is reachable.

@@ -9,7 +9,7 @@ Create a plan file in this directory before starting implementation.
 |---------|-----------------|------|-------|
 | Overlayfs copy strategy | [config.md](../../design/config.md) | — | `copy_strategy: auto \| overlay \| full`; instant setup, space-efficient |
 | Network isolation | [commands.md](../../design/commands.md), [security.md](../../design/security.md) | — | `--network-isolated`, iptables + ipset inside container |
-| Profiles | [config.md](../../design/config.md) | — | `~/.yoloai/profiles/<name>/` with Dockerfile + profile.yaml |
+| [DONE] Profiles | [config.md](../../design/config.md) | — | `~/.yoloai/profiles/<name>/` with Dockerfile + profile.yaml, inheritance via extends |
 | Codex agent | [commands.md](../../design/commands.md) | — | Agent definition exists; needs end-to-end testing and polish |
 | [DONE] Aux dirs (`-d`) | [commands.md](../../design/commands.md) | — | Repeatable flag for auxiliary directories |
 | [DONE] Custom mount points (`=<path>`) | [commands.md](../../design/commands.md) | — | Mount directories at custom container paths |
@@ -23,12 +23,12 @@ Create a plan file in this directory before starting implementation.
 | ~~`restart`~~ | [commands.md](../../design/commands.md) | — | Implemented |
 | `--resume` on `start` | [commands.md](../../design/commands.md) | — | Re-feed original prompt with continuation preamble |
 | `--power-user` on `setup` | [setup.md](../../design/setup.md) | — | Non-interactive setup for automation |
-| `profile create` | [config.md](../../design/config.md) | — | Scaffold Dockerfile + profile.yaml |
-| `profile list` | [config.md](../../design/config.md) | — | List profiles in `~/.yoloai/profiles/` |
-| `profile delete` | [config.md](../../design/config.md) | — | Delete profile with confirmation |
+| [DONE] `profile create` | [config.md](../../design/config.md) | — | Scaffold profile.yaml with commented examples. `--template` deferred. |
+| [DONE] `profile list` | [config.md](../../design/config.md) | — | List profiles in `~/.yoloai/profiles/` |
+| [DONE] `profile delete` | [config.md](../../design/config.md) | — | Delete profile with confirmation |
 | `--json` flag | [commands.md](../../design/commands.md) | [json-flag.md](json-flag.md) | Structured output for scripting |
 | `list` filters | [commands.md](../../design/commands.md) | — | `--running`, `--stopped`, `--json` |
-| `build` profile/--all | [commands.md](../../design/commands.md) | — | Build specific profile or all images |
+| [DONE] `build` profile | [commands.md](../../design/commands.md) | — | Build specific profile image chain |
 
 ## Config Options
 

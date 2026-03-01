@@ -88,7 +88,7 @@ These were deferred from MVP but might be cheap to add and valuable for dogfoodi
 
 35. ~~**`auto_commit_interval` implementation**~~ — **Resolved:** Post-MVP. Shell script loop spawned by entrypoint. `git add -A && git commit` with author `yoloai <yoloai@localhost>`, UTC timestamp message. Skips if no changes. Creates commit history that `yoloai apply` preserves as individual commits (see #86).
 
-36. ~~**Profile without a Dockerfile**~~ — **Resolved:** Profile creation always seeds a Dockerfile — if profile doesn't provide one, copy from base. Every profile has an explicit Dockerfile. Binary updates don't silently change behavior on existing profiles.
+36. ~~**Profile without a Dockerfile**~~ — **Resolved (revised):** Dockerfile is optional per profile. Profiles without a Dockerfile use `yoloai-base` directly — no image build needed. This is simpler for runtime-only profiles (env, ports, directories) that don't need custom packages. If a profile explicitly depends on `yoloai-base`, base image updates affecting all dependents is expected and correct behavior. The earlier "always seed a Dockerfile" approach added unnecessary maintenance burden for the common case.
 
 ## UX Issues (from workflow simulation)
 
@@ -193,6 +193,10 @@ These were deferred from MVP but might be cheap to add and valuable for dogfoodi
 91. ~~**Worktree source directories — .git file link is unsafe after copy**~~ — **Resolved (Phase 4b bugfix).** When the source directory is a git worktree, `.git` is a file (not a directory) containing a `gitdir:` pointer back to the main repo. After `cp -rp`, the copy's `.git` file still points to the original repo's object store — git operations in the container would affect the host repo. Fix: `gitBaseline` now uses `os.Lstat` to detect `.git` files, removes the worktree link, and creates a fresh standalone baseline via `git init`. The baseline SHA is different from the original HEAD but that's correct — diff/apply only need a baseline representing the copy's initial state.
 
 92. ~~**Git worktrees as a copy strategy (instead of cp -rp)**~~ — **Resolved: not pursuing.** `git worktree add` would be near-instant and share the object store, but has fundamental problems for coding agents: (a) `.gitignore`d files (`node_modules/`, build artifacts, `.env`) are not included — agents can't build or test without them; (b) worktree branches/refs are visible in the original repo — agent git operations pollute the host; (c) only works for git repos, not arbitrary directories. The planned overlayfs strategy (post-MVP) solves the same performance problem without these limitations.
+
+## Profile Inheritance
+
+95. ~~**Profile inheritance model**~~ — **Resolved.** Profiles specify `extends: <profile-name>` (defaults to `base` if omitted). Config merge chain: base config.yaml → each profile in extends order → CLI flags. Image chain: each profile with a Dockerfile builds `yoloai-<name>` FROM its parent's image. Profiles without Dockerfiles inherit their parent's resolved image. Cycle detection on the extends chain (error on revisit). Implemented in `internal/sandbox/profile.go`.
 
 ## Unresolved (prioritize based on user feedback)
 

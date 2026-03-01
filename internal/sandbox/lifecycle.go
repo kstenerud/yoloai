@@ -307,6 +307,25 @@ func (m *Manager) recreateContainer(ctx context.Context, name string, meta *Meta
 		})
 	}
 
+	// Resolve env: load config, then merge profile chain if profile was used.
+	cfg, cfgErr := LoadConfig()
+	if cfgErr != nil {
+		return fmt.Errorf("load config: %w", cfgErr)
+	}
+	envVars := cfg.Env
+	if meta.Profile != "" {
+		chain, chainErr := ResolveProfileChain(meta.Profile)
+		if chainErr == nil {
+			merged, mergeErr := MergeProfileChain(cfg, chain)
+			if mergeErr == nil {
+				envVars = merged.Env
+			}
+		}
+	}
+
+	// Use stored image ref, fall back to yoloai-base for backward compat
+	imageRef := meta.ImageRef
+
 	state := &sandboxState{
 		name:         name,
 		sandboxDir:   sandboxDir,
@@ -315,6 +334,9 @@ func (m *Manager) recreateContainer(ctx context.Context, name string, meta *Meta
 		auxDirs:      auxDirs,
 		agent:        agentDef,
 		model:        meta.Model,
+		profile:      meta.Profile,
+		imageRef:     imageRef,
+		env:          envVars,
 		hasPrompt:    meta.HasPrompt,
 		networkMode:  meta.NetworkMode,
 		networkAllow: meta.NetworkAllow,

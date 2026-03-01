@@ -271,6 +271,128 @@ type buildMessage struct {
 	Error  string `json:"error"`
 }
 
+// BuildProfileImage builds a Docker image from a profile directory's Dockerfile.
+// The tag parameter is the full image tag (e.g., "yoloai-go-dev").
+func (r *Runtime) BuildProfileImage(ctx context.Context, sourceDir string, tag string, output io.Writer, logger *slog.Logger) error {
+	buildCtx, err := createProfileBuildContext(sourceDir)
+	if err != nil {
+		return fmt.Errorf("create profile build context: %w", err)
+	}
+
+	logger.Debug("building profile image", "tag", tag, "sourceDir", sourceDir)
+
+	resp, err := r.client.ImageBuild(ctx, buildCtx, build.ImageBuildOptions{
+		Tags:       []string{tag},
+		Dockerfile: "Dockerfile",
+		Remove:     true,
+	})
+	if err != nil {
+		return fmt.Errorf("start profile image build: %w", err)
+	}
+	defer resp.Body.Close() //nolint:errcheck // best-effort cleanup
+
+	return streamBuildOutput(resp.Body, output)
+}
+
+// ProfileImageNeedsBuild returns true if the profile image needs to be
+// (re)built. Checks: no checksum file, profile Dockerfile changed, or
+// parent profile was rebuilt more recently.
+func (r *Runtime) ProfileImageNeedsBuild(profileDir string, parentDir string) bool {
+	current := profileBuildChecksum(profileDir)
+	if current == "" {
+		return true
+	}
+
+	lastPath := filepath.Join(profileDir, lastBuildFile)
+	last, err := os.ReadFile(lastPath) //nolint:gosec // G304: profileDir is from profile resolution
+	if err != nil {
+		return true
+	}
+	if string(last) != current {
+		return true
+	}
+
+	// Check if parent was rebuilt after us
+	parentLastPath := filepath.Join(parentDir, lastBuildFile)
+	parentInfo, parentErr := os.Stat(parentLastPath)
+	if parentErr != nil {
+		return false // can't check parent, assume ok
+	}
+	myInfo, myErr := os.Stat(lastPath)
+	if myErr != nil {
+		return true
+	}
+	return parentInfo.ModTime().After(myInfo.ModTime())
+}
+
+// RecordProfileBuildChecksum writes the current Dockerfile checksum to disk
+// for staleness detection.
+func (r *Runtime) RecordProfileBuildChecksum(profileDir string) {
+	if sum := profileBuildChecksum(profileDir); sum != "" {
+		_ = os.WriteFile(filepath.Join(profileDir, lastBuildFile), []byte(sum), 0600)
+	}
+}
+
+// profileBuildChecksum computes a SHA-256 of the profile's Dockerfile.
+func profileBuildChecksum(profileDir string) string {
+	data, err := os.ReadFile(filepath.Join(profileDir, "Dockerfile")) //nolint:gosec // G304: profileDir is from profile resolution
+	if err != nil {
+		return ""
+	}
+	h := sha256.New()
+	h.Write([]byte("Dockerfile"))
+	h.Write(data)
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// createProfileBuildContext creates a tar archive from all files in the profile
+// directory for Docker build context.
+func createProfileBuildContext(sourceDir string) (io.Reader, error) {
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+
+	entries, err := os.ReadDir(sourceDir)
+	if err != nil {
+		return nil, fmt.Errorf("read profile dir: %w", err)
+	}
+
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		// Skip internal files
+		name := e.Name()
+		if name == checksumFile || name == lastBuildFile || name == "profile.yaml" {
+			continue
+		}
+
+		path := filepath.Join(sourceDir, name)
+		content, readErr := os.ReadFile(path) //nolint:gosec // G304: sourceDir is from profile resolution
+		if readErr != nil {
+			return nil, fmt.Errorf("read %s: %w", name, readErr)
+		}
+
+		header := &tar.Header{
+			Name:    name,
+			Size:    int64(len(content)),
+			Mode:    0644,
+			ModTime: time.Now(),
+		}
+		if err := tw.WriteHeader(header); err != nil {
+			return nil, fmt.Errorf("write tar header for %s: %w", name, err)
+		}
+		if _, err := tw.Write(content); err != nil {
+			return nil, fmt.Errorf("write tar content for %s: %w", name, err)
+		}
+	}
+
+	if err := tw.Close(); err != nil {
+		return nil, fmt.Errorf("close tar writer: %w", err)
+	}
+
+	return &buf, nil
+}
+
 // streamBuildOutput reads JSON lines from a Docker build response,
 // extracts the stream field for human-readable output, and checks for errors.
 func streamBuildOutput(response io.Reader, output io.Writer) error {

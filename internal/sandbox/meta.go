@@ -14,6 +14,8 @@ type Meta struct {
 	Name          string    `json:"name"`
 	CreatedAt     time.Time `json:"created_at"`
 	Backend       string    `json:"backend"` // "docker" or "tart"
+	Profile       string    `json:"profile,omitempty"`
+	ImageRef      string    `json:"image_ref,omitempty"`
 
 	Agent string `json:"agent"`
 	Model string `json:"model,omitempty"`

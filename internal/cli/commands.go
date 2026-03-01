@@ -49,6 +49,7 @@ func registerCommands(root *cobra.Command, version, commit, date string) {
 		newLogAliasCmd(),
 
 		// Admin
+		newProfileCmd(),
 		newHelpCmd(),
 		newConfigCmd(),
 		newCompletionCmd(),
@@ -80,7 +81,7 @@ func newLogAliasCmd() *cobra.Command {
 
 func newNewCmd(version string) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:     "new [flags] <name> <workdir> [-d <dir>...] [-- <agent-args>...]",
+		Use:     "new [flags] <name> [workdir] [-d <dir>...] [-- <agent-args>...]",
 		Short:   "Create and start a sandbox",
 		GroupID: groupWorkflow,
 		Args:    cobra.ArbitraryArgs,
@@ -95,18 +96,23 @@ func newNewCmd(version string) *cobra.Command {
 				passthrough = args[dashIdx:]
 			}
 
+			profileFlag, _ := cmd.Flags().GetString("profile")
+
 			if len(positional) < 1 {
 				return sandbox.NewUsageError("sandbox name is required")
 			}
-			if len(positional) < 2 {
-				return sandbox.NewUsageError("workdir is required\n\nUsage: yoloai new [flags] <name> <workdir> [-- <agent-args>...]\n\nExample: yoloai new %s .", positional[0])
+			if len(positional) < 2 && profileFlag == "" {
+				return sandbox.NewUsageError("workdir is required (or use --profile)\n\nUsage: yoloai new [flags] <name> <workdir> [-- <agent-args>...]\n\nExample: yoloai new %s .", positional[0])
 			}
 			if len(positional) > 2 {
-				return sandbox.NewUsageError("too many positional arguments (expected <name> <workdir>)")
+				return sandbox.NewUsageError("too many positional arguments (expected <name> [workdir])")
 			}
 
 			name := positional[0]
-			workdirArg := positional[1]
+			var workdirArg string
+			if len(positional) >= 2 {
+				workdirArg = positional[1]
+			}
 
 			prompt, _ := cmd.Flags().GetString("prompt")
 			promptFile, _ := cmd.Flags().GetString("prompt-file")
@@ -143,6 +149,7 @@ func newNewCmd(version string) *cobra.Command {
 					AuxDirArgs:      dirs,
 					Agent:           agentName,
 					Model:           model,
+					Profile:         profileFlag,
 					Prompt:          prompt,
 					PromptFile:      promptFile,
 					NetworkNone:     networkNone,
@@ -180,6 +187,7 @@ func newNewCmd(version string) *cobra.Command {
 	cmd.Flags().StringP("prompt-file", "f", "", "File containing the prompt")
 	cmd.Flags().StringP("model", "m", "", "Model name or alias")
 	cmd.Flags().String("agent", "", "Agent to use (default from config or claude)")
+	cmd.Flags().String("profile", "", "Profile to use (from ~/.yoloai/profiles/)")
 	cmd.Flags().String("backend", "", "Runtime backend (see 'yoloai system backends')")
 	cmd.Flags().Bool("network-none", false, "Disable network access")
 	cmd.Flags().Bool("network-isolated", false, "Allow only agent API traffic (iptables allowlist)")

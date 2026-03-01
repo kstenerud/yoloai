@@ -37,21 +37,53 @@ func newSystemCmd(version, commit, date string) *cobra.Command {
 func newSystemBuildCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "build [profile]",
-		Short: "Build or rebuild base image",
+		Short: "Build or rebuild base image (or profile image)",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if len(args) > 0 {
-				return fmt.Errorf("profiles not yet implemented")
-			}
-
 			homeDir, err := os.UserHomeDir()
 			if err != nil {
 				return fmt.Errorf("get home directory: %w", err)
 			}
-			yoloaiDir := filepath.Join(homeDir, ".yoloai")
 
 			backend := resolveBackend(cmd)
-			baseProfileDir := filepath.Join(yoloaiDir, "profiles", "base")
+
+			if len(args) > 0 {
+				// Build a specific profile's image chain
+				profileName := args[0]
+				if err := sandbox.ValidateProfileName(profileName); err != nil {
+					return err
+				}
+				if !sandbox.ProfileExists(profileName) {
+					return fmt.Errorf("profile %q does not exist", profileName)
+				}
+				if !sandbox.ProfileHasDockerfile(profileName) {
+					// Check if any ancestor has a Dockerfile
+					chain, chainErr := sandbox.ResolveProfileChain(profileName)
+					if chainErr != nil {
+						return chainErr
+					}
+					hasAny := false
+					for _, name := range chain {
+						if name != "base" && sandbox.ProfileHasDockerfile(name) {
+							hasAny = true
+							break
+						}
+					}
+					if !hasAny {
+						return fmt.Errorf("profile %q has no Dockerfile (and no ancestor does either)", profileName)
+					}
+				}
+				return withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
+					if err := sandbox.EnsureProfileImage(ctx, rt, profileName, backend, os.Stderr, slog.Default(), true); err != nil {
+						return err
+					}
+					_, err := fmt.Fprintf(cmd.OutOrStdout(), "Profile image built successfully\n")
+					return err
+				})
+			}
+
+			// Build base image only
+			baseProfileDir := filepath.Join(homeDir, ".yoloai", "profiles", "base")
 			return withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
 				if err := rt.EnsureImage(ctx, baseProfileDir, os.Stderr, slog.Default(), true); err != nil {
 					return err

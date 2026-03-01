@@ -47,6 +47,10 @@ func newSandboxInfoCmd() *cobra.Command {
 
 				fmt.Fprintf(w, "Backend:     %s\n", meta.Backend) //nolint:errcheck
 
+				if meta.Profile != "" {
+					fmt.Fprintf(w, "Profile:     %s\n", meta.Profile) //nolint:errcheck
+				}
+
 				sandboxDir := sandbox.Dir(name)
 				fmt.Fprintf(w, "Sandbox dir: %s\n", sandboxDir) //nolint:errcheck
 
