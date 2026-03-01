@@ -18,6 +18,7 @@ type ResetOptions struct {
 	Clean     bool // also wipe agent-state directory
 	NoPrompt  bool // skip re-sending prompt after reset
 	NoRestart bool // keep agent running, reset workspace in-place
+	Debug     bool // enable entrypoint debug logging
 }
 
 // Stop stops a sandbox's instance.
@@ -201,6 +202,13 @@ func (m *Manager) Reset(ctx context.Context, opts ResetOptions) error {
 		}
 		if err := os.MkdirAll(agentStateDir, 0750); err != nil {
 			return fmt.Errorf("recreate agent-state: %w", err)
+		}
+	}
+
+	// Patch config.json with debug flag if requested
+	if opts.Debug {
+		if err := patchConfigDebug(sandboxDir, true); err != nil {
+			return err
 		}
 	}
 
@@ -413,6 +421,31 @@ rm -f /tmp/yoloai-reset.txt`, appendPrompt, cfg.SubmitSequence)
 		"bash", "-c", script, "_", resetNotification,
 	})
 	return err
+}
+
+// patchConfigDebug reads config.json, sets the debug field, and writes it back.
+func patchConfigDebug(sandboxDir string, debug bool) error {
+	configPath := filepath.Join(sandboxDir, "config.json")
+	data, err := os.ReadFile(configPath) //nolint:gosec // path is sandbox-controlled
+	if err != nil {
+		return fmt.Errorf("read config.json for debug patch: %w", err)
+	}
+
+	var cfg containerConfig
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return fmt.Errorf("parse config.json for debug patch: %w", err)
+	}
+
+	cfg.Debug = debug
+	updated, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal config.json for debug patch: %w", err)
+	}
+
+	if err := os.WriteFile(configPath, updated, 0600); err != nil {
+		return fmt.Errorf("write config.json for debug patch: %w", err)
+	}
+	return nil
 }
 
 // forceRemoveAll removes a directory tree, making read-only entries writable

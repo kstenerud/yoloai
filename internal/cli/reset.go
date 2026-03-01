@@ -22,6 +22,7 @@ func newResetCmd() *cobra.Command {
 			noPrompt, _ := cmd.Flags().GetBool("no-prompt")
 			clean, _ := cmd.Flags().GetBool("clean")
 			noRestart, _ := cmd.Flags().GetBool("no-restart")
+			debug, _ := cmd.Flags().GetBool("debug")
 
 			if clean && noRestart {
 				return sandbox.NewUsageError("cannot wipe agent state while agent is running; use --clean without --no-restart, or stop the agent first")
@@ -34,6 +35,7 @@ func newResetCmd() *cobra.Command {
 					Clean:     clean,
 					NoPrompt:  noPrompt,
 					NoRestart: noRestart,
+					Debug:     debug,
 				}); err != nil {
 					return err
 				}

@@ -14,8 +14,13 @@ exec >>"$SANDBOX_DIR/log.txt" 2>&1
 
 CONFIG="$SANDBOX_DIR/config.json"
 TMUX_SOCK="$SANDBOX_DIR/tmux.sock"
+DEBUG=$(jq -r '.debug // false' "$CONFIG")
+debug_log() { [ "$DEBUG" = "true" ] && echo "[debug] $*" || true; }
+
+debug_log "entrypoint starting (sandbox=$SANDBOX_DIR)"
 
 # --- Set up HOME redirection ---
+debug_log "setting up HOME redirection"
 export HOME="$SANDBOX_DIR/home"
 mkdir -p "$HOME"
 
@@ -39,6 +44,7 @@ if [ -d "$HOME_SEED" ]; then
 fi
 
 # --- Read secrets and export as env vars ---
+debug_log "reading secrets"
 SECRETS_DIR="$SANDBOX_DIR/secrets"
 if [ -d "$SECRETS_DIR" ]; then
     for secret in "$SECRETS_DIR"/*; do
@@ -53,6 +59,7 @@ fi
 export BROWSER="${BROWSER:-true}"
 
 # --- Read agent config ---
+debug_log "reading agent config"
 AGENT_COMMAND=$(jq -r '.agent_command' "$CONFIG")
 STARTUP_DELAY=$(jq -r '.startup_delay' "$CONFIG")
 READY_PATTERN=$(jq -r '.ready_pattern' "$CONFIG")
@@ -61,6 +68,7 @@ TMUX_CONF=$(jq -r '.tmux_conf' "$CONFIG")
 WORKING_DIR=$(jq -r '.working_dir' "$CONFIG")
 
 # --- Start tmux session (per-sandbox socket) ---
+debug_log "starting tmux session (tmux_conf=$TMUX_CONF)"
 cd "$WORKING_DIR"
 
 TMUX_ARGS=(-S "$TMUX_SOCK")
@@ -88,6 +96,7 @@ tmux -S "$TMUX_SOCK" set-option -t main remain-on-exit on
 tmux -S "$TMUX_SOCK" pipe-pane -t main "cat >> $SANDBOX_DIR/log.txt"
 
 # --- Launch agent inside tmux ---
+debug_log "launching agent: $AGENT_COMMAND"
 tmux -S "$TMUX_SOCK" send-keys -t main "cd $WORKING_DIR && exec $AGENT_COMMAND" Enter
 
 # --- Monitor for agent exit ---
@@ -101,6 +110,7 @@ tmux -S "$TMUX_SOCK" send-keys -t main "cd $WORKING_DIR && exec $AGENT_COMMAND" 
 ) &
 
 # --- Wait for agent ready, auto-accept trust/confirmation prompts ---
+debug_log "waiting for agent ready (pattern=$READY_PATTERN)"
 if [ -n "$READY_PATTERN" ] && [ "$READY_PATTERN" != "null" ]; then
     MAX_WAIT=60
     WAITED=0
@@ -137,8 +147,10 @@ else
 fi
 
 # --- Deliver prompt if present ---
+debug_log "checking for prompt file"
 PROMPT_FILE="$SANDBOX_DIR/prompt.txt"
 if [ -f "$PROMPT_FILE" ]; then
+    debug_log "delivering prompt"
     tmux -S "$TMUX_SOCK" load-buffer "$PROMPT_FILE"
     tmux -S "$TMUX_SOCK" paste-buffer -t main
     sleep 0.5
@@ -147,6 +159,8 @@ if [ -f "$PROMPT_FILE" ]; then
         sleep 0.2
     done
 fi
+
+debug_log "entrypoint setup complete, blocking on tmux wait"
 
 # Block — process stops only on explicit kill
 exec tmux -S "$TMUX_SOCK" wait-for yoloai-exit

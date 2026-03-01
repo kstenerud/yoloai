@@ -117,6 +117,8 @@ func newNewCmd(version string) *cobra.Command {
 			attach, _ := cmd.Flags().GetBool("attach")
 			yes, _ := cmd.Flags().GetBool("yes")
 
+			debug, _ := cmd.Flags().GetBool("debug")
+
 			backend := resolveBackend(cmd)
 			return withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
 				mgr := sandbox.NewManager(rt, backend, slog.Default(), cmd.InOrStdin(), cmd.ErrOrStderr())
@@ -136,6 +138,7 @@ func newNewCmd(version string) *cobra.Command {
 					Yes:         yes,
 					Passthrough: passthrough,
 					Version:     version,
+					Debug:       debug,
 				})
 				if err != nil {
 					return err

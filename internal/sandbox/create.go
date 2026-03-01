@@ -31,6 +31,7 @@ type CreateOptions struct {
 	Passthrough []string // args after -- passed to agent
 	Version     string   // yoloAI version for meta.json
 	Attach      bool     // --attach flag (auto-attach after creation)
+	Debug       bool     // --debug flag (enable entrypoint debug logging)
 }
 
 // sandboxState holds resolved state computed during preparation.
@@ -61,6 +62,7 @@ type containerConfig struct {
 	TmuxConf       string `json:"tmux_conf"`
 	WorkingDir     string `json:"working_dir"`
 	StateDirName   string `json:"state_dir_name"`
+	Debug          bool   `json:"debug,omitempty"`
 }
 
 // Create creates and optionally starts a new sandbox.
@@ -395,7 +397,7 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 	}
 
 	// Build config.json
-	configData, err := buildContainerConfig(agentDef, agentCommand, tmuxConf, workdir.ResolvedMountPath())
+	configData, err := buildContainerConfig(agentDef, agentCommand, tmuxConf, workdir.ResolvedMountPath(), opts.Debug)
 	if err != nil {
 		return nil, fmt.Errorf("build config.json: %w", err)
 	}
@@ -633,7 +635,7 @@ func shellEscapeForDoubleQuotes(s string) string {
 }
 
 // buildContainerConfig creates the config.json content.
-func buildContainerConfig(agentDef *agent.Definition, agentCommand string, tmuxConf string, workingDir string) ([]byte, error) {
+func buildContainerConfig(agentDef *agent.Definition, agentCommand string, tmuxConf string, workingDir string, debug bool) ([]byte, error) {
 	var stateDirName string
 	if agentDef.StateDir != "" {
 		stateDirName = filepath.Base(agentDef.StateDir)
@@ -648,6 +650,7 @@ func buildContainerConfig(agentDef *agent.Definition, agentCommand string, tmuxC
 		TmuxConf:       tmuxConf,
 		WorkingDir:     workingDir,
 		StateDirName:   stateDirName,
+		Debug:          debug,
 	}
 	return json.MarshalIndent(cfg, "", "  ")
 }

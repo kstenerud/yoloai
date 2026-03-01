@@ -61,7 +61,7 @@ func TestBuildAgentCommand_InteractiveFallback(t *testing.T) {
 
 func TestBuildContainerConfig_ValidJSON(t *testing.T) {
 	agentDef := agent.GetAgent("claude")
-	data, err := buildContainerConfig(agentDef, "claude --dangerously-skip-permissions", "default+host", "/Users/test/project")
+	data, err := buildContainerConfig(agentDef, "claude --dangerously-skip-permissions", "default+host", "/Users/test/project", false)
 	require.NoError(t, err)
 
 	var cfg containerConfig
@@ -89,7 +89,7 @@ func TestBuildContainerConfig_StateDirName(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.agent, func(t *testing.T) {
 			agentDef := agent.GetAgent(tt.agent)
-			data, err := buildContainerConfig(agentDef, "cmd", "default", "/tmp")
+			data, err := buildContainerConfig(agentDef, "cmd", "default", "/tmp", false)
 			require.NoError(t, err)
 			var cfg containerConfig
 			require.NoError(t, json.Unmarshal(data, &cfg))

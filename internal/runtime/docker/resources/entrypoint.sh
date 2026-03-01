@@ -10,11 +10,16 @@ exec > >(tee -a /yoloai/log.txt) 2>&1
 CONFIG="/yoloai/config.json"
 HOST_UID=$(jq -r '.host_uid' "$CONFIG")
 HOST_GID=$(jq -r '.host_gid' "$CONFIG")
+DEBUG=$(jq -r '.debug // false' "$CONFIG")
+debug_log() { [ "$DEBUG" = "true" ] && echo "[debug] $*" || true; }
+
+debug_log "entrypoint starting"
 
 # Remap UID/GID to match host user
 CURRENT_UID=$(id -u yoloai)
 CURRENT_GID=$(id -g yoloai)
 
+debug_log "remapping UID=$CURRENT_UID->$HOST_UID GID=$CURRENT_GID->$HOST_GID"
 if [ "$CURRENT_GID" != "$HOST_GID" ]; then
     groupmod -g "$HOST_GID" yoloai 2>/dev/null || true
 fi
@@ -24,6 +29,7 @@ fi
 
 # Fix ownership on container-managed directories.
 # Some files may be bind-mounted read-only; chown on those is expected to fail.
+debug_log "fixing ownership on container-managed directories"
 chown -R yoloai:yoloai /home/yoloai 2>/dev/null || true
 chown yoloai:yoloai /yoloai
 for f in /yoloai/*; do
@@ -31,6 +37,7 @@ for f in /yoloai/*; do
 done
 
 # Read secrets and export as env vars
+debug_log "reading secrets"
 if [ -d /run/secrets ]; then
     for secret in /run/secrets/*; do
         [ -f "$secret" ] || continue
@@ -43,6 +50,8 @@ fi
 # documentation URLs). Only set if not already provided via secrets/env.
 export BROWSER="${BROWSER:-true}"
 
+debug_log "dropping privileges to yoloai"
+
 # --- Drop privileges and run as yoloai ---
 exec gosu yoloai bash -c '
 set -euo pipefail
@@ -54,8 +63,11 @@ STARTUP_DELAY=$(jq -r .startup_delay "$CONFIG")
 READY_PATTERN=$(jq -r .ready_pattern "$CONFIG")
 SUBMIT_SEQUENCE=$(jq -r .submit_sequence "$CONFIG")
 TMUX_CONF=$(jq -r .tmux_conf "$CONFIG")
+DEBUG=$(jq -r ".debug // false" "$CONFIG")
+debug_log() { [ "$DEBUG" = "true" ] && echo "[debug] $*" || true; }
 
 # Start tmux session with config based on tmux_conf setting
+debug_log "starting tmux session (tmux_conf=$TMUX_CONF)"
 case "$TMUX_CONF" in
     default+host)
         tmux -f /yoloai/tmux.conf new-session -d -s main -x 200 -y 50
@@ -81,6 +93,7 @@ tmux set-option -t main remain-on-exit on
 tmux pipe-pane -t main "cat >> /yoloai/log.txt"
 
 # Launch agent inside tmux (exec replaces shell so agent exit = pane exit)
+debug_log "launching agent: $AGENT_COMMAND"
 tmux send-keys -t main "exec $AGENT_COMMAND" Enter
 
 # Monitor for agent exit: when pane dies, detach all attached clients
@@ -96,6 +109,7 @@ tmux send-keys -t main "exec $AGENT_COMMAND" Enter
 # --- Wait for agent ready, auto-accept trust/confirmation prompts ---
 # Always run this loop so interactive "Enter to confirm" prompts (workspace trust,
 # permissions mode) are handled even when no prompt file is provided.
+debug_log "waiting for agent ready (pattern=$READY_PATTERN)"
 if [ -n "$READY_PATTERN" ] && [ "$READY_PATTERN" != "null" ]; then
     MAX_WAIT=60
     WAITED=0
@@ -134,7 +148,9 @@ else
 fi
 
 # --- Deliver prompt if present ---
+debug_log "checking for prompt file"
 if [ -f /yoloai/prompt.txt ]; then
+    debug_log "delivering prompt"
     tmux load-buffer /yoloai/prompt.txt
     tmux paste-buffer -t main
     # Send submit keys individually with delay to ensure TUI processes each
@@ -144,6 +160,8 @@ if [ -f /yoloai/prompt.txt ]; then
         sleep 0.2
     done
 fi
+
+debug_log "entrypoint setup complete, blocking on tmux wait"
 
 # Block forever — container stops only on explicit docker stop
 exec tmux wait-for yoloai-exit
