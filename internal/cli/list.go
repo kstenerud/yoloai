@@ -32,6 +32,13 @@ func runList(cmd *cobra.Command, _ []string) error {
 			return err
 		}
 
+		if jsonEnabled(cmd) {
+			if infos == nil {
+				infos = []*sandbox.Info{}
+			}
+			return writeJSON(cmd.OutOrStdout(), infos)
+		}
+
 		if len(infos) == 0 {
 			fmt.Fprintln(cmd.OutOrStdout(), "No sandboxes found") //nolint:errcheck
 			return nil

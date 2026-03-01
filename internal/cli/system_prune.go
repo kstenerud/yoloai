@@ -67,6 +67,13 @@ func runSystemPrune(cmd *cobra.Command, backend string, dryRun, yes bool) error 
 	// 5. Check if there's anything to prune.
 	totalItems := len(scanResult.Items) + len(staleTempDirs)
 	if totalItems == 0 {
+		if jsonEnabled(cmd) {
+			key := "items_removed"
+			if dryRun {
+				key = "items_found"
+			}
+			return writeJSON(cmd.OutOrStdout(), map[string]any{key: []string{}})
+		}
 		fmt.Fprintln(output, "Nothing to prune.") //nolint:errcheck
 		return nil
 	}
@@ -90,6 +97,9 @@ func runSystemPrune(cmd *cobra.Command, backend string, dryRun, yes bool) error 
 
 	// 7. If dry-run, stop here.
 	if dryRun {
+		if jsonEnabled(cmd) {
+			return writePruneJSON(cmd, scanResult, staleTempDirs, true)
+		}
 		return nil
 	}
 
@@ -127,7 +137,33 @@ func runSystemPrune(cmd *cobra.Command, backend string, dryRun, yes bool) error 
 		fmt.Fprintf(output, "Removed temp dir %s\n", path) //nolint:errcheck
 	}
 
+	if jsonEnabled(cmd) {
+		return writePruneJSON(cmd, scanResult, staleTempDirs, false)
+	}
+
 	return nil
+}
+
+// writePruneJSON outputs prune results as JSON.
+func writePruneJSON(cmd *cobra.Command, scanResult runtime.PruneResult, staleTempDirs []string, dryRun bool) error {
+	type pruneItem struct {
+		Kind string `json:"kind"`
+		Name string `json:"name"`
+	}
+
+	var items []pruneItem
+	for _, item := range scanResult.Items {
+		items = append(items, pruneItem{Kind: item.Kind, Name: item.Name})
+	}
+	for _, path := range staleTempDirs {
+		items = append(items, pruneItem{Kind: "temp_dir", Name: path})
+	}
+
+	key := "items_removed"
+	if dryRun {
+		key = "items_found"
+	}
+	return writeJSON(cmd.OutOrStdout(), map[string]any{key: items})
 }
 
 type brokenSandbox struct {

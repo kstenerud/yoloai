@@ -37,6 +37,18 @@ func runLog(cmd *cobra.Command, args []string) error {
 	}
 
 	logPath := filepath.Join(sandboxDir, "log.txt")
+
+	if jsonEnabled(cmd) {
+		data, readErr := os.ReadFile(logPath) //nolint:gosec
+		if readErr != nil {
+			if os.IsNotExist(readErr) {
+				return writeJSON(cmd.OutOrStdout(), map[string]string{"content": ""})
+			}
+			return fmt.Errorf("open log file: %w", readErr)
+		}
+		return writeJSON(cmd.OutOrStdout(), map[string]string{"content": string(data)})
+	}
+
 	f, err := os.Open(logPath) //nolint:gosec
 	if err != nil {
 		if os.IsNotExist(err) {

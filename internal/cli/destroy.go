@@ -18,6 +18,10 @@ func newDestroyCmd() *cobra.Command {
 		GroupID: groupLifecycle,
 		Args:    cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := requireYesForJSON(cmd); err != nil {
+				return err
+			}
+
 			all, _ := cmd.Flags().GetBool("all")
 			yes, _ := cmd.Flags().GetBool("yes")
 
@@ -41,6 +45,9 @@ func newDestroyCmd() *cobra.Command {
 						return err
 					}
 					if len(infos) == 0 {
+						if jsonEnabled(cmd) {
+							return writeJSON(cmd.OutOrStdout(), []struct{}{})
+						}
 						_, err = fmt.Fprintln(cmd.OutOrStdout(), "No sandboxes to destroy")
 						return err
 					}
@@ -89,6 +96,23 @@ func newDestroyCmd() *cobra.Command {
 							return nil
 						}
 					}
+				}
+
+				if jsonEnabled(cmd) {
+					type destroyResult struct {
+						Name   string `json:"name"`
+						Action string `json:"action,omitempty"`
+						Error  string `json:"error,omitempty"`
+					}
+					var results []destroyResult
+					for _, name := range names {
+						if err := mgr.Destroy(ctx, name); err != nil {
+							results = append(results, destroyResult{Name: name, Error: err.Error()})
+						} else {
+							results = append(results, destroyResult{Name: name, Action: "destroyed"})
+						}
+					}
+					return writeJSON(cmd.OutOrStdout(), results)
 				}
 
 				var errs []error

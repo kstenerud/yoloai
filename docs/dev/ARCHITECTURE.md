@@ -36,7 +36,7 @@ Dependency direction: `cmd/yoloai` → `cli` → `sandbox` + `runtime`; `sandbox
 
 | File | Purpose |
 |------|---------|
-| `root.go` | Root Cobra command, global flags (`-v`, `-q`, `--no-color`), `Execute()` with exit code mapping. |
+| `root.go` | Root Cobra command, global flags (`-v`, `-q`, `--no-color`, `--json`), `Execute()` with exit code mapping (JSON errors to stderr when `--json`). |
 | `commands.go` | `registerCommands()` — registers all subcommands. Also contains `newNewCmd`, `newLsAliasCmd`, `newLogAliasCmd`, `newCompletionCmd`, `newVersionCmd`, and `attachToSandbox`/`waitForTmux` helpers. |
 | `config.go` | `yoloai config get/set/reset` — read, write, and delete `config.yaml` values via dotted paths. |
 | `apply.go` | `yoloai apply` — apply changes back to host. Squash and selective-commit modes, `--export` for `.patch` files. |
@@ -52,6 +52,8 @@ Dependency direction: `cmd/yoloai` → `cli` → `sandbox` + `runtime`; `sandbox
 | `list.go` | `yoloai sandbox list` / `yoloai ls` — tabular listing of all sandboxes with status. |
 | `log.go` | `yoloai sandbox log` / `yoloai log` — display sandbox session log (log.txt). |
 | `info.go` | Backend and agent info commands (`system backends`, `system agents`), plus shared helpers (`checkBackend`, `knownBackends`). |
+| `json.go` | `--json` flag helpers: `jsonEnabled()`, `writeJSON()`, `writeJSONError()`, `requireYesForJSON()`. Used by all commands for JSON output mode. |
+| `json_test.go` | Unit tests for JSON helpers. |
 | `reset.go` | `yoloai reset` — re-copy workdir from host, reset git baseline. |
 | `start.go` | `yoloai start` — start a stopped sandbox (recreates container if removed). |
 | `stop.go` | `yoloai stop` — stop a running sandbox. |

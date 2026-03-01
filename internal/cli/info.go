@@ -114,6 +114,27 @@ func newSystemBackendsCmd() *cobra.Command {
 // listBackends displays the summary table of all backends.
 func listBackends(cmd *cobra.Command) error {
 	ctx := cmd.Context()
+
+	if jsonEnabled(cmd) {
+		type backendJSON struct {
+			Name        string `json:"name"`
+			Description string `json:"description"`
+			Available   bool   `json:"available"`
+			Note        string `json:"note,omitempty"`
+		}
+		var items []backendJSON
+		for _, b := range knownBackends {
+			available, note := checkBackend(ctx, b.Name)
+			items = append(items, backendJSON{
+				Name:        b.Name,
+				Description: b.Description,
+				Available:   available,
+				Note:        note,
+			})
+		}
+		return writeJSON(cmd.OutOrStdout(), items)
+	}
+
 	w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 3, ' ', 0)
 	fmt.Fprintln(w, "BACKEND\tDESCRIPTION\tAVAILABLE\tNOTE") //nolint:errcheck // best-effort output
 
@@ -141,6 +162,22 @@ func showBackendDetail(cmd *cobra.Command, name string) error {
 	}
 
 	ctx := cmd.Context()
+
+	if jsonEnabled(cmd) {
+		available, note := checkBackend(ctx, b.Name)
+		return writeJSON(cmd.OutOrStdout(), map[string]any{
+			"name":         b.Name,
+			"description":  b.Description,
+			"available":    available,
+			"note":         note,
+			"environment":  b.Detail.Environment,
+			"platforms":    b.Detail.Platforms,
+			"requires":     b.Detail.Requires,
+			"install_hint": b.Detail.InstallHint,
+			"tradeoffs":    b.Detail.Tradeoffs,
+		})
+	}
+
 	out := cmd.OutOrStdout()
 	d := b.Detail
 
@@ -201,6 +238,24 @@ func newSystemAgentsCmd() *cobra.Command {
 
 // listAgents displays the summary table of all agents.
 func listAgents(cmd *cobra.Command) error {
+	if jsonEnabled(cmd) {
+		type agentJSON struct {
+			Name        string `json:"name"`
+			Description string `json:"description"`
+			PromptMode  string `json:"prompt_mode"`
+		}
+		var items []agentJSON
+		for _, name := range agent.AllAgentNames() {
+			def := agent.GetAgent(name)
+			items = append(items, agentJSON{
+				Name:        def.Name,
+				Description: def.Description,
+				PromptMode:  string(def.PromptMode),
+			})
+		}
+		return writeJSON(cmd.OutOrStdout(), items)
+	}
+
 	w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 3, ' ', 0)
 	fmt.Fprintln(w, "AGENT\tDESCRIPTION\tPROMPT MODE") //nolint:errcheck
 

@@ -1,6 +1,6 @@
 # Global `--json` Flag for Machine-Readable Output
 
-**Status: Future implementation — not yet scheduled.**
+**Status: Implemented.**
 
 ## Context
 

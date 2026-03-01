@@ -27,7 +27,12 @@ func Execute(ctx context.Context, version, commit, date string) int {
 		return exitCodeSIGINT
 	}
 
-	fmt.Fprintf(os.Stderr, "yoloai: %s\n", err) //nolint:errcheck // best-effort stderr write
+	// In JSON mode, errors go to stderr as JSON
+	if jsonFlag, _ := rootCmd.PersistentFlags().GetBool("json"); jsonFlag {
+		writeJSONError(os.Stderr, err)
+	} else {
+		fmt.Fprintf(os.Stderr, "yoloai: %s\n", err) //nolint:errcheck // best-effort stderr write
+	}
 
 	var usageErr *sandbox.UsageError
 	if errors.As(err, &usageErr) {
@@ -69,6 +74,7 @@ diff and apply what you want to keep.`,
 	rootCmd.PersistentFlags().CountP("quiet", "q", "Suppress non-essential output (-q for warn, -qq for error only)")
 	rootCmd.PersistentFlags().Bool("no-color", false, "Disable colored output")
 	rootCmd.PersistentFlags().Bool("debug", false, "Enable debug logging in sandbox entrypoint")
+	rootCmd.PersistentFlags().Bool("json", false, "Output as JSON (machine-readable)")
 
 	registerCommands(rootCmd, version, commit, date)
 

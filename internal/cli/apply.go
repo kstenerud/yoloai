@@ -9,6 +9,14 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// applyResult holds JSON output for the apply command.
+type applyResult struct {
+	Target         string `json:"target"`
+	CommitsApplied int    `json:"commits_applied"`
+	WIPApplied     bool   `json:"wip_applied"`
+	Method         string `json:"method"` // "format-patch", "squash", "selective", "patches-export"
+}
+
 func newApplyCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "apply <name> [<ref>...] [-- <path>...]",
@@ -28,6 +36,10 @@ Use --patches to export .patch files without applying them.`,
 		GroupID: groupWorkflow,
 		Args:    cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := requireYesForJSON(cmd); err != nil {
+				return err
+			}
+
 			name, rest, err := resolveName(cmd, args)
 			if err != nil {
 				return err
@@ -66,10 +78,14 @@ Use --patches to export .patch files without applying them.`,
 				return fmt.Errorf("apply is not needed for :rw directories — changes are already live")
 			}
 
-			fmt.Fprintf(cmd.OutOrStdout(), "Target: %s\n\n", meta.Workdir.HostPath) //nolint:errcheck
+			if !jsonEnabled(cmd) {
+				fmt.Fprintf(cmd.OutOrStdout(), "Target: %s\n\n", meta.Workdir.HostPath) //nolint:errcheck
+			}
 
 			// Best-effort agent-running warning
-			agentRunningWarning(cmd, name)
+			if !jsonEnabled(cmd) {
+				agentRunningWarning(cmd, name)
+			}
 
 			// Selective apply: specific commit refs
 			if len(refs) > 0 {
@@ -96,6 +112,12 @@ Use --patches to export .patch files without applying them.`,
 			}
 
 			if len(commits) == 0 && !hasWIP {
+				if jsonEnabled(cmd) {
+					return writeJSON(cmd.OutOrStdout(), applyResult{
+						Target: meta.Workdir.HostPath,
+						Method: "format-patch",
+					})
+				}
 				_, err = fmt.Fprintln(cmd.OutOrStdout(), "No changes to apply")
 				return err
 			}
@@ -132,15 +154,17 @@ Use --patches to export .patch files without applying them.`,
 			}
 
 			// Show summary
-			out := cmd.OutOrStdout()
-			fmt.Fprintf(out, "Commits to apply (%d):\n", len(commits)) //nolint:errcheck
-			for _, c := range commits {
-				fmt.Fprintf(out, "  %.12s %s\n", c.SHA, c.Subject) //nolint:errcheck
+			if !jsonEnabled(cmd) {
+				out := cmd.OutOrStdout()
+				fmt.Fprintf(out, "Commits to apply (%d):\n", len(commits)) //nolint:errcheck
+				for _, c := range commits {
+					fmt.Fprintf(out, "  %.12s %s\n", c.SHA, c.Subject) //nolint:errcheck
+				}
+				if hasWIP {
+					fmt.Fprintln(out, "\n+ uncommitted changes (will be applied as unstaged files)") //nolint:errcheck
+				}
+				fmt.Fprintln(out) //nolint:errcheck
 			}
-			if hasWIP {
-				fmt.Fprintln(out, "\n+ uncommitted changes (will be applied as unstaged files)") //nolint:errcheck
-			}
-			fmt.Fprintln(out) //nolint:errcheck
 
 			// Confirmation
 			if !yes {
@@ -161,11 +185,15 @@ Use --patches to export .patch files without applying them.`,
 			}
 			defer os.RemoveAll(patchDir) //nolint:errcheck // best-effort cleanup
 
+			commitsApplied := 0
 			if len(files) > 0 {
 				if err := sandbox.ApplyFormatPatch(patchDir, files, targetDir); err != nil {
 					return err
 				}
-				fmt.Fprintf(out, "%d commit(s) applied to %s\n", len(files), targetDir) //nolint:errcheck
+				commitsApplied = len(files)
+				if !jsonEnabled(cmd) {
+					fmt.Fprintf(cmd.OutOrStdout(), "%d commit(s) applied to %s\n", len(files), targetDir) //nolint:errcheck
+				}
 			}
 
 			// Advance baseline past applied commits (skip for path-filtered applies)
@@ -176,21 +204,36 @@ Use --patches to export .patch files without applying them.`,
 			}
 
 			// Apply WIP changes
+			wipApplied := false
 			if hasWIP {
 				wipPatch, _, wipErr := sandbox.GenerateWIPDiff(name, paths)
 				if wipErr != nil {
-					fmt.Fprintf(cmd.ErrOrStderr(), "Warning: failed to generate WIP diff: %v\n", wipErr) //nolint:errcheck
-					return nil
-				}
-				if len(wipPatch) > 0 {
-					if err := sandbox.ApplyPatch(wipPatch, targetDir, isGit); err != nil {
-						fmt.Fprintf(cmd.ErrOrStderr(), //nolint:errcheck // best-effort warning
-							"Warning: failed to apply WIP changes: %v\n"+
-								"Commits were applied successfully. WIP changes need manual application.\n", err)
-						return nil
+					if !jsonEnabled(cmd) {
+						fmt.Fprintf(cmd.ErrOrStderr(), "Warning: failed to generate WIP diff: %v\n", wipErr) //nolint:errcheck
 					}
-					fmt.Fprintln(out, "Uncommitted changes applied (unstaged)") //nolint:errcheck
+				} else if len(wipPatch) > 0 {
+					if err := sandbox.ApplyPatch(wipPatch, targetDir, isGit); err != nil {
+						if !jsonEnabled(cmd) {
+							fmt.Fprintf(cmd.ErrOrStderr(), //nolint:errcheck // best-effort warning
+								"Warning: failed to apply WIP changes: %v\n"+
+									"Commits were applied successfully. WIP changes need manual application.\n", err)
+						}
+					} else {
+						wipApplied = true
+						if !jsonEnabled(cmd) {
+							fmt.Fprintln(cmd.OutOrStdout(), "Uncommitted changes applied (unstaged)") //nolint:errcheck
+						}
+					}
 				}
+			}
+
+			if jsonEnabled(cmd) {
+				return writeJSON(cmd.OutOrStdout(), applyResult{
+					Target:         targetDir,
+					CommitsApplied: commitsApplied,
+					WIPApplied:     wipApplied,
+					Method:         "format-patch",
+				})
 			}
 
 			return nil
@@ -261,6 +304,12 @@ func applySelectedCommits(cmd *cobra.Command, name string, refs []string, meta *
 	}
 
 	if len(resolved) == 0 {
+		if jsonEnabled(cmd) {
+			return writeJSON(cmd.OutOrStdout(), applyResult{
+				Target: targetDir,
+				Method: "selective",
+			})
+		}
 		_, err = fmt.Fprintln(cmd.OutOrStdout(), "No commits matched")
 		return err
 	}
@@ -276,12 +325,14 @@ func applySelectedCommits(cmd *cobra.Command, name string, refs []string, meta *
 	}
 
 	// Show summary
-	out := cmd.OutOrStdout()
-	fmt.Fprintf(out, "Commits to apply (%d):\n", len(resolved)) //nolint:errcheck
-	for _, c := range resolved {
-		fmt.Fprintf(out, "  %.12s %s\n", c.SHA, c.Subject) //nolint:errcheck
+	if !jsonEnabled(cmd) {
+		out := cmd.OutOrStdout()
+		fmt.Fprintf(out, "Commits to apply (%d):\n", len(resolved)) //nolint:errcheck
+		for _, c := range resolved {
+			fmt.Fprintf(out, "  %.12s %s\n", c.SHA, c.Subject) //nolint:errcheck
+		}
+		fmt.Fprintln(out) //nolint:errcheck
 	}
-	fmt.Fprintln(out) //nolint:errcheck
 
 	// Confirmation
 	if !yes {
@@ -310,7 +361,9 @@ func applySelectedCommits(cmd *cobra.Command, name string, refs []string, meta *
 	if err := sandbox.ApplyFormatPatch(patchDir, files, targetDir); err != nil {
 		return err
 	}
-	fmt.Fprintf(out, "%d commit(s) applied to %s\n", len(files), targetDir) //nolint:errcheck
+	if !jsonEnabled(cmd) {
+		fmt.Fprintf(cmd.OutOrStdout(), "%d commit(s) applied to %s\n", len(files), targetDir) //nolint:errcheck
+	}
 
 	// Advance baseline using contiguous prefix logic
 	allCommits, err := sandbox.ListCommitsBeyondBaseline(name)
@@ -345,6 +398,12 @@ func applySquash(cmd *cobra.Command, name string, paths []string, meta *sandbox.
 		return err
 	}
 	if len(patch) == 0 {
+		if jsonEnabled(cmd) {
+			return writeJSON(cmd.OutOrStdout(), applyResult{
+				Target: meta.Workdir.HostPath,
+				Method: "squash",
+			})
+		}
 		_, err = fmt.Fprintln(cmd.OutOrStdout(), "No changes to apply")
 		return err
 	}
@@ -390,6 +449,12 @@ func applySquashMulti(cmd *cobra.Command, name string, paths []string, _ *sandbo
 		return err
 	}
 	if len(patches) == 0 {
+		if jsonEnabled(cmd) {
+			return writeJSON(cmd.OutOrStdout(), applyResult{
+				Target: "multi",
+				Method: "squash",
+			})
+		}
 		_, err = fmt.Fprintln(cmd.OutOrStdout(), "No changes to apply")
 		return err
 	}
@@ -472,6 +537,15 @@ func exportPatches(cmd *cobra.Command, name string, paths []string, commits []sa
 			}
 			fmt.Fprintf(out, "  %s\n", dst) //nolint:errcheck
 		}
+	}
+
+	if jsonEnabled(cmd) {
+		return writeJSON(cmd.OutOrStdout(), applyResult{
+			Target:         dir,
+			CommitsApplied: len(commits),
+			WIPApplied:     hasWIP,
+			Method:         "patches-export",
+		})
 	}
 
 	fmt.Fprintln(out)                                                       //nolint:errcheck

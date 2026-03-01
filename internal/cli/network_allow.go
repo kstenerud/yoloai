@@ -65,6 +65,13 @@ func newSandboxNetworkAllowCmd() *cobra.Command {
 				}
 
 				if len(newDomains) == 0 {
+					if jsonEnabled(cmd) {
+						return writeJSON(cmd.OutOrStdout(), map[string]any{
+							"name":          name,
+							"domains_added": []string{},
+							"live":          false,
+						})
+					}
 					fmt.Fprintf(w, "All domains already allowed\n") //nolint:errcheck // best-effort output
 					return nil
 				}
@@ -86,6 +93,7 @@ func newSandboxNetworkAllowCmd() *cobra.Command {
 					return err
 				}
 
+				live := false
 				if info.Status == sandbox.StatusRunning {
 					// Live-patch ipset rules in running container
 					script := `for domain in "$@"; do
@@ -101,10 +109,19 @@ done`
 						fmt.Fprintf(w, "Warning: failed to update running container: %v\n", err) //nolint:errcheck // best-effort output
 						fmt.Fprintf(w, "Changes saved — will take effect on next start\n")       //nolint:errcheck // best-effort output
 					} else {
+						live = true
 						fmt.Fprintf(w, "Allowed %s (live)\n", strings.Join(newDomains, ", ")) //nolint:errcheck // best-effort output
 					}
 				} else {
 					fmt.Fprintf(w, "Allowed %s (will take effect on next start)\n", strings.Join(newDomains, ", ")) //nolint:errcheck // best-effort output
+				}
+
+				if jsonEnabled(cmd) {
+					return writeJSON(cmd.OutOrStdout(), map[string]any{
+						"name":          name,
+						"domains_added": newDomains,
+						"live":          live,
+					})
 				}
 
 				return nil

@@ -17,8 +17,7 @@ Create a plan file in this directory before starting implementation.
 |---------|-----------------|------|-------|
 | `--resume` on `start` | [commands.md](../../design/commands.md) | — | Re-feed original prompt with continuation preamble |
 | `--power-user` on `setup` | [setup.md](../../design/setup.md) | — | Non-interactive setup for automation |
-| `--json` flag | [commands.md](../../design/commands.md) | [json-flag.md](json-flag.md) | Structured output for scripting |
-| `list` filters | [commands.md](../../design/commands.md) | — | `--running`, `--stopped`, `--json` |
+| `list` filters | [commands.md](../../design/commands.md) | — | `--running`, `--stopped` |
 
 ## Config Options
 

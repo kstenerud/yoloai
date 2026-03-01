@@ -34,6 +34,17 @@ func newSandboxInfoCmd() *cobra.Command {
 					return err
 				}
 
+				if jsonEnabled(cmd) {
+					type infoJSON struct {
+						*sandbox.Info
+						PromptPreview string `json:"prompt_preview,omitempty"`
+					}
+					result := infoJSON{
+						Info:          info,
+						PromptPreview: loadPromptPreview(sandbox.Dir(name)),
+					}
+					return writeJSON(cmd.OutOrStdout(), result)
+				}
 				w := cmd.OutOrStdout()
 				meta := info.Meta
 

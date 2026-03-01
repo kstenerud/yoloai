@@ -45,11 +45,16 @@ Examples:
 			stat, _ := cmd.Flags().GetBool("stat")
 			logFlag, _ := cmd.Flags().GetBool("log")
 
-			// Best-effort agent-running warning
-			agentRunningWarning(cmd, name)
+			// Skip agent warning in JSON mode
+			if !jsonEnabled(cmd) {
+				agentRunningWarning(cmd, name)
+			}
 
 			// --log: list commits
 			if logFlag {
+				if jsonEnabled(cmd) {
+					return diffLogJSON(cmd, name, stat)
+				}
 				return diffLog(cmd, name, stat)
 			}
 
@@ -70,6 +75,9 @@ Examples:
 			}
 
 			if len(meta.Directories) > 0 && len(paths) == 0 {
+				if jsonEnabled(cmd) {
+					return diffMultiDirJSON(cmd, name, stat)
+				}
 				return diffMultiDir(cmd, name, stat)
 			}
 
@@ -83,6 +91,9 @@ Examples:
 				if err != nil {
 					return err
 				}
+				if jsonEnabled(cmd) {
+					return writeJSON(cmd.OutOrStdout(), result)
+				}
 				if result.Empty {
 					_, err = fmt.Fprintln(cmd.OutOrStdout(), "No changes")
 					return err
@@ -94,6 +105,9 @@ Examples:
 			result, err := sandbox.GenerateDiff(opts)
 			if err != nil {
 				return err
+			}
+			if jsonEnabled(cmd) {
+				return writeJSON(cmd.OutOrStdout(), result)
 			}
 			if result.Empty {
 				_, err = fmt.Fprintln(cmd.OutOrStdout(), "No changes")
@@ -217,6 +231,10 @@ func diffRef(cmd *cobra.Command, name, ref string, stat bool) error {
 		return err
 	}
 
+	if jsonEnabled(cmd) {
+		return writeJSON(cmd.OutOrStdout(), result)
+	}
+
 	if result.Empty {
 		_, err = fmt.Fprintln(cmd.OutOrStdout(), "No changes")
 		return err
@@ -286,4 +304,52 @@ func diffMultiDir(cmd *cobra.Command, name string, stat bool) error {
 
 	_, err = fmt.Fprint(cmd.OutOrStdout(), output)
 	return err
+}
+
+// diffLogJSON outputs commit log as JSON.
+func diffLogJSON(cmd *cobra.Command, name string, stat bool) error {
+	var commits any
+	if stat {
+		c, err := sandbox.ListCommitsWithStats(name)
+		if err != nil {
+			return err
+		}
+		if c == nil {
+			c = []sandbox.CommitInfoWithStat{}
+		}
+		commits = c
+	} else {
+		c, err := sandbox.ListCommitsBeyondBaseline(name)
+		if err != nil {
+			return err
+		}
+		if c == nil {
+			c = []sandbox.CommitInfo{}
+		}
+		commits = c
+	}
+
+	hasWIP, _ := sandbox.HasUncommittedChanges(name)
+
+	result := struct {
+		Commits               any  `json:"commits"`
+		HasUncommittedChanges bool `json:"has_uncommitted_changes"`
+	}{
+		Commits:               commits,
+		HasUncommittedChanges: hasWIP,
+	}
+
+	return writeJSON(cmd.OutOrStdout(), result)
+}
+
+// diffMultiDirJSON outputs multi-directory diffs as JSON.
+func diffMultiDirJSON(cmd *cobra.Command, name string, stat bool) error {
+	results, err := sandbox.GenerateMultiDiff(name, stat)
+	if err != nil {
+		return err
+	}
+	if results == nil {
+		results = []*sandbox.DiffResult{}
+	}
+	return writeJSON(cmd.OutOrStdout(), results)
 }

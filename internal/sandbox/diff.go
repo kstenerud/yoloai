@@ -14,10 +14,10 @@ type DiffOptions struct {
 
 // DiffResult holds the output of a diff operation.
 type DiffResult struct {
-	Output  string // diff text or stat summary
-	WorkDir string // work directory that was diffed
-	Mode    string // "copy" or "rw"
-	Empty   bool   // true if no changes detected
+	Output  string `json:"output"`  // diff text or stat summary
+	WorkDir string `json:"workdir"` // work directory that was diffed
+	Mode    string `json:"mode"`    // "copy" or "rw"
+	Empty   bool   `json:"empty"`   // true if no changes detected
 }
 
 // GenerateDiff produces a full diff of agent changes for a sandbox.
@@ -170,7 +170,7 @@ func GenerateCommitDiff(opts CommitDiffOptions) (*DiffResult, error) {
 // CommitInfoWithStat extends CommitInfo with a per-commit stat summary.
 type CommitInfoWithStat struct {
 	CommitInfo
-	Stat string // output of git diff --stat for this commit
+	Stat string `json:"stat,omitempty"` // output of git diff --stat for this commit
 }
 
 // ListCommitsWithStats returns commits beyond baseline with per-commit

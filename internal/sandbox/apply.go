@@ -173,8 +173,8 @@ func formatApplyError(gitErr error, targetDir string) error {
 
 // CommitInfo holds a commit SHA and its subject line.
 type CommitInfo struct {
-	SHA     string
-	Subject string
+	SHA     string `json:"sha"`
+	Subject string `json:"subject"`
 }
 
 // ListCommitsBeyondBaseline returns the commits made in the work copy

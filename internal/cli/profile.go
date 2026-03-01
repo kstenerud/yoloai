@@ -80,6 +80,13 @@ func newProfileCreateCmd() *cobra.Command {
 				return fmt.Errorf("write profile.yaml: %w", err)
 			}
 
+			if jsonEnabled(cmd) {
+				return writeJSON(cmd.OutOrStdout(), map[string]string{
+					"name":   name,
+					"path":   yamlPath,
+					"action": "created",
+				})
+			}
 			fmt.Fprintf(cmd.OutOrStdout(), "Created profile '%s' at %s\n", name, yamlPath) //nolint:errcheck
 			return nil
 		},
@@ -173,6 +180,12 @@ func newProfileDeleteCmd() *cobra.Command {
 				return fmt.Errorf("remove profile directory: %w", err)
 			}
 
+			if jsonEnabled(cmd) {
+				return writeJSON(cmd.OutOrStdout(), map[string]string{
+					"name":   name,
+					"action": "deleted",
+				})
+			}
 			fmt.Fprintf(cmd.OutOrStdout(), "Deleted profile '%s'\n", name)                                                                   //nolint:errcheck
 			fmt.Fprintf(cmd.OutOrStdout(), "Note: if a Docker image 'yoloai-%s' exists, remove it with: docker rmi yoloai-%s\n", name, name) //nolint:errcheck
 			return nil

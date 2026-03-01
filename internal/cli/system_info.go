@@ -18,6 +18,10 @@ func newSystemInfoCmd(version, commit, date string) *cobra.Command {
 		Short: "Show system information",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if jsonEnabled(cmd) {
+				return writeSystemInfoJSON(cmd, version, commit, date)
+			}
+
 			out := cmd.OutOrStdout()
 
 			fmt.Fprintf(out, "Version:     %s\n", version) //nolint:errcheck
@@ -65,4 +69,63 @@ func newSystemInfoCmd(version, commit, date string) *cobra.Command {
 			return nil
 		},
 	}
+}
+
+// writeSystemInfoJSON outputs system info as JSON.
+func writeSystemInfoJSON(cmd *cobra.Command, version, commit, date string) error {
+	configPath, err := sandbox.ConfigPath()
+	if err != nil {
+		configPath = ""
+	}
+
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		homeDir = ""
+	}
+	dataDir := filepath.Join(homeDir, ".yoloai")
+	sandboxesDir := filepath.Join(dataDir, "sandboxes")
+
+	diskUsage := ""
+	if size, err := sandbox.DirSize(dataDir); err == nil {
+		diskUsage = sandbox.FormatSize(size)
+	}
+
+	type backendStatus struct {
+		Name      string `json:"name"`
+		Available bool   `json:"available"`
+		Note      string `json:"note,omitempty"`
+	}
+
+	var backends []backendStatus
+	ctx := cmd.Context()
+	for _, b := range knownBackends {
+		available, note := checkBackend(ctx, b.Name)
+		backends = append(backends, backendStatus{
+			Name:      b.Name,
+			Available: available,
+			Note:      note,
+		})
+	}
+
+	result := struct {
+		Version      string          `json:"version"`
+		Commit       string          `json:"commit"`
+		Date         string          `json:"date"`
+		ConfigPath   string          `json:"config_path"`
+		DataDir      string          `json:"data_dir"`
+		SandboxesDir string          `json:"sandboxes_dir"`
+		DiskUsage    string          `json:"disk_usage"`
+		Backends     []backendStatus `json:"backends"`
+	}{
+		Version:      version,
+		Commit:       commit,
+		Date:         date,
+		ConfigPath:   configPath,
+		DataDir:      dataDir,
+		SandboxesDir: sandboxesDir,
+		DiskUsage:    diskUsage,
+		Backends:     backends,
+	}
+
+	return writeJSON(cmd.OutOrStdout(), result)
 }

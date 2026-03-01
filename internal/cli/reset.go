@@ -48,6 +48,13 @@ func newResetCmd() *cobra.Command {
 					return err
 				}
 
+				if jsonEnabled(cmd) {
+					return writeJSON(cmd.OutOrStdout(), map[string]string{
+						"name":   name,
+						"action": "reset",
+					})
+				}
+
 				if attach {
 					containerName := sandbox.InstanceName(name)
 					if err := waitForTmux(ctx, rt, containerName, 30*time.Second); err != nil {

@@ -74,8 +74,15 @@ func newSystemBuildCmd() *cobra.Command {
 					}
 				}
 				return withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
-					if err := sandbox.EnsureProfileImage(ctx, rt, profileName, backend, os.Stderr, slog.Default(), true); err != nil {
+					buildOut := os.Stderr
+					if jsonEnabled(cmd) {
+						buildOut, _ = os.Open(os.DevNull)
+					}
+					if err := sandbox.EnsureProfileImage(ctx, rt, profileName, backend, buildOut, slog.Default(), true); err != nil {
 						return err
+					}
+					if jsonEnabled(cmd) {
+						return writeJSON(cmd.OutOrStdout(), map[string]string{"action": "built", "profile": profileName})
 					}
 					_, err := fmt.Fprintf(cmd.OutOrStdout(), "Profile image built successfully\n")
 					return err
@@ -85,10 +92,17 @@ func newSystemBuildCmd() *cobra.Command {
 			// Build base image only
 			baseProfileDir := filepath.Join(homeDir, ".yoloai", "profiles", "base")
 			return withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
-				if err := rt.EnsureImage(ctx, baseProfileDir, os.Stderr, slog.Default(), true); err != nil {
+				buildOut := os.Stderr
+				if jsonEnabled(cmd) {
+					buildOut, _ = os.Open(os.DevNull)
+				}
+				if err := rt.EnsureImage(ctx, baseProfileDir, buildOut, slog.Default(), true); err != nil {
 					return err
 				}
 
+				if jsonEnabled(cmd) {
+					return writeJSON(cmd.OutOrStdout(), map[string]string{"action": "built"})
+				}
 				_, err := fmt.Fprintln(cmd.OutOrStdout(), "Base image built successfully")
 				return err
 			})

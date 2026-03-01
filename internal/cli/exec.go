@@ -19,6 +19,10 @@ func newSandboxExecCmd() *cobra.Command {
 		Short: "Run a command inside a sandbox",
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if jsonEnabled(cmd) {
+				return errJSONNotSupported("exec")
+			}
+
 			name, rest, err := resolveName(cmd, args)
 			if err != nil {
 				return err

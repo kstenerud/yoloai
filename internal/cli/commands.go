@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"time"
 
@@ -136,6 +137,10 @@ func newNewCmd(version string) *cobra.Command {
 			replace, _ := cmd.Flags().GetBool("replace")
 			noStart, _ := cmd.Flags().GetBool("no-start")
 			attach, _ := cmd.Flags().GetBool("attach")
+
+			if jsonEnabled(cmd) && attach {
+				return fmt.Errorf("--json and --attach are incompatible")
+			}
 			yes, _ := cmd.Flags().GetBool("yes")
 
 			cpus, _ := cmd.Flags().GetString("cpus")
@@ -144,7 +149,11 @@ func newNewCmd(version string) *cobra.Command {
 
 			backend := resolveBackend(cmd)
 			return withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
-				mgr := sandbox.NewManager(rt, backend, slog.Default(), cmd.InOrStdin(), cmd.ErrOrStderr())
+				mgrOutput := cmd.ErrOrStderr()
+				if jsonEnabled(cmd) {
+					mgrOutput = io.Discard
+				}
+				mgr := sandbox.NewManager(rt, backend, slog.Default(), cmd.InOrStdin(), mgrOutput)
 				sandboxName, err := mgr.Create(ctx, sandbox.CreateOptions{
 					Name:            name,
 					WorkdirArg:      workdirArg,
@@ -170,6 +179,17 @@ func newNewCmd(version string) *cobra.Command {
 				})
 				if err != nil {
 					return err
+				}
+
+				if jsonEnabled(cmd) {
+					if sandboxName == "" {
+						return nil
+					}
+					meta, loadErr := sandbox.LoadMeta(sandbox.Dir(sandboxName))
+					if loadErr != nil {
+						return loadErr
+					}
+					return writeJSON(cmd.OutOrStdout(), meta)
 				}
 
 				if sandboxName == "" || !attach || noStart {

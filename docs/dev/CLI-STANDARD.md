@@ -50,6 +50,7 @@ Every command supports:
 | `--verbose`, `-v` | Increase output verbosity (stackable: `-vv`)     |
 | `--quiet`, `-q`   | Suppress non-essential output                    |
 | `--no-color`      | Disable colored output                           |
+| `--json`          | Output as JSON (machine-readable)                |
 | `--yes`, `-y`     | Skip confirmation prompts (where applicable)     |
 
 ### Verbosity Mapping
@@ -69,7 +70,36 @@ Every command supports:
 - Errors and warnings go to **stderr**
 - Progress indicators and prompts go to **stderr** (so stdout is pipeable)
 - `--help` and `--version` output goes to **stdout** (per GNU standards)
-- Structured output available via `--json` where useful
+### JSON Output (`--json`)
+
+The `--json` global flag switches all command output from human-readable text to structured JSON. Designed for scripting, CI pipelines, and tool integration.
+
+**Behavior:**
+
+- Normal output goes to stdout as a single JSON object or array
+- Errors go to stderr as `{"error": "message"}`
+- No envelope wrapper — commands output their domain object directly (like `gh`, `docker`, `kubectl`)
+- Exit codes still signal success (0) or failure (non-zero)
+
+**Interactive commands** (`attach`, `exec`) reject `--json` with an error since they require a terminal.
+
+**Confirmation commands** (`destroy`, `apply`, `system prune`) require `--yes` when `--json` is set, since interactive prompts can't work in a machine-readable pipeline. Exception: `system prune --dry-run` works without `--yes`.
+
+**Commands with `--attach`** (`new`, `start`, `restart`) reject `--json --attach` since attach is interactive.
+
+**Examples:**
+
+```bash
+yoloai list --json                    # JSON array of sandbox info
+yoloai list --json | jq '.[].meta.name'
+yoloai sandbox info mybox --json      # single sandbox object
+yoloai version --json                 # {"version": "...", "commit": "...", "date": "..."}
+yoloai diff mybox --json              # diff result object
+yoloai diff mybox --log --json        # {commits: [...], has_uncommitted_changes: bool}
+yoloai destroy mybox --json --yes     # [{name: "...", action: "destroyed"}]
+yoloai config get --json              # full config as JSON
+yoloai config get backend --json      # {"key": "backend", "value": "docker"}
+```
 - After state-changing operations, suggest logical next commands (e.g., after `yoloai new`, suggest `yoloai attach`)
 
 ### Color
@@ -161,6 +191,7 @@ Global Flags:
   -v, --verbose   Increase output verbosity
   -q, --quiet     Suppress non-essential output
       --no-color  Disable colored output
+      --json      Output as JSON (machine-readable)
 
 Examples:
   yoloai new my-sandbox ./my-project

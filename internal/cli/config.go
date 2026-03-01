@@ -68,7 +68,7 @@ Uses dotted paths for nested keys (e.g., tart.image).
 Creates the config file if it doesn't exist.
 Preserves comments and formatting.`,
 		Args: cobra.ExactArgs(2),
-		RunE: func(_ *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, args []string) error {
 			configPath, err := sandbox.ConfigPath()
 			if err != nil {
 				return err
@@ -85,9 +85,20 @@ Preserves comments and formatting.`,
 				}
 			}
 
-			return sandbox.UpdateConfigFields(map[string]string{
+			if err := sandbox.UpdateConfigFields(map[string]string{
 				args[0]: args[1],
-			})
+			}); err != nil {
+				return err
+			}
+
+			if jsonEnabled(cmd) {
+				return writeJSON(cmd.OutOrStdout(), map[string]string{
+					"key":    args[0],
+					"value":  args[1],
+					"action": "set",
+				})
+			}
+			return nil
 		},
 	}
 }
@@ -101,8 +112,17 @@ func newConfigResetCmd() *cobra.Command {
 Works at any level: a single value (backend), a map entry
 (env.OLLAMA_API_BASE), or an entire section (tart).`,
 		Args: cobra.ExactArgs(1),
-		RunE: func(_ *cobra.Command, args []string) error {
-			return sandbox.DeleteConfigField(args[0])
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := sandbox.DeleteConfigField(args[0]); err != nil {
+				return err
+			}
+			if jsonEnabled(cmd) {
+				return writeJSON(cmd.OutOrStdout(), map[string]string{
+					"key":    args[0],
+					"action": "reset",
+				})
+			}
+			return nil
 		},
 	}
 }

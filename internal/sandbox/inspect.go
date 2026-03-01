@@ -29,11 +29,11 @@ const (
 
 // Info holds the combined metadata and live state for a sandbox.
 type Info struct {
-	Meta        *Meta
-	Status      Status
-	ContainerID string // 12-char short ID, empty if removed
-	HasChanges  string // "yes", "no", or "-" (unknown/not applicable)
-	DiskUsage   string // human-readable size, e.g. "42.0MB"
+	Meta        *Meta  `json:"meta"`
+	Status      Status `json:"status"`
+	ContainerID string `json:"container_id,omitempty"` // 12-char short ID, empty if removed
+	HasChanges  string `json:"has_changes"`            // "yes", "no", or "-" (unknown/not applicable)
+	DiskUsage   string `json:"disk_usage"`             // human-readable size, e.g. "42.0MB"
 }
 
 // FormatAge returns a human-readable duration string (e.g., "2h", "3d", "5m").

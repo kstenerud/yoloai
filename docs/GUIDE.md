@@ -150,6 +150,21 @@ The `host.docker.internal` hostname allows the container to reach services runni
 | `-v` | Verbose output |
 | `-q` | Quiet output |
 | `--no-color` | Disable color output |
+| `--json` | Output as JSON for scripting and CI |
+
+### JSON Output
+
+Use `--json` on any command to get machine-readable JSON output:
+
+```bash
+yoloai list --json                         # all sandboxes as JSON array
+yoloai sandbox info mybox --json           # sandbox details as JSON object
+yoloai diff mybox --json                   # diff result as JSON
+yoloai destroy mybox --json --yes          # action result (--yes required)
+yoloai config get --json                   # full config as JSON
+```
+
+Errors are output to stderr as `{"error": "message"}`. Interactive commands (`attach`, `exec`) reject `--json`.
 
 ## Key Flags
 

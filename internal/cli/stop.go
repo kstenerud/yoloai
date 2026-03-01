@@ -46,6 +46,9 @@ func newStopCmd() *cobra.Command {
 						}
 					}
 					if len(names) == 0 {
+						if jsonEnabled(cmd) {
+							return writeJSON(cmd.OutOrStdout(), []struct{}{})
+						}
 						_, err = fmt.Fprintln(cmd.OutOrStdout(), "No running sandboxes to stop")
 						return err
 					}
@@ -66,6 +69,23 @@ func newStopCmd() *cobra.Command {
 							}
 						}
 						names = args
+						if jsonEnabled(cmd) {
+							type stopResult struct {
+								Name   string `json:"name"`
+								Action string `json:"action,omitempty"`
+								Error  string `json:"error,omitempty"`
+							}
+							var results []stopResult
+							for _, name := range names {
+								if err := mgr.Stop(ctx, name); err != nil {
+									results = append(results, stopResult{Name: name, Error: err.Error()})
+								} else {
+									results = append(results, stopResult{Name: name, Action: "stopped"})
+								}
+							}
+							return writeJSON(cmd.OutOrStdout(), results)
+						}
+
 					}
 				}
 

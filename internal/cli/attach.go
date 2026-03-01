@@ -17,6 +17,10 @@ func newAttachCmd() *cobra.Command {
 		GroupID: groupWorkflow,
 		Args:    cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if jsonEnabled(cmd) {
+				return errJSONNotSupported("attach")
+			}
+
 			name, _, err := resolveName(cmd, args)
 			if err != nil {
 				return err

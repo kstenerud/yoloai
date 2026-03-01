@@ -26,6 +26,10 @@ func newRestartCmd() *cobra.Command {
 
 			attach, _ := cmd.Flags().GetBool("attach")
 
+			if jsonEnabled(cmd) && attach {
+				return fmt.Errorf("--json and --attach are incompatible")
+			}
+
 			backend := resolveBackendForSandbox(name)
 			return withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
 				mgr := sandbox.NewManager(rt, backend, slog.Default(), cmd.InOrStdin(), cmd.ErrOrStderr())
@@ -35,6 +39,13 @@ func newRestartCmd() *cobra.Command {
 				}
 				if err := mgr.Start(ctx, name); err != nil {
 					return err
+				}
+
+				if jsonEnabled(cmd) {
+					return writeJSON(cmd.OutOrStdout(), map[string]string{
+						"name":   name,
+						"action": "restarted",
+					})
 				}
 
 				if attach {
