@@ -574,6 +574,10 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 		return nil, fmt.Errorf("write config.json: %w", err)
 	}
 
+	if err := WriteContextFiles(sandboxDir, meta, agentDef); err != nil {
+		return nil, fmt.Errorf("write context files: %w", err)
+	}
+
 	success = true
 	return &sandboxState{
 		name:         opts.Name,
@@ -1010,6 +1014,16 @@ func buildMounts(state *sandboxState, secretsDir string) []runtime.MountSpec {
 		Target:   "/yoloai/config.json",
 		ReadOnly: true,
 	})
+
+	// Context file (sandbox environment description for AI agents)
+	contextPath := filepath.Join(state.sandboxDir, "context.md")
+	if _, err := os.Stat(contextPath); err == nil {
+		mounts = append(mounts, runtime.MountSpec{
+			Source:   contextPath,
+			Target:   "/yoloai/context.md",
+			ReadOnly: true,
+		})
+	}
 
 	// Home-seed files and directories (mounted into /home/yoloai/)
 	mountedDirs := map[string]bool{}

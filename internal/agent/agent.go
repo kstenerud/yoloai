@@ -50,6 +50,7 @@ type Definition struct {
 	ModelAliases     map[string]string
 	ModelPrefixes    map[string]string // env var → model prefix (e.g. OLLAMA_API_BASE → "ollama_chat/")
 	NetworkAllowlist []string          // domains allowed when network-isolated
+	ContextFile      string            // filename in StateDir for sandbox context reference (e.g., "CLAUDE.md")
 }
 
 var agents = map[string]*Definition{
@@ -104,6 +105,7 @@ var agents = map[string]*Definition{
 			"haiku":  "claude-haiku-4-latest",
 		},
 		NetworkAllowlist: []string{"api.anthropic.com", "statsig.anthropic.com", "sentry.io"},
+		ContextFile:      "CLAUDE.md",
 	},
 	"gemini": {
 		Name:           "gemini",
@@ -127,6 +129,7 @@ var agents = map[string]*Definition{
 			"flash": "gemini-2.5-flash",
 		},
 		NetworkAllowlist: []string{"generativelanguage.googleapis.com", "cloudcode-pa.googleapis.com"},
+		ContextFile:      "GEMINI.md",
 	},
 	"opencode": {
 		Name:           "opencode",
