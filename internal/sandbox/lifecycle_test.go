@@ -487,11 +487,16 @@ func TestReset_Clean(t *testing.T) {
 	mgr := newLifecycleMgr(mock)
 	_ = mgr.Reset(context.Background(), ResetOptions{Name: name, Clean: true})
 
-	// agent-state dir should exist but be empty
+	// agent-state dir should exist with only settings.json (re-applied by
+	// ensureContainerSettings after clean wipe)
 	assert.DirExists(t, agentStateDir)
 	entries, err := os.ReadDir(agentStateDir)
 	require.NoError(t, err)
-	assert.Empty(t, entries)
+	var names []string
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	assert.Equal(t, []string{"settings.json"}, names)
 }
 
 func TestReset_RWMode_Error(t *testing.T) {

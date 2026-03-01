@@ -272,6 +272,13 @@ func (m *Manager) recreateContainer(ctx context.Context, name string, meta *Meta
 		return fmt.Errorf("refresh seed files: %w", err)
 	}
 
+	// Re-apply container settings (copySeedFiles overwrites settings.json
+	// with the host version, which lacks sandbox-specific settings like
+	// skipDangerousModePermissionPrompt)
+	if err := ensureContainerSettings(agentDef, sandboxDir); err != nil {
+		return fmt.Errorf("ensure container settings: %w", err)
+	}
+
 	// Read existing config.json
 	configData, err := os.ReadFile(filepath.Join(sandboxDir, "config.json")) //nolint:gosec // path is sandbox-controlled
 	if err != nil {

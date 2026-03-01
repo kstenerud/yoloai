@@ -1040,7 +1040,11 @@ func ensureContainerSettings(agentDef *agent.Definition, sandboxDir string) erro
 		return nil
 	}
 
-	settingsPath := filepath.Join(sandboxDir, "agent-state", "settings.json")
+	agentStateDir := filepath.Join(sandboxDir, "agent-state")
+	if err := os.MkdirAll(agentStateDir, 0750); err != nil {
+		return fmt.Errorf("create agent-state dir: %w", err)
+	}
+	settingsPath := filepath.Join(agentStateDir, "settings.json")
 
 	switch agentDef.Name {
 	case "claude":
