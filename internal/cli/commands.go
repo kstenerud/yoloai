@@ -114,9 +114,9 @@ func newNewCmd(version string) *cobra.Command {
 			agentName := resolveAgent(cmd)
 			networkNone, _ := cmd.Flags().GetBool("network-none")
 			networkIsolated, _ := cmd.Flags().GetBool("network-isolated")
-			networkAllow, _ := cmd.Flags().GetStringArray("network-allow")
-			ports, _ := cmd.Flags().GetStringArray("port")
-			dirs, _ := cmd.Flags().GetStringArray("dir")
+			networkAllow, _ := cmd.Flags().GetStringSlice("network-allow")
+			ports, _ := cmd.Flags().GetStringSlice("port")
+			dirs, _ := cmd.Flags().GetStringSlice("dir")
 
 			// --network-allow implies --network-isolated
 			if len(networkAllow) > 0 {
@@ -183,9 +183,9 @@ func newNewCmd(version string) *cobra.Command {
 	cmd.Flags().String("backend", "", "Runtime backend (see 'yoloai system backends')")
 	cmd.Flags().Bool("network-none", false, "Disable network access")
 	cmd.Flags().Bool("network-isolated", false, "Allow only agent API traffic (iptables allowlist)")
-	cmd.Flags().StringArray("network-allow", nil, "Extra domain to allow when network-isolated (repeatable, implies --network-isolated)")
-	cmd.Flags().StringArray("port", nil, "Port mapping (host:container)")
-	cmd.Flags().StringArrayP("dir", "d", nil, "Auxiliary directory (repeatable, default read-only)")
+	cmd.Flags().StringSlice("network-allow", nil, "Extra domain to allow when network-isolated (repeatable, implies --network-isolated)")
+	cmd.Flags().StringSlice("port", nil, "Port mapping (host:container)")
+	cmd.Flags().StringSliceP("dir", "d", nil, "Auxiliary directory (repeatable, default read-only)")
 	cmd.Flags().Bool("replace", false, "Replace existing sandbox")
 	cmd.Flags().Bool("no-start", false, "Create but don't start the container")
 	cmd.Flags().BoolP("attach", "a", false, "Auto-attach after creation")
