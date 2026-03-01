@@ -10,9 +10,9 @@ yoloai needs machine-readable output for scripting, CI pipelines, and tool integ
 
 **No envelope wrapper.** Commands output their domain object directly (like `gh`, `docker`, `kubectl`). Exit codes signal success/failure. Errors go to stderr as JSON when `--json` is active.
 
-**All commands get JSON handling.** Data queries output structured JSON. Action commands output result objects. Interactive commands (`attach`, `exec`, `setup`) reject `--json` with an error.
+**All commands get JSON handling.** Data queries output structured JSON. Action commands output result objects. Interactive commands (`attach`, `exec`) reject `--json` with an error.
 
-**Confirmations require `--yes`.** Commands with interactive prompts (`destroy`, `apply`) error if `--json` is set without `--yes`.
+**Confirmations require `--yes`.** Commands with interactive prompts (`destroy`, `apply`, `system prune`) error if `--json` is set without `--yes`.
 
 ## New File
 
@@ -75,17 +75,21 @@ Each gets an early `if jsonEnabled(cmd)` check that writes JSON and returns, lea
 
 **`internal/cli/list.go`** — Output `[]*sandbox.Info` array. Empty list → `[]`.
 
-**`internal/cli/show.go`** — Output `Info` object with added `prompt_preview` field.
+**`internal/cli/sandbox_info.go`** (`sandbox info`) — Output `Info` object with added `prompt_preview` field.
 
 **`internal/cli/diff.go`** — Output `DiffResult` for plain/stat diff, structured `{commits, has_uncommitted_changes}` for `--log`. Bypasses pager. Suppress `agentRunningWarning()` when JSON.
 
 **`internal/cli/log.go`** — Read file, output `{"content": "..."}`. Bypasses pager.
 
-**`internal/cli/commands.go` (`version`)** — Output `{"version", "commit", "date"}`.
+**`internal/cli/commands.go`** (`version`) — Output `{"version", "commit", "date"}`.
 
-**`internal/cli/info.go`** — List: array of `{name, description, available, note}`. Detail: single object with all fields.
+**`internal/cli/system_info.go`** (`system info`) — Output structured JSON: `{"version", "commit", "date", "config_path", "data_dir", "sandboxes_dir", "disk_usage", "backends": [...]}`.
 
-**`internal/cli/config.go` (`config get`)** — Full config: parse YAML to `map[string]any`, output as JSON. Single key: `{"key": "...", "value": "..."}`.
+**`internal/cli/info.go`** (`system backends`, `system agents`) — List: array of `{name, description, available, note}`. Detail: single object with all fields.
+
+**`internal/cli/config.go`** (`config get`) — Full config: parse YAML to `map[string]any`, output as JSON. Single key: `{"key": "...", "value": "..."}`.
+
+**`internal/cli/profile.go`** (`profile list`) — Output JSON array of `{name, extends, image, agent}`.
 
 ### Action Commands
 
@@ -99,17 +103,29 @@ Each outputs a result object on success.
 
 **`internal/cli/reset.go`** — Output `{"name", "action": "reset"}`.
 
-**`internal/cli/commands.go` (`new`)** — Output sandbox meta JSON. Error if `--attach` + `--json`. Pass `io.Discard` as Manager output writer to suppress progress.
+**`internal/cli/restart.go`** — Output `{"name", "action": "restarted"}`. Error if `--attach` + `--json`.
 
-**`internal/cli/commands.go` (`build`)** — Output `{"action": "built"}`. Pass `io.Discard` for build output.
+**`internal/cli/commands.go`** (`new`) — Output sandbox meta JSON. Error if `--attach` + `--json`. Pass `io.Discard` as Manager output writer to suppress progress.
+
+**`internal/cli/system.go`** (`system build`) — Output `{"action": "built"}`. Pass `io.Discard` for build output.
 
 **`internal/cli/apply.go`** — `requireYesForJSON()`. Define result type `{"target", "commits_applied", "wip_applied"}`. Suppress human-readable progress. Most complex command — multiple code paths (default, squash, selective, patches export) each need JSON result.
 
-**`internal/cli/config.go` (`config set`)** — Output `{"key", "value", "action": "set"}`.
+**`internal/cli/config.go`** (`config set`) — Output `{"key", "value", "action": "set"}`.
+
+**`internal/cli/config.go`** (`config reset`) — Output `{"key", "action": "reset"}`.
+
+**`internal/cli/profile.go`** (`profile create`) — Output `{"name", "path", "action": "created"}`.
+
+**`internal/cli/profile.go`** (`profile delete`) — Output `{"name", "action": "deleted"}`.
+
+**`internal/cli/network_allow.go`** (`sandbox network-allow`) — Output `{"name", "domains_added": [...], "live": true/false}`.
+
+**`internal/cli/system_prune.go`** (`system prune`) — `requireYesForJSON()`. Output `{"items_removed": [...]}`. With `--dry-run`, output `{"items_found": [...]}`.
 
 ### Interactive Command Guards
 
-**`internal/cli/commands.go` (`attach`)**, **`internal/cli/commands.go` (`exec`)**, **`internal/cli/setup.go`** — Add `if jsonEnabled(cmd) { return errJSONNotSupported("...") }` at top of RunE.
+**`internal/cli/attach.go`**, **`internal/cli/exec.go`** — Add `if jsonEnabled(cmd) { return errJSONNotSupported("...") }` at top of RunE.
 
 ### Cross-Cutting
 
@@ -126,11 +142,11 @@ Each outputs a result object on success.
 ## Implementation Order
 
 1. Foundation: `json.go` helpers + `root.go` flag + json tags on sandbox types
-2. Interactive guards: `attach`, `exec`, `setup` (trivial, immediate safety)
-3. Data queries: `list`, `show`, `version`, `info backends` (highest value)
-4. More data queries: `diff`, `log`, `config get`
-5. Simple actions: `stop`, `start`, `reset`, `build`, `config set`
-6. Complex actions: `new`, `destroy`, `apply`
+2. Interactive guards: `attach`, `exec` (trivial, immediate safety)
+3. Data queries: `list`, `sandbox info`, `version`, `system info`, `system backends/agents` (highest value)
+4. More data queries: `diff`, `log`, `config get`, `profile list`
+5. Simple actions: `stop`, `start`, `reset`, `restart`, `system build`, `config set`, `config reset`, `profile create`, `profile delete`
+6. Complex actions: `new`, `destroy`, `apply`, `system prune`, `sandbox network-allow`
 7. Docs + final `make check`
 
 ## Verification
@@ -138,10 +154,12 @@ Each outputs a result object on success.
 - `make check` passes at each step
 - `yoloai list --json` outputs valid JSON array
 - `yoloai list --json | jq .` parses cleanly
-- `yoloai show <name> --json | jq .status` extracts fields
+- `yoloai sandbox info <name> --json | jq .status` extracts fields
 - `yoloai attach --json` errors with "not supported for interactive command"
 - `yoloai destroy <name> --json` errors requiring `--yes`
 - `yoloai destroy <name> --json --yes` outputs JSON result
 - `yoloai diff <name> --json` outputs JSON (no pager)
-- Errors: `yoloai show nonexistent --json` outputs JSON error to stderr, exits 1
+- Errors: `yoloai sandbox info nonexistent --json` outputs JSON error to stderr, exits 1
+- `yoloai system prune --json` errors requiring `--yes`
+- `yoloai system prune --json --yes` outputs JSON result
 - `json_test.go` unit tests for all helpers
