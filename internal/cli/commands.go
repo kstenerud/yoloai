@@ -48,6 +48,7 @@ func registerCommands(root *cobra.Command, version, commit, date string) {
 		newLogAliasCmd(),
 
 		// Admin
+		newHelpCmd(),
 		newConfigCmd(),
 		newCompletionCmd(),
 		newVersionCmd(version, commit, date),

@@ -53,7 +53,17 @@ and unattended while your originals stay protected. When done, review the
 diff and apply what you want to keep.`,
 		SilenceErrors: true,
 		SilenceUsage:  true,
+		Run: func(cmd *cobra.Command, _ []string) {
+			w := cmd.OutOrStdout()
+			fmt.Fprintln(w, "yoloai — sandboxed AI coding agent runner") //nolint:errcheck // best-effort stdout write
+			fmt.Fprintln(w)                                              //nolint:errcheck // best-effort stdout write
+			fmt.Fprintln(w, "Run 'yoloai help' to get started")          //nolint:errcheck // best-effort stdout write
+			fmt.Fprintln(w, "Run 'yoloai -h' for command-line options")  //nolint:errcheck // best-effort stdout write
+		},
 	}
+
+	// Disable Cobra's built-in help subcommand; we register our own.
+	rootCmd.SetHelpCommand(&cobra.Command{Hidden: true, Use: "no-help"})
 
 	rootCmd.PersistentFlags().CountP("verbose", "v", "Increase output verbosity (-v for debug, -vv reserved)")
 	rootCmd.PersistentFlags().CountP("quiet", "q", "Suppress non-essential output (-q for warn, -qq for error only)")
