@@ -15,14 +15,13 @@ linters:
   disable:
     - exhaustruct
     - varnamelen
-
-linters-settings:
-  revive:
-    rules:
-      # internal/runtime is an intentional name for the runtime abstraction
-      # layer — not a collision with Go's stdlib "runtime" in practice.
-      - name: redefines-builtin-id
-        disabled: true
+  settings:
+    revive:
+      rules:
+        # internal/runtime is an intentional name for the runtime abstraction
+        # layer — not a collision with Go's stdlib "runtime" in practice.
+        - name: redefines-builtin-id
+          disabled: true
 
 run:
   timeout: 2m
