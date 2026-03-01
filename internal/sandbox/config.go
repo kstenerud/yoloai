@@ -199,31 +199,8 @@ func GetEffectiveConfig() (string, error) {
 		}
 	}
 
-	// Sort collection settings alphabetically by key for stable output.
-	for _, cs := range knownCollectionSettings {
-		if cs.Kind != yaml.MappingNode {
-			continue
-		}
-		parts := splitDottedPath(cs.Path)
-		node := root
-		for _, p := range parts {
-			found := false
-			for i := 0; i < len(node.Content)-1; i += 2 {
-				if node.Content[i].Value == p {
-					node = node.Content[i+1]
-					found = true
-					break
-				}
-			}
-			if !found {
-				node = nil
-				break
-			}
-		}
-		if node != nil && node.Kind == yaml.MappingNode {
-			sortMappingNode(node)
-		}
-	}
+	// Sort all mappings alphabetically for predictable, scannable output.
+	sortMappingNodesRecursive(root)
 
 	doc := yaml.Node{Kind: yaml.DocumentNode, Content: []*yaml.Node{root}}
 	out, err := yaml.Marshal(&doc)
@@ -314,9 +291,7 @@ func GetConfigValue(path string) (string, bool, error) {
 	}
 
 	// For mappings/sequences, sort and marshal the subtree.
-	if node.Kind == yaml.MappingNode {
-		sortMappingNode(node)
-	}
+	sortMappingNodesRecursive(node)
 	out, err := yaml.Marshal(node)
 	if err != nil {
 		return "", false, fmt.Errorf("marshal subtree: %w", err)
@@ -422,6 +397,17 @@ func getOrCreateMapping(parent *yaml.Node, key string) *yaml.Node {
 	mapNode := &yaml.Node{Kind: yaml.MappingNode}
 	parent.Content = append(parent.Content, keyNode, mapNode)
 	return mapNode
+}
+
+// sortMappingNodesRecursive sorts all mapping nodes in the tree alphabetically.
+func sortMappingNodesRecursive(node *yaml.Node) {
+	if node.Kind == yaml.MappingNode {
+		// Sort children first
+		for i := 1; i < len(node.Content); i += 2 {
+			sortMappingNodesRecursive(node.Content[i])
+		}
+		sortMappingNode(node)
+	}
 }
 
 // sortMappingNode sorts a mapping node's key-value pairs alphabetically by key.
