@@ -553,6 +553,7 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 		NetworkMode:  networkMode,
 		NetworkAllow: networkAllow,
 		Ports:        opts.Ports,
+		Resources:    resources,
 	}
 
 	if err := SaveMeta(sandboxDir, meta); err != nil {

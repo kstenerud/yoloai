@@ -51,6 +51,10 @@ func newSandboxInfoCmd() *cobra.Command {
 					fmt.Fprintf(w, "Profile:     %s\n", meta.Profile) //nolint:errcheck
 				}
 
+				if meta.ImageRef != "" && meta.ImageRef != "yoloai-base" {
+					fmt.Fprintf(w, "Image:       %s\n", meta.ImageRef) //nolint:errcheck
+				}
+
 				sandboxDir := sandbox.Dir(name)
 				fmt.Fprintf(w, "Sandbox dir: %s\n", sandboxDir) //nolint:errcheck
 
@@ -58,7 +62,11 @@ func newSandboxInfoCmd() *cobra.Command {
 					fmt.Fprintf(w, "Prompt:      %s\n", preview) //nolint:errcheck
 				}
 
-				fmt.Fprintf(w, "Workdir:     %s (%s)\n", meta.Workdir.HostPath, meta.Workdir.Mode) //nolint:errcheck
+				if meta.Workdir.MountPath != "" && meta.Workdir.MountPath != meta.Workdir.HostPath {
+					fmt.Fprintf(w, "Workdir:     %s → %s (%s)\n", meta.Workdir.HostPath, meta.Workdir.MountPath, meta.Workdir.Mode) //nolint:errcheck
+				} else {
+					fmt.Fprintf(w, "Workdir:     %s (%s)\n", meta.Workdir.HostPath, meta.Workdir.Mode) //nolint:errcheck
+				}
 
 				for _, d := range meta.Directories {
 					if d.MountPath != d.HostPath {
@@ -79,6 +87,19 @@ func newSandboxInfoCmd() *cobra.Command {
 					fmt.Fprintf(w, "Ports:       %s\n", strings.Join(meta.Ports, ", ")) //nolint:errcheck
 				}
 
+				if meta.Resources != nil {
+					var parts []string
+					if meta.Resources.CPUs != "" {
+						parts = append(parts, meta.Resources.CPUs+" cpus")
+					}
+					if meta.Resources.Memory != "" {
+						parts = append(parts, meta.Resources.Memory+" memory")
+					}
+					if len(parts) > 0 {
+						fmt.Fprintf(w, "Resources:   %s\n", strings.Join(parts, ", ")) //nolint:errcheck
+					}
+				}
+
 				fmt.Fprintf(w, "Created:     %s (%s)\n", meta.CreatedAt.Format("2006-01-02T15:04:05Z07:00"), sandbox.FormatAge(meta.CreatedAt)) //nolint:errcheck
 
 				if meta.Workdir.BaselineSHA != "" {
@@ -86,6 +107,10 @@ func newSandboxInfoCmd() *cobra.Command {
 				}
 				if info.ContainerID != "" {
 					fmt.Fprintf(w, "Container:   %s\n", info.ContainerID) //nolint:errcheck
+				}
+
+				if meta.YoloaiVersion != "" {
+					fmt.Fprintf(w, "Version:     %s\n", meta.YoloaiVersion) //nolint:errcheck
 				}
 
 				fmt.Fprintf(w, "Disk Usage:  %s\n", info.DiskUsage)  //nolint:errcheck

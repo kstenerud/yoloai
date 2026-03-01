@@ -23,10 +23,11 @@ type Meta struct {
 	Workdir     WorkdirMeta `json:"workdir"`
 	Directories []DirMeta   `json:"directories,omitempty"`
 
-	HasPrompt    bool     `json:"has_prompt"`
-	NetworkMode  string   `json:"network_mode,omitempty"`
-	NetworkAllow []string `json:"network_allow,omitempty"`
-	Ports        []string `json:"ports,omitempty"`
+	HasPrompt    bool            `json:"has_prompt"`
+	NetworkMode  string          `json:"network_mode,omitempty"`
+	NetworkAllow []string        `json:"network_allow,omitempty"`
+	Ports        []string        `json:"ports,omitempty"`
+	Resources    *ResourceLimits `json:"resources,omitempty"`
 }
 
 // WorkdirMeta stores the resolved workdir state at creation time.

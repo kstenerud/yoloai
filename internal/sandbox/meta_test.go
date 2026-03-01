@@ -123,3 +123,60 @@ func TestMeta_NetworkAllowRoundTrip(t *testing.T) {
 	assert.Equal(t, "isolated", loaded.NetworkMode)
 	assert.Equal(t, []string{"api.anthropic.com", "sentry.io"}, loaded.NetworkAllow)
 }
+
+func TestMeta_ResourcesRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+
+	original := &Meta{
+		YoloaiVersion: "1.0.0",
+		Name:          "resource-test",
+		CreatedAt:     time.Date(2025, 6, 1, 12, 0, 0, 0, time.UTC),
+		Agent:         "claude",
+		Workdir: WorkdirMeta{
+			HostPath:  "/tmp/project",
+			MountPath: "/tmp/project",
+			Mode:      "copy",
+		},
+		Resources: &ResourceLimits{
+			CPUs:   "4",
+			Memory: "8g",
+		},
+	}
+
+	err := SaveMeta(dir, original)
+	require.NoError(t, err)
+
+	loaded, err := LoadMeta(dir)
+	require.NoError(t, err)
+
+	require.NotNil(t, loaded.Resources)
+	assert.Equal(t, "4", loaded.Resources.CPUs)
+	assert.Equal(t, "8g", loaded.Resources.Memory)
+}
+
+func TestMeta_ResourcesOmittedWhenNil(t *testing.T) {
+	dir := t.TempDir()
+
+	meta := &Meta{
+		YoloaiVersion: "1.0.0",
+		Name:          "no-resources",
+		CreatedAt:     time.Date(2025, 6, 1, 12, 0, 0, 0, time.UTC),
+		Agent:         "claude",
+		Workdir: WorkdirMeta{
+			HostPath:  "/tmp/project",
+			MountPath: "/tmp/project",
+			Mode:      "copy",
+		},
+	}
+
+	err := SaveMeta(dir, meta)
+	require.NoError(t, err)
+
+	data, err := os.ReadFile(filepath.Join(dir, "meta.json")) //nolint:gosec
+	require.NoError(t, err)
+
+	var raw map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(data, &raw))
+
+	assert.NotContains(t, raw, "resources")
+}
