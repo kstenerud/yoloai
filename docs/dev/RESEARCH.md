@@ -1357,85 +1357,52 @@ However, iptables has its own limitations:
 
 ### 6. Design Approach for yoloAI
 
-#### Adopted approach: internal network + proxy container + iptables fallback
+#### Adopted approach: iptables + ipset inside the container
 
-**Architecture:**
+Follows the same pattern as Anthropic's Claude Code devcontainer and Trail of Bits' devcontainer — both verified production implementations. Single container, no sidecar, simple to implement and debug.
 
-```
-┌─────────────────────────────────────────────────────┐
-│  Host                                               │
-│                                                     │
-│  ┌─────────────────────────────────────────────┐    │
-│  │  Internal Docker Network (--internal)       │    │
-│  │  (no internet access)                       │    │
-│  │                                             │    │
-│  │  ┌───────────────┐   ┌──────────────────┐  │    │
-│  │  │ Sandbox        │   │ Proxy            │  │    │
-│  │  │ Container      │──►│ Container        │──┼──► Internet
-│  │  │                │   │ (Squid/tinyproxy │  │    │ (filtered)
-│  │  │ HTTP_PROXY=    │   │  + allowlist)    │  │    │
-│  │  │  proxy:3128    │   │                  │  │    │
-│  │  │                │   │ Also on normal   │  │    │
-│  │  │ iptables:      │   │ Docker network   │  │    │
-│  │  │ DROP all       │   └──────────────────┘  │    │
-│  │  │ except proxy   │                         │    │
-│  │  └───────────────┘                          │    │
-│  └─────────────────────────────────────────────┘    │
-└─────────────────────────────────────────────────────┘
-```
+**How it works:**
 
-**Layered defense:**
-
-1. **Network topology (layer 1):** Sandbox container on an `--internal` network. The proxy container bridges the internal and external networks. The sandbox literally cannot route to the internet — only to the proxy.
-
-2. **Proxy allowlist (layer 2):** The proxy (Squid, tinyproxy, or a custom Go proxy) enforces domain-based allowlisting. Only `api.anthropic.com` (and user-specified `--network-allow` domains) are permitted. HTTPS traffic is handled via `CONNECT` tunneling (no MITM needed — the proxy sees the domain from the `CONNECT` request and can allow/deny based on that).
-
-3. **iptables inside container (layer 3, defense-in-depth):** Even on the internal network, add iptables rules inside the sandbox container to ensure only the proxy's IP is reachable on allowed ports. This prevents bypass via any container-to-container communication other than the proxy. Requires `CAP_NET_ADMIN` (a separate Linux capability from `CAP_SYS_ADMIN` — both must be explicitly granted via `--cap-add`).
-
-4. **DNS control (layer 4):** Configure the sandbox container to use the proxy container as its DNS server (or a controlled resolver). The proxy resolves DNS on behalf of the sandbox. Block UDP 53 outbound from the sandbox in iptables. This mitigates DNS exfiltration.
+1. The entrypoint resolves allowlisted domains to IPs via `dig` and populates an ipset (`hash:net`).
+2. Default-deny iptables policy: DROP all OUTPUT except established connections, DNS (UDP 53 to Docker's internal resolver at 127.0.0.11), and traffic to IPs in the allowlist ipset.
+3. Explicitly REJECT (not DROP) unmatched outbound for immediate feedback to the agent.
+4. Rules are configured by the entrypoint while running as root. The entrypoint then drops privileges via `gosu` — the agent process never has `CAP_NET_ADMIN`.
+5. Requires `CAP_NET_ADMIN` (a separate capability from `CAP_SYS_ADMIN` — both must be granted when using overlay + `--network-isolated`; for `copy_strategy: full`, only `CAP_NET_ADMIN` is added).
 
 **Why this approach:**
 
-- **Internal network alone** prevents raw TCP bypass without iptables or special capabilities (the network topology does the enforcement, not the application).
-- **Proxy** provides human-readable domain allowlisting and logging.
-- **iptables** provides defense-in-depth against bypasses.
-- **DNS control** addresses the CVE-2025-55284 vector.
-- **Cross-platform:** Works on Linux, macOS (Docker Desktop), and WSL2 because all layers operate inside Docker's Linux VM.
-- **No MITM needed:** HTTPS `CONNECT` tunneling lets the proxy see the target domain without decrypting traffic.
-- **Implementable in Go:** yoloAI creates the Docker network, starts the proxy container, and configures the sandbox container. The proxy can be a small Go binary or a pre-configured Squid image.
+- **Battle-tested:** Same pattern Anthropic and Trail of Bits ship. If it's good enough for Anthropic's own devcontainer, it's good enough for us.
+- **Single container:** No sidecar lifecycle management, no proxy image builds, no health checks, no failure mode multiplication across every lifecycle command.
+- **Cross-platform:** iptables works inside Docker's Linux VM on all platforms (Linux, macOS Docker Desktop, WSL2).
+- **Covers primary threat vectors:** Blocks raw TCP bypass, non-HTTP protocols, and IP-direct connections. See the comparison table in section 3.
 
-#### What the proxy container needs
+#### Known limitations
 
-- A forward proxy that supports `CONNECT` method (for HTTPS) and domain-based ACLs.
-- Options: Squid (heavy but battle-tested), tinyproxy (lightweight), or a custom Go proxy (simplest to embed and configure).
-- A DNS resolver (optional — can use the host's DNS via Docker's default DNS, then block the sandbox's direct DNS access).
+1. **DNS exfiltration:** UDP 53 must be allowed for domain resolution. A malicious query like `secrets.attacker.com` will be forwarded upstream. This is the same limitation shared by Anthropic's devcontainer and Trail of Bits'. Mitigated (not eliminated) in Claude Code v1.0.4 by removing networking utilities from the auto-approve allowlist.
 
-#### Unavoidable limitations
+2. **CDN IP rotation:** Domain-to-IP resolution happens at container start. If IPs change (CDN rotation), rules become stale. Restart the container to refresh. Not a practical concern for stable API endpoints like `api.anthropic.com`.
 
-1. **DNS exfiltration with a controlled resolver:** Even if the sandbox uses the proxy's DNS resolver, a malicious query like `secrets.attacker.com` will be forwarded upstream by the resolver. The resolver can log queries and rate-limit suspicious patterns, but cannot fully prevent exfiltration via DNS without deep packet inspection or a DNS allowlist (only resolve known domains). A DNS allowlist is theoretically possible but brittle (breaks when domains use CNAMEs to CDNs). **This is the same limitation shared by Docker Sandboxes, Anthropic's devcontainer, and Trail of Bits' devcontainer.**
+3. **Domain fronting:** iptables cannot detect SNI/Host header mismatches. Major CDNs have banned this. Acceptable risk.
 
-2. **Domain fronting:** A proxy that does not perform MITM cannot detect SNI/Host header mismatches. Major CDNs have banned this, but it remains theoretically possible. Acceptable risk for v1.
+4. **`CAP_NET_ADMIN`:** Required for iptables. Combined with `CAP_SYS_ADMIN` (for overlayfs), the container has two broad capabilities. Users concerned about this can use `copy_strategy: full` + no network isolation to avoid both.
 
-3. **CDN IP rotation:** If using iptables with IP-based rules (like the devcontainer approach), CDN IP changes can break access. The proxy approach avoids this because it resolves domains at connection time, not at setup time.
+#### Deferred: proxy sidecar architecture
 
-4. **`CAP_SYS_ADMIN` / `CAP_NET_ADMIN`:** The iptables-inside-container approach requires `CAP_NET_ADMIN`. This is a separate capability from `CAP_SYS_ADMIN` (used for overlayfs) — both must be granted when using overlay + network isolation. For `copy_strategy: full` (no overlay), `CAP_NET_ADMIN` alone suffices.
+A more robust approach using an internal Docker network + proxy sidecar container + DNS control could mitigate DNS exfiltration and handle CDN IP rotation dynamically. The research is thorough (see sections 2-5 above) and the architecture is well-understood:
 
-5. **Proxy as SPOF:** If the proxy container crashes, the sandbox loses all network access. This is actually a security feature (fail-closed).
+```
+Internal Docker Network (--internal) → Proxy Sidecar → Internet (filtered)
+```
 
-#### Changes applied to design docs
+Layers: network topology (--internal) + proxy allowlist (CONNECT tunneling) + iptables (defense-in-depth) + DNS control (proxy resolves DNS, block UDP 53).
 
-The original design proposed a proxy inside the sandbox container. Based on this research, the design was updated to:
-- Move the proxy **outside** the sandbox container (into a sidecar). A proxy inside the sandbox can be killed or reconfigured by Claude. A separate container on a separate network is tamper-resistant.
-- Use Docker `--internal` network topology as the primary enforcement mechanism, not just proxy environment variables.
-- Add iptables rules inside the sandbox as defense-in-depth (configured by entrypoint before privilege drop).
-- Control DNS resolution to mitigate exfiltration.
-- Document the DNS exfiltration limitation explicitly.
+This adds significant operational complexity: sidecar lifecycle across all commands (start/stop/reset/restart/destroy), proxy image building, health checks, failure modes. The iptables-only approach covers the primary threat vectors at a fraction of the complexity. The proxy architecture remains here as a reference if stronger isolation is ever needed — but only if someone asks really nicely, with a fat wad of cash.
 
 ---
 
 ## Claude Code Proxy Support Research
 
-Research into whether Claude Code honors HTTP_PROXY/HTTPS_PROXY environment variables, critical for yoloAI's `--network-isolated` feature which routes all traffic through a proxy sidecar on an `--internal` Docker network.
+Research into whether Claude Code honors HTTP_PROXY/HTTPS_PROXY environment variables. While yoloAI's current `--network-isolated` design uses iptables + ipset (no proxy), proxy support remains relevant for the deferred proxy sidecar architecture and for users behind corporate proxies.
 
 ### npm Installation (Node.js)
 

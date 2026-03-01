@@ -23,7 +23,7 @@ Run AI coding CLI agents (Claude Code, Codex, and others) with their sandbox-byp
 
 **Strong but shared with some competitors:**
 
-- **Network isolation with domain allowlisting.** Docker Sandboxes and sandbox-runtime also have this. yoloAI's layered approach (internal network + proxy sidecar + iptables + DNS control) is the most thorough among open-source options.
+- **Network isolation with domain allowlisting.** Docker Sandboxes and sandbox-runtime also have this. yoloAI uses iptables + ipset inside the container (same approach as Anthropic's devcontainer and Trail of Bits').
 - **Agent-agnostic design.** deva.sh and cco also support multiple agents. yoloAI's agent definition abstraction is cleaner but the capability isn't unique.
 - **Session logging.** Several tools have some form of this.
 
@@ -129,8 +129,8 @@ The Docker container is disposable — it can crash, be destroyed, be recreated.
 Field notes:
 - **No `status` field.** Container state (`running`/`stopped`/`exited`) is queried live from Docker, not stored. Runtime state (whether agent files have been initialized) is tracked separately in `state.json` alongside `meta.json` — no `state.json` = not initialized.
 - **`baseline_sha`** — always present for `:copy` dirs. For git repos, the HEAD SHA at copy time. For non-git dirs, the SHA of the synthetic initial commit (`git init` + `git add -A` + `git commit`). Never null — `yoloai diff` always uses `git diff <baseline_sha>` with no special cases.
-- **`network.mode`** — `"none"`, `"isolated"`, or `"default"`. Drives proxy sidecar lifecycle.
-- **`network.allow`** — the fully resolved allowlist (agent defaults + config + CLI), stored so the proxy can be recreated on restart.
+- **`network.mode`** — `"none"`, `"isolated"`, or `"default"`. Drives iptables rule generation in the entrypoint.
+- **`network.allow`** — the fully resolved allowlist (agent defaults + config + CLI), stored so iptables rules can be reapplied on restart.
 - **`model`** — `null` if the agent's default was used.
 - **`has_prompt`** — whether `prompt.txt` exists. The prompt content lives in `prompt.txt`, not here.
 - **`workdir` and `directories`** store the resolved state at creation time. The `work/` subdirectory for each `:copy` dir is derived from `host_path` via caret encoding (not stored).

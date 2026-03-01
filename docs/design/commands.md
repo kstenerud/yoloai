@@ -256,7 +256,7 @@ Before creating the sandbox (all checks run before any state is created on disk)
 1. **[PLANNED]** Generate a **sandbox context file** on the host (in the sandbox state directory) describing the environment for the agent: which directory is the workdir, which are auxiliary, mount paths and access mode of each (read-only / read-write / copy), available tools, and how auto-save works. Bind-mounted read-only into the container at `/yoloai/context.md` (same pattern as `log.txt` and `prompt.txt`). This file lives outside the work tree so it never pollutes project files, git baselines, or diffs. The agent is pointed to it via agent-specific mechanisms (`--append-system-prompt` for Claude, inclusion in the initial prompt for Codex).
 2. Generate `/yoloai/config.json` on the host (in the sandbox state directory) containing all entrypoint configuration: agent_command, startup_delay, submit_sequence, host_uid, host_gid, and later overlay_mounts, iptables_rules, setup_script. This is bind-mounted into the container and read by the entrypoint.
 3. Start Docker container (as non-root user `yoloai`) with:
-   - **[PLANNED]** When `--network-isolated`: `HTTPS_PROXY` and `HTTP_PROXY` env vars pointing to the proxy sidecar (required — Claude Code's npm installation honors these via undici; Codex proxy support is TBD — see RESEARCH.md)
+   - **[PLANNED]** When `--network-isolated`: entrypoint configures iptables + ipset rules (default-deny, allow only resolved IPs from the agent's domain allowlist + `--network-allow` domains). Requires `CAP_NET_ADMIN`.
    - `:copy` directories: overlay strategy mounts originals as overlayfs lower layers with upper dirs from sandbox state; full copy strategy mounts copies from sandbox state. Both at their mount point (mirrored host path or custom `=<path>`, read-write)
    - `:rw` directories bind-mounted at their mount point (mirrored host path or custom `=<path>`, read-write)
    - Default (no suffix) directories bind-mounted at their mount point (mirrored host path or custom `=<path>`, read-only)
@@ -427,7 +427,7 @@ Without `-- <path>...`, applies all changes. With `-- <path>...`, `git format-pa
 
 `yoloai destroy <name>...`
 
-`docker stop` + `docker rm` the container (and proxy sidecar if `--network-isolated`). Removes `~/.yoloai/sandboxes/<name>/` entirely. No special overlay cleanup needed — the kernel tears down the mount namespace when the container stops.
+`docker stop` + `docker rm` the container. Removes `~/.yoloai/sandboxes/<name>/` entirely. No special overlay cleanup needed — the kernel tears down the mount namespace when the container stops.
 
 Accepts multiple sandbox names (e.g., `yoloai destroy sandbox1 sandbox2 sandbox3`) with a single confirmation prompt showing all sandboxes to be destroyed.
 
@@ -476,9 +476,7 @@ Top-level shortcut: `yoloai ls`.
 
 **[PLANNED]** `yoloai system build <profile>` rebuilds a specific profile's image (which derives from `yoloai-base`).
 
-**[PLANNED]** `yoloai system build --all` rebuilds everything: base image first, then the proxy image (`yoloai-proxy`), then all profile images.
-
-**[PLANNED]** `yoloai system build` and `yoloai system build --all` also build the proxy sidecar image (`yoloai-proxy`), a purpose-built Go forward proxy (~200-300 lines) used by `--network-isolated`. Compiled as a static binary in a `FROM scratch` image (~5 MB). Uses HTTPS CONNECT tunneling with domain-based allowlist (no MITM). Allowlist loaded from a config file; reloadable via SIGUSR1. Logs allowed/denied requests. See [RESEARCH.md](../dev/RESEARCH.md) "Proxy Sidecar Research" for the evaluation of alternatives.
+**[PLANNED]** `yoloai system build --all` rebuilds everything: base image first, then all profile images (those with Dockerfiles).
 
 Useful after modifying a profile's Dockerfile or when the base image needs updating (e.g., new agent CLI versions).
 
@@ -506,7 +504,7 @@ Options:
 
 ### `yoloai stop`
 
-`yoloai stop <name>...` stops sandbox containers (and proxy sidecars if `--network-isolated`), preserving all state (work directory, agent-state, logs). Containers can be restarted later without losing progress.
+`yoloai stop <name>...` stops sandbox containers, preserving all state (work directory, agent-state, logs). Containers can be restarted later without losing progress.
 
 Accepts multiple sandbox names (e.g., `yoloai stop sandbox1 sandbox2 sandbox3`). With `--all`, stops all running sandboxes.
 
@@ -519,7 +517,7 @@ Options:
 
 `yoloai start [-a|--attach] [--resume] <name>` ensures the sandbox is running — idempotent "get it running, however needed". Like `new`, starts detached by default.
 - If the container has been removed: re-run full container creation from `meta.json` (skipping the copy step for `:copy` directories — state already exists in `work/`). Create a new credential temp file (ephemeral by design).
-- If the container is stopped: starts it (and proxy sidecar if `--network-isolated`). The entrypoint re-establishes overlayfs mounts (mounts don't survive `docker stop` — this is by design; the upper directory persists on the host and the entrypoint re-mounts idempotently).
+- If the container is stopped: starts it. The entrypoint re-establishes overlayfs mounts (mounts don't survive `docker stop` — this is by design; the upper directory persists on the host and the entrypoint re-mounts idempotently). If `--network-isolated`, iptables rules are reapplied by the entrypoint.
 - If the container is running but the agent has exited: relaunches the agent in the existing tmux session.
 - If already running: no-op.
 

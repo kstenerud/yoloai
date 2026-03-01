@@ -8,7 +8,7 @@ Create a plan file in this directory before starting implementation.
 | Feature | Design Reference | Plan | Notes |
 |---------|-----------------|------|-------|
 | Overlayfs copy strategy | [config.md](../../design/config.md) | — | `copy_strategy: auto \| overlay \| full`; instant setup, space-efficient |
-| Network isolation | [commands.md](../../design/commands.md), [security.md](../../design/security.md) | — | `--network-isolated`, proxy sidecar, iptables, DNS control |
+| Network isolation | [commands.md](../../design/commands.md), [security.md](../../design/security.md) | — | `--network-isolated`, iptables + ipset inside container |
 | Profiles | [config.md](../../design/config.md) | — | `~/.yoloai/profiles/<name>/` with Dockerfile + profile.yaml |
 | Codex agent | [commands.md](../../design/commands.md) | — | Agent definition exists; needs end-to-end testing and polish |
 | [DONE] Aux dirs (`-d`) | [commands.md](../../design/commands.md) | — | Repeatable flag for auxiliary directories |

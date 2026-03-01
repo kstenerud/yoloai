@@ -7,7 +7,7 @@ For the full list of designed-but-unimplemented features, see [dev/plans/TODO.md
 ## Next up
 
 - **Overlayfs copy strategy** — instant sandbox setup, space-efficient for large repos
-- **Network isolation** — domain-based allowlisting via proxy sidecar (`--network-isolated`)
+- **Network isolation** — domain-based allowlisting via iptables + ipset (`--network-isolated`)
 - **Profiles** — reusable environment definitions with user-supplied Dockerfiles
 - **Codex agent** — testing and polish (agent definition exists, needs verification)
 
