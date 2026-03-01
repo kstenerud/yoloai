@@ -21,12 +21,19 @@ type YoloaiConfig struct {
 	Model     string            `yaml:"model"`      // model
 	Env       map[string]string `yaml:"env"`        // env — environment variables passed to container
 	Resources *ResourceLimits   `yaml:"resources"`  // resources — container resource limits
+	Network   *NetworkConfig    `yaml:"network"`    // network — network isolation settings
 }
 
 // ResourceLimits holds container resource constraints (CPU, memory).
 type ResourceLimits struct {
 	CPUs   string `yaml:"cpus" json:"cpus,omitempty"`
 	Memory string `yaml:"memory" json:"memory,omitempty"`
+}
+
+// NetworkConfig holds network isolation settings.
+type NetworkConfig struct {
+	Isolated bool     `yaml:"isolated" json:"isolated,omitempty"`
+	Allow    []string `yaml:"allow" json:"allow,omitempty"`
 }
 
 // knownSetting defines a config key with its default value.
@@ -45,6 +52,7 @@ var knownSettings = []knownSetting{
 	{"model", ""},
 	{"resources.cpus", ""},
 	{"resources.memory", ""},
+	{"network.isolated", "false"},
 }
 
 // knownCollectionSetting defines a non-scalar config key (map or list)
@@ -58,6 +66,7 @@ type knownCollectionSetting struct {
 // Each appears as an empty mapping ({}) or sequence ([]) when not set by the user.
 var knownCollectionSettings = []knownCollectionSetting{
 	{"env", yaml.MappingNode},
+	{"network.allow", yaml.SequenceNode},
 }
 
 // ConfigPath returns the path to ~/.yoloai/profiles/base/config.yaml.
@@ -144,6 +153,23 @@ func LoadConfig() (*YoloaiConfig, error) {
 						cfg.Resources.CPUs = subExpanded
 					case "memory":
 						cfg.Resources.Memory = subExpanded
+					}
+				}
+			}
+		case "network":
+			if val.Kind == yaml.MappingNode {
+				cfg.Network = &NetworkConfig{}
+				for k := 0; k < len(val.Content)-1; k += 2 {
+					subKey := val.Content[k].Value
+					switch subKey {
+					case "isolated":
+						cfg.Network.Isolated = val.Content[k+1].Value == "true"
+					case "allow":
+						if val.Content[k+1].Kind == yaml.SequenceNode {
+							for _, item := range val.Content[k+1].Content {
+								cfg.Network.Allow = append(cfg.Network.Allow, item.Value)
+							}
+						}
 					}
 				}
 			}

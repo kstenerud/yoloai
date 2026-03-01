@@ -60,6 +60,10 @@ func newProfileCreateCmd() *cobra.Command {
 #   - "8080:8080"
 # env:
 #   MY_VAR: value
+# network:
+#   isolated: true           # enable network isolation
+#   allow:                   # domains allowed when isolated
+#     - example.com
 # workdir:
 #   path: ~/my-project
 #   mode: copy       # copy or rw

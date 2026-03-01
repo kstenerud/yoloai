@@ -24,6 +24,7 @@ type ProfileConfig struct {
 	Workdir     *ProfileWorkdir   // nil if not specified
 	Directories []ProfileDir      // empty if not specified
 	Resources   *ResourceLimits   // resource limits (cpus, memory)
+	Network     *NetworkConfig    // network isolation settings
 }
 
 // ProfileWorkdir defines a workdir from a profile.
@@ -52,6 +53,7 @@ type MergedConfig struct {
 	Workdir     *ProfileWorkdir   // from nearest profile that specifies one (child wins)
 	Directories []ProfileDir      // additive across chain
 	Resources   *ResourceLimits   // from per-field merge across chain
+	Network     *NetworkConfig    // isolated overrides (last wins), allow additive
 }
 
 // ProfileDirPath returns the host-side directory for a profile.
@@ -284,6 +286,23 @@ func LoadProfile(name string) (*ProfileConfig, error) {
 					}
 				}
 			}
+		case "network":
+			if val.Kind == yaml.MappingNode {
+				cfg.Network = &NetworkConfig{}
+				for k := 0; k < len(val.Content)-1; k += 2 {
+					subKey := val.Content[k].Value
+					switch subKey {
+					case "isolated":
+						cfg.Network.Isolated = val.Content[k+1].Value == "true"
+					case "allow":
+						if val.Content[k+1].Kind == yaml.SequenceNode {
+							for _, item := range val.Content[k+1].Content {
+								cfg.Network.Allow = append(cfg.Network.Allow, item.Value)
+							}
+						}
+					}
+				}
+			}
 			// Unknown fields are silently ignored
 		}
 	}
@@ -387,6 +406,16 @@ func MergeProfileChain(base *YoloaiConfig, chain []string) (*MergedConfig, error
 		}
 	}
 
+	if base.Network != nil {
+		merged.Network = &NetworkConfig{
+			Isolated: base.Network.Isolated,
+		}
+		if len(base.Network.Allow) > 0 {
+			merged.Network.Allow = make([]string, len(base.Network.Allow))
+			copy(merged.Network.Allow, base.Network.Allow)
+		}
+	}
+
 	// Apply each non-base profile in order
 	for _, name := range chain {
 		if name == "base" {
@@ -444,6 +473,15 @@ func MergeProfileChain(base *YoloaiConfig, chain []string) (*MergedConfig, error
 			if profile.Resources.Memory != "" {
 				merged.Resources.Memory = profile.Resources.Memory
 			}
+		}
+
+		// Network: isolated overrides (last wins), allow is additive
+		if profile.Network != nil {
+			if merged.Network == nil {
+				merged.Network = &NetworkConfig{}
+			}
+			merged.Network.Isolated = profile.Network.Isolated
+			merged.Network.Allow = append(merged.Network.Allow, profile.Network.Allow...)
 		}
 	}
 

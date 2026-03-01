@@ -217,6 +217,14 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 		// Profile ports: additive
 		opts.Ports = append(merged.Ports, opts.Ports...)
 
+		// Network: apply merged config as defaults (CLI flags override later)
+		if merged.Network != nil && !opts.NetworkNone && !opts.NetworkIsolated {
+			if merged.Network.Isolated {
+				opts.NetworkIsolated = true
+			}
+			opts.NetworkAllow = append(merged.Network.Allow, opts.NetworkAllow...)
+		}
+
 		// Resolve image ref
 		imageRef = ResolveProfileImage(opts.Profile, chain)
 		profileName = opts.Profile
@@ -231,6 +239,14 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 	if resources == nil && ycfg.Resources != nil {
 		r := *ycfg.Resources
 		resources = &r
+	}
+
+	// Network from base config (if profile didn't set it and CLI didn't override)
+	if opts.Profile == "" && ycfg.Network != nil && !opts.NetworkNone && !opts.NetworkIsolated {
+		if ycfg.Network.Isolated {
+			opts.NetworkIsolated = true
+		}
+		opts.NetworkAllow = append(ycfg.Network.Allow, opts.NetworkAllow...)
 	}
 	// CLI overrides for resources
 	if opts.CPUs != "" {
