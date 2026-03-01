@@ -20,6 +20,7 @@ func newConfigCmd() *cobra.Command {
 	cmd.AddCommand(
 		newConfigGetCmd(),
 		newConfigSetCmd(),
+		newConfigResetCmd(),
 	)
 
 	return cmd
@@ -87,6 +88,21 @@ Preserves comments and formatting.`,
 			return sandbox.UpdateConfigFields(map[string]string{
 				args[0]: args[1],
 			})
+		},
+	}
+}
+
+func newConfigResetCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "reset <key>",
+		Short: "Reset a configuration value to its default",
+		Long: `Remove a key from ~/.yoloai/config.yaml, reverting it to the internal default.
+
+Works at any level: a single value (defaults.backend), a map entry
+(defaults.env.OLLAMA_API_BASE), or an entire section (defaults.tart).`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			return sandbox.DeleteConfigField(args[0])
 		},
 	}
 }

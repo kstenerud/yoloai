@@ -364,6 +364,79 @@ func UpdateConfigFields(fields map[string]string) error {
 	return nil
 }
 
+// DeleteConfigField removes a key at a dotted path from config.yaml.
+// Returns nil if the file doesn't exist or the key is already absent.
+func DeleteConfigField(path string) error {
+	configPath, err := ConfigPath()
+	if err != nil {
+		return err
+	}
+
+	data, err := os.ReadFile(configPath) //nolint:gosec // G304: path is ~/.yoloai/config.yaml
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil // nothing to delete
+		}
+		return fmt.Errorf("read config.yaml: %w", err)
+	}
+
+	var doc yaml.Node
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		return fmt.Errorf("parse config.yaml: %w", err)
+	}
+
+	if doc.Kind != yaml.DocumentNode || len(doc.Content) == 0 {
+		return nil
+	}
+	root := doc.Content[0]
+	if root.Kind != yaml.MappingNode {
+		return nil
+	}
+
+	deleteYAMLField(root, path)
+
+	out, err := yaml.Marshal(&doc)
+	if err != nil {
+		return fmt.Errorf("marshal config.yaml: %w", err)
+	}
+
+	if err := os.WriteFile(configPath, out, 0600); err != nil {
+		return fmt.Errorf("write config.yaml: %w", err)
+	}
+
+	return nil
+}
+
+// deleteYAMLField removes a key at a dotted path from a yaml.Node mapping tree.
+func deleteYAMLField(root *yaml.Node, path string) {
+	parts := splitDottedPath(path)
+	node := root
+
+	// Navigate to the parent mapping.
+	for _, part := range parts[:len(parts)-1] {
+		found := false
+		for i := 0; i < len(node.Content)-1; i += 2 {
+			if node.Content[i].Value == part && node.Content[i+1].Kind == yaml.MappingNode {
+				node = node.Content[i+1]
+				found = true
+				break
+			}
+		}
+		if !found {
+			return // parent path doesn't exist, nothing to delete
+		}
+	}
+
+	// Remove the leaf key-value pair.
+	leafKey := parts[len(parts)-1]
+	for i := 0; i < len(node.Content)-1; i += 2 {
+		if node.Content[i].Value == leafKey {
+			node.Content = append(node.Content[:i], node.Content[i+2:]...)
+			return
+		}
+	}
+}
+
 // setYAMLField sets a dotted path (e.g., "defaults.tmux_conf") to a value
 // in a yaml.Node mapping tree. Creates intermediate mappings as needed.
 func setYAMLField(root *yaml.Node, path string, value string) {

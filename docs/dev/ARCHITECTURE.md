@@ -38,7 +38,7 @@ Dependency direction: `cmd/yoloai` → `cli` → `sandbox` + `runtime`; `sandbox
 |------|---------|
 | `root.go` | Root Cobra command, global flags (`-v`, `-q`, `--no-color`), `Execute()` with exit code mapping. |
 | `commands.go` | `registerCommands()` — registers all subcommands. Also contains `newNewCmd`, `newLsAliasCmd`, `newLogAliasCmd`, `newCompletionCmd`, `newVersionCmd`, and `attachToSandbox`/`waitForTmux` helpers. |
-| `config.go` | `yoloai config get/set` — read and write `config.yaml` values via dotted paths. |
+| `config.go` | `yoloai config get/set/reset` — read, write, and delete `config.yaml` values via dotted paths. |
 | `apply.go` | `yoloai apply` — apply changes back to host. Squash and selective-commit modes, `--export` for `.patch` files. |
 | `attach.go` | `yoloai attach` — attach to sandbox tmux session via `runtime.InteractiveExec`. |
 | `diff.go` | `yoloai diff` — show agent changes. Supports `--stat`, `--log`, commit refs, and ranges. |
@@ -117,7 +117,7 @@ Dependency direction: `cmd/yoloai` → `cli` → `sandbox` + `runtime`; `sandbox
 | `paths.go` | `EncodePath()` / `DecodePath()` — caret encoding for filesystem-safe names. `InstanceName()` (and deprecated alias `ContainerName()`), `Dir()`, `WorkDir()`, `RequireSandboxDir()`. |
 | `parse.go` | `ParseDirArg()` — parses `path:copy`, `path:rw`, `path:force` suffixes into `DirArg`. |
 | `safety.go` | `IsDangerousDir()`, `CheckPathOverlap()`, `CheckDirtyRepo()` — pre-creation safety checks. |
-| `config.go` | `LoadConfig()`, `UpdateConfigFields()`, `ConfigPath()`, `ReadConfigRaw()`, `GetConfigValue()`, `GetEffectiveConfig()` — read/write `~/.yoloai/config.yaml` preserving YAML comments via `yaml.Node`. Dotted-path get/set with default fallback for CLI `config get/set` commands. |
+| `config.go` | `LoadConfig()`, `UpdateConfigFields()`, `DeleteConfigField()`, `ConfigPath()`, `ReadConfigRaw()`, `GetConfigValue()`, `GetEffectiveConfig()` — read/write `~/.yoloai/config.yaml` preserving YAML comments via `yaml.Node`. Dotted-path get/set/delete with default fallback for CLI `config get/set/reset` commands. |
 | `setup.go` | `RunSetup()`, `runNewUserSetup()` — interactive tmux configuration setup. Classifies user's tmux config, prompts for preferences. |
 | `confirm.go` | `Confirm()` — simple y/N interactive prompt. |
 | `errors.go` | `UsageError` (exit 2), `ConfigError` (exit 3), sentinel errors (`ErrSandboxNotFound`, `ErrSandboxExists`, etc.). |
@@ -177,6 +177,7 @@ Tart (macOS VM) implementation of `Runtime` interface. Shells out to `tart` CLI 
 | `yoloai log` | `cli/commands.go:newLogAliasCmd` | Shortcut for `sandbox log` (calls `runLog`) |
 | `yoloai config get` | `cli/config.go:newConfigGetCmd` | `sandbox.GetEffectiveConfig()` / `sandbox.GetConfigValue()` |
 | `yoloai config set` | `cli/config.go:newConfigSetCmd` | `sandbox.UpdateConfigFields()` |
+| `yoloai config reset` | `cli/config.go:newConfigResetCmd` | `sandbox.DeleteConfigField()` |
 | `yoloai completion` | `cli/commands.go:newCompletionCmd` | Cobra's built-in completion generators |
 | `yoloai version` | `cli/commands.go:newVersionCmd` | Prints build-time version info |
 
@@ -314,9 +315,9 @@ Manager.Start (sandbox/lifecycle.go)
 2. Status constants are in the same file
 
 **Change config.yaml handling:**
-1. `LoadConfig()` / `UpdateConfigFields()` in `internal/sandbox/config.go`
+1. `LoadConfig()` / `UpdateConfigFields()` / `DeleteConfigField()` in `internal/sandbox/config.go`
 2. Add new fields to `YoloaiConfig` struct and the YAML node walker
-3. CLI `config get/set` commands in `internal/cli/config.go`
+3. CLI `config get/set/reset` commands in `internal/cli/config.go`
 
 **Add a new runtime backend:**
 1. Create `internal/runtime/<name>/` package

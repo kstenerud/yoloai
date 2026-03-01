@@ -221,6 +221,12 @@ yoloai config get defaults.backend
 
 # Change a setting
 yoloai config set defaults.backend tart
+
+# Reset a setting to its default
+yoloai config reset defaults.backend
+
+# Remove an env var
+yoloai config reset defaults.env.OLLAMA_API_BASE
 ```
 
 ### Settings

@@ -235,6 +235,86 @@ defaults:
 	assert.Contains(t, string(data), "my preferred agent")
 }
 
+func TestDeleteConfigField_Scalar(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	yoloaiDir := filepath.Join(tmpDir, ".yoloai")
+	require.NoError(t, os.MkdirAll(yoloaiDir, 0750))
+	content := "setup_complete: true\ndefaults:\n  backend: tart\n  agent: gemini\n"
+	require.NoError(t, os.WriteFile(filepath.Join(yoloaiDir, "config.yaml"), []byte(content), 0600))
+
+	require.NoError(t, DeleteConfigField("defaults.backend"))
+
+	// backend should be gone from file, agent preserved
+	data, err := os.ReadFile(filepath.Join(yoloaiDir, "config.yaml")) //nolint:gosec // G304: test code
+	require.NoError(t, err)
+	assert.NotContains(t, string(data), "backend")
+	assert.Contains(t, string(data), "agent: gemini")
+
+	// GetConfigValue should fall back to default
+	val, found, err := GetConfigValue("defaults.backend")
+	require.NoError(t, err)
+	assert.True(t, found)
+	assert.Equal(t, "docker", val)
+}
+
+func TestDeleteConfigField_MapEntry(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	yoloaiDir := filepath.Join(tmpDir, ".yoloai")
+	require.NoError(t, os.MkdirAll(yoloaiDir, 0750))
+	content := "defaults:\n  env:\n    FOO: bar\n    BAZ: qux\n"
+	require.NoError(t, os.WriteFile(filepath.Join(yoloaiDir, "config.yaml"), []byte(content), 0600))
+
+	require.NoError(t, DeleteConfigField("defaults.env.FOO"))
+
+	data, err := os.ReadFile(filepath.Join(yoloaiDir, "config.yaml")) //nolint:gosec // G304: test code
+	require.NoError(t, err)
+	assert.NotContains(t, string(data), "FOO")
+	assert.Contains(t, string(data), "BAZ: qux")
+}
+
+func TestDeleteConfigField_EntireSection(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	yoloaiDir := filepath.Join(tmpDir, ".yoloai")
+	require.NoError(t, os.MkdirAll(yoloaiDir, 0750))
+	content := "setup_complete: true\ndefaults:\n  env:\n    FOO: bar\n  backend: tart\n"
+	require.NoError(t, os.WriteFile(filepath.Join(yoloaiDir, "config.yaml"), []byte(content), 0600))
+
+	require.NoError(t, DeleteConfigField("defaults.env"))
+
+	data, err := os.ReadFile(filepath.Join(yoloaiDir, "config.yaml")) //nolint:gosec // G304: test code
+	require.NoError(t, err)
+	assert.NotContains(t, string(data), "FOO")
+	assert.NotContains(t, string(data), "env")
+	assert.Contains(t, string(data), "backend: tart")
+}
+
+func TestDeleteConfigField_NonexistentKey(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	yoloaiDir := filepath.Join(tmpDir, ".yoloai")
+	require.NoError(t, os.MkdirAll(yoloaiDir, 0750))
+	content := "setup_complete: true\n"
+	require.NoError(t, os.WriteFile(filepath.Join(yoloaiDir, "config.yaml"), []byte(content), 0600))
+
+	// Should not error on missing key
+	require.NoError(t, DeleteConfigField("defaults.nonexistent"))
+}
+
+func TestDeleteConfigField_MissingFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	// Should not error when config file doesn't exist
+	require.NoError(t, DeleteConfigField("defaults.backend"))
+}
+
 func TestLoadConfig_ExpandsEnvVars(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)

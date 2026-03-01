@@ -1,6 +1,6 @@
 package cli
 
-// ABOUTME: Tests for the config get/set CLI commands.
+// ABOUTME: Tests for the config get/set/reset CLI commands.
 
 import (
 	"bytes"
@@ -128,4 +128,32 @@ func TestConfigSet_Agent(t *testing.T) {
 	getCmd.SetArgs([]string{"defaults.agent"})
 	require.NoError(t, getCmd.Execute())
 	assert.Equal(t, "gemini\n", buf.String())
+}
+
+func TestConfigReset_RemovesKey(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	yoloaiDir := filepath.Join(tmpDir, ".yoloai")
+	require.NoError(t, os.MkdirAll(yoloaiDir, 0750))
+	content := "setup_complete: true\ndefaults:\n  backend: tart\n  agent: gemini\n"
+	require.NoError(t, os.WriteFile(filepath.Join(yoloaiDir, "config.yaml"), []byte(content), 0600))
+
+	cmd := newConfigResetCmd()
+	cmd.SetArgs([]string{"defaults.backend"})
+	require.NoError(t, cmd.Execute())
+
+	// Verify via get — should show default
+	getCmd := newConfigGetCmd()
+	buf := new(bytes.Buffer)
+	getCmd.SetOut(buf)
+	getCmd.SetArgs([]string{"defaults.backend"})
+	require.NoError(t, getCmd.Execute())
+	assert.Equal(t, "docker\n", buf.String())
+}
+
+func TestConfigReset_RequiresArg(t *testing.T) {
+	cmd := newConfigResetCmd()
+	cmd.SetArgs([]string{})
+	assert.Error(t, cmd.Execute())
 }
