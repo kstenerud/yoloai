@@ -128,6 +128,28 @@ func TestLoadConfig_EnvEmpty(t *testing.T) {
 	assert.Nil(t, cfg.Env)
 }
 
+func TestLoadConfig_ModelAliases(t *testing.T) {
+	dir := configDir(t)
+
+	content := "model_aliases:\n  sonnet: claude-sonnet-4-20250514\n  fast: claude-haiku-4-latest\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
+
+	cfg, err := LoadConfig()
+	require.NoError(t, err)
+	require.Len(t, cfg.ModelAliases, 2)
+	assert.Equal(t, "claude-sonnet-4-20250514", cfg.ModelAliases["sonnet"])
+	assert.Equal(t, "claude-haiku-4-latest", cfg.ModelAliases["fast"])
+}
+
+func TestLoadConfig_ModelAliasesEmpty(t *testing.T) {
+	dir := configDir(t)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(defaultConfigYAML), 0600))
+
+	cfg, err := LoadConfig()
+	require.NoError(t, err)
+	assert.Nil(t, cfg.ModelAliases)
+}
+
 func TestLoadConfig_MissingFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)

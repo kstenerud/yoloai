@@ -14,18 +14,19 @@ import (
 
 // ProfileConfig holds the parsed fields from a profile.yaml file.
 type ProfileConfig struct {
-	Extends     string            // parent profile name; "" means "base" (default)
-	Agent       string            // agent override
-	Model       string            // model override
-	Backend     string            // optional backend constraint
-	TartImage   string            // from tart.image nested key
-	Env         map[string]string // environment variables
-	Ports       []string          // port mappings
-	Workdir     *ProfileWorkdir   // nil if not specified
-	Directories []ProfileDir      // empty if not specified
-	Resources   *ResourceLimits   // resource limits (cpus, memory)
-	Network     *NetworkConfig    // network isolation settings
-	Mounts      []string          // extra bind mounts (host:container[:ro])
+	Extends      string            // parent profile name; "" means "base" (default)
+	Agent        string            // agent override
+	Model        string            // model override
+	Backend      string            // optional backend constraint
+	TartImage    string            // from tart.image nested key
+	Env          map[string]string // environment variables
+	ModelAliases map[string]string // user-defined model alias overrides
+	Ports        []string          // port mappings
+	Workdir      *ProfileWorkdir   // nil if not specified
+	Directories  []ProfileDir      // empty if not specified
+	Resources    *ResourceLimits   // resource limits (cpus, memory)
+	Network      *NetworkConfig    // network isolation settings
+	Mounts       []string          // extra bind mounts (host:container[:ro])
 }
 
 // ProfileWorkdir defines a workdir from a profile.
@@ -44,18 +45,19 @@ type ProfileDir struct {
 
 // MergedConfig holds the result of merging base config with a profile chain.
 type MergedConfig struct {
-	Agent       string            // from nearest profile that specifies one
-	Model       string            // from nearest profile that specifies one
-	Backend     string            // last non-empty backend constraint
-	TartImage   string            // from nearest profile that specifies one
-	TmuxConf    string            // from base config only
-	Env         map[string]string // merged across chain
-	Ports       []string          // additive across chain
-	Workdir     *ProfileWorkdir   // from nearest profile that specifies one (child wins)
-	Directories []ProfileDir      // additive across chain
-	Resources   *ResourceLimits   // from per-field merge across chain
-	Network     *NetworkConfig    // isolated overrides (last wins), allow additive
-	Mounts      []string          // additive across chain (host:container[:ro])
+	Agent        string            // from nearest profile that specifies one
+	Model        string            // from nearest profile that specifies one
+	Backend      string            // last non-empty backend constraint
+	TartImage    string            // from nearest profile that specifies one
+	TmuxConf     string            // from base config only
+	Env          map[string]string // merged across chain
+	ModelAliases map[string]string // merged across chain (child overrides parent)
+	Ports        []string          // additive across chain
+	Workdir      *ProfileWorkdir   // from nearest profile that specifies one (child wins)
+	Directories  []ProfileDir      // additive across chain
+	Resources    *ResourceLimits   // from per-field merge across chain
+	Network      *NetworkConfig    // isolated overrides (last wins), allow additive
+	Mounts       []string          // additive across chain (host:container[:ro])
 }
 
 // ProfileDirPath returns the host-side directory for a profile.
@@ -217,6 +219,18 @@ func LoadProfile(name string) (*ProfileConfig, error) {
 						return nil, fmt.Errorf("env.%s: %w", envKey, envErr)
 					}
 					cfg.Env[envKey] = envExpanded
+				}
+			}
+		case "model_aliases":
+			if val.Kind == yaml.MappingNode {
+				cfg.ModelAliases = make(map[string]string, len(val.Content)/2)
+				for k := 0; k < len(val.Content)-1; k += 2 {
+					aliasKey := val.Content[k].Value
+					aliasExpanded, aliasErr := expandEnvBraced(val.Content[k+1].Value)
+					if aliasErr != nil {
+						return nil, fmt.Errorf("model_aliases.%s: %w", aliasKey, aliasErr)
+					}
+					cfg.ModelAliases[aliasKey] = aliasExpanded
 				}
 			}
 		case "ports":
@@ -407,6 +421,12 @@ func MergeProfileChain(base *YoloaiConfig, chain []string) (*MergedConfig, error
 			merged.Env[k] = v
 		}
 	}
+	if len(base.ModelAliases) > 0 {
+		merged.ModelAliases = make(map[string]string, len(base.ModelAliases))
+		for k, v := range base.ModelAliases {
+			merged.ModelAliases[k] = v
+		}
+	}
 
 	if base.Resources != nil {
 		merged.Resources = &ResourceLimits{}
@@ -465,6 +485,16 @@ func MergeProfileChain(base *YoloaiConfig, chain []string) (*MergedConfig, error
 			}
 			for k, v := range profile.Env {
 				merged.Env[k] = v
+			}
+		}
+
+		// ModelAliases: map merge, later wins on conflict
+		if len(profile.ModelAliases) > 0 {
+			if merged.ModelAliases == nil {
+				merged.ModelAliases = make(map[string]string)
+			}
+			for k, v := range profile.ModelAliases {
+				merged.ModelAliases[k] = v
 			}
 		}
 

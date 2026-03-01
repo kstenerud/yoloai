@@ -19,20 +19,40 @@ import (
 
 func TestResolveModel_Alias(t *testing.T) {
 	agentDef := agent.GetAgent("claude")
-	result := resolveModel(agentDef, "sonnet")
+	result := resolveModel(agentDef, "sonnet", nil)
 	assert.Equal(t, "claude-sonnet-4-latest", result)
 }
 
 func TestResolveModel_FullName(t *testing.T) {
 	agentDef := agent.GetAgent("claude")
-	result := resolveModel(agentDef, "claude-sonnet-4-5-20250929")
+	result := resolveModel(agentDef, "claude-sonnet-4-5-20250929", nil)
 	assert.Equal(t, "claude-sonnet-4-5-20250929", result)
 }
 
 func TestResolveModel_Empty(t *testing.T) {
 	agentDef := agent.GetAgent("claude")
-	result := resolveModel(agentDef, "")
+	result := resolveModel(agentDef, "", nil)
 	assert.Equal(t, "", result)
+}
+
+func TestResolveModel_UserAliasOverridesBuiltin(t *testing.T) {
+	agentDef := agent.GetAgent("claude")
+	userAliases := map[string]string{"sonnet": "claude-sonnet-4-20250514"}
+	result := resolveModel(agentDef, "sonnet", userAliases)
+	assert.Equal(t, "claude-sonnet-4-20250514", result)
+}
+
+func TestResolveModel_UserAliasCustomKey(t *testing.T) {
+	agentDef := agent.GetAgent("claude")
+	userAliases := map[string]string{"fast": "claude-haiku-4-latest"}
+	result := resolveModel(agentDef, "fast", userAliases)
+	assert.Equal(t, "claude-haiku-4-latest", result)
+}
+
+func TestResolveModel_NilUserAliasesFallsBack(t *testing.T) {
+	agentDef := agent.GetAgent("claude")
+	result := resolveModel(agentDef, "sonnet", nil)
+	assert.Equal(t, "claude-sonnet-4-latest", result)
 }
 
 func TestBuildAgentCommand_InteractiveWithModel(t *testing.T) {

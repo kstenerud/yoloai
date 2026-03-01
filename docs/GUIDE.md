@@ -127,6 +127,29 @@ yoloai new task ./my-project --agent gemini --model pro    # gemini-2.5-pro
 yoloai new task ./my-project --agent gemini --model flash  # gemini-2.5-flash
 ```
 
+### Custom Model Aliases
+
+You can define custom model aliases or pin versions in your config:
+
+```bash
+# Pin sonnet to a specific version
+yoloai config set model_aliases.sonnet claude-sonnet-4-20250514
+
+# Create a custom shortcut
+yoloai config set model_aliases.fast claude-haiku-4-latest
+
+# Use your custom alias
+yoloai new task ./my-project --model fast
+
+# View configured aliases
+yoloai config get model_aliases
+
+# Remove an alias
+yoloai config reset model_aliases.fast
+```
+
+User-defined aliases take priority over built-in agent aliases. Full model names always work regardless of aliases.
+
 ### Local Models (Aider)
 
 Aider supports local model servers like Ollama and LM Studio. To use aider without a cloud API key, set the appropriate environment variable:

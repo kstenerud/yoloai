@@ -14,15 +14,16 @@ import (
 
 // YoloaiConfig holds the subset of config.yaml fields that the Go code reads.
 type YoloaiConfig struct {
-	TmuxConf  string            `yaml:"tmux_conf"`  // tmux_conf
-	Backend   string            `yaml:"backend"`    // backend
-	TartImage string            `yaml:"tart_image"` // tart.image — custom base VM image for tart backend
-	Agent     string            `yaml:"agent"`      // agent
-	Model     string            `yaml:"model"`      // model
-	Env       map[string]string `yaml:"env"`        // env — environment variables passed to container
-	Resources *ResourceLimits   `yaml:"resources"`  // resources — container resource limits
-	Network   *NetworkConfig    `yaml:"network"`    // network — network isolation settings
-	Mounts    []string          `yaml:"mounts"`     // mounts — extra bind mounts (host:container[:ro])
+	TmuxConf     string            `yaml:"tmux_conf"`     // tmux_conf
+	Backend      string            `yaml:"backend"`       // backend
+	TartImage    string            `yaml:"tart_image"`    // tart.image — custom base VM image for tart backend
+	Agent        string            `yaml:"agent"`         // agent
+	Model        string            `yaml:"model"`         // model
+	Env          map[string]string `yaml:"env"`           // env — environment variables passed to container
+	ModelAliases map[string]string `yaml:"model_aliases"` // model_aliases — user-defined model alias overrides
+	Resources    *ResourceLimits   `yaml:"resources"`     // resources — container resource limits
+	Network      *NetworkConfig    `yaml:"network"`       // network — network isolation settings
+	Mounts       []string          `yaml:"mounts"`        // mounts — extra bind mounts (host:container[:ro])
 }
 
 // ResourceLimits holds container resource constraints (CPU, memory).
@@ -67,6 +68,7 @@ type knownCollectionSetting struct {
 // Each appears as an empty mapping ({}) or sequence ([]) when not set by the user.
 var knownCollectionSettings = []knownCollectionSetting{
 	{"env", yaml.MappingNode},
+	{"model_aliases", yaml.MappingNode},
 	{"mounts", yaml.SequenceNode},
 	{"network.allow", yaml.SequenceNode},
 }
@@ -126,6 +128,18 @@ func LoadConfig() (*YoloaiConfig, error) {
 						return nil, fmt.Errorf("env.%s: %w", envKey, envErr)
 					}
 					cfg.Env[envKey] = envExpanded
+				}
+			}
+		case "model_aliases":
+			if val.Kind == yaml.MappingNode {
+				cfg.ModelAliases = make(map[string]string, len(val.Content)/2)
+				for k := 0; k < len(val.Content)-1; k += 2 {
+					aliasKey := val.Content[k].Value
+					aliasExpanded, aliasErr := expandEnvBraced(val.Content[k+1].Value)
+					if aliasErr != nil {
+						return nil, fmt.Errorf("model_aliases.%s: %w", aliasKey, aliasErr)
+					}
+					cfg.ModelAliases[aliasKey] = aliasExpanded
 				}
 			}
 		case "tart":

@@ -151,6 +151,7 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 	var resources *ResourceLimits
 	var mergedMounts []string
 	mergedEnv := ycfg.Env
+	userAliases := ycfg.ModelAliases
 	if opts.Profile != "" {
 		if err := ValidateProfileName(opts.Profile); err != nil {
 			return nil, err
@@ -180,6 +181,7 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 		}
 
 		mergedEnv = merged.Env
+		userAliases = merged.ModelAliases
 
 		if merged.Resources != nil {
 			r := *merged.Resources
@@ -544,7 +546,7 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 	hasPrompt := promptText != ""
 
 	// Resolve model alias and apply provider prefix if needed
-	model := resolveModel(agentDef, opts.Model)
+	model := resolveModel(agentDef, opts.Model, userAliases)
 	model = applyModelPrefix(agentDef, model, mergedEnv)
 
 	// Build agent command
@@ -792,10 +794,16 @@ func (m *Manager) printCreationOutput(state *sandboxState, autoAttach bool) {
 	}
 }
 
-// resolveModel expands a model alias using the agent definition.
-func resolveModel(agentDef *agent.Definition, model string) string {
+// resolveModel expands a model alias. User-configured aliases (from
+// config.yaml model_aliases) take priority over agent built-in aliases.
+func resolveModel(agentDef *agent.Definition, model string, userAliases map[string]string) string {
 	if model == "" {
 		return ""
+	}
+	if userAliases != nil {
+		if resolved, ok := userAliases[model]; ok {
+			return resolved
+		}
 	}
 	if agentDef.ModelAliases != nil {
 		if resolved, ok := agentDef.ModelAliases[model]; ok {
