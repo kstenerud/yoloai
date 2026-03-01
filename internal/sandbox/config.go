@@ -17,7 +17,7 @@ type YoloaiConfig struct {
 	SetupComplete bool              `yaml:"setup_complete"`
 	TmuxConf      string            `yaml:"tmux_conf"`  // from defaults.tmux_conf
 	Backend       string            `yaml:"backend"`    // from defaults.backend
-	TartImage     string            `yaml:"tart_image"` // from defaults.tart_image — custom base VM image for tart backend
+	TartImage     string            `yaml:"tart_image"` // from defaults.tart.image — custom base VM image for tart backend
 	Agent         string            `yaml:"agent"`      // from defaults.agent
 	Model         string            `yaml:"model"`      // from defaults.model
 	Env           map[string]string `yaml:"env"`        // from defaults.env — environment variables passed to container
@@ -34,7 +34,7 @@ type knownSetting struct {
 var knownSettings = []knownSetting{
 	{"setup_complete", "false"},
 	{"defaults.backend", "docker"},
-	{"defaults.tart_image", ""},
+	{"defaults.tart.image", ""},
 	{"defaults.tmux_conf", ""},
 	{"defaults.agent", "claude"},
 	{"defaults.model", ""},
@@ -106,8 +106,9 @@ func LoadConfig() (*YoloaiConfig, error) {
 					fieldName := val.Content[j].Value
 					fieldVal := val.Content[j+1]
 
-					// env is a mapping, not a scalar — handle separately
-					if fieldName == "env" {
+					// Nested mappings — handle before scalar extraction
+					switch fieldName {
+					case "env":
 						if fieldVal.Kind == yaml.MappingNode {
 							cfg.Env = make(map[string]string, len(fieldVal.Content)/2)
 							for k := 0; k < len(fieldVal.Content)-1; k += 2 {
@@ -117,6 +118,20 @@ func LoadConfig() (*YoloaiConfig, error) {
 									return nil, fmt.Errorf("defaults.env.%s: %w", envKey, envErr)
 								}
 								cfg.Env[envKey] = envExpanded
+							}
+						}
+						continue
+					case "tart":
+						if fieldVal.Kind == yaml.MappingNode {
+							for k := 0; k < len(fieldVal.Content)-1; k += 2 {
+								subKey := fieldVal.Content[k].Value
+								subExpanded, subErr := expandEnvBraced(fieldVal.Content[k+1].Value)
+								if subErr != nil {
+									return nil, fmt.Errorf("defaults.tart.%s: %w", subKey, subErr)
+								}
+								if subKey == "image" {
+									cfg.TartImage = subExpanded
+								}
 							}
 						}
 						continue
@@ -131,8 +146,6 @@ func LoadConfig() (*YoloaiConfig, error) {
 						cfg.TmuxConf = expanded
 					case "backend":
 						cfg.Backend = expanded
-					case "tart_image":
-						cfg.TartImage = expanded
 					case "agent":
 						cfg.Agent = expanded
 					case "model":

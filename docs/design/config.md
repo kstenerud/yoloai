@@ -39,7 +39,8 @@ setup_complete: false
 # Always applied to every sandbox
 defaults:
   backend: docker                       # Runtime backend: docker, tart, seatbelt
-  # tart_image:                         # Custom base VM image (tart backend only)
+  # tart:                               # Tart backend settings
+  #   image:                            # Custom base VM image
   tmux_conf: default+host               # default+host | default | host | none (see setup.md)
 
   agent: claude                           # Agent to launch: aider, claude, codex, gemini, opencode; CLI --agent overrides
@@ -68,7 +69,7 @@ Settings are managed via `yoloai config get/set` or by editing `~/.yoloai/config
 **Implemented settings:**
 
 - `defaults.backend` selects the runtime backend. Valid values: `docker`, `tart`, `seatbelt`. CLI `--backend` overrides config.
-- `defaults.tart_image` overrides the base VM image for the tart backend.
+- `defaults.tart.image` overrides the base VM image for the tart backend.
 - `defaults.tmux_conf` controls how user tmux config interacts with the container. Set by the interactive first-run setup. Values: `default+host`, `default`, `host`, `none` (see [setup.md](setup.md#tmux-configuration)).
 - `defaults.agent` selects the agent to launch. Valid values: `aider`, `claude`, `codex`, `gemini`, `opencode`. CLI `--agent` overrides config.
 - `defaults.model` sets the model name or alias passed to the agent. Empty means the agent uses its own default. CLI `--model` overrides config.

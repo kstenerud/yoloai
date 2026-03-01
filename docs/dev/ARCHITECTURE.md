@@ -84,7 +84,7 @@ Dependency direction: `cmd/yoloai` → `cli` → `sandbox` + `runtime`; `sandbox
 | File | Purpose |
 |------|---------|
 | `tart.go` | `Runtime` struct — implements `Runtime` interface, shells out to `tart` CLI. VM lifecycle via `tart clone/run/stop/delete`, exec via `tart exec`. PID file + `tart list` for process management. |
-| `build.go` | `EnsureImage()` — pulls Cirrus Labs macOS base image, provisions dev tools via `tart exec` (Homebrew, Node.js, Xcode CLI tools, tmux, git, jq, ripgrep). Supports `defaults.tart_image` config override. |
+| `build.go` | `EnsureImage()` — pulls Cirrus Labs macOS base image, provisions dev tools via `tart exec` (Homebrew, Node.js, Xcode CLI tools, tmux, git, jq, ripgrep). Supports `defaults.tart.image` config override. |
 | `resources.go` | `//go:embed` for setup.sh. |
 | `platform.go` | Platform detection helpers (macOS, Apple Silicon). Testable via variable overrides. |
 | `resources/setup.sh` | Post-boot setup script (embedded at compile time). Creates mount symlinks, injects secrets, launches tmux + agent. |

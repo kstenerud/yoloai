@@ -231,7 +231,7 @@ yoloai config set defaults.backend tart
 | `defaults.agent` | `claude` | Agent to use: `aider`, `claude`, `codex`, `gemini`, `opencode` |
 | `defaults.model` | (empty) | Model name or alias passed to the agent |
 | `defaults.backend` | `docker` | Runtime backend: `docker`, `tart`, `seatbelt` |
-| `defaults.tart_image` | (empty) | Custom base VM image for tart backend |
+| `defaults.tart.image` | (empty) | Custom base VM image for tart backend |
 | `defaults.tmux_conf` | (set by setup) | Tmux config mode: `default+host`, `default`, `host`, `none` |
 | `defaults.env.<NAME>` | (empty) | Environment variable forwarded to container |
 

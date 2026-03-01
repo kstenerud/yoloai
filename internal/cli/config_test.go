@@ -31,7 +31,7 @@ func TestConfigGet_EffectiveConfig(t *testing.T) {
 	// File override should appear
 	assert.Contains(t, out, "backend: seatbelt")
 	// Defaults for unset keys should appear
-	assert.Contains(t, out, "tart_image:")
+	assert.Contains(t, out, "image:")
 	assert.Contains(t, out, "tmux_conf:")
 }
 

@@ -46,7 +46,7 @@ var provisionCommands = []string{
 }
 
 // EnsureImage ensures the provisioned base VM image exists, pulling and
-// provisioning as needed. If imageRef is set in config (tart_image override),
+// provisioning as needed. If imageRef is set in config (tart.image override),
 // it uses that as the base instead of the default.
 func (r *Runtime) EnsureImage(ctx context.Context, sourceDir string, output io.Writer, logger *slog.Logger, force bool) error {
 	// Check if provisioned image already exists
@@ -123,7 +123,7 @@ func (r *Runtime) ImageExists(ctx context.Context, imageRef string) (bool, error
 }
 
 // resolveBaseImage returns the base image to use, checking for a config
-// override in defaults.tart_image.
+// override in defaults.tart.image.
 func (r *Runtime) resolveBaseImage(_ string) string {
 	if r.baseImageOverride != "" {
 		return r.baseImageOverride

@@ -434,7 +434,7 @@ func TestGetEffectiveConfig_Defaults(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, out, "setup_complete: false")
 	assert.Contains(t, out, "backend: docker")
-	assert.Contains(t, out, "tart_image:")
+	assert.Contains(t, out, "image:")
 	assert.Contains(t, out, "tmux_conf:")
 	assert.Contains(t, out, "agent: claude")
 	assert.Contains(t, out, "env: {}")
@@ -454,7 +454,7 @@ func TestGetEffectiveConfig_WithOverrides(t *testing.T) {
 	assert.Contains(t, out, "setup_complete: true")
 	assert.Contains(t, out, "backend: tart")
 	// Defaults for unset keys still present
-	assert.Contains(t, out, "tart_image:")
+	assert.Contains(t, out, "image:")
 	assert.Contains(t, out, "tmux_conf:")
 }
 

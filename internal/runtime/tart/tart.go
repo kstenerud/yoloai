@@ -40,7 +40,7 @@ const (
 type Runtime struct {
 	tartBin           string // path to tart binary
 	sandboxDir        string // ~/.yoloai/sandboxes/ base path
-	baseImageOverride string // custom base image from config (defaults.tart_image)
+	baseImageOverride string // custom base image from config (defaults.tart.image)
 }
 
 // Compile-time check.
@@ -69,7 +69,7 @@ func New(_ context.Context) (*Runtime, error) {
 		return nil, fmt.Errorf("get home directory: %w", err)
 	}
 
-	// Read config for optional tart_image override
+	// Read config for optional tart.image override
 	var baseImageOverride string
 	if cfg, err := sandbox.LoadConfig(); err == nil && cfg.TartImage != "" {
 		baseImageOverride = cfg.TartImage
