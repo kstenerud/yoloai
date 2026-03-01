@@ -169,8 +169,12 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 		for _, key := range agentDef.AuthHintEnvVars {
 			for _, val := range []string{os.Getenv(key), ycfg.Env[key]} {
 				if val != "" && containsLocalhost(val) {
-					return nil, NewUsageError("%s contains a localhost address (%s) which won't work inside a %s container — use host.docker.internal instead",
-						key, val, m.backend)
+					hint := "use the host's routable IP instead"
+					if m.backend == "docker" {
+						hint = "use host.docker.internal instead"
+					}
+					return nil, NewUsageError("%s contains a localhost address (%s) which won't work inside a %s VM — %s",
+						key, val, m.backend, hint)
 				}
 			}
 		}
