@@ -162,6 +162,20 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 		return nil, NewUsageError("a model is required when using a local model server: use --model or 'yoloai config set defaults.model <model>'")
 	}
 
+	// Warn if a local model server URL points to localhost but the backend
+	// is containerized — localhost inside a container refers to the container
+	// itself, not the host machine.
+	if m.backend != "seatbelt" {
+		for _, key := range agentDef.AuthHintEnvVars {
+			for _, val := range []string{os.Getenv(key), ycfg.Env[key]} {
+				if val != "" && containsLocalhost(val) {
+					return nil, NewUsageError("%s contains a localhost address (%s) which won't work inside a %s container — use host.docker.internal instead",
+						key, val, m.backend)
+				}
+			}
+		}
+	}
+
 	// Parse auxiliary directories
 	var auxDirs []*DirArg
 	for _, auxArg := range opts.AuxDirArgs {
@@ -896,6 +910,11 @@ func hasAnyAuthHint(agentDef *agent.Definition, configEnv map[string]string) boo
 		}
 	}
 	return false
+}
+
+// containsLocalhost returns true if the URL string references localhost or 127.0.0.1.
+func containsLocalhost(url string) bool {
+	return strings.Contains(url, "localhost") || strings.Contains(url, "127.0.0.1")
 }
 
 // describeSeedAuthFiles returns a human-readable description of expected auth file paths.
