@@ -1,4 +1,4 @@
-> **Design documents:** [Overview](README.md) | [Commands](commands.md) | [Config](config.md) | [Security](security.md) | [Research](../dev/RESEARCH.md)
+> **Design documents:** [Overview](README.md) | [Commands](commands.md) | [Config](config.md) | [Security](security.md) | [Research](../dev/RESEARCH.md) | [research/](../dev/research/)
 
 ## First-Run Experience
 

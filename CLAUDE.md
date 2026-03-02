@@ -27,8 +27,8 @@ Development docs live in `docs/dev/`:
 - `docs/dev/ARCHITECTURE.md` — Code navigation guide: package map, file index, key types, command→code map, data flows, "where to change" recipes, testing. Keep in sync when architecture changes.
 - `docs/dev/CODING-STANDARD.md` — Code style: Go 1.22+, gofmt, golangci-lint, Cobra, project structure, naming, error handling, dependency policy.
 - `docs/dev/CLI-STANDARD.md` — CLI design conventions: argument ordering (options first), flag naming, exit codes, error messages, help text format.
-- `docs/dev/RESEARCH.md` — Competitive landscape, community pain points, security incidents, feature comparison, multi-agent CLI research, credential management research, network isolation research.
-- `docs/dev/CRITIQUE.md` — Rolling critique document. After a critique pass, findings are applied to design docs and RESEARCH.md, then CRITIQUE.md is emptied for the next round.
+- `docs/dev/RESEARCH.md` — Index of research documents. Detailed research split into topic files in `docs/dev/research/`: competitors, agents, security, sandboxing, implementation.
+- `docs/dev/CRITIQUE.md` — Rolling critique document. After a critique pass, findings are applied to design docs and research files, then CRITIQUE.md is emptied for the next round.
 - `docs/dev/OPEN_QUESTIONS.md` — Questions encountered during design/implementation that need resolution.
 - `docs/dev/plans/TODO.md` — Consolidated list of designed-but-unimplemented features with design references.
 - `docs/dev/old/PLAN.md` — Historical implementation plan (phases, architecture decisions). Reference for how yoloAI was built.
@@ -53,8 +53,8 @@ Development docs live in `docs/dev/`:
 
 ## Workflow Conventions
 
-- **Critique cycle:** Write a critique in `docs/dev/CRITIQUE.md`, apply corrections to design docs and `docs/dev/RESEARCH.md`, mark critique as done, empty CRITIQUE.md for the next round.
-- **Research before design changes:** When a design question comes up (e.g., "should we use overlayfs?"), research it first in `docs/dev/RESEARCH.md` with verified facts, then update design docs based on findings.
+- **Critique cycle:** Write a critique in `docs/dev/CRITIQUE.md`, apply corrections to design docs and research files in `docs/dev/research/`, mark critique as done, empty CRITIQUE.md for the next round.
+- **Research before design changes:** When a design question comes up (e.g., "should we use overlayfs?"), research it first in the appropriate file under `docs/dev/research/` with verified facts, then update design docs based on findings.
 - **Factual accuracy matters:** Star counts, feature claims, and security assertions must be verified. Don't repeat marketing language or unverifiable numbers.
 - **Cross-platform awareness:** Always consider Linux, macOS (Docker Desktop + VirtioFS), and Windows/WSL. Note platform-specific tradeoffs explicitly.
 - **Commit granularity:** One commit per logical change. Research, design updates, and critique application get separate commits.

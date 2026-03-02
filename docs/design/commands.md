@@ -1,4 +1,4 @@
-> **Design documents:** [Overview](README.md) | [Config](config.md) | [Setup](setup.md) | [Security](security.md) | [Research](../dev/RESEARCH.md)
+> **Design documents:** [Overview](README.md) | [Config](config.md) | [Setup](setup.md) | [Security](security.md) | [Research](../dev/RESEARCH.md) | [research/](../dev/research/)
 
 ### 4. CLI (`yoloai`)
 

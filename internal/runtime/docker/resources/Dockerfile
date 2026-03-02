@@ -64,7 +64,7 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
 RUN echo 'export PATH="/usr/local/cargo/bin:$PATH"' > /etc/profile.d/cargo.sh
 
 # Claude Code via npm (not native binary — native bundles Bun which ignores
-# proxy env vars and auto-updates; see docs/dev/RESEARCH.md "Claude Code Installation")
+# proxy env vars and auto-updates; see docs/dev/research/implementation.md "Claude Code Installation")
 RUN npm install -g @anthropic-ai/claude-code
 ENV DISABLE_INSTALLATION_CHECKS=1
 
