@@ -36,6 +36,7 @@ func registerCommands(root *cobra.Command, version, commit, date string) {
 		newDiffCmd(),
 		newApplyCmd(),
 		newFilesCmd(),
+		newXCmd(),
 
 		// Lifecycle
 		newStartCmd(),

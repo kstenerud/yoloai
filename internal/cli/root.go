@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/kstenerud/yoloai/internal/extension"
 	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/spf13/cobra"
 )
@@ -32,6 +33,11 @@ func Execute(ctx context.Context, version, commit, date string) int {
 		writeJSONError(os.Stderr, err)
 	} else {
 		fmt.Fprintf(os.Stderr, "yoloai: %s\n", err) //nolint:errcheck // best-effort stderr write
+	}
+
+	var exitErr *extension.ExitError
+	if errors.As(err, &exitErr) {
+		return exitErr.Code
 	}
 
 	var usageErr *sandbox.UsageError
