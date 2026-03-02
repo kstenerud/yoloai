@@ -204,8 +204,8 @@ These were deferred from MVP but might be cheap to add and valuable for dogfoodi
 
 ## macOS Sandbox Backend
 
-94. **macOS VM backend for native development** — yoloAI's Linux Docker containers cannot run xcodebuild, Swift, or Xcode SDKs. Supporting macOS-native development requires a VM-based sandbox backend. Tart (Cirrus Labs) is the leading candidate (see RESEARCH.md "macOS VM Sandbox Research"). Key open questions:
-    - **Architecture:** How does yoloAI abstract over Docker (Linux) and Tart (macOS) backends? Shared interface with per-backend implementations? Or separate command paths?
+94. **macOS VM backend for native development** — yoloAI's Linux Docker containers cannot run xcodebuild, Swift, or Xcode SDKs. Supporting macOS-native development requires a VM-based sandbox backend. Tart (Cirrus Labs) is the leading candidate (see RESEARCH.md "macOS VM Sandbox Research"). **Partially resolved:** The `runtime.Runtime` interface in `internal/runtime/` provides the backend abstraction, with Docker, Tart, and Seatbelt implementations. Remaining open questions:
+    - ~~**Architecture:** How does yoloAI abstract over Docker (Linux) and Tart (macOS) backends? Shared interface with per-backend implementations? Or separate command paths?~~ **Resolved:** `runtime.Runtime` interface with per-backend packages (`internal/runtime/docker/`, `internal/runtime/tart/`, `internal/runtime/seatbelt/`).
     - **Image management:** macOS VM images are ~30-70 GB (vs. ~1 GB for Linux Docker images). How to handle first-run image download? Pre-built images via OCI registry?
     - **2-VM limit:** Apple enforces a hard 2 concurrent macOS VM limit per Mac. How does yoloAI communicate and enforce this? Error on third sandbox? Queue?
     - **Xcode installation:** Xcode is ~30 GB and requires Apple ID to download. How to pre-install in base images? `xcode-select --install` for CLI tools only?
@@ -233,7 +233,7 @@ These were deferred from MVP but might be cheap to add and valuable for dogfoodi
 
 39. **Codex TUI behavior in tmux** — Interactive mode (`codex --yolo` without `exec`) behavior in tmux is unverified (RESEARCH.md).
 
-40. **Image cleanup mechanism** — Docker images accumulate indefinitely. Cleanup is deferred pending research into Docker's image lifecycle (see [commands.md](../design/commands.md)). Needs design for safe pruning that doesn't break running sandboxes.
+40. **Image cleanup mechanism** — Docker images accumulate indefinitely. **Note:** `yoloai system prune` now handles orphaned containers, VMs, and temp files, but does not prune Docker images (affects all Docker usage, not just yoloai). Image pruning still needs design for safe cleanup that doesn't break running sandboxes.
 
 ## Unresolved (Extensions)
 

@@ -30,7 +30,7 @@ Tracks breaking changes made during beta. Each entry should be included in relea
 
 **Previous behavior:** `--backend` was a global flag available on all commands.
 
-**New behavior:** `--backend` is a local flag on `new`, `build`, and `setup` only. Lifecycle commands (`start`, `stop`, `destroy`, `reset`, `attach`, `exec`, `show`) read the backend from the sandbox's `meta.json` automatically. `list` uses the config default.
+**New behavior:** `--backend` is a local flag on `new`, `build`, and `setup` only. Lifecycle commands (`start`, `stop`, `destroy`, `reset`, `attach`, `exec`, `sandbox info`) read the backend from the sandbox's `meta.json` automatically. `list` uses the config default.
 
 **Rationale:** The backend is a property of the sandbox, not the CLI invocation. Lifecycle commands should use the backend the sandbox was created with, not require the user to remember and pass it every time.
 

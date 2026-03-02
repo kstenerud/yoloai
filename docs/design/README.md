@@ -6,7 +6,7 @@
 
 Run AI coding CLI agents (Claude Code, Codex, and others) with their sandbox-bypass flags inside disposable, isolated containers so that the agent can work autonomously without constant permission prompts. Project directories are presented as isolated writable views inside the container. The user reviews changes via `yoloai diff` and applies them back to the originals via `yoloai apply` when satisfied.
 
-**Scope:** Currently ships with Aider, Claude Code, Codex, Gemini CLI, OpenCode, and a deterministic test agent. Overlay strategy, network isolation, profiles, Viper config, and aux dirs are planned. The architecture is agent-agnostic — Docker, overlayfs, network isolation, diff/apply are not agent-specific. Adding a new agent requires only a new agent definition (install command, launch command, API key env vars, state directory). See [RESEARCH.md](../dev/RESEARCH.md) "Multi-Agent Support Research" for additional agents researched.
+**Scope:** Currently ships with Aider, Claude Code, Codex, Gemini CLI, OpenCode, and a deterministic test agent. Overlay strategy, network isolation, and profiles are implemented. Extensions are planned. The architecture is agent-agnostic — Docker, overlayfs, network isolation, diff/apply are not agent-specific. Adding a new agent requires only a new agent definition (install command, launch command, API key env vars, state directory). See [RESEARCH.md](../dev/RESEARCH.md) "Multi-Agent Support Research" for additional agents researched.
 
 ## Value Proposition
 
@@ -86,13 +86,11 @@ The Docker container is disposable — it can crash, be destroyed, be recreated.
   "created_at": "2025-01-15T10:30:00Z",
 
   "agent": "claude",
-  "profile": "go-dev",                    // [PLANNED] profile name
+  "profile": "go-dev",
   "model": "claude-sonnet-4-5-20250929",
 
-  "network": {
-    "mode": "isolated",                   // Currently a flat "network_mode" string ("none" or "")
-    "allow": ["api.anthropic.com", "statsig.anthropic.com", "sentry.io"]  // [PLANNED] per-agent defaults; this example shows Claude's
-  },
+  "network_mode": "isolated",            // "none", "isolated", or "" (default/unrestricted)
+  "network_allow": ["api.anthropic.com", "claude.ai", "platform.claude.com", "statsig.anthropic.com", "sentry.io"],
 
   "workdir": {
     "host_path": "/home/user/projects/my-app",
@@ -101,7 +99,7 @@ The Docker container is disposable — it can crash, be destroyed, be recreated.
     "baseline_sha": "a1b2c3d4..."
   },
 
-  "directories": [                        // [PLANNED] aux dirs
+  "directories": [
     {
       "host_path": "/home/user/projects/shared-lib",
       "mount_path": "/usr/local/lib/shared",
@@ -117,18 +115,19 @@ The Docker container is disposable — it can crash, be destroyed, be recreated.
   "has_prompt": true,
 
   "ports": ["8080:8080"],
-  "resources": {                          // [PLANNED] stored in meta; currently applied from config only
-    "cpus": 4,
+  "resources": {
+    "cpus": "4",
     "memory": "8g"
-  }
+  },
+  "mounts": []
 }
 ```
 
 Field notes:
 - **No `status` field.** Container state (`running`/`stopped`/`exited`) is queried live from Docker, not stored. Runtime state is tracked separately in `state.json` alongside `meta.json`. This file is created at sandbox creation time and contains fields like `agent_files_initialized` (boolean) to track whether agent files have been seeded.
 - **`baseline_sha`** — always present for `:copy` dirs. For git repos, the HEAD SHA at copy time. For non-git dirs, the SHA of the synthetic initial commit (`git init` + `git add -A` + `git commit`). Never null — `yoloai diff` always uses `git diff <baseline_sha>` with no special cases.
-- **`network.mode`** — `"none"`, `"isolated"`, or `"default"`. Drives iptables rule generation in the entrypoint.
-- **`network.allow`** — the fully resolved allowlist (agent defaults + config + CLI), stored so iptables rules can be reapplied on restart.
+- **`network_mode`** — `"none"`, `"isolated"`, or `""` (default/unrestricted). Drives iptables rule generation in the entrypoint.
+- **`network_allow`** — the fully resolved allowlist (agent defaults + config + CLI), stored so iptables rules can be reapplied on restart.
 - **`model`** — `null` if the agent's default was used.
 - **`has_prompt`** — whether `prompt.txt` exists. The prompt content lives in `prompt.txt`, not here.
 - **`workdir` and `directories`** store the resolved state at creation time. The `work/` subdirectory for each `:copy` dir is derived from `host_path` via caret encoding (not stored).
@@ -156,6 +155,7 @@ Field notes:
 │   └── node-dev/
 │       ├── Dockerfile
 │       └── profile.yaml
+├── config.yaml                  ← global config (tmux_conf, model_aliases)
 └── sandboxes/
     └── <name>/
         ├── meta.json            ← original paths, mode, profile, timestamps
@@ -164,6 +164,7 @@ Field notes:
         ├── prompt.txt           ← initial prompt (if provided)
         ├── log.txt              ← tmux session log
         ├── agent-state/         ← agent's state directory (per-sandbox, read-write)
+        ├── files/               ← bidirectional file exchange (mounted at /yoloai/files/)
         └── work/                ← overlay upper dirs (deltas) or full copies, for :copy dirs only
             ├── ^2Fhome^2Fuser^2Fmy-app/    ← caret-encoded host path
             └── ^2Fhome^2Fuser^2Fshared/    ← (one subdir per :copy directory)
@@ -182,7 +183,7 @@ Field notes:
 1. ~~**Headless mode?**~~ Agent definition specifies prompt delivery mode. Claude always uses interactive mode via tmux (`--prompt` fed via `tmux send-keys`). Codex uses headless mode (`codex exec`) when `--prompt` is provided, interactive mode otherwise. Tmux used in all cases for logging and attach.
 2. ~~**Multiple mounts?**~~ Yes. Workdir is primary (cwd), aux dirs are dependencies. Error on container path collision.
 3. ~~**Dotfiles/tools?**~~ Config file with defaults + profiles. Profiles use user-supplied Dockerfiles for full flexibility.
-4. ~~**Resource limits?**~~ Will be configurable in `config.yaml` under `defaults.resources`.
+4. ~~**Resource limits?**~~ Configurable in config under `resources`.
 5. ~~**Auto-destroy?**~~ No. Sandboxes persist until explicitly destroyed.
 6. ~~**Git integration?**~~ Yes. Copy mode auto-inits git for clean diffs. `yoloai apply` excludes `.git/`.
 7. ~~**Default mode?**~~ All dirs read-only by default. Per-directory `:rw` (live) or `:copy` (staged) suffixes. Workdir defaults to `:copy` if no suffix given; `:rw` must be explicit.

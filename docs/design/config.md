@@ -57,7 +57,7 @@ agent: claude                           # Agent to launch: aider, claude, codex,
 # model:                               # Model name or alias; CLI --model overrides
 
 # agent_files: "${HOME}"               # string: base dir (agent subdir appended); list: specific files
-# --- Planned fields (not yet implemented) ---
+# --- Additional fields ---
 # profile: my-project                  # [PLANNED] default profile to use; CLI --profile overrides
 # mounts:                              # [PLANNED] bind mounts added at container run time
 #   - ~/.gitconfig:/home/yoloai/.gitconfig:ro
@@ -67,11 +67,12 @@ env: {}                                # Environment variables forwarded to cont
 # agent_args:                           # Per-agent default CLI args (inserted before -- passthrough)
 #   aider: "--no-auto-commits --no-pretty"
 #   claude: "--allowedTools '*'"
-# network_isolated: false              # [PLANNED] true to enable network isolation by default
-# network_allow: []                    # [PLANNED] additional domains to allow (additive with agent defaults)
-# resources:                           # [PLANNED] container resource limits
-#   cpus: 4                            # docker --cpus
-#   memory: 8g                         # docker --memory
+# network:                              # Network isolation settings
+#   isolated: false                     # true to enable network isolation by default
+#   allow: []                           # additional domains to allow (additive with agent defaults)
+# resources:                            # Container resource limits
+#   cpus: 4                             # docker --cpus
+#   memory: 8g                          # docker --memory
 ```
 
 Settings are managed via `yoloai config get/set` (keys are automatically routed to the correct file) or by editing the config files directly.
@@ -87,6 +88,10 @@ Settings are managed via `yoloai config get/set` (keys are automatically routed 
 - `model` sets the model name or alias passed to the agent. Empty means the agent uses its own default. CLI `--model` overrides config.
 - `env` sets environment variables forwarded to the container. Values are written as files in `/run/secrets/` (same mechanism as API keys). API keys take precedence if a name conflicts. Supports `${VAR}` expansion. Set via `yoloai config set env.NAME value`. Profile `env` merges with defaults (profile values win on conflict).
 - `agent_args` sets per-agent default CLI args. Map of agent name → arg string. Args are inserted between the model flag and CLI passthrough (`--` args), so passthrough always wins. Set via `yoloai config set agent_args.aider "--no-auto-commits"`. Profile `agent_args` merges with defaults (profile values win on conflict per agent key).
+- `resources` sets container resource limits. `resources.cpus` (e.g., `"4"`, `"2.5"`) maps to `docker --cpus`. `resources.memory` (e.g., `"8g"`, `"512m"`) maps to `docker --memory`. CLI `--cpus` and `--memory` override config. Profile can override individual values.
+- `network` controls network isolation. `network.isolated: true` enables network isolation for all sandboxes. `network.allow` lists additional allowed domains (additive with agent defaults). Non-empty `network.allow` implies `network.isolated: true`. CLI `--network-isolated` and `--network-allow` override config.
+- `mounts` specifies bind mounts added at container run time (e.g., `~/.gitconfig:/home/yoloai/.gitconfig:ro`). Profile mounts are additive (merged with defaults).
+- `agent_files` controls what files are copied into the sandbox's `agent-state/` directory on first run (see below).
 
 Agents may define `AuthHintEnvVars` — environment variables that indicate authentication is configured through a non-API-key mechanism (e.g. local model server). When any of these vars are set (in host env or `env`), the auth check passes without requiring a cloud API key.
 
@@ -102,11 +107,7 @@ With profiles (future), a "local-models" profile can bundle env, network config,
 **`agent_files`** controls what files are copied into the sandbox's `agent-state/` directory on first run. Two forms: **string** — a base directory from which yoloai derives the agent-specific subdir (e.g. `"${HOME}"` → `~/.claude/` for Claude, `~/.gemini/` for Gemini; `"/shared/team-configs"` → `/shared/team-configs/.claude/` for Claude). **list** — specific files or directories to copy in verbatim (e.g. `["~/.claude/settings.json", "/shared/CLAUDE.md"]`). Omit entirely to copy nothing (safe default). Profile `agent_files` **replaces** (not merges with) defaults. Files placed by SeedFiles (auth credentials, settings) are never overwritten. Each agent defines exclusion patterns for session data and caches. First-run status is tracked in `state.json` (`agent_files_initialized`); `reset --clean` resets the flag so files are re-seeded on next start.
 
 **Planned settings (not yet parsed from config):**
-- `mounts` will be bind mounts added at container run time. Profile mounts are **additive** (merged with defaults, no deduplication — duplicates are a user error).
 - `ports` will be default port mappings. Profile ports are additive.
-- `resources` will set baseline limits. Profiles can override individual values.
-- `network_isolated` will enable network isolation for all sandboxes. Profile can override. CLI `--network-isolated` flag overrides config.
-- `network_allow` will list additional allowed domains. Non-empty `network_allow` implies `network_isolated: true`. Profile `network_allow` is additive with defaults. CLI `--network-allow` is additive with config.
 
 #### [PLANNED] Recipes (advanced)
 
@@ -143,7 +144,7 @@ Profiles live in `~/.yoloai/profiles/<name>/`, containing a `profile.yaml` and o
 
 **Profile.yaml mirrors config.yaml.** The profile format uses the same field names and structure as `config.yaml`, plus profile-specific fields (`workdir`, `directories`). Users learn one config format. Backend-specific fields (`backend`, `tart.image`, Dockerfile) are optional — omit them for backend-agnostic profiles.
 
-**Implemented profile fields:** `agent`, `model`, `backend`, `tart.image`, `env`, `agent_args`, `agent_files`, `ports`, `workdir`, `directories`. Other config.yaml fields (`mounts`, `resources`, etc.) will be supported in profile.yaml as they are implemented. Unknown fields are silently ignored — profiles written for future versions won't break on older ones.
+**Implemented profile fields:** `agent`, `model`, `backend`, `tart.image`, `env`, `agent_args`, `agent_files`, `ports`, `workdir`, `directories`, `resources`, `network`, `mounts`. Unknown fields are silently ignored — profiles written for future versions won't break on older ones.
 
 **Backend handling:**
 - `backend` in profile — optional constraint. If set, error when the user's backend doesn't match. If omitted, the profile works with any backend.
@@ -184,7 +185,7 @@ env:
 # agent_files:                            # list: specific files/dirs to copy verbatim
 #   - ~/.claude/settings.json
 #   - /shared/configs/CLAUDE.md
-# [PLANNED] mounts:                       # bind mounts added at container run time
+# mounts:                                 # bind mounts added at container run time
 #   - ~/.ssh:/home/yoloai/.ssh:ro
 resources:                    # container resource limits
   cpus: "4"
@@ -195,9 +196,10 @@ resources:                    # container resource limits
 #   - /dev/net/tun
 # [PLANNED] setup:                        # commands run at container start before agent
 #   - tailscale up --authkey=${TAILSCALE_AUTHKEY}
-# [PLANNED] network_isolated: true
-# [PLANNED] network_allow:
-#   - api.example.com
+# network:
+#   isolated: true
+#   allow:
+#     - api.example.com
 # [PLANNED] auto_commit_interval: 300
 
 # --- Profile-specific fields (not in config.yaml) ---
@@ -231,13 +233,13 @@ The full merge table for reference:
 | `directories`          | Profile provides defaults, CLI `-d` is additive          |
 | [PLANNED] `profile`              | Defaults provide fallback. CLI `--profile` overrides. `--no-profile` uses base image. |
 | `agent_files`          | Profile **replaces** defaults (no merge)                 |
-| [PLANNED] `mounts`               | Additive (no deduplication — duplicates are user error)  |
+| `mounts`               | Additive (no deduplication — duplicates are user error)  |
 | `resources`            | Profile overrides individual values                      |
 | [PLANNED] `cap_add`              | Additive                                                 |
 | [PLANNED] `devices`              | Additive                                                 |
 | [PLANNED] `setup`                | Additive (defaults first, then profile)                  |
-| [PLANNED] `network_isolated`     | Profile overrides default. CLI overrides profile.        |
-| [PLANNED] `network_allow`        | Additive                                                 |
+| `network.isolated`     | Profile overrides default. CLI overrides profile.        |
+| `network.allow`        | Additive                                                 |
 | [PLANNED] `auto_commit_interval` | Profile overrides default                                |
 
 **`yoloai profile` commands:**

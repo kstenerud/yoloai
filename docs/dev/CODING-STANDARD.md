@@ -45,13 +45,14 @@ yoloai/
 ├── go.sum
 ├── cmd/yoloai/main.go        # Entry point (thin — parse flags, call run)
 ├── internal/                  # All private packages
+│   ├── agent/                 # Agent definitions (Aider, Claude, Codex, Gemini, OpenCode, etc.)
 │   ├── cli/                   # Cobra command definitions
-│   ├── sandbox/               # Sandbox lifecycle
-│   ├── docker/                # Docker client wrapper
-│   ├── config/                # Config parsing (Viper, planned)
-│   └── agent/                 # Agent preset definitions
-├── resources/                 # Dockerfiles, templates
-└── testdata/                  # Test fixtures
+│   ├── runtime/               # Pluggable runtime interface
+│   │   ├── docker/            # Docker implementation of runtime.Runtime
+│   │   ├── tart/              # Tart (macOS VM) implementation
+│   │   └── seatbelt/          # Seatbelt (macOS sandbox-exec) implementation
+│   └── sandbox/               # Core logic: create, lifecycle, diff, apply, config, inspect
+└── docs/                      # Documentation
 ```
 
 Everything under `internal/` is private to this module — prevents accidental external imports.
@@ -61,7 +62,7 @@ Everything under `internal/` is private to this module — prevents accidental e
 - **Cobra** for command definitions
 - One file per command under `internal/cli/`
 - Use `RunE` (not `Run`) so commands return errors for proper propagation
-- **Viper** deferred — currently using CLI flags + go-yaml config. When added, Viper handles config file + env var + flag binding with struct unmarshaling
+- Config handled via CLI flags + go-yaml with `yaml.Node` for comment-preserving edits. Viper was evaluated but not adopted.
 - Commands are thin — parse args, call into domain packages, format output
 
 ## File Organization
@@ -183,7 +184,7 @@ Cobra customization required: set `SilenceErrors: true` and `SilenceUsage: true`
 ## Configuration and Constants
 
 - No magic strings — use constants or typed values
-- Config parsing isolated in `internal/config/`; rest of code receives typed structs
+- Config parsing isolated in `internal/sandbox/config.go`; rest of code receives typed structs
 - Default values defined in one place, not scattered
 - Environment variable names prefixed with `YOLOAI_` for yoloai-specific vars
 
@@ -192,7 +193,7 @@ Cobra customization required: set `SilenceErrors: true` and `SilenceUsage: true`
 - **Minimal** — Go culture favors the standard library. Justify each dependency.
 - `go.mod` managed by `go mod tidy`. Respect major version path convention (`/v2`). Reproducible builds via `go.sum`
 - **Core deps** (always needed): Cobra (CLI), Docker SDK
-- **Planned dep:** Viper (config). Pulls ~15 transitive dependencies — justified by config file + env var + flag precedence binding, which is non-trivial to replicate. If Viper proves too heavy, the fallback is Cobra flags + `go-yaml` + a thin config struct
+- **Config dep:** `go-yaml` v3 with `yaml.Node` for comment-preserving config edits. Viper was evaluated but not adopted — go-yaml + thin config struct is sufficient.
 - **Dev deps:** golangci-lint, testify
 - No vendoring unless required for reproducible builds in air-gapped environments
 

@@ -4,7 +4,7 @@
 
 ### Setup tracking
 
-`config.yaml` includes a `setup_complete` field (boolean, default `false`). This is the sole signal for whether the first-run experience has been completed. The field is explicitly set to `true` only after setup finishes successfully. This decouples first-run detection from config file existence — we can create/modify `config.yaml` at any point without accidentally suppressing the new-user prompts.
+`state.yaml` includes a `setup_complete` field (boolean, default `false`). This is the sole signal for whether the first-run experience has been completed. The field is explicitly set to `true` only after setup finishes successfully. This decouples first-run detection from config file existence — we can create/modify config files at any point without accidentally suppressing the new-user prompts.
 
 ### `EnsureSetup` (runs on every `yoloai new`)
 
@@ -53,7 +53,7 @@ Your config (~/.tmux.conf):
 
 For the no-config case, `[n]` means raw tmux defaults (equivalent to `tmux_conf: none`), and `[p]` prints only yoloai's defaults.
 
-After all prompts complete successfully, set `setup_complete: true` in `config.yaml` and print:
+After all prompts complete successfully, set `setup_complete: true` in `state.yaml` and print:
 
 ```
 Setup complete. To re-run setup at any time: yoloai system setup
@@ -116,8 +116,7 @@ set -g set-clipboard on
 The `tmux_conf` setting in `config.yaml` controls how user tmux config interacts with the container:
 
 ```yaml
-defaults:
-  tmux_conf: default+host    # default+host | default | host | none
+tmux_conf: default+host    # default+host | default | host | none
 ```
 
 - **`default+host`**: yoloai sensible defaults sourced first, then user's `~/.tmux.conf` (bind-mounted read-only). User settings override on conflict. This is the recommended mode and what the new-user prompt sets on `[Y]`.

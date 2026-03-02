@@ -6,7 +6,7 @@ Code navigation guide for the yoloAI codebase. Focused on the implemented code, 
 
 ```
 cmd/yoloai/          → Binary entry point
-internal/agent/      → Agent plugin definitions (Claude, Gemini, Codex, test, shell)
+internal/agent/      → Agent plugin definitions (Aider, Claude, Codex, Gemini, OpenCode, test, shell)
 internal/cli/        → Cobra command tree and CLI plumbing
 internal/runtime/    → Pluggable runtime interface (backend-agnostic types and errors)
 internal/runtime/docker/ → Docker implementation of runtime.Runtime
@@ -37,8 +37,15 @@ Dependency direction: `cmd/yoloai` → `cli` → `sandbox` + `runtime`; `sandbox
 | File | Purpose |
 |------|---------|
 | `root.go` | Root Cobra command, global flags (`-v`, `-q`, `--no-color`, `--json`), `Execute()` with exit code mapping (JSON errors to stderr when `--json`). |
-| `commands.go` | `registerCommands()` — registers all subcommands. Also contains `newNewCmd`, `newLsAliasCmd`, `newLogAliasCmd`, `newCompletionCmd`, `newVersionCmd`, and `attachToSandbox`/`waitForTmux` helpers. |
+| `commands.go` | `registerCommands()` — registers all subcommands. Also contains `newNewCmd`, `newLsAliasCmd`, `newLogAliasCmd`, `newExecAliasCmd`, `newCompletionCmd`, `newVersionCmd`, and `attachToSandbox`/`waitForTmux` helpers. |
 | `config.go` | `yoloai config get/set/reset` — read, write, and delete config values via dotted paths. Routes global keys (tmux_conf, model_aliases) to `~/.yoloai/config.yaml`, profile keys to `~/.yoloai/profiles/base/config.yaml`. |
+| `files.go` | `yoloai files put/get/ls/rm/path` — bidirectional file exchange between host and sandbox via `~/.yoloai/sandboxes/<name>/files/`. |
+| `profile.go` | `yoloai profile create/list/info/delete` — profile management commands. |
+| `restart.go` | `yoloai restart` — stop + start a sandbox, with `--attach` and `--resume` support. |
+| `system_prune.go` | `yoloai system prune` — remove orphaned backend resources and stale temp files. |
+| `help.go` | `yoloai help [topic]` — topic-based help system with embedded markdown content. |
+| `ansi.go` | ANSI escape code stripping helpers for terminal output processing. |
+| `help/` | Embedded markdown help topic files (quickstart, agents, workflow, config, etc.). |
 | `apply.go` | `yoloai apply` — apply changes back to host. Squash and selective-commit modes, `--export` for `.patch` files. |
 | `attach.go` | `yoloai attach` — attach to sandbox tmux session via `runtime.InteractiveExec`. |
 | `diff.go` | `yoloai diff` — show agent changes. Supports `--stat`, `--log`, commit refs, and ranges. |
@@ -123,6 +130,15 @@ Dependency direction: `cmd/yoloai` → `cli` → `sandbox` + `runtime`; `sandbox
 | `context.go` | `GenerateContext()` — builds markdown description of sandbox environment (dirs, network, resources). `WriteContextFiles()` — writes `context.md` to sandbox dir and inlines context into agent instruction file (e.g., `CLAUDE.md`). |
 | `config.go` | Profile config (`LoadConfig()`, `UpdateConfigFields()`, etc.) and global config (`LoadGlobalConfig()`, `UpdateGlobalConfigFields()`, etc.). Profile config at `~/.yoloai/profiles/base/config.yaml`, global at `~/.yoloai/config.yaml`. `IsGlobalKey()` routes keys to correct file. YAML comment-preserving via `yaml.Node`. |
 | `state.go` | `LoadState()`, `SaveState()` — read/write `~/.yoloai/state.yaml` containing global state like `setup_complete`. |
+| `sandbox_state.go` | `SandboxState` struct, `LoadSandboxState()`, `SaveSandboxState()` — per-sandbox runtime state (`state.json` alongside `meta.json`). Tracks `agent_files_initialized`. |
+| `agent_files.go` | `copyAgentFiles()` — copies files from host into sandbox `agent-state/` per `agent_files` config. Handles string/list forms, exclusion patterns, first-run tracking via `SandboxState`. |
+| `profile.go` | `ProfileConfig`, `LoadProfileConfig()`, `MergedConfig` — profile loading, inheritance chain resolution, config merging. |
+| `profile_build.go` | Profile image building — Docker-specific logic for building `yoloai-<profile>` images from profile Dockerfiles. Staleness detection. |
+| `prune.go` | `Prune()` — scans for orphaned backend resources and stale temp files. |
+| `git.go` | Git helper functions used by diff, apply, and baseline creation. |
+| `fileutil.go` | File utility helpers (copy, recursive operations). |
+| `keychain_darwin.go` | macOS Keychain integration — reads credentials via `security find-generic-password` when seed files are missing. |
+| `keychain_other.go` | Non-macOS stub for Keychain integration. |
 | `migration.go` | `MigrateConfigIfNeeded()` — handles migration from old config structure (`~/.yoloai/config.yaml` with `defaults:` nesting) to new structure (`~/.yoloai/profiles/base/config.yaml` with flat keys). |
 | `setup.go` | `RunSetup()`, `runNewUserSetup()` — interactive tmux configuration setup. Classifies user's tmux config, prompts for preferences. |
 | `confirm.go` | `Confirm()` — simple y/N interactive prompt. |
@@ -134,8 +150,20 @@ Dependency direction: `cmd/yoloai` → `cli` → `sandbox` + `runtime`; `sandbox
 ### `sandbox.Manager`
 Central orchestrator. Holds a `runtime.Runtime`, backend name, logger, and I/O streams. All sandbox operations go through it: `Create()`, `Start()`, `Stop()`, `Destroy()`, `Reset()`, `EnsureSetup()`. The backend name is stored so it can be persisted in `Meta` at sandbox creation time.
 
-### `sandbox.Meta` / `sandbox.WorkdirMeta` / `sandbox.DirectoryMeta`
-Persisted as `meta.json` in each sandbox dir. Records creation-time state: agent, model, workdir path/mode/baseline SHA, auxiliary directories (via `Directories` field), network mode, ports, backend. Each directory (workdir and aux dirs) has its own `DirectoryMeta` with host path, mount path, mode, and baseline SHA.
+### `sandbox.Meta` / `sandbox.WorkdirMeta` / `sandbox.DirMeta`
+Persisted as `meta.json` in each sandbox dir. Records creation-time state: agent, model, profile, workdir path/mode/baseline SHA, auxiliary directories (via `Directories` field), network mode/allow, ports, resources, mounts, backend. Each directory (workdir and aux dirs) has its own `DirMeta` with host path, mount path, mode, and baseline SHA.
+
+### `sandbox.SandboxState`
+Per-sandbox runtime state persisted as `state.json` alongside `meta.json`. Tracks mutable state like `agent_files_initialized` (boolean). Separate from `Meta` which is immutable after creation.
+
+### `sandbox.AgentFilesConfig`
+Parsed from `agent_files` in config. Two forms: string (base directory) or list (explicit file paths). Used by `copyAgentFiles()` during sandbox creation.
+
+### `sandbox.ProfileConfig` / `sandbox.MergedConfig`
+Profile configuration loaded from `profile.yaml`. `MergedConfig` is the result of merging the inheritance chain (base → profiles → CLI flags). Used to resolve effective settings for sandbox creation.
+
+### `sandbox.ResourceLimits`
+CPU and memory limits (`CPUs string`, `Memory string`). Stored in `Meta`, applied via `runtime.InstanceConfig`.
 
 ### `sandbox.CreateOptions`
 All parameters for `Manager.Create()`. Mirrors CLI flags: name, workdir, auxiliary directories (`AuxDirs`), agent, model, prompt, network, ports, replace, attach, passthrough args.
@@ -144,7 +172,7 @@ All parameters for `Manager.Create()`. Mirrors CLI flags: name, workdir, auxilia
 Input/output for `GenerateDiff()`. Supports path filtering and stat-only mode. `DiffResult` carries the diff text, workdir, mode, and empty flag.
 
 ### `agent.Definition`
-Describes an agent's commands (interactive/headless), prompt delivery mode, API key env vars, seed files, state directory, tmux submit sequence, model flag/aliases, and `ContextFile` (native instruction file for sandbox context injection). Built-in: `aider`, `claude`, `codex`, `gemini`, `opencode`, `test`, and `shell`.
+Describes an agent's commands (interactive/headless), prompt delivery mode, API key env vars (`APIKeyEnvVars`), auth hint env vars (`AuthHintEnvVars`), `AuthOptional` flag, seed files, state directory, tmux submit sequence, `ReadyPattern`, model flag/aliases/prefixes (`ModelPrefixes`), network allowlist, `ContextFile` (native instruction file for sandbox context injection), and `AgentFilesExclude` (glob patterns to skip when copying agent_files). Built-in: `aider`, `claude`, `codex`, `gemini`, `opencode`, `test`, and `shell`.
 
 ### `runtime.Runtime`
 Pluggable runtime interface for backend abstraction. Methods: `Create()`, `Start()`, `Stop()`, `Remove()`, `Inspect()`, `Exec()`, `InteractiveExec()`, `EnsureImage()`, `Close()`. Allows swapping container/VM backends.
@@ -180,8 +208,14 @@ Tart (macOS VM) implementation of `Runtime` interface. Shells out to `tart` CLI 
 | `yoloai sandbox log` | `cli/log.go:newSandboxLogCmd` | Reads `log.txt` from sandbox dir |
 | `yoloai sandbox exec` | `cli/exec.go:newSandboxExecCmd` | `runtime.InteractiveExec` into running container |
 | `yoloai sandbox network-allow` | `cli/network_allow.go:newSandboxNetworkAllowCmd` | `sandbox.PatchConfigAllowedDomains()` + `runtime.Exec` ipset update |
+| `yoloai restart` | `cli/restart.go:newRestartCmd` | `sandbox.Manager.Stop()` + `sandbox.Manager.Start()` in `sandbox/lifecycle.go` |
+| `yoloai system prune` | `cli/system_prune.go:newSystemPruneCmd` | `sandbox.Prune()` in `sandbox/prune.go` |
+| `yoloai files` | `cli/files.go:newFilesCmd` | File exchange via `~/.yoloai/sandboxes/<name>/files/` |
+| `yoloai profile` | `cli/profile.go:newProfileCmd` | Profile create/list/info/delete |
+| `yoloai help` | `cli/help.go:newHelpCmd` | Topic-based help with embedded markdown |
 | `yoloai ls` | `cli/commands.go:newLsAliasCmd` | Shortcut for `sandbox list` (calls `runList`) |
 | `yoloai log` | `cli/commands.go:newLogAliasCmd` | Shortcut for `sandbox log` (calls `runLog`) |
+| `yoloai exec` | `cli/commands.go:newExecAliasCmd` | Shortcut for `sandbox exec` |
 | `yoloai config get` | `cli/config.go:newConfigGetCmd` | `sandbox.GetEffectiveConfig()` / `sandbox.GetConfigValue()` |
 | `yoloai config set` | `cli/config.go:newConfigSetCmd` | `sandbox.UpdateConfigFields()` or `sandbox.UpdateGlobalConfigFields()` via `IsGlobalKey()` |
 | `yoloai config reset` | `cli/config.go:newConfigResetCmd` | `sandbox.DeleteConfigField()` or `sandbox.DeleteGlobalConfigField()` via `IsGlobalKey()` |
@@ -201,9 +235,9 @@ newNewCmd (cli/commands.go)
           ParseDirArg → validate name/agent/workdir/auxdirs → safety checks
           → :copy dirs: copyDir (cp -rp) → removeGitDirs → gitBaseline (git init + commit)
           → :overlay dirs: createOverlayDirs (upper/ovlwork in sandbox state)
-          → copySeedFiles → ensureContainerSettings
+          → copySeedFiles → copyAgentFiles → ensureContainerSettings
           → readPrompt → resolveModel → buildAgentCommand
-          → SaveMeta (meta.json with Directories field) → write prompt.txt, log.txt, config.json
+          → SaveMeta (meta.json) → SaveSandboxState (state.json) → write prompt.txt, log.txt, config.json
           → WriteContextFiles (context.md + agent instruction file)
       → launchContainer:
           createSecretsDir (config env vars + API keys from host env)
@@ -284,6 +318,7 @@ Manager.Start (sandbox/lifecycle.go)
 
 ```
 ~/.yoloai/
+├── config.yaml              # Global config (tmux_conf, model_aliases)
 ├── state.yaml               # Global state (setup_complete)
 ├── profiles/
 │   └── base/
@@ -296,11 +331,13 @@ Manager.Start (sandbox/lifecycle.go)
 ├── sandboxes/
 │   └── <name>/
 │       ├── meta.json        # Sandbox metadata (agent, workdir, baseline SHA)
+│       ├── state.json       # Per-sandbox runtime state (agent_files_initialized, etc.)
 │       ├── config.json      # Container runtime config (agent cmd, tmux settings)
 │       ├── context.md       # Sandbox environment description (dirs, network, resources)
 │       ├── prompt.txt       # Agent prompt (if provided)
 │       ├── log.txt          # Session log
 │       ├── agent-state/     # Mounted at agent's StateDir (e.g., /home/yoloai/.claude/, /home/yoloai/.gemini/)
+│       ├── files/           # Bidirectional file exchange (mounted at /yoloai/files/)
 │       ├── home-seed/       # Files mounted individually into /home/yoloai/
 │       └── work/
 │           └── <caret-encoded-path>/  # Copy of workdir with internal git repo
@@ -316,7 +353,13 @@ Manager.Start (sandbox/lifecycle.go)
 
 **Add a new agent:**
 1. Add a new entry to the `agents` map in `internal/agent/agent.go`
-2. Define: commands, prompt mode, API key env vars, seed files, state dir, submit sequence, startup delay, model aliases
+2. Define: commands, prompt mode, API key env vars, auth hint env vars, `AuthOptional`, seed files, state dir, submit sequence, startup delay, ready pattern, model flag/aliases/prefixes, network allowlist, context file, agent files exclude patterns
+
+**Change agent files seeding:**
+1. Config parsing: `parseAgentFilesNode()` in `internal/sandbox/config.go`
+2. Copy logic: `copyAgentFiles()` in `internal/sandbox/agent_files.go`
+3. Exclusion patterns: `AgentFilesExclude` in agent definitions (`internal/agent/agent.go`)
+4. State tracking: `SandboxState.AgentFilesInitialized` in `internal/sandbox/sandbox_state.go`
 
 **Add a new CLI flag to an existing command:**
 1. Add `cmd.Flags().XxxP(...)` in the command's `newXxxCmd()` function
@@ -328,7 +371,7 @@ Manager.Start (sandbox/lifecycle.go)
 3. `SeedResources()` in `internal/runtime/docker/build.go` handles deploying them to `~/.yoloai/profiles/base/`
 
 **Change how sandbox state is persisted:**
-1. Modify `Meta` / `DirectoryMeta` in `internal/sandbox/meta.go`
+1. Modify `Meta` / `DirMeta` in `internal/sandbox/meta.go`
 2. Update `prepareSandboxState()` in `internal/sandbox/create.go` where meta is populated
 3. Update any consumers that `LoadMeta()` and use the changed fields (e.g., diff, apply, inspect, reset)
 
@@ -360,9 +403,14 @@ Manager.Start (sandbox/lifecycle.go)
 1. Create `internal/runtime/<name>/` package
 2. Implement the `runtime.Runtime` interface
 3. Register in `cli/helpers.go:newRuntime()` — switch on the backend name resolved by `resolveBackend()`
-4. Backend is selectable via `--backend` flag (on new/build/setup) or `defaults.backend` config. Lifecycle commands read backend from sandbox `meta.json`.
+4. Backend is selectable via `--backend` flag (on new/build/setup) or `backend` config. Lifecycle commands read backend from sandbox `meta.json`.
 
 ## Testing
+
+**Run all checks (preferred — gofmt, lint, tidy, tests):**
+```
+make check
+```
 
 **Run all unit tests:**
 ```

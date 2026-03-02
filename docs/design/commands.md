@@ -8,6 +8,7 @@ Single Go binary. No runtime dependencies — just the binary and Docker.
 - `--verbose` / `-v`: Enable verbose output showing Docker commands, mount operations, config resolution, and entrypoint activity. Essential for troubleshooting overlay mount failures, proxy startup issues, and entrypoint errors. Also settable via `YOLOAI_VERBOSE=1`.
 - `--quiet` / `-q`: Suppress non-essential output. `-q` for warn-only, `-qq` for error-only.
 - `--no-color`: Disable colored output.
+- `--json`: Output as JSON for scripting and CI. Errors go to stderr as `{"error": "message"}`. Interactive commands (`attach`, `exec`) reject `--json`.
 
 **Environment Variables:**
 - `YOLOAI_SANDBOX`: Default sandbox name for commands that accept `<name>`. Explicit `<name>` argument always takes precedence. Example: `YOLOAI_SANDBOX=my-task yoloai diff` is equivalent to `yoloai diff my-task`.
@@ -23,7 +24,7 @@ Core Workflow:
   yoloai apply <name>                            Copy changes back to original dirs
 
 Lifecycle:
-  yoloai start [-a] [--resume] <name>             Start a stopped sandbox  (--resume [PLANNED])
+  yoloai start [-a] [--resume] <name>             Start a stopped sandbox
   yoloai stop <name>...                          Stop sandboxes (preserving state)
   yoloai destroy <name>...                       Stop and remove sandboxes
   yoloai reset <name>                            Re-copy workdir and reset git baseline
@@ -34,7 +35,7 @@ Inspection:
   yoloai system info                             Show version, paths, disk usage, backend availability
   yoloai system agents [name]                    List available agents
   yoloai system backends [name]                  List available runtime backends
-  yoloai system build [profile|--all]            Build/rebuild Docker image(s)  (profile/--all [PLANNED])
+  yoloai system build [profile|--all]            Build/rebuild Docker image(s)
   yoloai system prune                            Remove orphaned backend resources and stale temp files
   yoloai system setup                            Run interactive setup  (--power-user [PLANNED])
   yoloai sandbox                                 Sandbox inspection
@@ -55,11 +56,11 @@ Admin:
   yoloai profile list                            List profiles
   yoloai profile info <name>                     Show merged profile configuration
   yoloai profile delete <name>                   Delete a profile
-  yoloai files put <name> <file>...                    Copy files into sandbox exchange dir  [PLANNED]
-  yoloai files get <name> <file> [dst]                 Copy a file out of sandbox exchange dir  [PLANNED]
-  yoloai files ls <name> [glob]                        List files in sandbox exchange dir  [PLANNED]
-  yoloai files rm <name> <glob>                        Remove files from sandbox exchange dir  [PLANNED]
-  yoloai files path <name>                             Print host path to sandbox exchange dir  [PLANNED]
+  yoloai files put <name> <file>...                    Copy files into sandbox exchange dir
+  yoloai files get <name> <file> [dst]                 Copy a file out of sandbox exchange dir
+  yoloai files ls <name> [glob]                        List files in sandbox exchange dir
+  yoloai files rm <name> <glob>                        Remove files from sandbox exchange dir
+  yoloai files path <name>                             Print host path to sandbox exchange dir
   yoloai x <extension> <name> [args...] [--flags...]  Run a user-defined extension  [PLANNED]
   yoloai completion [bash|zsh|fish|powershell]   Generate shell completion script
   yoloai version                                 Show version information
@@ -69,24 +70,25 @@ Admin:
 
 Built-in agent definitions (v1). Each agent specifies its install method, launch commands, API key requirements, and behavioral characteristics. No user-defined agents in v1.
 
-| Field                         | Claude                                                    | Gemini                                          | test                                           | Codex                                          | shell                                          |
-|-------------------------------|-----------------------------------------------------------|-------------------------------------------------|-------------------------------------------------|------------------------------------------------|------------------------------------------------|
-| Install                       | `npm i -g @anthropic-ai/claude-code`                      | `npm i -g @google/gemini-cli`                   | (none — bash is built-in)                       | `npm i -g @openai/codex`                       | (none — uses agents installed in base image)   |
-| Runtime                       | Node.js                                                   | Node.js                                         | None                                            | Node.js                                        | None                                           |
-| Interactive cmd               | `claude --dangerously-skip-permissions`                   | `gemini --yolo`                                 | `bash`                                          | `codex --dangerously-bypass-approvals-and-sandbox` | `bash`                                         |
-| Headless cmd                  | `claude -p "PROMPT" --dangerously-skip-permissions`       | `gemini -p "PROMPT" --yolo`                     | `sh -c "PROMPT"`                                | `codex exec --dangerously-bypass-approvals-and-sandbox "PROMPT"` | `sh -c "PROMPT"`                               |
-| Default prompt mode           | interactive                                               | interactive                                     | headless (with prompt) / interactive (without)  | interactive                                    | headless (with prompt) / interactive (without) |
-| Submit sequence (interactive) | `Enter Enter` (double) + ready-pattern polling            | `Enter` + 3s startup delay                      | `Enter` + 0s startup delay                      | `Enter` + ready-pattern polling                | `Enter` + 0s startup delay                     |
-| API key env vars              | `ANTHROPIC_API_KEY`                                       | `GEMINI_API_KEY`                                | (none)                                          | `CODEX_API_KEY` (preferred), `OPENAI_API_KEY` (fallback) | Union of all agents' keys                      |
-| State directory               | `~/.claude/`                                              | `~/.gemini/`                                    | (none)                                          | `~/.codex/`                                    | (none — seeds into `~/.claude/`, `~/.codex/`, `~/.gemini/`) |
-| Model flag                    | `--model <model>`                                         | `--model <model>`                               | (ignored)                                       | `--model <model>`                              | (ignored)                                      |
-| Model aliases                 | `sonnet` → `claude-sonnet-4-latest`, `opus` → `claude-opus-4-latest`, `haiku` → `claude-haiku-4-latest` | `pro` → `gemini-2.5-pro`, `flash` → `gemini-2.5-flash` | (none) | `default` → `gpt-5.3-codex`, `spark` → `gpt-5.3-codex-spark`, `mini` → `codex-mini-latest` | (none) |
-| Ready pattern                 | `❯` (polls tmux output; replaces fixed delay)             | (none — uses startup delay; needs testing)      | (none — uses fixed delay)                       | `›` (polls tmux output)                        | (none — uses fixed delay)                      |
-| Seed files                    | `.credentials.json` (auth-only), `settings.json`, `.claude.json` (home dir) | `oauth_creds.json` (auth-only), `google_accounts.json` (auth-only), `settings.json` | (none)                | `auth.json` (auth-only), `config.toml`         | Union of all agents' seed files (remapped to home dir paths) |
-| Non-root required             | Yes (refuses as root)                                     | No                                              | No                                              | No (convention is non-root)                    | No                                             |
-| Proxy support                 | Yes (npm install only, not native binary)                 | TBD                                             | N/A                                             | No (upstream limitation — github.com/openai/codex#4242) | N/A                                            |
-| Default network allowlist     | `api.anthropic.com`, `statsig.anthropic.com`, `sentry.io` | `generativelanguage.googleapis.com`             | (none)                                          | `api.openai.com`                               | Union of all agents' allowlists                |
-| Extra env vars / quirks       | —                                                         | Sandbox disabled by default; `--yolo` auto-approves tool calls. OAuth login also supported but API key is the primary auth path. | Deterministic shell-based agent for development and bug report reproduction. No API key needed. Prompt IS the shell script. | Landlock sandbox fails in containers — use `--dangerously-bypass-approvals-and-sandbox`. Auth via `auth.json` (browser OAuth cache) or API key env vars. `cli_auth_credentials_store = "file"` must be set in `config.toml` for file-based auth. | Pseudo-agent that seeds ALL agents' credentials and drops to bash. Run any agent manually. Not shown in `yoloai system setup`. |
+| Field                         | Aider                                                     | Claude                                                    | Codex                                          | Gemini                                          | OpenCode                                       | test                                           | shell                                          |
+|-------------------------------|-----------------------------------------------------------|-----------------------------------------------------------|-------------------------------------------------|-------------------------------------------------|------------------------------------------------|-------------------------------------------------|------------------------------------------------|
+| Install                       | `pip install aider-chat`                                  | `npm i -g @anthropic-ai/claude-code`                      | `npm i -g @openai/codex`                       | `npm i -g @google/gemini-cli`                   | `go install github.com/opencode-ai/opencode`   | (none — bash is built-in)                       | (none — uses agents installed in base image)   |
+| Runtime                       | Python                                                    | Node.js                                                   | Node.js                                        | Node.js                                         | Go binary                                      | None                                            | None                                           |
+| Interactive cmd               | `aider --yes-always`                                      | `claude --dangerously-skip-permissions`                   | `codex --dangerously-bypass-approvals-and-sandbox` | `gemini --yolo`                                 | `opencode`                                     | `bash`                                          | `bash`                                         |
+| Headless cmd                  | `aider --message "PROMPT" --yes-always --no-pretty --no-fancy-input` | `claude -p "PROMPT" --dangerously-skip-permissions`       | `codex exec --dangerously-bypass-approvals-and-sandbox "PROMPT"` | `gemini -p "PROMPT" --yolo`                     | `opencode run "PROMPT"`                        | `sh -c "PROMPT"`                                | `sh -c "PROMPT"`                               |
+| Default prompt mode           | interactive                                               | interactive                                               | interactive                                    | interactive                                     | headless                                       | headless (with prompt) / interactive (without)  | headless (with prompt) / interactive (without) |
+| Submit sequence (interactive) | `Enter` + ready-pattern polling                           | `Enter Enter` (double) + ready-pattern polling            | `Enter` + ready-pattern polling                | `Enter` + ready-pattern polling                 | `Enter` + 3s startup delay                     | `Enter` + 0s startup delay                      | `Enter` + 0s startup delay                     |
+| API key env vars              | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `DEEPSEEK_API_KEY`, `OPENROUTER_API_KEY` | `ANTHROPIC_API_KEY`                                       | `CODEX_API_KEY` (preferred), `OPENAI_API_KEY` (fallback) | `GEMINI_API_KEY`                                | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `GROQ_API_KEY`, `OPENROUTER_API_KEY`, `XAI_API_KEY` | (none) | Union of all agents' keys |
+| Auth optional                 | No                                                        | No                                                        | No                                             | No                                              | Yes (warning, not error — many auth paths)     | N/A                                             | N/A                                            |
+| State directory               | (none)                                                    | `~/.claude/`                                              | `~/.codex/`                                    | `~/.gemini/`                                    | `~/.local/share/opencode/`                     | (none)                                          | (none — seeds into all agents' state dirs)     |
+| Model flag                    | `--model <model>`                                         | `--model <model>`                                         | `--model <model>`                              | `--model <model>`                               | `--model <model>`                              | (ignored)                                       | (ignored)                                      |
+| Model aliases                 | `sonnet`, `opus`, `haiku`, `deepseek`, `flash` (passthrough to aider's model names) | `sonnet` → `claude-sonnet-4-latest`, `opus` → `claude-opus-4-latest`, `haiku` → `claude-haiku-4-latest` | `default` → `gpt-5.3-codex`, `spark` → `gpt-5.3-codex-spark`, `mini` → `codex-mini-latest` | `pro` → `gemini-2.5-pro`, `flash` → `gemini-2.5-flash`, `preview-pro` → `gemini-3.1-pro-preview`, `preview-flash` → `gemini-3-flash-preview` | `sonnet` → `anthropic/claude-sonnet-4-5-latest`, `opus` → `anthropic/claude-opus-4-latest`, `haiku` → `anthropic/claude-haiku-4-5-latest` | (none) | (none) |
+| Ready pattern                 | `> $`                                                     | `❯` (polls tmux output; replaces fixed delay)             | `›` (polls tmux output)                        | `"Type your message"` (polls tmux output)       | (none — uses fixed delay)                      | (none — uses fixed delay)                       | (none — uses fixed delay)                      |
+| Seed files                    | `.aider.conf.yml` (home dir)                              | `.credentials.json` (auth-only, Keychain fallback), `settings.json`, `.claude.json` (home dir) | `auth.json` (auth-only), `config.toml`         | `oauth_creds.json` (auth-only), `google_accounts.json` (auth-only), `settings.json` | `auth.json` (auth-only), `.opencode.json` (auth-only, home dir), `hosts.json`/`apps.json` (GitHub Copilot, auth-only, home dir), `.config/opencode/.opencode.json` (home dir) | (none) | Union of all agents' seed files (remapped to home dir paths) |
+| Non-root required             | No                                                        | Yes (refuses as root)                                     | No (convention is non-root)                    | No                                              | No                                             | No                                              | No                                             |
+| Proxy support                 | TBD                                                       | Yes (npm install only, not native binary)                 | No (upstream limitation — github.com/openai/codex#4242) | TBD                                             | TBD                                            | N/A                                             | N/A                                            |
+| Default network allowlist     | (none)                                                    | `api.anthropic.com`, `claude.ai`, `platform.claude.com`, `statsig.anthropic.com`, `sentry.io` | `api.openai.com` | `generativelanguage.googleapis.com`, `cloudcode-pa.googleapis.com`, `oauth2.googleapis.com` | `api.anthropic.com`, `api.openai.com`, `generativelanguage.googleapis.com`, `api.github.com`, `api.githubcopilot.com` | (none) | Union of all agents' allowlists |
+| Extra env vars / quirks       | Supports local models via `OLLAMA_API_BASE`, `OPENAI_API_BASE`. Model prefixes auto-applied (e.g. `ollama_chat/`). | —                                                         | Landlock sandbox fails in containers — use `--dangerously-bypass-approvals-and-sandbox`. Auth via `auth.json` (browser OAuth cache) or API key env vars. `cli_auth_credentials_store = "file"` must be set in `config.toml` for file-based auth. | Sandbox disabled by default; `--yolo` auto-approves tool calls. OAuth login also supported but API key is the primary auth path. | Supports GitHub Copilot credentials, local endpoints, AWS Bedrock, Azure OpenAI, and Vertex AI auth. Auth hint env vars skip API key check. | Deterministic shell-based agent for development and bug report reproduction. No API key needed. Prompt IS the shell script. | Pseudo-agent that seeds ALL agents' credentials and drops to bash. Run any agent manually with `yolo-<name>` aliases. Not shown in `yoloai system setup`. |
 
 **Ready pattern:** Agents can specify a `ready_pattern` — a string the entrypoint polls for in the tmux pane output to determine when the agent is ready to receive a prompt. This replaces the fixed startup delay with responsive detection. Claude uses `❯` (the prompt character). While polling, the entrypoint auto-accepts confirmation prompts (e.g., workspace trust dialogs) by detecting "Enter to confirm" and sending Enter. After the pattern is found, the entrypoint waits for screen output to stabilize before delivering the prompt. Agents without a ready pattern fall back to the fixed `startup_delay`.
 
@@ -171,13 +173,13 @@ yoloai new my-task ./my-app=/opt/myapp -d ./shared-lib=/usr/local/lib/shared -d 
 ```
 
 Options:
-- **[PLANNED]** `--profile <name>`: Use a profile's derived image and runtime config. No profile = base image + defaults only. The profile name and resolved image ref (`yoloai-<profile>`) are stored in `meta.json` so lifecycle commands recreate containers with the correct image. Auto-builds missing or stale images on demand (see [config.md](config.md#1-docker-images)).
+- `--profile <name>`: Use a profile's derived image and runtime config. No profile = base image + defaults only. The profile name and resolved image ref (`yoloai-<profile>`) are stored in `meta.json` so lifecycle commands recreate containers with the correct image. Auto-builds missing or stale images on demand (see [config.md](config.md#1-docker-images)).
 - `--prompt` / `-p` `<text>`: Initial prompt/task for the agent (see Prompt Mechanism below). Use `--prompt -` to read from stdin. Mutually exclusive with `--prompt-file`.
 - `--prompt-file` / `-f` `<path>`: Read prompt from a file. Use `--prompt-file -` to read from stdin. Mutually exclusive with `--prompt`.
 - `--model` / `-m` `<model>`: Model to use. Passed to the agent's `--model` flag. If omitted, uses the agent's default. Accepts built-in aliases (see Agent Definitions) or full model names. Supports user-configurable aliases via `model_aliases` in config.yaml for version pinning and custom shortcuts.
-- `--agent <name>`: Agent to use (`aider`, `claude`, `codex`, `gemini`, `opencode`, `shell`, `test`). Overrides `defaults.agent` from config.
-- **[PLANNED]** `--network-isolated`: Allow only the agent's required API traffic. The agent can function but cannot access other external services, download arbitrary binaries, or exfiltrate code.
-- **[PLANNED]** `--network-allow <domain>`: Allow traffic to specific additional domains (can be repeated). Implies `--network-isolated`. Added to the agent's default allowlist (see below).
+- `--agent <name>`: Agent to use (`aider`, `claude`, `codex`, `gemini`, `opencode`, `shell`, `test`). Overrides `agent` from config.
+- `--network-isolated`: Allow only the agent's required API traffic. The agent can function but cannot access other external services, download arbitrary binaries, or exfiltrate code.
+- `--network-allow <domain>`: Allow traffic to specific additional domains (can be repeated). Implies `--network-isolated`. Added to the agent's default allowlist (see below).
 - `--network-none`: Run with `--network none` for full network isolation (agent API calls will also fail). Mutually exclusive with `--network-isolated` and `--network-allow`. **Warning:** Most agents (Claude, Codex) require network access to reach their API endpoints. This flag is useful for testing container setup without agent execution or for agents with locally-hosted models.
 - `--port <host:container>`: Expose a container port on the host (can be repeated). Example: `--port 3000:3000` for web dev. Without this, container services are not reachable from the host browser. Ports must be specified at creation time — Docker does not support adding port mappings to running containers. To add ports later, use `yoloai new --replace`.
 - `--replace`: Destroy existing sandbox of the same name before creating. Shorthand for `yoloai destroy <name> && yoloai new <name>`. Inherits destroy's smart confirmation — prompts when the existing sandbox has a running agent or unapplied changes. `--yes` skips confirmation.
@@ -193,6 +195,8 @@ Options:
 | Domain                  | Purpose                               |
 |-------------------------|---------------------------------------|
 | `api.anthropic.com`     | API calls (required)                  |
+| `claude.ai`             | OAuth/web auth (required for OAuth)   |
+| `platform.claude.com`   | OAuth/web auth (required for OAuth)   |
 | `statsig.anthropic.com` | Telemetry/feature flags (recommended) |
 | `sentry.io`             | Error reporting (recommended)         |
 
@@ -202,6 +206,7 @@ Options:
 |----------------------------------------|-------------------------------|
 | `generativelanguage.googleapis.com`    | API calls (required)          |
 | `cloudcode-pa.googleapis.com`          | OAuth auth route (recommended)|
+| `oauth2.googleapis.com`               | OAuth token refresh (required for OAuth) |
 
 **Codex:**
 
@@ -264,7 +269,7 @@ Before creating the sandbox (all checks run before any state is created on disk)
    - `/yoloai/` internal directory for sandbox context file, overlay working directories, and bind-mounted state files (`log.txt`, `prompt.txt`, `config.json`)
 4. **[PLANNED]** Run `setup` commands from config (if any).
 5. Start tmux session named `main` with logging to `/yoloai/log.txt` (`tmux pipe-pane`) and `remain-on-exit on` (container stays up after agent exits, only stops on explicit `yoloai stop` or `yoloai destroy`). Tmux config sourced based on the `tmux_conf` value in `config.json` (see [setup.md](setup.md#tmux-configuration)).
-6. Inside tmux: launch the agent using the command from its agent definition (e.g., `claude --dangerously-skip-permissions [--model X]` or `codex --yolo`).
+6. Inside tmux: launch the agent using the command from its agent definition (e.g., `claude --dangerously-skip-permissions [--model X]` or `codex --dangerously-bypass-approvals-and-sandbox`).
 7. Start a background monitor that polls `#{pane_dead}` — when the agent exits, all attached tmux clients are auto-detached so the user's terminal returns cleanly instead of showing a dead pane.
 8. Wait for the agent to initialize (interactive mode only). If the agent defines a `ready_pattern`, poll the tmux pane output for it (with a 60s timeout), auto-accepting confirmation prompts along the way and waiting for screen output to stabilize. Otherwise, fall back to a fixed `startup_delay`.
 9. Prompt delivery depends on the agent's prompt mode:
@@ -343,12 +348,12 @@ Displays sandbox configuration and state:
 - Status (running / stopped / done / failed)
 - Agent (claude, codex, etc.)
 - Model (if specified)
-- [PLANNED] Profile (name or "(base)")
+- Profile (name or "(base)")
 - Prompt (first 200 chars from `prompt.txt`, or "(none)")
 - Workdir (resolved absolute path with mode)
 - Network (if non-default, e.g., "none")
 - Ports (if any)
-- [PLANNED] Directories with access modes (read-only / rw / copy)
+- Directories with access modes (read-only / rw / copy)
 - Creation time
 - Baseline SHA (for `:copy` directories that were git repos, or "(synthetic)" for non-git dirs)
 - Container ID
@@ -452,7 +457,8 @@ Lists all sandboxes with their current status.
 | NAME    | Sandbox name                                                   |
 | STATUS  | `running`, `stopped`, `done` (exit 0), `failed` (non-zero exit) |
 | AGENT   | Agent name (`aider`, `claude`, `codex`, `gemini`, `opencode`, `test`) |
-| PROFILE | [PLANNED] Profile name or `(base)`                            |
+| PROFILE | Profile name or `(base)`                                       |
+| SIZE    | Sandbox disk usage                                             |
 | AGE     | Time since creation                                            |
 | WORKDIR | Working directory path                                         |
 | CHANGES | `yes` if unapplied changes exist, `no` if clean, `-` if unknown. Detected via `git status --porcelain` on the host-side work directory (any output = changes; read-only, catches both tracked modifications and untracked files; no Docker needed). |
@@ -464,15 +470,14 @@ Top-level shortcut: `yoloai ls`.
 [PLANNED] Options:
 - `--running`: Show only running sandboxes.
 - `--stopped`: Show only stopped sandboxes.
-- `--json`: Output as JSON for scripting.
 
 ### `yoloai system build`
 
 `yoloai system build` with no arguments rebuilds the base image (`yoloai-base`).
 
-**[PLANNED]** `yoloai system build <profile>` rebuilds a specific profile's image (which derives from `yoloai-base`).
+`yoloai system build <profile>` rebuilds a specific profile's image (which derives from `yoloai-base`).
 
-**[PLANNED]** `yoloai system build --all` rebuilds everything: base image first, then all profile images (those with Dockerfiles).
+`yoloai system build --all` rebuilds everything: base image first, then all profile images (those with Dockerfiles).
 
 Useful after modifying a profile's Dockerfile or when the base image needs updating (e.g., new agent CLI versions).
 
@@ -525,9 +530,11 @@ This eliminates the need to diagnose *why* a sandbox isn't running before choosi
 
 ### `yoloai restart`
 
-`yoloai restart [-a|--attach] <name>` is equivalent to `yoloai stop <name>` followed by `yoloai start <name>`. Use cases: recovering from a corrupted container environment, applying config changes that require a fresh container (e.g., new mounts or resource limits), or restarting a wedged agent process.
+`yoloai restart [-a|--attach] [--resume] <name>` is equivalent to `yoloai stop <name>` followed by `yoloai start <name>`. Use cases: recovering from a corrupted container environment, applying config changes that require a fresh container (e.g., new mounts or resource limits), or restarting a wedged agent process.
 
 **`-a`/`--attach` flag:** After the sandbox is restarted, automatically attach to the tmux session.
+
+**`--resume` flag:** Passed through to `start --resume` — the agent is relaunched with the original prompt prefixed with a continuation preamble.
 
 ### `yoloai reset`
 

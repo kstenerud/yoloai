@@ -19,6 +19,7 @@ Full reference for commands, flags, configuration, and internals. For a quick ov
 |---------|-------------|
 | `yoloai stop <name>...` | Stop sandboxes (preserving state) |
 | `yoloai start <name>` | Start a stopped sandbox |
+| `yoloai restart <name>` | Restart the agent in an existing sandbox |
 | `yoloai reset <name>` | Re-copy workdir and reset to original state |
 | `yoloai destroy <name>...` | Stop and remove sandboxes |
 
@@ -31,16 +32,19 @@ Full reference for commands, flags, configuration, and internals. For a quick ov
 | `yoloai system agents [name]` | List available agents |
 | `yoloai system backends [name]` | List available runtime backends |
 | `yoloai system build` | Build or rebuild the base Docker image |
+| `yoloai system prune` | Remove orphaned resources and stale temp files |
 | `yoloai system setup` | Re-run interactive first-run setup |
 | `yoloai sandbox` | Sandbox inspection |
 | `yoloai sandbox list` | List sandboxes and their status |
 | `yoloai sandbox info <name>` | Show sandbox configuration and state |
 | `yoloai sandbox log <name>` | Show session log |
 | `yoloai sandbox exec <name> <cmd>` | Run a command inside the sandbox |
+| `yoloai sandbox network-allow <name> <domain>` | Allow additional domains in an isolated sandbox |
 | `yoloai ls` | List sandboxes (shortcut for `sandbox list`) |
 | `yoloai log <name>` | Show sandbox log (shortcut for `sandbox log`) |
+| `yoloai exec <name> <cmd>` | Run a command inside a sandbox (shortcut for `sandbox exec`) |
 
-**Profiles**
+**Admin**
 
 | Command | Description |
 |---------|-------------|
@@ -48,13 +52,14 @@ Full reference for commands, flags, configuration, and internals. For a quick ov
 | `yoloai profile list` | List profiles |
 | `yoloai profile info <name>` | Show merged profile configuration |
 | `yoloai profile delete <name>` | Delete a profile |
-
-**Admin**
-
-| Command | Description |
-|---------|-------------|
+| `yoloai files put <name> <file>...` | Copy files into sandbox exchange directory |
+| `yoloai files get <name> <file> [dst]` | Copy a file out of sandbox exchange directory |
+| `yoloai files ls <name> [glob]` | List files in sandbox exchange directory |
+| `yoloai files rm <name> <glob>` | Remove files from sandbox exchange directory |
+| `yoloai files path <name>` | Print host path to sandbox exchange directory |
 | `yoloai config get [key]` | Print configuration values (all settings or a specific key) |
 | `yoloai config set <key> <value>` | Set a configuration value |
+| `yoloai help [topic]` | Show help topics (quickstart, agents, workflow, etc.) |
 | `yoloai completion <shell>` | Generate shell completion (bash/zsh/fish/powershell) |
 | `yoloai version` | Show version information |
 
@@ -135,10 +140,11 @@ yoloai ships with multiple agents. The architecture is agent-agnostic — more a
 
 | Agent | API Key | Description |
 |-------|---------|-------------|
-| `claude` (default) | `ANTHROPIC_API_KEY` | Claude Code in interactive mode |
-| `gemini` | `GEMINI_API_KEY` | Gemini CLI in interactive mode |
-
-Codex (`codex`) is defined but still undergoing testing — see the roadmap for status.
+| `aider` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `DEEPSEEK_API_KEY`, `OPENROUTER_API_KEY` | Aider — AI pair programming in your terminal |
+| `claude` (default) | `ANTHROPIC_API_KEY` | Anthropic Claude Code — AI coding assistant |
+| `codex` | `CODEX_API_KEY`, `OPENAI_API_KEY` | OpenAI Codex — AI coding agent |
+| `gemini` | `GEMINI_API_KEY` | Google Gemini CLI — AI coding assistant |
+| `opencode` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, + others | OpenCode — open-source AI coding agent (auth check is a warning, not error) |
 
 You can select a model using shorthand aliases or full model names. Aliases are agent-specific — use `yoloai system agents <name>` to see the full list for each agent.
 
@@ -152,6 +158,11 @@ yoloai new task ./my-project --model claude-sonnet-4-20250514  # exact model
 # Gemini model aliases
 yoloai new task ./my-project --agent gemini --model pro    # gemini-2.5-pro
 yoloai new task ./my-project --agent gemini --model flash  # gemini-2.5-flash
+
+# Codex model aliases
+yoloai new task ./my-project --agent codex --model default  # gpt-5.3-codex
+yoloai new task ./my-project --agent codex --model spark    # gpt-5.3-codex-spark
+yoloai new task ./my-project --agent codex --model mini     # codex-mini-latest
 ```
 
 ### Custom Model Aliases
@@ -177,9 +188,9 @@ yoloai config reset model_aliases.fast
 
 User-defined aliases take priority over built-in agent aliases. Full model names always work regardless of aliases.
 
-### Local Models (Aider)
+### Local Models (Aider, OpenCode)
 
-Aider supports local model servers like Ollama and LM Studio. To use aider without a cloud API key, set the appropriate environment variable:
+Aider and OpenCode support local model servers like Ollama and LM Studio. To use them without a cloud API key, set the appropriate environment variable:
 
 ```bash
 export OLLAMA_API_BASE=http://host.docker.internal:11434
@@ -188,10 +199,10 @@ export OLLAMA_API_BASE=http://host.docker.internal:11434
 Or configure it persistently:
 
 ```bash
-yoloai config set defaults.env.OLLAMA_API_BASE http://host.docker.internal:11434
+yoloai config set env.OLLAMA_API_BASE http://host.docker.internal:11434
 ```
 
-The `host.docker.internal` hostname allows the container to reach services running on the host machine.
+The `host.docker.internal` hostname allows the container to reach services running on the host machine. OpenCode also supports GitHub Copilot credentials, AWS Bedrock, Azure OpenAI, and Vertex AI — see `yoloai system agents opencode` for details.
 
 ## Global Flags
 
@@ -207,7 +218,7 @@ The `host.docker.internal` hostname allows the container to reach services runni
 Use `--json` on any command to get machine-readable JSON output:
 
 ```bash
-yoloai list --json                         # all sandboxes as JSON array
+yoloai ls --json                           # all sandboxes as JSON array
 yoloai sandbox info mybox --json           # sandbox details as JSON object
 yoloai diff mybox --json                   # diff result as JSON
 yoloai destroy mybox --json --yes          # action result (--yes required)
@@ -220,7 +231,7 @@ Errors are output to stderr as `{"error": "message"}`. Interactive commands (`at
 
 ### Creating sandboxes
 
-`--backend <name>` selects the runtime backend (`docker` or `tart`). Available on `new`, `build`, and `setup`. Lifecycle commands (`start`, `stop`, etc.) read the backend from the sandbox's `meta.json` automatically.
+`--backend <name>` selects the runtime backend (`docker`, `tart`, or `seatbelt`). Available on `new`, `build`, and `setup`. Lifecycle commands (`start`, `stop`, etc.) read the backend from the sandbox's `meta.json` automatically.
 
 ```bash
 # Prompt (headless — agent runs the task autonomously)
@@ -231,8 +242,11 @@ echo "fix the build" | yoloai new task ./project --prompt -   # from stdin
 # Create without starting the container
 yoloai new task ./project --no-start
 
-# Create without auto-attaching
-yoloai new task ./project --detach
+# Auto-attach after creation
+yoloai new task ./project --attach
+
+# Skip confirmation prompts
+yoloai new task ./project --yes
 
 # Replace an existing sandbox with the same name
 yoloai new task ./project --replace
@@ -240,8 +254,20 @@ yoloai new task ./project --replace
 # Pass extra arguments directly to the agent CLI
 yoloai new task ./project -- --allowedTools "Edit,Write,Bash"
 
+# Network isolation (allow only agent API traffic)
+yoloai new task ./project --network-isolated
+
+# Allow extra domains in network-isolated mode
+yoloai new task ./project --network-allow api.example.com
+
 # Disable network access entirely
 yoloai new task ./project --network-none
+
+# Use a profile
+yoloai new task ./project --profile go-dev
+
+# Resource limits
+yoloai new task ./project --cpus 4 --memory 8g
 
 # Expose a container port to the host
 yoloai new task ./project --port 3000:3000
@@ -258,6 +284,10 @@ yoloai apply task --yes
 yoloai stop --all
 yoloai destroy --all --yes
 
+# Resume a stopped sandbox (re-feed original prompt with context)
+yoloai start task --resume
+yoloai start task -a            # start and auto-attach
+
 # Restart agent (stop + start, preserving workspace)
 yoloai restart task
 yoloai restart task -a          # restart and auto-attach
@@ -266,6 +296,8 @@ yoloai restart task -a          # restart and auto-attach
 yoloai reset task
 yoloai reset task --clean       # also wipe agent memory
 yoloai reset task --no-prompt   # don't re-send prompt
+yoloai reset task --no-restart  # keep agent running, reset workspace in-place
+yoloai reset task -a            # reset, restart, and auto-attach
 ```
 
 ### Reviewing changes
@@ -277,8 +309,37 @@ yoloai diff task
 # Summary only (files changed, insertions, deletions)
 yoloai diff task --stat
 
+# List individual agent commits
+yoloai diff task --log
+
+# Diff for a specific commit or range
+yoloai diff task abc123
+yoloai diff task abc123..def456
+
 # Filter to specific paths
 yoloai diff task -- src/handler.go
+```
+
+### Applying changes
+
+```bash
+# Default: preserve individual commits (git am --3way)
+yoloai apply task
+
+# Squash all changes into a single unstaged patch
+yoloai apply task --squash
+
+# Export .patch files for manual curation
+yoloai apply task --patches ./my-patches
+
+# Skip uncommitted (WIP) changes, only apply commits
+yoloai apply task --no-wip
+
+# Apply specific commits by ref
+yoloai apply task abc123 def456
+
+# Force apply even if host repo has uncommitted changes
+yoloai apply task --force
 ```
 
 ## How It Works
@@ -306,37 +367,42 @@ Use `yoloai config` to view and change settings (keys are automatically routed t
 yoloai config get
 
 # Get a specific setting
-yoloai config get defaults.backend
+yoloai config get backend
 
 # Change a setting
-yoloai config set defaults.backend tart
+yoloai config set backend tart
 
 # Reset a setting to its default
-yoloai config reset defaults.backend
+yoloai config reset backend
 
 # Remove an env var
-yoloai config reset defaults.env.OLLAMA_API_BASE
+yoloai config reset env.OLLAMA_API_BASE
 ```
 
 ### Settings
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `setup_complete` | `false` | Set to `true` after first-run setup completes |
-| `defaults.agent` | `claude` | Agent to use: `aider`, `claude`, `codex`, `gemini`, `opencode` |
-| `defaults.model` | (empty) | Model name or alias passed to the agent |
-| `defaults.backend` | `docker` | Runtime backend: `docker`, `tart`, `seatbelt` |
-| `defaults.tart.image` | (empty) | Custom base VM image for tart backend |
-| `defaults.env.<NAME>` | (empty) | Environment variable forwarded to container |
+| `agent` | `claude` | Agent to use: `aider`, `claude`, `codex`, `gemini`, `opencode` |
+| `model` | (empty) | Model name or alias passed to the agent |
+| `backend` | `docker` | Runtime backend: `docker`, `tart`, `seatbelt` |
+| `tart.image` | (empty) | Custom base VM image for tart backend |
+| `env.<NAME>` | (empty) | Environment variable forwarded to container |
 | `agent_args.<AGENT>` | (empty) | Default CLI args for an agent (e.g., `agent_args.aider`) |
+| `resources.cpus` | (empty) | CPU limit (e.g., `4`, `2.5`) |
+| `resources.memory` | (empty) | Memory limit (e.g., `8g`, `512m`) |
+| `network.isolated` | `false` | Enable network isolation by default |
+| `network.allow` | (empty) | Additional domains to allow (additive with agent defaults) |
 | `tmux_conf` | (set by setup) | Tmux config mode (global config) |
 | `model_aliases.<alias>` | (empty) | Custom model alias (global config) |
 
-Agent resolution: `new` uses `--agent` flag > `defaults.agent` in config > `"claude"`.
+Operational state (`setup_complete`) is stored in `~/.yoloai/state.yaml`, separate from config.
 
-Model resolution: `new` uses `--model` flag > `defaults.model` in config > `""` (empty = agent's default model).
+Agent resolution: `new` uses `--agent` flag > `agent` in config > `"claude"`.
 
-Backend resolution: `new`/`build`/`setup` use `--backend` flag > `defaults.backend` in config > `"docker"`. Lifecycle commands read the backend from the sandbox's `meta.json`, falling back to config default.
+Model resolution: `new` uses `--model` flag > `model` in config > `""` (empty = agent's default model).
+
+Backend resolution: `new`/`build`/`setup` use `--backend` flag > `backend` in config > `"docker"`. Lifecycle commands read the backend from the sandbox's `meta.json`, falling back to config default.
 
 Agent args: persistent default CLI args for specific agents. Inserted between the model flag and CLI passthrough (`--` args), so passthrough always takes precedence. Example: `yoloai config set agent_args.aider "--no-auto-commits --no-pretty"`. Profile `agent_args` merge with base config (per-agent key, profile wins on conflict).
 
@@ -385,6 +451,7 @@ All sandbox state lives on the host at `~/.yoloai/sandboxes/<name>/`:
   prompt.txt      # initial prompt (if provided)
   log.txt         # tmux session log
   agent-state/    # agent's persistent state (e.g., ~/.claude/, ~/.gemini/)
+  files/          # bidirectional file exchange (mounted at /yoloai/files/)
   work/           # isolated copy of your project
 ```
 
