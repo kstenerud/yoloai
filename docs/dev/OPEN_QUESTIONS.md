@@ -52,9 +52,9 @@ These were deferred from MVP but might be cheap to add and valuable for dogfoodi
 
 ### Agent Files
 
-22. ~~**`agent_files: home` — scope**~~ — **Resolved:** Post-MVP. Copy entire agent state directory excluding session history and caches. If directory doesn't exist, skip silently. Runtime state tracked in `state.json` (alongside `meta.json`).
+22. ~~**`agent_files` — scope**~~ — **Resolved:** Post-MVP. Two forms: string (base directory — yoloai appends the agent's state subdir, e.g. `"${HOME}"` → `~/.claude/` for Claude) or list (specific files/dirs to copy verbatim). Excludes session history and caches. If source doesn't exist, skip silently. Runtime state tracked in `state.json` (alongside `meta.json`).
 
-23. ~~**`agent_files` — "first run" detection**~~ — **Resolved:** Post-MVP. Initialization detected by presence of `state.json` in agent-state directory. No `state.json` = not initialized. To re-seed, delete `state.json`.
+23. ~~**`agent_files` — "first run" detection**~~ — **Resolved:** Post-MVP. `state.json` is created at sandbox creation time alongside `meta.json`. It contains an `agent_files_initialized` boolean (initially `false`). After `agent_files` seeding completes, the field is set to `true`. To re-seed, set the field back to `false` and restart the sandbox.
 
 ### Build / Resources
 

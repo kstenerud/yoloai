@@ -58,7 +58,7 @@ agent: claude                           # Agent to launch: aider, claude, codex,
 
 # --- Planned fields (not yet implemented) ---
 # profile: my-project                  # [PLANNED] default profile to use; CLI --profile overrides
-# agent_files: home                    # [PLANNED] files seeded into agent-state/ on first run
+# agent_files: "${HOME}"               # [PLANNED] string: base dir (agent subdir appended); list: specific files
 # mounts:                              # [PLANNED] bind mounts added at container run time
 #   - ~/.gitconfig:/home/yoloai/.gitconfig:ro
 # auto_commit_interval: 0              # [PLANNED] seconds between auto-commits in :copy dirs; 0 = disabled
@@ -100,7 +100,7 @@ env:
 With profiles (future), a "local-models" profile can bundle env, network config, and Dockerfile additions for a turnkey local-model setup.
 
 **Planned settings (not yet parsed from config):**
-- `agent_files` will control what files are copied into the sandbox's `agent-state/` directory on first run. Set to `home` to copy from the agent's default state directory (`~/.claude/` for Claude, `~/.codex/` for Codex). Set to a list of paths (`~/` or absolute) for deterministic setups. Relative paths without `~/` are an error. Omit entirely to copy nothing (safe default). Profile `agent_files` **replaces** (not merges with) defaults.
+- `agent_files` will control what files are copied into the sandbox's `agent-state/` directory on first run. Two forms: **string** — a base directory from which yoloai derives the agent-specific subdir (e.g. `"${HOME}"` → `~/.claude/` for Claude, `~/.gemini/` for Gemini; `"/shared/team-configs"` → `/shared/team-configs/.claude/` for Claude). **list** — specific files or directories to copy in verbatim (e.g. `["~/.claude/settings.json", "/shared/CLAUDE.md"]`). Omit entirely to copy nothing (safe default). Profile `agent_files` **replaces** (not merges with) defaults.
 - `mounts` will be bind mounts added at container run time. Profile mounts are **additive** (merged with defaults, no deduplication — duplicates are a user error).
 - `ports` will be default port mappings. Profile ports are additive.
 - `resources` will set baseline limits. Profiles can override individual values.
@@ -178,9 +178,11 @@ env:
   GOMODCACHE: /home/yoloai/go/pkg/mod     # Go module cache
 # agent_args:                             # per-agent default CLI args
 #   aider: "--no-auto-commits"
-# [PLANNED] agent_files:                  # files seeded into agent-state/ on first run
-#   - ~/.claude/CLAUDE.md
-#   - /shared/configs/claude-settings.json
+# [PLANNED] agent_files: "${HOME}"        # string: base dir (agent subdir appended automatically)
+# --- or ---
+# [PLANNED] agent_files:                  # list: specific files/dirs to copy verbatim
+#   - ~/.claude/settings.json
+#   - /shared/configs/CLAUDE.md
 # [PLANNED] mounts:                       # bind mounts added at container run time
 #   - ~/.ssh:/home/yoloai/.ssh:ro
 resources:                    # container resource limits

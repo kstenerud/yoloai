@@ -125,7 +125,7 @@ The Docker container is disposable — it can crash, be destroyed, be recreated.
 ```
 
 Field notes:
-- **No `status` field.** Container state (`running`/`stopped`/`exited`) is queried live from Docker, not stored. Runtime state (whether agent files have been initialized) is tracked separately in `state.json` alongside `meta.json` — no `state.json` = not initialized.
+- **No `status` field.** Container state (`running`/`stopped`/`exited`) is queried live from Docker, not stored. Runtime state is tracked separately in `state.json` alongside `meta.json`. This file is created at sandbox creation time and contains fields like `agent_files_initialized` (boolean) to track whether agent files have been seeded.
 - **`baseline_sha`** — always present for `:copy` dirs. For git repos, the HEAD SHA at copy time. For non-git dirs, the SHA of the synthetic initial commit (`git init` + `git add -A` + `git commit`). Never null — `yoloai diff` always uses `git diff <baseline_sha>` with no special cases.
 - **`network.mode`** — `"none"`, `"isolated"`, or `"default"`. Drives iptables rule generation in the entrypoint.
 - **`network.allow`** — the fully resolved allowlist (agent defaults + config + CLI), stored so iptables rules can be reapplied on restart.
