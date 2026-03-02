@@ -8,6 +8,7 @@ import "github.com/spf13/cobra"
 func newSandboxCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "sandbox",
+		Aliases: []string{"sb"},
 		Short:   "Sandbox inspection",
 		GroupID: groupInspect,
 	}
