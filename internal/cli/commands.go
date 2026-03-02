@@ -76,7 +76,7 @@ func newLogAliasCmd() *cobra.Command {
 		Args:    cobra.ArbitraryArgs,
 		RunE:    runLog,
 	}
-	cmd.Flags().Bool("no-strip", false, "Show raw output with ANSI escape sequences")
+	cmd.Flags().Bool("raw", false, "Show raw output with ANSI escape sequences")
 	return cmd
 }
 

@@ -20,7 +20,7 @@ func newSandboxLogCmd() *cobra.Command {
 		Args:  cobra.ArbitraryArgs,
 		RunE:  runLog,
 	}
-	cmd.Flags().Bool("no-strip", false, "Show raw output with ANSI escape sequences")
+	cmd.Flags().Bool("raw", false, "Show raw output with ANSI escape sequences")
 	return cmd
 }
 
@@ -59,8 +59,8 @@ func runLog(cmd *cobra.Command, args []string) error {
 	}
 	defer f.Close() //nolint:errcheck
 
-	noStrip, _ := cmd.Flags().GetBool("no-strip")
-	if noStrip {
+	raw, _ := cmd.Flags().GetBool("raw")
+	if raw {
 		_, err = io.Copy(cmd.OutOrStdout(), f)
 	} else {
 		err = stripANSI(cmd.OutOrStdout(), f)
