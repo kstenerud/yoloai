@@ -64,21 +64,30 @@ type sandboxState struct {
 	configJSON       []byte
 }
 
+// overlayMountConfig describes a single overlay mount for config.json.
+type overlayMountConfig struct {
+	Lower  string `json:"lower"`
+	Upper  string `json:"upper"`
+	Work   string `json:"work"`
+	Merged string `json:"merged"`
+}
+
 // containerConfig is the serializable form of /yoloai/config.json.
 type containerConfig struct {
-	HostUID         int      `json:"host_uid"`
-	HostGID         int      `json:"host_gid"`
-	AgentCommand    string   `json:"agent_command"`
-	StartupDelay    int      `json:"startup_delay"`
-	ReadyPattern    string   `json:"ready_pattern"`
-	SubmitSequence  string   `json:"submit_sequence"`
-	TmuxConf        string   `json:"tmux_conf"`
-	WorkingDir      string   `json:"working_dir"`
-	StateDirName    string   `json:"state_dir_name"`
-	Debug           bool     `json:"debug,omitempty"`
-	NetworkIsolated bool     `json:"network_isolated,omitempty"`
-	AllowedDomains  []string `json:"allowed_domains,omitempty"`
-	Passthrough     []string `json:"passthrough,omitempty"`
+	HostUID         int                  `json:"host_uid"`
+	HostGID         int                  `json:"host_gid"`
+	AgentCommand    string               `json:"agent_command"`
+	StartupDelay    int                  `json:"startup_delay"`
+	ReadyPattern    string               `json:"ready_pattern"`
+	SubmitSequence  string               `json:"submit_sequence"`
+	TmuxConf        string               `json:"tmux_conf"`
+	WorkingDir      string               `json:"working_dir"`
+	StateDirName    string               `json:"state_dir_name"`
+	Debug           bool                 `json:"debug,omitempty"`
+	NetworkIsolated bool                 `json:"network_isolated,omitempty"`
+	AllowedDomains  []string             `json:"allowed_domains,omitempty"`
+	Passthrough     []string             `json:"passthrough,omitempty"`
+	OverlayMounts   []overlayMountConfig `json:"overlay_mounts,omitempty"`
 }
 
 // Create creates and optionally starts a new sandbox.
@@ -418,7 +427,7 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 		dirtyWarnings = append(dirtyWarnings, fmt.Sprintf("%s: %s", workdir.Path, msg))
 	}
 	for _, ad := range auxDirs {
-		if ad.Mode == "copy" || ad.Mode == "rw" {
+		if ad.Mode == "copy" || ad.Mode == "overlay" || ad.Mode == "rw" {
 			if msg, checkErr := CheckDirtyRepo(ad.Path); checkErr != nil {
 				return nil, fmt.Errorf("check repo status: %w", checkErr)
 			} else if msg != "" {
@@ -479,12 +488,23 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 		}
 	}
 
-	// Copy workdir
-	if workdir.Mode == "copy" {
+	// Copy workdir (or create overlay dirs)
+	switch workdir.Mode {
+	case "copy":
 		if err := copyDir(workdir.Path, workCopyDir); err != nil {
 			return nil, fmt.Errorf("copy workdir: %w", err)
 		}
-	} else {
+	case "overlay":
+		// Create upper and ovlwork directories; no file copy needed
+		for _, d := range []string{
+			OverlayUpperDir(opts.Name, workdir.Path),
+			OverlayOvlworkDir(opts.Name, workdir.Path),
+		} {
+			if err := os.MkdirAll(d, 0750); err != nil {
+				return nil, fmt.Errorf("create overlay dir %s: %w", d, err)
+			}
+		}
+	default:
 		if err := os.MkdirAll(workCopyDir, 0750); err != nil {
 			return nil, fmt.Errorf("create work dir: %w", err)
 		}
@@ -497,15 +517,19 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 		}
 	}
 
-	// Git baseline
+	// Git baseline (overlay defers baseline to container entrypoint)
 	var baselineSHA string
-	if workdir.Mode == "copy" {
+	switch workdir.Mode {
+	case "copy":
 		sha, err := gitBaseline(workCopyDir)
 		if err != nil {
 			return nil, fmt.Errorf("git baseline: %w", err)
 		}
 		baselineSHA = sha
-	} else {
+	case "overlay":
+		// Deferred — baseline created inside container by entrypoint
+		baselineSHA = ""
+	default:
 		sha, _ := gitHeadSHA(workdir.Path)
 		baselineSHA = sha
 	}
@@ -524,7 +548,8 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 			Mode:      mode,
 		}
 
-		if ad.Mode == "copy" {
+		switch ad.Mode {
+		case "copy":
 			auxWorkDir := WorkDir(opts.Name, ad.Path)
 			if err := copyDir(ad.Path, auxWorkDir); err != nil {
 				return nil, fmt.Errorf("copy aux dir %s: %w", ad.Path, err)
@@ -537,6 +562,16 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 				return nil, fmt.Errorf("git baseline for aux dir %s: %w", ad.Path, err)
 			}
 			dm.BaselineSHA = sha
+		case "overlay":
+			for _, d := range []string{
+				OverlayUpperDir(opts.Name, ad.Path),
+				OverlayOvlworkDir(opts.Name, ad.Path),
+			} {
+				if err := os.MkdirAll(d, 0750); err != nil {
+					return nil, fmt.Errorf("create overlay dir for aux %s: %w", ad.Path, err)
+				}
+			}
+			// Baseline deferred to container entrypoint
 		}
 
 		dirMetas = append(dirMetas, dm)
@@ -573,8 +608,31 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 		networkAllow = append(networkAllow, opts.NetworkAllow...)
 	}
 
+	// Build overlay mount configs for config.json
+	var overlayMounts []overlayMountConfig
+	if workdir.Mode == "overlay" {
+		encoded := EncodePath(workdir.Path)
+		overlayMounts = append(overlayMounts, overlayMountConfig{
+			Lower:  "/yoloai/overlay/" + encoded + "/lower",
+			Upper:  "/yoloai/overlay/" + encoded + "/upper",
+			Work:   "/yoloai/overlay/" + encoded + "/ovlwork",
+			Merged: workdir.ResolvedMountPath(),
+		})
+	}
+	for _, ad := range auxDirs {
+		if ad.Mode == "overlay" {
+			encoded := EncodePath(ad.Path)
+			overlayMounts = append(overlayMounts, overlayMountConfig{
+				Lower:  "/yoloai/overlay/" + encoded + "/lower",
+				Upper:  "/yoloai/overlay/" + encoded + "/upper",
+				Work:   "/yoloai/overlay/" + encoded + "/ovlwork",
+				Merged: ad.ResolvedMountPath(),
+			})
+		}
+	}
+
 	// Build config.json
-	configData, err := buildContainerConfig(agentDef, agentCommand, tmuxConf, workdir.ResolvedMountPath(), opts.Debug, networkMode == "isolated", networkAllow, opts.Passthrough)
+	configData, err := buildContainerConfig(agentDef, agentCommand, tmuxConf, workdir.ResolvedMountPath(), opts.Debug, networkMode == "isolated", networkAllow, opts.Passthrough, overlayMounts)
 	if err != nil {
 		return nil, fmt.Errorf("build config.json: %w", err)
 	}
@@ -718,7 +776,15 @@ func (m *Manager) launchContainer(ctx context.Context, state *sandboxState) erro
 	}
 
 	if state.networkMode == "isolated" && m.backend == "docker" {
-		instanceCfg.CapAdd = []string{"NET_ADMIN"}
+		instanceCfg.CapAdd = append(instanceCfg.CapAdd, "NET_ADMIN")
+	}
+
+	// CAP_SYS_ADMIN required for overlay mounts inside the container
+	if hasOverlayDirs(state) {
+		if m.backend != "docker" {
+			return fmt.Errorf(":overlay mode requires the docker backend (not supported with %s)", m.backend)
+		}
+		instanceCfg.CapAdd = append(instanceCfg.CapAdd, "SYS_ADMIN")
 	}
 
 	if err := m.runtime.Create(ctx, instanceCfg); err != nil {
@@ -869,7 +935,7 @@ func shellEscapeForDoubleQuotes(s string) string {
 }
 
 // buildContainerConfig creates the config.json content.
-func buildContainerConfig(agentDef *agent.Definition, agentCommand string, tmuxConf string, workingDir string, debug bool, networkIsolated bool, allowedDomains []string, passthrough []string) ([]byte, error) {
+func buildContainerConfig(agentDef *agent.Definition, agentCommand string, tmuxConf string, workingDir string, debug bool, networkIsolated bool, allowedDomains []string, passthrough []string, overlayMounts []overlayMountConfig) ([]byte, error) {
 	var stateDirName string
 	if agentDef.StateDir != "" {
 		stateDirName = filepath.Base(agentDef.StateDir)
@@ -888,6 +954,7 @@ func buildContainerConfig(agentDef *agent.Definition, agentCommand string, tmuxC
 		NetworkIsolated: networkIsolated,
 		AllowedDomains:  allowedDomains,
 		Passthrough:     passthrough,
+		OverlayMounts:   overlayMounts,
 	}
 	return json.MarshalIndent(cfg, "", "  ")
 }
@@ -1005,16 +1072,34 @@ func buildMounts(state *sandboxState, secretsDir string) []runtime.MountSpec {
 	var mounts []runtime.MountSpec
 
 	// Work directory
-	if state.workdir.Mode == "copy" {
+	switch state.workdir.Mode {
+	case "copy":
 		mounts = append(mounts, runtime.MountSpec{
 			Source: state.workCopyDir,
 			Target: state.workdir.ResolvedMountPath(),
 		})
-	} else {
+	case "overlay":
+		encoded := EncodePath(state.workdir.Path)
+		mounts = append(mounts,
+			runtime.MountSpec{
+				Source:   state.workdir.Path,
+				Target:   "/yoloai/overlay/" + encoded + "/lower",
+				ReadOnly: true,
+			},
+			runtime.MountSpec{
+				Source: OverlayUpperDir(state.name, state.workdir.Path),
+				Target: "/yoloai/overlay/" + encoded + "/upper",
+			},
+			runtime.MountSpec{
+				Source: OverlayOvlworkDir(state.name, state.workdir.Path),
+				Target: "/yoloai/overlay/" + encoded + "/ovlwork",
+			},
+		)
+	default:
 		mounts = append(mounts, runtime.MountSpec{
 			Source:   state.workdir.Path,
 			Target:   state.workdir.ResolvedMountPath(),
-			ReadOnly: state.workdir.Mode != "rw" && state.workdir.Mode != "copy",
+			ReadOnly: state.workdir.Mode != "rw",
 		})
 	}
 
@@ -1027,6 +1112,23 @@ func buildMounts(state *sandboxState, secretsDir string) []runtime.MountSpec {
 				Source: WorkDir(state.name, ad.Path),
 				Target: mountTarget,
 			})
+		case "overlay":
+			encoded := EncodePath(ad.Path)
+			mounts = append(mounts,
+				runtime.MountSpec{
+					Source:   ad.Path,
+					Target:   "/yoloai/overlay/" + encoded + "/lower",
+					ReadOnly: true,
+				},
+				runtime.MountSpec{
+					Source: OverlayUpperDir(state.name, ad.Path),
+					Target: "/yoloai/overlay/" + encoded + "/upper",
+				},
+				runtime.MountSpec{
+					Source: OverlayOvlworkDir(state.name, ad.Path),
+					Target: "/yoloai/overlay/" + encoded + "/ovlwork",
+				},
+			)
 		case "rw":
 			mounts = append(mounts, runtime.MountSpec{
 				Source: ad.Path,
@@ -1481,6 +1583,19 @@ func parseMemoryString(s string) (int64, error) {
 	}
 
 	return int64(val * float64(multiplier)), nil
+}
+
+// hasOverlayDirs returns true if any directory in the sandbox state uses overlay mode.
+func hasOverlayDirs(state *sandboxState) bool {
+	if state.workdir.Mode == "overlay" {
+		return true
+	}
+	for _, ad := range state.auxDirs {
+		if ad.Mode == "overlay" {
+			return true
+		}
+	}
+	return false
 }
 
 // parseConfigMount parses a "host:container[:ro]" mount string into a MountSpec.

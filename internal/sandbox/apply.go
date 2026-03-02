@@ -2,6 +2,7 @@ package sandbox
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -10,6 +11,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/kstenerud/yoloai/internal/runtime"
 )
 
 // GeneratePatch produces a binary patch from the work copy against
@@ -23,6 +26,10 @@ func GeneratePatch(name string, paths []string) (patch []byte, stat string, err 
 
 	if mode == "rw" {
 		return nil, "", fmt.Errorf("apply is not needed for :rw directories — changes are already live")
+	}
+
+	if mode == "overlay" {
+		return nil, "", fmt.Errorf("use GenerateOverlayPatch for :overlay directories")
 	}
 
 	if err := stageUntracked(workDir); err != nil {
@@ -56,6 +63,114 @@ func GeneratePatch(name string, paths []string) (patch []byte, stat string, err 
 	}
 
 	return patchOut, strings.TrimRight(string(statOut), "\n"), nil
+}
+
+// updateOverlayBaseline updates the baseline SHA for an overlay directory in meta.json.
+func updateOverlayBaseline(name, hostPath, sha string) error {
+	sandboxDir, err := RequireSandboxDir(name)
+	if err != nil {
+		return err
+	}
+
+	meta, err := LoadMeta(sandboxDir)
+	if err != nil {
+		return err
+	}
+
+	// Update workdir or aux dir
+	if meta.Workdir.HostPath == hostPath {
+		meta.Workdir.BaselineSHA = sha
+	} else {
+		found := false
+		for i := range meta.Directories {
+			if meta.Directories[i].HostPath == hostPath {
+				meta.Directories[i].BaselineSHA = sha
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("directory %s not found in sandbox metadata", hostPath)
+		}
+	}
+
+	return SaveMeta(sandboxDir, meta)
+}
+
+// GenerateOverlayPatch produces a binary patch for overlay-mode directories
+// by executing git commands inside the running container.
+func GenerateOverlayPatch(ctx context.Context, rt runtime.Runtime, name string, paths []string) ([]PatchSet, error) {
+	contexts, err := LoadAllDiffContexts(name)
+	if err != nil {
+		return nil, err
+	}
+
+	cname := InstanceName(name)
+	var patches []PatchSet
+
+	for _, dc := range contexts {
+		if dc.Mode != "overlay" {
+			continue
+		}
+
+		// Resolve baseline SHA if deferred
+		baselineSHA := dc.BaselineSHA
+		if baselineSHA == "" {
+			stdout, err := execInContainer(ctx, rt, cname, []string{
+				"git", "-C", dc.WorkDir, "rev-parse", "HEAD",
+			})
+			if err != nil {
+				return nil, fmt.Errorf("resolve baseline SHA for %s: %w", dc.HostPath, err)
+			}
+			baselineSHA = strings.TrimSpace(stdout)
+			if updateErr := updateOverlayBaseline(name, dc.HostPath, baselineSHA); updateErr != nil {
+				return nil, updateErr
+			}
+		}
+
+		// Stage untracked files
+		_, err := execInContainer(ctx, rt, cname, []string{
+			"git", "-C", dc.WorkDir, "add", "-A",
+		})
+		if err != nil {
+			return nil, fmt.Errorf("stage untracked in %s: %w", dc.HostPath, err)
+		}
+
+		// Generate binary patch
+		patchArgs := []string{"git", "-c", "core.hooksPath=/dev/null", "-C", dc.WorkDir, "diff", "--binary", baselineSHA}
+		if len(paths) > 0 {
+			patchArgs = append(patchArgs, "--")
+			patchArgs = append(patchArgs, paths...)
+		}
+		stdout, err := execInContainer(ctx, rt, cname, patchArgs)
+		if err != nil {
+			return nil, fmt.Errorf("git diff (patch) in %s: %w", dc.HostPath, err)
+		}
+
+		if len(stdout) == 0 {
+			continue
+		}
+
+		// Generate stat summary
+		statArgs := []string{"git", "-c", "core.hooksPath=/dev/null", "-C", dc.WorkDir, "diff", "--stat", baselineSHA}
+		if len(paths) > 0 {
+			statArgs = append(statArgs, "--")
+			statArgs = append(statArgs, paths...)
+		}
+		statOut, err := execInContainer(ctx, rt, cname, statArgs)
+		if err != nil {
+			return nil, fmt.Errorf("git diff (stat) in %s: %w", dc.HostPath, err)
+		}
+
+		patches = append(patches, PatchSet{
+			HostPath: dc.HostPath,
+			Mode:     "overlay",
+			Patch:    []byte(stdout),
+			Stat:     strings.TrimRight(statOut, "\n"),
+		})
+	}
+
+	return patches, nil
 }
 
 // CheckPatch verifies the patch applies cleanly to the target directory
@@ -190,6 +305,10 @@ func ListCommitsBeyondBaseline(name string) ([]CommitInfo, error) {
 		return nil, fmt.Errorf("commit listing is not available for :rw directories")
 	}
 
+	if mode == "overlay" {
+		return nil, fmt.Errorf("commit listing for :overlay directories requires container exec")
+	}
+
 	cmd := newGitCmd(workDir, "log", "--reverse", "--format=%H %s", baselineSHA+"..HEAD")
 	output, err := cmd.Output()
 	if err != nil {
@@ -223,6 +342,10 @@ func HasUncommittedChanges(name string) (bool, error) {
 
 	if mode == "rw" {
 		return false, fmt.Errorf("uncommitted-change check is not available for :rw directories")
+	}
+
+	if mode == "overlay" {
+		return false, fmt.Errorf("uncommitted-change check for :overlay directories requires container exec")
 	}
 
 	if err := stageUntracked(workDir); err != nil {
@@ -357,6 +480,10 @@ func GenerateFormatPatchForRefs(name string, shas []string) (patchDir string, fi
 		return "", nil, fmt.Errorf("format-patch is not available for :rw directories")
 	}
 
+	if mode == "overlay" {
+		return "", nil, fmt.Errorf("format-patch for :overlay directories requires container exec")
+	}
+
 	patchDir, err = os.MkdirTemp("", "yoloai-format-patch-*")
 	if err != nil {
 		return "", nil, fmt.Errorf("create temp dir: %w", err)
@@ -405,6 +532,10 @@ func AdvanceBaselineTo(name, sha string) error {
 		return nil
 	}
 
+	if meta.Workdir.Mode == "overlay" {
+		return nil // baseline managed via updateOverlayBaseline
+	}
+
 	meta.Workdir.BaselineSHA = sha
 	return SaveMeta(sandboxDir, meta)
 }
@@ -445,6 +576,10 @@ func AdvanceBaseline(name string) error {
 		return nil
 	}
 
+	if meta.Workdir.Mode == "overlay" {
+		return nil // baseline managed via updateOverlayBaseline
+	}
+
 	workDir := WorkDir(name, meta.Workdir.HostPath)
 	sha, err := gitHeadSHA(workDir)
 	if err != nil {
@@ -467,6 +602,10 @@ func GenerateFormatPatch(name string, paths []string) (patchDir string, files []
 
 	if mode == "rw" {
 		return "", nil, fmt.Errorf("format-patch is not available for :rw directories")
+	}
+
+	if mode == "overlay" {
+		return "", nil, fmt.Errorf("format-patch for :overlay directories requires container exec")
 	}
 
 	patchDir, err = os.MkdirTemp("", "yoloai-format-patch-*")
@@ -532,6 +671,10 @@ func GenerateWIPDiff(name string, paths []string) (patch []byte, stat string, er
 		return nil, "", fmt.Errorf("WIP diff is not available for :rw directories")
 	}
 
+	if mode == "overlay" {
+		return nil, "", fmt.Errorf("WIP diff for :overlay directories requires container exec")
+	}
+
 	if err := stageUntracked(workDir); err != nil {
 		return nil, "", err
 	}
@@ -572,7 +715,7 @@ func GenerateWIPDiff(name string, paths []string) (patch []byte, stat string, er
 // PatchSet holds patch data for a single directory.
 type PatchSet struct {
 	HostPath string // original host path (for display)
-	Mode     string // "copy"
+	Mode     string // "copy" or "overlay"
 	Patch    []byte
 	Stat     string
 }

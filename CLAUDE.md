@@ -42,6 +42,7 @@ Development docs live in `docs/dev/`:
 - Agent abstraction: per-agent definitions specify install, launch command, API key env vars, state directory, network allowlist, and prompt delivery mode. Ships Aider, Claude, Codex, Gemini, and OpenCode agents.
 - CLI separates workdir (primary project dir, positional) from aux dirs (`-d` flag). Directories mounted at mirrored host paths by default. Custom paths via `=<path>` override.
 - `:copy` directories use overlayfs by default (instant setup, deltas-only) with full-copy fallback. Both use git for diff/apply.
+- `:overlay` directories use Linux overlayfs inside the container for instant setup with diff/apply workflow. Changes are captured in an upper layer; no file copying. Docker-only, requires CAP_SYS_ADMIN. Container must be running for diff/apply (git commands exec inside container).
 - `:rw` directories are live bind-mounts. Default (no suffix) is read-only.
 - Profile system: each profile is a directory in `~/.yoloai/profiles/<name>/` containing a `Dockerfile` and `config.yaml`. The base profile at `~/.yoloai/profiles/base/` is auto-created if missing and serves as the default. "base" is a reserved profile name.
 - Two config files: global config (`~/.yoloai/config.yaml`) for user preferences (tmux_conf, model_aliases) and profile config (`~/.yoloai/profiles/base/config.yaml`) for profile-overridable defaults (agent, model, backend, env, etc.). `IsGlobalKey()` routes config commands to the correct file. Operational state (`setup_complete`) lives in `~/.yoloai/state.yaml`.

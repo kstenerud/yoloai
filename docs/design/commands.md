@@ -109,6 +109,7 @@ Directory argument syntax: `<path>[:<suffixes>][=<mount-point>]`
 Suffixes (combinable in any order):
 - `:rw` — bind-mounted read-write (live, immediate changes)
 - `:copy` — copied to sandbox state, read-write, diff/apply available
+- `:overlay` — uses Linux overlayfs for instant setup with diff/apply workflow (Docker only, requires CAP_SYS_ADMIN)
 - `:force` — override dangerous directory detection
 
 Mount point:

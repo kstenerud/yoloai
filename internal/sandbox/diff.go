@@ -1,8 +1,11 @@
 package sandbox
 
 import (
+	"context"
 	"fmt"
 	"strings"
+
+	"github.com/kstenerud/yoloai/internal/runtime"
 )
 
 // DiffOptions controls diff generation.
@@ -16,7 +19,7 @@ type DiffOptions struct {
 type DiffResult struct {
 	Output  string `json:"output"`  // diff text or stat summary
 	WorkDir string `json:"workdir"` // work directory that was diffed
-	Mode    string `json:"mode"`    // "copy" or "rw"
+	Mode    string `json:"mode"`    // "copy", "overlay", or "rw"
 	Empty   bool   `json:"empty"`   // true if no changes detected
 }
 
@@ -41,11 +44,18 @@ func generateDiff(opts DiffOptions, stat bool) (*DiffResult, error) {
 		return nil, err
 	}
 
-	if mode == "rw" {
+	switch mode {
+	case "rw":
 		return generateRWDiff(workDir, opts.Paths, stat)
+	case "overlay":
+		return &DiffResult{
+			Output: "Diff for :overlay directories requires 'yoloai diff' (runs git inside container)",
+			Mode:   "overlay",
+			Empty:  true,
+		}, nil
+	default:
+		return generateCopyDiff(workDir, baselineSHA, opts.Paths, stat)
 	}
-
-	return generateCopyDiff(workDir, baselineSHA, opts.Paths, stat)
 }
 
 func generateRWDiff(workDir string, paths []string, stat bool) (*DiffResult, error) {
@@ -226,6 +236,13 @@ func loadDiffContext(name string) (workDir string, baselineSHA string, mode stri
 		if baselineSHA == "" {
 			return "", "", "", fmt.Errorf("sandbox has no baseline SHA — was it created before diff support?")
 		}
+	case "overlay":
+		// Container path for exec
+		workDir = meta.Workdir.MountPath
+		if workDir == "" {
+			workDir = meta.Workdir.HostPath // mirror host path
+		}
+		baselineSHA = meta.Workdir.BaselineSHA // may be empty (deferred)
 	case "rw":
 		workDir = meta.Workdir.HostPath
 		baselineSHA = "HEAD"
@@ -239,13 +256,13 @@ func loadDiffContext(name string) (workDir string, baselineSHA string, mode stri
 // DiffContext holds the resolved paths needed for diff/apply on one directory.
 type DiffContext struct {
 	HostPath    string // original host path (for display)
-	WorkDir     string // path to diff against (work copy for :copy, host path for :rw)
-	BaselineSHA string // baseline SHA for :copy dirs
-	Mode        string // "copy" or "rw"
+	WorkDir     string // path to diff against (work copy for :copy, container path for :overlay, host path for :rw)
+	BaselineSHA string // baseline SHA for :copy and :overlay dirs
+	Mode        string // "copy", "overlay", or "rw"
 }
 
 // LoadAllDiffContexts returns diff contexts for workdir + all aux dirs
-// that have diffable content (:copy or :rw). Read-only dirs are skipped.
+// that have diffable content (:copy, :overlay, or :rw). Read-only dirs are skipped.
 func LoadAllDiffContexts(name string) ([]DiffContext, error) {
 	sandboxDir, err := RequireSandboxDir(name)
 	if err != nil {
@@ -268,6 +285,17 @@ func LoadAllDiffContexts(name string) ([]DiffContext, error) {
 			BaselineSHA: meta.Workdir.BaselineSHA,
 			Mode:        "copy",
 		})
+	case "overlay":
+		mountPath := meta.Workdir.MountPath
+		if mountPath == "" {
+			mountPath = meta.Workdir.HostPath
+		}
+		contexts = append(contexts, DiffContext{
+			HostPath:    meta.Workdir.HostPath,
+			WorkDir:     mountPath,
+			BaselineSHA: meta.Workdir.BaselineSHA,
+			Mode:        "overlay",
+		})
 	case "rw":
 		contexts = append(contexts, DiffContext{
 			HostPath: meta.Workdir.HostPath,
@@ -286,6 +314,17 @@ func LoadAllDiffContexts(name string) ([]DiffContext, error) {
 				BaselineSHA: d.BaselineSHA,
 				Mode:        "copy",
 			})
+		case "overlay":
+			mountPath := d.MountPath
+			if mountPath == "" {
+				mountPath = d.HostPath
+			}
+			contexts = append(contexts, DiffContext{
+				HostPath:    d.HostPath,
+				WorkDir:     mountPath,
+				BaselineSHA: d.BaselineSHA,
+				Mode:        "overlay",
+			})
 		case "rw":
 			contexts = append(contexts, DiffContext{
 				HostPath: d.HostPath,
@@ -301,6 +340,7 @@ func LoadAllDiffContexts(name string) ([]DiffContext, error) {
 
 // GenerateMultiDiff produces diffs for all diffable directories in the sandbox.
 // Returns one DiffResult per directory that has changes.
+// NOTE: This does not handle :overlay directories. Use GenerateOverlayDiff for overlay mode.
 func GenerateMultiDiff(name string, stat bool) ([]*DiffResult, error) {
 	contexts, err := LoadAllDiffContexts(name)
 	if err != nil {
@@ -310,9 +350,17 @@ func GenerateMultiDiff(name string, stat bool) ([]*DiffResult, error) {
 	var results []*DiffResult
 	for _, dc := range contexts {
 		var result *DiffResult
-		if dc.Mode == "rw" {
+		switch dc.Mode {
+		case "rw":
 			result, err = generateRWDiff(dc.WorkDir, nil, stat)
-		} else {
+		case "overlay":
+			// Overlay dirs require container exec; skip here
+			result = &DiffResult{
+				Output: "Diff for :overlay directories requires 'yoloai diff' (runs git inside container)",
+				Mode:   "overlay",
+				Empty:  true,
+			}
+		default:
 			result, err = generateCopyDiff(dc.WorkDir, dc.BaselineSHA, nil, stat)
 		}
 		if err != nil {
@@ -320,6 +368,73 @@ func GenerateMultiDiff(name string, stat bool) ([]*DiffResult, error) {
 		}
 		result.WorkDir = dc.HostPath // use host path for display
 		results = append(results, result)
+	}
+
+	return results, nil
+}
+
+// GenerateOverlayDiff generates a diff for overlay-mode directories by
+// executing git commands inside the running container.
+func GenerateOverlayDiff(ctx context.Context, rt runtime.Runtime, name string, stat bool) ([]*DiffResult, error) {
+	contexts, err := LoadAllDiffContexts(name)
+	if err != nil {
+		return nil, err
+	}
+
+	cname := InstanceName(name)
+	var results []*DiffResult
+
+	for _, dc := range contexts {
+		if dc.Mode != "overlay" {
+			// Non-overlay dirs handled by GenerateMultiDiff
+			continue
+		}
+
+		// Resolve baseline SHA if deferred
+		baselineSHA := dc.BaselineSHA
+		if baselineSHA == "" {
+			stdout, execErr := execInContainer(ctx, rt, cname, []string{
+				"git", "-C", dc.WorkDir, "rev-parse", "HEAD",
+			})
+			if execErr != nil {
+				return nil, fmt.Errorf("resolve baseline SHA for %s: %w", dc.HostPath, execErr)
+			}
+			baselineSHA = strings.TrimSpace(stdout)
+			// Update meta.json with resolved SHA
+			if updateErr := updateOverlayBaseline(name, dc.HostPath, baselineSHA); updateErr != nil {
+				return nil, updateErr
+			}
+		}
+
+		// Stage untracked files
+		_, err := execInContainer(ctx, rt, cname, []string{
+			"git", "-C", dc.WorkDir, "add", "-A",
+		})
+		if err != nil {
+			return nil, fmt.Errorf("stage untracked in %s: %w", dc.HostPath, err)
+		}
+
+		// Generate diff
+		args := []string{"git", "-c", "core.hooksPath=/dev/null", "-C", dc.WorkDir, "diff"}
+		if stat {
+			args = append(args, "--stat")
+		} else {
+			args = append(args, "--binary")
+		}
+		args = append(args, baselineSHA)
+
+		stdout, err := execInContainer(ctx, rt, cname, args)
+		if err != nil {
+			return nil, fmt.Errorf("git diff in %s: %w", dc.HostPath, err)
+		}
+
+		result := strings.TrimRight(stdout, "\n")
+		results = append(results, &DiffResult{
+			Output:  result,
+			WorkDir: dc.HostPath,
+			Mode:    "overlay",
+			Empty:   len(result) == 0,
+		})
 	}
 
 	return results, nil

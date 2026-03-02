@@ -111,14 +111,14 @@ Dependency direction: `cmd/yoloai` → `cli` → `sandbox` + `runtime`; `sandbox
 | File | Purpose |
 |------|---------|
 | `manager.go` | `Manager` struct — central orchestrator. Holds a `runtime.Runtime`. `EnsureSetup()` / `EnsureSetupNonInteractive()` for first-run auto-setup (dirs, resources, image, config). |
-| `create.go` | `Create()` — full sandbox creation: validate, safety checks, copy workdir, git baseline, seed files, build mounts, launch container. Also contains `launchContainer()`, `buildMounts()`, `createSecretsDir()` (writes config env vars + API keys from host env to /run/secrets/), `copySeedFiles()`. On macOS, when a seed file with `KeychainService` set is not found on disk, the system falls back to reading credentials from the macOS Keychain (via `security find-generic-password`). Platform-specific code is in `keychain_darwin.go` / `keychain_other.go`. |
-| `lifecycle.go` | `Start()`, `Stop()`, `Destroy()`, `Reset()` — sandbox lifecycle. `recreateContainer()` and `relaunchAgent()` for restart scenarios. `resetInPlace()` for `--no-restart` resets. |
-| `diff.go` | `GenerateDiff()`, `GenerateDiffStat()`, `GenerateCommitDiff()`, `ListCommitsWithStats()` — diff generation for both `:copy` and `:rw` modes. |
+| `create.go` | `Create()` — full sandbox creation: validate, safety checks, copy workdir, git baseline, seed files, build mounts, launch container. Also contains `launchContainer()`, `buildMounts()`, `createSecretsDir()` (writes config env vars + API keys from host env to /run/secrets/), `copySeedFiles()`, `createOverlayDirs()` (creates upper/ovlwork dirs for `:overlay` mode). On macOS, when a seed file with `KeychainService` set is not found on disk, the system falls back to reading credentials from the macOS Keychain (via `security find-generic-password`). Platform-specific code is in `keychain_darwin.go` / `keychain_other.go`. |
+| `lifecycle.go` | `Start()`, `Stop()`, `Destroy()`, `Reset()` — sandbox lifecycle. `recreateContainer()` and `relaunchAgent()` for restart scenarios. `resetInPlace()` for `--no-restart` resets. `clearOverlayDirs()` clears upper/ovlwork for instant `:overlay` reset. |
+| `diff.go` | `GenerateDiff()`, `GenerateDiffStat()`, `GenerateCommitDiff()`, `ListCommitsWithStats()` — diff generation for `:copy`, `:overlay`, and `:rw` modes. |
 | `apply.go` | `GeneratePatch()`, `CheckPatch()`, `ApplyPatch()` — squash apply via `git apply`. `GenerateFormatPatch()`, `ApplyFormatPatch()` — per-commit apply via `git am`. `ListCommitsBeyondBaseline()`, `AdvanceBaseline()`, `AdvanceBaselineTo()`. |
 | `inspect.go` | `DetectStatus()` — queries runtime + tmux for sandbox state. `InspectSandbox()`, `ListSandboxes()` — metadata + live status. `execInContainer()` helper uses `runtime.Exec()`. |
 | `meta.go` | `Meta` / `WorkdirMeta` structs, `SaveMeta()` / `LoadMeta()` — sandbox metadata persistence as `meta.json`. `Meta.Backend` records which runtime backend was used to create the sandbox. |
-| `paths.go` | `EncodePath()` / `DecodePath()` — caret encoding for filesystem-safe names. `InstanceName()` (and deprecated alias `ContainerName()`), `Dir()`, `WorkDir()`, `RequireSandboxDir()`. |
-| `parse.go` | `ParseDirArg()` — parses `path:copy`, `path:rw`, `path:force` suffixes into `DirArg`. |
+| `paths.go` | `EncodePath()` / `DecodePath()` — caret encoding for filesystem-safe names. `InstanceName()` (and deprecated alias `ContainerName()`), `Dir()`, `WorkDir()`, `RequireSandboxDir()`. `OverlayUpperDir()` / `OverlayWorkDir()` for `:overlay` mount paths. |
+| `parse.go` | `ParseDirArg()` — parses `path:copy`, `path:overlay`, `path:rw`, `path:force` suffixes into `DirArg`. |
 | `safety.go` | `IsDangerousDir()`, `CheckPathOverlap()`, `CheckDirtyRepo()` — pre-creation safety checks. |
 | `context.go` | `GenerateContext()` — builds markdown description of sandbox environment (dirs, network, resources). `WriteContextFiles()` — writes `context.md` to sandbox dir and inlines context into agent instruction file (e.g., `CLAUDE.md`). |
 | `config.go` | Profile config (`LoadConfig()`, `UpdateConfigFields()`, etc.) and global config (`LoadGlobalConfig()`, `UpdateGlobalConfigFields()`, etc.). Profile config at `~/.yoloai/profiles/base/config.yaml`, global at `~/.yoloai/config.yaml`. `IsGlobalKey()` routes keys to correct file. YAML comment-preserving via `yaml.Node`. |
@@ -199,14 +199,16 @@ newNewCmd (cli/commands.go)
       → EnsureSetup: create dirs, seed resources, build image, write config.yaml
       → prepareSandboxState:
           ParseDirArg → validate name/agent/workdir/auxdirs → safety checks
-          → copyDir (cp -rp) for each :copy directory → removeGitDirs → gitBaseline (git init + commit)
+          → :copy dirs: copyDir (cp -rp) → removeGitDirs → gitBaseline (git init + commit)
+          → :overlay dirs: createOverlayDirs (upper/ovlwork in sandbox state)
           → copySeedFiles → ensureContainerSettings
           → readPrompt → resolveModel → buildAgentCommand
           → SaveMeta (meta.json with Directories field) → write prompt.txt, log.txt, config.json
           → WriteContextFiles (context.md + agent instruction file)
       → launchContainer:
           createSecretsDir (config env vars + API keys from host env)
-          → buildMounts (workdir + aux dirs) → runtime.Create → runtime.Start
+          → buildMounts (workdir + aux dirs, overlay mount configs for :overlay dirs)
+          → runtime.Create (with CAP_SYS_ADMIN for :overlay) → runtime.Start
           → runtime.Inspect (verify running) → cleanup secrets
 ```
 
@@ -217,7 +219,7 @@ newDiffCmd (cli/diff.go)
   → GenerateDiff (sandbox/diff.go)
     → loadDiffContext: LoadMeta → resolve all directories from meta.Directories
     → For each directory:
-      → :copy mode: stageUntracked (git add -A) → git diff --binary <baseline>
+      → :copy/:overlay mode: stageUntracked (git add -A) → git diff --binary <baseline>
       → :rw mode: git diff HEAD on live host dir
     → Combine diffs with directory-prefixed headers
 ```
@@ -229,7 +231,7 @@ Two modes — squash and selective:
 **Squash (default):**
 ```
 applySquash (cli/apply.go)
-  → For each :copy directory in meta.Directories:
+  → For each :copy/:overlay directory in meta.Directories:
     → GeneratePatch (sandbox/apply.go): git diff --binary against baseline
     → CheckPatch: git apply --check
     → Confirm with user
@@ -240,11 +242,31 @@ applySquash (cli/apply.go)
 **Selective (commit refs):**
 ```
 applySelectedCommits (cli/apply.go)
-  → For each :copy directory in meta.Directories:
+  → For each :copy/:overlay directory in meta.Directories:
     → ResolveRefs (sandbox/apply.go): resolve short SHAs / ranges
     → GenerateFormatPatchForRefs: git format-patch per commit
     → ApplyFormatPatch: git am --3way
     → AdvanceBaselineTo: advance baseline to contiguous prefix
+```
+
+### Overlay Mount Flow (`:overlay` directories)
+
+Overlay mode uses Linux kernel overlayfs for instant setup with the diff/apply workflow:
+
+```
+create.go:
+  → createOverlayDirs: create upper/ovlwork dirs in sandbox state
+  → buildMounts: build overlay mount configs for config.json, add CAP_SYS_ADMIN
+
+entrypoint.sh (Docker container):
+  → root phase: mount overlayfs using config.json overlay_mounts
+  → user phase: git baseline (git init + commit) in mounted directories
+
+diff.go / apply.go:
+  → exec git commands inside container for overlay dirs (same as :copy)
+
+lifecycle.go (reset):
+  → clearOverlayDirs: rm -rf upper/ovlwork for instant reset
 ```
 
 ### Container Start/Restart (`yoloai start`)

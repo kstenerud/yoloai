@@ -99,6 +99,22 @@ if [ "$NETWORK_ISOLATED" = "true" ]; then
     debug_log "network isolation rules applied"
 fi
 
+# --- Overlay mounts ---
+OVERLAY_COUNT=$(jq '.overlay_mounts // [] | length' "$CONFIG")
+if [ "$OVERLAY_COUNT" -gt 0 ]; then
+    debug_log "setting up $OVERLAY_COUNT overlay mount(s)"
+    for i in $(seq 0 $((OVERLAY_COUNT - 1))); do
+        LOWER=$(jq -r ".overlay_mounts[$i].lower" "$CONFIG")
+        UPPER=$(jq -r ".overlay_mounts[$i].upper" "$CONFIG")
+        WORK=$(jq -r ".overlay_mounts[$i].work" "$CONFIG")
+        MERGED=$(jq -r ".overlay_mounts[$i].merged" "$CONFIG")
+        mkdir -p "$MERGED"
+        mount -t overlay overlay -o "lowerdir=$LOWER,upperdir=$UPPER,workdir=$WORK" "$MERGED"
+        chown yoloai:yoloai "$MERGED"
+        debug_log "overlay: $MERGED (lower=$LOWER)"
+    done
+fi
+
 debug_log "dropping privileges to yoloai"
 
 # --- Drop privileges and run as yoloai ---
@@ -114,6 +130,21 @@ SUBMIT_SEQUENCE=$(jq -r .submit_sequence "$CONFIG")
 TMUX_CONF=$(jq -r .tmux_conf "$CONFIG")
 DEBUG=$(jq -r ".debug // false" "$CONFIG")
 debug_log() { [ "$DEBUG" = "true" ] && echo "[debug] $*" || true; }
+
+# --- Git baseline for overlay mounts ---
+OVERLAY_COUNT=$(jq '.overlay_mounts // [] | length' "$CONFIG")
+if [ "$OVERLAY_COUNT" -gt 0 ]; then
+    for i in $(seq 0 $((OVERLAY_COUNT - 1))); do
+        MERGED=$(jq -r ".overlay_mounts[$i].merged" "$CONFIG")
+        debug_log "creating git baseline for overlay: $MERGED"
+        # Remove .git dirs (creates whiteouts in upper layer)
+        find "$MERGED" -name .git -exec rm -rf {} + 2>/dev/null || true
+        # Create fresh baseline
+        git -C "$MERGED" init
+        git -C "$MERGED" add -A
+        git -C "$MERGED" -c user.name=yoloai -c user.email=yoloai@local commit -m "baseline" --allow-empty
+    done
+fi
 
 # Start tmux session with config based on tmux_conf setting
 debug_log "starting tmux session (tmux_conf=$TMUX_CONF)"

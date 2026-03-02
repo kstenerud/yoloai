@@ -66,15 +66,33 @@ The workdir (your project directory) is copied into the sandbox by default. You 
 | Mode | Syntax | Behavior |
 |------|--------|----------|
 | `:copy` | `./my-app` (default) | Isolated copy. Agent changes are reviewed via diff/apply. |
+| `:overlay` | `./my-app:overlay` | Overlay mount. Instant setup, diff/apply workflow. Docker only. |
 | `:rw` | `./my-app:rw` | Live bind-mount. Changes are immediate — no diff/apply needed. |
 
 ```bash
 # Default: safe isolated copy
 yoloai new task1 ./my-project
 
+# Overlay: instant setup for large projects (Docker only)
+yoloai new task2 ./large-project:overlay
+
 # Live mount (use with caution — agent writes directly to your files)
-yoloai new task2 ./my-project:rw
+yoloai new task3 ./my-project:rw
 ```
+
+### Overlay Mode
+
+`:overlay` uses Linux kernel overlayfs inside the Docker container to mount the original directory as a read-only lower layer, with agent changes captured in an upper layer. This provides:
+
+- **Instant setup** — no file copying, regardless of project size
+- **diff/apply workflow** — same review process as `:copy` mode
+- **Instant reset** — clearing the upper layer is immediate
+
+**Tradeoffs vs `:copy`:**
+- No snapshot isolation — changes to the original host directory are visible for files the agent hasn't modified
+- Container must be running for `yoloai diff` and `yoloai apply` (auto-started if stopped)
+- Requires `CAP_SYS_ADMIN` capability in the container
+- Docker backend only (not available with `--backend seatbelt` or `--backend tart`)
 
 ## Auxiliary Directories
 

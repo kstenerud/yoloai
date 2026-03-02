@@ -147,6 +147,9 @@ func (m *Manager) Reset(ctx context.Context, opts ResetOptions) error {
 	if meta.Workdir.Mode == "rw" {
 		return fmt.Errorf("reset is not applicable for :rw directories — changes are already in the original")
 	}
+	if meta.Workdir.Mode == "overlay" && opts.NoRestart {
+		return fmt.Errorf("--no-restart is not supported for overlay mode (requires container restart)")
+	}
 
 	// Check if we can do an in-place reset (--no-restart)
 	if opts.NoRestart {
@@ -167,52 +170,84 @@ func (m *Manager) Reset(ctx context.Context, opts ResetOptions) error {
 	// Truncate log so each run starts fresh
 	_ = os.Truncate(filepath.Join(sandboxDir, "log.txt"), 0)
 
-	workDir := WorkDir(opts.Name, meta.Workdir.HostPath)
+	var newSHA string
+	if meta.Workdir.Mode == "overlay" {
+		// Clear upper and ovlwork dirs (instant reset)
+		for _, d := range []string{
+			OverlayUpperDir(opts.Name, meta.Workdir.HostPath),
+			OverlayOvlworkDir(opts.Name, meta.Workdir.HostPath),
+		} {
+			if err := os.RemoveAll(d); err != nil {
+				return fmt.Errorf("clear overlay dir %s: %w", d, err)
+			}
+			if err := os.MkdirAll(d, 0750); err != nil {
+				return fmt.Errorf("recreate overlay dir %s: %w", d, err)
+			}
+		}
+		// Baseline deferred — container restart recreates it
+		newSHA = ""
+	} else {
+		workDir := WorkDir(opts.Name, meta.Workdir.HostPath)
 
-	// Delete work copy
-	if err := os.RemoveAll(workDir); err != nil {
-		return fmt.Errorf("remove work copy: %w", err)
+		// Delete work copy
+		if err := os.RemoveAll(workDir); err != nil {
+			return fmt.Errorf("remove work copy: %w", err)
+		}
+
+		// Verify original still exists
+		if _, err := os.Stat(meta.Workdir.HostPath); err != nil {
+			return fmt.Errorf("original directory no longer exists: %s", meta.Workdir.HostPath)
+		}
+
+		// Re-copy
+		if err := copyDir(meta.Workdir.HostPath, workDir); err != nil {
+			return fmt.Errorf("re-copy workdir: %w", err)
+		}
+
+		// Re-create git baseline
+		sha, baselineErr := gitBaseline(workDir)
+		if baselineErr != nil {
+			return fmt.Errorf("re-create git baseline: %w", baselineErr)
+		}
+		newSHA = sha
 	}
 
-	// Verify original still exists
-	if _, err := os.Stat(meta.Workdir.HostPath); err != nil {
-		return fmt.Errorf("original directory no longer exists: %s", meta.Workdir.HostPath)
-	}
-
-	// Re-copy
-	if err := copyDir(meta.Workdir.HostPath, workDir); err != nil {
-		return fmt.Errorf("re-copy workdir: %w", err)
-	}
-
-	// Re-create git baseline
-	newSHA, err := gitBaseline(workDir)
-	if err != nil {
-		return fmt.Errorf("re-create git baseline: %w", err)
-	}
-
-	// Reset aux :copy dirs
+	// Reset aux :copy and :overlay dirs
 	for i, d := range meta.Directories {
-		if d.Mode != "copy" {
-			continue
+		switch d.Mode {
+		case "copy":
+			auxWorkDir := WorkDir(opts.Name, d.HostPath)
+			if err := os.RemoveAll(auxWorkDir); err != nil {
+				return fmt.Errorf("remove aux work copy %s: %w", d.HostPath, err)
+			}
+			if _, err := os.Stat(d.HostPath); err != nil {
+				return fmt.Errorf("original aux directory no longer exists: %s", d.HostPath)
+			}
+			if err := copyDir(d.HostPath, auxWorkDir); err != nil {
+				return fmt.Errorf("re-copy aux dir %s: %w", d.HostPath, err)
+			}
+			if err := removeGitDirs(auxWorkDir); err != nil {
+				return fmt.Errorf("remove git metadata in aux dir %s: %w", d.HostPath, err)
+			}
+			auxSHA, auxErr := gitBaseline(auxWorkDir)
+			if auxErr != nil {
+				return fmt.Errorf("git baseline for aux dir %s: %w", d.HostPath, auxErr)
+			}
+			meta.Directories[i].BaselineSHA = auxSHA
+		case "overlay":
+			for _, dir := range []string{
+				OverlayUpperDir(opts.Name, d.HostPath),
+				OverlayOvlworkDir(opts.Name, d.HostPath),
+			} {
+				if err := os.RemoveAll(dir); err != nil {
+					return fmt.Errorf("clear overlay dir for aux %s: %w", d.HostPath, err)
+				}
+				if err := os.MkdirAll(dir, 0750); err != nil {
+					return fmt.Errorf("recreate overlay dir for aux %s: %w", d.HostPath, err)
+				}
+			}
+			meta.Directories[i].BaselineSHA = ""
 		}
-		auxWorkDir := WorkDir(opts.Name, d.HostPath)
-		if err := os.RemoveAll(auxWorkDir); err != nil {
-			return fmt.Errorf("remove aux work copy %s: %w", d.HostPath, err)
-		}
-		if _, err := os.Stat(d.HostPath); err != nil {
-			return fmt.Errorf("original aux directory no longer exists: %s", d.HostPath)
-		}
-		if err := copyDir(d.HostPath, auxWorkDir); err != nil {
-			return fmt.Errorf("re-copy aux dir %s: %w", d.HostPath, err)
-		}
-		if err := removeGitDirs(auxWorkDir); err != nil {
-			return fmt.Errorf("remove git metadata in aux dir %s: %w", d.HostPath, err)
-		}
-		auxSHA, auxErr := gitBaseline(auxWorkDir)
-		if auxErr != nil {
-			return fmt.Errorf("git baseline for aux dir %s: %w", d.HostPath, auxErr)
-		}
-		meta.Directories[i].BaselineSHA = auxSHA
 	}
 
 	// Update meta.json

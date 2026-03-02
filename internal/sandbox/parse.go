@@ -10,7 +10,7 @@ import (
 type DirArg struct {
 	Path      string // resolved absolute host path
 	MountPath string // container mount path ("" = mirror host path)
-	Mode      string // "copy", "rw", or "" (caller applies default)
+	Mode      string // "copy", "overlay", "rw", or "" (caller applies default)
 	Force     bool   // :force was specified
 }
 
@@ -25,9 +25,10 @@ func (d *DirArg) ResolvedMountPath() string {
 
 // knownSuffixes are the recognized directory argument suffixes.
 var knownSuffixes = map[string]bool{
-	"copy":  true,
-	"rw":    true,
-	"force": true,
+	"copy":    true,
+	"overlay": true,
+	"rw":      true,
+	"force":   true,
 }
 
 // ParseDirArg parses a directory argument with optional suffixes.
@@ -61,13 +62,18 @@ func ParseDirArg(arg string) (*DirArg, error) {
 
 		switch suffix {
 		case "copy":
-			if result.Mode == "rw" {
-				return nil, fmt.Errorf("cannot combine :copy and :rw on %q", arg)
+			if result.Mode == "rw" || result.Mode == "overlay" {
+				return nil, fmt.Errorf("cannot combine :copy and :%s on %q", result.Mode, arg)
 			}
 			result.Mode = "copy"
+		case "overlay":
+			if result.Mode == "copy" || result.Mode == "rw" {
+				return nil, fmt.Errorf("cannot combine :overlay and :%s on %q", result.Mode, arg)
+			}
+			result.Mode = "overlay"
 		case "rw":
-			if result.Mode == "copy" {
-				return nil, fmt.Errorf("cannot combine :copy and :rw on %q", arg)
+			if result.Mode == "copy" || result.Mode == "overlay" {
+				return nil, fmt.Errorf("cannot combine :rw and :%s on %q", result.Mode, arg)
 			}
 			result.Mode = "rw"
 		case "force":

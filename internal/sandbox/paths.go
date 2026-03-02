@@ -205,3 +205,18 @@ func RequireSandboxDir(name string) (string, error) {
 func WorkDir(name string, hostPath string) string {
 	return filepath.Join(Dir(name), "work", EncodePath(hostPath))
 }
+
+// OverlayUpperDir returns the upper layer directory for an overlay mount.
+//
+//	~/.yoloai/sandboxes/<name>/work/<caret-encoded-path>/upper/
+func OverlayUpperDir(name string, hostPath string) string {
+	return filepath.Join(Dir(name), "work", EncodePath(hostPath), "upper")
+}
+
+// OverlayOvlworkDir returns the overlayfs workdir for an overlay mount.
+// Named "ovlwork" to avoid collision with the sandbox work/ directory.
+//
+//	~/.yoloai/sandboxes/<name>/work/<caret-encoded-path>/ovlwork/
+func OverlayOvlworkDir(name string, hostPath string) string {
+	return filepath.Join(Dir(name), "work", EncodePath(hostPath), "ovlwork")
+}

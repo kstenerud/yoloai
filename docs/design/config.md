@@ -196,14 +196,14 @@ resources:                    # container resource limits
 # --- Profile-specific fields (not in config.yaml) ---
 workdir:
   path: /home/user/my-app
-  mode: copy                              # copy or rw (required for workdir)
+  mode: copy                              # copy, overlay, or rw (required for workdir)
   # mount: /opt/myapp                     # optional custom mount point (default: mirrors host path)
 directories:
   - path: /home/user/shared-lib
     mode: rw
     mount: /usr/local/lib/shared          # custom mount point (default: mirrors host path)
   - path: /home/user/common-types
-    # default: read-only
+    # default: read-only (no :copy/:overlay/:rw suffix)
 ```
 
 CLI workdir **replaces** profile workdir. CLI `-d` dirs are **additive** with profile dirs. CLI arguments for one-offs, config for repeatability — same options available in both.

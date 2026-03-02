@@ -25,10 +25,13 @@ func TestParseDirArg_Modes(t *testing.T) {
 		{"copy suffix", app + ":copy", "copy", false},
 		{"rw suffix", app + ":rw", "rw", false},
 		{"force suffix", app + ":force", "", true},
+		{"overlay suffix", app + ":overlay", "overlay", false},
 		{"rw and force", app + ":rw:force", "rw", true},
 		{"force and copy", app + ":force:copy", "copy", true},
 		{"copy and force", app + ":copy:force", "copy", true},
 		{"force and rw", app + ":force:rw", "rw", true},
+		{"overlay and force", app + ":overlay:force", "overlay", true},
+		{"force and overlay", app + ":force:overlay", "overlay", true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -42,16 +45,23 @@ func TestParseDirArg_Modes(t *testing.T) {
 }
 
 func TestParseDirArg_ConflictingModes(t *testing.T) {
-	tests := []string{
-		"/tmp/app:copy:rw",
-		"/tmp/app:rw:copy",
-		"/tmp/app:copy:force:rw",
+	tests := []struct {
+		input   string
+		errFrag string
+	}{
+		{"/tmp/app:copy:rw", "cannot combine"},
+		{"/tmp/app:rw:copy", "cannot combine"},
+		{"/tmp/app:copy:force:rw", "cannot combine"},
+		{"/tmp/app:overlay:copy", "cannot combine"},
+		{"/tmp/app:copy:overlay", "cannot combine"},
+		{"/tmp/app:overlay:rw", "cannot combine"},
+		{"/tmp/app:rw:overlay", "cannot combine"},
 	}
-	for _, input := range tests {
-		t.Run(input, func(t *testing.T) {
-			_, err := ParseDirArg(input)
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			_, err := ParseDirArg(tt.input)
 			assert.Error(t, err)
-			assert.Contains(t, err.Error(), "cannot combine :copy and :rw")
+			assert.Contains(t, err.Error(), tt.errFrag)
 		})
 	}
 }
