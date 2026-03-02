@@ -64,7 +64,7 @@ func TestGetAgent_Claude(t *testing.T) {
 	assert.Equal(t, "claude-sonnet-4-latest", def.ModelAliases["sonnet"])
 	assert.Equal(t, "claude-opus-4-latest", def.ModelAliases["opus"])
 	assert.Equal(t, "claude-haiku-4-latest", def.ModelAliases["haiku"])
-	assert.Equal(t, []string{"api.anthropic.com", "statsig.anthropic.com", "sentry.io"}, def.NetworkAllowlist)
+	assert.Equal(t, []string{"api.anthropic.com", "claude.ai", "platform.claude.com", "statsig.anthropic.com", "sentry.io"}, def.NetworkAllowlist)
 }
 
 func TestGetAgent_Gemini(t *testing.T) {

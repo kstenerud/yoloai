@@ -1431,19 +1431,19 @@ The native binary installation bundles a Bun runtime. Bun's `fetch()` does NOT h
 
 ### Required Domains
 
-Based on Claude Code's network requirements:
+Based on the official Claude Code enterprise network configuration docs (March 2026):
 
 | Domain | Purpose | Required? |
 |--------|---------|-----------|
 | `api.anthropic.com` | API calls | Yes |
+| `claude.ai` | Authentication for claude.ai accounts | Yes (needed for OAuth token refresh) |
+| `platform.claude.com` | Authentication for Anthropic Console accounts | Yes (needed for OAuth token refresh) |
 | `statsig.anthropic.com` | Telemetry/feature flags | Recommended (may affect functionality) |
 | `sentry.io` | Error reporting | Optional (blocking may cause non-fatal errors) |
-| `claude.ai` | OAuth authentication (Pro/Max/Team plans) | Only if using OAuth, not API key |
-| `platform.claude.com` | Console authentication | Only if using OAuth, not API key |
 
-For yoloAI v1 (API key auth), the minimum allowlist is `api.anthropic.com`. Telemetry domains (`statsig.anthropic.com`, `sentry.io`) are recommended to avoid potential issues with feature flag checks.
+The official docs list `api.anthropic.com`, `claude.ai`, and `platform.claude.com` as required. The auth domains are essential even for users who initially authenticate via API key if the CLI falls back to OAuth flows internally. Without them, OAuth tokens expire after ~30 minutes with no way to refresh, causing session loss. The devcontainer's `init-firewall.sh` does not include the auth domains (it assumes API key auth only), so it is not a complete reference.
 
-**Source:** [Claude Code devcontainer init-firewall.sh](https://github.com/anthropics/claude-code/blob/main/.devcontainer/init-firewall.sh), [Claude Code network config docs](https://code.claude.com/docs/en/network-config)
+**Source:** [Claude Code enterprise network config docs](https://code.claude.com/docs/en/network-config), [Claude Code devcontainer init-firewall.sh](https://github.com/anthropics/claude-code/blob/main/.devcontainer/init-firewall.sh)
 
 ### How Competitors Handle Proxy Routing
 

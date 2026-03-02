@@ -104,7 +104,7 @@ var agents = map[string]*Definition{
 			"opus":   "claude-opus-4-latest",
 			"haiku":  "claude-haiku-4-latest",
 		},
-		NetworkAllowlist: []string{"api.anthropic.com", "statsig.anthropic.com", "sentry.io"},
+		NetworkAllowlist: []string{"api.anthropic.com", "claude.ai", "platform.claude.com", "statsig.anthropic.com", "sentry.io"},
 		ContextFile:      "CLAUDE.md",
 	},
 	"gemini": {
