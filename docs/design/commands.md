@@ -50,9 +50,10 @@ Admin:
   yoloai config get [key]                        Print configuration values (all or specific key)
   yoloai config set <key> <value>                Set a configuration value
   yoloai config reset <key>                      Remove key from config, reverting to internal default
-  yoloai profile create <name>                     Create a profile with scaffold  [PLANNED]
-  yoloai profile list                            List profiles  [PLANNED]
-  yoloai profile delete <name>                   Delete a profile  [PLANNED]
+  yoloai profile create <name>                   Create a profile with scaffold
+  yoloai profile list                            List profiles
+  yoloai profile info <name>                     Show merged profile configuration
+  yoloai profile delete <name>                   Delete a profile
   yoloai x <extension> <name> [args...] [--flags...]  Run a user-defined extension  [PLANNED]
   yoloai completion [bash|zsh|fish|powershell]   Generate shell completion script
   yoloai version                                 Show version information

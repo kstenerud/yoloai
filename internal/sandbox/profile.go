@@ -31,16 +31,16 @@ type ProfileConfig struct {
 
 // ProfileWorkdir defines a workdir from a profile.
 type ProfileWorkdir struct {
-	Path  string // host path
-	Mode  string // "copy" or "rw"
-	Mount string // optional custom mount point
+	Path  string `json:"path"`            // host path
+	Mode  string `json:"mode,omitempty"`  // "copy" or "rw"
+	Mount string `json:"mount,omitempty"` // optional custom mount point
 }
 
 // ProfileDir defines an auxiliary directory from a profile.
 type ProfileDir struct {
-	Path  string // host path
-	Mode  string // "rw", "copy", or "" (read-only)
-	Mount string // optional custom mount point
+	Path  string `json:"path"`            // host path
+	Mode  string `json:"mode,omitempty"`  // "rw", "copy", or "" (read-only)
+	Mount string `json:"mount,omitempty"` // optional custom mount point
 }
 
 // MergedConfig holds the result of merging base config with a profile chain.

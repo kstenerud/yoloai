@@ -1,6 +1,6 @@
 package cli
 
-// ABOUTME: `yoloai profile` command group: create, list, delete.
+// ABOUTME: `yoloai profile` command group: create, list, info, delete.
 // ABOUTME: Manages reusable environment profiles in ~/.yoloai/profiles/.
 
 import (
@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/kstenerud/yoloai/internal/sandbox"
@@ -24,6 +26,7 @@ func newProfileCmd() *cobra.Command {
 	cmd.AddCommand(
 		newProfileCreateCmd(),
 		newProfileListCmd(),
+		newProfileInfoCmd(),
 		newProfileDeleteCmd(),
 	)
 
@@ -130,6 +133,237 @@ func newProfileListCmd() *cobra.Command {
 			return w.Flush()
 		},
 	}
+}
+
+func newProfileInfoCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "info <name>",
+		Short: "Show profile configuration",
+		Args:  cobra.ExactArgs(1),
+		ValidArgsFunction: func(_ *cobra.Command, _ []string, _ string) ([]string, cobra.ShellCompDirective) {
+			names, err := sandbox.ListProfiles()
+			if err != nil {
+				return nil, cobra.ShellCompDirectiveError
+			}
+			// Include "base" in completions
+			names = append([]string{"base"}, names...)
+			return names, cobra.ShellCompDirectiveNoFileComp
+		},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			name := args[0]
+
+			var extends string
+			var chain []string
+			var merged *sandbox.MergedConfig
+			var image string
+			var hasDockerfile bool
+
+			if name == "base" {
+				// Base profile: no extends, no chain resolution needed
+				chain = []string{"base"}
+				image = "yoloai-base"
+				hasDockerfile = sandbox.ProfileHasDockerfile("base")
+
+				baseCfg, err := sandbox.LoadConfig()
+				if err != nil {
+					return err
+				}
+				merged, err = sandbox.MergeProfileChain(baseCfg, chain)
+				if err != nil {
+					return err
+				}
+			} else {
+				if err := sandbox.ValidateProfileName(name); err != nil {
+					return err
+				}
+				if !sandbox.ProfileExists(name) {
+					return fmt.Errorf("profile %q does not exist", name)
+				}
+
+				rawProfile, err := sandbox.LoadProfile(name)
+				if err != nil {
+					return err
+				}
+				extends = rawProfile.Extends
+
+				chain, err = sandbox.ResolveProfileChain(name)
+				if err != nil {
+					return err
+				}
+
+				baseCfg, err := sandbox.LoadConfig()
+				if err != nil {
+					return err
+				}
+				merged, err = sandbox.MergeProfileChain(baseCfg, chain)
+				if err != nil {
+					return err
+				}
+
+				image = sandbox.ResolveProfileImage(name, chain)
+				hasDockerfile = sandbox.ProfileHasDockerfile(name)
+			}
+
+			if jsonEnabled(cmd) {
+				return writeJSON(cmd.OutOrStdout(), profileInfoJSON{
+					Profile:     name,
+					Extends:     extends,
+					Chain:       chain,
+					Image:       image,
+					Dockerfile:  hasDockerfile,
+					Agent:       merged.Agent,
+					Model:       merged.Model,
+					Backend:     merged.Backend,
+					TartImage:   merged.TartImage,
+					Env:         merged.Env,
+					AgentArgs:   merged.AgentArgs,
+					Ports:       merged.Ports,
+					Workdir:     merged.Workdir,
+					Directories: merged.Directories,
+					Resources:   merged.Resources,
+					Network:     merged.Network,
+					Mounts:      merged.Mounts,
+				})
+			}
+
+			return printProfileInfo(cmd, name, extends, chain, image, hasDockerfile, merged)
+		},
+	}
+}
+
+// profileInfoJSON is the JSON output structure for `profile info`.
+type profileInfoJSON struct {
+	Profile     string                  `json:"profile"`
+	Extends     string                  `json:"extends"`
+	Chain       []string                `json:"chain"`
+	Image       string                  `json:"image"`
+	Dockerfile  bool                    `json:"dockerfile"`
+	Agent       string                  `json:"agent,omitempty"`
+	Model       string                  `json:"model,omitempty"`
+	Backend     string                  `json:"backend,omitempty"`
+	TartImage   string                  `json:"tart_image,omitempty"`
+	Env         map[string]string       `json:"env,omitempty"`
+	AgentArgs   map[string]string       `json:"agent_args,omitempty"`
+	Ports       []string                `json:"ports,omitempty"`
+	Workdir     *sandbox.ProfileWorkdir `json:"workdir,omitempty"`
+	Directories []sandbox.ProfileDir    `json:"directories,omitempty"`
+	Resources   *sandbox.ResourceLimits `json:"resources,omitempty"`
+	Network     *sandbox.NetworkConfig  `json:"network,omitempty"`
+	Mounts      []string                `json:"mounts,omitempty"`
+}
+
+// printProfileInfo renders the human-readable output for `profile info`.
+func printProfileInfo(cmd *cobra.Command, name, extends string, chain []string, image string, hasDockerfile bool, merged *sandbox.MergedConfig) error {
+	out := cmd.OutOrStdout()
+
+	fmt.Fprintf(out, "Profile:     %s\n", name) //nolint:errcheck
+	if extends != "" {
+		fmt.Fprintf(out, "Extends:     %s\n", extends) //nolint:errcheck
+	}
+	if len(chain) > 2 {
+		fmt.Fprintf(out, "Chain:       %s\n", strings.Join(chain, " \u2192 ")) //nolint:errcheck
+	}
+	fmt.Fprintf(out, "Image:       %s\n", image) //nolint:errcheck
+	dockerfileStr := "no"
+	if hasDockerfile {
+		dockerfileStr = "yes"
+	}
+	fmt.Fprintf(out, "Dockerfile:  %s\n", dockerfileStr) //nolint:errcheck
+
+	if merged.Agent != "" {
+		fmt.Fprintf(out, "Agent:       %s\n", merged.Agent) //nolint:errcheck
+	}
+	if merged.Model != "" {
+		fmt.Fprintf(out, "Model:       %s\n", merged.Model) //nolint:errcheck
+	}
+	if merged.Backend != "" {
+		fmt.Fprintf(out, "Backend:     %s\n", merged.Backend) //nolint:errcheck
+	}
+	if merged.TartImage != "" {
+		fmt.Fprintf(out, "Tart image:  %s\n", merged.TartImage) //nolint:errcheck
+	}
+
+	if len(merged.Env) > 0 {
+		fmt.Fprintln(out, "Env:") //nolint:errcheck
+		for _, k := range sortedKeys(merged.Env) {
+			fmt.Fprintf(out, "  %s: %s\n", k, merged.Env[k]) //nolint:errcheck
+		}
+	}
+
+	if len(merged.AgentArgs) > 0 {
+		fmt.Fprintln(out, "Agent args:") //nolint:errcheck
+		for _, k := range sortedKeys(merged.AgentArgs) {
+			fmt.Fprintf(out, "  %s: %s\n", k, merged.AgentArgs[k]) //nolint:errcheck
+		}
+	}
+
+	if len(merged.Ports) > 0 {
+		fmt.Fprintf(out, "Ports:       %s\n", strings.Join(merged.Ports, ", ")) //nolint:errcheck
+	}
+
+	if merged.Workdir != nil {
+		w := merged.Workdir
+		s := w.Path
+		if w.Mode != "" {
+			s += " (" + w.Mode + ")"
+		}
+		if w.Mount != "" {
+			s += " \u2192 " + w.Mount
+		}
+		fmt.Fprintf(out, "Workdir:     %s\n", s) //nolint:errcheck
+	}
+
+	if len(merged.Directories) > 0 {
+		fmt.Fprintln(out, "Directories:") //nolint:errcheck
+		for _, d := range merged.Directories {
+			s := "  " + d.Path
+			if d.Mode != "" {
+				s += " (" + d.Mode + ")"
+			}
+			if d.Mount != "" {
+				s += " \u2192 " + d.Mount
+			}
+			fmt.Fprintln(out, s) //nolint:errcheck
+		}
+	}
+
+	if merged.Resources != nil && (merged.Resources.CPUs != "" || merged.Resources.Memory != "") {
+		var parts []string
+		if merged.Resources.CPUs != "" {
+			parts = append(parts, merged.Resources.CPUs+" cpus")
+		}
+		if merged.Resources.Memory != "" {
+			parts = append(parts, merged.Resources.Memory+" memory")
+		}
+		fmt.Fprintf(out, "Resources:   %s\n", strings.Join(parts, ", ")) //nolint:errcheck
+	}
+
+	if merged.Network != nil && merged.Network.Isolated {
+		s := "isolated"
+		if len(merged.Network.Allow) > 0 {
+			s += " (" + strings.Join(merged.Network.Allow, ", ") + ")"
+		}
+		fmt.Fprintf(out, "Network:     %s\n", s) //nolint:errcheck
+	}
+
+	if len(merged.Mounts) > 0 {
+		fmt.Fprintln(out, "Mounts:") //nolint:errcheck
+		for _, m := range merged.Mounts {
+			fmt.Fprintf(out, "  %s\n", m) //nolint:errcheck
+		}
+	}
+
+	return nil
+}
+
+// sortedKeys returns the keys of a map in sorted order.
+func sortedKeys(m map[string]string) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 func newProfileDeleteCmd() *cobra.Command {

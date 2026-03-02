@@ -154,7 +154,7 @@ These were deferred from MVP but might be cheap to add and valuable for dogfoodi
 
 70. ~~**No `yoloai diff` safety note while agent is running**~~ — **Resolved:** Print warning "Note: agent is still running; diff may be incomplete" when tmux pane is alive during `yoloai diff`.
 
-71. ~~**No way to inspect profile configuration**~~ — **Deferred.** Profiles are post-MVP. Add `yoloai profile show` when profiles are implemented.
+71. ~~**No way to inspect profile configuration**~~ — **Resolved.** Implemented as `yoloai profile info <name>`. Shows merged config with full inheritance chain. Supports `--json` and `base` profile.
 
 72. ~~**Shell quoting for `--prompt` is painful**~~ — **Deferred.** Same as #69. `--prompt-file` and stdin already address the pain. `--edit` for `$EDITOR` deferred.
 

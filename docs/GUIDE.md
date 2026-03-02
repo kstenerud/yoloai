@@ -40,6 +40,15 @@ Full reference for commands, flags, configuration, and internals. For a quick ov
 | `yoloai ls` | List sandboxes (shortcut for `sandbox list`) |
 | `yoloai log <name>` | Show sandbox log (shortcut for `sandbox log`) |
 
+**Profiles**
+
+| Command | Description |
+|---------|-------------|
+| `yoloai profile create <name>` | Create a new profile with scaffold |
+| `yoloai profile list` | List profiles |
+| `yoloai profile info <name>` | Show merged profile configuration |
+| `yoloai profile delete <name>` | Delete a profile |
+
 **Admin**
 
 | Command | Description |
