@@ -90,11 +90,13 @@ func TestGetAgent_Gemini(t *testing.T) {
 	assert.Equal(t, "/home/yoloai/.gemini/", def.StateDir)
 	assert.Equal(t, "Enter", def.SubmitSequence)
 	assert.Equal(t, 3*time.Second, def.StartupDelay)
-	assert.Equal(t, "", def.ReadyPattern)
+	assert.Equal(t, "Type your message", def.ReadyPattern)
 	assert.Equal(t, "--model", def.ModelFlag)
 	assert.Equal(t, "gemini-2.5-pro", def.ModelAliases["pro"])
 	assert.Equal(t, "gemini-2.5-flash", def.ModelAliases["flash"])
-	assert.Equal(t, []string{"generativelanguage.googleapis.com", "cloudcode-pa.googleapis.com"}, def.NetworkAllowlist)
+	assert.Equal(t, "gemini-3.1-pro-preview", def.ModelAliases["preview-pro"])
+	assert.Equal(t, "gemini-3-flash-preview", def.ModelAliases["preview-flash"])
+	assert.Equal(t, []string{"generativelanguage.googleapis.com", "cloudcode-pa.googleapis.com", "oauth2.googleapis.com"}, def.NetworkAllowlist)
 }
 
 func TestGetAgent_OpenCode(t *testing.T) {

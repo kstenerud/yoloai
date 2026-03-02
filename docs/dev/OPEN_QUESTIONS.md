@@ -213,6 +213,14 @@ These were deferred from MVP but might be cheap to add and valuable for dogfoodi
     - **Diff/apply workflow:** Does the copy/diff/apply workflow work unchanged? Tart's VirtioFS sharing may behave differently from Docker bind mounts.
     - **Startup time:** ~5-15 seconds is acceptable but noticeably slower than Docker. Does this affect UX enough to require UI changes (progress indicator)?
 
+## Network Allowlist Audit
+
+97. **Comprehensive network allowlist audit for all agents** — Gemini was missing `oauth2.googleapis.com` for OAuth token refresh (tokens expire after ~1 hour, breaking long sessions). Claude likely has the same class of issue — OAuth/API token refresh may need domains beyond what's currently allowed. All agents need a systematic audit: capture actual network traffic during full sessions (startup, auth, operation, token refresh, telemetry) and verify the allowlist covers everything. This is especially important for `--network-isolated` mode where missing domains cause silent failures.
+
+## Model Version Tracking
+
+98. **Strategy for keeping model aliases current** — Gemini's model aliases drifted (pointed to 2.5 when Gemini 3 was the current default). This will recur as providers release new models. Need a process to stay current. Options to discuss: periodic manual review cadence, automated checks against provider APIs/docs, pinning to stable identifiers that providers maintain (e.g., `-latest` suffixes where available), or documenting that aliases are best-effort and users should use `--model` for specific versions.
+
 ## Unresolved (Codex and cleanup)
 
 37. **Codex proxy support** — Whether Codex's static Rust binary honors `HTTP_PROXY`/`HTTPS_PROXY` env vars is unverified (see [commands.md](../design/commands.md), RESEARCH.md). Critical for `--network-isolated` mode with Codex. If it ignores proxy env vars, would need iptables-only enforcement.
