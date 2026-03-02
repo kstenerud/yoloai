@@ -108,24 +108,28 @@ func TestGetAgent_OpenCode(t *testing.T) {
 	assert.Equal(t, "opencode", def.InteractiveCmd)
 	assert.Contains(t, def.HeadlessCmd, "opencode run")
 	assert.Equal(t, PromptModeHeadless, def.PromptMode)
-	assert.Equal(t, []string{"ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY"}, def.APIKeyEnvVars)
-	assert.Equal(t, []string{"GITHUB_TOKEN", "LOCAL_ENDPOINT"}, def.AuthHintEnvVars)
-	require.Len(t, def.SeedFiles, 4)
+	assert.Equal(t, []string{"ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "GROQ_API_KEY", "OPENROUTER_API_KEY", "XAI_API_KEY"}, def.APIKeyEnvVars)
+	assert.Equal(t, []string{"GITHUB_TOKEN", "LOCAL_ENDPOINT", "AZURE_OPENAI_ENDPOINT", "AWS_ACCESS_KEY_ID", "AWS_PROFILE", "AWS_DEFAULT_PROFILE", "AWS_REGION", "AWS_DEFAULT_REGION", "VERTEXAI_PROJECT"}, def.AuthHintEnvVars)
+	require.Len(t, def.SeedFiles, 5)
 	assert.Equal(t, "~/.local/share/opencode/auth.json", def.SeedFiles[0].HostPath)
 	assert.Equal(t, "auth.json", def.SeedFiles[0].TargetPath)
 	assert.True(t, def.SeedFiles[0].AuthOnly)
-	assert.Equal(t, "~/.config/github-copilot/hosts.json", def.SeedFiles[1].HostPath)
-	assert.Equal(t, ".config/github-copilot/hosts.json", def.SeedFiles[1].TargetPath)
+	assert.Equal(t, "~/.opencode.json", def.SeedFiles[1].HostPath)
+	assert.Equal(t, ".opencode.json", def.SeedFiles[1].TargetPath)
 	assert.True(t, def.SeedFiles[1].AuthOnly)
 	assert.True(t, def.SeedFiles[1].HomeDir)
-	assert.Equal(t, "~/.config/github-copilot/apps.json", def.SeedFiles[2].HostPath)
-	assert.Equal(t, ".config/github-copilot/apps.json", def.SeedFiles[2].TargetPath)
+	assert.Equal(t, "~/.config/github-copilot/hosts.json", def.SeedFiles[2].HostPath)
+	assert.Equal(t, ".config/github-copilot/hosts.json", def.SeedFiles[2].TargetPath)
 	assert.True(t, def.SeedFiles[2].AuthOnly)
 	assert.True(t, def.SeedFiles[2].HomeDir)
-	assert.Equal(t, "~/.config/opencode/config.json", def.SeedFiles[3].HostPath)
-	assert.Equal(t, "config.json", def.SeedFiles[3].TargetPath)
+	assert.Equal(t, "~/.config/github-copilot/apps.json", def.SeedFiles[3].HostPath)
+	assert.Equal(t, ".config/github-copilot/apps.json", def.SeedFiles[3].TargetPath)
+	assert.True(t, def.SeedFiles[3].AuthOnly)
 	assert.True(t, def.SeedFiles[3].HomeDir)
-	assert.False(t, def.SeedFiles[3].AuthOnly)
+	assert.Equal(t, "~/.config/opencode/.opencode.json", def.SeedFiles[4].HostPath)
+	assert.Equal(t, ".config/opencode/.opencode.json", def.SeedFiles[4].TargetPath)
+	assert.True(t, def.SeedFiles[4].HomeDir)
+	assert.False(t, def.SeedFiles[4].AuthOnly)
 	assert.Equal(t, "/home/yoloai/.local/share/opencode/", def.StateDir)
 	assert.Equal(t, "Enter", def.SubmitSequence)
 	assert.Equal(t, 3*time.Second, def.StartupDelay)
@@ -221,6 +225,8 @@ func TestGetAgent_Shell(t *testing.T) {
 	assert.Contains(t, def.APIKeyEnvVars, "OPENAI_API_KEY")
 	assert.Contains(t, def.APIKeyEnvVars, "DEEPSEEK_API_KEY")
 	assert.Contains(t, def.APIKeyEnvVars, "OPENROUTER_API_KEY")
+	assert.Contains(t, def.APIKeyEnvVars, "GROQ_API_KEY")
+	assert.Contains(t, def.APIKeyEnvVars, "XAI_API_KEY")
 
 	// Should have seed files from all real agents
 	assert.NotEmpty(t, def.SeedFiles)
@@ -244,7 +250,10 @@ func TestGetAgent_Shell(t *testing.T) {
 	assert.Contains(t, targetPaths, ".gemini/settings.json")
 	assert.Contains(t, targetPaths, ".aider.conf.yml") // was already HomeDir, unchanged
 	assert.Contains(t, targetPaths, "opencode/auth.json")
-	assert.Contains(t, targetPaths, "config.json") // was already HomeDir, unchanged
+	assert.Contains(t, targetPaths, ".opencode.json")                    // was already HomeDir, unchanged
+	assert.Contains(t, targetPaths, ".config/github-copilot/hosts.json") // was already HomeDir, unchanged
+	assert.Contains(t, targetPaths, ".config/github-copilot/apps.json")  // was already HomeDir, unchanged
+	assert.Contains(t, targetPaths, ".config/opencode/.opencode.json")   // was already HomeDir, unchanged
 
 	// Each seed file should have OwnerAPIKeys set
 	for _, sf := range def.SeedFiles {
