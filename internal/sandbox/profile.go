@@ -45,18 +45,18 @@ type ProfileDir struct {
 
 // MergedConfig holds the result of merging base config with a profile chain.
 type MergedConfig struct {
-	Agent       string            // from nearest profile that specifies one
-	Model       string            // from nearest profile that specifies one
-	Backend     string            // last non-empty backend constraint
-	TartImage   string            // from nearest profile that specifies one
-	Env         map[string]string // merged across chain
-	Ports       []string          // additive across chain
-	Workdir     *ProfileWorkdir   // from nearest profile that specifies one (child wins)
-	Directories []ProfileDir      // additive across chain
-	Resources   *ResourceLimits   // from per-field merge across chain
-	Network     *NetworkConfig    // isolated overrides (last wins), allow additive
-	Mounts      []string          // additive across chain (host:container[:ro])
-	AgentArgs   map[string]string // merged across chain (map merge, later wins)
+	Agent       string            `json:"agent,omitempty"`       // from nearest profile that specifies one
+	Model       string            `json:"model,omitempty"`       // from nearest profile that specifies one
+	Backend     string            `json:"backend,omitempty"`     // last non-empty backend constraint
+	TartImage   string            `json:"tart_image,omitempty"`  // from nearest profile that specifies one
+	Env         map[string]string `json:"env,omitempty"`         // merged across chain
+	Ports       []string          `json:"ports,omitempty"`       // additive across chain
+	Workdir     *ProfileWorkdir   `json:"workdir,omitempty"`     // from nearest profile that specifies one (child wins)
+	Directories []ProfileDir      `json:"directories,omitempty"` // additive across chain
+	Resources   *ResourceLimits   `json:"resources,omitempty"`   // from per-field merge across chain
+	Network     *NetworkConfig    `json:"network,omitempty"`     // isolated overrides (last wins), allow additive
+	Mounts      []string          `json:"mounts,omitempty"`      // additive across chain (host:container[:ro])
+	AgentArgs   map[string]string `json:"agent_args,omitempty"`  // merged across chain (map merge, later wins)
 }
 
 // ProfileDirPath returns the host-side directory for a profile.

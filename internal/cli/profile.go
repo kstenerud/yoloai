@@ -6,6 +6,7 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -136,7 +137,8 @@ func newProfileListCmd() *cobra.Command {
 }
 
 func newProfileInfoCmd() *cobra.Command {
-	return &cobra.Command{
+	var diffMode bool
+	cmd := &cobra.Command{
 		Use:   "info <name>",
 		Short: "Show profile configuration",
 		Args:  cobra.ExactArgs(1),
@@ -204,6 +206,35 @@ func newProfileInfoCmd() *cobra.Command {
 				hasDockerfile = sandbox.ProfileHasDockerfile(name)
 			}
 
+			if diffMode {
+				var parentMerged *sandbox.MergedConfig
+				if name == "base" {
+					parentMerged = &sandbox.MergedConfig{}
+				} else {
+					parentChain := chain[:len(chain)-1]
+					baseCfg, err := sandbox.LoadConfig()
+					if err != nil {
+						return err
+					}
+					parentMerged, err = sandbox.MergeProfileChain(baseCfg, parentChain)
+					if err != nil {
+						return err
+					}
+				}
+
+				if jsonEnabled(cmd) {
+					return writeJSON(cmd.OutOrStdout(), profileDiffJSON{
+						Profile:   name,
+						Extends:   extends,
+						Chain:     chain,
+						Inherited: parentMerged,
+						Merged:    merged,
+					})
+				}
+
+				return printProfileDiff(cmd, name, extends, chain, parentMerged, merged)
+			}
+
 			if jsonEnabled(cmd) {
 				return writeJSON(cmd.OutOrStdout(), profileInfoJSON{
 					Profile:     name,
@@ -229,6 +260,8 @@ func newProfileInfoCmd() *cobra.Command {
 			return printProfileInfo(cmd, name, extends, chain, image, hasDockerfile, merged)
 		},
 	}
+	cmd.Flags().BoolVar(&diffMode, "diff", false, "Show only changes from parent profile")
+	return cmd
 }
 
 // profileInfoJSON is the JSON output structure for `profile info`.
@@ -250,6 +283,15 @@ type profileInfoJSON struct {
 	Resources   *sandbox.ResourceLimits `json:"resources,omitempty"`
 	Network     *sandbox.NetworkConfig  `json:"network,omitempty"`
 	Mounts      []string                `json:"mounts,omitempty"`
+}
+
+// profileDiffJSON is the JSON output structure for `profile info --diff`.
+type profileDiffJSON struct {
+	Profile   string                `json:"profile"`
+	Extends   string                `json:"extends"`
+	Chain     []string              `json:"chain"`
+	Inherited *sandbox.MergedConfig `json:"inherited"`
+	Merged    *sandbox.MergedConfig `json:"merged"`
 }
 
 // printProfileInfo renders the human-readable output for `profile info`.
@@ -354,6 +396,250 @@ func printProfileInfo(cmd *cobra.Command, name, extends string, chain []string, 
 	}
 
 	return nil
+}
+
+// printProfileDiff renders the human-readable diff output for `profile info --diff`.
+func printProfileDiff(cmd *cobra.Command, name, extends string, chain []string, parent, merged *sandbox.MergedConfig) error {
+	out := cmd.OutOrStdout()
+
+	fmt.Fprintf(out, "Profile:   %s\n", name) //nolint:errcheck
+	if extends != "" {
+		fmt.Fprintf(out, "Extends:   %s\n", extends) //nolint:errcheck
+	}
+	if len(chain) > 1 {
+		fmt.Fprintf(out, "Chain:     %s\n", strings.Join(chain, " → ")) //nolint:errcheck
+	}
+
+	hasDiff := false
+
+	hasDiff = printScalarDiff(out, "Agent", parent.Agent, merged.Agent) || hasDiff
+	hasDiff = printScalarDiff(out, "Model", parent.Model, merged.Model) || hasDiff
+	hasDiff = printScalarDiff(out, "Backend", parent.Backend, merged.Backend) || hasDiff
+	hasDiff = printScalarDiff(out, "Tart image", parent.TartImage, merged.TartImage) || hasDiff
+
+	if printed := printMapDiff(out, "Env", parent.Env, merged.Env); printed {
+		hasDiff = true
+	}
+
+	if printed := printMapDiff(out, "Agent args", parent.AgentArgs, merged.AgentArgs); printed {
+		hasDiff = true
+	}
+
+	if printed := printListAdditions(out, "Ports", parent.Ports, merged.Ports); printed {
+		hasDiff = true
+	}
+
+	if printed := printListAdditions(out, "Mounts", parent.Mounts, merged.Mounts); printed {
+		hasDiff = true
+	}
+
+	if printed := printWorkdirDiff(out, parent.Workdir, merged.Workdir); printed {
+		hasDiff = true
+	}
+
+	if printed := printDirAdditions(out, parent.Directories, merged.Directories); printed {
+		hasDiff = true
+	}
+
+	if printed := printResourcesDiff(out, parent.Resources, merged.Resources); printed {
+		hasDiff = true
+	}
+
+	if printed := printNetworkDiff(out, parent.Network, merged.Network); printed {
+		hasDiff = true
+	}
+
+	if !hasDiff {
+		parentName := "base"
+		if extends != "" {
+			parentName = extends
+		}
+		fmt.Fprintf(out, "\nNo changes from %s\n", parentName) //nolint:errcheck
+	}
+
+	return nil
+}
+
+// printScalarDiff prints a scalar field diff. Returns true if printed.
+func printScalarDiff(out io.Writer, label, old, new string) bool {
+	if old == new {
+		return false
+	}
+	if old == "" {
+		fmt.Fprintf(out, "  + %-12s %s\n", label+":", new) //nolint:errcheck
+	} else {
+		fmt.Fprintf(out, "  ~ %-12s %s → %s\n", label+":", old, new) //nolint:errcheck
+	}
+	return true
+}
+
+// printMapDiff prints per-key diff for a map field. Returns true if any diffs printed.
+func printMapDiff(out io.Writer, label string, old, new map[string]string) bool {
+	if len(new) == 0 {
+		return false
+	}
+
+	var lines []string
+	for _, k := range sortedKeys(new) {
+		oldVal, existed := old[k]
+		newVal := new[k]
+		if existed && oldVal == newVal {
+			continue
+		}
+		if !existed {
+			lines = append(lines, fmt.Sprintf("    + %-10s %s", k+":", newVal))
+		} else {
+			lines = append(lines, fmt.Sprintf("    ~ %-10s %s → %s", k+":", oldVal, newVal))
+		}
+	}
+
+	if len(lines) == 0 {
+		return false
+	}
+
+	fmt.Fprintf(out, "  %s:\n", label) //nolint:errcheck
+	for _, line := range lines {
+		fmt.Fprintln(out, line) //nolint:errcheck
+	}
+	return true
+}
+
+// printListAdditions prints new items in a list field. Returns true if any printed.
+func printListAdditions(out io.Writer, label string, old, new []string) bool {
+	if len(new) <= len(old) {
+		return false
+	}
+
+	added := new[len(old):]
+	if len(added) == 0 {
+		return false
+	}
+
+	fmt.Fprintf(out, "  %s:\n", label) //nolint:errcheck
+	for _, item := range added {
+		fmt.Fprintf(out, "    + %s\n", item) //nolint:errcheck
+	}
+	return true
+}
+
+// printWorkdirDiff prints workdir diff. Returns true if printed.
+func printWorkdirDiff(out io.Writer, old, new *sandbox.ProfileWorkdir) bool {
+	if new == nil {
+		return false
+	}
+	if old == nil {
+		fmt.Fprintf(out, "  + %-12s %s\n", "Workdir:", formatWorkdir(new)) //nolint:errcheck
+		return true
+	}
+	oldStr := formatWorkdir(old)
+	newStr := formatWorkdir(new)
+	if oldStr == newStr {
+		return false
+	}
+	fmt.Fprintf(out, "  ~ %-12s %s → %s\n", "Workdir:", oldStr, newStr) //nolint:errcheck
+	return true
+}
+
+// formatWorkdir formats a ProfileWorkdir for display.
+func formatWorkdir(w *sandbox.ProfileWorkdir) string {
+	s := w.Path
+	if w.Mode != "" {
+		s += " (" + w.Mode + ")"
+	}
+	if w.Mount != "" {
+		s += " → " + w.Mount
+	}
+	return s
+}
+
+// printDirAdditions prints directory additions. Returns true if any printed.
+func printDirAdditions(out io.Writer, old, new []sandbox.ProfileDir) bool {
+	if len(new) <= len(old) {
+		return false
+	}
+
+	added := new[len(old):]
+	if len(added) == 0 {
+		return false
+	}
+
+	fmt.Fprintln(out, "  Directories:") //nolint:errcheck
+	for _, d := range added {
+		s := d.Path
+		if d.Mode != "" {
+			s += " (" + d.Mode + ")"
+		}
+		if d.Mount != "" {
+			s += " → " + d.Mount
+		}
+		fmt.Fprintf(out, "    + %s\n", s) //nolint:errcheck
+	}
+	return true
+}
+
+// printResourcesDiff prints per-field resources diff. Returns true if any printed.
+func printResourcesDiff(out io.Writer, old, new *sandbox.ResourceLimits) bool {
+	if new == nil {
+		return false
+	}
+	if old == nil {
+		old = &sandbox.ResourceLimits{}
+	}
+
+	var lines []string
+	if new.CPUs != old.CPUs {
+		if old.CPUs == "" {
+			lines = append(lines, fmt.Sprintf("    + %-10s %s", "cpus:", new.CPUs))
+		} else {
+			lines = append(lines, fmt.Sprintf("    ~ %-10s %s → %s", "cpus:", old.CPUs, new.CPUs))
+		}
+	}
+	if new.Memory != old.Memory {
+		if old.Memory == "" {
+			lines = append(lines, fmt.Sprintf("    + %-10s %s", "memory:", new.Memory))
+		} else {
+			lines = append(lines, fmt.Sprintf("    ~ %-10s %s → %s", "memory:", old.Memory, new.Memory))
+		}
+	}
+
+	if len(lines) == 0 {
+		return false
+	}
+
+	fmt.Fprintln(out, "  Resources:") //nolint:errcheck
+	for _, line := range lines {
+		fmt.Fprintln(out, line) //nolint:errcheck
+	}
+	return true
+}
+
+// printNetworkDiff prints network config diff. Returns true if any printed.
+func printNetworkDiff(out io.Writer, old, new *sandbox.NetworkConfig) bool {
+	if new == nil {
+		return false
+	}
+	if old == nil {
+		old = &sandbox.NetworkConfig{}
+	}
+
+	hasDiff := false
+	if new.Isolated != old.Isolated {
+		fmt.Fprintf(out, "  ~ %-12s %v → %v\n", "Isolated:", old.Isolated, new.Isolated) //nolint:errcheck
+		hasDiff = true
+	}
+
+	if len(new.Allow) > len(old.Allow) {
+		added := new.Allow[len(old.Allow):]
+		if len(added) > 0 {
+			fmt.Fprintln(out, "  Network allow:") //nolint:errcheck
+			for _, domain := range added {
+				fmt.Fprintf(out, "    + %s\n", domain) //nolint:errcheck
+			}
+			hasDiff = true
+		}
+	}
+
+	return hasDiff
 }
 
 // sortedKeys returns the keys of a map in sorted order.
