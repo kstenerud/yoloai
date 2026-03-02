@@ -584,3 +584,59 @@ func TestReadGlobalConfigRaw_ExistingFile(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, content, string(data))
 }
+
+func TestLoadConfig_AgentFilesString(t *testing.T) {
+	dir := configDir(t)
+	home := filepath.Dir(filepath.Dir(filepath.Dir(dir))) // strip .yoloai/profiles/base
+
+	content := "agent_files: ~/my-agent-configs\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
+
+	cfg, err := LoadConfig()
+	require.NoError(t, err)
+	require.NotNil(t, cfg.AgentFiles)
+	assert.True(t, cfg.AgentFiles.IsStringForm())
+	assert.Equal(t, filepath.Join(home, "my-agent-configs"), cfg.AgentFiles.BaseDir)
+	assert.Nil(t, cfg.AgentFiles.Files)
+}
+
+func TestLoadConfig_AgentFilesList(t *testing.T) {
+	dir := configDir(t)
+	home := filepath.Dir(filepath.Dir(filepath.Dir(dir)))
+
+	content := "agent_files:\n  - ~/file1.json\n  - ~/file2.json\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
+
+	cfg, err := LoadConfig()
+	require.NoError(t, err)
+	require.NotNil(t, cfg.AgentFiles)
+	assert.False(t, cfg.AgentFiles.IsStringForm())
+	assert.Empty(t, cfg.AgentFiles.BaseDir)
+	require.Len(t, cfg.AgentFiles.Files, 2)
+	assert.Equal(t, filepath.Join(home, "file1.json"), cfg.AgentFiles.Files[0])
+	assert.Equal(t, filepath.Join(home, "file2.json"), cfg.AgentFiles.Files[1])
+}
+
+func TestLoadConfig_AgentFilesEnvExpansion(t *testing.T) {
+	dir := configDir(t)
+	t.Setenv("YOLOAI_AGENT_DIR", "/custom/path")
+
+	content := "agent_files: ${YOLOAI_AGENT_DIR}\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
+
+	cfg, err := LoadConfig()
+	require.NoError(t, err)
+	require.NotNil(t, cfg.AgentFiles)
+	assert.Equal(t, "/custom/path", cfg.AgentFiles.BaseDir)
+}
+
+func TestLoadConfig_AgentFilesOmitted(t *testing.T) {
+	dir := configDir(t)
+
+	content := "agent: claude\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
+
+	cfg, err := LoadConfig()
+	require.NoError(t, err)
+	assert.Nil(t, cfg.AgentFiles)
+}

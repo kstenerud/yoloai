@@ -251,7 +251,7 @@ Before creating the sandbox (all checks run before any state is created on disk)
    - `:rw` directories bind-mounted at their mount point (mirrored host path or custom `=<path>`, read-write)
    - Default (no suffix) directories bind-mounted at their mount point (mirrored host path or custom `=<path>`, read-only)
    - `agent-state/` mounted at the agent's state directory path (read-write, per-sandbox)
-   - **[PLANNED]** Files listed in `agent_files` (from config) copied into `agent-state/` on first run
+   - Files listed in `agent_files` (from config) copied into `agent-state/` on first run
    - `log.txt` from sandbox state bind-mounted at `/yoloai/log.txt` (read-write, for tmux `pipe-pane`)
    - `prompt.txt` from sandbox state bind-mounted at `/yoloai/prompt.txt` (read-only, if provided)
    - `/yoloai/config.json` bind-mounted read-only

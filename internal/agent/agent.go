@@ -4,6 +4,7 @@ package agent
 import (
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -34,23 +35,24 @@ type SeedFile struct {
 
 // Definition describes an agent's install, launch, and behavioral characteristics.
 type Definition struct {
-	Name             string
-	Description      string
-	InteractiveCmd   string
-	HeadlessCmd      string
-	PromptMode       PromptMode
-	APIKeyEnvVars    []string
-	AuthHintEnvVars  []string // env vars indicating auth is configured without a cloud API key (e.g. local model servers)
-	SeedFiles        []SeedFile
-	StateDir         string
-	SubmitSequence   string
-	StartupDelay     time.Duration
-	ReadyPattern     string // grep pattern in tmux output that signals agent is ready for input
-	ModelFlag        string
-	ModelAliases     map[string]string
-	ModelPrefixes    map[string]string // env var → model prefix (e.g. OLLAMA_API_BASE → "ollama_chat/")
-	NetworkAllowlist []string          // domains allowed when network-isolated
-	ContextFile      string            // filename in StateDir for sandbox context reference (e.g., "CLAUDE.md")
+	Name              string
+	Description       string
+	InteractiveCmd    string
+	HeadlessCmd       string
+	PromptMode        PromptMode
+	APIKeyEnvVars     []string
+	AuthHintEnvVars   []string // env vars indicating auth is configured without a cloud API key (e.g. local model servers)
+	SeedFiles         []SeedFile
+	StateDir          string
+	SubmitSequence    string
+	StartupDelay      time.Duration
+	ReadyPattern      string // grep pattern in tmux output that signals agent is ready for input
+	ModelFlag         string
+	ModelAliases      map[string]string
+	ModelPrefixes     map[string]string // env var → model prefix (e.g. OLLAMA_API_BASE → "ollama_chat/")
+	NetworkAllowlist  []string          // domains allowed when network-isolated
+	ContextFile       string            // filename in StateDir for sandbox context reference (e.g., "CLAUDE.md")
+	AgentFilesExclude []string          // glob patterns to skip when copying agent_files (string form)
 }
 
 var agents = map[string]*Definition{
@@ -104,8 +106,9 @@ var agents = map[string]*Definition{
 			"opus":   "claude-opus-4-latest",
 			"haiku":  "claude-haiku-4-latest",
 		},
-		NetworkAllowlist: []string{"api.anthropic.com", "claude.ai", "platform.claude.com", "statsig.anthropic.com", "sentry.io"},
-		ContextFile:      "CLAUDE.md",
+		NetworkAllowlist:  []string{"api.anthropic.com", "claude.ai", "platform.claude.com", "statsig.anthropic.com", "sentry.io"},
+		ContextFile:       "CLAUDE.md",
+		AgentFilesExclude: []string{"projects/", "statsig/", "todos/", ".credentials.json", "*.log"},
 	},
 	"gemini": {
 		Name:           "gemini",
@@ -130,8 +133,9 @@ var agents = map[string]*Definition{
 			"preview-pro":   "gemini-3.1-pro-preview",
 			"preview-flash": "gemini-3-flash-preview",
 		},
-		NetworkAllowlist: []string{"generativelanguage.googleapis.com", "cloudcode-pa.googleapis.com", "oauth2.googleapis.com"},
-		ContextFile:      "GEMINI.md",
+		NetworkAllowlist:  []string{"generativelanguage.googleapis.com", "cloudcode-pa.googleapis.com", "oauth2.googleapis.com"},
+		ContextFile:       "GEMINI.md",
+		AgentFilesExclude: []string{"logs/", "oauth_creds.json", "google_accounts.json"},
 	},
 	"opencode": {
 		Name:           "opencode",
@@ -154,6 +158,7 @@ var agents = map[string]*Definition{
 			"opus":   "anthropic/claude-opus-4-latest",
 			"haiku":  "anthropic/claude-haiku-4-5-latest",
 		},
+		AgentFilesExclude: []string{"auth.json", "sessions/"},
 	},
 	"codex": {
 		Name:           "codex",
@@ -176,7 +181,8 @@ var agents = map[string]*Definition{
 			"spark":   "gpt-5.3-codex-spark",
 			"mini":    "codex-mini-latest",
 		},
-		NetworkAllowlist: []string{"api.openai.com"},
+		NetworkAllowlist:  []string{"api.openai.com"},
+		AgentFilesExclude: []string{"auth.json", "sessions/"},
 	},
 	"test": {
 		Name:           "test",
@@ -221,6 +227,21 @@ func RealAgents() []string {
 	}
 	sort.Strings(names)
 	return names
+}
+
+// StateRelPath returns the relative path from /home/yoloai/ to the agent's
+// state directory. For example, ".claude" for Claude, ".gemini" for Gemini,
+// ".local/share/opencode" for OpenCode. Returns "" for agents without a StateDir.
+func (d *Definition) StateRelPath() string {
+	if d.StateDir == "" {
+		return ""
+	}
+	const prefix = "/home/yoloai/"
+	path := strings.TrimSuffix(d.StateDir, "/")
+	if strings.HasPrefix(path, prefix) {
+		return path[len(prefix):]
+	}
+	return ""
 }
 
 // buildShellAgent constructs a shell agent whose SeedFiles and APIKeyEnvVars

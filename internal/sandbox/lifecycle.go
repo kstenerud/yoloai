@@ -265,6 +265,12 @@ func (m *Manager) Reset(ctx context.Context, opts ResetOptions) error {
 		if err := os.MkdirAll(agentStateDir, 0750); err != nil {
 			return fmt.Errorf("recreate agent-state: %w", err)
 		}
+		// Reset agent_files flag so files get re-seeded on next start
+		sbState, stateErr := LoadSandboxState(sandboxDir)
+		if stateErr == nil {
+			sbState.AgentFilesInitialized = false
+			_ = SaveSandboxState(sandboxDir, sbState)
+		}
 	}
 
 	// Patch config.json with debug flag if requested
@@ -336,6 +342,40 @@ func (m *Manager) recreateContainer(ctx context.Context, name string, meta *Meta
 	// skipDangerousModePermissionPrompt)
 	if err := ensureContainerSettings(agentDef, sandboxDir); err != nil {
 		return fmt.Errorf("ensure container settings: %w", err)
+	}
+
+	// Copy agent_files if not yet initialized (e.g., sandbox created before
+	// agent_files was configured, or after --clean reset)
+	sbState, stateErr := LoadSandboxState(sandboxDir)
+	if stateErr != nil {
+		return fmt.Errorf("load sandbox state: %w", stateErr)
+	}
+	if !sbState.AgentFilesInitialized && agentDef.StateDir != "" {
+		cfg, cfgErr := LoadConfig()
+		if cfgErr == nil {
+			var agentFilesConfig *AgentFilesConfig
+			if meta.Profile != "" {
+				chain, chainErr := ResolveProfileChain(meta.Profile)
+				if chainErr == nil {
+					merged, mergeErr := MergeProfileChain(cfg, chain)
+					if mergeErr == nil {
+						agentFilesConfig = merged.AgentFiles
+					}
+				}
+			}
+			if agentFilesConfig == nil {
+				agentFilesConfig = cfg.AgentFiles
+			}
+			if agentFilesConfig != nil {
+				if copyErr := copyAgentFiles(agentDef, sandboxDir, agentFilesConfig); copyErr != nil {
+					return fmt.Errorf("copy agent files on restart: %w", copyErr)
+				}
+				sbState.AgentFilesInitialized = true
+				if saveErr := SaveSandboxState(sandboxDir, sbState); saveErr != nil {
+					return fmt.Errorf("save sandbox state: %w", saveErr)
+				}
+			}
+		}
 	}
 
 	// Read existing config.json

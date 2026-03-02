@@ -166,6 +166,7 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 	var mergedMounts []string
 	mergedEnv := ycfg.Env
 	mergedAgentArgs := ycfg.AgentArgs
+	mergedAgentFiles := ycfg.AgentFiles
 	userAliases := gcfg.ModelAliases
 	if opts.Profile != "" {
 		if err := ValidateProfileName(opts.Profile); err != nil {
@@ -197,6 +198,7 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 
 		mergedEnv = merged.Env
 		mergedAgentArgs = merged.AgentArgs
+		mergedAgentFiles = merged.AgentFiles
 
 		if merged.Resources != nil {
 			r := *merged.Resources
@@ -483,6 +485,15 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 		return nil, fmt.Errorf("ensure container settings: %w", err)
 	}
 
+	// Copy agent_files (user-configured agent config files)
+	agentFilesInitialized := false
+	if mergedAgentFiles != nil && agentDef.StateDir != "" {
+		if err := copyAgentFiles(agentDef, sandboxDir, mergedAgentFiles); err != nil {
+			return nil, fmt.Errorf("copy agent files: %w", err)
+		}
+		agentFilesInitialized = true
+	}
+
 	// Fix install method in seeded .claude.json (host has "native", container uses npm).
 	// Skip for seatbelt — it runs the host's native Claude Code, not npm-installed.
 	if m.backend != "seatbelt" {
@@ -667,6 +678,12 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 	}
 
 	if err := SaveMeta(sandboxDir, meta); err != nil {
+		return nil, err
+	}
+
+	if err := SaveSandboxState(sandboxDir, &SandboxState{
+		AgentFilesInitialized: agentFilesInitialized,
+	}); err != nil {
 		return nil, err
 	}
 

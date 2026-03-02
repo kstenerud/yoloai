@@ -340,6 +340,37 @@ Backend resolution: `new`/`build`/`setup` use `--backend` flag > `defaults.backe
 
 Agent args: persistent default CLI args for specific agents. Inserted between the model flag and CLI passthrough (`--` args), so passthrough always takes precedence. Example: `yoloai config set agent_args.aider "--no-auto-commits --no-pretty"`. Profile `agent_args` merge with base config (per-agent key, profile wins on conflict).
 
+### Agent Files
+
+`agent_files` controls additional files seeded into a sandbox's `agent-state/` directory on first creation. Useful for sharing agent configuration (e.g., a team CLAUDE.md, custom settings) across sandboxes without modifying host agent state.
+
+Two forms are supported:
+
+**String form** — a base directory. yoloAI derives the agent-specific subdirectory automatically:
+
+```yaml
+# In ~/.yoloai/profiles/base/config.yaml
+agent_files: "${HOME}"
+# Claude sandbox → copies from ~/.claude/ (minus excluded files)
+# Gemini sandbox → copies from ~/.gemini/
+```
+
+**List form** — explicit file/directory paths copied into `agent-state/`:
+
+```yaml
+# In ~/.yoloai/profiles/base/config.yaml
+agent_files:
+  - ~/.claude/settings.json
+  - /shared/team-configs/CLAUDE.md
+```
+
+Key behaviors:
+- Files already placed by SeedFiles (auth credentials, container settings) are never overwritten.
+- Each agent excludes session data and caches (e.g., Claude excludes `projects/`, `statsig/`, `todos/`, `.credentials.json`, `*.log`).
+- Files are only seeded on first creation. Tracked via `state.json` — `reset --clean` resets the flag so files are re-seeded on next start.
+- Agents without a state directory (aider, test, shell) are silently skipped.
+- In profiles, `agent_files` uses replacement semantics (child completely replaces parent).
+
 You can also edit the config files directly — `config set` preserves comments and formatting.
 
 ## Sandbox State
@@ -349,6 +380,7 @@ All sandbox state lives on the host at `~/.yoloai/sandboxes/<name>/`:
 ```
 ~/.yoloai/sandboxes/<name>/
   meta.json       # sandbox config (paths, mode, baseline SHA, backend)
+  state.json      # per-sandbox state (agent_files_initialized, etc.)
   config.json     # container entrypoint config
   prompt.txt      # initial prompt (if provided)
   log.txt         # tmux session log

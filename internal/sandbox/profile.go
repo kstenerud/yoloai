@@ -27,6 +27,7 @@ type ProfileConfig struct {
 	Network     *NetworkConfig    // network isolation settings
 	Mounts      []string          // extra bind mounts (host:container[:ro])
 	AgentArgs   map[string]string // per-agent default CLI args
+	AgentFiles  *AgentFilesConfig // agent_files — extra files to seed into agent-state
 }
 
 // ProfileWorkdir defines a workdir from a profile.
@@ -57,6 +58,7 @@ type MergedConfig struct {
 	Network     *NetworkConfig    `json:"network,omitempty"`     // isolated overrides (last wins), allow additive
 	Mounts      []string          `json:"mounts,omitempty"`      // additive across chain (host:container[:ro])
 	AgentArgs   map[string]string `json:"agent_args,omitempty"`  // merged across chain (map merge, later wins)
+	AgentFiles  *AgentFilesConfig `json:"agent_files,omitempty"` // replacement semantics (child replaces parent)
 }
 
 // ProfileDirPath returns the host-side directory for a profile.
@@ -328,6 +330,12 @@ func LoadProfile(name string) (*ProfileConfig, error) {
 					}
 				}
 			}
+		case "agent_files":
+			af, afErr := parseAgentFilesNode(val)
+			if afErr != nil {
+				return nil, fmt.Errorf("agent_files: %w", afErr)
+			}
+			cfg.AgentFiles = af
 			// Unknown fields are silently ignored
 		}
 	}
@@ -452,6 +460,8 @@ func MergeProfileChain(base *YoloaiConfig, chain []string) (*MergedConfig, error
 		}
 	}
 
+	merged.AgentFiles = base.AgentFiles
+
 	// Apply each non-base profile in order
 	for _, name := range chain {
 		if name == "base" {
@@ -532,6 +542,11 @@ func MergeProfileChain(base *YoloaiConfig, chain []string) (*MergedConfig, error
 
 		// Mounts: additive
 		merged.Mounts = append(merged.Mounts, profile.Mounts...)
+
+		// AgentFiles: replacement semantics (child replaces parent entirely)
+		if profile.AgentFiles != nil {
+			merged.AgentFiles = profile.AgentFiles
+		}
 	}
 
 	return merged, nil

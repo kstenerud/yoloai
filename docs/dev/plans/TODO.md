@@ -25,7 +25,7 @@ Create a plan file in this directory before starting implementation.
 | Feature | Design Reference | Notes |
 |---------|-----------------|-------|
 | ~~`copy_strategy`~~ | ~~[config.md](../../design/config.md)~~ | ~~No longer planned — `:copy` uses full copies; `:overlay` is a separate explicit mode~~ |
-| `agent_files` | [config.md](../../design/config.md) | Files seeded into agent-state/ on first run |
+| ~~`agent_files`~~ | [config.md](../../design/config.md) | Done — string/list forms, exclusion patterns, state.json tracking |
 | Recipes (`cap_add`, `devices`, `setup`) | [config.md](../../design/config.md) | Advanced setups (Tailscale, GPU) |
 | ~~User-configurable model aliases~~ | [commands.md](../../design/commands.md) | Done — `model_aliases` in config.yaml |
 | ~~Network isolation~~ | [commands.md](../../design/commands.md) | Done — `--network-isolated`, `--network-allow` |

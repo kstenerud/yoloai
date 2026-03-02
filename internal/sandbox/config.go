@@ -12,17 +12,30 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// AgentFilesConfig holds the parsed agent_files config option.
+// nil means not specified (inherit from parent in merge).
+type AgentFilesConfig struct {
+	BaseDir string   // non-empty for string form (base directory path)
+	Files   []string // non-nil for list form (explicit file/dir paths)
+}
+
+// IsStringForm returns true if the config uses the string (base directory) form.
+func (c *AgentFilesConfig) IsStringForm() bool {
+	return c != nil && c.BaseDir != ""
+}
+
 // YoloaiConfig holds the subset of config.yaml fields that the Go code reads.
 type YoloaiConfig struct {
-	Backend   string            `yaml:"backend"`    // backend
-	TartImage string            `yaml:"tart_image"` // tart.image — custom base VM image for tart backend
-	Agent     string            `yaml:"agent"`      // agent
-	Model     string            `yaml:"model"`      // model
-	Env       map[string]string `yaml:"env"`        // env — environment variables passed to container
-	Resources *ResourceLimits   `yaml:"resources"`  // resources — container resource limits
-	Network   *NetworkConfig    `yaml:"network"`    // network — network isolation settings
-	Mounts    []string          `yaml:"mounts"`     // mounts — extra bind mounts (host:container[:ro])
-	AgentArgs map[string]string `yaml:"agent_args"` // agent_args — per-agent default CLI args
+	Backend    string            `yaml:"backend"`    // backend
+	TartImage  string            `yaml:"tart_image"` // tart.image — custom base VM image for tart backend
+	Agent      string            `yaml:"agent"`      // agent
+	Model      string            `yaml:"model"`      // model
+	Env        map[string]string `yaml:"env"`        // env — environment variables passed to container
+	Resources  *ResourceLimits   `yaml:"resources"`  // resources — container resource limits
+	Network    *NetworkConfig    `yaml:"network"`    // network — network isolation settings
+	Mounts     []string          `yaml:"mounts"`     // mounts — extra bind mounts (host:container[:ro])
+	AgentArgs  map[string]string `yaml:"agent_args"` // agent_args — per-agent default CLI args
+	AgentFiles *AgentFilesConfig `yaml:"-"`          // agent_files — extra files to seed into agent-state
 }
 
 // ResourceLimits holds container resource constraints (CPU, memory).
@@ -241,6 +254,12 @@ func LoadConfig() (*YoloaiConfig, error) {
 				return nil, fmt.Errorf("model: %w", err)
 			}
 			cfg.Model = expanded
+		case "agent_files":
+			af, afErr := parseAgentFilesNode(val)
+			if afErr != nil {
+				return nil, fmt.Errorf("agent_files: %w", afErr)
+			}
+			cfg.AgentFiles = af
 		}
 	}
 
@@ -829,6 +848,33 @@ func sortMappingNode(node *yaml.Node) {
 	for i, p := range pairs {
 		node.Content[i*2] = p.key
 		node.Content[i*2+1] = p.val
+	}
+}
+
+// parseAgentFilesNode parses an agent_files yaml.Node into AgentFilesConfig.
+// Supports two forms:
+//   - String (scalar): base directory path, e.g. "~/.claude" or "${HOME}"
+//   - List (sequence): explicit file/dir paths, e.g. ["~/.claude/settings.json"]
+func parseAgentFilesNode(val *yaml.Node) (*AgentFilesConfig, error) {
+	switch val.Kind {
+	case yaml.ScalarNode:
+		expanded, err := ExpandPath(val.Value)
+		if err != nil {
+			return nil, err
+		}
+		return &AgentFilesConfig{BaseDir: expanded}, nil
+	case yaml.SequenceNode:
+		files := make([]string, 0, len(val.Content))
+		for _, item := range val.Content {
+			expanded, err := ExpandPath(item.Value)
+			if err != nil {
+				return nil, err
+			}
+			files = append(files, expanded)
+		}
+		return &AgentFilesConfig{Files: files}, nil
+	default:
+		return nil, fmt.Errorf("expected string or list, got %v", val.Kind)
 	}
 }
 

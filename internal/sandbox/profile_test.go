@@ -850,3 +850,121 @@ func TestMergeProfileChain_AgentArgsFromBaseOnly(t *testing.T) {
 		t.Errorf("AgentArgs[aider] = %q, want %q (should come from base config)", merged.AgentArgs["aider"], "--no-auto-commits")
 	}
 }
+
+func TestLoadProfile_AgentFilesString(t *testing.T) {
+	yaml := "agent_files: /shared/agent-configs\n"
+	setupProfileDir(t, "af-str", yaml)
+
+	cfg, err := LoadProfile("af-str")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if cfg.AgentFiles == nil {
+		t.Fatal("AgentFiles is nil")
+	}
+	if cfg.AgentFiles.BaseDir != "/shared/agent-configs" {
+		t.Errorf("BaseDir = %q, want %q", cfg.AgentFiles.BaseDir, "/shared/agent-configs")
+	}
+}
+
+func TestLoadProfile_AgentFilesList(t *testing.T) {
+	yaml := "agent_files:\n  - /path/file1.json\n  - /path/file2.json\n"
+	setupProfileDir(t, "af-list", yaml)
+
+	cfg, err := LoadProfile("af-list")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if cfg.AgentFiles == nil {
+		t.Fatal("AgentFiles is nil")
+	}
+	if len(cfg.AgentFiles.Files) != 2 {
+		t.Fatalf("len(Files) = %d, want 2", len(cfg.AgentFiles.Files))
+	}
+	if cfg.AgentFiles.Files[0] != "/path/file1.json" {
+		t.Errorf("Files[0] = %q, want %q", cfg.AgentFiles.Files[0], "/path/file1.json")
+	}
+}
+
+func TestMergeProfileChain_AgentFilesChildReplaces(t *testing.T) {
+	home := setupProfileDir(t, "af-parent", "agent_files: /parent/dir\n")
+
+	childDir := filepath.Join(home, ".yoloai", "profiles", "af-child")
+	if err := os.MkdirAll(childDir, 0750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(childDir, "profile.yaml"),
+		[]byte("extends: af-parent\nagent_files:\n  - /child/file.json\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	base := &YoloaiConfig{}
+
+	chain := []string{"base", "af-parent", "af-child"}
+	merged, err := MergeProfileChain(base, chain)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if merged.AgentFiles == nil {
+		t.Fatal("AgentFiles is nil")
+	}
+	// Child should completely replace parent (list replaces string)
+	if merged.AgentFiles.BaseDir != "" {
+		t.Errorf("BaseDir = %q, want empty (child used list form)", merged.AgentFiles.BaseDir)
+	}
+	if len(merged.AgentFiles.Files) != 1 || merged.AgentFiles.Files[0] != "/child/file.json" {
+		t.Errorf("Files = %v, want [/child/file.json]", merged.AgentFiles.Files)
+	}
+}
+
+func TestMergeProfileChain_AgentFilesOmittedKeepsParent(t *testing.T) {
+	home := setupProfileDir(t, "af-keep-parent", "agent_files: /parent/dir\n")
+
+	childDir := filepath.Join(home, ".yoloai", "profiles", "af-keep-child")
+	if err := os.MkdirAll(childDir, 0750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(childDir, "profile.yaml"),
+		[]byte("extends: af-keep-parent\nagent: gemini\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	base := &YoloaiConfig{}
+
+	chain := []string{"base", "af-keep-parent", "af-keep-child"}
+	merged, err := MergeProfileChain(base, chain)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if merged.AgentFiles == nil {
+		t.Fatal("AgentFiles is nil (should be inherited from parent)")
+	}
+	if merged.AgentFiles.BaseDir != "/parent/dir" {
+		t.Errorf("BaseDir = %q, want %q (should keep parent)", merged.AgentFiles.BaseDir, "/parent/dir")
+	}
+}
+
+func TestMergeProfileChain_AgentFilesFromBaseConfig(t *testing.T) {
+	setupProfileDir(t, "af-base-only", "agent: claude\n")
+
+	base := &YoloaiConfig{
+		AgentFiles: &AgentFilesConfig{BaseDir: "/base/config/dir"},
+	}
+
+	chain := []string{"base", "af-base-only"}
+	merged, err := MergeProfileChain(base, chain)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if merged.AgentFiles == nil {
+		t.Fatal("AgentFiles is nil (should come from base config)")
+	}
+	if merged.AgentFiles.BaseDir != "/base/config/dir" {
+		t.Errorf("BaseDir = %q, want %q", merged.AgentFiles.BaseDir, "/base/config/dir")
+	}
+}

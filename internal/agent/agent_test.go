@@ -247,6 +247,28 @@ func TestGetAgent_Shell(t *testing.T) {
 	assert.Contains(t, def.NetworkAllowlist, "api.openai.com")
 }
 
+func TestStateRelPath(t *testing.T) {
+	tests := []struct {
+		agent string
+		want  string
+	}{
+		{"claude", ".claude"},
+		{"gemini", ".gemini"},
+		{"codex", ".codex"},
+		{"opencode", ".local/share/opencode"},
+		{"aider", ""}, // no StateDir
+		{"test", ""},  // no StateDir
+		{"shell", ""}, // no StateDir
+	}
+	for _, tt := range tests {
+		t.Run(tt.agent, func(t *testing.T) {
+			def := GetAgent(tt.agent)
+			require.NotNil(t, def)
+			assert.Equal(t, tt.want, def.StateRelPath())
+		})
+	}
+}
+
 func TestGetAgent_Unknown(t *testing.T) {
 	assert.Nil(t, GetAgent("unknown"))
 	assert.Nil(t, GetAgent(""))

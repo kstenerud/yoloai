@@ -56,9 +56,9 @@ backend: docker                       # Runtime backend: docker, tart, seatbelt
 agent: claude                           # Agent to launch: aider, claude, codex, gemini, opencode; CLI --agent overrides
 # model:                               # Model name or alias; CLI --model overrides
 
+# agent_files: "${HOME}"               # string: base dir (agent subdir appended); list: specific files
 # --- Planned fields (not yet implemented) ---
 # profile: my-project                  # [PLANNED] default profile to use; CLI --profile overrides
-# agent_files: "${HOME}"               # [PLANNED] string: base dir (agent subdir appended); list: specific files
 # mounts:                              # [PLANNED] bind mounts added at container run time
 #   - ~/.gitconfig:/home/yoloai/.gitconfig:ro
 # auto_commit_interval: 0              # [PLANNED] seconds between auto-commits in :copy dirs; 0 = disabled
@@ -99,8 +99,9 @@ env:
 
 With profiles (future), a "local-models" profile can bundle env, network config, and Dockerfile additions for a turnkey local-model setup.
 
+**`agent_files`** controls what files are copied into the sandbox's `agent-state/` directory on first run. Two forms: **string** — a base directory from which yoloai derives the agent-specific subdir (e.g. `"${HOME}"` → `~/.claude/` for Claude, `~/.gemini/` for Gemini; `"/shared/team-configs"` → `/shared/team-configs/.claude/` for Claude). **list** — specific files or directories to copy in verbatim (e.g. `["~/.claude/settings.json", "/shared/CLAUDE.md"]`). Omit entirely to copy nothing (safe default). Profile `agent_files` **replaces** (not merges with) defaults. Files placed by SeedFiles (auth credentials, settings) are never overwritten. Each agent defines exclusion patterns for session data and caches. First-run status is tracked in `state.json` (`agent_files_initialized`); `reset --clean` resets the flag so files are re-seeded on next start.
+
 **Planned settings (not yet parsed from config):**
-- `agent_files` will control what files are copied into the sandbox's `agent-state/` directory on first run. Two forms: **string** — a base directory from which yoloai derives the agent-specific subdir (e.g. `"${HOME}"` → `~/.claude/` for Claude, `~/.gemini/` for Gemini; `"/shared/team-configs"` → `/shared/team-configs/.claude/` for Claude). **list** — specific files or directories to copy in verbatim (e.g. `["~/.claude/settings.json", "/shared/CLAUDE.md"]`). Omit entirely to copy nothing (safe default). Profile `agent_files` **replaces** (not merges with) defaults.
 - `mounts` will be bind mounts added at container run time. Profile mounts are **additive** (merged with defaults, no deduplication — duplicates are a user error).
 - `ports` will be default port mappings. Profile ports are additive.
 - `resources` will set baseline limits. Profiles can override individual values.
@@ -126,7 +127,7 @@ defaults:
 
 **Environment variable interpolation in config files:** Config values in `config.yaml` (and future `profile.yaml`) support `${VAR}` interpolation from the host environment. Only the braced syntax `${VAR}` is recognized — bare `$VAR` is **not** interpolated and treated as literal text. This avoids the class of bugs where `$` in passwords, regex patterns, or shell strings is silently misinterpreted (a well-documented pain point with Docker Compose's unbraced `$VAR` support — see [RESEARCH.md](../dev/RESEARCH.md)). Interpolation is applied after YAML parsing, so expanded values cannot break YAML syntax. Unset variables produce an error (fail-fast, not silent empty string). CLI path inputs also support `${VAR}` interpolation and `~/` expansion.
 
-**[PLANNED] Tilde expansion in config files:** `~/` will be expanded to `$HOME` in path-valued fields across both `config.yaml` and `profile.yaml` (`agent_files`, `mounts`, `workdir.path`, `directories[].path`). Bare relative paths (without `~/`) are an error in all path fields. Currently no path-valued fields are parsed from config — tilde expansion will be added alongside those fields. CLI path inputs already support `~/` expansion.
+**Tilde expansion in config files:** `~/` is expanded to `$HOME` in path-valued fields across both `config.yaml` and `profile.yaml` (`agent_files`, `mounts`, `workdir.path`, `directories[].path`). CLI path inputs also support `~/` expansion.
 
 ### 3. Profiles
 
@@ -142,7 +143,7 @@ Profiles live in `~/.yoloai/profiles/<name>/`, containing a `profile.yaml` and o
 
 **Profile.yaml mirrors config.yaml.** The profile format uses the same field names and structure as `config.yaml`, plus profile-specific fields (`workdir`, `directories`). Users learn one config format. Backend-specific fields (`backend`, `tart.image`, Dockerfile) are optional — omit them for backend-agnostic profiles.
 
-**Implemented profile fields:** `agent`, `model`, `backend`, `tart.image`, `env`, `agent_args`, `ports`, `workdir`, `directories`. Other config.yaml fields (`agent_files`, `mounts`, `resources`, etc.) will be supported in profile.yaml as they are implemented. Unknown fields are silently ignored — profiles written for future versions won't break on older ones.
+**Implemented profile fields:** `agent`, `model`, `backend`, `tart.image`, `env`, `agent_args`, `agent_files`, `ports`, `workdir`, `directories`. Other config.yaml fields (`mounts`, `resources`, etc.) will be supported in profile.yaml as they are implemented. Unknown fields are silently ignored — profiles written for future versions won't break on older ones.
 
 **Backend handling:**
 - `backend` in profile — optional constraint. If set, error when the user's backend doesn't match. If omitted, the profile works with any backend.
@@ -178,9 +179,9 @@ env:
   GOMODCACHE: /home/yoloai/go/pkg/mod     # Go module cache
 # agent_args:                             # per-agent default CLI args
 #   aider: "--no-auto-commits"
-# [PLANNED] agent_files: "${HOME}"        # string: base dir (agent subdir appended automatically)
+# agent_files: "${HOME}"                  # string: base dir (agent subdir appended automatically)
 # --- or ---
-# [PLANNED] agent_files:                  # list: specific files/dirs to copy verbatim
+# agent_files:                            # list: specific files/dirs to copy verbatim
 #   - ~/.claude/settings.json
 #   - /shared/configs/CLAUDE.md
 # [PLANNED] mounts:                       # bind mounts added at container run time
@@ -229,7 +230,7 @@ The full merge table for reference:
 | `workdir`              | Profile provides default, CLI replaces                   |
 | `directories`          | Profile provides defaults, CLI `-d` is additive          |
 | [PLANNED] `profile`              | Defaults provide fallback. CLI `--profile` overrides. `--no-profile` uses base image. |
-| [PLANNED] `agent_files`          | Profile **replaces** defaults (no merge)                 |
+| `agent_files`          | Profile **replaces** defaults (no merge)                 |
 | [PLANNED] `mounts`               | Additive (no deduplication — duplicates are user error)  |
 | `resources`            | Profile overrides individual values                      |
 | [PLANNED] `cap_add`              | Additive                                                 |
