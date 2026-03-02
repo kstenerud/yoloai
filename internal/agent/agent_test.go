@@ -110,6 +110,7 @@ func TestGetAgent_OpenCode(t *testing.T) {
 	assert.Equal(t, PromptModeHeadless, def.PromptMode)
 	assert.Equal(t, []string{"ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "GROQ_API_KEY", "OPENROUTER_API_KEY", "XAI_API_KEY"}, def.APIKeyEnvVars)
 	assert.Equal(t, []string{"GITHUB_TOKEN", "LOCAL_ENDPOINT", "AZURE_OPENAI_ENDPOINT", "AWS_ACCESS_KEY_ID", "AWS_PROFILE", "AWS_DEFAULT_PROFILE", "AWS_REGION", "AWS_DEFAULT_REGION", "VERTEXAI_PROJECT"}, def.AuthHintEnvVars)
+	assert.True(t, def.AuthOptional)
 	require.Len(t, def.SeedFiles, 5)
 	assert.Equal(t, "~/.local/share/opencode/auth.json", def.SeedFiles[0].HostPath)
 	assert.Equal(t, "auth.json", def.SeedFiles[0].TargetPath)

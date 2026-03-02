@@ -326,15 +326,19 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 	hasAuth := hasAnyAuthFile(agentDef)
 	hasAuthHint := hasAnyAuthHint(agentDef, mergedEnv)
 	if !hasAPIKey && !hasAuth && !hasAuthHint {
-		msg := fmt.Sprintf("no authentication found for %s: set %s",
-			agentDef.Name, strings.Join(agentDef.APIKeyEnvVars, "/"))
-		if authDesc := describeSeedAuthFiles(agentDef); authDesc != "" {
-			msg += fmt.Sprintf(" or provide OAuth credentials (%s)", authDesc)
+		if agentDef.AuthOptional {
+			fmt.Fprintf(m.output, "Warning: no authentication detected for %s (it may use credentials yoloai cannot check)\n", agentDef.Name) //nolint:errcheck // best-effort warning
+		} else {
+			msg := fmt.Sprintf("no authentication found for %s: set %s",
+				agentDef.Name, strings.Join(agentDef.APIKeyEnvVars, "/"))
+			if authDesc := describeSeedAuthFiles(agentDef); authDesc != "" {
+				msg += fmt.Sprintf(" or provide OAuth credentials (%s)", authDesc)
+			}
+			if len(agentDef.AuthHintEnvVars) > 0 {
+				msg += fmt.Sprintf(", or set %s for local models", strings.Join(agentDef.AuthHintEnvVars, "/"))
+			}
+			return nil, fmt.Errorf("%s: %w", msg, ErrMissingAPIKey)
 		}
-		if len(agentDef.AuthHintEnvVars) > 0 {
-			msg += fmt.Sprintf(", or set %s for local models", strings.Join(agentDef.AuthHintEnvVars, "/"))
-		}
-		return nil, fmt.Errorf("%s: %w", msg, ErrMissingAPIKey)
 	}
 
 	// When auth is only via local model server, a model must be specified

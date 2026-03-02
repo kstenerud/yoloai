@@ -42,6 +42,7 @@ type Definition struct {
 	PromptMode        PromptMode
 	APIKeyEnvVars     []string
 	AuthHintEnvVars   []string // env vars indicating auth is configured without a cloud API key (e.g. local model servers)
+	AuthOptional      bool     // when true, missing auth is a warning not an error (for agents with many auth paths)
 	SeedFiles         []SeedFile
 	StateDir          string
 	SubmitSequence    string
@@ -145,6 +146,7 @@ var agents = map[string]*Definition{
 		PromptMode:      PromptModeHeadless,
 		APIKeyEnvVars:   []string{"ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "GROQ_API_KEY", "OPENROUTER_API_KEY", "XAI_API_KEY"},
 		AuthHintEnvVars: []string{"GITHUB_TOKEN", "LOCAL_ENDPOINT", "AZURE_OPENAI_ENDPOINT", "AWS_ACCESS_KEY_ID", "AWS_PROFILE", "AWS_DEFAULT_PROFILE", "AWS_REGION", "AWS_DEFAULT_REGION", "VERTEXAI_PROJECT"},
+		AuthOptional:    true,
 		SeedFiles: []SeedFile{
 			{HostPath: "~/.local/share/opencode/auth.json", TargetPath: "auth.json", AuthOnly: true},
 			{HostPath: "~/.opencode.json", TargetPath: ".opencode.json", AuthOnly: true, HomeDir: true},
