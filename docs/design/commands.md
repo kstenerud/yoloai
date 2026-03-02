@@ -590,48 +590,51 @@ Extensions declare which agents they support via the `agent` field — a single 
 Each extension is a standalone YAML file — self-contained, shareable, no external dependencies.
 
 ```yaml
-# ~/.yoloai/extensions/lint.yaml
-description: "Lint and fix code issues"
-agent: claude                         # optional: string or list (e.g., [claude, codex]); omit for any agent
+# ~/.yoloai/extensions/from-issue.yaml
+description: "Create a sandbox from a GitHub issue"
 
 args:
-  - name: name
-    description: "Sandbox name"
-  - name: directory
-    description: "Directory to lint"
+  - name: issue
+    description: "GitHub issue URL or number"
+  - name: workdir
+    description: "Repository directory"
 
 flags:
-  - name: severity
-    short: s
-    description: "Minimum severity to fix"
-    default: "warning"
-  - name: max-turns
-    description: "Maximum agent turns"
-    default: "5"
+  - name: model
+    short: m
+    description: "Model to use"
+    default: "sonnet"
 
 action: |
-  yoloai new "${name}" "${directory}" -a \
-    --model sonnet \
-    --prompt "Find and fix all ${severity}-level and above linting issues. Run the linter, fix what it finds, repeat until clean." \
-    -- --max-turns "${max_turns}"
+  title="$(gh issue view "${issue}" --json title -q .title)"
+  body="$(gh issue view "${issue}" --json body -q .body)"
+  slug="$(echo "${title}" | tr '[:upper:] ' '[:lower:]-' | tr -cd 'a-z0-9-' | head -c 40)"
+
+  yoloai new "${slug}" "${workdir}":copy -a \
+    --model "${model}" \
+    --prompt "Fix this GitHub issue.
+
+  Title: ${title}
+
+  ${body}"
 ```
 
 **Usage:**
 
 ```
-# Run the lint extension — creates sandbox "my-lint", lints ./src, attaches
-yoloai x lint my-lint ./src
+# Create a sandbox from issue #42, working on the current directory
+yoloai x from-issue 42 .
 
-# Override a flag
-yoloai x lint my-lint ./src --severity error
+# Use a different model
+yoloai x from-issue 42 . -m opus
 
-# Short flag
-yoloai x lint my-lint ./src -s error --max-turns 10
+# Works with URLs too
+yoloai x from-issue https://github.com/org/repo/issues/42 ~/projects/repo
 ```
 
 **How it works:**
 
-1. yoloAI finds `~/.yoloai/extensions/lint.yaml` and parses its `args` and `flags` definitions.
+1. yoloAI finds `~/.yoloai/extensions/from-issue.yaml` and parses its `args` and `flags` definitions.
 2. yoloAI parses the user's command line against those definitions — all positional args are extension-defined.
 3. If `agent` is specified in the YAML and doesn't match the current `--agent` / `defaults.agent`, error with a message suggesting the right extension.
 4. All captured values are set as environment variables and the `action` script is executed via `sh -c`.
@@ -649,47 +652,109 @@ Flags with hyphens in their name are available with underscores: `--max-turns` �
 **More examples:**
 
 ```yaml
-# ~/.yoloai/extensions/review.yaml
-description: "Code review with configurable focus"
-agent: claude
+# ~/.yoloai/extensions/race.yaml
+# Run the same task across multiple models in parallel, then compare diffs.
+description: "Race models against each other on the same task"
 
 args:
-  - name: name
-    description: "Sandbox name"
-  - name: directory
-    description: "Directory to review"
+  - name: workdir
+    description: "Directory to work on"
+  - name: prompt
+    description: "Task description"
 
 flags:
-  - name: focus
-    short: f
-    description: "Review focus area"
-    default: "bugs and security"
-  - name: model
-    short: m
-    description: "Model to use"
-    default: "opus"
+  - name: models
+    description: "Comma-separated models to race"
+    default: "sonnet,opus"
 
 action: |
-  yoloai new "${name}" "${directory}" -a \
-    --model "${model}" \
-    --prompt "Review this codebase. Focus on: ${focus}. Provide a detailed report with file locations and suggested fixes."
+  IFS=',' read -ra models <<< "${models}"
+  pids=()
+  for m in "${models[@]}"; do
+    yoloai new "race-${m}" "${workdir}":copy --model "$m" --prompt "${prompt}" &
+    pids+=($!)
+  done
+  wait "${pids[@]}"
+
+  echo "All agents launched. Compare results:"
+  for m in "${models[@]}"; do
+    echo ""
+    echo "=== ${m} ==="
+    yoloai diff "race-${m}" --stat
+  done
 ```
 
 ```yaml
-# ~/.yoloai/extensions/iterate.yaml
-description: "Destroy and recreate a sandbox with the same settings"
+# ~/.yoloai/extensions/refine.yaml
+# Destroy a sandbox and recreate it with the previous diff and feedback
+# baked into the new prompt, so the agent can improve on its first attempt.
+description: "Iterate on a sandbox with feedback"
 
 args:
   - name: sandbox
-    description: "Sandbox to recreate"
+    description: "Existing sandbox to refine"
+  - name: feedback
+    description: "What to improve"
 
 action: |
-  workdir="$(yoloai sandbox info --json "${sandbox}" | jq -r .workdir.host_path)"
+  info="$(yoloai sandbox info --json "${sandbox}")"
+  workdir="$(echo "${info}" | jq -r .workdir.host_path)"
+  model="$(echo "${info}" | jq -r .model)"
+  prev_prompt="$(cat ~/.yoloai/sandboxes/${sandbox}/prompt.txt 2>/dev/null || echo '(none)')"
+  prev_diff="$(yoloai diff "${sandbox}" 2>/dev/null || echo '(no changes)')"
+
   yoloai destroy --yes "${sandbox}"
-  yoloai new "${sandbox}" "${workdir}" -a
+  yoloai new "${sandbox}" "${workdir}":copy -a \
+    --model "${model}" \
+    --prompt "Previous attempt at this task produced the diff below.
+
+  The user's feedback: ${feedback}
+
+  Original prompt: ${prev_prompt}
+
+  Previous diff:
+  ${prev_diff}
+
+  Incorporate the feedback and produce an improved version."
 ```
 
-**The action script is not limited to `yoloai new`** — it can call any yoloAI command (`exec`, `destroy`, `diff`), chain multiple commands, use conditionals, or call external tools. yoloAI is just the argument parser and executor; the script defines the behavior.
+```yaml
+# ~/.yoloai/extensions/pr-review.yaml
+# Fetch a PR diff, have the agent review it, extract a structured report.
+description: "AI code review for a pull request"
+agent: claude
+
+args:
+  - name: workdir
+    description: "Repository directory"
+
+flags:
+  - name: pr
+    description: "PR number"
+  - name: focus
+    short: f
+    description: "Review focus areas"
+    default: "bugs, security, correctness"
+
+action: |
+  diff="$(cd "${workdir}" && gh pr diff "${pr}")"
+  pr_title="$(cd "${workdir}" && gh pr view "${pr}" --json title -q .title)"
+
+  yoloai new "review-pr${pr}" "${workdir}" \
+    --prompt "Review this pull request. Focus on: ${focus}
+
+  Title: ${pr_title}
+
+  ${diff}
+
+  Write your review to /yoloai/files/review.md with sections:
+  Summary, Issues Found, Suggestions, Verdict."
+
+  echo "Review written. Retrieve it with:"
+  echo "  yoloai files get review-pr${pr} review.md"
+```
+
+Extensions compose yoloai with the rest of the unix ecosystem — `gh`, `jq`, `git`, and any other tools. They're most valuable for multi-step workflows that cross the boundary of a single sandbox: orchestrating parallel runs, feeding one sandbox's output into another, or integrating with external services.
 
 **Listing extensions:**
 
