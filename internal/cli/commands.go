@@ -35,6 +35,7 @@ func registerCommands(root *cobra.Command, version, commit, date string) {
 		newAttachCmd(),
 		newDiffCmd(),
 		newApplyCmd(),
+		newFilesCmd(),
 
 		// Lifecycle
 		newStartCmd(),
@@ -51,7 +52,6 @@ func registerCommands(root *cobra.Command, version, commit, date string) {
 		newExecAliasCmd(),
 
 		// Admin
-		newFilesCmd(),
 		newProfileCmd(),
 		newHelpCmd(),
 		newConfigCmd(),

@@ -13,7 +13,7 @@ import (
 func newAttachCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:     "attach <name>",
-		Short:   "Attach to a sandbox's tmux session",
+		Short:   "Attach to a sandbox's session (tmux)",
 		GroupID: groupWorkflow,
 		Args:    cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {

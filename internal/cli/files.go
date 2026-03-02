@@ -19,7 +19,7 @@ func newFilesCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "files",
 		Short:   "Exchange files with a sandbox",
-		GroupID: groupAdmin,
+		GroupID: groupWorkflow,
 	}
 
 	cmd.AddCommand(

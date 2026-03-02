@@ -15,7 +15,7 @@ import (
 func newConfigCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "config",
-		Short:   "Get or set configuration values",
+		Short:   "Get or set global configuration values",
 		GroupID: groupAdmin,
 	}
 

@@ -20,7 +20,7 @@ type applyResult struct {
 func newApplyCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "apply <name> [<ref>...] [-- <path>...]",
-		Short: "Apply agent changes back to original directory",
+		Short: "Apply agent changes back to original work directory",
 		Long: `Apply agent changes back to the original directory.
 
 By default, individual commits are preserved using git format-patch/am.
