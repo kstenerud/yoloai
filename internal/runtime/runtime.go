@@ -17,8 +17,8 @@ var (
 
 // PruneItem describes a single orphaned resource found during pruning.
 type PruneItem struct {
-	Kind string // "container", "vm"
-	Name string // instance name
+	Kind string // "container", "vm", "image"
+	Name string // instance name or short image ID
 }
 
 // PruneResult summarizes orphaned resources found by a backend.

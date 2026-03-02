@@ -1,6 +1,6 @@
 package docker
 
-// ABOUTME: Finds and removes orphaned yoloai-* Docker containers.
+// ABOUTME: Finds and removes orphaned yoloai-* Docker containers and dangling images.
 
 import (
 	"context"
@@ -10,6 +10,7 @@ import (
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/filters"
+	"github.com/docker/docker/api/types/image"
 
 	"github.com/kstenerud/yoloai/internal/runtime"
 )
@@ -52,5 +53,50 @@ func (r *Runtime) Prune(ctx context.Context, knownInstances []string, dryRun boo
 		}
 	}
 
+	// Scan for dangling images (stale build layers from image rebuilds).
+	danglingImages, err := r.client.ImageList(ctx, image.ListOptions{
+		Filters: filters.NewArgs(filters.Arg("dangling", "true")),
+	})
+	if err != nil {
+		fmt.Fprintf(output, "Warning: failed to list dangling images: %v\n", err) //nolint:errcheck // best-effort output
+		return result, nil
+	}
+
+	for _, img := range danglingImages {
+		shortID := strings.TrimPrefix(img.ID, "sha256:")
+		if len(shortID) > 12 {
+			shortID = shortID[:12]
+		}
+		result.Items = append(result.Items, runtime.PruneItem{
+			Kind: "image",
+			Name: shortID,
+		})
+	}
+
+	if !dryRun && len(danglingImages) > 0 {
+		report, err := r.client.ImagesPrune(ctx, filters.NewArgs(filters.Arg("dangling", "true")))
+		if err != nil {
+			fmt.Fprintf(output, "Warning: failed to prune dangling images: %v\n", err) //nolint:errcheck // best-effort output
+		} else if report.SpaceReclaimed > 0 {
+			fmt.Fprintf(output, "Reclaimed %s from dangling images\n", formatBytes(report.SpaceReclaimed)) //nolint:errcheck // best-effort output
+		}
+	}
+
 	return result, nil
+}
+
+// formatBytes formats a byte count as a human-readable string.
+func formatBytes(b uint64) string {
+	const (
+		mb = 1024 * 1024
+		gb = 1024 * 1024 * 1024
+	)
+	switch {
+	case b >= gb:
+		return fmt.Sprintf("%.2f GB", float64(b)/float64(gb))
+	case b >= mb:
+		return fmt.Sprintf("%.1f MB", float64(b)/float64(mb))
+	default:
+		return fmt.Sprintf("%d B", b)
+	}
 }
