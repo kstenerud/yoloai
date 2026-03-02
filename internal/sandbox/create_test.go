@@ -57,26 +57,38 @@ func TestResolveModel_NilUserAliasesFallsBack(t *testing.T) {
 
 func TestBuildAgentCommand_InteractiveWithModel(t *testing.T) {
 	agentDef := agent.GetAgent("claude")
-	result := buildAgentCommand(agentDef, "claude-opus-4-latest", "", nil)
+	result := buildAgentCommand(agentDef, "claude-opus-4-latest", "", "", nil)
 	assert.Equal(t, "claude --dangerously-skip-permissions --model claude-opus-4-latest", result)
 }
 
 func TestBuildAgentCommand_InteractiveWithPassthrough(t *testing.T) {
 	agentDef := agent.GetAgent("claude")
-	result := buildAgentCommand(agentDef, "claude-sonnet-4-latest", "", []string{"--max-turns", "5"})
+	result := buildAgentCommand(agentDef, "claude-sonnet-4-latest", "", "", []string{"--max-turns", "5"})
 	assert.Equal(t, "claude --dangerously-skip-permissions --model claude-sonnet-4-latest --max-turns 5", result)
 }
 
 func TestBuildAgentCommand_HeadlessWithPrompt(t *testing.T) {
 	agentDef := agent.GetAgent("test")
-	result := buildAgentCommand(agentDef, "", "echo hello", nil)
+	result := buildAgentCommand(agentDef, "", "echo hello", "", nil)
 	assert.Equal(t, `sh -c "echo hello"`, result)
 }
 
 func TestBuildAgentCommand_InteractiveFallback(t *testing.T) {
 	agentDef := agent.GetAgent("test")
-	result := buildAgentCommand(agentDef, "", "", nil)
+	result := buildAgentCommand(agentDef, "", "", "", nil)
 	assert.Equal(t, "bash", result)
+}
+
+func TestBuildAgentCommand_WithAgentArgs(t *testing.T) {
+	agentDef := agent.GetAgent("claude")
+	result := buildAgentCommand(agentDef, "claude-sonnet-4-latest", "", "--allowedTools '*'", []string{"--max-turns", "5"})
+	assert.Equal(t, "claude --dangerously-skip-permissions --model claude-sonnet-4-latest --allowedTools '*' --max-turns 5", result)
+}
+
+func TestBuildAgentCommand_AgentArgsOnly(t *testing.T) {
+	agentDef := agent.GetAgent("claude")
+	result := buildAgentCommand(agentDef, "", "", "--verbose", nil)
+	assert.Equal(t, "claude --dangerously-skip-permissions --verbose", result)
 }
 
 func TestBuildContainerConfig_ValidJSON(t *testing.T) {

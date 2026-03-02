@@ -22,6 +22,7 @@ type YoloaiConfig struct {
 	Resources *ResourceLimits   `yaml:"resources"`  // resources — container resource limits
 	Network   *NetworkConfig    `yaml:"network"`    // network — network isolation settings
 	Mounts    []string          `yaml:"mounts"`     // mounts — extra bind mounts (host:container[:ro])
+	AgentArgs map[string]string `yaml:"agent_args"` // agent_args — per-agent default CLI args
 }
 
 // ResourceLimits holds container resource constraints (CPU, memory).
@@ -71,6 +72,7 @@ type knownCollectionSetting struct {
 // knownCollectionSettings lists non-scalar config keys shown in effective config.
 // Each appears as an empty mapping ({}) or sequence ([]) when not set by the user.
 var knownCollectionSettings = []knownCollectionSetting{
+	{"agent_args", yaml.MappingNode},
 	{"env", yaml.MappingNode},
 	{"mounts", yaml.SequenceNode},
 	{"network.allow", yaml.SequenceNode},
@@ -140,6 +142,18 @@ func LoadConfig() (*YoloaiConfig, error) {
 		val := root.Content[i+1]
 
 		switch key.Value {
+		case "agent_args":
+			if val.Kind == yaml.MappingNode {
+				cfg.AgentArgs = make(map[string]string, len(val.Content)/2)
+				for k := 0; k < len(val.Content)-1; k += 2 {
+					agentKey := val.Content[k].Value
+					agentExpanded, agentErr := expandEnvBraced(val.Content[k+1].Value)
+					if agentErr != nil {
+						return nil, fmt.Errorf("agent_args.%s: %w", agentKey, agentErr)
+					}
+					cfg.AgentArgs[agentKey] = agentExpanded
+				}
+			}
 		case "env":
 			if val.Kind == yaml.MappingNode {
 				cfg.Env = make(map[string]string, len(val.Content)/2)

@@ -779,3 +779,74 @@ func TestMergeProfileChain_ResourcesFromBaseConfig(t *testing.T) {
 		t.Errorf("Resources.Memory = %q, want %q", merged.Resources.Memory, "4g")
 	}
 }
+
+func TestLoadProfile_AgentArgs(t *testing.T) {
+	yaml := `
+agent_args:
+  aider: "--no-auto-commits --no-pretty"
+  claude: "--allowedTools '*'"
+`
+	setupProfileDir(t, "args-profile", yaml)
+
+	cfg, err := LoadProfile("args-profile")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if cfg.AgentArgs["aider"] != "--no-auto-commits --no-pretty" {
+		t.Errorf("AgentArgs[aider] = %q, want %q", cfg.AgentArgs["aider"], "--no-auto-commits --no-pretty")
+	}
+	if cfg.AgentArgs["claude"] != "--allowedTools '*'" {
+		t.Errorf("AgentArgs[claude] = %q, want %q", cfg.AgentArgs["claude"], "--allowedTools '*'")
+	}
+}
+
+func TestMergeProfileChain_AgentArgsMerge(t *testing.T) {
+	home := setupProfileDir(t, "args-parent", "agent_args:\n  aider: \"--no-auto-commits\"\n  claude: \"--verbose\"\n")
+
+	childDir := filepath.Join(home, ".yoloai", "profiles", "args-child")
+	if err := os.MkdirAll(childDir, 0750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(childDir, "profile.yaml"),
+		[]byte("extends: args-parent\nagent_args:\n  aider: \"--no-pretty\"\n  gemini: \"--fast\"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	base := &YoloaiConfig{AgentArgs: map[string]string{"aider": "--base-flag"}}
+
+	chain := []string{"base", "args-parent", "args-child"}
+	merged, err := MergeProfileChain(base, chain)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// aider: child overrides parent and base
+	if merged.AgentArgs["aider"] != "--no-pretty" {
+		t.Errorf("AgentArgs[aider] = %q, want %q (child should win)", merged.AgentArgs["aider"], "--no-pretty")
+	}
+	// claude: from parent (child doesn't override)
+	if merged.AgentArgs["claude"] != "--verbose" {
+		t.Errorf("AgentArgs[claude] = %q, want %q", merged.AgentArgs["claude"], "--verbose")
+	}
+	// gemini: from child
+	if merged.AgentArgs["gemini"] != "--fast" {
+		t.Errorf("AgentArgs[gemini] = %q, want %q", merged.AgentArgs["gemini"], "--fast")
+	}
+}
+
+func TestMergeProfileChain_AgentArgsFromBaseOnly(t *testing.T) {
+	setupProfileDir(t, "no-args", "agent: claude\n")
+
+	base := &YoloaiConfig{AgentArgs: map[string]string{"aider": "--no-auto-commits"}}
+
+	chain := []string{"base", "no-args"}
+	merged, err := MergeProfileChain(base, chain)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if merged.AgentArgs["aider"] != "--no-auto-commits" {
+		t.Errorf("AgentArgs[aider] = %q, want %q (should come from base config)", merged.AgentArgs["aider"], "--no-auto-commits")
+	}
+}

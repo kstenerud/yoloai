@@ -26,6 +26,7 @@ type ProfileConfig struct {
 	Resources   *ResourceLimits   // resource limits (cpus, memory)
 	Network     *NetworkConfig    // network isolation settings
 	Mounts      []string          // extra bind mounts (host:container[:ro])
+	AgentArgs   map[string]string // per-agent default CLI args
 }
 
 // ProfileWorkdir defines a workdir from a profile.
@@ -55,6 +56,7 @@ type MergedConfig struct {
 	Resources   *ResourceLimits   // from per-field merge across chain
 	Network     *NetworkConfig    // isolated overrides (last wins), allow additive
 	Mounts      []string          // additive across chain (host:container[:ro])
+	AgentArgs   map[string]string // merged across chain (map merge, later wins)
 }
 
 // ProfileDirPath returns the host-side directory for a profile.
@@ -204,6 +206,18 @@ func LoadProfile(name string) (*ProfileConfig, error) {
 					if subKey == "image" {
 						cfg.TartImage = subExpanded
 					}
+				}
+			}
+		case "agent_args":
+			if val.Kind == yaml.MappingNode {
+				cfg.AgentArgs = make(map[string]string, len(val.Content)/2)
+				for k := 0; k < len(val.Content)-1; k += 2 {
+					agentKey := val.Content[k].Value
+					agentExpanded, agentErr := expandEnvBraced(val.Content[k+1].Value)
+					if agentErr != nil {
+						return nil, fmt.Errorf("agent_args.%s: %w", agentKey, agentErr)
+					}
+					cfg.AgentArgs[agentKey] = agentExpanded
 				}
 			}
 		case "env":
@@ -431,6 +445,13 @@ func MergeProfileChain(base *YoloaiConfig, chain []string) (*MergedConfig, error
 		copy(merged.Mounts, base.Mounts)
 	}
 
+	if len(base.AgentArgs) > 0 {
+		merged.AgentArgs = make(map[string]string, len(base.AgentArgs))
+		for k, v := range base.AgentArgs {
+			merged.AgentArgs[k] = v
+		}
+	}
+
 	// Apply each non-base profile in order
 	for _, name := range chain {
 		if name == "base" {
@@ -463,6 +484,16 @@ func MergeProfileChain(base *YoloaiConfig, chain []string) (*MergedConfig, error
 			}
 			for k, v := range profile.Env {
 				merged.Env[k] = v
+			}
+		}
+
+		// AgentArgs: map merge, later wins on conflict
+		if len(profile.AgentArgs) > 0 {
+			if merged.AgentArgs == nil {
+				merged.AgentArgs = make(map[string]string)
+			}
+			for k, v := range profile.AgentArgs {
+				merged.AgentArgs[k] = v
 			}
 		}
 

@@ -457,8 +457,11 @@ func (m *Manager) relaunchAgentWithResume(ctx context.Context, name string, meta
 		return fmt.Errorf("unknown agent: %s", meta.Agent)
 	}
 
+	// Resolve agent_args from config/profile
+	agentArgs := resolveAgentArgs(meta.Agent, meta.Profile)
+
 	// Build interactive command (no headless prompt baked in)
-	interactiveCmd := buildAgentCommand(agentDef, meta.Model, "", cfg.Passthrough)
+	interactiveCmd := buildAgentCommand(agentDef, meta.Model, "", agentArgs, cfg.Passthrough)
 
 	// Respawn with interactive command
 	_, err = execInContainer(ctx, m.runtime, InstanceName(name), []string{
@@ -556,7 +559,8 @@ func (m *Manager) prepareResumeFiles(name string, meta *Meta) error {
 		return fmt.Errorf("unknown agent: %s", meta.Agent)
 	}
 
-	cfg.AgentCommand = buildAgentCommand(agentDef, meta.Model, "", cfg.Passthrough)
+	agentArgs := resolveAgentArgs(meta.Agent, meta.Profile)
+	cfg.AgentCommand = buildAgentCommand(agentDef, meta.Model, "", agentArgs, cfg.Passthrough)
 
 	updated, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
@@ -656,6 +660,25 @@ rm -f /tmp/yoloai-reset.txt`, appendPrompt, cfg.SubmitSequence)
 		"bash", "-c", script, "_", resetNotification,
 	})
 	return err
+}
+
+// resolveAgentArgs loads agent_args for the given agent from config and profile.
+// Returns empty string if no args are configured.
+func resolveAgentArgs(agentName, profileName string) string {
+	cfg, err := LoadConfig()
+	if err != nil {
+		return ""
+	}
+	if profileName != "" {
+		chain, chainErr := ResolveProfileChain(profileName)
+		if chainErr == nil {
+			merged, mergeErr := MergeProfileChain(cfg, chain)
+			if mergeErr == nil {
+				return merged.AgentArgs[agentName]
+			}
+		}
+	}
+	return cfg.AgentArgs[agentName]
 }
 
 // patchConfigDebug reads config.json, sets the debug field, and writes it back.

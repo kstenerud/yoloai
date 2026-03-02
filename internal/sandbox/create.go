@@ -165,6 +165,7 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 	var resources *ResourceLimits
 	var mergedMounts []string
 	mergedEnv := ycfg.Env
+	mergedAgentArgs := ycfg.AgentArgs
 	userAliases := gcfg.ModelAliases
 	if opts.Profile != "" {
 		if err := ValidateProfileName(opts.Profile); err != nil {
@@ -195,6 +196,7 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 		}
 
 		mergedEnv = merged.Env
+		mergedAgentArgs = merged.AgentArgs
 
 		if merged.Resources != nil {
 			r := *merged.Resources
@@ -589,7 +591,8 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 	model = applyModelPrefix(agentDef, model, mergedEnv)
 
 	// Build agent command
-	agentCommand := buildAgentCommand(agentDef, model, promptText, opts.Passthrough)
+	agentArgs := mergedAgentArgs[opts.Agent]
+	agentCommand := buildAgentCommand(agentDef, model, promptText, agentArgs, opts.Passthrough)
 
 	// Read tmux_conf from global config
 	tmuxConf := gcfg.TmuxConf
@@ -902,7 +905,8 @@ func applyModelPrefix(agentDef *agent.Definition, model string, configEnv map[st
 }
 
 // buildAgentCommand constructs the full agent command string for config.json.
-func buildAgentCommand(agentDef *agent.Definition, model string, prompt string, passthrough []string) string {
+// Arg priority (left to right, last flag wins): base cmd → model flag → agentArgs → passthrough.
+func buildAgentCommand(agentDef *agent.Definition, model string, prompt string, agentArgs string, passthrough []string) string {
 	var cmd string
 
 	if agentDef.PromptMode == agent.PromptModeHeadless && prompt != "" {
@@ -913,6 +917,10 @@ func buildAgentCommand(agentDef *agent.Definition, model string, prompt string, 
 		if model != "" && agentDef.ModelFlag != "" {
 			cmd += " " + agentDef.ModelFlag + " " + model
 		}
+	}
+
+	if agentArgs != "" {
+		cmd += " " + agentArgs
 	}
 
 	for _, arg := range passthrough {

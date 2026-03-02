@@ -65,6 +65,9 @@ agent: claude                           # Agent to launch: aider, claude, codex,
 # auto_commit_interval: 0              # [PLANNED] seconds between auto-commits in :copy dirs; 0 = disabled
 # ports: []                            # [PLANNED] default port mappings; profile ports are additive
 env: {}                                # Environment variables forwarded to container via /run/secrets/
+# agent_args:                           # Per-agent default CLI args (inserted before -- passthrough)
+#   aider: "--no-auto-commits --no-pretty"
+#   claude: "--allowedTools '*'"
 # network_isolated: false              # [PLANNED] true to enable network isolation by default
 # network_allow: []                    # [PLANNED] additional domains to allow (additive with agent defaults)
 # resources:                           # [PLANNED] container resource limits
@@ -84,6 +87,7 @@ Settings are managed via `yoloai config get/set` (keys are automatically routed 
 - `agent` selects the agent to launch. Valid values: `aider`, `claude`, `codex`, `gemini`, `opencode`. CLI `--agent` overrides config.
 - `model` sets the model name or alias passed to the agent. Empty means the agent uses its own default. CLI `--model` overrides config.
 - `env` sets environment variables forwarded to the container. Values are written as files in `/run/secrets/` (same mechanism as API keys). API keys take precedence if a name conflicts. Supports `${VAR}` expansion. Set via `yoloai config set env.NAME value`. Profile `env` merges with defaults (profile values win on conflict).
+- `agent_args` sets per-agent default CLI args. Map of agent name → arg string. Args are inserted between the model flag and CLI passthrough (`--` args), so passthrough always wins. Set via `yoloai config set agent_args.aider "--no-auto-commits"`. Profile `agent_args` merges with defaults (profile values win on conflict per agent key).
 
 Agents may define `AuthHintEnvVars` — environment variables that indicate authentication is configured through a non-API-key mechanism (e.g. local model server). When any of these vars are set (in host env or `env`), the auth check passes without requiring a cloud API key.
 
@@ -139,7 +143,7 @@ Profiles live in `~/.yoloai/profiles/<name>/`, containing a `profile.yaml` and o
 
 **Profile.yaml mirrors config.yaml.** The profile format uses the same field names and structure as `config.yaml`, plus profile-specific fields (`workdir`, `directories`). Users learn one config format. Backend-specific fields (`backend`, `tart.image`, Dockerfile) are optional — omit them for backend-agnostic profiles.
 
-**Implemented profile fields:** `agent`, `model`, `backend`, `tart.image`, `env`, `ports`, `workdir`, `directories`. Other config.yaml fields (`agent_files`, `mounts`, `resources`, etc.) will be supported in profile.yaml as they are implemented. Unknown fields are silently ignored — profiles written for future versions won't break on older ones.
+**Implemented profile fields:** `agent`, `model`, `backend`, `tart.image`, `env`, `agent_args`, `ports`, `workdir`, `directories`. Other config.yaml fields (`agent_files`, `mounts`, `resources`, etc.) will be supported in profile.yaml as they are implemented. Unknown fields are silently ignored — profiles written for future versions won't break on older ones.
 
 **Backend handling:**
 - `backend` in profile — optional constraint. If set, error when the user's backend doesn't match. If omitted, the profile works with any backend.
@@ -173,6 +177,8 @@ ports:
   - "8080:8080"
 env:
   GOMODCACHE: /home/yoloai/go/pkg/mod     # Go module cache
+# agent_args:                             # per-agent default CLI args
+#   aider: "--no-auto-commits"
 # [PLANNED] agent_files:                  # files seeded into agent-state/ on first run
 #   - ~/.claude/CLAUDE.md
 #   - /shared/configs/claude-settings.json

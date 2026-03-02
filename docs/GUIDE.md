@@ -319,6 +319,7 @@ yoloai config reset defaults.env.OLLAMA_API_BASE
 | `defaults.backend` | `docker` | Runtime backend: `docker`, `tart`, `seatbelt` |
 | `defaults.tart.image` | (empty) | Custom base VM image for tart backend |
 | `defaults.env.<NAME>` | (empty) | Environment variable forwarded to container |
+| `agent_args.<AGENT>` | (empty) | Default CLI args for an agent (e.g., `agent_args.aider`) |
 | `tmux_conf` | (set by setup) | Tmux config mode (global config) |
 | `model_aliases.<alias>` | (empty) | Custom model alias (global config) |
 
@@ -327,6 +328,8 @@ Agent resolution: `new` uses `--agent` flag > `defaults.agent` in config > `"cla
 Model resolution: `new` uses `--model` flag > `defaults.model` in config > `""` (empty = agent's default model).
 
 Backend resolution: `new`/`build`/`setup` use `--backend` flag > `defaults.backend` in config > `"docker"`. Lifecycle commands read the backend from the sandbox's `meta.json`, falling back to config default.
+
+Agent args: persistent default CLI args for specific agents. Inserted between the model flag and CLI passthrough (`--` args), so passthrough always takes precedence. Example: `yoloai config set agent_args.aider "--no-auto-commits --no-pretty"`. Profile `agent_args` merge with base config (per-agent key, profile wins on conflict).
 
 You can also edit the config files directly — `config set` preserves comments and formatting.
 
