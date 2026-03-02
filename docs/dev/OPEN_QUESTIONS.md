@@ -223,7 +223,7 @@ These were deferred from MVP but might be cheap to add and valuable for dogfoodi
 
 ## Reference Files in Sandboxes
 
-99. **Reference files pollute diff/apply workflow** — When a user copies a file into the sandbox work dir for the agent to inspect (e.g., a log file), it becomes part of the git state and interferes with `yoloai apply`: the untracked file blocks apply (host doesn't have it), and deleting it creates a WIP deletion patch that fails on the host (file never existed there). Need a way to provide reference material to the agent without polluting the diff. Options: (a) a separate read-only reference mount (e.g., `/yoloai/ref/`) outside the work dir, (b) an ignore mechanism (`.yoloaiignore`) to exclude files from the WIP diff, (c) more resilient WIP apply that skips hunks for files that don't exist on the target rather than failing entirely.
+99. ~~**Reference files pollute diff/apply workflow**~~ — **Resolved.** Bidirectional file exchange directory: `~/.yoloai/sandboxes/<name>/files/` on host, mounted rw at `/yoloai/files/` in sandbox. Managed via `yoloai files` subcommands (`put`, `get`, `ls`, `rm`, `path`). Lives outside the work dir so it never appears in diff/apply. Works across all backends (Docker bind mount, Tart VirtioFS, Seatbelt SBPL sandbox dir rule). See [commands.md](../design/commands.md) for full spec.
 
 ## Unresolved (Codex and cleanup)
 

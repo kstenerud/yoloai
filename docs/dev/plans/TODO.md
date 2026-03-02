@@ -18,6 +18,7 @@ Create a plan file in this directory before starting implementation.
 | ~~`--resume` on `start`~~ | [commands.md](../../design/commands.md) | — | Done |
 | `--power-user` on `setup` | [setup.md](../../design/setup.md) | — | Non-interactive setup for automation |
 | `list` filters | [commands.md](../../design/commands.md) | — | `--running`, `--stopped` |
+| `files` subcommands | [commands.md](../../design/commands.md) | — | `put`, `get`, `ls`, `rm`, `path` — bidirectional file exchange dir |
 
 ## Config Options
 

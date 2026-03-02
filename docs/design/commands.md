@@ -54,6 +54,11 @@ Admin:
   yoloai profile list                            List profiles
   yoloai profile info <name>                     Show merged profile configuration
   yoloai profile delete <name>                   Delete a profile
+  yoloai files put <name> <file>...                    Copy files into sandbox exchange dir  [PLANNED]
+  yoloai files get <name> <file> [dst]                 Copy a file out of sandbox exchange dir  [PLANNED]
+  yoloai files ls <name> [glob]                        List files in sandbox exchange dir  [PLANNED]
+  yoloai files rm <name> <glob>                        Remove files from sandbox exchange dir  [PLANNED]
+  yoloai files path <name>                             Print host path to sandbox exchange dir  [PLANNED]
   yoloai x <extension> <name> [args...] [--flags...]  Run a user-defined extension  [PLANNED]
   yoloai completion [bash|zsh|fish|powershell]   Generate shell completion script
   yoloai version                                 Show version information
@@ -684,6 +689,48 @@ action: |
 - `flags` support `short` (single char), `default` (string), and `description`. Flag names and shorts must not collide with yoloAI's global flags (`--verbose`/`-v`, `--quiet`/`-q`, `--yes`/`-y`, `--no-color`, `--help`/`-h`) — error at parse time if they do.
 - Missing required args (no `default`) produce a usage error with the extension's arg definitions.
 - The `action` field is required.
+
+### `yoloai files`
+
+Bidirectional file exchange between host and sandbox. Files live in `~/.yoloai/sandboxes/<name>/files/` on the host, mounted read-write at `/yoloai/files/` inside the sandbox. Both the user and the agent can read and write here. The directory is created when the sandbox is created and destroyed with `yoloai destroy`.
+
+**Purpose:** Pass reference material to the agent (logs, specs, screenshots) without polluting the work directory's git state, and retrieve artifacts the agent produces (reports, generated files) without them appearing in `yoloai diff` / `yoloai apply`.
+
+**Mount details:**
+
+| Backend  | Mechanism | Read-only enforcement |
+|----------|-----------|----------------------|
+| Docker   | Bind mount to `/yoloai/files/` | N/A (intentionally rw) |
+| Tart     | VirtioFS share, remapped to `/Users/admin/.yoloai/files/` | N/A (intentionally rw) |
+| Seatbelt | SBPL profile grants rw on sandbox dir; accessible at source path | N/A (intentionally rw) |
+
+#### `yoloai files put <sandbox> <file>...`
+
+Copy one or more files or directories into the sandbox's exchange directory. Directories are copied recursively. If a target file already exists, the command fails with an error listing the conflicting paths.
+
+Options:
+- `--force`: Overwrite existing files instead of failing.
+
+#### `yoloai files get <sandbox> <file> [dst]`
+
+Copy a file from the sandbox's exchange directory to the host. `<file>` is relative to the exchange directory. `dst` defaults to the current working directory. If the destination file already exists, the command fails.
+
+Options:
+- `--force`: Overwrite existing destination file instead of failing.
+
+#### `yoloai files ls <sandbox> [glob]`
+
+List files in the exchange directory. Without a glob, lists everything (implicit `*`). Glob matching does not treat dotfiles specially — `*` matches `.hidden` files. Output is one path per line, relative to the exchange directory.
+
+#### `yoloai files rm <sandbox> <glob>`
+
+Remove files matching the glob from the exchange directory. The glob argument is required — no implicit wildcard. Removes read-only files without prompting (uses whatever OS operations are needed to force deletion). Glob matching does not treat dotfiles specially.
+
+Prints the list of removed files. If no files match the glob, exits with an error.
+
+#### `yoloai files path <sandbox>`
+
+Print the absolute host-side path to the exchange directory (`~/.yoloai/sandboxes/<name>/files/`). Useful for direct manipulation with host tools (`cp`, `rsync`, `open`, etc.).
 
 ### Image Cleanup
 
