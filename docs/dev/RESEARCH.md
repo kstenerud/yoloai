@@ -432,10 +432,10 @@ ZFS and Btrfs are too host-dependent to serve as primary mechanisms (require the
 
 This section documents the headless/Docker characteristics of major AI coding CLI agents. Claude Code and Codex are supported in v1; additional agents are researched for future versions.
 
-**Known research gaps (v1):**
-- **Codex proxy support:** Whether the static Rust binary honors `HTTP_PROXY`/`HTTPS_PROXY` env vars is unverified. Critical for `--network-isolated` mode. If Codex ignores proxy env vars, `--network-isolated` with Codex would require iptables-only enforcement (no proxy-based domain allowlisting for the agent's own traffic).
-- **Codex required network domains:** Only `api.openai.com` is confirmed. Additional domains (telemetry, model downloads) may be required.
-- **Codex TUI behavior in tmux:** Interactive mode (`codex --yolo` without `exec`) behavior in tmux is unverified.
+**Resolved research gaps (v1):**
+- **Codex proxy support:** Not supported. The static Rust binary does not honor `HTTP_PROXY`/`HTTPS_PROXY`. Open upstream issues: github.com/openai/codex#4242, github.com/openai/codex#6060.
+- **Codex required network domains:** Confirmed `api.openai.com` only. Telemetry uses user-configured OTLP endpoints, not hardcoded domains.
+- **Codex TUI behavior in tmux:** Confirmed working. Interactive mode runs correctly in tmux.
 
 ### Viable Agents
 
@@ -457,11 +457,13 @@ This section documents the headless/Docker characteristics of major AI coding CL
 - **Headless command:** `codex exec --yolo "task"`
 - **API key env vars:** `CODEX_API_KEY` (preferred), `OPENAI_API_KEY` (fallback)
 - **State dir:** `~/.codex/`
-- **Model selection:** `--model <model>` or `-m <model>` (e.g., `gpt-5-codex`, `gpt-5-codex-mini`)
+- **Model selection:** `--model <model>` or `-m <model>` (e.g., `gpt-5.3-codex`, `gpt-5.3-codex-spark`, `codex-mini-latest`)
+- **Model aliases:** `default` → `gpt-5.3-codex`, `spark` → `gpt-5.3-codex-spark`, `mini` → `codex-mini-latest`
 - **Sandbox bypass:** `--yolo` (alias `--dangerously-bypass-approvals-and-sandbox`)
 - **Runtime:** Rust (statically-linked musl binary, zero runtime deps)
+- **Proxy support:** Not supported — does not honor `HTTP_PROXY`/`HTTPS_PROXY` (upstream issues github.com/openai/codex#4242, #6060)
 - **Root restriction:** None found, but convention is non-root
-- **Docker quirks:** `codex exec` avoids TUI entirely — no tmux needed; `--skip-git-repo-check` useful outside repos; Landlock sandbox may fail in containers (use `--yolo`)
+- **Docker quirks:** `codex exec` avoids TUI entirely — no tmux needed; `--skip-git-repo-check` useful outside repos; Landlock sandbox may fail in containers (use `--yolo`); TUI works correctly in tmux
 - **Sources:** [CLI reference](https://developers.openai.com/codex/cli/reference/), [Security docs](https://developers.openai.com/codex/security/)
 
 #### Google Gemini CLI

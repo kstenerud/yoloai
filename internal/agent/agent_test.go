@@ -147,7 +147,9 @@ func TestGetAgent_Codex(t *testing.T) {
 	assert.Equal(t, 3*time.Second, def.StartupDelay)
 	assert.Equal(t, "›", def.ReadyPattern)
 	assert.Equal(t, "--model", def.ModelFlag)
-	assert.Nil(t, def.ModelAliases)
+	assert.Equal(t, "gpt-5.3-codex", def.ModelAliases["default"])
+	assert.Equal(t, "gpt-5.3-codex-spark", def.ModelAliases["spark"])
+	assert.Equal(t, "codex-mini-latest", def.ModelAliases["mini"])
 	assert.Equal(t, []string{"api.openai.com"}, def.NetworkAllowlist)
 }
 

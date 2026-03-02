@@ -6,10 +6,6 @@ For the full list of designed-but-unimplemented features, see [dev/plans/TODO.md
 
 ## Next up
 
-- **Codex agent polish** — agent definition exists, needs end-to-end verification
-
-## Also planned
-
 - User-defined extensions (`yoloai x`)
 - `list` filters (`--running`, `--stopped`)
 - macOS VM backend improvements (Tart)

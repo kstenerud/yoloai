@@ -8,7 +8,7 @@ Create a plan file in this directory before starting implementation.
 | Feature | Design Reference | Plan | Notes |
 |---------|-----------------|------|-------|
 | ~~Overlayfs copy strategy~~ | [config.md](../../design/config.md) | — | Done — `:overlay` directory mode |
-| Codex agent polish | [commands.md](../../design/commands.md) | — | Agent definition exists; needs end-to-end testing |
+| ~~Codex agent polish~~ | [commands.md](../../design/commands.md) | — | Done — model aliases, research gaps resolved |
 | Extensions (`yoloai x`) | [commands.md](../../design/commands.md) | — | User-defined YAML commands in `~/.yoloai/extensions/` |
 
 ## Commands
