@@ -221,6 +221,10 @@ These were deferred from MVP but might be cheap to add and valuable for dogfoodi
 
 98. **Strategy for keeping model aliases current** — Gemini's model aliases drifted (pointed to 2.5 when Gemini 3 was the current default). This will recur as providers release new models. Need a process to stay current. Options to discuss: periodic manual review cadence, automated checks against provider APIs/docs, pinning to stable identifiers that providers maintain (e.g., `-latest` suffixes where available), or documenting that aliases are best-effort and users should use `--model` for specific versions.
 
+## Reference Files in Sandboxes
+
+99. **Reference files pollute diff/apply workflow** — When a user copies a file into the sandbox work dir for the agent to inspect (e.g., a log file), it becomes part of the git state and interferes with `yoloai apply`: the untracked file blocks apply (host doesn't have it), and deleting it creates a WIP deletion patch that fails on the host (file never existed there). Need a way to provide reference material to the agent without polluting the diff. Options: (a) a separate read-only reference mount (e.g., `/yoloai/ref/`) outside the work dir, (b) an ignore mechanism (`.yoloaiignore`) to exclude files from the WIP diff, (c) more resilient WIP apply that skips hunks for files that don't exist on the target rather than failing entirely.
+
 ## Unresolved (Codex and cleanup)
 
 37. **Codex proxy support** — Whether Codex's static Rust binary honors `HTTP_PROXY`/`HTTPS_PROXY` env vars is unverified (see [commands.md](../design/commands.md), RESEARCH.md). Critical for `--network-isolated` mode with Codex. If it ignores proxy env vars, would need iptables-only enforcement.
