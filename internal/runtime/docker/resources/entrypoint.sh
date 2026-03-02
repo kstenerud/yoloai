@@ -100,7 +100,7 @@ if [ "$NETWORK_ISOLATED" = "true" ]; then
 fi
 
 # --- Overlay mounts ---
-OVERLAY_COUNT=$(jq '.overlay_mounts // [] | length' "$CONFIG")
+OVERLAY_COUNT=$(jq ".overlay_mounts // [] | length" "$CONFIG")
 if [ "$OVERLAY_COUNT" -gt 0 ]; then
     debug_log "setting up $OVERLAY_COUNT overlay mount(s)"
     for i in $(seq 0 $((OVERLAY_COUNT - 1))); do
@@ -132,7 +132,7 @@ DEBUG=$(jq -r ".debug // false" "$CONFIG")
 debug_log() { [ "$DEBUG" = "true" ] && echo "[debug] $*" || true; }
 
 # --- Git baseline for overlay mounts ---
-OVERLAY_COUNT=$(jq '.overlay_mounts // [] | length' "$CONFIG")
+OVERLAY_COUNT=$(jq ".overlay_mounts // [] | length" "$CONFIG")
 if [ "$OVERLAY_COUNT" -gt 0 ]; then
     for i in $(seq 0 $((OVERLAY_COUNT - 1))); do
         MERGED=$(jq -r ".overlay_mounts[$i].merged" "$CONFIG")
