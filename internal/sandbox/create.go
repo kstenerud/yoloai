@@ -458,6 +458,7 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 		filepath.Join(sandboxDir, "work"),
 		filepath.Join(sandboxDir, "agent-state"),
 		filepath.Join(sandboxDir, "home-seed"),
+		filepath.Join(sandboxDir, "files"),
 	} {
 		if err := os.MkdirAll(dir, 0750); err != nil {
 			return nil, fmt.Errorf("create directory %s: %w", dir, err)
@@ -1183,6 +1184,12 @@ func buildMounts(state *sandboxState, secretsDir string) []runtime.MountSpec {
 		Source:   filepath.Join(state.sandboxDir, "config.json"),
 		Target:   "/yoloai/config.json",
 		ReadOnly: true,
+	})
+
+	// File exchange directory
+	mounts = append(mounts, runtime.MountSpec{
+		Source: filepath.Join(state.sandboxDir, "files"),
+		Target: "/yoloai/files",
 	})
 
 	// Home-seed files and directories (mounted into /home/yoloai/)

@@ -220,3 +220,10 @@ func OverlayUpperDir(name string, hostPath string) string {
 func OverlayOvlworkDir(name string, hostPath string) string {
 	return filepath.Join(Dir(name), "work", EncodePath(hostPath), "ovlwork")
 }
+
+// FilesDir returns the host-side file exchange directory for a sandbox.
+//
+//	~/.yoloai/sandboxes/<name>/files/
+func FilesDir(name string) string {
+	return filepath.Join(Dir(name), "files")
+}

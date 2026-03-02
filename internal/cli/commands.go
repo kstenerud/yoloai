@@ -51,6 +51,7 @@ func registerCommands(root *cobra.Command, version, commit, date string) {
 		newExecAliasCmd(),
 
 		// Admin
+		newFilesCmd(),
 		newProfileCmd(),
 		newHelpCmd(),
 		newConfigCmd(),
