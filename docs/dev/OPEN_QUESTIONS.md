@@ -233,7 +233,7 @@ These were deferred from MVP but might be cheap to add and valuable for dogfoodi
 
 39. **Codex TUI behavior in tmux** — Interactive mode (`codex --yolo` without `exec`) behavior in tmux is unverified (RESEARCH.md).
 
-40. **Image cleanup mechanism** — Docker images accumulate indefinitely. **Note:** `yoloai system prune` now handles orphaned containers, VMs, and temp files, but does not prune Docker images (affects all Docker usage, not just yoloai). Image pruning still needs design for safe cleanup that doesn't break running sandboxes.
+40. ~~**Image cleanup mechanism**~~ — **Resolved.** `yoloai system prune` now removes dangling Docker images (stale build layers from image rebuilds) in addition to orphaned containers, VMs, and temp files. Uses Docker's `dangling=true` filter, which only removes unreferenced images — safe for running sandboxes.
 
 ## Unresolved (Extensions)
 

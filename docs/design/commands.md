@@ -577,9 +577,11 @@ Constraints:
 
 ### [PLANNED] `yoloai x` (Extensions)
 
-`yoloai x <extension> <name> [args...] [--flags...]`
+`yoloai x <extension> [args...] [--flags...]`
 
 Extensions are user-defined custom commands. Each extension is a separate YAML file in `~/.yoloai/extensions/` that defines its own arguments, flags, and a shell script action. `x` is short for "extension" to the command vocabulary. This is a power-user feature.
+
+Extensions define all their own positional arguments — there are no built-in positionals. Extensions that create sandboxes include a name arg; extensions that operate on existing sandboxes or don't involve sandboxes at all define whatever args make sense.
 
 Extensions declare which agents they support via the `agent` field — a single string (`agent: claude`), a list (`agent: [claude, codex]`), or omitted entirely for any-agent compatibility. yoloAI validates the current agent against this list before running the action. For extensions supporting multiple agents, the `$agent` variable lets the script branch on the active agent. For extensions that are fundamentally different per agent, create separate files (e.g., `lint-claude.yaml`, `lint-codex.yaml`).
 
@@ -593,6 +595,8 @@ description: "Lint and fix code issues"
 agent: claude                         # optional: string or list (e.g., [claude, codex]); omit for any agent
 
 args:
+  - name: name
+    description: "Sandbox name"
   - name: directory
     description: "Directory to lint"
 
@@ -606,7 +610,7 @@ flags:
     default: "5"
 
 action: |
-  yoloai new "${name}" "${directory}" \
+  yoloai new "${name}" "${directory}" -a \
     --model sonnet \
     --prompt "Find and fix all ${severity}-level and above linting issues. Run the linter, fix what it finds, repeat until clean." \
     -- --max-turns "${max_turns}"
@@ -615,7 +619,7 @@ action: |
 **Usage:**
 
 ```
-# Run the lint extension — creates sandbox "my-lint", lints ./src
+# Run the lint extension — creates sandbox "my-lint", lints ./src, attaches
 yoloai x lint my-lint ./src
 
 # Override a flag
@@ -628,7 +632,7 @@ yoloai x lint my-lint ./src -s error --max-turns 10
 **How it works:**
 
 1. yoloAI finds `~/.yoloai/extensions/lint.yaml` and parses its `args` and `flags` definitions.
-2. yoloAI parses the user's command line against those definitions — `name` is always the first positional (built-in), then extension-defined `args` follow.
+2. yoloAI parses the user's command line against those definitions — all positional args are extension-defined.
 3. If `agent` is specified in the YAML and doesn't match the current `--agent` / `defaults.agent`, error with a message suggesting the right extension.
 4. All captured values are set as environment variables and the `action` script is executed via `sh -c`.
 
@@ -636,7 +640,6 @@ yoloai x lint my-lint ./src -s error --max-turns 10
 
 | Variable      | Source                                       |
 |---------------|----------------------------------------------|
-| `$name`       | Sandbox name (first positional, always required) |
 | `$agent`      | Resolved agent name (`--agent` / `defaults.agent`) |
 | `$<arg_name>` | Each defined arg, by its `name` field        |
 | `$<flag_name>`| Each defined flag, by its `name` field (default applied if not provided) |
@@ -651,6 +654,8 @@ description: "Code review with configurable focus"
 agent: claude
 
 args:
+  - name: name
+    description: "Sandbox name"
   - name: directory
     description: "Directory to review"
 
@@ -665,7 +670,7 @@ flags:
     default: "opus"
 
 action: |
-  yoloai new "${name}" "${directory}" \
+  yoloai new "${name}" "${directory}" -a \
     --model "${model}" \
     --prompt "Review this codebase. Focus on: ${focus}. Provide a detailed report with file locations and suggested fixes."
 ```
@@ -675,25 +680,25 @@ action: |
 description: "Destroy and recreate a sandbox with the same settings"
 
 args:
-  - name: existing
-    description: "Existing sandbox to recreate"
+  - name: sandbox
+    description: "Sandbox to recreate"
 
 action: |
-  workdir="$(jq -r .workdir.host_path ~/.yoloai/sandboxes/"${existing}"/meta.json)"
-  yoloai destroy --yes "${existing}"
-  yoloai new "${name}" "${workdir}"
+  workdir="$(yoloai sandbox info --json "${sandbox}" | jq -r .workdir.host_path)"
+  yoloai destroy --yes "${sandbox}"
+  yoloai new "${sandbox}" "${workdir}" -a
 ```
 
 **The action script is not limited to `yoloai new`** — it can call any yoloAI command (`exec`, `destroy`, `diff`), chain multiple commands, use conditionals, or call external tools. yoloAI is just the argument parser and executor; the script defines the behavior.
 
 **Listing extensions:**
 
-`yoloai x --list` scans `~/.yoloai/extensions/` and shows each extension's name, description, agent, and defined args/flags.
+`yoloai x` with no arguments scans `~/.yoloai/extensions/` and shows each extension's name, description, agent, and defined args/flags.
 
 **Validation:**
 
 - Extension name derived from filename (e.g., `lint.yaml` → `lint`). Must not collide with built-in yoloAI commands.
-- `args` are positional and order matters — parsed in definition order after `name`.
+- `args` are positional and order matters — parsed in definition order.
 - `flags` support `short` (single char), `default` (string), and `description`. Flag names and shorts must not collide with yoloAI's global flags (`--verbose`/`-v`, `--quiet`/`-q`, `--yes`/`-y`, `--no-color`, `--help`/`-h`) — error at parse time if they do.
 - Missing required args (no `default`) produce a usage error with the extension's arg definitions.
 - The `action` field is required.
