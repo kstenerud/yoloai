@@ -57,6 +57,36 @@ func TestStripANSI(t *testing.T) {
 			input: "\x1b[?25hvisible\x1b[?25l\n",
 			want:  "visible\n",
 		},
+		{
+			name:  "null and bell characters",
+			input: "hel\x00lo\x07world\n",
+			want:  "helloworld\n",
+		},
+		{
+			name:  "carriage return stripped",
+			input: "progress: 100%\roverwritten\n",
+			want:  "progress: 100%overwritten\n",
+		},
+		{
+			name:  "backspace and DEL",
+			input: "ab\x08c\x7fd\n",
+			want:  "abcd\n",
+		},
+		{
+			name:  "tab preserved",
+			input: "col1\tcol2\tcol3\n",
+			want:  "col1\tcol2\tcol3\n",
+		},
+		{
+			name:  "vertical tab and form feed stripped",
+			input: "before\x0bmid\x0cafter\n",
+			want:  "beforemidafter\n",
+		},
+		{
+			name:  "mixed ANSI and control chars",
+			input: "\x1b[31m\x00red\x08\x1b[0m\n",
+			want:  "red\n",
+		},
 	}
 
 	for _, tt := range tests {
