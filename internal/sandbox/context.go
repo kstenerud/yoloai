@@ -44,6 +44,10 @@ func GenerateContext(meta *Meta) string {
 		}
 	}
 
+	// Files section (exchange directory is always available)
+	b.WriteString("\n## Files\n\n")
+	b.WriteString("Files shared via `yoloai files put` are available at `/yoloai/files/`. You can also write files there for the user to retrieve with `yoloai files get`.\n")
+
 	// Resources section (only when resources are set)
 	if meta.Resources != nil {
 		var parts []string

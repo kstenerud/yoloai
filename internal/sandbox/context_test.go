@@ -50,6 +50,14 @@ func TestGenerateContext_AllFields(t *testing.T) {
 		t.Error("missing rw aux dir")
 	}
 
+	// Files
+	if !strings.Contains(result, "## Files") {
+		t.Error("missing Files section")
+	}
+	if !strings.Contains(result, "/yoloai/files/") {
+		t.Error("missing files exchange path")
+	}
+
 	// Network
 	if !strings.Contains(result, "## Network") {
 		t.Error("missing Network section")
