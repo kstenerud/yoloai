@@ -211,31 +211,14 @@ The allowlist is agent-specific — each agent's definition includes its require
 
 1. Apply `:copy` suffix to workdir if no mode suffix (`:rw` or `:copy`) is given — `:force` is a modifier, not a mode, so `./my-app:force` is treated as `./my-app:copy:force`.
 2. Error if any two directories resolve to the same absolute container path (mirrored host path or custom `=<path>`).
-3. For each `:copy` directory, set up an isolated writable view using one of two strategies (selected by `copy_strategy` config, default `auto`):
-
-   **[PLANNED] Overlay strategy** (default when available):
-   - Host side: bind-mount the original directory read-only into the container at its original absolute path. Provide an empty upper directory from `~/.yoloai/sandboxes/<name>/work/<encoded-path>/`, where `<encoded-path>` is the absolute host path with path separators and filesystem-unsafe characters encoded using [caret encoding](https://github.com/kstenerud/caret-encoding) (e.g., `/home/user/my-app` → `^2Fhome^2Fuser^2Fmy-app`). This is fully reversible and avoids collisions when multiple directories share the same basename.
-   - Container side (entrypoint): mount overlayfs with `lowerdir` (original, read-only), `upperdir` (from host `work/<encoded-path>/upper/`), and `workdir` (from host `work/<encoded-path>/work/` — required by overlayfs for atomic copy-up operations) merged at the mirrored host path. The agent sees the full project; writes go to upper only. Original directory is inherently protected (read-only lower layer). The entrypoint must be idempotent — use `mkdir -p` for directories and check `mountpoint -q` before mounting, so it handles both fresh starts and restarts cleanly.
-   - After overlay mount, the entrypoint creates the git baseline on the merged view: `git init` + `git add -A` + `git commit -m "initial"`. If the directory is already a git repo, the baseline SHA was recorded in `meta.json` by host-side yoloAI at sandbox creation time — the entrypoint skips git init.
-   - Requires `CAP_SYS_ADMIN` capability on the container (not full `--privileged`).
-
-   **Full copy strategy** (fallback):
-   All steps run on the host via yoloAI before container start:
+3. For each `:copy` directory, create an isolated writable copy:
    - If the directory is a git repo, record the current HEAD SHA in `meta.json`.
-   - Copy via `cp -rp` to `~/.yoloai/sandboxes/<name>/work/<encoded-path>/` (same caret-encoding scheme as overlay), then mount at the mirrored host path inside the container. `cp -rp` preserves permissions, timestamps, and symlinks (POSIX-portable; `cp -a` is GNU-specific and unavailable on macOS). Everything is copied including `.git/` and files ignored by `.gitignore`.
+   - Copy via `cp -rp` to `~/.yoloai/sandboxes/<name>/work/<encoded-path>/`, where `<encoded-path>` is the absolute host path with path separators and filesystem-unsafe characters encoded using [caret encoding](https://github.com/kstenerud/caret-encoding) (e.g., `/home/user/my-app` → `^2Fhome^2Fuser^2Fmy-app`). This is fully reversible and avoids collisions when multiple directories share the same basename. `cp -rp` preserves permissions, timestamps, and symlinks (POSIX-portable; `cp -a` is GNU-specific and unavailable on macOS). Everything is copied including `.git/` and files ignored by `.gitignore`.
    - If the copy already has a `.git/` directory (from the original repo), use the recorded SHA as the baseline — `yoloai diff` will diff against it.
    - If the copy has no `.git/`, `git init` + `git add -A` + `git commit -m "initial"` to create a baseline.
-   The container receives a ready-to-use directory with a git baseline already established.
+   - The container receives a ready-to-use directory with a git baseline already established, mounted at the mirrored host path inside the container.
 
-   **Currently uses the full copy strategy only.** Both strategies produce the same result from the user's perspective: a protected, writable view with git-based diff/apply. The overlay strategy is instant and space-efficient; the full copy strategy is more portable. `auto` tries overlay first, falls back to full copy if `CAP_SYS_ADMIN` is unavailable or the kernel doesn't support nested overlayfs. Explicitly setting `copy_strategy: overlay` when overlay is not available is an error (the user asked for something specific — don't silently degrade).
-
-   **[PLANNED] `auto` detection strategy** (following the pattern used by containers/storage, Podman, and Docker itself):
-   1. Check `/proc/filesystems` for `overlay` — if absent, skip to full copy.
-   2. Check `CAP_SYS_ADMIN` via `/proc/self/status` `CapEff` bitmask (bit 21) — if absent, skip to full copy.
-   3. Attempt a test mount in a temp directory (`mount -t overlay` with `lowerdir`, `upperdir`, `workdir`). This is the authoritative test — it validates kernel support, security profiles (seccomp, AppArmor), and backing filesystem compatibility simultaneously. If it fails, fall back to full copy.
-   4. Cache the result in `~/.yoloai/cache/overlay-support`, invalidated on kernel or Docker version change.
-
-   Note: `git add -A` naturally honors `.gitignore` if one is present, so gitignored files (e.g., `node_modules`) won't clutter `yoloai diff` output regardless of strategy.
+   Note: `git add -A` naturally honors `.gitignore` if one is present, so gitignored files (e.g., `node_modules`) won't clutter `yoloai diff` output.
 4. **[PLANNED]** If `auto_commit_interval` > 0, start a background auto-commit loop for `:copy` directories inside the container for recovery. The interval is passed to the container via `config.json`. Disabled by default.
 5. Store original paths, modes, and mapping in `meta.json`.
 6. Start Docker container (see Container Startup below).
@@ -260,7 +243,7 @@ Before creating the sandbox (all checks run before any state is created on disk)
 2. Generate `/yoloai/config.json` on the host (in the sandbox state directory) containing all entrypoint configuration: agent_command, startup_delay, submit_sequence, host_uid, host_gid, and later overlay_mounts, iptables_rules, setup_script. This is bind-mounted into the container and read by the entrypoint.
 3. Start Docker container (as non-root user `yoloai`) with:
    - **[PLANNED]** When `--network-isolated`: entrypoint configures iptables + ipset rules (default-deny, allow only resolved IPs from the agent's domain allowlist + `--network-allow` domains). Requires `CAP_NET_ADMIN`.
-   - `:copy` directories: overlay strategy mounts originals as overlayfs lower layers with upper dirs from sandbox state; full copy strategy mounts copies from sandbox state. Both at their mount point (mirrored host path or custom `=<path>`, read-write)
+   - `:copy` directories: copies from sandbox state mounted at their mount point (mirrored host path or custom `=<path>`, read-write)
    - `:rw` directories bind-mounted at their mount point (mirrored host path or custom `=<path>`, read-write)
    - Default (no suffix) directories bind-mounted at their mount point (mirrored host path or custom `=<path>`, read-only)
    - `agent-state/` mounted at the agent's state directory path (read-write, per-sandbox)
@@ -271,7 +254,7 @@ Before creating the sandbox (all checks run before any state is created on disk)
    - Config mounts from defaults + profile
    - Resource limits from defaults + profile
    - API key(s) injected via file-based bind mount at `/run/secrets/` — env var names from agent definition (see [security.md](security.md#credential-management))
-   - **[PLANNED]** `CAP_SYS_ADMIN` capability (required for overlayfs mounts inside the container; omitted when `copy_strategy: full`). `CAP_NET_ADMIN` added when `--network-isolated` is used (required for iptables rules; independent capability, not included in `CAP_SYS_ADMIN`)
+   - **[PLANNED]** `CAP_NET_ADMIN` added when `--network-isolated` is used (required for iptables rules)
    - Container name: `yoloai-<name>`
    - User: `yoloai` (UID/GID matching host user)
    - `/yoloai/` internal directory for sandbox context file, overlay working directories, and bind-mounted state files (`log.txt`, `prompt.txt`, `config.json`)
@@ -341,7 +324,7 @@ Run 'yoloai attach web-dev' to interact (Ctrl-b d to detach)
     'yoloai diff web-dev' when done
 ```
 
-Profile, network, and ports lines are omitted when using defaults (base image, unrestricted network, no ports). Strategy line is omitted when using `full` copy (only shown for overlay since it implies `CAP_SYS_ADMIN`).
+Profile, network, and ports lines are omitted when using defaults (base image, unrestricted network, no ports).
 
 ### `yoloai attach`
 
@@ -391,7 +374,7 @@ Options:
 
 For `:copy` directories only. `:rw` directories need no apply — changes are already live. Read-only directories have no changes. For dirs that had no original git repo, excludes the synthetic `.git/` directory created by yoloAI.
 
-**Strategy selection:** For the **full copy** strategy, runs entirely on the host — reads from `work/<encoded-path>/`. Does not require the container to be running. For the **overlay** strategy, requires the container to be running (the merged view only exists when overlayfs is mounted). If the container is stopped, `apply` auto-starts it (printing "Starting container for overlay diff..." to stderr) and leaves it in whatever state it was before. Works identically from the user's perspective regardless of `copy_strategy`.
+Runs entirely on the host — reads from `work/<encoded-path>/`. Does not require the container to be running.
 
 **Default behavior (commit-preserving):**
 
@@ -526,7 +509,7 @@ Options:
 
 `yoloai start [-a|--attach] [--resume] <name>` ensures the sandbox is running — idempotent "get it running, however needed". Like `new`, starts detached by default.
 - If the container has been removed: re-run full container creation from `meta.json` (skipping the copy step for `:copy` directories — state already exists in `work/`). Create a new credential temp file (ephemeral by design).
-- If the container is stopped: starts it. The entrypoint re-establishes overlayfs mounts (mounts don't survive `docker stop` — this is by design; the upper directory persists on the host and the entrypoint re-mounts idempotently). If `--network-isolated`, iptables rules are reapplied by the entrypoint.
+- If the container is stopped: starts it. If `--network-isolated`, iptables rules are reapplied by the entrypoint.
 - If the container is running but the agent has exited: relaunches the agent in the existing tmux session.
 - If already running: no-op.
 
@@ -564,8 +547,7 @@ By default, the container is stopped and restarted. The agent loses its conversa
 The agent stays running and retains its conversational context while the workspace is reset underneath it. Use case: host repo got new upstream commits (user merged a PR, fetched), user wants to update the agent's copy without losing conversational context.
 
 1. Re-sync workdir from host while container is running:
-   - Full copy strategy: `rsync -a --delete` from original host dir to `work/<encoded-path>/` on the host (bind-mount makes changes immediately visible in container)
-   - [PLANNED] Overlay strategy: `docker exec` to unmount overlay, clear upper/work dirs, remount overlay (lower dir already reflects latest host state)
+   - `rsync -a --delete` from original host dir to `work/<encoded-path>/` on the host (bind-mount makes changes immediately visible in container)
 2. Re-create git baseline inside container via `docker exec` (`git add -A && git commit -m "yoloai baseline" --allow-empty`)
 3. Update `baseline_sha` in `meta.json`
 4. Send notification to agent via tmux `send-keys`:

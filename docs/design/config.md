@@ -61,7 +61,6 @@ agent: claude                           # Agent to launch: aider, claude, codex,
 # agent_files: home                    # [PLANNED] files seeded into agent-state/ on first run
 # mounts:                              # [PLANNED] bind mounts added at container run time
 #   - ~/.gitconfig:/home/yoloai/.gitconfig:ro
-# copy_strategy: auto                  # [PLANNED] auto | overlay | full (currently full copy only)
 # auto_commit_interval: 0              # [PLANNED] seconds between auto-commits in :copy dirs; 0 = disabled
 # ports: []                            # [PLANNED] default port mappings; profile ports are additive
 env: {}                                # Environment variables forwarded to container via /run/secrets/
@@ -196,7 +195,6 @@ resources:                    # container resource limits
 # [PLANNED] network_isolated: true
 # [PLANNED] network_allow:
 #   - api.example.com
-# [PLANNED] copy_strategy: overlay
 # [PLANNED] auto_commit_interval: 300
 
 # --- Profile-specific fields (not in config.yaml) ---
@@ -237,7 +235,6 @@ The full merge table for reference:
 | [PLANNED] `setup`                | Additive (defaults first, then profile)                  |
 | [PLANNED] `network_isolated`     | Profile overrides default. CLI overrides profile.        |
 | [PLANNED] `network_allow`        | Additive                                                 |
-| [PLANNED] `copy_strategy`        | Profile overrides default                                |
 | [PLANNED] `auto_commit_interval` | Profile overrides default                                |
 
 **`yoloai profile` commands:**

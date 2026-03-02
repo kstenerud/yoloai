@@ -7,7 +7,6 @@ For the full list of designed-but-unimplemented features, see [dev/plans/TODO.md
 ## Next up
 
 - **Codex agent polish** — agent definition exists, needs end-to-end verification
-- **`copy_strategy` config** — global default for copy mode (`auto | overlay | full`)
 
 ## Also planned
 

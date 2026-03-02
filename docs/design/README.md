@@ -89,8 +89,6 @@ The Docker container is disposable — it can crash, be destroyed, be recreated.
   "profile": "go-dev",                    // [PLANNED] profile name
   "model": "claude-sonnet-4-5-20250929",
 
-  "copy_strategy": "overlay",             // [PLANNED] "overlay" | "full"
-
   "network": {
     "mode": "isolated",                   // Currently a flat "network_mode" string ("none" or "")
     "allow": ["api.anthropic.com", "statsig.anthropic.com", "sentry.io"]  // [PLANNED] per-agent defaults; this example shows Claude's
@@ -189,7 +187,7 @@ Field notes:
 6. ~~**Git integration?**~~ Yes. Copy mode auto-inits git for clean diffs. `yoloai apply` excludes `.git/`.
 7. ~~**Default mode?**~~ All dirs read-only by default. Per-directory `:rw` (live) or `:copy` (staged) suffixes. Workdir defaults to `:copy` if no suffix given; `:rw` must be explicit.
 8. ~~**Container work directory?**~~ Directories are mounted at their original host paths (mirrored) by default, so configs, error messages, and symlinks work without translation. Custom paths available via `=<path>` override. `/yoloai/` reserved for internals. The `/work` prefix was considered but rejected — path consistency (matching host paths) outweighs the minor safety benefit, and dangerous directory detection already prevents mounting over system paths.
-9. ~~**Copy strategy?**~~ OverlayFS by default (`copy_strategy: auto`). The original directory is bind-mounted read-only as the overlayfs lower layer; writes go to an upper directory in sandbox state. Git provides diff/apply on the merged view. Falls back to full copy if overlayfs isn't available. Works cross-platform — Docker on macOS/Windows runs a Linux VM, so overlayfs works inside the container regardless of host OS. VirtioFS overhead for macOS host reads is acceptable (70-90% native after page cache warms). Config option `copy_strategy: full` available for users who prefer the traditional full-copy approach or want to avoid `CAP_SYS_ADMIN`.
+9. ~~**Copy strategy?**~~ `:copy` uses full directory copies. `:overlay` is an explicit opt-in for overlayfs (instant setup, space-efficient, requires `CAP_SYS_ADMIN`). Originally considered making overlayfs the default for `:copy` with a `copy_strategy` config option, but decided on separate explicit modes instead.
 10. ~~**Config template generation?**~~ Addressed by `yoloai config get/set`. `config get` shows all known settings with effective values (defaults + overrides). Agent-specific config generation deferred to v2.
 
 ## Design Considerations

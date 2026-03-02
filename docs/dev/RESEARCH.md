@@ -260,7 +260,7 @@ The following tools were identified but not analyzed in depth. Included for comp
 
 ## Alternative Filesystem Isolation Approaches
 
-The design uses overlayfs by default for `:copy` mode, with full directory copies as a fallback. This section documents the research that led to that decision, evaluating several copy-on-write (COW) filesystem technologies.
+The design offers two directory modes for copy/diff/apply: `:copy` (full directory copy) and `:overlay` (explicit overlayfs opt-in). This section documents the research into copy-on-write (COW) filesystem technologies that informed that design.
 
 ### OverlayFS
 
@@ -422,9 +422,7 @@ On macOS, bind-mounted host directories cross the VM boundary via VirtioFS. With
 - **Linux:** OverlayFS + git. Best case — instant setup, all I/O local.
 - **macOS/Windows:** OverlayFS + git. Instant setup, warm reads near-native. Cold stat-heavy operations ~3x slower than full copy. Acceptable tradeoff for most workflows.
 - **Older Docker/kernels:** Falls back to full copy + git.
-- **Config override:** `copy_strategy: overlay | full | auto` for users who want explicit control. `auto` (default) uses overlay where available, falls back to full copy.
-
-OverlayFS is the default strategy for v1 (`copy_strategy: auto`). Full copy serves as the portable fallback. See the [design docs](../design/config.md) for the full specification including entrypoint idempotency, `CAP_SYS_ADMIN` requirements, and cross-platform behavior.
+- **Outcome:** `:copy` uses full directory copies (portable, no special capabilities). `:overlay` is an explicit opt-in for overlayfs (instant setup, space-efficient, requires `CAP_SYS_ADMIN`). See the [design docs](../design/commands.md) for the full specification.
 
 ZFS and Btrfs are too host-dependent to serve as primary mechanisms (require the host filesystem to be ZFS/Btrfs). APFS clones are not instant for directories. FUSE-based overlays on macOS have reliability concerns (Finder issues, FUSE-T maturity). Docker volumes eliminate VirtioFS overhead but don't save setup time.
 
@@ -1367,7 +1365,7 @@ Follows the same pattern as Anthropic's Claude Code devcontainer and Trail of Bi
 2. Default-deny iptables policy: DROP all OUTPUT except established connections, DNS (UDP 53 to Docker's internal resolver at 127.0.0.11), and traffic to IPs in the allowlist ipset.
 3. Explicitly REJECT (not DROP) unmatched outbound for immediate feedback to the agent.
 4. Rules are configured by the entrypoint while running as root. The entrypoint then drops privileges via `gosu` — the agent process never has `CAP_NET_ADMIN`.
-5. Requires `CAP_NET_ADMIN` (a separate capability from `CAP_SYS_ADMIN` — both must be granted when using overlay + `--network-isolated`; for `copy_strategy: full`, only `CAP_NET_ADMIN` is added).
+5. Requires `CAP_NET_ADMIN` (a separate capability from `CAP_SYS_ADMIN` — both must be granted when using `:overlay` + `--network-isolated`; for `:copy` mode, only `CAP_NET_ADMIN` is added).
 
 **Why this approach:**
 
@@ -1384,7 +1382,7 @@ Follows the same pattern as Anthropic's Claude Code devcontainer and Trail of Bi
 
 3. **Domain fronting:** iptables cannot detect SNI/Host header mismatches. Major CDNs have banned this. Acceptable risk.
 
-4. **`CAP_NET_ADMIN`:** Required for iptables. Combined with `CAP_SYS_ADMIN` (for overlayfs), the container has two broad capabilities. Users concerned about this can use `copy_strategy: full` + no network isolation to avoid both.
+4. **`CAP_NET_ADMIN`:** Required for iptables. Combined with `CAP_SYS_ADMIN` (for `:overlay` mode), the container has two broad capabilities. Users concerned about this can use `:copy` mode + no network isolation to avoid both.
 
 #### Deferred: proxy sidecar architecture
 
