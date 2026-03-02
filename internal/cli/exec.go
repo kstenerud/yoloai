@@ -18,43 +18,45 @@ func newSandboxExecCmd() *cobra.Command {
 		Use:   "exec <name> <command> [args...]",
 		Short: "Run a command inside a sandbox",
 		Args:  cobra.MinimumNArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if jsonEnabled(cmd) {
-				return errJSONNotSupported("exec")
-			}
-
-			name, rest, err := resolveName(cmd, args)
-			if err != nil {
-				return err
-			}
-			if len(rest) == 0 {
-				return sandbox.NewUsageError("command is required")
-			}
-			cmdArgs := rest
-
-			backend := resolveBackendForSandbox(name)
-			return withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
-				info, err := sandbox.InspectSandbox(ctx, rt, name)
-				if err != nil {
-					return err
-				}
-
-				if info.Status != sandbox.StatusRunning {
-					return fmt.Errorf("sandbox %q: %w", name, sandbox.ErrContainerNotRunning)
-				}
-
-				containerName := sandbox.ContainerName(name)
-				slog.Debug("exec in container", "container", containerName, "cmd", cmdArgs)
-
-				if err := rt.InteractiveExec(ctx, containerName, cmdArgs, "yoloai", info.Meta.Workdir.MountPath); err != nil {
-					var exitErr *exec.ExitError
-					if errors.As(err, &exitErr) {
-						os.Exit(exitErr.ExitCode())
-					}
-					return err
-				}
-				return nil
-			})
-		},
+		RunE:  runExec,
 	}
+}
+
+func runExec(cmd *cobra.Command, args []string) error {
+	if jsonEnabled(cmd) {
+		return errJSONNotSupported("exec")
+	}
+
+	name, rest, err := resolveName(cmd, args)
+	if err != nil {
+		return err
+	}
+	if len(rest) == 0 {
+		return sandbox.NewUsageError("command is required")
+	}
+	cmdArgs := rest
+
+	backend := resolveBackendForSandbox(name)
+	return withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
+		info, err := sandbox.InspectSandbox(ctx, rt, name)
+		if err != nil {
+			return err
+		}
+
+		if info.Status != sandbox.StatusRunning {
+			return fmt.Errorf("sandbox %q: %w", name, sandbox.ErrContainerNotRunning)
+		}
+
+		containerName := sandbox.ContainerName(name)
+		slog.Debug("exec in container", "container", containerName, "cmd", cmdArgs)
+
+		if err := rt.InteractiveExec(ctx, containerName, cmdArgs, "yoloai", info.Meta.Workdir.MountPath); err != nil {
+			var exitErr *exec.ExitError
+			if errors.As(err, &exitErr) {
+				os.Exit(exitErr.ExitCode())
+			}
+			return err
+		}
+		return nil
+	})
 }

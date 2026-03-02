@@ -45,6 +45,7 @@ Inspection:
   yoloai sandbox network-allow <name> <domain>  Allow additional domains in an isolated sandbox
   yoloai ls                                      List sandboxes (shortcut for 'sandbox list')
   yoloai log <name>                              Show sandbox log (shortcut for 'sandbox log')
+  yoloai exec <name> <command>                   Run a command inside a sandbox (shortcut for 'sandbox exec')
 
 Admin:
   yoloai config get [key]                        Print configuration values (all or specific key)

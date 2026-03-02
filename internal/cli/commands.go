@@ -48,6 +48,7 @@ func registerCommands(root *cobra.Command, version, commit, date string) {
 		newSandboxCmd(),
 		newLsAliasCmd(),
 		newLogAliasCmd(),
+		newExecAliasCmd(),
 
 		// Admin
 		newProfileCmd(),
@@ -78,6 +79,16 @@ func newLogAliasCmd() *cobra.Command {
 	}
 	cmd.Flags().Bool("raw", false, "Show raw output with ANSI escape sequences")
 	return cmd
+}
+
+func newExecAliasCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:     "exec <name> <command> [args...]",
+		Short:   "Run a command inside a sandbox (shortcut for 'sandbox exec')",
+		GroupID: groupInspect,
+		Args:    cobra.MinimumNArgs(1),
+		RunE:    runExec,
+	}
 }
 
 func newNewCmd(version string) *cobra.Command {
