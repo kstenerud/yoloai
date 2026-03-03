@@ -14,6 +14,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"time"
 
@@ -273,7 +274,14 @@ type buildMessage struct {
 
 // BuildProfileImage builds a Docker image from a profile directory's Dockerfile.
 // The tag parameter is the full image tag (e.g., "yoloai-go-dev").
-func (r *Runtime) BuildProfileImage(ctx context.Context, sourceDir string, tag string, output io.Writer, logger *slog.Logger) error {
+// When secrets are provided, the build uses the Docker CLI with BuildKit
+// --secret flags instead of the SDK, since BuildKit secret sessions require
+// heavy dependencies.
+func (r *Runtime) BuildProfileImage(ctx context.Context, sourceDir string, tag string, secrets []string, output io.Writer, logger *slog.Logger) error {
+	if len(secrets) > 0 {
+		return r.buildProfileImageCLI(ctx, sourceDir, tag, secrets, output, logger)
+	}
+
 	buildCtx, err := createProfileBuildContext(sourceDir)
 	if err != nil {
 		return fmt.Errorf("create profile build context: %w", err)
@@ -292,6 +300,33 @@ func (r *Runtime) BuildProfileImage(ctx context.Context, sourceDir string, tag s
 	defer resp.Body.Close() //nolint:errcheck // best-effort cleanup
 
 	return streamBuildOutput(resp.Body, output)
+}
+
+// buildProfileImageCLI builds a profile image by shelling out to `docker build`
+// with BuildKit --secret flags. Used when build secrets are needed.
+func (r *Runtime) buildProfileImageCLI(ctx context.Context, sourceDir string, tag string, secrets []string, output io.Writer, logger *slog.Logger) error {
+	args := []string{"build", "-t", tag, "-f", "Dockerfile"}
+	for _, s := range secrets {
+		args = append(args, "--secret", s)
+	}
+	args = append(args, ".")
+
+	logger.Debug("building profile image via CLI", "tag", tag, "sourceDir", sourceDir, "secrets", len(secrets))
+
+	cmd := exec.CommandContext(ctx, "docker", args...) //nolint:gosec // args are validated by caller
+	cmd.Dir = sourceDir
+	cmd.Env = append(os.Environ(), "DOCKER_BUILDKIT=1")
+	cmd.Stdout = output
+	cmd.Stderr = output
+
+	if err := cmd.Run(); err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			return fmt.Errorf("docker build exited with code %d", exitErr.ExitCode())
+		}
+		return fmt.Errorf("docker build: %w", err)
+	}
+	return nil
 }
 
 // ProfileImageNeedsBuild returns true if the profile image needs to be

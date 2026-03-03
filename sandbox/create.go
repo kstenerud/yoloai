@@ -276,7 +276,7 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 		profileName = opts.Profile
 
 		// Build profile image if needed (Docker only)
-		if err := EnsureProfileImage(ctx, m.runtime, opts.Profile, m.backend, m.output, m.logger, false); err != nil {
+		if err := EnsureProfileImage(ctx, m.runtime, opts.Profile, m.backend, AutoBuildSecrets(), m.output, m.logger, false); err != nil {
 			return nil, fmt.Errorf("build profile image: %w", err)
 		}
 	}

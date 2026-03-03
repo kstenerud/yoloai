@@ -15,7 +15,7 @@ Create a plan file in this directory before starting implementation.
 |---------|-----------------|------|-------|
 | ~~`--power-user` on `setup`~~ | [setup.md](../../design/setup.md) | — | Done: `--agent`, `--backend`, `--tmux-conf` flags on setup |
 | ~~`list` filters~~ | [commands.md](../../design/commands.md) | — | Done: `--running`, `--stopped`, `--agent`, `--profile`, `--changes` |
-| Build secrets (`--secret`) | [commands.md](../../design/commands.md) | — | Profile Dockerfiles with private deps need build-time credentials |
+| ~~Build secrets (`--secret`)~~ | [commands.md](../../design/commands.md) | — | Done |
 
 ## Config Options
 

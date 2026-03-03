@@ -47,6 +47,8 @@ func newSystemBuildCmd() *cobra.Command {
 
 			backend := resolveBackend(cmd)
 
+			secretFlags, _ := cmd.Flags().GetStringSlice("secret")
+
 			if len(args) > 0 {
 				// Build a specific profile's image chain
 				profileName := args[0]
@@ -73,12 +75,26 @@ func newSystemBuildCmd() *cobra.Command {
 						return fmt.Errorf("profile %q has no Dockerfile (and no ancestor does either)", profileName)
 					}
 				}
+
+				// Validate user-provided secrets and expand tildes
+				var secrets []string
+				for _, s := range secretFlags {
+					expanded, secretErr := sandbox.ValidateBuildSecret(s)
+					if secretErr != nil {
+						return secretErr
+					}
+					secrets = append(secrets, expanded)
+				}
+
+				// Prepend auto-detected secrets
+				secrets = append(sandbox.AutoBuildSecrets(), secrets...)
+
 				return withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
 					buildOut := os.Stderr
 					if jsonEnabled(cmd) {
 						buildOut, _ = os.Open(os.DevNull)
 					}
-					if err := sandbox.EnsureProfileImage(ctx, rt, profileName, backend, buildOut, slog.Default(), true); err != nil {
+					if err := sandbox.EnsureProfileImage(ctx, rt, profileName, backend, secrets, buildOut, slog.Default(), true); err != nil {
 						return err
 					}
 					if jsonEnabled(cmd) {
@@ -90,6 +106,9 @@ func newSystemBuildCmd() *cobra.Command {
 			}
 
 			// Build base image only
+			if len(secretFlags) > 0 {
+				return fmt.Errorf("--secret is only supported with profile builds")
+			}
 			baseProfileDir := filepath.Join(homeDir, ".yoloai", "profiles", "base")
 			return withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
 				buildOut := os.Stderr
@@ -110,6 +129,7 @@ func newSystemBuildCmd() *cobra.Command {
 	}
 
 	cmd.Flags().String("backend", "", "Runtime backend (see 'yoloai system backends')")
+	cmd.Flags().StringSlice("secret", nil, "Build secret (id=<name>,src=<path>); can be repeated")
 
 	return cmd
 }
