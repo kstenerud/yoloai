@@ -153,6 +153,26 @@ func TestParseDirArg_MountPath(t *testing.T) {
 	}
 }
 
+func TestParseDirArg_DoubleColon(t *testing.T) {
+	// Input with trailing "::" — the empty suffix after the last colon is
+	// not a known suffix, so both colons become part of the path.
+	result, err := ParseDirArg("/tmp/test::")
+	require.NoError(t, err)
+	assert.Equal(t, "/tmp/test::", result.Path)
+	assert.Equal(t, "", result.Mode)
+	assert.False(t, result.Force)
+}
+
+func TestParseDirArg_TrailingColon(t *testing.T) {
+	// Input with trailing ":" — the empty suffix is not a known suffix,
+	// so the colon becomes part of the path.
+	result, err := ParseDirArg("/tmp/test:")
+	require.NoError(t, err)
+	assert.Equal(t, "/tmp/test:", result.Path)
+	assert.Equal(t, "", result.Mode)
+	assert.False(t, result.Force)
+}
+
 func TestDirArg_ResolvedMountPath(t *testing.T) {
 	d := &DirArg{Path: "/host/path", MountPath: "/container/path"}
 	assert.Equal(t, "/container/path", d.ResolvedMountPath())
