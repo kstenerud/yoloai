@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/kstenerud/yoloai/config"
 	"github.com/kstenerud/yoloai/runtime"
 )
 
@@ -114,8 +115,7 @@ func (r *Runtime) Create(_ context.Context, cfg runtime.InstanceConfig) error {
 	}
 
 	// Generate SBPL profile
-	homeDir, _ := os.UserHomeDir()
-	profile := GenerateProfile(cfg, sandboxPath, homeDir)
+	profile := GenerateProfile(cfg, sandboxPath, config.HomeDir())
 	if err := os.WriteFile(filepath.Join(sandboxPath, profileFileName), []byte(profile), 0600); err != nil {
 		return fmt.Errorf("write SBPL profile: %w", err)
 	}
@@ -190,7 +190,11 @@ func (r *Runtime) Start(ctx context.Context, name string) error {
 		return fmt.Errorf("start sandbox-exec: %w", err)
 	}
 
-	// Write PID file
+	// Write PID file. There is a brief race between cmd.Start() and writing
+	// the PID file — if the process exits in this window, the PID file may
+	// reference a dead process. This is handled by: (1) the waitForTmux loop
+	// below detects early process exit via procDone, and (2) killByPID and
+	// isRunning gracefully handle stale PID files.
 	pidPath := filepath.Join(sandboxPath, pidFileName)
 	if err := os.WriteFile(pidPath, []byte(strconv.Itoa(cmd.Process.Pid)), 0600); err != nil {
 		_ = cmd.Process.Kill()
@@ -351,9 +355,11 @@ func mountSymlinks(mounts []runtime.MountSpec) ([]string, error) {
 		if _, err := os.Lstat(m.Target); err == nil {
 			continue
 		}
-		// Create parent directory if needed. Skip unreachable paths
-		// (e.g., /home/yoloai/.claude/ — macOS restricts /home via
-		// auto_master; the entrypoint handles these internally).
+		// Create parent directory if needed. Silently skip unreachable paths
+		// — on macOS, /home is managed by auto_master and may not be writable,
+		// and sandbox-exec restrictions can prevent directory creation in
+		// certain locations. The entrypoint script handles these cases internally
+		// by setting up paths within its sandboxed HOME.
 		if err := os.MkdirAll(filepath.Dir(m.Target), 0750); err != nil { //nolint:gosec // G301: parent dirs for mount symlinks
 			continue
 		}

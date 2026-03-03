@@ -177,8 +177,7 @@ func ContainerName(name string) string {
 //
 //	~/.yoloai/sandboxes/<name>/
 func Dir(name string) string {
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".yoloai", "sandboxes", name)
+	return filepath.Join(config.HomeDir(), ".yoloai", "sandboxes", name)
 }
 
 // RequireSandboxDir returns the sandbox directory path after verifying it exists.

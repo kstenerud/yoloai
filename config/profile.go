@@ -74,8 +74,7 @@ type MergedConfig struct {
 //
 //	~/.yoloai/profiles/<name>/
 func ProfileDirPath(name string) string {
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".yoloai", "profiles", name)
+	return filepath.Join(HomeDir(), ".yoloai", "profiles", name)
 }
 
 // ValidateProfileName validates a profile name using the same rules as sandbox

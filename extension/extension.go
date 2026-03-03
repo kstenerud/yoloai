@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/kstenerud/yoloai/agent"
+	"github.com/kstenerud/yoloai/config"
 	"gopkg.in/yaml.v3"
 )
 
@@ -87,8 +88,7 @@ func (e *ExitError) Error() string {
 
 // ExtensionsDir returns the path to the extensions directory (~/.yoloai/extensions/).
 func ExtensionsDir() string {
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".yoloai", "extensions")
+	return filepath.Join(config.HomeDir(), ".yoloai", "extensions")
 }
 
 // Load parses a single YAML extension file. The extension name is derived
