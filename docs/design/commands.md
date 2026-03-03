@@ -228,7 +228,7 @@ The allowlist is agent-specific — each agent's definition includes its require
    - The container receives a ready-to-use directory with a git baseline already established, mounted at the mirrored host path inside the container.
 
    Note: `git add -A` naturally honors `.gitignore` if one is present, so gitignored files (e.g., `node_modules`) won't clutter `yoloai diff` output.
-4. **[PLANNED]** If `auto_commit_interval` > 0, start a background auto-commit loop for `:copy` directories inside the container for recovery. The interval is passed to the container via `config.json`. Disabled by default.
+4. If `auto_commit_interval` > 0, start a background auto-commit loop for `:copy` directories inside the container for recovery. The interval is passed to the container via `config.json`. Disabled by default.
 5. Store original paths, modes, and mapping in `meta.json`.
 6. Start Docker container (see Container Startup below).
 
