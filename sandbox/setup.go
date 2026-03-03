@@ -81,6 +81,8 @@ func classifyTmuxConfig() (tmuxConfigClass, string) {
 }
 
 // countSignificantLines counts non-blank, non-comment lines.
+// Note: scanner.Err() is not checked because strings.Reader never returns
+// an I/O error — Scan only returns false on EOF.
 func countSignificantLines(content string) int {
 	count := 0
 	scanner := bufio.NewScanner(strings.NewReader(content))

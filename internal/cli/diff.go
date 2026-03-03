@@ -253,6 +253,7 @@ func diffRef(cmd *cobra.Command, name, ref string, stat bool) error {
 // Silently skips if Docker is unavailable or inspection fails.
 func agentRunningWarning(cmd *cobra.Command, name string) {
 	backend := resolveBackendForSandbox(name)
+	//nolint:errcheck // intentional: best-effort warning, failure here should not affect the diff command
 	_ = withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
 		info, err := sandbox.InspectSandbox(ctx, rt, name)
 		if err != nil {

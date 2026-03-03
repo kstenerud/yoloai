@@ -181,6 +181,8 @@ func newFilesLsCmd() *cobra.Command {
 
 			names := make([]string, 0, len(matches))
 			for _, m := range matches {
+				// filepath.Rel cannot fail: both paths are absolute and m is
+				// a glob result within filesDir.
 				rel, err := filepath.Rel(filesDir, m)
 				if err != nil {
 					continue
@@ -231,6 +233,8 @@ func newFilesRmCmd() *cobra.Command {
 			}
 
 			for _, m := range matches {
+				// filepath.Rel cannot fail: both paths are absolute and m is
+				// a glob result within filesDir.
 				rel, err := filepath.Rel(filesDir, m)
 				if err != nil {
 					continue
