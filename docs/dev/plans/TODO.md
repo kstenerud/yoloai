@@ -23,5 +23,5 @@ Create a plan file in this directory before starting implementation.
 |---------|-----------------|-------|
 | ~~Recipes (`cap_add`, `devices`, `setup`)~~ | [config.md](../../design/config.md) | Done |
 | ~~`profile` config field~~ | [config.md](../../design/config.md) | Done |
-| `auto_commit_interval` | [config.md](../../design/config.md) | Background auto-commit loop for `:copy` dirs |
+| ~~`auto_commit_interval`~~ | [config.md](../../design/config.md) | Done |
 | ~~`ports` in base config~~ | [config.md](../../design/config.md) | Done |

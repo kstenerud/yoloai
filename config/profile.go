@@ -8,29 +8,31 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 
 	"gopkg.in/yaml.v3"
 )
 
 // ProfileConfig holds the parsed fields from a profile.yaml file.
 type ProfileConfig struct {
-	Extends     string            // parent profile name; "" means "base" (default)
-	Agent       string            // agent override
-	Model       string            // model override
-	Backend     string            // optional backend constraint
-	TartImage   string            // from tart.image nested key
-	Env         map[string]string // environment variables
-	Ports       []string          // port mappings
-	Workdir     *ProfileWorkdir   // nil if not specified
-	Directories []ProfileDir      // empty if not specified
-	Resources   *ResourceLimits   // resource limits (cpus, memory)
-	Network     *NetworkConfig    // network isolation settings
-	Mounts      []string          // extra bind mounts (host:container[:ro])
-	AgentArgs   map[string]string // per-agent default CLI args
-	AgentFiles  *AgentFilesConfig // agent_files — extra files to seed into agent-state
-	CapAdd      []string          // cap_add — Linux capabilities to add (Docker only)
-	Devices     []string          // devices — host devices to expose (Docker only)
-	Setup       []string          // setup — commands to run before agent launch (Docker only)
+	Extends            string            // parent profile name; "" means "base" (default)
+	Agent              string            // agent override
+	Model              string            // model override
+	Backend            string            // optional backend constraint
+	TartImage          string            // from tart.image nested key
+	Env                map[string]string // environment variables
+	Ports              []string          // port mappings
+	Workdir            *ProfileWorkdir   // nil if not specified
+	Directories        []ProfileDir      // empty if not specified
+	Resources          *ResourceLimits   // resource limits (cpus, memory)
+	Network            *NetworkConfig    // network isolation settings
+	Mounts             []string          // extra bind mounts (host:container[:ro])
+	AgentArgs          map[string]string // per-agent default CLI args
+	AgentFiles         *AgentFilesConfig // agent_files — extra files to seed into agent-state
+	CapAdd             []string          // cap_add — Linux capabilities to add (Docker only)
+	Devices            []string          // devices — host devices to expose (Docker only)
+	Setup              []string          // setup — commands to run before agent launch (Docker only)
+	AutoCommitInterval int               // auto_commit_interval — seconds between auto-commits in :copy dirs; 0 = disabled
 }
 
 // ProfileWorkdir defines a workdir from a profile.
@@ -49,22 +51,23 @@ type ProfileDir struct {
 
 // MergedConfig holds the result of merging base config with a profile chain.
 type MergedConfig struct {
-	Agent       string            `json:"agent,omitempty"`       // from nearest profile that specifies one
-	Model       string            `json:"model,omitempty"`       // from nearest profile that specifies one
-	Backend     string            `json:"backend,omitempty"`     // last non-empty backend constraint
-	TartImage   string            `json:"tart_image,omitempty"`  // from nearest profile that specifies one
-	Env         map[string]string `json:"env,omitempty"`         // merged across chain
-	Ports       []string          `json:"ports,omitempty"`       // additive across chain
-	Workdir     *ProfileWorkdir   `json:"workdir,omitempty"`     // from nearest profile that specifies one (child wins)
-	Directories []ProfileDir      `json:"directories,omitempty"` // additive across chain
-	Resources   *ResourceLimits   `json:"resources,omitempty"`   // from per-field merge across chain
-	Network     *NetworkConfig    `json:"network,omitempty"`     // isolated overrides (last wins), allow additive
-	Mounts      []string          `json:"mounts,omitempty"`      // additive across chain (host:container[:ro])
-	AgentArgs   map[string]string `json:"agent_args,omitempty"`  // merged across chain (map merge, later wins)
-	AgentFiles  *AgentFilesConfig `json:"agent_files,omitempty"` // replacement semantics (child replaces parent)
-	CapAdd      []string          `json:"cap_add,omitempty"`     // additive across chain (Docker only)
-	Devices     []string          `json:"devices,omitempty"`     // additive across chain (Docker only)
-	Setup       []string          `json:"setup,omitempty"`       // additive across chain (Docker only)
+	Agent              string            `json:"agent,omitempty"`                // from nearest profile that specifies one
+	Model              string            `json:"model,omitempty"`                // from nearest profile that specifies one
+	Backend            string            `json:"backend,omitempty"`              // last non-empty backend constraint
+	TartImage          string            `json:"tart_image,omitempty"`           // from nearest profile that specifies one
+	Env                map[string]string `json:"env,omitempty"`                  // merged across chain
+	Ports              []string          `json:"ports,omitempty"`                // additive across chain
+	Workdir            *ProfileWorkdir   `json:"workdir,omitempty"`              // from nearest profile that specifies one (child wins)
+	Directories        []ProfileDir      `json:"directories,omitempty"`          // additive across chain
+	Resources          *ResourceLimits   `json:"resources,omitempty"`            // from per-field merge across chain
+	Network            *NetworkConfig    `json:"network,omitempty"`              // isolated overrides (last wins), allow additive
+	Mounts             []string          `json:"mounts,omitempty"`               // additive across chain (host:container[:ro])
+	AgentArgs          map[string]string `json:"agent_args,omitempty"`           // merged across chain (map merge, later wins)
+	AgentFiles         *AgentFilesConfig `json:"agent_files,omitempty"`          // replacement semantics (child replaces parent)
+	CapAdd             []string          `json:"cap_add,omitempty"`              // additive across chain (Docker only)
+	Devices            []string          `json:"devices,omitempty"`              // additive across chain (Docker only)
+	Setup              []string          `json:"setup,omitempty"`                // additive across chain (Docker only)
+	AutoCommitInterval int               `json:"auto_commit_interval,omitempty"` // profile overrides default
 }
 
 // ProfileDirPath returns the host-side directory for a profile.
@@ -372,6 +375,12 @@ func LoadProfile(name string) (*ProfileConfig, error) {
 				return nil, fmt.Errorf("agent_files: %w", afErr)
 			}
 			cfg.AgentFiles = af
+		case "auto_commit_interval":
+			n, aErr := strconv.Atoi(val.Value)
+			if aErr != nil {
+				return nil, fmt.Errorf("auto_commit_interval: %w", aErr)
+			}
+			cfg.AutoCommitInterval = n
 			// Unknown fields are silently ignored
 		}
 	}
@@ -512,6 +521,7 @@ func MergeProfileChain(base *YoloaiConfig, chain []string) (*MergedConfig, error
 	}
 
 	merged.AgentFiles = base.AgentFiles
+	merged.AutoCommitInterval = base.AutoCommitInterval
 
 	// Apply each non-base profile in order
 	for _, name := range chain {
@@ -602,6 +612,11 @@ func MergeProfileChain(base *YoloaiConfig, chain []string) (*MergedConfig, error
 		// AgentFiles: replacement semantics (child replaces parent entirely)
 		if profile.AgentFiles != nil {
 			merged.AgentFiles = profile.AgentFiles
+		}
+
+		// AutoCommitInterval: scalar override (non-zero wins)
+		if profile.AutoCommitInterval > 0 {
+			merged.AutoCommitInterval = profile.AutoCommitInterval
 		}
 	}
 

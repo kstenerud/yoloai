@@ -79,21 +79,23 @@ type overlayMountConfig struct {
 
 // containerConfig is the serializable form of /yoloai/config.json.
 type containerConfig struct {
-	HostUID         int                  `json:"host_uid"`
-	HostGID         int                  `json:"host_gid"`
-	AgentCommand    string               `json:"agent_command"`
-	StartupDelay    int                  `json:"startup_delay"`
-	ReadyPattern    string               `json:"ready_pattern"`
-	SubmitSequence  string               `json:"submit_sequence"`
-	TmuxConf        string               `json:"tmux_conf"`
-	WorkingDir      string               `json:"working_dir"`
-	StateDirName    string               `json:"state_dir_name"`
-	Debug           bool                 `json:"debug,omitempty"`
-	NetworkIsolated bool                 `json:"network_isolated,omitempty"`
-	AllowedDomains  []string             `json:"allowed_domains,omitempty"`
-	Passthrough     []string             `json:"passthrough,omitempty"`
-	OverlayMounts   []overlayMountConfig `json:"overlay_mounts,omitempty"`
-	SetupCommands   []string             `json:"setup_commands,omitempty"`
+	HostUID            int                  `json:"host_uid"`
+	HostGID            int                  `json:"host_gid"`
+	AgentCommand       string               `json:"agent_command"`
+	StartupDelay       int                  `json:"startup_delay"`
+	ReadyPattern       string               `json:"ready_pattern"`
+	SubmitSequence     string               `json:"submit_sequence"`
+	TmuxConf           string               `json:"tmux_conf"`
+	WorkingDir         string               `json:"working_dir"`
+	StateDirName       string               `json:"state_dir_name"`
+	Debug              bool                 `json:"debug,omitempty"`
+	NetworkIsolated    bool                 `json:"network_isolated,omitempty"`
+	AllowedDomains     []string             `json:"allowed_domains,omitempty"`
+	Passthrough        []string             `json:"passthrough,omitempty"`
+	OverlayMounts      []overlayMountConfig `json:"overlay_mounts,omitempty"`
+	SetupCommands      []string             `json:"setup_commands,omitempty"`
+	AutoCommitInterval int                  `json:"auto_commit_interval,omitempty"`
+	CopyDirs           []string             `json:"copy_dirs,omitempty"`
 }
 
 // Create creates and optionally starts a new sandbox.
@@ -173,6 +175,7 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 	var mergedCapAdd []string
 	var mergedDevices []string
 	var mergedSetup []string
+	mergedAutoCommitInterval := ycfg.AutoCommitInterval
 	mergedEnv := ycfg.Env
 	mergedAgentArgs := ycfg.AgentArgs
 	mergedAgentFiles := ycfg.AgentFiles
@@ -264,6 +267,9 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 		mergedCapAdd = merged.CapAdd
 		mergedDevices = merged.Devices
 		mergedSetup = merged.Setup
+
+		// AutoCommitInterval: scalar override
+		mergedAutoCommitInterval = merged.AutoCommitInterval
 
 		// Resolve image ref
 		imageRef = config.ResolveProfileImage(opts.Profile, chain)
@@ -676,8 +682,19 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 		}
 	}
 
+	// Collect mount paths of all :copy directories for auto-commit loop
+	var copyDirs []string
+	if workdir.Mode == "copy" {
+		copyDirs = append(copyDirs, workdir.ResolvedMountPath())
+	}
+	for _, ad := range auxDirs {
+		if ad.Mode == "copy" {
+			copyDirs = append(copyDirs, ad.ResolvedMountPath())
+		}
+	}
+
 	// Build config.json
-	configData, err := buildContainerConfig(agentDef, agentCommand, tmuxConf, workdir.ResolvedMountPath(), opts.Debug, networkMode == "isolated", networkAllow, opts.Passthrough, overlayMounts, mergedSetup)
+	configData, err := buildContainerConfig(agentDef, agentCommand, tmuxConf, workdir.ResolvedMountPath(), opts.Debug, networkMode == "isolated", networkAllow, opts.Passthrough, overlayMounts, mergedSetup, mergedAutoCommitInterval, copyDirs)
 	if err != nil {
 		return nil, fmt.Errorf("build config.json: %w", err)
 	}
@@ -698,16 +715,17 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 			Mode:        workdir.Mode,
 			BaselineSHA: baselineSHA,
 		},
-		Directories:  dirMetas,
-		HasPrompt:    hasPrompt,
-		NetworkMode:  networkMode,
-		NetworkAllow: networkAllow,
-		Ports:        opts.Ports,
-		Resources:    resources,
-		Mounts:       mergedMounts,
-		CapAdd:       mergedCapAdd,
-		Devices:      mergedDevices,
-		Setup:        mergedSetup,
+		Directories:        dirMetas,
+		HasPrompt:          hasPrompt,
+		NetworkMode:        networkMode,
+		NetworkAllow:       networkAllow,
+		Ports:              opts.Ports,
+		Resources:          resources,
+		Mounts:             mergedMounts,
+		CapAdd:             mergedCapAdd,
+		Devices:            mergedDevices,
+		Setup:              mergedSetup,
+		AutoCommitInterval: mergedAutoCommitInterval,
 	}
 
 	if err := SaveMeta(sandboxDir, meta); err != nil {
@@ -1004,27 +1022,29 @@ func shellEscapeForDoubleQuotes(s string) string {
 }
 
 // buildContainerConfig creates the config.json content.
-func buildContainerConfig(agentDef *agent.Definition, agentCommand string, tmuxConf string, workingDir string, debug bool, networkIsolated bool, allowedDomains []string, passthrough []string, overlayMounts []overlayMountConfig, setupCommands []string) ([]byte, error) {
+func buildContainerConfig(agentDef *agent.Definition, agentCommand string, tmuxConf string, workingDir string, debug bool, networkIsolated bool, allowedDomains []string, passthrough []string, overlayMounts []overlayMountConfig, setupCommands []string, autoCommitInterval int, copyDirs []string) ([]byte, error) {
 	var stateDirName string
 	if agentDef.StateDir != "" {
 		stateDirName = filepath.Base(agentDef.StateDir)
 	}
 	cfg := containerConfig{
-		HostUID:         os.Getuid(),
-		HostGID:         os.Getgid(),
-		AgentCommand:    agentCommand,
-		StartupDelay:    int(agentDef.StartupDelay / time.Millisecond),
-		ReadyPattern:    agentDef.ReadyPattern,
-		SubmitSequence:  agentDef.SubmitSequence,
-		TmuxConf:        tmuxConf,
-		WorkingDir:      workingDir,
-		StateDirName:    stateDirName,
-		Debug:           debug,
-		NetworkIsolated: networkIsolated,
-		AllowedDomains:  allowedDomains,
-		Passthrough:     passthrough,
-		OverlayMounts:   overlayMounts,
-		SetupCommands:   setupCommands,
+		HostUID:            os.Getuid(),
+		HostGID:            os.Getgid(),
+		AgentCommand:       agentCommand,
+		StartupDelay:       int(agentDef.StartupDelay / time.Millisecond),
+		ReadyPattern:       agentDef.ReadyPattern,
+		SubmitSequence:     agentDef.SubmitSequence,
+		TmuxConf:           tmuxConf,
+		WorkingDir:         workingDir,
+		StateDirName:       stateDirName,
+		Debug:              debug,
+		NetworkIsolated:    networkIsolated,
+		AllowedDomains:     allowedDomains,
+		Passthrough:        passthrough,
+		OverlayMounts:      overlayMounts,
+		SetupCommands:      setupCommands,
+		AutoCommitInterval: autoCommitInterval,
+		CopyDirs:           copyDirs,
 	}
 	return json.MarshalIndent(cfg, "", "  ")
 }

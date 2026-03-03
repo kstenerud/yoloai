@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 
 	"gopkg.in/yaml.v3"
 )
@@ -26,21 +27,22 @@ func (c *AgentFilesConfig) IsStringForm() bool {
 
 // YoloaiConfig holds the subset of config.yaml fields that the Go code reads.
 type YoloaiConfig struct {
-	Backend    string            `yaml:"backend"`    // backend
-	TartImage  string            `yaml:"tart_image"` // tart.image — custom base VM image for tart backend
-	Agent      string            `yaml:"agent"`      // agent
-	Model      string            `yaml:"model"`      // model
-	Profile    string            `yaml:"profile"`    // profile — default profile to use
-	Env        map[string]string `yaml:"env"`        // env — environment variables passed to container
-	Resources  *ResourceLimits   `yaml:"resources"`  // resources — container resource limits
-	Network    *NetworkConfig    `yaml:"network"`    // network — network isolation settings
-	Mounts     []string          `yaml:"mounts"`     // mounts — extra bind mounts (host:container[:ro])
-	Ports      []string          `yaml:"ports"`      // ports — default port mappings (host:container)
-	AgentArgs  map[string]string `yaml:"agent_args"` // agent_args — per-agent default CLI args
-	AgentFiles *AgentFilesConfig `yaml:"-"`          // agent_files — extra files to seed into agent-state
-	CapAdd     []string          `yaml:"cap_add"`    // cap_add — Linux capabilities to add (Docker only)
-	Devices    []string          `yaml:"devices"`    // devices — host devices to expose (Docker only)
-	Setup      []string          `yaml:"setup"`      // setup — commands to run before agent launch (Docker only)
+	Backend            string            `yaml:"backend"`              // backend
+	TartImage          string            `yaml:"tart_image"`           // tart.image — custom base VM image for tart backend
+	Agent              string            `yaml:"agent"`                // agent
+	Model              string            `yaml:"model"`                // model
+	Profile            string            `yaml:"profile"`              // profile — default profile to use
+	Env                map[string]string `yaml:"env"`                  // env — environment variables passed to container
+	Resources          *ResourceLimits   `yaml:"resources"`            // resources — container resource limits
+	Network            *NetworkConfig    `yaml:"network"`              // network — network isolation settings
+	Mounts             []string          `yaml:"mounts"`               // mounts — extra bind mounts (host:container[:ro])
+	Ports              []string          `yaml:"ports"`                // ports — default port mappings (host:container)
+	AgentArgs          map[string]string `yaml:"agent_args"`           // agent_args — per-agent default CLI args
+	AgentFiles         *AgentFilesConfig `yaml:"-"`                    // agent_files — extra files to seed into agent-state
+	CapAdd             []string          `yaml:"cap_add"`              // cap_add — Linux capabilities to add (Docker only)
+	Devices            []string          `yaml:"devices"`              // devices — host devices to expose (Docker only)
+	Setup              []string          `yaml:"setup"`                // setup — commands to run before agent launch (Docker only)
+	AutoCommitInterval int               `yaml:"auto_commit_interval"` // auto_commit_interval — seconds between auto-commits in :copy dirs; 0 = disabled
 }
 
 // ResourceLimits holds container resource constraints (CPU, memory).
@@ -79,6 +81,7 @@ var knownSettings = []knownSetting{
 	{"resources.cpus", ""},
 	{"resources.memory", ""},
 	{"network.isolated", "false"},
+	{"auto_commit_interval", "0"},
 }
 
 // knownCollectionSetting defines a non-scalar config key (map or list)
@@ -312,6 +315,12 @@ func LoadConfig() (*YoloaiConfig, error) {
 				return nil, fmt.Errorf("agent_files: %w", afErr)
 			}
 			cfg.AgentFiles = af
+		case "auto_commit_interval":
+			n, aErr := strconv.Atoi(val.Value)
+			if aErr != nil {
+				return nil, fmt.Errorf("auto_commit_interval: %w", aErr)
+			}
+			cfg.AutoCommitInterval = n
 		}
 	}
 

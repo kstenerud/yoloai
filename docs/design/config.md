@@ -61,7 +61,7 @@ agent: claude                           # Agent to launch: aider, claude, codex,
 # profile: my-project                  # default profile to use; CLI --profile overrides, --no-profile opts out
 # mounts:                              # bind mounts added at container run time
 #   - ~/.gitconfig:/home/yoloai/.gitconfig:ro
-# auto_commit_interval: 0              # [PLANNED] seconds between auto-commits in :copy dirs; 0 = disabled
+# auto_commit_interval: 0              # seconds between auto-commits in :copy dirs; 0 = disabled
 # ports: []                            # default port mappings; profile ports are additive
 env: {}                                # Environment variables forwarded to container via /run/secrets/
 # agent_args:                           # Per-agent default CLI args (inserted before -- passthrough)
@@ -91,6 +91,7 @@ Settings are managed via `yoloai config get/set` (keys are automatically routed 
 - `resources` sets container resource limits. `resources.cpus` (e.g., `"4"`, `"2.5"`) maps to `docker --cpus`. `resources.memory` (e.g., `"8g"`, `"512m"`) maps to `docker --memory`. CLI `--cpus` and `--memory` override config. Profile can override individual values.
 - `network` controls network isolation. `network.isolated: true` enables network isolation for all sandboxes. `network.allow` lists additional allowed domains (additive with agent defaults). Non-empty `network.allow` implies `network.isolated: true`. CLI `--network-isolated` and `--network-allow` override config.
 - `mounts` specifies bind mounts added at container run time (e.g., `~/.gitconfig:/home/yoloai/.gitconfig:ro`). Profile mounts are additive (merged with defaults).
+- `auto_commit_interval` sets the interval in seconds between automatic git commits in `:copy` directories inside the container. Disabled by default (`0`). When enabled, a background loop periodically runs `git add -A && git commit` in each `:copy` directory, providing recovery checkpoints for unattended runs. Only affects `:copy` dirs (`:overlay` has its own mechanism; `:rw` is the user's live repo). Profile overrides default.
 - `agent_files` controls what files are copied into the sandbox's `agent-state/` directory on first run (see below).
 
 Agents may define `AuthHintEnvVars` — environment variables that indicate authentication is configured through a non-API-key mechanism (e.g. local model server). When any of these vars are set (in host env or `env`), the auth check passes without requiring a cloud API key.
@@ -200,7 +201,7 @@ resources:                    # container resource limits
 #   isolated: true
 #   allow:
 #     - api.example.com
-# [PLANNED] auto_commit_interval: 300
+# auto_commit_interval: 300
 
 # --- Profile-specific fields (not in config.yaml) ---
 workdir:
@@ -240,7 +241,7 @@ The full merge table for reference:
 | `setup`                          | Additive (defaults first, then profile)                  |
 | `network.isolated`     | Profile overrides default. CLI overrides profile.        |
 | `network.allow`        | Additive                                                 |
-| [PLANNED] `auto_commit_interval` | Profile overrides default                                |
+| `auto_commit_interval` | Profile overrides default                                |
 
 **`yoloai profile` commands:**
 

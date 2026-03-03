@@ -728,3 +728,45 @@ func TestLoadConfig_AgentFilesOmitted(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, cfg.AgentFiles)
 }
+
+func TestLoadConfig_AutoCommitIntervalDefault(t *testing.T) {
+	dir := configDir(t)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(DefaultConfigYAML), 0600))
+
+	cfg, err := LoadConfig()
+	require.NoError(t, err)
+	assert.Equal(t, 0, cfg.AutoCommitInterval)
+}
+
+func TestLoadConfig_AutoCommitIntervalExplicit(t *testing.T) {
+	dir := configDir(t)
+
+	content := "auto_commit_interval: 60\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
+
+	cfg, err := LoadConfig()
+	require.NoError(t, err)
+	assert.Equal(t, 60, cfg.AutoCommitInterval)
+}
+
+func TestLoadConfig_AutoCommitIntervalInvalid(t *testing.T) {
+	dir := configDir(t)
+
+	content := "auto_commit_interval: abc\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
+
+	_, err := LoadConfig()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "auto_commit_interval")
+}
+
+func TestGetConfigValue_AutoCommitInterval(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	// Known key with no file: returns default "0"
+	val, found, err := GetConfigValue("auto_commit_interval")
+	require.NoError(t, err)
+	assert.True(t, found)
+	assert.Equal(t, "0", val)
+}

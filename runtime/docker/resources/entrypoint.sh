@@ -197,6 +197,27 @@ tmux send-keys -t main "exec $AGENT_COMMAND" Enter
     done
 ) &
 
+# --- Auto-commit loop for :copy directories ---
+AUTO_COMMIT_INTERVAL=$(jq -r '.auto_commit_interval // 0' "$CONFIG")
+COPY_DIR_COUNT=$(jq '.copy_dirs // [] | length' "$CONFIG")
+if [ "$AUTO_COMMIT_INTERVAL" -gt 0 ] && [ "$COPY_DIR_COUNT" -gt 0 ]; then
+    debug_log "starting auto-commit loop (interval=${AUTO_COMMIT_INTERVAL}s, dirs=$COPY_DIR_COUNT)"
+    (
+        while true; do
+            sleep "$AUTO_COMMIT_INTERVAL"
+            for i in $(seq 0 $((COPY_DIR_COUNT - 1))); do
+                DIR=$(jq -r ".copy_dirs[$i]" "$CONFIG")
+                git -C "$DIR" add -A 2>/dev/null || true
+                git -C "$DIR" \
+                    -c user.name=yoloai \
+                    -c user.email=yoloai@localhost \
+                    commit -m "auto-commit at $(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+                    2>/dev/null || true
+            done
+        done
+    ) &
+fi
+
 # --- Wait for agent ready, auto-accept trust/confirmation prompts ---
 # Always run this loop so interactive "Enter to confirm" prompts (workspace trust,
 # permissions mode) are handled even when no prompt file is provided.
