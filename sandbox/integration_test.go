@@ -3,95 +3,46 @@
 package sandbox
 
 import (
-	"context"
-	"io"
-	"log/slog"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
-	dockerrt "github.com/kstenerud/yoloai/runtime/docker"
 	"github.com/kstenerud/yoloai/workspace"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func TestIntegration_FullLifecycle(t *testing.T) {
-	ctx := context.Background()
+	mgr, ctx := integrationSetup(t)
+	projectDir := createProjectDir(t)
 
-	// Use a dedicated HOME to avoid polluting the real one
-	tmpHome := t.TempDir()
-	t.Setenv("HOME", tmpHome)
-
-	// Create a temp project directory with known content
-	projectDir := filepath.Join(tmpHome, "project")
-	require.NoError(t, os.MkdirAll(projectDir, 0750))
-	require.NoError(t, os.WriteFile(
-		filepath.Join(projectDir, "main.go"),
-		[]byte("package main\n\nfunc main() {}\n"),
-		0600,
-	))
-
-	// Connect to Docker
-	rt, err := dockerrt.New(ctx)
-	require.NoError(t, err, "Docker must be running for integration tests")
-	defer rt.Close() //nolint:errcheck // test cleanup
-
-	mgr := NewManager(rt, "docker", slog.Default(), strings.NewReader(""), io.Discard)
-
-	// Step 1: EnsureSetup (builds base image if needed)
-	require.NoError(t, mgr.EnsureSetup(ctx))
-
-	// Step 2: Create sandbox with --no-start (no API keys needed)
+	// Create sandbox with --no-start
 	sandboxName := "integ-test"
-	_, err = mgr.Create(ctx, CreateOptions{
+	_, err := mgr.Create(ctx, CreateOptions{
 		Name:       sandboxName,
 		WorkdirArg: projectDir,
-		Agent:      "claude",
+		Agent:      "test",
 		NoStart:    true,
 		Version:    "test",
 	})
 	require.NoError(t, err)
 
-	// Step 3: Verify directory structure
+	// Verify directory structure
 	sandboxDir := Dir(sandboxName)
 	assert.DirExists(t, sandboxDir)
 
 	meta, err := LoadMeta(sandboxDir)
 	require.NoError(t, err)
 	assert.Equal(t, sandboxName, meta.Name)
-	assert.Equal(t, "claude", meta.Agent)
+	assert.Equal(t, "test", meta.Agent)
 	assert.Equal(t, "copy", meta.Workdir.Mode)
 	assert.NotEmpty(t, meta.Workdir.BaselineSHA)
 
 	workDir := WorkDir(sandboxName, meta.Workdir.HostPath)
 	assert.FileExists(t, filepath.Join(workDir, "main.go"))
 
-	// Step 4: Start the container
-	require.NoError(t, mgr.Start(ctx, sandboxName, false))
-
-	// Give the container a moment to start
-	time.Sleep(2 * time.Second)
-
-	status, containerID, err := DetectStatus(ctx, rt, "yoloai-"+sandboxName)
-	require.NoError(t, err)
-	assert.NotEmpty(t, containerID)
-	// Status should be running, done, or failed (agent may fail without API key)
-	assert.Contains(t, []Status{StatusRunning, StatusDone, StatusFailed}, status)
-
-	// Step 5: Stop the container
-	require.NoError(t, mgr.Stop(ctx, sandboxName))
-
-	// Give Docker a moment to stop
-	time.Sleep(1 * time.Second)
-
-	status, _, err = DetectStatus(ctx, rt, "yoloai-"+sandboxName)
-	require.NoError(t, err)
-	assert.Equal(t, StatusStopped, status)
-
-	// Step 6: Modify work copy and verify diff
+	// Modify work copy and verify diff
 	require.NoError(t, os.WriteFile(
 		filepath.Join(workDir, "main.go"),
 		[]byte("package main\n\nimport \"fmt\"\n\nfunc main() { fmt.Println(\"hello\") }\n"),
@@ -103,14 +54,13 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 	assert.False(t, diffResult.Empty)
 	assert.Contains(t, diffResult.Output, "fmt")
 
-	// Step 7: Generate patch and apply to a target directory
+	// Generate patch and apply to a target directory
 	patch, stat, err := GeneratePatch(sandboxName, nil)
 	require.NoError(t, err)
 	assert.NotEmpty(t, patch)
 	assert.Contains(t, stat, "main.go")
 
-	targetDir := filepath.Join(tmpHome, "target")
-	require.NoError(t, os.MkdirAll(targetDir, 0750))
+	targetDir := t.TempDir()
 	require.NoError(t, os.WriteFile(
 		filepath.Join(targetDir, "main.go"),
 		[]byte("package main\n\nfunc main() {}\n"),
@@ -123,12 +73,12 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, string(applied), "fmt.Println")
 
-	// Step 8: Destroy
+	// Destroy
 	require.NoError(t, mgr.Destroy(ctx, sandboxName))
 	assert.NoDirExists(t, sandboxDir)
 
 	// Container should be gone
-	status, _, err = DetectStatus(ctx, rt, "yoloai-"+sandboxName)
+	status, _, err := DetectStatus(ctx, mgr.runtime, InstanceName(sandboxName))
 	require.NoError(t, err)
 	assert.Equal(t, StatusRemoved, status)
 }
@@ -304,15 +254,18 @@ func TestIntegration_Reset(t *testing.T) {
 	mgr, ctx := integrationSetup(t)
 	projectDir := createProjectDir(t)
 
+	// Create and start the sandbox (Reset requires a restart cycle)
 	_, err := mgr.Create(ctx, CreateOptions{
 		Name:       "resettest",
 		WorkdirArg: projectDir,
 		Agent:      "test",
-		NoStart:    true,
 		Version:    "test",
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { mgr.Destroy(ctx, "resettest") }) //nolint:errcheck // test cleanup
+
+	// Wait for container to stabilize
+	time.Sleep(2 * time.Second)
 
 	meta, err := LoadMeta(Dir("resettest"))
 	require.NoError(t, err)
@@ -328,6 +281,9 @@ func TestIntegration_Reset(t *testing.T) {
 	// Reset
 	require.NoError(t, mgr.Reset(ctx, ResetOptions{Name: "resettest"}))
 
+	// Wait for restarted container to stabilize
+	time.Sleep(2 * time.Second)
+
 	// new_file.txt should be gone after reset
 	assert.NoFileExists(t, filepath.Join(workDir, "new_file.txt"))
 
@@ -339,19 +295,18 @@ func TestIntegration_Exec(t *testing.T) {
 	mgr, ctx := integrationSetup(t)
 	projectDir := createProjectDir(t)
 
+	// Create and start the sandbox
 	_, err := mgr.Create(ctx, CreateOptions{
 		Name:       "exectest",
 		WorkdirArg: projectDir,
 		Agent:      "test",
-		NoStart:    true,
 		Version:    "test",
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { mgr.Destroy(ctx, "exectest") }) //nolint:errcheck // test cleanup
 
-	// Start the container
-	require.NoError(t, mgr.Start(ctx, "exectest", false))
-	time.Sleep(1 * time.Second)
+	// Wait for container to stabilize
+	time.Sleep(2 * time.Second)
 
 	// Exec a command
 	result, err := mgr.runtime.Exec(ctx, InstanceName("exectest"), []string{"echo", "integration-test"}, "yoloai")

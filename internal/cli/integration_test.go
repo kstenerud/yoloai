@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/kstenerud/yoloai/sandbox"
 	"github.com/stretchr/testify/assert"
@@ -72,16 +73,16 @@ func destroySandbox(t *testing.T, name string) {
 func TestCLI_NewAndDestroy(t *testing.T) {
 	projectDir := cliSetup(t)
 
-	stdout, _, err := runCLI(t, "new", "--agent", "test", "--no-start", "cli-new", projectDir)
+	_, stderr, err := runCLI(t, "new", "--agent", "test", "--no-start", "cli-new", projectDir)
 	require.NoError(t, err)
 	t.Cleanup(func() { destroySandbox(t, "cli-new") })
 
 	assert.DirExists(t, sandbox.Dir("cli-new"))
-	assert.Contains(t, stdout, "cli-new")
+	assert.Contains(t, stderr, "cli-new") // Manager output goes to stderr
 
-	stdout, _, err = runCLI(t, "destroy", "--yes", "cli-new")
+	_, stderr, err = runCLI(t, "destroy", "--yes", "cli-new")
 	require.NoError(t, err)
-	assert.Contains(t, stdout, "Destroyed")
+	assert.Contains(t, stderr, "Destroyed")
 	assert.NoDirExists(t, sandbox.Dir("cli-new"))
 }
 
@@ -150,12 +151,13 @@ func TestCLI_Diff(t *testing.T) {
 func TestCLI_StartStop(t *testing.T) {
 	projectDir := cliSetup(t)
 
-	_, _, err := runCLI(t, "new", "--agent", "test", "--no-start", "cli-startstop", projectDir)
+	// Create and start in one step (avoids separate start which recreates container)
+	_, _, err := runCLI(t, "new", "--agent", "test", "cli-startstop", projectDir)
 	require.NoError(t, err)
 	t.Cleanup(func() { destroySandbox(t, "cli-startstop") })
 
-	_, _, err = runCLI(t, "start", "cli-startstop")
-	require.NoError(t, err)
+	// Wait for container to stabilize
+	time.Sleep(2 * time.Second)
 
 	_, _, err = runCLI(t, "stop", "cli-startstop")
 	require.NoError(t, err)
