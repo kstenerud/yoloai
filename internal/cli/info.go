@@ -9,8 +9,8 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	"github.com/kstenerud/yoloai/internal/agent"
-	"github.com/kstenerud/yoloai/internal/sandbox"
+	"github.com/kstenerud/yoloai/agent"
+	"github.com/kstenerud/yoloai/sandbox"
 	"github.com/spf13/cobra"
 )
 

@@ -5,7 +5,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/kstenerud/yoloai/internal/sandbox"
+	"github.com/kstenerud/yoloai/sandbox"
+	"github.com/kstenerud/yoloai/workspace"
 	"github.com/spf13/cobra"
 )
 
@@ -128,7 +129,7 @@ Use --patches to export .patch files without applying them.`,
 			}
 
 			targetDir := meta.Workdir.HostPath
-			isGit := sandbox.IsGitRepo(targetDir)
+			isGit := workspace.IsGitRepo(targetDir)
 
 			// Non-git fallback: can't use git am on non-git targets
 			if !isGit && len(commits) > 0 {
@@ -143,7 +144,7 @@ Use --patches to export .patch files without applying them.`,
 
 			// Pre-flight: check for dirty repo when applying commits
 			if isGit {
-				warning, checkErr := sandbox.CheckDirtyRepo(targetDir)
+				warning, checkErr := workspace.CheckDirtyRepo(targetDir)
 				if checkErr != nil {
 					return checkErr
 				}
@@ -187,7 +188,7 @@ Use --patches to export .patch files without applying them.`,
 
 			commitsApplied := 0
 			if len(files) > 0 {
-				if err := sandbox.ApplyFormatPatch(patchDir, files, targetDir); err != nil {
+				if err := workspace.ApplyFormatPatch(patchDir, files, targetDir); err != nil {
 					return err
 				}
 				commitsApplied = len(files)
@@ -212,7 +213,7 @@ Use --patches to export .patch files without applying them.`,
 						fmt.Fprintf(cmd.ErrOrStderr(), "Warning: failed to generate WIP diff: %v\n", wipErr) //nolint:errcheck
 					}
 				} else if len(wipPatch) > 0 {
-					if err := sandbox.ApplyPatch(wipPatch, targetDir, isGit); err != nil {
+					if err := workspace.ApplyPatch(wipPatch, targetDir, isGit); err != nil {
 						if !jsonEnabled(cmd) {
 							fmt.Fprintf(cmd.ErrOrStderr(), //nolint:errcheck // best-effort warning
 								"Warning: failed to apply WIP changes: %v\n"+
@@ -293,7 +294,7 @@ func parseApplyArgs(rest []string, cmd *cobra.Command) (refs []string, paths []s
 // applySelectedCommits cherry-picks specific commits into the target.
 func applySelectedCommits(cmd *cobra.Command, name string, refs []string, meta *sandbox.Meta, yes, force bool) error {
 	targetDir := meta.Workdir.HostPath
-	if !sandbox.IsGitRepo(targetDir) {
+	if !workspace.IsGitRepo(targetDir) {
 		return fmt.Errorf("selective apply requires a git target directory — %s is not a git repository", targetDir)
 	}
 
@@ -315,7 +316,7 @@ func applySelectedCommits(cmd *cobra.Command, name string, refs []string, meta *
 	}
 
 	// Pre-flight: dirty repo check
-	warning, checkErr := sandbox.CheckDirtyRepo(targetDir)
+	warning, checkErr := workspace.CheckDirtyRepo(targetDir)
 	if checkErr != nil {
 		return checkErr
 	}
@@ -358,7 +359,7 @@ func applySelectedCommits(cmd *cobra.Command, name string, refs []string, meta *
 	}
 	defer os.RemoveAll(patchDir) //nolint:errcheck
 
-	if err := sandbox.ApplyFormatPatch(patchDir, files, targetDir); err != nil {
+	if err := workspace.ApplyFormatPatch(patchDir, files, targetDir); err != nil {
 		return err
 	}
 	if !jsonEnabled(cmd) {
@@ -376,7 +377,7 @@ func applySelectedCommits(cmd *cobra.Command, name string, refs []string, meta *
 		appliedSet[c.SHA] = true
 	}
 
-	prefixEnd := sandbox.ContiguousPrefixEnd(allCommits, appliedSet)
+	prefixEnd := workspace.ContiguousPrefixEnd(allCommits, appliedSet)
 	if prefixEnd >= 0 {
 		if err := sandbox.AdvanceBaselineTo(name, allCommits[prefixEnd].SHA); err != nil {
 			return fmt.Errorf("advance baseline: %w", err)
@@ -420,9 +421,9 @@ func applySquash(cmd *cobra.Command, name string, paths []string, meta *sandbox.
 	if !jsonEnabled(cmd) {
 		fmt.Fprintln(cmd.OutOrStdout(), stat) //nolint:errcheck
 	}
-	isGit := sandbox.IsGitRepo(targetDir)
+	isGit := workspace.IsGitRepo(targetDir)
 
-	if err := sandbox.CheckPatch(patch, targetDir, isGit); err != nil {
+	if err := workspace.CheckPatch(patch, targetDir, isGit); err != nil {
 		return err
 	}
 
@@ -437,7 +438,7 @@ func applySquash(cmd *cobra.Command, name string, paths []string, meta *sandbox.
 		}
 	}
 
-	if err := sandbox.ApplyPatch(patch, targetDir, isGit); err != nil {
+	if err := workspace.ApplyPatch(patch, targetDir, isGit); err != nil {
 		return err
 	}
 
@@ -497,11 +498,11 @@ func applySquashMulti(cmd *cobra.Command, name string, paths []string, _ *sandbo
 	}
 
 	for _, ps := range patches {
-		isGit := sandbox.IsGitRepo(ps.HostPath)
-		if err := sandbox.CheckPatch(ps.Patch, ps.HostPath, isGit); err != nil {
+		isGit := workspace.IsGitRepo(ps.HostPath)
+		if err := workspace.CheckPatch(ps.Patch, ps.HostPath, isGit); err != nil {
 			return fmt.Errorf("%s: %w", ps.HostPath, err)
 		}
-		if err := sandbox.ApplyPatch(ps.Patch, ps.HostPath, isGit); err != nil {
+		if err := workspace.ApplyPatch(ps.Patch, ps.HostPath, isGit); err != nil {
 			return fmt.Errorf("%s: %w", ps.HostPath, err)
 		}
 		if !isJSON {

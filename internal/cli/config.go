@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/kstenerud/yoloai/internal/sandbox"
+	"github.com/kstenerud/yoloai/sandbox"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )

@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kstenerud/yoloai/internal/extension"
+	"github.com/kstenerud/yoloai/extension"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

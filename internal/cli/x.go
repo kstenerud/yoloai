@@ -12,7 +12,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	"github.com/kstenerud/yoloai/internal/extension"
+	"github.com/kstenerud/yoloai/extension"
 	"github.com/spf13/cobra"
 )
 

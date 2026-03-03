@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/kstenerud/yoloai/internal/extension"
-	"github.com/kstenerud/yoloai/internal/sandbox"
+	"github.com/kstenerud/yoloai/extension"
+	"github.com/kstenerud/yoloai/sandbox"
 	"github.com/spf13/cobra"
 )
 

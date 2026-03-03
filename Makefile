@@ -35,7 +35,7 @@ tidy-check:
 check: lint tidy-check test
 
 integration:
-	go test -tags=integration -v -count=1 ./internal/sandbox/ ./internal/docker/
+	go test -tags=integration -v -count=1 ./sandbox/ ./runtime/docker/
 
 clean:
 	rm -f $(BINARY)

@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/kstenerud/yoloai/internal/runtime"
-	dockerrt "github.com/kstenerud/yoloai/internal/runtime/docker"
-	seatbeltrt "github.com/kstenerud/yoloai/internal/runtime/seatbelt"
-	tartrt "github.com/kstenerud/yoloai/internal/runtime/tart"
-	"github.com/kstenerud/yoloai/internal/sandbox"
+	"github.com/kstenerud/yoloai/runtime"
+	dockerrt "github.com/kstenerud/yoloai/runtime/docker"
+	seatbeltrt "github.com/kstenerud/yoloai/runtime/seatbelt"
+	tartrt "github.com/kstenerud/yoloai/runtime/tart"
+	"github.com/kstenerud/yoloai/sandbox"
 	"github.com/spf13/cobra"
 )
 
