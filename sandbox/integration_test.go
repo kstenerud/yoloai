@@ -17,16 +17,18 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 	mgr, ctx := integrationSetup(t)
 	projectDir := createProjectDir(t)
 
-	// Create sandbox with --no-start
+	// Create sandbox (starts container)
 	sandboxName := "integ-test"
 	_, err := mgr.Create(ctx, CreateOptions{
 		Name:       sandboxName,
 		WorkdirArg: projectDir,
 		Agent:      "test",
-		NoStart:    true,
 		Version:    "test",
 	})
 	require.NoError(t, err)
+
+	// Wait for entrypoint to initialize
+	time.Sleep(2 * time.Second)
 
 	// Verify directory structure
 	sandboxDir := Dir(sandboxName)
@@ -42,6 +44,17 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 	workDir := WorkDir(sandboxName, meta.Workdir.HostPath)
 	assert.FileExists(t, filepath.Join(workDir, "main.go"))
 
+	// Verify container is running
+	status, _, err := DetectStatus(ctx, mgr.runtime, InstanceName(sandboxName))
+	require.NoError(t, err)
+	assert.Equal(t, StatusRunning, status)
+
+	// Exec inside running container
+	result, err := mgr.runtime.Exec(ctx, InstanceName(sandboxName), []string{"echo", "lifecycle-test"}, "yoloai")
+	require.NoError(t, err)
+	assert.Equal(t, "lifecycle-test", result.Stdout)
+	assert.Equal(t, 0, result.ExitCode)
+
 	// Modify work copy and verify diff
 	require.NoError(t, os.WriteFile(
 		filepath.Join(workDir, "main.go"),
@@ -53,6 +66,27 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, diffResult.Empty)
 	assert.Contains(t, diffResult.Output, "fmt")
+
+	// Stop container and verify
+	require.NoError(t, mgr.Stop(ctx, sandboxName))
+
+	status, _, err = DetectStatus(ctx, mgr.runtime, InstanceName(sandboxName))
+	require.NoError(t, err)
+	assert.Equal(t, StatusStopped, status)
+
+	// Restart container and verify
+	require.NoError(t, mgr.Start(ctx, sandboxName, false))
+	time.Sleep(2 * time.Second)
+
+	status, _, err = DetectStatus(ctx, mgr.runtime, InstanceName(sandboxName))
+	require.NoError(t, err)
+	assert.Equal(t, StatusRunning, status)
+
+	// Exec again after restart
+	result, err = mgr.runtime.Exec(ctx, InstanceName(sandboxName), []string{"echo", "after-restart"}, "yoloai")
+	require.NoError(t, err)
+	assert.Equal(t, "after-restart", result.Stdout)
+	assert.Equal(t, 0, result.ExitCode)
 
 	// Generate patch and apply to a target directory
 	patch, stat, err := GeneratePatch(sandboxName, nil)
@@ -78,7 +112,7 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 	assert.NoDirExists(t, sandboxDir)
 
 	// Container should be gone
-	status, _, err := DetectStatus(ctx, mgr.runtime, InstanceName(sandboxName))
+	status, _, err = DetectStatus(ctx, mgr.runtime, InstanceName(sandboxName))
 	require.NoError(t, err)
 	assert.Equal(t, StatusRemoved, status)
 }
