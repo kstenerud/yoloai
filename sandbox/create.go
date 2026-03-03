@@ -14,7 +14,6 @@ import (
 	"github.com/kstenerud/yoloai/agent"
 	"github.com/kstenerud/yoloai/config"
 	"github.com/kstenerud/yoloai/runtime"
-	"github.com/kstenerud/yoloai/workspace"
 )
 
 // CreateOptions holds all parameters for sandbox creation.
@@ -168,286 +167,19 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 		return nil, fmt.Errorf("load global config: %w", err)
 	}
 
-	// Profile resolution: load profile chain, merge config, resolve image.
-	var profileName, imageRef string
-	var resources *config.ResourceLimits
-	var mergedMounts []string
-	var mergedCapAdd []string
-	var mergedDevices []string
-	var mergedSetup []string
-	mergedAutoCommitInterval := ycfg.AutoCommitInterval
-	mergedEnv := ycfg.Env
-	mergedAgentArgs := ycfg.AgentArgs
-	mergedAgentFiles := ycfg.AgentFiles
-	userAliases := gcfg.ModelAliases
-	if opts.Profile != "" {
-		if err := config.ValidateProfileName(opts.Profile); err != nil {
-			return nil, err
-		}
-		chain, chainErr := config.ResolveProfileChain(opts.Profile)
-		if chainErr != nil {
-			return nil, chainErr
-		}
-		merged, mergeErr := config.MergeProfileChain(ycfg, chain)
-		if mergeErr != nil {
-			return nil, fmt.Errorf("merge profile chain: %w", mergeErr)
-		}
-		if err := config.ValidateProfileBackend(merged.Backend, m.backend); err != nil {
-			return nil, err
-		}
-
-		// Apply merged values where CLI didn't override
-		if opts.Agent == ycfg.Agent && merged.Agent != "" {
-			opts.Agent = merged.Agent
-			agentDef = agent.GetAgent(opts.Agent)
-			if agentDef == nil {
-				return nil, NewUsageError("unknown agent from profile: %s", opts.Agent)
-			}
-		}
-		if opts.Model == "" && merged.Model != "" {
-			opts.Model = merged.Model
-		}
-
-		mergedEnv = merged.Env
-		mergedAgentArgs = merged.AgentArgs
-		mergedAgentFiles = merged.AgentFiles
-
-		if merged.Resources != nil {
-			r := *merged.Resources
-			resources = &r
-		}
-
-		// Profile workdir: use if CLI didn't provide one
-		if opts.WorkdirArg == "" && merged.Workdir != nil {
-			wdPath, wdErr := ExpandPath(merged.Workdir.Path)
-			if wdErr != nil {
-				return nil, fmt.Errorf("expand profile workdir path: %w", wdErr)
-			}
-			suffix := ""
-			if merged.Workdir.Mode != "" {
-				suffix = ":" + merged.Workdir.Mode
-			}
-			if merged.Workdir.Mount != "" {
-				suffix += "=" + merged.Workdir.Mount
-			}
-			opts.WorkdirArg = wdPath + suffix
-		}
-
-		// Profile directories: prepend before CLI aux dirs
-		for _, pd := range merged.Directories {
-			dirPath, dirErr := ExpandPath(pd.Path)
-			if dirErr != nil {
-				return nil, fmt.Errorf("expand profile directory path: %w", dirErr)
-			}
-			arg := dirPath
-			if pd.Mode != "" {
-				arg += ":" + pd.Mode
-			}
-			if pd.Mount != "" {
-				arg += "=" + pd.Mount
-			}
-			opts.AuxDirArgs = append([]string{arg}, opts.AuxDirArgs...)
-		}
-
-		// Profile ports: additive
-		opts.Ports = append(merged.Ports, opts.Ports...)
-
-		// Network: apply merged config as defaults (CLI flags override later)
-		if merged.Network != nil && !opts.NetworkNone && !opts.NetworkIsolated {
-			if merged.Network.Isolated {
-				opts.NetworkIsolated = true
-			}
-			opts.NetworkAllow = append(merged.Network.Allow, opts.NetworkAllow...)
-		}
-
-		// Mounts: additive from merged profile chain
-		mergedMounts = merged.Mounts
-
-		// Recipes: additive from merged profile chain
-		mergedCapAdd = merged.CapAdd
-		mergedDevices = merged.Devices
-		mergedSetup = merged.Setup
-
-		// AutoCommitInterval: scalar override
-		mergedAutoCommitInterval = merged.AutoCommitInterval
-
-		// Resolve image ref
-		imageRef = config.ResolveProfileImage(opts.Profile, chain)
-		profileName = opts.Profile
-
-		// Build profile image if needed (Docker only)
-		if err := EnsureProfileImage(ctx, m.runtime, opts.Profile, m.backend, AutoBuildSecrets(), m.output, m.logger, false); err != nil {
-			return nil, fmt.Errorf("build profile image: %w", err)
-		}
-	}
-
-	// Resources from base config (if profile didn't set them)
-	if resources == nil && ycfg.Resources != nil {
-		r := *ycfg.Resources
-		resources = &r
-	}
-
-	// Mounts from base config (if profile didn't set them)
-	if opts.Profile == "" && len(ycfg.Mounts) > 0 {
-		mergedMounts = ycfg.Mounts
-	}
-
-	// Ports from base config (if profile didn't set them)
-	if opts.Profile == "" && len(ycfg.Ports) > 0 {
-		opts.Ports = append(ycfg.Ports, opts.Ports...)
-	}
-
-	// Recipes from base config (if profile didn't set them)
-	if opts.Profile == "" {
-		mergedCapAdd = ycfg.CapAdd
-		mergedDevices = ycfg.Devices
-		mergedSetup = ycfg.Setup
-	}
-
-	// Network from base config (if profile didn't set it and CLI didn't override)
-	if opts.Profile == "" && ycfg.Network != nil && !opts.NetworkNone && !opts.NetworkIsolated {
-		if ycfg.Network.Isolated {
-			opts.NetworkIsolated = true
-		}
-		opts.NetworkAllow = append(ycfg.Network.Allow, opts.NetworkAllow...)
-	}
-	// Validate and expand config mounts
-	for i, m := range mergedMounts {
-		spec, parseErr := parseConfigMount(m)
-		if parseErr != nil {
-			return nil, fmt.Errorf("invalid mount %q: %w", m, parseErr)
-		}
-		// Re-store with expanded host path
-		mergedMounts[i] = spec.Source + ":" + spec.Target
-		if spec.ReadOnly {
-			mergedMounts[i] += ":ro"
-		}
-	}
-
-	// CLI overrides for resources
-	if opts.CPUs != "" {
-		if resources == nil {
-			resources = &config.ResourceLimits{}
-		}
-		resources.CPUs = opts.CPUs
-	}
-	if opts.Memory != "" {
-		if resources == nil {
-			resources = &config.ResourceLimits{}
-		}
-		resources.Memory = opts.Memory
-	}
-
-	// Parse workdir (may have been set from profile above)
-	if opts.WorkdirArg == "" {
-		return nil, NewUsageError("no workdir specified and no default workdir in profile")
-	}
-	workdir, err := ParseDirArg(opts.WorkdirArg)
+	// Resolve profile config: profile chain, config merging, image building.
+	pr, err := m.resolveProfileConfig(ctx, &opts, &agentDef, ycfg, gcfg)
 	if err != nil {
-		return nil, NewUsageError("invalid workdir: %s", err)
-	}
-	if workdir.Mode == "" {
-		workdir.Mode = "copy"
+		return nil, err
 	}
 
-	if _, err := os.Stat(workdir.Path); err != nil {
-		return nil, NewUsageError("workdir does not exist: %s", workdir.Path)
-	}
+	// Apply config defaults and CLI overrides for resources.
+	applyConfigDefaults(&opts, ycfg, pr)
 
-	hasAPIKey := hasAnyAPIKey(agentDef)
-	hasAuth := hasAnyAuthFile(agentDef)
-	hasAuthHint := hasAnyAuthHint(agentDef, mergedEnv)
-	if !hasAPIKey && !hasAuth && !hasAuthHint {
-		if agentDef.AuthOptional {
-			fmt.Fprintf(m.output, "Warning: no authentication detected for %s (it may use credentials yoloai cannot check)\n", agentDef.Name) //nolint:errcheck // best-effort warning
-		} else {
-			msg := fmt.Sprintf("no authentication found for %s: set %s",
-				agentDef.Name, strings.Join(agentDef.APIKeyEnvVars, "/"))
-			if authDesc := describeSeedAuthFiles(agentDef); authDesc != "" {
-				msg += fmt.Sprintf(" or provide OAuth credentials (%s)", authDesc)
-			}
-			if len(agentDef.AuthHintEnvVars) > 0 {
-				msg += fmt.Sprintf(", or set %s for local models", strings.Join(agentDef.AuthHintEnvVars, "/"))
-			}
-			return nil, fmt.Errorf("%s: %w", msg, ErrMissingAPIKey)
-		}
-	}
-
-	// When auth is only via local model server, a model must be specified
-	// so the agent knows which model to use.
-	if !hasAPIKey && !hasAuth && hasAuthHint && opts.Model == "" && ycfg.Model == "" {
-		return nil, NewUsageError("a model is required when using a local model server: use --model or 'yoloai config set model <model>'")
-	}
-
-	// Warn if a local model server URL points to localhost but the backend
-	// is containerized — localhost inside a container refers to the container
-	// itself, not the host machine.
-	if m.backend != "seatbelt" {
-		for _, key := range agentDef.AuthHintEnvVars {
-			for _, val := range []string{os.Getenv(key), mergedEnv[key]} {
-				if val != "" && containsLocalhost(val) {
-					hint := "use the host's routable IP instead"
-					if m.backend == "docker" {
-						hint = "use host.docker.internal instead"
-					}
-					return nil, NewUsageError("%s contains a localhost address (%s) which won't work inside a %s VM — %s",
-						key, val, m.backend, hint)
-				}
-			}
-		}
-	}
-
-	// Parse auxiliary directories
-	var auxDirs []*DirArg
-	for _, auxArg := range opts.AuxDirArgs {
-		auxDir, auxErr := ParseDirArg(auxArg)
-		if auxErr != nil {
-			return nil, NewUsageError("invalid directory %q: %s", auxArg, auxErr)
-		}
-		// Aux dirs default to read-only (empty mode means "ro")
-		if _, auxStatErr := os.Stat(auxDir.Path); auxStatErr != nil {
-			return nil, NewUsageError("directory does not exist: %s", auxDir.Path)
-		}
-		auxDirs = append(auxDirs, auxDir)
-	}
-
-	// Safety checks — workdir
-	if workspace.IsDangerousDir(workdir.Path) {
-		if workdir.Force {
-			fmt.Fprintf(m.output, "WARNING: mounting dangerous directory %s\n", workdir.Path) //nolint:errcheck // best-effort output
-		} else {
-			return nil, NewUsageError("refusing to mount dangerous directory %s (use :force to override)", workdir.Path)
-		}
-	}
-
-	// Safety checks — aux dirs
-	for _, ad := range auxDirs {
-		if workspace.IsDangerousDir(ad.Path) {
-			if ad.Force {
-				fmt.Fprintf(m.output, "WARNING: mounting dangerous directory %s\n", ad.Path) //nolint:errcheck // best-effort output
-			} else {
-				return nil, NewUsageError("refusing to mount dangerous directory %s (use :force to override)", ad.Path)
-			}
-		}
-	}
-
-	// Collect all host paths for overlap check
-	allPaths := []string{workdir.Path}
-	for _, ad := range auxDirs {
-		allPaths = append(allPaths, ad.Path)
-	}
-	if err := workspace.CheckPathOverlap(allPaths); err != nil {
-		return nil, NewUsageError("%s", err)
-	}
-
-	// Check for duplicate container mount paths
-	mountPaths := map[string]string{workdir.ResolvedMountPath(): workdir.Path}
-	for _, ad := range auxDirs {
-		mp := ad.ResolvedMountPath()
-		if prev, exists := mountPaths[mp]; exists {
-			return nil, NewUsageError("duplicate container mount path %s (from %s and %s)", mp, prev, ad.Path)
-		}
-		mountPaths[mp] = ad.Path
+	// Validate and expand config mounts.
+	mergedMounts, err := validateAndExpandMounts(pr.mounts)
+	if err != nil {
+		return nil, err
 	}
 
 	// --replace: destroy existing sandbox
@@ -459,38 +191,16 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 		}
 	}
 
-	// Dirty repo warnings (workdir + aux :copy/:rw dirs)
-	var dirtyWarnings []string
-	if msg, checkErr := workspace.CheckDirtyRepo(workdir.Path); checkErr != nil {
-		return nil, fmt.Errorf("check repo status: %w", checkErr)
-	} else if msg != "" {
-		dirtyWarnings = append(dirtyWarnings, fmt.Sprintf("%s: %s", workdir.Path, msg))
+	// Parse and validate directories, auth, safety checks, dirty repo warnings.
+	workdir, auxDirs, err := m.parseAndValidateDirs(ctx, opts, agentDef, pr.env, ycfg.Model)
+	if err != nil {
+		return nil, err
 	}
-	for _, ad := range auxDirs {
-		if ad.Mode == "copy" || ad.Mode == "overlay" || ad.Mode == "rw" {
-			if msg, checkErr := workspace.CheckDirtyRepo(ad.Path); checkErr != nil {
-				return nil, fmt.Errorf("check repo status: %w", checkErr)
-			} else if msg != "" {
-				dirtyWarnings = append(dirtyWarnings, fmt.Sprintf("%s: %s", ad.Path, msg))
-			}
-		}
-	}
-	if len(dirtyWarnings) > 0 && !opts.Yes {
-		for _, w := range dirtyWarnings {
-			fmt.Fprintf(m.output, "WARNING: %s has uncommitted changes (%s)\n", strings.SplitN(w, ": ", 2)[0], strings.SplitN(w, ": ", 2)[1]) //nolint:errcheck // best-effort output
-		}
-		fmt.Fprintln(m.output, "These changes will be visible to the agent and could be modified or lost.") //nolint:errcheck // best-effort output
-		confirmed, confirmErr := Confirm(ctx, "Continue? [y/N] ", m.input, m.output)
-		if confirmErr != nil {
-			return nil, confirmErr
-		}
-		if !confirmed {
-			return nil, nil // user cancelled
-		}
+	if workdir == nil {
+		return nil, nil // user cancelled
 	}
 
 	// Create directory structure
-	workCopyDir := WorkDir(opts.Name, workdir.Path)
 	for _, dir := range []string{
 		sandboxDir,
 		filepath.Join(sandboxDir, "work"),
@@ -512,6 +222,7 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 	}()
 
 	// Copy seed files into agent-state (config, OAuth credentials, etc.)
+	hasAPIKey := hasAnyAPIKey(agentDef)
 	if _, err := copySeedFiles(agentDef, sandboxDir, hasAPIKey); err != nil {
 		return nil, fmt.Errorf("copy seed files: %w", err)
 	}
@@ -523,8 +234,8 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 
 	// Copy agent_files (user-configured agent config files)
 	agentFilesInitialized := false
-	if mergedAgentFiles != nil && agentDef.StateDir != "" {
-		if err := copyAgentFiles(agentDef, sandboxDir, mergedAgentFiles); err != nil {
+	if pr.agentFiles != nil && agentDef.StateDir != "" {
+		if err := copyAgentFiles(agentDef, sandboxDir, pr.agentFiles); err != nil {
 			return nil, fmt.Errorf("copy agent files: %w", err)
 		}
 		agentFilesInitialized = true
@@ -538,93 +249,16 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 		}
 	}
 
-	// Copy workdir (or create overlay dirs)
-	switch workdir.Mode {
-	case "copy":
-		if err := workspace.CopyDir(workdir.Path, workCopyDir); err != nil {
-			return nil, fmt.Errorf("copy workdir: %w", err)
-		}
-	case "overlay":
-		// Create upper and ovlwork directories; no file copy needed
-		for _, d := range []string{
-			OverlayUpperDir(opts.Name, workdir.Path),
-			OverlayOvlworkDir(opts.Name, workdir.Path),
-		} {
-			if err := os.MkdirAll(d, 0750); err != nil {
-				return nil, fmt.Errorf("create overlay dir %s: %w", d, err)
-			}
-		}
-	default:
-		if err := os.MkdirAll(workCopyDir, 0750); err != nil {
-			return nil, fmt.Errorf("create work dir: %w", err)
-		}
+	// Copy/overlay workdir and create git baseline.
+	workCopyDir, baselineSHA, err := setupWorkdir(opts.Name, workdir)
+	if err != nil {
+		return nil, err
 	}
 
-	// Strip git metadata from copy before creating fresh baseline
-	if workdir.Mode == "copy" {
-		if err := workspace.RemoveGitDirs(workCopyDir); err != nil {
-			return nil, fmt.Errorf("remove git metadata: %w", err)
-		}
-	}
-
-	// Git baseline (overlay defers baseline to container entrypoint)
-	var baselineSHA string
-	switch workdir.Mode {
-	case "copy":
-		sha, err := workspace.Baseline(workCopyDir)
-		if err != nil {
-			return nil, fmt.Errorf("git baseline: %w", err)
-		}
-		baselineSHA = sha
-	case "overlay":
-		// Deferred — baseline created inside container by entrypoint
-		baselineSHA = ""
-	default:
-		sha, _ := workspace.HeadSHA(workdir.Path)
-		baselineSHA = sha
-	}
-
-	// Copy and baseline aux dirs
-	var dirMetas []DirMeta
-	for _, ad := range auxDirs {
-		mode := ad.Mode
-		if mode == "" {
-			mode = "ro"
-		}
-
-		dm := DirMeta{
-			HostPath:  ad.Path,
-			MountPath: ad.ResolvedMountPath(),
-			Mode:      mode,
-		}
-
-		switch ad.Mode {
-		case "copy":
-			auxWorkDir := WorkDir(opts.Name, ad.Path)
-			if err := workspace.CopyDir(ad.Path, auxWorkDir); err != nil {
-				return nil, fmt.Errorf("copy aux dir %s: %w", ad.Path, err)
-			}
-			if err := workspace.RemoveGitDirs(auxWorkDir); err != nil {
-				return nil, fmt.Errorf("remove git metadata in aux dir %s: %w", ad.Path, err)
-			}
-			sha, err := workspace.Baseline(auxWorkDir)
-			if err != nil {
-				return nil, fmt.Errorf("git baseline for aux dir %s: %w", ad.Path, err)
-			}
-			dm.BaselineSHA = sha
-		case "overlay":
-			for _, d := range []string{
-				OverlayUpperDir(opts.Name, ad.Path),
-				OverlayOvlworkDir(opts.Name, ad.Path),
-			} {
-				if err := os.MkdirAll(d, 0750); err != nil {
-					return nil, fmt.Errorf("create overlay dir for aux %s: %w", ad.Path, err)
-				}
-			}
-			// Baseline deferred to container entrypoint
-		}
-
-		dirMetas = append(dirMetas, dm)
+	// Copy/overlay aux dirs and create baselines.
+	dirMetas, err := setupAuxDirs(opts.Name, auxDirs)
+	if err != nil {
+		return nil, err
 	}
 
 	// Read prompt
@@ -635,11 +269,11 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 	hasPrompt := promptText != ""
 
 	// Resolve model alias and apply provider prefix if needed
-	model := resolveModel(agentDef, opts.Model, userAliases)
-	model = applyModelPrefix(agentDef, model, mergedEnv)
+	model := resolveModel(agentDef, opts.Model, pr.userAliases)
+	model = applyModelPrefix(agentDef, model, pr.env)
 
 	// Build agent command
-	agentArgs := mergedAgentArgs[opts.Agent]
+	agentArgs := pr.agentArgs[opts.Agent]
 	agentCommand := buildAgentCommand(agentDef, model, promptText, agentArgs, opts.Passthrough)
 
 	// Read tmux_conf from global config
@@ -648,53 +282,17 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 		tmuxConf = "default" // fallback if not set
 	}
 
-	// Determine network mode and allowlist
-	networkMode := ""
-	var networkAllow []string
-	if opts.NetworkNone {
-		networkMode = "none"
-	} else if opts.NetworkIsolated {
-		networkMode = "isolated"
-		networkAllow = append(networkAllow, agentDef.NetworkAllowlist...)
-		networkAllow = append(networkAllow, opts.NetworkAllow...)
-	}
+	// Determine network mode and allowlist.
+	networkMode, networkAllow := buildNetworkConfig(opts, agentDef)
 
-	// Build overlay mount configs for config.json
-	var overlayMounts []overlayMountConfig
-	if workdir.Mode == "overlay" {
-		encoded := EncodePath(workdir.Path)
-		overlayMounts = append(overlayMounts, overlayMountConfig{
-			Lower:  "/yoloai/overlay/" + encoded + "/lower",
-			Upper:  "/yoloai/overlay/" + encoded + "/upper",
-			Work:   "/yoloai/overlay/" + encoded + "/ovlwork",
-			Merged: workdir.ResolvedMountPath(),
-		})
-	}
-	for _, ad := range auxDirs {
-		if ad.Mode == "overlay" {
-			encoded := EncodePath(ad.Path)
-			overlayMounts = append(overlayMounts, overlayMountConfig{
-				Lower:  "/yoloai/overlay/" + encoded + "/lower",
-				Upper:  "/yoloai/overlay/" + encoded + "/upper",
-				Work:   "/yoloai/overlay/" + encoded + "/ovlwork",
-				Merged: ad.ResolvedMountPath(),
-			})
-		}
-	}
+	// Build overlay mount configs for config.json.
+	overlayMounts := collectOverlayMounts(workdir, auxDirs)
 
-	// Collect mount paths of all :copy directories for auto-commit loop
-	var copyDirs []string
-	if workdir.Mode == "copy" {
-		copyDirs = append(copyDirs, workdir.ResolvedMountPath())
-	}
-	for _, ad := range auxDirs {
-		if ad.Mode == "copy" {
-			copyDirs = append(copyDirs, ad.ResolvedMountPath())
-		}
-	}
+	// Collect mount paths of all :copy directories for auto-commit loop.
+	copyDirs := collectCopyDirs(workdir, auxDirs)
 
 	// Build config.json
-	configData, err := buildContainerConfig(agentDef, agentCommand, tmuxConf, workdir.ResolvedMountPath(), opts.Debug, networkMode == "isolated", networkAllow, opts.Passthrough, overlayMounts, mergedSetup, mergedAutoCommitInterval, copyDirs)
+	configData, err := buildContainerConfig(agentDef, agentCommand, tmuxConf, workdir.ResolvedMountPath(), opts.Debug, networkMode == "isolated", networkAllow, opts.Passthrough, overlayMounts, pr.setup, pr.autoCommitInterval, copyDirs)
 	if err != nil {
 		return nil, fmt.Errorf("build config.json: %w", err)
 	}
@@ -705,8 +303,8 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 		Name:          opts.Name,
 		CreatedAt:     time.Now(),
 		Backend:       m.backend,
-		Profile:       profileName,
-		ImageRef:      imageRef,
+		Profile:       pr.name,
+		ImageRef:      pr.imageRef,
 		Agent:         opts.Agent,
 		Model:         model,
 		Workdir: WorkdirMeta{
@@ -720,12 +318,12 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 		NetworkMode:        networkMode,
 		NetworkAllow:       networkAllow,
 		Ports:              opts.Ports,
-		Resources:          resources,
+		Resources:          pr.resources,
 		Mounts:             mergedMounts,
-		CapAdd:             mergedCapAdd,
-		Devices:            mergedDevices,
-		Setup:              mergedSetup,
-		AutoCommitInterval: mergedAutoCommitInterval,
+		CapAdd:             pr.capAdd,
+		Devices:            pr.devices,
+		Setup:              pr.setup,
+		AutoCommitInterval: pr.autoCommitInterval,
 	}
 
 	if err := SaveMeta(sandboxDir, meta); err != nil {
@@ -765,19 +363,19 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 		auxDirs:      auxDirs,
 		agent:        agentDef,
 		model:        model,
-		profile:      profileName,
-		imageRef:     imageRef,
-		env:          mergedEnv,
+		profile:      pr.name,
+		imageRef:     pr.imageRef,
+		env:          pr.env,
 		hasPrompt:    hasPrompt,
 		networkMode:  networkMode,
 		networkAllow: networkAllow,
 		ports:        opts.Ports,
 		configMounts: mergedMounts,
 		tmuxConf:     tmuxConf,
-		resources:    resources,
-		capAdd:       mergedCapAdd,
-		devices:      mergedDevices,
-		setup:        mergedSetup,
+		resources:    pr.resources,
+		capAdd:       pr.capAdd,
+		devices:      pr.devices,
+		setup:        pr.setup,
 		meta:         meta,
 		configJSON:   configData,
 	}, nil
