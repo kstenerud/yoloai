@@ -36,6 +36,9 @@ type YoloaiConfig struct {
 	Mounts     []string          `yaml:"mounts"`     // mounts — extra bind mounts (host:container[:ro])
 	AgentArgs  map[string]string `yaml:"agent_args"` // agent_args — per-agent default CLI args
 	AgentFiles *AgentFilesConfig `yaml:"-"`          // agent_files — extra files to seed into agent-state
+	CapAdd     []string          `yaml:"cap_add"`    // cap_add — Linux capabilities to add (Docker only)
+	Devices    []string          `yaml:"devices"`    // devices — host devices to expose (Docker only)
+	Setup      []string          `yaml:"setup"`      // setup — commands to run before agent launch (Docker only)
 }
 
 // ResourceLimits holds container resource constraints (CPU, memory).
@@ -89,6 +92,9 @@ var knownCollectionSettings = []knownCollectionSetting{
 	{"env", yaml.MappingNode},
 	{"mounts", yaml.SequenceNode},
 	{"network.allow", yaml.SequenceNode},
+	{"cap_add", yaml.SequenceNode},
+	{"devices", yaml.SequenceNode},
+	{"setup", yaml.SequenceNode},
 }
 
 // globalKnownSettings lists scalar config keys belonging to the global config.
@@ -217,6 +223,36 @@ func LoadConfig() (*YoloaiConfig, error) {
 						return nil, fmt.Errorf("mounts[]: %w", expandErr)
 					}
 					cfg.Mounts = append(cfg.Mounts, expanded)
+				}
+			}
+		case "cap_add":
+			if val.Kind == yaml.SequenceNode {
+				for _, item := range val.Content {
+					expanded, expandErr := expandEnvBraced(item.Value)
+					if expandErr != nil {
+						return nil, fmt.Errorf("cap_add[]: %w", expandErr)
+					}
+					cfg.CapAdd = append(cfg.CapAdd, expanded)
+				}
+			}
+		case "devices":
+			if val.Kind == yaml.SequenceNode {
+				for _, item := range val.Content {
+					expanded, expandErr := expandEnvBraced(item.Value)
+					if expandErr != nil {
+						return nil, fmt.Errorf("devices[]: %w", expandErr)
+					}
+					cfg.Devices = append(cfg.Devices, expanded)
+				}
+			}
+		case "setup":
+			if val.Kind == yaml.SequenceNode {
+				for _, item := range val.Content {
+					expanded, expandErr := expandEnvBraced(item.Value)
+					if expandErr != nil {
+						return nil, fmt.Errorf("setup[]: %w", expandErr)
+					}
+					cfg.Setup = append(cfg.Setup, expanded)
 				}
 			}
 		case "network":

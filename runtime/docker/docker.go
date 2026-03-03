@@ -130,6 +130,18 @@ func (r *Runtime) Create(ctx context.Context, cfg runtime.InstanceConfig) error 
 		CapAdd:       cfg.CapAdd,
 	}
 
+	if len(cfg.Devices) > 0 {
+		devices := make([]container.DeviceMapping, len(cfg.Devices))
+		for i, d := range cfg.Devices {
+			devices[i] = container.DeviceMapping{
+				PathOnHost:        d,
+				PathInContainer:   d,
+				CgroupPermissions: "rwm",
+			}
+		}
+		hostConfig.Devices = devices
+	}
+
 	if cfg.Resources != nil {
 		if cfg.Resources.NanoCPUs > 0 {
 			hostConfig.NanoCPUs = cfg.Resources.NanoCPUs

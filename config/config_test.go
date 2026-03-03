@@ -630,6 +630,42 @@ func TestLoadConfig_AgentFilesEnvExpansion(t *testing.T) {
 	assert.Equal(t, "/custom/path", cfg.AgentFiles.BaseDir)
 }
 
+func TestLoadConfig_RecipeFields(t *testing.T) {
+	dir := configDir(t)
+
+	content := "cap_add:\n  - NET_ADMIN\n  - SYS_PTRACE\ndevices:\n  - /dev/net/tun\nsetup:\n  - tailscale up --authkey=abc123\n  - echo done\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
+
+	cfg, err := LoadConfig()
+	require.NoError(t, err)
+	assert.Equal(t, []string{"NET_ADMIN", "SYS_PTRACE"}, cfg.CapAdd)
+	assert.Equal(t, []string{"/dev/net/tun"}, cfg.Devices)
+	assert.Equal(t, []string{"tailscale up --authkey=abc123", "echo done"}, cfg.Setup)
+}
+
+func TestLoadConfig_RecipeFieldsEnvExpansion(t *testing.T) {
+	dir := configDir(t)
+	t.Setenv("YOLOAI_TEST_KEY", "mykey123")
+
+	content := "setup:\n  - tailscale up --authkey=${YOLOAI_TEST_KEY}\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
+
+	cfg, err := LoadConfig()
+	require.NoError(t, err)
+	assert.Equal(t, []string{"tailscale up --authkey=mykey123"}, cfg.Setup)
+}
+
+func TestLoadConfig_RecipeFieldsEmpty(t *testing.T) {
+	dir := configDir(t)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(DefaultConfigYAML), 0600))
+
+	cfg, err := LoadConfig()
+	require.NoError(t, err)
+	assert.Nil(t, cfg.CapAdd)
+	assert.Nil(t, cfg.Devices)
+	assert.Nil(t, cfg.Setup)
+}
+
 func TestLoadConfig_AgentFilesOmitted(t *testing.T) {
 	dir := configDir(t)
 

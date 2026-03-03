@@ -109,7 +109,7 @@ With profiles (future), a "local-models" profile can bundle env, network config,
 **Planned settings (not yet parsed from config):**
 - `ports` will be default port mappings. Profile ports are additive.
 
-#### [PLANNED] Recipes (advanced)
+#### Recipes (advanced)
 
 For advanced setups like Tailscale inside containers:
 

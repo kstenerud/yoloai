@@ -948,6 +948,167 @@ func TestMergeProfileChain_AgentFilesOmittedKeepsParent(t *testing.T) {
 	}
 }
 
+func TestLoadProfile_RecipeFields(t *testing.T) {
+	yaml := `
+cap_add:
+  - NET_ADMIN
+devices:
+  - /dev/net/tun
+setup:
+  - tailscale up --authkey=key123
+  - echo ready
+`
+	setupProfileDir(t, "recipe-profile", yaml)
+
+	cfg, err := LoadProfile("recipe-profile")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(cfg.CapAdd) != 1 || cfg.CapAdd[0] != "NET_ADMIN" {
+		t.Errorf("CapAdd = %v, want [NET_ADMIN]", cfg.CapAdd)
+	}
+	if len(cfg.Devices) != 1 || cfg.Devices[0] != "/dev/net/tun" {
+		t.Errorf("Devices = %v, want [/dev/net/tun]", cfg.Devices)
+	}
+	if len(cfg.Setup) != 2 || cfg.Setup[0] != "tailscale up --authkey=key123" || cfg.Setup[1] != "echo ready" {
+		t.Errorf("Setup = %v, want [tailscale up --authkey=key123, echo ready]", cfg.Setup)
+	}
+}
+
+func TestLoadProfile_RecipeEnvExpansion(t *testing.T) {
+	t.Setenv("TEST_AUTHKEY", "secret123")
+	yaml := `
+setup:
+  - "tailscale up --authkey=${TEST_AUTHKEY}"
+`
+	setupProfileDir(t, "recipe-env", yaml)
+
+	cfg, err := LoadProfile("recipe-env")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(cfg.Setup) != 1 || cfg.Setup[0] != "tailscale up --authkey=secret123" {
+		t.Errorf("Setup = %v, want [tailscale up --authkey=secret123]", cfg.Setup)
+	}
+}
+
+func TestMergeProfileChain_RecipeAdditive(t *testing.T) {
+	home := setupProfileDir(t, "recipe-parent", "cap_add:\n  - NET_ADMIN\ndevices:\n  - /dev/net/tun\nsetup:\n  - echo parent\n")
+
+	childDir := filepath.Join(home, ".yoloai", "profiles", "recipe-child")
+	if err := os.MkdirAll(childDir, 0750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(childDir, "profile.yaml"),
+		[]byte("extends: recipe-parent\ncap_add:\n  - SYS_PTRACE\ndevices:\n  - /dev/fuse\nsetup:\n  - echo child\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	base := &YoloaiConfig{}
+	chain := []string{"base", "recipe-parent", "recipe-child"}
+	merged, err := MergeProfileChain(base, chain)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Additive: parent + child
+	wantCaps := []string{"NET_ADMIN", "SYS_PTRACE"}
+	if len(merged.CapAdd) != 2 || merged.CapAdd[0] != wantCaps[0] || merged.CapAdd[1] != wantCaps[1] {
+		t.Errorf("CapAdd = %v, want %v", merged.CapAdd, wantCaps)
+	}
+	wantDevices := []string{"/dev/net/tun", "/dev/fuse"}
+	if len(merged.Devices) != 2 || merged.Devices[0] != wantDevices[0] || merged.Devices[1] != wantDevices[1] {
+		t.Errorf("Devices = %v, want %v", merged.Devices, wantDevices)
+	}
+	wantSetup := []string{"echo parent", "echo child"}
+	if len(merged.Setup) != 2 || merged.Setup[0] != wantSetup[0] || merged.Setup[1] != wantSetup[1] {
+		t.Errorf("Setup = %v, want %v", merged.Setup, wantSetup)
+	}
+}
+
+func TestMergeProfileChain_RecipeBaseOnly(t *testing.T) {
+	setupProfileDir(t, "recipe-none", "agent: claude\n")
+
+	base := &YoloaiConfig{
+		CapAdd:  []string{"NET_ADMIN"},
+		Devices: []string{"/dev/net/tun"},
+		Setup:   []string{"echo base"},
+	}
+
+	chain := []string{"base", "recipe-none"}
+	merged, err := MergeProfileChain(base, chain)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(merged.CapAdd) != 1 || merged.CapAdd[0] != "NET_ADMIN" {
+		t.Errorf("CapAdd = %v, want [NET_ADMIN] (from base config)", merged.CapAdd)
+	}
+	if len(merged.Devices) != 1 || merged.Devices[0] != "/dev/net/tun" {
+		t.Errorf("Devices = %v, want [/dev/net/tun] (from base config)", merged.Devices)
+	}
+	if len(merged.Setup) != 1 || merged.Setup[0] != "echo base" {
+		t.Errorf("Setup = %v, want [echo base] (from base config)", merged.Setup)
+	}
+}
+
+func TestMergeProfileChain_RecipeProfileOnly(t *testing.T) {
+	setupProfileDir(t, "recipe-only", "cap_add:\n  - SYS_ADMIN\nsetup:\n  - echo profile\n")
+
+	base := &YoloaiConfig{}
+	chain := []string{"base", "recipe-only"}
+	merged, err := MergeProfileChain(base, chain)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(merged.CapAdd) != 1 || merged.CapAdd[0] != "SYS_ADMIN" {
+		t.Errorf("CapAdd = %v, want [SYS_ADMIN]", merged.CapAdd)
+	}
+	if merged.Devices != nil {
+		t.Errorf("Devices = %v, want nil", merged.Devices)
+	}
+	if len(merged.Setup) != 1 || merged.Setup[0] != "echo profile" {
+		t.Errorf("Setup = %v, want [echo profile]", merged.Setup)
+	}
+}
+
+func TestMergeProfileChain_RecipeThreeLevel(t *testing.T) {
+	home := setupProfileDir(t, "r-level1", "setup:\n  - echo level1\n")
+
+	for _, pair := range []struct{ name, extends, yaml string }{
+		{"r-level2", "r-level1", "extends: r-level1\nsetup:\n  - echo level2\n"},
+		{"r-level3", "r-level2", "extends: r-level2\nsetup:\n  - echo level3\n"},
+	} {
+		dir := filepath.Join(home, ".yoloai", "profiles", pair.name)
+		if err := os.MkdirAll(dir, 0750); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "profile.yaml"), []byte(pair.yaml), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	base := &YoloaiConfig{Setup: []string{"echo base"}}
+	chain := []string{"base", "r-level1", "r-level2", "r-level3"}
+	merged, err := MergeProfileChain(base, chain)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := []string{"echo base", "echo level1", "echo level2", "echo level3"}
+	if len(merged.Setup) != len(want) {
+		t.Fatalf("Setup = %v, want %v", merged.Setup, want)
+	}
+	for i, w := range want {
+		if merged.Setup[i] != w {
+			t.Errorf("Setup[%d] = %q, want %q", i, merged.Setup[i], w)
+		}
+	}
+}
+
 func TestMergeProfileChain_AgentFilesFromBaseConfig(t *testing.T) {
 	setupProfileDir(t, "af-base-only", "agent: claude\n")
 

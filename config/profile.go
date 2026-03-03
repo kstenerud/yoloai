@@ -28,6 +28,9 @@ type ProfileConfig struct {
 	Mounts      []string          // extra bind mounts (host:container[:ro])
 	AgentArgs   map[string]string // per-agent default CLI args
 	AgentFiles  *AgentFilesConfig // agent_files — extra files to seed into agent-state
+	CapAdd      []string          // cap_add — Linux capabilities to add (Docker only)
+	Devices     []string          // devices — host devices to expose (Docker only)
+	Setup       []string          // setup — commands to run before agent launch (Docker only)
 }
 
 // ProfileWorkdir defines a workdir from a profile.
@@ -59,6 +62,9 @@ type MergedConfig struct {
 	Mounts      []string          `json:"mounts,omitempty"`      // additive across chain (host:container[:ro])
 	AgentArgs   map[string]string `json:"agent_args,omitempty"`  // merged across chain (map merge, later wins)
 	AgentFiles  *AgentFilesConfig `json:"agent_files,omitempty"` // replacement semantics (child replaces parent)
+	CapAdd      []string          `json:"cap_add,omitempty"`     // additive across chain (Docker only)
+	Devices     []string          `json:"devices,omitempty"`     // additive across chain (Docker only)
+	Setup       []string          `json:"setup,omitempty"`       // additive across chain (Docker only)
 }
 
 // ProfileDirPath returns the host-side directory for a profile.
@@ -248,6 +254,36 @@ func LoadProfile(name string) (*ProfileConfig, error) {
 						return nil, fmt.Errorf("mounts[]: %w", expandErr)
 					}
 					cfg.Mounts = append(cfg.Mounts, expanded)
+				}
+			}
+		case "cap_add":
+			if val.Kind == yaml.SequenceNode {
+				for _, item := range val.Content {
+					expanded, expandErr := expandEnvBraced(item.Value)
+					if expandErr != nil {
+						return nil, fmt.Errorf("cap_add[]: %w", expandErr)
+					}
+					cfg.CapAdd = append(cfg.CapAdd, expanded)
+				}
+			}
+		case "devices":
+			if val.Kind == yaml.SequenceNode {
+				for _, item := range val.Content {
+					expanded, expandErr := expandEnvBraced(item.Value)
+					if expandErr != nil {
+						return nil, fmt.Errorf("devices[]: %w", expandErr)
+					}
+					cfg.Devices = append(cfg.Devices, expanded)
+				}
+			}
+		case "setup":
+			if val.Kind == yaml.SequenceNode {
+				for _, item := range val.Content {
+					expanded, expandErr := expandEnvBraced(item.Value)
+					if expandErr != nil {
+						return nil, fmt.Errorf("setup[]: %w", expandErr)
+					}
+					cfg.Setup = append(cfg.Setup, expanded)
 				}
 			}
 		case "workdir":
@@ -453,6 +489,16 @@ func MergeProfileChain(base *YoloaiConfig, chain []string) (*MergedConfig, error
 		copy(merged.Mounts, base.Mounts)
 	}
 
+	if len(base.CapAdd) > 0 {
+		merged.CapAdd = append([]string{}, base.CapAdd...)
+	}
+	if len(base.Devices) > 0 {
+		merged.Devices = append([]string{}, base.Devices...)
+	}
+	if len(base.Setup) > 0 {
+		merged.Setup = append([]string{}, base.Setup...)
+	}
+
 	if len(base.AgentArgs) > 0 {
 		merged.AgentArgs = make(map[string]string, len(base.AgentArgs))
 		for k, v := range base.AgentArgs {
@@ -542,6 +588,11 @@ func MergeProfileChain(base *YoloaiConfig, chain []string) (*MergedConfig, error
 
 		// Mounts: additive
 		merged.Mounts = append(merged.Mounts, profile.Mounts...)
+
+		// Recipes: additive
+		merged.CapAdd = append(merged.CapAdd, profile.CapAdd...)
+		merged.Devices = append(merged.Devices, profile.Devices...)
+		merged.Setup = append(merged.Setup, profile.Setup...)
 
 		// AgentFiles: replacement semantics (child replaces parent entirely)
 		if profile.AgentFiles != nil {

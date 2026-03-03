@@ -62,6 +62,9 @@ type sandboxState struct {
 	configMounts     []string // extra bind mounts from config/profile (host:container[:ro])
 	tmuxConf         string
 	resources        *config.ResourceLimits
+	capAdd           []string // Linux capabilities from config/profile
+	devices          []string // host devices from config/profile
+	setup            []string // setup commands from config/profile
 	meta             *Meta
 	configJSON       []byte
 }
@@ -90,6 +93,7 @@ type containerConfig struct {
 	AllowedDomains  []string             `json:"allowed_domains,omitempty"`
 	Passthrough     []string             `json:"passthrough,omitempty"`
 	OverlayMounts   []overlayMountConfig `json:"overlay_mounts,omitempty"`
+	SetupCommands   []string             `json:"setup_commands,omitempty"`
 }
 
 // Create creates and optionally starts a new sandbox.
@@ -166,6 +170,9 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 	var profileName, imageRef string
 	var resources *config.ResourceLimits
 	var mergedMounts []string
+	var mergedCapAdd []string
+	var mergedDevices []string
+	var mergedSetup []string
 	mergedEnv := ycfg.Env
 	mergedAgentArgs := ycfg.AgentArgs
 	mergedAgentFiles := ycfg.AgentFiles
@@ -253,6 +260,11 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 		// Mounts: additive from merged profile chain
 		mergedMounts = merged.Mounts
 
+		// Recipes: additive from merged profile chain
+		mergedCapAdd = merged.CapAdd
+		mergedDevices = merged.Devices
+		mergedSetup = merged.Setup
+
 		// Resolve image ref
 		imageRef = config.ResolveProfileImage(opts.Profile, chain)
 		profileName = opts.Profile
@@ -272,6 +284,13 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 	// Mounts from base config (if profile didn't set them)
 	if opts.Profile == "" && len(ycfg.Mounts) > 0 {
 		mergedMounts = ycfg.Mounts
+	}
+
+	// Recipes from base config (if profile didn't set them)
+	if opts.Profile == "" {
+		mergedCapAdd = ycfg.CapAdd
+		mergedDevices = ycfg.Devices
+		mergedSetup = ycfg.Setup
 	}
 
 	// Network from base config (if profile didn't set it and CLI didn't override)
@@ -653,7 +672,7 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 	}
 
 	// Build config.json
-	configData, err := buildContainerConfig(agentDef, agentCommand, tmuxConf, workdir.ResolvedMountPath(), opts.Debug, networkMode == "isolated", networkAllow, opts.Passthrough, overlayMounts)
+	configData, err := buildContainerConfig(agentDef, agentCommand, tmuxConf, workdir.ResolvedMountPath(), opts.Debug, networkMode == "isolated", networkAllow, opts.Passthrough, overlayMounts, mergedSetup)
 	if err != nil {
 		return nil, fmt.Errorf("build config.json: %w", err)
 	}
@@ -681,6 +700,9 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 		Ports:        opts.Ports,
 		Resources:    resources,
 		Mounts:       mergedMounts,
+		CapAdd:       mergedCapAdd,
+		Devices:      mergedDevices,
+		Setup:        mergedSetup,
 	}
 
 	if err := SaveMeta(sandboxDir, meta); err != nil {
@@ -730,6 +752,9 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 		configMounts: mergedMounts,
 		tmuxConf:     tmuxConf,
 		resources:    resources,
+		capAdd:       mergedCapAdd,
+		devices:      mergedDevices,
+		setup:        mergedSetup,
 		meta:         meta,
 		configJSON:   configData,
 	}, nil
@@ -813,6 +838,13 @@ func (m *Manager) launchContainer(ctx context.Context, state *sandboxState) erro
 		}
 		instanceCfg.CapAdd = append(instanceCfg.CapAdd, "SYS_ADMIN")
 	}
+
+	// Recipe fields (cap_add, devices, setup) are Docker-only
+	if m.backend != "docker" && (len(state.capAdd) > 0 || len(state.devices) > 0 || len(state.setup) > 0) {
+		return fmt.Errorf("cap_add, devices, and setup require the docker backend (not supported with %s)", m.backend)
+	}
+	instanceCfg.CapAdd = append(instanceCfg.CapAdd, state.capAdd...)
+	instanceCfg.Devices = state.devices
 
 	if err := m.runtime.Create(ctx, instanceCfg); err != nil {
 		return err
@@ -967,7 +999,7 @@ func shellEscapeForDoubleQuotes(s string) string {
 }
 
 // buildContainerConfig creates the config.json content.
-func buildContainerConfig(agentDef *agent.Definition, agentCommand string, tmuxConf string, workingDir string, debug bool, networkIsolated bool, allowedDomains []string, passthrough []string, overlayMounts []overlayMountConfig) ([]byte, error) {
+func buildContainerConfig(agentDef *agent.Definition, agentCommand string, tmuxConf string, workingDir string, debug bool, networkIsolated bool, allowedDomains []string, passthrough []string, overlayMounts []overlayMountConfig, setupCommands []string) ([]byte, error) {
 	var stateDirName string
 	if agentDef.StateDir != "" {
 		stateDirName = filepath.Base(agentDef.StateDir)
@@ -987,6 +1019,7 @@ func buildContainerConfig(agentDef *agent.Definition, agentCommand string, tmuxC
 		AllowedDomains:  allowedDomains,
 		Passthrough:     passthrough,
 		OverlayMounts:   overlayMounts,
+		SetupCommands:   setupCommands,
 	}
 	return json.MarshalIndent(cfg, "", "  ")
 }

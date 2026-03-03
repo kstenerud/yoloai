@@ -99,6 +99,17 @@ if [ "$NETWORK_ISOLATED" = "true" ]; then
     debug_log "network isolation rules applied"
 fi
 
+# --- Setup commands ---
+SETUP_COUNT=$(jq ".setup_commands // [] | length" "$CONFIG")
+if [ "$SETUP_COUNT" -gt 0 ]; then
+    debug_log "running $SETUP_COUNT setup command(s)"
+    for i in $(seq 0 $((SETUP_COUNT - 1))); do
+        SETUP_CMD=$(jq -r ".setup_commands[$i]" "$CONFIG")
+        debug_log "setup[$i]: $SETUP_CMD"
+        eval "$SETUP_CMD"
+    done
+fi
+
 # --- Overlay mounts ---
 OVERLAY_COUNT=$(jq ".overlay_mounts // [] | length" "$CONFIG")
 if [ "$OVERLAY_COUNT" -gt 0 ]; then

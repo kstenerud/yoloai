@@ -7,17 +7,17 @@ Create a plan file in this directory before starting implementation.
 
 | Feature | Design Reference | Plan | Notes |
 |---------|-----------------|------|-------|
-| Extensions (`yoloai x`) | [commands.md](../../design/commands.md) | — | User-defined YAML commands in `~/.yoloai/extensions/` |
+| ~~Extensions (`yoloai x`)~~ | [commands.md](../../design/commands.md) | — | Done |
 
 ## Commands
 
 | Feature | Design Reference | Plan | Notes |
 |---------|-----------------|------|-------|
-| `--power-user` on `setup` | [setup.md](../../design/setup.md) | — | Non-interactive setup for automation |
+| ~~`--power-user` on `setup`~~ | [setup.md](../../design/setup.md) | — | Done: `--agent`, `--backend`, `--tmux-conf` flags on setup |
 | ~~`list` filters~~ | [commands.md](../../design/commands.md) | — | Done: `--running`, `--stopped`, `--agent`, `--profile`, `--changes` |
 
 ## Config Options
 
 | Feature | Design Reference | Notes |
 |---------|-----------------|-------|
-| Recipes (`cap_add`, `devices`, `setup`) | [config.md](../../design/config.md) | Advanced setups (Tailscale, GPU) |
+| ~~Recipes (`cap_add`, `devices`, `setup`)~~ | [config.md](../../design/config.md) | Done |

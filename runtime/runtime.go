@@ -55,6 +55,7 @@ type InstanceConfig struct {
 	Ports       []PortMapping
 	NetworkMode string // "" = default, "none" = no network, "isolated" = allowlist only
 	CapAdd      []string
+	Devices     []string
 	UseInit     bool
 	Resources   *ResourceLimits
 }

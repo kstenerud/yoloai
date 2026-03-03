@@ -31,6 +31,9 @@ type Meta struct {
 	Ports        []string               `json:"ports,omitempty"`
 	Resources    *config.ResourceLimits `json:"resources,omitempty"`
 	Mounts       []string               `json:"mounts,omitempty"`
+	CapAdd       []string               `json:"cap_add,omitempty"`
+	Devices      []string               `json:"devices,omitempty"`
+	Setup        []string               `json:"setup,omitempty"`
 }
 
 // WorkdirMeta stores the resolved workdir state at creation time.
