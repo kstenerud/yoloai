@@ -30,6 +30,7 @@ type YoloaiConfig struct {
 	TartImage  string            `yaml:"tart_image"` // tart.image — custom base VM image for tart backend
 	Agent      string            `yaml:"agent"`      // agent
 	Model      string            `yaml:"model"`      // model
+	Profile    string            `yaml:"profile"`    // profile — default profile to use
 	Env        map[string]string `yaml:"env"`        // env — environment variables passed to container
 	Resources  *ResourceLimits   `yaml:"resources"`  // resources — container resource limits
 	Network    *NetworkConfig    `yaml:"network"`    // network — network isolation settings
@@ -74,6 +75,7 @@ var knownSettings = []knownSetting{
 	{"tart.image", ""},
 	{"agent", "claude"},
 	{"model", ""},
+	{"profile", ""},
 	{"resources.cpus", ""},
 	{"resources.memory", ""},
 	{"network.isolated", "false"},
@@ -298,6 +300,12 @@ func LoadConfig() (*YoloaiConfig, error) {
 				return nil, fmt.Errorf("model: %w", err)
 			}
 			cfg.Model = expanded
+		case "profile":
+			expanded, err := expandEnvBraced(val.Value)
+			if err != nil {
+				return nil, fmt.Errorf("profile: %w", err)
+			}
+			cfg.Profile = expanded
 		case "agent_files":
 			af, afErr := parseAgentFilesNode(val)
 			if afErr != nil {

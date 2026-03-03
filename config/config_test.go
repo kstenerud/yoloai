@@ -686,6 +686,38 @@ func TestLoadConfig_RecipeFieldsEmpty(t *testing.T) {
 	assert.Nil(t, cfg.Setup)
 }
 
+func TestLoadConfig_ProfileDefault(t *testing.T) {
+	dir := configDir(t)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(DefaultConfigYAML), 0600))
+
+	cfg, err := LoadConfig()
+	require.NoError(t, err)
+	assert.Empty(t, cfg.Profile)
+}
+
+func TestLoadConfig_ProfileOverride(t *testing.T) {
+	dir := configDir(t)
+
+	content := "profile: my-project\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
+
+	cfg, err := LoadConfig()
+	require.NoError(t, err)
+	assert.Equal(t, "my-project", cfg.Profile)
+}
+
+func TestLoadConfig_ProfileEnvExpansion(t *testing.T) {
+	dir := configDir(t)
+	t.Setenv("YOLOAI_TEST_PROFILE", "dev-profile")
+
+	content := "profile: ${YOLOAI_TEST_PROFILE}\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
+
+	cfg, err := LoadConfig()
+	require.NoError(t, err)
+	assert.Equal(t, "dev-profile", cfg.Profile)
+}
+
 func TestLoadConfig_AgentFilesOmitted(t *testing.T) {
 	dir := configDir(t)
 

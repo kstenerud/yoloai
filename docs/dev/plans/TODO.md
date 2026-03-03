@@ -22,6 +22,6 @@ Create a plan file in this directory before starting implementation.
 | Feature | Design Reference | Notes |
 |---------|-----------------|-------|
 | ~~Recipes (`cap_add`, `devices`, `setup`)~~ | [config.md](../../design/config.md) | Done |
-| `profile` config field | [config.md](../../design/config.md) | Default profile in base config; CLI `--profile` overrides |
+| ~~`profile` config field~~ | [config.md](../../design/config.md) | Done |
 | `auto_commit_interval` | [config.md](../../design/config.md) | Background auto-commit loop for `:copy` dirs |
 | ~~`ports` in base config~~ | [config.md](../../design/config.md) | Done |

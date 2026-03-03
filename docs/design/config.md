@@ -58,7 +58,7 @@ agent: claude                           # Agent to launch: aider, claude, codex,
 
 # agent_files: "${HOME}"               # string: base dir (agent subdir appended); list: specific files
 # --- Additional fields ---
-# profile: my-project                  # [PLANNED] default profile to use; CLI --profile overrides
+# profile: my-project                  # default profile to use; CLI --profile overrides, --no-profile opts out
 # mounts:                              # bind mounts added at container run time
 #   - ~/.gitconfig:/home/yoloai/.gitconfig:ro
 # auto_commit_interval: 0              # [PLANNED] seconds between auto-commits in :copy dirs; 0 = disabled
@@ -231,7 +231,7 @@ The full merge table for reference:
 | `env`                  | Merged (profile wins on conflict)                        |
 | `workdir`              | Profile provides default, CLI replaces                   |
 | `directories`          | Profile provides defaults, CLI `-d` is additive          |
-| [PLANNED] `profile`              | Defaults provide fallback. CLI `--profile` overrides. `--no-profile` uses base image. |
+| `profile`              | Defaults provide fallback. CLI `--profile` overrides. `--no-profile` uses base image. |
 | `agent_files`          | Profile **replaces** defaults (no merge)                 |
 | `mounts`               | Additive (no deduplication — duplicates are user error)  |
 | `resources`            | Profile overrides individual values                      |

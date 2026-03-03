@@ -112,7 +112,7 @@ func newNewCmd(version string) *cobra.Command {
 				passthrough = args[dashIdx:]
 			}
 
-			profileFlag, _ := cmd.Flags().GetString("profile")
+			profileFlag := resolveProfile(cmd)
 
 			if len(positional) < 1 {
 				return sandbox.NewUsageError("sandbox name is required")
@@ -227,6 +227,7 @@ func newNewCmd(version string) *cobra.Command {
 	cmd.Flags().StringP("model", "m", "", "Model name or alias")
 	cmd.Flags().String("agent", "", "Agent to use (default from config or claude)")
 	cmd.Flags().String("profile", "", "Profile to use (from ~/.yoloai/profiles/)")
+	cmd.Flags().Bool("no-profile", false, "Use base image even if config sets a default profile")
 	cmd.Flags().String("backend", "", "Runtime backend (see 'yoloai system backends')")
 	cmd.Flags().Bool("network-none", false, "Disable network access")
 	cmd.Flags().Bool("network-isolated", false, "Allow only agent API traffic (iptables allowlist)")
