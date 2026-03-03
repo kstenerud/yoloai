@@ -80,7 +80,7 @@ func (m *Manager) EnsureSetup(ctx context.Context) error {
 				return fmt.Errorf("save state: %w", err)
 			}
 		} else {
-			if err := m.runNewUserSetup(ctx); err != nil {
+			if err := m.runNewUserSetup(ctx, SetupOptions{}); err != nil {
 				if !errors.Is(err, errSetupPreview) {
 					return err
 				}

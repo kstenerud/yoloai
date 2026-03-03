@@ -23,6 +23,17 @@ import (
 // tmux config and the setup should exit cleanly without setting setup_complete.
 var errSetupPreview = errors.New("setup preview requested")
 
+// SetupOptions allows callers to pre-answer setup prompts via flags.
+// When a field is non-empty, its corresponding interactive prompt is skipped.
+type SetupOptions struct {
+	Agent    string // skip agent prompt, use this value
+	Backend  string // skip backend prompt, use this value
+	TmuxConf string // skip tmux prompt, use this value
+}
+
+// validTmuxConf lists the accepted values for the --tmux-conf flag.
+var validTmuxConf = []string{"default", "default+host", "host", "none"}
+
 // detectedOS and detectedArch are variables so tests can override them.
 var (
 	detectedOS   = func() string { return runtime.GOOS }
@@ -116,11 +127,11 @@ func availableAgents() []setupOption {
 
 // RunSetup runs the interactive setup unconditionally, regardless of
 // setup_complete. Used by `yoloai setup` to let users redo their choices.
-func (m *Manager) RunSetup(ctx context.Context) error {
+func (m *Manager) RunSetup(ctx context.Context, opts SetupOptions) error {
 	if err := m.EnsureSetupNonInteractive(ctx); err != nil {
 		return err
 	}
-	if err := m.runNewUserSetup(ctx); err != nil {
+	if err := m.runNewUserSetup(ctx, opts); err != nil {
 		if errors.Is(err, errSetupPreview) {
 			return nil
 		}
@@ -132,39 +143,102 @@ func (m *Manager) RunSetup(ctx context.Context) error {
 // runNewUserSetup orchestrates the interactive first-run setup prompts.
 // Steps: tmux config → default backend → default agent → mark complete.
 // Returns errSetupPreview if the user chose [p] in the tmux prompt.
-func (m *Manager) runNewUserSetup(ctx context.Context) error {
+func (m *Manager) runNewUserSetup(ctx context.Context, opts SetupOptions) error {
 	// Step 1: Tmux config
-	class, userConfig := classifyTmuxConfig()
-
-	switch class {
-	case tmuxConfigLarge:
-		// Power user — skip prompt, auto-configure default+host
-		if err := m.setTmuxConf("default+host"); err != nil {
+	if opts.TmuxConf != "" {
+		if err := validateTmuxConf(opts.TmuxConf); err != nil {
 			return err
 		}
-
-	case tmuxConfigNone:
-		if err := m.promptTmuxSetup(ctx, "", true); err != nil {
+		if err := m.setTmuxConf(opts.TmuxConf); err != nil {
 			return err
 		}
+	} else {
+		class, userConfig := classifyTmuxConfig()
 
-	case tmuxConfigSmall:
-		if err := m.promptTmuxSetup(ctx, userConfig, false); err != nil {
-			return err
+		switch class {
+		case tmuxConfigLarge:
+			// Power user — skip prompt, auto-configure default+host
+			if err := m.setTmuxConf("default+host"); err != nil {
+				return err
+			}
+
+		case tmuxConfigNone:
+			if err := m.promptTmuxSetup(ctx, "", true); err != nil {
+				return err
+			}
+
+		case tmuxConfigSmall:
+			if err := m.promptTmuxSetup(ctx, userConfig, false); err != nil {
+				return err
+			}
 		}
 	}
 
 	// Step 2: Default backend (skip if only one option)
-	if err := m.promptBackendSetup(ctx); err != nil {
-		return err
+	if opts.Backend != "" {
+		if err := m.setBackendFromFlag(opts.Backend); err != nil {
+			return err
+		}
+	} else {
+		if err := m.promptBackendSetup(ctx); err != nil {
+			return err
+		}
 	}
 
 	// Step 3: Default agent (skip if only one option)
-	if err := m.promptAgentSetup(ctx); err != nil {
-		return err
+	if opts.Agent != "" {
+		if err := m.setAgentFromFlag(opts.Agent); err != nil {
+			return err
+		}
+	} else {
+		if err := m.promptAgentSetup(ctx); err != nil {
+			return err
+		}
 	}
 
 	return m.setSetupComplete()
+}
+
+// validateTmuxConf checks that the value is one of the accepted tmux_conf modes.
+func validateTmuxConf(value string) error {
+	for _, v := range validTmuxConf {
+		if value == v {
+			return nil
+		}
+	}
+	return fmt.Errorf("invalid --tmux-conf value %q (valid: %s)", value, strings.Join(validTmuxConf, ", "))
+}
+
+// setBackendFromFlag validates the backend name against available backends and sets it.
+func (m *Manager) setBackendFromFlag(name string) error {
+	for _, b := range availableBackends() {
+		if b.name == name {
+			return config.UpdateConfigFields(map[string]string{
+				"backend": name,
+			})
+		}
+	}
+	available := make([]string, 0, len(availableBackends()))
+	for _, b := range availableBackends() {
+		available = append(available, b.name)
+	}
+	return fmt.Errorf("invalid --backend value %q (available: %s)", name, strings.Join(available, ", "))
+}
+
+// setAgentFromFlag validates the agent name against available agents and sets it.
+func (m *Manager) setAgentFromFlag(name string) error {
+	for _, a := range availableAgents() {
+		if a.name == name {
+			return config.UpdateConfigFields(map[string]string{
+				"agent": name,
+			})
+		}
+	}
+	available := make([]string, 0, len(availableAgents()))
+	for _, a := range availableAgents() {
+		available = append(available, a.name)
+	}
+	return fmt.Errorf("invalid --agent value %q (available: %s)", name, strings.Join(available, ", "))
 }
 
 // promptTmuxSetup shows the tmux config prompt and handles the user's choice.

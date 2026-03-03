@@ -143,7 +143,7 @@ func TestRunNewUserSetup_LargeConfig_AutoConfigures(t *testing.T) {
 	tmuxConf := strings.Repeat("set -g option value\n", 15)
 	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, ".tmux.conf"), []byte(tmuxConf), 0600))
 
-	err := mgr.runNewUserSetup(context.Background())
+	err := mgr.runNewUserSetup(context.Background(), SetupOptions{})
 	require.NoError(t, err)
 
 	state, err := LoadState()
@@ -160,7 +160,7 @@ func TestRunNewUserSetup_NoConfig_AnswerY(t *testing.T) {
 	// tmux=y, agent=default(enter)
 	mgr, output, _ := setupTestManager(t, "y\n\n")
 
-	err := mgr.runNewUserSetup(context.Background())
+	err := mgr.runNewUserSetup(context.Background(), SetupOptions{})
 	require.NoError(t, err)
 
 	state, err := LoadState()
@@ -178,7 +178,7 @@ func TestRunNewUserSetup_NoConfig_AnswerEmpty(t *testing.T) {
 	// tmux=default(enter), agent=default(enter)
 	mgr, _, _ := setupTestManager(t, "\n\n")
 
-	err := mgr.runNewUserSetup(context.Background())
+	err := mgr.runNewUserSetup(context.Background(), SetupOptions{})
 	require.NoError(t, err)
 
 	state, err := LoadState()
@@ -195,7 +195,7 @@ func TestRunNewUserSetup_NoConfig_AnswerN(t *testing.T) {
 	// tmux=n, agent=default(enter)
 	mgr, _, _ := setupTestManager(t, "n\n\n")
 
-	err := mgr.runNewUserSetup(context.Background())
+	err := mgr.runNewUserSetup(context.Background(), SetupOptions{})
 	require.NoError(t, err)
 
 	state, err := LoadState()
@@ -211,7 +211,7 @@ func TestRunNewUserSetup_NoConfig_AnswerP(t *testing.T) {
 	setLinuxPlatform(t)
 	mgr, output, _ := setupTestManager(t, "p\n")
 
-	err := mgr.runNewUserSetup(context.Background())
+	err := mgr.runNewUserSetup(context.Background(), SetupOptions{})
 	assert.ErrorIs(t, err, errSetupPreview)
 
 	// setup_complete should NOT be set (preview exits early)
@@ -230,7 +230,7 @@ func TestRunNewUserSetup_SmallConfig_AnswerY(t *testing.T) {
 	tmuxConf := "set -g mouse on\n"
 	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, ".tmux.conf"), []byte(tmuxConf), 0600))
 
-	err := mgr.runNewUserSetup(context.Background())
+	err := mgr.runNewUserSetup(context.Background(), SetupOptions{})
 	require.NoError(t, err)
 
 	state, err := LoadState()
@@ -250,7 +250,7 @@ func TestRunNewUserSetup_SmallConfig_AnswerN(t *testing.T) {
 	tmuxConf := "set -g mouse on\n"
 	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, ".tmux.conf"), []byte(tmuxConf), 0600))
 
-	err := mgr.runNewUserSetup(context.Background())
+	err := mgr.runNewUserSetup(context.Background(), SetupOptions{})
 	require.NoError(t, err)
 
 	state, err := LoadState()
@@ -269,7 +269,7 @@ func TestRunNewUserSetup_SmallConfig_AnswerP(t *testing.T) {
 	tmuxConf := "set -g mouse on\n"
 	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, ".tmux.conf"), []byte(tmuxConf), 0600))
 
-	err := mgr.runNewUserSetup(context.Background())
+	err := mgr.runNewUserSetup(context.Background(), SetupOptions{})
 	assert.ErrorIs(t, err, errSetupPreview)
 
 	assert.Contains(t, output.String(), "yoloai defaults")
@@ -281,7 +281,7 @@ func TestRunNewUserSetup_EOF_DefaultsToY(t *testing.T) {
 	// Empty reader simulates EOF — all prompts get default
 	mgr, _, _ := setupTestManager(t, "")
 
-	err := mgr.runNewUserSetup(context.Background())
+	err := mgr.runNewUserSetup(context.Background(), SetupOptions{})
 	require.NoError(t, err)
 
 	state, err := LoadState()
@@ -424,7 +424,7 @@ func TestRunNewUserSetup_FullFlow_MacOS(t *testing.T) {
 	// tmux=y, backend=2(seatbelt), agent=3(codex)
 	mgr, output, _ := setupTestManager(t, "y\n2\n3\n")
 
-	err := mgr.runNewUserSetup(context.Background())
+	err := mgr.runNewUserSetup(context.Background(), SetupOptions{})
 	require.NoError(t, err)
 
 	state, err := LoadState()
@@ -447,7 +447,7 @@ func TestRunNewUserSetup_FullFlow_Linux_SkipsBackend(t *testing.T) {
 	// tmux=y, (no backend prompt), agent=1(aider)
 	mgr, output, _ := setupTestManager(t, "y\n1\n")
 
-	err := mgr.runNewUserSetup(context.Background())
+	err := mgr.runNewUserSetup(context.Background(), SetupOptions{})
 	require.NoError(t, err)
 
 	state, err := LoadState()
@@ -473,7 +473,7 @@ func TestRunNewUserSetup_LargeConfig_StillAsksBackendAndAgent(t *testing.T) {
 	tmuxConf := strings.Repeat("set -g option value\n", 15)
 	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, ".tmux.conf"), []byte(tmuxConf), 0600))
 
-	err := mgr.runNewUserSetup(context.Background())
+	err := mgr.runNewUserSetup(context.Background(), SetupOptions{})
 	require.NoError(t, err)
 
 	state, err := LoadState()
@@ -490,6 +490,130 @@ func TestRunNewUserSetup_LargeConfig_StillAsksBackendAndAgent(t *testing.T) {
 	assert.Equal(t, "codex", cfg.Agent)
 	assert.Contains(t, output.String(), "Default runtime backend")
 	assert.Contains(t, output.String(), "Default agent")
+}
+
+// --- Flag-based setup tests ---
+
+func TestRunNewUserSetup_WithAgentFlag(t *testing.T) {
+	setLinuxPlatform(t)
+	// tmux prompt needs input, backend skipped on Linux, agent flag skips agent prompt
+	mgr, output, _ := setupTestManager(t, "y\n")
+
+	err := mgr.runNewUserSetup(context.Background(), SetupOptions{Agent: "claude"})
+	require.NoError(t, err)
+
+	cfg, err := LoadConfig()
+	require.NoError(t, err)
+	assert.Equal(t, "claude", cfg.Agent)
+	assert.NotContains(t, output.String(), "Default agent")
+}
+
+func TestRunNewUserSetup_WithBackendFlag(t *testing.T) {
+	setMacOSARMPlatform(t)
+	// tmux prompt needs input, backend flag skips backend prompt, agent prompt needs input
+	mgr, output, _ := setupTestManager(t, "y\n\n")
+
+	err := mgr.runNewUserSetup(context.Background(), SetupOptions{Backend: "seatbelt"})
+	require.NoError(t, err)
+
+	cfg, err := LoadConfig()
+	require.NoError(t, err)
+	assert.Equal(t, "seatbelt", cfg.Backend)
+	assert.NotContains(t, output.String(), "Default runtime backend")
+	assert.Contains(t, output.String(), "Default agent")
+}
+
+func TestRunNewUserSetup_WithTmuxConfFlag(t *testing.T) {
+	setLinuxPlatform(t)
+	// tmux flag skips tmux prompt, backend skipped on Linux, agent prompt needs input
+	mgr, output, _ := setupTestManager(t, "\n")
+
+	err := mgr.runNewUserSetup(context.Background(), SetupOptions{TmuxConf: "host"})
+	require.NoError(t, err)
+
+	gcfg, err := LoadGlobalConfig()
+	require.NoError(t, err)
+	assert.Equal(t, "host", gcfg.TmuxConf)
+	assert.NotContains(t, output.String(), "tmux")
+}
+
+func TestRunNewUserSetup_AllFlags_NonInteractive(t *testing.T) {
+	setMacOSARMPlatform(t)
+	// All flags provided — no prompts, empty input
+	mgr, output, _ := setupTestManager(t, "")
+
+	opts := SetupOptions{
+		Agent:    "gemini",
+		Backend:  "docker",
+		TmuxConf: "default",
+	}
+	err := mgr.runNewUserSetup(context.Background(), opts)
+	require.NoError(t, err)
+
+	state, err := LoadState()
+	require.NoError(t, err)
+	assert.True(t, state.SetupComplete)
+
+	gcfg, err := LoadGlobalConfig()
+	require.NoError(t, err)
+	assert.Equal(t, "default", gcfg.TmuxConf)
+
+	cfg, err := LoadConfig()
+	require.NoError(t, err)
+	assert.Equal(t, "docker", cfg.Backend)
+	assert.Equal(t, "gemini", cfg.Agent)
+	assert.NotContains(t, output.String(), "Choice")
+}
+
+func TestRunNewUserSetup_InvalidAgent_Error(t *testing.T) {
+	setLinuxPlatform(t)
+	mgr, _, _ := setupTestManager(t, "")
+
+	err := mgr.runNewUserSetup(context.Background(), SetupOptions{
+		TmuxConf: "default",
+		Agent:    "nonexistent",
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid --agent value")
+}
+
+func TestRunNewUserSetup_InvalidBackend_Error(t *testing.T) {
+	setLinuxPlatform(t)
+	mgr, _, _ := setupTestManager(t, "")
+
+	err := mgr.runNewUserSetup(context.Background(), SetupOptions{
+		TmuxConf: "default",
+		Backend:  "tart",
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid --backend value")
+}
+
+func TestRunNewUserSetup_InvalidTmuxConf_Error(t *testing.T) {
+	setLinuxPlatform(t)
+	mgr, _, _ := setupTestManager(t, "")
+
+	err := mgr.runNewUserSetup(context.Background(), SetupOptions{TmuxConf: "badvalue"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid --tmux-conf value")
+}
+
+func TestRunNewUserSetup_BackendDockerOnLinux_OK(t *testing.T) {
+	setLinuxPlatform(t)
+	// docker is available on Linux — should succeed
+	mgr, _, _ := setupTestManager(t, "")
+
+	opts := SetupOptions{
+		TmuxConf: "default",
+		Backend:  "docker",
+		Agent:    "claude",
+	}
+	err := mgr.runNewUserSetup(context.Background(), opts)
+	require.NoError(t, err)
+
+	cfg, err := LoadConfig()
+	require.NoError(t, err)
+	assert.Equal(t, "docker", cfg.Backend)
 }
 
 // mockRuntime is defined above — we can use it here since

@@ -121,13 +121,26 @@ func newSystemSetupCmd() *cobra.Command {
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			backend := resolveBackend(cmd)
+
+			agentFlag, _ := cmd.Flags().GetString("agent")
+			tmuxConfFlag, _ := cmd.Flags().GetString("tmux-conf")
+			backendFlag, _ := cmd.Flags().GetString("backend")
+
+			opts := sandbox.SetupOptions{
+				Agent:    agentFlag,
+				Backend:  backendFlag,
+				TmuxConf: tmuxConfFlag,
+			}
+
 			return withManager(cmd, backend, func(ctx context.Context, mgr *sandbox.Manager) error {
-				return mgr.RunSetup(ctx)
+				return mgr.RunSetup(ctx, opts)
 			})
 		},
 	}
 
 	cmd.Flags().String("backend", "", "Runtime backend (see 'yoloai system backends')")
+	cmd.Flags().String("agent", "", "Default agent (skip prompt)")
+	cmd.Flags().String("tmux-conf", "", "Tmux config mode: default, default+host, host, none (skip prompt)")
 
 	return cmd
 }
