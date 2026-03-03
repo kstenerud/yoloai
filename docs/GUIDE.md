@@ -145,6 +145,8 @@ yoloai ships with multiple agents. The architecture is agent-agnostic — more a
 | `codex` | `CODEX_API_KEY`, `OPENAI_API_KEY` | OpenAI Codex — AI coding agent |
 | `gemini` | `GEMINI_API_KEY` | Google Gemini CLI — AI coding assistant |
 | `opencode` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, + others | OpenCode — open-source AI coding agent (auth check is a warning, not error) |
+| `test` | (none) | Test agent — launches a shell for testing sandbox behavior |
+| `shell` | (none) | Shell agent — launches an interactive shell (no AI agent) |
 
 You can select a model using shorthand aliases or full model names. Aliases are agent-specific — use `yoloai system agents <name>` to see the full list for each agent.
 
@@ -394,6 +396,7 @@ yoloai config reset env.OLLAMA_API_BASE
 | `network.isolated` | `false` | Enable network isolation by default |
 | `network.allow` | (empty) | Additional domains to allow (additive with agent defaults) |
 | `tmux_conf` | (set by setup) | Tmux config mode (global config) |
+| `profile` | (empty) | Default profile name (used when `--profile` is not specified) |
 | `model_aliases.<alias>` | (empty) | Custom model alias (global config) |
 
 Operational state (`setup_complete`) is stored in `~/.yoloai/state.yaml`, separate from config.
