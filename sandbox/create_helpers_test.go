@@ -36,7 +36,7 @@ func TestHasAnyAPIKey_Unset(t *testing.T) {
 
 func TestHasAnyAPIKey_EmptyList(t *testing.T) {
 	agentDef := agent.GetAgent("test")
-	assert.False(t, hasAnyAPIKey(agentDef))
+	assert.True(t, hasAnyAPIKey(agentDef)) // no API key required = always true
 }
 
 // hasAnyAuthFile tests

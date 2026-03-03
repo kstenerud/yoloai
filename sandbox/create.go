@@ -947,6 +947,9 @@ func buildMounts(state *sandboxState, secretsDir string) []runtime.MountSpec {
 
 // hasAnyAPIKey returns true if any of the agent's required API key env vars are set.
 func hasAnyAPIKey(agentDef *agent.Definition) bool {
+	if len(agentDef.APIKeyEnvVars) == 0 {
+		return true // no API key required
+	}
 	for _, key := range agentDef.APIKeyEnvVars {
 		if os.Getenv(key) != "" {
 			return true
