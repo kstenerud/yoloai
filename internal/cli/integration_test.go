@@ -80,9 +80,9 @@ func TestCLI_NewAndDestroy(t *testing.T) {
 	assert.DirExists(t, sandbox.Dir("cli-new"))
 	assert.Contains(t, stderr, "cli-new") // Manager output goes to stderr
 
-	_, stderr, err = runCLI(t, "destroy", "--yes", "cli-new")
+	stdout, _, err := runCLI(t, "destroy", "--yes", "cli-new")
 	require.NoError(t, err)
-	assert.Contains(t, stderr, "Destroyed")
+	assert.Contains(t, stdout, "Destroyed")
 	assert.NoDirExists(t, sandbox.Dir("cli-new"))
 }
 

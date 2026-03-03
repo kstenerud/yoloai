@@ -198,8 +198,8 @@ tmux send-keys -t main "exec $AGENT_COMMAND" Enter
 ) &
 
 # --- Auto-commit loop for :copy directories ---
-AUTO_COMMIT_INTERVAL=$(jq -r '.auto_commit_interval // 0' "$CONFIG")
-COPY_DIR_COUNT=$(jq '.copy_dirs // [] | length' "$CONFIG")
+AUTO_COMMIT_INTERVAL=$(jq -r ".auto_commit_interval // 0" "$CONFIG")
+COPY_DIR_COUNT=$(jq ".copy_dirs // [] | length" "$CONFIG")
 if [ "$AUTO_COMMIT_INTERVAL" -gt 0 ] && [ "$COPY_DIR_COUNT" -gt 0 ]; then
     debug_log "starting auto-commit loop (interval=${AUTO_COMMIT_INTERVAL}s, dirs=$COPY_DIR_COUNT)"
     (
