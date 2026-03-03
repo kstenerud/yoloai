@@ -62,13 +62,15 @@ func registerCommands(root *cobra.Command, version, commit, date string) {
 }
 
 func newLsAliasCmd() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:     "ls",
 		Short:   "List sandboxes (shortcut for 'sandbox list')",
 		GroupID: groupInspect,
 		Args:    cobra.NoArgs,
 		RunE:    runList,
 	}
+	addListFlags(cmd)
+	return cmd
 }
 
 func newLogAliasCmd() *cobra.Command {

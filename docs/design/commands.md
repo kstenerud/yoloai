@@ -467,9 +467,12 @@ Agent exit status is detected via `tmux list-panes -t main -F '#{pane_dead_statu
 
 Top-level shortcut: `yoloai ls`.
 
-[PLANNED] Options:
+Options:
 - `--running`: Show only running sandboxes.
 - `--stopped`: Show only stopped sandboxes.
+- `--agent <name>`: Show only sandboxes using this agent.
+- `--profile <name>`: Show only sandboxes using this profile (`base` matches default).
+- `--changes`: Show only sandboxes with unapplied changes.
 
 ### `yoloai system build`
 

@@ -14,7 +14,7 @@ Create a plan file in this directory before starting implementation.
 | Feature | Design Reference | Plan | Notes |
 |---------|-----------------|------|-------|
 | `--power-user` on `setup` | [setup.md](../../design/setup.md) | — | Non-interactive setup for automation |
-| `list` filters | [commands.md](../../design/commands.md) | — | `--running`, `--stopped` |
+| ~~`list` filters~~ | [commands.md](../../design/commands.md) | — | Done: `--running`, `--stopped`, `--agent`, `--profile`, `--changes` |
 
 ## Config Options
 
