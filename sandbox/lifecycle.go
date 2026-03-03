@@ -444,6 +444,7 @@ func (m *Manager) recreateContainer(ctx context.Context, name string, meta *Meta
 		ports:        meta.Ports,
 		configMounts: meta.Mounts,
 		tmuxConf:     cfgJSON.TmuxConf,
+		resources:    meta.Resources,
 		capAdd:       meta.CapAdd,
 		devices:      meta.Devices,
 		setup:        meta.Setup,
