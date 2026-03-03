@@ -655,6 +655,26 @@ func TestLoadConfig_RecipeFieldsEnvExpansion(t *testing.T) {
 	assert.Equal(t, []string{"tailscale up --authkey=mykey123"}, cfg.Setup)
 }
 
+func TestLoadConfig_Ports(t *testing.T) {
+	dir := configDir(t)
+
+	content := "ports:\n  - \"8080:8080\"\n  - \"3000:3000\"\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
+
+	cfg, err := LoadConfig()
+	require.NoError(t, err)
+	assert.Equal(t, []string{"8080:8080", "3000:3000"}, cfg.Ports)
+}
+
+func TestLoadConfig_PortsEmpty(t *testing.T) {
+	dir := configDir(t)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(DefaultConfigYAML), 0600))
+
+	cfg, err := LoadConfig()
+	require.NoError(t, err)
+	assert.Nil(t, cfg.Ports)
+}
+
 func TestLoadConfig_RecipeFieldsEmpty(t *testing.T) {
 	dir := configDir(t)
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(DefaultConfigYAML), 0600))

@@ -286,6 +286,11 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 		mergedMounts = ycfg.Mounts
 	}
 
+	// Ports from base config (if profile didn't set them)
+	if opts.Profile == "" && len(ycfg.Ports) > 0 {
+		opts.Ports = append(ycfg.Ports, opts.Ports...)
+	}
+
 	// Recipes from base config (if profile didn't set them)
 	if opts.Profile == "" {
 		mergedCapAdd = ycfg.CapAdd

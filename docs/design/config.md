@@ -106,8 +106,8 @@ With profiles (future), a "local-models" profile can bundle env, network config,
 
 **`agent_files`** controls what files are copied into the sandbox's `agent-state/` directory on first run. Two forms: **string** — a base directory from which yoloai derives the agent-specific subdir (e.g. `"${HOME}"` → `~/.claude/` for Claude, `~/.gemini/` for Gemini; `"/shared/team-configs"` → `/shared/team-configs/.claude/` for Claude). **list** — specific files or directories to copy in verbatim (e.g. `["~/.claude/settings.json", "/shared/CLAUDE.md"]`). Omit entirely to copy nothing (safe default). Profile `agent_files` **replaces** (not merges with) defaults. Files placed by SeedFiles (auth credentials, settings) are never overwritten. Each agent defines exclusion patterns for session data and caches. First-run status is tracked in `state.json` (`agent_files_initialized`); `reset --clean` resets the flag so files are re-seeded on next start.
 
-**Planned settings (not yet parsed from base config):**
-- `ports` — default port mappings. Currently parsed from profiles only; base config parsing not yet implemented.
+**Planned settings (not yet parsed from config):**
+- (none currently — all designed config fields are implemented)
 
 #### Recipes (advanced)
 

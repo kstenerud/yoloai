@@ -34,6 +34,7 @@ type YoloaiConfig struct {
 	Resources  *ResourceLimits   `yaml:"resources"`  // resources — container resource limits
 	Network    *NetworkConfig    `yaml:"network"`    // network — network isolation settings
 	Mounts     []string          `yaml:"mounts"`     // mounts — extra bind mounts (host:container[:ro])
+	Ports      []string          `yaml:"ports"`      // ports — default port mappings (host:container)
 	AgentArgs  map[string]string `yaml:"agent_args"` // agent_args — per-agent default CLI args
 	AgentFiles *AgentFilesConfig `yaml:"-"`          // agent_files — extra files to seed into agent-state
 	CapAdd     []string          `yaml:"cap_add"`    // cap_add — Linux capabilities to add (Docker only)
@@ -91,6 +92,7 @@ var knownCollectionSettings = []knownCollectionSetting{
 	{"agent_args", yaml.MappingNode},
 	{"env", yaml.MappingNode},
 	{"mounts", yaml.SequenceNode},
+	{"ports", yaml.SequenceNode},
 	{"network.allow", yaml.SequenceNode},
 	{"cap_add", yaml.SequenceNode},
 	{"devices", yaml.SequenceNode},
@@ -223,6 +225,12 @@ func LoadConfig() (*YoloaiConfig, error) {
 						return nil, fmt.Errorf("mounts[]: %w", expandErr)
 					}
 					cfg.Mounts = append(cfg.Mounts, expanded)
+				}
+			}
+		case "ports":
+			if val.Kind == yaml.SequenceNode {
+				for _, item := range val.Content {
+					cfg.Ports = append(cfg.Ports, item.Value)
 				}
 			}
 		case "cap_add":

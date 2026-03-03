@@ -489,6 +489,11 @@ func MergeProfileChain(base *YoloaiConfig, chain []string) (*MergedConfig, error
 		copy(merged.Mounts, base.Mounts)
 	}
 
+	if len(base.Ports) > 0 {
+		merged.Ports = make([]string, len(base.Ports))
+		copy(merged.Ports, base.Ports)
+	}
+
 	if len(base.CapAdd) > 0 {
 		merged.CapAdd = append([]string{}, base.CapAdd...)
 	}

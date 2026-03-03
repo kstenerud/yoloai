@@ -994,6 +994,43 @@ setup:
 	}
 }
 
+func TestMergeProfileChain_PortsFromBaseConfig(t *testing.T) {
+	setupProfileDir(t, "ports-base", "agent: claude\n")
+
+	base := &YoloaiConfig{
+		Ports: []string{"9090:9090"},
+	}
+
+	chain := []string{"base", "ports-base"}
+	merged, err := MergeProfileChain(base, chain)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(merged.Ports) != 1 || merged.Ports[0] != "9090:9090" {
+		t.Errorf("Ports = %v, want [9090:9090] (from base config)", merged.Ports)
+	}
+}
+
+func TestMergeProfileChain_PortsBaseAndProfile(t *testing.T) {
+	setupProfileDir(t, "ports-both", "ports:\n  - \"3000:3000\"\n")
+
+	base := &YoloaiConfig{
+		Ports: []string{"9090:9090"},
+	}
+
+	chain := []string{"base", "ports-both"}
+	merged, err := MergeProfileChain(base, chain)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := []string{"9090:9090", "3000:3000"}
+	if len(merged.Ports) != 2 || merged.Ports[0] != want[0] || merged.Ports[1] != want[1] {
+		t.Errorf("Ports = %v, want %v (base + profile additive)", merged.Ports, want)
+	}
+}
+
 func TestMergeProfileChain_RecipeAdditive(t *testing.T) {
 	home := setupProfileDir(t, "recipe-parent", "cap_add:\n  - NET_ADMIN\ndevices:\n  - /dev/net/tun\nsetup:\n  - echo parent\n")
 
