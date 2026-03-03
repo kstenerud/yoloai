@@ -40,6 +40,11 @@ func NewManager(rt runtime.Runtime, backend string, logger *slog.Logger, input i
 
 // readLine reads a single line from the shared scanner, returning early if ctx
 // is cancelled. On EOF, returns ("", nil) so callers can treat it as a default.
+//
+// This method uses the Manager's shared bufio.Scanner so that sequential reads
+// in multi-step interactive prompts (e.g., setup wizard) consume successive
+// lines correctly. For one-shot confirmations that create a fresh scanner on
+// each call, see the standalone readLine() in confirm.go.
 func (m *Manager) readLine(ctx context.Context) (string, error) {
 	ch := make(chan string, 1)
 	go func() {

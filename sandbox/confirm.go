@@ -15,6 +15,11 @@ import (
 // On EOF (empty reader), returns ("", nil) so callers can treat it as a default.
 // The reading goroutine may outlive the call on cancellation; this is acceptable
 // for a CLI that is about to exit.
+//
+// This standalone function creates a fresh bufio.Scanner on each call, making it
+// suitable for one-shot confirmations (see Confirm below). For multi-step
+// interactive prompts where a shared scanner must persist across reads, see
+// Manager.readLine() in manager.go.
 func readLine(ctx context.Context, input io.Reader) (string, error) {
 	ch := make(chan string, 1)
 	go func() {

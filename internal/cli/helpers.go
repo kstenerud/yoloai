@@ -27,6 +27,20 @@ func newRuntime(ctx context.Context, backend string) (runtime.Runtime, error) {
 	}
 }
 
+// Flag resolution pattern: each resolve* pair follows the same priority:
+//   flag → config → default
+//
+// The pattern is intentionally not abstracted into a generic helper because
+// each pair has domain-specific variations:
+//   - resolveBackend: accepts a --backend flag; used by new/build/setup.
+//   - resolveBackendForSandbox: reads from meta.json, not a flag; used by
+//     lifecycle commands (start, stop, attach, diff, apply, destroy).
+//   - resolveAgent: similar flag→config→default; new command only.
+//   - resolveProfile: has a --no-profile bypass that the others don't have.
+//
+// These differences make a generic abstraction more obscure than the small
+// amount of duplicated structure.
+
 // resolveBackend determines the backend name from --backend flag, then config,
 // then default. Used by commands that accept a --backend flag (new, build, setup).
 func resolveBackend(cmd *cobra.Command) string {
