@@ -27,3 +27,19 @@ jobs:
 
       - name: Run checks
         run: make check
+
+  integration:
+    runs-on: ubuntu-latest
+    needs: check
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Build yoloai
+        run: go build ./cmd/yoloai
+
+      - name: Run integration tests
+        run: make integration

@@ -35,7 +35,7 @@ tidy-check:
 check: lint tidy-check test
 
 integration:
-	go test -tags=integration -v -count=1 ./sandbox/ ./runtime/docker/
+	go test -tags=integration -v -count=1 -timeout=10m ./sandbox/ ./runtime/docker/ ./internal/cli/
 
 clean:
 	rm -f $(BINARY)
