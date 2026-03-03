@@ -13,6 +13,7 @@ import (
 	"time"
 
 	dockerrt "github.com/kstenerud/yoloai/runtime/docker"
+	"github.com/kstenerud/yoloai/workspace"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -116,7 +117,7 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 		0600,
 	))
 
-	require.NoError(t, ApplyPatch(patch, targetDir, false))
+	require.NoError(t, workspace.ApplyPatch(patch, targetDir, false))
 
 	applied, err := os.ReadFile(filepath.Join(targetDir, "main.go")) //nolint:gosec // G304: test file path
 	require.NoError(t, err)
@@ -447,7 +448,7 @@ func TestIntegration_ApplyPatch(t *testing.T) {
 		0600,
 	))
 
-	require.NoError(t, ApplyPatch(patch, targetDir, false))
+	require.NoError(t, workspace.ApplyPatch(patch, targetDir, false))
 
 	applied, err := os.ReadFile(filepath.Join(targetDir, "main.go")) //nolint:gosec // test path
 	require.NoError(t, err)

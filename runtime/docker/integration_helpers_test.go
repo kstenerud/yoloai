@@ -6,6 +6,8 @@ import (
 	"context"
 	"testing"
 
+	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/network"
 	"github.com/kstenerud/yoloai/runtime"
 	"github.com/stretchr/testify/require"
 )
@@ -27,7 +29,10 @@ func dockerSetup(t *testing.T) (*Runtime, context.Context) {
 	return rt, ctx
 }
 
-// createTestContainer creates a minimal container for testing.
+// createTestContainer creates a container using the yoloai-base image with
+// entrypoint overridden to "sleep infinity" so it stays alive for exec tests.
+// Uses the Docker SDK directly to set Entrypoint/Cmd since InstanceConfig
+// doesn't expose those fields (they're normally baked into the image).
 // Returns the container name. Uses t.Cleanup for removal.
 func createTestContainer(t *testing.T, rt *Runtime, ctx context.Context, cfg runtime.InstanceConfig) string {
 	t.Helper()
@@ -39,7 +44,37 @@ func createTestContainer(t *testing.T, rt *Runtime, ctx context.Context, cfg run
 		cfg.ImageRef = "yoloai-base"
 	}
 
-	require.NoError(t, rt.Create(ctx, cfg))
+	mounts := convertMounts(cfg.Mounts)
+	portBindings, exposedPorts := convertPorts(cfg.Ports)
+
+	containerConfig := &container.Config{
+		Image:        cfg.ImageRef,
+		Entrypoint:   []string{"sleep"},
+		Cmd:          []string{"infinity"},
+		WorkingDir:   cfg.WorkingDir,
+		ExposedPorts: exposedPorts,
+	}
+
+	hostConfig := &container.HostConfig{
+		Init:         &cfg.UseInit,
+		NetworkMode:  container.NetworkMode(cfg.NetworkMode),
+		PortBindings: portBindings,
+		Mounts:       mounts,
+		CapAdd:       cfg.CapAdd,
+	}
+
+	if cfg.Resources != nil {
+		if cfg.Resources.NanoCPUs > 0 {
+			hostConfig.NanoCPUs = cfg.Resources.NanoCPUs
+		}
+		if cfg.Resources.Memory > 0 {
+			hostConfig.Memory = cfg.Resources.Memory
+		}
+	}
+
+	_, err := rt.client.ContainerCreate(ctx, containerConfig, hostConfig, &network.NetworkingConfig{}, nil, cfg.Name)
+	require.NoError(t, err)
+
 	t.Cleanup(func() {
 		_ = rt.Stop(ctx, cfg.Name)
 		_ = rt.Remove(ctx, cfg.Name)
