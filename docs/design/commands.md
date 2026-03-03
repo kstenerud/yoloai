@@ -37,7 +37,7 @@ Inspection:
   yoloai system backends [name]                  List available runtime backends
   yoloai system build [profile|--all]            Build/rebuild Docker image(s)
   yoloai system prune                            Remove orphaned backend resources and stale temp files
-  yoloai system setup                            Run interactive setup  (--power-user [PLANNED])
+  yoloai system setup                            Run interactive setup  (--agent, --backend, --tmux-conf for automation)
   yoloai sandbox                                 Sandbox inspection
   yoloai sandbox list                            List sandboxes and their status
   yoloai sandbox info <name>                     Show sandbox configuration and state
@@ -61,7 +61,7 @@ Admin:
   yoloai files ls <name> [glob]                        List files in sandbox exchange dir
   yoloai files rm <name> <glob>                        Remove files from sandbox exchange dir
   yoloai files path <name>                             Print host path to sandbox exchange dir
-  yoloai x <extension> <name> [args...] [--flags...]  Run a user-defined extension  [PLANNED]
+  yoloai x <extension> <name> [args...] [--flags...]  Run a user-defined extension
   yoloai completion [bash|zsh|fish|powershell]   Generate shell completion script
   yoloai version                                 Show version information
 ```
@@ -107,11 +107,11 @@ The agent definition determines the default prompt delivery mode. `--prompt` sel
 
 The **name** is always required (no auto-generation).
 
-The **workdir** is the single primary project directory — the agent's working directory. It is positional (after name) and defaults to `:copy` mode if no suffix is given. The `:rw` suffix must be explicit. **[PLANNED]** When `--profile` is set and the profile provides a workdir, `<workdir>` is optional (profile workdir is used as default). If the profile has no workdir and `<workdir>` is omitted, error: "workdir is required (profile '<name>' doesn't provide one)". Without `--profile`, `<workdir>` is always required.
+The **workdir** is the single primary project directory — the agent's working directory. It is positional (after name) and defaults to `:copy` mode if no suffix is given. The `:rw` suffix must be explicit. When `--profile` is set and the profile provides a workdir, `<workdir>` is optional (profile workdir is used as default). If the profile has no workdir and `<workdir>` is omitted, error: "workdir is required (profile '<name>' doesn't provide one)". Without `--profile`, `<workdir>` is always required.
 
 **`-d` / `--dir`** specifies auxiliary directories (repeatable). Default read-only. Additive with profile directories.
 
-**[PLANNED]** When both CLI and profile provide directories: CLI workdir **replaces** profile workdir. CLI `-d` dirs are **additive** with profile dirs.
+When both CLI and profile provide directories: CLI workdir **replaces** profile workdir. CLI `-d` dirs are **additive** with profile dirs.
 
 Directory argument syntax: `<path>[:<suffixes>][=<mount-point>]`
 
@@ -251,7 +251,7 @@ Before creating the sandbox (all checks run before any state is created on disk)
 1. Generate a **sandbox context file** (`context.md`) in the sandbox state directory describing the environment: workdir, auxiliary directories, mount modes (read-only / read-write / copy), network constraints, and resource limits. For agents with a native instruction mechanism (Claude's `CLAUDE.md`, Gemini's `GEMINI.md`), the context is written inline into the agent's instruction file in `agent-state/`. A reference copy is kept at `<sandbox>/context.md`. This approach works across all backends (Docker, Tart, Seatbelt) without requiring bind mounts to arbitrary paths.
 2. Generate `/yoloai/config.json` on the host (in the sandbox state directory) containing all entrypoint configuration: agent_command, startup_delay, submit_sequence, host_uid, host_gid, and later overlay_mounts, iptables_rules, setup_script. This is bind-mounted into the container and read by the entrypoint.
 3. Start Docker container (as non-root user `yoloai`) with:
-   - **[PLANNED]** When `--network-isolated`: entrypoint configures iptables + ipset rules (default-deny, allow only resolved IPs from the agent's domain allowlist + `--network-allow` domains). Requires `CAP_NET_ADMIN`.
+   - When `--network-isolated`: entrypoint configures iptables + ipset rules (default-deny, allow only resolved IPs from the agent's domain allowlist + `--network-allow` domains). Requires `CAP_NET_ADMIN`.
    - `:copy` directories: copies from sandbox state mounted at their mount point (mirrored host path or custom `=<path>`, read-write)
    - `:rw` directories bind-mounted at their mount point (mirrored host path or custom `=<path>`, read-write)
    - Default (no suffix) directories bind-mounted at their mount point (mirrored host path or custom `=<path>`, read-only)
@@ -263,11 +263,11 @@ Before creating the sandbox (all checks run before any state is created on disk)
    - Config mounts from defaults + profile
    - Resource limits from defaults + profile
    - API key(s) injected via file-based bind mount at `/run/secrets/` — env var names from agent definition (see [security.md](security.md#credential-management))
-   - **[PLANNED]** `CAP_NET_ADMIN` added when `--network-isolated` is used (required for iptables rules)
+   - `CAP_NET_ADMIN` added when `--network-isolated` is used (required for iptables rules)
    - Container name: `yoloai-<name>`
    - User: `yoloai` (UID/GID matching host user)
    - `/yoloai/` internal directory for sandbox context file, overlay working directories, and bind-mounted state files (`log.txt`, `prompt.txt`, `config.json`)
-4. **[PLANNED]** Run `setup` commands from config (if any).
+4. Run `setup` commands from config (if any).
 5. Start tmux session named `main` with logging to `/yoloai/log.txt` (`tmux pipe-pane`) and `remain-on-exit on` (container stays up after agent exits, only stops on explicit `yoloai stop` or `yoloai destroy`). Tmux config sourced based on the `tmux_conf` value in `config.json` (see [setup.md](setup.md#tmux-configuration)).
 6. Inside tmux: launch the agent using the command from its agent definition (e.g., `claude --dangerously-skip-permissions [--model X]` or `codex --dangerously-bypass-approvals-and-sandbox`).
 7. Start a background monitor that polls `#{pane_dead}` — when the agent exits, all attached tmux clients are auto-detached so the user's terminal returns cleanly instead of showing a dead pane.
@@ -578,7 +578,7 @@ Constraints:
 - `--clean` + `--no-restart` is an error (see above).
 - `--no-restart` when container is not running: falls back to default behavior (start the container).
 
-### [PLANNED] `yoloai x` (Extensions)
+### `yoloai x` (Extensions)
 
 `yoloai x <extension> [args...] [--flags...]`
 

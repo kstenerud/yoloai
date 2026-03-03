@@ -15,9 +15,13 @@ Create a plan file in this directory before starting implementation.
 |---------|-----------------|------|-------|
 | ~~`--power-user` on `setup`~~ | [setup.md](../../design/setup.md) | — | Done: `--agent`, `--backend`, `--tmux-conf` flags on setup |
 | ~~`list` filters~~ | [commands.md](../../design/commands.md) | — | Done: `--running`, `--stopped`, `--agent`, `--profile`, `--changes` |
+| Build secrets (`--secret`) | [commands.md](../../design/commands.md) | — | Profile Dockerfiles with private deps need build-time credentials |
 
 ## Config Options
 
 | Feature | Design Reference | Notes |
 |---------|-----------------|-------|
 | ~~Recipes (`cap_add`, `devices`, `setup`)~~ | [config.md](../../design/config.md) | Done |
+| `profile` config field | [config.md](../../design/config.md) | Default profile in base config; CLI `--profile` overrides |
+| `auto_commit_interval` | [config.md](../../design/config.md) | Background auto-commit loop for `:copy` dirs |
+| `ports` in base config | [config.md](../../design/config.md) | Currently parsed from profiles only |

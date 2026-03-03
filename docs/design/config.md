@@ -59,10 +59,10 @@ agent: claude                           # Agent to launch: aider, claude, codex,
 # agent_files: "${HOME}"               # string: base dir (agent subdir appended); list: specific files
 # --- Additional fields ---
 # profile: my-project                  # [PLANNED] default profile to use; CLI --profile overrides
-# mounts:                              # [PLANNED] bind mounts added at container run time
+# mounts:                              # bind mounts added at container run time
 #   - ~/.gitconfig:/home/yoloai/.gitconfig:ro
 # auto_commit_interval: 0              # [PLANNED] seconds between auto-commits in :copy dirs; 0 = disabled
-# ports: []                            # [PLANNED] default port mappings; profile ports are additive
+# ports: []                            # default port mappings; profile ports are additive
 env: {}                                # Environment variables forwarded to container via /run/secrets/
 # agent_args:                           # Per-agent default CLI args (inserted before -- passthrough)
 #   aider: "--no-auto-commits --no-pretty"
@@ -106,8 +106,8 @@ With profiles (future), a "local-models" profile can bundle env, network config,
 
 **`agent_files`** controls what files are copied into the sandbox's `agent-state/` directory on first run. Two forms: **string** — a base directory from which yoloai derives the agent-specific subdir (e.g. `"${HOME}"` → `~/.claude/` for Claude, `~/.gemini/` for Gemini; `"/shared/team-configs"` → `/shared/team-configs/.claude/` for Claude). **list** — specific files or directories to copy in verbatim (e.g. `["~/.claude/settings.json", "/shared/CLAUDE.md"]`). Omit entirely to copy nothing (safe default). Profile `agent_files` **replaces** (not merges with) defaults. Files placed by SeedFiles (auth credentials, settings) are never overwritten. Each agent defines exclusion patterns for session data and caches. First-run status is tracked in `state.json` (`agent_files_initialized`); `reset --clean` resets the flag so files are re-seeded on next start.
 
-**Planned settings (not yet parsed from config):**
-- `ports` will be default port mappings. Profile ports are additive.
+**Planned settings (not yet parsed from base config):**
+- `ports` — default port mappings. Currently parsed from profiles only; base config parsing not yet implemented.
 
 #### Recipes (advanced)
 
@@ -190,11 +190,11 @@ env:
 resources:                    # container resource limits
   cpus: "4"
   memory: 16g
-# [PLANNED] cap_add:
+# cap_add:
 #   - NET_ADMIN
-# [PLANNED] devices:
+# devices:
 #   - /dev/net/tun
-# [PLANNED] setup:                        # commands run at container start before agent
+# setup:                                  # commands run at container start before agent
 #   - tailscale up --authkey=${TAILSCALE_AUTHKEY}
 # network:
 #   isolated: true
@@ -235,9 +235,9 @@ The full merge table for reference:
 | `agent_files`          | Profile **replaces** defaults (no merge)                 |
 | `mounts`               | Additive (no deduplication — duplicates are user error)  |
 | `resources`            | Profile overrides individual values                      |
-| [PLANNED] `cap_add`              | Additive                                                 |
-| [PLANNED] `devices`              | Additive                                                 |
-| [PLANNED] `setup`                | Additive (defaults first, then profile)                  |
+| `cap_add`                        | Additive                                                 |
+| `devices`                        | Additive                                                 |
+| `setup`                          | Additive (defaults first, then profile)                  |
 | `network.isolated`     | Profile overrides default. CLI overrides profile.        |
 | `network.allow`        | Additive                                                 |
 | [PLANNED] `auto_commit_interval` | Profile overrides default                                |

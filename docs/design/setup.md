@@ -63,7 +63,7 @@ Setup complete. To re-run setup at any time: yoloai system setup
 
 Dedicated interactive setup command. Always runs the full new-user experience regardless of `setup_complete` — treats it as if `setup_complete` is false. This lets users redo their choices if they regret something. Shows current settings as defaults in prompts (e.g., if `tmux_conf` is already `host`, the `[n]` option is pre-selected).
 
-**[PLANNED] `--power-user` flag:** Skip all interactive prompts. For automation (Ansible, dotfiles scripts, CI):
+**`--agent`, `--backend`, `--tmux-conf` flags:** Skip interactive prompts by specifying choices directly. For automation (Ansible, dotfiles scripts, CI):
 - No `~/.tmux.conf` exists → set `tmux_conf: default` (yoloai defaults only).
 - `~/.tmux.conf` exists → set `tmux_conf: default+host` (yoloai defaults + user config, no questions asked — assume they know what they want). Power users who want *only* their config can set `tmux_conf: host` in `config.yaml` directly. Power users who want *only* yoloai defaults can supply an empty `~/.tmux.conf`.
 - Perform non-interactive steps (directory creation, image build).
