@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/kstenerud/yoloai/agent"
 	"github.com/spf13/cobra"
 )
 
@@ -20,8 +21,6 @@ var helpFS embed.FS
 var topicFile = map[string]string{
 	"topics":        "topics.md",
 	"workflow":      "workflow.md",
-	"agents":        "agents.md",
-	"models":        "agents.md",
 	"workdirs":      "workdirs.md",
 	"directories":   "workdirs.md",
 	"config":        "config.md",
@@ -29,6 +28,14 @@ var topicFile = map[string]string{
 	"security":      "security.md",
 	"credentials":   "security.md",
 	"flags":         "flags.md",
+}
+
+// topicFunc maps a topic keyword to a function that generates content
+// dynamically. Checked before topicFile so generated topics stay in sync
+// with the code.
+var topicFunc = map[string]func() string{
+	"agents": generateAgentsTopic,
+	"models": generateAgentsTopic,
 }
 
 func newHelpCmd() *cobra.Command {
@@ -50,20 +57,29 @@ func newHelpCmd() *cobra.Command {
 // runHelp displays the guide for the given topic, or the quickstart guide
 // if no topic is specified.
 func runHelp(topic string) error {
-	filename := "quickstart.md"
 	if topic != "" {
+		// Check dynamic topics first.
+		if fn, ok := topicFunc[topic]; ok {
+			_, err := os.Stdout.WriteString(fn())
+			return err
+		}
+
 		f, ok := topicFile[topic]
 		if !ok {
 			return unknownTopicError(topic)
 		}
-		filename = f
+		content, err := helpFS.ReadFile("help/" + f)
+		if err != nil {
+			return fmt.Errorf("reading help topic: %w", err)
+		}
+		_, err = os.Stdout.Write(content)
+		return err
 	}
 
-	content, err := helpFS.ReadFile("help/" + filename)
+	content, err := helpFS.ReadFile("help/quickstart.md")
 	if err != nil {
 		return fmt.Errorf("reading help topic: %w", err)
 	}
-
 	_, err = os.Stdout.Write(content)
 	return err
 }
@@ -75,10 +91,27 @@ type topicError struct {
 
 func (e *topicError) Error() string { return e.msg }
 
+// allTopicKeywords returns the union of topicFile and topicFunc keys.
+func allTopicKeywords() []string {
+	seen := make(map[string]bool)
+	for k := range topicFile {
+		seen[k] = true
+	}
+	for k := range topicFunc {
+		seen[k] = true
+	}
+	keys := make([]string, 0, len(seen))
+	for k := range seen {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
 // unknownTopicError returns an error with suggestions for unknown topics.
 func unknownTopicError(topic string) error {
 	var suggestions []string
-	for keyword := range topicFile {
+	for _, keyword := range allTopicKeywords() {
 		if levenshtein(topic, keyword) <= 3 {
 			suggestions = append(suggestions, keyword)
 		}
@@ -94,6 +127,110 @@ func unknownTopicError(topic string) error {
 	}
 
 	return &topicError{msg: msg}
+}
+
+// generateAgentsTopic builds the "agents" help topic dynamically from agent
+// definitions so it stays in sync with the code.
+func generateAgentsTopic() string {
+	var b strings.Builder
+
+	b.WriteString("AGENTS AND MODELS\n")
+	b.WriteString("\n")
+	b.WriteString("  yoloai ships multiple agents. Select with --agent or set a default:\n")
+	b.WriteString("\n")
+	b.WriteString("     yoloai new task . --agent gemini\n")
+	b.WriteString("     yoloai config set defaults.agent gemini\n")
+	b.WriteString("\n")
+	b.WriteString("AVAILABLE AGENTS\n")
+	b.WriteString("\n")
+
+	realAgents := agent.RealAgents()
+
+	// Find the longest agent name for alignment.
+	maxName := 0
+	for _, name := range realAgents {
+		if len(name) > maxName {
+			maxName = len(name)
+		}
+	}
+
+	for _, name := range realAgents {
+		def := agent.GetAgent(name)
+		suffix := ""
+		if name == "claude" {
+			suffix = " (default)"
+		}
+		label := name + suffix
+
+		keys := ""
+		if len(def.APIKeyEnvVars) > 0 {
+			keys = "Requires " + def.APIKeyEnvVars[0]
+		}
+
+		// Pad to align descriptions: "  name (default)   Description   Requires KEY"
+		// Use maxName + len(" (default)") as the label column width.
+		labelWidth := maxName + len(" (default)")
+		fmt.Fprintf(&b, "  %-*s  %s", labelWidth, label, def.Description)
+		if keys != "" {
+			fmt.Fprintf(&b, "\n  %-*s  %s", labelWidth, "", keys)
+		}
+		b.WriteString("\n")
+	}
+
+	b.WriteString("\n")
+	b.WriteString("  Agent details:   yoloai system agents <name>\n")
+	b.WriteString("\n")
+	b.WriteString("MODEL ALIASES\n")
+	b.WriteString("\n")
+	b.WriteString("  Each agent supports shorthand model aliases with --model.\n")
+	b.WriteString("  Run 'yoloai system agents <name>' for the full list.\n")
+
+	// Show aliases for agents that have them, grouped by agent.
+	for _, name := range realAgents {
+		def := agent.GetAgent(name)
+		if len(def.ModelAliases) == 0 {
+			continue
+		}
+
+		// Title-case the agent name.
+		title := strings.ToUpper(name[:1]) + name[1:]
+		fmt.Fprintf(&b, "\n  %s:\n", title)
+
+		// Sort aliases for stable output.
+		aliases := make([]string, 0, len(def.ModelAliases))
+		for alias := range def.ModelAliases {
+			aliases = append(aliases, alias)
+		}
+		sort.Strings(aliases)
+
+		// Find max alias length for alignment.
+		maxAlias := 0
+		for _, alias := range aliases {
+			if len(alias) > maxAlias {
+				maxAlias = len(alias)
+			}
+		}
+
+		for _, alias := range aliases {
+			fmt.Fprintf(&b, "     %-*s → %s\n", maxAlias, alias, def.ModelAliases[alias])
+		}
+	}
+
+	b.WriteString("\n")
+	b.WriteString("  Set a default model:\n")
+	b.WriteString("\n")
+	b.WriteString("     yoloai config set defaults.model sonnet\n")
+	b.WriteString("\n")
+	b.WriteString("LOCAL MODELS\n")
+	b.WriteString("\n")
+	b.WriteString("  Some agents (e.g. aider) support local model servers (Ollama, LM Studio):\n")
+	b.WriteString("\n")
+	b.WriteString("     yoloai config set defaults.env.OLLAMA_API_BASE \\\n")
+	b.WriteString("       http://host.docker.internal:11434\n")
+	b.WriteString("\n")
+	b.WriteString("More info: https://github.com/kstenerud/yoloai/blob/main/docs/GUIDE.md#agents-and-models\n")
+
+	return b.String()
 }
 
 // levenshtein computes the Levenshtein distance between two strings.

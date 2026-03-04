@@ -31,7 +31,6 @@ func TestTopicLookup_Primary(t *testing.T) {
 		wantFile string
 	}{
 		{"workflow", "workflow.md"},
-		{"agents", "agents.md"},
 		{"workdirs", "workdirs.md"},
 		{"config", "config.md"},
 		{"security", "security.md"},
@@ -47,12 +46,23 @@ func TestTopicLookup_Primary(t *testing.T) {
 	}
 }
 
+func TestTopicLookup_DynamicTopics(t *testing.T) {
+	for _, keyword := range []string{"agents", "models"} {
+		t.Run(keyword, func(t *testing.T) {
+			fn, ok := topicFunc[keyword]
+			require.True(t, ok, "topic %q should have a dynamic generator", keyword)
+			content := fn()
+			assert.Contains(t, content, "AVAILABLE AGENTS")
+			assert.Contains(t, content, "MODEL ALIASES")
+		})
+	}
+}
+
 func TestTopicLookup_Aliases(t *testing.T) {
 	tests := []struct {
 		alias    string
 		wantFile string
 	}{
-		{"models", "agents.md"},
 		{"directories", "workdirs.md"},
 		{"configuration", "config.md"},
 		{"credentials", "security.md"},

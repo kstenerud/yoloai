@@ -90,7 +90,8 @@ diff and apply what you want to keep.`,
 	}
 
 	// Disable Cobra's built-in help subcommand; we register our own.
-	rootCmd.SetHelpCommand(&cobra.Command{Hidden: true, Use: "no-help"})
+	// GroupID prevents an empty "Additional Commands:" header in -h output.
+	rootCmd.SetHelpCommand(&cobra.Command{Hidden: true, Use: "no-help", GroupID: groupAdmin})
 
 	// Register --help/-h as persistent so it appears under "Global Flags"
 	// on every command. Cobra's InitDefaultHelpFlag skips adding a local

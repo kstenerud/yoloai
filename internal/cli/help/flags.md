@@ -4,7 +4,7 @@ GLOBAL FLAGS
 
   -v             Verbose output (-v for debug, -vv reserved)
   -q             Quiet output (-q for warn, -qq for error only)
-  --no-color     Disable colored output
+  --json         Output as JSON (machine-readable)
 
 CREATING SANDBOXES (yoloai new)
 
