@@ -66,6 +66,7 @@ func newResetCmd() *cobra.Command {
 		},
 	}
 
+	cmd.Flags().Bool("debug", false, "Enable debug logging in sandbox entrypoint")
 	cmd.Flags().Bool("no-prompt", false, "Skip re-sending prompt after reset")
 	cmd.Flags().Bool("clean", false, "Also wipe agent-state directory")
 	cmd.Flags().Bool("no-restart", false, "Keep agent running, reset workspace in-place")
