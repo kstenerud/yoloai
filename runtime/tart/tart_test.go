@@ -2,10 +2,13 @@
 package tart
 
 import (
+	"encoding/json"
+	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/kstenerud/yoloai/runtime"
 )
@@ -322,6 +325,75 @@ func TestRemapTargetPath(t *testing.T) {
 			assert.Equal(t, tt.expect, got)
 		})
 	}
+}
+
+// patchConfigWorkingDir tests
+
+func TestPatchConfigWorkingDir_RemapsDockerPath(t *testing.T) {
+	sandboxDir := t.TempDir()
+	cfg := map[string]interface{}{
+		"agent_command": "claude",
+		"working_dir":   "/home/yoloai/project",
+	}
+	cfgData, err := json.MarshalIndent(cfg, "", "  ")
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, "config.json"), cfgData, 0600))
+
+	r := &Runtime{}
+	require.NoError(t, r.patchConfigWorkingDir(sandboxDir))
+
+	data, err := os.ReadFile(filepath.Join(sandboxDir, "config.json")) //nolint:gosec // test
+	require.NoError(t, err)
+	var result map[string]interface{}
+	require.NoError(t, json.Unmarshal(data, &result))
+	assert.Equal(t, "/Users/admin/project", result["working_dir"])
+}
+
+func TestPatchConfigWorkingDir_NoopWhenNoRemap(t *testing.T) {
+	sandboxDir := t.TempDir()
+	cfg := map[string]interface{}{
+		"agent_command": "claude",
+		"working_dir":   "/tmp/foo",
+	}
+	cfgData, err := json.MarshalIndent(cfg, "", "  ")
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, "config.json"), cfgData, 0600))
+
+	r := &Runtime{}
+	require.NoError(t, r.patchConfigWorkingDir(sandboxDir))
+
+	data, err := os.ReadFile(filepath.Join(sandboxDir, "config.json")) //nolint:gosec // test
+	require.NoError(t, err)
+	var result map[string]interface{}
+	require.NoError(t, json.Unmarshal(data, &result))
+	assert.Equal(t, "/tmp/foo", result["working_dir"])
+}
+
+func TestPatchConfigWorkingDir_MissingConfig(t *testing.T) {
+	sandboxDir := t.TempDir()
+	r := &Runtime{}
+	err := r.patchConfigWorkingDir(sandboxDir)
+	assert.Error(t, err)
+}
+
+func TestPatchConfigWorkingDir_NoWorkingDirKey(t *testing.T) {
+	sandboxDir := t.TempDir()
+	cfg := map[string]interface{}{
+		"agent_command": "claude",
+	}
+	cfgData, err := json.MarshalIndent(cfg, "", "  ")
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, "config.json"), cfgData, 0600))
+
+	r := &Runtime{}
+	require.NoError(t, r.patchConfigWorkingDir(sandboxDir))
+
+	// File should remain unchanged
+	data, err := os.ReadFile(filepath.Join(sandboxDir, "config.json")) //nolint:gosec // test
+	require.NoError(t, err)
+	var result map[string]interface{}
+	require.NoError(t, json.Unmarshal(data, &result))
+	assert.Nil(t, result["working_dir"])
 }
 
 func TestMountDirName(t *testing.T) {

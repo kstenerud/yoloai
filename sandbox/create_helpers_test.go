@@ -996,6 +996,28 @@ func TestPrepareSandboxState_NetworkIsolatedSetsAllowlist(t *testing.T) {
 	assert.Contains(t, state.networkAllow, "sentry.io")
 }
 
+// containsLocalhost tests
+
+func TestContainsLocalhost_WithLocalhost(t *testing.T) {
+	assert.True(t, containsLocalhost("http://localhost:11434"))
+}
+
+func TestContainsLocalhost_With127(t *testing.T) {
+	assert.True(t, containsLocalhost("http://127.0.0.1:8080/api"))
+}
+
+func TestContainsLocalhost_Neither(t *testing.T) {
+	assert.False(t, containsLocalhost("http://api.example.com"))
+}
+
+func TestContainsLocalhost_Empty(t *testing.T) {
+	assert.False(t, containsLocalhost(""))
+}
+
+func TestContainsLocalhost_ExternalURL(t *testing.T) {
+	assert.False(t, containsLocalhost("http://example.com"))
+}
+
 func TestPrepareSandboxState_NetworkAllowAddsExtraDomains(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)

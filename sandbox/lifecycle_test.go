@@ -885,6 +885,120 @@ func TestReset_NoRestart_FallsBackWhenNotRunning(t *testing.T) {
 	assert.NotEqual(t, sha, updatedMeta.Workdir.BaselineSHA)
 }
 
+// patchConfigDebug tests
+
+func TestPatchConfigDebug_SetTrue(t *testing.T) {
+	sandboxDir := t.TempDir()
+	cfg := containerConfig{AgentCommand: "claude", WorkingDir: "/project"}
+	cfgData, err := json.MarshalIndent(cfg, "", "  ")
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, "config.json"), cfgData, 0600))
+
+	require.NoError(t, patchConfigDebug(sandboxDir, true))
+
+	data, err := os.ReadFile(filepath.Join(sandboxDir, "config.json")) //nolint:gosec // test
+	require.NoError(t, err)
+	var result containerConfig
+	require.NoError(t, json.Unmarshal(data, &result))
+	assert.True(t, result.Debug)
+}
+
+func TestPatchConfigDebug_SetFalse(t *testing.T) {
+	sandboxDir := t.TempDir()
+	cfg := containerConfig{AgentCommand: "claude", Debug: true}
+	cfgData, err := json.MarshalIndent(cfg, "", "  ")
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, "config.json"), cfgData, 0600))
+
+	require.NoError(t, patchConfigDebug(sandboxDir, false))
+
+	data, err := os.ReadFile(filepath.Join(sandboxDir, "config.json")) //nolint:gosec // test
+	require.NoError(t, err)
+	var result containerConfig
+	require.NoError(t, json.Unmarshal(data, &result))
+	assert.False(t, result.Debug)
+}
+
+func TestPatchConfigDebug_MissingConfig(t *testing.T) {
+	sandboxDir := t.TempDir()
+	err := patchConfigDebug(sandboxDir, true)
+	assert.Error(t, err)
+}
+
+func TestPatchConfigDebug_PreservesOtherFields(t *testing.T) {
+	sandboxDir := t.TempDir()
+	cfg := containerConfig{AgentCommand: "claude --print", WorkingDir: "/home/user/project"}
+	cfgData, err := json.MarshalIndent(cfg, "", "  ")
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, "config.json"), cfgData, 0600))
+
+	require.NoError(t, patchConfigDebug(sandboxDir, true))
+
+	data, err := os.ReadFile(filepath.Join(sandboxDir, "config.json")) //nolint:gosec // test
+	require.NoError(t, err)
+	var result containerConfig
+	require.NoError(t, json.Unmarshal(data, &result))
+	assert.Equal(t, "claude --print", result.AgentCommand)
+	assert.Equal(t, "/home/user/project", result.WorkingDir)
+	assert.True(t, result.Debug)
+}
+
+// PatchConfigAllowedDomains tests
+
+func TestPatchConfigAllowedDomains_SetDomains(t *testing.T) {
+	sandboxDir := t.TempDir()
+	cfg := containerConfig{AgentCommand: "claude"}
+	cfgData, err := json.MarshalIndent(cfg, "", "  ")
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, "config.json"), cfgData, 0600))
+
+	require.NoError(t, PatchConfigAllowedDomains(sandboxDir, []string{"api.anthropic.com", "sentry.io"}))
+
+	data, err := os.ReadFile(filepath.Join(sandboxDir, "config.json")) //nolint:gosec // test
+	require.NoError(t, err)
+	var result containerConfig
+	require.NoError(t, json.Unmarshal(data, &result))
+	assert.Equal(t, []string{"api.anthropic.com", "sentry.io"}, result.AllowedDomains)
+}
+
+func TestPatchConfigAllowedDomains_ReplacesExisting(t *testing.T) {
+	sandboxDir := t.TempDir()
+	cfg := containerConfig{AgentCommand: "claude", AllowedDomains: []string{"old.com"}}
+	cfgData, err := json.MarshalIndent(cfg, "", "  ")
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, "config.json"), cfgData, 0600))
+
+	require.NoError(t, PatchConfigAllowedDomains(sandboxDir, []string{"new.com"}))
+
+	data, err := os.ReadFile(filepath.Join(sandboxDir, "config.json")) //nolint:gosec // test
+	require.NoError(t, err)
+	var result containerConfig
+	require.NoError(t, json.Unmarshal(data, &result))
+	assert.Equal(t, []string{"new.com"}, result.AllowedDomains)
+}
+
+func TestPatchConfigAllowedDomains_EmptyListClears(t *testing.T) {
+	sandboxDir := t.TempDir()
+	cfg := containerConfig{AgentCommand: "claude", AllowedDomains: []string{"api.com"}}
+	cfgData, err := json.MarshalIndent(cfg, "", "  ")
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, "config.json"), cfgData, 0600))
+
+	require.NoError(t, PatchConfigAllowedDomains(sandboxDir, []string{}))
+
+	data, err := os.ReadFile(filepath.Join(sandboxDir, "config.json")) //nolint:gosec // test
+	require.NoError(t, err)
+	var result containerConfig
+	require.NoError(t, json.Unmarshal(data, &result))
+	assert.Empty(t, result.AllowedDomains)
+}
+
+func TestPatchConfigAllowedDomains_MissingConfig(t *testing.T) {
+	sandboxDir := t.TempDir()
+	err := PatchConfigAllowedDomains(sandboxDir, []string{"api.com"})
+	assert.Error(t, err)
+}
+
 func TestDestroy_BrokenSandbox(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)

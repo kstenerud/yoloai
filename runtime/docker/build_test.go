@@ -258,3 +258,30 @@ func TestCreateBuildContext_MissingFile(t *testing.T) {
 	assert.Error(t, err)
 	assert.True(t, strings.Contains(err.Error(), "entrypoint.sh") || strings.Contains(err.Error(), "tmux.conf"))
 }
+
+// profileBuildChecksum tests
+
+func TestProfileBuildChecksum_ValidDockerfile(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "Dockerfile"), []byte("FROM yoloai-base\nRUN apt install -y go"), 0600))
+
+	sum := profileBuildChecksum(dir)
+	assert.NotEmpty(t, sum)
+	assert.Len(t, sum, 64, "expected SHA-256 hex string (64 chars)")
+}
+
+func TestProfileBuildChecksum_Deterministic(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "Dockerfile"), []byte("FROM yoloai-base"), 0600))
+
+	sum1 := profileBuildChecksum(dir)
+	sum2 := profileBuildChecksum(dir)
+	assert.Equal(t, sum1, sum2)
+	assert.NotEmpty(t, sum1)
+}
+
+func TestProfileBuildChecksum_MissingDockerfile(t *testing.T) {
+	dir := t.TempDir()
+	sum := profileBuildChecksum(dir)
+	assert.Empty(t, sum)
+}

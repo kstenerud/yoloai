@@ -216,3 +216,32 @@ func TestWorkDir(t *testing.T) {
 	expected := filepath.Join(home, ".yoloai", "sandboxes", "my-sandbox", "work", "^2Fhome^2Fuser^2Fproject")
 	assert.Equal(t, expected, WorkDir("my-sandbox", "/home/user/project"))
 }
+
+func TestContainerName(t *testing.T) {
+	assert.Equal(t, "yoloai-mybox", ContainerName("mybox"))
+	assert.Equal(t, "yoloai-mybox", InstanceName("mybox"))
+}
+
+func TestOverlayUpperDir(t *testing.T) {
+	home, err := os.UserHomeDir()
+	require.NoError(t, err)
+
+	expected := filepath.Join(home, ".yoloai", "sandboxes", "my-sandbox", "work", EncodePath("/home/user/project"), "upper")
+	assert.Equal(t, expected, OverlayUpperDir("my-sandbox", "/home/user/project"))
+}
+
+func TestOverlayOvlworkDir(t *testing.T) {
+	home, err := os.UserHomeDir()
+	require.NoError(t, err)
+
+	expected := filepath.Join(home, ".yoloai", "sandboxes", "my-sandbox", "work", EncodePath("/home/user/project"), "ovlwork")
+	assert.Equal(t, expected, OverlayOvlworkDir("my-sandbox", "/home/user/project"))
+}
+
+func TestFilesDir(t *testing.T) {
+	home, err := os.UserHomeDir()
+	require.NoError(t, err)
+
+	expected := filepath.Join(home, ".yoloai", "sandboxes", "my-sandbox", "files")
+	assert.Equal(t, expected, FilesDir("my-sandbox"))
+}
