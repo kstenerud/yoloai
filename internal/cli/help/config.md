@@ -12,20 +12,20 @@ COMMANDS
 
 KEY SETTINGS
 
-  defaults.agent       Agent to use (default: claude)
-  defaults.model       Model name or alias (default: agent's default)
-  defaults.backend     Runtime backend: docker, tart, seatbelt
-  defaults.tmux_conf   Tmux config mode: default+host, default, host, none
-  defaults.env.<NAME>  Environment variable forwarded to container
+  agent            Agent to use (default: claude)
+  model            Model name or alias (default: agent's default)
+  backend          Runtime backend: docker, tart, seatbelt
+  tmux_conf        Tmux config mode: default+host, default, host, none
+  env.<NAME>       Environment variable forwarded to container
 
 EXAMPLES
 
-     yoloai config set defaults.agent gemini
-     yoloai config set defaults.model sonnet
-     yoloai config set defaults.backend tart
-     yoloai config set defaults.env.OLLAMA_API_BASE \
+     yoloai config set agent gemini
+     yoloai config set model sonnet
+     yoloai config set backend tart
+     yoloai config set env.OLLAMA_API_BASE \
        http://host.docker.internal:11434
-     yoloai config reset defaults.model
+     yoloai config reset model
 
   You can also edit ~/.yoloai/config.yaml directly.
 

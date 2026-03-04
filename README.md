@@ -39,13 +39,13 @@ yoloai destroy fix-bug
 Or skip the prompt and drop into an interactive session:
 
 ```bash
-yoloai new explore ./my-project
+yoloai new explore ./my-project -a
 # You're inside the agent, running in tmux in the sandbox.
 #   Ctrl-B, D to detach.
 #   yoloai attach explore to reconnect.
 ```
 
-Agents: **Claude Code** (default), **Gemini CLI** (`-a gemini`). Use `yoloai info agents` to list available agents.
+Agents: **Claude Code** (default), **Aider**, **Codex**, **Gemini CLI** (`--agent gemini`), **OpenCode**. Use `yoloai system agents` to list available agents.
 
 ## Iterative workflow
 

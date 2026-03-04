@@ -20,6 +20,7 @@ Full reference for commands, flags, configuration, and internals. For a quick ov
 | `yoloai stop <name>...` | Stop sandboxes (preserving state) |
 | `yoloai start <name>` | Start a stopped sandbox |
 | `yoloai restart <name>` | Restart the agent in an existing sandbox |
+| `yoloai clone <source> <dest>` | Clone a sandbox (copy state to a new sandbox) |
 | `yoloai reset <name>` | Re-copy workdir and reset to original state |
 | `yoloai destroy <name>...` | Stop and remove sandboxes |
 
@@ -31,12 +32,13 @@ Full reference for commands, flags, configuration, and internals. For a quick ov
 | `yoloai system info` | Show version, paths, disk usage, backend availability |
 | `yoloai system agents [name]` | List available agents |
 | `yoloai system backends [name]` | List available runtime backends |
-| `yoloai system build` | Build or rebuild the base Docker image |
-| `yoloai system prune` | Remove orphaned resources and stale temp files |
+| `yoloai system build [profile]` | Build or rebuild the base image (`--backend`, `--secret`, `--all`) |
+| `yoloai system prune` | Remove orphaned resources (`--dry-run`, `--yes`, `--all`, `--backend`) |
 | `yoloai system setup` | Re-run interactive first-run setup |
 | `yoloai sandbox` | Sandbox inspection |
 | `yoloai sandbox list` | List sandboxes and their status |
 | `yoloai sandbox info <name>` | Show sandbox configuration and state |
+| `yoloai sandbox prompt <name>` | Show sandbox prompt |
 | `yoloai sandbox log <name>` | Show session log |
 | `yoloai sandbox exec <name> <cmd>` | Run a command inside the sandbox |
 | `yoloai sandbox network add <name> <domain>...` | Allow additional domains in an isolated sandbox |
@@ -53,7 +55,7 @@ Full reference for commands, flags, configuration, and internals. For a quick ov
 | `yoloai profile create <name>` | Create a new profile with scaffold |
 | `yoloai profile list` | List profiles |
 | `yoloai profile info <name>` | Show merged profile configuration |
-| `yoloai profile delete <name>` | Delete a profile |
+| `yoloai profile delete <name>` | Delete a profile (`--yes` to skip confirmation) |
 | `yoloai files put <name> <file>...` | Copy files into sandbox exchange directory |
 | `yoloai files get <name> <file> [dst]` | Copy a file out of sandbox exchange directory |
 | `yoloai files ls <name> [glob]` | List files in sandbox exchange directory |
@@ -61,7 +63,9 @@ Full reference for commands, flags, configuration, and internals. For a quick ov
 | `yoloai files path <name>` | Print host path to sandbox exchange directory |
 | `yoloai config get [key]` | Print configuration values (all settings or a specific key) |
 | `yoloai config set <key> <value>` | Set a configuration value |
-| `yoloai help [topic]` | Show help topics (quickstart, agents, workflow, etc.) |
+| `yoloai config reset <key>` | Reset a configuration value to its default |
+| `yoloai x [extension]` | Run a user-defined extension (alias: `ext`) |
+| `yoloai help [topic]` | Show help topics (agents, workflow, workdirs, config, security, flags) |
 | `yoloai completion <shell>` | Generate shell completion (bash/zsh/fish/powershell) |
 | `yoloai version` | Show version information |
 
@@ -147,8 +151,8 @@ yoloai ships with multiple agents. The architecture is agent-agnostic — more a
 | `codex` | `CODEX_API_KEY`, `OPENAI_API_KEY` | OpenAI Codex — AI coding agent |
 | `gemini` | `GEMINI_API_KEY` | Google Gemini CLI — AI coding assistant |
 | `opencode` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, + others | OpenCode — open-source AI coding agent (auth check is a warning, not error) |
-| `test` | (none) | Test agent — launches a shell for testing sandbox behavior |
-| `shell` | (none) | Shell agent — launches an interactive shell (no AI agent) |
+| `test` | (none) | Bash shell for testing and development |
+| `shell` | All agents' keys | Bash shell with all agents' credentials seeded |
 
 You can select a model using shorthand aliases or full model names. Aliases are agent-specific — use `yoloai system agents <name>` to see the full list for each agent.
 
@@ -160,8 +164,10 @@ yoloai new task ./my-project --model haiku    # claude-haiku-4-latest
 yoloai new task ./my-project --model claude-sonnet-4-20250514  # exact model
 
 # Gemini model aliases
-yoloai new task ./my-project --agent gemini --model pro    # gemini-2.5-pro
-yoloai new task ./my-project --agent gemini --model flash  # gemini-2.5-flash
+yoloai new task ./my-project --agent gemini --model pro          # gemini-2.5-pro
+yoloai new task ./my-project --agent gemini --model flash        # gemini-2.5-flash
+yoloai new task ./my-project --agent gemini --model preview-pro  # gemini-3.1-pro-preview
+yoloai new task ./my-project --agent gemini --model preview-flash # gemini-3-flash-preview
 
 # Codex model aliases
 yoloai new task ./my-project --agent codex --model default  # gpt-5.3-codex
@@ -212,9 +218,9 @@ The `host.docker.internal` hostname allows the container to reach services runni
 
 | Flag | Description |
 |------|-------------|
-| `-v` | Verbose output |
-| `-q` | Quiet output |
-| `--no-color` | Disable color output |
+| `-h`, `--help` | Show help for any command |
+| `-v`, `--verbose` | Increase verbosity (repeatable: `-v` info, `-vv` debug, `-vvv` trace) |
+| `-q`, `--quiet` | Decrease verbosity (repeatable: `-q` warnings only, `-qq` errors only, `-qqq` silent) |
 | `--json` | Output as JSON for scripting and CI |
 
 ### JSON Output
@@ -253,7 +259,7 @@ yoloai new task ./project --attach
 yoloai new task ./project --yes
 
 # Replace an existing sandbox with the same name
-yoloai new task ./project --replace
+yoloai new task ./project --force
 
 # Pass extra arguments directly to the agent CLI
 yoloai new task ./project -- --allowedTools "Edit,Write,Bash"
@@ -275,6 +281,12 @@ yoloai new task ./project --cpus 4 --memory 8g
 
 # Expose a container port to the host
 yoloai new task ./project --port 3000:3000
+
+# Pass environment variables to the sandbox
+yoloai new task ./project --env MY_VAR=value --env OTHER=val2
+
+# Debug entrypoint issues
+yoloai new task ./project --debug
 ```
 
 ### Managing sandboxes
@@ -291,10 +303,17 @@ yoloai destroy --all --yes
 # Resume a stopped sandbox (re-feed original prompt with context)
 yoloai start task --resume
 yoloai start task -a            # start and auto-attach
+yoloai start task --prompt "continue with the API changes"  # new prompt
+yoloai start task --prompt-file next-steps.md               # prompt from file
 
 # Restart agent (stop + start, preserving workspace)
 yoloai restart task
 yoloai restart task -a          # restart and auto-attach
+yoloai restart task --resume    # restart with resume prompt
+yoloai restart task --prompt "now add tests"  # restart with new prompt
+
+# Attach with resume (restart agent with resume prompt, then attach)
+yoloai attach task --resume
 
 # Reset workdir (re-copy from original, restart agent)
 yoloai reset task
@@ -312,6 +331,9 @@ yoloai diff task
 
 # Summary only (files changed, insertions, deletions)
 yoloai diff task --stat
+
+# List changed file names only
+yoloai diff task --name-only
 
 # List individual agent commits
 yoloai diff task --log
@@ -341,6 +363,9 @@ yoloai apply task --no-wip
 
 # Apply specific commits by ref
 yoloai apply task abc123 def456
+
+# Dry-run: check what would be applied without making changes
+yoloai apply task --dry-run
 
 # Force apply even if host repo has uncommitted changes
 yoloai apply task --force
@@ -397,6 +422,12 @@ yoloai config reset env.OLLAMA_API_BASE
 | `resources.memory` | (empty) | Memory limit (e.g., `8g`, `512m`) |
 | `network.isolated` | `false` | Enable network isolation by default |
 | `network.allow` | (empty) | Additional domains to allow (additive with agent defaults) |
+| `auto_commit_interval` | `0` | Auto-commit interval in seconds (0 = disabled) |
+| `mounts` | (empty) | Additional bind mounts (list of `host:container` paths) |
+| `ports` | (empty) | Port mappings (list of `host:container` ports) |
+| `cap_add` | (empty) | Additional Linux capabilities (list, e.g. `SYS_PTRACE`) |
+| `devices` | (empty) | Device mappings (list of `/dev/` paths) |
+| `setup` | (empty) | Shell commands to run inside the container on first start (list) |
 | `tmux_conf` | (set by setup) | Tmux config mode (global config) |
 | `profile` | (empty) | Default profile name (used when `--profile` is not specified) |
 | `model_aliases.<alias>` | (empty) | Custom model alias (global config) |
