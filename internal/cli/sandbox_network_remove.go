@@ -1,7 +1,6 @@
+// ABOUTME: `yoloai sandbox network remove` subcommand. Removes domains
+// ABOUTME: from a network-isolated sandbox's allowlist.
 package cli
-
-// ABOUTME: `yoloai sandbox network-allow` subcommand. Adds network domains
-// ABOUTME: to a running network-isolated sandbox at runtime.
 
 import (
 	"context"
@@ -13,10 +12,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func newSandboxNetworkAllowCmd() *cobra.Command {
+func newSandboxNetworkRemoveCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "network-allow <name> <domain>...",
-		Short: "Allow additional domains in an isolated sandbox",
+		Use:   "remove <name> <domain>...",
+		Short: "Remove domains from the allowlist",
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name, domains, err := resolveName(cmd, args)
@@ -46,38 +45,34 @@ func newSandboxNetworkAllowCmd() *cobra.Command {
 				case "isolated":
 					// ok
 				case "none":
-					return fmt.Errorf("sandbox %q uses --network-none; cannot add network access", name)
+					return fmt.Errorf("sandbox %q uses --network-none; cannot modify network access", name)
 				default:
 					return fmt.Errorf("sandbox %q is not using network isolation", name)
 				}
 
-				// Deduplicate new domains against existing allowlist
+				// Build set of domains to remove and validate they exist
+				toRemove := make(map[string]bool, len(domains))
 				existing := make(map[string]bool, len(meta.NetworkAllow))
 				for _, d := range meta.NetworkAllow {
 					existing[d] = true
 				}
-				var newDomains []string
 				for _, d := range domains {
 					if !existing[d] {
-						newDomains = append(newDomains, d)
-						existing[d] = true // prevent duplicates within the input
+						return fmt.Errorf("domain %q is not in the allowlist", d)
 					}
+					toRemove[d] = true
 				}
 
-				if len(newDomains) == 0 {
-					if jsonEnabled(cmd) {
-						return writeJSON(cmd.OutOrStdout(), map[string]any{
-							"name":          name,
-							"domains_added": []string{},
-							"live":          false,
-						})
+				// Filter out removed domains
+				var remaining []string
+				for _, d := range meta.NetworkAllow {
+					if !toRemove[d] {
+						remaining = append(remaining, d)
 					}
-					fmt.Fprintf(w, "All domains already allowed\n") //nolint:errcheck // best-effort output
-					return nil
 				}
 
 				// Update meta.json
-				meta.NetworkAllow = append(meta.NetworkAllow, newDomains...)
+				meta.NetworkAllow = remaining
 				if err := sandbox.SaveMeta(sandboxDir, meta); err != nil {
 					return err
 				}
@@ -95,15 +90,20 @@ func newSandboxNetworkAllowCmd() *cobra.Command {
 
 				live := false
 				if info.Status == sandbox.StatusRunning {
-					// Live-patch ipset rules in running container
-					script := `for domain in "$@"; do
+					// Live-patch: flush ipset and re-add remaining domains
+					var scriptParts []string
+					scriptParts = append(scriptParts, "ipset flush allowed-domains 2>/dev/null || true")
+					if len(remaining) > 0 {
+						scriptParts = append(scriptParts, `for domain in "$@"; do
   for ip in $(dig +short A "$domain" 2>/dev/null); do
     echo "$ip" | grep -qE "^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$" && \
       ipset add allowed-domains "$ip" 2>/dev/null || true
   done
-done`
+done`)
+					}
+					script := strings.Join(scriptParts, "\n")
 					execArgs := []string{"sh", "-c", script, "_"}
-					execArgs = append(execArgs, newDomains...)
+					execArgs = append(execArgs, remaining...)
 					_, err := rt.Exec(ctx, sandbox.InstanceName(name), execArgs, "0")
 					if err != nil {
 						if !jsonEnabled(cmd) {
@@ -113,18 +113,18 @@ done`
 					} else {
 						live = true
 						if !jsonEnabled(cmd) {
-							fmt.Fprintf(w, "Allowed %s (live)\n", strings.Join(newDomains, ", ")) //nolint:errcheck // best-effort output
+							fmt.Fprintf(w, "Removed %s (live)\n", strings.Join(domains, ", ")) //nolint:errcheck // best-effort output
 						}
 					}
 				} else if !jsonEnabled(cmd) {
-					fmt.Fprintf(w, "Allowed %s (will take effect on next start)\n", strings.Join(newDomains, ", ")) //nolint:errcheck // best-effort output
+					fmt.Fprintf(w, "Removed %s (will take effect on next start)\n", strings.Join(domains, ", ")) //nolint:errcheck // best-effort output
 				}
 
 				if jsonEnabled(cmd) {
 					return writeJSON(cmd.OutOrStdout(), map[string]any{
-						"name":          name,
-						"domains_added": newDomains,
-						"live":          live,
+						"name":            name,
+						"domains_removed": domains,
+						"live":            live,
 					})
 				}
 

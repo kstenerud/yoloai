@@ -22,8 +22,9 @@ Dropped (already working):
 Completed in Pass 3:
 - `sandbox clone` — clone an existing sandbox
 
-## Later review
+## Pass 4: Remaining CLI critiques
 
-- Command classification issues (section 3 of critique) — whether commands are in the right groups
-- `--no-*` flag naming inconsistency — some flags use `--no-X`, others don't follow a pattern
-- `sandbox network-allow` verb naming — whether this should be a different verb
+Completed in Pass 4:
+- Command classification — moved `files` and `x` from Admin to Workflow in design doc
+- `--no-*` flag naming — documented convention in CLI-STANDARD.md (--no-X for default-on, --X for default-off)
+- `sandbox network-allow` naming — replaced with `sandbox network {add,list,remove}` namespace

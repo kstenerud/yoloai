@@ -58,7 +58,10 @@ Dependency direction: `cmd/yoloai` → `cli` → `sandbox` + `runtime`; `sandbox
 | `sandbox_cmd.go` | `yoloai sandbox` parent command grouping sandbox inspection subcommands. |
 | `sandbox_info.go` | `yoloai sandbox info` — display sandbox config, meta, and status. |
 | `exec.go` | `yoloai sandbox exec` — run commands inside a running sandbox container. |
-| `network_allow.go` | `yoloai sandbox network-allow` — add domains to a network-isolated sandbox at runtime. |
+| `sandbox_network.go` | `yoloai sandbox network` parent command for network allowlist management. |
+| `sandbox_network_add.go` | `yoloai sandbox network add` — add domains to a network-isolated sandbox at runtime. |
+| `sandbox_network_list.go` | `yoloai sandbox network list` — show allowed domains for a sandbox. |
+| `sandbox_network_remove.go` | `yoloai sandbox network remove` — remove domains from the allowlist. |
 | `list.go` | `yoloai sandbox list` / `yoloai ls` — tabular listing of all sandboxes with status. |
 | `log.go` | `yoloai sandbox log` / `yoloai log` — display sandbox session log (log.txt). |
 | `info.go` | Backend and agent info commands (`system backends`, `system agents`), plus shared helpers (`checkBackend`, `knownBackends`). |
@@ -218,7 +221,9 @@ Tart (macOS VM) implementation of `Runtime` interface. Shells out to `tart` CLI 
 | `yoloai sandbox info` | `cli/sandbox_info.go:newSandboxInfoCmd` | `sandbox.InspectSandbox()` in `sandbox/inspect.go` |
 | `yoloai sandbox log` | `cli/log.go:newSandboxLogCmd` | Reads `log.txt` from sandbox dir |
 | `yoloai sandbox exec` | `cli/exec.go:newSandboxExecCmd` | `runtime.InteractiveExec` into running container |
-| `yoloai sandbox network-allow` | `cli/network_allow.go:newSandboxNetworkAllowCmd` | `sandbox.PatchConfigAllowedDomains()` + `runtime.Exec` ipset update |
+| `yoloai sandbox network add` | `cli/sandbox_network_add.go:newSandboxNetworkAddCmd` | `sandbox.PatchConfigAllowedDomains()` + `runtime.Exec` ipset update |
+| `yoloai sandbox network list` | `cli/sandbox_network_list.go:newSandboxNetworkListCmd` | `sandbox.LoadMeta()` — pure file read |
+| `yoloai sandbox network remove` | `cli/sandbox_network_remove.go:newSandboxNetworkRemoveCmd` | `sandbox.PatchConfigAllowedDomains()` + `runtime.Exec` ipset update |
 | `yoloai restart` | `cli/restart.go:newRestartCmd` | `sandbox.Manager.Stop()` + `sandbox.Manager.Start()` in `sandbox/lifecycle.go` |
 | `yoloai system prune` | `cli/system_prune.go:newSystemPruneCmd` | `sandbox.Prune()` in `sandbox/prune.go` |
 | `yoloai files` | `cli/files.go:newFilesCmd` | File exchange via `~/.yoloai/sandboxes/<name>/files/` |

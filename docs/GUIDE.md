@@ -39,7 +39,9 @@ Full reference for commands, flags, configuration, and internals. For a quick ov
 | `yoloai sandbox info <name>` | Show sandbox configuration and state |
 | `yoloai sandbox log <name>` | Show session log |
 | `yoloai sandbox exec <name> <cmd>` | Run a command inside the sandbox |
-| `yoloai sandbox network-allow <name> <domain>` | Allow additional domains in an isolated sandbox |
+| `yoloai sandbox network add <name> <domain>...` | Allow additional domains in an isolated sandbox |
+| `yoloai sandbox network list <name>` | Show allowed domains for a sandbox |
+| `yoloai sandbox network remove <name> <domain>...` | Remove domains from the allowlist |
 | `yoloai ls` | List sandboxes (shortcut for `sandbox list`) |
 | `yoloai log <name>` | Show sandbox log (shortcut for `sandbox log`) |
 | `yoloai exec <name> <cmd>` | Run a command inside a sandbox (shortcut for `sandbox exec`) |

@@ -43,10 +43,20 @@ Inspection:
   yoloai sandbox info <name>                     Show sandbox configuration and state
   yoloai sandbox log <name>                      Show sandbox session log
   yoloai sandbox exec <name> <command>           Run a command inside the sandbox
-  yoloai sandbox network-allow <name> <domain>  Allow additional domains in an isolated sandbox
+  yoloai sandbox network add <name> <domain>... Allow additional domains in an isolated sandbox
+  yoloai sandbox network list <name>            Show allowed domains for a sandbox
+  yoloai sandbox network remove <name> <domain>... Remove domains from the allowlist
   yoloai ls                                      List sandboxes (shortcut for 'sandbox list')
   yoloai log <name>                              Show sandbox log (shortcut for 'sandbox log')
   yoloai exec <name> <command>                   Run a command inside a sandbox (shortcut for 'sandbox exec')
+
+Workflow:
+  yoloai files put <name> <file>...                    Copy files into sandbox exchange dir
+  yoloai files get <name> <file> [dst]                 Copy a file out of sandbox exchange dir
+  yoloai files ls <name> [glob]                        List files in sandbox exchange dir
+  yoloai files rm <name> <glob>                        Remove files from sandbox exchange dir
+  yoloai files path <name>                             Print host path to sandbox exchange dir
+  yoloai x <extension> <name> [args...] [--flags...]  Run a user-defined extension
 
 Admin:
   yoloai config get [key]                        Print configuration values (all or specific key)
@@ -56,12 +66,6 @@ Admin:
   yoloai profile list                            List profiles
   yoloai profile info <name>                     Show merged profile configuration
   yoloai profile delete <name>                   Delete a profile
-  yoloai files put <name> <file>...                    Copy files into sandbox exchange dir
-  yoloai files get <name> <file> [dst]                 Copy a file out of sandbox exchange dir
-  yoloai files ls <name> [glob]                        List files in sandbox exchange dir
-  yoloai files rm <name> <glob>                        Remove files from sandbox exchange dir
-  yoloai files path <name>                             Print host path to sandbox exchange dir
-  yoloai x <extension> <name> [args...] [--flags...]  Run a user-defined extension
   yoloai completion [bash|zsh|fish|powershell]   Generate shell completion script
   yoloai version                                 Show version information
 ```
@@ -442,11 +446,30 @@ Options:
 
 Implemented as `docker exec yoloai-<name> <command>`, with `-i` added when stdin is a pipe/TTY and `-t` added when stdin is a TTY. This allows both interactive use (`yoloai exec my-sandbox bash`) and non-interactive use (`yoloai exec my-sandbox ls`, `echo "test" | yoloai exec my-sandbox cat`).
 
-### `yoloai sandbox network-allow`
+### `yoloai sandbox network`
 
-`yoloai sandbox network-allow <name> <domain>...` adds domains to the allowlist of a network-isolated sandbox. Changes are persisted to meta.json and config.json so they survive container restarts. If the container is running, ipset rules are live-patched via `docker exec` (as root, using `dig` + `ipset add`).
+Parent command for managing sandbox network allowlists.
+
+#### `yoloai sandbox network add`
+
+`yoloai sandbox network add <name> <domain>...` adds domains to the allowlist of a network-isolated sandbox. Changes are persisted to meta.json and config.json so they survive container restarts. If the container is running, ipset rules are live-patched via `docker exec` (as root, using `dig` + `ipset add`).
 
 Requires `network_mode == "isolated"`. Errors if the sandbox uses `--network-none` or has no network restrictions. Duplicate domains are silently skipped (idempotent). If the container is stopped, changes are saved and take effect on the next start.
+
+#### `yoloai sandbox network list`
+
+`yoloai sandbox network list <name>` shows the allowed domains for a sandbox.
+
+- Text output: one domain per line, or "No network isolation" / "No domains allowed".
+- JSON output: `{"name": "...", "network_mode": "...", "domains": [...]}`.
+
+No runtime needed — pure file read from meta.json.
+
+#### `yoloai sandbox network remove`
+
+`yoloai sandbox network remove <name> <domain>...` removes domains from the allowlist of a network-isolated sandbox. Changes are persisted to meta.json and config.json. If the container is running, ipset rules are live-patched (flush and re-add remaining IPs).
+
+Requires `network_mode == "isolated"`. Errors if a specified domain is not in the allowlist.
 
 ### `yoloai sandbox list` / `yoloai ls`
 
