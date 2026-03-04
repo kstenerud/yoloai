@@ -19,6 +19,7 @@ Dropped (already working):
 
 ## Pass 3: New commands
 
+Completed in Pass 3:
 - `sandbox clone` — clone an existing sandbox
 
 ## Later review
