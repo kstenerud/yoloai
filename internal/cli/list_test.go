@@ -48,10 +48,38 @@ func TestFilterInfos_Running(t *testing.T) {
 		makeInfo("a", sandbox.StatusRunning, "claude", "", "no"),
 		makeInfo("b", sandbox.StatusStopped, "gemini", "", "no"),
 		makeInfo("c", sandbox.StatusDone, "claude", "", "no"),
+		makeInfo("d", sandbox.StatusIdle, "claude", "", "no"),
 	}
 	result := filterInfos(infos, listFilters{running: true})
-	assert.Len(t, result, 1)
+	assert.Len(t, result, 2)
 	assert.Equal(t, "a", result[0].Meta.Name)
+	assert.Equal(t, "d", result[1].Meta.Name)
+}
+
+func TestFilterInfos_Idle(t *testing.T) {
+	infos := []*sandbox.Info{
+		makeInfo("a", sandbox.StatusRunning, "claude", "", "no"),
+		makeInfo("b", sandbox.StatusIdle, "gemini", "", "no"),
+		makeInfo("c", sandbox.StatusDone, "claude", "", "no"),
+		makeInfo("d", sandbox.StatusIdle, "claude", "", "yes"),
+	}
+	result := filterInfos(infos, listFilters{idle: true})
+	assert.Len(t, result, 2)
+	assert.Equal(t, "b", result[0].Meta.Name)
+	assert.Equal(t, "d", result[1].Meta.Name)
+}
+
+func TestFilterInfos_Done(t *testing.T) {
+	infos := []*sandbox.Info{
+		makeInfo("a", sandbox.StatusRunning, "claude", "", "no"),
+		makeInfo("b", sandbox.StatusDone, "gemini", "", "no"),
+		makeInfo("c", sandbox.StatusFailed, "claude", "", "no"),
+		makeInfo("d", sandbox.StatusStopped, "claude", "", "no"),
+	}
+	result := filterInfos(infos, listFilters{done: true})
+	assert.Len(t, result, 2)
+	assert.Equal(t, "b", result[0].Meta.Name)
+	assert.Equal(t, "c", result[1].Meta.Name)
 }
 
 func TestFilterInfos_Stopped(t *testing.T) {

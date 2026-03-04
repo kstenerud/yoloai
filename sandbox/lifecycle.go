@@ -55,7 +55,7 @@ func (m *Manager) Start(ctx context.Context, name string, opts StartOpts) error 
 	}
 
 	cname := InstanceName(name)
-	status, _, err := DetectStatus(ctx, m.runtime, cname)
+	status, _, err := DetectStatus(ctx, m.runtime, cname, 0)
 	if err != nil {
 		return fmt.Errorf("detect status: %w", err)
 	}
@@ -89,7 +89,7 @@ func (m *Manager) Start(ctx context.Context, name string, opts StartOpts) error 
 	}
 
 	switch status {
-	case StatusRunning:
+	case StatusRunning, StatusIdle:
 		fmt.Fprintf(m.output, "Sandbox %s is already running\n", name) //nolint:errcheck // best-effort output
 		return nil
 
@@ -204,8 +204,8 @@ func (m *Manager) Reset(ctx context.Context, opts ResetOptions) error {
 
 	// Check if we can do an in-place reset (--no-restart)
 	if opts.NoRestart {
-		status, _, err := DetectStatus(ctx, m.runtime, InstanceName(opts.Name))
-		if err != nil || status != StatusRunning {
+		status, _, err := DetectStatus(ctx, m.runtime, InstanceName(opts.Name), 0)
+		if err != nil || (status != StatusRunning && status != StatusIdle) {
 			fmt.Fprintf(m.output, "Container is not running, falling back to restart\n") //nolint:errcheck // best-effort output
 			opts.NoRestart = false
 		}
@@ -351,12 +351,12 @@ func (m *Manager) Reset(ctx context.Context, opts ResetOptions) error {
 // destruction. Returns true if the agent is running or unapplied changes
 // exist. Returns a reason string for the confirmation prompt.
 func (m *Manager) NeedsConfirmation(ctx context.Context, name string) (bool, string) {
-	status, _, err := DetectStatus(ctx, m.runtime, InstanceName(name))
+	status, _, err := DetectStatus(ctx, m.runtime, InstanceName(name), 0)
 	if err != nil {
 		return false, ""
 	}
 
-	if status == StatusRunning {
+	if status == StatusRunning || status == StatusIdle {
 		return true, "agent is still running"
 	}
 

@@ -325,6 +325,7 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 		Devices:            pr.devices,
 		Setup:              pr.setup,
 		AutoCommitInterval: pr.autoCommitInterval,
+		IdleThreshold:      pr.idleThreshold,
 	}
 
 	if err := SaveMeta(sandboxDir, meta); err != nil {

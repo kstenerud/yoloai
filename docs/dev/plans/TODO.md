@@ -19,16 +19,9 @@ Design considerations:
 - Options: inherit shared flags (agent, model, profile, aux dirs) from the batch command
 - Output: summary table of created sandboxes
 
-### Agent status detection
+### Agent status detection (done)
 
-Detect whether the agent process inside a sandbox is actively running, idle (waiting for input), or has exited. Surface this in `yoloai ls` output.
-
-Possible approaches:
-- Monitor the agent process state (running vs. sleeping on stdin)
-- Detect agent exit (process no longer running in the container)
-- Use agent-specific hooks where available (e.g., Claude Code notification hooks)
-
-Minimum viable: distinguish "agent running" from "agent exited" by checking if the agent process is still alive in the container.
+Implemented via tmux `#{pane_last_activity}` heuristic. `DetectStatus()` now reports `idle` when the agent process is alive but hasn't produced output for a configurable duration (`idle_threshold` in config/profile, default 30s). New `--idle` and `--done` flags on `yoloai ls`. `--running` includes idle sandboxes.
 
 ### Sandbox chaining (pipelines)
 
@@ -54,7 +47,7 @@ Design considerations:
 Enrich `yoloai ls` output for multi-sandbox workflows:
 - Agent type and model
 - Runtime duration (how long the sandbox has been running)
-- Agent status (running/idle/exited)
+- ~~Agent status (running/idle/exited)~~ (done)
 - Workdir dirty state (has uncommitted changes)
 
 Keep default output concise; add `--long` or `-l` flag for the full dashboard view.

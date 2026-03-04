@@ -452,7 +452,7 @@ func agentRunningWarning(cmd *cobra.Command, name string) {
 			return nil // silently skip
 		}
 
-		if info.Status == sandbox.StatusRunning {
+		if info.Status == sandbox.StatusRunning || info.Status == sandbox.StatusIdle {
 			fmt.Fprintln(cmd.ErrOrStderr(), "Note: agent is still running; diff may be incomplete") //nolint:errcheck // best-effort warning
 		}
 		return nil

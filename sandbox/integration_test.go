@@ -45,7 +45,7 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 	assert.FileExists(t, filepath.Join(workDir, "main.go"))
 
 	// Verify container is running
-	status, _, err := DetectStatus(ctx, mgr.runtime, InstanceName(sandboxName))
+	status, _, err := DetectStatus(ctx, mgr.runtime, InstanceName(sandboxName), 0)
 	require.NoError(t, err)
 	assert.Equal(t, StatusRunning, status)
 
@@ -70,7 +70,7 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 	// Stop container and verify
 	require.NoError(t, mgr.Stop(ctx, sandboxName))
 
-	status, _, err = DetectStatus(ctx, mgr.runtime, InstanceName(sandboxName))
+	status, _, err = DetectStatus(ctx, mgr.runtime, InstanceName(sandboxName), 0)
 	require.NoError(t, err)
 	assert.Equal(t, StatusStopped, status)
 
@@ -78,7 +78,7 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 	require.NoError(t, mgr.Start(ctx, sandboxName, StartOpts{}))
 	time.Sleep(2 * time.Second)
 
-	status, _, err = DetectStatus(ctx, mgr.runtime, InstanceName(sandboxName))
+	status, _, err = DetectStatus(ctx, mgr.runtime, InstanceName(sandboxName), 0)
 	require.NoError(t, err)
 	assert.Equal(t, StatusRunning, status)
 
@@ -112,7 +112,7 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 	assert.NoDirExists(t, sandboxDir)
 
 	// Container should be gone
-	status, _, err = DetectStatus(ctx, mgr.runtime, InstanceName(sandboxName))
+	status, _, err = DetectStatus(ctx, mgr.runtime, InstanceName(sandboxName), 0)
 	require.NoError(t, err)
 	assert.Equal(t, StatusRemoved, status)
 }
@@ -568,7 +568,7 @@ func TestIntegration_DestroyCleanup(t *testing.T) {
 	assert.NoDirExists(t, sandboxDir)
 
 	// Container should be removed
-	status, _, err := DetectStatus(ctx, mgr.runtime, InstanceName("destroyme"))
+	status, _, err := DetectStatus(ctx, mgr.runtime, InstanceName("destroyme"), 0)
 	require.NoError(t, err)
 	assert.Equal(t, StatusRemoved, status)
 }

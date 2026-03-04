@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -20,12 +21,17 @@ type Status string
 // Status constants for sandbox lifecycle states.
 const (
 	StatusRunning Status = "running" // container running, agent alive in tmux
+	StatusIdle    Status = "idle"    // container running, agent alive but no output recently
 	StatusDone    Status = "done"    // container running, agent exited cleanly (exit 0)
 	StatusFailed  Status = "failed"  // container running, agent exited with error (non-zero)
 	StatusStopped Status = "stopped" // container stopped (docker stop)
 	StatusRemoved Status = "removed" // container removed but sandbox dir exists
 	StatusBroken  Status = "broken"  // sandbox dir exists but meta.json missing/invalid
 )
+
+// DefaultIdleThreshold is how long (in seconds) a pane must be silent before
+// the sandbox is considered idle. Used when no per-sandbox threshold is configured.
+const DefaultIdleThreshold = 30
 
 // Info holds the combined metadata and live state for a sandbox.
 type Info struct {
@@ -119,7 +125,9 @@ func execInContainer(ctx context.Context, rt runtime.Runtime, containerID string
 }
 
 // DetectStatus queries the runtime and tmux to determine sandbox status.
-func DetectStatus(ctx context.Context, rt runtime.Runtime, containerName string) (Status, string, error) {
+// idleThreshold is the number of seconds of inactivity before reporting idle;
+// 0 means use DefaultIdleThreshold.
+func DetectStatus(ctx context.Context, rt runtime.Runtime, containerName string, idleThreshold int) (Status, string, error) {
 	info, err := rt.Inspect(ctx, containerName)
 	if err != nil {
 		if errors.Is(err, runtime.ErrNotFound) {
@@ -134,15 +142,28 @@ func DetectStatus(ctx context.Context, rt runtime.Runtime, containerName string)
 
 	// Query tmux pane state
 	output, err := execInContainer(ctx, rt, containerName, []string{
-		"tmux", "list-panes", "-t", "main", "-F", "#{pane_dead} #{pane_dead_status}",
+		"tmux", "list-panes", "-t", "main", "-F", "#{pane_dead} #{pane_dead_status} #{pane_last_activity}",
 	})
 	if err != nil {
 		// tmux query failed — default to running (safest assumption)
 		return StatusRunning, "", nil
 	}
 
+	threshold := int64(idleThreshold)
+	if threshold <= 0 {
+		threshold = DefaultIdleThreshold
+	}
+
 	fields := strings.Fields(output)
 	if len(fields) < 1 || fields[0] == "0" {
+		// Pane is alive — check if idle based on last activity timestamp
+		if len(fields) >= 3 {
+			if ts, err := strconv.ParseInt(fields[2], 10, 64); err == nil {
+				if time.Now().Unix()-ts >= threshold {
+					return StatusIdle, "", nil
+				}
+			}
+		}
 		return StatusRunning, "", nil
 	}
 
@@ -165,7 +186,7 @@ func InspectSandbox(ctx context.Context, rt runtime.Runtime, name string) (*Info
 		return nil, fmt.Errorf("load metadata: %w", err)
 	}
 
-	status, containerID, err := DetectStatus(ctx, rt, InstanceName(name))
+	status, containerID, err := DetectStatus(ctx, rt, InstanceName(name), meta.IdleThreshold)
 	if err != nil {
 		return nil, err
 	}

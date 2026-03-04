@@ -43,6 +43,7 @@ type YoloaiConfig struct {
 	Devices            []string          `yaml:"devices"`              // devices — host devices to expose (Docker only)
 	Setup              []string          `yaml:"setup"`                // setup — commands to run before agent launch (Docker only)
 	AutoCommitInterval int               `yaml:"auto_commit_interval"` // auto_commit_interval — seconds between auto-commits in :copy dirs; 0 = disabled
+	IdleThreshold      int               `yaml:"idle_threshold"`       // idle_threshold — seconds of inactivity before agent is considered idle; 0 = default (30s)
 }
 
 // ResourceLimits holds container resource constraints (CPU, memory).
@@ -82,6 +83,7 @@ var knownSettings = []knownSetting{
 	{"resources.memory", ""},
 	{"network.isolated", "false"},
 	{"auto_commit_interval", "0"},
+	{"idle_threshold", "0"},
 }
 
 // knownCollectionSetting defines a non-scalar config key (map or list)
@@ -321,6 +323,12 @@ func LoadConfig() (*YoloaiConfig, error) {
 				return nil, fmt.Errorf("auto_commit_interval: %w", aErr)
 			}
 			cfg.AutoCommitInterval = n
+		case "idle_threshold":
+			n, aErr := strconv.Atoi(val.Value)
+			if aErr != nil {
+				return nil, fmt.Errorf("idle_threshold: %w", aErr)
+			}
+			cfg.IdleThreshold = n
 		}
 	}
 
