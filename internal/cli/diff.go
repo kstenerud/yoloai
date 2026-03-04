@@ -45,6 +45,13 @@ Examples:
 			stat, _ := cmd.Flags().GetBool("stat")
 			logFlag, _ := cmd.Flags().GetBool("log")
 
+			// Load meta early to detect overlay dirs
+			meta, metaErr := sandbox.LoadMeta(sandbox.Dir(name))
+			if metaErr != nil {
+				return metaErr
+			}
+			overlay := hasOverlayDirs(meta)
+
 			// Skip agent warning in JSON mode
 			if !jsonEnabled(cmd) {
 				agentRunningWarning(cmd, name)
@@ -52,6 +59,9 @@ Examples:
 
 			// --log: list commits
 			if logFlag {
+				if overlay {
+					return diffLogOverlay(cmd, name, stat)
+				}
 				if jsonEnabled(cmd) {
 					return diffLogJSON(cmd, name, stat)
 				}
@@ -62,16 +72,19 @@ Examples:
 			// try to detect ref from the first positional arg.
 			ref, paths := parseDiffArgs(rest, cmd)
 
+			// Ref-based diff not supported for overlay
+			if ref != "" && overlay {
+				return fmt.Errorf("ref-based diff is not supported for :overlay sandboxes (commits are not individually addressable from the host)")
+			}
+
 			// If ref is set, show that specific commit/range
 			if ref != "" {
 				return diffRef(cmd, name, ref, stat)
 			}
 
 			// Default: monolithic diff
-			// Check if sandbox has aux dirs — if so, use multi-dir diff
-			meta, metaErr := sandbox.LoadMeta(sandbox.Dir(name))
-			if metaErr != nil {
-				return metaErr
+			if overlay {
+				return diffOverlay(cmd, name, stat)
 			}
 
 			if len(meta.Directories) > 0 && len(paths) == 0 {
@@ -123,6 +136,158 @@ Examples:
 	cmd.Flags().Bool("log", false, "List agent commits beyond baseline")
 
 	return cmd
+}
+
+// hasOverlayDirs returns true if any directory in the sandbox uses overlay mode.
+func hasOverlayDirs(meta *sandbox.Meta) bool {
+	if meta.Workdir.Mode == "overlay" {
+		return true
+	}
+	for _, d := range meta.Directories {
+		if d.Mode == "overlay" {
+			return true
+		}
+	}
+	return false
+}
+
+// requireOverlayRunning verifies the sandbox container is running (required for overlay ops).
+func requireOverlayRunning(ctx context.Context, rt runtime.Runtime, name string) error {
+	info, err := rt.Inspect(ctx, sandbox.InstanceName(name))
+	if err != nil {
+		return fmt.Errorf("overlay sandbox %s must be running for this operation — use 'yoloai start %s'", name, name)
+	}
+	if !info.Running {
+		return fmt.Errorf("overlay sandbox %s must be running for this operation — use 'yoloai start %s'", name, name)
+	}
+	return nil
+}
+
+// diffOverlay handles the default diff for sandboxes with overlay dirs.
+// Merges overlay results (from container exec) with non-overlay results.
+func diffOverlay(cmd *cobra.Command, name string, stat bool) error {
+	backend := resolveBackendForSandbox(name)
+	return withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
+		if err := requireOverlayRunning(ctx, rt, name); err != nil {
+			return err
+		}
+
+		// Get overlay diffs via container exec
+		overlayResults, err := sandbox.GenerateOverlayDiff(ctx, rt, name, stat)
+		if err != nil {
+			return err
+		}
+
+		// Get non-overlay diffs (copy/rw) via host
+		hostResults, err := sandbox.GenerateMultiDiff(name, stat)
+		if err != nil {
+			return err
+		}
+
+		// Merge: replace overlay placeholder entries from hostResults with actual overlay results
+		var merged []*sandbox.DiffResult
+		for _, r := range hostResults {
+			if r.Mode == "overlay" {
+				// Find matching overlay result
+				for _, or := range overlayResults {
+					if or.WorkDir == r.WorkDir {
+						merged = append(merged, or)
+						break
+					}
+				}
+			} else {
+				merged = append(merged, r)
+			}
+		}
+		// Add any overlay results not matched (shouldn't happen, but be safe)
+		matchedOverlay := make(map[string]bool)
+		for _, r := range hostResults {
+			if r.Mode == "overlay" {
+				matchedOverlay[r.WorkDir] = true
+			}
+		}
+		for _, or := range overlayResults {
+			if !matchedOverlay[or.WorkDir] {
+				merged = append(merged, or)
+			}
+		}
+
+		if jsonEnabled(cmd) {
+			if merged == nil {
+				merged = []*sandbox.DiffResult{}
+			}
+			return writeJSON(cmd.OutOrStdout(), merged)
+		}
+
+		allEmpty := true
+		for _, r := range merged {
+			if !r.Empty {
+				allEmpty = false
+				break
+			}
+		}
+		if allEmpty {
+			_, err = fmt.Fprintln(cmd.OutOrStdout(), "No changes")
+			return err
+		}
+
+		var sb strings.Builder
+		for _, r := range merged {
+			if r.Empty {
+				continue
+			}
+			fmt.Fprintf(&sb, "=== %s (%s) ===\n", r.WorkDir, r.Mode)
+			sb.WriteString(r.Output)
+			sb.WriteString("\n\n")
+		}
+
+		output := strings.TrimRight(sb.String(), "\n") + "\n"
+		_, err = fmt.Fprint(cmd.OutOrStdout(), output)
+		return err
+	})
+}
+
+// diffLogOverlay lists commits for overlay sandboxes by executing git log inside the container.
+func diffLogOverlay(cmd *cobra.Command, name string, stat bool) error {
+	if stat {
+		return fmt.Errorf("--log --stat is not supported for :overlay sandboxes")
+	}
+
+	backend := resolveBackendForSandbox(name)
+	return withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
+		if err := requireOverlayRunning(ctx, rt, name); err != nil {
+			return err
+		}
+
+		commits, err := sandbox.ListCommitsBeyondBaselineOverlay(ctx, rt, name)
+		if err != nil {
+			return err
+		}
+
+		if jsonEnabled(cmd) {
+			if commits == nil {
+				commits = []sandbox.CommitInfo{}
+			}
+			result := struct {
+				Commits               any  `json:"commits"`
+				HasUncommittedChanges bool `json:"has_uncommitted_changes"`
+			}{
+				Commits:               commits,
+				HasUncommittedChanges: false, // can't cheaply detect WIP in overlay
+			}
+			return writeJSON(cmd.OutOrStdout(), result)
+		}
+
+		out := cmd.OutOrStdout()
+		if len(commits) == 0 {
+			_, err = fmt.Fprintln(out, "No commits beyond baseline")
+			return err
+		}
+		for i, c := range commits {
+			fmt.Fprintf(out, "%3d  %.12s  %s\n", i+1, c.SHA, c.Subject) //nolint:errcheck
+		}
+		return nil
+	})
 }
 
 // parseDiffArgs separates a ref argument from path arguments.

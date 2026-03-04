@@ -4,6 +4,16 @@ Tracks breaking changes made during beta. Each entry should be included in relea
 
 ## Unreleased
 
+### `yoloai new --replace` renamed to `--force`
+
+**Previous behavior:** `yoloai new --replace` replaced an existing sandbox with the same name.
+
+**New behavior:** `yoloai new --force` replaces an existing sandbox. `--replace` still works but prints a deprecation warning to stderr and will be removed in a future release.
+
+**Rationale:** `--force` is the standard convention for "proceed despite conflict" across CLI tools (docker, git, etc.). `--replace` was non-standard and also conflicted with the `--force` flag used in `apply` for a similar "override safety check" purpose.
+
+**Migration:** Replace `--replace` with `--force` in scripts. `--replace` continues to work during the deprecation period.
+
 ### `yoloai new` no longer auto-attaches by default
 
 **Previous behavior:** `yoloai new` auto-attached to the tmux session after creation. `--detach`/`-d` skipped the attach.

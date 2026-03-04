@@ -303,6 +303,60 @@ func GenerateMultiDiff(name string, stat bool) ([]*DiffResult, error) {
 	return results, nil
 }
 
+// ListCommitsBeyondBaselineOverlay returns commits beyond the baseline for
+// overlay-mode directories by executing git log inside the running container.
+func ListCommitsBeyondBaselineOverlay(ctx context.Context, rt runtime.Runtime, name string) ([]CommitInfo, error) {
+	contexts, err := LoadAllDiffContexts(name)
+	if err != nil {
+		return nil, err
+	}
+
+	cname := InstanceName(name)
+	var commits []CommitInfo
+
+	for _, dc := range contexts {
+		if dc.Mode != "overlay" {
+			continue
+		}
+
+		baselineSHA := dc.BaselineSHA
+		if baselineSHA == "" {
+			stdout, execErr := execInContainer(ctx, rt, cname, []string{
+				"git", "-C", dc.WorkDir, "rev-parse", "HEAD",
+			})
+			if execErr != nil {
+				return nil, fmt.Errorf("resolve baseline SHA for %s: %w", dc.HostPath, execErr)
+			}
+			baselineSHA = strings.TrimSpace(stdout)
+			if updateErr := updateOverlayBaseline(name, dc.HostPath, baselineSHA); updateErr != nil {
+				return nil, updateErr
+			}
+		}
+
+		stdout, err := execInContainer(ctx, rt, cname, []string{
+			"git", "-C", dc.WorkDir, "log", "--reverse", "--format=%H %s", baselineSHA + "..HEAD",
+		})
+		if err != nil {
+			return nil, fmt.Errorf("git log in %s: %w", dc.HostPath, err)
+		}
+
+		lines := strings.TrimSpace(stdout)
+		if lines == "" {
+			continue
+		}
+
+		for _, line := range strings.Split(lines, "\n") {
+			sha, subject, ok := strings.Cut(line, " ")
+			if !ok {
+				continue
+			}
+			commits = append(commits, CommitInfo{SHA: sha, Subject: subject})
+		}
+	}
+
+	return commits, nil
+}
+
 // GenerateOverlayDiff generates a diff for overlay-mode directories by
 // executing git commands inside the running container.
 func GenerateOverlayDiff(ctx context.Context, rt runtime.Runtime, name string, stat bool) ([]*DiffResult, error) {

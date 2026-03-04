@@ -177,6 +177,32 @@ func GenerateOverlayPatch(ctx context.Context, rt runtime.Runtime, name string, 
 	return patches, nil
 }
 
+// UpdateOverlayBaselineToHEAD advances the overlay baseline for a directory
+// to the current HEAD inside the running container. Called after a successful
+// overlay apply to prevent re-applying already-applied changes.
+func UpdateOverlayBaselineToHEAD(ctx context.Context, rt runtime.Runtime, name, hostPath string) error {
+	contexts, err := LoadAllDiffContexts(name)
+	if err != nil {
+		return err
+	}
+
+	cname := InstanceName(name)
+	for _, dc := range contexts {
+		if dc.Mode != "overlay" || dc.HostPath != hostPath {
+			continue
+		}
+		stdout, err := execInContainer(ctx, rt, cname, []string{
+			"git", "-C", dc.WorkDir, "rev-parse", "HEAD",
+		})
+		if err != nil {
+			return fmt.Errorf("get HEAD for %s: %w", hostPath, err)
+		}
+		return updateOverlayBaseline(name, hostPath, strings.TrimSpace(stdout))
+	}
+
+	return nil
+}
+
 // ListCommitsBeyondBaseline returns the commits made in the work copy
 // after the baseline commit, in chronological order (oldest first).
 // Returns an empty slice if HEAD == baseline.

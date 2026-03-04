@@ -145,18 +145,23 @@ func newNewCmd(version string) *cobra.Command {
 				networkIsolated = true
 			}
 
-			// Mutual exclusivity checks
-			if networkNone && networkIsolated {
-				return sandbox.NewUsageError("--network-none and --network-isolated are mutually exclusive")
+			force, _ := cmd.Flags().GetBool("force")
+			if !force {
+				if r, _ := cmd.Flags().GetBool("replace"); r {
+					force = r
+					fmt.Fprintln(cmd.ErrOrStderr(), "Warning: --replace is deprecated, use --force") //nolint:errcheck
+				}
 			}
-			replace, _ := cmd.Flags().GetBool("replace")
 			noStart, _ := cmd.Flags().GetBool("no-start")
 			attach, _ := cmd.Flags().GetBool("attach")
 
 			if jsonEnabled(cmd) && attach {
 				return fmt.Errorf("--json and --attach are incompatible")
 			}
-			yes, _ := cmd.Flags().GetBool("yes")
+			if networkNone && len(ports) > 0 {
+				return sandbox.NewUsageError("--port is incompatible with --network-none")
+			}
+			yes := effectiveYes(cmd)
 
 			cpus, _ := cmd.Flags().GetString("cpus")
 			memory, _ := cmd.Flags().GetString("memory")
@@ -182,7 +187,7 @@ func newNewCmd(version string) *cobra.Command {
 					NetworkIsolated: networkIsolated,
 					NetworkAllow:    networkAllow,
 					Ports:           ports,
-					Replace:         replace,
+					Replace:         force,
 					NoStart:         noStart,
 					Attach:          attach,
 					Yes:             yes,
@@ -234,12 +239,18 @@ func newNewCmd(version string) *cobra.Command {
 	cmd.Flags().StringSlice("network-allow", nil, "Extra domain to allow when network-isolated (repeatable, implies --network-isolated)")
 	cmd.Flags().StringSlice("port", nil, "Port mapping (host:container)")
 	cmd.Flags().StringSliceP("dir", "d", nil, "Auxiliary directory (repeatable, default read-only)")
-	cmd.Flags().Bool("replace", false, "Replace existing sandbox")
+	cmd.Flags().Bool("force", false, "Replace existing sandbox")
+	cmd.Flags().Bool("replace", false, "Deprecated: use --force")
+	_ = cmd.Flags().MarkHidden("replace")
 	cmd.Flags().Bool("no-start", false, "Create but don't start the container")
 	cmd.Flags().BoolP("attach", "a", false, "Auto-attach after creation")
 	cmd.Flags().BoolP("yes", "y", false, "Skip confirmations")
 	cmd.Flags().String("cpus", "", "CPU limit (e.g., 4, 2.5)")
 	cmd.Flags().String("memory", "", "Memory limit (e.g., 8g, 512m)")
+
+	cmd.MarkFlagsMutuallyExclusive("network-none", "network-isolated")
+	cmd.MarkFlagsMutuallyExclusive("profile", "no-profile")
+	cmd.MarkFlagsMutuallyExclusive("no-start", "attach")
 
 	return cmd
 }

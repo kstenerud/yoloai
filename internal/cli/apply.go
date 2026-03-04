@@ -1,10 +1,12 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 
+	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/sandbox"
 	"github.com/kstenerud/yoloai/workspace"
 	"github.com/spf13/cobra"
@@ -37,16 +39,12 @@ Use --patches to export .patch files without applying them.`,
 		GroupID: groupWorkflow,
 		Args:    cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := requireYesForJSON(cmd); err != nil {
-				return err
-			}
-
 			name, rest, err := resolveName(cmd, args)
 			if err != nil {
 				return err
 			}
 
-			yes, _ := cmd.Flags().GetBool("yes")
+			yes := effectiveYes(cmd)
 			squash, _ := cmd.Flags().GetBool("squash")
 			patchesDir, _ := cmd.Flags().GetString("patches")
 			if patchesDir != "" {
@@ -77,6 +75,10 @@ Use --patches to export .patch files without applying them.`,
 			}
 			if meta.Workdir.Mode == "rw" {
 				return fmt.Errorf("apply is not needed for :rw directories — changes are already live")
+			}
+
+			if hasOverlayDirs(meta) {
+				return applyOverlay(cmd, name, meta, refs, paths, patchesDir, noWIP, yes)
 			}
 
 			if !jsonEnabled(cmd) {
@@ -247,7 +249,117 @@ Use --patches to export .patch files without applying them.`,
 	cmd.Flags().Bool("no-wip", false, "Skip uncommitted changes, only apply commits")
 	cmd.Flags().Bool("force", false, "Proceed even if host repo has uncommitted changes")
 
+	cmd.MarkFlagsMutuallyExclusive("squash", "patches")
+	cmd.MarkFlagsMutuallyExclusive("squash", "no-wip")
+
 	return cmd
+}
+
+// applyOverlay handles apply for sandboxes with overlay directories.
+func applyOverlay(cmd *cobra.Command, name string, meta *sandbox.Meta, refs, paths []string, patchesDir string, noWIP, yes bool) error {
+	// Reject unsupported flag combos for overlay
+	if len(refs) > 0 {
+		return fmt.Errorf("selective ref apply is not supported for :overlay sandboxes")
+	}
+	if noWIP {
+		return fmt.Errorf("--no-wip is not supported for :overlay sandboxes (no commit/WIP separation)")
+	}
+
+	backend := resolveBackendForSandbox(name)
+	return withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
+		if err := requireOverlayRunning(ctx, rt, name); err != nil {
+			return err
+		}
+
+		patches, err := sandbox.GenerateOverlayPatch(ctx, rt, name, paths)
+		if err != nil {
+			return err
+		}
+
+		if len(patches) == 0 {
+			if jsonEnabled(cmd) {
+				return writeJSON(cmd.OutOrStdout(), applyResult{
+					Target: meta.Workdir.HostPath,
+					Method: "overlay",
+				})
+			}
+			_, err = fmt.Fprintln(cmd.OutOrStdout(), "No changes to apply")
+			return err
+		}
+
+		// --patches: export patch files
+		if patchesDir != "" {
+			if err := os.MkdirAll(patchesDir, 0750); err != nil {
+				return fmt.Errorf("create patches directory: %w", err)
+			}
+			for i, ps := range patches {
+				dst := filepath.Join(patchesDir, fmt.Sprintf("overlay-%d.diff", i+1))
+				if err := os.WriteFile(dst, ps.Patch, 0600); err != nil { //nolint:gosec // G703: dst is constructed from user-provided --patches flag
+					return fmt.Errorf("write patch: %w", err)
+				}
+				if !jsonEnabled(cmd) {
+					fmt.Fprintf(cmd.OutOrStdout(), "  %s\n", dst) //nolint:errcheck
+				}
+			}
+			if jsonEnabled(cmd) {
+				return writeJSON(cmd.OutOrStdout(), applyResult{
+					Target:     patchesDir,
+					WIPApplied: true,
+					Method:     "overlay",
+				})
+			}
+			return nil
+		}
+
+		// Show summary
+		isJSON := jsonEnabled(cmd)
+		out := cmd.OutOrStdout()
+		if !isJSON {
+			for _, ps := range patches {
+				fmt.Fprintf(out, "=== %s (%s) ===\n", ps.HostPath, ps.Mode) //nolint:errcheck
+				fmt.Fprintln(out, ps.Stat)                                  //nolint:errcheck
+			}
+		}
+
+		// Confirmation
+		if !yes {
+			confirmed, confirmErr := sandbox.Confirm(cmd.Context(), "Apply these changes? [y/N] ", os.Stdin, cmd.ErrOrStderr())
+			if confirmErr != nil {
+				return confirmErr
+			}
+			if !confirmed {
+				return nil
+			}
+		}
+
+		// Apply each patch to host
+		for _, ps := range patches {
+			isGit := workspace.IsGitRepo(ps.HostPath)
+			if err := workspace.ApplyPatch(ps.Patch, ps.HostPath, isGit); err != nil {
+				return fmt.Errorf("%s: %w", ps.HostPath, err)
+			}
+			if !isJSON {
+				fmt.Fprintf(out, "Changes applied to %s\n", ps.HostPath) //nolint:errcheck
+			}
+		}
+
+		// Advance overlay baseline
+		for _, ps := range patches {
+			if err := sandbox.UpdateOverlayBaselineToHEAD(ctx, rt, name, ps.HostPath); err != nil {
+				return fmt.Errorf("advance overlay baseline: %w", err)
+			}
+		}
+
+		if isJSON {
+			return writeJSON(out, applyResult{
+				Target:     meta.Workdir.HostPath,
+				WIPApplied: true,
+				Method:     "overlay",
+			})
+		}
+
+		return nil
+	})
 }
 
 // parseApplyArgs separates ref arguments from path arguments.

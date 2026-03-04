@@ -20,6 +20,10 @@ func newStopCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			all, _ := cmd.Flags().GetBool("all")
 
+			if all && len(args) > 0 {
+				return sandbox.NewUsageError("cannot specify sandbox names with --all")
+			}
+
 			// Resolve backend: from first named sandbox, or config default for --all
 			backend := resolveBackendFromConfig()
 			if !all && len(args) > 0 {

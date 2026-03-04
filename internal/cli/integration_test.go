@@ -204,7 +204,7 @@ func TestCLI_NewReplace(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { destroySandbox(t, "cli-replace") })
 
-	_, _, err = runCLI(t, "new", "--agent", "test", "--no-start", "--replace", "cli-replace", projectDir)
+	_, _, err = runCLI(t, "new", "--agent", "test", "--no-start", "--force", "cli-replace", projectDir)
 	require.NoError(t, err)
 
 	assert.DirExists(t, sandbox.Dir("cli-replace"))

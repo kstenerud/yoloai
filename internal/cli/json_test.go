@@ -68,28 +68,34 @@ func TestErrJSONNotSupported(t *testing.T) {
 	assert.Contains(t, err.Error(), "not supported")
 }
 
-func TestRequireYesForJSON_NoJSON(t *testing.T) {
+func TestEffectiveYes_NoFlags(t *testing.T) {
 	cmd := &cobra.Command{}
 	cmd.PersistentFlags().Bool("json", false, "")
 	cmd.Flags().BoolP("yes", "y", false, "")
-	assert.NoError(t, requireYesForJSON(cmd))
+	assert.False(t, effectiveYes(cmd))
 }
 
-func TestRequireYesForJSON_JSONWithoutYes(t *testing.T) {
+func TestEffectiveYes_YesOnly(t *testing.T) {
+	cmd := &cobra.Command{}
+	cmd.PersistentFlags().Bool("json", false, "")
+	cmd.Flags().BoolP("yes", "y", false, "")
+	require.NoError(t, cmd.Flags().Set("yes", "true"))
+	assert.True(t, effectiveYes(cmd))
+}
+
+func TestEffectiveYes_JSONOnly(t *testing.T) {
 	cmd := &cobra.Command{}
 	cmd.PersistentFlags().Bool("json", false, "")
 	cmd.Flags().BoolP("yes", "y", false, "")
 	require.NoError(t, cmd.PersistentFlags().Set("json", "true"))
-	err := requireYesForJSON(cmd)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "--yes")
+	assert.True(t, effectiveYes(cmd))
 }
 
-func TestRequireYesForJSON_JSONWithYes(t *testing.T) {
+func TestEffectiveYes_Both(t *testing.T) {
 	cmd := &cobra.Command{}
 	cmd.PersistentFlags().Bool("json", false, "")
 	cmd.Flags().BoolP("yes", "y", false, "")
 	require.NoError(t, cmd.PersistentFlags().Set("json", "true"))
 	require.NoError(t, cmd.Flags().Set("yes", "true"))
-	assert.NoError(t, requireYesForJSON(cmd))
+	assert.True(t, effectiveYes(cmd))
 }

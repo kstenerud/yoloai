@@ -18,12 +18,12 @@ func newDestroyCmd() *cobra.Command {
 		GroupID: groupLifecycle,
 		Args:    cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := requireYesForJSON(cmd); err != nil {
-				return err
-			}
-
 			all, _ := cmd.Flags().GetBool("all")
-			yes, _ := cmd.Flags().GetBool("yes")
+			yes := effectiveYes(cmd)
+
+			if all && len(args) > 0 {
+				return sandbox.NewUsageError("cannot specify sandbox names with --all")
+			}
 
 			// Resolve backend: from first named sandbox, or config default for --all
 			backend := resolveBackendFromConfig()

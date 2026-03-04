@@ -21,7 +21,7 @@ func newSystemPruneCmd() *cobra.Command {
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			dryRun, _ := cmd.Flags().GetBool("dry-run")
-			yes, _ := cmd.Flags().GetBool("yes")
+			yes := effectiveYes(cmd)
 			backend := resolveBackend(cmd)
 
 			return runSystemPrune(cmd, backend, dryRun, yes)

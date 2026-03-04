@@ -28,11 +28,8 @@ func newResetCmd() *cobra.Command {
 			attach, _ := cmd.Flags().GetBool("attach")
 			debug, _ := cmd.Flags().GetBool("debug")
 
-			if clean && noRestart {
-				return sandbox.NewUsageError("cannot wipe agent state while agent is running; use --clean without --no-restart, or stop the agent first")
-			}
-			if attach && noRestart {
-				return sandbox.NewUsageError("--attach and --no-restart are incompatible; the agent is still running so just reattach")
+			if jsonEnabled(cmd) && attach {
+				return fmt.Errorf("--json and --attach are incompatible")
 			}
 
 			backend := resolveBackendForSandbox(name)
@@ -73,6 +70,9 @@ func newResetCmd() *cobra.Command {
 	cmd.Flags().Bool("clean", false, "Also wipe agent-state directory")
 	cmd.Flags().Bool("no-restart", false, "Keep agent running, reset workspace in-place")
 	cmd.Flags().BoolP("attach", "a", false, "Auto-attach after reset")
+
+	cmd.MarkFlagsMutuallyExclusive("clean", "no-restart")
+	cmd.MarkFlagsMutuallyExclusive("attach", "no-restart")
 
 	return cmd
 }

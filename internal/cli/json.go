@@ -39,22 +39,16 @@ func writeJSONError(w io.Writer, err error) {
 	fmt.Fprintf(w, "%s\n", data) //nolint:errcheck // best-effort stderr write
 }
 
+// effectiveYes returns true if --yes is set or --json is enabled.
+// JSON mode implies --yes because interactive prompts can't work in a
+// machine-readable pipeline.
+func effectiveYes(cmd *cobra.Command) bool {
+	yes, _ := cmd.Flags().GetBool("yes")
+	return yes || jsonEnabled(cmd)
+}
+
 // errJSONNotSupported returns an error indicating that --json is not supported
 // for interactive commands like attach and exec.
 func errJSONNotSupported(name string) error {
 	return fmt.Errorf("--json is not supported for interactive command %q", name)
-}
-
-// requireYesForJSON returns an error if --json is set without --yes.
-// Commands with confirmation prompts must require --yes in JSON mode since
-// interactive prompts can't work in a machine-readable pipeline.
-func requireYesForJSON(cmd *cobra.Command) error {
-	if !jsonEnabled(cmd) {
-		return nil
-	}
-	yes, _ := cmd.Flags().GetBool("yes")
-	if !yes {
-		return fmt.Errorf("--json requires --yes to skip confirmation prompts")
-	}
-	return nil
 }
