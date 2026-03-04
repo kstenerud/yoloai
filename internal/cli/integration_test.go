@@ -209,3 +209,71 @@ func TestCLI_NewReplace(t *testing.T) {
 
 	assert.DirExists(t, sandbox.Dir("cli-replace"))
 }
+
+func TestCLI_NetworkLifecycle(t *testing.T) {
+	projectDir := cliSetup(t)
+
+	// Create network-isolated sandbox
+	_, _, err := runCLI(t, "new", "--agent", "test", "--no-start", "--network-isolated", "cli-net", projectDir)
+	require.NoError(t, err)
+	t.Cleanup(func() { destroySandbox(t, "cli-net") })
+
+	// Verify meta has network isolation
+	meta, err := sandbox.LoadMeta(sandbox.Dir("cli-net"))
+	require.NoError(t, err)
+	assert.Equal(t, "isolated", meta.NetworkMode)
+	initialDomains := len(meta.NetworkAllow)
+
+	// List domains
+	stdout, _, err := runCLI(t, "sandbox", "network", "list", "cli-net")
+	require.NoError(t, err)
+	if initialDomains == 0 {
+		assert.Contains(t, stdout, "No domains allowed")
+	}
+
+	// Add domains
+	stdout, _, err = runCLI(t, "sandbox", "network", "add", "cli-net", "extra.example.com", "api.test.com")
+	require.NoError(t, err)
+	assert.Contains(t, stdout, "extra.example.com")
+
+	// Verify persisted
+	meta, err = sandbox.LoadMeta(sandbox.Dir("cli-net"))
+	require.NoError(t, err)
+	assert.Contains(t, meta.NetworkAllow, "extra.example.com")
+	assert.Contains(t, meta.NetworkAllow, "api.test.com")
+
+	// List again — should show added domains
+	stdout, _, err = runCLI(t, "sandbox", "network", "list", "cli-net")
+	require.NoError(t, err)
+	assert.Contains(t, stdout, "extra.example.com")
+	assert.Contains(t, stdout, "api.test.com")
+
+	// List with --json
+	stdout, _, err = runCLI(t, "--json", "sandbox", "network", "list", "cli-net")
+	require.NoError(t, err)
+	var result map[string]any
+	require.NoError(t, json.Unmarshal([]byte(stdout), &result))
+	assert.Equal(t, "cli-net", result["name"])
+	assert.Equal(t, "isolated", result["network_mode"])
+
+	// Remove a domain
+	stdout, _, err = runCLI(t, "sandbox", "network", "remove", "cli-net", "api.test.com")
+	require.NoError(t, err)
+	assert.Contains(t, stdout, "api.test.com")
+
+	// Verify removal persisted
+	meta, err = sandbox.LoadMeta(sandbox.Dir("cli-net"))
+	require.NoError(t, err)
+	assert.Contains(t, meta.NetworkAllow, "extra.example.com")
+	assert.NotContains(t, meta.NetworkAllow, "api.test.com")
+
+	// Remove nonexistent domain — should error
+	_, _, err = runCLI(t, "sandbox", "network", "remove", "cli-net", "nope.com")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "not in the allowlist")
+
+	// Add duplicate — should be idempotent
+	stdout, _, err = runCLI(t, "sandbox", "network", "add", "cli-net", "extra.example.com")
+	require.NoError(t, err)
+	assert.Contains(t, stdout, "All domains already allowed")
+}
