@@ -39,7 +39,10 @@ jobs:
           go-version-file: go.mod
 
       - name: Build yoloai
-        run: go build ./cmd/yoloai
+        run: go build -o yoloai ./cmd/yoloai
+
+      - name: Build base image
+        run: ./yoloai system build
 
       - name: Run integration tests
         run: make integration
