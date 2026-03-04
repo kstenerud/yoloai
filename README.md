@@ -45,7 +45,7 @@ yoloai new explore ./my-project -a
 #   yoloai attach explore to reconnect.
 ```
 
-Agents: **Claude Code** (default), **Aider**, **Codex**, **Gemini CLI** (`--agent gemini`), **OpenCode**. Use `yoloai system agents` to list available agents.
+Agents: **Claude Code** (default), **Aider**, **Codex**, **Gemini**, **OpenCode**. Use `yoloai system agents` to list available agents.
 
 ## Iterative workflow
 
@@ -84,6 +84,8 @@ The agent works on an isolated copy, so you can keep iterating without risk. Eac
 - **Easy retry.** `yoloai reset` re-copies your original for a fresh attempt — no leftover state.
 
 ## Install
+
+**yoloAI** is a single go binary, with dependencies dictated only by the sandboxing backend you choose. Install the `yoloai` binary in your path and you're good to go!
 
 ```bash
 git clone https://github.com/kstenerud/yoloai.git
