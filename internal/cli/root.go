@@ -92,18 +92,17 @@ diff and apply what you want to keep.`,
 	// Disable Cobra's built-in help subcommand; we register our own.
 	rootCmd.SetHelpCommand(&cobra.Command{Hidden: true, Use: "no-help"})
 
+	// Register --help/-h as persistent so it appears under "Global Flags"
+	// on every command. Cobra's InitDefaultHelpFlag skips adding a local
+	// --help when one already exists via persistent inheritance.
+	rootCmd.PersistentFlags().BoolP("help", "h", false, "Help for this command")
+
 	rootCmd.PersistentFlags().CountP("verbose", "v", "Increase output verbosity (-v for debug, -vv reserved)")
 	rootCmd.PersistentFlags().CountP("quiet", "q", "Suppress non-essential output (-q for warn, -qq for error only)")
 	rootCmd.PersistentFlags().Bool("debug", false, "Enable debug logging in sandbox entrypoint")
 	rootCmd.PersistentFlags().Bool("json", false, "Output as JSON (machine-readable)")
 
 	registerCommands(rootCmd, version, commit, date)
-
-	// Customize help flag description to mention per-command usage
-	rootCmd.InitDefaultHelpFlag()
-	if f := rootCmd.Flags().Lookup("help"); f != nil {
-		f.Usage = "Help for yoloai (use with any command: yoloai <command> -h)"
-	}
 
 	return rootCmd
 }
