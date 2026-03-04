@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/kstenerud/yoloai/runtime"
@@ -166,6 +167,16 @@ func newNewCmd(version string) *cobra.Command {
 			cpus, _ := cmd.Flags().GetString("cpus")
 			memory, _ := cmd.Flags().GetString("memory")
 			debug, _ := cmd.Flags().GetBool("debug")
+			envSlice, _ := cmd.Flags().GetStringSlice("env")
+
+			envMap := make(map[string]string, len(envSlice))
+			for _, e := range envSlice {
+				k, v, ok := strings.Cut(e, "=")
+				if !ok {
+					return sandbox.NewUsageError("invalid --env value %q: must be KEY=VAL", e)
+				}
+				envMap[k] = v
+			}
 
 			backend := resolveBackend(cmd)
 			return withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
@@ -196,6 +207,7 @@ func newNewCmd(version string) *cobra.Command {
 					Debug:           debug,
 					CPUs:            cpus,
 					Memory:          memory,
+					Env:             envMap,
 				})
 				if err != nil {
 					return err
@@ -247,6 +259,7 @@ func newNewCmd(version string) *cobra.Command {
 	cmd.Flags().BoolP("yes", "y", false, "Skip confirmations")
 	cmd.Flags().String("cpus", "", "CPU limit (e.g., 4, 2.5)")
 	cmd.Flags().String("memory", "", "Memory limit (e.g., 8g, 512m)")
+	cmd.Flags().StringSlice("env", nil, "Environment variable (KEY=VAL, repeatable)")
 
 	cmd.MarkFlagsMutuallyExclusive("network-none", "network-isolated")
 	cmd.MarkFlagsMutuallyExclusive("profile", "no-profile")

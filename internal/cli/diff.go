@@ -43,6 +43,7 @@ Examples:
 			}
 
 			stat, _ := cmd.Flags().GetBool("stat")
+			nameOnly, _ := cmd.Flags().GetBool("name-only")
 			logFlag, _ := cmd.Flags().GetBool("log")
 
 			// Load meta early to detect overlay dirs
@@ -84,7 +85,7 @@ Examples:
 
 			// Default: monolithic diff
 			if overlay {
-				return diffOverlay(cmd, name, stat)
+				return diffOverlay(cmd, name, stat, nameOnly)
 			}
 
 			if len(meta.Directories) > 0 && len(paths) == 0 {
@@ -95,8 +96,25 @@ Examples:
 			}
 
 			opts := sandbox.DiffOptions{
-				Name:  name,
-				Paths: paths,
+				Name:     name,
+				Paths:    paths,
+				NameOnly: nameOnly,
+			}
+
+			if nameOnly {
+				result, err := sandbox.GenerateDiff(opts)
+				if err != nil {
+					return err
+				}
+				if jsonEnabled(cmd) {
+					return writeJSON(cmd.OutOrStdout(), result)
+				}
+				if result.Empty {
+					_, err = fmt.Fprintln(cmd.OutOrStdout(), "No changes")
+					return err
+				}
+				_, err = fmt.Fprintln(cmd.OutOrStdout(), result.Output)
+				return err
 			}
 
 			if stat {
@@ -133,7 +151,10 @@ Examples:
 	}
 
 	cmd.Flags().Bool("stat", false, "Show summary (files changed, insertions, deletions)")
+	cmd.Flags().Bool("name-only", false, "List changed files without content")
 	cmd.Flags().Bool("log", false, "List agent commits beyond baseline")
+
+	cmd.MarkFlagsMutuallyExclusive("stat", "name-only")
 
 	return cmd
 }
@@ -165,7 +186,7 @@ func requireOverlayRunning(ctx context.Context, rt runtime.Runtime, name string)
 
 // diffOverlay handles the default diff for sandboxes with overlay dirs.
 // Merges overlay results (from container exec) with non-overlay results.
-func diffOverlay(cmd *cobra.Command, name string, stat bool) error {
+func diffOverlay(cmd *cobra.Command, name string, stat, nameOnly bool) error {
 	backend := resolveBackendForSandbox(name)
 	return withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
 		if err := requireOverlayRunning(ctx, rt, name); err != nil {
@@ -173,7 +194,13 @@ func diffOverlay(cmd *cobra.Command, name string, stat bool) error {
 		}
 
 		// Get overlay diffs via container exec
-		overlayResults, err := sandbox.GenerateOverlayDiff(ctx, rt, name, stat)
+		var overlayResults []*sandbox.DiffResult
+		var err error
+		if nameOnly {
+			overlayResults, err = sandbox.GenerateOverlayDiffNameOnly(ctx, rt, name)
+		} else {
+			overlayResults, err = sandbox.GenerateOverlayDiff(ctx, rt, name, stat)
+		}
 		if err != nil {
 			return err
 		}

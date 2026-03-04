@@ -965,7 +965,7 @@ func TestGenerateFormatPatchForRefs_Single(t *testing.T) {
 	require.Len(t, commits, 2)
 
 	// Only generate patch for the second commit
-	patchDir, files, err := GenerateFormatPatchForRefs("test-fpref-single", []string{commits[1].SHA})
+	patchDir, files, err := GenerateFormatPatchForRefs("test-fpref-single", []string{commits[1].SHA}, nil)
 	require.NoError(t, err)
 	defer os.RemoveAll(patchDir) //nolint:errcheck
 
@@ -993,7 +993,7 @@ func TestGenerateFormatPatchForRefs_Multiple(t *testing.T) {
 	require.Len(t, commits, 3)
 
 	// Only generate patches for first and third
-	patchDir, files, err := GenerateFormatPatchForRefs("test-fpref-multi", []string{commits[0].SHA, commits[2].SHA})
+	patchDir, files, err := GenerateFormatPatchForRefs("test-fpref-multi", []string{commits[0].SHA, commits[2].SHA}, nil)
 	require.NoError(t, err)
 	defer os.RemoveAll(patchDir) //nolint:errcheck
 
@@ -1064,7 +1064,7 @@ func TestSelectiveApplyFlow(t *testing.T) {
 
 	// Generate patches for selected commits
 	shas := []string{resolved[0].SHA, resolved[1].SHA}
-	patchDir, files, err := GenerateFormatPatchForRefs(name, shas)
+	patchDir, files, err := GenerateFormatPatchForRefs(name, shas, nil)
 	require.NoError(t, err)
 	defer os.RemoveAll(patchDir) //nolint:errcheck
 

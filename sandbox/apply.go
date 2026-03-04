@@ -379,9 +379,10 @@ func ResolveRefs(name string, refs []string) ([]CommitInfo, error) {
 }
 
 // GenerateFormatPatchForRefs creates .patch files for specific commits (by SHA)
-// within the sandbox work copy. Returns the temp directory and sorted file list.
-// The caller is responsible for os.RemoveAll(patchDir).
-func GenerateFormatPatchForRefs(name string, shas []string) (patchDir string, files []string, err error) {
+// within the sandbox work copy. When paths is non-empty, patches are filtered
+// to only include changes in those paths. Returns the temp directory and sorted
+// file list. The caller is responsible for os.RemoveAll(patchDir).
+func GenerateFormatPatchForRefs(name string, shas, paths []string) (patchDir string, files []string, err error) {
 	workDir, _, mode, loadErr := loadDiffContext(name)
 	if loadErr != nil {
 		return "", nil, loadErr
@@ -401,7 +402,12 @@ func GenerateFormatPatchForRefs(name string, shas []string) (patchDir string, fi
 	}
 
 	for _, sha := range shas {
-		cmd := workspace.NewGitCmd(workDir, "format-patch", "-1", "--output-directory="+patchDir, sha)
+		args := []string{"format-patch", "-1", "--output-directory=" + patchDir, sha}
+		if len(paths) > 0 {
+			args = append(args, "--")
+			args = append(args, paths...)
+		}
+		cmd := workspace.NewGitCmd(workDir, args...)
 		if output, runErr := cmd.CombinedOutput(); runErr != nil {
 			os.RemoveAll(patchDir) //nolint:errcheck,gosec // best-effort cleanup
 			return "", nil, fmt.Errorf("git format-patch -1 %s: %s: %w", sha, strings.TrimSpace(string(output)), runErr)

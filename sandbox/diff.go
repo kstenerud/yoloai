@@ -11,9 +11,10 @@ import (
 
 // DiffOptions controls diff generation.
 type DiffOptions struct {
-	Name  string   // sandbox name
-	Stat  bool     // true for --stat summary only
-	Paths []string // optional path filter (relative to workdir)
+	Name     string   // sandbox name
+	Stat     bool     // true for --stat summary only
+	NameOnly bool     // true for --name-only (list changed files)
+	Paths    []string // optional path filter (relative to workdir)
 }
 
 // DiffResult is an alias for workspace.DiffResult.
@@ -42,7 +43,7 @@ func generateDiff(opts DiffOptions, stat bool) (*DiffResult, error) {
 
 	switch mode {
 	case "rw":
-		return workspace.RWDiff(workDir, opts.Paths, stat)
+		return workspace.RWDiff(workDir, opts.Paths, stat, opts.NameOnly)
 	case "overlay":
 		return &DiffResult{
 			Output: "Diff for :overlay directories requires 'yoloai diff' (runs git inside container)",
@@ -50,7 +51,7 @@ func generateDiff(opts DiffOptions, stat bool) (*DiffResult, error) {
 			Empty:  true,
 		}, nil
 	default:
-		return workspace.CopyDiff(workDir, baselineSHA, opts.Paths, stat)
+		return workspace.CopyDiff(workDir, baselineSHA, opts.Paths, stat, opts.NameOnly)
 	}
 }
 
@@ -282,7 +283,7 @@ func GenerateMultiDiff(name string, stat bool) ([]*DiffResult, error) {
 		var result *DiffResult
 		switch dc.Mode {
 		case "rw":
-			result, err = workspace.RWDiff(dc.WorkDir, nil, stat)
+			result, err = workspace.RWDiff(dc.WorkDir, nil, stat, false)
 		case "overlay":
 			// Overlay dirs require container exec; skip here
 			result = &DiffResult{
@@ -291,7 +292,7 @@ func GenerateMultiDiff(name string, stat bool) ([]*DiffResult, error) {
 				Empty:  true,
 			}
 		default:
-			result, err = workspace.CopyDiff(dc.WorkDir, dc.BaselineSHA, nil, stat)
+			result, err = workspace.CopyDiff(dc.WorkDir, dc.BaselineSHA, nil, stat, false)
 		}
 		if err != nil {
 			return nil, fmt.Errorf("diff %s: %w", dc.HostPath, err)
@@ -360,6 +361,15 @@ func ListCommitsBeyondBaselineOverlay(ctx context.Context, rt runtime.Runtime, n
 // GenerateOverlayDiff generates a diff for overlay-mode directories by
 // executing git commands inside the running container.
 func GenerateOverlayDiff(ctx context.Context, rt runtime.Runtime, name string, stat bool) ([]*DiffResult, error) {
+	return generateOverlayDiff(ctx, rt, name, stat, false)
+}
+
+// GenerateOverlayDiffNameOnly generates a name-only diff for overlay-mode directories.
+func GenerateOverlayDiffNameOnly(ctx context.Context, rt runtime.Runtime, name string) ([]*DiffResult, error) {
+	return generateOverlayDiff(ctx, rt, name, false, true)
+}
+
+func generateOverlayDiff(ctx context.Context, rt runtime.Runtime, name string, stat, nameOnly bool) ([]*DiffResult, error) {
 	contexts, err := LoadAllDiffContexts(name)
 	if err != nil {
 		return nil, err
@@ -400,9 +410,12 @@ func GenerateOverlayDiff(ctx context.Context, rt runtime.Runtime, name string, s
 
 		// Generate diff
 		args := []string{"git", "-c", "core.hooksPath=/dev/null", "-C", dc.WorkDir, "diff"}
-		if stat {
+		switch {
+		case nameOnly:
+			args = append(args, "--name-only")
+		case stat:
 			args = append(args, "--stat")
-		} else {
+		default:
 			args = append(args, "--binary")
 		}
 		args = append(args, baselineSHA)

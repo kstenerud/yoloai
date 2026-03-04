@@ -56,6 +56,7 @@ Use --patches to export .patch files without applying them.`,
 			}
 			noWIP, _ := cmd.Flags().GetBool("no-wip")
 			force, _ := cmd.Flags().GetBool("force")
+			dryRun, _ := cmd.Flags().GetBool("dry-run")
 
 			// Parse refs and paths from remaining args
 			refs, paths := parseApplyArgs(rest, cmd)
@@ -64,10 +65,6 @@ Use --patches to export .patch files without applying them.`,
 			if len(refs) > 0 && squash {
 				return fmt.Errorf("--squash cannot be used with commit refs — they are mutually exclusive")
 			}
-			if len(refs) > 0 && len(paths) > 0 {
-				return fmt.Errorf("commit refs and path filters cannot be combined")
-			}
-
 			// Load metadata for target directory and mode validation
 			meta, err := sandbox.LoadMeta(sandbox.Dir(name))
 			if err != nil {
@@ -78,7 +75,7 @@ Use --patches to export .patch files without applying them.`,
 			}
 
 			if hasOverlayDirs(meta) {
-				return applyOverlay(cmd, name, meta, refs, paths, patchesDir, noWIP, yes)
+				return applyOverlay(cmd, name, meta, refs, paths, patchesDir, noWIP, yes, dryRun)
 			}
 
 			if !jsonEnabled(cmd) {
@@ -92,12 +89,12 @@ Use --patches to export .patch files without applying them.`,
 
 			// Selective apply: specific commit refs
 			if len(refs) > 0 {
-				return applySelectedCommits(cmd, name, refs, meta, yes, force)
+				return applySelectedCommits(cmd, name, refs, paths, meta, yes, force, dryRun)
 			}
 
 			// --squash: legacy behavior — flatten everything into one unstaged patch
 			if squash {
-				return applySquash(cmd, name, paths, meta, yes)
+				return applySquash(cmd, name, paths, meta, yes, dryRun)
 			}
 
 			// Query work copy for commits and WIP
@@ -136,12 +133,12 @@ Use --patches to export .patch files without applying them.`,
 			// Non-git fallback: can't use git am on non-git targets
 			if !isGit && len(commits) > 0 {
 				fmt.Fprintln(cmd.ErrOrStderr(), "Note: target is not a git repository — falling back to squashed patch") //nolint:errcheck
-				return applySquash(cmd, name, paths, meta, yes)
+				return applySquash(cmd, name, paths, meta, yes, dryRun)
 			}
 
 			// No commits, only WIP — use existing squash flow (HEAD == baseline equivalent)
 			if len(commits) == 0 && hasWIP {
-				return applySquash(cmd, name, paths, meta, yes)
+				return applySquash(cmd, name, paths, meta, yes, dryRun)
 			}
 
 			// Pre-flight: check for dirty repo when applying commits
@@ -167,6 +164,14 @@ Use --patches to export .patch files without applying them.`,
 					fmt.Fprintln(out, "\n+ uncommitted changes (will be applied as unstaged files)") //nolint:errcheck
 				}
 				fmt.Fprintln(out) //nolint:errcheck
+			}
+
+			// --dry-run: show summary and stop
+			if dryRun {
+				if !jsonEnabled(cmd) {
+					fmt.Fprintln(cmd.OutOrStdout(), "(dry run)") //nolint:errcheck
+				}
+				return nil
 			}
 
 			// Confirmation
@@ -248,15 +253,17 @@ Use --patches to export .patch files without applying them.`,
 	cmd.Flags().String("patches", "", "Export .patch files to directory instead of applying")
 	cmd.Flags().Bool("no-wip", false, "Skip uncommitted changes, only apply commits")
 	cmd.Flags().Bool("force", false, "Proceed even if host repo has uncommitted changes")
+	cmd.Flags().Bool("dry-run", false, "Show what would be applied without applying")
 
 	cmd.MarkFlagsMutuallyExclusive("squash", "patches")
 	cmd.MarkFlagsMutuallyExclusive("squash", "no-wip")
+	cmd.MarkFlagsMutuallyExclusive("dry-run", "patches")
 
 	return cmd
 }
 
 // applyOverlay handles apply for sandboxes with overlay directories.
-func applyOverlay(cmd *cobra.Command, name string, meta *sandbox.Meta, refs, paths []string, patchesDir string, noWIP, yes bool) error {
+func applyOverlay(cmd *cobra.Command, name string, meta *sandbox.Meta, refs, paths []string, patchesDir string, noWIP, yes, dryRun bool) error {
 	// Reject unsupported flag combos for overlay
 	if len(refs) > 0 {
 		return fmt.Errorf("selective ref apply is not supported for :overlay sandboxes")
@@ -319,6 +326,14 @@ func applyOverlay(cmd *cobra.Command, name string, meta *sandbox.Meta, refs, pat
 				fmt.Fprintf(out, "=== %s (%s) ===\n", ps.HostPath, ps.Mode) //nolint:errcheck
 				fmt.Fprintln(out, ps.Stat)                                  //nolint:errcheck
 			}
+		}
+
+		// --dry-run: show summary and stop
+		if dryRun {
+			if !isJSON {
+				fmt.Fprintln(out, "(dry run)") //nolint:errcheck
+			}
+			return nil
 		}
 
 		// Confirmation
@@ -404,7 +419,7 @@ func parseApplyArgs(rest []string, cmd *cobra.Command) (refs []string, paths []s
 }
 
 // applySelectedCommits cherry-picks specific commits into the target.
-func applySelectedCommits(cmd *cobra.Command, name string, refs []string, meta *sandbox.Meta, yes, force bool) error {
+func applySelectedCommits(cmd *cobra.Command, name string, refs, paths []string, meta *sandbox.Meta, yes, force, dryRun bool) error {
 	targetDir := meta.Workdir.HostPath
 	if !workspace.IsGitRepo(targetDir) {
 		return fmt.Errorf("selective apply requires a git target directory — %s is not a git repository", targetDir)
@@ -447,6 +462,14 @@ func applySelectedCommits(cmd *cobra.Command, name string, refs []string, meta *
 		fmt.Fprintln(out) //nolint:errcheck
 	}
 
+	// --dry-run: show summary and stop
+	if dryRun {
+		if !jsonEnabled(cmd) {
+			fmt.Fprintln(cmd.OutOrStdout(), "(dry run)") //nolint:errcheck
+		}
+		return nil
+	}
+
 	// Confirmation
 	if !yes {
 		prompt := fmt.Sprintf("Apply to %s? [y/N] ", targetDir)
@@ -465,7 +488,7 @@ func applySelectedCommits(cmd *cobra.Command, name string, refs []string, meta *
 		shas[i] = c.SHA
 	}
 
-	patchDir, files, err := sandbox.GenerateFormatPatchForRefs(name, shas)
+	patchDir, files, err := sandbox.GenerateFormatPatchForRefs(name, shas, paths)
 	if err != nil {
 		return err
 	}
@@ -478,21 +501,23 @@ func applySelectedCommits(cmd *cobra.Command, name string, refs []string, meta *
 		fmt.Fprintf(cmd.OutOrStdout(), "%d commit(s) applied to %s\n", len(files), targetDir) //nolint:errcheck
 	}
 
-	// Advance baseline using contiguous prefix logic
-	allCommits, err := sandbox.ListCommitsBeyondBaseline(name)
-	if err != nil {
-		return fmt.Errorf("advance baseline: %w", err)
-	}
-
-	appliedSet := make(map[string]bool, len(resolved))
-	for _, c := range resolved {
-		appliedSet[c.SHA] = true
-	}
-
-	prefixEnd := workspace.ContiguousPrefixEnd(allCommits, appliedSet)
-	if prefixEnd >= 0 {
-		if err := sandbox.AdvanceBaselineTo(name, allCommits[prefixEnd].SHA); err != nil {
+	// Advance baseline using contiguous prefix logic (skip for path-filtered applies)
+	if len(paths) == 0 {
+		allCommits, err := sandbox.ListCommitsBeyondBaseline(name)
+		if err != nil {
 			return fmt.Errorf("advance baseline: %w", err)
+		}
+
+		appliedSet := make(map[string]bool, len(resolved))
+		for _, c := range resolved {
+			appliedSet[c.SHA] = true
+		}
+
+		prefixEnd := workspace.ContiguousPrefixEnd(allCommits, appliedSet)
+		if prefixEnd >= 0 {
+			if err := sandbox.AdvanceBaselineTo(name, allCommits[prefixEnd].SHA); err != nil {
+				return fmt.Errorf("advance baseline: %w", err)
+			}
 		}
 	}
 
@@ -508,10 +533,10 @@ func applySelectedCommits(cmd *cobra.Command, name string, refs []string, meta *
 }
 
 // applySquash implements the legacy squashed-patch behavior.
-func applySquash(cmd *cobra.Command, name string, paths []string, meta *sandbox.Meta, yes bool) error {
+func applySquash(cmd *cobra.Command, name string, paths []string, meta *sandbox.Meta, yes, dryRun bool) error {
 	// Check for aux :copy dirs
 	if len(meta.Directories) > 0 {
-		return applySquashMulti(cmd, name, paths, meta, yes)
+		return applySquashMulti(cmd, name, paths, meta, yes, dryRun)
 	}
 
 	patch, stat, err := sandbox.GeneratePatch(name, paths)
@@ -533,6 +558,14 @@ func applySquash(cmd *cobra.Command, name string, paths []string, meta *sandbox.
 	if !jsonEnabled(cmd) {
 		fmt.Fprintln(cmd.OutOrStdout(), stat) //nolint:errcheck
 	}
+
+	if dryRun {
+		if !jsonEnabled(cmd) {
+			fmt.Fprintln(cmd.OutOrStdout(), "(dry run)") //nolint:errcheck
+		}
+		return nil
+	}
+
 	isGit := workspace.IsGitRepo(targetDir)
 
 	if err := workspace.CheckPatch(patch, targetDir, isGit); err != nil {
@@ -574,7 +607,7 @@ func applySquash(cmd *cobra.Command, name string, paths []string, meta *sandbox.
 }
 
 // applySquashMulti applies squashed patches for multiple :copy directories.
-func applySquashMulti(cmd *cobra.Command, name string, paths []string, _ *sandbox.Meta, yes bool) error {
+func applySquashMulti(cmd *cobra.Command, name string, paths []string, _ *sandbox.Meta, yes, dryRun bool) error {
 	patches, err := sandbox.GenerateMultiPatch(name, paths)
 	if err != nil {
 		return err
@@ -597,6 +630,13 @@ func applySquashMulti(cmd *cobra.Command, name string, paths []string, _ *sandbo
 			fmt.Fprintf(out, "=== %s (%s) ===\n", ps.HostPath, ps.Mode) //nolint:errcheck
 			fmt.Fprintln(out, ps.Stat)                                  //nolint:errcheck
 		}
+	}
+
+	if dryRun {
+		if !isJSON {
+			fmt.Fprintln(out, "(dry run)") //nolint:errcheck
+		}
+		return nil
 	}
 
 	if !yes {

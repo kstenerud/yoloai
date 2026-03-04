@@ -35,8 +35,15 @@ func (m *Manager) Stop(ctx context.Context, name string) error {
 	return m.runtime.Stop(ctx, InstanceName(name))
 }
 
+// StartOpts holds parameters for the start command.
+type StartOpts struct {
+	Resume     bool   // re-feed original prompt with continuation preamble
+	Prompt     string // if set, overwrite prompt.txt and send directly (no preamble)
+	PromptFile string // if set, read from file, overwrite prompt.txt, send directly
+}
+
 // Start ensures a sandbox is running — idempotent.
-func (m *Manager) Start(ctx context.Context, name string, resume bool) error {
+func (m *Manager) Start(ctx context.Context, name string, opts StartOpts) error {
 	sandboxDir, err := RequireSandboxDir(name)
 	if err != nil {
 		return err
@@ -52,8 +59,33 @@ func (m *Manager) Start(ctx context.Context, name string, resume bool) error {
 	if err != nil {
 		return fmt.Errorf("detect status: %w", err)
 	}
-	if resume && !meta.HasPrompt {
+
+	// Resolve custom prompt if provided
+	customPrompt := opts.Prompt != "" || opts.PromptFile != ""
+	if opts.Resume && customPrompt {
+		return fmt.Errorf("--resume and --prompt/--prompt-file are mutually exclusive")
+	}
+	if opts.Resume && !meta.HasPrompt {
 		return fmt.Errorf("--resume requires a sandbox created with --prompt")
+	}
+
+	var promptText string
+	if customPrompt {
+		promptText, err = ReadPrompt(opts.Prompt, opts.PromptFile)
+		if err != nil {
+			return err
+		}
+		if promptText == "" {
+			return fmt.Errorf("--prompt/--prompt-file produced empty text")
+		}
+		// Overwrite prompt.txt with new prompt
+		if writeErr := os.WriteFile(filepath.Join(sandboxDir, "prompt.txt"), []byte(promptText), 0600); writeErr != nil {
+			return fmt.Errorf("write prompt.txt: %w", writeErr)
+		}
+		meta.HasPrompt = true
+		if saveErr := SaveMeta(sandboxDir, meta); saveErr != nil {
+			return fmt.Errorf("save meta: %w", saveErr)
+		}
 	}
 
 	switch status {
@@ -62,11 +94,16 @@ func (m *Manager) Start(ctx context.Context, name string, resume bool) error {
 		return nil
 
 	case StatusDone, StatusFailed:
-		if resume {
+		switch {
+		case customPrompt:
+			if err := m.relaunchAgentWithCustomPrompt(ctx, name, meta, promptText); err != nil {
+				return err
+			}
+		case opts.Resume:
 			if err := m.relaunchAgentWithResume(ctx, name, meta); err != nil {
 				return err
 			}
-		} else {
+		default:
 			if err := m.relaunchAgent(ctx, name, meta); err != nil {
 				return err
 			}
@@ -78,26 +115,38 @@ func (m *Manager) Start(ctx context.Context, name string, resume bool) error {
 		if err := m.runtime.Remove(ctx, cname); err != nil {
 			return fmt.Errorf("remove stopped instance: %w", err)
 		}
-		if resume {
+		switch {
+		case customPrompt:
+			if err := m.prepareCustomPromptFiles(name, meta, promptText); err != nil {
+				return err
+			}
+			defer m.cleanupResumeFiles(name)
+		case opts.Resume:
 			if err := m.prepareResumeFiles(name, meta); err != nil {
 				return err
 			}
 			defer m.cleanupResumeFiles(name)
 		}
-		if err := m.recreateContainer(ctx, name, meta, resume); err != nil {
+		if err := m.recreateContainer(ctx, name, meta, opts.Resume || customPrompt); err != nil {
 			return err
 		}
 		fmt.Fprintf(m.output, "Sandbox %s started\n", name) //nolint:errcheck // best-effort output
 		return nil
 
 	case StatusRemoved:
-		if resume {
+		switch {
+		case customPrompt:
+			if err := m.prepareCustomPromptFiles(name, meta, promptText); err != nil {
+				return err
+			}
+			defer m.cleanupResumeFiles(name)
+		case opts.Resume:
 			if err := m.prepareResumeFiles(name, meta); err != nil {
 				return err
 			}
 			defer m.cleanupResumeFiles(name)
 		}
-		if err := m.recreateContainer(ctx, name, meta, resume); err != nil {
+		if err := m.recreateContainer(ctx, name, meta, opts.Resume || customPrompt); err != nil {
 			return err
 		}
 		fmt.Fprintf(m.output, "Sandbox %s recreated and started\n", name) //nolint:errcheck // best-effort output
@@ -295,7 +344,7 @@ func (m *Manager) Reset(ctx context.Context, opts ResetOptions) error {
 	}
 
 	// Start the container
-	return m.Start(ctx, opts.Name, false)
+	return m.Start(ctx, opts.Name, StartOpts{})
 }
 
 // NeedsConfirmation checks if a sandbox requires confirmation before
@@ -569,6 +618,120 @@ rm -f /tmp/yoloai-resume.txt`, waitCmd, cfg.SubmitSequence)
 		"bash", "-c", "nohup bash -c '" + strings.ReplaceAll(script, "'", "'\"'\"'") + "' _ \"$1\" >/dev/null 2>&1 &", "_", resumeText,
 	})
 	return err
+}
+
+// relaunchAgentWithCustomPrompt relaunches the agent in interactive mode and sends
+// the custom prompt directly (no resume preamble) via tmux.
+func (m *Manager) relaunchAgentWithCustomPrompt(ctx context.Context, name string, meta *Meta, promptText string) error {
+	sandboxDir := Dir(name)
+
+	configData, err := os.ReadFile(filepath.Join(sandboxDir, "config.json")) //nolint:gosec // path is sandbox-controlled
+	if err != nil {
+		return fmt.Errorf("read config.json: %w", err)
+	}
+
+	var cfg containerConfig
+	if err := json.Unmarshal(configData, &cfg); err != nil {
+		return fmt.Errorf("parse config.json: %w", err)
+	}
+
+	agentDef := agent.GetAgent(meta.Agent)
+	if agentDef == nil {
+		return fmt.Errorf("unknown agent: %s", meta.Agent)
+	}
+
+	agentArgs := resolveAgentArgs(meta.Agent, meta.Profile)
+	interactiveCmd := buildAgentCommand(agentDef, meta.Model, "", agentArgs, cfg.Passthrough)
+
+	_, err = execInContainer(ctx, m.runtime, InstanceName(name), []string{
+		"tmux", "respawn-pane", "-t", "main", "-k", interactiveCmd,
+	})
+	if err != nil {
+		return fmt.Errorf("relaunch agent: %w", err)
+	}
+
+	return m.sendCustomPrompt(ctx, name, sandboxDir, cfg, promptText)
+}
+
+// sendCustomPrompt waits for the agent to be ready and delivers the custom
+// prompt directly (without resume preamble) via tmux load-buffer/paste-buffer.
+func (m *Manager) sendCustomPrompt(ctx context.Context, name, sandboxDir string, cfg containerConfig, promptText string) error {
+	var waitCmd string
+	switch {
+	case cfg.ReadyPattern != "":
+		waitCmd = fmt.Sprintf(`for i in $(seq 1 60); do
+    if tmux capture-pane -t main -p 2>/dev/null | grep -q '%s'; then
+        break
+    fi
+    sleep 1
+done`, cfg.ReadyPattern)
+	case cfg.StartupDelay > 0:
+		delaySec := cfg.StartupDelay / 1000
+		if delaySec < 1 {
+			delaySec = 1
+		}
+		waitCmd = fmt.Sprintf("sleep %d", delaySec)
+	default:
+		waitCmd = "sleep 3"
+	}
+
+	script := fmt.Sprintf(`%s
+printf '%%s' "$1" > /tmp/yoloai-custom-prompt.txt
+tmux load-buffer /tmp/yoloai-custom-prompt.txt
+tmux paste-buffer -t main
+sleep 0.5
+for key in %s; do
+    tmux send-keys -t main "$key"
+    sleep 0.2
+done
+rm -f /tmp/yoloai-custom-prompt.txt`, waitCmd, cfg.SubmitSequence)
+
+	_, err := execInContainer(ctx, m.runtime, InstanceName(name), []string{
+		"bash", "-c", "nohup bash -c '" + strings.ReplaceAll(script, "'", "'\"'\"'") + "' _ \"$1\" >/dev/null 2>&1 &", "_", promptText,
+	})
+	return err
+}
+
+// prepareCustomPromptFiles writes the resume-prompt.txt (custom prompt, no preamble)
+// and patches config.json for interactive command mode.
+func (m *Manager) prepareCustomPromptFiles(name string, meta *Meta, promptText string) error {
+	sandboxDir := Dir(name)
+
+	// Write resume-prompt.txt (custom prompt, no preamble)
+	if err := os.WriteFile(filepath.Join(sandboxDir, "resume-prompt.txt"), []byte(promptText), 0600); err != nil {
+		return fmt.Errorf("write resume-prompt.txt: %w", err)
+	}
+
+	// Patch config.json: replace agent_command with interactive version
+	configPath := filepath.Join(sandboxDir, "config.json")
+	configData, err := os.ReadFile(configPath) //nolint:gosec // path is sandbox-controlled
+	if err != nil {
+		return fmt.Errorf("read config.json: %w", err)
+	}
+
+	var cfg containerConfig
+	if err := json.Unmarshal(configData, &cfg); err != nil {
+		return fmt.Errorf("parse config.json: %w", err)
+	}
+
+	agentDef := agent.GetAgent(meta.Agent)
+	if agentDef == nil {
+		return fmt.Errorf("unknown agent: %s", meta.Agent)
+	}
+
+	agentArgs := resolveAgentArgs(meta.Agent, meta.Profile)
+	cfg.AgentCommand = buildAgentCommand(agentDef, meta.Model, "", agentArgs, cfg.Passthrough)
+
+	updated, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal config.json: %w", err)
+	}
+
+	if err := os.WriteFile(configPath, updated, 0600); err != nil {
+		return fmt.Errorf("write config.json: %w", err)
+	}
+
+	return nil
 }
 
 // prepareResumeFiles writes the resume-prompt.txt and patches config.json

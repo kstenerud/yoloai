@@ -15,15 +15,18 @@ type DiffResult struct {
 
 // CopyDiff generates a diff for a :copy mode work directory against
 // a baseline SHA. Stages untracked files first, then runs git diff.
-func CopyDiff(workDir, baselineSHA string, paths []string, stat bool) (*DiffResult, error) {
+func CopyDiff(workDir, baselineSHA string, paths []string, stat, nameOnly bool) (*DiffResult, error) {
 	if err := StageUntracked(workDir); err != nil {
 		return nil, err
 	}
 
 	args := []string{"diff"}
-	if stat {
+	switch {
+	case nameOnly:
+		args = append(args, "--name-only")
+	case stat:
 		args = append(args, "--stat")
-	} else {
+	default:
 		args = append(args, "--binary")
 	}
 	args = append(args, baselineSHA)
@@ -49,7 +52,7 @@ func CopyDiff(workDir, baselineSHA string, paths []string, stat bool) (*DiffResu
 
 // RWDiff generates a diff for a :rw mode directory. Returns an
 // informational result (not error) if the directory is not a git repo.
-func RWDiff(workDir string, paths []string, stat bool) (*DiffResult, error) {
+func RWDiff(workDir string, paths []string, stat, nameOnly bool) (*DiffResult, error) {
 	if !IsGitRepo(workDir) {
 		return &DiffResult{
 			Output: "Diff not available: " + workDir + " is not a git repository (live-mounted :rw directory)",
@@ -59,7 +62,10 @@ func RWDiff(workDir string, paths []string, stat bool) (*DiffResult, error) {
 	}
 
 	args := []string{"diff"}
-	if stat {
+	switch {
+	case nameOnly:
+		args = append(args, "--name-only")
+	case stat:
 		args = append(args, "--stat")
 	}
 	args = append(args, "HEAD")

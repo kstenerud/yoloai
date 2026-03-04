@@ -4,15 +4,18 @@ Items from the CLI critique that were not addressed in Pass 1 (flag validation, 
 
 ## Pass 2: New flags/features on existing commands
 
+Completed in Pass 2:
 - `attach --resume` — reconnect to a detached agent session
 - `start/restart --prompt/--prompt-file` — re-send or replace prompt on start
 - `apply --dry-run` — show what would be applied without applying
-- `apply` refs + path filters combined — currently errors, could be useful
+- `apply` refs + path filters combined — now works together
 - `diff --name-only` — list changed files without content
-- `new` without workdir — create a sandbox with no workdir (agent-only)
 - `new --env KEY=VAL` — pass environment variables to the sandbox
-- `reset --clean` on stopped sandboxes — currently requires running container
 - `sandbox prompt` / `sandbox config` — read-only inspection of sandbox settings
+
+Dropped (already working):
+- `new` without workdir — already works when `--profile` is set
+- `reset --clean` on stopped sandboxes — already works (stop is a no-op when already stopped)
 
 ## Pass 3: New commands
 

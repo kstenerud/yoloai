@@ -188,6 +188,16 @@ func applyConfigDefaults(opts *CreateOptions, ycfg *config.YoloaiConfig, pr *pro
 		}
 		pr.resources.Memory = opts.Memory
 	}
+
+	// CLI --env overrides config/profile env vars
+	if len(opts.Env) > 0 {
+		if pr.env == nil {
+			pr.env = make(map[string]string)
+		}
+		for k, v := range opts.Env {
+			pr.env[k] = v
+		}
+	}
 }
 
 // parseAndValidateDirs parses workdir and aux dirs, runs safety checks, overlap

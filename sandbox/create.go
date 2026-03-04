@@ -19,26 +19,27 @@ import (
 // CreateOptions holds all parameters for sandbox creation.
 type CreateOptions struct {
 	Name            string
-	WorkdirArg      string   // raw workdir argument (path with optional :copy/:rw/:force suffixes)
-	Agent           string   // agent name (e.g., "claude", "test")
-	Model           string   // model name or alias (e.g., "sonnet", "claude-sonnet-4-latest")
-	Profile         string   // profile name (from --profile flag)
-	Prompt          string   // prompt text (from --prompt)
-	PromptFile      string   // prompt file path (from --prompt-file)
-	NetworkNone     bool     // --network-none flag
-	NetworkIsolated bool     // --network-isolated flag
-	NetworkAllow    []string // --network-allow flags
-	Ports           []string // --port flags (e.g., ["3000:3000"])
-	Replace         bool     // --replace flag
-	NoStart         bool     // --no-start flag
-	Yes             bool     // --yes flag (skip confirmations)
-	AuxDirArgs      []string // raw -d arguments (path with optional :copy/:rw/:force/=mount suffixes)
-	Passthrough     []string // args after -- passed to agent
-	Version         string   // yoloAI version for meta.json
-	Attach          bool     // --attach flag (auto-attach after creation)
-	Debug           bool     // --debug flag (enable entrypoint debug logging)
-	CPUs            string   // --cpus flag (e.g., "4", "2.5")
-	Memory          string   // --memory flag (e.g., "8g", "512m")
+	WorkdirArg      string            // raw workdir argument (path with optional :copy/:rw/:force suffixes)
+	Agent           string            // agent name (e.g., "claude", "test")
+	Model           string            // model name or alias (e.g., "sonnet", "claude-sonnet-4-latest")
+	Profile         string            // profile name (from --profile flag)
+	Prompt          string            // prompt text (from --prompt)
+	PromptFile      string            // prompt file path (from --prompt-file)
+	NetworkNone     bool              // --network-none flag
+	NetworkIsolated bool              // --network-isolated flag
+	NetworkAllow    []string          // --network-allow flags
+	Ports           []string          // --port flags (e.g., ["3000:3000"])
+	Replace         bool              // --replace flag
+	NoStart         bool              // --no-start flag
+	Yes             bool              // --yes flag (skip confirmations)
+	AuxDirArgs      []string          // raw -d arguments (path with optional :copy/:rw/:force/=mount suffixes)
+	Passthrough     []string          // args after -- passed to agent
+	Version         string            // yoloAI version for meta.json
+	Attach          bool              // --attach flag (auto-attach after creation)
+	Debug           bool              // --debug flag (enable entrypoint debug logging)
+	CPUs            string            // --cpus flag (e.g., "4", "2.5")
+	Memory          string            // --memory flag (e.g., "8g", "512m")
+	Env             map[string]string // --env flags (KEY=VAL pairs)
 }
 
 // sandboxState holds resolved state computed during preparation.
@@ -262,7 +263,7 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 	}
 
 	// Read prompt
-	promptText, err := readPrompt(opts.Prompt, opts.PromptFile)
+	promptText, err := ReadPrompt(opts.Prompt, opts.PromptFile)
 	if err != nil {
 		return nil, err
 	}
@@ -647,8 +648,8 @@ func buildContainerConfig(agentDef *agent.Definition, agentCommand string, tmuxC
 	return json.MarshalIndent(cfg, "", "  ")
 }
 
-// readPrompt reads the prompt from --prompt, --prompt-file, or stdin ("-").
-func readPrompt(prompt, promptFile string) (string, error) {
+// ReadPrompt reads the prompt from --prompt, --prompt-file, or stdin ("-").
+func ReadPrompt(prompt, promptFile string) (string, error) {
 	if prompt != "" && promptFile != "" {
 		return "", NewUsageError("--prompt and --prompt-file are mutually exclusive")
 	}

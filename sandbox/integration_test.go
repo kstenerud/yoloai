@@ -75,7 +75,7 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 	assert.Equal(t, StatusStopped, status)
 
 	// Restart container and verify
-	require.NoError(t, mgr.Start(ctx, sandboxName, false))
+	require.NoError(t, mgr.Start(ctx, sandboxName, StartOpts{}))
 	time.Sleep(2 * time.Second)
 
 	status, _, err = DetectStatus(ctx, mgr.runtime, InstanceName(sandboxName))

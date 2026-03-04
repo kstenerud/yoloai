@@ -25,6 +25,8 @@ func newStartCmd() *cobra.Command {
 
 			attach, _ := cmd.Flags().GetBool("attach")
 			resume, _ := cmd.Flags().GetBool("resume")
+			prompt, _ := cmd.Flags().GetString("prompt")
+			promptFile, _ := cmd.Flags().GetString("prompt-file")
 
 			if jsonEnabled(cmd) && attach {
 				return fmt.Errorf("--json and --attach are incompatible")
@@ -33,7 +35,11 @@ func newStartCmd() *cobra.Command {
 			backend := resolveBackendForSandbox(name)
 			return withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
 				mgr := sandbox.NewManager(rt, backend, slog.Default(), cmd.InOrStdin(), cmd.ErrOrStderr())
-				if err := mgr.Start(ctx, name, resume); err != nil {
+				if err := mgr.Start(ctx, name, sandbox.StartOpts{
+					Resume:     resume,
+					Prompt:     prompt,
+					PromptFile: promptFile,
+				}); err != nil {
 					return err
 				}
 
@@ -60,6 +66,12 @@ func newStartCmd() *cobra.Command {
 
 	cmd.Flags().BoolP("attach", "a", false, "Auto-attach after starting")
 	cmd.Flags().Bool("resume", false, "Re-feed original prompt with continuation preamble")
+	cmd.Flags().StringP("prompt", "p", "", "New prompt text (overwrites existing prompt)")
+	cmd.Flags().StringP("prompt-file", "f", "", "File containing new prompt")
+
+	cmd.MarkFlagsMutuallyExclusive("resume", "prompt")
+	cmd.MarkFlagsMutuallyExclusive("resume", "prompt-file")
+	cmd.MarkFlagsMutuallyExclusive("prompt", "prompt-file")
 
 	return cmd
 }
