@@ -653,7 +653,7 @@ func sortedKeys(m map[string]string) []string {
 }
 
 func newProfileDeleteCmd() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "delete <name>",
 		Short: "Delete a profile",
 		Args:  cobra.ExactArgs(1),
@@ -695,6 +695,17 @@ func newProfileDeleteCmd() *cobra.Command {
 				fmt.Fprintf(cmd.ErrOrStderr(), "Warning: %d sandbox(es) reference this profile: %s\n", len(refs), joinNames(refs)) //nolint:errcheck
 			}
 
+			yes := effectiveYes(cmd)
+			if !yes {
+				confirmed, confirmErr := sandbox.Confirm(cmd.Context(), fmt.Sprintf("Delete profile '%s'? [y/N] ", name), os.Stdin, cmd.ErrOrStderr())
+				if confirmErr != nil {
+					return confirmErr
+				}
+				if !confirmed {
+					return nil
+				}
+			}
+
 			dir := sandbox.ProfileDirPath(name)
 			if err := os.RemoveAll(dir); err != nil {
 				return fmt.Errorf("remove profile directory: %w", err)
@@ -711,6 +722,10 @@ func newProfileDeleteCmd() *cobra.Command {
 			return nil
 		},
 	}
+
+	cmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
+
+	return cmd
 }
 
 // findSandboxesWithProfile scans sandbox meta.json files for profile references.

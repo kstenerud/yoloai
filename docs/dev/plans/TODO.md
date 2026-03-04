@@ -17,12 +17,6 @@ Create a plan file in this directory before starting implementation.
 | ~~`list` filters~~ | [commands.md](../../design/commands.md) | — | Done: `--running`, `--stopped`, `--agent`, `--profile`, `--changes` |
 | ~~Build secrets (`--secret`)~~ | [commands.md](../../design/commands.md) | — | Done |
 
-## Bugs
-
-| Feature | Notes |
-|---------|-------|
-| `profile delete` missing confirmation | Deletes immediately via `os.RemoveAll` without prompting. Should prompt by default and accept `--yes/-y` to skip, consistent with `destroy` and `system prune`. |
-
 ## Config Options
 
 | Feature | Design Reference | Notes |
