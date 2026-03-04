@@ -3,11 +3,9 @@
 package cli
 
 import (
-	"context"
 	"fmt"
 	"strings"
 
-	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/sandbox"
 	"github.com/spf13/cobra"
 )
@@ -16,7 +14,7 @@ func newSandboxNetworkRemoveCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "remove <name> <domain>...",
 		Short: "Remove domains from the allowlist",
-		Args:  cobra.MinimumNArgs(1),
+		Args:  cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name, domains, err := resolveName(cmd, args)
 			if err != nil {
@@ -26,110 +24,66 @@ func newSandboxNetworkRemoveCmd() *cobra.Command {
 				return sandbox.NewUsageError("at least one domain is required")
 			}
 
+			sandboxDir, meta, err := loadIsolatedMeta(name)
+			if err != nil {
+				return err
+			}
+
+			// Validate all domains exist in allowlist
+			existing := make(map[string]bool, len(meta.NetworkAllow))
+			for _, d := range meta.NetworkAllow {
+				existing[d] = true
+			}
+			toRemove := make(map[string]bool, len(domains))
+			for _, d := range domains {
+				if !existing[d] {
+					return fmt.Errorf("domain %q is not in the allowlist", d)
+				}
+				toRemove[d] = true
+			}
+
+			// Filter out removed domains
+			var remaining []string
+			for _, d := range meta.NetworkAllow {
+				if !toRemove[d] {
+					remaining = append(remaining, d)
+				}
+			}
+
+			// Persist changes
+			meta.NetworkAllow = remaining
+			if err := saveNetworkAllowlist(sandboxDir, meta); err != nil {
+				return err
+			}
+
+			// Try live-patching (flush ipset and re-add remaining domain IPs)
+			script := "ipset flush allowed-domains 2>/dev/null || true"
+			if len(remaining) > 0 {
+				script += "\n" + ipsetResolveDomains
+			}
 			backend := resolveBackendForSandbox(name)
-			return withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
-				w := cmd.OutOrStdout()
+			live, patchErr := tryLivePatchNetwork(cmd.Context(), backend, name, script, remaining)
 
-				// Load meta.json
-				sandboxDir, err := sandbox.RequireSandboxDir(name)
-				if err != nil {
-					return err
-				}
-				meta, err := sandbox.LoadMeta(sandboxDir)
-				if err != nil {
-					return err
-				}
+			w := cmd.OutOrStdout()
+			if jsonEnabled(cmd) {
+				return writeJSON(w, map[string]any{
+					"name":            name,
+					"domains_removed": domains,
+					"live":            live,
+				})
+			}
 
-				// Validate network mode
-				switch meta.NetworkMode {
-				case "isolated":
-					// ok
-				case "none":
-					return fmt.Errorf("sandbox %q uses --network-none; cannot modify network access", name)
-				default:
-					return fmt.Errorf("sandbox %q is not using network isolation", name)
-				}
+			switch {
+			case live:
+				fmt.Fprintf(w, "Removed %s (live)\n", strings.Join(domains, ", ")) //nolint:errcheck // best-effort output
+			case patchErr != nil:
+				fmt.Fprintf(w, "Warning: failed to update running container: %v\n", patchErr) //nolint:errcheck // best-effort output
+				fmt.Fprintf(w, "Changes saved — will take effect on next start\n")            //nolint:errcheck // best-effort output
+			default:
+				fmt.Fprintf(w, "Removed %s (will take effect on next start)\n", strings.Join(domains, ", ")) //nolint:errcheck // best-effort output
+			}
 
-				// Build set of domains to remove and validate they exist
-				toRemove := make(map[string]bool, len(domains))
-				existing := make(map[string]bool, len(meta.NetworkAllow))
-				for _, d := range meta.NetworkAllow {
-					existing[d] = true
-				}
-				for _, d := range domains {
-					if !existing[d] {
-						return fmt.Errorf("domain %q is not in the allowlist", d)
-					}
-					toRemove[d] = true
-				}
-
-				// Filter out removed domains
-				var remaining []string
-				for _, d := range meta.NetworkAllow {
-					if !toRemove[d] {
-						remaining = append(remaining, d)
-					}
-				}
-
-				// Update meta.json
-				meta.NetworkAllow = remaining
-				if err := sandbox.SaveMeta(sandboxDir, meta); err != nil {
-					return err
-				}
-
-				// Update config.json
-				if err := sandbox.PatchConfigAllowedDomains(sandboxDir, meta.NetworkAllow); err != nil {
-					return err
-				}
-
-				// Check if container is running
-				info, err := sandbox.InspectSandbox(ctx, rt, name)
-				if err != nil {
-					return err
-				}
-
-				live := false
-				if info.Status == sandbox.StatusRunning {
-					// Live-patch: flush ipset and re-add remaining domains
-					var scriptParts []string
-					scriptParts = append(scriptParts, "ipset flush allowed-domains 2>/dev/null || true")
-					if len(remaining) > 0 {
-						scriptParts = append(scriptParts, `for domain in "$@"; do
-  for ip in $(dig +short A "$domain" 2>/dev/null); do
-    echo "$ip" | grep -qE "^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$" && \
-      ipset add allowed-domains "$ip" 2>/dev/null || true
-  done
-done`)
-					}
-					script := strings.Join(scriptParts, "\n")
-					execArgs := []string{"sh", "-c", script, "_"}
-					execArgs = append(execArgs, remaining...)
-					_, err := rt.Exec(ctx, sandbox.InstanceName(name), execArgs, "0")
-					if err != nil {
-						if !jsonEnabled(cmd) {
-							fmt.Fprintf(w, "Warning: failed to update running container: %v\n", err) //nolint:errcheck // best-effort output
-							fmt.Fprintf(w, "Changes saved — will take effect on next start\n")       //nolint:errcheck // best-effort output
-						}
-					} else {
-						live = true
-						if !jsonEnabled(cmd) {
-							fmt.Fprintf(w, "Removed %s (live)\n", strings.Join(domains, ", ")) //nolint:errcheck // best-effort output
-						}
-					}
-				} else if !jsonEnabled(cmd) {
-					fmt.Fprintf(w, "Removed %s (will take effect on next start)\n", strings.Join(domains, ", ")) //nolint:errcheck // best-effort output
-				}
-
-				if jsonEnabled(cmd) {
-					return writeJSON(cmd.OutOrStdout(), map[string]any{
-						"name":            name,
-						"domains_removed": domains,
-						"live":            live,
-					})
-				}
-
-				return nil
-			})
+			return nil
 		},
 	}
 }

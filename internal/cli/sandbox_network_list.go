@@ -13,7 +13,7 @@ func newSandboxNetworkListCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "list <name>",
 		Short: "Show allowed domains",
-		Args:  cobra.MinimumNArgs(1),
+		Args:  cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name, _, err := resolveName(cmd, args)
 			if err != nil {
@@ -42,18 +42,19 @@ func newSandboxNetworkListCmd() *cobra.Command {
 			}
 
 			w := cmd.OutOrStdout()
-			if meta.NetworkMode != "isolated" && meta.NetworkMode != "none" {
+			switch meta.NetworkMode {
+			case "none":
+				fmt.Fprintln(w, "Network disabled (--network-none)") //nolint:errcheck // best-effort output
+			case "isolated":
+				if len(meta.NetworkAllow) == 0 {
+					fmt.Fprintln(w, "No domains allowed") //nolint:errcheck // best-effort output
+				} else {
+					for _, d := range meta.NetworkAllow {
+						fmt.Fprintln(w, d) //nolint:errcheck // best-effort output
+					}
+				}
+			default:
 				fmt.Fprintln(w, "No network isolation") //nolint:errcheck // best-effort output
-				return nil
-			}
-
-			if len(meta.NetworkAllow) == 0 {
-				fmt.Fprintln(w, "No domains allowed") //nolint:errcheck // best-effort output
-				return nil
-			}
-
-			for _, d := range meta.NetworkAllow {
-				fmt.Fprintln(w, d) //nolint:errcheck // best-effort output
 			}
 			return nil
 		},
