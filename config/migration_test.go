@@ -204,3 +204,100 @@ func TestMigrateIfNeeded_PreservesExtraKeys(t *testing.T) {
 	assert.Contains(t, configStr, "agent: claude")
 	assert.NotContains(t, configStr, "setup_complete")
 }
+
+func TestMigrateGlobalSettings_MovesTmuxConf(t *testing.T) {
+	tmpDir := t.TempDir()
+	profilePath := filepath.Join(tmpDir, "profile-config.yaml")
+	globalPath := filepath.Join(tmpDir, "global-config.yaml")
+
+	require.NoError(t, os.WriteFile(profilePath, []byte("tmux_conf: default+host\nagent: claude\n"), 0600))
+	require.NoError(t, os.WriteFile(globalPath, []byte("placeholder: true\n"), 0600))
+
+	require.NoError(t, MigrateGlobalSettings(profilePath, globalPath))
+
+	globalData, err := os.ReadFile(globalPath) //nolint:gosec // G304: test code
+	require.NoError(t, err)
+	assert.Contains(t, string(globalData), "tmux_conf")
+	assert.Contains(t, string(globalData), "default+host")
+
+	profileData, err := os.ReadFile(profilePath) //nolint:gosec // G304: test code
+	require.NoError(t, err)
+	assert.NotContains(t, string(profileData), "tmux_conf")
+	assert.Contains(t, string(profileData), "agent: claude")
+}
+
+func TestMigrateGlobalSettings_SkipsIfAlreadyInGlobal(t *testing.T) {
+	tmpDir := t.TempDir()
+	profilePath := filepath.Join(tmpDir, "profile-config.yaml")
+	globalPath := filepath.Join(tmpDir, "global-config.yaml")
+
+	require.NoError(t, os.WriteFile(profilePath, []byte("tmux_conf: from-profile\n"), 0600))
+	require.NoError(t, os.WriteFile(globalPath, []byte("tmux_conf: from-global\n"), 0600))
+
+	require.NoError(t, MigrateGlobalSettings(profilePath, globalPath))
+
+	globalData, err := os.ReadFile(globalPath) //nolint:gosec // G304: test code
+	require.NoError(t, err)
+	assert.Contains(t, string(globalData), "from-global")
+	assert.NotContains(t, string(globalData), "from-profile")
+}
+
+func TestMigrateGlobalSettings_NoGlobalKeysInProfile(t *testing.T) {
+	tmpDir := t.TempDir()
+	profilePath := filepath.Join(tmpDir, "profile-config.yaml")
+	globalPath := filepath.Join(tmpDir, "global-config.yaml")
+
+	globalContent := "placeholder: true\n"
+	require.NoError(t, os.WriteFile(profilePath, []byte("agent: claude\n"), 0600))
+	require.NoError(t, os.WriteFile(globalPath, []byte(globalContent), 0600))
+
+	require.NoError(t, MigrateGlobalSettings(profilePath, globalPath))
+
+	// Global file should be unchanged
+	globalData, err := os.ReadFile(globalPath) //nolint:gosec // G304: test code
+	require.NoError(t, err)
+	assert.Equal(t, globalContent, string(globalData))
+}
+
+func TestMigrateGlobalSettings_MissingProfileFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	profilePath := filepath.Join(tmpDir, "nonexistent-profile.yaml")
+	globalPath := filepath.Join(tmpDir, "global-config.yaml")
+
+	require.NoError(t, os.WriteFile(globalPath, []byte("# config\n"), 0600))
+
+	err := MigrateGlobalSettings(profilePath, globalPath)
+	assert.NoError(t, err)
+}
+
+func TestMigrateGlobalSettings_MissingGlobalFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	profilePath := filepath.Join(tmpDir, "profile-config.yaml")
+	globalPath := filepath.Join(tmpDir, "nonexistent-global.yaml")
+
+	require.NoError(t, os.WriteFile(profilePath, []byte("tmux_conf: default\n"), 0600))
+
+	err := MigrateGlobalSettings(profilePath, globalPath)
+	assert.NoError(t, err)
+}
+
+func TestMigrateGlobalSettings_MovesModelAliases(t *testing.T) {
+	tmpDir := t.TempDir()
+	profilePath := filepath.Join(tmpDir, "profile-config.yaml")
+	globalPath := filepath.Join(tmpDir, "global-config.yaml")
+
+	require.NoError(t, os.WriteFile(profilePath, []byte("model_aliases:\n  fast: haiku\n"), 0600))
+	require.NoError(t, os.WriteFile(globalPath, []byte("placeholder: true\n"), 0600))
+
+	require.NoError(t, MigrateGlobalSettings(profilePath, globalPath))
+
+	globalData, err := os.ReadFile(globalPath) //nolint:gosec // G304: test code
+	require.NoError(t, err)
+	assert.Contains(t, string(globalData), "model_aliases")
+	assert.Contains(t, string(globalData), "fast")
+	assert.Contains(t, string(globalData), "haiku")
+
+	profileData, err := os.ReadFile(profilePath) //nolint:gosec // G304: test code
+	require.NoError(t, err)
+	assert.NotContains(t, string(profileData), "model_aliases")
+}

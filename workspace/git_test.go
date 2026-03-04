@@ -3,6 +3,7 @@ package workspace
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -120,4 +121,48 @@ func TestStageUntracked_DeletedFiles(t *testing.T) {
 	output, err := cmd.Output()
 	require.NoError(t, err)
 	assert.Contains(t, string(output), "a.txt")
+}
+
+// Baseline tests
+
+func TestBaseline_CreatesRepoWithCommit(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, dir, "file.txt", "hello")
+
+	sha, err := Baseline(dir)
+	require.NoError(t, err)
+
+	// SHA should be a 40-character hex string
+	assert.Len(t, sha, 40)
+	assert.Regexp(t, `^[0-9a-f]{40}$`, sha)
+
+	// Verify git log contains the baseline commit message
+	cmd := NewGitCmd(dir, "log", "--oneline")
+	output, err := cmd.Output()
+	require.NoError(t, err)
+	assert.Contains(t, string(output), "yoloai baseline")
+}
+
+func TestBaseline_EmptyDir(t *testing.T) {
+	dir := t.TempDir()
+
+	sha, err := Baseline(dir)
+	require.NoError(t, err)
+
+	// Even with no files, --allow-empty should produce a valid commit
+	assert.Len(t, sha, 40)
+	assert.Regexp(t, `^[0-9a-f]{40}$`, sha)
+}
+
+func TestBaseline_SetsUserConfig(t *testing.T) {
+	dir := t.TempDir()
+
+	_, err := Baseline(dir)
+	require.NoError(t, err)
+
+	// Verify user.email was set to yoloai@localhost
+	cmd := NewGitCmd(dir, "config", "user.email")
+	output, err := cmd.Output()
+	require.NoError(t, err)
+	assert.Equal(t, "yoloai@localhost", strings.TrimSpace(string(output)))
 }

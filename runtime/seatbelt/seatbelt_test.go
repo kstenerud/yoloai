@@ -3,6 +3,7 @@ package seatbelt
 // ABOUTME: Unit tests for seatbelt backend — profile generation, platform, tmux socket.
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -361,5 +362,157 @@ func TestMountSymlinks_SkipUnreachableParent(t *testing.T) {
 	}
 	if len(created) != 0 {
 		t.Errorf("expected no symlinks for unreachable parent, got %d", len(created))
+	}
+}
+
+func TestPatchConfigWorkingDir_CopyMode(t *testing.T) {
+	sandboxPath := t.TempDir()
+	workDir := filepath.Join(sandboxPath, "work", "encoded-dir")
+	if err := os.MkdirAll(workDir, 0750); err != nil {
+		t.Fatal(err)
+	}
+
+	cfgPath := filepath.Join(sandboxPath, "config.json")
+	cfgData, err := json.Marshal(map[string]interface{}{
+		"working_dir": "/original/path",
+		"other_key":   "other_value",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(cfgPath, cfgData, 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	mounts := []runtime.MountSpec{
+		{Source: workDir, Target: "/some/target", ReadOnly: false},
+	}
+
+	r := &Runtime{}
+	if err := r.patchConfigWorkingDir(sandboxPath, mounts); err != nil {
+		t.Fatalf("patchConfigWorkingDir failed: %v", err)
+	}
+
+	data, err := os.ReadFile(cfgPath) //nolint:gosec // G304: test file in temp dir
+	if err != nil {
+		t.Fatal(err)
+	}
+	var raw map[string]interface{}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatal(err)
+	}
+	if raw["working_dir"] != workDir {
+		t.Errorf("working_dir = %q, want %q", raw["working_dir"], workDir)
+	}
+	if raw["other_key"] != "other_value" {
+		t.Error("other_key should be preserved")
+	}
+}
+
+func TestPatchConfigWorkingDir_NotCopyMode(t *testing.T) {
+	sandboxPath := t.TempDir()
+
+	originalConfig := `{"working_dir": "/original/path"}`
+	cfgPath := filepath.Join(sandboxPath, "config.json")
+	if err := os.WriteFile(cfgPath, []byte(originalConfig), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Mount source is NOT under <sandboxPath>/work/
+	mounts := []runtime.MountSpec{
+		{Source: "/some/other/path", Target: "/target", ReadOnly: false},
+	}
+
+	r := &Runtime{}
+	if err := r.patchConfigWorkingDir(sandboxPath, mounts); err != nil {
+		t.Fatalf("patchConfigWorkingDir failed: %v", err)
+	}
+
+	data, err := os.ReadFile(cfgPath) //nolint:gosec // G304: test file in temp dir
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != originalConfig {
+		t.Errorf("config.json should be unchanged, got %s", string(data))
+	}
+}
+
+func TestPatchConfigWorkingDir_NoMounts(t *testing.T) {
+	sandboxPath := t.TempDir()
+
+	originalConfig := `{"working_dir": "/original/path"}`
+	cfgPath := filepath.Join(sandboxPath, "config.json")
+	if err := os.WriteFile(cfgPath, []byte(originalConfig), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	r := &Runtime{}
+	if err := r.patchConfigWorkingDir(sandboxPath, nil); err != nil {
+		t.Fatalf("patchConfigWorkingDir failed: %v", err)
+	}
+
+	data, err := os.ReadFile(cfgPath) //nolint:gosec // G304: test file in temp dir
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != originalConfig {
+		t.Errorf("config.json should be unchanged, got %s", string(data))
+	}
+}
+
+func TestPatchConfigWorkingDir_AlreadyCorrect(t *testing.T) {
+	sandboxPath := t.TempDir()
+	workDir := filepath.Join(sandboxPath, "work", "encoded-dir")
+	if err := os.MkdirAll(workDir, 0750); err != nil {
+		t.Fatal(err)
+	}
+
+	// working_dir already equals the copy source
+	cfgData, err := json.Marshal(map[string]interface{}{
+		"working_dir": workDir,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfgPath := filepath.Join(sandboxPath, "config.json")
+	if err := os.WriteFile(cfgPath, cfgData, 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Record the file's mod time before the call
+	infoBefore, err := os.Stat(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mounts := []runtime.MountSpec{
+		{Source: workDir, Target: "/some/target", ReadOnly: false},
+	}
+
+	r := &Runtime{}
+	if err := r.patchConfigWorkingDir(sandboxPath, mounts); err != nil {
+		t.Fatalf("patchConfigWorkingDir failed: %v", err)
+	}
+
+	// File content should be unchanged (not rewritten)
+	data, err := os.ReadFile(cfgPath) //nolint:gosec // G304: test file in temp dir
+	if err != nil {
+		t.Fatal(err)
+	}
+	var raw map[string]interface{}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatal(err)
+	}
+	if raw["working_dir"] != workDir {
+		t.Errorf("working_dir = %q, want %q", raw["working_dir"], workDir)
+	}
+
+	// Verify the file was not rewritten by checking mod time
+	infoAfter, err := os.Stat(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if infoAfter.ModTime() != infoBefore.ModTime() {
+		t.Error("config.json should not have been rewritten when working_dir already matches")
 	}
 }

@@ -272,3 +272,85 @@ func containsStr(s, sub string) bool {
 	}
 	return false
 }
+
+func TestRemapTargetPath(t *testing.T) {
+	tests := []struct {
+		name   string
+		input  string
+		expect string
+	}{
+		{
+			name:   "docker home subpath",
+			input:  "/home/yoloai/.claude",
+			expect: "/Users/admin/.claude",
+		},
+		{
+			name:   "docker home exact",
+			input:  "/home/yoloai",
+			expect: "/Users/admin",
+		},
+		{
+			name:   "yoloai prefix",
+			input:  "/yoloai/config.json",
+			expect: "/Users/admin/.yoloai/config.json",
+		},
+		{
+			name:   "other user under /Users",
+			input:  "/Users/karl/project",
+			expect: "/Users/admin/host/Users/karl/project",
+		},
+		{
+			name:   "already under vmHomeDir",
+			input:  "/Users/admin/something",
+			expect: "/Users/admin/something",
+		},
+		{
+			name:   "no matching prefix",
+			input:  "/tmp/foo",
+			expect: "/tmp/foo",
+		},
+		{
+			name:   "docker home subpath with trailing content",
+			input:  "/home/yoloai/deep/nested/dir",
+			expect: "/Users/admin/deep/nested/dir",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := remapTargetPath(tt.input)
+			assert.Equal(t, tt.expect, got)
+		})
+	}
+}
+
+func TestMountDirName(t *testing.T) {
+	tests := []struct {
+		name   string
+		input  string
+		expect string
+	}{
+		{
+			name:   "typical path",
+			input:  "/Users/karl/project",
+			expect: "m-project",
+		},
+		{
+			name:   "deep nested path",
+			input:  "/some/deep/nested/path",
+			expect: "m-path",
+		},
+		{
+			name:   "single component",
+			input:  "/single",
+			expect: "m-single",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := mountDirName(tt.input)
+			assert.Equal(t, tt.expect, got)
+		})
+	}
+}

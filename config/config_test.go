@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gopkg.in/yaml.v3"
 )
 
 // configDir creates the profiles/base/ directory structure needed for config tests.
@@ -769,4 +770,45 @@ func TestGetConfigValue_AutoCommitInterval(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, found)
 	assert.Equal(t, "0", val)
+}
+
+// Helper to parse YAML and return the root mapping node.
+func parseYAMLMapping(t *testing.T, input string) *yaml.Node {
+	t.Helper()
+	var doc yaml.Node
+	require.NoError(t, yaml.Unmarshal([]byte(input), &doc))
+	require.Equal(t, yaml.DocumentNode, doc.Kind)
+	require.NotEmpty(t, doc.Content)
+	require.Equal(t, yaml.MappingNode, doc.Content[0].Kind)
+	return doc.Content[0]
+}
+
+func TestFindYAMLValue_Found(t *testing.T) {
+	root := parseYAMLMapping(t, "foo: bar\nbaz: qux\n")
+
+	node := FindYAMLValue(root, "foo")
+	require.NotNil(t, node)
+	assert.Equal(t, "bar", node.Value)
+}
+
+func TestFindYAMLValue_NotFound(t *testing.T) {
+	root := parseYAMLMapping(t, "foo: bar\n")
+
+	node := FindYAMLValue(root, "missing")
+	assert.Nil(t, node)
+}
+
+func TestFindYAMLValue_EmptyMapping(t *testing.T) {
+	root := &yaml.Node{Kind: yaml.MappingNode}
+
+	node := FindYAMLValue(root, "anything")
+	assert.Nil(t, node)
+}
+
+func TestFindYAMLValue_CorrectNode(t *testing.T) {
+	root := parseYAMLMapping(t, "a: 1\nb: 2\nc: 3\n")
+
+	node := FindYAMLValue(root, "b")
+	require.NotNil(t, node)
+	assert.Equal(t, "2", node.Value)
 }
