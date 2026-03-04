@@ -13,6 +13,7 @@ import (
 type CloneOptions struct {
 	Source string // existing sandbox name
 	Dest   string // new sandbox name
+	Force  bool   // destroy destination if it already exists
 }
 
 // Clone creates a new stopped sandbox by deep-copying an existing one's
