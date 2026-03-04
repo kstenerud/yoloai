@@ -1,5 +1,5 @@
 // ABOUTME: `yoloai sandbox` parent command grouping sandbox inspection
-// ABOUTME: subcommands: list, info, log, exec, network, prompt, config, clone.
+// ABOUTME: subcommands: list, info, log, exec, network, prompt, clone.
 package cli
 
 import "github.com/spf13/cobra"
@@ -19,7 +19,6 @@ func newSandboxCmd() *cobra.Command {
 		newSandboxExecCmd(),
 		newSandboxNetworkCmd(),
 		newSandboxPromptCmd(),
-		newSandboxConfigShowCmd(),
 		newSandboxCloneCmd(),
 	)
 

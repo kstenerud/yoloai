@@ -11,7 +11,8 @@ Completed in Pass 2:
 - `apply` refs + path filters combined — now works together
 - `diff --name-only` — list changed files without content
 - `new --env KEY=VAL` — pass environment variables to the sandbox
-- `sandbox prompt` / `sandbox config` — read-only inspection of sandbox settings
+- `sandbox prompt` — read-only inspection of sandbox prompt
+- `sandbox config` — removed; config file path now shown in `sandbox info` output
 
 Dropped (already working):
 - `new` without workdir — already works when `--profile` is set

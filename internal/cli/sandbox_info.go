@@ -37,10 +37,12 @@ func newSandboxInfoCmd() *cobra.Command {
 				if jsonEnabled(cmd) {
 					type infoJSON struct {
 						*sandbox.Info
+						ConfigPath    string `json:"config_path"`
 						PromptPreview string `json:"prompt_preview,omitempty"`
 					}
 					result := infoJSON{
 						Info:          info,
+						ConfigPath:    filepath.Join(sandbox.Dir(name), "config.json"),
 						PromptPreview: loadPromptPreview(sandbox.Dir(name)),
 					}
 					return writeJSON(cmd.OutOrStdout(), result)
@@ -67,7 +69,8 @@ func newSandboxInfoCmd() *cobra.Command {
 				}
 
 				sandboxDir := sandbox.Dir(name)
-				fmt.Fprintf(w, "Sandbox dir: %s\n", sandboxDir) //nolint:errcheck
+				fmt.Fprintf(w, "Sandbox dir: %s\n", sandboxDir)                               //nolint:errcheck
+				fmt.Fprintf(w, "Config:      %s\n", filepath.Join(sandboxDir, "config.json")) //nolint:errcheck
 
 				if preview := loadPromptPreview(sandboxDir); preview != "" {
 					fmt.Fprintf(w, "Prompt:      %s\n", preview) //nolint:errcheck
