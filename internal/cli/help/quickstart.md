@@ -3,29 +3,29 @@ YOLOAI QUICK START
   yoloai runs AI coding agents inside disposable sandboxes.
   Your original files stay protected — review changes before applying.
 
-BASIC WORKFLOW
+INTERACTIVE
 
-  1. Create a sandbox with a copy of your project:
+  1. Create a sandbox and attach to the agent's terminal:
 
-     yoloai new my-task ./my-project
+     yoloai new my-task ./my-project -a
 
-  2. Attach to watch the agent work (or let it run headless):
+  2. Work with the agent interactively, then detach (Ctrl-B D).
 
-     yoloai attach my-task
-
-  3. When the agent is done, review the diff:
+  3. Review the diff and apply changes you want to keep:
 
      yoloai diff my-task
-
-  4. Apply the changes you want to keep:
-
      yoloai apply my-task
 
-HEADLESS MODE
+HEADLESS
 
   Give the agent a prompt and let it work unattended:
 
      yoloai new my-task ./my-project -p "refactor the auth module"
+
+  Check back later:
+
+     yoloai diff my-task
+     yoloai apply my-task
 
 NEXT STEPS
 
