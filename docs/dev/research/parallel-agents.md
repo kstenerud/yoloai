@@ -49,6 +49,25 @@ Key insight from HN discussion: "spec quality is everything. A vague spec produc
 
 The flat markdown approach is simplest and works well with sandbox isolation (each sandbox gets its own spec). Shared-state approaches add complexity that may not be warranted when sandboxes already provide filesystem isolation.
 
+## Sandbox Chaining (Pipelines)
+
+A distinct pattern from parallel execution: sequential sandbox pipelines where the output of one sandbox becomes the input of the next. Each stage runs a different agent (or the same agent with a different prompt) on the data produced by the previous stage.
+
+**Use cases:**
+- **Code generation → review → testing:** Agent A writes code, agent B reviews it, agent C writes tests for it
+- **Research → implementation:** Agent A explores a codebase and writes a spec, agent B implements from that spec
+- **Refactor → verify → document:** Agent A refactors, agent B runs tests and fixes breakage, agent C updates docs
+- **Translation/migration pipelines:** Agent A converts Python to Go, agent B idiomatic-ifies the Go code
+- **Multi-model pipelines:** Use a cheap model for boilerplate, then an expensive model for the hard parts
+
+**Key design questions:**
+- What "data" flows between stages? The simplest answer: the workdir. Stage N's applied changes become stage N+1's starting state. This composes naturally with copy mode — each stage gets a fresh copy of the workdir as modified by prior stages.
+- Should intermediate diffs be reviewable? Ideally yes — the user should be able to inspect and approve each stage's output before it flows to the next, or run the whole pipeline unattended.
+- How are prompts specified? A pipeline definition needs an ordered list of (prompt, agent, model) tuples. Could be a YAML file, a multi-document markdown file, or CLI flags.
+- Error handling: if stage N fails or produces bad output, the pipeline should stop (not feed garbage to stage N+1). The user can then inspect, fix, and resume.
+
+**Relationship to batch:** Batch is fan-out (parallel), chaining is sequential. They compose: you could batch-parallelize independent pipelines, or fan out at one stage and converge at the next.
+
 ## Relevance to yoloAI
 
 yoloAI's sandbox model is a natural fit for parallel agent workflows:
@@ -59,10 +78,11 @@ yoloAI's sandbox model is a natural fit for parallel agent workflows:
 
 **Gaps to address:**
 1. No batch creation of sandboxes from a task list
-2. No agent status detection (running/idle/done/error) in `yoloai ls`
-3. `yoloai ls` output is minimal for multi-sandbox management
-4. No ordering/dependency between sandboxes for sequential apply
-5. No cost/token tracking surfaced from agents
+2. No sandbox chaining / pipeline execution
+3. No agent status detection (running/idle/done/error) in `yoloai ls`
+4. `yoloai ls` output is minimal for multi-sandbox management
+5. No ordering/dependency between sandboxes for sequential apply
+6. No cost/token tracking surfaced from agents
 
 **yoloAI advantages over manual tmux approach:**
 - Sandbox isolation eliminates the permission-bypass security concerns the blog author raised
