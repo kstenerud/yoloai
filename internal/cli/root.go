@@ -19,6 +19,19 @@ const exitCodeSIGINT = 130
 func Execute(ctx context.Context, version, commit, date string) int {
 	rootCmd := newRootCmd(version, commit, date)
 
+	// Track which command was active when the error occurred so we can
+	// show a context-aware help hint (e.g. "Run 'yoloai system prune -h' for help").
+	var activeCmd *cobra.Command
+	rootCmd.PersistentPreRun = func(cmd *cobra.Command, _ []string) { activeCmd = cmd }
+	prev := rootCmd.FlagErrorFunc()
+	rootCmd.SetFlagErrorFunc(func(cmd *cobra.Command, err error) error {
+		activeCmd = cmd
+		if prev != nil {
+			return prev(cmd, err)
+		}
+		return err
+	})
+
 	err := rootCmd.ExecuteContext(ctx)
 	if err == nil {
 		return 0
@@ -33,6 +46,9 @@ func Execute(ctx context.Context, version, commit, date string) int {
 		writeJSONError(os.Stderr, err)
 	} else {
 		fmt.Fprintf(os.Stderr, "yoloai: %s\n", err) //nolint:errcheck // best-effort stderr write
+		if activeCmd != nil {
+			fmt.Fprintf(os.Stderr, "Run '%s -h' for help\n", activeCmd.CommandPath()) //nolint:errcheck // best-effort stderr write
+		}
 	}
 
 	var exitErr *extension.ExitError
