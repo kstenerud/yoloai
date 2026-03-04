@@ -4,7 +4,7 @@ COMMIT  := $(shell git rev-parse --short HEAD 2>/dev/null || echo "none")
 DATE    := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 LDFLAGS := -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(DATE)
 
-.PHONY: build test fmt lint tidy-check check integration clean
+.PHONY: build test fmt lint tidy-check check cover integration clean
 
 build:
 	CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o $(BINARY) ./cmd/yoloai
@@ -33,6 +33,15 @@ tidy-check:
 
 ## check: run all CI checks locally (same as PR checks)
 check: lint tidy-check test
+
+## cover: show test coverage per package and total
+cover:
+	@go test -coverprofile=coverage.out ./... 2>&1 | grep -E '^ok|no test' | \
+		sed 's/.*yoloai\//  /; s/[[:space:]]*coverage: / /; s/ of statements//' | \
+		sort -t' ' -k2 -n; \
+	echo ""; \
+	go tool cover -func=coverage.out | tail -1; \
+	rm -f coverage.out
 
 integration:
 	go test -tags=integration -v -count=1 -timeout=10m ./sandbox/ ./runtime/docker/ ./internal/cli/
