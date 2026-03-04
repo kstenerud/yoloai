@@ -1,5 +1,5 @@
-// ABOUTME: `yoloai sandbox` parent command grouping sandbox inspection
-// ABOUTME: subcommands: list, info, log, exec, network, prompt, clone.
+// ABOUTME: `yoloai sandbox` parent command grouping sandbox tool
+// ABOUTME: subcommands: list, info, log, exec, network, prompt.
 package cli
 
 import "github.com/spf13/cobra"
@@ -8,9 +8,12 @@ func newSandboxCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "sandbox",
 		Aliases: []string{"sb"},
-		Short:   "Sandbox inspection",
-		GroupID: groupInspect,
+		Short:   "Sandbox tools",
+		GroupID: groupSandboxTools,
 	}
+
+	cloneAlias := newSandboxCloneCmd()
+	cloneAlias.Hidden = true
 
 	cmd.AddCommand(
 		newSandboxListCmd(),
@@ -19,7 +22,7 @@ func newSandboxCmd() *cobra.Command {
 		newSandboxExecCmd(),
 		newSandboxNetworkCmd(),
 		newSandboxPromptCmd(),
-		newSandboxCloneCmd(),
+		cloneAlias,
 	)
 
 	return cmd

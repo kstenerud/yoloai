@@ -15,45 +15,46 @@ import (
 
 // Command group IDs for help output.
 const (
-	groupWorkflow  = "workflow"
-	groupLifecycle = "lifecycle"
-	groupInspect   = "inspect"
-	groupAdmin     = "admin"
+	groupLifecycle    = "lifecycle"
+	groupWorkflow     = "workflow"
+	groupSandboxTools = "sandbox-tools"
+	groupAdmin        = "admin"
 )
 
 // registerCommands adds all subcommands to the root command.
 func registerCommands(root *cobra.Command, version, commit, date string) {
 	root.AddGroup(
-		&cobra.Group{ID: groupWorkflow, Title: "Core Workflow:"},
 		&cobra.Group{ID: groupLifecycle, Title: "Lifecycle:"},
-		&cobra.Group{ID: groupInspect, Title: "Inspection:"},
+		&cobra.Group{ID: groupWorkflow, Title: "Workflow:"},
+		&cobra.Group{ID: groupSandboxTools, Title: "Sandbox Tools:"},
 		&cobra.Group{ID: groupAdmin, Title: "Admin:"},
 	)
 
 	root.AddCommand(
-		// Workflow
-		newNewCmd(version),
-		newAttachCmd(),
-		newDiffCmd(),
-		newApplyCmd(),
-		newFilesCmd(),
-		newXCmd(),
-
 		// Lifecycle
+		newNewCmd(version),
+		newCloneCmd(),
 		newStartCmd(),
 		newStopCmd(),
 		newRestartCmd(),
 		newDestroyCmd(),
 		newResetCmd(),
 
-		// Inspection
-		newSystemCmd(version, commit, date),
+		// Workflow
+		newAttachCmd(),
+		newDiffCmd(),
+		newApplyCmd(),
+		newFilesCmd(),
+		newXCmd(),
+
+		// Sandbox Tools
 		newSandboxCmd(),
 		newLsAliasCmd(),
 		newLogAliasCmd(),
 		newExecAliasCmd(),
 
 		// Admin
+		newSystemCmd(version, commit, date),
 		newProfileCmd(),
 		newHelpCmd(),
 		newConfigCmd(),
@@ -66,7 +67,7 @@ func newLsAliasCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "ls",
 		Short:   "List sandboxes (shortcut for 'sandbox list')",
-		GroupID: groupInspect,
+		GroupID: groupSandboxTools,
 		Args:    cobra.NoArgs,
 		RunE:    runList,
 	}
@@ -78,7 +79,7 @@ func newLogAliasCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "log <name>",
 		Short:   "Show sandbox log (shortcut for 'sandbox log')",
-		GroupID: groupInspect,
+		GroupID: groupSandboxTools,
 		Args:    cobra.ArbitraryArgs,
 		RunE:    runLog,
 	}
@@ -90,7 +91,7 @@ func newExecAliasCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:     "exec <name> <command> [args...]",
 		Short:   "Run a command inside a sandbox (shortcut for 'sandbox exec')",
-		GroupID: groupInspect,
+		GroupID: groupSandboxTools,
 		Args:    cobra.MinimumNArgs(1),
 		RunE:    runExec,
 	}
@@ -100,7 +101,7 @@ func newNewCmd(version string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "new [flags] <name> [workdir] [-d <dir>...] [-- <agent-args>...]",
 		Short:   "Create and start a sandbox",
-		GroupID: groupWorkflow,
+		GroupID: groupLifecycle,
 		Args:    cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Parse positional args considering --

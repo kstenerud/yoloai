@@ -19,7 +19,7 @@ func newSystemCmd(version, commit, date string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "system",
 		Short:   "System information and management",
-		GroupID: groupInspect,
+		GroupID: groupAdmin,
 	}
 
 	cmd.AddCommand(
