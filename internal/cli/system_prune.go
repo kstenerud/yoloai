@@ -22,15 +22,25 @@ func newSystemPruneCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			dryRun, _ := cmd.Flags().GetBool("dry-run")
 			yes := effectiveYes(cmd)
-			backend := resolveBackend(cmd)
+			all, _ := cmd.Flags().GetBool("all")
+			backendFlag, _ := cmd.Flags().GetString("backend")
 
-			return runSystemPrune(cmd, backend, dryRun, yes)
+			if all && backendFlag != "" {
+				return fmt.Errorf("--all and --backend are mutually exclusive")
+			}
+
+			if all {
+				return runSystemPruneAll(cmd, dryRun, yes)
+			}
+
+			return runSystemPrune(cmd, resolveBackend(cmd), dryRun, yes)
 		},
 	}
 
 	cmd.Flags().Bool("dry-run", false, "Report only, don't remove anything")
 	cmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
 	cmd.Flags().String("backend", "", "Runtime backend (see 'yoloai system backends')")
+	cmd.Flags().Bool("all", false, "Prune across all available backends")
 
 	return cmd
 }
@@ -134,6 +144,128 @@ func runSystemPrune(cmd *cobra.Command, backend string, dryRun, yes bool) error 
 	}
 
 	// 10. Remove stale temp files.
+	if _, err := sandbox.PruneTempFiles(false, 1*time.Hour); err != nil {
+		return fmt.Errorf("remove temp files: %w", err)
+	}
+	if !isJSON {
+		for _, path := range staleTempDirs {
+			fmt.Fprintf(output, "Removed temp dir %s\n", path) //nolint:errcheck
+		}
+	}
+
+	if isJSON {
+		return writePruneJSON(cmd, scanResult, staleTempDirs, false)
+	}
+
+	return nil
+}
+
+// runSystemPruneAll prunes orphaned resources across all available backends.
+func runSystemPruneAll(cmd *cobra.Command, dryRun, yes bool) error {
+	ctx := cmd.Context()
+	output := cmd.OutOrStdout()
+
+	knownInstances, brokenSandboxes := scanSandboxes()
+
+	// Scan all available backends, aggregating results.
+	var allItems []runtime.PruneItem
+	var availableBackends []string
+	for _, b := range knownBackends {
+		available, _ := checkBackend(ctx, b.Name)
+		if !available {
+			continue
+		}
+		availableBackends = append(availableBackends, b.Name)
+
+		var result runtime.PruneResult
+		err := withRuntime(ctx, b.Name, func(ctx context.Context, rt runtime.Runtime) error {
+			var err error
+			result, err = rt.Prune(ctx, knownInstances, true, output)
+			return err
+		})
+		if err != nil {
+			return fmt.Errorf("scan %s: %w", b.Name, err)
+		}
+		allItems = append(allItems, result.Items...)
+	}
+
+	staleTempDirs, err := sandbox.PruneTempFiles(true, 1*time.Hour)
+	if err != nil {
+		return fmt.Errorf("scan temp files: %w", err)
+	}
+
+	isJSON := jsonEnabled(cmd)
+	scanResult := runtime.PruneResult{Items: allItems}
+
+	if !isJSON {
+		for _, bs := range brokenSandboxes {
+			fmt.Fprintf(output, "Warning: broken sandbox at %s — use 'yoloai destroy %s' to remove\n", bs.path, bs.name) //nolint:errcheck
+		}
+	}
+
+	totalItems := len(allItems) + len(staleTempDirs)
+	if totalItems == 0 {
+		if isJSON {
+			return writePruneJSON(cmd, scanResult, staleTempDirs, dryRun)
+		}
+		fmt.Fprintln(output, "Nothing to prune.") //nolint:errcheck
+		return nil
+	}
+
+	if !isJSON {
+		if len(allItems) > 0 {
+			fmt.Fprintln(output, "Orphaned resources:") //nolint:errcheck
+			for _, item := range allItems {
+				fmt.Fprintf(output, "  %s %s\n", item.Kind, item.Name) //nolint:errcheck
+			}
+			fmt.Fprintln(output) //nolint:errcheck
+		}
+
+		if len(staleTempDirs) > 0 {
+			fmt.Fprintln(output, "Stale temporary files:") //nolint:errcheck
+			for _, path := range staleTempDirs {
+				fmt.Fprintf(output, "  %s\n", path) //nolint:errcheck
+			}
+			fmt.Fprintln(output) //nolint:errcheck
+		}
+	}
+
+	if dryRun {
+		if isJSON {
+			return writePruneJSON(cmd, scanResult, staleTempDirs, true)
+		}
+		return nil
+	}
+
+	if !yes {
+		prompt := fmt.Sprintf("Remove %d resource(s)? [y/N]: ", totalItems)
+		confirmed, err := sandbox.Confirm(ctx, prompt, cmd.InOrStdin(), cmd.ErrOrStderr())
+		if err != nil {
+			return err
+		}
+		if !confirmed {
+			return nil
+		}
+	}
+
+	// Remove orphaned resources from each available backend.
+	if len(allItems) > 0 {
+		for _, name := range availableBackends {
+			err := withRuntime(ctx, name, func(ctx context.Context, rt runtime.Runtime) error {
+				_, err := rt.Prune(ctx, knownInstances, false, output)
+				return err
+			})
+			if err != nil {
+				return fmt.Errorf("prune %s: %w", name, err)
+			}
+		}
+		if !isJSON {
+			for _, item := range allItems {
+				fmt.Fprintf(output, "Removed %s %s\n", item.Kind, item.Name) //nolint:errcheck
+			}
+		}
+	}
+
 	if _, err := sandbox.PruneTempFiles(false, 1*time.Hour); err != nil {
 		return fmt.Errorf("remove temp files: %w", err)
 	}
