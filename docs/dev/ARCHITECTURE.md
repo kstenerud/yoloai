@@ -143,7 +143,7 @@ Dependency direction: `cmd/yoloai` → `cli` → `sandbox` + `runtime`; `sandbox
 | `lifecycle.go` | `Start()`, `Stop()`, `Destroy()`, `Reset()` — sandbox lifecycle. `recreateContainer()` and `relaunchAgent()` for restart scenarios. `resetInPlace()` for `--no-restart` resets. `clearOverlayDirs()` clears upper/ovlwork for instant `:overlay` reset. |
 | `diff.go` | `GenerateDiff()`, `GenerateDiffStat()`, `GenerateCommitDiff()`, `ListCommitsWithStats()` — diff generation for `:copy`, `:overlay`, and `:rw` modes. |
 | `apply.go` | `GeneratePatch()`, `CheckPatch()`, `ApplyPatch()` — squash apply via `git apply`. `GenerateFormatPatch()`, `ApplyFormatPatch()` — per-commit apply via `git am`. `ListCommitsBeyondBaseline()`, `AdvanceBaseline()`, `AdvanceBaselineTo()`. |
-| `inspect.go` | `DetectStatus()` — queries runtime + tmux for sandbox state. `InspectSandbox()`, `ListSandboxes()` — metadata + live status. `execInContainer()` helper uses `runtime.Exec()`. |
+| `inspect.go` | `DetectStatus()` — reads bind-mounted status file written by in-container monitor; falls back to exec-based tmux query for old sandboxes. `InspectSandbox()`, `ListSandboxes()` — metadata + live status. `execInContainer()` helper uses `runtime.Exec()`. |
 | `meta.go` | `Meta` / `WorkdirMeta` structs, `SaveMeta()` / `LoadMeta()` — sandbox metadata persistence as `meta.json`. `Meta.Backend` records which runtime backend was used to create the sandbox. |
 | `paths.go` | `EncodePath()` / `DecodePath()` — caret encoding for filesystem-safe names. `InstanceName()` (and deprecated alias `ContainerName()`), `Dir()`, `WorkDir()`, `RequireSandboxDir()`. `OverlayUpperDir()` / `OverlayOvlworkDir()` for `:overlay` mount paths. |
 | `parse.go` | `ParseDirArg()` — parses `path:copy`, `path:overlay`, `path:rw`, `path:force` suffixes into `DirArg`. |
@@ -353,6 +353,7 @@ Manager.Start (sandbox/lifecycle.go)
 │       ├── context.md       # Sandbox environment description (dirs, network, resources)
 │       ├── prompt.txt       # Agent prompt (if provided)
 │       ├── log.txt          # Session log
+│       ├── status.json      # Agent status (written by in-container monitor)
 │       ├── agent-state/     # Mounted at agent's StateDir (e.g., /home/yoloai/.claude/, /home/yoloai/.gemini/)
 │       ├── files/           # Bidirectional file exchange (mounted at /yoloai/files/)
 │       ├── home-seed/       # Files mounted individually into /home/yoloai/
@@ -404,7 +405,7 @@ Manager.Start (sandbox/lifecycle.go)
 4. Runtime creation: `runtime.Create()` in `runtime/docker/docker.go`
 
 **Change sandbox status detection:**
-1. `DetectStatus()` in `sandbox/inspect.go` — queries `runtime.Inspect()` and tmux via `runtime.Exec()`
+1. `DetectStatus()` in `sandbox/inspect.go` — reads status file from sandbox dir (written by in-container monitor), falls back to `runtime.Exec()` for old sandboxes
 2. Status constants are in the same file
 
 **Change config handling:**

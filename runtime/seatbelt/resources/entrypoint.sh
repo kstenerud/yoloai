@@ -178,6 +178,33 @@ if [ -f "$PROMPT_FILE" ]; then
     done
 fi
 
+# --- Status monitor ---
+STATUS_FILE="$SANDBOX_DIR/status.json"
+write_status() { printf '{"status":"%s","exit_code":%s,"timestamp":%d}\n' "$1" "$2" "$(date +%s)" > "$STATUS_FILE"; }
+write_status running null
+(
+    while true; do
+        PANE_DEAD=$(tmux -S "$TMUX_SOCK" list-panes -t main -F "#{pane_dead}" 2>/dev/null || echo "error")
+        if [ "$PANE_DEAD" = "1" ]; then
+            EXIT_CODE=$(tmux -S "$TMUX_SOCK" list-panes -t main -F "#{pane_dead_status}" 2>/dev/null || echo "1")
+            write_status done "$EXIT_CODE"
+            break
+        elif [ "$PANE_DEAD" = "error" ]; then
+            write_status done 1
+            break
+        fi
+        NEW_STATUS="running"
+        if [ -n "$READY_PATTERN" ] && [ "$READY_PATTERN" != "null" ]; then
+            LAST_LINE=$(tmux -S "$TMUX_SOCK" capture-pane -t main -p 2>/dev/null | grep -v "^$" | tail -1 || true)
+            if echo "$LAST_LINE" | grep -qF "$READY_PATTERN"; then
+                NEW_STATUS="idle"
+            fi
+        fi
+        write_status "$NEW_STATUS" null
+        sleep 2
+    done
+) &
+
 debug_log "entrypoint setup complete, blocking on tmux wait"
 
 # Block — process stops only on explicit kill

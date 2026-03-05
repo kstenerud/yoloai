@@ -348,6 +348,10 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 		return nil, fmt.Errorf("write log.txt: %w", err)
 	}
 
+	if err := os.WriteFile(filepath.Join(sandboxDir, "status.json"), []byte("{}\n"), 0600); err != nil {
+		return nil, fmt.Errorf("write status.json: %w", err)
+	}
+
 	if err := os.WriteFile(filepath.Join(sandboxDir, "config.json"), configData, 0600); err != nil {
 		return nil, fmt.Errorf("write config.json: %w", err)
 	}
@@ -847,6 +851,12 @@ func buildMounts(state *sandboxState, secretsDir string) []runtime.MountSpec {
 		Target: "/yoloai/log.txt",
 	})
 
+	// Status file (for in-container status monitor)
+	mounts = append(mounts, runtime.MountSpec{
+		Source: filepath.Join(state.sandboxDir, "status.json"),
+		Target: "/yoloai/status.json",
+	})
+
 	// Prompt file
 	if state.hasPrompt {
 		promptSource := filepath.Join(state.sandboxDir, "prompt.txt")
@@ -1108,6 +1118,8 @@ func ensureContainerSettings(agentDef *agent.Definition, sandboxDir string) erro
 		// sandbox-exec cannot be nested — an inner sandbox-exec inherits the outer
 		// profile's restrictions and typically fails.
 		settings["sandbox"] = map[string]interface{}{"enabled": false}
+		// Ensure Claude Code emits BEL for tmux tab highlighting
+		settings["preferredNotifChannel"] = "terminal_bell"
 		return writeJSONMap(settingsPath, settings)
 
 	case "gemini":

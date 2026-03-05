@@ -55,7 +55,7 @@ func (m *Manager) Start(ctx context.Context, name string, opts StartOpts) error 
 	}
 
 	cname := InstanceName(name)
-	status, _, err := DetectStatus(ctx, m.runtime, cname, 0)
+	status, err := DetectStatus(ctx, m.runtime, cname, sandboxDir)
 	if err != nil {
 		return fmt.Errorf("detect status: %w", err)
 	}
@@ -204,7 +204,7 @@ func (m *Manager) Reset(ctx context.Context, opts ResetOptions) error {
 
 	// Check if we can do an in-place reset (--no-restart)
 	if opts.NoRestart {
-		status, _, err := DetectStatus(ctx, m.runtime, InstanceName(opts.Name), 0)
+		status, err := DetectStatus(ctx, m.runtime, InstanceName(opts.Name), sandboxDir)
 		if err != nil || (status != StatusRunning && status != StatusIdle) {
 			fmt.Fprintf(m.output, "Container is not running, falling back to restart\n") //nolint:errcheck // best-effort output
 			opts.NoRestart = false
@@ -351,7 +351,7 @@ func (m *Manager) Reset(ctx context.Context, opts ResetOptions) error {
 // destruction. Returns true if the agent is running or unapplied changes
 // exist. Returns a reason string for the confirmation prompt.
 func (m *Manager) NeedsConfirmation(ctx context.Context, name string) (bool, string) {
-	status, _, err := DetectStatus(ctx, m.runtime, InstanceName(name), 0)
+	status, err := DetectStatus(ctx, m.runtime, InstanceName(name), Dir(name))
 	if err != nil {
 		return false, ""
 	}

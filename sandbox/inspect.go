@@ -2,6 +2,7 @@ package sandbox
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -28,17 +29,17 @@ const (
 	StatusBroken  Status = "broken"  // sandbox dir exists but meta.json missing/invalid
 )
 
-// DefaultIdleThreshold is retained for config/API compatibility but currently
-// unused. Idle detection now uses tmux window_bell_flag instead of timestamps.
+// DefaultIdleThreshold is retained for config/API compatibility but unused.
+//
+// Deprecated: idle detection uses the in-container status monitor.
 const DefaultIdleThreshold = 30
 
 // Info holds the combined metadata and live state for a sandbox.
 type Info struct {
-	Meta        *Meta  `json:"meta"`
-	Status      Status `json:"status"`
-	ContainerID string `json:"container_id,omitempty"` // 12-char short ID, empty if removed
-	HasChanges  string `json:"has_changes"`            // "yes", "no", or "-" (unknown/not applicable)
-	DiskUsage   string `json:"disk_usage"`             // human-readable size, e.g. "42.0MB"
+	Meta       *Meta  `json:"meta"`
+	Status     Status `json:"status"`
+	HasChanges string `json:"has_changes"` // "yes", "no", or "-" (unknown/not applicable)
+	DiskUsage  string `json:"disk_usage"`  // human-readable size, e.g. "42.0MB"
 }
 
 // FormatAge returns a human-readable duration string (e.g., "2h", "3d", "5m").
@@ -123,51 +124,110 @@ func execInContainer(ctx context.Context, rt runtime.Runtime, containerID string
 	return result.Stdout, nil
 }
 
-// DetectStatus queries the runtime and tmux to determine sandbox status.
-// idleThreshold is retained for API compatibility but currently unused;
-// idle detection uses tmux's window_bell_flag instead of timestamps.
-func DetectStatus(ctx context.Context, rt runtime.Runtime, containerName string, idleThreshold int) (Status, string, error) {
-	_ = idleThreshold // retained for API compat; bell-based detection doesn't use a threshold
+// statusFileStaleness is the maximum age of a status.json timestamp before
+// falling back to exec-based detection.
+const statusFileStaleness = 10 * time.Second
 
+// statusJSON is the structure written by the in-container status monitor.
+// Designed for extensibility — new fields can be added without breaking readers.
+type statusJSON struct {
+	Status    string `json:"status"`              // "running", "idle", "done"
+	ExitCode  *int   `json:"exit_code,omitempty"` // set when status is "done"
+	Timestamp int64  `json:"timestamp"`           // unix seconds
+}
+
+// DetectStatus queries the runtime and status.json to determine sandbox status.
+// sandboxDir is the host-side sandbox directory; if empty, only exec fallback is used.
+func DetectStatus(ctx context.Context, rt runtime.Runtime, containerName string, sandboxDir string) (Status, error) {
 	info, err := rt.Inspect(ctx, containerName)
 	if err != nil {
 		if errors.Is(err, runtime.ErrNotFound) {
-			return StatusRemoved, "", nil
+			return StatusRemoved, nil
 		}
-		return "", "", fmt.Errorf("inspect container: %w", err)
+		return "", fmt.Errorf("inspect container: %w", err)
 	}
 
 	if !info.Running {
-		return StatusStopped, "", nil
+		return StatusStopped, nil
 	}
 
-	// Query tmux pane state: pane_dead | pane_dead_status | window_bell_flag
+	// Try status.json first (fast path — no exec)
+	if sandboxDir != "" {
+		data, readErr := os.ReadFile(filepath.Join(sandboxDir, "status.json")) //nolint:gosec // path is sandbox-controlled
+		if readErr == nil && len(data) > 0 {
+			if status, ok := parseStatusJSON(data); ok {
+				return status, nil
+			}
+		}
+	}
+
+	// Fall back to exec-based detection (old sandboxes without status monitor)
+	return detectStatusViaExec(ctx, rt, containerName)
+}
+
+// parseStatusJSON parses the status.json content and returns the status.
+// Returns false if the content is invalid or stale (except for terminal "done" state).
+func parseStatusJSON(data []byte) (Status, bool) {
+	var s statusJSON
+	if err := json.Unmarshal(data, &s); err != nil {
+		return "", false
+	}
+
+	if s.Status == "" || s.Timestamp == 0 {
+		return "", false
+	}
+
+	switch s.Status {
+	case "running", "idle":
+		age := time.Since(time.Unix(s.Timestamp, 0))
+		if age > statusFileStaleness {
+			return "", false // stale — fall back to exec
+		}
+		if s.Status == "idle" {
+			return StatusIdle, true
+		}
+		return StatusRunning, true
+
+	case "done":
+		// "done" is a terminal state — trust it even if stale
+		exitCode := 1
+		if s.ExitCode != nil {
+			exitCode = *s.ExitCode
+		}
+		if exitCode == 0 {
+			return StatusDone, true
+		}
+		return StatusFailed, true
+
+	default:
+		return "", false
+	}
+}
+
+// detectStatusViaExec falls back to exec-based tmux queries for old sandboxes
+// without the in-container status monitor.
+func detectStatusViaExec(ctx context.Context, rt runtime.Runtime, containerName string) (Status, error) {
 	output, err := execInContainer(ctx, rt, containerName, []string{
-		"tmux", "list-panes", "-t", "main", "-F", "#{pane_dead}|#{pane_dead_status}|#{window_bell_flag}",
+		"tmux", "list-panes", "-t", "main", "-F", "#{pane_dead}|#{pane_dead_status}",
 	})
 	if err != nil {
-		// tmux query failed — default to running (safest assumption)
-		return StatusRunning, "", nil
+		return StatusRunning, nil
 	}
 
-	parts := strings.SplitN(strings.TrimSpace(output), "|", 3)
-	if len(parts) < 3 {
-		return StatusRunning, "", nil
+	parts := strings.SplitN(strings.TrimSpace(output), "|", 2)
+	if len(parts) < 2 {
+		return StatusRunning, nil
 	}
 
 	if parts[0] == "0" {
-		// Pane is alive — check bell flag for idle detection
-		if parts[2] == "1" {
-			return StatusIdle, "", nil
-		}
-		return StatusRunning, "", nil
+		return StatusRunning, nil
 	}
 
 	// Pane is dead
 	if parts[1] == "0" {
-		return StatusDone, "", nil
+		return StatusDone, nil
 	}
-	return StatusFailed, "", nil
+	return StatusFailed, nil
 }
 
 // InspectSandbox loads metadata and queries the runtime for a single sandbox.
@@ -182,7 +242,7 @@ func InspectSandbox(ctx context.Context, rt runtime.Runtime, name string) (*Info
 		return nil, fmt.Errorf("load metadata: %w", err)
 	}
 
-	status, containerID, err := DetectStatus(ctx, rt, InstanceName(name), meta.IdleThreshold)
+	status, err := DetectStatus(ctx, rt, InstanceName(name), sandboxDir)
 	if err != nil {
 		return nil, err
 	}
@@ -209,11 +269,10 @@ func InspectSandbox(ctx context.Context, rt runtime.Runtime, name string) (*Info
 	}
 
 	return &Info{
-		Meta:        meta,
-		Status:      status,
-		ContainerID: containerID,
-		HasChanges:  changes,
-		DiskUsage:   diskUsage,
+		Meta:       meta,
+		Status:     status,
+		HasChanges: changes,
+		DiskUsage:  diskUsage,
 	}, nil
 }
 

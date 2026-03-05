@@ -119,10 +119,6 @@ func newSandboxInfoCmd() *cobra.Command {
 				if meta.Workdir.BaselineSHA != "" {
 					fmt.Fprintf(w, "Baseline:    %s\n", meta.Workdir.BaselineSHA) //nolint:errcheck
 				}
-				if info.ContainerID != "" {
-					fmt.Fprintf(w, "Container:   %s\n", info.ContainerID) //nolint:errcheck
-				}
-
 				if meta.YoloaiVersion != "" {
 					fmt.Fprintf(w, "Version:     %s\n", meta.YoloaiVersion) //nolint:errcheck
 				}

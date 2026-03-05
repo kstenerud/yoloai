@@ -4,6 +4,16 @@ Tracks breaking changes made during beta. Each entry should be included in relea
 
 ## Unreleased
 
+### `container_id` removed from JSON output
+
+**Previous behavior:** `yoloai ls --json` and `yoloai sandbox info --json` included a `container_id` field in the output.
+
+**New behavior:** The `container_id` field is no longer present.
+
+**Rationale:** The field was always empty — it was never populated with a value. Removing it cleans up the JSON API.
+
+**Migration:** Remove any code that reads `container_id` from yoloAI JSON output. The field was always empty, so no information is lost.
+
 ### `yoloai new --replace` renamed to `--force`
 
 **Previous behavior:** `yoloai new --replace` replaced an existing sandbox with the same name.
