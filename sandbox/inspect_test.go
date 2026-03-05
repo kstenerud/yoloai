@@ -14,10 +14,11 @@ import (
 	"github.com/kstenerud/yoloai/runtime"
 )
 
-// inspectMockRuntime extends mockRuntime to support Inspect for inspect tests.
+// inspectMockRuntime extends mockRuntime to support Inspect and Exec for inspect tests.
 type inspectMockRuntime struct {
 	mockRuntime
 	inspectFn func(ctx context.Context, name string) (runtime.InstanceInfo, error)
+	execFn    func(ctx context.Context, name string, cmd []string, user string) (runtime.ExecResult, error)
 }
 
 func (m *inspectMockRuntime) Inspect(ctx context.Context, name string) (runtime.InstanceInfo, error) {
@@ -25,6 +26,13 @@ func (m *inspectMockRuntime) Inspect(ctx context.Context, name string) (runtime.
 		return m.inspectFn(ctx, name)
 	}
 	return runtime.InstanceInfo{}, errMockNotImplemented
+}
+
+func (m *inspectMockRuntime) Exec(ctx context.Context, name string, cmd []string, user string) (runtime.ExecResult, error) {
+	if m.execFn != nil {
+		return m.execFn(ctx, name, cmd, user)
+	}
+	return m.mockRuntime.Exec(ctx, name, cmd, user)
 }
 
 // FormatAge tests
@@ -202,4 +210,98 @@ func TestListSandboxes_IncludesBroken(t *testing.T) {
 	assert.Equal(t, StatusBroken, brokenInfo.Status)
 	assert.Equal(t, "-", brokenInfo.HasChanges)
 	assert.Equal(t, "-", brokenInfo.DiskUsage)
+}
+
+// DetectStatus tests
+
+func TestDetectStatus_Running(t *testing.T) {
+	mock := &inspectMockRuntime{
+		inspectFn: func(_ context.Context, _ string) (runtime.InstanceInfo, error) {
+			return runtime.InstanceInfo{Running: true}, nil
+		},
+		execFn: func(_ context.Context, _ string, _ []string, _ string) (runtime.ExecResult, error) {
+			return runtime.ExecResult{Stdout: "0||"}, nil
+		},
+	}
+	status, _, err := DetectStatus(context.Background(), mock, "test", 0)
+	require.NoError(t, err)
+	assert.Equal(t, StatusRunning, status)
+}
+
+func TestDetectStatus_Idle(t *testing.T) {
+	mock := &inspectMockRuntime{
+		inspectFn: func(_ context.Context, _ string) (runtime.InstanceInfo, error) {
+			return runtime.InstanceInfo{Running: true}, nil
+		},
+		execFn: func(_ context.Context, _ string, _ []string, _ string) (runtime.ExecResult, error) {
+			return runtime.ExecResult{Stdout: "0||1"}, nil
+		},
+	}
+	status, _, err := DetectStatus(context.Background(), mock, "test", 0)
+	require.NoError(t, err)
+	assert.Equal(t, StatusIdle, status)
+}
+
+func TestDetectStatus_Done(t *testing.T) {
+	mock := &inspectMockRuntime{
+		inspectFn: func(_ context.Context, _ string) (runtime.InstanceInfo, error) {
+			return runtime.InstanceInfo{Running: true}, nil
+		},
+		execFn: func(_ context.Context, _ string, _ []string, _ string) (runtime.ExecResult, error) {
+			return runtime.ExecResult{Stdout: "1|0|"}, nil
+		},
+	}
+	status, _, err := DetectStatus(context.Background(), mock, "test", 0)
+	require.NoError(t, err)
+	assert.Equal(t, StatusDone, status)
+}
+
+func TestDetectStatus_Failed(t *testing.T) {
+	mock := &inspectMockRuntime{
+		inspectFn: func(_ context.Context, _ string) (runtime.InstanceInfo, error) {
+			return runtime.InstanceInfo{Running: true}, nil
+		},
+		execFn: func(_ context.Context, _ string, _ []string, _ string) (runtime.ExecResult, error) {
+			return runtime.ExecResult{Stdout: "1|1|"}, nil
+		},
+	}
+	status, _, err := DetectStatus(context.Background(), mock, "test", 0)
+	require.NoError(t, err)
+	assert.Equal(t, StatusFailed, status)
+}
+
+func TestDetectStatus_ExecError(t *testing.T) {
+	mock := &inspectMockRuntime{
+		inspectFn: func(_ context.Context, _ string) (runtime.InstanceInfo, error) {
+			return runtime.InstanceInfo{Running: true}, nil
+		},
+		execFn: func(_ context.Context, _ string, _ []string, _ string) (runtime.ExecResult, error) {
+			return runtime.ExecResult{}, fmt.Errorf("exec failed")
+		},
+	}
+	status, _, err := DetectStatus(context.Background(), mock, "test", 0)
+	require.NoError(t, err)
+	assert.Equal(t, StatusRunning, status)
+}
+
+func TestDetectStatus_Removed(t *testing.T) {
+	mock := &inspectMockRuntime{
+		inspectFn: func(_ context.Context, _ string) (runtime.InstanceInfo, error) {
+			return runtime.InstanceInfo{}, fmt.Errorf("not found: %w", runtime.ErrNotFound)
+		},
+	}
+	status, _, err := DetectStatus(context.Background(), mock, "test", 0)
+	require.NoError(t, err)
+	assert.Equal(t, StatusRemoved, status)
+}
+
+func TestDetectStatus_Stopped(t *testing.T) {
+	mock := &inspectMockRuntime{
+		inspectFn: func(_ context.Context, _ string) (runtime.InstanceInfo, error) {
+			return runtime.InstanceInfo{Running: false}, nil
+		},
+	}
+	status, _, err := DetectStatus(context.Background(), mock, "test", 0)
+	require.NoError(t, err)
+	assert.Equal(t, StatusStopped, status)
 }

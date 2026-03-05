@@ -21,7 +21,7 @@ Design considerations:
 
 ### Agent status detection (done)
 
-Implemented via tmux `#{pane_last_activity}` heuristic. `DetectStatus()` now reports `idle` when the agent process is alive but hasn't produced output for a configurable duration (`idle_threshold` in config/profile, default 30s). New `--idle` and `--done` flags on `yoloai ls`. `--running` includes idle sandboxes.
+Implemented via tmux `#{window_bell_flag}`. Agents that emit a bell character (`\a`) when idle (e.g. Claude Code) cause tmux to set the bell flag, which `DetectStatus()` reads to report `idle`. The `idle_threshold` config key is retained for compatibility but currently unused. New `--idle` and `--done` flags on `yoloai ls`. `--running` includes idle sandboxes.
 
 ### Sandbox chaining (pipelines)
 

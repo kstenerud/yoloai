@@ -305,9 +305,9 @@ func TestStart_Resume_DoneStatus(t *testing.T) {
 	// Override Exec to capture calls
 	mock.execFn = func(_ context.Context, _ string, cmd []string, _ string) (runtime.ExecResult, error) {
 		execCalls = append(execCalls, cmd)
-		// Status detection: tmux list-panes — return "1 0" to indicate done (pane dead, exit 0)
+		// Status detection: tmux list-panes — return pipe-delimited "1|0|" to indicate done (pane dead, exit 0)
 		if len(cmd) > 0 && cmd[0] == "tmux" && len(cmd) > 1 && cmd[1] == "list-panes" {
-			return runtime.ExecResult{Stdout: "1 0\n"}, nil
+			return runtime.ExecResult{Stdout: "1|0|\n"}, nil
 		}
 		// respawn-pane will succeed
 		if len(cmd) > 0 && cmd[0] == "tmux" && len(cmd) > 1 && cmd[1] == "respawn-pane" {

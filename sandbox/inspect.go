@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
@@ -21,7 +20,7 @@ type Status string
 // Status constants for sandbox lifecycle states.
 const (
 	StatusRunning Status = "running" // container running, agent alive in tmux
-	StatusIdle    Status = "idle"    // container running, agent alive but no output recently
+	StatusIdle    Status = "idle"    // container running, agent alive, bell flag set (finished processing)
 	StatusDone    Status = "done"    // container running, agent exited cleanly (exit 0)
 	StatusFailed  Status = "failed"  // container running, agent exited with error (non-zero)
 	StatusStopped Status = "stopped" // container stopped (docker stop)
@@ -29,8 +28,8 @@ const (
 	StatusBroken  Status = "broken"  // sandbox dir exists but meta.json missing/invalid
 )
 
-// DefaultIdleThreshold is how long (in seconds) a pane must be silent before
-// the sandbox is considered idle. Used when no per-sandbox threshold is configured.
+// DefaultIdleThreshold is retained for config/API compatibility but currently
+// unused. Idle detection now uses tmux window_bell_flag instead of timestamps.
 const DefaultIdleThreshold = 30
 
 // Info holds the combined metadata and live state for a sandbox.
@@ -125,9 +124,11 @@ func execInContainer(ctx context.Context, rt runtime.Runtime, containerID string
 }
 
 // DetectStatus queries the runtime and tmux to determine sandbox status.
-// idleThreshold is the number of seconds of inactivity before reporting idle;
-// 0 means use DefaultIdleThreshold.
+// idleThreshold is retained for API compatibility but currently unused;
+// idle detection uses tmux's window_bell_flag instead of timestamps.
 func DetectStatus(ctx context.Context, rt runtime.Runtime, containerName string, idleThreshold int) (Status, string, error) {
+	_ = idleThreshold // retained for API compat; bell-based detection doesn't use a threshold
+
 	info, err := rt.Inspect(ctx, containerName)
 	if err != nil {
 		if errors.Is(err, runtime.ErrNotFound) {
@@ -140,35 +141,30 @@ func DetectStatus(ctx context.Context, rt runtime.Runtime, containerName string,
 		return StatusStopped, "", nil
 	}
 
-	// Query tmux pane state
+	// Query tmux pane state: pane_dead | pane_dead_status | window_bell_flag
 	output, err := execInContainer(ctx, rt, containerName, []string{
-		"tmux", "list-panes", "-t", "main", "-F", "#{pane_dead} #{pane_dead_status} #{pane_last_activity}",
+		"tmux", "list-panes", "-t", "main", "-F", "#{pane_dead}|#{pane_dead_status}|#{window_bell_flag}",
 	})
 	if err != nil {
 		// tmux query failed — default to running (safest assumption)
 		return StatusRunning, "", nil
 	}
 
-	threshold := int64(idleThreshold)
-	if threshold <= 0 {
-		threshold = DefaultIdleThreshold
+	parts := strings.SplitN(strings.TrimSpace(output), "|", 3)
+	if len(parts) < 3 {
+		return StatusRunning, "", nil
 	}
 
-	fields := strings.Fields(output)
-	if len(fields) < 1 || fields[0] == "0" {
-		// Pane is alive — check if idle based on last activity timestamp
-		if len(fields) >= 3 {
-			if ts, err := strconv.ParseInt(fields[2], 10, 64); err == nil {
-				if time.Now().Unix()-ts >= threshold {
-					return StatusIdle, "", nil
-				}
-			}
+	if parts[0] == "0" {
+		// Pane is alive — check bell flag for idle detection
+		if parts[2] == "1" {
+			return StatusIdle, "", nil
 		}
 		return StatusRunning, "", nil
 	}
 
 	// Pane is dead
-	if len(fields) >= 2 && fields[1] == "0" {
+	if parts[1] == "0" {
 		return StatusDone, "", nil
 	}
 	return StatusFailed, "", nil
