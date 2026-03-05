@@ -100,6 +100,17 @@ yoloai new task2 ./large-project:overlay
 yoloai new task3 ./my-project:rw
 ```
 
+### Why Copies, Not Git Worktrees?
+
+Many AI coding tools use `git worktree` for isolation — it's instant and space-efficient. yoloAI uses full copies instead because worktrees have fundamental problems for sandboxed agents:
+
+- **Missing files.** Worktrees only include tracked files. Gitignored directories like `node_modules/`, build artifacts, and `.env` files are excluded — agents can't build or test without them.
+- **Host pollution.** Worktree branches and commits are visible in your original repo. Agent git operations clutter your ref history.
+- **Git-only.** Worktrees require a git repository. yoloAI supports any directory.
+- **Shared object store.** Worktrees share the `.git` directory with the host repo, weakening isolation inside the container.
+
+For large projects where copy speed is a concern, use `:overlay` mode — it provides instant setup with the same isolation and diff/apply workflow.
+
 ### Overlay Mode
 
 `:overlay` uses Linux kernel overlayfs inside the Docker container to mount the original directory as a read-only lower layer, with agent changes captured in an upper layer. This provides:
