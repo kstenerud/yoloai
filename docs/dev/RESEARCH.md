@@ -10,3 +10,4 @@ Research documents supporting yoloAI's design decisions. Each file covers a broa
 | [Sandboxing](research/sandboxing.md) | Alternative filesystem isolation, macOS VM sandbox, macOS process/FS isolation |
 | [Implementation](research/implementation.md) | Env var interpolation, Claude Code installation, Go libs vs shell commands, tmux defaults |
 | [Parallel Agents](research/parallel-agents.md) | Multi-agent coordination, idle detection, spec-driven development, batch orchestration |
+| [Orchestration](research/orchestration.md) | Agent idle/done detection mechanisms, orchestrator ecosystem, agent SDK interfaces, handoffs, user pain points |

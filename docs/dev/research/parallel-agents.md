@@ -26,6 +26,8 @@ The blog post author rigged idle detection via:
 
 This is fragile and agent-specific. A sandbox runner could detect agent process state more reliably (process exited, waiting for stdin, etc.) and surface it as structured status.
 
+See [Orchestration research](orchestration.md) for a comprehensive analysis of detection mechanisms across agents, including the multi-layer approach used by Claude Squad and hook-based alternatives.
+
 ## Spec-Driven Development
 
 The "Feature Design" (FD) system uses numbered markdown files with structured sections:
