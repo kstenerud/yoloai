@@ -166,8 +166,8 @@ write_status running null
         fi
         NEW_STATUS="running"
         if [ -n "$READY_PATTERN" ] && [ "$READY_PATTERN" != "null" ]; then
-            LAST_LINE=$(tmux capture-pane -t main -p 2>/dev/null | grep -v "^$" | tail -1 || true)
-            if echo "$LAST_LINE" | grep -qF "$READY_PATTERN"; then
+            PANE_CONTENT=$(tmux capture-pane -t main -p 2>/dev/null || true)
+            if echo "$PANE_CONTENT" | grep -qF "$READY_PATTERN"; then
                 NEW_STATUS="idle"
             fi
         fi
