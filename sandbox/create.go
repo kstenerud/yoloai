@@ -1163,7 +1163,7 @@ func ensureContainerSettings(agentDef *agent.Definition, sandboxDir string) erro
 		settings["sandbox"] = map[string]interface{}{"enabled": false}
 		// Ensure Claude Code emits BEL for tmux tab highlighting
 		settings["preferredNotifChannel"] = "terminal_bell"
-		// Inject Stop hook for idle detection. Claude Code's own hook system is
+		// Inject hooks for status tracking. Claude Code's own hook system is
 		// far more reliable than polling tmux capture-pane for a ready pattern.
 		injectIdleHook(settings)
 		return writeJSONMap(settingsPath, settings)
@@ -1231,12 +1231,17 @@ func ensureShellContainerSettings(sandboxDir string) error {
 	return nil
 }
 
-// statusHookCommand is the shell command injected as a Claude Code Stop hook.
-// It writes idle status to /yoloai/status.json so the host can detect when
-// Claude has finished responding without fragile tmux screen-scraping.
-const statusHookCommand = `printf '{"status":"idle","exit_code":null,"timestamp":%d}\n' "$(date +%s)" > /yoloai/status.json`
+// statusIdleCommand writes idle status to /yoloai/status.json when Claude
+// finishes a response (Notification hook).
+const statusIdleCommand = `printf '{"status":"idle","exit_code":null,"timestamp":%d}\n' "$(date +%s)" > /yoloai/status.json`
 
-// injectIdleHook merges a Stop hook into Claude Code's settings map.
+// statusRunningCommand writes running status to /yoloai/status.json when Claude
+// starts working (PreToolExec hook). This ensures the title updates from "> name"
+// back to "name" when the user submits a new prompt.
+const statusRunningCommand = `printf '{"status":"running","exit_code":null,"timestamp":%d}\n' "$(date +%s)" > /yoloai/status.json`
+
+// injectIdleHook merges hooks into Claude Code's settings map for status tracking.
+// Notification → idle (turn complete), PreToolExec → running (work started).
 // Preserves any existing hooks the user may have configured.
 func injectIdleHook(settings map[string]any) {
 	hooks, _ := settings["hooks"].(map[string]any)
@@ -1244,19 +1249,28 @@ func injectIdleHook(settings map[string]any) {
 		hooks = map[string]any{}
 	}
 
-	yoloaiHook := map[string]any{
+	// Notification hook: mark idle when Claude finishes a response.
+	idleHook := map[string]any{
 		"type":    "command",
-		"command": statusHookCommand,
+		"command": statusIdleCommand,
 	}
-	yoloaiGroup := map[string]any{
-		"hooks": []any{yoloaiHook},
+	idleGroup := map[string]any{
+		"hooks": []any{idleHook},
 	}
+	existingNotif, _ := hooks["Notification"].([]any)
+	hooks["Notification"] = append(existingNotif, idleGroup)
 
-	// Append to existing Notification hooks rather than replacing them.
-	// Notification fires when Claude finishes a response (turn complete),
-	// which is the right signal for idle detection. Stop only fires on exit.
-	existing, _ := hooks["Notification"].([]any)
-	hooks["Notification"] = append(existing, yoloaiGroup)
+	// PreToolExec hook: mark running when Claude starts using tools.
+	runningHook := map[string]any{
+		"type":    "command",
+		"command": statusRunningCommand,
+	}
+	runningGroup := map[string]any{
+		"hooks": []any{runningHook},
+	}
+	existingPre, _ := hooks["PreToolExec"].([]any)
+	hooks["PreToolExec"] = append(existingPre, runningGroup)
+
 	settings["hooks"] = hooks
 }
 
