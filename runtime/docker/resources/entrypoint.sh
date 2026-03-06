@@ -143,6 +143,7 @@ STARTUP_DELAY=$(jq -r .startup_delay "$CONFIG")
 READY_PATTERN=$(jq -r .ready_pattern "$CONFIG")
 SUBMIT_SEQUENCE=$(jq -r .submit_sequence "$CONFIG")
 TMUX_CONF=$(jq -r .tmux_conf "$CONFIG")
+HOOK_IDLE=$(jq -r ".hook_idle // false" "$CONFIG")
 DEBUG=$(jq -r ".debug // false" "$CONFIG")
 debug_log() { [ "$DEBUG" = "true" ] && echo "[debug] $*" || true; }
 
@@ -292,14 +293,19 @@ write_status running null
             write_status done 1
             break
         fi
-        NEW_STATUS="running"
-        if [ -n "$READY_PATTERN" ] && [ "$READY_PATTERN" != "null" ]; then
-            PANE_CONTENT=$(tmux capture-pane -t main -p 2>/dev/null || true)
-            if echo "$PANE_CONTENT" | grep -qF "$READY_PATTERN"; then
-                NEW_STATUS="idle"
+        # When hook_idle is true, the agent's own hooks write idle status
+        # to status.json — no need to poll tmux. The monitor only tracks
+        # running (initial) and done (pane death).
+        if [ "$HOOK_IDLE" != "true" ]; then
+            NEW_STATUS="running"
+            if [ -n "$READY_PATTERN" ] && [ "$READY_PATTERN" != "null" ]; then
+                PANE_CONTENT=$(tmux capture-pane -t main -p 2>/dev/null || true)
+                if echo "$PANE_CONTENT" | grep -qF "$READY_PATTERN"; then
+                    NEW_STATUS="idle"
+                fi
             fi
+            write_status "$NEW_STATUS" null
         fi
-        write_status "$NEW_STATUS" null
         sleep 2
     done
 ) &

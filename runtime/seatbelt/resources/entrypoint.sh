@@ -79,6 +79,7 @@ debug_log "reading agent config"
 AGENT_COMMAND=$(jq -r '.agent_command' "$CONFIG")
 STARTUP_DELAY=$(jq -r '.startup_delay' "$CONFIG")
 READY_PATTERN=$(jq -r '.ready_pattern' "$CONFIG")
+HOOK_IDLE=$(jq -r ".hook_idle // false" "$CONFIG")
 SUBMIT_SEQUENCE=$(jq -r '.submit_sequence' "$CONFIG")
 TMUX_CONF=$(jq -r '.tmux_conf' "$CONFIG")
 WORKING_DIR=$(jq -r '.working_dir' "$CONFIG")
@@ -197,14 +198,16 @@ write_status running null
             write_status done 1
             break
         fi
-        NEW_STATUS="running"
-        if [ -n "$READY_PATTERN" ] && [ "$READY_PATTERN" != "null" ]; then
-            PANE_CONTENT=$(tmux -S "$TMUX_SOCK" capture-pane -t main -p 2>/dev/null || true)
-            if echo "$PANE_CONTENT" | grep -qF "$READY_PATTERN"; then
-                NEW_STATUS="idle"
+        if [ "$HOOK_IDLE" != "true" ]; then
+            NEW_STATUS="running"
+            if [ -n "$READY_PATTERN" ] && [ "$READY_PATTERN" != "null" ]; then
+                PANE_CONTENT=$(tmux -S "$TMUX_SOCK" capture-pane -t main -p 2>/dev/null || true)
+                if echo "$PANE_CONTENT" | grep -qF "$READY_PATTERN"; then
+                    NEW_STATUS="idle"
+                fi
             fi
+            write_status "$NEW_STATUS" null
         fi
-        write_status "$NEW_STATUS" null
         sleep 2
     done
 ) &

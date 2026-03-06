@@ -629,6 +629,9 @@ rm -f /tmp/yoloai-resume.txt`, waitCmd, cfg.SubmitSequence)
 	_, err = execInContainer(ctx, m.runtime, InstanceName(name), []string{
 		"bash", "-c", "nohup bash -c '" + strings.ReplaceAll(script, "'", "'\"'\"'") + "' _ \"$1\" >/dev/null 2>&1 &", "_", resumeText,
 	})
+	if err == nil && cfg.HookIdle {
+		resetStatusToRunning(sandboxDir)
+	}
 	return err
 }
 
@@ -701,6 +704,9 @@ rm -f /tmp/yoloai-custom-prompt.txt`, waitCmd, cfg.SubmitSequence)
 	_, err := execInContainer(ctx, m.runtime, InstanceName(name), []string{
 		"bash", "-c", "nohup bash -c '" + strings.ReplaceAll(script, "'", "'\"'\"'") + "' _ \"$1\" >/dev/null 2>&1 &", "_", promptText,
 	})
+	if err == nil && cfg.HookIdle {
+		resetStatusToRunning(sandboxDir)
+	}
 	return err
 }
 
