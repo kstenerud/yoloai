@@ -9,6 +9,9 @@ var embeddedDockerfile []byte
 //go:embed resources/entrypoint.sh
 var embeddedEntrypoint []byte
 
+//go:embed resources/entrypoint-user.sh
+var embeddedEntrypointUser []byte
+
 //go:embed resources/tmux.conf
 var embeddedTmuxConf []byte
 

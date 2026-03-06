@@ -411,9 +411,7 @@ func TestParseResourceLimits(t *testing.T) {
 				}
 				return
 			}
-			if result == nil {
-				t.Fatal("expected non-nil result")
-			}
+			require.NotNil(t, result, "expected non-nil result")
 			if result.NanoCPUs != tt.wantCPU {
 				t.Errorf("NanoCPUs = %d, want %d", result.NanoCPUs, tt.wantCPU)
 			}

@@ -104,6 +104,7 @@ RUN mkdir -p /yoloai && chown yoloai:yoloai /yoloai
 
 COPY tmux.conf /yoloai/tmux.conf
 COPY entrypoint.sh /yoloai/entrypoint.sh
-RUN chmod +x /yoloai/entrypoint.sh
+COPY entrypoint-user.sh /yoloai/entrypoint-user.sh
+RUN chmod +x /yoloai/entrypoint.sh /yoloai/entrypoint-user.sh
 
 ENTRYPOINT ["/yoloai/entrypoint.sh"]
