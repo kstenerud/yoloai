@@ -70,6 +70,10 @@ fi
 # documentation URLs). Only set if not already provided via secrets/env.
 export BROWSER="${BROWSER:-true}"
 
+# Tell agents they're inside a sandbox (e.g. Claude Code uses this to allow
+# --dangerously-skip-permissions even when running as root).
+export IS_SANDBOX=1
+
 # --- Read agent config ---
 debug_log "reading agent config"
 AGENT_COMMAND=$(jq -r '.agent_command' "$CONFIG")

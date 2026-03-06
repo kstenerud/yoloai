@@ -50,6 +50,10 @@ fi
 # documentation URLs). Only set if not already provided via secrets/env.
 export BROWSER="${BROWSER:-true}"
 
+# Tell agents they're inside a sandbox (e.g. Claude Code uses this to allow
+# --dangerously-skip-permissions even when running as root).
+export IS_SANDBOX=1
+
 # --- Network isolation (iptables + ipset) ---
 NETWORK_ISOLATED=$(jq -r '.network_isolated // false' "$CONFIG")
 if [ "$NETWORK_ISOLATED" = "true" ]; then
