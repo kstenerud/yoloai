@@ -19,7 +19,8 @@ CREATING SANDBOXES (yoloai new)
   --network-isolated  Allow only agent API traffic (iptables allowlist)
   --network-allow     Extra domain to allow (repeatable, implies --network-isolated)
   --attach, -a        Auto-attach after creation
-  --force             Replace existing sandbox with same name
+  --replace           Replace existing sandbox with same name
+  --force             Replace even if unapplied changes exist
   --no-start          Create without starting
   --yes, -y           Skip confirmations
   --cpus <num>        CPU limit (e.g., 4, 2.5)

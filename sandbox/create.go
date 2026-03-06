@@ -29,7 +29,8 @@ type CreateOptions struct {
 	NetworkIsolated bool              // --network-isolated flag
 	NetworkAllow    []string          // --network-allow flags
 	Ports           []string          // --port flags (e.g., ["3000:3000"])
-	Replace         bool              // --replace flag
+	Replace         bool              // --replace flag (safe: errors if unapplied work exists)
+	Force           bool              // --force flag (unconditional replace, skips safety check)
 	NoStart         bool              // --no-start flag
 	Yes             bool              // --yes flag (skip confirmations)
 	AuxDirArgs      []string          // raw -d arguments (path with optional :copy/:rw/:force/=mount suffixes)
@@ -129,6 +130,34 @@ func (m *Manager) Create(ctx context.Context, opts CreateOptions) (string, error
 	return state.name, nil
 }
 
+// checkUnappliedWork checks if the named sandbox has any unapplied work
+// (uncommitted changes or commits beyond the baseline). Returns an error
+// if work would be lost.
+func checkUnappliedWork(name string) error {
+	meta, err := LoadMeta(Dir(name))
+	if err != nil {
+		return nil // can't load meta — nothing to protect
+	}
+
+	if meta.Workdir.Mode == "copy" || meta.Workdir.Mode == "overlay" {
+		workDir := WorkDir(name, meta.Workdir.HostPath)
+		if hasUnappliedWork(workDir, meta.Workdir.BaselineSHA) {
+			return fmt.Errorf("sandbox %q has unapplied changes (use --force to replace anyway, or 'yoloai apply' first)", name)
+		}
+	}
+
+	for _, d := range meta.Directories {
+		if d.Mode == "copy" || d.Mode == "overlay" {
+			auxWorkDir := WorkDir(name, d.HostPath)
+			if hasUnappliedWork(auxWorkDir, d.BaselineSHA) {
+				return fmt.Errorf("sandbox %q has unapplied changes in %s (use --force to replace anyway, or 'yoloai apply' first)", name, d.HostPath)
+			}
+		}
+	}
+
+	return nil
+}
+
 // prepareSandboxState handles validation, safety checks, directory
 // creation, workdir copy, git baseline, and meta/config writing.
 func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (*sandboxState, error) {
@@ -140,6 +169,11 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 	agentDef := agent.GetAgent(opts.Agent)
 	if agentDef == nil {
 		return nil, NewUsageError("unknown agent: %s", opts.Agent)
+	}
+
+	// --force implies --replace
+	if opts.Force {
+		opts.Replace = true
 	}
 
 	sandboxDir := Dir(opts.Name)
@@ -183,9 +217,14 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 		return nil, err
 	}
 
-	// --replace: destroy existing sandbox
+	// --replace: destroy existing sandbox (--force skips safety check)
 	if opts.Replace {
 		if _, err := os.Stat(sandboxDir); err == nil {
+			if !opts.Force {
+				if err := checkUnappliedWork(opts.Name); err != nil {
+					return nil, err
+				}
+			}
 			if err := m.Destroy(ctx, opts.Name); err != nil {
 				return nil, fmt.Errorf("replace existing sandbox: %w", err)
 			}

@@ -101,6 +101,63 @@ func TestDetectChanges_UntrackedFiles(t *testing.T) {
 	assert.Equal(t, "yes", detectChanges(dir))
 }
 
+// hasUnappliedWork tests
+
+func TestHasUnappliedWork_NoWorkDir(t *testing.T) {
+	assert.False(t, hasUnappliedWork("/nonexistent/path", "abc123"))
+}
+
+func TestHasUnappliedWork_CleanAtBaseline(t *testing.T) {
+	dir := t.TempDir()
+	initGitRepo(t, dir)
+	writeTestFile(t, dir, "file.txt", "hello")
+	gitAdd(t, dir, ".")
+	gitCommit(t, dir, "initial")
+
+	sha := gitRevParse(t, dir)
+	assert.False(t, hasUnappliedWork(dir, sha))
+}
+
+func TestHasUnappliedWork_DirtyWorkingTree(t *testing.T) {
+	dir := t.TempDir()
+	initGitRepo(t, dir)
+	writeTestFile(t, dir, "file.txt", "hello")
+	gitAdd(t, dir, ".")
+	gitCommit(t, dir, "initial")
+
+	sha := gitRevParse(t, dir)
+	writeTestFile(t, dir, "file.txt", "modified")
+	assert.True(t, hasUnappliedWork(dir, sha))
+}
+
+func TestHasUnappliedWork_CommitsBeyondBaseline(t *testing.T) {
+	dir := t.TempDir()
+	initGitRepo(t, dir)
+	writeTestFile(t, dir, "file.txt", "hello")
+	gitAdd(t, dir, ".")
+	gitCommit(t, dir, "initial")
+
+	baselineSHA := gitRevParse(t, dir)
+
+	// Make a new commit beyond baseline
+	writeTestFile(t, dir, "file.txt", "modified")
+	gitAdd(t, dir, ".")
+	gitCommit(t, dir, "agent work")
+
+	assert.True(t, hasUnappliedWork(dir, baselineSHA))
+}
+
+func TestHasUnappliedWork_EmptyBaseline(t *testing.T) {
+	dir := t.TempDir()
+	initGitRepo(t, dir)
+	writeTestFile(t, dir, "file.txt", "hello")
+	gitAdd(t, dir, ".")
+	gitCommit(t, dir, "initial")
+
+	// Empty baseline — can't check commits, only dirty tree
+	assert.False(t, hasUnappliedWork(dir, ""))
+}
+
 // InspectSandbox tests
 
 func TestInspectSandbox_NotFound(t *testing.T) {

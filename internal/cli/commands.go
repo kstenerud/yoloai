@@ -147,12 +147,10 @@ func newNewCmd(version string) *cobra.Command {
 				networkIsolated = true
 			}
 
+			replace, _ := cmd.Flags().GetBool("replace")
 			force, _ := cmd.Flags().GetBool("force")
-			if !force {
-				if r, _ := cmd.Flags().GetBool("replace"); r {
-					force = r
-					fmt.Fprintln(cmd.ErrOrStderr(), "Warning: --replace is deprecated, use --force") //nolint:errcheck
-				}
+			if force {
+				replace = true
 			}
 			noStart, _ := cmd.Flags().GetBool("no-start")
 			attach, _ := cmd.Flags().GetBool("attach")
@@ -199,7 +197,8 @@ func newNewCmd(version string) *cobra.Command {
 					NetworkIsolated: networkIsolated,
 					NetworkAllow:    networkAllow,
 					Ports:           ports,
-					Replace:         force,
+					Replace:         replace,
+					Force:           force,
 					NoStart:         noStart,
 					Attach:          attach,
 					Yes:             yes,
@@ -252,9 +251,8 @@ func newNewCmd(version string) *cobra.Command {
 	cmd.Flags().StringSlice("network-allow", nil, "Extra domain to allow when network-isolated (repeatable, implies --network-isolated)")
 	cmd.Flags().StringSlice("port", nil, "Port mapping (host:container)")
 	cmd.Flags().StringSliceP("dir", "d", nil, "Auxiliary directory (repeatable, default read-only)")
-	cmd.Flags().Bool("force", false, "Replace existing sandbox")
-	cmd.Flags().Bool("replace", false, "Deprecated: use --force")
-	_ = cmd.Flags().MarkHidden("replace")
+	cmd.Flags().Bool("replace", false, "Replace existing sandbox with same name")
+	cmd.Flags().Bool("force", false, "Replace even if unapplied changes exist")
 	cmd.Flags().Bool("no-start", false, "Create but don't start the container")
 	cmd.Flags().BoolP("attach", "a", false, "Auto-attach after creation")
 	cmd.Flags().BoolP("yes", "y", false, "Skip confirmations")

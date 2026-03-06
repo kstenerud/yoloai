@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -32,6 +33,14 @@ func runGit(t *testing.T, dir string, args ...string) {
 	cmd.Dir = dir
 	out, err := cmd.CombinedOutput()
 	require.NoError(t, err, "git %v failed: %s", args, out)
+}
+
+func gitRevParse(t *testing.T, dir string) string {
+	t.Helper()
+	cmd := exec.Command("git", "-C", dir, "rev-parse", "HEAD") //nolint:gosec // G204: test helper
+	out, err := cmd.Output()
+	require.NoError(t, err, "git rev-parse HEAD failed")
+	return strings.TrimSpace(string(out))
 }
 
 func writeTestFile(t *testing.T, dir, name, content string) {

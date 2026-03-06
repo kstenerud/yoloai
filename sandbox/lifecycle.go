@@ -349,7 +349,8 @@ func (m *Manager) Reset(ctx context.Context, opts ResetOptions) error {
 
 // NeedsConfirmation checks if a sandbox requires confirmation before
 // destruction. Returns true if the agent is running or unapplied changes
-// exist. Returns a reason string for the confirmation prompt.
+// exist (uncommitted changes or commits beyond baseline).
+// Returns a reason string for the confirmation prompt.
 func (m *Manager) NeedsConfirmation(ctx context.Context, name string) (bool, string) {
 	status, err := DetectStatus(ctx, m.runtime, InstanceName(name), Dir(name))
 	if err != nil {
@@ -365,9 +366,20 @@ func (m *Manager) NeedsConfirmation(ctx context.Context, name string) (bool, str
 		return false, ""
 	}
 
-	workDir := WorkDir(name, meta.Workdir.HostPath)
-	if detectChanges(workDir) == "yes" {
-		return true, "unapplied changes exist"
+	if meta.Workdir.Mode == "copy" || meta.Workdir.Mode == "overlay" {
+		workDir := WorkDir(name, meta.Workdir.HostPath)
+		if hasUnappliedWork(workDir, meta.Workdir.BaselineSHA) {
+			return true, "unapplied changes exist"
+		}
+	}
+
+	for _, d := range meta.Directories {
+		if d.Mode == "copy" || d.Mode == "overlay" {
+			auxWorkDir := WorkDir(name, d.HostPath)
+			if hasUnappliedWork(auxWorkDir, d.BaselineSHA) {
+				return true, "unapplied changes exist"
+			}
+		}
 	}
 
 	return false, ""

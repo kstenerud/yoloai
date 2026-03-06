@@ -115,6 +115,25 @@ func detectChanges(workDir string) string {
 	return "no"
 }
 
+// hasUnappliedWork checks if a work directory has any unapplied work:
+// uncommitted changes OR commits beyond the baseline SHA.
+// Returns true if work exists that would be lost on destruction.
+func hasUnappliedWork(workDir, baselineSHA string) bool {
+	if detectChanges(workDir) == "yes" {
+		return true
+	}
+	if baselineSHA == "" {
+		return false
+	}
+	// Check for commits beyond the baseline
+	cmd := exec.Command("git", "-C", workDir, "rev-list", "--count", baselineSHA+"..HEAD") //nolint:gosec // G204: workDir and baselineSHA are sandbox-controlled
+	output, err := cmd.Output()
+	if err != nil {
+		return false
+	}
+	return strings.TrimSpace(string(output)) != "0"
+}
+
 // execInContainer runs a command inside a sandbox instance and returns stdout.
 func execInContainer(ctx context.Context, rt runtime.Runtime, containerID string, cmd []string) (string, error) {
 	result, err := rt.Exec(ctx, containerID, cmd, "yoloai")
@@ -247,15 +266,22 @@ func InspectSandbox(ctx context.Context, rt runtime.Runtime, name string) (*Info
 		return nil, err
 	}
 
-	workDir := WorkDir(name, meta.Workdir.HostPath)
-	changes := detectChanges(workDir)
+	changes := "-"
+	if meta.Workdir.Mode == "copy" || meta.Workdir.Mode == "overlay" {
+		workDir := WorkDir(name, meta.Workdir.HostPath)
+		if hasUnappliedWork(workDir, meta.Workdir.BaselineSHA) {
+			changes = "yes"
+		} else if detectChanges(workDir) != "-" {
+			changes = "no"
+		}
+	}
 
-	// Also check aux :copy dirs for changes
+	// Also check aux :copy/:overlay dirs for changes
 	if changes == "no" {
 		for _, d := range meta.Directories {
-			if d.Mode == "copy" {
+			if d.Mode == "copy" || d.Mode == "overlay" {
 				auxWorkDir := WorkDir(name, d.HostPath)
-				if detectChanges(auxWorkDir) == "yes" {
+				if hasUnappliedWork(auxWorkDir, d.BaselineSHA) {
 					changes = "yes"
 					break
 				}
