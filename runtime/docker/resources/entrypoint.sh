@@ -283,8 +283,14 @@ fi
 # --- Status monitor ---
 STATUS_FILE="/yoloai/status.json"
 write_status() { printf "{\"status\":\"%s\",\"exit_code\":%s,\"timestamp\":%d}\n" "$1" "$2" "$(date +%s)" > "$STATUS_FILE"; }
-write_status running null
-set_title "$SANDBOX_NAME"
+# If no prompt was delivered, the agent is waiting for input — start as idle.
+if [ -f /yoloai/prompt.txt ]; then
+    write_status running null
+    set_title "$SANDBOX_NAME"
+else
+    write_status idle null
+    set_title "> $SANDBOX_NAME"
+fi
 (
     PREV_TITLE=""
     update_title() {

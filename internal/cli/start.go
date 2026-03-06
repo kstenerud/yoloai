@@ -59,7 +59,7 @@ func newStartCmd() *cobra.Command {
 					return fmt.Errorf("waiting for tmux session: %w", err)
 				}
 
-				return attachToSandbox(ctx, rt, containerName)
+				return attachToSandbox(ctx, rt, containerName, name)
 			})
 		},
 	}

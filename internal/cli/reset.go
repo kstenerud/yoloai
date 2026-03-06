@@ -57,7 +57,7 @@ func newResetCmd() *cobra.Command {
 					if err := waitForTmux(ctx, rt, containerName, 30*time.Second); err != nil {
 						return fmt.Errorf("waiting for tmux session: %w", err)
 					}
-					return attachToSandbox(ctx, rt, containerName)
+					return attachToSandbox(ctx, rt, containerName, name)
 				}
 
 				_, err = fmt.Fprintf(cmd.OutOrStdout(), "Sandbox %s reset\nRun 'yoloai attach %s' to reconnect\n", name, name)

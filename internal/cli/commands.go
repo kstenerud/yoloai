@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
 	"strings"
 	"time"
 
@@ -234,7 +235,7 @@ func newNewCmd(version string) *cobra.Command {
 					return fmt.Errorf("waiting for tmux session: %w", err)
 				}
 
-				return attachToSandbox(ctx, rt, containerName)
+				return attachToSandbox(ctx, rt, containerName, sandboxName)
 			})
 		},
 	}
@@ -339,8 +340,18 @@ func waitForTmux(ctx context.Context, rt runtime.Runtime, containerName string, 
 	return fmt.Errorf("tmux session not ready after %s", timeout)
 }
 
+// setTerminalTitle emits an OSC 0 escape sequence to set the terminal title.
+// This sets the title on the host terminal directly, bypassing any nested
+// tmux/docker layers that might swallow the inner tmux's title sequences.
+func setTerminalTitle(title string) {
+	fmt.Fprintf(os.Stdout, "\033]0;%s\007", title) //nolint:errcheck // best-effort terminal title
+}
+
 // attachToSandbox attaches to the tmux session in a running container.
-func attachToSandbox(ctx context.Context, rt runtime.Runtime, containerName string) error {
+// It sets the terminal title to the sandbox name and restores it on detach.
+func attachToSandbox(ctx context.Context, rt runtime.Runtime, containerName, sandboxName string) error {
+	setTerminalTitle(sandboxName)
+	defer setTerminalTitle("")
 	return rt.InteractiveExec(ctx, containerName, []string{"tmux", "attach", "-t", "main"}, "yoloai", "")
 }
 

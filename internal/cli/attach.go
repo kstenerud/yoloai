@@ -63,6 +63,8 @@ func newAttachCmd() *cobra.Command {
 				}
 
 				slog.Debug("attaching to tmux session", "container", containerName)
+				setTerminalTitle(name)
+				defer setTerminalTitle("")
 				return rt.InteractiveExec(ctx, containerName, []string{"tmux", "attach", "-t", "main"}, "yoloai", "")
 			})
 		},
