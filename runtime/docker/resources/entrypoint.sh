@@ -280,7 +280,7 @@ fi
 
 # --- Status monitor ---
 STATUS_FILE="/yoloai/status.json"
-write_status() { printf '{"status":"%s","exit_code":%s,"timestamp":%d}\n' "$1" "$2" "$(date +%s)" > "$STATUS_FILE"; }
+write_status() { printf "{\"status\":\"%s\",\"exit_code\":%s,\"timestamp\":%d}\n" "$1" "$2" "$(date +%s)" > "$STATUS_FILE"; }
 write_status running null
 (
     while true; do
