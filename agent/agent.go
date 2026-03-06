@@ -48,6 +48,7 @@ type Definition struct {
 	SubmitSequence    string
 	StartupDelay      time.Duration
 	ReadyPattern      string // grep pattern in tmux output that signals agent is ready for input
+	HookIdle          bool   // when true, agent uses its own hooks to write idle status (skip ReadyPattern polling)
 	ModelFlag         string
 	ModelAliases      map[string]string
 	ModelPrefixes     map[string]string // env var → model prefix (e.g. OLLAMA_API_BASE → "ollama_chat/")
@@ -101,6 +102,7 @@ var agents = map[string]*Definition{
 		SubmitSequence: "Enter Enter",
 		StartupDelay:   3 * time.Second,
 		ReadyPattern:   "❯",
+		HookIdle:       true,
 		ModelFlag:      "--model",
 		ModelAliases: map[string]string{
 			"sonnet": "claude-sonnet-4-latest",

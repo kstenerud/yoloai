@@ -155,6 +155,20 @@ type statusJSON struct {
 	Timestamp int64  `json:"timestamp"`           // unix seconds
 }
 
+// resetStatusToRunning writes a "running" status to the sandbox's status.json.
+// Called from the host side when delivering a new prompt to reset idle→running.
+func resetStatusToRunning(sandboxDir string) {
+	s := statusJSON{
+		Status:    "running",
+		Timestamp: time.Now().Unix(),
+	}
+	data, err := json.Marshal(s)
+	if err != nil {
+		return
+	}
+	_ = os.WriteFile(filepath.Join(sandboxDir, "status.json"), data, 0644) //nolint:gosec // status file is sandbox-controlled
+}
+
 // DetectStatus queries the runtime and status.json to determine sandbox status.
 // sandboxDir is the host-side sandbox directory; if empty, only exec fallback is used.
 func DetectStatus(ctx context.Context, rt runtime.Runtime, containerName string, sandboxDir string) (Status, error) {
