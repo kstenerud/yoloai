@@ -1236,12 +1236,12 @@ func ensureShellContainerSettings(sandboxDir string) error {
 const statusIdleCommand = `printf '{"status":"idle","exit_code":null,"timestamp":%d}\n' "$(date +%s)" > /yoloai/status.json`
 
 // statusRunningCommand writes running status to /yoloai/status.json when Claude
-// starts working (PreToolExec hook). This ensures the title updates from "> name"
+// starts working (PreToolUse hook). This ensures the title updates from "> name"
 // back to "name" when the user submits a new prompt.
 const statusRunningCommand = `printf '{"status":"running","exit_code":null,"timestamp":%d}\n' "$(date +%s)" > /yoloai/status.json`
 
 // injectIdleHook merges hooks into Claude Code's settings map for status tracking.
-// Notification → idle (turn complete), PreToolExec → running (work started).
+// Notification → idle (turn complete), PreToolUse → running (work started).
 // Preserves any existing hooks the user may have configured.
 func injectIdleHook(settings map[string]any) {
 	hooks, _ := settings["hooks"].(map[string]any)
@@ -1260,7 +1260,7 @@ func injectIdleHook(settings map[string]any) {
 	existingNotif, _ := hooks["Notification"].([]any)
 	hooks["Notification"] = append(existingNotif, idleGroup)
 
-	// PreToolExec hook: mark running when Claude starts using tools.
+	// PreToolUse hook: mark running when Claude starts using tools.
 	runningHook := map[string]any{
 		"type":    "command",
 		"command": statusRunningCommand,
@@ -1268,8 +1268,8 @@ func injectIdleHook(settings map[string]any) {
 	runningGroup := map[string]any{
 		"hooks": []any{runningHook},
 	}
-	existingPre, _ := hooks["PreToolExec"].([]any)
-	hooks["PreToolExec"] = append(existingPre, runningGroup)
+	existingPre, _ := hooks["PreToolUse"].([]any)
+	hooks["PreToolUse"] = append(existingPre, runningGroup)
 
 	settings["hooks"] = hooks
 }

@@ -109,7 +109,12 @@ if [ -n "$READY_PATTERN" ] && [ "$READY_PATTERN" != "null" ]; then
     while [ $WAITED -lt $MAX_WAIT ]; do
         PANE=$(tmux capture-pane -t main -p 2>/dev/null || true)
         if echo "$PANE" | grep -qF "Enter to confirm"; then
-            tmux send-keys -t main Enter
+            # Bypass Permissions prompt defaults to "No, exit" — move to "Yes" first
+            if echo "$PANE" | grep -qF "Yes, I accept"; then
+                tmux send-keys -t main Down Enter
+            else
+                tmux send-keys -t main Enter
+            fi
             sleep 2
             WAITED=$((WAITED + 2))
             continue
