@@ -98,6 +98,7 @@ type containerConfig struct {
 	AutoCommitInterval int                  `json:"auto_commit_interval,omitempty"`
 	CopyDirs           []string             `json:"copy_dirs,omitempty"`
 	HookIdle           bool                 `json:"hook_idle,omitempty"`
+	SandboxName        string               `json:"sandbox_name"`
 }
 
 // Create creates and optionally starts a new sandbox.
@@ -333,7 +334,7 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 	copyDirs := collectCopyDirs(workdir, auxDirs)
 
 	// Build config.json
-	configData, err := buildContainerConfig(agentDef, agentCommand, tmuxConf, workdir.ResolvedMountPath(), opts.Debug, networkMode == "isolated", networkAllow, opts.Passthrough, overlayMounts, pr.setup, pr.autoCommitInterval, copyDirs)
+	configData, err := buildContainerConfig(agentDef, agentCommand, tmuxConf, workdir.ResolvedMountPath(), opts.Debug, networkMode == "isolated", networkAllow, opts.Passthrough, overlayMounts, pr.setup, pr.autoCommitInterval, copyDirs, opts.Name)
 	if err != nil {
 		return nil, fmt.Errorf("build config.json: %w", err)
 	}
@@ -666,7 +667,7 @@ func shellEscapeForDoubleQuotes(s string) string {
 }
 
 // buildContainerConfig creates the config.json content.
-func buildContainerConfig(agentDef *agent.Definition, agentCommand string, tmuxConf string, workingDir string, debug bool, networkIsolated bool, allowedDomains []string, passthrough []string, overlayMounts []overlayMountConfig, setupCommands []string, autoCommitInterval int, copyDirs []string) ([]byte, error) {
+func buildContainerConfig(agentDef *agent.Definition, agentCommand string, tmuxConf string, workingDir string, debug bool, networkIsolated bool, allowedDomains []string, passthrough []string, overlayMounts []overlayMountConfig, setupCommands []string, autoCommitInterval int, copyDirs []string, sandboxName string) ([]byte, error) {
 	var stateDirName string
 	if agentDef.StateDir != "" {
 		stateDirName = filepath.Base(agentDef.StateDir)
@@ -690,6 +691,7 @@ func buildContainerConfig(agentDef *agent.Definition, agentCommand string, tmuxC
 		AutoCommitInterval: autoCommitInterval,
 		CopyDirs:           copyDirs,
 		HookIdle:           agentDef.HookIdle,
+		SandboxName:        sandboxName,
 	}
 	return json.MarshalIndent(cfg, "", "  ")
 }

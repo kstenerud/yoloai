@@ -94,7 +94,7 @@ func TestBuildAgentCommand_AgentArgsOnly(t *testing.T) {
 
 func TestBuildContainerConfig_ValidJSON(t *testing.T) {
 	agentDef := agent.GetAgent("claude")
-	data, err := buildContainerConfig(agentDef, "claude --dangerously-skip-permissions", "default+host", "/Users/test/project", false, false, nil, nil, nil, nil, 0, nil)
+	data, err := buildContainerConfig(agentDef, "claude --dangerously-skip-permissions", "default+host", "/Users/test/project", false, false, nil, nil, nil, nil, 0, nil, "test")
 	require.NoError(t, err)
 
 	var cfg containerConfig
@@ -124,7 +124,7 @@ func TestBuildContainerConfig_StateDirName(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.agent, func(t *testing.T) {
 			agentDef := agent.GetAgent(tt.agent)
-			data, err := buildContainerConfig(agentDef, "cmd", "default", "/tmp", false, false, nil, nil, nil, nil, 0, nil)
+			data, err := buildContainerConfig(agentDef, "cmd", "default", "/tmp", false, false, nil, nil, nil, nil, 0, nil, "test")
 			require.NoError(t, err)
 			var cfg containerConfig
 			require.NoError(t, json.Unmarshal(data, &cfg))
@@ -316,7 +316,7 @@ func TestCreate_CleansUpOnPrepareFail(t *testing.T) {
 func TestBuildContainerConfig_NetworkIsolated(t *testing.T) {
 	agentDef := agent.GetAgent("claude")
 	domains := []string{"api.anthropic.com", "sentry.io"}
-	data, err := buildContainerConfig(agentDef, "claude", "default", "/tmp", false, true, domains, nil, nil, nil, 0, nil)
+	data, err := buildContainerConfig(agentDef, "claude", "default", "/tmp", false, true, domains, nil, nil, nil, 0, nil, "test")
 	require.NoError(t, err)
 
 	var cfg containerConfig
@@ -329,7 +329,7 @@ func TestBuildContainerConfig_NetworkIsolated(t *testing.T) {
 func TestBuildContainerConfig_AutoCommitInterval(t *testing.T) {
 	agentDef := agent.GetAgent("claude")
 	copyDirs := []string{"/home/user/project", "/home/user/lib"}
-	data, err := buildContainerConfig(agentDef, "claude", "default", "/tmp", false, false, nil, nil, nil, nil, 60, copyDirs)
+	data, err := buildContainerConfig(agentDef, "claude", "default", "/tmp", false, false, nil, nil, nil, nil, 60, copyDirs, "test")
 	require.NoError(t, err)
 
 	var cfg containerConfig
@@ -341,7 +341,7 @@ func TestBuildContainerConfig_AutoCommitInterval(t *testing.T) {
 
 func TestBuildContainerConfig_AutoCommitIntervalZero(t *testing.T) {
 	agentDef := agent.GetAgent("claude")
-	data, err := buildContainerConfig(agentDef, "claude", "default", "/tmp", false, false, nil, nil, nil, nil, 0, nil)
+	data, err := buildContainerConfig(agentDef, "claude", "default", "/tmp", false, false, nil, nil, nil, nil, 0, nil, "test")
 	require.NoError(t, err)
 
 	var cfg containerConfig
