@@ -293,7 +293,7 @@ write_status running null
             write_status done 1
             break
         fi
-        # When hook_idle is true, the agent's own hooks write idle status
+        # When hook_idle is true, the agent hooks write idle status
         # to status.json — no need to poll tmux. The monitor only tracks
         # running (initial) and done (pane death).
         if [ "$HOOK_IDLE" != "true" ]; then
