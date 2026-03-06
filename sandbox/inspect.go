@@ -211,15 +211,18 @@ func parseStatusJSON(data []byte) (Status, bool) {
 	}
 
 	switch s.Status {
-	case "running", "idle":
+	case "running":
 		age := time.Since(time.Unix(s.Timestamp, 0))
 		if age > statusFileStaleness {
 			return "", false // stale — fall back to exec
 		}
-		if s.Status == "idle" {
-			return StatusIdle, true
-		}
 		return StatusRunning, true
+
+	case "idle":
+		// Idle is a persistent state written once (by hook or monitor) and
+		// cleared only by resetStatusToRunning or agent exit. No staleness
+		// check — the status remains valid until explicitly changed.
+		return StatusIdle, true
 
 	case "done":
 		// "done" is a terminal state — trust it even if stale

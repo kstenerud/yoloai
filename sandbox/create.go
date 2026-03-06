@@ -1250,9 +1250,11 @@ func injectIdleHook(settings map[string]any) {
 		"hooks": []any{yoloaiHook},
 	}
 
-	// Append to existing Stop hooks rather than replacing them
-	existing, _ := hooks["Stop"].([]any)
-	hooks["Stop"] = append(existing, yoloaiGroup)
+	// Append to existing Notification hooks rather than replacing them.
+	// Notification fires when Claude finishes a response (turn complete),
+	// which is the right signal for idle detection. Stop only fires on exit.
+	existing, _ := hooks["Notification"].([]any)
+	hooks["Notification"] = append(existing, yoloaiGroup)
 	settings["hooks"] = hooks
 }
 

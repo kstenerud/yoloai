@@ -473,7 +473,7 @@ func TestParseStatusJSON(t *testing.T) {
 		{"running fresh", statusJSONBytes("running", nil, now), StatusRunning, true},
 		{"idle fresh", statusJSONBytes("idle", nil, now), StatusIdle, true},
 		{"running stale", statusJSONBytes("running", nil, old), "", false},
-		{"idle stale", statusJSONBytes("idle", nil, old), "", false},
+		{"idle stale", statusJSONBytes("idle", nil, old), StatusIdle, true},
 		{"done success", statusJSONBytes("done", intPtr(0), now), StatusDone, true},
 		{"done failure", statusJSONBytes("done", intPtr(1), now), StatusFailed, true},
 		{"done stale success", statusJSONBytes("done", intPtr(0), old), StatusDone, true},
