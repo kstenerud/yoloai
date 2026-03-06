@@ -374,22 +374,27 @@ func setupWorkdir(sandboxName string, workdir *DirArg) (string, string, error) {
 		}
 	}
 
-	// Strip git metadata from copy before creating fresh baseline
-	if workdir.Mode == "copy" {
-		if err := workspace.RemoveGitDirs(workCopyDir); err != nil {
-			return "", "", fmt.Errorf("remove git metadata: %w", err)
-		}
-	}
-
 	// Git baseline (overlay defers baseline to container entrypoint)
 	var baselineSHA string
 	switch workdir.Mode {
 	case "copy":
-		sha, err := workspace.Baseline(workCopyDir)
-		if err != nil {
-			return "", "", fmt.Errorf("git baseline: %w", err)
+		// Preserve original git history so the agent (and user) can
+		// git log, git show, git blame, etc. inside the sandbox.
+		// If the source was a git repo, just record HEAD as baseline.
+		// For non-git directories, create a fresh repo.
+		if workspace.IsGitRepo(workCopyDir) {
+			sha, err := workspace.HeadSHA(workCopyDir)
+			if err != nil {
+				return "", "", fmt.Errorf("read HEAD of copied repo: %w", err)
+			}
+			baselineSHA = sha
+		} else {
+			sha, err := workspace.Baseline(workCopyDir)
+			if err != nil {
+				return "", "", fmt.Errorf("git baseline: %w", err)
+			}
+			baselineSHA = sha
 		}
-		baselineSHA = sha
 	case "overlay":
 		baselineSHA = ""
 	default:
@@ -421,14 +426,19 @@ func setupAuxDirs(sandboxName string, auxDirs []*DirArg) ([]DirMeta, error) {
 			if err := workspace.CopyDir(ad.Path, auxWorkDir); err != nil {
 				return nil, fmt.Errorf("copy aux dir %s: %w", ad.Path, err)
 			}
-			if err := workspace.RemoveGitDirs(auxWorkDir); err != nil {
-				return nil, fmt.Errorf("remove git metadata in aux dir %s: %w", ad.Path, err)
+			if workspace.IsGitRepo(auxWorkDir) {
+				sha, err := workspace.HeadSHA(auxWorkDir)
+				if err != nil {
+					return nil, fmt.Errorf("read HEAD of copied aux dir %s: %w", ad.Path, err)
+				}
+				dm.BaselineSHA = sha
+			} else {
+				sha, err := workspace.Baseline(auxWorkDir)
+				if err != nil {
+					return nil, fmt.Errorf("git baseline for aux dir %s: %w", ad.Path, err)
+				}
+				dm.BaselineSHA = sha
 			}
-			sha, err := workspace.Baseline(auxWorkDir)
-			if err != nil {
-				return nil, fmt.Errorf("git baseline for aux dir %s: %w", ad.Path, err)
-			}
-			dm.BaselineSHA = sha
 		case "overlay":
 			for _, d := range []string{
 				OverlayUpperDir(sandboxName, ad.Path),

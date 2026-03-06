@@ -255,12 +255,20 @@ func (m *Manager) Reset(ctx context.Context, opts ResetOptions) error {
 			return fmt.Errorf("re-copy workdir: %w", err)
 		}
 
-		// Re-create git baseline
-		sha, baselineErr := workspace.Baseline(workDir)
-		if baselineErr != nil {
-			return fmt.Errorf("re-create git baseline: %w", baselineErr)
+		// Record baseline — preserve git history if source is a git repo
+		if workspace.IsGitRepo(workDir) {
+			sha, err := workspace.HeadSHA(workDir)
+			if err != nil {
+				return fmt.Errorf("read HEAD of re-copied workdir: %w", err)
+			}
+			newSHA = sha
+		} else {
+			sha, err := workspace.Baseline(workDir)
+			if err != nil {
+				return fmt.Errorf("re-create git baseline: %w", err)
+			}
+			newSHA = sha
 		}
-		newSHA = sha
 	}
 
 	// Reset aux :copy and :overlay dirs
@@ -277,14 +285,19 @@ func (m *Manager) Reset(ctx context.Context, opts ResetOptions) error {
 			if err := workspace.CopyDir(d.HostPath, auxWorkDir); err != nil {
 				return fmt.Errorf("re-copy aux dir %s: %w", d.HostPath, err)
 			}
-			if err := workspace.RemoveGitDirs(auxWorkDir); err != nil {
-				return fmt.Errorf("remove git metadata in aux dir %s: %w", d.HostPath, err)
+			if workspace.IsGitRepo(auxWorkDir) {
+				auxSHA, auxErr := workspace.HeadSHA(auxWorkDir)
+				if auxErr != nil {
+					return fmt.Errorf("read HEAD of re-copied aux dir %s: %w", d.HostPath, auxErr)
+				}
+				meta.Directories[i].BaselineSHA = auxSHA
+			} else {
+				auxSHA, auxErr := workspace.Baseline(auxWorkDir)
+				if auxErr != nil {
+					return fmt.Errorf("git baseline for aux dir %s: %w", d.HostPath, auxErr)
+				}
+				meta.Directories[i].BaselineSHA = auxSHA
 			}
-			auxSHA, auxErr := workspace.Baseline(auxWorkDir)
-			if auxErr != nil {
-				return fmt.Errorf("git baseline for aux dir %s: %w", d.HostPath, auxErr)
-			}
-			meta.Directories[i].BaselineSHA = auxSHA
 		case "overlay":
 			for _, dir := range []string{
 				OverlayUpperDir(opts.Name, d.HostPath),
@@ -816,15 +829,20 @@ func (m *Manager) resetInPlace(ctx context.Context, opts ResetOptions, meta *Met
 		return fmt.Errorf("rsync workdir: %w", err)
 	}
 
-	// Strip git metadata from the synced copy (host repo's .git dirs)
-	if err := workspace.RemoveGitDirs(workDir); err != nil {
-		return fmt.Errorf("remove git dirs: %w", err)
-	}
-
-	// Re-create git baseline (host-side, visible in container via bind-mount)
-	newSHA, err := workspace.Baseline(workDir)
-	if err != nil {
-		return fmt.Errorf("re-create git baseline: %w", err)
+	// Record baseline — preserve git history if source is a git repo
+	var newSHA string
+	if workspace.IsGitRepo(workDir) {
+		sha, err := workspace.HeadSHA(workDir)
+		if err != nil {
+			return fmt.Errorf("read HEAD of resynced workdir: %w", err)
+		}
+		newSHA = sha
+	} else {
+		sha, err := workspace.Baseline(workDir)
+		if err != nil {
+			return fmt.Errorf("re-create git baseline: %w", err)
+		}
+		newSHA = sha
 	}
 
 	// Update meta.json
