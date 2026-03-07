@@ -345,7 +345,7 @@ When you begin working on a new request, print the marker: [YOLOAI:WORKING]
 
 **Key weakness:** LLMs are unreliable instruction followers. The agent may emit the marker at wrong times, or not at all. Must be combined with other signals.
 
-#### `test_mock` -- Controllable Test Signals (High Confidence)
+#### `test_mock` -- Controllable Test Signals (High Confidence, Deferred)
 
 **How:** The test agent writes `status.json` directly in response to specific commands, simulating idle/working transitions.
 
@@ -353,33 +353,27 @@ When you begin working on a new request, print the marker: [YOLOAI:WORKING]
 
 **Platform:** All.
 
-**Implementation:** New. Add test-specific scripts or aliases inside the container:
-- `yoloai-idle` -- writes `{"status":"idle",...}` to `/yoloai/status.json`
-- `yoloai-working` -- writes `{"status":"running",...}` to `/yoloai/status.json`
-- `yoloai-done [exit_code]` -- writes `{"status":"done",...}` to `/yoloai/status.json`
-
-This lets integration tests exercise the full idle detection pipeline.
+**Implementation:** Deferred. The test agent is currently a plain bash shell and will remain unchanged for the idle detection rework. A full test harness that can mimic agent workflows and idle signal strategies is planned as a separate TODO (see `docs/dev/plans/TODO.md`). For now, the test agent has no idle detection -- it stays as "running" until the process exits.
 
 ### 3.4 Detector Selection Per Agent x Platform
 
 The detector stack for a sandbox is determined at creation time. This table shows which detectors apply:
 
-| Detector | claude (Linux) | claude (macOS) | gemini | codex | aider | opencode | test | shell |
-|----------|---------------|----------------|--------|-------|-------|----------|------|-------|
-| `hook` | **primary** | **primary** | - | - | - | - | - | - |
-| `wchan` | supplementary | - | **primary** | **primary** | **primary** | **primary** | - | - |
-| `ready_pattern` | - | - | supplementary | supplementary | supplementary | - | - | - |
-| `context_signal` | - | - | supplementary | supplementary | supplementary | supplementary | - | - |
-| `output_stability` | - | - | fallback | fallback | fallback | fallback | - | - |
-| `test_mock` | - | - | - | - | - | - | **primary** | - |
-| (none) | - | - | - | - | - | - | - | *n/a* |
+| Detector | claude (Linux) | claude (macOS) | gemini | codex | aider | opencode | test/shell |
+|----------|---------------|----------------|--------|-------|-------|----------|------------|
+| `hook` | **primary** | **primary** | - | - | - | - | - |
+| `wchan` | supplementary | - | **primary** | **primary** | **primary** | **primary** | - |
+| `ready_pattern` | - | - | supplementary | supplementary | supplementary | - | - |
+| `context_signal` | - | - | supplementary | supplementary | supplementary | supplementary | - |
+| `output_stability` | - | - | fallback | fallback | fallback | fallback | - |
+| (none) | - | - | - | - | - | - | *n/a* |
 
 Notes:
 - **primary**: First detector checked. If it returns idle/running, that result is used.
 - **supplementary**: Checked to increase confidence in the primary result, or used when primary returns `unknown`.
 - **fallback**: Only used when primary and supplementary return `unknown`.
 - Claude on macOS: hooks are primary, no wchan available. Falls back to ready_pattern if hooks fail.
-- Shell agent: idle detection is not meaningful (it's a bash shell, always "waiting for input").
+- Test/shell agents: no idle detection. They stay as "running" until the process exits. A full test harness is planned separately (see `docs/dev/plans/TODO.md`).
 - OpenCode on macOS: no hooks, no wchan, no ready pattern. Only context_signal and output_stability. This is a known limitation.
 
 ### 3.5 Implementation Plan
@@ -481,11 +475,11 @@ When you begin working on a new task, print this exact line:
 
 3. **Debounce.** The agent might emit markers in unexpected places. Require the marker to appear after the most recent output burst (i.e., no output for 1 second after the marker).
 
-#### Phase 4: Test Agent + Output Stability
+#### Phase 4: Output Stability
 
-1. **Test agent mock commands.** Install `yoloai-idle`, `yoloai-working`, `yoloai-done` scripts in the container. These write directly to `status.json`. The test agent definition sets `detectors: ["test_mock"]`.
+1. **Output stability detector.** Track consecutive identical `capture-pane` snapshots. After N matches (configurable, default 3), report idle. Reset counter on any content change.
 
-2. **Output stability detector.** Track consecutive identical `capture-pane` snapshots. After N matches (configurable, default 3), report idle. Reset counter on any content change.
+Note: Test agent harness is a separate future TODO, not part of this rework.
 
 ### 3.6 Resolution Algorithm
 

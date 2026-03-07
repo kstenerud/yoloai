@@ -19,9 +19,13 @@ Design considerations:
 - Options: inherit shared flags (agent, model, profile, aux dirs) from the batch command
 - Output: summary table of created sandboxes
 
-### Agent status detection (done)
+### Agent status detection (rework planned)
 
-Implemented via in-container status monitor. A background process in the entrypoint polls tmux pane state every 2 seconds and writes status (`running`, `idle`, `done <exit_code>`) to a bind-mounted status file. `DetectStatus()` reads this file from the host — fast, reliable, no exec overhead. Idle detection uses the agent's `ReadyPattern` to detect when the agent is waiting for input. Falls back to exec-based tmux queries for old sandboxes without the monitor. New `--idle` and `--done` flags on `yoloai ls`. `--running` includes idle sandboxes.
+Current implementation works but is fragile. See [idle detection research](../research/idle-detection.md) for full audit, external research, and architecture proposal for a pluggable detector framework.
+
+### Test agent harness
+
+Replace the current test agent (plain `bash`) with a proper test harness process that simulates real agent workflows: startup sequence, accepting input, simulating work, transitioning to idle, and controllable exit. Should support mimicking different detection strategies (hook-based, pattern-based, context signals) via environment variables or commands, enabling integration testing of the full idle detection pipeline. Spec TBD.
 
 ### Sandbox chaining (pipelines)
 
