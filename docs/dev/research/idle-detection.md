@@ -382,30 +382,35 @@ Notes:
 
 1. **Remove dead code:** Delete deprecated `idle_threshold` from config, profiles, meta.json, and `DefaultIdleThreshold` constant. Remove unused bell-detection comments/config.
 
-2. **Define detector interface in agent definition.** Replace `HookIdle bool` and `ReadyPattern string` with a structured detector configuration:
+2. **Declare agent idle capabilities.** Replace `HookIdle bool` and `ReadyPattern string` with an `IdleSupport` struct that describes what idle signals the agent can produce:
 
 ```go
-// DetectorConfig describes how idle detection works for an agent.
-type DetectorConfig struct {
-    // Hook-based: agent writes status.json directly via its own hook system.
-    // When true, the status monitor does not poll for idle.
+// IdleSupport describes what idle detection signals an agent can produce.
+// These are agent capabilities, not configuration — the framework decides
+// which detectors to activate based on these capabilities plus the platform.
+type IdleSupport struct {
+    // Hook: agent has a native hook system that yoloAI can wire up to
+    // write status.json on state transitions. Requires agent-specific
+    // setup code in sandbox/create.go.
     Hook bool
 
-    // ReadyPattern: grep pattern visible in tmux when agent is waiting for input.
+    // ReadyPattern: terminal prompt text visible when agent is waiting
+    // for input. Used by the ready_pattern detector.
     ReadyPattern string
 
-    // ContextSignal: whether to inject idle-signaling instructions into the
-    // agent's context file. Requires ContextFile to be set.
+    // ContextSignal: agent reads a context file where we can inject
+    // instructions to emit idle/working markers.
     ContextSignal bool
 
-    // WchanSupported: whether wchan-based detection works for this agent.
-    // True for all real agents. False for test/shell (where wchan would
-    // detect bash waiting for input, which is always).
-    WchanSupported bool
+    // WchanApplicable: wchan-based detection is meaningful for this agent.
+    // False for test/shell where the process is always waiting on stdin.
+    WchanApplicable bool
 }
 ```
 
-3. **Compute detector stack at creation time.** Based on agent definition + runtime backend, determine which detectors to activate. Store in `config.json` as a list:
+The framework resolves which detectors to run at creation time via a function like `resolveDetectors(idle agent.IdleSupport, backend string) []Detector`, separating capability declaration from detector selection.
+
+3. **Compute detector stack at creation time.** Based on `IdleSupport` + runtime backend, determine which detectors to activate. Store in `config.json` as a list:
 
 ```json
 {
@@ -509,7 +514,7 @@ The stability counters are per-detector and reset when the detector's result cha
 
 | Component | Changes |
 |-----------|---------|
-| `agent/agent.go` | Replace `HookIdle bool` + `ReadyPattern string` with `DetectorConfig` struct |
+| `agent/agent.go` | Replace `HookIdle bool` + `ReadyPattern string` with `IdleSupport` struct |
 | `sandbox/create.go` | Compute detector stack at creation time, write to `config.json` |
 | `sandbox/inspect.go` | Remove `DefaultIdleThreshold`. The `parseStatusJSON` and `DetectStatus` functions don't change -- they read `status.json` regardless of how it was written |
 | `sandbox/meta.go` | Remove `IdleThreshold` field |
