@@ -22,6 +22,8 @@ from pathlib import Path
 POLL_INTERVAL = 2  # seconds between detector polls
 MEDIUM_STABILITY = 2  # consecutive matches for medium confidence
 LOW_STABILITY = 3  # consecutive matches for low confidence
+HOOK_IDLE_AGE = 15  # seconds of no "active" hook write before inferring idle
+GLOBAL_HOLD_CYCLES = 2  # consecutive non-idle cycles needed to leave idle
 
 # Wait channels indicating terminal input wait (idle)
 IDLE_WCHANS = {"n_tty_read", "wait_woken", "ttyin"}
@@ -60,11 +62,16 @@ def tmux_cmd(args, tmux_sock=None):
 
 
 def write_status(status_file, status, exit_code=None):
-    """Write status JSON atomically."""
+    """Write status JSON atomically.
+
+    Sets source="monitor" so the HookDetector can distinguish monitor writes
+    from hook writes (which don't set source).
+    """
     data = {
         "status": status,
         "exit_code": exit_code,
         "timestamp": int(time.time()),
+        "source": "monitor",
     }
     tmp = status_file + ".tmp"
     try:
@@ -166,12 +173,21 @@ class DetectorResult:
 
 
 class HookDetector:
-    """Reads status from status.json written by agent hooks."""
+    """Reads status from status.json written by agent hooks.
+
+    Returns "idle" when:
+    - The file explicitly says "idle" (Notification hook fired), OR
+    - The file says "active" but the write is stale (age > HOOK_IDLE_AGE).
+      A stale "active" means PreToolUse hasn't fired recently, implying the
+      agent stopped working. This provides idle detection even when the
+      Notification hook fails to fire (a known upstream issue).
+    """
     name = "hook"
     confidence = "high"
 
     def __init__(self, status_file):
         self.status_file = status_file
+        self._hook_ts = 0  # last timestamp written by a hook (not by monitor)
 
     def check(self, _agent_pid):
         try:
@@ -179,15 +195,30 @@ class HookDetector:
                 data = json.load(f)
             s = data.get("status", "")
             ts = data.get("timestamp", 0)
-            age = int(time.time()) - ts if ts else -1
-            # Only report "idle" from hooks. Reporting "active" creates a
-            # feedback loop: the monitor writes "active" to the same file,
-            # the HookDetector reads it back, and blocks all lower-priority
-            # detectors (wchan, ready_pattern) from ever running. The safe
-            # default is already "active", so we don't need hooks for that.
+            now = int(time.time())
+            age = now - ts if ts else -1
+
             if s == "idle":
+                self._hook_ts = ts
                 debug(f"  hook: file says idle (age={age}s)")
                 return DetectorResult("idle", self.confidence)
+
+            if s == "active":
+                # Only update _hook_ts from actual hook writes (no "source"
+                # field). The monitor sets source="monitor" on its writes.
+                source = data.get("source", "")
+                if not source and ts > self._hook_ts:
+                    self._hook_ts = ts
+
+                hook_age = now - self._hook_ts if self._hook_ts else -1
+
+                if self._hook_ts and hook_age >= HOOK_IDLE_AGE:
+                    debug(f"  hook: last hook write {hook_age}s ago (>{HOOK_IDLE_AGE}s) -> idle")
+                    return DetectorResult("idle", self.confidence)
+
+                debug(f"  hook: file says 'active' (hook_age={hook_age}s), waiting")
+                return DetectorResult("unknown")
+
             debug(f"  hook: file says {s!r} (age={age}s), ignoring")
         except (OSError, json.JSONDecodeError, ValueError) as e:
             debug(f"  hook: read error: {e}")
@@ -199,11 +230,26 @@ class WchanDetector:
     name = "wchan"
     confidence = "high"
 
+    def __init__(self):
+        self._prev_result = None  # last non-unknown DetectorResult
+
     def check(self, agent_pid):
         wchan = read_wchan(agent_pid)
+
+        # "0" means the process is on-CPU (not blocked). This is transient —
+        # it doesn't mean the agent started or stopped working. Return the
+        # previous result to avoid flapping.
+        if wchan == "0":
+            if self._prev_result:
+                debug(f"  wchan: 0 -> reusing previous ({self._prev_result.status})")
+                return self._prev_result
+            debug(f"  wchan: 0 -> unknown (no previous)")
+            return DetectorResult("unknown")
+
         if wchan in IDLE_WCHANS:
             debug(f"  wchan: {wchan} -> idle")
-            return DetectorResult("idle", self.confidence)
+            self._prev_result = DetectorResult("idle", self.confidence)
+            return self._prev_result
         if wchan in EVENT_LOOP_WCHANS:
             has_conn = has_active_connections(agent_pid)
             if has_conn:
@@ -213,10 +259,12 @@ class WchanDetector:
                 # Return unknown to let lower-priority detectors decide.
                 return DetectorResult("unknown")
             debug(f"  wchan: {wchan} + no connections -> idle")
-            return DetectorResult("idle", self.confidence)
+            self._prev_result = DetectorResult("idle", self.confidence)
+            return self._prev_result
         if wchan in ACTIVE_WCHANS:
             debug(f"  wchan: {wchan} -> active")
-            return DetectorResult("active", self.confidence)
+            self._prev_result = DetectorResult("active", self.confidence)
+            return self._prev_result
         debug(f"  wchan: {wchan} -> unknown (unrecognized)")
         return DetectorResult("unknown")
 
@@ -415,6 +463,11 @@ def run_monitor(config_path, status_file, tmux_sock=None):
 
     # Per-detector stability counters: {detector_name: (last_status, count)}
     stability = {}
+    # Global hold: when idle, require GLOBAL_HOLD_CYCLES consecutive non-idle
+    # decisions before transitioning to active. Prevents brief sensor gaps
+    # (e.g. wchan "0" blip) from causing idle->active->idle flaps.
+    hold_status = None  # last written status
+    hold_active_count = 0  # consecutive cycles wanting to leave idle
 
     prev_title = ""
 
@@ -466,12 +519,27 @@ def run_monitor(config_path, status_file, tmux_sock=None):
                 decided_by = det.name
                 break
 
+        # 3b. Apply global hold: don't leave idle on a single default cycle
+        if hold_status == "idle" and final_status != "idle":
+            hold_active_count += 1
+            if hold_active_count < GLOBAL_HOLD_CYCLES:
+                debug(
+                    f"pid={agent_pid} [{' '.join(detector_results)}] -> {final_status}"
+                    + (f" (by {decided_by})" if decided_by else " (default)")
+                    + f" [HELD idle, {hold_active_count}/{GLOBAL_HOLD_CYCLES}]"
+                )
+                time.sleep(POLL_INTERVAL)
+                continue
+        else:
+            hold_active_count = 0
+
         debug(
             f"pid={agent_pid} [{' '.join(detector_results)}] -> {final_status}"
             + (f" (by {decided_by})" if decided_by else " (default)")
         )
 
         # 4. Write status
+        hold_status = final_status
         write_status(status_file, final_status)
 
         # 5. Update title
