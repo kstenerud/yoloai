@@ -587,6 +587,10 @@ func (r *Runtime) runSetupScript(ctx context.Context, vmName, sandboxPath string
 	if err := os.WriteFile(monitorPath, monitor.Script(), 0644); err != nil { //nolint:gosec // G306: script content, not user input
 		return fmt.Errorf("write status monitor: %w", err)
 	}
+	diagPath := filepath.Join(sandboxPath, "diagnose-idle.sh")
+	if err := os.WriteFile(diagPath, monitor.DiagnoseScript(), 0755); err != nil { //nolint:gosec // G306: script needs exec permission
+		return fmt.Errorf("write diagnose script: %w", err)
+	}
 	tmuxConfPath := filepath.Join(sandboxPath, "tmux.conf")
 	if err := os.WriteFile(tmuxConfPath, embeddedTmuxConf, 0600); err != nil {
 		return fmt.Errorf("write tmux.conf: %w", err)

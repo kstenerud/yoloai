@@ -35,6 +35,7 @@ type Meta struct {
 	Devices            []string               `json:"devices,omitempty"`
 	Setup              []string               `json:"setup,omitempty"`
 	AutoCommitInterval int                    `json:"auto_commit_interval,omitempty"`
+	Debug              bool                   `json:"debug,omitempty"`
 }
 
 // WorkdirMeta stores the resolved workdir state at creation time.

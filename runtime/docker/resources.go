@@ -23,6 +23,9 @@ var embeddedTmuxConf []byte
 // from the runtime/monitor package for inclusion in Docker image builds.
 var embeddedStatusMonitor = monitor.Script()
 
+// embeddedDiagnoseIdle provides the idle detection diagnostic script.
+var embeddedDiagnoseIdle = monitor.DiagnoseScript()
+
 // EmbeddedTmuxConf returns the embedded tmux.conf content.
 func EmbeddedTmuxConf() []byte {
 	return embeddedTmuxConf

@@ -65,6 +65,17 @@ func GenerateContext(meta *Meta) string {
 		}
 	}
 
+	// Debug section (only when --debug is enabled)
+	if meta.Debug {
+		b.WriteString("\n## Idle Detection Debugging\n\n")
+		b.WriteString("This sandbox has `--debug` enabled. The idle detection monitor writes detailed logs to `/yoloai/monitor.log`.\n\n")
+		b.WriteString("If the user asks you to help debug idle detection (e.g. status stuck on active/idle), check these files:\n\n")
+		b.WriteString("- `/yoloai/monitor.log` — per-cycle trace: each detector's result, stability counters, final decision\n")
+		b.WriteString("- `/yoloai/status.json` — current status written by the monitor\n")
+		b.WriteString("- `/yoloai/config.json` — sandbox config including detector stack (`detectors` field) and idle settings\n")
+		b.WriteString("\nYou can also run `/yoloai/diagnose-idle.sh` for a point-in-time snapshot of all idle detection state.\n")
+	}
+
 	return b.String()
 }
 

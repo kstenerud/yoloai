@@ -368,6 +368,7 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 		Devices:            pr.devices,
 		Setup:              pr.setup,
 		AutoCommitInterval: pr.autoCommitInterval,
+		Debug:              opts.Debug,
 	}
 
 	if err := SaveMeta(sandboxDir, meta); err != nil {
@@ -392,6 +393,10 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 
 	if err := os.WriteFile(filepath.Join(sandboxDir, "status.json"), []byte("{}\n"), 0600); err != nil {
 		return nil, fmt.Errorf("write status.json: %w", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(sandboxDir, "monitor.log"), nil, 0600); err != nil {
+		return nil, fmt.Errorf("write monitor.log: %w", err)
 	}
 
 	if err := os.WriteFile(filepath.Join(sandboxDir, "config.json"), configData, 0600); err != nil {
@@ -937,6 +942,12 @@ func buildMounts(state *sandboxState, secretsDir string) []runtime.MountSpec {
 	mounts = append(mounts, runtime.MountSpec{
 		Source: filepath.Join(state.sandboxDir, "status.json"),
 		Target: "/yoloai/status.json",
+	})
+
+	// Monitor debug log (written by status-monitor.py when --debug is set)
+	mounts = append(mounts, runtime.MountSpec{
+		Source: filepath.Join(state.sandboxDir, "monitor.log"),
+		Target: "/yoloai/monitor.log",
 	})
 
 	// Prompt file

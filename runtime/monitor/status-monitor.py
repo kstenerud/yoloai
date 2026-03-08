@@ -178,15 +178,19 @@ class HookDetector:
             with open(self.status_file) as f:
                 data = json.load(f)
             s = data.get("status", "")
+            ts = data.get("timestamp", 0)
+            age = int(time.time()) - ts if ts else -1
             # Only report "idle" from hooks. Reporting "active" creates a
             # feedback loop: the monitor writes "active" to the same file,
             # the HookDetector reads it back, and blocks all lower-priority
             # detectors (wchan, ready_pattern) from ever running. The safe
             # default is already "active", so we don't need hooks for that.
             if s == "idle":
+                debug(f"  hook: file says idle (age={age}s)")
                 return DetectorResult("idle", self.confidence)
-        except (OSError, json.JSONDecodeError, ValueError):
-            pass
+            debug(f"  hook: file says {s!r} (age={age}s), ignoring")
+        except (OSError, json.JSONDecodeError, ValueError) as e:
+            debug(f"  hook: read error: {e}")
         return DetectorResult("unknown")
 
 
@@ -198,16 +202,22 @@ class WchanDetector:
     def check(self, agent_pid):
         wchan = read_wchan(agent_pid)
         if wchan in IDLE_WCHANS:
+            debug(f"  wchan: {wchan} -> idle")
             return DetectorResult("idle", self.confidence)
         if wchan in EVENT_LOOP_WCHANS:
-            if has_active_connections(agent_pid):
+            has_conn = has_active_connections(agent_pid)
+            if has_conn:
+                debug(f"  wchan: {wchan} + active connections -> unknown")
                 # Ambiguous: could be active API call or just keepalive
                 # connections (common with Node.js agents like Claude Code).
                 # Return unknown to let lower-priority detectors decide.
                 return DetectorResult("unknown")
+            debug(f"  wchan: {wchan} + no connections -> idle")
             return DetectorResult("idle", self.confidence)
         if wchan in ACTIVE_WCHANS:
+            debug(f"  wchan: {wchan} -> active")
             return DetectorResult("active", self.confidence)
+        debug(f"  wchan: {wchan} -> unknown (unrecognized)")
         return DetectorResult("unknown")
 
 
@@ -369,13 +379,39 @@ def check_pane_dead(tmux_sock=None):
     return False, None
 
 
+DEBUG_LOG = None  # file handle for debug logging, set by run_monitor
+
+
+def debug(msg):
+    """Write a debug message to the monitor log file if debug mode is enabled."""
+    if DEBUG_LOG is None:
+        return
+    try:
+        DEBUG_LOG.write(f"[{time.strftime('%H:%M:%S')}] {msg}\n")
+        DEBUG_LOG.flush()
+    except OSError:
+        pass
+
+
 def run_monitor(config_path, status_file, tmux_sock=None):
     """Main monitor loop."""
+    global DEBUG_LOG
+
     with open(config_path) as f:
         config = json.load(f)
 
+    # Enable debug logging if config.debug is set or YOLOAI_MONITOR_DEBUG env var
+    if config.get("debug", False) or os.environ.get("YOLOAI_MONITOR_DEBUG"):
+        try:
+            DEBUG_LOG = open("/yoloai/monitor.log", "a")
+        except OSError:
+            pass
+
     sandbox_name = config.get("sandbox_name", "sandbox")
     detectors = build_detectors(config, status_file, tmux_sock)
+
+    debug(f"monitor started: sandbox={sandbox_name} detectors={[d.name for d in detectors]}")
+    debug(f"platform: linux={IS_LINUX} macos={IS_MACOS}")
 
     # Per-detector stability counters: {detector_name: (last_status, count)}
     stability = {}
@@ -393,6 +429,7 @@ def run_monitor(config_path, status_file, tmux_sock=None):
         dead, exit_code = check_pane_dead(tmux_sock)
         if dead:
             ec = exit_code if exit_code is not None else 1
+            debug(f"pane dead: exit_code={ec}")
             write_status(status_file, "done", ec)
             update_title(sandbox_name)
             break
@@ -402,9 +439,12 @@ def run_monitor(config_path, status_file, tmux_sock=None):
 
         # 3. Evaluate detectors in order
         final_status = "active"  # safe default
+        decided_by = None
+        detector_results = []
         for det in detectors:
             result = det.check(agent_pid)
             if result.status == "unknown":
+                detector_results.append(f"{det.name}=unknown")
                 continue
 
             threshold = STABILITY_THRESHOLDS.get(result.confidence, 1)
@@ -417,9 +457,19 @@ def run_monitor(config_path, status_file, tmux_sock=None):
                 count = 1
             stability[key] = (result.status, count)
 
+            detector_results.append(
+                f"{det.name}={result.status}({result.confidence} {count}/{threshold})"
+            )
+
             if count >= threshold:
                 final_status = result.status
+                decided_by = det.name
                 break
+
+        debug(
+            f"pid={agent_pid} [{' '.join(detector_results)}] -> {final_status}"
+            + (f" (by {decided_by})" if decided_by else " (default)")
+        )
 
         # 4. Write status
         write_status(status_file, final_status)
