@@ -33,6 +33,28 @@ type SeedFile struct {
 	OwnerAPIKeys []string
 }
 
+// IdleSupport describes what idle detection signals an agent can produce.
+// These are agent capabilities, not configuration — the framework decides
+// which detectors to activate based on these capabilities plus the platform.
+type IdleSupport struct {
+	// Hook: agent has a native hook system that yoloAI can wire up to
+	// write status.json on state transitions. Requires agent-specific
+	// setup code in sandbox/create.go.
+	Hook bool
+
+	// ReadyPattern: terminal prompt text visible when agent is waiting
+	// for input. Used by the ready_pattern detector.
+	ReadyPattern string
+
+	// ContextSignal: agent reads a context file where we can inject
+	// instructions to emit idle/working markers.
+	ContextSignal bool
+
+	// WchanApplicable: wchan-based detection is meaningful for this agent.
+	// False for test/shell where the process is always waiting on stdin.
+	WchanApplicable bool
+}
+
 // Definition describes an agent's install, launch, and behavioral characteristics.
 type Definition struct {
 	Name              string
@@ -47,8 +69,7 @@ type Definition struct {
 	StateDir          string
 	SubmitSequence    string
 	StartupDelay      time.Duration
-	ReadyPattern      string // grep pattern in tmux output that signals agent is ready for input
-	HookIdle          bool   // when true, agent uses its own hooks to write idle status (skip ReadyPattern polling)
+	Idle              IdleSupport
 	ModelFlag         string
 	ModelAliases      map[string]string
 	ModelPrefixes     map[string]string // env var → model prefix (e.g. OLLAMA_API_BASE → "ollama_chat/")
@@ -72,8 +93,12 @@ var agents = map[string]*Definition{
 		StateDir:       "",
 		SubmitSequence: "Enter",
 		StartupDelay:   3 * time.Second,
-		ReadyPattern:   "> $",
-		ModelFlag:      "--model",
+		Idle: IdleSupport{
+			ReadyPattern:    "> $",
+			ContextSignal:   true,
+			WchanApplicable: true,
+		},
+		ModelFlag: "--model",
 		ModelAliases: map[string]string{
 			"sonnet":   "sonnet",
 			"opus":     "opus",
@@ -101,9 +126,13 @@ var agents = map[string]*Definition{
 		StateDir:       "/home/yoloai/.claude/",
 		SubmitSequence: "Enter Enter",
 		StartupDelay:   3 * time.Second,
-		ReadyPattern:   "❯",
-		HookIdle:       true,
-		ModelFlag:      "--model",
+		Idle: IdleSupport{
+			Hook:            true,
+			ReadyPattern:    "❯",
+			ContextSignal:   true,
+			WchanApplicable: true,
+		},
+		ModelFlag: "--model",
 		ModelAliases: map[string]string{
 			"sonnet": "claude-sonnet-4-latest",
 			"opus":   "claude-opus-4-latest",
@@ -128,8 +157,12 @@ var agents = map[string]*Definition{
 		StateDir:       "/home/yoloai/.gemini/",
 		SubmitSequence: "Enter",
 		StartupDelay:   3 * time.Second,
-		ReadyPattern:   "Type your message",
-		ModelFlag:      "--model",
+		Idle: IdleSupport{
+			ReadyPattern:    "Type your message",
+			ContextSignal:   true,
+			WchanApplicable: true,
+		},
+		ModelFlag: "--model",
 		ModelAliases: map[string]string{
 			"pro":           "gemini-2.5-pro",
 			"flash":         "gemini-2.5-flash",
@@ -159,8 +192,10 @@ var agents = map[string]*Definition{
 		StateDir:       "/home/yoloai/.local/share/opencode/",
 		SubmitSequence: "Enter",
 		StartupDelay:   3 * time.Second,
-		ReadyPattern:   "",
-		ModelFlag:      "--model",
+		Idle: IdleSupport{
+			WchanApplicable: true,
+		},
+		ModelFlag: "--model",
 		ModelAliases: map[string]string{
 			"sonnet": "anthropic/claude-sonnet-4-5-latest",
 			"opus":   "anthropic/claude-opus-4-latest",
@@ -183,8 +218,12 @@ var agents = map[string]*Definition{
 		StateDir:       "/home/yoloai/.codex/",
 		SubmitSequence: "Enter",
 		StartupDelay:   3 * time.Second,
-		ReadyPattern:   "›",
-		ModelFlag:      "--model",
+		Idle: IdleSupport{
+			ReadyPattern:    "›",
+			ContextSignal:   true,
+			WchanApplicable: true,
+		},
+		ModelFlag: "--model",
 		ModelAliases: map[string]string{
 			"default": "gpt-5.3-codex",
 			"spark":   "gpt-5.3-codex-spark",
@@ -298,7 +337,6 @@ func buildShellAgent() *Definition {
 		StateDir:         "",
 		SubmitSequence:   "Enter",
 		StartupDelay:     0,
-		ReadyPattern:     "",
 		ModelFlag:        "",
 		ModelAliases:     nil,
 		NetworkAllowlist: networkAllowlist,

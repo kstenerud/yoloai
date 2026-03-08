@@ -98,6 +98,8 @@ type containerConfig struct {
 	AutoCommitInterval int                  `json:"auto_commit_interval,omitempty"`
 	CopyDirs           []string             `json:"copy_dirs,omitempty"`
 	HookIdle           bool                 `json:"hook_idle,omitempty"`
+	Idle               agent.IdleSupport    `json:"idle"`
+	Detectors          []string             `json:"detectors,omitempty"`
 	SandboxName        string               `json:"sandbox_name"`
 }
 
@@ -665,6 +667,42 @@ func shellEscapeForDoubleQuotes(s string) string {
 	return r.Replace(s)
 }
 
+// resolveDetectors computes the ordered detector stack based on the agent's
+// idle support capabilities. The returned list is stored in config.json and
+// used by the in-container status monitor to determine which detection
+// strategies to run (in priority order).
+func resolveDetectors(idle agent.IdleSupport) []string {
+	var detectors []string
+
+	// Hook detector: highest priority, agent writes status.json directly.
+	if idle.Hook {
+		detectors = append(detectors, "hook")
+	}
+
+	// Wchan detector: high confidence, works for any process-based agent.
+	if idle.WchanApplicable {
+		detectors = append(detectors, "wchan")
+	}
+
+	// Ready pattern: medium confidence, checks tmux pane for prompt text.
+	if idle.ReadyPattern != "" {
+		detectors = append(detectors, "ready_pattern")
+	}
+
+	// Context signal: medium confidence, checks for agent-emitted markers.
+	if idle.ContextSignal {
+		detectors = append(detectors, "context_signal")
+	}
+
+	// Output stability: low confidence fallback, always added when any
+	// other detector exists (provides a last-resort signal).
+	if len(detectors) > 0 {
+		detectors = append(detectors, "output_stability")
+	}
+
+	return detectors
+}
+
 // buildContainerConfig creates the config.json content.
 func buildContainerConfig(agentDef *agent.Definition, agentCommand string, tmuxConf string, workingDir string, debug bool, networkIsolated bool, allowedDomains []string, passthrough []string, overlayMounts []overlayMountConfig, setupCommands []string, autoCommitInterval int, copyDirs []string, sandboxName string) ([]byte, error) {
 	var stateDirName string
@@ -676,7 +714,7 @@ func buildContainerConfig(agentDef *agent.Definition, agentCommand string, tmuxC
 		HostGID:            os.Getgid(),
 		AgentCommand:       agentCommand,
 		StartupDelay:       int(agentDef.StartupDelay / time.Millisecond),
-		ReadyPattern:       agentDef.ReadyPattern,
+		ReadyPattern:       agentDef.Idle.ReadyPattern,
 		SubmitSequence:     agentDef.SubmitSequence,
 		TmuxConf:           tmuxConf,
 		WorkingDir:         workingDir,
@@ -689,7 +727,9 @@ func buildContainerConfig(agentDef *agent.Definition, agentCommand string, tmuxC
 		SetupCommands:      setupCommands,
 		AutoCommitInterval: autoCommitInterval,
 		CopyDirs:           copyDirs,
-		HookIdle:           agentDef.HookIdle,
+		HookIdle:           agentDef.Idle.Hook,
+		Idle:               agentDef.Idle,
+		Detectors:          resolveDetectors(agentDef.Idle),
 		SandboxName:        sandboxName,
 	}
 	return json.MarshalIndent(cfg, "", "  ")

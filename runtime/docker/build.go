@@ -59,6 +59,7 @@ func SeedResources(targetDir string) (SeedResult, error) {
 		{"Dockerfile", embeddedDockerfile},
 		{"entrypoint.sh", embeddedEntrypoint},
 		{"entrypoint-user.sh", embeddedEntrypointUser},
+		{"status-monitor.py", embeddedStatusMonitor},
 		{"tmux.conf", embeddedTmuxConf},
 	}
 

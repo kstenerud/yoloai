@@ -17,6 +17,7 @@ import (
 
 	"github.com/kstenerud/yoloai/config"
 	"github.com/kstenerud/yoloai/runtime"
+	"github.com/kstenerud/yoloai/runtime/monitor"
 )
 
 const (
@@ -577,10 +578,14 @@ func (r *Runtime) runSetupScript(ctx context.Context, vmName, sandboxPath string
 		return fmt.Errorf("patch config working dir: %w", err)
 	}
 
-	// Write setup script and tmux config to sandbox dir (shared via VirtioFS)
+	// Write setup script, status monitor, and tmux config to sandbox dir (shared via VirtioFS)
 	scriptPath := filepath.Join(sandboxPath, "setup.sh")
 	if err := os.WriteFile(scriptPath, embeddedSetupScript, 0755); err != nil { //nolint:gosec // G306: script needs exec permission
 		return fmt.Errorf("write setup script: %w", err)
+	}
+	monitorPath := filepath.Join(sandboxPath, "status-monitor.py")
+	if err := os.WriteFile(monitorPath, monitor.Script(), 0644); err != nil { //nolint:gosec // G306: script content, not user input
+		return fmt.Errorf("write status monitor: %w", err)
 	}
 	tmuxConfPath := filepath.Join(sandboxPath, "tmux.conf")
 	if err := os.WriteFile(tmuxConfPath, embeddedTmuxConf, 0600); err != nil {

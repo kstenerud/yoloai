@@ -16,6 +16,7 @@ import (
 
 	"github.com/kstenerud/yoloai/config"
 	"github.com/kstenerud/yoloai/runtime"
+	"github.com/kstenerud/yoloai/runtime/monitor"
 )
 
 const (
@@ -120,10 +121,14 @@ func (r *Runtime) Create(_ context.Context, cfg runtime.InstanceConfig) error {
 		return fmt.Errorf("write SBPL profile: %w", err)
 	}
 
-	// Write entrypoint and tmux config
+	// Write entrypoint, status monitor, and tmux config
 	entrypointPath := filepath.Join(sandboxPath, "entrypoint.sh")
 	if err := os.WriteFile(entrypointPath, embeddedEntrypoint, 0755); err != nil { //nolint:gosec // G306: script needs exec permission
 		return fmt.Errorf("write entrypoint.sh: %w", err)
+	}
+	monitorPath := filepath.Join(sandboxPath, "status-monitor.py")
+	if err := os.WriteFile(monitorPath, monitor.Script(), 0644); err != nil { //nolint:gosec // G306: script content, not user input
+		return fmt.Errorf("write status-monitor.py: %w", err)
 	}
 	tmuxConfPath := filepath.Join(sandboxPath, "tmux.conf")
 	if err := os.WriteFile(tmuxConfPath, embeddedTmuxConf, 0600); err != nil {

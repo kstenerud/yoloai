@@ -8,7 +8,6 @@ STARTUP_DELAY=$(jq -r .startup_delay "$CONFIG")
 READY_PATTERN=$(jq -r .ready_pattern "$CONFIG")
 SUBMIT_SEQUENCE=$(jq -r .submit_sequence "$CONFIG")
 TMUX_CONF=$(jq -r .tmux_conf "$CONFIG")
-HOOK_IDLE=$(jq -r ".hook_idle // false" "$CONFIG")
 SANDBOX_NAME=$(jq -r ".sandbox_name // \"sandbox\"" "$CONFIG")
 DEBUG=$(jq -r ".debug // false" "$CONFIG")
 debug_log() { [ "$DEBUG" = "true" ] && echo "[debug] $*" || true; }
@@ -161,55 +160,7 @@ else
     write_status idle null
     set_title "> $SANDBOX_NAME"
 fi
-(
-    PREV_TITLE=""
-    update_title() {
-        if [ "$1" != "$PREV_TITLE" ]; then
-            set_title "$1"
-            PREV_TITLE="$1"
-        fi
-    }
-    while true; do
-        PANE_DEAD=$(tmux list-panes -t main -F '#{pane_dead}' 2>/dev/null || echo "error")
-        if [ "$PANE_DEAD" = "1" ]; then
-            EXIT_CODE=$(tmux list-panes -t main -F '#{pane_dead_status}' 2>/dev/null || echo "1")
-            write_status done "$EXIT_CODE"
-            update_title "$SANDBOX_NAME"
-            break
-        elif [ "$PANE_DEAD" = "error" ]; then
-            write_status done 1
-            update_title "$SANDBOX_NAME"
-            break
-        fi
-        # When hook_idle is true, the agent hooks write idle status
-        # to status.json — no need to poll tmux. The monitor only tracks
-        # running (initial) and done (pane death). Read status.json to
-        # update the terminal title.
-        if [ "$HOOK_IDLE" = "true" ]; then
-            CUR_STATUS=$(jq -r '.status // "active"' "$STATUS_FILE" 2>/dev/null || echo "active")
-            if [ "$CUR_STATUS" = "idle" ]; then
-                update_title "> $SANDBOX_NAME"
-            else
-                update_title "$SANDBOX_NAME"
-            fi
-        else
-            NEW_STATUS="active"
-            if [ -n "$READY_PATTERN" ] && [ "$READY_PATTERN" != "null" ]; then
-                PANE_CONTENT=$(tmux capture-pane -t main -p 2>/dev/null || true)
-                if echo "$PANE_CONTENT" | grep -qF "$READY_PATTERN"; then
-                    NEW_STATUS="idle"
-                fi
-            fi
-            write_status "$NEW_STATUS" null
-            if [ "$NEW_STATUS" = "idle" ]; then
-                update_title "> $SANDBOX_NAME"
-            else
-                update_title "$SANDBOX_NAME"
-            fi
-        fi
-        sleep 2
-    done
-) &
+python3 /yoloai/status-monitor.py "$CONFIG" "$STATUS_FILE" &
 
 debug_log "entrypoint setup complete, blocking on tmux wait"
 

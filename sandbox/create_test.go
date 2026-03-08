@@ -457,3 +457,38 @@ func TestParseMemoryString(t *testing.T) {
 		})
 	}
 }
+
+func TestResolveDetectors_HookAgent(t *testing.T) {
+	idle := agent.IdleSupport{
+		Hook:            true,
+		ReadyPattern:    "❯",
+		ContextSignal:   true,
+		WchanApplicable: true,
+	}
+	detectors := resolveDetectors(idle)
+	assert.Equal(t, []string{"hook", "wchan", "ready_pattern", "context_signal", "output_stability"}, detectors)
+}
+
+func TestResolveDetectors_NonHookAgent(t *testing.T) {
+	idle := agent.IdleSupport{
+		ReadyPattern:    "> $",
+		ContextSignal:   true,
+		WchanApplicable: true,
+	}
+	detectors := resolveDetectors(idle)
+	assert.Equal(t, []string{"wchan", "ready_pattern", "context_signal", "output_stability"}, detectors)
+}
+
+func TestResolveDetectors_WchanOnly(t *testing.T) {
+	idle := agent.IdleSupport{
+		WchanApplicable: true,
+	}
+	detectors := resolveDetectors(idle)
+	assert.Equal(t, []string{"wchan", "output_stability"}, detectors)
+}
+
+func TestResolveDetectors_NoCapabilities(t *testing.T) {
+	idle := agent.IdleSupport{}
+	detectors := resolveDetectors(idle)
+	assert.Nil(t, detectors)
+}

@@ -79,7 +79,6 @@ debug_log "reading agent config"
 AGENT_COMMAND=$(jq -r '.agent_command' "$CONFIG")
 STARTUP_DELAY=$(jq -r '.startup_delay' "$CONFIG")
 READY_PATTERN=$(jq -r '.ready_pattern' "$CONFIG")
-HOOK_IDLE=$(jq -r ".hook_idle // false" "$CONFIG")
 SANDBOX_NAME=$(jq -r ".sandbox_name // \"sandbox\"" "$CONFIG")
 SUBMIT_SEQUENCE=$(jq -r '.submit_sequence' "$CONFIG")
 TMUX_CONF=$(jq -r '.tmux_conf' "$CONFIG")
@@ -196,51 +195,11 @@ else
     write_status idle null
     set_title "> $SANDBOX_NAME"
 fi
-(
-    PREV_TITLE=""
-    update_title() {
-        if [ "$1" != "$PREV_TITLE" ]; then
-            set_title "$1"
-            PREV_TITLE="$1"
-        fi
-    }
-    while true; do
-        PANE_DEAD=$(tmux -S "$TMUX_SOCK" list-panes -t main -F "#{pane_dead}" 2>/dev/null || echo "error")
-        if [ "$PANE_DEAD" = "1" ]; then
-            EXIT_CODE=$(tmux -S "$TMUX_SOCK" list-panes -t main -F "#{pane_dead_status}" 2>/dev/null || echo "1")
-            write_status done "$EXIT_CODE"
-            update_title "$SANDBOX_NAME"
-            break
-        elif [ "$PANE_DEAD" = "error" ]; then
-            write_status done 1
-            update_title "$SANDBOX_NAME"
-            break
-        fi
-        if [ "$HOOK_IDLE" = "true" ]; then
-            CUR_STATUS=$(jq -r '.status // "active"' "$STATUS_FILE" 2>/dev/null || echo "active")
-            if [ "$CUR_STATUS" = "idle" ]; then
-                update_title "> $SANDBOX_NAME"
-            else
-                update_title "$SANDBOX_NAME"
-            fi
-        else
-            NEW_STATUS="active"
-            if [ -n "$READY_PATTERN" ] && [ "$READY_PATTERN" != "null" ]; then
-                PANE_CONTENT=$(tmux -S "$TMUX_SOCK" capture-pane -t main -p 2>/dev/null || true)
-                if echo "$PANE_CONTENT" | grep -qF "$READY_PATTERN"; then
-                    NEW_STATUS="idle"
-                fi
-            fi
-            write_status "$NEW_STATUS" null
-            if [ "$NEW_STATUS" = "idle" ]; then
-                update_title "> $SANDBOX_NAME"
-            else
-                update_title "$SANDBOX_NAME"
-            fi
-        fi
-        sleep 2
-    done
-) &
+# Launch Python status monitor with per-sandbox tmux socket.
+if ! command -v python3 >/dev/null 2>&1; then
+    echo "ERROR: Python 3 required for status monitoring. Install Xcode Command Line Tools: xcode-select --install" >&2
+fi
+python3 "$SANDBOX_DIR/status-monitor.py" "$CONFIG" "$STATUS_FILE" "$TMUX_SOCK" &
 
 debug_log "entrypoint setup complete, blocking on tmux wait"
 
