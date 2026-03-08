@@ -23,6 +23,7 @@ POLL_INTERVAL = 2  # seconds between detector polls
 MEDIUM_STABILITY = 2  # consecutive matches for medium confidence
 LOW_STABILITY = 3  # consecutive matches for low confidence
 HOOK_IDLE_AGE = 15  # seconds of no "active" hook write before inferring idle
+HOOK_IDLE_GRACE = 8  # seconds idle must persist before HookDetector reports idle
 GLOBAL_HOLD_CYCLES = 2  # consecutive non-idle cycles needed to leave idle
 
 # Wait channels indicating terminal input wait (idle)
@@ -181,11 +182,19 @@ class HookDetector:
     """Reads status from status.json written by agent hooks.
 
     Returns "idle" when:
-    - The file explicitly says "idle" (Notification hook fired), OR
+    - The file says "idle" (Notification hook fired) AND idle has persisted
+      for at least HOOK_IDLE_GRACE seconds. The grace period filters out
+      brief idle blips between tool calls in multi-tool sequences — the
+      Notification hook fires after every assistant response, not just when
+      Claude is truly waiting for user input.
     - The file says "active" but the write is stale (age > HOOK_IDLE_AGE).
       A stale "active" means PreToolUse hasn't fired recently, implying the
       agent stopped working. This provides idle detection even when the
       Notification hook fails to fire (a known upstream issue).
+
+    The grace period is started only by actual hook writes (no "source"
+    field), not by the monitor's own echoed writes. An "active" hook write
+    (PreToolUse) immediately clears the grace timer.
     """
     name = "hook"
     confidence = "high"
@@ -193,6 +202,7 @@ class HookDetector:
     def __init__(self, status_file):
         self.status_file = status_file
         self._hook_ts = 0  # last timestamp written by a hook (not by monitor)
+        self._idle_since = 0  # monotonic time when idle was first seen from hook
 
     def check(self, _agent_pid):
         try:
@@ -200,18 +210,36 @@ class HookDetector:
                 data = json.load(f)
             s = data.get("status", "")
             ts = data.get("timestamp", 0)
+            source = data.get("source", "")
             now = int(time.time())
             age = now - ts if ts else -1
 
             if s == "idle":
-                self._hook_ts = ts
-                debug(f"  hook: file says idle (age={age}s)")
-                return DetectorResult("idle", self.confidence)
+                # Only start/continue the grace period from actual hook writes.
+                # Monitor writes (source="monitor") echo the current state and
+                # should not reset or extend the grace timer.
+                if not source:
+                    self._hook_ts = ts
+                    if not self._idle_since:
+                        self._idle_since = time.monotonic()
+
+                if self._idle_since:
+                    elapsed = time.monotonic() - self._idle_since
+                    if elapsed >= HOOK_IDLE_GRACE:
+                        debug(f"  hook: idle confirmed (grace {elapsed:.1f}s >= {HOOK_IDLE_GRACE}s)")
+                        return DetectorResult("idle", self.confidence)
+                    debug(f"  hook: idle grace period ({elapsed:.1f}s/{HOOK_IDLE_GRACE}s)")
+                    return DetectorResult("unknown")
+
+                debug(f"  hook: file says idle (age={age}s) but source={source!r}, waiting")
+                return DetectorResult("unknown")
 
             if s == "active":
+                # Active signal clears the idle grace period.
+                self._idle_since = 0
+
                 # Only update _hook_ts from actual hook writes (no "source"
                 # field). The monitor sets source="monitor" on its writes.
-                source = data.get("source", "")
                 if not source and ts > self._hook_ts:
                     self._hook_ts = ts
 
