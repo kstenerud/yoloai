@@ -178,8 +178,13 @@ class HookDetector:
             with open(self.status_file) as f:
                 data = json.load(f)
             s = data.get("status", "")
-            if s in ("idle", "active"):
-                return DetectorResult(s, self.confidence)
+            # Only report "idle" from hooks. Reporting "active" creates a
+            # feedback loop: the monitor writes "active" to the same file,
+            # the HookDetector reads it back, and blocks all lower-priority
+            # detectors (wchan, ready_pattern) from ever running. The safe
+            # default is already "active", so we don't need hooks for that.
+            if s == "idle":
+                return DetectorResult("idle", self.confidence)
         except (OSError, json.JSONDecodeError, ValueError):
             pass
         return DetectorResult("unknown")
@@ -196,7 +201,10 @@ class WchanDetector:
             return DetectorResult("idle", self.confidence)
         if wchan in EVENT_LOOP_WCHANS:
             if has_active_connections(agent_pid):
-                return DetectorResult("active", self.confidence)
+                # Ambiguous: could be active API call or just keepalive
+                # connections (common with Node.js agents like Claude Code).
+                # Return unknown to let lower-priority detectors decide.
+                return DetectorResult("unknown")
             return DetectorResult("idle", self.confidence)
         if wchan in ACTIVE_WCHANS:
             return DetectorResult("active", self.confidence)
