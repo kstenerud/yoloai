@@ -628,6 +628,10 @@ done`, cfg.ReadyPattern)
 		waitCmd = "sleep 3"
 	}
 
+	// Write active status to status.json AFTER prompt delivery, not before.
+	// This fixes the race where status shows "active" during the readiness wait.
+	statusWrite := `printf '{"status":"active","timestamp":%d}' "$(date +%%s)" > /yoloai/status.json`
+
 	script := fmt.Sprintf(`%s
 printf '%%s' "$1" > /tmp/yoloai-resume.txt
 tmux load-buffer /tmp/yoloai-resume.txt
@@ -637,14 +641,12 @@ for key in %s; do
     tmux send-keys -t main "$key"
     sleep 0.2
 done
-rm -f /tmp/yoloai-resume.txt`, waitCmd, cfg.SubmitSequence)
+rm -f /tmp/yoloai-resume.txt
+%s`, waitCmd, cfg.SubmitSequence, statusWrite)
 
 	_, err = execInContainer(ctx, m.runtime, InstanceName(name), []string{
 		"bash", "-c", "nohup bash -c '" + strings.ReplaceAll(script, "'", "'\"'\"'") + "' _ \"$1\" >/dev/null 2>&1 &", "_", resumeText,
 	})
-	if err == nil && cfg.HookIdle {
-		resetStatusToActive(sandboxDir)
-	}
 	return err
 }
 
@@ -703,6 +705,9 @@ done`, cfg.ReadyPattern)
 		waitCmd = "sleep 3"
 	}
 
+	// Write active status to status.json AFTER prompt delivery, not before.
+	statusWrite := `printf '{"status":"active","timestamp":%d}' "$(date +%%s)" > /yoloai/status.json`
+
 	script := fmt.Sprintf(`%s
 printf '%%s' "$1" > /tmp/yoloai-custom-prompt.txt
 tmux load-buffer /tmp/yoloai-custom-prompt.txt
@@ -712,14 +717,12 @@ for key in %s; do
     tmux send-keys -t main "$key"
     sleep 0.2
 done
-rm -f /tmp/yoloai-custom-prompt.txt`, waitCmd, cfg.SubmitSequence)
+rm -f /tmp/yoloai-custom-prompt.txt
+%s`, waitCmd, cfg.SubmitSequence, statusWrite)
 
 	_, err := execInContainer(ctx, m.runtime, InstanceName(name), []string{
 		"bash", "-c", "nohup bash -c '" + strings.ReplaceAll(script, "'", "'\"'\"'") + "' _ \"$1\" >/dev/null 2>&1 &", "_", promptText,
 	})
-	if err == nil && cfg.HookIdle {
-		resetStatusToActive(sandboxDir)
-	}
 	return err
 }
 
