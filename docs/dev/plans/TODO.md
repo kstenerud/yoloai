@@ -56,6 +56,14 @@ Enrich `yoloai ls` output for multi-sandbox workflows:
 
 Keep default output concise; add `--long` or `-l` flag for the full dashboard view.
 
+## Idle Detection
+
+### User-overridable detector config
+
+Allow users to override the auto-resolved detector stack via profile-level config. A `detectors` list in profile `config.yaml` would replace the automatically computed stack, letting users disable noisy detectors or change priority order. No CLI flag — config file only.
+
+See [idle detection research](../research/idle-detection.md) §3.9 Q1.
+
 ## Profile Enhancements
 
 ### Shared cache volumes

@@ -521,7 +521,8 @@ The stability counters are per-detector and reset when the detector's result cha
 | `config/config.go` | Remove `idle_threshold` key |
 | `config/profile.go` | Remove `idle_threshold` from profile config |
 | `sandbox/create_prepare.go` | Remove `idle_threshold` handling |
-| `entrypoint-user.sh` | Rewrite status monitor loop to use detector framework |
+| `entrypoint-user.sh` | Remove bash status monitor loop, launch Python status monitor instead |
+| (new) `status-monitor.py` | Python status monitor implementing the detector framework |
 | `runtime/tart/resources/setup.sh` | Same detector framework changes |
 | `runtime/seatbelt/resources/entrypoint.sh` | Same detector framework changes |
 
@@ -535,20 +536,12 @@ The stability counters are per-detector and reset when the detector's result cha
 
 ### 3.9 Open Questions
 
-**Q1: Should detector config be user-overridable?**
-Users might want to disable a noisy detector or tune stability thresholds. This could be a profile-level config (`detectors: [hook, ready_pattern]`) but adds complexity. Suggest: not in phase 1.
+~~**Q1: Should detector config be user-overridable?**~~ **Resolved:** Yes, via config file only (profile-level `detectors` list). No CLI flag. Users can override the auto-resolved detector stack in their profile's `config.yaml` to disable noisy detectors or change the order. Not in phase 1 — TODO.
 
-**Q2: Should the entrypoint be rewritten in a compiled language?**
-The status monitor is currently a bash background subshell. As we add wchan parsing, network checks, and log tailing, bash becomes unwieldy. A small Go or Rust binary could be more maintainable. However, this adds a build step and binary to the container image. Suggest: keep bash for now, extract to a compiled binary only if complexity demands it.
+~~**Q2: Should the entrypoint be rewritten in a compiled language?**~~ **Resolved:** Rewrite the status monitor in Python from the start. Python 3 is already in the base image — no new dependency or build step. Far more maintainable than bash for the detector framework (ordered evaluation, stability counters, `/proc` parsing, network checks, process tree walking). No compiled language needed — avoids cross-compilation and build complexity for a long-running in-container process where startup time is irrelevant. **macOS caveat (Seatbelt backend):** macOS doesn't ship Python 3 pre-installed since Monterey 12.3. It's available via Xcode Command Line Tools (practically universal for macOS developers). The monitor should check for Python 3 at startup and error with a clear message ("Python 3 required — install Xcode Command Line Tools: `xcode-select --install`") if missing.
 
-**Q3: How to handle the node.js epoll problem?**
-Claude Code and Codex are Node.js programs. Their wchan is always `do_epoll_wait` because Node uses libuv's event loop. The network connection check distinguishes idle from working, but there's a window after an API response completes and before the agent processes it where there are no TCP connections but the agent is about to start working. This is a very short window (milliseconds) and the stability counter should prevent false idle detection.
+~~**Q3: How to handle the node.js epoll problem?**~~ **Resolved:** The stability counter handles it. The post-API-response window (no TCP connections, agent about to start working) is milliseconds long. Even the medium-confidence stability check requires 2 consecutive matches at 2-second intervals — a momentary false idle blip won't survive the debounce. No special handling needed.
 
-**Q4: What about agents that use WebSocket connections?**
-Some agents maintain persistent WebSocket connections to their API. These show as ESTABLISHED TCP connections even when idle. The simple "has TCP connections = working" heuristic breaks. Solutions:
-- Check if the connections are to known API endpoints (port 443 to api.anthropic.com, etc.)
-- Monitor TCP traffic volume (zero bytes transferred = idle connection)
-- Accept this as a limitation for WebSocket-based agents and rely on other detectors
+~~**Q4: What about agents that use WebSocket connections?**~~ **Resolved:** Monitor TCP traffic volume by tracking byte counter deltas between poll cycles — zero delta on a persistent connection = idle. Cross-platform: Linux uses `ss -ti` (per-socket `bytes_sent`/`bytes_acked` from kernel netlink stats, <1ms, part of `iproute2`); macOS uses `nettop -p <pid> -J bytes_in,bytes_out -l 1` (per-process byte counters). The Python status monitor abstracts this behind a platform check.
 
-**Q5: Should context_signal use the pipe-pane log or capture-pane?**
-The log file captures all output regardless of scrolling, making it more reliable. But it grows unboundedly and requires seeking to the end. The detector would need to track its read position. Alternatively, use a dedicated pipe (not the main log) for signal detection.
+~~**Q5: Should context_signal use the pipe-pane log or capture-pane?**~~ **Resolved:** Use the pipe-pane log (`/yoloai/log.txt`). The Python status monitor opens the file, seeks to end at startup, and reads new lines each poll cycle — checking for `[YOLOAI:IDLE]` / `[YOLOAI:WORKING]` markers. Essentially `tail -f | grep` in-process, no subprocess needed. Beats `capture-pane` because the log captures all output regardless of terminal scrollback — markers can't scroll off the visible buffer.
