@@ -117,8 +117,8 @@ write_status "$NEW_STATUS" null
 
 ### 1.7 Known Issues
 
-**1. Deprecated `idle_threshold` config still exists.**
-The `idle_threshold` field is in config, profiles, and meta.json, with `DefaultIdleThreshold = 30` marked deprecated (`sandbox/inspect.go:32-35`). It is never read or used. Dead configuration that could confuse users.
+**1. `idle_threshold` config is wired up but unused.**
+The `idle_threshold` field is actively parsed from YAML (`config/config.go`), propagated through profile resolution (`create_prepare.go`), and stored in meta.json (`meta.go`). Only the `DefaultIdleThreshold` constant is marked deprecated (`sandbox/inspect.go:32-35`). The field flows through the entire creation pipeline but is never read for any detection logic. Full removal scope documented in Phase 1.
 
 **2. Agents without ReadyPattern can never be detected as idle.**
 OpenCode, test, and shell agents have empty `ReadyPattern` and `HookIdle: false`. Once a prompt is sent, they show as "active" forever until the process exits.
@@ -133,7 +133,7 @@ OpenCode, test, and shell agents have empty `ReadyPattern` and `HookIdle: false`
 An "active" `status.json` older than 10 seconds triggers exec fallback. But exec can't detect idle -- only pane death. So if the status monitor dies, a non-hook agent stuck in idle will report as "active" forever.
 
 **5. Race condition on prompt delivery.**
-`sendResumePrompt`/`sendCustomPrompt` call `resetStatusToActive` immediately, but prompt delivery involves waiting up to 60 seconds for the agent to be ready. During this window, status says "active" but no prompt has been delivered yet.
+`sendResumePrompt`/`sendCustomPrompt` call `resetStatusToActive` on the host immediately after spawning a `nohup` background script, but the script waits up to 60 seconds for the agent to be ready before delivering the prompt. During this window, status says "active" but no prompt has been delivered yet. **Fix:** Move the status write into the background script — write `{"status":"active",...}` to `/yoloai/status.json` after successful prompt delivery, not on the host when spawning the script. Remove `resetStatusToActive` calls from `sendResumePrompt`/`sendCustomPrompt` in `lifecycle.go`.
 
 **6. Claude Code hook reliability concerns.**
 The `Notification` hook with `idle_prompt` matcher is widely reported as unreliable upstream (fires on every response, or doesn't fire at all in VS Code). yoloAI uses a plain `Notification` hook (not `idle_prompt`-specific), which fires on every completion -- this is correct for our use case but worth noting the upstream instability.
@@ -284,6 +284,8 @@ When you begin working on a new request, print the marker: [YOLOAI:WORKING]
 
 **Implementation:** Already exists. The current `HOOK_IDLE=true` path in `entrypoint-user.sh`.
 
+**Resilience:** Unique among detectors — hooks write to `status.json` directly, bypassing the status monitor. If the Python monitor crashes, hook-based idle detection continues working (the host reads `status.json` regardless). The monitor's role for hook agents is purely cosmetic (terminal title updates).
+
 #### `ready_pattern` -- Terminal Prompt Matching (Medium Confidence)
 
 **How:** `tmux capture-pane -t main -p | grep -qF "$READY_PATTERN"`
@@ -345,6 +347,8 @@ When you begin working on a new request, print the marker: [YOLOAI:WORKING]
 
 **Key weakness:** LLMs are unreliable instruction followers. The agent may emit the marker at wrong times, or not at all. Must be combined with other signals.
 
+**ANSI caveat:** The pipe-pane log captures raw terminal output including ANSI escape/color codes. The Python monitor must strip ANSI sequences before matching markers. The context file instructions should also explicitly say "print this exact text on its own line with no formatting."
+
 #### `test_mock` -- Controllable Test Signals (High Confidence, Deferred)
 
 **How:** The test agent writes `status.json` directly in response to specific commands, simulating idle/working transitions.
@@ -375,14 +379,23 @@ Notes:
 - Claude on macOS: hooks are primary, no wchan available. Falls back to ready_pattern if hooks fail.
 - Test/shell agents: no idle detection. They stay as "active" until the process exits. A full test harness is planned separately (see `docs/dev/plans/TODO.md`).
 - OpenCode on macOS: no hooks, no wchan, no ready pattern. Only context_signal and output_stability. This is a known limitation.
+- **macOS idle detection is best-effort for non-Claude agents.** Without wchan, gemini/codex/aider fall back to ready_pattern + context_signal + output_stability — all medium/low confidence. A research round for macOS-specific detection alternatives is needed; if nothing better exists, accept and document the limitation.
 
 ### 3.5 Implementation Plan
 
 #### Phase 1: Framework + Cleanup
 
-1. **Remove dead code:** Delete deprecated `idle_threshold` from config, profiles, meta.json, and `DefaultIdleThreshold` constant. Remove unused bell-detection comments/config.
+1. **Remove `idle_threshold` plumbing:** The field is actively wired through the creation pipeline despite being unused. Full removal scope:
+   - `sandbox/inspect.go`: `DefaultIdleThreshold` constant (marked deprecated)
+   - `sandbox/meta.go`: `IdleThreshold` field in `Meta` struct
+   - `config/config.go`: `IdleThreshold` field in `YoloaiConfig`, `idle_threshold` in `knownSettings`
+   - `config/profile.go`: `idle_threshold` in profile config
+   - `sandbox/create_prepare.go`: `idleThreshold` resolution and propagation
+   - Remove unused bell-detection comments/config.
 
-2. **Declare agent idle capabilities.** Replace `HookIdle bool` and `ReadyPattern string` with an `IdleSupport` struct that describes what idle signals the agent can produce:
+2. **Fix prompt delivery race condition.** Move `resetStatusToActive` from the host side (`lifecycle.go`) into the in-container background script. The script writes `{"status":"active","timestamp":...}` to `/yoloai/status.json` after successful prompt delivery, not before. Remove `resetStatusToActive` calls from `sendResumePrompt` and `sendCustomPrompt`.
+
+3. **Declare agent idle capabilities.** Replace `HookIdle bool` and `ReadyPattern string` with an `IdleSupport` struct that describes what idle signals the agent can produce:
 
 ```go
 // IdleSupport describes what idle detection signals an agent can produce.
@@ -410,7 +423,7 @@ type IdleSupport struct {
 
 The framework resolves which detectors to run at creation time via a function like `resolveDetectors(idle agent.IdleSupport, backend string) []Detector`, separating capability declaration from detector selection.
 
-3. **Compute detector stack at creation time.** Based on `IdleSupport` + runtime backend, determine which detectors to activate. Store in `config.json` as a list:
+4. **Compute detector stack at creation time.** Based on `IdleSupport` + runtime backend, determine which detectors to activate. Store in `config.json` as a list:
 
 ```json
 {
@@ -428,41 +441,39 @@ or for a non-hook agent on Linux:
 }
 ```
 
-4. **Refactor the status monitor loop.** Replace the current `if HOOK_IDLE ... else ...` with a detector loop that evaluates each configured detector in order.
+5. **Refactor the status monitor loop.** Replace the current `if HOOK_IDLE ... else ...` with a detector loop that evaluates each configured detector in order.
 
 #### Phase 2: wchan Detector
 
-1. **Implement wchan reading in the status monitor.** After `tmux list-panes -t main -F '#{pane_pid}'` to get the agent PID:
+1. **Implement wchan reading in the Python status monitor.** After getting the agent PID via `tmux list-panes -t main -F '#{pane_pid}'`:
 
-```bash
-WCHAN=$(cat /proc/$AGENT_PID/wchan 2>/dev/null || echo "unknown")
-case "$WCHAN" in
-    n_tty_read|wait_woken)
-        # Blocked on terminal read -- idle
-        WCHAN_STATUS="idle"
-        ;;
-    do_epoll_wait|poll_schedule_timeout)
-        # Event loop -- check for network activity
-        if has_tcp_connections "$AGENT_PID"; then
-            WCHAN_STATUS="active"  # waiting for API
-        else
-            WCHAN_STATUS="idle"     # idle event loop
-        fi
-        ;;
-    do_wait)
-        WCHAN_STATUS="active"  # waiting for child process
-        ;;
-    *)
-        WCHAN_STATUS="unknown"
-        ;;
-esac
+```python
+def read_wchan(pid: int) -> str:
+    try:
+        return Path(f"/proc/{pid}/wchan").read_text().strip()
+    except OSError:
+        return "unknown"
+
+wchan = read_wchan(agent_pid)
+if wchan in ("n_tty_read", "wait_woken"):
+    status = "idle"       # blocked on terminal read
+elif wchan in ("do_epoll_wait", "poll_schedule_timeout"):
+    # event loop — check for network activity
+    if has_active_connections(agent_pid):
+        status = "active"  # waiting for API
+    else:
+        status = "idle"    # idle event loop
+elif wchan == "do_wait":
+    status = "active"      # waiting for child process
+else:
+    status = "unknown"
 ```
 
-2. **Network connection check.** `ss -tnp` filtered by PID, or parse `/proc/<pid>/net/tcp6` (no `ss` needed in minimal containers). Check for ESTABLISHED connections to known API endpoints.
+2. **Network connection check.** Parse `/proc/<pid>/net/tcp6` directly in Python (no `ss` or `iproute2` dependency). Each line has connection state at a fixed offset — `01` = ESTABLISHED. For WebSocket-aware detection, track per-connection `tx_queue:rx_queue` byte counter deltas between poll cycles (zero delta = idle persistent connection). On macOS, fall back to `nettop -p <pid> -J bytes_in,bytes_out -l 1`.
 
-3. **Process tree awareness.** AI agents spawn child processes (node workers, language servers, build tools). The main process may show `do_wait` while children do the real work. Check children's wchan too: if any child has active network connections, the agent is working.
+3. **Network namespace approach for process trees.** Rather than walking child processes, read `/proc/<pid>/net/tcp6` which covers ALL processes in the container's network namespace. If any process in the container has active TCP connections with traffic, the agent is working. Simpler and more complete than recursive process tree traversal.
 
-4. **Platform guard.** Only activate wchan detector on Linux. In the entrypoint, check `[ -f /proc/1/wchan ]` before enabling.
+4. **Platform guard.** Only activate wchan detector on Linux. The Python monitor checks `os.path.exists("/proc/1/wchan")` at startup.
 
 #### Phase 3: Context Signal Detector
 
@@ -531,7 +542,7 @@ The stability counters are per-detector and reset when the detector's result cha
 - **status.json format and semantics.** The IPC mechanism is sound. Detectors write to it, host reads it.
 - **DetectStatus() on the host side.** It reads status.json and falls back to exec. This doesn't need to know about detectors.
 - **Terminal title convention.** `"> name"` for idle, `"name"` for active.
-- **resetStatusToActive().** Host-side status reset when delivering prompts.
+- **resetStatusToActive() concept.** Status reset when delivering prompts. Implementation moves from host-side (`lifecycle.go`) to in-container background script to fix the prompt delivery race (see Phase 1 step 2).
 - **All consumer commands** (list, attach, exec, stop, diff, etc.) -- they read status, not detect it.
 
 ### 3.9 Open Questions
@@ -542,6 +553,6 @@ The stability counters are per-detector and reset when the detector's result cha
 
 ~~**Q3: How to handle the node.js epoll problem?**~~ **Resolved:** The stability counter handles it. The post-API-response window (no TCP connections, agent about to start working) is milliseconds long. Even the medium-confidence stability check requires 2 consecutive matches at 2-second intervals — a momentary false idle blip won't survive the debounce. No special handling needed.
 
-~~**Q4: What about agents that use WebSocket connections?**~~ **Resolved:** Monitor TCP traffic volume by tracking byte counter deltas between poll cycles — zero delta on a persistent connection = idle. Cross-platform: Linux uses `ss -ti` (per-socket `bytes_sent`/`bytes_acked` from kernel netlink stats, <1ms, part of `iproute2`); macOS uses `nettop -p <pid> -J bytes_in,bytes_out -l 1` (per-process byte counters). The Python status monitor abstracts this behind a platform check.
+~~**Q4: What about agents that use WebSocket connections?**~~ **Resolved:** Monitor TCP traffic volume by tracking byte counter deltas between poll cycles — zero delta on a persistent connection = idle. Cross-platform: Linux parses `/proc/<pid>/net/tcp6` directly in Python (per-connection `tx_queue:rx_queue` counters, no external dependencies); macOS uses `nettop -p <pid> -J bytes_in,bytes_out -l 1` (per-process byte counters). The Python status monitor abstracts this behind a platform check.
 
 ~~**Q5: Should context_signal use the pipe-pane log or capture-pane?**~~ **Resolved:** Use the pipe-pane log (`/yoloai/log.txt`). The Python status monitor opens the file, seeks to end at startup, and reads new lines each poll cycle — checking for `[YOLOAI:IDLE]` / `[YOLOAI:WORKING]` markers. Essentially `tail -f | grep` in-process, no subprocess needed. Beats `capture-pane` because the log captures all output regardless of terminal scrollback — markers can't scroll off the visible buffer.

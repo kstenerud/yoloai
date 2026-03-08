@@ -1,143 +1,105 @@
 # Critique
 
-Architecture review — February 2026. Assessed implementation against design docs, coding standards, and roadmap.
+Idle detection architecture review — March 2026. Assessed [idle detection research and architecture proposal](research/idle-detection.md) against actual codebase.
 
 ## What's Working Well
 
-- Copy/diff/apply workflow backed by git is well-implemented and clean.
-- Safety layer is thorough: dangerous dir checks, path overlap detection, dirty repo warnings, read-only defaults.
-- Docker Client interface enables testability; compile-time satisfaction check is good practice.
-- Package boundaries (agent/sandbox/docker/cli) are clear at the top level.
-- Coding standards are being followed consistently.
-- Test coverage is solid (4,375 lines of test code, 18 test files).
-- The implementation delivers what the design promised — no major gaps between spec and implementation.
+- The pluggable detector framework is well-designed — clean separation of capability declaration from detector selection.
+- `status.json` as IPC is sound. Detectors write, host reads. No change needed.
+- The confidence/stability counter approach handles flapping elegantly.
+- wchan research is thorough and verified against kernel 6.17.4.
+- Q4 resolution (TCP traffic volume via `ss`/`nettop`) closes the WebSocket gap.
+- Hook-based detection for Claude Code is verified working and survives monitor death (hooks write `status.json` directly).
 
 ## Findings
 
-### 1. `sandbox` package concentration (Medium)
+### 1. `idle_threshold` is live code, not dead (Medium)
 
-**Observation:** `internal/sandbox/` is 7,400 lines in one package. It owns creation, lifecycle, diff, apply, setup, config, paths, safety, inspection, confirmation, and error types. The file-per-concern split helps readability, but everything shares one package namespace — all internals are mutually accessible, and change impact is hard to reason about.
+**Observation:** The design doc (known issue #1) calls `idle_threshold` "never read or used." This is wrong. `config/config.go:46` parses it from YAML, `config/config.go:86` lists it in `knownSettings`, `sandbox/create_prepare.go:28,40,133` propagates it through profile resolution, and `sandbox/meta.go:38` stores it in Meta. It flows through the entire creation pipeline.
 
-**Evidence:** The package-level functions `GeneratePatch`, `CheckPatch`, `ApplyPatch`, `GenerateDiff`, etc. don't use Manager at all. They operate on sandbox names and paths. This is a natural extraction boundary that's already visible in the code.
+Only the `DefaultIdleThreshold` constant in `sandbox/inspect.go:32-35` is marked deprecated. The field itself is actively wired up.
 
-**Recommendation:** Split along the seams that already exist:
+**Recommendation:** The Phase 1 cleanup must trace and remove all of these sites, not just the constant. Update the design doc's known issue #1 to list the actual removal scope: `config.go`, `create_prepare.go`, `meta.go`, `inspect.go`.
 
-- `internal/sandbox/` — Manager, create, lifecycle, meta, state types (orchestration)
-- `internal/workspace/` — diff, apply, patch generation, git baseline, format-patch (copy/diff/apply engine)
-- `internal/setup/` — first-run setup, config.yaml manipulation, tmux configuration
+**When:** Phase 1.
 
-This would also make roadmap features land more cleanly: overlayfs belongs in workspace, profiles touch setup, network isolation touches sandbox.
+### 2. Phase 2 code examples are bash, should be Python (Low)
 
-**When:** Before overlay or profiles implementation begins.
+**Observation:** Section 3.5 Phase 2 shows bash snippets (`WCHAN=$(cat /proc/...)`, `case "$WCHAN" in ...`) even though Q2 resolved the monitor will be Python from the start. The section 3.7 code changes table was updated but the inline examples weren't.
 
-### 2. `create.go` mixes creation logic with shared utilities (Low-Medium)
+**Recommendation:** Replace bash code examples in Phase 2-4 with Python (or pseudocode) for consistency.
 
-**Observation:** `create.go` (920 lines) holds the creation workflow alongside git helpers (`newGitCmd`, `runGitCmd`, `gitBaseline`, `gitHeadSHA`), file operations (`copyDir`, `removeGitDirs`, `expandTilde`), JSON helpers, secrets handling, mount building, prompt reading, port parsing, and seed file logic. The git helpers in particular are used by diff.go, apply.go, and lifecycle.go — they're shared infrastructure that happens to live in the creation file.
+**When:** Before implementation begins.
 
-**Recommendation:** Extract shared helpers into dedicated files regardless of whether the package splits:
+### 3. `ss` / `iproute2` not in Dockerfile (Medium)
 
-- `git.go` — `newGitCmd`, `runGitCmd`, `gitHeadSHA`, `gitBaseline`, `stageUntracked`
-- `util.go` or similar — `copyDir`, `removeGitDirs`, `expandTilde`, `readJSONMap`, `writeJSONMap`
+**Observation:** Q4 resolution says "Linux uses `ss -ti`" for TCP traffic volume monitoring. But `iproute2` is not installed in the base image Dockerfile. Phase 2 step 2 acknowledges `/proc/<pid>/net/tcp6` parsing as an alternative, but the Q4 resolution doesn't mention it.
 
-This reduces `create.go` to the creation workflow itself and makes the shared code discoverable.
+**Recommendation:** Pick one approach and be consistent:
+- **Option A:** Add `iproute2` to Dockerfile. Simple, `ss` is a ~100KB binary.
+- **Option B:** Parse `/proc/<pid>/net/tcp6` directly in Python. No new dependency, but more code.
 
-**When:** Anytime. Easy refactor.
+Option B is more aligned with the Python monitor approach (no subprocess spawning). Either way, update Q4 resolution and Phase 2 to agree.
 
-### 3. Docker subprocess calls bypass the SDK (Low)
+**When:** Before Phase 2 implementation.
 
-**Observation:** `waitForTmux` and `attachToSandbox` in `cli/commands.go` shell out to `docker exec`/`docker inspect` via `os/exec`. The coding standard says: "Use `github.com/docker/docker/client` (official SDK), not subprocess calls to `docker` CLI."
+### 4. No macOS idle detection story for most agents (Medium)
 
-`attachToSandbox` is a legitimate exception — `docker exec -it` with full TTY passthrough is genuinely difficult via the SDK. But `waitForTmux` could use `ContainerExecCreate`/`ContainerExecAttach` (already on the Client interface) and `ContainerInspect` (also on the interface).
+**Observation:** On macOS (Tart/Seatbelt), wchan is unavailable. For non-hook agents (gemini, codex, aider, opencode), the primary detector is gone. What remains: `ready_pattern` (medium confidence, fragile), `context_signal` (medium, unreliable), `output_stability` (low, false positives). OpenCode on macOS has only context_signal and output_stability — both weak.
 
-**Recommendation:** Document the TTY-attach exception explicitly. Convert `waitForTmux` to use the SDK. The subprocess calls can't be mocked via the Client interface, which hurts testability.
+The design acknowledges this for OpenCode ("known limitation") but doesn't call out that *most agents on macOS* have significantly degraded idle detection.
 
-**When:** When touching those code paths.
+**Recommendation:** Add a note to section 3.4 explicitly stating that macOS idle detection for non-Claude agents is best-effort. Consider whether this gap is acceptable or whether it warrants a macOS-specific fallback (e.g., `ps -o wchan` heuristic, even if weaker than Linux).
 
-### 4. Agent definitions need a user-facing format before the second agent ships (Low now, High later)
+**When:** Before Phase 2.
 
-**Observation:** The `agents` map in `agent.go` is a Go map literal. Adding Codex or Aider means editing Go source and recompiling. The roadmap lists "community-requested agents (Aider, Goose, etc.)" — at some point users will want to define custom agents without rebuilding the binary.
+### 5. ANSI escape sequences in context_signal log matching (Low-Medium)
 
-The current design doesn't specify a user-facing agent definition format. Profile `profile.yaml` could carry agent overrides, but there's no schema for it.
+**Observation:** The `context_signal` detector reads the pipe-pane log (`/yoloai/log.txt`) for `[YOLOAI:IDLE]` / `[YOLOAI:WORKING]` markers. This log captures raw terminal output including ANSI color/formatting codes. If the agent wraps the marker text in formatting (bold, color, markdown rendering), a literal string match will fail.
 
-**Recommendation:** Plan the agent definition schema (likely YAML in `~/.yoloai/agents/` or embedded in profiles) before the second agent ships, so the format isn't shaped by Claude's specific needs alone. The Definition struct fields are a good starting point for the schema.
+**Recommendation:** The Python monitor must strip ANSI escape sequences before matching markers. Alternatively, the context file instructions should explicitly say "print this exact text on its own line with no formatting." Both mitigations are cheap — do both.
 
-**When:** Before Codex ships. The schema design should consider all planned agents.
+**When:** Phase 3 implementation.
 
-### 5. Overlayfs will stress the current `sandbox` package structure (Medium)
+### 6. Process tree walking for wchan is underspecified (Low-Medium)
 
-**Observation:** Overlayfs replaces `copyDir` with mount setup, requires different cleanup on destroy/reset, changes how the git baseline works (original `.git/` is read-only lower layer), and needs capability detection with fallback logic. This cuts across create, lifecycle, and diff — all within the already-large sandbox package.
+**Observation:** Phase 2 step 3 says "check children's wchan too: if any child has active network connections, the agent is working." But it doesn't specify traversal depth. Claude Code spawns Node workers, which spawn shells, which spawn build tools. Recursive `/proc/<pid>/children` traversal could be expensive.
 
-The current `create.go` flow is 920 lines and will grow with overlay code paths.
+**Recommendation:** Specify a depth limit (e.g., 2 levels) or use a smarter heuristic: only check processes with TCP connections (scan `/proc/<pid>/net/tcp6` for the agent PID's network namespace, which covers all processes in the container). The network namespace approach is both simpler and more complete.
 
-**Recommendation:** The workspace extraction from finding 1 would cleanly separate "how to set up a work copy" (full copy vs overlay) from "how to manage a container." A `workspace.Strategy` interface with `FullCopy` and `Overlay` implementations would keep the creation flow readable and the strategy logic isolated.
+**When:** Phase 2 implementation.
 
-**When:** Decide before overlay implementation starts. The package split and the overlay work can be done together or sequentially, but the split should be designed first.
+### 7. Prompt delivery race condition not addressed (Low)
 
-### 6. `meta.json` has no schema versioning (Low)
+**Observation:** Known issue #5 documents that `resetStatusToActive` fires before the prompt is actually delivered (up to 60s wait for agent readiness). The architecture proposal doesn't fix this — it persists into the new design.
 
-**Observation:** `Meta` is a flat struct with no version field. Aux directories (roadmap) will need `AuxDirs []WorkdirMeta` or similar — a schema change. Existing sandboxes won't have this field.
+**Recommendation:** Either fix it (reset status only after confirming delivery) or explicitly note in the architecture proposal that this is a known limitation carried forward. Currently it's documented as a known issue in Part 1 but not mentioned in Part 3.
 
-Go's JSON unmarshaling handles missing fields gracefully (zero values), so this works today. But as the schema evolves across beta, explicitly tracking the version would make migration logic cleaner.
+**When:** Note it now, fix when prompt delivery is reworked.
 
-**Recommendation:** Add a `Version int` field to Meta. Existing meta.json files without it unmarshal to `Version: 0`, which is a valid sentinel for "initial schema." Worth adding to OPEN_QUESTIONS for discussion.
+### 8. Hook detector survives monitor death — undocumented strength (Low)
 
-**When:** When aux dirs or other schema changes ship.
+**Observation:** The `hook` detector is unique: Claude Code's hooks write to `status.json` directly, bypassing the status monitor entirely. If the Python monitor crashes, hook-based idle detection continues working (the host reads `status.json` regardless). All other detectors die with the monitor.
 
-### 7. Viper may not be needed (Low)
+This is a significant reliability advantage that the design doesn't capture. It also means the monitor's role for hook agents is purely cosmetic (terminal title updates) — worth documenting for the implementation.
 
-**Observation:** The design calls for Viper for config file + env var + flag precedence binding. But the current approach — raw YAML manipulation with `updateConfigFields` preserving comments — is simpler and more predictable. Viper pulls ~15 transitive dependencies.
+**Recommendation:** Add a note to the `hook` detector section (3.3) about this resilience property.
 
-Profiles will have their own `profile.yaml`. The main thing Viper gives is precedence binding (env > config > flag), which could be built with a thin layer over `go-yaml` + Cobra flags. The design already notes this as a fallback.
-
-**Recommendation:** Make the thin-layer approach the primary plan rather than the fallback. The comment-preserving YAML manipulation already works and is a feature Viper doesn't offer. Only adopt Viper if the precedence binding logic becomes genuinely complex.
-
-**When:** Decision point before config features expand.
-
-### 8. `ErrSetupPreview` overloads error return for flow control (Low)
-
-**Observation:** In `cli/commands.go:153`, `Create` can return `ErrSetupPreview` which the CLI treats as a clean exit (`return nil`). This means `Create` has a success path that returns an error — overloading the error channel for flow control.
-
-The user-cancelled path already returns `("", nil)` cleanly. The preview path should do the same.
-
-**Recommendation:** Either return a `CreateResult` struct with a `Preview bool` field, or handle the preview path inside `Create` and return `("", nil)` like the cancellation path.
-
-**When:** Anytime. Cosmetic fix.
+**When:** Before implementation.
 
 ## Summary Table
 
-| # | Finding | Severity | When to Address |
-|---|---------|----------|-----------------|
-| 1 | `sandbox` package too large | Medium | Before overlay or profiles |
-| 2 | `create.go` mixes workflow with shared helpers | Low-Medium | Anytime |
-| 3 | Docker subprocess calls bypass SDK | Low | When touching those paths |
-| 4 | Agent definitions need user-facing format | Low now, High later | Before Codex ships |
-| 5 | Overlayfs will stress current structure | Medium | Before overlay starts |
-| 6 | `meta.json` has no schema versioning | Low | When schema changes ship |
-| 7 | Viper may not be needed | Low | Before config expansion |
-| 8 | `ErrSetupPreview` flow control via error | Low | Anytime |
-
-## Test Coverage Gaps (February 2026)
-
-Test count: 239 passing in `internal/sandbox/`, 6 in `internal/cli/`, covering ~80% of sandbox functions. Remaining gaps:
-
-### Needs Docker (integration tests, not unit-testable)
-
-- `launchContainer()` — container create/start, secrets cleanup, crash detection
-- `recreateContainer()` — rebuild from meta.json
-- `resetInPlace()` rsync path — sends tmux commands, resyncs while running
-- `sendResetNotification()`, `relaunchAgent()` — tmux exec inside container
-- `execInContainer()` — Docker exec create/attach/inspect flow
-- `DetectStatus()` — queries Docker + tmux pane state
-- `docker.BuildBaseImage()`, `docker.NeedsBuild()`
-
-### CLI command layer (thin wrappers, low risk)
-
-The entire `internal/cli/` package beyond `resolveName` and `RunPager` — all commands (`new`, `attach`, `diff`, `apply`, `destroy`, `reset`, `start`, `stop`, `list`, `show`, `log`, `exec`). These are Cobra `RunE` functions that parse flags, call Manager methods, and format output. The sandbox package tests cover the underlying logic; CLI tests would mostly verify flag parsing and output formatting.
-
-### Confirm helper
-
-`Confirm()` in `confirm.go` — reads y/N from stdin. Trivial function, tested indirectly through lifecycle tests that use Manager with mocked stdin.
+| # | Finding | Severity | Status |
+|---|---------|----------|--------|
+| 1 | `idle_threshold` is live code, not dead | Medium | **Applied** — Phase 1 updated with full removal scope, known issue #1 corrected |
+| 2 | Phase 2 code examples still bash | Low | **Applied** — replaced with Python |
+| 3 | `ss`/`iproute2` not in Dockerfile | Medium | **Applied** — resolved: parse `/proc` in Python, no `ss` dependency |
+| 4 | Weak macOS idle detection for non-Claude agents | Medium | **Noted** — research round needed for macOS-specific alternatives |
+| 5 | ANSI sequences break context_signal matching | Low-Medium | **Applied** — ANSI caveat added to context_signal detector |
+| 6 | Process tree walk depth unspecified | Low-Medium | **Applied** — replaced with network namespace approach |
+| 7 | Prompt delivery race not addressed | Low | **Applied** — fix added to Phase 1 step 2 |
+| 8 | Hook detector resilience undocumented | Low | **Applied** — resilience note added to hook detector |
 
 ## Verdict
 
-The architecture is in good shape for what it does today. No critical issues. The main structural concern is that the `sandbox` package concentration will become a bottleneck as overlay, profiles, and network isolation land. Splitting it along the workspace/setup seams before those features arrive is the highest-value structural change. The other findings are minor and can be addressed opportunistically.
+All findings applied to the design doc. One remaining action: research round for macOS-specific idle detection alternatives (#4). If nothing better exists, document the limitation and accept it.
