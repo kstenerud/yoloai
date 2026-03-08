@@ -76,7 +76,7 @@ func tryLivePatchNetwork(ctx context.Context, backend, name, script string, scri
 	defer rt.Close() //nolint:errcheck // best-effort cleanup
 
 	info, err := sandbox.InspectSandbox(ctx, rt, name)
-	if err != nil || (info.Status != sandbox.StatusRunning && info.Status != sandbox.StatusIdle) {
+	if err != nil || (info.Status != sandbox.StatusActive && info.Status != sandbox.StatusIdle) {
 		return false, nil // can't inspect or not running — skip
 	}
 

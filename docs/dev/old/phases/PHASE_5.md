@@ -48,7 +48,7 @@ import (
 type SandboxStatus string
 
 const (
-	StatusRunning SandboxStatus = "running" // container running, agent alive in tmux
+	StatusActive  SandboxStatus = "active"  // container running, agent actively working
 	StatusDone    SandboxStatus = "done"    // container running, agent exited cleanly (exit 0)
 	StatusFailed  SandboxStatus = "failed"  // container running, agent exited with error (non-zero)
 	StatusStopped SandboxStatus = "stopped" // container stopped (docker stop)
@@ -203,7 +203,7 @@ New direct dependency for TTY detection. `x/sys` is already an indirect dependen
 
 Convenience alias via Cobra's `Aliases` field. Both `yoloai list` and `yoloai ls` work.
 
-### 7. No `--json`, `--running`, `--stopped` flags
+### 7. No `--json`, `--active`, `--stopped` flags
 
 MVP keeps `list` simple per [PLAN.md](../PLAN.md). Filtering and structured output deferred.
 
@@ -280,7 +280,7 @@ func DetectStatus(ctx context.Context, client docker.Client, containerName strin
 5. If `!resp.State.Running` → return `(StatusStopped, shortID, nil)`.
 6. Query tmux pane state: `execInContainer(ctx, client, containerName, []string{"tmux", "list-panes", "-t", "main", "-F", "#{pane_dead} #{pane_dead_status}"})`.
 7. Parse output: first field is `"0"` (alive) or `"1"` (dead). Second field (if dead) is the exit status.
-8. If pane alive (`"0"`) or tmux query fails → return `(StatusRunning, shortID, nil)`. Tmux query failure defaults to "running" — the container is running, so the most reasonable assumption is the agent is alive. This handles the edge case where tmux crashed.
+8. If pane alive (`"0"`) or tmux query fails → return `(StatusActive, shortID, nil)`. Tmux query failure defaults to "active" — the container is running, so the most reasonable assumption is the agent is alive. This handles the edge case where tmux crashed.
 9. If pane dead with exit status `"0"` → return `(StatusDone, shortID, nil)`.
 10. If pane dead with non-zero exit status → return `(StatusFailed, shortID, nil)`.
 
@@ -340,7 +340,7 @@ Cobra command:
 RunE:
 1. Get sandbox name from `args[0]`.
 2. Create Docker client, get `SandboxInfo` via `InspectSandbox` to verify sandbox exists and is running.
-3. If status is not `StatusRunning`, `StatusDone`, or `StatusFailed`: return `ErrContainerNotRunning`. (Attaching to a container with a dead pane is valid — user can see the final output.)
+3. If status is not `StatusActive`, `StatusDone`, or `StatusFailed`: return `ErrContainerNotRunning`. (Attaching to a container with a dead pane is valid — user can see the final output.)
 4. Build command: `docker exec -it yoloai-<name> tmux attach -t main`.
 5. Create `exec.Command("docker", args...)`.
 6. Set `cmd.Stdin = os.Stdin`, `cmd.Stdout = os.Stdout`, `cmd.Stderr = os.Stderr`.
@@ -411,7 +411,7 @@ RunE:
 
 ```
 NAME       STATUS    AGENT    AGE    WORKDIR                          CHANGES
-fix-bug    running   claude   2h     /home/user/projects/my-app       yes
+fix-bug    active    claude   2h     /home/user/projects/my-app       yes
 explore    done      claude   3d     /home/user/projects/other        no
 test-1     stopped   test     5m     /tmp/test-project                -
 ```
@@ -646,7 +646,7 @@ rm -rf ~/.yoloai/sandboxes/test-inspect
 
 ### 2. tmux crash edge case
 
-If tmux crashes inside the container, `DetectStatus` falls back to `StatusRunning` when the tmux query fails. This is the safest default — the container is running, so reporting it as running is more accurate than guessing stopped/failed. The user can inspect further with `exec`.
+If tmux crashes inside the container, `DetectStatus` falls back to `StatusActive` when the tmux query fails. This is the safest default — the container is running, so reporting it as active is more accurate than guessing stopped/failed. The user can inspect further with `exec`.
 
 ### 3. `os.Exit` in exec
 

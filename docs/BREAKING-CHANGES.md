@@ -4,6 +4,16 @@ Tracks breaking changes made during beta. Each entry should be included in relea
 
 ## Unreleased
 
+### Sandbox status `running` renamed to `active`; `--running` flag renamed to `--active`
+
+**Previous behavior:** The agent status was `"running"` when actively working. `yoloai ls --running` filtered for active sandboxes.
+
+**New behavior:** The agent status is `"active"`. `yoloai ls --active` filters for active sandboxes.
+
+**Rationale:** `"running"` was ambiguous -- the container process is also "running" when the agent is idle. `"active"` clearly means the agent is actively working on a task.
+
+**Migration:** Replace `--running` with `--active` in scripts. Old sandboxes with `"running"` in `status.json` are handled automatically (backward compatible parsing).
+
 ### `container_id` removed from JSON output
 
 **Previous behavior:** `yoloai ls --json` and `yoloai sandbox info --json` included a `container_id` field in the output.

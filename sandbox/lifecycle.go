@@ -89,7 +89,7 @@ func (m *Manager) Start(ctx context.Context, name string, opts StartOpts) error 
 	}
 
 	switch status {
-	case StatusRunning, StatusIdle:
+	case StatusActive, StatusIdle:
 		fmt.Fprintf(m.output, "Sandbox %s is already running\n", name) //nolint:errcheck // best-effort output
 		return nil
 
@@ -205,7 +205,7 @@ func (m *Manager) Reset(ctx context.Context, opts ResetOptions) error {
 	// Check if we can do an in-place reset (--no-restart)
 	if opts.NoRestart {
 		status, err := DetectStatus(ctx, m.runtime, InstanceName(opts.Name), sandboxDir)
-		if err != nil || (status != StatusRunning && status != StatusIdle) {
+		if err != nil || (status != StatusActive && status != StatusIdle) {
 			fmt.Fprintf(m.output, "Container is not running, falling back to restart\n") //nolint:errcheck // best-effort output
 			opts.NoRestart = false
 		}
@@ -370,7 +370,7 @@ func (m *Manager) NeedsConfirmation(ctx context.Context, name string) (bool, str
 		return false, ""
 	}
 
-	if status == StatusRunning || status == StatusIdle {
+	if status == StatusActive || status == StatusIdle {
 		return true, "agent is still running"
 	}
 
@@ -643,7 +643,7 @@ rm -f /tmp/yoloai-resume.txt`, waitCmd, cfg.SubmitSequence)
 		"bash", "-c", "nohup bash -c '" + strings.ReplaceAll(script, "'", "'\"'\"'") + "' _ \"$1\" >/dev/null 2>&1 &", "_", resumeText,
 	})
 	if err == nil && cfg.HookIdle {
-		resetStatusToRunning(sandboxDir)
+		resetStatusToActive(sandboxDir)
 	}
 	return err
 }
@@ -718,7 +718,7 @@ rm -f /tmp/yoloai-custom-prompt.txt`, waitCmd, cfg.SubmitSequence)
 		"bash", "-c", "nohup bash -c '" + strings.ReplaceAll(script, "'", "'\"'\"'") + "' _ \"$1\" >/dev/null 2>&1 &", "_", promptText,
 	})
 	if err == nil && cfg.HookIdle {
-		resetStatusToRunning(sandboxDir)
+		resetStatusToActive(sandboxDir)
 	}
 	return err
 }

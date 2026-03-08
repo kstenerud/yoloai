@@ -43,7 +43,7 @@ func runExec(cmd *cobra.Command, args []string) error {
 			return err
 		}
 
-		if info.Status != sandbox.StatusRunning && info.Status != sandbox.StatusIdle {
+		if info.Status != sandbox.StatusActive && info.Status != sandbox.StatusIdle {
 			return fmt.Errorf("sandbox %q: %w", name, sandbox.ErrContainerNotRunning)
 		}
 

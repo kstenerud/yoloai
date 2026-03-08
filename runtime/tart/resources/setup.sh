@@ -162,7 +162,7 @@ STATUS_FILE="$SHARED_DIR/status.json"
 write_status() { printf '{"status":"%s","exit_code":%s,"timestamp":%d}\n' "$1" "$2" "$(date +%s)" > "$STATUS_FILE"; }
 # If no prompt was delivered, the agent is waiting for input — start as idle.
 if [ -f "$PROMPT_FILE" ]; then
-    write_status running null
+    write_status active null
     set_title "$SANDBOX_NAME"
 else
     write_status idle null
@@ -189,14 +189,14 @@ fi
             break
         fi
         if [ "$HOOK_IDLE" = "true" ]; then
-            CUR_STATUS=$(jq -r '.status // "running"' "$STATUS_FILE" 2>/dev/null || echo "running")
+            CUR_STATUS=$(jq -r '.status // "active"' "$STATUS_FILE" 2>/dev/null || echo "active")
             if [ "$CUR_STATUS" = "idle" ]; then
                 update_title "> $SANDBOX_NAME"
             else
                 update_title "$SANDBOX_NAME"
             fi
         else
-            NEW_STATUS="running"
+            NEW_STATUS="active"
             if [ -n "$READY_PATTERN" ] && [ "$READY_PATTERN" != "null" ]; then
                 PANE_CONTENT=$(tmux capture-pane -t main -p 2>/dev/null || true)
                 if echo "$PANE_CONTENT" | grep -qF "$READY_PATTERN"; then

@@ -20,7 +20,7 @@ type Status string
 
 // Status constants for sandbox lifecycle states.
 const (
-	StatusRunning Status = "running" // container running, agent alive in tmux
+	StatusActive  Status = "active"  // container running, agent actively working
 	StatusIdle    Status = "idle"    // container running, agent alive, bell flag set (finished processing)
 	StatusDone    Status = "done"    // container running, agent exited cleanly (exit 0)
 	StatusFailed  Status = "failed"  // container running, agent exited with error (non-zero)
@@ -150,16 +150,16 @@ const statusFileStaleness = 10 * time.Second
 // statusJSON is the structure written by the in-container status monitor.
 // Designed for extensibility — new fields can be added without breaking readers.
 type statusJSON struct {
-	Status    string `json:"status"`              // "running", "idle", "done"
+	Status    string `json:"status"`              // "active", "idle", "done"
 	ExitCode  *int   `json:"exit_code,omitempty"` // set when status is "done"
 	Timestamp int64  `json:"timestamp"`           // unix seconds
 }
 
-// resetStatusToRunning writes a "running" status to the sandbox's status.json.
-// Called from the host side when delivering a new prompt to reset idle→running.
-func resetStatusToRunning(sandboxDir string) {
+// resetStatusToActive writes an "active" status to the sandbox's status.json.
+// Called from the host side when delivering a new prompt to reset idle→active.
+func resetStatusToActive(sandboxDir string) {
 	s := statusJSON{
-		Status:    "running",
+		Status:    "active",
 		Timestamp: time.Now().Unix(),
 	}
 	data, err := json.Marshal(s)
@@ -211,16 +211,18 @@ func parseStatusJSON(data []byte) (Status, bool) {
 	}
 
 	switch s.Status {
-	case "running":
+	case "active", "running":
+		// Accept both "active" (current) and "running" (old sandboxes) for
+		// backward compatibility with status.json written by older versions.
 		age := time.Since(time.Unix(s.Timestamp, 0))
 		if age > statusFileStaleness {
 			return "", false // stale — fall back to exec
 		}
-		return StatusRunning, true
+		return StatusActive, true
 
 	case "idle":
 		// Idle is a persistent state written once (by hook or monitor) and
-		// cleared only by resetStatusToRunning or agent exit. No staleness
+		// cleared only by resetStatusToActive or agent exit. No staleness
 		// check — the status remains valid until explicitly changed.
 		return StatusIdle, true
 
@@ -247,16 +249,16 @@ func detectStatusViaExec(ctx context.Context, rt runtime.Runtime, containerName 
 		"tmux", "list-panes", "-t", "main", "-F", "#{pane_dead}|#{pane_dead_status}",
 	})
 	if err != nil {
-		return StatusRunning, nil
+		return StatusActive, nil
 	}
 
 	parts := strings.SplitN(strings.TrimSpace(output), "|", 2)
 	if len(parts) < 2 {
-		return StatusRunning, nil
+		return StatusActive, nil
 	}
 
 	if parts[0] == "0" {
-		return StatusRunning, nil
+		return StatusActive, nil
 	}
 
 	// Pane is dead

@@ -39,7 +39,7 @@ func newAttachCmd() *cobra.Command {
 				containerName := sandbox.InstanceName(name)
 
 				switch info.Status {
-				case sandbox.StatusRunning, sandbox.StatusIdle, sandbox.StatusDone, sandbox.StatusFailed:
+				case sandbox.StatusActive, sandbox.StatusIdle, sandbox.StatusDone, sandbox.StatusFailed:
 					// OK — user can attach to see output
 
 				case sandbox.StatusStopped:
@@ -52,7 +52,7 @@ func newAttachCmd() *cobra.Command {
 				}
 
 				// --resume: restart agent before attaching
-				if resume && info.Status != sandbox.StatusRunning && info.Status != sandbox.StatusIdle {
+				if resume && info.Status != sandbox.StatusActive && info.Status != sandbox.StatusIdle {
 					mgr := sandbox.NewManager(rt, backend, slog.Default(), cmd.InOrStdin(), cmd.ErrOrStderr())
 					if err := mgr.Start(ctx, name, sandbox.StartOpts{Resume: true}); err != nil {
 						return err

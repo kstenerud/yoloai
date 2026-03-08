@@ -7,6 +7,6 @@ For the full list of designed-but-unimplemented features, see [dev/plans/TODO.md
 ## Next up
 
 - User-defined extensions (`yoloai x`)
-- `list` filters (`--running`, `--stopped`)
+- `list` filters (`--active`, `--stopped`)
 - macOS VM backend improvements (Tart)
 - Recipes in profiles (`cap_add`, `devices`, `setup`)

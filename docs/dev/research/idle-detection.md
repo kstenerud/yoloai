@@ -10,7 +10,7 @@ Seven statuses defined in `sandbox/inspect.go:18-30`:
 
 | Status | Meaning |
 |--------|---------|
-| `running` | Container up, agent actively working |
+| `active` | Container up, agent actively working |
 | `idle` | Container up, agent waiting for input |
 | `done` | Container up, agent exited cleanly (exit 0) |
 | `failed` | Container up, agent exited with error (non-zero) |
@@ -26,15 +26,15 @@ The status monitor inside the container writes JSON to `/yoloai/status.json`, wh
 
 ```go
 type statusJSON struct {
-    Status    string `json:"status"`              // "running", "idle", "done"
+    Status    string `json:"status"`              // "active", "idle", "done"
     ExitCode  *int   `json:"exit_code,omitempty"`
     Timestamp int64  `json:"timestamp"`           // unix seconds
 }
 ```
 
 Trust rules in `parseStatusJSON` (`sandbox/inspect.go:203`):
-- **"running"**: Only trusted if timestamp < 10 seconds old (`statusFileStaleness`). If stale, falls back to exec.
-- **"idle"**: Trusted regardless of staleness. Rationale: idle is a persistent state written once and cleared only by `resetStatusToRunning` or agent exit.
+- **"active"**: Only trusted if timestamp < 10 seconds old (`statusFileStaleness`). If stale, falls back to exec.
+- **"idle"**: Trusted regardless of staleness. Rationale: idle is a persistent state written once and cleared only by `resetStatusToActive` or agent exit.
 - **"done"**: Terminal state, always trusted. Uses `exit_code` to distinguish done (0) vs failed (non-zero). Missing exit_code defaults to 1.
 - Empty/zero/unknown: Falls through to exec fallback.
 
@@ -45,7 +45,7 @@ Trust rules in `parseStatusJSON` (`sandbox/inspect.go:203`):
 tmux list-panes -t main -F '#{pane_dead}|#{pane_dead_status}'
 ```
 
-Returns alive (`0|0`), done (`1|0`), or failed (`1|N`). If exec fails, defaults to `running`. **This fallback cannot detect idle** -- only running vs done/failed.
+Returns alive (`0|0`), done (`1|0`), or failed (`1|N`). If exec fails, defaults to `active`. **This fallback cannot detect idle** -- only active vs done/failed.
 
 **Full resolution flow** (`DetectStatus`, line 174):
 1. `rt.Inspect()` -- check container exists/is running
@@ -63,11 +63,11 @@ Claude Code is the **only** agent with `HookIdle: true` (`agent/agent.go:105`).
 During creation, `injectIdleHook()` (`sandbox/create.go:1246-1275`) adds two hooks to Claude Code's `settings.json`:
 
 1. **Notification hook**: On response completion, writes `{"status":"idle",...}` to `/yoloai/status.json`
-2. **PreToolUse hook**: On tool use start, writes `{"status":"running",...}` to `/yoloai/status.json`
+2. **PreToolUse hook**: On tool use start, writes `{"status":"active",...}` to `/yoloai/status.json`
 
 When `HOOK_IDLE=true` in the status monitor loop (`entrypoint-user.sh:188-209`), the monitor does NOT poll for idle. It only:
 - Checks for pane death (writes "done" status)
-- Reads `status.json` to update terminal title (`"> name"` for idle, `"name"` for running)
+- Reads `status.json` to update terminal title (`"> name"` for idle, `"name"` for active)
 
 #### Polling-based (all other agents)
 
@@ -100,20 +100,20 @@ write_status "$NEW_STATUS" null
 1. **status.json** -- primary, bind-mounted, read from host
 2. **Terminal title** -- `"> name"` prefix when idle, set via tmux `set-titles-string "#W"`. Visual indicator only.
 3. **Bell** -- Claude Code emits BEL via `preferredNotifChannel: terminal_bell`. Configured in tmux (`monitor-bell on`) but **not used for status determination**. Comment says "track for idle detection" but no code reads bell state.
-4. **resetStatusToRunning** (`sandbox/inspect.go:158-170`) -- host writes "running" to `status.json` when sending prompts to hook-based agents
+4. **resetStatusToActive** (`sandbox/inspect.go:158-170`) -- host writes "active" to `status.json` when sending prompts to hook-based agents
 
 ### 1.6 Consumers of Idle Status
 
 | Command | How it uses status |
 |---------|--------------------|
 | `yoloai ls` | Displays status column; `--idle` filter |
-| `yoloai attach` | Allows attach when running/idle/done/failed |
-| `yoloai exec` | Requires running or idle |
-| `yoloai stop --all` | Stops running/idle/done/failed sandboxes |
-| `yoloai diff` | Warns if running/idle that diff may be incomplete |
-| `sandbox.Start()` | Returns "already running" if running/idle |
-| `sandbox.Destroy()` | Requires confirmation if running/idle |
-| `sandbox.Reset()` | Checks running/idle for `--no-restart` |
+| `yoloai attach` | Allows attach when active/idle/done/failed |
+| `yoloai exec` | Requires active or idle |
+| `yoloai stop --all` | Stops active/idle/done/failed sandboxes |
+| `yoloai diff` | Warns if active/idle that diff may be incomplete |
+| `sandbox.Start()` | Returns "already running" if active/idle |
+| `sandbox.Destroy()` | Requires confirmation if active/idle |
+| `sandbox.Reset()` | Checks active/idle for `--no-restart` |
 
 ### 1.7 Known Issues
 
@@ -121,7 +121,7 @@ write_status "$NEW_STATUS" null
 The `idle_threshold` field is in config, profiles, and meta.json, with `DefaultIdleThreshold = 30` marked deprecated (`sandbox/inspect.go:32-35`). It is never read or used. Dead configuration that could confuse users.
 
 **2. Agents without ReadyPattern can never be detected as idle.**
-OpenCode, test, and shell agents have empty `ReadyPattern` and `HookIdle: false`. Once a prompt is sent, they show as "running" forever until the process exits.
+OpenCode, test, and shell agents have empty `ReadyPattern` and `HookIdle: false`. Once a prompt is sent, they show as "active" forever until the process exits.
 
 **3. Polling-based detection is inherently fragile.**
 `grep -qF "$READY_PATTERN"` against `tmux capture-pane -p` has multiple failure modes:
@@ -129,11 +129,11 @@ OpenCode, test, and shell agents have empty `ReadyPattern` and `HookIdle: false`
 - **False negative**: Pattern scrolled off visible terminal area
 - **Buffer boundary**: `capture-pane` only captures visible content (~50 lines)
 
-**4. Stale "running" + exec fallback = no idle detection.**
-A "running" `status.json` older than 10 seconds triggers exec fallback. But exec can't detect idle -- only pane death. So if the status monitor dies, a non-hook agent stuck in idle will report as "running" forever.
+**4. Stale "active" + exec fallback = no idle detection.**
+An "active" `status.json` older than 10 seconds triggers exec fallback. But exec can't detect idle -- only pane death. So if the status monitor dies, a non-hook agent stuck in idle will report as "active" forever.
 
 **5. Race condition on prompt delivery.**
-`sendResumePrompt`/`sendCustomPrompt` call `resetStatusToRunning` immediately, but prompt delivery involves waiting up to 60 seconds for the agent to be ready. During this window, status says "running" but no prompt has been delivered yet.
+`sendResumePrompt`/`sendCustomPrompt` call `resetStatusToActive` immediately, but prompt delivery involves waiting up to 60 seconds for the agent to be ready. During this window, status says "active" but no prompt has been delivered yet.
 
 **6. Claude Code hook reliability concerns.**
 The `Notification` hook with `idle_prompt` matcher is widely reported as unreliable upstream (fires on every response, or doesn't fire at all in VS Code). yoloAI uses a plain `Notification` hook (not `idle_prompt`-specific), which fires on every completion -- this is correct for our use case but worth noting the upstream instability.
@@ -251,7 +251,7 @@ When you begin working on a new request, print the marker: [YOLOAI:WORKING]
 1. **Pluggable detectors.** Each detection method is a self-contained unit. New methods can be added without changing the framework.
 2. **Context-dependent.** Which detectors are active depends on the agent and the runtime backend. A detector declares its own applicability.
 3. **Layered confidence.** Detectors produce signals, not final verdicts. The framework combines signals into a status determination.
-4. **Graceful degradation.** When no detector can determine idle state, the system reports "running" (safe default) rather than guessing.
+4. **Graceful degradation.** When no detector can determine idle state, the system reports "active" (safe default) rather than guessing.
 5. **status.json remains the IPC mechanism.** The in-container monitor writes it, the host reads it. This architecture is sound and shouldn't change.
 6. **Test agent mocks idle transitions.** The test agent provides controllable idle/working signals for testing the framework.
 
@@ -260,7 +260,7 @@ When you begin working on a new request, print the marker: [YOLOAI:WORKING]
 **Detector:** A named strategy that can determine whether an agent is idle. Runs inside the container's status monitor loop. Each detector:
 - Has a unique name (e.g., `hook`, `ready_pattern`, `wchan`, `output_stability`, `context_signal`)
 - Declares what it needs (agent config fields, platform capabilities)
-- Returns one of: `idle`, `running`, or `unknown` on each poll
+- Returns one of: `idle`, `active`, or `unknown` on each poll
 - Has a confidence level: `high`, `medium`, `low`
 
 **Detector Stack:** The ordered list of detectors active for a given sandbox. Determined at creation time based on agent definition + runtime backend. Stored in `config.json` so the entrypoint knows what to run.
@@ -270,7 +270,7 @@ When you begin working on a new request, print the marker: [YOLOAI:WORKING]
 - A single `medium` confidence result is trusted after N consecutive identical results (stability check)
 - `low` confidence results are only used when no better signal exists, and require more consecutive matches
 
-**Stability Counter:** For medium/low confidence detectors, the framework tracks consecutive identical results. This is the "circuit breaker" pattern — prevents flapping between idle and running on noisy signals.
+**Stability Counter:** For medium/low confidence detectors, the framework tracks consecutive identical results. This is the "circuit breaker" pattern — prevents flapping between idle and active on noisy signals.
 
 ### 3.3 Detector Catalog
 
@@ -353,7 +353,7 @@ When you begin working on a new request, print the marker: [YOLOAI:WORKING]
 
 **Platform:** All.
 
-**Implementation:** Deferred. The test agent is currently a plain bash shell and will remain unchanged for the idle detection rework. A full test harness that can mimic agent workflows and idle signal strategies is planned as a separate TODO (see `docs/dev/plans/TODO.md`). For now, the test agent has no idle detection -- it stays as "running" until the process exits.
+**Implementation:** Deferred. The test agent is currently a plain bash shell and will remain unchanged for the idle detection rework. A full test harness that can mimic agent workflows and idle signal strategies is planned as a separate TODO (see `docs/dev/plans/TODO.md`). For now, the test agent has no idle detection -- it stays as "active" until the process exits.
 
 ### 3.4 Detector Selection Per Agent x Platform
 
@@ -369,11 +369,11 @@ The detector stack for a sandbox is determined at creation time. This table show
 | (none) | - | - | - | - | - | - | *n/a* |
 
 Notes:
-- **primary**: First detector checked. If it returns idle/running, that result is used.
+- **primary**: First detector checked. If it returns idle/active, that result is used.
 - **supplementary**: Checked to increase confidence in the primary result, or used when primary returns `unknown`.
 - **fallback**: Only used when primary and supplementary return `unknown`.
 - Claude on macOS: hooks are primary, no wchan available. Falls back to ready_pattern if hooks fail.
-- Test/shell agents: no idle detection. They stay as "running" until the process exits. A full test harness is planned separately (see `docs/dev/plans/TODO.md`).
+- Test/shell agents: no idle detection. They stay as "active" until the process exits. A full test harness is planned separately (see `docs/dev/plans/TODO.md`).
 - OpenCode on macOS: no hooks, no wchan, no ready pattern. Only context_signal and output_stability. This is a known limitation.
 
 ### 3.5 Implementation Plan
@@ -444,13 +444,13 @@ case "$WCHAN" in
     do_epoll_wait|poll_schedule_timeout)
         # Event loop -- check for network activity
         if has_tcp_connections "$AGENT_PID"; then
-            WCHAN_STATUS="running"  # waiting for API
+            WCHAN_STATUS="active"  # waiting for API
         else
             WCHAN_STATUS="idle"     # idle event loop
         fi
         ;;
     do_wait)
-        WCHAN_STATUS="running"  # waiting for child process
+        WCHAN_STATUS="active"  # waiting for child process
         ;;
     *)
         WCHAN_STATUS="unknown"
@@ -494,7 +494,7 @@ The status monitor loop runs every 2 seconds. On each tick:
 1. Check pane_dead -> done/failed (always, all agents)
 2. For each detector in order:
    a. Query the detector
-   b. If result is "idle" or "running":
+   b. If result is "idle" or "active":
       - If confidence is HIGH: use result immediately
       - If confidence is MEDIUM: increment stability counter
         - If counter >= 2: use result
@@ -503,7 +503,7 @@ The status monitor loop runs every 2 seconds. On each tick:
         - If counter >= 3: use result
         - Otherwise: continue to next detector
    c. If result is "unknown": continue to next detector
-3. If no detector returned a usable result: status = "running" (safe default)
+3. If no detector returned a usable result: status = "active" (safe default)
 4. Write status to status.json
 5. Update terminal title
 ```
@@ -529,8 +529,8 @@ The stability counters are per-detector and reset when the detector's result cha
 
 - **status.json format and semantics.** The IPC mechanism is sound. Detectors write to it, host reads it.
 - **DetectStatus() on the host side.** It reads status.json and falls back to exec. This doesn't need to know about detectors.
-- **Terminal title convention.** `"> name"` for idle, `"name"` for running.
-- **resetStatusToRunning().** Host-side status reset when delivering prompts.
+- **Terminal title convention.** `"> name"` for idle, `"name"` for active.
+- **resetStatusToActive().** Host-side status reset when delivering prompts.
 - **All consumer commands** (list, attach, exec, stop, diff, etc.) -- they read status, not detect it.
 
 ### 3.9 Open Questions

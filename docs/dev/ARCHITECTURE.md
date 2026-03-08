@@ -325,7 +325,7 @@ lifecycle.go (reset):
 ```
 Manager.Start (sandbox/lifecycle.go)
   → DetectStatus (sandbox/inspect.go): runtime.Inspect + tmux query
-  → StatusRunning: no-op
+  → StatusActive: no-op
   → StatusDone/Failed: relaunchAgent via tmux respawn-pane
   → StatusStopped: runtime.Start
   → StatusRemoved: recreateContainer (rebuild state from meta.json via runtime.Create + runtime.Start)

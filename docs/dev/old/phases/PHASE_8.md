@@ -316,7 +316,7 @@ package sandbox
    - Work copy exists with the original file.
 5. **Start and stop:**
    - `mgr.Start(ctx, "integ-test")` — container starts.
-   - `DetectStatus(ctx, client, "yoloai-integ-test")` returns StatusRunning or StatusDone/Failed.
+   - `DetectStatus(ctx, client, "yoloai-integ-test")` returns StatusActive or StatusDone/Failed.
    - `mgr.Stop(ctx, "integ-test")` — container stops.
    - `DetectStatus` returns StatusStopped.
 6. **Diff with modifications:**

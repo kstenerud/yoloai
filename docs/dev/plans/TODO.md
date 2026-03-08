@@ -51,7 +51,7 @@ Design considerations:
 Enrich `yoloai ls` output for multi-sandbox workflows:
 - Agent type and model
 - Runtime duration (how long the sandbox has been running)
-- ~~Agent status (running/idle/exited)~~ (done)
+- ~~Agent status (active/idle/exited)~~ (done)
 - Workdir dirty state (has uncommitted changes)
 
 Keep default output concise; add `--long` or `-l` flag for the full dashboard view.

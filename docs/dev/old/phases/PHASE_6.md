@@ -164,7 +164,7 @@ Uses Cobra's `ArgsLenAtDash()` to separate sandbox name from path filters. Paths
 
 ### 6. Agent-running warning via `InspectSandbox`
 
-The diff command checks if the agent is still running by calling `InspectSandbox`. If the status is `StatusRunning`, it prints a warning to stderr: `"Note: agent is still running; diff may be incomplete"`. If Docker is unavailable (e.g., Docker daemon not running), the warning is skipped silently — the diff still works because it reads host-side files. Best-effort warning, not a gate.
+The diff command checks if the agent is still running by calling `InspectSandbox`. If the status is `StatusActive`, it prints a warning to stderr: `"Note: agent is still running; diff may be incomplete"`. If Docker is unavailable (e.g., Docker daemon not running), the warning is skipped silently — the diff still works because it reads host-side files. Best-effort warning, not a gate.
 
 ### 7. `formatApplyError` for human-readable context
 
@@ -339,7 +339,7 @@ RunE:
 3. Agent-running warning (best-effort):
    a. Attempt to create Docker client. If error (Docker unavailable), skip warning.
    b. Call `InspectSandbox(ctx, client, name)`. If error, skip warning.
-   c. If status is `StatusRunning`, print to stderr: `"Note: agent is still running; diff may be incomplete\n"`.
+   c. If status is `StatusActive`, print to stderr: `"Note: agent is still running; diff may be incomplete\n"`.
 4. Build `DiffOptions{Name: name, Paths: paths}`.
 5. If `--stat`:
    - `GenerateDiffStat(opts)` → result.

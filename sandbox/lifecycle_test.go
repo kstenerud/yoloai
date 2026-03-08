@@ -176,7 +176,7 @@ func TestStart_AlreadyRunning(t *testing.T) {
 
 	// DetectStatus will call Inspect (running=true),
 	// then try Exec for tmux. Since our mock returns errMockNotImplemented
-	// for exec, DetectStatus defaults to StatusRunning.
+	// for exec, DetectStatus defaults to StatusActive.
 	err := mgr.Start(context.Background(), "test-start-running", StartOpts{})
 	require.NoError(t, err)
 	assert.Contains(t, output.String(), "already running")

@@ -16,7 +16,7 @@ import (
 
 // listFilters holds the filter criteria for the list command.
 type listFilters struct {
-	running bool
+	active  bool
 	idle    bool
 	done    bool
 	stopped bool
@@ -38,7 +38,7 @@ func newSandboxListCmd() *cobra.Command {
 
 // addListFlags adds filter flags shared by `sandbox list` and the `ls` alias.
 func addListFlags(cmd *cobra.Command) {
-	cmd.Flags().Bool("running", false, "Show only running sandboxes (includes idle)")
+	cmd.Flags().Bool("active", false, "Show only active sandboxes (includes idle)")
 	cmd.Flags().Bool("idle", false, "Show only idle sandboxes")
 	cmd.Flags().Bool("done", false, "Show only done or failed sandboxes")
 	cmd.Flags().Bool("stopped", false, "Show only stopped sandboxes")
@@ -51,13 +51,13 @@ func addListFlags(cmd *cobra.Command) {
 // Multiple filters are ANDed together. Broken sandboxes are excluded by
 // all filters except when no filters are active.
 func filterInfos(infos []*sandbox.Info, f listFilters) []*sandbox.Info {
-	if !f.running && !f.idle && !f.done && !f.stopped && f.agent == "" && f.profile == "" && !f.changes {
+	if !f.active && !f.idle && !f.done && !f.stopped && f.agent == "" && f.profile == "" && !f.changes {
 		return infos
 	}
 
 	var result []*sandbox.Info
 	for _, info := range infos {
-		if f.running && info.Status != sandbox.StatusRunning && info.Status != sandbox.StatusIdle {
+		if f.active && info.Status != sandbox.StatusActive && info.Status != sandbox.StatusIdle {
 			continue
 		}
 		if f.idle && info.Status != sandbox.StatusIdle {
@@ -114,7 +114,7 @@ func runList(cmd *cobra.Command, _ []string) error {
 		}
 
 		// Read filter flags.
-		running, _ := cmd.Flags().GetBool("running")
+		active, _ := cmd.Flags().GetBool("active")
 		idle, _ := cmd.Flags().GetBool("idle")
 		done, _ := cmd.Flags().GetBool("done")
 		stopped, _ := cmd.Flags().GetBool("stopped")
@@ -123,7 +123,7 @@ func runList(cmd *cobra.Command, _ []string) error {
 		changes, _ := cmd.Flags().GetBool("changes")
 
 		infos = filterInfos(infos, listFilters{
-			running: running,
+			active:  active,
 			idle:    idle,
 			done:    done,
 			stopped: stopped,

@@ -191,7 +191,7 @@ func (m *Manager) Start(ctx context.Context, name string) error
 2. Load metadata: `LoadMeta(Dir(name))`.
 3. Detect status: `DetectStatus(ctx, m.client, "yoloai-"+name)`.
 4. Switch on status:
-   - `StatusRunning`: Print `"Sandbox <name> is already running"`. Return nil.
+   - `StatusActive`: Print `"Sandbox <name> is already running"`. Return nil.
    - `StatusDone`, `StatusFailed`: Agent exited but container running. Call `relaunchAgent(ctx, name, meta)`. Print `"Agent relaunched in sandbox <name>"`.
    - `StatusStopped`: `m.client.ContainerStart(ctx, "yoloai-"+name, container.StartOptions{})`. Print `"Sandbox <name> started"`.
    - `StatusRemoved`: Call `recreateContainer(ctx, name, meta)`. Print `"Sandbox <name> recreated and started"`.
@@ -244,7 +244,7 @@ func (m *Manager) needsConfirmation(ctx context.Context, name string) (bool, str
 ```
 
 1. Detect status: `DetectStatus(ctx, m.client, "yoloai-"+name)`.
-2. If `StatusRunning`, return `(true, "agent is still running")`.
+2. If `StatusActive`, return `(true, "agent is still running")`.
 3. Load meta, get work dir: `WorkDir(name, meta.Workdir.HostPath)`.
 4. Check changes: `detectChanges(workDir)`.
 5. If `"yes"`, return `(true, "unapplied changes exist")`.
@@ -305,7 +305,7 @@ RunE:
 2. Create Docker client, Manager.
 3. If `--all`:
    a. `ListSandboxes(ctx, client)` to get all sandboxes.
-   b. Filter to running ones (`StatusRunning`, `StatusDone`, `StatusFailed` — anything with a running container).
+   b. Filter to running ones (`StatusActive`, `StatusDone`, `StatusFailed` — anything with a running container).
    c. Names = filtered sandbox names.
 4. If not `--all`:
    a. If no args, return usage error.
@@ -451,7 +451,7 @@ func TestStop_Running(t *testing.T)
 // Mock Docker ContainerStop succeeds → Stop returns nil.
 
 func TestStart_AlreadyRunning(t *testing.T)
-// Mock DetectStatus returns StatusRunning → Start is no-op, returns nil.
+// Mock DetectStatus returns StatusActive → Start is no-op, returns nil.
 
 func TestStart_Stopped(t *testing.T)
 // Mock DetectStatus returns StatusStopped → ContainerStart called.
@@ -468,7 +468,7 @@ func TestStart_SandboxNotFound(t *testing.T)
 // Non-existent sandbox → ErrSandboxNotFound.
 
 func TestNeedsConfirmation_Running(t *testing.T)
-// Mock status = StatusRunning → (true, "agent is still running").
+// Mock status = StatusActive → (true, "agent is still running").
 
 func TestNeedsConfirmation_ChangesExist(t *testing.T)
 // Mock status = StatusStopped, work dir has uncommitted changes → (true, "unapplied changes exist").

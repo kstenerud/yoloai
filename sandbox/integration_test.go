@@ -47,7 +47,7 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 	// Verify container is running
 	status, err := DetectStatus(ctx, mgr.runtime, InstanceName(sandboxName), Dir(sandboxName))
 	require.NoError(t, err)
-	assert.Equal(t, StatusRunning, status)
+	assert.Equal(t, StatusActive, status)
 
 	// Exec inside running container
 	result, err := mgr.runtime.Exec(ctx, InstanceName(sandboxName), []string{"echo", "lifecycle-test"}, "yoloai")
@@ -80,7 +80,7 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 
 	status, err = DetectStatus(ctx, mgr.runtime, InstanceName(sandboxName), Dir(sandboxName))
 	require.NoError(t, err)
-	assert.Equal(t, StatusRunning, status)
+	assert.Equal(t, StatusActive, status)
 
 	// Exec again after restart
 	result, err = mgr.runtime.Exec(ctx, InstanceName(sandboxName), []string{"echo", "after-restart"}, "yoloai")

@@ -349,7 +349,7 @@ Detach with standard tmux `Ctrl-b d` — container keeps running.
 
 Displays sandbox configuration and state:
 - Name
-- Status (running / stopped / done / failed)
+- Status (active / stopped / done / failed)
 - Agent (claude, codex, etc.)
 - Model (if specified)
 - Profile (name or "(base)")
@@ -363,7 +363,7 @@ Displays sandbox configuration and state:
 - Container ID
 - Changes (yes/no/- — same detection as `list`)
 
-Reads from `meta.json` and queries live Docker state. Agent status is detected via `docker exec tmux list-panes -t main -F '#{pane_dead}'` combined with Docker container state for full status (running / stopped / done / failed). Useful for quick inspection without listing all sandboxes.
+Reads from `meta.json` and queries live Docker state. Agent status is detected via `docker exec tmux list-panes -t main -F '#{pane_dead}'` combined with Docker container state for full status (active / stopped / done / failed). Useful for quick inspection without listing all sandboxes.
 
 ### `yoloai diff`
 
@@ -478,7 +478,7 @@ Lists all sandboxes with their current status.
 | Column  | Description                                                    |
 |---------|----------------------------------------------------------------|
 | NAME    | Sandbox name                                                   |
-| STATUS  | `running`, `stopped`, `done` (exit 0), `failed` (non-zero exit) |
+| STATUS  | `active`, `stopped`, `done` (exit 0), `failed` (non-zero exit) |
 | AGENT   | Agent name (`aider`, `claude`, `codex`, `gemini`, `opencode`, `test`) |
 | PROFILE | Profile name or `(base)`                                       |
 | SIZE    | Sandbox disk usage                                             |
@@ -486,12 +486,12 @@ Lists all sandboxes with their current status.
 | WORKDIR | Working directory path                                         |
 | CHANGES | `yes` if unapplied changes exist, `no` if clean, `-` if unknown. Detected via `git status --porcelain` on the host-side work directory (any output = changes; read-only, catches both tracked modifications and untracked files; no Docker needed). |
 
-Agent exit status is detected via `tmux list-panes -t main -F '#{pane_dead_status}'` when `#{pane_dead}` is 1. Non-zero exit code shows STATUS as "failed"; exit 0 shows as "done". Running containers with live panes show "running"; stopped containers show "stopped".
+Agent exit status is detected via `tmux list-panes -t main -F '#{pane_dead_status}'` when `#{pane_dead}` is 1. Non-zero exit code shows STATUS as "failed"; exit 0 shows as "done". Running containers with live panes show "active"; stopped containers show "stopped".
 
 Top-level shortcut: `yoloai ls`.
 
 Options:
-- `--running`: Show only running sandboxes.
+- `--active`: Show only active sandboxes.
 - `--stopped`: Show only stopped sandboxes.
 - `--agent <name>`: Show only sandboxes using this agent.
 - `--profile <name>`: Show only sandboxes using this profile (`base` matches default).

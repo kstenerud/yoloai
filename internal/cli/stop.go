@@ -45,7 +45,7 @@ func newStopCmd() *cobra.Command {
 					}
 					for _, info := range infos {
 						switch info.Status {
-						case sandbox.StatusRunning, sandbox.StatusIdle, sandbox.StatusDone, sandbox.StatusFailed:
+						case sandbox.StatusActive, sandbox.StatusIdle, sandbox.StatusDone, sandbox.StatusFailed:
 							names = append(names, info.Meta.Name)
 						}
 					}
