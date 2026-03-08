@@ -192,6 +192,11 @@ class HookDetector:
       agent stopped working. This provides idle detection even when the
       Notification hook fails to fire (a known upstream issue).
 
+    Returns "active" when:
+    - The file says "active" and the last hook write is recent (< HOOK_IDLE_AGE).
+      This prevents lower-priority detectors (e.g. wchan) from reporting
+      spurious idle during brief gaps between tool calls.
+
     The grace period is started only by actual hook writes (no "source"
     field), not by the monitor's own echoed writes. An "active" hook write
     (PreToolUse) immediately clears the grace timer.
@@ -248,6 +253,13 @@ class HookDetector:
                 if self._hook_ts and hook_age >= HOOK_IDLE_AGE:
                     debug(f"  hook: last hook write {hook_age}s ago (>{HOOK_IDLE_AGE}s) -> idle")
                     return DetectorResult("idle", self.confidence)
+
+                # Recent hook write says active — report it so lower-priority
+                # detectors (e.g. wchan) can't override with a spurious idle
+                # during brief gaps between tool calls.
+                if self._hook_ts and hook_age >= 0:
+                    debug(f"  hook: active (hook_age={hook_age}s)")
+                    return DetectorResult("active", self.confidence)
 
                 debug(f"  hook: file says 'active' (hook_age={hook_age}s), waiting")
                 return DetectorResult("unknown")
