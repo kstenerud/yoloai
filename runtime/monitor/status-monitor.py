@@ -224,10 +224,14 @@ class ReadyPatternDetector:
         content = tmux_cmd(["capture-pane", "-t", "main", "-p"], self.tmux_sock)
         if not content:
             return DetectorResult("unknown")
-        # Check last non-empty line for the pattern to reduce false positives
+        # Check bottom 5 non-empty lines for the pattern. The agent's ready
+        # prompt is near the bottom but may not be the very last line — TUI
+        # agents like Claude Code show status bars, hints, or other chrome
+        # below the input prompt.
         lines = [l for l in content.splitlines() if l.strip()]
-        if lines and self.pattern in lines[-1]:
-            return DetectorResult("idle", self.confidence)
+        for line in lines[-5:]:
+            if self.pattern in line:
+                return DetectorResult("idle", self.confidence)
         return DetectorResult("unknown")
 
 
@@ -289,9 +293,15 @@ class OutputStabilityDetector:
         content = tmux_cmd(["capture-pane", "-t", "main", "-p"], self.tmux_sock)
         if not content:
             return DetectorResult("unknown")
-        if content == self.prev_content:
+        # Normalize: strip trailing whitespace per line and remove trailing
+        # blank lines. This prevents cursor position changes and minor tmux
+        # capture variations from resetting the stability counter.
+        normalized = "\n".join(
+            l.rstrip() for l in content.rstrip("\n").splitlines()
+        )
+        if normalized == self.prev_content:
             return DetectorResult("idle", self.confidence)
-        self.prev_content = content
+        self.prev_content = normalized
         return DetectorResult("unknown")
 
 
