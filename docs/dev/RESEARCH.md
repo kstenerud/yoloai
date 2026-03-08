@@ -11,4 +11,5 @@ Research documents supporting yoloAI's design decisions. Each file covers a broa
 | [Implementation](research/implementation.md) | Env var interpolation, Claude Code installation, Go libs vs shell commands, tmux defaults |
 | [Parallel Agents](research/parallel-agents.md) | Multi-agent coordination, idle detection, spec-driven development, batch orchestration |
 | [Orchestration](research/orchestration.md) | Agent idle/done detection mechanisms, orchestrator ecosystem, agent SDK interfaces, handoffs, user pain points |
-| [Idle Detection](research/idle-detection.md) | Full audit of current idle detection code, external research on detection approaches, layered detection analysis |
+| [Idle Detection](research/idle-detection.md) | Full audit of current idle detection code, external research on detection approaches, pluggable detector architecture |
+| [macOS Idle Detection](research/macos-idle-detection.md) | macOS-specific process idle detection: sysctl KERN_PROC, libproc, DTrace, Mach APIs, network monitoring |

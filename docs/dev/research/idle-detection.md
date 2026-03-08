@@ -300,21 +300,23 @@ When you begin working on a new request, print the marker: [YOLOAI:WORKING]
 
 #### `wchan` -- Kernel Wait Channel (High Confidence)
 
-**How:** Read `/proc/<pid>/wchan` for the agent's main process. `n_tty_read` or `wait_woken` = idle.
+**How:** Read the kernel wait channel for the agent's main process. The wait channel indicates what the process is blocked on.
 
 **Applies to:** All agents (the signal is process-level, not agent-specific).
 
-**Platform:** Linux only (Docker, Seatbelt on Linux). Not available on macOS/Tart.
+**Platform:** All. Platform-specific implementations:
+- **Linux:** Read `/proc/<pid>/wchan`. `n_tty_read` or `wait_woken` = idle. `do_epoll_wait` = check network. `do_wait` = working.
+- **macOS:** Read `kinfo_proc.kp_eproc.e_wmesg` via `sysctl KERN_PROC`. `ttyin` = idle. `select`/`kqueue` = check network. `sbwait`/`wait` = working. Fallback: `ps -o wchan= -p PID`. See [macOS idle detection research](macos-idle-detection.md) for details.
 
-**Implementation:** New. The status monitor finds the agent PID (it's the process exec'd in the tmux pane) and reads its wchan every poll cycle. Distinguishes TTY read (idle) from epoll/network wait (working) and child process wait (working).
+**Implementation:** New. The Python status monitor finds the agent PID (`tmux list-panes -t main -F '#{pane_pid}'`) and reads its wait channel every poll cycle. A single `wchan` detector with platform-specific backends.
 
-**Finding the agent PID:** After `exec $AGENT_COMMAND` in tmux, the agent IS the pane's process. `tmux list-panes -t main -F '#{pane_pid}'` returns it.
+**Distinguishing network I/O:** When wait channel shows event loop (`do_epoll_wait` on Linux, `select`/`kqueue` on macOS), check for active TCP connections. Linux: parse `/proc/<pid>/net/tcp6` directly in Python. macOS: `proc_pidinfo` + `PROC_PIDFDSOCKETINFO` (no subprocess) or `lsof -i`. Active connections with traffic = working.
 
-**Distinguishing network I/O:** When wchan is `do_epoll_wait` (event loop), check for active TCP connections via `/proc/<pid>/net/tcp` or `ss -tnp`. Active connections = waiting for API response = working.
+**Key advantage:** Works for ALL agents on ALL platforms, including those with no ReadyPattern and no hooks (opencode, test, shell). No agent cooperation needed.
 
-**Key advantage:** Works for ALL agents, including those with no ReadyPattern and no hooks (opencode, test, shell). No agent cooperation needed.
+**Caveat (Node.js):** Node.js-based agents (Claude Code, Codex) use epoll/kqueue for their event loop, so wait channel shows `do_epoll_wait`/`kqueue` even when idle. The network connection check becomes essential.
 
-**Caveat:** Node.js-based agents (Claude Code, Codex) use epoll for their event loop, so wchan will show `do_epoll_wait` even when idle. The network connection check becomes essential: `do_epoll_wait` + no TCP connections = idle event loop = agent is waiting for input.
+**Caveat (macOS):** The `e_wmesg` field is limited to 7 characters and may be empty on some macOS versions. When empty, the detector returns `unknown` and falls through to supplementary detectors. Needs verification on Sequoia/Sonoma hardware.
 
 #### `output_stability` -- Screen Content Stability (Low Confidence)
 
@@ -366,7 +368,7 @@ The detector stack for a sandbox is determined at creation time. This table show
 | Detector | claude (Linux) | claude (macOS) | gemini | codex | aider | opencode | test/shell |
 |----------|---------------|----------------|--------|-------|-------|----------|------------|
 | `hook` | **primary** | **primary** | - | - | - | - | - |
-| `wchan` | supplementary | - | **primary** | **primary** | **primary** | **primary** | - |
+| `wchan` | supplementary | supplementary | **primary** | **primary** | **primary** | **primary** | - |
 | `ready_pattern` | - | - | supplementary | supplementary | supplementary | - | - |
 | `context_signal` | - | - | supplementary | supplementary | supplementary | supplementary | - |
 | `output_stability` | - | - | fallback | fallback | fallback | fallback | - |
@@ -376,10 +378,10 @@ Notes:
 - **primary**: First detector checked. If it returns idle/active, that result is used.
 - **supplementary**: Checked to increase confidence in the primary result, or used when primary returns `unknown`.
 - **fallback**: Only used when primary and supplementary return `unknown`.
-- Claude on macOS: hooks are primary, no wchan available. Falls back to ready_pattern if hooks fail.
+- `wchan` is now cross-platform: Linux uses `/proc/PID/wchan`, macOS uses `sysctl KERN_PROC` `e_wmesg`. Same detector interface, platform-specific backends. See [macOS idle detection research](macos-idle-detection.md).
+- Claude on macOS: hooks are primary, wchan is supplementary (confirms hook result or catches hook failures).
 - Test/shell agents: no idle detection. They stay as "active" until the process exits. A full test harness is planned separately (see `docs/dev/plans/TODO.md`).
-- OpenCode on macOS: no hooks, no wchan, no ready pattern. Only context_signal and output_stability. This is a known limitation.
-- **macOS idle detection is best-effort for non-Claude agents.** Without wchan, gemini/codex/aider fall back to ready_pattern + context_signal + output_stability — all medium/low confidence. A research round for macOS-specific detection alternatives is needed; if nothing better exists, accept and document the limitation.
+- **macOS caveat:** The `e_wmesg` field may be empty on some macOS versions, causing the wchan detector to return `unknown`. When this happens, non-Claude agents fall back to ready_pattern + context_signal + output_stability. Needs verification on Sequoia/Sonoma hardware.
 
 ### 3.5 Implementation Plan
 
@@ -445,35 +447,61 @@ or for a non-hook agent on Linux:
 
 #### Phase 2: wchan Detector
 
-1. **Implement wchan reading in the Python status monitor.** After getting the agent PID via `tmux list-panes -t main -F '#{pane_pid}'`:
+1. **Implement cross-platform wchan reading in the Python status monitor.** After getting the agent PID via `tmux list-panes -t main -F '#{pane_pid}'`:
 
 ```python
-def read_wchan(pid: int) -> str:
+import platform, subprocess
+from pathlib import Path
+
+# --- Platform-specific wait channel reading ---
+
+def read_wchan_linux(pid: int) -> str:
     try:
         return Path(f"/proc/{pid}/wchan").read_text().strip()
     except OSError:
         return "unknown"
 
+def read_wchan_macos(pid: int) -> str:
+    try:
+        out = subprocess.check_output(
+            ["ps", "-o", "wchan=", "-p", str(pid)],
+            text=True, timeout=5
+        ).strip()
+        return out if out else "unknown"
+    except (subprocess.SubprocessError, OSError):
+        return "unknown"
+
+# --- Unified idle classification ---
+
+IDLE_WCHANS = {
+    "n_tty_read", "wait_woken",  # Linux
+    "ttyin",                      # macOS
+}
+EVENT_LOOP_WCHANS = {
+    "do_epoll_wait", "poll_schedule_timeout",  # Linux
+    "select", "kqueue", "pselect",             # macOS
+}
+ACTIVE_WCHANS = {
+    "do_wait",        # Linux — waiting for child
+    "wait", "sbwait", # macOS — child wait, socket wait
+}
+
 wchan = read_wchan(agent_pid)
-if wchan in ("n_tty_read", "wait_woken"):
-    status = "idle"       # blocked on terminal read
-elif wchan in ("do_epoll_wait", "poll_schedule_timeout"):
-    # event loop — check for network activity
-    if has_active_connections(agent_pid):
-        status = "active"  # waiting for API
-    else:
-        status = "idle"    # idle event loop
-elif wchan == "do_wait":
-    status = "active"      # waiting for child process
+if wchan in IDLE_WCHANS:
+    status = "idle"
+elif wchan in EVENT_LOOP_WCHANS:
+    status = "idle" if not has_active_connections(agent_pid) else "active"
+elif wchan in ACTIVE_WCHANS:
+    status = "active"
 else:
     status = "unknown"
 ```
 
-2. **Network connection check.** Parse `/proc/<pid>/net/tcp6` directly in Python (no `ss` or `iproute2` dependency). Each line has connection state at a fixed offset — `01` = ESTABLISHED. For WebSocket-aware detection, track per-connection `tx_queue:rx_queue` byte counter deltas between poll cycles (zero delta = idle persistent connection). On macOS, fall back to `nettop -p <pid> -J bytes_in,bytes_out -l 1`.
+2. **Network connection check.** Platform-specific:
+   - **Linux:** Parse `/proc/<pid>/net/tcp6` directly in Python (no `ss` or `iproute2` dependency). Each line has connection state at a fixed offset — `01` = ESTABLISHED. For WebSocket-aware detection, track per-connection `tx_queue:rx_queue` byte counter deltas between poll cycles (zero delta = idle persistent connection). The network namespace approach covers ALL processes in the container — no process tree walking needed.
+   - **macOS:** Use `proc_pidinfo` + `PROC_PIDFDSOCKETINFO` via ctypes for zero-overhead connection enumeration, or fall back to `lsof -i TCP -p PID -sTCP:ESTABLISHED`. For traffic volume on persistent connections, use `nettop -p PID -l 1 -P -d`. See [macOS idle detection research](macos-idle-detection.md).
 
-3. **Network namespace approach for process trees.** Rather than walking child processes, read `/proc/<pid>/net/tcp6` which covers ALL processes in the container's network namespace. If any process in the container has active TCP connections with traffic, the agent is working. Simpler and more complete than recursive process tree traversal.
-
-4. **Platform guard.** Only activate wchan detector on Linux. The Python monitor checks `os.path.exists("/proc/1/wchan")` at startup.
+3. **Platform detection at startup.** The Python monitor detects the platform once and selects the appropriate `read_wchan` and `has_active_connections` implementations. Linux: check `os.path.exists("/proc/1/wchan")`. macOS: check `platform.system() == "Darwin"`.
 
 #### Phase 3: Context Signal Detector
 
@@ -532,10 +560,11 @@ The stability counters are per-detector and reset when the detector's result cha
 | `config/config.go` | Remove `idle_threshold` key |
 | `config/profile.go` | Remove `idle_threshold` from profile config |
 | `sandbox/create_prepare.go` | Remove `idle_threshold` handling |
+| `sandbox/lifecycle.go` | Remove `resetStatusToActive` calls from `sendResumePrompt`/`sendCustomPrompt`; move status write into in-container background script |
 | `entrypoint-user.sh` | Remove bash status monitor loop, launch Python status monitor instead |
-| (new) `status-monitor.py` | Python status monitor implementing the detector framework |
-| `runtime/tart/resources/setup.sh` | Same detector framework changes |
-| `runtime/seatbelt/resources/entrypoint.sh` | Same detector framework changes |
+| (new) `status-monitor.py` | Python status monitor implementing the detector framework (cross-platform: Linux `/proc` + macOS `sysctl`) |
+| `runtime/tart/resources/setup.sh` | Launch Python status monitor instead of bash loop |
+| `runtime/seatbelt/resources/entrypoint.sh` | Launch Python status monitor instead of bash loop |
 
 ### 3.8 What Doesn't Change
 

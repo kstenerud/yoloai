@@ -94,7 +94,7 @@ This is a significant reliability advantage that the design doesn't capture. It 
 | 1 | `idle_threshold` is live code, not dead | Medium | **Applied** — Phase 1 updated with full removal scope, known issue #1 corrected |
 | 2 | Phase 2 code examples still bash | Low | **Applied** — replaced with Python |
 | 3 | `ss`/`iproute2` not in Dockerfile | Medium | **Applied** — resolved: parse `/proc` in Python, no `ss` dependency |
-| 4 | Weak macOS idle detection for non-Claude agents | Medium | **Noted** — research round needed for macOS-specific alternatives |
+| 4 | Weak macOS idle detection for non-Claude agents | Medium | **Applied** — `sysctl KERN_PROC` `e_wmesg` (`ttyin`) fills the gap; wchan detector now cross-platform |
 | 5 | ANSI sequences break context_signal matching | Low-Medium | **Applied** — ANSI caveat added to context_signal detector |
 | 6 | Process tree walk depth unspecified | Low-Medium | **Applied** — replaced with network namespace approach |
 | 7 | Prompt delivery race not addressed | Low | **Applied** — fix added to Phase 1 step 2 |
@@ -102,4 +102,4 @@ This is a significant reliability advantage that the design doesn't capture. It 
 
 ## Verdict
 
-All findings applied to the design doc. One remaining action: research round for macOS-specific idle detection alternatives (#4). If nothing better exists, document the limitation and accept it.
+All findings applied. macOS research (#4) found `sysctl KERN_PROC` `e_wmesg` as the macOS equivalent of Linux's wchan — the wchan detector is now cross-platform. One caveat remains: `e_wmesg` may be empty on some macOS versions, needing verification on Sequoia/Sonoma hardware.
