@@ -179,7 +179,7 @@ func RecordBuildChecksum(sourceDir string) {
 // buildInputsChecksum computes a combined SHA-256 of the build input files.
 func buildInputsChecksum(sourceDir string) string {
 	h := sha256.New()
-	for _, name := range []string{"Dockerfile", "entrypoint.sh", "entrypoint-user.sh", "tmux.conf"} {
+	for _, name := range []string{"Dockerfile", "entrypoint.sh", "entrypoint-user.sh", "status-monitor.py", "tmux.conf"} {
 		data, err := os.ReadFile(filepath.Join(sourceDir, name)) //nolint:gosec // G304: sourceDir is ~/.yoloai/
 		if err != nil {
 			return ""
@@ -238,6 +238,7 @@ func createBuildContext(sourceDir string) (io.Reader, error) {
 		{"Dockerfile", "Dockerfile"},
 		{"entrypoint.sh", "entrypoint.sh"},
 		{"entrypoint-user.sh", "entrypoint-user.sh"},
+		{"status-monitor.py", "status-monitor.py"},
 		{"tmux.conf", "tmux.conf"},
 	}
 

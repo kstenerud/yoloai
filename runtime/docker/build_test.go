@@ -20,6 +20,7 @@ func TestCreateBuildContext(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "Dockerfile"), []byte("FROM ubuntu"), 0600))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "entrypoint.sh"), []byte("#!/bin/bash"), 0600))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "entrypoint-user.sh"), []byte("#!/bin/bash\nset -euo pipefail"), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "status-monitor.py"), []byte("#!/usr/bin/env python3"), 0600))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "tmux.conf"), []byte("set -g mouse on"), 0600))
 
 	reader, err := createBuildContext(dir)
@@ -42,8 +43,9 @@ func TestCreateBuildContext(t *testing.T) {
 	assert.Equal(t, "FROM ubuntu", found["Dockerfile"])
 	assert.Equal(t, "#!/bin/bash", found["entrypoint.sh"])
 	assert.Equal(t, "#!/bin/bash\nset -euo pipefail", found["entrypoint-user.sh"])
+	assert.Equal(t, "#!/usr/bin/env python3", found["status-monitor.py"])
 	assert.Equal(t, "set -g mouse on", found["tmux.conf"])
-	assert.Len(t, found, 4)
+	assert.Len(t, found, 5)
 }
 
 func TestCreateProfileBuildContext(t *testing.T) {
@@ -180,6 +182,7 @@ func TestNeedsBuild_NoChecksum(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "Dockerfile"), []byte("FROM ubuntu"), 0600))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "entrypoint.sh"), []byte("#!/bin/bash"), 0600))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "entrypoint-user.sh"), []byte("#!/bin/bash"), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "status-monitor.py"), []byte("#!/usr/bin/env python3"), 0600))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "tmux.conf"), []byte("set -g mouse on"), 0600))
 
 	assert.True(t, NeedsBuild(dir))
@@ -190,6 +193,7 @@ func TestNeedsBuild_AfterRecord(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "Dockerfile"), []byte("FROM ubuntu"), 0600))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "entrypoint.sh"), []byte("#!/bin/bash"), 0600))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "entrypoint-user.sh"), []byte("#!/bin/bash"), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "status-monitor.py"), []byte("#!/usr/bin/env python3"), 0600))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "tmux.conf"), []byte("set -g mouse on"), 0600))
 
 	RecordBuildChecksum(dir)
@@ -238,6 +242,7 @@ func TestBuildInputsChecksum_Deterministic(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "Dockerfile"), []byte("FROM ubuntu"), 0600))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "entrypoint.sh"), []byte("#!/bin/bash"), 0600))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "entrypoint-user.sh"), []byte("#!/bin/bash"), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "status-monitor.py"), []byte("#!/usr/bin/env python3"), 0600))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "tmux.conf"), []byte("set -g mouse on"), 0600))
 
 	sum1 := buildInputsChecksum(dir)
