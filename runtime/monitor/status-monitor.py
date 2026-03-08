@@ -62,7 +62,14 @@ def tmux_cmd(args, tmux_sock=None):
 
 
 def write_status(status_file, status, exit_code=None):
-    """Write status JSON atomically.
+    """Write status JSON in-place.
+
+    Writes directly to the status file rather than using atomic rename, because
+    status.json is a file-level bind mount in Docker. os.replace() fails with
+    EBUSY on bind-mounted files, so we truncate-and-write instead. This is safe
+    because we're the only structured writer (hooks use shell redirection) and
+    a partial read by the host would just fail JSON parsing and trigger the
+    exec fallback.
 
     Sets source="monitor" so the HookDetector can distinguish monitor writes
     from hook writes (which don't set source).
@@ -73,12 +80,10 @@ def write_status(status_file, status, exit_code=None):
         "timestamp": int(time.time()),
         "source": "monitor",
     }
-    tmp = status_file + ".tmp"
     try:
-        with open(tmp, "w") as f:
+        with open(status_file, "w") as f:
             json.dump(data, f)
             f.write("\n")
-        os.replace(tmp, status_file)
     except OSError:
         pass
 
