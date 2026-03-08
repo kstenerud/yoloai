@@ -29,11 +29,6 @@ const (
 	StatusBroken  Status = "broken"  // sandbox dir exists but meta.json missing/invalid
 )
 
-// DefaultIdleThreshold is retained for config/API compatibility but unused.
-//
-// Deprecated: idle detection uses the in-container status monitor.
-const DefaultIdleThreshold = 30
-
 // Info holds the combined metadata and live state for a sandbox.
 type Info struct {
 	Meta       *Meta  `json:"meta"`

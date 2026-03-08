@@ -772,48 +772,6 @@ func TestGetConfigValue_AutoCommitInterval(t *testing.T) {
 	assert.Equal(t, "0", val)
 }
 
-func TestLoadConfig_IdleThresholdDefault(t *testing.T) {
-	dir := configDir(t)
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(DefaultConfigYAML), 0600))
-
-	cfg, err := LoadConfig()
-	require.NoError(t, err)
-	assert.Equal(t, 0, cfg.IdleThreshold)
-}
-
-func TestLoadConfig_IdleThresholdExplicit(t *testing.T) {
-	dir := configDir(t)
-
-	content := "idle_threshold: 45\n"
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
-
-	cfg, err := LoadConfig()
-	require.NoError(t, err)
-	assert.Equal(t, 45, cfg.IdleThreshold)
-}
-
-func TestLoadConfig_IdleThresholdInvalid(t *testing.T) {
-	dir := configDir(t)
-
-	content := "idle_threshold: abc\n"
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
-
-	_, err := LoadConfig()
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "idle_threshold")
-}
-
-func TestGetConfigValue_IdleThreshold(t *testing.T) {
-	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
-
-	// Known key with no file: returns default "0"
-	val, found, err := GetConfigValue("idle_threshold")
-	require.NoError(t, err)
-	assert.True(t, found)
-	assert.Equal(t, "0", val)
-}
-
 // Helper to parse YAML and return the root mapping node.
 func parseYAMLMapping(t *testing.T, input string) *yaml.Node {
 	t.Helper()

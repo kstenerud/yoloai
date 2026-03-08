@@ -25,7 +25,6 @@ type profileResult struct {
 	devices            []string
 	setup              []string
 	autoCommitInterval int
-	idleThreshold      int
 	userAliases        map[string]string
 }
 
@@ -37,7 +36,6 @@ func (m *Manager) resolveProfileConfig(ctx context.Context, opts *CreateOptions,
 		agentArgs:          ycfg.AgentArgs,
 		agentFiles:         ycfg.AgentFiles,
 		autoCommitInterval: ycfg.AutoCommitInterval,
-		idleThreshold:      ycfg.IdleThreshold,
 		userAliases:        gcfg.ModelAliases,
 	}
 
@@ -130,7 +128,6 @@ func (m *Manager) resolveProfileConfig(ctx context.Context, opts *CreateOptions,
 	pr.devices = merged.Devices
 	pr.setup = merged.Setup
 	pr.autoCommitInterval = merged.AutoCommitInterval
-	pr.idleThreshold = merged.IdleThreshold
 	pr.name = opts.Profile
 
 	// Resolve image ref

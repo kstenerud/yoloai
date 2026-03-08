@@ -33,7 +33,6 @@ type ProfileConfig struct {
 	Devices            []string          // devices — host devices to expose (Docker only)
 	Setup              []string          // setup — commands to run before agent launch (Docker only)
 	AutoCommitInterval int               // auto_commit_interval — seconds between auto-commits in :copy dirs; 0 = disabled
-	IdleThreshold      int               // idle_threshold — seconds of inactivity before agent is considered idle; 0 = default (30s)
 }
 
 // ProfileWorkdir defines a workdir from a profile.
@@ -69,7 +68,6 @@ type MergedConfig struct {
 	Devices            []string          `json:"devices,omitempty"`              // additive across chain (Docker only)
 	Setup              []string          `json:"setup,omitempty"`                // additive across chain (Docker only)
 	AutoCommitInterval int               `json:"auto_commit_interval,omitempty"` // profile overrides default
-	IdleThreshold      int               `json:"idle_threshold,omitempty"`       // profile overrides default
 }
 
 // ProfileDirPath returns the host-side directory for a profile.
@@ -382,12 +380,6 @@ func LoadProfile(name string) (*ProfileConfig, error) {
 				return nil, fmt.Errorf("auto_commit_interval: %w", aErr)
 			}
 			cfg.AutoCommitInterval = n
-		case "idle_threshold":
-			n, aErr := strconv.Atoi(val.Value)
-			if aErr != nil {
-				return nil, fmt.Errorf("idle_threshold: %w", aErr)
-			}
-			cfg.IdleThreshold = n
 			// Unknown fields are silently ignored
 		}
 	}
@@ -529,7 +521,6 @@ func MergeProfileChain(base *YoloaiConfig, chain []string) (*MergedConfig, error
 
 	merged.AgentFiles = base.AgentFiles
 	merged.AutoCommitInterval = base.AutoCommitInterval
-	merged.IdleThreshold = base.IdleThreshold
 
 	// Apply each non-base profile in order
 	for _, name := range chain {
@@ -627,10 +618,6 @@ func MergeProfileChain(base *YoloaiConfig, chain []string) (*MergedConfig, error
 			merged.AutoCommitInterval = profile.AutoCommitInterval
 		}
 
-		// IdleThreshold: scalar override (non-zero wins)
-		if profile.IdleThreshold > 0 {
-			merged.IdleThreshold = profile.IdleThreshold
-		}
 	}
 
 	return merged, nil
