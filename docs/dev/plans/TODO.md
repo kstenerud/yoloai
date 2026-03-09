@@ -64,6 +64,20 @@ Allow users to override the auto-resolved detector stack via profile-level confi
 
 See [idle detection research](../research/idle-detection.md) §3.9 Q1.
 
+## Seatbelt Improvements
+
+### Dynamic toolchain detection in SBPL profiles
+
+Currently `profile.go:systemReadPaths()` hardcodes paths like `/opt/homebrew`, `/usr/local/Cellar`. Users with non-standard tool installations (nix, asdf, mise, custom prefixes) hit "Operation not permitted" errors. Augment `GenerateProfile()` to resolve common toolchain paths at runtime (e.g., `which node` → grant read to its install prefix). Cover at minimum: node, python, ruby, go, rust, java.
+
+Inspired by Agent Safehouse's dynamic toolchain detection approach. See [sandboxing research](../research/sandboxing.md) key finding #7 and [competitors research](../research/competitors.md) §9.
+
+### Per-agent sandbox access documentation
+
+Document what filesystem paths, network endpoints, and IPC each supported agent tries to access under sandboxing. Use this to improve SBPL profile generation and agent definitions. Agent Safehouse publishes per-agent investigation reports that could serve as a starting reference.
+
+See [competitors research](../research/competitors.md) §9.
+
 ## Profile Enhancements
 
 ### Shared cache volumes

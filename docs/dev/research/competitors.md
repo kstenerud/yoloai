@@ -206,6 +206,38 @@ The following tools were identified but not analyzed in depth. Included for comp
 
 **Approach categories not fully explored:** macOS `sandbox-exec` tools (5+ projects), Nix-based isolation, micro-VM alternatives (boxlite, Fly.io Sprites, E2B), commercial platforms (E2B, Daytona, Fly.io Sprites, Northflank, Vercel Sandbox), HTTP API wrappers (agentapi, sandbox-agent).
 
+### 9. Agent Safehouse
+
+**Repo:** [eugene1g/agent-safehouse](https://github.com/eugene1g/agent-safehouse)
+**Stars:** 37 | **Language:** Shell (99.7%) | **Status:** Active (104 commits, Apache 2.0)
+
+**What it does:** Single bash script that wraps any agent CLI with macOS `sandbox-exec`. Deny-first SBPL profiles restrict filesystem access to the project's git root. No lifecycle management, no copy/diff/apply — purely a transparent sandbox wrapper.
+
+**Architecture:** Downloads as a single `safehouse.sh` script. Runs `sandbox-exec` with a generated profile around the target agent command. No daemon, no state management.
+
+**Strengths:**
+- **Zero-dependency installation** — single curl command
+- **Dynamic toolchain detection** — auto-discovers installed dev environments (node, python, rust, etc.) and grants read access, rather than hardcoding paths like `/opt/homebrew`
+- **Shell function pattern** — `claude() { safe claude --dangerously-skip-permissions "$@"; }` makes sandboxing transparent and composable
+- **Per-agent investigation reports** — documents what each agent tries to access under sandboxing, specific quirks and breakage patterns
+- **Composable policies** — extensible permission configuration via `--add-dirs-ro` and similar flags
+- **Wide agent compatibility** — tested with 13+ agents (Claude Code, Codex, Gemini CLI, Aider, Goose, Amp, OpenCode, Auggie, Pi, Cursor Agent, Cline, Kilo Code, Droid)
+
+**Weaknesses:**
+- macOS-only (sandbox-exec dependency)
+- No change isolation — agent writes directly to project directory
+- No copy/diff/apply workflow
+- No session management, logging, or persistent state
+- Coarse network control (same sandbox-exec limitation as all Seatbelt tools)
+
+**Actionable lessons for yoloAI:**
+
+1. **Dynamic toolchain detection for seatbelt profiles.** Our `profile.go:systemReadPaths()` hardcodes paths (`/opt/homebrew`, `/usr/local/Cellar`, etc.). Safehouse instead detects installed toolchains at runtime (e.g., resolving `which node` to its prefix) and grants read access dynamically. This would reduce "Operation not permitted" friction for users with non-standard tool installations (nix, asdf, mise, custom prefixes). Low-effort improvement to `GenerateProfile()`.
+
+2. **Per-agent sandbox compatibility docs.** Safehouse documents what each agent tries to access (filesystem paths, network endpoints, IPC) and what breaks under sandboxing. We should catalog this for our supported agents — e.g., which paths Claude Code, Codex, Gemini need beyond the working directory. This directly improves our SBPL profile generation and agent definitions.
+
+3. **Lightweight "wrap" mode.** Their shell function pattern (`safe() { safehouse "$@"; }`) enables sandboxing without the full create/start/attach lifecycle. A future `yoloai wrap <agent-command>` could provide quick one-off sandboxed runs using seatbelt without creating a persistent sandbox — useful for users who want protection but don't need copy/diff/apply.
+
 ---
 
 ## Community Pain Points (from GitHub issues, Reddit, HN, blogs)
@@ -245,15 +277,17 @@ The following tools were identified but not analyzed in depth. Included for comp
 
 *Note: This table covers a subset of the landscape. See section 8 for additional tools.*
 
-| Feature | deva.sh | TextCortex | Docker Sandbox | rsh3khar | cco | sandbox-runtime | **yoloAI** |
-|---------|---------|------------|----------------|----------|-----|-----------------|-----------------|
-| Copy/diff/apply workflow | No | No (git branch + diff review) | No (file sync) | No (auto-commit) | No | No | **Yes** |
-| Per-sandbox Claude state | No | No | No | No | No | No | **Yes** |
-| Session logging | No | Web terminal | No | No | No | No | **Yes** |
-| User-supplied Dockerfiles | No | Custom Dockerfile | Templates | No | No | N/A (no container) | **Yes** |
-| Multi-directory with primary/dep | Partial | No | No | Worktrees | No | N/A | **Yes** |
-| Review before applying changes | No | Diff review (git) | No | No | No | No | **Yes (core feature)** |
-| Multi-backend isolation | No | No | MicroVM | No | Yes (sandbox-exec/bwrap/Docker) | Yes (bwrap/Seatbelt) | No (Docker only) |
-| No Docker dependency | No | No | Docker Desktop | No | Yes (native modes) | Yes | No |
+| Feature | deva.sh | TextCortex | Docker Sandbox | rsh3khar | cco | sandbox-runtime | Safehouse | **yoloAI** |
+|---------|---------|------------|----------------|----------|-----|-----------------|-----------|-----------------|
+| Copy/diff/apply workflow | No | No (git branch + diff review) | No (file sync) | No (auto-commit) | No | No | No | **Yes** |
+| Per-sandbox Claude state | No | No | No | No | No | No | No | **Yes** |
+| Session logging | No | Web terminal | No | No | No | No | No | **Yes** |
+| User-supplied Dockerfiles | No | Custom Dockerfile | Templates | No | No | N/A (no container) | N/A | **Yes** |
+| Multi-directory with primary/dep | Partial | No | No | Worktrees | No | N/A | No | **Yes** |
+| Review before applying changes | No | Diff review (git) | No | No | No | No | No | **Yes (core feature)** |
+| Multi-backend isolation | No | No | MicroVM | No | Yes (sandbox-exec/bwrap/Docker) | Yes (bwrap/Seatbelt) | No (sandbox-exec only) | **Yes (Docker/Tart/Seatbelt)** |
+| No Docker dependency | No | No | Docker Desktop | No | Yes (native modes) | Yes | Yes | Partial (Seatbelt mode) |
+| Dynamic toolchain detection | No | No | No | No | No | Yes (glob patterns) | Yes | No |
+| Per-agent compatibility docs | No | No | No | No | No | No | Yes | No |
 
 ---
