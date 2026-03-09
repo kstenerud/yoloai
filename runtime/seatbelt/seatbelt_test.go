@@ -161,6 +161,93 @@ func TestGenerateProfile_EmptyMountSourceSkipped(t *testing.T) {
 	}
 }
 
+func TestGenerateProfile_SymlinkResolution(t *testing.T) {
+	// Create a real directory and a symlink pointing to it.
+	// Resolve temp dirs first since on macOS /var -> /private/var.
+	realDir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	symlinkParent, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	symlinkPath := filepath.Join(symlinkParent, "link")
+	if err := os.Symlink(realDir, symlinkPath); err != nil {
+		t.Fatalf("failed to create symlink: %v", err)
+	}
+
+	cfg := runtime.InstanceConfig{
+		Name: "test",
+		Mounts: []runtime.MountSpec{
+			{Source: symlinkPath, Target: symlinkPath, ReadOnly: false},
+		},
+	}
+	profile := GenerateProfile(cfg, "/tmp/sandbox", "/Users/testuser")
+
+	// The resolved (real) path must appear in the profile
+	if !strings.Contains(profile, fmt.Sprintf(`(subpath %q)`, realDir)) {
+		t.Errorf("profile should contain resolved path %q, profile:\n%s", realDir, profile)
+	}
+	// The original symlink path should also appear
+	if !strings.Contains(profile, fmt.Sprintf(`(subpath %q)`, symlinkPath)) {
+		t.Errorf("profile should contain original symlink path %q, profile:\n%s", symlinkPath, profile)
+	}
+}
+
+func TestResolvePathVariants_NoSymlink(t *testing.T) {
+	// Resolve the temp dir to its real path (on macOS /var -> /private/var)
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	variants := resolvePathVariants(dir)
+	if len(variants) != 1 {
+		t.Errorf("expected 1 variant for real path, got %d: %v", len(variants), variants)
+	}
+	if variants[0] != dir {
+		t.Errorf("expected %q, got %q", dir, variants[0])
+	}
+}
+
+func TestResolvePathVariants_WithSymlink(t *testing.T) {
+	// Resolve temp dirs first since on macOS /var -> /private/var
+	realDir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	symlinkParent, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	symlinkPath := filepath.Join(symlinkParent, "link")
+	if err := os.Symlink(realDir, symlinkPath); err != nil {
+		t.Fatalf("failed to create symlink: %v", err)
+	}
+
+	variants := resolvePathVariants(symlinkPath)
+	if len(variants) != 2 {
+		t.Fatalf("expected 2 variants for symlink path, got %d: %v", len(variants), variants)
+	}
+	if variants[0] != realDir {
+		t.Errorf("first variant should be resolved path %q, got %q", realDir, variants[0])
+	}
+	if variants[1] != symlinkPath {
+		t.Errorf("second variant should be original path %q, got %q", symlinkPath, variants[1])
+	}
+}
+
+func TestResolvePathVariants_NonexistentPath(t *testing.T) {
+	// A nonexistent path should return just the original (EvalSymlinks fails)
+	variants := resolvePathVariants("/nonexistent/path/that/does/not/exist")
+	if len(variants) != 1 {
+		t.Errorf("expected 1 variant for nonexistent path, got %d: %v", len(variants), variants)
+	}
+	if variants[0] != "/nonexistent/path/that/does/not/exist" {
+		t.Errorf("expected original path, got %q", variants[0])
+	}
+}
+
 func TestIsMacOS(t *testing.T) {
 	// Save and restore
 	original := goos

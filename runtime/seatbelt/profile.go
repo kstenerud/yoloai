@@ -57,7 +57,10 @@ func GenerateProfile(cfg runtime.InstanceConfig, sandboxDir, homeDir string) str
 
 	// --- Sandbox directory (always read-write) ---
 	b.WriteString("; Sandbox directory\n")
-	fmt.Fprintf(&b, "(allow file-read* file-write* (subpath %q))\n\n", sandboxDir)
+	for _, p := range resolvePathVariants(sandboxDir) {
+		fmt.Fprintf(&b, "(allow file-read* file-write* (subpath %q))\n", p)
+	}
+	b.WriteString("\n")
 
 	// --- Mount-derived filesystem rules ---
 	b.WriteString("; Mount-derived filesystem rules\n")
@@ -65,19 +68,28 @@ func GenerateProfile(cfg runtime.InstanceConfig, sandboxDir, homeDir string) str
 		if m.Source == "" {
 			continue
 		}
-		if m.ReadOnly {
-			fmt.Fprintf(&b, "(allow file-read* (subpath %q))\n", m.Source)
-		} else {
-			fmt.Fprintf(&b, "(allow file-read* file-write* (subpath %q))\n", m.Source)
+		for _, src := range resolvePathVariants(m.Source) {
+			if m.ReadOnly {
+				fmt.Fprintf(&b, "(allow file-read* (subpath %q))\n", src)
+			} else {
+				fmt.Fprintf(&b, "(allow file-read* file-write* (subpath %q))\n", src)
+			}
 		}
 	}
 	b.WriteString("\n")
 
 	// --- Home directory (minimal access — credentials excluded by default) ---
 	b.WriteString("; Home directory (agent binaries and git config only)\n")
-	fmt.Fprintf(&b, "(allow file-read* (subpath %q))\n", filepath.Join(homeDir, ".local"))
-	fmt.Fprintf(&b, "(allow file-read* (literal %q))\n", filepath.Join(homeDir, ".gitconfig"))
-	fmt.Fprintf(&b, "(allow file-read* (subpath %q))\n\n", filepath.Join(homeDir, ".config", "git"))
+	for _, p := range resolvePathVariants(filepath.Join(homeDir, ".local")) {
+		fmt.Fprintf(&b, "(allow file-read* (subpath %q))\n", p)
+	}
+	for _, p := range resolvePathVariants(filepath.Join(homeDir, ".gitconfig")) {
+		fmt.Fprintf(&b, "(allow file-read* (literal %q))\n", p)
+	}
+	for _, p := range resolvePathVariants(filepath.Join(homeDir, ".config", "git")) {
+		fmt.Fprintf(&b, "(allow file-read* (subpath %q))\n", p)
+	}
+	b.WriteString("\n")
 
 	// --- Network ---
 	b.WriteString("; Network access\n")
@@ -132,4 +144,17 @@ func tempPaths() []string {
 		"/private/tmp",
 		"/private/var/folders",
 	}
+}
+
+// resolvePathVariants returns the path variants needed for SBPL rules.
+// macOS sandbox-exec checks file access at the vnode level (after symlink
+// resolution), so if any component of a path is a symlink the SBPL subpath
+// rule must include the resolved path. When the resolved path differs from
+// the original, both are returned so the rule covers either access pattern.
+func resolvePathVariants(path string) []string {
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil || resolved == path {
+		return []string{path}
+	}
+	return []string{resolved, path}
 }
