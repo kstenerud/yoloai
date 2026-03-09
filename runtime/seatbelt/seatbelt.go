@@ -188,6 +188,7 @@ func (r *Runtime) Start(ctx context.Context, name string) error {
 	entrypointPath := filepath.Join(sandboxPath, "entrypoint.sh")
 
 	cmd := exec.Command(r.sandboxExecBin, "-f", profilePath, "bash", entrypointPath, sandboxPath) //nolint:gosec // G204: paths are constructed from validated config
+	cmd.Env = sandboxEnv()
 	cmd.Stderr = logFile
 	cmd.Stdout = logFile
 	cmd.SysProcAttr = &syscall.SysProcAttr{
@@ -433,6 +434,28 @@ func (r *Runtime) killByPID(sandboxPath string) {
 	_ = syscall.Kill(-pid, syscall.SIGTERM)
 	_ = proc.Signal(syscall.SIGTERM)
 	_ = os.Remove(pidPath)
+}
+
+// sandboxEnv returns a filtered subset of the parent environment, passing
+// only safe OS/locale variables. Credentials like SSH_AUTH_SOCK,
+// AWS_SECRET_ACCESS_KEY, etc. are excluded. The entrypoint injects agent
+// API keys from the secrets directory; users can opt in to additional env
+// vars via the config env: section.
+func sandboxEnv() []string {
+	allowed := map[string]bool{
+		"PATH": true, "HOME": true, "USER": true, "LOGNAME": true,
+		"SHELL": true, "TERM": true, "TMPDIR": true,
+		"LANG": true, "LC_ALL": true, "LC_CTYPE": true,
+		"LC_COLLATE": true, "LC_MESSAGES": true, "LC_MONETARY": true,
+		"LC_NUMERIC": true, "LC_TIME": true,
+	}
+	var filtered []string
+	for _, entry := range os.Environ() {
+		if k, _, ok := strings.Cut(entry, "="); ok && allowed[k] {
+			filtered = append(filtered, entry)
+		}
+	}
+	return filtered
 }
 
 // waitForTmux polls until the tmux session appears via the per-sandbox socket.

@@ -106,13 +106,23 @@ func TestGenerateProfile_SandboxDirAlwaysWritable(t *testing.T) {
 	}
 }
 
-func TestGenerateProfile_HomeDirReadable(t *testing.T) {
+func TestGenerateProfile_HomeDirMinimalAccess(t *testing.T) {
 	cfg := runtime.InstanceConfig{Name: "test"}
 	homeDir := "/Users/testuser"
 	profile := GenerateProfile(cfg, "/tmp/sandbox", homeDir)
 
-	if !strings.Contains(profile, fmt.Sprintf(`(allow file-read* (subpath %q))`, homeDir)) {
-		t.Error("home dir should be readable")
+	// Should allow read access to ~/.local (agent binaries)
+	localPath := filepath.Join(homeDir, ".local")
+	if !strings.Contains(profile, fmt.Sprintf(`(allow file-read* (subpath %q))`, localPath)) {
+		t.Error("~/.local should be readable for agent binaries")
+	}
+
+	// Should NOT grant blanket read access to the entire home directory.
+	// The .local rule contains homeDir as a prefix, so check for the exact
+	// standalone rule that would grant full home access.
+	blanketRule := fmt.Sprintf("(allow file-read* (subpath %q))\n", homeDir)
+	if strings.Contains(profile, blanketRule) {
+		t.Error("home dir should NOT have blanket read access")
 	}
 }
 
@@ -514,5 +524,48 @@ func TestPatchConfigWorkingDir_AlreadyCorrect(t *testing.T) {
 	}
 	if infoAfter.ModTime() != infoBefore.ModTime() {
 		t.Error("config.json should not have been rewritten when working_dir already matches")
+	}
+}
+
+func TestSandboxEnv_Whitelist(t *testing.T) {
+	// Set some env vars that should be stripped
+	t.Setenv("SSH_AUTH_SOCK", "/tmp/ssh-agent.sock")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "super-secret")
+	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+	t.Setenv("GIT_AUTHOR_EMAIL", "test@example.com")
+
+	env := sandboxEnv()
+	envMap := make(map[string]string)
+	for _, entry := range env {
+		k, v, _ := strings.Cut(entry, "=")
+		envMap[k] = v
+	}
+
+	// Sensitive vars must NOT be present
+	for _, key := range []string{"SSH_AUTH_SOCK", "AWS_SECRET_ACCESS_KEY", "ANTHROPIC_API_KEY", "GIT_AUTHOR_EMAIL"} {
+		if _, ok := envMap[key]; ok {
+			t.Errorf("%s should be excluded from sandbox environment", key)
+		}
+	}
+}
+
+func TestSandboxEnv_PreservesWhitelisted(t *testing.T) {
+	t.Setenv("PATH", "/usr/bin:/bin")
+	t.Setenv("HOME", "/Users/testuser")
+	t.Setenv("TERM", "xterm-256color")
+	t.Setenv("LANG", "en_US.UTF-8")
+	t.Setenv("LC_CTYPE", "UTF-8")
+
+	env := sandboxEnv()
+	envMap := make(map[string]string)
+	for _, entry := range env {
+		k, v, _ := strings.Cut(entry, "=")
+		envMap[k] = v
+	}
+
+	for _, key := range []string{"PATH", "HOME", "TERM", "LANG", "LC_CTYPE"} {
+		if _, ok := envMap[key]; !ok {
+			t.Errorf("%s should be preserved in sandbox environment", key)
+		}
 	}
 }

@@ -23,6 +23,14 @@ The user sets the appropriate API key in their host shell profile (`ANTHROPIC_AP
 - **OAuth/SSO:** Claude supports OAuth for Pro/Max/Team plans. v1 supports API key auth only. Docker Sandboxes supports OAuth but reports it as broken (docker/for-mac#7842).
 - **Assessment:** File-based injection is the industry standard for developer tools at this level. Credential proxy and vault integration are enterprise features for future versions.
 
+## Seatbelt Backend Security
+
+The seatbelt (macOS sandbox-exec) backend applies **default-deny credential access**:
+
+- **Environment whitelist:** Only safe OS and locale variables (`PATH`, `HOME`, `USER`, `SHELL`, `TERM`, `LANG`, `LC_*`, etc.) are passed to the sandboxed process. Sensitive variables like `SSH_AUTH_SOCK`, `AWS_SECRET_ACCESS_KEY`, and API keys are excluded. Agent API keys are injected by the entrypoint from the secrets directory.
+- **Restricted home directory:** The SBPL profile grants read access only to `~/.local/` (where agent binaries live), not the entire home directory. This prevents the agent from reading `~/.ssh/`, `~/.gnupg/`, `~/.aws/`, `~/.git-credentials`, `~/.npmrc`, etc.
+- **Opting in to credential access:** Users who need SSH agent forwarding or other credentials can add them via the config `env:` section (e.g., `SSH_AUTH_SOCK`) which flows through the secrets mechanism, or via `mounts:` for directory access (e.g., `~/.ssh:~/.ssh:ro`).
+
 ## Security Considerations
 
 - **The agent runs arbitrary code** inside the container: shell commands, file operations, network requests. The container provides isolation, not prevention.

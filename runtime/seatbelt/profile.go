@@ -4,6 +4,7 @@ package seatbelt
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/kstenerud/yoloai/runtime"
@@ -72,9 +73,9 @@ func GenerateProfile(cfg runtime.InstanceConfig, sandboxDir, homeDir string) str
 	}
 	b.WriteString("\n")
 
-	// --- Home directory (read for .gitconfig etc.) ---
-	b.WriteString("; Home directory (limited read access)\n")
-	fmt.Fprintf(&b, "(allow file-read* (subpath %q))\n\n", homeDir)
+	// --- Home directory (minimal access — credentials excluded by default) ---
+	b.WriteString("; Home directory (agent binaries only)\n")
+	fmt.Fprintf(&b, "(allow file-read* (subpath %q))\n\n", filepath.Join(homeDir, ".local"))
 
 	// --- Network ---
 	b.WriteString("; Network access\n")
