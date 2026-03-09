@@ -46,8 +46,12 @@ func GenerateContext(meta *Meta) string {
 
 	// Files section (exchange directory is always available)
 	b.WriteString("\n## Files\n\n")
-	b.WriteString("Files shared via `yoloai files put` are available at `/yoloai/files/`. You can also write files there for the user to retrieve with `yoloai files get`.\n")
-	b.WriteString("\n`/yoloai/files/` is also useful as a scratch area — for example, cloning a repo there instead of fetching files over HTTPS, or staging generated artifacts before the user retrieves them.\n")
+	filesPath := "/yoloai/files/"
+	if meta.Backend == "seatbelt" {
+		filesPath = filepath.Join(Dir(meta.Name), "files") + "/"
+	}
+	fmt.Fprintf(&b, "Files shared via `yoloai files put` are available at `%s`. You can also write files there for the user to retrieve with `yoloai files get`.\n", filesPath)
+	fmt.Fprintf(&b, "\n`%s` is also useful as a scratch area — for example, cloning a repo there instead of fetching files over HTTPS, or staging generated artifacts before the user retrieves them.\n", filesPath)
 
 	// Resources section (only when resources are set)
 	if meta.Resources != nil {

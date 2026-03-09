@@ -305,6 +305,21 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 		return nil, err
 	}
 
+	// For seatbelt, rewrite mount paths for :copy directories to the actual
+	// copy location. Docker mounts the copy at the original host path inside
+	// the container, but seatbelt runs directly on macOS — the agent sees
+	// the copy at its sandbox location, not the original host path.
+	if m.backend == "seatbelt" {
+		if workdir.Mode == "copy" {
+			workdir.MountPath = WorkDir(opts.Name, workdir.Path)
+		}
+		for _, ad := range auxDirs {
+			if ad.Mode == "copy" {
+				ad.MountPath = WorkDir(opts.Name, ad.Path)
+			}
+		}
+	}
+
 	// Read prompt
 	promptText, err := ReadPrompt(opts.Prompt, opts.PromptFile)
 	if err != nil {

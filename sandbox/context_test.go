@@ -130,6 +130,46 @@ func TestGenerateContext_WorkdirMountPath(t *testing.T) {
 	}
 }
 
+func TestGenerateContext_SeatbeltFilesPath(t *testing.T) {
+	meta := &Meta{
+		Name:    "test-sb",
+		Backend: "seatbelt",
+		Workdir: WorkdirMeta{
+			HostPath:  "/home/user/project",
+			MountPath: "/home/user/project",
+			Mode:      "copy",
+		},
+	}
+
+	result := GenerateContext(meta)
+
+	expectedPath := filepath.Join(Dir("test-sb"), "files") + "/"
+	if !strings.Contains(result, expectedPath) {
+		t.Errorf("expected seatbelt files path %q in context, got:\n%s", expectedPath, result)
+	}
+	if strings.Contains(result, "/yoloai/files/") {
+		t.Error("seatbelt context should not contain /yoloai/files/")
+	}
+}
+
+func TestGenerateContext_DockerFilesPath(t *testing.T) {
+	meta := &Meta{
+		Name:    "test-sb",
+		Backend: "docker",
+		Workdir: WorkdirMeta{
+			HostPath:  "/home/user/project",
+			MountPath: "/home/user/project",
+			Mode:      "copy",
+		},
+	}
+
+	result := GenerateContext(meta)
+
+	if !strings.Contains(result, "/yoloai/files/") {
+		t.Error("docker context should contain /yoloai/files/")
+	}
+}
+
 func TestWriteContextFiles_WritesContextAndRef(t *testing.T) {
 	sandboxDir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(sandboxDir, "agent-state"), 0750); err != nil {
