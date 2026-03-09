@@ -33,8 +33,15 @@ func CheckPatch(patch []byte, targetDir string, isGit bool) error {
 		return nil
 	}
 
+	// Resolve symlinks so git apply doesn't reject the path with
+	// "beyond a symbolic link" (e.g. macOS /var -> /private/var).
+	realTarget, err := filepath.EvalSymlinks(targetDir)
+	if err != nil {
+		return fmt.Errorf("resolve target dir: %w", err)
+	}
+
 	return withTempGitDir(func(tmpDir string) error {
-		if err := runGitApply(tmpDir, patch, "--check", "--unsafe-paths", "--directory="+targetDir); err != nil {
+		if err := runGitApply(tmpDir, patch, "--check", "--unsafe-paths", "--directory="+realTarget); err != nil {
 			return formatApplyError(err, targetDir)
 		}
 		return nil
