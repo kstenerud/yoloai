@@ -726,3 +726,35 @@ yoloAI's approach (internal Docker network + `HTTP_PROXY` env vars) is less inva
 3. Proxy sidecar must be an HTTP forward proxy (not SOCKS). Squid, tinyproxy, or a custom Go proxy all work.
 4. No MITM/TLS inspection needed for domain-based allowlisting — HTTPS `CONNECT` tunneling exposes the target domain.
 5. For v2 multi-agent support, proxy compatibility must be verified per agent. Agents using non-standard HTTP clients or bundled runtimes (like Bun) may not work.
+
+---
+
+## Emerging Security Approaches (HN Discussion, 2026-03-09)
+
+Insights from HN discussion on Agent Safehouse (471 points, 109 comments). These represent community thinking about the next layer of agent security beyond filesystem sandboxing.
+
+### Credential Proxying and Scoped Tokens
+
+**Problem:** Filesystem sandboxing doesn't prevent credential misuse. A sandboxed agent still has access to any API keys, AWS credentials, or GitHub tokens injected into its environment. A confused deputy attack (e.g., agent reads a malicious prompt from a file) can misuse legitimate credentials within the sandbox's permissions.
+
+**Approaches discussed:**
+
+1. **Credential proxy (Clawvisor pattern):** Gateway sits between agent and external APIs. Agent makes requests without credentials; proxy injects credentials server-side. Agent never sees raw tokens. Supports task-based scoping (time-limited, action-limited), approval queues, and audit logging. Optional LLM-based intent verification catches request drift.
+
+2. **Scoped short-lived JWTs:** Instead of raw API keys, generate short-lived tokens with narrow scopes. Agent gets a JWT valid for 15 minutes with specific permissions (e.g., "read issues in repo X" not "full repo access").
+
+3. **Tool-level auth at MCP layer (Arcade):** Each MCP tool gets individually scoped authorization via JIT OAuth. The agent has broad filesystem access but each tool call is independently authorized and audited. Granularity is at the tool call level, not the process level.
+
+**Relevance to yoloAI:** Our file-based secrets injection (`/run/secrets/`) is better than env vars but still gives the agent raw credentials. A credential proxy would be a significant security improvement but adds architectural complexity (sidecar process, API-specific configuration). Worth considering for a future "hardened" profile or security-focused mode. The MCP-level approach is interesting but outside our scope — it requires changes to the agents themselves.
+
+### Outbound Secrets Scanning
+
+**Multitui** (macOS GUI wrapper) implements a secrets filter powered by gitleaks that scans outbound network traffic for API keys and credentials before transmission. This is a data-loss prevention (DLP) approach — even if the agent has access to credentials, it cannot exfiltrate them over the network.
+
+**Relevance to yoloAI:** Could be implemented in the proxy sidecar as a content inspection layer. The proxy already sees all outbound traffic; adding a gitleaks-style scanner to detect credential patterns in request bodies/headers would catch accidental exfiltration. Low false-positive risk since legitimate API calls use designated auth headers, not embedded credentials in request bodies.
+
+### Dynamic Permission Contraction
+
+**Concept (zmmmmm):** Sandbox permissions should shrink when agents are "tainted" by untrusted content. For example, if an agent reads a file from an untrusted source (cloned repo, downloaded dependency, user-provided input), its permissions should automatically contract — restricting network access, limiting filesystem writes, or requiring approval for subsequent actions.
+
+**Assessment:** Theoretically sound but extremely difficult to implement. Taint tracking requires deep integration with the agent's execution model (knowing *what* the agent read and *how* it influences subsequent actions). No existing tool implements this. The closest practical approach is our copy/diff/apply workflow — the agent can be "tainted" all it wants, but changes are reviewed before landing.

@@ -184,7 +184,7 @@ tmux send-keys -t agent1 'Build the REST API' Enter Enter  # Double Enter needed
 
 **claude-compose-sandbox** ([whisller/claude-compose-sandbox](https://github.com/whisller/claude-compose-sandbox)): Docker Compose based, notable for SSH agent forwarding (credentials via agent, not mounted keys).
 
-**nono** ([always-further/nono](https://github.com/always-further/nono)): Kernel-level isolation via Landlock (Linux) / Seatbelt (macOS). Irreversible restrictions. Basic audit trail with session JSON and merkle roots (signed attestation is "Coming Soon" per issues #130, #127). Created 2026-01-31, self-described "early alpha." Most security-focused option in concept. Known friction: SSL cert verification blocked under kernel sandbox (issue #93), Seatbelt blocks `network-bind` (issue #131).
+**nono** ([always-further/nono](https://github.com/always-further/nono), [nono.sh](https://nono.sh/)): Kernel-level isolation via Landlock (Linux) / Seatbelt (macOS). Irreversible restrictions. Atomic filesystem snapshots for undo/rollback. Cryptographic audit logging. Sigstore-based supply chain integrity. Native SDKs for Python, TypeScript, Rust, plus C FFI bindings. Declarative capability sets (`caps.allow_path("/project", READ_WRITE); caps.block_network()`). Created 2026-01-31, self-described "early alpha." Known friction: SSL cert verification blocked under kernel sandbox (issue #93), Seatbelt blocks `network-bind` (issue #131).
 
 ---
 
@@ -203,6 +203,10 @@ The following tools were identified but not analyzed in depth. Included for comp
 | disler/agent-sandbox-skill | 318 | Claude Code skill | Manages sandboxes from *within* Claude Code. Novel approach. |
 | sadjow/claude-code-nix | 216 | Nix | Nix-based isolation of the Node runtime. |
 | PACHAKUTlQ/ClaudeCage | 134 | Bubblewrap | Single portable executable, drop-in `claude` replacement. No Docker needed. |
+| finbarr/yolobox | 509 | Docker/Podman/Apple containers | Go binary. Project dir r/w, home excluded. Pre-configured dev tools. `--no-network` flag. Config via TOML. |
+| clawvisor/clawvisor | 13 | Credential proxy + LLM intent verification | Go + React. Authorization gateway between agents and APIs. Injects credentials server-side. Optional LLM-based intent verification catches request drift. Task-based scoping. |
+| srid/sandnix | 34 | Nix + Landlock/Seatbelt | Nix flake module for declarative sandboxing. Cross-platform (Landlock on Linux, sandbox-exec on macOS). High-level feature flags (tty, network, nix-store). |
+| multitui.com | N/A | macOS GUI + sandbox-exec | SvelteKit macOS app wrapping CLI tools as native apps. Network rules per domain. Secrets filter (gitleaks-based) scanning outbound traffic for API keys. |
 
 **Approach categories not fully explored:** macOS `sandbox-exec` tools (5+ projects), Nix-based isolation, micro-VM alternatives (boxlite, Fly.io Sprites, E2B), commercial platforms (E2B, Daytona, Fly.io Sprites, Northflank, Vercel Sandbox), HTTP API wrappers (agentapi, sandbox-agent).
 
@@ -260,6 +264,20 @@ The following tools were identified but not analyzed in depth. Included for comp
 - Time-scoped credentials that auto-expire
 - Multi-agent management from a single interface
 
+### HN thread insights (2026-03-09, Agent Safehouse, 471 points, 109 comments):
+
+**"Sandboxing is necessary but insufficient"** — strong consensus that filesystem/process restrictions alone don't prevent agents from operating "perfectly within permissions and still producing garbage" (devonkelley). Three additional layers were discussed:
+
+1. **Credential scoping** (silverstream): "An agent inside sandbox-exec still has your AWS keys, GitHub token, whatever's in the environment." Solution: scoped short-lived JWTs instead of raw credentials. Clawvisor (Go project) implements this as a credential proxy that injects credentials server-side — agents never see the raw tokens.
+
+2. **Dynamic permission shrinking** (zmmmmm): Sandbox permissions should contract when agents are "tainted" by untrusted content (e.g., reading a malicious file or processing untrusted input). This is the "confused deputy" problem — a sandboxed agent with legitimate credentials can be tricked into misusing them.
+
+3. **Tool-level auth scoping at MCP layer** (gnanagurusrgs, Arcade): Sandboxing the runtime alone is insufficient; each tool/MCP server needs individually scoped authorization with JIT OAuth. The granularity should be at the tool call level, not the process level.
+
+4. **Supervisor agent frameworks** (nemo44x): Sandboxing prevents catastrophic damage but doesn't prevent cascading failures from hallucinations or goal drift. A supervisor agent (or human-in-the-loop) that monitors *what* the agent is doing, not just *what it can access*, is needed for production reliability.
+
+**Relevance to yoloAI:** Our copy/diff/apply workflow already addresses the "produces garbage" problem — changes are reviewed before landing. The credential scoping discussion reinforces that our file-based secrets injection is better than env vars, but could be improved with short-lived/scoped tokens. The supervisor/monitoring angle aligns with our idle detection and status monitoring work.
+
 ### Real-world security incidents:
 - Claude deleting a user's entire Mac home directory (viral Reddit post)
 - 13% of AI agent skills on ClawHub contain critical security flaws (Snyk study)
@@ -277,17 +295,18 @@ The following tools were identified but not analyzed in depth. Included for comp
 
 *Note: This table covers a subset of the landscape. See section 8 for additional tools.*
 
-| Feature | deva.sh | TextCortex | Docker Sandbox | rsh3khar | cco | sandbox-runtime | Safehouse | **yoloAI** |
-|---------|---------|------------|----------------|----------|-----|-----------------|-----------|-----------------|
-| Copy/diff/apply workflow | No | No (git branch + diff review) | No (file sync) | No (auto-commit) | No | No | No | **Yes** |
-| Per-sandbox Claude state | No | No | No | No | No | No | No | **Yes** |
-| Session logging | No | Web terminal | No | No | No | No | No | **Yes** |
-| User-supplied Dockerfiles | No | Custom Dockerfile | Templates | No | No | N/A (no container) | N/A | **Yes** |
-| Multi-directory with primary/dep | Partial | No | No | Worktrees | No | N/A | No | **Yes** |
-| Review before applying changes | No | Diff review (git) | No | No | No | No | No | **Yes (core feature)** |
-| Multi-backend isolation | No | No | MicroVM | No | Yes (sandbox-exec/bwrap/Docker) | Yes (bwrap/Seatbelt) | No (sandbox-exec only) | **Yes (Docker/Tart/Seatbelt)** |
-| No Docker dependency | No | No | Docker Desktop | No | Yes (native modes) | Yes | Yes | Partial (Seatbelt mode) |
-| Dynamic toolchain detection | No | No | No | No | No | Yes (glob patterns) | Yes | No |
-| Per-agent compatibility docs | No | No | No | No | No | No | Yes | No |
+| Feature | deva.sh | TextCortex | Docker Sandbox | rsh3khar | cco | sandbox-runtime | Safehouse | yolobox | **yoloAI** |
+|---------|---------|------------|----------------|----------|-----|-----------------|-----------|--------|-----------------|
+| Copy/diff/apply workflow | No | No (git branch + diff review) | No (file sync) | No (auto-commit) | No | No | No | No | **Yes** |
+| Per-sandbox agent state | No | No | No | No | No | No | No | Yes (persistent volumes) | **Yes** |
+| Session logging | No | Web terminal | No | No | No | No | No | No | **Yes** |
+| User-supplied Dockerfiles | No | Custom Dockerfile | Templates | No | No | N/A (no container) | N/A | No | **Yes** |
+| Multi-directory with primary/dep | Partial | No | No | Worktrees | No | N/A | No | No | **Yes** |
+| Review before applying changes | No | Diff review (git) | No | No | No | No | No | No | **Yes (core feature)** |
+| Multi-backend isolation | No | No | MicroVM | No | Yes (sandbox-exec/bwrap/Docker) | Yes (bwrap/Seatbelt) | No (sandbox-exec only) | Yes (Docker/Podman/Apple) | **Yes (Docker/Tart/Seatbelt)** |
+| No Docker dependency | No | No | Docker Desktop | No | Yes (native modes) | Yes | Yes | Partial (Podman/Apple) | Partial (Seatbelt mode) |
+| Dynamic toolchain detection | No | No | No | No | No | Yes (glob patterns) | Yes | No | No |
+| Per-agent compatibility docs | No | No | No | No | No | No | Yes | No | No |
+| Network disable flag | No | No | Proxy-based | No | No | Yes | No | Yes (`--no-network`) | **Yes** |
 
 ---
