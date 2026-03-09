@@ -74,8 +74,10 @@ func GenerateProfile(cfg runtime.InstanceConfig, sandboxDir, homeDir string) str
 	b.WriteString("\n")
 
 	// --- Home directory (minimal access — credentials excluded by default) ---
-	b.WriteString("; Home directory (agent binaries only)\n")
-	fmt.Fprintf(&b, "(allow file-read* (subpath %q))\n\n", filepath.Join(homeDir, ".local"))
+	b.WriteString("; Home directory (agent binaries and git config only)\n")
+	fmt.Fprintf(&b, "(allow file-read* (subpath %q))\n", filepath.Join(homeDir, ".local"))
+	fmt.Fprintf(&b, "(allow file-read* (literal %q))\n", filepath.Join(homeDir, ".gitconfig"))
+	fmt.Fprintf(&b, "(allow file-read* (subpath %q))\n\n", filepath.Join(homeDir, ".config", "git"))
 
 	// --- Network ---
 	b.WriteString("; Network access\n")

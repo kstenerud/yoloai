@@ -28,7 +28,7 @@ The user sets the appropriate API key in their host shell profile (`ANTHROPIC_AP
 The seatbelt (macOS sandbox-exec) backend applies **default-deny credential access**:
 
 - **Environment whitelist:** Only safe OS and locale variables (`PATH`, `HOME`, `USER`, `SHELL`, `TERM`, `LANG`, `LC_*`, etc.) are passed to the sandboxed process. Sensitive variables like `SSH_AUTH_SOCK`, `AWS_SECRET_ACCESS_KEY`, and API keys are excluded. Agent API keys are injected by the entrypoint from the secrets directory.
-- **Restricted home directory:** The SBPL profile grants read access only to `~/.local/` (where agent binaries live), not the entire home directory. This prevents the agent from reading `~/.ssh/`, `~/.gnupg/`, `~/.aws/`, `~/.git-credentials`, `~/.npmrc`, etc.
+- **Restricted home directory:** The SBPL profile grants read access only to `~/.local/` (agent binaries), `~/.gitconfig`, and `~/.config/git/` (git identity/settings) — not the entire home directory. This prevents the agent from reading `~/.ssh/`, `~/.gnupg/`, `~/.aws/`, `~/.git-credentials`, `~/.npmrc`, etc.
 - **Opting in to credential access:** Users who need SSH agent forwarding or other credentials can add them via the config `env:` section (e.g., `SSH_AUTH_SOCK`) which flows through the secrets mechanism, or via `mounts:` for directory access (e.g., `~/.ssh:~/.ssh:ro`).
 
 ## Security Considerations

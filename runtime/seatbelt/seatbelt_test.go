@@ -117,6 +117,14 @@ func TestGenerateProfile_HomeDirMinimalAccess(t *testing.T) {
 		t.Error("~/.local should be readable for agent binaries")
 	}
 
+	// Should allow read access to git config files
+	if !strings.Contains(profile, fmt.Sprintf(`(allow file-read* (literal %q))`, filepath.Join(homeDir, ".gitconfig"))) {
+		t.Error("~/.gitconfig should be readable")
+	}
+	if !strings.Contains(profile, fmt.Sprintf(`(allow file-read* (subpath %q))`, filepath.Join(homeDir, ".config", "git"))) {
+		t.Error("~/.config/git/ should be readable")
+	}
+
 	// Should NOT grant blanket read access to the entire home directory.
 	// The .local rule contains homeDir as a prefix, so check for the exact
 	// standalone rule that would grant full home access.
