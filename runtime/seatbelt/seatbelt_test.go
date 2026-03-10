@@ -6,8 +6,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/kstenerud/yoloai/runtime"
@@ -619,6 +622,52 @@ func TestPatchConfigWorkingDir_AlreadyCorrect(t *testing.T) {
 	}
 	if infoAfter.ModTime() != infoBefore.ModTime() {
 		t.Error("runtime-config.json should not have been rewritten when working_dir already matches")
+	}
+}
+
+func TestKillByPID_WaitsForExit(t *testing.T) {
+	// Set up a sandbox directory with a PID file
+	sandboxPath := t.TempDir()
+	backendPath := filepath.Join(sandboxPath, backendDir)
+	if err := os.MkdirAll(backendPath, 0750); err != nil {
+		t.Fatal(err)
+	}
+
+	// Start a long-running subprocess with its own process group
+	cmd := exec.Command("sleep", "60")
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("failed to start sleep process: %v", err)
+	}
+	pid := cmd.Process.Pid
+
+	// Write PID file
+	pidPath := filepath.Join(backendPath, pidFileName)
+	if err := os.WriteFile(pidPath, []byte(strconv.Itoa(pid)), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Reap the zombie in the background. In production the parent process has
+	// exited, so init/launchd reaps the child. In the test we're the parent,
+	// so we must call Wait() to prevent a zombie that Signal(0) can't detect.
+	go func() { _ = cmd.Wait() }()
+
+	// Ensure cleanup in case test fails
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+	})
+
+	r := &Runtime{}
+	r.killByPID(sandboxPath)
+
+	// Verify the process is no longer running
+	if err := cmd.Process.Signal(syscall.Signal(0)); err == nil {
+		t.Error("process should be dead after killByPID, but it's still running")
+	}
+
+	// Verify PID file was removed
+	if _, err := os.Stat(pidPath); !os.IsNotExist(err) {
+		t.Error("PID file should be removed after killByPID")
 	}
 }
 

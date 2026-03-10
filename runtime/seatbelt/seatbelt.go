@@ -445,7 +445,10 @@ func (r *Runtime) isRunning(sandboxPath string) bool {
 	return proc.Signal(syscall.Signal(0)) == nil
 }
 
-// killByPID reads the PID file and kills the process.
+// killByPID reads the PID file, sends SIGTERM, waits for exit, and
+// escalates to SIGKILL if the process doesn't die in time. This ensures
+// the process is fully gone before returning, preventing race conditions
+// when --replace destroys and recreates the sandbox directory.
 func (r *Runtime) killByPID(sandboxPath string) {
 	pidPath := filepath.Join(sandboxPath, backendDir, pidFileName)
 	if _, err := os.Stat(pidPath); os.IsNotExist(err) {
@@ -466,9 +469,26 @@ func (r *Runtime) killByPID(sandboxPath string) {
 		return
 	}
 
-	// Kill the entire process group (negative PID)
+	// Send SIGTERM to process group and process
 	_ = syscall.Kill(-pid, syscall.SIGTERM)
 	_ = proc.Signal(syscall.SIGTERM)
+
+	// Wait for process to exit (poll every 100ms, up to 5s)
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if proc.Signal(syscall.Signal(0)) != nil {
+			// Process is gone
+			_ = os.Remove(pidPath)
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	// Still alive — escalate to SIGKILL
+	_ = syscall.Kill(-pid, syscall.SIGKILL)
+	_ = proc.Signal(syscall.SIGKILL)
+	time.Sleep(500 * time.Millisecond)
+
 	_ = os.Remove(pidPath)
 }
 
