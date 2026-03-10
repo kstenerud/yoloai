@@ -579,6 +579,9 @@ func (r *Runtime) buildExecCommand(sandboxPath string, cmd []string) *exec.Cmd {
 	// which stores the Docker-oriented target path (the original host path),
 	// not the seatbelt copy path.
 	cfgPath := filepath.Join(sandboxPath, "runtime-config.json")
+	if _, err := os.Stat(cfgPath); os.IsNotExist(err) {
+		cfgPath = filepath.Join(sandboxPath, "config.json")
+	}
 	if data, err := os.ReadFile(cfgPath); err == nil { //nolint:gosec // G304: path within sandbox dir
 		var raw map[string]interface{}
 		if err := json.Unmarshal(data, &raw); err == nil {
@@ -624,6 +627,9 @@ func (r *Runtime) patchConfigWorkingDir(sandboxPath string, mounts []runtime.Mou
 	}
 
 	cfgPath := filepath.Join(sandboxPath, "runtime-config.json")
+	if _, err := os.Stat(cfgPath); os.IsNotExist(err) {
+		cfgPath = filepath.Join(sandboxPath, "config.json")
+	}
 	data, err := os.ReadFile(cfgPath) //nolint:gosec // G304: path within sandbox dir
 	if err != nil {
 		return err

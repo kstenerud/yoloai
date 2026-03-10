@@ -14,6 +14,7 @@ export YOLOAI_DIR="$SANDBOX_DIR"
 exec >>"$YOLOAI_DIR/log.txt" 2>&1
 
 CONFIG="$YOLOAI_DIR/runtime-config.json"
+[ -f "$CONFIG" ] || CONFIG="$YOLOAI_DIR/config.json"
 TMUX_SOCK="$YOLOAI_DIR/$( [ -d "$YOLOAI_DIR/tmux" ] && echo 'tmux/tmux.sock' || echo 'tmux.sock' )"
 DEBUG=$(jq -r '.debug // false' "$CONFIG")
 debug_log() { [ "$DEBUG" = "true" ] && echo "[debug] $*" || true; }

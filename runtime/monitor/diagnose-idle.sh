@@ -5,6 +5,7 @@ set -uo pipefail
 
 YOLOAI_DIR="${YOLOAI_DIR:-/yoloai}"
 CONFIG="$YOLOAI_DIR/runtime-config.json"
+[ -f "$CONFIG" ] || CONFIG="$YOLOAI_DIR/config.json"
 STATUS="$YOLOAI_DIR/agent-status.json"
 LOG="$YOLOAI_DIR/monitor.log"
 

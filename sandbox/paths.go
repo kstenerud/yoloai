@@ -46,6 +46,30 @@ const (
 	legacyAgentStateDir = "agent-state"
 )
 
+// ReadRuntimeConfig reads runtime-config.json from the given sandbox directory.
+// Falls back to legacy config.json for backward compatibility with older sandboxes.
+func ReadRuntimeConfig(sandboxDir string) ([]byte, error) {
+	path := filepath.Join(sandboxDir, RuntimeConfigFile)
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		path = filepath.Join(sandboxDir, legacyConfigFile)
+	}
+	return os.ReadFile(path) //nolint:gosec // path is sandbox-controlled
+}
+
+// RuntimeConfigPath returns the path to the runtime config file in the given
+// sandbox directory. Returns the new name if it exists, otherwise falls back
+// to the legacy config.json path.
+func RuntimeConfigPath(sandboxDir string) string {
+	path := filepath.Join(sandboxDir, RuntimeConfigFile)
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		legacy := filepath.Join(sandboxDir, legacyConfigFile)
+		if _, err := os.Stat(legacy); err == nil {
+			return legacy
+		}
+	}
+	return path
+}
+
 // safeASCII marks ASCII bytes that do NOT need caret encoding.
 // Safe: alphanumeric, hyphen, underscore, backtick, braces.
 var safeASCII [128]bool

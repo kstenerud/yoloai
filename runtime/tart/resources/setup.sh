@@ -12,6 +12,7 @@ export YOLOAI_DIR="$SHARED_DIR"
 exec > >(tee -a "$YOLOAI_DIR/log.txt") 2>&1
 
 CONFIG="$YOLOAI_DIR/runtime-config.json"
+[ -f "$CONFIG" ] || CONFIG="$YOLOAI_DIR/config.json"
 DEBUG=$(jq -r '.debug // false' "$CONFIG")
 debug_log() { [ "$DEBUG" = "true" ] && echo "[debug] $*" || true; }
 

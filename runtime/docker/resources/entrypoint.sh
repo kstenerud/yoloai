@@ -8,6 +8,7 @@ exec > >(tee -a "$YOLOAI_DIR/log.txt") 2>&1
 
 # Read config (only UID/GID needed in root context; agent config read by inner bash)
 CONFIG="$YOLOAI_DIR/runtime-config.json"
+[ -f "$CONFIG" ] || CONFIG="$YOLOAI_DIR/config.json"
 HOST_UID=$(jq -r '.host_uid' "$CONFIG")
 HOST_GID=$(jq -r '.host_gid' "$CONFIG")
 DEBUG=$(jq -r '.debug // false' "$CONFIG")

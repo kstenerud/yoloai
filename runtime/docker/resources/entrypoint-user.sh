@@ -3,6 +3,7 @@ set -euo pipefail
 
 # Read agent config directly (avoids shell quoting issues passing through gosu)
 CONFIG="$YOLOAI_DIR/runtime-config.json"
+[ -f "$CONFIG" ] || CONFIG="$YOLOAI_DIR/config.json"
 AGENT_COMMAND=$(jq -r .agent_command "$CONFIG")
 STARTUP_DELAY=$(jq -r .startup_delay "$CONFIG")
 READY_PATTERN=$(jq -r .ready_pattern "$CONFIG")

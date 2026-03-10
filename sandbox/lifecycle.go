@@ -454,8 +454,8 @@ func (m *Manager) recreateContainer(ctx context.Context, name string, meta *Meta
 		}
 	}
 
-	// Read existing runtime-config.json
-	configData, err := os.ReadFile(filepath.Join(sandboxDir, RuntimeConfigFile)) //nolint:gosec // path is sandbox-controlled
+	// Read existing runtime-config.json (with legacy config.json fallback)
+	configData, err := ReadRuntimeConfig(sandboxDir)
 	if err != nil {
 		return fmt.Errorf("read runtime-config.json: %w", err)
 	}
@@ -536,8 +536,8 @@ func (m *Manager) recreateContainer(ctx context.Context, name string, meta *Meta
 func (m *Manager) relaunchAgent(ctx context.Context, name string, _ *Meta) error {
 	sandboxDir := Dir(name)
 
-	// Read runtime-config.json to get agent_command
-	configData, err := os.ReadFile(filepath.Join(sandboxDir, RuntimeConfigFile)) //nolint:gosec // path is sandbox-controlled
+	// Read runtime-config.json to get agent_command (with legacy fallback)
+	configData, err := ReadRuntimeConfig(sandboxDir)
 	if err != nil {
 		return fmt.Errorf("read runtime-config.json: %w", err)
 	}
@@ -562,7 +562,7 @@ func (m *Manager) relaunchAgent(ctx context.Context, name string, _ *Meta) error
 func (m *Manager) relaunchAgentWithResume(ctx context.Context, name string, meta *Meta) error {
 	sandboxDir := Dir(name)
 
-	configData, err := os.ReadFile(filepath.Join(sandboxDir, RuntimeConfigFile)) //nolint:gosec // path is sandbox-controlled
+	configData, err := ReadRuntimeConfig(sandboxDir)
 	if err != nil {
 		return fmt.Errorf("read runtime-config.json: %w", err)
 	}
@@ -655,7 +655,7 @@ rm -f /tmp/yoloai-resume.txt
 func (m *Manager) relaunchAgentWithCustomPrompt(ctx context.Context, name string, meta *Meta, promptText string) error {
 	sandboxDir := Dir(name)
 
-	configData, err := os.ReadFile(filepath.Join(sandboxDir, RuntimeConfigFile)) //nolint:gosec // path is sandbox-controlled
+	configData, err := ReadRuntimeConfig(sandboxDir)
 	if err != nil {
 		return fmt.Errorf("read runtime-config.json: %w", err)
 	}
@@ -737,7 +737,7 @@ func (m *Manager) prepareCustomPromptFiles(name string, meta *Meta, promptText s
 	}
 
 	// Patch runtime-config.json: replace agent_command with interactive version
-	configPath := filepath.Join(sandboxDir, RuntimeConfigFile)
+	configPath := RuntimeConfigPath(sandboxDir)
 	configData, err := os.ReadFile(configPath) //nolint:gosec // path is sandbox-controlled
 	if err != nil {
 		return fmt.Errorf("read runtime-config.json: %w", err)
@@ -786,7 +786,7 @@ func (m *Manager) prepareResumeFiles(name string, meta *Meta) error {
 	}
 
 	// Patch runtime-config.json: replace agent_command with interactive version
-	configPath := filepath.Join(sandboxDir, RuntimeConfigFile)
+	configPath := RuntimeConfigPath(sandboxDir)
 	configData, err := os.ReadFile(configPath) //nolint:gosec // path is sandbox-controlled
 	if err != nil {
 		return fmt.Errorf("read runtime-config.json: %w", err)
@@ -875,8 +875,8 @@ const resetNotification = "[yoloai] Workspace has been reset to match the curren
 // sendResetNotification delivers a notification (and optionally the prompt)
 // to the running agent via tmux load-buffer + paste-buffer + send-keys.
 func (m *Manager) sendResetNotification(ctx context.Context, name, sandboxDir string, noPrompt, hasPrompt bool) error {
-	// Read runtime-config.json for submit_sequence
-	configData, err := os.ReadFile(filepath.Join(sandboxDir, RuntimeConfigFile)) //nolint:gosec // path is sandbox-controlled
+	// Read runtime-config.json for submit_sequence (with legacy fallback)
+	configData, err := ReadRuntimeConfig(sandboxDir)
 	if err != nil {
 		return fmt.Errorf("read runtime-config.json: %w", err)
 	}
@@ -931,7 +931,7 @@ func resolveAgentArgs(agentName, profileName string) string {
 
 // patchConfigDebug reads runtime-config.json, sets the debug field, and writes it back.
 func patchConfigDebug(sandboxDir string, debug bool) error {
-	configPath := filepath.Join(sandboxDir, RuntimeConfigFile)
+	configPath := RuntimeConfigPath(sandboxDir)
 	data, err := os.ReadFile(configPath) //nolint:gosec // path is sandbox-controlled
 	if err != nil {
 		return fmt.Errorf("read runtime-config.json for debug patch: %w", err)
@@ -957,7 +957,7 @@ func patchConfigDebug(sandboxDir string, debug bool) error {
 // PatchConfigAllowedDomains reads runtime-config.json, updates the allowed_domains
 // field, and writes it back. Used by network-allow to persist domain changes.
 func PatchConfigAllowedDomains(sandboxDir string, domains []string) error {
-	configPath := filepath.Join(sandboxDir, RuntimeConfigFile)
+	configPath := RuntimeConfigPath(sandboxDir)
 	data, err := os.ReadFile(configPath) //nolint:gosec // path is sandbox-controlled
 	if err != nil {
 		return fmt.Errorf("read runtime-config.json for domain patch: %w", err)

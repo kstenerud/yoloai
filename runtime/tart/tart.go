@@ -627,6 +627,9 @@ func (r *Runtime) runSetupScript(ctx context.Context, vmName, sandboxPath string
 // patchConfigWorkingDir reads runtime-config.json, remaps working_dir for macOS, and writes it back.
 func (r *Runtime) patchConfigWorkingDir(sandboxPath string) error {
 	cfgPath := filepath.Join(sandboxPath, "runtime-config.json")
+	if _, err := os.Stat(cfgPath); os.IsNotExist(err) {
+		cfgPath = filepath.Join(sandboxPath, "config.json")
+	}
 	data, err := os.ReadFile(cfgPath) //nolint:gosec // G304: path within sandbox dir
 	if err != nil {
 		return err
