@@ -37,9 +37,9 @@ func TestBuildRunArgs(t *testing.T) {
 		// External dir — should get its own --dir share
 		{Source: extDir, Target: "/Users/karl/project"},
 		// Sandbox-internal dir — should be skipped (already in yoloai share)
-		{Source: sandboxPath + "/agent-state", Target: "/home/yoloai/.claude/"},
+		{Source: sandboxPath + "/agent-runtime", Target: "/home/yoloai/.claude/"},
 		// File mount — should be skipped (VirtioFS only supports dirs)
-		{Source: sandboxPath + "/config.json", Target: "/yoloai/config.json"},
+		{Source: sandboxPath + "/runtime-config.json", Target: "/yoloai/runtime-config.json"},
 	}
 	args := r.buildRunArgs("yoloai-test", sandboxPath, mounts)
 
@@ -51,8 +51,8 @@ func TestBuildRunArgs(t *testing.T) {
 	assert.Contains(t, args, "m-"+filepath.Base(extDir)+":"+extDir)
 	// Sandbox-internal and file mounts should NOT appear
 	for _, a := range args {
-		assert.NotContains(t, a, "agent-state")
-		assert.NotContains(t, a, "config.json")
+		assert.NotContains(t, a, "agent-runtime")
+		assert.NotContains(t, a, "runtime-config.json")
 	}
 	// VM name must be last argument
 	assert.Equal(t, "yoloai-test", args[len(args)-1])
@@ -105,11 +105,11 @@ func TestBuildNetworkArgs_IsolatedWithPorts(t *testing.T) {
 func TestBuildMountSymlinkCmds(t *testing.T) {
 	mounts := []runtime.MountSpec{
 		{Source: "/Users/karl/project", Target: "/Users/karl/project"},
-		{Source: "/Users/karl/.yoloai/sandboxes/test/agent-state", Target: "/home/admin/.claude/"},
+		{Source: "/Users/karl/.yoloai/sandboxes/test/agent-runtime", Target: "/home/admin/.claude/"},
 	}
 	dirNames := map[string]string{
-		"/Users/karl/project":                            "workdir",
-		"/Users/karl/.yoloai/sandboxes/test/agent-state": "agent-state",
+		"/Users/karl/project":                              "workdir",
+		"/Users/karl/.yoloai/sandboxes/test/agent-runtime": "agent-runtime",
 	}
 
 	cmds := BuildMountSymlinkCmds(mounts, dirNames)
@@ -294,8 +294,8 @@ func TestRemapTargetPath(t *testing.T) {
 		},
 		{
 			name:   "yoloai prefix",
-			input:  "/yoloai/config.json",
-			expect: "/Users/admin/.yoloai/config.json",
+			input:  "/yoloai/runtime-config.json",
+			expect: "/Users/admin/.yoloai/runtime-config.json",
 		},
 		{
 			name:   "other user under /Users",
@@ -337,12 +337,12 @@ func TestPatchConfigWorkingDir_RemapsDockerPath(t *testing.T) {
 	}
 	cfgData, err := json.MarshalIndent(cfg, "", "  ")
 	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, "config.json"), cfgData, 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, "runtime-config.json"), cfgData, 0600))
 
 	r := &Runtime{}
 	require.NoError(t, r.patchConfigWorkingDir(sandboxDir))
 
-	data, err := os.ReadFile(filepath.Join(sandboxDir, "config.json")) //nolint:gosec // test
+	data, err := os.ReadFile(filepath.Join(sandboxDir, "runtime-config.json")) //nolint:gosec // test
 	require.NoError(t, err)
 	var result map[string]interface{}
 	require.NoError(t, json.Unmarshal(data, &result))
@@ -357,12 +357,12 @@ func TestPatchConfigWorkingDir_NoopWhenNoRemap(t *testing.T) {
 	}
 	cfgData, err := json.MarshalIndent(cfg, "", "  ")
 	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, "config.json"), cfgData, 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, "runtime-config.json"), cfgData, 0600))
 
 	r := &Runtime{}
 	require.NoError(t, r.patchConfigWorkingDir(sandboxDir))
 
-	data, err := os.ReadFile(filepath.Join(sandboxDir, "config.json")) //nolint:gosec // test
+	data, err := os.ReadFile(filepath.Join(sandboxDir, "runtime-config.json")) //nolint:gosec // test
 	require.NoError(t, err)
 	var result map[string]interface{}
 	require.NoError(t, json.Unmarshal(data, &result))
@@ -383,13 +383,13 @@ func TestPatchConfigWorkingDir_NoWorkingDirKey(t *testing.T) {
 	}
 	cfgData, err := json.MarshalIndent(cfg, "", "  ")
 	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, "config.json"), cfgData, 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, "runtime-config.json"), cfgData, 0600))
 
 	r := &Runtime{}
 	require.NoError(t, r.patchConfigWorkingDir(sandboxDir))
 
 	// File should remain unchanged
-	data, err := os.ReadFile(filepath.Join(sandboxDir, "config.json")) //nolint:gosec // test
+	data, err := os.ReadFile(filepath.Join(sandboxDir, "runtime-config.json")) //nolint:gosec // test
 	require.NoError(t, err)
 	var result map[string]interface{}
 	require.NoError(t, json.Unmarshal(data, &result))

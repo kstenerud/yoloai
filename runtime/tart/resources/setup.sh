@@ -6,15 +6,16 @@ set -euo pipefail
 
 # Arguments: path to the yoloai shared directory inside the VM
 SHARED_DIR="${1:?usage: setup.sh <shared-dir>}"
+export YOLOAI_DIR="$SHARED_DIR"
 
 # Capture all setup output to log.txt
-exec > >(tee -a "$SHARED_DIR/log.txt") 2>&1
+exec > >(tee -a "$YOLOAI_DIR/log.txt") 2>&1
 
-CONFIG="$SHARED_DIR/config.json"
+CONFIG="$YOLOAI_DIR/runtime-config.json"
 DEBUG=$(jq -r '.debug // false' "$CONFIG")
 debug_log() { [ "$DEBUG" = "true" ] && echo "[debug] $*" || true; }
 
-debug_log "setup starting (shared_dir=$SHARED_DIR)"
+debug_log "setup starting (shared_dir=$YOLOAI_DIR)"
 
 # --- Create symlinks for VirtioFS mounts ---
 debug_log "creating VirtioFS mount symlinks"
@@ -36,7 +37,7 @@ fi
 
 # --- Read secrets and export as env vars ---
 debug_log "reading secrets"
-SECRETS_DIR="$SHARED_DIR/secrets"
+SECRETS_DIR="$YOLOAI_DIR/secrets"
 if [ -d "$SECRETS_DIR" ]; then
     for secret in "$SECRETS_DIR"/*; do
         [ -f "$secret" ] || continue
@@ -60,13 +61,17 @@ set_title() { tmux rename-window -t main "$1" 2>/dev/null || true; }
 debug_log "starting tmux session (tmux_conf=$TMUX_CONF)"
 cd "$WORKING_DIR"
 
+# Locate tmux config (new layout: tmux/tmux.conf, legacy: tmux.conf at root)
+TMUX_CONF_FILE="$YOLOAI_DIR/tmux/tmux.conf"
+[ -f "$TMUX_CONF_FILE" ] || TMUX_CONF_FILE="$YOLOAI_DIR/tmux.conf"
+
 TMUX_ARGS=()
 case "$TMUX_CONF" in
     default+host)
-        TMUX_ARGS=(-f "$SHARED_DIR/tmux.conf")
+        TMUX_ARGS=(-f "$TMUX_CONF_FILE")
         ;;
     default)
-        TMUX_ARGS=(-f "$SHARED_DIR/tmux.conf")
+        TMUX_ARGS=(-f "$TMUX_CONF_FILE")
         ;;
     host)
         if [ -f "$HOME/.tmux.conf" ]; then
@@ -82,7 +87,7 @@ if [ "$TMUX_CONF" = "default+host" ] && [ -f "$HOME/.tmux.conf" ]; then
 fi
 
 tmux set-option -t main remain-on-exit on
-tmux pipe-pane -t main "cat >> $SHARED_DIR/log.txt"
+tmux pipe-pane -t main "cat >> $YOLOAI_DIR/log.txt"
 
 # --- Launch agent inside tmux ---
 debug_log "launching agent: $AGENT_COMMAND"
@@ -144,7 +149,7 @@ fi
 
 # --- Deliver prompt if present ---
 debug_log "checking for prompt file"
-PROMPT_FILE="$SHARED_DIR/prompt.txt"
+PROMPT_FILE="$YOLOAI_DIR/prompt.txt"
 if [ -f "$PROMPT_FILE" ]; then
     debug_log "delivering prompt"
     tmux load-buffer "$PROMPT_FILE"
@@ -157,7 +162,7 @@ if [ -f "$PROMPT_FILE" ]; then
 fi
 
 # --- Status monitor ---
-STATUS_FILE="$SHARED_DIR/status.json"
+STATUS_FILE="$YOLOAI_DIR/agent-status.json"
 write_status() { printf '{"status":"%s","exit_code":%s,"timestamp":%d}\n' "$1" "$2" "$(date +%s)" > "$STATUS_FILE"; }
 # If no prompt was delivered, the agent is waiting for input — start as idle.
 if [ -f "$PROMPT_FILE" ]; then
@@ -168,10 +173,13 @@ else
     set_title "> $SANDBOX_NAME"
 fi
 # Launch Python status monitor. Tart VMs receive the script via shared dir.
+# Locate script (new layout: bin/, legacy: root)
+MONITOR_SCRIPT="$YOLOAI_DIR/bin/status-monitor.py"
+[ -f "$MONITOR_SCRIPT" ] || MONITOR_SCRIPT="$YOLOAI_DIR/status-monitor.py"
 if ! command -v python3 >/dev/null 2>&1; then
     echo "ERROR: Python 3 required for status monitoring. Install Xcode Command Line Tools: xcode-select --install" >&2
 fi
-python3 "$SHARED_DIR/status-monitor.py" "$CONFIG" "$STATUS_FILE" &
+python3 "$MONITOR_SCRIPT" "$CONFIG" "$STATUS_FILE" &
 
 debug_log "setup complete, blocking on tmux wait"
 

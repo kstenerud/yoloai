@@ -14,7 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// createNetworkSandbox creates a sandbox directory with meta.json and config.json
+// createNetworkSandbox creates a sandbox directory with environment.json and runtime-config.json
 // suitable for network command testing. Returns the sandbox directory path.
 func createNetworkSandbox(t *testing.T, name, networkMode string, domains []string) string {
 	t.Helper()
@@ -34,7 +34,7 @@ func createNetworkSandbox(t *testing.T, name, networkMode string, domains []stri
 	}
 	require.NoError(t, sandbox.SaveMeta(sandboxDir, meta))
 
-	// Write minimal config.json that PatchConfigAllowedDomains can parse
+	// Write minimal runtime-config.json that PatchConfigAllowedDomains can parse
 	cfg := map[string]any{
 		"host_uid":        1000,
 		"host_gid":        1000,
@@ -44,7 +44,7 @@ func createNetworkSandbox(t *testing.T, name, networkMode string, domains []stri
 	}
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, "config.json"), data, 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, sandbox.RuntimeConfigFile), data, 0600))
 
 	return sandboxDir
 }
@@ -114,13 +114,13 @@ func TestSaveNetworkAllowlist_UpdatesBothFiles(t *testing.T) {
 
 	require.NoError(t, saveNetworkAllowlist(sandboxDir, meta))
 
-	// Verify meta.json
+	// Verify environment.json
 	reloaded, err := sandbox.LoadMeta(sandboxDir)
 	require.NoError(t, err)
 	assert.Equal(t, []string{"old.example.com", "new.example.com"}, reloaded.NetworkAllow)
 
-	// Verify config.json
-	data, err := os.ReadFile(filepath.Join(sandboxDir, "config.json")) //nolint:gosec // test path
+	// Verify runtime-config.json
+	data, err := os.ReadFile(filepath.Join(sandboxDir, sandbox.RuntimeConfigFile)) //nolint:gosec // test path
 	require.NoError(t, err)
 	var cfg map[string]any
 	require.NoError(t, json.Unmarshal(data, &cfg))
@@ -146,12 +146,12 @@ func TestSaveNetworkAllowlist_EmptyList(t *testing.T) {
 
 func TestSaveNetworkAllowlist_NoConfigJSON(t *testing.T) {
 	sandboxDir := createNetworkSandbox(t, "save-nocfg", "isolated", []string{"x.com"})
-	require.NoError(t, os.Remove(filepath.Join(sandboxDir, "config.json")))
+	require.NoError(t, os.Remove(filepath.Join(sandboxDir, sandbox.RuntimeConfigFile)))
 
 	meta, err := sandbox.LoadMeta(sandboxDir)
 	require.NoError(t, err)
 	meta.NetworkAllow = []string{"y.com"}
 
 	err = saveNetworkAllowlist(sandboxDir, meta)
-	require.Error(t, err, "should fail when config.json is missing")
+	require.Error(t, err, "should fail when runtime-config.json is missing")
 }

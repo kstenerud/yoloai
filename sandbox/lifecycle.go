@@ -20,7 +20,7 @@ const resumePreamble = "You were previously working on the following task and we
 // ResetOptions holds parameters for the reset command.
 type ResetOptions struct {
 	Name      string
-	Clean     bool // also wipe agent-state directory
+	Clean     bool // also wipe agent-runtime directory
 	NoPrompt  bool // skip re-sending prompt after reset
 	NoRestart bool // keep agent running, reset workspace in-place
 	Debug     bool // enable entrypoint debug logging
@@ -320,14 +320,14 @@ func (m *Manager) Reset(ctx context.Context, opts ResetOptions) error {
 		return err
 	}
 
-	// Optionally wipe agent-state
+	// Optionally wipe agent-runtime
 	if opts.Clean {
-		agentStateDir := filepath.Join(sandboxDir, "agent-state")
+		agentStateDir := filepath.Join(sandboxDir, AgentRuntimeDir)
 		if err := os.RemoveAll(agentStateDir); err != nil {
-			return fmt.Errorf("remove agent-state: %w", err)
+			return fmt.Errorf("remove %s: %w", AgentRuntimeDir, err)
 		}
 		if err := os.MkdirAll(agentStateDir, 0750); err != nil {
-			return fmt.Errorf("recreate agent-state: %w", err)
+			return fmt.Errorf("recreate %s: %w", AgentRuntimeDir, err)
 		}
 		// Reset agent_files flag so files get re-seeded on next start
 		sbState, stateErr := LoadSandboxState(sandboxDir)
@@ -337,7 +337,7 @@ func (m *Manager) Reset(ctx context.Context, opts ResetOptions) error {
 		}
 	}
 
-	// Patch config.json with debug flag if requested
+	// Patch runtime-config.json with debug flag if requested
 	if opts.Debug {
 		if err := patchConfigDebug(sandboxDir, true); err != nil {
 			return err
@@ -454,10 +454,10 @@ func (m *Manager) recreateContainer(ctx context.Context, name string, meta *Meta
 		}
 	}
 
-	// Read existing config.json
-	configData, err := os.ReadFile(filepath.Join(sandboxDir, "config.json")) //nolint:gosec // path is sandbox-controlled
+	// Read existing runtime-config.json
+	configData, err := os.ReadFile(filepath.Join(sandboxDir, RuntimeConfigFile)) //nolint:gosec // path is sandbox-controlled
 	if err != nil {
-		return fmt.Errorf("read config.json: %w", err)
+		return fmt.Errorf("read runtime-config.json: %w", err)
 	}
 
 	// Build sandbox state for container launch
@@ -466,10 +466,10 @@ func (m *Manager) recreateContainer(ctx context.Context, name string, meta *Meta
 		return fmt.Errorf("parse workdir: %w", err)
 	}
 
-	// Extract tmux_conf from config.json
+	// Extract tmux_conf from runtime-config.json
 	var cfgJSON containerConfig
 	if err := json.Unmarshal(configData, &cfgJSON); err != nil {
-		return fmt.Errorf("parse config.json: %w", err)
+		return fmt.Errorf("parse runtime-config.json: %w", err)
 	}
 
 	// Rebuild aux dir args from meta
@@ -536,15 +536,15 @@ func (m *Manager) recreateContainer(ctx context.Context, name string, meta *Meta
 func (m *Manager) relaunchAgent(ctx context.Context, name string, _ *Meta) error {
 	sandboxDir := Dir(name)
 
-	// Read config.json to get agent_command
-	configData, err := os.ReadFile(filepath.Join(sandboxDir, "config.json")) //nolint:gosec // path is sandbox-controlled
+	// Read runtime-config.json to get agent_command
+	configData, err := os.ReadFile(filepath.Join(sandboxDir, RuntimeConfigFile)) //nolint:gosec // path is sandbox-controlled
 	if err != nil {
-		return fmt.Errorf("read config.json: %w", err)
+		return fmt.Errorf("read runtime-config.json: %w", err)
 	}
 
 	var cfg containerConfig
 	if err := json.Unmarshal(configData, &cfg); err != nil {
-		return fmt.Errorf("parse config.json: %w", err)
+		return fmt.Errorf("parse runtime-config.json: %w", err)
 	}
 
 	_, err = execInContainer(ctx, m.runtime, InstanceName(name), []string{
@@ -562,14 +562,14 @@ func (m *Manager) relaunchAgent(ctx context.Context, name string, _ *Meta) error
 func (m *Manager) relaunchAgentWithResume(ctx context.Context, name string, meta *Meta) error {
 	sandboxDir := Dir(name)
 
-	configData, err := os.ReadFile(filepath.Join(sandboxDir, "config.json")) //nolint:gosec // path is sandbox-controlled
+	configData, err := os.ReadFile(filepath.Join(sandboxDir, RuntimeConfigFile)) //nolint:gosec // path is sandbox-controlled
 	if err != nil {
-		return fmt.Errorf("read config.json: %w", err)
+		return fmt.Errorf("read runtime-config.json: %w", err)
 	}
 
 	var cfg containerConfig
 	if err := json.Unmarshal(configData, &cfg); err != nil {
-		return fmt.Errorf("parse config.json: %w", err)
+		return fmt.Errorf("parse runtime-config.json: %w", err)
 	}
 
 	agentDef := agent.GetAgent(meta.Agent)
@@ -606,7 +606,7 @@ func (m *Manager) sendResumePrompt(ctx context.Context, name, sandboxDir string,
 	resumeText := resumePreamble + string(promptData)
 
 	// Build a wait-for-ready + deliver script.
-	// Uses ready_pattern or startup_delay from config.json, following
+	// Uses ready_pattern or startup_delay from runtime-config.json, following
 	// the same logic as the entrypoint.
 	var waitCmd string
 	switch {
@@ -630,7 +630,7 @@ done`, cfg.ReadyPattern)
 
 	// Write active status to status.json AFTER prompt delivery, not before.
 	// This fixes the race where status shows "active" during the readiness wait.
-	statusWrite := `printf '{"status":"active","timestamp":%d}' "$(date +%%s)" > /yoloai/status.json`
+	statusWrite := `printf '{"status":"active","timestamp":%d}' "$(date +%%s)" > "${YOLOAI_DIR:-/yoloai}/agent-status.json"`
 
 	script := fmt.Sprintf(`%s
 printf '%%s' "$1" > /tmp/yoloai-resume.txt
@@ -655,14 +655,14 @@ rm -f /tmp/yoloai-resume.txt
 func (m *Manager) relaunchAgentWithCustomPrompt(ctx context.Context, name string, meta *Meta, promptText string) error {
 	sandboxDir := Dir(name)
 
-	configData, err := os.ReadFile(filepath.Join(sandboxDir, "config.json")) //nolint:gosec // path is sandbox-controlled
+	configData, err := os.ReadFile(filepath.Join(sandboxDir, RuntimeConfigFile)) //nolint:gosec // path is sandbox-controlled
 	if err != nil {
-		return fmt.Errorf("read config.json: %w", err)
+		return fmt.Errorf("read runtime-config.json: %w", err)
 	}
 
 	var cfg containerConfig
 	if err := json.Unmarshal(configData, &cfg); err != nil {
-		return fmt.Errorf("parse config.json: %w", err)
+		return fmt.Errorf("parse runtime-config.json: %w", err)
 	}
 
 	agentDef := agent.GetAgent(meta.Agent)
@@ -706,7 +706,7 @@ done`, cfg.ReadyPattern)
 	}
 
 	// Write active status to status.json AFTER prompt delivery, not before.
-	statusWrite := `printf '{"status":"active","timestamp":%d}' "$(date +%%s)" > /yoloai/status.json`
+	statusWrite := `printf '{"status":"active","timestamp":%d}' "$(date +%%s)" > "${YOLOAI_DIR:-/yoloai}/agent-status.json"`
 
 	script := fmt.Sprintf(`%s
 printf '%%s' "$1" > /tmp/yoloai-custom-prompt.txt
@@ -727,7 +727,7 @@ rm -f /tmp/yoloai-custom-prompt.txt
 }
 
 // prepareCustomPromptFiles writes the resume-prompt.txt (custom prompt, no preamble)
-// and patches config.json for interactive command mode.
+// and patches runtime-config.json for interactive command mode.
 func (m *Manager) prepareCustomPromptFiles(name string, meta *Meta, promptText string) error {
 	sandboxDir := Dir(name)
 
@@ -736,16 +736,16 @@ func (m *Manager) prepareCustomPromptFiles(name string, meta *Meta, promptText s
 		return fmt.Errorf("write resume-prompt.txt: %w", err)
 	}
 
-	// Patch config.json: replace agent_command with interactive version
-	configPath := filepath.Join(sandboxDir, "config.json")
+	// Patch runtime-config.json: replace agent_command with interactive version
+	configPath := filepath.Join(sandboxDir, RuntimeConfigFile)
 	configData, err := os.ReadFile(configPath) //nolint:gosec // path is sandbox-controlled
 	if err != nil {
-		return fmt.Errorf("read config.json: %w", err)
+		return fmt.Errorf("read runtime-config.json: %w", err)
 	}
 
 	var cfg containerConfig
 	if err := json.Unmarshal(configData, &cfg); err != nil {
-		return fmt.Errorf("parse config.json: %w", err)
+		return fmt.Errorf("parse runtime-config.json: %w", err)
 	}
 
 	agentDef := agent.GetAgent(meta.Agent)
@@ -758,17 +758,17 @@ func (m *Manager) prepareCustomPromptFiles(name string, meta *Meta, promptText s
 
 	updated, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
-		return fmt.Errorf("marshal config.json: %w", err)
+		return fmt.Errorf("marshal runtime-config.json: %w", err)
 	}
 
 	if err := os.WriteFile(configPath, updated, 0600); err != nil {
-		return fmt.Errorf("write config.json: %w", err)
+		return fmt.Errorf("write runtime-config.json: %w", err)
 	}
 
 	return nil
 }
 
-// prepareResumeFiles writes the resume-prompt.txt and patches config.json
+// prepareResumeFiles writes the resume-prompt.txt and patches runtime-config.json
 // for resume mode (interactive command).
 func (m *Manager) prepareResumeFiles(name string, meta *Meta) error {
 	sandboxDir := Dir(name)
@@ -785,16 +785,16 @@ func (m *Manager) prepareResumeFiles(name string, meta *Meta) error {
 		return fmt.Errorf("write resume-prompt.txt: %w", err)
 	}
 
-	// Patch config.json: replace agent_command with interactive version
-	configPath := filepath.Join(sandboxDir, "config.json")
+	// Patch runtime-config.json: replace agent_command with interactive version
+	configPath := filepath.Join(sandboxDir, RuntimeConfigFile)
 	configData, err := os.ReadFile(configPath) //nolint:gosec // path is sandbox-controlled
 	if err != nil {
-		return fmt.Errorf("read config.json: %w", err)
+		return fmt.Errorf("read runtime-config.json: %w", err)
 	}
 
 	var cfg containerConfig
 	if err := json.Unmarshal(configData, &cfg); err != nil {
-		return fmt.Errorf("parse config.json: %w", err)
+		return fmt.Errorf("parse runtime-config.json: %w", err)
 	}
 
 	agentDef := agent.GetAgent(meta.Agent)
@@ -807,11 +807,11 @@ func (m *Manager) prepareResumeFiles(name string, meta *Meta) error {
 
 	updated, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
-		return fmt.Errorf("marshal config.json: %w", err)
+		return fmt.Errorf("marshal runtime-config.json: %w", err)
 	}
 
 	if err := os.WriteFile(configPath, updated, 0600); err != nil {
-		return fmt.Errorf("write config.json: %w", err)
+		return fmt.Errorf("write runtime-config.json: %w", err)
 	}
 
 	return nil
@@ -875,15 +875,15 @@ const resetNotification = "[yoloai] Workspace has been reset to match the curren
 // sendResetNotification delivers a notification (and optionally the prompt)
 // to the running agent via tmux load-buffer + paste-buffer + send-keys.
 func (m *Manager) sendResetNotification(ctx context.Context, name, sandboxDir string, noPrompt, hasPrompt bool) error {
-	// Read config.json for submit_sequence
-	configData, err := os.ReadFile(filepath.Join(sandboxDir, "config.json")) //nolint:gosec // path is sandbox-controlled
+	// Read runtime-config.json for submit_sequence
+	configData, err := os.ReadFile(filepath.Join(sandboxDir, RuntimeConfigFile)) //nolint:gosec // path is sandbox-controlled
 	if err != nil {
-		return fmt.Errorf("read config.json: %w", err)
+		return fmt.Errorf("read runtime-config.json: %w", err)
 	}
 
 	var cfg containerConfig
 	if err := json.Unmarshal(configData, &cfg); err != nil {
-		return fmt.Errorf("parse config.json: %w", err)
+		return fmt.Errorf("parse runtime-config.json: %w", err)
 	}
 
 	// Build script to deliver notification via tmux.
@@ -929,53 +929,53 @@ func resolveAgentArgs(agentName, profileName string) string {
 	return cfg.AgentArgs[agentName]
 }
 
-// patchConfigDebug reads config.json, sets the debug field, and writes it back.
+// patchConfigDebug reads runtime-config.json, sets the debug field, and writes it back.
 func patchConfigDebug(sandboxDir string, debug bool) error {
-	configPath := filepath.Join(sandboxDir, "config.json")
+	configPath := filepath.Join(sandboxDir, RuntimeConfigFile)
 	data, err := os.ReadFile(configPath) //nolint:gosec // path is sandbox-controlled
 	if err != nil {
-		return fmt.Errorf("read config.json for debug patch: %w", err)
+		return fmt.Errorf("read runtime-config.json for debug patch: %w", err)
 	}
 
 	var cfg containerConfig
 	if err := json.Unmarshal(data, &cfg); err != nil {
-		return fmt.Errorf("parse config.json for debug patch: %w", err)
+		return fmt.Errorf("parse runtime-config.json for debug patch: %w", err)
 	}
 
 	cfg.Debug = debug
 	updated, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
-		return fmt.Errorf("marshal config.json for debug patch: %w", err)
+		return fmt.Errorf("marshal runtime-config.json for debug patch: %w", err)
 	}
 
 	if err := os.WriteFile(configPath, updated, 0600); err != nil {
-		return fmt.Errorf("write config.json for debug patch: %w", err)
+		return fmt.Errorf("write runtime-config.json for debug patch: %w", err)
 	}
 	return nil
 }
 
-// PatchConfigAllowedDomains reads config.json, updates the allowed_domains
+// PatchConfigAllowedDomains reads runtime-config.json, updates the allowed_domains
 // field, and writes it back. Used by network-allow to persist domain changes.
 func PatchConfigAllowedDomains(sandboxDir string, domains []string) error {
-	configPath := filepath.Join(sandboxDir, "config.json")
+	configPath := filepath.Join(sandboxDir, RuntimeConfigFile)
 	data, err := os.ReadFile(configPath) //nolint:gosec // path is sandbox-controlled
 	if err != nil {
-		return fmt.Errorf("read config.json for domain patch: %w", err)
+		return fmt.Errorf("read runtime-config.json for domain patch: %w", err)
 	}
 
 	var cfg containerConfig
 	if err := json.Unmarshal(data, &cfg); err != nil {
-		return fmt.Errorf("parse config.json for domain patch: %w", err)
+		return fmt.Errorf("parse runtime-config.json for domain patch: %w", err)
 	}
 
 	cfg.AllowedDomains = domains
 	updated, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
-		return fmt.Errorf("marshal config.json for domain patch: %w", err)
+		return fmt.Errorf("marshal runtime-config.json for domain patch: %w", err)
 	}
 
 	if err := os.WriteFile(configPath, updated, 0600); err != nil {
-		return fmt.Errorf("write config.json for domain patch: %w", err)
+		return fmt.Errorf("write runtime-config.json for domain patch: %w", err)
 	}
 	return nil
 }

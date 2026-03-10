@@ -71,7 +71,7 @@ Dependency direction: `cmd/yoloai` → `cli` → `sandbox` + `runtime`; `sandbox
 | `start.go` | `yoloai start` — start a stopped sandbox (recreates container if removed). |
 | `stop.go` | `yoloai stop` — stop a running sandbox. |
 | `envname.go` | `resolveName()` — resolves sandbox name from args or `YOLOAI_SANDBOX` env var. |
-| `helpers.go` | `withRuntime()`, `withManager()` — create Runtime / Manager for command handlers. `resolveBackend()` reads `--backend` flag (on new/build/setup). `resolveBackendForSandbox()` reads `meta.json`. `resolveBackendFromConfig()` reads config default. |
+| `helpers.go` | `withRuntime()`, `withManager()` — create Runtime / Manager for command handlers. `resolveBackend()` reads `--backend` flag (on new/build/setup). `resolveBackendForSandbox()` reads `environment.json`. `resolveBackendFromConfig()` reads config default. |
 | `x.go` | `yoloai x` — extension runner. Loads user-defined extension YAML files, builds Cobra commands dynamically. |
 | `x_test.go` | Tests for extension runner. |
 | `envname_test.go` | Tests for name resolution. |
@@ -144,12 +144,12 @@ Dependency direction: `cmd/yoloai` → `cli` → `sandbox` + `runtime`; `sandbox
 | `diff.go` | `GenerateDiff()`, `GenerateDiffStat()`, `GenerateCommitDiff()`, `ListCommitsWithStats()` — diff generation for `:copy`, `:overlay`, and `:rw` modes. |
 | `apply.go` | `GeneratePatch()`, `CheckPatch()`, `ApplyPatch()` — squash apply via `git apply`. `GenerateFormatPatch()`, `ApplyFormatPatch()` — per-commit apply via `git am`. `ListCommitsBeyondBaseline()`, `AdvanceBaseline()`, `AdvanceBaselineTo()`. |
 | `inspect.go` | `DetectStatus()` — reads bind-mounted status file written by in-container monitor; falls back to exec-based tmux query for old sandboxes. `InspectSandbox()`, `ListSandboxes()` — metadata + live status. `execInContainer()` helper uses `runtime.Exec()`. |
-| `meta.go` | `Meta` / `WorkdirMeta` structs, `SaveMeta()` / `LoadMeta()` — sandbox metadata persistence as `meta.json`. `Meta.Backend` records which runtime backend was used to create the sandbox. |
-| `paths.go` | `EncodePath()` / `DecodePath()` — caret encoding for filesystem-safe names. `InstanceName()` (and deprecated alias `ContainerName()`), `Dir()`, `WorkDir()`, `RequireSandboxDir()`. `OverlayUpperDir()` / `OverlayOvlworkDir()` for `:overlay` mount paths. |
+| `meta.go` | `Meta` / `WorkdirMeta` structs, `SaveMeta()` / `LoadMeta()` — sandbox metadata persistence as `environment.json` (legacy: `meta.json`). `Meta.Backend` records which runtime backend was used to create the sandbox. |
+| `paths.go` | `EncodePath()` / `DecodePath()` — caret encoding for filesystem-safe names. `InstanceName()` (and deprecated alias `ContainerName()`), `Dir()`, `WorkDir()`, `RequireSandboxDir()`. `OverlayUpperDir()` / `OverlayOvlworkDir()` for `:overlay` mount paths. Centralized filename constants (`EnvironmentFile`, `RuntimeConfigFile`, `AgentStatusFile`, `SandboxStateFile`, etc.). |
 | `parse.go` | `ParseDirArg()` — parses `path:copy`, `path:overlay`, `path:rw`, `path:force` suffixes into `DirArg`. |
 | `context.go` | `GenerateContext()` — builds markdown description of sandbox environment (dirs, network, resources). `WriteContextFiles()` — writes `context.md` to sandbox dir and inlines context into agent instruction file (e.g., `CLAUDE.md`). |
-| `sandbox_state.go` | `SandboxState` struct, `LoadSandboxState()`, `SaveSandboxState()` — per-sandbox runtime state (`state.json` alongside `meta.json`). Tracks `agent_files_initialized`. |
-| `agent_files.go` | `copyAgentFiles()` — copies files from host into sandbox `agent-state/` per `agent_files` config. Handles string/list forms, exclusion patterns, first-run tracking via `SandboxState`. |
+| `sandbox_state.go` | `SandboxState` struct, `LoadSandboxState()`, `SaveSandboxState()` — per-sandbox runtime state (`sandbox-state.json`, legacy: `state.json`). Tracks `agent_files_initialized`. |
+| `agent_files.go` | `copyAgentFiles()` — copies files from host into sandbox `agent-runtime/` per `agent_files` config. Handles string/list forms, exclusion patterns, first-run tracking via `SandboxState`. |
 | `profile_build.go` | Profile image building — Docker-specific logic for building `yoloai-<profile>` images from profile Dockerfiles. Staleness detection. |
 | `prune.go` | `PruneTempFiles()` — cleans up stale `/tmp/yoloai-*` temporary directories. |
 | `keychain_darwin.go` | macOS Keychain integration — reads credentials via `security find-generic-password` when seed files are missing. |
@@ -165,10 +165,10 @@ Dependency direction: `cmd/yoloai` → `cli` → `sandbox` + `runtime`; `sandbox
 Central orchestrator. Holds a `runtime.Runtime`, backend name, logger, and I/O streams. All sandbox operations go through it: `Create()`, `Start()`, `Stop()`, `Destroy()`, `Reset()`, `EnsureSetup()`. The backend name is stored so it can be persisted in `Meta` at sandbox creation time.
 
 ### `sandbox.Meta` / `sandbox.WorkdirMeta` / `sandbox.DirMeta`
-Persisted as `meta.json` in each sandbox dir. Records creation-time state: agent, model, profile, workdir path/mode/baseline SHA, auxiliary directories (via `Directories` field), network mode/allow, ports, resources, mounts, backend. Each directory (workdir and aux dirs) has its own `DirMeta` with host path, mount path, mode, and baseline SHA.
+Persisted as `environment.json` (legacy: `meta.json`) in each sandbox dir. Records creation-time state: agent, model, profile, workdir path/mode/baseline SHA, auxiliary directories (via `Directories` field), network mode/allow, ports, resources, mounts, backend. Each directory (workdir and aux dirs) has its own `DirMeta` with host path, mount path, mode, and baseline SHA.
 
 ### `sandbox.SandboxState`
-Per-sandbox runtime state persisted as `state.json` alongside `meta.json`. Tracks mutable state like `agent_files_initialized` (boolean). Separate from `Meta` which is immutable after creation.
+Per-sandbox runtime state persisted as `sandbox-state.json` (legacy: `state.json`). Tracks mutable state like `agent_files_initialized` (boolean). Separate from `Meta` which is immutable after creation.
 
 ### `sandbox.AgentFilesConfig`
 Parsed from `agent_files` in config. Two forms: string (base directory) or list (explicit file paths). Used by `copyAgentFiles()` during sandbox creation.
@@ -254,7 +254,7 @@ newNewCmd (cli/commands.go)
           → :overlay dirs: createOverlayDirs (upper/ovlwork in sandbox state)
           → copySeedFiles → copyAgentFiles → ensureContainerSettings
           → readPrompt → resolveModel → buildAgentCommand
-          → SaveMeta (meta.json) → SaveSandboxState (state.json) → write prompt.txt, log.txt, config.json
+          → SaveMeta (environment.json) → SaveSandboxState (sandbox-state.json) → write prompt.txt, log.txt, runtime-config.json
           → WriteContextFiles (context.md + agent instruction file)
       → launchContainer:
           createSecretsDir (config env vars + API keys from host env)
@@ -287,7 +287,7 @@ applySquash (cli/apply.go)
     → CheckPatch: git apply --check
     → Confirm with user
     → ApplyPatch: git apply
-    → AdvanceBaseline: update meta.json baseline SHA to HEAD
+    → AdvanceBaseline: update environment.json baseline SHA to HEAD
 ```
 
 **Selective (commit refs):**
@@ -307,10 +307,10 @@ Overlay mode uses Linux kernel overlayfs for instant setup with the diff/apply w
 ```
 create.go:
   → createOverlayDirs: create upper/ovlwork dirs in sandbox state
-  → buildMounts: build overlay mount configs for config.json, add CAP_SYS_ADMIN
+  → buildMounts: build overlay mount configs for runtime-config.json, add CAP_SYS_ADMIN
 
 entrypoint.sh (Docker container):
-  → root phase: mount overlayfs using config.json overlay_mounts
+  → root phase: mount overlayfs using runtime-config.json overlay_mounts
   → user phase: git baseline (git init + commit) in mounted directories
 
 diff.go / apply.go:
@@ -328,7 +328,7 @@ Manager.Start (sandbox/lifecycle.go)
   → StatusActive: no-op
   → StatusDone/Failed: relaunchAgent via tmux respawn-pane
   → StatusStopped: runtime.Start
-  → StatusRemoved: recreateContainer (rebuild state from meta.json via runtime.Create + runtime.Start)
+  → StatusRemoved: recreateContainer (rebuild state from environment.json via runtime.Create + runtime.Start)
 ```
 
 ## Host Directory Layout
@@ -347,16 +347,30 @@ Manager.Start (sandbox/lifecycle.go)
 │       └── .last-build-checksum  # Tracks last image build inputs
 ├── sandboxes/
 │   └── <name>/
-│       ├── meta.json        # Sandbox metadata (agent, workdir, baseline SHA)
-│       ├── state.json       # Per-sandbox runtime state (agent_files_initialized, etc.)
-│       ├── config.json      # Container runtime config (agent cmd, tmux settings)
-│       ├── context.md       # Sandbox environment description (dirs, network, resources)
-│       ├── prompt.txt       # Agent prompt (if provided)
-│       ├── log.txt          # Session log
-│       ├── status.json      # Agent status (written by in-container monitor)
-│       ├── agent-state/     # Mounted at agent's StateDir (e.g., /home/yoloai/.claude/, /home/yoloai/.gemini/)
-│       ├── files/           # Bidirectional file exchange (mounted at /yoloai/files/)
-│       ├── home-seed/       # Files mounted individually into /home/yoloai/
+│       ├── environment.json   # Sandbox metadata (agent, workdir, baseline SHA)
+│       ├── sandbox-state.json # Per-sandbox runtime state (agent_files_initialized, etc.)
+│       ├── runtime-config.json # Runtime config (agent cmd, tmux settings)
+│       ├── agent-status.json  # Agent status (written by status monitor)
+│       ├── context.md         # Sandbox environment description (dirs, network, resources)
+│       ├── prompt.txt         # Agent prompt (if provided)
+│       ├── log.txt            # Session log
+│       ├── monitor.log        # Status monitor debug log
+│       ├── bin/               # Executable scripts
+│       │   ├── entrypoint.sh  # Root entrypoint (Docker: baked in image)
+│       │   ├── status-monitor.py # Idle detection monitor
+│       │   └── diagnose-idle.sh  # Idle detection diagnostic
+│       ├── tmux/              # Tmux runtime
+│       │   ├── tmux.conf      # Tmux configuration
+│       │   └── tmux.sock      # Per-sandbox tmux socket (seatbelt)
+│       ├── backend/           # Backend-specific files
+│       │   ├── instance.json  # Backend instance config
+│       │   ├── profile.sb     # SBPL sandbox profile (seatbelt)
+│       │   ├── pid            # Process ID file
+│       │   └── stderr.log     # Backend stderr log
+│       ├── agent-runtime/     # Mounted at agent's StateDir (e.g., ~/.claude/, ~/.gemini/)
+│       ├── files/             # Bidirectional file exchange (shared files directory)
+│       ├── home-seed/         # Files symlinked into sandbox HOME
+│       ├── home/              # Sandbox HOME directory (seatbelt)
 │       └── work/
 │           └── <caret-encoded-path>/  # Copy of workdir with internal git repo
 └── cache/                   # (future) Cache directory
@@ -405,7 +419,7 @@ Manager.Start (sandbox/lifecycle.go)
 4. Runtime creation: `runtime.Create()` in `runtime/docker/docker.go`
 
 **Change sandbox status detection:**
-1. `DetectStatus()` in `sandbox/inspect.go` — reads status file from sandbox dir (written by in-container monitor), falls back to `runtime.Exec()` for old sandboxes
+1. `DetectStatus()` in `sandbox/inspect.go` — reads `agent-status.json` from sandbox dir (written by status monitor), falls back to legacy `status.json` then `runtime.Exec()` for old sandboxes
 2. Status constants are in the same file
 
 **Change config handling:**
@@ -421,7 +435,7 @@ Manager.Start (sandbox/lifecycle.go)
 1. Create `runtime/<name>/` package
 2. Implement the `runtime.Runtime` interface
 3. Register in `cli/helpers.go:newRuntime()` — switch on the backend name resolved by `resolveBackend()`
-4. Backend is selectable via `--backend` flag (on new/build/setup) or `backend` config. Lifecycle commands read backend from sandbox `meta.json`.
+4. Backend is selectable via `--backend` flag (on new/build/setup) or `backend` config. Lifecycle commands read backend from sandbox `environment.json`.
 
 ## Testing
 

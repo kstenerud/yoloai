@@ -745,7 +745,10 @@ func findSandboxesWithProfile(profileName string) []string {
 		if !e.IsDir() {
 			continue
 		}
-		metaPath := filepath.Join(sandboxesDir, e.Name(), "meta.json")
+		metaPath := filepath.Join(sandboxesDir, e.Name(), sandbox.EnvironmentFile)
+		if _, statErr := os.Stat(metaPath); os.IsNotExist(statErr) {
+			metaPath = filepath.Join(sandboxesDir, e.Name(), "meta.json") // legacy fallback
+		}
 		data, readErr := os.ReadFile(metaPath) //nolint:gosec // G304: path is from sandboxes dir
 		if readErr != nil {
 			continue

@@ -58,7 +58,7 @@ func TestMeta_OmitEmptyFields(t *testing.T) {
 	err := SaveMeta(dir, meta)
 	require.NoError(t, err)
 
-	data, err := os.ReadFile(filepath.Join(dir, "meta.json")) //nolint:gosec // test file in temp dir
+	data, err := os.ReadFile(filepath.Join(dir, EnvironmentFile)) //nolint:gosec // test file in temp dir
 	require.NoError(t, err)
 
 	var raw map[string]json.RawMessage
@@ -172,7 +172,7 @@ func TestMeta_ResourcesOmittedWhenNil(t *testing.T) {
 	err := SaveMeta(dir, meta)
 	require.NoError(t, err)
 
-	data, err := os.ReadFile(filepath.Join(dir, "meta.json")) //nolint:gosec
+	data, err := os.ReadFile(filepath.Join(dir, EnvironmentFile)) //nolint:gosec
 	require.NoError(t, err)
 
 	var raw map[string]json.RawMessage

@@ -20,14 +20,23 @@ import (
 )
 
 const (
+	// backendDir holds backend-specific files within the sandbox directory.
+	backendDir = "backend"
+
+	// binDir holds executable scripts within the sandbox directory.
+	binDir = "bin"
+
+	// tmuxDir holds tmux config and sockets within the sandbox directory.
+	tmuxDir = "tmux"
+
 	// pidFileName stores the sandbox-exec process ID.
-	pidFileName = "seatbelt.pid"
+	pidFileName = "pid"
 
 	// processLogFileName captures sandbox-exec stderr for debugging.
-	processLogFileName = "seatbelt.log"
+	processLogFileName = "stderr.log"
 
 	// seatbeltConfigFileName stores the instance config for Start to use.
-	seatbeltConfigFileName = "seatbelt-instance.json"
+	seatbeltConfigFileName = "instance.json"
 
 	// profileFileName is the generated SBPL profile.
 	profileFileName = "profile.sb"
@@ -77,12 +86,17 @@ func New(_ context.Context) (*Runtime, error) {
 func (r *Runtime) Create(_ context.Context, cfg runtime.InstanceConfig) error {
 	sandboxPath := filepath.Join(r.sandboxDir, sandboxName(cfg.Name))
 
+	// Ensure backend subdirectory exists
+	if err := os.MkdirAll(filepath.Join(sandboxPath, backendDir), 0750); err != nil {
+		return fmt.Errorf("create backend dir: %w", err)
+	}
+
 	// Save instance config so Start can read it
 	cfgData, err := json.Marshal(cfg)
 	if err != nil {
 		return fmt.Errorf("marshal instance config: %w", err)
 	}
-	if err := os.WriteFile(filepath.Join(sandboxPath, seatbeltConfigFileName), cfgData, 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(sandboxPath, backendDir, seatbeltConfigFileName), cfgData, 0600); err != nil {
 		return fmt.Errorf("write instance config: %w", err)
 	}
 
@@ -107,9 +121,9 @@ func (r *Runtime) Create(_ context.Context, cfg runtime.InstanceConfig) error {
 		}
 	}
 
-	// Patch working_dir in config.json for :copy mode.
+	// Patch working_dir in runtime-config.json for :copy mode.
 	// When the workdir is a copy, the actual files are in
-	// <sandboxDir>/work/<encoded>/ but config.json still has the original
+	// <sandboxDir>/work/<encoded>/ but runtime-config.json still has the original
 	// host path. Patch it to point at the copy.
 	if err := r.patchConfigWorkingDir(sandboxPath, cfg.Mounts); err != nil {
 		return fmt.Errorf("patch config working dir: %w", err)
@@ -117,24 +131,25 @@ func (r *Runtime) Create(_ context.Context, cfg runtime.InstanceConfig) error {
 
 	// Generate SBPL profile
 	profile := GenerateProfile(cfg, sandboxPath, config.HomeDir())
-	if err := os.WriteFile(filepath.Join(sandboxPath, profileFileName), []byte(profile), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(sandboxPath, backendDir, profileFileName), []byte(profile), 0600); err != nil {
 		return fmt.Errorf("write SBPL profile: %w", err)
 	}
 
-	// Write entrypoint, status monitor, and tmux config
-	entrypointPath := filepath.Join(sandboxPath, "entrypoint.sh")
+	// Write entrypoint and monitor scripts to bin/
+	entrypointPath := filepath.Join(sandboxPath, binDir, "entrypoint.sh")
 	if err := os.WriteFile(entrypointPath, embeddedEntrypoint, 0755); err != nil { //nolint:gosec // G306: script needs exec permission
 		return fmt.Errorf("write entrypoint.sh: %w", err)
 	}
-	monitorPath := filepath.Join(sandboxPath, "status-monitor.py")
+	monitorPath := filepath.Join(sandboxPath, binDir, "status-monitor.py")
 	if err := os.WriteFile(monitorPath, monitor.Script(), 0644); err != nil { //nolint:gosec // G306: script content, not user input
 		return fmt.Errorf("write status-monitor.py: %w", err)
 	}
-	diagPath := filepath.Join(sandboxPath, "diagnose-idle.sh")
+	diagPath := filepath.Join(sandboxPath, binDir, "diagnose-idle.sh")
 	if err := os.WriteFile(diagPath, monitor.DiagnoseScript(), 0755); err != nil { //nolint:gosec // G306: script needs exec permission
 		return fmt.Errorf("write diagnose-idle.sh: %w", err)
 	}
-	tmuxConfPath := filepath.Join(sandboxPath, "tmux.conf")
+	// Write tmux config to tmux/
+	tmuxConfPath := filepath.Join(sandboxPath, tmuxDir, "tmux.conf")
 	if err := os.WriteFile(tmuxConfPath, embeddedTmuxConf, 0600); err != nil {
 		return fmt.Errorf("write tmux.conf: %w", err)
 	}
@@ -147,7 +162,7 @@ func (r *Runtime) Create(_ context.Context, cfg runtime.InstanceConfig) error {
 	}
 	if len(symlinks) > 0 {
 		manifest := strings.Join(symlinks, "\n") + "\n"
-		if err := os.WriteFile(filepath.Join(sandboxPath, symlinkManifestName), []byte(manifest), 0600); err != nil {
+		if err := os.WriteFile(filepath.Join(sandboxPath, backendDir, symlinkManifestName), []byte(manifest), 0600); err != nil {
 			return fmt.Errorf("write symlink manifest: %w", err)
 		}
 	}
@@ -167,7 +182,7 @@ func (r *Runtime) Start(ctx context.Context, name string) error {
 
 	// Load instance config saved by Create
 	var cfg runtime.InstanceConfig
-	cfgPath := filepath.Join(sandboxPath, seatbeltConfigFileName)
+	cfgPath := filepath.Join(sandboxPath, backendDir, seatbeltConfigFileName)
 	cfgData, err := os.ReadFile(cfgPath) //nolint:gosec // G304: path within sandbox dir
 	if err != nil {
 		return fmt.Errorf("read instance config: %w", err)
@@ -177,15 +192,15 @@ func (r *Runtime) Start(ctx context.Context, name string) error {
 	}
 
 	// Open log file for stderr capture
-	logPath := filepath.Join(sandboxPath, processLogFileName)
+	logPath := filepath.Join(sandboxPath, backendDir, processLogFileName)
 	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600) //nolint:gosec // G304: sandboxPath is ~/.yoloai/sandboxes/<name>
 	if err != nil {
 		return fmt.Errorf("open log: %w", err)
 	}
 
 	// Launch sandbox-exec with the SBPL profile running the entrypoint
-	profilePath := filepath.Join(sandboxPath, profileFileName)
-	entrypointPath := filepath.Join(sandboxPath, "entrypoint.sh")
+	profilePath := filepath.Join(sandboxPath, backendDir, profileFileName)
+	entrypointPath := filepath.Join(sandboxPath, binDir, "entrypoint.sh")
 
 	cmd := exec.Command(r.sandboxExecBin, "-f", profilePath, "bash", entrypointPath, sandboxPath) //nolint:gosec // G204: paths are constructed from validated config
 	cmd.Env = sandboxEnv()
@@ -205,7 +220,7 @@ func (r *Runtime) Start(ctx context.Context, name string) error {
 	// reference a dead process. This is handled by: (1) the waitForTmux loop
 	// below detects early process exit via procDone, and (2) killByPID and
 	// isRunning gracefully handle stale PID files.
-	pidPath := filepath.Join(sandboxPath, pidFileName)
+	pidPath := filepath.Join(sandboxPath, backendDir, pidFileName)
 	if err := os.WriteFile(pidPath, []byte(strconv.Itoa(cmd.Process.Pid)), 0600); err != nil {
 		_ = cmd.Process.Kill()
 		_ = cmd.Wait()
@@ -237,8 +252,11 @@ func (r *Runtime) Start(ctx context.Context, name string) error {
 func (r *Runtime) Stop(_ context.Context, name string) error {
 	sandboxPath := filepath.Join(r.sandboxDir, sandboxName(name))
 
-	// Kill tmux server via socket
-	tmuxSock := filepath.Join(sandboxPath, tmuxSocketName)
+	// Kill tmux server via socket (check both new and legacy locations)
+	tmuxSock := filepath.Join(sandboxPath, tmuxDir, tmuxSocketName)
+	if _, err := os.Stat(tmuxSock); os.IsNotExist(err) {
+		tmuxSock = filepath.Join(sandboxPath, tmuxSocketName) // legacy
+	}
 	if _, err := os.Stat(tmuxSock); err == nil {
 		killCmd := exec.Command("tmux", "-S", tmuxSock, "kill-server") //nolint:gosec // G204: path within sandbox dir
 		_ = killCmd.Run()
@@ -256,8 +274,11 @@ func (r *Runtime) Remove(ctx context.Context, name string) error {
 
 	_ = r.Stop(ctx, name)
 
-	// Clean up mount symlinks
-	manifestPath := filepath.Join(sandboxPath, symlinkManifestName)
+	// Clean up mount symlinks (check both new and legacy locations)
+	manifestPath := filepath.Join(sandboxPath, backendDir, symlinkManifestName)
+	if _, err := os.Stat(manifestPath); os.IsNotExist(err) {
+		manifestPath = filepath.Join(sandboxPath, symlinkManifestName) // legacy
+	}
 	if data, err := os.ReadFile(manifestPath); err == nil { //nolint:gosec // G304: path within sandbox dir
 		for _, linkPath := range strings.Split(strings.TrimSpace(string(data)), "\n") {
 			if linkPath == "" {
@@ -270,16 +291,21 @@ func (r *Runtime) Remove(ctx context.Context, name string) error {
 		}
 	}
 
-	// Clean up seatbelt-specific files
+	// Clean up new layout subdirectories
+	for _, d := range []string{backendDir, binDir, tmuxDir} {
+		_ = os.RemoveAll(filepath.Join(sandboxPath, d))
+	}
+
+	// Clean up legacy seatbelt-specific files (for old sandboxes)
 	for _, f := range []string{
-		pidFileName,
-		profileFileName,
-		seatbeltConfigFileName,
-		processLogFileName,
-		tmuxSocketName,
+		"seatbelt.pid",
+		"profile.sb",
+		"seatbelt-instance.json",
+		"seatbelt.log",
+		"tmux.sock",
 		"entrypoint.sh",
 		"tmux.conf",
-		symlinkManifestName,
+		"mount-symlinks.txt",
 	} {
 		_ = os.Remove(filepath.Join(sandboxPath, f))
 	}
@@ -294,9 +320,13 @@ func (r *Runtime) Remove(ctx context.Context, name string) error {
 func (r *Runtime) Inspect(_ context.Context, name string) (runtime.InstanceInfo, error) {
 	sandboxPath := filepath.Join(r.sandboxDir, sandboxName(name))
 
-	pidPath := filepath.Join(sandboxPath, pidFileName)
+	pidPath := filepath.Join(sandboxPath, backendDir, pidFileName)
 	if _, err := os.Stat(pidPath); os.IsNotExist(err) {
-		return runtime.InstanceInfo{}, runtime.ErrNotFound
+		// Check legacy location
+		pidPath = filepath.Join(sandboxPath, "seatbelt.pid")
+		if _, err := os.Stat(pidPath); os.IsNotExist(err) {
+			return runtime.InstanceInfo{}, runtime.ErrNotFound
+		}
 	}
 
 	return runtime.InstanceInfo{
@@ -338,7 +368,7 @@ func (r *Runtime) Close() error {
 
 // DiagHint returns a seatbelt-specific hint for checking logs.
 func (r *Runtime) DiagHint(instanceName string) string {
-	logPath := filepath.Join(r.sandboxDir, sandboxName(instanceName), processLogFileName)
+	logPath := filepath.Join(r.sandboxDir, sandboxName(instanceName), backendDir, processLogFileName)
 	return fmt.Sprintf("check log at %s", logPath)
 }
 
@@ -392,7 +422,10 @@ func sandboxName(instanceName string) string {
 
 // isRunning checks if the sandbox-exec process is alive.
 func (r *Runtime) isRunning(sandboxPath string) bool {
-	pidPath := filepath.Join(sandboxPath, pidFileName)
+	pidPath := filepath.Join(sandboxPath, backendDir, pidFileName)
+	if _, err := os.Stat(pidPath); os.IsNotExist(err) {
+		pidPath = filepath.Join(sandboxPath, "seatbelt.pid") // legacy
+	}
 	data, err := os.ReadFile(pidPath) //nolint:gosec // G304: path within sandbox dir
 	if err != nil {
 		return false
@@ -414,7 +447,10 @@ func (r *Runtime) isRunning(sandboxPath string) bool {
 
 // killByPID reads the PID file and kills the process.
 func (r *Runtime) killByPID(sandboxPath string) {
-	pidPath := filepath.Join(sandboxPath, pidFileName)
+	pidPath := filepath.Join(sandboxPath, backendDir, pidFileName)
+	if _, err := os.Stat(pidPath); os.IsNotExist(err) {
+		pidPath = filepath.Join(sandboxPath, "seatbelt.pid") // legacy
+	}
 	data, err := os.ReadFile(pidPath) //nolint:gosec // G304: path within sandbox dir
 	if err != nil {
 		return
@@ -460,7 +496,7 @@ func sandboxEnv() []string {
 
 // waitForTmux polls until the tmux session appears via the per-sandbox socket.
 func (r *Runtime) waitForTmux(ctx context.Context, sandboxPath string, procDone <-chan error) error {
-	tmuxSock := filepath.Join(sandboxPath, tmuxSocketName)
+	tmuxSock := filepath.Join(sandboxPath, tmuxDir, tmuxSocketName)
 	deadline := time.Now().Add(30 * time.Second)
 
 	for {
@@ -508,18 +544,21 @@ func (r *Runtime) buildExecCommand(sandboxPath string, cmd []string) *exec.Cmd {
 	}
 
 	// Run under sandbox-exec with the SBPL profile
-	profilePath := filepath.Join(sandboxPath, profileFileName)
+	profilePath := filepath.Join(sandboxPath, backendDir, profileFileName)
+	if _, err := os.Stat(profilePath); os.IsNotExist(err) {
+		profilePath = filepath.Join(sandboxPath, "profile.sb") // legacy
+	}
 	args := []string{"-f", profilePath}
 	args = append(args, cmd...)
 	c := exec.Command(r.sandboxExecBin, args...) //nolint:gosec // G204: args from validated sandbox state
 
-	// Read working directory from config.json, which is the source of truth
+	// Read working directory from runtime-config.json, which is the source of truth
 	// for seatbelt. patchConfigWorkingDir (called during Start) rewrites it
 	// to the actual copy location for :copy sandboxes. We don't use the
-	// caller-supplied workDir because it comes from meta.json mount_path,
+	// caller-supplied workDir because it comes from environment.json mount_path,
 	// which stores the Docker-oriented target path (the original host path),
 	// not the seatbelt copy path.
-	cfgPath := filepath.Join(sandboxPath, "config.json")
+	cfgPath := filepath.Join(sandboxPath, "runtime-config.json")
 	if data, err := os.ReadFile(cfgPath); err == nil { //nolint:gosec // G304: path within sandbox dir
 		var raw map[string]interface{}
 		if err := json.Unmarshal(data, &raw); err == nil {
@@ -534,7 +573,10 @@ func (r *Runtime) buildExecCommand(sandboxPath string, cmd []string) *exec.Cmd {
 
 // buildTmuxCommand injects the per-sandbox socket into a tmux command.
 func (r *Runtime) buildTmuxCommand(sandboxPath string, cmd []string) *exec.Cmd {
-	tmuxSock := filepath.Join(sandboxPath, tmuxSocketName)
+	tmuxSock := filepath.Join(sandboxPath, tmuxDir, tmuxSocketName)
+	if _, err := os.Stat(tmuxSock); os.IsNotExist(err) {
+		tmuxSock = filepath.Join(sandboxPath, tmuxSocketName) // legacy
+	}
 
 	// cmd[0] is "tmux", inject -S <socket> after it
 	args := []string{"-S", tmuxSock}
@@ -544,7 +586,7 @@ func (r *Runtime) buildTmuxCommand(sandboxPath string, cmd []string) *exec.Cmd {
 	return exec.Command("tmux", args...) //nolint:gosec // G204: socket path within sandbox dir
 }
 
-// patchConfigWorkingDir rewrites working_dir in config.json when the
+// patchConfigWorkingDir rewrites working_dir in runtime-config.json when the
 // workdir mount is a copy (source differs from target).
 func (r *Runtime) patchConfigWorkingDir(sandboxPath string, mounts []runtime.MountSpec) error {
 	// Find the workdir mount: it's the first non-readonly mount whose
@@ -561,7 +603,7 @@ func (r *Runtime) patchConfigWorkingDir(sandboxPath string, mounts []runtime.Mou
 		return nil // not a copy-mode sandbox
 	}
 
-	cfgPath := filepath.Join(sandboxPath, "config.json")
+	cfgPath := filepath.Join(sandboxPath, "runtime-config.json")
 	data, err := os.ReadFile(cfgPath) //nolint:gosec // G304: path within sandbox dir
 	if err != nil {
 		return err

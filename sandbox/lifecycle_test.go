@@ -70,7 +70,7 @@ func newLifecycleMgr(rt *lifecycleMockRuntime) *Manager {
 	return NewManager(rt, "docker", slog.Default(), strings.NewReader(""), io.Discard)
 }
 
-// createTestSandbox creates a sandbox directory with meta.json for lifecycle tests.
+// createTestSandbox creates a sandbox directory with environment.json for lifecycle tests.
 func createTestSandbox(t *testing.T, tmpDir, name, hostPath, mode string) {
 	t.Helper()
 	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
@@ -202,11 +202,11 @@ func TestStart_Stopped(t *testing.T) {
 	mgr := newLifecycleMgr(mock)
 
 	// After remove, Start routes to recreateContainer which fails
-	// (no config.json) — same pattern as TestStart_Removed.
+	// (no runtime-config.json) — same pattern as TestStart_Removed.
 	err := mgr.Start(context.Background(), "test-start-stopped", StartOpts{})
 	assert.Error(t, err)
 	assert.True(t, removeCalled, "should remove stopped container before recreating")
-	assert.Contains(t, err.Error(), "config.json")
+	assert.Contains(t, err.Error(), RuntimeConfigFile)
 }
 
 func TestStart_SandboxNotFound(t *testing.T) {
@@ -233,12 +233,12 @@ func TestStart_Removed(t *testing.T) {
 
 	mgr := newLifecycleMgr(mock)
 
-	// recreateContainer will fail because there's no config.json,
+	// recreateContainer will fail because there's no runtime-config.json,
 	// but we're testing that Start routes to recreateContainer for StatusRemoved.
 	err := mgr.Start(context.Background(), "test-start-removed", StartOpts{})
 	assert.Error(t, err)
-	// Should be a recreateContainer error (config.json missing), not a routing error
-	assert.Contains(t, err.Error(), "config.json")
+	// Should be a recreateContainer error (runtime-config.json missing), not a routing error
+	assert.Contains(t, err.Error(), RuntimeConfigFile)
 }
 
 func TestStart_Resume_RequiresPrompt(t *testing.T) {
@@ -285,7 +285,7 @@ func TestStart_Resume_DoneStatus(t *testing.T) {
 	// Write prompt.txt
 	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, "prompt.txt"), []byte("Write hello world"), 0600))
 
-	// Write config.json
+	// Write runtime-config.json
 	cfg := containerConfig{
 		AgentCommand:   "claude --dangerously-skip-permissions --print \"Write hello world\"",
 		SubmitSequence: "Enter",
@@ -293,7 +293,7 @@ func TestStart_Resume_DoneStatus(t *testing.T) {
 	}
 	cfgData, err := json.MarshalIndent(cfg, "", "  ")
 	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, "config.json"), cfgData, 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, RuntimeConfigFile), cfgData, 0600))
 
 	// Track exec calls
 	var execCalls [][]string
@@ -360,7 +360,7 @@ func TestStart_Resume_StoppedStatus(t *testing.T) {
 	// Write prompt.txt
 	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, "prompt.txt"), []byte("Write hello world"), 0600))
 
-	// Write config.json with headless command
+	// Write runtime-config.json with headless command
 	cfg := containerConfig{
 		AgentCommand:   "claude --dangerously-skip-permissions --print \"Write hello world\"",
 		SubmitSequence: "Enter",
@@ -368,7 +368,7 @@ func TestStart_Resume_StoppedStatus(t *testing.T) {
 	}
 	cfgData, err := json.MarshalIndent(cfg, "", "  ")
 	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, "config.json"), cfgData, 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, RuntimeConfigFile), cfgData, 0600))
 
 	mock := &lifecycleMockRuntime{
 		inspectFn: func(_ context.Context, _ string) (runtime.InstanceInfo, error) {
@@ -384,21 +384,21 @@ func TestStart_Resume_StoppedStatus(t *testing.T) {
 
 	// Start with resume will call prepareResumeFiles then recreateContainer.
 	// recreateContainer will fail (no work dir, no secrets etc.) but we can check
-	// that resume-prompt.txt was created and config.json was patched.
+	// that resume-prompt.txt was created and runtime-config.json was patched.
 	_ = mgr.Start(context.Background(), name, StartOpts{Resume: true})
 
-	// Verify config.json was patched to interactive command
-	updatedCfgData, err := os.ReadFile(filepath.Join(sandboxDir, "config.json")) //nolint:gosec // test file in controlled temp dir
+	// Verify runtime-config.json was patched to interactive command
+	updatedCfgData, err := os.ReadFile(filepath.Join(sandboxDir, RuntimeConfigFile)) //nolint:gosec // test file in controlled temp dir
 	require.NoError(t, err)
 	var updatedCfg containerConfig
 	require.NoError(t, json.Unmarshal(updatedCfgData, &updatedCfg))
 	assert.NotContains(t, updatedCfg.AgentCommand, "Write hello world",
-		"config.json should have interactive command after resume prep")
+		"runtime-config.json should have interactive command after resume prep")
 	assert.Contains(t, updatedCfg.AgentCommand, "claude",
-		"config.json should still reference the agent")
+		"runtime-config.json should still reference the agent")
 
 	// resume-prompt.txt is cleaned up by defer, so it may not exist anymore.
-	// But we can verify the config.json patch was permanent (design spec says
+	// But we can verify the runtime-config.json patch was permanent (design spec says
 	// interactive command is correct for future starts).
 }
 
@@ -583,7 +583,7 @@ func TestReset_RecopiesWorkdir(t *testing.T) {
 		stopFn: func(_ context.Context, _ string) error {
 			return nil // runtime returns nil when instance not found
 		},
-		// Start: container removed, recreate will fail (no config.json), but
+		// Start: container removed, recreate will fail (no runtime-config.json), but
 		// we still check the re-copy happened
 		inspectFn: func(_ context.Context, _ string) (runtime.InstanceInfo, error) {
 			return runtime.InstanceInfo{}, fmt.Errorf("not found: %w", runtime.ErrNotFound)
@@ -593,7 +593,7 @@ func TestReset_RecopiesWorkdir(t *testing.T) {
 	mgr := newLifecycleMgr(mock)
 
 	// Reset will re-copy and re-baseline, then fail at Start (recreateContainer
-	// needs config.json). That's OK — we verify the re-copy happened.
+	// needs runtime-config.json). That's OK — we verify the re-copy happened.
 	_ = mgr.Reset(context.Background(), ResetOptions{Name: name})
 
 	// Verify work copy was re-copied from original
@@ -619,11 +619,11 @@ func TestReset_Clean(t *testing.T) {
 	name := "test-reset-clean"
 	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
 	workDir := filepath.Join(sandboxDir, "work", EncodePath(origDir))
-	agentStateDir := filepath.Join(sandboxDir, "agent-state")
+	agentStateDir := filepath.Join(sandboxDir, AgentRuntimeDir)
 	require.NoError(t, os.MkdirAll(workDir, 0750))
 	require.NoError(t, os.MkdirAll(agentStateDir, 0750))
 
-	// Add content to agent-state
+	// Add content to agent-runtime
 	writeTestFile(t, agentStateDir, "session.json", `{"key":"value"}`)
 
 	writeTestFile(t, workDir, "file.txt", "content\n")
@@ -657,7 +657,7 @@ func TestReset_Clean(t *testing.T) {
 	mgr := newLifecycleMgr(mock)
 	_ = mgr.Reset(context.Background(), ResetOptions{Name: name, Clean: true})
 
-	// agent-state dir should exist with only settings.json (re-applied by
+	// agent-runtime dir should exist with only settings.json (re-applied by
 	// ensureContainerSettings after clean wipe)
 	assert.DirExists(t, agentStateDir)
 	entries, err := os.ReadDir(agentStateDir)
@@ -792,7 +792,7 @@ func TestReset_NoRestart_SyncsWorkdir(t *testing.T) {
 
 	mgr := newLifecycleMgr(mock)
 
-	// Reset with --no-restart. sendResetNotification will fail (no config.json
+	// Reset with --no-restart. sendResetNotification will fail (no runtime-config.json
 	// and exec mock not wired), but workspace sync and baseline should succeed.
 	_ = mgr.Reset(context.Background(), ResetOptions{Name: name, NoRestart: true})
 
@@ -867,7 +867,7 @@ func TestReset_NoRestart_FallsBackWhenNotRunning(t *testing.T) {
 	mgr := NewManager(mock, "docker", slog.Default(), strings.NewReader(""), &output)
 
 	// Reset with --no-restart; container not running → falls back to default path.
-	// Default path will fail at Start (no config.json), but re-copy should happen.
+	// Default path will fail at Start (no runtime-config.json), but re-copy should happen.
 	_ = mgr.Reset(context.Background(), ResetOptions{Name: name, NoRestart: true})
 
 	// Verify fallback message was printed
@@ -892,11 +892,11 @@ func TestPatchConfigDebug_SetTrue(t *testing.T) {
 	cfg := containerConfig{AgentCommand: "claude", WorkingDir: "/project"}
 	cfgData, err := json.MarshalIndent(cfg, "", "  ")
 	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, "config.json"), cfgData, 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, RuntimeConfigFile), cfgData, 0600))
 
 	require.NoError(t, patchConfigDebug(sandboxDir, true))
 
-	data, err := os.ReadFile(filepath.Join(sandboxDir, "config.json")) //nolint:gosec // test
+	data, err := os.ReadFile(filepath.Join(sandboxDir, RuntimeConfigFile)) //nolint:gosec // test
 	require.NoError(t, err)
 	var result containerConfig
 	require.NoError(t, json.Unmarshal(data, &result))
@@ -908,11 +908,11 @@ func TestPatchConfigDebug_SetFalse(t *testing.T) {
 	cfg := containerConfig{AgentCommand: "claude", Debug: true}
 	cfgData, err := json.MarshalIndent(cfg, "", "  ")
 	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, "config.json"), cfgData, 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, RuntimeConfigFile), cfgData, 0600))
 
 	require.NoError(t, patchConfigDebug(sandboxDir, false))
 
-	data, err := os.ReadFile(filepath.Join(sandboxDir, "config.json")) //nolint:gosec // test
+	data, err := os.ReadFile(filepath.Join(sandboxDir, RuntimeConfigFile)) //nolint:gosec // test
 	require.NoError(t, err)
 	var result containerConfig
 	require.NoError(t, json.Unmarshal(data, &result))
@@ -930,11 +930,11 @@ func TestPatchConfigDebug_PreservesOtherFields(t *testing.T) {
 	cfg := containerConfig{AgentCommand: "claude --print", WorkingDir: "/home/user/project"}
 	cfgData, err := json.MarshalIndent(cfg, "", "  ")
 	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, "config.json"), cfgData, 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, RuntimeConfigFile), cfgData, 0600))
 
 	require.NoError(t, patchConfigDebug(sandboxDir, true))
 
-	data, err := os.ReadFile(filepath.Join(sandboxDir, "config.json")) //nolint:gosec // test
+	data, err := os.ReadFile(filepath.Join(sandboxDir, RuntimeConfigFile)) //nolint:gosec // test
 	require.NoError(t, err)
 	var result containerConfig
 	require.NoError(t, json.Unmarshal(data, &result))
@@ -950,11 +950,11 @@ func TestPatchConfigAllowedDomains_SetDomains(t *testing.T) {
 	cfg := containerConfig{AgentCommand: "claude"}
 	cfgData, err := json.MarshalIndent(cfg, "", "  ")
 	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, "config.json"), cfgData, 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, RuntimeConfigFile), cfgData, 0600))
 
 	require.NoError(t, PatchConfigAllowedDomains(sandboxDir, []string{"api.anthropic.com", "sentry.io"}))
 
-	data, err := os.ReadFile(filepath.Join(sandboxDir, "config.json")) //nolint:gosec // test
+	data, err := os.ReadFile(filepath.Join(sandboxDir, RuntimeConfigFile)) //nolint:gosec // test
 	require.NoError(t, err)
 	var result containerConfig
 	require.NoError(t, json.Unmarshal(data, &result))
@@ -966,11 +966,11 @@ func TestPatchConfigAllowedDomains_ReplacesExisting(t *testing.T) {
 	cfg := containerConfig{AgentCommand: "claude", AllowedDomains: []string{"old.com"}}
 	cfgData, err := json.MarshalIndent(cfg, "", "  ")
 	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, "config.json"), cfgData, 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, RuntimeConfigFile), cfgData, 0600))
 
 	require.NoError(t, PatchConfigAllowedDomains(sandboxDir, []string{"new.com"}))
 
-	data, err := os.ReadFile(filepath.Join(sandboxDir, "config.json")) //nolint:gosec // test
+	data, err := os.ReadFile(filepath.Join(sandboxDir, RuntimeConfigFile)) //nolint:gosec // test
 	require.NoError(t, err)
 	var result containerConfig
 	require.NoError(t, json.Unmarshal(data, &result))
@@ -982,11 +982,11 @@ func TestPatchConfigAllowedDomains_EmptyListClears(t *testing.T) {
 	cfg := containerConfig{AgentCommand: "claude", AllowedDomains: []string{"api.com"}}
 	cfgData, err := json.MarshalIndent(cfg, "", "  ")
 	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, "config.json"), cfgData, 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, RuntimeConfigFile), cfgData, 0600))
 
 	require.NoError(t, PatchConfigAllowedDomains(sandboxDir, []string{}))
 
-	data, err := os.ReadFile(filepath.Join(sandboxDir, "config.json")) //nolint:gosec // test
+	data, err := os.ReadFile(filepath.Join(sandboxDir, RuntimeConfigFile)) //nolint:gosec // test
 	require.NoError(t, err)
 	var result containerConfig
 	require.NoError(t, json.Unmarshal(data, &result))
@@ -1003,7 +1003,7 @@ func TestDestroy_BrokenSandbox(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
 
-	// Create sandbox dir without meta.json (broken sandbox)
+	// Create sandbox dir without environment.json (broken sandbox)
 	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", "broken")
 	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
 

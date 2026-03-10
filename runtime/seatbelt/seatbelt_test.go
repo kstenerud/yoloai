@@ -477,7 +477,7 @@ func TestPatchConfigWorkingDir_CopyMode(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cfgPath := filepath.Join(sandboxPath, "config.json")
+	cfgPath := filepath.Join(sandboxPath, "runtime-config.json")
 	cfgData, err := json.Marshal(map[string]interface{}{
 		"working_dir": "/original/path",
 		"other_key":   "other_value",
@@ -518,7 +518,7 @@ func TestPatchConfigWorkingDir_NotCopyMode(t *testing.T) {
 	sandboxPath := t.TempDir()
 
 	originalConfig := `{"working_dir": "/original/path"}`
-	cfgPath := filepath.Join(sandboxPath, "config.json")
+	cfgPath := filepath.Join(sandboxPath, "runtime-config.json")
 	if err := os.WriteFile(cfgPath, []byte(originalConfig), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -538,7 +538,7 @@ func TestPatchConfigWorkingDir_NotCopyMode(t *testing.T) {
 		t.Fatal(err)
 	}
 	if string(data) != originalConfig {
-		t.Errorf("config.json should be unchanged, got %s", string(data))
+		t.Errorf("runtime-config.json should be unchanged, got %s", string(data))
 	}
 }
 
@@ -546,7 +546,7 @@ func TestPatchConfigWorkingDir_NoMounts(t *testing.T) {
 	sandboxPath := t.TempDir()
 
 	originalConfig := `{"working_dir": "/original/path"}`
-	cfgPath := filepath.Join(sandboxPath, "config.json")
+	cfgPath := filepath.Join(sandboxPath, "runtime-config.json")
 	if err := os.WriteFile(cfgPath, []byte(originalConfig), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -561,7 +561,7 @@ func TestPatchConfigWorkingDir_NoMounts(t *testing.T) {
 		t.Fatal(err)
 	}
 	if string(data) != originalConfig {
-		t.Errorf("config.json should be unchanged, got %s", string(data))
+		t.Errorf("runtime-config.json should be unchanged, got %s", string(data))
 	}
 }
 
@@ -579,7 +579,7 @@ func TestPatchConfigWorkingDir_AlreadyCorrect(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfgPath := filepath.Join(sandboxPath, "config.json")
+	cfgPath := filepath.Join(sandboxPath, "runtime-config.json")
 	if err := os.WriteFile(cfgPath, cfgData, 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -618,7 +618,7 @@ func TestPatchConfigWorkingDir_AlreadyCorrect(t *testing.T) {
 		t.Fatal(err)
 	}
 	if infoAfter.ModTime() != infoBefore.ModTime() {
-		t.Error("config.json should not have been rewritten when working_dir already matches")
+		t.Error("runtime-config.json should not have been rewritten when working_dir already matches")
 	}
 }
 

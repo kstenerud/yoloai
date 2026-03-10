@@ -25,7 +25,7 @@ func TestSandboxState_MissingFile(t *testing.T) {
 
 	loaded, err := LoadSandboxState(dir)
 	require.NoError(t, err)
-	assert.False(t, loaded.AgentFilesInitialized, "missing state.json should return zero value")
+	assert.False(t, loaded.AgentFilesInitialized, "missing sandbox-state.json should return zero value")
 }
 
 func TestSandboxState_FalseValue(t *testing.T) {
@@ -41,9 +41,9 @@ func TestSandboxState_FalseValue(t *testing.T) {
 
 func TestSandboxState_InvalidJSON(t *testing.T) {
 	dir := t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "state.json"), []byte("{invalid"), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, SandboxStateFile), []byte("{invalid"), 0600))
 
 	_, err := LoadSandboxState(dir)
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "parse state.json")
+	assert.Contains(t, err.Error(), "parse "+SandboxStateFile)
 }

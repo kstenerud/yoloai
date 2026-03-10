@@ -55,33 +55,37 @@ type DirMeta struct {
 	BaselineSHA string `json:"baseline_sha,omitempty"`
 }
 
-// SaveMeta writes meta.json to the given directory path.
+// SaveMeta writes environment.json to the given directory path.
 func SaveMeta(dir string, meta *Meta) error {
 	data, err := json.MarshalIndent(meta, "", "  ")
 	if err != nil {
-		return fmt.Errorf("marshal meta.json: %w", err)
+		return fmt.Errorf("marshal %s: %w", EnvironmentFile, err)
 	}
 
-	path := filepath.Join(dir, "meta.json")
+	path := filepath.Join(dir, EnvironmentFile)
 	if err := os.WriteFile(path, data, 0600); err != nil {
-		return fmt.Errorf("write meta.json: %w", err)
+		return fmt.Errorf("write %s: %w", EnvironmentFile, err)
 	}
 
 	return nil
 }
 
-// LoadMeta reads meta.json from the given directory path.
+// LoadMeta reads environment.json from the given directory path.
+// Falls back to legacy meta.json for backward compatibility with older sandboxes.
 func LoadMeta(dir string) (*Meta, error) {
-	path := filepath.Join(dir, "meta.json")
+	path := filepath.Join(dir, EnvironmentFile)
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		path = filepath.Join(dir, legacyMetaFile) // legacy fallback
+	}
 
 	data, err := os.ReadFile(path) //nolint:gosec // path is constructed from sandbox dir, not user input
 	if err != nil {
-		return nil, fmt.Errorf("read meta.json: %w", err)
+		return nil, fmt.Errorf("read %s: %w", filepath.Base(path), err)
 	}
 
 	var meta Meta
 	if err := json.Unmarshal(data, &meta); err != nil {
-		return nil, fmt.Errorf("parse meta.json: %w", err)
+		return nil, fmt.Errorf("parse %s: %w", filepath.Base(path), err)
 	}
 
 	return &meta, nil

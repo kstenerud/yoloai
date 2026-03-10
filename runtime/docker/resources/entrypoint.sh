@@ -2,12 +2,12 @@
 set -euo pipefail
 
 # Capture all entrypoint output to log.txt (preserves docker logs via tee)
-exec > >(tee -a /yoloai/log.txt) 2>&1
+exec > >(tee -a "$YOLOAI_DIR/log.txt") 2>&1
 
 # --- Run as root ---
 
 # Read config (only UID/GID needed in root context; agent config read by inner bash)
-CONFIG="/yoloai/config.json"
+CONFIG="$YOLOAI_DIR/runtime-config.json"
 HOST_UID=$(jq -r '.host_uid' "$CONFIG")
 HOST_GID=$(jq -r '.host_gid' "$CONFIG")
 DEBUG=$(jq -r '.debug // false' "$CONFIG")
@@ -31,9 +31,13 @@ fi
 # Some files may be bind-mounted read-only; chown on those is expected to fail.
 debug_log "fixing ownership on container-managed directories"
 chown -R yoloai:yoloai /home/yoloai 2>/dev/null || true
-chown yoloai:yoloai /yoloai
-for f in /yoloai/*; do
+chown yoloai:yoloai "$YOLOAI_DIR"
+for f in "$YOLOAI_DIR"/*; do
     chown yoloai:yoloai "$f" 2>/dev/null || true
+done
+# Also fix subdirectories
+for d in "$YOLOAI_DIR"/bin "$YOLOAI_DIR"/tmux; do
+    [ -d "$d" ] && chown -R yoloai:yoloai "$d" 2>/dev/null || true
 done
 
 # Read secrets and export as env vars
@@ -133,4 +137,4 @@ fi
 debug_log "dropping privileges to yoloai"
 
 # --- Drop privileges and run as yoloai ---
-exec gosu yoloai /yoloai/entrypoint-user.sh
+exec gosu yoloai "$YOLOAI_DIR/bin/entrypoint-user.sh"

@@ -272,7 +272,7 @@ func TestCreate_CleansUpIncompleteOnNew(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
 
-	// Create sandbox dir without meta.json (incomplete from prior failure)
+	// Create sandbox dir without environment.json (incomplete from prior failure)
 	name := "incomplete"
 	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
 	require.NoError(t, os.MkdirAll(sandboxDir, 0750))

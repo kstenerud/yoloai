@@ -4,6 +4,26 @@ Tracks breaking changes made during beta. Each entry should be included in relea
 
 ## Unreleased
 
+### Sandbox directory layout reorganized; `YOLOAI_DIR` abstraction added
+
+**Previous behavior:** Sandbox state files had generic names (`meta.json`, `config.json`, `state.json`, `status.json`) in a flat layout. The `agent-state/` directory held agent runtime state. Docker hardcoded `/yoloai/` paths; seatbelt and tart used different variable names. Scripts, tmux config, and backend-specific files all lived at the sandbox root.
+
+**New behavior:** Files are renamed for clarity and organized into subdirectories:
+- `meta.json` → `environment.json`
+- `config.json` → `runtime-config.json`
+- `state.json` → `sandbox-state.json`
+- `status.json` → `agent-status.json`
+- `agent-state/` → `agent-runtime/`
+- Scripts moved to `bin/` (entrypoint.sh, status-monitor.py, diagnose-idle.sh)
+- Tmux config moved to `tmux/` (tmux.conf, tmux.sock)
+- Backend-specific files moved to `backend/` (instance.json, profile.sb, pid, stderr.log)
+
+All entrypoint scripts now use `$YOLOAI_DIR` instead of hardcoded paths. Docker sets `ENV YOLOAI_DIR=/yoloai`, seatbelt exports `YOLOAI_DIR=$SANDBOX_DIR`, tart exports `YOLOAI_DIR=$SHARED_DIR`.
+
+**Rationale:** Generic names like `config.json` and `status.json` didn't convey purpose. The flat layout mixed scripts, configs, state, and backend files. Hardcoded `/yoloai/` paths in hook commands broke on seatbelt (where the sandbox dir is a host-local path, not `/yoloai/`).
+
+**Migration:** Automatic. The code checks for new filenames first, then falls back to legacy names. Existing sandboxes continue to work. New sandboxes use the new layout. Docker images must be rebuilt (`yoloai system build`) for new sandboxes.
+
 ### Sandbox status `running` renamed to `active`; `--running` flag renamed to `--active`
 
 **Previous behavior:** The agent status was `"running"` when actively working. `yoloai ls --running` filtered for active sandboxes.
@@ -12,7 +32,7 @@ Tracks breaking changes made during beta. Each entry should be included in relea
 
 **Rationale:** `"running"` was ambiguous -- the container process is also "running" when the agent is idle. `"active"` clearly means the agent is actively working on a task.
 
-**Migration:** Replace `--running` with `--active` in scripts. Old sandboxes with `"running"` in `status.json` are handled automatically (backward compatible parsing).
+**Migration:** Replace `--running` with `--active` in scripts. Old sandboxes with `"running"` in the agent status file are handled automatically (backward compatible parsing).
 
 ### `container_id` removed from JSON output
 
@@ -64,7 +84,7 @@ Tracks breaking changes made during beta. Each entry should be included in relea
 
 **Rationale:** The backend is a property of the sandbox, not the CLI invocation. Lifecycle commands should use the backend the sandbox was created with, not require the user to remember and pass it every time.
 
-**Migration:** Remove `--backend` from lifecycle command invocations. If you were passing `--backend` to `start`/`stop`/etc., it now happens automatically via `meta.json`.
+**Migration:** Remove `--backend` from lifecycle command invocations. If you were passing `--backend` to `start`/`stop`/etc., it now happens automatically via the sandbox's environment metadata.
 
 ### Config paths restructured: `defaults.` prefix removed, config moved to profile
 

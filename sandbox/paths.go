@@ -11,6 +11,41 @@ import (
 	"github.com/kstenerud/yoloai/config"
 )
 
+// Centralized sandbox file and directory names. All code that reads/writes
+// these files should reference these constants rather than using literal strings.
+const (
+	// EnvironmentFile stores sandbox metadata captured at creation time (was "meta.json").
+	EnvironmentFile = "environment.json"
+
+	// SandboxStateFile stores per-sandbox persistent flags (was "state.json").
+	SandboxStateFile = "sandbox-state.json"
+
+	// RuntimeConfigFile stores entrypoint/infrastructure config (was "config.json").
+	RuntimeConfigFile = "runtime-config.json"
+
+	// AgentStatusFile stores live agent liveness status (was "status.json").
+	AgentStatusFile = "agent-status.json"
+
+	// AgentRuntimeDir stores agent-managed state (was "agent-state").
+	AgentRuntimeDir = "agent-runtime"
+
+	// BinDir holds executable scripts (entrypoint, monitor, diagnose).
+	BinDir = "bin"
+
+	// TmuxDir holds tmux configuration and sockets.
+	TmuxDir = "tmux"
+
+	// BackendDir holds backend-specific files (seatbelt profile, pid, logs).
+	BackendDir = "backend"
+
+	// Legacy file/directory names for backward compatibility.
+	legacyMetaFile      = "meta.json"
+	legacySandboxState  = "state.json"
+	legacyConfigFile    = "config.json"
+	legacyStatusFile    = "status.json"
+	legacyAgentStateDir = "agent-state"
+)
+
 // safeASCII marks ASCII bytes that do NOT need caret encoding.
 // Safe: alphanumeric, hyphen, underscore, backtick, braces.
 var safeASCII [128]bool

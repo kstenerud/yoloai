@@ -78,7 +78,7 @@ type overlayMountConfig struct {
 	Merged string `json:"merged"`
 }
 
-// containerConfig is the serializable form of /yoloai/config.json.
+// containerConfig is the serializable form of runtime-config.json.
 type containerConfig struct {
 	HostUID            int                  `json:"host_uid"`
 	HostGID            int                  `json:"host_gid"`
@@ -248,9 +248,12 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 	for _, dir := range []string{
 		sandboxDir,
 		filepath.Join(sandboxDir, "work"),
-		filepath.Join(sandboxDir, "agent-state"),
+		filepath.Join(sandboxDir, AgentRuntimeDir),
 		filepath.Join(sandboxDir, "home-seed"),
 		filepath.Join(sandboxDir, "files"),
+		filepath.Join(sandboxDir, BinDir),
+		filepath.Join(sandboxDir, TmuxDir),
+		filepath.Join(sandboxDir, BackendDir),
 	} {
 		if err := os.MkdirAll(dir, 0750); err != nil {
 			return nil, fmt.Errorf("create directory %s: %w", dir, err)
@@ -353,7 +356,7 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 	// Build config.json
 	configData, err := buildContainerConfig(agentDef, agentCommand, tmuxConf, workdir.ResolvedMountPath(), opts.Debug, networkMode == "isolated", networkAllow, opts.Passthrough, overlayMounts, pr.setup, pr.autoCommitInterval, copyDirs, opts.Name)
 	if err != nil {
-		return nil, fmt.Errorf("build config.json: %w", err)
+		return nil, fmt.Errorf("build %s: %w", RuntimeConfigFile, err)
 	}
 
 	// Write state files
@@ -406,16 +409,16 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 		return nil, fmt.Errorf("write log.txt: %w", err)
 	}
 
-	if err := os.WriteFile(filepath.Join(sandboxDir, "status.json"), []byte("{}\n"), 0600); err != nil {
-		return nil, fmt.Errorf("write status.json: %w", err)
+	if err := os.WriteFile(filepath.Join(sandboxDir, AgentStatusFile), []byte("{}\n"), 0600); err != nil {
+		return nil, fmt.Errorf("write %s: %w", AgentStatusFile, err)
 	}
 
 	if err := os.WriteFile(filepath.Join(sandboxDir, "monitor.log"), nil, 0600); err != nil {
 		return nil, fmt.Errorf("write monitor.log: %w", err)
 	}
 
-	if err := os.WriteFile(filepath.Join(sandboxDir, "config.json"), configData, 0600); err != nil {
-		return nil, fmt.Errorf("write config.json: %w", err)
+	if err := os.WriteFile(filepath.Join(sandboxDir, RuntimeConfigFile), configData, 0600); err != nil {
+		return nil, fmt.Errorf("write %s: %w", RuntimeConfigFile, err)
 	}
 
 	if err := WriteContextFiles(sandboxDir, meta, agentDef); err != nil {
@@ -939,10 +942,10 @@ func buildMounts(state *sandboxState, secretsDir string) []runtime.MountSpec {
 		}
 	}
 
-	// Agent state directory
+	// Agent runtime directory (agent's own managed state)
 	if state.agent.StateDir != "" {
 		mounts = append(mounts, runtime.MountSpec{
-			Source: filepath.Join(state.sandboxDir, "agent-state"),
+			Source: filepath.Join(state.sandboxDir, AgentRuntimeDir),
 			Target: state.agent.StateDir,
 		})
 	}
@@ -953,10 +956,10 @@ func buildMounts(state *sandboxState, secretsDir string) []runtime.MountSpec {
 		Target: "/yoloai/log.txt",
 	})
 
-	// Status file (for in-container status monitor)
+	// Agent status file (for in-container status monitor)
 	mounts = append(mounts, runtime.MountSpec{
-		Source: filepath.Join(state.sandboxDir, "status.json"),
-		Target: "/yoloai/status.json",
+		Source: filepath.Join(state.sandboxDir, AgentStatusFile),
+		Target: "/yoloai/" + AgentStatusFile,
 	})
 
 	// Monitor debug log (written by status-monitor.py when --debug is set)
@@ -978,10 +981,10 @@ func buildMounts(state *sandboxState, secretsDir string) []runtime.MountSpec {
 		})
 	}
 
-	// Config file
+	// Runtime config file
 	mounts = append(mounts, runtime.MountSpec{
-		Source:   filepath.Join(state.sandboxDir, "config.json"),
-		Target:   "/yoloai/config.json",
+		Source:   filepath.Join(state.sandboxDir, RuntimeConfigFile),
+		Target:   "/yoloai/" + RuntimeConfigFile,
 		ReadOnly: true,
 	})
 
@@ -1130,11 +1133,11 @@ func describeSeedAuthFiles(agentDef *agent.Definition) string {
 // copySeedFiles copies seed files from the host into the sandbox.
 // Files with AuthOnly=true are skipped when hasAPIKey is true.
 // Files with HomeDir=true go to home-seed/ (mounted at /home/yoloai/);
-// others go to agent-state/ (mounted at StateDir).
+// others go to agent-runtime/ (mounted at StateDir).
 // Returns true if any files were copied. Skips files that don't exist on the host.
 func copySeedFiles(agentDef *agent.Definition, sandboxDir string, hasAPIKey bool) (bool, error) {
 	copied := false
-	agentStateDir := filepath.Join(sandboxDir, "agent-state")
+	agentStateDir := filepath.Join(sandboxDir, AgentRuntimeDir)
 	homeSeedDir := filepath.Join(sandboxDir, "home-seed")
 
 	for _, sf := range agentDef.SeedFiles {
@@ -1209,9 +1212,9 @@ func ensureContainerSettings(agentDef *agent.Definition, sandboxDir string) erro
 		return nil
 	}
 
-	agentStateDir := filepath.Join(sandboxDir, "agent-state")
+	agentStateDir := filepath.Join(sandboxDir, AgentRuntimeDir)
 	if err := os.MkdirAll(agentStateDir, 0750); err != nil {
-		return fmt.Errorf("create agent-state dir: %w", err)
+		return fmt.Errorf("create %s dir: %w", AgentRuntimeDir, err)
 	}
 	settingsPath := filepath.Join(agentStateDir, "settings.json")
 
@@ -1296,14 +1299,15 @@ func ensureShellContainerSettings(sandboxDir string) error {
 	return nil
 }
 
-// statusIdleCommand writes idle status to /yoloai/status.json when Claude
-// finishes a response (Notification hook).
-const statusIdleCommand = `printf '{"status":"idle","exit_code":null,"timestamp":%d}\n' "$(date +%s)" > /yoloai/status.json`
+// statusIdleCommand writes idle status to agent-status.json when Claude
+// finishes a response (Notification hook). Uses $YOLOAI_DIR for portability
+// across backends (Docker=/yoloai, seatbelt=sandbox dir).
+const statusIdleCommand = `printf '{"status":"idle","exit_code":null,"timestamp":%d}\n' "$(date +%s)" > "${YOLOAI_DIR:-/yoloai}/agent-status.json"`
 
-// statusActiveCommand writes active status to /yoloai/status.json when Claude
+// statusActiveCommand writes active status to agent-status.json when Claude
 // starts working (PreToolUse hook). This ensures the title updates from "> name"
 // back to "name" when the user submits a new prompt.
-const statusActiveCommand = `printf '{"status":"active","exit_code":null,"timestamp":%d}\n' "$(date +%s)" > /yoloai/status.json`
+const statusActiveCommand = `printf '{"status":"active","exit_code":null,"timestamp":%d}\n' "$(date +%s)" > "${YOLOAI_DIR:-/yoloai}/agent-status.json"`
 
 // injectIdleHook merges hooks into Claude Code's settings map for status tracking.
 // Notification → idle (turn complete), PreToolUse → running (work started).

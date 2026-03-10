@@ -172,7 +172,7 @@ func TestGenerateContext_DockerFilesPath(t *testing.T) {
 
 func TestWriteContextFiles_WritesContextAndRef(t *testing.T) {
 	sandboxDir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(sandboxDir, "agent-state"), 0750); err != nil {
+	if err := os.MkdirAll(filepath.Join(sandboxDir, AgentRuntimeDir), 0750); err != nil {
 		t.Fatal(err)
 	}
 
@@ -203,7 +203,7 @@ func TestWriteContextFiles_WritesContextAndRef(t *testing.T) {
 	}
 
 	// Check agent instruction file contains full context (inlined, not a pointer)
-	refData, err := os.ReadFile(filepath.Join(sandboxDir, "agent-state", "CLAUDE.md")) //nolint:gosec // G304: test helper path
+	refData, err := os.ReadFile(filepath.Join(sandboxDir, AgentRuntimeDir, "CLAUDE.md")) //nolint:gosec // G304: test helper path
 	if err != nil {
 		t.Fatalf("read agent instruction file: %v", err)
 	}
@@ -214,7 +214,7 @@ func TestWriteContextFiles_WritesContextAndRef(t *testing.T) {
 
 func TestWriteContextFiles_NoRefWhenEmpty(t *testing.T) {
 	sandboxDir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(sandboxDir, "agent-state"), 0750); err != nil {
+	if err := os.MkdirAll(filepath.Join(sandboxDir, AgentRuntimeDir), 0750); err != nil {
 		t.Fatal(err)
 	}
 
@@ -240,8 +240,8 @@ func TestWriteContextFiles_NoRefWhenEmpty(t *testing.T) {
 	}
 
 	// No agent ref file should be created
-	entries, _ := os.ReadDir(filepath.Join(sandboxDir, "agent-state"))
+	entries, _ := os.ReadDir(filepath.Join(sandboxDir, AgentRuntimeDir))
 	for _, e := range entries {
-		t.Errorf("unexpected file in agent-state: %s", e.Name())
+		t.Errorf("unexpected file in %s: %s", AgentRuntimeDir, e.Name())
 	}
 }

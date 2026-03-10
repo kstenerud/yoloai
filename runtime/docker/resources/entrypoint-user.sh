@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Read agent config directly (avoids shell quoting issues passing through gosu)
-CONFIG="/yoloai/config.json"
+CONFIG="$YOLOAI_DIR/runtime-config.json"
 AGENT_COMMAND=$(jq -r .agent_command "$CONFIG")
 STARTUP_DELAY=$(jq -r .startup_delay "$CONFIG")
 READY_PATTERN=$(jq -r .ready_pattern "$CONFIG")
@@ -32,13 +32,13 @@ fi
 debug_log "starting tmux session (tmux_conf=$TMUX_CONF)"
 case "$TMUX_CONF" in
     default+host)
-        tmux -f /yoloai/tmux.conf new-session -d -s main -x 200 -y 50
+        tmux -f "$YOLOAI_DIR/tmux/tmux.conf" new-session -d -s main -x 200 -y 50
         if [ -f /home/yoloai/.tmux.conf ]; then
             tmux source-file /home/yoloai/.tmux.conf
         fi
         ;;
     default)
-        tmux -f /yoloai/tmux.conf new-session -d -s main -x 200 -y 50
+        tmux -f "$YOLOAI_DIR/tmux/tmux.conf" new-session -d -s main -x 200 -y 50
         ;;
     host)
         if [ -f /home/yoloai/.tmux.conf ]; then
@@ -52,7 +52,7 @@ case "$TMUX_CONF" in
         ;;
 esac
 tmux set-option -t main remain-on-exit on
-tmux pipe-pane -t main "cat >> /yoloai/log.txt"
+tmux pipe-pane -t main "cat >> $YOLOAI_DIR/log.txt"
 
 # Launch agent inside tmux (exec replaces shell so agent exit = pane exit)
 debug_log "launching agent: $AGENT_COMMAND"
@@ -137,9 +137,9 @@ fi
 
 # --- Deliver prompt if present ---
 debug_log "checking for prompt file"
-if [ -f /yoloai/prompt.txt ]; then
+if [ -f "$YOLOAI_DIR/prompt.txt" ]; then
     debug_log "delivering prompt"
-    tmux load-buffer /yoloai/prompt.txt
+    tmux load-buffer "$YOLOAI_DIR/prompt.txt"
     tmux paste-buffer -t main
     # Send submit keys individually with delay to ensure TUI processes each
     sleep 0.5
@@ -150,17 +150,17 @@ if [ -f /yoloai/prompt.txt ]; then
 fi
 
 # --- Status monitor ---
-STATUS_FILE="/yoloai/status.json"
+STATUS_FILE="$YOLOAI_DIR/agent-status.json"
 write_status() { printf '{"status":"%s","exit_code":%s,"timestamp":%d}\n' "$1" "$2" "$(date +%s)" > "$STATUS_FILE"; }
 # If no prompt was delivered, the agent is waiting for input — start as idle.
-if [ -f /yoloai/prompt.txt ]; then
+if [ -f "$YOLOAI_DIR/prompt.txt" ]; then
     write_status active null
     set_title "$SANDBOX_NAME"
 else
     write_status idle null
     set_title "> $SANDBOX_NAME"
 fi
-python3 /yoloai/status-monitor.py "$CONFIG" "$STATUS_FILE" &
+python3 "$YOLOAI_DIR/bin/status-monitor.py" "$CONFIG" "$STATUS_FILE" &
 
 debug_log "entrypoint setup complete, blocking on tmux wait"
 

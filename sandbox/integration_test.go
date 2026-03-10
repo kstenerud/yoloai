@@ -146,9 +146,9 @@ func TestIntegration_CreateNoStart(t *testing.T) {
 	assert.FileExists(t, filepath.Join(workDir, "main.go"))
 
 	// Verify standard subdirs
-	assert.DirExists(t, filepath.Join(sandboxDir, "agent-state"))
-	assert.FileExists(t, filepath.Join(sandboxDir, "meta.json"))
-	assert.FileExists(t, filepath.Join(sandboxDir, "config.json"))
+	assert.DirExists(t, filepath.Join(sandboxDir, AgentRuntimeDir))
+	assert.FileExists(t, filepath.Join(sandboxDir, EnvironmentFile))
+	assert.FileExists(t, filepath.Join(sandboxDir, RuntimeConfigFile))
 }
 
 func TestIntegration_CopyMode(t *testing.T) {

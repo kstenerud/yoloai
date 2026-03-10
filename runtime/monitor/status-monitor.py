@@ -417,11 +417,11 @@ STABILITY_THRESHOLDS = {
 }
 
 
-def build_detectors(config, status_file, tmux_sock=None):
-    """Instantiate detectors based on config.json detector list."""
+def build_detectors(config, status_file, tmux_sock=None, yoloai_dir=None):
+    """Instantiate detectors based on runtime-config.json detector list."""
     detector_names = config.get("detectors", [])
     idle = config.get("idle", {})
-    log_path = "/yoloai/log.txt"
+    log_path = os.path.join(yoloai_dir, "log.txt") if yoloai_dir else "/yoloai/log.txt"
     detectors = []
 
     for name in detector_names:
@@ -493,15 +493,18 @@ def run_monitor(config_path, status_file, tmux_sock=None):
     with open(config_path) as f:
         config = json.load(f)
 
+    # Derive yoloai_dir from config path (e.g. /yoloai/runtime-config.json → /yoloai)
+    yoloai_dir = os.path.dirname(os.path.abspath(config_path))
+
     # Enable debug logging if config.debug is set or YOLOAI_MONITOR_DEBUG env var
     if config.get("debug", False) or os.environ.get("YOLOAI_MONITOR_DEBUG"):
         try:
-            DEBUG_LOG = open("/yoloai/monitor.log", "a")
+            DEBUG_LOG = open(os.path.join(yoloai_dir, "monitor.log"), "a")
         except OSError:
             pass
 
     sandbox_name = config.get("sandbox_name", "sandbox")
-    detectors = build_detectors(config, status_file, tmux_sock)
+    detectors = build_detectors(config, status_file, tmux_sock, yoloai_dir)
 
     debug(f"monitor started: sandbox={sandbox_name} detectors={[d.name for d in detectors]}")
     debug(f"platform: linux={IS_LINUX} macos={IS_MACOS}")

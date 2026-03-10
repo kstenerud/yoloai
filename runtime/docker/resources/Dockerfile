@@ -99,14 +99,15 @@ RUN curl -fsSL "https://github.com/tianon/gosu/releases/download/${GOSU_VERSION}
 RUN groupadd -g 1001 yoloai \
     && useradd -m -u 1001 -g yoloai -s /bin/bash yoloai
 
-# Internal directory for sandbox state files
-RUN mkdir -p /yoloai && chown yoloai:yoloai /yoloai
+# Internal directory for sandbox runtime files
+ENV YOLOAI_DIR=/yoloai
+RUN mkdir -p /yoloai/bin /yoloai/tmux && chown -R yoloai:yoloai /yoloai
 
-COPY tmux.conf /yoloai/tmux.conf
-COPY entrypoint.sh /yoloai/entrypoint.sh
-COPY entrypoint-user.sh /yoloai/entrypoint-user.sh
-COPY status-monitor.py /yoloai/status-monitor.py
-COPY diagnose-idle.sh /yoloai/diagnose-idle.sh
-RUN chmod +x /yoloai/entrypoint.sh /yoloai/entrypoint-user.sh /yoloai/diagnose-idle.sh
+COPY tmux.conf /yoloai/tmux/tmux.conf
+COPY entrypoint.sh /yoloai/bin/entrypoint.sh
+COPY entrypoint-user.sh /yoloai/bin/entrypoint-user.sh
+COPY status-monitor.py /yoloai/bin/status-monitor.py
+COPY diagnose-idle.sh /yoloai/bin/diagnose-idle.sh
+RUN chmod +x /yoloai/bin/entrypoint.sh /yoloai/bin/entrypoint-user.sh /yoloai/bin/diagnose-idle.sh
 
-ENTRYPOINT ["/yoloai/entrypoint.sh"]
+ENTRYPOINT ["/yoloai/bin/entrypoint.sh"]

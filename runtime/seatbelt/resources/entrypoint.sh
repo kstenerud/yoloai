@@ -6,23 +6,24 @@ set -euo pipefail
 
 # Arguments: path to the sandbox directory
 SANDBOX_DIR="${1:?usage: entrypoint.sh <sandbox-dir>}"
+export YOLOAI_DIR="$SANDBOX_DIR"
 
 # Capture all entrypoint output to log.txt (plain redirect — no tee needed
 # since seatbelt has no "docker logs" equivalent to preserve, and process
 # substitution >(tee ...) is blocked by sandbox-exec's /dev/fd restrictions)
-exec >>"$SANDBOX_DIR/log.txt" 2>&1
+exec >>"$YOLOAI_DIR/log.txt" 2>&1
 
-CONFIG="$SANDBOX_DIR/config.json"
-TMUX_SOCK="$SANDBOX_DIR/tmux.sock"
+CONFIG="$YOLOAI_DIR/runtime-config.json"
+TMUX_SOCK="$YOLOAI_DIR/$( [ -d "$YOLOAI_DIR/tmux" ] && echo 'tmux/tmux.sock' || echo 'tmux.sock' )"
 DEBUG=$(jq -r '.debug // false' "$CONFIG")
 debug_log() { [ "$DEBUG" = "true" ] && echo "[debug] $*" || true; }
 
-debug_log "entrypoint starting (sandbox=$SANDBOX_DIR)"
+debug_log "entrypoint starting (sandbox=$YOLOAI_DIR)"
 
 # --- Set up HOME redirection ---
 debug_log "setting up HOME redirection"
 ORIGINAL_HOME="$HOME"
-export HOME="$SANDBOX_DIR/home"
+export HOME="$YOLOAI_DIR/home"
 mkdir -p "$HOME/.local/bin"
 export PATH="$HOME/.local/bin:$PATH"
 
@@ -46,14 +47,19 @@ if [ -d "$ORIGINAL_HOME/.config/git" ]; then
     [ ! -e "$HOME/.config/git" ] && ln -sf "$ORIGINAL_HOME/.config/git" "$HOME/.config/git"
 fi
 
-# Symlink agent state dir (e.g. .claude, .gemini) to agent-state
+# Symlink agent state dir (e.g. .claude, .gemini) to agent-runtime
 STATE_DIR_NAME=$(jq -r '.state_dir_name // empty' "$CONFIG")
-if [ -n "$STATE_DIR_NAME" ] && [ ! -L "$HOME/$STATE_DIR_NAME" ]; then
-    ln -sf "$SANDBOX_DIR/agent-state" "$HOME/$STATE_DIR_NAME"
+if [ -n "$STATE_DIR_NAME" ]; then
+    # Support both old and new agent runtime dir names
+    AGENT_DIR="$YOLOAI_DIR/agent-runtime"
+    [ -d "$AGENT_DIR" ] || AGENT_DIR="$YOLOAI_DIR/agent-state"
+    if [ ! -L "$HOME/$STATE_DIR_NAME" ]; then
+        ln -sf "$AGENT_DIR" "$HOME/$STATE_DIR_NAME"
+    fi
 fi
 
 # Symlink home-seed files (e.g. .claude.json) into HOME
-HOME_SEED="$SANDBOX_DIR/home-seed"
+HOME_SEED="$YOLOAI_DIR/home-seed"
 if [ -d "$HOME_SEED" ]; then
     for f in "$HOME_SEED"/*  "$HOME_SEED"/.*; do
         [ -e "$f" ] || continue
@@ -67,7 +73,7 @@ fi
 
 # --- Read secrets and export as env vars ---
 debug_log "reading secrets"
-SECRETS_DIR="$SANDBOX_DIR/secrets"
+SECRETS_DIR="$YOLOAI_DIR/secrets"
 if [ -d "$SECRETS_DIR" ]; then
     for secret in "$SECRETS_DIR"/*; do
         [ -f "$secret" ] || continue
@@ -99,13 +105,17 @@ set_title() { tmux -S "$TMUX_SOCK" rename-window -t main "$1" 2>/dev/null || tru
 debug_log "starting tmux session (tmux_conf=$TMUX_CONF)"
 cd "$WORKING_DIR"
 
+# Locate tmux config (new layout: tmux/tmux.conf, legacy: tmux.conf at root)
+TMUX_CONF_FILE="$YOLOAI_DIR/tmux/tmux.conf"
+[ -f "$TMUX_CONF_FILE" ] || TMUX_CONF_FILE="$YOLOAI_DIR/tmux.conf"
+
 TMUX_ARGS=(-S "$TMUX_SOCK")
 case "$TMUX_CONF" in
     default+host)
-        TMUX_ARGS+=(-f "$SANDBOX_DIR/tmux.conf")
+        TMUX_ARGS+=(-f "$TMUX_CONF_FILE")
         ;;
     default)
-        TMUX_ARGS+=(-f "$SANDBOX_DIR/tmux.conf")
+        TMUX_ARGS+=(-f "$TMUX_CONF_FILE")
         ;;
     host)
         if [ -f "$HOME/.tmux.conf" ]; then
@@ -121,7 +131,7 @@ if [ "$TMUX_CONF" = "default+host" ] && [ -f "$HOME/.tmux.conf" ]; then
 fi
 
 tmux -S "$TMUX_SOCK" set-option -t main remain-on-exit on
-tmux -S "$TMUX_SOCK" pipe-pane -t main "cat >> $SANDBOX_DIR/log.txt"
+tmux -S "$TMUX_SOCK" pipe-pane -t main "cat >> $YOLOAI_DIR/log.txt"
 
 # --- Launch agent inside tmux ---
 debug_log "launching agent: $AGENT_COMMAND"
@@ -182,7 +192,7 @@ fi
 
 # --- Deliver prompt if present ---
 debug_log "checking for prompt file"
-PROMPT_FILE="$SANDBOX_DIR/prompt.txt"
+PROMPT_FILE="$YOLOAI_DIR/prompt.txt"
 if [ -f "$PROMPT_FILE" ]; then
     debug_log "delivering prompt"
     tmux -S "$TMUX_SOCK" load-buffer "$PROMPT_FILE"
@@ -195,7 +205,7 @@ if [ -f "$PROMPT_FILE" ]; then
 fi
 
 # --- Status monitor ---
-STATUS_FILE="$SANDBOX_DIR/status.json"
+STATUS_FILE="$YOLOAI_DIR/agent-status.json"
 write_status() { printf '{"status":"%s","exit_code":%s,"timestamp":%d}\n' "$1" "$2" "$(date +%s)" > "$STATUS_FILE"; }
 # If no prompt was delivered, the agent is waiting for input — start as idle.
 if [ -f "$PROMPT_FILE" ]; then
@@ -206,10 +216,13 @@ else
     set_title "> $SANDBOX_NAME"
 fi
 # Launch Python status monitor with per-sandbox tmux socket.
+# Locate script (new layout: bin/, legacy: root)
+MONITOR_SCRIPT="$YOLOAI_DIR/bin/status-monitor.py"
+[ -f "$MONITOR_SCRIPT" ] || MONITOR_SCRIPT="$YOLOAI_DIR/status-monitor.py"
 if ! command -v python3 >/dev/null 2>&1; then
     echo "ERROR: Python 3 required for status monitoring. Install Xcode Command Line Tools: xcode-select --install" >&2
 fi
-python3 "$SANDBOX_DIR/status-monitor.py" "$CONFIG" "$STATUS_FILE" "$TMUX_SOCK" &
+python3 "$MONITOR_SCRIPT" "$CONFIG" "$STATUS_FILE" "$TMUX_SOCK" &
 
 debug_log "entrypoint setup complete, blocking on tmux wait"
 

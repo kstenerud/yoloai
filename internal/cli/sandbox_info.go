@@ -42,7 +42,7 @@ func newSandboxInfoCmd() *cobra.Command {
 					}
 					result := infoJSON{
 						Info:          info,
-						ConfigPath:    filepath.Join(sandbox.Dir(name), "config.json"),
+						ConfigPath:    filepath.Join(sandbox.Dir(name), sandbox.RuntimeConfigFile),
 						PromptPreview: loadPromptPreview(sandbox.Dir(name)),
 					}
 					return writeJSON(cmd.OutOrStdout(), result)
@@ -69,8 +69,8 @@ func newSandboxInfoCmd() *cobra.Command {
 				}
 
 				sandboxDir := sandbox.Dir(name)
-				fmt.Fprintf(w, "Sandbox dir: %s\n", sandboxDir)                               //nolint:errcheck
-				fmt.Fprintf(w, "Config:      %s\n", filepath.Join(sandboxDir, "config.json")) //nolint:errcheck
+				fmt.Fprintf(w, "Sandbox dir: %s\n", sandboxDir)                                           //nolint:errcheck
+				fmt.Fprintf(w, "Config:      %s\n", filepath.Join(sandboxDir, sandbox.RuntimeConfigFile)) //nolint:errcheck
 
 				if preview := loadPromptPreview(sandboxDir); preview != "" {
 					fmt.Fprintf(w, "Prompt:      %s\n", preview) //nolint:errcheck

@@ -28,7 +28,16 @@ const (
 	vmLogFileName = "vm.log"
 
 	// tartConfigFileName stores the instance config for Start to use.
-	tartConfigFileName = "tart-instance.json"
+	tartConfigFileName = "instance.json"
+
+	// backendDir holds backend-specific files within the sandbox directory.
+	backendDir = "backend"
+
+	// binDir holds executable scripts within the sandbox directory.
+	binDir = "bin"
+
+	// tmuxDir holds tmux configuration within the sandbox directory.
+	tmuxDir = "tmux"
 
 	// sharedDirName is the VirtioFS share name used for yoloai state.
 	sharedDirName = "yoloai"
@@ -105,7 +114,11 @@ func (r *Runtime) Create(ctx context.Context, cfg runtime.InstanceConfig) error 
 	if err != nil {
 		return fmt.Errorf("marshal instance config: %w", err)
 	}
-	if err := os.WriteFile(filepath.Join(sandboxPath, tartConfigFileName), cfgData, 0600); err != nil {
+	// Ensure backend dir exists
+	if err := os.MkdirAll(filepath.Join(sandboxPath, backendDir), 0750); err != nil {
+		return fmt.Errorf("create backend dir: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(sandboxPath, backendDir, tartConfigFileName), cfgData, 0600); err != nil {
 		return fmt.Errorf("write instance config: %w", err)
 	}
 
@@ -123,7 +136,7 @@ func (r *Runtime) Start(ctx context.Context, name string) error {
 
 	// Load instance config saved by Create
 	var cfg runtime.InstanceConfig
-	cfgPath := filepath.Join(sandboxPath, tartConfigFileName)
+	cfgPath := filepath.Join(sandboxPath, backendDir, tartConfigFileName)
 	cfgData, err := os.ReadFile(cfgPath) //nolint:gosec // G304: path within sandbox dir
 	if err != nil {
 		return fmt.Errorf("read instance config: %w", err)
@@ -136,7 +149,7 @@ func (r *Runtime) Start(ctx context.Context, name string) error {
 	args := r.buildRunArgs(name, sandboxPath, cfg.Mounts)
 
 	// Open log file for stderr capture
-	logPath := filepath.Join(sandboxPath, vmLogFileName)
+	logPath := filepath.Join(sandboxPath, backendDir, vmLogFileName)
 	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600) //nolint:gosec // G304: sandboxPath is ~/.yoloai/sandboxes/<name>
 	if err != nil {
 		return fmt.Errorf("open VM log: %w", err)
@@ -160,7 +173,7 @@ func (r *Runtime) Start(ctx context.Context, name string) error {
 	}
 
 	// Write PID file
-	pidPath := filepath.Join(sandboxPath, pidFileName)
+	pidPath := filepath.Join(sandboxPath, backendDir, pidFileName)
 	if err := os.WriteFile(pidPath, []byte(strconv.Itoa(cmd.Process.Pid)), 0600); err != nil {
 		// Kill the process we just started if we can't track it
 		_ = cmd.Process.Kill()
@@ -212,7 +225,8 @@ func (r *Runtime) Remove(ctx context.Context, name string) error {
 
 	if !r.vmExists(ctx, name) {
 		// Clean up stale PID file
-		_ = os.Remove(filepath.Join(sandboxPath, pidFileName))
+		_ = os.Remove(filepath.Join(sandboxPath, backendDir, pidFileName))
+		_ = os.Remove(filepath.Join(sandboxPath, "tart.pid")) // legacy
 		return nil
 	}
 
@@ -220,7 +234,8 @@ func (r *Runtime) Remove(ctx context.Context, name string) error {
 		return fmt.Errorf("delete VM: %w", err)
 	}
 
-	_ = os.Remove(filepath.Join(sandboxPath, pidFileName))
+	_ = os.Remove(filepath.Join(sandboxPath, backendDir, pidFileName))
+	_ = os.Remove(filepath.Join(sandboxPath, "tart.pid")) // legacy
 
 	return nil
 }
@@ -272,7 +287,7 @@ func (r *Runtime) Close() error {
 
 // DiagHint returns a Tart-specific hint for checking logs.
 func (r *Runtime) DiagHint(instanceName string) string {
-	logPath := filepath.Join(r.sandboxDir, sandboxName(instanceName), vmLogFileName)
+	logPath := filepath.Join(r.sandboxDir, sandboxName(instanceName), backendDir, vmLogFileName)
 	return fmt.Sprintf("check VM log at %s", logPath)
 }
 
@@ -573,32 +588,32 @@ func (r *Runtime) runSetupScript(ctx context.Context, vmName, sandboxPath string
 		}
 	}
 
-	// Patch config.json to remap working_dir for macOS VM paths
+	// Patch runtime-config.json to remap working_dir for macOS VM paths
 	if err := r.patchConfigWorkingDir(sandboxPath); err != nil {
 		return fmt.Errorf("patch config working dir: %w", err)
 	}
 
 	// Write setup script, status monitor, and tmux config to sandbox dir (shared via VirtioFS)
-	scriptPath := filepath.Join(sandboxPath, "setup.sh")
+	scriptPath := filepath.Join(sandboxPath, binDir, "setup.sh")
 	if err := os.WriteFile(scriptPath, embeddedSetupScript, 0755); err != nil { //nolint:gosec // G306: script needs exec permission
 		return fmt.Errorf("write setup script: %w", err)
 	}
-	monitorPath := filepath.Join(sandboxPath, "status-monitor.py")
+	monitorPath := filepath.Join(sandboxPath, binDir, "status-monitor.py")
 	if err := os.WriteFile(monitorPath, monitor.Script(), 0644); err != nil { //nolint:gosec // G306: script content, not user input
 		return fmt.Errorf("write status monitor: %w", err)
 	}
-	diagPath := filepath.Join(sandboxPath, "diagnose-idle.sh")
+	diagPath := filepath.Join(sandboxPath, binDir, "diagnose-idle.sh")
 	if err := os.WriteFile(diagPath, monitor.DiagnoseScript(), 0755); err != nil { //nolint:gosec // G306: script needs exec permission
 		return fmt.Errorf("write diagnose script: %w", err)
 	}
-	tmuxConfPath := filepath.Join(sandboxPath, "tmux.conf")
+	tmuxConfPath := filepath.Join(sandboxPath, tmuxDir, "tmux.conf")
 	if err := os.WriteFile(tmuxConfPath, embeddedTmuxConf, 0600); err != nil {
 		return fmt.Errorf("write tmux.conf: %w", err)
 	}
 
 	// Run the setup script in the background inside the VM.
 	// Paths must be quoted — VirtioFS mount path contains spaces.
-	setupCmd := fmt.Sprintf("nohup '%s/setup.sh' '%s' </dev/null >'%s/setup.log' 2>&1 &",
+	setupCmd := fmt.Sprintf("nohup '%s/bin/setup.sh' '%s' </dev/null >'%s/setup.log' 2>&1 &",
 		vmSharedDir, vmSharedDir, vmSharedDir)
 	args := execArgs(vmName, "bash", "-c", setupCmd)
 	_, err := r.runTart(ctx, args...)
@@ -609,9 +624,9 @@ func (r *Runtime) runSetupScript(ctx context.Context, vmName, sandboxPath string
 	return nil
 }
 
-// patchConfigWorkingDir reads config.json, remaps working_dir for macOS, and writes it back.
+// patchConfigWorkingDir reads runtime-config.json, remaps working_dir for macOS, and writes it back.
 func (r *Runtime) patchConfigWorkingDir(sandboxPath string) error {
-	cfgPath := filepath.Join(sandboxPath, "config.json")
+	cfgPath := filepath.Join(sandboxPath, "runtime-config.json")
 	data, err := os.ReadFile(cfgPath) //nolint:gosec // G304: path within sandbox dir
 	if err != nil {
 		return err
@@ -664,7 +679,7 @@ func (r *Runtime) stopVM(ctx context.Context, vmName string) {
 
 // killByPID reads the PID file and kills the process.
 func (r *Runtime) killByPID(sandboxPath string) {
-	pidPath := filepath.Join(sandboxPath, pidFileName)
+	pidPath := filepath.Join(sandboxPath, backendDir, pidFileName)
 	data, err := os.ReadFile(pidPath) //nolint:gosec // G304: path is within ~/.yoloai/
 	if err != nil {
 		return

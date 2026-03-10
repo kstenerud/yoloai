@@ -56,7 +56,7 @@ func loadIsolatedMeta(name string) (string, *sandbox.Meta, error) {
 	return sandboxDir, meta, nil
 }
 
-// saveNetworkAllowlist persists an updated allowlist to both meta.json and config.json.
+// saveNetworkAllowlist persists an updated allowlist to both environment.json and runtime-config.json.
 func saveNetworkAllowlist(sandboxDir string, meta *sandbox.Meta) error {
 	if err := sandbox.SaveMeta(sandboxDir, meta); err != nil {
 		return err

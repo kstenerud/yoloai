@@ -1,6 +1,6 @@
 package sandbox
 
-// ABOUTME: Copies user-configured agent files into sandbox agent-state directory.
+// ABOUTME: Copies user-configured agent files into sandbox agent-runtime directory.
 // ABOUTME: Supports string form (base directory) and list form (explicit paths).
 
 import (
@@ -16,12 +16,12 @@ import (
 )
 
 // copyAgentFiles copies user-configured agent files into the sandbox's
-// agent-state directory. Supports two forms:
+// agent-runtime directory. Supports two forms:
 //   - String form (BaseDir): copies the agent's state subdir from the base
 //     directory, applying AgentFilesExclude patterns.
-//   - List form (Files): copies each listed file/directory into agent-state.
+//   - List form (Files): copies each listed file/directory into agent-runtime.
 //
-// Files that already exist in agent-state are never overwritten (SeedFiles win).
+// Files that already exist in agent-runtime are never overwritten (SeedFiles win).
 // Returns nil if agentFiles is nil or the agent has no StateDir.
 func copyAgentFiles(agentDef *agent.Definition, sandboxDir string, agentFiles *config.AgentFilesConfig) error {
 	if agentFiles == nil {
@@ -37,7 +37,7 @@ func copyAgentFiles(agentDef *agent.Definition, sandboxDir string, agentFiles *c
 
 // copyAgentFilesFromBaseDir copies the agent's state directory from a base
 // directory. For example, if baseDir is "/home/user" and the agent is Claude,
-// it copies from /home/user/.claude/ into agent-state/.
+// it copies from /home/user/.claude/ into agent-runtime/.
 // Applies AgentFilesExclude patterns and skips files that already exist.
 func copyAgentFilesFromBaseDir(agentDef *agent.Definition, sandboxDir, baseDir string) error {
 	relPath := agentDef.StateRelPath()
@@ -50,7 +50,7 @@ func copyAgentFilesFromBaseDir(agentDef *agent.Definition, sandboxDir, baseDir s
 		return nil // source doesn't exist, skip silently
 	}
 
-	agentStateDir := filepath.Join(sandboxDir, "agent-state")
+	agentStateDir := filepath.Join(sandboxDir, AgentRuntimeDir)
 
 	return filepath.WalkDir(srcDir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
@@ -91,11 +91,11 @@ func copyAgentFilesFromBaseDir(agentDef *agent.Definition, sandboxDir, baseDir s
 	})
 }
 
-// copyAgentFilesList copies explicit file/directory paths into agent-state.
-// Each entry is copied to agent-state/basename. Missing entries are skipped.
+// copyAgentFilesList copies explicit file/directory paths into agent-runtime.
+// Each entry is copied to agent-runtime/basename. Missing entries are skipped.
 // Existing files are not overwritten.
 func copyAgentFilesList(sandboxDir string, files []string) error {
-	agentStateDir := filepath.Join(sandboxDir, "agent-state")
+	agentStateDir := filepath.Join(sandboxDir, AgentRuntimeDir)
 
 	for _, src := range files {
 		info, err := os.Stat(src)

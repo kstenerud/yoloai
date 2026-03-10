@@ -3,16 +3,17 @@
 # Run inside a yoloai sandbox to diagnose idle detection issues.
 set -uo pipefail
 
-CONFIG="/yoloai/config.json"
-STATUS="/yoloai/status.json"
-LOG="/yoloai/monitor.log"
+YOLOAI_DIR="${YOLOAI_DIR:-/yoloai}"
+CONFIG="$YOLOAI_DIR/runtime-config.json"
+STATUS="$YOLOAI_DIR/agent-status.json"
+LOG="$YOLOAI_DIR/monitor.log"
 
 echo "=== Idle Detection Diagnostic ==="
 echo "Time: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 echo
 
 # 1. Current status
-echo "--- status.json ---"
+echo "--- agent-status.json ---"
 if [ -f "$STATUS" ]; then
     cat "$STATUS"
     TS=$(jq -r '.timestamp // 0' "$STATUS" 2>/dev/null)
@@ -89,7 +90,7 @@ HOOK_IDLE=$(jq -r '.idle.Hook // false' "$CONFIG" 2>/dev/null)
 if [ "$HOOK_IDLE" = "true" ]; then
     echo "--- Hook detector ---"
     echo "Hook-based idle: enabled"
-    SETTINGS="/home/yoloai/.claude/settings.json"
+    SETTINGS="$HOME/.claude/settings.json"
     if [ -f "$SETTINGS" ]; then
         echo "Hooks in settings.json:"
         jq '.hooks // "none"' "$SETTINGS" 2>/dev/null

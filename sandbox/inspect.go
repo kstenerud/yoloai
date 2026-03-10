@@ -165,9 +165,13 @@ func DetectStatus(ctx context.Context, rt runtime.Runtime, containerName string,
 		return StatusStopped, nil
 	}
 
-	// Try status.json first (fast path — no exec)
+	// Try agent-status.json first (fast path — no exec), with legacy fallback
 	if sandboxDir != "" {
-		data, readErr := os.ReadFile(filepath.Join(sandboxDir, "status.json")) //nolint:gosec // path is sandbox-controlled
+		statusPath := filepath.Join(sandboxDir, AgentStatusFile)
+		if _, statErr := os.Stat(statusPath); os.IsNotExist(statErr) {
+			statusPath = filepath.Join(sandboxDir, legacyStatusFile) // legacy fallback
+		}
+		data, readErr := os.ReadFile(statusPath) //nolint:gosec // path is sandbox-controlled
 		if readErr == nil && len(data) > 0 {
 			if status, ok := parseStatusJSON(data); ok {
 				return status, nil
