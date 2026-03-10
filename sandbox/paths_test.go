@@ -217,8 +217,7 @@ func TestWorkDir(t *testing.T) {
 	assert.Equal(t, expected, WorkDir("my-sandbox", "/home/user/project"))
 }
 
-func TestContainerName(t *testing.T) {
-	assert.Equal(t, "yoloai-mybox", ContainerName("mybox"))
+func TestInstanceName(t *testing.T) {
 	assert.Equal(t, "yoloai-mybox", InstanceName("mybox"))
 }
 

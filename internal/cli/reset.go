@@ -42,7 +42,7 @@ func newResetCmd() *cobra.Command {
 					NoRestart: noRestart,
 					Debug:     debug,
 				}); err != nil {
-					return err
+					return sandboxErrorHint(name, err)
 				}
 
 				if jsonEnabled(cmd) {

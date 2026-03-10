@@ -14,8 +14,7 @@ export YOLOAI_DIR="$SANDBOX_DIR"
 exec >>"$YOLOAI_DIR/log.txt" 2>&1
 
 CONFIG="$YOLOAI_DIR/runtime-config.json"
-[ -f "$CONFIG" ] || CONFIG="$YOLOAI_DIR/config.json"
-TMUX_SOCK="$YOLOAI_DIR/$( [ -d "$YOLOAI_DIR/tmux" ] && echo 'tmux/tmux.sock' || echo 'tmux.sock' )"
+TMUX_SOCK="$YOLOAI_DIR/tmux/tmux.sock"
 DEBUG=$(jq -r '.debug // false' "$CONFIG")
 debug_log() { [ "$DEBUG" = "true" ] && echo "[debug] $*" || true; }
 
@@ -51,9 +50,7 @@ fi
 # Symlink agent state dir (e.g. .claude, .gemini) to agent-runtime
 STATE_DIR_NAME=$(jq -r '.state_dir_name // empty' "$CONFIG")
 if [ -n "$STATE_DIR_NAME" ]; then
-    # Support both old and new agent runtime dir names
     AGENT_DIR="$YOLOAI_DIR/agent-runtime"
-    [ -d "$AGENT_DIR" ] || AGENT_DIR="$YOLOAI_DIR/agent-state"
     if [ ! -L "$HOME/$STATE_DIR_NAME" ]; then
         ln -sf "$AGENT_DIR" "$HOME/$STATE_DIR_NAME"
     fi
@@ -106,9 +103,7 @@ set_title() { tmux -S "$TMUX_SOCK" rename-window -t main "$1" 2>/dev/null || tru
 debug_log "starting tmux session (tmux_conf=$TMUX_CONF)"
 cd "$WORKING_DIR"
 
-# Locate tmux config (new layout: tmux/tmux.conf, legacy: tmux.conf at root)
 TMUX_CONF_FILE="$YOLOAI_DIR/tmux/tmux.conf"
-[ -f "$TMUX_CONF_FILE" ] || TMUX_CONF_FILE="$YOLOAI_DIR/tmux.conf"
 
 TMUX_ARGS=(-S "$TMUX_SOCK")
 case "$TMUX_CONF" in
@@ -217,9 +212,7 @@ else
     set_title "> $SANDBOX_NAME"
 fi
 # Launch Python status monitor with per-sandbox tmux socket.
-# Locate script (new layout: bin/, legacy: root)
 MONITOR_SCRIPT="$YOLOAI_DIR/bin/status-monitor.py"
-[ -f "$MONITOR_SCRIPT" ] || MONITOR_SCRIPT="$YOLOAI_DIR/status-monitor.py"
 if ! command -v python3 >/dev/null 2>&1; then
     echo "ERROR: Python 3 required for status monitoring. Install Xcode Command Line Tools: xcode-select --install" >&2
 fi

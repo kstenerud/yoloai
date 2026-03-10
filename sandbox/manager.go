@@ -106,11 +106,6 @@ func (m *Manager) EnsureSetupNonInteractive(ctx context.Context) error {
 	}
 	yoloaiDir := filepath.Join(homeDir, ".yoloai")
 
-	// Migrate old layout before anything else
-	if err := config.MigrateIfNeeded(yoloaiDir); err != nil {
-		return fmt.Errorf("migrate: %w", err)
-	}
-
 	// Create directory structure
 	for _, sub := range []string{"sandboxes", "profiles", "cache"} {
 		dir := filepath.Join(yoloaiDir, sub)
@@ -144,11 +139,6 @@ func (m *Manager) EnsureSetupNonInteractive(ctx context.Context) error {
 		if err := os.WriteFile(globalConfigPath, []byte(config.DefaultGlobalConfigYAML), 0600); err != nil {
 			return fmt.Errorf("write global config.yaml: %w", err)
 		}
-	}
-
-	// Migration: move tmux_conf from base profile config to global config
-	if err := config.MigrateGlobalSettings(configPath, globalConfigPath); err != nil {
-		return fmt.Errorf("migrate global settings: %w", err)
 	}
 
 	// Write default state.yaml if missing

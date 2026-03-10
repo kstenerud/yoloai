@@ -32,25 +32,21 @@ func SaveSandboxState(sandboxDir string, state *SandboxState) error {
 }
 
 // LoadSandboxState reads sandbox-state.json from the given sandbox directory.
-// Falls back to legacy state.json, then returns a zero-value SandboxState if
-// neither file exists (backward compatibility).
+// Returns a zero-value SandboxState if the file does not exist.
 func LoadSandboxState(sandboxDir string) (*SandboxState, error) {
 	path := filepath.Join(sandboxDir, SandboxStateFile)
-	if _, err := os.Stat(path); os.IsNotExist(err) {
-		path = filepath.Join(sandboxDir, legacySandboxState) // legacy fallback
-	}
 
 	data, err := os.ReadFile(path) //nolint:gosec // path is constructed from sandbox dir
 	if err != nil {
 		if os.IsNotExist(err) {
 			return &SandboxState{}, nil
 		}
-		return nil, fmt.Errorf("read %s: %w", filepath.Base(path), err)
+		return nil, fmt.Errorf("read %s: %w", SandboxStateFile, err)
 	}
 
 	var state SandboxState
 	if err := json.Unmarshal(data, &state); err != nil {
-		return nil, fmt.Errorf("parse %s: %w", filepath.Base(path), err)
+		return nil, fmt.Errorf("parse %s: %w", SandboxStateFile, err)
 	}
 
 	return &state, nil

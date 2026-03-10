@@ -49,6 +49,4 @@ var (
 	StatePath                = config.StatePath
 	LoadState                = config.LoadState
 	SaveState                = config.SaveState
-	MigrateIfNeeded          = config.MigrateIfNeeded
-	MigrateGlobalSettings    = config.MigrateGlobalSettings
 )

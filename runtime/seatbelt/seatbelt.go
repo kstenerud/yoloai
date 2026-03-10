@@ -252,11 +252,8 @@ func (r *Runtime) Start(ctx context.Context, name string) error {
 func (r *Runtime) Stop(_ context.Context, name string) error {
 	sandboxPath := filepath.Join(r.sandboxDir, sandboxName(name))
 
-	// Kill tmux server via socket (check both new and legacy locations)
+	// Kill tmux server via socket
 	tmuxSock := filepath.Join(sandboxPath, tmuxDir, tmuxSocketName)
-	if _, err := os.Stat(tmuxSock); os.IsNotExist(err) {
-		tmuxSock = filepath.Join(sandboxPath, tmuxSocketName) // legacy
-	}
 	if _, err := os.Stat(tmuxSock); err == nil {
 		killCmd := exec.Command("tmux", "-S", tmuxSock, "kill-server") //nolint:gosec // G204: path within sandbox dir
 		_ = killCmd.Run()
@@ -274,11 +271,8 @@ func (r *Runtime) Remove(ctx context.Context, name string) error {
 
 	_ = r.Stop(ctx, name)
 
-	// Clean up mount symlinks (check both new and legacy locations)
+	// Clean up mount symlinks
 	manifestPath := filepath.Join(sandboxPath, backendDir, symlinkManifestName)
-	if _, err := os.Stat(manifestPath); os.IsNotExist(err) {
-		manifestPath = filepath.Join(sandboxPath, symlinkManifestName) // legacy
-	}
 	if data, err := os.ReadFile(manifestPath); err == nil { //nolint:gosec // G304: path within sandbox dir
 		for _, linkPath := range strings.Split(strings.TrimSpace(string(data)), "\n") {
 			if linkPath == "" {
@@ -291,23 +285,9 @@ func (r *Runtime) Remove(ctx context.Context, name string) error {
 		}
 	}
 
-	// Clean up new layout subdirectories
+	// Clean up subdirectories
 	for _, d := range []string{backendDir, binDir, tmuxDir} {
 		_ = os.RemoveAll(filepath.Join(sandboxPath, d))
-	}
-
-	// Clean up legacy seatbelt-specific files (for old sandboxes)
-	for _, f := range []string{
-		"seatbelt.pid",
-		"profile.sb",
-		"seatbelt-instance.json",
-		"seatbelt.log",
-		"tmux.sock",
-		"entrypoint.sh",
-		"tmux.conf",
-		"mount-symlinks.txt",
-	} {
-		_ = os.Remove(filepath.Join(sandboxPath, f))
 	}
 
 	// Clean up secrets directory
@@ -322,11 +302,7 @@ func (r *Runtime) Inspect(_ context.Context, name string) (runtime.InstanceInfo,
 
 	pidPath := filepath.Join(sandboxPath, backendDir, pidFileName)
 	if _, err := os.Stat(pidPath); os.IsNotExist(err) {
-		// Check legacy location
-		pidPath = filepath.Join(sandboxPath, "seatbelt.pid")
-		if _, err := os.Stat(pidPath); os.IsNotExist(err) {
-			return runtime.InstanceInfo{}, runtime.ErrNotFound
-		}
+		return runtime.InstanceInfo{}, runtime.ErrNotFound
 	}
 
 	return runtime.InstanceInfo{
@@ -423,9 +399,6 @@ func sandboxName(instanceName string) string {
 // isRunning checks if the sandbox-exec process is alive.
 func (r *Runtime) isRunning(sandboxPath string) bool {
 	pidPath := filepath.Join(sandboxPath, backendDir, pidFileName)
-	if _, err := os.Stat(pidPath); os.IsNotExist(err) {
-		pidPath = filepath.Join(sandboxPath, "seatbelt.pid") // legacy
-	}
 	data, err := os.ReadFile(pidPath) //nolint:gosec // G304: path within sandbox dir
 	if err != nil {
 		return false
@@ -451,9 +424,6 @@ func (r *Runtime) isRunning(sandboxPath string) bool {
 // when --replace destroys and recreates the sandbox directory.
 func (r *Runtime) killByPID(sandboxPath string) {
 	pidPath := filepath.Join(sandboxPath, backendDir, pidFileName)
-	if _, err := os.Stat(pidPath); os.IsNotExist(err) {
-		pidPath = filepath.Join(sandboxPath, "seatbelt.pid") // legacy
-	}
 	data, err := os.ReadFile(pidPath) //nolint:gosec // G304: path within sandbox dir
 	if err != nil {
 		return
@@ -565,9 +535,6 @@ func (r *Runtime) buildExecCommand(sandboxPath string, cmd []string) *exec.Cmd {
 
 	// Run under sandbox-exec with the SBPL profile
 	profilePath := filepath.Join(sandboxPath, backendDir, profileFileName)
-	if _, err := os.Stat(profilePath); os.IsNotExist(err) {
-		profilePath = filepath.Join(sandboxPath, "profile.sb") // legacy
-	}
 	args := []string{"-f", profilePath}
 	args = append(args, cmd...)
 	c := exec.Command(r.sandboxExecBin, args...) //nolint:gosec // G204: args from validated sandbox state
@@ -579,9 +546,6 @@ func (r *Runtime) buildExecCommand(sandboxPath string, cmd []string) *exec.Cmd {
 	// which stores the Docker-oriented target path (the original host path),
 	// not the seatbelt copy path.
 	cfgPath := filepath.Join(sandboxPath, "runtime-config.json")
-	if _, err := os.Stat(cfgPath); os.IsNotExist(err) {
-		cfgPath = filepath.Join(sandboxPath, "config.json")
-	}
 	if data, err := os.ReadFile(cfgPath); err == nil { //nolint:gosec // G304: path within sandbox dir
 		var raw map[string]interface{}
 		if err := json.Unmarshal(data, &raw); err == nil {
@@ -597,9 +561,6 @@ func (r *Runtime) buildExecCommand(sandboxPath string, cmd []string) *exec.Cmd {
 // buildTmuxCommand injects the per-sandbox socket into a tmux command.
 func (r *Runtime) buildTmuxCommand(sandboxPath string, cmd []string) *exec.Cmd {
 	tmuxSock := filepath.Join(sandboxPath, tmuxDir, tmuxSocketName)
-	if _, err := os.Stat(tmuxSock); os.IsNotExist(err) {
-		tmuxSock = filepath.Join(sandboxPath, tmuxSocketName) // legacy
-	}
 
 	// cmd[0] is "tmux", inject -S <socket> after it
 	args := []string{"-S", tmuxSock}
@@ -627,9 +588,6 @@ func (r *Runtime) patchConfigWorkingDir(sandboxPath string, mounts []runtime.Mou
 	}
 
 	cfgPath := filepath.Join(sandboxPath, "runtime-config.json")
-	if _, err := os.Stat(cfgPath); os.IsNotExist(err) {
-		cfgPath = filepath.Join(sandboxPath, "config.json")
-	}
 	data, err := os.ReadFile(cfgPath) //nolint:gosec // G304: path within sandbox dir
 	if err != nil {
 		return err

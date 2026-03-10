@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 
@@ -148,4 +149,14 @@ func withManager(cmd *cobra.Command, backend string, fn func(ctx context.Context
 		mgr := sandbox.NewManager(rt, backend, slog.Default(), cmd.InOrStdin(), cmd.ErrOrStderr())
 		return fn(ctx, mgr)
 	})
+}
+
+// sandboxErrorHint wraps an error with the sandbox directory path and a hint
+// to use 'yoloai destroy'. Skips the hint for ErrSandboxNotFound (no directory
+// to point at).
+func sandboxErrorHint(name string, err error) error {
+	if err == nil || errors.Is(err, sandbox.ErrSandboxNotFound) {
+		return err
+	}
+	return fmt.Errorf("%w\n  sandbox dir: %s\n  to remove: yoloai destroy %s", err, sandbox.Dir(name), name)
 }

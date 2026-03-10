@@ -68,7 +68,7 @@ Use --patches to export .patch files without applying them.`,
 			// Load metadata for target directory and mode validation
 			meta, err := sandbox.LoadMeta(sandbox.Dir(name))
 			if err != nil {
-				return err
+				return sandboxErrorHint(name, err)
 			}
 			if meta.Workdir.Mode == "rw" {
 				return fmt.Errorf("apply is not needed for :rw directories — changes are already live")

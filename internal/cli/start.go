@@ -40,7 +40,7 @@ func newStartCmd() *cobra.Command {
 					Prompt:     prompt,
 					PromptFile: promptFile,
 				}); err != nil {
-					return err
+					return sandboxErrorHint(name, err)
 				}
 
 				if jsonEnabled(cmd) {

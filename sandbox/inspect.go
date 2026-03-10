@@ -150,8 +150,8 @@ type statusJSON struct {
 	Timestamp int64  `json:"timestamp"`           // unix seconds
 }
 
-// DetectStatus queries the runtime and status.json to determine sandbox status.
-// sandboxDir is the host-side sandbox directory; if empty, only exec fallback is used.
+// DetectStatus queries the runtime and agent-status.json to determine sandbox status.
+// sandboxDir is the host-side sandbox directory.
 func DetectStatus(ctx context.Context, rt runtime.Runtime, containerName string, sandboxDir string) (Status, error) {
 	info, err := rt.Inspect(ctx, containerName)
 	if err != nil {
@@ -165,12 +165,9 @@ func DetectStatus(ctx context.Context, rt runtime.Runtime, containerName string,
 		return StatusStopped, nil
 	}
 
-	// Try agent-status.json first (fast path — no exec), with legacy fallback
+	// Try agent-status.json (fast path — no exec)
 	if sandboxDir != "" {
 		statusPath := filepath.Join(sandboxDir, AgentStatusFile)
-		if _, statErr := os.Stat(statusPath); os.IsNotExist(statErr) {
-			statusPath = filepath.Join(sandboxDir, legacyStatusFile) // legacy fallback
-		}
 		data, readErr := os.ReadFile(statusPath) //nolint:gosec // path is sandbox-controlled
 		if readErr == nil && len(data) > 0 {
 			if status, ok := parseStatusJSON(data); ok {
@@ -179,8 +176,8 @@ func DetectStatus(ctx context.Context, rt runtime.Runtime, containerName string,
 		}
 	}
 
-	// Fall back to exec-based detection (old sandboxes without status monitor)
-	return detectStatusViaExec(ctx, rt, containerName)
+	// If status file is missing or stale, assume active (container is running)
+	return StatusActive, nil
 }
 
 // parseStatusJSON parses the status.json content and returns the status.
@@ -196,9 +193,7 @@ func parseStatusJSON(data []byte) (Status, bool) {
 	}
 
 	switch s.Status {
-	case "active", "running":
-		// Accept both "active" (current) and "running" (old sandboxes) for
-		// backward compatibility with status.json written by older versions.
+	case "active":
 		age := time.Since(time.Unix(s.Timestamp, 0))
 		if age > statusFileStaleness {
 			return "", false // stale — fall back to exec
@@ -225,32 +220,6 @@ func parseStatusJSON(data []byte) (Status, bool) {
 	default:
 		return "", false
 	}
-}
-
-// detectStatusViaExec falls back to exec-based tmux queries for old sandboxes
-// without the in-container status monitor.
-func detectStatusViaExec(ctx context.Context, rt runtime.Runtime, containerName string) (Status, error) {
-	output, err := execInContainer(ctx, rt, containerName, []string{
-		"tmux", "list-panes", "-t", "main", "-F", "#{pane_dead}|#{pane_dead_status}",
-	})
-	if err != nil {
-		return StatusActive, nil
-	}
-
-	parts := strings.SplitN(strings.TrimSpace(output), "|", 2)
-	if len(parts) < 2 {
-		return StatusActive, nil
-	}
-
-	if parts[0] == "0" {
-		return StatusActive, nil
-	}
-
-	// Pane is dead
-	if parts[1] == "0" {
-		return StatusDone, nil
-	}
-	return StatusFailed, nil
 }
 
 // InspectSandbox loads metadata and queries the runtime for a single sandbox.

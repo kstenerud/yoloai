@@ -37,38 +37,7 @@ const (
 
 	// BackendDir holds backend-specific files (seatbelt profile, pid, logs).
 	BackendDir = "backend"
-
-	// Legacy file/directory names for backward compatibility.
-	legacyMetaFile      = "meta.json"
-	legacySandboxState  = "state.json"
-	legacyConfigFile    = "config.json"
-	legacyStatusFile    = "status.json"
-	legacyAgentStateDir = "agent-state"
 )
-
-// ReadRuntimeConfig reads runtime-config.json from the given sandbox directory.
-// Falls back to legacy config.json for backward compatibility with older sandboxes.
-func ReadRuntimeConfig(sandboxDir string) ([]byte, error) {
-	path := filepath.Join(sandboxDir, RuntimeConfigFile)
-	if _, err := os.Stat(path); os.IsNotExist(err) {
-		path = filepath.Join(sandboxDir, legacyConfigFile)
-	}
-	return os.ReadFile(path) //nolint:gosec // path is sandbox-controlled
-}
-
-// RuntimeConfigPath returns the path to the runtime config file in the given
-// sandbox directory. Returns the new name if it exists, otherwise falls back
-// to the legacy config.json path.
-func RuntimeConfigPath(sandboxDir string) string {
-	path := filepath.Join(sandboxDir, RuntimeConfigFile)
-	if _, err := os.Stat(path); os.IsNotExist(err) {
-		legacy := filepath.Join(sandboxDir, legacyConfigFile)
-		if _, err := os.Stat(legacy); err == nil {
-			return legacy
-		}
-	}
-	return path
-}
 
 // safeASCII marks ASCII bytes that do NOT need caret encoding.
 // Safe: alphanumeric, hyphen, underscore, backtick, braces.
@@ -225,11 +194,6 @@ func ValidateName(name string) error {
 // InstanceName returns the runtime instance name for a sandbox.
 func InstanceName(name string) string {
 	return "yoloai-" + name
-}
-
-// ContainerName is an alias for InstanceName (deprecated).
-func ContainerName(name string) string {
-	return InstanceName(name)
 }
 
 // Dir returns the host-side state directory for a sandbox.

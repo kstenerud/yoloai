@@ -40,14 +40,14 @@ func runExec(cmd *cobra.Command, args []string) error {
 	return withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
 		info, err := sandbox.InspectSandbox(ctx, rt, name)
 		if err != nil {
-			return err
+			return sandboxErrorHint(name, err)
 		}
 
 		if info.Status != sandbox.StatusActive && info.Status != sandbox.StatusIdle {
 			return fmt.Errorf("sandbox %q: %w", name, sandbox.ErrContainerNotRunning)
 		}
 
-		containerName := sandbox.ContainerName(name)
+		containerName := sandbox.InstanceName(name)
 		slog.Debug("exec in container", "container", containerName, "cmd", cmdArgs)
 
 		if err := rt.InteractiveExec(ctx, containerName, cmdArgs, "yoloai", info.Meta.Workdir.MountPath); err != nil {

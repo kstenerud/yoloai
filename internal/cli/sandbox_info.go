@@ -31,7 +31,7 @@ func newSandboxInfoCmd() *cobra.Command {
 			return withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
 				info, err := sandbox.InspectSandbox(ctx, rt, name)
 				if err != nil {
-					return err
+					return sandboxErrorHint(name, err)
 				}
 
 				if jsonEnabled(cmd) {

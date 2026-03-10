@@ -295,6 +295,10 @@ func TestStart_Resume_DoneStatus(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, RuntimeConfigFile), cfgData, 0600))
 
+	// Write agent-status.json indicating done (exit code 0)
+	statusData := fmt.Sprintf(`{"status":"done","exit_code":0,"timestamp":%d}`, time.Now().Unix())
+	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, AgentStatusFile), []byte(statusData), 0600))
+
 	// Track exec calls
 	var execCalls [][]string
 	mock := &lifecycleMockRuntime{
@@ -305,10 +309,6 @@ func TestStart_Resume_DoneStatus(t *testing.T) {
 	// Override Exec to capture calls
 	mock.execFn = func(_ context.Context, _ string, cmd []string, _ string) (runtime.ExecResult, error) {
 		execCalls = append(execCalls, cmd)
-		// Status detection: tmux list-panes — return pipe-delimited "1|0|" to indicate done (pane dead, exit 0)
-		if len(cmd) > 0 && cmd[0] == "tmux" && len(cmd) > 1 && cmd[1] == "list-panes" {
-			return runtime.ExecResult{Stdout: "1|0|\n"}, nil
-		}
 		// respawn-pane will succeed
 		if len(cmd) > 0 && cmd[0] == "tmux" && len(cmd) > 1 && cmd[1] == "respawn-pane" {
 			return runtime.ExecResult{}, nil
@@ -532,7 +532,7 @@ func TestDestroy_SandboxNotFound(t *testing.T) {
 	mock := &lifecycleMockRuntime{}
 	mgr := newLifecycleMgr(mock)
 	err := mgr.Destroy(context.Background(), "nonexistent")
-	assert.ErrorIs(t, err, ErrSandboxNotFound)
+	assert.NoError(t, err)
 }
 
 // Reset tests

@@ -286,42 +286,44 @@ func TestDetectStatus_Running(t *testing.T) {
 }
 
 func TestDetectStatus_Done(t *testing.T) {
+	dir := t.TempDir()
+	exitCode := 0
+	statusData := fmt.Sprintf(`{"status":"done","exit_code":%d,"timestamp":%d}`, exitCode, time.Now().Unix())
+	require.NoError(t, os.WriteFile(filepath.Join(dir, AgentStatusFile), []byte(statusData), 0600))
+
 	mock := &inspectMockRuntime{
 		inspectFn: func(_ context.Context, _ string) (runtime.InstanceInfo, error) {
 			return runtime.InstanceInfo{Running: true}, nil
 		},
-		execFn: func(_ context.Context, _ string, _ []string, _ string) (runtime.ExecResult, error) {
-			return runtime.ExecResult{Stdout: "1|0"}, nil
-		},
 	}
-	status, err := DetectStatus(context.Background(), mock, "test", "")
+	status, err := DetectStatus(context.Background(), mock, "test", dir)
 	require.NoError(t, err)
 	assert.Equal(t, StatusDone, status)
 }
 
 func TestDetectStatus_Failed(t *testing.T) {
+	dir := t.TempDir()
+	exitCode := 1
+	statusData := fmt.Sprintf(`{"status":"done","exit_code":%d,"timestamp":%d}`, exitCode, time.Now().Unix())
+	require.NoError(t, os.WriteFile(filepath.Join(dir, AgentStatusFile), []byte(statusData), 0600))
+
 	mock := &inspectMockRuntime{
 		inspectFn: func(_ context.Context, _ string) (runtime.InstanceInfo, error) {
 			return runtime.InstanceInfo{Running: true}, nil
 		},
-		execFn: func(_ context.Context, _ string, _ []string, _ string) (runtime.ExecResult, error) {
-			return runtime.ExecResult{Stdout: "1|1"}, nil
-		},
 	}
-	status, err := DetectStatus(context.Background(), mock, "test", "")
+	status, err := DetectStatus(context.Background(), mock, "test", dir)
 	require.NoError(t, err)
 	assert.Equal(t, StatusFailed, status)
 }
 
-func TestDetectStatus_ExecError(t *testing.T) {
+func TestDetectStatus_NoStatusFile(t *testing.T) {
 	mock := &inspectMockRuntime{
 		inspectFn: func(_ context.Context, _ string) (runtime.InstanceInfo, error) {
 			return runtime.InstanceInfo{Running: true}, nil
 		},
-		execFn: func(_ context.Context, _ string, _ []string, _ string) (runtime.ExecResult, error) {
-			return runtime.ExecResult{}, fmt.Errorf("exec failed")
-		},
 	}
+	// No sandboxDir or status file — assumes active
 	status, err := DetectStatus(context.Background(), mock, "test", "")
 	require.NoError(t, err)
 	assert.Equal(t, StatusActive, status)
@@ -471,10 +473,8 @@ func TestParseStatusJSON(t *testing.T) {
 		{"empty", []byte("{}"), "", false},
 		{"invalid json", []byte("{bad"), "", false},
 		{"active fresh", statusJSONBytes("active", nil, now), StatusActive, true},
-		{"running fresh (backward compat)", statusJSONBytes("running", nil, now), StatusActive, true},
 		{"idle fresh", statusJSONBytes("idle", nil, now), StatusIdle, true},
 		{"active stale", statusJSONBytes("active", nil, old), "", false},
-		{"running stale (backward compat)", statusJSONBytes("running", nil, old), "", false},
 		{"idle stale", statusJSONBytes("idle", nil, old), StatusIdle, true},
 		{"done success", statusJSONBytes("done", intPtr(0), now), StatusDone, true},
 		{"done failure", statusJSONBytes("done", intPtr(1), now), StatusFailed, true},
@@ -482,7 +482,7 @@ func TestParseStatusJSON(t *testing.T) {
 		{"done stale failure", statusJSONBytes("done", intPtr(1), old), StatusFailed, true},
 		{"done no exit code", statusJSONBytes("done", nil, now), StatusFailed, true},
 		{"unknown status", statusJSONBytes("unknown", nil, now), "", false},
-		{"zero timestamp", statusJSONBytes("running", nil, 0), "", false},
+		{"zero timestamp", statusJSONBytes("active", nil, 0), "", false},
 	}
 
 	for _, tc := range tests {

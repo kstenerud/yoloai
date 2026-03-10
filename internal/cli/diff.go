@@ -49,7 +49,7 @@ Examples:
 			// Load meta early to detect overlay dirs
 			meta, metaErr := sandbox.LoadMeta(sandbox.Dir(name))
 			if metaErr != nil {
-				return metaErr
+				return sandboxErrorHint(name, metaErr)
 			}
 			overlay := hasOverlayDirs(meta)
 

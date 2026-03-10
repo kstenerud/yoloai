@@ -71,21 +71,17 @@ func SaveMeta(dir string, meta *Meta) error {
 }
 
 // LoadMeta reads environment.json from the given directory path.
-// Falls back to legacy meta.json for backward compatibility with older sandboxes.
 func LoadMeta(dir string) (*Meta, error) {
 	path := filepath.Join(dir, EnvironmentFile)
-	if _, err := os.Stat(path); os.IsNotExist(err) {
-		path = filepath.Join(dir, legacyMetaFile) // legacy fallback
-	}
 
 	data, err := os.ReadFile(path) //nolint:gosec // path is constructed from sandbox dir, not user input
 	if err != nil {
-		return nil, fmt.Errorf("read %s: %w", filepath.Base(path), err)
+		return nil, fmt.Errorf("read %s: %w", EnvironmentFile, err)
 	}
 
 	var meta Meta
 	if err := json.Unmarshal(data, &meta); err != nil {
-		return nil, fmt.Errorf("parse %s: %w", filepath.Base(path), err)
+		return nil, fmt.Errorf("parse %s: %w", EnvironmentFile, err)
 	}
 
 	return &meta, nil

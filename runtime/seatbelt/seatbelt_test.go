@@ -298,7 +298,7 @@ func TestBuildTmuxCommand(t *testing.T) {
 	if args[1] != "-S" {
 		t.Errorf("second arg should be -S, got %q", args[1])
 	}
-	expectedSocket := sandboxPath + "/tmux.sock"
+	expectedSocket := sandboxPath + "/tmux/tmux.sock"
 	if args[2] != expectedSocket {
 		t.Errorf("third arg should be socket path %q, got %q", expectedSocket, args[2])
 	}
