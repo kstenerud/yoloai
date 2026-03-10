@@ -158,7 +158,7 @@ yoloai ships with multiple agents. The architecture is agent-agnostic — more a
 | Agent | API Key | Description |
 |-------|---------|-------------|
 | `aider` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `DEEPSEEK_API_KEY`, `OPENROUTER_API_KEY` | Aider — AI pair programming in your terminal |
-| `claude` (default) | `ANTHROPIC_API_KEY` | Anthropic Claude Code — AI coding assistant |
+| `claude` (default) | `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` | Anthropic Claude Code — AI coding assistant |
 | `codex` | `CODEX_API_KEY`, `OPENAI_API_KEY` | OpenAI Codex — AI coding agent |
 | `gemini` | `GEMINI_API_KEY` | Google Gemini CLI — AI coding assistant |
 | `opencode` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, + others | OpenCode — open-source AI coding agent (auth check is a warning, not error) |
@@ -510,6 +510,19 @@ Containers are ephemeral — if removed, `yoloai start` recreates them from `met
 - **Dangerous directory detection.** Refuses to mount `$HOME`, `/`, or system directories. Append `:force` to override (e.g., `$HOME:force`).
 - **Dirty repo warning.** Prompts if your workdir has uncommitted git changes, so you don't lose work.
 - **Credential injection via files.** API keys are mounted as read-only files at `/run/secrets/`, not passed as environment variables. Temp files on the host are cleaned up after container start. Some agents support additional credential sources — for example, on macOS, yoloai checks the macOS Keychain for Claude Code OAuth credentials (service `Claude Code-credentials`). If you're logged in via `claude` CLI, yoloai will automatically detect your credentials even without `~/.claude/.credentials.json` on disk.
+
+### Claude Code Authentication
+
+Claude Code supports two authentication methods:
+
+- **`ANTHROPIC_API_KEY`** — For API plan users. API keys don't expire and work reliably in sandboxes.
+- **`CLAUDE_CODE_OAUTH_TOKEN`** — For Pro/Max/Team subscription users. Run `claude setup-token` on your host machine to generate a long-lived OAuth token, then export it:
+
+  ```bash
+  export CLAUDE_CODE_OAUTH_TOKEN=<token>
+  ```
+
+  **Why not use `~/.claude/.credentials.json` directly?** The OAuth credentials from `claude login` contain short-lived access tokens (~30 minute expiry) and single-use refresh tokens. When the token expires, the first client to refresh it invalidates the refresh token for all other copies. This means running Claude Code on your host machine will break any sandbox sessions using the same credentials, and running multiple sandboxes will break each other. `CLAUDE_CODE_OAUTH_TOKEN` avoids this entirely — it's a long-lived token that requires no refresh and works across any number of concurrent sandboxes.
 - **Non-root execution.** Containers run as a non-root user with UID/GID matching your host user.
 
 ## Development

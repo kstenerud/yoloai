@@ -30,6 +30,7 @@ func TestHasAnyAPIKey_Set(t *testing.T) {
 func TestHasAnyAPIKey_Unset(t *testing.T) {
 	agentDef := agent.GetAgent("claude")
 	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
 
 	assert.False(t, hasAnyAPIKey(agentDef))
 }
@@ -930,6 +931,7 @@ func TestPrepareSandboxState_MissingAPIKeyErrorWithAuthFiles(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
 	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
 
 	// Override keychainReader to fail
 	origReader := keychainReader

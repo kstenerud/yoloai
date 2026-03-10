@@ -18,6 +18,21 @@ CREDENTIAL INJECTION
   On macOS, yoloai checks the Keychain for Claude Code OAuth
   credentials automatically.
 
+CLAUDE CODE SUBSCRIPTION USERS (Pro/Max/Team)
+
+  If you use a Claude subscription (not an API key), run:
+
+     claude setup-token
+
+  Then export the token:
+
+     export CLAUDE_CODE_OAUTH_TOKEN=<token>
+
+  This generates a long-lived token that works reliably in sandboxes.
+  Without it, yoloai falls back to ~/.claude/.credentials.json, which
+  contains short-lived OAuth tokens (~30 min) that break when any
+  other Claude Code instance refreshes them first.
+
 DIRTY REPO WARNING
 
   If your workdir has uncommitted git changes, yoloai prompts before

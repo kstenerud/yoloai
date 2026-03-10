@@ -45,7 +45,7 @@ func TestGetAgent_Claude(t *testing.T) {
 	assert.Equal(t, "claude --dangerously-skip-permissions", def.InteractiveCmd)
 	assert.Contains(t, def.HeadlessCmd, "claude -p")
 	assert.Equal(t, PromptModeInteractive, def.PromptMode)
-	assert.Equal(t, []string{"ANTHROPIC_API_KEY"}, def.APIKeyEnvVars)
+	assert.Equal(t, []string{"ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"}, def.APIKeyEnvVars)
 	require.Len(t, def.SeedFiles, 3)
 	assert.Equal(t, "~/.claude/.credentials.json", def.SeedFiles[0].HostPath)
 	assert.Equal(t, ".credentials.json", def.SeedFiles[0].TargetPath)

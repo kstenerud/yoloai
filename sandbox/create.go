@@ -270,8 +270,19 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 
 	// Copy seed files into agent-state (config, OAuth credentials, etc.)
 	hasAPIKey := hasAnyAPIKey(agentDef)
-	if _, err := copySeedFiles(agentDef, sandboxDir, hasAPIKey); err != nil {
+	copiedAuth, err := copySeedFiles(agentDef, sandboxDir, hasAPIKey)
+	if err != nil {
 		return nil, fmt.Errorf("copy seed files: %w", err)
+	}
+
+	// Warn when Claude is using short-lived OAuth credentials instead of a long-lived token.
+	// OAuth access tokens expire after ~30 minutes and refresh tokens are single-use,
+	// so the host's Claude Code can invalidate the sandbox's copy by refreshing first.
+	if agentDef.Name == "claude" && copiedAuth {
+		fmt.Fprintln(m.output, "Warning: using OAuth credentials from ~/.claude/.credentials.json")                         //nolint:errcheck // best-effort warning
+		fmt.Fprintln(m.output, "  These tokens expire after ~30 minutes and may fail in long-running sessions.")            //nolint:errcheck // best-effort warning
+		fmt.Fprintln(m.output, "  For reliable auth, run 'claude setup-token' and export CLAUDE_CODE_OAUTH_TOKEN instead.") //nolint:errcheck // best-effort warning
+		fmt.Fprintln(m.output)                                                                                              //nolint:errcheck // best-effort warning
 	}
 
 	// Ensure container-required settings (e.g., skip bypass permissions prompt)
