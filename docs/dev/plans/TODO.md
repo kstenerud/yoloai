@@ -66,11 +66,9 @@ See [idle detection research](../research/idle-detection.md) §3.9 Q1.
 
 ## Seatbelt Improvements
 
-### Dynamic toolchain detection in SBPL profiles
+### ~~Dynamic toolchain detection in SBPL profiles~~ ✅
 
-Currently `profile.go:systemReadPaths()` hardcodes paths like `/opt/homebrew`, `/usr/local/Cellar`. Users with non-standard tool installations (nix, asdf, mise, custom prefixes) hit "Operation not permitted" errors. Augment `GenerateProfile()` to resolve common toolchain paths at runtime (e.g., `which node` → grant read to its install prefix). Cover at minimum: node, python, ruby, go, rust, java.
-
-Inspired by Agent Safehouse's dynamic toolchain detection approach. See [sandboxing research](../research/sandboxing.md) key finding #7 and [competitors research](../research/competitors.md) §9.
+Implemented in `profile.go:toolchainReadPaths()`. `GenerateProfile()` now resolves `python3`, `node`, `ruby`, `go`, `rustc`, `java` at runtime via `exec.LookPath`, extracts installation prefixes, and adds read rules for non-system paths.
 
 ### Per-agent sandbox access documentation
 

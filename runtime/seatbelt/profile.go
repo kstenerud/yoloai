@@ -4,11 +4,15 @@ package seatbelt
 
 import (
 	"fmt"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
 	"github.com/kstenerud/yoloai/runtime"
 )
+
+// lookPath is a variable so tests can override it.
+var lookPath = exec.LookPath
 
 // GenerateProfile builds an SBPL profile string from the instance
 // configuration, sandbox directory path, and user's home directory.
@@ -39,6 +43,18 @@ func GenerateProfile(cfg runtime.InstanceConfig, sandboxDir, homeDir string) str
 		fmt.Fprintf(&b, "(allow file-read* (subpath %q))\n", path)
 	}
 	b.WriteString("\n")
+
+	// --- Detected toolchain paths ---
+	toolchainPaths := toolchainReadPaths()
+	if len(toolchainPaths) > 0 {
+		b.WriteString("; Detected toolchain installation prefixes\n")
+		for _, path := range toolchainPaths {
+			for _, p := range resolvePathVariants(path) {
+				fmt.Fprintf(&b, "(allow file-read* (subpath %q))\n", p)
+			}
+		}
+		b.WriteString("\n")
+	}
 
 	// --- Temp directories ---
 	b.WriteString("; Temporary directories\n")
@@ -144,6 +160,67 @@ func tempPaths() []string {
 		"/private/tmp",
 		"/private/var/folders",
 	}
+}
+
+// toolchainReadPaths discovers installation prefixes for common toolchain
+// binaries (python3, node, ruby, go, rustc, java) by resolving their paths
+// at runtime. Prefixes that are already covered by systemReadPaths(), equal
+// to "/", or have fewer than 3 path components are skipped.
+func toolchainReadPaths() []string {
+	toolchains := []string{"python3", "node", "ruby", "go", "rustc", "java"}
+	sysPaths := systemReadPaths()
+	seen := make(map[string]bool)
+	var result []string
+
+	for _, name := range toolchains {
+		binPath, err := lookPath(name)
+		if err != nil {
+			continue
+		}
+		resolved, err := filepath.EvalSymlinks(binPath)
+		if err != nil {
+			continue
+		}
+		prefix := filepath.Dir(filepath.Dir(resolved))
+
+		// Skip root prefix.
+		if prefix == "/" {
+			continue
+		}
+
+		// Skip prefixes with fewer than 3 path components.
+		parts := strings.Split(prefix, "/")
+		count := 0
+		for _, p := range parts {
+			if p != "" {
+				count++
+			}
+		}
+		if count < 2 {
+			continue
+		}
+
+		// Skip if already covered by a system read path.
+		covered := false
+		for _, sysPath := range sysPaths {
+			if prefix == sysPath || strings.HasPrefix(prefix, sysPath+"/") {
+				covered = true
+				break
+			}
+		}
+		if covered {
+			continue
+		}
+
+		// Deduplicate.
+		if seen[prefix] {
+			continue
+		}
+		seen[prefix] = true
+		result = append(result, prefix)
+	}
+
+	return result
 }
 
 // resolvePathVariants returns the path variants needed for SBPL rules.

@@ -671,6 +671,128 @@ func TestKillByPID_WaitsForExit(t *testing.T) {
 	}
 }
 
+func TestToolchainReadPaths_DetectsPython(t *testing.T) {
+	pythonPath, err := exec.LookPath("python3")
+	if err != nil {
+		t.Skip("python3 not on PATH")
+	}
+	resolved, err := filepath.EvalSymlinks(pythonPath)
+	if err != nil {
+		t.Fatalf("failed to resolve python3 symlinks: %v", err)
+	}
+	prefix := filepath.Dir(filepath.Dir(resolved))
+
+	paths := toolchainReadPaths()
+	found := false
+	for _, p := range paths {
+		if p == prefix {
+			found = true
+			break
+		}
+	}
+	// The prefix might be skipped if it's under a system path — that's correct
+	// behavior. Only fail if it's a non-system prefix that wasn't detected.
+	sysPaths := systemReadPaths()
+	covered := false
+	for _, sp := range sysPaths {
+		if prefix == sp || strings.HasPrefix(prefix, sp+"/") {
+			covered = true
+			break
+		}
+	}
+	if !covered && !found {
+		t.Errorf("expected toolchainReadPaths to include python3 prefix %q", prefix)
+	}
+}
+
+func TestToolchainReadPaths_SkipsRootPrefix(t *testing.T) {
+	original := lookPath
+	defer func() { lookPath = original }()
+
+	lookPath = func(name string) (string, error) {
+		return "/bin/sh", nil
+	}
+
+	paths := toolchainReadPaths()
+	if len(paths) != 0 {
+		t.Errorf("expected empty result for root prefix, got %v", paths)
+	}
+}
+
+func TestToolchainReadPaths_SkipsSystemPaths(t *testing.T) {
+	original := lookPath
+	defer func() { lookPath = original }()
+
+	lookPath = func(name string) (string, error) {
+		return "/usr/bin/python3", nil
+	}
+
+	paths := toolchainReadPaths()
+	if len(paths) != 0 {
+		t.Errorf("expected empty result for system path prefix, got %v", paths)
+	}
+}
+
+func TestToolchainReadPaths_Deduplicates(t *testing.T) {
+	original := lookPath
+	defer func() { lookPath = original }()
+
+	tmpDir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	binDir := filepath.Join(tmpDir, "fake-prefix", "bin")
+	if err := os.MkdirAll(binDir, 0750); err != nil {
+		t.Fatal(err)
+	}
+	toolPath := filepath.Join(binDir, "tool")
+	if err := os.WriteFile(toolPath, []byte("#!/bin/sh\n"), 0700); err != nil { //nolint:gosec // G306: fake executable needs +x
+		t.Fatal(err)
+	}
+
+	lookPath = func(name string) (string, error) {
+		return toolPath, nil
+	}
+
+	paths := toolchainReadPaths()
+	if len(paths) != 1 {
+		t.Errorf("expected 1 deduplicated entry, got %d: %v", len(paths), paths)
+	}
+}
+
+func TestGenerateProfile_ToolchainPaths(t *testing.T) {
+	original := lookPath
+	defer func() { lookPath = original }()
+
+	tmpDir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	binDir := filepath.Join(tmpDir, "custom-toolchain", "bin")
+	if err := os.MkdirAll(binDir, 0750); err != nil {
+		t.Fatal(err)
+	}
+	toolPath := filepath.Join(binDir, "python3")
+	if err := os.WriteFile(toolPath, []byte("#!/bin/sh\n"), 0700); err != nil { //nolint:gosec // G306: fake executable needs +x
+		t.Fatal(err)
+	}
+
+	lookPath = func(name string) (string, error) {
+		return toolPath, nil
+	}
+
+	cfg := runtime.InstanceConfig{Name: "test"}
+	profile := GenerateProfile(cfg, "/tmp/sandbox", "/Users/testuser")
+
+	expectedPrefix := filepath.Join(tmpDir, "custom-toolchain")
+	if !strings.Contains(profile, "; Detected toolchain installation prefixes") {
+		t.Error("profile should contain toolchain section comment")
+	}
+	if !strings.Contains(profile, fmt.Sprintf(`(subpath %q)`, expectedPrefix)) {
+		t.Errorf("profile should contain toolchain prefix %q, profile:\n%s", expectedPrefix, profile)
+	}
+}
+
 func TestSandboxEnv_Whitelist(t *testing.T) {
 	// Set some env vars that should be stripped
 	t.Setenv("SSH_AUTH_SOCK", "/tmp/ssh-agent.sock")
