@@ -137,4 +137,4 @@ fi
 debug_log "dropping privileges to yoloai"
 
 # --- Drop privileges and run as yoloai ---
-exec gosu yoloai "$YOLOAI_DIR/bin/entrypoint-user.sh"
+exec gosu yoloai python3 "$YOLOAI_DIR/bin/sandbox-setup.py" docker

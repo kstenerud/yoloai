@@ -105,9 +105,9 @@ RUN mkdir -p /yoloai/bin /yoloai/tmux && chown -R yoloai:yoloai /yoloai
 
 COPY tmux.conf /yoloai/tmux/tmux.conf
 COPY entrypoint.sh /yoloai/bin/entrypoint.sh
-COPY entrypoint-user.sh /yoloai/bin/entrypoint-user.sh
+COPY sandbox-setup.py /yoloai/bin/sandbox-setup.py
 COPY status-monitor.py /yoloai/bin/status-monitor.py
 COPY diagnose-idle.sh /yoloai/bin/diagnose-idle.sh
-RUN chmod +x /yoloai/bin/entrypoint.sh /yoloai/bin/entrypoint-user.sh /yoloai/bin/diagnose-idle.sh
+RUN chmod +x /yoloai/bin/entrypoint.sh /yoloai/bin/diagnose-idle.sh
 
 ENTRYPOINT ["/yoloai/bin/entrypoint.sh"]

@@ -102,9 +102,9 @@ Dependency direction: `cmd/yoloai` → `cli` → `sandbox` + `runtime`; `sandbox
 |------|---------|
 | `docker.go` | `DockerRuntime` struct — implements `Runtime` interface, wraps Docker SDK. `NewDockerRuntime()` with daemon ping. |
 | `build.go` | `EnsureImage()` — builds `yoloai-base` image. `NeedsBuild()` / `RecordBuildChecksum()` for rebuild detection. Tar context creation, build output streaming. Moved from old `internal/docker/build.go`. |
-| `resources.go` | `//go:embed` for Dockerfile, entrypoint.sh, tmux.conf. `SeedResources()` writes them to `~/.yoloai/profiles/base/` respecting user customizations. Moved from old `internal/docker/resources.go`. |
+| `resources.go` | `//go:embed` for Dockerfile, entrypoint.sh, tmux.conf. Imports `sandbox-setup.py` and `status-monitor.py` from `runtime/monitor`. `SeedResources()` writes them to `~/.yoloai/profiles/base/` respecting user customizations. |
 | `resources/Dockerfile` | Container Dockerfile (embedded at compile time). |
-| `resources/entrypoint.sh` | Container entrypoint script (embedded at compile time). |
+| `resources/entrypoint.sh` | Root container entrypoint script (embedded at compile time). Handles UID/GID remapping, iptables, overlayfs, then invokes `sandbox-setup.py`. |
 | `resources/tmux.conf` | Default tmux config (embedded at compile time). |
 | `prune.go` | `Prune()` — finds and removes orphaned `yoloai-*` Docker containers and dangling images. |
 | `build_test.go` | Unit tests for build/seed logic. |
@@ -116,9 +116,8 @@ Dependency direction: `cmd/yoloai` → `cli` → `sandbox` + `runtime`; `sandbox
 |------|---------|
 | `tart.go` | `Runtime` struct — implements `Runtime` interface, shells out to `tart` CLI. VM lifecycle via `tart clone/run/stop/delete`, exec via `tart exec`. PID file + `tart list` for process management. |
 | `build.go` | `EnsureImage()` — pulls Cirrus Labs macOS base image, provisions dev tools via `tart exec` (Homebrew, Node.js, Xcode CLI tools, tmux, git, jq, ripgrep). Supports `defaults.tart.image` config override. |
-| `resources.go` | `//go:embed` for setup.sh. |
+| `resources.go` | `//go:embed` for tmux.conf. |
 | `platform.go` | Platform detection helpers (macOS, Apple Silicon). Testable via variable overrides. |
-| `resources/setup.sh` | Post-boot setup script (embedded at compile time). Creates mount symlinks, injects secrets, launches tmux + agent. |
 | `tart_test.go` | Unit tests for arg building, error mapping, network flags, mount symlinks. |
 
 ### `runtime/seatbelt/`
@@ -128,9 +127,8 @@ Dependency direction: `cmd/yoloai` → `cli` → `sandbox` + `runtime`; `sandbox
 | `seatbelt.go` | `Runtime` struct — implements `Runtime` interface using macOS `sandbox-exec`. PID file management, background process, per-sandbox tmux socket. |
 | `profile.go` | `GenerateProfile()` — builds SBPL (Seatbelt Profile Language) profiles from `InstanceConfig`. Maps mounts to file-access rules, controls network. |
 | `build.go` | `EnsureImage()` / `ImageExists()` — verifies prerequisites (sandbox-exec, tmux, jq). No image to build. |
-| `resources.go` | `//go:embed` for entrypoint.sh and tmux.conf. |
+| `resources.go` | `//go:embed` for tmux.conf. |
 | `platform.go` | Platform detection (macOS only, no Apple Silicon requirement). Testable via variable override. |
-| `resources/entrypoint.sh` | Entrypoint script (embedded at compile time). Sets up HOME redirection, secrets, per-sandbox tmux socket, launches agent. |
 | `resources/tmux.conf` | Default tmux config (embedded at compile time). |
 | `seatbelt_test.go` | Unit tests for profile generation, platform detection, tmux socket injection. |
 
@@ -309,9 +307,10 @@ create.go:
   → createOverlayDirs: create upper/ovlwork dirs in sandbox state
   → buildMounts: build overlay mount configs for runtime-config.json, add CAP_SYS_ADMIN
 
-entrypoint.sh (Docker container):
-  → root phase: mount overlayfs using runtime-config.json overlay_mounts
-  → user phase: git baseline (git init + commit) in mounted directories
+entrypoint.sh (Docker container, root phase):
+  → mount overlayfs using runtime-config.json overlay_mounts
+sandbox-setup.py (Docker container, user phase):
+  → git baseline (git init + commit) in mounted directories
 
 diff.go / apply.go:
   → exec git commands inside container for overlay dirs (same as :copy)
@@ -341,7 +340,8 @@ Manager.Start (sandbox/lifecycle.go)
 │   └── base/
 │       ├── config.yaml      # Profile defaults (agent, model, backend, env, etc.)
 │       ├── Dockerfile       # Seeded from embedded, user-customizable
-│       ├── entrypoint.sh    # Seeded from embedded, user-customizable
+│       ├── entrypoint.sh    # Root entrypoint, seeded from embedded
+│       ├── sandbox-setup.py # User-phase setup, seeded from embedded
 │       ├── tmux.conf        # Seeded from embedded, user-customizable
 │       ├── .checksums       # Tracks seeded file checksums
 │       └── .last-build-checksum  # Tracks last image build inputs
@@ -356,9 +356,9 @@ Manager.Start (sandbox/lifecycle.go)
 │       ├── log.txt            # Session log
 │       ├── monitor.log        # Status monitor debug log
 │       ├── bin/               # Executable scripts
-│       │   ├── entrypoint.sh  # Root entrypoint (Docker: baked in image)
-│       │   ├── status-monitor.py # Idle detection monitor
-│       │   └── diagnose-idle.sh  # Idle detection diagnostic
+│       │   ├── sandbox-setup.py   # Consolidated setup script (all backends)
+│       │   ├── status-monitor.py  # Idle detection monitor
+│       │   └── diagnose-idle.sh   # Idle detection diagnostic
 │       ├── tmux/              # Tmux runtime
 │       │   ├── tmux.conf      # Tmux configuration
 │       │   └── tmux.sock      # Per-sandbox tmux socket (seatbelt)

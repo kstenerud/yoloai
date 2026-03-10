@@ -592,9 +592,9 @@ func (r *Runtime) runSetupScript(ctx context.Context, vmName, sandboxPath string
 	}
 
 	// Write setup script, status monitor, and tmux config to sandbox dir (shared via VirtioFS)
-	scriptPath := filepath.Join(sandboxPath, binDir, "setup.sh")
-	if err := os.WriteFile(scriptPath, embeddedSetupScript, 0755); err != nil { //nolint:gosec // G306: script needs exec permission
-		return fmt.Errorf("write setup script: %w", err)
+	scriptPath := filepath.Join(sandboxPath, binDir, "sandbox-setup.py")
+	if err := os.WriteFile(scriptPath, monitor.SetupScript(), 0644); err != nil { //nolint:gosec // G306: script content, not user input
+		return fmt.Errorf("write sandbox-setup.py: %w", err)
 	}
 	monitorPath := filepath.Join(sandboxPath, binDir, "status-monitor.py")
 	if err := os.WriteFile(monitorPath, monitor.Script(), 0644); err != nil { //nolint:gosec // G306: script content, not user input
@@ -611,7 +611,7 @@ func (r *Runtime) runSetupScript(ctx context.Context, vmName, sandboxPath string
 
 	// Run the setup script in the background inside the VM.
 	// Paths must be quoted — VirtioFS mount path contains spaces.
-	setupCmd := fmt.Sprintf("nohup '%s/bin/setup.sh' '%s' </dev/null >'%s/setup.log' 2>&1 &",
+	setupCmd := fmt.Sprintf("nohup python3 '%s/bin/sandbox-setup.py' tart '%s' </dev/null >'%s/setup.log' 2>&1 &",
 		vmSharedDir, vmSharedDir, vmSharedDir)
 	args := execArgs(vmName, "bash", "-c", setupCmd)
 	_, err := r.runTart(ctx, args...)

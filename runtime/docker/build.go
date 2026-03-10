@@ -58,7 +58,7 @@ func SeedResources(targetDir string) (SeedResult, error) {
 	}{
 		{"Dockerfile", embeddedDockerfile},
 		{"entrypoint.sh", embeddedEntrypoint},
-		{"entrypoint-user.sh", embeddedEntrypointUser},
+		{"sandbox-setup.py", embeddedSandboxSetup},
 		{"status-monitor.py", embeddedStatusMonitor},
 		{"diagnose-idle.sh", embeddedDiagnoseIdle},
 		{"tmux.conf", embeddedTmuxConf},
@@ -180,7 +180,7 @@ func RecordBuildChecksum(sourceDir string) {
 // buildInputsChecksum computes a combined SHA-256 of the build input files.
 func buildInputsChecksum(sourceDir string) string {
 	h := sha256.New()
-	for _, name := range []string{"Dockerfile", "entrypoint.sh", "entrypoint-user.sh", "status-monitor.py", "diagnose-idle.sh", "tmux.conf"} {
+	for _, name := range []string{"Dockerfile", "entrypoint.sh", "sandbox-setup.py", "status-monitor.py", "diagnose-idle.sh", "tmux.conf"} {
 		data, err := os.ReadFile(filepath.Join(sourceDir, name)) //nolint:gosec // G304: sourceDir is ~/.yoloai/
 		if err != nil {
 			return ""
@@ -238,7 +238,7 @@ func createBuildContext(sourceDir string) (io.Reader, error) {
 	}{
 		{"Dockerfile", "Dockerfile"},
 		{"entrypoint.sh", "entrypoint.sh"},
-		{"entrypoint-user.sh", "entrypoint-user.sh"},
+		{"sandbox-setup.py", "sandbox-setup.py"},
 		{"status-monitor.py", "status-monitor.py"},
 		{"diagnose-idle.sh", "diagnose-idle.sh"},
 		{"tmux.conf", "tmux.conf"},

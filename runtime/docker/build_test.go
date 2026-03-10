@@ -19,7 +19,7 @@ func TestCreateBuildContext(t *testing.T) {
 	dir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "Dockerfile"), []byte("FROM ubuntu"), 0600))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "entrypoint.sh"), []byte("#!/bin/bash"), 0600))
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "entrypoint-user.sh"), []byte("#!/bin/bash\nset -euo pipefail"), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "sandbox-setup.py"), []byte("#!/bin/bash\nset -euo pipefail"), 0600))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "status-monitor.py"), []byte("#!/usr/bin/env python3"), 0600))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "diagnose-idle.sh"), []byte("#!/bin/bash"), 0600))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "tmux.conf"), []byte("set -g mouse on"), 0600))
@@ -43,7 +43,7 @@ func TestCreateBuildContext(t *testing.T) {
 
 	assert.Equal(t, "FROM ubuntu", found["Dockerfile"])
 	assert.Equal(t, "#!/bin/bash", found["entrypoint.sh"])
-	assert.Equal(t, "#!/bin/bash\nset -euo pipefail", found["entrypoint-user.sh"])
+	assert.Equal(t, "#!/bin/bash\nset -euo pipefail", found["sandbox-setup.py"])
 	assert.Equal(t, "#!/usr/bin/env python3", found["status-monitor.py"])
 	assert.Equal(t, "#!/bin/bash", found["diagnose-idle.sh"])
 	assert.Equal(t, "set -g mouse on", found["tmux.conf"])
@@ -124,7 +124,7 @@ func TestSeedResources_FirstRun(t *testing.T) {
 	assert.Empty(t, result.Conflicts)
 
 	// Verify files exist
-	for _, name := range []string{"Dockerfile", "entrypoint.sh", "entrypoint-user.sh", "tmux.conf"} {
+	for _, name := range []string{"Dockerfile", "entrypoint.sh", "sandbox-setup.py", "tmux.conf"} {
 		_, err := os.Stat(filepath.Join(dir, name))
 		assert.NoError(t, err, "expected %s to exist", name)
 	}
@@ -183,7 +183,7 @@ func TestNeedsBuild_NoChecksum(t *testing.T) {
 	dir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "Dockerfile"), []byte("FROM ubuntu"), 0600))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "entrypoint.sh"), []byte("#!/bin/bash"), 0600))
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "entrypoint-user.sh"), []byte("#!/bin/bash"), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "sandbox-setup.py"), []byte("#!/bin/bash"), 0600))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "status-monitor.py"), []byte("#!/usr/bin/env python3"), 0600))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "diagnose-idle.sh"), []byte("#!/bin/bash"), 0600))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "tmux.conf"), []byte("set -g mouse on"), 0600))
@@ -195,7 +195,7 @@ func TestNeedsBuild_AfterRecord(t *testing.T) {
 	dir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "Dockerfile"), []byte("FROM ubuntu"), 0600))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "entrypoint.sh"), []byte("#!/bin/bash"), 0600))
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "entrypoint-user.sh"), []byte("#!/bin/bash"), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "sandbox-setup.py"), []byte("#!/bin/bash"), 0600))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "status-monitor.py"), []byte("#!/usr/bin/env python3"), 0600))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "diagnose-idle.sh"), []byte("#!/bin/bash"), 0600))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "tmux.conf"), []byte("set -g mouse on"), 0600))
@@ -245,7 +245,7 @@ func TestBuildInputsChecksum_Deterministic(t *testing.T) {
 	dir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "Dockerfile"), []byte("FROM ubuntu"), 0600))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "entrypoint.sh"), []byte("#!/bin/bash"), 0600))
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "entrypoint-user.sh"), []byte("#!/bin/bash"), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "sandbox-setup.py"), []byte("#!/bin/bash"), 0600))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "status-monitor.py"), []byte("#!/usr/bin/env python3"), 0600))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "diagnose-idle.sh"), []byte("#!/bin/bash"), 0600))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "tmux.conf"), []byte("set -g mouse on"), 0600))

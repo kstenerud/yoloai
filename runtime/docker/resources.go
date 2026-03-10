@@ -13,11 +13,12 @@ var embeddedDockerfile []byte
 //go:embed resources/entrypoint.sh
 var embeddedEntrypoint []byte
 
-//go:embed resources/entrypoint-user.sh
-var embeddedEntrypointUser []byte
-
 //go:embed resources/tmux.conf
 var embeddedTmuxConf []byte
+
+// embeddedSandboxSetup provides the consolidated Python sandbox setup script
+// from the runtime/monitor package for inclusion in Docker image builds.
+var embeddedSandboxSetup = monitor.SetupScript()
 
 // embeddedStatusMonitor provides the shared Python status monitor script
 // from the runtime/monitor package for inclusion in Docker image builds.

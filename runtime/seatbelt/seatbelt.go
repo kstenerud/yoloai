@@ -135,10 +135,10 @@ func (r *Runtime) Create(_ context.Context, cfg runtime.InstanceConfig) error {
 		return fmt.Errorf("write SBPL profile: %w", err)
 	}
 
-	// Write entrypoint and monitor scripts to bin/
-	entrypointPath := filepath.Join(sandboxPath, binDir, "entrypoint.sh")
-	if err := os.WriteFile(entrypointPath, embeddedEntrypoint, 0755); err != nil { //nolint:gosec // G306: script needs exec permission
-		return fmt.Errorf("write entrypoint.sh: %w", err)
+	// Write setup script and monitor scripts to bin/
+	setupScriptPath := filepath.Join(sandboxPath, binDir, "sandbox-setup.py")
+	if err := os.WriteFile(setupScriptPath, monitor.SetupScript(), 0644); err != nil { //nolint:gosec // G306: script content, not user input
+		return fmt.Errorf("write sandbox-setup.py: %w", err)
 	}
 	monitorPath := filepath.Join(sandboxPath, binDir, "status-monitor.py")
 	if err := os.WriteFile(monitorPath, monitor.Script(), 0644); err != nil { //nolint:gosec // G306: script content, not user input
@@ -198,11 +198,11 @@ func (r *Runtime) Start(ctx context.Context, name string) error {
 		return fmt.Errorf("open log: %w", err)
 	}
 
-	// Launch sandbox-exec with the SBPL profile running the entrypoint
+	// Launch sandbox-exec with the SBPL profile running the setup script
 	profilePath := filepath.Join(sandboxPath, backendDir, profileFileName)
-	entrypointPath := filepath.Join(sandboxPath, binDir, "entrypoint.sh")
+	setupScriptPath := filepath.Join(sandboxPath, binDir, "sandbox-setup.py")
 
-	cmd := exec.Command(r.sandboxExecBin, "-f", profilePath, "bash", entrypointPath, sandboxPath) //nolint:gosec // G204: paths are constructed from validated config
+	cmd := exec.Command(r.sandboxExecBin, "-f", profilePath, "python3", setupScriptPath, "seatbelt", sandboxPath) //nolint:gosec // G204: paths are constructed from validated config
 	cmd.Env = sandboxEnv()
 	cmd.Stderr = logFile
 	cmd.Stdout = logFile
@@ -238,7 +238,7 @@ func (r *Runtime) Start(ctx context.Context, name string) error {
 	// Wait for tmux session to appear
 	if err := r.waitForTmux(ctx, sandboxPath, procDone); err != nil {
 		r.killByPID(sandboxPath)
-		detail := fmt.Sprintf("command: %s -f %s bash %s %s", r.sandboxExecBin, profilePath, entrypointPath, sandboxPath)
+		detail := fmt.Sprintf("command: %s -f %s python3 %s seatbelt %s", r.sandboxExecBin, profilePath, setupScriptPath, sandboxPath)
 		if logData, readErr := os.ReadFile(logPath); readErr == nil && len(logData) > 0 { //nolint:gosec // G304: path within sandbox dir
 			detail += fmt.Sprintf("\nlog output:\n%s", strings.TrimSpace(string(logData)))
 		}
