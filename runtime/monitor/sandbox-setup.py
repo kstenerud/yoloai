@@ -454,12 +454,15 @@ def main():
 
     debug_log("sandbox-setup complete, blocking on tmux wait")
 
-    # Block — process stops only on explicit stop/kill
+    # Block — process stops only on explicit stop/kill.
+    # Use subprocess.run (not os.execvp) so the Python process stays alive
+    # and the monitor_exit daemon thread can detach clients when the agent exits.
     cmd = ["tmux"]
     if socket:
         cmd.extend(["-S", socket])
     cmd.extend(["wait-for", "yoloai-exit"])
-    os.execvp("tmux", cmd)
+    result = subprocess.run(cmd)
+    sys.exit(result.returncode)
 
 
 if __name__ == "__main__":
