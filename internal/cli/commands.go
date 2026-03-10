@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -340,11 +341,29 @@ func waitForTmux(ctx context.Context, rt runtime.Runtime, containerName string, 
 	return fmt.Errorf("tmux session not ready after %s", timeout)
 }
 
-// setTerminalTitle emits an OSC 0 escape sequence to set the terminal title.
-// This sets the title on the host terminal directly, bypassing any nested
-// tmux/docker layers that might swallow the inner tmux's title sequences.
+// setTerminalTitle sets the terminal title for the host terminal.
+// It emits an OSC 0 escape sequence (works for non-tmux terminals) and,
+// if running inside a host tmux session, also renames the tmux window
+// so the title shows in the tmux status bar.
+// When title is empty, it restores the previous state (clears OSC title
+// and re-enables tmux automatic-rename).
 func setTerminalTitle(title string) {
 	fmt.Fprintf(os.Stdout, "\033]0;%s\007", title) //nolint:errcheck // best-effort terminal title
+
+	// If inside a host tmux session, also set the window name.
+	if os.Getenv("TMUX") == "" {
+		return
+	}
+	if title != "" {
+		// Disable automatic-rename so tmux doesn't override our title
+		// with the command name (e.g., "tmux -S /long/path attach -t main").
+		exec.Command("tmux", "set-option", "-w", "automatic-rename", "off").Run() //nolint:errcheck,gosec // best-effort
+		exec.Command("tmux", "rename-window", title).Run()                        //nolint:errcheck,gosec // best-effort
+	} else {
+		// Restore: re-enable automatic-rename so the window name
+		// reverts to the current command after detach.
+		exec.Command("tmux", "set-option", "-w", "automatic-rename", "on").Run() //nolint:errcheck,gosec // best-effort
+	}
 }
 
 // attachToSandbox attaches to the tmux session in a running container.
