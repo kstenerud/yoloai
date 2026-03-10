@@ -36,6 +36,16 @@ if [ -d "$ORIGINAL_HOME/.local/bin" ]; then
     done
 fi
 
+# Symlink git config from the original HOME so agents can commit with
+# the user's identity (user.name/user.email).
+if [ -f "$ORIGINAL_HOME/.gitconfig" ] && [ ! -e "$HOME/.gitconfig" ]; then
+    ln -sf "$ORIGINAL_HOME/.gitconfig" "$HOME/.gitconfig"
+fi
+if [ -d "$ORIGINAL_HOME/.config/git" ]; then
+    mkdir -p "$HOME/.config"
+    [ ! -e "$HOME/.config/git" ] && ln -sf "$ORIGINAL_HOME/.config/git" "$HOME/.config/git"
+fi
+
 # Symlink agent state dir (e.g. .claude, .gemini) to agent-state
 STATE_DIR_NAME=$(jq -r '.state_dir_name // empty' "$CONFIG")
 if [ -n "$STATE_DIR_NAME" ] && [ ! -L "$HOME/$STATE_DIR_NAME" ]; then
