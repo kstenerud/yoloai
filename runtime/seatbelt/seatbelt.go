@@ -21,13 +21,13 @@ import (
 
 const (
 	// backendDir holds backend-specific files within the sandbox directory.
-	backendDir = "backend"
+	backendDir = config.BackendDirName
 
 	// binDir holds executable scripts within the sandbox directory.
-	binDir = "bin"
+	binDir = config.BinDirName
 
 	// tmuxDir holds tmux config and sockets within the sandbox directory.
-	tmuxDir = "tmux"
+	tmuxDir = config.TmuxDirName
 
 	// pidFileName stores the sandbox-exec process ID.
 	pidFileName = "pid"
@@ -69,14 +69,9 @@ func New(_ context.Context) (*Runtime, error) {
 		return nil, fmt.Errorf("sandbox-exec not found: %w", err)
 	}
 
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return nil, fmt.Errorf("get home directory: %w", err)
-	}
-
 	return &Runtime{
 		sandboxExecBin: sandboxExecBin,
-		sandboxDir:     filepath.Join(homeDir, ".yoloai", "sandboxes"),
+		sandboxDir:     config.SandboxesDir(),
 	}, nil
 }
 

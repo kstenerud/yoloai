@@ -17,20 +17,13 @@ type State struct {
 }
 
 // StatePath returns the path to ~/.yoloai/state.yaml.
-func StatePath() (string, error) {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("get home directory: %w", err)
-	}
-	return filepath.Join(homeDir, ".yoloai", "state.yaml"), nil
+func StatePath() string {
+	return filepath.Join(YoloaiDir(), "state.yaml")
 }
 
 // LoadState reads ~/.yoloai/state.yaml. Returns zero-value State if missing.
 func LoadState() (*State, error) {
-	statePath, err := StatePath()
-	if err != nil {
-		return nil, err
-	}
+	statePath := StatePath()
 
 	data, err := os.ReadFile(statePath) //nolint:gosec // G304: path is ~/.yoloai/state.yaml
 	if err != nil {
@@ -49,10 +42,7 @@ func LoadState() (*State, error) {
 
 // SaveState writes state to ~/.yoloai/state.yaml.
 func SaveState(s *State) error {
-	statePath, err := StatePath()
-	if err != nil {
-		return err
-	}
+	statePath := StatePath()
 
 	data, err := yaml.Marshal(s)
 	if err != nil {

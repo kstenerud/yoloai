@@ -8,8 +8,8 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"path/filepath"
 
+	"github.com/kstenerud/yoloai/config"
 	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/sandbox"
 	"github.com/spf13/cobra"
@@ -63,11 +63,6 @@ func newSystemBuildCmd() *cobra.Command {
 }
 
 func runSystemBuild(cmd *cobra.Command, args []string, backend string) error {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return fmt.Errorf("get home directory: %w", err)
-	}
-
 	secretFlags, _ := cmd.Flags().GetStringSlice("secret")
 
 	if len(args) > 0 {
@@ -130,7 +125,7 @@ func runSystemBuild(cmd *cobra.Command, args []string, backend string) error {
 	if len(secretFlags) > 0 {
 		return fmt.Errorf("--secret is only supported with profile builds")
 	}
-	baseProfileDir := filepath.Join(homeDir, ".yoloai", "profiles", "base")
+	baseProfileDir := config.ProfileDirPath("base")
 	return withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
 		buildOut := os.Stderr
 		if jsonEnabled(cmd) {

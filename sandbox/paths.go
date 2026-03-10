@@ -27,16 +27,16 @@ const (
 	AgentStatusFile = "agent-status.json"
 
 	// AgentRuntimeDir stores agent-managed state (was "agent-state").
-	AgentRuntimeDir = "agent-runtime"
+	AgentRuntimeDir = config.AgentRuntimeDirName
 
 	// BinDir holds executable scripts (entrypoint, monitor, diagnose).
-	BinDir = "bin"
+	BinDir = config.BinDirName
 
 	// TmuxDir holds tmux configuration and sockets.
-	TmuxDir = "tmux"
+	TmuxDir = config.TmuxDirName
 
 	// BackendDir holds backend-specific files (seatbelt profile, pid, logs).
-	BackendDir = "backend"
+	BackendDir = config.BackendDirName
 )
 
 // safeASCII marks ASCII bytes that do NOT need caret encoding.
@@ -200,7 +200,61 @@ func InstanceName(name string) string {
 //
 //	~/.yoloai/sandboxes/<name>/
 func Dir(name string) string {
-	return filepath.Join(config.HomeDir(), ".yoloai", "sandboxes", name)
+	return filepath.Join(config.SandboxesDir(), name)
+}
+
+// Per-sandbox subdirectory helpers.
+
+// BackendPath returns the backend-specific directory for a sandbox.
+func BackendPath(name string) string {
+	return filepath.Join(Dir(name), BackendDir)
+}
+
+// BinPath returns the executable scripts directory for a sandbox.
+func BinPath(name string) string {
+	return filepath.Join(Dir(name), BinDir)
+}
+
+// TmuxPath returns the tmux configuration directory for a sandbox.
+func TmuxPath(name string) string {
+	return filepath.Join(Dir(name), TmuxDir)
+}
+
+// AgentRuntimePath returns the agent-managed state directory for a sandbox.
+func AgentRuntimePath(name string) string {
+	return filepath.Join(Dir(name), AgentRuntimeDir)
+}
+
+// HomeSeedPath returns the home-seed directory for a sandbox.
+func HomeSeedPath(name string) string {
+	return filepath.Join(Dir(name), "home-seed")
+}
+
+// Per-sandbox file helpers.
+
+// RuntimeConfigFilePath returns the path to runtime-config.json for a sandbox.
+func RuntimeConfigFilePath(name string) string {
+	return filepath.Join(Dir(name), RuntimeConfigFile)
+}
+
+// AgentStatusFilePath returns the path to agent-status.json for a sandbox.
+func AgentStatusFilePath(name string) string {
+	return filepath.Join(Dir(name), AgentStatusFile)
+}
+
+// LogFilePath returns the path to log.txt for a sandbox.
+func LogFilePath(name string) string {
+	return filepath.Join(Dir(name), "log.txt")
+}
+
+// PromptFilePath returns the path to prompt.txt for a sandbox.
+func PromptFilePath(name string) string {
+	return filepath.Join(Dir(name), "prompt.txt")
+}
+
+// MonitorLogFilePath returns the path to monitor.log for a sandbox.
+func MonitorLogFilePath(name string) string {
+	return filepath.Join(Dir(name), "monitor.log")
 }
 
 // RequireSandboxDir returns the sandbox directory path after verifying it exists.

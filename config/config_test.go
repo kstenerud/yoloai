@@ -325,8 +325,7 @@ func TestConfigPath(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
 
-	p, err := ConfigPath()
-	require.NoError(t, err)
+	p := ConfigPath()
 	assert.Equal(t, filepath.Join(tmpDir, ".yoloai", "profiles", "base", "config.yaml"), p)
 }
 
@@ -500,8 +499,7 @@ func TestGlobalConfigPath(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
 
-	p, err := GlobalConfigPath()
-	require.NoError(t, err)
+	p := GlobalConfigPath()
 	assert.Equal(t, filepath.Join(tmpDir, ".yoloai", "config.yaml"), p)
 }
 

@@ -8,7 +8,6 @@ import (
 	"io"
 	"log/slog"
 	"os"
-	"path/filepath"
 
 	"github.com/kstenerud/yoloai/config"
 	"github.com/kstenerud/yoloai/runtime"
@@ -100,21 +99,14 @@ func (m *Manager) EnsureSetup(ctx context.Context) error {
 // setup: migration, directory creation, resource seeding, image building,
 // and default config writing. Does not run interactive prompts.
 func (m *Manager) EnsureSetupNonInteractive(ctx context.Context) error {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return fmt.Errorf("get home directory: %w", err)
-	}
-	yoloaiDir := filepath.Join(homeDir, ".yoloai")
-
 	// Create directory structure
-	for _, sub := range []string{"sandboxes", "profiles", "cache"} {
-		dir := filepath.Join(yoloaiDir, sub)
+	for _, dir := range []string{config.SandboxesDir(), config.ProfilesDir(), config.CacheDir()} {
 		if err := os.MkdirAll(dir, 0750); err != nil {
 			return fmt.Errorf("create %s: %w", dir, err)
 		}
 	}
 
-	baseProfileDir := filepath.Join(yoloaiDir, "profiles", "base")
+	baseProfileDir := config.ProfileDirPath("base")
 	if err := os.MkdirAll(baseProfileDir, 0750); err != nil {
 		return fmt.Errorf("create %s: %w", baseProfileDir, err)
 	}
@@ -125,7 +117,7 @@ func (m *Manager) EnsureSetupNonInteractive(ctx context.Context) error {
 	}
 
 	// Write default config.yaml on first run
-	configPath := filepath.Join(baseProfileDir, "config.yaml")
+	configPath := config.ConfigPath()
 	if _, err := os.Stat(configPath); err != nil {
 		if err := os.WriteFile(configPath, []byte(config.DefaultConfigYAML), 0600); err != nil {
 			return fmt.Errorf("write config.yaml: %w", err)
@@ -134,7 +126,7 @@ func (m *Manager) EnsureSetupNonInteractive(ctx context.Context) error {
 	}
 
 	// Write default global config.yaml if missing
-	globalConfigPath := filepath.Join(yoloaiDir, "config.yaml")
+	globalConfigPath := config.GlobalConfigPath()
 	if _, err := os.Stat(globalConfigPath); os.IsNotExist(err) {
 		if err := os.WriteFile(globalConfigPath, []byte(config.DefaultGlobalConfigYAML), 0600); err != nil {
 			return fmt.Errorf("write global config.yaml: %w", err)
@@ -142,7 +134,7 @@ func (m *Manager) EnsureSetupNonInteractive(ctx context.Context) error {
 	}
 
 	// Write default state.yaml if missing
-	statePath := filepath.Join(yoloaiDir, "state.yaml")
+	statePath := config.StatePath()
 	if _, err := os.Stat(statePath); os.IsNotExist(err) {
 		if err := config.SaveState(&config.State{}); err != nil {
 			return fmt.Errorf("write state.yaml: %w", err)

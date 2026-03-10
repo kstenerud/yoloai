@@ -88,7 +88,7 @@ func (e *ExitError) Error() string {
 
 // ExtensionsDir returns the path to the extensions directory (~/.yoloai/extensions/).
 func ExtensionsDir() string {
-	return filepath.Join(config.HomeDir(), ".yoloai", "extensions")
+	return config.ExtensionsDir()
 }
 
 // Load parses a single YAML extension file. The extension name is derived

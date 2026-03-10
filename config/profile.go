@@ -74,7 +74,7 @@ type MergedConfig struct {
 //
 //	~/.yoloai/profiles/<name>/
 func ProfileDirPath(name string) string {
-	return filepath.Join(HomeDir(), ".yoloai", "profiles", name)
+	return filepath.Join(ProfilesDir(), name)
 }
 
 // ValidateProfileName validates a profile name using the same rules as sandbox
@@ -117,11 +117,7 @@ func ProfileHasDockerfile(name string) bool {
 
 // ListProfiles returns the names of all user profiles (excludes "base").
 func ListProfiles() ([]string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return nil, fmt.Errorf("get home directory: %w", err)
-	}
-	profilesDir := filepath.Join(home, ".yoloai", "profiles")
+	profilesDir := ProfilesDir()
 
 	entries, err := os.ReadDir(profilesDir)
 	if err != nil {

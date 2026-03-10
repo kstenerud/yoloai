@@ -115,29 +115,18 @@ var globalKnownCollectionSettings = []knownCollectionSetting{
 }
 
 // ConfigPath returns the path to ~/.yoloai/profiles/base/config.yaml.
-func ConfigPath() (string, error) {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("get home directory: %w", err)
-	}
-	return filepath.Join(homeDir, ".yoloai", "profiles", "base", "config.yaml"), nil
+func ConfigPath() string {
+	return filepath.Join(ProfilesDir(), "base", "config.yaml")
 }
 
 // GlobalConfigPath returns the path to ~/.yoloai/config.yaml.
-func GlobalConfigPath() (string, error) {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("get home directory: %w", err)
-	}
-	return filepath.Join(homeDir, ".yoloai", "config.yaml"), nil
+func GlobalConfigPath() string {
+	return filepath.Join(YoloaiDir(), "config.yaml")
 }
 
 // LoadConfig reads ~/.yoloai/profiles/base/config.yaml and extracts known fields.
 func LoadConfig() (*YoloaiConfig, error) {
-	configPath, err := ConfigPath()
-	if err != nil {
-		return nil, err
-	}
+	configPath := ConfigPath()
 
 	data, err := os.ReadFile(configPath) //nolint:gosec // G304: path is ~/.yoloai/profiles/base/config.yaml
 	if err != nil {
@@ -329,10 +318,7 @@ func LoadConfig() (*YoloaiConfig, error) {
 
 // LoadGlobalConfig reads ~/.yoloai/config.yaml and extracts global settings.
 func LoadGlobalConfig() (*GlobalConfig, error) {
-	configPath, err := GlobalConfigPath()
-	if err != nil {
-		return nil, err
-	}
+	configPath := GlobalConfigPath()
 
 	data, err := os.ReadFile(configPath) //nolint:gosec // G304: path is ~/.yoloai/config.yaml
 	if err != nil {
@@ -389,10 +375,7 @@ func LoadGlobalConfig() (*GlobalConfig, error) {
 // ReadConfigRaw reads the raw bytes of config.yaml. Returns nil, nil if the
 // file does not exist.
 func ReadConfigRaw() ([]byte, error) {
-	configPath, err := ConfigPath()
-	if err != nil {
-		return nil, err
-	}
+	configPath := ConfigPath()
 	data, err := os.ReadFile(configPath) //nolint:gosec // G304: path is ~/.yoloai/profiles/base/config.yaml
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -406,10 +389,7 @@ func ReadConfigRaw() ([]byte, error) {
 // ReadGlobalConfigRaw reads the raw bytes of the global config.yaml.
 // Returns nil, nil if the file does not exist.
 func ReadGlobalConfigRaw() ([]byte, error) {
-	configPath, err := GlobalConfigPath()
-	if err != nil {
-		return nil, err
-	}
+	configPath := GlobalConfigPath()
 	data, err := os.ReadFile(configPath) //nolint:gosec // G304: path is ~/.yoloai/config.yaml
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -554,18 +534,14 @@ func setNodeValue(parent *yaml.Node, key string, val *yaml.Node) {
 // The bool return indicates whether the key was found (in file or defaults).
 func GetConfigValue(path string) (string, bool, error) {
 	var configPath string
-	var err error
 	var defaults []knownSetting
 
 	if isGlobalKey(path) {
-		configPath, err = GlobalConfigPath()
+		configPath = GlobalConfigPath()
 		defaults = globalKnownSettings
 	} else {
-		configPath, err = ConfigPath()
+		configPath = ConfigPath()
 		defaults = knownSettings
-	}
-	if err != nil {
-		return "", false, err
 	}
 
 	data, err := os.ReadFile(configPath) //nolint:gosec // G304: path from GlobalConfigPath/ConfigPath
@@ -632,10 +608,7 @@ func knownDefaultFrom(path string, defaults []knownSetting) (string, bool, error
 // UpdateConfigFields updates specific fields in config.yaml using yaml.Node
 // manipulation to preserve comments and formatting.
 func UpdateConfigFields(fields map[string]string) error {
-	configPath, err := ConfigPath()
-	if err != nil {
-		return err
-	}
+	configPath := ConfigPath()
 
 	data, err := os.ReadFile(configPath) //nolint:gosec // G304: path is ~/.yoloai/profiles/base/config.yaml
 	if err != nil {
@@ -674,10 +647,7 @@ func UpdateConfigFields(fields map[string]string) error {
 // DeleteConfigField removes a key at a dotted path from config.yaml.
 // Returns nil if the file doesn't exist or the key is already absent.
 func DeleteConfigField(path string) error {
-	configPath, err := ConfigPath()
-	if err != nil {
-		return err
-	}
+	configPath := ConfigPath()
 
 	data, err := os.ReadFile(configPath) //nolint:gosec // G304: path is ~/.yoloai/profiles/base/config.yaml
 	if err != nil {
@@ -717,10 +687,7 @@ func DeleteConfigField(path string) error {
 // UpdateGlobalConfigFields updates specific fields in the global config.yaml
 // using yaml.Node manipulation to preserve comments and formatting.
 func UpdateGlobalConfigFields(fields map[string]string) error {
-	configPath, err := GlobalConfigPath()
-	if err != nil {
-		return err
-	}
+	configPath := GlobalConfigPath()
 
 	data, err := os.ReadFile(configPath) //nolint:gosec // G304: path is ~/.yoloai/config.yaml
 	if err != nil {
@@ -759,10 +726,7 @@ func UpdateGlobalConfigFields(fields map[string]string) error {
 // DeleteGlobalConfigField removes a key at a dotted path from the global config.yaml.
 // Returns nil if the file doesn't exist or the key is already absent.
 func DeleteGlobalConfigField(path string) error {
-	configPath, err := GlobalConfigPath()
-	if err != nil {
-		return err
-	}
+	configPath := GlobalConfigPath()
 
 	data, err := os.ReadFile(configPath) //nolint:gosec // G304: path is ~/.yoloai/config.yaml
 	if err != nil {

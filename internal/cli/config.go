@@ -94,10 +94,7 @@ Profile settings are stored in ~/.yoloai/profiles/base/config.yaml.`,
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if sandbox.IsGlobalKey(args[0]) {
-				configPath, err := sandbox.GlobalConfigPath()
-				if err != nil {
-					return err
-				}
+				configPath := sandbox.GlobalConfigPath()
 				if _, err := os.Stat(configPath); os.IsNotExist(err) {
 					dir := configPath[:len(configPath)-len("/config.yaml")]
 					if err := os.MkdirAll(dir, 0750); err != nil {
@@ -113,10 +110,7 @@ Profile settings are stored in ~/.yoloai/profiles/base/config.yaml.`,
 					return err
 				}
 			} else {
-				configPath, err := sandbox.ConfigPath()
-				if err != nil {
-					return err
-				}
+				configPath := sandbox.ConfigPath()
 				if _, err := os.Stat(configPath); os.IsNotExist(err) {
 					dir := configPath[:len(configPath)-len("/config.yaml")]
 					if err := os.MkdirAll(dir, 0750); err != nil {

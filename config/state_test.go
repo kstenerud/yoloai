@@ -13,8 +13,7 @@ func TestStatePath(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
 
-	p, err := StatePath()
-	require.NoError(t, err)
+	p := StatePath()
 	assert.Equal(t, filepath.Join(tmpDir, ".yoloai", "state.yaml"), p)
 }
 

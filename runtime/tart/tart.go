@@ -31,13 +31,13 @@ const (
 	tartConfigFileName = "instance.json"
 
 	// backendDir holds backend-specific files within the sandbox directory.
-	backendDir = "backend"
+	backendDir = config.BackendDirName
 
 	// binDir holds executable scripts within the sandbox directory.
-	binDir = "bin"
+	binDir = config.BinDirName
 
 	// tmuxDir holds tmux configuration within the sandbox directory.
-	tmuxDir = "tmux"
+	tmuxDir = config.TmuxDirName
 
 	// sharedDirName is the VirtioFS share name used for yoloai state.
 	sharedDirName = "yoloai"
@@ -74,11 +74,6 @@ func New(_ context.Context) (*Runtime, error) {
 		return nil, fmt.Errorf("tart backend requires Apple Silicon (M1 or later)")
 	}
 
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return nil, fmt.Errorf("get home directory: %w", err)
-	}
-
 	// Read config for optional tart.image override
 	var baseImageOverride string
 	if cfg, err := config.LoadConfig(); err == nil && cfg.TartImage != "" {
@@ -87,7 +82,7 @@ func New(_ context.Context) (*Runtime, error) {
 
 	return &Runtime{
 		tartBin:           tartBin,
-		sandboxDir:        filepath.Join(homeDir, ".yoloai", "sandboxes"),
+		sandboxDir:        config.SandboxesDir(),
 		baseImageOverride: baseImageOverride,
 	}, nil
 }
