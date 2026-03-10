@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/kstenerud/yoloai/agent"
 	"github.com/kstenerud/yoloai/config"
@@ -1000,5 +1001,16 @@ func forceRemoveAll(path string) error {
 		}
 		return nil
 	})
-	return os.RemoveAll(path)
+	// Retry removal a few times. On macOS, system services (Spotlight,
+	// FSEvents) can momentarily recreate files in the directory between
+	// content removal and the final rmdir, causing "directory not empty".
+	var err error
+	for range 3 {
+		err = os.RemoveAll(path)
+		if err == nil {
+			return nil
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return err
 }
