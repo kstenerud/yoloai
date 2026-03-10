@@ -346,7 +346,7 @@ func waitForTmux(ctx context.Context, rt runtime.Runtime, containerName string, 
 // if running inside a host tmux session, also renames the tmux window
 // so the title shows in the tmux status bar.
 // When title is empty, it restores the previous state (clears OSC title
-// and re-enables tmux automatic-rename).
+// and unsets per-window tmux overrides to revert to user defaults).
 func setTerminalTitle(title string) {
 	fmt.Fprintf(os.Stdout, "\033]0;%s\007", title) //nolint:errcheck // best-effort terminal title
 
@@ -355,14 +355,17 @@ func setTerminalTitle(title string) {
 		return
 	}
 	if title != "" {
-		// Disable automatic-rename so tmux doesn't override our title
-		// with the command name (e.g., "tmux -S /long/path attach -t main").
+		// Disable automatic-rename (tmux tracking the foreground process name)
+		// and allow-rename (programs sending escape sequences to rename the
+		// window) so our title sticks while the sandbox is attached.
 		exec.Command("tmux", "set-option", "-w", "automatic-rename", "off").Run() //nolint:errcheck,gosec // best-effort
+		exec.Command("tmux", "set-option", "-w", "allow-rename", "off").Run()     //nolint:errcheck,gosec // best-effort
 		exec.Command("tmux", "rename-window", title).Run()                        //nolint:errcheck,gosec // best-effort
 	} else {
-		// Restore: re-enable automatic-rename so the window name
-		// reverts to the current command after detach.
-		exec.Command("tmux", "set-option", "-w", "automatic-rename", "on").Run() //nolint:errcheck,gosec // best-effort
+		// Unset per-window overrides so the window reverts to the user's
+		// session/global defaults after detach.
+		exec.Command("tmux", "set-option", "-wu", "automatic-rename").Run() //nolint:errcheck,gosec // best-effort
+		exec.Command("tmux", "set-option", "-wu", "allow-rename").Run()     //nolint:errcheck,gosec // best-effort
 	}
 }
 
