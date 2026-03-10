@@ -100,6 +100,7 @@ func TestCreateSecretsDir_WithKey(t *testing.T) {
 
 func TestCreateSecretsDir_NoKey(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
 	agentDef := agent.GetAgent("claude")
 
 	dir, err := createSecretsDir(agentDef, nil)
@@ -180,7 +181,7 @@ func TestCopySeedFiles_CopiesExistingFiles(t *testing.T) {
 	agentDef := agent.GetAgent("claude")
 	copied, err := copySeedFiles(agentDef, sandboxDir, true)
 	require.NoError(t, err)
-	assert.True(t, copied)
+	assert.False(t, copied) // copied only tracks auth-only files; settings.json is not auth-only
 
 	// settings.json should be in agent-runtime (not auth-only)
 	assert.FileExists(t, filepath.Join(sandboxDir, AgentRuntimeDir, "settings.json"))
@@ -714,6 +715,7 @@ func TestPrepareSandboxState_MissingAPIKey(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
 	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
 
 	mgr := NewManager(&mockRuntime{}, "docker", slog.Default(), strings.NewReader(""), io.Discard)
 

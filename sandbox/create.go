@@ -1147,7 +1147,7 @@ func describeSeedAuthFiles(agentDef *agent.Definition) string {
 // others go to agent-runtime/ (mounted at StateDir).
 // Returns true if any files were copied. Skips files that don't exist on the host.
 func copySeedFiles(agentDef *agent.Definition, sandboxDir string, hasAPIKey bool) (bool, error) {
-	copied := false
+	copiedAuth := false
 	agentStateDir := filepath.Join(sandboxDir, AgentRuntimeDir)
 	homeSeedDir := filepath.Join(sandboxDir, "home-seed")
 
@@ -1176,7 +1176,7 @@ func copySeedFiles(agentDef *agent.Definition, sandboxDir string, hasAPIKey bool
 		if _, err := os.Stat(hostPath); err == nil {
 			fileData, readErr := os.ReadFile(hostPath) //nolint:gosec // G304: path is from agent definition, not user input
 			if readErr != nil {
-				return copied, fmt.Errorf("read %s: %w", hostPath, readErr)
+				return copiedAuth, fmt.Errorf("read %s: %w", hostPath, readErr)
 			}
 			data = fileData
 		} else if sf.KeychainService != "" {
@@ -1197,16 +1197,18 @@ func copySeedFiles(agentDef *agent.Definition, sandboxDir string, hasAPIKey bool
 
 		// Ensure parent directory exists
 		if err := os.MkdirAll(filepath.Dir(targetPath), 0750); err != nil {
-			return copied, fmt.Errorf("create dir for %s: %w", sf.TargetPath, err)
+			return copiedAuth, fmt.Errorf("create dir for %s: %w", sf.TargetPath, err)
 		}
 
 		if err := os.WriteFile(targetPath, data, 0600); err != nil {
-			return copied, fmt.Errorf("write %s: %w", targetPath, err)
+			return copiedAuth, fmt.Errorf("write %s: %w", targetPath, err)
 		}
-		copied = true
+		if sf.AuthOnly {
+			copiedAuth = true
+		}
 	}
 
-	return copied, nil
+	return copiedAuth, nil
 }
 
 // ensureContainerSettings merges required container settings into agent-state/settings.json.
