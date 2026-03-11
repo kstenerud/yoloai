@@ -13,3 +13,4 @@ Research documents supporting yoloAI's design decisions. Each file covers a broa
 | [Orchestration](research/orchestration.md) | Agent idle/done detection mechanisms, orchestrator ecosystem, agent SDK interfaces, handoffs, user pain points |
 | [Idle Detection](research/idle-detection.md) | Full audit of current idle detection code, external research on detection approaches, pluggable detector architecture |
 | [macOS Idle Detection](research/macos-idle-detection.md) | macOS-specific process idle detection: sysctl KERN_PROC, libproc, DTrace, Mach APIs, network monitoring |
+| [Agentic Workflows](research/agentic-workflows.md) | Community sentiment on autonomous agents, TDD subagent patterns, authority splitting, review gap, skill ecosystem |
