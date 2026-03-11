@@ -21,6 +21,24 @@ func CopyDir(src, dst string) error {
 		return fmt.Errorf("source is not a directory: %s", src)
 	}
 
+	// Ensure parent directory exists.
+	if err := os.MkdirAll(filepath.Dir(dst), 0o750); err != nil {
+		return fmt.Errorf("create parent: %w", err)
+	}
+
+	// Try fast clone (APFS on macOS). Falls back on unsupported platforms/filesystems.
+	if err := cloneDir(src, dst); err == nil {
+		return nil
+	}
+
+	// Regular file-by-file copy.
+	return copyDirWalk(src, dst, srcInfo)
+}
+
+// copyDirWalk copies a directory tree by walking the source and recreating
+// each entry in the destination, preserving symlinks, permissions, and
+// modification times.
+func copyDirWalk(src, dst string, srcInfo os.FileInfo) error {
 	if err := os.MkdirAll(dst, srcInfo.Mode().Perm()); err != nil {
 		return fmt.Errorf("create destination: %w", err)
 	}

@@ -146,6 +146,30 @@ func TestCopyDir_SourceNotDirectory(t *testing.T) {
 	assert.Contains(t, err.Error(), "not a directory")
 }
 
+func TestCopyDir_CloneIsolation(t *testing.T) {
+	src := t.TempDir()
+	writeTestFile(t, src, "file.txt", "original")
+	require.NoError(t, os.MkdirAll(filepath.Join(src, "sub"), 0750))
+	writeTestFile(t, src, "sub/nested.txt", "nested-original")
+
+	dst := filepath.Join(t.TempDir(), "copy")
+	require.NoError(t, CopyDir(src, dst))
+
+	// Modify files in the copy.
+	require.NoError(t, os.WriteFile(filepath.Join(dst, "file.txt"), []byte("modified"), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(dst, "sub", "nested.txt"), []byte("nested-modified"), 0600))
+
+	// Original files must be unchanged (validates isolation for both
+	// clonefile and regular copy paths).
+	content, err := os.ReadFile(filepath.Join(src, "file.txt")) //nolint:gosec
+	require.NoError(t, err)
+	assert.Equal(t, "original", string(content))
+
+	content, err = os.ReadFile(filepath.Join(src, "sub", "nested.txt")) //nolint:gosec
+	require.NoError(t, err)
+	assert.Equal(t, "nested-original", string(content))
+}
+
 // RemoveGitDirs tests
 
 func TestRemoveGitDirs_RemovesGitDirectory(t *testing.T) {
