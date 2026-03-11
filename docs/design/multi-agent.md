@@ -6,72 +6,79 @@
 
 yoloAI's workdir model treats a directory as a unit: one mode (`:copy`, `:overlay`, `:rw`, or read-only) applies to the entire directory. This works perfectly for a single agent working on a single project.
 
-When multiple agents need to collaborate on the same project with different roles, the workdir-as-unit model breaks down:
+When multiple agents need to collaborate on the same project with different roles, we want:
 
-- A test-writing agent needs to write to `tests/` but shouldn't touch `src/`.
-- An implementing agent needs to write to `src/` but shouldn't modify `tests/`.
-- A reviewing agent should see everything but modify nothing.
-- All agents need to see the full project tree (imports, configs, build files).
+- A test-writing agent that focuses on `tests/` and doesn't touch `src/`.
+- An implementing agent that focuses on `src/` and doesn't modify `tests/`.
+- A reviewing agent that sees everything but modifies nothing.
+- All agents see the full project tree (imports, configs, build files).
 
-Currently you'd either give each agent full `:copy` access (no authority splitting) or split the project into separate `-d` mounts (agents lose the unified project view).
+## Key Insight: This Mostly Works Today
+
+The multi-agent authority-split workflow is achievable with current yoloAI primitives and prompt-based role scoping:
+
+```
+yoloai new red /path/to/project:copy \
+    --prompt "Write failing tests in tests/. Do not modify anything in src/."
+yoloai new green /path/to/project:copy \
+    --prompt "Implement in src/ to make tests pass. Do not modify tests/."
+yoloai new review /path/to/project \
+    --prompt "Review the codebase for issues."
+```
+
+Each sandbox gets its own `:copy` of the project with its own `.git/`. Agents commit freely within their sandbox. The sandbox's git state never leaks back to the host. When done:
+
+```
+yoloai apply red    # lands tests/ changes on host
+yoloai apply green  # lands src/ changes on host
+```
+
+Since the agents worked on non-overlapping paths (by convention via prompts), patches apply cleanly in any order. No merge logic, no consolidation step, no new features needed.
+
+**The review gate catches violations.** If an agent ignores the prompt and modifies files outside its designated scope, `yoloai diff` shows it. The user can reject the change or apply selectively with `yoloai apply red -- tests/` to land only the intended paths. The diff/apply workflow is already the enforcement mechanism — it catches violations after the fact rather than preventing them.
+
+### What's Missing: Cross-Visibility
+
+The one thing that doesn't work today is agents seeing each other's work. Each sandbox starts from the same host snapshot, but they're isolated — red can't see green's implementation, green can't see red's tests.
+
+For **sequential workflows** (write tests, THEN implement), this is fine. Red finishes, you apply its changes, then create green from the updated host state.
+
+For **parallel workflows**, agents are blind to each other. This limits use cases where agents need to react to each other's output in real time.
 
 ## Design Goals
 
-1. **Fine-grained write permissions within a workdir.** An agent sees the full project tree but can only write to designated paths. Enforced by the filesystem, not by prompts.
+1. **Incidental cross-visibility.** Agents can see each other's work as a natural consequence of how you compose the sandboxes, not through a baked-in coordination protocol. No `--reads-from` flags, no dependency graphs, no orchestration layer.
 
-2. **Incidental cross-visibility.** Agents can see each other's work as a natural consequence of how you compose the sandboxes, not through a baked-in coordination protocol. No `--reads-from` flags, no dependency graphs, no orchestration layer.
+2. **Composability with existing primitives.** Uses the `-d` flag, mount modes, and existing sandbox layout. Doesn't introduce new concepts beyond what's necessary.
 
-3. **Composability with existing primitives.** Uses the `-d` flag, mount modes, and existing sandbox layout. Doesn't introduce new concepts beyond what's necessary.
+3. **Diff/apply still works.** Changes are reviewable and gated. Nothing lands on the host without explicit approval.
 
-4. **Diff/apply still works.** Changes are reviewable and gated. Nothing lands on the host without explicit approval.
-
-## Concept: Writable Paths
-
-Mount the workdir read-only by default. Designate specific subdirectories as writable.
-
-```
-yoloai new red /path/to/project --writable tests/
-yoloai new green /path/to/project --writable src/
-yoloai new review /path/to/project
-```
-
-What happens mechanically:
-
-- The project root is bind-mounted **read-only** into the container at the mirrored host path (same as a default aux dir today).
-- Each `--writable` path gets a **copy** stored in the sandbox's `work/` directory on the host (like `:copy` does today, but for a subdirectory rather than the whole tree).
-- The copy is bind-mounted **read-write** on top of the read-only base at the correct subpath. The agent sees the full tree; writes to non-writable paths fail silently or with EROFS.
-- Git baseline is established for each writable path for diff purposes.
-
-`yoloai diff red` shows changes only in `tests/` — the only place writes could land. `yoloai apply red` lands those changes to the host's `tests/` directory.
-
-### Open Questions: Writable Paths
-
-- **Granularity.** Subdirectories are the natural unit. But what about single files? File-glob patterns? At some point the complexity of specifying permissions exceeds the value.
-
-- **Multiple writable paths.** `--writable src/ --writable docs/` should work. Each gets its own tracked copy. But how does `diff` present changes across multiple paths? Unified diff? Per-path?
-
-- **Interaction with `:copy`.** If the user says `/path/to/project:copy --writable tests/`, what wins? Is `--writable` only valid without an explicit mode (i.e., it implies read-only base)? Or can you combine it with `:copy` to mean "everything is writable but tests/ is separately tracked"? Probably the former — `--writable` implies read-only base.
-
-- **The `.git/` directory.** The read-only base mount includes `.git/`. The agent can't write to it. This means no `git commit`, no `git stash`, etc. inside the container. For many agent workflows this is fine (the agent just edits files), but some agents use git internally. Is this a problem? Could mount `.git/` as a writable copy if needed, but that adds complexity.
-
-- **Overlay as alternative.** Instead of copying the writable subdirectory, could use overlayfs to make specific paths writable. Lower layer = host directory (read-only), upper layer = sandbox work dir. Avoids the copy cost. But adds the same platform constraints as `:overlay` mode (Linux-only, `CAP_SYS_ADMIN`).
+4. **Filesystem-enforced write restriction is a future hardening option**, not a prerequisite. Prompt-based role scoping + diff review is the baseline. `--writable` is a possible later addition for users who want kernel-enforced boundaries.
 
 ## Concept: Incidental Cross-Visibility
 
-Once writable paths are stored in a predictable host-side location, cross-sandbox visibility falls out naturally. The writable layer for sandbox `red`'s `tests/` directory lives on the host at:
+Each sandbox's work directory already lives on the host in a predictable location:
 
 ```
-~/.yoloai/sandboxes/red/work/<encoded-path>/
+~/.yoloai/sandboxes/<name>/work/<encoded-path>/
 ```
 
-Another sandbox can mount that path using the existing `-d` flag:
+Another sandbox can mount a path from that location using the existing `-d` flag:
 
 ```
-yoloai new green /path/to/project --writable src/ \
-    -d ~/.yoloai/sandboxes/red/work/<encoded>/tests/=/path/to/project/tests/
+yoloai new red /path/to/project:copy \
+    --prompt "Write failing tests in tests/. Do not modify src/."
+
+yoloai new green /path/to/project:copy \
+    -d ~/.yoloai/sandboxes/red/work/<encoded>/tests/:rw=/path/to/project/tests/ \
+    --prompt "Implement in src/ to make tests pass. Do not modify tests/."
 ```
 
-This mounts red's test output at the expected path inside green's container. Green sees the full project tree with red's live test files overlaid on the read-only base. No coordination protocol — just filesystem paths.
+This mounts red's `tests/` directory into green's container at the expected path. Green sees red's test files appear in real-time. No coordination protocol — just filesystem paths.
+
+The mount mode on the cross-reference controls the relationship:
+- `:rw` — green can see AND modify red's tests (bidirectional)
+- (no suffix, read-only) — green can see red's tests but not modify them (unidirectional)
 
 ### The Ergonomic Problem
 
@@ -80,11 +87,11 @@ The raw path (`~/.yoloai/sandboxes/red/work/^2Fhome^2Fuser^2Fmy-app/tests/`) is 
 **Option A: Convenience shorthand.** A `@sandbox` prefix that expands to the sandbox's work directory:
 
 ```
-yoloai new green /path/to/project --writable src/ \
+yoloai new green /path/to/project:copy \
     -d @red/tests/=/path/to/project/tests/
 ```
 
-Where `@red/tests/` resolves to the host-side location of red's writable `tests/` layer. This is sugar, not a coordination primitive. The expansion is deterministic and inspectable.
+Where `@red/tests/` resolves to the host-side location of red's `tests/` subdirectory within its work copy. This is sugar, not a coordination primitive. The expansion is deterministic and inspectable.
 
 **Option B: A query command.** Instead of baking shorthand into the CLI syntax:
 
@@ -96,7 +103,7 @@ yoloai workdir red tests/
 Then compose with shell:
 
 ```
-yoloai new green /path/to/project --writable src/ \
+yoloai new green /path/to/project:copy \
     -d "$(yoloai workdir red tests/)=/path/to/project/tests/"
 ```
 
@@ -108,13 +115,11 @@ More unix-y. No magic syntax. But verbose.
 
 Two fundamentally different modes of cross-visibility:
 
-**Live (bind mount):** Green sees red's changes as they happen. If red writes a new test file, green can read it immediately. This enables real-time collaboration but couples the sandbox lifecycles — red must be running (or at least have its work directory intact) for green to see anything.
+**Live (bind mount):** Green sees red's changes as they happen. If red writes a new test file, green can read it immediately. This enables real-time collaboration but couples the sandbox lifecycles — red must exist (work directory intact) for green to see anything.
 
 **Snapshotted (copy at creation time):** Green gets a copy of red's current state when green is created. Changes red makes after green starts are not visible. Simpler mental model but requires sequential workflows (red finishes, then green starts).
 
-The bind mount approach is more powerful and is what makes cross-visibility "incidental" — you're just pointing at a directory. But it means both sandboxes need to exist simultaneously, and the work directory must persist.
-
-Since sandbox work directories already persist on the host until the sandbox is destroyed, the bind mount approach works naturally. The user creates `red`, then creates `green` with a `-d` pointing at red's work directory. As red writes tests, green sees them appear.
+The bind mount approach is more powerful and is what makes cross-visibility "incidental" — you're just pointing at a directory on the host. Since sandbox work directories persist until the sandbox is destroyed, it works naturally.
 
 ### Coordination Without Coordination
 
@@ -122,11 +127,11 @@ The interesting property of this model: there is no coordination protocol, but c
 
 - **Sequential pipeline:** Create `red`, let it finish, create `green` pointing at red's work. Green sees red's final output. Review and apply each independently.
 
-- **Parallel with live visibility:** Create `red` and `green` simultaneously, each pointing at the other's writable layers. Both see each other's changes in real-time. Merge conflicts are the user's problem (but since each agent writes to non-overlapping paths, conflicts shouldn't arise if roles are properly split).
+- **Parallel with live visibility:** Create `red` and `green` simultaneously, each mounting the other's work directory via `-d`. Both see each other's changes in real-time. Since each agent writes to non-overlapping paths (by prompt convention), no conflicts arise.
 
-- **Fan-out:** Create multiple sandboxes with the same `--writable` path. Each produces an independent version. Compare diffs, pick the best.
+- **Fan-out:** Create multiple sandboxes with the same project and prompt. Each produces an independent version. Compare diffs, pick the best.
 
-- **Review:** Create a read-only sandbox pointing at another sandbox's work directory. The review agent reads but cannot modify.
+- **Review:** Create a read-only sandbox mounting another sandbox's work directory. The review agent reads but cannot modify.
 
 None of these require yoloAI to know that the sandboxes are related. The user composes the relationships through mount paths.
 
@@ -135,82 +140,130 @@ None of these require yoloAI to know that the sandboxes are related. The user co
 ### What Doesn't Change
 
 - `yoloai diff <sandbox>` still shows what that sandbox changed relative to its baseline.
-- `yoloai apply <sandbox>` still lands changes to the host project.
+- `yoloai apply <sandbox>` still lands changes to the host project via `format-patch` + `git am`.
 - Each sandbox's changes are independently reviewable and applicable.
+- Non-overlapping changes (enforced by prompt convention) guarantee clean patch application in any order.
+
+### Git Consolidation Is Already Solved
+
+Each sandbox has its own `.git/` copy (existing `:copy` behavior). Each agent commits independently within its sandbox. `apply` extracts patches via `format-patch` and applies them to the host with `git am --3way`. Since the patches touch non-overlapping paths (by convention), they apply cleanly in any order.
+
+No merge logic, no consolidation step, no `.git/` sharing between sandboxes. The existing diff/apply workflow handles multi-agent consolidation as a natural consequence of non-overlapping changes.
+
+### Selective Apply for Boundary Violations
+
+If an agent strays outside its designated scope (ignores the "only touch tests/" instruction), the user can apply selectively:
+
+```
+yoloai apply red -- tests/    # only land changes in tests/, ignore anything else
+```
+
+This already works via the path-filtering support in `apply`. The review gate + selective apply is soft enforcement — it catches and corrects violations rather than preventing them.
 
 ### What Gets Awkward
 
-**Ordering.** If `red` wrote tests and `green` wrote implementation, you need to apply both. The order might matter if there are cross-dependencies (e.g., green's code imports a test helper that red created). Today, `apply` works against the host's current state, so:
+**Composite diff.** After multiple agents have worked, the user might want a combined view:
 
 ```
-yoloai apply red    # lands tests on host
-yoloai apply green  # lands src on host (host now has red's tests too)
-```
-
-This works if the changes are to non-overlapping paths. If both agents touched the same file (shouldn't happen with proper `--writable` scoping), you get patch conflicts.
-
-**The "promote" alternative.** Instead of applying to the host, what if you could promote one sandbox's changes into another sandbox's view? This would let you build up a combined result across multiple agents before applying once to the host.
-
-Mechanically: `yoloai promote red green` would copy red's writable layer into green's read-only base (or add it as an additional layer). Green now sees red's changes as part of its baseline. Green's diff would show only green's own changes, not red's.
-
-This is a new concept. It might be overengineering. The sequential `apply` approach probably works for most cases.
-
-**Composite diff.** After multiple agents have worked, the user might want to see the combined diff before applying anything. This could be done by creating a temporary sandbox that mounts all the writable layers:
-
-```
-yoloai diff red    # just tests/ changes
-yoloai diff green  # just src/ changes
+yoloai diff red    # just red's changes
+yoloai diff green  # just green's changes
 # user wants combined view... how?
 ```
 
-No obvious clean answer here. Maybe `yoloai diff red green` shows both? Or maybe this is a non-problem — reviewing each agent's changes independently is actually better for trust.
+Maybe `yoloai diff red green` shows both? Or maybe this is a non-problem — reviewing each agent's changes independently is actually better for trust and attribution.
 
-## Alternative Model: Shared Mutable Workdir
+### Agent-Driven Patch Merging
 
-Instead of read-only base + writable holes, what if multiple sandboxes shared a single `:copy` workdir with filesystem-level access controls?
+Instead of applying each sandbox's changes directly to the host, export patches and hand them to a merger agent:
 
 ```
-# Create a shared workdir
-yoloai new base /path/to/project:copy
+yoloai apply red --patches /tmp/merge-job/red/
+yoloai apply green --patches /tmp/merge-job/green/
 
-# Create agents that share base's workdir with different permissions
-yoloai new red --share base --writable tests/
-yoloai new green --share base --writable src/
+yoloai new merger /path/to/project:copy \
+    -d /tmp/merge-job/ \
+    --prompt "Apply the patches in /tmp/merge-job/ to the project. Resolve any conflicts."
 ```
 
-All agents see the same copy. Changes by any agent are immediately visible to all others. `yoloai diff base` shows all accumulated changes.
+The merger agent has the full project as a `:copy` workdir plus all patch files as read-only input. It can inspect the patches, decide ordering, resolve conflicts in cross-cutting files, and commit the combined result. Then `yoloai diff merger` shows the unified outcome and `yoloai apply merger` lands it on the host in a single step.
 
-**Advantages:** Single source of truth. No cross-mounting. One diff shows everything.
+This uses only existing primitives (`apply --patches`, `-d`, `:copy`). No new features needed.
 
-**Disadvantages:** Requires a new `--share` concept. The shared workdir is mutable by multiple agents — harder to reason about. Diff attribution is lost (who changed what?). This is closer to a traditional shared filesystem than yoloAI's isolation model.
+**Why this is interesting:**
 
-This model might conflict with yoloAI's core principle of protecting originals. The shared workdir is a copy (so the original is safe), but within the sandbox cluster, there's no isolation between agents.
+- **Solves cross-cutting files.** If both agents touched `go.mod`, the merger agent reconciles both changes rather than one patch failing to apply. The merger sees the full picture and can make intelligent decisions about combining the changes.
+- **Solves composite diff.** Instead of needing `yoloai diff red green`, the user reviews `yoloai diff merger` — one unified diff showing the combined outcome of all agents' work.
+- **Solves ordering.** The merger agent decides the right patch application order, not the user.
+- **Adds a review layer.** The merger agent is effectively a code-aware merge tool. It can flag problems that mechanical `git am` would miss.
+- **Composable.** Works with any number of input sandboxes. Fan out to N agents, collect patches, merge in one step.
 
-## Alternative Model: Ephemeral Writable Layer
+The tradeoff is an extra sandbox and agent invocation. For simple non-overlapping changes, sequential `yoloai apply` is simpler. The merger pattern shines when changes overlap or when the user wants a single reviewed result from multiple agents.
 
-What if the writable layer isn't a full copy of the subdirectory but an **overlay** that captures only the deltas?
+### Cross-Cutting Files
 
-For `:copy` the writable `tests/` layer would be a full copy of `tests/` from the host. For an overlay approach, the writable layer starts empty — reads fall through to the read-only base, writes go to the upper layer.
+Some changes inherently cross boundaries. Agent red needs a new test dependency in `go.mod`. Agent green needs a new library in `go.mod`. Both changes are legitimate but neither agent "owns" `go.mod`.
 
-This is essentially `:overlay` mode applied per-subdirectory rather than per-directory.
+Options:
 
-**Advantages:** Instant setup (no copy). Space-efficient. Cross-visibility naturally works (the upper layer contains only changed files, which is all the other agent needs to see).
+1. **Agent-driven merge.** Export patches from both agents, hand them to a merger agent that reconciles conflicts (see above). The merger sees both changes and can combine them intelligently.
 
-**Disadvantages:** Same platform constraints as `:overlay` (Linux, `CAP_SYS_ADMIN`). The delta-only layer is harder to work with for git-based diff (need the overlay mounted to see the merged view).
+2. **Accept the constraint.** Cross-cutting files are handled by a human or a third "setup" agent with broader scope. This forces clean role separation.
+
+3. **A prep/teardown step.** A setup sandbox runs first to install dependencies, update configs, etc. Role-scoped agents run after, building on the prep work.
+
+4. **Let both agents modify it.** If both agents touch `go.mod`, one apply may conflict with the other. The user resolves it manually. This is the normal git workflow — not a new problem.
+
+Option 1 is the most powerful. Options 2-4 are simpler fallbacks depending on the situation. No new mechanism needed for any of them.
+
+## Future Hardening: `--writable` Flag
+
+For users who want kernel-enforced write restrictions (not just prompt-based conventions), a future `--writable` flag could restrict filesystem writes to designated paths:
+
+```
+yoloai new red /path/to/project --writable tests/
+yoloai new green /path/to/project --writable src/
+```
+
+This would use the same `:copy` flow (full project copy, own `.git/`) but apply filesystem-level restrictions so writes outside designated paths fail with EROFS.
+
+### Why This Is Optional, Not Foundational
+
+- **Prompt-based scoping works for most cases.** Agents generally follow "only touch X" instructions. When they don't, `yoloai diff` catches it and `apply -- <path>` filters it.
+- **The diff/apply review gate is already enforcement.** Violations are caught after the fact, which is sufficient when the review step is mandatory anyway.
+- **Kernel enforcement adds implementation complexity.** Possible approaches (chmod-based, bind-mount layering, overlayfs per-subdirectory) each have tradeoffs in complexity, portability, and interaction with agent tooling.
+- **Community signal is mixed.** The HN discussion (2026-03) had one practitioner report that filesystem enforcement "cuts out a surprising amount of self-grading behavior," but the dominant sentiment was that simple setups win and complex harnesses are unproven.
+
+If the pattern sees real adoption with prompt-based scoping, `--writable` becomes a natural hardening step. Build it when users ask for it, not before.
+
+### Implementation Options (When Needed)
+
+- **chmod-based:** Copy full project, then `chmod -R a-w` on non-writable paths inside the container. Simple but soft — root in the container can bypass.
+- **Bind-mount layering:** Mount project root read-only from host, bind-mount writable copies of designated paths plus `.git/` on top. Kernel-enforced. More complex mount setup.
+- **Per-subdirectory overlay:** Mount project root read-only, use overlayfs per writable path. Instant setup, space-efficient. Linux-only, requires `CAP_SYS_ADMIN`.
+
+## Alternative Models (Explored, Not Recommended)
+
+### Shared Mutable Workdir
+
+Multiple sandboxes share a single `:copy` workdir with filesystem-level access controls.
+
+**Rejected because:** Concurrent git operations risk index corruption. Diff attribution is lost. Conflicts with yoloAI's isolation model.
+
+### Ephemeral Writable Layer
+
+Mount project read-only, overlay writable paths with empty upper layers. Reads fall through; writes land in upper layer.
+
+**Deferred because:** Same platform constraints as `:overlay`. Git baseline management is complex with split layers. Could be a future optimization for the `--writable` implementation.
 
 ## What Needs More Thought
 
-1. **Is `--writable` the right primitive?** It's simple but introduces a new mount concept. Could the same thing be achieved by composing existing modes differently? E.g., mount the project read-only as an aux dir, then mount subdirectories as separate `:copy` workdirs? That technically works today but the mental model is weird — you'd have multiple "workdirs" and lose the unified project view.
+1. **Ergonomics of cross-sandbox mounting.** The `@sandbox` shorthand vs. query command vs. raw paths question. This determines how accessible the cross-visibility pattern is to non-power-users.
 
-2. **`.git/` handling.** Many agents use git internally (committing, branching, diffing). A read-only `.git/` breaks this. Options: (a) just accept it — agents that need git won't work with `--writable` mode; (b) always make `.git/` writable; (c) provide a synthetic `.git/` in the writable layer that tracks changes. None are great.
+2. **Is cross-sandbox visibility actually needed?** The sequential pipeline (red finishes → apply → create green from updated host) works today with no new features. The only thing it lacks is parallelism. For the common TDD workflow (write tests THEN implement), sequential is natural.
 
-3. **How does this interact with `:overlay` mode?** Overlay already does "read-only base + writable upper." Is `--writable` just a per-subdirectory version of `:overlay`? Could it share the same implementation? On platforms that support overlayfs, `--writable` could use overlayfs per-subdirectory. On others, fall back to copy.
+3. **Extension system interaction.** Could the authority-split TDD pattern be expressed as an extension using existing primitives, without any new CLI features? If so, ship the extension and defer the design work.
 
-4. **Is cross-sandbox visibility actually needed?** The sequential pipeline (red finishes → apply → create green from updated host) works today with no new features. The only thing it lacks is parallelism. Is the parallelism worth the added complexity? For the common TDD workflow (write tests THEN implement), sequential is natural.
-
-5. **Extension system interaction.** yoloAI extensions already provide a composition mechanism for multi-sandbox workflows. Could the authority-split TDD pattern be expressed as an extension using existing primitives, without any new CLI features? If so, ship the extension and defer the design work.
-
-6. **Scope creep toward orchestration.** Every step toward multi-agent coordination moves yoloAI closer to being an orchestrator. The research shows the orchestrator space is crowded (60+ tools) and rapidly evolving. yoloAI's value is the sandbox layer. Where's the line between "composable primitives" and "accidental orchestrator"?
+4. **Scope creep toward orchestration.** Every step toward multi-agent coordination moves yoloAI closer to being an orchestrator. The research shows the orchestrator space is crowded (60+ tools) and rapidly evolving. yoloAI's value is the sandbox layer. Where's the line between "composable primitives" and "accidental orchestrator"?
 
 ## Research References
 
