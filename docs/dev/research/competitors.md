@@ -244,6 +244,72 @@ The following tools were identified but not analyzed in depth. Included for comp
 
 ---
 
+### 10. EnvPod CE (Xtellix)
+
+**Repo:** [markamo/envpod-ce](https://github.com/markamo/envpod-ce)
+**Stars:** New | **Language:** Rust | **Status:** v0.1.0 released March 2026
+**License:** BSL 1.1 (free to use/self-host, converts to AGPL-3.0 in 2030). Provisional patent filed Feb 2026.
+**Author:** Mark Amoboateng / Xtellix Inc.
+
+**What it does:** A governance runtime for AI agents, built from scratch on native Linux primitives (namespaces, cgroups v2, overlayfs, seccomp-BPF). Single static Rust binary (~12MB, musl), zero runtime dependencies — not Docker-based. Tagline: "Docker isolates. Envpod governs."
+
+**Architecture:**
+- **Foundation:** OverlayFS copy-on-write filesystem (diff/commit/rollback)
+- **Four Walls:** PID/mount/UTS/user namespaces, cgroups v2, seccomp-BPF, per-pod network namespace with veth pairs
+- **Governance Ceiling:** Encrypted credential vault, action queue with approval tiers, append-only audit trail, monitoring policies, remote control, web dashboard
+
+**Scale:** 44 Rust source files (~440KB source). CLI main.rs alone is 6,467 lines. 26+ subcommands, 18 built-in presets, 45 example configs, 25+ documentation files.
+
+**Strengths:**
+- **Governance layer is the key differentiator.** Action queue with 4 approval tiers (immediate/delayed/staged/blocked) — agents call actions via Unix socket, dangerous actions can be staged for human approval. Append-only JSONL audit trail records every operation. Monitoring agent with configurable policies. Remote control (freeze/resume/kill). This is genuinely novel in the sandbox space.
+- **Credential vault with proxy injection.** ChaCha20-Poly1305 encrypted per-pod vault. v0.2 adds transparent HTTPS proxy on the host-side veth that injects API keys at the transport layer — the agent makes normal HTTPS requests but never sees the actual key. DNS remaps API endpoints (e.g., `api.anthropic.com`) to the local proxy. Eliminates credential exfiltration entirely.
+- **Per-pod DNS resolver.** Embedded DNS server per pod with whitelist/blacklist/monitor modes, domain remapping, anti-DNS-tunneling detection, live mutation without restart. Central daemon for pod-to-pod discovery (`*.pods.local`).
+- **Snapshot system.** Named checkpoints with save/restore/promote-to-base-pod. Fast cloning from base pods (~130ms vs 1.3s init).
+- **Web dashboard.** Fleet management UI with real-time monitoring, audit viewer, diff inspector, noVNC desktop display with audio.
+- **Extensive agent support.** 18 presets: Claude Code, Codex, Gemini CLI, Aider, SWE-agent, OpenCode, LangGraph, Google ADK, OpenClaw, browser-use, Playwright, plus desktop/dev environments.
+- **Security testing.** 49 jailbreak boundary tests (55KB test script). Built-in `audit --security` static analysis.
+- **Performance.** Claims to outperform Docker: 401ms fresh start vs 552ms for Docker, 32ms warm exec vs 95ms.
+
+**Weaknesses:**
+- **Linux-only.** Requires kernel namespaces, cgroups v2, and overlayfs. No macOS or Windows support. Docker/VM backends planned but not shipped.
+- **Requires root.** `sudo envpod` for every operation — namespace/cgroup manipulation needs privileges.
+- **BSL license + patent.** May deter OSS contributors and enterprise adopters who prefer permissive or pure copyleft licenses. Cannot embed in competing commercial products or offer as managed service.
+- **Complexity.** 26+ commands, 4-tier action queues, monitoring policies, vault proxy configuration — powerful but intimidating for quick one-off agent runs.
+- **No ecosystem integration.** Bespoke runtime means no Docker Compose, no existing container tooling, no Kubernetes path.
+- **Single developer.** No visible community or external contributions yet.
+
+**How it compares to yoloAI:**
+
+| Aspect | EnvPod CE | yoloAI |
+|--------|-----------|--------|
+| Isolation | Native Linux primitives | Docker / Tart / Seatbelt |
+| Platform | Linux only | Linux, macOS |
+| Root required | Yes | No |
+| Diff/review workflow | OverlayFS diff/commit/rollback | git-based copy/diff/apply |
+| Credential mgmt | Encrypted vault + HTTPS proxy injection | File-based bind mount |
+| Network control | Per-pod DNS resolver + filtering | Docker network + agent allowlists |
+| Governance | Action queues, approval tiers, audit trail | None (future opportunity) |
+| Snapshots | Named checkpoints, base pods | None |
+| Dashboard | Web UI (fleet, audit, diff, noVNC) | None |
+| Complexity | High (26+ commands, governance model) | Low (familiar Docker/git workflow) |
+| Dependencies | None (static binary) | Docker / Tart / none (Seatbelt) |
+
+**Actionable lessons for yoloAI:**
+
+1. **Action governance is a compelling concept.** Staging dangerous agent operations (git push, external HTTP requests) for human approval before execution addresses the "agent operates within permissions but does something unwanted" problem. A lightweight version — e.g., agents declare intended side-effects, user approves before `yoloai apply` — could be valuable without the full queue/tier complexity.
+
+2. **Vault proxy injection eliminates credential exfiltration.** Our file-based bind mount means the agent can read the API key directly. A transparent proxy that injects credentials at the transport layer (agent never sees the key) is a meaningful security upgrade. Worth investigating as an enhancement to our credential injection, especially for the Docker backend where we control the network stack.
+
+3. **DNS-level filtering is more granular than Docker's network controls.** Per-pod DNS with whitelist/monitor/anti-tunneling addresses the CVE-2025-55284 (DNS exfiltration from Claude Code) class of attacks directly. Our agent network allowlists work at a higher level. For Docker backend, a DNS sidecar container could provide this without requiring native DNS server code.
+
+4. **Snapshots add workflow flexibility.** Named checkpoints that can be restored or promoted to templates complement the diff/apply workflow. For yoloAI, this could map to git tags or branches in `:copy` mode — cheap to implement since we already use git.
+
+5. **Our cross-platform support is a major differentiator.** EnvPod's Linux-only, root-required approach locks out macOS developers. Our Docker/Tart/Seatbelt multi-backend strategy serves a much wider audience. This is worth emphasizing in positioning.
+
+6. **Simplicity is a feature.** EnvPod's 26+ commands and governance model is powerful but adds cognitive load. yoloAI's approach of using familiar tools (Docker, git, unix conventions) lowers the barrier to entry. Don't chase feature parity at the cost of simplicity — add governance features only when they can be made lightweight and optional.
+
+---
+
 ## Community Pain Points (from GitHub issues, Reddit, HN, blogs)
 
 ### Top complaints (ranked by frequency):
@@ -295,18 +361,23 @@ The following tools were identified but not analyzed in depth. Included for comp
 
 *Note: This table covers a subset of the landscape. See section 8 for additional tools.*
 
-| Feature | deva.sh | TextCortex | Docker Sandbox | rsh3khar | cco | sandbox-runtime | Safehouse | yolobox | **yoloAI** |
-|---------|---------|------------|----------------|----------|-----|-----------------|-----------|--------|-----------------|
-| Copy/diff/apply workflow | No | No (git branch + diff review) | No (file sync) | No (auto-commit) | No | No | No | No | **Yes** |
-| Per-sandbox agent state | No | No | No | No | No | No | No | Yes (persistent volumes) | **Yes** |
-| Session logging | No | Web terminal | No | No | No | No | No | No | **Yes** |
-| User-supplied Dockerfiles | No | Custom Dockerfile | Templates | No | No | N/A (no container) | N/A | No | **Yes** |
-| Multi-directory with primary/dep | Partial | No | No | Worktrees | No | N/A | No | No | **Yes** |
-| Review before applying changes | No | Diff review (git) | No | No | No | No | No | No | **Yes (core feature)** |
-| Multi-backend isolation | No | No | MicroVM | No | Yes (sandbox-exec/bwrap/Docker) | Yes (bwrap/Seatbelt) | No (sandbox-exec only) | Yes (Docker/Podman/Apple) | **Yes (Docker/Tart/Seatbelt)** |
-| No Docker dependency | No | No | Docker Desktop | No | Yes (native modes) | Yes | Yes | Partial (Podman/Apple) | Partial (Seatbelt mode) |
-| Dynamic toolchain detection | No | No | No | No | No | Yes (glob patterns) | Yes | No | No |
-| Per-agent compatibility docs | No | No | No | No | No | No | Yes | No | No |
-| Network disable flag | No | No | Proxy-based | No | No | Yes | No | Yes (`--no-network`) | **Yes** |
+| Feature | deva.sh | TextCortex | Docker Sandbox | rsh3khar | cco | sandbox-runtime | Safehouse | yolobox | EnvPod CE | **yoloAI** |
+|---------|---------|------------|----------------|----------|-----|-----------------|-----------|--------|-----------|-----------------|
+| Copy/diff/apply workflow | No | No (git branch + diff review) | No (file sync) | No (auto-commit) | No | No | No | No | Yes (overlayfs) | **Yes** |
+| Per-sandbox agent state | No | No | No | No | No | No | No | Yes (persistent volumes) | Yes | **Yes** |
+| Session logging | No | Web terminal | No | No | No | No | No | No | Yes (JSONL audit) | **Yes** |
+| User-supplied Dockerfiles | No | Custom Dockerfile | Templates | No | No | N/A (no container) | N/A | No | No (YAML config) | **Yes** |
+| Multi-directory with primary/dep | Partial | No | No | Worktrees | No | N/A | No | No | Yes (bind mounts) | **Yes** |
+| Review before applying changes | No | Diff review (git) | No | No | No | No | No | No | Yes (diff/commit/rollback) | **Yes (core feature)** |
+| Multi-backend isolation | No | No | MicroVM | No | Yes (sandbox-exec/bwrap/Docker) | Yes (bwrap/Seatbelt) | No (sandbox-exec only) | Yes (Docker/Podman/Apple) | No (native Linux only) | **Yes (Docker/Tart/Seatbelt)** |
+| No Docker dependency | No | No | Docker Desktop | No | Yes (native modes) | Yes | Yes | Partial (Podman/Apple) | Yes (no Docker) | Partial (Seatbelt mode) |
+| Dynamic toolchain detection | No | No | No | No | No | Yes (glob patterns) | Yes | No | No | No |
+| Per-agent compatibility docs | No | No | No | No | No | No | Yes | No | Yes (presets) | No |
+| Network disable flag | No | No | Proxy-based | No | No | Yes | No | Yes (`--no-network`) | Yes (per-pod DNS) | **Yes** |
+| Governance (action approval) | No | No | No | No | No | No | No | No | Yes (4-tier queue) | No |
+| Encrypted credential vault | No | No | No | No | No | No | No | No | Yes (ChaCha20 + proxy) | No |
+| Snapshots/checkpoints | No | No | No | No | No | No | No | No | Yes | No |
+| Web dashboard | No | Yes | No | No | No | No | No | No | Yes | No |
+| macOS support | Yes | Yes | Yes | Yes | Yes | Yes | Yes | Yes | No | **Yes** |
 
 ---
