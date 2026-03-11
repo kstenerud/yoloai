@@ -33,6 +33,12 @@ func newRestartCmd() *cobra.Command {
 				return fmt.Errorf("--json and --attach are incompatible")
 			}
 
+			// Set terminal title early so it shows the sandbox name during restart
+			if attach {
+				setTerminalTitle(name)
+				defer setTerminalTitle("")
+			}
+
 			backend := resolveBackendForSandbox(name)
 			return withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
 				mgr := sandbox.NewManager(rt, backend, slog.Default(), cmd.InOrStdin(), cmd.ErrOrStderr())

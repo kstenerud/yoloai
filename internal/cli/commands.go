@@ -179,6 +179,12 @@ func newNewCmd(version string) *cobra.Command {
 				envMap[k] = v
 			}
 
+			// Set terminal title early so it shows the sandbox name during create
+			if attach && !noStart {
+				setTerminalTitle(name)
+				defer setTerminalTitle("")
+			}
+
 			backend := resolveBackend(cmd)
 			return withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
 				mgrOutput := cmd.ErrOrStderr()

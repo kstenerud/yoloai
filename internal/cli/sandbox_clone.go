@@ -27,6 +27,12 @@ func runClone(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("--json and --attach are incompatible")
 	}
 
+	// Set terminal title early so it shows the sandbox name during clone+start
+	if attach && !noStart {
+		setTerminalTitle(dst)
+		defer setTerminalTitle("")
+	}
+
 	// Force-destroy existing destination before cloning.
 	if force {
 		if _, err := os.Stat(sandbox.Dir(dst)); err == nil {
