@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -32,6 +33,117 @@ func TestCopyDir_Basic(t *testing.T) {
 func TestCopyDir_SourceMissing(t *testing.T) {
 	err := CopyDir("/nonexistent/path", filepath.Join(t.TempDir(), "dst"))
 	assert.Error(t, err)
+}
+
+func TestCopyDir_BrokenSymlink(t *testing.T) {
+	src := t.TempDir()
+	require.NoError(t, os.Symlink("/nonexistent/target", filepath.Join(src, "broken")))
+
+	dst := filepath.Join(t.TempDir(), "copy")
+	require.NoError(t, CopyDir(src, dst))
+
+	link, err := os.Readlink(filepath.Join(dst, "broken"))
+	require.NoError(t, err)
+	assert.Equal(t, "/nonexistent/target", link)
+}
+
+func TestCopyDir_ValidSymlink(t *testing.T) {
+	src := t.TempDir()
+	writeTestFile(t, src, "real.txt", "content")
+	require.NoError(t, os.Symlink("real.txt", filepath.Join(src, "link.txt")))
+
+	dst := filepath.Join(t.TempDir(), "copy")
+	require.NoError(t, CopyDir(src, dst))
+
+	// Must be a symlink, not a regular file copy.
+	fi, err := os.Lstat(filepath.Join(dst, "link.txt"))
+	require.NoError(t, err)
+	assert.NotZero(t, fi.Mode()&os.ModeSymlink, "should be a symlink")
+
+	link, err := os.Readlink(filepath.Join(dst, "link.txt"))
+	require.NoError(t, err)
+	assert.Equal(t, "real.txt", link)
+}
+
+func TestCopyDir_RelativeSymlink(t *testing.T) {
+	src := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(src, "sub"), 0750))
+	writeTestFile(t, src, "sub/target.txt", "data")
+	require.NoError(t, os.Symlink("sub/target.txt", filepath.Join(src, "rel")))
+
+	dst := filepath.Join(t.TempDir(), "copy")
+	require.NoError(t, CopyDir(src, dst))
+
+	link, err := os.Readlink(filepath.Join(dst, "rel"))
+	require.NoError(t, err)
+	assert.Equal(t, "sub/target.txt", link)
+}
+
+func TestCopyDir_SymlinkToDirectory(t *testing.T) {
+	src := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(src, "realdir"), 0750))
+	writeTestFile(t, src, "realdir/file.txt", "inside")
+	require.NoError(t, os.Symlink("realdir", filepath.Join(src, "linkdir")))
+
+	dst := filepath.Join(t.TempDir(), "copy")
+	require.NoError(t, CopyDir(src, dst))
+
+	// linkdir should be a symlink, not a real directory.
+	fi, err := os.Lstat(filepath.Join(dst, "linkdir"))
+	require.NoError(t, err)
+	assert.NotZero(t, fi.Mode()&os.ModeSymlink, "should be a symlink")
+
+	link, err := os.Readlink(filepath.Join(dst, "linkdir"))
+	require.NoError(t, err)
+	assert.Equal(t, "realdir", link)
+}
+
+func TestCopyDir_PreservesPermissions(t *testing.T) {
+	src := t.TempDir()
+	f := filepath.Join(src, "exec.sh")
+	require.NoError(t, os.WriteFile(f, []byte("#!/bin/sh"), 0755)) //nolint:gosec
+
+	dst := filepath.Join(t.TempDir(), "copy")
+	require.NoError(t, CopyDir(src, dst))
+
+	fi, err := os.Stat(filepath.Join(dst, "exec.sh"))
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0755), fi.Mode().Perm())
+}
+
+func TestCopyDir_PreservesModTime(t *testing.T) {
+	src := t.TempDir()
+	writeTestFile(t, src, "file.txt", "hello")
+	past := time.Date(2020, 6, 15, 12, 0, 0, 0, time.UTC)
+	require.NoError(t, os.Chtimes(filepath.Join(src, "file.txt"), past, past))
+
+	dst := filepath.Join(t.TempDir(), "copy")
+	require.NoError(t, CopyDir(src, dst))
+
+	fi, err := os.Stat(filepath.Join(dst, "file.txt"))
+	require.NoError(t, err)
+	assert.True(t, fi.ModTime().Equal(past), "mod time should be preserved, got %v", fi.ModTime())
+}
+
+func TestCopyDir_EmptyDirectory(t *testing.T) {
+	src := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(src, "empty"), 0750))
+
+	dst := filepath.Join(t.TempDir(), "copy")
+	require.NoError(t, CopyDir(src, dst))
+
+	fi, err := os.Stat(filepath.Join(dst, "empty"))
+	require.NoError(t, err)
+	assert.True(t, fi.IsDir(), "empty dir should be preserved")
+}
+
+func TestCopyDir_SourceNotDirectory(t *testing.T) {
+	f := filepath.Join(t.TempDir(), "file.txt")
+	require.NoError(t, os.WriteFile(f, []byte("data"), 0600))
+
+	err := CopyDir(f, filepath.Join(t.TempDir(), "dst"))
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "not a directory")
 }
 
 // RemoveGitDirs tests
