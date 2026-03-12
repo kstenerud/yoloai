@@ -28,6 +28,9 @@ var topicFile = map[string]string{
 	"security":      "security.md",
 	"credentials":   "security.md",
 	"flags":         "flags.md",
+	"extensions":    "extensions.md",
+	"x":             "extensions.md",
+	"ext":           "extensions.md",
 }
 
 // topicFunc maps a topic keyword to a function that generates content

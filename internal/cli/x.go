@@ -20,7 +20,7 @@ func newXCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "x [extension] [args...] [--flags...]",
 		Short:   "Run a user-defined extension",
-		Long:    "Run user-defined extensions from ~/.yoloai/extensions/.\nRun without arguments to list available extensions.",
+		Long:    "Run user-defined extensions from ~/.yoloai/extensions/.\nRun without arguments to list available extensions.\n\nSee 'yoloai help extensions' for how to create and install extensions.",
 		GroupID: groupWorkflow,
 		Aliases: []string{"ext"},
 		RunE:    runExtensionList,
@@ -145,7 +145,7 @@ func runExtensionList(cmd *cobra.Command, _ []string) error {
 		fmt.Fprintln(cmd.OutOrStdout(), "No extensions found.")                                                   //nolint:errcheck
 		fmt.Fprintln(cmd.OutOrStdout())                                                                           //nolint:errcheck
 		fmt.Fprintf(cmd.OutOrStdout(), "Add YAML files to %s to create extensions.\n", extension.ExtensionsDir()) //nolint:errcheck
-		fmt.Fprintln(cmd.OutOrStdout(), "See 'yoloai help' for extension format documentation.")                  //nolint:errcheck
+		fmt.Fprintln(cmd.OutOrStdout(), "See 'yoloai help extensions' for how to create and install extensions.") //nolint:errcheck
 		return nil
 	}
 
