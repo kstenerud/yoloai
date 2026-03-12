@@ -30,7 +30,7 @@ Note: Many popular tools (git, docker) silently accept interleaved options via G
 - Every short flag must have a long form
 - Short flags can be grouped: `-vq` is equivalent to `-v -q` (POSIX Guideline 5)
 - Boolean flags use `--flag` to enable and `--no-flag` to disable (e.g., `--color` / `--no-color`)
-- **`--no-*` convention:** Use `--no-X` to disable behavior that is on by default (`--no-start`, `--no-prompt`, `--no-profile`, `--no-restart`, `--no-wip`, `--no-color`). Use bare `--X` to enable behavior that is off by default (`--force`, `--dry-run`, `--resume`, `--attach`). This keeps the default invocation flag-free: running a command with no flags gives the default behavior, and each flag explicitly opts out of or into a non-default behavior.
+- **`--no-*` convention:** Use `--no-X` to disable behavior that is on by default (`--no-start`, `--no-prompt`, `--no-profile`, `--no-wip`, `--no-color`). Use bare `--X` to enable behavior that is off by default (`--force`, `--dry-run`, `--resume`, `--attach`, `--restart`). Use `--keep-X` to preserve something that is cleared by default (`--keep-cache`, `--keep-files`). This keeps the default invocation flag-free: running a command with no flags gives the default behavior, and each flag explicitly opts out of or into a non-default behavior.
 - Flags that take values: `--flag value` (space-separated) and `--flag=value` are both accepted
 
 ## Positional Arguments

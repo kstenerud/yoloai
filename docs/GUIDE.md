@@ -326,12 +326,14 @@ yoloai restart task --prompt "now add tests"  # restart with new prompt
 # Attach with resume (restart agent with resume prompt, then attach)
 yoloai attach task --resume
 
-# Reset workdir (re-copy from original, restart agent)
+# Reset workdir (in-place by default, agent stays running)
 yoloai reset task
-yoloai reset task --clean       # also wipe agent memory
+yoloai reset task --keep-cache  # preserve cache directory
+yoloai reset task --keep-files  # preserve files directory
 yoloai reset task --no-prompt   # don't re-send prompt
-yoloai reset task --no-restart  # keep agent running, reset workspace in-place
-yoloai reset task -a            # reset, restart, and auto-attach
+yoloai reset task --restart     # stop and restart container
+yoloai reset task --state       # wipe agent state (implies --restart)
+yoloai reset task --restart -a  # restart and auto-attach
 ```
 
 ### Reviewing changes

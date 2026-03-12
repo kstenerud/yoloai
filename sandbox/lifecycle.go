@@ -22,9 +22,11 @@ const resumePreamble = "You were previously working on the following task and we
 // ResetOptions holds parameters for the reset command.
 type ResetOptions struct {
 	Name      string
-	Clean     bool // also wipe agent-runtime directory
+	Restart   bool // stop and restart container
+	State     bool // also wipe agent-runtime directory (replaces Clean)
+	KeepCache bool // preserve cache directory
+	KeepFiles bool // preserve files directory
 	NoPrompt  bool // skip re-sending prompt after reset
-	NoRestart bool // keep agent running, reset workspace in-place
 	Debug     bool // enable entrypoint debug logging
 }
 
@@ -188,7 +190,8 @@ func (m *Manager) Destroy(ctx context.Context, name string) error {
 }
 
 // Reset re-copies the workdir from the original host directory and resets
-// the git baseline. Stops and restarts the container.
+// the git baseline. By default, resets in-place (agent stays running).
+// With --restart, stops and restarts the container.
 func (m *Manager) Reset(ctx context.Context, opts ResetOptions) error {
 	sandboxDir, err := RequireSandboxDir(opts.Name)
 	if err != nil {
@@ -203,20 +206,27 @@ func (m *Manager) Reset(ctx context.Context, opts ResetOptions) error {
 	if meta.Workdir.Mode == "rw" {
 		return fmt.Errorf("reset is not applicable for :rw directories — changes are already in the original")
 	}
-	if meta.Workdir.Mode == "overlay" && opts.NoRestart {
-		return fmt.Errorf("--no-restart is not supported for overlay mode (requires container restart)")
+
+	// Auto-upgrade to restart: --state implies restart (can't wipe state while agent is running)
+	if opts.State {
+		opts.Restart = true
 	}
 
-	// Check if we can do an in-place reset (--no-restart)
-	if opts.NoRestart {
+	// Auto-upgrade to restart: overlay mode requires container restart
+	if meta.Workdir.Mode == "overlay" {
+		opts.Restart = true
+	}
+
+	// Auto-upgrade to restart: container not running
+	if !opts.Restart {
 		status, err := DetectStatus(ctx, m.runtime, InstanceName(opts.Name), sandboxDir)
 		if err != nil || (status != StatusActive && status != StatusIdle) {
-			fmt.Fprintf(m.output, "Container is not running, falling back to restart\n") //nolint:errcheck // best-effort output
-			opts.NoRestart = false
+			fmt.Fprintf(m.output, "Container is not running, upgrading to restart\n") //nolint:errcheck // best-effort output
+			opts.Restart = true
 		}
 	}
 
-	if opts.NoRestart {
+	if !opts.Restart {
 		return m.resetInPlace(ctx, opts, meta, sandboxDir)
 	}
 
@@ -325,8 +335,8 @@ func (m *Manager) Reset(ctx context.Context, opts ResetOptions) error {
 		return err
 	}
 
-	// Optionally wipe agent-runtime and cache
-	if opts.Clean {
+	// Optionally wipe agent-runtime state
+	if opts.State {
 		agentStateDir := filepath.Join(sandboxDir, AgentRuntimeDir)
 		if err := os.RemoveAll(agentStateDir); err != nil {
 			return fmt.Errorf("remove %s: %w", AgentRuntimeDir, err)
@@ -334,19 +344,17 @@ func (m *Manager) Reset(ctx context.Context, opts ResetOptions) error {
 		if err := os.MkdirAll(agentStateDir, 0750); err != nil {
 			return fmt.Errorf("recreate %s: %w", AgentRuntimeDir, err)
 		}
-		cacheDir := filepath.Join(sandboxDir, "cache")
-		if err := os.RemoveAll(cacheDir); err != nil {
-			return fmt.Errorf("remove cache: %w", err)
-		}
-		if err := os.MkdirAll(cacheDir, 0750); err != nil {
-			return fmt.Errorf("recreate cache: %w", err)
-		}
 		// Reset agent_files flag so files get re-seeded on next start
 		sbState, stateErr := LoadSandboxState(sandboxDir)
 		if stateErr == nil {
 			sbState.AgentFilesInitialized = false
 			_ = SaveSandboxState(sandboxDir, sbState)
 		}
+	}
+
+	// Clear cache and files directories (unless --keep-X)
+	if err := m.clearCacheAndFiles(opts); err != nil {
+		return err
 	}
 
 	// Patch runtime-config.json with debug flag if requested
@@ -865,8 +873,36 @@ func (m *Manager) resetInPlace(ctx context.Context, opts ResetOptions, meta *Met
 		return err
 	}
 
+	// Clear cache and files directories (unless --keep-X)
+	if err := m.clearCacheAndFiles(opts); err != nil {
+		return err
+	}
+
 	// Notify agent via tmux
 	return m.sendResetNotification(ctx, opts.Name, sandboxDir, opts.NoPrompt, meta.HasPrompt)
+}
+
+// clearCacheAndFiles clears the cache and files directories unless --keep-X flags are set.
+func (m *Manager) clearCacheAndFiles(opts ResetOptions) error {
+	if !opts.KeepCache {
+		cacheDir := CacheDir(opts.Name)
+		if err := os.RemoveAll(cacheDir); err != nil {
+			return fmt.Errorf("remove cache: %w", err)
+		}
+		if err := os.MkdirAll(cacheDir, 0750); err != nil {
+			return fmt.Errorf("recreate cache: %w", err)
+		}
+	}
+	if !opts.KeepFiles {
+		filesDir := FilesDir(opts.Name)
+		if err := os.RemoveAll(filesDir); err != nil {
+			return fmt.Errorf("remove files: %w", err)
+		}
+		if err := os.MkdirAll(filesDir, 0750); err != nil {
+			return fmt.Errorf("recreate files: %w", err)
+		}
+	}
+	return nil
 }
 
 // rsyncDir syncs contents of src into dst using rsync.

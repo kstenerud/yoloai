@@ -552,6 +552,14 @@ func TestReset_RecopiesWorkdir(t *testing.T) {
 	workDir := filepath.Join(sandboxDir, "work", EncodePath(origDir))
 	require.NoError(t, os.MkdirAll(workDir, 0750))
 
+	// Create cache and files dirs with content (should be cleared by default)
+	cacheDir := filepath.Join(sandboxDir, "cache")
+	filesDir := filepath.Join(sandboxDir, "files")
+	require.NoError(t, os.MkdirAll(cacheDir, 0750))
+	require.NoError(t, os.MkdirAll(filesDir, 0750))
+	writeTestFile(t, cacheDir, "cached.txt", "cached data\n")
+	writeTestFile(t, filesDir, "shared.txt", "shared data\n")
+
 	// Copy original to work dir and create baseline
 	writeTestFile(t, workDir, "file.txt", "original content\n")
 	initGitRepo(t, workDir)
@@ -575,16 +583,13 @@ func TestReset_RecopiesWorkdir(t *testing.T) {
 	// Modify work copy
 	writeTestFile(t, workDir, "file.txt", "modified by agent\n")
 
-	// Reset needs Start to work, which needs Docker. Stop will also
-	// try Docker. Since we just want to test the re-copy logic,
-	// mock everything to succeed/no-op.
+	// Container not running → auto-upgrades to restart.
+	// Stop/Start will eventually fail (no runtime-config.json), but
+	// we still check the re-copy happened.
 	mock := &lifecycleMockRuntime{
-		// Stop: already stopped
 		stopFn: func(_ context.Context, _ string) error {
-			return nil // runtime returns nil when instance not found
+			return nil
 		},
-		// Start: container removed, recreate will fail (no runtime-config.json), but
-		// we still check the re-copy happened
 		inspectFn: func(_ context.Context, _ string) (runtime.InstanceInfo, error) {
 			return runtime.InstanceInfo{}, fmt.Errorf("not found: %w", runtime.ErrNotFound)
 		},
@@ -606,9 +611,15 @@ func TestReset_RecopiesWorkdir(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotEmpty(t, updatedMeta.Workdir.BaselineSHA)
 	assert.NotEqual(t, sha, updatedMeta.Workdir.BaselineSHA) // new baseline
+
+	// Verify cache and files were cleared (default behavior)
+	assert.NoFileExists(t, filepath.Join(cacheDir, "cached.txt"))
+	assert.NoFileExists(t, filepath.Join(filesDir, "shared.txt"))
+	assert.DirExists(t, cacheDir)
+	assert.DirExists(t, filesDir)
 }
 
-func TestReset_Clean(t *testing.T) {
+func TestReset_State(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
 
@@ -616,7 +627,7 @@ func TestReset_Clean(t *testing.T) {
 	require.NoError(t, os.MkdirAll(origDir, 0750))
 	writeTestFile(t, origDir, "file.txt", "content\n")
 
-	name := "test-reset-clean"
+	name := "test-reset-state"
 	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
 	workDir := filepath.Join(sandboxDir, "work", EncodePath(origDir))
 	agentStateDir := filepath.Join(sandboxDir, AgentRuntimeDir)
@@ -647,7 +658,7 @@ func TestReset_Clean(t *testing.T) {
 
 	mock := &lifecycleMockRuntime{
 		stopFn: func(_ context.Context, _ string) error {
-			return nil // runtime returns nil when instance not found
+			return nil
 		},
 		inspectFn: func(_ context.Context, _ string) (runtime.InstanceInfo, error) {
 			return runtime.InstanceInfo{}, fmt.Errorf("not found: %w", runtime.ErrNotFound)
@@ -655,7 +666,8 @@ func TestReset_Clean(t *testing.T) {
 	}
 
 	mgr := newLifecycleMgr(mock)
-	_ = mgr.Reset(context.Background(), ResetOptions{Name: name, Clean: true})
+	// --state implies --restart
+	_ = mgr.Reset(context.Background(), ResetOptions{Name: name, State: true})
 
 	// agent-runtime dir should exist with only settings.json (re-applied by
 	// ensureContainerSettings after clean wipe)
@@ -723,19 +735,23 @@ func TestReset_OriginalMissing(t *testing.T) {
 
 	mock := &lifecycleMockRuntime{
 		stopFn: func(_ context.Context, _ string) error {
-			return nil // runtime returns nil when instance not found
+			return nil
+		},
+		inspectFn: func(_ context.Context, _ string) (runtime.InstanceInfo, error) {
+			return runtime.InstanceInfo{}, fmt.Errorf("not found: %w", runtime.ErrNotFound)
 		},
 	}
 
 	mgr := newLifecycleMgr(mock)
+	// Container not running → auto-upgrades to restart
 	err := mgr.Reset(context.Background(), ResetOptions{Name: name})
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "original directory no longer exists")
 }
 
-// --no-restart tests
+// In-place reset tests (default behavior when container is running)
 
-func TestReset_NoRestart_SyncsWorkdir(t *testing.T) {
+func TestReset_InPlace_SyncsWorkdir(t *testing.T) {
 	if _, err := exec.LookPath("rsync"); err != nil {
 		t.Skip("rsync not installed")
 	}
@@ -749,10 +765,18 @@ func TestReset_NoRestart_SyncsWorkdir(t *testing.T) {
 	writeTestFile(t, origDir, "file.txt", "original content\n")
 
 	// Create sandbox with work copy
-	name := "test-reset-norestart"
+	name := "test-reset-inplace"
 	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
 	workDir := filepath.Join(sandboxDir, "work", EncodePath(origDir))
 	require.NoError(t, os.MkdirAll(workDir, 0750))
+
+	// Create cache and files dirs with content
+	cacheDir := filepath.Join(sandboxDir, "cache")
+	filesDir := filepath.Join(sandboxDir, "files")
+	require.NoError(t, os.MkdirAll(cacheDir, 0750))
+	require.NoError(t, os.MkdirAll(filesDir, 0750))
+	writeTestFile(t, cacheDir, "cached.txt", "cached data\n")
+	writeTestFile(t, filesDir, "shared.txt", "shared data\n")
 
 	// Set up work copy with baseline
 	writeTestFile(t, workDir, "file.txt", "original content\n")
@@ -792,9 +816,9 @@ func TestReset_NoRestart_SyncsWorkdir(t *testing.T) {
 
 	mgr := newLifecycleMgr(mock)
 
-	// Reset with --no-restart. sendResetNotification will fail (no runtime-config.json
+	// Default reset (in-place). sendResetNotification will fail (no runtime-config.json
 	// and exec mock not wired), but workspace sync and baseline should succeed.
-	_ = mgr.Reset(context.Background(), ResetOptions{Name: name, NoRestart: true})
+	_ = mgr.Reset(context.Background(), ResetOptions{Name: name})
 
 	// Verify work copy was synced from updated original
 	content, err := os.ReadFile(filepath.Join(workDir, "file.txt")) //nolint:gosec // test
@@ -814,9 +838,136 @@ func TestReset_NoRestart_SyncsWorkdir(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotEmpty(t, updatedMeta.Workdir.BaselineSHA)
 	assert.NotEqual(t, sha, updatedMeta.Workdir.BaselineSHA)
+
+	// Verify cache and files were cleared (default behavior)
+	assert.NoFileExists(t, filepath.Join(cacheDir, "cached.txt"))
+	assert.NoFileExists(t, filepath.Join(filesDir, "shared.txt"))
+	// Directories should still exist (recreated)
+	assert.DirExists(t, cacheDir)
+	assert.DirExists(t, filesDir)
 }
 
-func TestReset_NoRestart_FallsBackWhenNotRunning(t *testing.T) {
+func TestReset_InPlace_KeepCache(t *testing.T) {
+	if _, err := exec.LookPath("rsync"); err != nil {
+		t.Skip("rsync not installed")
+	}
+
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	origDir := filepath.Join(tmpDir, "original")
+	require.NoError(t, os.MkdirAll(origDir, 0750))
+	writeTestFile(t, origDir, "file.txt", "content\n")
+
+	name := "test-reset-keep-cache"
+	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
+	workDir := filepath.Join(sandboxDir, "work", EncodePath(origDir))
+	require.NoError(t, os.MkdirAll(workDir, 0750))
+
+	// Create cache and files dirs with content
+	cacheDir := filepath.Join(sandboxDir, "cache")
+	filesDir := filepath.Join(sandboxDir, "files")
+	require.NoError(t, os.MkdirAll(cacheDir, 0750))
+	require.NoError(t, os.MkdirAll(filesDir, 0750))
+	writeTestFile(t, cacheDir, "cached.txt", "cached data\n")
+	writeTestFile(t, filesDir, "shared.txt", "shared data\n")
+
+	writeTestFile(t, workDir, "file.txt", "content\n")
+	initGitRepo(t, workDir)
+	gitAdd(t, workDir, ".")
+	gitCommit(t, workDir, "yoloai baseline")
+	sha := gitHEAD(t, workDir)
+
+	meta := &Meta{
+		Name:      name,
+		Agent:     "claude",
+		CreatedAt: time.Now(),
+		Workdir: WorkdirMeta{
+			HostPath:    origDir,
+			MountPath:   origDir,
+			Mode:        "copy",
+			BaselineSHA: sha,
+		},
+	}
+	require.NoError(t, SaveMeta(sandboxDir, meta))
+
+	mock := &lifecycleMockRuntime{
+		inspectFn: func(_ context.Context, _ string) (runtime.InstanceInfo, error) {
+			return runtime.InstanceInfo{Running: true}, nil
+		},
+	}
+
+	mgr := newLifecycleMgr(mock)
+	_ = mgr.Reset(context.Background(), ResetOptions{Name: name, KeepCache: true})
+
+	// Cache should be preserved
+	assert.FileExists(t, filepath.Join(cacheDir, "cached.txt"))
+	// Files dir should be cleared
+	assert.NoFileExists(t, filepath.Join(filesDir, "shared.txt"))
+	assert.DirExists(t, filesDir)
+}
+
+func TestReset_InPlace_KeepFiles(t *testing.T) {
+	if _, err := exec.LookPath("rsync"); err != nil {
+		t.Skip("rsync not installed")
+	}
+
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	origDir := filepath.Join(tmpDir, "original")
+	require.NoError(t, os.MkdirAll(origDir, 0750))
+	writeTestFile(t, origDir, "file.txt", "content\n")
+
+	name := "test-reset-keep-files"
+	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
+	workDir := filepath.Join(sandboxDir, "work", EncodePath(origDir))
+	require.NoError(t, os.MkdirAll(workDir, 0750))
+
+	// Create cache and files dirs with content
+	cacheDir := filepath.Join(sandboxDir, "cache")
+	filesDir := filepath.Join(sandboxDir, "files")
+	require.NoError(t, os.MkdirAll(cacheDir, 0750))
+	require.NoError(t, os.MkdirAll(filesDir, 0750))
+	writeTestFile(t, cacheDir, "cached.txt", "cached data\n")
+	writeTestFile(t, filesDir, "shared.txt", "shared data\n")
+
+	writeTestFile(t, workDir, "file.txt", "content\n")
+	initGitRepo(t, workDir)
+	gitAdd(t, workDir, ".")
+	gitCommit(t, workDir, "yoloai baseline")
+	sha := gitHEAD(t, workDir)
+
+	meta := &Meta{
+		Name:      name,
+		Agent:     "claude",
+		CreatedAt: time.Now(),
+		Workdir: WorkdirMeta{
+			HostPath:    origDir,
+			MountPath:   origDir,
+			Mode:        "copy",
+			BaselineSHA: sha,
+		},
+	}
+	require.NoError(t, SaveMeta(sandboxDir, meta))
+
+	mock := &lifecycleMockRuntime{
+		inspectFn: func(_ context.Context, _ string) (runtime.InstanceInfo, error) {
+			return runtime.InstanceInfo{Running: true}, nil
+		},
+	}
+
+	mgr := newLifecycleMgr(mock)
+	_ = mgr.Reset(context.Background(), ResetOptions{Name: name, KeepFiles: true})
+
+	// Cache should be cleared
+	assert.NoFileExists(t, filepath.Join(cacheDir, "cached.txt"))
+	assert.DirExists(t, cacheDir)
+	// Files dir should be preserved
+	assert.FileExists(t, filepath.Join(filesDir, "shared.txt"))
+}
+
+func TestReset_UpgradesToRestartWhenNotRunning(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
 
@@ -826,7 +977,7 @@ func TestReset_NoRestart_FallsBackWhenNotRunning(t *testing.T) {
 	writeTestFile(t, origDir, "file.txt", "original content\n")
 
 	// Create sandbox with work copy
-	name := "test-reset-norestart-fallback"
+	name := "test-reset-upgrade-restart"
 	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
 	workDir := filepath.Join(sandboxDir, "work", EncodePath(origDir))
 	require.NoError(t, os.MkdirAll(workDir, 0750))
@@ -856,7 +1007,7 @@ func TestReset_NoRestart_FallsBackWhenNotRunning(t *testing.T) {
 	// Mock: container not found (removed)
 	mock := &lifecycleMockRuntime{
 		stopFn: func(_ context.Context, _ string) error {
-			return nil // runtime returns nil when instance not found
+			return nil
 		},
 		inspectFn: func(_ context.Context, _ string) (runtime.InstanceInfo, error) {
 			return runtime.InstanceInfo{}, fmt.Errorf("not found: %w", runtime.ErrNotFound)
@@ -866,14 +1017,14 @@ func TestReset_NoRestart_FallsBackWhenNotRunning(t *testing.T) {
 	var output bytes.Buffer
 	mgr := NewManager(mock, "docker", slog.Default(), strings.NewReader(""), &output)
 
-	// Reset with --no-restart; container not running → falls back to default path.
-	// Default path will fail at Start (no runtime-config.json), but re-copy should happen.
-	_ = mgr.Reset(context.Background(), ResetOptions{Name: name, NoRestart: true})
+	// Default reset; container not running → auto-upgrades to restart.
+	// Restart path will fail at Start (no runtime-config.json), but re-copy should happen.
+	_ = mgr.Reset(context.Background(), ResetOptions{Name: name})
 
-	// Verify fallback message was printed
-	assert.Contains(t, output.String(), "Container is not running, falling back to restart")
+	// Verify upgrade message was printed
+	assert.Contains(t, output.String(), "Container is not running, upgrading to restart")
 
-	// Verify work copy was re-copied from original (default reset behavior)
+	// Verify work copy was re-copied from original (restart behavior)
 	content, err := os.ReadFile(filepath.Join(workDir, "file.txt")) //nolint:gosec // test
 	require.NoError(t, err)
 	assert.Equal(t, "original content\n", string(content))

@@ -23,10 +23,17 @@ func newResetCmd() *cobra.Command {
 				return err
 			}
 			noPrompt, _ := cmd.Flags().GetBool("no-prompt")
-			clean, _ := cmd.Flags().GetBool("clean")
-			noRestart, _ := cmd.Flags().GetBool("no-restart")
+			restart, _ := cmd.Flags().GetBool("restart")
+			state, _ := cmd.Flags().GetBool("state")
+			keepCache, _ := cmd.Flags().GetBool("keep-cache")
+			keepFiles, _ := cmd.Flags().GetBool("keep-files")
 			attach, _ := cmd.Flags().GetBool("attach")
 			debug, _ := cmd.Flags().GetBool("debug")
+
+			// --state and --attach imply --restart
+			if state || attach {
+				restart = true
+			}
 
 			if jsonEnabled(cmd) && attach {
 				return fmt.Errorf("--json and --attach are incompatible")
@@ -37,9 +44,11 @@ func newResetCmd() *cobra.Command {
 				mgr := sandbox.NewManager(rt, backend, slog.Default(), cmd.InOrStdin(), cmd.ErrOrStderr())
 				if err := mgr.Reset(ctx, sandbox.ResetOptions{
 					Name:      name,
-					Clean:     clean,
+					Restart:   restart,
+					State:     state,
+					KeepCache: keepCache,
+					KeepFiles: keepFiles,
 					NoPrompt:  noPrompt,
-					NoRestart: noRestart,
 					Debug:     debug,
 				}); err != nil {
 					return sandboxErrorHint(name, err)
@@ -68,12 +77,11 @@ func newResetCmd() *cobra.Command {
 
 	cmd.Flags().Bool("debug", false, "Enable debug logging in sandbox entrypoint")
 	cmd.Flags().Bool("no-prompt", false, "Skip re-sending prompt after reset")
-	cmd.Flags().Bool("clean", false, "Also wipe agent-state directory")
-	cmd.Flags().Bool("no-restart", false, "Keep agent running, reset workspace in-place")
-	cmd.Flags().BoolP("attach", "a", false, "Auto-attach after reset")
-
-	cmd.MarkFlagsMutuallyExclusive("clean", "no-restart")
-	cmd.MarkFlagsMutuallyExclusive("attach", "no-restart")
+	cmd.Flags().Bool("restart", false, "Stop and restart the container")
+	cmd.Flags().Bool("state", false, "Also wipe agent runtime state")
+	cmd.Flags().Bool("keep-cache", false, "Preserve cache directory")
+	cmd.Flags().Bool("keep-files", false, "Preserve files directory")
+	cmd.Flags().BoolP("attach", "a", false, "Auto-attach after restart (implies --restart)")
 
 	return cmd
 }

@@ -4,6 +4,27 @@ Tracks breaking changes made during beta. Each entry should be included in relea
 
 ## Unreleased
 
+### `reset` redesigned: in-place default, cache/files cleared, new flags
+
+**Previous behavior:** `yoloai reset` stopped and restarted the container by default. `--no-restart` kept the agent running (in-place reset). `--clean` wiped agent state and cache. `--clean` and `--no-restart` were mutually exclusive.
+
+**New behavior:** `yoloai reset` resets in-place by default (agent stays running). Cache and files directories are cleared by default. New flags:
+- `--restart` — stop and restart container (replaces old default behavior)
+- `--state` — wipe agent runtime state (replaces `--clean`, implies `--restart`)
+- `--keep-cache` — preserve cache directory
+- `--keep-files` — preserve files directory
+- `--attach` now implies `--restart`
+
+Automatic upgrades to `--restart`: overlay mode, container not running, or `--state` set.
+
+**Rationale:** In-place reset is the better default — it preserves agent context while syncing workspace changes. The old `--no-restart` flag required opting in to the better UX. Cache and files are now cleared by default for a clean slate, with `--keep-X` flags for opt-out. `--clean` mixed too many concerns (agent state + cache); `--state` is more precise.
+
+**Migration:**
+- `yoloai reset <name>` — now resets in-place (was restart). Add `--restart` for old behavior.
+- `yoloai reset <name> --no-restart` — remove `--no-restart` (now the default).
+- `yoloai reset <name> --clean` — replace with `--state`. Note: cache is now cleared by default, so `--state` only adds agent runtime state wipe.
+- Cache/files are now cleared by default. Add `--keep-cache` and/or `--keep-files` to preserve them.
+
 ### `files` command: name before subcommand
 
 **Previous behavior:** `yoloai files put <sandbox> <file>...` — subcommand before sandbox name.
