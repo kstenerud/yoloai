@@ -15,11 +15,11 @@ func TestEncodePath_BasicPaths(t *testing.T) {
 		input    string
 		expected string
 	}{
-		{"absolute path", "/home/user/project", "^2Fhome^2Fuser^2Fproject"},
-		{"tmp path", "/tmp/test", "^2Ftmp^2Ftest"},
+		{"absolute path", "/home/user/project", "^shome^suser^sproject"},
+		{"tmp path", "/tmp/test", "^stmp^stest"},
 		{"safe only", "simple", "simple"},
 		{"empty string", "", ""},
-		{"root", "/", "^2F"},
+		{"root", "/", "^s"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -34,17 +34,20 @@ func TestEncodePath_SpecialCharacters(t *testing.T) {
 		input    string
 		expected string
 	}{
-		{"space", "/my dir", "^2Fmy^20dir"},
-		{"caret", "/foo^bar", "^2Ffoo^5Ebar"},
-		{"colon", "/foo:bar", "^2Ffoo^3Abar"},
-		{"dot", "/foo.bar", "^2Ffoo^2Ebar"},
-		{"hash", "/foo#bar", "^2Ffoo^23bar"},
-		{"at sign", "/foo@bar", "^2Ffoo^40bar"},
-		{"backslash", `/foo\bar`, "^2Ffoo^5Cbar"},
-		{"tilde", "/foo~bar", "^2Ffoo^7Ebar"},
-		{"exclamation", "/foo!bar", "^2Ffoo^21bar"},
-		{"question mark", "/foo?bar", "^2Ffoo^3Fbar"},
-		{"multiple specials", "/a b/c:d", "^2Fa^20b^2Fc^3Ad"},
+		{"space", "/my dir", "^smy^_dir"},
+		{"caret", "/foo^bar", "^sfoo^^bar"},
+		{"colon", "/foo:bar", "^sfoo^kbar"},
+		{"dot mid-component", "/foo.bar", "^sfoo.bar"},
+		{"dot end-of-component", "/foo./bar", "^sfoo^2E^sbar"},
+		{"dot end-of-path", "/foo.", "^sfoo^2E"},
+		{"double dot end", "/foo..", "^sfoo.^2E"},
+		{"hash", "/foo#bar", "^sfoo^hbar"},
+		{"at sign", "/foo@bar", "^sfoo^obar"},
+		{"backslash", `/foo\bar`, "^sfoo^rbar"},
+		{"tilde", "/foo~bar", "^sfoo~bar"},
+		{"exclamation", "/foo!bar", "^sfoo^ibar"},
+		{"question mark", "/foo?bar", "^sfoo^qbar"},
+		{"multiple specials", "/a b/c:d", "^sa^_b^sc^kd"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -59,10 +62,10 @@ func TestEncodePath_NonASCII(t *testing.T) {
 		input    string
 		expected string
 	}{
-		{"latin extended", "/données", "^2Fdonn^E9es"},
-		{"polish", "/Łódź", "^2F^w141^F3d^w17A"},
-		{"cjk", "/日本", "^2F^x65E5^x672C"},
-		{"emoji", "/test/🎉", "^2Ftest^2F^y1F389"},
+		{"latin extended", "/données", "^sdonn^E9es"},
+		{"polish", "/Łódź", "^s^w141^F3d^w17A"},
+		{"cjk", "/日本", "^s^x65E5^x672C"},
+		{"emoji", "/test/🎉", "^stest^s^y1F389"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -86,6 +89,7 @@ func TestDecodePath_RoundTrip(t *testing.T) {
 		"/日本",
 		"/test/🎉",
 		"/a!b@c#d$e%f",
+		"/trailing./dots.",
 	}
 	for _, path := range paths {
 		t.Run(path, func(t *testing.T) {
@@ -108,9 +112,45 @@ func TestDecodePath_CaseInsensitive(t *testing.T) {
 		{"lowercase modifier", "^w141", "Ł"},
 		{"uppercase modifier", "^W141", "Ł"},
 		{"mixed case hex", "^x00e9", "é"},
-		{"old modifier g", "^g141", "Ł"},
-		{"old modifier G", "^G141", "Ł"},
-		{"old modifier h", "^h00e9", "é"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			decoded, err := DecodePath(tt.input)
+			require.NoError(t, err)
+			assert.Equal(t, tt.expected, decoded)
+		})
+	}
+}
+
+func TestDecodePath_Shortcuts(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{"caret", "^^", "^"},
+		{"space", "^_", " "},
+		{"equals", "^-", "="},
+		{"plus", "^`", "+"},
+		{"open paren", "^{", "("},
+		{"close paren", "^}", ")"},
+		{"slash lower", "^s", "/"},
+		{"slash upper", "^S", "/"},
+		{"colon lower", "^k", ":"},
+		{"colon upper", "^K", ":"},
+		{"at lower", "^o", "@"},
+		{"at upper", "^O", "@"},
+		{"backslash lower", "^r", "\\"},
+		{"backslash upper", "^R", "\\"},
+		{"exclamation lower", "^i", "!"},
+		{"exclamation upper", "^I", "!"},
+		{"question lower", "^q", "?"},
+		{"question upper", "^Q", "?"},
+		{"hash lower", "^h", "#"},
+		{"hash upper", "^H", "#"},
+		{"dollar lower", "^v", "$"},
+		{"dollar upper", "^V", "$"},
+		{"combined", "^shome^suser", "/home/user"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -131,7 +171,6 @@ func TestDecodePath_Errors(t *testing.T) {
 		{"invalid hex", "^ZZ"},
 		{"truncated with modifier", "^w14"},
 		{"truncated modifier only", "^w"},
-		{"truncated old modifier", "^g14"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -213,7 +252,7 @@ func TestWorkDir(t *testing.T) {
 	home, err := os.UserHomeDir()
 	require.NoError(t, err)
 
-	expected := filepath.Join(home, ".yoloai", "sandboxes", "my-sandbox", "work", "^2Fhome^2Fuser^2Fproject")
+	expected := filepath.Join(home, ".yoloai", "sandboxes", "my-sandbox", "work", "^shome^suser^sproject")
 	assert.Equal(t, expected, WorkDir("my-sandbox", "/home/user/project"))
 }
 

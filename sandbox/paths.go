@@ -40,7 +40,7 @@ const (
 )
 
 // safeASCII marks ASCII bytes that do NOT need caret encoding.
-// Safe: alphanumeric, hyphen, underscore, backtick, braces.
+// Safe: alphanumeric, hyphen, underscore, backtick, braces, dot, tilde.
 var safeASCII [128]bool
 
 func init() {
@@ -58,6 +58,33 @@ func init() {
 	safeASCII['`'] = true
 	safeASCII['{'] = true
 	safeASCII['}'] = true
+	safeASCII['.'] = true
+	safeASCII['~'] = true
+}
+
+// encodeShortcuts maps characters to their single-letter caret shortcut codes.
+var encodeShortcuts = map[rune]byte{
+	'^': '^', ' ': '_', '=': '-', '+': '`',
+	'(': '{', ')': '}', '>': 'g', '#': 'h',
+	'!': 'i', '\'': 'j', ':': 'k', '<': 'l',
+	'%': 'm', '&': 'n', '@': 'o', '|': 'p',
+	'?': 'q', '\\': 'r', '/': 's', '*': 't',
+	'"': 'u', '$': 'v',
+}
+
+// decodeShortcuts maps single-letter caret shortcut codes back to characters.
+// Both cases are accepted for letters.
+var decodeShortcuts = map[byte]rune{
+	'^': '^', '_': ' ', '-': '=', '`': '+',
+	'{': '(', '}': ')',
+	'g': '>', 'G': '>', 'h': '#', 'H': '#',
+	'i': '!', 'I': '!', 'j': '\'', 'J': '\'',
+	'k': ':', 'K': ':', 'l': '<', 'L': '<',
+	'm': '%', 'M': '%', 'n': '&', 'N': '&',
+	'o': '@', 'O': '@', 'p': '|', 'P': '|',
+	'q': '?', 'Q': '?', 'r': '\\', 'R': '\\',
+	's': '/', 'S': '/', 't': '*', 'T': '*',
+	'u': '"', 'U': '"', 'v': '$', 'V': '$',
 }
 
 // encodeRune encodes a single rune using the shortest caret representation.
@@ -84,9 +111,17 @@ func EncodePath(hostPath string) string {
 	var builder strings.Builder
 	builder.Grow(len(hostPath))
 
-	for _, r := range hostPath {
+	for i, r := range hostPath {
+		// Encode trailing dots in path components — Windows strips them from filenames.
+		if r == '.' && (i+1 >= len(hostPath) || hostPath[i+1] == '/') {
+			encodeRune(&builder, r)
+			continue
+		}
 		if r < 128 && safeASCII[byte(r)] { //nolint:gosec // r < 128 guarantees safe conversion
 			builder.WriteRune(r)
+		} else if sc, ok := encodeShortcuts[r]; ok {
+			builder.WriteByte('^')
+			builder.WriteByte(sc)
 		} else {
 			encodeRune(&builder, r)
 		}
@@ -115,19 +150,28 @@ func DecodePath(encoded string) (string, error) {
 			return "", fmt.Errorf("truncated caret sequence at end of string")
 		}
 
-		hexDigits := 2
 		modifier := encoded[i]
+
+		// Check shortcuts first.
+		if r, ok := decodeShortcuts[modifier]; ok {
+			builder.WriteRune(r)
+			i++
+			continue
+		}
+
+		// Check width modifiers (w/x/y/z).
+		hexDigits := 2
 		switch modifier {
-		case 'w', 'W', 'g', 'G':
+		case 'w', 'W':
 			hexDigits = 3
 			i++
-		case 'x', 'X', 'h', 'H':
+		case 'x', 'X':
 			hexDigits = 4
 			i++
-		case 'y', 'Y', 'i', 'I':
+		case 'y', 'Y':
 			hexDigits = 5
 			i++
-		case 'z', 'Z', 'j', 'J':
+		case 'z', 'Z':
 			hexDigits = 6
 			i++
 		}
