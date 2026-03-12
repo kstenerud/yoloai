@@ -1,29 +1,48 @@
 # yoloAI
 
-**Fearless YOLO sandbox for your agent.**
-
-* No more endless inane prompts that you'll just answer yes to
-* No more babysitting the agent's long running tasks
-* No more annoying interruptions
-
-Let AI coding agents go **wild** (inside a disposable container or VM).
-
-* Your files are never touched.
-* When the agent's done, review what changed with `yoloai diff` and cherry-pick what you want with `yoloai apply`.
-* No permission prompts, no anxiety, no messy cleanup.
+**Sandboxed runner for AI coding agents. Your files stay untouched until you say otherwise.**
 
 ![terminal](terminal.svg)
 
-> MVP — early access. Core workflow works, rough edges expected. [Feedback welcome.](https://github.com/kstenerud/yoloai/issues)
+AI coding agents (Claude Code, Codex, Gemini, etc.) want to edit your files and run commands. You can approve every action one by one — or let them loose in a disposable sandbox and review the diff when they're done.
+
+```text
+  You                          Sandbox                        Your project
+   │                              │                               │
+   ├─ yoloai new fix-bug .        ├─ local sandbox copy of dir    │
+   │                              │                               │
+   ├─ << write your prompt(s) >>  ├─ agent works freely           │
+   │                              │  (no permission prompts)      │
+   │                              │                               │
+   ├─ yoloai diff fix-bug         ├─ shows what changed           │
+   │                              │                               │
+   ├─ yoloai apply fix-bug        │                               ├─ patches applied
+   │  (you can choose which ones) │                               │
+   │                              │                               │
+   ├─ yoloai destroy fix-bug      ├─ destroys sandbox             │
+```
+
+## Why?
+
+**Permission fatigue is real.** After a hundred approve/deny prompts you stop reading and just hit "yes" — or you reach for `--dangerously-skip-permissions` and hope for the best. Neither is great.
+
+yoloAI takes a different approach: let the agent do whatever it wants inside a disposable container. Your originals are never modified. When the agent is done, review the diff and choose what to keep.
+
+- **Your files are untouchable.** The agent works on an isolated copy. Originals never change until you say so.
+- **Git-powered review.** `diff` shows exactly what changed. `apply` patches your project cleanly, preserving individual commits.
+- **No permission prompts.** The container is disposable — agents run with full access inside the sandbox.
+- **Persistent agent state.** Session history and config survive stops and restarts.
+- **Easy retry.** `yoloai reset` re-copies your original for a fresh attempt.
 
 ## The workflow
 
 ```bash
-# Authenticate (API key or OAuth — yoloAI picks up existing credentials automatically)
+# Authenticate (yoloAI picks up existing credentials automatically)
 export ANTHROPIC_API_KEY=sk-ant-...   # Claude Code
-export GEMINI_API_KEY=...             # Gemini CLI (or `gemini` OAuth login)
+export GEMINI_API_KEY=...             # Gemini CLI
+# Or just let it pick up your already authenticated session
 
-# 1. Spin up a sandbox — agent starts working immediately
+# 1. Spin up a sandbox. Agent starts working immediately when you supply a prompt here
 yoloai new fix-bug ./my-project --prompt "fix the failing tests"
 
 # 2. See what the agent changed
@@ -36,20 +55,18 @@ yoloai apply fix-bug
 yoloai destroy fix-bug
 ```
 
-Or skip the prompt and drop into an interactive session:
+Or drop into an interactive session:
 
 ```bash
-yoloai new explore ./my-project -a
+yoloai new exploration ./my-project -a
 # You're inside the agent, running in tmux in the sandbox.
 #   Ctrl-B, D to detach.
-#   yoloai attach explore to reconnect.
+#   yoloai attach exploration to reconnect.
 ```
-
-Agents: **Claude Code** (default), **Aider**, **Codex**, **Gemini**, **OpenCode**. Use `yoloai system agents` to list available agents.
 
 ## Iterative workflow
 
-For longer tasks, work in a commit-by-commit loop. Keep two terminals open in your project directory — one for yoloAI, one for your normal shell. Start with a clean git repo.
+For longer tasks, work in a commit-by-commit loop. Keep two terminals open — one for yoloAI, one for your normal shell.
 
 ```
 ┌─ YOLO shell ──────────────────────┬─ Outer shell ─────────────────────┐
@@ -75,17 +92,11 @@ For longer tasks, work in a commit-by-commit loop. Keep two terminals open in yo
 
 The agent works on an isolated copy, so you can keep iterating without risk. Each `apply` patches the real project with only the new commits since the last apply.
 
-## Why?
+## Agents
 
-- **Your files are untouchable.** The agent works on an isolated copy. Originals never change until you say so.
-- **Git-powered review.** `diff` shows exactly what changed. `apply` patches your project cleanly.
-- **No permission prompts.** The container is disposable — agents run with their sandbox-bypass flags. No more clicking "approve" on every edit.
-- **Persistent agent state.** Session history and config survive stops and restarts.
-- **Easy retry.** `yoloai reset` re-copies your original for a fresh attempt — no leftover state.
+**Claude Code** (default), **Aider**, **Codex**, **Gemini**, **OpenCode**. Use `yoloai system agents` to list available agents.
 
 ## Install
-
-**yoloAI** is a single go binary, with dependencies dictated only by the sandboxing backend you choose. Install the `yoloai` binary in your path and you're good to go!
 
 ```bash
 git clone https://github.com/kstenerud/yoloai.git
@@ -94,27 +105,25 @@ make build
 sudo mv yoloai /usr/local/bin/  # or add to PATH
 ```
 
-On first run, yoloAI builds its base image (~2 min, depending on backend type) and creates `~/.yoloai/`.
+Single Go binary, no runtime dependencies beyond your chosen backend. On first run, yoloAI builds its base image (~2 min) and creates `~/.yoloai/`.
 
-**Requirements:**
+**Build requires:** Go 1.24+
 
-For building: Go 1.24+
+**Runtime backends:**
 
-For running:
-
-| Backend  | Supported Hosts                  | Dependencies                                                       |
-|----------|----------------------------------|--------------------------------------------------------------------|
-| docker   | Linux, macOS, Windows (WSL2)     | [Docker Engine](https://docs.docker.com/engine/install/) or [Docker Desktop](https://docs.docker.com/get-docker/) |
-| tart     | macOS (Apple Silicon only)       | [Tart](https://github.com/cirruslabs/tart) (`brew install cirruslabs/cli/tart`) |
-| seatbelt | macOS (any architecture)         | None (uses built-in `sandbox-exec`)                                |
-
-Use `yoloai system backends` to check which backends are available on your system.
+| Backend  | Supported Hosts              | Dependencies                                                       |
+|----------|------------------------------|--------------------------------------------------------------------|
+| docker   | Linux, macOS, Windows (WSL2) | [Docker Engine](https://docs.docker.com/engine/install/) or [Docker Desktop](https://docs.docker.com/get-docker/) |
+| tart     | macOS (Apple Silicon)        | [Tart](https://github.com/cirruslabs/tart) (`brew install cirruslabs/cli/tart`) |
+| seatbelt | macOS (any)                  | None (uses built-in `sandbox-exec`)                                |
 
 ## Learn more
 
 - **[Usage Guide](docs/GUIDE.md)** — commands, flags, workdir modes, configuration, security
-- **[Roadmap](docs/ROADMAP.md)** — upcoming agents, network isolation, profiles, overlayfs
+- **[Roadmap](docs/ROADMAP.md)** — upcoming features
 - **[Architecture](docs/dev/ARCHITECTURE.md)** — code navigation for contributors
+
+Early access. Core workflow works, rough edges expected. [Feedback welcome.](https://github.com/kstenerud/yoloai/issues)
 
 ## License
 
