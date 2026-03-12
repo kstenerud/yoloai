@@ -23,9 +23,22 @@ func newSandboxCmd() *cobra.Command {
 		Use:     "sandbox",
 		Aliases: []string{"sb"},
 		Short:   "Sandbox tools",
-		Long: `Sandbox tools.
+		Long:    "Sandbox tools.",
+		GroupID: groupSandboxTools,
+		Args:    cobra.ArbitraryArgs,
+		RunE:    sandboxDispatch,
+	}
+	cmd.Flags().Bool("raw", false, "Show raw output with ANSI escape sequences")
 
-Subcommands:
+	listCmd := newSandboxListCmd()
+	listCmd.Hidden = true
+	cmd.AddCommand(listCmd)
+
+	cmd.SetUsageTemplate(`Usage:
+  {{.CommandPath}} list [flags]
+  {{.CommandPath}} <name> <subcommand> [args...]
+
+Commands:
   list                       List sandboxes and their status
   <name> info                Show sandbox configuration and state
   <name> log [--raw]         Show sandbox session log
@@ -33,14 +46,17 @@ Subcommands:
   <name> prompt              Show sandbox prompt
   <name> allow <domain>...   Allow additional domains (network-isolated)
   <name> allowed             Show allowed domains
-  <name> deny <domain>...    Remove domains from the allowlist`,
-		GroupID: groupSandboxTools,
-		Args:    cobra.ArbitraryArgs,
-		RunE:    sandboxDispatch,
-	}
-	cmd.Flags().Bool("raw", false, "Show raw output with ANSI escape sequences")
+  <name> deny <domain>...    Remove domains from the allowlist{{if gt (len .Aliases) 0}}
 
-	cmd.AddCommand(newSandboxListCmd())
+Aliases:
+  {{.NameAndAliases}}{{end}}{{if .HasAvailableLocalFlags}}
+
+Flags:
+{{.LocalFlags.FlagUsages | trimTrailingWhitespaces}}{{end}}{{if .HasAvailableInheritedFlags}}
+
+Global Flags:
+{{.InheritedFlags.FlagUsages | trimTrailingWhitespaces}}{{end}}
+`)
 
 	return cmd
 }
