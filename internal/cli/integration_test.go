@@ -224,15 +224,15 @@ func TestCLI_NetworkLifecycle(t *testing.T) {
 	assert.Equal(t, "isolated", meta.NetworkMode)
 	initialDomains := len(meta.NetworkAllow)
 
-	// List domains
-	stdout, _, err := runCLI(t, "sandbox", "network", "list", "cli-net")
+	// List domains (allowed)
+	stdout, _, err := runCLI(t, "sandbox", "cli-net", "allowed")
 	require.NoError(t, err)
 	if initialDomains == 0 {
 		assert.Contains(t, stdout, "No domains allowed")
 	}
 
-	// Add domains
-	stdout, _, err = runCLI(t, "sandbox", "network", "add", "cli-net", "extra.example.com", "api.test.com")
+	// Add domains (allow)
+	stdout, _, err = runCLI(t, "sandbox", "cli-net", "allow", "extra.example.com", "api.test.com")
 	require.NoError(t, err)
 	assert.Contains(t, stdout, "extra.example.com")
 
@@ -243,21 +243,21 @@ func TestCLI_NetworkLifecycle(t *testing.T) {
 	assert.Contains(t, meta.NetworkAllow, "api.test.com")
 
 	// List again — should show added domains
-	stdout, _, err = runCLI(t, "sandbox", "network", "list", "cli-net")
+	stdout, _, err = runCLI(t, "sandbox", "cli-net", "allowed")
 	require.NoError(t, err)
 	assert.Contains(t, stdout, "extra.example.com")
 	assert.Contains(t, stdout, "api.test.com")
 
 	// List with --json
-	stdout, _, err = runCLI(t, "--json", "sandbox", "network", "list", "cli-net")
+	stdout, _, err = runCLI(t, "--json", "sandbox", "cli-net", "allowed")
 	require.NoError(t, err)
 	var result map[string]any
 	require.NoError(t, json.Unmarshal([]byte(stdout), &result))
 	assert.Equal(t, "cli-net", result["name"])
 	assert.Equal(t, "isolated", result["network_mode"])
 
-	// Remove a domain
-	stdout, _, err = runCLI(t, "sandbox", "network", "remove", "cli-net", "api.test.com")
+	// Remove a domain (deny)
+	stdout, _, err = runCLI(t, "sandbox", "cli-net", "deny", "api.test.com")
 	require.NoError(t, err)
 	assert.Contains(t, stdout, "api.test.com")
 
@@ -268,12 +268,12 @@ func TestCLI_NetworkLifecycle(t *testing.T) {
 	assert.NotContains(t, meta.NetworkAllow, "api.test.com")
 
 	// Remove nonexistent domain — should error
-	_, _, err = runCLI(t, "sandbox", "network", "remove", "cli-net", "nope.com")
+	_, _, err = runCLI(t, "sandbox", "cli-net", "deny", "nope.com")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "not in the allowlist")
 
 	// Add duplicate — should be idempotent
-	stdout, _, err = runCLI(t, "sandbox", "network", "add", "cli-net", "extra.example.com")
+	stdout, _, err = runCLI(t, "sandbox", "cli-net", "allow", "extra.example.com")
 	require.NoError(t, err)
 	assert.Contains(t, stdout, "All domains already allowed")
 }

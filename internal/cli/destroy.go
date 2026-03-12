@@ -69,6 +69,9 @@ func newDestroyCmd() *cobra.Command {
 							if err := sandbox.ValidateName(name); err != nil {
 								return err
 							}
+							if _, err := sandbox.RequireSandboxDir(name); err != nil {
+								return err
+							}
 						}
 						names = args
 					}
