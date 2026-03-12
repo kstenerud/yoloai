@@ -1165,3 +1165,79 @@ func TestDestroy_BrokenSandbox(t *testing.T) {
 	require.NoError(t, err)
 	assert.NoDirExists(t, sandboxDir)
 }
+
+func TestDestroy_ReadOnlyFiles(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	name := "test-destroy-readonly"
+	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
+	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
+
+	// Create read-only nested structure (like Go module cache)
+	readonlyDir := filepath.Join(sandboxDir, "work", "modcache", "pkg")
+	require.NoError(t, os.MkdirAll(readonlyDir, 0750))
+	writeTestFile(t, readonlyDir, "mod.go", "package mod")
+	// Make directory read-only
+	require.NoError(t, os.Chmod(readonlyDir, 0o555))               //nolint:gosec // intentionally read-only for test
+	require.NoError(t, os.Chmod(filepath.Dir(readonlyDir), 0o555)) //nolint:gosec // intentionally read-only for test
+
+	meta := &Meta{
+		Name:      name,
+		Agent:     "claude",
+		CreatedAt: time.Now(),
+		Workdir:   WorkdirMeta{HostPath: "/tmp/project", Mode: "copy"},
+	}
+	require.NoError(t, SaveMeta(sandboxDir, meta))
+
+	mock := &lifecycleMockRuntime{}
+	mgr := newLifecycleMgr(mock)
+
+	err := mgr.Destroy(context.Background(), name)
+	require.NoError(t, err)
+	assert.NoDirExists(t, sandboxDir)
+}
+
+// NeedsConfirmation edge cases
+
+func TestNeedsConfirmation_InspectError(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	createTestSandbox(t, tmpDir, "test-confirm-err", "/tmp/project", "copy")
+
+	mock := &lifecycleMockRuntime{
+		inspectFn: func(_ context.Context, _ string) (runtime.InstanceInfo, error) {
+			return runtime.InstanceInfo{}, fmt.Errorf("runtime unavailable")
+		},
+	}
+
+	mgr := newLifecycleMgr(mock)
+	needs, reason := mgr.NeedsConfirmation(context.Background(), "test-confirm-err")
+	// When inspect fails, DetectStatus returns an error → NeedsConfirmation returns false
+	assert.False(t, needs)
+	assert.Empty(t, reason)
+}
+
+// forceRemoveAll tests
+
+func TestForceRemoveAll_ReadOnlyNested(t *testing.T) {
+	dir := t.TempDir()
+	nested := filepath.Join(dir, "a", "b", "c")
+	require.NoError(t, os.MkdirAll(nested, 0750))
+	writeTestFile(t, nested, "file.txt", "content")
+
+	// Make everything read-only
+	require.NoError(t, os.Chmod(nested, 0o555))                             //nolint:gosec // intentionally read-only for test
+	require.NoError(t, os.Chmod(filepath.Dir(nested), 0o555))               //nolint:gosec // intentionally read-only for test
+	require.NoError(t, os.Chmod(filepath.Dir(filepath.Dir(nested)), 0o555)) //nolint:gosec // intentionally read-only for test
+
+	err := forceRemoveAll(dir)
+	require.NoError(t, err)
+	assert.NoDirExists(t, dir)
+}
+
+func TestForceRemoveAll_NonExistentPath(t *testing.T) {
+	err := forceRemoveAll("/tmp/nonexistent-path-" + t.Name())
+	assert.NoError(t, err)
+}

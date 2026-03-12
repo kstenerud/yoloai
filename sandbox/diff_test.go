@@ -386,3 +386,298 @@ func TestLoadDiffContext_NoBaseline(t *testing.T) {
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "no baseline SHA")
 }
+
+// --- loadDiffContext mode tests ---
+
+func TestLoadDiffContext_CopyMode(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	name := "ctx-copy"
+	hostPath := "/tmp/project"
+	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
+	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
+
+	meta := &Meta{
+		Name:      name,
+		Agent:     "test",
+		CreatedAt: time.Now(),
+		Workdir: WorkdirMeta{
+			HostPath:    hostPath,
+			MountPath:   hostPath,
+			Mode:        "copy",
+			BaselineSHA: "abc123",
+		},
+	}
+	require.NoError(t, SaveMeta(sandboxDir, meta))
+
+	workDir, baselineSHA, mode, err := loadDiffContext(name)
+	require.NoError(t, err)
+	assert.Equal(t, "copy", mode)
+	assert.Equal(t, "abc123", baselineSHA)
+	assert.Equal(t, WorkDir(name, hostPath), workDir)
+}
+
+func TestLoadDiffContext_OverlayMode(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	name := "ctx-overlay"
+	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
+	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
+
+	meta := &Meta{
+		Name:      name,
+		Agent:     "test",
+		CreatedAt: time.Now(),
+		Workdir: WorkdirMeta{
+			HostPath:    "/tmp/project",
+			MountPath:   "/container/project",
+			Mode:        "overlay",
+			BaselineSHA: "overlay-sha",
+		},
+	}
+	require.NoError(t, SaveMeta(sandboxDir, meta))
+
+	workDir, baselineSHA, mode, err := loadDiffContext(name)
+	require.NoError(t, err)
+	assert.Equal(t, "overlay", mode)
+	assert.Equal(t, "overlay-sha", baselineSHA)
+	assert.Equal(t, "/container/project", workDir)
+}
+
+func TestLoadDiffContext_OverlayMode_FallbackToHostPath(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	name := "ctx-overlay-fallback"
+	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
+	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
+
+	meta := &Meta{
+		Name:      name,
+		Agent:     "test",
+		CreatedAt: time.Now(),
+		Workdir: WorkdirMeta{
+			HostPath: "/tmp/project",
+			Mode:     "overlay",
+			// MountPath intentionally empty
+		},
+	}
+	require.NoError(t, SaveMeta(sandboxDir, meta))
+
+	workDir, _, mode, err := loadDiffContext(name)
+	require.NoError(t, err)
+	assert.Equal(t, "overlay", mode)
+	assert.Equal(t, "/tmp/project", workDir)
+}
+
+func TestLoadDiffContext_RWMode(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	name := "ctx-rw"
+	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
+	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
+
+	meta := &Meta{
+		Name:      name,
+		Agent:     "test",
+		CreatedAt: time.Now(),
+		Workdir: WorkdirMeta{
+			HostPath: "/tmp/project",
+			Mode:     "rw",
+		},
+	}
+	require.NoError(t, SaveMeta(sandboxDir, meta))
+
+	workDir, baselineSHA, mode, err := loadDiffContext(name)
+	require.NoError(t, err)
+	assert.Equal(t, "rw", mode)
+	assert.Equal(t, "HEAD", baselineSHA)
+	assert.Equal(t, "/tmp/project", workDir)
+}
+
+func TestLoadDiffContext_UnsupportedMode(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	name := "ctx-unknown"
+	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
+	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
+
+	meta := &Meta{
+		Name:      name,
+		Agent:     "test",
+		CreatedAt: time.Now(),
+		Workdir: WorkdirMeta{
+			HostPath: "/tmp/project",
+			Mode:     "bogus",
+		},
+	}
+	require.NoError(t, SaveMeta(sandboxDir, meta))
+
+	_, _, _, err := loadDiffContext(name)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "unsupported workdir mode")
+}
+
+// --- LoadAllDiffContexts tests ---
+
+func TestLoadAllDiffContexts_SingleCopyWorkdir(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	name := "all-copy"
+	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
+	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
+
+	meta := &Meta{
+		Name:      name,
+		Agent:     "test",
+		CreatedAt: time.Now(),
+		Workdir: WorkdirMeta{
+			HostPath:    "/tmp/project",
+			MountPath:   "/tmp/project",
+			Mode:        "copy",
+			BaselineSHA: "sha1",
+		},
+	}
+	require.NoError(t, SaveMeta(sandboxDir, meta))
+
+	contexts, err := LoadAllDiffContexts(name)
+	require.NoError(t, err)
+	require.Len(t, contexts, 1)
+	assert.Equal(t, "copy", contexts[0].Mode)
+	assert.Equal(t, "/tmp/project", contexts[0].HostPath)
+	assert.Equal(t, "sha1", contexts[0].BaselineSHA)
+}
+
+func TestLoadAllDiffContexts_WorkdirAndAuxDirs(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	name := "all-mixed"
+	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
+	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
+
+	meta := &Meta{
+		Name:      name,
+		Agent:     "test",
+		CreatedAt: time.Now(),
+		Workdir: WorkdirMeta{
+			HostPath:    "/tmp/project",
+			Mode:        "copy",
+			BaselineSHA: "sha-main",
+		},
+		Directories: []DirMeta{
+			{HostPath: "/tmp/aux1", Mode: "copy", BaselineSHA: "sha-aux1"},
+			{HostPath: "/tmp/aux2", Mode: "rw"},
+			{HostPath: "/tmp/aux3", Mode: "ro"},
+		},
+	}
+	require.NoError(t, SaveMeta(sandboxDir, meta))
+
+	contexts, err := LoadAllDiffContexts(name)
+	require.NoError(t, err)
+	// Should have: workdir (copy) + aux1 (copy) + aux2 (rw) = 3
+	// aux3 (ro) is skipped
+	require.Len(t, contexts, 3)
+	assert.Equal(t, "copy", contexts[0].Mode)
+	assert.Equal(t, "/tmp/project", contexts[0].HostPath)
+	assert.Equal(t, "copy", contexts[1].Mode)
+	assert.Equal(t, "/tmp/aux1", contexts[1].HostPath)
+	assert.Equal(t, "rw", contexts[2].Mode)
+	assert.Equal(t, "/tmp/aux2", contexts[2].HostPath)
+}
+
+func TestLoadAllDiffContexts_OverlayAuxFallsBackToHostPath(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	name := "all-overlay-fallback"
+	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
+	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
+
+	meta := &Meta{
+		Name:      name,
+		Agent:     "test",
+		CreatedAt: time.Now(),
+		Workdir: WorkdirMeta{
+			HostPath:    "/tmp/project",
+			Mode:        "copy",
+			BaselineSHA: "sha1",
+		},
+		Directories: []DirMeta{
+			{
+				HostPath:    "/tmp/overlay-dir",
+				MountPath:   "", // empty MountPath
+				Mode:        "overlay",
+				BaselineSHA: "sha-ovl",
+			},
+		},
+	}
+	require.NoError(t, SaveMeta(sandboxDir, meta))
+
+	contexts, err := LoadAllDiffContexts(name)
+	require.NoError(t, err)
+	require.Len(t, contexts, 2)
+	// Overlay aux dir should fall back to host path
+	assert.Equal(t, "overlay", contexts[1].Mode)
+	assert.Equal(t, "/tmp/overlay-dir", contexts[1].WorkDir) // fell back to HostPath
+}
+
+func TestLoadAllDiffContexts_NoAuxDirs(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	name := "all-noaux"
+	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
+	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
+
+	meta := &Meta{
+		Name:      name,
+		Agent:     "test",
+		CreatedAt: time.Now(),
+		Workdir: WorkdirMeta{
+			HostPath:    "/tmp/project",
+			Mode:        "copy",
+			BaselineSHA: "sha-only",
+		},
+	}
+	require.NoError(t, SaveMeta(sandboxDir, meta))
+
+	contexts, err := LoadAllDiffContexts(name)
+	require.NoError(t, err)
+	require.Len(t, contexts, 1)
+	assert.Equal(t, "/tmp/project", contexts[0].HostPath)
+}
+
+func TestLoadAllDiffContexts_OverlayWorkdirWithMountPath(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	name := "all-overlay-mount"
+	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
+	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
+
+	meta := &Meta{
+		Name:      name,
+		Agent:     "test",
+		CreatedAt: time.Now(),
+		Workdir: WorkdirMeta{
+			HostPath:    "/host/project",
+			MountPath:   "/container/project",
+			Mode:        "overlay",
+			BaselineSHA: "sha-ovl",
+		},
+	}
+	require.NoError(t, SaveMeta(sandboxDir, meta))
+
+	contexts, err := LoadAllDiffContexts(name)
+	require.NoError(t, err)
+	require.Len(t, contexts, 1)
+	assert.Equal(t, "overlay", contexts[0].Mode)
+	assert.Equal(t, "/container/project", contexts[0].WorkDir)
+	assert.Equal(t, "/host/project", contexts[0].HostPath)
+}
