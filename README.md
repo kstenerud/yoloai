@@ -1,25 +1,29 @@
 # yoloAI
 
-**Sandboxed runner for AI coding agents. Your files stay untouched until you say otherwise.**
+**Sandboxed runner for AI coding agents. No more permission fatique. Your files stay untouched until you say otherwise.**
 
 ![terminal](terminal.svg)
 
-AI coding agents (Claude Code, Codex, Gemini, etc.) want to edit your files and run commands. You can approve every action one by one — or let them loose in a disposable sandbox and review the diff when they're done.
+AI coding agents want to edit your files and run commands, so you must choose between them constantly asking your permission, or bypassing permissions and risking a catastrophe.
+
+Until now.
+
+Let your agent live dangerously in a sandbox, then review the changes and decide what to keep.
 
 ```text
-  You                          Sandbox                        Your project
-   │                              │                               │
-   ├─ yoloai new fix-bug .        ├─ local sandbox copy of dir    │
-   │                              │                               │
-   ├─ << write your prompt(s) >>  ├─ agent works freely           │
-   │                              │  (no permission prompts)      │
-   │                              │                               │
-   ├─ yoloai diff fix-bug         ├─ shows what changed           │
-   │                              │                               │
-   ├─ yoloai apply fix-bug        │                               ├─ patches applied
-   │  (you can choose which ones) │                               │
-   │                              │                               │
-   ├─ yoloai destroy fix-bug      ├─ destroys sandbox             │
+You                          Sandbox                        Your project
+ │                              │                                │
+ ├─ yoloai new fix-bug .        ├─ sandbox copy of project       │
+ │                              │                                │
+ ├─ << your prompt(s) >>        ├─ agent works freely            │
+ │                              │  (no permission prompts)       │
+ │                              │                                │
+ ├─ yoloai diff fix-bug         ├─ shows what changed            │
+ │                              │                                │
+ ├─ yoloai apply fix-bug        │                                ├─ patches applied
+ │  (you choose which ones)     │                                │
+ │                              │                                │
+ ├─ yoloai destroy fix-bug      ├─ destroys sandbox              │
 ```
 
 ## Why?
