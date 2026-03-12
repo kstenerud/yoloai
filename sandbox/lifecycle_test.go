@@ -667,7 +667,7 @@ func TestReset_State(t *testing.T) {
 
 	mgr := newLifecycleMgr(mock)
 	// --state implies --restart
-	_ = mgr.Reset(context.Background(), ResetOptions{Name: name, State: true})
+	_ = mgr.Reset(context.Background(), ResetOptions{Name: name, ClearState: true})
 
 	// agent-runtime dir should exist with only settings.json (re-applied by
 	// ensureContainerSettings after clean wipe)

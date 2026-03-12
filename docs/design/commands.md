@@ -581,7 +581,7 @@ By default, the agent stays running and retains its conversational context while
    - With `--no-prompt`: notification text only
 7. Notification text: `"[yoloai] Workspace has been reset to match the current host directory. All previous changes have been reverted and any new upstream changes are now present. Re-read files before assuming their contents."`
 
-Auto-upgrade to `--restart`: if the container is not running, overlay mode is used, or `--state` is set, the reset automatically upgrades to restart mode.
+Auto-upgrade to `--restart`: if the container is not running, overlay mode is used, or `--clear-state` is set, the reset automatically upgrades to restart mode.
 
 **`--restart` behavior (stop and restart container):**
 
@@ -592,7 +592,7 @@ The container is stopped and restarted. The agent loses its conversational conte
 3. Re-copy workdir from original host dir via `cp -rp`
 4. Re-create git baseline
 5. Update `baseline_sha` in `meta.json`
-6. If `--state`, also delete and recreate `agent-runtime/` directory
+6. If `--clear-state`, also delete and recreate `agent-runtime/` directory
 7. Clear cache directory (unless `--keep-cache`)
 8. Clear files directory (unless `--keep-files`)
 9. Start container (entrypoint runs as normal)
@@ -600,7 +600,7 @@ The container is stopped and restarted. The agent loses its conversational conte
 
 Options:
 - `--restart`: Stop and restart the container instead of resetting in-place.
-- `--state`: Also wipe agent runtime state (`agent-runtime/` directory). Implies `--restart`.
+- `--clear-state`: Also wipe agent runtime state (`agent-runtime/` directory). Implies `--restart`.
 - `--keep-cache`: Preserve the cache directory (not cleared).
 - `--keep-files`: Preserve the files directory (not cleared).
 - `--no-prompt`: Skip re-sending the prompt after reset.
@@ -608,7 +608,7 @@ Options:
 - `--debug`: Enable debug logging in sandbox entrypoint.
 
 Implied behaviors:
-- `--state` implies `--restart` (can't wipe state while agent is running).
+- `--clear-state` implies `--restart` (can't wipe state while agent is running).
 - `--attach` implies `--restart` (need to reconnect after restart).
 - Overlay mode auto-upgrades to `--restart` (overlay requires container restart).
 - Container not running auto-upgrades to `--restart`.

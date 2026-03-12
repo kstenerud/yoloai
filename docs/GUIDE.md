@@ -332,7 +332,7 @@ yoloai reset task --keep-cache  # preserve cache directory
 yoloai reset task --keep-files  # preserve files directory
 yoloai reset task --no-prompt   # don't re-send prompt
 yoloai reset task --restart     # stop and restart container
-yoloai reset task --state       # wipe agent state (implies --restart)
+yoloai reset task --clear-state  # wipe agent state and restart
 yoloai reset task --restart -a  # restart and auto-attach
 ```
 

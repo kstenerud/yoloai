@@ -24,14 +24,14 @@ func newResetCmd() *cobra.Command {
 			}
 			noPrompt, _ := cmd.Flags().GetBool("no-prompt")
 			restart, _ := cmd.Flags().GetBool("restart")
-			state, _ := cmd.Flags().GetBool("state")
+			clearState, _ := cmd.Flags().GetBool("clear-state")
 			keepCache, _ := cmd.Flags().GetBool("keep-cache")
 			keepFiles, _ := cmd.Flags().GetBool("keep-files")
 			attach, _ := cmd.Flags().GetBool("attach")
 			debug, _ := cmd.Flags().GetBool("debug")
 
-			// --state and --attach imply --restart
-			if state || attach {
+			// --clear-state and --attach imply --restart
+			if clearState || attach {
 				restart = true
 			}
 
@@ -43,13 +43,13 @@ func newResetCmd() *cobra.Command {
 			return withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
 				mgr := sandbox.NewManager(rt, backend, slog.Default(), cmd.InOrStdin(), cmd.ErrOrStderr())
 				if err := mgr.Reset(ctx, sandbox.ResetOptions{
-					Name:      name,
-					Restart:   restart,
-					State:     state,
-					KeepCache: keepCache,
-					KeepFiles: keepFiles,
-					NoPrompt:  noPrompt,
-					Debug:     debug,
+					Name:       name,
+					Restart:    restart,
+					ClearState: clearState,
+					KeepCache:  keepCache,
+					KeepFiles:  keepFiles,
+					NoPrompt:   noPrompt,
+					Debug:      debug,
 				}); err != nil {
 					return sandboxErrorHint(name, err)
 				}
@@ -78,7 +78,7 @@ func newResetCmd() *cobra.Command {
 	cmd.Flags().Bool("debug", false, "Enable debug logging in sandbox entrypoint")
 	cmd.Flags().Bool("no-prompt", false, "Skip re-sending prompt after reset")
 	cmd.Flags().Bool("restart", false, "Stop and restart the container")
-	cmd.Flags().Bool("state", false, "Also wipe agent runtime state")
+	cmd.Flags().Bool("clear-state", false, "Wipe agent runtime state (implies --restart)")
 	cmd.Flags().Bool("keep-cache", false, "Preserve cache directory")
 	cmd.Flags().Bool("keep-files", false, "Preserve files directory")
 	cmd.Flags().BoolP("attach", "a", false, "Auto-attach after restart (implies --restart)")

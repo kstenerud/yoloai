@@ -21,13 +21,13 @@ const resumePreamble = "You were previously working on the following task and we
 
 // ResetOptions holds parameters for the reset command.
 type ResetOptions struct {
-	Name      string
-	Restart   bool // stop and restart container
-	State     bool // also wipe agent-runtime directory (replaces Clean)
-	KeepCache bool // preserve cache directory
-	KeepFiles bool // preserve files directory
-	NoPrompt  bool // skip re-sending prompt after reset
-	Debug     bool // enable entrypoint debug logging
+	Name       string
+	Restart    bool // stop and restart container
+	ClearState bool // also wipe agent-runtime directory (replaces Clean)
+	KeepCache  bool // preserve cache directory
+	KeepFiles  bool // preserve files directory
+	NoPrompt   bool // skip re-sending prompt after reset
+	Debug      bool // enable entrypoint debug logging
 }
 
 // Stop stops a sandbox's instance.
@@ -208,7 +208,7 @@ func (m *Manager) Reset(ctx context.Context, opts ResetOptions) error {
 	}
 
 	// Auto-upgrade to restart: --state implies restart (can't wipe state while agent is running)
-	if opts.State {
+	if opts.ClearState {
 		opts.Restart = true
 	}
 
@@ -336,7 +336,7 @@ func (m *Manager) Reset(ctx context.Context, opts ResetOptions) error {
 	}
 
 	// Optionally wipe agent-runtime state
-	if opts.State {
+	if opts.ClearState {
 		agentStateDir := filepath.Join(sandboxDir, AgentRuntimeDir)
 		if err := os.RemoveAll(agentStateDir); err != nil {
 			return fmt.Errorf("remove %s: %w", AgentRuntimeDir, err)
