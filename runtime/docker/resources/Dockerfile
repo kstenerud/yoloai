@@ -25,6 +25,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     iptables \
     ipset \
     dnsutils \
+    sudo \
     && rm -rf /var/lib/apt/lists/*
 
 # Node.js 22 LTS via NodeSource
@@ -97,7 +98,9 @@ RUN curl -fsSL "https://github.com/tianon/gosu/releases/download/${GOSU_VERSION}
 
 # Non-root user (placeholder UID/GID — entrypoint adjusts at runtime)
 RUN groupadd -g 1001 yoloai \
-    && useradd -m -u 1001 -g yoloai -s /bin/bash yoloai
+    && useradd -m -u 1001 -g yoloai -s /bin/bash yoloai \
+    && echo 'yoloai ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/yoloai \
+    && chmod 0440 /etc/sudoers.d/yoloai
 
 # Internal directory for sandbox runtime files
 ENV YOLOAI_DIR=/yoloai
