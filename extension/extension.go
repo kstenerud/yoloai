@@ -169,7 +169,7 @@ var ReservedNames = map[string]bool{
 	"new": true, "attach": true, "diff": true, "apply": true, "files": true,
 	"start": true, "stop": true, "restart": true, "destroy": true, "reset": true,
 	"system": true, "sandbox": true, "ls": true, "log": true, "exec": true,
-	"profile": true, "help": true, "config": true, "completion": true, "version": true,
+	"profile": true, "help": true, "config": true, "version": true,
 	"x": true, "ext": true, "sb": true,
 }
 

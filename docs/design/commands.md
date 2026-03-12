@@ -66,7 +66,7 @@ Admin:
   yoloai profile list                            List profiles
   yoloai profile info <name>                     Show merged profile configuration
   yoloai profile delete <name>                   Delete a profile
-  yoloai completion [bash|zsh|fish|powershell]   Generate shell completion script
+  yoloai system completion [bash|zsh|fish|powershell]   Generate shell completion script
   yoloai version                                 Show version information
 ```
 

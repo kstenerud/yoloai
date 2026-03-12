@@ -66,7 +66,7 @@ Full reference for commands, flags, configuration, and internals. For a quick ov
 | `yoloai config reset <key>` | Reset a configuration value to its default |
 | `yoloai x [extension]` | Run a user-defined extension (alias: `ext`) |
 | `yoloai help [topic]` | Show help topics (agents, workflow, workdirs, config, security, flags) |
-| `yoloai completion <shell>` | Generate shell completion (bash/zsh/fish/powershell) |
+| `yoloai system completion <shell>` | Generate shell completion (bash/zsh/fish/powershell) |
 | `yoloai version` | Show version information |
 
 ### YOLOAI_SANDBOX

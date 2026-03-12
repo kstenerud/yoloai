@@ -233,7 +233,7 @@ Tart (macOS VM) implementation of `Runtime` interface. Shells out to `tart` CLI 
 | `yoloai config get` | `cli/config.go:newConfigGetCmd` | `sandbox.GetEffectiveConfig()` / `sandbox.GetConfigValue()` |
 | `yoloai config set` | `cli/config.go:newConfigSetCmd` | `sandbox.UpdateConfigFields()` or `sandbox.UpdateGlobalConfigFields()` via `IsGlobalKey()` |
 | `yoloai config reset` | `cli/config.go:newConfigResetCmd` | `sandbox.DeleteConfigField()` or `sandbox.DeleteGlobalConfigField()` via `IsGlobalKey()` |
-| `yoloai completion` | `cli/commands.go:newCompletionCmd` | Cobra's built-in completion generators |
+| `yoloai system completion` | `cli/commands.go:newCompletionCmd` | Cobra's built-in completion generators |
 | `yoloai x` | `cli/x.go:newExtensionCmd` | Loads and runs user-defined extensions from `~/.yoloai/extensions/` |
 | `yoloai version` | `cli/commands.go:newVersionCmd` | Prints build-time version info |
 

@@ -122,7 +122,7 @@ func (m *Manager) EnsureSetupNonInteractive(ctx context.Context) error {
 		if err := os.WriteFile(configPath, []byte(config.DefaultConfigYAML), 0600); err != nil {
 			return fmt.Errorf("write config.yaml: %w", err)
 		}
-		fmt.Fprintln(m.output, "Tip: enable shell completions with 'yoloai completion --help'") //nolint:errcheck // best-effort output
+		fmt.Fprintln(m.output, "Tip: enable shell completions with 'yoloai system completion --help'") //nolint:errcheck // best-effort output
 	}
 
 	// Write default global config.yaml if missing

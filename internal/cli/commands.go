@@ -60,7 +60,6 @@ func registerCommands(root *cobra.Command, version, commit, date string) {
 		newProfileCmd(),
 		newHelpCmd(),
 		newConfigCmd(),
-		newCompletionCmd(),
 		newVersionCmd(version, commit, date),
 	)
 }
@@ -278,24 +277,23 @@ func newNewCmd(version string) *cobra.Command {
 
 func newCompletionCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:     "completion [bash|zsh|fish|powershell]",
-		Short:   "Generate shell completion script",
-		GroupID: groupAdmin,
+		Use:   "completion [bash|zsh|fish|powershell]",
+		Short: "Generate shell completion script",
 		Long: `Generate shell completion script for the specified shell.
 
 To load completions:
 
 Bash:
-  source <(yoloai completion bash)
+  source <(yoloai system completion bash)
 
 Zsh:
-  source <(yoloai completion zsh)
+  source <(yoloai system completion zsh)
 
 Fish:
-  yoloai completion fish | source
+  yoloai system completion fish | source
 
 PowerShell:
-  yoloai completion powershell | Out-String | Invoke-Expression`,
+  yoloai system completion powershell | Out-String | Invoke-Expression`,
 		Args:      cobra.ExactArgs(1),
 		ValidArgs: []string{"bash", "zsh", "fish", "powershell"},
 		RunE: func(cmd *cobra.Command, args []string) error {
