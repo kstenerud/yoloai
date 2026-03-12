@@ -6,7 +6,7 @@ For the full list of designed-but-unimplemented features, see [dev/plans/TODO.md
 
 ## Next up
 
-- Profile `setup` commands (parsed but not yet executed in containers)
+- Profile setup commands (run custom scripts when a sandbox starts)
 - Batch sandbox creation (`yoloai batch`)
 - Sandbox chaining/pipelines
 - Shared cache volumes for package managers
