@@ -110,6 +110,20 @@ The agent works on an isolated copy, so you can keep iterating without risk. Eac
 
 ## Install
 
+### Using `go install`
+
+```bash
+# Latest release
+go install github.com/kstenerud/yoloai/cmd/yoloai@latest
+
+# Latest development version (beta)
+go install github.com/kstenerud/yoloai/cmd/yoloai@main
+```
+
+Requires Go 1.24+. The binary is placed in `$GOPATH/bin` (typically `~/go/bin`).
+
+### From source
+
 ```bash
 git clone https://github.com/kstenerud/yoloai.git
 cd yoloai
@@ -118,8 +132,6 @@ sudo mv yoloai /usr/local/bin/  # or add to PATH
 ```
 
 Single Go binary, no runtime dependencies beyond your chosen backend. On first run, yoloAI builds its base image (~2 min) and creates `~/.yoloai/`.
-
-**Build requires:** Go 1.24+
 
 **Runtime backends:**
 
