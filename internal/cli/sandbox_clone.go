@@ -119,14 +119,3 @@ func newCloneCmd() *cobra.Command {
 	addCloneFlags(cmd)
 	return cmd
 }
-
-func newSandboxCloneCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "clone <source> <dest>",
-		Short: "Clone a sandbox",
-		Args:  cobra.ExactArgs(2),
-		RunE:  runClone,
-	}
-	addCloneFlags(cmd)
-	return cmd
-}

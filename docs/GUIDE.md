@@ -37,13 +37,13 @@ Full reference for commands, flags, configuration, and internals. For a quick ov
 | `yoloai system setup` | Re-run interactive first-run setup |
 | `yoloai sandbox` | Sandbox inspection |
 | `yoloai sandbox list` | List sandboxes and their status |
-| `yoloai sandbox info <name>` | Show sandbox configuration and state |
-| `yoloai sandbox prompt <name>` | Show sandbox prompt |
-| `yoloai sandbox log <name>` | Show session log |
-| `yoloai sandbox exec <name> <cmd>` | Run a command inside the sandbox |
-| `yoloai sandbox network add <name> <domain>...` | Allow additional domains in an isolated sandbox |
-| `yoloai sandbox network list <name>` | Show allowed domains for a sandbox |
-| `yoloai sandbox network remove <name> <domain>...` | Remove domains from the allowlist |
+| `yoloai sandbox <name> info` | Show sandbox configuration and state |
+| `yoloai sandbox <name> prompt` | Show sandbox prompt |
+| `yoloai sandbox <name> log` | Show session log |
+| `yoloai sandbox <name> exec <cmd>` | Run a command inside the sandbox |
+| `yoloai sandbox <name> allow <domain>...` | Allow additional domains in an isolated sandbox |
+| `yoloai sandbox <name> allowed` | Show allowed domains for a sandbox |
+| `yoloai sandbox <name> deny <domain>...` | Remove domains from the allowlist |
 | `yoloai ls` | List sandboxes (shortcut for `sandbox list`) |
 | `yoloai log <name>` | Show sandbox log (shortcut for `sandbox log`) |
 | `yoloai exec <name> <cmd>` | Run a command inside a sandbox (shortcut for `sandbox exec`) |
@@ -56,11 +56,11 @@ Full reference for commands, flags, configuration, and internals. For a quick ov
 | `yoloai profile list` | List profiles |
 | `yoloai profile info <name>` | Show merged profile configuration |
 | `yoloai profile delete <name>` | Delete a profile (`--yes` to skip confirmation) |
-| `yoloai files put <name> <file/glob>...` | Copy files into sandbox exchange directory |
-| `yoloai files get <name> <file/glob>... [-o dir]` | Copy files from sandbox exchange directory |
-| `yoloai files ls <name> [glob]...` | List files in sandbox exchange directory |
-| `yoloai files rm <name> <glob>...` | Remove files from sandbox exchange directory |
-| `yoloai files path <name>` | Print host path to sandbox exchange directory |
+| `yoloai files <name> put <file/glob>...` | Copy files into sandbox exchange directory |
+| `yoloai files <name> get <file/glob>... [-o dir]` | Copy files from sandbox exchange directory |
+| `yoloai files <name> ls [glob]...` | List files in sandbox exchange directory |
+| `yoloai files <name> rm <glob>...` | Remove files from sandbox exchange directory |
+| `yoloai files <name> path` | Print host path to sandbox exchange directory |
 | `yoloai config get [key]` | Print configuration values (all settings or a specific key) |
 | `yoloai config set <key> <value>` | Set a configuration value |
 | `yoloai config reset <key>` | Reset a configuration value to its default |

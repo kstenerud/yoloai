@@ -1,6 +1,6 @@
 package cli
 
-// ABOUTME: Unit tests for `yoloai sandbox network add` command.
+// ABOUTME: Unit tests for `yoloai sandbox <name> allow` command.
 // ABOUTME: Tests domain deduplication, persistence, and error cases.
 
 import (
@@ -15,10 +15,10 @@ import (
 func TestNetworkAdd_NewDomains(t *testing.T) {
 	sandboxDir := createNetworkSandbox(t, "na-new", "isolated", []string{"existing.com"})
 
-	cmd := newSandboxNetworkAddCmd()
+	cmd := newSandboxCmd()
 	out := new(bytes.Buffer)
 	cmd.SetOut(out)
-	cmd.SetArgs([]string{"na-new", "added.com"})
+	cmd.SetArgs([]string{"na-new", "allow", "added.com"})
 	require.NoError(t, cmd.Execute())
 
 	// Verify persisted
@@ -34,10 +34,10 @@ func TestNetworkAdd_NewDomains(t *testing.T) {
 func TestNetworkAdd_DeduplicateExisting(t *testing.T) {
 	createNetworkSandbox(t, "na-dedup", "isolated", []string{"already.com"})
 
-	cmd := newSandboxNetworkAddCmd()
+	cmd := newSandboxCmd()
 	out := new(bytes.Buffer)
 	cmd.SetOut(out)
-	cmd.SetArgs([]string{"na-dedup", "already.com"})
+	cmd.SetArgs([]string{"na-dedup", "allow", "already.com"})
 	require.NoError(t, cmd.Execute())
 
 	assert.Contains(t, out.String(), "All domains already allowed")
@@ -46,10 +46,10 @@ func TestNetworkAdd_DeduplicateExisting(t *testing.T) {
 func TestNetworkAdd_DeduplicateWithinInput(t *testing.T) {
 	sandboxDir := createNetworkSandbox(t, "na-inputdup", "isolated", nil)
 
-	cmd := newSandboxNetworkAddCmd()
+	cmd := newSandboxCmd()
 	out := new(bytes.Buffer)
 	cmd.SetOut(out)
-	cmd.SetArgs([]string{"na-inputdup", "dup.com", "dup.com", "unique.com"})
+	cmd.SetArgs([]string{"na-inputdup", "allow", "dup.com", "dup.com", "unique.com"})
 	require.NoError(t, cmd.Execute())
 
 	meta, err := sandbox.LoadMeta(sandboxDir)
@@ -60,10 +60,10 @@ func TestNetworkAdd_DeduplicateWithinInput(t *testing.T) {
 func TestNetworkAdd_MultipleDomains(t *testing.T) {
 	sandboxDir := createNetworkSandbox(t, "na-multi", "isolated", []string{"keep.com"})
 
-	cmd := newSandboxNetworkAddCmd()
+	cmd := newSandboxCmd()
 	out := new(bytes.Buffer)
 	cmd.SetOut(out)
-	cmd.SetArgs([]string{"na-multi", "a.com", "b.com", "c.com"})
+	cmd.SetArgs([]string{"na-multi", "allow", "a.com", "b.com", "c.com"})
 	require.NoError(t, cmd.Execute())
 
 	meta, err := sandbox.LoadMeta(sandboxDir)
@@ -74,9 +74,9 @@ func TestNetworkAdd_MultipleDomains(t *testing.T) {
 func TestNetworkAdd_NoDomainArg(t *testing.T) {
 	createNetworkSandbox(t, "na-nodom", "isolated", nil)
 
-	cmd := newSandboxNetworkAddCmd()
+	cmd := newSandboxCmd()
 	cmd.SetOut(new(bytes.Buffer))
-	cmd.SetArgs([]string{"na-nodom"})
+	cmd.SetArgs([]string{"na-nodom", "allow"})
 	err := cmd.Execute()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "at least one domain")
@@ -85,9 +85,9 @@ func TestNetworkAdd_NoDomainArg(t *testing.T) {
 func TestNetworkAdd_NotIsolated(t *testing.T) {
 	createNetworkSandbox(t, "na-open", "", nil)
 
-	cmd := newSandboxNetworkAddCmd()
+	cmd := newSandboxCmd()
 	cmd.SetOut(new(bytes.Buffer))
-	cmd.SetArgs([]string{"na-open", "x.com"})
+	cmd.SetArgs([]string{"na-open", "allow", "x.com"})
 	err := cmd.Execute()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not using network isolation")
@@ -96,9 +96,9 @@ func TestNetworkAdd_NotIsolated(t *testing.T) {
 func TestNetworkAdd_NetworkNone(t *testing.T) {
 	createNetworkSandbox(t, "na-none", "none", nil)
 
-	cmd := newSandboxNetworkAddCmd()
+	cmd := newSandboxCmd()
 	cmd.SetOut(new(bytes.Buffer))
-	cmd.SetArgs([]string{"na-none", "x.com"})
+	cmd.SetArgs([]string{"na-none", "allow", "x.com"})
 	err := cmd.Execute()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "--network-none")

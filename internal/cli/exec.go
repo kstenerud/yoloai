@@ -13,15 +13,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func newSandboxExecCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "exec <name> <command> [args...]",
-		Short: "Run a command inside a sandbox",
-		Args:  cobra.MinimumNArgs(1),
-		RunE:  runExec,
-	}
-}
-
 func runExec(cmd *cobra.Command, args []string) error {
 	if jsonEnabled(cmd) {
 		return errJSONNotSupported("exec")

@@ -2,6 +2,7 @@ package cli
 
 // ABOUTME: CLI commands for bidirectional file exchange between host and sandbox.
 // ABOUTME: Implements put, get, ls, rm, and path subcommands for the files dir.
+// ABOUTME: Uses name-first dispatch: `yoloai files <sandbox> <subcommand> [args...]`.
 
 import (
 	"fmt"
@@ -15,243 +16,238 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// filesSubcmds is the set of known files subcommands.
+var filesSubcmds = map[string]bool{
+	"put": true, "get": true, "ls": true, "rm": true, "path": true,
+}
+
 func newFilesCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:     "files",
-		Short:   "Exchange files with a sandbox",
-		GroupID: groupWorkflow,
-	}
+		Use:   "files <sandbox> <subcommand> [args...]",
+		Short: "Exchange files with a sandbox",
+		Long: `Exchange files with a sandbox.
 
-	cmd.AddCommand(
-		newFilesPutCmd(),
-		newFilesGetCmd(),
-		newFilesLsCmd(),
-		newFilesRmCmd(),
-		newFilesPathCmd(),
-	)
-
-	return cmd
-}
-
-func newFilesPutCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "put <sandbox> <file/glob>...",
-		Short: "Copy files into sandbox exchange directory",
-		Args:  cobra.MinimumNArgs(2),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			name, rest, err := resolveName(cmd, args)
-			if err != nil {
-				return err
-			}
-			if len(rest) == 0 {
-				return sandbox.NewUsageError("at least one file is required")
-			}
-
-			if _, err := sandbox.RequireSandboxDir(name); err != nil {
-				return err
-			}
-			filesDir := sandbox.FilesDir(name)
-			force, _ := cmd.Flags().GetBool("force")
-
-			expanded, err := expandHostGlobs(rest)
-			if err != nil {
-				return err
-			}
-
-			for _, src := range expanded {
-				absSrc, err := filepath.Abs(src)
-				if err != nil {
-					return fmt.Errorf("resolve path %s: %w", src, err)
-				}
-
-				info, err := os.Stat(absSrc)
-				if err != nil {
-					return fmt.Errorf("source %s: %w", src, err)
-				}
-
-				dst := filepath.Join(filesDir, info.Name())
-				if !force {
-					if _, err := os.Stat(dst); err == nil {
-						return fmt.Errorf("target already exists: %s (use --force to overwrite)", info.Name())
-					}
-				}
-
-				cpCmd := exec.Command("cp", "-rp", absSrc, dst) //nolint:gosec // G204: paths are validated
-				if out, err := cpCmd.CombinedOutput(); err != nil {
-					return fmt.Errorf("copy %s: %s", src, strings.TrimSpace(string(out)))
-				}
-
-				fmt.Fprintln(cmd.OutOrStdout(), info.Name()) //nolint:errcheck // best-effort output
-			}
-			return nil
-		},
+Subcommands:
+  put <file/glob>...         Copy files into sandbox exchange directory
+  get <file/glob>... [-o dir] Copy files from sandbox exchange directory
+  ls [glob]...               List files in sandbox exchange directory
+  rm <glob>...               Remove files from sandbox exchange directory
+  path                       Print host path to sandbox exchange directory`,
+		GroupID:            groupWorkflow,
+		Args:               cobra.ArbitraryArgs,
+		DisableFlagParsing: false,
+		RunE:               filesDispatch,
 	}
 	cmd.Flags().Bool("force", false, "Overwrite existing files")
-	return cmd
-}
-
-func newFilesGetCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "get <sandbox> <file/glob>... [-o dir]",
-		Short: "Copy files from sandbox exchange directory",
-		Args:  cobra.MinimumNArgs(2),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			name, rest, err := resolveName(cmd, args)
-			if err != nil {
-				return err
-			}
-			if len(rest) == 0 {
-				return sandbox.NewUsageError("file name is required")
-			}
-
-			if _, err := sandbox.RequireSandboxDir(name); err != nil {
-				return err
-			}
-			filesDir := sandbox.FilesDir(name)
-
-			files, err := expandExchangeGlobs(filesDir, rest)
-			if err != nil {
-				return err
-			}
-
-			dst, _ := cmd.Flags().GetString("output")
-			force, _ := cmd.Flags().GetBool("force")
-
-			absDst, err := filepath.Abs(dst)
-			if err != nil {
-				return fmt.Errorf("resolve destination: %w", err)
-			}
-
-			// Multiple files require destination to be a directory
-			if len(files) > 1 {
-				info, err := os.Stat(absDst)
-				if err != nil {
-					return fmt.Errorf("destination directory does not exist: %s", absDst)
-				}
-				if !info.IsDir() {
-					return fmt.Errorf("destination must be a directory when getting multiple files: %s", absDst)
-				}
-			}
-
-			for _, rel := range files {
-				srcPath := filepath.Join(filesDir, rel)
-
-				// Compute final destination for this file
-				fileDst := absDst
-				if info, err := os.Stat(fileDst); err == nil && info.IsDir() {
-					fileDst = filepath.Join(fileDst, filepath.Base(rel))
-				}
-
-				if !force {
-					if _, err := os.Stat(fileDst); err == nil {
-						return fmt.Errorf("destination already exists: %s (use --force to overwrite)", fileDst)
-					}
-				}
-
-				cpCmd := exec.Command("cp", "-rp", srcPath, fileDst) //nolint:gosec // G204: paths are validated
-				if out, err := cpCmd.CombinedOutput(); err != nil {
-					return fmt.Errorf("copy: %s", strings.TrimSpace(string(out)))
-				}
-
-				fmt.Fprintln(cmd.OutOrStdout(), fileDst) //nolint:errcheck // best-effort output
-			}
-			return nil
-		},
-	}
-	cmd.Flags().Bool("force", false, "Overwrite existing destination files")
 	cmd.Flags().StringP("output", "o", ".", "Destination directory (or file for single get)")
 	return cmd
 }
 
-func newFilesLsCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "ls <sandbox> [glob]...",
-		Short: "List files in sandbox exchange directory",
-		Args:  cobra.MinimumNArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			name, rest, err := resolveName(cmd, args)
-			if err != nil {
-				return err
-			}
+func filesDispatch(cmd *cobra.Command, args []string) error {
+	if len(args) == 0 {
+		return cmd.Help()
+	}
 
-			if _, err := sandbox.RequireSandboxDir(name); err != nil {
-				return err
-			}
-			filesDir := sandbox.FilesDir(name)
+	var name, subcmd string
+	var rest []string
 
-			patterns := rest
-			if len(patterns) == 0 {
-				patterns = []string{"*"}
-			}
+	if filesSubcmds[args[0]] {
+		// args[0] is a subcommand — name must come from YOLOAI_SANDBOX
+		envName := os.Getenv(EnvSandboxName)
+		if envName == "" {
+			return sandbox.NewUsageError("sandbox name required before subcommand (or set YOLOAI_SANDBOX)")
+		}
+		if err := sandbox.ValidateName(envName); err != nil {
+			return err
+		}
+		name = envName
+		subcmd = args[0]
+		rest = args[1:]
+	} else {
+		if err := sandbox.ValidateName(args[0]); err != nil {
+			return err
+		}
+		name = args[0]
+		if len(args) < 2 {
+			return sandbox.NewUsageError("subcommand required: put, get, ls, rm, path")
+		}
+		subcmd = args[1]
+		rest = args[2:]
+	}
 
-			names, err := collectExchangeGlobs(filesDir, patterns)
-			if err != nil {
-				return err
-			}
-
-			for _, n := range names {
-				fmt.Fprintln(cmd.OutOrStdout(), n) //nolint:errcheck // best-effort output
-			}
-			return nil
-		},
+	switch subcmd {
+	case "put":
+		return runFilesPut(cmd, name, rest)
+	case "get":
+		return runFilesGet(cmd, name, rest)
+	case "ls":
+		return runFilesLs(cmd, name, rest)
+	case "rm":
+		return runFilesRm(cmd, name, rest)
+	case "path":
+		return runFilesPath(cmd, name)
+	default:
+		return fmt.Errorf("unknown subcommand %q: valid subcommands are put, get, ls, rm, path", subcmd)
 	}
 }
 
-func newFilesRmCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "rm <sandbox> <glob>...",
-		Short: "Remove files from sandbox exchange directory",
-		Args:  cobra.MinimumNArgs(2),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			name, rest, err := resolveName(cmd, args)
-			if err != nil {
-				return err
-			}
-			if len(rest) == 0 {
-				return sandbox.NewUsageError("glob pattern is required")
-			}
-
-			if _, err := sandbox.RequireSandboxDir(name); err != nil {
-				return err
-			}
-			filesDir := sandbox.FilesDir(name)
-
-			matches, err := expandExchangeGlobs(filesDir, rest)
-			if err != nil {
-				return err
-			}
-
-			for _, rel := range matches {
-				m := filepath.Join(filesDir, rel)
-				if err := os.RemoveAll(m); err != nil {
-					return fmt.Errorf("remove %s: %w", rel, err)
-				}
-				fmt.Fprintln(cmd.OutOrStdout(), rel) //nolint:errcheck // best-effort output
-			}
-			return nil
-		},
+func runFilesPut(cmd *cobra.Command, name string, args []string) error {
+	if len(args) == 0 {
+		return sandbox.NewUsageError("at least one file is required")
 	}
+
+	if _, err := sandbox.RequireSandboxDir(name); err != nil {
+		return err
+	}
+	filesDir := sandbox.FilesDir(name)
+	force, _ := cmd.Flags().GetBool("force")
+
+	expanded, err := expandHostGlobs(args)
+	if err != nil {
+		return err
+	}
+
+	for _, src := range expanded {
+		absSrc, err := filepath.Abs(src)
+		if err != nil {
+			return fmt.Errorf("resolve path %s: %w", src, err)
+		}
+
+		info, err := os.Stat(absSrc)
+		if err != nil {
+			return fmt.Errorf("source %s: %w", src, err)
+		}
+
+		dst := filepath.Join(filesDir, info.Name())
+		if !force {
+			if _, err := os.Stat(dst); err == nil { //nolint:gosec // G703: path is under sandbox files dir
+				return fmt.Errorf("target already exists: %s (use --force to overwrite)", info.Name())
+			}
+		}
+
+		cpCmd := exec.Command("cp", "-rp", absSrc, dst) //nolint:gosec // G204: paths are validated
+		if out, err := cpCmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("copy %s: %s", src, strings.TrimSpace(string(out)))
+		}
+
+		fmt.Fprintln(cmd.OutOrStdout(), info.Name()) //nolint:errcheck // best-effort output
+	}
+	return nil
 }
 
-func newFilesPathCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "path <sandbox>",
-		Short: "Print host path to sandbox exchange directory",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			name, _, err := resolveName(cmd, args)
-			if err != nil {
-				return err
-			}
-
-			if _, err := sandbox.RequireSandboxDir(name); err != nil {
-				return err
-			}
-
-			fmt.Fprintln(cmd.OutOrStdout(), sandbox.FilesDir(name)) //nolint:errcheck // best-effort output
-			return nil
-		},
+func runFilesGet(cmd *cobra.Command, name string, args []string) error {
+	if len(args) == 0 {
+		return sandbox.NewUsageError("file name is required")
 	}
+
+	if _, err := sandbox.RequireSandboxDir(name); err != nil {
+		return err
+	}
+	filesDir := sandbox.FilesDir(name)
+
+	files, err := expandExchangeGlobs(filesDir, args)
+	if err != nil {
+		return err
+	}
+
+	dst, _ := cmd.Flags().GetString("output")
+	force, _ := cmd.Flags().GetBool("force")
+
+	absDst, err := filepath.Abs(dst)
+	if err != nil {
+		return fmt.Errorf("resolve destination: %w", err)
+	}
+
+	// Multiple files require destination to be a directory
+	if len(files) > 1 {
+		info, err := os.Stat(absDst)
+		if err != nil {
+			return fmt.Errorf("destination directory does not exist: %s", absDst)
+		}
+		if !info.IsDir() {
+			return fmt.Errorf("destination must be a directory when getting multiple files: %s", absDst)
+		}
+	}
+
+	for _, rel := range files {
+		srcPath := filepath.Join(filesDir, rel)
+
+		// Compute final destination for this file
+		fileDst := absDst
+		if info, err := os.Stat(fileDst); err == nil && info.IsDir() {
+			fileDst = filepath.Join(fileDst, filepath.Base(rel))
+		}
+
+		if !force {
+			if _, err := os.Stat(fileDst); err == nil { //nolint:gosec // G703: path is user-specified destination
+				return fmt.Errorf("destination already exists: %s (use --force to overwrite)", fileDst)
+			}
+		}
+
+		cpCmd := exec.Command("cp", "-rp", srcPath, fileDst) //nolint:gosec // G204: paths are validated
+		if out, err := cpCmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("copy: %s", strings.TrimSpace(string(out)))
+		}
+
+		fmt.Fprintln(cmd.OutOrStdout(), fileDst) //nolint:errcheck // best-effort output
+	}
+	return nil
+}
+
+func runFilesLs(cmd *cobra.Command, name string, args []string) error {
+	if _, err := sandbox.RequireSandboxDir(name); err != nil {
+		return err
+	}
+	filesDir := sandbox.FilesDir(name)
+
+	patterns := args
+	if len(patterns) == 0 {
+		patterns = []string{"*"}
+	}
+
+	names, err := collectExchangeGlobs(filesDir, patterns)
+	if err != nil {
+		return err
+	}
+
+	for _, n := range names {
+		fmt.Fprintln(cmd.OutOrStdout(), n) //nolint:errcheck // best-effort output
+	}
+	return nil
+}
+
+func runFilesRm(cmd *cobra.Command, name string, args []string) error {
+	if len(args) == 0 {
+		return sandbox.NewUsageError("glob pattern is required")
+	}
+
+	if _, err := sandbox.RequireSandboxDir(name); err != nil {
+		return err
+	}
+	filesDir := sandbox.FilesDir(name)
+
+	matches, err := expandExchangeGlobs(filesDir, args)
+	if err != nil {
+		return err
+	}
+
+	for _, rel := range matches {
+		m := filepath.Join(filesDir, rel)
+		if err := os.RemoveAll(m); err != nil { //nolint:gosec // G703: path is under sandbox files dir
+			return fmt.Errorf("remove %s: %w", rel, err)
+		}
+		fmt.Fprintln(cmd.OutOrStdout(), rel) //nolint:errcheck // best-effort output
+	}
+	return nil
+}
+
+func runFilesPath(cmd *cobra.Command, name string) error {
+	if _, err := sandbox.RequireSandboxDir(name); err != nil {
+		return err
+	}
+
+	fmt.Fprintln(cmd.OutOrStdout(), sandbox.FilesDir(name)) //nolint:errcheck // best-effort output
+	return nil
 }
 
 // validateExchangePath ensures a resolved path stays within the files directory.

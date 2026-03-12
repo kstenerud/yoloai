@@ -1,6 +1,6 @@
 package cli
 
-// ABOUTME: Unit tests for `yoloai sandbox network remove` command.
+// ABOUTME: Unit tests for `yoloai sandbox <name> deny` command.
 // ABOUTME: Tests domain validation, filtering, and error cases.
 
 import (
@@ -15,10 +15,10 @@ import (
 func TestNetworkRemove_SingleDomain(t *testing.T) {
 	sandboxDir := createNetworkSandbox(t, "nr-single", "isolated", []string{"keep.com", "drop.com"})
 
-	cmd := newSandboxNetworkRemoveCmd()
+	cmd := newSandboxCmd()
 	out := new(bytes.Buffer)
 	cmd.SetOut(out)
-	cmd.SetArgs([]string{"nr-single", "drop.com"})
+	cmd.SetArgs([]string{"nr-single", "deny", "drop.com"})
 	require.NoError(t, cmd.Execute())
 
 	meta, err := sandbox.LoadMeta(sandboxDir)
@@ -31,10 +31,10 @@ func TestNetworkRemove_SingleDomain(t *testing.T) {
 func TestNetworkRemove_MultipleDomains(t *testing.T) {
 	sandboxDir := createNetworkSandbox(t, "nr-multi", "isolated", []string{"a.com", "b.com", "c.com", "d.com"})
 
-	cmd := newSandboxNetworkRemoveCmd()
+	cmd := newSandboxCmd()
 	out := new(bytes.Buffer)
 	cmd.SetOut(out)
-	cmd.SetArgs([]string{"nr-multi", "b.com", "d.com"})
+	cmd.SetArgs([]string{"nr-multi", "deny", "b.com", "d.com"})
 	require.NoError(t, cmd.Execute())
 
 	meta, err := sandbox.LoadMeta(sandboxDir)
@@ -45,10 +45,10 @@ func TestNetworkRemove_MultipleDomains(t *testing.T) {
 func TestNetworkRemove_AllDomains(t *testing.T) {
 	sandboxDir := createNetworkSandbox(t, "nr-all", "isolated", []string{"only.com"})
 
-	cmd := newSandboxNetworkRemoveCmd()
+	cmd := newSandboxCmd()
 	out := new(bytes.Buffer)
 	cmd.SetOut(out)
-	cmd.SetArgs([]string{"nr-all", "only.com"})
+	cmd.SetArgs([]string{"nr-all", "deny", "only.com"})
 	require.NoError(t, cmd.Execute())
 
 	meta, err := sandbox.LoadMeta(sandboxDir)
@@ -59,9 +59,9 @@ func TestNetworkRemove_AllDomains(t *testing.T) {
 func TestNetworkRemove_DomainNotInList(t *testing.T) {
 	createNetworkSandbox(t, "nr-missing", "isolated", []string{"exists.com"})
 
-	cmd := newSandboxNetworkRemoveCmd()
+	cmd := newSandboxCmd()
 	cmd.SetOut(new(bytes.Buffer))
-	cmd.SetArgs([]string{"nr-missing", "nope.com"})
+	cmd.SetArgs([]string{"nr-missing", "deny", "nope.com"})
 	err := cmd.Execute()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "nope.com")
@@ -71,9 +71,9 @@ func TestNetworkRemove_DomainNotInList(t *testing.T) {
 func TestNetworkRemove_NoDomainArg(t *testing.T) {
 	createNetworkSandbox(t, "nr-noarg", "isolated", []string{"x.com"})
 
-	cmd := newSandboxNetworkRemoveCmd()
+	cmd := newSandboxCmd()
 	cmd.SetOut(new(bytes.Buffer))
-	cmd.SetArgs([]string{"nr-noarg"})
+	cmd.SetArgs([]string{"nr-noarg", "deny"})
 	err := cmd.Execute()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "at least one domain")
@@ -82,9 +82,9 @@ func TestNetworkRemove_NoDomainArg(t *testing.T) {
 func TestNetworkRemove_NotIsolated(t *testing.T) {
 	createNetworkSandbox(t, "nr-open", "", nil)
 
-	cmd := newSandboxNetworkRemoveCmd()
+	cmd := newSandboxCmd()
 	cmd.SetOut(new(bytes.Buffer))
-	cmd.SetArgs([]string{"nr-open", "x.com"})
+	cmd.SetArgs([]string{"nr-open", "deny", "x.com"})
 	err := cmd.Execute()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not using network isolation")
@@ -93,9 +93,9 @@ func TestNetworkRemove_NotIsolated(t *testing.T) {
 func TestNetworkRemove_NetworkNone(t *testing.T) {
 	createNetworkSandbox(t, "nr-none", "none", nil)
 
-	cmd := newSandboxNetworkRemoveCmd()
+	cmd := newSandboxCmd()
 	cmd.SetOut(new(bytes.Buffer))
-	cmd.SetArgs([]string{"nr-none", "x.com"})
+	cmd.SetArgs([]string{"nr-none", "deny", "x.com"})
 	err := cmd.Execute()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "--network-none")
@@ -104,9 +104,9 @@ func TestNetworkRemove_NetworkNone(t *testing.T) {
 func TestNetworkRemove_PreservesOrder(t *testing.T) {
 	sandboxDir := createNetworkSandbox(t, "nr-order", "isolated", []string{"first.com", "middle.com", "last.com"})
 
-	cmd := newSandboxNetworkRemoveCmd()
+	cmd := newSandboxCmd()
 	cmd.SetOut(new(bytes.Buffer))
-	cmd.SetArgs([]string{"nr-order", "middle.com"})
+	cmd.SetArgs([]string{"nr-order", "deny", "middle.com"})
 	require.NoError(t, cmd.Execute())
 
 	meta, err := sandbox.LoadMeta(sandboxDir)

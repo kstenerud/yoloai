@@ -13,17 +13,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func newSandboxLogCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "log <name>",
-		Short: "Show sandbox session log",
-		Args:  cobra.ArbitraryArgs,
-		RunE:  runLog,
-	}
-	cmd.Flags().Bool("raw", false, "Show raw output with ANSI escape sequences")
-	return cmd
-}
-
 // runLog is the shared implementation for `sandbox log` and the `log` alias.
 func runLog(cmd *cobra.Command, args []string) error {
 	name, _, err := resolveName(cmd, args)

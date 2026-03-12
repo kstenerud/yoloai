@@ -4,6 +4,46 @@ Tracks breaking changes made during beta. Each entry should be included in relea
 
 ## Unreleased
 
+### `files` command: name before subcommand
+
+**Previous behavior:** `yoloai files put <sandbox> <file>...` — subcommand before sandbox name.
+
+**New behavior:** `yoloai files <sandbox> put <file>...` — sandbox name before subcommand.
+
+**Rationale:** Name-first ordering is more ergonomic (name is the "context", action is the "verb") and consistent with top-level commands (`yoloai diff <name>`) that already put the name first.
+
+**Migration:** Swap the sandbox name and subcommand positions. For example, `yoloai files put mybox file.txt` becomes `yoloai files mybox put file.txt`.
+
+### `sandbox` command: name before subcommand
+
+**Previous behavior:** `yoloai sandbox info <name>`, `yoloai sandbox log <name>` — subcommand before sandbox name.
+
+**New behavior:** `yoloai sandbox <name> info`, `yoloai sandbox <name> log` — sandbox name before subcommand. `sandbox list` is unchanged (no sandbox name).
+
+**Rationale:** Same as `files` — name-first ordering is more ergonomic and consistent with top-level commands.
+
+**Migration:** Swap the sandbox name and subcommand positions. For example, `yoloai sandbox info mybox` becomes `yoloai sandbox mybox info`.
+
+### `sandbox network` flattened to `allow`/`allowed`/`deny`
+
+**Previous behavior:** Network allowlist management used nested subcommands: `yoloai sandbox network add <name> <domain>...`, `yoloai sandbox network list <name>`, `yoloai sandbox network remove <name> <domain>...`.
+
+**New behavior:** Flattened to direct subcommands with name-first ordering: `yoloai sandbox <name> allow <domain>...`, `yoloai sandbox <name> allowed`, `yoloai sandbox <name> deny <domain>...`.
+
+**Rationale:** Reduces nesting depth and uses clearer verb names (`allow`/`deny` instead of `add`/`remove`, `allowed` instead of `list`).
+
+**Migration:** Replace `sandbox network add` with `sandbox <name> allow`, `sandbox network list` with `sandbox <name> allowed`, `sandbox network remove` with `sandbox <name> deny`.
+
+### `sandbox clone` removed
+
+**Previous behavior:** `yoloai sandbox clone <src> <dst>` was available as an alias for `yoloai clone`.
+
+**New behavior:** Only the top-level `yoloai clone <src> <dst>` is available.
+
+**Rationale:** The `sandbox clone` alias conflicted with the name-first dispatch pattern (where `clone` would be interpreted as a sandbox name). The top-level command is the canonical form.
+
+**Migration:** Replace `yoloai sandbox clone` with `yoloai clone`.
+
 ### `files get` signature changed: positional destination replaced with `-o` flag
 
 **Previous behavior:** `yoloai files get <sandbox> <file> [dst]` — single file, optional positional destination argument.

@@ -1,5 +1,4 @@
-// ABOUTME: `yoloai sandbox network` parent command and shared helpers for
-// ABOUTME: network allowlist management: add, list, remove subcommands.
+// ABOUTME: Shared helpers for network allowlist management: allow, allowed, deny.
 package cli
 
 import (
@@ -7,21 +6,7 @@ import (
 	"fmt"
 
 	"github.com/kstenerud/yoloai/sandbox"
-	"github.com/spf13/cobra"
 )
-
-func newSandboxNetworkCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "network",
-		Short: "Manage sandbox network allowlist",
-	}
-	cmd.AddCommand(
-		newSandboxNetworkAddCmd(),
-		newSandboxNetworkListCmd(),
-		newSandboxNetworkRemoveCmd(),
-	)
-	return cmd
-}
 
 // ipsetResolveDomains is the shell script fragment that resolves domains to IPs
 // and adds them to the ipset. Used by both add and remove live-patching.

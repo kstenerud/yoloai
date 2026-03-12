@@ -36,10 +36,10 @@ func TestFilesPut_SingleFile(t *testing.T) {
 	src := filepath.Join(t.TempDir(), "hello.txt")
 	require.NoError(t, os.WriteFile(src, []byte("hello"), 0600))
 
-	cmd := newFilesPutCmd()
+	cmd := newFilesCmd()
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
-	cmd.SetArgs([]string{name, src})
+	cmd.SetArgs([]string{name, "put", src})
 	require.NoError(t, cmd.Execute())
 
 	assert.Equal(t, "hello.txt\n", buf.String())
@@ -56,10 +56,10 @@ func TestFilesPut_MultipleFiles(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(srcDir, "a.txt"), []byte("a"), 0600))
 	require.NoError(t, os.WriteFile(filepath.Join(srcDir, "b.txt"), []byte("b"), 0600))
 
-	cmd := newFilesPutCmd()
+	cmd := newFilesCmd()
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
-	cmd.SetArgs([]string{name, filepath.Join(srcDir, "a.txt"), filepath.Join(srcDir, "b.txt")})
+	cmd.SetArgs([]string{name, "put", filepath.Join(srcDir, "a.txt"), filepath.Join(srcDir, "b.txt")})
 	require.NoError(t, cmd.Execute())
 
 	assert.Contains(t, buf.String(), "a.txt")
@@ -76,10 +76,10 @@ func TestFilesPut_GlobExpansion(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(srcDir, "y.txt"), []byte("y"), 0600))
 	require.NoError(t, os.WriteFile(filepath.Join(srcDir, "z.log"), []byte("z"), 0600))
 
-	cmd := newFilesPutCmd()
+	cmd := newFilesCmd()
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
-	cmd.SetArgs([]string{name, filepath.Join(srcDir, "*.txt")})
+	cmd.SetArgs([]string{name, "put", filepath.Join(srcDir, "*.txt")})
 	require.NoError(t, cmd.Execute())
 
 	assert.Contains(t, buf.String(), "x.txt")
@@ -97,10 +97,10 @@ func TestFilesPut_Directory(t *testing.T) {
 	require.NoError(t, os.MkdirAll(srcDir, 0750))
 	require.NoError(t, os.WriteFile(filepath.Join(srcDir, "inner.txt"), []byte("inner"), 0600))
 
-	cmd := newFilesPutCmd()
+	cmd := newFilesCmd()
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
-	cmd.SetArgs([]string{name, srcDir})
+	cmd.SetArgs([]string{name, "put", srcDir})
 	require.NoError(t, cmd.Execute())
 
 	assert.Equal(t, "mydir\n", buf.String())
@@ -118,9 +118,9 @@ func TestFilesPut_OverwriteFails(t *testing.T) {
 	src := filepath.Join(t.TempDir(), "exists.txt")
 	require.NoError(t, os.WriteFile(src, []byte("new"), 0600))
 
-	cmd := newFilesPutCmd()
+	cmd := newFilesCmd()
 	cmd.SetOut(new(bytes.Buffer))
-	cmd.SetArgs([]string{name, src})
+	cmd.SetArgs([]string{name, "put", src})
 	err := cmd.Execute()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "already exists")
@@ -134,9 +134,9 @@ func TestFilesPut_OverwriteWithForce(t *testing.T) {
 	src := filepath.Join(t.TempDir(), "exists.txt")
 	require.NoError(t, os.WriteFile(src, []byte("new"), 0600))
 
-	cmd := newFilesPutCmd()
+	cmd := newFilesCmd()
 	cmd.SetOut(new(bytes.Buffer))
-	cmd.SetArgs([]string{name, "--force", src})
+	cmd.SetArgs([]string{name, "put", "--force", src})
 	require.NoError(t, cmd.Execute())
 
 	got, err := os.ReadFile(filepath.Join(filesDir, "exists.txt")) //nolint:gosec // test helper
@@ -147,9 +147,9 @@ func TestFilesPut_OverwriteWithForce(t *testing.T) {
 func TestFilesPut_MissingSource(t *testing.T) {
 	name, _ := setupFilesTest(t)
 
-	cmd := newFilesPutCmd()
+	cmd := newFilesCmd()
 	cmd.SetOut(new(bytes.Buffer))
-	cmd.SetArgs([]string{name, "/nonexistent/file.txt"})
+	cmd.SetArgs([]string{name, "put", "/nonexistent/file.txt"})
 	err := cmd.Execute()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "source")
@@ -163,10 +163,10 @@ func TestFilesGet_ToCwd(t *testing.T) {
 
 	dstDir := t.TempDir()
 
-	cmd := newFilesGetCmd()
+	cmd := newFilesCmd()
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
-	cmd.SetArgs([]string{name, "report.txt", "-o", dstDir})
+	cmd.SetArgs([]string{name, "get", "report.txt", "-o", dstDir})
 	require.NoError(t, cmd.Execute())
 
 	got, err := os.ReadFile(filepath.Join(dstDir, "report.txt")) //nolint:gosec // test helper
@@ -180,10 +180,10 @@ func TestFilesGet_ToExplicitDst(t *testing.T) {
 
 	dstFile := filepath.Join(t.TempDir(), "output.txt")
 
-	cmd := newFilesGetCmd()
+	cmd := newFilesCmd()
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
-	cmd.SetArgs([]string{name, "report.txt", "-o", dstFile})
+	cmd.SetArgs([]string{name, "get", "report.txt", "-o", dstFile})
 	require.NoError(t, cmd.Execute())
 
 	got, err := os.ReadFile(dstFile) //nolint:gosec // test helper
@@ -199,10 +199,10 @@ func TestFilesGet_MultipleFiles(t *testing.T) {
 
 	dstDir := t.TempDir()
 
-	cmd := newFilesGetCmd()
+	cmd := newFilesCmd()
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
-	cmd.SetArgs([]string{name, "a.txt", "b.txt", "-o", dstDir})
+	cmd.SetArgs([]string{name, "get", "a.txt", "b.txt", "-o", dstDir})
 	require.NoError(t, cmd.Execute())
 
 	assert.Contains(t, buf.String(), "a.txt")
@@ -219,10 +219,10 @@ func TestFilesGet_GlobExpansion(t *testing.T) {
 
 	dstDir := t.TempDir()
 
-	cmd := newFilesGetCmd()
+	cmd := newFilesCmd()
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
-	cmd.SetArgs([]string{name, "*.txt", "-o", dstDir})
+	cmd.SetArgs([]string{name, "get", "*.txt", "-o", dstDir})
 	require.NoError(t, cmd.Execute())
 
 	assert.Contains(t, buf.String(), "x.txt")
@@ -240,9 +240,9 @@ func TestFilesGet_MultipleFilesToNonDir(t *testing.T) {
 	dstFile := filepath.Join(t.TempDir(), "single.txt")
 	require.NoError(t, os.WriteFile(dstFile, []byte(""), 0600))
 
-	cmd := newFilesGetCmd()
+	cmd := newFilesCmd()
 	cmd.SetOut(new(bytes.Buffer))
-	cmd.SetArgs([]string{name, "a.txt", "b.txt", "-o", dstFile})
+	cmd.SetArgs([]string{name, "get", "a.txt", "b.txt", "-o", dstFile})
 	err := cmd.Execute()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "must be a directory")
@@ -255,9 +255,9 @@ func TestFilesGet_OverwriteFails(t *testing.T) {
 	dstDir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(dstDir, "report.txt"), []byte("old"), 0600))
 
-	cmd := newFilesGetCmd()
+	cmd := newFilesCmd()
 	cmd.SetOut(new(bytes.Buffer))
-	cmd.SetArgs([]string{name, "report.txt", "-o", dstDir})
+	cmd.SetArgs([]string{name, "get", "report.txt", "-o", dstDir})
 	err := cmd.Execute()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "already exists")
@@ -271,9 +271,9 @@ func TestFilesGet_OverwriteWithForce(t *testing.T) {
 	dstFile := filepath.Join(dstDir, "report.txt")
 	require.NoError(t, os.WriteFile(dstFile, []byte("old"), 0600))
 
-	cmd := newFilesGetCmd()
+	cmd := newFilesCmd()
 	cmd.SetOut(new(bytes.Buffer))
-	cmd.SetArgs([]string{name, "--force", "report.txt", "-o", dstDir})
+	cmd.SetArgs([]string{name, "get", "--force", "report.txt", "-o", dstDir})
 	require.NoError(t, cmd.Execute())
 
 	got, err := os.ReadFile(dstFile) //nolint:gosec // test helper
@@ -284,9 +284,9 @@ func TestFilesGet_OverwriteWithForce(t *testing.T) {
 func TestFilesGet_MissingFile(t *testing.T) {
 	name, _ := setupFilesTest(t)
 
-	cmd := newFilesGetCmd()
+	cmd := newFilesCmd()
 	cmd.SetOut(new(bytes.Buffer))
-	cmd.SetArgs([]string{name, "nope.txt", "-o", t.TempDir()})
+	cmd.SetArgs([]string{name, "get", "nope.txt", "-o", t.TempDir()})
 	err := cmd.Execute()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no files match")
@@ -295,9 +295,9 @@ func TestFilesGet_MissingFile(t *testing.T) {
 func TestFilesGet_PathTraversalBlocked(t *testing.T) {
 	name, _ := setupFilesTest(t)
 
-	cmd := newFilesGetCmd()
+	cmd := newFilesCmd()
 	cmd.SetOut(new(bytes.Buffer))
-	cmd.SetArgs([]string{name, "../../../etc/passwd", "-o", t.TempDir()})
+	cmd.SetArgs([]string{name, "get", "../../../etc/passwd", "-o", t.TempDir()})
 	err := cmd.Execute()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "escapes exchange directory")
@@ -310,10 +310,10 @@ func TestFilesLs_ImplicitGlob(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(filesDir, "a.txt"), []byte(""), 0600))
 	require.NoError(t, os.WriteFile(filepath.Join(filesDir, "b.txt"), []byte(""), 0600))
 
-	cmd := newFilesLsCmd()
+	cmd := newFilesCmd()
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
-	cmd.SetArgs([]string{name})
+	cmd.SetArgs([]string{name, "ls"})
 	require.NoError(t, cmd.Execute())
 
 	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
@@ -325,10 +325,10 @@ func TestFilesLs_WithGlob(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(filesDir, "foo.log"), []byte(""), 0600))
 	require.NoError(t, os.WriteFile(filepath.Join(filesDir, "bar.txt"), []byte(""), 0600))
 
-	cmd := newFilesLsCmd()
+	cmd := newFilesCmd()
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
-	cmd.SetArgs([]string{name, "*.log"})
+	cmd.SetArgs([]string{name, "ls", "*.log"})
 	require.NoError(t, cmd.Execute())
 
 	assert.Equal(t, "foo.log\n", buf.String())
@@ -340,10 +340,10 @@ func TestFilesLs_MultipleGlobs(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(filesDir, "b.log"), []byte(""), 0600))
 	require.NoError(t, os.WriteFile(filepath.Join(filesDir, "c.tmp"), []byte(""), 0600))
 
-	cmd := newFilesLsCmd()
+	cmd := newFilesCmd()
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
-	cmd.SetArgs([]string{name, "*.txt", "*.log"})
+	cmd.SetArgs([]string{name, "ls", "*.txt", "*.log"})
 	require.NoError(t, cmd.Execute())
 
 	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
@@ -355,10 +355,10 @@ func TestFilesLs_DotfilesIncluded(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(filesDir, ".hidden"), []byte(""), 0600))
 	require.NoError(t, os.WriteFile(filepath.Join(filesDir, "visible"), []byte(""), 0600))
 
-	cmd := newFilesLsCmd()
+	cmd := newFilesCmd()
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
-	cmd.SetArgs([]string{name})
+	cmd.SetArgs([]string{name, "ls"})
 	require.NoError(t, cmd.Execute())
 
 	out := buf.String()
@@ -369,10 +369,10 @@ func TestFilesLs_DotfilesIncluded(t *testing.T) {
 func TestFilesLs_EmptyDir(t *testing.T) {
 	name, _ := setupFilesTest(t)
 
-	cmd := newFilesLsCmd()
+	cmd := newFilesCmd()
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
-	cmd.SetArgs([]string{name})
+	cmd.SetArgs([]string{name, "ls"})
 	require.NoError(t, cmd.Execute())
 
 	assert.Empty(t, buf.String())
@@ -386,10 +386,10 @@ func TestFilesRm_MatchingFiles(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(filesDir, "b.log"), []byte(""), 0600))
 	require.NoError(t, os.WriteFile(filepath.Join(filesDir, "keep.txt"), []byte(""), 0600))
 
-	cmd := newFilesRmCmd()
+	cmd := newFilesCmd()
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
-	cmd.SetArgs([]string{name, "*.log"})
+	cmd.SetArgs([]string{name, "rm", "*.log"})
 	require.NoError(t, cmd.Execute())
 
 	out := buf.String()
@@ -406,10 +406,10 @@ func TestFilesRm_MultiplePatterns(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(filesDir, "b.tmp"), []byte(""), 0600))
 	require.NoError(t, os.WriteFile(filepath.Join(filesDir, "keep.txt"), []byte(""), 0600))
 
-	cmd := newFilesRmCmd()
+	cmd := newFilesCmd()
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
-	cmd.SetArgs([]string{name, "*.log", "*.tmp"})
+	cmd.SetArgs([]string{name, "rm", "*.log", "*.tmp"})
 	require.NoError(t, cmd.Execute())
 
 	out := buf.String()
@@ -426,10 +426,10 @@ func TestFilesRm_Directory(t *testing.T) {
 	require.NoError(t, os.MkdirAll(subDir, 0750))
 	require.NoError(t, os.WriteFile(filepath.Join(subDir, "inner.txt"), []byte(""), 0600))
 
-	cmd := newFilesRmCmd()
+	cmd := newFilesCmd()
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
-	cmd.SetArgs([]string{name, "subdir"})
+	cmd.SetArgs([]string{name, "rm", "subdir"})
 	require.NoError(t, cmd.Execute())
 
 	assert.Contains(t, buf.String(), "subdir")
@@ -439,9 +439,9 @@ func TestFilesRm_Directory(t *testing.T) {
 func TestFilesRm_NoMatches(t *testing.T) {
 	name, _ := setupFilesTest(t)
 
-	cmd := newFilesRmCmd()
+	cmd := newFilesCmd()
 	cmd.SetOut(new(bytes.Buffer))
-	cmd.SetArgs([]string{name, "*.nope"})
+	cmd.SetArgs([]string{name, "rm", "*.nope"})
 	err := cmd.Execute()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no files match")
@@ -452,10 +452,10 @@ func TestFilesRm_ReadOnlyFile(t *testing.T) {
 	f := filepath.Join(filesDir, "readonly.txt")
 	require.NoError(t, os.WriteFile(f, []byte("locked"), 0444)) //nolint:gosec // intentionally read-only for test
 
-	cmd := newFilesRmCmd()
+	cmd := newFilesCmd()
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
-	cmd.SetArgs([]string{name, "readonly.txt"})
+	cmd.SetArgs([]string{name, "rm", "readonly.txt"})
 	require.NoError(t, cmd.Execute())
 
 	assert.Contains(t, buf.String(), "readonly.txt")
@@ -467,10 +467,10 @@ func TestFilesRm_ReadOnlyFile(t *testing.T) {
 func TestFilesPath(t *testing.T) {
 	name, filesDir := setupFilesTest(t)
 
-	cmd := newFilesPathCmd()
+	cmd := newFilesCmd()
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
-	cmd.SetArgs([]string{name})
+	cmd.SetArgs([]string{name, "path"})
 	require.NoError(t, cmd.Execute())
 
 	assert.Equal(t, filesDir+"\n", buf.String())

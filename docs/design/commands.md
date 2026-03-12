@@ -40,22 +40,22 @@ Inspection:
   yoloai system setup                            Run interactive setup  (--agent, --backend, --tmux-conf for automation)
   yoloai sandbox                                 Sandbox inspection
   yoloai sandbox list                            List sandboxes and their status
-  yoloai sandbox info <name>                     Show sandbox configuration and state
-  yoloai sandbox log <name>                      Show sandbox session log
-  yoloai sandbox exec <name> <command>           Run a command inside the sandbox
-  yoloai sandbox network add <name> <domain>... Allow additional domains in an isolated sandbox
-  yoloai sandbox network list <name>            Show allowed domains for a sandbox
-  yoloai sandbox network remove <name> <domain>... Remove domains from the allowlist
+  yoloai sandbox <name> info                     Show sandbox configuration and state
+  yoloai sandbox <name> log                      Show sandbox session log
+  yoloai sandbox <name> exec <command>           Run a command inside the sandbox
+  yoloai sandbox <name> allow <domain>...       Allow additional domains in an isolated sandbox
+  yoloai sandbox <name> allowed                 Show allowed domains for a sandbox
+  yoloai sandbox <name> deny <domain>...        Remove domains from the allowlist
   yoloai ls                                      List sandboxes (shortcut for 'sandbox list')
   yoloai log <name>                              Show sandbox log (shortcut for 'sandbox log')
   yoloai exec <name> <command>                   Run a command inside a sandbox (shortcut for 'sandbox exec')
 
 Workflow:
-  yoloai files put <name> <file/glob>...               Copy files into sandbox exchange dir
-  yoloai files get <name> <file/glob>... [-o dir]      Copy files out of sandbox exchange dir
-  yoloai files ls <name> [glob]...                     List files in sandbox exchange dir
-  yoloai files rm <name> <glob>...                     Remove files from sandbox exchange dir
-  yoloai files path <name>                             Print host path to sandbox exchange dir
+  yoloai files <name> put <file/glob>...               Copy files into sandbox exchange dir
+  yoloai files <name> get <file/glob>... [-o dir]      Copy files out of sandbox exchange dir
+  yoloai files <name> ls [glob]...                     List files in sandbox exchange dir
+  yoloai files <name> rm <glob>...                     Remove files from sandbox exchange dir
+  yoloai files <name> path                             Print host path to sandbox exchange dir
   yoloai x <extension> <name> [args...] [--flags...]  Run a user-defined extension
 
 Admin:
@@ -345,7 +345,7 @@ Runs `docker exec -it yoloai-<name> tmux attach -t main`.
 
 Detach with standard tmux `Ctrl-b d` — container keeps running.
 
-### `yoloai sandbox info <name>`
+### `yoloai sandbox <name> info`
 
 Displays sandbox configuration and state:
 - Name
@@ -436,38 +436,38 @@ Options:
 - `--all`: Destroy all sandboxes (confirmation required unless `--yes` is also provided).
 - `--yes`: Skip confirmation prompts.
 
-### `yoloai sandbox log` / `yoloai log`
+### `yoloai sandbox <name> log` / `yoloai log`
 
 `yoloai log <name>` displays the session log (`log.txt`) for the named sandbox. Auto-pages through `$PAGER` / `less -R` when stdout is a TTY, matching `git log` behavior. When piped (stdout is not a TTY), outputs raw for composition with unix tools: `yoloai log my-task | tail -100`, `yoloai log my-task | grep error`.
 
-### `yoloai sandbox exec`
+### `yoloai sandbox <name> exec`
 
 `yoloai exec <name> <command>` runs a command inside the sandbox container without attaching to tmux. Useful for debugging (`yoloai exec my-sandbox bash`) or quick operations (`yoloai exec my-sandbox npm install foo`).
 
 Implemented as `docker exec yoloai-<name> <command>`, with `-i` added when stdin is a pipe/TTY and `-t` added when stdin is a TTY. This allows both interactive use (`yoloai exec my-sandbox bash`) and non-interactive use (`yoloai exec my-sandbox ls`, `echo "test" | yoloai exec my-sandbox cat`).
 
-### `yoloai sandbox network`
+### `yoloai sandbox <name> allow/allowed/deny`
 
 Parent command for managing sandbox network allowlists.
 
-#### `yoloai sandbox network add`
+#### `yoloai sandbox <name> allow`
 
-`yoloai sandbox network add <name> <domain>...` adds domains to the allowlist of a network-isolated sandbox. Changes are persisted to meta.json and config.json so they survive container restarts. If the container is running, ipset rules are live-patched via `docker exec` (as root, using `dig` + `ipset add`).
+`yoloai sandbox <name> allow <domain>...` adds domains to the allowlist of a network-isolated sandbox. Changes are persisted to meta.json and config.json so they survive container restarts. If the container is running, ipset rules are live-patched via `docker exec` (as root, using `dig` + `ipset add`).
 
 Requires `network_mode == "isolated"`. Errors if the sandbox uses `--network-none` or has no network restrictions. Duplicate domains are silently skipped (idempotent). If the container is stopped, changes are saved and take effect on the next start.
 
-#### `yoloai sandbox network list`
+#### `yoloai sandbox <name> allowed`
 
-`yoloai sandbox network list <name>` shows the allowed domains for a sandbox.
+`yoloai sandbox <name> allowed` shows the allowed domains for a sandbox.
 
 - Text output: one domain per line, or "No network isolation" / "No domains allowed".
 - JSON output: `{"name": "...", "network_mode": "...", "domains": [...]}`.
 
 No runtime needed — pure file read from meta.json.
 
-#### `yoloai sandbox network remove`
+#### `yoloai sandbox <name> deny`
 
-`yoloai sandbox network remove <name> <domain>...` removes domains from the allowlist of a network-isolated sandbox. Changes are persisted to meta.json and config.json. If the container is running, ipset rules are live-patched (flush and re-add remaining IPs).
+`yoloai sandbox <name> deny <domain>...` removes domains from the allowlist of a network-isolated sandbox. Changes are persisted to meta.json and config.json. If the container is running, ipset rules are live-patched (flush and re-add remaining IPs).
 
 Requires `network_mode == "isolated"`. Errors if a specified domain is not in the allowlist.
 
@@ -808,14 +808,14 @@ Bidirectional file exchange between host and sandbox. Files live in `~/.yoloai/s
 | Tart     | VirtioFS share, remapped to `/Users/admin/.yoloai/files/` | N/A (intentionally rw) |
 | Seatbelt | SBPL profile grants rw on sandbox dir; accessible at source path | N/A (intentionally rw) |
 
-#### `yoloai files put <sandbox> <file/glob>...`
+#### `yoloai files <sandbox> put <file/glob>...`
 
 Copy one or more files or directories into the sandbox's exchange directory. Arguments can be literal paths or glob patterns — quoted globs (e.g., `"*.txt"`) are expanded by the tool if the shell didn't expand them. Directories are copied recursively. If a target file already exists, the command fails with an error listing the conflicting paths.
 
 Options:
 - `--force`: Overwrite existing files instead of failing.
 
-#### `yoloai files get <sandbox> <file/glob>... [-o dir]`
+#### `yoloai files <sandbox> get <file/glob>... [-o dir]`
 
 Copy files from the sandbox's exchange directory to the host. File arguments are relative to the exchange directory and may be literal names or glob patterns. Multiple files/globs can be specified.
 
@@ -823,17 +823,17 @@ Options:
 - `-o`, `--output`: Destination directory (or file path for a single file). Defaults to `.` (current directory). When getting multiple files, the destination must be an existing directory.
 - `--force`: Overwrite existing destination files instead of failing.
 
-#### `yoloai files ls <sandbox> [glob]...`
+#### `yoloai files <sandbox> ls [glob]...`
 
 List files in the exchange directory. Without a glob, lists everything (implicit `*`). Multiple glob patterns can be specified — results are deduplicated and sorted. Glob matching does not treat dotfiles specially — `*` matches `.hidden` files. Output is one path per line, relative to the exchange directory.
 
-#### `yoloai files rm <sandbox> <glob>...`
+#### `yoloai files <sandbox> rm <glob>...`
 
 Remove files matching the glob(s) from the exchange directory. At least one glob argument is required — no implicit wildcard. Multiple patterns can be specified. Removes read-only files without prompting (uses whatever OS operations are needed to force deletion). Glob matching does not treat dotfiles specially.
 
 Prints the list of removed files. If no files match any pattern, exits with an error.
 
-#### `yoloai files path <sandbox>`
+#### `yoloai files <sandbox> path`
 
 Print the absolute host-side path to the exchange directory (`~/.yoloai/sandboxes/<name>/files/`). Useful for direct manipulation with host tools (`cp`, `rsync`, `open`, etc.).
 
