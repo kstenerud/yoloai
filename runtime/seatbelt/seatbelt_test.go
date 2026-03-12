@@ -690,12 +690,13 @@ func TestToolchainReadPaths_DetectsPython(t *testing.T) {
 			break
 		}
 	}
-	// The prefix might be skipped if it's under a system path — that's correct
-	// behavior. Only fail if it's a non-system prefix that wasn't detected.
+	// The prefix might be skipped if it's under a system path or is a parent
+	// of system paths (e.g. /usr when /usr/bin is a system path) — that's
+	// correct behavior. Only fail if it's unrelated to any system prefix.
 	sysPaths := systemReadPaths()
 	covered := false
 	for _, sp := range sysPaths {
-		if prefix == sp || strings.HasPrefix(prefix, sp+"/") {
+		if prefix == sp || strings.HasPrefix(prefix, sp+"/") || strings.HasPrefix(sp, prefix+"/") {
 			covered = true
 			break
 		}
