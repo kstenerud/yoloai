@@ -69,7 +69,11 @@ func newResetCmd() *cobra.Command {
 					return attachToSandbox(ctx, rt, containerName, name)
 				}
 
-				_, err = fmt.Fprintf(cmd.OutOrStdout(), "Sandbox %s reset\nRun 'yoloai attach %s' to reconnect\n", name, name)
+				if restart {
+					_, err = fmt.Fprintf(cmd.OutOrStdout(), "Sandbox %s reset\nRun 'yoloai attach %s' to reconnect\n", name, name)
+				} else {
+					_, err = fmt.Fprintf(cmd.OutOrStdout(), "Sandbox %s reset\n", name)
+				}
 				return err
 			})
 		},
