@@ -101,7 +101,7 @@ func addCloneFlags(cmd *cobra.Command) {
 	cmd.Flags().BoolP("attach", "a", false, "Auto-attach after starting")
 	cmd.Flags().StringP("prompt", "p", "", "New prompt text (overwrites existing prompt)")
 	cmd.Flags().StringP("prompt-file", "f", "", "File containing new prompt")
-	cmd.Flags().Bool("no-start", false, "Clone without starting (old behavior)")
+	cmd.Flags().Bool("no-start", false, "Clone without starting")
 	cmd.Flags().Bool("force", false, "Replace existing destination")
 
 	cmd.MarkFlagsMutuallyExclusive("no-start", "attach")

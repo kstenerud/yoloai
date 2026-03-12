@@ -34,7 +34,7 @@ Specific commits can be cherry-picked by providing ref arguments:
   yoloai apply mybox abc123..def456      # range
   yoloai apply mybox                     # all (unchanged behavior)
 
-Use --squash to flatten everything into a single unstaged patch (legacy behavior).
+Use --squash to flatten everything into a single unstaged patch.
 Use --patches to export .patch files without applying them.`,
 		GroupID: groupWorkflow,
 		Args:    cobra.ArbitraryArgs,
@@ -92,7 +92,7 @@ Use --patches to export .patch files without applying them.`,
 				return applySelectedCommits(cmd, name, refs, paths, meta, yes, force, dryRun)
 			}
 
-			// --squash: legacy behavior — flatten everything into one unstaged patch
+			// --squash: flatten everything into one unstaged patch
 			if squash {
 				return applySquash(cmd, name, paths, meta, yes, dryRun)
 			}
@@ -532,7 +532,7 @@ func applySelectedCommits(cmd *cobra.Command, name string, refs, paths []string,
 	return nil
 }
 
-// applySquash implements the legacy squashed-patch behavior.
+// applySquash implements the squashed-patch apply mode.
 func applySquash(cmd *cobra.Command, name string, paths []string, meta *sandbox.Meta, yes, dryRun bool) error {
 	// Check for aux :copy dirs
 	if len(meta.Directories) > 0 {

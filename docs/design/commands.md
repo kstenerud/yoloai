@@ -417,7 +417,7 @@ Without `-- <path>...`, applies all changes. With `-- <path>...`, `git format-pa
 
 **Options:**
 
-- `--squash`: Flatten all changes (commits + uncommitted) into a single unstaged patch. This is the legacy behavior — generates one `git diff <baseline>` and applies it with `git apply`. Shows a summary via `git diff --stat` and verifies cleanly with `git apply --check` before prompting for confirmation. Useful when you want to review everything as a single diff before committing.
+- `--squash`: Flatten all changes (commits + uncommitted) into a single unstaged patch. Generates one `git diff <baseline>` and applies it with `git apply`. Shows a summary via `git diff --stat` and verifies cleanly with `git apply --check` before prompting for confirmation. Useful when you want to review everything as a single diff before committing.
 - `--no-wip`: Skip uncommitted changes, only apply commits. Has no effect with `--squash` (which always includes everything). Has no effect when there are no commits beyond baseline.
 - `--patches <dir>`: Export `.patch` files to the specified directory instead of applying. Also exports `wip.diff` if uncommitted changes exist (unless `--no-wip`). Prints instructions for manual application (`git am --3way <dir>/*.patch`). Useful for selective commit application — the user can delete unwanted `.patch` files before running `git am`, or use standard git tools (`git rebase -i`, `git cherry-pick`) after importing.
 - `--force`: Proceed even if the host repo has uncommitted changes.

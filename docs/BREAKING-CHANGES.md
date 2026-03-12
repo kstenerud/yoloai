@@ -9,7 +9,7 @@ Tracks breaking changes made during beta. Each entry should be included in relea
 **Previous behavior:** `yoloai reset` stopped and restarted the container by default. `--no-restart` kept the agent running (in-place reset). `--clean` wiped agent state and cache. `--clean` and `--no-restart` were mutually exclusive.
 
 **New behavior:** `yoloai reset` resets in-place by default (agent stays running). Cache and files directories are cleared by default. New flags:
-- `--restart` — stop and restart container (replaces old default behavior)
+- `--restart` — stop and restart container
 - `--clear-state` — wipe agent runtime state (replaces `--clean`, implies `--restart`)
 - `--keep-cache` — preserve cache directory
 - `--keep-files` — preserve files directory
@@ -20,7 +20,7 @@ Automatic upgrades to `--restart`: overlay mode, container not running, or `--cl
 **Rationale:** In-place reset is the better default — it preserves agent context while syncing workspace changes. The old `--no-restart` flag required opting in to the better UX. Cache and files are now cleared by default for a clean slate, with `--keep-X` flags for opt-out. `--clean` mixed too many concerns (agent state + cache); `--clear-state` is more precise.
 
 **Migration:**
-- `yoloai reset <name>` — now resets in-place (was restart). Add `--restart` for old behavior.
+- `yoloai reset <name>` — now resets in-place (was restart). Add `--restart` to stop and restart the container.
 - `yoloai reset <name> --no-restart` — remove `--no-restart` (now the default).
 - `yoloai reset <name> --clean` — replace with `--clear-state`. Note: cache is now cleared by default, so `--clear-state` only adds agent runtime state wipe.
 - Cache/files are now cleared by default. Add `--keep-cache` and/or `--keep-files` to preserve them.
@@ -155,7 +155,7 @@ All entrypoint scripts now use `$YOLOAI_DIR` instead of hardcoded paths. Docker 
 
 **Rationale:** Consistent unix-y model — both `new` and `start` are detached by default, both accept `-a` to attach. Avoids confusing asymmetry where `new` used `-d` (detach) while `start` used `-a` (attach).
 
-**Migration:** Replace `yoloai new ...` with `yoloai new -a ...` to restore the old default. Remove `-d`/`--detach` from any scripts.
+**Migration:** Add `-a` to auto-attach: `yoloai new -a ...`. Remove `-d`/`--detach` from any scripts.
 
 ### Tmux mouse mode no longer enabled by default
 
