@@ -35,7 +35,7 @@ func newFilesCmd() *cobra.Command {
 
 func newFilesPutCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "put <sandbox> <file>...",
+		Use:   "put <sandbox> <file/glob>...",
 		Short: "Copy files into sandbox exchange directory",
 		Args:  cobra.MinimumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -53,7 +53,12 @@ func newFilesPutCmd() *cobra.Command {
 			filesDir := sandbox.FilesDir(name)
 			force, _ := cmd.Flags().GetBool("force")
 
-			for _, src := range rest {
+			expanded, err := expandHostGlobs(rest)
+			if err != nil {
+				return err
+			}
+
+			for _, src := range expanded {
 				absSrc, err := filepath.Abs(src)
 				if err != nil {
 					return fmt.Errorf("resolve path %s: %w", src, err)
@@ -87,9 +92,9 @@ func newFilesPutCmd() *cobra.Command {
 
 func newFilesGetCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "get <sandbox> <file> [dst]",
-		Short: "Copy a file from sandbox exchange directory",
-		Args:  cobra.RangeArgs(2, 3),
+		Use:   "get <sandbox> <file/glob>... [-o dir]",
+		Short: "Copy files from sandbox exchange directory",
+		Args:  cobra.MinimumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name, rest, err := resolveName(cmd, args)
 			if err != nil {
@@ -104,55 +109,65 @@ func newFilesGetCmd() *cobra.Command {
 			}
 			filesDir := sandbox.FilesDir(name)
 
-			srcPath := filepath.Join(filesDir, rest[0])
-			if err := validateExchangePath(filesDir, srcPath); err != nil {
+			files, err := expandExchangeGlobs(filesDir, rest)
+			if err != nil {
 				return err
 			}
 
-			if _, err := os.Stat(srcPath); err != nil {
-				return fmt.Errorf("file not found in exchange directory: %s", rest[0])
-			}
-
-			dst := "."
-			if len(rest) >= 2 {
-				dst = rest[1]
-			}
+			dst, _ := cmd.Flags().GetString("output")
+			force, _ := cmd.Flags().GetBool("force")
 
 			absDst, err := filepath.Abs(dst)
 			if err != nil {
 				return fmt.Errorf("resolve destination: %w", err)
 			}
 
-			// If dst is a directory, place file inside it
-			if info, err := os.Stat(absDst); err == nil && info.IsDir() {
-				absDst = filepath.Join(absDst, filepath.Base(rest[0]))
-			}
-
-			force, _ := cmd.Flags().GetBool("force")
-			if !force {
-				if _, err := os.Stat(absDst); err == nil {
-					return fmt.Errorf("destination already exists: %s (use --force to overwrite)", absDst)
+			// Multiple files require destination to be a directory
+			if len(files) > 1 {
+				info, err := os.Stat(absDst)
+				if err != nil {
+					return fmt.Errorf("destination directory does not exist: %s", absDst)
+				}
+				if !info.IsDir() {
+					return fmt.Errorf("destination must be a directory when getting multiple files: %s", absDst)
 				}
 			}
 
-			cpCmd := exec.Command("cp", "-rp", srcPath, absDst) //nolint:gosec // G204: paths are validated
-			if out, err := cpCmd.CombinedOutput(); err != nil {
-				return fmt.Errorf("copy: %s", strings.TrimSpace(string(out)))
-			}
+			for _, rel := range files {
+				srcPath := filepath.Join(filesDir, rel)
 
-			fmt.Fprintln(cmd.OutOrStdout(), absDst) //nolint:errcheck // best-effort output
+				// Compute final destination for this file
+				fileDst := absDst
+				if info, err := os.Stat(fileDst); err == nil && info.IsDir() {
+					fileDst = filepath.Join(fileDst, filepath.Base(rel))
+				}
+
+				if !force {
+					if _, err := os.Stat(fileDst); err == nil {
+						return fmt.Errorf("destination already exists: %s (use --force to overwrite)", fileDst)
+					}
+				}
+
+				cpCmd := exec.Command("cp", "-rp", srcPath, fileDst) //nolint:gosec // G204: paths are validated
+				if out, err := cpCmd.CombinedOutput(); err != nil {
+					return fmt.Errorf("copy: %s", strings.TrimSpace(string(out)))
+				}
+
+				fmt.Fprintln(cmd.OutOrStdout(), fileDst) //nolint:errcheck // best-effort output
+			}
 			return nil
 		},
 	}
-	cmd.Flags().Bool("force", false, "Overwrite existing destination file")
+	cmd.Flags().Bool("force", false, "Overwrite existing destination files")
+	cmd.Flags().StringP("output", "o", ".", "Destination directory (or file for single get)")
 	return cmd
 }
 
 func newFilesLsCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "ls <sandbox> [glob]",
+		Use:   "ls <sandbox> [glob]...",
 		Short: "List files in sandbox exchange directory",
-		Args:  cobra.RangeArgs(1, 2),
+		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name, rest, err := resolveName(cmd, args)
 			if err != nil {
@@ -164,32 +179,15 @@ func newFilesLsCmd() *cobra.Command {
 			}
 			filesDir := sandbox.FilesDir(name)
 
-			glob := "*"
-			if len(rest) >= 1 {
-				glob = rest[0]
+			patterns := rest
+			if len(patterns) == 0 {
+				patterns = []string{"*"}
 			}
 
-			pattern := filepath.Join(filesDir, glob)
-			if err := validateExchangePath(filesDir, pattern); err != nil {
+			names, err := collectExchangeGlobs(filesDir, patterns)
+			if err != nil {
 				return err
 			}
-
-			matches, err := filepath.Glob(pattern)
-			if err != nil {
-				return fmt.Errorf("invalid glob pattern: %w", err)
-			}
-
-			names := make([]string, 0, len(matches))
-			for _, m := range matches {
-				// filepath.Rel cannot fail: both paths are absolute and m is
-				// a glob result within filesDir.
-				rel, err := filepath.Rel(filesDir, m)
-				if err != nil {
-					continue
-				}
-				names = append(names, rel)
-			}
-			sort.Strings(names)
 
 			for _, n := range names {
 				fmt.Fprintln(cmd.OutOrStdout(), n) //nolint:errcheck // best-effort output
@@ -201,9 +199,9 @@ func newFilesLsCmd() *cobra.Command {
 
 func newFilesRmCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "rm <sandbox> <glob>",
+		Use:   "rm <sandbox> <glob>...",
 		Short: "Remove files from sandbox exchange directory",
-		Args:  cobra.ExactArgs(2),
+		Args:  cobra.MinimumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name, rest, err := resolveName(cmd, args)
 			if err != nil {
@@ -218,27 +216,13 @@ func newFilesRmCmd() *cobra.Command {
 			}
 			filesDir := sandbox.FilesDir(name)
 
-			pattern := filepath.Join(filesDir, rest[0])
-			if err := validateExchangePath(filesDir, pattern); err != nil {
+			matches, err := expandExchangeGlobs(filesDir, rest)
+			if err != nil {
 				return err
 			}
 
-			matches, err := filepath.Glob(pattern)
-			if err != nil {
-				return fmt.Errorf("invalid glob pattern: %w", err)
-			}
-
-			if len(matches) == 0 {
-				return fmt.Errorf("no files match pattern: %s", rest[0])
-			}
-
-			for _, m := range matches {
-				// filepath.Rel cannot fail: both paths are absolute and m is
-				// a glob result within filesDir.
-				rel, err := filepath.Rel(filesDir, m)
-				if err != nil {
-					continue
-				}
+			for _, rel := range matches {
+				m := filepath.Join(filesDir, rel)
 				if err := os.RemoveAll(m); err != nil {
 					return fmt.Errorf("remove %s: %w", rel, err)
 				}
@@ -279,4 +263,101 @@ func validateExchangePath(filesDir, resolved string) error {
 		return fmt.Errorf("path escapes exchange directory: %s", resolved)
 	}
 	return nil
+}
+
+// hasGlobMeta reports whether s contains glob metacharacters.
+func hasGlobMeta(s string) bool {
+	return strings.ContainsAny(s, "*?[")
+}
+
+// collectExchangeGlobs expands multiple glob patterns against the exchange
+// directory. Returns deduplicated, sorted relative paths. Returns an empty
+// slice (not an error) when nothing matches.
+func collectExchangeGlobs(filesDir string, patterns []string) ([]string, error) {
+	seen := make(map[string]bool)
+	var names []string
+
+	for _, pat := range patterns {
+		fullPattern := filepath.Join(filesDir, pat)
+		if err := validateExchangePath(filesDir, fullPattern); err != nil {
+			return nil, err
+		}
+
+		matches, err := filepath.Glob(fullPattern)
+		if err != nil {
+			return nil, fmt.Errorf("invalid glob pattern: %w", err)
+		}
+
+		for _, m := range matches {
+			rel, err := filepath.Rel(filesDir, m)
+			if err != nil {
+				continue
+			}
+			if !seen[rel] {
+				seen[rel] = true
+				names = append(names, rel)
+			}
+		}
+	}
+
+	sort.Strings(names)
+	return names, nil
+}
+
+// expandExchangeGlobs wraps collectExchangeGlobs and returns an error if no
+// files match any of the patterns.
+func expandExchangeGlobs(filesDir string, patterns []string) ([]string, error) {
+	names, err := collectExchangeGlobs(filesDir, patterns)
+	if err != nil {
+		return nil, err
+	}
+	if len(names) == 0 {
+		return nil, fmt.Errorf("no files match pattern: %s", strings.Join(patterns, " "))
+	}
+	return names, nil
+}
+
+// expandHostGlobs expands arguments that may be literal paths or glob patterns
+// on the host filesystem. For each arg, tries os.Stat first (literal path);
+// if that fails and the arg has glob metacharacters, expands with filepath.Glob.
+// Returns deduplicated results in argument order.
+func expandHostGlobs(args []string) ([]string, error) {
+	seen := make(map[string]bool)
+	var result []string
+
+	for _, arg := range args {
+		if _, err := os.Stat(arg); err == nil {
+			// Literal path exists — use it directly
+			if !seen[arg] {
+				seen[arg] = true
+				result = append(result, arg)
+			}
+			continue
+		}
+
+		if hasGlobMeta(arg) {
+			matches, err := filepath.Glob(arg)
+			if err != nil {
+				return nil, fmt.Errorf("invalid glob pattern %s: %w", arg, err)
+			}
+			if len(matches) == 0 {
+				return nil, fmt.Errorf("no files match pattern: %s", arg)
+			}
+			for _, m := range matches {
+				if !seen[m] {
+					seen[m] = true
+					result = append(result, m)
+				}
+			}
+			continue
+		}
+
+		// Not a glob, doesn't exist — pass through for later error handling
+		if !seen[arg] {
+			seen[arg] = true
+			result = append(result, arg)
+		}
+	}
+
+	return result, nil
 }

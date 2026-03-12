@@ -51,10 +51,10 @@ Inspection:
   yoloai exec <name> <command>                   Run a command inside a sandbox (shortcut for 'sandbox exec')
 
 Workflow:
-  yoloai files put <name> <file>...                    Copy files into sandbox exchange dir
-  yoloai files get <name> <file> [dst]                 Copy a file out of sandbox exchange dir
-  yoloai files ls <name> [glob]                        List files in sandbox exchange dir
-  yoloai files rm <name> <glob>                        Remove files from sandbox exchange dir
+  yoloai files put <name> <file/glob>...               Copy files into sandbox exchange dir
+  yoloai files get <name> <file/glob>... [-o dir]      Copy files out of sandbox exchange dir
+  yoloai files ls <name> [glob]...                     List files in sandbox exchange dir
+  yoloai files rm <name> <glob>...                     Remove files from sandbox exchange dir
   yoloai files path <name>                             Print host path to sandbox exchange dir
   yoloai x <extension> <name> [args...] [--flags...]  Run a user-defined extension
 
@@ -808,29 +808,30 @@ Bidirectional file exchange between host and sandbox. Files live in `~/.yoloai/s
 | Tart     | VirtioFS share, remapped to `/Users/admin/.yoloai/files/` | N/A (intentionally rw) |
 | Seatbelt | SBPL profile grants rw on sandbox dir; accessible at source path | N/A (intentionally rw) |
 
-#### `yoloai files put <sandbox> <file>...`
+#### `yoloai files put <sandbox> <file/glob>...`
 
-Copy one or more files or directories into the sandbox's exchange directory. Directories are copied recursively. If a target file already exists, the command fails with an error listing the conflicting paths.
+Copy one or more files or directories into the sandbox's exchange directory. Arguments can be literal paths or glob patterns — quoted globs (e.g., `"*.txt"`) are expanded by the tool if the shell didn't expand them. Directories are copied recursively. If a target file already exists, the command fails with an error listing the conflicting paths.
 
 Options:
 - `--force`: Overwrite existing files instead of failing.
 
-#### `yoloai files get <sandbox> <file> [dst]`
+#### `yoloai files get <sandbox> <file/glob>... [-o dir]`
 
-Copy a file from the sandbox's exchange directory to the host. `<file>` is relative to the exchange directory. `dst` defaults to the current working directory. If the destination file already exists, the command fails.
+Copy files from the sandbox's exchange directory to the host. File arguments are relative to the exchange directory and may be literal names or glob patterns. Multiple files/globs can be specified.
 
 Options:
-- `--force`: Overwrite existing destination file instead of failing.
+- `-o`, `--output`: Destination directory (or file path for a single file). Defaults to `.` (current directory). When getting multiple files, the destination must be an existing directory.
+- `--force`: Overwrite existing destination files instead of failing.
 
-#### `yoloai files ls <sandbox> [glob]`
+#### `yoloai files ls <sandbox> [glob]...`
 
-List files in the exchange directory. Without a glob, lists everything (implicit `*`). Glob matching does not treat dotfiles specially — `*` matches `.hidden` files. Output is one path per line, relative to the exchange directory.
+List files in the exchange directory. Without a glob, lists everything (implicit `*`). Multiple glob patterns can be specified — results are deduplicated and sorted. Glob matching does not treat dotfiles specially — `*` matches `.hidden` files. Output is one path per line, relative to the exchange directory.
 
-#### `yoloai files rm <sandbox> <glob>`
+#### `yoloai files rm <sandbox> <glob>...`
 
-Remove files matching the glob from the exchange directory. The glob argument is required — no implicit wildcard. Removes read-only files without prompting (uses whatever OS operations are needed to force deletion). Glob matching does not treat dotfiles specially.
+Remove files matching the glob(s) from the exchange directory. At least one glob argument is required — no implicit wildcard. Multiple patterns can be specified. Removes read-only files without prompting (uses whatever OS operations are needed to force deletion). Glob matching does not treat dotfiles specially.
 
-Prints the list of removed files. If no files match the glob, exits with an error.
+Prints the list of removed files. If no files match any pattern, exits with an error.
 
 #### `yoloai files path <sandbox>`
 

@@ -56,10 +56,10 @@ Full reference for commands, flags, configuration, and internals. For a quick ov
 | `yoloai profile list` | List profiles |
 | `yoloai profile info <name>` | Show merged profile configuration |
 | `yoloai profile delete <name>` | Delete a profile (`--yes` to skip confirmation) |
-| `yoloai files put <name> <file>...` | Copy files into sandbox exchange directory |
-| `yoloai files get <name> <file> [dst]` | Copy a file out of sandbox exchange directory |
-| `yoloai files ls <name> [glob]` | List files in sandbox exchange directory |
-| `yoloai files rm <name> <glob>` | Remove files from sandbox exchange directory |
+| `yoloai files put <name> <file/glob>...` | Copy files into sandbox exchange directory |
+| `yoloai files get <name> <file/glob>... [-o dir]` | Copy files from sandbox exchange directory |
+| `yoloai files ls <name> [glob]...` | List files in sandbox exchange directory |
+| `yoloai files rm <name> <glob>...` | Remove files from sandbox exchange directory |
 | `yoloai files path <name>` | Print host path to sandbox exchange directory |
 | `yoloai config get [key]` | Print configuration values (all settings or a specific key) |
 | `yoloai config set <key> <value>` | Set a configuration value |
