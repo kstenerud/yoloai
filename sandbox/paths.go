@@ -295,3 +295,10 @@ func OverlayOvlworkDir(name string, hostPath string) string {
 func FilesDir(name string) string {
 	return filepath.Join(Dir(name), "files")
 }
+
+// CacheDir returns the host-side cache directory for a sandbox.
+//
+//	~/.yoloai/sandboxes/<name>/cache/
+func CacheDir(name string) string {
+	return filepath.Join(Dir(name), "cache")
+}

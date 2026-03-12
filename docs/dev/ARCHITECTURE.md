@@ -369,11 +369,12 @@ Manager.Start (sandbox/lifecycle.go)
 │       │   └── stderr.log     # Backend stderr log
 │       ├── agent-runtime/     # Mounted at agent's StateDir (e.g., ~/.claude/, ~/.gemini/)
 │       ├── files/             # Bidirectional file exchange (shared files directory)
+│       ├── cache/             # Agent cache (HTTP responses, cloned repos)
 │       ├── home-seed/         # Files symlinked into sandbox HOME
 │       ├── home/              # Sandbox HOME directory (seatbelt)
 │       └── work/
 │           └── <caret-encoded-path>/  # Copy of workdir with internal git repo
-└── cache/                   # (future) Cache directory
+└── cache/                   # Global cache directory (e.g., overlay detection)
 ```
 
 ## Where to Change

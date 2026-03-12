@@ -499,10 +499,43 @@ All sandbox state lives on the host at `~/.yoloai/sandboxes/<name>/`:
   log.txt         # tmux session log
   agent-state/    # agent's persistent state (e.g., ~/.claude/, ~/.gemini/)
   files/          # bidirectional file exchange (mounted at /yoloai/files/)
+  cache/          # agent cache — HTTP responses, cloned repos (mounted at /yoloai/cache/)
   work/           # isolated copy of your project
 ```
 
 Containers are ephemeral — if removed, `yoloai start` recreates them from `meta.json`. Your work and agent state persist.
+
+### Shared Files Directory
+
+The `files/` directory is a bidirectional exchange between you and the agent. It's mounted read-write inside the sandbox (at `/yoloai/files/` for Docker, or the sandbox path for seatbelt) and managed via the `yoloai files` command:
+
+```bash
+# Pass reference material to the agent
+yoloai files mybox put error-log.txt spec.pdf
+
+# Retrieve artifacts the agent produced
+yoloai files mybox get report.md
+
+# List what's in the exchange directory
+yoloai files mybox ls
+
+# Direct host access (for scripts, rsync, etc.)
+yoloai files mybox path
+```
+
+Files here never appear in `yoloai diff` or `yoloai apply` — they live outside the work directory. Use this for anything the agent needs to see or anything you want to retrieve from the agent: logs, specs, screenshots, generated reports, exported files, etc.
+
+### Cache Directory
+
+The `cache/` directory gives the agent a persistent scratch space for data that speeds up its work but you don't need to see. It's mounted read-write inside the sandbox (at `/yoloai/cache/` for Docker, or the sandbox path for seatbelt).
+
+The agent is instructed to use this directory to:
+
+- **Cache HTTP responses** — avoid re-fetching the same URL repeatedly, which risks rate limiting or bans during research tasks.
+- **Clone remote repos** — `git clone --depth 1` into the cache to search a codebase locally instead of fetching individual files over HTTPS.
+- **Store reusable data** — downloaded archives, parsed documentation, intermediate results, etc.
+
+The cache directory persists across agent restarts (`yoloai stop` / `yoloai start`) but is destroyed with `yoloai destroy`. It's reset along with the workspace by `yoloai reset --clean`.
 
 ## Security
 

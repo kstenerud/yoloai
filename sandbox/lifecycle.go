@@ -325,7 +325,7 @@ func (m *Manager) Reset(ctx context.Context, opts ResetOptions) error {
 		return err
 	}
 
-	// Optionally wipe agent-runtime
+	// Optionally wipe agent-runtime and cache
 	if opts.Clean {
 		agentStateDir := filepath.Join(sandboxDir, AgentRuntimeDir)
 		if err := os.RemoveAll(agentStateDir); err != nil {
@@ -333,6 +333,13 @@ func (m *Manager) Reset(ctx context.Context, opts ResetOptions) error {
 		}
 		if err := os.MkdirAll(agentStateDir, 0750); err != nil {
 			return fmt.Errorf("recreate %s: %w", AgentRuntimeDir, err)
+		}
+		cacheDir := filepath.Join(sandboxDir, "cache")
+		if err := os.RemoveAll(cacheDir); err != nil {
+			return fmt.Errorf("remove cache: %w", err)
+		}
+		if err := os.MkdirAll(cacheDir, 0750); err != nil {
+			return fmt.Errorf("recreate cache: %w", err)
 		}
 		// Reset agent_files flag so files get re-seeded on next start
 		sbState, stateErr := LoadSandboxState(sandboxDir)

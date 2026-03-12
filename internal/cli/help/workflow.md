@@ -40,6 +40,16 @@ RESET
      yoloai reset my-task
      yoloai reset my-task --clean    # also wipe agent memory
 
+FILES
+
+  Exchange files with the agent without polluting the work directory:
+
+     yoloai files my-task put spec.pdf        # send to agent
+     yoloai files my-task get report.md       # retrieve from agent
+
+  The agent also has a cache directory for HTTP responses, cloned
+  repos, and other reusable data (managed automatically).
+
 CLEANUP
 
   Stop or destroy sandboxes when done:

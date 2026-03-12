@@ -165,6 +165,7 @@ Field notes:
         ├── log.txt              ← tmux session log
         ├── agent-state/         ← agent's state directory (per-sandbox, read-write)
         ├── files/               ← bidirectional file exchange (mounted at /yoloai/files/)
+        ├── cache/               ← agent cache (HTTP responses, cloned repos; mounted at /yoloai/cache/)
         └── work/                ← overlay upper dirs (deltas) or full copies, for :copy dirs only
             ├── ^2Fhome^2Fuser^2Fmy-app/    ← caret-encoded host path
             └── ^2Fhome^2Fuser^2Fshared/    ← (one subdir per :copy directory)

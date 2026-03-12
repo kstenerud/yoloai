@@ -47,12 +47,28 @@ func GenerateContext(meta *Meta) string {
 	// Files section (exchange directory is always available)
 	b.WriteString("\n## Files\n\n")
 	filesPath := "/yoloai/files/"
+	cachePath := "/yoloai/cache/"
 	if meta.Backend == "seatbelt" {
 		filesPath = filepath.Join(Dir(meta.Name), "files") + "/"
+		cachePath = filepath.Join(Dir(meta.Name), "cache") + "/"
 	}
 	fmt.Fprintf(&b, "The **shared files directory** is at `%s`.\n", filesPath)
 	fmt.Fprintf(&b, "Files shared via `yoloai files put` appear here, and anything you write here can be retrieved by the user with `yoloai files get`.\n")
-	fmt.Fprintf(&b, "\nThis directory is also useful as a scratch area — for example, cloning a repo there instead of fetching files over HTTPS, or staging generated artifacts before the user retrieves them.\n")
+	fmt.Fprintf(&b, "Use this for artifacts the user needs to see — generated reports, exported files, etc.\n")
+
+	// Cache section
+	b.WriteString("\n## Cache\n\n")
+	fmt.Fprintf(&b, "The **cache directory** is at `%s`.\n", cachePath)
+	b.WriteString("Use this for anything that speeds up your work but the user doesn't need to see:\n\n")
+	b.WriteString("- **HTTP responses.** Cache fetched web pages/API responses here so you don't re-fetch the same URL. Check the cache before every fetch.\n")
+	b.WriteString("- **Git repos.** When you need to search a remote codebase, `git clone --depth 1` into the cache directory and search locally instead of fetching files over HTTPS.\n")
+	b.WriteString("- **Any reusable data.** Downloaded archives, parsed documentation, intermediate results, etc.\n")
+
+	// Terminology
+	b.WriteString("\n## Terminology\n\n")
+	b.WriteString("When the user says:\n\n")
+	fmt.Fprintf(&b, "- \"the cache\" — they mean the cache directory (`%s`)\n", cachePath)
+	fmt.Fprintf(&b, "- \"the files dir\" or \"shared files\" — they mean the shared files directory (`%s`)\n", filesPath)
 
 	// Resources section (only when resources are set)
 	if meta.Resources != nil {

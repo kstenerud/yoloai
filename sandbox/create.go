@@ -251,6 +251,7 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 		filepath.Join(sandboxDir, AgentRuntimeDir),
 		filepath.Join(sandboxDir, "home-seed"),
 		filepath.Join(sandboxDir, "files"),
+		filepath.Join(sandboxDir, "cache"),
 		filepath.Join(sandboxDir, BinDir),
 		filepath.Join(sandboxDir, TmuxDir),
 		filepath.Join(sandboxDir, BackendDir),
@@ -1003,6 +1004,12 @@ func buildMounts(state *sandboxState, secretsDir string) []runtime.MountSpec {
 	mounts = append(mounts, runtime.MountSpec{
 		Source: filepath.Join(state.sandboxDir, "files"),
 		Target: "/yoloai/files",
+	})
+
+	// Cache directory
+	mounts = append(mounts, runtime.MountSpec{
+		Source: filepath.Join(state.sandboxDir, "cache"),
+		Target: "/yoloai/cache",
 	})
 
 	// Home-seed files and directories (mounted into /home/yoloai/)

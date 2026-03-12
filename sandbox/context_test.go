@@ -58,6 +58,19 @@ func TestGenerateContext_AllFields(t *testing.T) {
 		t.Error("missing files exchange path")
 	}
 
+	// Cache
+	if !strings.Contains(result, "## Cache") {
+		t.Error("missing Cache section")
+	}
+	if !strings.Contains(result, "/yoloai/cache/") {
+		t.Error("missing cache path")
+	}
+
+	// Terminology
+	if !strings.Contains(result, "## Terminology") {
+		t.Error("missing Terminology section")
+	}
+
 	// Network
 	if !strings.Contains(result, "## Network") {
 		t.Error("missing Network section")
@@ -143,12 +156,19 @@ func TestGenerateContext_SeatbeltFilesPath(t *testing.T) {
 
 	result := GenerateContext(meta)
 
-	expectedPath := filepath.Join(Dir("test-sb"), "files") + "/"
-	if !strings.Contains(result, expectedPath) {
-		t.Errorf("expected seatbelt files path %q in context, got:\n%s", expectedPath, result)
+	expectedFilesPath := filepath.Join(Dir("test-sb"), "files") + "/"
+	if !strings.Contains(result, expectedFilesPath) {
+		t.Errorf("expected seatbelt files path %q in context, got:\n%s", expectedFilesPath, result)
 	}
 	if strings.Contains(result, "/yoloai/files/") {
 		t.Error("seatbelt context should not contain /yoloai/files/")
+	}
+	expectedCachePath := filepath.Join(Dir("test-sb"), "cache") + "/"
+	if !strings.Contains(result, expectedCachePath) {
+		t.Errorf("expected seatbelt cache path %q in context, got:\n%s", expectedCachePath, result)
+	}
+	if strings.Contains(result, "/yoloai/cache/") {
+		t.Error("seatbelt context should not contain /yoloai/cache/")
 	}
 }
 
@@ -167,6 +187,9 @@ func TestGenerateContext_DockerFilesPath(t *testing.T) {
 
 	if !strings.Contains(result, "/yoloai/files/") {
 		t.Error("docker context should contain /yoloai/files/")
+	}
+	if !strings.Contains(result, "/yoloai/cache/") {
+		t.Error("docker context should contain /yoloai/cache/")
 	}
 }
 

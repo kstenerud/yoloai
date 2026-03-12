@@ -837,6 +837,18 @@ Prints the list of removed files. If no files match any pattern, exits with an e
 
 Print the absolute host-side path to the exchange directory (`~/.yoloai/sandboxes/<name>/files/`). Useful for direct manipulation with host tools (`cp`, `rsync`, `open`, etc.).
 
+### Cache Directory
+
+The cache directory (`~/.yoloai/sandboxes/<name>/cache/`) is mounted read-write at `/yoloai/cache/` inside the sandbox. It provides the agent with persistent scratch space for data that speeds up its work: cached HTTP responses, shallow-cloned Git repos, downloaded archives, and other reusable data. The agent context instructs it to check the cache before fetching URLs and to clone repos locally rather than fetching files over HTTPS.
+
+| Backend  | Mechanism | Path inside sandbox |
+|----------|-----------|---------------------|
+| Docker   | Bind mount to `/yoloai/cache/` | `/yoloai/cache/` |
+| Tart     | VirtioFS share | Backend-specific |
+| Seatbelt | SBPL profile grants rw on sandbox dir | Source path |
+
+The cache persists across `stop`/`start` cycles and is destroyed with `yoloai destroy`. `yoloai reset --clean` also clears it.
+
 ### Image Cleanup
 
 Docker images (`yoloai-base`, `yoloai-<profile>`) accumulate indefinitely. A cleanup mechanism is needed but deferred pending research into Docker's image lifecycle: base images are shared parents of profile images, profile images may have running containers, layer caching means "removing" doesn't necessarily free space, and `docker image prune` vs `docker rmi` have different semantics. Half-baked pruning could break running sandboxes or nuke images the user spent time building.
