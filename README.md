@@ -1,6 +1,6 @@
 # yoloAI
 
-**Sandboxed runner for AI coding agents. No more permission fatique. Your files stay untouched until you say otherwise.**
+**Sandboxed runner for AI coding agents. No more permission fatigue. Your files stay untouched until you say otherwise.**
 
 ![terminal](terminal.svg)
 

@@ -38,7 +38,7 @@ RESET
   Re-copy the original and start over:
 
      yoloai reset my-task
-     yoloai reset my-task --clean    # also wipe agent memory
+     yoloai reset my-task --clear-state  # also wipe agent state
 
 FILES
 

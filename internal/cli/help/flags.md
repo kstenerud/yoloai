@@ -35,7 +35,7 @@ LIFECYCLE
 
   yoloai stop --all               Stop all sandboxes
   yoloai destroy --all --yes      Destroy all sandboxes
-  yoloai reset <name> --clean     Reset and wipe agent memory
+  yoloai reset <name> --clear-state  Reset and wipe agent state
   yoloai reset <name> --no-prompt Don't re-send prompt on reset
 
 More info: https://github.com/kstenerud/yoloai/blob/main/docs/GUIDE.md

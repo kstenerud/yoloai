@@ -35,7 +35,7 @@ Full reference for commands, flags, configuration, and internals. For a quick ov
 | `yoloai system build [profile]` | Build or rebuild the base image (`--backend`, `--secret`, `--all`) |
 | `yoloai system prune` | Remove orphaned resources (`--dry-run`, `--yes`, `--all`, `--backend`) |
 | `yoloai system setup` | Re-run interactive first-run setup |
-| `yoloai sandbox` | Sandbox inspection |
+| `yoloai sandbox` (alias: `sb`) | Sandbox inspection |
 | `yoloai sandbox list` | List sandboxes and their status |
 | `yoloai sandbox <name> info` | Show sandbox configuration and state |
 | `yoloai sandbox <name> prompt` | Show sandbox prompt |
@@ -65,7 +65,7 @@ Full reference for commands, flags, configuration, and internals. For a quick ov
 | `yoloai config set <key> <value>` | Set a configuration value |
 | `yoloai config reset <key>` | Reset a configuration value to its default |
 | `yoloai x [extension]` | Run a user-defined extension (alias: `ext`) |
-| `yoloai help [topic]` | Show help topics (agents, workflow, workdirs, config, security, flags) |
+| `yoloai help [topic]` | Show help topics (agents, workflow, workdirs, config, security, flags, extensions) |
 | `yoloai system completion <shell>` | Generate shell completion (bash/zsh/fish/powershell) |
 | `yoloai version` | Show version information |
 
@@ -230,8 +230,8 @@ The `host.docker.internal` hostname allows the container to reach services runni
 | Flag | Description |
 |------|-------------|
 | `-h`, `--help` | Show help for any command |
-| `-v`, `--verbose` | Increase verbosity (repeatable: `-v` info, `-vv` debug, `-vvv` trace) |
-| `-q`, `--quiet` | Decrease verbosity (repeatable: `-q` warnings only, `-qq` errors only, `-qqq` silent) |
+| `-v`, `--verbose` | Increase verbosity (repeatable: `-v` debug, `-vv` reserved) |
+| `-q`, `--quiet` | Decrease verbosity (repeatable: `-q` warnings only, `-qq` errors only) |
 | `--json` | Output as JSON for scripting and CI |
 
 ### JSON Output
@@ -252,7 +252,7 @@ Errors are output to stderr as `{"error": "message"}`. Interactive commands (`at
 
 ### Creating sandboxes
 
-`--backend <name>` selects the runtime backend (`docker`, `tart`, or `seatbelt`). Available on `new`, `build`, and `setup`. Lifecycle commands (`start`, `stop`, etc.) read the backend from the sandbox's `meta.json` automatically.
+`--backend <name>` selects the runtime backend (`docker`, `tart`, or `seatbelt`). Available on `new`, `build`, and `setup`. Lifecycle commands (`start`, `stop`, etc.) read the backend from the sandbox's `environment.json` automatically.
 
 ```bash
 # Prompt (headless — agent runs the task autonomously)
@@ -270,6 +270,9 @@ yoloai new task ./project --attach
 yoloai new task ./project --yes
 
 # Replace an existing sandbox with the same name
+yoloai new task ./project --replace
+
+# Replace even if unapplied changes exist
 yoloai new task ./project --force
 
 # Pass extra arguments directly to the agent CLI
@@ -286,6 +289,9 @@ yoloai new task ./project --network-none
 
 # Use a profile
 yoloai new task ./project --profile go-dev
+
+# Use base image even if config sets a default profile
+yoloai new task ./project --no-profile
 
 # Resource limits
 yoloai new task ./project --cpus 4 --memory 8g
@@ -322,9 +328,17 @@ yoloai restart task
 yoloai restart task -a          # restart and auto-attach
 yoloai restart task --resume    # restart with resume prompt
 yoloai restart task --prompt "now add tests"  # restart with new prompt
+yoloai restart task --prompt-file next-steps.md  # restart with prompt from file
 
 # Attach with resume (restart agent with resume prompt, then attach)
 yoloai attach task --resume
+
+# Clone a sandbox
+yoloai clone source-box dest-box
+yoloai clone source-box dest-box -a           # clone, start, and attach
+yoloai clone source-box dest-box --no-start   # clone without starting
+yoloai clone source-box dest-box --force      # replace existing destination
+yoloai clone source-box dest-box --prompt "continue with tests"
 
 # Reset workdir (in-place by default, agent stays running)
 yoloai reset task
@@ -334,6 +348,7 @@ yoloai reset task --no-prompt   # don't re-send prompt
 yoloai reset task --restart     # stop and restart container
 yoloai reset task --clear-state  # wipe agent state and restart
 yoloai reset task --restart -a  # restart and auto-attach
+yoloai reset task --debug       # debug entrypoint issues on restart
 ```
 
 ### Reviewing changes
@@ -451,7 +466,7 @@ Agent resolution: `new` uses `--agent` flag > `agent` in config > `"claude"`.
 
 Model resolution: `new` uses `--model` flag > `model` in config > `""` (empty = agent's default model).
 
-Backend resolution: `new`/`build`/`setup` use `--backend` flag > `backend` in config > `"docker"`. Lifecycle commands read the backend from the sandbox's `meta.json`, falling back to config default.
+Backend resolution: `new`/`build`/`setup` use `--backend` flag > `backend` in config > `"docker"`. Lifecycle commands read the backend from the sandbox's `environment.json`, falling back to config default.
 
 Agent args: persistent default CLI args for specific agents. Inserted between the model flag and CLI passthrough (`--` args), so passthrough always takes precedence. Example: `yoloai config set agent_args.aider "--no-auto-commits --no-pretty"`. Profile `agent_args` merge with base config (per-agent key, profile wins on conflict).
 
@@ -482,7 +497,7 @@ agent_files:
 Key behaviors:
 - Files already placed by SeedFiles (auth credentials, container settings) are never overwritten.
 - Each agent excludes session data and caches (e.g., Claude excludes `projects/`, `statsig/`, `todos/`, `.credentials.json`, `*.log`).
-- Files are only seeded on first creation. Tracked via `state.json` — `reset --clean` resets the flag so files are re-seeded on next start.
+- Files are only seeded on first creation. Tracked via `sandbox-state.json` — `reset --clear-state` resets the flag so files are re-seeded on next start.
 - Agents without a state directory (aider, test, shell) are silently skipped.
 - In profiles, `agent_files` uses replacement semantics (child completely replaces parent).
 
@@ -494,18 +509,18 @@ All sandbox state lives on the host at `~/.yoloai/sandboxes/<name>/`:
 
 ```
 ~/.yoloai/sandboxes/<name>/
-  meta.json       # sandbox config (paths, mode, baseline SHA, backend)
-  state.json      # per-sandbox state (agent_files_initialized, etc.)
-  config.json     # container entrypoint config
-  prompt.txt      # initial prompt (if provided)
-  log.txt         # tmux session log
-  agent-state/    # agent's persistent state (e.g., ~/.claude/, ~/.gemini/)
-  files/          # bidirectional file exchange (mounted at /yoloai/files/)
-  cache/          # agent cache — HTTP responses, cloned repos (mounted at /yoloai/cache/)
-  work/           # isolated copy of your project
+  environment.json   # sandbox config (paths, mode, baseline SHA, backend)
+  sandbox-state.json # per-sandbox state (agent_files_initialized, etc.)
+  runtime-config.json # container entrypoint config
+  prompt.txt         # initial prompt (if provided)
+  log.txt            # tmux session log
+  agent-runtime/     # agent's persistent state (e.g., ~/.claude/, ~/.gemini/)
+  files/             # bidirectional file exchange (mounted at /yoloai/files/)
+  cache/             # agent cache — HTTP responses, cloned repos (mounted at /yoloai/cache/)
+  work/              # isolated copy of your project
 ```
 
-Containers are ephemeral — if removed, `yoloai start` recreates them from `meta.json`. Your work and agent state persist.
+Containers are ephemeral — if removed, `yoloai start` recreates them from `environment.json`. Your work and agent state persist.
 
 ### Shared Files Directory
 
@@ -537,7 +552,7 @@ The agent is instructed to use this directory to:
 - **Clone remote repos** — `git clone --depth 1` into the cache to search a codebase locally instead of fetching individual files over HTTPS.
 - **Store reusable data** — downloaded archives, parsed documentation, intermediate results, etc.
 
-The cache directory persists across agent restarts (`yoloai stop` / `yoloai start`) but is destroyed with `yoloai destroy`. It's reset along with the workspace by `yoloai reset --clean`.
+The cache directory persists across agent restarts (`yoloai stop` / `yoloai start`) but is destroyed with `yoloai destroy`. It's cleared by default on `yoloai reset` (use `--keep-cache` to preserve it).
 
 ## Security
 

@@ -1,7 +1,11 @@
 CONFIGURATION
 
-  yoloai stores config in ~/.yoloai/config.yaml. On first run, interactive
-  setup creates this file. Use 'yoloai config' to view and change settings.
+  yoloai uses two config files:
+  - ~/.yoloai/config.yaml — global settings (tmux_conf, model_aliases)
+  - ~/.yoloai/profiles/base/config.yaml — profile defaults (agent, model, etc.)
+
+  On first run, interactive setup creates these files. Use 'yoloai config'
+  to view and change settings (keys are automatically routed to the correct file).
 
 COMMANDS
 
