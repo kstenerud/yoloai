@@ -34,6 +34,14 @@ yoloAI takes a different approach: let the agent do whatever it wants inside a d
 - **Persistent agent state.** Session history and config survive stops and restarts.
 - **Easy retry.** `yoloai reset` re-copies your original for a fresh attempt.
 
+## What yoloAI is not
+
+- **Not an orchestrator.** The orchestrator space is crowded (60+ tools) and rapidly evolving. yoloAI's value is the sandbox layer — it provides composable primitives (`new`, `diff`, `apply`) that orchestrators can build on top of, not a coordination framework.
+- **Not an autonomous agent platform.** yoloAI runs one agent in one sandbox — it doesn't decompose tasks, coordinate multiple agents, or manage autonomous workflows. You drive the loop.
+- **Not a permission system.** Instead of asking you to approve every file write and shell command, yoloAI eliminates the question entirely: the agent does whatever it wants in a disposable sandbox, and you review the result.
+- **Not a hosted service.** yoloAI is a local CLI tool. No accounts, no cloud, no vendor lock-in. Just a Go binary and your chosen sandbox backend.
+- **Not a live-sync tool.** Your originals are protected by default. The agent works on an isolated copy and changes only land when you say so. (Live mounts are available via `:rw` mode for those who want them.)
+
 ## The workflow
 
 ```bash
