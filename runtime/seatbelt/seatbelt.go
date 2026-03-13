@@ -111,7 +111,7 @@ func (r *Runtime) Create(_ context.Context, cfg runtime.InstanceConfig) error {
 			continue // skip missing secrets (may have been cleaned up)
 		}
 		keyName := filepath.Base(m.Target)
-		if err := os.WriteFile(filepath.Join(secretsDir, keyName), data, 0600); err != nil {
+		if err := os.WriteFile(filepath.Join(secretsDir, keyName), data, 0600); err != nil { //nolint:gosec // G703: secretsDir is an internal sandbox directory, keyName is filepath.Base of an agent mount target
 			return fmt.Errorf("copy secret %s: %w", keyName, err)
 		}
 	}
@@ -273,10 +273,10 @@ func (r *Runtime) Remove(ctx context.Context, name string) error {
 			if linkPath == "" {
 				continue
 			}
-			_ = os.Remove(linkPath)
+			_ = os.Remove(linkPath) //nolint:gosec // G703: linkPath is derived from internal agent mount config
 			// Try to remove empty parent dirs we may have created
 			parent := filepath.Dir(linkPath)
-			_ = os.Remove(parent) // only succeeds if empty
+			_ = os.Remove(parent) //nolint:gosec // G703: parent is filepath.Dir of an internal controlled path
 		}
 	}
 

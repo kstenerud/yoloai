@@ -39,7 +39,7 @@ func runExec(cmd *cobra.Command, args []string) error {
 		}
 
 		containerName := sandbox.InstanceName(name)
-		slog.Debug("exec in container", "container", containerName, "cmd", cmdArgs)
+		slog.Debug("exec in container", "container", containerName, "cmd", cmdArgs) //nolint:gosec // G706: values are internal, not user-controlled log injection
 
 		if err := rt.InteractiveExec(ctx, containerName, cmdArgs, "yoloai", info.Meta.Workdir.MountPath); err != nil {
 			var exitErr *exec.ExitError

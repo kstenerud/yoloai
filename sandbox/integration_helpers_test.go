@@ -6,11 +6,10 @@ import (
 	"context"
 	"io"
 	"log/slog"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/kstenerud/yoloai/internal/testutil"
 	dockerrt "github.com/kstenerud/yoloai/runtime/docker"
 	"github.com/stretchr/testify/require"
 )
@@ -22,8 +21,7 @@ func integrationSetup(t *testing.T) (*Manager, context.Context) {
 	t.Helper()
 	ctx := context.Background()
 
-	tmpHome := t.TempDir()
-	t.Setenv("HOME", tmpHome)
+	testutil.IsolatedHome(t)
 
 	rt, err := dockerrt.New(ctx)
 	require.NoError(t, err, "Docker must be running for integration tests")
@@ -36,28 +34,14 @@ func integrationSetup(t *testing.T) (*Manager, context.Context) {
 }
 
 // createProjectDir creates a temp directory with a minimal Go project
-// (main.go) for use as a workdir.
+// (main.go) and an initial git commit.
 func createProjectDir(t *testing.T) string {
 	t.Helper()
-	dir := filepath.Join(t.TempDir(), "project")
-	require.NoError(t, os.MkdirAll(dir, 0750))
-	require.NoError(t, os.WriteFile(
-		filepath.Join(dir, "main.go"),
-		[]byte("package main\n\nfunc main() {}\n"),
-		0600,
-	))
-	return dir
+	return testutil.GoProject(t)
 }
 
 // createAuxDir creates a temp directory with a simple file for aux dir testing.
 func createAuxDir(t *testing.T, name string) string {
 	t.Helper()
-	dir := filepath.Join(t.TempDir(), name)
-	require.NoError(t, os.MkdirAll(dir, 0750))
-	require.NoError(t, os.WriteFile(
-		filepath.Join(dir, "data.txt"),
-		[]byte("aux data for "+name+"\n"),
-		0600,
-	))
-	return dir
+	return testutil.AuxDir(t, name)
 }

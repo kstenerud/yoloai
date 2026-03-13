@@ -10,11 +10,13 @@ agent/                   → Agent plugin definitions (Aider, Claude, Codex, Gem
 config/                  → Configuration loading, profiles, migration, state, path utilities
 extension/               → User-defined custom commands (YAML-based extensions)
 internal/cli/            → Cobra command tree and CLI plumbing
+internal/testutil/       → Shared test helpers (git, fixtures, home isolation, container polling) — test use only
 runtime/                 → Pluggable runtime interface (backend-agnostic types and errors)
 runtime/docker/          → Docker implementation of runtime.Runtime
 runtime/tart/            → Tart (macOS VM) implementation of runtime.Runtime
 runtime/seatbelt/        → Seatbelt (macOS sandbox-exec) implementation of runtime.Runtime
 sandbox/                 → Core logic: create, lifecycle, diff, apply, inspect
+test/e2e/                → End-to-end tests against the compiled binary (build tag: e2e)
 workspace/               → Workspace utilities (copy, git, safety checks)
 ```
 
@@ -75,6 +77,17 @@ Dependency direction: `cmd/yoloai` → `cli` → `sandbox` + `runtime`; `sandbox
 | `x.go` | `yoloai x` — extension runner. Loads user-defined extension YAML files, builds Cobra commands dynamically. |
 | `x_test.go` | Tests for extension runner. |
 | `envname_test.go` | Tests for name resolution. |
+
+### `internal/testutil/`
+
+Shared test helpers — a non-`_test.go` package importable by test files across all packages. Not included in production builds (nothing in the main binary imports it).
+
+| File | Purpose |
+|------|---------|
+| `git.go` | `InitGitRepo`, `GitAdd`, `GitCommit`, `GitRevParse`, `RunGit`, `WriteFile` — git and filesystem helpers, extracted from the duplicated `testhelpers_test.go` files. |
+| `fixtures.go` | `GoProject(t)`, `AuxDir(t, name)`, `MultiFileProject(t)` — create temp project directories with committed git state. |
+| `home.go` | `IsolatedHome(t)` — `t.Setenv("HOME", t.TempDir())` for per-test sandbox isolation. |
+| `wait.go` | `WaitForActive`, `WaitForStopped` — poll `rt.Inspect` at 200ms intervals instead of `time.Sleep`. |
 
 ### `config/`
 
@@ -440,19 +453,34 @@ Manager.Start (sandbox/lifecycle.go)
 
 ## Testing
 
-**Run all checks (preferred — gofmt, lint, tidy, tests):**
+Three tiers of tests, each requiring progressively more infrastructure:
+
+| Tier | Build tag | Requires | Run with |
+|------|-----------|----------|----------|
+| Unit | *(none)* | Nothing | `make test` / `go test ./...` |
+| Integration | `integration` | Docker daemon + `yoloai-base` image | `make integration` |
+| E2E | `e2e` | Docker daemon + compiled binary | `make e2e` |
+
+**Run all checks (preferred — gofmt, lint, tidy, unit tests):**
 ```
 make check
 ```
 
-**Run all unit tests:**
+**Run unit tests:**
 ```
 go test ./...
 ```
 
 **Run integration tests (requires Docker):**
 ```
-go test -tags integration ./...
+make integration
+# or: go test -tags=integration -v -count=1 -timeout=10m ./sandbox/ ./runtime/docker/ ./internal/cli/
+```
+
+**Run E2E tests (requires Docker, compiles binary first):**
+```
+make e2e
+# or: go test -tags=e2e -v -count=1 -timeout=15m ./test/e2e/
 ```
 
 **Run tests for a specific package:**
@@ -472,8 +500,23 @@ go build -o yoloai ./cmd/yoloai/
 golangci-lint run
 ```
 
-Integration tests use the `//go:build integration` build tag and are in:
-- `runtime/docker/docker_integration_test.go`
-- `sandbox/integration_test.go`
+### Test infrastructure
 
-All other `_test.go` files are standard unit tests that run without Docker or other runtime backends.
+**`internal/testutil/`** — shared non-test package importable by all test files:
+- `git.go`: `InitGitRepo`, `GitAdd`, `GitCommit`, `GitRevParse`, `RunGit`, `WriteFile`
+- `fixtures.go`: `GoProject(t)` (git-initialized Go project), `AuxDir(t, name)`, `MultiFileProject(t)`
+- `home.go`: `IsolatedHome(t)` — sets `HOME` to `t.TempDir()`
+- `wait.go`: `WaitForActive`, `WaitForStopped` — poll `rt.Inspect` instead of sleeping
+
+**`TestMain` pattern** — each integration package has `integration_main_test.go` that connects to Docker and calls `EnsureSetup` once before any tests run. Per-test `integrationSetup(t)` still uses `IsolatedHome(t)` for sandbox isolation, but subsequent `EnsureImage` calls hit the image cache.
+
+Integration test files:
+- `sandbox/integration_test.go` — full sandbox lifecycle; includes `TestIntegration_AgentStubWorkflow` (agent runs in container → diff → apply)
+- `runtime/docker/integration_test.go` — Docker runtime operations
+- `internal/cli/integration_test.go` — CLI commands via Cobra
+
+E2E test files (`test/e2e/`):
+- `helpers_test.go` — `TestMain` (builds binary), `runYoloai`, `e2eSetup`
+- `workflow_test.go` — `new` / `ls` / `destroy` lifecycle
+- `json_test.go` — `--json` output shape contracts
+- `error_test.go` — exit codes and error messages

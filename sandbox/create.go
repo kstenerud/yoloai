@@ -1207,7 +1207,7 @@ func copySeedFiles(agentDef *agent.Definition, sandboxDir string, hasAPIKey bool
 			return copiedAuth, fmt.Errorf("create dir for %s: %w", sf.TargetPath, err)
 		}
 
-		if err := os.WriteFile(targetPath, data, 0600); err != nil {
+		if err := os.WriteFile(targetPath, data, 0600); err != nil { //nolint:gosec // G703: targetPath is constructed from internal agent config, not user input
 			return copiedAuth, fmt.Errorf("write %s: %w", targetPath, err)
 		}
 		if sf.AuthOnly {

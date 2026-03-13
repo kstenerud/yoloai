@@ -60,7 +60,7 @@ func copyDirWalk(src, dst string, srcInfo os.FileInfo) error {
 			if err != nil {
 				return fmt.Errorf("readlink %s: %w", path, err)
 			}
-			return os.Symlink(link, target)
+			return os.Symlink(link, target) //nolint:gosec // G122: target is derived from a controlled destination root, TOCTOU not applicable here
 		}
 
 		if d.IsDir() {

@@ -800,7 +800,7 @@ func (m *Manager) prepareResumeFiles(name string, meta *Meta) error {
 
 	// Write resume-prompt.txt (preamble + original prompt)
 	resumeText := resumePreamble + string(promptData)
-	if err := os.WriteFile(filepath.Join(sandboxDir, "resume-prompt.txt"), []byte(resumeText), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(sandboxDir, "resume-prompt.txt"), []byte(resumeText), 0600); err != nil { //nolint:gosec // G703: sandboxDir is an internal controlled path
 		return fmt.Errorf("write resume-prompt.txt: %w", err)
 	}
 

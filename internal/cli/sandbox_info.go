@@ -116,7 +116,7 @@ func runSandboxInfo(cmd *cobra.Command, name string) error {
 		fmt.Fprintf(w, "Disk Usage:  %s\n", info.DiskUsage)  //nolint:errcheck
 		fmt.Fprintf(w, "Changes:     %s\n", info.HasChanges) //nolint:errcheck
 
-		slog.Debug("show complete", "sandbox", name)
+		slog.Debug("show complete", "sandbox", name) //nolint:gosec // G706: name is an internal sandbox name, not user-injected log data
 		return nil
 	})
 }

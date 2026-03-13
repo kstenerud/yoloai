@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kstenerud/yoloai/internal/testutil"
 	"github.com/kstenerud/yoloai/workspace"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -27,8 +28,8 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// Wait for entrypoint to initialize
-	time.Sleep(2 * time.Second)
+	// Wait for container to become active
+	testutil.WaitForActive(ctx, t, mgr.runtime, InstanceName(sandboxName), 15*time.Second)
 
 	// Verify directory structure
 	sandboxDir := Dir(sandboxName)
@@ -76,7 +77,7 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 
 	// Restart container and verify
 	require.NoError(t, mgr.Start(ctx, sandboxName, StartOpts{}))
-	time.Sleep(2 * time.Second)
+	testutil.WaitForActive(ctx, t, mgr.runtime, InstanceName(sandboxName), 15*time.Second)
 
 	status, err = DetectStatus(ctx, mgr.runtime, InstanceName(sandboxName), Dir(sandboxName))
 	require.NoError(t, err)
@@ -298,8 +299,8 @@ func TestIntegration_Reset(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { mgr.Destroy(ctx, "resettest") }) //nolint:errcheck // test cleanup
 
-	// Wait for container to stabilize
-	time.Sleep(2 * time.Second)
+	// Wait for container to become active
+	testutil.WaitForActive(ctx, t, mgr.runtime, InstanceName("resettest"), 15*time.Second)
 
 	meta, err := LoadMeta(Dir("resettest"))
 	require.NoError(t, err)
@@ -315,8 +316,9 @@ func TestIntegration_Reset(t *testing.T) {
 	// Reset
 	require.NoError(t, mgr.Reset(ctx, ResetOptions{Name: "resettest"}))
 
-	// Wait for restarted container to stabilize
-	time.Sleep(2 * time.Second)
+	// Wait for reset: container stops then becomes active again
+	testutil.WaitForStopped(ctx, t, mgr.runtime, InstanceName("resettest"), 15*time.Second)
+	testutil.WaitForActive(ctx, t, mgr.runtime, InstanceName("resettest"), 15*time.Second)
 
 	// new_file.txt should be gone after reset
 	assert.NoFileExists(t, filepath.Join(workDir, "new_file.txt"))
@@ -339,8 +341,8 @@ func TestIntegration_Exec(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { mgr.Destroy(ctx, "exectest") }) //nolint:errcheck // test cleanup
 
-	// Wait for container to stabilize
-	time.Sleep(2 * time.Second)
+	// Wait for container to become active
+	testutil.WaitForActive(ctx, t, mgr.runtime, InstanceName("exectest"), 15*time.Second)
 
 	// Exec a command
 	result, err := mgr.runtime.Exec(ctx, InstanceName("exectest"), []string{"echo", "integration-test"}, "yoloai")
@@ -571,4 +573,58 @@ func TestIntegration_DestroyCleanup(t *testing.T) {
 	status, err := DetectStatus(ctx, mgr.runtime, InstanceName("destroyme"), Dir("destroyme"))
 	require.NoError(t, err)
 	assert.Equal(t, StatusRemoved, status)
+}
+
+// TestIntegration_AgentStubWorkflow tests the full agent-does-work → diff → apply pipeline.
+// It uses the "test" agent (bash), starts the container, execs a command inside
+// to simulate agent output, then verifies diff detects the change and apply lands
+// the file in the original project directory.
+func TestIntegration_AgentStubWorkflow(t *testing.T) {
+	mgr, ctx := integrationSetup(t)
+	projectDir := createProjectDir(t)
+
+	_, err := mgr.Create(ctx, CreateOptions{
+		Name:       "stubworkflow",
+		WorkdirArg: projectDir,
+		Agent:      "test",
+		Version:    "test",
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { mgr.Destroy(ctx, "stubworkflow") }) //nolint:errcheck // test cleanup
+
+	testutil.WaitForActive(ctx, t, mgr.runtime, InstanceName("stubworkflow"), 15*time.Second)
+
+	// Simulate agent output: create a new file inside the container.
+	// Exec runs in the container's WorkingDir (= project bind-mount), so the
+	// file appears in the work copy on the host side via the bind-mount.
+	result, err := mgr.runtime.Exec(ctx, InstanceName("stubworkflow"), []string{"touch", "agent-output.txt"}, "yoloai")
+	require.NoError(t, err)
+	assert.Equal(t, 0, result.ExitCode)
+
+	// Verify the file is visible in the work copy on the host
+	meta, err := LoadMeta(Dir("stubworkflow"))
+	require.NoError(t, err)
+	workDir := WorkDir("stubworkflow", meta.Workdir.HostPath)
+	assert.FileExists(t, filepath.Join(workDir, "agent-output.txt"))
+
+	// Diff should detect the new file
+	diffResult, err := GenerateDiff(DiffOptions{Name: "stubworkflow"})
+	require.NoError(t, err)
+	assert.False(t, diffResult.Empty, "diff should not be empty after agent created a file")
+	assert.Contains(t, diffResult.Output, "agent-output.txt")
+
+	// Generate patch and apply to a fresh copy of the original project
+	patch, stat, err := GeneratePatch("stubworkflow", nil)
+	require.NoError(t, err)
+	assert.NotEmpty(t, patch)
+	assert.Contains(t, stat, "agent-output.txt")
+
+	targetDir := t.TempDir()
+	require.NoError(t, os.WriteFile(
+		filepath.Join(targetDir, "main.go"),
+		[]byte("package main\n\nfunc main() {}\n"),
+		0600,
+	))
+	require.NoError(t, workspace.ApplyPatch(patch, targetDir, false))
+	assert.FileExists(t, filepath.Join(targetDir, "agent-output.txt"))
 }

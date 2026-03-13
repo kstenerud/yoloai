@@ -703,7 +703,7 @@ func exportPatches(cmd *cobra.Command, name string, paths []string, commits []sa
 			if err != nil {
 				return fmt.Errorf("read patch %s: %w", f, err)
 			}
-			if err := os.WriteFile(dst, data, 0600); err != nil {
+			if err := os.WriteFile(dst, data, 0600); err != nil { //nolint:gosec // G703: dst is under controlled dir
 				return fmt.Errorf("write patch %s: %w", f, err)
 			}
 			if !isJSON {
