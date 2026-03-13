@@ -16,7 +16,7 @@ import (
 
 func newCloneMgr() *Manager {
 	mock := &lifecycleMockRuntime{}
-	return NewManager(mock, "docker", slog.Default(), strings.NewReader(""), io.Discard)
+	return NewManager(mock, slog.Default(), strings.NewReader(""), io.Discard)
 }
 
 func createCloneSource(t *testing.T, tmpDir, name string) {

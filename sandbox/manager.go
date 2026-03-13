@@ -16,18 +16,33 @@ import (
 
 // Manager is the central orchestrator for sandbox operations.
 type Manager struct {
-	runtime runtime.Runtime
-	backend string
-	logger  *slog.Logger
-	input   io.Reader
-	scanner *bufio.Scanner // shared scanner for multi-step interactive prompts
-	output  io.Writer
+	runtime  runtime.Runtime
+	backend  string
+	logger   *slog.Logger
+	input    io.Reader
+	scanner  *bufio.Scanner // shared scanner for multi-step interactive prompts
+	output   io.Writer
+	progress func(name, msg string) // optional progress callback
 }
 
-// NewManager creates a Manager with the given runtime, backend name, logger,
-// input reader for interactive prompts, and output writer for user-facing messages.
-func NewManager(rt runtime.Runtime, backend string, logger *slog.Logger, input io.Reader, output io.Writer) *Manager {
-	return &Manager{
+// ManagerOption configures a Manager.
+type ManagerOption func(*Manager)
+
+// WithProgress sets a callback that receives human-readable progress messages
+// during long operations. The callback receives the sandbox name and message.
+func WithProgress(fn func(name, msg string)) ManagerOption {
+	return func(m *Manager) { m.progress = fn }
+}
+
+// NewManager creates a Manager with the given runtime, logger, input reader
+// for interactive prompts, and output writer for user-facing messages.
+// The backend name is read from rt.Name() when rt is non-nil.
+func NewManager(rt runtime.Runtime, logger *slog.Logger, input io.Reader, output io.Writer, opts ...ManagerOption) *Manager {
+	backend := ""
+	if rt != nil {
+		backend = rt.Name()
+	}
+	m := &Manager{
 		runtime: rt,
 		backend: backend,
 		logger:  logger,
@@ -35,6 +50,10 @@ func NewManager(rt runtime.Runtime, backend string, logger *slog.Logger, input i
 		scanner: bufio.NewScanner(input),
 		output:  output,
 	}
+	for _, opt := range opts {
+		opt(m)
+	}
+	return m
 }
 
 // readLine reads a single line from the shared scanner, returning early if ctx
@@ -142,6 +161,31 @@ func (m *Manager) EnsureSetupNonInteractive(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+// List returns info for all sandboxes.
+func (m *Manager) List(ctx context.Context) ([]*Info, error) {
+	return ListSandboxes(ctx, m.runtime)
+}
+
+// Inspect returns combined metadata and live state for a single sandbox.
+func (m *Manager) Inspect(ctx context.Context, name string) (*Info, error) {
+	return InspectSandbox(ctx, m.runtime, name)
+}
+
+// Status returns the current lifecycle status of a sandbox.
+func (m *Manager) Status(ctx context.Context, name string) (Status, error) {
+	return DetectStatus(ctx, m.runtime, InstanceName(name), Dir(name))
+}
+
+// SandboxFiles returns the path to the per-sandbox file exchange directory.
+func (m *Manager) SandboxFiles(name string) string {
+	return FilesDir(name)
+}
+
+// SandboxCache returns the path to the per-sandbox cache directory.
+func (m *Manager) SandboxCache(name string) string {
+	return CacheDir(name)
 }
 
 // isInteractive returns true if m.input is a TTY (terminal).

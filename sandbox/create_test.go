@@ -280,12 +280,12 @@ func TestCreate_CleansUpIncompleteOnNew(t *testing.T) {
 	// prepareSandboxState should auto-clean the incomplete dir.
 	// It will fail later (no agent, etc.) but the key assertion is
 	// that it does NOT return ErrSandboxExists.
-	mgr := NewManager(&mockRuntime{}, "docker", slog.Default(), strings.NewReader(""), io.Discard)
+	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), io.Discard)
 	_, err := mgr.Create(context.Background(), CreateOptions{
-		Name:       name,
-		WorkdirArg: tmpDir,
-		Agent:      "test",
-		Version:    "test",
+		Name:    name,
+		Workdir: DirSpec{Path: tmpDir},
+		Agent:   "test",
+		Version: "test",
 	})
 	// Will fail for other reasons (no API key etc.), but must NOT be ErrSandboxExists
 	assert.NotErrorIs(t, err, ErrSandboxExists)
@@ -300,12 +300,12 @@ func TestCreate_CleansUpOnPrepareFail(t *testing.T) {
 
 	// Use test agent which needs no API key, but provide a nonexistent workdir
 	// so preparation fails after directory creation.
-	mgr := NewManager(&mockRuntime{}, "docker", slog.Default(), strings.NewReader(""), io.Discard)
+	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), io.Discard)
 	_, err := mgr.Create(context.Background(), CreateOptions{
-		Name:       name,
-		WorkdirArg: filepath.Join(tmpDir, "nonexistent"),
-		Agent:      "test",
-		Version:    "test",
+		Name:    name,
+		Workdir: DirSpec{Path: filepath.Join(tmpDir, "nonexistent")},
+		Agent:   "test",
+		Version: "test",
 	})
 	require.Error(t, err)
 

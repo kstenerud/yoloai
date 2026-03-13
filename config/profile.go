@@ -630,3 +630,26 @@ func ValidateProfileBackend(profileBackend, resolvedBackend string) error {
 	}
 	return nil
 }
+
+// LoadMergedConfig loads the base config and merges the named profile chain
+// in a single call. If profileName is empty, returns config defaults with no
+// profile applied.
+func LoadMergedConfig(profileName string) (*MergedConfig, error) {
+	base, err := LoadConfig()
+	if err != nil {
+		return nil, err
+	}
+	if profileName == "" {
+		return &MergedConfig{
+			Agent:   base.Agent,
+			Model:   base.Model,
+			Backend: base.Backend,
+			Env:     base.Env,
+		}, nil
+	}
+	chain, err := ResolveProfileChain(profileName)
+	if err != nil {
+		return nil, err
+	}
+	return MergeProfileChain(base, chain)
+}

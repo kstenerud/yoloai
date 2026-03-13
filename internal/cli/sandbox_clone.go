@@ -38,7 +38,7 @@ func runClone(cmd *cobra.Command, args []string) error {
 		if _, err := os.Stat(sandbox.Dir(dst)); err == nil {
 			backend := resolveBackendForSandbox(dst)
 			if err := withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
-				mgr := sandbox.NewManager(rt, backend, slog.Default(), cmd.InOrStdin(), cmd.ErrOrStderr())
+				mgr := sandbox.NewManager(rt, slog.Default(), cmd.InOrStdin(), cmd.ErrOrStderr())
 				return mgr.Destroy(ctx, dst)
 			}); err != nil {
 				return fmt.Errorf("destroy existing destination: %w", err)
@@ -47,7 +47,7 @@ func runClone(cmd *cobra.Command, args []string) error {
 	}
 
 	// Clone (no runtime needed).
-	mgr := sandbox.NewManager(nil, "", slog.Default(), cmd.InOrStdin(), cmd.ErrOrStderr())
+	mgr := sandbox.NewManager(nil, slog.Default(), cmd.InOrStdin(), cmd.ErrOrStderr())
 	if err := mgr.Clone(cmd.Context(), sandbox.CloneOptions{Source: src, Dest: dst}); err != nil {
 		return err
 	}
@@ -66,7 +66,7 @@ func runClone(cmd *cobra.Command, args []string) error {
 	// Start (and optionally attach) — needs a runtime.
 	backend := resolveBackendForSandbox(dst)
 	return withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
-		startMgr := sandbox.NewManager(rt, backend, slog.Default(), cmd.InOrStdin(), cmd.ErrOrStderr())
+		startMgr := sandbox.NewManager(rt, slog.Default(), cmd.InOrStdin(), cmd.ErrOrStderr())
 		if err := startMgr.Start(ctx, dst, sandbox.StartOpts{
 			Prompt:     prompt,
 			PromptFile: promptFile,

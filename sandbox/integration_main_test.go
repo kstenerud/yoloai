@@ -36,7 +36,7 @@ func TestMain(m *testing.M) {
 	}
 	defer rt.Close() //nolint:errcheck // best-effort close in test main
 
-	mgr := NewManager(rt, "docker", slog.Default(), strings.NewReader(""), io.Discard)
+	mgr := NewManager(rt, slog.Default(), strings.NewReader(""), io.Discard)
 	if err := mgr.EnsureSetup(ctx); err != nil {
 		fmt.Fprintf(os.Stderr, "EnsureSetup failed: %v\n", err)
 		os.Exit(1)

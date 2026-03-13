@@ -20,14 +20,14 @@ func TestBuildNetworkConfig_Default(t *testing.T) {
 
 func TestBuildNetworkConfig_None(t *testing.T) {
 	agentDef := agent.GetAgent("claude")
-	mode, allow := buildNetworkConfig(CreateOptions{NetworkNone: true}, agentDef)
+	mode, allow := buildNetworkConfig(CreateOptions{Network: NetworkModeNone}, agentDef)
 	assert.Equal(t, "none", mode)
 	assert.Nil(t, allow)
 }
 
 func TestBuildNetworkConfig_Isolated(t *testing.T) {
 	agentDef := agent.GetAgent("claude")
-	mode, allow := buildNetworkConfig(CreateOptions{NetworkIsolated: true}, agentDef)
+	mode, allow := buildNetworkConfig(CreateOptions{Network: NetworkModeIsolated}, agentDef)
 	assert.Equal(t, "isolated", mode)
 	// Should include agent's allowlist
 	assert.NotEmpty(t, allow)
@@ -37,8 +37,8 @@ func TestBuildNetworkConfig_Isolated(t *testing.T) {
 func TestBuildNetworkConfig_IsolatedWithUserAllow(t *testing.T) {
 	agentDef := agent.GetAgent("claude")
 	opts := CreateOptions{
-		NetworkIsolated: true,
-		NetworkAllow:    []string{"example.com"},
+		Network:      NetworkModeIsolated,
+		NetworkAllow: []string{"example.com"},
 	}
 	mode, allow := buildNetworkConfig(opts, agentDef)
 	assert.Equal(t, "isolated", mode)
@@ -50,9 +50,8 @@ func TestBuildNetworkConfig_IsolatedWithUserAllow(t *testing.T) {
 func TestBuildNetworkConfig_NoneTakesPriority(t *testing.T) {
 	agentDef := agent.GetAgent("claude")
 	opts := CreateOptions{
-		NetworkNone:     true,
-		NetworkIsolated: true, // should be ignored
-		NetworkAllow:    []string{"example.com"},
+		Network:      NetworkModeNone,
+		NetworkAllow: []string{"example.com"},
 	}
 	mode, allow := buildNetworkConfig(opts, agentDef)
 	assert.Equal(t, "none", mode)
@@ -279,12 +278,12 @@ func TestApplyConfigDefaults_NetworkFromConfigWhenNoProfile(t *testing.T) {
 	pr := &profileResult{}
 
 	applyConfigDefaults(opts, ycfg, pr)
-	assert.True(t, opts.NetworkIsolated)
+	assert.Equal(t, NetworkModeIsolated, opts.Network)
 	assert.Equal(t, []string{"example.com"}, opts.NetworkAllow)
 }
 
 func TestApplyConfigDefaults_NetworkSkippedWhenCLIOverrides(t *testing.T) {
-	opts := &CreateOptions{NetworkNone: true}
+	opts := &CreateOptions{Network: NetworkModeNone}
 	ycfg := &config.YoloaiConfig{
 		Network: &config.NetworkConfig{
 			Isolated: true,
@@ -295,8 +294,7 @@ func TestApplyConfigDefaults_NetworkSkippedWhenCLIOverrides(t *testing.T) {
 
 	applyConfigDefaults(opts, ycfg, pr)
 	// NetworkNone takes priority; config network should not apply
-	assert.True(t, opts.NetworkNone)
-	assert.False(t, opts.NetworkIsolated)
+	assert.Equal(t, NetworkModeNone, opts.Network)
 	assert.Empty(t, opts.NetworkAllow)
 }
 

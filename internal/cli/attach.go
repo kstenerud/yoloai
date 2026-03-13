@@ -53,7 +53,7 @@ func newAttachCmd() *cobra.Command {
 
 				// --resume: restart agent before attaching
 				if resume && info.Status != sandbox.StatusActive && info.Status != sandbox.StatusIdle {
-					mgr := sandbox.NewManager(rt, backend, slog.Default(), cmd.InOrStdin(), cmd.ErrOrStderr())
+					mgr := sandbox.NewManager(rt, slog.Default(), cmd.InOrStdin(), cmd.ErrOrStderr())
 					if err := mgr.Start(ctx, name, sandbox.StartOpts{Resume: true}); err != nil {
 						return err
 					}

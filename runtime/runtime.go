@@ -118,4 +118,7 @@ type Runtime interface {
 	// an instance fails to start or crashes. The hint is included in error
 	// messages shown to the user.
 	DiagHint(instanceName string) string
+
+	// Name returns the backend name (e.g., "docker", "tart", "seatbelt").
+	Name() string
 }

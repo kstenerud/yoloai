@@ -128,9 +128,9 @@ func newNewCmd(version string) *cobra.Command {
 			}
 
 			name := positional[0]
-			var workdirArg string
+			var rawWorkdirArg string
 			if len(positional) >= 2 {
-				workdirArg = positional[1]
+				rawWorkdirArg = positional[1]
 			}
 
 			prompt, _ := cmd.Flags().GetString("prompt")
@@ -141,7 +141,7 @@ func newNewCmd(version string) *cobra.Command {
 			networkIsolated, _ := cmd.Flags().GetBool("network-isolated")
 			networkAllow, _ := cmd.Flags().GetStringSlice("network-allow")
 			ports, _ := cmd.Flags().GetStringSlice("port")
-			dirs, _ := cmd.Flags().GetStringSlice("dir")
+			rawDirs, _ := cmd.Flags().GetStringSlice("dir")
 
 			// --network-allow implies --network-isolated
 			if len(networkAllow) > 0 {
@@ -178,6 +178,32 @@ func newNewCmd(version string) *cobra.Command {
 				envMap[k] = v
 			}
 
+			// Parse raw CLI dir args into DirSpec values
+			var workdirSpec sandbox.DirSpec
+			if rawWorkdirArg != "" {
+				parsed, parseErr := sandbox.ParseDirArg(rawWorkdirArg)
+				if parseErr != nil {
+					return sandbox.NewUsageError("invalid workdir: %s", parseErr)
+				}
+				workdirSpec = sandbox.DirArgToSpec(parsed)
+			}
+			var auxDirSpecs []sandbox.DirSpec
+			for _, rawDir := range rawDirs {
+				parsed, parseErr := sandbox.ParseDirArg(rawDir)
+				if parseErr != nil {
+					return sandbox.NewUsageError("invalid directory %q: %s", rawDir, parseErr)
+				}
+				auxDirSpecs = append(auxDirSpecs, sandbox.DirArgToSpec(parsed))
+			}
+
+			// Resolve network mode
+			networkMode := sandbox.NetworkModeDefault
+			if networkNone {
+				networkMode = sandbox.NetworkModeNone
+			} else if networkIsolated {
+				networkMode = sandbox.NetworkModeIsolated
+			}
+
 			// Set terminal title early so it shows the sandbox name during create
 			if attach && !noStart {
 				setTerminalTitle(name)
@@ -190,31 +216,30 @@ func newNewCmd(version string) *cobra.Command {
 				if jsonEnabled(cmd) {
 					mgrOutput = io.Discard
 				}
-				mgr := sandbox.NewManager(rt, backend, slog.Default(), cmd.InOrStdin(), mgrOutput)
+				mgr := sandbox.NewManager(rt, slog.Default(), cmd.InOrStdin(), mgrOutput)
 				sandboxName, err := mgr.Create(ctx, sandbox.CreateOptions{
-					Name:            name,
-					WorkdirArg:      workdirArg,
-					AuxDirArgs:      dirs,
-					Agent:           agentName,
-					Model:           model,
-					Profile:         profileFlag,
-					Prompt:          prompt,
-					PromptFile:      promptFile,
-					NetworkNone:     networkNone,
-					NetworkIsolated: networkIsolated,
-					NetworkAllow:    networkAllow,
-					Ports:           ports,
-					Replace:         replace,
-					Force:           force,
-					NoStart:         noStart,
-					Attach:          attach,
-					Yes:             yes,
-					Passthrough:     passthrough,
-					Version:         version,
-					Debug:           debug,
-					CPUs:            cpus,
-					Memory:          memory,
-					Env:             envMap,
+					Name:         name,
+					Workdir:      workdirSpec,
+					AuxDirs:      auxDirSpecs,
+					Agent:        agentName,
+					Model:        model,
+					Profile:      profileFlag,
+					Prompt:       prompt,
+					PromptFile:   promptFile,
+					Network:      networkMode,
+					NetworkAllow: networkAllow,
+					Ports:        ports,
+					Replace:      replace,
+					Force:        force,
+					NoStart:      noStart,
+					Attach:       attach,
+					Yes:          yes,
+					Passthrough:  passthrough,
+					Version:      version,
+					Debug:        debug,
+					CPUs:         cpus,
+					Memory:       memory,
+					Env:          envMap,
 				})
 				if err != nil {
 					return err

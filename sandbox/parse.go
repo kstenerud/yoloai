@@ -31,6 +31,16 @@ var knownSuffixes = map[string]bool{
 	"force":   true,
 }
 
+// DirArgToSpec converts a parsed DirArg to a DirSpec for use with CreateOptions.
+func DirArgToSpec(d *DirArg) DirSpec {
+	return DirSpec{
+		Path:      d.Path,
+		Mode:      DirMode(d.Mode),
+		MountPath: d.MountPath,
+		Force:     d.Force,
+	}
+}
+
 // ParseDirArg parses a directory argument with optional suffixes.
 // Suffixes (:copy, :rw, :force) can be combined in any order.
 // Default mode (no :copy or :rw) is determined by the caller

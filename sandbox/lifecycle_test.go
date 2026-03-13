@@ -67,7 +67,7 @@ func (m *lifecycleMockRuntime) Exec(ctx context.Context, name string, cmd []stri
 
 // newLifecycleMgr creates a Manager with the given mock runtime and a discard output.
 func newLifecycleMgr(rt *lifecycleMockRuntime) *Manager {
-	return NewManager(rt, "docker", slog.Default(), strings.NewReader(""), io.Discard)
+	return NewManager(rt, slog.Default(), strings.NewReader(""), io.Discard)
 }
 
 // createTestSandbox creates a sandbox directory with environment.json for lifecycle tests.
@@ -172,7 +172,7 @@ func TestStart_AlreadyRunning(t *testing.T) {
 	}
 
 	var output bytes.Buffer
-	mgr := NewManager(mock, "docker", slog.Default(), strings.NewReader(""), &output)
+	mgr := NewManager(mock, slog.Default(), strings.NewReader(""), &output)
 
 	// DetectStatus will call Inspect (running=true),
 	// then try Exec for tmux. Since our mock returns errMockNotImplemented
@@ -1015,7 +1015,7 @@ func TestReset_UpgradesToRestartWhenNotRunning(t *testing.T) {
 	}
 
 	var output bytes.Buffer
-	mgr := NewManager(mock, "docker", slog.Default(), strings.NewReader(""), &output)
+	mgr := NewManager(mock, slog.Default(), strings.NewReader(""), &output)
 
 	// Default reset; container not running → auto-upgrades to restart.
 	// Restart path will fail at Start (no runtime-config.json), but re-copy should happen.

@@ -29,12 +29,24 @@ const (
 	StatusBroken  Status = "broken"  // sandbox dir exists but meta.json missing/invalid
 )
 
+// AgentStatus represents the agent's activity state within a running sandbox.
+type AgentStatus string
+
+const (
+	AgentStatusUnknown AgentStatus = ""       // status not yet determined
+	AgentStatusActive  AgentStatus = "active" // agent is actively working
+	AgentStatusIdle    AgentStatus = "idle"   // agent is idle, awaiting input
+	AgentStatusDone    AgentStatus = "done"   // agent has completed its task
+	AgentStatusFailed  AgentStatus = "failed" // agent exited with an error
+)
+
 // Info holds the combined metadata and live state for a sandbox.
 type Info struct {
-	Meta       *Meta  `json:"meta"`
-	Status     Status `json:"status"`
-	HasChanges string `json:"has_changes"` // "yes", "no", or "-" (unknown/not applicable)
-	DiskUsage  string `json:"disk_usage"`  // human-readable size, e.g. "42.0MB"
+	Meta        *Meta       `json:"meta"`
+	Status      Status      `json:"status"`
+	AgentStatus AgentStatus `json:"agent_status,omitempty"` // agent activity status (may be empty)
+	HasChanges  string      `json:"has_changes"`            // "yes", "no", or "-" (unknown/not applicable)
+	DiskUsage   string      `json:"disk_usage"`             // human-readable size, e.g. "42.0MB"
 }
 
 // FormatAge returns a human-readable duration string (e.g., "2h", "3d", "5m").

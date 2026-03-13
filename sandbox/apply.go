@@ -13,6 +13,50 @@ import (
 	"github.com/kstenerud/yoloai/workspace"
 )
 
+// ApplyResult describes the outcome of applying a sandbox's changes.
+type ApplyResult struct {
+	// Dir is the host directory that was patched.
+	Dir string
+	// FilesChanged is the number of files modified.
+	FilesChanged int
+	// Stat is the human-readable diff stat summary.
+	Stat string
+}
+
+// ApplyAll applies all pending changes from the sandbox's :copy directories
+// back to their original host paths. It is the programmatic equivalent of
+// 'yoloai apply <name>'.
+//
+// Returns ErrNoChanges if there are no patches to apply.
+// Returns an ApplyResult for each directory patched.
+func ApplyAll(_ context.Context, name string) ([]*ApplyResult, error) {
+	patches, err := GenerateMultiPatch(name, nil)
+	if err != nil {
+		return nil, err
+	}
+	if len(patches) == 0 {
+		return nil, ErrNoChanges
+	}
+
+	var results []*ApplyResult
+	for _, ps := range patches {
+		isGit := workspace.IsGitRepo(ps.HostPath)
+		if err := workspace.ApplyPatch(ps.Patch, ps.HostPath, isGit); err != nil {
+			return nil, fmt.Errorf("%s: %w", ps.HostPath, err)
+		}
+		results = append(results, &ApplyResult{
+			Dir:  ps.HostPath,
+			Stat: ps.Stat,
+		})
+	}
+
+	if err := AdvanceBaseline(name); err != nil {
+		return nil, fmt.Errorf("advance baseline: %w", err)
+	}
+
+	return results, nil
+}
+
 // CommitInfo is an alias for workspace.CommitInfo.
 type CommitInfo = workspace.CommitInfo
 

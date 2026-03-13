@@ -81,44 +81,40 @@ func (m *Manager) resolveProfileConfig(ctx context.Context, opts *CreateOptions,
 	}
 
 	// Profile workdir: use if CLI didn't provide one
-	if opts.WorkdirArg == "" && merged.Workdir != nil {
+	if opts.Workdir.Path == "" && merged.Workdir != nil {
 		wdPath, err := ExpandPath(merged.Workdir.Path)
 		if err != nil {
 			return nil, fmt.Errorf("expand profile workdir path: %w", err)
 		}
-		suffix := ""
-		if merged.Workdir.Mode != "" {
-			suffix = ":" + merged.Workdir.Mode
+		opts.Workdir = DirSpec{
+			Path:      wdPath,
+			Mode:      DirMode(merged.Workdir.Mode),
+			MountPath: merged.Workdir.Mount,
 		}
-		if merged.Workdir.Mount != "" {
-			suffix += "=" + merged.Workdir.Mount
-		}
-		opts.WorkdirArg = wdPath + suffix
 	}
 
 	// Profile directories: prepend before CLI aux dirs
+	var profileDirs []DirSpec
 	for _, pd := range merged.Directories {
 		dirPath, err := ExpandPath(pd.Path)
 		if err != nil {
 			return nil, fmt.Errorf("expand profile directory path: %w", err)
 		}
-		arg := dirPath
-		if pd.Mode != "" {
-			arg += ":" + pd.Mode
-		}
-		if pd.Mount != "" {
-			arg += "=" + pd.Mount
-		}
-		opts.AuxDirArgs = append([]string{arg}, opts.AuxDirArgs...)
+		profileDirs = append(profileDirs, DirSpec{
+			Path:      dirPath,
+			Mode:      DirMode(pd.Mode),
+			MountPath: pd.Mount,
+		})
 	}
+	opts.AuxDirs = append(profileDirs, opts.AuxDirs...)
 
 	// Profile ports: additive
 	opts.Ports = append(merged.Ports, opts.Ports...)
 
 	// Network: apply merged config as defaults (CLI flags override later)
-	if merged.Network != nil && !opts.NetworkNone && !opts.NetworkIsolated {
+	if merged.Network != nil && opts.Network == NetworkModeDefault {
 		if merged.Network.Isolated {
-			opts.NetworkIsolated = true
+			opts.Network = NetworkModeIsolated
 		}
 		opts.NetworkAllow = append(merged.Network.Allow, opts.NetworkAllow...)
 	}
@@ -168,9 +164,9 @@ func applyConfigDefaults(opts *CreateOptions, ycfg *config.YoloaiConfig, pr *pro
 	}
 
 	// Network from base config (if profile didn't set it and CLI didn't override)
-	if opts.Profile == "" && ycfg.Network != nil && !opts.NetworkNone && !opts.NetworkIsolated {
+	if opts.Profile == "" && ycfg.Network != nil && opts.Network == NetworkModeDefault {
 		if ycfg.Network.Isolated {
-			opts.NetworkIsolated = true
+			opts.Network = NetworkModeIsolated
 		}
 		opts.NetworkAllow = append(ycfg.Network.Allow, opts.NetworkAllow...)
 	}
@@ -200,18 +196,15 @@ func applyConfigDefaults(opts *CreateOptions, ycfg *config.YoloaiConfig, pr *pro
 	}
 }
 
-// parseAndValidateDirs parses workdir and aux dirs, runs safety checks, overlap
-// detection, and dirty repo warnings. Returns nil workdir if the user cancelled.
+// parseAndValidateDirs converts DirSpec values to DirArg, runs safety checks,
+// overlap detection, and dirty repo warnings. Returns nil workdir if the user cancelled.
 // cfgModel is the model from config.yaml (needed for local model server check).
 func (m *Manager) parseAndValidateDirs(ctx context.Context, opts CreateOptions, agentDef *agent.Definition, mergedEnv map[string]string, cfgModel string) (*DirArg, []*DirArg, error) {
-	// Parse workdir
-	if opts.WorkdirArg == "" {
+	// Convert workdir DirSpec to DirArg
+	if opts.Workdir.Path == "" {
 		return nil, nil, NewUsageError("no workdir specified and no default workdir in profile")
 	}
-	workdir, err := ParseDirArg(opts.WorkdirArg)
-	if err != nil {
-		return nil, nil, NewUsageError("invalid workdir: %s", err)
-	}
+	workdir := dirSpecToDirArg(opts.Workdir)
 	if workdir.Mode == "" {
 		workdir.Mode = "copy"
 	}
@@ -261,13 +254,10 @@ func (m *Manager) parseAndValidateDirs(ctx context.Context, opts CreateOptions, 
 		}
 	}
 
-	// Parse auxiliary directories
+	// Convert auxiliary DirSpec values to DirArg
 	var auxDirs []*DirArg
-	for _, auxArg := range opts.AuxDirArgs {
-		auxDir, err := ParseDirArg(auxArg)
-		if err != nil {
-			return nil, nil, NewUsageError("invalid directory %q: %s", auxArg, err)
-		}
+	for _, auxSpec := range opts.AuxDirs {
+		auxDir := dirSpecToDirArg(auxSpec)
 		if _, err := os.Stat(auxDir.Path); err != nil {
 			return nil, nil, NewUsageError("directory does not exist: %s", auxDir.Path)
 		}
@@ -455,16 +445,27 @@ func setupAuxDirs(sandboxName string, auxDirs []*DirArg) ([]DirMeta, error) {
 // buildNetworkConfig determines the network mode and allowlist from options
 // and agent definition.
 func buildNetworkConfig(opts CreateOptions, agentDef *agent.Definition) (string, []string) {
-	if opts.NetworkNone {
+	switch opts.Network {
+	case NetworkModeNone:
 		return "none", nil
-	}
-	if opts.NetworkIsolated {
+	case NetworkModeIsolated:
 		var allow []string
 		allow = append(allow, agentDef.NetworkAllowlist...)
 		allow = append(allow, opts.NetworkAllow...)
 		return "isolated", allow
+	default:
+		return "", nil
 	}
-	return "", nil
+}
+
+// dirSpecToDirArg converts a DirSpec to a DirArg for internal use.
+func dirSpecToDirArg(s DirSpec) *DirArg {
+	return &DirArg{
+		Path:      s.Path,
+		MountPath: s.MountPath,
+		Mode:      string(s.Mode),
+		Force:     s.Force,
+	}
 }
 
 // collectOverlayMounts builds overlay mount configs for config.json from

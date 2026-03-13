@@ -530,7 +530,7 @@ func TestBuildMounts_IncludesSecrets(t *testing.T) {
 
 func TestPrintCreationOutput_Basic(t *testing.T) {
 	var buf bytes.Buffer
-	mgr := NewManager(&mockRuntime{}, "docker", slog.Default(), strings.NewReader(""), &buf)
+	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), &buf)
 
 	agentDef := agent.GetAgent("claude")
 	state := &sandboxState{
@@ -551,7 +551,7 @@ func TestPrintCreationOutput_Basic(t *testing.T) {
 
 func TestPrintCreationOutput_AutoAttach(t *testing.T) {
 	var buf bytes.Buffer
-	mgr := NewManager(&mockRuntime{}, "docker", slog.Default(), strings.NewReader(""), &buf)
+	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), &buf)
 
 	state := &sandboxState{
 		name:    "test",
@@ -567,7 +567,7 @@ func TestPrintCreationOutput_AutoAttach(t *testing.T) {
 
 func TestPrintCreationOutput_WithPrompt(t *testing.T) {
 	var buf bytes.Buffer
-	mgr := NewManager(&mockRuntime{}, "docker", slog.Default(), strings.NewReader(""), &buf)
+	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), &buf)
 
 	state := &sandboxState{
 		name:      "test",
@@ -583,7 +583,7 @@ func TestPrintCreationOutput_WithPrompt(t *testing.T) {
 
 func TestPrintCreationOutput_NetworkNone(t *testing.T) {
 	var buf bytes.Buffer
-	mgr := NewManager(&mockRuntime{}, "docker", slog.Default(), strings.NewReader(""), &buf)
+	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), &buf)
 
 	state := &sandboxState{
 		name:        "test",
@@ -599,7 +599,7 @@ func TestPrintCreationOutput_NetworkNone(t *testing.T) {
 
 func TestPrintCreationOutput_WithPorts(t *testing.T) {
 	var buf bytes.Buffer
-	mgr := NewManager(&mockRuntime{}, "docker", slog.Default(), strings.NewReader(""), &buf)
+	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), &buf)
 
 	state := &sandboxState{
 		name:    "test",
@@ -616,7 +616,7 @@ func TestPrintCreationOutput_WithPorts(t *testing.T) {
 
 func TestPrintCreationOutput_NilState(t *testing.T) {
 	var buf bytes.Buffer
-	mgr := NewManager(&mockRuntime{}, "docker", slog.Default(), strings.NewReader(""), &buf)
+	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), &buf)
 
 	mgr.printCreationOutput(nil, false)
 
@@ -630,12 +630,12 @@ func TestPrepareSandboxState_MissingName(t *testing.T) {
 	t.Setenv("HOME", tmpDir)
 	t.Setenv("ANTHROPIC_API_KEY", "sk-test")
 
-	mgr := NewManager(&mockRuntime{}, "docker", slog.Default(), strings.NewReader(""), io.Discard)
+	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), io.Discard)
 
 	_, err := mgr.prepareSandboxState(context.TODO(), CreateOptions{
-		Name:       "",
-		WorkdirArg: tmpDir,
-		Agent:      "test",
+		Name:    "",
+		Workdir: DirSpec{Path: tmpDir},
+		Agent:   "test",
 	})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "name is required")
@@ -645,12 +645,12 @@ func TestPrepareSandboxState_UnknownAgent(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
 
-	mgr := NewManager(&mockRuntime{}, "docker", slog.Default(), strings.NewReader(""), io.Discard)
+	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), io.Discard)
 
 	_, err := mgr.prepareSandboxState(context.TODO(), CreateOptions{
-		Name:       "test",
-		WorkdirArg: tmpDir,
-		Agent:      "nonexistent-agent",
+		Name:    "test",
+		Workdir: DirSpec{Path: tmpDir},
+		Agent:   "nonexistent-agent",
 	})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unknown agent")
@@ -660,12 +660,12 @@ func TestPrepareSandboxState_WorkdirMissing(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
 
-	mgr := NewManager(&mockRuntime{}, "docker", slog.Default(), strings.NewReader(""), io.Discard)
+	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), io.Discard)
 
 	_, err := mgr.prepareSandboxState(context.TODO(), CreateOptions{
-		Name:       "test",
-		WorkdirArg: "/nonexistent/path",
-		Agent:      "test",
+		Name:    "test",
+		Workdir: DirSpec{Path: "/nonexistent/path"},
+		Agent:   "test",
 	})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "workdir does not exist")
@@ -683,12 +683,12 @@ func TestPrepareSandboxState_SandboxExists(t *testing.T) {
 		Agent: "test",
 	}))
 
-	mgr := NewManager(&mockRuntime{}, "docker", slog.Default(), strings.NewReader(""), io.Discard)
+	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), io.Discard)
 
 	_, err := mgr.prepareSandboxState(context.TODO(), CreateOptions{
-		Name:       "existing",
-		WorkdirArg: tmpDir,
-		Agent:      "test",
+		Name:    "existing",
+		Workdir: DirSpec{Path: tmpDir},
+		Agent:   "test",
 	})
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrSandboxExists)
@@ -698,11 +698,11 @@ func TestPrepareSandboxState_ConflictingPromptFlags(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
 
-	mgr := NewManager(&mockRuntime{}, "docker", slog.Default(), strings.NewReader(""), io.Discard)
+	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), io.Discard)
 
 	_, err := mgr.prepareSandboxState(context.TODO(), CreateOptions{
 		Name:       "test",
-		WorkdirArg: tmpDir,
+		Workdir:    DirSpec{Path: tmpDir},
 		Agent:      "test",
 		Prompt:     "hello",
 		PromptFile: "/some/file",
@@ -717,12 +717,12 @@ func TestPrepareSandboxState_MissingAPIKey(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "")
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
 
-	mgr := NewManager(&mockRuntime{}, "docker", slog.Default(), strings.NewReader(""), io.Discard)
+	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), io.Discard)
 
 	_, err := mgr.prepareSandboxState(context.TODO(), CreateOptions{
-		Name:       "test",
-		WorkdirArg: tmpDir,
-		Agent:      "claude",
+		Name:    "test",
+		Workdir: DirSpec{Path: tmpDir},
+		Agent:   "claude",
 	})
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrMissingAPIKey)
@@ -733,12 +733,12 @@ func TestPrepareSandboxState_DangerousDir(t *testing.T) {
 	t.Setenv("HOME", tmpDir)
 	t.Setenv("ANTHROPIC_API_KEY", "sk-test")
 
-	mgr := NewManager(&mockRuntime{}, "docker", slog.Default(), strings.NewReader(""), io.Discard)
+	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), io.Discard)
 
 	_, err := mgr.prepareSandboxState(context.TODO(), CreateOptions{
-		Name:       "test",
-		WorkdirArg: "/",
-		Agent:      "claude",
+		Name:    "test",
+		Workdir: DirSpec{Path: "/"},
+		Agent:   "claude",
 	})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "dangerous directory")
@@ -751,12 +751,12 @@ func TestPrepareSandboxState_DangerousDirForce(t *testing.T) {
 
 	// HOME is classified as dangerous. Use :rw:force to avoid copying.
 	var buf bytes.Buffer
-	mgr := NewManager(&mockRuntime{}, "docker", slog.Default(), strings.NewReader("y\n"), &buf)
+	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader("y\n"), &buf)
 
 	_, err := mgr.prepareSandboxState(context.TODO(), CreateOptions{
-		Name:       "test",
-		WorkdirArg: tmpDir + ":rw:force",
-		Agent:      "claude",
+		Name:    "test",
+		Workdir: DirSpec{Path: tmpDir, Mode: DirModeRW, Force: true},
+		Agent:   "claude",
 	})
 	// Should NOT fail on "dangerous directory" — :force bypasses it.
 	if err != nil {
@@ -914,12 +914,12 @@ func TestPrepareSandboxState_MissingAPIKeyErrorNoEmptyParens(t *testing.T) {
 		t.Setenv(key, "")
 	}
 
-	mgr := NewManager(&mockRuntime{}, "docker", slog.Default(), strings.NewReader(""), io.Discard)
+	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), io.Discard)
 
 	_, err := mgr.prepareSandboxState(context.TODO(), CreateOptions{
-		Name:       "test",
-		WorkdirArg: tmpDir,
-		Agent:      "aider",
+		Name:    "test",
+		Workdir: DirSpec{Path: tmpDir},
+		Agent:   "aider",
 	})
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrMissingAPIKey)
@@ -942,12 +942,12 @@ func TestPrepareSandboxState_MissingAPIKeyErrorWithAuthFiles(t *testing.T) {
 	}
 	defer func() { keychainReader = origReader }()
 
-	mgr := NewManager(&mockRuntime{}, "docker", slog.Default(), strings.NewReader(""), io.Discard)
+	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), io.Discard)
 
 	_, err := mgr.prepareSandboxState(context.TODO(), CreateOptions{
-		Name:       "test",
-		WorkdirArg: tmpDir,
-		Agent:      "claude",
+		Name:    "test",
+		Workdir: DirSpec{Path: tmpDir},
+		Agent:   "claude",
 	})
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrMissingAPIKey)
@@ -958,7 +958,7 @@ func TestPrepareSandboxState_MissingAPIKeyErrorWithAuthFiles(t *testing.T) {
 
 func TestPrintCreationOutput_NetworkIsolated(t *testing.T) {
 	var buf bytes.Buffer
-	mgr := NewManager(&mockRuntime{}, "docker", slog.Default(), strings.NewReader(""), &buf)
+	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), &buf)
 
 	state := &sandboxState{
 		name:         "test",
@@ -982,14 +982,14 @@ func TestPrepareSandboxState_NetworkIsolatedSetsAllowlist(t *testing.T) {
 	workDir := filepath.Join(tmpDir, "project")
 	require.NoError(t, os.MkdirAll(workDir, 0750))
 
-	mgr := NewManager(&mockRuntime{}, "docker", slog.Default(), strings.NewReader("y\n"), io.Discard)
+	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader("y\n"), io.Discard)
 
 	state, err := mgr.prepareSandboxState(context.TODO(), CreateOptions{
-		Name:            "test",
-		WorkdirArg:      workDir,
-		Agent:           "claude",
-		NetworkIsolated: true,
-		Version:         "test",
+		Name:    "test",
+		Workdir: DirSpec{Path: workDir},
+		Agent:   "claude",
+		Network: NetworkModeIsolated,
+		Version: "test",
 	})
 	require.NoError(t, err)
 	require.NotNil(t, state)
@@ -1031,15 +1031,15 @@ func TestPrepareSandboxState_NetworkAllowAddsExtraDomains(t *testing.T) {
 	workDir := filepath.Join(tmpDir, "project")
 	require.NoError(t, os.MkdirAll(workDir, 0750))
 
-	mgr := NewManager(&mockRuntime{}, "docker", slog.Default(), strings.NewReader("y\n"), io.Discard)
+	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader("y\n"), io.Discard)
 
 	state, err := mgr.prepareSandboxState(context.TODO(), CreateOptions{
-		Name:            "test",
-		WorkdirArg:      workDir,
-		Agent:           "claude",
-		NetworkIsolated: true,
-		NetworkAllow:    []string{"api.example.com"},
-		Version:         "test",
+		Name:         "test",
+		Workdir:      DirSpec{Path: workDir},
+		Agent:        "claude",
+		Network:      NetworkModeIsolated,
+		NetworkAllow: []string{"api.example.com"},
+		Version:      "test",
 	})
 	require.NoError(t, err)
 	require.NotNil(t, state)

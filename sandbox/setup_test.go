@@ -88,7 +88,7 @@ func setupTestManager(t *testing.T, input string) (*Manager, *bytes.Buffer, stri
 
 	var output bytes.Buffer
 	mock := &mockRuntime{}
-	mgr := NewManager(mock, "docker", slog.Default(), strings.NewReader(input), &output)
+	mgr := NewManager(mock, slog.Default(), strings.NewReader(input), &output)
 	return mgr, &output, tmpDir
 }
 

@@ -280,6 +280,9 @@ func (r *Runtime) DiagHint(instanceName string) string {
 	return fmt.Sprintf("run 'docker logs %s' to see what went wrong", instanceName)
 }
 
+// Name returns the backend name.
+func (r *Runtime) Name() string { return "docker" }
+
 // convertMounts converts runtime.MountSpec to Docker mount.Mount.
 func convertMounts(specs []runtime.MountSpec) []mount.Mount {
 	if len(specs) == 0 {

@@ -41,7 +41,7 @@ func newResetCmd() *cobra.Command {
 
 			backend := resolveBackendForSandbox(name)
 			return withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
-				mgr := sandbox.NewManager(rt, backend, slog.Default(), cmd.InOrStdin(), cmd.ErrOrStderr())
+				mgr := sandbox.NewManager(rt, slog.Default(), cmd.InOrStdin(), cmd.ErrOrStderr())
 				if err := mgr.Reset(ctx, sandbox.ResetOptions{
 					Name:       name,
 					Restart:    restart,

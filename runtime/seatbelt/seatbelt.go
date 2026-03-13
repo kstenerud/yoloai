@@ -343,6 +343,9 @@ func (r *Runtime) DiagHint(instanceName string) string {
 	return fmt.Sprintf("check log at %s", logPath)
 }
 
+// Name returns the backend name.
+func (r *Runtime) Name() string { return "seatbelt" }
+
 // mountSymlinks creates symlinks from Target → Source for mounts where the
 // paths differ, allowing the sandboxed process to find directories at the
 // expected target path. Returns the list of created symlink paths.

@@ -284,6 +284,9 @@ func (r *Runtime) DiagHint(instanceName string) string {
 	return fmt.Sprintf("check VM log at %s", logPath)
 }
 
+// Name returns the backend name.
+func (r *Runtime) Name() string { return "tart" }
+
 // instancePrefix is prepended to sandbox names by the sandbox package
 // to form instance names. We strip it to recover the sandbox name for
 // constructing file-system paths.

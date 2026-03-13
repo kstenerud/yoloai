@@ -21,10 +21,10 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 	// Create sandbox (starts container)
 	sandboxName := "integ-test"
 	_, err := mgr.Create(ctx, CreateOptions{
-		Name:       sandboxName,
-		WorkdirArg: projectDir,
-		Agent:      "test",
-		Version:    "test",
+		Name:    sandboxName,
+		Workdir: DirSpec{Path: projectDir},
+		Agent:   "test",
+		Version: "test",
 	})
 	require.NoError(t, err)
 
@@ -123,11 +123,11 @@ func TestIntegration_CreateNoStart(t *testing.T) {
 	projectDir := createProjectDir(t)
 
 	_, err := mgr.Create(ctx, CreateOptions{
-		Name:       "nostart",
-		WorkdirArg: projectDir,
-		Agent:      "test",
-		NoStart:    true,
-		Version:    "test",
+		Name:    "nostart",
+		Workdir: DirSpec{Path: projectDir},
+		Agent:   "test",
+		NoStart: true,
+		Version: "test",
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { mgr.Destroy(ctx, "nostart") }) //nolint:errcheck // test cleanup
@@ -157,11 +157,11 @@ func TestIntegration_CopyMode(t *testing.T) {
 	projectDir := createProjectDir(t)
 
 	_, err := mgr.Create(ctx, CreateOptions{
-		Name:       "copymode",
-		WorkdirArg: projectDir + ":copy",
-		Agent:      "test",
-		NoStart:    true,
-		Version:    "test",
+		Name:    "copymode",
+		Workdir: DirSpec{Path: projectDir, Mode: DirModeCopy},
+		Agent:   "test",
+		NoStart: true,
+		Version: "test",
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { mgr.Destroy(ctx, "copymode") }) //nolint:errcheck // test cleanup
@@ -190,11 +190,11 @@ func TestIntegration_RWMode(t *testing.T) {
 	projectDir := createProjectDir(t)
 
 	_, err := mgr.Create(ctx, CreateOptions{
-		Name:       "rwmode",
-		WorkdirArg: projectDir + ":rw",
-		Agent:      "test",
-		NoStart:    true,
-		Version:    "test",
+		Name:    "rwmode",
+		Workdir: DirSpec{Path: projectDir, Mode: DirModeRW},
+		Agent:   "test",
+		NoStart: true,
+		Version: "test",
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { mgr.Destroy(ctx, "rwmode") }) //nolint:errcheck // test cleanup
@@ -210,12 +210,12 @@ func TestIntegration_AuxDirCopy(t *testing.T) {
 	auxDir := createAuxDir(t, "libs")
 
 	_, err := mgr.Create(ctx, CreateOptions{
-		Name:       "auxcopy",
-		WorkdirArg: projectDir,
-		Agent:      "test",
-		NoStart:    true,
-		AuxDirArgs: []string{auxDir + ":copy"},
-		Version:    "test",
+		Name:    "auxcopy",
+		Workdir: DirSpec{Path: projectDir},
+		Agent:   "test",
+		NoStart: true,
+		AuxDirs: []DirSpec{{Path: auxDir, Mode: DirModeCopy}},
+		Version: "test",
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { mgr.Destroy(ctx, "auxcopy") }) //nolint:errcheck // test cleanup
@@ -237,12 +237,12 @@ func TestIntegration_AuxDirRO(t *testing.T) {
 	auxDir := createAuxDir(t, "readonly-lib")
 
 	_, err := mgr.Create(ctx, CreateOptions{
-		Name:       "auxro",
-		WorkdirArg: projectDir,
-		Agent:      "test",
-		NoStart:    true,
-		AuxDirArgs: []string{auxDir},
-		Version:    "test",
+		Name:    "auxro",
+		Workdir: DirSpec{Path: projectDir},
+		Agent:   "test",
+		NoStart: true,
+		AuxDirs: []DirSpec{{Path: auxDir}},
+		Version: "test",
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { mgr.Destroy(ctx, "auxro") }) //nolint:errcheck // test cleanup
@@ -259,23 +259,23 @@ func TestIntegration_Replace(t *testing.T) {
 
 	// Create first sandbox
 	_, err := mgr.Create(ctx, CreateOptions{
-		Name:       "replaceme",
-		WorkdirArg: projectDir,
-		Agent:      "test",
-		NoStart:    true,
-		Version:    "test",
+		Name:    "replaceme",
+		Workdir: DirSpec{Path: projectDir},
+		Agent:   "test",
+		NoStart: true,
+		Version: "test",
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { mgr.Destroy(ctx, "replaceme") }) //nolint:errcheck // test cleanup
 
 	// Replace with new sandbox
 	_, err = mgr.Create(ctx, CreateOptions{
-		Name:       "replaceme",
-		WorkdirArg: projectDir,
-		Agent:      "test",
-		NoStart:    true,
-		Replace:    true,
-		Version:    "test",
+		Name:    "replaceme",
+		Workdir: DirSpec{Path: projectDir},
+		Agent:   "test",
+		NoStart: true,
+		Replace: true,
+		Version: "test",
 	})
 	require.NoError(t, err)
 
@@ -291,10 +291,10 @@ func TestIntegration_Reset(t *testing.T) {
 
 	// Create and start the sandbox (Reset requires a restart cycle)
 	_, err := mgr.Create(ctx, CreateOptions{
-		Name:       "resettest",
-		WorkdirArg: projectDir,
-		Agent:      "test",
-		Version:    "test",
+		Name:    "resettest",
+		Workdir: DirSpec{Path: projectDir},
+		Agent:   "test",
+		Version: "test",
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { mgr.Destroy(ctx, "resettest") }) //nolint:errcheck // test cleanup
@@ -333,10 +333,10 @@ func TestIntegration_Exec(t *testing.T) {
 
 	// Create and start the sandbox
 	_, err := mgr.Create(ctx, CreateOptions{
-		Name:       "exectest",
-		WorkdirArg: projectDir,
-		Agent:      "test",
-		Version:    "test",
+		Name:    "exectest",
+		Workdir: DirSpec{Path: projectDir},
+		Agent:   "test",
+		Version: "test",
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { mgr.Destroy(ctx, "exectest") }) //nolint:errcheck // test cleanup
@@ -356,11 +356,11 @@ func TestIntegration_DiffClean(t *testing.T) {
 	projectDir := createProjectDir(t)
 
 	_, err := mgr.Create(ctx, CreateOptions{
-		Name:       "diffclean",
-		WorkdirArg: projectDir,
-		Agent:      "test",
-		NoStart:    true,
-		Version:    "test",
+		Name:    "diffclean",
+		Workdir: DirSpec{Path: projectDir},
+		Agent:   "test",
+		NoStart: true,
+		Version: "test",
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { mgr.Destroy(ctx, "diffclean") }) //nolint:errcheck // test cleanup
@@ -375,11 +375,11 @@ func TestIntegration_DiffWithChanges(t *testing.T) {
 	projectDir := createProjectDir(t)
 
 	_, err := mgr.Create(ctx, CreateOptions{
-		Name:       "diffchanges",
-		WorkdirArg: projectDir,
-		Agent:      "test",
-		NoStart:    true,
-		Version:    "test",
+		Name:    "diffchanges",
+		Workdir: DirSpec{Path: projectDir},
+		Agent:   "test",
+		NoStart: true,
+		Version: "test",
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { mgr.Destroy(ctx, "diffchanges") }) //nolint:errcheck // test cleanup
@@ -405,11 +405,11 @@ func TestIntegration_ApplyPatch(t *testing.T) {
 	projectDir := createProjectDir(t)
 
 	_, err := mgr.Create(ctx, CreateOptions{
-		Name:       "applypatch",
-		WorkdirArg: projectDir,
-		Agent:      "test",
-		NoStart:    true,
-		Version:    "test",
+		Name:    "applypatch",
+		Workdir: DirSpec{Path: projectDir},
+		Agent:   "test",
+		NoStart: true,
+		Version: "test",
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { mgr.Destroy(ctx, "applypatch") }) //nolint:errcheck // test cleanup
@@ -451,12 +451,12 @@ func TestIntegration_Prompt(t *testing.T) {
 	projectDir := createProjectDir(t)
 
 	_, err := mgr.Create(ctx, CreateOptions{
-		Name:       "prompttest",
-		WorkdirArg: projectDir,
-		Agent:      "test",
-		Prompt:     "echo hello world",
-		NoStart:    true,
-		Version:    "test",
+		Name:    "prompttest",
+		Workdir: DirSpec{Path: projectDir},
+		Agent:   "test",
+		Prompt:  "echo hello world",
+		NoStart: true,
+		Version: "test",
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { mgr.Destroy(ctx, "prompttest") }) //nolint:errcheck // test cleanup
@@ -477,13 +477,13 @@ func TestIntegration_ResourceLimits(t *testing.T) {
 	projectDir := createProjectDir(t)
 
 	_, err := mgr.Create(ctx, CreateOptions{
-		Name:       "reslimits",
-		WorkdirArg: projectDir,
-		Agent:      "test",
-		NoStart:    true,
-		CPUs:       "2",
-		Memory:     "512m",
-		Version:    "test",
+		Name:    "reslimits",
+		Workdir: DirSpec{Path: projectDir},
+		Agent:   "test",
+		NoStart: true,
+		CPUs:    "2",
+		Memory:  "512m",
+		Version: "test",
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { mgr.Destroy(ctx, "reslimits") }) //nolint:errcheck // test cleanup
@@ -500,12 +500,12 @@ func TestIntegration_PortForwarding(t *testing.T) {
 	projectDir := createProjectDir(t)
 
 	_, err := mgr.Create(ctx, CreateOptions{
-		Name:       "portfwd",
-		WorkdirArg: projectDir,
-		Agent:      "test",
-		NoStart:    true,
-		Ports:      []string{"3000:3000"},
-		Version:    "test",
+		Name:    "portfwd",
+		Workdir: DirSpec{Path: projectDir},
+		Agent:   "test",
+		NoStart: true,
+		Ports:   []string{"3000:3000"},
+		Version: "test",
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { mgr.Destroy(ctx, "portfwd") }) //nolint:errcheck // test cleanup
@@ -521,11 +521,11 @@ func TestIntegration_MultiSandbox(t *testing.T) {
 
 	for _, name := range []string{"multi-a", "multi-b"} {
 		_, err := mgr.Create(ctx, CreateOptions{
-			Name:       name,
-			WorkdirArg: projectDir,
-			Agent:      "test",
-			NoStart:    true,
-			Version:    "test",
+			Name:    name,
+			Workdir: DirSpec{Path: projectDir},
+			Agent:   "test",
+			NoStart: true,
+			Version: "test",
 		})
 		require.NoError(t, err)
 	}
@@ -555,11 +555,11 @@ func TestIntegration_DestroyCleanup(t *testing.T) {
 	projectDir := createProjectDir(t)
 
 	_, err := mgr.Create(ctx, CreateOptions{
-		Name:       "destroyme",
-		WorkdirArg: projectDir,
-		Agent:      "test",
-		NoStart:    true,
-		Version:    "test",
+		Name:    "destroyme",
+		Workdir: DirSpec{Path: projectDir},
+		Agent:   "test",
+		NoStart: true,
+		Version: "test",
 	})
 	require.NoError(t, err)
 
@@ -584,10 +584,10 @@ func TestIntegration_AgentStubWorkflow(t *testing.T) {
 	projectDir := createProjectDir(t)
 
 	_, err := mgr.Create(ctx, CreateOptions{
-		Name:       "stubworkflow",
-		WorkdirArg: projectDir,
-		Agent:      "test",
-		Version:    "test",
+		Name:    "stubworkflow",
+		Workdir: DirSpec{Path: projectDir},
+		Agent:   "test",
+		Version: "test",
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { mgr.Destroy(ctx, "stubworkflow") }) //nolint:errcheck // test cleanup

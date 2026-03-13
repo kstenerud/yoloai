@@ -13,6 +13,7 @@ var (
 	ErrDockerUnavailable   = errors.New("docker is not available")
 	ErrMissingAPIKey       = errors.New("required API key not set")
 	ErrContainerNotRunning = errors.New("container is not running")
+	ErrNoChanges           = errors.New("no changes to apply")
 )
 
 // UsageError is an alias for config.UsageError.

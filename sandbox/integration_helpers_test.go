@@ -27,7 +27,7 @@ func integrationSetup(t *testing.T) (*Manager, context.Context) {
 	require.NoError(t, err, "Docker must be running for integration tests")
 	t.Cleanup(func() { rt.Close() }) //nolint:errcheck // test cleanup
 
-	mgr := NewManager(rt, "docker", slog.Default(), strings.NewReader(""), io.Discard)
+	mgr := NewManager(rt, slog.Default(), strings.NewReader(""), io.Discard)
 	require.NoError(t, mgr.EnsureSetup(ctx))
 
 	return mgr, ctx

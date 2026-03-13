@@ -16,31 +16,58 @@ import (
 	"github.com/kstenerud/yoloai/runtime"
 )
 
+// NetworkMode specifies the sandbox's network access policy.
+type NetworkMode string
+
+const (
+	NetworkModeDefault  NetworkMode = ""         // full network access
+	NetworkModeNone     NetworkMode = "none"     // no network access
+	NetworkModeIsolated NetworkMode = "isolated" // allowlist only
+)
+
+// DirMode specifies how a directory is mounted in the sandbox.
+type DirMode string
+
+const (
+	DirModeCopy    DirMode = "copy"    // full copy; changes tracked via git
+	DirModeOverlay DirMode = "overlay" // overlayfs; original untouched
+	DirModeRW      DirMode = "rw"      // live bind-mount; changes immediate
+	DirModeRO      DirMode = ""        // read-only bind-mount (aux dirs only)
+)
+
+// DirSpec describes a directory to mount in the sandbox.
+// Use this instead of raw ":copy"/":rw" string syntax.
+type DirSpec struct {
+	Path      string  // absolute host path; required
+	Mode      DirMode // mount mode; required for workdir
+	MountPath string  // custom container mount path; empty = mirror host path
+	Force     bool    // skip dirty-repo safety check
+}
+
 // CreateOptions holds all parameters for sandbox creation.
 type CreateOptions struct {
-	Name            string
-	WorkdirArg      string            // raw workdir argument (path with optional :copy/:rw/:force suffixes)
-	Agent           string            // agent name (e.g., "claude", "test")
-	Model           string            // model name or alias (e.g., "sonnet", "claude-sonnet-4-latest")
-	Profile         string            // profile name (from --profile flag)
-	Prompt          string            // prompt text (from --prompt)
-	PromptFile      string            // prompt file path (from --prompt-file)
-	NetworkNone     bool              // --network-none flag
-	NetworkIsolated bool              // --network-isolated flag
-	NetworkAllow    []string          // --network-allow flags
-	Ports           []string          // --port flags (e.g., ["3000:3000"])
-	Replace         bool              // --replace flag (safe: errors if unapplied work exists)
-	Force           bool              // --force flag (unconditional replace, skips safety check)
-	NoStart         bool              // --no-start flag
-	Yes             bool              // --yes flag (skip confirmations)
-	AuxDirArgs      []string          // raw -d arguments (path with optional :copy/:rw/:force/=mount suffixes)
-	Passthrough     []string          // args after -- passed to agent
-	Version         string            // yoloAI version for meta.json
-	Attach          bool              // --attach flag (auto-attach after creation)
-	Debug           bool              // --debug flag (enable entrypoint debug logging)
-	CPUs            string            // --cpus flag (e.g., "4", "2.5")
-	Memory          string            // --memory flag (e.g., "8g", "512m")
-	Env             map[string]string // --env flags (KEY=VAL pairs)
+	Name         string
+	Workdir      DirSpec           // primary working directory
+	AuxDirs      []DirSpec         // auxiliary directories
+	Agent        string            // agent name (e.g., "claude", "test")
+	Model        string            // model name or alias (e.g., "sonnet", "claude-sonnet-4-latest")
+	Profile      string            // profile name (from --profile flag)
+	Prompt       string            // prompt text (from --prompt)
+	PromptFile   string            // prompt file path (from --prompt-file)
+	Network      NetworkMode       // network access policy
+	NetworkAllow []string          // --network-allow flags
+	Ports        []string          // --port flags (e.g., ["3000:3000"])
+	Replace      bool              // --replace flag (safe: errors if unapplied work exists)
+	Force        bool              // --force flag (unconditional replace, skips safety check)
+	NoStart      bool              // --no-start flag
+	Yes          bool              // --yes flag (skip confirmations)
+	Passthrough  []string          // args after -- passed to agent
+	Version      string            // yoloAI version for meta.json
+	Attach       bool              // --attach flag (auto-attach after creation)
+	Debug        bool              // --debug flag (enable entrypoint debug logging)
+	CPUs         string            // --cpus flag (e.g., "4", "2.5")
+	Memory       string            // --memory flag (e.g., "8g", "512m")
+	Env          map[string]string // --env flags (KEY=VAL pairs)
 }
 
 // sandboxState holds resolved state computed during preparation.
