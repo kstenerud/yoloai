@@ -310,6 +310,93 @@ The following tools were identified but not analyzed in depth. Included for comp
 
 ---
 
+### 11. agent-clip (epiral)
+
+**Repo:** [epiral/agent-clip](https://github.com/epiral/agent-clip)
+**Stars:** 183 | **Forks:** 14 | **Language:** Go 57.3%, TypeScript 40.4% | **Status:** Active (61 commits, no releases)
+**Created:** March 9, 2026
+**License:** Not identified in fetched content
+
+**What it does:** An AI agent implemented as a [Pinix](https://github.com/epiral/pinix) Clip. Provides an agentic loop with memory, tool use, vision (browser screenshots), and async execution. It is **not a sandbox runner** — it is a general-purpose AI agent runtime packaged for the Pinix platform. The agent runs inside Pinix's BoxLite micro-VMs via the Clip packaging format, but sandboxing is a side effect of the platform, not an intentional design goal.
+
+**Architecture overview:**
+
+The system follows a three-layer model:
+```
+Workspace → Package (.clip ZIP) → Instance (Pinix Server)
+```
+
+Key components:
+- `internal/loop.go` — Agentic loop: LLM → tool_calls → execute → repeat
+- `internal/memory.go` — Summary generation and semantic search via embeddings
+- `internal/browser.go` — HTTP client with browser screenshot capture
+- `internal/db.go` — SQLite schema and transactions
+- Frontend: React + Vite + Tailwind CSS v4, Streamdown markdown with LaTeX support
+
+**LLM interface:** Uses a "one function call" pattern — the LLM is given a single `run(command, stdin?)` tool. Each invocation is a fresh process with state persisted to SQLite. Context management uses a "Run Window 3→7" strategy: recent runs are included as full messages; older ones become LLM-generated summaries with embeddings for semantic retrieval.
+
+**Memory system (three layers):**
+1. Persistent facts (structured key-value store)
+2. LLM-generated run summaries with embeddings
+3. Semantic search across summaries
+
+**Tool suite (~24 commands) available to the LLM:**
+- File I/O: `ls`, `cat`, `write`, `rm`, `cp`, `mv`, `mkdir` (operating on a `data/` directory)
+- Memory management: read/write facts, search summaries
+- Topic and run management: create-topic, list-topics, get-run, cancel-run
+- Browser control: screenshot capture, HTTP fetch
+- Clip invocation: calling other Pinix Clips as sub-agents
+
+**Pinix platform dependency:**
+
+Agent-clip is tightly coupled to [Pinix](https://github.com/epiral/pinix), a decentralized runtime platform. Pinix runs Clips inside BoxLite micro-VMs on servers, or natively on "edge" devices (iPhone, Raspberry Pi, ESP32). The Clip interface (Invoke / ReadFile / GetInfo) is the universal contract — callers don't see whether execution happens in a VM or on a device. Packaging is a `.clip` ZIP archive deployed via Pinix commands. This architecture means agent-clip has no standalone use outside the Pinix ecosystem.
+
+**Target audience:**
+
+Developers already using or interested in the Pinix platform who want an intelligent agent with memory and vision. Not a general-purpose tool for running Claude Code / Gemini / Codex on developer projects. No evidence of targeting the AI coding assistant safety-sandbox use case at all.
+
+**Comparison with yoloAI:**
+
+| Aspect | agent-clip | yoloAI |
+|--------|-----------|--------|
+| Core purpose | General-purpose AI agent runtime | Sandboxed AI coding agent runner |
+| Sandboxing model | Platform-provided (Pinix BoxLite micro-VMs) — incidental | Intentional isolation (Docker / Tart / Seatbelt) |
+| Supported agents | Custom agent (OpenRouter LLM) | Claude Code, Gemini CLI, Codex, Aider, OpenCode |
+| Copy/diff/apply workflow | No | Yes (core differentiator) |
+| User reviews changes before apply | No | Yes |
+| Persistent sandbox state | Yes (SQLite, `data/` dir survives upgrades) | Yes (`~/.yoloai/sandboxes/<name>/`) |
+| Directory mount modes | N/A (data/ only) | :copy, :overlay, :rw, read-only |
+| Profile system / Dockerfiles | No | Yes |
+| Multi-backend runtimes | No (Pinix only) | Docker, Tart, Seatbelt |
+| Memory / embeddings | Yes (3-layer + semantic search) | No |
+| Vision (screenshots) | Yes | No |
+| Web UI | Yes (React frontend) | No |
+| Standalone use (no platform dependency) | No (requires Pinix) | Yes (requires Docker/Tart) |
+| Cross-platform | macOS primary (binary build target) | Linux, macOS |
+| Community size | Small (183 stars, 14 forks, no releases) | — |
+
+**Strengths of agent-clip:**
+- Sophisticated memory architecture (facts + embeddings + semantic search) — rivals standalone memory systems
+- Vision support is a genuine differentiator for agents that need to observe rendered output
+- The "one function call" LLM interface is clean and auditable — each tool use maps to a subprocess invocation
+- Topic/run namespacing gives structured multi-session management
+- SQLite-backed state is durable and inspectable
+- Cross-language docs (English + Chinese + Vietnamese) suggest broader geographic reach
+
+**Weaknesses relative to yoloAI's goals:**
+- **Not a competitor in the sandboxed AI coding agent space.** It does not run Claude Code, Gemini CLI, or Codex. It does not provide copy/diff/apply. It is not designed to protect host codebases from agent-caused damage.
+- **Hard platform dependency on Pinix.** Users must run a Pinix server and understand the Clip packaging model. This is a non-trivial onboarding barrier compared to yoloAI's single binary + Docker.
+- **No change isolation workflow.** Agents write directly to the `data/` directory with no mechanism for the user to review changes before they land.
+- **macOS-primary build.** `make dev` builds a macOS binary; cross-compilation is mentioned but the development ergonomics skew toward macOS Pinix server users.
+- **No releases.** Despite 183 stars, there are no tagged releases or distributed binaries. Adoption curve is steep.
+- **Agent is the LLM, not an AI coding tool.** agent-clip runs a custom agent loop — it is not a wrapper around Claude Code, Gemini CLI, or any established coding agent. Users of yoloAI's target persona (developers who want to run Claude Code safely) would not reach for agent-clip.
+
+**Conclusion:**
+
+Agent-clip is not a meaningful competitor to yoloAI. It occupies a different niche: a platform-native intelligent agent with memory and vision, built for the Pinix ecosystem. Its 183 stars likely reflect interest in the memory architecture and the Pinix platform rather than any overlap with sandboxed coding agent runners. No actionable lessons for yoloAI's current roadmap — the toolchains, goals, and user personas are disjoint.
+
+---
+
 ## Community Pain Points (from GitHub issues, Reddit, HN, blogs)
 
 ### Top complaints (ranked by frequency):
