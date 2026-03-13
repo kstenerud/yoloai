@@ -25,12 +25,14 @@ func TestE2E_JSONLs(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(stdout), &result), "output should be valid JSON array")
 	assert.GreaterOrEqual(t, len(result), 1)
 
-	// Each entry should have a name field
+	// Each entry has shape {"meta": {"name": "..."}, ...}
 	found := false
 	for _, entry := range result {
-		if entry["name"] == "e2e-jsonls" {
-			found = true
-			break
+		if meta, ok := entry["meta"].(map[string]any); ok {
+			if meta["name"] == "e2e-jsonls" {
+				found = true
+				break
+			}
 		}
 	}
 	assert.True(t, found, "e2e-jsonls should appear in JSON ls output")

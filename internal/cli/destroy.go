@@ -70,7 +70,7 @@ func newDestroyCmd() *cobra.Command {
 								return err
 							}
 							if _, err := sandbox.RequireSandboxDir(name); err != nil {
-								return err
+								return fmt.Errorf("%s: %w", name, err)
 							}
 						}
 						names = args

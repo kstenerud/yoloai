@@ -33,8 +33,8 @@ func TestE2E_NewDiffApplyDestroy(t *testing.T) {
 	sandboxDir := filepath.Join(home, ".yoloai", "sandboxes", "e2e-workflow")
 	assert.DirExists(t, sandboxDir)
 
-	// Read meta to find work copy
-	metaPath := filepath.Join(sandboxDir, "meta.json")
+	// Sandbox metadata is stored in environment.json (not meta.json).
+	metaPath := filepath.Join(sandboxDir, "environment.json")
 	assert.FileExists(t, metaPath)
 
 	// Diff should initially be clean

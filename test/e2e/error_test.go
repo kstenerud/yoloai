@@ -45,9 +45,9 @@ func TestE2E_HelpExitZero(t *testing.T) {
 	assert.Equal(t, 0, code)
 }
 
-// TestE2E_VersionExitZero verifies that --version exits with code 0.
+// TestE2E_VersionExitZero verifies that the version subcommand exits with code 0.
 func TestE2E_VersionExitZero(t *testing.T) {
-	stdout, _, code := runYoloai(t, "--version")
+	stdout, _, code := runYoloai(t, "version")
 	assert.Equal(t, 0, code)
 	assert.NotEmpty(t, stdout)
 }
