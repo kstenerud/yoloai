@@ -316,8 +316,8 @@ func TestIntegration_Reset(t *testing.T) {
 	// Reset
 	require.NoError(t, mgr.Reset(ctx, ResetOptions{Name: "resettest"}))
 
-	// Wait for reset: container stops then becomes active again
-	testutil.WaitForStopped(ctx, t, mgr.runtime, InstanceName("resettest"), 15*time.Second)
+	// Reset is synchronous (stop+restore+start completes before returning), so
+	// just wait for the container to be active again.
 	testutil.WaitForActive(ctx, t, mgr.runtime, InstanceName("resettest"), 15*time.Second)
 
 	// new_file.txt should be gone after reset

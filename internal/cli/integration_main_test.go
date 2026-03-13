@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -24,8 +25,19 @@ func TestMain(m *testing.M) {
 	os.Setenv("HOME", tmpHome) //nolint:errcheck // best-effort env set in test main
 
 	// Bootstrap: create a throwaway sandbox to trigger EnsureSetup (image build).
+	// Use a project subdirectory — tmpHome itself triggers the "dangerous directory" safety check.
+	projectDir := filepath.Join(tmpHome, "project")
+	if err := os.MkdirAll(projectDir, 0o750); err != nil {
+		fmt.Fprintf(os.Stderr, "failed to create project dir: %v\n", err)
+		os.Exit(1)
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0o600); err != nil {
+		fmt.Fprintf(os.Stderr, "failed to write project file: %v\n", err)
+		os.Exit(1)
+	}
+
 	root := newRootCmd("test", "test", "test")
-	root.SetArgs([]string{"new", "--agent", "test", "--no-start", "cli-main-setup", tmpHome})
+	root.SetArgs([]string{"new", "--agent", "test", "--no-start", "cli-main-setup", projectDir})
 	root.SetOut(&bytes.Buffer{})
 	root.SetErr(&bytes.Buffer{})
 	if err := root.ExecuteContext(context.Background()); err != nil {
