@@ -18,6 +18,14 @@ type Server struct {
 	srv *server.MCPServer
 }
 
+// serverInstructions is returned in the initialize response and gives the outer
+// agent a high-level orientation before it calls any tools.
+const serverInstructions = `yoloAI runs AI coding agents (Claude Code, Gemini, Codex) inside isolated
+Docker containers. The outer agent (you) drives the inner agent via these tools,
+then inspects and applies the results.
+
+Call yoloai_help for the full workflow guide.`
+
 // New creates a new orchestration MCP server backed by mgr.
 func New(mgr *sandbox.Manager) *Server {
 	s := &Server{mgr: mgr}
@@ -25,6 +33,7 @@ func New(mgr *sandbox.Manager) *Server {
 		"yoloai",
 		"1.0.0",
 		server.WithToolCapabilities(true),
+		server.WithInstructions(serverInstructions),
 	)
 	s.registerTools()
 	return s

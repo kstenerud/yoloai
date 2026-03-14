@@ -15,6 +15,9 @@ import (
 )
 
 func (s *Server) registerTools() {
+	// Help
+	s.srv.AddTool(yoloaiHelpTool(), handleYoloaiHelp)
+
 	// Lifecycle
 	s.srv.AddTool(sandboxCreateTool(), s.handleSandboxCreate)
 	s.srv.AddTool(sandboxStatusTool(), s.handleSandboxStatus)
@@ -509,3 +512,115 @@ func tailFile(path string, n int) (string, error) {
 
 	return strings.Join(lines, "\n"), nil
 }
+
+// ── Help tool ─────────────────────────────────────────────────────────────────
+
+func yoloaiHelpTool() mcp.Tool {
+	return mcp.NewTool("yoloai_help",
+		mcp.WithDescription("Returns the yoloAI workflow guide: how sandboxes work, the polling loop, how to handle agent questions, refinement, and when to apply or reset."),
+	)
+}
+
+func handleYoloaiHelp(_ context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	return textResult(helpText), nil
+}
+
+const helpText = `# yoloAI MCP Server — Workflow Guide
+
+yoloAI runs AI coding agents (Claude Code, Gemini, Codex) inside isolated
+Docker containers. You are the outer agent. The inner agent works inside the
+sandbox. Your job is to create sandboxes, monitor progress, handle questions,
+inspect results, and surface diffs to the user for approval.
+
+## Core concept
+
+The sandbox is a safe scratchpad. The inner agent makes changes to a copy of
+the working directory. Changes are NOT applied to the host until you (or the
+user) explicitly applies them with 'yoloai apply'. You can inspect diffs,
+request revisions, or discard the sandbox entirely.
+
+## Basic workflow
+
+1. sandbox_create — start a sandbox with a task prompt. Returns immediately.
+2. Poll sandbox_status every 5 seconds until agent_status is done or failed.
+3. sandbox_diff(stat=true) — cheap summary of what changed.
+4. sandbox_diff / sandbox_diff_file — full diff when needed.
+5. Surface the diff to the user. Get approval.
+6. User runs 'yoloai apply <name>' from their terminal to apply changes.
+7. sandbox_destroy — clean up.
+
+## agent_status values
+
+- active:  inner agent is currently working (tools running, code being written)
+- idle:    inner agent finished its turn, waiting at the prompt
+- done:    inner agent exited cleanly (task complete)
+- failed:  inner agent exited with an error
+
+When agent_status is done or failed, stop polling and inspect the diff.
+
+## Handling agent questions
+
+The inner agent may need to ask a question before it can continue. Protocol:
+
+1. The inner agent writes /yoloai/files/question.json:
+   {"question": "...", "context": "..."}
+2. agent_status becomes idle (the agent is waiting, not active).
+3. Call sandbox_files_list to check for question.json.
+4. Call sandbox_files_read(name, "question.json") to read it.
+5. Reason about the question or surface it to the user.
+6. Call sandbox_files_write(name, "answer.json", '{"answer": "..."}').
+7. Call sandbox_input(name, "I've answered your question in /yoloai/files/answer.json") to
+   notify the agent.
+8. Resume polling.
+
+## Refinement (before destroy)
+
+If the diff is close but not right, don't reset — refine:
+
+  sandbox_input(name, "the email verification step was removed, add it back")
+
+The inner agent receives the message at its prompt and continues working.
+Resume polling after sending input. agent_status will go back to active.
+
+## Poisoned context (reset)
+
+If the inner agent has gone badly off track and the conversation context is
+too confused to salvage:
+
+  sandbox_reset(name)                          — restart with original prompt
+  sandbox_reset(name, prompt="revised prompt") — restart with new instructions
+
+The sandbox is wiped and started fresh. Resume polling after reset.
+
+## Diff efficiency
+
+Large diffs can be expensive to include in your context window:
+
+  sandbox_diff(stat=true)    — one-liner summary: N files, M insertions, K deletions
+  sandbox_diff               — full unified diff for all changed files
+  sandbox_diff_file(path)    — diff for one specific file
+
+Always call stat=true first. Only fetch the full diff or per-file diffs when
+you need to reason about specific changes.
+
+## Logs
+
+  sandbox_log(name)          — last 100 lines of the inner agent's output
+  sandbox_log(name, lines=N) — last N lines
+
+Useful for debugging when agent_status is failed.
+
+## Multiple sandboxes
+
+You can run multiple sandboxes concurrently for parallel tasks. Each sandbox
+is independent. Use sandbox_list to see all running sandboxes.
+
+## What NOT to do
+
+- Do not apply changes yourself via file tools. The diff/apply workflow
+  exists so the user can review and approve changes. Surface the diff and
+  let the user run 'yoloai apply'.
+- Do not poll faster than 5 seconds — the inner agent needs time to work.
+- Do not call sandbox_input while agent_status is active unless you intend
+  to interrupt the current task.
+`
