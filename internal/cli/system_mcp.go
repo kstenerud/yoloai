@@ -55,13 +55,23 @@ func newMCPProxyCmd() *cobra.Command {
 		Short: "Proxy an MCP server running inside a sandbox (stdio)",
 		Long: `Run an MCP server inside a sandbox and proxy its stdio to the caller.
 
-Injects sandbox_diff into the tool surface. The proxied server's tools
-are forwarded transparently.
+Injects sandbox_diff into the tool surface. All other tools from the inner
+server are forwarded transparently.
 
-The sandbox must already exist (use 'yoloai new' or the MCP sandbox_create tool).
+The sandbox must already exist. Create it first with 'yoloai new' or the
+MCP sandbox_create tool, then run mcp-proxy to wrap it.
+
+Path placeholders are expanded using the sandbox's metadata before the inner
+command is launched inside the container:
+
+  {workdir}   Primary working directory mount path
+  {files}     File exchange directory (/yoloai/files/)
+  {cache}     Cache directory (/yoloai/cache/)
+  {dir:N}     Nth auxiliary directory mount path (0-indexed)
 
 Example:
-  yoloai system mcp-proxy mybox -- npx -y @modelcontextprotocol/server-filesystem /workspace`,
+  yoloai new mybox /path/to/project
+  yoloai system mcp-proxy mybox -- npx -y @modelcontextprotocol/server-filesystem {workdir}`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: runMCPProxy,
 	}

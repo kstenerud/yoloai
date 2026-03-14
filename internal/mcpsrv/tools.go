@@ -615,6 +615,27 @@ Useful for debugging when agent_status is failed.
 You can run multiple sandboxes concurrently for parallel tasks. Each sandbox
 is independent. Use sandbox_list to see all running sandboxes.
 
+## Proxy mode (mcp-proxy)
+
+yoloai system mcp-proxy wraps any MCP-capable server inside a sandbox,
+forwarding its tools transparently while injecting sandbox_diff.
+
+The sandbox must exist first. Create it with 'yoloai new' or sandbox_create.
+Then run:
+
+  yoloai system mcp-proxy <name> -- <inner-server-command> {workdir}
+
+Path placeholders in the inner command are expanded from sandbox metadata:
+
+  {workdir}   Primary working directory (container-side path)
+  {files}     File exchange directory (/yoloai/files/)
+  {cache}     Cache directory (/yoloai/cache/)
+  {dir:N}     Nth auxiliary directory mount path (0-indexed)
+
+Example:
+  yoloai new mybox /path/to/project
+  yoloai system mcp-proxy mybox -- npx -y @modelcontextprotocol/server-filesystem {workdir}
+
 ## What NOT to do
 
 - Do not apply changes yourself via file tools. The diff/apply workflow

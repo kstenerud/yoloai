@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -69,10 +70,68 @@ var injectedToolDefs = []map[string]any{
 	},
 }
 
+// expandCmd substitutes path placeholders in the inner command args using
+// sandbox metadata, so callers don't need to hardcode container-side paths.
+//
+// Supported placeholders:
+//
+//	{workdir}  — meta.Workdir.MountPath (the primary working directory)
+//	{files}    — the file exchange directory (/yoloai/files/)
+//	{cache}    — the cache directory (/yoloai/cache/)
+//	{dir:N}    — meta.Directories[N].MountPath (Nth auxiliary directory, 0-indexed)
+func expandCmd(cmd []string, meta *sandbox.Meta) ([]string, error) {
+	filesDir := "/yoloai/files/"
+	cacheDir := "/yoloai/cache/"
+	if meta.Backend == "seatbelt" {
+		filesDir = sandbox.FilesDir(meta.Name)
+		cacheDir = sandbox.CacheDir(meta.Name)
+	}
+
+	expanded := make([]string, len(cmd))
+	for i, arg := range cmd {
+		arg = strings.ReplaceAll(arg, "{workdir}", meta.Workdir.MountPath)
+		arg = strings.ReplaceAll(arg, "{files}", filesDir)
+		arg = strings.ReplaceAll(arg, "{cache}", cacheDir)
+
+		// {dir:N} — auxiliary directory by index
+		for {
+			start := strings.Index(arg, "{dir:")
+			if start == -1 {
+				break
+			}
+			end := strings.Index(arg[start:], "}")
+			if end == -1 {
+				break
+			}
+			end += start
+			indexStr := arg[start+5 : end]
+			n, err := strconv.Atoi(indexStr)
+			if err != nil || n < 0 || n >= len(meta.Directories) {
+				return nil, fmt.Errorf("placeholder {dir:%s}: index out of range (sandbox has %d auxiliary directories)", indexStr, len(meta.Directories))
+			}
+			arg = arg[:start] + meta.Directories[n].MountPath + arg[end+1:]
+		}
+
+		expanded[i] = arg
+	}
+	return expanded, nil
+}
+
 func (p *ProxyServer) run(ctx context.Context, in io.Reader, out io.Writer) error {
+	// Load sandbox metadata for path template expansion.
+	meta, err := sandbox.LoadMeta(sandbox.Dir(p.sandboxName))
+	if err != nil {
+		return fmt.Errorf("load sandbox %q metadata: %w", p.sandboxName, err)
+	}
+
+	innerCmd, err := expandCmd(p.innerCmd, meta)
+	if err != nil {
+		return fmt.Errorf("expand inner command: %w", err)
+	}
+
 	// Start inner MCP server via docker exec
 	containerName := sandbox.InstanceName(p.sandboxName)
-	dockerArgs := append([]string{"exec", "-i", containerName}, p.innerCmd...)
+	dockerArgs := append([]string{"exec", "-i", containerName}, innerCmd...)
 	cmd := exec.CommandContext(ctx, "docker", dockerArgs...) //nolint:gosec // G204: innerCmd is user-provided
 
 	innerIn, err := cmd.StdinPipe()
