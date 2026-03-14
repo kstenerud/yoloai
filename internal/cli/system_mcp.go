@@ -1,7 +1,7 @@
 package cli
 
-// ABOUTME: `yoloai system mcp` — starts the yoloAI orchestration MCP server on stdio.
-// ABOUTME: `yoloai system mcp-proxy` — proxies an inner MCP server through a sandbox.
+// ABOUTME: `yoloai mcp serve` — starts the yoloAI orchestration MCP server on stdio.
+// ABOUTME: `yoloai mcp proxy` — proxies an inner MCP server through a sandbox.
 
 import (
 	"context"
@@ -13,8 +13,18 @@ import (
 )
 
 func newMCPCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:     "mcp",
+		Short:   "MCP server commands (orchestration and proxy)",
+		GroupID: groupLifecycle,
+	}
+	cmd.AddCommand(newMCPServeCmd(), newMCPProxyCmd())
+	return cmd
+}
+
+func newMCPServeCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "mcp",
+		Use:   "serve",
 		Short: "Start the yoloAI MCP server (stdio)",
 		Long: `Start the yoloAI MCP server on stdin/stdout.
 
@@ -32,16 +42,16 @@ Add to ~/.claude.json to use with Claude Desktop:
     "mcpServers": {
       "yoloai": {
         "command": "yoloai",
-        "args": ["system", "mcp"]
+        "args": ["mcp", "serve"]
       }
     }
   }`,
 		Args: cobra.NoArgs,
-		RunE: runMCP,
+		RunE: runMCPServe,
 	}
 }
 
-func runMCP(cmd *cobra.Command, _ []string) error {
+func runMCPServe(cmd *cobra.Command, _ []string) error {
 	backend := resolveBackendFromConfig()
 	return withManager(cmd, backend, func(ctx context.Context, mgr *sandbox.Manager) error {
 		srv := mcpsrv.New(mgr)
@@ -51,7 +61,7 @@ func runMCP(cmd *cobra.Command, _ []string) error {
 
 func newMCPProxyCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "mcp-proxy [flags] <name> [workdir] -- <command> [args...]",
+		Use:   "proxy [flags] <name> [workdir] -- <command> [args...]",
 		Short: "Run an MCP server inside a sandbox and proxy its stdio",
 		Long: `Run an MCP server inside a sandbox and proxy its stdio to the caller.
 
@@ -75,10 +85,10 @@ Path placeholders in the inner command are expanded from sandbox metadata:
 
 Examples:
   # New sandbox — workdir required
-  yoloai system mcp-proxy mybox /path/to/project -- npx -y @modelcontextprotocol/server-filesystem {workdir}
+  yoloai mcp proxy mybox /path/to/project -- npx -y @modelcontextprotocol/server-filesystem {workdir}
 
   # Reuse existing sandbox
-  yoloai system mcp-proxy mybox -- npx -y @modelcontextprotocol/server-filesystem {workdir}`,
+  yoloai mcp proxy mybox -- npx -y @modelcontextprotocol/server-filesystem {workdir}`,
 		Args: cobra.ArbitraryArgs,
 		RunE: runMCPProxy,
 	}

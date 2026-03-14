@@ -265,7 +265,7 @@ func (p *ProxyServer) run(ctx context.Context, in io.Reader, out io.Writer, _ *s
 			var msg jsonRPCMsg
 			if err := json.Unmarshal(line, &msg); err != nil {
 				outMu.Lock()
-				fmt.Fprintf(out, "%s\n", line) //nolint:errcheck
+				fmt.Fprintf(out, "%s\n", line) //nolint:errcheck,gosec // G705: intentional proxy forwarding
 				outMu.Unlock()
 				continue
 			}
@@ -324,7 +324,7 @@ func (p *ProxyServer) run(ctx context.Context, in io.Reader, out io.Writer, _ *s
 		line := outerScanner.Bytes()
 		var msg jsonRPCMsg
 		if err := json.Unmarshal(line, &msg); err != nil {
-			fmt.Fprintln(innerIn, string(line)) //nolint:errcheck
+			fmt.Fprintln(innerIn, string(line)) //nolint:errcheck,gosec // G705: intentional proxy forwarding
 			continue
 		}
 
@@ -352,7 +352,7 @@ func (p *ProxyServer) run(ctx context.Context, in io.Reader, out io.Writer, _ *s
 			}
 		}
 
-		if _, err := fmt.Fprintln(innerIn, string(line)); err != nil {
+		if _, err := fmt.Fprintln(innerIn, string(line)); err != nil { //nolint:gosec // G705: intentional proxy forwarding
 			return fmt.Errorf("write to inner MCP server: %w", err)
 		}
 	}

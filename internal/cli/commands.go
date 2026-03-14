@@ -41,6 +41,7 @@ func registerCommands(root *cobra.Command, version, commit, date string) {
 		newRestartCmd(),
 		newDestroyCmd(),
 		newResetCmd(),
+		newMCPCmd(),
 
 		// Workflow
 		newAttachCmd(),

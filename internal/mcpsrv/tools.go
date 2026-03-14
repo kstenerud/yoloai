@@ -617,17 +617,17 @@ is independent. Use sandbox_list to see all running sandboxes.
 
 ## Proxy mode (mcp-proxy)
 
-yoloai system mcp-proxy wraps any MCP-capable server inside a sandbox,
+yoloai mcp proxy wraps any MCP-capable server inside a sandbox,
 forwarding its tools transparently while injecting sandbox_diff.
 
 The sandbox is created automatically if it doesn't exist. If it already
 exists, it is reused. The default agent is "idle" (no AI agent — just a
 running container). Use --agent to also run an AI agent alongside.
 
-  yoloai system mcp-proxy mybox /path/to/project -- <inner-server-command> {workdir}
+  yoloai mcp proxy mybox /path/to/project -- <inner-server-command> {workdir}
 
   # Reuse existing sandbox (workdir optional):
-  yoloai system mcp-proxy mybox -- <inner-server-command> {workdir}
+  yoloai mcp proxy mybox -- <inner-server-command> {workdir}
 
 Path placeholders in the inner command are expanded from sandbox metadata:
 
@@ -637,7 +637,7 @@ Path placeholders in the inner command are expanded from sandbox metadata:
   {dir:N}     Nth auxiliary directory mount path (0-indexed)
 
 Example:
-  yoloai system mcp-proxy mybox /path/to/project -- npx -y @modelcontextprotocol/server-filesystem {workdir}
+  yoloai mcp proxy mybox /path/to/project -- npx -y @modelcontextprotocol/server-filesystem {workdir}
 
 ## What NOT to do
 
