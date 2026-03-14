@@ -448,23 +448,62 @@ Agent-clip is not a meaningful competitor to yoloAI. It occupies a different nic
 
 *Note: This table covers a subset of the landscape. See section 8 for additional tools.*
 
-| Feature | deva.sh | TextCortex | Docker Sandbox | rsh3khar | cco | sandbox-runtime | Safehouse | yolobox | EnvPod CE | **yoloAI** |
-|---------|---------|------------|----------------|----------|-----|-----------------|-----------|--------|-----------|-----------------|
-| Copy/diff/apply workflow | No | No (git branch + diff review) | No (file sync) | No (auto-commit) | No | No | No | No | Yes (overlayfs) | **Yes** |
-| Per-sandbox agent state | No | No | No | No | No | No | No | Yes (persistent volumes) | Yes | **Yes** |
-| Session logging | No | Web terminal | No | No | No | No | No | No | Yes (JSONL audit) | **Yes** |
-| User-supplied Dockerfiles | No | Custom Dockerfile | Templates | No | No | N/A (no container) | N/A | No | No (YAML config) | **Yes** |
-| Multi-directory with primary/dep | Partial | No | No | Worktrees | No | N/A | No | No | Yes (bind mounts) | **Yes** |
-| Review before applying changes | No | Diff review (git) | No | No | No | No | No | No | Yes (diff/commit/rollback) | **Yes (core feature)** |
-| Multi-backend isolation | No | No | MicroVM | No | Yes (sandbox-exec/bwrap/Docker) | Yes (bwrap/Seatbelt) | No (sandbox-exec only) | Yes (Docker/Podman/Apple) | No (native Linux only) | **Yes (Docker/Tart/Seatbelt)** |
-| No Docker dependency | No | No | Docker Desktop | No | Yes (native modes) | Yes | Yes | Partial (Podman/Apple) | Yes (no Docker) | Partial (Seatbelt mode) |
-| Dynamic toolchain detection | No | No | No | No | No | Yes (glob patterns) | Yes | No | No | No |
-| Per-agent compatibility docs | No | No | No | No | No | No | Yes | No | Yes (presets) | No |
-| Network disable flag | No | No | Proxy-based | No | No | Yes | No | Yes (`--no-network`) | Yes (per-pod DNS) | **Yes** |
-| Governance (action approval) | No | No | No | No | No | No | No | No | Yes (4-tier queue) | No |
-| Encrypted credential vault | No | No | No | No | No | No | No | No | Yes (ChaCha20 + proxy) | No |
-| Snapshots/checkpoints | No | No | No | No | No | No | No | No | Yes | No |
-| Web dashboard | No | Yes | No | No | No | No | No | No | Yes | No |
-| macOS support | Yes | Yes | Yes | Yes | Yes | Yes | Yes | Yes | No | **Yes** |
+### 12. BunkerVM (ashishgituser)
+
+**Repo:** [ashishgituser/bunkervm](https://github.com/ashishgituser/bunkervm)
+**Version:** 0.8.6 (Alpha) | **Language:** Python | **License:** AGPL-3.0
+
+**What it does:** Python library (`pip install bunkervm`) that boots disposable **Firecracker microVMs** (Amazon's microVM runtime, ~3s boot, KVM-backed) for AI agent code execution. Ships a native MCP server (Claude Desktop, VS Code Copilot), framework integrations (LangChain, CrewAI, OpenAI Agents, LangGraph), and a Tauri-based desktop app (BunkerDesktop, targeting Windows first).
+
+**Architecture:** Host runs a Python daemon managing Firecracker VMs via a REST API on `localhost:9551`. Guest is Alpine Linux + Python 3.12. Host↔VM communication via vsock UDS (zero-config, no TAP). TAP networking is an opt-in for internet access.
+
+**Key features:**
+- **KVM hardware isolation** — separate kernel per VM, not containerization; container escape CVEs don't apply
+- **VMPool** — up to 10 concurrent VMs, thread-safe, each isolated (unique vsock CID, rootfs copy, subnet)
+- **MCP server** — 8 tools (exec, file read/write, install, reset, snapshot, etc.) auto-discovered by Claude Desktop and VS Code Copilot
+- **Safety classifier** — regex-based advisory classification (READ/WRITE/SYSTEM/DESTRUCTIVE/BLOCKED) logged to JSONL audit trail
+- **JSONL audit logging** — append-only, thread-safe, timestamp + sequence + event type
+- **Engine daemon** (emerging) — REST API for centralized VM management; thin clients auto-discover
+
+**Weaknesses:**
+- No diff/apply workflow — VMs are stateless/ephemeral; no git-aware file sync
+- No project-level configuration (global only)
+- No macOS support (Apple Virtualization.framework lacks nested KVM)
+- Manual file management (upload/download), no `:copy`/`:overlay`/`:rw` equivalent
+- Targets AI framework integrations (LangChain, CrewAI), not CLI agents (Claude Code, Gemini CLI)
+- Alpha maturity; Windows installer unsigned; BunkerDesktop not yet 1.0
+
+**Threat level: MEDIUM — different primary market, not a direct competitor today.** BunkerVM is "run code and get output" (ephemeral, framework-oriented); yoloAI is "apply changes to a project" (persistent, CLI-agent-oriented). Would become competitive if it adds diff/apply + CLI agent support and reaches 1.0.
+
+**Lessons:**
+- **MCP-first integration is becoming table stakes.** Claude Desktop and VS Code Copilot auto-discover MCP servers; this is a distribution channel yoloAI doesn't use.
+- **JSONL audit logs** are better than plain text for compliance/debugging. Append-only with sequence numbers + event types.
+- **Airgapped default** (vsock, no TAP) mirrors our read-only mount default — safe by default is the right call.
+- **VMPool concurrent execution** validates the batch/parallel agent design we already have on the roadmap.
+- **Hardware isolation is a genuine differentiator** for untrusted code — if yoloAI ever targets security-critical use cases, Firecracker or gVisor would be worth evaluating.
+
+---
+
+| Feature | deva.sh | TextCortex | Docker Sandbox | rsh3khar | cco | sandbox-runtime | Safehouse | yolobox | EnvPod CE | BunkerVM | **yoloAI** |
+|---------|---------|------------|----------------|----------|-----|-----------------|-----------|--------|-----------|----------|-----------------|
+| Copy/diff/apply workflow | No | No (git branch + diff review) | No (file sync) | No (auto-commit) | No | No | No | No | Yes (overlayfs) | No | **Yes** |
+| Per-sandbox agent state | No | No | No | No | No | No | No | Yes (persistent volumes) | Yes | No (ephemeral) | **Yes** |
+| Session logging | No | Web terminal | No | No | No | No | No | No | Yes (JSONL audit) | Yes (JSONL audit) | **Yes** |
+| User-supplied Dockerfiles | No | Custom Dockerfile | Templates | No | No | N/A (no container) | N/A | No | No (YAML config) | No (rootfs only) | **Yes** |
+| Multi-directory with primary/dep | Partial | No | No | Worktrees | No | N/A | No | No | Yes (bind mounts) | No | **Yes** |
+| Review before applying changes | No | Diff review (git) | No | No | No | No | No | No | Yes (diff/commit/rollback) | No | **Yes (core feature)** |
+| Multi-backend isolation | No | No | MicroVM | No | Yes (sandbox-exec/bwrap/Docker) | Yes (bwrap/Seatbelt) | No (sandbox-exec only) | Yes (Docker/Podman/Apple) | No (native Linux only) | No (Firecracker only) | **Yes (Docker/Tart/Seatbelt)** |
+| No Docker dependency | No | No | Docker Desktop | No | Yes (native modes) | Yes | Yes | Partial (Podman/Apple) | Yes (no Docker) | Yes (Firecracker) | Partial (Seatbelt mode) |
+| Dynamic toolchain detection | No | No | No | No | No | Yes (glob patterns) | Yes | No | No | No | No |
+| Per-agent compatibility docs | No | No | No | No | No | No | Yes | No | Yes (presets) | No | No |
+| Network disable flag | No | No | Proxy-based | No | No | Yes | No | Yes (`--no-network`) | Yes (per-pod DNS) | Yes (vsock airgap default) | **Yes** |
+| Governance (action approval) | No | No | No | No | No | No | No | No | Yes (4-tier queue) | No | No |
+| Encrypted credential vault | No | No | No | No | No | No | No | No | Yes (ChaCha20 + proxy) | No | No |
+| Snapshots/checkpoints | No | No | No | No | No | No | No | No | Yes | No | No |
+| Web dashboard | No | Yes | No | No | No | No | No | No | Yes | Yes (BunkerDesktop) | No |
+| MCP server | No | No | No | No | No | No | No | No | No | Yes (native) | No |
+| Hardware isolation (KVM) | No | No | No | No | No | No | No | No | No | Yes (Firecracker) | No |
+| Parallel multi-sandbox | No | No | No | No | No | No | No | No | No | Yes (VMPool, 10x) | Planned |
+| macOS support | Yes | Yes | Yes | Yes | Yes | Yes | Yes | Yes | No | No | **Yes** |
 
 ---
