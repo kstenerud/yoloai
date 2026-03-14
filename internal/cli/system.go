@@ -30,6 +30,8 @@ func newSystemCmd(version, commit, date string) *cobra.Command {
 		newSystemPruneCmd(),
 		newSystemSetupCmd(),
 		newCompletionCmd(),
+		newMCPCmd(),
+		newMCPProxyCmd(),
 	)
 
 	return cmd

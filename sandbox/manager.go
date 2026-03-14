@@ -188,6 +188,22 @@ func (m *Manager) SandboxCache(name string) string {
 	return CacheDir(name)
 }
 
+// SendInput sends text to the sandbox agent's terminal via tmux send-keys.
+// If the agent is running, this interrupts it mid-task. If the agent is idle
+// at its prompt, this sends a follow-up message. The caller should check
+// Manager.Status before calling to know which case applies.
+func (m *Manager) SendInput(ctx context.Context, name string, text string) error {
+	containerName := InstanceName(name)
+	_, err := m.runtime.Exec(ctx, containerName,
+		[]string{"tmux", "send-keys", "-t", "main", text, "Enter"},
+		"yoloai",
+	)
+	if err != nil {
+		return fmt.Errorf("send input to sandbox %q: %w", name, err)
+	}
+	return nil
+}
+
 // isInteractive returns true if m.input is a TTY (terminal).
 func (m *Manager) isInteractive() bool {
 	if f, ok := m.input.(*os.File); ok {
