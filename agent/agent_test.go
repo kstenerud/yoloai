@@ -172,7 +172,7 @@ func TestGetAgent_Codex(t *testing.T) {
 
 func TestAllAgentNames(t *testing.T) {
 	names := AllAgentNames()
-	assert.Equal(t, []string{"aider", "claude", "codex", "gemini", "opencode", "shell", "test"}, names)
+	assert.Equal(t, []string{"aider", "claude", "codex", "gemini", "idle", "opencode", "shell", "test"}, names)
 }
 
 func TestGetAgent_Test(t *testing.T) {

@@ -51,52 +51,113 @@ func runMCP(cmd *cobra.Command, _ []string) error {
 
 func newMCPProxyCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "mcp-proxy <name> -- <command> [args...]",
-		Short: "Proxy an MCP server running inside a sandbox (stdio)",
+		Use:   "mcp-proxy [flags] <name> [workdir] -- <command> [args...]",
+		Short: "Run an MCP server inside a sandbox and proxy its stdio",
 		Long: `Run an MCP server inside a sandbox and proxy its stdio to the caller.
 
+The sandbox is created automatically if it does not exist (requires workdir).
+If the sandbox already exists, it is reused regardless of the workdir argument.
+If the container is stopped, it is restarted.
+
+The default agent is "idle" (sleep infinity) — the container runs but no AI
+agent is started. Use --agent to run an AI agent alongside the inner MCP server.
+
 Injects sandbox_diff into the tool surface. All other tools from the inner
-server are forwarded transparently.
+server are forwarded transparently. The sandbox persists after the proxy exits
+so you can inspect and apply changes with 'yoloai diff' and 'yoloai apply'.
 
-The sandbox must already exist. Create it first with 'yoloai new' or the
-MCP sandbox_create tool, then run mcp-proxy to wrap it.
+Path placeholders in the inner command are expanded from sandbox metadata:
 
-Path placeholders are expanded using the sandbox's metadata before the inner
-command is launched inside the container:
-
-  {workdir}   Primary working directory mount path
+  {workdir}   Primary working directory (container-side path)
   {files}     File exchange directory (/yoloai/files/)
   {cache}     Cache directory (/yoloai/cache/)
   {dir:N}     Nth auxiliary directory mount path (0-indexed)
 
-Example:
-  yoloai new mybox /path/to/project
+Examples:
+  # New sandbox — workdir required
+  yoloai system mcp-proxy mybox /path/to/project -- npx -y @modelcontextprotocol/server-filesystem {workdir}
+
+  # Reuse existing sandbox
   yoloai system mcp-proxy mybox -- npx -y @modelcontextprotocol/server-filesystem {workdir}`,
-		Args: cobra.MinimumNArgs(1),
+		Args: cobra.ArbitraryArgs,
 		RunE: runMCPProxy,
 	}
+
+	cmd.Flags().String("agent", "idle", "Agent to run in the container (default: idle)")
+	cmd.Flags().String("model", "", "Model override")
+	cmd.Flags().String("profile", "", "Profile name")
+	cmd.Flags().StringSlice("dir", nil, "Auxiliary directory (same syntax as 'yoloai new -d')")
+	cmd.Flags().Bool("replace", false, "Destroy and recreate the sandbox if it exists")
+	cmd.Flags().String("backend", "", "Runtime backend")
 
 	return cmd
 }
 
 func runMCPProxy(cmd *cobra.Command, args []string) error {
-	name := args[0]
+	// Split positional args at "--"
+	dashIdx := cmd.ArgsLenAtDash()
+	var positional, innerCmd []string
+	if dashIdx < 0 {
+		positional = args
+	} else {
+		positional = args[:dashIdx]
+		innerCmd = args[dashIdx:]
+	}
 
-	// Find the "--" separator
-	var innerCmd []string
-	for i, a := range args {
-		if a == "--" {
-			innerCmd = args[i+1:]
-			break
-		}
+	if len(positional) < 1 {
+		return fmt.Errorf("sandbox name is required")
 	}
 	if len(innerCmd) == 0 {
-		return fmt.Errorf("inner command required: yoloai system mcp-proxy <name> -- <command> [args...]")
+		return fmt.Errorf("inner command required after '--'")
+	}
+
+	name := positional[0]
+	rawWorkdir := ""
+	if len(positional) >= 2 {
+		rawWorkdir = positional[1]
+	}
+
+	agentFlag, _ := cmd.Flags().GetString("agent")
+	model := resolveModel(cmd)
+	profile := resolveProfile(cmd)
+	rawDirs, _ := cmd.Flags().GetStringSlice("dir")
+	replace, _ := cmd.Flags().GetBool("replace")
+
+	// Parse workdir if provided
+	var workdirSpec sandbox.DirSpec
+	if rawWorkdir != "" {
+		parsed, err := sandbox.ParseDirArg(rawWorkdir)
+		if err != nil {
+			return fmt.Errorf("invalid workdir: %w", err)
+		}
+		workdirSpec = sandbox.DirArgToSpec(parsed)
+		if workdirSpec.Mode == "" {
+			workdirSpec.Mode = sandbox.DirModeCopy
+		}
+	}
+
+	// Parse aux dirs
+	var auxDirSpecs []sandbox.DirSpec
+	for _, rawDir := range rawDirs {
+		parsed, err := sandbox.ParseDirArg(rawDir)
+		if err != nil {
+			return fmt.Errorf("invalid directory %q: %w", rawDir, err)
+		}
+		auxDirSpecs = append(auxDirSpecs, sandbox.DirArgToSpec(parsed))
+	}
+
+	opts := mcpsrv.ProxyOptions{
+		Workdir: workdirSpec,
+		AuxDirs: auxDirSpecs,
+		Agent:   agentFlag,
+		Model:   model,
+		Profile: profile,
+		Replace: replace,
 	}
 
 	backend := resolveBackendForSandbox(name)
 	return withManager(cmd, backend, func(ctx context.Context, mgr *sandbox.Manager) error {
-		proxy := mcpsrv.NewProxy(mgr, name, innerCmd)
+		proxy := mcpsrv.NewProxy(mgr, name, innerCmd, opts)
 		return proxy.ServeStdio(ctx)
 	})
 }

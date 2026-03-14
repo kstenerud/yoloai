@@ -245,6 +245,19 @@ var agents = map[string]*Definition{
 		ModelFlag:      "",
 		ModelAliases:   nil,
 	},
+	"idle": {
+		Name:           "idle",
+		Description:    "No-op container — keeps the sandbox running without an AI agent. Default for mcp-proxy.",
+		InteractiveCmd: "sleep infinity",
+		HeadlessCmd:    "sleep infinity",
+		PromptMode:     PromptModeInteractive,
+		APIKeyEnvVars:  []string{},
+		StateDir:       "",
+		SubmitSequence: "Enter",
+		StartupDelay:   0,
+		ModelFlag:      "",
+		ModelAliases:   nil,
+	},
 }
 
 // GetAgent returns the agent definition for the given name.
@@ -268,7 +281,7 @@ func AllAgentNames() []string {
 func RealAgents() []string {
 	var names []string
 	for name := range agents {
-		if name == "test" || name == "shell" {
+		if name == "test" || name == "shell" || name == "idle" {
 			continue
 		}
 		names = append(names, name)

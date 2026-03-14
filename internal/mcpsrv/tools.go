@@ -620,10 +620,14 @@ is independent. Use sandbox_list to see all running sandboxes.
 yoloai system mcp-proxy wraps any MCP-capable server inside a sandbox,
 forwarding its tools transparently while injecting sandbox_diff.
 
-The sandbox must exist first. Create it with 'yoloai new' or sandbox_create.
-Then run:
+The sandbox is created automatically if it doesn't exist. If it already
+exists, it is reused. The default agent is "idle" (no AI agent — just a
+running container). Use --agent to also run an AI agent alongside.
 
-  yoloai system mcp-proxy <name> -- <inner-server-command> {workdir}
+  yoloai system mcp-proxy mybox /path/to/project -- <inner-server-command> {workdir}
+
+  # Reuse existing sandbox (workdir optional):
+  yoloai system mcp-proxy mybox -- <inner-server-command> {workdir}
 
 Path placeholders in the inner command are expanded from sandbox metadata:
 
@@ -633,8 +637,7 @@ Path placeholders in the inner command are expanded from sandbox metadata:
   {dir:N}     Nth auxiliary directory mount path (0-indexed)
 
 Example:
-  yoloai new mybox /path/to/project
-  yoloai system mcp-proxy mybox -- npx -y @modelcontextprotocol/server-filesystem {workdir}
+  yoloai system mcp-proxy mybox /path/to/project -- npx -y @modelcontextprotocol/server-filesystem {workdir}
 
 ## What NOT to do
 
