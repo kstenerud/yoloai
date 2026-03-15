@@ -5,10 +5,12 @@
 Single Go binary. No runtime dependencies — just the binary and Docker.
 
 **Global flags:**
-- `--verbose` / `-v`: Enable verbose output showing Docker commands, mount operations, config resolution, and entrypoint activity. Essential for troubleshooting overlay mount failures, proxy startup issues, and entrypoint errors. Also settable via `YOLOAI_VERBOSE=1`.
+- `--verbose` / `-v`: Enable verbose terminal output showing Docker commands, mount operations, config resolution, and entrypoint activity. Controls what is printed to the console; does not affect log persistence. Also settable via `YOLOAI_VERBOSE=1`.
 - `--quiet` / `-q`: Suppress non-essential output. `-q` for warn-only, `-qq` for error-only.
 - `--no-color`: Disable colored output.
 - `--json`: Output as JSON for scripting and CI. Errors go to stderr as `{"error": "message"}`. Interactive commands (`attach`, `exec`) reject `--json`.
+- `--debug`: Enable debug-level logging to the sandbox's persistent debug log (`~/.yoloai/sandboxes/<name>/debug.log`). For commands that do not operate on a sandbox, silently ignored. Useful for capturing a detailed trail before a problem occurs, so it is available when filing a bug report.
+- `--bugreport <file>`: Write a structured Markdown bug report to `<file>`. Implicitly enables `--debug`. Report is always written regardless of outcome (success, error, panic, or signal). See [Bug Report Design](bugreport.md).
 
 **Environment Variables:**
 - `YOLOAI_SANDBOX`: Default sandbox name for commands that accept `<name>`. Explicit `<name>` argument always takes precedence. Example: `YOLOAI_SANDBOX=my-task yoloai diff` is equivalent to `yoloai diff my-task`.
@@ -46,6 +48,7 @@ Inspection:
   yoloai sandbox <name> allow <domain>...       Allow additional domains in an isolated sandbox
   yoloai sandbox <name> allowed                 Show allowed domains for a sandbox
   yoloai sandbox <name> deny <domain>...        Remove domains from the allowlist
+  yoloai sandbox <name> bugreport <file>        Write a bug report for a sandbox to a file
   yoloai ls                                      List sandboxes (shortcut for 'sandbox list')
   yoloai log <name>                              Show sandbox log (shortcut for 'sandbox log')
   yoloai exec <name> <command>                   Run a command inside a sandbox (shortcut for 'sandbox exec')
