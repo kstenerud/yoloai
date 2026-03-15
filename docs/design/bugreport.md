@@ -43,7 +43,7 @@ Each line in the JSONL log files is a JSON object:
 |------|--------|
 | `--verbose` | More output printed to the terminal. No effect on log files. |
 | `--debug` | Enables `debug`-level entries in the sandbox's JSONL log files. Silently ignored for non-sandbox commands (no log location to write to). |
-| `--bugreport <file>` | Implies `--debug`. Writes debug-level log entries to the report's temp file only — not to the sandbox's JSONL files. The report is the authoritative record for that run. |
+| `--bugreport <type>` | Implies `--debug`. See below. |
 
 ---
 
@@ -83,35 +83,62 @@ Pretty-printed, interleaved stream of `logs/cli.jsonl`, `logs/sandbox.jsonl`, `l
 
 ## Two Bug Report Mechanisms
 
+### Report types
+
+Both mechanisms accept a required `<type>` argument:
+
+| Type | Description |
+|------|-------------|
+| `safe` | Privacy-conscious report. Sensitive sections omitted or redacted. Suitable for sharing in a public GitHub issue. Includes a "Review before sharing" notice. |
+| `full` | Author/developer report. No omissions, no redaction. Includes a prominent "**Do not share publicly**" warning banner. |
+
+### Output filename
+
+Reports are written to the current directory with an auto-generated name:
+
+- Sandbox commands: `yoloai-bugreport-<name>-<timestamp>.md`
+- Non-sandbox commands: `yoloai-bugreport-<timestamp>.md`
+
+The filename is printed to stderr after writing:
+```
+Bug report written: yoloai-bugreport-x-20260315-142301.md
+```
+
+The temp file during writing is `<filename>.tmp`. On SIGKILL, the temp file survives with whatever was captured up to that point.
+
+Report files are created with mode **0600** (owner read/write only).
+
 ### 1. Global `--bugreport` flag (flight recorder)
 
 ```
-yoloai --bugreport <file> <command> [args...]
+yoloai --bugreport safe new x .
+yoloai --bugreport full new x .
 ```
 
 Can be used with any yoloai command. When active:
 
-- A temp file (`<file>.tmp`) is opened immediately, before any subcommand logic runs.
+- The output file is determined and the temp file opened immediately, before any subcommand logic runs.
 - Static sections (header, command invocation, system info, backends, config) are written to the temp file right at launch.
 - `--debug` is implicitly enabled: debug-level entries from the yoloai CLI are written to the temp file only, not to `cli.jsonl`. Container processes (`sandbox.jsonl`, `monitor.jsonl`, `agent-hooks.jsonl`) are independent and continue writing to their own files as normal — `--bugreport` cannot redirect them.
-- A deferred finalizer (with `recover()` to catch panics) writes the exit code and any error, then renames `<file>.tmp` → `<file>`.
-- For sandbox commands, the existing `cli.jsonl`, `sandbox.jsonl`, `monitor.jsonl`, and `agent-hooks.jsonl` are included in the report — prior `--debug` runs will have contributed debug-level entries to `cli.jsonl`.
-- The report is **always written** regardless of outcome: success, error, panic, or signal. On SIGKILL the temp file survives with whatever was captured up to that point.
+- A deferred finalizer (with `recover()` to catch panics) writes the exit code and any error, then renames the temp file to the final filename.
+- For sandbox commands, the existing JSONL log files are included in the report — prior `--debug` runs will have contributed debug-level entries to `cli.jsonl`.
+- The report is **always written** regardless of outcome: success, error, panic, or signal.
 
 Typical workflow for a hard-to-reproduce bug:
 ```
-yoloai --debug new x .              # run leading-up commands with debug logging
-yoloai --debug start x              # more debug-logged commands
-yoloai --bugreport out.md start x   # captures live debug + prior events.jsonl from sandbox
+yoloai --debug new x .           # run leading-up commands with debug logging
+yoloai --debug start x           # more debug-logged commands
+yoloai --bugreport safe start x  # captures live debug + prior logs from sandbox
 ```
 
 ### 2. `sandbox <name> bugreport` command (forensic tool)
 
 ```
-yoloai sandbox <name> bugreport <file>
+yoloai sandbox <name> bugreport safe
+yoloai sandbox <name> bugreport full
 ```
 
-Used when a bug occurred in a past run and the user still has the sandbox — no need to reproduce the issue. Collects static diagnostic information from system state and the named sandbox, including all files under `logs/`, which will contain debug-level entries if prior commands were run with `--debug`. Always writes to a file; no stdout mode.
+Used when a bug occurred in a past run and the user still has the sandbox — no need to reproduce the issue. Collects static diagnostic information from system state and the named sandbox, including all files under `logs/`, which will contain debug-level entries if prior commands were run with `--debug`.
 
 Placed under `sandbox` alongside `sandbox <name> log` and `sandbox <name> info`. Non-sandbox commands don't accumulate persistent state, so there is nothing to perform forensics on without a sandbox.
 
@@ -125,16 +152,20 @@ GitHub issue bodies are capped at **65,536 characters**. After writing the repor
 
 ```
 Warning: report exceeds GitHub's issue body limit (65,536 characters).
-Upload as a Gist instead: gh gist create out.md
+Upload as a Gist instead: gh gist create yoloai-bugreport-x-20260315-142301.md
 ```
 
-Verbose sections (system info, backends, config, logs, sandbox detail) are wrapped in `<details>`/`<summary>` collapsible blocks. Only the header, command, and exit status are visible by default; machine-readable content is folded away.
+Verbose sections (system info, backends, config, logs, sandbox detail) are wrapped in `<details>`/`<summary>` collapsible blocks. Only the header, type, command, and exit status are visible by default; machine-readable content is folded away.
 
 ```markdown
 ## yoloai Bug Report — 2026-03-15T14:23:01Z
 
+> ⚠️ Review before sharing: this report may contain proprietary code,
+> task descriptions, file paths, and internal configuration.
+
 **Version:** 0.9.1 (abc1234, 2026-03-10)
-**Command:** `yoloai --bugreport out.md new x .`
+**Type:** safe
+**Command:** `yoloai --bugreport safe new x .`
 **Exit code:** 1 — sandbox creation failed
 
 <details>
@@ -145,11 +176,18 @@ Verbose sections (system info, backends, config, logs, sandbox detail) are wrapp
 </details>
 
 <details>
-<summary>events.jsonl</summary>
+<summary>logs/cli.jsonl</summary>
 
 ...
 
 </details>
+```
+
+`full` reports include a stronger banner:
+
+```markdown
+> ⛔ FULL REPORT — unsanitized, contains all logs and agent output.
+> Do not share publicly.
 ```
 
 Note: `<details>`/`<summary>` is GitHub-Flavored Markdown and may not render correctly in other environments, but the content remains readable as plain text.
@@ -158,16 +196,33 @@ Note: `<details>`/`<summary>` is GitHub-Flavored Markdown and may not render cor
 
 ## Report Sections
 
-Both mechanisms share the same section format. The flag-based report includes additional sections (command invocation, live log) that the forensic command omits.
+Columns indicate whether a section is included in `safe` and `full` reports. *(flag)* and *(sandbox)* indicate which mechanism provides the section.
+
+| Section | safe | full |
+|---------|------|------|
+| 1. Header | ✓ | ✓ |
+| 2. Command invocation *(flag)* | ✓ redacted | ✓ |
+| 3. System | ✓ | ✓ |
+| 4. Backends | ✓ | ✓ |
+| 5. Configuration | ✓ sanitized | ✓ |
+| 6. Sandbox detail *(sandbox)* | ✓ partial | ✓ |
+| 7. `cli.jsonl` *(sandbox)* | ✓ sanitized | ✓ |
+| 8. `sandbox.jsonl` *(sandbox)* | ✓ partial | ✓ |
+| 9. `monitor.jsonl` *(sandbox)* | ✓ | ✓ |
+| 10. `agent-hooks.jsonl` *(sandbox)* | ✓ | ✓ |
+| 11. Agent output *(sandbox)* | ✗ omitted | ✓ |
+| 12. Live log *(flag)* | ✓ sanitized | ✓ |
+| 13. Exit *(flag)* | ✓ | ✓ |
 
 ### 1. Header
 
 - Timestamp (UTC, RFC3339)
 - yoloai version, commit, build date
+- Report type (`safe` or `full`)
 
 ### 2. Command Invocation *(flag only)*
 
-- Full `os.Args` as a fenced code block
+Full `os.Args` as a fenced code block. In `safe` mode, values for `--prompt` / `-p` flags are redacted: `--prompt [REDACTED]`.
 
 ### 3. System
 
@@ -191,7 +246,7 @@ In `--bugreport` mode, all probes run regardless of known availability — a fai
 
 ### 5. Configuration
 
-Global config (`~/.yoloai/config.yaml`) and active profile config, each in a fenced YAML code block, sanitized (see Sanitization below). Missing files noted as "(not found)".
+Global config (`~/.yoloai/config.yaml`) and active profile config, each in a fenced YAML code block. In `safe` mode, sanitized (see Sanitization). Missing files noted as "(not found)".
 
 ### 6. Sandbox Detail *(sandbox commands only)*
 
@@ -201,7 +256,7 @@ Global config (`~/.yoloai/config.yaml`) and active profile config, each in a fen
 
 **`agent-status.json`** — full contents.
 
-**`runtime-config.json`** — full contents. Useful for diagnosing entrypoint and mount configuration issues.
+**`runtime-config.json`** — In `safe` mode, `setup_commands` and `allowed_domains` fields are omitted (may reveal internal infrastructure). In `full` mode, full contents.
 
 **Container log** — full output from the container runtime:
 - docker: `docker logs yoloai-<name> 2>&1`
@@ -212,27 +267,29 @@ Errors from a non-running container are included rather than silently omitted.
 
 ### 7. `cli.jsonl` *(sandbox commands only)*
 
-Full contents. Contains debug-level entries if prior commands were run with `--debug`.
+Full contents. In `safe` mode, `msg` fields are scanned for known-sensitive patterns and redacted. Contains debug-level entries if prior commands were run with `--debug`.
 
 ### 8. `sandbox.jsonl` *(sandbox commands only)*
 
-Full contents. Covers entrypoint setup through prompt delivery — useful for diagnosing container startup failures, UID remapping issues, network isolation errors, and overlay mount problems.
+In `safe` mode, entries with `event` types that log setup commands or network configuration (`entrypoint.setup_cmd`, `entrypoint.network.*`) are omitted — these may reveal internal infrastructure. In `full` mode, full contents.
 
 ### 9. `monitor.jsonl` *(sandbox commands only)*
 
-Full contents. Covers idle/active detector decisions and status transitions.
+Full contents in both modes. Detector decisions and status transitions contain no user data.
 
 ### 10. `agent-hooks.jsonl` *(sandbox commands only)*
 
-Full contents. Hook-reported state changes from the agent process.
+Full contents in both modes. Hook events are idle/active state changes with no user content.
 
 ### 11. Agent output *(sandbox commands only)*
 
-ANSI-stripped contents of `agent.log`. The raw terminal stream is not included — it is not meaningful outside a terminal renderer.
+**Omitted in `safe` mode.** The agent's terminal output is the highest-risk section — it contains the full conversation, processed code, and any secrets the agent encountered in files.
+
+In `full` mode: ANSI-stripped contents of `agent.log`. Raw terminal stream is never included (not meaningful outside a renderer).
 
 ### 12. Live log *(flag only)*
 
-All debug-level log entries captured during the run, written incrementally to the temp file as the command progresses.
+All debug-level log entries captured during the run. In `safe` mode, `msg` fields are scanned and sanitized as with `cli.jsonl`.
 
 ### 13. Exit *(flag only)*
 
@@ -244,7 +301,9 @@ All debug-level log entries captured during the run, written incrementally to th
 
 ## Sanitization
 
-Config file values are redacted for keys whose names (case-insensitive) contain any of: `key`, `token`, `secret`, `password`, `credential`, `passwd`.
+### YAML config (`safe` mode)
+
+Values are redacted for keys whose names (case-insensitive) contain any of: `key`, `token`, `secret`, `password`, `credential`, `passwd`.
 
 ```yaml
 # input
@@ -255,13 +314,22 @@ anthropic_api_key: [REDACTED]
 
 Line-by-line on raw YAML text (no parser dependency). Handles indented keys (e.g. inside `env:` maps).
 
+### JSONL `msg` fields (`safe` mode)
+
+`msg` field values are scanned for patterns matching known secret formats (e.g. `sk-ant-`, `ghp_`, long hex strings) and redacted inline. This is best-effort — structured fields containing sensitive values logged at debug level may not be caught.
+
 ---
 
-## Deliberate Omissions
+## Deliberate Omissions (`safe` mode)
 
 | Item | Reason omitted |
 |------|----------------|
+| Agent output (`agent.log`) | Full conversation; may contain proprietary code and echoed secrets |
 | `prompt.txt` | May contain sensitive task descriptions |
+| `--prompt` flag value in `os.Args` | May contain sensitive task descriptions |
+| `setup_commands` in `runtime-config.json` | May reveal internal infrastructure |
+| `allowed_domains` in `runtime-config.json` | May reveal internal network topology |
+| `sandbox.jsonl` network/setup entries | Same as above |
 | Full environment dump | Too noisy; may expose unrelated secrets |
 | Credential/key files | Never appropriate for a bug report |
 | `home-seed/` directory | Large; agent-internal; not useful for diagnosis |
@@ -281,13 +349,15 @@ Line-by-line on raw YAML text (no parser dependency). Handles indented keys (e.g
 
 ### Flag (`--bugreport`)
 
-1. Add `--bugreport <file>` as a persistent flag on the root Cobra command in `internal/cli/root.go`.
+1. Add `--bugreport <type>` as a persistent flag on the root Cobra command in `internal/cli/root.go`. Valid values: `safe`, `full`.
 2. In `PersistentPreRunE`, if the flag is set:
-   - Open `<file>.tmp` immediately.
+   - Determine output filename (`yoloai-bugreport-[<name>-]<timestamp>.md`).
+   - Open `<filename>.tmp` with mode 0600 immediately.
    - Write static sections (header, command invocation, system, backends, config).
    - Install a debug log handler that appends to the temp file.
-   - Register a `defer` with `recover()` to write exit/error info and rename temp → target.
-   - After rename, check file size and warn to stderr if > 65,536 characters.
+   - Register a `defer` with `recover()` to write exit/error info and rename temp → final.
+   - Print filename to stderr after rename.
+   - Check file size and warn to stderr if > 65,536 characters.
 3. New file: `internal/cli/bugreport_writer.go` — shared section-writing logic.
 
 ### Command (`sandbox <name> bugreport`)
@@ -302,16 +372,18 @@ Line-by-line on raw YAML text (no parser dependency). Handles indented keys (e.g
 | Function | Purpose |
 |----------|---------|
 | `newSandboxBugReportCmd(version, commit, date)` | Cobra command constructor |
-| `writeBugReportHeader(w, version, commit, date)` | Section 1 |
-| `writeBugReportCommandInvocation(w)` | Section 2 (flag only) |
+| `writeBugReportHeader(w, version, commit, date, reportType)` | Section 1 |
+| `writeBugReportCommandInvocation(w, reportType)` | Section 2 (flag only) |
 | `writeBugReportSystem(w)` | Section 3 |
 | `writeBugReportBackends(ctx, w)` | Section 4 |
-| `writeBugReportConfig(w)` | Section 5 |
-| `writeBugReportSandboxDetail(ctx, w, rt, name)` | Section 6 |
-| `writeBugReportCLILog(w, name)` | Section 7 |
-| `writeBugReportSandboxLog(w, name)` | Section 8 |
+| `writeBugReportConfig(w, reportType)` | Section 5 |
+| `writeBugReportSandboxDetail(ctx, w, rt, name, reportType)` | Section 6 |
+| `writeBugReportCLILog(w, name, reportType)` | Section 7 |
+| `writeBugReportSandboxLog(w, name, reportType)` | Section 8 |
 | `writeBugReportMonitorLog(w, name)` | Section 9 |
 | `writeBugReportHooksLog(w, name)` | Section 10 |
-| `writeBugReportAgentOutput(w, name)` | Section 11 |
+| `writeBugReportAgentOutput(w, name)` | Section 11 (full only) |
+| `bugReportFilename(sandboxName, t)` | Generates output filename |
 | `backendVersion(backend)` | Returns version string from backend CLI, or "" |
 | `sanitizeYAMLConfig(content)` | Redacts sensitive key values |
+| `sanitizeJSONLMsg(content)` | Redacts known secret patterns from msg fields |
