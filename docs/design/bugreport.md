@@ -66,18 +66,30 @@ Pretty-printed, interleaved stream of `logs/cli.jsonl`, `logs/sandbox.jsonl`, `l
 
 ### Flags
 
+The command operates in one of three mutually exclusive modes selected by flag. `--follow` is the only flag that applies across all modes.
+
+**Structured log mode** (default):
+
 | Flag | Effect |
 |------|--------|
 | `--source <sources>` | Show only the specified sources instead of all four interleaved. Comma-separated list of: `cli`, `sandbox`, `monitor`, `hooks`. E.g. `--source cli,monitor` |
 | `--level debug\|info\|warn\|error` | Filter by minimum log level (default: `info`) |
 | `--debug` | Shorthand for `--level debug` |
-| `--follow` / `-f` | Tail the log live |
 | `--since <duration\|timestamp>` | e.g. `--since 5m` or `--since 14:20:00` |
+| `--raw` | Emit lines as raw JSONL (no formatting) |
+
+**Agent output modes** (mutually exclusive with each other and with all structured log flags):
+
+| Flag | Effect |
+|------|--------|
 | `--agent` | Show agent output with ANSI stripped — readable text |
 | `--agent-raw` | Show raw agent terminal stream (for replay or escape sequence inspection) |
-| `--raw` | Emit structured log lines as raw JSONL (no formatting) |
 
-`--follow` applies to all modes including `--agent` and `--agent-raw`.
+**Applies to all modes:**
+
+| Flag | Effect |
+|------|--------|
+| `--follow` / `-f` | Tail the log live |
 
 ---
 
