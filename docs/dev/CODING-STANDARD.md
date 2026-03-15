@@ -204,6 +204,40 @@ Cobra customization required: set `SilenceErrors: true` and `SilenceUsage: true`
 - Cross-compilation targets: `linux/amd64`, `linux/arm64`, `darwin/amd64`, `darwin/arm64`
 - Standard `go build` invocation — no custom build tools required
 
+## API Design
+
+### Two-Layer API (80/20 Rule)
+
+Public packages expose two layers:
+
+**High-level API** — simple, opinionated, covers ~80% of use cases. Most callers never need to go deeper. Built directly on top of the low-level API.
+
+**Low-level API** — flexible, explicit, handles the remaining ~20% of use cases that the high-level API can't serve without sacrificing simplicity. Worth the added complexity for power users who need it.
+
+The ratio isn't literal — it's a design target. The goal is that the common path stays simple and the escape hatch exists for when it doesn't.
+
+In practice:
+- High-level functions take compact, ergonomic parameters and apply sensible defaults.
+- Low-level functions accept `*Options` / `*Config` structs with full control over every knob.
+- High-level functions are thin wrappers: they fill in defaults and delegate to the low-level function. No duplicated logic.
+- Callers who need more control graduate to the low-level API; they don't fight the high-level one.
+
+Example pattern:
+
+```go
+// High-level: zero-config entry point for the common case.
+func (mgr *Manager) Start(ctx context.Context, name string) error {
+    return mgr.StartWithOptions(ctx, name, StartOptions{})
+}
+
+// Low-level: full control for callers that need it.
+func (mgr *Manager) StartWithOptions(ctx context.Context, name string, opts StartOptions) error {
+    // implementation
+}
+```
+
+Keep both layers in the same package. Don't split them into separate packages — that forces callers to import two packages for one concept.
+
 ## Code Organization Patterns
 
 - **Accept interfaces, return structs** — define interfaces at the point of consumption, not alongside the implementation
