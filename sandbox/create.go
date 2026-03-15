@@ -404,6 +404,30 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 		return nil, fmt.Errorf("build %s: %w", RuntimeConfigFile, err)
 	}
 
+	// Determine effective userns mode for Podman rootless containers.
+	// With Podman rootless + keep-id, the container runs as the host user (not yoloai),
+	// so tmux exec must use the default user ("") instead of "yoloai".
+	// keep-id is NOT used when SYS_ADMIN is needed (overlay or recipe cap_add).
+	usernsMode := ""
+	if m.backend == "podman" && os.Getuid() != 0 {
+		hasSysAdmin := workdir.Mode == "overlay"
+		for _, ad := range auxDirs {
+			if ad.Mode == "overlay" {
+				hasSysAdmin = true
+				break
+			}
+		}
+		for _, cap := range pr.capAdd {
+			if cap == "SYS_ADMIN" {
+				hasSysAdmin = true
+				break
+			}
+		}
+		if !hasSysAdmin {
+			usernsMode = "keep-id"
+		}
+	}
+
 	// Write state files
 	meta := &Meta{
 		YoloaiVersion: opts.Version,
@@ -432,6 +456,7 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 		Setup:              pr.setup,
 		AutoCommitInterval: pr.autoCommitInterval,
 		Debug:              opts.Debug,
+		UsernsMode:         usernsMode,
 	}
 
 	if err := SaveMeta(sandboxDir, meta); err != nil {

@@ -88,11 +88,16 @@ func runClone(cmd *cobra.Command, args []string) error {
 			return nil
 		}
 
+		meta, err := sandbox.LoadMeta(sandbox.Dir(dst))
+		if err != nil {
+			return err
+		}
+		user := tmuxExecUser(meta)
 		containerName := sandbox.InstanceName(dst)
-		if err := waitForTmux(ctx, rt, containerName, 30*time.Second); err != nil {
+		if err := waitForTmux(ctx, rt, containerName, 30*time.Second, user); err != nil {
 			return fmt.Errorf("waiting for tmux session: %w", err)
 		}
-		return attachToSandbox(ctx, rt, containerName, dst)
+		return attachToSandbox(ctx, rt, containerName, dst, user)
 	})
 }
 

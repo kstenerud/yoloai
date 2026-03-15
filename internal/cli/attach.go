@@ -37,6 +37,7 @@ func newAttachCmd() *cobra.Command {
 				}
 
 				containerName := sandbox.InstanceName(name)
+				user := tmuxExecUser(info.Meta)
 
 				switch info.Status {
 				case sandbox.StatusActive, sandbox.StatusIdle, sandbox.StatusDone, sandbox.StatusFailed:
@@ -57,16 +58,13 @@ func newAttachCmd() *cobra.Command {
 					if err := mgr.Start(ctx, name, sandbox.StartOpts{Resume: true}); err != nil {
 						return err
 					}
-					if err := waitForTmux(ctx, rt, containerName, 30*time.Second); err != nil {
+					if err := waitForTmux(ctx, rt, containerName, 30*time.Second, user); err != nil {
 						return fmt.Errorf("waiting for tmux session: %w", err)
 					}
 				}
 
 				slog.Debug("attaching to tmux session", "container", containerName)
-				setTerminalTitle(name)
-				defer setTerminalTitle("")
-				// Use container's default user (not yoloai) for Podman --userns=keep-id compatibility
-				return rt.InteractiveExec(ctx, containerName, []string{"tmux", "attach", "-t", "main"}, "", "")
+				return attachToSandbox(ctx, rt, containerName, name, user)
 			})
 		},
 	}

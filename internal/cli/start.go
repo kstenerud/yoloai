@@ -60,12 +60,17 @@ func newStartCmd() *cobra.Command {
 					return nil
 				}
 
+				meta, err := sandbox.LoadMeta(sandbox.Dir(name))
+				if err != nil {
+					return err
+				}
+				user := tmuxExecUser(meta)
 				containerName := sandbox.InstanceName(name)
-				if err := waitForTmux(ctx, rt, containerName, 30*time.Second); err != nil {
+				if err := waitForTmux(ctx, rt, containerName, 30*time.Second, user); err != nil {
 					return fmt.Errorf("waiting for tmux session: %w", err)
 				}
 
-				return attachToSandbox(ctx, rt, containerName, name)
+				return attachToSandbox(ctx, rt, containerName, name, user)
 			})
 		},
 	}

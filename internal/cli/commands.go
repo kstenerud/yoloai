@@ -261,13 +261,20 @@ func newNewCmd(version string) *cobra.Command {
 					return nil
 				}
 
+				// Load meta to determine correct tmux exec user
+				meta, loadErr := sandbox.LoadMeta(sandbox.Dir(sandboxName))
+				if loadErr != nil {
+					return loadErr
+				}
+				user := tmuxExecUser(meta)
+
 				// Wait for tmux session to be ready before attaching
 				containerName := sandbox.InstanceName(sandboxName)
-				if err := waitForTmux(ctx, rt, containerName, 30*time.Second); err != nil {
+				if err := waitForTmux(ctx, rt, containerName, 30*time.Second, user); err != nil {
 					return fmt.Errorf("waiting for tmux session: %w", err)
 				}
 
-				return attachToSandbox(ctx, rt, containerName, sandboxName)
+				return attachToSandbox(ctx, rt, containerName, sandboxName, user)
 			})
 		},
 	}
@@ -339,9 +346,20 @@ PowerShell:
 	}
 }
 
+// tmuxExecUser returns the user to use for tmux exec operations based on the
+// sandbox's userns mode. With Podman --userns=keep-id the tmux session is owned
+// by the host user (container default), not yoloai. All other backends create
+// the tmux session as the yoloai user.
+func tmuxExecUser(meta *sandbox.Meta) string {
+	if meta != nil && meta.UsernsMode == "keep-id" {
+		return ""
+	}
+	return "yoloai"
+}
+
 // waitForTmux polls until the tmux session is ready in the container.
 // Returns early if the container stops running or the context is cancelled.
-func waitForTmux(ctx context.Context, rt runtime.Runtime, containerName string, timeout time.Duration) error {
+func waitForTmux(ctx context.Context, rt runtime.Runtime, containerName string, timeout time.Duration, user string) error {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		// Check if context was cancelled (e.g. Ctrl+C)
@@ -355,9 +373,8 @@ func waitForTmux(ctx context.Context, rt runtime.Runtime, containerName string, 
 			return fmt.Errorf("container %s is not running", containerName)
 		}
 
-		// Check if tmux session exists (run as container's default user, not yoloai,
-		// since with Podman --userns=keep-id the session is created by the host user)
-		_, err = rt.Exec(ctx, containerName, []string{"tmux", "has-session", "-t", "main"}, "")
+		// Check if tmux session exists
+		_, err = rt.Exec(ctx, containerName, []string{"tmux", "has-session", "-t", "main"}, user)
 		if err == nil {
 			return nil
 		}
@@ -402,11 +419,10 @@ func setTerminalTitle(title string) {
 
 // attachToSandbox attaches to the tmux session in a running container.
 // It sets the terminal title to the sandbox name and restores it on detach.
-func attachToSandbox(ctx context.Context, rt runtime.Runtime, containerName, sandboxName string) error {
+func attachToSandbox(ctx context.Context, rt runtime.Runtime, containerName, sandboxName string, user string) error {
 	setTerminalTitle(sandboxName)
 	defer setTerminalTitle("")
-	// Use container's default user (not yoloai) for Podman --userns=keep-id compatibility
-	return rt.InteractiveExec(ctx, containerName, []string{"tmux", "attach", "-t", "main"}, "", "")
+	return rt.InteractiveExec(ctx, containerName, []string{"tmux", "attach", "-t", "main"}, user, "")
 }
 
 func newVersionCmd(version, commit, date string) *cobra.Command {

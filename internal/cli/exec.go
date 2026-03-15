@@ -41,8 +41,7 @@ func runExec(cmd *cobra.Command, args []string) error {
 		containerName := sandbox.InstanceName(name)
 		slog.Debug("exec in container", "container", containerName, "cmd", cmdArgs) //nolint:gosec // G706: values are internal, not user-controlled log injection
 
-		// Use container's default user (not yoloai) for Podman --userns=keep-id compatibility
-		if err := rt.InteractiveExec(ctx, containerName, cmdArgs, "", info.Meta.Workdir.MountPath); err != nil {
+		if err := rt.InteractiveExec(ctx, containerName, cmdArgs, tmuxExecUser(info.Meta), info.Meta.Workdir.MountPath); err != nil {
 			var exitErr *exec.ExitError
 			if errors.As(err, &exitErr) {
 				os.Exit(exitErr.ExitCode())

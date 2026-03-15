@@ -36,6 +36,7 @@ type Meta struct {
 	Setup              []string               `json:"setup,omitempty"`
 	AutoCommitInterval int                    `json:"auto_commit_interval,omitempty"`
 	Debug              bool                   `json:"debug,omitempty"`
+	UsernsMode         string                 `json:"userns_mode,omitempty"` // "keep-id" for Podman rootless keep-id; "" otherwise
 }
 
 // WorkdirMeta stores the resolved workdir state at creation time.
