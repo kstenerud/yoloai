@@ -10,7 +10,7 @@ Single Go binary. No runtime dependencies — just the binary and Docker.
 - `--no-color`: Disable colored output.
 - `--json`: Output as JSON for scripting and CI. Errors go to stderr as `{"error": "message"}`. Interactive commands (`attach`, `exec`) reject `--json`.
 - `--debug`: Enable debug-level logging to the sandbox's persistent debug log (`~/.yoloai/sandboxes/<name>/debug.log`). For commands that do not operate on a sandbox, silently ignored. Useful for capturing a detailed trail before a problem occurs, so it is available when filing a bug report.
-- `--bugreport <type>`: Write a structured Markdown bug report. `<type>` is `safe` (sanitized, suitable for sharing) or `full` (unsanitized, for author debugging). Implicitly enables `--debug`. Report is always written regardless of outcome (success, error, panic, or signal). Output filename is auto-generated in the current directory: `yoloai-bugreport-[<sandbox>-]<timestamp>.md`. See [Bug Report Design](bugreport.md).
+- `--bugreport <type>`: Write a structured Markdown bug report. `<type>` is `safe` (sanitized, suitable for sharing) or `unsafe` (unsanitized, for author debugging). Implicitly enables `--debug`. Report is always written regardless of outcome (success, error, panic, or signal). Output filename is auto-generated in the current directory: `yoloai-bugreport-[<sandbox>-]<timestamp>.md`. See [Bug Report Design](bugreport.md).
 
 **Environment Variables:**
 - `YOLOAI_SANDBOX`: Default sandbox name for commands that accept `<name>`. Explicit `<name>` argument always takes precedence. Example: `YOLOAI_SANDBOX=my-task yoloai diff` is equivalent to `yoloai diff my-task`.

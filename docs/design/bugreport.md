@@ -90,7 +90,7 @@ Both mechanisms accept a required `<type>` argument:
 | Type | Description |
 |------|-------------|
 | `safe` | Privacy-conscious report. Sensitive sections omitted or redacted. Suitable for sharing in a public GitHub issue. Includes a "Review before sharing" notice. |
-| `full` | Author/developer report. No omissions, no redaction. Includes a prominent "**Do not share publicly**" warning banner. |
+| `unsafe` | Author/developer report. No omissions, no redaction. Includes a prominent "**Do not share publicly**" warning banner. |
 
 ### Output filename
 
@@ -112,7 +112,7 @@ Report files are created with mode **0600** (owner read/write only).
 
 ```
 yoloai --bugreport safe new x .
-yoloai --bugreport full new x .
+yoloai --bugreport unsafe new x .
 ```
 
 Can be used with any yoloai command. When active:
@@ -135,7 +135,7 @@ yoloai --bugreport safe start x  # captures live debug + prior logs from sandbox
 
 ```
 yoloai sandbox <name> bugreport safe
-yoloai sandbox <name> bugreport full
+yoloai sandbox <name> bugreport unsafe
 ```
 
 Used when a bug occurred in a past run and the user still has the sandbox — no need to reproduce the issue. Collects static diagnostic information from system state and the named sandbox, including all files under `logs/`, which will contain debug-level entries if prior commands were run with `--debug`.
@@ -183,10 +183,10 @@ Verbose sections (system info, backends, config, logs, sandbox detail) are wrapp
 </details>
 ```
 
-`full` reports include a stronger banner:
+`unsafe` reports include a stronger banner:
 
 ```markdown
-> ⛔ FULL REPORT — unsanitized, contains all logs and agent output.
+> ⛔ UNSAFE REPORT — unsanitized, contains all logs and agent output.
 > Do not share publicly.
 ```
 
@@ -196,9 +196,9 @@ Note: `<details>`/`<summary>` is GitHub-Flavored Markdown and may not render cor
 
 ## Report Sections
 
-Columns indicate whether a section is included in `safe` and `full` reports. *(flag)* and *(sandbox)* indicate which mechanism provides the section.
+Columns indicate whether a section is included in `safe` and `unsafe` reports. *(flag)* and *(sandbox)* indicate which mechanism provides the section.
 
-| Section | safe | full |
+| Section | safe | unsafe |
 |---------|------|------|
 | 1. Header | ✓ | ✓ |
 | 2. Command invocation *(flag)* | ✓ redacted | ✓ |
@@ -218,7 +218,7 @@ Columns indicate whether a section is included in `safe` and `full` reports. *(f
 
 - Timestamp (UTC, RFC3339)
 - yoloai version, commit, build date
-- Report type (`safe` or `full`)
+- Report type (`safe` or `unsafe`)
 
 ### 2. Command Invocation *(flag only)*
 
@@ -256,7 +256,7 @@ Global config (`~/.yoloai/config.yaml`) and active profile config, each in a fen
 
 **`agent-status.json`** — full contents.
 
-**`runtime-config.json`** — In `safe` mode, `setup_commands` and `allowed_domains` fields are omitted (may reveal internal infrastructure). In `full` mode, full contents.
+**`runtime-config.json`** — In `safe` mode, `setup_commands` and `allowed_domains` fields are omitted (may reveal internal infrastructure). In `unsafe` mode, full contents.
 
 **Container log** — full output from the container runtime:
 - docker: `docker logs yoloai-<name> 2>&1`
@@ -271,7 +271,7 @@ Full contents. In `safe` mode, `msg` fields are scanned for known-sensitive patt
 
 ### 8. `sandbox.jsonl` *(sandbox commands only)*
 
-In `safe` mode, entries with `event` types that log setup commands or network configuration (`entrypoint.setup_cmd`, `entrypoint.network.*`) are omitted — these may reveal internal infrastructure. In `full` mode, full contents.
+In `safe` mode, entries with `event` types that log setup commands or network configuration (`entrypoint.setup_cmd`, `entrypoint.network.*`) are omitted — these may reveal internal infrastructure. In `unsafe` mode, full contents.
 
 ### 9. `monitor.jsonl` *(sandbox commands only)*
 
@@ -285,7 +285,7 @@ Full contents in both modes. Hook events are idle/active state changes with no u
 
 **Omitted in `safe` mode.** The agent's terminal output is the highest-risk section — it contains the full conversation, processed code, and any secrets the agent encountered in files.
 
-In `full` mode: ANSI-stripped contents of `agent.log`. Raw terminal stream is never included (not meaningful outside a renderer).
+In `unsafe` mode: ANSI-stripped contents of `agent.log`. Raw terminal stream is never included (not meaningful outside a renderer).
 
 ### 12. Live log *(flag only)*
 
@@ -372,7 +372,7 @@ Matched content is replaced with `[REDACTED]` inline, preserving surrounding con
 
 ### Flag (`--bugreport`)
 
-1. Add `--bugreport <type>` as a persistent flag on the root Cobra command in `internal/cli/root.go`. Valid values: `safe`, `full`.
+1. Add `--bugreport <type>` as a persistent flag on the root Cobra command in `internal/cli/root.go`. Valid values: `safe`, `unsafe`.
 2. In `PersistentPreRunE`, if the flag is set:
    - Determine output filename (`yoloai-bugreport-[<name>-]<timestamp>.md`).
    - Open `<filename>.tmp` with mode 0600 immediately.
@@ -405,7 +405,7 @@ Matched content is replaced with `[REDACTED]` inline, preserving surrounding con
 | `writeBugReportSandboxLog(w, name, reportType)` | Section 8 |
 | `writeBugReportMonitorLog(w, name)` | Section 9 |
 | `writeBugReportHooksLog(w, name)` | Section 10 |
-| `writeBugReportAgentOutput(w, name)` | Section 11 (full only) |
+| `writeBugReportAgentOutput(w, name)` | Section 11 (unsafe only) |
 | `bugReportFilename(sandboxName, t)` | Generates output filename |
 | `backendVersion(backend)` | Returns version string from backend CLI, or "" |
 | `sanitizeYAMLConfig(content)` | Redacts values for sensitive key names |
