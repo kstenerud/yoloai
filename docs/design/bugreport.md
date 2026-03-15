@@ -25,13 +25,12 @@ Each file has a single writer, so no file locking is required. POSIX append sema
 Each line in the JSONL log files is a JSON object:
 
 ```json
-{"ts": "2026-03-15T14:23:01.123Z", "seq": 1, "level": "info", "event": "sandbox.start", "msg": "starting sandbox", "backend": "docker", "sandbox": "x"}
+{"ts": "2026-03-15T14:23:01.123Z", "level": "info", "event": "sandbox.start", "msg": "starting sandbox", "backend": "docker", "sandbox": "x"}
 ```
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `ts` | string | RFC3339 timestamp with milliseconds |
-| `seq` | int | Monotonic sequence number — ordering guarantee when timestamps collide |
 | `level` | string | `debug`, `info`, `warn`, `error` |
 | `event` | string | Dot-separated event type: `sandbox.start`, `mount.bind`, `agent.launch`, `backend.exec`, etc. |
 | `msg` | string | Human-readable summary |
@@ -383,7 +382,7 @@ Matched content is replaced with `[REDACTED]` inline, preserving surrounding con
 
 1. Create `logs/` subdirectory in the sandbox state directory.
 2. Replace existing `log.txt` / `monitor.log` with `logs/cli.jsonl`, `logs/sandbox.jsonl`, `logs/monitor.jsonl`, `logs/agent-hooks.jsonl`, and `logs/agent.log`.
-3. Update all internal logging calls to emit structured JSONL entries with `ts`, `seq`, `level`, `event`, `msg` fields.
+3. Update all internal logging calls to emit structured JSONL entries with `ts`, `level`, `event`, `msg` fields.
 4. Update `sandbox <name> log` to the new design (see above).
 5. Agent output capture (tmux pipe-pane) redirects to `logs/agent.log` — format unchanged.
 
@@ -391,9 +390,9 @@ Matched content is replaced with `[REDACTED]` inline, preserving surrounding con
 
 `entrypoint.sh` is refactored into a minimal shell trampoline + a Python script:
 
-- **`entrypoint.sh` (shell, stays thin):** Writes one canned JSONL entry to `logs/sandbox.jsonl` to record that the shell started (evidence of container boot even if Python fails), then `exec`s into `entrypoint.py`. Timestamp via `date -u +%Y-%m-%dT%H:%M:%S.000Z`; seq hardcoded to 1.
+- **`entrypoint.sh` (shell, stays thin):** Writes one canned JSONL entry to `logs/sandbox.jsonl` to record that the shell started (evidence of container boot even if Python fails), then `exec`s into `entrypoint.py`. Timestamp via `date -u +%Y-%m-%dT%H:%M:%S.000Z`.
   ```json
-  {"ts":"...","seq":1,"level":"info","event":"entrypoint.start","msg":"entrypoint.sh started"}
+  {"ts":"...","level":"info","event":"entrypoint.start","msg":"entrypoint.sh started"}
   ```
 - **`entrypoint.py` (new, runs as root):** Handles all real setup work — UID remapping, secrets, network isolation, overlay mounts, setup commands — and writes structured JSONL to `logs/sandbox.jsonl`. Then `exec`s to `gosu yoloai python3 sandbox-setup.py`.
 - **`sandbox-setup.py`:** Continues as the unprivileged Python process; appends to `logs/sandbox.jsonl` for tmux setup, agent launch, and prompt delivery.

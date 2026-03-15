@@ -4,18 +4,6 @@ Open questions from reviewing `docs/design/bugreport.md` from an implementer's p
 
 ---
 
----
-
-## 3. `seq` field — scope and Python restart handling
-
-**Problem:** Two related questions about the `seq` field:
-
-1. **Cross-file scope:** Are sequence numbers meaningful across `cli.jsonl` and `sandbox.jsonl` for interleaving, or per-file? If per-file, the interleaver must use `ts` as the primary sort key with `seq` as a tiebreaker within the same file only.
-
-2. **Python restarts:** If `status-monitor.py` is restarted, how does it resume the sequence number? Read the last line of `monitor.jsonl` on startup? Start from 0 per-session?
-
----
-
 ## 4. `agent-hooks.jsonl` — required hook script changes
 
 **Problem:** Agent hooks currently write `{"status":"idle"}` to `agent-status.json` (overwrite). The design adds `agent-hooks.jsonl` as an append-only log but doesn't specify:
