@@ -46,3 +46,6 @@ jobs:
 
       - name: Run integration tests
         run: make integration
+
+      - name: Run e2e tests
+        run: make e2e

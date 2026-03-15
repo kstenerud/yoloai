@@ -32,7 +32,7 @@ tidy-check:
 	@rm -f go.mod.bak go.sum.bak
 
 ## check: run all CI checks locally (same as PR checks)
-check: lint tidy-check test
+check: lint tidy-check test integration e2e
 
 ## cover: show test coverage per package and total
 cover:
