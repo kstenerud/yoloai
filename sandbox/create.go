@@ -25,6 +25,12 @@ const (
 	NetworkModeIsolated NetworkMode = "isolated" // allowlist only
 )
 
+// isContainerBackend returns true for backends that use OCI containers
+// (Docker, Podman) as opposed to VMs or process sandboxes.
+func isContainerBackend(backend string) bool {
+	return backend == "docker" || backend == "podman"
+}
+
 // DirMode specifies how a directory is mounted in the sandbox.
 type DirMode string
 
@@ -522,8 +528,8 @@ func (m *Manager) launchContainer(ctx context.Context, state *sandboxState) erro
 
 	cname := InstanceName(state.name)
 
-	if state.networkMode == "isolated" && m.backend != "docker" {
-		return fmt.Errorf("--network-isolated requires the docker backend (%s does not support domain-based filtering)", m.backend)
+	if state.networkMode == "isolated" && !isContainerBackend(m.backend) {
+		return fmt.Errorf("--network-isolated requires a container backend (%s does not support domain-based filtering)", m.backend)
 	}
 
 	// Map internal network modes to Docker-understood values.
@@ -558,21 +564,21 @@ func (m *Manager) launchContainer(ctx context.Context, state *sandboxState) erro
 		instanceCfg.Resources = rtResources
 	}
 
-	if state.networkMode == "isolated" && m.backend == "docker" {
+	if state.networkMode == "isolated" && isContainerBackend(m.backend) {
 		instanceCfg.CapAdd = append(instanceCfg.CapAdd, "NET_ADMIN")
 	}
 
 	// CAP_SYS_ADMIN required for overlay mounts inside the container
 	if hasOverlayDirs(state) {
-		if m.backend != "docker" {
-			return fmt.Errorf(":overlay mode requires the docker backend (not supported with %s)", m.backend)
+		if !isContainerBackend(m.backend) {
+			return fmt.Errorf(":overlay mode requires a container backend (not supported with %s)", m.backend)
 		}
 		instanceCfg.CapAdd = append(instanceCfg.CapAdd, "SYS_ADMIN")
 	}
 
-	// Recipe fields (cap_add, devices, setup) are Docker-only
-	if m.backend != "docker" && (len(state.capAdd) > 0 || len(state.devices) > 0 || len(state.setup) > 0) {
-		return fmt.Errorf("cap_add, devices, and setup require the docker backend (not supported with %s)", m.backend)
+	// Recipe fields (cap_add, devices, setup) require a container backend
+	if !isContainerBackend(m.backend) && (len(state.capAdd) > 0 || len(state.devices) > 0 || len(state.setup) > 0) {
+		return fmt.Errorf("cap_add, devices, and setup require a container backend (not supported with %s)", m.backend)
 	}
 	instanceCfg.CapAdd = append(instanceCfg.CapAdd, state.capAdd...)
 	instanceCfg.Devices = state.devices

@@ -298,34 +298,43 @@ func TestRunNewUserSetup_EOF_DefaultsToY(t *testing.T) {
 func TestAvailableBackends_Linux(t *testing.T) {
 	setLinuxPlatform(t)
 	backends := availableBackends()
-	assert.Len(t, backends, 1)
+	assert.Len(t, backends, 2)
 	assert.Equal(t, "docker", backends[0].name)
+	assert.Equal(t, "podman", backends[1].name)
 }
 
 func TestAvailableBackends_MacOSARM(t *testing.T) {
 	setMacOSARMPlatform(t)
 	backends := availableBackends()
-	assert.Len(t, backends, 3)
+	assert.Len(t, backends, 4)
 	assert.Equal(t, "docker", backends[0].name)
-	assert.Equal(t, "seatbelt", backends[1].name)
-	assert.Equal(t, "tart", backends[2].name)
+	assert.Equal(t, "podman", backends[1].name)
+	assert.Equal(t, "seatbelt", backends[2].name)
+	assert.Equal(t, "tart", backends[3].name)
 }
 
 func TestAvailableBackends_MacOSIntel(t *testing.T) {
 	setMacOSIntelPlatform(t)
 	backends := availableBackends()
-	assert.Len(t, backends, 2)
+	assert.Len(t, backends, 3)
 	assert.Equal(t, "docker", backends[0].name)
-	assert.Equal(t, "seatbelt", backends[1].name)
+	assert.Equal(t, "podman", backends[1].name)
+	assert.Equal(t, "seatbelt", backends[2].name)
 }
 
-func TestPromptBackendSetup_SkippedOnLinux(t *testing.T) {
+func TestPromptBackendSetup_ShownOnLinux(t *testing.T) {
 	setLinuxPlatform(t)
-	mgr, output, _ := setupTestManager(t, "")
+	mgr, output, _ := setupTestManager(t, "\n")
 
 	err := mgr.promptBackendSetup(context.Background())
 	require.NoError(t, err)
-	assert.Empty(t, output.String())
+	assert.Contains(t, output.String(), "Default runtime backend")
+	assert.Contains(t, output.String(), "docker")
+	assert.Contains(t, output.String(), "podman")
+
+	cfg, err := LoadConfig()
+	require.NoError(t, err)
+	assert.Equal(t, "docker", cfg.Backend)
 }
 
 func TestPromptBackendSetup_ShownOnMacOS(t *testing.T) {
@@ -348,7 +357,7 @@ func TestPromptBackendSetup_ShownOnMacOS(t *testing.T) {
 
 func TestPromptBackendSetup_SelectSeatbelt(t *testing.T) {
 	setMacOSARMPlatform(t)
-	mgr, _, _ := setupTestManager(t, "2\n")
+	mgr, _, _ := setupTestManager(t, "3\n")
 
 	err := mgr.promptBackendSetup(context.Background())
 	require.NoError(t, err)
@@ -360,7 +369,7 @@ func TestPromptBackendSetup_SelectSeatbelt(t *testing.T) {
 
 func TestPromptBackendSetup_SelectTart(t *testing.T) {
 	setMacOSARMPlatform(t)
-	mgr, _, _ := setupTestManager(t, "3\n")
+	mgr, _, _ := setupTestManager(t, "4\n")
 
 	err := mgr.promptBackendSetup(context.Background())
 	require.NoError(t, err)
@@ -421,8 +430,8 @@ func TestPromptAgentSetup_SelectSecond(t *testing.T) {
 
 func TestRunNewUserSetup_FullFlow_MacOS(t *testing.T) {
 	setMacOSARMPlatform(t)
-	// tmux=y, backend=2(seatbelt), agent=3(codex)
-	mgr, output, _ := setupTestManager(t, "y\n2\n3\n")
+	// tmux=y, backend=3(seatbelt), agent=3(codex)
+	mgr, output, _ := setupTestManager(t, "y\n3\n3\n")
 
 	err := mgr.runNewUserSetup(context.Background(), SetupOptions{})
 	require.NoError(t, err)
@@ -442,10 +451,10 @@ func TestRunNewUserSetup_FullFlow_MacOS(t *testing.T) {
 	assert.Contains(t, output.String(), "Setup complete")
 }
 
-func TestRunNewUserSetup_FullFlow_Linux_SkipsBackend(t *testing.T) {
+func TestRunNewUserSetup_FullFlow_Linux_ShowsBackend(t *testing.T) {
 	setLinuxPlatform(t)
-	// tmux=y, (no backend prompt), agent=1(aider)
-	mgr, output, _ := setupTestManager(t, "y\n1\n")
+	// tmux=y, backend=1(docker), agent=1(aider)
+	mgr, output, _ := setupTestManager(t, "y\n1\n1\n")
 
 	err := mgr.runNewUserSetup(context.Background(), SetupOptions{})
 	require.NoError(t, err)
@@ -460,15 +469,16 @@ func TestRunNewUserSetup_FullFlow_Linux_SkipsBackend(t *testing.T) {
 
 	cfg, err := LoadConfig()
 	require.NoError(t, err)
+	assert.Equal(t, "docker", cfg.Backend)
 	assert.Equal(t, "aider", cfg.Agent)
-	assert.NotContains(t, output.String(), "Default runtime backend")
+	assert.Contains(t, output.String(), "Default runtime backend")
 	assert.Contains(t, output.String(), "Default agent")
 }
 
 func TestRunNewUserSetup_LargeConfig_StillAsksBackendAndAgent(t *testing.T) {
 	setMacOSARMPlatform(t)
-	// Large tmux → auto-configure, but backend=3(tart), agent=3(codex)
-	mgr, output, tmpDir := setupTestManager(t, "3\n3\n")
+	// Large tmux → auto-configure, but backend=4(tart), agent=3(codex)
+	mgr, output, tmpDir := setupTestManager(t, "4\n3\n")
 
 	tmuxConf := strings.Repeat("set -g option value\n", 15)
 	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, ".tmux.conf"), []byte(tmuxConf), 0600))

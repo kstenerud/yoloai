@@ -49,6 +49,22 @@ var knownBackends = []backendInfo{
 		},
 	},
 	{
+		Name:        "podman",
+		Description: "Linux containers (Podman)",
+		Detail: backendDetail{
+			Environment: "Linux (Ubuntu-based container)",
+			Platforms:   "Linux, macOS (via Podman Machine)",
+			Requires:    "Podman installed with API socket activated",
+			InstallHint: "https://podman.io/docs/installation",
+			Tradeoffs: []string{
+				"Daemonless — no background service required",
+				"Rootless by default — better security posture",
+				"Docker-compatible — uses same container images and commands",
+				"Podman socket must be started manually (systemctl --user start podman.socket)",
+			},
+		},
+	},
+	{
 		Name:        "tart",
 		Description: "macOS VMs (Apple Virtualization)",
 		Detail: backendDetail{

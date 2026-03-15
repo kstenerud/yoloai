@@ -100,6 +100,7 @@ func countSignificantLines(content string) int {
 func availableBackends() []setupOption {
 	opts := []setupOption{
 		{"docker", "Linux containers; portable, lightweight, fast"},
+		{"podman", "Linux containers; daemonless, rootless by default"},
 	}
 	if detectedOS() == "darwin" {
 		opts = append(opts, setupOption{

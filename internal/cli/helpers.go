@@ -8,6 +8,7 @@ import (
 
 	"github.com/kstenerud/yoloai/runtime"
 	dockerrt "github.com/kstenerud/yoloai/runtime/docker"
+	podmanrt "github.com/kstenerud/yoloai/runtime/podman"
 	seatbeltrt "github.com/kstenerud/yoloai/runtime/seatbelt"
 	tartrt "github.com/kstenerud/yoloai/runtime/tart"
 	"github.com/kstenerud/yoloai/sandbox"
@@ -19,12 +20,14 @@ func newRuntime(ctx context.Context, backend string) (runtime.Runtime, error) {
 	switch backend {
 	case "docker", "":
 		return dockerrt.New(ctx)
+	case "podman":
+		return podmanrt.New(ctx)
 	case "tart":
 		return tartrt.New(ctx)
 	case "seatbelt":
 		return seatbeltrt.New(ctx)
 	default:
-		return nil, fmt.Errorf("unknown backend: %q (valid: docker, tart, seatbelt)", backend)
+		return nil, fmt.Errorf("unknown backend: %q (valid: docker, podman, tart, seatbelt)", backend)
 	}
 }
 

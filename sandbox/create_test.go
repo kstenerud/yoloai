@@ -18,6 +18,14 @@ import (
 	"github.com/kstenerud/yoloai/workspace"
 )
 
+func TestIsContainerBackend(t *testing.T) {
+	assert.True(t, isContainerBackend("docker"))
+	assert.True(t, isContainerBackend("podman"))
+	assert.False(t, isContainerBackend("tart"))
+	assert.False(t, isContainerBackend("seatbelt"))
+	assert.False(t, isContainerBackend(""))
+}
+
 func TestResolveModel_Alias(t *testing.T) {
 	agentDef := agent.GetAgent("claude")
 	result := resolveModel(agentDef, "sonnet", nil)

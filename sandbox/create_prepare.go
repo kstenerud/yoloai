@@ -244,7 +244,7 @@ func (m *Manager) parseAndValidateDirs(ctx context.Context, opts CreateOptions, 
 			for _, val := range []string{os.Getenv(key), mergedEnv[key]} {
 				if val != "" && containsLocalhost(val) {
 					hint := "use the host's routable IP instead"
-					if m.backend == "docker" {
+					if isContainerBackend(m.backend) {
 						hint = "use host.docker.internal instead"
 					}
 					return nil, nil, NewUsageError("%s contains a localhost address (%s) which won't work inside a %s VM — %s",

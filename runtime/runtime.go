@@ -57,6 +57,7 @@ type InstanceConfig struct {
 	CapAdd      []string
 	Devices     []string
 	UseInit     bool
+	UsernsMode  string // "" = default, "keep-id" = rootless Podman
 	Resources   *ResourceLimits
 }
 

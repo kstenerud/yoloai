@@ -319,7 +319,7 @@ func (r *Runtime) buildProfileImageCLI(ctx context.Context, sourceDir string, ta
 
 	logger.Debug("building profile image via CLI", "tag", tag, "sourceDir", sourceDir, "secrets", len(secrets))
 
-	cmd := exec.CommandContext(ctx, "docker", args...) //nolint:gosec // args are validated by caller
+	cmd := exec.CommandContext(ctx, r.binaryName, args...) //nolint:gosec // args are validated by caller
 	cmd.Dir = sourceDir
 	cmd.Env = append(os.Environ(), "DOCKER_BUILDKIT=1")
 	cmd.Stdout = output
@@ -328,9 +328,9 @@ func (r *Runtime) buildProfileImageCLI(ctx context.Context, sourceDir string, ta
 	if err := cmd.Run(); err != nil {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
-			return fmt.Errorf("docker build exited with code %d", exitErr.ExitCode())
+			return fmt.Errorf("%s build exited with code %d", r.binaryName, exitErr.ExitCode())
 		}
-		return fmt.Errorf("docker build: %w", err)
+		return fmt.Errorf("%s build: %w", r.binaryName, err)
 	}
 	return nil
 }

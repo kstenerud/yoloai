@@ -25,7 +25,8 @@ import (
 
 // Runtime implements runtime.Runtime using the Docker SDK.
 type Runtime struct {
-	client *dockerclient.Client
+	client     *dockerclient.Client
+	binaryName string // CLI binary name ("docker" or "podman")
 }
 
 // Compile-time checks.
@@ -36,11 +37,24 @@ func New(ctx context.Context) (*Runtime, error) {
 	if _, err := exec.LookPath("docker"); err != nil {
 		return nil, fmt.Errorf("docker is not installed, install it from https://docs.docker.com/get-docker/")
 	}
+	return NewWithSocket(ctx, "", "docker")
+}
 
-	cli, err := dockerclient.NewClientWithOpts(
-		dockerclient.FromEnv,
+// NewWithSocket creates a Runtime connected to a specific Docker-compatible socket.
+// If host is empty, the client uses the default Docker environment variables.
+// binaryName is the CLI binary to use for interactive exec and image builds
+// (e.g., "docker" or "podman").
+func NewWithSocket(ctx context.Context, host string, binaryName string) (*Runtime, error) {
+	opts := []dockerclient.Opt{
 		dockerclient.WithAPIVersionNegotiation(),
-	)
+	}
+	if host != "" {
+		opts = append(opts, dockerclient.WithHost(host))
+	} else {
+		opts = append(opts, dockerclient.FromEnv)
+	}
+
+	cli, err := dockerclient.NewClientWithOpts(opts...)
 	if err != nil {
 		return nil, fmt.Errorf("create Docker client: %w", err)
 	}
@@ -48,10 +62,10 @@ func New(ctx context.Context) (*Runtime, error) {
 	_, err = cli.Ping(ctx)
 	if err != nil {
 		_ = cli.Close()
-		return nil, fmt.Errorf("docker daemon is not responding, start Docker Desktop or run 'sudo systemctl start docker'")
+		return nil, fmt.Errorf("%s daemon is not responding, start Docker Desktop or run 'sudo systemctl start docker'", binaryName)
 	}
 
-	return &Runtime{client: cli}, nil
+	return &Runtime{client: cli, binaryName: binaryName}, nil
 }
 
 // EnsureImage seeds Docker build resources and builds/rebuilds the
@@ -128,6 +142,7 @@ func (r *Runtime) Create(ctx context.Context, cfg runtime.InstanceConfig) error 
 		PortBindings: portBindings,
 		Mounts:       mounts,
 		CapAdd:       cfg.CapAdd,
+		UsernsMode:   container.UsernsMode(cfg.UsernsMode),
 	}
 
 	if len(cfg.Devices) > 0 {
@@ -263,7 +278,7 @@ func (r *Runtime) InteractiveExec(ctx context.Context, name string, cmd []string
 	args = append(args, name)
 	args = append(args, cmd...)
 
-	c := exec.CommandContext(ctx, "docker", args...) //nolint:gosec // G204: name and cmd are from validated sandbox state
+	c := exec.CommandContext(ctx, r.binaryName, args...) //nolint:gosec // G204: name and cmd are from validated sandbox state
 	c.Stdin = os.Stdin
 	c.Stdout = os.Stdout
 	c.Stderr = os.Stderr
@@ -275,13 +290,13 @@ func (r *Runtime) Close() error {
 	return r.client.Close()
 }
 
-// DiagHint returns a Docker-specific hint for checking logs.
+// DiagHint returns a backend-specific hint for checking logs.
 func (r *Runtime) DiagHint(instanceName string) string {
-	return fmt.Sprintf("run 'docker logs %s' to see what went wrong", instanceName)
+	return fmt.Sprintf("run '%s logs %s' to see what went wrong", r.binaryName, instanceName)
 }
 
 // Name returns the backend name.
-func (r *Runtime) Name() string { return "docker" }
+func (r *Runtime) Name() string { return r.binaryName }
 
 // convertMounts converts runtime.MountSpec to Docker mount.Mount.
 func convertMounts(specs []runtime.MountSpec) []mount.Mount {
