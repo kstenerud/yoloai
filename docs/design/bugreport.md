@@ -358,7 +358,7 @@ Global config (`~/.yoloai/config.yaml`) and active profile config, each in a fen
 
 **Summary** — status, agent, model, backend, created, disk usage, has-changes.
 
-**`environment.json`** — full contents (no API keys stored here).
+**`environment.json`** — In `safe` mode, parsed with `encoding/json`, `network_allow` and `setup` fields deleted, then re-serialized (`network_allow` reveals allowed domains; `setup` reveals setup commands — same sensitivity as the corresponding fields in `runtime-config.json`). In `unsafe` mode, full contents.
 
 **`agent-status.json`** — full contents.
 
@@ -373,11 +373,11 @@ Errors from a non-running container are included rather than silently omitted.
 
 ### 7. `cli.jsonl` *(sandbox commands only)*
 
-Full contents. In `safe` mode, `msg` fields are scanned for known-sensitive patterns and redacted. Contains debug-level entries if prior commands were run with `--debug`.
+Full contents. In `safe` mode, all string-valued fields are scanned for known-sensitive patterns and redacted (via `sanitizeJSONLFile`). Contains debug-level entries if prior commands were run with `--debug`.
 
 ### 8. `sandbox.jsonl` *(sandbox commands only)*
 
-In `safe` mode, `setup_cmd.*` and `network.allow` entries are omitted and `msg` fields are pattern-scanned for sensitive values (see safe-mode filter in taxonomy above). In `unsafe` mode, full contents.
+In `safe` mode, `setup_cmd.*` and `network.allow` entries are omitted and all string-valued fields are pattern-scanned for sensitive values (see safe-mode filter in taxonomy above). In `unsafe` mode, full contents.
 
 ### 9. `monitor.jsonl` *(sandbox commands only)*
 
@@ -477,6 +477,8 @@ Matched content is replaced with `[REDACTED]` inline, preserving surrounding con
 | `--prompt` flag value in `os.Args` | May contain sensitive task descriptions |
 | `setup_commands` in `runtime-config.json` | May reveal internal infrastructure |
 | `allowed_domains` in `runtime-config.json` | May reveal internal network topology |
+| `setup` in `environment.json` | Same as setup_commands |
+| `network_allow` in `environment.json` | Same as allowed_domains |
 | `sandbox.jsonl` network/setup entries | Same as above |
 | Full environment dump | Too noisy; may expose unrelated secrets |
 | Credential/key files | Never appropriate for a bug report |
@@ -490,10 +492,11 @@ Matched content is replaced with `[REDACTED]` inline, preserving surrounding con
 ### Structured logging (prerequisite)
 
 1. Create `logs/` subdirectory in the sandbox state directory **on the host before container start** — `entrypoint.sh` writes to it as its first action inside the container, so the directory must be visible via the bind mount immediately.
-2. Replace existing `log.txt` / `monitor.log` with `logs/cli.jsonl`, `logs/sandbox.jsonl`, `logs/monitor.jsonl`, `logs/agent-hooks.jsonl`, and `logs/agent.log`.
+2. Replace existing `log.txt` / `monitor.log` with `logs/cli.jsonl`, `logs/sandbox.jsonl`, `logs/monitor.jsonl`, `logs/agent-hooks.jsonl`, and `logs/agent.log`. Update the path constants in `sandbox/paths.go`.
 3. Update all internal logging calls to emit structured JSONL entries with `ts`, `level`, `event`, `msg` fields.
 4. Update `sandbox <name> log` to the new design (see above).
-5. Agent output capture (tmux pipe-pane) redirects to `logs/agent.log` — format unchanged.
+5. **Python-side change:** Update `sandbox-setup.py` to redirect `tmux pipe-pane` output to `logs/agent.log` instead of `log.txt`. Remove the existing `sys.stdout`/`sys.stderr` redirect to `log.txt` — sandbox-setup.py will write structured JSONL directly instead of relying on stdout capture.
+6. **Python-side change:** Update `status-monitor.py` to write structured JSONL to `logs/monitor.jsonl` instead of `monitor.log`.
 
 #### Container entrypoint refactor
 
@@ -512,8 +515,10 @@ The existing CLI logger must be replaced with a multi-sink structured logger bef
 
 - **Multiple simultaneous sinks** — each sink is an `io.Writer` with its own minimum level filter
 - **Sinks:** (1) stderr (for `--verbose` terminal output), (2) `cli.jsonl` file per sandbox, (3) bugreport temp file when `--bugreport` is active
-- **`cli.jsonl` sink is added lazily** — the sandbox name is a subcommand positional argument, not known at `PersistentPreRunE` time. Each sandbox subcommand's `RunE` opens `logs/cli.jsonl` and registers it as a sink before doing any other work. Log entries emitted in `PersistentPreRunE` before the sink is registered go to whichever other sinks are already active (bugreport temp file, stderr)
-- **Bugreport sink receives all levels** — not filtered to debug only; the temp file is the flight recorder
+- **Single initialization point** — construct the multi-sink logger in `PersistentPreRunE` and call `slog.SetDefault()`. All existing `slog.Default()` call sites in the CLI (e.g. `sandbox.NewManager(rt, slog.Default(), ...)`) automatically pick it up with no other changes.
+- **`cli.jsonl` sink is added lazily** — the sandbox name is a subcommand positional argument, not known at `PersistentPreRunE` time. Each sandbox subcommand's `RunE` opens `logs/cli.jsonl` and registers it as a sink before doing any other work. Log entries emitted in `PersistentPreRunE` before the sink is registered go to whichever other sinks are already active (bugreport temp file, stderr).
+- **`--debug` flag:** currently defined as a local flag on `new` and `reset` commands. Must be removed from those commands and replaced with the new global persistent `--debug` flag; behavior is unchanged.
+- **Bugreport sink receives all levels** — not filtered to debug only; the temp file is the flight recorder.
 - **Live log entries are buffered in memory** — the bugreport sink accumulates entries in a `[]LogEntry` slice during the run. `writeBugReportLiveLog` writes them all in the `defer` finalizer, preserving document section order. Entry count is bounded by CLI operation duration, which is short.
 
 New file: `internal/cli/logger.go`.
@@ -534,9 +539,9 @@ New file: `internal/cli/logger.go`.
 
 ### Command (`sandbox <name> bugreport`)
 
-1. New file: `internal/cli/sandbox_bugreport.go`
-2. Wire into `newSandboxNameCmd()` in `internal/cli/sandbox.go`
-3. Pass `version`, `commit`, `date` strings into the constructor (same pattern as `newSystemInfoCmd`)
+1. New file: `internal/cli/sandbox_bugreport.go` — implements `runSandboxBugReport()`
+2. Add a `"bugreport"` case to `sandboxDispatch()` in `internal/cli/sandbox_cmd.go` dispatching to `runSandboxBugReport()`
+3. Pass `version`, `commit`, `date` strings via a closure or package-level vars (same pattern as other commands in the dispatch switch)
 4. No new external dependencies
 
 ### Key functions
