@@ -248,43 +248,6 @@ func TestPodman_ImageExists(t *testing.T) {
 
 // Podman-specific tests
 
-func TestPodman_RootlessUsernsKeepID(t *testing.T) {
-	rt, ctx := podmanSetup(t)
-
-	// Skip this test - rootless UID mapping behavior varies across environments
-	// The --userns=keep-id flag is being set correctly in production code,
-	// but test validation is environment-dependent (GitHub Actions CI, macOS Podman Machine,
-	// native Linux all behave differently). Core functionality tests cover the integration.
-	t.Skip("Skipping - rootless UID mapping behavior is environment-dependent")
-
-	// Skip on rootful Podman (running as root)
-	if !isRootless() {
-		t.Skip("Skipping rootless test — running as root")
-	}
-
-	hostDir := t.TempDir()
-	testFile := filepath.Join(hostDir, "test.txt")
-	require.NoError(t, os.WriteFile(testFile, []byte("test"), 0644))
-
-	// Create container — should automatically get --userns=keep-id
-	name := createTestContainer(t, rt, ctx, yoloairuntime.InstanceConfig{
-		UseInit: true,
-		Mounts: []yoloairuntime.MountSpec{
-			{Source: hostDir, Target: "/mnt/test", ReadOnly: false},
-		},
-	})
-	require.NoError(t, rt.Start(ctx, name))
-
-	// Check file ownership inside container
-	result, err := rt.Exec(ctx, name, []string{"stat", "-c", "%u:%g", "/mnt/test/test.txt"}, "")
-	require.NoError(t, err)
-
-	// With --userns=keep-id, files should not appear as root-owned (0:0)
-	// The exact UID/GID mapping may vary by Podman configuration,
-	// but it should preserve the host user's ownership
-	assert.NotEqual(t, "0:0", result.Stdout, "file should not appear as root-owned with keep-id")
-}
-
 func TestPodman_Name(t *testing.T) {
 	rt, ctx := podmanSetup(t)
 	_ = ctx // unused but keep for consistency
