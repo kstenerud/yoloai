@@ -59,7 +59,7 @@ Each line in the JSONL log files is a JSON object:
 | Flag | Effect |
 |------|--------|
 | `--verbose` | More output printed to the terminal. No effect on log files. |
-| `--debug` | Enables `debug`-level entries in the sandbox's JSONL log files. Silently ignored for non-sandbox commands (no log location to write to). |
+| `--debug` | Enables `debug`-level entries in the sandbox's JSONL log files. Silently ignored for non-sandbox commands (no log location to write to). Only affects the CLI's own `cli.jsonl` output — container processes (`sandbox.jsonl`, `monitor.jsonl`) read their debug flag from `runtime-config.json` at container creation time (`new`) and cannot be re-configured by `--debug` on subsequent commands like `start`. To get container-side debug logs, pass `--debug` to `new`. |
 | `--bugreport <type>` | Implies `--debug`. See below. |
 
 ---

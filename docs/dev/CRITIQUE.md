@@ -4,14 +4,6 @@ Open questions from reviewing `docs/design/bugreport.md` from an implementer's p
 
 ---
 
-## 6. `--debug` reaching container processes — timing issue
-
-**Problem:** The doc says `--debug` enables debug-level entries in `sandbox.jsonl` and `monitor.jsonl`. These are Python processes inside the container that read their debug flag from `runtime-config.json` at startup. But `runtime-config.json` is written at container creation time.
-
-**Timing issue:** `yoloai --debug start x` — the container already exists, `runtime-config.json` is already written with whatever `debug` value was set at `new` time. Does `--debug` on `start` affect container-side logging at all, or only the CLI's own `cli.jsonl` output?
-
----
-
 ## 7. JSONL interleaving algorithm and `--follow`
 
 **Problem:** `sandbox <name> log` interleaves four JSONL files by timestamp. The algorithm is unspecified for the `--follow` case in particular:
