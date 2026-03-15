@@ -50,9 +50,64 @@ Each line in the JSONL log files is a JSON object:
 |-------|------|-------------|
 | `ts` | string | RFC3339 timestamp with milliseconds |
 | `level` | string | `debug`, `info`, `warn`, `error` |
-| `event` | string | Dot-separated event type: `sandbox.start`, `mount.bind`, `agent.launch`, `backend.exec`, etc. |
+| `event` | string | Dot-separated event type — see taxonomy below |
 | `msg` | string | Human-readable summary |
 | *(additional fields)* | | Per-event structured data (e.g. `backend`, `sandbox`, `path`) |
+
+### Event type taxonomy
+
+#### `sandbox.jsonl` and `monitor.jsonl`
+
+`sandbox.jsonl` is written by three sequential processes: the shell trampoline (`entrypoint.sh`), the root Python entrypoint (`entrypoint.py`), and the unprivileged setup script (`sandbox-setup.py`). `monitor.jsonl` is written solely by `status-monitor.py`.
+
+| Event | Writer | Level | Fields | Description |
+|-------|--------|-------|--------|-------------|
+| `entrypoint.start` | entrypoint.sh | info | — | Shell trampoline started (canned entry) |
+| `entrypoint.python_start` | entrypoint.py | info | — | Root Python entrypoint started |
+| `uid.remap` | entrypoint.py | info | `host_uid`, `host_gid` | UID/GID remapping applied |
+| `uid.remap_skip` | entrypoint.py | debug | — | UID already correct, remapping skipped |
+| `secrets.write` | entrypoint.py | info | `path`, `kind` | Credential file written |
+| `secrets.skip` | entrypoint.py | debug | — | No credentials to inject |
+| `network.isolate` | entrypoint.py | info | — | Default-deny iptables rule applied |
+| `network.allow` | entrypoint.py | info | `domain`, `ip` | Domain added to allowlist |
+| `overlay.mount` | entrypoint.py | info | `path` | Overlayfs mount applied |
+| `overlay.skip` | entrypoint.py | debug | — | No overlay mounts configured |
+| `setup_cmd.start` | entrypoint.py | info | `cmd`, `index`, `total` | Setup command starting |
+| `setup_cmd.done` | entrypoint.py | info | `exit_code`, `duration_ms` | Setup command finished |
+| `setup_cmd.error` | entrypoint.py | error | `exit_code`, `cmd` | Setup command failed |
+| `sandbox.backend_setup` | sandbox-setup.py | info | `backend` | Backend-specific setup (seatbelt symlinks, tart mounts) |
+| `overlay.git_baseline` | sandbox-setup.py | info | `path` | Git baseline commit on overlay merged directory (Docker only) |
+| `sandbox.tmux_start` | sandbox-setup.py | info | — | tmux session created |
+| `sandbox.agent_launch` | sandbox-setup.py | info | `agent`, `model` | Agent process started |
+| `sandbox.prompt_deliver` | sandbox-setup.py | info | `method` | Prompt delivered to agent |
+| `sandbox.prompt_skip` | sandbox-setup.py | info | — | No prompt.txt; agent started without prompt |
+| `sandbox.monitor_launch` | sandbox-setup.py | info | — | status-monitor.py spawned |
+| `sandbox.ready` | sandbox-setup.py | info | — | Sandbox fully initialized |
+| `sandbox.agent_exit` | sandbox-setup.py | info | `exit_code` | Agent process exited |
+| `monitor.start` | status-monitor.py | info | `detectors` | Monitor started |
+| `detector.result` | status-monitor.py | **debug** | `detector`, `confidence`, `status` | Per-poll detector verdict (very frequent) |
+| `status.transition` | status-monitor.py | info | `from`, `to`, `detector` | Status changed (includes `to=done` on pane death) |
+| `monitor.exit` | status-monitor.py | info | `reason` | Monitor exiting |
+
+#### `agent-hooks.jsonl`
+
+| Event | Level | Fields | Description |
+|-------|-------|--------|-------------|
+| `hook.idle` | info | `status` | Notification hook fired (agent idle) |
+| `hook.active` | info | `status` | PreToolUse hook fired (agent active) |
+
+#### `cli.jsonl`
+
+Events are defined by the Go CLI implementation. Event names follow the same `component.action` convention (e.g. `sandbox.create`, `mount.bind`, `backend.exec`). Exact taxonomy defined during implementation.
+
+#### Safe-mode filter
+
+The following event types are omitted from `sandbox.jsonl` in `safe` mode — they may reveal internal infrastructure:
+
+- `setup_cmd.*` — setup commands may contain internal hostnames or credentials
+- `network.allow` — allowed domains reveal internal network topology
+
+All other events pass through (field-level pattern scanning still applies to `msg` values).
 
 ### `--debug` and `--verbose`
 
@@ -309,7 +364,7 @@ Full contents. In `safe` mode, `msg` fields are scanned for known-sensitive patt
 
 ### 8. `sandbox.jsonl` *(sandbox commands only)*
 
-In `safe` mode, entries with `event` types that log setup commands or network configuration (`entrypoint.setup_cmd`, `entrypoint.network.*`) are omitted — these may reveal internal infrastructure. In `unsafe` mode, full contents.
+In `safe` mode, `setup_cmd.*` and `network.allow` entries are omitted and `msg` fields are pattern-scanned for sensitive values (see safe-mode filter in taxonomy above). In `unsafe` mode, full contents.
 
 ### 9. `monitor.jsonl` *(sandbox commands only)*
 
