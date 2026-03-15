@@ -14,3 +14,4 @@ Research documents supporting yoloAI's design decisions. Each file covers a broa
 | [Idle Detection](research/idle-detection.md) | Full audit of current idle detection code, external research on detection approaches, pluggable detector architecture |
 | [macOS Idle Detection](research/macos-idle-detection.md) | macOS-specific process idle detection: sysctl KERN_PROC, libproc, DTrace, Mach APIs, network monitoring |
 | [Agentic Workflows](research/agentic-workflows.md) | Community sentiment on autonomous agents, TDD subagent patterns, authority splitting, review gap, skill ecosystem |
+| [Podman](research/podman.md) | Podman backend: SDK options, Docker-compat socket, rootless file ownership, overlay concerns, implementation scope, open questions |
