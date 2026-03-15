@@ -4,3 +4,4 @@ Open questions from reviewing `docs/design/bugreport.md` from an implementer's p
 
 ---
 
+*All items from this critique pass have been resolved and applied.*

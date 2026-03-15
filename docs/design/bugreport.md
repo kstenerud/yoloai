@@ -131,13 +131,26 @@ Pretty-printed, interleaved stream of `logs/cli.jsonl`, `logs/sandbox.jsonl`, `l
 - **Static (no `--follow`):** Read all four files fully, merge-sort by `ts`, emit. Ordering is exact.
 - **`--follow`:** One goroutine per file tails its file and sends lines to a merge channel; lines are emitted as they arrive. Ordering is approximate — sub-second reordering between files is possible but inconsequential since all lines carry timestamps.
 
+**Pretty-print format:**
+
 ```
-14:23:01 [cli]     info   sandbox.start    starting sandbox (backend=docker)
-14:23:02 [sandbox] info   entrypoint.uid   remapped uid 0 → 1000
-14:23:03 [cli]     info   mount.bind       bound /home/karl/Projects/foo
-14:23:05 [sandbox] info   agent.launch     agent process started
-14:23:06 [hooks]   info   agent.active     hook reported active
-14:23:09 [monitor] warn   agent.idle       no output for 30s
+HH:MM:SS src     LEVL  event-name               message  key=val key=val...
+```
+
+- **Time:** local timezone, `HH:MM:SS`
+- **Source:** 7 chars, right-padded: `cli    `, `sandbox`, `monitor`, `hooks  `
+- **Level:** 4 chars uppercase: `INFO`, `WARN`, `ERRO`, `DBUG`
+- **Event:** 24 chars, right-padded (fits all taxonomy events without abbreviation)
+- **Message + extra fields:** remaining columns to terminal edge (from `$COLUMNS` or `os.Stdout` size, fallback 120). Extra fields shown as `key=val` pairs after the message, in order of diagnostic importance (e.g. `exit_code`, `duration_ms`, `agent`, `model`, `path`). The entire line is hard-truncated at terminal width — no wrapping.
+
+```
+14:23:01 cli     INFO  sandbox.create           creating sandbox  backend=docker name=x
+14:23:02 sandbox INFO  entrypoint.python_start  root entrypoint started
+14:23:02 sandbox INFO  uid.remap                UID/GID remapped  host_uid=1000 host_gid=1000
+14:23:03 sandbox INFO  overlay.mount            overlay mounted   path=/home/karl/Projects/foo
+14:23:05 sandbox INFO  sandbox.agent_launch     agent started     agent=claude model=claude-opus-4-6
+14:23:06 hooks   INFO  hook.active              agent hook: active
+14:23:09 monitor INFO  status.transition        status changed    from=active to=idle detector=hook
 ```
 
 ### Flags
@@ -150,7 +163,6 @@ The command operates in one of three mutually exclusive modes selected by flag. 
 |------|--------|
 | `--source <sources>` | Show only the specified sources instead of all four interleaved. Comma-separated list of: `cli`, `sandbox`, `monitor`, `hooks`. E.g. `--source cli,monitor` |
 | `--level debug\|info\|warn\|error` | Filter by minimum log level (default: `info`) |
-| `--debug` | Shorthand for `--level debug` |
 | `--since <duration\|timestamp>` | e.g. `--since 5m` or `--since 14:20:00` |
 | `--raw` | Emit lines as raw JSONL (no formatting) |
 
@@ -215,7 +227,7 @@ Can be used with any yoloai command. When active:
 - For sandbox commands, the existing JSONL log files are included in the report — prior `--debug` runs will have contributed debug-level entries to `cli.jsonl`.
 - The report is **always written** regardless of outcome: success, error, panic, or signal.
 
-For non-sandbox commands (e.g. `yoloai ls`, `yoloai system info`), the report contains only sections 1–5, 12, and 13 — no sandbox detail or log files are included.
+For non-sandbox commands (e.g. `yoloai ls`, `yoloai system info`), the report contains only sections 1–5, 13, and 14 — no sandbox detail or log files are included.
 
 Typical workflow for a hard-to-reproduce bug:
 ```
@@ -304,8 +316,9 @@ Columns indicate whether a section is included in `safe` and `unsafe` reports. *
 | 9. `monitor.jsonl` *(sandbox)* | ✓ | ✓ |
 | 10. `agent-hooks.jsonl` *(sandbox)* | ✓ | ✓ |
 | 11. Agent output *(sandbox)* | ✗ omitted | ✓ |
-| 12. Live log *(flag)* | ✓ sanitized | ✓ |
-| 13. Exit *(flag)* | ✓ | ✓ |
+| 12. tmux screen capture *(sandbox)* | ✗ omitted | ✓ |
+| 13. Live log *(flag)* | ✓ sanitized | ✓ |
+| 14. Exit *(flag)* | ✓ | ✓ |
 
 ### 1. Header
 
@@ -315,7 +328,7 @@ Columns indicate whether a section is included in `safe` and `unsafe` reports. *
 
 ### 2. Command Invocation *(flag only)*
 
-Full `os.Args` as a fenced code block. In `safe` mode, values for `--prompt` / `-p` flags are redacted: `--prompt [REDACTED]`.
+Full `os.Args` as a fenced code block. In `safe` mode, values for `--prompt` / `-p` flags are redacted: `--prompt [REDACTED]`. `--prompt-file` / `-P` paths are not redacted (the path itself is not sensitive; file contents are never included).
 
 ### 3. System
 
@@ -397,11 +410,11 @@ DCS/APC/SOS/PM sequences are left as best-effort (span multiple lines, vanishing
 
 **Omitted in `safe` mode** (screen contents may contain sensitive data).
 
-In `unsafe` mode: output of `tmux capture-pane -p -t <session>`, which renders the current pane contents as plain text. Silently omitted if the sandbox is not running or the tmux session is not found. Provides a snapshot of what was on screen at the time of the report — useful context even after the agent has exited, as long as the container is still up.
+In `unsafe` mode: output of `tmux capture-pane -p -t main`, which renders the current pane contents as plain text. Session name is always `main`. For seatbelt sandboxes, the non-default socket must be specified: `tmux -S $state_dir/tmux/tmux.sock capture-pane -p -t main`. For all other backends, the default socket is used. Silently omitted if the sandbox is not running or the tmux session is not found. Provides a snapshot of what was on screen at the time of the report — useful context even after the agent has exited, as long as the container is still up.
 
 ### 13. Live log *(flag only)*
 
-All debug-level log entries captured during the run. In `safe` mode, `msg` fields are scanned and sanitized as with `cli.jsonl`.
+All log entries (all levels) captured from the CLI logger during the run. In `safe` mode, `msg` fields are scanned and sanitized as with `cli.jsonl`.
 
 ### 14. Exit *(flag only)*
 
@@ -493,17 +506,29 @@ Matched content is replaced with `[REDACTED]` inline, preserving surrounding con
 - **`entrypoint.py` (new, runs as root):** Handles all real setup work — UID remapping, secrets, network isolation, overlay mounts, setup commands — and writes structured JSONL to `logs/sandbox.jsonl`. Then `exec`s to `gosu yoloai python3 sandbox-setup.py`.
 - **`sandbox-setup.py`:** Continues as the unprivileged Python process; appends to `logs/sandbox.jsonl` for tmux setup, agent launch, and prompt delivery.
 
+### CLI logger rewrite (prerequisite)
+
+The existing CLI logger must be replaced with a multi-sink structured logger before bug reporting or `cli.jsonl` can be implemented. Requirements:
+
+- **Multiple simultaneous sinks** — each sink is an `io.Writer` with its own minimum level filter
+- **Sinks:** (1) stderr (for `--verbose` terminal output), (2) `cli.jsonl` file per sandbox, (3) bugreport temp file when `--bugreport` is active
+- **`cli.jsonl` sink is added lazily** — the sandbox name is a subcommand positional argument, not known at `PersistentPreRunE` time. Each sandbox subcommand's `RunE` opens `logs/cli.jsonl` and registers it as a sink before doing any other work. Log entries emitted in `PersistentPreRunE` before the sink is registered go to whichever other sinks are already active (bugreport temp file, stderr)
+- **Bugreport sink receives all levels** — not filtered to debug only; the temp file is the flight recorder
+
+New file: `internal/cli/logger.go`.
+
 ### Flag (`--bugreport`)
 
 1. Add `--bugreport <type>` as a persistent flag on the root Cobra command in `internal/cli/root.go`. Valid values: `safe`, `unsafe`.
 2. In `PersistentPreRunE`, if the flag is set:
-   - Determine output filename (`yoloai-bugreport-[<name>-]<timestamp>.md`).
+   - Determine output filename (`yoloai-bugreport-<timestamp>.md`).
    - Open `<filename>.tmp` with mode 0600 immediately.
    - Write static sections (header, command invocation, system, backends, config).
-   - Install a debug log handler that appends to the temp file.
+   - Register the temp file as an all-levels sink on the CLI logger.
    - Register a `defer` with `recover()` to write exit/error info and rename temp → final.
    - Print filename to stderr after rename.
    - Check file size and warn to stderr if > 65,536 characters.
+   - Orphaned `.tmp` files from prior SIGKILLed runs are left in place — they contain partial diagnostic data and should not be silently deleted.
 3. New file: `internal/cli/bugreport_writer.go` — shared section-writing logic.
 
 ### Command (`sandbox <name> bugreport`)
@@ -529,7 +554,11 @@ Matched content is replaced with `[REDACTED]` inline, preserving surrounding con
 | `writeBugReportMonitorLog(w, name)` | Section 9 |
 | `writeBugReportHooksLog(w, name)` | Section 10 |
 | `writeBugReportAgentOutput(w, name)` | Section 11 (unsafe only) |
+| `writeBugReportTmuxCapture(w, name, backend, stateDir)` | Section 12 (unsafe only); uses seatbelt socket when needed |
+| `writeBugReportLiveLog(w, entries, reportType)` | Section 13 (flag only) |
+| `writeBugReportExit(w, code, err, panicked)` | Section 14 (flag only) |
 | `bugReportFilename(t)` | Generates output filename from UTC timestamp |
 | `backendVersion(backend)` | Returns version string from backend CLI, or "" |
-| `sanitizeYAMLConfig(content)` | Redacts values for sensitive key names |
-| `sanitizeText(content)` | Applies pattern scanning to free-text content (JSONL msg fields, container logs, etc.) |
+| `sanitizeYAMLConfig(content)` | Redacts values for sensitive key names; operates on raw YAML text line-by-line |
+| `sanitizeJSONLFile(path, reportType, omitEvents)` | Reads a JSONL file, omits specified event types, applies pattern scanning to string fields of each parsed object; passes through malformed lines unmodified |
+| `sanitizeText(content)` | Applies pattern scanning to raw free-text (container logs, environment.json values, etc.) |
