@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 
 	"github.com/kstenerud/yoloai/sandbox"
 	"github.com/spf13/cobra"
@@ -20,12 +19,11 @@ func runLog(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	sandboxDir, err := sandbox.RequireSandboxDir(name)
 	if err != nil {
 		return err
 	}
 
-	logPath := filepath.Join(sandboxDir, "log.txt")
+	logPath := sandbox.AgentLogPath(name)
 
 	if jsonEnabled(cmd) {
 		data, readErr := os.ReadFile(logPath) //nolint:gosec

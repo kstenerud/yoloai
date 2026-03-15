@@ -475,16 +475,12 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 		}
 	}
 
-	if err := os.WriteFile(filepath.Join(sandboxDir, "log.txt"), nil, 0600); err != nil {
-		return nil, fmt.Errorf("write log.txt: %w", err)
+	if err := os.MkdirAll(filepath.Join(sandboxDir, LogsDir), 0700); err != nil {
+		return nil, fmt.Errorf("create logs dir: %w", err)
 	}
 
 	if err := os.WriteFile(filepath.Join(sandboxDir, AgentStatusFile), []byte("{}\n"), 0600); err != nil {
 		return nil, fmt.Errorf("write %s: %w", AgentStatusFile, err)
-	}
-
-	if err := os.WriteFile(filepath.Join(sandboxDir, "monitor.log"), nil, 0600); err != nil {
-		return nil, fmt.Errorf("write monitor.log: %w", err)
 	}
 
 	if err := os.WriteFile(filepath.Join(sandboxDir, RuntimeConfigFile), configData, 0600); err != nil {
@@ -628,7 +624,7 @@ func (m *Manager) launchContainer(ctx context.Context, state *sandboxState) erro
 		return fmt.Errorf("inspect instance after start: %w", err)
 	}
 	if !info.Running {
-		logPath := filepath.Join(state.sandboxDir, "log.txt")
+		logPath := filepath.Join(state.sandboxDir, AgentLogFile)
 		if tail := readLogTail(logPath, 20); tail != "" {
 			return fmt.Errorf("instance exited immediately:\n%s", tail)
 		}
@@ -1020,22 +1016,16 @@ func buildMounts(state *sandboxState, secretsDir string) []runtime.MountSpec {
 		})
 	}
 
-	// Log file
+	// Structured log directory (cli.jsonl, sandbox.jsonl, monitor.jsonl, agent-hooks.jsonl, agent.log)
 	mounts = append(mounts, runtime.MountSpec{
-		Source: filepath.Join(state.sandboxDir, "log.txt"),
-		Target: "/yoloai/log.txt",
+		Source: filepath.Join(state.sandboxDir, LogsDir),
+		Target: "/yoloai/" + LogsDir,
 	})
 
 	// Agent status file (for in-container status monitor)
 	mounts = append(mounts, runtime.MountSpec{
 		Source: filepath.Join(state.sandboxDir, AgentStatusFile),
 		Target: "/yoloai/" + AgentStatusFile,
-	})
-
-	// Monitor debug log (written by status-monitor.py when --debug is set)
-	mounts = append(mounts, runtime.MountSpec{
-		Source: filepath.Join(state.sandboxDir, "monitor.log"),
-		Target: "/yoloai/monitor.log",
 	})
 
 	// Prompt file
@@ -1377,15 +1367,17 @@ func ensureShellContainerSettings(sandboxDir string) error {
 	return nil
 }
 
-// statusIdleCommand writes idle status to agent-status.json when Claude
-// finishes a response (Notification hook). Uses $YOLOAI_DIR for portability
-// across backends (Docker=/yoloai, seatbelt=sandbox dir).
-const statusIdleCommand = `printf '{"status":"idle","exit_code":null,"timestamp":%d}\n' "$(date +%s)" > "${YOLOAI_DIR:-/yoloai}/agent-status.json"`
+// statusIdleCommand writes idle status to agent-status.json and appends a
+// structured JSONL entry to logs/agent-hooks.jsonl when Claude finishes a
+// response (Notification hook). Uses $YOLOAI_DIR for portability across
+// backends (Docker=/yoloai, seatbelt=sandbox dir).
+const statusIdleCommand = `printf '{"ts":"%s","level":"info","event":"hook.idle","msg":"agent hook: idle","status":"idle"}\n' "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" >> "${YOLOAI_DIR:-/yoloai}/logs/agent-hooks.jsonl" && printf '{"status":"idle","exit_code":null,"timestamp":%d}\n' "$(date +%s)" > "${YOLOAI_DIR:-/yoloai}/agent-status.json"`
 
-// statusActiveCommand writes active status to agent-status.json when Claude
-// starts working (PreToolUse hook). This ensures the title updates from "> name"
-// back to "name" when the user submits a new prompt.
-const statusActiveCommand = `printf '{"status":"active","exit_code":null,"timestamp":%d}\n' "$(date +%s)" > "${YOLOAI_DIR:-/yoloai}/agent-status.json"`
+// statusActiveCommand writes active status to agent-status.json and appends a
+// structured JSONL entry to logs/agent-hooks.jsonl when Claude starts working
+// (PreToolUse hook). This ensures the title updates from "> name" back to
+// "name" when the user submits a new prompt.
+const statusActiveCommand = `printf '{"ts":"%s","level":"info","event":"hook.active","msg":"agent hook: active","status":"active"}\n' "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" >> "${YOLOAI_DIR:-/yoloai}/logs/agent-hooks.jsonl" && printf '{"status":"active","exit_code":null,"timestamp":%d}\n' "$(date +%s)" > "${YOLOAI_DIR:-/yoloai}/agent-status.json"`
 
 // injectIdleHook merges hooks into Claude Code's settings map for status tracking.
 // Notification → idle (turn complete), PreToolUse → running (work started).

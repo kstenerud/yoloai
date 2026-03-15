@@ -233,8 +233,9 @@ func (m *Manager) Reset(ctx context.Context, opts ResetOptions) error {
 	// Stop the container (if running)
 	_ = m.Stop(ctx, opts.Name)
 
-	// Truncate log so each run starts fresh
-	_ = os.Truncate(filepath.Join(sandboxDir, "log.txt"), 0)
+	// Clear logs so each run starts fresh
+	_ = os.RemoveAll(filepath.Join(sandboxDir, LogsDir))
+	_ = os.MkdirAll(filepath.Join(sandboxDir, LogsDir), 0700)
 
 	var newSHA string
 	if meta.Workdir.Mode == "overlay" {

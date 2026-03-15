@@ -37,6 +37,24 @@ const (
 
 	// BackendDir holds backend-specific files (seatbelt profile, pid, logs).
 	BackendDir = config.BackendDirName
+
+	// LogsDir holds per-sandbox structured log files.
+	LogsDir = "logs"
+
+	// CLIJSONLFile is the relative path to the CLI structured log within the sandbox dir.
+	CLIJSONLFile = "logs/cli.jsonl"
+
+	// SandboxJSONLFile is the relative path to the container entrypoint structured log.
+	SandboxJSONLFile = "logs/sandbox.jsonl"
+
+	// MonitorJSONLFile is the relative path to the status monitor structured log.
+	MonitorJSONLFile = "logs/monitor.jsonl"
+
+	// HooksJSONLFile is the relative path to the agent hooks structured log.
+	HooksJSONLFile = "logs/agent-hooks.jsonl"
+
+	// AgentLogFile is the relative path to the raw agent terminal output log.
+	AgentLogFile = "logs/agent.log"
 )
 
 // safeASCII marks ASCII bytes that do NOT need caret encoding.
@@ -286,19 +304,39 @@ func AgentStatusFilePath(name string) string {
 	return filepath.Join(Dir(name), AgentStatusFile)
 }
 
-// LogFilePath returns the path to log.txt for a sandbox.
-func LogFilePath(name string) string {
-	return filepath.Join(Dir(name), "log.txt")
+// LogsPath returns the logs/ directory for a sandbox.
+func LogsPath(name string) string {
+	return filepath.Join(Dir(name), LogsDir)
+}
+
+// CLIJSONLPath returns the path to logs/cli.jsonl for a sandbox.
+func CLIJSONLPath(name string) string {
+	return filepath.Join(Dir(name), CLIJSONLFile)
+}
+
+// SandboxJSONLPath returns the path to logs/sandbox.jsonl for a sandbox.
+func SandboxJSONLPath(name string) string {
+	return filepath.Join(Dir(name), SandboxJSONLFile)
+}
+
+// MonitorJSONLPath returns the path to logs/monitor.jsonl for a sandbox.
+func MonitorJSONLPath(name string) string {
+	return filepath.Join(Dir(name), MonitorJSONLFile)
+}
+
+// HooksJSONLPath returns the path to logs/agent-hooks.jsonl for a sandbox.
+func HooksJSONLPath(name string) string {
+	return filepath.Join(Dir(name), HooksJSONLFile)
+}
+
+// AgentLogPath returns the path to logs/agent.log for a sandbox.
+func AgentLogPath(name string) string {
+	return filepath.Join(Dir(name), AgentLogFile)
 }
 
 // PromptFilePath returns the path to prompt.txt for a sandbox.
 func PromptFilePath(name string) string {
 	return filepath.Join(Dir(name), "prompt.txt")
-}
-
-// MonitorLogFilePath returns the path to monitor.log for a sandbox.
-func MonitorLogFilePath(name string) string {
-	return filepath.Join(Dir(name), "monitor.log")
 }
 
 // RequireSandboxDir returns the sandbox directory path after verifying it exists.

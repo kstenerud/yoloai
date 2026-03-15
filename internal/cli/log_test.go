@@ -19,7 +19,7 @@ func setupLogTest(t *testing.T, name string) string {
 	t.Setenv("HOME", tmpDir)
 
 	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
-	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
+	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, "logs"), 0750))
 
 	meta := &sandbox.Meta{
 		Name:      name,
@@ -33,7 +33,7 @@ func setupLogTest(t *testing.T, name string) string {
 
 func TestRunLog_FileExists(t *testing.T) {
 	sandboxDir := setupLogTest(t, "logtest")
-	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, "log.txt"), []byte("hello world\n"), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, "logs", "agent.log"), []byte("hello world\n"), 0600))
 
 	cmd := newLogAliasCmd()
 	buf := new(bytes.Buffer)
@@ -59,7 +59,7 @@ func TestRunLog_FileMissing(t *testing.T) {
 func TestRunLog_RawPreservesANSI(t *testing.T) {
 	sandboxDir := setupLogTest(t, "logtest-raw")
 	ansiContent := "\x1b[31mred text\x1b[0m\n"
-	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, "log.txt"), []byte(ansiContent), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, "logs", "agent.log"), []byte(ansiContent), 0600))
 
 	cmd := newLogAliasCmd()
 	buf := new(bytes.Buffer)
@@ -73,7 +73,7 @@ func TestRunLog_RawPreservesANSI(t *testing.T) {
 func TestRunLog_NoRawStripsANSI(t *testing.T) {
 	sandboxDir := setupLogTest(t, "logtest-strip")
 	ansiContent := "\x1b[31mred text\x1b[0m\n"
-	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, "log.txt"), []byte(ansiContent), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, "logs", "agent.log"), []byte(ansiContent), 0600))
 
 	cmd := newLogAliasCmd()
 	buf := new(bytes.Buffer)
@@ -87,7 +87,7 @@ func TestRunLog_NoRawStripsANSI(t *testing.T) {
 
 func TestRunLog_JSONWithContent(t *testing.T) {
 	sandboxDir := setupLogTest(t, "logtest-json")
-	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, "log.txt"), []byte("log content"), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, "logs", "agent.log"), []byte("log content"), 0600))
 
 	cmd := newLogAliasCmd()
 	cmd.PersistentFlags().Bool("json", false, "")

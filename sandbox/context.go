@@ -90,9 +90,9 @@ func GenerateContext(meta *Meta) string {
 	if meta.Debug {
 		rtDir := runtimeDir(meta)
 		b.WriteString("\n## Idle Detection Debugging\n\n")
-		fmt.Fprintf(&b, "This sandbox has `--debug` enabled. The idle detection monitor writes detailed logs to `%s/monitor.log`.\n\n", rtDir)
+		fmt.Fprintf(&b, "This sandbox has `--debug` enabled. The idle detection monitor writes detailed logs to `%s/logs/monitor.jsonl`.\n\n", rtDir)
 		b.WriteString("If the user asks you to help debug idle detection (e.g. status stuck on active/idle), check these files:\n\n")
-		fmt.Fprintf(&b, "- `%s/monitor.log` — per-cycle trace: each detector's result, stability counters, final decision\n", rtDir)
+		fmt.Fprintf(&b, "- `%s/logs/monitor.jsonl` — per-cycle trace: each detector's result, stability counters, final decision\n", rtDir)
 		fmt.Fprintf(&b, "- `%s/%s` — current status written by the monitor\n", rtDir, AgentStatusFile)
 		fmt.Fprintf(&b, "- `%s/%s` — sandbox config including detector stack (`detectors` field) and idle settings\n", rtDir, RuntimeConfigFile)
 		fmt.Fprintf(&b, "\nYou can also run `%s/%s/diagnose-idle.sh` for a point-in-time snapshot of all idle detection state.\n", rtDir, BinDir)

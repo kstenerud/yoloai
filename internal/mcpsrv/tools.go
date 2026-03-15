@@ -326,7 +326,7 @@ func (s *Server) handleSandboxLog(_ context.Context, req mcp.CallToolRequest) (*
 		lines = 100
 	}
 
-	logPath := sandbox.LogFilePath(name)
+	logPath := sandbox.AgentLogPath(name)
 	output, err := tailFile(logPath, lines)
 	if err != nil {
 		return textResult(errorf("read log for sandbox %q: %v", name, err)), nil
