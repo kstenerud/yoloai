@@ -43,6 +43,7 @@ Use --patches to export .patch files without applying them.`,
 			if err != nil {
 				return err
 			}
+			defer openCLIJSONLSink(name, cmd)()
 
 			yes := effectiveYes(cmd)
 			squash, _ := cmd.Flags().GetBool("squash")

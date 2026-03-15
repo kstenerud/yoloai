@@ -36,13 +36,13 @@ func newXCmd() *cobra.Command {
 func registerExtensionSubcommands(parent *cobra.Command) {
 	exts, err := extension.LoadAll()
 	if err != nil {
-		slog.Debug("failed to load extensions", "error", err)
+		slog.Debug("failed to load extensions", "event", "extension.load_error", "error", err)
 		return
 	}
 
 	for _, ext := range exts {
 		if err := extension.Validate(ext); err != nil {
-			slog.Debug("skipping invalid extension", "name", ext.Name, "error", err)
+			slog.Debug("skipping invalid extension", "event", "extension.skip", "name", ext.Name, "error", err)
 			continue
 		}
 		parent.AddCommand(newExtensionRunCmd(ext))

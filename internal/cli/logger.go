@@ -7,9 +7,11 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"os"
 	"strings"
 	"sync"
 
+	"github.com/kstenerud/yoloai/sandbox"
 	"github.com/spf13/cobra"
 )
 
@@ -128,6 +130,24 @@ func newJSONLHandler(w io.Writer, minLevel slog.Level) slog.Handler {
 			return a
 		},
 	})
+}
+
+// openCLIJSONLSink opens logs/cli.jsonl for the named sandbox and registers it
+// as a JSONL sink on the global logger. Returns a cleanup func (call with defer).
+// No-op (returns empty func) if the sandbox logs directory doesn't exist yet.
+func openCLIJSONLSink(name string, cmd *cobra.Command) func() {
+	path := sandbox.CLIJSONLPath(name)
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600) //nolint:gosec // G304: path derived from trusted sandbox dir
+	if err != nil {
+		return func() {}
+	}
+	debug, _ := cmd.Flags().GetBool("debug")
+	level := slog.LevelInfo
+	if debug {
+		level = slog.LevelDebug
+	}
+	AddLogSink(f, level)
+	return func() { _ = f.Close() }
 }
 
 // newTextHandler returns a human-readable slog.Handler for stderr output.

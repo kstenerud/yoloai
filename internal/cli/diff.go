@@ -41,6 +41,7 @@ Examples:
 			if err != nil {
 				return err
 			}
+			defer openCLIJSONLSink(name, cmd)()
 
 			stat, _ := cmd.Flags().GetBool("stat")
 			nameOnly, _ := cmd.Flags().GetBool("name-only")

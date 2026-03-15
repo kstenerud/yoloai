@@ -26,6 +26,7 @@ func newAttachCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			defer openCLIJSONLSink(name, cmd)()
 
 			resume, _ := cmd.Flags().GetBool("resume")
 
@@ -63,7 +64,7 @@ func newAttachCmd() *cobra.Command {
 					}
 				}
 
-				slog.Debug("attaching to tmux session", "container", containerName)
+				slog.Debug("attaching to tmux session", "event", "sandbox.attach", "container", containerName)
 				return attachToSandbox(ctx, rt, containerName, name, user)
 			})
 		},

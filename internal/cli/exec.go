@@ -22,6 +22,7 @@ func runExec(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	defer openCLIJSONLSink(name, cmd)()
 	if len(rest) == 0 {
 		return sandbox.NewUsageError("command is required")
 	}
@@ -39,7 +40,7 @@ func runExec(cmd *cobra.Command, args []string) error {
 		}
 
 		containerName := sandbox.InstanceName(name)
-		slog.Debug("exec in container", "container", containerName, "cmd", cmdArgs) //nolint:gosec // G706: values are internal, not user-controlled log injection
+		slog.Debug("exec in container", "event", "sandbox.exec", "container", containerName, "cmd", cmdArgs) //nolint:gosec // G706: values are internal, not user-controlled log injection
 
 		if err := rt.InteractiveExec(ctx, containerName, cmdArgs, tmuxExecUser(info.Meta), info.Meta.Workdir.MountPath); err != nil {
 			var exitErr *exec.ExitError

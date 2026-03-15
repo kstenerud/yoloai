@@ -22,6 +22,7 @@ func newResetCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			defer openCLIJSONLSink(name, cmd)()
 			noPrompt, _ := cmd.Flags().GetBool("no-prompt")
 			restart, _ := cmd.Flags().GetBool("restart")
 			clearState, _ := cmd.Flags().GetBool("clear-state")

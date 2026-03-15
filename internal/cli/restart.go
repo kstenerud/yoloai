@@ -23,6 +23,7 @@ func newRestartCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			defer openCLIJSONLSink(name, cmd)()
 
 			attach, _ := cmd.Flags().GetBool("attach")
 			resume, _ := cmd.Flags().GetBool("resume")
