@@ -108,14 +108,15 @@ Both mechanisms accept a required `<type>` argument:
 
 Reports are written to the current directory with an auto-generated name:
 
-- Sandbox commands: `yoloai-bugreport-<name>-<timestamp>.md`
-- Non-sandbox commands: `yoloai-bugreport-<timestamp>.md`
+```
+yoloai-bugreport-<timestamp>.md
+```
 
-Timestamp format: UTC, `YYYYMMDD-HHMMSS` (seconds precision). Example: `20260315-142301`.
+Timestamp format: UTC, `YYYYMMDD-HHMMSS` (seconds precision). Example: `yoloai-bugreport-20260315-142301.md`. The sandbox name is included inside the report, not in the filename.
 
 The filename is printed to stderr after writing:
 ```
-Bug report written: yoloai-bugreport-x-20260315-142301.md
+Bug report written: yoloai-bugreport-20260315-142301.md
 ```
 
 The temp file during writing is `<filename>.tmp`. On SIGKILL, the temp file survives with whatever was captured up to that point.
@@ -422,7 +423,7 @@ Matched content is replaced with `[REDACTED]` inline, preserving surrounding con
 | `writeBugReportMonitorLog(w, name)` | Section 9 |
 | `writeBugReportHooksLog(w, name)` | Section 10 |
 | `writeBugReportAgentOutput(w, name)` | Section 11 (unsafe only) |
-| `bugReportFilename(sandboxName, t)` | Generates output filename |
+| `bugReportFilename(t)` | Generates output filename from UTC timestamp |
 | `backendVersion(backend)` | Returns version string from backend CLI, or "" |
 | `sanitizeYAMLConfig(content)` | Redacts values for sensitive key names |
 | `sanitizeText(content)` | Applies pattern scanning to free-text content (JSONL msg fields, container logs, etc.) |

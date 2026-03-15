@@ -4,18 +4,6 @@ Open questions from reviewing `docs/design/bugreport.md` from an implementer's p
 
 ---
 
-## 1. `--bugreport` filename — chicken-and-egg with sandbox name
-
-**Problem:** `--bugreport` fires in `PersistentPreRunE` on the root command, before any subcommand runs. The sandbox name (needed for `yoloai-bugreport-<name>-<timestamp>.md`) is determined by `resolveName()` inside each subcommand. At pre-run time, the name is not yet known.
-
-**Options:**
-- Parse `os.Args` directly in `PersistentPreRunE` to extract the name positional argument — fragile, couples pre-run to CLI structure.
-- Open the temp file with a placeholder name; defer the final rename (with correct sandbox name) until after the command completes — loses the sandbox name in the filename if the command panics before the name is resolved.
-- Drop the sandbox name from flag-mode filenames; always use `yoloai-bugreport-<timestamp>.md` — simpler, consistent with non-sandbox commands. Sandbox name already appears inside the report.
-- Set a package-level variable in `PersistentPreRunE` that subcommands populate once they resolve the name; the finalizer uses it for the rename.
-
----
-
 ## 2. `sandbox.jsonl` — how does bash write JSONL?
 
 **Problem:** `entrypoint.sh` is a bash script. Writing well-formed JSONL (correct timestamps, monotonic sequence numbers, JSON-escaped strings) from bash is non-trivial and error-prone. `jq` may not be available in all container images.
