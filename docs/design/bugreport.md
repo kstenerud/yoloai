@@ -68,7 +68,7 @@ Pretty-printed, interleaved stream of `logs/cli.jsonl`, `logs/sandbox.jsonl`, `l
 
 | Flag | Effect |
 |------|--------|
-| `--source cli\|sandbox\|monitor\|hooks` | Show only one structured source instead of interleaved |
+| `--source <sources>` | Show only the specified sources instead of all four interleaved. Comma-separated list of: `cli`, `sandbox`, `monitor`, `hooks`. E.g. `--source cli,monitor` |
 | `--level debug\|info\|warn\|error` | Filter by minimum log level (default: `info`) |
 | `--debug` | Shorthand for `--level debug` |
 | `--follow` / `-f` | Tail the log live |
