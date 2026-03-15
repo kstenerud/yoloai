@@ -4,17 +4,6 @@ Open questions from reviewing `docs/design/bugreport.md` from an implementer's p
 
 ---
 
-## 4. `agent-hooks.jsonl` — required hook script changes
-
-**Problem:** Agent hooks currently write `{"status":"idle"}` to `agent-status.json` (overwrite). The design adds `agent-hooks.jsonl` as an append-only log but doesn't specify:
-
-- The JSONL schema for hook entries
-- Whether hooks write to `agent-hooks.jsonl` in addition to `agent-status.json`, or instead of
-- Whether this is a yoloai-side change (yoloai installs the hook scripts) or requires agent-side changes
-- How hooks know the path to `agent-hooks.jsonl`
-
----
-
 ## 5. `runtime-config.json` field omission in `safe` mode
 
 **Problem:** The doc says `setup_commands` and `allowed_domains` are "omitted" in `safe` mode. The YAML sanitizer is line-by-line with no parser dependency — but JSON field omission without a parser is fragile (multiline values, nested structures, varied whitespace).

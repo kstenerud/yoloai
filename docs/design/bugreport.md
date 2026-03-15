@@ -16,6 +16,24 @@ Each sandbox maintains log files named by writer, under `~/.yoloai/sandboxes/<na
 
 `agent-status.json` is retained as the IPC mechanism between hook scripts and status-monitor.py — it is not a log file. `agent-hooks.jsonl` is a separate append-only log of hook events for diagnostic purposes.
 
+Hook commands are shell strings injected by yoloai into the agent's settings (e.g. Claude Code's `~/.claude/settings.json`) via `injectIdleHook()`. They have access to `$YOLOAI_DIR` (e.g. `/yoloai` in Docker containers), so the log path is `${YOLOAI_DIR}/logs/agent-hooks.jsonl`. Each hook command appends one JSONL entry to `agent-hooks.jsonl` **and** overwrites `agent-status.json` (the latter is still required by `HookDetector` in `status-monitor.py`). No agent-side changes are needed — hooks are fully yoloai-side.
+
+Hook JSONL entries use the standard schema with an added `status` field:
+
+```json
+{"ts": "2026-03-15T14:23:01.123Z", "level": "info", "event": "hook.idle", "msg": "agent hook: idle", "status": "idle"}
+{"ts": "2026-03-15T14:23:05.456Z", "level": "info", "event": "hook.active", "msg": "agent hook: active", "status": "active"}
+```
+
+The hook commands (built in `create.go`) append to the JSONL log then overwrite the status file:
+
+```sh
+printf '{"ts":"%s","level":"info","event":"hook.idle","msg":"agent hook: idle","status":"idle"}\n' \
+  "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" >> "${YOLOAI_DIR}/logs/agent-hooks.jsonl" && \
+printf '{"status":"idle","exit_code":null,"timestamp":%d}\n' "$(date +%s)" \
+  > "${YOLOAI_DIR}/agent-status.json"
+```
+
 Agent output is a raw terminal recording — not loggable alongside structured events. It is treated as a separate artifact, not a log source.
 
 Each file has a single writer, so no file locking is required. POSIX append semantics are sufficient for `agent.log`.
