@@ -65,7 +65,8 @@ func newAttachCmd() *cobra.Command {
 				slog.Debug("attaching to tmux session", "container", containerName)
 				setTerminalTitle(name)
 				defer setTerminalTitle("")
-				return rt.InteractiveExec(ctx, containerName, []string{"tmux", "attach", "-t", "main"}, "yoloai", "")
+				// Use container's default user (not yoloai) for Podman --userns=keep-id compatibility
+				return rt.InteractiveExec(ctx, containerName, []string{"tmux", "attach", "-t", "main"}, "", "")
 			})
 		},
 	}

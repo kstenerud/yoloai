@@ -405,7 +405,8 @@ func setTerminalTitle(title string) {
 func attachToSandbox(ctx context.Context, rt runtime.Runtime, containerName, sandboxName string) error {
 	setTerminalTitle(sandboxName)
 	defer setTerminalTitle("")
-	return rt.InteractiveExec(ctx, containerName, []string{"tmux", "attach", "-t", "main"}, "yoloai", "")
+	// Use container's default user (not yoloai) for Podman --userns=keep-id compatibility
+	return rt.InteractiveExec(ctx, containerName, []string{"tmux", "attach", "-t", "main"}, "", "")
 }
 
 func newVersionCmd(version, commit, date string) *cobra.Command {
