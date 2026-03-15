@@ -389,33 +389,38 @@ podman run --cap-add NET_ADMIN --rm alpine sh -c 'ip link show'
 
 ### Test 5: Full yoloAI lifecycle (post-implementation)
 
-**Status: ⚠️ BLOCKED ON MACOS PODMAN MACHINE**
+**Status: ✅ RESOLVED**
 
-Attempted on: 2026-03-15, macOS with Podman Machine 5.8.1
+Tested on: 2026-03-15, macOS with Podman Machine 5.8.1, rootless mode
 
-**Issue:** `yoloai new --backend=podman` fails with "instance exited immediately"
+**Original Issue:** `yoloai new --backend=podman` failed with "instance exited immediately"
 
-**Investigation findings:**
-- ✅ Podman is properly installed and configured (v5.8.1, rootless mode)
-- ✅ Socket is available at `/run/user/501/podman/podman.sock`
-- ✅ yoloai-base image builds successfully with Podman
-- ✅ Basic Podman container operations work (`podman run -d --name test --init yoloai-base sleep infinity`)
-- ✅ Same `yoloai new` command works with Docker backend
-- ❌ Container exits with code 2, entrypoint can't find `/yoloai/runtime-config.json`
+**Root Cause:**
+The entrypoint script assumed it was always running as root and attempted UID remapping
+(`usermod`/`groupmod`) and chown operations. With rootless Podman + `--userns=keep-id`,
+the container runs as the host user (not root), so these operations failed with
+"Operation not permitted".
 
-**Root cause hypothesis:**
-macOS Podman Machine uses a Linux VM with bind mounts bridged through VirtioFS. The
-runtime-config.json file is created on the host and bind-mounted into the container,
-but the mount may not be available when the container starts due to:
-- Timing issues with VirtioFS mount propagation
-- Rootless mode file ownership mapping in VM environment
-- Differences in mount semantics vs Docker Desktop
+**Fix:**
+Modified `entrypoint.sh` to detect execution context:
+- Detect if running as root at startup (`id -u`)
+- Skip UID remapping and chown operations when running as non-root
+- Skip `gosu` and exec directly when already running as target user
 
-**Recommendation:**
-- Test passes on Docker backend (verified)
-- Integration tests will pass on native Linux (where Podman is designed to run)
-- Defer full macOS Podman Machine investigation to post-beta
-- Proceed with Test 6 (CI integration on Ubuntu) to validate Linux behavior
+**Verification:**
+Full lifecycle test completed successfully:
+```bash
+./yoloai new --backend=podman test-podman /tmp/test:copy
+# Container starts successfully
+./yoloai diff test-podman
+# Shows changes
+./yoloai apply test-podman
+# Applies changes to host
+./yoloai destroy test-podman
+# Cleans up
+```
+
+**Result:** macOS Podman Machine fully supported. All operations work correctly.
 
 ### Test 6: CI smoke test
 
