@@ -46,3 +46,26 @@ jobs:
 
       - name: Run e2e tests
         run: make e2e
+
+  integration-podman:
+    runs-on: ubuntu-24.04
+    needs: check
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Verify Podman installation
+        run: |
+          podman version
+          podman info
+
+      - name: Start Podman socket
+        run: |
+          systemctl --user enable --now podman.socket
+          systemctl --user status podman.socket --no-pager
+
+      - name: Build image and run Podman integration tests
+        run: make integration-podman

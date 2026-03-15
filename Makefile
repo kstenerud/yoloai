@@ -4,7 +4,7 @@ COMMIT  := $(shell git rev-parse --short HEAD 2>/dev/null || echo "none")
 DATE    := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 LDFLAGS := -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(DATE)
 
-.PHONY: build test fmt lint tidy-check check cover integration e2e clean
+.PHONY: build test fmt lint tidy-check check cover integration e2e integration-podman clean
 
 build:
 	CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o $(BINARY) ./cmd/yoloai
@@ -51,6 +51,13 @@ integration: base-image
 
 e2e: base-image
 	go test -tags=e2e -v -count=1 -timeout=15m ./test/e2e/
+
+## integration-podman: run Podman integration tests (requires Podman with socket)
+integration-podman: build
+	@echo "Building base image with Podman..."
+	@./$(BINARY) system build --backend=podman
+	@echo "Running Podman integration tests..."
+	@go test -tags=integration -v -count=1 -timeout=10m ./runtime/podman/
 
 clean:
 	rm -f $(BINARY)

@@ -5,9 +5,10 @@ package podman
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
-	"github.com/kstenerud/yoloai/runtime"
+	yoloairuntime "github.com/kstenerud/yoloai/runtime"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -15,7 +16,7 @@ import (
 func TestPodman_CreateStartStopRemove(t *testing.T) {
 	rt, ctx := podmanSetup(t)
 
-	name := createTestContainer(t, rt, ctx, runtime.InstanceConfig{
+	name := createTestContainer(t, rt, ctx, yoloairuntime.InstanceConfig{
 		UseInit: true,
 	})
 
@@ -34,13 +35,13 @@ func TestPodman_CreateStartStopRemove(t *testing.T) {
 	require.NoError(t, rt.Remove(ctx, name))
 
 	_, err = rt.Inspect(ctx, name)
-	assert.ErrorIs(t, err, runtime.ErrNotFound)
+	assert.ErrorIs(t, err, yoloairuntime.ErrNotFound)
 }
 
 func TestPodman_InspectRunning(t *testing.T) {
 	rt, ctx := podmanSetup(t)
 
-	name := createTestContainer(t, rt, ctx, runtime.InstanceConfig{
+	name := createTestContainer(t, rt, ctx, yoloairuntime.InstanceConfig{
 		UseInit: true,
 	})
 	require.NoError(t, rt.Start(ctx, name))
@@ -53,7 +54,7 @@ func TestPodman_InspectRunning(t *testing.T) {
 func TestPodman_InspectStopped(t *testing.T) {
 	rt, ctx := podmanSetup(t)
 
-	name := createTestContainer(t, rt, ctx, runtime.InstanceConfig{
+	name := createTestContainer(t, rt, ctx, yoloairuntime.InstanceConfig{
 		UseInit: true,
 	})
 	require.NoError(t, rt.Start(ctx, name))
@@ -68,13 +69,13 @@ func TestPodman_InspectNotFound(t *testing.T) {
 	rt, ctx := podmanSetup(t)
 
 	_, err := rt.Inspect(ctx, "yoloai-nonexistent-container-xyz")
-	assert.ErrorIs(t, err, runtime.ErrNotFound)
+	assert.ErrorIs(t, err, yoloairuntime.ErrNotFound)
 }
 
 func TestPodman_ExecSimple(t *testing.T) {
 	rt, ctx := podmanSetup(t)
 
-	name := createTestContainer(t, rt, ctx, runtime.InstanceConfig{
+	name := createTestContainer(t, rt, ctx, yoloairuntime.InstanceConfig{
 		UseInit: true,
 	})
 	require.NoError(t, rt.Start(ctx, name))
@@ -88,7 +89,7 @@ func TestPodman_ExecSimple(t *testing.T) {
 func TestPodman_ExecNonZeroExit(t *testing.T) {
 	rt, ctx := podmanSetup(t)
 
-	name := createTestContainer(t, rt, ctx, runtime.InstanceConfig{
+	name := createTestContainer(t, rt, ctx, yoloairuntime.InstanceConfig{
 		UseInit: true,
 	})
 	require.NoError(t, rt.Start(ctx, name))
@@ -102,7 +103,7 @@ func TestPodman_ExecNotRunning(t *testing.T) {
 	rt, ctx := podmanSetup(t)
 
 	// Create but don't start
-	name := createTestContainer(t, rt, ctx, runtime.InstanceConfig{
+	name := createTestContainer(t, rt, ctx, yoloairuntime.InstanceConfig{
 		UseInit: true,
 	})
 
@@ -115,9 +116,9 @@ func TestPodman_BindMountReadWrite(t *testing.T) {
 
 	hostDir := t.TempDir()
 
-	name := createTestContainer(t, rt, ctx, runtime.InstanceConfig{
+	name := createTestContainer(t, rt, ctx, yoloairuntime.InstanceConfig{
 		UseInit: true,
-		Mounts: []runtime.MountSpec{
+		Mounts: []yoloairuntime.MountSpec{
 			{Source: hostDir, Target: "/mnt/test", ReadOnly: false},
 		},
 	})
@@ -137,9 +138,9 @@ func TestPodman_BindMountReadOnly(t *testing.T) {
 	hostDir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(hostDir, "readonly.txt"), []byte("original"), 0600))
 
-	name := createTestContainer(t, rt, ctx, runtime.InstanceConfig{
+	name := createTestContainer(t, rt, ctx, yoloairuntime.InstanceConfig{
 		UseInit: true,
-		Mounts: []runtime.MountSpec{
+		Mounts: []yoloairuntime.MountSpec{
 			{Source: hostDir, Target: "/mnt/test", ReadOnly: true},
 		},
 	})
@@ -158,9 +159,9 @@ func TestPodman_BindMountReadOnly(t *testing.T) {
 func TestPodman_ResourceLimits(t *testing.T) {
 	rt, ctx := podmanSetup(t)
 
-	name := createTestContainer(t, rt, ctx, runtime.InstanceConfig{
+	name := createTestContainer(t, rt, ctx, yoloairuntime.InstanceConfig{
 		UseInit: true,
-		Resources: &runtime.ResourceLimits{
+		Resources: &yoloairuntime.ResourceLimits{
 			NanoCPUs: 1_000_000_000, // 1 CPU
 			Memory:   256 * 1024 * 1024,
 		},
@@ -176,9 +177,9 @@ func TestPodman_ResourceLimits(t *testing.T) {
 func TestPodman_PortBinding(t *testing.T) {
 	rt, ctx := podmanSetup(t)
 
-	name := createTestContainer(t, rt, ctx, runtime.InstanceConfig{
+	name := createTestContainer(t, rt, ctx, yoloairuntime.InstanceConfig{
 		UseInit: true,
-		Ports: []runtime.PortMapping{
+		Ports: []yoloairuntime.PortMapping{
 			{HostPort: "0", InstancePort: "8080", Protocol: "tcp"},
 		},
 	})
@@ -194,7 +195,7 @@ func TestPodman_PortBinding(t *testing.T) {
 func TestPodman_NetworkNone(t *testing.T) {
 	rt, ctx := podmanSetup(t)
 
-	name := createTestContainer(t, rt, ctx, runtime.InstanceConfig{
+	name := createTestContainer(t, rt, ctx, yoloairuntime.InstanceConfig{
 		UseInit:     true,
 		NetworkMode: "none",
 	})
@@ -212,7 +213,7 @@ func TestPodman_NetworkNone(t *testing.T) {
 func TestPodman_StopIdempotent(t *testing.T) {
 	rt, ctx := podmanSetup(t)
 
-	name := createTestContainer(t, rt, ctx, runtime.InstanceConfig{
+	name := createTestContainer(t, rt, ctx, yoloairuntime.InstanceConfig{
 		UseInit: true,
 	})
 	require.NoError(t, rt.Start(ctx, name))
@@ -225,7 +226,7 @@ func TestPodman_StopIdempotent(t *testing.T) {
 func TestPodman_RemoveIdempotent(t *testing.T) {
 	rt, ctx := podmanSetup(t)
 
-	name := createTestContainer(t, rt, ctx, runtime.InstanceConfig{
+	name := createTestContainer(t, rt, ctx, yoloairuntime.InstanceConfig{
 		UseInit: true,
 	})
 	require.NoError(t, rt.Remove(ctx, name))
@@ -251,6 +252,12 @@ func TestPodman_ImageExists(t *testing.T) {
 func TestPodman_RootlessUsernsKeepID(t *testing.T) {
 	rt, ctx := podmanSetup(t)
 
+	// Skip on macOS — Podman Machine uses a VM with different UID mapping behavior
+	// This test is specific to Linux rootless Podman
+	if runtime.GOOS == "darwin" {
+		t.Skip("Skipping on macOS — test requires native Linux rootless Podman")
+	}
+
 	// Skip on rootful Podman (running as root)
 	if !isRootless() {
 		t.Skip("Skipping rootless test — running as root")
@@ -261,9 +268,9 @@ func TestPodman_RootlessUsernsKeepID(t *testing.T) {
 	require.NoError(t, os.WriteFile(testFile, []byte("test"), 0644))
 
 	// Create container — should automatically get --userns=keep-id
-	name := createTestContainer(t, rt, ctx, runtime.InstanceConfig{
+	name := createTestContainer(t, rt, ctx, yoloairuntime.InstanceConfig{
 		UseInit: true,
-		Mounts: []runtime.MountSpec{
+		Mounts: []yoloairuntime.MountSpec{
 			{Source: hostDir, Target: "/mnt/test", ReadOnly: false},
 		},
 	})
