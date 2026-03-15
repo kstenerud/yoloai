@@ -355,8 +355,9 @@ func waitForTmux(ctx context.Context, rt runtime.Runtime, containerName string, 
 			return fmt.Errorf("container %s is not running", containerName)
 		}
 
-		// Check if tmux session exists
-		_, err = rt.Exec(ctx, containerName, []string{"tmux", "has-session", "-t", "main"}, "yoloai")
+		// Check if tmux session exists (run as container's default user, not yoloai,
+		// since with Podman --userns=keep-id the session is created by the host user)
+		_, err = rt.Exec(ctx, containerName, []string{"tmux", "has-session", "-t", "main"}, "")
 		if err == nil {
 			return nil
 		}
