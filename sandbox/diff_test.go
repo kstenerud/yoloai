@@ -203,7 +203,7 @@ func TestGenerateDiffStat_CopyMode(t *testing.T) {
 	writeTestFile(t, workDir, "file.txt", "modified content\n")
 	writeTestFile(t, workDir, "new.txt", "added file\n")
 
-	result, err := GenerateDiffStat(DiffOptions{Name: "test-stat"})
+	result, err := GenerateDiff(DiffOptions{Name: "test-stat", Stat: true})
 	require.NoError(t, err)
 	assert.False(t, result.Empty)
 	assert.Contains(t, result.Output, "file.txt")

@@ -270,7 +270,7 @@ func (s *Server) handleSandboxDiff(_ context.Context, req mcp.CallToolRequest) (
 		return textResult(errorf("name is required")), nil
 	}
 
-	results, err := sandbox.GenerateMultiDiff(name, stat)
+	results, err := sandbox.GenerateMultiDiff(sandbox.DiffOptions{Name: name, Stat: stat})
 	if err != nil {
 		return textResult(errorf("diff sandbox %q: %v", name, err)), nil
 	}

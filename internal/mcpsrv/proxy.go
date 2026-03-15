@@ -369,7 +369,7 @@ func (p *ProxyServer) run(ctx context.Context, in io.Reader, out io.Writer, _ *s
 func (p *ProxyServer) handleProxyDiff(args map[string]any) map[string]any {
 	stat, _ := args["stat"].(bool)
 
-	results, err := sandbox.GenerateMultiDiff(p.sandboxName, stat)
+	results, err := sandbox.GenerateMultiDiff(sandbox.DiffOptions{Name: p.sandboxName, Stat: stat})
 	if err != nil {
 		return mcpTextContent(errorf("diff sandbox %q: %v", p.sandboxName, err))
 	}

@@ -117,22 +117,7 @@ Examples:
 				return err
 			}
 
-			if stat {
-				result, err := sandbox.GenerateDiffStat(opts)
-				if err != nil {
-					return err
-				}
-				if jsonEnabled(cmd) {
-					return writeJSON(cmd.OutOrStdout(), result)
-				}
-				if result.Empty {
-					_, err = fmt.Fprintln(cmd.OutOrStdout(), "No changes")
-					return err
-				}
-				_, err = fmt.Fprintln(cmd.OutOrStdout(), result.Output)
-				return err
-			}
-
+			opts.Stat = stat
 			result, err := sandbox.GenerateDiff(opts)
 			if err != nil {
 				return err
@@ -194,19 +179,13 @@ func diffOverlay(cmd *cobra.Command, name string, stat, nameOnly bool) error {
 		}
 
 		// Get overlay diffs via container exec
-		var overlayResults []*sandbox.DiffResult
-		var err error
-		if nameOnly {
-			overlayResults, err = sandbox.GenerateOverlayDiffNameOnly(ctx, rt, name)
-		} else {
-			overlayResults, err = sandbox.GenerateOverlayDiff(ctx, rt, name, stat)
-		}
+		overlayResults, err := sandbox.GenerateOverlayDiff(ctx, rt, sandbox.DiffOptions{Name: name, Stat: stat, NameOnly: nameOnly})
 		if err != nil {
 			return err
 		}
 
 		// Get non-overlay diffs (copy/rw) via host
-		hostResults, err := sandbox.GenerateMultiDiff(name, stat)
+		hostResults, err := sandbox.GenerateMultiDiff(sandbox.DiffOptions{Name: name, Stat: stat})
 		if err != nil {
 			return err
 		}
@@ -461,7 +440,7 @@ func agentRunningWarning(cmd *cobra.Command, name string) {
 
 // diffMultiDir shows diffs for all diffable directories with per-dir headers.
 func diffMultiDir(cmd *cobra.Command, name string, stat bool) error {
-	results, err := sandbox.GenerateMultiDiff(name, stat)
+	results, err := sandbox.GenerateMultiDiff(sandbox.DiffOptions{Name: name, Stat: stat})
 	if err != nil {
 		return err
 	}
@@ -537,7 +516,7 @@ func diffLogJSON(cmd *cobra.Command, name string, stat bool) error {
 
 // diffMultiDirJSON outputs multi-directory diffs as JSON.
 func diffMultiDirJSON(cmd *cobra.Command, name string, stat bool) error {
-	results, err := sandbox.GenerateMultiDiff(name, stat)
+	results, err := sandbox.GenerateMultiDiff(sandbox.DiffOptions{Name: name, Stat: stat})
 	if err != nil {
 		return err
 	}
