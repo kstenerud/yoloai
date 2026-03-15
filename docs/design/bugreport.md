@@ -301,22 +301,45 @@ All debug-level log entries captured during the run. In `safe` mode, `msg` field
 
 ## Sanitization
 
-### YAML config (`safe` mode)
+All sanitization is best-effort. `safe` mode reduces the risk of accidental exposure; it is not a security guarantee. Do not include credential-related bugs in `safe` reports intended for public sharing.
 
-Values are redacted for keys whose names (case-insensitive) contain any of: `key`, `token`, `secret`, `password`, `credential`, `passwd`.
+### YAML keyword matching (`safe` mode)
+
+Values are redacted for keys whose names (case-insensitive) contain any of:
+
+```
+key, token, secret, password, credential, passwd, pwd, auth, jwt, bearer,
+cert, private, access, encryption, saml, oauth, sso, connection
+```
 
 ```yaml
 # input
 anthropic_api_key: sk-ant-abc123
+db_connection: postgres://user:pass@host/db
 # output
 anthropic_api_key: [REDACTED]
+db_connection: [REDACTED]
 ```
 
 Line-by-line on raw YAML text (no parser dependency). Handles indented keys (e.g. inside `env:` maps).
 
-### JSONL `msg` fields (`safe` mode)
+### Pattern scanning (`safe` mode)
 
-`msg` field values are scanned for patterns matching known secret formats (e.g. `sk-ant-`, `ghp_`, long hex strings) and redacted inline. This is best-effort — structured fields containing sensitive values logged at debug level may not be caught.
+Applied to JSONL `msg` fields, container log output, and any other free-text content included in the report. Patterns are applied in order; first match wins.
+
+| Pattern | Matches | Example |
+|---------|---------|---------|
+| PEM blocks | Private keys, certificates | `-----BEGIN RSA PRIVATE KEY-----` |
+| Known service prefixes | API keys with distinctive prefixes | `sk-ant-`, `sk-proj-`, `ghp_`, `ghu_`, `gha_`, `sk_live_`, `sk_test_`, `AIzaSy`, `pplx-`, `gsk_` |
+| AWS access keys | AWS IAM key IDs | `AKIA[A-Z0-9]{16}` |
+| Connection strings | Database URLs with embedded credentials | `\w+://[^:@\s]+:[^@\s]+@\S+` |
+| JWT tokens | Three-part base64url tokens | `eyJ[A-Za-z0-9\-_]{10,}\.[A-Za-z0-9\-_]{10,}\.[A-Za-z0-9\-_]{10,}` |
+| Long hex strings | Hashes, raw keys | `[a-fA-F0-9]{32,}` |
+| Base64 strings | Encoded secrets, tokens | `[A-Za-z0-9+/\-_]{40,}={0,2}` |
+
+Base64 strings are redacted aggressively — any base64-looking string of 40+ characters is considered a potential encoded secret. The diagnostic value of base64 content in logs is low; the security risk is not.
+
+Matched content is replaced with `[REDACTED]` inline, preserving surrounding context so the log line remains readable.
 
 ---
 
@@ -385,5 +408,5 @@ Line-by-line on raw YAML text (no parser dependency). Handles indented keys (e.g
 | `writeBugReportAgentOutput(w, name)` | Section 11 (full only) |
 | `bugReportFilename(sandboxName, t)` | Generates output filename |
 | `backendVersion(backend)` | Returns version string from backend CLI, or "" |
-| `sanitizeYAMLConfig(content)` | Redacts sensitive key values |
-| `sanitizeJSONLMsg(content)` | Redacts known secret patterns from msg fields |
+| `sanitizeYAMLConfig(content)` | Redacts values for sensitive key names |
+| `sanitizeText(content)` | Applies pattern scanning to free-text content (JSONL msg fields, container logs, etc.) |
