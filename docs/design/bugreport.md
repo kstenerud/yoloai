@@ -290,7 +290,7 @@ Global config (`~/.yoloai/config.yaml`) and active profile config, each in a fen
 
 **`agent-status.json`** — full contents.
 
-**`runtime-config.json`** — In `safe` mode, `setup_commands` and `allowed_domains` fields are omitted (may reveal internal infrastructure). In `unsafe` mode, full contents.
+**`runtime-config.json`** — In `safe` mode, parsed with `encoding/json`, `setup_commands` and `allowed_domains` fields deleted, then re-serialized (may reveal internal infrastructure). In `unsafe` mode, full contents included verbatim.
 
 **Container log** — full output from the container runtime:
 - docker: `docker logs yoloai-<name> 2>&1`

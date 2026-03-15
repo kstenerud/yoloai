@@ -4,17 +4,6 @@ Open questions from reviewing `docs/design/bugreport.md` from an implementer's p
 
 ---
 
-## 5. `runtime-config.json` field omission in `safe` mode
-
-**Problem:** The doc says `setup_commands` and `allowed_domains` are "omitted" in `safe` mode. The YAML sanitizer is line-by-line with no parser dependency — but JSON field omission without a parser is fragile (multiline values, nested structures, varied whitespace).
-
-**Options:**
-- Use a JSON parser to read, delete fields, and re-serialize — correct but adds parser dependency (though Go's `encoding/json` is stdlib).
-- Include `runtime-config.json` as-is and rely on pattern scanning to catch sensitive values.
-- Omit `runtime-config.json` entirely from `safe` mode.
-
----
-
 ## 6. `--debug` reaching container processes — timing issue
 
 **Problem:** The doc says `--debug` enables debug-level entries in `sandbox.jsonl` and `monitor.jsonl`. These are Python processes inside the container that read their debug flag from `runtime-config.json` at startup. But `runtime-config.json` is written at container creation time.
