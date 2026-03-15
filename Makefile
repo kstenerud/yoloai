@@ -32,7 +32,7 @@ tidy-check:
 	@rm -f go.mod.bak go.sum.bak
 
 ## check: run all CI checks locally (same as PR checks)
-check: lint tidy-check test integration e2e
+check: lint tidy-check test base-image integration e2e
 
 ## cover: show test coverage per package and total
 cover:
@@ -43,10 +43,13 @@ cover:
 	go tool cover -func=coverage.out | tail -1; \
 	rm -f coverage.out
 
-integration:
+base-image: build
+	./$(BINARY) system build
+
+integration: base-image
 	go test -tags=integration -v -count=1 -timeout=10m ./sandbox/ ./runtime/docker/ ./internal/cli/
 
-e2e: build
+e2e: base-image
 	go test -tags=e2e -v -count=1 -timeout=15m ./test/e2e/
 
 clean:
