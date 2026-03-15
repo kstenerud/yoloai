@@ -239,7 +239,22 @@ to decide availability (same pattern as other backends).
 
 These items cannot be verified from source code alone and require hands-on testing.
 
+**Status Summary:**
+- ✅ Pre-implementation environment setup (macOS with Podman Machine 5.8.1)
+- ✅ Test 1: Docker SDK over Podman socket — **PASSED**
+- ✅ Test 2: Rootless file ownership with `--userns=keep-id` — **PASSED**
+- ⏸️ Test 3: `:overlay` mode — **DEFERRED** (requires native Linux, kernel 5.11+)
+- ✅ Test 4: Network isolation — **PASSED**
+- ⏸️ Test 5: Full yoloAI lifecycle — **POST-IMPLEMENTATION**
+- ⏸️ Test 6: CI smoke test — **POST-IMPLEMENTATION**
+
+Tested on: 2026-03-15, macOS (M-series) with Podman Machine 5.8.1, rootless mode
+
+---
+
 ### Pre-implementation: Podman environment setup
+
+**Status: ✅ COMPLETED**
 
 ```bash
 # Install Podman (Ubuntu 24.04)
@@ -257,6 +272,8 @@ curl --unix-socket $XDG_RUNTIME_DIR/podman/podman.sock http://localhost/v1.44/in
 
 ### Test 1: Docker SDK over Podman socket (validates core approach)
 
+**Status: ✅ PASSED**
+
 Before writing any code, verify the Docker Go SDK works against Podman's socket:
 
 ```go
@@ -270,13 +287,17 @@ fmt.Println(info.APIVersion) // Should print "1.44.0" or similar
 ```
 
 **What to check:**
-- Ping succeeds
-- Container create/start/stop/remove cycle works
-- `ContainerExec` works (non-interactive)
-- `ImageBuild` (SDK path, no secrets) works
-- Bind mounts work and file permissions are correct
+- ✅ Ping succeeds (API version 1.44)
+- ✅ Container create/start/stop/remove cycle works
+- ✅ `ContainerExec` works (non-interactive)
+- ✅ `ImageBuild` (SDK path, no secrets) works
+- ✅ Bind mounts work and file permissions are correct
+
+**Result:** All operations work identically to Docker. Core approach validated.
 
 ### Test 2: Rootless file ownership with `--userns=keep-id`
+
+**Status: ✅ PASSED**
 
 ```bash
 # Create a file as your user
@@ -294,11 +315,15 @@ podman run -v /tmp/podman-test-file:/mnt/test:ro \
 ```
 
 **What to check:**
-- With `keep-id`: container sees files owned by the mapped user
-- `:copy` and `:rw` mounts both work correctly
-- Files created inside the container have correct host ownership
+- ✅ With `keep-id`: container sees files owned by the mapped user (uid=501)
+- ✅ `:copy` and `:rw` mounts both work correctly
+- ✅ Files created inside the container have correct host ownership
+
+**Result:** `HostConfig.UsernsMode = "keep-id"` works via Docker SDK. Without keep-id, container runs as root (uid=0). With keep-id, container runs as mapped user (uid=501) and files maintain correct ownership.
 
 ### Test 3: `:overlay` mode on rootless Podman (open question)
+
+**Status: ⏸️ DEFERRED** (requires native Linux with kernel 5.11+)
 
 This is the last open research question.
 
@@ -330,6 +355,8 @@ of `isContainerBackend()`, and document that `:overlay` requires the Docker back
 
 ### Test 4: Network isolation
 
+**Status: ✅ PASSED**
+
 ```bash
 # Verify --network=none works
 podman run --network=none alpine ping -c1 8.8.8.8
@@ -340,7 +367,14 @@ podman run --cap-add NET_ADMIN --rm alpine sh -c 'ip link show'
 # Should succeed
 ```
 
+**Result:**
+- ✅ `--network=none` blocks internet access (ping fails with "Network unreachable")
+- ✅ Default network mode allows internet access
+- ✅ `CAP_NET_ADMIN` capability works (ip commands succeed)
+
 ### Test 5: Full yoloAI lifecycle (post-implementation)
+
+**Status: ⏸️ POST-IMPLEMENTATION**
 
 After implementation, run the full lifecycle on Podman:
 
@@ -367,6 +401,8 @@ yoloai destroy test-podman
 
 ### Test 6: CI smoke test
 
+**Status: ⏸️ POST-IMPLEMENTATION**
+
 Verify the GitHub Actions setup works:
 
 ```yaml
@@ -388,10 +424,10 @@ test-podman:
 
 ## Risk Assessment
 
-| Risk | Likelihood | Impact | Mitigation |
-|------|-----------|--------|------------|
-| Docker SDK incompatible with Podman socket | Low | High | Pre-validated via source code; Test 1 confirms |
-| `:overlay` fails on rootless Podman | Medium | Low | Not a blocker; can exclude Podman from overlay |
-| `--userns=keep-id` breaks something | Low | Medium | Test 2 validates; well-documented Podman feature |
+| Risk | Likelihood | Impact | Status |
+|------|-----------|--------|---------|
+| Docker SDK incompatible with Podman socket | ~~Low~~ **RESOLVED** | High | ✅ Test 1 confirmed all operations work |
+| `:overlay` fails on rootless Podman | Medium | Low | ⏸️ Deferred to native Linux testing; not a blocker |
+| `--userns=keep-id` breaks something | ~~Low~~ **RESOLVED** | Medium | ✅ Test 2 validated Docker SDK integration |
 | Podman socket not started by default | Certain | Low | Good error message pointing to `systemctl --user start podman.socket` |
 | `binaryName` refactor breaks Docker backend | Low | High | Pure refactor; existing Docker tests catch regressions |
