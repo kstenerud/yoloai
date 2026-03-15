@@ -123,9 +123,12 @@ func TestCLI_LsJSON(t *testing.T) {
 	stdout, _, err := runCLI(t, "--json", "ls")
 	require.NoError(t, err)
 
-	var result []json.RawMessage
+	var result struct {
+		Sandboxes           []json.RawMessage `json:"sandboxes"`
+		UnavailableBackends []string          `json:"unavailable_backends"`
+	}
 	require.NoError(t, json.Unmarshal([]byte(stdout), &result))
-	assert.GreaterOrEqual(t, len(result), 1)
+	assert.GreaterOrEqual(t, len(result.Sandboxes), 1)
 }
 
 func TestCLI_Diff(t *testing.T) {
