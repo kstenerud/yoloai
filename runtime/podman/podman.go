@@ -84,7 +84,7 @@ func discoverSocket() (string, error) {
 	}
 
 	// macOS: try podman machine inspect
-	sock, err := discoverMachineSocket()
+	sock, err := machineSocketDiscovery()
 	if err == nil {
 		return sock, nil
 	}
@@ -92,8 +92,11 @@ func discoverSocket() (string, error) {
 	return "", fmt.Errorf("no podman socket found (checked $CONTAINER_HOST, $DOCKER_HOST, $XDG_RUNTIME_DIR/podman/podman.sock, /run/podman/podman.sock)")
 }
 
-// discoverMachineSocket tries to get the socket path from `podman machine inspect`.
-func discoverMachineSocket() (string, error) {
+// machineSocketDiscovery tries to get the socket path from `podman machine inspect`.
+// Variable for testing - can be mocked to avoid executing podman commands.
+var machineSocketDiscovery = defaultMachineSocketDiscovery
+
+func defaultMachineSocketDiscovery() (string, error) {
 	out, err := exec.Command("podman", "machine", "inspect", "--format", "{{.ConnectionInfo.PodmanSocket.Path}}").Output() //nolint:gosec // trusted binary path
 	if err != nil {
 		return "", err

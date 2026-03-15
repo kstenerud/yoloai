@@ -1,6 +1,6 @@
 //go:build integration
 
-package docker
+package podman
 
 import (
 	"context"
@@ -9,17 +9,18 @@ import (
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/network"
 	"github.com/kstenerud/yoloai/runtime"
+	"github.com/kstenerud/yoloai/runtime/docker"
 	"github.com/stretchr/testify/require"
 )
 
-// dockerSetup connects to Docker, ensures the base image exists,
+// podmanSetup connects to Podman, ensures the base image exists,
 // and returns a *Runtime. Uses t.Cleanup for Close().
-func dockerSetup(t *testing.T) (*Runtime, context.Context) {
+func podmanSetup(t *testing.T) (*Runtime, context.Context) {
 	t.Helper()
 	ctx := context.Background()
 
 	rt, err := New(ctx)
-	require.NoError(t, err, "Docker must be running for integration tests")
+	require.NoError(t, err, "Podman must be running with socket activated for integration tests")
 	t.Cleanup(func() { rt.Close() }) //nolint:errcheck // test cleanup
 
 	exists, err := rt.ImageExists(ctx, "yoloai-base")
@@ -44,8 +45,9 @@ func createTestContainer(t *testing.T, rt *Runtime, ctx context.Context, cfg run
 		cfg.ImageRef = "yoloai-base"
 	}
 
-	mounts := ConvertMounts(cfg.Mounts)
-	portBindings, exposedPorts := ConvertPorts(cfg.Ports)
+	// Use docker package helpers for conversions since they're not exported
+	mounts := docker.ConvertMounts(cfg.Mounts)
+	portBindings, exposedPorts := docker.ConvertPorts(cfg.Ports)
 
 	containerConfig := &container.Config{
 		Image:        cfg.ImageRef,
@@ -72,7 +74,13 @@ func createTestContainer(t *testing.T, rt *Runtime, ctx context.Context, cfg run
 		}
 	}
 
-	_, err := rt.client.ContainerCreate(ctx, containerConfig, hostConfig, &network.NetworkingConfig{}, nil, cfg.Name)
+	// Apply UsernsMode if set (Podman-specific)
+	if cfg.UsernsMode != "" {
+		hostConfig.UsernsMode = container.UsernsMode(cfg.UsernsMode)
+	}
+
+	// Access the embedded Docker runtime's client
+	_, err := rt.Runtime.Client().ContainerCreate(ctx, containerConfig, hostConfig, &network.NetworkingConfig{}, nil, cfg.Name)
 	require.NoError(t, err)
 
 	t.Cleanup(func() {

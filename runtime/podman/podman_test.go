@@ -56,6 +56,13 @@ func TestDiscoverSocket_XDGRuntimeDir(t *testing.T) {
 }
 
 func TestDiscoverSocket_NoSocket(t *testing.T) {
+	// Mock machine socket discovery to fail (prevents executing podman commands)
+	origMachineDiscovery := machineSocketDiscovery
+	defer func() { machineSocketDiscovery = origMachineDiscovery }()
+	machineSocketDiscovery = func() (string, error) {
+		return "", assert.AnError
+	}
+
 	t.Setenv("CONTAINER_HOST", "")
 	t.Setenv("DOCKER_HOST", "")
 	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())

@@ -68,6 +68,12 @@ func NewWithSocket(ctx context.Context, host string, binaryName string) (*Runtim
 	return &Runtime{client: cli, binaryName: binaryName}, nil
 }
 
+// Client returns the underlying Docker SDK client.
+// Exported for use by Docker-compatible backends (e.g., Podman integration tests).
+func (r *Runtime) Client() *dockerclient.Client {
+	return r.client
+}
+
 // EnsureImage seeds Docker build resources and builds/rebuilds the
 // yoloai-base image as needed.
 func (r *Runtime) EnsureImage(ctx context.Context, sourceDir string, output io.Writer, logger *slog.Logger, force bool) error {
@@ -127,8 +133,8 @@ func (r *Runtime) ImageExists(ctx context.Context, imageRef string) (bool, error
 
 // Create creates a new Docker container from the given InstanceConfig.
 func (r *Runtime) Create(ctx context.Context, cfg runtime.InstanceConfig) error {
-	mounts := convertMounts(cfg.Mounts)
-	portBindings, exposedPorts := convertPorts(cfg.Ports)
+	mounts := ConvertMounts(cfg.Mounts)
+	portBindings, exposedPorts := ConvertPorts(cfg.Ports)
 
 	containerConfig := &container.Config{
 		Image:        cfg.ImageRef,
@@ -299,7 +305,9 @@ func (r *Runtime) DiagHint(instanceName string) string {
 func (r *Runtime) Name() string { return r.binaryName }
 
 // convertMounts converts runtime.MountSpec to Docker mount.Mount.
-func convertMounts(specs []runtime.MountSpec) []mount.Mount {
+// ConvertMounts converts runtime.MountSpec to Docker SDK mount types.
+// Exported for use by Docker-compatible backends (e.g., Podman).
+func ConvertMounts(specs []runtime.MountSpec) []mount.Mount {
 	if len(specs) == 0 {
 		return nil
 	}
@@ -315,8 +323,9 @@ func convertMounts(specs []runtime.MountSpec) []mount.Mount {
 	return mounts
 }
 
-// convertPorts converts runtime.PortMapping to Docker port types.
-func convertPorts(ports []runtime.PortMapping) (nat.PortMap, nat.PortSet) {
+// ConvertPorts converts runtime.PortMapping to Docker SDK port types.
+// Exported for use by Docker-compatible backends (e.g., Podman).
+func ConvertPorts(ports []runtime.PortMapping) (nat.PortMap, nat.PortSet) {
 	if len(ports) == 0 {
 		return nil, nil
 	}
