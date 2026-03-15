@@ -296,7 +296,6 @@ func newNewCmd(version string) *cobra.Command {
 	cmd.Flags().Bool("no-start", false, "Create but don't start the container")
 	cmd.Flags().BoolP("attach", "a", false, "Auto-attach after creation")
 	cmd.Flags().BoolP("yes", "y", false, "Skip confirmations")
-	cmd.Flags().Bool("debug", false, "Enable debug logging in sandbox entrypoint")
 	cmd.Flags().String("cpus", "", "CPU limit (e.g., 4, 2.5)")
 	cmd.Flags().String("memory", "", "Memory limit (e.g., 8g, 512m)")
 	cmd.Flags().StringSlice("env", nil, "Environment variable (KEY=VAL, repeatable)")

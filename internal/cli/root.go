@@ -22,7 +22,11 @@ func Execute(ctx context.Context, version, commit, date string) int {
 	// Track which command was active when the error occurred so we can
 	// show a context-aware help hint (e.g. "Run 'yoloai system prune -h' for help").
 	var activeCmd *cobra.Command
-	rootCmd.PersistentPreRun = func(cmd *cobra.Command, _ []string) { activeCmd = cmd }
+	rootCmd.PersistentPreRunE = func(cmd *cobra.Command, _ []string) error {
+		activeCmd = cmd
+		initLogger(cmd)
+		return nil
+	}
 	prev := rootCmd.FlagErrorFunc()
 	rootCmd.SetFlagErrorFunc(func(cmd *cobra.Command, err error) error {
 		activeCmd = cmd
@@ -101,6 +105,7 @@ diff and apply what you want to keep.`,
 	rootCmd.PersistentFlags().CountP("verbose", "v", "Increase output verbosity (-v for debug, -vv reserved)")
 	rootCmd.PersistentFlags().CountP("quiet", "q", "Suppress non-essential output (-q for warn, -qq for error only)")
 	rootCmd.PersistentFlags().Bool("json", false, "Output as JSON (machine-readable)")
+	rootCmd.PersistentFlags().Bool("debug", false, "Enable debug-level entries in cli.jsonl")
 
 	registerCommands(rootCmd, version, commit, date)
 
