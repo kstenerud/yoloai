@@ -4,17 +4,6 @@ Open questions from reviewing `docs/design/bugreport.md` from an implementer's p
 
 ---
 
-## 2. `sandbox.jsonl` — how does bash write JSONL?
-
-**Problem:** `entrypoint.sh` is a bash script. Writing well-formed JSONL (correct timestamps, monotonic sequence numbers, JSON-escaped strings) from bash is non-trivial and error-prone. `jq` may not be available in all container images.
-
-**Options:**
-- `sandbox-setup.py` takes over all structured logging for the container side; `entrypoint.sh` only writes plain text to stdout (captured by Docker logs and a separate `entrypoint.log`). `sandbox.jsonl` is Python-only.
-- Add a tiny logging helper binary that `entrypoint.sh` pipes to for JSONL output.
-- Split the file: `entrypoint.log` (plain text, entrypoint.sh) and `sandbox.jsonl` (Python only, sandbox-setup.py).
-
-**Recommendation to consider:** Splitting into two files is cleanest. Bash writing JSONL is fragile regardless of approach.
-
 ---
 
 ## 3. `seq` field — scope and Python restart handling

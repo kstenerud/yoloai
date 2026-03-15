@@ -9,7 +9,7 @@ Each sandbox maintains log files named by writer, under `~/.yoloai/sandboxes/<na
 | File | Writer | Format | Content |
 |------|--------|--------|---------|
 | `cli.jsonl` | yoloai CLI (host Go binary) | JSONL | Sandbox lifecycle, mount operations, backend calls, config resolution |
-| `sandbox.jsonl` | entrypoint.sh → sandbox-setup.py (sequential, single writer) | JSONL | Container setup, UID remapping, network isolation, overlay mounts, prompt delivery |
+| `sandbox.jsonl` | entrypoint.py → sandbox-setup.py (sequential, single writer) | JSONL | Container setup, UID remapping, network isolation, overlay mounts, prompt delivery |
 | `monitor.jsonl` | status-monitor.py | JSONL | Detector decisions, status transitions, idle/active polling |
 | `agent-hooks.jsonl` | Agent hook scripts | JSONL | Hook-reported state changes (idle/active events from Claude Code hooks etc.) |
 | `agent.log` | tmux pipe-pane | Raw terminal stream | Verbatim agent process output (ANSI codes, cursor positioning, etc.) |
@@ -386,6 +386,17 @@ Matched content is replaced with `[REDACTED]` inline, preserving surrounding con
 3. Update all internal logging calls to emit structured JSONL entries with `ts`, `seq`, `level`, `event`, `msg` fields.
 4. Update `sandbox <name> log` to the new design (see above).
 5. Agent output capture (tmux pipe-pane) redirects to `logs/agent.log` — format unchanged.
+
+#### Container entrypoint refactor
+
+`entrypoint.sh` is refactored into a minimal shell trampoline + a Python script:
+
+- **`entrypoint.sh` (shell, stays thin):** Writes one canned JSONL entry to `logs/sandbox.jsonl` to record that the shell started (evidence of container boot even if Python fails), then `exec`s into `entrypoint.py`. Timestamp via `date -u +%Y-%m-%dT%H:%M:%S.000Z`; seq hardcoded to 1.
+  ```json
+  {"ts":"...","seq":1,"level":"info","event":"entrypoint.start","msg":"entrypoint.sh started"}
+  ```
+- **`entrypoint.py` (new, runs as root):** Handles all real setup work — UID remapping, secrets, network isolation, overlay mounts, setup commands — and writes structured JSONL to `logs/sandbox.jsonl`. Then `exec`s to `gosu yoloai python3 sandbox-setup.py`.
+- **`sandbox-setup.py`:** Continues as the unprivileged Python process; appends to `logs/sandbox.jsonl` for tmux setup, agent launch, and prompt delivery.
 
 ### Flag (`--bugreport`)
 
