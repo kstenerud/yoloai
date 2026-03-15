@@ -19,6 +19,10 @@ Design considerations:
 - Options: inherit shared flags (agent, model, profile, aux dirs) from the batch command
 - Output: summary table of created sandboxes
 
+### Per-mechanism status files
+
+Currently all status writers (agent hooks, status-monitor.py, sandbox-setup.py) share a single `agent-status.json`, using the `source` field to distinguish writes. A cleaner approach: each mechanism writes to its own status file (`hook-status.json`, `monitor-status.json`, etc.), and the status getter reads them in priority order, preferring the most recently updated. This eliminates the `source` field hack and makes the IPC contract explicit per writer. Not part of the structured logging change — tracked separately.
+
 ### Agent status detection (rework planned)
 
 Current implementation works but is fragile. See [idle detection research](../research/idle-detection.md) for full audit, external research, and architecture proposal for a pluggable detector framework.

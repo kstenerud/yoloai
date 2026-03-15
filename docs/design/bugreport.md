@@ -4,19 +4,25 @@
 
 ### Log files
 
-Each sandbox maintains three log files in its state directory (`~/.yoloai/sandboxes/<name>/`):
+Each sandbox maintains log files named by writer, under `~/.yoloai/sandboxes/<name>/logs/`:
 
-| File | Format | Content |
-|------|--------|---------|
-| `events.jsonl` | JSONL | yoloai internal events: sandbox lifecycle, mount operations, backend calls, config resolution |
-| `monitor.jsonl` | JSONL | Monitor process events: idle detection, agent status polling, health checks |
-| `agent.log` | Raw terminal stream | Verbatim output from the agent process (ANSI codes, cursor positioning, etc.) |
+| File | Writer | Format | Content |
+|------|--------|--------|---------|
+| `cli.jsonl` | yoloai CLI (host Go binary) | JSONL | Sandbox lifecycle, mount operations, backend calls, config resolution |
+| `sandbox.jsonl` | entrypoint.sh → sandbox-setup.py (sequential, single writer) | JSONL | Container setup, UID remapping, network isolation, overlay mounts, prompt delivery |
+| `monitor.jsonl` | status-monitor.py | JSONL | Detector decisions, status transitions, idle/active polling |
+| `agent-hooks.jsonl` | Agent hook scripts | JSONL | Hook-reported state changes (idle/active events from Claude Code hooks etc.) |
+| `agent.log` | tmux pipe-pane | Raw terminal stream | Verbatim agent process output (ANSI codes, cursor positioning, etc.) |
+
+`agent-status.json` is retained as the IPC mechanism between hook scripts and status-monitor.py — it is not a log file. `agent-hooks.jsonl` is a separate append-only log of hook events for diagnostic purposes.
 
 Agent output is a raw terminal recording — not loggable alongside structured events. It is treated as a separate artifact, not a log source.
 
+Each file has a single writer, so no file locking is required. POSIX append semantics are sufficient for `agent.log`.
+
 ### JSONL schema
 
-Each line in `events.jsonl` and `monitor.jsonl` is a JSON object:
+Each line in the JSONL log files is a JSON object:
 
 ```json
 {"ts": "2026-03-15T14:23:01.123Z", "seq": 1, "level": "info", "event": "sandbox.start", "msg": "starting sandbox", "backend": "docker", "sandbox": "x"}
@@ -36,7 +42,7 @@ Each line in `events.jsonl` and `monitor.jsonl` is a JSON object:
 | Flag | Effect |
 |------|--------|
 | `--verbose` | More output printed to the terminal. No effect on log files. |
-| `--debug` | Enables `debug`-level entries in `events.jsonl` and `monitor.jsonl`. Silently ignored for non-sandbox commands (no log location to write to). |
+| `--debug` | Enables `debug`-level entries in the sandbox's JSONL log files. Silently ignored for non-sandbox commands (no log location to write to). |
 | `--bugreport <file>` | Implies `--debug`. Writes debug-level log entries to the report's temp file only — not to the sandbox's JSONL files. The report is the authoritative record for that run. |
 
 ---
@@ -47,12 +53,14 @@ The log command is redesigned around the structured log files. Agent output is s
 
 ### Default view
 
-Pretty-printed, interleaved stream of `events.jsonl` and `monitor.jsonl`, ordered by timestamp. Default level: `info+`.
+Pretty-printed, interleaved stream of `logs/cli.jsonl`, `logs/sandbox.jsonl`, `logs/monitor.jsonl`, and `logs/agent-hooks.jsonl`, ordered by timestamp. Default level: `info+`.
 
 ```
-14:23:01 [yoloai]  info   sandbox.start    starting sandbox (backend=docker)
-14:23:03 [yoloai]  info   mount.bind       bound /home/karl/Projects/foo
-14:23:05 [monitor] info   agent.launch     agent process started
+14:23:01 [cli]     info   sandbox.start    starting sandbox (backend=docker)
+14:23:02 [sandbox] info   entrypoint.uid   remapped uid 0 → 1000
+14:23:03 [cli]     info   mount.bind       bound /home/karl/Projects/foo
+14:23:05 [sandbox] info   agent.launch     agent process started
+14:23:06 [hooks]   info   agent.active     hook reported active
 14:23:09 [monitor] warn   agent.idle       no output for 30s
 ```
 
@@ -60,7 +68,7 @@ Pretty-printed, interleaved stream of `events.jsonl` and `monitor.jsonl`, ordere
 
 | Flag | Effect |
 |------|--------|
-| `--source events\|monitor` | Show only one structured source instead of interleaved |
+| `--source cli\|sandbox\|monitor\|hooks` | Show only one structured source instead of interleaved |
 | `--level debug\|info\|warn\|error` | Filter by minimum log level (default: `info`) |
 | `--debug` | Shorthand for `--level debug` |
 | `--follow` / `-f` | Tail the log live |
@@ -85,9 +93,9 @@ Can be used with any yoloai command. When active:
 
 - A temp file (`<file>.tmp`) is opened immediately, before any subcommand logic runs.
 - Static sections (header, command invocation, system info, backends, config) are written to the temp file right at launch.
-- `--debug` is implicitly enabled: debug-level log entries are written to the temp file only. The sandbox's `events.jsonl` and `monitor.jsonl` are not written during a `--bugreport` run — the report is the authoritative record for that command.
+- `--debug` is implicitly enabled: debug-level entries from the yoloai CLI are written to the temp file only, not to `cli.jsonl`. Container processes (`sandbox.jsonl`, `monitor.jsonl`, `agent-hooks.jsonl`) are independent and continue writing to their own files as normal — `--bugreport` cannot redirect them.
 - A deferred finalizer (with `recover()` to catch panics) writes the exit code and any error, then renames `<file>.tmp` → `<file>`.
-- For sandbox commands, the existing `events.jsonl` and `monitor.jsonl` are included in the report — prior `--debug` runs will have contributed debug-level entries.
+- For sandbox commands, the existing `cli.jsonl`, `sandbox.jsonl`, `monitor.jsonl`, and `agent-hooks.jsonl` are included in the report — prior `--debug` runs will have contributed debug-level entries to `cli.jsonl`.
 - The report is **always written** regardless of outcome: success, error, panic, or signal. On SIGKILL the temp file survives with whatever was captured up to that point.
 
 Typical workflow for a hard-to-reproduce bug:
@@ -103,7 +111,7 @@ yoloai --bugreport out.md start x   # captures live debug + prior events.jsonl f
 yoloai sandbox <name> bugreport <file>
 ```
 
-Used when a bug occurred in a past run and the user still has the sandbox — no need to reproduce the issue. Collects static diagnostic information from system state and the named sandbox, including `events.jsonl` and `monitor.jsonl` which will contain debug-level entries if prior commands were run with `--debug`. Always writes to a file; no stdout mode.
+Used when a bug occurred in a past run and the user still has the sandbox — no need to reproduce the issue. Collects static diagnostic information from system state and the named sandbox, including all files under `logs/`, which will contain debug-level entries if prior commands were run with `--debug`. Always writes to a file; no stdout mode.
 
 Placed under `sandbox` alongside `sandbox <name> log` and `sandbox <name> info`. Non-sandbox commands don't accumulate persistent state, so there is nothing to perform forensics on without a sandbox.
 
@@ -202,23 +210,31 @@ Global config (`~/.yoloai/config.yaml`) and active profile config, each in a fen
 
 Errors from a non-running container are included rather than silently omitted.
 
-### 7. `events.jsonl` *(sandbox commands only)*
+### 7. `cli.jsonl` *(sandbox commands only)*
 
-Full contents of the sandbox's `events.jsonl`. Contains debug-level entries if prior commands were run with `--debug`.
+Full contents. Contains debug-level entries if prior commands were run with `--debug`.
 
-### 8. `monitor.jsonl` *(sandbox commands only)*
+### 8. `sandbox.jsonl` *(sandbox commands only)*
 
-Full contents of the sandbox's `monitor.jsonl`.
+Full contents. Covers entrypoint setup through prompt delivery — useful for diagnosing container startup failures, UID remapping issues, network isolation errors, and overlay mount problems.
 
-### 9. Agent output *(sandbox commands only)*
+### 9. `monitor.jsonl` *(sandbox commands only)*
+
+Full contents. Covers idle/active detector decisions and status transitions.
+
+### 10. `agent-hooks.jsonl` *(sandbox commands only)*
+
+Full contents. Hook-reported state changes from the agent process.
+
+### 11. Agent output *(sandbox commands only)*
 
 ANSI-stripped contents of `agent.log`. The raw terminal stream is not included — it is not meaningful outside a terminal renderer.
 
-### 10. Live log *(flag only)*
+### 12. Live log *(flag only)*
 
 All debug-level log entries captured during the run, written incrementally to the temp file as the command progresses.
 
-### 11. Exit *(flag only)*
+### 13. Exit *(flag only)*
 
 - Exit code
 - Error message (if any)
@@ -257,10 +273,11 @@ Line-by-line on raw YAML text (no parser dependency). Handles indented keys (e.g
 
 ### Structured logging (prerequisite)
 
-1. Replace existing `log.txt` / `monitor.log` with `events.jsonl` and `monitor.jsonl` in the sandbox state directory.
-2. Update all internal logging calls to emit structured JSONL entries with `ts`, `seq`, `level`, `event`, `msg` fields.
-3. Update `sandbox <name> log` to the new design (see above).
-4. Agent output capture continues writing to `agent.log` unchanged — it is a terminal recording, not a structured log.
+1. Create `logs/` subdirectory in the sandbox state directory.
+2. Replace existing `log.txt` / `monitor.log` with `logs/cli.jsonl`, `logs/sandbox.jsonl`, `logs/monitor.jsonl`, `logs/agent-hooks.jsonl`, and `logs/agent.log`.
+3. Update all internal logging calls to emit structured JSONL entries with `ts`, `seq`, `level`, `event`, `msg` fields.
+4. Update `sandbox <name> log` to the new design (see above).
+5. Agent output capture (tmux pipe-pane) redirects to `logs/agent.log` — format unchanged.
 
 ### Flag (`--bugreport`)
 
@@ -291,8 +308,10 @@ Line-by-line on raw YAML text (no parser dependency). Handles indented keys (e.g
 | `writeBugReportBackends(ctx, w)` | Section 4 |
 | `writeBugReportConfig(w)` | Section 5 |
 | `writeBugReportSandboxDetail(ctx, w, rt, name)` | Section 6 |
-| `writeBugReportEventsLog(w, name)` | Section 7 |
-| `writeBugReportMonitorLog(w, name)` | Section 8 |
-| `writeBugReportAgentOutput(w, name)` | Section 9 |
+| `writeBugReportCLILog(w, name)` | Section 7 |
+| `writeBugReportSandboxLog(w, name)` | Section 8 |
+| `writeBugReportMonitorLog(w, name)` | Section 9 |
+| `writeBugReportHooksLog(w, name)` | Section 10 |
+| `writeBugReportAgentOutput(w, name)` | Section 11 |
 | `backendVersion(backend)` | Returns version string from backend CLI, or "" |
 | `sanitizeYAMLConfig(content)` | Redacts sensitive key values |
