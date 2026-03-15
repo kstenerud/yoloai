@@ -15,30 +15,41 @@ debug_log() { [ "$DEBUG" = "true" ] && echo "[debug] $*" || true; }
 
 debug_log "entrypoint starting"
 
-# Remap UID/GID to match host user
-CURRENT_UID=$(id -u yoloai)
-CURRENT_GID=$(id -g yoloai)
-
-debug_log "remapping UID=$CURRENT_UID->$HOST_UID GID=$CURRENT_GID->$HOST_GID"
-if [ "$CURRENT_GID" != "$HOST_GID" ]; then
-    groupmod -g "$HOST_GID" yoloai 2>/dev/null || true
-fi
-if [ "$CURRENT_UID" != "$HOST_UID" ]; then
-    usermod -u "$HOST_UID" yoloai 2>/dev/null || true
+# Check if running as root. With rootless Podman + --userns=keep-id, we run as
+# the host user and can't perform UID remapping or chown operations.
+RUNNING_AS_ROOT=false
+if [ "$(id -u)" -eq 0 ]; then
+    RUNNING_AS_ROOT=true
 fi
 
-# Fix ownership on container-managed directories.
-# Some files may be bind-mounted read-only; chown on those is expected to fail.
-debug_log "fixing ownership on container-managed directories"
-chown -R yoloai:yoloai /home/yoloai 2>/dev/null || true
-chown yoloai:yoloai "$YOLOAI_DIR"
-for f in "$YOLOAI_DIR"/*; do
-    chown yoloai:yoloai "$f" 2>/dev/null || true
-done
-# Also fix subdirectories
-for d in "$YOLOAI_DIR"/bin "$YOLOAI_DIR"/tmux; do
-    [ -d "$d" ] && chown -R yoloai:yoloai "$d" 2>/dev/null || true
-done
+# Remap UID/GID to match host user (only if running as root)
+if [ "$RUNNING_AS_ROOT" = "true" ]; then
+    CURRENT_UID=$(id -u yoloai)
+    CURRENT_GID=$(id -g yoloai)
+
+    debug_log "remapping UID=$CURRENT_UID->$HOST_UID GID=$CURRENT_GID->$HOST_GID"
+    if [ "$CURRENT_GID" != "$HOST_GID" ]; then
+        groupmod -g "$HOST_GID" yoloai 2>/dev/null || true
+    fi
+    if [ "$CURRENT_UID" != "$HOST_UID" ]; then
+        usermod -u "$HOST_UID" yoloai 2>/dev/null || true
+    fi
+
+    # Fix ownership on container-managed directories.
+    # Some files may be bind-mounted read-only; chown on those is expected to fail.
+    debug_log "fixing ownership on container-managed directories"
+    chown -R yoloai:yoloai /home/yoloai 2>/dev/null || true
+    chown yoloai:yoloai "$YOLOAI_DIR" 2>/dev/null || true
+    for f in "$YOLOAI_DIR"/*; do
+        chown yoloai:yoloai "$f" 2>/dev/null || true
+    done
+    # Also fix subdirectories
+    for d in "$YOLOAI_DIR"/bin "$YOLOAI_DIR"/tmux; do
+        [ -d "$d" ] && chown -R yoloai:yoloai "$d" 2>/dev/null || true
+    done
+else
+    debug_log "running as non-root (uid=$(id -u)), skipping UID remapping and chown"
+fi
 
 # Read secrets and export as env vars
 debug_log "reading secrets"
@@ -134,7 +145,12 @@ if [ "$OVERLAY_COUNT" -gt 0 ]; then
     done
 fi
 
-debug_log "dropping privileges to yoloai"
-
-# --- Drop privileges and run as yoloai ---
-exec gosu yoloai python3 "$YOLOAI_DIR/bin/sandbox-setup.py" docker
+if [ "$RUNNING_AS_ROOT" = "true" ]; then
+    debug_log "dropping privileges to yoloai"
+    # --- Drop privileges and run as yoloai ---
+    exec gosu yoloai python3 "$YOLOAI_DIR/bin/sandbox-setup.py" docker
+else
+    debug_log "already running as non-root user, executing directly"
+    # --- Already running as non-root (rootless Podman with --userns=keep-id) ---
+    exec python3 "$YOLOAI_DIR/bin/sandbox-setup.py" docker
+fi
