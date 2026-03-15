@@ -8,6 +8,7 @@ and updates the tmux window title.
 Usage: status-monitor.py /path/to/config.json /path/to/status.json
 """
 
+import datetime
 import json
 import os
 import platform
@@ -421,7 +422,7 @@ def build_detectors(config, status_file, tmux_sock=None, yoloai_dir=None):
     """Instantiate detectors based on runtime-config.json detector list."""
     detector_names = config.get("detectors", [])
     idle = config.get("idle", {})
-    log_path = os.path.join(yoloai_dir, "log.txt") if yoloai_dir else "/yoloai/log.txt"
+    log_path = os.path.join(yoloai_dir, "logs", "agent.log") if yoloai_dir else "/yoloai/logs/agent.log"
     detectors = []
 
     for name in detector_names:
@@ -472,23 +473,39 @@ def check_pane_dead(tmux_sock=None):
     return False, None
 
 
-DEBUG_LOG = None  # file handle for debug logging, set by run_monitor
+_monitor_log = None  # file handle for logs/monitor.jsonl
+_debug_enabled = False  # set by run_monitor based on config
 
 
-def debug(msg):
-    """Write a debug message to the monitor log file if debug mode is enabled."""
-    if DEBUG_LOG is None:
+def _log_jsonl(level, event, msg, **fields):
+    """Write a structured JSONL entry to logs/monitor.jsonl."""
+    if _monitor_log is None:
         return
+    now = datetime.datetime.utcnow()
+    ts = now.strftime("%Y-%m-%dT%H:%M:%S.") + f"{now.microsecond // 1000:03d}Z"
+    entry = {"ts": ts, "level": level, "event": event, "msg": msg}
+    entry.update(fields)
     try:
-        DEBUG_LOG.write(f"[{time.strftime('%H:%M:%S')}] {msg}\n")
-        DEBUG_LOG.flush()
+        _monitor_log.write(json.dumps(entry) + "\n")
+        _monitor_log.flush()
     except OSError:
         pass
 
 
+def debug(msg):
+    """Write a debug-level entry to monitor.jsonl if debug mode is enabled.
+
+    Accepts a plain string (legacy format) for compatibility with existing callers.
+    The message is stored verbatim in the 'msg' field.
+    """
+    if not _debug_enabled:
+        return
+    _log_jsonl("debug", "detector.result", msg)
+
+
 def run_monitor(config_path, status_file, tmux_sock=None):
     """Main monitor loop."""
-    global DEBUG_LOG
+    global _monitor_log, _debug_enabled
 
     with open(config_path) as f:
         config = json.load(f)
@@ -496,17 +513,20 @@ def run_monitor(config_path, status_file, tmux_sock=None):
     # Derive yoloai_dir from config path (e.g. /yoloai/runtime-config.json → /yoloai)
     yoloai_dir = os.path.dirname(os.path.abspath(config_path))
 
-    # Enable debug logging if config.debug is set or YOLOAI_MONITOR_DEBUG env var
-    if config.get("debug", False) or os.environ.get("YOLOAI_MONITOR_DEBUG"):
-        try:
-            DEBUG_LOG = open(os.path.join(yoloai_dir, "monitor.log"), "a")
-        except OSError:
-            pass
+    _debug_enabled = config.get("debug", False) or bool(os.environ.get("YOLOAI_MONITOR_DEBUG"))
+    monitor_log_path = os.path.join(yoloai_dir, "logs", "monitor.jsonl")
+    try:
+        _monitor_log = open(monitor_log_path, "a", buffering=1)  # line-buffered
+    except OSError:
+        pass
 
     sandbox_name = config.get("sandbox_name", "sandbox")
     detectors = build_detectors(config, status_file, tmux_sock, yoloai_dir)
 
-    debug(f"monitor started: sandbox={sandbox_name} detectors={[d.name for d in detectors]}")
+    detector_names = [d.name for d in detectors]
+    _log_jsonl("info", "monitor.start", "monitor started",
+               detectors=detector_names,
+               sandbox=sandbox_name)
     debug(f"platform: linux={IS_LINUX} macos={IS_MACOS}")
 
     # Per-detector stability counters: {detector_name: (last_status, count)}
@@ -531,6 +551,8 @@ def run_monitor(config_path, status_file, tmux_sock=None):
         if dead:
             ec = exit_code if exit_code is not None else 1
             debug(f"pane dead: exit_code={ec}")
+            _log_jsonl("info", "status.transition", "status changed",
+                       **{"from": hold_status or "unknown", "to": "done", "detector": "pane_dead"})
             write_status(status_file, "done", ec)
             update_title(sandbox_name)
             break
@@ -587,6 +609,10 @@ def run_monitor(config_path, status_file, tmux_sock=None):
         )
 
         # 4. Write status
+        if final_status != hold_status:
+            _log_jsonl("info", "status.transition", "status changed",
+                       **{"from": hold_status or "unknown", "to": final_status,
+                          "detector": decided_by or "default"})
         hold_status = final_status
         write_status(status_file, final_status)
 
@@ -597,6 +623,10 @@ def run_monitor(config_path, status_file, tmux_sock=None):
             update_title(sandbox_name)
 
         time.sleep(POLL_INTERVAL)
+
+    _log_jsonl("info", "monitor.exit", "monitor exiting", reason="pane_dead")
+    if _monitor_log:
+        _monitor_log.close()
 
 
 def main():

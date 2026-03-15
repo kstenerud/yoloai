@@ -13,6 +13,9 @@ var embeddedDockerfile []byte
 //go:embed resources/entrypoint.sh
 var embeddedEntrypoint []byte
 
+//go:embed resources/entrypoint.py
+var embeddedEntrypointPy []byte
+
 //go:embed resources/tmux.conf
 var embeddedTmuxConf []byte
 

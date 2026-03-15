@@ -11,6 +11,7 @@ Usage:
     sandbox-setup.py tart <shared-dir>       # Tart
 """
 
+import datetime
 import json
 import os
 import subprocess
@@ -20,13 +21,43 @@ import time
 from pathlib import Path
 
 
-# --- Utility functions ---
+# --- JSONL logger ---
 
-def debug_log(msg):
-    """Print a debug message if DEBUG is enabled."""
+_sandbox_log = None
+
+
+def _init_sandbox_log(yoloai_dir):
+    global _sandbox_log
+    log_path = os.path.join(yoloai_dir, "logs", "sandbox.jsonl")
+    try:
+        _sandbox_log = open(log_path, "a", buffering=1)  # noqa: WPS515 # line-buffered
+    except OSError as e:
+        print(f"[sandbox-setup] warning: cannot open log: {e}", file=sys.stderr)
+
+
+def _log(level, event, msg, **fields):
+    now = datetime.datetime.utcnow()
+    ts = now.strftime("%Y-%m-%dT%H:%M:%S.") + f"{now.microsecond // 1000:03d}Z"
+    entry = {"ts": ts, "level": level, "event": event, "msg": msg}
+    entry.update(fields)
+    if _sandbox_log:
+        try:
+            _sandbox_log.write(json.dumps(entry) + "\n")
+            _sandbox_log.flush()
+        except OSError:
+            pass
+
+
+def log_info(event, msg, **fields):
+    _log("info", event, msg, **fields)
+
+
+def log_debug(event, msg, **fields):
     if DEBUG:
-        print(f"[debug] {msg}", flush=True)
+        _log("debug", event, msg, **fields)
 
+
+# --- Utility functions ---
 
 def read_config(path):
     """Read and return the runtime-config.json as a dict."""
@@ -102,7 +133,7 @@ def setup_tmux_session(cfg, yoloai_dir, socket=None):
     else:
         cmd = ["tmux"] + base_args + session_args
 
-    debug_log(f"starting tmux session (tmux_conf={tmux_conf})")
+    log_debug("tmux.start", f"starting tmux session (tmux_conf={tmux_conf})")
     subprocess.run(cmd, capture_output=True)
 
     # Source host tmux.conf on top of default if default+host
@@ -110,13 +141,17 @@ def setup_tmux_session(cfg, yoloai_dir, socket=None):
         tmux("source-file", host_tmux_conf, socket=socket)
 
     tmux("set-option", "-t", "main", "remain-on-exit", "on", socket=socket)
-    tmux("pipe-pane", "-t", "main", f"cat >> {yoloai_dir}/log.txt", socket=socket)
+    # Pipe raw terminal stream to logs/agent.log for later inspection.
+    tmux("pipe-pane", "-t", "main", f"cat >> {yoloai_dir}/logs/agent.log", socket=socket)
+    log_info("sandbox.tmux_start", "tmux session created")
 
 
 def launch_agent(cfg, socket=None, working_dir=None):
     """Launch the agent command inside the tmux session."""
     agent_command = cfg.get("agent_command", "")
-    debug_log(f"launching agent: {agent_command}")
+    agent = cfg.get("agent", "")
+    model = cfg.get("model", "")
+    log_debug("agent.launch", f"launching agent: {agent_command}")
 
     if working_dir:
         send_cmd = f"cd {working_dir} && exec {agent_command}"
@@ -124,6 +159,7 @@ def launch_agent(cfg, socket=None, working_dir=None):
         send_cmd = f"exec {agent_command}"
 
     tmux("send-keys", "-t", "main", send_cmd, "Enter", socket=socket)
+    log_info("sandbox.agent_launch", "agent process started", agent=agent, model=model)
 
 
 def monitor_exit(socket=None):
@@ -149,7 +185,7 @@ def wait_for_ready(cfg, socket=None):
     ready_pattern = cfg.get("ready_pattern", "")
     startup_delay = cfg.get("startup_delay", 5)
 
-    debug_log(f"waiting for agent ready (pattern={ready_pattern})")
+    log_debug("agent.wait_ready", f"waiting for agent ready (pattern={ready_pattern})")
 
     if not ready_pattern or ready_pattern == "null":
         time.sleep(float(startup_delay))
@@ -195,11 +231,11 @@ def deliver_prompt(cfg, yoloai_dir, socket=None):
     """Deliver prompt file to the agent via tmux paste-buffer."""
     prompt_file = os.path.join(yoloai_dir, "prompt.txt")
     if not os.path.isfile(prompt_file):
-        debug_log("no prompt file found")
+        log_info("sandbox.prompt_skip", "no prompt.txt; agent started without prompt")
         return False
 
     submit_sequence = cfg.get("submit_sequence", "")
-    debug_log("delivering prompt")
+    log_debug("prompt.deliver", "delivering prompt")
 
     tmux("load-buffer", prompt_file, socket=socket)
     tmux("paste-buffer", "-t", "main", socket=socket)
@@ -209,6 +245,7 @@ def deliver_prompt(cfg, yoloai_dir, socket=None):
         tmux("send-keys", "-t", "main", key, socket=socket)
         time.sleep(0.2)
 
+    log_info("sandbox.prompt_deliver", "prompt delivered", method="paste-buffer")
     return True
 
 
@@ -219,19 +256,22 @@ def launch_monitor(cfg_path, status_file, yoloai_dir, socket=None):
     if socket:
         cmd.append(socket)
     subprocess.Popen(cmd)
+    log_info("sandbox.monitor_launch", "status-monitor.py spawned")
 
 
 # --- Backend-specific setup ---
 
 def setup_docker(cfg, yoloai_dir):
     """Docker-specific setup: overlay git baseline and auto-commit loop."""
+    log_info("sandbox.backend_setup", "Docker backend setup", backend="docker")
+
     # Git baseline for overlay mounts
     overlay_mounts = cfg.get("overlay_mounts", [])
     for overlay in overlay_mounts:
         merged = overlay.get("merged", "")
         if not merged:
             continue
-        debug_log(f"creating git baseline for overlay: {merged}")
+        log_debug("overlay.git_baseline", f"creating git baseline for overlay: {merged}")
         # Remove .git dirs (creates whiteouts in upper layer)
         for root, dirs, _files in os.walk(merged):
             if ".git" in dirs:
@@ -245,13 +285,14 @@ def setup_docker(cfg, yoloai_dir):
              "commit", "-m", "baseline", "--allow-empty"],
             capture_output=True,
         )
+        log_info("overlay.git_baseline", "git baseline commit created", path=merged)
 
     # Auto-commit loop for :copy directories
     auto_commit_interval = int(cfg.get("auto_commit_interval", 0))
     copy_dirs = cfg.get("copy_dirs", [])
 
     if auto_commit_interval > 0 and copy_dirs:
-        debug_log(f"starting auto-commit loop (interval={auto_commit_interval}s, dirs={len(copy_dirs)})")
+        log_debug("auto_commit.start", f"starting auto-commit loop (interval={auto_commit_interval}s, dirs={len(copy_dirs)})")
 
         def _auto_commit():
             while True:
@@ -271,6 +312,8 @@ def setup_docker(cfg, yoloai_dir):
 
 def setup_seatbelt(cfg, sandbox_dir):
     """Seatbelt-specific setup: HOME redirection, CLI tool symlinks, git config."""
+    log_info("sandbox.backend_setup", "Seatbelt backend setup", backend="seatbelt")
+
     original_home = os.environ.get("HOME", "")
     new_home = os.path.join(sandbox_dir, "home")
 
@@ -320,18 +363,17 @@ def setup_seatbelt(cfg, sandbox_dir):
             dst = os.path.join(new_home, name)
             if not os.path.exists(dst):
                 os.symlink(src, dst)
-        # Also handle hidden files (listdir already includes them on Python)
-        # but glob for dotfiles that listdir might show
-        # Note: os.listdir already returns dotfiles, so no extra step needed
 
 
 def setup_tart(cfg, shared_dir):
     """Tart-specific setup: VirtioFS mount symlinks via sudo."""
+    log_info("sandbox.backend_setup", "Tart backend setup", backend="tart")
+
     mount_map = cfg.get("mount_map", {})
     if not mount_map:
         return
 
-    debug_log("creating VirtioFS mount symlinks")
+    log_debug("tart.symlinks", "creating VirtioFS mount symlinks")
     for target, source in mount_map.items():
         parent = os.path.dirname(target)
         subprocess.run(["sudo", "mkdir", "-p", parent], capture_output=True)
@@ -377,28 +419,16 @@ def main():
         print(f"Unknown backend: {backend}", file=sys.stderr)
         sys.exit(1)
 
+    # Open structured log (append mode — entrypoint.py may have written entries already).
+    _init_sandbox_log(yoloai_dir)
+
     # Read config
     cfg_path = os.path.join(yoloai_dir, "runtime-config.json")
     cfg = read_config(cfg_path)
 
     DEBUG = cfg.get("debug", False)
-    debug_log(f"sandbox-setup starting (backend={backend}, dir={yoloai_dir})")
 
-    # Setup log capture per backend
-    if backend == "seatbelt":
-        # Redirect stdout/stderr to log.txt (no tee — sandbox-exec blocks /dev/fd)
-        log_path = os.path.join(yoloai_dir, "log.txt")
-        log_file = open(log_path, "a")
-        sys.stdout = log_file
-        sys.stderr = log_file
-    elif backend in ("docker", "tart"):
-        # Append to log (docker logs captures stdout; tart tees externally)
-        log_path = os.path.join(yoloai_dir, "log.txt")
-        log_file = open(log_path, "a")
-        sys.stdout = log_file
-        sys.stderr = log_file
-
-    # Read secrets and set env vars
+    # Read secrets and set env vars (seatbelt/tart only; docker handled by entrypoint.py)
     if backend == "docker":
         read_secrets("/run/secrets")
     else:
@@ -452,7 +482,7 @@ def main():
     # Launch status monitor
     launch_monitor(cfg_path, status_file, yoloai_dir, socket=socket)
 
-    debug_log("sandbox-setup complete, blocking on tmux wait")
+    log_info("sandbox.ready", "sandbox fully initialized")
 
     # Block — process stops only on explicit stop/kill.
     # Use subprocess.run (not os.execvp) so the Python process stays alive
@@ -462,6 +492,8 @@ def main():
         cmd.extend(["-S", socket])
     cmd.extend(["wait-for", "yoloai-exit"])
     result = subprocess.run(cmd)
+
+    log_info("sandbox.agent_exit", "agent process exited", exit_code=result.returncode)
     sys.exit(result.returncode)
 
 

@@ -19,6 +19,7 @@ func TestCreateBuildContext(t *testing.T) {
 	dir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "Dockerfile"), []byte("FROM ubuntu"), 0600))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "entrypoint.sh"), []byte("#!/bin/bash"), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "entrypoint.py"), []byte("#!/usr/bin/env python3"), 0600))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "sandbox-setup.py"), []byte("#!/bin/bash\nset -euo pipefail"), 0600))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "status-monitor.py"), []byte("#!/usr/bin/env python3"), 0600))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "diagnose-idle.sh"), []byte("#!/bin/bash"), 0600))
@@ -43,11 +44,12 @@ func TestCreateBuildContext(t *testing.T) {
 
 	assert.Equal(t, "FROM ubuntu", found["Dockerfile"])
 	assert.Equal(t, "#!/bin/bash", found["entrypoint.sh"])
+	assert.Equal(t, "#!/usr/bin/env python3", found["entrypoint.py"])
 	assert.Equal(t, "#!/bin/bash\nset -euo pipefail", found["sandbox-setup.py"])
 	assert.Equal(t, "#!/usr/bin/env python3", found["status-monitor.py"])
 	assert.Equal(t, "#!/bin/bash", found["diagnose-idle.sh"])
 	assert.Equal(t, "set -g mouse on", found["tmux.conf"])
-	assert.Len(t, found, 6)
+	assert.Len(t, found, 7)
 }
 
 func TestCreateProfileBuildContext(t *testing.T) {
@@ -183,6 +185,7 @@ func TestNeedsBuild_NoChecksum(t *testing.T) {
 	dir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "Dockerfile"), []byte("FROM ubuntu"), 0600))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "entrypoint.sh"), []byte("#!/bin/bash"), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "entrypoint.py"), []byte("#!/usr/bin/env python3"), 0600))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "sandbox-setup.py"), []byte("#!/bin/bash"), 0600))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "status-monitor.py"), []byte("#!/usr/bin/env python3"), 0600))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "diagnose-idle.sh"), []byte("#!/bin/bash"), 0600))
@@ -195,6 +198,7 @@ func TestNeedsBuild_AfterRecord(t *testing.T) {
 	dir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "Dockerfile"), []byte("FROM ubuntu"), 0600))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "entrypoint.sh"), []byte("#!/bin/bash"), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "entrypoint.py"), []byte("#!/usr/bin/env python3"), 0600))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "sandbox-setup.py"), []byte("#!/bin/bash"), 0600))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "status-monitor.py"), []byte("#!/usr/bin/env python3"), 0600))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "diagnose-idle.sh"), []byte("#!/bin/bash"), 0600))
@@ -245,6 +249,7 @@ func TestBuildInputsChecksum_Deterministic(t *testing.T) {
 	dir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "Dockerfile"), []byte("FROM ubuntu"), 0600))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "entrypoint.sh"), []byte("#!/bin/bash"), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "entrypoint.py"), []byte("#!/usr/bin/env python3"), 0600))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "sandbox-setup.py"), []byte("#!/bin/bash"), 0600))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "status-monitor.py"), []byte("#!/usr/bin/env python3"), 0600))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "diagnose-idle.sh"), []byte("#!/bin/bash"), 0600))
