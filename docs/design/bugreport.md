@@ -29,9 +29,9 @@ The hook commands (built in `create.go`) append to the JSONL log then overwrite 
 
 ```sh
 printf '{"ts":"%s","level":"info","event":"hook.idle","msg":"agent hook: idle","status":"idle"}\n' \
-  "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" >> "${YOLOAI_DIR}/logs/agent-hooks.jsonl" && \
+  "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" >> "${YOLOAI_DIR:-/yoloai}/logs/agent-hooks.jsonl" && \
 printf '{"status":"idle","exit_code":null,"timestamp":%d}\n' "$(date +%s)" \
-  > "${YOLOAI_DIR}/agent-status.json"
+  > "${YOLOAI_DIR:-/yoloai}/agent-status.json"
 ```
 
 Agent output is a raw terminal recording — not loggable alongside structured events. It is treated as a separate artifact, not a log source.
@@ -43,7 +43,7 @@ Each file has a single writer, so no file locking is required. POSIX append sema
 Each line in the JSONL log files is a JSON object:
 
 ```json
-{"ts": "2026-03-15T14:23:01.123Z", "level": "info", "event": "sandbox.start", "msg": "starting sandbox", "backend": "docker", "sandbox": "x"}
+{"ts": "2026-03-15T14:23:01.123Z", "level": "info", "event": "sandbox.ready", "msg": "sandbox fully initialized", "backend": "docker", "sandbox": "x"}
 ```
 
 | Field | Type | Description |
@@ -114,7 +114,7 @@ All other events pass through. Field-level pattern scanning applies to all strin
 | Flag | Effect |
 |------|--------|
 | `--verbose` | More output printed to the terminal. No effect on log files. |
-| `--debug` | Enables `debug`-level entries in the sandbox's JSONL log files. Silently ignored for non-sandbox commands (no log location to write to). Only affects the CLI's own `cli.jsonl` output — container processes (`sandbox.jsonl`, `monitor.jsonl`) read their debug flag from `runtime-config.json` at container creation time (`new`) and cannot be re-configured by `--debug` on subsequent commands like `start`. To get container-side debug logs, pass `--debug` to `new`. |
+| `--debug` | Enables `debug`-level entries in `cli.jsonl`. For non-sandbox commands, silently ignored unless `--bugreport` is also active (in which case debug entries go to the bugreport temp file). Container processes (`sandbox.jsonl`, `monitor.jsonl`) read their debug flag from `runtime-config.json` at container creation time and cannot be reconfigured by `--debug` on subsequent commands like `start` — pass `--debug` to `new` to get container-side debug logs. |
 | `--bugreport <type>` | Implies `--debug`. See below. |
 
 ---
@@ -225,7 +225,7 @@ Can be used with any yoloai command. When active:
 - `--debug` is implicitly enabled: debug-level entries are written to both the bugreport temp file and to `cli.jsonl` (once it opens in the subcommand). Container processes (`sandbox.jsonl`, `monitor.jsonl`, `agent-hooks.jsonl`) are independent and continue writing to their own files as normal — `--bugreport` cannot redirect them.
 - A deferred finalizer (with `recover()` to catch panics) writes the exit code and any error, then renames the temp file to the final filename.
 - For sandbox commands, the existing JSONL log files are included in the report — prior `--debug` runs will have contributed debug-level entries to `cli.jsonl`.
-- The report is **always written** regardless of outcome: success, error, panic, or signal.
+- The report is **always written** regardless of outcome: success, error, or panic. On SIGKILL the rename never completes, leaving a partial `.tmp` file.
 
 For non-sandbox commands (e.g. `yoloai ls`, `yoloai system info`), the report contains only sections 1–5, 13, and 14 — no sandbox detail or log files are included.
 
@@ -414,7 +414,7 @@ In `unsafe` mode: output of `tmux capture-pane -p -t main`, which renders the cu
 
 ### 13. Live log *(flag only)*
 
-All log entries (all levels) captured from the CLI logger during the run. In `safe` mode, `msg` fields are scanned and sanitized as with `cli.jsonl`.
+All log entries (all levels) captured from the CLI logger during the run. In `safe` mode, all string-valued fields are scanned and sanitized as with `cli.jsonl`.
 
 ### 14. Exit *(flag only)*
 
@@ -548,7 +548,7 @@ New file: `internal/cli/logger.go`.
 
 | Function | Purpose |
 |----------|---------|
-| `newSandboxBugReportCmd(version, commit, date)` | Cobra command constructor |
+| `runSandboxBugReport(cmd, name, reportType, version, commit, date)` | Entry point called from `sandboxDispatch()` |
 | `writeBugReportHeader(w, version, commit, date, reportType)` | Section 1 |
 | `writeBugReportCommandInvocation(w, reportType)` | Section 2 (flag only) |
 | `writeBugReportSystem(w)` | Section 3 |
