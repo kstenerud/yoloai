@@ -111,6 +111,8 @@ Reports are written to the current directory with an auto-generated name:
 - Sandbox commands: `yoloai-bugreport-<name>-<timestamp>.md`
 - Non-sandbox commands: `yoloai-bugreport-<timestamp>.md`
 
+Timestamp format: UTC, `YYYYMMDD-HHMMSS` (seconds precision). Example: `20260315-142301`.
+
 The filename is printed to stderr after writing:
 ```
 Bug report written: yoloai-bugreport-x-20260315-142301.md
@@ -135,6 +137,8 @@ Can be used with any yoloai command. When active:
 - A deferred finalizer (with `recover()` to catch panics) writes the exit code and any error, then renames the temp file to the final filename.
 - For sandbox commands, the existing JSONL log files are included in the report — prior `--debug` runs will have contributed debug-level entries to `cli.jsonl`.
 - The report is **always written** regardless of outcome: success, error, panic, or signal.
+
+For non-sandbox commands (e.g. `yoloai ls`, `yoloai system info`), the report contains only sections 1–5, 12, and 13 — no sandbox detail or log files are included.
 
 Typical workflow for a hard-to-reproduce bug:
 ```
@@ -247,7 +251,7 @@ Full `os.Args` as a fenced code block. In `safe` mode, values for `--prompt` / `
 
 For each known backend (docker, podman, tart, seatbelt):
 
-- Availability status
+- Availability status: one of `available`, `unavailable`, or `unknown` (if the check itself failed)
 - Version string from backend CLI if available:
   - docker: `docker version --format 'Client: {{.Client.Version}} / Server: {{.Server.Version}}'`
   - podman: `podman version --format '{{.Client.Version}}'`
@@ -337,7 +341,7 @@ Line-by-line on raw YAML text (no parser dependency). Handles indented keys (e.g
 
 ### Pattern scanning (`safe` mode)
 
-Applied to JSONL `msg` fields, container log output, and any other free-text content included in the report. Patterns are applied in order; first match wins.
+Applied to: JSONL `msg` fields and all other string-valued JSONL fields (e.g. `path`, `cmd`, `backend`), container log output, and `environment.json` string values. Patterns are applied in order; first match wins.
 
 | Pattern | Matches | Example |
 |---------|---------|---------|
@@ -414,7 +418,7 @@ Matched content is replaced with `[REDACTED]` inline, preserving surrounding con
 | `writeBugReportConfig(w, reportType)` | Section 5 |
 | `writeBugReportSandboxDetail(ctx, w, rt, name, reportType)` | Section 6 |
 | `writeBugReportCLILog(w, name, reportType)` | Section 7 |
-| `writeBugReportSandboxLog(w, name, reportType)` | Section 8 |
+| `writeBugReportSandboxJSONL(w, name, reportType)` | Section 8 |
 | `writeBugReportMonitorLog(w, name)` | Section 9 |
 | `writeBugReportHooksLog(w, name)` | Section 10 |
 | `writeBugReportAgentOutput(w, name)` | Section 11 (unsafe only) |

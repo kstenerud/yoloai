@@ -1,105 +1,96 @@
-# Critique
+# Critique: Bug Report and Structured Logging Design
 
-Idle detection architecture review — March 2026. Assessed [idle detection research and architecture proposal](research/idle-detection.md) against actual codebase.
+Open questions from reviewing `docs/design/bugreport.md` from an implementer's perspective. Each item needs a design decision before implementation can proceed. Apply resolutions to `docs/design/bugreport.md` and clear this file when done.
 
-## What's Working Well
+---
 
-- The pluggable detector framework is well-designed — clean separation of capability declaration from detector selection.
-- `status.json` as IPC is sound. Detectors write, host reads. No change needed.
-- The confidence/stability counter approach handles flapping elegantly.
-- wchan research is thorough and verified against kernel 6.17.4.
-- Q4 resolution (TCP traffic volume via `ss`/`nettop`) closes the WebSocket gap.
-- Hook-based detection for Claude Code is verified working and survives monitor death (hooks write `status.json` directly).
+## 1. `--bugreport` filename — chicken-and-egg with sandbox name
 
-## Findings
+**Problem:** `--bugreport` fires in `PersistentPreRunE` on the root command, before any subcommand runs. The sandbox name (needed for `yoloai-bugreport-<name>-<timestamp>.md`) is determined by `resolveName()` inside each subcommand. At pre-run time, the name is not yet known.
 
-### 1. `idle_threshold` is live code, not dead (Medium)
+**Options:**
+- Parse `os.Args` directly in `PersistentPreRunE` to extract the name positional argument — fragile, couples pre-run to CLI structure.
+- Open the temp file with a placeholder name; defer the final rename (with correct sandbox name) until after the command completes — loses the sandbox name in the filename if the command panics before the name is resolved.
+- Drop the sandbox name from flag-mode filenames; always use `yoloai-bugreport-<timestamp>.md` — simpler, consistent with non-sandbox commands. Sandbox name already appears inside the report.
+- Set a package-level variable in `PersistentPreRunE` that subcommands populate once they resolve the name; the finalizer uses it for the rename.
 
-**Observation:** The design doc (known issue #1) calls `idle_threshold` "never read or used." This is wrong. `config/config.go:46` parses it from YAML, `config/config.go:86` lists it in `knownSettings`, `sandbox/create_prepare.go:28,40,133` propagates it through profile resolution, and `sandbox/meta.go:38` stores it in Meta. It flows through the entire creation pipeline.
+---
 
-Only the `DefaultIdleThreshold` constant in `sandbox/inspect.go:32-35` is marked deprecated. The field itself is actively wired up.
+## 2. `sandbox.jsonl` — how does bash write JSONL?
 
-**Recommendation:** The Phase 1 cleanup must trace and remove all of these sites, not just the constant. Update the design doc's known issue #1 to list the actual removal scope: `config.go`, `create_prepare.go`, `meta.go`, `inspect.go`.
+**Problem:** `entrypoint.sh` is a bash script. Writing well-formed JSONL (correct timestamps, monotonic sequence numbers, JSON-escaped strings) from bash is non-trivial and error-prone. `jq` may not be available in all container images.
 
-**When:** Phase 1.
+**Options:**
+- `sandbox-setup.py` takes over all structured logging for the container side; `entrypoint.sh` only writes plain text to stdout (captured by Docker logs and a separate `entrypoint.log`). `sandbox.jsonl` is Python-only.
+- Add a tiny logging helper binary that `entrypoint.sh` pipes to for JSONL output.
+- Split the file: `entrypoint.log` (plain text, entrypoint.sh) and `sandbox.jsonl` (Python only, sandbox-setup.py).
 
-### 2. Phase 2 code examples are bash, should be Python (Low)
+**Recommendation to consider:** Splitting into two files is cleanest. Bash writing JSONL is fragile regardless of approach.
 
-**Observation:** Section 3.5 Phase 2 shows bash snippets (`WCHAN=$(cat /proc/...)`, `case "$WCHAN" in ...`) even though Q2 resolved the monitor will be Python from the start. The section 3.7 code changes table was updated but the inline examples weren't.
+---
 
-**Recommendation:** Replace bash code examples in Phase 2-4 with Python (or pseudocode) for consistency.
+## 3. `seq` field — scope and Python restart handling
 
-**When:** Before implementation begins.
+**Problem:** Two related questions about the `seq` field:
 
-### 3. `ss` / `iproute2` not in Dockerfile (Medium)
+1. **Cross-file scope:** Are sequence numbers meaningful across `cli.jsonl` and `sandbox.jsonl` for interleaving, or per-file? If per-file, the interleaver must use `ts` as the primary sort key with `seq` as a tiebreaker within the same file only.
 
-**Observation:** Q4 resolution says "Linux uses `ss -ti`" for TCP traffic volume monitoring. But `iproute2` is not installed in the base image Dockerfile. Phase 2 step 2 acknowledges `/proc/<pid>/net/tcp6` parsing as an alternative, but the Q4 resolution doesn't mention it.
+2. **Python restarts:** If `status-monitor.py` is restarted, how does it resume the sequence number? Read the last line of `monitor.jsonl` on startup? Start from 0 per-session?
 
-**Recommendation:** Pick one approach and be consistent:
-- **Option A:** Add `iproute2` to Dockerfile. Simple, `ss` is a ~100KB binary.
-- **Option B:** Parse `/proc/<pid>/net/tcp6` directly in Python. No new dependency, but more code.
+---
 
-Option B is more aligned with the Python monitor approach (no subprocess spawning). Either way, update Q4 resolution and Phase 2 to agree.
+## 4. `agent-hooks.jsonl` — required hook script changes
 
-**When:** Before Phase 2 implementation.
+**Problem:** Agent hooks currently write `{"status":"idle"}` to `agent-status.json` (overwrite). The design adds `agent-hooks.jsonl` as an append-only log but doesn't specify:
 
-### 4. No macOS idle detection story for most agents (Medium)
+- The JSONL schema for hook entries
+- Whether hooks write to `agent-hooks.jsonl` in addition to `agent-status.json`, or instead of
+- Whether this is a yoloai-side change (yoloai installs the hook scripts) or requires agent-side changes
+- How hooks know the path to `agent-hooks.jsonl`
 
-**Observation:** On macOS (Tart/Seatbelt), wchan is unavailable. For non-hook agents (gemini, codex, aider, opencode), the primary detector is gone. What remains: `ready_pattern` (medium confidence, fragile), `context_signal` (medium, unreliable), `output_stability` (low, false positives). OpenCode on macOS has only context_signal and output_stability — both weak.
+---
 
-The design acknowledges this for OpenCode ("known limitation") but doesn't call out that *most agents on macOS* have significantly degraded idle detection.
+## 5. `runtime-config.json` field omission in `safe` mode
 
-**Recommendation:** Add a note to section 3.4 explicitly stating that macOS idle detection for non-Claude agents is best-effort. Consider whether this gap is acceptable or whether it warrants a macOS-specific fallback (e.g., `ps -o wchan` heuristic, even if weaker than Linux).
+**Problem:** The doc says `setup_commands` and `allowed_domains` are "omitted" in `safe` mode. The YAML sanitizer is line-by-line with no parser dependency — but JSON field omission without a parser is fragile (multiline values, nested structures, varied whitespace).
 
-**When:** Before Phase 2.
+**Options:**
+- Use a JSON parser to read, delete fields, and re-serialize — correct but adds parser dependency (though Go's `encoding/json` is stdlib).
+- Include `runtime-config.json` as-is and rely on pattern scanning to catch sensitive values.
+- Omit `runtime-config.json` entirely from `safe` mode.
 
-### 5. ANSI escape sequences in context_signal log matching (Low-Medium)
+---
 
-**Observation:** The `context_signal` detector reads the pipe-pane log (`/yoloai/log.txt`) for `[YOLOAI:IDLE]` / `[YOLOAI:WORKING]` markers. This log captures raw terminal output including ANSI color/formatting codes. If the agent wraps the marker text in formatting (bold, color, markdown rendering), a literal string match will fail.
+## 6. `--debug` reaching container processes — timing issue
 
-**Recommendation:** The Python monitor must strip ANSI escape sequences before matching markers. Alternatively, the context file instructions should explicitly say "print this exact text on its own line with no formatting." Both mitigations are cheap — do both.
+**Problem:** The doc says `--debug` enables debug-level entries in `sandbox.jsonl` and `monitor.jsonl`. These are Python processes inside the container that read their debug flag from `runtime-config.json` at startup. But `runtime-config.json` is written at container creation time.
 
-**When:** Phase 3 implementation.
+**Timing issue:** `yoloai --debug start x` — the container already exists, `runtime-config.json` is already written with whatever `debug` value was set at `new` time. Does `--debug` on `start` affect container-side logging at all, or only the CLI's own `cli.jsonl` output?
 
-### 6. Process tree walking for wchan is underspecified (Low-Medium)
+---
 
-**Observation:** Phase 2 step 3 says "check children's wchan too: if any child has active network connections, the agent is working." But it doesn't specify traversal depth. Claude Code spawns Node workers, which spawn shells, which spawn build tools. Recursive `/proc/<pid>/children` traversal could be expensive.
+## 7. JSONL interleaving algorithm and `--follow`
 
-**Recommendation:** Specify a depth limit (e.g., 2 levels) or use a smarter heuristic: only check processes with TCP connections (scan `/proc/<pid>/net/tcp6` for the agent PID's network namespace, which covers all processes in the container). The network namespace approach is both simpler and more complete.
+**Problem:** `sandbox <name> log` interleaves four JSONL files by timestamp. The algorithm is unspecified for the `--follow` case in particular:
 
-**When:** Phase 2 implementation.
+- **Static:** Read all four files, merge-sort by `ts`, emit. Straightforward.
+- **`--follow`:** Tail all four files simultaneously and merge in real-time. A goroutine-per-file with channel merge is the natural Go approach, but polling interval and latency characteristics need specifying.
 
-### 7. Prompt delivery race condition not addressed (Low)
+---
 
-**Observation:** Known issue #5 documents that `resetStatusToActive` fires before the prompt is actually delivered (up to 60s wait for agent readiness). The architecture proposal doesn't fix this — it persists into the new design.
+## 9. `sandbox.jsonl` event type taxonomy
 
-**Recommendation:** Either fix it (reset status only after confirming delivery) or explicitly note in the architecture proposal that this is a known limitation carried forward. Currently it's documented as a known issue in Part 1 but not mentioned in Part 3.
+**Problem:** Section 8 filters entries by event type (e.g. `entrypoint.setup_cmd`, `entrypoint.network.*`) for `safe` mode. But there is no complete list of event types that `sandbox.jsonl` will emit.
 
-**When:** Note it now, fix when prompt delivery is reworked.
+An implementer writing the Python/bash side needs the full taxonomy upfront to know what to emit. An implementer writing the `safe`-mode filter needs the complete list to know what to omit.
 
-### 8. Hook detector survives monitor death — undocumented strength (Low)
+---
 
-**Observation:** The `hook` detector is unique: Claude Code's hooks write to `status.json` directly, bypassing the status monitor entirely. If the Python monitor crashes, hook-based idle detection continues working (the host reads `status.json` regardless). All other detectors die with the monitor.
+## 11. ANSI stripping sufficiency for `agent.log`
 
-This is a significant reliability advantage that the design doesn't capture. It also means the monitor's role for hook agents is purely cosmetic (terminal title updates) — worth documenting for the implementation.
+**Problem:** `agent.log` is a raw terminal recording containing not just SGR color codes but full VT100 sequences: cursor positioning (`[180C[1A`), terminal mode switches (`[?2004l`, `[?2026h`), terminal identification queries (`>0q`, `[c`), bracketed paste, window title sequences. The existing `stripANSI` from `ansi.go` handles SGR codes — it may leave significant noise from these other sequences, producing largely unreadable output for `--agent` mode.
 
-**Recommendation:** Add a note to the `hook` detector section (3.3) about this resilience property.
-
-**When:** Before implementation.
-
-## Summary Table
-
-| # | Finding | Severity | Status |
-|---|---------|----------|--------|
-| 1 | `idle_threshold` is live code, not dead | Medium | **Applied** — Phase 1 updated with full removal scope, known issue #1 corrected |
-| 2 | Phase 2 code examples still bash | Low | **Applied** — replaced with Python |
-| 3 | `ss`/`iproute2` not in Dockerfile | Medium | **Applied** — resolved: parse `/proc` in Python, no `ss` dependency |
-| 4 | Weak macOS idle detection for non-Claude agents | Medium | **Applied** — `sysctl KERN_PROC` `e_wmesg` (`ttyin`) fills the gap; wchan detector now cross-platform |
-| 5 | ANSI sequences break context_signal matching | Low-Medium | **Applied** — ANSI caveat added to context_signal detector |
-| 6 | Process tree walk depth unspecified | Low-Medium | **Applied** — replaced with network namespace approach |
-| 7 | Prompt delivery race not addressed | Low | **Applied** — fix added to Phase 1 step 2 |
-| 8 | Hook detector resilience undocumented | Low | **Applied** — resilience note added to hook detector |
-
-## Verdict
-
-All findings applied. macOS research (#4) found `sysctl KERN_PROC` `e_wmesg` as the macOS equivalent of Linux's wchan — the wchan detector is now cross-platform. One caveat remains: `e_wmesg` may be empty on some macOS versions, needing verification on Sequoia/Sonoma hardware.
+**Options:**
+- Use a more comprehensive VT100 stripping library.
+- Accept best-effort readability and document the limitation.
+- Use `tmux capture-pane -p` for the stripped view (renders to plain text) instead of `agent.log` — but only works on live sessions.
