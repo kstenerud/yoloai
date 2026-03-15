@@ -9,7 +9,7 @@ Each sandbox maintains log files named by writer, under `~/.yoloai/sandboxes/<na
 | File | Writer | Format | Content |
 |------|--------|--------|---------|
 | `cli.jsonl` | yoloai CLI (host Go binary) | JSONL | Sandbox lifecycle, mount operations, backend calls, config resolution |
-| `sandbox.jsonl` | entrypoint.py → sandbox-setup.py (sequential, single writer) | JSONL | Container setup, UID remapping, network isolation, overlay mounts, prompt delivery |
+| `sandbox.jsonl` | entrypoint.sh → entrypoint.py → sandbox-setup.py (sequential, single writer at a time) | JSONL | Container setup, UID remapping, network isolation, overlay mounts, prompt delivery |
 | `monitor.jsonl` | status-monitor.py | JSONL | Detector decisions, status transitions, idle/active polling |
 | `agent-hooks.jsonl` | Agent hook scripts | JSONL | Hook-reported state changes (idle/active events from Claude Code hooks etc.) |
 | `agent.log` | tmux pipe-pane | Raw terminal stream | Verbatim agent process output (ANSI codes, cursor positioning, etc.) |
@@ -73,8 +73,8 @@ Each line in the JSONL log files is a JSON object:
 | `overlay.mount` | entrypoint.py | info | `path` | Overlayfs mount applied |
 | `overlay.skip` | entrypoint.py | debug | — | No overlay mounts configured |
 | `setup_cmd.start` | entrypoint.py | info | `cmd`, `index`, `total` | Setup command starting |
-| `setup_cmd.done` | entrypoint.py | info | `exit_code`, `duration_ms` | Setup command finished |
-| `setup_cmd.error` | entrypoint.py | error | `exit_code`, `cmd` | Setup command failed |
+| `setup_cmd.done` | entrypoint.py | info | `duration_ms` | Setup command succeeded (exit_code=0) |
+| `setup_cmd.error` | entrypoint.py | error | `exit_code`, `duration_ms` | Setup command failed (non-zero exit); mutually exclusive with `setup_cmd.done` |
 | `sandbox.backend_setup` | sandbox-setup.py | info | `backend` | Backend-specific setup (seatbelt symlinks, tart mounts) |
 | `overlay.git_baseline` | sandbox-setup.py | info | `path` | Git baseline commit on overlay merged directory (Docker only) |
 | `sandbox.tmux_start` | sandbox-setup.py | info | — | tmux session created |
@@ -107,7 +107,7 @@ The following event types are omitted from `sandbox.jsonl` in `safe` mode — th
 - `setup_cmd.*` — setup commands may contain internal hostnames or credentials
 - `network.allow` — allowed domains reveal internal network topology
 
-All other events pass through (field-level pattern scanning still applies to `msg` values).
+All other events pass through. Field-level pattern scanning applies to all string-valued fields (not just `msg`) — see Sanitization section.
 
 ### `--debug` and `--verbose`
 
@@ -163,7 +163,7 @@ The command operates in one of three mutually exclusive modes selected by flag. 
 |------|--------|
 | `--source <sources>` | Show only the specified sources instead of all four interleaved. Comma-separated list of: `cli`, `sandbox`, `monitor`, `hooks`. E.g. `--source cli,monitor` |
 | `--level debug\|info\|warn\|error` | Filter by minimum log level (default: `info`) |
-| `--since <duration\|timestamp>` | e.g. `--since 5m` or `--since 14:20:00` |
+| `--since <duration\|timestamp>` | e.g. `--since 5m` or `--since 14:20:00` (local timezone). Filters by `ts` field after converting to local time. |
 | `--raw` | Emit lines as raw JSONL (no formatting) |
 
 **Agent output modes** (mutually exclusive with each other and with all structured log flags):
@@ -177,7 +177,7 @@ The command operates in one of three mutually exclusive modes selected by flag. 
 
 | Flag | Effect |
 |------|--------|
-| `--follow` / `-f` | Tail the log live |
+| `--follow` / `-f` | Tail the log live. Auto-exits when all sources stop producing output and sandbox status is `done`. |
 
 ---
 
@@ -200,14 +200,14 @@ Reports are written to the current directory with an auto-generated name:
 yoloai-bugreport-<timestamp>.md
 ```
 
-Timestamp format: UTC, `YYYYMMDD-HHMMSS` (seconds precision). Example: `yoloai-bugreport-20260315-142301.md`. The sandbox name is included inside the report, not in the filename.
+Timestamp format: UTC, `YYYYMMDD-HHMMSS.mmm` (millisecond precision). Example: `yoloai-bugreport-20260315-142301.123.md`. The sandbox name is included inside the report, not in the filename. If a file with the same name already exists (same-millisecond collision), yoloai exits with an error rather than overwriting.
 
 The filename is printed to stderr after writing:
 ```
-Bug report written: yoloai-bugreport-20260315-142301.md
+Bug report written: yoloai-bugreport-20260315-142301.123.md
 ```
 
-The temp file during writing is `<filename>.tmp`. On SIGKILL, the temp file survives with whatever was captured up to that point.
+The temp file during writing is `<filename>.tmp`. On successful completion the temp file is renamed atomically to the final name. On SIGKILL the rename never happens, leaving the `.tmp` with whatever was captured up to that point — it is not cleaned up automatically.
 
 Report files are created with mode **0600** (owner read/write only).
 
@@ -222,7 +222,7 @@ Can be used with any yoloai command. When active:
 
 - The output file is determined and the temp file opened immediately, before any subcommand logic runs.
 - Static sections (header, command invocation, system info, backends, config) are written to the temp file right at launch.
-- `--debug` is implicitly enabled: debug-level entries from the yoloai CLI are written to the temp file only, not to `cli.jsonl`. Container processes (`sandbox.jsonl`, `monitor.jsonl`, `agent-hooks.jsonl`) are independent and continue writing to their own files as normal — `--bugreport` cannot redirect them.
+- `--debug` is implicitly enabled: debug-level entries are written to both the bugreport temp file and to `cli.jsonl` (once it opens in the subcommand). Container processes (`sandbox.jsonl`, `monitor.jsonl`, `agent-hooks.jsonl`) are independent and continue writing to their own files as normal — `--bugreport` cannot redirect them.
 - A deferred finalizer (with `recover()` to catch panics) writes the exit code and any error, then renames the temp file to the final filename.
 - For sandbox commands, the existing JSONL log files are included in the report — prior `--debug` runs will have contributed debug-level entries to `cli.jsonl`.
 - The report is **always written** regardless of outcome: success, error, panic, or signal.
@@ -257,7 +257,7 @@ GitHub issue bodies are capped at **65,536 characters**. After writing the repor
 
 ```
 Warning: report exceeds GitHub's issue body limit (65,536 characters).
-Upload as a Gist instead: gh gist create yoloai-bugreport-x-20260315-142301.md
+Upload as a Gist instead: gh gist create yoloai-bugreport-20260315-142301.123.md
 ```
 
 Verbose sections (system info, backends, config, logs, sandbox detail) are wrapped in `<details>`/`<summary>` collapsible blocks. Only the header, type, command, and exit status are visible by default; machine-readable content is folded away.
@@ -489,7 +489,7 @@ Matched content is replaced with `[REDACTED]` inline, preserving surrounding con
 
 ### Structured logging (prerequisite)
 
-1. Create `logs/` subdirectory in the sandbox state directory.
+1. Create `logs/` subdirectory in the sandbox state directory **on the host before container start** — `entrypoint.sh` writes to it as its first action inside the container, so the directory must be visible via the bind mount immediately.
 2. Replace existing `log.txt` / `monitor.log` with `logs/cli.jsonl`, `logs/sandbox.jsonl`, `logs/monitor.jsonl`, `logs/agent-hooks.jsonl`, and `logs/agent.log`.
 3. Update all internal logging calls to emit structured JSONL entries with `ts`, `level`, `event`, `msg` fields.
 4. Update `sandbox <name> log` to the new design (see above).
@@ -514,6 +514,7 @@ The existing CLI logger must be replaced with a multi-sink structured logger bef
 - **Sinks:** (1) stderr (for `--verbose` terminal output), (2) `cli.jsonl` file per sandbox, (3) bugreport temp file when `--bugreport` is active
 - **`cli.jsonl` sink is added lazily** — the sandbox name is a subcommand positional argument, not known at `PersistentPreRunE` time. Each sandbox subcommand's `RunE` opens `logs/cli.jsonl` and registers it as a sink before doing any other work. Log entries emitted in `PersistentPreRunE` before the sink is registered go to whichever other sinks are already active (bugreport temp file, stderr)
 - **Bugreport sink receives all levels** — not filtered to debug only; the temp file is the flight recorder
+- **Live log entries are buffered in memory** — the bugreport sink accumulates entries in a `[]LogEntry` slice during the run. `writeBugReportLiveLog` writes them all in the `defer` finalizer, preserving document section order. Entry count is bounded by CLI operation duration, which is short.
 
 New file: `internal/cli/logger.go`.
 
@@ -557,8 +558,8 @@ New file: `internal/cli/logger.go`.
 | `writeBugReportTmuxCapture(w, name, backend, stateDir)` | Section 12 (unsafe only); uses seatbelt socket when needed |
 | `writeBugReportLiveLog(w, entries, reportType)` | Section 13 (flag only) |
 | `writeBugReportExit(w, code, err, panicked)` | Section 14 (flag only) |
-| `bugReportFilename(t)` | Generates output filename from UTC timestamp |
+| `bugReportFilename(t)` | Generates output filename from UTC timestamp (millisecond precision); errors if file already exists |
 | `backendVersion(backend)` | Returns version string from backend CLI, or "" |
 | `sanitizeYAMLConfig(content)` | Redacts values for sensitive key names; operates on raw YAML text line-by-line |
-| `sanitizeJSONLFile(path, reportType, omitEvents)` | Reads a JSONL file, omits specified event types, applies pattern scanning to string fields of each parsed object; passes through malformed lines unmodified |
+| `sanitizeJSONLFile(path, reportType, omitEvents)` | Reads a JSONL file, omits specified event types, applies pattern scanning to all string-valued fields of each parsed object; passes through malformed lines unmodified. `omitEvents` entries are either exact (`"network.allow"`) or prefix patterns ending in `".*"` (`"setup_cmd.*"`). |
 | `sanitizeText(content)` | Applies pattern scanning to raw free-text (container logs, environment.json values, etc.) |
