@@ -15,7 +15,7 @@ import (
 // "list" is excluded — it's a real Cobra subcommand.
 var sandboxSubcmds = map[string]bool{
 	"info": true, "log": true, "exec": true, "prompt": true,
-	"allow": true, "allowed": true, "deny": true,
+	"allow": true, "allowed": true, "deny": true, "bugreport": true,
 }
 
 func newSandboxCmd() *cobra.Command {
@@ -46,7 +46,8 @@ Commands:
   <name> prompt              Show sandbox prompt
   <name> allow <domain>...   Allow additional domains (network-isolated)
   <name> allowed             Show allowed domains
-  <name> deny <domain>...    Remove domains from the allowlist{{if gt (len .Aliases) 0}}
+  <name> deny <domain>...    Remove domains from the allowlist
+  <name> bugreport [safe|unsafe]  Write a bug report for the sandbox{{if gt (len .Aliases) 0}}
 
 Aliases:
   {{.NameAndAliases}}{{end}}{{if .HasAvailableLocalFlags}}
@@ -110,7 +111,13 @@ func sandboxDispatch(cmd *cobra.Command, args []string) error {
 		return runSandboxAllowed(cmd, name)
 	case "deny":
 		return runSandboxDeny(cmd, name, rest)
+	case "bugreport":
+		reportType := "safe"
+		if len(rest) > 0 {
+			reportType = rest[0]
+		}
+		return runSandboxBugReport(cmd, name, reportType)
 	default:
-		return fmt.Errorf("unknown subcommand %q: valid subcommands are info, log, exec, prompt, allow, allowed, deny", subcmd)
+		return fmt.Errorf("unknown subcommand %q: valid subcommands are info, log, exec, prompt, allow, allowed, deny, bugreport", subcmd)
 	}
 }

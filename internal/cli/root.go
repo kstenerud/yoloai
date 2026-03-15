@@ -17,8 +17,14 @@ import (
 // exitCodeSIGINT is the conventional exit code for SIGINT (128 + signal 2).
 const exitCodeSIGINT = 130
 
+// cliVersion, cliCommit, cliDate hold build-time info set in Execute and used
+// by subcommands (e.g. sandbox bugreport) that need version info without
+// threading it through every function call.
+var cliVersion, cliCommit, cliDate string
+
 // Execute runs the root command and returns the exit code.
 func Execute(ctx context.Context, version, commit, date string) (exitCode int) {
+	cliVersion, cliCommit, cliDate = version, commit, date
 	rootCmd := newRootCmd(version, commit, date)
 
 	// Track which command was active when the error occurred so we can
