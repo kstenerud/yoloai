@@ -166,5 +166,7 @@ if [ "$RUNNING_AS_ROOT" = "true" ]; then
 else
     debug_log "already running as non-root user, executing directly"
     # --- Already running as non-root (rootless Podman with --userns=keep-id) ---
+    # Set HOME to yoloai home directory (WorkingDir overrides it otherwise)
+    export HOME=/home/yoloai
     exec python3 "$YOLOAI_DIR/bin/sandbox-setup.py" docker
 fi
