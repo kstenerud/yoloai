@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestE2E_JSONLs verifies that '--json ls' emits a valid JSON array.
+// TestE2E_JSONLs verifies that '--json ls' emits a valid JSON object with sandboxes list.
 func TestE2E_JSONLs(t *testing.T) {
 	projectDir := e2eSetup(t)
 
@@ -21,13 +21,16 @@ func TestE2E_JSONLs(t *testing.T) {
 	stdout, _, code := runYoloai(t, "--json", "ls")
 	require.Equal(t, 0, code)
 
-	var result []map[string]any
-	require.NoError(t, json.Unmarshal([]byte(stdout), &result), "output should be valid JSON array")
-	assert.GreaterOrEqual(t, len(result), 1)
+	var result struct {
+		Sandboxes           []map[string]any `json:"sandboxes"`
+		UnavailableBackends []string         `json:"unavailable_backends"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(stdout), &result), "output should be valid JSON object")
+	assert.GreaterOrEqual(t, len(result.Sandboxes), 1)
 
 	// Each entry has shape {"meta": {"name": "..."}, ...}
 	found := false
-	for _, entry := range result {
+	for _, entry := range result.Sandboxes {
 		if meta, ok := entry["meta"].(map[string]any); ok {
 			if meta["name"] == "e2e-jsonls" {
 				found = true
