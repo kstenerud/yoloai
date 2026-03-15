@@ -85,8 +85,27 @@ func newLogAliasCmd() *cobra.Command {
 		Args:    cobra.ArbitraryArgs,
 		RunE:    runLog,
 	}
-	cmd.Flags().Bool("raw", false, "Show raw output with ANSI escape sequences")
+	addLogFlags(cmd)
 	return cmd
+}
+
+func addLogFlags(cmd *cobra.Command) {
+	cmd.Flags().String("source", "", "comma-separated sources: cli,sandbox,monitor,hooks")
+	cmd.Flags().String("level", "info", "minimum log level: debug|info|warn|error")
+	cmd.Flags().String("since", "", "show entries since duration (5m) or local time (14:20:00)")
+	cmd.Flags().Bool("raw", false, "emit raw JSONL (no formatting)")
+	cmd.Flags().Bool("agent", false, "show agent output (ANSI stripped)")
+	cmd.Flags().Bool("agent-raw", false, "show raw agent terminal stream")
+	cmd.Flags().BoolP("follow", "f", false, "tail log live; auto-exits when sandbox is done")
+	cmd.MarkFlagsMutuallyExclusive("agent", "agent-raw")
+	cmd.MarkFlagsMutuallyExclusive("agent", "raw")
+	cmd.MarkFlagsMutuallyExclusive("agent-raw", "raw")
+	cmd.MarkFlagsMutuallyExclusive("agent", "source")
+	cmd.MarkFlagsMutuallyExclusive("agent", "level")
+	cmd.MarkFlagsMutuallyExclusive("agent", "since")
+	cmd.MarkFlagsMutuallyExclusive("agent-raw", "source")
+	cmd.MarkFlagsMutuallyExclusive("agent-raw", "level")
+	cmd.MarkFlagsMutuallyExclusive("agent-raw", "since")
 }
 
 func newExecAliasCmd() *cobra.Command {

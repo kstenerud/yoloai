@@ -4,6 +4,30 @@ Tracks breaking changes made during beta. Each entry should be included in relea
 
 ## Unreleased
 
+### `sandbox <name> log` redesigned around structured JSONL
+
+**Previous behavior:** `yoloai log <name>` (and `yoloai sandbox <name> log`) displayed the raw agent terminal output (`logs/agent.log`) with ANSI stripped by default. `--raw` preserved ANSI escape sequences. `--json` returned `{"content": "..."}`.
+
+**New behavior:** Default view is a pretty-printed, merge-sorted stream of all four structured JSONL logs (`logs/cli.jsonl`, `logs/sandbox.jsonl`, `logs/monitor.jsonl`, `logs/agent-hooks.jsonl`). Agent terminal output is accessed via dedicated flags. `--raw` now emits raw JSONL lines.
+
+New flags:
+- `--agent` — show agent terminal output with ANSI stripped (replaces old default)
+- `--agent-raw` — show raw agent terminal stream (replaces old `--raw`)
+- `--raw` — emit structured log as raw JSONL (new meaning)
+- `--source cli,sandbox,monitor,hooks` — filter to specific log sources
+- `--level debug|info|warn|error` — filter by minimum level (default: `info`)
+- `--since <duration|time>` — filter by timestamp (e.g. `5m` or `14:20:00`)
+- `--follow` / `-f` — tail all sources live; auto-exits when sandbox is done
+
+`--json` flag no longer has special handling for the log command.
+
+**Rationale:** Structured JSONL is the primary log format — the pretty-printed interleaved view is far more useful than raw terminal output for debugging. Agent output is still accessible via `--agent`/`--agent-raw` for cases where it's needed.
+
+**Migration:**
+- `yoloai log <name>` — now shows structured log. Add `--agent` to see agent output as before.
+- `yoloai log <name> --raw` — now emits raw JSONL. Use `--agent-raw` for old behavior.
+- `yoloai log <name> --json` — no longer returns `{"content": "..."}`. Read `logs/agent.log` directly.
+
 ### Caret encoding updated to current spec
 
 **Previous behavior:** Caret encoding used raw hex for all unsafe characters (e.g., `/` → `^2F`, `^` → `^5E`). `.` and `~` were encoded as unsafe. The decoder accepted `g/G`, `h/H`, `i/I`, `j/J` as hex width modifiers (3-6 digit forms).

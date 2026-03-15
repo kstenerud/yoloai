@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -31,87 +32,170 @@ func setupLogTest(t *testing.T, name string) string {
 	return sandboxDir
 }
 
-func TestRunLog_FileExists(t *testing.T) {
-	sandboxDir := setupLogTest(t, "logtest")
+func TestRunLog_NoLogFiles(t *testing.T) {
+	setupLogTest(t, "logtest-empty")
+
+	cmd := newLogAliasCmd()
+	buf := new(bytes.Buffer)
+	cmd.SetOut(buf)
+	cmd.SetArgs([]string{"logtest-empty"})
+	require.NoError(t, cmd.Execute())
+
+	assert.Contains(t, buf.String(), "No log entries found.")
+}
+
+func TestRunLog_AgentFlag(t *testing.T) {
+	sandboxDir := setupLogTest(t, "logtest-agent")
 	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, "logs", "agent.log"), []byte("hello world\n"), 0600))
 
 	cmd := newLogAliasCmd()
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
-	cmd.SetArgs([]string{"logtest"})
+	cmd.SetArgs([]string{"logtest-agent", "--agent"})
 	require.NoError(t, cmd.Execute())
 
 	assert.Contains(t, buf.String(), "hello world")
 }
 
-func TestRunLog_FileMissing(t *testing.T) {
-	setupLogTest(t, "logtest-missing")
+func TestRunLog_AgentMissing(t *testing.T) {
+	setupLogTest(t, "logtest-agent-missing")
 
 	cmd := newLogAliasCmd()
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
-	cmd.SetArgs([]string{"logtest-missing"})
+	cmd.SetArgs([]string{"logtest-agent-missing", "--agent"})
 	require.NoError(t, cmd.Execute())
 
-	assert.Contains(t, buf.String(), "No log output yet")
+	assert.Contains(t, buf.String(), "No agent output yet")
 }
 
-func TestRunLog_RawPreservesANSI(t *testing.T) {
-	sandboxDir := setupLogTest(t, "logtest-raw")
+func TestRunLog_AgentRawPreservesANSI(t *testing.T) {
+	sandboxDir := setupLogTest(t, "logtest-agent-raw")
 	ansiContent := "\x1b[31mred text\x1b[0m\n"
 	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, "logs", "agent.log"), []byte(ansiContent), 0600))
 
 	cmd := newLogAliasCmd()
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
-	cmd.SetArgs([]string{"logtest-raw", "--raw"})
+	cmd.SetArgs([]string{"logtest-agent-raw", "--agent-raw"})
 	require.NoError(t, cmd.Execute())
 
 	assert.Contains(t, buf.String(), "\x1b[31m")
 }
 
-func TestRunLog_NoRawStripsANSI(t *testing.T) {
-	sandboxDir := setupLogTest(t, "logtest-strip")
+func TestRunLog_AgentStripsANSI(t *testing.T) {
+	sandboxDir := setupLogTest(t, "logtest-agent-strip")
 	ansiContent := "\x1b[31mred text\x1b[0m\n"
 	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, "logs", "agent.log"), []byte(ansiContent), 0600))
 
 	cmd := newLogAliasCmd()
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
-	cmd.SetArgs([]string{"logtest-strip"})
+	cmd.SetArgs([]string{"logtest-agent-strip", "--agent"})
 	require.NoError(t, cmd.Execute())
 
 	assert.NotContains(t, buf.String(), "\x1b[31m")
 	assert.Contains(t, buf.String(), "red text")
 }
 
-func TestRunLog_JSONWithContent(t *testing.T) {
-	sandboxDir := setupLogTest(t, "logtest-json")
-	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, "logs", "agent.log"), []byte("log content"), 0600))
+func TestRunLog_StructuredJSONL(t *testing.T) {
+	sandboxDir := setupLogTest(t, "logtest-jsonl")
+	entry := `{"ts":"2026-03-15T14:23:01.000Z","level":"info","event":"sandbox.attach","msg":"attaching to session"}` + "\n"
+	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, "logs", "cli.jsonl"), []byte(entry), 0600))
 
 	cmd := newLogAliasCmd()
-	cmd.PersistentFlags().Bool("json", false, "")
-	require.NoError(t, cmd.PersistentFlags().Set("json", "true"))
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
-	cmd.SetArgs([]string{"logtest-json"})
+	cmd.SetArgs([]string{"logtest-jsonl"})
 	require.NoError(t, cmd.Execute())
 
-	assert.Contains(t, buf.String(), `"content"`)
-	assert.Contains(t, buf.String(), "log content")
+	assert.Contains(t, buf.String(), "attaching to session")
+	assert.Contains(t, buf.String(), "INFO")
+	assert.Contains(t, buf.String(), "sandbox.attach")
 }
 
-func TestRunLog_JSONMissingLog(t *testing.T) {
-	setupLogTest(t, "logtest-json-empty")
+func TestRunLog_RawEmitsJSONL(t *testing.T) {
+	sandboxDir := setupLogTest(t, "logtest-raw-jsonl")
+	line := `{"ts":"2026-03-15T14:23:01.000Z","level":"info","event":"test.event","msg":"hello"}`
+	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, "logs", "cli.jsonl"), []byte(line+"\n"), 0600))
 
 	cmd := newLogAliasCmd()
-	cmd.PersistentFlags().Bool("json", false, "")
-	require.NoError(t, cmd.PersistentFlags().Set("json", "true"))
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
-	cmd.SetArgs([]string{"logtest-json-empty"})
+	cmd.SetArgs([]string{"logtest-raw-jsonl", "--raw"})
 	require.NoError(t, cmd.Execute())
 
-	assert.Contains(t, buf.String(), `"content"`)
-	assert.Contains(t, buf.String(), `""`)
+	assert.Contains(t, buf.String(), `"event":"test.event"`)
+}
+
+func TestRunLog_LevelFilter(t *testing.T) {
+	sandboxDir := setupLogTest(t, "logtest-level")
+	entries := `{"ts":"2026-03-15T14:23:01.000Z","level":"debug","event":"a","msg":"debug msg"}` + "\n" +
+		`{"ts":"2026-03-15T14:23:02.000Z","level":"info","event":"b","msg":"info msg"}` + "\n"
+	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, "logs", "cli.jsonl"), []byte(entries), 0600))
+
+	cmd := newLogAliasCmd()
+	buf := new(bytes.Buffer)
+	cmd.SetOut(buf)
+	cmd.SetArgs([]string{"logtest-level"}) // default level is info
+	require.NoError(t, cmd.Execute())
+
+	assert.NotContains(t, buf.String(), "debug msg")
+	assert.Contains(t, buf.String(), "info msg")
+}
+
+func TestRunLog_DebugLevel(t *testing.T) {
+	sandboxDir := setupLogTest(t, "logtest-debug")
+	entries := `{"ts":"2026-03-15T14:23:01.000Z","level":"debug","event":"a","msg":"debug msg"}` + "\n" +
+		`{"ts":"2026-03-15T14:23:02.000Z","level":"info","event":"b","msg":"info msg"}` + "\n"
+	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, "logs", "cli.jsonl"), []byte(entries), 0600))
+
+	cmd := newLogAliasCmd()
+	buf := new(bytes.Buffer)
+	cmd.SetOut(buf)
+	cmd.SetArgs([]string{"logtest-debug", "--level", "debug"})
+	require.NoError(t, cmd.Execute())
+
+	assert.Contains(t, buf.String(), "debug msg")
+	assert.Contains(t, buf.String(), "info msg")
+}
+
+func TestRunLog_SourceFilter(t *testing.T) {
+	sandboxDir := setupLogTest(t, "logtest-source")
+	cliEntry := `{"ts":"2026-03-15T14:23:01.000Z","level":"info","event":"cli.event","msg":"cli message"}` + "\n"
+	sandboxEntry := `{"ts":"2026-03-15T14:23:02.000Z","level":"info","event":"sb.event","msg":"sandbox message"}` + "\n"
+	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, "logs", "cli.jsonl"), []byte(cliEntry), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, "logs", "sandbox.jsonl"), []byte(sandboxEntry), 0600))
+
+	cmd := newLogAliasCmd()
+	buf := new(bytes.Buffer)
+	cmd.SetOut(buf)
+	cmd.SetArgs([]string{"logtest-source", "--source", "cli"})
+	require.NoError(t, cmd.Execute())
+
+	assert.Contains(t, buf.String(), "cli message")
+	assert.NotContains(t, buf.String(), "sandbox message")
+}
+
+func TestRunLog_MergeSort(t *testing.T) {
+	sandboxDir := setupLogTest(t, "logtest-merge")
+	// cli entry is later but in cli.jsonl; sandbox entry is earlier but in sandbox.jsonl
+	cliEntry := `{"ts":"2026-03-15T14:23:03.000Z","level":"info","event":"a","msg":"third"}` + "\n"
+	sandboxEntry := `{"ts":"2026-03-15T14:23:01.000Z","level":"info","event":"b","msg":"first"}` + "\n" +
+		`{"ts":"2026-03-15T14:23:02.000Z","level":"info","event":"c","msg":"second"}` + "\n"
+	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, "logs", "cli.jsonl"), []byte(cliEntry), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, "logs", "sandbox.jsonl"), []byte(sandboxEntry), 0600))
+
+	cmd := newLogAliasCmd()
+	buf := new(bytes.Buffer)
+	cmd.SetOut(buf)
+	cmd.SetArgs([]string{"logtest-merge"})
+	require.NoError(t, cmd.Execute())
+
+	out := buf.String()
+	firstIdx := strings.Index(out, "first")
+	secondIdx := strings.Index(out, "second")
+	thirdIdx := strings.Index(out, "third")
+	assert.Less(t, firstIdx, secondIdx)
+	assert.Less(t, secondIdx, thirdIdx)
 }

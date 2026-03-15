@@ -28,7 +28,7 @@ func newSandboxCmd() *cobra.Command {
 		Args:    cobra.ArbitraryArgs,
 		RunE:    sandboxDispatch,
 	}
-	cmd.Flags().Bool("raw", false, "Show raw output with ANSI escape sequences")
+	addLogFlags(cmd)
 
 	listCmd := newSandboxListCmd()
 	listCmd.Hidden = true
@@ -41,7 +41,7 @@ func newSandboxCmd() *cobra.Command {
 Commands:
   list                       List sandboxes and their status
   <name> info                Show sandbox configuration and state
-  <name> log [--raw]         Show sandbox session log
+  <name> log [flags]         Show sandbox log
   <name> exec <command>      Run a command inside the sandbox
   <name> prompt              Show sandbox prompt
   <name> allow <domain>...   Allow additional domains (network-isolated)
