@@ -9,9 +9,21 @@ import (
 	"regexp"
 )
 
-// ansiPattern matches ANSI escape sequences: CSI (colors, cursor, erase),
-// OSC (title setting), and character set selection.
-var ansiPattern = regexp.MustCompile(`\x1b(?:\[[0-9;?]*[A-Za-z]|\][^\x07]*\x07|[()][AB012])`)
+// ansiPattern matches VT100/ANSI escape sequences using grammar-based rules,
+// without needing to understand individual sequence semantics:
+//   - CSI: ESC [ + param bytes (0x30-0x3F) + intermediate bytes (0x20-0x2F) + final byte (0x40-0x7E)
+//   - OSC: ESC ] + string + BEL or ST (ESC \)
+//   - nF:  ESC + intermediate byte(s) (0x20-0x2F) + final byte (0x30-0x7E) — e.g. character set designation
+//   - 2-char: ESC + any single byte 0x30-0x7E (Fp/Fe/Fs — ESC 7, ESC M, ESC c, etc.)
+//
+// DCS/APC/SOS/PM sequences are not matched — they span lines and are vanishingly
+// rare in agent output.
+var ansiPattern = regexp.MustCompile(`\x1b(?:` +
+	`\[[0-?]*[ -/]*[@-~]` + // CSI
+	`|\][^\x07\x1b]*(?:\x07|\x1b\\)` + // OSC
+	`|[ -/][0-~]` + // nF (character set designation etc.)
+	`|[0-~]` + // all other 2-char sequences
+	`)`)
 
 // controlPattern matches problematic control characters: C0 controls except
 // tab (0x09), plus DEL (0x7F). Newlines (0x0A) are handled by the line

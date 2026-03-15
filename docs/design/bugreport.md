@@ -380,11 +380,30 @@ Full contents in both modes. Hook events are idle/active state changes with no u
 
 In `unsafe` mode: ANSI-stripped contents of `agent.log`. Raw terminal stream is never included (not meaningful outside a renderer).
 
-### 12. Live log *(flag only)*
+**ANSI stripping:** `agent.log` contains the full VT100 stream — not just SGR color codes but cursor positioning, mode switches, terminal queries, OSC sequences, etc. The stripper uses a grammar-based regex covering all three sequence forms (no library dependency):
+
+```
+\x1b(?:
+  \[[0-?]*[ -/]*[@-~]             CSI: param bytes + intermediate bytes + final byte
+  |\][^\x07\x1b]*(?:\x07|\x1b\\)  OSC: BEL or ST terminated
+  |[ -/][0-~]                      nF: intermediate + final (e.g. character set designation)
+  |[0-~]                           2-char: Fp/Fe/Fs (ESC 7, ESC M, ESC c, etc.)
+)
+```
+
+DCS/APC/SOS/PM sequences are left as best-effort (span multiple lines, vanishingly rare in agent output).
+
+### 12. tmux screen capture *(sandbox commands only)*
+
+**Omitted in `safe` mode** (screen contents may contain sensitive data).
+
+In `unsafe` mode: output of `tmux capture-pane -p -t <session>`, which renders the current pane contents as plain text. Silently omitted if the sandbox is not running or the tmux session is not found. Provides a snapshot of what was on screen at the time of the report — useful context even after the agent has exited, as long as the container is still up.
+
+### 13. Live log *(flag only)*
 
 All debug-level log entries captured during the run. In `safe` mode, `msg` fields are scanned and sanitized as with `cli.jsonl`.
 
-### 13. Exit *(flag only)*
+### 14. Exit *(flag only)*
 
 - Exit code
 - Error message (if any)

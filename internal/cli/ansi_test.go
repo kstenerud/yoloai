@@ -87,6 +87,36 @@ func TestStripANSI(t *testing.T) {
 			input: "\x1b[31m\x00red\x08\x1b[0m\n",
 			want:  "red\n",
 		},
+		{
+			name:  "CSI with > parameter (terminal version query)",
+			input: "\x1b[>0qtext\n",
+			want:  "text\n",
+		},
+		{
+			name:  "OSC with ST terminator",
+			input: "\x1b]0;title\x1b\\text\n",
+			want:  "text\n",
+		},
+		{
+			name:  "2-char ESC M (reverse index)",
+			input: "before\x1bMafter\n",
+			want:  "beforeafter\n",
+		},
+		{
+			name:  "2-char ESC c (full reset)",
+			input: "\x1bctext\n",
+			want:  "text\n",
+		},
+		{
+			name:  "cursor positioning sequences",
+			input: "\x1b[180C\x1b[1Atext\n",
+			want:  "text\n",
+		},
+		{
+			name:  "bracketed paste mode toggle",
+			input: "\x1b[?2004htext\x1b[?2004l\n",
+			want:  "text\n",
+		},
 	}
 
 	for _, tt := range tests {

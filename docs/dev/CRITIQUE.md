@@ -4,11 +4,3 @@ Open questions from reviewing `docs/design/bugreport.md` from an implementer's p
 
 ---
 
-## 11. ANSI stripping sufficiency for `agent.log`
-
-**Problem:** `agent.log` is a raw terminal recording containing not just SGR color codes but full VT100 sequences: cursor positioning (`[180C[1A`), terminal mode switches (`[?2004l`, `[?2026h`), terminal identification queries (`>0q`, `[c`), bracketed paste, window title sequences. The existing `stripANSI` from `ansi.go` handles SGR codes — it may leave significant noise from these other sequences, producing largely unreadable output for `--agent` mode.
-
-**Options:**
-- Use a more comprehensive VT100 stripping library.
-- Accept best-effort readability and document the limitation.
-- Use `tmux capture-pane -p` for the stripped view (renders to plain text) instead of `agent.log` — but only works on live sessions.
