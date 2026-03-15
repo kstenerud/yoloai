@@ -20,13 +20,14 @@ type Status string
 
 // Status constants for sandbox lifecycle states.
 const (
-	StatusActive  Status = "active"  // container running, agent actively working
-	StatusIdle    Status = "idle"    // container running, agent alive, bell flag set (finished processing)
-	StatusDone    Status = "done"    // container running, agent exited cleanly (exit 0)
-	StatusFailed  Status = "failed"  // container running, agent exited with error (non-zero)
-	StatusStopped Status = "stopped" // container stopped (docker stop)
-	StatusRemoved Status = "removed" // container removed but sandbox dir exists
-	StatusBroken  Status = "broken"  // sandbox dir exists but meta.json missing/invalid
+	StatusActive      Status = "active"      // container running, agent actively working
+	StatusIdle        Status = "idle"        // container running, agent alive, bell flag set (finished processing)
+	StatusDone        Status = "done"        // container running, agent exited cleanly (exit 0)
+	StatusFailed      Status = "failed"      // container running, agent exited with error (non-zero)
+	StatusStopped     Status = "stopped"     // container stopped (docker stop)
+	StatusRemoved     Status = "removed"     // container removed but sandbox dir exists
+	StatusBroken      Status = "broken"      // sandbox dir exists but meta.json missing/invalid
+	StatusUnavailable Status = "unavailable" // backend not running (container state unknown)
 )
 
 // AgentStatus represents the agent's activity state within a running sandbox.
@@ -287,6 +288,76 @@ func InspectSandbox(ctx context.Context, rt runtime.Runtime, name string) (*Info
 	}, nil
 }
 
+// InspectSandboxWithBackend loads metadata and optionally queries the runtime.
+// If rt is nil, returns basic info (from meta.json and filesystem) with StatusUnavailable.
+// If rt is available, performs full inspection including container state.
+func InspectSandboxWithBackend(ctx context.Context, rt runtime.Runtime, name string) (*Info, error) {
+	sandboxDir, err := RequireSandboxDir(name)
+	if err != nil {
+		return nil, err
+	}
+
+	meta, err := LoadMeta(sandboxDir)
+	if err != nil {
+		return nil, fmt.Errorf("load metadata: %w", err)
+	}
+
+	// If runtime is nil, return basic info with unavailable status
+	if rt == nil {
+		diskUsage := "-"
+		if size, err := DirSize(sandboxDir); err == nil {
+			diskUsage = FormatSize(size)
+		}
+		return &Info{
+			Meta:       meta,
+			Status:     StatusUnavailable,
+			HasChanges: "-",
+			DiskUsage:  diskUsage,
+		}, nil
+	}
+
+	// Runtime available - perform full inspection
+	status, err := DetectStatus(ctx, rt, InstanceName(name), sandboxDir)
+	if err != nil {
+		return nil, err
+	}
+
+	changes := "-"
+	if meta.Workdir.Mode == "copy" || meta.Workdir.Mode == "overlay" {
+		workDir := WorkDir(name, meta.Workdir.HostPath)
+		if hasUnappliedWork(workDir, meta.Workdir.BaselineSHA) {
+			changes = "yes"
+		} else if detectChanges(workDir) != "-" {
+			changes = "no"
+		}
+	}
+
+	// Also check aux :copy/:overlay dirs for changes
+	if changes == "no" {
+		for _, d := range meta.Directories {
+			if d.Mode == "copy" || d.Mode == "overlay" {
+				auxWorkDir := WorkDir(name, d.HostPath)
+				if hasUnappliedWork(auxWorkDir, d.BaselineSHA) {
+					changes = "yes"
+					break
+				}
+			}
+		}
+	}
+
+	diskUsage := "-"
+	if size, err := DirSize(sandboxDir); err == nil {
+		diskUsage = FormatSize(size)
+	}
+
+	return &Info{
+		Meta:       meta,
+		Status:     status,
+		HasChanges: changes,
+		DiskUsage:  diskUsage,
+	}, nil
+}
+
 // ListSandboxes scans ~/.yoloai/sandboxes/ and returns info for all sandboxes.
 func ListSandboxes(ctx context.Context, rt runtime.Runtime) ([]*Info, error) {
 	home, err := os.UserHomeDir()
@@ -323,4 +394,100 @@ func ListSandboxes(ctx context.Context, rt runtime.Runtime) ([]*Info, error) {
 	}
 
 	return result, nil
+}
+
+// ListSandboxesMultiBackend scans sandboxes and inspects them using their respective backends.
+// Takes a newRuntimeFunc parameter for creating runtimes (enables testing).
+// Returns (infos, unavailableBackends, error).
+// Sandboxes whose backends are unavailable get StatusUnavailable.
+func ListSandboxesMultiBackend(ctx context.Context, newRuntimeFunc func(context.Context, string) (runtime.Runtime, error)) ([]*Info, []string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, nil, fmt.Errorf("get home directory: %w", err)
+	}
+	sandboxesDir := filepath.Join(home, ".yoloai", "sandboxes")
+
+	entries, err := os.ReadDir(sandboxesDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil, nil
+		}
+		return nil, nil, fmt.Errorf("read sandboxes directory: %w", err)
+	}
+
+	// Group sandboxes by backend
+	backendSandboxes := make(map[string][]string)
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		sandboxDir := filepath.Join(sandboxesDir, entry.Name())
+		meta, err := LoadMeta(sandboxDir)
+		if err != nil {
+			// Broken sandbox - will be added with StatusBroken
+			backendSandboxes[""] = append(backendSandboxes[""], entry.Name())
+			continue
+		}
+		backend := meta.Backend
+		if backend == "" {
+			backend = "docker" // fallback for old sandboxes
+		}
+		backendSandboxes[backend] = append(backendSandboxes[backend], entry.Name())
+	}
+
+	var result []*Info
+	var unavailableBackends []string
+	unavailableSet := make(map[string]bool)
+
+	// Process each backend group
+	for backend, names := range backendSandboxes {
+		if backend == "" {
+			// Broken sandboxes
+			for _, name := range names {
+				result = append(result, &Info{
+					Meta:       &Meta{Name: name},
+					Status:     StatusBroken,
+					HasChanges: "-",
+					DiskUsage:  "-",
+				})
+			}
+			continue
+		}
+
+		// Try to create runtime for this backend
+		rt, err := newRuntimeFunc(ctx, backend)
+		var runtimeAvailable bool
+		if err == nil {
+			runtimeAvailable = true
+			defer rt.Close() //nolint:errcheck,gosec // best-effort cleanup
+		} else if !unavailableSet[backend] {
+			// Backend unavailable - track it
+			unavailableBackends = append(unavailableBackends, backend)
+			unavailableSet[backend] = true
+		}
+
+		// Inspect each sandbox in this backend group
+		for _, name := range names {
+			var info *Info
+			if runtimeAvailable {
+				info, err = InspectSandboxWithBackend(ctx, rt, name)
+			} else {
+				info, err = InspectSandboxWithBackend(ctx, nil, name)
+			}
+
+			if err != nil {
+				// Broken sandbox
+				result = append(result, &Info{
+					Meta:       &Meta{Name: name},
+					Status:     StatusBroken,
+					HasChanges: "-",
+					DiskUsage:  "-",
+				})
+				continue
+			}
+			result = append(result, info)
+		}
+	}
+
+	return result, unavailableBackends, nil
 }
