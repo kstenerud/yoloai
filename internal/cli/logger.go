@@ -4,6 +4,7 @@ package cli
 // ABOUTME: Fans records to N independent sinks (stderr, cli.jsonl, bugreport temp file).
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"log/slog"
@@ -78,6 +79,19 @@ func (m *multiSinkHandler) WithGroup(name string) slog.Handler {
 // Package-level logger state, initialised in PersistentPreRunE.
 var globalHandler *multiSinkHandler
 
+// liveLogBuf accumulates all JSONL log lines when --bugreport is active.
+// Written via AddLogSink. Used to produce section 13 of the bug report.
+var liveLogBuf bytes.Buffer
+
+// bugReportFile is the open temp file for the current bug report, nil if not active.
+var bugReportFile *os.File
+
+// bugReportFinalName is the target filename (without .tmp) for the bug report.
+var bugReportFinalName string
+
+// bugReportType is "safe" or "unsafe", set when --bugreport is active.
+var bugReportType string
+
 // initLogger sets up the global multi-sink slog logger. Called from PersistentPreRunE
 // before any subcommand logic runs. Respects --verbose/-v and --quiet/-q flags for the
 // stderr sink level; --debug affects cli.jsonl (added later per sandbox subcommand).
@@ -143,7 +157,7 @@ func openCLIJSONLSink(name string, cmd *cobra.Command) func() {
 	}
 	debug, _ := cmd.Flags().GetBool("debug")
 	level := slog.LevelInfo
-	if debug {
+	if debug || bugReportFile != nil {
 		level = slog.LevelDebug
 	}
 	AddLogSink(f, level)
