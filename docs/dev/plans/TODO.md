@@ -68,6 +68,12 @@ Allow users to override the auto-resolved detector stack via profile-level confi
 
 See [idle detection research](../research/idle-detection.md) §3.9 Q1.
 
+## Workspace
+
+### `yoloai apply` should pull new tags
+
+When applying changes, also fetch any new git tags from the sandbox's copy of the workdir so that tags created by the agent (e.g. version bumps, release tags) land on the host. Currently `apply` syncs file changes but does not transfer tags.
+
 ## Seatbelt Improvements
 
 ### ~~Dynamic toolchain detection in SBPL profiles~~ ✅
