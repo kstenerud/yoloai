@@ -72,6 +72,10 @@ The log command is redesigned around the structured log files. Agent output is s
 
 Pretty-printed, interleaved stream of `logs/cli.jsonl`, `logs/sandbox.jsonl`, `logs/monitor.jsonl`, and `logs/agent-hooks.jsonl`, ordered by timestamp. Default level: `info+`.
 
+**Interleaving algorithm:**
+- **Static (no `--follow`):** Read all four files fully, merge-sort by `ts`, emit. Ordering is exact.
+- **`--follow`:** One goroutine per file tails its file and sends lines to a merge channel; lines are emitted as they arrive. Ordering is approximate — sub-second reordering between files is possible but inconsequential since all lines carry timestamps.
+
 ```
 14:23:01 [cli]     info   sandbox.start    starting sandbox (backend=docker)
 14:23:02 [sandbox] info   entrypoint.uid   remapped uid 0 → 1000

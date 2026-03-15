@@ -4,15 +4,6 @@ Open questions from reviewing `docs/design/bugreport.md` from an implementer's p
 
 ---
 
-## 7. JSONL interleaving algorithm and `--follow`
-
-**Problem:** `sandbox <name> log` interleaves four JSONL files by timestamp. The algorithm is unspecified for the `--follow` case in particular:
-
-- **Static:** Read all four files, merge-sort by `ts`, emit. Straightforward.
-- **`--follow`:** Tail all four files simultaneously and merge in real-time. A goroutine-per-file with channel merge is the natural Go approach, but polling interval and latency characteristics need specifying.
-
----
-
 ## 9. `sandbox.jsonl` event type taxonomy
 
 **Problem:** Section 8 filters entries by event type (e.g. `entrypoint.setup_cmd`, `entrypoint.network.*`) for `safe` mode. But there is no complete list of event types that `sandbox.jsonl` will emit.
