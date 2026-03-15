@@ -133,15 +133,29 @@ fi
 OVERLAY_COUNT=$(jq ".overlay_mounts // [] | length" "$CONFIG")
 if [ "$OVERLAY_COUNT" -gt 0 ]; then
     debug_log "setting up $OVERLAY_COUNT overlay mount(s)"
+
     for i in $(seq 0 $((OVERLAY_COUNT - 1))); do
         LOWER=$(jq -r ".overlay_mounts[$i].lower" "$CONFIG")
         UPPER=$(jq -r ".overlay_mounts[$i].upper" "$CONFIG")
         WORK=$(jq -r ".overlay_mounts[$i].work" "$CONFIG")
         MERGED=$(jq -r ".overlay_mounts[$i].merged" "$CONFIG")
-        mkdir -p "$MERGED"
-        mount -t overlay overlay -o "lowerdir=$LOWER,upperdir=$UPPER,workdir=$WORK" "$MERGED"
+
+        # Mount tmpfs for upper/work to avoid overlayfs-on-overlayfs issues.
+        # With Podman's overlay storage driver, the container rootfs is itself overlayfs,
+        # and overlayfs doesn't support being used as upperdir for another overlay mount.
+        # Strategy: Create upper/work on tmpfs, use those paths directly in overlay mount.
+        OVERLAY_TMPFS="/tmp/yoloai-overlay-$i"
+        mkdir -p "$OVERLAY_TMPFS"
+        mount -t tmpfs tmpfs "$OVERLAY_TMPFS"
+
+        # Create upper/work subdirs in tmpfs
+        mkdir -p "$OVERLAY_TMPFS/upper" "$OVERLAY_TMPFS/work" "$MERGED"
+        debug_log "created tmpfs at $OVERLAY_TMPFS for overlay storage"
+
+        # Use the tmpfs paths directly for upper/work in the overlay mount
+        mount -t overlay overlay -o "lowerdir=$LOWER,upperdir=$OVERLAY_TMPFS/upper,workdir=$OVERLAY_TMPFS/work" "$MERGED"
         chown yoloai:yoloai "$MERGED"
-        debug_log "overlay: $MERGED (lower=$LOWER)"
+        debug_log "overlay: $MERGED (lower=$LOWER, upper/work on tmpfs)"
     done
 fi
 

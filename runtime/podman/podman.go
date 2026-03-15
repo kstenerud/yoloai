@@ -46,9 +46,22 @@ func New(ctx context.Context) (*Runtime, error) {
 }
 
 // Create wraps the Docker Create to inject --userns=keep-id for rootless mode.
+// Exception: overlay mode requires CAP_SYS_ADMIN and root privileges inside the
+// container, so we skip keep-id when SYS_ADMIN is in CapAdd.
 func (r *Runtime) Create(ctx context.Context, cfg runtime.InstanceConfig) error {
 	if isRootless() && cfg.UsernsMode == "" {
-		cfg.UsernsMode = "keep-id"
+		// Check if overlay mode is active (indicated by SYS_ADMIN capability)
+		hasOverlay := false
+		for _, cap := range cfg.CapAdd {
+			if cap == "SYS_ADMIN" {
+				hasOverlay = true
+				break
+			}
+		}
+		// Only use keep-id for normal mounts; overlay needs root in container
+		if !hasOverlay {
+			cfg.UsernsMode = "keep-id"
+		}
 	}
 	return r.Runtime.Create(ctx, cfg)
 }
