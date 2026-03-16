@@ -167,7 +167,7 @@ diff and apply what you want to keep.`,
 	rootCmd.PersistentFlags().BoolP("help", "h", false, "Help for this command")
 
 	rootCmd.PersistentFlags().CountP("verbose", "v", "Increase output verbosity (-v for debug, -vv reserved)")
-	rootCmd.PersistentFlags().CountP("quiet", "q", "Suppress non-essential output (-q for warn, -qq for error only)")
+	rootCmd.PersistentFlags().CountP("quiet", "q", "Suppress non-essential output (-q for error only)")
 	rootCmd.PersistentFlags().Bool("json", false, "Output as JSON (machine-readable)")
 	rootCmd.PersistentFlags().Bool("debug", false, "Enable debug-level entries in cli.jsonl")
 	rootCmd.PersistentFlags().String("bugreport", "", "Write bug report (safe|unsafe)")

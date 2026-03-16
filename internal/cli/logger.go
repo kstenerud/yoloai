@@ -97,8 +97,9 @@ var bugReportType string
 var bugReportSandboxName string
 
 // initLogger sets up the global multi-sink slog logger. Called from PersistentPreRunE
-// before any subcommand logic runs. Respects --verbose/-v and --quiet/-q flags for the
-// stderr sink level; --debug affects cli.jsonl (added later per sandbox subcommand).
+// before any subcommand logic runs. Default stderr level is WARN (lifecycle INFO events
+// go to cli.jsonl only). -v raises to DEBUG; -q raises to ERROR. --debug affects
+// cli.jsonl (added later per sandbox subcommand).
 func initLogger(cmd *cobra.Command) {
 	globalHandler = &multiSinkHandler{}
 
@@ -107,14 +108,12 @@ func initLogger(cmd *cobra.Command) {
 
 	var stderrLevel slog.Level
 	switch {
-	case quietCount >= 2:
+	case quietCount >= 1:
 		stderrLevel = slog.LevelError
-	case quietCount == 1:
-		stderrLevel = slog.LevelWarn
 	case verboseCount >= 1:
 		stderrLevel = slog.LevelDebug
 	default:
-		stderrLevel = slog.LevelInfo
+		stderrLevel = slog.LevelWarn
 	}
 
 	globalHandler.addSink(newTextHandler(cmd.ErrOrStderr(), stderrLevel), stderrLevel)
