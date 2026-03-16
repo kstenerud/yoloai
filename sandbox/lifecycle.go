@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -36,6 +37,7 @@ func (m *Manager) Stop(ctx context.Context, name string) error {
 	if _, err := RequireSandboxDir(name); err != nil {
 		return err
 	}
+	slog.Info("stopping sandbox", "event", "sandbox.stop", "container", InstanceName(name))
 	return m.runtime.Stop(ctx, InstanceName(name))
 }
 
@@ -48,6 +50,7 @@ type StartOpts struct {
 
 // Start ensures a sandbox is running — idempotent.
 func (m *Manager) Start(ctx context.Context, name string, opts StartOpts) error {
+	slog.Info("starting sandbox", "event", "sandbox.start", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
 	sandboxDir, err := RequireSandboxDir(name)
 	if err != nil {
 		return err
@@ -63,6 +66,7 @@ func (m *Manager) Start(ctx context.Context, name string, opts StartOpts) error 
 	if err != nil {
 		return fmt.Errorf("detect status: %w", err)
 	}
+	slog.Debug("container status", "event", "sandbox.start.status", "sandbox", name, "status", string(status)) //nolint:gosec // G706: name is validated by ValidateName
 
 	// Resolve custom prompt if provided
 	customPrompt := opts.Prompt != "" || opts.PromptFile != ""
@@ -98,6 +102,7 @@ func (m *Manager) Start(ctx context.Context, name string, opts StartOpts) error 
 		return nil
 
 	case StatusDone, StatusFailed:
+		slog.Info("relaunching agent", "event", "sandbox.start.agent.relaunch", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
 		switch {
 		case customPrompt:
 			if err := m.relaunchAgentWithCustomPrompt(ctx, name, meta, promptText); err != nil {
@@ -119,6 +124,7 @@ func (m *Manager) Start(ctx context.Context, name string, opts StartOpts) error 
 		if err := m.runtime.Remove(ctx, cname); err != nil {
 			return fmt.Errorf("remove stopped instance: %w", err)
 		}
+		slog.Info("recreating container", "event", "sandbox.start.container.recreate", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
 		switch {
 		case customPrompt:
 			if err := m.prepareCustomPromptFiles(name, meta, promptText); err != nil {
@@ -138,6 +144,7 @@ func (m *Manager) Start(ctx context.Context, name string, opts StartOpts) error 
 		return nil
 
 	case StatusRemoved:
+		slog.Info("recreating container", "event", "sandbox.start.container.recreate", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
 		switch {
 		case customPrompt:
 			if err := m.prepareCustomPromptFiles(name, meta, promptText); err != nil {
@@ -165,6 +172,7 @@ func (m *Manager) Start(ctx context.Context, name string, opts StartOpts) error 
 // Always succeeds — confirmation logic is handled by the CLI layer via
 // NeedsConfirmation before calling this method.
 func (m *Manager) Destroy(ctx context.Context, name string) error {
+	slog.Info("destroying sandbox", "event", "sandbox.destroy", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
 	if _, err := RequireSandboxDir(name); err != nil {
 		if errors.Is(err, ErrSandboxNotFound) {
 			return nil // nothing to destroy
@@ -193,6 +201,7 @@ func (m *Manager) Destroy(ctx context.Context, name string) error {
 // the git baseline. By default, resets in-place (agent stays running).
 // With --restart, stops and restarts the container.
 func (m *Manager) Reset(ctx context.Context, opts ResetOptions) error {
+	slog.Info("resetting sandbox", "event", "sandbox.reset", "sandbox", opts.Name)
 	sandboxDir, err := RequireSandboxDir(opts.Name)
 	if err != nil {
 		return err
@@ -234,6 +243,7 @@ func (m *Manager) Reset(ctx context.Context, opts ResetOptions) error {
 	_ = m.Stop(ctx, opts.Name)
 
 	// Clear logs so each run starts fresh
+	slog.Debug("clearing logs", "event", "sandbox.reset.logs", "sandbox", opts.Name)
 	_ = os.RemoveAll(filepath.Join(sandboxDir, LogsDir))
 	_ = os.MkdirAll(filepath.Join(sandboxDir, LogsDir), 0700)
 
@@ -267,6 +277,7 @@ func (m *Manager) Reset(ctx context.Context, opts ResetOptions) error {
 		}
 
 		// Re-copy
+		slog.Debug("re-copying workdir", "event", "sandbox.reset.workdir", "sandbox", opts.Name, "host_path", meta.Workdir.HostPath)
 		if err := workspace.CopyDir(meta.Workdir.HostPath, workDir); err != nil {
 			return fmt.Errorf("re-copy workdir: %w", err)
 		}
@@ -377,6 +388,7 @@ func (m *Manager) Reset(ctx context.Context, opts ResetOptions) error {
 		}
 	}
 
+	slog.Info("reset complete", "event", "sandbox.reset.complete", "sandbox", opts.Name)
 	// Start the container
 	return m.Start(ctx, opts.Name, StartOpts{})
 }

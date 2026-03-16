@@ -39,6 +39,7 @@ func newStartCmd() *cobra.Command {
 				defer setTerminalTitle("")
 			}
 
+			slog.Info("starting sandbox", "event", "sandbox.start", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
 			backend := resolveBackendForSandbox(name)
 			return withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
 				mgr := sandbox.NewManager(rt, slog.Default(), cmd.InOrStdin(), cmd.ErrOrStderr())
@@ -49,6 +50,7 @@ func newStartCmd() *cobra.Command {
 				}); err != nil {
 					return sandboxErrorHint(name, err)
 				}
+				slog.Info("sandbox started", "event", "sandbox.start.complete", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
 
 				if jsonEnabled(cmd) {
 					return writeJSON(cmd.OutOrStdout(), map[string]string{

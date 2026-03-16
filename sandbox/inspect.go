@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -190,6 +191,7 @@ func DetectStatus(ctx context.Context, rt runtime.Runtime, containerName string,
 	}
 
 	// If status file is missing or stale, assume active (container is running)
+	slog.Debug("detecting sandbox status", "event", "sandbox.inspect.status", "container", containerName, "result", string(StatusActive))
 	return StatusActive, nil
 }
 

@@ -43,6 +43,7 @@ func newResetCmd() *cobra.Command {
 			backend := resolveBackendForSandbox(name)
 			return withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
 				mgr := sandbox.NewManager(rt, slog.Default(), cmd.InOrStdin(), cmd.ErrOrStderr())
+				slog.Info("resetting sandbox", "event", "sandbox.reset", "sandbox", name, "restart", restart, "clear_state", clearState) //nolint:gosec // G706: name is validated by ValidateName
 				if err := mgr.Reset(ctx, sandbox.ResetOptions{
 					Name:       name,
 					Restart:    restart,
@@ -54,6 +55,7 @@ func newResetCmd() *cobra.Command {
 				}); err != nil {
 					return sandboxErrorHint(name, err)
 				}
+				slog.Info("sandbox reset complete", "event", "sandbox.reset.complete", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
 
 				if jsonEnabled(cmd) {
 					return writeJSON(cmd.OutOrStdout(), map[string]string{

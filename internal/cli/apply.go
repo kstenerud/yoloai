@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 
@@ -75,6 +76,7 @@ Use --patches to export .patch files without applying them.`,
 				return fmt.Errorf("apply is not needed for :rw directories — changes are already live")
 			}
 
+			slog.Info("applying changes", "event", "sandbox.apply", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
 			if hasOverlayDirs(meta) {
 				return applyOverlay(cmd, name, meta, refs, paths, patchesDir, noWIP, yes, dryRun)
 			}
@@ -112,6 +114,10 @@ Use --patches to export .patch files without applying them.`,
 				}
 			}
 
+			slog.Debug("commits to apply", "event", "sandbox.apply.commits", "sandbox", name, "count", len(commits)) //nolint:gosec // G706: name is validated by ValidateName
+			if hasWIP {
+				slog.Debug("WIP to apply", "event", "sandbox.apply.wip", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
+			}
 			if len(commits) == 0 && !hasWIP {
 				if jsonEnabled(cmd) {
 					return writeJSON(cmd.OutOrStdout(), applyResult{
@@ -236,6 +242,7 @@ Use --patches to export .patch files without applying them.`,
 				}
 			}
 
+			slog.Info("apply complete", "event", "sandbox.apply.complete", "sandbox", name, "commits_applied", commitsApplied, "wip_applied", wipApplied) //nolint:gosec // G706: name is validated by ValidateName
 			if jsonEnabled(cmd) {
 				return writeJSON(cmd.OutOrStdout(), applyResult{
 					Target:         targetDir,

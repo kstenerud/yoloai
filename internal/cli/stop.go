@@ -84,9 +84,11 @@ func newStopCmd() *cobra.Command {
 					}
 					var results []stopResult
 					for _, name := range names {
+						slog.Info("stopping sandbox", "event", "sandbox.stop", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
 						if err := mgr.Stop(ctx, name); err != nil {
 							results = append(results, stopResult{Name: name, Error: err.Error()})
 						} else {
+							slog.Info("sandbox stopped", "event", "sandbox.stop.complete", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
 							results = append(results, stopResult{Name: name, Action: "stopped"})
 						}
 					}
@@ -95,11 +97,13 @@ func newStopCmd() *cobra.Command {
 
 				var errs []error
 				for _, name := range names {
+					slog.Info("stopping sandbox", "event", "sandbox.stop", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
 					if err := mgr.Stop(ctx, name); err != nil {
 						fmt.Fprintf(os.Stderr, "Warning: stop %s: %v\n", name, sandboxErrorHint(name, err)) //nolint:errcheck // best-effort output
 						errs = append(errs, err)
 					} else {
-						fmt.Fprintf(cmd.OutOrStdout(), "Stopped %s\n", name) //nolint:errcheck // best-effort output
+						slog.Info("sandbox stopped", "event", "sandbox.stop.complete", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
+						fmt.Fprintf(cmd.OutOrStdout(), "Stopped %s\n", name)                            //nolint:errcheck // best-effort output
 					}
 				}
 

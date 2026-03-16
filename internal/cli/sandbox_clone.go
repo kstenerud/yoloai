@@ -47,10 +47,12 @@ func runClone(cmd *cobra.Command, args []string) error {
 	}
 
 	// Clone (no runtime needed).
+	slog.Info("cloning sandbox", "event", "sandbox.clone", "source", src, "dest", dst)
 	mgr := sandbox.NewManager(nil, slog.Default(), cmd.InOrStdin(), cmd.ErrOrStderr())
 	if err := mgr.Clone(cmd.Context(), sandbox.CloneOptions{Source: src, Dest: dst}); err != nil {
 		return err
 	}
+	slog.Info("clone complete", "event", "sandbox.clone.complete", "source", src, "dest", dst)
 
 	if noStart {
 		if jsonEnabled(cmd) {

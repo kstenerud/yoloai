@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -139,6 +140,7 @@ type containerConfig struct {
 // Create creates and optionally starts a new sandbox.
 // Returns the sandbox name on success (empty if user cancelled or no-start).
 func (m *Manager) Create(ctx context.Context, opts CreateOptions) (string, error) {
+	slog.Info("creating sandbox", "event", "sandbox.create", "sandbox", opts.Name, "agent", opts.Agent, "backend", m.backend)
 	if err := m.EnsureSetup(ctx); err != nil {
 		return "", err
 	}
@@ -163,6 +165,7 @@ func (m *Manager) Create(ctx context.Context, opts CreateOptions) (string, error
 		return "", err
 	}
 
+	slog.Info("sandbox created", "event", "sandbox.create.complete", "sandbox", state.name)
 	m.printCreationOutput(state, opts.Attach)
 	return state.name, nil
 }
@@ -342,12 +345,14 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 	}
 
 	// Copy/overlay workdir and create git baseline.
+	slog.Debug("setting up workdir", "event", "sandbox.create.workdir", "mode", string(workdir.Mode))
 	workCopyDir, baselineSHA, err := setupWorkdir(opts.Name, workdir)
 	if err != nil {
 		return nil, err
 	}
 
 	// Copy/overlay aux dirs and create baselines.
+	slog.Debug("setting up aux dirs", "event", "sandbox.create.aux_dirs", "count", len(auxDirs))
 	dirMetas, err := setupAuxDirs(opts.Name, auxDirs)
 	if err != nil {
 		return nil, err
@@ -391,6 +396,7 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 
 	// Determine network mode and allowlist.
 	networkMode, networkAllow := buildNetworkConfig(opts, agentDef)
+	slog.Debug("building runtime config", "event", "sandbox.create.config", "network_mode", networkMode)
 
 	// Build overlay mount configs for config.json.
 	overlayMounts := collectOverlayMounts(workdir, auxDirs)
@@ -522,6 +528,7 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 // and cleans up credential temp files. Used by both initial creation and
 // recreation from meta.json.
 func (m *Manager) launchContainer(ctx context.Context, state *sandboxState) error {
+	slog.Info("launching container", "event", "sandbox.create.container.launch", "sandbox", state.name, "image", state.imageRef)
 	// Use pre-merged env from state if available, otherwise load from config.
 	envVars := state.env
 	if envVars == nil {

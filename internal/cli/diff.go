@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"regexp"
 	"strings"
 
@@ -53,6 +54,7 @@ Examples:
 				return sandboxErrorHint(name, metaErr)
 			}
 			overlay := hasOverlayDirs(meta)
+			slog.Debug("generating diff", "event", "sandbox.diff", "sandbox", name, "workdir_mode", meta.Workdir.Mode) //nolint:gosec // G706: name is validated by ValidateName
 
 			// Skip agent warning in JSON mode
 			if !jsonEnabled(cmd) {
