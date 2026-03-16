@@ -177,6 +177,77 @@ func TestRunLog_SourceFilter(t *testing.T) {
 	assert.NotContains(t, buf.String(), "sandbox message")
 }
 
+func TestRunLog_SinceFilter(t *testing.T) {
+	sandboxDir := setupLogTest(t, "logtest-since")
+	// Two entries: one old (2020), one recent (2026).
+	entries := `{"ts":"2020-01-01T00:00:00.000Z","level":"info","event":"old","msg":"old message"}` + "\n" +
+		`{"ts":"2026-03-15T14:23:02.000Z","level":"info","event":"new","msg":"new message"}` + "\n"
+	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, "logs", "cli.jsonl"), []byte(entries), 0600))
+
+	cmd := newLogAliasCmd()
+	buf := new(bytes.Buffer)
+	cmd.SetOut(buf)
+	// --since 1y filters out the 2020 entry; use a very long duration to capture 2026.
+	cmd.SetArgs([]string{"logtest-since", "--since", "8760h"}) // 1 year back — includes 2026-03-15, excludes 2020
+	require.NoError(t, cmd.Execute())
+
+	assert.Contains(t, buf.String(), "new message")
+	assert.NotContains(t, buf.String(), "old message")
+}
+
+func TestRunLog_MultipleSourcesFilter(t *testing.T) {
+	sandboxDir := setupLogTest(t, "logtest-multi-source")
+	cliEntry := `{"ts":"2026-03-15T14:23:01.000Z","level":"info","event":"cli.event","msg":"cli msg"}` + "\n"
+	sbEntry := `{"ts":"2026-03-15T14:23:02.000Z","level":"info","event":"sb.event","msg":"sandbox msg"}` + "\n"
+	hooksEntry := `{"ts":"2026-03-15T14:23:03.000Z","level":"info","event":"hooks.event","msg":"hooks msg"}` + "\n"
+	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, "logs", "cli.jsonl"), []byte(cliEntry), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, "logs", "sandbox.jsonl"), []byte(sbEntry), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, "logs", "agent-hooks.jsonl"), []byte(hooksEntry), 0600))
+
+	cmd := newLogAliasCmd()
+	buf := new(bytes.Buffer)
+	cmd.SetOut(buf)
+	cmd.SetArgs([]string{"logtest-multi-source", "--source", "cli,hooks"})
+	require.NoError(t, cmd.Execute())
+
+	assert.Contains(t, buf.String(), "cli msg")
+	assert.Contains(t, buf.String(), "hooks msg")
+	assert.NotContains(t, buf.String(), "sandbox msg")
+}
+
+func TestRunLog_ExtraFieldsDisplayed(t *testing.T) {
+	sandboxDir := setupLogTest(t, "logtest-extra")
+	entry := `{"ts":"2026-03-15T14:23:01.000Z","level":"info","event":"sandbox.create","msg":"creating","sandbox":"my-box","agent":"claude"}` + "\n"
+	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, "logs", "cli.jsonl"), []byte(entry), 0600))
+
+	cmd := newLogAliasCmd()
+	buf := new(bytes.Buffer)
+	cmd.SetOut(buf)
+	cmd.SetArgs([]string{"logtest-extra"})
+	require.NoError(t, cmd.Execute())
+
+	out := buf.String()
+	assert.Contains(t, out, "sandbox=my-box")
+	assert.Contains(t, out, "agent=claude")
+}
+
+func TestRunLog_MalformedLinesSkipped(t *testing.T) {
+	sandboxDir := setupLogTest(t, "logtest-malformed")
+	content := "not json\n" +
+		`{"ts":"2026-03-15T14:23:01.000Z","level":"info","event":"e","msg":"valid msg"}` + "\n" +
+		"{incomplete\n"
+	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, "logs", "cli.jsonl"), []byte(content), 0600))
+
+	cmd := newLogAliasCmd()
+	buf := new(bytes.Buffer)
+	cmd.SetOut(buf)
+	cmd.SetArgs([]string{"logtest-malformed"})
+	require.NoError(t, cmd.Execute())
+
+	assert.Contains(t, buf.String(), "valid msg")
+	assert.NotContains(t, buf.String(), "not json")
+}
+
 func TestRunLog_MergeSort(t *testing.T) {
 	sandboxDir := setupLogTest(t, "logtest-merge")
 	// cli entry is later but in cli.jsonl; sandbox entry is earlier but in sandbox.jsonl
