@@ -37,7 +37,7 @@ Inspection:
   yoloai system info                             Show version, paths, disk usage, backend availability
   yoloai system agents [name]                    List available agents
   yoloai system backends [name]                  List available runtime backends
-  yoloai system build [profile|--all]            Build/rebuild Docker image(s)
+  yoloai system build [profile|--all]            Build/rebuild container image(s)
   yoloai system prune                            Remove orphaned backend resources and stale temp files
   yoloai system setup                            Run interactive setup  (--agent, --backend, --tmux-conf for automation)
   yoloai sandbox                                 Sandbox inspection
@@ -125,7 +125,7 @@ Directory argument syntax: `<path>[:<suffixes>][=<mount-point>]`
 Suffixes (combinable in any order):
 - `:rw` — bind-mounted read-write (live, immediate changes)
 - `:copy` — copied to sandbox state, read-write, diff/apply available
-- `:overlay` — uses Linux overlayfs for instant setup with diff/apply workflow (Docker only, requires CAP_SYS_ADMIN)
+- `:overlay` — uses Linux overlayfs for instant setup with diff/apply workflow (Docker/Podman, requires CAP_SYS_ADMIN)
 - `:force` — override dangerous directory detection
 
 Mount point:
@@ -344,7 +344,7 @@ Profile, network, and ports lines are omitted when using defaults (base image, u
 
 ### `yoloai attach`
 
-Runs `docker exec -it yoloai-<name> tmux attach -t main`.
+Runs `tmux attach -t main` inside the container via the backend's exec mechanism.
 
 Detach with standard tmux `Ctrl-b d` — container keeps running.
 
@@ -366,11 +366,11 @@ Displays sandbox configuration and state:
 - Container ID
 - Changes (yes/no/- — same detection as `list`)
 
-Reads from `meta.json` and queries live Docker state. Agent status is detected via `docker exec tmux list-panes -t main -F '#{pane_dead}'` combined with Docker container state for full status (active / stopped / done / failed). Useful for quick inspection without listing all sandboxes.
+Reads from `environment.json` and queries live container state via the sandbox's backend. Agent status is detected via container exec (`tmux list-panes -t main -F '#{pane_dead}'`) combined with container state for full status (active / stopped / done / failed). Useful for quick inspection without listing all sandboxes.
 
 ### `yoloai diff`
 
-For `:copy` directories: runs `git add -A` (to capture untracked files created by the agent) then `git diff` against the baseline (the recorded HEAD SHA for existing repos, or the synthetic initial commit for non-git dirs). Shows exactly what the agent changed with proper diff formatting. For the full copy strategy, runs on the host (reads `work/` directly). For the overlay strategy, runs inside the container via `docker exec` (the merged view requires the overlay mount). Same as `yoloai apply` — see that section for details.
+For `:copy` directories: runs `git add -A` (to capture untracked files created by the agent) then `git diff` against the baseline (the recorded HEAD SHA for existing repos, or the synthetic initial commit for non-git dirs). Shows exactly what the agent changed with proper diff formatting. For the full copy strategy, runs on the host (reads `work/` directly). For the overlay strategy, runs inside the container via container exec (the merged view requires the overlay mount). Same as `yoloai apply` — see that section for details.
 
 For `:rw` directories: runs `git diff` directly on the host (same files via bind mount). Does not require the container to be running. If the original is not a git repo, notes that diff is not available for live-mounted dirs without git. Note: for `:rw` directories, diff shows all uncommitted changes relative to HEAD, not just changes made by the agent. Pre-existing uncommitted changes are mixed in. Use `:copy` mode for clean agent-only diffs.
 
@@ -429,7 +429,7 @@ Without `-- <path>...`, applies all changes. With `-- <path>...`, `git format-pa
 
 `yoloai destroy <name>...`
 
-`docker stop` + `docker rm` the container. Removes `~/.yoloai/sandboxes/<name>/` entirely. No special overlay cleanup needed — the kernel tears down the mount namespace when the container stops.
+Stops and removes the container via the sandbox's backend. Removes `~/.yoloai/sandboxes/<name>/` entirely. No special overlay cleanup needed — the kernel tears down the mount namespace when the container stops.
 
 Accepts multiple sandbox names (e.g., `yoloai destroy sandbox1 sandbox2 sandbox3`) with a single confirmation prompt showing all sandboxes to be destroyed.
 
@@ -447,7 +447,7 @@ Options:
 
 `yoloai exec <name> <command>` runs a command inside the sandbox container without attaching to tmux. Useful for debugging (`yoloai exec my-sandbox bash`) or quick operations (`yoloai exec my-sandbox npm install foo`).
 
-Implemented as `docker exec yoloai-<name> <command>`, with `-i` added when stdin is a pipe/TTY and `-t` added when stdin is a TTY. This allows both interactive use (`yoloai exec my-sandbox bash`) and non-interactive use (`yoloai exec my-sandbox ls`, `echo "test" | yoloai exec my-sandbox cat`).
+Implemented via the backend's exec mechanism (e.g., `docker exec` or `podman exec`), with `-i` added when stdin is a pipe/TTY and `-t` added when stdin is a TTY. This allows both interactive use (`yoloai exec my-sandbox bash`) and non-interactive use (`yoloai exec my-sandbox ls`, `echo "test" | yoloai exec my-sandbox cat`).
 
 ### `yoloai sandbox <name> allow/allowed/deny`
 
@@ -455,7 +455,7 @@ Parent command for managing sandbox network allowlists.
 
 #### `yoloai sandbox <name> allow`
 
-`yoloai sandbox <name> allow <domain>...` adds domains to the allowlist of a network-isolated sandbox. Changes are persisted to meta.json and config.json so they survive container restarts. If the container is running, ipset rules are live-patched via `docker exec` (as root, using `dig` + `ipset add`).
+`yoloai sandbox <name> allow <domain>...` adds domains to the allowlist of a network-isolated sandbox. Changes are persisted to meta.json and config.json so they survive container restarts. If the container is running, ipset rules are live-patched via container exec (as root, using `dig` + `ipset add`).
 
 Requires `network_mode == "isolated"`. Errors if the sandbox uses `--network-none` or has no network restrictions. Duplicate domains are silently skipped (idempotent). If the container is stopped, changes are saved and take effect on the next start.
 
@@ -518,14 +518,14 @@ Profile Dockerfiles that install private dependencies (e.g., `RUN go mod downloa
 
 **What gets pruned:**
 
-- **Docker:** Containers named `yoloai-*` that have no corresponding sandbox directory.
+- **Docker/Podman:** Containers named `yoloai-*` that have no corresponding sandbox directory.
 - **Tart:** VMs named `yoloai-*` that have no corresponding sandbox directory.
 - **Seatbelt:** No-op (no central instance registry; processes are tied to sandbox dirs).
 - **Cross-backend:** `/tmp/yoloai-*` directories older than 1 hour (leaked secrets, apply, format-patch temps).
 
 **Broken sandbox warnings:** Sandbox directories with missing or corrupt `meta.json` are reported as warnings (with full path and suggested `yoloai destroy` command) but are NOT deleted — they may contain recoverable work.
 
-**What is NOT pruned:** Docker images and build cache (affects all Docker usage, not just yoloai). Orphaned seatbelt processes (complex detection, low frequency).
+**What is NOT pruned:** Container images and build cache (affects all Docker/Podman usage, not just yoloai). Orphaned seatbelt processes (complex detection, low frequency).
 
 Options:
 - `--dry-run`: Report only, don't ask or remove.

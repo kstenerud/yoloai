@@ -13,6 +13,7 @@ internal/cli/            → Cobra command tree and CLI plumbing
 internal/testutil/       → Shared test helpers (git, fixtures, home isolation, container polling) — test use only
 runtime/                 → Pluggable runtime interface (backend-agnostic types and errors)
 runtime/docker/          → Docker implementation of runtime.Runtime
+runtime/podman/          → Podman implementation (embeds Docker runtime, overrides socket discovery and rootless support)
 runtime/tart/            → Tart (macOS VM) implementation of runtime.Runtime
 runtime/seatbelt/        → Seatbelt (macOS sandbox-exec) implementation of runtime.Runtime
 sandbox/                 → Core logic: create, lifecycle, diff, apply, inspect
@@ -123,6 +124,14 @@ Shared test helpers — a non-`_test.go` package importable by test files across
 | `build_test.go` | Unit tests for build/seed logic. |
 | `docker_integration_test.go` | Integration tests requiring Docker daemon. Build tag: `integration`. |
 
+### `runtime/podman/`
+
+| File | Purpose |
+|------|---------|
+| `podman.go` | `Runtime` struct — embeds `docker.Runtime`, overrides socket discovery (`$CONTAINER_HOST`, `$XDG_RUNTIME_DIR/podman/podman.sock`, `/run/podman/podman.sock`, `podman machine inspect` on macOS) and `Create()` to inject `--userns=keep-id` for rootless file ownership. |
+| `podman_test.go` | Unit tests for socket discovery logic. |
+| `integration_test.go` | Integration tests requiring Podman daemon. Build tag: `integration`. |
+
 ### `runtime/tart/`
 
 | File | Purpose |
@@ -207,6 +216,9 @@ Configuration for `Runtime.Create()`. Describes image, command, working director
 
 ### `runtime.DockerRuntime`
 Docker implementation of `Runtime` interface. Wraps Docker SDK client. Defined in `runtime/docker/`.
+
+### `runtime.PodmanRuntime`
+Podman implementation of `Runtime` interface. Embeds `docker.Runtime` and overrides socket discovery and rootless container creation. Reuses the Docker SDK by connecting to Podman's Docker-compatible socket. Defined in `runtime/podman/`.
 
 ### `runtime.TartRuntime`
 Tart (macOS VM) implementation of `Runtime` interface. Shells out to `tart` CLI for all operations. PID-based process management with `tart list` cross-check. VirtioFS mounts with symlink path mapping. Defined in `runtime/tart/`.
@@ -447,7 +459,7 @@ Manager.Start (sandbox/lifecycle.go)
 
 **Add a new runtime backend:**
 1. Create `runtime/<name>/` package
-2. Implement the `runtime.Runtime` interface
+2. Implement the `runtime.Runtime` interface (see `runtime/podman/` for an example that embeds an existing backend and overrides only what differs)
 3. Register in `cli/helpers.go:newRuntime()` — switch on the backend name resolved by `resolveBackend()`
 4. Backend is selectable via `--backend` flag (on new/build/setup) or `backend` config. Lifecycle commands read backend from sandbox `environment.json`.
 

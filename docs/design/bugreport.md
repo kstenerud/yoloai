@@ -76,7 +76,7 @@ Each line in the JSONL log files is a JSON object:
 | `setup_cmd.done` | entrypoint.py | info | `duration_ms` | Setup command succeeded (exit_code=0) |
 | `setup_cmd.error` | entrypoint.py | error | `exit_code`, `duration_ms` | Setup command failed (non-zero exit); mutually exclusive with `setup_cmd.done` |
 | `sandbox.backend_setup` | sandbox-setup.py | info | `backend` | Backend-specific setup (seatbelt symlinks, tart mounts) |
-| `overlay.git_baseline` | sandbox-setup.py | info | `path` | Git baseline commit on overlay merged directory (Docker only) |
+| `overlay.git_baseline` | sandbox-setup.py | info | `path` | Git baseline commit on overlay merged directory (Docker/Podman) |
 | `sandbox.tmux_start` | sandbox-setup.py | info | — | tmux session created |
 | `sandbox.agent_launch` | sandbox-setup.py | info | `agent`, `model` | Agent process started |
 | `sandbox.prompt_deliver` | sandbox-setup.py | info | `method` | Prompt delivered to agent |

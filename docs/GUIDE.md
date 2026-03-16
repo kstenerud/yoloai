@@ -86,14 +86,14 @@ The workdir (your project directory) is copied into the sandbox by default. You 
 | Mode | Syntax | Behavior |
 |------|--------|----------|
 | `:copy` | `./my-app` (default) | Isolated copy. Agent changes are reviewed via diff/apply. |
-| `:overlay` | `./my-app:overlay` | Overlay mount. Instant setup, diff/apply workflow. Docker only. |
+| `:overlay` | `./my-app:overlay` | Overlay mount. Instant setup, diff/apply workflow. Docker/Podman only. |
 | `:rw` | `./my-app:rw` | Live bind-mount. Changes are immediate — no diff/apply needed. |
 
 ```bash
 # Default: safe isolated copy
 yoloai new task1 ./my-project
 
-# Overlay: instant setup for large projects (Docker only)
+# Overlay: instant setup for large projects (Docker/Podman only)
 yoloai new task2 ./large-project:overlay
 
 # Live mount (use with caution — agent writes directly to your files)
@@ -113,7 +113,7 @@ For large projects where copy speed is a concern, use `:overlay` mode — it pro
 
 ### Overlay Mode
 
-`:overlay` uses Linux kernel overlayfs inside the Docker container to mount the original directory as a read-only lower layer, with agent changes captured in an upper layer. This provides:
+`:overlay` uses Linux kernel overlayfs inside the container to mount the original directory as a read-only lower layer, with agent changes captured in an upper layer. This provides:
 
 - **Instant setup** — no file copying, regardless of project size
 - **diff/apply workflow** — same review process as `:copy` mode
@@ -123,7 +123,7 @@ For large projects where copy speed is a concern, use `:overlay` mode — it pro
 - No snapshot isolation — changes to the original host directory are visible for files the agent hasn't modified
 - Container must be running for `yoloai diff` and `yoloai apply` (auto-started if stopped)
 - Requires `CAP_SYS_ADMIN` capability in the container
-- Docker backend only (not available with `--backend seatbelt` or `--backend tart`)
+- Not available with `--backend seatbelt` or `--backend tart`
 
 ## Auxiliary Directories
 
@@ -252,7 +252,7 @@ Errors are output to stderr as `{"error": "message"}`. Interactive commands (`at
 
 ### Creating sandboxes
 
-`--backend <name>` selects the runtime backend (`docker`, `tart`, or `seatbelt`). Available on `new`, `build`, and `setup`. Lifecycle commands (`start`, `stop`, etc.) read the backend from the sandbox's `environment.json` automatically.
+`--backend <name>` selects the runtime backend (`docker`, `podman`, `tart`, or `seatbelt`). Available on `new`, `build`, and `setup`. Lifecycle commands (`start`, `stop`, etc.) read the backend from the sandbox's `environment.json` automatically.
 
 ```bash
 # Prompt (headless — agent runs the task autonomously)
@@ -442,7 +442,7 @@ yoloai config reset env.OLLAMA_API_BASE
 |-----|---------|-------------|
 | `agent` | `claude` | Agent to use: `aider`, `claude`, `codex`, `gemini`, `opencode` |
 | `model` | (empty) | Model name or alias passed to the agent |
-| `backend` | `docker` | Runtime backend: `docker`, `tart`, `seatbelt` |
+| `backend` | `docker` | Runtime backend: `docker`, `podman`, `tart`, `seatbelt` |
 | `tart.image` | (empty) | Custom base VM image for tart backend |
 | `env.<NAME>` | (empty) | Environment variable forwarded to container |
 | `agent_args.<AGENT>` | (empty) | Default CLI args for an agent (e.g., `agent_args.aider`) |
@@ -466,7 +466,7 @@ Agent resolution: `new` uses `--agent` flag > `agent` in config > `"claude"`.
 
 Model resolution: `new` uses `--model` flag > `model` in config > `""` (empty = agent's default model).
 
-Backend resolution: `new`/`build`/`setup` use `--backend` flag > `backend` in config > `"docker"`. Lifecycle commands read the backend from the sandbox's `environment.json`, falling back to config default.
+Backend resolution: `new`/`build`/`setup` use `--backend` flag > `backend` in config > `"docker"`. Valid values: `docker`, `podman`, `tart`, `seatbelt`. Lifecycle commands read the backend from the sandbox's `environment.json`, falling back to config default.
 
 Agent args: persistent default CLI args for specific agents. Inserted between the model flag and CLI passthrough (`--` args), so passthrough always takes precedence. Example: `yoloai config set agent_args.aider "--no-auto-commits --no-pretty"`. Profile `agent_args` merge with base config (per-agent key, profile wins on conflict).
 

@@ -49,7 +49,7 @@ tmux_conf: default+host               # default+host | default | host | none (se
 
 ```yaml
 # Always applied to every sandbox
-backend: docker                       # Runtime backend: docker, tart, seatbelt
+backend: docker                       # Runtime backend: docker, podman, tart, seatbelt
 # tart:                               # Tart backend settings
 #   image:                            # Custom base VM image
 
@@ -81,14 +81,14 @@ Settings are managed via `yoloai config get/set` (keys are automatically routed 
 
 **Implemented settings:**
 
-- `backend` selects the runtime backend. Valid values: `docker`, `tart`, `seatbelt`. CLI `--backend` overrides config.
+- `backend` selects the runtime backend. Valid values: `docker`, `podman`, `tart`, `seatbelt`. CLI `--backend` overrides config.
 - `tart.image` overrides the base VM image for the tart backend.
 - `tmux_conf` (global config) controls how user tmux config interacts with the container. Set by the interactive first-run setup. Values: `default+host`, `default`, `host`, `none` (see [setup.md](setup.md#tmux-configuration)).
 - `agent` selects the agent to launch. Valid values: `aider`, `claude`, `codex`, `gemini`, `opencode`. CLI `--agent` overrides config.
 - `model` sets the model name or alias passed to the agent. Empty means the agent uses its own default. CLI `--model` overrides config.
 - `env` sets environment variables forwarded to the container. Values are written as files in `/run/secrets/` (same mechanism as API keys). API keys take precedence if a name conflicts. Supports `${VAR}` expansion. Set via `yoloai config set env.NAME value`. Profile `env` merges with defaults (profile values win on conflict).
 - `agent_args` sets per-agent default CLI args. Map of agent name → arg string. Args are inserted between the model flag and CLI passthrough (`--` args), so passthrough always wins. Set via `yoloai config set agent_args.aider "--no-auto-commits"`. Profile `agent_args` merges with defaults (profile values win on conflict per agent key).
-- `resources` sets container resource limits. `resources.cpus` (e.g., `"4"`, `"2.5"`) maps to `docker --cpus`. `resources.memory` (e.g., `"8g"`, `"512m"`) maps to `docker --memory`. CLI `--cpus` and `--memory` override config. Profile can override individual values.
+- `resources` sets container resource limits. `resources.cpus` (e.g., `"4"`, `"2.5"`) maps to `--cpus`. `resources.memory` (e.g., `"8g"`, `"512m"`) maps to `--memory`. CLI `--cpus` and `--memory` override config. Profile can override individual values.
 - `network` controls network isolation. `network.isolated: true` enables network isolation for all sandboxes. `network.allow` lists additional allowed domains (additive with agent defaults). Non-empty `network.allow` implies `network.isolated: true`. CLI `--network-isolated` and `--network-allow` override config.
 - `mounts` specifies bind mounts added at container run time (e.g., `~/.gitconfig:/home/yoloai/.gitconfig:ro`). Profile mounts are additive (merged with defaults).
 - `auto_commit_interval` sets the interval in seconds between automatic git commits in `:copy` directories inside the container. Disabled by default (`0`). When enabled, a background loop periodically runs `git add -A && git commit` in each `:copy` directory, providing recovery checkpoints for unattended runs. Only affects `:copy` dirs (`:overlay` has its own mechanism; `:rw` is the user's live repo). Profile overrides default.
@@ -138,7 +138,7 @@ Profiles live in `~/.yoloai/profiles/<name>/`, containing a `profile.yaml` and o
 ```
 ~/.yoloai/profiles/<name>/
 ├── profile.yaml      ← runtime config (edit directly — no CLI config command)
-└── Dockerfile        ← optional; FROM yoloai-base (Docker backend only)
+└── Dockerfile        ← optional; FROM yoloai-base (Docker/Podman backends only)
 ```
 
 **Name validation:** Profile names follow the same rules as sandbox names — must match `^[a-zA-Z0-9][a-zA-Z0-9_.-]*$`, max 56 characters. The name `base` is reserved and cannot be used for user profiles. Profile names become Docker image tags (`yoloai-<profile>`), so the character restrictions ensure compatibility with Docker's naming rules.
@@ -149,12 +149,12 @@ Profiles live in `~/.yoloai/profiles/<name>/`, containing a `profile.yaml` and o
 
 **Backend handling:**
 - `backend` in profile — optional constraint. If set, error when the user's backend doesn't match. If omitted, the profile works with any backend.
-- `Dockerfile` in profile dir — optional. Used only with the Docker backend to build a `yoloai-<profile>` image. Ignored with Tart and Seatbelt backends. When absent, the Docker backend uses `yoloai-base`.
+- `Dockerfile` in profile dir — optional. Used with Docker and Podman backends to build a `yoloai-<profile>` image. Ignored with Tart and Seatbelt backends. When absent, Docker/Podman backends use `yoloai-base`.
 - `tart.image` in profile — optional. Used only with the Tart backend to specify a custom VM image. Ignored with other backends.
 
 **Sandbox metadata:** When a profile is used, `meta.json` records the profile name and the resolved image ref (`yoloai-<profile>` or `yoloai-base`). Lifecycle commands (`start`, `reset`, `restart`) use the stored image ref to recreate containers correctly — they do not re-resolve the profile. This means profile changes (Dockerfile or yaml) only take effect on new sandboxes, not existing ones.
 
-**Profile image building:** Profile image building is Docker-specific — handled outside the backend-agnostic `Runtime` interface. The sandbox manager calls `Runtime.EnsureImage()` for the base image as before, then uses Docker-specific build logic for profile images when the Docker backend is active and the profile has a Dockerfile. Tart and Seatbelt backends skip profile image building entirely (Tart uses `tart.image` override; Seatbelt has no image concept).
+**Profile image building:** Profile image building applies to container backends (Docker, Podman) — handled outside the backend-agnostic `Runtime` interface. The sandbox manager calls `Runtime.EnsureImage()` for the base image as before, then uses container-backend build logic for profile images when Docker or Podman is active and the profile has a Dockerfile. Tart and Seatbelt backends skip profile image building entirely (Tart uses `tart.image` override; Seatbelt has no image concept).
 
 **Profile image staleness:** A profile image (`yoloai-<profile>`) is considered stale when: (a) it doesn't exist, (b) the profile's Dockerfile has changed since last build (tracked via checksum, same pattern as base image), or (c) `yoloai-base` has been rebuilt since the profile image was last built. Stale images are automatically rebuilt during `yoloai new --profile`.
 
@@ -170,7 +170,7 @@ Profiles live in `~/.yoloai/profiles/<name>/`, containing a `profile.yaml` and o
 extends: base                             # parent profile (default: base)
 
 # --- Same fields as config.yaml (all optional) ---
-# backend: docker                         # constrain to a specific backend; omit for any
+# backend: docker                         # constrain to a specific backend (docker, podman, tart, seatbelt); omit for any
 agent: claude                             # override default agent
 # model: sonnet                           # override default model
 # tart:                                   # Tart backend settings
