@@ -133,7 +133,16 @@ The agent works on an isolated copy, so you can keep iterating without risk. Eac
 
 ## Supported Infrastructure
 
-### Agent Modess
+### Sandbox Backends
+
+| Backend  | Supported Hosts              | Dependencies                                                       |
+|----------|------------------------------|--------------------------------------------------------------------|
+| docker   | Linux, macOS, Windows (WSL2) | [Docker Engine](https://docs.docker.com/engine/install/) or [Docker Desktop](https://docs.docker.com/get-docker/) |
+| podman   | Linux, macOS                 | [Podman](https://podman.io/get-started) (`brew install podman` on macOS) |
+| tart     | macOS (Apple Silicon)        | [Tart](https://github.com/cirruslabs/tart) (`brew install cirruslabs/cli/tart`) |
+| seatbelt | macOS (any)                  | None (uses built-in `sandbox-exec`)                                |
+
+### Agent Modes
 
 | Mode       | Description |
 |------------|-------------|
@@ -146,15 +155,6 @@ The agent works on an isolated copy, so you can keep iterating without risk. Eac
 | `idle`     | Runs an idle process to allow MCP proxying |
 
 Use `yoloai system agents` to list available agents.
-
-### Backends
-
-| Backend  | Supported Hosts              | Dependencies                                                       |
-|----------|------------------------------|--------------------------------------------------------------------|
-| docker   | Linux, macOS, Windows (WSL2) | [Docker Engine](https://docs.docker.com/engine/install/) or [Docker Desktop](https://docs.docker.com/get-docker/) |
-| podman   | Linux, macOS                 | [Podman](https://podman.io/get-started) (`brew install podman` on macOS) |
-| tart     | macOS (Apple Silicon)        | [Tart](https://github.com/cirruslabs/tart) (`brew install cirruslabs/cli/tart`) |
-| seatbelt | macOS (any)                  | None (uses built-in `sandbox-exec`)                                |
 
 ## Learn more
 
