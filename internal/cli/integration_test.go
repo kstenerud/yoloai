@@ -288,3 +288,96 @@ func TestCLI_NetworkLifecycle(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, stdout, "All domains already allowed")
 }
+
+func TestCLI_BugreportCommand_Unsafe(t *testing.T) {
+	projectDir := cliSetup(t)
+
+	_, _, err := runCLI(t, "new", "--agent", "test", "--no-start", "--prompt", "secret task", "cli-br-unsafe", projectDir)
+	require.NoError(t, err)
+	t.Cleanup(func() { destroySandbox(t, "cli-br-unsafe") })
+
+	// Write fake JSONL to all 4 log files and agent.log in the sandbox
+	sandboxDir := sandbox.Dir("cli-br-unsafe")
+	logsDir := filepath.Join(sandboxDir, sandbox.LogsDir)
+	require.NoError(t, os.MkdirAll(logsDir, 0700))
+	entry := `{"ts":"2026-03-16T10:00:00.000Z","level":"info","event":"test.event","msg":"test log message"}` + "\n"
+	require.NoError(t, os.WriteFile(sandbox.CLIJSONLPath("cli-br-unsafe"), []byte(entry), 0600))
+	require.NoError(t, os.WriteFile(sandbox.SandboxJSONLPath("cli-br-unsafe"), []byte(entry), 0600))
+	require.NoError(t, os.WriteFile(sandbox.MonitorJSONLPath("cli-br-unsafe"), []byte(entry), 0600))
+	require.NoError(t, os.WriteFile(sandbox.HooksJSONLPath("cli-br-unsafe"), []byte(entry), 0600))
+	require.NoError(t, os.WriteFile(sandbox.AgentLogPath("cli-br-unsafe"), []byte("agent output line\n"), 0600))
+
+	origDir, err := os.Getwd()
+	require.NoError(t, err)
+	reportDir := t.TempDir()
+	require.NoError(t, os.Chdir(reportDir))
+	t.Cleanup(func() { _ = os.Chdir(origDir) }) //nolint:gosec // G104: chdir in test cleanup
+
+	_, _, err = runCLI(t, "sandbox", "cli-br-unsafe", "bugreport", "unsafe")
+	require.NoError(t, err)
+
+	matches, err := filepath.Glob(filepath.Join(reportDir, "yoloai-bugreport-*.md"))
+	require.NoError(t, err)
+	require.Len(t, matches, 1)
+
+	content, err := os.ReadFile(matches[0])
+	require.NoError(t, err)
+	out := string(content)
+
+	assert.Contains(t, out, "Sandbox detail")
+	assert.Contains(t, out, "logs/cli.jsonl")
+	assert.Contains(t, out, "logs/sandbox.jsonl")
+	assert.Contains(t, out, "logs/monitor.jsonl")
+	assert.Contains(t, out, "logs/agent-hooks.jsonl")
+	assert.Contains(t, out, "Agent output")
+	assert.Contains(t, out, "secret task") // prompt included in unsafe
+
+	// Flag-only sections not present in command path
+	assert.NotContains(t, out, "Live log")
+	assert.NotContains(t, out, "Exit code")
+}
+
+func TestCLI_BugreportCommand_Safe(t *testing.T) {
+	projectDir := cliSetup(t)
+
+	_, _, err := runCLI(t, "new", "--agent", "test", "--no-start", "--prompt", "secret task", "cli-br-safe", projectDir)
+	require.NoError(t, err)
+	t.Cleanup(func() { destroySandbox(t, "cli-br-safe") })
+
+	// Write fake JSONL to all 4 log files
+	sandboxDir := sandbox.Dir("cli-br-safe")
+	logsDir := filepath.Join(sandboxDir, sandbox.LogsDir)
+	require.NoError(t, os.MkdirAll(logsDir, 0700))
+	entry := `{"ts":"2026-03-16T10:00:00.000Z","level":"info","event":"test.event","msg":"test log message"}` + "\n"
+	require.NoError(t, os.WriteFile(sandbox.CLIJSONLPath("cli-br-safe"), []byte(entry), 0600))
+	require.NoError(t, os.WriteFile(sandbox.SandboxJSONLPath("cli-br-safe"), []byte(entry), 0600))
+	require.NoError(t, os.WriteFile(sandbox.MonitorJSONLPath("cli-br-safe"), []byte(entry), 0600))
+	require.NoError(t, os.WriteFile(sandbox.HooksJSONLPath("cli-br-safe"), []byte(entry), 0600))
+
+	origDir, err := os.Getwd()
+	require.NoError(t, err)
+	reportDir := t.TempDir()
+	require.NoError(t, os.Chdir(reportDir))
+	t.Cleanup(func() { _ = os.Chdir(origDir) }) //nolint:gosec // G104: chdir in test cleanup
+
+	_, _, err = runCLI(t, "sandbox", "cli-br-safe", "bugreport", "safe")
+	require.NoError(t, err)
+
+	matches, err := filepath.Glob(filepath.Join(reportDir, "yoloai-bugreport-*.md"))
+	require.NoError(t, err)
+	require.Len(t, matches, 1)
+
+	content, err := os.ReadFile(matches[0])
+	require.NoError(t, err)
+	out := string(content)
+
+	assert.Contains(t, out, "Sandbox detail")
+	assert.Contains(t, out, "logs/cli.jsonl")
+	assert.Contains(t, out, "logs/sandbox.jsonl")
+	assert.Contains(t, out, "logs/monitor.jsonl")
+	assert.Contains(t, out, "logs/agent-hooks.jsonl")
+
+	// Safe mode omits these
+	assert.NotContains(t, out, "Agent output")
+	assert.NotContains(t, out, "prompt.txt") // prompt.txt section omitted in safe mode
+}
