@@ -82,6 +82,9 @@ func Execute(ctx context.Context, version, commit, date string) (exitCode int) {
 			if panicked {
 				code = 1
 			}
+			if bugReportSandboxName != "" {
+				writeBugReportSandboxSectionsForFlag(bugReportFile, bugReportSandboxName, bugReportType)
+			}
 			writeBugReportLiveLog(bugReportFile, liveLogBuf.Bytes(), bugReportType)
 			writeBugReportExit(bugReportFile, code, runErr, panicked)
 			_ = bugReportFile.Close()

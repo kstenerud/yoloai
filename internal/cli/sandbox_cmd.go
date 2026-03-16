@@ -94,6 +94,11 @@ func sandboxDispatch(cmd *cobra.Command, args []string) error {
 		rest = args[2:]
 	}
 
+	// Track sandbox name so the --bugreport flag defer can include sandbox sections.
+	if bugReportFile != nil {
+		bugReportSandboxName = name
+	}
+
 	switch subcmd {
 	case "info":
 		return runSandboxInfo(cmd, name)

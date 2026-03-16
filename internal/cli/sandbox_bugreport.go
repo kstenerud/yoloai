@@ -58,34 +58,54 @@ func runSandboxBugReport(cmd *cobra.Command, name string, reportType string) err
 	// Sections 6-12: Sandbox-specific
 	backend := resolveBackendForSandbox(name)
 	return withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
-		// Section 6: Sandbox detail
-		writeBugReportSandboxDetail(ctx, f, rt, name, reportType)
+		writeSandboxSections(ctx, f, rt, name, reportType)
+		return nil
+	})
+}
 
-		// Section 7: cli.jsonl
-		writeBugReportJSONLFile(f, "logs/cli.jsonl", sandbox.CLIJSONLPath(name), reportType, nil)
+// writeSandboxSections writes sections 6-12 to w for the named sandbox.
+// Called from both runSandboxBugReport (sandbox bugreport command) and
+// writeBugReportSandboxSectionsForFlag (--bugreport global flag on sandbox commands).
+func writeSandboxSections(ctx context.Context, w io.Writer, rt runtime.Runtime, name, reportType string) {
+	backend := resolveBackendForSandbox(name)
 
-		// Section 8: sandbox.jsonl (omit setup_cmd.* and network.allow in safe mode)
-		var omitEvents []string
-		if reportType == "safe" {
-			omitEvents = []string{"setup_cmd.*", "network.allow"}
-		}
-		writeBugReportJSONLFile(f, "logs/sandbox.jsonl", sandbox.SandboxJSONLPath(name), reportType, omitEvents)
+	// Section 6: Sandbox detail
+	writeBugReportSandboxDetail(ctx, w, rt, name, reportType)
 
-		// Section 9: monitor.jsonl (full in both modes)
-		writeBugReportJSONLFile(f, "logs/monitor.jsonl", sandbox.MonitorJSONLPath(name), reportType, nil)
+	// Section 7: cli.jsonl
+	writeBugReportJSONLFile(w, "logs/cli.jsonl", sandbox.CLIJSONLPath(name), reportType, nil)
 
-		// Section 10: agent-hooks.jsonl (full in both modes)
-		writeBugReportJSONLFile(f, "logs/agent-hooks.jsonl", sandbox.HooksJSONLPath(name), reportType, nil)
+	// Section 8: sandbox.jsonl (omit setup_cmd.* and network.allow in safe mode)
+	var omitEvents []string
+	if reportType == "safe" {
+		omitEvents = []string{"setup_cmd.*", "network.allow"}
+	}
+	writeBugReportJSONLFile(w, "logs/sandbox.jsonl", sandbox.SandboxJSONLPath(name), reportType, omitEvents)
 
-		if reportType == "unsafe" {
-			// Section 11: Agent output (unsafe only)
-			writeBugReportAgentOutput(f, name)
+	// Section 9: monitor.jsonl (full in both modes)
+	writeBugReportJSONLFile(w, "logs/monitor.jsonl", sandbox.MonitorJSONLPath(name), reportType, nil)
 
-			// Section 12: tmux screen capture (unsafe only)
-			stateDir := sandbox.Dir(name)
-			writeBugReportTmuxCapture(f, name, backend, stateDir)
-		}
+	// Section 10: agent-hooks.jsonl (full in both modes)
+	writeBugReportJSONLFile(w, "logs/agent-hooks.jsonl", sandbox.HooksJSONLPath(name), reportType, nil)
 
+	if reportType == "unsafe" {
+		// Section 11: Agent output (unsafe only)
+		writeBugReportAgentOutput(w, name)
+
+		// Section 12: tmux screen capture (unsafe only)
+		stateDir := sandbox.Dir(name)
+		writeBugReportTmuxCapture(w, name, backend, stateDir)
+	}
+}
+
+// writeBugReportSandboxSectionsForFlag writes sections 6-12 for the --bugreport flag path.
+// Called from the Execute defer when bugReportSandboxName is set.
+// Uses context.Background() since the command context may already be done.
+func writeBugReportSandboxSectionsForFlag(w io.Writer, name, reportType string) {
+	backend := resolveBackendForSandbox(name)
+	ctx := context.Background()
+	_ = withRuntime(ctx, backend, func(ctx context.Context, rt runtime.Runtime) error {
+		writeSandboxSections(ctx, w, rt, name, reportType)
 		return nil
 	})
 }
@@ -125,6 +145,12 @@ func writeBugReportSandboxDetail(ctx context.Context, w io.Writer, rt runtime.Ru
 	writeJSONFileSection(w, "runtime-config.json",
 		fmt.Sprintf("%s/%s", sandboxDir, sandbox.RuntimeConfigFile),
 		reportType, []string{"setup_commands", "allowed_domains"})
+
+	// prompt.txt (unsafe only; omitted in safe mode — may contain sensitive task descriptions)
+	if reportType == "unsafe" {
+		writePlainFileSection(w, "prompt.txt",
+			fmt.Sprintf("%s/prompt.txt", sandboxDir))
+	}
 
 	// Container log
 	writeContainerLog(w, name, resolveBackendForSandbox(name))

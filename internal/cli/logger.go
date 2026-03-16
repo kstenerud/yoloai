@@ -92,6 +92,10 @@ var bugReportFinalName string
 // bugReportType is "safe" or "unsafe", set when --bugreport is active.
 var bugReportType string
 
+// bugReportSandboxName is set by sandboxDispatch when --bugreport is active.
+// The defer in Execute uses it to write sandbox sections 6-12.
+var bugReportSandboxName string
+
 // initLogger sets up the global multi-sink slog logger. Called from PersistentPreRunE
 // before any subcommand logic runs. Respects --verbose/-v and --quiet/-q flags for the
 // stderr sink level; --debug affects cli.jsonl (added later per sandbox subcommand).

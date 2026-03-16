@@ -58,7 +58,7 @@ func writeBugReportCommandInvocation(w io.Writer, reportType string) {
 		args = redactPromptArgs(args)
 	}
 	cmd := strings.Join(args, " ")
-	fmt.Fprintf(w, "**Command:** `%s`\n\n", cmd) //nolint:errcheck
+	fmt.Fprintf(w, "**Command:** `%s`\n\n", cmd) //nolint:errcheck,gosec // G705: cmd is constructed from os.Args which are caller-controlled, not attacker-controlled
 }
 
 // redactPromptArgs redacts the values of --prompt / -p flags.

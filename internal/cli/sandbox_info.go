@@ -17,6 +17,9 @@ import (
 )
 
 func runSandboxInfo(cmd *cobra.Command, name string) error {
+	closeSink := openCLIJSONLSink(name, cmd)
+	defer closeSink()
+	slog.Info("collecting sandbox info", "event", "sandbox.info", "sandbox", name) //nolint:gosec // G706: name is an internal sandbox name, not user-injected log data
 	backend := resolveBackendForSandbox(name)
 	return withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
 		info, err := sandbox.InspectSandbox(ctx, rt, name)
