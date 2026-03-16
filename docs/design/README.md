@@ -1,4 +1,4 @@
-> **Design documents:** [Commands](commands.md) | [Config](config.md) | [Setup](setup.md) | [Security](security.md) | [Research](../dev/RESEARCH.md) | [research/](../dev/research/)
+> **Design documents:** [Commands](commands.md) | [Config](config.md) | [Setup](setup.md) | [Security](security.md) | [GitHub Issues](github-issues.md) | [Research](../dev/RESEARCH.md) | [research/](../dev/research/)
 
 # yoloAI: Sandboxed AI Coding Agent Runner
 
