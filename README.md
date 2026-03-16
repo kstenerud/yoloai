@@ -138,6 +138,7 @@ Single Go binary, no runtime dependencies beyond your chosen backend. On first r
 | Backend  | Supported Hosts              | Dependencies                                                       |
 |----------|------------------------------|--------------------------------------------------------------------|
 | docker   | Linux, macOS, Windows (WSL2) | [Docker Engine](https://docs.docker.com/engine/install/) or [Docker Desktop](https://docs.docker.com/get-docker/) |
+| podman   | Linux, macOS                 | [Podman](https://podman.io/get-started) (`brew install podman` on macOS) |
 | tart     | macOS (Apple Silicon)        | [Tart](https://github.com/cirruslabs/tart) (`brew install cirruslabs/cli/tart`) |
 | seatbelt | macOS (any)                  | None (uses built-in `sandbox-exec`)                                |
 
