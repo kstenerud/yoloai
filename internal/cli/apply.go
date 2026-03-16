@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/sandbox"
@@ -18,6 +19,8 @@ type applyResult struct {
 	Target         string `json:"target"`
 	CommitsApplied int    `json:"commits_applied"`
 	WIPApplied     bool   `json:"wip_applied"`
+	TagsApplied    int    `json:"tags_applied"`
+	TagsSkipped    int    `json:"tags_skipped"`
 	Method         string `json:"method"` // "format-patch", "squash", "selective", "patches-export"
 }
 
@@ -59,6 +62,7 @@ Use --patches to export .patch files without applying them.`,
 			noWIP, _ := cmd.Flags().GetBool("no-wip")
 			force, _ := cmd.Flags().GetBool("force")
 			dryRun, _ := cmd.Flags().GetBool("dry-run")
+			withTags, _ := cmd.Flags().GetBool("tags")
 
 			// Parse refs and paths from remaining args
 			refs, paths := parseApplyArgs(rest, cmd)
@@ -92,7 +96,7 @@ Use --patches to export .patch files without applying them.`,
 
 			// Selective apply: specific commit refs
 			if len(refs) > 0 {
-				return applySelectedCommits(cmd, name, refs, paths, meta, yes, force, dryRun)
+				return applySelectedCommits(cmd, name, refs, paths, meta, yes, force, dryRun, withTags)
 			}
 
 			// --squash: flatten everything into one unstaged patch
@@ -145,6 +149,9 @@ Use --patches to export .patch files without applying them.`,
 
 			// No commits, only WIP — use existing squash flow (HEAD == baseline equivalent)
 			if len(commits) == 0 && hasWIP {
+				if withTags {
+					return fmt.Errorf("--tags requires commits — cannot transfer tags with WIP-only changes")
+				}
 				return applySquash(cmd, name, paths, meta, yes, dryRun)
 			}
 
@@ -160,15 +167,26 @@ Use --patches to export .patch files without applying them.`,
 				}
 			}
 
+			// Fetch tags beyond baseline (best-effort; errors don't fail the apply).
+			tags, _ := sandbox.ListTagsBeyondBaseline(name)
+			tagsByCommit := buildTagsByCommit(tags)
+
 			// Show summary
 			if !jsonEnabled(cmd) {
 				out := cmd.OutOrStdout()
 				fmt.Fprintf(out, "Commits to apply (%d):\n", len(commits)) //nolint:errcheck
 				for _, c := range commits {
-					fmt.Fprintf(out, "  %.12s %s\n", c.SHA, c.Subject) //nolint:errcheck
+					line := fmt.Sprintf("  %.12s %s", c.SHA, c.Subject)
+					if names := tagsByCommit[strings.ToLower(c.SHA)]; len(names) > 0 {
+						line += "  [tag: " + strings.Join(names, ", ") + "]"
+					}
+					fmt.Fprintln(out, line) //nolint:errcheck
 				}
 				if hasWIP {
 					fmt.Fprintln(out, "\n+ uncommitted changes (will be applied as unstaged files)") //nolint:errcheck
+				}
+				if len(tags) > 0 && !withTags {
+					fmt.Fprintf(out, "\nNote: %d tag(s) not applied (use --tags to include them)\n", len(tags)) //nolint:errcheck
 				}
 				fmt.Fprintln(out) //nolint:errcheck
 			}
@@ -201,8 +219,10 @@ Use --patches to export .patch files without applying them.`,
 			defer os.RemoveAll(patchDir) //nolint:errcheck // best-effort cleanup
 
 			commitsApplied := 0
+			var shaMap map[string]string
 			if len(files) > 0 {
-				if err := workspace.ApplyFormatPatch(patchDir, files, targetDir); err != nil {
+				shaMap, err = workspace.ApplyFormatPatch(patchDir, files, targetDir)
+				if err != nil {
 					return err
 				}
 				commitsApplied = len(files)
@@ -242,12 +262,17 @@ Use --patches to export .patch files without applying them.`,
 				}
 			}
 
-			slog.Info("apply complete", "event", "sandbox.apply.complete", "sandbox", name, "commits_applied", commitsApplied, "wip_applied", wipApplied) //nolint:gosec // G706: name is validated by ValidateName
+			// Apply tags
+			tagsApplied, tagsSkipped := applyTags(cmd, tags, shaMap, targetDir, withTags)
+
+			slog.Info("apply complete", "event", "sandbox.apply.complete", "sandbox", name, "commits_applied", commitsApplied, "wip_applied", wipApplied, "tags_applied", tagsApplied) //nolint:gosec // G706: name is validated by ValidateName
 			if jsonEnabled(cmd) {
 				return writeJSON(cmd.OutOrStdout(), applyResult{
 					Target:         targetDir,
 					CommitsApplied: commitsApplied,
 					WIPApplied:     wipApplied,
+					TagsApplied:    tagsApplied,
+					TagsSkipped:    tagsSkipped,
 					Method:         "format-patch",
 				})
 			}
@@ -262,9 +287,11 @@ Use --patches to export .patch files without applying them.`,
 	cmd.Flags().Bool("no-wip", false, "Skip uncommitted changes, only apply commits")
 	cmd.Flags().Bool("force", false, "Proceed even if host repo has uncommitted changes")
 	cmd.Flags().Bool("dry-run", false, "Show what would be applied without applying")
+	cmd.Flags().Bool("tags", false, "Transfer git tags created by the agent")
 
 	cmd.MarkFlagsMutuallyExclusive("squash", "patches")
 	cmd.MarkFlagsMutuallyExclusive("squash", "no-wip")
+	cmd.MarkFlagsMutuallyExclusive("squash", "tags")
 	cmd.MarkFlagsMutuallyExclusive("dry-run", "patches")
 
 	return cmd
@@ -427,7 +454,7 @@ func parseApplyArgs(rest []string, cmd *cobra.Command) (refs []string, paths []s
 }
 
 // applySelectedCommits cherry-picks specific commits into the target.
-func applySelectedCommits(cmd *cobra.Command, name string, refs, paths []string, meta *sandbox.Meta, yes, force, dryRun bool) error {
+func applySelectedCommits(cmd *cobra.Command, name string, refs, paths []string, meta *sandbox.Meta, yes, force, dryRun, withTags bool) error {
 	targetDir := meta.Workdir.HostPath
 	if !workspace.IsGitRepo(targetDir) {
 		return fmt.Errorf("selective apply requires a git target directory — %s is not a git repository", targetDir)
@@ -460,12 +487,33 @@ func applySelectedCommits(cmd *cobra.Command, name string, refs, paths []string,
 			"commit or stash them first, or use --force to proceed anyway", warning)
 	}
 
+	// Fetch tags (best-effort); filter to those on selected commits.
+	allTags, _ := sandbox.ListTagsBeyondBaseline(name)
+	resolvedSet := make(map[string]bool, len(resolved))
+	for _, c := range resolved {
+		resolvedSet[strings.ToLower(c.SHA)] = true
+	}
+	var selectedTags []sandbox.TagInfo
+	for _, t := range allTags {
+		if resolvedSet[strings.ToLower(t.SHA)] {
+			selectedTags = append(selectedTags, t)
+		}
+	}
+	tagsByCommit := buildTagsByCommit(selectedTags)
+
 	// Show summary
 	if !jsonEnabled(cmd) {
 		out := cmd.OutOrStdout()
 		fmt.Fprintf(out, "Commits to apply (%d):\n", len(resolved)) //nolint:errcheck
 		for _, c := range resolved {
-			fmt.Fprintf(out, "  %.12s %s\n", c.SHA, c.Subject) //nolint:errcheck
+			line := fmt.Sprintf("  %.12s %s", c.SHA, c.Subject)
+			if names := tagsByCommit[strings.ToLower(c.SHA)]; len(names) > 0 {
+				line += "  [tag: " + strings.Join(names, ", ") + "]"
+			}
+			fmt.Fprintln(out, line) //nolint:errcheck
+		}
+		if len(selectedTags) > 0 && !withTags {
+			fmt.Fprintf(out, "\nNote: %d tag(s) not applied (use --tags to include them)\n", len(selectedTags)) //nolint:errcheck
 		}
 		fmt.Fprintln(out) //nolint:errcheck
 	}
@@ -502,7 +550,8 @@ func applySelectedCommits(cmd *cobra.Command, name string, refs, paths []string,
 	}
 	defer os.RemoveAll(patchDir) //nolint:errcheck
 
-	if err := workspace.ApplyFormatPatch(patchDir, files, targetDir); err != nil {
+	shaMap, err := workspace.ApplyFormatPatch(patchDir, files, targetDir)
+	if err != nil {
 		return err
 	}
 	if !jsonEnabled(cmd) {
@@ -529,10 +578,15 @@ func applySelectedCommits(cmd *cobra.Command, name string, refs, paths []string,
 		}
 	}
 
+	// Apply tags
+	tagsApplied, tagsSkipped := applyTags(cmd, selectedTags, shaMap, targetDir, withTags)
+
 	if jsonEnabled(cmd) {
 		return writeJSON(cmd.OutOrStdout(), applyResult{
 			Target:         targetDir,
 			CommitsApplied: len(files),
+			TagsApplied:    tagsApplied,
+			TagsSkipped:    tagsSkipped,
 			Method:         "selective",
 		})
 	}
@@ -750,4 +804,45 @@ func exportPatches(cmd *cobra.Command, name string, paths []string, commits []sa
 	fmt.Fprintln(out, "To apply WIP:      git apply wip.diff")              //nolint:errcheck
 
 	return nil
+}
+
+// buildTagsByCommit builds a map of lowercase commit SHA → tag names from a tag list.
+func buildTagsByCommit(tags []sandbox.TagInfo) map[string][]string {
+	m := make(map[string][]string, len(tags))
+	for _, t := range tags {
+		key := strings.ToLower(t.SHA)
+		m[key] = append(m[key], t.Name)
+	}
+	return m
+}
+
+// applyTags transfers tags to the host using the sandbox→host SHA map.
+// Returns counts of applied and skipped tags. No-ops if withTags is false.
+func applyTags(cmd *cobra.Command, tags []sandbox.TagInfo, shaMap map[string]string, targetDir string, withTags bool) (applied, skipped int) {
+	if !withTags || len(tags) == 0 {
+		return 0, 0
+	}
+	isJSON := jsonEnabled(cmd)
+	for _, tag := range tags {
+		hostSHA, ok := shaMap[strings.ToLower(tag.SHA)]
+		if !ok {
+			skipped++
+			if !isJSON {
+				fmt.Fprintf(cmd.ErrOrStderr(), "Warning: tag %q skipped (target commit not applied)\n", tag.Name) //nolint:errcheck
+			}
+			continue
+		}
+		if createErr := workspace.CreateTag(targetDir, tag.Name, hostSHA, tag.Message); createErr != nil {
+			skipped++
+			if !isJSON {
+				fmt.Fprintf(cmd.ErrOrStderr(), "Warning: tag %q: %v\n", tag.Name, createErr) //nolint:errcheck
+			}
+		} else {
+			applied++
+			if !isJSON {
+				fmt.Fprintf(cmd.OutOrStdout(), "Tag %q applied\n", tag.Name) //nolint:errcheck
+			}
+		}
+	}
+	return applied, skipped
 }

@@ -548,7 +548,8 @@ func TestApplyFormatPatch_Single(t *testing.T) {
 	gitAdd(t, targetDir, ".")
 	gitCommit(t, targetDir, "initial")
 
-	require.NoError(t, workspace.ApplyFormatPatch(patchDir, files, targetDir))
+	_, err = workspace.ApplyFormatPatch(patchDir, files, targetDir)
+	require.NoError(t, err)
 
 	content, err := os.ReadFile(filepath.Join(targetDir, "feature.txt")) //nolint:gosec
 	require.NoError(t, err)
@@ -580,7 +581,8 @@ func TestApplyFormatPatch_Multiple(t *testing.T) {
 	gitAdd(t, targetDir, ".")
 	gitCommit(t, targetDir, "initial")
 
-	require.NoError(t, workspace.ApplyFormatPatch(patchDir, files, targetDir))
+	_, err = workspace.ApplyFormatPatch(patchDir, files, targetDir)
+	require.NoError(t, err)
 
 	// Both files should exist
 	assert.FileExists(t, filepath.Join(targetDir, "a.txt"))
@@ -617,7 +619,7 @@ func TestApplyFormatPatch_Conflict(t *testing.T) {
 	gitAdd(t, targetDir, ".")
 	gitCommit(t, targetDir, "initial")
 
-	err = workspace.ApplyFormatPatch(patchDir, files, targetDir)
+	_, err = workspace.ApplyFormatPatch(patchDir, files, targetDir)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "git am failed")
 	assert.Contains(t, err.Error(), "--abort")
@@ -647,7 +649,8 @@ func TestApplyFormatPatch_PreservesAuthorship(t *testing.T) {
 	gitAdd(t, targetDir, ".")
 	gitCommit(t, targetDir, "initial")
 
-	require.NoError(t, workspace.ApplyFormatPatch(patchDir, files, targetDir))
+	_, err = workspace.ApplyFormatPatch(patchDir, files, targetDir)
+	require.NoError(t, err)
 
 	// Verify the commit message was preserved
 	cmd := workspace.NewGitCmd(targetDir, "log", "-1", "--format=%s")
@@ -1077,7 +1080,8 @@ func TestSelectiveApplyFlow(t *testing.T) {
 	gitCommit(t, targetDir, "initial")
 
 	// Apply
-	require.NoError(t, workspace.ApplyFormatPatch(patchDir, files, targetDir))
+	_, err = workspace.ApplyFormatPatch(patchDir, files, targetDir)
+	require.NoError(t, err)
 
 	// Verify only A and B exist, not C
 	assert.FileExists(t, filepath.Join(targetDir, "a.txt"))
@@ -1138,7 +1142,8 @@ func TestApplyFlow_CommitsOnly(t *testing.T) {
 	gitAdd(t, targetDir, ".")
 	gitCommit(t, targetDir, "initial")
 
-	require.NoError(t, workspace.ApplyFormatPatch(patchDir, files, targetDir))
+	_, err = workspace.ApplyFormatPatch(patchDir, files, targetDir)
+	require.NoError(t, err)
 
 	// Verify both files exist with correct content
 	contentA, _ := os.ReadFile(filepath.Join(targetDir, "a.txt")) //nolint:gosec
@@ -1188,7 +1193,8 @@ func TestApplyFlow_CommitsAndWIP(t *testing.T) {
 	gitAdd(t, targetDir, ".")
 	gitCommit(t, targetDir, "initial")
 
-	require.NoError(t, workspace.ApplyFormatPatch(patchDir, files, targetDir))
+	_, err = workspace.ApplyFormatPatch(patchDir, files, targetDir)
+	require.NoError(t, err)
 
 	// Then apply WIP
 	wipPatch, _, err := GenerateWIPDiff("test-flow-both", nil)

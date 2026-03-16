@@ -262,7 +262,7 @@ func TestApplyPatch_ConflictReturnsError(t *testing.T) {
 // --- ApplyFormatPatch ---
 
 func TestApplyFormatPatch_EmptyFilesList(t *testing.T) {
-	err := ApplyFormatPatch("/nonexistent", nil, "/nonexistent")
+	_, err := ApplyFormatPatch("/nonexistent", nil, "/nonexistent")
 	assert.NoError(t, err)
 }
 

@@ -354,6 +354,10 @@ func looksLikeRef(s string) bool {
 func diffLog(cmd *cobra.Command, name string, stat bool) error {
 	out := cmd.OutOrStdout()
 
+	// Fetch tags for inline display (best-effort).
+	tags, _ := sandbox.ListTagsBeyondBaseline(name)
+	tagsByCommit := buildTagsByCommit(tags)
+
 	if stat {
 		commits, err := sandbox.ListCommitsWithStats(name)
 		if err != nil {
@@ -364,10 +368,14 @@ func diffLog(cmd *cobra.Command, name string, stat bool) error {
 			return err
 		}
 		for i, c := range commits {
-			fmt.Fprintf(out, "%3d  %.12s  %s\n", i+1, c.SHA, c.Subject) //nolint:errcheck
+			line := fmt.Sprintf("%3d  %.12s  %s", i+1, c.SHA, c.Subject)
+			if names := tagsByCommit[strings.ToLower(c.SHA)]; len(names) > 0 {
+				line += "  [tag: " + strings.Join(names, ", ") + "]"
+			}
+			fmt.Fprintln(out, line) //nolint:errcheck
 			if c.Stat != "" {
-				for _, line := range strings.Split(c.Stat, "\n") {
-					fmt.Fprintf(out, "     %s\n", line) //nolint:errcheck
+				for _, statLine := range strings.Split(c.Stat, "\n") {
+					fmt.Fprintf(out, "     %s\n", statLine) //nolint:errcheck
 				}
 			}
 		}
@@ -381,7 +389,11 @@ func diffLog(cmd *cobra.Command, name string, stat bool) error {
 			return err
 		}
 		for i, c := range commits {
-			fmt.Fprintf(out, "%3d  %.12s  %s\n", i+1, c.SHA, c.Subject) //nolint:errcheck
+			line := fmt.Sprintf("%3d  %.12s  %s", i+1, c.SHA, c.Subject)
+			if names := tagsByCommit[strings.ToLower(c.SHA)]; len(names) > 0 {
+				line += "  [tag: " + strings.Join(names, ", ") + "]"
+			}
+			fmt.Fprintln(out, line) //nolint:errcheck
 		}
 	}
 
@@ -505,13 +517,19 @@ func diffLogJSON(cmd *cobra.Command, name string, stat bool) error {
 	}
 
 	hasWIP, _ := sandbox.HasUncommittedChanges(name)
+	tags, _ := sandbox.ListTagsBeyondBaseline(name)
+	if tags == nil {
+		tags = []sandbox.TagInfo{}
+	}
 
 	result := struct {
-		Commits               any  `json:"commits"`
-		HasUncommittedChanges bool `json:"has_uncommitted_changes"`
+		Commits               any               `json:"commits"`
+		HasUncommittedChanges bool              `json:"has_uncommitted_changes"`
+		Tags                  []sandbox.TagInfo `json:"tags"`
 	}{
 		Commits:               commits,
 		HasUncommittedChanges: hasWIP,
+		Tags:                  tags,
 	}
 
 	return writeJSON(cmd.OutOrStdout(), result)

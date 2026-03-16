@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"bufio"
 	"bytes"
 	"fmt"
 	"os"
@@ -76,11 +77,28 @@ func ApplyPatch(patch []byte, targetDir string, isGit bool) error {
 }
 
 // ApplyFormatPatch applies .patch files to a target git directory using
-// git am --3way. On failure, returns an error with guidance about
-// git am --continue/--skip/--abort.
-func ApplyFormatPatch(patchDir string, files []string, targetDir string) error {
+// git am --3way. Returns a map of sandbox SHA → host SHA for applied commits,
+// which callers can use to re-create tags on the host. On failure, returns an
+// error with guidance about git am --continue/--skip/--abort.
+func ApplyFormatPatch(patchDir string, files []string, targetDir string) (map[string]string, error) {
 	if len(files) == 0 {
-		return nil
+		return nil, nil
+	}
+
+	// Record HEAD before applying so we can identify new commits afterward.
+	preTip, err := HeadSHA(targetDir)
+	if err != nil {
+		return nil, err
+	}
+
+	// Extract sandbox SHAs from patch file headers (first line: "From <sha> <date>").
+	sandboxSHAs := make([]string, 0, len(files))
+	for _, f := range files {
+		sha, parseErr := parsePatchSHA(filepath.Join(patchDir, f))
+		if parseErr != nil {
+			return nil, parseErr
+		}
+		sandboxSHAs = append(sandboxSHAs, sha)
 	}
 
 	// Build full paths
@@ -93,10 +111,48 @@ func ApplyFormatPatch(patchDir string, files []string, targetDir string) error {
 	cmd := NewGitCmd(targetDir, args...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return formatAMError(output, targetDir)
+		return nil, formatAMError(output, targetDir)
 	}
 
-	return nil
+	// Collect new host SHAs in chronological order.
+	logCmd := NewGitCmd(targetDir, "log", "--reverse", "--format=%H", preTip+"..HEAD")
+	logOut, logErr := logCmd.Output()
+	if logErr != nil {
+		// Commits are applied; SHA map is a best-effort bonus.
+		return nil, nil
+	}
+	hostSHAs := strings.Fields(strings.TrimSpace(string(logOut)))
+
+	// Pair positionally: sandboxSHA[i] → hostSHA[i].
+	shaMap := make(map[string]string, len(sandboxSHAs))
+	for i, sandboxSHA := range sandboxSHAs {
+		if i < len(hostSHAs) {
+			shaMap[strings.ToLower(sandboxSHA)] = hostSHAs[i]
+		}
+	}
+	return shaMap, nil
+}
+
+// parsePatchSHA extracts the original commit SHA from a format-patch file.
+// The first line of a format-patch file is: "From <sha> <date>"
+func parsePatchSHA(path string) (string, error) {
+	f, err := os.Open(path) //nolint:gosec // G304: path is within sandbox-controlled temp dir
+	if err != nil {
+		return "", fmt.Errorf("open patch %s: %w", path, err)
+	}
+	defer f.Close() //nolint:errcheck // best-effort close
+
+	scanner := bufio.NewScanner(f)
+	if scanner.Scan() {
+		line := scanner.Text()
+		if strings.HasPrefix(line, "From ") {
+			parts := strings.Fields(line)
+			if len(parts) >= 2 {
+				return parts[1], nil
+			}
+		}
+	}
+	return "", fmt.Errorf("could not parse SHA from patch file %s", path)
 }
 
 // IsGitRepo checks if a directory is a git repository by looking for .git/.
