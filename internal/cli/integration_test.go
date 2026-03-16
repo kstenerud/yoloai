@@ -178,9 +178,12 @@ func TestCLI_Log(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { destroySandbox(t, "cli-log") })
 
-	// Write a fake log for testing
+	// Write a fake JSONL log entry for testing
 	sandboxDir := sandbox.Dir("cli-log")
-	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, "log.txt"), []byte("test log output\n"), 0600))
+	logsDir := filepath.Join(sandboxDir, sandbox.LogsDir)
+	require.NoError(t, os.MkdirAll(logsDir, 0700))
+	entry := `{"ts":"2026-03-16T10:00:00.000Z","level":"info","event":"test.event","msg":"test log output"}` + "\n"
+	require.NoError(t, os.WriteFile(sandbox.CLIJSONLPath("cli-log"), []byte(entry), 0600))
 
 	stdout, _, err := runCLI(t, "log", "cli-log")
 	require.NoError(t, err)
