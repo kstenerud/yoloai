@@ -170,6 +170,46 @@ func TestCopyDir_CloneIsolation(t *testing.T) {
 	assert.Equal(t, "nested-original", string(content))
 }
 
+func TestCopyDir_SkipsBugreportFiles(t *testing.T) {
+	src := t.TempDir()
+	writeTestFile(t, src, "file.txt", "hello")
+	writeTestFile(t, src, "yoloai-bugreport-20260316-102123.534.md", "bugreport content")
+	writeTestFile(t, src, "yoloai-bugreport-20260316-103627.211.md.tmp", "temp bugreport")
+	writeTestFile(t, src, "yoloai-bugreport-20260315-140000.000.md", "another bugreport")
+	require.NoError(t, os.MkdirAll(filepath.Join(src, "sub"), 0750))
+	writeTestFile(t, src, "sub/yoloai-bugreport-20260314-120000.000.md", "nested bugreport")
+	writeTestFile(t, src, "sub/yoloai-bugreport-20260314-120001.000.md.tmp", "nested temp bugreport")
+	writeTestFile(t, src, "sub/nested.txt", "world")
+
+	dst := filepath.Join(t.TempDir(), "copy")
+	require.NoError(t, CopyDir(src, dst))
+
+	// Normal files should be copied
+	content, err := os.ReadFile(filepath.Join(dst, "file.txt")) //nolint:gosec
+	require.NoError(t, err)
+	assert.Equal(t, "hello", string(content))
+
+	content, err = os.ReadFile(filepath.Join(dst, "sub", "nested.txt")) //nolint:gosec
+	require.NoError(t, err)
+	assert.Equal(t, "world", string(content))
+
+	// Bugreport files (.md and .md.tmp) should NOT be copied
+	_, err = os.ReadFile(filepath.Join(dst, "yoloai-bugreport-20260316-102123.534.md")) //nolint:gosec
+	assert.Error(t, err, "bugreport .md file should not be copied")
+
+	_, err = os.ReadFile(filepath.Join(dst, "yoloai-bugreport-20260316-103627.211.md.tmp")) //nolint:gosec
+	assert.Error(t, err, "bugreport .md.tmp file should not be copied")
+
+	_, err = os.ReadFile(filepath.Join(dst, "yoloai-bugreport-20260315-140000.000.md")) //nolint:gosec
+	assert.Error(t, err, "bugreport .md file should not be copied")
+
+	_, err = os.ReadFile(filepath.Join(dst, "sub", "yoloai-bugreport-20260314-120000.000.md")) //nolint:gosec
+	assert.Error(t, err, "nested bugreport .md file should not be copied")
+
+	_, err = os.ReadFile(filepath.Join(dst, "sub", "yoloai-bugreport-20260314-120001.000.md.tmp")) //nolint:gosec
+	assert.Error(t, err, "nested bugreport .md.tmp file should not be copied")
+}
+
 // RemoveGitDirs tests
 
 func TestRemoveGitDirs_RemovesGitDirectory(t *testing.T) {

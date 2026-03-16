@@ -105,6 +105,18 @@ func CheckDirtyRepo(path string) (string, error) {
 	modified := 0
 	untracked := 0
 	for _, line := range lines {
+		// Git status --porcelain format: "XY filename" where XY is a 2-char status code
+		// Extract filename (everything after the 3rd character)
+		if len(line) < 3 {
+			continue
+		}
+		filename := line[3:]
+
+		// Skip yoloai-generated bugreport files (both .md and .md.tmp)
+		if isBugreportFile(filepath.Base(filename)) {
+			continue
+		}
+
 		if strings.HasPrefix(line, "??") {
 			untracked++
 		} else {

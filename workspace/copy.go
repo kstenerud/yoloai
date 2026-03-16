@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // CopyDir copies a directory tree preserving symlinks, permissions, and
@@ -28,7 +29,8 @@ func CopyDir(src, dst string) error {
 
 	// Try fast clone (APFS on macOS). Falls back on unsupported platforms/filesystems.
 	if err := cloneDir(src, dst); err == nil {
-		return nil
+		// Fast clone succeeded, but we need to remove bugreport files.
+		return removeBugreportFiles(dst)
 	}
 
 	// Regular file-by-file copy.
@@ -46,6 +48,11 @@ func copyDirWalk(src, dst string, srcInfo os.FileInfo) error {
 	return filepath.WalkDir(src, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
+		}
+
+		// Skip yoloai-generated bugreport files
+		if !d.IsDir() && isBugreportFile(d.Name()) {
+			return nil
 		}
 
 		rel, err := filepath.Rel(src, path)
@@ -103,6 +110,39 @@ func copyFile(src, dst string, srcInfo fs.FileInfo) error {
 	}
 
 	return os.Chtimes(dst, srcInfo.ModTime(), srcInfo.ModTime())
+}
+
+// isBugreportFile returns true if the filename matches the bugreport pattern.
+// Matches both final (.md) and temporary (.md.tmp) bugreport files.
+func isBugreportFile(name string) bool {
+	if !strings.HasPrefix(name, "yoloai-bugreport-") {
+		return false
+	}
+	return strings.HasSuffix(name, ".md") || strings.HasSuffix(name, ".md.tmp")
+}
+
+// removeBugreportFiles recursively removes all bugreport files from the directory.
+func removeBugreportFiles(root string) error {
+	var toRemove []string
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !d.IsDir() && isBugreportFile(d.Name()) {
+			toRemove = append(toRemove, path)
+		}
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("walk for bugreport files: %w", err)
+	}
+
+	for _, path := range toRemove {
+		if err := os.Remove(path); err != nil {
+			return fmt.Errorf("remove %s: %w", path, err)
+		}
+	}
+	return nil
 }
 
 // RemoveGitDirs recursively removes all .git entries (files and directories)

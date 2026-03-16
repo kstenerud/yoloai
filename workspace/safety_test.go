@@ -94,3 +94,28 @@ func TestCheckDirtyRepo_NotGitRepo(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, warning)
 }
+
+func TestCheckDirtyRepo_IgnoresBugreportFiles(t *testing.T) {
+	dir := t.TempDir()
+	initGitRepo(t, dir)
+
+	// Create and commit a file
+	writeTestFile(t, dir, "file.txt", "hello")
+	gitAdd(t, dir, ".")
+	gitCommit(t, dir, "initial")
+
+	// Add bugreport files (both .md and .md.tmp should be ignored)
+	writeTestFile(t, dir, "yoloai-bugreport-20260316-102123.534.md", "bugreport content")
+	writeTestFile(t, dir, "yoloai-bugreport-20260316-103627.211.md.tmp", "temp bugreport")
+
+	warning, err := CheckDirtyRepo(dir)
+	require.NoError(t, err)
+	assert.Empty(t, warning, "bugreport files should be ignored")
+
+	// Add a real untracked file (should be detected)
+	writeTestFile(t, dir, "new.txt", "untracked")
+
+	warning, err = CheckDirtyRepo(dir)
+	require.NoError(t, err)
+	assert.Contains(t, warning, "1 untracked")
+}
