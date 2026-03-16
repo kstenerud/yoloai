@@ -266,6 +266,40 @@ func TestApplyFormatPatch_EmptyFilesList(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+func TestApplyFormatPatch_EmptyTargetRepo(t *testing.T) {
+	// Source repo: one commit to patch from.
+	srcDir := t.TempDir()
+	initGitRepo(t, srcDir)
+	writeTestFile(t, srcDir, "hello.txt", "hello\n")
+	gitAdd(t, srcDir, "hello.txt")
+	gitCommit(t, srcDir, "add hello")
+
+	// Generate a format-patch into a temp dir.
+	patchDir := t.TempDir()
+	runGit(t, srcDir, "format-patch", "--output-directory", patchDir, "--root", "HEAD")
+
+	files, err := filepath.Glob(filepath.Join(patchDir, "*.patch"))
+	require.NoError(t, err)
+	require.NotEmpty(t, files)
+	// Relativize to patchDir for ApplyFormatPatch.
+	relFiles := make([]string, len(files))
+	for i, f := range files {
+		relFiles[i] = filepath.Base(f)
+	}
+
+	// Target repo: empty (no commits yet).
+	targetDir := t.TempDir()
+	initGitRepo(t, targetDir)
+
+	shaMap, err := ApplyFormatPatch(patchDir, relFiles, targetDir)
+	require.NoError(t, err)
+	assert.Len(t, shaMap, 1, "should have one SHA mapping")
+
+	content, readErr := os.ReadFile(filepath.Join(targetDir, "hello.txt")) //nolint:gosec // G304: test file path
+	require.NoError(t, readErr)
+	assert.Equal(t, "hello\n", string(content))
+}
+
 // --- withTempGitDir ---
 
 func TestWithTempGitDir_CallsFn(t *testing.T) {

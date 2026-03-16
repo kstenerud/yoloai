@@ -86,9 +86,16 @@ func ApplyFormatPatch(patchDir string, files []string, targetDir string) (map[st
 	}
 
 	// Record HEAD before applying so we can identify new commits afterward.
+	// Empty repos have no HEAD yet; preTip="" is handled below when building
+	// the git log range after git am completes.
 	preTip, err := HeadSHA(targetDir)
 	if err != nil {
-		return nil, err
+		// Only tolerate the empty-repo case (no commits → exit 128).
+		// Any other failure means the repo is in an unexpected state.
+		if !IsEmptyRepo(targetDir) {
+			return nil, err
+		}
+		preTip = ""
 	}
 
 	// Extract sandbox SHAs from patch file headers (first line: "From <sha> <date>").
@@ -115,7 +122,12 @@ func ApplyFormatPatch(patchDir string, files []string, targetDir string) (map[st
 	}
 
 	// Collect new host SHAs in chronological order.
-	logCmd := NewGitCmd(targetDir, "log", "--reverse", "--format=%H", preTip+"..HEAD")
+	// When preTip is empty (applied to a repo with no prior commits), list all commits.
+	logArgs := []string{"log", "--reverse", "--format=%H"}
+	if preTip != "" {
+		logArgs = append(logArgs, preTip+"..HEAD")
+	}
+	logCmd := NewGitCmd(targetDir, logArgs...)
 	logOut, logErr := logCmd.Output()
 	if logErr != nil {
 		// Commits are applied; SHA map is a best-effort bonus.

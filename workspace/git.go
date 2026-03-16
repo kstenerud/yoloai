@@ -23,6 +23,12 @@ func HeadSHA(dir string) (string, error) {
 	return strings.TrimSpace(string(output)), nil
 }
 
+// IsEmptyRepo reports whether dir is a git repository with no commits yet.
+func IsEmptyRepo(dir string) bool {
+	cmd := NewGitCmd(dir, "rev-parse", "--verify", "HEAD")
+	return cmd.Run() != nil
+}
+
 // RunGitCmd executes a git command in the given directory.
 func RunGitCmd(dir string, args ...string) error {
 	cmd := NewGitCmd(dir, args...)
