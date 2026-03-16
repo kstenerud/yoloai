@@ -186,7 +186,7 @@ Use --patches to export .patch files without applying them.`,
 					fmt.Fprintln(out, "\n+ uncommitted changes (will be applied as unstaged files)") //nolint:errcheck
 				}
 				if len(tags) > 0 && !withTags {
-					fmt.Fprintf(out, "\nNote: %d tag(s) not applied (use --tags to include them)\n", len(tags)) //nolint:errcheck
+					fmt.Fprintf(out, "\nWARNING: %d tag(s) will NOT be applied (cancel this apply and redo with --tags to include them)\n", len(tags)) //nolint:errcheck
 				}
 				fmt.Fprintln(out) //nolint:errcheck
 			}
@@ -513,7 +513,7 @@ func applySelectedCommits(cmd *cobra.Command, name string, refs, paths []string,
 			fmt.Fprintln(out, line) //nolint:errcheck
 		}
 		if len(selectedTags) > 0 && !withTags {
-			fmt.Fprintf(out, "\nNote: %d tag(s) not applied (use --tags to include them)\n", len(selectedTags)) //nolint:errcheck
+			fmt.Fprintf(out, "\nWARNING: %d tag(s) will NOT be applied (cancel this apply and redo with --tags to include them)\n", len(selectedTags)) //nolint:errcheck
 		}
 		fmt.Fprintln(out) //nolint:errcheck
 	}
