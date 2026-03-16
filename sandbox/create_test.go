@@ -221,6 +221,22 @@ func TestGitBaseline_EmptyDir(t *testing.T) {
 	assert.Len(t, sha, 40, "allow-empty should produce a valid commit")
 }
 
+func TestGitBaseline_EmptyGitRepo(t *testing.T) {
+	// Regression test: git init with no commits should be handled gracefully
+	dir := t.TempDir()
+	require.NoError(t, workspace.RunGitCmd(dir, "init"))
+	writeTestFile(t, dir, "file.txt", "hello")
+
+	// setupWorkdir should remove the empty .git and create a fresh baseline
+	workdir := &DirArg{Path: dir, Mode: "copy"}
+	_, sha, err := setupWorkdir("test-sandbox", workdir)
+	require.NoError(t, err)
+	assert.Len(t, sha, 40)
+
+	// Clean up the test sandbox directory
+	require.NoError(t, os.RemoveAll(WorkDir("test-sandbox", dir)))
+}
+
 // removeGitDirs tests
 
 func TestRemoveGitDirs_TopLevel(t *testing.T) {

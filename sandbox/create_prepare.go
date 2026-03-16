@@ -367,14 +367,24 @@ func setupWorkdir(sandboxName string, workdir *DirArg) (string, string, error) {
 	case "copy":
 		// Preserve original git history so the agent (and user) can
 		// git log, git show, git blame, etc. inside the sandbox.
-		// If the source was a git repo, just record HEAD as baseline.
-		// For non-git directories, create a fresh repo.
+		// If the source was a git repo with commits, just record HEAD as baseline.
+		// For non-git directories or empty repos, create a fresh repo.
 		if workspace.IsGitRepo(workCopyDir) {
 			sha, err := workspace.HeadSHA(workCopyDir)
 			if err != nil {
-				return "", "", fmt.Errorf("read HEAD of copied repo: %w", err)
+				// Git repo exists but has no commits (or is broken).
+				// Remove .git and create fresh baseline.
+				if rmErr := workspace.RemoveGitDirs(workCopyDir); rmErr != nil {
+					return "", "", fmt.Errorf("remove invalid git dir: %w", rmErr)
+				}
+				sha, err = workspace.Baseline(workCopyDir)
+				if err != nil {
+					return "", "", fmt.Errorf("git baseline after removing invalid repo: %w", err)
+				}
+				baselineSHA = sha
+			} else {
+				baselineSHA = sha
 			}
-			baselineSHA = sha
 		} else {
 			sha, err := workspace.Baseline(workCopyDir)
 			if err != nil {
