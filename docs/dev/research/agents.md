@@ -23,6 +23,56 @@ This section documents the headless/Docker characteristics of major AI coding CL
 - **Root restriction:** Refuses to run as root
 - **Docker quirks:** Requires tmux with double-Enter workaround to submit prompts; needs non-root user
 
+##### Claude Code Streaming Protocol (stream-json mode)
+
+Claude Code supports a machine-readable streaming mode that enables programmatic integration without a TTY or tmux. This is separate from yoloai's current interactive mode but relevant to future headless/programmatic scenarios.
+
+**Invocation:**
+```
+claude --output-format stream-json --input-format stream-json --verbose --model <model> [--session-id <id>] --dangerously-skip-permissions
+```
+
+**Communication:** Newline-delimited JSON on stdin/stdout. The process stays alive across multiple turns — subsequent user messages are written to the same stdin. A new process spawn is only needed when the session is explicitly ended or the process exits.
+
+**Input format** (written to stdin per turn):
+```json
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"..."}]}}
+```
+
+**Output message types:**
+| Type | Meaning |
+|------|---------|
+| `system` / `init` | Process startup; carries initial `session_id` |
+| `content_block_start` | Start of text/thinking/tool_use block (keyed by `index`) |
+| `content_block_delta` | Streaming delta: `text_delta`, `thinking_delta`, `input_json_delta` |
+| `content_block_stop` | Block finished |
+| `assistant` | Complete non-streaming assistant message |
+| `user` | Tool results fed back from Claude Code |
+| `result` | **End of turn** (see below) |
+
+**The `result` message is the authoritative idle/done signal:**
+```json
+{
+  "type": "result",
+  "session_id": "abc123",
+  "is_error": false,
+  "total_cost_usd": 0.012,
+  "duration_ms": 4200,
+  "duration_api_ms": 3100,
+  "num_turns": 3,
+  "usage": {"input_tokens": 1234, "output_tokens": 567}
+}
+```
+`is_error: true` indicates the turn failed. This is cleaner than timeout or output-stability heuristics for detecting completion.
+
+**Session resumption via `--session-id`:** The `session_id` from the `result` or `system/init` message can be saved and passed back as `--session-id` on the next invocation. This allows Claude Code to resume its conversation context after a process restart or container recreation — the session history is stored in Claude Code's own state (`~/.claude/`), so as long as `agent-state/` is preserved, the session can be resumed.
+
+**Environment requirement:** `TERM=xterm-256color` must be set in the subprocess environment; omitting it causes Claude CLI to misbehave.
+
+**MCP tools in stream-json mode:** MCP server tools appear in the output stream with name format `mcp__<server>__<tool>`. Claude Code runs its configured MCP servers internally (from `~/.claude/settings.json`); they are transparent to the caller.
+
+**Source:** Analysis of [opencode-claude-code-plugin](https://github.com/unixfox/opencode-claude-code-plugin) (2026-03), which implements the Vercel AI SDK `LanguageModelV2` interface on top of `claude` subprocess stdio.
+
 #### OpenAI Codex
 
 - **Install:** Static binary download or `npm i -g @openai/codex`
