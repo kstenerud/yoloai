@@ -46,7 +46,34 @@ yoloAI takes a different approach: let the agent do whatever it wants inside a d
 - **Not a hosted service.** yoloAI is a local CLI tool. No accounts, no cloud, no vendor lock-in. Just a Go binary and your chosen sandbox backend.
 - **Not a live-sync tool.** Your originals are protected by default. The agent works on an isolated copy and changes only land when you say so. (Live mounts are available via `:rw` mode for those who want them.)
 
-## The workflow
+## Install
+
+### Using `go install`
+
+```bash
+# Latest release
+go install github.com/kstenerud/yoloai/cmd/yoloai@latest
+
+# Latest development version (beta)
+go install github.com/kstenerud/yoloai/cmd/yoloai@main
+```
+
+Requires Go 1.24+. The binary is placed in `$GOPATH/bin` (typically `~/go/bin`).
+
+### From source
+
+```bash
+git clone https://github.com/kstenerud/yoloai.git
+cd yoloai
+make build
+sudo mv yoloai /usr/local/bin/  # or add to PATH
+```
+
+Single Go binary, no runtime dependencies beyond your chosen backend. On first run, yoloAI builds its base image (~2 min) and creates `~/.yoloai/`.
+
+## One-Shot workflow
+
+### Non-Interactive
 
 ```bash
 # Authenticate (yoloAI picks up existing credentials automatically)
@@ -67,7 +94,7 @@ yoloai apply fix-bug
 yoloai destroy fix-bug
 ```
 
-Or drop into an interactive session:
+### Interactive
 
 ```bash
 yoloai new exploration ./my-project -a
@@ -104,36 +131,23 @@ For longer tasks, work in a commit-by-commit loop. Keep two terminals open — o
 
 The agent works on an isolated copy, so you can keep iterating without risk. Each `apply` patches the real project with only the new commits since the last apply.
 
-## Agents
+## Supported Infrastructure
 
-**Claude Code** (default), **Aider**, **Codex**, **Gemini**, **OpenCode**. Use `yoloai system agents` to list available agents.
+### Agent Modess
 
-## Install
+| Mode       | Description |
+|------------|-------------|
+| `claude`   | Runs [Claude Code](https://github.com/anthropics/claude-code) via API key or subscription credentials (default) |
+| `codex`    | Runs [Codex](https://github.com/openai/codex) via API key or subscription credentials |
+| `gemini`   | Runs [Gemini](https://github.com/google-gemini) via API key or subscription credentials |
+| `aider`    | Runs [Aider](https://github.com/Aider-AI/aider) (your config is copied in) |
+| `opencode` | Runs [OpenCode](https://github.com/anomalyco/opencode) (your config is copied in) |
+| `shell`    | Runs a tmux shell with all agents credentials seeded |
+| `idle`     | Runs an idle process to allow MCP proxying |
 
-### Using `go install`
+Use `yoloai system agents` to list available agents.
 
-```bash
-# Latest release
-go install github.com/kstenerud/yoloai/cmd/yoloai@latest
-
-# Latest development version (beta)
-go install github.com/kstenerud/yoloai/cmd/yoloai@main
-```
-
-Requires Go 1.24+. The binary is placed in `$GOPATH/bin` (typically `~/go/bin`).
-
-### From source
-
-```bash
-git clone https://github.com/kstenerud/yoloai.git
-cd yoloai
-make build
-sudo mv yoloai /usr/local/bin/  # or add to PATH
-```
-
-Single Go binary, no runtime dependencies beyond your chosen backend. On first run, yoloAI builds its base image (~2 min) and creates `~/.yoloai/`.
-
-**Runtime backends:**
+### Backends
 
 | Backend  | Supported Hosts              | Dependencies                                                       |
 |----------|------------------------------|--------------------------------------------------------------------|
