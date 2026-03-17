@@ -142,6 +142,14 @@ def setup_tmux_session(cfg, yoloai_dir, socket=None):
                  stdout=result.stdout.strip(),
                  stderr=result.stderr.strip())
         print(f"[sandbox-setup] tmux new-session failed (exit {result.returncode}): {result.stderr.strip()}", file=sys.stderr)
+    else:
+        log_info("sandbox.tmux_new_session", "new-session succeeded")
+
+    # Verify server is alive after new-session before proceeding.
+    _sessions_after_new = tmux_output("list-sessions", socket=socket)
+    log_info("sandbox.tmux_server_check", "server alive after new-session",
+             alive=bool(_sessions_after_new.strip()),
+             sessions=_sessions_after_new.strip())
 
     # Source host tmux.conf on top of default if default+host
     if tmux_conf == "default+host" and host_tmux_conf and os.path.isfile(host_tmux_conf):
@@ -149,10 +157,27 @@ def setup_tmux_session(cfg, yoloai_dir, socket=None):
 
     # remain-on-exit is also set in tmux.conf, but belt-and-suspenders here.
     # Use set-window-option (not set-option) — remain-on-exit is a window option.
-    tmux("set-window-option", "-t", "main", "remain-on-exit", "on", socket=socket)
+    r = tmux("set-window-option", "-t", "main", "remain-on-exit", "on", socket=socket)
+    if r.returncode != 0:
+        log_info("tmux.error", "set-window-option remain-on-exit failed",
+                 exit_code=r.returncode, stderr=r.stderr.strip())
+
+    # Verify server is alive after set-window-option.
+    _sessions_after_swo = tmux_output("list-sessions", socket=socket)
+    log_info("sandbox.tmux_server_check", "server alive after set-window-option",
+             alive=bool(_sessions_after_swo.strip()),
+             sessions=_sessions_after_swo.strip())
+
     # Pipe raw terminal stream to logs/agent.log for later inspection.
-    tmux("pipe-pane", "-t", "main", f"cat >> {yoloai_dir}/logs/agent.log", socket=socket)
-    log_info("sandbox.tmux_start", "tmux session created")
+    r = tmux("pipe-pane", "-t", "main", f"cat >> {yoloai_dir}/logs/agent.log", socket=socket)
+    if r.returncode != 0:
+        log_info("tmux.error", "pipe-pane failed",
+                 exit_code=r.returncode, stderr=r.stderr.strip())
+
+    # Verify server is alive after pipe-pane.
+    _sessions_after_pp = tmux_output("list-sessions", socket=socket)
+    log_info("sandbox.tmux_start", "tmux session created",
+             alive_after_pipe_pane=bool(_sessions_after_pp.strip()))
 
 
 def launch_agent(cfg, socket=None, working_dir=None):
