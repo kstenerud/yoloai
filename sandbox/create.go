@@ -18,6 +18,26 @@ import (
 	"github.com/kstenerud/yoloai/runtime"
 )
 
+// mkdirAllPerm creates a directory (and parents) then explicitly chmods it to
+// bypass the process umask. Use this when the directory will be bind-mounted
+// into a container that may run under a different uid (e.g. gVisor).
+func mkdirAllPerm(path string, perm os.FileMode) error {
+	if err := os.MkdirAll(path, perm); err != nil {
+		return err
+	}
+	return os.Chmod(path, perm) //nolint:gosec // G302: caller is responsible for choosing the perm
+}
+
+// writeFilePerm writes data to a file then explicitly chmods it to bypass the
+// process umask. Use this when the file will be bind-mounted into a container
+// that may run under a different uid (e.g. gVisor).
+func writeFilePerm(path string, data []byte, perm os.FileMode) error {
+	if err := os.WriteFile(path, data, perm); err != nil {
+		return err
+	}
+	return os.Chmod(path, perm) //nolint:gosec // G302: caller is responsible for choosing the perm
+}
+
 // NetworkMode specifies the sandbox's network access policy.
 type NetworkMode string
 
@@ -361,7 +381,7 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 		filepath.Join(sandboxDir, "files"),
 		filepath.Join(sandboxDir, "cache"),
 	} {
-		if err := os.MkdirAll(dir, 0777); err != nil { //nolint:gosec // G301: world-writable needed for gVisor user-namespace UID remapping
+		if err := mkdirAllPerm(dir, 0777); err != nil { //nolint:gosec // G301: world-writable needed for gVisor user-namespace UID remapping
 			return nil, fmt.Errorf("create directory %s: %w", dir, err)
 		}
 	}
@@ -555,15 +575,15 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 	// may run as a different uid under gVisor user namespaces), so they need
 	// world-writable/world-readable permissions. runtime-config.json is
 	// read-only inside the container; 0644 lets any uid read it.
-	if err := os.MkdirAll(filepath.Join(sandboxDir, LogsDir), 0777); err != nil { //nolint:gosec // G301: world-writable needed for gVisor user-namespace UID remapping
+	if err := mkdirAllPerm(filepath.Join(sandboxDir, LogsDir), 0777); err != nil { //nolint:gosec // G301: world-writable needed for gVisor user-namespace UID remapping
 		return nil, fmt.Errorf("create logs dir: %w", err)
 	}
 
-	if err := os.WriteFile(filepath.Join(sandboxDir, AgentStatusFile), []byte("{}\n"), 0666); err != nil { //nolint:gosec // G306: world-writable needed for gVisor user-namespace UID remapping
+	if err := writeFilePerm(filepath.Join(sandboxDir, AgentStatusFile), []byte("{}\n"), 0666); err != nil { //nolint:gosec // G306: world-writable needed for gVisor user-namespace UID remapping
 		return nil, fmt.Errorf("write %s: %w", AgentStatusFile, err)
 	}
 
-	if err := os.WriteFile(filepath.Join(sandboxDir, RuntimeConfigFile), configData, 0644); err != nil { //nolint:gosec // G306: world-readable; no secrets in this file
+	if err := writeFilePerm(filepath.Join(sandboxDir, RuntimeConfigFile), configData, 0644); err != nil { //nolint:gosec // G306: world-readable; no secrets in this file
 		return nil, fmt.Errorf("write %s: %w", RuntimeConfigFile, err)
 	}
 
@@ -1015,12 +1035,19 @@ func createSecretsDir(agentDef *agent.Definition, envVars map[string]string) (st
 	if err != nil {
 		return "", fmt.Errorf("create secrets temp dir: %w", err)
 	}
+	// Make dir world-executable so the gVisor gofer (running as a remapped uid)
+	// can traverse into it. Files are 0644: world-readable for the same reason.
+	// The dir lives in /tmp and is removed within seconds of container startup.
+	if err := os.Chmod(tmpDir, 0755); err != nil { //nolint:gosec // G302: intentional for gVisor UID remapping
+		_ = os.RemoveAll(tmpDir)
+		return "", fmt.Errorf("chmod secrets dir: %w", err)
+	}
 
 	wrote := false
 
 	// Write env vars first
 	for k, v := range envVars {
-		if err := os.WriteFile(filepath.Join(tmpDir, k), []byte(v), 0600); err != nil {
+		if err := writeFilePerm(filepath.Join(tmpDir, k), []byte(v), 0644); err != nil { //nolint:gosec // G306: world-readable for gVisor UID remapping; removed within seconds
 			_ = os.RemoveAll(tmpDir)
 			return "", fmt.Errorf("write env %s: %w", k, err)
 		}
@@ -1033,7 +1060,7 @@ func createSecretsDir(agentDef *agent.Definition, envVars map[string]string) (st
 		if value == "" {
 			continue
 		}
-		if err := os.WriteFile(filepath.Join(tmpDir, key), []byte(value), 0600); err != nil { //nolint:gosec // G703: key is from agent definition, not user input
+		if err := writeFilePerm(filepath.Join(tmpDir, key), []byte(value), 0644); err != nil { //nolint:gosec // G306: world-readable for gVisor UID remapping; removed within seconds
 			_ = os.RemoveAll(tmpDir)
 			return "", fmt.Errorf("write secret %s: %w", key, err)
 		}
@@ -1397,7 +1424,7 @@ func ensureContainerSettings(agentDef *agent.Definition, sandboxDir string) erro
 	}
 
 	agentStateDir := filepath.Join(sandboxDir, AgentRuntimeDir)
-	if err := os.MkdirAll(agentStateDir, 0777); err != nil { //nolint:gosec // G301: world-writable needed for gVisor user-namespace UID remapping
+	if err := mkdirAllPerm(agentStateDir, 0777); err != nil { //nolint:gosec // G301: world-writable needed for gVisor user-namespace UID remapping
 		return fmt.Errorf("create %s dir: %w", AgentRuntimeDir, err)
 	}
 	settingsPath := filepath.Join(agentStateDir, "settings.json")
