@@ -91,6 +91,7 @@ Settings are managed via `yoloai config get/set` (keys are automatically routed 
 - `resources` sets container resource limits. `resources.cpus` (e.g., `"4"`, `"2.5"`) maps to `--cpus`. `resources.memory` (e.g., `"8g"`, `"512m"`) maps to `--memory`. CLI `--cpus` and `--memory` override config. Profile can override individual values.
 - `network` controls network isolation. `network.isolated: true` enables network isolation for all sandboxes. `network.allow` lists additional allowed domains (additive with agent defaults). Non-empty `network.allow` implies `network.isolated: true`. CLI `--network-isolated` and `--network-allow` override config.
 - `mounts` specifies bind mounts added at container run time (e.g., `~/.gitconfig:/home/yoloai/.gitconfig:ro`). Profile mounts are additive (merged with defaults).
+- `security` selects the OCI runtime security mode for container backends (Docker, Podman). Valid values: `standard` (default runc), `gvisor` (requires `runsc` in PATH), `kata` (requires `kata-qemu`; experimental), `kata-firecracker` (requires `kata-fc`; experimental). Silently ignored on non-container backends (tart, seatbelt). CLI `--security` overrides config; explicit `--security` on an incompatible backend is an error. Profile overrides default.
 - `auto_commit_interval` sets the interval in seconds between automatic git commits in `:copy` directories inside the container. Disabled by default (`0`). When enabled, a background loop periodically runs `git add -A && git commit` in each `:copy` directory, providing recovery checkpoints for unattended runs. Only affects `:copy` dirs (`:overlay` has its own mechanism; `:rw` is the user's live repo). Profile overrides default.
 - `agent_files` controls what files are copied into the sandbox's `agent-state/` directory on first run (see below).
 
@@ -145,7 +146,7 @@ Profiles live in `~/.yoloai/profiles/<name>/`, containing a `profile.yaml` and o
 
 **Profile.yaml mirrors config.yaml.** The profile format uses the same field names and structure as `config.yaml`, plus profile-specific fields (`workdir`, `directories`). Users learn one config format. Backend-specific fields (`backend`, `tart.image`, Dockerfile) are optional — omit them for backend-agnostic profiles.
 
-**Implemented profile fields:** `agent`, `model`, `backend`, `tart.image`, `env`, `agent_args`, `agent_files`, `ports`, `workdir`, `directories`, `resources`, `network`, `mounts`. Unknown fields are silently ignored — profiles written for future versions won't break on older ones.
+**Implemented profile fields:** `agent`, `model`, `backend`, `tart.image`, `env`, `agent_args`, `agent_files`, `ports`, `workdir`, `directories`, `resources`, `network`, `mounts`, `security`. Unknown fields are silently ignored — profiles written for future versions won't break on older ones.
 
 **Backend handling:**
 - `backend` in profile — optional constraint. If set, error when the user's backend doesn't match. If omitted, the profile works with any backend.

@@ -24,6 +24,9 @@ CREATING SANDBOXES (yoloai new)
   --yes, -y           Skip confirmations
   --cpus <num>        CPU limit (e.g., 4, 2.5)
   --memory <size>     Memory limit (e.g., 8g, 512m)
+  --security <mode>   OCI runtime security mode: standard, gvisor,
+                      kata, kata-firecracker (docker/podman only;
+                      kata modes are experimental)
 
 REVIEWING AND APPLYING
 

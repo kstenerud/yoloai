@@ -59,6 +59,7 @@ func newProfileCreateCmd() *cobra.Command {
 # agent: claude
 # model: sonnet
 # backend: docker   # optional backend constraint
+# security: standard  # OCI runtime: standard, gvisor, kata, kata-firecracker (Docker/Podman only)
 # tart:
 #   image: my-vm    # Tart backend only
 # ports:
@@ -247,6 +248,7 @@ func newProfileInfoCmd() *cobra.Command {
 					Model:       merged.Model,
 					Backend:     merged.Backend,
 					TartImage:   merged.TartImage,
+					Security:    merged.Security,
 					Env:         merged.Env,
 					AgentArgs:   merged.AgentArgs,
 					Ports:       merged.Ports,
@@ -276,6 +278,7 @@ type profileInfoJSON struct {
 	Model       string                 `json:"model,omitempty"`
 	Backend     string                 `json:"backend,omitempty"`
 	TartImage   string                 `json:"tart_image,omitempty"`
+	Security    string                 `json:"security,omitempty"`
 	Env         map[string]string      `json:"env,omitempty"`
 	AgentArgs   map[string]string      `json:"agent_args,omitempty"`
 	Ports       []string               `json:"ports,omitempty"`
@@ -324,6 +327,9 @@ func printProfileInfo(cmd *cobra.Command, name, extends string, chain []string, 
 	}
 	if merged.TartImage != "" {
 		fmt.Fprintf(out, "Tart image:  %s\n", merged.TartImage) //nolint:errcheck
+	}
+	if merged.Security != "" && merged.Security != "standard" {
+		fmt.Fprintf(out, "Security:    %s\n", merged.Security) //nolint:errcheck
 	}
 
 	if len(merged.Env) > 0 {
@@ -417,6 +423,7 @@ func printProfileDiff(cmd *cobra.Command, name, extends string, chain []string, 
 	hasDiff = printScalarDiff(out, "Model", parent.Model, merged.Model) || hasDiff
 	hasDiff = printScalarDiff(out, "Backend", parent.Backend, merged.Backend) || hasDiff
 	hasDiff = printScalarDiff(out, "Tart image", parent.TartImage, merged.TartImage) || hasDiff
+	hasDiff = printScalarDiff(out, "Security", parent.Security, merged.Security) || hasDiff
 
 	if printed := printMapDiff(out, "Env", parent.Env, merged.Env); printed {
 		hasDiff = true

@@ -25,6 +25,8 @@ type profileResult struct {
 	devices            []string
 	setup              []string
 	autoCommitInterval int
+	security           string
+	securityExplicit   bool // true when security was set via --security flag (not config/profile default)
 	userAliases        map[string]string
 }
 
@@ -124,6 +126,7 @@ func (m *Manager) resolveProfileConfig(ctx context.Context, opts *CreateOptions,
 	pr.devices = merged.Devices
 	pr.setup = merged.Setup
 	pr.autoCommitInterval = merged.AutoCommitInterval
+	pr.security = merged.Security
 	pr.name = opts.Profile
 
 	// Resolve image ref
@@ -139,7 +142,7 @@ func (m *Manager) resolveProfileConfig(ctx context.Context, opts *CreateOptions,
 
 // applyConfigDefaults fills in values from base config when the profile didn't
 // set them, and applies CLI overrides for resources.
-func applyConfigDefaults(opts *CreateOptions, ycfg *config.YoloaiConfig, pr *profileResult) {
+func applyConfigDefaults(opts *CreateOptions, ycfg *config.YoloaiConfig, pr *profileResult) error {
 	// Resources from base config (if profile didn't set them)
 	if pr.resources == nil && ycfg.Resources != nil {
 		r := *ycfg.Resources
@@ -161,6 +164,7 @@ func applyConfigDefaults(opts *CreateOptions, ycfg *config.YoloaiConfig, pr *pro
 		pr.capAdd = ycfg.CapAdd
 		pr.devices = ycfg.Devices
 		pr.setup = ycfg.Setup
+		pr.security = ycfg.Security
 	}
 
 	// Network from base config (if profile didn't set it and CLI didn't override)
@@ -185,6 +189,15 @@ func applyConfigDefaults(opts *CreateOptions, ycfg *config.YoloaiConfig, pr *pro
 		pr.resources.Memory = opts.Memory
 	}
 
+	// CLI --security overrides config/profile security mode
+	if opts.Security != "" {
+		if err := config.ValidateSecurityMode(opts.Security); err != nil {
+			return err
+		}
+		pr.security = opts.Security
+		pr.securityExplicit = true
+	}
+
 	// CLI --env overrides config/profile env vars
 	if len(opts.Env) > 0 {
 		if pr.env == nil {
@@ -194,6 +207,8 @@ func applyConfigDefaults(opts *CreateOptions, ycfg *config.YoloaiConfig, pr *pro
 			pr.env[k] = v
 		}
 	}
+
+	return nil
 }
 
 // parseAndValidateDirs converts DirSpec values to DirArg, runs safety checks,

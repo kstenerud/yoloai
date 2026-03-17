@@ -142,6 +142,27 @@ The agent works on an isolated copy, so you can keep iterating without risk. Eac
 | tart     | macOS (Apple Silicon)        | [Tart](https://github.com/cirruslabs/tart) (`brew install cirruslabs/cli/tart`) |
 | seatbelt | macOS (any)                  | None (uses built-in `sandbox-exec`)                                |
 
+### Security Modes (Docker/Podman)
+
+Optionally upgrade the OCI runtime for stronger isolation on container backends:
+
+| Mode | Description |
+|------|-------------|
+| `standard` | Default `runc` — standard Linux namespaces and cgroups |
+| `gvisor` | Userspace kernel (gVisor/runsc) — syscall interception, no KVM needed |
+| `kata` | Kata Containers (VM-based) — hardware VM isolation (experimental) |
+| `kata-firecracker` | Kata + Firecracker microVM — lightweight VM isolation (experimental) |
+
+```bash
+# Use gVisor for all new sandboxes
+yoloai config set security gvisor
+
+# Or per sandbox
+yoloai new task . --security gvisor
+```
+
+`kata` and `kata-firecracker` are experimental and require Kata Containers to be installed.
+
 ### Agent Modes
 
 | Mode       | Description |

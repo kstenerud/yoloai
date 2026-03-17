@@ -450,6 +450,7 @@ yoloai config reset env.OLLAMA_API_BASE
 | `resources.memory` | (empty) | Memory limit (e.g., `8g`, `512m`) |
 | `network.isolated` | `false` | Enable network isolation by default |
 | `network.allow` | (empty) | Additional domains to allow (additive with agent defaults) |
+| `security` | `standard` | OCI runtime security mode (docker/podman only): `standard`, `gvisor`, `kata` (experimental), `kata-firecracker` (experimental) |
 | `auto_commit_interval` | `0` | Auto-commit interval in seconds (0 = disabled) |
 | `mounts` | (empty) | Additional bind mounts (list of `host:container` paths) |
 | `ports` | (empty) | Port mappings (list of `host:container` ports) |
@@ -574,6 +575,56 @@ Claude Code supports two authentication methods:
 
   **Why not use `~/.claude/.credentials.json` directly?** The OAuth credentials from `claude login` contain short-lived access tokens (~30 minute expiry) and single-use refresh tokens. When the token expires, the first client to refresh it invalidates the refresh token for all other copies. This means running Claude Code on your host machine will break any sandbox sessions using the same credentials, and running multiple sandboxes will break each other. `CLAUDE_CODE_OAUTH_TOKEN` avoids this entirely — it's a long-lived token that requires no refresh and works across any number of concurrent sandboxes.
 - **Non-root execution.** Containers run as a non-root user with UID/GID matching your host user.
+
+### OCI Runtime Security Modes
+
+On Docker and Podman backends, you can upgrade the OCI runtime for stronger isolation:
+
+| Mode | Requires | Description |
+|------|----------|-------------|
+| `standard` | nothing | Default `runc` — Linux namespaces and cgroups |
+| `gvisor` | `runsc` in PATH | Userspace kernel — intercepts syscalls in userspace, no KVM needed |
+| `kata` | `kata-qemu` in PATH | Kata Containers with QEMU VM (**experimental**) |
+| `kata-firecracker` | `kata-fc` in PATH | Kata Containers with Firecracker microVM (**experimental**) |
+
+```bash
+# Set gVisor as default for all sandboxes
+yoloai config set security gvisor
+
+# Or specify per sandbox
+yoloai new task . --security gvisor
+```
+
+Security modes are silently ignored on non-container backends (tart, seatbelt). Using `--security` explicitly on an incompatible backend is an error.
+
+`kata` and `kata-firecracker` are experimental. They require Kata Containers 3.x to be installed and registered with your container runtime.
+
+**Setup — gVisor:**
+
+1. Install the `runsc` binary: see [gVisor installation docs](https://gvisor.dev/docs/user_guide/install/)
+2. Register it with Docker in `/etc/docker/daemon.json`:
+   ```json
+   {"runtimes": {"runsc": {"path": "/usr/local/bin/runsc"}}}
+   ```
+3. Restart the Docker daemon: `sudo systemctl restart docker`
+
+Installing the binary alone is not enough — Docker must also have the runtime registered. yoloai checks both.
+
+**Setup — Kata Containers (experimental):**
+
+1. Install Kata Containers 3.x: see [Kata releases](https://github.com/kata-containers/kata-containers/releases)
+2. Register with Docker in `/etc/docker/daemon.json`:
+   ```json
+   {"runtimes": {
+     "kata-qemu": {"path": "/usr/bin/kata-qemu"},
+     "kata-fc":   {"path": "/usr/bin/kata-fc"}
+   }}
+   ```
+3. Restart the Docker daemon.
+
+**Incompatibilities:**
+
+- **gVisor + `:overlay` directories:** gVisor's VFS2 kernel does not support overlayfs mounts inside the container. Use `:copy` or `:rw` instead — yoloai will error if you combine them.
 
 ## Development
 

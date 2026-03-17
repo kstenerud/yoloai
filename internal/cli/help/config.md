@@ -19,6 +19,8 @@ KEY SETTINGS
   agent            Agent to use (default: claude)
   model            Model name or alias (default: agent's default)
   backend          Runtime backend: docker, tart, seatbelt
+  security         OCI runtime security mode (docker/podman only):
+                   standard, gvisor, kata, kata-firecracker (experimental)
   tmux_conf        Tmux config mode: default+host, default, host, none
   env.<NAME>       Environment variable forwarded to container
 

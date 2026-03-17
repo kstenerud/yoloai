@@ -48,17 +48,18 @@ type ResourceLimits struct {
 
 // InstanceConfig holds the parameters for creating a sandbox instance.
 type InstanceConfig struct {
-	Name        string
-	ImageRef    string // image tag (Docker) or base VM name (Tart)
-	WorkingDir  string
-	Mounts      []MountSpec
-	Ports       []PortMapping
-	NetworkMode string // "" = default, "none" = no network, "isolated" = allowlist only
-	CapAdd      []string
-	Devices     []string
-	UseInit     bool
-	UsernsMode  string // "" = default, "keep-id" = rootless Podman
-	Resources   *ResourceLimits
+	Name             string
+	ImageRef         string // image tag (Docker) or base VM name (Tart)
+	WorkingDir       string
+	Mounts           []MountSpec
+	Ports            []PortMapping
+	NetworkMode      string // "" = default, "none" = no network, "isolated" = allowlist only
+	CapAdd           []string
+	Devices          []string
+	UseInit          bool
+	UsernsMode       string // "" = default, "keep-id" = rootless Podman
+	Resources        *ResourceLimits
+	ContainerRuntime string // OCI runtime name for Docker/Podman (e.g., "runsc" for gVisor, "kata-qemu" for Kata)
 }
 
 // InstanceInfo holds the inspected state of a sandbox instance.

@@ -43,6 +43,7 @@ type YoloaiConfig struct {
 	Devices            []string          `yaml:"devices"`              // devices — host devices to expose (Docker only)
 	Setup              []string          `yaml:"setup"`                // setup — commands to run before agent launch (Docker only)
 	AutoCommitInterval int               `yaml:"auto_commit_interval"` // auto_commit_interval — seconds between auto-commits in :copy dirs; 0 = disabled
+	Security           string            `yaml:"security"`             // security — OCI runtime security mode: standard, gvisor, kata, kata-firecracker
 }
 
 // ResourceLimits holds container resource constraints (CPU, memory).
@@ -82,6 +83,24 @@ var knownSettings = []knownSetting{
 	{"resources.memory", ""},
 	{"network.isolated", "false"},
 	{"auto_commit_interval", "0"},
+	{"security", ""},
+}
+
+// validSecurityModes is the set of accepted values for the security config key.
+var validSecurityModes = map[string]bool{
+	"standard":         true,
+	"gvisor":           true,
+	"kata":             true,
+	"kata-firecracker": true,
+}
+
+// ValidateSecurityMode returns an error if mode is not a known security mode.
+// Empty string is allowed (means "use default").
+func ValidateSecurityMode(mode string) error {
+	if mode == "" || validSecurityModes[mode] {
+		return nil
+	}
+	return NewUsageError("unknown security mode %q: valid values are standard, gvisor, kata, kata-firecracker", mode)
 }
 
 // knownCollectionSetting defines a non-scalar config key (map or list)
@@ -310,6 +329,15 @@ func LoadConfig() (*YoloaiConfig, error) {
 				return nil, fmt.Errorf("auto_commit_interval: %w", aErr)
 			}
 			cfg.AutoCommitInterval = n
+		case "security":
+			expanded, err := expandEnvBraced(val.Value)
+			if err != nil {
+				return nil, fmt.Errorf("security: %w", err)
+			}
+			if err := ValidateSecurityMode(expanded); err != nil {
+				return nil, fmt.Errorf("security: %w", err)
+			}
+			cfg.Security = expanded
 		}
 	}
 

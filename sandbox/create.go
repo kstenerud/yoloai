@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -30,6 +31,59 @@ const (
 // (Docker, Podman) as opposed to VMs or process sandboxes.
 func isContainerBackend(backend string) bool {
 	return backend == "docker" || backend == "podman"
+}
+
+// securityRuntimeName maps a security mode to the OCI runtime name used for
+// both --runtime flag and binary PATH validation. Returns "" for "standard"
+// (uses the default runc; no extra binary needed).
+// Kata 3.x registers kata-qemu / kata-fc (not the legacy kata-runtime binary).
+func securityRuntimeName(security string) string {
+	switch security {
+	case "gvisor":
+		return "runsc"
+	case "kata":
+		return "kata-qemu"
+	case "kata-firecracker":
+		return "kata-fc"
+	default:
+		return ""
+	}
+}
+
+// checkSecurityRuntime validates that a named OCI runtime is both installed
+// in PATH and registered with the container daemon (Docker only).
+// Returns a descriptive error if either check fails.
+func checkSecurityRuntime(ctx context.Context, backend, security, runtimeName string) error {
+	// Check that the runtime binary is installed.
+	if _, err := exec.LookPath(runtimeName); err != nil {
+		return fmt.Errorf("security mode %q requires %q to be installed and in PATH", security, runtimeName)
+	}
+
+	// For Docker, also verify the runtime is registered in daemon.json.
+	// Podman discovers runtimes from containers.conf / PATH, so skip that check.
+	if backend != "docker" {
+		return nil
+	}
+
+	out, cmdErr := exec.CommandContext(ctx, "docker", "info", "--format",
+		`{{range $k,$v := .Runtimes}}{{$k}}
+{{end}}`).Output()
+	if cmdErr == nil {
+		// Docker responded — check whether the runtime is registered.
+		for _, line := range strings.Split(string(out), "\n") {
+			if strings.TrimSpace(line) == runtimeName {
+				return nil
+			}
+		}
+		return fmt.Errorf(
+			"security mode %q requires the %q runtime to be registered with Docker;\n"+
+				"add it to /etc/docker/daemon.json and restart the daemon:\n"+
+				`  {"runtimes": {%q: {"path": %q}}}`,
+			security, runtimeName, runtimeName, runtimeName,
+		)
+	}
+	// docker CLI unavailable or daemon unreachable — skip registration check.
+	return nil
 }
 
 // DirMode specifies how a directory is mounted in the sandbox.
@@ -75,6 +129,7 @@ type CreateOptions struct {
 	CPUs         string            // --cpus flag (e.g., "4", "2.5")
 	Memory       string            // --memory flag (e.g., "8g", "512m")
 	Env          map[string]string // --env flags (KEY=VAL pairs)
+	Security     string            // --security flag (e.g., "gvisor", "standard")
 }
 
 // sandboxState holds resolved state computed during preparation.
@@ -100,6 +155,8 @@ type sandboxState struct {
 	capAdd           []string // Linux capabilities from config/profile
 	devices          []string // host devices from config/profile
 	setup            []string // setup commands from config/profile
+	security         string   // OCI runtime security mode from config/profile
+	securityExplicit bool     // true when security was set via --security flag
 	meta             *Meta
 	configJSON       []byte
 }
@@ -249,7 +306,9 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 	}
 
 	// Apply config defaults and CLI overrides for resources.
-	applyConfigDefaults(&opts, ycfg, pr)
+	if err := applyConfigDefaults(&opts, ycfg, pr); err != nil {
+		return nil, err
+	}
 
 	// Validate and expand config mounts.
 	mergedMounts, err := validateAndExpandMounts(pr.mounts)
@@ -463,6 +522,7 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 		AutoCommitInterval: pr.autoCommitInterval,
 		Debug:              opts.Debug,
 		UsernsMode:         usernsMode,
+		Security:           pr.security,
 	}
 
 	if err := SaveMeta(sandboxDir, meta); err != nil {
@@ -499,28 +559,30 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 
 	success = true
 	return &sandboxState{
-		name:         opts.Name,
-		sandboxDir:   sandboxDir,
-		workdir:      workdir,
-		workCopyDir:  workCopyDir,
-		auxDirs:      auxDirs,
-		agent:        agentDef,
-		model:        model,
-		profile:      pr.name,
-		imageRef:     pr.imageRef,
-		env:          pr.env,
-		hasPrompt:    hasPrompt,
-		networkMode:  networkMode,
-		networkAllow: networkAllow,
-		ports:        opts.Ports,
-		configMounts: mergedMounts,
-		tmuxConf:     tmuxConf,
-		resources:    pr.resources,
-		capAdd:       pr.capAdd,
-		devices:      pr.devices,
-		setup:        pr.setup,
-		meta:         meta,
-		configJSON:   configData,
+		name:             opts.Name,
+		sandboxDir:       sandboxDir,
+		workdir:          workdir,
+		workCopyDir:      workCopyDir,
+		auxDirs:          auxDirs,
+		agent:            agentDef,
+		model:            model,
+		profile:          pr.name,
+		imageRef:         pr.imageRef,
+		env:              pr.env,
+		hasPrompt:        hasPrompt,
+		networkMode:      networkMode,
+		networkAllow:     networkAllow,
+		ports:            opts.Ports,
+		configMounts:     mergedMounts,
+		tmuxConf:         tmuxConf,
+		resources:        pr.resources,
+		capAdd:           pr.capAdd,
+		devices:          pr.devices,
+		setup:            pr.setup,
+		security:         pr.security,
+		securityExplicit: pr.securityExplicit,
+		meta:             meta,
+		configJSON:       configData,
 	}, nil
 }
 
@@ -596,6 +658,17 @@ func (m *Manager) launchContainer(ctx context.Context, state *sandboxState) erro
 		instanceCfg.CapAdd = append(instanceCfg.CapAdd, "NET_ADMIN")
 	}
 
+	// gVisor's VFS2 kernel does not support overlayfs mounts inside the container.
+	// Catch this combination early before Docker fails with an opaque error.
+	if state.security == "gvisor" && hasOverlayDirs(state) {
+		return fmt.Errorf(
+			"security mode %q is incompatible with :overlay directories — "+
+				"gVisor's VFS2 does not support overlayfs inside the container; "+
+				"use :copy or :rw mode instead",
+			state.security,
+		)
+	}
+
 	// CAP_SYS_ADMIN required for overlay mounts inside the container
 	if hasOverlayDirs(state) {
 		if !isContainerBackend(m.backend) {
@@ -610,6 +683,23 @@ func (m *Manager) launchContainer(ctx context.Context, state *sandboxState) erro
 	}
 	instanceCfg.CapAdd = append(instanceCfg.CapAdd, state.capAdd...)
 	instanceCfg.Devices = state.devices
+
+	// Security mode: requires a container backend; validate runtime is installed and registered.
+	if state.security != "" && state.security != "standard" {
+		if !isContainerBackend(m.backend) {
+			if state.securityExplicit {
+				return fmt.Errorf("--security %q requires a container backend (current backend: %s)", state.security, m.backend)
+			}
+			// Security from config/profile: silently ignore on non-container backends.
+		} else {
+			if runtimeName := securityRuntimeName(state.security); runtimeName != "" {
+				if err := checkSecurityRuntime(ctx, m.backend, state.security, runtimeName); err != nil {
+					return err
+				}
+				instanceCfg.ContainerRuntime = runtimeName
+			}
+		}
+	}
 
 	if err := m.runtime.Create(ctx, instanceCfg); err != nil {
 		return err

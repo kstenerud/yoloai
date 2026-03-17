@@ -55,6 +55,63 @@ NETWORK ISOLATION
   Each agent has a default allowlist (e.g., api.anthropic.com for
   Claude). Use --network-none for maximum isolation.
 
+OCI RUNTIME SECURITY MODES
+
+  Applies to Docker and Podman backends only. Upgrades the OCI runtime
+  for stronger isolation beyond standard Linux namespaces:
+
+  standard          Default runc (Linux namespaces + cgroups)
+  gvisor            Userspace kernel (gVisor/runsc) — syscall interception,
+                    no KVM required.
+  kata              Kata Containers with QEMU VM isolation (experimental).
+  kata-firecracker  Kata Containers with Firecracker microVM (experimental).
+
+  Set a default:
+
+     yoloai config set security gvisor
+
+  Or per sandbox:
+
+     yoloai new task . --security gvisor
+
+  Security modes are silently ignored on non-container backends (tart,
+  seatbelt). Specifying --security explicitly on an incompatible backend
+  is an error.
+
+SETUP: GVISOR
+
+  1. Install runsc (the gVisor binary):
+        https://gvisor.dev/docs/user_guide/install/
+
+  2. Register it with Docker in /etc/docker/daemon.json:
+        {"runtimes": {"runsc": {"path": "/usr/local/bin/runsc"}}}
+
+  3. Restart the Docker daemon:
+        sudo systemctl restart docker
+
+  Both steps are required. Installing the binary is not enough —
+  Docker must also know about it. yoloai checks both.
+
+SETUP: KATA (EXPERIMENTAL)
+
+  1. Install Kata Containers 3.x:
+        https://github.com/kata-containers/kata-containers/releases
+
+  2. Register with Docker in /etc/docker/daemon.json:
+        {"runtimes": {
+          "kata-qemu": {"path": "/usr/bin/kata-qemu"},
+          "kata-fc":   {"path": "/usr/bin/kata-fc"}
+        }}
+
+  3. Restart the Docker daemon.
+
+INCOMPATIBILITIES
+
+  gVisor + :overlay directories:
+    gVisor's VFS2 kernel does not support overlayfs mounts inside the
+    container. Combine --security gvisor only with :copy or :rw
+    directories. yoloai detects and rejects this combination.
+
 NON-ROOT EXECUTION
 
   Containers run as a non-root user with UID/GID matching your host

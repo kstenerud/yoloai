@@ -149,6 +149,7 @@ func (r *Runtime) Create(ctx context.Context, cfg runtime.InstanceConfig) error 
 		Mounts:       mounts,
 		CapAdd:       cfg.CapAdd,
 		UsernsMode:   container.UsernsMode(cfg.UsernsMode),
+		Runtime:      cfg.ContainerRuntime,
 	}
 
 	if len(cfg.Devices) > 0 {

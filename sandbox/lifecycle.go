@@ -554,6 +554,7 @@ func (m *Manager) recreateContainer(ctx context.Context, name string, meta *Meta
 		capAdd:       meta.CapAdd,
 		devices:      meta.Devices,
 		setup:        meta.Setup,
+		security:     meta.Security,
 		configJSON:   configData,
 	}
 

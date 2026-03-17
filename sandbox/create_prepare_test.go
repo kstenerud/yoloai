@@ -186,7 +186,7 @@ func TestApplyConfigDefaults_ResourcesFromConfig(t *testing.T) {
 	}
 	pr := &profileResult{}
 
-	applyConfigDefaults(opts, ycfg, pr)
+	require.NoError(t, applyConfigDefaults(opts, ycfg, pr))
 	require.NotNil(t, pr.resources)
 	assert.Equal(t, "4", pr.resources.CPUs)
 	assert.Equal(t, "8g", pr.resources.Memory)
@@ -201,7 +201,7 @@ func TestApplyConfigDefaults_ProfileResourcesTakePriority(t *testing.T) {
 		resources: &config.ResourceLimits{CPUs: "2", Memory: "4g"},
 	}
 
-	applyConfigDefaults(opts, ycfg, pr)
+	require.NoError(t, applyConfigDefaults(opts, ycfg, pr))
 	// Profile resources should not be overwritten by config
 	assert.Equal(t, "2", pr.resources.CPUs)
 	assert.Equal(t, "4g", pr.resources.Memory)
@@ -214,7 +214,7 @@ func TestApplyConfigDefaults_CLIOverridesResources(t *testing.T) {
 	}
 	pr := &profileResult{}
 
-	applyConfigDefaults(opts, ycfg, pr)
+	require.NoError(t, applyConfigDefaults(opts, ycfg, pr))
 	require.NotNil(t, pr.resources)
 	assert.Equal(t, "8", pr.resources.CPUs)
 	assert.Equal(t, "16g", pr.resources.Memory)
@@ -227,7 +227,7 @@ func TestApplyConfigDefaults_CLIOverridesProfileResources(t *testing.T) {
 		resources: &config.ResourceLimits{CPUs: "2", Memory: "4g"},
 	}
 
-	applyConfigDefaults(opts, ycfg, pr)
+	require.NoError(t, applyConfigDefaults(opts, ycfg, pr))
 	assert.Equal(t, "8", pr.resources.CPUs)
 	assert.Equal(t, "4g", pr.resources.Memory) // unchanged
 }
@@ -239,7 +239,7 @@ func TestApplyConfigDefaults_MountsFromConfigWhenNoProfile(t *testing.T) {
 	}
 	pr := &profileResult{}
 
-	applyConfigDefaults(opts, ycfg, pr)
+	require.NoError(t, applyConfigDefaults(opts, ycfg, pr))
 	assert.Equal(t, []string{"/a:/b"}, pr.mounts)
 }
 
@@ -250,7 +250,7 @@ func TestApplyConfigDefaults_MountsSkippedWithProfile(t *testing.T) {
 	}
 	pr := &profileResult{mounts: []string{"/c:/d"}}
 
-	applyConfigDefaults(opts, ycfg, pr)
+	require.NoError(t, applyConfigDefaults(opts, ycfg, pr))
 	// Profile mounts should not be overwritten
 	assert.Equal(t, []string{"/c:/d"}, pr.mounts)
 }
@@ -262,7 +262,7 @@ func TestApplyConfigDefaults_PortsFromConfigWhenNoProfile(t *testing.T) {
 	}
 	pr := &profileResult{}
 
-	applyConfigDefaults(opts, ycfg, pr)
+	require.NoError(t, applyConfigDefaults(opts, ycfg, pr))
 	// Config ports prepended to CLI ports
 	assert.Equal(t, []string{"8080:8080", "9090:9090"}, opts.Ports)
 }
@@ -277,7 +277,7 @@ func TestApplyConfigDefaults_NetworkFromConfigWhenNoProfile(t *testing.T) {
 	}
 	pr := &profileResult{}
 
-	applyConfigDefaults(opts, ycfg, pr)
+	require.NoError(t, applyConfigDefaults(opts, ycfg, pr))
 	assert.Equal(t, NetworkModeIsolated, opts.Network)
 	assert.Equal(t, []string{"example.com"}, opts.NetworkAllow)
 }
@@ -292,7 +292,7 @@ func TestApplyConfigDefaults_NetworkSkippedWhenCLIOverrides(t *testing.T) {
 	}
 	pr := &profileResult{}
 
-	applyConfigDefaults(opts, ycfg, pr)
+	require.NoError(t, applyConfigDefaults(opts, ycfg, pr))
 	// NetworkNone takes priority; config network should not apply
 	assert.Equal(t, NetworkModeNone, opts.Network)
 	assert.Empty(t, opts.NetworkAllow)
@@ -307,7 +307,7 @@ func TestApplyConfigDefaults_RecipesFromConfigWhenNoProfile(t *testing.T) {
 	}
 	pr := &profileResult{}
 
-	applyConfigDefaults(opts, ycfg, pr)
+	require.NoError(t, applyConfigDefaults(opts, ycfg, pr))
 	assert.Equal(t, []string{"SYS_ADMIN"}, pr.capAdd)
 	assert.Equal(t, []string{"/dev/fuse"}, pr.devices)
 	assert.Equal(t, []string{"apt-get install -y vim"}, pr.setup)

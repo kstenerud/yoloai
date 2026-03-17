@@ -186,6 +186,7 @@ func newNewCmd(version string) *cobra.Command {
 
 			cpus, _ := cmd.Flags().GetString("cpus")
 			memory, _ := cmd.Flags().GetString("memory")
+			security, _ := cmd.Flags().GetString("security")
 			debug, _ := cmd.Flags().GetBool("debug")
 			envSlice, _ := cmd.Flags().GetStringSlice("env")
 
@@ -259,6 +260,7 @@ func newNewCmd(version string) *cobra.Command {
 					Debug:        debug,
 					CPUs:         cpus,
 					Memory:       memory,
+					Security:     security,
 					Env:          envMap,
 				})
 				if err != nil {
@@ -317,6 +319,7 @@ func newNewCmd(version string) *cobra.Command {
 	cmd.Flags().BoolP("yes", "y", false, "Skip confirmations")
 	cmd.Flags().String("cpus", "", "CPU limit (e.g., 4, 2.5)")
 	cmd.Flags().String("memory", "", "Memory limit (e.g., 8g, 512m)")
+	cmd.Flags().String("security", "", "OCI runtime security mode (standard, gvisor, kata, kata-firecracker)")
 	cmd.Flags().StringSlice("env", nil, "Environment variable (KEY=VAL, repeatable)")
 
 	cmd.MarkFlagsMutuallyExclusive("network-none", "network-isolated")

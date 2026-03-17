@@ -33,6 +33,7 @@ type ProfileConfig struct {
 	Devices            []string          // devices — host devices to expose (Docker only)
 	Setup              []string          // setup — commands to run before agent launch (Docker only)
 	AutoCommitInterval int               // auto_commit_interval — seconds between auto-commits in :copy dirs; 0 = disabled
+	Security           string            // security — OCI runtime security mode: standard, gvisor, kata, kata-firecracker
 }
 
 // ProfileWorkdir defines a workdir from a profile.
@@ -68,6 +69,7 @@ type MergedConfig struct {
 	Devices            []string          `json:"devices,omitempty"`              // additive across chain (Docker only)
 	Setup              []string          `json:"setup,omitempty"`                // additive across chain (Docker only)
 	AutoCommitInterval int               `json:"auto_commit_interval,omitempty"` // profile overrides default
+	Security           string            `json:"security,omitempty"`             // last non-empty wins across chain
 }
 
 // ProfileDirPath returns the host-side directory for a profile.
@@ -376,6 +378,15 @@ func LoadProfile(name string) (*ProfileConfig, error) {
 				return nil, fmt.Errorf("auto_commit_interval: %w", aErr)
 			}
 			cfg.AutoCommitInterval = n
+		case "security":
+			expanded, expandErr := expandEnvBraced(val.Value)
+			if expandErr != nil {
+				return nil, fmt.Errorf("security: %w", expandErr)
+			}
+			if err := ValidateSecurityMode(expanded); err != nil {
+				return nil, fmt.Errorf("security: %w", err)
+			}
+			cfg.Security = expanded
 			// Unknown fields are silently ignored
 		}
 	}
@@ -460,6 +471,7 @@ func MergeProfileChain(base *YoloaiConfig, chain []string) (*MergedConfig, error
 		Model:     base.Model,
 		Backend:   base.Backend,
 		TartImage: base.TartImage,
+		Security:  base.Security,
 	}
 	if len(base.Env) > 0 {
 		merged.Env = make(map[string]string, len(base.Env))
@@ -541,6 +553,9 @@ func MergeProfileChain(base *YoloaiConfig, chain []string) (*MergedConfig, error
 		}
 		if profile.TartImage != "" {
 			merged.TartImage = profile.TartImage
+		}
+		if profile.Security != "" {
+			merged.Security = profile.Security
 		}
 
 		// Env: map merge, later wins on conflict
