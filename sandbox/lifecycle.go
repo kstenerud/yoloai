@@ -245,9 +245,18 @@ func (m *Manager) Reset(ctx context.Context, opts ResetOptions) error {
 	// Clear logs so each run starts fresh
 	slog.Debug("clearing logs", "event", "sandbox.reset.logs", "sandbox", opts.Name)
 	_ = os.RemoveAll(filepath.Join(sandboxDir, LogsDir))
-	_ = mkdirAllPerm(filepath.Join(sandboxDir, LogsDir), 0777) //nolint:gosec // G301: world-writable needed for gVisor user-namespace UID remapping
+
+	// Use restrictive permissions by default, world-writable only for gVisor
+	logsDirPerm := os.FileMode(0750)
+	logFilePerm := os.FileMode(0600)
+	if meta.Security == "gvisor" {
+		logsDirPerm = 0777 //nolint:gosec // G301: world-writable needed for gVisor user-namespace UID remapping
+		logFilePerm = 0666 //nolint:gosec // G306: world-writable needed for gVisor user-namespace UID remapping
+	}
+
+	_ = mkdirAllPerm(filepath.Join(sandboxDir, LogsDir), logsDirPerm)
 	for _, logFile := range []string{SandboxJSONLFile, MonitorJSONLFile, HooksJSONLFile} {
-		_ = writeFilePerm(filepath.Join(sandboxDir, logFile), nil, 0666) //nolint:gosec // G306: world-writable needed for gVisor user-namespace UID remapping
+		_ = writeFilePerm(filepath.Join(sandboxDir, logFile), nil, logFilePerm)
 	}
 
 	var newSHA string
@@ -352,11 +361,16 @@ func (m *Manager) Reset(ctx context.Context, opts ResetOptions) error {
 
 	// Optionally wipe agent-runtime state
 	if opts.ClearState {
+		agentStateDirPerm := os.FileMode(0750)
+		if meta.Security == "gvisor" {
+			agentStateDirPerm = 0777 //nolint:gosec // G301: world-writable needed for gVisor user-namespace UID remapping
+		}
+
 		agentStateDir := filepath.Join(sandboxDir, AgentRuntimeDir)
 		if err := os.RemoveAll(agentStateDir); err != nil {
 			return fmt.Errorf("remove %s: %w", AgentRuntimeDir, err)
 		}
-		if err := mkdirAllPerm(agentStateDir, 0777); err != nil { //nolint:gosec // G301: world-writable needed for gVisor user-namespace UID remapping
+		if err := mkdirAllPerm(agentStateDir, agentStateDirPerm); err != nil {
 			return fmt.Errorf("recreate %s: %w", AgentRuntimeDir, err)
 		}
 		// Reset agent_files flag so files get re-seeded on next start
@@ -452,7 +466,7 @@ func (m *Manager) recreateContainer(ctx context.Context, name string, meta *Meta
 	// Re-apply container settings (copySeedFiles overwrites settings.json
 	// with the host version, which lacks sandbox-specific settings like
 	// skipDangerousModePermissionPrompt)
-	if err := ensureContainerSettings(agentDef, sandboxDir); err != nil {
+	if err := ensureContainerSettings(agentDef, sandboxDir, meta.Security); err != nil {
 		return fmt.Errorf("ensure container settings: %w", err)
 	}
 
@@ -901,12 +915,23 @@ func (m *Manager) resetInPlace(ctx context.Context, opts ResetOptions, meta *Met
 
 // clearCacheAndFiles clears the cache and files directories unless --keep-X flags are set.
 func (m *Manager) clearCacheAndFiles(opts ResetOptions) error {
+	// Load metadata to check security mode for permissions
+	meta, err := LoadMeta(Dir(opts.Name))
+	if err != nil {
+		return fmt.Errorf("load metadata: %w", err)
+	}
+
+	containerDirPerm := os.FileMode(0750)
+	if meta.Security == "gvisor" {
+		containerDirPerm = 0777 //nolint:gosec // G301: world-writable needed for gVisor user-namespace UID remapping
+	}
+
 	if !opts.KeepCache {
 		cacheDir := CacheDir(opts.Name)
 		if err := os.RemoveAll(cacheDir); err != nil {
 			return fmt.Errorf("remove cache: %w", err)
 		}
-		if err := mkdirAllPerm(cacheDir, 0777); err != nil { //nolint:gosec // G301: world-writable needed for gVisor user-namespace UID remapping
+		if err := mkdirAllPerm(cacheDir, containerDirPerm); err != nil {
 			return fmt.Errorf("recreate cache: %w", err)
 		}
 	}
@@ -915,7 +940,7 @@ func (m *Manager) clearCacheAndFiles(opts ResetOptions) error {
 		if err := os.RemoveAll(filesDir); err != nil {
 			return fmt.Errorf("remove files: %w", err)
 		}
-		if err := mkdirAllPerm(filesDir, 0777); err != nil { //nolint:gosec // G301: world-writable needed for gVisor user-namespace UID remapping
+		if err := mkdirAllPerm(filesDir, containerDirPerm); err != nil {
 			return fmt.Errorf("recreate files: %w", err)
 		}
 	}
