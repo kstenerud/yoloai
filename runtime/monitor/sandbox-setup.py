@@ -147,7 +147,9 @@ def setup_tmux_session(cfg, yoloai_dir, socket=None):
     if tmux_conf == "default+host" and host_tmux_conf and os.path.isfile(host_tmux_conf):
         tmux("source-file", host_tmux_conf, socket=socket)
 
-    tmux("set-option", "-t", "main", "remain-on-exit", "on", socket=socket)
+    # remain-on-exit is also set in tmux.conf, but belt-and-suspenders here.
+    # Use set-window-option (not set-option) — remain-on-exit is a window option.
+    tmux("set-window-option", "-t", "main", "remain-on-exit", "on", socket=socket)
     # Pipe raw terminal stream to logs/agent.log for later inspection.
     tmux("pipe-pane", "-t", "main", f"cat >> {yoloai_dir}/logs/agent.log", socket=socket)
     log_info("sandbox.tmux_start", "tmux session created")
@@ -167,6 +169,16 @@ def launch_agent(cfg, socket=None, working_dir=None):
 
     tmux("send-keys", "-t", "main", send_cmd, "Enter", socket=socket)
     log_info("sandbox.agent_launch", "agent process started", agent=agent, model=model)
+
+    # Wait briefly, then check if the session is still alive and capture pane
+    # output. This surfaces immediate crashes (e.g. missing binary, auth error)
+    # in sandbox.jsonl without waiting for the full wait_for_ready timeout.
+    time.sleep(2)
+    sessions = tmux_output("list-sessions", socket=socket)
+    pane = tmux_output("capture-pane", "-t", "main", "-p", socket=socket)
+    log_info("sandbox.post_launch", "post-launch check",
+             sessions_alive=bool(sessions.strip()),
+             pane_sample=pane.strip()[:400] if pane else "")
 
 
 def monitor_exit(socket=None):
