@@ -499,11 +499,12 @@ func setTerminalTitle(title string) {
 // attachToSandbox attaches to the tmux session in a running container.
 // It sets the terminal title to the sandbox name and restores it on detach.
 //
-// Under gVisor on ARM64, tmux run directly via docker exec may fail with
-// "access not allowed" because the exec'd process doesn't get a proper
-// controlling terminal. Wrapping in bash -c ensures bash initialises the
-// terminal session before exec'ing tmux, which avoids the EACCES from
-// tmux's tty_open call.
+// Under gVisor on ARM64, docker exec -it does not set TIOCSCTTY on the
+// allocated PTY slave, so the exec'd process has no controlling terminal.
+// tmux's tty_open then fails to open /dev/tty and prints "access not
+// allowed". Wrapping in `script` fixes this: script calls setsid + TIOCSCTTY
+// on a fresh PTY, giving the child process a proper controlling terminal
+// before exec'ing tmux. On standard Docker the overhead is negligible.
 func attachToSandbox(ctx context.Context, rt runtime.Runtime, containerName, sandboxName string, user string) error {
 	setTerminalTitle(sandboxName)
 	defer setTerminalTitle("")
@@ -514,7 +515,11 @@ func attachToSandbox(ctx context.Context, rt runtime.Runtime, containerName, san
 	} else {
 		tmuxArgs = "exec tmux attach -t main"
 	}
-	return rt.InteractiveExec(ctx, containerName, []string{"bash", "-c", tmuxArgs}, user, "")
+	// script -q -e -c <cmd> /dev/null: quiet, propagate exit status, run cmd,
+	// discard transcript. Creates a fresh PTY + controlling terminal.
+	return rt.InteractiveExec(ctx, containerName,
+		[]string{"script", "-q", "-e", "-c", tmuxArgs, "/dev/null"},
+		user, "")
 }
 
 func newVersionCmd(version, commit, date string) *cobra.Command {
