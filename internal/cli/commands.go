@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -297,7 +298,7 @@ func newNewCmd(version string) *cobra.Command {
 
 				// Wait for tmux session to be ready before attaching
 				containerName := sandbox.InstanceName(sandboxName)
-				if err := waitForTmux(ctx, rt, containerName, 30*time.Second, user); err != nil {
+				if err := waitForTmux(ctx, rt, containerName, sandboxName, 30*time.Second, user); err != nil {
 					return fmt.Errorf("waiting for tmux session: %w", err)
 				}
 
@@ -386,8 +387,18 @@ func tmuxExecUser(meta *sandbox.Meta) string {
 
 // waitForTmux polls until the tmux session is ready in the container.
 // Returns early if the container stops running or the context is cancelled.
-func waitForTmux(ctx context.Context, rt runtime.Runtime, containerName string, timeout time.Duration, user string) error {
+//
+// Detection strategy (both are checked on each poll cycle):
+//  1. sandbox.jsonl: read the container's structured log on the host and look
+//     for the "sandbox.tmux_start" event. This is the primary check and works
+//     even when docker exec is unreliable (e.g. gVisor on ARM64 where exec
+//     into the container may behave differently).
+//  2. docker exec: run "tmux has-session -t main" inside the container.
+//     This is the fallback and covers backends that don't write sandbox.jsonl.
+func waitForTmux(ctx context.Context, rt runtime.Runtime, containerName, sandboxName string, timeout time.Duration, user string) error {
+	jsonlPath := sandbox.SandboxJSONLPath(sandboxName)
 	deadline := time.Now().Add(timeout)
+	var lastExecErr error
 	for time.Now().Before(deadline) {
 		// Check if context was cancelled (e.g. Ctrl+C)
 		if ctx.Err() != nil {
@@ -400,11 +411,23 @@ func waitForTmux(ctx context.Context, rt runtime.Runtime, containerName string, 
 			return fmt.Errorf("container %s is not running", containerName)
 		}
 
-		// Check if tmux session exists
+		// Primary: check sandbox.jsonl for the "sandbox.tmux_start" event.
+		// The container writes this immediately after tmux new-session succeeds,
+		// so it's visible to the host without requiring docker exec.
+		if data, readErr := os.ReadFile(jsonlPath); readErr == nil { //nolint:gosec // G304: path from trusted sandbox dir
+			if bytes.Contains(data, []byte(`"sandbox.tmux_start"`)) {
+				return nil
+			}
+		}
+
+		// Fallback: docker exec tmux has-session (unreliable under gVisor).
 		_, err = rt.Exec(ctx, containerName, []string{"tmux", "has-session", "-t", "main"}, user)
 		if err == nil {
 			return nil
 		}
+		lastExecErr = err
+		slog.Debug("waitForTmux: exec check failed", "event", "sandbox.wait_tmux.exec_fail",
+			"container", containerName, "error", err)
 
 		// Context-aware sleep
 		select {
@@ -413,8 +436,9 @@ func waitForTmux(ctx context.Context, rt runtime.Runtime, containerName string, 
 		case <-time.After(500 * time.Millisecond):
 		}
 	}
-	// Include container logs in the error to surface setup failures
-	// (e.g. tmux failing to create a session under gVisor).
+	slog.Debug("waitForTmux: timed out", "event", "sandbox.wait_tmux.timeout",
+		"container", containerName, "last_exec_err", lastExecErr)
+	// Include container logs in the error to surface setup failures.
 	if logs := rt.Logs(ctx, containerName, 50); logs != "" {
 		return fmt.Errorf("tmux session not ready after %s\n\nContainer logs:\n%s", timeout, logs)
 	}

@@ -96,7 +96,7 @@ func runClone(cmd *cobra.Command, args []string) error {
 		}
 		user := tmuxExecUser(meta)
 		containerName := sandbox.InstanceName(dst)
-		if err := waitForTmux(ctx, rt, containerName, 30*time.Second, user); err != nil {
+		if err := waitForTmux(ctx, rt, containerName, dst, 30*time.Second, user); err != nil {
 			return fmt.Errorf("waiting for tmux session: %w", err)
 		}
 		return attachToSandbox(ctx, rt, containerName, dst, user)

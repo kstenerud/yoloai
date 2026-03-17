@@ -59,7 +59,7 @@ func newAttachCmd() *cobra.Command {
 					if err := mgr.Start(ctx, name, sandbox.StartOptions{Resume: true}); err != nil {
 						return err
 					}
-					if err := waitForTmux(ctx, rt, containerName, 30*time.Second, user); err != nil {
+					if err := waitForTmux(ctx, rt, containerName, name, 30*time.Second, user); err != nil {
 						return fmt.Errorf("waiting for tmux session: %w", err)
 					}
 				}
