@@ -504,19 +504,48 @@ func setTerminalTitle(title string) {
 // terminal that gVisor denies via /dev/tty (EACCES), and tmux only falls
 // back to stdin when errno is ENXIO — not EACCES.
 //
-// Fix: prefix with setsid(1), which creates a new session with no
+// Fix: prefix with setsid(1) for gVisor, which creates a new session with no
 // controlling terminal. /dev/tty then returns ENXIO (no controlling
 // terminal), tmux's ENXIO fallback activates, and it uses stdin — which IS
-// the PTY from `docker exec -it`. On standard Docker, setsid adds no
-// measurable overhead.
+// the PTY from `docker exec -it`.
+//
+// On standard Docker, setsid breaks attach because it removes the controlling
+// terminal that tmux needs. Use the script wrapper instead, which creates a
+// fresh PTY + controlling terminal via setsid + TIOCSCTTY.
 func attachToSandbox(ctx context.Context, rt runtime.Runtime, containerName, sandboxName string, user string) error {
 	setTerminalTitle(sandboxName)
 	defer setTerminalTitle("")
-	cmd := []string{"setsid", "tmux"}
-	if sock := readTmuxSocket(sandboxName); sock != "" {
-		cmd = append(cmd, "-S", sock)
+
+	// Load metadata to check security mode
+	meta, err := sandbox.LoadMeta(sandbox.Dir(sandboxName))
+	if err != nil {
+		return fmt.Errorf("load sandbox metadata: %w", err)
 	}
-	cmd = append(cmd, "attach", "-t", "main")
+
+	// Build tmux attach command
+	var cmd []string
+	sock := readTmuxSocket(sandboxName)
+
+	// For gVisor: use setsid to get ENXIO from /dev/tty so tmux uses stdin
+	if meta.Security == "gvisor" {
+		cmd = []string{"setsid", "tmux"}
+		if sock != "" {
+			cmd = append(cmd, "-S", sock)
+		}
+		cmd = append(cmd, "attach", "-t", "main")
+	} else {
+		// For standard Docker: use script wrapper to create a fresh PTY
+		var tmuxArgs string
+		if sock != "" {
+			tmuxArgs = fmt.Sprintf("exec tmux -S %s attach -t main", sock)
+		} else {
+			tmuxArgs = "exec tmux attach -t main"
+		}
+		// script -q -e -c <cmd> /dev/null: quiet, propagate exit status, run cmd,
+		// discard transcript. Creates a fresh PTY + controlling terminal.
+		cmd = []string{"script", "-q", "-e", "-c", tmuxArgs, "/dev/null"}
+	}
+
 	return rt.InteractiveExec(ctx, containerName, cmd, user, "")
 }
 
