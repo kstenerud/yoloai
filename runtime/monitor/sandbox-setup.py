@@ -134,7 +134,14 @@ def setup_tmux_session(cfg, yoloai_dir, socket=None):
         cmd = ["tmux"] + base_args + session_args
 
     log_debug("tmux.start", f"starting tmux session (tmux_conf={tmux_conf})")
-    subprocess.run(cmd, capture_output=True)
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        log_info("tmux.error", "tmux new-session failed",
+                 cmd=" ".join(cmd),
+                 exit_code=result.returncode,
+                 stdout=result.stdout.strip(),
+                 stderr=result.stderr.strip())
+        print(f"[sandbox-setup] tmux new-session failed (exit {result.returncode}): {result.stderr.strip()}", file=sys.stderr)
 
     # Source host tmux.conf on top of default if default+host
     if tmux_conf == "default+host" and host_tmux_conf and os.path.isfile(host_tmux_conf):
