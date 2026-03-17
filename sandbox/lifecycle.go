@@ -246,6 +246,9 @@ func (m *Manager) Reset(ctx context.Context, opts ResetOptions) error {
 	slog.Debug("clearing logs", "event", "sandbox.reset.logs", "sandbox", opts.Name)
 	_ = os.RemoveAll(filepath.Join(sandboxDir, LogsDir))
 	_ = mkdirAllPerm(filepath.Join(sandboxDir, LogsDir), 0777) //nolint:gosec // G301: world-writable needed for gVisor user-namespace UID remapping
+	for _, logFile := range []string{SandboxJSONLFile, MonitorJSONLFile, HooksJSONLFile} {
+		_ = writeFilePerm(filepath.Join(sandboxDir, logFile), nil, 0666) //nolint:gosec // G306: world-writable needed for gVisor user-namespace UID remapping
+	}
 
 	var newSHA string
 	if meta.Workdir.Mode == "overlay" {

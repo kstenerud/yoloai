@@ -578,6 +578,17 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 	if err := mkdirAllPerm(filepath.Join(sandboxDir, LogsDir), 0777); err != nil { //nolint:gosec // G301: world-writable needed for gVisor user-namespace UID remapping
 		return nil, fmt.Errorf("create logs dir: %w", err)
 	}
+	// Pre-create log files with 0666 so any uid inside the container can
+	// append to them. Without this, the entrypoint (running as root) creates
+	// the file, and sandbox-setup.py (re-execed as the yoloai user) gets
+	// EPERM when it tries to append — root inside a gVisor container maps to
+	// a different host uid than the yoloai user inside the same container.
+	for _, logFile := range []string{SandboxJSONLFile, MonitorJSONLFile, HooksJSONLFile} {
+		p := filepath.Join(sandboxDir, logFile)
+		if err := writeFilePerm(p, nil, 0666); err != nil { //nolint:gosec // G306: world-writable needed for gVisor user-namespace UID remapping
+			return nil, fmt.Errorf("create log file %s: %w", logFile, err)
+		}
+	}
 
 	if err := writeFilePerm(filepath.Join(sandboxDir, AgentStatusFile), []byte("{}\n"), 0666); err != nil { //nolint:gosec // G306: world-writable needed for gVisor user-namespace UID remapping
 		return nil, fmt.Errorf("write %s: %w", AgentStatusFile, err)
