@@ -69,21 +69,21 @@ func runSystemBuild(cmd *cobra.Command, args []string, backend string) error {
 	if len(args) > 0 {
 		// Build a specific profile's image chain
 		profileName := args[0]
-		if err := sandbox.ValidateProfileName(profileName); err != nil {
+		if err := config.ValidateProfileName(profileName); err != nil {
 			return err
 		}
-		if !sandbox.ProfileExists(profileName) {
+		if !config.ProfileExists(profileName) {
 			return fmt.Errorf("profile %q does not exist", profileName)
 		}
-		if !sandbox.ProfileHasDockerfile(profileName) {
+		if !config.ProfileHasDockerfile(profileName) {
 			// Check if any ancestor has a Dockerfile
-			chain, chainErr := sandbox.ResolveProfileChain(profileName)
+			chain, chainErr := config.ResolveProfileChain(profileName)
 			if chainErr != nil {
 				return chainErr
 			}
 			hasAny := false
 			for _, name := range chain {
-				if name != "base" && sandbox.ProfileHasDockerfile(name) {
+				if name != "base" && config.ProfileHasDockerfile(name) {
 					hasAny = true
 					break
 				}

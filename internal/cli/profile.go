@@ -13,6 +13,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	"github.com/kstenerud/yoloai/config"
 	"github.com/kstenerud/yoloai/sandbox"
 	"github.com/spf13/cobra"
 )
@@ -41,15 +42,15 @@ func newProfileCreateCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
-			if err := sandbox.ValidateProfileName(name); err != nil {
+			if err := config.ValidateProfileName(name); err != nil {
 				return err
 			}
 
-			if sandbox.ProfileExists(name) {
+			if config.ProfileExists(name) {
 				return fmt.Errorf("profile %q already exists", name)
 			}
 
-			dir := sandbox.ProfileDirPath(name)
+			dir := config.ProfileDirPath(name)
 			if err := os.MkdirAll(dir, 0750); err != nil {
 				return fmt.Errorf("create profile directory: %w", err)
 			}
@@ -103,7 +104,7 @@ func newProfileListCmd() *cobra.Command {
 		Short: "List profiles",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			names, err := sandbox.ListProfiles()
+			names, err := config.ListProfiles()
 			if err != nil {
 				return err
 			}
@@ -116,7 +117,7 @@ func newProfileListCmd() *cobra.Command {
 			w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
 			fmt.Fprintln(w, "NAME\tEXTENDS\tIMAGE\tAGENT") //nolint:errcheck
 			for _, name := range names {
-				profile, loadErr := sandbox.LoadProfile(name)
+				profile, loadErr := config.LoadProfile(name)
 				extends := "base"
 				agent := ""
 				image := "no"
@@ -126,7 +127,7 @@ func newProfileListCmd() *cobra.Command {
 					}
 					agent = profile.Agent
 				}
-				if sandbox.ProfileHasDockerfile(name) {
+				if config.ProfileHasDockerfile(name) {
 					image = "yes"
 				}
 				fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", name, extends, image, agent) //nolint:errcheck
@@ -143,7 +144,7 @@ func newProfileInfoCmd() *cobra.Command {
 		Short: "Show profile configuration",
 		Args:  cobra.ExactArgs(1),
 		ValidArgsFunction: func(_ *cobra.Command, _ []string, _ string) ([]string, cobra.ShellCompDirective) {
-			names, err := sandbox.ListProfiles()
+			names, err := config.ListProfiles()
 			if err != nil {
 				return nil, cobra.ShellCompDirectiveError
 			}
@@ -156,7 +157,7 @@ func newProfileInfoCmd() *cobra.Command {
 
 			var extends string
 			var chain []string
-			var merged *sandbox.MergedConfig
+			var merged *config.MergedConfig
 			var image string
 			var hasDockerfile bool
 
@@ -164,59 +165,59 @@ func newProfileInfoCmd() *cobra.Command {
 				// Base profile: no extends, no chain resolution needed
 				chain = []string{"base"}
 				image = "yoloai-base"
-				hasDockerfile = sandbox.ProfileHasDockerfile("base")
+				hasDockerfile = config.ProfileHasDockerfile("base")
 
-				baseCfg, err := sandbox.LoadConfig()
+				baseCfg, err := config.LoadConfig()
 				if err != nil {
 					return err
 				}
-				merged, err = sandbox.MergeProfileChain(baseCfg, chain)
+				merged, err = config.MergeProfileChain(baseCfg, chain)
 				if err != nil {
 					return err
 				}
 			} else {
-				if err := sandbox.ValidateProfileName(name); err != nil {
+				if err := config.ValidateProfileName(name); err != nil {
 					return err
 				}
-				if !sandbox.ProfileExists(name) {
+				if !config.ProfileExists(name) {
 					return fmt.Errorf("profile %q does not exist", name)
 				}
 
-				rawProfile, err := sandbox.LoadProfile(name)
+				rawProfile, err := config.LoadProfile(name)
 				if err != nil {
 					return err
 				}
 				extends = rawProfile.Extends
 
-				chain, err = sandbox.ResolveProfileChain(name)
+				chain, err = config.ResolveProfileChain(name)
 				if err != nil {
 					return err
 				}
 
-				baseCfg, err := sandbox.LoadConfig()
+				baseCfg, err := config.LoadConfig()
 				if err != nil {
 					return err
 				}
-				merged, err = sandbox.MergeProfileChain(baseCfg, chain)
+				merged, err = config.MergeProfileChain(baseCfg, chain)
 				if err != nil {
 					return err
 				}
 
-				image = sandbox.ResolveProfileImage(name, chain)
-				hasDockerfile = sandbox.ProfileHasDockerfile(name)
+				image = config.ResolveProfileImage(name, chain)
+				hasDockerfile = config.ProfileHasDockerfile(name)
 			}
 
 			if diffMode {
-				var parentMerged *sandbox.MergedConfig
+				var parentMerged *config.MergedConfig
 				if name == "base" {
-					parentMerged = &sandbox.MergedConfig{}
+					parentMerged = &config.MergedConfig{}
 				} else {
 					parentChain := chain[:len(chain)-1]
-					baseCfg, err := sandbox.LoadConfig()
+					baseCfg, err := config.LoadConfig()
 					if err != nil {
 						return err
 					}
-					parentMerged, err = sandbox.MergeProfileChain(baseCfg, parentChain)
+					parentMerged, err = config.MergeProfileChain(baseCfg, parentChain)
 					if err != nil {
 						return err
 					}
@@ -266,36 +267,36 @@ func newProfileInfoCmd() *cobra.Command {
 
 // profileInfoJSON is the JSON output structure for `profile info`.
 type profileInfoJSON struct {
-	Profile     string                  `json:"profile"`
-	Extends     string                  `json:"extends"`
-	Chain       []string                `json:"chain"`
-	Image       string                  `json:"image"`
-	Dockerfile  bool                    `json:"dockerfile"`
-	Agent       string                  `json:"agent,omitempty"`
-	Model       string                  `json:"model,omitempty"`
-	Backend     string                  `json:"backend,omitempty"`
-	TartImage   string                  `json:"tart_image,omitempty"`
-	Env         map[string]string       `json:"env,omitempty"`
-	AgentArgs   map[string]string       `json:"agent_args,omitempty"`
-	Ports       []string                `json:"ports,omitempty"`
-	Workdir     *sandbox.ProfileWorkdir `json:"workdir,omitempty"`
-	Directories []sandbox.ProfileDir    `json:"directories,omitempty"`
-	Resources   *sandbox.ResourceLimits `json:"resources,omitempty"`
-	Network     *sandbox.NetworkConfig  `json:"network,omitempty"`
-	Mounts      []string                `json:"mounts,omitempty"`
+	Profile     string                 `json:"profile"`
+	Extends     string                 `json:"extends"`
+	Chain       []string               `json:"chain"`
+	Image       string                 `json:"image"`
+	Dockerfile  bool                   `json:"dockerfile"`
+	Agent       string                 `json:"agent,omitempty"`
+	Model       string                 `json:"model,omitempty"`
+	Backend     string                 `json:"backend,omitempty"`
+	TartImage   string                 `json:"tart_image,omitempty"`
+	Env         map[string]string      `json:"env,omitempty"`
+	AgentArgs   map[string]string      `json:"agent_args,omitempty"`
+	Ports       []string               `json:"ports,omitempty"`
+	Workdir     *config.ProfileWorkdir `json:"workdir,omitempty"`
+	Directories []config.ProfileDir    `json:"directories,omitempty"`
+	Resources   *config.ResourceLimits `json:"resources,omitempty"`
+	Network     *config.NetworkConfig  `json:"network,omitempty"`
+	Mounts      []string               `json:"mounts,omitempty"`
 }
 
 // profileDiffJSON is the JSON output structure for `profile info --diff`.
 type profileDiffJSON struct {
-	Profile   string                `json:"profile"`
-	Extends   string                `json:"extends"`
-	Chain     []string              `json:"chain"`
-	Inherited *sandbox.MergedConfig `json:"inherited"`
-	Merged    *sandbox.MergedConfig `json:"merged"`
+	Profile   string               `json:"profile"`
+	Extends   string               `json:"extends"`
+	Chain     []string             `json:"chain"`
+	Inherited *config.MergedConfig `json:"inherited"`
+	Merged    *config.MergedConfig `json:"merged"`
 }
 
 // printProfileInfo renders the human-readable output for `profile info`.
-func printProfileInfo(cmd *cobra.Command, name, extends string, chain []string, image string, hasDockerfile bool, merged *sandbox.MergedConfig) error {
+func printProfileInfo(cmd *cobra.Command, name, extends string, chain []string, image string, hasDockerfile bool, merged *config.MergedConfig) error {
 	out := cmd.OutOrStdout()
 
 	fmt.Fprintf(out, "Profile:     %s\n", name) //nolint:errcheck
@@ -399,7 +400,7 @@ func printProfileInfo(cmd *cobra.Command, name, extends string, chain []string, 
 }
 
 // printProfileDiff renders the human-readable diff output for `profile info --diff`.
-func printProfileDiff(cmd *cobra.Command, name, extends string, chain []string, parent, merged *sandbox.MergedConfig) error {
+func printProfileDiff(cmd *cobra.Command, name, extends string, chain []string, parent, merged *config.MergedConfig) error {
 	out := cmd.OutOrStdout()
 
 	fmt.Fprintf(out, "Profile:   %s\n", name) //nolint:errcheck
@@ -523,7 +524,7 @@ func printListAdditions(out io.Writer, label string, old, new []string) bool {
 }
 
 // printWorkdirDiff prints workdir diff. Returns true if printed.
-func printWorkdirDiff(out io.Writer, old, new *sandbox.ProfileWorkdir) bool {
+func printWorkdirDiff(out io.Writer, old, new *config.ProfileWorkdir) bool {
 	if new == nil {
 		return false
 	}
@@ -541,7 +542,7 @@ func printWorkdirDiff(out io.Writer, old, new *sandbox.ProfileWorkdir) bool {
 }
 
 // formatWorkdir formats a ProfileWorkdir for display.
-func formatWorkdir(w *sandbox.ProfileWorkdir) string {
+func formatWorkdir(w *config.ProfileWorkdir) string {
 	s := w.Path
 	if w.Mode != "" {
 		s += " (" + w.Mode + ")"
@@ -553,7 +554,7 @@ func formatWorkdir(w *sandbox.ProfileWorkdir) string {
 }
 
 // printDirAdditions prints directory additions. Returns true if any printed.
-func printDirAdditions(out io.Writer, old, new []sandbox.ProfileDir) bool {
+func printDirAdditions(out io.Writer, old, new []config.ProfileDir) bool {
 	if len(new) <= len(old) {
 		return false
 	}
@@ -578,12 +579,12 @@ func printDirAdditions(out io.Writer, old, new []sandbox.ProfileDir) bool {
 }
 
 // printResourcesDiff prints per-field resources diff. Returns true if any printed.
-func printResourcesDiff(out io.Writer, old, new *sandbox.ResourceLimits) bool {
+func printResourcesDiff(out io.Writer, old, new *config.ResourceLimits) bool {
 	if new == nil {
 		return false
 	}
 	if old == nil {
-		old = &sandbox.ResourceLimits{}
+		old = &config.ResourceLimits{}
 	}
 
 	var lines []string
@@ -614,12 +615,12 @@ func printResourcesDiff(out io.Writer, old, new *sandbox.ResourceLimits) bool {
 }
 
 // printNetworkDiff prints network config diff. Returns true if any printed.
-func printNetworkDiff(out io.Writer, old, new *sandbox.NetworkConfig) bool {
+func printNetworkDiff(out io.Writer, old, new *config.NetworkConfig) bool {
 	if new == nil {
 		return false
 	}
 	if old == nil {
-		old = &sandbox.NetworkConfig{}
+		old = &config.NetworkConfig{}
 	}
 
 	hasDiff := false
@@ -659,16 +660,16 @@ func newProfileDeleteCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
-			if err := sandbox.ValidateProfileName(name); err != nil {
+			if err := config.ValidateProfileName(name); err != nil {
 				return err
 			}
 
-			if !sandbox.ProfileExists(name) {
+			if !config.ProfileExists(name) {
 				return fmt.Errorf("profile %q does not exist", name)
 			}
 
 			// Check if other profiles extend this one
-			allProfiles, err := sandbox.ListProfiles()
+			allProfiles, err := config.ListProfiles()
 			if err != nil {
 				return err
 			}
@@ -677,7 +678,7 @@ func newProfileDeleteCmd() *cobra.Command {
 				if other == name {
 					continue
 				}
-				profile, loadErr := sandbox.LoadProfile(other)
+				profile, loadErr := config.LoadProfile(other)
 				if loadErr != nil {
 					continue
 				}
@@ -706,7 +707,7 @@ func newProfileDeleteCmd() *cobra.Command {
 				}
 			}
 
-			dir := sandbox.ProfileDirPath(name)
+			dir := config.ProfileDirPath(name)
 			if err := os.RemoveAll(dir); err != nil {
 				return fmt.Errorf("remove profile directory: %w", err)
 			}

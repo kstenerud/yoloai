@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/kstenerud/yoloai/agent"
+	"github.com/kstenerud/yoloai/config"
 	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/workspace"
 )
@@ -378,7 +379,7 @@ func TestBuildContainerConfig_AutoCommitIntervalZero(t *testing.T) {
 func TestParseResourceLimits(t *testing.T) {
 	tests := []struct {
 		name    string
-		input   *ResourceLimits
+		input   *config.ResourceLimits
 		wantCPU int64
 		wantMem int64
 		wantNil bool
@@ -386,33 +387,33 @@ func TestParseResourceLimits(t *testing.T) {
 	}{
 		{
 			name:    "both set",
-			input:   &ResourceLimits{CPUs: "4", Memory: "8g"},
+			input:   &config.ResourceLimits{CPUs: "4", Memory: "8g"},
 			wantCPU: 4_000_000_000,
 			wantMem: 8 * 1024 * 1024 * 1024,
 		},
 		{
 			name:    "cpus only",
-			input:   &ResourceLimits{CPUs: "2.5"},
+			input:   &config.ResourceLimits{CPUs: "2.5"},
 			wantCPU: 2_500_000_000,
 		},
 		{
 			name:    "memory only",
-			input:   &ResourceLimits{Memory: "512m"},
+			input:   &config.ResourceLimits{Memory: "512m"},
 			wantMem: 512 * 1024 * 1024,
 		},
 		{
 			name:    "neither set",
-			input:   &ResourceLimits{},
+			input:   &config.ResourceLimits{},
 			wantNil: true,
 		},
 		{
 			name:    "invalid cpus",
-			input:   &ResourceLimits{CPUs: "abc"},
+			input:   &config.ResourceLimits{CPUs: "abc"},
 			wantErr: true,
 		},
 		{
 			name:    "invalid memory",
-			input:   &ResourceLimits{Memory: "xyz"},
+			input:   &config.ResourceLimits{Memory: "xyz"},
 			wantErr: true,
 		},
 	}

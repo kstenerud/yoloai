@@ -146,11 +146,11 @@ func TestRunNewUserSetup_LargeConfig_AutoConfigures(t *testing.T) {
 	err := mgr.runNewUserSetup(context.Background(), SetupOptions{})
 	require.NoError(t, err)
 
-	state, err := LoadState()
+	state, err := config.LoadState()
 	require.NoError(t, err)
 	assert.True(t, state.SetupComplete)
 
-	gcfg, err := LoadGlobalConfig()
+	gcfg, err := config.LoadGlobalConfig()
 	require.NoError(t, err)
 	assert.Equal(t, "default+host", gcfg.TmuxConf)
 }
@@ -163,11 +163,11 @@ func TestRunNewUserSetup_NoConfig_AnswerY(t *testing.T) {
 	err := mgr.runNewUserSetup(context.Background(), SetupOptions{})
 	require.NoError(t, err)
 
-	state, err := LoadState()
+	state, err := config.LoadState()
 	require.NoError(t, err)
 	assert.True(t, state.SetupComplete)
 
-	gcfg, err := LoadGlobalConfig()
+	gcfg, err := config.LoadGlobalConfig()
 	require.NoError(t, err)
 	assert.Equal(t, "default", gcfg.TmuxConf)
 	assert.Contains(t, output.String(), "Setup complete")
@@ -181,11 +181,11 @@ func TestRunNewUserSetup_NoConfig_AnswerEmpty(t *testing.T) {
 	err := mgr.runNewUserSetup(context.Background(), SetupOptions{})
 	require.NoError(t, err)
 
-	state, err := LoadState()
+	state, err := config.LoadState()
 	require.NoError(t, err)
 	assert.True(t, state.SetupComplete)
 
-	gcfg, err := LoadGlobalConfig()
+	gcfg, err := config.LoadGlobalConfig()
 	require.NoError(t, err)
 	assert.Equal(t, "default", gcfg.TmuxConf)
 }
@@ -198,11 +198,11 @@ func TestRunNewUserSetup_NoConfig_AnswerN(t *testing.T) {
 	err := mgr.runNewUserSetup(context.Background(), SetupOptions{})
 	require.NoError(t, err)
 
-	state, err := LoadState()
+	state, err := config.LoadState()
 	require.NoError(t, err)
 	assert.True(t, state.SetupComplete)
 
-	gcfg, err := LoadGlobalConfig()
+	gcfg, err := config.LoadGlobalConfig()
 	require.NoError(t, err)
 	assert.Equal(t, "none", gcfg.TmuxConf)
 }
@@ -215,7 +215,7 @@ func TestRunNewUserSetup_NoConfig_AnswerP(t *testing.T) {
 	assert.ErrorIs(t, err, errSetupPreview)
 
 	// setup_complete should NOT be set (preview exits early)
-	state, err := LoadState()
+	state, err := config.LoadState()
 	require.NoError(t, err)
 	assert.False(t, state.SetupComplete)
 
@@ -233,11 +233,11 @@ func TestRunNewUserSetup_SmallConfig_AnswerY(t *testing.T) {
 	err := mgr.runNewUserSetup(context.Background(), SetupOptions{})
 	require.NoError(t, err)
 
-	state, err := LoadState()
+	state, err := config.LoadState()
 	require.NoError(t, err)
 	assert.True(t, state.SetupComplete)
 
-	gcfg, err := LoadGlobalConfig()
+	gcfg, err := config.LoadGlobalConfig()
 	require.NoError(t, err)
 	assert.Equal(t, "default+host", gcfg.TmuxConf)
 }
@@ -253,11 +253,11 @@ func TestRunNewUserSetup_SmallConfig_AnswerN(t *testing.T) {
 	err := mgr.runNewUserSetup(context.Background(), SetupOptions{})
 	require.NoError(t, err)
 
-	state, err := LoadState()
+	state, err := config.LoadState()
 	require.NoError(t, err)
 	assert.True(t, state.SetupComplete)
 
-	gcfg, err := LoadGlobalConfig()
+	gcfg, err := config.LoadGlobalConfig()
 	require.NoError(t, err)
 	assert.Equal(t, "host", gcfg.TmuxConf)
 }
@@ -284,11 +284,11 @@ func TestRunNewUserSetup_EOF_DefaultsToY(t *testing.T) {
 	err := mgr.runNewUserSetup(context.Background(), SetupOptions{})
 	require.NoError(t, err)
 
-	state, err := LoadState()
+	state, err := config.LoadState()
 	require.NoError(t, err)
 	assert.True(t, state.SetupComplete)
 
-	gcfg, err := LoadGlobalConfig()
+	gcfg, err := config.LoadGlobalConfig()
 	require.NoError(t, err)
 	assert.Equal(t, "default", gcfg.TmuxConf)
 }
@@ -332,7 +332,7 @@ func TestPromptBackendSetup_ShownOnLinux(t *testing.T) {
 	assert.Contains(t, output.String(), "docker")
 	assert.Contains(t, output.String(), "podman")
 
-	cfg, err := LoadConfig()
+	cfg, err := config.LoadConfig()
 	require.NoError(t, err)
 	assert.Equal(t, "docker", cfg.Backend)
 }
@@ -350,7 +350,7 @@ func TestPromptBackendSetup_ShownOnMacOS(t *testing.T) {
 	assert.Contains(t, output.String(), "seatbelt")
 	assert.Contains(t, output.String(), "tart")
 
-	cfg, err := LoadConfig()
+	cfg, err := config.LoadConfig()
 	require.NoError(t, err)
 	assert.Equal(t, "docker", cfg.Backend)
 }
@@ -362,7 +362,7 @@ func TestPromptBackendSetup_SelectSeatbelt(t *testing.T) {
 	err := mgr.promptBackendSetup(context.Background())
 	require.NoError(t, err)
 
-	cfg, err := LoadConfig()
+	cfg, err := config.LoadConfig()
 	require.NoError(t, err)
 	assert.Equal(t, "seatbelt", cfg.Backend)
 }
@@ -374,7 +374,7 @@ func TestPromptBackendSetup_SelectTart(t *testing.T) {
 	err := mgr.promptBackendSetup(context.Background())
 	require.NoError(t, err)
 
-	cfg, err := LoadConfig()
+	cfg, err := config.LoadConfig()
 	require.NoError(t, err)
 	assert.Equal(t, "tart", cfg.Backend)
 }
@@ -386,7 +386,7 @@ func TestPromptBackendSetup_InvalidInputDefaultsToFirst(t *testing.T) {
 	err := mgr.promptBackendSetup(context.Background())
 	require.NoError(t, err)
 
-	cfg, err := LoadConfig()
+	cfg, err := config.LoadConfig()
 	require.NoError(t, err)
 	assert.Equal(t, "docker", cfg.Backend)
 }
@@ -410,7 +410,7 @@ func TestPromptAgentSetup_DefaultSelectsFirst(t *testing.T) {
 
 	assert.Contains(t, output.String(), "Default agent")
 
-	cfg, err := LoadConfig()
+	cfg, err := config.LoadConfig()
 	require.NoError(t, err)
 	assert.Equal(t, "aider", cfg.Agent)
 }
@@ -421,7 +421,7 @@ func TestPromptAgentSetup_SelectSecond(t *testing.T) {
 	err := mgr.promptAgentSetup(context.Background())
 	require.NoError(t, err)
 
-	cfg, err := LoadConfig()
+	cfg, err := config.LoadConfig()
 	require.NoError(t, err)
 	assert.Equal(t, "claude", cfg.Agent)
 }
@@ -436,15 +436,15 @@ func TestRunNewUserSetup_FullFlow_MacOS(t *testing.T) {
 	err := mgr.runNewUserSetup(context.Background(), SetupOptions{})
 	require.NoError(t, err)
 
-	state, err := LoadState()
+	state, err := config.LoadState()
 	require.NoError(t, err)
 	assert.True(t, state.SetupComplete)
 
-	gcfg, err := LoadGlobalConfig()
+	gcfg, err := config.LoadGlobalConfig()
 	require.NoError(t, err)
 	assert.Equal(t, "default", gcfg.TmuxConf)
 
-	cfg, err := LoadConfig()
+	cfg, err := config.LoadConfig()
 	require.NoError(t, err)
 	assert.Equal(t, "seatbelt", cfg.Backend)
 	assert.Equal(t, "codex", cfg.Agent)
@@ -459,15 +459,15 @@ func TestRunNewUserSetup_FullFlow_Linux_ShowsBackend(t *testing.T) {
 	err := mgr.runNewUserSetup(context.Background(), SetupOptions{})
 	require.NoError(t, err)
 
-	state, err := LoadState()
+	state, err := config.LoadState()
 	require.NoError(t, err)
 	assert.True(t, state.SetupComplete)
 
-	gcfg, err := LoadGlobalConfig()
+	gcfg, err := config.LoadGlobalConfig()
 	require.NoError(t, err)
 	assert.Equal(t, "default", gcfg.TmuxConf)
 
-	cfg, err := LoadConfig()
+	cfg, err := config.LoadConfig()
 	require.NoError(t, err)
 	assert.Equal(t, "docker", cfg.Backend)
 	assert.Equal(t, "aider", cfg.Agent)
@@ -486,15 +486,15 @@ func TestRunNewUserSetup_LargeConfig_StillAsksBackendAndAgent(t *testing.T) {
 	err := mgr.runNewUserSetup(context.Background(), SetupOptions{})
 	require.NoError(t, err)
 
-	state, err := LoadState()
+	state, err := config.LoadState()
 	require.NoError(t, err)
 	assert.True(t, state.SetupComplete)
 
-	gcfg, err := LoadGlobalConfig()
+	gcfg, err := config.LoadGlobalConfig()
 	require.NoError(t, err)
 	assert.Equal(t, "default+host", gcfg.TmuxConf)
 
-	cfg, err := LoadConfig()
+	cfg, err := config.LoadConfig()
 	require.NoError(t, err)
 	assert.Equal(t, "tart", cfg.Backend)
 	assert.Equal(t, "codex", cfg.Agent)
@@ -512,7 +512,7 @@ func TestRunNewUserSetup_WithAgentFlag(t *testing.T) {
 	err := mgr.runNewUserSetup(context.Background(), SetupOptions{Agent: "claude"})
 	require.NoError(t, err)
 
-	cfg, err := LoadConfig()
+	cfg, err := config.LoadConfig()
 	require.NoError(t, err)
 	assert.Equal(t, "claude", cfg.Agent)
 	assert.NotContains(t, output.String(), "Default agent")
@@ -526,7 +526,7 @@ func TestRunNewUserSetup_WithBackendFlag(t *testing.T) {
 	err := mgr.runNewUserSetup(context.Background(), SetupOptions{Backend: "seatbelt"})
 	require.NoError(t, err)
 
-	cfg, err := LoadConfig()
+	cfg, err := config.LoadConfig()
 	require.NoError(t, err)
 	assert.Equal(t, "seatbelt", cfg.Backend)
 	assert.NotContains(t, output.String(), "Default runtime backend")
@@ -541,7 +541,7 @@ func TestRunNewUserSetup_WithTmuxConfFlag(t *testing.T) {
 	err := mgr.runNewUserSetup(context.Background(), SetupOptions{TmuxConf: "host"})
 	require.NoError(t, err)
 
-	gcfg, err := LoadGlobalConfig()
+	gcfg, err := config.LoadGlobalConfig()
 	require.NoError(t, err)
 	assert.Equal(t, "host", gcfg.TmuxConf)
 	assert.NotContains(t, output.String(), "tmux")
@@ -560,15 +560,15 @@ func TestRunNewUserSetup_AllFlags_NonInteractive(t *testing.T) {
 	err := mgr.runNewUserSetup(context.Background(), opts)
 	require.NoError(t, err)
 
-	state, err := LoadState()
+	state, err := config.LoadState()
 	require.NoError(t, err)
 	assert.True(t, state.SetupComplete)
 
-	gcfg, err := LoadGlobalConfig()
+	gcfg, err := config.LoadGlobalConfig()
 	require.NoError(t, err)
 	assert.Equal(t, "default", gcfg.TmuxConf)
 
-	cfg, err := LoadConfig()
+	cfg, err := config.LoadConfig()
 	require.NoError(t, err)
 	assert.Equal(t, "docker", cfg.Backend)
 	assert.Equal(t, "gemini", cfg.Agent)
@@ -621,7 +621,7 @@ func TestRunNewUserSetup_BackendDockerOnLinux_OK(t *testing.T) {
 	err := mgr.runNewUserSetup(context.Background(), opts)
 	require.NoError(t, err)
 
-	cfg, err := LoadConfig()
+	cfg, err := config.LoadConfig()
 	require.NoError(t, err)
 	assert.Equal(t, "docker", cfg.Backend)
 }

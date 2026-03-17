@@ -101,7 +101,7 @@ func (p *ProxyServer) ensureRunning(ctx context.Context) (*sandbox.Meta, error) 
 
 	case sandbox.StatusStopped, sandbox.StatusRemoved:
 		// Container stopped or removed — restart it
-		if err := p.mgr.Start(ctx, p.sandboxName, sandbox.StartOpts{}); err != nil {
+		if err := p.mgr.Start(ctx, p.sandboxName, sandbox.StartOptions{}); err != nil {
 			return nil, fmt.Errorf("start sandbox %q: %w", p.sandboxName, err)
 		}
 		return info.Meta, nil

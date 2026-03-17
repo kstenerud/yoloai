@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kstenerud/yoloai/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -137,7 +138,7 @@ func TestMeta_ResourcesRoundTrip(t *testing.T) {
 			MountPath: "/tmp/project",
 			Mode:      "copy",
 		},
-		Resources: &ResourceLimits{
+		Resources: &config.ResourceLimits{
 			CPUs:   "4",
 			Memory: "8g",
 		},

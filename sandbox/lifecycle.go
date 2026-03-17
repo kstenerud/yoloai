@@ -41,15 +41,15 @@ func (m *Manager) Stop(ctx context.Context, name string) error {
 	return m.runtime.Stop(ctx, InstanceName(name))
 }
 
-// StartOpts holds parameters for the start command.
-type StartOpts struct {
+// StartOptions holds parameters for the start command.
+type StartOptions struct {
 	Resume     bool   // re-feed original prompt with continuation preamble
 	Prompt     string // if set, overwrite prompt.txt and send directly (no preamble)
 	PromptFile string // if set, read from file, overwrite prompt.txt, send directly
 }
 
 // Start ensures a sandbox is running — idempotent.
-func (m *Manager) Start(ctx context.Context, name string, opts StartOpts) error {
+func (m *Manager) Start(ctx context.Context, name string, opts StartOptions) error {
 	slog.Info("starting sandbox", "event", "sandbox.start", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
 	sandboxDir, err := RequireSandboxDir(name)
 	if err != nil {
@@ -390,7 +390,7 @@ func (m *Manager) Reset(ctx context.Context, opts ResetOptions) error {
 
 	slog.Info("reset complete", "event", "sandbox.reset.complete", "sandbox", opts.Name)
 	// Start the container
-	return m.Start(ctx, opts.Name, StartOpts{})
+	return m.Start(ctx, opts.Name, StartOptions{})
 }
 
 // NeedsConfirmation checks if a sandbox requires confirmation before

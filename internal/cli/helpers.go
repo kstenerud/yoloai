@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/kstenerud/yoloai/config"
 	"github.com/kstenerud/yoloai/runtime"
 	dockerrt "github.com/kstenerud/yoloai/runtime/docker"
 	podmanrt "github.com/kstenerud/yoloai/runtime/podman"
@@ -69,7 +70,7 @@ func resolveBackendForSandbox(name string) string {
 // to "docker". Used by commands that don't have a specific sandbox context
 // (e.g., list, stop --all).
 func resolveBackendFromConfig() string {
-	cfg, err := sandbox.LoadConfig()
+	cfg, err := config.LoadConfig()
 	if err == nil && cfg.Backend != "" {
 		return cfg.Backend
 	}
@@ -98,7 +99,7 @@ func resolveAgent(cmd *cobra.Command) string {
 // resolveAgentFromConfig reads the agent from config.yaml, falling back
 // to "claude".
 func resolveAgentFromConfig() string {
-	cfg, err := sandbox.LoadConfig()
+	cfg, err := config.LoadConfig()
 	if err == nil && cfg.Agent != "" {
 		return cfg.Agent
 	}
@@ -117,7 +118,7 @@ func resolveModel(cmd *cobra.Command) string {
 // resolveModelFromConfig reads the model from config.yaml, falling back
 // to "" (no default model — agent uses its own).
 func resolveModelFromConfig() string {
-	cfg, err := sandbox.LoadConfig()
+	cfg, err := config.LoadConfig()
 	if err == nil && cfg.Model != "" {
 		return cfg.Model
 	}
@@ -139,7 +140,7 @@ func resolveProfile(cmd *cobra.Command) string {
 // resolveProfileFromConfig reads the profile from config.yaml, falling back
 // to "" (no default profile).
 func resolveProfileFromConfig() string {
-	cfg, err := sandbox.LoadConfig()
+	cfg, err := config.LoadConfig()
 	if err == nil && cfg.Profile != "" {
 		return cfg.Profile
 	}

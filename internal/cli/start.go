@@ -43,7 +43,7 @@ func newStartCmd() *cobra.Command {
 			backend := resolveBackendForSandbox(name)
 			return withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
 				mgr := sandbox.NewManager(rt, slog.Default(), cmd.InOrStdin(), cmd.ErrOrStderr())
-				if err := mgr.Start(ctx, name, sandbox.StartOpts{
+				if err := mgr.Start(ctx, name, sandbox.StartOptions{
 					Resume:     resume,
 					Prompt:     prompt,
 					PromptFile: promptFile,

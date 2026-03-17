@@ -48,7 +48,7 @@ func newRestartCmd() *cobra.Command {
 				if err := mgr.Stop(ctx, name); err != nil {
 					return err
 				}
-				if err := mgr.Start(ctx, name, sandbox.StartOpts{
+				if err := mgr.Start(ctx, name, sandbox.StartOptions{
 					Resume:     resume,
 					Prompt:     prompt,
 					PromptFile: promptFile,

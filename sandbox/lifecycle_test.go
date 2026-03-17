@@ -177,7 +177,7 @@ func TestStart_AlreadyRunning(t *testing.T) {
 	// DetectStatus will call Inspect (running=true),
 	// then try Exec for tmux. Since our mock returns errMockNotImplemented
 	// for exec, DetectStatus defaults to StatusActive.
-	err := mgr.Start(context.Background(), "test-start-running", StartOpts{})
+	err := mgr.Start(context.Background(), "test-start-running", StartOptions{})
 	require.NoError(t, err)
 	assert.Contains(t, output.String(), "already running")
 }
@@ -203,7 +203,7 @@ func TestStart_Stopped(t *testing.T) {
 
 	// After remove, Start routes to recreateContainer which fails
 	// (no runtime-config.json) — same pattern as TestStart_Removed.
-	err := mgr.Start(context.Background(), "test-start-stopped", StartOpts{})
+	err := mgr.Start(context.Background(), "test-start-stopped", StartOptions{})
 	assert.Error(t, err)
 	assert.True(t, removeCalled, "should remove stopped container before recreating")
 	assert.Contains(t, err.Error(), RuntimeConfigFile)
@@ -215,7 +215,7 @@ func TestStart_SandboxNotFound(t *testing.T) {
 
 	mock := &lifecycleMockRuntime{}
 	mgr := newLifecycleMgr(mock)
-	err := mgr.Start(context.Background(), "nonexistent", StartOpts{})
+	err := mgr.Start(context.Background(), "nonexistent", StartOptions{})
 	assert.ErrorIs(t, err, ErrSandboxNotFound)
 }
 
@@ -235,7 +235,7 @@ func TestStart_Removed(t *testing.T) {
 
 	// recreateContainer will fail because there's no runtime-config.json,
 	// but we're testing that Start routes to recreateContainer for StatusRemoved.
-	err := mgr.Start(context.Background(), "test-start-removed", StartOpts{})
+	err := mgr.Start(context.Background(), "test-start-removed", StartOptions{})
 	assert.Error(t, err)
 	// Should be a recreateContainer error (runtime-config.json missing), not a routing error
 	assert.Contains(t, err.Error(), RuntimeConfigFile)
@@ -255,7 +255,7 @@ func TestStart_Resume_RequiresPrompt(t *testing.T) {
 	}
 
 	mgr := newLifecycleMgr(mock)
-	err := mgr.Start(context.Background(), "test-resume-noprompt", StartOpts{Resume: true})
+	err := mgr.Start(context.Background(), "test-resume-noprompt", StartOptions{Resume: true})
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "--resume requires a sandbox created with --prompt")
 }
@@ -318,7 +318,7 @@ func TestStart_Resume_DoneStatus(t *testing.T) {
 	}
 
 	mgr := newLifecycleMgr(mock)
-	_ = mgr.Start(context.Background(), name, StartOpts{Resume: true})
+	_ = mgr.Start(context.Background(), name, StartOptions{Resume: true})
 	// The sendResumePrompt exec might fail but the respawn should have happened
 	// We just check that the respawn used interactive command (no headless prompt)
 
@@ -385,7 +385,7 @@ func TestStart_Resume_StoppedStatus(t *testing.T) {
 	// Start with resume will call prepareResumeFiles then recreateContainer.
 	// recreateContainer will fail (no work dir, no secrets etc.) but we can check
 	// that resume-prompt.txt was created and runtime-config.json was patched.
-	_ = mgr.Start(context.Background(), name, StartOpts{Resume: true})
+	_ = mgr.Start(context.Background(), name, StartOptions{Resume: true})
 
 	// Verify runtime-config.json was patched to interactive command
 	updatedCfgData, err := os.ReadFile(filepath.Join(sandboxDir, RuntimeConfigFile)) //nolint:gosec // test file in controlled temp dir

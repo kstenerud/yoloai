@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/kstenerud/yoloai/sandbox"
+	"github.com/kstenerud/yoloai/config"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
@@ -42,7 +42,7 @@ Profile settings are stored in ~/.yoloai/profiles/base/config.yaml.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 0 {
-				out, err := sandbox.GetEffectiveConfig()
+				out, err := config.GetEffectiveConfig()
 				if err != nil {
 					return err
 				}
@@ -57,7 +57,7 @@ Profile settings are stored in ~/.yoloai/profiles/base/config.yaml.`,
 				return err
 			}
 
-			value, found, err := sandbox.GetConfigValue(args[0])
+			value, found, err := config.GetConfigValue(args[0])
 			if err != nil {
 				return err
 			}
@@ -93,8 +93,8 @@ Global settings (tmux_conf, model_aliases) are stored in ~/.yoloai/config.yaml.
 Profile settings are stored in ~/.yoloai/profiles/base/config.yaml.`,
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if sandbox.IsGlobalKey(args[0]) {
-				configPath := sandbox.GlobalConfigPath()
+			if config.IsGlobalKey(args[0]) {
+				configPath := config.GlobalConfigPath()
 				if _, err := os.Stat(configPath); os.IsNotExist(err) {
 					dir := configPath[:len(configPath)-len("/config.yaml")]
 					if err := os.MkdirAll(dir, 0750); err != nil {
@@ -104,13 +104,13 @@ Profile settings are stored in ~/.yoloai/profiles/base/config.yaml.`,
 						return fmt.Errorf("create config.yaml: %w", err)
 					}
 				}
-				if err := sandbox.UpdateGlobalConfigFields(map[string]string{
+				if err := config.UpdateGlobalConfigFields(map[string]string{
 					args[0]: args[1],
 				}); err != nil {
 					return err
 				}
 			} else {
-				configPath := sandbox.ConfigPath()
+				configPath := config.ConfigPath()
 				if _, err := os.Stat(configPath); os.IsNotExist(err) {
 					dir := configPath[:len(configPath)-len("/config.yaml")]
 					if err := os.MkdirAll(dir, 0750); err != nil {
@@ -120,7 +120,7 @@ Profile settings are stored in ~/.yoloai/profiles/base/config.yaml.`,
 						return fmt.Errorf("create config.yaml: %w", err)
 					}
 				}
-				if err := sandbox.UpdateConfigFields(map[string]string{
+				if err := config.UpdateConfigFields(map[string]string{
 					args[0]: args[1],
 				}); err != nil {
 					return err
@@ -153,10 +153,10 @@ Profile settings are stored in ~/.yoloai/profiles/base/config.yaml.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var err error
-			if sandbox.IsGlobalKey(args[0]) {
-				err = sandbox.DeleteGlobalConfigField(args[0])
+			if config.IsGlobalKey(args[0]) {
+				err = config.DeleteGlobalConfigField(args[0])
 			} else {
-				err = sandbox.DeleteConfigField(args[0])
+				err = config.DeleteConfigField(args[0])
 			}
 			if err != nil {
 				return err

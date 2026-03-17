@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/kstenerud/yoloai/sandbox"
+	"github.com/kstenerud/yoloai/config"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -100,13 +100,13 @@ func TestPrintListAdditions_ShorterNew(t *testing.T) {
 
 func TestPrintWorkdirDiff_NilNew(t *testing.T) {
 	var buf bytes.Buffer
-	printed := printWorkdirDiff(&buf, &sandbox.ProfileWorkdir{Path: "/a"}, nil)
+	printed := printWorkdirDiff(&buf, &config.ProfileWorkdir{Path: "/a"}, nil)
 	assert.False(t, printed)
 }
 
 func TestPrintWorkdirDiff_NilOld(t *testing.T) {
 	var buf bytes.Buffer
-	printed := printWorkdirDiff(&buf, nil, &sandbox.ProfileWorkdir{Path: "/a"})
+	printed := printWorkdirDiff(&buf, nil, &config.ProfileWorkdir{Path: "/a"})
 	assert.True(t, printed)
 	assert.Contains(t, buf.String(), "+ Workdir:")
 	assert.Contains(t, buf.String(), "/a")
@@ -114,8 +114,8 @@ func TestPrintWorkdirDiff_NilOld(t *testing.T) {
 
 func TestPrintWorkdirDiff_Changed(t *testing.T) {
 	var buf bytes.Buffer
-	old := &sandbox.ProfileWorkdir{Path: "/a"}
-	new := &sandbox.ProfileWorkdir{Path: "/b"}
+	old := &config.ProfileWorkdir{Path: "/a"}
+	new := &config.ProfileWorkdir{Path: "/b"}
 	printed := printWorkdirDiff(&buf, old, new)
 	assert.True(t, printed)
 	assert.Contains(t, buf.String(), "~ Workdir:")
@@ -123,7 +123,7 @@ func TestPrintWorkdirDiff_Changed(t *testing.T) {
 
 func TestPrintWorkdirDiff_Same(t *testing.T) {
 	var buf bytes.Buffer
-	w := &sandbox.ProfileWorkdir{Path: "/a", Mode: "copy"}
+	w := &config.ProfileWorkdir{Path: "/a", Mode: "copy"}
 	printed := printWorkdirDiff(&buf, w, w)
 	assert.False(t, printed)
 }
@@ -131,17 +131,17 @@ func TestPrintWorkdirDiff_Same(t *testing.T) {
 // --- formatWorkdir ---
 
 func TestFormatWorkdir_PathOnly(t *testing.T) {
-	w := &sandbox.ProfileWorkdir{Path: "/home/user/project"}
+	w := &config.ProfileWorkdir{Path: "/home/user/project"}
 	assert.Equal(t, "/home/user/project", formatWorkdir(w))
 }
 
 func TestFormatWorkdir_PathAndMode(t *testing.T) {
-	w := &sandbox.ProfileWorkdir{Path: "/home/user/project", Mode: "copy"}
+	w := &config.ProfileWorkdir{Path: "/home/user/project", Mode: "copy"}
 	assert.Equal(t, "/home/user/project (copy)", formatWorkdir(w))
 }
 
 func TestFormatWorkdir_PathModeAndMount(t *testing.T) {
-	w := &sandbox.ProfileWorkdir{Path: "/home/user/project", Mode: "copy", Mount: "/app"}
+	w := &config.ProfileWorkdir{Path: "/home/user/project", Mode: "copy", Mount: "/app"}
 	assert.Equal(t, "/home/user/project (copy) → /app", formatWorkdir(w))
 }
 
@@ -149,13 +149,13 @@ func TestFormatWorkdir_PathModeAndMount(t *testing.T) {
 
 func TestPrintResourcesDiff_NilNew(t *testing.T) {
 	var buf bytes.Buffer
-	printed := printResourcesDiff(&buf, &sandbox.ResourceLimits{CPUs: "2"}, nil)
+	printed := printResourcesDiff(&buf, &config.ResourceLimits{CPUs: "2"}, nil)
 	assert.False(t, printed)
 }
 
 func TestPrintResourcesDiff_NilOld(t *testing.T) {
 	var buf bytes.Buffer
-	printed := printResourcesDiff(&buf, nil, &sandbox.ResourceLimits{CPUs: "4"})
+	printed := printResourcesDiff(&buf, nil, &config.ResourceLimits{CPUs: "4"})
 	assert.True(t, printed)
 	assert.Contains(t, buf.String(), "Resources:")
 	assert.Contains(t, buf.String(), "+ cpus:")
@@ -164,8 +164,8 @@ func TestPrintResourcesDiff_NilOld(t *testing.T) {
 
 func TestPrintResourcesDiff_Changed(t *testing.T) {
 	var buf bytes.Buffer
-	old := &sandbox.ResourceLimits{CPUs: "2"}
-	new := &sandbox.ResourceLimits{CPUs: "4"}
+	old := &config.ResourceLimits{CPUs: "2"}
+	new := &config.ResourceLimits{CPUs: "4"}
 	printed := printResourcesDiff(&buf, old, new)
 	assert.True(t, printed)
 	assert.Contains(t, buf.String(), "~ cpus:")
@@ -175,7 +175,7 @@ func TestPrintResourcesDiff_Changed(t *testing.T) {
 
 func TestPrintResourcesDiff_NoChange(t *testing.T) {
 	var buf bytes.Buffer
-	r := &sandbox.ResourceLimits{CPUs: "2", Memory: "4g"}
+	r := &config.ResourceLimits{CPUs: "2", Memory: "4g"}
 	printed := printResourcesDiff(&buf, r, r)
 	assert.False(t, printed)
 }
@@ -184,14 +184,14 @@ func TestPrintResourcesDiff_NoChange(t *testing.T) {
 
 func TestPrintNetworkDiff_NilNew(t *testing.T) {
 	var buf bytes.Buffer
-	printed := printNetworkDiff(&buf, &sandbox.NetworkConfig{Isolated: true}, nil)
+	printed := printNetworkDiff(&buf, &config.NetworkConfig{Isolated: true}, nil)
 	assert.False(t, printed)
 }
 
 func TestPrintNetworkDiff_IsolatedChanged(t *testing.T) {
 	var buf bytes.Buffer
-	old := &sandbox.NetworkConfig{Isolated: false}
-	new := &sandbox.NetworkConfig{Isolated: true}
+	old := &config.NetworkConfig{Isolated: false}
+	new := &config.NetworkConfig{Isolated: true}
 	printed := printNetworkDiff(&buf, old, new)
 	assert.True(t, printed)
 	assert.Contains(t, buf.String(), "~ Isolated:")
@@ -199,8 +199,8 @@ func TestPrintNetworkDiff_IsolatedChanged(t *testing.T) {
 
 func TestPrintNetworkDiff_AllowAdded(t *testing.T) {
 	var buf bytes.Buffer
-	old := &sandbox.NetworkConfig{Isolated: true, Allow: []string{"a.com"}}
-	new := &sandbox.NetworkConfig{Isolated: true, Allow: []string{"a.com", "b.com"}}
+	old := &config.NetworkConfig{Isolated: true, Allow: []string{"a.com"}}
+	new := &config.NetworkConfig{Isolated: true, Allow: []string{"a.com", "b.com"}}
 	printed := printNetworkDiff(&buf, old, new)
 	assert.True(t, printed)
 	assert.Contains(t, buf.String(), "Network allow:")
@@ -211,15 +211,15 @@ func TestPrintNetworkDiff_AllowAdded(t *testing.T) {
 
 func TestPrintDirAdditions_NoAdditions(t *testing.T) {
 	var buf bytes.Buffer
-	dirs := []sandbox.ProfileDir{{Path: "/a"}}
+	dirs := []config.ProfileDir{{Path: "/a"}}
 	printed := printDirAdditions(&buf, dirs, dirs)
 	assert.False(t, printed)
 }
 
 func TestPrintDirAdditions_NewDirs(t *testing.T) {
 	var buf bytes.Buffer
-	old := []sandbox.ProfileDir{{Path: "/a"}}
-	new := []sandbox.ProfileDir{{Path: "/a"}, {Path: "/b", Mode: "rw"}}
+	old := []config.ProfileDir{{Path: "/a"}}
+	new := []config.ProfileDir{{Path: "/a"}, {Path: "/b", Mode: "rw"}}
 	printed := printDirAdditions(&buf, old, new)
 	assert.True(t, printed)
 	assert.Contains(t, buf.String(), "Directories:")

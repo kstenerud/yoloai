@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/kstenerud/yoloai/agent"
+	"github.com/kstenerud/yoloai/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -31,7 +32,7 @@ func TestCopyAgentFiles_StringForm_Normal(t *testing.T) {
 	agentStateDir := filepath.Join(sandboxDir, AgentRuntimeDir)
 	require.NoError(t, os.MkdirAll(agentStateDir, 0750))
 
-	af := &AgentFilesConfig{BaseDir: baseDir}
+	af := &config.AgentFilesConfig{BaseDir: baseDir}
 	require.NoError(t, copyAgentFiles(agentDef, sandboxDir, af))
 
 	// Verify files were copied
@@ -53,7 +54,7 @@ func TestCopyAgentFiles_StringForm_MissingSrc(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, AgentRuntimeDir), 0750))
 
 	// Base dir exists but has no .claude/ subdir
-	af := &AgentFilesConfig{BaseDir: t.TempDir()}
+	af := &config.AgentFilesConfig{BaseDir: t.TempDir()}
 	require.NoError(t, copyAgentFiles(agentDef, sandboxDir, af))
 }
 
@@ -78,7 +79,7 @@ func TestCopyAgentFiles_StringForm_Exclusions(t *testing.T) {
 	sandboxDir := t.TempDir()
 	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, AgentRuntimeDir), 0750))
 
-	af := &AgentFilesConfig{BaseDir: baseDir}
+	af := &config.AgentFilesConfig{BaseDir: baseDir}
 	require.NoError(t, copyAgentFiles(agentDef, sandboxDir, af))
 
 	agentStateDir := filepath.Join(sandboxDir, AgentRuntimeDir)
@@ -108,7 +109,7 @@ func TestCopyAgentFiles_StringForm_NoOverwrite(t *testing.T) {
 	// Pre-existing file (from SeedFiles) should not be overwritten
 	require.NoError(t, os.WriteFile(filepath.Join(agentStateDir, "settings.json"), []byte("from-seed"), 0600))
 
-	af := &AgentFilesConfig{BaseDir: baseDir}
+	af := &config.AgentFilesConfig{BaseDir: baseDir}
 	require.NoError(t, copyAgentFiles(agentDef, sandboxDir, af))
 
 	p := filepath.Join(agentStateDir, "settings.json")
@@ -123,7 +124,7 @@ func TestCopyAgentFiles_StringForm_NoStateDirAgent(t *testing.T) {
 	sandboxDir := t.TempDir()
 	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, AgentRuntimeDir), 0750))
 
-	af := &AgentFilesConfig{BaseDir: t.TempDir()}
+	af := &config.AgentFilesConfig{BaseDir: t.TempDir()}
 	require.NoError(t, copyAgentFiles(agentDef, sandboxDir, af))
 }
 
@@ -138,7 +139,7 @@ func TestCopyAgentFiles_ListForm_Files(t *testing.T) {
 	require.NoError(t, os.MkdirAll(agentStateDir, 0750))
 
 	agentDef := agent.GetAgent("claude")
-	af := &AgentFilesConfig{
+	af := &config.AgentFilesConfig{
 		Files: []string{
 			filepath.Join(srcDir, "custom.json"),
 			filepath.Join(srcDir, "other.txt"),
@@ -168,7 +169,7 @@ func TestCopyAgentFiles_ListForm_Directory(t *testing.T) {
 	require.NoError(t, os.MkdirAll(agentStateDir, 0750))
 
 	agentDef := agent.GetAgent("claude")
-	af := &AgentFilesConfig{
+	af := &config.AgentFilesConfig{
 		Files: []string{subDir},
 	}
 	require.NoError(t, copyAgentFiles(agentDef, sandboxDir, af))
@@ -184,7 +185,7 @@ func TestCopyAgentFiles_ListForm_MissingEntry(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, AgentRuntimeDir), 0750))
 
 	agentDef := agent.GetAgent("claude")
-	af := &AgentFilesConfig{
+	af := &config.AgentFilesConfig{
 		Files: []string{"/nonexistent/path/file.json"},
 	}
 	require.NoError(t, copyAgentFiles(agentDef, sandboxDir, af))
@@ -200,7 +201,7 @@ func TestCopyAgentFiles_ListForm_NoOverwrite(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(agentStateDir, "settings.json"), []byte("from-seed"), 0600))
 
 	agentDef := agent.GetAgent("claude")
-	af := &AgentFilesConfig{
+	af := &config.AgentFilesConfig{
 		Files: []string{filepath.Join(srcDir, "settings.json")},
 	}
 	require.NoError(t, copyAgentFiles(agentDef, sandboxDir, af))

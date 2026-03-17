@@ -69,7 +69,7 @@ func runClone(cmd *cobra.Command, args []string) error {
 	backend := resolveBackendForSandbox(dst)
 	return withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
 		startMgr := sandbox.NewManager(rt, slog.Default(), cmd.InOrStdin(), cmd.ErrOrStderr())
-		if err := startMgr.Start(ctx, dst, sandbox.StartOpts{
+		if err := startMgr.Start(ctx, dst, sandbox.StartOptions{
 			Prompt:     prompt,
 			PromptFile: promptFile,
 		}); err != nil {

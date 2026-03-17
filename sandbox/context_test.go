@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/kstenerud/yoloai/agent"
+	"github.com/kstenerud/yoloai/config"
 )
 
 func TestGenerateContext_AllFields(t *testing.T) {
@@ -23,7 +24,7 @@ func TestGenerateContext_AllFields(t *testing.T) {
 		},
 		NetworkMode:  "isolated",
 		NetworkAllow: []string{"api.anthropic.com", "sentry.io"},
-		Resources:    &ResourceLimits{CPUs: "4", Memory: "8g"},
+		Resources:    &config.ResourceLimits{CPUs: "4", Memory: "8g"},
 	}
 
 	result := GenerateContext(meta)
