@@ -468,7 +468,7 @@ func TestFormatRecord_ContainsExpectedParts(t *testing.T) {
 	assert.Contains(t, out, "INFO")
 	assert.Contains(t, out, "sandbox.create")
 	assert.Contains(t, out, "creating sandbox")
-	assert.Contains(t, out, "14:23:01")
+	assert.Contains(t, out, rec.ts.Local().Format("15:04:05"))
 }
 
 func TestFormatRecord_ExtraFieldsAppended(t *testing.T) {
