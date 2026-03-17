@@ -513,6 +513,18 @@ def main():
 
     # Shared setup
     setup_tmux_session(cfg, yoloai_dir, socket=socket)
+
+    # Under gVisor on ARM64 the docker exec'd process may see different
+    # effective credentials than the container entrypoint, causing EACCES
+    # when connecting to the tmux socket. chmod 0777 lets any user in the
+    # container connect; the socket is already isolated inside the container.
+    if socket and os.path.exists(socket):
+        stat_info = os.stat(socket)
+        log_info("sandbox.tmux_socket_info", "tmux socket created",
+                 path=socket, mode=oct(stat_info.st_mode),
+                 uid=stat_info.st_uid, gid=stat_info.st_gid)
+        os.chmod(socket, 0o777)
+
     launch_agent(cfg, socket=socket, working_dir=working_dir)
     monitor_exit(socket=socket)
     wait_for_ready(cfg, socket=socket)
