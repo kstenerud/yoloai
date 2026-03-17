@@ -116,6 +116,11 @@ type Runtime interface {
 	// Close releases any resources held by the runtime.
 	Close() error
 
+	// Logs returns the last n lines of an instance's log output.
+	// Returns empty string if logs are unavailable (e.g. VM backends).
+	// Used to capture crash output before container removal.
+	Logs(ctx context.Context, name string, tail int) string
+
 	// DiagHint returns a backend-specific hint for how to check logs when
 	// an instance fails to start or crashes. The hint is included in error
 	// messages shown to the user.

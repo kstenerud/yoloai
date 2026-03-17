@@ -79,6 +79,7 @@ func (m *mockRuntime) Prune(_ context.Context, _ []string, _ bool, _ io.Writer) 
 	return runtime.PruneResult{}, errMockNotImplemented
 }
 
+func (m *mockRuntime) Logs(_ context.Context, _ string, _ int) string { return "" }
 func (m *mockRuntime) DiagHint(instanceName string) string {
 	return "check logs for " + instanceName
 }

@@ -297,6 +297,23 @@ func (r *Runtime) Close() error {
 	return r.client.Close()
 }
 
+// Logs returns the last n lines of a container's combined stdout+stderr output.
+// Returns empty string if the container does not exist or logs are unavailable.
+func (r *Runtime) Logs(ctx context.Context, name string, tail int) string {
+	out, err := r.client.ContainerLogs(ctx, name, container.LogsOptions{
+		ShowStdout: true,
+		ShowStderr: true,
+		Tail:       fmt.Sprintf("%d", tail),
+	})
+	if err != nil {
+		return ""
+	}
+	defer out.Close() //nolint:errcheck // best-effort close
+	var buf bytes.Buffer
+	_, _ = stdcopy.StdCopy(&buf, &buf, out)
+	return strings.TrimSpace(buf.String())
+}
+
 // DiagHint returns a backend-specific hint for checking logs.
 func (r *Runtime) DiagHint(instanceName string) string {
 	return fmt.Sprintf("run '%s logs %s' to see what went wrong", r.binaryName, instanceName)

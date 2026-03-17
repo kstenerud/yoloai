@@ -721,9 +721,14 @@ func (m *Manager) launchContainer(ctx context.Context, state *sandboxState) erro
 		return fmt.Errorf("inspect instance after start: %w", err)
 	}
 	if !info.Running {
+		// Try agent log file first (written by entrypoint after startup).
 		logPath := filepath.Join(state.sandboxDir, AgentLogFile)
 		if tail := readLogTail(logPath, 20); tail != "" {
 			return fmt.Errorf("instance exited immediately:\n%s", tail)
+		}
+		// Fall back to container logs (captures pre-entrypoint crashes, e.g. gVisor startup errors).
+		if logs := m.runtime.Logs(ctx, cname, 50); logs != "" {
+			return fmt.Errorf("instance exited immediately:\n%s", logs)
 		}
 		return fmt.Errorf("instance exited immediately — %s", m.runtime.DiagHint(cname))
 	}

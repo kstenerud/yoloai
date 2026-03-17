@@ -278,6 +278,10 @@ func (r *Runtime) Close() error {
 	return nil
 }
 
+// Logs returns empty string — Tart VM logs are written to files on disk.
+// Callers can use DiagHint to find the log path.
+func (r *Runtime) Logs(_ context.Context, _ string, _ int) string { return "" }
+
 // DiagHint returns a Tart-specific hint for checking logs.
 func (r *Runtime) DiagHint(instanceName string) string {
 	logPath := filepath.Join(r.sandboxDir, sandboxName(instanceName), backendDir, vmLogFileName)
