@@ -32,7 +32,7 @@ tidy-check:
 	@rm -f go.mod.bak go.sum.bak
 
 govulncheck:
-	go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+	GOTOOLCHAIN=$(shell go env GOVERSION) go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
 hadolint:
 	docker run --rm -i hadolint/hadolint < runtime/docker/resources/Dockerfile
