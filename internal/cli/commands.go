@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	goruntime "runtime"
 	"strings"
 	"time"
 
@@ -191,6 +192,16 @@ func newNewCmd(version string) *cobra.Command {
 			security, _ := cmd.Flags().GetString("security")
 			debug, _ := cmd.Flags().GetBool("debug")
 			envSlice, _ := cmd.Flags().GetStringSlice("env")
+
+			// Block gVisor on macOS due to known bug
+			if security == "gvisor" && goruntime.GOOS == "darwin" {
+				return sandbox.NewUsageError(
+					"gVisor security mode is not supported on macOS due to a bug that causes\n" +
+						"Claude Code to hang indefinitely during initialization.\n\n" +
+						"Workaround: Use standard Docker security (omit --security flag) or try the\n" +
+						"Seatbelt backend with --backend seatbelt for lightweight macOS sandboxing.\n\n" +
+						"For details, see: https://github.com/anthropics/claude-code/issues/35454")
+			}
 
 			envMap := make(map[string]string, len(envSlice))
 			for _, e := range envSlice {
