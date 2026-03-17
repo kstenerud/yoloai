@@ -212,6 +212,7 @@ type containerConfig struct {
 	Idle               agent.IdleSupport    `json:"idle"`
 	Detectors          []string             `json:"detectors,omitempty"`
 	SandboxName        string               `json:"sandbox_name"`
+	TmuxSocket         string               `json:"tmux_socket,omitempty"`
 }
 
 // Create creates and optionally starts a new sandbox.
@@ -494,7 +495,7 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 	copyDirs := collectCopyDirs(workdir, auxDirs)
 
 	// Build config.json
-	configData, err := buildContainerConfig(agentDef, agentCommand, tmuxConf, workdir.ResolvedMountPath(), opts.Debug, networkMode == "isolated", networkAllow, opts.Passthrough, overlayMounts, pr.setup, pr.autoCommitInterval, copyDirs, opts.Name)
+	configData, err := buildContainerConfig(agentDef, agentCommand, tmuxConf, workdir.ResolvedMountPath(), opts.Debug, networkMode == "isolated", networkAllow, opts.Passthrough, overlayMounts, pr.setup, pr.autoCommitInterval, copyDirs, opts.Name, m.backend)
 	if err != nil {
 		return nil, fmt.Errorf("build %s: %w", RuntimeConfigFile, err)
 	}
@@ -940,10 +941,18 @@ func resolveDetectors(idle agent.IdleSupport) []string {
 }
 
 // buildContainerConfig creates the config.json content.
-func buildContainerConfig(agentDef *agent.Definition, agentCommand string, tmuxConf string, workingDir string, debug bool, networkIsolated bool, allowedDomains []string, passthrough []string, overlayMounts []overlayMountConfig, setupCommands []string, autoCommitInterval int, copyDirs []string, sandboxName string) ([]byte, error) {
+func buildContainerConfig(agentDef *agent.Definition, agentCommand string, tmuxConf string, workingDir string, debug bool, networkIsolated bool, allowedDomains []string, passthrough []string, overlayMounts []overlayMountConfig, setupCommands []string, autoCommitInterval int, copyDirs []string, sandboxName string, backend string) ([]byte, error) {
 	var stateDirName string
 	if agentDef.StateDir != "" {
 		stateDirName = filepath.Base(agentDef.StateDir)
+	}
+	// Use a fixed tmux socket path for Docker/Podman so that docker exec'd
+	// processes find the same socket as the container entrypoint. Under gVisor
+	// on ARM64 the uid-based default path (/tmp/tmux-<uid>/default) may not
+	// be visible to processes spawned by docker exec.
+	var tmuxSocket string
+	if backend == "docker" || backend == "podman" {
+		tmuxSocket = "/tmp/yoloai-tmux.sock"
 	}
 	cfg := containerConfig{
 		HostUID:            os.Getuid(),
@@ -967,6 +976,7 @@ func buildContainerConfig(agentDef *agent.Definition, agentCommand string, tmuxC
 		Idle:               agentDef.Idle,
 		Detectors:          resolveDetectors(agentDef.Idle),
 		SandboxName:        sandboxName,
+		TmuxSocket:         tmuxSocket,
 	}
 	return json.MarshalIndent(cfg, "", "  ")
 }

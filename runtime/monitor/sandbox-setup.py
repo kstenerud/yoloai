@@ -493,10 +493,16 @@ def main():
     elif backend == "tart":
         setup_tart(cfg, yoloai_dir)
 
-    # Determine tmux socket (seatbelt uses per-sandbox socket)
+    # Determine tmux socket.
+    # Seatbelt uses a per-sandbox socket in the sandbox dir.
+    # Docker/Podman use a fixed path from runtime-config.json so that
+    # docker exec'd processes (which may not see the uid-based default
+    # /tmp/tmux-<uid>/default on gVisor ARM64) find the same socket.
     socket = None
     if backend == "seatbelt":
         socket = os.path.join(yoloai_dir, "tmux", "tmux.sock")
+    elif backend in ("docker", "podman"):
+        socket = cfg.get("tmux_socket") or None
 
     # Determine working directory (seatbelt and tart need explicit cd)
     working_dir = None

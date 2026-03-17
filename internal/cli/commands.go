@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -385,6 +386,22 @@ func tmuxExecUser(meta *sandbox.Meta) string {
 	return "yoloai"
 }
 
+// readTmuxSocket returns the tmux socket path configured for a sandbox, or
+// empty string if not set (backend does not use a custom socket).
+func readTmuxSocket(sandboxName string) string {
+	data, err := os.ReadFile(sandbox.RuntimeConfigFilePath(sandboxName)) //nolint:gosec // G304: path from trusted sandbox dir
+	if err != nil {
+		return ""
+	}
+	var cfg struct {
+		TmuxSocket string `json:"tmux_socket"`
+	}
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return ""
+	}
+	return cfg.TmuxSocket
+}
+
 // waitForTmux polls until the tmux session is ready in the container.
 // Returns early if the container stops running or the context is cancelled.
 //
@@ -397,6 +414,7 @@ func tmuxExecUser(meta *sandbox.Meta) string {
 //     This is the fallback and covers backends that don't write sandbox.jsonl.
 func waitForTmux(ctx context.Context, rt runtime.Runtime, containerName, sandboxName string, timeout time.Duration, user string) error {
 	jsonlPath := sandbox.SandboxJSONLPath(sandboxName)
+	tmuxSocket := readTmuxSocket(sandboxName)
 	deadline := time.Now().Add(timeout)
 	var lastExecErr error
 	for time.Now().Before(deadline) {
@@ -421,7 +439,12 @@ func waitForTmux(ctx context.Context, rt runtime.Runtime, containerName, sandbox
 		}
 
 		// Fallback: docker exec tmux has-session (unreliable under gVisor).
-		_, err = rt.Exec(ctx, containerName, []string{"tmux", "has-session", "-t", "main"}, user)
+		tmuxArgs := []string{"tmux"}
+		if tmuxSocket != "" {
+			tmuxArgs = append(tmuxArgs, "-S", tmuxSocket)
+		}
+		tmuxArgs = append(tmuxArgs, "has-session", "-t", "main")
+		_, err = rt.Exec(ctx, containerName, tmuxArgs, user)
 		if err == nil {
 			return nil
 		}
@@ -478,7 +501,12 @@ func setTerminalTitle(title string) {
 func attachToSandbox(ctx context.Context, rt runtime.Runtime, containerName, sandboxName string, user string) error {
 	setTerminalTitle(sandboxName)
 	defer setTerminalTitle("")
-	return rt.InteractiveExec(ctx, containerName, []string{"tmux", "attach", "-t", "main"}, user, "")
+	tmuxCmd := []string{"tmux"}
+	if sock := readTmuxSocket(sandboxName); sock != "" {
+		tmuxCmd = append(tmuxCmd, "-S", sock)
+	}
+	tmuxCmd = append(tmuxCmd, "attach", "-t", "main")
+	return rt.InteractiveExec(ctx, containerName, tmuxCmd, user, "")
 }
 
 func newVersionCmd(version, commit, date string) *cobra.Command {
