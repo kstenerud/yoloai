@@ -15,3 +15,4 @@ Research documents supporting yoloAI's design decisions. Each file covers a broa
 | [macOS Idle Detection](research/macos-idle-detection.md) | macOS-specific process idle detection: sysctl KERN_PROC, libproc, DTrace, Mach APIs, network monitoring |
 | [Agentic Workflows](research/agentic-workflows.md) | Community sentiment on autonomous agents, TDD subagent patterns, authority splitting, review gap, skill ecosystem |
 | [Podman](research/podman.md) | Podman backend: SDK options, Docker-compat socket, rootless file ownership, overlay concerns, implementation scope, open questions |
+| [Linux VM Backends](research/linux-vm-backends.md) | VM-level isolation beyond Docker: Firecracker, gVisor, Kata Containers, Cloud Hypervisor, Lima, Sysbox; comparison matrix and yoloAI recommendation |
