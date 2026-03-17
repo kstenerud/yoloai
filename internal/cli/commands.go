@@ -499,27 +499,25 @@ func setTerminalTitle(title string) {
 // attachToSandbox attaches to the tmux session in a running container.
 // It sets the terminal title to the sandbox name and restores it on detach.
 //
-// Under gVisor on ARM64, docker exec -it does not set TIOCSCTTY on the
-// allocated PTY slave, so the exec'd process has no controlling terminal.
-// tmux's tty_open then fails to open /dev/tty and prints "access not
-// allowed". Wrapping in `script` fixes this: script calls setsid + TIOCSCTTY
-// on a fresh PTY, giving the child process a proper controlling terminal
-// before exec'ing tmux. On standard Docker the overhead is negligible.
+// Under gVisor on ARM64, docker exec -it does not call TIOCSCTTY on the
+// allocated PTY slave. The exec'd process ends up with a controlling
+// terminal that gVisor denies via /dev/tty (EACCES), and tmux only falls
+// back to stdin when errno is ENXIO — not EACCES.
+//
+// Fix: prefix with setsid(1), which creates a new session with no
+// controlling terminal. /dev/tty then returns ENXIO (no controlling
+// terminal), tmux's ENXIO fallback activates, and it uses stdin — which IS
+// the PTY from `docker exec -it`. On standard Docker, setsid adds no
+// measurable overhead.
 func attachToSandbox(ctx context.Context, rt runtime.Runtime, containerName, sandboxName string, user string) error {
 	setTerminalTitle(sandboxName)
 	defer setTerminalTitle("")
-	sock := readTmuxSocket(sandboxName)
-	var tmuxArgs string
-	if sock != "" {
-		tmuxArgs = fmt.Sprintf("exec tmux -S %s attach -t main", sock)
-	} else {
-		tmuxArgs = "exec tmux attach -t main"
+	cmd := []string{"setsid", "tmux"}
+	if sock := readTmuxSocket(sandboxName); sock != "" {
+		cmd = append(cmd, "-S", sock)
 	}
-	// script -q -e -c <cmd> /dev/null: quiet, propagate exit status, run cmd,
-	// discard transcript. Creates a fresh PTY + controlling terminal.
-	return rt.InteractiveExec(ctx, containerName,
-		[]string{"script", "-q", "-e", "-c", tmuxArgs, "/dev/null"},
-		user, "")
+	cmd = append(cmd, "attach", "-t", "main")
+	return rt.InteractiveExec(ctx, containerName, cmd, user, "")
 }
 
 func newVersionCmd(version, commit, date string) *cobra.Command {
