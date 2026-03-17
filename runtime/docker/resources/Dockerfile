@@ -1,5 +1,8 @@
 FROM debian:bookworm-slim
 
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
+# hadolint ignore=DL3008
 RUN apt-get update && apt-get install -y --no-install-recommends \
     tmux \
     git \
@@ -30,6 +33,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Node.js 22 LTS via NodeSource
 ARG NODE_MAJOR=22
+# hadolint ignore=DL3008
 RUN mkdir -p /etc/apt/keyrings \
     && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
        | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg \
@@ -48,9 +52,11 @@ RUN curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-$(dpkg --print-architect
 ENV PATH="/usr/local/go/bin:${PATH}"
 # Also set via profile.d so shells started fresh (e.g. by AI coding agents)
 # pick up the path even when Docker ENV is not inherited.
+# hadolint ignore=SC2016
 RUN echo 'export PATH="/usr/local/go/bin:$PATH"' > /etc/profile.d/golang.sh
 
 # golangci-lint
+# hadolint ignore=DL3062
 RUN GOPATH=/tmp/gopath go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest \
     && mv /tmp/gopath/bin/golangci-lint /usr/local/bin/golangci-lint \
     && rm -rf /tmp/gopath
@@ -62,24 +68,21 @@ ENV RUSTUP_HOME=/usr/local/rustup \
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
       | sh -s -- -y --default-toolchain stable --profile minimal --no-modify-path \
     && chmod -R a+rw "$RUSTUP_HOME" "$CARGO_HOME"
+# hadolint ignore=SC2016
 RUN echo 'export PATH="/usr/local/cargo/bin:$PATH"' > /etc/profile.d/cargo.sh
 
+# AI coding agents — versions intentionally unpinned; agents must run at
+# current versions to function correctly with their respective APIs.
 # Claude Code via npm (not native binary — native bundles Bun which ignores
-# proxy env vars and auto-updates; see docs/dev/research/implementation.md "Claude Code Installation")
-RUN npm install -g @anthropic-ai/claude-code
+# proxy env vars and auto-updates; see docs/dev/research/implementation.md)
 ENV DISABLE_INSTALLATION_CHECKS=1
-
-# Gemini CLI via npm
-RUN npm install -g @google/gemini-cli
-
-# OpenAI Codex CLI via npm
-RUN npm install -g @openai/codex
-
-# Aider via pip (AI pair programming tool)
-RUN pip install --break-system-packages aider-chat
-
-# OpenCode via npm (open-source AI coding agent)
-RUN npm install -g opencode-ai
+# hadolint ignore=DL3016
+RUN npm install -g @anthropic-ai/claude-code \
+    && npm install -g @google/gemini-cli \
+    && npm install -g @openai/codex \
+    && npm install -g opencode-ai
+# hadolint ignore=DL3013
+RUN pip install --break-system-packages --no-cache-dir aider-chat
 
 # Agent launcher shortcuts (yolo-<agent> runs with full permissions bypassed)
 RUN printf '#!/bin/sh\nexec aider --yes-always "$@"\n' > /usr/local/bin/yolo-aider \

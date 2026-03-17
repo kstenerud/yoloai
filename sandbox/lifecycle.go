@@ -1050,7 +1050,7 @@ func forceRemoveAll(path string) error {
 		if err != nil {
 			// If the directory isn't readable/executable, fix it and retry.
 			_ = os.Chmod(p, 0o700) //nolint:errcheck,gosec // best-effort; 0700 needed for directory traversal before removal
-			return nil              //nolint:nilerr // returning nil continues the walk after a best-effort chmod
+			return nil             //nolint:nilerr // returning nil continues the walk after a best-effort chmod
 		}
 		if d.IsDir() {
 			_ = os.Chmod(p, 0o700) //nolint:errcheck,gosec // best-effort; 0700 needed for directory traversal before removal
