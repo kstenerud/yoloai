@@ -212,14 +212,20 @@ def monitor_exit(socket=None):
     """Daemon thread: poll pane_dead and detach clients when agent exits."""
     def _monitor():
         while True:
-            output = tmux_output("list-panes", "-t", "main", "-F", "#{pane_dead}", socket=socket)
-            if output.strip() == "1":
-                clients = tmux_output("list-clients", "-t", "main", "-F", "#{client_name}", socket=socket)
-                for client in clients.strip().splitlines():
-                    client = client.strip()
-                    if client:
-                        tmux("detach-client", "-t", client, socket=socket)
-                break
+            output = tmux_output("list-panes", "-t", "main", "-F", "#{pane_dead}:#{pane_dead_status}", socket=socket)
+            if ":" in (output or ""):
+                dead, status = output.strip().split(":", 1)
+                if dead == "1":
+                    pane = tmux_output("capture-pane", "-t", "main", "-p", socket=socket)
+                    log_info("sandbox.agent_exit_detected", "agent pane exited",
+                             exit_code=status.strip(),
+                             pane_content=pane.strip()[:400] if pane else "")
+                    clients = tmux_output("list-clients", "-t", "main", "-F", "#{client_name}", socket=socket)
+                    for client in clients.strip().splitlines():
+                        client = client.strip()
+                        if client:
+                            tmux("detach-client", "-t", client, socket=socket)
+                    break
             time.sleep(1)
 
     t = threading.Thread(target=_monitor, daemon=True)
