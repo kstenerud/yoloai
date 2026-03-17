@@ -267,6 +267,12 @@ func newNewCmd(version string) *cobra.Command {
 					return err
 				}
 
+				// Register sandbox name so --bugreport can include sandbox sections
+				// if a subsequent step (e.g. waitForTmux) fails.
+				if sandboxName != "" && bugReportFile != nil {
+					bugReportSandboxName = sandboxName
+				}
+
 				if jsonEnabled(cmd) {
 					if sandboxName == "" {
 						return nil
@@ -406,6 +412,11 @@ func waitForTmux(ctx context.Context, rt runtime.Runtime, containerName string, 
 			return ctx.Err()
 		case <-time.After(500 * time.Millisecond):
 		}
+	}
+	// Include container logs in the error to surface setup failures
+	// (e.g. tmux failing to create a session under gVisor).
+	if logs := rt.Logs(ctx, containerName, 50); logs != "" {
+		return fmt.Errorf("tmux session not ready after %s\n\nContainer logs:\n%s", timeout, logs)
 	}
 	return fmt.Errorf("tmux session not ready after %s", timeout)
 }

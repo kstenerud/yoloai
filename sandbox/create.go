@@ -32,7 +32,7 @@ func mkdirAllPerm(path string, perm os.FileMode) error {
 // process umask. Use this when the file will be bind-mounted into a container
 // that may run under a different uid (e.g. gVisor).
 func writeFilePerm(path string, data []byte, perm os.FileMode) error {
-	if err := os.WriteFile(path, data, perm); err != nil {
+	if err := os.WriteFile(path, data, perm); err != nil { //nolint:gosec // G703: path is always a trusted sandbox subpath
 		return err
 	}
 	return os.Chmod(path, perm) //nolint:gosec // G302: caller is responsible for choosing the perm
