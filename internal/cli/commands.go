@@ -498,15 +498,23 @@ func setTerminalTitle(title string) {
 
 // attachToSandbox attaches to the tmux session in a running container.
 // It sets the terminal title to the sandbox name and restores it on detach.
+//
+// Under gVisor on ARM64, tmux run directly via docker exec may fail with
+// "access not allowed" because the exec'd process doesn't get a proper
+// controlling terminal. Wrapping in bash -c ensures bash initialises the
+// terminal session before exec'ing tmux, which avoids the EACCES from
+// tmux's tty_open call.
 func attachToSandbox(ctx context.Context, rt runtime.Runtime, containerName, sandboxName string, user string) error {
 	setTerminalTitle(sandboxName)
 	defer setTerminalTitle("")
-	tmuxCmd := []string{"tmux"}
-	if sock := readTmuxSocket(sandboxName); sock != "" {
-		tmuxCmd = append(tmuxCmd, "-S", sock)
+	sock := readTmuxSocket(sandboxName)
+	var tmuxArgs string
+	if sock != "" {
+		tmuxArgs = fmt.Sprintf("exec tmux -S %s attach -t main", sock)
+	} else {
+		tmuxArgs = "exec tmux attach -t main"
 	}
-	tmuxCmd = append(tmuxCmd, "attach", "-t", "main")
-	return rt.InteractiveExec(ctx, containerName, tmuxCmd, user, "")
+	return rt.InteractiveExec(ctx, containerName, []string{"bash", "-c", tmuxArgs}, user, "")
 }
 
 func newVersionCmd(version, commit, date string) *cobra.Command {

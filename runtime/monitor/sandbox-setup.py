@@ -195,14 +195,16 @@ def launch_agent(cfg, socket=None, working_dir=None):
     tmux("send-keys", "-t", "main", send_cmd, "Enter", socket=socket)
     log_info("sandbox.agent_launch", "agent process started", agent=agent, model=model)
 
-    # Wait briefly, then check if the session is still alive and capture pane
-    # output. This surfaces immediate crashes (e.g. missing binary, auth error)
-    # in sandbox.jsonl without waiting for the full wait_for_ready timeout.
-    time.sleep(2)
+    # Check session health shortly after launch to surface immediate crashes
+    # (e.g. missing binary, auth error, gVisor syscall rejection) in
+    # sandbox.jsonl before the host-side attach attempt.
+    time.sleep(0.5)
     sessions = tmux_output("list-sessions", socket=socket)
     pane = tmux_output("capture-pane", "-t", "main", "-p", socket=socket)
+    pane_dead = tmux_output("list-panes", "-t", "main", "-F", "#{pane_dead}", socket=socket)
     log_info("sandbox.post_launch", "post-launch check",
              sessions_alive=bool(sessions.strip()),
+             pane_dead=(pane_dead.strip() == "1"),
              pane_sample=pane.strip()[:400] if pane else "")
 
 
