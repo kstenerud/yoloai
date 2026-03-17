@@ -12,6 +12,7 @@ linters:
     - revive
     - gocritic
     - sloglint
+    - nilerr
   disable:
     - exhaustruct
     - varnamelen

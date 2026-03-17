@@ -4,7 +4,7 @@ COMMIT  := $(shell git rev-parse --short HEAD 2>/dev/null || echo "none")
 DATE    := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 LDFLAGS := -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(DATE)
 
-.PHONY: build test fmt lint tidy-check check cover integration e2e integration-podman clean
+.PHONY: build test fmt lint tidy-check govulncheck hadolint actionlint check cover integration e2e integration-podman clean
 
 build:
 	CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o $(BINARY) ./cmd/yoloai
@@ -31,8 +31,17 @@ tidy-check:
 	fi
 	@rm -f go.mod.bak go.sum.bak
 
+govulncheck:
+	go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+
+hadolint:
+	docker run --rm -i hadolint/hadolint < runtime/docker/resources/Dockerfile
+
+actionlint:
+	go run github.com/rhysd/actionlint/cmd/actionlint@latest
+
 ## check: run all CI checks locally (same as PR checks)
-check: lint tidy-check test base-image integration e2e
+check: lint tidy-check govulncheck hadolint actionlint test base-image integration e2e
 
 ## cover: show test coverage per package and total
 cover:

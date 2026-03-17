@@ -443,7 +443,7 @@ func agentRunningWarning(cmd *cobra.Command, name string) {
 	_ = withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
 		info, err := sandbox.InspectSandbox(ctx, rt, name)
 		if err != nil {
-			return nil // silently skip
+			return nil //nolint:nilerr // best-effort warning; inspection failure should not affect the diff command
 		}
 
 		if info.Status == sandbox.StatusActive || info.Status == sandbox.StatusIdle {

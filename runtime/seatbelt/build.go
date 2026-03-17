@@ -35,7 +35,7 @@ func (r *Runtime) EnsureImage(_ context.Context, _ string, output io.Writer, _ *
 func (r *Runtime) ImageExists(_ context.Context, _ string) (bool, error) {
 	for _, bin := range requiredBinaries {
 		if _, err := exec.LookPath(bin); err != nil {
-			return false, nil
+			return false, nil //nolint:nilerr // binary not found means unavailable, not an error condition
 		}
 	}
 	return true, nil

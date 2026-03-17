@@ -130,8 +130,7 @@ func ApplyFormatPatch(patchDir string, files []string, targetDir string) (map[st
 	logCmd := NewGitCmd(targetDir, logArgs...)
 	logOut, logErr := logCmd.Output()
 	if logErr != nil {
-		// Commits are applied; SHA map is a best-effort bonus.
-		return nil, nil
+		return nil, nil //nolint:nilerr // SHA map is best-effort; commits are already applied
 	}
 	hostSHAs := strings.Fields(strings.TrimSpace(string(logOut)))
 

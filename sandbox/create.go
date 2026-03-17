@@ -176,7 +176,7 @@ func (m *Manager) Create(ctx context.Context, opts CreateOptions) (string, error
 func checkUnappliedWork(name string) error {
 	meta, err := LoadMeta(Dir(name))
 	if err != nil {
-		return nil // can't load meta — nothing to protect
+		return nil //nolint:nilerr // can't load meta — nothing to protect
 	}
 
 	if meta.Workdir.Mode == "copy" || meta.Workdir.Mode == "overlay" {

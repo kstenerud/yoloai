@@ -88,13 +88,13 @@ func pathsOverlap(a, b string) bool {
 func CheckDirtyRepo(path string) (string, error) {
 	gitDir := filepath.Join(path, ".git")
 	if _, err := os.Stat(gitDir); err != nil {
-		return "", nil // not a git repo
+		return "", nil //nolint:nilerr // not a git repo; absence of .git is not an error
 	}
 
 	cmd := exec.Command("git", "-C", path, "status", "--porcelain") //nolint:gosec // G204: args are not user-controlled
 	output, err := cmd.Output()
 	if err != nil {
-		return "", nil // git command failed, don't block sandbox creation
+		return "", nil //nolint:nilerr // git command failed; don't block sandbox creation
 	}
 
 	if len(output) == 0 {
