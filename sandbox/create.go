@@ -50,39 +50,39 @@ func securityRuntimeName(security string) string {
 	}
 }
 
-// checkSecurityRuntime validates that a named OCI runtime is both installed
-// in PATH and registered with the container daemon (Docker only).
-// Returns a descriptive error if either check fails.
+// checkSecurityRuntime validates that a named OCI runtime is available for use.
+// For Docker, registration with the daemon is the authoritative check (covers
+// cases like Docker Desktop on macOS where the binary lives inside the VM).
+// For other backends (Podman), fall back to checking the host PATH.
+// Returns a descriptive error if the runtime is unavailable.
 func checkSecurityRuntime(ctx context.Context, backend, security, runtimeName string) error {
-	// Check that the runtime binary is installed.
-	if _, err := exec.LookPath(runtimeName); err != nil {
-		return fmt.Errorf("security mode %q requires %q to be installed and in PATH", security, runtimeName)
-	}
-
-	// For Docker, also verify the runtime is registered in daemon.json.
-	// Podman discovers runtimes from containers.conf / PATH, so skip that check.
-	if backend != "docker" {
+	if backend == "docker" {
+		out, cmdErr := exec.CommandContext(ctx, "docker", "info", "--format",
+			`{{range $k,$v := .Runtimes}}{{$k}}
+{{end}}`).Output()
+		if cmdErr == nil {
+			// Docker responded — check whether the runtime is registered.
+			for _, line := range strings.Split(string(out), "\n") {
+				if strings.TrimSpace(line) == runtimeName {
+					return nil
+				}
+			}
+			return fmt.Errorf(
+				"security mode %q requires the %q runtime to be registered with Docker;\n"+
+					"add it to Docker Desktop → Settings → Docker Engine (macOS/Windows) or\n"+
+					"/etc/docker/daemon.json (Linux) and restart the daemon:\n"+
+					`  {"runtimes": {%q: {"path": "/usr/local/bin/%s"}}}`,
+				security, runtimeName, runtimeName, runtimeName,
+			)
+		}
+		// docker CLI unavailable or daemon unreachable — skip registration check.
 		return nil
 	}
 
-	out, cmdErr := exec.CommandContext(ctx, "docker", "info", "--format",
-		`{{range $k,$v := .Runtimes}}{{$k}}
-{{end}}`).Output()
-	if cmdErr == nil {
-		// Docker responded — check whether the runtime is registered.
-		for _, line := range strings.Split(string(out), "\n") {
-			if strings.TrimSpace(line) == runtimeName {
-				return nil
-			}
-		}
-		return fmt.Errorf(
-			"security mode %q requires the %q runtime to be registered with Docker;\n"+
-				"add it to /etc/docker/daemon.json and restart the daemon:\n"+
-				`  {"runtimes": {%q: {"path": %q}}}`,
-			security, runtimeName, runtimeName, runtimeName,
-		)
+	// For non-Docker backends (e.g. Podman), check the host PATH.
+	if _, err := exec.LookPath(runtimeName); err != nil {
+		return fmt.Errorf("security mode %q requires %q to be installed and in PATH", security, runtimeName)
 	}
-	// docker CLI unavailable or daemon unreachable — skip registration check.
 	return nil
 }
 
