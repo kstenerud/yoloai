@@ -88,7 +88,7 @@ func TestCreateSecretsDir_WithKey(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "sk-test-secret")
 	agentDef := agent.GetAgent("claude")
 
-	dir, err := createSecretsDir(agentDef, nil)
+	dir, err := createSecretsDir(agentDef, nil, "")
 	require.NoError(t, err)
 	require.NotEmpty(t, dir)
 	defer os.RemoveAll(dir) //nolint:errcheck
@@ -103,7 +103,7 @@ func TestCreateSecretsDir_NoKey(t *testing.T) {
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
 	agentDef := agent.GetAgent("claude")
 
-	dir, err := createSecretsDir(agentDef, nil)
+	dir, err := createSecretsDir(agentDef, nil, "")
 	require.NoError(t, err)
 	assert.Empty(t, dir)
 }
@@ -111,7 +111,7 @@ func TestCreateSecretsDir_NoKey(t *testing.T) {
 func TestCreateSecretsDir_NoEnvVars(t *testing.T) {
 	agentDef := agent.GetAgent("test")
 
-	dir, err := createSecretsDir(agentDef, nil)
+	dir, err := createSecretsDir(agentDef, nil, "")
 	require.NoError(t, err)
 	assert.Empty(t, dir)
 }
@@ -123,7 +123,7 @@ func TestCreateSecretsDir_WithEnvVars(t *testing.T) {
 		"CUSTOM_VAR":      "myvalue",
 	}
 
-	dir, err := createSecretsDir(agentDef, envVars)
+	dir, err := createSecretsDir(agentDef, envVars, "")
 	require.NoError(t, err)
 	require.NotEmpty(t, dir)
 	defer os.RemoveAll(dir) //nolint:errcheck
@@ -144,7 +144,7 @@ func TestCreateSecretsDir_APIKeyOverridesEnv(t *testing.T) {
 		"ANTHROPIC_API_KEY": "should-be-overwritten",
 	}
 
-	dir, err := createSecretsDir(agentDef, envVars)
+	dir, err := createSecretsDir(agentDef, envVars, "")
 	require.NoError(t, err)
 	require.NotEmpty(t, dir)
 	defer os.RemoveAll(dir) //nolint:errcheck
@@ -157,7 +157,7 @@ func TestCreateSecretsDir_APIKeyOverridesEnv(t *testing.T) {
 func TestCreateSecretsDir_EmptyBoth(t *testing.T) {
 	agentDef := agent.GetAgent("test")
 
-	dir, err := createSecretsDir(agentDef, map[string]string{})
+	dir, err := createSecretsDir(agentDef, map[string]string{}, "")
 	require.NoError(t, err)
 	assert.Empty(t, dir)
 }
@@ -269,7 +269,7 @@ func TestEnsureContainerSettings_SetsSkipPermissions(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, AgentRuntimeDir), 0750))
 
 	agentDef := agent.GetAgent("claude")
-	require.NoError(t, ensureContainerSettings(agentDef, sandboxDir))
+	require.NoError(t, ensureContainerSettings(agentDef, sandboxDir, ""))
 
 	settings, err := readJSONMap(filepath.Join(sandboxDir, AgentRuntimeDir, "settings.json"))
 	require.NoError(t, err)
@@ -281,7 +281,7 @@ func TestEnsureContainerSettings_NoopForTestAgent(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, AgentRuntimeDir), 0750))
 
 	agentDef := agent.GetAgent("test")
-	require.NoError(t, ensureContainerSettings(agentDef, sandboxDir))
+	require.NoError(t, ensureContainerSettings(agentDef, sandboxDir, ""))
 
 	// No settings file should be created for test agent
 	assert.NoFileExists(t, filepath.Join(sandboxDir, AgentRuntimeDir, "settings.json"))
@@ -296,7 +296,7 @@ func TestEnsureContainerSettings_PreservesExisting(t *testing.T) {
 	require.NoError(t, writeJSONMap(settingsPath, map[string]any{"customKey": "customValue"}))
 
 	agentDef := agent.GetAgent("claude")
-	require.NoError(t, ensureContainerSettings(agentDef, sandboxDir))
+	require.NoError(t, ensureContainerSettings(agentDef, sandboxDir, ""))
 
 	settings, err := readJSONMap(settingsPath)
 	require.NoError(t, err)
@@ -309,7 +309,7 @@ func TestEnsureContainerSettings_GeminiDisablesFolderTrust(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, AgentRuntimeDir), 0750))
 
 	agentDef := agent.GetAgent("gemini")
-	require.NoError(t, ensureContainerSettings(agentDef, sandboxDir))
+	require.NoError(t, ensureContainerSettings(agentDef, sandboxDir, ""))
 
 	settings, err := readJSONMap(filepath.Join(sandboxDir, AgentRuntimeDir, "settings.json"))
 	require.NoError(t, err)
@@ -334,7 +334,7 @@ func TestEnsureContainerSettings_GeminiPreservesAuthSettings(t *testing.T) {
 	}))
 
 	agentDef := agent.GetAgent("gemini")
-	require.NoError(t, ensureContainerSettings(agentDef, sandboxDir))
+	require.NoError(t, ensureContainerSettings(agentDef, sandboxDir, ""))
 
 	settings, err := readJSONMap(settingsPath)
 	require.NoError(t, err)

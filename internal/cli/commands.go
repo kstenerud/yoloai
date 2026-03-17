@@ -460,7 +460,7 @@ func waitForTmux(ctx context.Context, rt runtime.Runtime, containerName, sandbox
 			return nil
 		}
 		lastExecErr = err
-		slog.Debug("waitForTmux: exec check failed", "event", "sandbox.wait_tmux.exec_fail",
+		slog.Debug("waitForTmux: exec check failed", "event", "sandbox.wait_tmux.exec_fail", //nolint:gosec // G706: slog uses structured logging, not vulnerable to log injection
 			"container", containerName, "error", err)
 
 		// Context-aware sleep
@@ -470,7 +470,7 @@ func waitForTmux(ctx context.Context, rt runtime.Runtime, containerName, sandbox
 		case <-time.After(500 * time.Millisecond):
 		}
 	}
-	slog.Debug("waitForTmux: timed out", "event", "sandbox.wait_tmux.timeout",
+	slog.Debug("waitForTmux: timed out", "event", "sandbox.wait_tmux.timeout", //nolint:gosec // G706: slog uses structured logging, not vulnerable to log injection
 		"container", containerName, "last_exec_err", lastExecErr)
 	// Include container logs in the error to surface setup failures.
 	if logs := rt.Logs(ctx, containerName, 50); logs != "" {

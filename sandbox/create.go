@@ -588,9 +588,9 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 	configPerm := os.FileMode(0644) // always 0644 (no secrets, read-only in container)
 
 	if pr.security == "gvisor" {
-		logsDirPerm = 0777  //nolint:gosec // G301: world-writable needed for gVisor user-namespace UID remapping
-		logFilePerm = 0666  //nolint:gosec // G306: world-writable needed for gVisor user-namespace UID remapping
-		statusPerm = 0666   //nolint:gosec // G306: world-writable needed for gVisor user-namespace UID remapping
+		logsDirPerm = 0777 //nolint:gosec // G301: world-writable needed for gVisor user-namespace UID remapping
+		logFilePerm = 0666 //nolint:gosec // G306: world-writable needed for gVisor user-namespace UID remapping
+		statusPerm = 0666  //nolint:gosec // G306: world-writable needed for gVisor user-namespace UID remapping
 	}
 
 	if err := mkdirAllPerm(filepath.Join(sandboxDir, LogsDir), logsDirPerm); err != nil {

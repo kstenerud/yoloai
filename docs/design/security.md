@@ -31,6 +31,58 @@ The seatbelt (macOS sandbox-exec) backend applies **default-deny credential acce
 - **Restricted home directory:** The SBPL profile grants read access only to `~/.local/` (agent binaries), `~/.gitconfig`, and `~/.config/git/` (git identity/settings) — not the entire home directory. This prevents the agent from reading `~/.ssh/`, `~/.gnupg/`, `~/.aws/`, `~/.git-credentials`, `~/.npmrc`, etc.
 - **Opting in to credential access:** Users who need SSH agent forwarding or other credentials can add them via the config `env:` section (e.g., `SSH_AUTH_SOCK`) which flows through the secrets mechanism, or via `mounts:` for directory access (e.g., `~/.ssh:~/.ssh:ro`).
 
+## gVisor Security Mode
+
+gVisor provides **syscall-level sandboxing** by intercepting and filtering system calls through a user-space kernel (the "Sentry"). This adds defense-in-depth beyond container isolation. However, gVisor's user namespace UID remapping requires special permission handling:
+
+### Permission Requirements
+
+gVisor maps container UIDs to different host UIDs (e.g., container root → host UID 501, container yoloai user → host UID 1000+501). This causes permission issues when the container process tries to access bind-mounted directories:
+
+- **Standard Docker**: Uses normal permissions (directories: 0750, files: 0600) because container UIDs match what the Docker daemon expects.
+- **gVisor**: Requires relaxed permissions (directories: 0777, files: 0666) for container-accessible paths because the remapped UIDs don't match the owner.
+
+yoloai **automatically detects gVisor** and applies appropriate permissions:
+
+```bash
+# Standard Docker (--security standard or omitted)
+drwxr-x--- logs/           # 0750: owner + group only
+-rw------- sandbox.jsonl   # 0600: owner only
+
+# gVisor (--security gvisor)
+drwxrwxrwx logs/           # 0777: world-readable/writable
+-rw-rw-rw- sandbox.jsonl   # 0666: world-readable/writable
+```
+
+**Affected paths** (inside `~/.yoloai/sandboxes/<name>/`):
+- Container-writable directories: `logs/`, `work/`, `agent-runtime/`, `files/`, `cache/`
+- Log files: `sandbox.jsonl`, `monitor.jsonl`, `agent-hooks.jsonl`
+- Status files: `agent-status.json`
+- Temporary secrets directory (exists only during container startup, removed within seconds)
+
+**Host-only directories** (not bind-mounted) always use restrictive 0750 permissions: `home-seed/`, `bin/`, `tmux/`, `backend/`.
+
+### Security Trade-offs
+
+**What this means for security:**
+
+- **Standard Docker users**: Benefit from principle of least privilege (0750/0600). Sandbox files are not readable by other users on the host.
+- **gVisor users**: Trade tighter file permissions for syscall-level sandboxing. The relaxed permissions (0777/0666) make sandbox files world-readable on the host, but gVisor's syscall filtering provides an additional security layer inside the container that standard Docker lacks.
+
+**Mitigation:** The sandbox directory (`~/.yoloai/sandboxes/<name>/`) is created with 0750 permissions regardless of security mode, so while *contents* may be world-readable under gVisor, the parent directory is still restricted to the owner.
+
+**Inside the container:** File permissions are uniform regardless of backend. The container always sees the yoloai user as the owner. The permission differences only affect host-side access.
+
+### macOS + gVisor Compatibility
+
+**gVisor is blocked on macOS** due to a known bug where Claude Code hangs indefinitely during initialization (infinite `epoll_pwait` loop). This appears to be a gVisor ARM64 syscall emulation issue. Tracked at: https://github.com/anthropics/claude-code/issues/35454
+
+Workarounds for macOS users who want additional sandboxing:
+- Use standard Docker security (default)
+- Use Seatbelt backend: `--backend seatbelt` (macOS-only, lightweight sandboxing via `sandbox-exec`)
+
+gVisor works correctly on Linux (both x86_64 and ARM64).
+
 ## Security Considerations
 
 - **The agent runs arbitrary code** inside the container: shell commands, file operations, network requests. The container provides isolation, not prevention.
