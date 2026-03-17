@@ -339,19 +339,29 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 		return nil, nil // user cancelled
 	}
 
-	// Create directory structure
+	// Create directory structure.
+	// Host-only dirs (sandboxDir, home-seed, bin, tmux, backend) use 0750.
+	// Dirs bind-mounted into the container use 0777: gVisor user namespaces
+	// remap the container's root to a non-root host uid, so the container
+	// process would get EPERM on 0750 dirs it needs to write into.
 	for _, dir := range []string{
 		sandboxDir,
-		filepath.Join(sandboxDir, "work"),
-		filepath.Join(sandboxDir, AgentRuntimeDir),
 		filepath.Join(sandboxDir, "home-seed"),
-		filepath.Join(sandboxDir, "files"),
-		filepath.Join(sandboxDir, "cache"),
 		filepath.Join(sandboxDir, BinDir),
 		filepath.Join(sandboxDir, TmuxDir),
 		filepath.Join(sandboxDir, BackendDir),
 	} {
 		if err := os.MkdirAll(dir, 0750); err != nil {
+			return nil, fmt.Errorf("create directory %s: %w", dir, err)
+		}
+	}
+	for _, dir := range []string{
+		filepath.Join(sandboxDir, "work"),
+		filepath.Join(sandboxDir, AgentRuntimeDir),
+		filepath.Join(sandboxDir, "files"),
+		filepath.Join(sandboxDir, "cache"),
+	} {
+		if err := os.MkdirAll(dir, 0777); err != nil { //nolint:gosec // G301: world-writable needed for gVisor user-namespace UID remapping
 			return nil, fmt.Errorf("create directory %s: %w", dir, err)
 		}
 	}
@@ -541,15 +551,19 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 		}
 	}
 
-	if err := os.MkdirAll(filepath.Join(sandboxDir, LogsDir), 0700); err != nil {
+	// Logs dir and status file are written by the container process (which
+	// may run as a different uid under gVisor user namespaces), so they need
+	// world-writable/world-readable permissions. runtime-config.json is
+	// read-only inside the container; 0644 lets any uid read it.
+	if err := os.MkdirAll(filepath.Join(sandboxDir, LogsDir), 0777); err != nil { //nolint:gosec // G301: world-writable needed for gVisor user-namespace UID remapping
 		return nil, fmt.Errorf("create logs dir: %w", err)
 	}
 
-	if err := os.WriteFile(filepath.Join(sandboxDir, AgentStatusFile), []byte("{}\n"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(sandboxDir, AgentStatusFile), []byte("{}\n"), 0666); err != nil { //nolint:gosec // G306: world-writable needed for gVisor user-namespace UID remapping
 		return nil, fmt.Errorf("write %s: %w", AgentStatusFile, err)
 	}
 
-	if err := os.WriteFile(filepath.Join(sandboxDir, RuntimeConfigFile), configData, 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(sandboxDir, RuntimeConfigFile), configData, 0644); err != nil { //nolint:gosec // G306: world-readable; no secrets in this file
 		return nil, fmt.Errorf("write %s: %w", RuntimeConfigFile, err)
 	}
 
@@ -1383,7 +1397,7 @@ func ensureContainerSettings(agentDef *agent.Definition, sandboxDir string) erro
 	}
 
 	agentStateDir := filepath.Join(sandboxDir, AgentRuntimeDir)
-	if err := os.MkdirAll(agentStateDir, 0750); err != nil {
+	if err := os.MkdirAll(agentStateDir, 0777); err != nil { //nolint:gosec // G301: world-writable needed for gVisor user-namespace UID remapping
 		return fmt.Errorf("create %s dir: %w", AgentRuntimeDir, err)
 	}
 	settingsPath := filepath.Join(agentStateDir, "settings.json")

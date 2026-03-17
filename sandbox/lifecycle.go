@@ -245,7 +245,7 @@ func (m *Manager) Reset(ctx context.Context, opts ResetOptions) error {
 	// Clear logs so each run starts fresh
 	slog.Debug("clearing logs", "event", "sandbox.reset.logs", "sandbox", opts.Name)
 	_ = os.RemoveAll(filepath.Join(sandboxDir, LogsDir))
-	_ = os.MkdirAll(filepath.Join(sandboxDir, LogsDir), 0700)
+	_ = os.MkdirAll(filepath.Join(sandboxDir, LogsDir), 0777) //nolint:gosec // G301: world-writable needed for gVisor user-namespace UID remapping
 
 	var newSHA string
 	if meta.Workdir.Mode == "overlay" {
@@ -353,7 +353,7 @@ func (m *Manager) Reset(ctx context.Context, opts ResetOptions) error {
 		if err := os.RemoveAll(agentStateDir); err != nil {
 			return fmt.Errorf("remove %s: %w", AgentRuntimeDir, err)
 		}
-		if err := os.MkdirAll(agentStateDir, 0750); err != nil {
+		if err := os.MkdirAll(agentStateDir, 0777); err != nil { //nolint:gosec // G301: world-writable needed for gVisor user-namespace UID remapping
 			return fmt.Errorf("recreate %s: %w", AgentRuntimeDir, err)
 		}
 		// Reset agent_files flag so files get re-seeded on next start
@@ -903,7 +903,7 @@ func (m *Manager) clearCacheAndFiles(opts ResetOptions) error {
 		if err := os.RemoveAll(cacheDir); err != nil {
 			return fmt.Errorf("remove cache: %w", err)
 		}
-		if err := os.MkdirAll(cacheDir, 0750); err != nil {
+		if err := os.MkdirAll(cacheDir, 0777); err != nil { //nolint:gosec // G301: world-writable needed for gVisor user-namespace UID remapping
 			return fmt.Errorf("recreate cache: %w", err)
 		}
 	}
@@ -912,7 +912,7 @@ func (m *Manager) clearCacheAndFiles(opts ResetOptions) error {
 		if err := os.RemoveAll(filesDir); err != nil {
 			return fmt.Errorf("remove files: %w", err)
 		}
-		if err := os.MkdirAll(filesDir, 0750); err != nil {
+		if err := os.MkdirAll(filesDir, 0777); err != nil { //nolint:gosec // G301: world-writable needed for gVisor user-namespace UID remapping
 			return fmt.Errorf("recreate files: %w", err)
 		}
 	}
