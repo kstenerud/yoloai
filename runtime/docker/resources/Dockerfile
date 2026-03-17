@@ -31,8 +31,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     sudo \
     && rm -rf /var/lib/apt/lists/*
 
-# Node.js 22 LTS via NodeSource
-ARG NODE_MAJOR=22
+# Node.js 20 LTS via NodeSource (22 has syscall incompatibilities with gVisor ARM64)
+ARG NODE_MAJOR=20
 # hadolint ignore=DL3008
 RUN mkdir -p /etc/apt/keyrings \
     && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \

@@ -187,6 +187,15 @@ def launch_agent(cfg, socket=None, working_dir=None):
     model = cfg.get("model", "")
     log_debug("agent.launch", f"launching agent: {agent_command}")
 
+    # Diagnostic: verify Node.js works before launching the agent.
+    # Node.js 22 has known syscall incompatibilities with gVisor ARM64 that
+    # cause silent immediate crashes with no output.
+    node_check = subprocess.run(["node", "--version"], capture_output=True, text=True)
+    log_info("sandbox.node_check", "node version check",
+             version=node_check.stdout.strip(),
+             returncode=node_check.returncode,
+             stderr=node_check.stderr.strip())
+
     if working_dir:
         send_cmd = f"cd {working_dir} && exec {agent_command}"
     else:
@@ -225,6 +234,13 @@ def monitor_exit(socket=None):
                         client = client.strip()
                         if client:
                             tmux("detach-client", "-t", client, socket=socket)
+                    break
+            elif not (output or "").strip():
+                # list-panes returned nothing: tmux session is completely gone
+                # (server crash or session destroyed). remain-on-exit couldn't help.
+                sessions = tmux_output("list-sessions", socket=socket)
+                if not (sessions or "").strip():
+                    log_info("sandbox.session_died", "tmux session gone unexpectedly - agent likely crashed")
                     break
             time.sleep(1)
 
