@@ -14,6 +14,7 @@ Usage:
 import datetime
 import json
 import os
+import shutil
 import subprocess
 import sys
 import threading
@@ -133,7 +134,13 @@ def setup_tmux_session(cfg, yoloai_dir, socket=None):
     else:
         cmd = ["tmux"] + base_args + session_args
 
-    log_debug("tmux.start", f"starting tmux session (tmux_conf={tmux_conf})")
+    log_info("tmux.start", "starting tmux session",
+             tmux_conf=tmux_conf,
+             cmd=" ".join(cmd),
+             python_path=os.environ.get("PATH", ""),
+             tmux_bin=shutil.which("tmux") or "not found",
+             tmux_conf_file_exists=os.path.isfile(tmux_conf_file),
+             tmux_conf_file_content=open(tmux_conf_file).read() if os.path.isfile(tmux_conf_file) else "missing")
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
         log_info("tmux.error", "tmux new-session failed",
@@ -195,6 +202,23 @@ def launch_agent(cfg, socket=None, working_dir=None):
              version=node_check.stdout.strip(),
              returncode=node_check.returncode,
              stderr=node_check.stderr.strip())
+
+    # Probe the pane's PATH before launching the agent.
+    # send-keys runs in the pane's shell, so this captures the shell's actual PATH,
+    # which may differ from the Python process's PATH.
+    tmux("send-keys", "-t", "main", "echo PANEPATH=$PATH > /tmp/yoloai-panepath.txt 2>&1", "Enter", socket=socket)
+    time.sleep(0.5)
+    pane_path_raw = ""
+    try:
+        with open("/tmp/yoloai-panepath.txt") as f:
+            pane_path_raw = f.read().strip()
+    except OSError:
+        pane_path_raw = "could not read /tmp/yoloai-panepath.txt"
+    log_info("sandbox.pane_path_probe", "pane PATH probe",
+             pane_path_raw=pane_path_raw,
+             python_path=os.environ.get("PATH", ""),
+             which_claude=shutil.which("claude") or "not found in python PATH",
+             which_node=shutil.which("node") or "not found in python PATH")
 
     if working_dir:
         send_cmd = f"cd {working_dir} && exec {agent_command}"
