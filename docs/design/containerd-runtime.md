@@ -53,24 +53,29 @@ combinations.
 
 ### Isolation Flag
 
-Replace `--security` with `--isolation` (values are user-visible; backends are not):
+Replace `--security` with `--isolation`. Values describe the isolation model, not the
+implementation:
 
-| `--isolation` | What the user gets | Underlying backend |
-|---------------|--------------------|-------------------|
-| *(omitted)*   | Standard container isolation (runc) | docker |
-| `standard`    | Standard container isolation (runc) | docker |
-| `enhanced`    | Syscall-level sandbox (gVisor/runsc) | docker |
-| `vm`          | Full VM isolation (Kata + QEMU)      | containerd |
-| `vm-fc`       | Full VM isolation (Kata + Firecracker) | containerd |
+| `--isolation` | Boundary | Attack surface | Underlying backend |
+|---------------|----------|----------------|--------------------|
+| *(omitted)*   | Container | Standard | docker (runc) |
+| `container`   | Container | Standard | docker (runc) |
+| `container-enhanced` | Container | Syscall-filtered | docker (gVisor/runsc) |
+| `vm`          | Hardware VM | Standard | containerd (Kata + QEMU) |
+| `vm-enhanced` | Hardware VM | Minimal device model | containerd (Kata + Firecracker) |
 
-Users say `--isolation vm`. They never see "containerd" or "kata" unless they read the docs.
+The two axes are explicit: **boundary type** (container vs vm) and **attack surface** (standard vs
+enhanced). No implementation names leak — users never see "gVisor", "Kata", or "Firecracker"
+unless they read the docs.
 
-**Why rename `gvisor` → `enhanced`?** The implementation name leaks. A user who doesn't know what
-gVisor is has no idea what `--security gvisor` provides. `enhanced` is self-explanatory: more
-isolation than the default, at a performance cost.
+**Why `container` instead of `standard`?** With `--os mac` in the picture, `container` vs `vm`
+is a meaningful contrast everywhere. On macOS, seatbelt is a container-like sandbox; Tart is a VM.
+The naming is consistent across platforms.
 
-**Why rename `kata` → `vm`?** Same reason. `vm` is the concept (hardware VM boundary); Kata is
-the implementation. Also future-proofs: if a better VM runtime replaces Kata, the flag stays stable.
+**Why `vm-enhanced` instead of `vm-firecracker`?** Firecracker's value is its minimal device
+model (smaller attack surface within the VM boundary) — the same relationship `container-enhanced`
+has to `container`. Naming it `vm-enhanced` describes what it provides rather than what it is, and
+keeps the 2×2 matrix symmetric.
 
 ### OS Flag (Mac)
 
@@ -91,10 +96,10 @@ Add `--os` flag (values: `linux`, `mac`):
 
 | `--os mac` + `--isolation` | Backend | What the user gets |
 |---------------------------|---------|-------------------|
-| `standard` (default) | seatbelt | macOS sandbox-exec (lightweight, low overhead) |
-| `vm`                 | tart    | Full macOS VM |
-| `enhanced`           | —       | **Error**: gVisor is Linux-only |
-| `vm-fc`              | —       | **Error**: Firecracker is Linux-only |
+| `container` (default) | seatbelt | macOS sandbox-exec (lightweight, low overhead) |
+| `vm`                  | tart    | Full macOS VM |
+| `container-enhanced`  | —       | **Error**: gVisor is Linux-only |
+| `vm-enhanced`         | —       | **Error**: Firecracker is Linux-only |
 
 Seatbelt is the right default for `--os mac`: it's the macOS equivalent of a standard runc
 container — process-level sandboxing, fast startup, no VM overhead. Tart is for users who want
@@ -102,12 +107,12 @@ full VM-level isolation or need a clean macOS environment.
 
 **Isolation symmetry across platforms:**
 
-| `--isolation` | Linux backend | macOS backend (`--os mac`) |
-|---------------|---------------|---------------------------|
-| `standard`    | docker (runc) | seatbelt (sandbox-exec)   |
-| `enhanced`    | docker (gVisor) | *(unsupported)*          |
-| `vm`          | containerd (Kata) | tart (macOS VM)        |
-| `vm-fc`       | containerd (Kata+FC) | *(unsupported)*     |
+| `--isolation`        | Linux backend            | macOS backend (`--os mac`) |
+|----------------------|--------------------------|---------------------------|
+| `container`          | docker (runc)            | seatbelt (sandbox-exec)   |
+| `container-enhanced` | docker (gVisor)          | *(unsupported)*           |
+| `vm`                 | containerd (Kata + QEMU) | tart (macOS VM)           |
+| `vm-enhanced`        | containerd (Kata + FC)   | *(unsupported)*           |
 
 **What happens to `--backend`?** It becomes a config-only escape hatch for power users and is
 removed from the `yoloai new` help text. The common case is covered by `--isolation` + `--os`.
@@ -120,12 +125,12 @@ No backwards compatibility requirement. `--security` is replaced by `--isolation
 | Old flag | New flag |
 |----------|----------|
 | *(omitted)* | *(omitted)* |
-| `--security standard` | `--isolation standard` |
-| `--security gvisor` | `--isolation enhanced` |
+| `--security standard` | `--isolation container` |
+| `--security gvisor` | `--isolation container-enhanced` |
 | `--security kata` | `--isolation vm` |
-| `--security kata-firecracker` | `--isolation vm-fc` |
+| `--security kata-firecracker` | `--isolation vm-enhanced` |
 | `--backend tart` | `--os mac --isolation vm` |
-| `--backend seatbelt` | `--os mac` (seatbelt is now the default for `--os mac --isolation standard`) |
+| `--backend seatbelt` | `--os mac` (`container` is the default for `--os mac`) |
 
 ### Backend Auto-Selection
 
@@ -137,14 +142,14 @@ resolveBackend(isolation, os):
     switch isolation:
     case "vm":
       return tart
-    case "enhanced", "vm-fc":
+    case "container-enhanced", "vm-enhanced":
       error (unsupported on macOS)
-    default:
+    default: // "container" or omitted
       return seatbelt
   switch isolation:
-  case "vm", "vm-fc":
+  case "vm", "vm-enhanced":
     return containerd
-  default:
+  default: // "container", "container-enhanced", or omitted
     return docker
 ```
 
@@ -165,29 +170,29 @@ creation time). No changes needed for lifecycle commands.
 
 | Backend | `:overlay` | Notes |
 |---------|-----------|-------|
-| docker / standard | Yes | Works. Requires `CAP_SYS_ADMIN`. |
-| docker / enhanced (gVisor) | No | gVisor does not support mounting overlayfs inside the container (no FUSE or unprivileged overlay). |
-| containerd / vm (Kata) | No | The agent runs inside a VM. The overlayfs upper layer is inside the VM's guest filesystem, not visible to the containerd host. |
-| containerd / vm-fc (Kata+Firecracker) | No | Same as vm. |
-| tart (macOS VM) | No | Tart is a macOS VM. No overlayfs. |
-| seatbelt | No | No container filesystem. |
+| docker / `container` | Yes | Works. Requires `CAP_SYS_ADMIN`. |
+| docker / `container-enhanced` | No | gVisor does not support mounting overlayfs inside the container. |
+| containerd / `vm` | No | Overlayfs upper layer is inside the VM guest, not visible to the host. |
+| containerd / `vm-enhanced` | No | Same as `vm`. |
+| tart (`--os mac`, `vm`) | No | macOS VM. No overlayfs. |
+| seatbelt (`--os mac`, `container`) | No | No container filesystem. |
 
-**Rule:** `:overlay` only works with `docker` backend + `standard` isolation (default or explicit).
+**Rule:** `:overlay` only works with `--isolation container` (default or explicit) on Linux.
 
 **User experience:** If a user specifies `:overlay` with an incompatible combination, yoloAI errors
 at creation time with a clear message:
 
 ```
-Error: :overlay directories require --isolation standard (docker backend).
-       --isolation enhanced uses gVisor, which does not support overlayfs inside the container.
-       Use :copy instead, or switch to --isolation standard.
+Error: :overlay directories require --isolation container (docker backend).
+       --isolation container-enhanced uses gVisor, which does not support overlayfs inside the container.
+       Use :copy instead, or switch to --isolation container.
 ```
 
 **Documentation strategy:** `:overlay` is documented in the main guide with a short caveat:
 
 > `:overlay` is a space-efficient alternative to `:copy` that uses Linux overlayfs for instant
 > directory setup. It requires standard isolation (Docker, Linux host) and `CAP_SYS_ADMIN`.
-> It does not work with enhanced or VM isolation modes, or on macOS. If you're unsure, use `:copy`.
+> It does not work with `container-enhanced`, `vm`, or `vm-enhanced` isolation modes, or on macOS. If you're unsure, use `:copy`.
 
 A detailed `:overlay` reference lives in an advanced section / separate doc covering the full
 tradeoff (instant setup vs. host-visible upper layer, `CAP_SYS_ADMIN` requirement, container-only
@@ -221,11 +226,11 @@ without being constrained by Docker's or nerdctl's protocol choices.
 
 ```
 runtime.Runtime (interface)
-├── runtime/docker/        ← Docker SDK — standard, enhanced (gVisor)
+├── runtime/docker/        ← Docker SDK — container, container-enhanced (gVisor)
 ├── runtime/podman/        ← Podman compat socket — rootless (--backend podman, not exposed via --isolation)
-├── runtime/containerd/    ← NEW: containerd API — vm (kata), vm-fc (kata-firecracker)
+├── runtime/containerd/    ← NEW: containerd API — vm (kata+qemu), vm-enhanced (kata+firecracker)
 ├── runtime/tart/          ← Tart VM — macOS (--os mac --isolation vm)
-└── runtime/seatbelt/      ← sandbox-exec — macOS lightweight (--os mac --isolation standard)
+└── runtime/seatbelt/      ← sandbox-exec — macOS lightweight (--os mac --isolation container)
 ```
 
 Podman is reachable via `--backend podman` in config only — it is not mapped to an `--isolation`
@@ -233,17 +238,17 @@ value and is not part of the auto-selection logic. It serves rootless Linux envi
 Docker is unavailable. Its status in the `--isolation` model is out of scope for this design.
 
 The containerd backend is not a replacement for Docker — it is a parallel backend for isolation
-modes that require it. The Docker backend continues to serve `standard` and `enhanced`.
+modes that require it. The Docker backend continues to serve `container` and `container-enhanced`.
 
 ### Isolation Mode → Backend Mapping
 
-| `--isolation` value | Backend | Mechanism |
-|---------------------|---------|-----------|
-| *(omitted)*         | docker  | runc (default) |
-| `standard`          | docker  | runc |
-| `enhanced`          | docker  | runsc (gVisor) |
-| `vm`                | containerd | `io.containerd.kata.v2` shimv2 + CNI |
-| `vm-fc`             | containerd | `io.containerd.kata-fc.v2` shimv2 + CNI + devmapper |
+| `--isolation` value  | Backend    | Mechanism |
+|----------------------|------------|-----------|
+| *(omitted)*          | docker     | runc (default) |
+| `container`          | docker     | runc |
+| `container-enhanced` | docker     | runsc (gVisor) |
+| `vm`                 | containerd | `io.containerd.kata.v2` shimv2 + CNI |
+| `vm-enhanced`        | containerd | `io.containerd.kata-fc.v2` shimv2 + CNI + devmapper |
 
 ### Image Namespace
 
@@ -305,7 +310,7 @@ containerd.WithRuntime("io.containerd.kata.v2", &options.Options{
     ConfigPath: "/opt/kata/share/defaults/kata-containers/configuration-qemu.toml",
 })
 
-// vm-fc (kata-firecracker)
+// vm-enhanced (kata-firecracker)
 containerd.WithRuntime("io.containerd.kata-fc.v2", &options.Options{
     ConfigPath: "/opt/kata/share/defaults/kata-containers/configuration-fc.toml",
 })
@@ -370,10 +375,10 @@ Implement `runtime/containerd/` with:
 
 ### Phase 4: Auto-Selection
 
-Extend `resolveBackend()` to auto-select `containerd` for `vm`/`vm-fc` isolation modes.
+Extend `resolveBackend()` to auto-select `containerd` for `vm`/`vm-enhanced` isolation modes.
 Update isolation validation to check for containerd prerequisites if vm is chosen.
 
-### Phase 5: vm-fc (Kata + Firecracker)
+### Phase 5: vm-enhanced (Kata + Firecracker)
 
 Kata-Firecracker requires the devmapper snapshotter in containerd. This needs a pre-provisioned
 thin-pool block device (or loop device). On Ubuntu 24.04, the recommended approach is a loop-based
@@ -389,7 +394,7 @@ so the apt-installed containerd must be used. Implement after Phase 3 is stable.
    (`docker save | containerd image import --namespace yoloai`) is acceptable overhead.
 
 2. ~~**Snapshotter**~~ — **Resolved:** Auto-select based on isolation mode: `overlayfs` for `vm`
-   (Kata+QEMU uses virtio-fs, no block device needed), `devmapper` for `vm-fc` (Firecracker
+   (Kata+QEMU uses virtio-fs, no block device needed), `devmapper` for `vm-enhanced` (Firecracker
    requires a block device for the guest kernel). devmapper must be pre-provisioned by the operator
    (it needs a dedicated block/loop device for its thin pool — not something yoloai can set up at
    runtime). At container creation time, query containerd for available snapshotters; if the
@@ -401,7 +406,7 @@ so the apt-installed containerd must be used. Implement after Phase 3 is stable.
    was installed independently or via Docker. The one remaining optional Docker dependency is image
    building: `EnsureImage()` currently delegates to `docker build` for convenience. This is
    separable — BuildKit can be invoked directly without Docker if needed. For now, document that
-   `--isolation vm`/`vm-fc` requires containerd (not Docker), and that image building additionally
+   `--isolation vm`/`vm-enhanced` requires containerd (not Docker), and that image building additionally
    requires either Docker or a standalone BuildKit daemon.
 
 4. ~~**gVisor on containerd**~~ — **Resolved:** Keep gVisor on the Docker backend indefinitely.
@@ -424,8 +429,8 @@ so the apt-installed containerd must be used. Implement after Phase 3 is stable.
      2. Restart WSL: wsl --shutdown
    ```
 
-   `--isolation standard` and `enhanced` are unaffected — those use the Docker backend, which
-   Docker Desktop manages transparently on Windows.
+   `--isolation container` and `container-enhanced` are unaffected — those use the Docker backend,
+   which Docker Desktop manages transparently on Windows.
 
 6. ~~**InteractiveExec dependency on nerdctl**~~ — **Resolved:** Implement native PTY from the
    start; skip the nerdctl shim entirely. The shim would introduce edge cases around TTY handling,
@@ -433,14 +438,14 @@ so the apt-installed containerd must be used. Implement after Phase 3 is stable.
    anyway. Native containerd + PTY is the right implementation and the cost of doing it once is
    lower than the cost of doing it twice.
 
-7. ~~**Seatbelt + gVisor gap**~~ — **Resolved:** `--os mac` + `--isolation enhanced` is
+7. ~~**Seatbelt + gVisor gap**~~ — **Resolved:** `--os mac` + `--isolation container-enhanced` is
    unsupported; error at creation time with a clear message listing what is available:
 
    ```
-   --isolation enhanced is not available on macOS.
+   --isolation container-enhanced is not available on macOS.
    Available isolation modes with --os mac:
-     standard  macOS sandbox-exec (seatbelt)
-     vm        Full macOS VM (Tart)
+     container  macOS sandbox-exec (seatbelt)
+     vm         Full macOS VM (Tart)
    ```
 
    If a gVisor equivalent for macOS emerges in the future, it can be added then.
@@ -449,7 +454,7 @@ so the apt-installed containerd must be used. Implement after Phase 3 is stable.
 
 ## Prerequisites (User-Facing)
 
-When `--isolation vm` or `vm-fc` is requested and the containerd backend is auto-selected, yoloAI
+When `--isolation vm` or `vm-enhanced` is requested and the containerd backend is auto-selected, yoloAI
 should check at startup:
 
 **Runtime prerequisites** (always required):
@@ -457,12 +462,12 @@ should check at startup:
 - `containerd-shim-kata-v2` (or kata-qemu-v2 variant) is in PATH
 - CNI plugins exist at `/opt/cni/bin/`
 - `vhost_net` kernel module is loaded
-- (`vm-fc` only) devmapper snapshotter is configured in containerd
+- (`vm-enhanced` only) devmapper snapshotter is configured in containerd
 
 **Image build prerequisite** (required only when the yoloai image needs to be built or updated):
 - `docker` is available, OR a standalone BuildKit daemon is reachable
 
-Docker is not required to *run* containers in vm/vm-fc mode — only to build the base image.
+Docker is not required to *run* containers in vm/vm-enhanced mode — only to build the base image.
 If the image already exists in the `yoloai` containerd namespace, the build step is skipped
 entirely and Docker is not needed.
 
@@ -518,8 +523,9 @@ Not viable — the networking problem is fundamental, not just an exec problem.
 
 ### Alternative D: Keep `--security` flag name, just rename values
 
-Rename `gvisor` → `enhanced` and `kata`/`kata-firecracker` → `vm`/`vm-fc` but keep `--security`.
+Rename `gvisor` → `container-enhanced` and `kata`/`kata-firecracker` → `vm`/`vm-enhanced` but keep `--security`.
 
 **Cons:** `--security` is still the wrong abstraction. The flag name implies a purely adversarial
 concern (what are you defending against?) when the real tradeoff is isolation strength vs.
-performance and compatibility. `--isolation` better captures the spectrum: standard → enhanced → vm.
+performance and compatibility. `--isolation` better captures the design space as a 2×2 matrix:
+`container`/`container-enhanced` vs `vm`/`vm-enhanced`.
