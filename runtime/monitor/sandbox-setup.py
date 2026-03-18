@@ -112,8 +112,13 @@ def write_status(status_file, status, exit_code=None):
 
 # --- Shared setup functions ---
 
-def setup_tmux_session(cfg, yoloai_dir, socket=None):
-    """Start a tmux session with config based on tmux_conf setting."""
+def setup_tmux_session(cfg, yoloai_dir, socket=None, login_shell=False):
+    """Start a tmux session with config based on tmux_conf setting.
+
+    login_shell: if True, start the pane shell as 'zsh -l' so that login
+    startup files (e.g. ~/.zprofile) are sourced. Required on tart VMs where
+    macOS /etc/zprofile resets PATH via path_helper on every non-login shell.
+    """
     tmux_conf = cfg.get("tmux_conf", "")
     tmux_conf_file = os.path.join(yoloai_dir, "tmux", "tmux.conf")
     home = os.environ.get("HOME", "")
@@ -125,6 +130,9 @@ def setup_tmux_session(cfg, yoloai_dir, socket=None):
         base_args.extend(["-S", socket])
 
     session_args = ["new-session", "-d", "-s", "main", "-x", "200", "-y", "50"]
+    # Append shell command last; zsh -l makes it a login shell.
+    if login_shell:
+        session_args += ["zsh", "-l"]
 
     if tmux_conf in ("default", "default+host"):
         cmd = ["tmux"] + base_args + ["-f", tmux_conf_file] + session_args
@@ -437,14 +445,6 @@ def setup_tart(cfg, shared_dir):
     """Tart-specific setup: VirtioFS mount symlinks via sudo."""
     log_info("sandbox.backend_setup", "Tart backend setup", backend="tart")
 
-    # tart exec runs as a non-login shell, so ~/.zprofile is never sourced.
-    # Prepend Homebrew bin so claude, node, npm etc. are on PATH for the
-    # tmux session and the agent that runs inside it.
-    homebrew_bin = "/opt/homebrew/bin"
-    path = os.environ.get("PATH", "")
-    if homebrew_bin not in path.split(os.pathsep):
-        os.environ["PATH"] = homebrew_bin + os.pathsep + path
-
     mount_map = cfg.get("mount_map", {})
     if not mount_map:
         return
@@ -543,8 +543,10 @@ def main():
         if working_dir:
             os.chdir(working_dir)
 
-    # Shared setup
-    setup_tmux_session(cfg, yoloai_dir, socket=socket)
+    # Tart VMs run as a non-login shell; use login_shell so ~/.zprofile is
+    # sourced and Homebrew (installed during provisioning) is on PATH.
+    setup_tmux_session(cfg, yoloai_dir, socket=socket,
+                       login_shell=(backend == "tart"))
 
     # Under gVisor on ARM64 the docker exec'd process may see different
     # effective credentials than the container entrypoint, causing EACCES
