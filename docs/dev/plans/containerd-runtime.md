@@ -407,7 +407,13 @@ go get github.com/containerd/containerd/api@v1.10.0
 go get github.com/containerd/go-cni@v1.1.13
 go get github.com/vishvananda/netns@latest
 go get github.com/creack/pty@latest
+go get golang.org/x/term@latest
 ```
+
+**`creack/pty` vs `golang.org/x/term`:** `creack/pty` does NOT export `MakeRaw` or `Restore`
+(verified: `undefined: pty.MakeRaw`). Raw mode on the host terminal uses `golang.org/x/term`:
+`term.MakeRaw(fd int) (*term.State, error)` and `term.Restore(fd int, state *term.State) error`.
+`creack/pty` is still needed for `pty.Getsize` (terminal dimensions for `ResizePTY`).
 
 **Module path is `github.com/containerd/containerd/v2` — not `v1`.** The installed daemon is
 v2.2.2 and the v2 module has a different import path. Key packages used from this module:
@@ -590,10 +596,11 @@ prefer explicit paths to avoid depending on containerd's registration.
 **`Stop()`:**
 1. Load container; if not found, return nil (idempotent)
 2. Load task via `ctr.Task(ctx, nil)`; if no task exists, skip to teardown
-3. Subscribe to exit events and check status — **`task.Wait()` must be called before
-   `task.Kill()`** to avoid missing the exit event:
+3. Subscribe to exit events and check status — call `task.Wait()` before `task.Kill()`
+   so the channel is ready before the signal fires (the shim buffers exit events, so
+   calling Wait after Kill still works, but registering first avoids any race):
    ```go
-   exitCh, err := task.Wait(ctx)  // subscribe first
+   exitCh, err := task.Wait(ctx)  // register before kill
    if err != nil {
        return fmt.Errorf("wait task: %w", err)
    }
@@ -644,11 +651,11 @@ bridges it to named FIFOs. On the host side, attach `os.Stdin`/`os.Stdout` direc
 FIFOs — no host PTY pair needed. `creack/pty` is used only for raw mode and terminal size,
 not for opening a PTY.
 
-1. Set raw mode on the host terminal:
+1. Set raw mode on the host terminal (`golang.org/x/term`, not `creack/pty`):
    ```go
-   oldState, err := pty.MakeRaw(int(os.Stdin.Fd()))
+   oldState, err := term.MakeRaw(int(os.Stdin.Fd()))
    if err != nil { return err }
-   defer pty.Restore(int(os.Stdin.Fd()), oldState)
+   defer term.Restore(int(os.Stdin.Fd()), oldState)
    ```
 2. Create a FIFO set with terminal flag in a temp dir:
    ```go
@@ -825,9 +832,20 @@ select `devmapper` snapshotter and the fc config path). No additional backend ch
 
 Changes for Phase 3:
 - Fill in the devmapper stub in `ValidateIsolation()` in `runtime/containerd/containerd.go`:
-  when `isolation == "vm-enhanced"`, query containerd snapshotters via
-  `r.client.SnapshotService("devmapper").Stat()` (or equivalent) and error if devmapper is
-  absent or not in the `ok` state.
+  when `isolation == "vm-enhanced"`, probe the devmapper snapshotter:
+  ```go
+  err := r.client.SnapshotService("devmapper").Stat(ctx, "probe")
+  // errdefs.IsNotFound → snapshotter is configured (key just doesn't exist)
+  // "snapshotter not loaded" in err → plugin not registered → error to user
+  if err != nil && !errdefs.IsNotFound(err) {
+      return fmt.Errorf("devmapper snapshotter not configured: %w\n"+
+          "Run the devmapper setup script and restart containerd.", err)
+  }
+  ```
+  Note: `client.ListSnapshotter` does not exist in containerd v2. `SnapshotService(name)`
+  always returns a proxy object (never nil); distinguish configured vs not by the error
+  type from `Stat()`. Verified on test VM: devmapper returns `errdefs.IsNotFound`,
+  unconfigured snapshotters return `"snapshotter not loaded: invalid argument"`.
 - Test on the test VM with Firecracker.
 
 ---
@@ -857,7 +875,7 @@ Changes for Phase 3:
 
 | File | Change |
 |------|--------|
-| `go.mod` / `go.sum` | Add `github.com/containerd/containerd/v2`, `github.com/containerd/containerd/api`, `github.com/containerd/go-cni`, `github.com/vishvananda/netns`, `github.com/creack/pty` |
+| `go.mod` / `go.sum` | Add `github.com/containerd/containerd/v2`, `github.com/containerd/containerd/api`, `github.com/containerd/go-cni`, `github.com/vishvananda/netns`, `github.com/creack/pty`, `golang.org/x/term` |
 | `runtime/containerd/containerd.go` | **New.** Struct, `New()`, `Name()`, `Close()`, `withNamespace()` helper, `ValidateIsolation()` (shim binary, CNI, /dev/kvm) |
 | `runtime/containerd/cni.go` | **New.** netns creation (vishvananda/netns), CNI setup/teardown, state persistence |
 | `runtime/containerd/lifecycle.go` | **New.** `Create()` (with snapshotter selection), `Start()` (with stopped-task cleanup), `Stop()` (with status check), `Remove()`, `Inspect()` |
