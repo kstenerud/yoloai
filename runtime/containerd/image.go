@@ -10,6 +10,7 @@ import (
 	"io"
 	"log/slog"
 	"os/exec"
+	"runtime"
 
 	"github.com/containerd/errdefs"
 )
@@ -45,7 +46,14 @@ func (r *Runtime) EnsureImage(ctx context.Context, sourceDir string, output io.W
 
 	ctrBin, err := exec.LookPath("ctr")
 	if err != nil {
-		return fmt.Errorf("ctr (containerd CLI) not found; install containerd:\n  sudo apt install containerd")
+		var hint string
+		switch runtime.GOOS {
+		case "linux":
+			hint = "  Ubuntu/Debian: sudo apt install containerd\n  RHEL/Fedora:   sudo dnf install containerd"
+		default:
+			hint = "  containerd requires a Linux host; see https://containerd.io/docs/getting-started/"
+		}
+		return fmt.Errorf("ctr (containerd CLI) not found; install containerd:\n%s", hint)
 	}
 
 	// Build the image with Docker.

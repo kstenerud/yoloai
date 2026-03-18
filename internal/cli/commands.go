@@ -195,6 +195,13 @@ func newNewCmd(version string) *cobra.Command {
 			envSlice, _ := cmd.Flags().GetStringSlice("env")
 
 			// Block unsupported isolation+os combinations early.
+			if goruntime.GOOS == "darwin" && targetOS != "mac" && (isolation == "vm" || isolation == "vm-enhanced") {
+				return sandbox.NewUsageError(
+					"--isolation %s requires containerd, which is not available on macOS.\n"+
+						"Use a Linux host for VM isolation, or use --os mac for macOS-native sandboxing:\n"+
+						"  container   macOS sandbox-exec (seatbelt)\n"+
+						"  vm          Full macOS VM (Tart)", isolation)
+			}
 			if targetOS == "mac" && (isolation == "container-enhanced" || isolation == "vm-enhanced") {
 				return sandbox.NewUsageError(
 					"--isolation %s is not available with --os mac.\n"+
