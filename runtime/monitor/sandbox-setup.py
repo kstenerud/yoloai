@@ -191,8 +191,11 @@ def launch_agent(cfg, socket=None, working_dir=None, backend=""):
     # tart exec runs a non-login shell so PATH omits /opt/homebrew/bin.
     # Prepend standard Homebrew prefixes so shutil.which() can find binaries
     # installed by Homebrew (e.g. claude via npm).
+    # Include /opt/homebrew/opt/node/bin (node 25) before /opt/homebrew/bin so
+    # that the claude shebang (#!/usr/bin/env node) resolves node 25, not the
+    # node@24 keg that the Cirrus base image adds to PATH via ~/.zprofile.
     if backend == "tart":
-        homebrew_bins = ["/opt/homebrew/bin", "/opt/homebrew/sbin", "/usr/local/bin"]
+        homebrew_bins = ["/opt/homebrew/opt/node/bin", "/opt/homebrew/bin", "/opt/homebrew/sbin", "/usr/local/bin"]
         current_path = os.environ.get("PATH", "")
         extras = [p for p in homebrew_bins if p not in current_path.split(":")]
         if extras:
@@ -233,6 +236,12 @@ def launch_agent(cfg, socket=None, working_dir=None, backend=""):
         send_cmd = f"cd {working_dir} && exec {agent_command}"
     else:
         send_cmd = f"exec {agent_command}"
+
+    # For tart: the login shell's ~/.zprofile (from the Cirrus base image) puts
+    # node@24 before node 25 in PATH. Prepend node 25's bin dir so the claude
+    # shebang (#!/usr/bin/env node) resolves to node 25, not the broken node@24.
+    if backend == "tart":
+        send_cmd = f'PATH="/opt/homebrew/opt/node/bin:$PATH" {send_cmd}'
 
     tmux("send-keys", "-t", "main", send_cmd, "Enter", socket=socket)
     log_info("sandbox.agent_launch", "agent process started", agent=agent, model=model)

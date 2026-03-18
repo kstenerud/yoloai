@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 )
 
 const (
@@ -202,12 +203,14 @@ func (r *Runtime) bootForProvisioning(ctx context.Context, vmName string, output
 		_ = vmLog.Close()
 	}()
 
-	// Ensure cleanup: stop the VM when done (regardless of success/failure)
+	// Safety net: if we return early (boot failure, provision error), stop the VM.
+	// On the success path the VM will already be stopped via in-guest shutdown
+	// before we return, so tart stop will be a no-op or benign failure.
 	defer func() {
-		logger.Debug("stopping provisioning VM", "vm", vmName)
+		logger.Debug("stopping provisioning VM (safety net)", "vm", vmName)
 		stopCmd := exec.CommandContext(ctx, r.tartBin, "stop", vmName) //nolint:gosec // G204
 		if err := stopCmd.Run(); err != nil {
-			// Fall back to killing the process
+			// Fall back to killing the tart run host process
 			_ = cmd.Process.Kill()
 		}
 	}()
@@ -235,6 +238,29 @@ func (r *Runtime) bootForProvisioning(ctx context.Context, vmName string, output
 		if err := provCmd.Run(); err != nil {
 			return fmt.Errorf("provision step %d failed: %w", i+1, err)
 		}
+	}
+
+	// Trigger an in-guest shutdown to flush all APFS write buffers before the
+	// disk image is cloned for sandboxes. Without this, an external tart stop
+	// (ACPI power-off) may not wait for macOS to commit all pending writes,
+	// causing installed packages and profile edits to be missing in clones.
+	fmt.Fprintln(output, "Flushing filesystem and shutting down provisioning VM...") //nolint:errcheck // best-effort
+	shutArgs := execArgs(vmName, "bash", "-c", "sync; sudo shutdown -h now")
+	shutCmd := exec.CommandContext(ctx, r.tartBin, shutArgs...) //nolint:gosec // G204
+	shutCmd.Stdout = output
+	shutCmd.Stderr = output
+	_ = shutCmd.Run() // VM shuts down during exec — non-zero exit is expected
+
+	// Wait for tart run to exit, confirming the VM has fully powered off and
+	// its disk image is in a consistent state.
+	fmt.Fprintln(output, "Waiting for VM to fully power off...") //nolint:errcheck // best-effort
+	select {
+	case <-procDone:
+		logger.Debug("provisioning VM powered off cleanly", "vm", vmName)
+	case <-time.After(90 * time.Second):
+		return fmt.Errorf("provisioning VM did not power off within 90s")
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 
 	return nil
