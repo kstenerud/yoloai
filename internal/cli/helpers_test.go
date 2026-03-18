@@ -53,6 +53,17 @@ func TestResolveBackend_OsMac(t *testing.T) {
 	assert.Equal(t, "seatbelt", resolveBackend(cmd))
 }
 
+func TestResolveBackend_OsMacIsolationVM(t *testing.T) {
+	cmd := &cobra.Command{}
+	cmd.Flags().String("backend", "", "")
+	cmd.Flags().String("isolation", "", "")
+	cmd.Flags().String("os", "", "")
+	require.NoError(t, cmd.Flags().Set("os", "mac"))
+	require.NoError(t, cmd.Flags().Set("isolation", "vm"))
+
+	assert.Equal(t, "tart", resolveBackend(cmd))
+}
+
 func TestResolveBackend_FlagEmptyNoConfig(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)

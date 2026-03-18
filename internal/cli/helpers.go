@@ -58,19 +58,21 @@ func resolveBackend(cmd *cobra.Command) string {
 		return b
 	}
 
-	// Isolation-based routing: vm/vm-enhanced always use containerd.
 	isolation, _ := cmd.Flags().GetString("isolation")
-	if isolation == "vm" || isolation == "vm-enhanced" {
-		return "containerd"
-	}
-
-	// OS-based routing: --os mac routes to seatbelt/tart.
 	targetOS, _ := cmd.Flags().GetString("os")
+
+	// OS-based routing: --os mac routes to seatbelt/tart (checked first so
+	// --os mac --isolation vm goes to tart, not containerd).
 	if targetOS == "mac" {
 		if isolation == "vm" {
 			return "tart"
 		}
 		return "seatbelt"
+	}
+
+	// Isolation-based routing: vm/vm-enhanced use containerd on Linux.
+	if isolation == "vm" || isolation == "vm-enhanced" {
+		return "containerd"
 	}
 
 	// container/container-enhanced: prefer config, then auto-detect.
