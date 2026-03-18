@@ -152,10 +152,11 @@ No backwards compatibility requirement. `--security` is replaced by `--isolation
 `resolveBackend()` in `cli/helpers.go` currently reads `--backend` or config default. Extend it
 with auto-detection and capability checking:
 
-**General principle: explicit intent is never silently overridden.** If the user specifies
-`--backend`, `--isolation`, or `--os` explicitly, a failure to satisfy that request is always an
-error — never a fallback to something else. Fallback only happens when nothing was explicitly
-specified.
+**General principle: explicit intent is never silently overridden.** CLI flags (`--backend`,
+`--isolation`, `--os`) signal explicit intent — a failure to satisfy them is always an error, never
+a silent fallback. Config values signal default preferences — a missing preferred runtime issues a
+warning and falls back gracefully. This distinction is captured in `backendOverrideIsExplicit`
+below.
 
 ```
 // backendOverride: from --backend CLI flag or container_backend config key
@@ -191,31 +192,37 @@ resolveBackend(isolation, os, backendOverride, backendOverrideIsExplicit):
     return backend
 ```
 
-**`detectContainerBackend()`:** Respects `container_backend` config as a preference, then
-falls back to auto-detection. Only runs when no explicit `--backend` was given on the CLI:
+**`detectContainerBackend()`:** Tries the `container_backend` config preference first, warns and
+falls back if unavailable. Only runs when no explicit `--backend` was given on the CLI:
 
 ```
 detectContainerBackend(containerBackendConfig):
-  // Honor container_backend config preference if the preferred runtime is reachable
-  if containerBackendConfig == "podman":
+  preferred = containerBackendConfig  // "docker", "podman", or unset
+
+  if preferred == "podman":
     if podmanSocketReachable() or podmanBinaryExists():
       return podman
-    // preferred runtime not available — fall through to auto-detect
-  if containerBackendConfig == "docker":
+    warn: "container_backend=podman not found; falling back to docker"
     if dockerSocketReachable():
       return docker
-    // preferred runtime not available — fall through to auto-detect
+    error: no container runtime found. Install Docker or Podman.
 
-  // Auto-detect: Docker first (more common, broader compatibility)
+  // Default order: docker first, podman second
   if dockerSocketReachable():
     return docker
+  if preferred == "docker":
+    // Explicit docker preference but docker not found; warn before trying podman
+    warn: "container_backend=docker not found; falling back to podman"
   if podmanSocketReachable() or podmanBinaryExists():
     return podman
   error: no container runtime found. Install Docker or Podman.
 ```
 
-Docker is tried first because it is more common and has broader compatibility (e.g., gVisor
-registration). Podman is the fallback for rootless/daemonless environments.
+Config values signal a default preference, not explicit intent — a missing preferred runtime is a
+warning, not an error. Only CLI `--backend` signals explicit intent and fails hard when the
+requested backend is unavailable. Docker is the default first choice because it is more common and
+has broader compatibility (e.g., gVisor registration). Podman is the fallback for
+rootless/daemonless environments.
 
 **`checkEnhancedSupport(backend)`:** Before creating a `container-enhanced` sandbox, verify the
 chosen backend has gVisor configured — don't wait for a cryptic runtime error deep in the stack.
