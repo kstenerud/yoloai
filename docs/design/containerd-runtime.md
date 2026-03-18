@@ -441,56 +441,80 @@ and shared.
 
 ---
 
+## Implementation Notes
+
+These are code-level decisions that resolve ambiguities an implementer would encounter. They
+belong in the design rather than the implementation plan because they affect how other parts of
+the codebase interact with the new features.
+
+### `--isolation` → OCI runtime mapping
+
+`--isolation` drives both backend selection and the OCI runtime name passed in
+`InstanceConfig.ContainerRuntime`. The mapping is:
+
+| `--isolation`        | Backend      | `ContainerRuntime`               |
+|----------------------|--------------|----------------------------------|
+| `container`          | docker/podman | `""` (default runc)             |
+| `container-enhanced` | docker/podman | `"runsc"` (gVisor)              |
+| `vm`                 | containerd   | `"io.containerd.kata.v2"`        |
+| `vm-enhanced`        | containerd   | `"io.containerd.kata-fc.v2"`     |
+
+The mapping lives in `sandbox/create.go` as a renamed `isolationContainerRuntime(isolation
+string) string` function (replacing the current `securityRuntimeName()`). The containerd backend
+reads `InstanceConfig.ContainerRuntime` in `Create()` to select the shimv2 type — same field,
+new values. No changes to `runtime.InstanceConfig`.
+
+### Auto-detection: soft-fail path for `resolveBackend()`
+
+`docker.New()` and `podman.New()` both fail hard when the daemon is unreachable — they ping on
+construction. Auto-detection requires trying a backend and recovering gracefully. Rather than
+instantiating a full runtime, add lightweight availability checks:
+
+```go
+// dockerAvailable checks whether the Docker socket is reachable (no full client creation).
+func dockerAvailable() bool  // stat /var/run/docker.sock or $DOCKER_HOST
+
+// podmanAvailable checks whether a Podman socket is reachable.
+func podmanAvailable() bool  // discoverSocket() without error surfacing
+```
+
+`resolveBackend()` uses these for the auto-detection path; `newRuntime()` is only called once
+the backend is resolved and still fails hard on construction (as it does today).
+
+### `Meta.Isolation` replaces `Meta.Security`
+
+`sandbox.Meta.Security` (json: `"security"`) becomes `sandbox.Meta.Isolation` (json:
+`"isolation"`). Values change from `"gvisor"`, `"kata"`, `"kata-firecracker"` to
+`"container-enhanced"`, `"vm"`, `"vm-enhanced"`. No migration — this is a breaking change
+and existing sandboxes will need to be recreated. All callsites that check `meta.Security`
+(including `Perms()`, overlay compatibility, status detection) update to use `meta.Isolation`
+with the new value names.
+
+### `config.YoloaiConfig.ContainerBackend` replaces `Backend`
+
+`YoloaiConfig.Backend` (yaml: `"backend"`) becomes `YoloaiConfig.ContainerBackend` (yaml:
+`"container_backend"`). No migration — users with `backend:` in their config will get the
+default (docker auto-detect) until they update. This is a breaking change, documented in
+`BREAKING-CHANGES.md`. The `knownSettings` list in `config/config.go` updates accordingly.
+
+### `EnsureImage()` in the containerd backend
+
+To avoid a cross-package import from `runtime/containerd` into `runtime/docker`, `EnsureImage()`
+in the containerd backend shell-execs the build steps:
+
+```
+docker build -t yoloai-base <sourceDir>
+docker save yoloai-base | ctr -n yoloai images import -
+```
+
+If `docker` is not available, try `buildctl` (standalone BuildKit). If neither is available and
+the image doesn't exist yet, error with the user-facing message from the Prerequisites section.
+This keeps `runtime/containerd` independent of `runtime/docker` at the Go import level.
+
 ## Implementation Plan
 
-### Phase 1: Containerd Backend Spike (verify the approach)
-
-Before committing to implementation, verify the design works end-to-end:
-
-1. Write a minimal Go program that uses the containerd client to:
-   - Pull `alpine`
-   - Run it with `io.containerd.kata.v2` runtime + CNI networking
-   - Exec `ip addr` and verify `eth0` exists with an IP
-   - Stop the container and verify CNI teardown releases the IP cleanly
-2. If this works, proceed. If not, revisit the design before touching any user-facing flags.
-
-### Phase 2: Rename `--security` → `--isolation`
-
-1. Rename the flag everywhere (CLI, config, meta.json, docs).
-2. Map new value names to backend/runtime selection.
-3. Add `--os` flag; implement `resolveBackend()` logic.
-4. Remove `--backend` from `yoloai new` help text (keep in config as escape hatch).
-5. Add early error for `:overlay` + incompatible isolation/os combination.
-
-No backwards compatibility handling needed.
-
-### Phase 3: Containerd Backend (MVP)
-
-Implement `runtime/containerd/` with:
-- `New()` — connect to containerd socket, verify kata shim exists
-- `Create()` — CNI setup + containerd container + task creation
-- `Start()` — CNI setup + new task creation + task start (containerd tasks are terminal after exit;
-  restart requires creating a new task from the existing container, not resuming the old one)
-- `Stop()` — task kill + wait for exit + CNI teardown
-- `Remove()` — container delete
-- `Inspect()` — task status
-- `Exec()` — non-interactive exec
-- `InteractiveExec()` — native containerd task Exec() + PTY (`github.com/creack/pty`)
-- `EnsureImage()` — Docker build + import into yoloai namespace
-- `Logs()` — read from bind-mounted log file (same as Docker backend)
-- `Prune()` — remove orphaned yoloai-* containers
-
-### Phase 4: Auto-Selection
-
-Extend `resolveBackend()` to auto-select `containerd` for `vm`/`vm-enhanced` isolation modes.
-Update isolation validation to check for containerd prerequisites if vm is chosen.
-
-### Phase 5: vm-enhanced (Kata + Firecracker)
-
-Kata-Firecracker requires the devmapper snapshotter in containerd. This needs a pre-provisioned
-thin-pool block device (or loop device). On Ubuntu 24.04, the recommended approach is a loop-based
-thin pool via `dmsetup` — the snap-packaged containerd ships without devmapper support compiled in,
-so the apt-installed containerd must be used. Implement after Phase 3 is stable.
+See [`docs/dev/plans/containerd-runtime.md`](../dev/plans/containerd-runtime.md) for the
+detailed step-by-step implementation plan.
 
 ---
 
