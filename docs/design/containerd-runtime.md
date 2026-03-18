@@ -114,9 +114,17 @@ full VM-level isolation or need a clean macOS environment.
 | `vm`                 | containerd (Kata + QEMU) | tart (macOS VM)           |
 | `vm-enhanced`        | containerd (Kata + FC)   | *(unsupported)*           |
 
-**What happens to `--backend`?** It becomes a config-only escape hatch for power users and is
-removed from the `yoloai new` help text. The common case is covered by `--isolation` + `--os`.
-Platform maintainers (CI, DevOps) who need explicit backend control can still set it in `config.yaml`.
+**What happens to `--backend`?** It stays as a visible but secondary flag — present in `--help`
+output but not in the quickstart docs. Its job is now narrower: override auto-selection within the
+chosen isolation level. The primary cases:
+
+- `--backend podman` — user prefers Podman (rootless, daemonless, systemd integration, corporate
+  policy) even when Docker is present
+- No other backends need explicit user selection; all others are auto-selected by `--isolation`
+  and `--os`
+
+Podman is a legitimate primary choice for many Linux users, not an obscure workaround. Hiding it
+behind a config-only key would make it a second-class citizen.
 
 ### Backwards Compatibility
 
@@ -134,10 +142,11 @@ No backwards compatibility requirement. `--security` is replaced by `--isolation
 
 ### Backend Auto-Selection
 
-`resolveBackend()` in `cli/helpers.go` currently reads `--backend` or config default. Extend it:
+`resolveBackend()` in `cli/helpers.go` currently reads `--backend` or config default. Extend it
+with auto-detection and capability checking:
 
 ```
-resolveBackend(isolation, os):
+resolveBackend(isolation, os, backendOverride):
   if os == "mac":
     switch isolation:
     case "vm":
@@ -146,14 +155,59 @@ resolveBackend(isolation, os):
       error (unsupported on macOS)
     default: // "container" or omitted
       return seatbelt
+
   switch isolation:
   case "vm", "vm-enhanced":
     return containerd
-  default: // "container", "container-enhanced", or omitted
-    return docker
+
+  // container / container-enhanced: auto-detect Docker vs Podman
+  if backendOverride != "":
+    backend = backendOverride  // --backend flag or config value
+  else:
+    backend = detectContainerBackend()  // see below
+
+  if isolation == "container-enhanced":
+    checkEnhancedSupport(backend)  // error early if gVisor not configured
+
+  return backend
 ```
 
-On `yoloai sandbox start/stop/destroy/exec`, the backend is read from `environment.json` (stored at
+**`detectContainerBackend()`:** Try Docker first; fall back to Podman if Docker is unavailable:
+
+```
+detectContainerBackend():
+  if dockerSocketReachable():
+    return docker
+  if podmanSocketReachable() or podmanBinaryExists():
+    return podman
+  error: no container runtime found. Install Docker or Podman.
+```
+
+Docker is tried first because it is more common and has broader compatibility (e.g., gVisor
+registration). Podman is the fallback for rootless/daemonless environments.
+
+**`checkEnhancedSupport(backend)`:** Before creating a `container-enhanced` sandbox, verify the
+chosen backend has gVisor configured — don't wait for a cryptic runtime error deep in the stack:
+
+```
+checkEnhancedSupport(backend):
+  switch backend:
+  case docker:
+    query docker info --format '{{json .Runtimes}}'
+    if "runsc" not in runtimes:
+      error: container-enhanced requires gVisor (runsc) registered in Docker.
+             Register it: https://gvisor.dev/docs/user_guide/install/
+  case podman:
+    check /etc/containers/containers.conf and ~/.config/containers/containers.conf
+    if "runsc" not in [engine.runtimes]:
+      error: container-enhanced requires gVisor (runsc) registered in Podman.
+             Add to containers.conf: [engine.runtimes] runsc = ["/usr/bin/runsc", "..."]
+```
+
+This check runs at `yoloai new` time only — sandbox lifecycle commands (`start`, `exec`, etc.)
+read the backend from `meta.json` and skip re-detection.
+
+On `yoloai sandbox start/stop/destroy/exec`, the backend is read from `meta.json` (stored at
 creation time). No changes needed for lifecycle commands.
 
 ---
