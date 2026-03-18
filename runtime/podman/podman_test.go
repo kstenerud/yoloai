@@ -63,6 +63,11 @@ func TestDiscoverSocket_NoSocket(t *testing.T) {
 		return "", assert.AnError
 	}
 
+	// Override system socket path so tests pass even when podman is installed
+	origSystemSockPath := systemSockPath
+	defer func() { systemSockPath = origSystemSockPath }()
+	systemSockPath = filepath.Join(t.TempDir(), "nonexistent.sock")
+
 	t.Setenv("CONTAINER_HOST", "")
 	t.Setenv("DOCKER_HOST", "")
 	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())

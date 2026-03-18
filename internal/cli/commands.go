@@ -190,16 +190,25 @@ func newNewCmd(version string) *cobra.Command {
 			cpus, _ := cmd.Flags().GetString("cpus")
 			memory, _ := cmd.Flags().GetString("memory")
 			isolation, _ := cmd.Flags().GetString("isolation")
+			targetOS, _ := cmd.Flags().GetString("os")
 			debug, _ := cmd.Flags().GetBool("debug")
 			envSlice, _ := cmd.Flags().GetStringSlice("env")
 
+			// Block unsupported isolation+os combinations early.
+			if targetOS == "mac" && (isolation == "container-enhanced" || isolation == "vm-enhanced") {
+				return sandbox.NewUsageError(
+					"--isolation %s is not available with --os mac.\n"+
+						"Available isolation modes with --os mac:\n"+
+						"  container   macOS sandbox-exec (seatbelt)\n"+
+						"  vm          Full macOS VM (Tart)", isolation)
+			}
 			// Block container-enhanced (gVisor) on macOS due to known bug.
-			if isolation == "container-enhanced" && goruntime.GOOS == "darwin" {
+			if isolation == "container-enhanced" && targetOS != "mac" && goruntime.GOOS == "darwin" {
 				return sandbox.NewUsageError(
 					"--isolation container-enhanced (gVisor) is not supported on macOS due to a bug\n" +
 						"that causes Claude Code to hang indefinitely during initialization.\n\n" +
 						"Workaround: Omit --isolation (use default container isolation) or use\n" +
-						"--backend seatbelt for lightweight macOS sandboxing.\n\n" +
+						"--os mac for lightweight macOS sandboxing.\n\n" +
 						"For details, see: https://github.com/anthropics/claude-code/issues/35454")
 			}
 
@@ -339,6 +348,7 @@ func newNewCmd(version string) *cobra.Command {
 	cmd.Flags().String("cpus", "", "CPU limit (e.g., 4, 2.5)")
 	cmd.Flags().String("memory", "", "Memory limit (e.g., 8g, 512m)")
 	cmd.Flags().String("isolation", "", "Isolation mode: container (default), container-enhanced (gVisor), vm (Kata+QEMU), vm-enhanced (Kata+Firecracker)")
+	cmd.Flags().String("os", "", "Target OS: linux (default), mac")
 	cmd.Flags().StringSlice("env", nil, "Environment variable (KEY=VAL, repeatable)")
 
 	cmd.MarkFlagsMutuallyExclusive("network-none", "network-isolated")

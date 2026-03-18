@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 
 	"github.com/kstenerud/yoloai/config"
 	"github.com/kstenerud/yoloai/runtime"
@@ -49,13 +50,70 @@ func newRuntime(ctx context.Context, backend string) (runtime.Runtime, error) {
 // These differences make a generic abstraction more obscure than the small
 // amount of duplicated structure.
 
-// resolveBackend determines the backend name from --backend flag, then config,
-// then default. Used by commands that accept a --backend flag (new, build, setup).
+// resolveBackend determines the backend from flags, then isolation/os routing,
+// then config preference, then auto-detection. Used by commands with --backend.
 func resolveBackend(cmd *cobra.Command) string {
+	// Explicit --backend always wins.
 	if b, _ := cmd.Flags().GetString("backend"); b != "" {
 		return b
 	}
-	return resolveBackendFromConfig()
+
+	// Isolation-based routing: vm/vm-enhanced always use containerd.
+	isolation, _ := cmd.Flags().GetString("isolation")
+	if isolation == "vm" || isolation == "vm-enhanced" {
+		return "containerd"
+	}
+
+	// OS-based routing: --os mac routes to seatbelt/tart.
+	targetOS, _ := cmd.Flags().GetString("os")
+	if targetOS == "mac" {
+		if isolation == "vm" {
+			return "tart"
+		}
+		return "seatbelt"
+	}
+
+	// container/container-enhanced: prefer config, then auto-detect.
+	return detectContainerBackend(resolveContainerBackendConfig())
+}
+
+// detectContainerBackend picks docker or podman based on a config preference
+// and socket availability. Warns to stderr if the preferred backend isn't found.
+func detectContainerBackend(preference string) string {
+	if preference == "podman" {
+		if podmanrt.SocketExists() {
+			return "podman"
+		}
+		fmt.Fprintf(os.Stderr, "Warning: container_backend=podman not found; falling back to docker\n")
+	}
+	if dockerAvailable() {
+		return "docker"
+	}
+	if preference == "docker" {
+		fmt.Fprintf(os.Stderr, "Warning: container_backend=docker not found; falling back to podman\n")
+	}
+	if podmanrt.SocketExists() {
+		return "podman"
+	}
+	return "docker" // will fail hard in newRuntime() with a clear error
+}
+
+// dockerAvailable returns true if the Docker socket is reachable (stat only, no dial).
+func dockerAvailable() bool {
+	if host := os.Getenv("DOCKER_HOST"); host != "" {
+		return true // assume reachable if explicitly configured
+	}
+	_, err := os.Stat("/var/run/docker.sock")
+	return err == nil
+}
+
+// resolveContainerBackendConfig reads the container_backend config preference.
+func resolveContainerBackendConfig() string {
+	cfg, err := config.LoadConfig()
+	if err == nil {
+		return cfg.ContainerBackend
+	}
+	return ""
 }
 
 // resolveBackendForSandbox reads the backend from a sandbox's meta.json.
@@ -66,18 +124,7 @@ func resolveBackendForSandbox(name string) string {
 	if err == nil && meta.Backend != "" {
 		return meta.Backend
 	}
-	return resolveBackendFromConfig()
-}
-
-// resolveBackendFromConfig reads the backend from config.yaml, falling back
-// to "docker". Used by commands that don't have a specific sandbox context
-// (e.g., list, stop --all).
-func resolveBackendFromConfig() string {
-	cfg, err := config.LoadConfig()
-	if err == nil && cfg.ContainerBackend != "" {
-		return cfg.ContainerBackend
-	}
-	return "docker"
+	return detectContainerBackend(resolveContainerBackendConfig())
 }
 
 // withRuntime creates a runtime for the given backend, calls fn, and ensures cleanup.

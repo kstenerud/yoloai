@@ -52,7 +52,7 @@ Add to ~/.claude.json to use with Claude Desktop:
 }
 
 func runMCPServe(cmd *cobra.Command, _ []string) error {
-	backend := resolveBackendFromConfig()
+	backend := detectContainerBackend(resolveContainerBackendConfig())
 	return withManager(cmd, backend, func(ctx context.Context, mgr *sandbox.Manager) error {
 		srv := mcpsrv.New(mgr)
 		return srv.ServeStdio(ctx)

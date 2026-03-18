@@ -66,6 +66,13 @@ func (r *Runtime) Create(ctx context.Context, cfg runtime.InstanceConfig) error 
 	return r.Runtime.Create(ctx, cfg)
 }
 
+// SocketExists returns true if a Podman socket can be found without dialing it.
+// Used by backend auto-detection in cli/helpers.go.
+func SocketExists() bool {
+	_, err := discoverSocket()
+	return err == nil
+}
+
 // discoverSocket finds the Podman API socket path.
 // Search order:
 //  1. $CONTAINER_HOST env var
@@ -91,9 +98,8 @@ func discoverSocket() (string, error) {
 	}
 
 	// System-wide socket
-	const systemSock = "/run/podman/podman.sock"
-	if _, err := os.Stat(systemSock); err == nil {
-		return "unix://" + systemSock, nil
+	if _, err := os.Stat(systemSockPath); err == nil {
+		return "unix://" + systemSockPath, nil
 	}
 
 	// macOS: try podman machine inspect
@@ -104,6 +110,9 @@ func discoverSocket() (string, error) {
 
 	return "", fmt.Errorf("no podman socket found (checked $CONTAINER_HOST, $DOCKER_HOST, $XDG_RUNTIME_DIR/podman/podman.sock, /run/podman/podman.sock)")
 }
+
+// systemSockPath is the system-wide Podman socket path. Variable for testing.
+var systemSockPath = "/run/podman/podman.sock"
 
 // machineSocketDiscovery tries to get the socket path from `podman machine inspect`.
 // Variable for testing - can be mocked to avoid executing podman commands.

@@ -23,12 +23,32 @@ func TestResolveBackend_FlagSet(t *testing.T) {
 	assert.Equal(t, "tart", resolveBackend(cmd))
 }
 
-func TestResolveBackend_FlagEmptyWithConfig(t *testing.T) {
-	dir := cliConfigDir(t)
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte("container_backend: seatbelt\n"), 0600))
-
+func TestResolveBackend_IsolationVM(t *testing.T) {
 	cmd := &cobra.Command{}
 	cmd.Flags().String("backend", "", "")
+	cmd.Flags().String("isolation", "", "")
+	cmd.Flags().String("os", "", "")
+	require.NoError(t, cmd.Flags().Set("isolation", "vm"))
+
+	assert.Equal(t, "containerd", resolveBackend(cmd))
+}
+
+func TestResolveBackend_IsolationVMEnhanced(t *testing.T) {
+	cmd := &cobra.Command{}
+	cmd.Flags().String("backend", "", "")
+	cmd.Flags().String("isolation", "", "")
+	cmd.Flags().String("os", "", "")
+	require.NoError(t, cmd.Flags().Set("isolation", "vm-enhanced"))
+
+	assert.Equal(t, "containerd", resolveBackend(cmd))
+}
+
+func TestResolveBackend_OsMac(t *testing.T) {
+	cmd := &cobra.Command{}
+	cmd.Flags().String("backend", "", "")
+	cmd.Flags().String("isolation", "", "")
+	cmd.Flags().String("os", "", "")
+	require.NoError(t, cmd.Flags().Set("os", "mac"))
 
 	assert.Equal(t, "seatbelt", resolveBackend(cmd))
 }
@@ -43,27 +63,27 @@ func TestResolveBackend_FlagEmptyNoConfig(t *testing.T) {
 	assert.Equal(t, "docker", resolveBackend(cmd))
 }
 
-// --- resolveBackendFromConfig ---
+// --- resolveContainerBackendConfig ---
 
-func TestResolveBackendFromConfig_HasBackend(t *testing.T) {
+func TestResolveContainerBackendConfig_HasBackend(t *testing.T) {
 	dir := cliConfigDir(t)
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte("container_backend: tart\n"), 0600))
 
-	assert.Equal(t, "tart", resolveBackendFromConfig())
+	assert.Equal(t, "tart", resolveContainerBackendConfig())
 }
 
-func TestResolveBackendFromConfig_Empty(t *testing.T) {
+func TestResolveContainerBackendConfig_Empty(t *testing.T) {
 	dir := cliConfigDir(t)
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte("agent: claude\n"), 0600))
 
-	assert.Equal(t, "docker", resolveBackendFromConfig())
+	assert.Equal(t, "", resolveContainerBackendConfig())
 }
 
-func TestResolveBackendFromConfig_NoFile(t *testing.T) {
+func TestResolveContainerBackendConfig_NoFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
 
-	assert.Equal(t, "docker", resolveBackendFromConfig())
+	assert.Equal(t, "", resolveContainerBackendConfig())
 }
 
 // --- resolveBackendForSandbox ---
