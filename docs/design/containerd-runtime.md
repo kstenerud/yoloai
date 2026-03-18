@@ -126,6 +126,13 @@ chosen isolation level. The primary cases:
 Podman is a legitimate primary choice for many Linux users, not an obscure workaround. Hiding it
 behind a config-only key would make it a second-class citizen.
 
+**Config key: `container_backend` (not `backend`).** The global/profile config key for this
+preference is `container_backend` (e.g., `container_backend: podman`). It only applies when
+`--isolation container` or `container-enhanced` is in effect — for `vm`, `vm-enhanced`, and
+`--os mac`, the backend is always auto-selected and `container_backend` is ignored. This scoping
+prevents a stale `container_backend: podman` config entry from producing confusing errors when the
+user later requests VM isolation.
+
 ### Backwards Compatibility
 
 No backwards compatibility requirement. `--security` is replaced by `--isolation`. Migration:
@@ -151,6 +158,9 @@ error — never a fallback to something else. Fallback only happens when nothing
 specified.
 
 ```
+// backendOverride: from --backend CLI flag or container_backend config key
+// backendOverrideIsExplicit: true only when --backend was given on the CLI;
+//   container_backend config is a preference, not a demand — treated as non-explicit
 resolveBackend(isolation, os, backendOverride, backendOverrideIsExplicit):
   if os == "mac":
     switch isolation:
@@ -164,6 +174,7 @@ resolveBackend(isolation, os, backendOverride, backendOverrideIsExplicit):
 
   switch isolation:
   case "vm", "vm-enhanced":
+    // container_backend config is ignored here — backend is always containerd
     return containerd
 
   // container / container-enhanced: Docker or Podman
@@ -180,11 +191,22 @@ resolveBackend(isolation, os, backendOverride, backendOverrideIsExplicit):
     return backend
 ```
 
-**`detectContainerBackend()`:** Try Docker first; fall back to Podman if Docker is unavailable.
-Only runs when no explicit `--backend` was given:
+**`detectContainerBackend()`:** Respects `container_backend` config as a preference, then
+falls back to auto-detection. Only runs when no explicit `--backend` was given on the CLI:
 
 ```
-detectContainerBackend():
+detectContainerBackend(containerBackendConfig):
+  // Honor container_backend config preference if the preferred runtime is reachable
+  if containerBackendConfig == "podman":
+    if podmanSocketReachable() or podmanBinaryExists():
+      return podman
+    // preferred runtime not available — fall through to auto-detect
+  if containerBackendConfig == "docker":
+    if dockerSocketReachable():
+      return docker
+    // preferred runtime not available — fall through to auto-detect
+
+  // Auto-detect: Docker first (more common, broader compatibility)
   if dockerSocketReachable():
     return docker
   if podmanSocketReachable() or podmanBinaryExists():

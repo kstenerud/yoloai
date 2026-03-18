@@ -49,7 +49,7 @@ tmux_conf: default+host               # default+host | default | host | none (se
 
 ```yaml
 # Always applied to every sandbox
-backend: docker                       # Runtime backend: docker, podman, tart, seatbelt
+container_backend: docker             # Container backend preference: docker, podman (applies to --isolation container/container-enhanced only)
 # tart:                               # Tart backend settings
 #   image:                            # Custom base VM image
 
@@ -81,7 +81,7 @@ Settings are managed via `yoloai config get/set` (keys are automatically routed 
 
 **Implemented settings:**
 
-- `backend` selects the runtime backend. Valid values: `docker`, `podman`, `tart`, `seatbelt`. CLI `--backend` overrides config.
+- `container_backend` selects the preferred container backend when `--isolation container` or `container-enhanced` is in effect. Valid values: `docker`, `podman`. Only applies to container isolation modes — `vm`, `vm-enhanced`, and `--os mac` always auto-select their backends (`containerd`/`tart`/`seatbelt`) regardless of this setting. CLI `--backend` overrides config.
 - `tart.image` overrides the base VM image for the tart backend.
 - `tmux_conf` (global config) controls how user tmux config interacts with the container. Set by the interactive first-run setup. Values: `default+host`, `default`, `host`, `none` (see [setup.md](setup.md#tmux-configuration)).
 - `agent` selects the agent to launch. Valid values: `aider`, `claude`, `codex`, `gemini`, `opencode`. CLI `--agent` overrides config.
@@ -144,12 +144,12 @@ Profiles live in `~/.yoloai/profiles/<name>/`, containing a `profile.yaml` and o
 
 **Name validation:** Profile names follow the same rules as sandbox names — must match `^[a-zA-Z0-9][a-zA-Z0-9_.-]*$`, max 56 characters. The name `base` is reserved and cannot be used for user profiles. Profile names become Docker image tags (`yoloai-<profile>`), so the character restrictions ensure compatibility with Docker's naming rules.
 
-**Profile.yaml mirrors config.yaml.** The profile format uses the same field names and structure as `config.yaml`, plus profile-specific fields (`workdir`, `directories`). Users learn one config format. Backend-specific fields (`backend`, `tart.image`, Dockerfile) are optional — omit them for backend-agnostic profiles.
+**Profile.yaml mirrors config.yaml.** The profile format uses the same field names and structure as `config.yaml`, plus profile-specific fields (`workdir`, `directories`). Users learn one config format. Backend-specific fields (`container_backend`, `tart.image`, Dockerfile) are optional — omit them for backend-agnostic profiles.
 
-**Implemented profile fields:** `agent`, `model`, `backend`, `tart.image`, `env`, `agent_args`, `agent_files`, `ports`, `workdir`, `directories`, `resources`, `network`, `mounts`, `security`. Unknown fields are silently ignored — profiles written for future versions won't break on older ones.
+**Implemented profile fields:** `agent`, `model`, `container_backend`, `tart.image`, `env`, `agent_args`, `agent_files`, `ports`, `workdir`, `directories`, `resources`, `network`, `mounts`, `security`. Unknown fields are silently ignored — profiles written for future versions won't break on older ones.
 
 **Backend handling:**
-- `backend` in profile — optional constraint. If set, error when the user's backend doesn't match. If omitted, the profile works with any backend.
+- `container_backend` in profile — optional preference. Overrides the default `container_backend` when this profile is active. Only meaningful for `--isolation container` or `container-enhanced`; ignored for `vm`, `vm-enhanced`, and `--os mac`.
 - `Dockerfile` in profile dir — optional. Used with Docker and Podman backends to build a `yoloai-<profile>` image. Ignored with Tart and Seatbelt backends. When absent, Docker/Podman backends use `yoloai-base`.
 - `tart.image` in profile — optional. Used only with the Tart backend to specify a custom VM image. Ignored with other backends.
 
@@ -171,7 +171,7 @@ Profiles live in `~/.yoloai/profiles/<name>/`, containing a `profile.yaml` and o
 extends: base                             # parent profile (default: base)
 
 # --- Same fields as config.yaml (all optional) ---
-# backend: docker                         # constrain to a specific backend (docker, podman, tart, seatbelt); omit for any
+# container_backend: docker               # preferred container backend (docker, podman); only applies to container/container-enhanced isolation
 agent: claude                             # override default agent
 # model: sonnet                           # override default model
 # tart:                                   # Tart backend settings
@@ -225,7 +225,7 @@ The full merge table for reference:
 
 | Field                  | Merge behavior                                           |
 |------------------------|----------------------------------------------------------|
-| `backend`              | Profile constrains backend. CLI `--backend` overrides both. Error if profile backend doesn't match resolved backend. |
+| `container_backend`    | Profile overrides default. Only applies to `container`/`container-enhanced` isolation. CLI `--backend` overrides both. |
 | `agent`                | Profile overrides default. CLI `--agent` overrides both. |
 | `model`                | Profile overrides default. CLI `--model` overrides both. |
 | `tart.image`           | Profile overrides default.                               |
