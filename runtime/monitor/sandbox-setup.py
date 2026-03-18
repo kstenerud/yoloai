@@ -188,6 +188,18 @@ def launch_agent(cfg, socket=None, working_dir=None, backend=""):
     model = cfg.get("model", "")
     log_debug("agent.launch", f"launching agent: {agent_command}")
 
+    # tart exec runs a non-login shell so PATH omits /opt/homebrew/bin.
+    # Prepend standard Homebrew prefixes so shutil.which() can find binaries
+    # installed by Homebrew (e.g. claude via npm).
+    if backend == "tart":
+        homebrew_bins = ["/opt/homebrew/bin", "/opt/homebrew/sbin", "/usr/local/bin"]
+        current_path = os.environ.get("PATH", "")
+        extras = [p for p in homebrew_bins if p not in current_path.split(":")]
+        if extras:
+            os.environ["PATH"] = ":".join(extras) + ":" + current_path
+            log_debug("tart.path_augment", "prepended Homebrew paths",
+                      added=":".join(extras))
+
     # Diagnostic: verify Node.js works before launching the agent.
     # Node.js 22 has known syscall incompatibilities with gVisor ARM64 that
     # cause silent immediate crashes with no output.
@@ -197,25 +209,19 @@ def launch_agent(cfg, socket=None, working_dir=None, backend=""):
              returncode=node_check.returncode,
              stderr=node_check.stderr.strip())
 
-    # Check that the agent binary is findable in the pane's shell PATH before
-    # launching, so we can emit a clear error instead of "command not found".
+    # Check that the agent binary exists before launching, so we can emit a
+    # clear error instead of "command not found". Use shutil.which() in the
+    # Python process rather than a pane-based check: the pane runs zsh -l
+    # which can take >0.4s to source ~/.zprofile and set Homebrew PATH, making
+    # a timed pane check unreliable. Python's PATH includes /opt/homebrew/bin
+    # on macOS (set by the host environment before sandbox-setup.py runs).
     agent_bin = agent_command.split()[0] if agent_command else ""
     if agent_bin:
-        check_file = "/tmp/yoloai-agent-check.txt"
-        check_cmd = f"command -v {agent_bin} > {check_file} 2>&1; echo $? >> {check_file}"
-        tmux("send-keys", "-t", "main", check_cmd, "Enter", socket=socket)
-        time.sleep(0.4)
-        try:
-            with open(check_file) as f:
-                lines = f.read().strip().splitlines()
-        except OSError:
-            lines = []
-        exit_code = lines[-1].strip() if lines else "1"
-        found_at = lines[0].strip() if len(lines) >= 2 else ""
-        if exit_code != "0":
-            log_info("sandbox.agent_not_found", "agent binary not found in pane PATH",
+        found_at = shutil.which(agent_bin)
+        if not found_at:
+            log_info("sandbox.agent_not_found", "agent binary not found",
                      agent_bin=agent_bin,
-                     pane_path=tmux_output("display-message", "-p", "#{pane_current_path}", socket=socket).strip())
+                     python_path=os.environ.get("PATH", ""))
             rebuild_cmd = f"yoloai system build --backend {backend}" if backend else "yoloai system build"
             tmux("send-keys", "-t", "main",
                  f"echo 'yoloai: {agent_bin} not found — run: {rebuild_cmd}'",
