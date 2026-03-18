@@ -208,7 +208,7 @@ The following tools were identified but not analyzed in depth. Included for comp
 | srid/sandnix | 34 | Nix + Landlock/Seatbelt | Nix flake module for declarative sandboxing. Cross-platform (Landlock on Linux, sandbox-exec on macOS). High-level feature flags (tty, network, nix-store). |
 | multitui.com | N/A | macOS GUI + sandbox-exec | SvelteKit macOS app wrapping CLI tools as native apps. Network rules per domain. Secrets filter (gitleaks-based) scanning outbound traffic for API keys. |
 
-**Approach categories not fully explored:** macOS `sandbox-exec` tools (5+ projects), Nix-based isolation, micro-VM alternatives (boxlite, Fly.io Sprites, E2B), commercial platforms (E2B, Daytona, Fly.io Sprites, Northflank, Vercel Sandbox), HTTP API wrappers (agentapi, sandbox-agent).
+**Approach categories not fully explored:** macOS `sandbox-exec` tools (5+ projects), Nix-based isolation, micro-VM alternatives (boxlite, Fly.io Sprites), commercial platforms (Fly.io Sprites, Vercel Sandbox), HTTP API wrappers (agentapi, sandbox-agent). E2B, Daytona, Modal, Northflank, and Zeroboot are covered in sections 13–14.
 
 ### 9. Agent Safehouse
 
@@ -522,6 +522,86 @@ Agent-clip is not a meaningful competitor to yoloAI. It occupies a different nic
 - **Airgapped default** (vsock, no TAP) mirrors our read-only mount default — safe by default is the right call.
 - **VMPool concurrent execution** validates the batch/parallel agent design we already have on the roadmap.
 - **Hardware isolation is a genuine differentiator** for untrusted code — if yoloAI ever targets security-critical use cases, Firecracker or gVisor would be worth evaluating.
+
+---
+
+### 13. Zeroboot (adammiribyan)
+
+**Source:** [Show HN: Sub-millisecond VM sandboxes using CoW memory forking](https://news.ycombinator.com/item?id=47412569) (2026-03-17)
+**Repo:** [github.com/adammiribyan/zeroboot](https://github.com/adammiribyan/zeroboot)
+
+**What it does:** Research prototype achieving 0.79ms p50 sandbox startup using Firecracker + copy-on-write memory forking. Creates a "template" VM once (with Python + NumPy pre-loaded), then forks it for each sandbox request using `MAP_PRIVATE` copy-on-write on the Firecracker snapshot. Each fork gets its own kernel (KVM/hardware isolation) with only 265KB memory overhead.
+
+**Technique:** Fork VM from snapshot instead of booting a new VM each time. `MAP_PRIVATE` on the guest memory file causes Linux to CoW pages on write — unmodified pages are shared across all forks without copying.
+
+**Strengths:**
+- Exceptional latency: 0.79ms p50 vs 100-500ms for cold-start containers
+- Real hardware isolation per sandbox (KVM), not just namespace/cgroup separation
+- Tiny memory footprint (265KB per fork)
+- Directly addresses "AI agent loops" use case where sandboxes are created at high frequency
+
+**Weaknesses:**
+- Prototype ("not production-hardened yet") — acknowledged by author
+- Security concerns raised in HN thread: entropy reuse across forks (ASLR becomes predictable across forks if seeds aren't re-randomized), shared `/dev/random` state
+- Requires Firecracker and KVM on Linux — not portable to macOS/Windows
+- Pre-loaded runtime (Python + NumPy) — not a general dev environment
+- Cross-node cloning (distributing forks across machines) is an unsolved problem
+
+**HN thread themes:**
+- CodeSandbox uses a similar technique (Firecracker snapshots + `MAP_SHARED` vs `MAP_PRIVATE`) to clone VMs in ~50ms; zeroboot's approach gets another 50x by using `MAP_PRIVATE` instead
+- Multiple commenters noted production concerns: entropy reuse, ASLR predictability, missing hardening
+- High interest from the AI agent tooling community — startup latency matters for agent loops where sandboxes are created per-task
+
+**vs. yoloAI:**
+- Zeroboot optimizes for sandbox creation frequency (AI agent eval loops, code execution per request); yoloAI optimizes for developer workflow safety (copy/diff/apply, persistent project state)
+- Complementary: zeroboot could be a future ultra-fast backend for yoloAI's Docker backend if/when Firecracker support is added
+- yoloAI's `:overlay` mode (overlayfs CoW) is the filesystem analogue: instant zero-copy setup, changes captured in upper layer, diff/apply at the end
+- Neither directly competes — different layers of the stack
+
+**Lessons:**
+- **CoW at the VM memory level is the next frontier after overlayfs CoW at the filesystem level.** Our `:overlay` mode shares this "fork from base, capture changes" philosophy — good to reference in positioning.
+- **AI agent eval loops are a distinct use case from developer workflows.** Frequency-of-sandbox-creation matters for evaluation pipelines (1000 sandboxes/sec); developer workflows typically need 1-10 sandboxes per session.
+- **Entropy/ASLR hardening must be addressed for production VM forking.** If yoloAI ever evaluates Firecracker as a backend, the snapshot-forking approach requires per-fork re-seeding of entropy sources.
+
+---
+
+### 14. Cloud Sandbox Platforms (E2B, Daytona, Modal, Northflank)
+
+These commercial platforms provide infrastructure-level sandboxes for AI agent workloads. They were discussed extensively in the HN thread linked above (item 47412569) and in concurrent discussions. Not direct competitors for yoloAI's developer-workflow use case, but relevant for positioning.
+
+#### E2B
+
+**URL:** [e2b.dev](https://e2b.dev/)
+
+Firecracker microVM-based isolated sandboxes. Python/JS SDKs. ~150ms startup. Sessions up to 24 hours (Pro). $0.05/hr per vCPU. Largest AI agent ecosystem integrations (LangChain, CrewAI, AutoGen, etc.).
+
+**vs. yoloAI:** Cloud-only, no infrastructure costs for user. No copy/diff/apply workflow. Charges per-CPU-hour; yoloAI is free (open-source). Best for production agent pipelines at scale; yoloAI is for individual developer workflow safety.
+
+#### Daytona
+
+**URL:** [daytona.io](https://daytona.io/)
+
+OCI/Docker-based sandboxes with ~90ms cold start. Open-source. Stateful environments with built-in Git integration and LSP support. Can run on BYOC (bring-your-own-cloud). Optional Kata Containers for stronger isolation.
+
+**vs. yoloAI:** Remote infrastructure; yoloAI is local-first. Daytona optimizes for persistent long-running stateful sandboxes; yoloAI optimizes for disposable per-session sandboxes with review-before-apply. Both use Docker/OCI but Daytona requires cloud infrastructure.
+
+#### Modal
+
+**URL:** [modal.com](https://modal.com/)
+
+Serverless platform with gVisor-based container isolation. Sub-second cold starts. Autoscales to 20,000+ concurrent functions. GPU support. Python-centric. Production use: Lovable, Quora running millions of code snippets/day.
+
+**vs. yoloAI:** General ML platform, not agent-workflow specific. Python-only SDK, cannot use arbitrary OCI images. Serverless cloud; yoloAI is local. Granular egress policies are a model for future yoloAI network controls.
+
+#### Northflank
+
+**URL:** [northflank.com](https://northflank.com/)
+
+Complete cloud platform using Kata Containers (lightweight microVMs) or gVisor. 2M+ isolated workloads/month. Unlimited session duration. BYOC support. Any OCI image.
+
+**vs. yoloAI:** Enterprise platform, not a developer tool. Northflank is for teams running production agent pipelines; yoloAI is for individual developers protecting their project files.
+
+**Cross-platform positioning:** All four cloud platforms require cloud infrastructure and charge per compute time. yoloAI runs on the developer's own machine with Docker — $0 for the sandbox infrastructure itself (agent API costs are separate and identical). This cost and control advantage is meaningful for development workflows but less relevant for production pipelines where cloud platforms' autoscaling is necessary.
 
 ---
 
