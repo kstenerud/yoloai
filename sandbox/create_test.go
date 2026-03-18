@@ -19,12 +19,12 @@ import (
 	"github.com/kstenerud/yoloai/workspace"
 )
 
-func TestIsContainerBackend(t *testing.T) {
-	assert.True(t, isContainerBackend("docker"))
-	assert.True(t, isContainerBackend("podman"))
-	assert.False(t, isContainerBackend("tart"))
-	assert.False(t, isContainerBackend("seatbelt"))
-	assert.False(t, isContainerBackend(""))
+func TestBackendCaps(t *testing.T) {
+	assert.True(t, backendCaps("docker").CapAdd)
+	assert.True(t, backendCaps("podman").CapAdd)
+	assert.False(t, backendCaps("tart").CapAdd)
+	assert.False(t, backendCaps("seatbelt").CapAdd)
+	assert.False(t, backendCaps("").CapAdd)
 }
 
 func TestResolveModel_Alias(t *testing.T) {

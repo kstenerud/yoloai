@@ -270,8 +270,8 @@ func (c *Client) Destroy(ctx context.Context, name string, force bool) error {
 
 func resolveBackendFromConfig() string {
 	cfg, err := config.LoadConfig()
-	if err == nil && cfg.Backend != "" {
-		return cfg.Backend
+	if err == nil && cfg.ContainerBackend != "" {
+		return cfg.ContainerBackend
 	}
 	return "docker"
 }

@@ -144,9 +144,9 @@ func hasUnappliedWork(workDir, baselineSHA string) bool {
 }
 
 // ContainerUser returns the appropriate user string for docker exec operations
-// in the given sandbox. Under gVisor, docker exec resolves usernames from the
-// OCI image manifest (the placeholder UID used at build time), not the
-// container's live /etc/passwd (updated by the entrypoint's uid-remap step).
+// in the given sandbox. Under container-enhanced (gVisor), docker exec resolves
+// usernames from the OCI image manifest (the placeholder UID used at build time),
+// not the container's live /etc/passwd (updated by the entrypoint's uid-remap step).
 // Use the numeric host UID instead to match the remapped container user.
 func ContainerUser(meta *Meta) string {
 	if meta == nil {
@@ -155,37 +155,41 @@ func ContainerUser(meta *Meta) string {
 	if meta.UsernsMode == "keep-id" {
 		return ""
 	}
-	if meta.Security == "gvisor" {
+	if meta.Isolation == "container-enhanced" {
 		return fmt.Sprintf("%d", os.Getuid())
 	}
 	return "yoloai"
 }
 
-// SecurityPerms holds filesystem permission values that vary by security mode.
-// Under gVisor, the entrypoint remaps the container's yoloai user UID to the
-// host user's UID at runtime, but files created before the remap (e.g. by the
-// Go host process) are owned by the original host UID. Both UIDs need access,
-// so permissions must be world-accessible.
-type SecurityPerms struct {
+// IsolationPerms holds filesystem permission values that vary by isolation mode.
+// Under container-enhanced (gVisor), the entrypoint remaps the container's yoloai
+// user UID to the host user's UID at runtime, but files created before the remap
+// (e.g. by the Go host process) are owned by the original host UID. Both UIDs need
+// access, so permissions must be world-accessible.
+type IsolationPerms struct {
 	Dir         os.FileMode // container-owned directories (work, cache, logs, agent-state)
 	File        os.FileMode // container-owned files (logs, status)
 	SecretsDir  os.FileMode // ephemeral secrets dir (removed after container mount)
 	SecretsFile os.FileMode // individual secret files (removed after container mount)
 }
 
-// Perms returns the filesystem permissions appropriate for the given security
+// SecurityPerms is an alias for IsolationPerms for backwards compatibility
+// within the sandbox package.
+type SecurityPerms = IsolationPerms
+
+// Perms returns the filesystem permissions appropriate for the given isolation
 // mode. Use this whenever creating host-side files or directories that the
 // container process will write to.
-func Perms(security string) SecurityPerms {
-	if security == "gvisor" {
-		return SecurityPerms{
+func Perms(isolation string) IsolationPerms {
+	if isolation == "container-enhanced" {
+		return IsolationPerms{
 			Dir:         0777, //nolint:gosec // G301: world-writable needed for gVisor user-namespace UID remapping
 			File:        0666, //nolint:gosec // G306: world-writable needed for gVisor user-namespace UID remapping
 			SecretsDir:  0755, //nolint:gosec // G302: world-executable for gVisor UID remapping; removed within seconds
 			SecretsFile: 0644, //nolint:gosec // G306: world-readable for gVisor UID remapping; removed within seconds
 		}
 	}
-	return SecurityPerms{
+	return IsolationPerms{
 		Dir:         0750,
 		File:        0600,
 		SecretsDir:  0700,

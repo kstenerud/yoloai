@@ -7,7 +7,6 @@ import (
 	"io"
 	"log/slog"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -47,63 +46,50 @@ const (
 	NetworkModeIsolated NetworkMode = "isolated" // allowlist only
 )
 
-// isContainerBackend returns true for backends that use OCI containers
-// (Docker, Podman) as opposed to VMs or process sandboxes.
-func isContainerBackend(backend string) bool {
-	return backend == "docker" || backend == "podman"
+// BackendCaps describes what a runtime backend supports in launchContainer.
+type BackendCaps struct {
+	NetworkIsolation bool // supports --network=isolated (iptables-based domain filtering)
+	OverlayDirs      bool // supports :overlay mount mode (overlayfs inside the container)
+	CapAdd           bool // supports cap_add and devices via OCI spec
 }
 
-// securityRuntimeName maps a security mode to the OCI runtime name used for
-// both --runtime flag and binary PATH validation. Returns "" for "standard"
-// (uses the default runc; no extra binary needed).
-// Kata 3.x registers kata-qemu / kata-fc (not the legacy kata-runtime binary).
-func securityRuntimeName(security string) string {
-	switch security {
-	case "gvisor":
+// backendCaps returns the capabilities for the given backend name.
+func backendCaps(backend string) BackendCaps {
+	switch backend {
+	case "docker", "podman":
+		return BackendCaps{NetworkIsolation: true, OverlayDirs: true, CapAdd: true}
+	case "containerd":
+		return BackendCaps{NetworkIsolation: true, OverlayDirs: false, CapAdd: true}
+	default: // tart, seatbelt
+		return BackendCaps{}
+	}
+}
+
+// isolationContainerRuntime maps an isolation mode to the OCI runtime name
+// (shimv2 type for containerd, runtime name for Docker/Podman).
+// Returns "" for "container" isolation (uses the default runc; no extra binary needed).
+func isolationContainerRuntime(isolation string) string {
+	switch isolation {
+	case "container-enhanced":
 		return "runsc"
-	case "kata":
-		return "kata-qemu"
-	case "kata-firecracker":
-		return "kata-fc"
+	case "vm":
+		return "io.containerd.kata.v2"
+	case "vm-enhanced":
+		return "io.containerd.kata-fc.v2"
 	default:
 		return ""
 	}
 }
 
-// checkSecurityRuntime validates that a named OCI runtime is available for use.
-// For Docker, registration with the daemon is the authoritative check (covers
-// cases like Docker Desktop on macOS where the binary lives inside the VM).
-// For other backends (Podman), fall back to checking the host PATH.
-// Returns a descriptive error if the runtime is unavailable.
-func checkSecurityRuntime(ctx context.Context, backend, security, runtimeName string) error {
-	if backend == "docker" {
-		out, cmdErr := exec.CommandContext(ctx, "docker", "info", "--format",
-			`{{range $k,$v := .Runtimes}}{{$k}}
-{{end}}`).Output()
-		if cmdErr == nil {
-			// Docker responded — check whether the runtime is registered.
-			for _, line := range strings.Split(string(out), "\n") {
-				if strings.TrimSpace(line) == runtimeName {
-					return nil
-				}
-			}
-			return fmt.Errorf(
-				"security mode %q requires the %q runtime to be registered with Docker;\n"+
-					"add it to Docker Desktop → Settings → Docker Engine (macOS/Windows) or\n"+
-					"/etc/docker/daemon.json (Linux) and restart the daemon:\n"+
-					`  {"runtimes": {%q: {"path": "/usr/local/bin/%s"}}}`,
-				security, runtimeName, runtimeName, runtimeName,
-			)
-		}
-		// docker CLI unavailable or daemon unreachable — skip registration check.
+// checkIsolationPrerequisites delegates isolation prerequisite validation to the
+// runtime backend via the optional IsolationValidator interface.
+// If the backend does not implement IsolationValidator, validation is skipped.
+func checkIsolationPrerequisites(ctx context.Context, rt runtime.Runtime, isolation string) error {
+	v, ok := rt.(runtime.IsolationValidator)
+	if !ok {
 		return nil
 	}
-
-	// For non-Docker backends (e.g. Podman), check the host PATH.
-	if _, err := exec.LookPath(runtimeName); err != nil {
-		return fmt.Errorf("security mode %q requires %q to be installed and in PATH", security, runtimeName)
-	}
-	return nil
+	return v.ValidateIsolation(ctx, isolation)
 }
 
 // DirMode specifies how a directory is mounted in the sandbox.
@@ -149,36 +135,36 @@ type CreateOptions struct {
 	CPUs         string            // --cpus flag (e.g., "4", "2.5")
 	Memory       string            // --memory flag (e.g., "8g", "512m")
 	Env          map[string]string // --env flags (KEY=VAL pairs)
-	Security     string            // --security flag (e.g., "gvisor", "standard")
+	Isolation    string            // --isolation flag (e.g., "container-enhanced", "vm")
 }
 
 // sandboxState holds resolved state computed during preparation.
 type sandboxState struct {
-	name             string
-	sandboxDir       string
-	workdir          *DirArg
-	workCopyDir      string
-	auxDirs          []*DirArg
-	agent            *agent.Definition
-	model            string
-	profile          string
-	imageRef         string
-	env              map[string]string // merged env (base + profile chain)
-	hasPrompt        bool
-	promptSourcePath string // overrides default prompt.txt path for /yoloai/prompt.txt mount
-	networkMode      string
-	networkAllow     []string
-	ports            []string
-	configMounts     []string // extra bind mounts from config/profile (host:container[:ro])
-	tmuxConf         string
-	resources        *config.ResourceLimits
-	capAdd           []string // Linux capabilities from config/profile
-	devices          []string // host devices from config/profile
-	setup            []string // setup commands from config/profile
-	security         string   // OCI runtime security mode from config/profile
-	securityExplicit bool     // true when security was set via --security flag
-	meta             *Meta
-	configJSON       []byte
+	name              string
+	sandboxDir        string
+	workdir           *DirArg
+	workCopyDir       string
+	auxDirs           []*DirArg
+	agent             *agent.Definition
+	model             string
+	profile           string
+	imageRef          string
+	env               map[string]string // merged env (base + profile chain)
+	hasPrompt         bool
+	promptSourcePath  string // overrides default prompt.txt path for /yoloai/prompt.txt mount
+	networkMode       string
+	networkAllow      []string
+	ports             []string
+	configMounts      []string // extra bind mounts from config/profile (host:container[:ro])
+	tmuxConf          string
+	resources         *config.ResourceLimits
+	capAdd            []string // Linux capabilities from config/profile
+	devices           []string // host devices from config/profile
+	setup             []string // setup commands from config/profile
+	isolation         string   // isolation mode from config/profile
+	isolationExplicit bool     // true when isolation was set via --isolation flag
+	meta              *Meta
+	configJSON        []byte
 }
 
 // overlayMountConfig describes a single overlay mount for config.json.
@@ -377,7 +363,7 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 		}
 	}
 
-	perms := Perms(pr.security)
+	perms := Perms(pr.isolation)
 
 	for _, dir := range []string{
 		filepath.Join(sandboxDir, "work"),
@@ -416,7 +402,7 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 	}
 
 	// Ensure container-required settings (e.g., skip bypass permissions prompt)
-	if err := ensureContainerSettings(agentDef, sandboxDir, pr.security); err != nil {
+	if err := ensureContainerSettings(agentDef, sandboxDir, pr.isolation); err != nil {
 		return nil, fmt.Errorf("ensure container settings: %w", err)
 	}
 
@@ -556,7 +542,7 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 		AutoCommitInterval: pr.autoCommitInterval,
 		Debug:              opts.Debug,
 		UsernsMode:         usernsMode,
-		Security:           pr.security,
+		Isolation:          pr.isolation,
 	}
 
 	if err := SaveMeta(sandboxDir, meta); err != nil {
@@ -609,30 +595,30 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 
 	success = true
 	return &sandboxState{
-		name:             opts.Name,
-		sandboxDir:       sandboxDir,
-		workdir:          workdir,
-		workCopyDir:      workCopyDir,
-		auxDirs:          auxDirs,
-		agent:            agentDef,
-		model:            model,
-		profile:          pr.name,
-		imageRef:         pr.imageRef,
-		env:              pr.env,
-		hasPrompt:        hasPrompt,
-		networkMode:      networkMode,
-		networkAllow:     networkAllow,
-		ports:            opts.Ports,
-		configMounts:     mergedMounts,
-		tmuxConf:         tmuxConf,
-		resources:        pr.resources,
-		capAdd:           pr.capAdd,
-		devices:          pr.devices,
-		setup:            pr.setup,
-		security:         pr.security,
-		securityExplicit: pr.securityExplicit,
-		meta:             meta,
-		configJSON:       configData,
+		name:              opts.Name,
+		sandboxDir:        sandboxDir,
+		workdir:           workdir,
+		workCopyDir:       workCopyDir,
+		auxDirs:           auxDirs,
+		agent:             agentDef,
+		model:             model,
+		profile:           pr.name,
+		imageRef:          pr.imageRef,
+		env:               pr.env,
+		hasPrompt:         hasPrompt,
+		networkMode:       networkMode,
+		networkAllow:      networkAllow,
+		ports:             opts.Ports,
+		configMounts:      mergedMounts,
+		tmuxConf:          tmuxConf,
+		resources:         pr.resources,
+		capAdd:            pr.capAdd,
+		devices:           pr.devices,
+		setup:             pr.setup,
+		isolation:         pr.isolation,
+		isolationExplicit: pr.isolationExplicit,
+		meta:              meta,
+		configJSON:        configData,
 	}, nil
 }
 
@@ -651,7 +637,7 @@ func (m *Manager) launchContainer(ctx context.Context, state *sandboxState) erro
 		envVars = cfg.Env
 	}
 
-	secretsDir, err := createSecretsDir(state.agent, envVars, state.security)
+	secretsDir, err := createSecretsDir(state.agent, envVars, state.isolation)
 	if err != nil {
 		return fmt.Errorf("create secrets: %w", err)
 	}
@@ -668,16 +654,10 @@ func (m *Manager) launchContainer(ctx context.Context, state *sandboxState) erro
 
 	cname := InstanceName(state.name)
 
-	if state.networkMode == "isolated" && !isContainerBackend(m.backend) {
-		return fmt.Errorf("--network-isolated requires a container backend (%s does not support domain-based filtering)", m.backend)
-	}
+	caps := backendCaps(m.backend)
 
-	// Map internal network modes to Docker-understood values.
-	// "isolated" uses default bridge networking; iptables rules inside the
-	// container handle the actual domain-based filtering.
-	dockerNetworkMode := state.networkMode
-	if dockerNetworkMode == "isolated" {
-		dockerNetworkMode = ""
+	if state.networkMode == "isolated" && !caps.NetworkIsolation {
+		return fmt.Errorf("--network=isolated is not supported by the %s backend", m.backend)
 	}
 
 	resolvedImage := state.imageRef
@@ -691,7 +671,7 @@ func (m *Manager) launchContainer(ctx context.Context, state *sandboxState) erro
 		WorkingDir:  state.workdir.ResolvedMountPath(),
 		Mounts:      mounts,
 		Ports:       ports,
-		NetworkMode: dockerNetworkMode,
+		NetworkMode: state.networkMode,
 		UseInit:     true,
 	}
 
@@ -704,51 +684,39 @@ func (m *Manager) launchContainer(ctx context.Context, state *sandboxState) erro
 		instanceCfg.Resources = rtResources
 	}
 
-	if state.networkMode == "isolated" && isContainerBackend(m.backend) {
+	if state.networkMode == "isolated" && caps.NetworkIsolation {
 		instanceCfg.CapAdd = append(instanceCfg.CapAdd, "NET_ADMIN")
 	}
 
-	// gVisor's VFS2 kernel does not support overlayfs mounts inside the container.
+	// container-enhanced (gVisor) does not support overlayfs inside the container.
 	// Catch this combination early before Docker fails with an opaque error.
-	if state.security == "gvisor" && hasOverlayDirs(state) {
+	if state.isolation == "container-enhanced" && hasOverlayDirs(state) {
 		return fmt.Errorf(
-			"security mode %q is incompatible with :overlay directories — "+
-				"gVisor's VFS2 does not support overlayfs inside the container; "+
-				"use :copy or :rw mode instead",
-			state.security,
-		)
+			":overlay directories require --isolation container; " +
+				"--isolation container-enhanced uses gVisor, which does not support overlayfs inside the container")
 	}
 
 	// CAP_SYS_ADMIN required for overlay mounts inside the container
 	if hasOverlayDirs(state) {
-		if !isContainerBackend(m.backend) {
-			return fmt.Errorf(":overlay mode requires a container backend (not supported with %s)", m.backend)
+		if !caps.OverlayDirs {
+			return fmt.Errorf(":overlay mode requires a container backend that supports overlayfs (not supported with %s)", m.backend)
 		}
 		instanceCfg.CapAdd = append(instanceCfg.CapAdd, "SYS_ADMIN")
 	}
 
-	// Recipe fields (cap_add, devices, setup) require a container backend
-	if !isContainerBackend(m.backend) && (len(state.capAdd) > 0 || len(state.devices) > 0 || len(state.setup) > 0) {
+	// Recipe fields (cap_add, devices, setup) require a backend with CapAdd support
+	if !caps.CapAdd && (len(state.capAdd) > 0 || len(state.devices) > 0 || len(state.setup) > 0) {
 		return fmt.Errorf("cap_add, devices, and setup require a container backend (not supported with %s)", m.backend)
 	}
 	instanceCfg.CapAdd = append(instanceCfg.CapAdd, state.capAdd...)
 	instanceCfg.Devices = state.devices
 
-	// Security mode: requires a container backend; validate runtime is installed and registered.
-	if state.security != "" && state.security != "standard" {
-		if !isContainerBackend(m.backend) {
-			if state.securityExplicit {
-				return fmt.Errorf("--security %q requires a container backend (current backend: %s)", state.security, m.backend)
-			}
-			// Security from config/profile: silently ignore on non-container backends.
-		} else {
-			if runtimeName := securityRuntimeName(state.security); runtimeName != "" {
-				if err := checkSecurityRuntime(ctx, m.backend, state.security, runtimeName); err != nil {
-					return err
-				}
-				instanceCfg.ContainerRuntime = runtimeName
-			}
-		}
+	// Set the runtime identifier for both Docker (OCI --runtime name) and containerd (shimv2 type).
+	// isolationContainerRuntime returns "" for container isolation where the default suffices.
+	instanceCfg.ContainerRuntime = isolationContainerRuntime(state.isolation)
+	// Validate that isolation prerequisites are met (delegates to runtime.IsolationValidator).
+	if err := checkIsolationPrerequisites(ctx, m.runtime, state.isolation); err != nil {
+		return err
 	}
 
 	if err := m.runtime.Create(ctx, instanceCfg); err != nil {
@@ -1443,17 +1411,17 @@ func copySeedFiles(agentDef *agent.Definition, sandboxDir string, hasAPIKey bool
 //   - Claude Code: skip --dangerously-skip-permissions prompt, disable nested sandbox-exec.
 //   - Gemini CLI: disable folder-trust prompt (the container IS the sandbox).
 //   - Shell: apply each real agent's settings into home-seed subdirectories.
-func ensureContainerSettings(agentDef *agent.Definition, sandboxDir, security string) error {
+func ensureContainerSettings(agentDef *agent.Definition, sandboxDir, isolation string) error {
 	if agentDef.Name == "shell" {
-		return ensureShellContainerSettings(sandboxDir, security)
+		return ensureShellContainerSettings(sandboxDir, isolation)
 	}
 
 	if agentDef.StateDir == "" {
 		return nil
 	}
 
-	// Use restrictive permissions by default, world-writable only for gVisor
-	perms := Perms(security)
+	// Use restrictive permissions by default, world-writable only for container-enhanced (gVisor)
+	perms := Perms(isolation)
 
 	agentStateDir := filepath.Join(sandboxDir, AgentRuntimeDir)
 	if err := mkdirAllPerm(agentStateDir, perms.Dir); err != nil {
@@ -1501,7 +1469,7 @@ func ensureContainerSettings(agentDef *agent.Definition, sandboxDir, security st
 
 // ensureShellContainerSettings applies each real agent's container settings
 // to its home-seed subdirectory (e.g., home-seed/.claude/settings.json).
-func ensureShellContainerSettings(sandboxDir, security string) error {
+func ensureShellContainerSettings(sandboxDir, isolation string) error {
 	for _, name := range agent.RealAgents() {
 		def := agent.GetAgent(name)
 		if def.StateDir == "" {

@@ -37,7 +37,7 @@ type Meta struct {
 	AutoCommitInterval int                    `json:"auto_commit_interval,omitempty"`
 	Debug              bool                   `json:"debug,omitempty"`
 	UsernsMode         string                 `json:"userns_mode,omitempty"` // "keep-id" for Podman rootless keep-id; "" otherwise
-	Security           string                 `json:"security,omitempty"`    // OCI runtime security mode: standard, gvisor, kata, kata-firecracker
+	Isolation          string                 `json:"isolation,omitempty"`   // isolation mode: container, container-enhanced, vm, vm-enhanced
 }
 
 // WorkdirMeta stores the resolved workdir state at creation time.

@@ -246,7 +246,7 @@ func (m *Manager) Reset(ctx context.Context, opts ResetOptions) error {
 	slog.Debug("clearing logs", "event", "sandbox.reset.logs", "sandbox", opts.Name)
 	_ = os.RemoveAll(filepath.Join(sandboxDir, LogsDir))
 
-	perms := Perms(meta.Security)
+	perms := Perms(meta.Isolation)
 
 	_ = mkdirAllPerm(filepath.Join(sandboxDir, LogsDir), perms.Dir)
 	for _, logFile := range []string{SandboxJSONLFile, MonitorJSONLFile, HooksJSONLFile} {
@@ -455,7 +455,7 @@ func (m *Manager) recreateContainer(ctx context.Context, name string, meta *Meta
 	// Re-apply container settings (copySeedFiles overwrites settings.json
 	// with the host version, which lacks sandbox-specific settings like
 	// skipDangerousModePermissionPrompt)
-	if err := ensureContainerSettings(agentDef, sandboxDir, meta.Security); err != nil {
+	if err := ensureContainerSettings(agentDef, sandboxDir, meta.Isolation); err != nil {
 		return fmt.Errorf("ensure container settings: %w", err)
 	}
 
@@ -560,7 +560,7 @@ func (m *Manager) recreateContainer(ctx context.Context, name string, meta *Meta
 		capAdd:       meta.CapAdd,
 		devices:      meta.Devices,
 		setup:        meta.Setup,
-		security:     meta.Security,
+		isolation:    meta.Isolation,
 		configJSON:   configData,
 	}
 
@@ -910,7 +910,7 @@ func (m *Manager) clearCacheAndFiles(opts ResetOptions) error {
 		return fmt.Errorf("load metadata: %w", err)
 	}
 
-	perms := Perms(meta.Security)
+	perms := Perms(meta.Isolation)
 
 	if !opts.KeepCache {
 		cacheDir := CacheDir(opts.Name)

@@ -189,17 +189,17 @@ func newNewCmd(version string) *cobra.Command {
 
 			cpus, _ := cmd.Flags().GetString("cpus")
 			memory, _ := cmd.Flags().GetString("memory")
-			security, _ := cmd.Flags().GetString("security")
+			isolation, _ := cmd.Flags().GetString("isolation")
 			debug, _ := cmd.Flags().GetBool("debug")
 			envSlice, _ := cmd.Flags().GetStringSlice("env")
 
-			// Block gVisor on macOS due to known bug
-			if security == "gvisor" && goruntime.GOOS == "darwin" {
+			// Block container-enhanced (gVisor) on macOS due to known bug.
+			if isolation == "container-enhanced" && goruntime.GOOS == "darwin" {
 				return sandbox.NewUsageError(
-					"gVisor security mode is not supported on macOS due to a bug that causes\n" +
-						"Claude Code to hang indefinitely during initialization.\n\n" +
-						"Workaround: Use standard Docker security (omit --security flag) or try the\n" +
-						"Seatbelt backend with --backend seatbelt for lightweight macOS sandboxing.\n\n" +
+					"--isolation container-enhanced (gVisor) is not supported on macOS due to a bug\n" +
+						"that causes Claude Code to hang indefinitely during initialization.\n\n" +
+						"Workaround: Omit --isolation (use default container isolation) or use\n" +
+						"--backend seatbelt for lightweight macOS sandboxing.\n\n" +
 						"For details, see: https://github.com/anthropics/claude-code/issues/35454")
 			}
 
@@ -273,7 +273,7 @@ func newNewCmd(version string) *cobra.Command {
 					Debug:        debug,
 					CPUs:         cpus,
 					Memory:       memory,
-					Security:     security,
+					Isolation:    isolation,
 					Env:          envMap,
 				})
 				if err != nil {
@@ -338,7 +338,7 @@ func newNewCmd(version string) *cobra.Command {
 	cmd.Flags().BoolP("yes", "y", false, "Skip confirmations")
 	cmd.Flags().String("cpus", "", "CPU limit (e.g., 4, 2.5)")
 	cmd.Flags().String("memory", "", "Memory limit (e.g., 8g, 512m)")
-	cmd.Flags().String("security", "", "OCI runtime security mode (standard, gvisor, kata, kata-firecracker)")
+	cmd.Flags().String("isolation", "", "Isolation mode: container (default), container-enhanced (gVisor), vm (Kata+QEMU), vm-enhanced (Kata+Firecracker)")
 	cmd.Flags().StringSlice("env", nil, "Environment variable (KEY=VAL, repeatable)")
 
 	cmd.MarkFlagsMutuallyExclusive("network-none", "network-isolated")
@@ -537,9 +537,9 @@ func attachToSandbox(ctx context.Context, rt runtime.Runtime, containerName, san
 	var cmd []string
 	sock := readTmuxSocket(sandboxName)
 
-	// gVisor on ARM64 requires setsid to work around missing TIOCSCTTY.
+	// container-enhanced (gVisor) on ARM64 requires setsid to work around missing TIOCSCTTY.
 	// All other cases (including gVisor on amd64) use the script wrapper.
-	if meta.Security == "gvisor" && goruntime.GOARCH == "arm64" {
+	if meta.Isolation == "container-enhanced" && goruntime.GOARCH == "arm64" {
 		cmd = []string{"setsid", "tmux"}
 		if sock != "" {
 			cmd = append(cmd, "-S", sock)

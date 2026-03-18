@@ -53,8 +53,8 @@ func runSandboxInfo(cmd *cobra.Command, name string) error {
 
 		fmt.Fprintf(w, "Backend:     %s\n", meta.Backend) //nolint:errcheck
 
-		if meta.Security != "" && meta.Security != "standard" {
-			fmt.Fprintf(w, "Security:    %s\n", meta.Security) //nolint:errcheck
+		if meta.Isolation != "" {
+			fmt.Fprintf(w, "Isolation:   %s\n", meta.Isolation) //nolint:errcheck
 		}
 
 		if meta.Profile != "" {

@@ -27,7 +27,7 @@ func (c *AgentFilesConfig) IsStringForm() bool {
 
 // YoloaiConfig holds the subset of config.yaml fields that the Go code reads.
 type YoloaiConfig struct {
-	Backend            string            `yaml:"backend"`              // backend
+	ContainerBackend   string            `yaml:"container_backend"`    // container_backend — runtime backend: docker, podman, containerd
 	TartImage          string            `yaml:"tart_image"`           // tart.image — custom base VM image for tart backend
 	Agent              string            `yaml:"agent"`                // agent
 	Model              string            `yaml:"model"`                // model
@@ -43,7 +43,7 @@ type YoloaiConfig struct {
 	Devices            []string          `yaml:"devices"`              // devices — host devices to expose (Docker only)
 	Setup              []string          `yaml:"setup"`                // setup — commands to run before agent launch (Docker only)
 	AutoCommitInterval int               `yaml:"auto_commit_interval"` // auto_commit_interval — seconds between auto-commits in :copy dirs; 0 = disabled
-	Security           string            `yaml:"security"`             // security — OCI runtime security mode: standard, gvisor, kata, kata-firecracker
+	Isolation          string            `yaml:"isolation"`            // isolation — sandbox isolation mode: container, container-enhanced, vm, vm-enhanced
 }
 
 // ResourceLimits holds container resource constraints (CPU, memory).
@@ -74,7 +74,7 @@ type knownSetting struct {
 // knownSettings lists every scalar config key the code recognizes, with defaults.
 // Used by GetEffectiveConfig and GetConfigValue to fill in unset values.
 var knownSettings = []knownSetting{
-	{"backend", "docker"},
+	{"container_backend", ""},
 	{"tart.image", ""},
 	{"agent", "claude"},
 	{"model", ""},
@@ -83,24 +83,18 @@ var knownSettings = []knownSetting{
 	{"resources.memory", ""},
 	{"network.isolated", "false"},
 	{"auto_commit_interval", "0"},
-	{"security", ""},
+	{"isolation", ""},
 }
 
-// validSecurityModes is the set of accepted values for the security config key.
-var validSecurityModes = map[string]bool{
-	"standard":         true,
-	"gvisor":           true,
-	"kata":             true,
-	"kata-firecracker": true,
-}
-
-// ValidateSecurityMode returns an error if mode is not a known security mode.
+// ValidateIsolationMode returns an error if mode is not a known isolation mode.
 // Empty string is allowed (means "use default").
-func ValidateSecurityMode(mode string) error {
-	if mode == "" || validSecurityModes[mode] {
+func ValidateIsolationMode(mode string) error {
+	switch mode {
+	case "", "container", "container-enhanced", "vm", "vm-enhanced":
 		return nil
+	default:
+		return NewUsageError("unknown isolation mode %q: valid values are container, container-enhanced, vm, vm-enhanced", mode)
 	}
-	return NewUsageError("unknown security mode %q: valid values are standard, gvisor, kata, kata-firecracker", mode)
 }
 
 // knownCollectionSetting defines a non-scalar config key (map or list)
@@ -293,12 +287,12 @@ func LoadConfig() (*YoloaiConfig, error) {
 					}
 				}
 			}
-		case "backend":
+		case "container_backend":
 			expanded, err := expandEnvBraced(val.Value)
 			if err != nil {
-				return nil, fmt.Errorf("backend: %w", err)
+				return nil, fmt.Errorf("container_backend: %w", err)
 			}
-			cfg.Backend = expanded
+			cfg.ContainerBackend = expanded
 		case "agent":
 			expanded, err := expandEnvBraced(val.Value)
 			if err != nil {
@@ -329,15 +323,15 @@ func LoadConfig() (*YoloaiConfig, error) {
 				return nil, fmt.Errorf("auto_commit_interval: %w", aErr)
 			}
 			cfg.AutoCommitInterval = n
-		case "security":
+		case "isolation":
 			expanded, err := expandEnvBraced(val.Value)
 			if err != nil {
-				return nil, fmt.Errorf("security: %w", err)
+				return nil, fmt.Errorf("isolation: %w", err)
 			}
-			if err := ValidateSecurityMode(expanded); err != nil {
-				return nil, fmt.Errorf("security: %w", err)
+			if err := ValidateIsolationMode(expanded); err != nil {
+				return nil, fmt.Errorf("isolation: %w", err)
 			}
-			cfg.Security = expanded
+			cfg.Isolation = expanded
 		}
 	}
 

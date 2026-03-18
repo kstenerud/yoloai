@@ -25,8 +25,8 @@ type profileResult struct {
 	devices            []string
 	setup              []string
 	autoCommitInterval int
-	security           string
-	securityExplicit   bool // true when security was set via --security flag (not config/profile default)
+	isolation          string
+	isolationExplicit  bool // true when isolation was set via --isolation flag (not config/profile default)
 	userAliases        map[string]string
 }
 
@@ -126,7 +126,7 @@ func (m *Manager) resolveProfileConfig(ctx context.Context, opts *CreateOptions,
 	pr.devices = merged.Devices
 	pr.setup = merged.Setup
 	pr.autoCommitInterval = merged.AutoCommitInterval
-	pr.security = merged.Security
+	pr.isolation = merged.Isolation
 	pr.name = opts.Profile
 
 	// Resolve image ref
@@ -164,7 +164,7 @@ func applyConfigDefaults(opts *CreateOptions, ycfg *config.YoloaiConfig, pr *pro
 		pr.capAdd = ycfg.CapAdd
 		pr.devices = ycfg.Devices
 		pr.setup = ycfg.Setup
-		pr.security = ycfg.Security
+		pr.isolation = ycfg.Isolation
 	}
 
 	// Network from base config (if profile didn't set it and CLI didn't override)
@@ -189,13 +189,13 @@ func applyConfigDefaults(opts *CreateOptions, ycfg *config.YoloaiConfig, pr *pro
 		pr.resources.Memory = opts.Memory
 	}
 
-	// CLI --security overrides config/profile security mode
-	if opts.Security != "" {
-		if err := config.ValidateSecurityMode(opts.Security); err != nil {
+	// CLI --isolation overrides config/profile isolation mode
+	if opts.Isolation != "" {
+		if err := config.ValidateIsolationMode(opts.Isolation); err != nil {
 			return err
 		}
-		pr.security = opts.Security
-		pr.securityExplicit = true
+		pr.isolation = opts.Isolation
+		pr.isolationExplicit = true
 	}
 
 	// CLI --env overrides config/profile env vars
@@ -259,7 +259,7 @@ func (m *Manager) parseAndValidateDirs(ctx context.Context, opts CreateOptions, 
 			for _, val := range []string{os.Getenv(key), mergedEnv[key]} {
 				if val != "" && containsLocalhost(val) {
 					hint := "use the host's routable IP instead"
-					if isContainerBackend(m.backend) {
+					if backendCaps(m.backend).NetworkIsolation {
 						hint = "use host.docker.internal instead"
 					}
 					return nil, nil, NewUsageError("%s contains a localhost address (%s) which won't work inside a %s VM — %s",

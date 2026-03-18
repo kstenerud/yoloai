@@ -33,7 +33,7 @@ type ProfileConfig struct {
 	Devices            []string          // devices — host devices to expose (Docker only)
 	Setup              []string          // setup — commands to run before agent launch (Docker only)
 	AutoCommitInterval int               // auto_commit_interval — seconds between auto-commits in :copy dirs; 0 = disabled
-	Security           string            // security — OCI runtime security mode: standard, gvisor, kata, kata-firecracker
+	Isolation          string            // isolation — sandbox isolation mode: container, container-enhanced, vm, vm-enhanced
 }
 
 // ProfileWorkdir defines a workdir from a profile.
@@ -69,7 +69,7 @@ type MergedConfig struct {
 	Devices            []string          `json:"devices,omitempty"`              // additive across chain (Docker only)
 	Setup              []string          `json:"setup,omitempty"`                // additive across chain (Docker only)
 	AutoCommitInterval int               `json:"auto_commit_interval,omitempty"` // profile overrides default
-	Security           string            `json:"security,omitempty"`             // last non-empty wins across chain
+	Isolation          string            `json:"isolation,omitempty"`            // last non-empty wins across chain
 }
 
 // ProfileDirPath returns the host-side directory for a profile.
@@ -378,15 +378,15 @@ func LoadProfile(name string) (*ProfileConfig, error) {
 				return nil, fmt.Errorf("auto_commit_interval: %w", aErr)
 			}
 			cfg.AutoCommitInterval = n
-		case "security":
+		case "isolation":
 			expanded, expandErr := expandEnvBraced(val.Value)
 			if expandErr != nil {
-				return nil, fmt.Errorf("security: %w", expandErr)
+				return nil, fmt.Errorf("isolation: %w", expandErr)
 			}
-			if err := ValidateSecurityMode(expanded); err != nil {
-				return nil, fmt.Errorf("security: %w", err)
+			if err := ValidateIsolationMode(expanded); err != nil {
+				return nil, fmt.Errorf("isolation: %w", err)
 			}
-			cfg.Security = expanded
+			cfg.Isolation = expanded
 			// Unknown fields are silently ignored
 		}
 	}
@@ -469,9 +469,9 @@ func MergeProfileChain(base *YoloaiConfig, chain []string) (*MergedConfig, error
 	merged := &MergedConfig{
 		Agent:     base.Agent,
 		Model:     base.Model,
-		Backend:   base.Backend,
+		Backend:   base.ContainerBackend,
 		TartImage: base.TartImage,
-		Security:  base.Security,
+		Isolation: base.Isolation,
 	}
 	if len(base.Env) > 0 {
 		merged.Env = make(map[string]string, len(base.Env))
@@ -554,8 +554,8 @@ func MergeProfileChain(base *YoloaiConfig, chain []string) (*MergedConfig, error
 		if profile.TartImage != "" {
 			merged.TartImage = profile.TartImage
 		}
-		if profile.Security != "" {
-			merged.Security = profile.Security
+		if profile.Isolation != "" {
+			merged.Isolation = profile.Isolation
 		}
 
 		// Env: map merge, later wins on conflict
@@ -658,7 +658,7 @@ func LoadMergedConfig(profileName string) (*MergedConfig, error) {
 		return &MergedConfig{
 			Agent:   base.Agent,
 			Model:   base.Model,
-			Backend: base.Backend,
+			Backend: base.ContainerBackend,
 			Env:     base.Env,
 		}, nil
 	}

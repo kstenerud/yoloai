@@ -217,7 +217,7 @@ func (m *Manager) setBackendFromFlag(name string) error {
 	for _, b := range availableBackends() {
 		if b.name == name {
 			return config.UpdateConfigFields(map[string]string{
-				"backend": name,
+				"container_backend": name,
 			})
 		}
 	}
@@ -348,7 +348,7 @@ func (m *Manager) promptBackendSetup(ctx context.Context) error {
 	}
 
 	return config.UpdateConfigFields(map[string]string{
-		"backend": backends[idx].name,
+		"container_backend": backends[idx].name,
 	})
 }
 

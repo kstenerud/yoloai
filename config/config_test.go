@@ -191,7 +191,7 @@ agent: claude # my preferred agent
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
 
 	err := UpdateConfigFields(map[string]string{
-		"backend": "tart",
+		"container_backend": "tart",
 	})
 	require.NoError(t, err)
 
@@ -203,22 +203,22 @@ agent: claude # my preferred agent
 
 func TestDeleteConfigField_Scalar(t *testing.T) {
 	dir := configDir(t)
-	content := "backend: tart\nagent: gemini\n"
+	content := "container_backend: tart\nagent: gemini\n"
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
 
-	require.NoError(t, DeleteConfigField("backend"))
+	require.NoError(t, DeleteConfigField("container_backend"))
 
 	// backend should be gone from file, agent preserved
 	data, err := os.ReadFile(filepath.Join(dir, "config.yaml")) //nolint:gosec // G304: test code
 	require.NoError(t, err)
-	assert.NotContains(t, string(data), "backend")
+	assert.NotContains(t, string(data), "container_backend")
 	assert.Contains(t, string(data), "agent: gemini")
 
-	// GetConfigValue should fall back to default
-	val, found, err := GetConfigValue("backend")
+	// GetConfigValue should fall back to default (empty string — auto-detect)
+	val, found, err := GetConfigValue("container_backend")
 	require.NoError(t, err)
 	assert.True(t, found)
-	assert.Equal(t, "docker", val)
+	assert.Equal(t, "", val)
 }
 
 func TestDeleteConfigField_MapEntry(t *testing.T) {
@@ -236,7 +236,7 @@ func TestDeleteConfigField_MapEntry(t *testing.T) {
 
 func TestDeleteConfigField_EntireSection(t *testing.T) {
 	dir := configDir(t)
-	content := "env:\n  FOO: bar\nbackend: tart\n"
+	content := "env:\n  FOO: bar\ncontainer_backend: tart\n"
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
 
 	require.NoError(t, DeleteConfigField("env"))
@@ -245,12 +245,12 @@ func TestDeleteConfigField_EntireSection(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotContains(t, string(data), "FOO")
 	assert.NotContains(t, string(data), "env")
-	assert.Contains(t, string(data), "backend: tart")
+	assert.Contains(t, string(data), "container_backend: tart")
 }
 
 func TestDeleteConfigField_NonexistentKey(t *testing.T) {
 	dir := configDir(t)
-	content := "backend: docker\n"
+	content := "container_backend: docker\n"
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
 
 	// Should not error on missing key
@@ -262,7 +262,7 @@ func TestDeleteConfigField_MissingFile(t *testing.T) {
 	t.Setenv("HOME", tmpDir)
 
 	// Should not error when config file doesn't exist
-	require.NoError(t, DeleteConfigField("backend"))
+	require.NoError(t, DeleteConfigField("container_backend"))
 }
 
 func TestLoadConfig_ExpandsEnvVars(t *testing.T) {
@@ -270,13 +270,13 @@ func TestLoadConfig_ExpandsEnvVars(t *testing.T) {
 	t.Setenv("YOLOAI_TEST_AGENT", "gemini")
 	t.Setenv("YOLOAI_TEST_BACKEND", "tart")
 
-	content := "agent: ${YOLOAI_TEST_AGENT}\nbackend: ${YOLOAI_TEST_BACKEND}\n"
+	content := "agent: ${YOLOAI_TEST_AGENT}\ncontainer_backend: ${YOLOAI_TEST_BACKEND}\n"
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
 
 	cfg, err := LoadConfig()
 	require.NoError(t, err)
 	assert.Equal(t, "gemini", cfg.Agent)
-	assert.Equal(t, "tart", cfg.Backend)
+	assert.Equal(t, "tart", cfg.ContainerBackend)
 }
 
 func TestLoadConfig_UnsetEnvVarError(t *testing.T) {
@@ -294,12 +294,12 @@ func TestLoadConfig_UnsetEnvVarError(t *testing.T) {
 func TestLoadConfig_UnclosedBraceError(t *testing.T) {
 	dir := configDir(t)
 
-	content := "backend: ${UNCLOSED\n"
+	content := "container_backend: ${UNCLOSED\n"
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
 
 	_, err := LoadConfig()
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "backend")
+	assert.Contains(t, err.Error(), "container_backend")
 	assert.Contains(t, err.Error(), "unclosed")
 }
 
@@ -340,7 +340,7 @@ func TestReadConfigRaw_MissingFile(t *testing.T) {
 
 func TestReadConfigRaw_ExistingFile(t *testing.T) {
 	dir := configDir(t)
-	content := "backend: docker\n"
+	content := "container_backend: docker\n"
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
 
 	data, err := ReadConfigRaw()
@@ -350,10 +350,10 @@ func TestReadConfigRaw_ExistingFile(t *testing.T) {
 
 func TestGetConfigValue_Scalar(t *testing.T) {
 	dir := configDir(t)
-	content := "backend: seatbelt\n"
+	content := "container_backend: seatbelt\n"
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
 
-	val, found, err := GetConfigValue("backend")
+	val, found, err := GetConfigValue("container_backend")
 	require.NoError(t, err)
 	assert.True(t, found)
 	assert.Equal(t, "seatbelt", val)
@@ -383,7 +383,7 @@ func TestGetConfigValue_Mapping(t *testing.T) {
 
 func TestGetConfigValue_NotFound(t *testing.T) {
 	dir := configDir(t)
-	content := "backend: docker\n"
+	content := "container_backend: docker\n"
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
 
 	// Unknown key: not found
@@ -397,11 +397,11 @@ func TestGetConfigValue_FallsBackToDefault(t *testing.T) {
 	content := "agent: claude\n"
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
 
-	// Known key not in file returns its default
-	val, found, err := GetConfigValue("backend")
+	// Known key not in file returns its default (empty string for container_backend)
+	val, found, err := GetConfigValue("container_backend")
 	require.NoError(t, err)
 	assert.True(t, found)
-	assert.Equal(t, "docker", val)
+	assert.Equal(t, "", val)
 }
 
 func TestGetConfigValue_MissingFile(t *testing.T) {
@@ -413,11 +413,11 @@ func TestGetConfigValue_MissingFile(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, found)
 
-	// Known key with no file: returns default
-	val, found, err := GetConfigValue("backend")
+	// Known key with no file: returns default (empty string for container_backend)
+	val, found, err := GetConfigValue("container_backend")
 	require.NoError(t, err)
 	assert.True(t, found)
-	assert.Equal(t, "docker", val)
+	assert.Equal(t, "", val)
 }
 
 func TestGetEffectiveConfig_Defaults(t *testing.T) {
@@ -426,7 +426,7 @@ func TestGetEffectiveConfig_Defaults(t *testing.T) {
 
 	out, err := GetEffectiveConfig()
 	require.NoError(t, err)
-	assert.Contains(t, out, "backend: docker")
+	assert.Contains(t, out, "container_backend:")
 	assert.Contains(t, out, "image:")
 	assert.Contains(t, out, "tmux_conf:")        // global default
 	assert.Contains(t, out, "model_aliases: {}") // global default
@@ -436,12 +436,12 @@ func TestGetEffectiveConfig_Defaults(t *testing.T) {
 
 func TestGetEffectiveConfig_WithOverrides(t *testing.T) {
 	dir := configDir(t)
-	content := "backend: tart\n"
+	content := "container_backend: tart\n"
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
 
 	out, err := GetEffectiveConfig()
 	require.NoError(t, err)
-	assert.Contains(t, out, "backend: tart")
+	assert.Contains(t, out, "container_backend: tart")
 	// Defaults for unset keys still present
 	assert.Contains(t, out, "image:")
 	assert.Contains(t, out, "tmux_conf:") // from global defaults
@@ -457,7 +457,7 @@ func TestGetEffectiveConfig_ExtraKeys(t *testing.T) {
 	// Custom keys from the file should appear too
 	assert.Contains(t, out, "custom_key: myvalue")
 	// And defaults still present
-	assert.Contains(t, out, "backend: docker")
+	assert.Contains(t, out, "container_backend:")
 }
 
 func TestLoadConfig_Resources(t *testing.T) {
@@ -540,7 +540,7 @@ func TestIsGlobalKey(t *testing.T) {
 	assert.True(t, IsGlobalKey("model_aliases"))
 	assert.True(t, IsGlobalKey("model_aliases.fast"))
 	assert.False(t, IsGlobalKey("agent"))
-	assert.False(t, IsGlobalKey("backend"))
+	assert.False(t, IsGlobalKey("container_backend"))
 	assert.False(t, IsGlobalKey("env"))
 	assert.False(t, IsGlobalKey("env.FOO"))
 }

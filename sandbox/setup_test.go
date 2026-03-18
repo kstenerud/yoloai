@@ -334,7 +334,7 @@ func TestPromptBackendSetup_ShownOnLinux(t *testing.T) {
 
 	cfg, err := config.LoadConfig()
 	require.NoError(t, err)
-	assert.Equal(t, "docker", cfg.Backend)
+	assert.Equal(t, "docker", cfg.ContainerBackend)
 }
 
 func TestPromptBackendSetup_ShownOnMacOS(t *testing.T) {
@@ -352,7 +352,7 @@ func TestPromptBackendSetup_ShownOnMacOS(t *testing.T) {
 
 	cfg, err := config.LoadConfig()
 	require.NoError(t, err)
-	assert.Equal(t, "docker", cfg.Backend)
+	assert.Equal(t, "docker", cfg.ContainerBackend)
 }
 
 func TestPromptBackendSetup_SelectSeatbelt(t *testing.T) {
@@ -364,7 +364,7 @@ func TestPromptBackendSetup_SelectSeatbelt(t *testing.T) {
 
 	cfg, err := config.LoadConfig()
 	require.NoError(t, err)
-	assert.Equal(t, "seatbelt", cfg.Backend)
+	assert.Equal(t, "seatbelt", cfg.ContainerBackend)
 }
 
 func TestPromptBackendSetup_SelectTart(t *testing.T) {
@@ -376,7 +376,7 @@ func TestPromptBackendSetup_SelectTart(t *testing.T) {
 
 	cfg, err := config.LoadConfig()
 	require.NoError(t, err)
-	assert.Equal(t, "tart", cfg.Backend)
+	assert.Equal(t, "tart", cfg.ContainerBackend)
 }
 
 func TestPromptBackendSetup_InvalidInputDefaultsToFirst(t *testing.T) {
@@ -388,7 +388,7 @@ func TestPromptBackendSetup_InvalidInputDefaultsToFirst(t *testing.T) {
 
 	cfg, err := config.LoadConfig()
 	require.NoError(t, err)
-	assert.Equal(t, "docker", cfg.Backend)
+	assert.Equal(t, "docker", cfg.ContainerBackend)
 }
 
 // --- Agent prompt tests ---
@@ -446,7 +446,7 @@ func TestRunNewUserSetup_FullFlow_MacOS(t *testing.T) {
 
 	cfg, err := config.LoadConfig()
 	require.NoError(t, err)
-	assert.Equal(t, "seatbelt", cfg.Backend)
+	assert.Equal(t, "seatbelt", cfg.ContainerBackend)
 	assert.Equal(t, "codex", cfg.Agent)
 	assert.Contains(t, output.String(), "Setup complete")
 }
@@ -469,7 +469,7 @@ func TestRunNewUserSetup_FullFlow_Linux_ShowsBackend(t *testing.T) {
 
 	cfg, err := config.LoadConfig()
 	require.NoError(t, err)
-	assert.Equal(t, "docker", cfg.Backend)
+	assert.Equal(t, "docker", cfg.ContainerBackend)
 	assert.Equal(t, "aider", cfg.Agent)
 	assert.Contains(t, output.String(), "Default runtime backend")
 	assert.Contains(t, output.String(), "Default agent")
@@ -496,7 +496,7 @@ func TestRunNewUserSetup_LargeConfig_StillAsksBackendAndAgent(t *testing.T) {
 
 	cfg, err := config.LoadConfig()
 	require.NoError(t, err)
-	assert.Equal(t, "tart", cfg.Backend)
+	assert.Equal(t, "tart", cfg.ContainerBackend)
 	assert.Equal(t, "codex", cfg.Agent)
 	assert.Contains(t, output.String(), "Default runtime backend")
 	assert.Contains(t, output.String(), "Default agent")
@@ -528,7 +528,7 @@ func TestRunNewUserSetup_WithBackendFlag(t *testing.T) {
 
 	cfg, err := config.LoadConfig()
 	require.NoError(t, err)
-	assert.Equal(t, "seatbelt", cfg.Backend)
+	assert.Equal(t, "seatbelt", cfg.ContainerBackend)
 	assert.NotContains(t, output.String(), "Default runtime backend")
 	assert.Contains(t, output.String(), "Default agent")
 }
@@ -570,7 +570,7 @@ func TestRunNewUserSetup_AllFlags_NonInteractive(t *testing.T) {
 
 	cfg, err := config.LoadConfig()
 	require.NoError(t, err)
-	assert.Equal(t, "docker", cfg.Backend)
+	assert.Equal(t, "docker", cfg.ContainerBackend)
 	assert.Equal(t, "gemini", cfg.Agent)
 	assert.NotContains(t, output.String(), "Choice")
 }
@@ -623,7 +623,7 @@ func TestRunNewUserSetup_BackendDockerOnLinux_OK(t *testing.T) {
 
 	cfg, err := config.LoadConfig()
 	require.NoError(t, err)
-	assert.Equal(t, "docker", cfg.Backend)
+	assert.Equal(t, "docker", cfg.ContainerBackend)
 }
 
 // mockRuntime is defined above — we can use it here since

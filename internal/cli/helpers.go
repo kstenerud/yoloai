@@ -71,8 +71,8 @@ func resolveBackendForSandbox(name string) string {
 // (e.g., list, stop --all).
 func resolveBackendFromConfig() string {
 	cfg, err := config.LoadConfig()
-	if err == nil && cfg.Backend != "" {
-		return cfg.Backend
+	if err == nil && cfg.ContainerBackend != "" {
+		return cfg.ContainerBackend
 	}
 	return "docker"
 }

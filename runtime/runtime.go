@@ -73,6 +73,14 @@ type ExecResult struct {
 	ExitCode int
 }
 
+// IsolationValidator is an optional interface implemented by Runtime backends
+// that support prerequisite checking for isolation modes. create.go delegates
+// to this interface via checkIsolationPrerequisites; backends that don't
+// implement it skip validation silently.
+type IsolationValidator interface {
+	ValidateIsolation(ctx context.Context, isolation string) error
+}
+
 // Runtime is the sandbox backend interface. Implementations manage the
 // lifecycle of sandbox instances (containers, VMs, etc.) and provide
 // image/environment management.

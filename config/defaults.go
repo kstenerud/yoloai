@@ -8,11 +8,12 @@ const DefaultConfigYAML = `# yoloai base profile configuration
 # Run 'yoloai config set <key> <value>' to change settings.
 #
 # Available settings:
-#   agent        Agent to use: aider, claude, codex, gemini, opencode
-#   model        Model name or alias passed to the agent
-#   backend      Runtime backend: docker, tart, seatbelt
-#   tart.image   Custom base VM image (tart backend only)
-#   env.<NAME>   Environment variable passed to container
+#   agent              Agent to use: aider, claude, codex, gemini, opencode
+#   model              Model name or alias passed to the agent
+#   container_backend  Runtime backend: docker, podman, containerd (auto-detect if unset)
+#   isolation          Isolation mode: container, container-enhanced, vm, vm-enhanced
+#   tart.image         Custom base VM image (tart backend only)
+#   env.<NAME>         Environment variable passed to container
 
 {}
 `

@@ -25,7 +25,7 @@ func TestResolveBackend_FlagSet(t *testing.T) {
 
 func TestResolveBackend_FlagEmptyWithConfig(t *testing.T) {
 	dir := cliConfigDir(t)
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte("backend: seatbelt\n"), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte("container_backend: seatbelt\n"), 0600))
 
 	cmd := &cobra.Command{}
 	cmd.Flags().String("backend", "", "")
@@ -47,7 +47,7 @@ func TestResolveBackend_FlagEmptyNoConfig(t *testing.T) {
 
 func TestResolveBackendFromConfig_HasBackend(t *testing.T) {
 	dir := cliConfigDir(t)
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte("backend: tart\n"), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte("container_backend: tart\n"), 0600))
 
 	assert.Equal(t, "tart", resolveBackendFromConfig())
 }
