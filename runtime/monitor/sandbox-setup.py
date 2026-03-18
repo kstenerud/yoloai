@@ -134,13 +134,7 @@ def setup_tmux_session(cfg, yoloai_dir, socket=None):
     else:
         cmd = ["tmux"] + base_args + session_args
 
-    log_info("tmux.start", "starting tmux session",
-             tmux_conf=tmux_conf,
-             cmd=" ".join(cmd),
-             python_path=os.environ.get("PATH", ""),
-             tmux_bin=shutil.which("tmux") or "not found",
-             tmux_conf_file_exists=os.path.isfile(tmux_conf_file),
-             tmux_conf_file_content=open(tmux_conf_file).read() if os.path.isfile(tmux_conf_file) else "missing")
+    log_debug("tmux.start", f"starting tmux session (tmux_conf={tmux_conf})")
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
         log_info("tmux.error", "tmux new-session failed",
@@ -187,7 +181,7 @@ def setup_tmux_session(cfg, yoloai_dir, socket=None):
              alive_after_pipe_pane=bool(_sessions_after_pp.strip()))
 
 
-def launch_agent(cfg, socket=None, working_dir=None):
+def launch_agent(cfg, socket=None, working_dir=None, backend=""):
     """Launch the agent command inside the tmux session."""
     agent_command = cfg.get("agent_command", "")
     agent = cfg.get("agent", "")
@@ -203,22 +197,31 @@ def launch_agent(cfg, socket=None, working_dir=None):
              returncode=node_check.returncode,
              stderr=node_check.stderr.strip())
 
-    # Probe the pane's PATH before launching the agent.
-    # send-keys runs in the pane's shell, so this captures the shell's actual PATH,
-    # which may differ from the Python process's PATH.
-    tmux("send-keys", "-t", "main", "echo PANEPATH=$PATH > /tmp/yoloai-panepath.txt 2>&1", "Enter", socket=socket)
-    time.sleep(0.5)
-    pane_path_raw = ""
-    try:
-        with open("/tmp/yoloai-panepath.txt") as f:
-            pane_path_raw = f.read().strip()
-    except OSError:
-        pane_path_raw = "could not read /tmp/yoloai-panepath.txt"
-    log_info("sandbox.pane_path_probe", "pane PATH probe",
-             pane_path_raw=pane_path_raw,
-             python_path=os.environ.get("PATH", ""),
-             which_claude=shutil.which("claude") or "not found in python PATH",
-             which_node=shutil.which("node") or "not found in python PATH")
+    # Check that the agent binary is findable in the pane's shell PATH before
+    # launching, so we can emit a clear error instead of "command not found".
+    agent_bin = agent_command.split()[0] if agent_command else ""
+    if agent_bin:
+        check_file = "/tmp/yoloai-agent-check.txt"
+        check_cmd = f"command -v {agent_bin} > {check_file} 2>&1; echo $? >> {check_file}"
+        tmux("send-keys", "-t", "main", check_cmd, "Enter", socket=socket)
+        time.sleep(0.4)
+        try:
+            with open(check_file) as f:
+                lines = f.read().strip().splitlines()
+        except OSError:
+            lines = []
+        exit_code = lines[-1].strip() if lines else "1"
+        found_at = lines[0].strip() if len(lines) >= 2 else ""
+        if exit_code != "0":
+            log_info("sandbox.agent_not_found", "agent binary not found in pane PATH",
+                     agent_bin=agent_bin,
+                     pane_path=tmux_output("display-message", "-p", "#{pane_current_path}", socket=socket).strip())
+            rebuild_cmd = f"yoloai system build --backend {backend}" if backend else "yoloai system build"
+            tmux("send-keys", "-t", "main",
+                 f"echo 'yoloai: {agent_bin} not found — run: {rebuild_cmd}'",
+                 "Enter", socket=socket)
+            return
+        log_debug("sandbox.agent_found", f"agent binary found: {found_at}")
 
     if working_dir:
         send_cmd = f"cd {working_dir} && exec {agent_command}"
@@ -572,7 +575,7 @@ def main():
                  uid=stat_info.st_uid, gid=stat_info.st_gid)
         os.chmod(socket, 0o777)
 
-    launch_agent(cfg, socket=socket, working_dir=working_dir)
+    launch_agent(cfg, socket=socket, working_dir=working_dir, backend=backend)
     monitor_exit(socket=socket)
     wait_for_ready(cfg, socket=socket)
     prompt_delivered = deliver_prompt(cfg, yoloai_dir, socket=socket)
