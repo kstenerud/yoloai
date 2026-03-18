@@ -245,7 +245,7 @@ func (r *Runtime) bootForProvisioning(ctx context.Context, vmName string, output
 	// (ACPI power-off) may not wait for macOS to commit all pending writes,
 	// causing installed packages and profile edits to be missing in clones.
 	fmt.Fprintln(output, "Flushing filesystem and shutting down provisioning VM...") //nolint:errcheck // best-effort
-	shutArgs := execArgs(vmName, "bash", "-c", "sync; sudo shutdown -h now")
+	shutArgs := execArgs(vmName, "bash", "-c", "sync; sudo /sbin/shutdown -h now")
 	shutCmd := exec.CommandContext(ctx, r.tartBin, shutArgs...) //nolint:gosec // G204
 	shutCmd.Stdout = output
 	shutCmd.Stderr = output
