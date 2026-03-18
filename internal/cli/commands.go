@@ -527,6 +527,10 @@ func setTerminalTitle(title string) {
 //
 // PTY/terminal behaviour varies by backend and architecture:
 //
+//   - tart/seatbelt: run commands directly with the caller's terminal already
+//     attached. No script wrapper needed or wanted — macOS BSD script does not
+//     support the GNU -c flag used by the Linux wrapper.
+//
 //   - Standard Docker (all arch): docker exec -it calls TIOCSCTTY, so the
 //     exec'd process gets a controlling terminal. The script wrapper creates a
 //     fresh PTY + controlling terminal, which tmux uses cleanly.
@@ -554,23 +558,33 @@ func attachToSandbox(ctx context.Context, rt runtime.Runtime, containerName, san
 	var cmd []string
 	sock := readTmuxSocket(sandboxName)
 
-	// container-enhanced (gVisor) on ARM64 requires setsid to work around missing TIOCSCTTY.
-	// All other cases (including gVisor on amd64) use the script wrapper.
-	if meta.Isolation == "container-enhanced" && goruntime.GOARCH == "arm64" {
+	switch {
+	case meta.Isolation == "container-enhanced" && goruntime.GOARCH == "arm64":
+		// gVisor on ARM64 requires setsid to work around missing TIOCSCTTY.
 		cmd = []string{"setsid", "tmux"}
 		if sock != "" {
 			cmd = append(cmd, "-S", sock)
 		}
 		cmd = append(cmd, "attach", "-t", "main")
-	} else {
+	case rt.Name() == "tart" || rt.Name() == "seatbelt":
+		// tart/seatbelt run commands directly with the caller's terminal;
+		// no script wrapper needed (and macOS BSD script doesn't support -c).
+		cmd = []string{"tmux"}
+		if sock != "" {
+			cmd = append(cmd, "-S", sock)
+		}
+		cmd = append(cmd, "attach", "-t", "main")
+	default:
+		// Container backends (docker, podman, containerd): use script to
+		// create a fresh PTY + controlling terminal.
+		// script -q -e -c <cmd> /dev/null: quiet, propagate exit status, run cmd,
+		// discard transcript.
 		var tmuxArgs string
 		if sock != "" {
 			tmuxArgs = fmt.Sprintf("exec tmux -S %s attach -t main", sock)
 		} else {
 			tmuxArgs = "exec tmux attach -t main"
 		}
-		// script -q -e -c <cmd> /dev/null: quiet, propagate exit status, run cmd,
-		// discard transcript. Creates a fresh PTY + controlling terminal.
 		cmd = []string{"script", "-q", "-e", "-c", tmuxArgs, "/dev/null"}
 	}
 
