@@ -161,15 +161,14 @@ type BackendCaps struct {
     NetworkIsolation bool // supports --network=isolated (iptables-based domain filtering)
     OverlayDirs      bool // supports :overlay mount mode (overlayfs inside the container)
     CapAdd           bool // supports cap_add and devices via OCI spec
-    OCIRuntime       bool // supports ContainerRuntime field (OCI --runtime name)
 }
 
 func backendCaps(backend string) BackendCaps {
     switch backend {
     case "docker", "podman":
-        return BackendCaps{NetworkIsolation: true, OverlayDirs: true, CapAdd: true, OCIRuntime: true}
+        return BackendCaps{NetworkIsolation: true, OverlayDirs: true, CapAdd: true}
     case "containerd":
-        return BackendCaps{NetworkIsolation: true, OverlayDirs: false, CapAdd: true, OCIRuntime: false}
+        return BackendCaps{NetworkIsolation: true, OverlayDirs: false, CapAdd: true}
     default: // tart, seatbelt
         return BackendCaps{}
     }
@@ -185,7 +184,34 @@ Delete `isContainerBackend()`. Add `caps := backendCaps(m.backend)` at the top o
 | `isContainerBackend(m.backend)` (NET_ADMIN cap, line 707) | `caps.NetworkIsolation` |
 | `!isContainerBackend(m.backend)` (overlay gate, line 724) | `!caps.OverlayDirs` |
 | `!isContainerBackend(m.backend)` (cap_add/devices/setup gate, line 731) | `!caps.CapAdd` |
-| `!isContainerBackend(m.backend)` (security/OCIRuntime gate, line 739) | `!caps.OCIRuntime` |
+
+The `isContainerBackend` gate at line 739 (security/runtime validation) is replaced entirely
+by `IsolationValidator` — see below. **`ContainerRuntime` is set unconditionally** before
+validation, then the validator (per-backend via interface) decides whether prerequisites are
+met. Replace the entire lines 738–752 block with:
+
+```go
+// Set the runtime identifier for both Docker (OCI --runtime name) and containerd (shimv2 type).
+// isolationContainerRuntime returns "" for container/container isolation where the default suffices.
+if runtimeName := isolationContainerRuntime(state.isolation); runtimeName != "" {
+    instanceCfg.ContainerRuntime = runtimeName
+}
+// Validate that isolation prerequisites are met (delegates to runtime.IsolationValidator).
+if err := checkIsolationPrerequisites(ctx, m.runtime, state.isolation); err != nil {
+    return err
+}
+```
+
+`checkIsolationPrerequisites` is a thin delegator in create.go:
+```go
+func checkIsolationPrerequisites(ctx context.Context, rt runtime.Runtime, isolation string) error {
+    v, ok := rt.(runtime.IsolationValidator)
+    if !ok {
+        return nil
+    }
+    return v.ValidateIsolation(ctx, isolation)
+}
+```
 
 Update the network isolation error message to avoid naming specific backends:
 ```go
@@ -216,11 +242,11 @@ Replace the macOS gVisor block:
 ```go
 isolation, _ := cmd.Flags().GetString("isolation")
 os, _ := cmd.Flags().GetString("os")
-if isolation == "container-enhanced" && os != "" && goruntime.GOOS == "darwin" {
-    return sandbox.NewUsageError("--isolation container-enhanced is not available on macOS.\n" +
-        "Available isolation modes with --os mac:\n" +
-        "  container   macOS sandbox-exec (seatbelt)\n" +
-        "  vm          Full macOS VM (Tart)")
+if os == "mac" && (isolation == "container-enhanced" || isolation == "vm-enhanced") {
+    return sandbox.NewUsageError(fmt.Sprintf("--isolation %s is not available on macOS.\n"+
+        "Available isolation modes with --os mac:\n"+
+        "  container   macOS sandbox-exec (seatbelt)\n"+
+        "  vm          Full macOS VM (Tart)", isolation))
 }
 ```
 
@@ -560,8 +586,13 @@ prefer explicit paths to avoid depending on containerd's registration.
 **`Stop()`:**
 1. Load container; if not found, return nil (idempotent)
 2. Load task via `ctr.Task(ctx, nil)`; if no task exists, skip to teardown
-3. Check task status — if already stopped, skip Kill:
+3. Subscribe to exit events and check status — **`task.Wait()` must be called before
+   `task.Kill()`** to avoid missing the exit event:
    ```go
+   exitCh, err := task.Wait(ctx)  // subscribe first
+   if err != nil {
+       return fmt.Errorf("wait task: %w", err)
+   }
    status, _ := task.Status(ctx)
    if status.Status != containerd.Stopped {
        task.Kill(ctx, syscall.SIGTERM)
@@ -604,26 +635,31 @@ This is correct — `Start()` will clean it up on the next restart.
 6. `<-exitCh` to get exit status
 7. Return `ExecResult`
 
-**`InteractiveExec()`** — PTY-attached. The containerd exec API does not accept raw file
-descriptors — stdio goes through named FIFOs managed by the shim. Wire a PTY to those FIFOs:
+**`InteractiveExec()`** — PTY-attached. The shim creates a PTY inside the container and
+bridges it to named FIFOs. On the host side, attach `os.Stdin`/`os.Stdout` directly to those
+FIFOs — no host PTY pair needed. `creack/pty` is used only for raw mode and terminal size,
+not for opening a PTY.
 
-1. Open a PTY: `ptm, pts, err := pty.Open()` — gives master (ptm) and slave (pts) ends
+1. Set raw mode on the host terminal:
+   ```go
+   oldState, err := pty.MakeRaw(int(os.Stdin.Fd()))
+   if err != nil { return err }
+   defer pty.Restore(int(os.Stdin.Fd()), oldState)
+   ```
 2. Create a FIFO set with terminal flag in a temp dir:
    ```go
    fifoDir, _ := os.MkdirTemp("", "yoloai-exec-")
    defer os.RemoveAll(fifoDir)
    fifoSet, _ := cio.NewFIFOSetInDir(fifoDir, execID, true /* terminal */)
    ```
-3. Create a `cio.Attach` function that bridges the FIFOs to the PTY master:
+3. Attach using the real stdin/stdout — not a PTY pair:
    ```go
-   ioAttach := cio.NewAttach(cio.WithTerminal, cio.WithStreams(ptm, ptm, nil))
+   ioAttach := cio.NewAttach(cio.WithTerminal, cio.WithStreams(os.Stdin, os.Stdout, nil))
    ```
-4. Create process spec with `Terminal: true`
-5. `process, _ := task.Exec(ctx, execID, processSpec, ioAttach(fifoSet))`
-6. Set raw terminal on the host side, then `process.Start(ctx)`
-7. Copy `os.Stdin` → `ptm` and `ptm` → `os.Stdout` in goroutines
-8. Handle `SIGWINCH`: `process.ResizePTY(ctx, cols, rows)`
-9. `<-exitCh` to wait for exit, then restore terminal
+4. Create process spec with `Terminal: true`; send initial terminal size via `ResizePTY`
+5. `exitCh, _ := process.Wait(ctx)` then `process.Start(ctx)`
+6. Forward SIGWINCH in a goroutine: `process.ResizePTY(ctx, cols, rows)`
+7. `<-exitCh` to wait for exit — raw mode is restored by the deferred call above
 
 Reference: nerdctl's `pkg/taskutil/taskutil.go`. This is a non-trivial pattern — copy it
 rather than inventing a new approach.
@@ -681,16 +717,10 @@ Containerd runtime implements it for `vm` and `vm-enhanced`. Phase 1 adds the in
 `runtime/runtime.go` and the Docker/Podman implementations. Phase 2 adds the containerd
 implementation below.
 
-**`runtime/containerd/containerd.go`** — `ValidateIsolation()` for containerd:
-
-**File: `sandbox/create.go`** — in `checkIsolationPrerequisites()`:
+**`runtime/containerd/containerd.go`** — implement `ValidateIsolation()`:
 
 ```go
-func checkIsolationPrerequisites(ctx context.Context, isolation, backend string, explicit bool) error {
-    if isolation != "vm" && isolation != "vm-enhanced" {
-        return checkEnhancedSupport(ctx, backend, isolation, explicit) // gVisor check (existing logic)
-    }
-    // vm/vm-enhanced: check containerd prerequisites
+func (r *Runtime) ValidateIsolation(ctx context.Context, isolation string) error {
     missing := []string{}
     if _, err := os.Stat("/run/containerd/containerd.sock"); err != nil {
         missing = append(missing, "containerd socket not found at /run/containerd/containerd.sock")
@@ -703,13 +733,17 @@ func checkIsolationPrerequisites(ctx context.Context, isolation, backend string,
     }
     if _, err := os.Stat("/dev/kvm"); err != nil {
         if isWSL2() {
-            missing = append(missing, "nested virtualization not enabled — see design doc for WSL2 steps")
+            missing = append(missing, "nested virtualization not enabled — see WSL2 steps in docs")
         } else {
             missing = append(missing, "/dev/kvm not found: enable KVM in BIOS or check hypervisor settings")
         }
     }
+    if isolation == "vm-enhanced" {
+        // devmapper check deferred to Phase 3 — query containerd snapshotters
+    }
     if len(missing) > 0 {
-        return fmt.Errorf("VM isolation mode requires additional setup:\n  - %s", strings.Join(missing, "\n  - "))
+        return fmt.Errorf("VM isolation mode requires additional setup:\n  - %s",
+            strings.Join(missing, "\n  - "))
     }
     return nil
 }
@@ -720,18 +754,24 @@ func isWSL2() bool {
 }
 ```
 
-**`checkEnhancedSupport` for Podman — rootless limitation:** When `backend == "podman"` and
-Podman is running rootless, gVisor fails with a cgroupv2 delegation error even if `runsc` is
-registered. Detect this case and emit a specific error:
+**`runtime/docker/docker.go`** and **`runtime/podman/podman.go`** — implement `ValidateIsolation()`
+for `container-enhanced`. This is the existing `checkSecurityRuntime` / `checkEnhancedSupport`
+logic, moved here from `sandbox/create.go`:
+
+- Docker: query `docker info --format '{{range $k,$v := .Runtimes}}{{$k}}\n{{end}}'`; error if
+  `"runsc"` not present
+- Podman: check `containers.conf` for `runsc`; then check `podmanIsRootless()` and error if
+  rootless (cgroupv2 delegation fails for runsc with rootless Podman — verified on test VM)
+
+**`sandbox/create.go`** — `checkIsolationPrerequisites` becomes a thin delegator:
 
 ```go
-// After confirming runsc is in containers.conf, check if podman is rootless
-if podmanIsRootless() {
-    return fmt.Errorf(
-        "container-enhanced requires rootful Podman when using gVisor.\n" +
-        "Rootless Podman lacks cgroupv2 delegation for runsc.\n" +
-        "Run as root (sudo yoloai ...) or configure rootful Podman.",
-    )
+func checkIsolationPrerequisites(ctx context.Context, rt runtime.Runtime, isolation string) error {
+    v, ok := rt.(runtime.IsolationValidator)
+    if !ok {
+        return nil
+    }
+    return v.ValidateIsolation(ctx, isolation)
 }
 ```
 
@@ -779,9 +819,10 @@ Deferred until Phase 2 is stable. The test VM already has Firecracker, devmapper
 select `devmapper` snapshotter and the fc config path). No additional backend changes needed.
 
 Changes for Phase 3:
-- Update `checkIsolationPrerequisites()` to check for devmapper snapshotter availability when
-  `isolation == "vm-enhanced"`: query containerd snapshotters and error if devmapper is not
-  in the `ok` state.
+- Fill in the devmapper stub in `ValidateIsolation()` in `runtime/containerd/containerd.go`:
+  when `isolation == "vm-enhanced"`, query containerd snapshotters via
+  `r.client.SnapshotService("devmapper").Stat()` (or equivalent) and error if devmapper is
+  absent or not in the `ok` state.
 - Test on the test VM with Firecracker.
 
 ---
@@ -803,9 +844,8 @@ Changes for Phase 3:
 | `internal/cli/helpers.go` | Overhaul `resolveBackend()`, add `detectContainerBackend()`, `dockerAvailable()`, `podmanAvailable()`, containerd stub in `newRuntime()` |
 | `runtime/runtime.go` | Add `IsolationValidator` interface |
 | `runtime/docker/docker.go` | Implement `ValidateIsolation()` (gVisor/docker info check) |
-| `runtime/podman/podman.go` | Implement `ValidateIsolation()` (PATH check + rootless detection), add WSL2 socket paths, add `SocketPath()` export |
+| `runtime/podman/podman.go` | Implement `ValidateIsolation()` (PATH check + rootless detection), add WSL2 socket paths to `discoverSocket()`, add `SocketPath()` export |
 | `internal/cli/info.go` | Add containerd to `knownBackends` |
-| `runtime/podman/podman.go` | Add WSL2 socket paths to `discoverSocket()`, add `SocketPath() (string, error)` export |
 | `docs/BREAKING-CHANGES.md` | Document all breaking changes |
 
 ### Phase 2
@@ -813,18 +853,17 @@ Changes for Phase 3:
 | File | Change |
 |------|--------|
 | `go.mod` / `go.sum` | Add `github.com/containerd/containerd/v2`, `github.com/containerd/containerd/api`, `github.com/containerd/go-cni`, `github.com/vishvananda/netns`, `github.com/creack/pty` |
-| `runtime/containerd/containerd.go` | **New.** Struct, `New()`, `Name()`, `Close()`, `withNamespace()` helper |
+| `runtime/containerd/containerd.go` | **New.** Struct, `New()`, `Name()`, `Close()`, `withNamespace()` helper, `ValidateIsolation()` (shim binary, CNI, /dev/kvm) |
 | `runtime/containerd/cni.go` | **New.** netns creation (vishvananda/netns), CNI setup/teardown, state persistence |
 | `runtime/containerd/lifecycle.go` | **New.** `Create()` (with snapshotter selection), `Start()` (with stopped-task cleanup), `Stop()` (with status check), `Remove()`, `Inspect()` |
-| `runtime/containerd/exec.go` | **New.** `Exec()`, `InteractiveExec()` with FIFO+PTY |
+| `runtime/containerd/exec.go` | **New.** `Exec()`, `InteractiveExec()` with FIFO+raw-mode terminal |
 | `runtime/containerd/image.go` | **New.** `EnsureImage()`, `ImageExists()` |
 | `runtime/containerd/prune.go` | **New.** `Prune()` |
 | `runtime/containerd/logs.go` | **New.** `Logs()`, `DiagHint()` |
 | `runtime/containerd/containerd_test.go` | **New.** Unit tests |
 | `runtime/containerd/cni_test.go` | **New.** CNI state unit tests |
 | `runtime/containerd/integration_test.go` | **New.** Integration tests (build tag: integration) |
-| `runtime/containerd/containerd.go` | Add `ValidateIsolation()` (shim binary, CNI, /dev/kvm) |
-| `sandbox/create.go` | `checkIsolationPrerequisites()` via `IsolationValidator` interface, `isWSL2()` |
+| `sandbox/create.go` | `checkIsolationPrerequisites()` becomes thin delegator to `IsolationValidator` |
 | `internal/cli/helpers.go` | Replace containerd stub with real `containerdrt.New()` |
 | `docs/dev/ARCHITECTURE.md` | Add `runtime/containerd/` to package map and file index |
 
