@@ -508,19 +508,21 @@ func setTerminalTitle(title string) {
 // attachToSandbox attaches to the tmux session in a running container.
 // It sets the terminal title to the sandbox name and restores it on detach.
 //
-// Under gVisor on ARM64, docker exec -it does not call TIOCSCTTY on the
-// allocated PTY slave. The exec'd process ends up with a controlling
-// terminal that gVisor denies via /dev/tty (EACCES), and tmux only falls
-// back to stdin when errno is ENXIO — not EACCES.
+// PTY/terminal behaviour varies by backend and architecture:
 //
-// Fix: prefix with setsid(1) for gVisor, which creates a new session with no
-// controlling terminal. /dev/tty then returns ENXIO (no controlling
-// terminal), tmux's ENXIO fallback activates, and it uses stdin — which IS
-// the PTY from `docker exec -it`.
+//   - Standard Docker (all arch): docker exec -it calls TIOCSCTTY, so the
+//     exec'd process gets a controlling terminal. The script wrapper creates a
+//     fresh PTY + controlling terminal, which tmux uses cleanly.
 //
-// On standard Docker, setsid breaks attach because it removes the controlling
-// terminal that tmux needs. Use the script wrapper instead, which creates a
-// fresh PTY + controlling terminal via setsid + TIOCSCTTY.
+//   - gVisor on ARM64: docker exec -it does NOT call TIOCSCTTY. The exec'd
+//     process has no controlling terminal, so /dev/tty returns EACCES (gVisor
+//     denies it). tmux falls back to stdin only when errno is ENXIO, not
+//     EACCES. Fix: setsid creates a new session with no CTY, /dev/tty returns
+//     ENXIO, tmux's ENXIO fallback activates and uses stdin (the PTY).
+//
+//   - gVisor on amd64/other: docker exec -it DOES call TIOCSCTTY (same as
+//     standard Docker). setsid would strip the CTY and tmux exits immediately.
+//     The script wrapper works correctly, same as standard Docker.
 func attachToSandbox(ctx context.Context, rt runtime.Runtime, containerName, sandboxName string, user string) error {
 	setTerminalTitle(sandboxName)
 	defer setTerminalTitle("")
@@ -535,15 +537,15 @@ func attachToSandbox(ctx context.Context, rt runtime.Runtime, containerName, san
 	var cmd []string
 	sock := readTmuxSocket(sandboxName)
 
-	// For gVisor: use setsid to get ENXIO from /dev/tty so tmux uses stdin
-	if meta.Security == "gvisor" {
+	// gVisor on ARM64 requires setsid to work around missing TIOCSCTTY.
+	// All other cases (including gVisor on amd64) use the script wrapper.
+	if meta.Security == "gvisor" && goruntime.GOARCH == "arm64" {
 		cmd = []string{"setsid", "tmux"}
 		if sock != "" {
 			cmd = append(cmd, "-S", sock)
 		}
 		cmd = append(cmd, "attach", "-t", "main")
 	} else {
-		// For standard Docker: use script wrapper to create a fresh PTY
 		var tmuxArgs string
 		if sock != "" {
 			tmuxArgs = fmt.Sprintf("exec tmux -S %s attach -t main", sock)
