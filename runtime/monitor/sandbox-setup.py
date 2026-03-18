@@ -437,6 +437,14 @@ def setup_tart(cfg, shared_dir):
     """Tart-specific setup: VirtioFS mount symlinks via sudo."""
     log_info("sandbox.backend_setup", "Tart backend setup", backend="tart")
 
+    # tart exec runs as a non-login shell, so ~/.zprofile is never sourced.
+    # Prepend Homebrew bin so claude, node, npm etc. are on PATH for the
+    # tmux session and the agent that runs inside it.
+    homebrew_bin = "/opt/homebrew/bin"
+    path = os.environ.get("PATH", "")
+    if homebrew_bin not in path.split(os.pathsep):
+        os.environ["PATH"] = homebrew_bin + os.pathsep + path
+
     mount_map = cfg.get("mount_map", {})
     if not mount_map:
         return
