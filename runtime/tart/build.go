@@ -27,7 +27,15 @@ const (
 
 // provisionCommands are the shell commands to install dev tools in the base VM.
 // Each entry is run via tart exec as the admin user. They install:
-// - Xcode Command Line Tools, Homebrew, Node.js, tmux, git, jq, ripgrep
+// - Xcode Command Line Tools, Homebrew, Node.js, tmux, git, jq, ripgrep, Claude Code
+//
+// Robustness notes:
+//   - node@24 (and other versioned formulae) may be pre-installed in the base
+//     image but broken (e.g. missing libsimdjson). We remove them so they don't
+//     shadow our node installation or crash when npm is invoked.
+//   - We use "$(brew --prefix node)/bin/npm" instead of bare "npm" to avoid
+//     picking up a shadowing binary from PATH (e.g. a broken node@24 keg that
+//     was force-linked or explicitly added to PATH in ~/.zprofile).
 var provisionCommands = []string{
 	// Accept Xcode license and install CLI tools (may already be present in base image)
 	"sudo xcode-select --install 2>/dev/null || true",
@@ -35,11 +43,16 @@ var provisionCommands = []string{
 	// Install Homebrew if not present
 	`which brew >/dev/null 2>&1 || /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"`,
 
-	// Ensure Homebrew is on PATH for subsequent commands
+	// Remove versioned node formulae that may be broken or shadow our install.
+	// Failures are silenced — these formulae may not be present.
+	`eval "$(/opt/homebrew/bin/brew shellenv)" && brew uninstall --ignore-dependencies node@24 node@22 node@20 2>/dev/null; true`,
+
+	// Install our preferred node and other tools.
 	`eval "$(/opt/homebrew/bin/brew shellenv)" && brew install node tmux jq ripgrep`,
 
-	// Install Claude Code via npm
-	`eval "$(/opt/homebrew/bin/brew shellenv)" && npm install -g @anthropic-ai/claude-code`,
+	// Install Claude Code using the exact npm from the node we just installed,
+	// bypassing any stale PATH entries that might point to broken node versions.
+	`eval "$(/opt/homebrew/bin/brew shellenv)" && "$(brew --prefix node)/bin/npm" install -g @anthropic-ai/claude-code`,
 
 	// Add Homebrew to shell profile for future logins
 	`grep -q 'brew shellenv' ~/.zprofile 2>/dev/null || echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> ~/.zprofile`,
