@@ -449,11 +449,9 @@ func New(ctx context.Context) (*Runtime, error) {
     if err != nil {
         return nil, fmt.Errorf("connect to containerd: %w", err)
     }
-    // verify kata shim is available
-    if _, err := exec.LookPath("containerd-shim-kata-v2"); err != nil {
-        c.Close()
-        return nil, fmt.Errorf("kata shim not found: %w", err)
-    }
+    // Note: shim and CNI prerequisite checks are done in ValidateIsolation() at yoloai-new time,
+    // not here — New() is called after validation passes and should only fail if the daemon
+    // itself is unreachable.
     return &Runtime{client: c, namespace: "yoloai"}, nil
 }
 
@@ -514,7 +512,11 @@ func setupCNI(sandboxDir, containerName string) (netnsPath string, err error) {
     if err != nil {
         return "", err
     }
-    // initialize go-cni, run CNI ADD against the netns
+    // If CNI ADD fails, delete the netns to avoid leaking it.
+    if err = runCNIAdd(netnsPath, sandboxDir, containerName); err != nil {
+        deleteNetNS(nsName)
+        return "", fmt.Errorf("CNI setup: %w", err)
+    }
     // persist cni-state.json
     return netnsPath, nil
 }
@@ -536,7 +538,9 @@ func teardownCNI(sandboxDir string) error
 
 **`Create()`:**
 1. `setupCNI(sandboxDir, name)` → get `netnsPath`
-2. Pull image into `yoloai` namespace if not present
+2. Look up image: `r.client.GetImage(ctx, cfg.ImageRef)` — error if not found with message
+   "image not found; run 'yoloai setup' to build it". `Create()` does not pull; image
+   management is owned by `EnsureImage()`.
 3. Determine snapshotter based on runtime:
    ```go
    snapshotter := "overlayfs"  // for vm (Kata + QEMU)
@@ -656,8 +660,9 @@ not for opening a PTY.
    ```go
    ioAttach := cio.NewAttach(cio.WithTerminal, cio.WithStreams(os.Stdin, os.Stdout, nil))
    ```
-4. Create process spec with `Terminal: true`; send initial terminal size via `ResizePTY`
-5. `exitCh, _ := process.Wait(ctx)` then `process.Start(ctx)`
+4. Create process spec with `Terminal: true`
+5. `exitCh, _ := process.Wait(ctx)` then `process.Start(ctx)` then
+   `process.ResizePTY(ctx, initialCols, initialRows)` — send initial size after start, not before
 6. Forward SIGWINCH in a goroutine: `process.ResizePTY(ctx, cols, rows)`
 7. `<-exitCh` to wait for exit — raw mode is restored by the deferred call above
 
@@ -871,9 +876,9 @@ Changes for Phase 3:
 
 ## Commit Plan
 
-1. **Phase 1, Steps 1.1–1.6:** Internal rename — config structs, meta, create/lifecycle. No CLI changes yet. `make check` passes.
+1. **Phase 1, Steps 1.1–1.6:** Internal rename — config structs, meta, create/lifecycle (including `BackendCaps`, `checkIsolationPrerequisites` stub). No CLI changes yet. `make check` passes.
 2. **Phase 1, Steps 1.7–1.8:** CLI: `--isolation`, `--os`, `resolveBackend()` overhaul. Add containerd stub. `make check` passes.
-3. **Phase 1, Steps 1.9–1.12:** Podman WSL2 paths, knownBackends, `BREAKING-CHANGES.md`.
+3. **Phase 1, Steps 1.9–1.12:** `IsolationValidator` interface (`runtime/runtime.go`), Docker and Podman `ValidateIsolation()` implementations, WSL2 socket paths, `knownBackends`, `BREAKING-CHANGES.md`.
 4. **Phase 2, Step 2.1:** Add `go.mod` dependencies.
 5. **Phase 2, Steps 2.2–2.8:** `runtime/containerd/` package — all files except prerequisites.
 6. **Phase 2, Step 2.9:** Prerequisites check.
