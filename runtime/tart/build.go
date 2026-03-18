@@ -56,7 +56,20 @@ var provisionCommands = []string{
 	// Prepend the node 25 bin dir to PATH so env node reliably finds node 25.
 	`eval "$(/opt/homebrew/bin/brew shellenv)" && PATH="$(brew --prefix node)/bin:$PATH" npm install -g @anthropic-ai/claude-code`,
 
-	// Add Homebrew to shell profile for future logins
+	// Fix the login-shell PATH so node 25 comes before node@24.
+	// The Cirrus base image adds /opt/homebrew/opt/node@24/bin to ~/.zprofile;
+	// this persists in login shells (including the tmux pane) even after brew
+	// uninstall, causing node@24 (broken: simdjson ABI mismatch) to shadow
+	// node 25 when claude's "#!/usr/bin/env node" shebang resolves "node".
+	// Remove the node@24 PATH line and prepend node 25 explicitly.
+	`sed -i '' '/opt\/homebrew\/opt\/node@24/d' ~/.zprofile 2>/dev/null; echo 'export PATH="/opt/homebrew/opt/node/bin:$PATH"' >> ~/.zprofile`,
+
+	// Force-remove node@24 keg. brew uninstall --ignore-dependencies may leave
+	// the keg if brew thinks a formula depends on it. Without the keg, any
+	// stale PATH reference pointing at it is harmless.
+	`sudo rm -rf /opt/homebrew/Cellar/node@24 /opt/homebrew/opt/node@24 2>/dev/null; true`,
+
+	// Add Homebrew to shell profile for future logins (idempotent).
 	`grep -q 'brew shellenv' ~/.zprofile 2>/dev/null || echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> ~/.zprofile`,
 }
 
