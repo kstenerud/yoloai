@@ -50,9 +50,11 @@ var provisionCommands = []string{
 	// Install our preferred node and other tools.
 	`eval "$(/opt/homebrew/bin/brew shellenv)" && brew install node tmux jq ripgrep`,
 
-	// Install Claude Code using the exact npm from the node we just installed,
-	// bypassing any stale PATH entries that might point to broken node versions.
-	`eval "$(/opt/homebrew/bin/brew shellenv)" && "$(brew --prefix node)/bin/npm" install -g @anthropic-ai/claude-code`,
+	// Install Claude Code. npm's shebang is "#!/usr/bin/env node"; if node@24
+	// is still in PATH (even after uninstall, it may linger via launchd env),
+	// env node resolves to node@24 which crashes due to simdjson ABI mismatch.
+	// Prepend the node 25 bin dir to PATH so env node reliably finds node 25.
+	`eval "$(/opt/homebrew/bin/brew shellenv)" && PATH="$(brew --prefix node)/bin:$PATH" npm install -g @anthropic-ai/claude-code`,
 
 	// Add Homebrew to shell profile for future logins
 	`grep -q 'brew shellenv' ~/.zprofile 2>/dev/null || echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> ~/.zprofile`,
