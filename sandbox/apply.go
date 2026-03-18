@@ -148,6 +148,10 @@ func updateOverlayBaseline(name, hostPath, sha string) error {
 // GenerateOverlayPatch produces a binary patch for overlay-mode directories
 // by executing git commands inside the running container.
 func GenerateOverlayPatch(ctx context.Context, rt runtime.Runtime, name string, paths []string) ([]PatchSet, error) {
+	meta, err := LoadMeta(Dir(name))
+	if err != nil {
+		return nil, fmt.Errorf("load metadata: %w", err)
+	}
 	contexts, err := LoadAllDiffContexts(name)
 	if err != nil {
 		return nil, err
@@ -166,7 +170,7 @@ func GenerateOverlayPatch(ctx context.Context, rt runtime.Runtime, name string, 
 		if baselineSHA == "" {
 			stdout, err := execInContainer(ctx, rt, cname, []string{
 				"git", "-C", dc.WorkDir, "rev-parse", "HEAD",
-			})
+			}, ContainerUser(meta))
 			if err != nil {
 				return nil, fmt.Errorf("resolve baseline SHA for %s: %w", dc.HostPath, err)
 			}
@@ -179,7 +183,7 @@ func GenerateOverlayPatch(ctx context.Context, rt runtime.Runtime, name string, 
 		// Stage untracked files
 		_, err := execInContainer(ctx, rt, cname, []string{
 			"git", "-C", dc.WorkDir, "add", "-A",
-		})
+		}, ContainerUser(meta))
 		if err != nil {
 			return nil, fmt.Errorf("stage untracked in %s: %w", dc.HostPath, err)
 		}
@@ -190,7 +194,7 @@ func GenerateOverlayPatch(ctx context.Context, rt runtime.Runtime, name string, 
 			patchArgs = append(patchArgs, "--")
 			patchArgs = append(patchArgs, paths...)
 		}
-		stdout, err := execInContainer(ctx, rt, cname, patchArgs)
+		stdout, err := execInContainer(ctx, rt, cname, patchArgs, ContainerUser(meta))
 		if err != nil {
 			return nil, fmt.Errorf("git diff (patch) in %s: %w", dc.HostPath, err)
 		}
@@ -205,7 +209,7 @@ func GenerateOverlayPatch(ctx context.Context, rt runtime.Runtime, name string, 
 			statArgs = append(statArgs, "--")
 			statArgs = append(statArgs, paths...)
 		}
-		statOut, err := execInContainer(ctx, rt, cname, statArgs)
+		statOut, err := execInContainer(ctx, rt, cname, statArgs, ContainerUser(meta))
 		if err != nil {
 			return nil, fmt.Errorf("git diff (stat) in %s: %w", dc.HostPath, err)
 		}
@@ -225,6 +229,10 @@ func GenerateOverlayPatch(ctx context.Context, rt runtime.Runtime, name string, 
 // to the current HEAD inside the running container. Called after a successful
 // overlay apply to prevent re-applying already-applied changes.
 func UpdateOverlayBaselineToHEAD(ctx context.Context, rt runtime.Runtime, name, hostPath string) error {
+	meta, err := LoadMeta(Dir(name))
+	if err != nil {
+		return fmt.Errorf("load metadata: %w", err)
+	}
 	contexts, err := LoadAllDiffContexts(name)
 	if err != nil {
 		return err
@@ -237,7 +245,7 @@ func UpdateOverlayBaselineToHEAD(ctx context.Context, rt runtime.Runtime, name, 
 		}
 		stdout, err := execInContainer(ctx, rt, cname, []string{
 			"git", "-C", dc.WorkDir, "rev-parse", "HEAD",
-		})
+		}, ContainerUser(meta))
 		if err != nil {
 			return fmt.Errorf("get HEAD for %s: %w", hostPath, err)
 		}

@@ -298,6 +298,10 @@ func GenerateMultiDiff(opts DiffOptions) ([]*DiffResult, error) {
 // ListCommitsBeyondBaselineOverlay returns commits beyond the baseline for
 // overlay-mode directories by executing git log inside the running container.
 func ListCommitsBeyondBaselineOverlay(ctx context.Context, rt runtime.Runtime, name string) ([]CommitInfo, error) {
+	meta, err := LoadMeta(Dir(name))
+	if err != nil {
+		return nil, fmt.Errorf("load metadata: %w", err)
+	}
 	contexts, err := LoadAllDiffContexts(name)
 	if err != nil {
 		return nil, err
@@ -315,7 +319,7 @@ func ListCommitsBeyondBaselineOverlay(ctx context.Context, rt runtime.Runtime, n
 		if baselineSHA == "" {
 			stdout, execErr := execInContainer(ctx, rt, cname, []string{
 				"git", "-C", dc.WorkDir, "rev-parse", "HEAD",
-			})
+			}, ContainerUser(meta))
 			if execErr != nil {
 				return nil, fmt.Errorf("resolve baseline SHA for %s: %w", dc.HostPath, execErr)
 			}
@@ -327,7 +331,7 @@ func ListCommitsBeyondBaselineOverlay(ctx context.Context, rt runtime.Runtime, n
 
 		stdout, err := execInContainer(ctx, rt, cname, []string{
 			"git", "-C", dc.WorkDir, "log", "--reverse", "--format=%H %s", baselineSHA + "..HEAD",
-		})
+		}, ContainerUser(meta))
 		if err != nil {
 			return nil, fmt.Errorf("git log in %s: %w", dc.HostPath, err)
 		}
@@ -357,6 +361,10 @@ func GenerateOverlayDiff(ctx context.Context, rt runtime.Runtime, opts DiffOptio
 }
 
 func generateOverlayDiff(ctx context.Context, rt runtime.Runtime, name string, stat, nameOnly bool) ([]*DiffResult, error) {
+	meta, err := LoadMeta(Dir(name))
+	if err != nil {
+		return nil, fmt.Errorf("load metadata: %w", err)
+	}
 	contexts, err := LoadAllDiffContexts(name)
 	if err != nil {
 		return nil, err
@@ -376,7 +384,7 @@ func generateOverlayDiff(ctx context.Context, rt runtime.Runtime, name string, s
 		if baselineSHA == "" {
 			stdout, execErr := execInContainer(ctx, rt, cname, []string{
 				"git", "-C", dc.WorkDir, "rev-parse", "HEAD",
-			})
+			}, ContainerUser(meta))
 			if execErr != nil {
 				return nil, fmt.Errorf("resolve baseline SHA for %s: %w", dc.HostPath, execErr)
 			}
@@ -390,7 +398,7 @@ func generateOverlayDiff(ctx context.Context, rt runtime.Runtime, name string, s
 		// Stage untracked files
 		_, err := execInContainer(ctx, rt, cname, []string{
 			"git", "-C", dc.WorkDir, "add", "-A",
-		})
+		}, ContainerUser(meta))
 		if err != nil {
 			return nil, fmt.Errorf("stage untracked in %s: %w", dc.HostPath, err)
 		}
@@ -407,7 +415,7 @@ func generateOverlayDiff(ctx context.Context, rt runtime.Runtime, name string, s
 		}
 		args = append(args, baselineSHA)
 
-		stdout, err := execInContainer(ctx, rt, cname, args)
+		stdout, err := execInContainer(ctx, rt, cname, args, ContainerUser(meta))
 		if err != nil {
 			return nil, fmt.Errorf("git diff in %s: %w", dc.HostPath, err)
 		}

@@ -386,15 +386,13 @@ PowerShell:
 	}
 }
 
-// tmuxExecUser returns the user to use for tmux exec operations based on the
-// sandbox's userns mode. With Podman --userns=keep-id the tmux session is owned
-// by the host user (container default), not yoloai. All other backends create
-// the tmux session as the yoloai user.
+// tmuxExecUser returns the user to use for tmux exec operations.
+// Delegates to sandbox.ContainerUser which handles all cases:
+//   - Podman --userns=keep-id: empty (use container default)
+//   - gVisor: numeric host UID (gVisor resolves usernames from OCI manifest, not /etc/passwd)
+//   - default: "yoloai"
 func tmuxExecUser(meta *sandbox.Meta) string {
-	if meta != nil && meta.UsernsMode == "keep-id" {
-		return ""
-	}
-	return "yoloai"
+	return sandbox.ContainerUser(meta)
 }
 
 // readTmuxSocket returns the tmux socket path configured for a sandbox, or

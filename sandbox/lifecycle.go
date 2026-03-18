@@ -583,7 +583,7 @@ func (m *Manager) recreateContainer(ctx context.Context, name string, meta *Meta
 }
 
 // relaunchAgent relaunches the agent in the existing tmux session.
-func (m *Manager) relaunchAgent(ctx context.Context, name string, _ *Meta) error {
+func (m *Manager) relaunchAgent(ctx context.Context, name string, meta *Meta) error {
 	sandboxDir := Dir(name)
 
 	// Read runtime-config.json to get agent_command
@@ -599,7 +599,7 @@ func (m *Manager) relaunchAgent(ctx context.Context, name string, _ *Meta) error
 
 	_, err = execInContainer(ctx, m.runtime, InstanceName(name), []string{
 		"tmux", "respawn-pane", "-t", "main", "-k", cfg.AgentCommand,
-	})
+	}, ContainerUser(meta))
 	if err != nil {
 		return fmt.Errorf("relaunch agent: %w", err)
 	}
@@ -636,18 +636,18 @@ func (m *Manager) relaunchAgentWithResume(ctx context.Context, name string, meta
 	// Respawn with interactive command
 	_, err = execInContainer(ctx, m.runtime, InstanceName(name), []string{
 		"tmux", "respawn-pane", "-t", "main", "-k", interactiveCmd,
-	})
+	}, ContainerUser(meta))
 	if err != nil {
 		return fmt.Errorf("relaunch agent: %w", err)
 	}
 
 	// Deliver resume prompt after agent is ready
-	return m.sendResumePrompt(ctx, name, sandboxDir, cfg)
+	return m.sendResumePrompt(ctx, name, sandboxDir, cfg, meta)
 }
 
 // sendResumePrompt waits for the agent to be ready and delivers the resume
 // prompt (preamble + original prompt) via tmux load-buffer/paste-buffer.
-func (m *Manager) sendResumePrompt(ctx context.Context, name, sandboxDir string, cfg containerConfig) error {
+func (m *Manager) sendResumePrompt(ctx context.Context, name, sandboxDir string, cfg containerConfig, meta *Meta) error {
 	promptData, err := os.ReadFile(filepath.Join(sandboxDir, "prompt.txt")) //nolint:gosec // path is sandbox-controlled
 	if err != nil {
 		return fmt.Errorf("read prompt.txt: %w", err)
@@ -696,7 +696,7 @@ rm -f /tmp/yoloai-resume.txt
 
 	_, err = execInContainer(ctx, m.runtime, InstanceName(name), []string{
 		"bash", "-c", "nohup bash -c '" + strings.ReplaceAll(script, "'", "'\"'\"'") + "' _ \"$1\" >/dev/null 2>&1 &", "_", resumeText,
-	})
+	}, ContainerUser(meta))
 	return err
 }
 
@@ -725,17 +725,17 @@ func (m *Manager) relaunchAgentWithCustomPrompt(ctx context.Context, name string
 
 	_, err = execInContainer(ctx, m.runtime, InstanceName(name), []string{
 		"tmux", "respawn-pane", "-t", "main", "-k", interactiveCmd,
-	})
+	}, ContainerUser(meta))
 	if err != nil {
 		return fmt.Errorf("relaunch agent: %w", err)
 	}
 
-	return m.sendCustomPrompt(ctx, name, sandboxDir, cfg, promptText)
+	return m.sendCustomPrompt(ctx, name, sandboxDir, cfg, promptText, meta)
 }
 
 // sendCustomPrompt waits for the agent to be ready and delivers the custom
 // prompt directly (without resume preamble) via tmux load-buffer/paste-buffer.
-func (m *Manager) sendCustomPrompt(ctx context.Context, name, sandboxDir string, cfg containerConfig, promptText string) error {
+func (m *Manager) sendCustomPrompt(ctx context.Context, name, sandboxDir string, cfg containerConfig, promptText string, meta *Meta) error {
 	var waitCmd string
 	switch {
 	case cfg.ReadyPattern != "":
@@ -772,7 +772,7 @@ rm -f /tmp/yoloai-custom-prompt.txt
 
 	_, err := execInContainer(ctx, m.runtime, InstanceName(name), []string{
 		"bash", "-c", "nohup bash -c '" + strings.ReplaceAll(script, "'", "'\"'\"'") + "' _ \"$1\" >/dev/null 2>&1 &", "_", promptText,
-	})
+	}, ContainerUser(meta))
 	return err
 }
 
@@ -910,7 +910,7 @@ func (m *Manager) resetInPlace(ctx context.Context, opts ResetOptions, meta *Met
 	}
 
 	// Notify agent via tmux
-	return m.sendResetNotification(ctx, opts.Name, sandboxDir, opts.NoPrompt, meta.HasPrompt)
+	return m.sendResetNotification(ctx, opts.Name, sandboxDir, opts.NoPrompt, meta.HasPrompt, meta)
 }
 
 // clearCacheAndFiles clears the cache and files directories unless --keep-X flags are set.
@@ -963,7 +963,7 @@ const resetNotification = "[yoloai] Workspace has been reset to match the curren
 
 // sendResetNotification delivers a notification (and optionally the prompt)
 // to the running agent via tmux load-buffer + paste-buffer + send-keys.
-func (m *Manager) sendResetNotification(ctx context.Context, name, sandboxDir string, noPrompt, hasPrompt bool) error {
+func (m *Manager) sendResetNotification(ctx context.Context, name, sandboxDir string, noPrompt, hasPrompt bool, meta *Meta) error {
 	// Read runtime-config.json for submit_sequence
 	configData, err := os.ReadFile(filepath.Join(sandboxDir, RuntimeConfigFile)) //nolint:gosec // path is sandbox-controlled
 	if err != nil {
@@ -995,7 +995,7 @@ rm -f /tmp/yoloai-reset.txt`, appendPrompt, cfg.SubmitSequence)
 
 	_, err = execInContainer(ctx, m.runtime, InstanceName(name), []string{
 		"bash", "-c", script, "_", resetNotification,
-	})
+	}, ContainerUser(meta))
 	return err
 }
 

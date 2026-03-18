@@ -143,9 +143,27 @@ func hasUnappliedWork(workDir, baselineSHA string) bool {
 	return strings.TrimSpace(string(output)) != "0"
 }
 
+// ContainerUser returns the appropriate user string for docker exec operations
+// in the given sandbox. Under gVisor, docker exec resolves usernames from the
+// OCI image manifest (the placeholder UID used at build time), not the
+// container's live /etc/passwd (updated by the entrypoint's uid-remap step).
+// Use the numeric host UID instead to match the remapped container user.
+func ContainerUser(meta *Meta) string {
+	if meta == nil {
+		return "yoloai"
+	}
+	if meta.UsernsMode == "keep-id" {
+		return ""
+	}
+	if meta.Security == "gvisor" {
+		return fmt.Sprintf("%d", os.Getuid())
+	}
+	return "yoloai"
+}
+
 // execInContainer runs a command inside a sandbox instance and returns stdout.
-func execInContainer(ctx context.Context, rt runtime.Runtime, containerID string, cmd []string) (string, error) {
-	result, err := rt.Exec(ctx, containerID, cmd, "yoloai")
+func execInContainer(ctx context.Context, rt runtime.Runtime, containerID string, cmd []string, user string) (string, error) {
+	result, err := rt.Exec(ctx, containerID, cmd, user)
 	if err != nil {
 		return "", err
 	}
