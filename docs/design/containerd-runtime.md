@@ -145,11 +145,17 @@ No backwards compatibility requirement. `--security` is replaced by `--isolation
 `resolveBackend()` in `cli/helpers.go` currently reads `--backend` or config default. Extend it
 with auto-detection and capability checking:
 
+**General principle: explicit intent is never silently overridden.** If the user specifies
+`--backend`, `--isolation`, or `--os` explicitly, a failure to satisfy that request is always an
+error — never a fallback to something else. Fallback only happens when nothing was explicitly
+specified.
+
 ```
-resolveBackend(isolation, os, backendOverride):
+resolveBackend(isolation, os, backendOverride, backendOverrideIsExplicit):
   if os == "mac":
     switch isolation:
     case "vm":
+      requireTart()  // error if tart not installed; no fallback
       return tart
     case "container-enhanced", "vm-enhanced":
       error (unsupported on macOS)
@@ -160,19 +166,22 @@ resolveBackend(isolation, os, backendOverride):
   case "vm", "vm-enhanced":
     return containerd
 
-  // container / container-enhanced: auto-detect Docker vs Podman
-  if backendOverride != "":
-    backend = backendOverride  // --backend flag or config value
+  // container / container-enhanced: Docker or Podman
+  if backendOverrideIsExplicit:
+    // User said exactly what they want — validate it, never fall back
+    requireBackend(backendOverride)  // error if not reachable
+    if isolation == "container-enhanced":
+      checkEnhancedSupport(backendOverride)  // error if gVisor not configured
+    return backendOverride
   else:
-    backend = detectContainerBackend()  // see below
-
-  if isolation == "container-enhanced":
-    checkEnhancedSupport(backend)  // error early if gVisor not configured
-
-  return backend
+    backend = detectContainerBackend()  // auto-detect; see below
+    if isolation == "container-enhanced":
+      checkEnhancedSupport(backend)  // error if gVisor not configured
+    return backend
 ```
 
-**`detectContainerBackend()`:** Try Docker first; fall back to Podman if Docker is unavailable:
+**`detectContainerBackend()`:** Try Docker first; fall back to Podman if Docker is unavailable.
+Only runs when no explicit `--backend` was given:
 
 ```
 detectContainerBackend():
@@ -187,7 +196,8 @@ Docker is tried first because it is more common and has broader compatibility (e
 registration). Podman is the fallback for rootless/daemonless environments.
 
 **`checkEnhancedSupport(backend)`:** Before creating a `container-enhanced` sandbox, verify the
-chosen backend has gVisor configured — don't wait for a cryptic runtime error deep in the stack:
+chosen backend has gVisor configured — don't wait for a cryptic runtime error deep in the stack.
+Always an error; never falls back to `container`:
 
 ```
 checkEnhancedSupport(backend):
