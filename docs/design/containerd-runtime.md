@@ -92,6 +92,11 @@ Add `--os` flag (values: `linux`, `mac`):
 | `linux` | Linux container (explicit) | docker or containerd |
 | `mac`   | macOS sandbox or VM | seatbelt or tart |
 
+**Windows:** yoloAI runs inside WSL2 — there is no native Windows binary. Running inside WSL2
+means yoloAI sees a Linux environment, so the `--os` flag has no `windows` value and no Windows
+container (WCOW) support is planned. Docker Desktop, Podman Desktop, and Rancher Desktop all
+expose their container runtimes inside WSL2 and work transparently.
+
 `--os mac` selects the macOS-native backend; which one depends on `--isolation`:
 
 | `--os mac` + `--isolation` | Backend | What the user gets |
@@ -107,12 +112,12 @@ full VM-level isolation or need a clean macOS environment.
 
 **Isolation symmetry across platforms:**
 
-| `--isolation`        | Linux backend            | macOS backend (`--os mac`) |
-|----------------------|--------------------------|---------------------------|
-| `container`          | docker (runc)            | seatbelt (sandbox-exec)   |
-| `container-enhanced` | docker (gVisor)          | *(unsupported)*           |
-| `vm`                 | containerd (Kata + QEMU) | tart (macOS VM)           |
-| `vm-enhanced`        | containerd (Kata + FC)   | *(unsupported)*           |
+| `--isolation`        | Linux backend            | macOS backend (`--os mac`) | Windows (WSL2)                    |
+|----------------------|--------------------------|----------------------------|-----------------------------------|
+| `container`          | docker (runc)            | seatbelt (sandbox-exec)    | docker or podman (same as Linux)  |
+| `container-enhanced` | docker (gVisor)          | *(unsupported)*            | docker (gVisor) — if gVisor installed in WSL2 |
+| `vm`                 | containerd (Kata + QEMU) | tart (macOS VM)            | *(requires nested KVM — see below)* |
+| `vm-enhanced`        | containerd (Kata + FC)   | *(unsupported)*            | *(requires nested KVM — see below)* |
 
 **What happens to `--backend`?** It stays as a visible but secondary flag — present in `--help`
 output but not in the quickstart docs. Its job is now narrower: override auto-selection within the
@@ -223,6 +228,15 @@ warning, not an error. Only CLI `--backend` signals explicit intent and fails ha
 requested backend is unavailable. Docker is the default first choice because it is more common and
 has broader compatibility (e.g., gVisor registration). Podman is the fallback for
 rootless/daemonless environments.
+
+**`podmanSocketReachable()`** checks the following paths in order (first reachable wins):
+- `/run/podman/podman.sock` — standard Linux rootful Podman
+- `/run/user/<uid>/podman/podman.sock` — standard Linux rootless Podman
+- `/mnt/wsl/podman-sockets/podman-machine-default/podman-root.sock` — Podman Desktop on Windows (WSL2 machine, rootful)
+- `/mnt/wsl/podman-sockets/podman-machine-default/podman-user.sock` — Podman Desktop on Windows (WSL2 machine, rootless)
+
+The WSL2 paths are used by Podman Desktop for Windows when the WSL2 machine provider is active.
+Without probing these paths, Podman Desktop users on Windows would never be auto-detected.
 
 **`checkEnhancedSupport(backend)`:** Before creating a `container-enhanced` sandbox, verify the
 chosen backend has gVisor configured — don't wait for a cryptic runtime error deep in the stack.
@@ -508,12 +522,19 @@ so the apt-installed containerd must be used. Implement after Phase 3 is stable.
    shimv2 path for gVisor exists and is maintained by Google, but migrating provides no
    user-visible benefit and adds implementation risk. Revisit only if a concrete problem forces it.
 
-5. ~~**Windows/WSL**~~ — **Resolved:** The real blocker on WSL2 is not CNI but KVM. Kata requires
-   hardware virtualization; WSL2 runs inside Hyper-V, so nested virtualization must be explicitly
-   enabled on the Windows host. If `/dev/kvm` is present, CNI works normally (same Linux kernel,
-   same paths). Handle automatically: at prerequisite check time, detect WSL2 (via
-   `/proc/version` or `WSL_DISTRO_NAME`) and check for `/dev/kvm`; if absent, error early with
-   a clear message rather than letting Kata fail cryptically deep in the stack:
+5. ~~**Windows/WSL**~~ — **Resolved:** yoloAI runs inside WSL2 on Windows — there is no native
+   Windows binary. From inside WSL2, yoloAI sees a Linux environment; Docker Desktop, Podman
+   Desktop, and Rancher Desktop all expose their runtimes via Unix sockets inside WSL2 and work
+   transparently for `container` and `container-enhanced` isolation.
+
+   For `vm` and `vm-enhanced`, the real blocker is KVM, not CNI. Kata requires hardware
+   virtualization; WSL2 runs inside Hyper-V, so nested virtualization must be explicitly enabled
+   on the Windows host — it is not on by default and requires a custom WSL2 kernel on some
+   configurations. This makes `vm`/`vm-enhanced` effectively unsupported for most Windows users.
+
+   Handle it explicitly: at prerequisite check time, detect WSL2 (via `/proc/version` or
+   `WSL_DISTRO_NAME`) and check for `/dev/kvm`; if absent, error early with a clear message
+   rather than letting Kata fail cryptically deep in the stack:
 
    ```
    VM isolation mode on WSL2 requires nested virtualization.
@@ -522,8 +543,14 @@ so the apt-installed containerd must be used. Implement after Phase 3 is stable.
      2. Restart WSL: wsl --shutdown
    ```
 
-   `--isolation container` and `container-enhanced` are unaffected — those use the Docker backend,
-   which Docker Desktop manages transparently on Windows.
+   If `/dev/kvm` is present after enabling nested virtualization, CNI works normally (same Linux
+   kernel, same paths as native Linux).
+
+   **Rancher Desktop** is a Docker Desktop alternative that uses containerd internally (socket at
+   `/run/k3s/containerd/containerd.sock`). For `container`/`container-enhanced`, users enable
+   its Docker-compatible socket and yoloAI works as with Docker Desktop. For `vm`/`vm-enhanced`,
+   Rancher Desktop's containerd is k3s-internal and does not have Kata configured — a standalone
+   containerd with Kata is still required.
 
 6. ~~**InteractiveExec dependency on nerdctl**~~ — **Resolved:** Implement native PTY from the
    start; skip the nerdctl shim entirely. The shim would introduce edge cases around TTY handling,
