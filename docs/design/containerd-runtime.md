@@ -124,8 +124,8 @@ No backwards compatibility requirement. `--security` is replaced by `--isolation
 | `--security gvisor` | `--isolation enhanced` |
 | `--security kata` | `--isolation vm` |
 | `--security kata-firecracker` | `--isolation vm-fc` |
-| `--backend tart` | `--os mac` |
-| `--backend seatbelt` | *(seatbelt is a lightweight Mac sandbox; revisit if --os mac + lightweight flag is needed)* |
+| `--backend tart` | `--os mac --isolation vm` |
+| `--backend seatbelt` | `--os mac` (seatbelt is now the default for `--os mac --isolation standard`) |
 
 ### Backend Auto-Selection
 
@@ -134,7 +134,13 @@ No backwards compatibility requirement. `--security` is replaced by `--isolation
 ```
 resolveBackend(isolation, os):
   if os == "mac":
-    return tart
+    switch isolation:
+    case "vm":
+      return tart
+    case "enhanced", "vm-fc":
+      error (unsupported on macOS)
+    default:
+      return seatbelt
   switch isolation:
   case "vm", "vm-fc":
     return containerd
@@ -216,11 +222,15 @@ without being constrained by Docker's or nerdctl's protocol choices.
 ```
 runtime.Runtime (interface)
 ├── runtime/docker/        ← Docker SDK — standard, enhanced (gVisor)
-├── runtime/podman/        ← Podman compat socket — rootless
+├── runtime/podman/        ← Podman compat socket — rootless (--backend podman, not exposed via --isolation)
 ├── runtime/containerd/    ← NEW: containerd API — vm (kata), vm-fc (kata-firecracker)
-├── runtime/tart/          ← Tart VM — macOS
-└── runtime/seatbelt/      ← sandbox-exec — macOS lightweight
+├── runtime/tart/          ← Tart VM — macOS (--os mac --isolation vm)
+└── runtime/seatbelt/      ← sandbox-exec — macOS lightweight (--os mac --isolation standard)
 ```
+
+Podman is reachable via `--backend podman` in config only — it is not mapped to an `--isolation`
+value and is not part of the auto-selection logic. It serves rootless Linux environments where
+Docker is unavailable. Its status in the `--isolation` model is out of scope for this design.
 
 The containerd backend is not a replacement for Docker — it is a parallel backend for isolation
 modes that require it. The Docker backend continues to serve `standard` and `enhanced`.
@@ -273,6 +283,14 @@ configuration that creates a bridge network for yoloAI containers:
 The containerd backend calls CNI plugins directly (as nerdctl does) before creating the container
 task, then passes the resulting netns path to the OCI spec.
 
+**CNI teardown:** On container stop/remove, the backend must run CNI `DEL` to release the
+allocated IP back to the host-local IPAM pool, remove the veth pair, and delete the network
+namespace. Without this, the IP pool leaks and orphaned netns accumulate on the host. The CNI
+state (allocated IP, interface name, netns path) must be persisted per-container at creation time
+so teardown can reconstruct the correct `DEL` call even if the container process is gone. nerdctl
+stores this in a per-container CNI state file; the containerd backend should do the same (e.g.,
+`~/.yoloai/sandboxes/<name>/backend/cni-state.json`).
+
 **Network isolation mode** (`--network isolated`): The containerd backend applies iptables rules
 in the same way as the Docker backend — via the in-container entrypoint and ipset, which are
 runtime-agnostic.
@@ -295,15 +313,13 @@ containerd.WithRuntime("io.containerd.kata-fc.v2", &options.Options{
 
 ### Interactive Exec
 
-The Docker backend shells out to `docker exec -it`. The containerd backend would need to:
+The Docker backend shells out to `docker exec -it`. The containerd backend implements this natively:
 
 1. Call containerd's task `Exec()` API
-2. Set up a PTY (using `github.com/creack/pty` or similar)
-3. Pipe stdin/stdout/stderr
+2. Set up a PTY (`github.com/creack/pty`)
+3. Pipe stdin/stdout/stderr, forward terminal resize signals (SIGWINCH → containerd `ResizePTY`)
 
-This is the most complex piece — nerdctl's exec implementation is a reference. Alternatively,
-shell out to `nerdctl exec -it --namespace yoloai` if nerdctl is available, deferring this
-complexity to a later iteration.
+nerdctl's exec implementation is a useful reference. No nerdctl shim — see resolved OQ#6.
 
 ### Image Building
 
@@ -315,31 +331,35 @@ and shared.
 
 ## Implementation Plan
 
-### Phase 1: Rename `--security` → `--isolation`
+### Phase 1: Containerd Backend Spike (verify the approach)
 
-1. Rename the flag everywhere (CLI, config, meta.json, docs).
-2. Map new value names to backend/runtime selection.
-3. Add `--os` flag; route `mac` to Tart backend.
-4. Remove `--backend` from `yoloai new` help text (keep in config as escape hatch).
-5. Add early error for `:overlay` + incompatible isolation/os combination.
-
-No backwards compatibility handling needed.
-
-### Phase 2: Containerd Backend Spike (verify the approach)
+Before committing to implementation, verify the design works end-to-end:
 
 1. Write a minimal Go program that uses the containerd client to:
    - Pull `alpine`
    - Run it with `io.containerd.kata.v2` runtime + CNI networking
    - Exec `ip addr` and verify `eth0` exists with an IP
-2. If this works, proceed. If not, revisit the design.
+   - Stop the container and verify CNI teardown releases the IP cleanly
+2. If this works, proceed. If not, revisit the design before touching any user-facing flags.
+
+### Phase 2: Rename `--security` → `--isolation`
+
+1. Rename the flag everywhere (CLI, config, meta.json, docs).
+2. Map new value names to backend/runtime selection.
+3. Add `--os` flag; implement `resolveBackend()` logic.
+4. Remove `--backend` from `yoloai new` help text (keep in config as escape hatch).
+5. Add early error for `:overlay` + incompatible isolation/os combination.
+
+No backwards compatibility handling needed.
 
 ### Phase 3: Containerd Backend (MVP)
 
 Implement `runtime/containerd/` with:
 - `New()` — connect to containerd socket, verify kata shim exists
 - `Create()` — CNI setup + containerd container + task creation
-- `Start()` — task start
-- `Stop()` — task kill + cleanup
+- `Start()` — CNI setup + new task creation + task start (containerd tasks are terminal after exit;
+  restart requires creating a new task from the existing container, not resuming the old one)
+- `Stop()` — task kill + wait for exit + CNI teardown
 - `Remove()` — container delete
 - `Inspect()` — task status
 - `Exec()` — non-interactive exec
@@ -355,8 +375,10 @@ Update isolation validation to check for containerd prerequisites if vm is chose
 
 ### Phase 5: vm-fc (Kata + Firecracker)
 
-Kata-Firecracker requires the devmapper snapshotter (block device backing) in containerd. This is
-a separate setup step with a known issue on Ubuntu 24.04. Implement after Phase 3 is stable.
+Kata-Firecracker requires the devmapper snapshotter in containerd. This needs a pre-provisioned
+thin-pool block device (or loop device). On Ubuntu 24.04, the recommended approach is a loop-based
+thin pool via `dmsetup` — the snap-packaged containerd ships without devmapper support compiled in,
+so the apt-installed containerd must be used. Implement after Phase 3 is stable.
 
 ---
 
