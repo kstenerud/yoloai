@@ -62,7 +62,14 @@ func NewWithSocket(ctx context.Context, host string, binaryName string) (*Runtim
 	_, err = cli.Ping(ctx)
 	if err != nil {
 		_ = cli.Close()
-		return nil, fmt.Errorf("%s daemon is not responding, start Docker Desktop or run 'sudo systemctl start docker'", binaryName)
+		var hint string
+		switch binaryName {
+		case "podman":
+			hint = "start Podman Desktop or run 'systemctl --user start podman.socket'"
+		default:
+			hint = "start Docker Desktop or run 'sudo systemctl start docker'"
+		}
+		return nil, fmt.Errorf("%s daemon is not responding, %s", binaryName, hint)
 	}
 
 	return &Runtime{client: cli, binaryName: binaryName}, nil
