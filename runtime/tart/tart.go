@@ -117,6 +117,29 @@ func (r *Runtime) Create(ctx context.Context, cfg runtime.InstanceConfig) error 
 		return fmt.Errorf("write instance config: %w", err)
 	}
 
+	// Copy secrets from mount spec into the sandbox secrets dir.
+	// VirtioFS only supports directories, not individual files, so the
+	// /run/secrets/* file mounts created by launchContainer are inaccessible
+	// inside the VM. We copy them into the sandbox directory, which is shared
+	// via the yoloai VirtioFS share, so sandbox-setup.py can read them.
+	secretsDir := filepath.Join(sandboxPath, "secrets")
+	if err := os.MkdirAll(secretsDir, 0700); err != nil {
+		return fmt.Errorf("create secrets dir: %w", err)
+	}
+	for _, m := range cfg.Mounts {
+		if !strings.HasPrefix(m.Target, "/run/secrets/") {
+			continue
+		}
+		data, err := os.ReadFile(m.Source) //nolint:gosec // G304: source is from validated mount spec
+		if err != nil {
+			continue // skip missing secrets (may have been cleaned up)
+		}
+		keyName := filepath.Base(m.Target)
+		if err := os.WriteFile(filepath.Join(secretsDir, keyName), data, 0600); err != nil { //nolint:gosec // G703: secretsDir is an internal sandbox directory
+			return fmt.Errorf("copy secret %s: %w", keyName, err)
+		}
+	}
+
 	return nil
 }
 
@@ -229,6 +252,7 @@ func (r *Runtime) Remove(ctx context.Context, name string) error {
 	}
 
 	_ = os.Remove(filepath.Join(sandboxPath, backendDir, pidFileName))
+	_ = os.RemoveAll(filepath.Join(sandboxPath, "secrets"))
 
 	return nil
 }
