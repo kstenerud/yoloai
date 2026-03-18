@@ -157,7 +157,6 @@ func GenerateOverlayPatch(ctx context.Context, rt runtime.Runtime, name string, 
 		return nil, err
 	}
 
-	cname := InstanceName(name)
 	var patches []PatchSet
 
 	for _, dc := range contexts {
@@ -168,9 +167,9 @@ func GenerateOverlayPatch(ctx context.Context, rt runtime.Runtime, name string, 
 		// Resolve baseline SHA if deferred
 		baselineSHA := dc.BaselineSHA
 		if baselineSHA == "" {
-			stdout, err := execInContainer(ctx, rt, cname, []string{
+			stdout, err := execInContainer(ctx, rt, name, meta, []string{
 				"git", "-C", dc.WorkDir, "rev-parse", "HEAD",
-			}, ContainerUser(meta))
+			})
 			if err != nil {
 				return nil, fmt.Errorf("resolve baseline SHA for %s: %w", dc.HostPath, err)
 			}
@@ -181,9 +180,9 @@ func GenerateOverlayPatch(ctx context.Context, rt runtime.Runtime, name string, 
 		}
 
 		// Stage untracked files
-		_, err := execInContainer(ctx, rt, cname, []string{
+		_, err := execInContainer(ctx, rt, name, meta, []string{
 			"git", "-C", dc.WorkDir, "add", "-A",
-		}, ContainerUser(meta))
+		})
 		if err != nil {
 			return nil, fmt.Errorf("stage untracked in %s: %w", dc.HostPath, err)
 		}
@@ -194,7 +193,7 @@ func GenerateOverlayPatch(ctx context.Context, rt runtime.Runtime, name string, 
 			patchArgs = append(patchArgs, "--")
 			patchArgs = append(patchArgs, paths...)
 		}
-		stdout, err := execInContainer(ctx, rt, cname, patchArgs, ContainerUser(meta))
+		stdout, err := execInContainer(ctx, rt, name, meta, patchArgs)
 		if err != nil {
 			return nil, fmt.Errorf("git diff (patch) in %s: %w", dc.HostPath, err)
 		}
@@ -209,7 +208,7 @@ func GenerateOverlayPatch(ctx context.Context, rt runtime.Runtime, name string, 
 			statArgs = append(statArgs, "--")
 			statArgs = append(statArgs, paths...)
 		}
-		statOut, err := execInContainer(ctx, rt, cname, statArgs, ContainerUser(meta))
+		statOut, err := execInContainer(ctx, rt, name, meta, statArgs)
 		if err != nil {
 			return nil, fmt.Errorf("git diff (stat) in %s: %w", dc.HostPath, err)
 		}
@@ -238,14 +237,13 @@ func UpdateOverlayBaselineToHEAD(ctx context.Context, rt runtime.Runtime, name, 
 		return err
 	}
 
-	cname := InstanceName(name)
 	for _, dc := range contexts {
 		if dc.Mode != "overlay" || dc.HostPath != hostPath {
 			continue
 		}
-		stdout, err := execInContainer(ctx, rt, cname, []string{
+		stdout, err := execInContainer(ctx, rt, name, meta, []string{
 			"git", "-C", dc.WorkDir, "rev-parse", "HEAD",
-		}, ContainerUser(meta))
+		})
 		if err != nil {
 			return fmt.Errorf("get HEAD for %s: %w", hostPath, err)
 		}

@@ -246,17 +246,11 @@ func (m *Manager) Reset(ctx context.Context, opts ResetOptions) error {
 	slog.Debug("clearing logs", "event", "sandbox.reset.logs", "sandbox", opts.Name)
 	_ = os.RemoveAll(filepath.Join(sandboxDir, LogsDir))
 
-	// Use restrictive permissions by default, world-writable only for gVisor
-	logsDirPerm := os.FileMode(0750)
-	logFilePerm := os.FileMode(0600)
-	if meta.Security == "gvisor" {
-		logsDirPerm = 0777 //nolint:gosec // G301: world-writable needed for gVisor user-namespace UID remapping
-		logFilePerm = 0666 //nolint:gosec // G306: world-writable needed for gVisor user-namespace UID remapping
-	}
+	perms := Perms(meta.Security)
 
-	_ = mkdirAllPerm(filepath.Join(sandboxDir, LogsDir), logsDirPerm)
+	_ = mkdirAllPerm(filepath.Join(sandboxDir, LogsDir), perms.Dir)
 	for _, logFile := range []string{SandboxJSONLFile, MonitorJSONLFile, HooksJSONLFile} {
-		_ = writeFilePerm(filepath.Join(sandboxDir, logFile), nil, logFilePerm)
+		_ = writeFilePerm(filepath.Join(sandboxDir, logFile), nil, perms.File)
 	}
 
 	var newSHA string
@@ -361,16 +355,11 @@ func (m *Manager) Reset(ctx context.Context, opts ResetOptions) error {
 
 	// Optionally wipe agent-runtime state
 	if opts.ClearState {
-		agentStateDirPerm := os.FileMode(0750)
-		if meta.Security == "gvisor" {
-			agentStateDirPerm = 0777 //nolint:gosec // G301: world-writable needed for gVisor user-namespace UID remapping
-		}
-
 		agentStateDir := filepath.Join(sandboxDir, AgentRuntimeDir)
 		if err := os.RemoveAll(agentStateDir); err != nil {
 			return fmt.Errorf("remove %s: %w", AgentRuntimeDir, err)
 		}
-		if err := mkdirAllPerm(agentStateDir, agentStateDirPerm); err != nil {
+		if err := mkdirAllPerm(agentStateDir, perms.Dir); err != nil {
 			return fmt.Errorf("recreate %s: %w", AgentRuntimeDir, err)
 		}
 		// Reset agent_files flag so files get re-seeded on next start
@@ -597,9 +586,9 @@ func (m *Manager) relaunchAgent(ctx context.Context, name string, meta *Meta) er
 		return fmt.Errorf("parse runtime-config.json: %w", err)
 	}
 
-	_, err = execInContainer(ctx, m.runtime, InstanceName(name), []string{
+	_, err = execInContainer(ctx, m.runtime, name, meta, []string{
 		"tmux", "respawn-pane", "-t", "main", "-k", cfg.AgentCommand,
-	}, ContainerUser(meta))
+	})
 	if err != nil {
 		return fmt.Errorf("relaunch agent: %w", err)
 	}
@@ -634,9 +623,9 @@ func (m *Manager) relaunchAgentWithResume(ctx context.Context, name string, meta
 	interactiveCmd := buildAgentCommand(agentDef, meta.Model, "", agentArgs, cfg.Passthrough)
 
 	// Respawn with interactive command
-	_, err = execInContainer(ctx, m.runtime, InstanceName(name), []string{
+	_, err = execInContainer(ctx, m.runtime, name, meta, []string{
 		"tmux", "respawn-pane", "-t", "main", "-k", interactiveCmd,
-	}, ContainerUser(meta))
+	})
 	if err != nil {
 		return fmt.Errorf("relaunch agent: %w", err)
 	}
@@ -694,9 +683,9 @@ done
 rm -f /tmp/yoloai-resume.txt
 %s`, waitCmd, cfg.SubmitSequence, statusWrite)
 
-	_, err = execInContainer(ctx, m.runtime, InstanceName(name), []string{
+	_, err = execInContainer(ctx, m.runtime, name, meta, []string{
 		"bash", "-c", "nohup bash -c '" + strings.ReplaceAll(script, "'", "'\"'\"'") + "' _ \"$1\" >/dev/null 2>&1 &", "_", resumeText,
-	}, ContainerUser(meta))
+	})
 	return err
 }
 
@@ -723,9 +712,9 @@ func (m *Manager) relaunchAgentWithCustomPrompt(ctx context.Context, name string
 	agentArgs := resolveAgentArgs(meta.Agent, meta.Profile)
 	interactiveCmd := buildAgentCommand(agentDef, meta.Model, "", agentArgs, cfg.Passthrough)
 
-	_, err = execInContainer(ctx, m.runtime, InstanceName(name), []string{
+	_, err = execInContainer(ctx, m.runtime, name, meta, []string{
 		"tmux", "respawn-pane", "-t", "main", "-k", interactiveCmd,
-	}, ContainerUser(meta))
+	})
 	if err != nil {
 		return fmt.Errorf("relaunch agent: %w", err)
 	}
@@ -770,9 +759,9 @@ done
 rm -f /tmp/yoloai-custom-prompt.txt
 %s`, waitCmd, cfg.SubmitSequence, statusWrite)
 
-	_, err := execInContainer(ctx, m.runtime, InstanceName(name), []string{
+	_, err := execInContainer(ctx, m.runtime, name, meta, []string{
 		"bash", "-c", "nohup bash -c '" + strings.ReplaceAll(script, "'", "'\"'\"'") + "' _ \"$1\" >/dev/null 2>&1 &", "_", promptText,
-	}, ContainerUser(meta))
+	})
 	return err
 }
 
@@ -921,17 +910,14 @@ func (m *Manager) clearCacheAndFiles(opts ResetOptions) error {
 		return fmt.Errorf("load metadata: %w", err)
 	}
 
-	containerDirPerm := os.FileMode(0750)
-	if meta.Security == "gvisor" {
-		containerDirPerm = 0777 //nolint:gosec // G301: world-writable needed for gVisor user-namespace UID remapping
-	}
+	perms := Perms(meta.Security)
 
 	if !opts.KeepCache {
 		cacheDir := CacheDir(opts.Name)
 		if err := os.RemoveAll(cacheDir); err != nil {
 			return fmt.Errorf("remove cache: %w", err)
 		}
-		if err := mkdirAllPerm(cacheDir, containerDirPerm); err != nil {
+		if err := mkdirAllPerm(cacheDir, perms.Dir); err != nil {
 			return fmt.Errorf("recreate cache: %w", err)
 		}
 	}
@@ -940,7 +926,7 @@ func (m *Manager) clearCacheAndFiles(opts ResetOptions) error {
 		if err := os.RemoveAll(filesDir); err != nil {
 			return fmt.Errorf("remove files: %w", err)
 		}
-		if err := mkdirAllPerm(filesDir, containerDirPerm); err != nil {
+		if err := mkdirAllPerm(filesDir, perms.Dir); err != nil {
 			return fmt.Errorf("recreate files: %w", err)
 		}
 	}
@@ -993,9 +979,9 @@ for key in %s; do
 done
 rm -f /tmp/yoloai-reset.txt`, appendPrompt, cfg.SubmitSequence)
 
-	_, err = execInContainer(ctx, m.runtime, InstanceName(name), []string{
+	_, err = execInContainer(ctx, m.runtime, name, meta, []string{
 		"bash", "-c", script, "_", resetNotification,
-	}, ContainerUser(meta))
+	})
 	return err
 }
 

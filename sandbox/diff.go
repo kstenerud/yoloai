@@ -307,7 +307,6 @@ func ListCommitsBeyondBaselineOverlay(ctx context.Context, rt runtime.Runtime, n
 		return nil, err
 	}
 
-	cname := InstanceName(name)
 	var commits []CommitInfo
 
 	for _, dc := range contexts {
@@ -317,9 +316,9 @@ func ListCommitsBeyondBaselineOverlay(ctx context.Context, rt runtime.Runtime, n
 
 		baselineSHA := dc.BaselineSHA
 		if baselineSHA == "" {
-			stdout, execErr := execInContainer(ctx, rt, cname, []string{
+			stdout, execErr := execInContainer(ctx, rt, name, meta, []string{
 				"git", "-C", dc.WorkDir, "rev-parse", "HEAD",
-			}, ContainerUser(meta))
+			})
 			if execErr != nil {
 				return nil, fmt.Errorf("resolve baseline SHA for %s: %w", dc.HostPath, execErr)
 			}
@@ -329,9 +328,9 @@ func ListCommitsBeyondBaselineOverlay(ctx context.Context, rt runtime.Runtime, n
 			}
 		}
 
-		stdout, err := execInContainer(ctx, rt, cname, []string{
+		stdout, err := execInContainer(ctx, rt, name, meta, []string{
 			"git", "-C", dc.WorkDir, "log", "--reverse", "--format=%H %s", baselineSHA + "..HEAD",
-		}, ContainerUser(meta))
+		})
 		if err != nil {
 			return nil, fmt.Errorf("git log in %s: %w", dc.HostPath, err)
 		}
@@ -370,7 +369,6 @@ func generateOverlayDiff(ctx context.Context, rt runtime.Runtime, name string, s
 		return nil, err
 	}
 
-	cname := InstanceName(name)
 	var results []*DiffResult
 
 	for _, dc := range contexts {
@@ -382,9 +380,9 @@ func generateOverlayDiff(ctx context.Context, rt runtime.Runtime, name string, s
 		// Resolve baseline SHA if deferred
 		baselineSHA := dc.BaselineSHA
 		if baselineSHA == "" {
-			stdout, execErr := execInContainer(ctx, rt, cname, []string{
+			stdout, execErr := execInContainer(ctx, rt, name, meta, []string{
 				"git", "-C", dc.WorkDir, "rev-parse", "HEAD",
-			}, ContainerUser(meta))
+			})
 			if execErr != nil {
 				return nil, fmt.Errorf("resolve baseline SHA for %s: %w", dc.HostPath, execErr)
 			}
@@ -396,9 +394,9 @@ func generateOverlayDiff(ctx context.Context, rt runtime.Runtime, name string, s
 		}
 
 		// Stage untracked files
-		_, err := execInContainer(ctx, rt, cname, []string{
+		_, err := execInContainer(ctx, rt, name, meta, []string{
 			"git", "-C", dc.WorkDir, "add", "-A",
-		}, ContainerUser(meta))
+		})
 		if err != nil {
 			return nil, fmt.Errorf("stage untracked in %s: %w", dc.HostPath, err)
 		}
@@ -415,7 +413,7 @@ func generateOverlayDiff(ctx context.Context, rt runtime.Runtime, name string, s
 		}
 		args = append(args, baselineSHA)
 
-		stdout, err := execInContainer(ctx, rt, cname, args, ContainerUser(meta))
+		stdout, err := execInContainer(ctx, rt, name, meta, args)
 		if err != nil {
 			return nil, fmt.Errorf("git diff in %s: %w", dc.HostPath, err)
 		}

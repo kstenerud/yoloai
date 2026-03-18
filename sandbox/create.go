@@ -377,10 +377,7 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 		}
 	}
 
-	containerDirPerm := os.FileMode(0750)
-	if pr.security == "gvisor" {
-		containerDirPerm = 0777 //nolint:gosec // G301: world-writable needed for gVisor user-namespace UID remapping
-	}
+	perms := Perms(pr.security)
 
 	for _, dir := range []string{
 		filepath.Join(sandboxDir, "work"),
@@ -388,7 +385,7 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 		filepath.Join(sandboxDir, "files"),
 		filepath.Join(sandboxDir, "cache"),
 	} {
-		if err := mkdirAllPerm(dir, containerDirPerm); err != nil {
+		if err := mkdirAllPerm(dir, perms.Dir); err != nil {
 			return nil, fmt.Errorf("create directory %s: %w", dir, err)
 		}
 	}
@@ -582,18 +579,9 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 	// gVisor user namespaces require world-readable/writable permissions because
 	// container uids are remapped (e.g., root→uid 501, yoloai→uid 1000+501).
 	// Standard Docker doesn't need this, so we use restrictive permissions.
-	logsDirPerm := os.FileMode(0750)
-	logFilePerm := os.FileMode(0600)
-	statusPerm := os.FileMode(0600)
 	configPerm := os.FileMode(0644) // always 0644 (no secrets, read-only in container)
 
-	if pr.security == "gvisor" {
-		logsDirPerm = 0777 //nolint:gosec // G301: world-writable needed for gVisor user-namespace UID remapping
-		logFilePerm = 0666 //nolint:gosec // G306: world-writable needed for gVisor user-namespace UID remapping
-		statusPerm = 0666  //nolint:gosec // G306: world-writable needed for gVisor user-namespace UID remapping
-	}
-
-	if err := mkdirAllPerm(filepath.Join(sandboxDir, LogsDir), logsDirPerm); err != nil {
+	if err := mkdirAllPerm(filepath.Join(sandboxDir, LogsDir), perms.Dir); err != nil {
 		return nil, fmt.Errorf("create logs dir: %w", err)
 	}
 
@@ -602,12 +590,12 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 	// sandbox-setup.py (re-execed as yoloai user) gets EPERM without 0666.
 	for _, logFile := range []string{SandboxJSONLFile, MonitorJSONLFile, HooksJSONLFile} {
 		p := filepath.Join(sandboxDir, logFile)
-		if err := writeFilePerm(p, nil, logFilePerm); err != nil {
+		if err := writeFilePerm(p, nil, perms.File); err != nil {
 			return nil, fmt.Errorf("create log file %s: %w", logFile, err)
 		}
 	}
 
-	if err := writeFilePerm(filepath.Join(sandboxDir, AgentStatusFile), []byte("{}\n"), statusPerm); err != nil {
+	if err := writeFilePerm(filepath.Join(sandboxDir, AgentStatusFile), []byte("{}\n"), perms.File); err != nil {
 		return nil, fmt.Errorf("write %s: %w", AgentStatusFile, err)
 	}
 
@@ -1077,14 +1065,9 @@ func createSecretsDir(agentDef *agent.Definition, envVars map[string]string, sec
 	// gVisor gofer runs as remapped uid and needs world-readable/executable.
 	// Standard Docker can use restrictive permissions.
 	// The dir lives in /tmp and is removed within seconds of container startup.
-	secretsDirPerm := os.FileMode(0700)
-	secretsFilePerm := os.FileMode(0600)
-	if security == "gvisor" {
-		secretsDirPerm = 0755  //nolint:gosec // G302: world-executable for gVisor UID remapping; removed within seconds
-		secretsFilePerm = 0644 //nolint:gosec // G306: world-readable for gVisor UID remapping; removed within seconds
-	}
+	perms := Perms(security)
 
-	if err := os.Chmod(tmpDir, secretsDirPerm); err != nil {
+	if err := os.Chmod(tmpDir, perms.SecretsDir); err != nil {
 		_ = os.RemoveAll(tmpDir)
 		return "", fmt.Errorf("chmod secrets dir: %w", err)
 	}
@@ -1093,7 +1076,7 @@ func createSecretsDir(agentDef *agent.Definition, envVars map[string]string, sec
 
 	// Write env vars first
 	for k, v := range envVars {
-		if err := writeFilePerm(filepath.Join(tmpDir, k), []byte(v), secretsFilePerm); err != nil {
+		if err := writeFilePerm(filepath.Join(tmpDir, k), []byte(v), perms.SecretsFile); err != nil {
 			_ = os.RemoveAll(tmpDir)
 			return "", fmt.Errorf("write env %s: %w", k, err)
 		}
@@ -1106,7 +1089,7 @@ func createSecretsDir(agentDef *agent.Definition, envVars map[string]string, sec
 		if value == "" {
 			continue
 		}
-		if err := writeFilePerm(filepath.Join(tmpDir, key), []byte(value), secretsFilePerm); err != nil {
+		if err := writeFilePerm(filepath.Join(tmpDir, key), []byte(value), perms.SecretsFile); err != nil {
 			_ = os.RemoveAll(tmpDir)
 			return "", fmt.Errorf("write secret %s: %w", key, err)
 		}
@@ -1470,13 +1453,10 @@ func ensureContainerSettings(agentDef *agent.Definition, sandboxDir, security st
 	}
 
 	// Use restrictive permissions by default, world-writable only for gVisor
-	agentStateDirPerm := os.FileMode(0750)
-	if security == "gvisor" {
-		agentStateDirPerm = 0777 //nolint:gosec // G301: world-writable needed for gVisor user-namespace UID remapping
-	}
+	perms := Perms(security)
 
 	agentStateDir := filepath.Join(sandboxDir, AgentRuntimeDir)
-	if err := mkdirAllPerm(agentStateDir, agentStateDirPerm); err != nil {
+	if err := mkdirAllPerm(agentStateDir, perms.Dir); err != nil {
 		return fmt.Errorf("create %s dir: %w", AgentRuntimeDir, err)
 	}
 	settingsPath := filepath.Join(agentStateDir, "settings.json")
