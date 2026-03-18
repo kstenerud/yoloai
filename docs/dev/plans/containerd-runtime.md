@@ -10,23 +10,21 @@ using `--security` will break.
 
 ## Phase 0: Spike — verify containerd + Kata + CNI end-to-end
 
-Before touching any user-facing code, verify the core approach works on a real machine.
+**Status: Complete.** The spike was run on the test VM (Ubuntu 24.04, containerd v2.2.2,
+Kata 3.28). Key findings that affect the rest of this plan:
 
-**Goal:** A standalone Go program (not part of yoloAI) that:
-1. Connects to containerd at `/run/containerd/containerd.sock` using `github.com/containerd/containerd`
-2. Runs an `alpine` container with `io.containerd.kata.v2` shimv2 + CNI networking
-3. Execs `ip addr` inside and confirms `eth0` exists with an IP address
-4. Stops the container and verifies CNI teardown releases the IP cleanly (no netns leak)
-
-Place the spike in `_spike/containerd/main.go` (gitignored). Delete after Phase 3 is complete.
-
-**If the spike fails:** Revisit the design before touching any user-facing code.
-
-**Spike output to capture:**
-- Exact Go import path and version of `github.com/containerd/containerd` that works
-- CNI plugin path on the test machine (confirm `/opt/cni/bin/` or document alternate)
-- Kata shimv2 type string (`io.containerd.kata.v2` — confirm it matches installed binary)
-- Any gotchas with the containerd namespace API (context must carry namespace)
+- **Module path:** Use `github.com/containerd/containerd/v2@v2.2.2` (not v1). All internal
+  package paths changed: `pkg/namespaces`, `pkg/oci`, `pkg/cio` (see Step 2.1 for full list).
+- **CNI plugin path:** Confirmed at `/opt/cni/bin/`.
+- **Kata shimv2 type:** `io.containerd.kata.v2` — confirmed matches `/usr/bin/containerd-shim-kata-v2`.
+- **Kata + overlayfs:** Works. `client.WithSnapshotter("overlayfs")` with
+  `client.WithRuntime("io.containerd.kata.v2", nil)` runs a container successfully.
+- **Task persistence:** Containerd tasks survive the calling process's exit — the shim manages
+  them. A new process reconnects via `ctr.LoadContainer()` + `ctr.Task(ctx, nil)`.
+- **Detach model:** `Start()` can return after `task.Start()` without calling `Wait()`. The task
+  keeps running. `Stop()` reconnects and kills it. No background goroutine needed.
+- **CNI netns:** `go-cni.Setup()` takes an existing netns path — the caller must create the
+  namespace. Use `github.com/vishvananda/netns` (pure Go, same approach as nerdctl).
 
 ---
 
@@ -131,20 +129,68 @@ func isolationContainerRuntime(isolation string) string {
 Update all references from `state.security` → `state.isolation` and `pr.security` →
 `pr.isolation` throughout `create.go` and `create_prepare.go`.
 
-Update the overlay incompatibility check:
+Update the overlay incompatibility check. The existing gVisor check becomes an isolation check,
+and a new containerd check is added (VM backends don't support overlayfs):
 ```go
-if state.isolation == "container-enhanced" && hasOverlayDirs(state) { ... }
-```
-
-Update the non-container-backend guard to include `"containerd"` as a container backend:
-```go
-func isContainerBackend(backend string) bool {
-    return backend == "docker" || backend == "podman" || backend == "containerd"
+// container-enhanced (gVisor) does not support overlayfs inside the container
+if state.isolation == "container-enhanced" && hasOverlayDirs(state) {
+    return fmt.Errorf(":overlay directories require --isolation container. " +
+        "--isolation container-enhanced uses gVisor, which does not support overlayfs inside the container.")
 }
 ```
 
-Update `checkSecurityRuntime` → `checkIsolationPrerequisites` (stub for now; full prerequisite
-checking added in Phase 3).
+Replace `isContainerBackend()` with `BackendCaps` — see Step 1.5b below. After that refactor, all
+four `isContainerBackend` call sites in `launchContainer()` become `caps.<field>` references, and
+containerd's capabilities are declared once in `backendCaps()` rather than scattered across
+if-chains.
+
+Also remove the `dockerNetworkMode` variable (create.go lines 678–681). Pass `state.networkMode`
+directly to `InstanceConfig.NetworkMode`. Move the `"isolated"` → `""` translation into the Docker
+runtime's `Create()` method, where it belongs. Containerd's `Create()` reads `"isolated"` directly
+to decide whether to configure CNI network filtering.
+
+Update `checkSecurityRuntime` → `checkIsolationPrerequisites` stub (full implementation in Step 2.9).
+
+### Step 1.5b — `sandbox/create.go`: replace `isContainerBackend()` with `BackendCaps`
+
+**New type in `sandbox/create.go`:**
+
+```go
+// BackendCaps describes what a runtime backend supports in launchContainer.
+type BackendCaps struct {
+    NetworkIsolation bool // supports --network=isolated (iptables-based domain filtering)
+    OverlayDirs      bool // supports :overlay mount mode (overlayfs inside the container)
+    CapAdd           bool // supports cap_add and devices via OCI spec
+    OCIRuntime       bool // supports ContainerRuntime field (OCI --runtime name)
+}
+
+func backendCaps(backend string) BackendCaps {
+    switch backend {
+    case "docker", "podman":
+        return BackendCaps{NetworkIsolation: true, OverlayDirs: true, CapAdd: true, OCIRuntime: true}
+    case "containerd":
+        return BackendCaps{NetworkIsolation: true, OverlayDirs: false, CapAdd: true, OCIRuntime: false}
+    default: // tart, seatbelt
+        return BackendCaps{}
+    }
+}
+```
+
+Delete `isContainerBackend()`. Add `caps := backendCaps(m.backend)` at the top of
+`launchContainer()`. Replace each usage site:
+
+| Old | New |
+|---|---|
+| `!isContainerBackend(m.backend)` (network isolation error, line 671) | `!caps.NetworkIsolation` |
+| `isContainerBackend(m.backend)` (NET_ADMIN cap, line 707) | `caps.NetworkIsolation` |
+| `!isContainerBackend(m.backend)` (overlay gate, line 724) | `!caps.OverlayDirs` |
+| `!isContainerBackend(m.backend)` (cap_add/devices/setup gate, line 731) | `!caps.CapAdd` |
+| `!isContainerBackend(m.backend)` (security/OCIRuntime gate, line 739) | `!caps.OCIRuntime` |
+
+Update the network isolation error message to avoid naming specific backends:
+```go
+return fmt.Errorf("--network=isolated is not supported by the %s backend", m.backend)
+```
 
 ### Step 1.6 — `sandbox/lifecycle.go`: update all `meta.Security` references
 
@@ -197,6 +243,10 @@ func podmanAvailable() bool {
     // reuse podmanrt.SocketPath() or equivalent — stat only, no dial
 }
 ```
+
+**`podmanAvailable()` implementation note:** `podmanrt.discoverSocket()` returns an error if
+no socket is found and surfaces the error to callers. Add a `SocketPath() (string, error)` to
+`runtime/podman` that returns the first reachable socket path without logging, and use that.
 
 Overhaul `resolveBackend()` to accept isolation and os, and return `(backend string, explicit bool)`:
 
@@ -323,123 +373,264 @@ Document:
 
 Implement `runtime/containerd/` to support `--isolation vm` (Kata + QEMU). Firecracker (`vm-enhanced`) deferred to Phase 3.
 
-### Step 2.1 — Add `github.com/containerd/containerd` dependency
+### Step 2.1 — Add Go dependencies
 
 ```
-go get github.com/containerd/containerd@v1.7.x
-go get github.com/containernetworking/cni@latest
+go get github.com/containerd/containerd/v2@v2.2.2
+go get github.com/containerd/containerd/api@v1.10.0
+go get github.com/containerd/go-cni@v1.1.13
+go get github.com/vishvananda/netns@latest
 go get github.com/creack/pty@latest
 ```
 
-Pin versions after the spike confirms which versions work. Run `go mod tidy`.
+**Module path is `github.com/containerd/containerd/v2` — not `v1`.** The installed daemon is
+v2.2.2 and the v2 module has a different import path. Key packages used from this module:
+
+| Purpose | Import path |
+|---|---|
+| Client | `github.com/containerd/containerd/v2/client` |
+| OCI spec | `github.com/containerd/containerd/v2/pkg/oci` |
+| IO (FIFOs) | `github.com/containerd/containerd/v2/pkg/cio` |
+| Namespaces | `github.com/containerd/containerd/v2/pkg/namespaces` |
+| Runtime options | `github.com/containerd/containerd/api/types/runtimeoptions/v1` |
+
+**`github.com/containerd/containerd/api`** is a separate Go module (not a subdirectory of the
+main client module) that provides protobuf types including `runtimeoptions.Options` for passing
+kata configuration paths. It must be added explicitly.
+
+**`github.com/containerd/go-cni`** is the CNI library used by nerdctl. Use it in preference to
+the lower-level `github.com/containernetworking/cni/libcni` directly.
+
+Run `go mod tidy` after adding all dependencies.
 
 ### Step 2.2 — `runtime/containerd/containerd.go` — struct, `New()`, `Name()`, `Close()`
 
 ```go
-package containerd
+package containerdrt
+
+import (
+    "github.com/containerd/containerd/v2/client"
+    "github.com/containerd/containerd/v2/pkg/namespaces"
+)
 
 type Runtime struct {
-    client    *containerd.Client
+    client    *client.Client
     namespace string // always "yoloai"
 }
 
 func New(ctx context.Context) (*Runtime, error) {
-    // connect to /run/containerd/containerd.sock
-    // verify kata shim is available (containerd-shim-kata-v2 in PATH)
-    // return Runtime with namespace "yoloai"
+    c, err := client.New("/run/containerd/containerd.sock")
+    if err != nil {
+        return nil, fmt.Errorf("connect to containerd: %w", err)
+    }
+    // verify kata shim is available
+    if _, err := exec.LookPath("containerd-shim-kata-v2"); err != nil {
+        c.Close()
+        return nil, fmt.Errorf("kata shim not found: %w", err)
+    }
+    return &Runtime{client: c, namespace: "yoloai"}, nil
+}
+
+func (r *Runtime) withNamespace(ctx context.Context) context.Context {
+    return namespaces.WithNamespace(ctx, r.namespace)
 }
 
 func (r *Runtime) Name() string { return "containerd" }
 func (r *Runtime) Close() error { return r.client.Close() }
 ```
 
-**Important:** every containerd API call must carry the namespace in context:
-```go
-ctx = namespaces.WithNamespace(ctx, r.namespace)
-```
+**Every containerd API call must carry the namespace in context** — use `r.withNamespace(ctx)`
+at the start of each method.
 
 ### Step 2.3 — `runtime/containerd/cni.go` — CNI setup, teardown, state
+
+**CNI netns creation:** `go-cni.Setup()` takes an already-existing netns path — it does not
+create the namespace. The caller must create it first using `github.com/vishvananda/netns`:
+
+```go
+// createNetNS creates a named network namespace and returns its path.
+// The namespace is created at /var/run/netns/<name> (standard Linux path).
+func createNetNS(name string) (string, error) {
+    // netns.NewNamed creates /var/run/netns/<name> and returns an fd
+    ns, err := netns.NewNamed(name)
+    if err != nil {
+        return "", fmt.Errorf("create netns %s: %w", name, err)
+    }
+    ns.Close()
+    return fmt.Sprintf("/var/run/netns/%s", name), nil
+}
+
+func deleteNetNS(name string) error {
+    return netns.DeleteNamed(name)
+}
+```
+
+**CNI configuration:** Use a shared config at `~/.yoloai/cni/yoloai.conflist` (written once on
+first use). Do not write per-sandbox CNI configs — the config is the same for all containers.
+Load it via `go-cni.New(cni.WithPluginConfDir(cniConfDir), cni.WithPluginDir([]string{"/opt/cni/bin"}))`.
 
 CNI state persisted at `~/.yoloai/sandboxes/<name>/backend/cni-state.json`:
 
 ```json
 {
-  "netns": "/var/run/netns/yoloai-<name>",
+  "netns_name": "yoloai-<name>",
+  "netns_path": "/var/run/netns/yoloai-<name>",
   "interface": "eth0",
-  "ip": "10.88.0.5/16",
-  "cni_result": { ... }
+  "ip": "10.88.0.5/16"
 }
 ```
 
 ```go
-// setupCNI creates a network namespace, runs CNI ADD, returns netns path.
-// Persists state to cni-state.json for teardown.
-func setupCNI(sandboxDir, name string) (netnsPath string, err error)
+// setupCNI creates a network namespace, runs CNI ADD, persists state for teardown.
+func setupCNI(sandboxDir, containerName string) (netnsPath string, err error) {
+    nsName := "yoloai-" + containerName
+    netnsPath, err = createNetNS(nsName)
+    if err != nil {
+        return "", err
+    }
+    // initialize go-cni, run CNI ADD against the netns
+    // persist cni-state.json
+    return netnsPath, nil
+}
 
 // teardownCNI reads cni-state.json and runs CNI DEL to release resources.
 // Idempotent: no-op if cni-state.json doesn't exist.
 func teardownCNI(sandboxDir string) error
 ```
 
-CNI config file written to `~/.yoloai/sandboxes/<name>/backend/cni-conf.json` at first use
-(or a global config at `~/.yoloai/cni/`). Use the `bridge` plugin with `host-local` IPAM —
-same as nerdctl's default.
-
 ### Step 2.4 — `runtime/containerd/lifecycle.go` — Create, Start, Stop, Remove, Inspect
+
+**Task lifecycle model** (verified by spike):
+- `task.Start()` + return: the shim manages the running container. The calling process can exit;
+  the task keeps running.
+- After task exit: the task moves to STOPPED state in containerd. It is NOT auto-deleted.
+  `task.Delete()` must be called explicitly to clean up.
+- Reconnect: `ctr.Task(ctx, nil)` loads an existing task (nil = don't reattach IO) from any
+  process. This is how `Stop()` and `Inspect()` access tasks started by a previous `Start()`.
 
 **`Create()`:**
 1. `setupCNI(sandboxDir, name)` → get `netnsPath`
 2. Pull image into `yoloai` namespace if not present
-3. Create OCI spec with `netnsPath`, mounts, capabilities, `WithRuntime(ContainerRuntime)`
-4. `client.NewContainer()` with the spec
-5. Create task, **do not start** (Start is separate)
+3. Determine snapshotter based on runtime:
+   ```go
+   snapshotter := "overlayfs"  // for vm (Kata + QEMU)
+   if cfg.ContainerRuntime == "io.containerd.kata-fc.v2" {
+       snapshotter = "devmapper"  // for vm-enhanced (Kata + Firecracker)
+   }
+   ```
+4. Create OCI spec with `netnsPath` set in the network namespace options, plus mounts,
+   capabilities, and runtime
+5. `client.NewContainer()` with:
+   - `client.WithSnapshotter(snapshotter)`
+   - `client.WithRuntime(cfg.ContainerRuntime, kataOpts)` where `kataOpts` is a
+     `*runtimeoptions.Options{ConfigPath: "..."}` pointing to the appropriate kata config
+   - `client.WithNewSpec(oci.WithImageConfig(img), oci.WithProcessArgs(...), ...)`
+
+**Kata config path selection** (pass via `runtimeoptions.Options{ConfigPath: "..."}`):
+
+| `ContainerRuntime` | ConfigPath |
+|---|---|
+| `"io.containerd.kata.v2"` | `/opt/kata/share/defaults/kata-containers/configuration-qemu.toml` |
+| `"io.containerd.kata-fc.v2"` | `/opt/kata/share/defaults/kata-containers/configuration-fc.toml` |
+
+Import: `runtimeoptions "github.com/containerd/containerd/api/types/runtimeoptions/v1"`.
+Passing `nil` for options uses whatever default is registered in containerd's `config.toml` —
+prefer explicit paths to avoid depending on containerd's registration.
 
 **`Start()`:**
-1. Get container from containerd
-2. Create a new task (containerd tasks are terminal after exit — recreate on restart)
-3. Set up stdio FIFOs
-4. `task.Start()`
-5. Detach (yoloAI doesn't wait for the task to exit here)
+1. Load container: `ctr, err := r.client.LoadContainer(ctx, name)`
+2. Check for an existing task — a stopped task must be deleted before creating a new one:
+   ```go
+   if existingTask, err := ctr.Task(ctx, nil); err == nil {
+       status, _ := existingTask.Status(ctx)
+       if status.Status == containerd.Running {
+           return nil // already running, nothing to do
+       }
+       // task exists but stopped — delete it before creating a new task
+       existingTask.Delete(ctx)
+   }
+   ```
+3. Create task with null IO (agent logs go to bind-mounted `log.txt`, not containerd stdio):
+   ```go
+   task, err := ctr.NewTask(ctx, cio.NullIO)
+   ```
+4. `task.Start(ctx)` — shim takes over, process keeps running after this function returns
+5. Return — no `task.Wait()` call. The task persists in containerd managed by the shim.
 
 **`Stop()`:**
-1. Get task
-2. `task.Kill(ctx, syscall.SIGTERM)` with timeout, then `SIGKILL`
-3. `task.Wait()` to reap
-4. `task.Delete()`
-5. `teardownCNI(sandboxDir)`
+1. Load container; if not found, return nil (idempotent)
+2. Load task via `ctr.Task(ctx, nil)`; if no task exists, skip to teardown
+3. Check task status — if already stopped, skip Kill:
+   ```go
+   status, _ := task.Status(ctx)
+   if status.Status != containerd.Stopped {
+       task.Kill(ctx, syscall.SIGTERM)
+       // wait up to 10s, then SIGKILL
+       select {
+       case <-exitCh:
+       case <-time.After(10 * time.Second):
+           task.Kill(ctx, syscall.SIGKILL)
+           <-exitCh
+       }
+   }
+   ```
+4. `task.Delete(ctx)` — always, whether it was running or already stopped
+5. `teardownCNI(sandboxDir)` — idempotent if already torn down
 
 **`Remove()`:**
 1. Stop if running (idempotent)
-2. `container.Delete(ctx, containerd.WithSnapshotCleanup)`
+2. `container.Delete(ctx, client.WithSnapshotCleanup)`
 3. `teardownCNI(sandboxDir)` (idempotent if already done in Stop)
 
 **`Inspect()`:**
-1. Get container; if not found return `ErrNotFound`
-2. Get task; if task not found return `InstanceInfo{Running: false}`
-3. Check task status
+1. Load container; if not found return `ErrNotFound`
+2. Load task via `ctr.Task(ctx, nil)`; if not found return `InstanceInfo{Running: false}`
+3. Check `task.Status(ctx)` — return `Running: status.Status == containerd.Running`
+
+Note: a task in STOPPED state (natural exit, not yet reaped) returns `Running: false`.
+This is correct — `Start()` will clean it up on the next restart.
 
 ### Step 2.5 — `runtime/containerd/exec.go` — Exec, InteractiveExec
 
 **`Exec()`** — non-interactive, captures stdout:
-1. Create exec process spec
-2. `task.Exec()` with piped stdio
-3. `proc.Start()`, read stdout, `proc.Wait()`
-4. Return `ExecResult`
+1. Load container and task
+2. Create a process spec for the exec (`specs.Process{Args: cmd, ...}`)
+3. Create a `cio.Creator` that captures stdout/stderr to a buffer:
+   ```go
+   ioCreator := cio.NewCreator(cio.WithStreams(nil, &stdout, &stderr))
+   ```
+4. `process, err := task.Exec(ctx, execID, processSpec, ioCreator)`
+5. `exitCh, _ := process.Wait(ctx)` then `process.Start(ctx)`
+6. `<-exitCh` to get exit status
+7. Return `ExecResult`
 
-**`InteractiveExec()`** — PTY-attached:
-1. `task.Exec()` with terminal=true
-2. `pty.Open()` — get master/slave FDs
-3. Set slave as proc stdio
-4. `proc.Start()`
-5. Copy stdin→master, master→stdout in goroutines
-6. Forward `SIGWINCH` → `proc.ResizePTY()`
-7. `proc.Wait()`
+**`InteractiveExec()`** — PTY-attached. The containerd exec API does not accept raw file
+descriptors — stdio goes through named FIFOs managed by the shim. Wire a PTY to those FIFOs:
 
-Reference: nerdctl's `pkg/taskutil/taskutil.go` for the PTY wiring pattern.
+1. Open a PTY: `ptm, pts, err := pty.Open()` — gives master (ptm) and slave (pts) ends
+2. Create a FIFO set with terminal flag in a temp dir:
+   ```go
+   fifoDir, _ := os.MkdirTemp("", "yoloai-exec-")
+   defer os.RemoveAll(fifoDir)
+   fifoSet, _ := cio.NewFIFOSetInDir(fifoDir, execID, true /* terminal */)
+   ```
+3. Create a `cio.Attach` function that bridges the FIFOs to the PTY master:
+   ```go
+   ioAttach := cio.NewAttach(cio.WithTerminal, cio.WithStreams(ptm, ptm, nil))
+   ```
+4. Create process spec with `Terminal: true`
+5. `process, _ := task.Exec(ctx, execID, processSpec, ioAttach(fifoSet))`
+6. Set raw terminal on the host side, then `process.Start(ctx)`
+7. Copy `os.Stdin` → `ptm` and `ptm` → `os.Stdout` in goroutines
+8. Handle `SIGWINCH`: `process.ResizePTY(ctx, cols, rows)`
+9. `<-exitCh` to wait for exit, then restore terminal
+
+Reference: nerdctl's `pkg/taskutil/taskutil.go`. This is a non-trivial pattern — copy it
+rather than inventing a new approach.
 
 ### Step 2.6 — `runtime/containerd/image.go` — EnsureImage, ImageExists
 
-**`ImageExists()`:** check `client.GetImage(ctx, "yoloai-base")` in the `yoloai` namespace.
+**`ImageExists()`:** check `r.client.GetImage(ctx, "yoloai-base")` in the `yoloai` namespace.
 
 **`EnsureImage()`:** shell-exec the build pipeline:
 ```go
@@ -468,6 +659,29 @@ check containerd logs: journalctl -u containerd
 ```
 
 ### Step 2.9 — Prerequisites check
+
+**Architecture note:** The prerequisite logic for each backend is quite different (Docker queries
+`docker info`, Podman checks PATH + rootless state, containerd checks shim binary + CNI + `/dev/kvm`).
+Move this into the backends via an optional interface on `runtime.Runtime`:
+
+```go
+// In runtime/runtime.go
+type IsolationValidator interface {
+    ValidateIsolation(ctx context.Context, isolation string) error
+}
+```
+
+Each runtime that supports validation implements this interface. `create.go`'s
+`checkIsolationPrerequisites` type-asserts to it and calls it; if the backend doesn't implement
+the interface, skip validation. This keeps backend-specific knowledge in the backend package and
+avoids growing a multi-branch `checkIsolationPrerequisites` in `create.go`.
+
+Docker and Podman runtimes implement `ValidateIsolation` for `container-enhanced` (gVisor check).
+Containerd runtime implements it for `vm` and `vm-enhanced`. Phase 1 adds the interface to
+`runtime/runtime.go` and the Docker/Podman implementations. Phase 2 adds the containerd
+implementation below.
+
+**`runtime/containerd/containerd.go`** — `ValidateIsolation()` for containerd:
 
 **File: `sandbox/create.go`** — in `checkIsolationPrerequisites()`:
 
@@ -506,6 +720,21 @@ func isWSL2() bool {
 }
 ```
 
+**`checkEnhancedSupport` for Podman — rootless limitation:** When `backend == "podman"` and
+Podman is running rootless, gVisor fails with a cgroupv2 delegation error even if `runsc` is
+registered. Detect this case and emit a specific error:
+
+```go
+// After confirming runsc is in containers.conf, check if podman is rootless
+if podmanIsRootless() {
+    return fmt.Errorf(
+        "container-enhanced requires rootful Podman when using gVisor.\n" +
+        "Rootless Podman lacks cgroupv2 delegation for runsc.\n" +
+        "Run as root (sudo yoloai ...) or configure rootful Podman.",
+    )
+}
+```
+
 ### Step 2.10 — Wire containerd into `newRuntime()`
 
 **File: `internal/cli/helpers.go`**
@@ -526,9 +755,10 @@ case "containerd":
 
 **`runtime/containerd/integration_test.go`** — requires a machine with containerd + Kata:
 - Container lifecycle (create/start/stop/remove)
+- Restart: stop then start again (verifies stopped-task cleanup in `Start()`)
 - Exec (stdout capture, non-zero exit)
 - InteractiveExec with PTY
-- CNI: container gets an IP, teardown releases it
+- CNI: container gets an IP, teardown releases it (verify no netns leak after remove)
 - Image import via `EnsureImage()`
 
 Guard with `//go:build integration` and a runtime check that skips if
@@ -538,15 +768,21 @@ Guard with `//go:build integration` and a runtime check that skips if
 
 ## Phase 3: vm-enhanced (Kata + Firecracker)
 
-Deferred until Phase 2 is stable. Requires:
-1. devmapper snapshotter configured in containerd
-2. `containerd-shim-kata-fc-v2` in PATH
-3. Loop-based thin pool provisioned (Ubuntu 24.04: `dmsetup` + loop device)
-4. Update `checkIsolationPrerequisites()` for vm-enhanced specifics
-5. Test on a machine with Firecracker installed
+Deferred until Phase 2 is stable. The test VM already has Firecracker, devmapper, and the
+`containerd-shim-kata-fc-v2` symlink set up. Requirements:
 
-The containerd backend itself needs no changes — `ContainerRuntime = "io.containerd.kata-fc.v2"`
-and the devmapper snapshotter are the only differences from Phase 2.
+1. devmapper snapshotter configured in containerd (done on test VM)
+2. `containerd-shim-kata-fc-v2` symlink → `containerd-shim-kata-v2` in PATH (done on test VM)
+3. containerd config: devmapper snapshotter + kata-fc runtime entry (done on test VM)
+
+**`Create()` already handles this** (Phase 2 implementation branches on `ContainerRuntime` to
+select `devmapper` snapshotter and the fc config path). No additional backend changes needed.
+
+Changes for Phase 3:
+- Update `checkIsolationPrerequisites()` to check for devmapper snapshotter availability when
+  `isolation == "vm-enhanced"`: query containerd snapshotters and error if devmapper is not
+  in the `ok` state.
+- Test on the test VM with Firecracker.
 
 ---
 
@@ -560,31 +796,35 @@ and the devmapper snapshotter are the only differences from Phase 2.
 | `config/defaults.go` | Update `DefaultConfigYAML` key names |
 | `sandbox/meta.go` | `Security`→`Isolation` (json:`isolation`) |
 | `sandbox/inspect.go` | `Perms("gvisor")`→`Perms("container-enhanced")`, rename type if desired |
-| `sandbox/create.go` | `securityRuntimeName`→`isolationContainerRuntime`, new values, update all security refs, `isContainerBackend` adds `"containerd"`, `checkSecurityRuntime`→`checkIsolationPrerequisites` stub |
+| `sandbox/create.go` | `securityRuntimeName`→`isolationContainerRuntime`, new values, update all security refs, replace `isContainerBackend()` with `BackendCaps` + `backendCaps()`, remove `dockerNetworkMode` variable, update overlay/gVisor check to use isolation values, `checkSecurityRuntime`→`checkIsolationPrerequisites` stub |
 | `sandbox/create_prepare.go` | `pr.security`→`pr.isolation`, `pr.securityExplicit`→`pr.isolationExplicit`, read `Isolation` from opts |
 | `sandbox/lifecycle.go` | All `meta.Security`→`meta.Isolation` refs |
 | `internal/cli/commands.go` | `--security`→`--isolation`, add `--os`, update macOS error |
 | `internal/cli/helpers.go` | Overhaul `resolveBackend()`, add `detectContainerBackend()`, `dockerAvailable()`, `podmanAvailable()`, containerd stub in `newRuntime()` |
+| `runtime/runtime.go` | Add `IsolationValidator` interface |
+| `runtime/docker/docker.go` | Implement `ValidateIsolation()` (gVisor/docker info check) |
+| `runtime/podman/podman.go` | Implement `ValidateIsolation()` (PATH check + rootless detection), add WSL2 socket paths, add `SocketPath()` export |
 | `internal/cli/info.go` | Add containerd to `knownBackends` |
-| `runtime/podman/podman.go` | Add WSL2 socket paths to `discoverSocket()` |
+| `runtime/podman/podman.go` | Add WSL2 socket paths to `discoverSocket()`, add `SocketPath() (string, error)` export |
 | `docs/BREAKING-CHANGES.md` | Document all breaking changes |
 
 ### Phase 2
 
 | File | Change |
 |------|--------|
-| `go.mod` / `go.sum` | Add `github.com/containerd/containerd`, `github.com/containernetworking/cni`, `github.com/creack/pty` |
-| `runtime/containerd/containerd.go` | **New.** Struct, `New()`, `Name()`, `Close()` |
-| `runtime/containerd/cni.go` | **New.** CNI setup/teardown, state persistence |
-| `runtime/containerd/lifecycle.go` | **New.** `Create()`, `Start()`, `Stop()`, `Remove()`, `Inspect()` |
-| `runtime/containerd/exec.go` | **New.** `Exec()`, `InteractiveExec()` with PTY |
+| `go.mod` / `go.sum` | Add `github.com/containerd/containerd/v2`, `github.com/containerd/containerd/api`, `github.com/containerd/go-cni`, `github.com/vishvananda/netns`, `github.com/creack/pty` |
+| `runtime/containerd/containerd.go` | **New.** Struct, `New()`, `Name()`, `Close()`, `withNamespace()` helper |
+| `runtime/containerd/cni.go` | **New.** netns creation (vishvananda/netns), CNI setup/teardown, state persistence |
+| `runtime/containerd/lifecycle.go` | **New.** `Create()` (with snapshotter selection), `Start()` (with stopped-task cleanup), `Stop()` (with status check), `Remove()`, `Inspect()` |
+| `runtime/containerd/exec.go` | **New.** `Exec()`, `InteractiveExec()` with FIFO+PTY |
 | `runtime/containerd/image.go` | **New.** `EnsureImage()`, `ImageExists()` |
 | `runtime/containerd/prune.go` | **New.** `Prune()` |
 | `runtime/containerd/logs.go` | **New.** `Logs()`, `DiagHint()` |
 | `runtime/containerd/containerd_test.go` | **New.** Unit tests |
 | `runtime/containerd/cni_test.go` | **New.** CNI state unit tests |
 | `runtime/containerd/integration_test.go` | **New.** Integration tests (build tag: integration) |
-| `sandbox/create.go` | Full `checkIsolationPrerequisites()`, `isWSL2()` |
+| `runtime/containerd/containerd.go` | Add `ValidateIsolation()` (shim binary, CNI, /dev/kvm) |
+| `sandbox/create.go` | `checkIsolationPrerequisites()` via `IsolationValidator` interface, `isWSL2()` |
 | `internal/cli/helpers.go` | Replace containerd stub with real `containerdrt.New()` |
 | `docs/dev/ARCHITECTURE.md` | Add `runtime/containerd/` to package map and file index |
 
@@ -600,19 +840,3 @@ and the devmapper snapshotter are the only differences from Phase 2.
 6. **Phase 2, Step 2.9:** Prerequisites check.
 7. **Phase 2, Steps 2.10–2.12:** Wire containerd, unit + integration tests.
 8. **Phase 3** (separate PR when ready): vm-enhanced / Firecracker.
-
----
-
-## Open Implementation Questions
-
-These need answers before or during implementation:
-
-1. **Containerd client version:** The spike should confirm which version of `github.com/containerd/containerd` is compatible with the installed containerd daemon version. Containerd's Go client has historically had breaking API changes between minor versions.
-
-2. **CNI config location:** Should the CNI bridge config be per-sandbox or shared? Shared (at `~/.yoloai/cni/`) is simpler. nerdctl uses `~/.config/cni/net.d/`. Decide during spike.
-
-3. **Snapshot driver for vm (QEMU):** Kata with QEMU works with the default `overlayfs` snapshotter. Confirm during spike that no special snapshotter configuration is needed on a vanilla Ubuntu 24.04 install with apt-installed containerd.
-
-4. **`podmanAvailable()` implementation:** `podmanrt.discoverSocket()` currently returns an error if no socket is found — it needs a path-only variant that doesn't surface the error to callers. Either export a `SocketPath() (string, error)` from `runtime/podman` or duplicate the stat logic in `helpers.go`. Decide at Step 1.8.
-
-5. **FIFO management in `Start()`:** containerd tasks use FIFOs for stdio. The Docker backend uses the SDK's attach mechanism. The containerd backend needs to create FIFOs in a sandbox-local dir (e.g., `~/.yoloai/sandboxes/<name>/backend/`), attach them before `task.Start()`, and clean them up. Confirm the FIFO lifecycle with nerdctl source as reference.
