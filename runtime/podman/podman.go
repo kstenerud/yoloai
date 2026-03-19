@@ -110,6 +110,16 @@ func discoverSocket() (string, error) {
 		return "unix://" + systemSockPath, nil
 	}
 
+	// WSL2: Podman Desktop on Windows exposes sockets under /mnt/wsl
+	for _, p := range []string{
+		"/mnt/wsl/podman-sockets/podman-machine-default/podman-root.sock",
+		"/mnt/wsl/podman-sockets/podman-machine-default/podman-user.sock",
+	} {
+		if _, err := os.Stat(p); err == nil { //nolint:gosec // G703: fixed known paths
+			return "unix://" + p, nil
+		}
+	}
+
 	// macOS: try podman machine inspect
 	sock, err := machineSocketDiscovery()
 	if err == nil {
@@ -139,6 +149,28 @@ func defaultMachineSocketDiscovery() (string, error) {
 		return "", fmt.Errorf("podman machine socket not found: %s", sock)
 	}
 	return "unix://" + sock, nil
+}
+
+// ValidateIsolation checks that the host has the required runtime for the
+// given isolation mode. For container-enhanced (gVisor), it verifies that
+// the "runsc" OCI runtime is in containers.conf and that Podman is not
+// running in rootless mode (rootless Podman + runsc fails due to cgroup
+// delegation issues).
+func (r *Runtime) ValidateIsolation(_ context.Context, isolation string) error {
+	if isolation != "container-enhanced" {
+		return nil
+	}
+	if isRootless() {
+		return fmt.Errorf("--isolation container-enhanced requires Podman running as root\n" +
+			"  gVisor (runsc) with rootless Podman fails due to cgroup v2 delegation\n" +
+			"  Run as root or use Docker for container-enhanced isolation")
+	}
+	if _, err := exec.LookPath("runsc"); err != nil {
+		return fmt.Errorf("--isolation container-enhanced requires gVisor (runsc) in PATH\n" +
+			"  Install: https://gvisor.dev/docs/user_guide/install/\n" +
+			"  Then add to /etc/containers/containers.conf: [engine.runtimes] runsc = [\"/usr/local/sbin/runsc\"]")
+	}
+	return nil
 }
 
 // isRootless returns true when not running as root, indicating Podman

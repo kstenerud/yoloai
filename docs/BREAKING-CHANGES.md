@@ -4,6 +4,30 @@ Tracks breaking changes made during beta. Each entry should be included in relea
 
 ## Unreleased
 
+### `--security` replaced by `--isolation`; `backend` config key renamed to `container_backend`
+
+**Previous behavior:** `yoloai new --security <mode>` where modes were `standard`, `gvisor`, `kata`, `kata-firecracker`. The `backend:` key in `config.yaml` configured the container runtime backend. The `security` field in `environment.json` (sandbox metadata) stored the isolation mode.
+
+**New behavior:** `yoloai new --isolation <mode>` where modes are:
+- `container` — standard container isolation (replaces `standard`)
+- `container-enhanced` — gVisor (replaces `gvisor`)
+- `vm` — Kata Containers + QEMU, via containerd backend (replaces `kata`)
+- `vm-enhanced` — Kata Containers + Firecracker, via containerd backend (replaces `kata-firecracker`)
+
+The `container_backend:` key in config replaces `backend:`. The `isolation` field in `environment.json` replaces `security`.
+
+`--isolation vm` and `--isolation vm-enhanced` automatically route to the containerd backend — `--backend containerd` is not needed.
+
+**Rationale:** `--security` implied that gVisor is "more secure" and standard containers are "insecure". `--isolation` describes the actual mechanism (container vs VM), which is a more accurate framing. The `vm`/`vm-enhanced` names make the hardware VM boundary explicit. The `container_backend` rename removes ambiguity with the broader concept of "backend" (which also covers tart and seatbelt).
+
+**Migration:**
+- `--security standard` → omit `--isolation` (container is the default)
+- `--security gvisor` → `--isolation container-enhanced`
+- `--security kata` → `--isolation vm`
+- `--security kata-firecracker` → `--isolation vm-enhanced`
+- `backend: docker` in config → `container_backend: docker` (no auto-migration)
+- Sandboxes created with `--security` store the old value in `environment.json`; they will not work with lifecycle commands that read the isolation field. Destroy and recreate them.
+
 ### `sandbox <name> log` redesigned around structured JSONL
 
 **Previous behavior:** `yoloai log <name>` (and `yoloai sandbox <name> log`) displayed the raw agent terminal output (`logs/agent.log`) with ANSI stripped by default. `--raw` preserved ANSI escape sequences. `--json` returned `{"content": "..."}`.

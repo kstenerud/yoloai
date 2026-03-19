@@ -334,6 +334,27 @@ func (r *Runtime) DiagHint(instanceName string) string {
 // Name returns the backend name.
 func (r *Runtime) Name() string { return r.binaryName }
 
+// ValidateIsolation checks that the host has the required runtime for the
+// given isolation mode. For container-enhanced (gVisor), verifies that the
+// "runsc" OCI runtime is registered with the Docker daemon.
+func (r *Runtime) ValidateIsolation(ctx context.Context, isolation string) error {
+	if isolation != "container-enhanced" {
+		return nil
+	}
+	out, err := exec.CommandContext(ctx, r.binaryName, "info", "--format", "{{range $k, $v := .Runtimes}}{{$k}}\n{{end}}").Output() //nolint:gosec // G204: binaryName is "docker" or "podman"
+	if err != nil {
+		return fmt.Errorf("check runtimes: %w", err)
+	}
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if strings.TrimSpace(line) == "runsc" {
+			return nil
+		}
+	}
+	return fmt.Errorf("--isolation container-enhanced requires gVisor (runsc) registered as a Docker runtime\n" +
+		"  Install: https://gvisor.dev/docs/user_guide/install/\n" +
+		"  Then add to /etc/docker/daemon.json: {\"runtimes\": {\"runsc\": {\"path\": \"/usr/local/sbin/runsc\"}}}")
+}
+
 // PreferredTmuxSocket returns the fixed tmux socket path for Docker/Podman
 // containers. A fixed path ensures exec'd processes find the same server as
 // the container init process (the uid-based default may differ under gVisor).

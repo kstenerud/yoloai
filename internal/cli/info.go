@@ -95,6 +95,24 @@ var knownBackends = []backendInfo{
 			},
 		},
 	},
+	{
+		Name:        "containerd",
+		Description: "Linux VMs via Kata Containers (--isolation vm/vm-enhanced)",
+		Detail: backendDetail{
+			Environment: "Linux (Ubuntu-based container inside a hardware VM)",
+			Platforms:   "Linux only (requires KVM; excludes standard cloud VMs without nested virt or .metal)",
+			Requires:    "containerd, Kata Containers shim, CNI plugins, /dev/kvm",
+			InstallHint: "sudo apt install containerd kata-containers containernetworking-plugins",
+			Tradeoffs: []string{
+				"Strongest isolation — each sandbox runs in a separate hardware VM (Kata + QEMU or Firecracker)",
+				"Host kernel is not directly reachable from inside the sandbox",
+				"~1-2s additional startup overhead per sandbox vs Docker containers",
+				"~100-150 MB per-sandbox VM memory overhead",
+				"Requires KVM — not available on standard cloud VMs without nested virtualization",
+				"Used automatically with --isolation vm or --isolation vm-enhanced",
+			},
+		},
+	},
 }
 
 // knownBackendsByName provides lookup by name.

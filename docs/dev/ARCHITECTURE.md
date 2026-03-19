@@ -16,6 +16,7 @@ runtime/docker/          → Docker implementation of runtime.Runtime
 runtime/podman/          → Podman implementation (embeds Docker runtime, overrides socket discovery and rootless support)
 runtime/tart/            → Tart (macOS VM) implementation of runtime.Runtime
 runtime/seatbelt/        → Seatbelt (macOS sandbox-exec) implementation of runtime.Runtime
+runtime/containerd/      → Containerd implementation of runtime.Runtime (Kata Containers VM isolation)
 sandbox/                 → Core logic: create, lifecycle, diff, apply, inspect
 test/e2e/                → End-to-end tests against the compiled binary (build tag: e2e)
 workspace/               → Workspace utilities (copy, git, safety checks)
@@ -153,6 +154,21 @@ Shared test helpers — a non-`_test.go` package importable by test files across
 | `platform.go` | Platform detection (macOS only, no Apple Silicon requirement). Testable via variable override. |
 | `resources/tmux.conf` | Default tmux config (embedded at compile time). |
 | `seatbelt_test.go` | Unit tests for profile generation, platform detection, tmux socket injection. |
+
+### `runtime/containerd/`
+
+| File | Purpose |
+|------|---------|
+| `containerd.go` | `Runtime` struct — implements `Runtime` interface using containerd v2 client. `New()` connects to `/run/containerd/containerd.sock`. All API calls use the `yoloai` containerd namespace. `ValidateIsolation()` checks for Kata shim binary, CNI plugins, and `/dev/kvm`. |
+| `lifecycle.go` | `Create()` (CNI setup, snapshotter selection, Kata config path), `Start()` (stopped-task cleanup), `Stop()` (SIGTERM + 10s timeout), `Remove()`, `Inspect()`. Task persistence via containerd shim — tasks survive the calling process. |
+| `exec.go` | `Exec()` (stdout capture via FIFO), `InteractiveExec()` (PTY via `Terminal: true` + FIFO set, raw mode via `golang.org/x/term`, SIGWINCH forwarding). `termSize()` helper wraps `pty.Getsize` with correct row/col naming. |
+| `cni.go` | CNI network namespace creation (`vishvananda/netns`), CNI ADD/DEL via `containerd/go-cni`, per-sandbox state at `backend/cni-state.json`. Idempotent teardown. |
+| `image.go` | `EnsureImage()` — builds via `docker build` + `ctr images import`; `ImageExists()` — checks containerd image store in `yoloai` namespace. |
+| `prune.go` | `Prune()` — lists containers in `yoloai` namespace, removes orphaned `yoloai-*` containers, tears down their CNI namespaces. |
+| `logs.go` | `Logs()` — reads bind-mounted `log.txt` (same as Docker backend). `DiagHint()` — points to `ctr -n yoloai tasks ls` and `journalctl -u containerd`. |
+| `containerd_test.go` | Unit tests: `Name()`, namespace injection, WSL2 detection, Kata config path selection, sandbox dir derivation. |
+| `cni_test.go` | Unit tests: CNI state file path, idempotent teardown on missing state, conflist JSON validity. |
+| `integration_test.go` | Integration tests requiring containerd + Kata (build tag: `integration`): full lifecycle, restart, exec, interactive exec, CNI IP assignment and cleanup. |
 
 ### `sandbox/`
 
