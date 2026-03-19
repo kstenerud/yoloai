@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 
 	cni "github.com/containerd/go-cni"
 	"github.com/vishvananda/netns"
@@ -121,12 +122,42 @@ func deleteNetNS(name string) error {
 	return nil
 }
 
+// cleanupStaleIPAMLeases removes any host-local IPAM lease files for
+// containerName left over from a previous failed or replaced sandbox.
+// Lease files live at /var/lib/cni/networks/yoloai/<IP> and contain
+// "<containerName>\n<interface>" as their content.
+// Errors are silently ignored — this is best-effort pre-flight cleanup.
+func cleanupStaleIPAMLeases(containerName string) {
+	dir := "/var/lib/cni/networks/yoloai"
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		path := filepath.Join(dir, entry.Name())
+		data, err := os.ReadFile(path) //nolint:gosec // G304: trusted dir
+		if err != nil {
+			continue
+		}
+		// Lease format: "<containerID>\n<interface>"
+		if strings.HasPrefix(string(data), containerName+"\n") {
+			_ = os.Remove(path)
+		}
+	}
+}
+
 // setupCNI creates a network namespace, runs CNI ADD, and persists state.
 // Returns the netns path.
 func setupCNI(ctx context.Context, sandboxDir, containerName string) (string, error) {
 	if err := ensureCNIConflist(); err != nil {
 		return "", err
 	}
+
+	// Remove any stale IPAM leases from a previous failed or replaced run.
+	cleanupStaleIPAMLeases(containerName)
 
 	nsName := "yoloai-" + containerName
 	netnsPath, err := createNetNS(nsName)
@@ -214,6 +245,10 @@ func teardownCNI(ctx context.Context, sandboxDir string) error {
 		// Log but don't fail — best-effort teardown.
 		_ = err
 	}
+
+	// Derive container name from netns name to clean up IPAM leases.
+	containerName := strings.TrimPrefix(state.NetnsName, "yoloai-")
+	cleanupStaleIPAMLeases(containerName)
 
 	if err := deleteNetNS(state.NetnsName); err != nil {
 		_ = err // best-effort
