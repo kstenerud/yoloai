@@ -206,6 +206,12 @@ type containerConfig struct {
 // Returns the sandbox name on success (empty if user cancelled or no-start).
 func (m *Manager) Create(ctx context.Context, opts CreateOptions) (string, error) {
 	slog.Info("creating sandbox", "event", "sandbox.create", "sandbox", opts.Name, "agent", opts.Agent, "backend", m.backend)
+	// Validate isolation prerequisites before the potentially expensive image build.
+	if opts.Isolation != "" {
+		if err := checkIsolationPrerequisites(ctx, m.runtime, opts.Isolation); err != nil {
+			return "", err
+		}
+	}
 	if err := m.EnsureSetup(ctx); err != nil {
 		return "", err
 	}
