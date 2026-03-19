@@ -95,8 +95,11 @@ def read_secrets(secrets_dir):
     for name in os.listdir(secrets_dir):
         path = os.path.join(secrets_dir, name)
         if os.path.isfile(path):
-            with open(path) as f:
-                os.environ[name] = f.read()
+            try:
+                with open(path) as f:
+                    os.environ[name] = f.read()
+            except OSError:
+                pass  # Already set by entrypoint.py (running as root), or not accessible
 
 
 def write_status(status_file, status, exit_code=None):

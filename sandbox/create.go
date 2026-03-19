@@ -230,7 +230,7 @@ func (m *Manager) Create(ctx context.Context, opts CreateOptions) (string, error
 	}
 
 	if err := m.launchContainer(ctx, state); err != nil {
-		// Clean up sandbox directory and attempt container removal
+		// Clean up sandbox directory and attempt container removal.
 		_ = os.RemoveAll(state.sandboxDir)
 		_ = m.runtime.Remove(ctx, InstanceName(state.name))
 		return "", err

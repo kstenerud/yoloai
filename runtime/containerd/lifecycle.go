@@ -147,6 +147,9 @@ func (r *Runtime) Create(ctx context.Context, cfg runtime.InstanceConfig) error 
 	if existingCtr, loadErr := r.client.LoadContainer(ctx, cfg.Name); loadErr == nil {
 		_ = existingCtr.Delete(ctx, client.WithSnapshotCleanup)
 	}
+	// Also pre-clear any stale snapshot that may have been orphaned (e.g. if the
+	// container was deleted but snapshot cleanup failed due to permissions or a crash).
+	_ = r.client.SnapshotService(snapshotter).Remove(ctx, cfg.Name)
 
 	if _, err := r.client.NewContainer(ctx, cfg.Name, ctrOpts...); err != nil {
 		createErr = fmt.Errorf("create container: %w", err)
