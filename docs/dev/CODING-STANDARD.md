@@ -197,6 +197,23 @@ Cobra customization required: set `SilenceErrors: true` and `SilenceUsage: true`
 - **Dev deps:** golangci-lint, testify
 - No vendoring unless required for reproducible builds in air-gapped environments
 
+### Third-Party Caching and State Mechanisms
+
+Treat any non-system library's caching, lazy-initialization, or persistent-state mechanism as potentially broken for your use case. You will hit the edge cases the library author didn't handle.
+
+This is not hypothetical — it has burned us repeatedly (containerd bolt metadata sharing, CNI IPAM lease cleanup, snapshot chain management). The patterns that bite most often:
+
+- **Cache assumes single-namespace use** — shared metadata structures have subtle cross-namespace invalidation bugs
+- **Lazy cleanup skips error paths** — stale entries accumulate when a previous run failed partway through
+- **GC reference tracing is incomplete** — the library marks some roots but not all, so entries are collected while still needed
+- **"Already exists" is silently swallowed** — treated as success even when the existing entry is wrong or stale
+
+Mitigation:
+- **Verify, don't trust.** After any write through a library's cache layer, read it back and confirm the data is actually accessible.
+- **Clean up before you write.** Remove stale entries before inserting new ones, not after.
+- **Understand GC roots.** If a library has a garbage collector, trace its root-marking logic before relying on it to protect your objects.
+- **Own the lifecycle.** If the library's cleanup is best-effort or async, drive it explicitly at the points in your code where you know cleanup is safe.
+
 ## Build and Release
 
 - Version injection via `ldflags`: `go build -ldflags "-X main.version=..."`
