@@ -1,6 +1,8 @@
 package podman
 
 import (
+	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -92,4 +94,113 @@ func TestIsRootless_Root(t *testing.T) {
 
 	isRootless = func() bool { return false }
 	assert.False(t, isRootless())
+}
+
+func TestDiscoverSocket_WSL2(t *testing.T) {
+	tmpDir := t.TempDir()
+	sockPath := filepath.Join(tmpDir, "podman-root.sock")
+	require.NoError(t, os.WriteFile(sockPath, nil, 0o600))
+
+	orig := wsl2SockPaths
+	defer func() { wsl2SockPaths = orig }()
+	wsl2SockPaths = []string{
+		filepath.Join(tmpDir, "nonexistent.sock"),
+		sockPath,
+	}
+
+	origMachineDiscovery := machineSocketDiscovery
+	defer func() { machineSocketDiscovery = origMachineDiscovery }()
+	machineSocketDiscovery = func() (string, error) { return "", fmt.Errorf("not macOS") }
+
+	origSystem := systemSockPath
+	defer func() { systemSockPath = origSystem }()
+	systemSockPath = filepath.Join(tmpDir, "system.sock")
+
+	t.Setenv("CONTAINER_HOST", "")
+	t.Setenv("DOCKER_HOST", "")
+	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+
+	sock, err := discoverSocket()
+	require.NoError(t, err)
+	assert.Equal(t, "unix://"+sockPath, sock)
+}
+
+func TestDiscoverSocket_WSL2_FirstPathWins(t *testing.T) {
+	tmpDir := t.TempDir()
+	first := filepath.Join(tmpDir, "podman-root.sock")
+	second := filepath.Join(tmpDir, "podman-user.sock")
+	require.NoError(t, os.WriteFile(first, nil, 0o600))
+	require.NoError(t, os.WriteFile(second, nil, 0o600))
+
+	orig := wsl2SockPaths
+	defer func() { wsl2SockPaths = orig }()
+	wsl2SockPaths = []string{first, second}
+
+	origMachineDiscovery := machineSocketDiscovery
+	defer func() { machineSocketDiscovery = origMachineDiscovery }()
+	machineSocketDiscovery = func() (string, error) { return "", fmt.Errorf("not macOS") }
+
+	origSystem := systemSockPath
+	defer func() { systemSockPath = origSystem }()
+	systemSockPath = filepath.Join(tmpDir, "system.sock")
+
+	t.Setenv("CONTAINER_HOST", "")
+	t.Setenv("DOCKER_HOST", "")
+	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+
+	sock, err := discoverSocket()
+	require.NoError(t, err)
+	assert.Equal(t, "unix://"+first, sock)
+}
+
+// ValidateIsolation tests
+
+func TestValidateIsolation_Podman_NonEnhanced(t *testing.T) {
+	r := &Runtime{}
+	for _, mode := range []string{"", "container", "vm", "vm-enhanced"} {
+		err := r.ValidateIsolation(context.Background(), mode)
+		assert.NoError(t, err, "mode %q should not require validation", mode)
+	}
+}
+
+func TestValidateIsolation_Podman_Rootless(t *testing.T) {
+	orig := isRootless
+	defer func() { isRootless = orig }()
+	isRootless = func() bool { return true }
+
+	r := &Runtime{}
+	err := r.ValidateIsolation(context.Background(), "container-enhanced")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "rootless")
+	assert.Contains(t, err.Error(), "root")
+}
+
+func TestValidateIsolation_Podman_RootNoRunsc(t *testing.T) {
+	orig := isRootless
+	defer func() { isRootless = orig }()
+	isRootless = func() bool { return false }
+
+	origLook := runscLookPath
+	defer func() { runscLookPath = origLook }()
+	runscLookPath = func(string) (string, error) { return "", fmt.Errorf("not found") }
+
+	r := &Runtime{}
+	err := r.ValidateIsolation(context.Background(), "container-enhanced")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "runsc")
+	assert.Contains(t, err.Error(), "gVisor")
+}
+
+func TestValidateIsolation_Podman_RootWithRunsc(t *testing.T) {
+	orig := isRootless
+	defer func() { isRootless = orig }()
+	isRootless = func() bool { return false }
+
+	origLook := runscLookPath
+	defer func() { runscLookPath = origLook }()
+	runscLookPath = func(string) (string, error) { return "/usr/local/sbin/runsc", nil }
+
+	r := &Runtime{}
+	err := r.ValidateIsolation(context.Background(), "container-enhanced")
+	assert.NoError(t, err)
 }

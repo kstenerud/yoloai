@@ -55,6 +55,16 @@ func (r *Runtime) PreferredTmuxSocket() string { return "/tmp/yoloai-tmux.sock" 
 // Close releases the containerd client connection.
 func (r *Runtime) Close() error { return r.client.Close() }
 
+// Prerequisite check overrides — variable for testing.
+var (
+	containerdSockPath   = "/run/containerd/containerd.sock"
+	kataShimName         = "containerd-shim-kata-v2"
+	cniBridgePath        = "/opt/cni/bin/bridge"
+	kvmDevPath           = "/dev/kvm"
+	capNetAdminCheckFunc = hasCapNetAdmin
+	wsl2CheckFunc        = isWSL2
+)
+
 // ValidateIsolation checks that all prerequisites for VM isolation are satisfied.
 // Implements runtime.IsolationValidator.
 func (r *Runtime) ValidateIsolation(_ context.Context, isolation string) error {
@@ -62,7 +72,7 @@ func (r *Runtime) ValidateIsolation(_ context.Context, isolation string) error {
 
 	// Use net.Dial to test actual connectivity — os.Open on a socket returns
 	// ENXIO (not EACCES) on Linux, so it can't distinguish permission from absence.
-	if conn, err := net.Dial("unix", "/run/containerd/containerd.sock"); err != nil {
+	if conn, err := net.Dial("unix", containerdSockPath); err != nil {
 		if os.IsPermission(err) || strings.Contains(err.Error(), "permission denied") {
 			missing = append(missing, "no permission to access containerd socket\n"+
 				"    Option 1 (simplest): run yoloai with sudo\n"+
@@ -75,26 +85,26 @@ func (r *Runtime) ValidateIsolation(_ context.Context, isolation string) error {
 				"      sudo systemctl restart containerd\n"+
 				"      newgrp containerd   # activate without logging out")
 		} else {
-			missing = append(missing, "containerd socket not found at /run/containerd/containerd.sock\n    Fix: sudo systemctl start containerd")
+			missing = append(missing, fmt.Sprintf("containerd socket not found at %s\n    Fix: sudo systemctl start containerd", containerdSockPath))
 		}
 	} else {
 		_ = conn.Close()
 	}
 
-	if _, err := exec.LookPath("containerd-shim-kata-v2"); err != nil {
+	if _, err := exec.LookPath(kataShimName); err != nil {
 		missing = append(missing, "kata shim not found: install kata-containers")
 	}
 
-	if _, err := os.Stat("/opt/cni/bin/bridge"); err != nil {
+	if _, err := os.Stat(cniBridgePath); err != nil {
 		missing = append(missing, "CNI plugins not found: sudo apt install containernetworking-plugins")
 	}
 
-	if !hasCapNetAdmin() {
+	if !capNetAdminCheckFunc() {
 		missing = append(missing, "CAP_NET_ADMIN not available (required to create network namespaces for CNI)\n    Fix: run yoloai with sudo for vm isolation")
 	}
 
-	if _, err := os.Stat("/dev/kvm"); err != nil {
-		if isWSL2() {
+	if _, err := os.Stat(kvmDevPath); err != nil {
+		if wsl2CheckFunc() {
 			missing = append(missing, "nested virtualization not enabled — see WSL2 nested virt steps in docs")
 		} else {
 			missing = append(missing, "/dev/kvm not found: enable KVM in BIOS or check hypervisor settings")
@@ -117,10 +127,13 @@ func isWSL2() bool {
 	return strings.Contains(strings.ToLower(string(data)), "microsoft")
 }
 
+// procSelfStatusPath is the path to /proc/self/status. Variable for testing.
+var procSelfStatusPath = "/proc/self/status"
+
 // hasCapNetAdmin reports whether the current process has CAP_NET_ADMIN
 // (bit 12 of CapEff in /proc/self/status). Required to create network namespaces.
 func hasCapNetAdmin() bool {
-	data, err := os.ReadFile("/proc/self/status")
+	data, err := os.ReadFile(procSelfStatusPath)
 	if err != nil {
 		return false
 	}

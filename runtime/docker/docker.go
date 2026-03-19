@@ -334,6 +334,12 @@ func (r *Runtime) DiagHint(instanceName string) string {
 // Name returns the backend name.
 func (r *Runtime) Name() string { return r.binaryName }
 
+// dockerInfoOutput fetches the list of registered OCI runtime names from the
+// Docker daemon. Variable for testing.
+var dockerInfoOutput = func(ctx context.Context, binaryName string) ([]byte, error) {
+	return exec.CommandContext(ctx, binaryName, "info", "--format", "{{range $k, $v := .Runtimes}}{{$k}}\n{{end}}").Output() //nolint:gosec // G204: binaryName is "docker" or "podman"
+}
+
 // ValidateIsolation checks that the host has the required runtime for the
 // given isolation mode. For container-enhanced (gVisor), verifies that the
 // "runsc" OCI runtime is registered with the Docker daemon.
@@ -341,7 +347,7 @@ func (r *Runtime) ValidateIsolation(ctx context.Context, isolation string) error
 	if isolation != "container-enhanced" {
 		return nil
 	}
-	out, err := exec.CommandContext(ctx, r.binaryName, "info", "--format", "{{range $k, $v := .Runtimes}}{{$k}}\n{{end}}").Output() //nolint:gosec // G204: binaryName is "docker" or "podman"
+	out, err := dockerInfoOutput(ctx, r.binaryName)
 	if err != nil {
 		return fmt.Errorf("check runtimes: %w", err)
 	}

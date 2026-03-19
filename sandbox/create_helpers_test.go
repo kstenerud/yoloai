@@ -1048,3 +1048,113 @@ func TestPrepareSandboxState_NetworkAllowAddsExtraDomains(t *testing.T) {
 	assert.Contains(t, state.networkAllow, "api.anthropic.com")
 	assert.Contains(t, state.networkAllow, "api.example.com")
 }
+
+// isolationContainerRuntime tests
+
+func TestIsolationContainerRuntime_Container(t *testing.T) {
+	assert.Equal(t, "", isolationContainerRuntime("container"))
+	assert.Equal(t, "", isolationContainerRuntime(""))
+}
+
+func TestIsolationContainerRuntime_ContainerEnhanced(t *testing.T) {
+	assert.Equal(t, "runsc", isolationContainerRuntime("container-enhanced"))
+}
+
+func TestIsolationContainerRuntime_VM(t *testing.T) {
+	assert.Equal(t, "io.containerd.kata.v2", isolationContainerRuntime("vm"))
+}
+
+func TestIsolationContainerRuntime_VMEnhanced(t *testing.T) {
+	assert.Equal(t, "io.containerd.kata-fc.v2", isolationContainerRuntime("vm-enhanced"))
+}
+
+// backendCaps tests
+
+func TestBackendCaps_Docker(t *testing.T) {
+	caps := backendCaps("docker")
+	assert.True(t, caps.NetworkIsolation)
+	assert.True(t, caps.OverlayDirs)
+	assert.True(t, caps.CapAdd)
+}
+
+func TestBackendCaps_Podman(t *testing.T) {
+	caps := backendCaps("podman")
+	assert.True(t, caps.NetworkIsolation)
+	assert.True(t, caps.OverlayDirs)
+	assert.True(t, caps.CapAdd)
+}
+
+func TestBackendCaps_Containerd(t *testing.T) {
+	caps := backendCaps("containerd")
+	assert.True(t, caps.NetworkIsolation)
+	assert.False(t, caps.OverlayDirs) // overlayfs not supported inside Kata VMs
+	assert.True(t, caps.CapAdd)
+}
+
+func TestBackendCaps_Tart(t *testing.T) {
+	caps := backendCaps("tart")
+	assert.False(t, caps.NetworkIsolation)
+	assert.False(t, caps.OverlayDirs)
+	assert.False(t, caps.CapAdd)
+}
+
+func TestBackendCaps_Seatbelt(t *testing.T) {
+	caps := backendCaps("seatbelt")
+	assert.False(t, caps.NetworkIsolation)
+	assert.False(t, caps.OverlayDirs)
+	assert.False(t, caps.CapAdd)
+}
+
+func TestBackendCaps_Unknown(t *testing.T) {
+	caps := backendCaps("unknown-backend")
+	assert.False(t, caps.NetworkIsolation)
+	assert.False(t, caps.OverlayDirs)
+	assert.False(t, caps.CapAdd)
+}
+
+// checkIsolationPrerequisites tests
+
+// validatingRuntime wraps mockRuntime and implements IsolationValidator.
+type validatingRuntime struct {
+	mockRuntime
+	validateErr    error
+	validateCalled bool
+	lastIsolation  string
+}
+
+func (v *validatingRuntime) ValidateIsolation(_ context.Context, isolation string) error {
+	v.validateCalled = true
+	v.lastIsolation = isolation
+	return v.validateErr
+}
+
+func TestCheckIsolationPrerequisites_NoValidator(t *testing.T) {
+	// mockRuntime does not implement IsolationValidator — should be a no-op.
+	rt := &mockRuntime{}
+	err := checkIsolationPrerequisites(context.Background(), rt, "container-enhanced")
+	assert.NoError(t, err)
+}
+
+func TestCheckIsolationPrerequisites_ValidatorPasses(t *testing.T) {
+	rt := &validatingRuntime{}
+	err := checkIsolationPrerequisites(context.Background(), rt, "vm")
+	assert.NoError(t, err)
+	assert.True(t, rt.validateCalled)
+	assert.Equal(t, "vm", rt.lastIsolation)
+}
+
+func TestCheckIsolationPrerequisites_ValidatorFails(t *testing.T) {
+	rt := &validatingRuntime{validateErr: fmt.Errorf("kata shim not found")}
+	err := checkIsolationPrerequisites(context.Background(), rt, "vm")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "kata shim not found")
+	assert.True(t, rt.validateCalled)
+}
+
+func TestCheckIsolationPrerequisites_PassesIsolationMode(t *testing.T) {
+	for _, mode := range []string{"container", "container-enhanced", "vm", "vm-enhanced", ""} {
+		rt := &validatingRuntime{}
+		_ = checkIsolationPrerequisites(context.Background(), rt, mode)
+		assert.Equal(t, mode, rt.lastIsolation, "isolation mode should be forwarded as-is")
+	}
+}

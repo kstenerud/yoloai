@@ -111,10 +111,7 @@ func discoverSocket() (string, error) {
 	}
 
 	// WSL2: Podman Desktop on Windows exposes sockets under /mnt/wsl
-	for _, p := range []string{
-		"/mnt/wsl/podman-sockets/podman-machine-default/podman-root.sock",
-		"/mnt/wsl/podman-sockets/podman-machine-default/podman-user.sock",
-	} {
+	for _, p := range wsl2SockPaths {
 		if _, err := os.Stat(p); err == nil { //nolint:gosec // G703: fixed known paths
 			return "unix://" + p, nil
 		}
@@ -131,6 +128,16 @@ func discoverSocket() (string, error) {
 
 // systemSockPath is the system-wide Podman socket path. Variable for testing.
 var systemSockPath = "/run/podman/podman.sock"
+
+// wsl2SockPaths lists the Podman socket paths exposed by Podman Desktop on
+// Windows via the WSL2 machine provider. Variable for testing.
+var wsl2SockPaths = []string{
+	"/mnt/wsl/podman-sockets/podman-machine-default/podman-root.sock",
+	"/mnt/wsl/podman-sockets/podman-machine-default/podman-user.sock",
+}
+
+// runscLookPath resolves the runsc binary path. Variable for testing.
+var runscLookPath = exec.LookPath
 
 // machineSocketDiscovery tries to get the socket path from `podman machine inspect`.
 // Variable for testing - can be mocked to avoid executing podman commands.
@@ -165,7 +172,7 @@ func (r *Runtime) ValidateIsolation(_ context.Context, isolation string) error {
 			"  gVisor (runsc) with rootless Podman fails due to cgroup v2 delegation\n" +
 			"  Run as root or use Docker for container-enhanced isolation")
 	}
-	if _, err := exec.LookPath("runsc"); err != nil {
+	if _, err := runscLookPath("runsc"); err != nil {
 		return fmt.Errorf("--isolation container-enhanced requires gVisor (runsc) in PATH\n" +
 			"  Install: https://gvisor.dev/docs/user_guide/install/\n" +
 			"  Then add to /etc/containers/containers.conf: [engine.runtimes] runsc = [\"/usr/local/sbin/runsc\"]")

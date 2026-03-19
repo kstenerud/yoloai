@@ -1,6 +1,8 @@
 package docker
 
 import (
+	"context"
+	"fmt"
 	"testing"
 
 	"github.com/docker/docker/api/types/mount"
@@ -91,4 +93,53 @@ func TestConvertPorts_Multiple(t *testing.T) {
 	portMap, portSet := ConvertPorts(ports)
 	require.Len(t, portMap, 2)
 	require.Len(t, portSet, 2)
+}
+
+// ValidateIsolation tests
+
+func TestValidateIsolation_NonEnhanced(t *testing.T) {
+	r := &Runtime{binaryName: "docker"}
+	for _, mode := range []string{"", "container", "vm", "vm-enhanced"} {
+		err := r.ValidateIsolation(context.Background(), mode)
+		assert.NoError(t, err, "mode %q should not require validation", mode)
+	}
+}
+
+func TestValidateIsolation_RunscPresent(t *testing.T) {
+	orig := dockerInfoOutput
+	defer func() { dockerInfoOutput = orig }()
+	dockerInfoOutput = func(_ context.Context, _ string) ([]byte, error) {
+		return []byte("runc\nrunsc\nio.containerd.runc.v2\n"), nil
+	}
+
+	r := &Runtime{binaryName: "docker"}
+	err := r.ValidateIsolation(context.Background(), "container-enhanced")
+	assert.NoError(t, err)
+}
+
+func TestValidateIsolation_RunscMissing(t *testing.T) {
+	orig := dockerInfoOutput
+	defer func() { dockerInfoOutput = orig }()
+	dockerInfoOutput = func(_ context.Context, _ string) ([]byte, error) {
+		return []byte("runc\nio.containerd.runc.v2\n"), nil
+	}
+
+	r := &Runtime{binaryName: "docker"}
+	err := r.ValidateIsolation(context.Background(), "container-enhanced")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "runsc")
+	assert.Contains(t, err.Error(), "gVisor")
+}
+
+func TestValidateIsolation_DockerInfoFails(t *testing.T) {
+	orig := dockerInfoOutput
+	defer func() { dockerInfoOutput = orig }()
+	dockerInfoOutput = func(_ context.Context, _ string) ([]byte, error) {
+		return nil, fmt.Errorf("docker daemon not responding")
+	}
+
+	r := &Runtime{binaryName: "docker"}
+	err := r.ValidateIsolation(context.Background(), "container-enhanced")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "check runtimes")
 }
