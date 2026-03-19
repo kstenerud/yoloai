@@ -59,12 +59,14 @@ func (r *Runtime) ValidateIsolation(_ context.Context, isolation string) error {
 		if os.IsPermission(err) || strings.Contains(err.Error(), "permission denied") {
 			missing = append(missing, "no permission to access containerd socket\n"+
 				"    Option 1 (simplest): run yoloai with sudo\n"+
-				"    Option 2: create a group and configure containerd to use it:\n"+
-				"      sudo groupadd containerd\n"+
+				"    Option 2: configure containerd socket group access (run as root or with sudo):\n"+
+				"      sudo groupadd -f containerd\n"+
 				"      sudo usermod -aG containerd $USER\n"+
-				"      # add to /etc/containerd/config.toml: [grpc] gid = <containerd-gid>\n"+
+				"      GID=$(getent group containerd | cut -d: -f3)\n"+
+				"      sudo mkdir -p /etc/containerd\n"+
+				"      printf '\\n[grpc]\\n  gid = %s\\n' \"$GID\" | sudo tee -a /etc/containerd/config.toml\n"+
 				"      sudo systemctl restart containerd\n"+
-				"      (then log out and back in, or: newgrp containerd)")
+				"      newgrp containerd   # activate without logging out")
 		} else {
 			missing = append(missing, "containerd socket not found at /run/containerd/containerd.sock\n    Fix: sudo systemctl start containerd")
 		}
