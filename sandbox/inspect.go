@@ -118,7 +118,15 @@ func detectChanges(workDir string) string {
 	if err != nil {
 		return "-"
 	}
-	if len(strings.TrimSpace(string(output))) > 0 {
+	for _, line := range strings.Split(strings.TrimSpace(string(output)), "\n") {
+		if len(line) < 3 {
+			continue
+		}
+		name := filepath.Base(line[3:])
+		if strings.HasPrefix(name, "yoloai-bugreport-") &&
+			(strings.HasSuffix(name, ".md") || strings.HasSuffix(name, ".md.tmp")) {
+			continue
+		}
 		return "yes"
 	}
 	return "no"
