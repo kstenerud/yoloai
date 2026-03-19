@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 
 	"github.com/containerd/containerd/v2/client"
@@ -82,6 +83,10 @@ func (r *Runtime) ValidateIsolation(_ context.Context, isolation string) error {
 		missing = append(missing, "CNI plugins not found: sudo apt install containernetworking-plugins")
 	}
 
+	if !hasCapNetAdmin() {
+		missing = append(missing, "CAP_NET_ADMIN not available (required to create network namespaces for CNI)\n    Fix: run yoloai with sudo for vm isolation")
+	}
+
 	if _, err := os.Stat("/dev/kvm"); err != nil {
 		if isWSL2() {
 			missing = append(missing, "nested virtualization not enabled — see WSL2 nested virt steps in docs")
@@ -104,4 +109,25 @@ func (r *Runtime) ValidateIsolation(_ context.Context, isolation string) error {
 func isWSL2() bool {
 	data, _ := os.ReadFile("/proc/version")
 	return strings.Contains(strings.ToLower(string(data)), "microsoft")
+}
+
+// hasCapNetAdmin reports whether the current process has CAP_NET_ADMIN
+// (bit 12 of CapEff in /proc/self/status). Required to create network namespaces.
+func hasCapNetAdmin() bool {
+	data, err := os.ReadFile("/proc/self/status")
+	if err != nil {
+		return false
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.HasPrefix(line, "CapEff:") {
+			hexStr := strings.TrimSpace(strings.TrimPrefix(line, "CapEff:"))
+			caps, err := strconv.ParseUint(hexStr, 16, 64)
+			if err != nil {
+				return false
+			}
+			const capNetAdmin = 12
+			return caps&(1<<capNetAdmin) != 0
+		}
+	}
+	return false
 }
