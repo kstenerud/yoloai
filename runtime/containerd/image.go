@@ -39,8 +39,14 @@ func (r *Runtime) EnsureImage(ctx context.Context, sourceDir string, output io.W
 	ctx = r.withNamespace(ctx)
 
 	if !force {
-		if _, err := r.client.GetImage(ctx, imageRef); err == nil {
-			return nil // already exists
+		if img, err := r.client.GetImage(ctx, imageRef); err == nil {
+			// Image record exists — verify the root content is accessible.
+			// If a previous run shared metadata but GC later removed the bolt
+			// entries, the image record survives but container creation fails.
+			if _, cerr := r.client.ContentStore().Info(ctx, img.Target().Digest); cerr == nil {
+				return nil // exists and content is accessible
+			}
+			// Content missing — fall through to rebuild/reimport.
 		}
 	}
 
