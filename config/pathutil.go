@@ -55,13 +55,10 @@ func expandEnvBraced(s string) (string, error) {
 }
 
 // ExpandTilde replaces a leading ~ with the user's home directory.
+// Uses HomeDir() so that sudo invocations resolve to the invoking user's home.
 func ExpandTilde(path string) string {
 	if !strings.HasPrefix(path, "~") {
 		return path
 	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return path
-	}
-	return filepath.Join(home, path[1:])
+	return filepath.Join(HomeDir(), path[1:])
 }
