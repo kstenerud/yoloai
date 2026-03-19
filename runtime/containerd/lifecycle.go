@@ -41,6 +41,30 @@ func sandboxDirForName(name string) string {
 	return config.SandboxesDir() + "/" + sandboxName
 }
 
+// retryDelete calls ctr.Delete with WithSnapshotCleanup, retrying on transient
+// errors to handle Kata Containers shim teardown lag (the shim may still be
+// running briefly after the task exit event fires). Returns nil if the
+// container is gone (either deleted or not found), error otherwise.
+func retryDelete(ctx context.Context, ctr client.Container) error {
+	const maxAttempts = 5
+	const retryDelay = 2 * time.Second
+	var lastErr error
+	for i := range maxAttempts {
+		if i > 0 {
+			select {
+			case <-time.After(retryDelay):
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+		lastErr = ctr.Delete(ctx, client.WithSnapshotCleanup)
+		if lastErr == nil || errdefs.IsNotFound(lastErr) {
+			return nil
+		}
+	}
+	return lastErr
+}
+
 // Create creates a new containerd container from the given InstanceConfig.
 func (r *Runtime) Create(ctx context.Context, cfg runtime.InstanceConfig) error {
 	ctx = r.withNamespace(ctx)
@@ -144,8 +168,12 @@ func (r *Runtime) Create(ctx context.Context, cfg runtime.InstanceConfig) error 
 	}
 
 	// Pre-clear any stale container with this name from a previous failed run.
+	// Use retryDelete to handle Kata shim teardown lag (same as in Remove).
 	if existingCtr, loadErr := r.client.LoadContainer(ctx, cfg.Name); loadErr == nil {
-		_ = existingCtr.Delete(ctx, client.WithSnapshotCleanup)
+		if err := retryDelete(ctx, existingCtr); err != nil && !errdefs.IsNotFound(err) {
+			createErr = fmt.Errorf("stale container %q could not be deleted: %w", cfg.Name, err)
+			return createErr
+		}
 	}
 	// Also pre-clear any stale snapshot that may have been orphaned (e.g. if the
 	// container was deleted but snapshot cleanup failed due to permissions or a crash).
@@ -292,10 +320,10 @@ func (r *Runtime) Remove(ctx context.Context, name string) error {
 		return fmt.Errorf("load container: %w", err)
 	}
 
-	if err := ctr.Delete(ctx, client.WithSnapshotCleanup); err != nil {
-		if errdefs.IsNotFound(err) {
-			return r.teardownCNIForSandbox(ctx, sandboxDir)
-		}
+	// Retry Delete to handle Kata Containers shim teardown lag: the task exit
+	// event fires before the kata-shim fully releases the container, so an
+	// immediate Delete may fail with a transient error.
+	if err := retryDelete(ctx, ctr); err != nil {
 		return fmt.Errorf("delete container: %w", err)
 	}
 
