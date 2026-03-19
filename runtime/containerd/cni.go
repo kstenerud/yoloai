@@ -160,6 +160,8 @@ func setupCNI(ctx context.Context, sandboxDir, containerName string) (string, er
 	cleanupStaleIPAMLeases(containerName)
 
 	nsName := "yoloai-" + containerName
+	// Delete any stale netns from a previous failed run before creating a fresh one.
+	_ = deleteNetNS(nsName)
 	netnsPath, err := createNetNS(nsName)
 	if err != nil {
 		return "", err
