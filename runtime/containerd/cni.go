@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 
 	cni "github.com/containerd/go-cni"
 	"github.com/vishvananda/netns"
@@ -78,12 +79,33 @@ func ensureCNIConflist() error {
 
 // createNetNS creates a named network namespace and returns its path.
 // The namespace is created at /var/run/netns/<name> (standard Linux path).
+//
+// netns.NewNamed calls unshare(CLONE_NEWNET) which switches the calling OS
+// thread into the new namespace and never restores it. We must save and
+// restore the original namespace ourselves, with the OS thread locked, so
+// that subsequent CNI plugin execs inherit the host namespace — not the newly
+// created one (which would cause the bridge plugin to reject CNI_NETNS as
+// "same as current netns").
 func createNetNS(name string) (string, error) {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
+	origNS, err := netns.Get()
+	if err != nil {
+		return "", fmt.Errorf("get current netns: %w", err)
+	}
+	defer origNS.Close()
+
 	ns, err := netns.NewNamed(name)
 	if err != nil {
 		return "", fmt.Errorf("create netns %s: %w", name, err)
 	}
 	_ = ns.Close() //nolint:gosec // G104: fd close only — namespace persists at /var/run/netns/<name>
+
+	if err := netns.Set(origNS); err != nil {
+		return "", fmt.Errorf("restore original netns: %w", err)
+	}
+
 	return fmt.Sprintf("/var/run/netns/%s", name), nil
 }
 
