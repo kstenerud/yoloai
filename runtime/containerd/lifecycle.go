@@ -80,7 +80,7 @@ func (r *Runtime) Create(ctx context.Context, cfg runtime.InstanceConfig) error 
 	// it does NOT unpack — it only calls Prepare(parent) on the final digest.
 	if unpacked, err := img.IsUnpacked(ctx, snapshotter); err == nil && !unpacked {
 		if err := img.Unpack(ctx, snapshotter); err != nil {
-			createErr = fmt.Errorf("unpack image: %w", err)
+			createErr = fmt.Errorf("unpack image: %w\n  Hint: image content may have been removed by containerd GC; run 'yoloai setup --force' to rebuild", err)
 			return createErr
 		}
 	}

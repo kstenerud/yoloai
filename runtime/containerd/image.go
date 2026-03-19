@@ -43,13 +43,14 @@ func (r *Runtime) EnsureImage(ctx context.Context, sourceDir string, output io.W
 
 	if !force {
 		if img, err := r.client.GetImage(ctx, imageRef); err == nil {
-			// Image record exists — verify the root content is accessible.
-			// If a previous run shared metadata but GC later removed the bolt
-			// entries, the image record survives but container creation fails.
-			if _, cerr := r.client.ContentStore().Info(ctx, img.Target().Digest); cerr == nil {
-				return nil // exists and content is accessible
+			// Image record exists — verify the FULL descriptor tree is accessible.
+			// Checking only the root is insufficient: GC can remove child blobs
+			// (platform manifests, configs, compressed layers) while leaving the
+			// root manifest list entry intact, causing img.Unpack to fail later.
+			if err := r.verifyDescriptorTree(ctx, r.client.ContentStore(), img.Target()); err == nil {
+				return nil // all blobs accessible
 			}
-			// Content missing — fall through to rebuild/reimport.
+			// One or more blobs missing — fall through to rebuild/reimport.
 		}
 	}
 
@@ -224,18 +225,40 @@ func (r *Runtime) linkFromDockerNamespace(ctx context.Context) error {
 			}
 		}
 
-		// Verify the root descriptor is actually readable in our namespace.
-		// If sharing failed silently (e.g. isSharedContent returned false
-		// because Docker BuildKit didn't store compressed layer blobs as
-		// separate content objects), bail out so the caller falls back to
+		// Verify the FULL descriptor tree is accessible — root, platform
+		// manifests, configs, and compressed layer blobs. If any blob is
+		// missing (BuildKit didn't materialise it as a separate content
+		// object, or GC removed it), bail out so the caller falls back to
 		// the slow import path.
-		if _, err := cs.Info(dstCtx, srcImg.Target.Digest); err != nil {
+		if err := r.verifyDescriptorTree(dstCtx, cs, srcImg.Target); err != nil {
 			_ = imgSvc.Delete(dstCtx, imageRef)
 			return fmt.Errorf("verify shared content: %w", err)
 		}
 		return nil
 	}
 	return fmt.Errorf("image %q not found in Docker containerd namespaces (moby, default)", dockerImageRef)
+}
+
+// verifyDescriptorTree recursively confirms that every blob in desc's tree
+// has an accessible metadata entry in ctx's namespace. It walks via
+// images.Children, so it reads manifest content — if a manifest blob is
+// present but a child blob is gone, the walk finds and reports the gap.
+// Used both as an early-exit check in EnsureImage and as a post-share
+// verification in linkFromDockerNamespace before the slow-path fallback.
+func (r *Runtime) verifyDescriptorTree(ctx context.Context, cs content.Store, desc ocispec.Descriptor) error {
+	if _, err := cs.Info(ctx, desc.Digest); err != nil {
+		return fmt.Errorf("blob %s: %w", desc.Digest, err)
+	}
+	children, err := images.Children(ctx, cs, desc)
+	if err != nil || len(children) == 0 {
+		return nil // leaf blob, or manifest not readable (non-fatal for leaf)
+	}
+	for _, child := range children {
+		if err := r.verifyDescriptorTree(ctx, cs, child); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // shareDescriptorTree walks desc and all its children, registering each blob
