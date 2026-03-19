@@ -131,7 +131,7 @@ func (r *Runtime) EnsureImage(ctx context.Context, sourceDir string, output io.W
 
 // linkFromDockerNamespace registers the yoloai-base image in the yoloai
 // containerd namespace by sharing content from Docker's namespace ("moby" or
-// "default"). It works in two steps:
+// "default"). It works in three steps:
 //
 //  1. Mark the source namespace as shareable
 //     (label containerd.io/namespace.shareable=true). This tells containerd
@@ -142,6 +142,11 @@ func (r *Runtime) EnsureImage(ctx context.Context, sourceDir string, output io.W
 //     is in a shareable namespace it takes the shared path: no underlying
 //     file writer is created and Commit only writes a bolt metadata entry in
 //     the yoloai namespace. No physical data is copied.
+//
+//  3. Create the image record in yoloai namespace and verify the root
+//     descriptor is readable. If the content is not accessible (e.g. GC
+//     removed the bolt entries during a brief unreferenced window), an error
+//     is returned so the caller can fall back to the slow import path.
 func (r *Runtime) linkFromDockerNamespace(ctx context.Context) error {
 	imgSvc := r.client.ImageService()
 	cs := r.client.ContentStore()
@@ -171,14 +176,34 @@ func (r *Runtime) linkFromDockerNamespace(ctx context.Context) error {
 			return fmt.Errorf("share content: %w", err)
 		}
 
-		// Create the image record in yoloai namespace.
-		_ = imgSvc.Delete(dstCtx, imageRef) // remove stale record if force-rebuilding
+		// Create or update the image record in yoloai namespace.
+		// We create first (before any delete) so the content entries are always
+		// referenced by an image, preventing GC from removing them.
 		_, err = imgSvc.Create(dstCtx, images.Image{
 			Name:   imageRef,
 			Target: srcImg.Target,
 		})
-		if err != nil && !errdefs.IsAlreadyExists(err) {
-			return fmt.Errorf("create image record: %w", err)
+		if err != nil {
+			if !errdefs.IsAlreadyExists(err) {
+				return fmt.Errorf("create image record: %w", err)
+			}
+			// Already exists — update in place so the reference is never dropped.
+			_, err = imgSvc.Update(dstCtx, images.Image{
+				Name:   imageRef,
+				Target: srcImg.Target,
+			})
+			if err != nil {
+				return fmt.Errorf("update image record: %w", err)
+			}
+		}
+
+		// Verify the root descriptor is actually readable in our namespace.
+		// If sharing failed silently (e.g. isSharedContent returned false and
+		// the underlying writer path produced an ingest that was never flushed),
+		// bail out here so the caller can fall back to the slow import path.
+		if _, err := cs.Info(dstCtx, srcImg.Target.Digest); err != nil {
+			_ = imgSvc.Delete(dstCtx, imageRef)
+			return fmt.Errorf("verify shared content: %w", err)
 		}
 		return nil
 	}
