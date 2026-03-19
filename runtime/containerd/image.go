@@ -97,7 +97,7 @@ func (r *Runtime) EnsureImage(ctx context.Context, sourceDir string, output io.W
 	if importErr != nil {
 		_ = saveCmd.Process.Kill()
 		_ = saveCmd.Wait()
-		return fmt.Errorf("ctr import: %w\n  Hint: ensure your user can access /run/containerd/containerd.sock\n  Fix: sudo usermod -aG containerd $USER  (then log out and back in)", importErr)
+		return fmt.Errorf("ctr import: %w\n  Hint: ensure your user can access /run/containerd/containerd.sock (run with sudo, or configure a containerd group)", importErr)
 	}
 
 	if saveErr := saveCmd.Wait(); saveErr != nil {
