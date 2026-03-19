@@ -65,6 +65,15 @@ func (r *Runtime) Create(ctx context.Context, cfg runtime.InstanceConfig) error 
 		snapshotter = "devmapper"
 	}
 
+	// Unpack the image into the snapshotter if not already done.
+	// WithNewSnapshot requires the layer snapshot chain to already exist;
+	// it does NOT unpack — it only calls Prepare(parent) on the final digest.
+	if unpacked, err := img.IsUnpacked(ctx, snapshotter); err == nil && !unpacked {
+		if err := img.Unpack(ctx, snapshotter); err != nil {
+			return fmt.Errorf("unpack image: %w", err)
+		}
+	}
+
 	// Build OCI spec options.
 	specOpts := []oci.SpecOpts{
 		oci.WithDefaultSpec(),
