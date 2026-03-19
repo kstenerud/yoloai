@@ -180,6 +180,9 @@ func (r *Runtime) Create(ctx context.Context, cfg runtime.InstanceConfig) error 
 		}
 	}
 
+	// Pre-clear any stale container with this name from a previous failed run.
+	_ = r.client.ContainerRemove(ctx, cfg.Name, container.RemoveOptions{Force: true})
+
 	_, err := r.client.ContainerCreate(ctx, containerConfig, hostConfig, &network.NetworkingConfig{}, nil, cfg.Name)
 	if err != nil {
 		return fmt.Errorf("create container: %w", err)

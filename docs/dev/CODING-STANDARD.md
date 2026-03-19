@@ -290,6 +290,27 @@ func NewSandboxManager(docker DockerClient, cfg Config) *SandboxManager {
 - Types that hold resources (connections, file handles, mounts) implement `io.Closer`
 - Be aware of LIFO ordering — defers run in reverse order, which matters when resources depend on each other
 
+### Persistent Resource Idempotency
+
+Assume any resource you create that lives outside process memory — files, directories, network namespaces, IPAM leases, containers, VMs, named pipes, lock files — will eventually be left stale. Crashes, `^C`, OOM kills, power loss, and partial failures happen in production. The next run must not fail because a previous run left something behind.
+
+**Rule: always delete before you create.** Before allocating any persistent, named resource, unconditionally remove any stale instance with the same name. Do not gate this on whether you expect a stale entry to exist.
+
+```go
+// Bad: assumes previous run cleaned up
+netnsPath, err := createNetNS(name)
+
+// Good: idempotent regardless of prior state
+_ = deleteNetNS(name)
+netnsPath, err := createNetNS(name)
+```
+
+This applies even when a higher-level `--replace` or `Destroy` call should have cleaned up: that call may have been skipped (e.g. sandbox dir missing so replace logic short-circuits), failed partway through, or the resource may have been created before the gating check. The creation site is the last line of defense.
+
+The same principle extends to partial failures mid-setup: if step 3 of a 5-step setup fails, steps 1 and 2 have already allocated resources. Clean all of them up on the failure path — not just the resource that failed.
+
+This is not hypothetical — it has burned us repeatedly: stale netns `file exists`, duplicate IPAM lease, `already exists` on container create. Every one was a missing pre-clear.
+
 ## Documentation
 
 - **godoc conventions:** comments start with the name being documented

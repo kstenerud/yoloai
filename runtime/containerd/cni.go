@@ -142,8 +142,10 @@ func cleanupStaleIPAMLeases(containerName string) {
 		if err != nil {
 			continue
 		}
-		// Lease format: "<containerID>\n<interface>"
-		if strings.HasPrefix(string(data), containerName+"\n") {
+		// Lease format: "<containerID>\n<interface>" in modern plugins,
+		// or just "<containerID>" in older ones. Match the first line.
+		firstLine := strings.SplitN(strings.TrimRight(string(data), "\r\n"), "\n", 2)[0]
+		if strings.TrimSpace(firstLine) == containerName {
 			_ = os.Remove(path)
 		}
 	}
@@ -167,9 +169,10 @@ func setupCNI(ctx context.Context, sandboxDir, containerName string) (string, er
 		return "", err
 	}
 
-	// If CNI ADD fails, clean up the netns to avoid leaking it.
+	// If CNI ADD fails, clean up both the netns and any partial IPAM allocation.
 	if err := runCNIAdd(ctx, netnsPath, sandboxDir, containerName); err != nil {
 		_ = deleteNetNS(nsName)
+		cleanupStaleIPAMLeases(containerName)
 		return "", fmt.Errorf("CNI setup: %w", err)
 	}
 
@@ -190,6 +193,11 @@ func runCNIAdd(ctx context.Context, netnsPath, sandboxDir, containerName string)
 	if err := n.Load(cni.WithConfListFile(filepath.Join(cniConfDir(), "yoloai.conflist"))); err != nil {
 		return fmt.Errorf("load CNI config: %w", err)
 	}
+
+	// Pre-flight DEL: release any stale IPAM lease for this container from a
+	// previous failed run. The host-local IPAM plugin identifies leases by
+	// container ID alone, so it can clean up even with a fresh empty netns.
+	_ = n.Remove(ctx, containerName, netnsPath)
 
 	result, err := n.Setup(ctx, containerName, netnsPath)
 	if err != nil {

@@ -136,6 +136,11 @@ func (r *Runtime) Create(ctx context.Context, cfg runtime.InstanceConfig) error 
 		client.WithRuntime(cfg.ContainerRuntime, kataOpts),
 	}
 
+	// Pre-clear any stale container with this name from a previous failed run.
+	if existingCtr, loadErr := r.client.LoadContainer(ctx, cfg.Name); loadErr == nil {
+		_ = existingCtr.Delete(ctx, client.WithSnapshotCleanup)
+	}
+
 	if _, err := r.client.NewContainer(ctx, cfg.Name, ctrOpts...); err != nil {
 		createErr = fmt.Errorf("create container: %w", err)
 		return createErr
