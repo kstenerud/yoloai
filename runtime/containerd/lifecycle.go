@@ -49,14 +49,24 @@ func (r *Runtime) Create(ctx context.Context, cfg runtime.InstanceConfig) error 
 	if err != nil {
 		return fmt.Errorf("setup CNI: %w", err)
 	}
+	// Tear down CNI on any error after this point so the netns file and IPAM
+	// lease are not left behind for the next run.
+	var createErr error
+	defer func() {
+		if createErr != nil {
+			_ = teardownCNI(ctx, sandboxDir)
+		}
+	}()
 
 	// Look up the image — do not pull; EnsureImage() is responsible for that.
 	img, err := r.client.GetImage(ctx, cfg.ImageRef)
 	if err != nil {
 		if errdefs.IsNotFound(err) {
-			return fmt.Errorf("image %q not found; run 'yoloai setup' to build it", cfg.ImageRef)
+			createErr = fmt.Errorf("image %q not found; run 'yoloai setup' to build it", cfg.ImageRef)
+			return createErr
 		}
-		return fmt.Errorf("get image: %w", err)
+		createErr = fmt.Errorf("get image: %w", err)
+		return createErr
 	}
 
 	// Select snapshotter: devmapper for Firecracker (vm-enhanced), overlayfs otherwise.
@@ -70,7 +80,8 @@ func (r *Runtime) Create(ctx context.Context, cfg runtime.InstanceConfig) error 
 	// it does NOT unpack — it only calls Prepare(parent) on the final digest.
 	if unpacked, err := img.IsUnpacked(ctx, snapshotter); err == nil && !unpacked {
 		if err := img.Unpack(ctx, snapshotter); err != nil {
-			return fmt.Errorf("unpack image: %w", err)
+			createErr = fmt.Errorf("unpack image: %w", err)
+			return createErr
 		}
 	}
 
@@ -126,9 +137,8 @@ func (r *Runtime) Create(ctx context.Context, cfg runtime.InstanceConfig) error 
 	}
 
 	if _, err := r.client.NewContainer(ctx, cfg.Name, ctrOpts...); err != nil {
-		// Clean up CNI if container creation fails.
-		_ = teardownCNI(ctx, sandboxDir)
-		return fmt.Errorf("create container: %w", err)
+		createErr = fmt.Errorf("create container: %w", err)
+		return createErr
 	}
 
 	return nil
