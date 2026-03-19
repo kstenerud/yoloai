@@ -249,8 +249,8 @@ func (r *Runtime) verifyDescriptorTree(ctx context.Context, cs content.Store, de
 	if _, err := cs.Info(ctx, desc.Digest); err != nil {
 		return fmt.Errorf("blob %s: %w", desc.Digest, err)
 	}
-	children, err := images.Children(ctx, cs, desc)
-	if err != nil || len(children) == 0 {
+	children, _ := images.Children(ctx, cs, desc) // non-manifest descriptors return err; treat as leaf
+	if len(children) == 0 {
 		return nil // leaf blob, or manifest not readable (non-fatal for leaf)
 	}
 	for _, child := range children {
@@ -269,8 +269,8 @@ func (r *Runtime) shareDescriptorTree(srcCtx, dstCtx context.Context, cs content
 	if err := r.shareBlob(dstCtx, cs, desc); err != nil {
 		return err
 	}
-	children, err := images.Children(srcCtx, cs, desc)
-	if err != nil || len(children) == 0 {
+	children, _ := images.Children(srcCtx, cs, desc) // non-manifest descriptors return err; treat as leaf
+	if len(children) == 0 {
 		return nil // leaf blob or unreadable — normal for layer/config blobs
 	}
 
@@ -337,7 +337,7 @@ func (r *Runtime) shareBlob(ctx context.Context, cs content.Store, desc ocispec.
 		}
 		return fmt.Errorf("open writer for %s: %w", desc.Digest, err)
 	}
-	defer w.Close()
+	defer w.Close() //nolint:errcheck // G104: close after Commit is best-effort cleanup
 
 	// Commit without writing — for shared blobs containerd creates only the
 	// bolt metadata entry in the destination namespace.

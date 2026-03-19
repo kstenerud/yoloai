@@ -95,7 +95,7 @@ func createNetNS(name string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("get current netns: %w", err)
 	}
-	defer origNS.Close()
+	defer origNS.Close() //nolint:errcheck // G104: best-effort restore; OS thread is locked and will exit
 
 	ns, err := netns.NewNamed(name)
 	if err != nil {

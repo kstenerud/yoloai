@@ -72,7 +72,7 @@ func (r *Runtime) ValidateIsolation(_ context.Context, isolation string) error {
 			missing = append(missing, "containerd socket not found at /run/containerd/containerd.sock\n    Fix: sudo systemctl start containerd")
 		}
 	} else {
-		conn.Close()
+		_ = conn.Close()
 	}
 
 	if _, err := exec.LookPath("containerd-shim-kata-v2"); err != nil {

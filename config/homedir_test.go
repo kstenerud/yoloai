@@ -8,7 +8,7 @@ import (
 
 func TestHomeDir_normal(t *testing.T) {
 	// Without SUDO_USER, HomeDir should match os.UserHomeDir.
-	os.Unsetenv("SUDO_USER")
+	_ = os.Unsetenv("SUDO_USER")
 	home := HomeDir()
 	if home == "" {
 		t.Fatal("HomeDir() returned empty string")
