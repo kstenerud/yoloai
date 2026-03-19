@@ -350,6 +350,21 @@ func (r *Runtime) DiagHint(instanceName string) string {
 // Name returns the backend name.
 func (r *Runtime) Name() string { return "seatbelt" }
 
+// PreferredTmuxSocket returns empty: seatbelt uses a per-sandbox socket that
+// is injected by the runtime itself in InteractiveExec via buildTmuxCommand.
+func (r *Runtime) PreferredTmuxSocket() string { return "" }
+
+// AttachCommand returns the command to attach to the tmux session for seatbelt.
+// Seatbelt runs commands directly with the caller's terminal; InteractiveExec
+// injects the per-sandbox socket path via buildTmuxCommand.
+func (r *Runtime) AttachCommand(tmuxSocket string, _ int, _ int, _ string) []string {
+	cmd := []string{"tmux"}
+	if tmuxSocket != "" {
+		cmd = append(cmd, "-S", tmuxSocket)
+	}
+	return append(cmd, "attach", "-t", "main")
+}
+
 // mountSymlinks creates symlinks from Target → Source for mounts where the
 // paths differ, allowing the sandboxed process to find directories at the
 // expected target path. Returns the list of created symlink paths.

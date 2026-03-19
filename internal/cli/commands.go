@@ -525,85 +525,21 @@ func setTerminalTitle(title string) {
 
 // attachToSandbox attaches to the tmux session in a running container.
 // It sets the terminal title to the sandbox name and restores it on detach.
-//
-// PTY/terminal behaviour varies by backend and architecture:
-//
-//   - tart/seatbelt: run commands directly with the caller's terminal already
-//     attached. No script wrapper needed or wanted — macOS BSD script does not
-//     support the GNU -c flag used by the Linux wrapper.
-//
-//   - Standard Docker (all arch): docker exec -it calls TIOCSCTTY, so the
-//     exec'd process gets a controlling terminal. The script wrapper creates a
-//     fresh PTY + controlling terminal, which tmux uses cleanly.
-//
-//   - gVisor on ARM64: docker exec -it does NOT call TIOCSCTTY. The exec'd
-//     process has no controlling terminal, so /dev/tty returns EACCES (gVisor
-//     denies it). tmux falls back to stdin only when errno is ENXIO, not
-//     EACCES. Fix: setsid creates a new session with no CTY, /dev/tty returns
-//     ENXIO, tmux's ENXIO fallback activates and uses stdin (the PTY).
-//
-//   - gVisor on amd64/other: docker exec -it DOES call TIOCSCTTY (same as
-//     standard Docker). setsid would strip the CTY and tmux exits immediately.
-//     The script wrapper works correctly, same as standard Docker.
+// The backend-specific attach command is built by rt.AttachCommand, which
+// knows the correct PTY and terminal strategies for each runtime.
 func attachToSandbox(ctx context.Context, rt runtime.Runtime, containerName, sandboxName string, user string) error {
 	setTerminalTitle(sandboxName)
 	defer setTerminalTitle("")
 
-	// Load metadata to check security mode
 	meta, err := sandbox.LoadMeta(sandbox.Dir(sandboxName))
 	if err != nil {
 		return fmt.Errorf("load sandbox metadata: %w", err)
 	}
 
-	// Build tmux attach command
-	var cmd []string
 	sock := readTmuxSocket(sandboxName)
-
-	switch {
-	case meta.Isolation == "container-enhanced" && goruntime.GOARCH == "arm64":
-		// gVisor on ARM64 requires setsid to work around missing TIOCSCTTY.
-		cmd = []string{"setsid", "tmux"}
-		if sock != "" {
-			cmd = append(cmd, "-S", sock)
-		}
-		cmd = append(cmd, "attach", "-t", "main")
-	case rt.Name() == "tart" || rt.Name() == "seatbelt":
-		// tart/seatbelt run commands directly with the caller's terminal;
-		// no script wrapper needed (and macOS BSD script doesn't support -c).
-		cmd = []string{"tmux"}
-		if sock != "" {
-			cmd = append(cmd, "-S", sock)
-		}
-		cmd = append(cmd, "attach", "-t", "main")
-	case rt.Name() == "containerd":
-		// containerd InteractiveExec creates a kata-agent PTY with Terminal:true.
-		// No script wrapper needed — a nested PTY prevents resize propagation.
-		// Use stty to set terminal dimensions before tmux queries them, since
-		// the kata-agent PTY size (set via ConsoleSize/Resize RPC) may not
-		// propagate to the PTY slave before tmux reads it.
-		var tmuxCmd string
-		if sock != "" {
-			tmuxCmd = fmt.Sprintf("exec /usr/bin/tmux -S %s attach -t main", sock)
-		} else {
-			tmuxCmd = "exec /usr/bin/tmux attach -t main"
-		}
-		// pty.Getsize returns (rows, cols, err).
-		if rows, cols, sizeErr := pty.Getsize(os.Stdin); sizeErr == nil {
-			tmuxCmd = fmt.Sprintf("stty cols %d rows %d 2>/dev/null; %s", cols, rows, tmuxCmd)
-		}
-		cmd = []string{"/bin/sh", "-c", tmuxCmd}
-	default:
-		// Docker/Podman: use script to create a fresh PTY + controlling terminal.
-		// script -q -e -c <cmd> /dev/null: quiet, propagate exit status, run cmd,
-		// discard transcript.
-		var tmuxArgs string
-		if sock != "" {
-			tmuxArgs = fmt.Sprintf("exec tmux -S %s attach -t main", sock)
-		} else {
-			tmuxArgs = "exec tmux attach -t main"
-		}
-		cmd = []string{"/usr/bin/script", "-q", "-e", "-c", tmuxArgs, "/dev/null"}
-	}
+	// pty.Getsize returns (rows, cols, err) — named accordingly.
+	rows, cols, _ := pty.Getsize(os.Stdin)
+	cmd := rt.AttachCommand(sock, rows, cols, meta.Isolation)
 
 	return rt.InteractiveExec(ctx, containerName, cmd, user, "")
 }

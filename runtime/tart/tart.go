@@ -315,6 +315,21 @@ func (r *Runtime) DiagHint(instanceName string) string {
 // Name returns the backend name.
 func (r *Runtime) Name() string { return "tart" }
 
+// PreferredTmuxSocket returns empty: tart VMs use the uid-based default socket.
+// The tart runtime handles socket injection internally in InteractiveExec.
+func (r *Runtime) PreferredTmuxSocket() string { return "" }
+
+// AttachCommand returns the command to attach to the tmux session in a tart VM.
+// Tart runs commands directly with the caller's terminal; no script wrapper
+// needed (and macOS BSD script does not support the GNU -c flag).
+func (r *Runtime) AttachCommand(tmuxSocket string, _ int, _ int, _ string) []string {
+	cmd := []string{"tmux"}
+	if tmuxSocket != "" {
+		cmd = append(cmd, "-S", tmuxSocket)
+	}
+	return append(cmd, "attach", "-t", "main")
+}
+
 // instancePrefix is prepended to sandbox names by the sandbox package
 // to form instance names. We strip it to recover the sandbox name for
 // constructing file-system paths.

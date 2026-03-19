@@ -136,4 +136,18 @@ type Runtime interface {
 
 	// Name returns the backend name (e.g., "docker", "tart", "seatbelt").
 	Name() string
+
+	// PreferredTmuxSocket returns the fixed tmux socket path this backend
+	// uses, or empty string if the backend uses the uid-based default socket.
+	// The value is written into runtime-config.json at sandbox creation time
+	// so all exec'd processes (including non-interactive execs) find the same
+	// tmux server as the container init process.
+	PreferredTmuxSocket() string
+
+	// AttachCommand returns the command to exec interactively to attach to
+	// the tmux session in a running instance. tmuxSocket is the fixed socket
+	// path from runtime-config.json (empty = use default). rows and cols are
+	// the current terminal dimensions (0 = unknown). isolation is the sandbox
+	// isolation mode (e.g. "container-enhanced").
+	AttachCommand(tmuxSocket string, rows, cols int, isolation string) []string
 }

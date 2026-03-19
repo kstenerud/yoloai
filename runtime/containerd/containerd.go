@@ -46,6 +46,12 @@ func (r *Runtime) withNamespace(ctx context.Context) context.Context {
 // Name returns the backend name.
 func (r *Runtime) Name() string { return "containerd" }
 
+// PreferredTmuxSocket returns the fixed tmux socket path for containerd.
+// A fixed path is required for Kata Containers because exec'd processes run
+// inside the VM in a clean environment and may resolve a different uid-based
+// socket path than the container init process.
+func (r *Runtime) PreferredTmuxSocket() string { return "/tmp/yoloai-tmux.sock" }
+
 // Close releases the containerd client connection.
 func (r *Runtime) Close() error { return r.client.Close() }
 

@@ -12,6 +12,8 @@ import (
 	"os/exec"
 	"strings"
 
+	goruntime "runtime"
+
 	cerrdefs "github.com/containerd/errdefs"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/mount"
@@ -331,6 +333,38 @@ func (r *Runtime) DiagHint(instanceName string) string {
 
 // Name returns the backend name.
 func (r *Runtime) Name() string { return r.binaryName }
+
+// PreferredTmuxSocket returns the fixed tmux socket path for Docker/Podman
+// containers. A fixed path ensures exec'd processes find the same server as
+// the container init process (the uid-based default may differ under gVisor).
+func (r *Runtime) PreferredTmuxSocket() string { return "/tmp/yoloai-tmux.sock" }
+
+// AttachCommand returns the command to attach to the tmux session.
+// For gVisor on ARM64, setsid is used to work around missing TIOCSCTTY in
+// gVisor's exec path. For all other cases, script creates a fresh PTY and
+// controlling terminal that tmux can use cleanly.
+func (r *Runtime) AttachCommand(tmuxSocket string, _ int, _ int, isolation string) []string {
+	// gVisor on ARM64: docker exec -it does NOT call TIOCSCTTY, so the exec'd
+	// process has no controlling terminal and tmux exits with EACCES on /dev/tty.
+	// setsid creates a new session with no CTY; /dev/tty returns ENXIO, which
+	// tmux handles by falling back to stdin (the PTY).
+	if isolation == "container-enhanced" && goruntime.GOARCH == "arm64" {
+		cmd := []string{"setsid", "tmux"}
+		if tmuxSocket != "" {
+			cmd = append(cmd, "-S", tmuxSocket)
+		}
+		return append(cmd, "attach", "-t", "main")
+	}
+	// Standard: script -q -e -c <cmd> /dev/null — quiet, propagate exit status,
+	// run cmd, discard transcript. Creates a fresh PTY + controlling terminal.
+	var tmuxArgs string
+	if tmuxSocket != "" {
+		tmuxArgs = fmt.Sprintf("exec tmux -S %s attach -t main", tmuxSocket)
+	} else {
+		tmuxArgs = "exec tmux attach -t main"
+	}
+	return []string{"/usr/bin/script", "-q", "-e", "-c", tmuxArgs, "/dev/null"}
+}
 
 // convertMounts converts runtime.MountSpec to Docker mount.Mount.
 // ConvertMounts converts runtime.MountSpec to Docker SDK mount types.

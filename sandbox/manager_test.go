@@ -84,7 +84,9 @@ func (m *mockRuntime) DiagHint(instanceName string) string {
 	return "check logs for " + instanceName
 }
 
-func (m *mockRuntime) Name() string { return "docker" }
+func (m *mockRuntime) Name() string                                        { return "docker" }
+func (m *mockRuntime) PreferredTmuxSocket() string                         { return "" }
+func (m *mockRuntime) AttachCommand(_ string, _, _ int, _ string) []string { return nil }
 
 func TestEnsureSetup_CreatesDirectories(t *testing.T) {
 	tmpDir := t.TempDir()

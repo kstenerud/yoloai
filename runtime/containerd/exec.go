@@ -19,6 +19,35 @@ import (
 	"github.com/kstenerud/yoloai/runtime"
 )
 
+// termSize returns the current terminal size as (rows, cols).
+// Returns (0, 0) if the terminal size cannot be determined.
+// pty.Getsize returns (rows, cols, err) — named accordingly to prevent swapping.
+func termSize() (rows, cols int) {
+	r, c, err := pty.Getsize(os.Stdin)
+	if err != nil {
+		return 0, 0
+	}
+	return r, c
+}
+
+// AttachCommand returns the command to attach to the tmux session.
+// For containerd/kata, stty is run first to set terminal dimensions on the PTY
+// slave before tmux queries them via TIOCGWINSZ. The kata-agent creates the PTY
+// inside the VM, and the ConsoleSize/Resize RPC may not propagate to the slave
+// before tmux reads the size — stty ensures the dimensions are correct.
+func (r *Runtime) AttachCommand(tmuxSocket string, rows, cols int, _ string) []string {
+	var tmuxCmd string
+	if tmuxSocket != "" {
+		tmuxCmd = fmt.Sprintf("exec /usr/bin/tmux -S %s attach -t main", tmuxSocket)
+	} else {
+		tmuxCmd = "exec /usr/bin/tmux attach -t main"
+	}
+	if rows > 0 && cols > 0 {
+		tmuxCmd = fmt.Sprintf("stty cols %d rows %d 2>/dev/null; %s", cols, rows, tmuxCmd)
+	}
+	return []string{"/bin/sh", "-c", tmuxCmd}
+}
+
 // containerEnv returns the Env slice from the container's stored OCI spec.
 // The Kata agent (inside the VM) executes processes in a clean environment — it does
 // not inherit the running container's environment the way Docker daemon does. Without
@@ -173,8 +202,7 @@ func (r *Runtime) InteractiveExec(ctx context.Context, name string, cmd []string
 	// Set the initial PTY size so the kata-agent creates the PTY at the correct
 	// dimensions. Without this the PTY starts at the shim default (e.g. 0×0),
 	// and tmux reads that size before our post-start Resize call arrives.
-	// pty.Getsize returns (rows, cols, err) — assign in that order.
-	if rows, cols, sizeErr := pty.Getsize(os.Stdin); sizeErr == nil {
+	if rows, cols := termSize(); rows > 0 {
 		processSpec.ConsoleSize = &specs.Box{
 			Width:  uint(cols), //nolint:gosec // G115: terminal dimensions fit in uint
 			Height: uint(rows), //nolint:gosec // G115
@@ -199,10 +227,8 @@ func (r *Runtime) InteractiveExec(ctx context.Context, name string, cmd []string
 	}
 
 	// Send initial terminal size after start.
-	// pty.Getsize returns (rows, cols, err).
-	if rows, cols, err := pty.Getsize(os.Stdin); err == nil {
-		//nolint:gosec // G115: int->uint32 conversion is safe for terminal dimensions
-		_ = process.Resize(ctx, uint32(cols), uint32(rows))
+	if rows, cols := termSize(); rows > 0 {
+		_ = process.Resize(ctx, uint32(cols), uint32(rows)) //nolint:gosec // G115: int->uint32 conversion is safe for terminal dimensions
 	}
 
 	// Forward SIGWINCH (terminal resize) in a goroutine.
@@ -212,10 +238,8 @@ func (r *Runtime) InteractiveExec(ctx context.Context, name string, cmd []string
 
 	go func() {
 		for range sigCh {
-			// pty.Getsize returns (rows, cols, err).
-			if rows, cols, err := pty.Getsize(os.Stdin); err == nil {
-				//nolint:gosec // G115: int->uint32 conversion is safe for terminal dimensions
-				_ = process.Resize(ctx, uint32(cols), uint32(rows))
+			if rows, cols := termSize(); rows > 0 {
+				_ = process.Resize(ctx, uint32(cols), uint32(rows)) //nolint:gosec // G115: int->uint32 conversion is safe for terminal dimensions
 			}
 		}
 	}()

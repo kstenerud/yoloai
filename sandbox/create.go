@@ -491,7 +491,7 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 	copyDirs := collectCopyDirs(workdir, auxDirs)
 
 	// Build config.json
-	configData, err := buildContainerConfig(agentDef, agentCommand, tmuxConf, workdir.ResolvedMountPath(), opts.Debug, networkMode == "isolated", networkAllow, opts.Passthrough, overlayMounts, pr.setup, pr.autoCommitInterval, copyDirs, opts.Name, m.backend)
+	configData, err := buildContainerConfig(agentDef, agentCommand, tmuxConf, workdir.ResolvedMountPath(), opts.Debug, networkMode == "isolated", networkAllow, opts.Passthrough, overlayMounts, pr.setup, pr.autoCommitInterval, copyDirs, opts.Name, m.runtime.PreferredTmuxSocket())
 	if err != nil {
 		return nil, fmt.Errorf("build %s: %w", RuntimeConfigFile, err)
 	}
@@ -930,19 +930,10 @@ func resolveDetectors(idle agent.IdleSupport) []string {
 }
 
 // buildContainerConfig creates the config.json content.
-func buildContainerConfig(agentDef *agent.Definition, agentCommand string, tmuxConf string, workingDir string, debug bool, networkIsolated bool, allowedDomains []string, passthrough []string, overlayMounts []overlayMountConfig, setupCommands []string, autoCommitInterval int, copyDirs []string, sandboxName string, backend string) ([]byte, error) {
+func buildContainerConfig(agentDef *agent.Definition, agentCommand string, tmuxConf string, workingDir string, debug bool, networkIsolated bool, allowedDomains []string, passthrough []string, overlayMounts []overlayMountConfig, setupCommands []string, autoCommitInterval int, copyDirs []string, sandboxName string, tmuxSocket string) ([]byte, error) {
 	var stateDirName string
 	if agentDef.StateDir != "" {
 		stateDirName = filepath.Base(agentDef.StateDir)
-	}
-	// Use a fixed tmux socket path for Docker/Podman/containerd so that exec'd
-	// processes find the same socket as the container entrypoint. The uid-based
-	// default path (/tmp/tmux-<uid>/default) may differ between the init process
-	// and exec'd processes depending on how the runtime resolves the user
-	// environment (gVisor ARM64, Kata Containers, etc.).
-	var tmuxSocket string
-	if backend == "docker" || backend == "podman" || backend == "containerd" {
-		tmuxSocket = "/tmp/yoloai-tmux.sock"
 	}
 	cfg := containerConfig{
 		HostUID:            os.Getuid(),
