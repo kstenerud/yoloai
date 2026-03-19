@@ -91,14 +91,17 @@ func (r *Runtime) EnsureImage(ctx context.Context, sourceDir string, output io.W
 		return fmt.Errorf("ctr import start: %w", err)
 	}
 
-	saveErr := saveCmd.Wait()
+	// Wait for import first; if it fails early, kill save to avoid a hang
+	// while docker save blocks writing to a broken pipe.
 	importErr := importCmd.Wait()
-
-	if saveErr != nil {
-		return fmt.Errorf("docker save: %w", saveErr)
-	}
 	if importErr != nil {
-		return fmt.Errorf("ctr import: %w", importErr)
+		_ = saveCmd.Process.Kill()
+		_ = saveCmd.Wait()
+		return fmt.Errorf("ctr import: %w\n  Hint: ensure your user can access /run/containerd/containerd.sock\n  Fix: sudo usermod -aG containerd $USER  (then log out and back in)", importErr)
+	}
+
+	if saveErr := saveCmd.Wait(); saveErr != nil {
+		return fmt.Errorf("docker save: %w", saveErr)
 	}
 
 	fmt.Fprintln(output, "Image imported successfully.") //nolint:errcheck // best-effort output

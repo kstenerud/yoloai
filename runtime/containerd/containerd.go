@@ -52,8 +52,14 @@ func (r *Runtime) Close() error { return r.client.Close() }
 func (r *Runtime) ValidateIsolation(_ context.Context, isolation string) error {
 	var missing []string
 
-	if _, err := os.Stat("/run/containerd/containerd.sock"); err != nil {
-		missing = append(missing, "containerd socket not found at /run/containerd/containerd.sock")
+	if f, err := os.Open("/run/containerd/containerd.sock"); err != nil {
+		if os.IsPermission(err) {
+			missing = append(missing, "no permission to access containerd socket\n    Fix: sudo usermod -aG containerd $USER  (then log out and back in, or: newgrp containerd)")
+		} else {
+			missing = append(missing, "containerd socket not found at /run/containerd/containerd.sock\n    Fix: sudo systemctl start containerd")
+		}
+	} else {
+		f.Close()
 	}
 
 	if _, err := exec.LookPath("containerd-shim-kata-v2"); err != nil {
