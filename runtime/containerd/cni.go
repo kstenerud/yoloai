@@ -131,7 +131,8 @@ func runCNIAdd(ctx context.Context, netnsPath, sandboxDir, containerName string)
 		return fmt.Errorf("create CNI client: %w", err)
 	}
 
-	if err := n.Load(cni.WithPluginConfDir(cniConfDir())); err != nil {
+	// WithPluginConfDir only sets the dir; WithConfListFile actually loads the file.
+	if err := n.Load(cni.WithConfListFile(filepath.Join(cniConfDir(), "yoloai.conflist"))); err != nil {
 		return fmt.Errorf("load CNI config: %w", err)
 	}
 
@@ -212,7 +213,7 @@ func runCNIDel(ctx context.Context, state cniState) error {
 		return fmt.Errorf("create CNI client: %w", err)
 	}
 
-	if err := n.Load(cni.WithPluginConfDir(cniConfDir())); err != nil {
+	if err := n.Load(cni.WithConfListFile(filepath.Join(cniConfDir(), "yoloai.conflist"))); err != nil {
 		return fmt.Errorf("load CNI config: %w", err)
 	}
 
