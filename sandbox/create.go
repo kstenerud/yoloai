@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	goruntime "runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -493,8 +494,15 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 	// With Podman rootless + keep-id, the container runs as the host user (not yoloai),
 	// so tmux exec must use the default user ("") instead of "yoloai".
 	// keep-id is NOT used when SYS_ADMIN is needed (overlay or recipe cap_add).
+	//
+	// On macOS, Podman runs via Podman Machine (a Linux VM). keep-id maps the
+	// VM user (UID 1000) into the container, not the macOS user (e.g. UID 501).
+	// The container runs as UID 1000, but /home/yoloai is owned by UID 1001 (the
+	// yoloai user created in the Dockerfile), so agents cannot write their config.
+	// Without keep-id, the container starts as root, entrypoint.py remaps yoloai
+	// to the macOS user's UID, and gosu drops to yoloai — exactly as Docker does.
 	usernsMode := ""
-	if m.backend == "podman" && os.Getuid() != 0 {
+	if m.backend == "podman" && os.Getuid() != 0 && goruntime.GOOS != "darwin" {
 		hasSysAdmin := workdir.Mode == "overlay"
 		for _, ad := range auxDirs {
 			if ad.Mode == "overlay" {

@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	goruntime "runtime"
 	"strings"
 
 	"github.com/kstenerud/yoloai/runtime"
@@ -48,8 +49,15 @@ func New(ctx context.Context) (*Runtime, error) {
 // Create wraps the Docker Create to inject --userns=keep-id for rootless mode.
 // Exception: overlay mode requires CAP_SYS_ADMIN and root privileges inside the
 // container, so we skip keep-id when SYS_ADMIN is in CapAdd.
+//
+// keep-id is also skipped on macOS. Podman on macOS runs via Podman Machine (a
+// Linux VM): keep-id maps the VM user (UID 1000) into the container, not the
+// macOS user (e.g. UID 501). The container then runs as UID 1000, but
+// /home/yoloai is owned by UID 1001 (yoloai), preventing agents from writing
+// their config. Without keep-id the container starts as root, and entrypoint.py
+// remaps yoloai to the macOS user's UID via gosu — the same path Docker takes.
 func (r *Runtime) Create(ctx context.Context, cfg runtime.InstanceConfig) error {
-	if isRootless() && cfg.UsernsMode == "" {
+	if isRootless() && cfg.UsernsMode == "" && goruntime.GOOS != "darwin" {
 		// Check if overlay mode is active (indicated by SYS_ADMIN capability)
 		hasOverlay := false
 		for _, cap := range cfg.CapAdd {
