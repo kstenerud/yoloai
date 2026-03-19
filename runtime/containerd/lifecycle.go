@@ -28,7 +28,9 @@ func kataConfigPath(containerRuntime string) string {
 	case "io.containerd.kata-fc.v2":
 		return "/opt/kata/share/defaults/kata-containers/configuration-fc.toml"
 	default: // io.containerd.kata.v2
-		return "/opt/kata/share/defaults/kata-containers/configuration-qemu.toml"
+		// runtime-rs (Rust shim) uses a separate config with [hypervisor.qemu]
+		// format and requires a runtime name field.
+		return "/opt/kata/share/defaults/kata-containers/runtime-rs/configuration-qemu-runtime-rs.toml"
 	}
 }
 

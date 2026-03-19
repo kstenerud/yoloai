@@ -42,7 +42,7 @@ func TestKataConfigPath(t *testing.T) {
 	}{
 		{
 			runtime:  "io.containerd.kata.v2",
-			wantPath: "/opt/kata/share/defaults/kata-containers/configuration-qemu.toml",
+			wantPath: "/opt/kata/share/defaults/kata-containers/runtime-rs/configuration-qemu-runtime-rs.toml",
 		},
 		{
 			runtime:  "io.containerd.kata-fc.v2",
@@ -50,7 +50,7 @@ func TestKataConfigPath(t *testing.T) {
 		},
 		{
 			runtime:  "",
-			wantPath: "/opt/kata/share/defaults/kata-containers/configuration-qemu.toml",
+			wantPath: "/opt/kata/share/defaults/kata-containers/runtime-rs/configuration-qemu-runtime-rs.toml",
 		},
 	}
 
