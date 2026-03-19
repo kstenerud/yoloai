@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"os/exec"
 	"runtime"
+	"strings"
 
 	"github.com/containerd/containerd/v2/core/content"
 	"github.com/containerd/containerd/v2/core/images"
@@ -27,14 +28,16 @@ const dockerImageRef = "docker.io/library/yoloai-base:latest"
 
 // EnsureImage builds the yoloai-base image using Docker and imports it into
 // the containerd yoloai namespace. If force is false and the image already
-// exists, the build is skipped.
+// exists with accessible content, the build is skipped.
 //
-// When Docker runs in containerd-snapshotter mode (the default on this VM),
-// the image is already in containerd's "moby" namespace after docker build.
-// EnsureImage marks that namespace as shareable, then walks the image's
-// descriptor tree and registers each blob in the yoloai namespace via a
-// pure bolt metadata operation — no physical data is copied. Otherwise it
-// falls back to docker save | ctr images import -.
+// Fast path: when Docker runs in containerd-snapshotter mode the image is
+// already in containerd's "moby" namespace. EnsureImage marks that namespace
+// as shareable, walks the descriptor tree, registers each blob in the yoloai
+// namespace via a pure bolt metadata write (no data copy), and sets GC ref
+// labels so containerd's garbage collector can trace the full manifest tree.
+//
+// Slow path: docker save | ctr images import - is used when Docker is not in
+// containerd-snapshotter mode, or when the fast path fails verification.
 func (r *Runtime) EnsureImage(ctx context.Context, sourceDir string, output io.Writer, logger *slog.Logger, force bool) error {
 	ctx = r.withNamespace(ctx)
 
@@ -75,8 +78,9 @@ func (r *Runtime) EnsureImage(ctx context.Context, sourceDir string, output io.W
 	// Fast path: Docker running in containerd-snapshotter mode stores images
 	// directly in containerd (namespace "moby"). Mark that namespace as
 	// shareable and walk the image descriptor tree — containerd registers each
-	// blob in the yoloai namespace via a pure bolt metadata write. No physical
-	// data is copied.
+	// blob in the yoloai namespace via a pure bolt metadata write. GC ref
+	// labels are set on each parent blob so the garbage collector can trace
+	// the full manifest tree and keep all blobs reachable.
 	fmt.Fprintln(output, "Linking image into containerd namespace yoloai...") //nolint:errcheck // best-effort output
 	if err := r.linkFromDockerNamespace(ctx); err == nil {
 		fmt.Fprintln(output, "Image ready.") //nolint:errcheck // best-effort output
@@ -84,7 +88,8 @@ func (r *Runtime) EnsureImage(ctx context.Context, sourceDir string, output io.W
 	}
 
 	// Slow path: docker save | ctr images import -
-	// Used when Docker is not in containerd-snapshotter mode.
+	// Used when Docker is not in containerd-snapshotter mode, or when the
+	// fast path fails verification.
 	ctrBin, err := exec.LookPath("ctr")
 	if err != nil {
 		var hint string
@@ -131,6 +136,17 @@ func (r *Runtime) EnsureImage(ctx context.Context, sourceDir string, output io.W
 		return fmt.Errorf("docker save: %w", saveErr)
 	}
 
+	// ctr import stores the image under the full Docker ref
+	// (docker.io/library/yoloai-base:latest). Create a short alias so the
+	// rest of yoloai can look it up by imageRef ("yoloai-base").
+	imgSvc := r.client.ImageService()
+	if importedImg, err := imgSvc.Get(ctx, dockerImageRef); err == nil {
+		_, cerr := imgSvc.Create(ctx, images.Image{Name: imageRef, Target: importedImg.Target})
+		if cerr != nil && !errdefs.IsAlreadyExists(cerr) {
+			return fmt.Errorf("create image alias: %w", cerr)
+		}
+	}
+
 	fmt.Fprintln(output, "Image imported successfully.") //nolint:errcheck // best-effort output
 	return nil
 }
@@ -148,11 +164,15 @@ func (r *Runtime) EnsureImage(ctx context.Context, sourceDir string, output io.W
 //     is in a shareable namespace it takes the shared path: no underlying
 //     file writer is created and Commit only writes a bolt metadata entry in
 //     the yoloai namespace. No physical data is copied.
+//     After sharing, GC ref labels (containerd.io/gc.ref.content.*) are set
+//     on each parent blob so containerd's garbage collector can trace from
+//     the image record through the full manifest tree to all leaf blobs.
 //
 //  3. Create the image record in yoloai namespace and verify the root
 //     descriptor is readable. If the content is not accessible (e.g. GC
-//     removed the bolt entries during a brief unreferenced window), an error
-//     is returned so the caller can fall back to the slow import path.
+//     removed the bolt entries or Docker didn't store compressed blobs in
+//     the content store), an error is returned so the caller can fall back
+//     to the slow import path.
 func (r *Runtime) linkFromDockerNamespace(ctx context.Context) error {
 	imgSvc := r.client.ImageService()
 	cs := r.client.ContentStore()
@@ -178,6 +198,7 @@ func (r *Runtime) linkFromDockerNamespace(ctx context.Context) error {
 		dstCtx := r.withNamespace(baseCtx)
 
 		// Walk the descriptor tree and register each blob in yoloai.
+		// Also sets GC ref labels so GC can keep all blobs reachable.
 		if err := r.shareDescriptorTree(srcCtx, dstCtx, cs, srcImg.Target); err != nil {
 			return fmt.Errorf("share content: %w", err)
 		}
@@ -204,9 +225,10 @@ func (r *Runtime) linkFromDockerNamespace(ctx context.Context) error {
 		}
 
 		// Verify the root descriptor is actually readable in our namespace.
-		// If sharing failed silently (e.g. isSharedContent returned false and
-		// the underlying writer path produced an ingest that was never flushed),
-		// bail out here so the caller can fall back to the slow import path.
+		// If sharing failed silently (e.g. isSharedContent returned false
+		// because Docker BuildKit didn't store compressed layer blobs as
+		// separate content objects), bail out so the caller falls back to
+		// the slow import path.
 		if _, err := cs.Info(dstCtx, srcImg.Target.Digest); err != nil {
 			_ = imgSvc.Delete(dstCtx, imageRef)
 			return fmt.Errorf("verify shared content: %w", err)
@@ -218,20 +240,64 @@ func (r *Runtime) linkFromDockerNamespace(ctx context.Context) error {
 
 // shareDescriptorTree walks desc and all its children, registering each blob
 // in the destination namespace via a zero-copy metadata-only commit.
+// After sharing a parent blob, it sets GC ref labels on it so containerd's
+// garbage collector can trace from the image record to all leaf blobs.
 func (r *Runtime) shareDescriptorTree(srcCtx, dstCtx context.Context, cs content.Store, desc ocispec.Descriptor) error {
 	if err := r.shareBlob(dstCtx, cs, desc); err != nil {
 		return err
 	}
 	children, err := images.Children(srcCtx, cs, desc)
-	if err != nil {
-		return nil // blobs have no children — normal for leaf nodes
+	if err != nil || len(children) == 0 {
+		return nil // leaf blob or unreadable — normal for layer/config blobs
 	}
+
+	// Set GC ref labels on this parent blob so GC can trace to its children.
+	// Without these labels, GC only follows the direct image → root target
+	// link and cannot reach manifests, configs, or layers further down.
+	if err := r.setGCRefLabels(dstCtx, cs, desc, children); err != nil {
+		return fmt.Errorf("set GC labels for %s: %w", desc.Digest, err)
+	}
+
 	for _, child := range children {
 		if err := r.shareDescriptorTree(srcCtx, dstCtx, cs, child); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// setGCRefLabels updates the bolt metadata for desc in dstCtx with
+// containerd.io/gc.ref.content.* labels pointing to each child descriptor.
+// This mirrors what containerd does during image pull so GC can trace the
+// full manifest tree from the image record.
+func (r *Runtime) setGCRefLabels(ctx context.Context, cs content.Store, desc ocispec.Descriptor, children []ocispec.Descriptor) error {
+	info := content.Info{
+		Digest: desc.Digest,
+		Labels: map[string]string{},
+	}
+	fields := []string{}
+	keys := map[string]uint{}
+
+	for _, child := range children {
+		for _, key := range images.ChildGCLabels(child) {
+			idx := keys[key]
+			keys[key] = idx + 1
+			labelKey := key
+			if strings.HasSuffix(key, ".sha256.") {
+				labelKey = fmt.Sprintf("%s%s", key, child.Digest.Hex()[:12])
+			} else if idx > 0 || key[len(key)-1] == '.' {
+				labelKey = fmt.Sprintf("%s%d", key, idx)
+			}
+			info.Labels[labelKey] = child.Digest.String()
+			fields = append(fields, "labels."+labelKey)
+		}
+	}
+
+	if len(fields) == 0 {
+		return nil
+	}
+	_, err := cs.Update(ctx, info, fields...)
+	return err
 }
 
 // shareBlob registers a single content blob in the destination namespace.
