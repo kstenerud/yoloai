@@ -189,7 +189,35 @@ func (r *Runtime) Start(ctx context.Context, name string) error {
 		return fmt.Errorf("start task: %w", err)
 	}
 
-	return nil
+	// task.Start returns once the shim acknowledges the RPC, but for
+	// slow-starting runtimes (e.g. Kata Containers which boots a full VM)
+	// the task may still be in Created state for many seconds. Poll until
+	// it reaches Running or Stopped so that callers can rely on the
+	// returned nil meaning "container is actually running".
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+	timer := time.NewTimer(60 * time.Second)
+	defer timer.Stop()
+	for {
+		status, statusErr := task.Status(ctx)
+		if statusErr == nil {
+			switch status.Status {
+			case client.Running:
+				return nil
+			case client.Stopped:
+				_, _ = task.Delete(ctx)
+				return fmt.Errorf("task exited immediately after start (exit code: %d)", status.ExitStatus)
+			}
+		}
+		select {
+		case <-ticker.C:
+			// poll again
+		case <-timer.C:
+			return fmt.Errorf("task did not reach running state within 60s")
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
 }
 
 // Stop stops a running containerd container. Returns nil if already stopped or not found.
