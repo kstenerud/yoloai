@@ -12,9 +12,12 @@ import (
 	"os/exec"
 	"runtime"
 
+	"github.com/containerd/containerd/v2/core/content"
 	"github.com/containerd/containerd/v2/core/images"
+	"github.com/containerd/containerd/v2/pkg/labels"
 	"github.com/containerd/containerd/v2/pkg/namespaces"
 	"github.com/containerd/errdefs"
+	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 )
 
 const imageRef = "yoloai-base"
@@ -26,10 +29,12 @@ const dockerImageRef = "docker.io/library/yoloai-base:latest"
 // the containerd yoloai namespace. If force is false and the image already
 // exists, the build is skipped.
 //
-// When Docker runs in containerd-snapshotter mode (common default), the image
-// is already in containerd's "moby" namespace after docker build. In that case
-// EnsureImage copies only the image record (metadata) to the yoloai namespace —
-// no data movement. Otherwise it falls back to docker save | ctr images import -.
+// When Docker runs in containerd-snapshotter mode (the default on this VM),
+// the image is already in containerd's "moby" namespace after docker build.
+// EnsureImage marks that namespace as shareable, then walks the image's
+// descriptor tree and registers each blob in the yoloai namespace via a
+// pure bolt metadata operation — no physical data is copied. Otherwise it
+// falls back to docker save | ctr images import -.
 func (r *Runtime) EnsureImage(ctx context.Context, sourceDir string, output io.Writer, logger *slog.Logger, force bool) error {
 	ctx = r.withNamespace(ctx)
 
@@ -62,8 +67,10 @@ func (r *Runtime) EnsureImage(ctx context.Context, sourceDir string, output io.W
 	}
 
 	// Fast path: Docker running in containerd-snapshotter mode stores images
-	// directly in containerd (namespace "moby"). Copy just the image record to
-	// our namespace — no data movement required.
+	// directly in containerd (namespace "moby"). Mark that namespace as
+	// shareable and walk the image descriptor tree — containerd registers each
+	// blob in the yoloai namespace via a pure bolt metadata write. No physical
+	// data is copied.
 	fmt.Fprintln(output, "Linking image into containerd namespace yoloai...") //nolint:errcheck // best-effort output
 	if err := r.linkFromDockerNamespace(ctx); err == nil {
 		fmt.Fprintln(output, "Image ready.") //nolint:errcheck // best-effort output
@@ -122,23 +129,50 @@ func (r *Runtime) EnsureImage(ctx context.Context, sourceDir string, output io.W
 	return nil
 }
 
-// linkFromDockerNamespace copies the yoloai-base image record from Docker's
-// containerd namespace ("moby" or "default") to the yoloai namespace. This is
-// a metadata-only operation — the content blobs are shared in containerd's
-// content store and require no copying.
+// linkFromDockerNamespace registers the yoloai-base image in the yoloai
+// containerd namespace by sharing content from Docker's namespace ("moby" or
+// "default"). It works in two steps:
+//
+//  1. Mark the source namespace as shareable
+//     (label containerd.io/namespace.shareable=true). This tells containerd
+//     that blobs in that namespace may be referenced from other namespaces.
+//
+//  2. Walk the image's descriptor tree and for each blob call cs.Writer then
+//     w.Commit without writing any data. When containerd sees that the blob
+//     is in a shareable namespace it takes the shared path: no underlying
+//     file writer is created and Commit only writes a bolt metadata entry in
+//     the yoloai namespace. No physical data is copied.
 func (r *Runtime) linkFromDockerNamespace(ctx context.Context) error {
 	imgSvc := r.client.ImageService()
+	cs := r.client.ContentStore()
+	nsSvc := r.client.NamespaceService()
+
+	// ctx already carries the yoloai namespace (set by EnsureImage).
+	// For namespace management and source-namespace lookups use a plain ctx.
+	baseCtx := context.Background()
 
 	for _, srcNS := range []string{"moby", "default"} {
-		srcCtx := namespaces.WithNamespace(ctx, srcNS)
+		srcCtx := namespaces.WithNamespace(baseCtx, srcNS)
 		srcImg, err := imgSvc.Get(srcCtx, dockerImageRef)
 		if err != nil {
 			continue
 		}
 
-		dstCtx := r.withNamespace(ctx)
-		// Delete stale record if force-rebuilding.
-		_ = imgSvc.Delete(dstCtx, imageRef)
+		// Mark source namespace as shareable so containerd allows
+		// cross-namespace content references without data movement.
+		if err := nsSvc.SetLabel(baseCtx, srcNS, labels.LabelSharedNamespace, "true"); err != nil {
+			return fmt.Errorf("mark %s namespace as shareable: %w", srcNS, err)
+		}
+
+		dstCtx := r.withNamespace(baseCtx)
+
+		// Walk the descriptor tree and register each blob in yoloai.
+		if err := r.shareDescriptorTree(srcCtx, dstCtx, cs, srcImg.Target); err != nil {
+			return fmt.Errorf("share content: %w", err)
+		}
+
+		// Create the image record in yoloai namespace.
+		_ = imgSvc.Delete(dstCtx, imageRef) // remove stale record if force-rebuilding
 		_, err = imgSvc.Create(dstCtx, images.Image{
 			Name:   imageRef,
 			Target: srcImg.Target,
@@ -149,6 +183,51 @@ func (r *Runtime) linkFromDockerNamespace(ctx context.Context) error {
 		return nil
 	}
 	return fmt.Errorf("image %q not found in Docker containerd namespaces (moby, default)", dockerImageRef)
+}
+
+// shareDescriptorTree walks desc and all its children, registering each blob
+// in the destination namespace via a zero-copy metadata-only commit.
+func (r *Runtime) shareDescriptorTree(srcCtx, dstCtx context.Context, cs content.Store, desc ocispec.Descriptor) error {
+	if err := r.shareBlob(dstCtx, cs, desc); err != nil {
+		return err
+	}
+	children, err := images.Children(srcCtx, cs, desc)
+	if err != nil {
+		return nil // blobs have no children — normal for leaf nodes
+	}
+	for _, child := range children {
+		if err := r.shareDescriptorTree(srcCtx, dstCtx, cs, child); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// shareBlob registers a single content blob in the destination namespace.
+// When the source namespace is marked shareable, containerd detects the
+// existing blob and performs only a bolt metadata write — no file I/O.
+func (r *Runtime) shareBlob(ctx context.Context, cs content.Store, desc ocispec.Descriptor) error {
+	w, err := cs.Writer(ctx,
+		content.WithRef("yoloai-share-"+desc.Digest.Encoded()),
+		content.WithDescriptor(desc),
+	)
+	if err != nil {
+		if errdefs.IsAlreadyExists(err) {
+			return nil // already in this namespace
+		}
+		return fmt.Errorf("open writer for %s: %w", desc.Digest, err)
+	}
+	defer w.Close()
+
+	// Commit without writing — for shared blobs containerd creates only the
+	// bolt metadata entry in the destination namespace.
+	if err := w.Commit(ctx, desc.Size, desc.Digest); err != nil {
+		if errdefs.IsAlreadyExists(err) {
+			return nil
+		}
+		return fmt.Errorf("commit %s: %w", desc.Digest, err)
+	}
+	return nil
 }
 
 // ImageExists checks if the yoloai-base image exists in the containerd yoloai namespace.
