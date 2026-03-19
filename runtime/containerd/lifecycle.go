@@ -241,14 +241,17 @@ func (r *Runtime) Remove(ctx context.Context, name string) error {
 	ctr, err := r.client.LoadContainer(ctx, name)
 	if err != nil {
 		if errdefs.IsNotFound(err) {
-			return nil
+			// Container was never created (e.g. previous run failed before
+			// NewContainer). Still clean up CNI/netns which may have been
+			// set up before the failure.
+			return r.teardownCNIForSandbox(ctx, sandboxDir)
 		}
 		return fmt.Errorf("load container: %w", err)
 	}
 
 	if err := ctr.Delete(ctx, client.WithSnapshotCleanup); err != nil {
 		if errdefs.IsNotFound(err) {
-			return nil
+			return r.teardownCNIForSandbox(ctx, sandboxDir)
 		}
 		return fmt.Errorf("delete container: %w", err)
 	}
