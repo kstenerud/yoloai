@@ -105,9 +105,39 @@ RUN groupadd -g 1001 yoloai \
     && echo 'yoloai ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/yoloai \
     && chmod 0440 /etc/sudoers.d/yoloai
 
+# Pre-create agent state directories and home seed file placeholders so
+# bind mount targets exist in the image. Kata Containers (and any OCI runtime
+# that does not auto-create missing targets like runc does) requires that both
+# directory and file bind mount destinations exist before the mount is applied.
+RUN mkdir -p \
+        /home/yoloai/.claude \
+        /home/yoloai/.gemini \
+        /home/yoloai/.codex \
+        /home/yoloai/.local/share/opencode \
+        /home/yoloai/.config/github-copilot \
+        /home/yoloai/.config/opencode \
+    && touch \
+        /home/yoloai/.claude.json \
+        /home/yoloai/.opencode.json \
+        /home/yoloai/.aider.conf.yml \
+        /home/yoloai/.tmux.conf \
+    && chown -R yoloai:yoloai /home/yoloai
+
 # Internal directory for sandbox runtime files
 ENV YOLOAI_DIR=/yoloai
-RUN mkdir -p /yoloai/bin /yoloai/tmux && chown -R yoloai:yoloai /yoloai
+RUN mkdir -p \
+        /yoloai/bin \
+        /yoloai/tmux \
+        /yoloai/logs \
+        /yoloai/files \
+        /yoloai/cache \
+        /yoloai/overlay \
+    && touch \
+        /yoloai/agent-status.json \
+        /yoloai/runtime-config.json \
+        /yoloai/prompt.txt \
+    && mkdir -p /run/secrets \
+    && chown -R yoloai:yoloai /yoloai
 
 COPY tmux.conf /yoloai/tmux/tmux.conf
 COPY entrypoint.sh /yoloai/bin/entrypoint.sh
