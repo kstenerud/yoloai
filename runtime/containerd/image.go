@@ -12,20 +12,24 @@ import (
 	"os/exec"
 	"runtime"
 
+	"github.com/containerd/containerd/v2/core/images"
+	"github.com/containerd/containerd/v2/pkg/namespaces"
 	"github.com/containerd/errdefs"
 )
 
 const imageRef = "yoloai-base"
 
+// dockerImageRef is the full ref Docker uses when storing yoloai-base in containerd.
+const dockerImageRef = "docker.io/library/yoloai-base:latest"
+
 // EnsureImage builds the yoloai-base image using Docker and imports it into
 // the containerd yoloai namespace. If force is false and the image already
 // exists, the build is skipped.
 //
-// The build pipeline uses shell commands to avoid a Go dependency on
-// the Docker SDK from this package:
-//
-//	docker build -t yoloai-base <sourceDir>
-//	docker save yoloai-base | ctr -n yoloai images import -
+// When Docker runs in containerd-snapshotter mode (common default), the image
+// is already in containerd's "moby" namespace after docker build. In that case
+// EnsureImage copies only the image record (metadata) to the yoloai namespace —
+// no data movement. Otherwise it falls back to docker save | ctr images import -.
 func (r *Runtime) EnsureImage(ctx context.Context, sourceDir string, output io.Writer, logger *slog.Logger, force bool) error {
 	ctx = r.withNamespace(ctx)
 
@@ -44,18 +48,6 @@ func (r *Runtime) EnsureImage(ctx context.Context, sourceDir string, output io.W
 			"    docker load -i yoloai-base.tar | ctr -n yoloai images import -")
 	}
 
-	ctrBin, err := exec.LookPath("ctr")
-	if err != nil {
-		var hint string
-		switch runtime.GOOS {
-		case "linux":
-			hint = "  Ubuntu/Debian: sudo apt install containerd\n  RHEL/Fedora:   sudo dnf install containerd"
-		default:
-			hint = "  containerd requires a Linux host; see https://containerd.io/docs/getting-started/"
-		}
-		return fmt.Errorf("ctr (containerd CLI) not found; install containerd:\n%s", hint)
-	}
-
 	// Build the image with Docker.
 	fmt.Fprintln(output, "Building yoloai-base image with Docker (this may take a few minutes)...") //nolint:errcheck // best-effort output
 	logger.Info("building yoloai-base image", "sourceDir", sourceDir)
@@ -69,8 +61,30 @@ func (r *Runtime) EnsureImage(ctx context.Context, sourceDir string, output io.W
 		return fmt.Errorf("docker build: %w", err)
 	}
 
-	// Import into containerd via pipe: docker save | ctr images import -
-	fmt.Fprintln(output, "Importing image into containerd namespace yoloai...") //nolint:errcheck // best-effort output
+	// Fast path: Docker running in containerd-snapshotter mode stores images
+	// directly in containerd (namespace "moby"). Copy just the image record to
+	// our namespace — no data movement required.
+	fmt.Fprintln(output, "Linking image into containerd namespace yoloai...") //nolint:errcheck // best-effort output
+	if err := r.linkFromDockerNamespace(ctx); err == nil {
+		fmt.Fprintln(output, "Image ready.") //nolint:errcheck // best-effort output
+		return nil
+	}
+
+	// Slow path: docker save | ctr images import -
+	// Used when Docker is not in containerd-snapshotter mode.
+	ctrBin, err := exec.LookPath("ctr")
+	if err != nil {
+		var hint string
+		switch runtime.GOOS {
+		case "linux":
+			hint = "  Ubuntu/Debian: sudo apt install containerd\n  RHEL/Fedora:   sudo dnf install containerd"
+		default:
+			hint = "  containerd requires a Linux host; see https://containerd.io/docs/getting-started/"
+		}
+		return fmt.Errorf("ctr (containerd CLI) not found; install containerd:\n%s", hint)
+	}
+
+	fmt.Fprintln(output, "Importing image into containerd namespace yoloai (this may take a few minutes)...") //nolint:errcheck // best-effort output
 
 	saveCmd := exec.CommandContext(ctx, dockerBin, "save", imageRef)                       //nolint:gosec // G204: imageRef is a constant
 	importCmd := exec.CommandContext(ctx, ctrBin, "-n", "yoloai", "images", "import", "-") //nolint:gosec // G204: ctrBin and args are trusted
@@ -106,6 +120,35 @@ func (r *Runtime) EnsureImage(ctx context.Context, sourceDir string, output io.W
 
 	fmt.Fprintln(output, "Image imported successfully.") //nolint:errcheck // best-effort output
 	return nil
+}
+
+// linkFromDockerNamespace copies the yoloai-base image record from Docker's
+// containerd namespace ("moby" or "default") to the yoloai namespace. This is
+// a metadata-only operation — the content blobs are shared in containerd's
+// content store and require no copying.
+func (r *Runtime) linkFromDockerNamespace(ctx context.Context) error {
+	imgSvc := r.client.ImageService()
+
+	for _, srcNS := range []string{"moby", "default"} {
+		srcCtx := namespaces.WithNamespace(ctx, srcNS)
+		srcImg, err := imgSvc.Get(srcCtx, dockerImageRef)
+		if err != nil {
+			continue
+		}
+
+		dstCtx := r.withNamespace(ctx)
+		// Delete stale record if force-rebuilding.
+		_ = imgSvc.Delete(dstCtx, imageRef)
+		_, err = imgSvc.Create(dstCtx, images.Image{
+			Name:   imageRef,
+			Target: srcImg.Target,
+		})
+		if err != nil && !errdefs.IsAlreadyExists(err) {
+			return fmt.Errorf("create image record: %w", err)
+		}
+		return nil
+	}
+	return fmt.Errorf("image %q not found in Docker containerd namespaces (moby, default)", dockerImageRef)
 }
 
 // ImageExists checks if the yoloai-base image exists in the containerd yoloai namespace.
