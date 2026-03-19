@@ -19,6 +19,22 @@ import (
 	"github.com/kstenerud/yoloai/runtime"
 )
 
+// containerEnv returns the Env slice from the container's stored OCI spec.
+// The Kata agent (inside the VM) executes processes in a clean environment — it does
+// not inherit the running container's environment the way Docker daemon does. Without
+// an explicit Env (including PATH), bare command names fail to resolve.
+// Falls back to a standard Debian PATH if the spec cannot be read.
+func containerEnv(ctx context.Context, ctr interface {
+	Spec(context.Context) (*specs.Spec, error)
+}) []string {
+	const fallback = "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+	spec, err := ctr.Spec(ctx)
+	if err != nil || spec.Process == nil || len(spec.Process.Env) == 0 {
+		return []string{fallback}
+	}
+	return spec.Process.Env
+}
+
 // Exec runs a command inside a running containerd container and returns the result.
 func (r *Runtime) Exec(ctx context.Context, name string, cmd []string, user string) (runtime.ExecResult, error) {
 	ctx = r.withNamespace(ctx)
@@ -45,6 +61,7 @@ func (r *Runtime) Exec(ctx context.Context, name string, cmd []string, user stri
 		Args:     cmd,
 		Cwd:      "/",
 		Terminal: false,
+		Env:      containerEnv(ctx, ctr),
 	}
 	if user != "" {
 		processSpec.User = specs.User{Username: user}
@@ -130,16 +147,38 @@ func (r *Runtime) InteractiveExec(ctx context.Context, name string, cmd []string
 	// Attach using real stdin/stdout — the shim bridges them to the container PTY.
 	ioAttach := cio.NewAttach(cio.WithTerminal, cio.WithStreams(os.Stdin, os.Stdout, nil))
 
+	// For interactive PTY execs, TERM must be set so ncurses/tmux can
+	// initialize. The container OCI spec does not include TERM (it's a
+	// runtime property, not an image property). Use the host's TERM value
+	// so the terminal type matches the PTY being bridged.
+	env := containerEnv(ctx, ctr)
+	term := os.Getenv("TERM")
+	if term == "" {
+		term = "xterm-256color"
+	}
+	env = append(env, "TERM="+term)
+
 	processSpec := &specs.Process{
 		Args:     cmd,
 		Cwd:      "/",
 		Terminal: true,
+		Env:      env,
 	}
 	if workDir != "" {
 		processSpec.Cwd = workDir
 	}
 	if user != "" {
 		processSpec.User = specs.User{Username: user}
+	}
+	// Set the initial PTY size so the kata-agent creates the PTY at the correct
+	// dimensions. Without this the PTY starts at the shim default (e.g. 0×0),
+	// and tmux reads that size before our post-start Resize call arrives.
+	// pty.Getsize returns (rows, cols, err) — assign in that order.
+	if rows, cols, sizeErr := pty.Getsize(os.Stdin); sizeErr == nil {
+		processSpec.ConsoleSize = &specs.Box{
+			Width:  uint(cols), //nolint:gosec // G115: terminal dimensions fit in uint
+			Height: uint(rows), //nolint:gosec // G115
+		}
 	}
 
 	process, err := task.Exec(ctx, execID, processSpec, func(id string) (cio.IO, error) {
@@ -160,7 +199,8 @@ func (r *Runtime) InteractiveExec(ctx context.Context, name string, cmd []string
 	}
 
 	// Send initial terminal size after start.
-	if cols, rows, err := pty.Getsize(os.Stdin); err == nil {
+	// pty.Getsize returns (rows, cols, err).
+	if rows, cols, err := pty.Getsize(os.Stdin); err == nil {
 		//nolint:gosec // G115: int->uint32 conversion is safe for terminal dimensions
 		_ = process.Resize(ctx, uint32(cols), uint32(rows))
 	}
@@ -172,7 +212,8 @@ func (r *Runtime) InteractiveExec(ctx context.Context, name string, cmd []string
 
 	go func() {
 		for range sigCh {
-			if cols, rows, err := pty.Getsize(os.Stdin); err == nil {
+			// pty.Getsize returns (rows, cols, err).
+			if rows, cols, err := pty.Getsize(os.Stdin); err == nil {
 				//nolint:gosec // G115: int->uint32 conversion is safe for terminal dimensions
 				_ = process.Resize(ctx, uint32(cols), uint32(rows))
 			}

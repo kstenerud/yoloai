@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/creack/pty"
 	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/sandbox"
 	"github.com/spf13/cobra"
@@ -574,9 +575,25 @@ func attachToSandbox(ctx context.Context, rt runtime.Runtime, containerName, san
 			cmd = append(cmd, "-S", sock)
 		}
 		cmd = append(cmd, "attach", "-t", "main")
+	case rt.Name() == "containerd":
+		// containerd InteractiveExec creates a kata-agent PTY with Terminal:true.
+		// No script wrapper needed — a nested PTY prevents resize propagation.
+		// Use stty to set terminal dimensions before tmux queries them, since
+		// the kata-agent PTY size (set via ConsoleSize/Resize RPC) may not
+		// propagate to the PTY slave before tmux reads it.
+		var tmuxCmd string
+		if sock != "" {
+			tmuxCmd = fmt.Sprintf("exec /usr/bin/tmux -S %s attach -t main", sock)
+		} else {
+			tmuxCmd = "exec /usr/bin/tmux attach -t main"
+		}
+		// pty.Getsize returns (rows, cols, err).
+		if rows, cols, sizeErr := pty.Getsize(os.Stdin); sizeErr == nil {
+			tmuxCmd = fmt.Sprintf("stty cols %d rows %d 2>/dev/null; %s", cols, rows, tmuxCmd)
+		}
+		cmd = []string{"/bin/sh", "-c", tmuxCmd}
 	default:
-		// Container backends (docker, podman, containerd): use script to
-		// create a fresh PTY + controlling terminal.
+		// Docker/Podman: use script to create a fresh PTY + controlling terminal.
 		// script -q -e -c <cmd> /dev/null: quiet, propagate exit status, run cmd,
 		// discard transcript.
 		var tmuxArgs string
@@ -585,7 +602,7 @@ func attachToSandbox(ctx context.Context, rt runtime.Runtime, containerName, san
 		} else {
 			tmuxArgs = "exec tmux attach -t main"
 		}
-		cmd = []string{"script", "-q", "-e", "-c", tmuxArgs, "/dev/null"}
+		cmd = []string{"/usr/bin/script", "-q", "-e", "-c", tmuxArgs, "/dev/null"}
 	}
 
 	return rt.InteractiveExec(ctx, containerName, cmd, user, "")

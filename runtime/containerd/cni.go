@@ -34,7 +34,7 @@ const cniConflistTemplate = `{
       "ipMasq": true,
       "ipam": {
         "type": "host-local",
-        "subnet": "10.88.0.0/16",
+        "subnet": "10.89.0.0/16",
         "routes": [{"dst": "0.0.0.0/0"}]
       }
     },
@@ -62,15 +62,19 @@ func cniStatePath(sandboxDir string) string {
 	return filepath.Join(sandboxDir, config.BackendDirName, cniStateFileName)
 }
 
-// ensureCNIConflist writes the yoloai CNI conflist if it does not already exist.
+// ensureCNIConflist writes the yoloai CNI conflist if it does not already exist
+// or if the existing file does not match the current template. Overwriting on
+// mismatch ensures subnet changes (e.g. moving from 10.88 to 10.89 to avoid
+// conflicts with Podman) take effect without manual intervention.
 func ensureCNIConflist() error {
 	dir := cniConfDir()
 	if err := os.MkdirAll(dir, 0o750); err != nil { //nolint:gosec // G301: 0750 is appropriate for CNI config dir
 		return fmt.Errorf("create CNI config dir: %w", err)
 	}
 	path := filepath.Join(dir, "yoloai.conflist")
-	if _, err := os.Stat(path); err == nil {
-		return nil // already exists
+	existing, err := os.ReadFile(path) //nolint:gosec // G304: path is always a trusted yoloai config subpath
+	if err == nil && string(existing) == cniConflistTemplate {
+		return nil // up to date
 	}
 	if err := os.WriteFile(path, []byte(cniConflistTemplate), 0o644); err != nil { //nolint:gosec // G306: world-readable config is correct
 		return fmt.Errorf("write CNI conflist: %w", err)

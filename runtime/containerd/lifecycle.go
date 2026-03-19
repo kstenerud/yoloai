@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"syscall"
 	"time"
@@ -22,15 +23,15 @@ import (
 )
 
 // kataConfigPath returns the Kata Containers configuration file path for the
-// given shimv2 runtime type.
+// given shimv2 runtime type, or "" to use the shim's built-in default.
 func kataConfigPath(containerRuntime string) string {
 	switch containerRuntime {
 	case "io.containerd.kata-fc.v2":
 		return "/opt/kata/share/defaults/kata-containers/configuration-fc.toml"
 	default: // io.containerd.kata.v2
-		// runtime-rs (Rust shim) uses a separate config with [hypervisor.qemu]
-		// format and requires a runtime name field.
-		return "/opt/kata/share/defaults/kata-containers/runtime-rs/configuration-qemu-runtime-rs.toml"
+		// Return "" to use the shim's default configuration (Dragonball VMM).
+		// Overriding with a QEMU config causes the VM to crash on this setup.
+		return ""
 	}
 }
 
@@ -135,29 +136,48 @@ func (r *Runtime) Create(ctx context.Context, cfg runtime.InstanceConfig) error 
 		specOpts = append(specOpts, oci.WithAddedCapabilities(cfg.CapAdd))
 	}
 
-	// Convert mounts.
-	if len(cfg.Mounts) > 0 {
-		mounts := make([]specs.Mount, 0, len(cfg.Mounts))
-		for _, m := range cfg.Mounts {
-			opts := []string{"rbind"}
-			if m.ReadOnly {
-				opts = append(opts, "ro")
-			} else {
-				opts = append(opts, "rw")
-			}
-			mounts = append(mounts, specs.Mount{
-				Type:        "bind",
-				Source:      m.Source,
-				Destination: m.Target,
-				Options:     opts,
-			})
-		}
-		specOpts = append(specOpts, oci.WithMounts(mounts))
+	// Always bind-mount a working resolv.conf so the container can resolve DNS.
+	// Docker handles this automatically; raw containerd does not.
+	// On systemd-resolved hosts (Ubuntu), /etc/resolv.conf → stub-resolv.conf
+	// which contains nameserver 127.0.0.53 — unreachable from inside the VM.
+	// Use /run/systemd/resolve/resolv.conf instead, which has the real upstream
+	// nameservers. Fall back to /etc/resolv.conf on non-systemd hosts.
+	resolvConf := "/etc/resolv.conf"
+	if _, err := os.Stat("/run/systemd/resolve/resolv.conf"); err == nil {
+		resolvConf = "/run/systemd/resolve/resolv.conf"
+	}
+	extraMounts := []specs.Mount{
+		{
+			Type:        "bind",
+			Source:      resolvConf,
+			Destination: "/etc/resolv.conf",
+			Options:     []string{"rbind", "ro"},
+		},
 	}
 
-	// Kata config passed via runtimeoptions.
-	kataOpts := &runtimeoptions.Options{
-		ConfigPath: kataConfigPath(cfg.ContainerRuntime),
+	// Convert user-specified mounts.
+	for _, m := range cfg.Mounts {
+		opts := []string{"rbind"}
+		if m.ReadOnly {
+			opts = append(opts, "ro")
+		} else {
+			opts = append(opts, "rw")
+		}
+		extraMounts = append(extraMounts, specs.Mount{
+			Type:        "bind",
+			Source:      m.Source,
+			Destination: m.Target,
+			Options:     opts,
+		})
+	}
+	specOpts = append(specOpts, oci.WithMounts(extraMounts))
+
+	// Kata config: only override when a non-default config path is needed
+	// (e.g. Firecracker). For the default kata.v2 runtime, pass nil to let
+	// the shim use its built-in default (Dragonball VMM).
+	var kataOpts interface{}
+	if cfgPath := kataConfigPath(cfg.ContainerRuntime); cfgPath != "" {
+		kataOpts = &runtimeoptions.Options{ConfigPath: cfgPath}
 	}
 
 	ctrOpts := []client.NewContainerOpts{

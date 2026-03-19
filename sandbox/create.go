@@ -753,9 +753,12 @@ func (m *Manager) launchContainer(ctx context.Context, state *sandboxState) erro
 		return fmt.Errorf("inspect instance after start: %w", err)
 	}
 	if !info.Running {
-		// Try agent log file first (written by entrypoint after startup).
-		logPath := filepath.Join(state.sandboxDir, AgentLogFile)
-		if tail := readLogTail(logPath, 20); tail != "" {
+		// Try sandbox.jsonl first — written by entrypoint.sh and entrypoint.py.
+		if tail := readLogTail(filepath.Join(state.sandboxDir, "logs", "sandbox.jsonl"), 20); tail != "" {
+			return fmt.Errorf("instance exited immediately:\n%s", tail)
+		}
+		// Try agent log file (written after tmux setup).
+		if tail := readLogTail(filepath.Join(state.sandboxDir, AgentLogFile), 20); tail != "" {
 			return fmt.Errorf("instance exited immediately:\n%s", tail)
 		}
 		// Fall back to container logs (captures pre-entrypoint crashes, e.g. gVisor startup errors).
@@ -932,12 +935,13 @@ func buildContainerConfig(agentDef *agent.Definition, agentCommand string, tmuxC
 	if agentDef.StateDir != "" {
 		stateDirName = filepath.Base(agentDef.StateDir)
 	}
-	// Use a fixed tmux socket path for Docker/Podman so that docker exec'd
-	// processes find the same socket as the container entrypoint. Under gVisor
-	// on ARM64 the uid-based default path (/tmp/tmux-<uid>/default) may not
-	// be visible to processes spawned by docker exec.
+	// Use a fixed tmux socket path for Docker/Podman/containerd so that exec'd
+	// processes find the same socket as the container entrypoint. The uid-based
+	// default path (/tmp/tmux-<uid>/default) may differ between the init process
+	// and exec'd processes depending on how the runtime resolves the user
+	// environment (gVisor ARM64, Kata Containers, etc.).
 	var tmuxSocket string
-	if backend == "docker" || backend == "podman" {
+	if backend == "docker" || backend == "podman" || backend == "containerd" {
 		tmuxSocket = "/tmp/yoloai-tmux.sock"
 	}
 	cfg := containerConfig{
