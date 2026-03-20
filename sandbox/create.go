@@ -1321,6 +1321,26 @@ func buildMounts(state *sandboxState, secretsDir string) []runtime.MountSpec {
 		}
 	}
 
+	// Git identity: mount ~/.gitconfig and ~/.config/git/ read-only so that
+	// git commands inside the container can resolve user.name / user.email.
+	// Mirrors the symlink-based approach used by the Seatbelt backend.
+	gitconfigPath := ExpandTilde("~/.gitconfig")
+	if _, err := os.Stat(gitconfigPath); err == nil {
+		mounts = append(mounts, runtime.MountSpec{
+			Source:   gitconfigPath,
+			Target:   "/home/yoloai/.gitconfig",
+			ReadOnly: true,
+		})
+	}
+	gitConfigDir := ExpandTilde("~/.config/git")
+	if info, err := os.Stat(gitConfigDir); err == nil && info.IsDir() {
+		mounts = append(mounts, runtime.MountSpec{
+			Source:   gitConfigDir,
+			Target:   "/home/yoloai/.config/git",
+			ReadOnly: true,
+		})
+	}
+
 	// Config/profile mounts (host:container[:ro])
 	for _, m := range state.configMounts {
 		spec, err := parseConfigMount(m)
