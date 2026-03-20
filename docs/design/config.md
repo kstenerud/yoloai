@@ -54,6 +54,7 @@ tmux_conf: default+host               # default+host | default | host | none (se
 **User defaults (`~/.yoloai/defaults/config.yaml`)** — active only when `--profile` is not given:
 
 ```yaml
+# os: linux                           # Guest OS: linux (default), mac; CLI --os overrides
 # container_backend: docker           # Container backend preference: docker, podman (applies to --isolation container/container-enhanced only)
 # tart:                               # Tart backend settings
 #   image:                            # Custom base VM image
@@ -78,11 +79,12 @@ env: {}                               # Environment variables forwarded to conta
 #   memory: 8g                        # docker --memory
 ```
 
-Settings are managed via `yoloai config get/set` or by editing the file directly.
+Settings are managed via `yoloai config get/set` or by editing the file directly. Unknown fields in either config file are an error — `yoloai new` fails with a clear message listing the unrecognized keys.
 
 **Implemented settings:**
 
-- `container_backend` selects the preferred container backend when `--isolation container` or `container-enhanced` is in effect. Valid values: `docker`, `podman`. Only applies to container isolation modes — `vm`, `vm-enhanced`, and `--os mac` always auto-select their backends (`containerd`/`tart`/`seatbelt`) regardless of this setting. CLI `--backend` overrides config.
+- `os` selects the guest OS for all sandboxes. Valid values: `linux` (default), `mac`. Useful on macOS when you always want macOS sandboxes. CLI `--os` overrides config.
+- `container_backend` selects the Linux container backend. Valid values: `docker`, `podman`. Both work on Linux and macOS. Only applies when running Linux containers (`isolation: container` or `container-enhanced`) — `vm` and `vm-enhanced` use containerd, and `os: mac` uses Seatbelt or Tart. CLI `--backend` overrides config.
 - `tart.image` overrides the base VM image for the tart backend.
 - `tmux_conf` (global config) controls how user tmux config interacts with the container. Set by the interactive first-run setup. Values: `default+host`, `default`, `host`, `none` (see [setup.md](setup.md#tmux-configuration)).
 - `agent` selects the agent to launch. Valid values: `aider`, `claude`, `codex`, `gemini`, `opencode`. CLI `--agent` overrides config.
@@ -144,13 +146,18 @@ Profiles live in `~/.yoloai/profiles/<name>/` and are always selected explicitly
 
 **Profiles are self-contained.** Profile config merges over baked-in defaults only — user defaults (`~/.yoloai/defaults/config.yaml`) do not apply when a profile is active. This makes profiles fully deterministic: their behavior is the same regardless of who runs them or what their personal defaults are.
 
+**Personal defaults do not carry into profiles — no exceptions.** When a profile is active, settings from `defaults/config.yaml` are completely ignored: personal `mounts` (e.g. `~/.gitconfig`, `~/.ssh`), `agent_files`, `env`, `agent_args`, and everything else. If a profile sandbox needs `~/.gitconfig`, it must be listed in the profile's `mounts`. This is intentional: a profile that silently inherits personal state isn't reproducible. There is no "global mounts" escape hatch.
+
 **File resolution.** For each file (Dockerfile, tmux.conf), the profile directory is checked first; if absent, the baked-in default is used. For `config.yaml`, the baked-in default config is loaded first, then the profile's config.yaml is merged on top.
 
 **Name validation:** Profile names must match `^[a-zA-Z0-9][a-zA-Z0-9_.-]*$`, max 56 characters. Profile names become Docker image tags (`yoloai-<profile>`), so the character restrictions ensure compatibility with Docker's naming rules.
 
-**Implemented profile fields:** `agent`, `model`, `container_backend`, `tart.image`, `env`, `agent_args`, `agent_files`, `ports`, `workdir`, `directories`, `resources`, `network`, `mounts`, `isolation`, `cap_add`, `devices`, `setup`, `auto_commit_interval`. Unknown fields are silently ignored.
+**Implemented profile fields:** `agent`, `model`, `os`, `container_backend`, `tart.image`, `env`, `agent_args`, `agent_files`, `ports`, `workdir`, `directories`, `resources`, `network`, `mounts`, `isolation`, `cap_add`, `devices`, `setup`, `auto_commit_interval`. Unknown fields are an error — `yoloai new` fails with a clear message listing the unrecognized keys. This catches typos and fields that have been renamed.
+
+**Machine-specific fields — fail loudly if prerequisites are absent.** `isolation` and `os` select runtime environments that may not be available on every machine. `isolation: vm` uses Kata Containers on Linux (requires KVM) and Tart on macOS (requires Tart installed). `isolation: vm-enhanced` is Linux-only and additionally requires Firecracker. `os: linux` is the default and works everywhere. `os: mac` requires a macOS host; the specific backend depends on `isolation` (`container` → Seatbelt, `vm` → Tart). All other isolation levels may also have prerequisites (e.g. `container-enhanced` requires Podman). If the required prerequisites are not present, `yoloai new` fails with a clear error — it does not silently fall back to a different mode. A profile that specifies `isolation` or `os` will not work everywhere.
 
 **Backend handling:**
+- `os` — optional. Selects the guest OS for the sandbox. Valid values: `linux` (default), `mac`. `linux` is the default and requires no special hardware. `mac` requires a macOS host; the backend depends on `isolation`: `container` uses Seatbelt, `vm` uses Tart. Fails loudly on non-macOS hosts or if the required backend is not installed. CLI `--os` overrides.
 - `container_backend` — optional preference. Only meaningful for `--isolation container` or `container-enhanced`; ignored for `vm`, `vm-enhanced`, and `--os mac`.
 - `Dockerfile` — optional. Used with Docker and Podman backends to build a `yoloai-<profile>` image. Must use `FROM yoloai-base`. Ignored with Tart and Seatbelt backends. When absent, Docker/Podman backends use `yoloai-base`.
 - `tart.image` — optional. Used only with the Tart backend. Ignored with other backends.
@@ -211,18 +218,32 @@ directories:
     mount: /usr/local/lib/shared
   - path: /home/user/common-types
     # default: read-only
+
+# --- Machine-specific fields ---
+# isolation: container                    # os=linux: Docker or Podman; os=mac: Seatbelt
+# isolation: container-enhanced           # os=linux: Podman required; os=mac: not supported
+# isolation: vm                           # os=linux: KVM + Kata required; os=mac: Tart required
+# isolation: vm-enhanced                  # os=linux: KVM + Kata + Firecracker required; os=mac: not supported
+# os: linux                               # explicit default; Linux container/VM
+# os: mac                                 # requires macOS host; isolation determines backend (container→Seatbelt, vm→Tart)
 ```
 
 CLI workdir **replaces** profile workdir. CLI `-d` dirs are **additive** with profile dirs.
 
-**Merge rule:** Baked-in defaults → profile config.yaml → CLI flags. Scalars override. Lists are additive. Maps are merged (profile wins on conflict). Exception: `agent_files` replaces entirely.
+**WOMM (works-on-my-machine) risks.** Profiles are self-contained and reproducible within the bounds of what they specify. However, certain field values are inherently machine-specific or user-specific:
+
+- **Absolute paths** in `workdir.path` and `directories[].path` (e.g. `/home/alice/my-app`) only work on machines where those paths exist. This is intentional — it supports reproducible deployments where tooling like Ansible has placed files at known, deterministic paths. For personal use, prefer CLI flags to keep profiles shareable.
+- **`${VAR}` expansion** is applied at runtime from the host environment. A profile with `agent_files: "${HOME}"` or `env: {FOO: "${BAR}"}` produces different results on each machine. `isolation` and `os` constraints require specific host capabilities. yoloai provides the tools and reasonable default protections, but cannot guarantee portability of values that are inherently environment-specific. Share profiles knowing their machine-specific values require matching environments.
+
+**Merge rule:** Baked-in defaults → profile config.yaml → CLI flags. See the table below for per-field merge behavior; the general rules (scalars override, lists are additive, maps merge) have exceptions.
 
 | Field                  | Merge behavior                                                                        |
 |------------------------|---------------------------------------------------------------------------------------|
-| `container_backend`    | Profile overrides baked-in. Only applies to `container`/`container-enhanced`. CLI `--backend` overrides. |
+| `container_backend`    | Profile overrides baked-in. Selects Linux container backend (docker/podman); works on Linux and macOS. Ignored for `vm`, `vm-enhanced`, and `os: mac`. CLI `--backend` overrides. |
 | `agent`                | Profile overrides baked-in. CLI `--agent` overrides.                                 |
 | `model`                | Profile overrides baked-in. CLI `--model` overrides.                                 |
-| `isolation`            | Profile overrides baked-in. CLI `--isolation` overrides.                             |
+| `os`                   | Profile overrides baked-in. CLI `--os` overrides. Valid: `linux` (default), `mac`. `mac` requires macOS host; backend depends on `isolation` (`container` → Seatbelt, `vm` → Tart). Fails loudly on non-macOS hosts. |
+| `isolation`            | Profile overrides baked-in. CLI `--isolation` overrides. Backend is host-dependent (`vm` → Kata on Linux, Tart on macOS); fails loudly if prerequisites absent. |
 | `tart.image`           | Profile overrides baked-in.                                                           |
 | `ports`                | Additive                                                                              |
 | `env`                  | Merged (profile wins on conflict)                                                     |
