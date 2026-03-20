@@ -22,145 +22,14 @@ import (
 	dockerclient "github.com/docker/docker/client"
 )
 
-const checksumFile = ".resource-checksums"
 const lastBuildFile = ".last-build-checksum"
 
-// SeedResult describes what happened during resource seeding.
-type SeedResult struct {
-	Changed         bool     // files were created or updated — image rebuild needed
-	Conflicts       []string // files with user customizations that weren't overwritten
-	ManifestMissing bool     // checksum manifest was missing or corrupt (first run after upgrade)
-}
-
-// SeedResources writes embedded Dockerfile and entrypoint.sh to the
-// target directory, respecting user customizations.
-//
-// For each file, the logic is:
-//  1. File missing → write it, record checksum.
-//  2. File matches last-seeded checksum (unmodified by user) AND embedded
-//     version changed → overwrite, update checksum.
-//  3. File differs from last-seeded checksum (user customized) AND embedded
-//     version changed → write <file>.new, add to Conflicts.
-//  4. Embedded version unchanged → nothing to do.
-//
-// Returns a SeedResult indicating whether a rebuild is needed and whether
-// any conflicts were detected.
-func SeedResources(targetDir string) (SeedResult, error) {
-	var result SeedResult
-
-	if err := os.MkdirAll(targetDir, 0750); err != nil {
-		return result, fmt.Errorf("create directory %s: %w", targetDir, err)
-	}
-
-	files := []struct {
-		name    string
-		content []byte
-	}{
-		{"Dockerfile", embeddedDockerfile},
-		{"entrypoint.sh", embeddedEntrypoint},
-		{"entrypoint.py", embeddedEntrypointPy},
-		{"sandbox-setup.py", embeddedSandboxSetup},
-		{"status-monitor.py", embeddedStatusMonitor},
-		{"diagnose-idle.sh", embeddedDiagnoseIdle},
-		{"tmux.conf", embeddedTmuxConf},
-	}
-
-	checksums, manifestOK := loadChecksums(targetDir)
-	result.ManifestMissing = !manifestOK
-
-	for _, f := range files {
-		path := filepath.Join(targetDir, f.name)
-		embeddedSum := sha256Hex(f.content)
-
-		existing, readErr := os.ReadFile(path) //nolint:gosec // G304: targetDir is ~/.yoloai/, not user input
-
-		if readErr != nil {
-			// File missing → write it
-			if err := os.WriteFile(path, f.content, 0600); err != nil {
-				return result, fmt.Errorf("write %s: %w", f.name, err)
-			}
-			checksums[f.name] = embeddedSum
-			result.Changed = true
-			continue
-		}
-
-		existingSum := sha256Hex(existing)
-
-		if existingSum == embeddedSum {
-			// On-disk matches embedded — ensure checksum is recorded
-			checksums[f.name] = embeddedSum
-			continue
-		}
-
-		// Content differs. Was the file modified by the user?
-		lastSeeded, hasRecord := checksums[f.name]
-		userModified := hasRecord && existingSum != lastSeeded
-
-		// No checksum record (pre-manifest upgrade): conservatively assume
-		// user customization since the content differs from embedded.
-		if !hasRecord {
-			userModified = true
-		}
-
-		if userModified {
-			// User customized — don't overwrite, write .new for them to review
-			newPath := path + ".new"
-			if err := os.WriteFile(newPath, f.content, 0600); err != nil {
-				return result, fmt.Errorf("write %s: %w", f.name+".new", err)
-			}
-			result.Conflicts = append(result.Conflicts, f.name)
-		} else {
-			// Not user-modified (matches last-seeded) — safe to overwrite
-			if err := os.WriteFile(path, f.content, 0600); err != nil {
-				return result, fmt.Errorf("write %s: %w", f.name, err)
-			}
-			checksums[f.name] = embeddedSum
-			result.Changed = true
-		}
-	}
-
-	if err := saveChecksums(targetDir, checksums); err != nil {
-		return result, fmt.Errorf("save resource checksums: %w", err)
-	}
-
-	return result, nil
-}
-
-func sha256Hex(data []byte) string {
-	h := sha256.Sum256(data)
-	return hex.EncodeToString(h[:])
-}
-
-// loadChecksums reads the checksum manifest. Returns the map and true if the
-// manifest was loaded successfully, or an empty map and false if it was missing
-// or corrupt.
-func loadChecksums(dir string) (map[string]string, bool) {
-	path := filepath.Join(dir, checksumFile)
-	data, err := os.ReadFile(path) //nolint:gosec // G304: dir is ~/.yoloai/
-	if err != nil {
-		return make(map[string]string), false
-	}
-	var m map[string]string
-	if err := json.Unmarshal(data, &m); err != nil {
-		return make(map[string]string), false
-	}
-	return m, true
-}
-
-func saveChecksums(dir string, checksums map[string]string) error {
-	data, err := json.MarshalIndent(checksums, "", "  ")
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(filepath.Join(dir, checksumFile), data, 0600)
-}
-
 // NeedsBuild returns true if the Docker image needs to be (re)built because
-// the on-disk resource files have changed since the last successful build.
+// the embedded resource files have changed since the last successful build.
 func NeedsBuild(sourceDir string) bool {
-	current := buildInputsChecksum(sourceDir)
+	current := buildInputsChecksum()
 	if current == "" {
-		return true // can't read files → need build
+		return true // shouldn't happen with embedded resources, but be safe
 	}
 	last, err := os.ReadFile(filepath.Join(sourceDir, lastBuildFile)) //nolint:gosec // G304: sourceDir is ~/.yoloai/
 	if err != nil {
@@ -173,37 +42,46 @@ func NeedsBuild(sourceDir string) bool {
 // Exported for testing; production code uses buildBaseImage which records
 // automatically on success.
 func RecordBuildChecksum(sourceDir string) {
-	if sum := buildInputsChecksum(sourceDir); sum != "" {
+	if sum := buildInputsChecksum(); sum != "" {
 		_ = os.WriteFile(filepath.Join(sourceDir, lastBuildFile), []byte(sum), 0600)
 	}
 }
 
-// buildInputsChecksum computes a combined SHA-256 of the build input files.
-func buildInputsChecksum(sourceDir string) string {
+// buildInputsChecksum computes a combined SHA-256 of the embedded build inputs.
+func buildInputsChecksum() string {
 	h := sha256.New()
-	for _, name := range []string{"Dockerfile", "entrypoint.sh", "entrypoint.py", "sandbox-setup.py", "status-monitor.py", "diagnose-idle.sh", "tmux.conf"} {
-		data, err := os.ReadFile(filepath.Join(sourceDir, name)) //nolint:gosec // G304: sourceDir is ~/.yoloai/
-		if err != nil {
-			return ""
-		}
-		h.Write([]byte(name))
-		h.Write(data)
+	type namedContent struct {
+		name    string
+		content []byte
+	}
+	files := []namedContent{
+		{"Dockerfile", embeddedDockerfile},
+		{"entrypoint.sh", embeddedEntrypoint},
+		{"entrypoint.py", embeddedEntrypointPy},
+		{"sandbox-setup.py", embeddedSandboxSetup},
+		{"status-monitor.py", embeddedStatusMonitor},
+		{"diagnose-idle.sh", embeddedDiagnoseIdle},
+		{"tmux.conf", embeddedTmuxConf},
+	}
+	for _, f := range files {
+		h.Write([]byte(f.name))
+		h.Write(f.content)
 	}
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-// buildBaseImage builds the yoloai-base Docker image from the Dockerfile
-// and entrypoint in the given directory. Build output is streamed to the
-// provided writer (typically os.Stderr for user-visible progress).
+// buildBaseImage builds the yoloai-base Docker image from the embedded
+// Dockerfile and entrypoints. Build output is streamed to the provided
+// writer (typically os.Stderr for user-visible progress).
 // On success, records a checksum of the build inputs so NeedsBuild can
 // detect when a rebuild is required.
 func buildBaseImage(ctx context.Context, client *dockerclient.Client, sourceDir string, output io.Writer, logger *slog.Logger) error {
-	buildCtx, err := createBuildContext(sourceDir)
+	buildCtx, err := createBuildContext()
 	if err != nil {
 		return fmt.Errorf("create build context: %w", err)
 	}
 
-	logger.Debug("building yoloai-base image", "sourceDir", sourceDir)
+	logger.Debug("building yoloai-base image")
 
 	resp, err := client.ImageBuild(ctx, buildCtx, build.ImageBuildOptions{
 		Tags:       []string{"yoloai-base"},
@@ -219,50 +97,47 @@ func buildBaseImage(ctx context.Context, client *dockerclient.Client, sourceDir 
 		return err
 	}
 
-	// Record build inputs checksum for NeedsBuild
-	if sum := buildInputsChecksum(sourceDir); sum != "" {
-		_ = os.WriteFile(filepath.Join(sourceDir, lastBuildFile), []byte(sum), 0600) // best-effort
+	// Record build inputs checksum for NeedsBuild.
+	// Use sourceDir for the checksum file location if provided, otherwise skip.
+	if sourceDir != "" {
+		if sum := buildInputsChecksum(); sum != "" {
+			_ = os.WriteFile(filepath.Join(sourceDir, lastBuildFile), []byte(sum), 0600) // best-effort
+		}
 	}
 
 	return nil
 }
 
 // createBuildContext creates an in-memory tar archive containing the
-// Dockerfile and entrypoint.sh from sourceDir.
-func createBuildContext(sourceDir string) (io.Reader, error) {
+// embedded Dockerfile and entrypoints.
+func createBuildContext() (io.Reader, error) {
 	var buf bytes.Buffer
 	tw := tar.NewWriter(&buf)
 
 	files := []struct {
-		diskName string // filename on disk
-		tarName  string // filename in the tar archive
+		tarName string
+		content []byte
 	}{
-		{"Dockerfile", "Dockerfile"},
-		{"entrypoint.sh", "entrypoint.sh"},
-		{"entrypoint.py", "entrypoint.py"},
-		{"sandbox-setup.py", "sandbox-setup.py"},
-		{"status-monitor.py", "status-monitor.py"},
-		{"diagnose-idle.sh", "diagnose-idle.sh"},
-		{"tmux.conf", "tmux.conf"},
+		{"Dockerfile", embeddedDockerfile},
+		{"entrypoint.sh", embeddedEntrypoint},
+		{"entrypoint.py", embeddedEntrypointPy},
+		{"sandbox-setup.py", embeddedSandboxSetup},
+		{"status-monitor.py", embeddedStatusMonitor},
+		{"diagnose-idle.sh", embeddedDiagnoseIdle},
+		{"tmux.conf", embeddedTmuxConf},
 	}
 
 	for _, f := range files {
-		path := filepath.Join(sourceDir, f.diskName)
-		content, err := os.ReadFile(path) //nolint:gosec // G304: sourceDir is ~/.yoloai/, not user-controlled input
-		if err != nil {
-			return nil, fmt.Errorf("read %s: %w", f.diskName, err)
-		}
-
 		header := &tar.Header{
 			Name:    f.tarName,
-			Size:    int64(len(content)),
+			Size:    int64(len(f.content)),
 			Mode:    0644,
 			ModTime: time.Now(),
 		}
 		if err := tw.WriteHeader(header); err != nil {
 			return nil, fmt.Errorf("write tar header for %s: %w", f.tarName, err)
 		}
-		if _, err := tw.Write(content); err != nil {
+		if _, err := tw.Write(f.content); err != nil {
 			return nil, fmt.Errorf("write tar content for %s: %w", f.tarName, err)
 		}
 	}
@@ -405,7 +280,7 @@ func createProfileBuildContext(sourceDir string) (io.Reader, error) {
 		}
 		// Skip internal files
 		name := e.Name()
-		if name == checksumFile || name == lastBuildFile || name == "profile.yaml" {
+		if name == lastBuildFile || name == "config.yaml" {
 			continue
 		}
 

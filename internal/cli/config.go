@@ -38,7 +38,7 @@ Without arguments, prints all settings with effective values (defaults + overrid
 With a dotted key (e.g., backend), prints just that value.
 
 Global settings (tmux_conf, model_aliases) are stored in ~/.yoloai/config.yaml.
-Profile settings are stored in ~/.yoloai/profiles/base/config.yaml.`,
+Default settings are stored in ~/.yoloai/defaults/config.yaml.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 0 {
@@ -90,7 +90,7 @@ Creates the config file if it doesn't exist.
 Preserves comments and formatting.
 
 Global settings (tmux_conf, model_aliases) are stored in ~/.yoloai/config.yaml.
-Profile settings are stored in ~/.yoloai/profiles/base/config.yaml.`,
+Default settings are stored in ~/.yoloai/defaults/config.yaml.`,
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if config.IsGlobalKey(args[0]) {
@@ -116,8 +116,9 @@ Profile settings are stored in ~/.yoloai/profiles/base/config.yaml.`,
 					if err := os.MkdirAll(dir, 0750); err != nil {
 						return fmt.Errorf("create config directory: %w", err)
 					}
-					if err := os.WriteFile(configPath, []byte("{}\n"), 0600); err != nil {
-						return fmt.Errorf("create config.yaml: %w", err)
+					scaffold := config.GenerateScaffoldConfig(config.DefaultConfigYAML)
+					if err := os.WriteFile(configPath, []byte(scaffold), 0600); err != nil {
+						return fmt.Errorf("create defaults/config.yaml: %w", err)
 					}
 				}
 				if err := config.UpdateConfigFields(map[string]string{
@@ -149,7 +150,7 @@ Works at any level: a single value (backend), a map entry
 (env.OLLAMA_API_BASE), or an entire section (tart).
 
 Global settings (tmux_conf, model_aliases) are stored in ~/.yoloai/config.yaml.
-Profile settings are stored in ~/.yoloai/profiles/base/config.yaml.`,
+Default settings are stored in ~/.yoloai/defaults/config.yaml.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var err error

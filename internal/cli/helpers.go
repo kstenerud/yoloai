@@ -50,6 +50,14 @@ func newRuntime(ctx context.Context, backend string) (runtime.Runtime, error) {
 // These differences make a generic abstraction more obscure than the small
 // amount of duplicated structure.
 
+// coalesce returns the first non-empty string.
+func coalesce(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
+}
+
 // resolveBackend determines the backend from flags, then isolation/os routing,
 // then config preference, then auto-detection. Used by commands with --backend.
 func resolveBackend(cmd *cobra.Command) string {
@@ -58,8 +66,15 @@ func resolveBackend(cmd *cobra.Command) string {
 		return b
 	}
 
-	isolation, _ := cmd.Flags().GetString("isolation")
-	targetOS, _ := cmd.Flags().GetString("os")
+	// Read isolation and os from flags, falling back to config.
+	cfg, _ := config.LoadDefaultsConfig()
+	var cfgIsolation, cfgOS string
+	if cfg != nil {
+		cfgIsolation = cfg.Isolation
+		cfgOS = cfg.OS
+	}
+	isolation := coalesce(flagStr(cmd, "isolation"), cfgIsolation)
+	targetOS := coalesce(flagStr(cmd, "os"), cfgOS)
 
 	// OS-based routing: --os mac routes to seatbelt/tart (checked first so
 	// --os mac --isolation vm goes to tart, not containerd).
@@ -77,6 +92,12 @@ func resolveBackend(cmd *cobra.Command) string {
 
 	// container/container-enhanced: prefer config, then auto-detect.
 	return detectContainerBackend(resolveContainerBackendConfig())
+}
+
+// flagStr returns the value of a string flag if it was set, or "" if not available.
+func flagStr(cmd *cobra.Command, name string) string {
+	v, _ := cmd.Flags().GetString(name)
+	return v
 }
 
 // detectContainerBackend picks docker or podman based on a config preference
@@ -111,7 +132,7 @@ func dockerAvailable() bool {
 
 // resolveContainerBackendConfig reads the container_backend config preference.
 func resolveContainerBackendConfig() string {
-	cfg, err := config.LoadConfig()
+	cfg, err := config.LoadDefaultsConfig()
 	if err == nil {
 		return cfg.ContainerBackend
 	}
@@ -148,10 +169,10 @@ func resolveAgent(cmd *cobra.Command) string {
 	return resolveAgentFromConfig()
 }
 
-// resolveAgentFromConfig reads the agent from config.yaml, falling back
+// resolveAgentFromConfig reads the agent from defaults config, falling back
 // to "claude".
 func resolveAgentFromConfig() string {
-	cfg, err := config.LoadConfig()
+	cfg, err := config.LoadDefaultsConfig()
 	if err == nil && cfg.Agent != "" {
 		return cfg.Agent
 	}
@@ -167,34 +188,24 @@ func resolveModel(cmd *cobra.Command) string {
 	return resolveModelFromConfig()
 }
 
-// resolveModelFromConfig reads the model from config.yaml, falling back
+// resolveModelFromConfig reads the model from defaults config, falling back
 // to "" (no default model — agent uses its own).
 func resolveModelFromConfig() string {
-	cfg, err := config.LoadConfig()
+	cfg, err := config.LoadDefaultsConfig()
 	if err == nil && cfg.Model != "" {
 		return cfg.Model
 	}
 	return ""
 }
 
-// resolveProfile determines the profile name from --no-profile, --profile flag,
-// then config, then empty string (no default profile). Used by the new command.
+// resolveProfile determines the profile name from --no-profile, then --profile flag,
+// then empty string (no default profile). Used by the new command.
 func resolveProfile(cmd *cobra.Command) string {
 	if noProfile, _ := cmd.Flags().GetBool("no-profile"); noProfile {
 		return ""
 	}
 	if p, _ := cmd.Flags().GetString("profile"); p != "" {
 		return p
-	}
-	return resolveProfileFromConfig()
-}
-
-// resolveProfileFromConfig reads the profile from config.yaml, falling back
-// to "" (no default profile).
-func resolveProfileFromConfig() string {
-	cfg, err := config.LoadConfig()
-	if err == nil && cfg.Profile != "" {
-		return cfg.Profile
 	}
 	return ""
 }

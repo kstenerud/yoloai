@@ -269,7 +269,7 @@ func (c *Client) Destroy(ctx context.Context, name string, force bool) error {
 // --- private helpers ---
 
 func resolveBackendFromConfig() string {
-	cfg, err := config.LoadConfig()
+	cfg, err := config.LoadDefaultsConfig()
 	if err == nil && cfg.ContainerBackend != "" {
 		return cfg.ContainerBackend
 	}
@@ -277,7 +277,7 @@ func resolveBackendFromConfig() string {
 }
 
 func resolveAgentFromConfig() string {
-	cfg, err := config.LoadConfig()
+	cfg, err := config.LoadDefaultsConfig()
 	if err == nil && cfg.Agent != "" {
 		return cfg.Agent
 	}
@@ -285,7 +285,7 @@ func resolveAgentFromConfig() string {
 }
 
 func resolveModelFromConfig() string {
-	cfg, err := config.LoadConfig()
+	cfg, err := config.LoadDefaultsConfig()
 	if err == nil && cfg.Model != "" {
 		return cfg.Model
 	}
@@ -293,10 +293,6 @@ func resolveModelFromConfig() string {
 }
 
 func resolveProfileFromConfig() string {
-	cfg, err := config.LoadConfig()
-	if err == nil && cfg.Profile != "" {
-		return cfg.Profile
-	}
 	return ""
 }
 

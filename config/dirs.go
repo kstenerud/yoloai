@@ -33,6 +33,16 @@ func ExtensionsDir() string {
 	return filepath.Join(YoloaiDir(), "extensions")
 }
 
+// DefaultsDir returns the path to ~/.yoloai/defaults/.
+func DefaultsDir() string {
+	return filepath.Join(YoloaiDir(), "defaults")
+}
+
+// DefaultsConfigPath returns the path to ~/.yoloai/defaults/config.yaml.
+func DefaultsConfigPath() string {
+	return filepath.Join(DefaultsDir(), "config.yaml")
+}
+
 // Shared sandbox subdirectory name constants. Used by sandbox/paths.go and
 // runtime backends to avoid duplicating these literal strings.
 const (

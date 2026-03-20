@@ -55,11 +55,10 @@ func newProfileCreateCmd() *cobra.Command {
 				return fmt.Errorf("create profile directory: %w", err)
 			}
 
-			scaffold := `# extends: base    # parent profile (default: base)
-# agent: claude
+			scaffold := `# agent: claude
 # model: sonnet
 # backend: docker   # optional backend constraint
-# security: standard  # OCI runtime: standard, gvisor, kata, kata-firecracker (Docker/Podman only)
+# os: linux         # guest OS: linux, mac
 # tart:
 #   image: my-vm    # Tart backend only
 # ports:
@@ -81,9 +80,9 @@ func newProfileCreateCmd() *cobra.Command {
 #     mode: rw
 #     mount: /usr/local/lib/shared
 `
-			yamlPath := filepath.Join(dir, "profile.yaml")
+			yamlPath := filepath.Join(dir, "config.yaml")
 			if err := os.WriteFile(yamlPath, []byte(scaffold), 0600); err != nil {
-				return fmt.Errorf("write profile.yaml: %w", err)
+				return fmt.Errorf("write config.yaml: %w", err)
 			}
 
 			if jsonEnabled(cmd) {
@@ -116,22 +115,18 @@ func newProfileListCmd() *cobra.Command {
 			}
 
 			w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
-			fmt.Fprintln(w, "NAME\tEXTENDS\tIMAGE\tAGENT") //nolint:errcheck
+			fmt.Fprintln(w, "NAME\tIMAGE\tAGENT") //nolint:errcheck
 			for _, name := range names {
 				profile, loadErr := config.LoadProfile(name)
-				extends := "base"
 				agent := ""
 				image := "no"
 				if loadErr == nil {
-					if profile.Extends != "" {
-						extends = profile.Extends
-					}
 					agent = profile.Agent
 				}
 				if config.ProfileHasDockerfile(name) {
 					image = "yes"
 				}
-				fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", name, extends, image, agent) //nolint:errcheck
+				fmt.Fprintf(w, "%s\t%s\t%s\n", name, image, agent) //nolint:errcheck
 			}
 			return w.Flush()
 		},
@@ -156,19 +151,18 @@ func newProfileInfoCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
 
-			var extends string
 			var chain []string
 			var merged *config.MergedConfig
 			var image string
 			var hasDockerfile bool
 
 			if name == "base" {
-				// Base profile: no extends, no chain resolution needed
+				// Base profile: no chain resolution needed
 				chain = []string{"base"}
 				image = "yoloai-base"
 				hasDockerfile = config.ProfileHasDockerfile("base")
 
-				baseCfg, err := config.LoadConfig()
+				baseCfg, err := config.LoadBakedInDefaults()
 				if err != nil {
 					return err
 				}
@@ -184,18 +178,13 @@ func newProfileInfoCmd() *cobra.Command {
 					return fmt.Errorf("profile %q does not exist", name)
 				}
 
-				rawProfile, err := config.LoadProfile(name)
-				if err != nil {
-					return err
-				}
-				extends = rawProfile.Extends
-
+				var err error
 				chain, err = config.ResolveProfileChain(name)
 				if err != nil {
 					return err
 				}
 
-				baseCfg, err := config.LoadConfig()
+				baseCfg, err := config.LoadBakedInDefaults()
 				if err != nil {
 					return err
 				}
@@ -214,7 +203,7 @@ func newProfileInfoCmd() *cobra.Command {
 					parentMerged = &config.MergedConfig{}
 				} else {
 					parentChain := chain[:len(chain)-1]
-					baseCfg, err := config.LoadConfig()
+					baseCfg, err := config.LoadBakedInDefaults()
 					if err != nil {
 						return err
 					}
@@ -227,20 +216,18 @@ func newProfileInfoCmd() *cobra.Command {
 				if jsonEnabled(cmd) {
 					return writeJSON(cmd.OutOrStdout(), profileDiffJSON{
 						Profile:   name,
-						Extends:   extends,
 						Chain:     chain,
 						Inherited: parentMerged,
 						Merged:    merged,
 					})
 				}
 
-				return printProfileDiff(cmd, name, extends, chain, parentMerged, merged)
+				return printProfileDiff(cmd, name, "", chain, parentMerged, merged)
 			}
 
 			if jsonEnabled(cmd) {
 				return writeJSON(cmd.OutOrStdout(), profileInfoJSON{
 					Profile:     name,
-					Extends:     extends,
 					Chain:       chain,
 					Image:       image,
 					Dockerfile:  hasDockerfile,
@@ -260,7 +247,7 @@ func newProfileInfoCmd() *cobra.Command {
 				})
 			}
 
-			return printProfileInfo(cmd, name, extends, chain, image, hasDockerfile, merged)
+			return printProfileInfo(cmd, name, "", chain, image, hasDockerfile, merged)
 		},
 	}
 	cmd.Flags().BoolVar(&diffMode, "diff", false, "Show only changes from parent profile")
@@ -270,7 +257,6 @@ func newProfileInfoCmd() *cobra.Command {
 // profileInfoJSON is the JSON output structure for `profile info`.
 type profileInfoJSON struct {
 	Profile     string                 `json:"profile"`
-	Extends     string                 `json:"extends"`
 	Chain       []string               `json:"chain"`
 	Image       string                 `json:"image"`
 	Dockerfile  bool                   `json:"dockerfile"`
@@ -292,7 +278,6 @@ type profileInfoJSON struct {
 // profileDiffJSON is the JSON output structure for `profile info --diff`.
 type profileDiffJSON struct {
 	Profile   string               `json:"profile"`
-	Extends   string               `json:"extends"`
 	Chain     []string             `json:"chain"`
 	Inherited *config.MergedConfig `json:"inherited"`
 	Merged    *config.MergedConfig `json:"merged"`
@@ -675,27 +660,7 @@ func newProfileDeleteCmd() *cobra.Command {
 				return fmt.Errorf("profile %q does not exist", name)
 			}
 
-			// Check if other profiles extend this one
-			allProfiles, err := config.ListProfiles()
-			if err != nil {
-				return err
-			}
-			var dependents []string
-			for _, other := range allProfiles {
-				if other == name {
-					continue
-				}
-				profile, loadErr := config.LoadProfile(other)
-				if loadErr != nil {
-					continue
-				}
-				if profile.Extends == name {
-					dependents = append(dependents, other)
-				}
-			}
-			if len(dependents) > 0 {
-				return fmt.Errorf("cannot delete: profile %q is extended by: %s", name, joinNames(dependents))
-			}
+			// Profiles no longer support inheritance — no dependency check needed.
 
 			// Check if any sandboxes reference this profile
 			refs := findSandboxesWithProfile(name)

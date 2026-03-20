@@ -3,8 +3,6 @@ package sandbox
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -117,7 +115,7 @@ func TestEnsureSetup_WritesConfigOnFirstRun(t *testing.T) {
 	err := mgr.EnsureSetup(context.Background())
 	require.NoError(t, err)
 
-	configPath := filepath.Join(tmpDir, ".yoloai", "profiles", "base", "config.yaml")
+	configPath := filepath.Join(tmpDir, ".yoloai", "defaults", "config.yaml")
 	content, err := os.ReadFile(configPath) //nolint:gosec // G304: test code with temp dir
 	require.NoError(t, err)
 	assert.Contains(t, string(content), "agent")
@@ -145,12 +143,12 @@ func TestEnsureSetup_SkipsConfigOnSubsequentRun(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
 
-	// Pre-create config.yaml and state.yaml
+	// Pre-create defaults/config.yaml and state.yaml
 	yoloaiDir := filepath.Join(tmpDir, ".yoloai")
-	baseDir := filepath.Join(yoloaiDir, "profiles", "base")
-	require.NoError(t, os.MkdirAll(baseDir, 0750))
-	customContent := []byte("# custom config\nagent: claude\n")
-	require.NoError(t, os.WriteFile(filepath.Join(baseDir, "config.yaml"), customContent, 0600))
+	defaultsDir := filepath.Join(yoloaiDir, "defaults")
+	require.NoError(t, os.MkdirAll(defaultsDir, 0750))
+	customContent := []byte("# custom config\n# agent: claude\n")
+	require.NoError(t, os.WriteFile(filepath.Join(defaultsDir, "config.yaml"), customContent, 0600))
 	require.NoError(t, config.SaveState(&config.State{SetupComplete: true}))
 
 	mock := &mockRuntime{}
@@ -161,7 +159,7 @@ func TestEnsureSetup_SkipsConfigOnSubsequentRun(t *testing.T) {
 	require.NoError(t, err)
 
 	// Config should be preserved
-	content, err := os.ReadFile(filepath.Join(baseDir, "config.yaml")) //nolint:gosec // G304: test code with temp dir
+	content, err := os.ReadFile(filepath.Join(defaultsDir, "config.yaml")) //nolint:gosec // G304: test code with temp dir
 	require.NoError(t, err)
 	assert.Equal(t, customContent, content)
 
@@ -169,54 +167,39 @@ func TestEnsureSetup_SkipsConfigOnSubsequentRun(t *testing.T) {
 	assert.NotContains(t, output.String(), "completion")
 }
 
-func TestEnsureSetup_SkipsBuildWhenImageExists(t *testing.T) {
+func TestEnsureSetup_AlwaysCallsEnsureImage(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
 
-	// Pre-seed resources to profiles/base/ and simulate a prior successful build
-	baseDir := filepath.Join(tmpDir, ".yoloai", "profiles", "base")
-	_, err := dockerrt.SeedResources(baseDir)
-	require.NoError(t, err)
-	dockerrt.RecordBuildChecksum(baseDir)
+	// Simulate a prior successful build by recording the current checksum in defaults/
+	defaultsDir := filepath.Join(tmpDir, ".yoloai", "defaults")
+	require.NoError(t, os.MkdirAll(defaultsDir, 0750))
+	dockerrt.RecordBuildChecksum(defaultsDir)
 
 	mock := &mockRuntime{} // EnsureImage returns nil (success)
 	mgr := NewManager(mock, slog.Default(), strings.NewReader(""), io.Discard)
 
-	err = mgr.EnsureSetup(context.Background())
+	err := mgr.EnsureSetup(context.Background())
 	require.NoError(t, err)
-	assert.True(t, mock.ensureImageCalled, "EnsureImage should be called")
+	assert.True(t, mock.ensureImageCalled, "EnsureImage should always be called")
 }
 
-func TestEnsureSetup_RebuildWhenResourcesChanged(t *testing.T) {
+func TestEnsureSetup_RebuildWhenChecksumStale(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
 
-	// First seed to establish checksum manifest
-	baseDir := filepath.Join(tmpDir, ".yoloai", "profiles", "base")
-	_, err := dockerrt.SeedResources(baseDir)
-	require.NoError(t, err)
-
-	// Simulate a binary upgrade: write stale content with matching checksums
-	staleContent := []byte("# old version")
-	require.NoError(t, os.WriteFile(filepath.Join(baseDir, "entrypoint.sh"), staleContent, 0600))
-	// Update checksum to match stale content
-	checksumPath := filepath.Join(baseDir, ".resource-checksums")
-	checksumData, err := os.ReadFile(checksumPath) //nolint:gosec // G304: test code
-	require.NoError(t, err)
-	var checksums map[string]string
-	require.NoError(t, json.Unmarshal(checksumData, &checksums))
-	checksums["entrypoint.sh"] = fmt.Sprintf("%x", sha256.Sum256(staleContent))
-	updated, err := json.Marshal(checksums)
-	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(checksumPath, updated, 0600))
+	// Simulate a stale build: write a different checksum to defaults/
+	defaultsDir := filepath.Join(tmpDir, ".yoloai", "defaults")
+	require.NoError(t, os.MkdirAll(defaultsDir, 0750))
+	require.NoError(t, os.WriteFile(filepath.Join(defaultsDir, ".last-build-checksum"), []byte("stale-checksum"), 0600))
 
 	mock := &mockRuntime{} // EnsureImage returns nil (success)
 	var output bytes.Buffer
 	mgr := NewManager(mock, slog.Default(), strings.NewReader(""), &output)
 
-	err = mgr.EnsureSetup(context.Background())
+	err := mgr.EnsureSetup(context.Background())
 	require.NoError(t, err)
-	assert.True(t, mock.ensureImageCalled, "EnsureImage should be called when resources changed")
+	assert.True(t, mock.ensureImageCalled, "EnsureImage should be called when checksum is stale")
 }
 
 func TestEnsureSetup_BuildsWhenImageMissing(t *testing.T) {

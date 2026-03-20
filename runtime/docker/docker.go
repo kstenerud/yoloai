@@ -83,30 +83,10 @@ func (r *Runtime) Client() *dockerclient.Client {
 	return r.client
 }
 
-// EnsureImage seeds Docker build resources and builds/rebuilds the
-// yoloai-base image as needed.
+// EnsureImage builds/rebuilds the yoloai-base image as needed.
+// sourceDir is unused for the Docker backend (build inputs are embedded);
+// it is accepted for interface compatibility with other runtimes.
 func (r *Runtime) EnsureImage(ctx context.Context, sourceDir string, output io.Writer, logger *slog.Logger, force bool) error {
-	// Seed Dockerfile.base, entrypoint.sh, tmux.conf
-	seedResult, err := SeedResources(sourceDir)
-	if err != nil {
-		return fmt.Errorf("seed resources: %w", err)
-	}
-
-	if len(seedResult.Conflicts) > 0 {
-		if seedResult.ManifestMissing {
-			fmt.Fprintln(output, "NOTE: yoloAI has updated resource files, but some differ from the new version.") //nolint:errcheck // best-effort output
-			fmt.Fprintln(output, "  If you have not customized these files, accept the new versions below.")       //nolint:errcheck // best-effort output
-		} else {
-			fmt.Fprintln(output, "NOTE: some resource files have local changes and were not overwritten.") //nolint:errcheck // best-effort output
-		}
-		for _, name := range seedResult.Conflicts {
-			fmt.Fprintf(output, "  %s: new version written to ~/.yoloai/profiles/base/%s.new\n", name, name)              //nolint:errcheck // best-effort output
-			fmt.Fprintf(output, "    accept: mv ~/.yoloai/profiles/base/%s.new ~/.yoloai/profiles/base/%s\n", name, name) //nolint:errcheck // best-effort output
-			fmt.Fprintf(output, "    keep:   rm ~/.yoloai/profiles/base/%s.new\n", name)                                  //nolint:errcheck // best-effort output
-		}
-		fmt.Fprintln(output, "  Then run 'yoloai build' to rebuild the base image.") //nolint:errcheck // best-effort output
-	}
-
 	// Check if image exists
 	exists, err := r.ImageExists(ctx, "yoloai-base")
 	if err != nil {

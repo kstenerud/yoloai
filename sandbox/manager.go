@@ -114,6 +114,23 @@ func (m *Manager) EnsureSetup(ctx context.Context) error {
 	return nil
 }
 
+// ensureDefaultsDir creates ~/.yoloai/defaults/ and writes defaults/config.yaml
+// scaffold if it doesn't exist.
+func ensureDefaultsDir() error {
+	defaultsDir := config.DefaultsDir()
+	if err := os.MkdirAll(defaultsDir, 0750); err != nil {
+		return fmt.Errorf("create defaults dir: %w", err)
+	}
+	configPath := config.DefaultsConfigPath()
+	if _, err := os.Stat(configPath); os.IsNotExist(err) {
+		scaffold := config.GenerateScaffoldConfig(config.DefaultConfigYAML)
+		if err := os.WriteFile(configPath, []byte(scaffold), 0600); err != nil {
+			return fmt.Errorf("write defaults/config.yaml: %w", err)
+		}
+	}
+	return nil
+}
+
 // EnsureSetupNonInteractive performs the non-interactive portion of first-run
 // setup: migration, directory creation, resource seeding, image building,
 // and default config writing. Does not run interactive prompts.
@@ -125,22 +142,29 @@ func (m *Manager) EnsureSetupNonInteractive(ctx context.Context) error {
 		}
 	}
 
-	baseProfileDir := config.ProfileDirPath("base")
-	if err := os.MkdirAll(baseProfileDir, 0750); err != nil {
-		return fmt.Errorf("create %s: %w", baseProfileDir, err)
+	// Upgrading user: defaults/ should exist. If it doesn't, they need to migrate.
+	state, err := config.LoadState()
+	if err != nil {
+		return fmt.Errorf("load state: %w", err)
+	}
+	if state.SetupComplete {
+		if err := config.CheckDefaultsDir(); err != nil {
+			return err
+		}
 	}
 
-	// Seed resources and build/rebuild base image as needed
-	if err := m.runtime.EnsureImage(ctx, baseProfileDir, m.output, m.logger, false); err != nil {
+	// Fresh install (or after manual migration): create defaults/ scaffold.
+	if err := ensureDefaultsDir(); err != nil {
 		return err
 	}
 
-	// Write default config.yaml on first run
-	configPath := config.ConfigPath()
-	if _, err := os.Stat(configPath); err != nil {
-		if err := os.WriteFile(configPath, []byte(config.DefaultConfigYAML), 0600); err != nil {
-			return fmt.Errorf("write config.yaml: %w", err)
-		}
+	// Seed resources and build/rebuild base image as needed
+	if err := m.runtime.EnsureImage(ctx, "", m.output, m.logger, false); err != nil {
+		return err
+	}
+
+	// Write defaults/config.yaml tip message on first run
+	if !state.SetupComplete {
 		fmt.Fprintln(m.output, "Tip: enable shell completions with 'yoloai system completion --help'") //nolint:errcheck // best-effort output
 	}
 

@@ -73,16 +73,16 @@ func TestClassifyTmuxConfig_Large(t *testing.T) {
 }
 
 // setupTestManager creates a Manager with the given input and a temp HOME
-// with profiles/base/config.yaml, global config.yaml, and state.yaml. Returns the Manager, output buffer, and HOME dir.
+// with defaults/config.yaml, global config.yaml, and state.yaml. Returns the Manager, output buffer, and HOME dir.
 func setupTestManager(t *testing.T, input string) (*Manager, *bytes.Buffer, string) {
 	t.Helper()
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
 
 	yoloaiDir := filepath.Join(tmpDir, ".yoloai")
-	baseDir := filepath.Join(yoloaiDir, "profiles", "base")
-	require.NoError(t, os.MkdirAll(baseDir, 0750))
-	require.NoError(t, os.WriteFile(filepath.Join(baseDir, "config.yaml"), []byte(config.DefaultConfigYAML), 0600))
+	defaultsDir := filepath.Join(yoloaiDir, "defaults")
+	require.NoError(t, os.MkdirAll(defaultsDir, 0750))
+	require.NoError(t, os.WriteFile(filepath.Join(defaultsDir, "config.yaml"), []byte(config.DefaultConfigYAML), 0600))
 	require.NoError(t, os.WriteFile(filepath.Join(yoloaiDir, "config.yaml"), []byte(config.DefaultGlobalConfigYAML), 0600))
 	require.NoError(t, config.SaveState(&config.State{}))
 

@@ -16,7 +16,7 @@ func setupProfileDir(t *testing.T, name, content string) string {
 	if err := os.MkdirAll(dir, 0750); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "profile.yaml"), []byte(content), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600); err != nil {
 		t.Fatal(err)
 	}
 	return home
@@ -31,7 +31,7 @@ func TestValidateProfileName(t *testing.T) {
 		{"node.project", ""},
 		{"my_profile", ""},
 		{"A1", ""},
-		{"base", "reserved"},
+		{"base", ""}, // "base" is no longer reserved
 		{"", "required"},
 		{strings.Repeat("a", 57), "at most 56"},
 		{strings.Repeat("a", 56), ""},
@@ -77,9 +77,6 @@ env:
 		t.Fatal(err)
 	}
 
-	if cfg.Extends != "base" {
-		t.Errorf("Extends = %q, want %q", cfg.Extends, "base")
-	}
 	if cfg.Agent != "gemini" {
 		t.Errorf("Agent = %q, want %q", cfg.Agent, "gemini")
 	}
@@ -100,7 +97,9 @@ env:
 	}
 }
 
-func TestLoadProfile_Extends(t *testing.T) {
+func TestLoadProfile_ExtendsIgnored(t *testing.T) {
+	// The 'extends' field is ignored in the new profile format (no chain resolution).
+	// Verify loading doesn't error even when extends is present.
 	yaml := `extends: go-dev
 agent: claude
 `
@@ -111,8 +110,8 @@ agent: claude
 		t.Fatal(err)
 	}
 
-	if cfg.Extends != "go-dev" {
-		t.Errorf("Extends = %q, want %q", cfg.Extends, "go-dev")
+	if cfg.Agent != "claude" {
+		t.Errorf("Agent = %q, want %q", cfg.Agent, "claude")
 	}
 }
 
@@ -228,8 +227,9 @@ func TestLoadProfile_EmptyFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Extends != "base" {
-		t.Errorf("Extends = %q, want %q", cfg.Extends, "base")
+	// Empty file results in zero-value ProfileConfig
+	if cfg.Agent != "" {
+		t.Errorf("Agent = %q, want empty", cfg.Agent)
 	}
 }
 
@@ -272,7 +272,7 @@ func TestResolveProfileChain_TwoLevelChain(t *testing.T) {
 	if err := os.MkdirAll(goWebDir, 0750); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(goWebDir, "profile.yaml"), []byte("extends: go-dev\n"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(goWebDir, "config.yaml"), []byte("extends: go-dev\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -297,7 +297,7 @@ func TestResolveProfileChain_ThreeLevelChain(t *testing.T) {
 		if err := os.MkdirAll(dir, 0750); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(dir, "profile.yaml"), []byte("extends: "+pair.extends+"\n"), 0600); err != nil {
+		if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte("extends: "+pair.extends+"\n"), 0600); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -324,7 +324,7 @@ func TestResolveProfileChain_CycleDetection(t *testing.T) {
 	if err := os.MkdirAll(bDir, 0750); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(bDir, "profile.yaml"), []byte("extends: a\n"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(bDir, "config.yaml"), []byte("extends: a\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -376,7 +376,7 @@ func TestListProfiles(t *testing.T) {
 	if err := os.MkdirAll(dir, 0750); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "profile.yaml"), []byte("agent: gemini\n"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte("agent: gemini\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -470,7 +470,7 @@ func TestMergeProfileChain_ScalarOverrideCascading(t *testing.T) {
 	if err := os.MkdirAll(childDir, 0750); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(childDir, "profile.yaml"), []byte("extends: parent\nmodel: pro\n"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(childDir, "config.yaml"), []byte("extends: parent\nmodel: pro\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -499,7 +499,7 @@ func TestMergeProfileChain_EnvMerge(t *testing.T) {
 	if err := os.MkdirAll(childDir, 0750); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(childDir, "profile.yaml"),
+	if err := os.WriteFile(filepath.Join(childDir, "config.yaml"),
 		[]byte("extends: env-parent\nenv:\n  NODE: \"1\"\n  SHARED: child\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -533,7 +533,7 @@ func TestMergeProfileChain_PortsAdditive(t *testing.T) {
 	if err := os.MkdirAll(childDir, 0750); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(childDir, "profile.yaml"),
+	if err := os.WriteFile(filepath.Join(childDir, "config.yaml"),
 		[]byte("extends: ports-parent\nports:\n  - \"3000:3000\"\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -561,7 +561,7 @@ func TestMergeProfileChain_WorkdirChildWins(t *testing.T) {
 	if err := os.MkdirAll(childDir, 0750); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(childDir, "profile.yaml"),
+	if err := os.WriteFile(filepath.Join(childDir, "config.yaml"),
 		[]byte("extends: wd-parent\nworkdir:\n  path: /child/dir\n  mode: rw\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -592,7 +592,7 @@ func TestMergeProfileChain_DirectoriesAdditive(t *testing.T) {
 	if err := os.MkdirAll(childDir, 0750); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(childDir, "profile.yaml"),
+	if err := os.WriteFile(filepath.Join(childDir, "config.yaml"),
 		[]byte("extends: dirs-parent\ndirectories:\n  - path: /child/lib\n    mode: copy\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -683,7 +683,7 @@ func TestResolveProfileImage(t *testing.T) {
 	if err := os.MkdirAll(nodfDir, 0750); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(nodfDir, "profile.yaml"), []byte("extends: with-df\n"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(nodfDir, "config.yaml"), []byte("extends: with-df\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -732,7 +732,7 @@ func TestMergeProfileChain_ResourcesPerFieldOverride(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Child only overrides memory, cpus should be preserved from parent
-	if err := os.WriteFile(filepath.Join(childDir, "profile.yaml"),
+	if err := os.WriteFile(filepath.Join(childDir, "config.yaml"),
 		[]byte("extends: res-parent\nresources:\n  memory: 16g\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -808,7 +808,7 @@ func TestMergeProfileChain_AgentArgsMerge(t *testing.T) {
 	if err := os.MkdirAll(childDir, 0750); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(childDir, "profile.yaml"),
+	if err := os.WriteFile(filepath.Join(childDir, "config.yaml"),
 		[]byte("extends: args-parent\nagent_args:\n  aider: \"--no-pretty\"\n  gemini: \"--fast\"\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -895,7 +895,7 @@ func TestMergeProfileChain_AgentFilesChildReplaces(t *testing.T) {
 	if err := os.MkdirAll(childDir, 0750); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(childDir, "profile.yaml"),
+	if err := os.WriteFile(filepath.Join(childDir, "config.yaml"),
 		[]byte("extends: af-parent\nagent_files:\n  - /child/file.json\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -927,7 +927,7 @@ func TestMergeProfileChain_AgentFilesOmittedKeepsParent(t *testing.T) {
 	if err := os.MkdirAll(childDir, 0750); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(childDir, "profile.yaml"),
+	if err := os.WriteFile(filepath.Join(childDir, "config.yaml"),
 		[]byte("extends: af-keep-parent\nagent: gemini\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -1038,7 +1038,7 @@ func TestMergeProfileChain_RecipeAdditive(t *testing.T) {
 	if err := os.MkdirAll(childDir, 0750); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(childDir, "profile.yaml"),
+	if err := os.WriteFile(filepath.Join(childDir, "config.yaml"),
 		[]byte("extends: recipe-parent\ncap_add:\n  - SYS_PTRACE\ndevices:\n  - /dev/fuse\nsetup:\n  - echo child\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -1123,7 +1123,7 @@ func TestMergeProfileChain_RecipeThreeLevel(t *testing.T) {
 		if err := os.MkdirAll(dir, 0750); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(dir, "profile.yaml"), []byte(pair.yaml), 0600); err != nil {
+		if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(pair.yaml), 0600); err != nil {
 			t.Fatal(err)
 		}
 	}

@@ -12,12 +12,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// cliConfigDir creates the profiles/base/ directory structure for CLI config tests.
+// cliConfigDir creates the defaults/ directory structure for CLI config tests.
 func cliConfigDir(t *testing.T) string {
 	t.Helper()
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
-	dir := filepath.Join(tmpDir, ".yoloai", "profiles", "base")
+	dir := filepath.Join(tmpDir, ".yoloai", "defaults")
 	require.NoError(t, os.MkdirAll(dir, 0750))
 	return dir
 }
@@ -94,7 +94,7 @@ func TestConfigSet_NoFile(t *testing.T) {
 	cmd.SetArgs([]string{"container_backend", "tart"})
 	require.NoError(t, cmd.Execute())
 
-	configPath := filepath.Join(tmpDir, ".yoloai", "profiles", "base", "config.yaml")
+	configPath := filepath.Join(tmpDir, ".yoloai", "defaults", "config.yaml")
 	data, err := os.ReadFile(configPath) //nolint:gosec // G304: test code with temp dir path
 	require.NoError(t, err)
 	assert.Contains(t, string(data), "container_backend: tart")

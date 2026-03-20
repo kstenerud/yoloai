@@ -1,6 +1,6 @@
 package config
 
-// ABOUTME: Config loading for profile (~/.yoloai/profiles/base/config.yaml) and
+// ABOUTME: Config loading for defaults (~/.yoloai/defaults/config.yaml) and
 // ABOUTME: global (~/.yoloai/config.yaml) configs. Provides dotted-path get/set.
 
 import (
@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -27,11 +28,11 @@ func (c *AgentFilesConfig) IsStringForm() bool {
 
 // YoloaiConfig holds the subset of config.yaml fields that the Go code reads.
 type YoloaiConfig struct {
+	OS                 string            `yaml:"os"`                   // os — guest OS: linux, mac
 	ContainerBackend   string            `yaml:"container_backend"`    // container_backend — runtime backend: docker, podman, containerd
 	TartImage          string            `yaml:"tart_image"`           // tart.image — custom base VM image for tart backend
 	Agent              string            `yaml:"agent"`                // agent
 	Model              string            `yaml:"model"`                // model
-	Profile            string            `yaml:"profile"`              // profile — default profile to use
 	Env                map[string]string `yaml:"env"`                  // env — environment variables passed to container
 	Resources          *ResourceLimits   `yaml:"resources"`            // resources — container resource limits
 	Network            *NetworkConfig    `yaml:"network"`              // network — network isolation settings
@@ -74,11 +75,11 @@ type knownSetting struct {
 // knownSettings lists every scalar config key the code recognizes, with defaults.
 // Used by GetEffectiveConfig and GetConfigValue to fill in unset values.
 var knownSettings = []knownSetting{
+	{"os", "linux"},
 	{"container_backend", ""},
 	{"tart.image", ""},
 	{"agent", "claude"},
 	{"model", ""},
-	{"profile", ""},
 	{"resources.cpus", ""},
 	{"resources.memory", ""},
 	{"network.isolated", "false"},
@@ -127,9 +128,32 @@ var globalKnownCollectionSettings = []knownCollectionSetting{
 	{"model_aliases", yaml.MappingNode},
 }
 
-// ConfigPath returns the path to ~/.yoloai/profiles/base/config.yaml.
+// knownDefaultsKeys: valid top-level keys in defaults/config.yaml.
+var knownDefaultsKeys = map[string]bool{
+	"os": true, "agent": true, "model": true, "container_backend": true,
+	"isolation": true, "tart": true, "network": true, "agent_files": true,
+	"mounts": true, "ports": true, "resources": true, "agent_args": true,
+	"env": true, "auto_commit_interval": true, "cap_add": true,
+	"devices": true, "setup": true,
+}
+
+// knownProfileKeys: valid top-level keys in profiles/<name>/config.yaml.
+// Superset of defaults keys — adds workdir and directories.
+var knownProfileKeys = map[string]bool{
+	"os": true, "agent": true, "model": true, "container_backend": true,
+	"isolation": true, "tart": true, "network": true, "agent_files": true,
+	"mounts": true, "ports": true, "resources": true, "agent_args": true,
+	"env": true, "auto_commit_interval": true, "cap_add": true,
+	"devices": true, "setup": true,
+	"workdir": true, "directories": true, // profile-only
+	// backend is kept for profile backend constraint (different from container_backend)
+	"backend": true,
+}
+
+// ConfigPath returns the path to ~/.yoloai/defaults/config.yaml.
+// Used by config get/set/reset for non-global settings.
 func ConfigPath() string {
-	return filepath.Join(ProfilesDir(), "base", "config.yaml")
+	return DefaultsConfigPath()
 }
 
 // GlobalConfigPath returns the path to ~/.yoloai/config.yaml.
@@ -137,22 +161,14 @@ func GlobalConfigPath() string {
 	return filepath.Join(YoloaiDir(), "config.yaml")
 }
 
-// LoadConfig reads ~/.yoloai/profiles/base/config.yaml and extracts known fields.
-func LoadConfig() (*YoloaiConfig, error) {
-	configPath := ConfigPath()
-
-	data, err := os.ReadFile(configPath) //nolint:gosec // G304: path is ~/.yoloai/profiles/base/config.yaml
-	if err != nil {
-		if os.IsNotExist(err) {
-			return &YoloaiConfig{}, nil
-		}
-		return nil, fmt.Errorf("read config.yaml: %w", err)
-	}
-
+// parseConfigYAML parses a config YAML document into a YoloaiConfig.
+// source is used in error messages. knownKeys is the set of allowed top-level keys;
+// if nil, no unknown-key validation is performed.
+func parseConfigYAML(data []byte, source string, knownKeys map[string]bool) (*YoloaiConfig, error) {
 	// Parse into a yaml.Node tree to extract fields without losing structure.
 	var doc yaml.Node
 	if err := yaml.Unmarshal(data, &doc); err != nil {
-		return nil, fmt.Errorf("parse config.yaml: %w", err)
+		return nil, fmt.Errorf("parse %s: %w", source, err)
 	}
 
 	cfg := &YoloaiConfig{}
@@ -163,6 +179,21 @@ func LoadConfig() (*YoloaiConfig, error) {
 	root := doc.Content[0]
 	if root.Kind != yaml.MappingNode {
 		return cfg, nil
+	}
+
+	// Validate unknown keys if knownKeys is provided.
+	if knownKeys != nil {
+		var unknown []string
+		for i := 0; i < len(root.Content)-1; i += 2 {
+			key := root.Content[i].Value
+			if !knownKeys[key] {
+				unknown = append(unknown, key)
+			}
+		}
+		if len(unknown) > 0 {
+			sort.Strings(unknown)
+			return nil, fmt.Errorf("%s: unknown config field(s): %s", source, strings.Join(unknown, ", "))
+		}
 	}
 
 	for i := 0; i < len(root.Content)-1; i += 2 {
@@ -305,12 +336,12 @@ func LoadConfig() (*YoloaiConfig, error) {
 				return nil, fmt.Errorf("model: %w", err)
 			}
 			cfg.Model = expanded
-		case "profile":
+		case "os":
 			expanded, err := expandEnvBraced(val.Value)
 			if err != nil {
-				return nil, fmt.Errorf("profile: %w", err)
+				return nil, fmt.Errorf("os: %w", err)
 			}
-			cfg.Profile = expanded
+			cfg.OS = expanded
 		case "agent_files":
 			af, afErr := parseAgentFilesNode(val)
 			if afErr != nil {
@@ -336,6 +367,192 @@ func LoadConfig() (*YoloaiConfig, error) {
 	}
 
 	return cfg, nil
+}
+
+// LoadBakedInDefaults parses the embedded defaults YAML into a YoloaiConfig.
+// Returns a fully-populated config with every field at its baked-in default.
+func LoadBakedInDefaults() (*YoloaiConfig, error) {
+	return parseConfigYAML([]byte(DefaultConfigYAML), "<baked-in>", knownDefaultsKeys)
+}
+
+// LoadDefaultsConfig loads the effective config for the no-profile path:
+// baked-in defaults merged with ~/.yoloai/defaults/config.yaml.
+// Used by sandbox.Create() when no --profile is given.
+func LoadDefaultsConfig() (*YoloaiConfig, error) {
+	base, err := LoadBakedInDefaults()
+	if err != nil {
+		return nil, err
+	}
+
+	data, err := os.ReadFile(DefaultsConfigPath()) //nolint:gosec // G304: path is ~/.yoloai/defaults/config.yaml
+	if err != nil {
+		if os.IsNotExist(err) {
+			return base, nil
+		}
+		return nil, fmt.Errorf("read defaults/config.yaml: %w", err)
+	}
+
+	override, err := parseConfigYAML(data, DefaultsConfigPath(), knownDefaultsKeys)
+	if err != nil {
+		return nil, err
+	}
+
+	return mergeConfigs(base, override), nil
+}
+
+// mergeConfigs merges override into base, returning a new YoloaiConfig.
+// Merge semantics:
+//   - Scalars (OS, Agent, Model, ContainerBackend, TartImage, Isolation): non-empty overrides
+//   - Maps (Env, AgentArgs): map merge, override wins on conflict
+//   - Lists (Mounts, Ports, CapAdd, Devices, Setup): additive
+//   - Resources: per-field override (non-empty override wins)
+//   - Network: Isolated overrides (last wins), Allow is additive
+//   - AgentFiles: replacement semantics (non-nil replaces)
+//   - AutoCommitInterval: non-zero override wins
+func mergeConfigs(base, override *YoloaiConfig) *YoloaiConfig {
+	result := &YoloaiConfig{
+		OS:                 base.OS,
+		ContainerBackend:   base.ContainerBackend,
+		TartImage:          base.TartImage,
+		Agent:              base.Agent,
+		Model:              base.Model,
+		Isolation:          base.Isolation,
+		AutoCommitInterval: base.AutoCommitInterval,
+		AgentFiles:         base.AgentFiles,
+	}
+
+	// Scalars: non-empty override wins
+	if override.OS != "" {
+		result.OS = override.OS
+	}
+	if override.ContainerBackend != "" {
+		result.ContainerBackend = override.ContainerBackend
+	}
+	if override.TartImage != "" {
+		result.TartImage = override.TartImage
+	}
+	if override.Agent != "" {
+		result.Agent = override.Agent
+	}
+	if override.Model != "" {
+		result.Model = override.Model
+	}
+	if override.Isolation != "" {
+		result.Isolation = override.Isolation
+	}
+
+	// AutoCommitInterval: non-zero override wins
+	if override.AutoCommitInterval > 0 {
+		result.AutoCommitInterval = override.AutoCommitInterval
+	}
+
+	// AgentFiles: replacement semantics
+	if override.AgentFiles != nil {
+		result.AgentFiles = override.AgentFiles
+	}
+
+	// Env: map merge, override wins on conflict
+	if len(base.Env) > 0 || len(override.Env) > 0 {
+		result.Env = make(map[string]string)
+		for k, v := range base.Env {
+			result.Env[k] = v
+		}
+		for k, v := range override.Env {
+			result.Env[k] = v
+		}
+	}
+
+	// AgentArgs: map merge, override wins on conflict
+	if len(base.AgentArgs) > 0 || len(override.AgentArgs) > 0 {
+		result.AgentArgs = make(map[string]string)
+		for k, v := range base.AgentArgs {
+			result.AgentArgs[k] = v
+		}
+		for k, v := range override.AgentArgs {
+			result.AgentArgs[k] = v
+		}
+	}
+
+	// Lists: additive
+	result.Mounts = append(append([]string{}, base.Mounts...), override.Mounts...)
+	result.Ports = append(append([]string{}, base.Ports...), override.Ports...)
+	result.CapAdd = append(append([]string{}, base.CapAdd...), override.CapAdd...)
+	result.Devices = append(append([]string{}, base.Devices...), override.Devices...)
+	result.Setup = append(append([]string{}, base.Setup...), override.Setup...)
+
+	// Normalize empty slices to nil
+	if len(result.Mounts) == 0 {
+		result.Mounts = nil
+	}
+	if len(result.Ports) == 0 {
+		result.Ports = nil
+	}
+	if len(result.CapAdd) == 0 {
+		result.CapAdd = nil
+	}
+	if len(result.Devices) == 0 {
+		result.Devices = nil
+	}
+	if len(result.Setup) == 0 {
+		result.Setup = nil
+	}
+	if len(result.Env) == 0 {
+		result.Env = nil
+	}
+	if len(result.AgentArgs) == 0 {
+		result.AgentArgs = nil
+	}
+
+	// Resources: per-field override
+	if base.Resources != nil || override.Resources != nil {
+		result.Resources = &ResourceLimits{}
+		if base.Resources != nil {
+			result.Resources.CPUs = base.Resources.CPUs
+			result.Resources.Memory = base.Resources.Memory
+		}
+		if override.Resources != nil {
+			if override.Resources.CPUs != "" {
+				result.Resources.CPUs = override.Resources.CPUs
+			}
+			if override.Resources.Memory != "" {
+				result.Resources.Memory = override.Resources.Memory
+			}
+		}
+	}
+
+	// Network: Isolated overrides (last wins), Allow is additive
+	if base.Network != nil || override.Network != nil {
+		result.Network = &NetworkConfig{}
+		if base.Network != nil {
+			result.Network.Isolated = base.Network.Isolated
+			result.Network.Allow = append(result.Network.Allow, base.Network.Allow...)
+		}
+		if override.Network != nil {
+			result.Network.Isolated = override.Network.Isolated
+			result.Network.Allow = append(result.Network.Allow, override.Network.Allow...)
+		}
+		if len(result.Network.Allow) == 0 {
+			result.Network.Allow = nil
+		}
+	}
+
+	return result
+}
+
+// LoadConfig reads ~/.yoloai/defaults/config.yaml and extracts known fields.
+// Kept for backwards compatibility; new code should prefer LoadDefaultsConfig.
+func LoadConfig() (*YoloaiConfig, error) {
+	configPath := ConfigPath()
+
+	data, err := os.ReadFile(configPath) //nolint:gosec // G304: path is ~/.yoloai/defaults/config.yaml
+	if err != nil {
+		if os.IsNotExist(err) {
+			return &YoloaiConfig{}, nil
+		}
+		return nil, fmt.Errorf("read config.yaml: %w", err)
+	}
+
+	return parseConfigYAML(data, configPath, nil)
 }
 
 // LoadGlobalConfig reads ~/.yoloai/config.yaml and extracts global settings.
@@ -398,7 +615,7 @@ func LoadGlobalConfig() (*GlobalConfig, error) {
 // file does not exist.
 func ReadConfigRaw() ([]byte, error) {
 	configPath := ConfigPath()
-	data, err := os.ReadFile(configPath) //nolint:gosec // G304: path is ~/.yoloai/profiles/base/config.yaml
+	data, err := os.ReadFile(configPath) //nolint:gosec // G304: path is ~/.yoloai/defaults/config.yaml
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
@@ -491,7 +708,7 @@ func GetEffectiveConfig() (string, error) {
 		}
 	}
 
-	// Overlay values from the profile config file.
+	// Overlay values from the defaults config file.
 	data, err := ReadConfigRaw()
 	if err != nil {
 		return "", err
@@ -550,7 +767,7 @@ func setNodeValue(parent *yaml.Node, key string, val *yaml.Node) {
 
 // GetConfigValue reads a value at the given dotted path from the appropriate
 // config file. Global keys (tmux_conf, model_aliases) are read from
-// ~/.yoloai/config.yaml; profile keys from ~/.yoloai/profiles/base/config.yaml.
+// ~/.yoloai/config.yaml; profile keys from ~/.yoloai/defaults/config.yaml.
 // Returns the raw string value for scalars, or marshaled YAML for
 // mappings/sequences. Falls back to the default for known settings.
 // The bool return indicates whether the key was found (in file or defaults).
@@ -632,7 +849,7 @@ func knownDefaultFrom(path string, defaults []knownSetting) (string, bool, error
 func UpdateConfigFields(fields map[string]string) error {
 	configPath := ConfigPath()
 
-	data, err := os.ReadFile(configPath) //nolint:gosec // G304: path is ~/.yoloai/profiles/base/config.yaml
+	data, err := os.ReadFile(configPath) //nolint:gosec // G304: path is ~/.yoloai/defaults/config.yaml
 	if err != nil {
 		return fmt.Errorf("read config.yaml: %w", err)
 	}
@@ -642,12 +859,14 @@ func UpdateConfigFields(fields map[string]string) error {
 		return fmt.Errorf("parse config.yaml: %w", err)
 	}
 
-	if doc.Kind != yaml.DocumentNode || len(doc.Content) == 0 {
-		return fmt.Errorf("config.yaml has unexpected structure")
-	}
-	root := doc.Content[0]
-	if root.Kind != yaml.MappingNode {
-		return fmt.Errorf("config.yaml root is not a mapping")
+	var root *yaml.Node
+	if doc.Kind == yaml.DocumentNode && len(doc.Content) > 0 && doc.Content[0].Kind == yaml.MappingNode {
+		root = doc.Content[0]
+	} else {
+		// Empty or all-comments file (e.g., scaffold): initialize a fresh mapping.
+		root = &yaml.Node{Kind: yaml.MappingNode}
+		doc.Kind = yaml.DocumentNode
+		doc.Content = []*yaml.Node{root}
 	}
 
 	for fieldPath, value := range fields {
@@ -671,7 +890,7 @@ func UpdateConfigFields(fields map[string]string) error {
 func DeleteConfigField(path string) error {
 	configPath := ConfigPath()
 
-	data, err := os.ReadFile(configPath) //nolint:gosec // G304: path is ~/.yoloai/profiles/base/config.yaml
+	data, err := os.ReadFile(configPath) //nolint:gosec // G304: path is ~/.yoloai/defaults/config.yaml
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil // nothing to delete

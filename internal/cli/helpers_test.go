@@ -260,14 +260,15 @@ func TestResolveProfile_NoProfileBypass(t *testing.T) {
 }
 
 func TestResolveProfile_FlagEmptyWithConfig(t *testing.T) {
-	dir := cliConfigDir(t)
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte("profile: myprofile\n"), 0600))
+	// resolveProfile no longer reads profile from config — flag only.
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
 
 	cmd := &cobra.Command{}
 	cmd.Flags().String("profile", "", "")
 	cmd.Flags().Bool("no-profile", false, "")
 
-	assert.Equal(t, "myprofile", resolveProfile(cmd))
+	assert.Equal(t, "", resolveProfile(cmd))
 }
 
 func TestResolveProfile_FlagEmptyNoConfig(t *testing.T) {
@@ -279,22 +280,6 @@ func TestResolveProfile_FlagEmptyNoConfig(t *testing.T) {
 	cmd.Flags().Bool("no-profile", false, "")
 
 	assert.Equal(t, "", resolveProfile(cmd))
-}
-
-// --- resolveProfileFromConfig ---
-
-func TestResolveProfileFromConfig_HasProfile(t *testing.T) {
-	dir := cliConfigDir(t)
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte("profile: dev\n"), 0600))
-
-	assert.Equal(t, "dev", resolveProfileFromConfig())
-}
-
-func TestResolveProfileFromConfig_NoFile(t *testing.T) {
-	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
-
-	assert.Equal(t, "", resolveProfileFromConfig())
 }
 
 // --- sandboxErrorHint ---

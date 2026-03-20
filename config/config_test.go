@@ -10,12 +10,12 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// configDir creates the profiles/base/ directory structure needed for config tests.
+// configDir creates the defaults/ directory structure needed for config tests.
 func configDir(t *testing.T) string {
 	t.Helper()
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
-	dir := filepath.Join(tmpDir, ".yoloai", "profiles", "base")
+	dir := filepath.Join(tmpDir, ".yoloai", "defaults")
 	require.NoError(t, os.MkdirAll(dir, 0750))
 	return dir
 }
@@ -36,7 +36,7 @@ func TestLoadConfig_Default(t *testing.T) {
 
 	cfg, err := LoadConfig()
 	require.NoError(t, err)
-	assert.Empty(t, cfg.Agent) // default config has no agent set
+	assert.Equal(t, "claude", cfg.Agent) // DefaultConfigYAML sets agent: claude
 }
 
 func TestLoadGlobalConfig_WithTmuxConf(t *testing.T) {
@@ -57,7 +57,7 @@ func TestLoadConfig_AgentDefault(t *testing.T) {
 
 	cfg, err := LoadConfig()
 	require.NoError(t, err)
-	assert.Empty(t, cfg.Agent) // Not set in file; caller uses knownSettings default
+	assert.Equal(t, "claude", cfg.Agent) // DefaultConfigYAML sets agent: claude
 }
 
 func TestLoadConfig_AgentOverride(t *testing.T) {
@@ -134,7 +134,8 @@ func TestLoadConfig_EnvEmpty(t *testing.T) {
 
 	cfg, err := LoadConfig()
 	require.NoError(t, err)
-	assert.Nil(t, cfg.Env)
+	// DefaultConfigYAML has env: {} which parses to an empty (non-nil) map
+	assert.Empty(t, cfg.Env)
 }
 
 func TestLoadGlobalConfig_ModelAliases(t *testing.T) {
@@ -326,7 +327,7 @@ func TestConfigPath(t *testing.T) {
 	t.Setenv("HOME", tmpDir)
 
 	p := ConfigPath()
-	assert.Equal(t, filepath.Join(tmpDir, ".yoloai", "profiles", "base", "config.yaml"), p)
+	assert.Equal(t, filepath.Join(tmpDir, ".yoloai", "defaults", "config.yaml"), p)
 }
 
 func TestReadConfigRaw_MissingFile(t *testing.T) {
@@ -492,7 +493,10 @@ func TestLoadConfig_ResourcesEmpty(t *testing.T) {
 
 	cfg, err := LoadConfig()
 	require.NoError(t, err)
-	assert.Nil(t, cfg.Resources)
+	// DefaultConfigYAML has resources block with empty cpus/memory — parses to non-nil struct
+	require.NotNil(t, cfg.Resources)
+	assert.Empty(t, cfg.Resources.CPUs)
+	assert.Empty(t, cfg.Resources.Memory)
 }
 
 func TestGlobalConfigPath(t *testing.T) {
@@ -586,7 +590,7 @@ func TestReadGlobalConfigRaw_ExistingFile(t *testing.T) {
 
 func TestLoadConfig_AgentFilesString(t *testing.T) {
 	dir := configDir(t)
-	home := filepath.Dir(filepath.Dir(filepath.Dir(dir))) // strip .yoloai/profiles/base
+	home := filepath.Dir(filepath.Dir(dir)) // strip .yoloai/defaults to get HOME
 
 	content := "agent_files: ~/my-agent-configs\n"
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
@@ -601,7 +605,7 @@ func TestLoadConfig_AgentFilesString(t *testing.T) {
 
 func TestLoadConfig_AgentFilesList(t *testing.T) {
 	dir := configDir(t)
-	home := filepath.Dir(filepath.Dir(filepath.Dir(dir)))
+	home := filepath.Dir(filepath.Dir(dir)) // strip .yoloai/defaults to get HOME
 
 	content := "agent_files:\n  - ~/file1.json\n  - ~/file2.json\n"
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
@@ -683,38 +687,6 @@ func TestLoadConfig_RecipeFieldsEmpty(t *testing.T) {
 	assert.Nil(t, cfg.CapAdd)
 	assert.Nil(t, cfg.Devices)
 	assert.Nil(t, cfg.Setup)
-}
-
-func TestLoadConfig_ProfileDefault(t *testing.T) {
-	dir := configDir(t)
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(DefaultConfigYAML), 0600))
-
-	cfg, err := LoadConfig()
-	require.NoError(t, err)
-	assert.Empty(t, cfg.Profile)
-}
-
-func TestLoadConfig_ProfileOverride(t *testing.T) {
-	dir := configDir(t)
-
-	content := "profile: my-project\n"
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
-
-	cfg, err := LoadConfig()
-	require.NoError(t, err)
-	assert.Equal(t, "my-project", cfg.Profile)
-}
-
-func TestLoadConfig_ProfileEnvExpansion(t *testing.T) {
-	dir := configDir(t)
-	t.Setenv("YOLOAI_TEST_PROFILE", "dev-profile")
-
-	content := "profile: ${YOLOAI_TEST_PROFILE}\n"
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
-
-	cfg, err := LoadConfig()
-	require.NoError(t, err)
-	assert.Equal(t, "dev-profile", cfg.Profile)
 }
 
 func TestLoadConfig_AgentFilesOmitted(t *testing.T) {
