@@ -90,7 +90,7 @@ func (r *Runtime) Create(ctx context.Context, cfg runtime.InstanceConfig) error 
 	img, err := r.client.GetImage(ctx, cfg.ImageRef)
 	if err != nil {
 		if errdefs.IsNotFound(err) {
-			createErr = fmt.Errorf("image %q not found; run 'yoloai setup' to build it", cfg.ImageRef)
+			createErr = fmt.Errorf("image %q not found; run 'yoloai system setup' to build it", cfg.ImageRef)
 			return createErr
 		}
 		createErr = fmt.Errorf("get image: %w", err)
@@ -111,7 +111,7 @@ func (r *Runtime) Create(ctx context.Context, cfg runtime.InstanceConfig) error 
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 				createErr = fmt.Errorf("unpack image: %w", err)
 			} else {
-				createErr = fmt.Errorf("unpack image: %w\n  Hint: image content may have been removed by containerd GC; run 'yoloai setup --force' to rebuild", err)
+				createErr = fmt.Errorf("unpack image: %w\n  Hint: image content may have been removed by containerd GC; run 'yoloai system build --force' to rebuild", err)
 			}
 			return createErr
 		}

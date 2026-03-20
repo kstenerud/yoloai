@@ -409,6 +409,6 @@ func (m *Manager) setSetupComplete() error {
 	if err := config.SaveState(&config.State{SetupComplete: true}); err != nil {
 		return err
 	}
-	fmt.Fprintln(m.output, "\nSetup complete. To re-run setup at any time: yoloai setup") //nolint:errcheck // best-effort output
+	fmt.Fprintln(m.output, "\nSetup complete. To re-run setup at any time: yoloai system setup") //nolint:errcheck // best-effort output
 	return nil
 }
