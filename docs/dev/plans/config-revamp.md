@@ -351,8 +351,10 @@ Update `EnsureSetup()` / `EnsureSetupNonInteractive()` in `sandbox/manager.go`:
 
 1. Create `~/.yoloai/defaults/` directory (mode 0750) if absent.
 2. If `defaults/config.yaml` does not exist, write it using `GenerateScaffoldConfig(DefaultConfigYAML)`.
-3. **Do not** write Dockerfile, entrypoint scripts, or tmux.conf to `defaults/` — these remain
-   baked-in.
+3. **Do not** write Dockerfile or entrypoint scripts to `defaults/` — these are baked-in.
+4. `defaults/tmux.conf` is written by the interactive setup wizard (`yoloai setup`) based on
+   the user's existing host tmux config. It is not written during non-interactive
+   `EnsureSetupNonInteractive()` — only when the user explicitly runs setup.
 
 ```go
 func ensureDefaultsDir() error {
