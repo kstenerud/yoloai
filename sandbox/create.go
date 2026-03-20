@@ -1070,9 +1070,19 @@ func createSecretsDir(agentDef *agent.Definition, envVars map[string]string, sec
 		wrote = true
 	}
 
+	// When running as root under sudo, the user's env vars (e.g. CLAUDE_CODE_OAUTH_TOKEN,
+	// ANTHROPIC_API_KEY) are stripped before yoloai is exec'd. Recover them from
+	// the parent process (sudo), which inherited the full environment. This allows
+	// vm-enhanced sandboxes (which require sudo for CAP_NET_ADMIN) to propagate
+	// API keys without requiring the user to pass every key explicitly.
+	parentEnv := sudoParentEnv()
+
 	// Write host env vars for API keys and auth hints (overwrites config env on conflict)
 	for _, key := range append(agentDef.APIKeyEnvVars, agentDef.AuthHintEnvVars...) {
 		value := os.Getenv(key)
+		if value == "" {
+			value = parentEnv[key]
+		}
 		if value == "" {
 			continue
 		}
@@ -1089,6 +1099,30 @@ func createSecretsDir(agentDef *agent.Definition, envVars map[string]string, sec
 	}
 
 	return tmpDir, nil
+}
+
+// sudoParentEnv returns env vars from the parent sudo process when yoloai is
+// run via sudo. sudo strips most env vars before exec'ing the child, but the
+// sudo process itself inherits the full user environment. Reading the parent's
+// /proc/<ppid>/environ recovers vars like CLAUDE_CODE_OAUTH_TOKEN and
+// ANTHROPIC_API_KEY that were stripped. Returns an empty map if not running
+// under sudo or if the parent environ cannot be read.
+func sudoParentEnv() map[string]string {
+	result := make(map[string]string)
+	if os.Getuid() != 0 || os.Getenv("SUDO_USER") == "" {
+		return result
+	}
+	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/environ", os.Getppid())) //nolint:gosec // G304: reading parent proc environ to recover sudo-stripped env vars
+	if err != nil {
+		return result
+	}
+	for _, kv := range strings.Split(string(data), "\x00") {
+		k, v, ok := strings.Cut(kv, "=")
+		if ok && k != "" {
+			result[k] = v
+		}
+	}
+	return result
 }
 
 // buildMounts constructs the bind mounts for the sandbox instance.
