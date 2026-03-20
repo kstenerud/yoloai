@@ -947,6 +947,34 @@ func resolveDetectors(idle agent.IdleSupport) []string {
 	return detectors
 }
 
+// effectiveUID returns the real host user's UID, accounting for sudo.
+// When running as root via sudo, os.Getuid() returns 0, but the Docker
+// entrypoint uses host_uid to remap the yoloai user — passing 0 causes
+// usermod to fail (uid 0 is already root). sudo sets SUDO_UID in the
+// child's environment so we can recover the original user's uid.
+func effectiveUID() int {
+	if os.Getuid() == 0 {
+		if s := os.Getenv("SUDO_UID"); s != "" {
+			if uid, err := strconv.Atoi(s); err == nil {
+				return uid
+			}
+		}
+	}
+	return os.Getuid()
+}
+
+// effectiveGID returns the real host user's GID, accounting for sudo.
+func effectiveGID() int {
+	if os.Getgid() == 0 {
+		if s := os.Getenv("SUDO_GID"); s != "" {
+			if gid, err := strconv.Atoi(s); err == nil {
+				return gid
+			}
+		}
+	}
+	return os.Getgid()
+}
+
 // buildContainerConfig creates the config.json content.
 func buildContainerConfig(agentDef *agent.Definition, agentCommand string, tmuxConf string, workingDir string, debug bool, networkIsolated bool, allowedDomains []string, passthrough []string, overlayMounts []overlayMountConfig, setupCommands []string, autoCommitInterval int, copyDirs []string, sandboxName string, tmuxSocket string) ([]byte, error) {
 	var stateDirName string
@@ -954,8 +982,8 @@ func buildContainerConfig(agentDef *agent.Definition, agentCommand string, tmuxC
 		stateDirName = filepath.Base(agentDef.StateDir)
 	}
 	cfg := containerConfig{
-		HostUID:            os.Getuid(),
-		HostGID:            os.Getgid(),
+		HostUID:            effectiveUID(),
+		HostGID:            effectiveGID(),
 		AgentCommand:       agentCommand,
 		StartupDelay:       int(agentDef.StartupDelay / time.Millisecond),
 		ReadyPattern:       agentDef.Idle.ReadyPattern,
