@@ -368,6 +368,15 @@ func (m *Manager) promptAgentSetup(ctx context.Context) error {
 		return nil
 	}
 
+	// Default to claude if available, otherwise first option.
+	idx := 0
+	for i, a := range agents {
+		if a.name == "claude" {
+			idx = i
+			break
+		}
+	}
+
 	fmt.Fprintln(m.output)                   //nolint:errcheck // best-effort output
 	fmt.Fprintln(m.output, "Default agent:") //nolint:errcheck // best-effort output
 	fmt.Fprintln(m.output)                   //nolint:errcheck // best-effort output
@@ -376,7 +385,7 @@ func (m *Manager) promptAgentSetup(ctx context.Context) error {
 		fmt.Fprintf(m.output, "  [%d] %-10s %s\n", i+1, a.name, a.blurb) //nolint:errcheck // best-effort output
 	}
 
-	fmt.Fprint(m.output, "\nChoice [1]: ") //nolint:errcheck // best-effort output
+	fmt.Fprintf(m.output, "\nChoice [%d]: ", idx+1) //nolint:errcheck // best-effort output
 
 	line, err := m.readLine(ctx)
 	if err != nil {
@@ -384,7 +393,6 @@ func (m *Manager) promptAgentSetup(ctx context.Context) error {
 	}
 	answer := strings.TrimSpace(line)
 
-	idx := 0 // default to first option
 	if answer != "" {
 		n, err := strconv.Atoi(answer)
 		if err == nil && n >= 1 && n <= len(agents) {

@@ -402,7 +402,7 @@ func TestAvailableAgents_ExcludesTest(t *testing.T) {
 	assert.GreaterOrEqual(t, len(agents), 2, "should have at least claude and gemini")
 }
 
-func TestPromptAgentSetup_DefaultSelectsFirst(t *testing.T) {
+func TestPromptAgentSetup_DefaultSelectsClaude(t *testing.T) {
 	mgr, output, _ := setupTestManager(t, "\n")
 
 	err := mgr.promptAgentSetup(context.Background())
@@ -412,18 +412,19 @@ func TestPromptAgentSetup_DefaultSelectsFirst(t *testing.T) {
 
 	cfg, err := config.LoadConfig()
 	require.NoError(t, err)
-	assert.Equal(t, "aider", cfg.Agent)
+	assert.Equal(t, "claude", cfg.Agent)
 }
 
-func TestPromptAgentSetup_SelectSecond(t *testing.T) {
-	mgr, _, _ := setupTestManager(t, "2\n")
+func TestPromptAgentSetup_SelectFirst(t *testing.T) {
+	mgr, _, _ := setupTestManager(t, "1\n")
 
 	err := mgr.promptAgentSetup(context.Background())
 	require.NoError(t, err)
 
 	cfg, err := config.LoadConfig()
 	require.NoError(t, err)
-	assert.Equal(t, "claude", cfg.Agent)
+	agents := availableAgents()
+	assert.Equal(t, agents[0].name, cfg.Agent)
 }
 
 // --- Full multi-step flow tests ---
