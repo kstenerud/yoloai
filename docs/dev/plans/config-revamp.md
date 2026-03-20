@@ -46,7 +46,7 @@ os: linux
 # Preferred Linux container backend. Valid values: docker, podman, or "" (auto-detect).
 # Both work on Linux and macOS. Ignored for vm/vm-enhanced (uses containerd)
 # and os=mac (uses Seatbelt or Tart). CLI --backend overrides.
-# Empty string (default): auto-detect by checking which binary is available.
+# Empty string (default): auto-detect — prefers docker over podman if both are present.
 container_backend: ""
 
 # Isolation level for the sandbox.
@@ -126,7 +126,7 @@ Also add a `GenerateScaffoldConfig` function that produces the user-facing scaff
 commenting out all uncommented, non-blank lines. The `container_backend` default in the
 baked-in YAML is `""` (empty string = auto-detect via `detectContainerBackend()`), matching
 existing behavior — this is NOT changing to `"docker"` as that would silently break
-Podman-only users on upgrade.
+Podman-only users on upgrade. Auto-detect prefers docker over podman if both are present.
 
 ```go
 // GenerateScaffoldConfig takes the baked-in defaults YAML and returns a version
