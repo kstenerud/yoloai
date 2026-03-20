@@ -421,7 +421,7 @@ func (m *Manager) setTmuxConf(value string) error {
 	if value == "default" || value == "default+host" {
 		destPath := filepath.Join(config.DefaultsDir(), "tmux.conf")
 		if _, err := os.Stat(destPath); os.IsNotExist(err) {
-			if writeErr := os.WriteFile(destPath, dockerrt.EmbeddedTmuxConf(), 0600); writeErr != nil {
+			if writeErr := os.WriteFile(destPath, dockerrt.EmbeddedTmuxConf(), 0644); writeErr != nil { //nolint:gosec // G306: tmux.conf contains no secrets; 0644 required so uid 1001 (yoloai in Kata VMs) can read it
 				return fmt.Errorf("write defaults/tmux.conf: %w", writeErr)
 			}
 		}

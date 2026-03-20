@@ -1260,6 +1260,13 @@ func buildMounts(state *sandboxState, secretsDir string) []runtime.MountSpec {
 	if state.tmuxConf == "default" || state.tmuxConf == "default+host" {
 		defaultsTmuxConf := filepath.Join(config.DefaultsDir(), "tmux.conf")
 		if _, err := os.Stat(defaultsTmuxConf); err == nil {
+			// Ensure the file is world-readable (0644). It may have been written
+			// with 0600 by older yoloai versions. Inside Kata VMs the file is
+			// mounted via virtiofs retaining its host uid, but the yoloai user
+			// inside the VM (uid 1001) differs from the host user's uid, so
+			// a 0600 file causes tmux to fail reading its config and enter
+			// copy-mode — preventing send-keys from reaching the shell.
+			_ = os.Chmod(defaultsTmuxConf, 0644) //nolint:gosec // G302: tmux.conf contains no secrets
 			mounts = append(mounts, runtime.MountSpec{
 				Source:   defaultsTmuxConf,
 				Target:   "/yoloai/tmux/tmux.conf",
