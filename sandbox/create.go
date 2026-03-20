@@ -215,6 +215,14 @@ type containerConfig struct {
 // Returns the sandbox name on success (empty if user cancelled or no-start).
 func (m *Manager) Create(ctx context.Context, opts CreateOptions) (string, error) {
 	slog.Info("creating sandbox", "event", "sandbox.create", "sandbox", opts.Name, "agent", opts.Agent, "backend", m.backend)
+	// When running as root under sudo, API key env vars (e.g. CLAUDE_CODE_OAUTH_TOKEN)
+	// are stripped by sudo. Restore them from the parent process's environment so that
+	// all downstream checks (hasAnyAPIKey, copySeedFiles, createSecretsDir) see them.
+	for k, v := range sudoParentEnv() {
+		if os.Getenv(k) == "" {
+			_ = os.Setenv(k, v)
+		}
+	}
 	// Validate isolation prerequisites before the potentially expensive image build.
 	if opts.Isolation != "" {
 		if err := checkIsolationPrerequisites(ctx, m.runtime, opts.Isolation); err != nil {
@@ -1070,19 +1078,9 @@ func createSecretsDir(agentDef *agent.Definition, envVars map[string]string, sec
 		wrote = true
 	}
 
-	// When running as root under sudo, the user's env vars (e.g. CLAUDE_CODE_OAUTH_TOKEN,
-	// ANTHROPIC_API_KEY) are stripped before yoloai is exec'd. Recover them from
-	// the parent process (sudo), which inherited the full environment. This allows
-	// vm-enhanced sandboxes (which require sudo for CAP_NET_ADMIN) to propagate
-	// API keys without requiring the user to pass every key explicitly.
-	parentEnv := sudoParentEnv()
-
 	// Write host env vars for API keys and auth hints (overwrites config env on conflict)
 	for _, key := range append(agentDef.APIKeyEnvVars, agentDef.AuthHintEnvVars...) {
 		value := os.Getenv(key)
-		if value == "" {
-			value = parentEnv[key]
-		}
 		if value == "" {
 			continue
 		}
