@@ -20,7 +20,7 @@ lint:
 	if [ -n "$$UNFMT" ]; then \
 		echo "gofmt needed:"; echo "$$UNFMT"; exit 1; \
 	fi
-	golangci-lint run ./...
+	PATH="$$HOME/go/bin:$$PATH" golangci-lint run ./...
 
 tidy-check:
 	@cp go.mod go.mod.bak && cp go.sum go.sum.bak

@@ -88,14 +88,14 @@ func TestIsWSL2_Microsoft(t *testing.T) {
 	_ = isWSL2() // smoke: no panic
 
 	// Inline the same logic with a temp file to test the "microsoft" branch.
-	data, _ := os.ReadFile(tmp)
+	data, _ := os.ReadFile(tmp) //nolint:gosec // G304: test code with temp dir
 	assert.True(t, strings.Contains(strings.ToLower(string(data)), "microsoft"))
 }
 
 func TestIsWSL2_NonWSL(t *testing.T) {
 	tmp := filepath.Join(t.TempDir(), "version")
 	require.NoError(t, os.WriteFile(tmp, []byte("Linux version 6.8.0-106-generic (buildd@lcy02-amd64-059)"), 0o600))
-	data, _ := os.ReadFile(tmp)
+	data, _ := os.ReadFile(tmp) //nolint:gosec // G304: test code with temp dir
 	assert.False(t, strings.Contains(strings.ToLower(string(data)), "microsoft"))
 }
 
@@ -172,22 +172,22 @@ func setupValidateIsolationMocks(t *testing.T) (sockPath string, restoreAll func
 	sockPath = filepath.Join(tmpDir, "containerd.sock")
 	ln, err := net.Listen("unix", sockPath)
 	require.NoError(t, err)
-	t.Cleanup(func() { ln.Close() })
+	t.Cleanup(func() { _ = ln.Close() })
 
-	// Create a fake CNI bridge binary.
+	// Create a fake CNI bridge binary (0o750: executable by group, acceptable for test bins).
 	cniBridgeDir := filepath.Join(tmpDir, "cni", "bin")
-	require.NoError(t, os.MkdirAll(cniBridgeDir, 0o755))
+	require.NoError(t, os.MkdirAll(cniBridgeDir, 0o750))
 	cniBridgeFile := filepath.Join(cniBridgeDir, "bridge")
-	require.NoError(t, os.WriteFile(cniBridgeFile, nil, 0o755))
+	require.NoError(t, os.WriteFile(cniBridgeFile, nil, 0o750)) //nolint:gosec // G306: intentional executable for test
 
 	// Create a fake /dev/kvm.
 	kvmFile := filepath.Join(tmpDir, "kvm")
 	require.NoError(t, os.WriteFile(kvmFile, nil, 0o600))
 
-	// Create a fake kata shim on PATH.
+	// Create a fake kata shim on PATH (must be executable for exec.LookPath).
 	fakeBinDir := filepath.Join(tmpDir, "bin")
-	require.NoError(t, os.MkdirAll(fakeBinDir, 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(fakeBinDir, "containerd-shim-kata-v2"), nil, 0o755))
+	require.NoError(t, os.MkdirAll(fakeBinDir, 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(fakeBinDir, "containerd-shim-kata-v2"), nil, 0o750)) //nolint:gosec // G306: intentional executable for test
 	t.Setenv("PATH", fakeBinDir+":"+os.Getenv("PATH"))
 
 	origSock := containerdSockPath
@@ -324,7 +324,7 @@ func TestValidateIsolation_SocketPermissionDenied(t *testing.T) {
 	tmpDir := t.TempDir()
 	noAccessDir := filepath.Join(tmpDir, "noaccess")
 	require.NoError(t, os.MkdirAll(noAccessDir, 0o000))
-	t.Cleanup(func() { os.Chmod(noAccessDir, 0o755) }) //nolint:errcheck // cleanup
+	t.Cleanup(func() { _ = os.Chmod(noAccessDir, 0o755) }) //nolint:gosec // G302: restoring test dir to allow cleanup
 	containerdSockPath = filepath.Join(noAccessDir, "containerd.sock")
 
 	r := &Runtime{}
