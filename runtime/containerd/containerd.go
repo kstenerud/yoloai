@@ -28,6 +28,17 @@ type Runtime struct {
 var _ runtime.Runtime = (*Runtime)(nil)
 var _ runtime.IsolationValidator = (*Runtime)(nil)
 
+// Capabilities returns the containerd backend's feature set.
+func (r *Runtime) Capabilities() runtime.BackendCaps {
+	return runtime.BackendCaps{
+		NetworkIsolation:    true,
+		OverlayDirs:         false, // overlayfs-in-container not supported with Kata shim
+		CapAdd:              true,
+		NeedsHomeSeedConfig: true,
+		RewritesCopyWorkdir: false,
+	}
+}
+
 const containerdSock = "/run/containerd/containerd.sock"
 
 // New connects to the containerd daemon and returns a Runtime.

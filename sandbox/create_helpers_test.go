@@ -16,6 +16,10 @@ import (
 
 	"github.com/kstenerud/yoloai/agent"
 	"github.com/kstenerud/yoloai/runtime"
+	containerdrt "github.com/kstenerud/yoloai/runtime/containerd"
+	dockerrt "github.com/kstenerud/yoloai/runtime/docker"
+	seatbeltrt "github.com/kstenerud/yoloai/runtime/seatbelt"
+	tartrt "github.com/kstenerud/yoloai/runtime/tart"
 )
 
 // hasAnyAPIKey tests
@@ -1081,48 +1085,44 @@ func TestIsolationContainerRuntime_VMEnhanced(t *testing.T) {
 	assert.Equal(t, "io.containerd.kata-fc.v2", isolationContainerRuntime("vm-enhanced"))
 }
 
-// backendCaps tests
+// BackendCaps tests — each backend declares its own capabilities.
+// Capabilities() is a pure static declaration; calling via nil pointer is safe
+// because the method returns a constant struct without accessing receiver fields.
 
 func TestBackendCaps_Docker(t *testing.T) {
-	caps := backendCaps("docker")
+	caps := (*dockerrt.Runtime)(nil).Capabilities()
 	assert.True(t, caps.NetworkIsolation)
 	assert.True(t, caps.OverlayDirs)
 	assert.True(t, caps.CapAdd)
-}
-
-func TestBackendCaps_Podman(t *testing.T) {
-	caps := backendCaps("podman")
-	assert.True(t, caps.NetworkIsolation)
-	assert.True(t, caps.OverlayDirs)
-	assert.True(t, caps.CapAdd)
+	assert.True(t, caps.NeedsHomeSeedConfig)
+	assert.False(t, caps.RewritesCopyWorkdir)
 }
 
 func TestBackendCaps_Containerd(t *testing.T) {
-	caps := backendCaps("containerd")
+	caps := (*containerdrt.Runtime)(nil).Capabilities()
 	assert.True(t, caps.NetworkIsolation)
 	assert.False(t, caps.OverlayDirs) // overlayfs not supported inside Kata VMs
 	assert.True(t, caps.CapAdd)
+	assert.True(t, caps.NeedsHomeSeedConfig)
+	assert.False(t, caps.RewritesCopyWorkdir)
 }
 
 func TestBackendCaps_Tart(t *testing.T) {
-	caps := backendCaps("tart")
+	caps := (*tartrt.Runtime)(nil).Capabilities()
 	assert.False(t, caps.NetworkIsolation)
 	assert.False(t, caps.OverlayDirs)
 	assert.False(t, caps.CapAdd)
+	assert.True(t, caps.NeedsHomeSeedConfig)
+	assert.False(t, caps.RewritesCopyWorkdir)
 }
 
 func TestBackendCaps_Seatbelt(t *testing.T) {
-	caps := backendCaps("seatbelt")
+	caps := (*seatbeltrt.Runtime)(nil).Capabilities()
 	assert.False(t, caps.NetworkIsolation)
 	assert.False(t, caps.OverlayDirs)
 	assert.False(t, caps.CapAdd)
-}
-
-func TestBackendCaps_Unknown(t *testing.T) {
-	caps := backendCaps("unknown-backend")
-	assert.False(t, caps.NetworkIsolation)
-	assert.False(t, caps.OverlayDirs)
-	assert.False(t, caps.CapAdd)
+	assert.False(t, caps.NeedsHomeSeedConfig) // uses host native agent, not npm-installed
+	assert.True(t, caps.RewritesCopyWorkdir)  // :copy paths point to sandbox copy location
 }
 
 // checkIsolationPrerequisites tests

@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	goruntime "runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -46,25 +45,6 @@ const (
 	NetworkModeNone     NetworkMode = "none"     // no network access
 	NetworkModeIsolated NetworkMode = "isolated" // allowlist only
 )
-
-// BackendCaps describes what a runtime backend supports in launchContainer.
-type BackendCaps struct {
-	NetworkIsolation bool // supports --network=isolated (iptables-based domain filtering)
-	OverlayDirs      bool // supports :overlay mount mode (overlayfs inside the container)
-	CapAdd           bool // supports cap_add and devices via OCI spec
-}
-
-// backendCaps returns the capabilities for the given backend name.
-func backendCaps(backend string) BackendCaps {
-	switch backend {
-	case "docker", "podman":
-		return BackendCaps{NetworkIsolation: true, OverlayDirs: true, CapAdd: true}
-	case "containerd":
-		return BackendCaps{NetworkIsolation: true, OverlayDirs: false, CapAdd: true}
-	default: // tart, seatbelt
-		return BackendCaps{}
-	}
-}
 
 // isolationContainerRuntime maps an isolation mode to the OCI runtime name
 // (shimv2 type for containerd, runtime name for Docker/Podman).
@@ -440,8 +420,9 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 	}
 
 	// Fix install method in seeded .claude.json (host has "native", container uses npm).
-	// Skip for seatbelt — it runs the host's native Claude Code, not npm-installed.
-	if m.backend != "seatbelt" {
+	// Skipped when NeedsHomeSeedConfig is false — the backend runs the host's native
+	// agent installation rather than the npm-installed copy in the container image.
+	if m.runtime.Capabilities().NeedsHomeSeedConfig {
 		if err := ensureHomeSeedConfig(agentDef, sandboxDir); err != nil {
 			return nil, fmt.Errorf("ensure home seed config: %w", err)
 		}
@@ -461,11 +442,12 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 		return nil, err
 	}
 
-	// For seatbelt, rewrite mount paths for :copy directories to the actual
-	// copy location. Docker mounts the copy at the original host path inside
-	// the container, but seatbelt runs directly on macOS — the agent sees
-	// the copy at its sandbox location, not the original host path.
-	if m.backend == "seatbelt" {
+	// For backends that run directly on the host (no container image), :copy
+	// workdir mount paths must be rewritten to the actual copy location.
+	// Container backends mount the copy at the original host path inside the
+	// container; process-based backends (e.g. seatbelt) run directly on macOS
+	// where the agent sees the copy at its sandbox location, not the host path.
+	if m.runtime.Capabilities().RewritesCopyWorkdir {
 		if workdir.Mode == "copy" {
 			workdir.MountPath = WorkDir(opts.Name, workdir.Path)
 		}
@@ -513,19 +495,14 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 		return nil, fmt.Errorf("build %s: %w", RuntimeConfigFile, err)
 	}
 
-	// Determine effective userns mode for Podman rootless containers.
-	// With Podman rootless + keep-id, the container runs as the host user (not yoloai),
-	// so tmux exec must use the default user ("") instead of "yoloai".
-	// keep-id is NOT used when SYS_ADMIN is needed (overlay or recipe cap_add).
-	//
-	// On macOS, Podman runs via Podman Machine (a Linux VM). keep-id maps the
-	// VM user (UID 1000) into the container, not the macOS user (e.g. UID 501).
-	// The container runs as UID 1000, but /home/yoloai is owned by UID 1001 (the
-	// yoloai user created in the Dockerfile), so agents cannot write their config.
-	// Without keep-id, the container starts as root, entrypoint.py remaps yoloai
-	// to the macOS user's UID, and gosu drops to yoloai — exactly as Docker does.
+	// Determine effective user namespace mode. Backends that implement
+	// UsernsProvider (currently Podman rootless) may request "keep-id" to map
+	// the container uid to the host user. keep-id also changes the tmux exec
+	// user from "yoloai" to "" (host user) — see inspect.go:tmuxExecUser.
+	// CAP_SYS_ADMIN (required for overlay mounts) disqualifies keep-id because
+	// overlay needs real root inside the container.
 	usernsMode := ""
-	if m.backend == "podman" && os.Getuid() != 0 && goruntime.GOOS != "darwin" {
+	if up, ok := m.runtime.(runtime.UsernsProvider); ok {
 		hasSysAdmin := workdir.Mode == "overlay"
 		for _, ad := range auxDirs {
 			if ad.Mode == "overlay" {
@@ -539,9 +516,7 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 				break
 			}
 		}
-		if !hasSysAdmin {
-			usernsMode = "keep-id"
-		}
+		usernsMode = up.UsernsMode(hasSysAdmin)
 	}
 
 	// Write state files
@@ -685,10 +660,10 @@ func (m *Manager) launchContainer(ctx context.Context, state *sandboxState) erro
 
 	cname := InstanceName(state.name)
 
-	caps := backendCaps(m.backend)
+	caps := m.runtime.Capabilities()
 
 	if state.networkMode == "isolated" && !caps.NetworkIsolation {
-		return fmt.Errorf("--network=isolated is not supported by the %s backend", m.backend)
+		return fmt.Errorf("--network=isolated is not supported by the %s backend", m.runtime.Name())
 	}
 
 	resolvedImage := state.imageRef
@@ -730,14 +705,14 @@ func (m *Manager) launchContainer(ctx context.Context, state *sandboxState) erro
 	// CAP_SYS_ADMIN required for overlay mounts inside the container
 	if hasOverlayDirs(state) {
 		if !caps.OverlayDirs {
-			return fmt.Errorf(":overlay mode requires a container backend that supports overlayfs (not supported with %s)", m.backend)
+			return fmt.Errorf(":overlay mode requires a container backend that supports overlayfs (not supported with %s)", m.runtime.Name())
 		}
 		instanceCfg.CapAdd = append(instanceCfg.CapAdd, "SYS_ADMIN")
 	}
 
 	// Recipe fields (cap_add, devices, setup) require a backend with CapAdd support
 	if !caps.CapAdd && (len(state.capAdd) > 0 || len(state.devices) > 0 || len(state.setup) > 0) {
-		return fmt.Errorf("cap_add, devices, and setup require a container backend (not supported with %s)", m.backend)
+		return fmt.Errorf("cap_add, devices, and setup require a container backend (not supported with %s)", m.runtime.Name())
 	}
 	instanceCfg.CapAdd = append(instanceCfg.CapAdd, state.capAdd...)
 	instanceCfg.Devices = state.devices

@@ -74,12 +74,35 @@ type ExecResult struct {
 	ExitCode int
 }
 
+// BackendCaps declares what features a runtime backend supports.
+// Each backend returns its own capabilities via Capabilities().
+type BackendCaps struct {
+	NetworkIsolation    bool // supports --network=isolated (iptables domain filtering)
+	OverlayDirs         bool // supports :overlay mount mode (overlayfs inside the container)
+	CapAdd              bool // supports cap_add, devices, and setup commands
+	NeedsHomeSeedConfig bool // entrypoint remaps yoloai's npm install method; false for seatbelt (runs host native agent)
+	RewritesCopyWorkdir bool // :copy workdir mount path must be rewritten to the sandbox copy location; true for seatbelt
+}
+
 // IsolationValidator is an optional interface implemented by Runtime backends
 // that support prerequisite checking for isolation modes. create.go delegates
 // to this interface via checkIsolationPrerequisites; backends that don't
 // implement it skip validation silently.
 type IsolationValidator interface {
 	ValidateIsolation(ctx context.Context, isolation string) error
+}
+
+// UsernsProvider is an optional interface implemented by backends that need
+// a non-default user namespace mode. Podman rootless uses "keep-id" to map
+// the container uid to the host user; this also determines the tmux exec user
+// (keep-id containers run as the host user, not as "yoloai").
+type UsernsProvider interface {
+	// UsernsMode returns the user namespace mode for a new container.
+	// hasSysAdmin is true when the container will receive CAP_SYS_ADMIN
+	// (overlay mounts or recipe cap_add), which requires real root in the
+	// container and therefore cannot use keep-id.
+	// Returns "" for the default mode.
+	UsernsMode(hasSysAdmin bool) string
 }
 
 // Runtime is the sandbox backend interface. Implementations manage the
@@ -134,6 +157,11 @@ type Runtime interface {
 	// an instance fails to start or crashes. The hint is included in error
 	// messages shown to the user.
 	DiagHint(instanceName string) string
+
+	// Capabilities returns the feature set supported by this backend.
+	// Used by sandbox/create.go to gate features and select backend-specific
+	// code paths without string-comparing backend names.
+	Capabilities() BackendCaps
 
 	// Name returns the backend name (e.g., "docker", "tart", "seatbelt").
 	Name() string

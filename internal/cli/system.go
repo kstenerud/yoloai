@@ -111,7 +111,7 @@ func runSystemBuild(cmd *cobra.Command, args []string, backend string) error {
 			if jsonEnabled(cmd) {
 				buildOut, _ = os.Open(os.DevNull)
 			}
-			if err := sandbox.EnsureProfileImage(ctx, rt, profileName, backend, secrets, buildOut, slog.Default(), true); err != nil {
+			if err := sandbox.EnsureProfileImage(ctx, rt, profileName, secrets, buildOut, slog.Default(), true); err != nil {
 				return err
 			}
 			if jsonEnabled(cmd) {

@@ -33,6 +33,7 @@ type Runtime struct {
 
 // Compile-time checks.
 var _ runtime.Runtime = (*Runtime)(nil)
+var _ runtime.IsolationValidator = (*Runtime)(nil)
 
 // New creates a Runtime and verifies the Docker daemon is reachable.
 func New(ctx context.Context) (*Runtime, error) {
@@ -313,6 +314,17 @@ func (r *Runtime) DiagHint(instanceName string) string {
 
 // Name returns the backend name.
 func (r *Runtime) Name() string { return r.binaryName }
+
+// Capabilities returns the Docker backend's feature set.
+func (r *Runtime) Capabilities() runtime.BackendCaps {
+	return runtime.BackendCaps{
+		NetworkIsolation:    true,
+		OverlayDirs:         true,
+		CapAdd:              true,
+		NeedsHomeSeedConfig: true,
+		RewritesCopyWorkdir: false,
+	}
+}
 
 // dockerInfoOutput fetches the list of registered OCI runtime names from the
 // Docker daemon. Variable for testing.

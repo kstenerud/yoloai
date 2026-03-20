@@ -133,7 +133,7 @@ func (m *Manager) resolveProfileConfig(ctx context.Context, opts *CreateOptions,
 	pr.imageRef = config.ResolveProfileImage(opts.Profile, chain)
 
 	// Build profile image if needed (Docker only)
-	if err := EnsureProfileImage(ctx, m.runtime, opts.Profile, m.backend, AutoBuildSecrets(), m.output, m.logger, false); err != nil {
+	if err := EnsureProfileImage(ctx, m.runtime, opts.Profile, AutoBuildSecrets(), m.output, m.logger, false); err != nil {
 		return nil, fmt.Errorf("build profile image: %w", err)
 	}
 
@@ -253,17 +253,21 @@ func (m *Manager) parseAndValidateDirs(ctx context.Context, opts CreateOptions, 
 		return nil, nil, NewUsageError("a model is required when using a local model server: use --model or 'yoloai config set model <model>'")
 	}
 
-	// Localhost URL warning for containerized backends
-	if m.backend != "seatbelt" {
+	// Localhost URL warning for backends that isolate the agent inside a
+	// container or VM where localhost resolves to the container, not the host.
+	// Skipped for process-based backends (RewritesCopyWorkdir=true) that run
+	// the agent directly on the host, where localhost resolves correctly.
+	caps := m.runtime.Capabilities()
+	if !caps.RewritesCopyWorkdir {
 		for _, key := range agentDef.AuthHintEnvVars {
 			for _, val := range []string{os.Getenv(key), mergedEnv[key]} {
 				if val != "" && containsLocalhost(val) {
 					hint := "use the host's routable IP instead"
-					if backendCaps(m.backend).NetworkIsolation {
+					if caps.NetworkIsolation {
 						hint = "use host.docker.internal instead"
 					}
-					return nil, nil, NewUsageError("%s contains a localhost address (%s) which won't work inside a %s VM — %s",
-						key, val, m.backend, hint)
+					return nil, nil, NewUsageError("%s contains a localhost address (%s) which won't work inside a %s sandbox — %s",
+						key, val, m.runtime.Name(), hint)
 				}
 			}
 		}

@@ -57,6 +57,20 @@ type Runtime struct {
 // Compile-time check.
 var _ runtime.Runtime = (*Runtime)(nil)
 
+// Capabilities returns the Seatbelt backend's feature set.
+// Seatbelt runs agent processes via sandbox-exec directly on macOS; it uses
+// the host's native agent installation rather than an npm-installed copy in
+// a container, and :copy workdir paths must point to the sandbox copy location.
+func (r *Runtime) Capabilities() runtime.BackendCaps {
+	return runtime.BackendCaps{
+		NetworkIsolation:    false,
+		OverlayDirs:         false,
+		CapAdd:              false,
+		NeedsHomeSeedConfig: false,
+		RewritesCopyWorkdir: true,
+	}
+}
+
 // New creates a Runtime after verifying that we're on macOS and
 // sandbox-exec is available.
 func New(_ context.Context) (*Runtime, error) {

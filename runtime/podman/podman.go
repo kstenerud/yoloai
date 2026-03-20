@@ -23,8 +23,10 @@ type Runtime struct {
 	*docker.Runtime
 }
 
-// Compile-time check.
+// Compile-time checks.
 var _ runtime.Runtime = (*Runtime)(nil)
+var _ runtime.IsolationValidator = (*Runtime)(nil)
+var _ runtime.UsernsProvider = (*Runtime)(nil)
 
 // New creates a Podman Runtime by discovering the Podman socket and
 // connecting via the Docker SDK.
@@ -178,6 +180,21 @@ func (r *Runtime) ValidateIsolation(_ context.Context, isolation string) error {
 			"  Then add to /etc/containers/containers.conf: [engine.runtimes] runsc = [\"/usr/local/sbin/runsc\"]")
 	}
 	return nil
+}
+
+// UsernsMode returns the user namespace mode for a new container.
+// Rootless Podman on Linux uses "keep-id" to map container uid to the host
+// user, which is required for correct file ownership. Exceptions:
+//   - hasSysAdmin=true: overlay mounts require real root in the container
+//   - macOS: Podman Machine maps the VM user (uid 1000) into the container,
+//     not the macOS user. Without keep-id, entrypoint.py remaps yoloai to
+//     the correct uid via gosu — the same path Docker takes.
+//   - root: keep-id is irrelevant when already running as root.
+func (r *Runtime) UsernsMode(hasSysAdmin bool) string {
+	if !isRootless() || hasSysAdmin || goruntime.GOOS == "darwin" {
+		return ""
+	}
+	return "keep-id"
 }
 
 // isRootless returns true when not running as root, indicating Podman

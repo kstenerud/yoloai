@@ -16,15 +16,17 @@ import (
 	"github.com/kstenerud/yoloai/agent"
 	"github.com/kstenerud/yoloai/config"
 	"github.com/kstenerud/yoloai/runtime"
+	dockerrt "github.com/kstenerud/yoloai/runtime/docker"
+	seatbeltrt "github.com/kstenerud/yoloai/runtime/seatbelt"
+	tartrt "github.com/kstenerud/yoloai/runtime/tart"
 	"github.com/kstenerud/yoloai/workspace"
 )
 
 func TestBackendCaps(t *testing.T) {
-	assert.True(t, backendCaps("docker").CapAdd)
-	assert.True(t, backendCaps("podman").CapAdd)
-	assert.False(t, backendCaps("tart").CapAdd)
-	assert.False(t, backendCaps("seatbelt").CapAdd)
-	assert.False(t, backendCaps("").CapAdd)
+	// Capabilities() is a pure static declaration; call via nil pointer is safe.
+	assert.True(t, (*dockerrt.Runtime)(nil).Capabilities().CapAdd)
+	assert.False(t, (*tartrt.Runtime)(nil).Capabilities().CapAdd)
+	assert.False(t, (*seatbeltrt.Runtime)(nil).Capabilities().CapAdd)
 }
 
 func TestResolveModel_Alias(t *testing.T) {

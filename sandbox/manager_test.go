@@ -85,6 +85,15 @@ func (m *mockRuntime) DiagHint(instanceName string) string {
 func (m *mockRuntime) Name() string                                        { return "docker" }
 func (m *mockRuntime) PreferredTmuxSocket() string                         { return "" }
 func (m *mockRuntime) AttachCommand(_ string, _, _ int, _ string) []string { return nil }
+func (m *mockRuntime) Capabilities() runtime.BackendCaps {
+	return runtime.BackendCaps{
+		NetworkIsolation:    true,
+		OverlayDirs:         true,
+		CapAdd:              true,
+		NeedsHomeSeedConfig: true,
+		RewritesCopyWorkdir: false,
+	}
+}
 
 func TestEnsureSetup_CreatesDirectories(t *testing.T) {
 	tmpDir := t.TempDir()

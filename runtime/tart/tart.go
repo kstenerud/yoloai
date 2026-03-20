@@ -56,6 +56,18 @@ type Runtime struct {
 // Compile-time check.
 var _ runtime.Runtime = (*Runtime)(nil)
 
+// Capabilities returns the Tart backend's feature set.
+// Tart runs macOS VMs; no container-specific features are supported.
+func (r *Runtime) Capabilities() runtime.BackendCaps {
+	return runtime.BackendCaps{
+		NetworkIsolation:    false,
+		OverlayDirs:         false,
+		CapAdd:              false,
+		NeedsHomeSeedConfig: true,
+		RewritesCopyWorkdir: false,
+	}
+}
+
 // New creates a Runtime after verifying that tart is installed and the
 // platform is supported (macOS with Apple Silicon).
 func New(_ context.Context) (*Runtime, error) {
