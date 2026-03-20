@@ -20,18 +20,28 @@ import (
 
 	"github.com/docker/docker/api/types/build"
 	dockerclient "github.com/docker/docker/client"
+	"github.com/kstenerud/yoloai/config"
 )
 
+// lastBuildFile is the filename used to record the last successful build checksum
+// in a profile directory (for profile image staleness detection).
 const lastBuildFile = ".last-build-checksum"
+
+// baseImageChecksumPath returns the fixed path where the base image build
+// checksum is stored. Using the yoloai cache dir avoids any dependency on
+// profiles/base/ or a caller-supplied sourceDir.
+func baseImageChecksumPath() string {
+	return filepath.Join(config.CacheDir(), ".base-image-checksum")
+}
 
 // NeedsBuild returns true if the Docker image needs to be (re)built because
 // the embedded resource files have changed since the last successful build.
-func NeedsBuild(sourceDir string) bool {
+func NeedsBuild(_ string) bool {
 	current := buildInputsChecksum()
 	if current == "" {
 		return true // shouldn't happen with embedded resources, but be safe
 	}
-	last, err := os.ReadFile(filepath.Join(sourceDir, lastBuildFile)) //nolint:gosec // G304: sourceDir is ~/.yoloai/
+	last, err := os.ReadFile(baseImageChecksumPath()) //nolint:gosec // G304: path is ~/.yoloai/cache/
 	if err != nil {
 		return true // no record → need build
 	}
@@ -41,9 +51,9 @@ func NeedsBuild(sourceDir string) bool {
 // RecordBuildChecksum writes the current build inputs checksum to disk.
 // Exported for testing; production code uses buildBaseImage which records
 // automatically on success.
-func RecordBuildChecksum(sourceDir string) {
+func RecordBuildChecksum(_ string) {
 	if sum := buildInputsChecksum(); sum != "" {
-		_ = os.WriteFile(filepath.Join(sourceDir, lastBuildFile), []byte(sum), 0600)
+		_ = os.WriteFile(baseImageChecksumPath(), []byte(sum), 0600) //nolint:gosec // G304: path is ~/.yoloai/cache/
 	}
 }
 
@@ -97,13 +107,8 @@ func buildBaseImage(ctx context.Context, client *dockerclient.Client, sourceDir 
 		return err
 	}
 
-	// Record build inputs checksum for NeedsBuild.
-	// Use sourceDir for the checksum file location if provided, otherwise skip.
-	if sourceDir != "" {
-		if sum := buildInputsChecksum(); sum != "" {
-			_ = os.WriteFile(filepath.Join(sourceDir, lastBuildFile), []byte(sum), 0600) // best-effort
-		}
-	}
+	// Record build inputs checksum so NeedsBuild can detect stale images.
+	RecordBuildChecksum("")
 
 	return nil
 }
