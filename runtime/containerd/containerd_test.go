@@ -51,7 +51,7 @@ func TestKataConfigPath(t *testing.T) {
 		},
 		{
 			runtime:  "io.containerd.kata-fc.v2",
-			wantPath: "/opt/kata/share/defaults/kata-containers/configuration-fc.toml",
+			wantPath: "", // use shim built-in default (no explicit config path needed)
 		},
 		{
 			runtime:  "",
@@ -198,6 +198,7 @@ func setupValidateIsolationMocks(t *testing.T) (sockPath string, restoreAll func
 	origKVM := kvmDevPath
 	origCap := capNetAdminCheckFunc
 	origWSL2 := wsl2CheckFunc
+	origDevmapper := devmakerCheckFunc
 
 	containerdSockPath = sockPath
 	kataShimName = "containerd-shim-kata-v2"
@@ -206,6 +207,7 @@ func setupValidateIsolationMocks(t *testing.T) (sockPath string, restoreAll func
 	kvmDevPath = kvmFile
 	capNetAdminCheckFunc = func() bool { return true }
 	wsl2CheckFunc = func() bool { return false }
+	devmakerCheckFunc = func(_ context.Context, _ *Runtime) error { return nil }
 
 	return sockPath, func() {
 		containerdSockPath = origSock
@@ -215,6 +217,7 @@ func setupValidateIsolationMocks(t *testing.T) (sockPath string, restoreAll func
 		kvmDevPath = origKVM
 		capNetAdminCheckFunc = origCap
 		wsl2CheckFunc = origWSL2
+		devmakerCheckFunc = origDevmapper
 	}
 }
 
@@ -246,6 +249,34 @@ func TestValidateIsolation_VmEnhanced_FCShimMissing(t *testing.T) {
 	err := r.ValidateIsolation(context.Background(), "vm-enhanced")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "kata shim not found")
+}
+
+func TestValidateIsolation_VmEnhanced_DevmakerNotConfigured(t *testing.T) {
+	_, restore := setupValidateIsolationMocks(t)
+	defer restore()
+
+	devmakerCheckFunc = func(_ context.Context, _ *Runtime) error {
+		return fmt.Errorf("devmapper snapshotter not configured: snapshotter not loaded: invalid argument\n    Run the devmapper setup script and restart containerd.")
+	}
+
+	r := &Runtime{}
+	err := r.ValidateIsolation(context.Background(), "vm-enhanced")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "devmapper snapshotter not configured")
+}
+
+func TestValidateIsolation_VmEnhanced_DevmakerOnlyCheckedForVmEnhanced(t *testing.T) {
+	_, restore := setupValidateIsolationMocks(t)
+	defer restore()
+
+	// Devmapper check always fails — but vm (not vm-enhanced) should not call it.
+	devmakerCheckFunc = func(_ context.Context, _ *Runtime) error {
+		return fmt.Errorf("devmapper snapshotter not configured")
+	}
+
+	r := &Runtime{}
+	err := r.ValidateIsolation(context.Background(), "vm")
+	assert.NoError(t, err, "vm isolation should not probe devmapper snapshotter")
 }
 
 func TestValidateIsolation_Vm_UsesQemuShim(t *testing.T) {

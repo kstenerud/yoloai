@@ -72,6 +72,22 @@ func TestIntegration_ValidateIsolation(t *testing.T) {
 	// No assert — the result depends on the test machine configuration.
 }
 
+// TestIntegration_ValidateIsolation_VmEnhanced verifies the devmapper snapshotter probe
+// works against the real containerd daemon with vm-enhanced isolation.
+func TestIntegration_ValidateIsolation_VmEnhanced(t *testing.T) {
+	skipIfNotAvailable(t)
+
+	ctx := context.Background()
+	rt, err := New(ctx)
+	require.NoError(t, err)
+	defer rt.Close() //nolint:errcheck // best-effort close
+
+	err = rt.ValidateIsolation(ctx, "vm-enhanced")
+	t.Logf("ValidateIsolation('vm-enhanced') result: %v", err)
+	// No assert — the result depends on the test machine configuration.
+	// On the test VM with devmapper configured, this should return nil.
+}
+
 // TestIntegration_ContainerLifecycle runs a full create/start/stop/remove cycle.
 // Requires: containerd running, yoloai-base image imported, Kata shim available.
 func TestIntegration_ContainerLifecycle(t *testing.T) {

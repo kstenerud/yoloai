@@ -13,6 +13,7 @@ import (
 
 	"github.com/containerd/containerd/v2/client"
 	"github.com/containerd/containerd/v2/pkg/namespaces"
+	"github.com/containerd/errdefs"
 
 	"github.com/kstenerud/yoloai/runtime"
 )
@@ -71,11 +72,25 @@ var (
 	kvmDevPath           = "/dev/kvm"
 	capNetAdminCheckFunc = hasCapNetAdmin
 	wsl2CheckFunc        = isWSL2
+	devmakerCheckFunc    = checkDevmakerSnapshotter
 )
+
+// checkDevmakerSnapshotter probes the devmapper snapshotter by calling Stat with a
+// non-existent key. A "not found" error means the snapshotter is registered and working;
+// any other error means it is not configured.
+func checkDevmakerSnapshotter(ctx context.Context, r *Runtime) error {
+	ctx = r.withNamespace(ctx)
+	_, err := r.client.SnapshotService("devmapper").Stat(ctx, "probe")
+	if err != nil && !errdefs.IsNotFound(err) {
+		return fmt.Errorf("devmapper snapshotter not configured: %w\n"+
+			"    Run the devmapper setup script and restart containerd", err)
+	}
+	return nil
+}
 
 // ValidateIsolation checks that all prerequisites for VM isolation are satisfied.
 // Implements runtime.IsolationValidator.
-func (r *Runtime) ValidateIsolation(_ context.Context, isolation string) error {
+func (r *Runtime) ValidateIsolation(ctx context.Context, isolation string) error {
 	var missing []string
 
 	// Use net.Dial to test actual connectivity — os.Open on a socket returns
@@ -123,7 +138,11 @@ func (r *Runtime) ValidateIsolation(_ context.Context, isolation string) error {
 		}
 	}
 
-	// vm-enhanced devmapper check deferred to Phase 3
+	if isolation == "vm-enhanced" {
+		if err := devmakerCheckFunc(ctx, r); err != nil {
+			missing = append(missing, err.Error())
+		}
+	}
 
 	if len(missing) > 0 {
 		return fmt.Errorf("VM isolation mode requires additional setup:\n  - %s",

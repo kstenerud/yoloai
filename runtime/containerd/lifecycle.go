@@ -4,9 +4,11 @@ package containerdrt
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -24,15 +26,18 @@ import (
 
 // kataConfigPath returns the Kata Containers configuration file path for the
 // given shimv2 runtime type, or "" to use the shim's built-in default.
-func kataConfigPath(containerRuntime string) string {
-	switch containerRuntime {
-	case "io.containerd.kata-fc.v2":
-		return "/opt/kata/share/defaults/kata-containers/configuration-fc.toml"
-	default: // io.containerd.kata.v2
-		// Return "" to use the shim's default configuration (Dragonball VMM).
-		// Overriding with a QEMU config causes the VM to crash on this setup.
-		return ""
-	}
+func kataConfigPath(_ string) string {
+	// Return "" for all runtimes to use the shim's built-in default configuration.
+	//
+	// io.containerd.kata-fc.v2 (Firecracker): the Rust shim (runtime-rs ≥ 3.x)
+	// selects the Firecracker VMM automatically based on the runtime type without
+	// needing an explicit config path. Passing the configuration-rs-fc.toml
+	// explicitly causes "After 500 attempts" (kata-agent unreachable), while
+	// omitting it (matching `ctr run` behavior) allows the VM to boot normally.
+	//
+	// io.containerd.kata.v2 (Dragonball): the shim's default is Dragonball VMM,
+	// which works correctly without an explicit config path.
+	return ""
 }
 
 // sandboxDirForName returns the sandbox directory path for a container name.
@@ -64,6 +69,100 @@ func retryDelete(ctx context.Context, ctr client.Container) error {
 		}
 	}
 	return lastErr
+}
+
+// killStaleKataShims finds and kills any Kata Containers shim processes for the
+// given container name that are orphaned (not registered with containerd). These
+// are left behind when a shim start fails partway through — containerd cleans up
+// its own task record but the shim process persists, holding an abstract Unix
+// socket that blocks the next start attempt.
+//
+// The shim may be invoked with either the bare container name or the
+// namespace-prefixed form (e.g. "yoloai-x" or "yoloai-yoloai-x") depending on
+// the containerd version, so both patterns are matched.
+//
+// Returns true if any shims were killed. The function reads /proc to find shim
+// processes with matching -id arguments and sends SIGKILL. Errors are silently
+// ignored because the shim may already be gone by the time we read its cmdline.
+func killStaleKataShims(namespace, name string) bool {
+	entries, err := os.ReadDir("/proc")
+	if err != nil {
+		return false
+	}
+	// Match either the bare container name or the namespace-prefixed form.
+	namespacedName := namespace + "-" + name
+	killed := false
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		pid, err := strconv.Atoi(e.Name())
+		if err != nil || pid <= 1 {
+			continue
+		}
+		cmdlineData, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid)) //nolint:gosec // G304: reading kernel proc file
+		if err != nil {
+			continue // process gone or no permission
+		}
+		// /proc/<pid>/cmdline args are NUL-separated.
+		args := strings.Split(string(cmdlineData), "\x00")
+		if len(args) == 0 {
+			continue
+		}
+		// Only target Kata shimv2 processes.
+		if !strings.Contains(args[0], "containerd-shim-kata") {
+			continue
+		}
+		// Look for -id <name> in the argument list (bare or namespace-prefixed).
+		for i, arg := range args {
+			if arg == "-id" && i+1 < len(args) {
+				id := args[i+1]
+				if id == name || id == namespacedName {
+					_ = syscall.Kill(pid, syscall.SIGKILL)
+					killed = true
+					break
+				}
+			}
+		}
+	}
+	return killed
+}
+
+// removeKataStateDir removes stale kata runtime-rs state that would prevent a
+// new shim from starting. Two sources of EADDRINUSE are cleaned up:
+//
+//  1. /run/kata/<namespace>-<name>/ — the kata management socket directory.
+//     The shim creates shim-monitor.sock here on startup; when the shim exits
+//     abnormally the directory persists because file sockets are not
+//     automatically released by the kernel (unlike abstract sockets).
+//
+//  2. /run/containerd/s/<sha256> — the containerd TTRPC socket that the shim
+//     creates and binds at startup. The path is derived from a deterministic
+//     formula: sha256(containerdSock + "/" + namespace + "/" + taskID), where
+//     taskID = namespace + "-" + name (the namespace-prefixed form containerd
+//     uses). When the shim dies without cleanup, this socket file persists too.
+//     Containerd's "clean up dead shim" code tries to remove it but can fail
+//     if the kata cleanup step returns an error first.
+func removeKataStateDir(namespace, name string) {
+	// 1. Kata management socket directory.
+	kataDir := fmt.Sprintf("/run/kata/%s-%s", namespace, name)
+	_ = os.RemoveAll(kataDir) //nolint:gosec // G304: path is from internal consts
+
+	// 2. Containerd TTRPC shim socket.
+	// Replicates containerd/containerd/v2/pkg/shim.SocketAddress() formula:
+	//   path = filepath.Join(addressFlag, ns, id)
+	//   socket = /run/containerd/s/<hex(sha256(path))>
+	// where addressFlag = containerd's main socket, id = namespace + "-" + name.
+	taskID := namespace + "-" + name
+	socketPath := containerdSock + "/" + namespace + "/" + taskID
+	d := sha256.Sum256([]byte(socketPath))
+	// The kata shim (runtime-rs, written in Rust) formats the SHA256 hash with
+	// uppercase hex. Go's %x is lowercase; use %X to match the actual filename.
+	// Remove both cases defensively in case the format ever changes.
+	shimSocketUpper := fmt.Sprintf("/run/containerd/s/%X", d)
+	shimSocketLower := fmt.Sprintf("/run/containerd/s/%x", d)
+	_ = os.Remove(shimSocketUpper) //nolint:gosec // G304: path is from internal consts
+	_ = os.Remove(shimSocketLower) //nolint:gosec // G304: path is from internal consts
 }
 
 // Create creates a new containerd container from the given InstanceConfig.
@@ -199,6 +298,17 @@ func (r *Runtime) Create(ctx context.Context, cfg runtime.InstanceConfig) error 
 	// container was deleted but snapshot cleanup failed due to permissions or a crash).
 	_ = r.client.SnapshotService(snapshotter).Remove(ctx, cfg.Name)
 
+	// Kill any orphaned Kata shim processes for this container name. These are
+	// left behind when a previous NewTask() call spawned a shim that then failed
+	// to start. Also remove the kata runtime-rs state directory: unlike abstract
+	// Unix sockets (which the kernel releases on process exit), filesystem sockets
+	// persist until explicitly deleted. The next shim start fails with EADDRINUSE
+	// if /run/kata/<namespace>-<name>/shim-monitor.sock still exists on disk.
+	if killStaleKataShims(r.namespace, cfg.Name) {
+		time.Sleep(500 * time.Millisecond)
+	}
+	removeKataStateDir(r.namespace, cfg.Name)
+
 	if _, err := r.client.NewContainer(ctx, cfg.Name, ctrOpts...); err != nil {
 		createErr = fmt.Errorf("create container: %w", err)
 		return createErr
@@ -231,10 +341,39 @@ func (r *Runtime) Start(ctx context.Context, name string) error {
 		_, _ = existingTask.Delete(ctx)
 	}
 
+	// Kill any orphaned Kata shim processes and remove stale runtime-rs state
+	// directories before starting. The shim creates a management socket at
+	// /run/kata/<namespace>-<name>/shim-monitor.sock on start; if a prior shim
+	// exited without cleanup (crash, SIGKILL), the socket file persists and
+	// causes bind() to fail with EADDRINUSE on the next start attempt.
+	if killStaleKataShims(r.namespace, name) {
+		time.Sleep(500 * time.Millisecond)
+	}
+	removeKataStateDir(r.namespace, name)
+
 	// Create task with null IO — agent logs go to bind-mounted log.txt.
-	task, err := ctr.NewTask(ctx, cio.NullIO)
-	if err != nil {
-		return fmt.Errorf("create task: %w", err)
+	const shimMaxRetries = 5
+	const shimRetryDelay = 2 * time.Second
+	var task client.Task
+	var createTaskErr error
+	for attempt := range shimMaxRetries {
+		if attempt > 0 {
+			select {
+			case <-time.After(shimRetryDelay):
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+		task, createTaskErr = ctr.NewTask(ctx, cio.NullIO)
+		if createTaskErr == nil {
+			break
+		}
+		if !strings.Contains(strings.ToLower(createTaskErr.Error()), "address in use") {
+			break // non-retryable error
+		}
+	}
+	if createTaskErr != nil {
+		return fmt.Errorf("create task: %w", createTaskErr)
 	}
 
 	if err := task.Start(ctx); err != nil {
