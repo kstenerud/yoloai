@@ -39,9 +39,22 @@
 
 There are three layers of configuration, applied in order:
 
-1. **Baked-in defaults** — embedded in the binary. Not user-editable. Define the baseline for all sandboxes and profiles.
+1. **Baked-in defaults** — embedded in the binary. Not user-editable. Every setting has an explicit value here; this is the authoritative source of defaults. Profiles and user defaults override specific fields; everything else falls through to this layer.
 2. **User defaults (`~/.yoloai/defaults/config.yaml`)** — personal settings applied on top of baked-in defaults. Only active when `--profile` is not specified. Managed via `yoloai config get/set`.
 3. **Profile config (`~/.yoloai/profiles/<name>/config.yaml`)** — profile-specific settings, merged over baked-in defaults only. User defaults do not apply when a profile is active. See [Profiles](#3-profiles).
+
+**Generated scaffold:** On first run, `defaults/config.yaml` is written as a commented-out copy of the baked-in defaults — every setting is present, set to its default value, and commented out. Inline comments explain what each setting does and what values are accepted. The file is self-documenting: opening it shows the full set of available settings and their defaults without consulting external documentation. Users can edit the file directly (uncomment and change values) or use `yoloai config set`, which writes the live (uncommented) key alongside the commented example. `yoloai config reset` removes the live key, leaving the commented example intact.
+
+**Implementation note:** The inline documentation comments live in the baked-in defaults YAML (embedded in the binary). Scaffold generation is a simple text transformation: read the baked-in YAML line by line and prepend `# ` to any line that isn't already a comment or blank. The baked-in config is the single source of truth for both default values and field documentation — no separate template required.
+
+**First-run setup:** `EnsureSetup()` creates the `defaults/` directory and writes `defaults/config.yaml` via scaffold generation (above) if the file does not already exist. It does not write a Dockerfile, entrypoint scripts, or tmux.conf to `defaults/` — those are baked-in and not user-editable at this layer. If `defaults/config.yaml` already exists (user has run before, or migrated from `profiles/base/config.yaml`), it is left untouched.
+
+**Two load paths — implementation requirement:** Config loading must implement two distinct paths depending on whether a profile is active:
+
+- **No profile:** baked-in defaults → merge `defaults/config.yaml` → apply CLI flags
+- **Profile active:** baked-in defaults → merge `profiles/<name>/config.yaml` → apply CLI flags
+
+`defaults/config.yaml` must be entirely absent from the profile path — not as a fallback, not for any field. These are separate code paths, not a three-way merge.
 
 **Global config (`~/.yoloai/config.yaml`)** — user preferences that apply regardless of whether a profile is active:
 

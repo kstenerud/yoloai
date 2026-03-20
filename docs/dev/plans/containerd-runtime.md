@@ -274,12 +274,13 @@ func podmanAvailable() bool {
 no socket is found and surfaces the error to callers. Add a `SocketPath() (string, error)` to
 `runtime/podman` that returns the first reachable socket path without logging, and use that.
 
-Overhaul `resolveBackend()` to accept isolation and os, and return `(backend string, explicit bool)`:
+Overhaul `resolveBackend()` to accept isolation and os, and return `(backend string, explicit bool)`. Both `os` and `isolation` may come from config (user defaults or profile) as well as CLI flags — CLI always wins, but config is the fallback:
 
 ```go
 func resolveBackend(cmd *cobra.Command) (backend string, explicit bool) {
-    isolation, _ := cmd.Flags().GetString("isolation")
-    targetOS, _ := cmd.Flags().GetString("os")
+    cfg, _ := config.LoadEffectiveConfig(cmd) // loads defaults or profile config as appropriate
+    isolation := coalesce(flagStr(cmd, "isolation"), cfg.Isolation)
+    targetOS  := coalesce(flagStr(cmd, "os"),        cfg.OS)
     backendFlag, _ := cmd.Flags().GetString("backend")
 
     return resolveBackendFull(isolation, targetOS, backendFlag, backendFlag != "")
@@ -547,13 +548,14 @@ func teardownCNI(sandboxDir string) error
 2. Look up image: `r.client.GetImage(ctx, cfg.ImageRef)` — error if not found with message
    "image not found; run 'yoloai setup' to build it". `Create()` does not pull; image
    management is owned by `EnsureImage()`.
-3. Determine snapshotter based on runtime:
+3. Select snapshotter from `cfg.Snapshotter` (set by `isolationSnapshotter()` in `sandbox/create.go`); default to `"overlayfs"` if empty:
    ```go
-   snapshotter := "overlayfs"  // for vm (Kata + QEMU)
-   if cfg.ContainerRuntime == "io.containerd.kata-fc.v2" {
-       snapshotter = "devmapper"  // for vm-enhanced (Kata + Firecracker)
+   snapshotter := cfg.Snapshotter
+   if snapshotter == "" {
+       snapshotter = "overlayfs"
    }
    ```
+   Note: `isolationSnapshotter()` maps `"vm-enhanced"` → `"devmapper"`, all others → `""`. The snapshotter→isolation mapping lives in the sandbox layer, not the containerd backend.
 4. Create OCI spec with `netnsPath` set in the network namespace options, plus mounts,
    capabilities, and runtime
 5. `client.NewContainer()` with:
