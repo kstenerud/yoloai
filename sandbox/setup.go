@@ -398,10 +398,28 @@ func (m *Manager) promptAgentSetup(ctx context.Context) error {
 }
 
 // setTmuxConf writes the tmux_conf setting to the global config.yaml.
+// When the mode includes "default" (i.e. the baked-in tmux config is active),
+// also writes a copy of the embedded tmux.conf to defaults/tmux.conf so the
+// user can inspect and customize it without rebuilding the image.
 func (m *Manager) setTmuxConf(value string) error {
-	return config.UpdateGlobalConfigFields(map[string]string{
+	if err := config.UpdateGlobalConfigFields(map[string]string{
 		"tmux_conf": value,
-	})
+	}); err != nil {
+		return err
+	}
+
+	// Write defaults/tmux.conf when the baked-in config is in use.
+	// Skip for "host" (user chose their own ~/.tmux.conf) and "none" (no config).
+	if value == "default" || value == "default+host" {
+		destPath := filepath.Join(config.DefaultsDir(), "tmux.conf")
+		if _, err := os.Stat(destPath); os.IsNotExist(err) {
+			if writeErr := os.WriteFile(destPath, dockerrt.EmbeddedTmuxConf(), 0600); writeErr != nil {
+				return fmt.Errorf("write defaults/tmux.conf: %w", writeErr)
+			}
+		}
+	}
+
+	return nil
 }
 
 // setSetupComplete marks setup as done and prints the completion message.

@@ -1254,6 +1254,20 @@ func buildMounts(state *sandboxState, secretsDir string) []runtime.MountSpec {
 		}
 	}
 
+	// Defaults tmux config: mount defaults/tmux.conf over the image-baked copy
+	// when the file exists and the mode uses the baked-in config.
+	// This lets users customize the config by editing ~/.yoloai/defaults/tmux.conf.
+	if state.tmuxConf == "default" || state.tmuxConf == "default+host" {
+		defaultsTmuxConf := filepath.Join(config.DefaultsDir(), "tmux.conf")
+		if _, err := os.Stat(defaultsTmuxConf); err == nil {
+			mounts = append(mounts, runtime.MountSpec{
+				Source:   defaultsTmuxConf,
+				Target:   "/yoloai/tmux/tmux.conf",
+				ReadOnly: true,
+			})
+		}
+	}
+
 	// Host tmux config (when tmux_conf is default+host or host)
 	if state.tmuxConf == "default+host" || state.tmuxConf == "host" {
 		tmuxConfPath := ExpandTilde("~/.tmux.conf")
