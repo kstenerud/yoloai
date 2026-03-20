@@ -145,16 +145,20 @@ func killStaleKataShims(namespace, name string) bool {
 //     if the kata cleanup step returns an error first.
 func removeKataStateDir(namespace, name string) {
 	// 1. Kata management socket directory.
-	kataDir := fmt.Sprintf("/run/kata/%s-%s", namespace, name)
+	// The runtime-rs shim creates /run/kata/<name>/ using the container name
+	// directly (e.g. /run/kata/yoloai-x/), not the namespace-prefixed form.
+	kataDir := fmt.Sprintf("/run/kata/%s", name)
 	_ = os.RemoveAll(kataDir) //nolint:gosec // G304: path is from internal consts
 
 	// 2. Containerd TTRPC shim socket.
 	// Replicates containerd/containerd/v2/pkg/shim.SocketAddress() formula:
 	//   path = filepath.Join(addressFlag, ns, id)
 	//   socket = /run/containerd/s/<hex(sha256(path))>
-	// where addressFlag = containerd's main socket, id = namespace + "-" + name.
-	taskID := namespace + "-" + name
-	socketPath := containerdSock + "/" + namespace + "/" + taskID
+	// where addressFlag = containerd's main socket, ns = namespace, id = name
+	// (the container name, e.g. "yoloai-x"). The "id" is the task ID which
+	// containerd sets to the container name — it is NOT additionally prefixed
+	// with the namespace.
+	socketPath := containerdSock + "/" + namespace + "/" + name
 	d := sha256.Sum256([]byte(socketPath))
 	// The kata shim (runtime-rs, written in Rust) formats the SHA256 hash with
 	// uppercase hex. Go's %x is lowercase; use %X to match the actual filename.
