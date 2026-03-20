@@ -71,14 +71,11 @@ func (r *Runtime) Prune(ctx context.Context, knownInstances []string, dryRun boo
 			Kind: "image",
 			Name: shortID,
 		})
-	}
 
-	if !dryRun && len(danglingImages) > 0 {
-		report, err := r.client.ImagesPrune(ctx, filters.NewArgs(filters.Arg("dangling", "true")))
-		if err != nil {
-			fmt.Fprintf(output, "Warning: failed to prune dangling images: %v\n", err) //nolint:errcheck // best-effort output
-		} else if report.SpaceReclaimed > 0 {
-			fmt.Fprintf(output, "Reclaimed %s from dangling images\n", formatBytes(report.SpaceReclaimed)) //nolint:errcheck // best-effort output
+		if !dryRun {
+			if _, removeErr := r.client.ImageRemove(ctx, img.ID, image.RemoveOptions{Force: false, PruneChildren: true}); removeErr != nil {
+				fmt.Fprintf(output, "Warning: failed to remove image %s: %v\n", shortID, removeErr) //nolint:errcheck // best-effort output
+			}
 		}
 	}
 
