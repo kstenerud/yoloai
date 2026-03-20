@@ -373,55 +373,40 @@ func ensureDefaultsDir() error {
 
 Call `ensureDefaultsDir()` from `EnsureSetupNonInteractive()` before the image build step.
 
-### Step 3.2 — `config/migration.go`: migrate `profiles/base/config.yaml` → `defaults/`
+### Step 3.2 — `config/migration.go`: guard against missing `defaults/`
 
-Create `config/migration.go` with a `MigrateIfNeeded()` function called early in startup
-(from `EnsureSetupNonInteractive()`):
+`EnsureSetup()` creates `defaults/` on fresh installs, but existing users upgrading from the
+old layout will have `profiles/base/config.yaml` with their customizations and no `defaults/`.
+Rather than silently auto-migrating (which could bring in now-invalid keys like `profile:`),
+detect this case and error with clear instructions:
 
 ```go
-// MigrateIfNeeded detects the old profiles/base/ layout and migrates to defaults/.
-// Idempotent: safe to call on every startup.
-func MigrateIfNeeded() error {
-    oldPath := filepath.Join(ProfilesDir(), "base", "config.yaml")
-    newPath := DefaultsConfigPath()
-
-    // Nothing to migrate if old file doesn't exist.
-    if _, err := os.Stat(oldPath); os.IsNotExist(err) {
-        return nil
+// CheckDefaultsDir verifies that ~/.yoloai/defaults/ exists. If it doesn't,
+// returns a descriptive error telling the user how to resolve it.
+// Called early in EnsureSetupNonInteractive() before any config is read.
+func CheckDefaultsDir() error {
+    if _, err := os.Stat(DefaultsDir()); err == nil {
+        return nil // exists, nothing to do
     }
-    // Already migrated.
-    if _, err := os.Stat(newPath); err == nil {
-        return nil
-    }
-
-    data, err := os.ReadFile(oldPath) //nolint:gosec
-    if err != nil {
-        return fmt.Errorf("migrate: read profiles/base/config.yaml: %w", err)
-    }
-
-    // Strip the 'profile' key if present (removed in new design).
-    data, err = stripYAMLKey(data, "profile")
-    if err != nil {
-        return fmt.Errorf("migrate: strip profile key: %w", err)
-    }
-
-    if err := os.MkdirAll(DefaultsDir(), 0750); err != nil {
-        return fmt.Errorf("migrate: create defaults dir: %w", err)
-    }
-    if err := os.WriteFile(newPath, data, 0600); err != nil {
-        return fmt.Errorf("migrate: write defaults/config.yaml: %w", err)
-    }
-
-    fmt.Fprintf(os.Stderr,
-        "yoloai: migrated ~/.yoloai/profiles/base/config.yaml to ~/.yoloai/defaults/config.yaml\n"+
-        "  The old file is still present; remove it manually once you've verified the migration.\n")
-    return nil
+    msg := "~/.yoloai/defaults/ not found\n\n" +
+        "This directory was added in a recent update. To fix:\n\n" +
+        "  Option 1 — Re-run setup (creates a fresh defaults/config.yaml):\n" +
+        "    yoloai setup\n\n" +
+        "  Option 2 — Copy your existing settings manually:\n" +
+        "    mkdir -p ~/.yoloai/defaults\n" +
+        "    cp ~/.yoloai/profiles/base/config.yaml ~/.yoloai/defaults/config.yaml\n" +
+        "  Then remove any 'profile:' line from the copied file (that key no longer exists).\n"
+    return config.NewConfigError(msg)
 }
 ```
 
-`stripYAMLKey(data []byte, key string) ([]byte, error)` — parse via `yaml.Node`, remove the
-top-level key if present, marshal back. Uses the same `deleteYAMLField` logic already in
-`config.go`.
+Call `CheckDefaultsDir()` from `EnsureSetupNonInteractive()` **before** `ensureDefaultsDir()`
+so that upgrading users see the error rather than getting a blank scaffold that silently
+discards their settings. The check only fires when `defaults/` is entirely absent — once
+setup has run (or the user copies manually), it becomes a no-op.
+
+`yoloai setup` runs `ensureDefaultsDir()` unconditionally, so it always creates `defaults/`
+with the scaffold — that is the "Option 1" path above.
 
 ---
 
@@ -521,9 +506,9 @@ the new code. Existing `profiles/base/` directories on user machines are handled
 - `TestLoadProfileConfig_UnknownField` — returns error for unknown field.
 
 **`config/migration_test.go`:**
-- `TestMigrateIfNeeded_OldExists` — copies and strips `profile` key.
-- `TestMigrateIfNeeded_Idempotent` — no-op when `defaults/config.yaml` already exists.
-- `TestMigrateIfNeeded_NothingToDo` — no-op when `profiles/base/config.yaml` absent.
+- `TestCheckDefaultsDir_Exists` — no error when `defaults/` is present.
+- `TestCheckDefaultsDir_Missing` — returns `ConfigError` with both options in the message.
+- `TestCheckDefaultsDir_MissingWithOldBase` — error message mentions `profiles/base/config.yaml` copy step.
 
 ### Step 6.2 — Update `docs/dev/ARCHITECTURE.md`
 
@@ -557,7 +542,7 @@ the new code. Existing `profiles/base/` directories on user machines are handled
 | File | Change |
 |------|--------|
 | `sandbox/manager.go` | Add `ensureDefaultsDir()`. Call from `EnsureSetupNonInteractive()`. Call `MigrateIfNeeded()` early. |
-| `config/migration.go` | **New.** `MigrateIfNeeded()`, `stripYAMLKey()`. |
+| `config/migration.go` | **New.** `CheckDefaultsDir()` — errors with migration instructions if `defaults/` absent. |
 
 ### Phase 4
 
