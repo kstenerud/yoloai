@@ -185,7 +185,8 @@ func runSystemPruneAll(cmd *cobra.Command, dryRun, yes bool) error {
 			return err
 		})
 		if err != nil {
-			return fmt.Errorf("scan %s: %w", b.Name, err)
+			fmt.Fprintf(output, "Warning: scan %s failed: %v\n", b.Name, err) //nolint:errcheck
+			continue
 		}
 		allItems = append(allItems, result.Items...)
 	}
@@ -257,7 +258,7 @@ func runSystemPruneAll(cmd *cobra.Command, dryRun, yes bool) error {
 				return err
 			})
 			if err != nil {
-				return fmt.Errorf("prune %s: %w", name, err)
+				fmt.Fprintf(output, "Warning: prune %s failed: %v\n", name, err) //nolint:errcheck
 			}
 		}
 		if !isJSON {

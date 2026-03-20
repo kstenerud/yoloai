@@ -27,10 +27,17 @@ type Runtime struct {
 var _ runtime.Runtime = (*Runtime)(nil)
 var _ runtime.IsolationValidator = (*Runtime)(nil)
 
+const containerdSock = "/run/containerd/containerd.sock"
+
 // New connects to the containerd daemon and returns a Runtime.
 // It does not validate isolation prerequisites — that is done via ValidateIsolation.
 func New(_ context.Context) (*Runtime, error) {
-	c, err := client.New("/run/containerd/containerd.sock")
+	// Fast-fail if the socket file doesn't exist — avoids a slow dial timeout
+	// on systems where containerd is not installed (e.g. macOS).
+	if _, err := os.Stat(containerdSock); err != nil {
+		return nil, fmt.Errorf("containerd socket not found at %s\n  Is containerd running? Try: sudo systemctl start containerd", containerdSock)
+	}
+	c, err := client.New(containerdSock)
 	if err != nil {
 		return nil, fmt.Errorf("connect to containerd: %w\n  Is containerd running? Try: sudo systemctl start containerd", err)
 	}
