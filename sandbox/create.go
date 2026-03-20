@@ -82,6 +82,15 @@ func isolationContainerRuntime(isolation string) string {
 	}
 }
 
+// isolationSnapshotter maps an isolation mode to the containerd snapshotter name.
+// Returns "" for modes that use the backend default (overlayfs).
+func isolationSnapshotter(isolation string) string {
+	if isolation == "vm-enhanced" {
+		return "devmapper"
+	}
+	return ""
+}
+
 // checkIsolationPrerequisites delegates isolation prerequisite validation to the
 // runtime backend via the optional IsolationValidator interface.
 // If the backend does not implement IsolationValidator, validation is skipped.
@@ -728,6 +737,7 @@ func (m *Manager) launchContainer(ctx context.Context, state *sandboxState) erro
 	// Set the runtime identifier for both Docker (OCI --runtime name) and containerd (shimv2 type).
 	// isolationContainerRuntime returns "" for container isolation where the default suffices.
 	instanceCfg.ContainerRuntime = isolationContainerRuntime(state.isolation)
+	instanceCfg.Snapshotter = isolationSnapshotter(state.isolation)
 	// Validate that isolation prerequisites are met (delegates to runtime.IsolationValidator).
 	if err := checkIsolationPrerequisites(ctx, m.runtime, state.isolation); err != nil {
 		return err

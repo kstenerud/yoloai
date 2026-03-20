@@ -1049,6 +1049,19 @@ func TestPrepareSandboxState_NetworkAllowAddsExtraDomains(t *testing.T) {
 	assert.Contains(t, state.networkAllow, "api.example.com")
 }
 
+// isolationSnapshotter tests
+
+func TestIsolationSnapshotter_VmEnhanced(t *testing.T) {
+	assert.Equal(t, "devmapper", isolationSnapshotter("vm-enhanced"))
+}
+
+func TestIsolationSnapshotter_Other(t *testing.T) {
+	assert.Equal(t, "", isolationSnapshotter("vm"))
+	assert.Equal(t, "", isolationSnapshotter("container"))
+	assert.Equal(t, "", isolationSnapshotter("container-enhanced"))
+	assert.Equal(t, "", isolationSnapshotter(""))
+}
+
 // isolationContainerRuntime tests
 
 func TestIsolationContainerRuntime_Container(t *testing.T) {

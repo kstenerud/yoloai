@@ -97,10 +97,10 @@ func (r *Runtime) Create(ctx context.Context, cfg runtime.InstanceConfig) error 
 		return createErr
 	}
 
-	// Select snapshotter: devmapper for Firecracker (vm-enhanced), overlayfs otherwise.
-	snapshotter := "overlayfs"
-	if cfg.ContainerRuntime == "io.containerd.kata-fc.v2" {
-		snapshotter = "devmapper"
+	// Select snapshotter: use the caller-specified snapshotter, defaulting to overlayfs.
+	snapshotter := cfg.Snapshotter
+	if snapshotter == "" {
+		snapshotter = "overlayfs"
 	}
 
 	// Unpack the image into the snapshotter if not already done.

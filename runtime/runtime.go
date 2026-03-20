@@ -59,7 +59,8 @@ type InstanceConfig struct {
 	UseInit          bool
 	UsernsMode       string // "" = default, "keep-id" = rootless Podman
 	Resources        *ResourceLimits
-	ContainerRuntime string // OCI runtime name for Docker/Podman (e.g., "runsc" for gVisor, "kata-qemu" for Kata)
+	ContainerRuntime string // OCI runtime name (shimv2 type for containerd, runtime name for Docker/Podman)
+	Snapshotter      string // containerd snapshotter name; "" = backend default (overlayfs)
 }
 
 // InstanceInfo holds the inspected state of a sandbox instance.

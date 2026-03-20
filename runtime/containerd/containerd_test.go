@@ -184,14 +184,16 @@ func setupValidateIsolationMocks(t *testing.T) (sockPath string, restoreAll func
 	kvmFile := filepath.Join(tmpDir, "kvm")
 	require.NoError(t, os.WriteFile(kvmFile, nil, 0o600))
 
-	// Create a fake kata shim on PATH (must be executable for exec.LookPath).
+	// Create fake kata shim binaries on PATH (must be executable for exec.LookPath).
 	fakeBinDir := filepath.Join(tmpDir, "bin")
 	require.NoError(t, os.MkdirAll(fakeBinDir, 0o750))
-	require.NoError(t, os.WriteFile(filepath.Join(fakeBinDir, "containerd-shim-kata-v2"), nil, 0o750)) //nolint:gosec // G306: intentional executable for test
+	require.NoError(t, os.WriteFile(filepath.Join(fakeBinDir, "containerd-shim-kata-v2"), nil, 0o750))    //nolint:gosec // G306: intentional executable for test
+	require.NoError(t, os.WriteFile(filepath.Join(fakeBinDir, "containerd-shim-kata-fc-v2"), nil, 0o750)) //nolint:gosec // G306: intentional executable for test
 	t.Setenv("PATH", fakeBinDir+":"+os.Getenv("PATH"))
 
 	origSock := containerdSockPath
 	origShim := kataShimName
+	origFCShim := kataFCShimName
 	origCNI := cniBridgePath
 	origKVM := kvmDevPath
 	origCap := capNetAdminCheckFunc
@@ -199,6 +201,7 @@ func setupValidateIsolationMocks(t *testing.T) (sockPath string, restoreAll func
 
 	containerdSockPath = sockPath
 	kataShimName = "containerd-shim-kata-v2"
+	kataFCShimName = "containerd-shim-kata-fc-v2"
 	cniBridgePath = cniBridgeFile
 	kvmDevPath = kvmFile
 	capNetAdminCheckFunc = func() bool { return true }
@@ -207,6 +210,7 @@ func setupValidateIsolationMocks(t *testing.T) (sockPath string, restoreAll func
 	return sockPath, func() {
 		containerdSockPath = origSock
 		kataShimName = origShim
+		kataFCShimName = origFCShim
 		cniBridgePath = origCNI
 		kvmDevPath = origKVM
 		capNetAdminCheckFunc = origCap
@@ -221,6 +225,40 @@ func TestValidateIsolation_AllPrerequisitesMet(t *testing.T) {
 	r := &Runtime{}
 	err := r.ValidateIsolation(context.Background(), "vm")
 	assert.NoError(t, err)
+}
+
+func TestValidateIsolation_VmEnhanced_AllPrerequisitesMet(t *testing.T) {
+	_, restore := setupValidateIsolationMocks(t)
+	defer restore()
+
+	r := &Runtime{}
+	err := r.ValidateIsolation(context.Background(), "vm-enhanced")
+	assert.NoError(t, err)
+}
+
+func TestValidateIsolation_VmEnhanced_FCShimMissing(t *testing.T) {
+	_, restore := setupValidateIsolationMocks(t)
+	defer restore()
+
+	kataFCShimName = "containerd-shim-kata-fc-v2-nonexistent"
+
+	r := &Runtime{}
+	err := r.ValidateIsolation(context.Background(), "vm-enhanced")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "kata shim not found")
+}
+
+func TestValidateIsolation_Vm_UsesQemuShim(t *testing.T) {
+	_, restore := setupValidateIsolationMocks(t)
+	defer restore()
+
+	// vm isolation should check kataShimName (QEMU), not kataFCShimName (Firecracker).
+	kataShimName = "containerd-shim-kata-v2-nonexistent"
+
+	r := &Runtime{}
+	err := r.ValidateIsolation(context.Background(), "vm")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "kata shim not found")
 }
 
 func TestValidateIsolation_SocketMissing(t *testing.T) {

@@ -59,6 +59,7 @@ func (r *Runtime) Close() error { return r.client.Close() }
 var (
 	containerdSockPath   = "/run/containerd/containerd.sock"
 	kataShimName         = "containerd-shim-kata-v2"
+	kataFCShimName       = "containerd-shim-kata-fc-v2"
 	cniBridgePath        = "/opt/cni/bin/bridge"
 	kvmDevPath           = "/dev/kvm"
 	capNetAdminCheckFunc = hasCapNetAdmin
@@ -91,7 +92,11 @@ func (r *Runtime) ValidateIsolation(_ context.Context, isolation string) error {
 		_ = conn.Close()
 	}
 
-	if _, err := exec.LookPath(kataShimName); err != nil {
+	shimName := kataShimName
+	if isolation == "vm-enhanced" {
+		shimName = kataFCShimName
+	}
+	if _, err := exec.LookPath(shimName); err != nil {
 		missing = append(missing, "kata shim not found: install kata-containers")
 	}
 
@@ -112,7 +117,6 @@ func (r *Runtime) ValidateIsolation(_ context.Context, isolation string) error {
 	}
 
 	// vm-enhanced devmapper check deferred to Phase 3
-	_ = isolation
 
 	if len(missing) > 0 {
 		return fmt.Errorf("VM isolation mode requires additional setup:\n  - %s",
