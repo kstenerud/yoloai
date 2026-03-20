@@ -129,8 +129,16 @@ func availableAgents() []setupOption {
 }
 
 // RunSetup runs the interactive setup unconditionally, regardless of
-// setup_complete. Used by `yoloai setup` to let users redo their choices.
+// setup_complete. Used by `yoloai system setup` to let users redo their choices
+// or migrate from old layouts. Always creates defaults/ before proceeding,
+// bypassing the CheckDefaultsDir migration gate (this command IS the migration).
 func (m *Manager) RunSetup(ctx context.Context, opts SetupOptions) error {
+	// Create defaults/ unconditionally so the migration check in
+	// EnsureSetupNonInteractive doesn't block users with setup_complete=true
+	// but no defaults/ yet (the exact scenario this command is meant to fix).
+	if err := ensureDefaultsDir(); err != nil {
+		return err
+	}
 	if err := m.EnsureSetupNonInteractive(ctx); err != nil {
 		return err
 	}
