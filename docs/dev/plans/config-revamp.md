@@ -397,7 +397,9 @@ func CheckDefaultsDir() error {
         "  Option 2 — Copy your existing settings manually:\n" +
         "    mkdir -p ~/.yoloai/defaults\n" +
         "    cp ~/.yoloai/profiles/base/config.yaml ~/.yoloai/defaults/config.yaml\n" +
-        "  Then remove any 'profile:' line from the copied file (that key no longer exists).\n"
+        "  Then remove any 'profile:' line from the copied file (that key no longer exists).\n\n" +
+        "  Note: after migration, 'base' will appear as a regular profile in 'yoloai profile list'.\n" +
+        "  You may want to remove it: yoloai profile delete base\n"
     return config.NewConfigError(msg)
 }
 ```
