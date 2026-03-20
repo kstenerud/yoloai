@@ -21,6 +21,7 @@ import (
 	"github.com/docker/docker/api/types/build"
 	dockerclient "github.com/docker/docker/client"
 	"github.com/kstenerud/yoloai/config"
+	"github.com/kstenerud/yoloai/internal/fileutil"
 )
 
 // lastBuildFile is the filename used to record the last successful build checksum
@@ -53,7 +54,7 @@ func NeedsBuild(_ string) bool {
 // automatically on success.
 func RecordBuildChecksum(_ string) {
 	if sum := buildInputsChecksum(); sum != "" {
-		_ = os.WriteFile(baseImageChecksumPath(), []byte(sum), 0600) //nolint:gosec // G304: path is ~/.yoloai/cache/
+		_ = fileutil.WriteFile(baseImageChecksumPath(), []byte(sum), 0600) //nolint:gosec // G304: path is ~/.yoloai/cache/
 	}
 }
 
@@ -252,7 +253,7 @@ func (r *Runtime) ProfileImageNeedsBuild(profileDir string, parentDir string) bo
 // for staleness detection.
 func (r *Runtime) RecordProfileBuildChecksum(profileDir string) {
 	if sum := profileBuildChecksum(profileDir); sum != "" {
-		_ = os.WriteFile(filepath.Join(profileDir, lastBuildFile), []byte(sum), 0600)
+		_ = fileutil.WriteFile(filepath.Join(profileDir, lastBuildFile), []byte(sum), 0600)
 	}
 }
 

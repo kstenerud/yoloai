@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/kstenerud/yoloai/internal/fileutil"
 	"gopkg.in/yaml.v3"
 )
 
@@ -49,7 +50,7 @@ func SaveState(s *State) error {
 		return fmt.Errorf("marshal state.yaml: %w", err)
 	}
 
-	if err := os.WriteFile(statePath, data, 0600); err != nil {
+	if err := fileutil.WriteFile(statePath, data, 0600); err != nil {
 		return fmt.Errorf("write state.yaml: %w", err)
 	}
 	return nil

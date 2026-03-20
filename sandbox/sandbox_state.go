@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/kstenerud/yoloai/internal/fileutil"
 )
 
 // SandboxState tracks per-sandbox persistent state across container restarts.
@@ -24,7 +26,7 @@ func SaveSandboxState(sandboxDir string, state *SandboxState) error {
 	}
 
 	path := filepath.Join(sandboxDir, SandboxStateFile)
-	if err := os.WriteFile(path, data, 0600); err != nil {
+	if err := fileutil.WriteFile(path, data, 0600); err != nil {
 		return fmt.Errorf("write %s: %w", SandboxStateFile, err)
 	}
 

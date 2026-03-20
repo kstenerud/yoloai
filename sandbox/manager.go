@@ -10,6 +10,7 @@ import (
 	"os"
 
 	"github.com/kstenerud/yoloai/config"
+	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/runtime"
 	"golang.org/x/term"
 )
@@ -118,13 +119,13 @@ func (m *Manager) EnsureSetup(ctx context.Context) error {
 // scaffold if it doesn't exist.
 func ensureDefaultsDir() error {
 	defaultsDir := config.DefaultsDir()
-	if err := os.MkdirAll(defaultsDir, 0750); err != nil {
+	if err := fileutil.MkdirAll(defaultsDir, 0750); err != nil {
 		return fmt.Errorf("create defaults dir: %w", err)
 	}
 	configPath := config.DefaultsConfigPath()
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
 		scaffold := config.GenerateScaffoldConfig(config.DefaultConfigYAML)
-		if err := os.WriteFile(configPath, []byte(scaffold), 0600); err != nil {
+		if err := fileutil.WriteFile(configPath, []byte(scaffold), 0600); err != nil {
 			return fmt.Errorf("write defaults/config.yaml: %w", err)
 		}
 	}
@@ -137,7 +138,7 @@ func ensureDefaultsDir() error {
 func (m *Manager) EnsureSetupNonInteractive(ctx context.Context) error {
 	// Create directory structure
 	for _, dir := range []string{config.SandboxesDir(), config.ProfilesDir(), config.CacheDir()} {
-		if err := os.MkdirAll(dir, 0750); err != nil {
+		if err := fileutil.MkdirAll(dir, 0750); err != nil {
 			return fmt.Errorf("create %s: %w", dir, err)
 		}
 	}
@@ -171,7 +172,7 @@ func (m *Manager) EnsureSetupNonInteractive(ctx context.Context) error {
 	// Write default global config.yaml if missing
 	globalConfigPath := config.GlobalConfigPath()
 	if _, err := os.Stat(globalConfigPath); os.IsNotExist(err) {
-		if err := os.WriteFile(globalConfigPath, []byte(config.DefaultGlobalConfigYAML), 0600); err != nil {
+		if err := fileutil.WriteFile(globalConfigPath, []byte(config.DefaultGlobalConfigYAML), 0600); err != nil {
 			return fmt.Errorf("write global config.yaml: %w", err)
 		}
 	}

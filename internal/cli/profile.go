@@ -14,6 +14,7 @@ import (
 	"text/tabwriter"
 
 	"github.com/kstenerud/yoloai/config"
+	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/sandbox"
 	"github.com/spf13/cobra"
 )
@@ -51,7 +52,7 @@ func newProfileCreateCmd() *cobra.Command {
 			}
 
 			dir := config.ProfileDirPath(name)
-			if err := os.MkdirAll(dir, 0750); err != nil {
+			if err := fileutil.MkdirAll(dir, 0750); err != nil {
 				return fmt.Errorf("create profile directory: %w", err)
 			}
 
@@ -81,7 +82,7 @@ func newProfileCreateCmd() *cobra.Command {
 #     mount: /usr/local/lib/shared
 `
 			yamlPath := filepath.Join(dir, "config.yaml")
-			if err := os.WriteFile(yamlPath, []byte(scaffold), 0600); err != nil {
+			if err := fileutil.WriteFile(yamlPath, []byte(scaffold), 0600); err != nil {
 				return fmt.Errorf("write config.yaml: %w", err)
 			}
 

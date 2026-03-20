@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/kstenerud/yoloai/config"
+	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/runtime/monitor"
 )
@@ -96,7 +97,7 @@ func (r *Runtime) Create(_ context.Context, cfg runtime.InstanceConfig) error {
 	sandboxPath := filepath.Join(r.sandboxDir, sandboxName(cfg.Name))
 
 	// Ensure backend subdirectory exists
-	if err := os.MkdirAll(filepath.Join(sandboxPath, backendDir), 0750); err != nil {
+	if err := fileutil.MkdirAll(filepath.Join(sandboxPath, backendDir), 0750); err != nil {
 		return fmt.Errorf("create backend dir: %w", err)
 	}
 
@@ -105,7 +106,7 @@ func (r *Runtime) Create(_ context.Context, cfg runtime.InstanceConfig) error {
 	if err != nil {
 		return fmt.Errorf("marshal instance config: %w", err)
 	}
-	if err := os.WriteFile(filepath.Join(sandboxPath, backendDir, seatbeltConfigFileName), cfgData, 0600); err != nil {
+	if err := fileutil.WriteFile(filepath.Join(sandboxPath, backendDir, seatbeltConfigFileName), cfgData, 0600); err != nil {
 		return fmt.Errorf("write instance config: %w", err)
 	}
 
@@ -113,7 +114,7 @@ func (r *Runtime) Create(_ context.Context, cfg runtime.InstanceConfig) error {
 	// launchContainer creates a temp secrets dir; we copy those files into
 	// the sandbox so the entrypoint can read them after the temp dir is removed.
 	secretsDir := filepath.Join(sandboxPath, "secrets")
-	if err := os.MkdirAll(secretsDir, 0700); err != nil {
+	if err := fileutil.MkdirAll(secretsDir, 0700); err != nil {
 		return fmt.Errorf("create secrets dir: %w", err)
 	}
 	for _, m := range cfg.Mounts {
@@ -125,7 +126,7 @@ func (r *Runtime) Create(_ context.Context, cfg runtime.InstanceConfig) error {
 			continue // skip missing secrets (may have been cleaned up)
 		}
 		keyName := filepath.Base(m.Target)
-		if err := os.WriteFile(filepath.Join(secretsDir, keyName), data, 0600); err != nil { //nolint:gosec // G703: secretsDir is an internal sandbox directory, keyName is filepath.Base of an agent mount target
+		if err := fileutil.WriteFile(filepath.Join(secretsDir, keyName), data, 0600); err != nil { //nolint:gosec // G703: secretsDir is an internal sandbox directory, keyName is filepath.Base of an agent mount target
 			return fmt.Errorf("copy secret %s: %w", keyName, err)
 		}
 	}
@@ -140,26 +141,26 @@ func (r *Runtime) Create(_ context.Context, cfg runtime.InstanceConfig) error {
 
 	// Generate SBPL profile
 	profile := GenerateProfile(cfg, sandboxPath, config.HomeDir())
-	if err := os.WriteFile(filepath.Join(sandboxPath, backendDir, profileFileName), []byte(profile), 0600); err != nil {
+	if err := fileutil.WriteFile(filepath.Join(sandboxPath, backendDir, profileFileName), []byte(profile), 0600); err != nil {
 		return fmt.Errorf("write SBPL profile: %w", err)
 	}
 
 	// Write setup script and monitor scripts to bin/
 	setupScriptPath := filepath.Join(sandboxPath, binDir, "sandbox-setup.py")
-	if err := os.WriteFile(setupScriptPath, monitor.SetupScript(), 0644); err != nil { //nolint:gosec // G306: script content, not user input
+	if err := fileutil.WriteFile(setupScriptPath, monitor.SetupScript(), 0644); err != nil { //nolint:gosec // G306: script content, not user input
 		return fmt.Errorf("write sandbox-setup.py: %w", err)
 	}
 	monitorPath := filepath.Join(sandboxPath, binDir, "status-monitor.py")
-	if err := os.WriteFile(monitorPath, monitor.Script(), 0644); err != nil { //nolint:gosec // G306: script content, not user input
+	if err := fileutil.WriteFile(monitorPath, monitor.Script(), 0644); err != nil { //nolint:gosec // G306: script content, not user input
 		return fmt.Errorf("write status-monitor.py: %w", err)
 	}
 	diagPath := filepath.Join(sandboxPath, binDir, "diagnose-idle.sh")
-	if err := os.WriteFile(diagPath, monitor.DiagnoseScript(), 0755); err != nil { //nolint:gosec // G306: script needs exec permission
+	if err := fileutil.WriteFile(diagPath, monitor.DiagnoseScript(), 0755); err != nil { //nolint:gosec // G306: script needs exec permission
 		return fmt.Errorf("write diagnose-idle.sh: %w", err)
 	}
 	// Write tmux config to tmux/
 	tmuxConfPath := filepath.Join(sandboxPath, tmuxDir, "tmux.conf")
-	if err := os.WriteFile(tmuxConfPath, embeddedTmuxConf, 0600); err != nil {
+	if err := fileutil.WriteFile(tmuxConfPath, embeddedTmuxConf, 0600); err != nil {
 		return fmt.Errorf("write tmux.conf: %w", err)
 	}
 
@@ -171,7 +172,7 @@ func (r *Runtime) Create(_ context.Context, cfg runtime.InstanceConfig) error {
 	}
 	if len(symlinks) > 0 {
 		manifest := strings.Join(symlinks, "\n") + "\n"
-		if err := os.WriteFile(filepath.Join(sandboxPath, backendDir, symlinkManifestName), []byte(manifest), 0600); err != nil {
+		if err := fileutil.WriteFile(filepath.Join(sandboxPath, backendDir, symlinkManifestName), []byte(manifest), 0600); err != nil {
 			return fmt.Errorf("write symlink manifest: %w", err)
 		}
 	}

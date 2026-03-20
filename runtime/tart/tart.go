@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/kstenerud/yoloai/config"
+	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/runtime/monitor"
 )
@@ -122,10 +123,10 @@ func (r *Runtime) Create(ctx context.Context, cfg runtime.InstanceConfig) error 
 		return fmt.Errorf("marshal instance config: %w", err)
 	}
 	// Ensure backend dir exists
-	if err := os.MkdirAll(filepath.Join(sandboxPath, backendDir), 0750); err != nil {
+	if err := fileutil.MkdirAll(filepath.Join(sandboxPath, backendDir), 0750); err != nil {
 		return fmt.Errorf("create backend dir: %w", err)
 	}
-	if err := os.WriteFile(filepath.Join(sandboxPath, backendDir, tartConfigFileName), cfgData, 0600); err != nil {
+	if err := fileutil.WriteFile(filepath.Join(sandboxPath, backendDir, tartConfigFileName), cfgData, 0600); err != nil {
 		return fmt.Errorf("write instance config: %w", err)
 	}
 
@@ -135,7 +136,7 @@ func (r *Runtime) Create(ctx context.Context, cfg runtime.InstanceConfig) error 
 	// inside the VM. We copy them into the sandbox directory, which is shared
 	// via the yoloai VirtioFS share, so sandbox-setup.py can read them.
 	secretsDir := filepath.Join(sandboxPath, "secrets")
-	if err := os.MkdirAll(secretsDir, 0700); err != nil {
+	if err := fileutil.MkdirAll(secretsDir, 0700); err != nil {
 		return fmt.Errorf("create secrets dir: %w", err)
 	}
 	for _, m := range cfg.Mounts {
@@ -147,7 +148,7 @@ func (r *Runtime) Create(ctx context.Context, cfg runtime.InstanceConfig) error 
 			continue // skip missing secrets (may have been cleaned up)
 		}
 		keyName := filepath.Base(m.Target)
-		if err := os.WriteFile(filepath.Join(secretsDir, keyName), data, 0600); err != nil { //nolint:gosec // G703: secretsDir is an internal sandbox directory
+		if err := fileutil.WriteFile(filepath.Join(secretsDir, keyName), data, 0600); err != nil { //nolint:gosec // G703: secretsDir is an internal sandbox directory
 			return fmt.Errorf("copy secret %s: %w", keyName, err)
 		}
 	}
@@ -180,7 +181,7 @@ func (r *Runtime) Start(ctx context.Context, name string) error {
 
 	// Open log file for stderr capture
 	logPath := filepath.Join(sandboxPath, backendDir, vmLogFileName)
-	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600) //nolint:gosec // G304: sandboxPath is ~/.yoloai/sandboxes/<name>
+	logFile, err := fileutil.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600) //nolint:gosec // G304: sandboxPath is ~/.yoloai/sandboxes/<name>
 	if err != nil {
 		return fmt.Errorf("open VM log: %w", err)
 	}

@@ -12,6 +12,7 @@ import (
 
 	"github.com/kstenerud/yoloai/agent"
 	"github.com/kstenerud/yoloai/config"
+	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/workspace"
 )
 
@@ -79,7 +80,7 @@ func copyAgentFilesFromBaseDir(agentDef *agent.Definition, sandboxDir, baseDir s
 		dst := filepath.Join(agentStateDir, rel)
 
 		if d.IsDir() {
-			return os.MkdirAll(dst, 0750)
+			return fileutil.MkdirAll(dst, 0750)
 		}
 
 		// Don't overwrite files that already exist (SeedFiles win)
@@ -158,7 +159,7 @@ func shouldExclude(rel string, isDir bool, patterns []string) bool {
 // copyFilePreserve copies a single file with mode 0600.
 func copyFilePreserve(src, dst string) error {
 	// Ensure parent directory exists
-	if err := os.MkdirAll(filepath.Dir(dst), 0750); err != nil {
+	if err := fileutil.MkdirAll(filepath.Dir(dst), 0750); err != nil {
 		return err
 	}
 
@@ -168,7 +169,7 @@ func copyFilePreserve(src, dst string) error {
 	}
 	defer in.Close() //nolint:errcheck // best-effort close on read-only file
 
-	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600) //nolint:gosec // dst is sandbox-controlled path
+	out, err := fileutil.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600) //nolint:gosec // dst is sandbox-controlled path
 	if err != nil {
 		return err
 	}

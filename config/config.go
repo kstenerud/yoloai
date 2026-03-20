@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/kstenerud/yoloai/internal/fileutil"
 	"gopkg.in/yaml.v3"
 )
 
@@ -878,7 +879,7 @@ func UpdateConfigFields(fields map[string]string) error {
 		return fmt.Errorf("marshal config.yaml: %w", err)
 	}
 
-	if err := os.WriteFile(configPath, out, 0600); err != nil {
+	if err := fileutil.WriteFile(configPath, out, 0600); err != nil {
 		return fmt.Errorf("write config.yaml: %w", err)
 	}
 
@@ -918,7 +919,7 @@ func DeleteConfigField(path string) error {
 		return fmt.Errorf("marshal config.yaml: %w", err)
 	}
 
-	if err := os.WriteFile(configPath, out, 0600); err != nil {
+	if err := fileutil.WriteFile(configPath, out, 0600); err != nil {
 		return fmt.Errorf("write config.yaml: %w", err)
 	}
 
@@ -957,7 +958,7 @@ func UpdateGlobalConfigFields(fields map[string]string) error {
 		return fmt.Errorf("marshal global config.yaml: %w", err)
 	}
 
-	if err := os.WriteFile(configPath, out, 0600); err != nil {
+	if err := fileutil.WriteFile(configPath, out, 0600); err != nil {
 		return fmt.Errorf("write global config.yaml: %w", err)
 	}
 
@@ -997,7 +998,7 @@ func DeleteGlobalConfigField(path string) error {
 		return fmt.Errorf("marshal global config.yaml: %w", err)
 	}
 
-	if err := os.WriteFile(configPath, out, 0600); err != nil {
+	if err := fileutil.WriteFile(configPath, out, 0600); err != nil {
 		return fmt.Errorf("write global config.yaml: %w", err)
 	}
 

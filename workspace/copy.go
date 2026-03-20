@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/kstenerud/yoloai/internal/fileutil"
 )
 
 // CopyDir copies a directory tree preserving symlinks, permissions, and
@@ -23,7 +25,7 @@ func CopyDir(src, dst string) error {
 	}
 
 	// Ensure parent directory exists.
-	if err := os.MkdirAll(filepath.Dir(dst), 0o750); err != nil {
+	if err := fileutil.MkdirAll(filepath.Dir(dst), 0o750); err != nil {
 		return fmt.Errorf("create parent: %w", err)
 	}
 
@@ -41,7 +43,7 @@ func CopyDir(src, dst string) error {
 // each entry in the destination, preserving symlinks, permissions, and
 // modification times.
 func copyDirWalk(src, dst string, srcInfo os.FileInfo) error {
-	if err := os.MkdirAll(dst, srcInfo.Mode().Perm()); err != nil {
+	if err := fileutil.MkdirAll(dst, srcInfo.Mode().Perm()); err != nil {
 		return fmt.Errorf("create destination: %w", err)
 	}
 
@@ -67,7 +69,10 @@ func copyDirWalk(src, dst string, srcInfo os.FileInfo) error {
 			if err != nil {
 				return fmt.Errorf("readlink %s: %w", path, err)
 			}
-			return os.Symlink(link, target) //nolint:gosec // G122: target is derived from a controlled destination root, TOCTOU not applicable here
+			if err := os.Symlink(link, target); err != nil { //nolint:gosec // G122: target is derived from a controlled destination root, TOCTOU not applicable here
+				return err
+			}
+			return fileutil.ChownIfSudo(target)
 		}
 
 		if d.IsDir() {
@@ -75,7 +80,7 @@ func copyDirWalk(src, dst string, srcInfo os.FileInfo) error {
 			if err != nil {
 				return fmt.Errorf("dir info %s: %w", path, err)
 			}
-			return os.MkdirAll(target, info.Mode().Perm())
+			return fileutil.MkdirAll(target, info.Mode().Perm())
 		}
 
 		// Regular file.
@@ -95,7 +100,7 @@ func copyFile(src, dst string, srcInfo fs.FileInfo) error {
 	}
 	defer in.Close() //nolint:errcheck // read-only file, close error is harmless
 
-	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, srcInfo.Mode().Perm()) //nolint:gosec // G304: paths come from WalkDir of validated sandbox paths
+	out, err := fileutil.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, srcInfo.Mode().Perm()) //nolint:gosec // G304: paths come from WalkDir of validated sandbox paths
 	if err != nil {
 		return fmt.Errorf("create %s: %w", dst, err)
 	}

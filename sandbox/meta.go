@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/kstenerud/yoloai/config"
+	"github.com/kstenerud/yoloai/internal/fileutil"
 )
 
 // Meta holds sandbox configuration captured at creation time.
@@ -65,7 +66,7 @@ func SaveMeta(dir string, meta *Meta) error {
 	}
 
 	path := filepath.Join(dir, EnvironmentFile)
-	if err := os.WriteFile(path, data, 0600); err != nil {
+	if err := fileutil.WriteFile(path, data, 0600); err != nil {
 		return fmt.Errorf("write %s: %w", EnvironmentFile, err)
 	}
 

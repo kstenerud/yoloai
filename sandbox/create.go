@@ -14,6 +14,7 @@ import (
 
 	"github.com/kstenerud/yoloai/agent"
 	"github.com/kstenerud/yoloai/config"
+	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/runtime"
 )
 
@@ -24,7 +25,10 @@ func mkdirAllPerm(path string, perm os.FileMode) error {
 	if err := os.MkdirAll(path, perm); err != nil {
 		return err
 	}
-	return os.Chmod(path, perm) //nolint:gosec // G302: caller is responsible for choosing the perm
+	if err := os.Chmod(path, perm); err != nil { //nolint:gosec // G302: caller is responsible for choosing the perm
+		return err
+	}
+	return fileutil.ChownIfSudo(path)
 }
 
 // writeFilePerm writes data to a file then explicitly chmods it to bypass the
@@ -34,7 +38,10 @@ func writeFilePerm(path string, data []byte, perm os.FileMode) error {
 	if err := os.WriteFile(path, data, perm); err != nil { //nolint:gosec // G703: path is always a trusted sandbox subpath
 		return err
 	}
-	return os.Chmod(path, perm) //nolint:gosec // G302: caller is responsible for choosing the perm
+	if err := os.Chmod(path, perm); err != nil { //nolint:gosec // G302: caller is responsible for choosing the perm
+		return err
+	}
+	return fileutil.ChownIfSudo(path)
 }
 
 // NetworkMode specifies the sandbox's network access policy.
@@ -362,7 +369,7 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 		filepath.Join(sandboxDir, TmuxDir),
 		filepath.Join(sandboxDir, BackendDir),
 	} {
-		if err := os.MkdirAll(dir, 0750); err != nil {
+		if err := fileutil.MkdirAll(dir, 0750); err != nil {
 			return nil, fmt.Errorf("create directory %s: %w", dir, err)
 		}
 	}
@@ -562,7 +569,7 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 	}
 
 	if hasPrompt {
-		if err := os.WriteFile(filepath.Join(sandboxDir, "prompt.txt"), []byte(promptText), 0600); err != nil {
+		if err := fileutil.WriteFile(filepath.Join(sandboxDir, "prompt.txt"), []byte(promptText), 0600); err != nil {
 			return nil, fmt.Errorf("write prompt.txt: %w", err)
 		}
 	}
@@ -928,24 +935,16 @@ func resolveDetectors(idle agent.IdleSupport) []string {
 // usermod to fail (uid 0 is already root). sudo sets SUDO_UID in the
 // child's environment so we can recover the original user's uid.
 func effectiveUID() int {
-	if os.Getuid() == 0 {
-		if s := os.Getenv("SUDO_UID"); s != "" {
-			if uid, err := strconv.Atoi(s); err == nil {
-				return uid
-			}
-		}
+	if uid := fileutil.SudoUID(); uid != -1 {
+		return uid
 	}
 	return os.Getuid()
 }
 
 // effectiveGID returns the real host user's GID, accounting for sudo.
 func effectiveGID() int {
-	if os.Getgid() == 0 {
-		if s := os.Getenv("SUDO_GID"); s != "" {
-			if gid, err := strconv.Atoi(s); err == nil {
-				return gid
-			}
-		}
+	if gid := fileutil.SudoGID(); gid != -1 {
+		return gid
 	}
 	return os.Getgid()
 }
@@ -1466,11 +1465,11 @@ func copySeedFiles(agentDef *agent.Definition, sandboxDir string, hasAPIKey bool
 		targetPath := filepath.Join(baseDir, sf.TargetPath)
 
 		// Ensure parent directory exists
-		if err := os.MkdirAll(filepath.Dir(targetPath), 0750); err != nil {
+		if err := fileutil.MkdirAll(filepath.Dir(targetPath), 0750); err != nil {
 			return copiedAuth, fmt.Errorf("create dir for %s: %w", sf.TargetPath, err)
 		}
 
-		if err := os.WriteFile(targetPath, data, 0600); err != nil { //nolint:gosec // G703: targetPath is constructed from internal agent config, not user input
+		if err := fileutil.WriteFile(targetPath, data, 0600); err != nil { //nolint:gosec // G703: targetPath is constructed from internal agent config, not user input
 			return copiedAuth, fmt.Errorf("write %s: %w", targetPath, err)
 		}
 		if sf.AuthOnly {
