@@ -43,10 +43,11 @@ model: ""
 # CLI --os overrides.
 os: linux
 
-# Preferred Linux container backend. Valid values: docker, podman.
+# Preferred Linux container backend. Valid values: docker, podman, or "" (auto-detect).
 # Both work on Linux and macOS. Ignored for vm/vm-enhanced (uses containerd)
 # and os=mac (uses Seatbelt or Tart). CLI --backend overrides.
-container_backend: docker
+# Empty string (default): auto-detect by checking which binary is available.
+container_backend: ""
 
 # Isolation level for the sandbox.
 # Valid values: container, container-enhanced, vm, vm-enhanced
@@ -122,7 +123,10 @@ setup: []
 ```
 
 Also add a `GenerateScaffoldConfig` function that produces the user-facing scaffold by
-commenting out all uncommented, non-blank lines:
+commenting out all uncommented, non-blank lines. The `container_backend` default in the
+baked-in YAML is `""` (empty string = auto-detect via `detectContainerBackend()`), matching
+existing behavior — this is NOT changing to `"docker"` as that would silently break
+Podman-only users on upgrade.
 
 ```go
 // GenerateScaffoldConfig takes the baked-in defaults YAML and returns a version
@@ -268,9 +272,76 @@ func LoadDefaultsConfig() (*YoloaiConfig, error) {
 from the design doc (scalars override, lists are additive, maps merge, `agent_files` replaces).
 Add as a new function in `config/config.go`.
 
-### Step 2.3 — `config/profile.go`: `LoadProfileConfig()` — profile load path
+### Step 2.3 — `config/profile.go`: `LoadProfileConfig()` and full profile.go cleanup
 
-Update profile loading so it merges over baked-in defaults only — never over `defaults/`:
+`profile.go` currently (671 lines) has a `base → profile` chain system that must be fully
+removed. This step is one of the largest in the plan. Enumerate every change needed:
+
+**A. Rename `profile.yaml` → `config.yaml`** throughout:
+
+- `LoadProfile()`: change `filepath.Join(profileDir, "profile.yaml")` → `"config.yaml"`
+- `ProfileExists()`: change filename check
+- `ListProfiles()`: change filename check (only lists dirs that contain the config file)
+- Any other place the string `"profile.yaml"` appears — search and replace all.
+
+**B. Remove `Extends` chain resolution:**
+
+- Remove `Extends string` field from `ProfileConfig`
+- Remove `ResolveProfileChain()` function entirely (walks `extends:` chain, cycle detection)
+- Remove `formatCycle()` helper used only by `ResolveProfileChain()`
+- Remove the chain-walking loop in `MergeProfileChain()` — it becomes a simple
+  two-config merge (baked-in + single profile config)
+
+**C. Add `OS` field to `ProfileConfig` and `MergedConfig`:**
+
+```go
+type ProfileConfig struct {
+    OS                string            `yaml:"os"`
+    ContainerBackend  string            `yaml:"container_backend"`
+    // ... (Backend field already exists; verify it maps to container_backend)
+    // ... rest of fields unchanged
+}
+
+type MergedConfig struct {
+    OS                string
+    ContainerBackend  string
+    // ... rest of fields unchanged
+}
+```
+
+**D. Remove `"base"` reservation from `ValidateProfileName()`:**
+
+The old code rejects `"base"` as a profile name (reserved for the base profile). Under the
+new design there is no reserved base profile — remove this check. `ValidateProfileName()`
+should only reject empty strings and names containing path separators.
+
+**E. Remove `"base"` exclusion from `ListProfiles()`:**
+
+The old code filters out `"base"` from the list. Remove this filter. After migration, users
+who still have `profiles/base/` will see it listed — that is intentional (migration message
+tells them to delete it).
+
+**F. Update `LoadMergedConfig()` to use baked-in defaults as base:**
+
+```go
+// Before:
+func LoadMergedConfig(profileName string) (*MergedConfig, error) {
+    base, err := LoadConfig()            // reads defaults/config.yaml
+    chain, err := ResolveProfileChain(profileName)
+    return MergeProfileChain(base, chain)
+}
+
+// After:
+func LoadMergedConfig(profileName string) (*MergedConfig, error) {
+    cfg, err := LoadProfileConfig(profileName)  // baked-in + single profile
+    if err != nil {
+        return nil, err
+    }
+    return configToMergedConfig(cfg), nil
+}
+```
+
+**G. New `LoadProfileConfig()` implementation:**
 
 ```go
 // LoadProfileConfig loads the effective config for the with-profile path:
@@ -291,7 +362,7 @@ func LoadProfileConfig(name string) (*YoloaiConfig, error) {
         return nil, fmt.Errorf("read profile config: %w", err)
     }
 
-    override, err := config.ParseConfigYAML(data, profileConfigPath)
+    override, err := config.ParseConfigYAML(data, profileConfigPath, config.KnownProfileKeys)
     if err != nil {
         return nil, err
     }
@@ -300,31 +371,57 @@ func LoadProfileConfig(name string) (*YoloaiConfig, error) {
 }
 ```
 
-Update `MergedConfig` and its consumers in `profile.go` to use this path. Remove the old
-`base → profile` chain (which used `LoadConfig()` as the base).
+**H. `MergeProfileChain()` as the template for `MergeConfigs()`:**
+
+The existing `MergeProfileChain()` already implements the correct merge semantics
+(scalars override, lists are additive, maps merge, `agent_files` replaces). Use it as
+the direct template when writing `MergeConfigs(base, override *YoloaiConfig) *YoloaiConfig`
+in `config/config.go`. The merge rules do not change — only the call site changes from a
+chain to a two-config merge.
 
 ### Step 2.4 — Unknown field validation
 
-Add validation to `parseConfigYAML()` — after parsing, check that every top-level key in
-the YAML document is a recognized field. Return a descriptive error if not:
+`workdir` and `directories` are valid in profile configs (they set per-profile defaults for
+the sandbox directory layout) but meaningless in `defaults/config.yaml` (they are ignored
+at runtime). Rather than silently accepting them in defaults, treat them as errors — a user
+who accidentally puts `workdir:` in their defaults config has made a mistake.
+
+This requires **two separate key sets** and a `knownKeys` parameter on `parseConfigYAML()`:
 
 ```go
-// knownTopLevelKeys is the set of valid top-level keys in a profile/defaults config.
-var knownTopLevelKeys = map[string]bool{
+// knownDefaultsKeys: valid in defaults/config.yaml
+var knownDefaultsKeys = map[string]bool{
     "os": true, "agent": true, "model": true, "container_backend": true,
     "isolation": true, "tart": true, "network": true, "agent_files": true,
     "mounts": true, "ports": true, "resources": true, "agent_args": true,
     "env": true, "auto_commit_interval": true, "cap_add": true,
     "devices": true, "setup": true,
-    // profile-only (valid in profiles, no-op in defaults — accepted, not errored)
-    "workdir": true, "directories": true,
 }
 
-// After parsing the root mapping, check for unknown keys:
+// knownProfileKeys: valid in profiles/<name>/config.yaml (superset of defaults keys)
+var knownProfileKeys = map[string]bool{
+    "os": true, "agent": true, "model": true, "container_backend": true,
+    "isolation": true, "tart": true, "network": true, "agent_files": true,
+    "mounts": true, "ports": true, "resources": true, "agent_args": true,
+    "env": true, "auto_commit_interval": true, "cap_add": true,
+    "devices": true, "setup": true,
+    "workdir": true, "directories": true, // profile-only
+}
+```
+
+Update the signature of `parseConfigYAML()` to accept the key set:
+
+```go
+func parseConfigYAML(data []byte, source string, knownKeys map[string]bool) (*YoloaiConfig, error)
+```
+
+After parsing the root mapping, check for unknown keys:
+
+```go
 var unknown []string
 for i := 0; i < len(root.Content)-1; i += 2 {
     key := root.Content[i].Value
-    if !knownTopLevelKeys[key] {
+    if !knownKeys[key] {
         unknown = append(unknown, key)
     }
 }
@@ -333,6 +430,10 @@ if len(unknown) > 0 {
     return nil, fmt.Errorf("%s: unknown config field(s): %s", source, strings.Join(unknown, ", "))
 }
 ```
+
+- `LoadBakedInDefaults()` passes `knownDefaultsKeys` (baked-in YAML must only contain defaults keys).
+- `LoadDefaultsConfig()` passes `knownDefaultsKeys` when parsing the user's `defaults/config.yaml`.
+- `LoadProfileConfig()` passes `knownProfileKeys` when parsing a profile's `config.yaml`.
 
 ### Step 2.5 — `GetEffectiveConfig()` update
 
@@ -377,15 +478,54 @@ Call `ensureDefaultsDir()` from `EnsureSetupNonInteractive()` before the image b
 
 ### Step 3.2 — `config/migration.go`: guard against missing `defaults/`
 
-`EnsureSetup()` creates `defaults/` on fresh installs, but existing users upgrading from the
-old layout will have `profiles/base/config.yaml` with their customizations and no `defaults/`.
-Rather than silently auto-migrating (which could bring in now-invalid keys like `profile:`),
-detect this case and error with clear instructions:
+Existing users upgrading from the old layout will have `profiles/base/config.yaml` with their
+customizations and no `defaults/`. Rather than silently auto-migrating (which could bring in
+now-invalid keys like `profile:`), detect this case and error with clear instructions.
+
+**Gating on `setup_complete`:**
+
+There is a sequencing problem: `CheckDefaultsDir()` must NOT fire on fresh installs, because
+fresh installs don't have `defaults/` yet either — `ensureDefaultsDir()` hasn't created it
+yet. The distinguishing signal is `setup_complete` in `state.yaml`:
+
+- **Fresh install** (`setup_complete == false`): skip `CheckDefaultsDir()`, let `ensureDefaultsDir()` create the scaffold.
+- **Returning user** (`setup_complete == true`, `defaults/` missing): fire `CheckDefaultsDir()` → error with migration instructions.
+- **Returning user** (`setup_complete == true`, `defaults/` present): `CheckDefaultsDir()` → no-op, proceed normally.
+
+The call order in `EnsureSetupNonInteractive()`:
+
+```go
+func (m *Manager) EnsureSetupNonInteractive(ctx context.Context) error {
+    state, err := config.LoadState()
+    if err != nil {
+        return err
+    }
+
+    // Upgrading user: defaults/ should exist. If it doesn't, they need to migrate.
+    if state.SetupComplete {
+        if err := config.CheckDefaultsDir(); err != nil {
+            return err
+        }
+    }
+
+    // Fresh install (or after manual migration): create defaults/ scaffold.
+    if err := ensureDefaultsDir(); err != nil {
+        return err
+    }
+
+    // ... rest of setup (image build, etc.) ...
+}
+```
+
+`yoloai setup` (interactive) always calls `ensureDefaultsDir()` without gating on
+`setup_complete` — that is "Option 1" for existing users who want a clean start.
+
+**`CheckDefaultsDir()` implementation:**
 
 ```go
 // CheckDefaultsDir verifies that ~/.yoloai/defaults/ exists. If it doesn't,
 // returns a descriptive error telling the user how to resolve it.
-// Called early in EnsureSetupNonInteractive() before any config is read.
+// Only called when setup_complete is true (i.e., this is an upgrade, not a fresh install).
 func CheckDefaultsDir() error {
     if _, err := os.Stat(DefaultsDir()); err == nil {
         return nil // exists, nothing to do
@@ -400,17 +540,9 @@ func CheckDefaultsDir() error {
         "  Then remove any 'profile:' line from the copied file (that key no longer exists).\n\n" +
         "  Note: after migration, 'base' will appear as a regular profile in 'yoloai profile list'.\n" +
         "  You may want to remove it: yoloai profile delete base\n"
-    return config.NewConfigError(msg)
+    return NewConfigError(msg)
 }
 ```
-
-Call `CheckDefaultsDir()` from `EnsureSetupNonInteractive()` **before** `ensureDefaultsDir()`
-so that upgrading users see the error rather than getting a blank scaffold that silently
-discards their settings. The check only fires when `defaults/` is entirely absent — once
-setup has run (or the user copies manually), it becomes a no-op.
-
-`yoloai setup` runs `ensureDefaultsDir()` unconditionally, so it always creates `defaults/`
-with the scaffold — that is the "Option 1" path above.
 
 ---
 
@@ -479,17 +611,62 @@ The breaking change entry is already written. Verify it covers:
 
 ## Phase 5: Remove `SeedResources()` writes to `profiles/base/`
 
-`runtime/docker/build.go`'s `SeedResources()` currently writes Dockerfile, entrypoint
-scripts, and tmux.conf to `~/.yoloai/profiles/base/`. Under the new design, these are
-baked-in and never written to disk. Confirm the Docker image build uses embedded bytes
-(via `embeddedDockerfile`, `embeddedEntrypoint`, etc. in `resources.go`) rather than
-reading from `profiles/base/`. If `SeedResources()` writes are still load-bearing for the
-build, replace the file reads with the embedded vars. Then remove the `SeedResources()`
-calls and function (or reduce it to a no-op stub if other callers remain).
+`runtime/docker/build.go`'s `SeedResources()` currently writes 7 files (Dockerfile,
+`entrypoint.sh`, `entrypoint.py`, `sandbox-setup.py`, `status-monitor.py`,
+`diagnose-idle.sh`, `tmux.conf`) to `~/.yoloai/profiles/base/`. The image build functions
+then read those files back **from disk** — they are not using the embedded vars directly.
+This means `SeedResources()` is load-bearing: skip it and the build breaks.
 
-**Checkpoint:** after this phase, `~/.yoloai/profiles/base/` should have no write path in
-the new code. Existing `profiles/base/` directories on user machines are handled by migration
-(Phase 3.2).
+The fix is to change the build to read from embedded vars rather than from disk:
+
+### Step 5.1 — `createBuildContext()`: use embedded vars instead of disk reads
+
+`createBuildContext(sourceDir string)` currently calls `os.ReadFile(path)` for each file
+under `sourceDir`. Replace these reads with direct references to the embedded vars already
+defined in `resources.go` (e.g., `embeddedDockerfile`, `embeddedEntrypoint`, etc.):
+
+```go
+// Before:
+content, err := os.ReadFile(filepath.Join(sourceDir, "Dockerfile"))
+
+// After:
+content := embeddedDockerfile  // []byte from resources.go
+```
+
+Map each filename to its corresponding embedded variable. The tar archive written by
+`createBuildContext()` remains structurally the same — only the data source changes.
+
+### Step 5.2 — `buildInputsChecksum()`: hash embedded vars instead of disk reads
+
+`buildInputsChecksum()` hashes the files under `sourceDir` to detect when a rebuild is
+needed. Replace each `os.ReadFile()` with the corresponding embedded var:
+
+```go
+// hash each embedded resource in a deterministic order
+for _, content := range [][]byte{
+    embeddedDockerfile,
+    embeddedEntrypoint,
+    embeddedEntrypointPy,
+    // ... etc
+} {
+    h.Write(content)
+}
+```
+
+`NeedsBuild()` calls `buildInputsChecksum()` — once Step 5.2 is done, `NeedsBuild()` no
+longer needs `sourceDir` either.
+
+### Step 5.3 — Update callers and remove `SeedResources()`
+
+- `EnsureImage(sourceDir string)` is called from `sandbox/manager.go` with `baseProfileDir`.
+  Once Steps 5.1–5.2 are done, `sourceDir` is unused — remove the parameter or pass `""`.
+- Remove the `SeedResources()` call from `EnsureSetupNonInteractive()` in `sandbox/manager.go`.
+- Remove the `SeedResources()` function from `build.go` entirely.
+- Remove the `baseProfileDir` variable and the `os.MkdirAll(baseProfileDir, ...)` call from
+  `EnsureSetupNonInteractive()`.
+
+**Checkpoint:** after this phase, `~/.yoloai/profiles/base/` has no write path in the new
+code. Existing `profiles/base/` directories on user machines are handled by migration (Phase 3.2).
 
 ---
 
@@ -538,15 +715,15 @@ the new code. Existing `profiles/base/` directories on user machines are handled
 
 | File | Change |
 |------|--------|
-| `config/config.go` | Extract `parseConfigYAML()`. Add `LoadBakedInDefaults()`, `LoadDefaultsConfig()`, `MergeConfigs()`. Add `knownTopLevelKeys` set and unknown-field validation in `parseConfigYAML()`. Update `GetEffectiveConfig()`. |
-| `config/profile.go` | Update `LoadProfileConfig()` / `MergedConfig` to use baked-in defaults as base instead of `LoadConfig()`. Remove old base→profile chain. |
+| `config/config.go` | Extract `parseConfigYAML(data, source, knownKeys)`. Add `LoadBakedInDefaults()`, `LoadDefaultsConfig()`, `MergeConfigs()`. Add `knownDefaultsKeys` + `knownProfileKeys` sets and unknown-field validation. Update `GetEffectiveConfig()`. |
+| `config/profile.go` | Rename `profile.yaml` → `config.yaml` throughout. Remove `Extends` field, `ResolveProfileChain()`, `formatCycle()`, chain loop. Add `OS` to `ProfileConfig`/`MergedConfig`. Remove `"base"` reservation from `ValidateProfileName()` and exclusion from `ListProfiles()`. Update `LoadMergedConfig()` base to baked-in defaults. Add `LoadProfileConfig()`. Derive `MergeConfigs()` from existing `MergeProfileChain()` logic. |
 
 ### Phase 3
 
 | File | Change |
 |------|--------|
-| `sandbox/manager.go` | Add `ensureDefaultsDir()`. Call from `EnsureSetupNonInteractive()`. Call `MigrateIfNeeded()` early. |
-| `config/migration.go` | **New.** `CheckDefaultsDir()` — errors with migration instructions if `defaults/` absent. |
+| `sandbox/manager.go` | Add `ensureDefaultsDir()`. Call from `EnsureSetupNonInteractive()`. Gate `CheckDefaultsDir()` on `state.SetupComplete`. |
+| `config/migration.go` | **New.** `CheckDefaultsDir()` — errors with migration instructions if `defaults/` absent (only called when `setup_complete == true`). |
 
 ### Phase 4
 
@@ -561,7 +738,8 @@ the new code. Existing `profiles/base/` directories on user machines are handled
 
 | File | Change |
 |------|--------|
-| `runtime/docker/build.go` | Confirm image build uses embedded bytes. Remove `SeedResources()` writes to `profiles/base/`. |
+| `runtime/docker/build.go` | `createBuildContext()` and `buildInputsChecksum()` use embedded vars instead of disk reads. Remove `SeedResources()`. Update `EnsureImage()` signature. |
+| `sandbox/manager.go` | Remove `SeedResources()` call and `baseProfileDir` setup. |
 
 ### Phase 6
 
@@ -578,7 +756,7 @@ the new code. Existing `profiles/base/` directories on user machines are handled
 
 1. **Phase 1:** Baked-in defaults YAML + scaffold generation + `OS` field + `ConfigPath()` redirect. `make check` passes.
 2. **Phase 2:** Two load paths (`LoadDefaultsConfig`, `LoadProfileConfig`), `MergeConfigs`, unknown field validation, `GetEffectiveConfig` update.
-3. **Phase 3:** `EnsureSetup` creates `defaults/` scaffold. `MigrateIfNeeded` from `profiles/base/`.
+3. **Phase 3:** `EnsureSetup` creates `defaults/` scaffold. `CheckDefaultsDir()` guards upgrade path (gated on `setup_complete`).
 4. **Phase 4:** CLI wiring — `config set` scaffold write, `resolveBackend()` reads from config, remove `profile` key, update help text.
 5. **Phase 5:** Remove `SeedResources()` writes to `profiles/base/`.
 6. **Phase 6:** Tests + `ARCHITECTURE.md` update.
