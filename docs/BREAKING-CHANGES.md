@@ -4,6 +4,29 @@ Tracks breaking changes made during beta. Each entry should be included in relea
 
 ## Unreleased
 
+### Profile system redesigned: `profiles/base/` replaced by `defaults/`, no default profile setting
+
+**Previous behavior:** Profile defaults lived in `~/.yoloai/profiles/base/` (config.yaml, Dockerfile, entrypoint.sh, tmux.conf). The `profile` config key let users set a default profile applied to all new sandboxes without `--profile`. Profile config merged over base config (base → profile → CLI). Profiles referenced a parent via `extends: base`.
+
+**New behavior:**
+- `~/.yoloai/profiles/base/` is replaced by `~/.yoloai/defaults/` (config.yaml and optionally tmux.conf only — no Dockerfile or scripts).
+- Baked-in defaults (Dockerfile, entrypoint scripts, initial config values) are embedded in the binary. They are not written to disk and are not user-editable.
+- The `profile` config key is removed. There is no default profile. `--profile <name>` on `yoloai new` is always explicit; omitting it uses `defaults/`.
+- Profiles are self-contained: their config.yaml merges over baked-in defaults only. User defaults (`defaults/config.yaml`) do not apply when a profile is active.
+- Profile directories contain `config.yaml`, optionally `Dockerfile` (must use `FROM yoloai-base`), and optionally `tmux.conf`. Entrypoint scripts are not profile-overridable.
+- The `extends` field is removed from profile config. All profiles inherit from baked-in defaults.
+- `profile.yaml` renamed to `config.yaml` in profile directories.
+
+**Rationale:** Profiles are now fully deterministic — their behavior depends only on the profile and baked-in defaults, not on the user's personal config. This eliminates "works on my machine" problems when sharing profiles. User defaults are clearly separate from profiles and only apply in the no-profile case.
+
+**Migration:**
+- Copy `~/.yoloai/profiles/base/config.yaml` to `~/.yoloai/defaults/config.yaml`.
+- Remove the `profile` key from your config if set. Use `--profile <name>` explicitly with `yoloai new`.
+- If you customized `profiles/base/Dockerfile` or `profiles/base/entrypoint.sh`, move those customizations into a named profile.
+- Rename `profile.yaml` to `config.yaml` in any existing profile directories.
+- Remove `extends: base` from any profile configs.
+- The profile name `base` is no longer reserved.
+
 ### `--security` replaced by `--isolation`; `backend` config key renamed to `container_backend`
 
 **Previous behavior:** `yoloai new --security <mode>` where modes were `standard`, `gvisor`, `kata`, `kata-firecracker`. The `backend:` key in `config.yaml` configured the container runtime backend. The `security` field in `environment.json` (sandbox metadata) stored the isolation mode.

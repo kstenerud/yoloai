@@ -142,20 +142,18 @@ Field notes:
 ├── extensions/
 │   ├── lint.yaml                ← user-defined extension (one file per command)
 │   └── review.yaml
+├── defaults/
+│   ├── config.yaml              ← user defaults (agent, model, isolation, etc.; active when no --profile)
+│   └── tmux.conf                ← optional tmux config (overrides baked-in default)
 ├── profiles/
-│   ├── base/
-│   │   ├── config.yaml          ← global defaults (no nesting — flat keys)
-│   │   ├── Dockerfile           ← seeded from embedded defaults, user-editable
-│   │   ├── entrypoint.sh        ← seeded from embedded defaults, user-editable
-│   │   ├── tmux.conf            ← seeded from embedded defaults, user-editable
-│   │   └── .checksums           ← tracks seeded file checksums
 │   ├── go-dev/
-│   │   ├── Dockerfile           ← FROM yoloai-base
-│   │   └── profile.yaml        ← runtime config (mounts, env, resources, workdir, directories)
+│   │   ├── Dockerfile           ← FROM yoloai base image
+│   │   ├── config.yaml          ← profile settings (merged over baked-in defaults, not over defaults/)
+│   │   └── tmux.conf            ← optional
 │   └── node-dev/
 │       ├── Dockerfile
-│       └── profile.yaml
-├── config.yaml                  ← global config (tmux_conf, model_aliases)
+│       └── config.yaml
+├── config.yaml                  ← global config (tmux_conf, model_aliases; always active)
 └── sandboxes/
     └── <name>/
         ├── meta.json            ← original paths, mode, profile, timestamps
