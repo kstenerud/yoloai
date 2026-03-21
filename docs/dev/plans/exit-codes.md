@@ -54,13 +54,13 @@ All new error types follow the same pattern as existing `UsageError` and `Config
 - A running agent whose output has not been reviewed.
 
 **Where it fires:**
-- `sandbox/lifecycle.go`: `checkUnappliedWork()` — currently returns `fmt.Errorf`, should return `*ActiveWorkError`.
+- `sandbox/lifecycle.go`: `Manager.NeedsConfirmation()` — returns `(bool, string)` today. The string reason ("unapplied changes exist", "agent is running") feeds the confirmation prompt. The `ActiveWorkError` is not returned here; instead, the CLI layer (destroy, stop) decides whether to prompt or error. See Phase 3 for the wiring.
 - `internal/cli/destroy.go`: the non-TTY confirmation path (stdin is not a TTY, `--yes` was not passed) — currently exits 0 silently; should return `*ActiveWorkError` with a message like "sandbox 'X' has active work; use --yes to force or run 'yoloai apply X' first".
 - `internal/cli/stop.go`: same non-TTY path for stops that check for running agents.
 
 **Behavioral edge cases:**
 - `--yes` explicitly bypasses this check (that's its purpose). `ActiveWorkError` is only returned when confirmation would be needed and cannot be obtained.
-- In `--json` mode: `destroy --json` requires `--yes` (CLI-STANDARD.md). If `--yes` is absent and stdin is not a TTY, return `ActiveWorkError` (not `UsageError` — the issue is state, not arguments).
+- In `--json` mode: `effectiveYes()` already returns `true` when `--json` is set, so `destroy --json` never reaches the confirmation block at all. `ActiveWorkError` is irrelevant in this path — the user is implicitly opting out of the guard.
 - `yoloai stop` without active work should not fire this code.
 
 ### Exit 5 — `DependencyError`
@@ -173,7 +173,7 @@ The distinction: the system *has* what is needed, but *access* is blocked.
 
 ### Phase 1: Define types and dispatch
 
-**`config/errors.go`** — add four new error types following the existing pattern:
+**`config/errors.go`** — add five new error types following the existing pattern:
 
 ```go
 // ActiveWorkError indicates a sandbox has unapplied changes or a running agent (exit code 4).
@@ -222,20 +222,25 @@ if errors.As(runErr, &permErr) { return 8 }
 
 ### Phase 2: Wire existing errors to new types
 
-1. **`ErrDockerUnavailable`** → wrap with `DependencyError` at the point it is returned from runtime constructors.
+1. **`ErrDockerUnavailable`** → this sentinel is currently declared in `sandbox/errors.go` but never actually returned anywhere in the codebase — it is dead code. The real Docker unavailability errors come from the Docker client (connection refused, daemon not running) inside `runtime/docker/`. The wiring must happen at those actual error sites in `runtime/docker/docker.go`, not by wrapping a sentinel that nobody returns. `ErrDockerUnavailable` can either be deleted or repurposed as the inner error wrapped by `DependencyError`.
 2. **`ErrMissingAPIKey`** → wrap with `AuthError` at the API key check in `sandbox/create.go`.
 3. **Overlay capability denial** → wrap with `PermissionError` in the `IsolationValidator` path.
 4. **Backend OS/arch checks** → return `PlatformError` from `runtime/seatbelt/` (non-macOS), `runtime/tart/` (non-Apple-Silicon).
 
 ### Phase 3: Fix `ActiveWorkError` paths
 
-1. **`sandbox/lifecycle.go`**: Change `checkUnappliedWork()` to return `*ActiveWorkError`.
-2. **`internal/cli/destroy.go`**: Add non-TTY guard before the confirmation block:
+1. **`sandbox/lifecycle.go`**: `NeedsConfirmation()` stays as-is (it returns `(bool, string)` for use in prompts). No change needed here.
+2. **`internal/cli/destroy.go`**: Add a non-TTY guard after the warnings loop, before the `sandbox.Confirm()` call. The codebase does not currently have an `isTerminal` helper — this requires either adding one using `golang.org/x/term` (check if already a transitive dependency) or using the simpler `os.Stdin.Stat()` approach. The guard:
    ```go
-   if !yes && !isTerminal(os.Stdin) && len(warnings) > 0 {
-       return sandbox.NewActiveWorkError("sandbox %q has active work; use --yes to force or run 'yoloai apply %s' first", name, name)
+   // If stdin is not a TTY, we cannot prompt — treat active work as an error.
+   if fi, err := os.Stdin.Stat(); err == nil && (fi.Mode()&os.ModeCharDevice) == 0 {
+       return sandbox.NewActiveWorkError(
+           "%d sandbox(es) have active work; use --yes to force or run 'yoloai apply' first",
+           len(warnings),
+       )
    }
    ```
+   Place this immediately before the `sandbox.Confirm(...)` call, inside the `len(warnings) > 0` block.
 3. **`internal/cli/stop.go`**: Same pattern if applicable.
 
 ### Phase 4: Update documentation
@@ -265,8 +270,8 @@ if errors.As(runErr, &permErr) { return 8 }
 
 ## Open Questions
 
-1. **`--yes` and `ActiveWorkError` in `--json` mode**: CLI-STANDARD says `destroy --json` requires `--yes`. Should `destroy --json` without `--yes` return exit 2 (`UsageError`) or exit 4 (`ActiveWorkError`)? Proposal: `UsageError` (2) — the absence of `--yes` with `--json` is a usage mistake, not a state problem.
+1. **Wrapping vs. replacing sentinels**: `ErrDockerUnavailable` and `ErrMissingAPIKey` are plain sentinel errors today. Should they be replaced by typed errors, or should callers wrap them? Proposal: replace at the origin so all callers get the typed code automatically without per-callsite wrapping.
 
-2. **Wrapping vs. replacing sentinels**: `ErrDockerUnavailable` and `ErrMissingAPIKey` are plain sentinel errors today. Should they be replaced by typed errors, or should callers wrap them? Proposal: replace at the origin so all callers get the typed code automatically without per-callsite wrapping.
+2. **`--json` error envelope for new codes**: The JSON error output is currently `{"error": "message"}`. Should it include the exit code? e.g., `{"error": "message", "code": 5}`. This would make machine parsing unambiguous without requiring the caller to inspect the process exit code. Low priority but worth considering.
 
-3. **`--json` error envelope for new codes**: The JSON error output is currently `{"error": "message"}`. Should it include the exit code? e.g., `{"error": "message", "code": 5}`. This would make machine parsing unambiguous without requiring the caller to inspect the process exit code. Low priority but worth considering.
+3. **`golang.org/x/term` dependency**: The non-TTY guard in Phase 3 uses `os.Stdin.Stat()` + `ModeCharDevice` instead of `term.IsTerminal()`. The latter is cleaner but requires `golang.org/x/term`. Check whether it is already a transitive dependency before deciding which approach to use.
