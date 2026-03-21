@@ -134,9 +134,9 @@ var agents = map[string]*Definition{
 		},
 		ModelFlag: "--model",
 		ModelAliases: map[string]string{
-			"sonnet": "claude-sonnet-4-latest",
-			"opus":   "claude-opus-4-latest",
-			"haiku":  "claude-haiku-4-latest",
+			"sonnet": "claude-sonnet-4-6",
+			"opus":   "claude-opus-4-6",
+			"haiku":  "claude-haiku-4-5-20251001",
 		},
 		NetworkAllowlist:  []string{"api.anthropic.com", "claude.ai", "platform.claude.com", "statsig.anthropic.com", "sentry.io"},
 		ContextFile:       "CLAUDE.md",

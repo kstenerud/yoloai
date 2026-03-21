@@ -61,9 +61,9 @@ func TestGetAgent_Claude(t *testing.T) {
 	assert.Equal(t, "Enter Enter", def.SubmitSequence)
 	assert.Equal(t, 3*time.Second, def.StartupDelay)
 	assert.Equal(t, "--model", def.ModelFlag)
-	assert.Equal(t, "claude-sonnet-4-latest", def.ModelAliases["sonnet"])
-	assert.Equal(t, "claude-opus-4-latest", def.ModelAliases["opus"])
-	assert.Equal(t, "claude-haiku-4-latest", def.ModelAliases["haiku"])
+	assert.Equal(t, "claude-sonnet-4-6", def.ModelAliases["sonnet"])
+	assert.Equal(t, "claude-opus-4-6", def.ModelAliases["opus"])
+	assert.Equal(t, "claude-haiku-4-5-20251001", def.ModelAliases["haiku"])
 	assert.Equal(t, []string{"api.anthropic.com", "claude.ai", "platform.claude.com", "statsig.anthropic.com", "sentry.io"}, def.NetworkAllowlist)
 }
 
