@@ -32,7 +32,7 @@ func TestBackendCaps(t *testing.T) {
 func TestResolveModel_Alias(t *testing.T) {
 	agentDef := agent.GetAgent("claude")
 	result := resolveModel(agentDef, "sonnet", nil)
-	assert.Equal(t, "claude-sonnet-4-latest", result)
+	assert.Equal(t, "claude-sonnet-4-6", result)
 }
 
 func TestResolveModel_FullName(t *testing.T) {
@@ -64,7 +64,7 @@ func TestResolveModel_UserAliasCustomKey(t *testing.T) {
 func TestResolveModel_NilUserAliasesFallsBack(t *testing.T) {
 	agentDef := agent.GetAgent("claude")
 	result := resolveModel(agentDef, "sonnet", nil)
-	assert.Equal(t, "claude-sonnet-4-latest", result)
+	assert.Equal(t, "claude-sonnet-4-6", result)
 }
 
 func TestBuildAgentCommand_InteractiveWithModel(t *testing.T) {
