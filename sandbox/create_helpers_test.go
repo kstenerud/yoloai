@@ -522,8 +522,9 @@ func TestBuildMounts_IncludesSecrets(t *testing.T) {
 
 	var found bool
 	for _, m := range mounts {
-		if m.Target == "/run/secrets/ANTHROPIC_API_KEY" {
+		if m.Target == "/run/secrets" {
 			found = true
+			assert.Equal(t, secretsDir, m.Source)
 			assert.True(t, m.ReadOnly)
 		}
 	}

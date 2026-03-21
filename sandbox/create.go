@@ -908,6 +908,9 @@ func createSecretsDir(agentDef *agent.Definition, envVars map[string]string, sec
 		_ = os.RemoveAll(tmpDir)
 		return "", fmt.Errorf("chmod secrets dir: %w", err)
 	}
+	// When running via sudo, chown the dir to the real user so the container
+	// process (running as that user via --userns=keep-id) can read it.
+	_ = fileutil.ChownIfSudo(tmpDir) //nolint:errcheck // best-effort; individual files are already chowned by writeFilePerm
 
 	wrote := false
 
@@ -1190,19 +1193,16 @@ func buildMounts(state *sandboxState, secretsDir string) []runtime.MountSpec {
 		mounts = append(mounts, spec)
 	}
 
-	// Secrets (env vars + API keys)
+	// Secrets (env vars + API keys): mount the whole directory so that
+	// Podman and Docker both work. Podman fails with per-file bind mounts
+	// because its Docker-compatible API tries to mkdir the source path.
+	// The entrypoint already iterates /run/secrets as a directory.
 	if secretsDir != "" {
-		entries, _ := os.ReadDir(secretsDir)
-		for _, e := range entries {
-			if e.IsDir() {
-				continue
-			}
-			mounts = append(mounts, runtime.MountSpec{
-				Source:   filepath.Join(secretsDir, e.Name()),
-				Target:   filepath.Join("/run/secrets", e.Name()),
-				ReadOnly: true,
-			})
-		}
+		mounts = append(mounts, runtime.MountSpec{
+			Source:   secretsDir,
+			Target:   "/run/secrets",
+			ReadOnly: true,
+		})
 	}
 
 	return mounts
