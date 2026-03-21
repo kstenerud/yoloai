@@ -132,6 +132,11 @@ For commands that produce long output (`yoloai diff`, `yoloai log`), pipe throug
 | 1     | General error                                                                                                                |
 | 2     | Usage error (bad arguments, missing required args) — requires Cobra customization; Cobra returns 1 for all errors by default |
 | 3     | Configuration error (bad config file, missing required config) — project-specific                                            |
+| 4     | Active work — sandbox has unapplied changes or a running agent                                                               |
+| 5     | Dependency error — required software not installed or not running                                                            |
+| 6     | Platform error — operation not possible on this OS/arch                                                                      |
+| 7     | Auth error — credentials completely absent                                                                                   |
+| 8     | Permission error — access denied by policy (capability, seccomp, ACL)                                                       |
 | 128+N | Terminated by signal N (POSIX convention)                                                                                    |
 | 130   | Interrupted by SIGINT / Ctrl+C (128+2)                                                                                       |
 

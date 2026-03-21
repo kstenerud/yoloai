@@ -22,6 +22,7 @@ import (
 	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/docker/go-connections/nat"
 
+	"github.com/kstenerud/yoloai/config"
 	"github.com/kstenerud/yoloai/runtime"
 )
 
@@ -38,7 +39,7 @@ var _ runtime.IsolationValidator = (*Runtime)(nil)
 // New creates a Runtime and verifies the Docker daemon is reachable.
 func New(ctx context.Context) (*Runtime, error) {
 	if _, err := exec.LookPath("docker"); err != nil {
-		return nil, fmt.Errorf("docker is not installed, install it from https://docs.docker.com/get-docker/")
+		return nil, config.NewDependencyError("docker is not installed, install it from https://docs.docker.com/get-docker/")
 	}
 	return NewWithSocket(ctx, "", "docker")
 }
@@ -65,6 +66,9 @@ func NewWithSocket(ctx context.Context, host string, binaryName string) (*Runtim
 	_, err = cli.Ping(ctx)
 	if err != nil {
 		_ = cli.Close()
+		if os.IsPermission(err) || strings.Contains(err.Error(), "permission denied") {
+			return nil, config.NewPermissionError("%s socket permission denied: add your user to the %s group or run with sudo", binaryName, binaryName)
+		}
 		var hint string
 		switch binaryName {
 		case "podman":
@@ -72,7 +76,7 @@ func NewWithSocket(ctx context.Context, host string, binaryName string) (*Runtim
 		default:
 			hint = "start Docker Desktop or run 'sudo systemctl start docker'"
 		}
-		return nil, fmt.Errorf("%s daemon is not responding, %s", binaryName, hint)
+		return nil, config.NewDependencyError("%s daemon is not responding, %s", binaryName, hint)
 	}
 
 	return &Runtime{client: cli, binaryName: binaryName}, nil

@@ -244,7 +244,7 @@ func (m *Manager) parseAndValidateDirs(ctx context.Context, opts CreateOptions, 
 			if len(agentDef.AuthHintEnvVars) > 0 {
 				msg += fmt.Sprintf(", or set %s for local models", strings.Join(agentDef.AuthHintEnvVars, "/"))
 			}
-			return nil, nil, fmt.Errorf("%s: %w", msg, ErrMissingAPIKey)
+			return nil, nil, NewAuthError("%s: %w", msg, ErrMissingAPIKey)
 		}
 	}
 

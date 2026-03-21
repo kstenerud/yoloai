@@ -9,6 +9,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/kstenerud/yoloai/config"
 	"github.com/kstenerud/yoloai/extension"
 	"github.com/kstenerud/yoloai/sandbox"
 	"github.com/spf13/cobra"
@@ -132,6 +133,31 @@ func Execute(ctx context.Context, version, commit, date string) (exitCode int) {
 	var configErr *sandbox.ConfigError
 	if errors.As(runErr, &configErr) {
 		return 3
+	}
+
+	var activeWorkErr *config.ActiveWorkError
+	if errors.As(runErr, &activeWorkErr) {
+		return 4
+	}
+
+	var depErr *config.DependencyError
+	if errors.As(runErr, &depErr) {
+		return 5
+	}
+
+	var platErr *config.PlatformError
+	if errors.As(runErr, &platErr) {
+		return 6
+	}
+
+	var authErr *config.AuthError
+	if errors.As(runErr, &authErr) {
+		return 7
+	}
+
+	var permErr *config.PermissionError
+	if errors.As(runErr, &permErr) {
+		return 8
 	}
 
 	return 1

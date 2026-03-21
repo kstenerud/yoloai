@@ -13,6 +13,7 @@ import (
 	goruntime "runtime"
 	"strings"
 
+	"github.com/kstenerud/yoloai/config"
 	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/runtime/docker"
 )
@@ -32,12 +33,12 @@ var _ runtime.UsernsProvider = (*Runtime)(nil)
 // connecting via the Docker SDK.
 func New(ctx context.Context) (*Runtime, error) {
 	if _, err := exec.LookPath("podman"); err != nil {
-		return nil, fmt.Errorf("podman is not installed, install it from https://podman.io/docs/installation")
+		return nil, config.NewDependencyError("podman is not installed, install it from https://podman.io/docs/installation")
 	}
 
 	sock, err := discoverSocket()
 	if err != nil {
-		return nil, fmt.Errorf("podman socket not found: %w\nhint: run 'systemctl --user start podman.socket' or 'podman machine start'", err)
+		return nil, config.NewDependencyError("podman socket not found: %w\nhint: run 'systemctl --user start podman.socket' or 'podman machine start'", err)
 	}
 
 	dockerRT, err := docker.NewWithSocket(ctx, sock, "podman")

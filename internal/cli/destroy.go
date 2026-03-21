@@ -94,6 +94,13 @@ func newDestroyCmd() *cobra.Command {
 						for _, w := range warnings {
 							fmt.Fprintln(cmd.ErrOrStderr(), w) //nolint:errcheck // best-effort output
 						}
+						// Non-TTY: cannot prompt — return a typed error so CI scripts can detect it.
+						if fi, err := os.Stdin.Stat(); err == nil && (fi.Mode()&os.ModeCharDevice) == 0 {
+							return sandbox.NewActiveWorkError(
+								"%d sandbox(es) have active work; use --yes to force or run 'yoloai apply' first",
+								len(warnings),
+							)
+						}
 						confirmed, confirmErr := sandbox.Confirm(cmd.Context(), "Destroy all listed sandboxes? [y/N] ", os.Stdin, cmd.ErrOrStderr())
 						if confirmErr != nil {
 							return confirmErr

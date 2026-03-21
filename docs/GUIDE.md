@@ -248,6 +248,22 @@ yoloai config get --json                   # full config as JSON
 
 Errors are output to stderr as `{"error": "message"}`. Interactive commands (`attach`, `exec`) reject `--json`.
 
+### Exit Codes
+
+| Code  | Meaning |
+|-------|---------|
+| 0     | Success |
+| 1     | General error |
+| 2     | Usage error (bad arguments, missing required args) |
+| 3     | Configuration error (bad config file, missing required config) |
+| 4     | Active work — sandbox has unapplied changes or a running agent; use `--yes` to force or `yoloai apply` first |
+| 5     | Dependency error — required software not installed or not running (e.g., Docker daemon) |
+| 6     | Platform error — operation not possible on this OS/arch (e.g., tart on Linux) |
+| 7     | Auth error — credentials completely absent (e.g., `ANTHROPIC_API_KEY` not set) |
+| 8     | Permission error — access denied by policy (e.g., user not in docker group) |
+| 128+N | Terminated by signal N (POSIX convention) |
+| 130   | Interrupted by SIGINT / Ctrl+C |
+
 ## Key Flags
 
 ### Creating sandboxes

@@ -85,12 +85,12 @@ func (r *Runtime) ResolveCopyMount(sbName, hostPath string) string {
 // sandbox-exec is available.
 func New(_ context.Context) (*Runtime, error) {
 	if !isMacOS() {
-		return nil, fmt.Errorf("seatbelt backend requires macOS")
+		return nil, config.NewPlatformError("seatbelt backend requires macOS")
 	}
 
 	sandboxExecBin, err := exec.LookPath("sandbox-exec")
 	if err != nil {
-		return nil, fmt.Errorf("sandbox-exec not found: %w", err)
+		return nil, config.NewDependencyError("sandbox-exec not found: %w", err)
 	}
 
 	return &Runtime{

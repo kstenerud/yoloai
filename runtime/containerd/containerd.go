@@ -15,6 +15,7 @@ import (
 	"github.com/containerd/containerd/v2/pkg/namespaces"
 	"github.com/containerd/errdefs"
 
+	"github.com/kstenerud/yoloai/config"
 	"github.com/kstenerud/yoloai/runtime"
 )
 
@@ -52,11 +53,17 @@ func New(_ context.Context) (*Runtime, error) {
 	// Fast-fail if the socket file doesn't exist — avoids a slow dial timeout
 	// on systems where containerd is not installed (e.g. macOS).
 	if _, err := os.Stat(containerdSock); err != nil {
-		return nil, fmt.Errorf("containerd socket not found at %s\n  Is containerd running? Try: sudo systemctl start containerd", containerdSock)
+		if os.IsPermission(err) {
+			return nil, config.NewPermissionError("no permission to access containerd socket at %s\n  Fix: run yoloai with sudo or configure containerd group access", containerdSock)
+		}
+		return nil, config.NewDependencyError("containerd socket not found at %s\n  Is containerd running? Try: sudo systemctl start containerd", containerdSock)
 	}
 	c, err := client.New(containerdSock)
 	if err != nil {
-		return nil, fmt.Errorf("connect to containerd: %w\n  Is containerd running? Try: sudo systemctl start containerd", err)
+		if os.IsPermission(err) || strings.Contains(err.Error(), "permission denied") {
+			return nil, config.NewPermissionError("no permission to access containerd socket at %s\n  Fix: run yoloai with sudo", containerdSock)
+		}
+		return nil, config.NewDependencyError("connect to containerd: %w\n  Is containerd running? Try: sudo systemctl start containerd", err)
 	}
 	return &Runtime{client: c, namespace: "yoloai"}, nil
 }

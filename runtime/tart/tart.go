@@ -77,19 +77,17 @@ func (r *Runtime) ResolveCopyMount(_, hostPath string) string { return hostPath 
 // New creates a Runtime after verifying that tart is installed and the
 // platform is supported (macOS with Apple Silicon).
 func New(_ context.Context) (*Runtime, error) {
+	// Platform checks first — no amount of software installation can fix these.
+	if !isMacOS() {
+		return nil, config.NewPlatformError("tart backend requires macOS with Apple Silicon")
+	}
+	if !isAppleSilicon() {
+		return nil, config.NewPlatformError("tart backend requires Apple Silicon (M1 or later)")
+	}
+
 	tartBin, err := exec.LookPath("tart")
 	if err != nil {
-		return nil, fmt.Errorf("tart is not installed. Install it with: brew install cirruslabs/cli/tart")
-	}
-
-	// Verify we're on macOS (tart requires Apple Virtualization.framework)
-	if !isMacOS() {
-		return nil, fmt.Errorf("tart backend requires macOS with Apple Silicon")
-	}
-
-	// Verify Apple Silicon
-	if !isAppleSilicon() {
-		return nil, fmt.Errorf("tart backend requires Apple Silicon (M1 or later)")
+		return nil, config.NewDependencyError("tart is not installed. Install it with: brew install cirruslabs/cli/tart")
 	}
 
 	// Read config for optional tart.image override
