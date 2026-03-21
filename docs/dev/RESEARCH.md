@@ -16,3 +16,4 @@ Research documents supporting yoloAI's design decisions. Each file covers a broa
 | [Agentic Workflows](research/agentic-workflows.md) | Community sentiment on autonomous agents, TDD subagent patterns, authority splitting, review gap, skill ecosystem |
 | [Podman](research/podman.md) | Podman backend: SDK options, Docker-compat socket, rootless file ownership, overlay concerns, implementation scope, open questions |
 | [Linux VM Backends](research/linux-vm-backends.md) | VM-level isolation beyond Docker: Firecracker, gVisor, Kata Containers, Cloud Hypervisor, Lima, Sysbox; comparison matrix and yoloAI recommendation |
+| [SSH Backend](research/ssh-backend.md) | Design for a remote SSH backend: connection model, provisioning, file sync, workdir modes, secrets, diff/apply, implementation plan, open questions |
