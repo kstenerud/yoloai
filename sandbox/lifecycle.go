@@ -34,6 +34,15 @@ type ResetOptions struct {
 // Stop stops a sandbox's instance.
 // Returns nil if the instance is already stopped or removed.
 func (m *Manager) Stop(ctx context.Context, name string) error {
+	unlock, err := acquireLock(name)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	return m.stop(ctx, name)
+}
+
+func (m *Manager) stop(ctx context.Context, name string) error {
 	if _, err := RequireSandboxDir(name); err != nil {
 		return err
 	}
@@ -50,6 +59,15 @@ type StartOptions struct {
 
 // Start ensures a sandbox is running — idempotent.
 func (m *Manager) Start(ctx context.Context, name string, opts StartOptions) error {
+	unlock, err := acquireLock(name)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	return m.start(ctx, name, opts)
+}
+
+func (m *Manager) start(ctx context.Context, name string, opts StartOptions) error {
 	slog.Info("starting sandbox", "event", "sandbox.start", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
 	sandboxDir, err := RequireSandboxDir(name)
 	if err != nil {
@@ -180,6 +198,15 @@ func (m *Manager) Start(ctx context.Context, name string, opts StartOptions) err
 // Always succeeds — confirmation logic is handled by the CLI layer via
 // NeedsConfirmation before calling this method.
 func (m *Manager) Destroy(ctx context.Context, name string) error {
+	unlock, err := acquireLock(name)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	return m.destroy(ctx, name)
+}
+
+func (m *Manager) destroy(ctx context.Context, name string) error {
 	slog.Info("destroying sandbox", "event", "sandbox.destroy", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
 	if _, err := RequireSandboxDir(name); err != nil {
 		if errors.Is(err, ErrSandboxNotFound) {
@@ -209,6 +236,12 @@ func (m *Manager) Destroy(ctx context.Context, name string) error {
 // the git baseline. By default, resets in-place (agent stays running).
 // With --restart, stops and restarts the container.
 func (m *Manager) Reset(ctx context.Context, opts ResetOptions) error {
+	unlock, err := acquireLock(opts.Name)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+
 	slog.Info("resetting sandbox", "event", "sandbox.reset", "sandbox", opts.Name)
 	sandboxDir, err := RequireSandboxDir(opts.Name)
 	if err != nil {
@@ -248,7 +281,7 @@ func (m *Manager) Reset(ctx context.Context, opts ResetOptions) error {
 	}
 
 	// Stop the container (if running)
-	_ = m.Stop(ctx, opts.Name)
+	_ = m.stop(ctx, opts.Name)
 
 	// Clear logs so each run starts fresh
 	slog.Debug("clearing logs", "event", "sandbox.reset.logs", "sandbox", opts.Name)
@@ -404,7 +437,7 @@ func (m *Manager) Reset(ctx context.Context, opts ResetOptions) error {
 
 	slog.Info("reset complete", "event", "sandbox.reset.complete", "sandbox", opts.Name)
 	// Start the container
-	return m.Start(ctx, opts.Name, StartOptions{})
+	return m.start(ctx, opts.Name, StartOptions{})
 }
 
 // NeedsConfirmation checks if a sandbox requires confirmation before

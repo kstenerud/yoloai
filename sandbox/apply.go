@@ -30,6 +30,12 @@ type ApplyResult struct {
 // Returns ErrNoChanges if there are no patches to apply.
 // Returns an ApplyResult for each directory patched.
 func ApplyAll(_ context.Context, name string) ([]*ApplyResult, error) {
+	unlock, err := acquireLock(name)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
+
 	patches, err := GenerateMultiPatch(name, nil)
 	if err != nil {
 		return nil, err

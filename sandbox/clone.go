@@ -27,6 +27,12 @@ func (m *Manager) Clone(ctx context.Context, opts CloneOptions) error {
 		return err
 	}
 
+	unlock, err := acquireMultiLock(opts.Source, opts.Dest)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+
 	srcDir, err := RequireSandboxDir(opts.Source)
 	if err != nil {
 		return fmt.Errorf("source sandbox %q: %w", opts.Source, err)

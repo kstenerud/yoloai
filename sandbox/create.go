@@ -201,6 +201,12 @@ type containerConfig struct {
 // Create creates and optionally starts a new sandbox.
 // Returns the sandbox name on success (empty if user cancelled or no-start).
 func (m *Manager) Create(ctx context.Context, opts CreateOptions) (string, error) {
+	unlock, err := acquireLock(opts.Name)
+	if err != nil {
+		return "", err
+	}
+	defer unlock()
+
 	slog.Info("creating sandbox", "event", "sandbox.create", "sandbox", opts.Name, "agent", opts.Agent, "backend", m.backend)
 	// When running as root under sudo, API key env vars (e.g. CLAUDE_CODE_OAUTH_TOKEN)
 	// are stripped by sudo. Restore them from the parent process's environment so that
@@ -342,7 +348,7 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 					return nil, err
 				}
 			}
-			if err := m.Destroy(ctx, opts.Name); err != nil {
+			if err := m.destroy(ctx, opts.Name); err != nil {
 				return nil, fmt.Errorf("replace existing sandbox: %w", err)
 			}
 		}

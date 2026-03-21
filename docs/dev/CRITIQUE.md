@@ -46,7 +46,6 @@ The package layout (`cmd/`, `agent/`, `config/`, `runtime/`, `sandbox/`, `intern
 
 **a) Diff/apply mode branching** — `sandbox/diff.go` and `sandbox/apply.go` switch on `mode` string inline. No interface for "diffable directory." Adding a 4th mount mode (`:sync`, `:snapshot`) would require changes in 5+ files. Not a blocker now, but worth noting.
 
-**b) No filesystem locking** — rapid concurrent `yoloai new` / `yoloai destroy` with the same sandbox name can race. No lockfile on `~/.yoloai/sandboxes/<name>/`.
 
 ---
 
@@ -77,7 +76,6 @@ The user-facing `docs/GUIDE.md` matches implemented commands. Design docs accura
 
 | Priority | Issue | Location |
 |----------|-------|----------|
-| Medium | No filesystem locking for concurrent operations | `sandbox/` package |
 | Low | Add `yoloai system check` health command | new command |
 | Low | Log rotation policy | `sandbox/` or external |
 
