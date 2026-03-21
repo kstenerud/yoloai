@@ -45,7 +45,7 @@ Dependency direction: `cmd/yoloai` → `cli` → `sandbox` + `runtime`; `sandbox
 |------|---------|
 | `root.go` | Root Cobra command, global flags (`-v`, `-q`, `--no-color`, `--json`), `Execute()` with exit code mapping (JSON errors to stderr when `--json`). |
 | `commands.go` | `registerCommands()` — registers all subcommands. Also contains `newNewCmd`, `newLsAliasCmd`, `newLogAliasCmd`, `newExecAliasCmd`, `newCompletionCmd`, `newVersionCmd`, and `attachToSandbox`/`waitForTmux` helpers. |
-| `config.go` | `yoloai config get/set/reset` — read, write, and delete config values via dotted paths. Routes global keys (tmux_conf, model_aliases) to `~/.yoloai/config.yaml`, profile keys to `~/.yoloai/profiles/base/config.yaml`. |
+| `config.go` | `yoloai config get/set/reset` — read, write, and delete config values via dotted paths. Routes global keys (tmux_conf, model_aliases) to `~/.yoloai/config.yaml`, other keys to `~/.yoloai/defaults/config.yaml`. |
 | `files.go` | `yoloai files put/get/ls/rm/path` — bidirectional file exchange between host and sandbox via `~/.yoloai/sandboxes/<name>/files/`. |
 | `profile.go` | `yoloai profile create/list/info/delete` — profile management commands. |
 | `restart.go` | `yoloai restart` — stop + start a sandbox, with `--attach` and `--resume` support. |
@@ -95,15 +95,16 @@ Shared test helpers — a non-`_test.go` package importable by test files across
 
 | File | Purpose |
 |------|---------|
-| `config.go` | `YoloaiConfig` struct, `LoadConfig()`, `UpdateConfigFields()`, `DeleteConfigField()`, global config loading/updating. `IsGlobalKey()` routes config commands. YAML comment-preserving via `yaml.Node`. |
-| `config_aliases.go` | Model alias resolution helpers for config-level aliases. |
+| `config.go` | `YoloaiConfig` struct, `LoadBakedInDefaults()`, `LoadDefaultsConfig()`, `mergeConfigs()`, `LoadConfig()` (deprecated), `LoadGlobalConfig()`, `UpdateConfigFields()`, `DeleteConfigField()`, `UpdateGlobalConfigFields()`, `DeleteGlobalConfigField()`, `GetEffectiveConfig()`, `GetConfigValue()`, `IsGlobalKey()`. Two load paths: profile path (baked-in + profile config.yaml) and defaults path (baked-in + defaults/config.yaml). YAML comment-preserving via `yaml.Node`. |
+| `config_test.go` | Unit tests for config loading, merging, and scaffold generation. |
+| `defaults.go` | `DefaultConfigYAML` — baked-in defaults YAML (authoritative source of truth for all defaults). `DefaultGlobalConfigYAML` — default global config content. `GenerateScaffoldConfig()` — generates commented-out scaffold from baked-in YAML. |
+| `dirs.go` | `YoloaiDir()`, `SandboxesDir()`, `ProfilesDir()`, `CacheDir()`, `DefaultsDir()`, `DefaultsConfigPath()`, `ExtensionsDir()` — centralized path helpers. Shared sandbox subdirectory name constants (`BackendDirName`, `BinDirName`, `TmuxDirName`, `AgentRuntimeDirName`). |
 | `profile.go` | `ProfileConfig`, `LoadProfile()`, `MergedConfig` — profile loading, inheritance chain resolution, config merging. |
-| `migration.go` | `MigrateIfNeeded()`, `MigrateGlobalSettings()` — handles migration from old config structure. |
+| `migration.go` | `CheckDefaultsDir()` — verifies `~/.yoloai/defaults/` exists; returns migration instructions if not. |
 | `state.go` | `LoadState()`, `SaveState()` — read/write `~/.yoloai/state.yaml` containing global state like `setup_complete`. |
 | `pathutil.go` | `ExpandPath()` — tilde and `${VAR}` expansion for config paths. |
 | `errors.go` | `UsageError` (exit 2), `ConfigError` (exit 3), sentinel errors. |
 | `names.go` | Name validation constants and regex (`ValidNameRe`, `MaxNameLength`). |
-| `defaults.go` | Default YAML content for config files (`DefaultConfigYAML`, `DefaultGlobalConfigYAML`). |
 
 ### `runtime/`
 
@@ -117,7 +118,7 @@ Shared test helpers — a non-`_test.go` package importable by test files across
 |------|---------|
 | `docker.go` | `DockerRuntime` struct — implements `Runtime` interface, wraps Docker SDK. `NewDockerRuntime()` with daemon ping. |
 | `build.go` | `EnsureImage()` — builds `yoloai-base` image. `NeedsBuild()` / `RecordBuildChecksum()` for rebuild detection. Tar context creation, build output streaming. Moved from old `internal/docker/build.go`. |
-| `resources.go` | `//go:embed` for Dockerfile, entrypoint.sh, tmux.conf. Imports `sandbox-setup.py` and `status-monitor.py` from `runtime/monitor`. `SeedResources()` writes them to `~/.yoloai/profiles/base/` respecting user customizations. |
+| `resources.go` | `//go:embed` for Dockerfile, entrypoint.sh, entrypoint.py, tmux.conf. Imports `sandbox-setup.py`, `status-monitor.py`, and `diagnose-idle.sh` from `runtime/monitor`. `EmbeddedTmuxConf()` — accessor for the embedded tmux.conf (used by setup wizard when writing `defaults/tmux.conf`). Resources are baked in and not written to user-editable disk locations. |
 | `resources/Dockerfile` | Container Dockerfile (embedded at compile time). |
 | `resources/entrypoint.sh` | Root container entrypoint script (embedded at compile time). Handles UID/GID remapping, iptables, overlayfs, then invokes `sandbox-setup.py`. |
 | `resources/tmux.conf` | Default tmux config (embedded at compile time). |
@@ -271,9 +272,9 @@ Tart (macOS VM) implementation of `Runtime` interface. Shells out to `tart` CLI 
 | `yoloai ls` | `cli/commands.go:newLsAliasCmd` | Shortcut for `sandbox list` (calls `runList`) |
 | `yoloai log` | `cli/commands.go:newLogAliasCmd` | Shortcut for `sandbox log` (calls `runLog`) |
 | `yoloai exec` | `cli/commands.go:newExecAliasCmd` | Shortcut for `sandbox exec` |
-| `yoloai config get` | `cli/config.go:newConfigGetCmd` | `sandbox.GetEffectiveConfig()` / `sandbox.GetConfigValue()` |
-| `yoloai config set` | `cli/config.go:newConfigSetCmd` | `sandbox.UpdateConfigFields()` or `sandbox.UpdateGlobalConfigFields()` via `IsGlobalKey()` |
-| `yoloai config reset` | `cli/config.go:newConfigResetCmd` | `sandbox.DeleteConfigField()` or `sandbox.DeleteGlobalConfigField()` via `IsGlobalKey()` |
+| `yoloai config get` | `cli/config.go:newConfigGetCmd` | `config.GetEffectiveConfig()` / `config.GetConfigValue()` |
+| `yoloai config set` | `cli/config.go:newConfigSetCmd` | `config.UpdateConfigFields()` or `config.UpdateGlobalConfigFields()` via `config.IsGlobalKey()` |
+| `yoloai config reset` | `cli/config.go:newConfigResetCmd` | `config.DeleteConfigField()` or `config.DeleteGlobalConfigField()` via `config.IsGlobalKey()` |
 | `yoloai system completion` | `cli/commands.go:newCompletionCmd` | Cobra's built-in completion generators |
 | `yoloai x` | `cli/x.go:newExtensionCmd` | Loads and runs user-defined extensions from `~/.yoloai/extensions/` |
 | `yoloai version` | `cli/commands.go:newVersionCmd` | Prints build-time version info |
@@ -377,15 +378,14 @@ Manager.Start (sandbox/lifecycle.go)
 ~/.yoloai/
 ├── config.yaml              # Global config (tmux_conf, model_aliases)
 ├── state.yaml               # Global state (setup_complete)
+├── defaults/
+│   ├── config.yaml          # User defaults (agent, model, isolation, etc.; active when no --profile)
+│   └── tmux.conf            # Optional; written by setup when baked-in tmux config is in use
 ├── profiles/
-│   └── base/
-│       ├── config.yaml      # Profile defaults (agent, model, backend, env, etc.)
-│       ├── Dockerfile       # Seeded from embedded, user-customizable
-│       ├── entrypoint.sh    # Root entrypoint, seeded from embedded
-│       ├── sandbox-setup.py # User-phase setup, seeded from embedded
-│       ├── tmux.conf        # Seeded from embedded, user-customizable
-│       ├── .checksums       # Tracks seeded file checksums
-│       └── .last-build-checksum  # Tracks last image build inputs
+│   └── <name>/
+│       ├── config.yaml      # Profile settings (merged over baked-in defaults, not over defaults/)
+│       ├── Dockerfile       # Optional; FROM yoloai-base
+│       └── tmux.conf        # Optional tmux config override
 ├── sandboxes/
 │   └── <name>/
 │       ├── environment.json   # Sandbox metadata (agent, workdir, baseline SHA)
@@ -415,7 +415,7 @@ Manager.Start (sandbox/lifecycle.go)
 │       ├── home/              # Sandbox HOME directory (seatbelt)
 │       └── work/
 │           └── <caret-encoded-path>/  # Copy of workdir with internal git repo
-└── cache/                   # Global cache directory (e.g., overlay detection)
+└── cache/                   # Global cache directory (e.g., overlay detection, base image checksum)
 ```
 
 ## Where to Change
@@ -430,7 +430,7 @@ Manager.Start (sandbox/lifecycle.go)
 2. Define: commands, prompt mode, API key env vars, auth hint env vars, `AuthOptional`, seed files, state dir, submit sequence, startup delay, ready pattern, model flag/aliases/prefixes, network allowlist, context file, agent files exclude patterns
 
 **Change agent files seeding:**
-1. Config parsing: `parseAgentFilesNode()` in `sandbox/config.go`
+1. Config parsing: `parseAgentFilesNode()` in `config/config.go`
 2. Copy logic: `copyAgentFiles()` in `sandbox/agent_files.go`
 3. Exclusion patterns: `AgentFilesExclude` in agent definitions (`agent/agent.go`)
 4. State tracking: `SandboxState.AgentFilesInitialized` in `sandbox/sandbox_state.go`
@@ -442,7 +442,7 @@ Manager.Start (sandbox/lifecycle.go)
 **Change container setup (Dockerfile, entrypoint):**
 1. Edit files in `runtime/docker/resources/`
 2. They're embedded at compile time via `//go:embed` in `runtime/docker/resources.go`
-3. `SeedResources()` in `runtime/docker/build.go` handles deploying them to `~/.yoloai/profiles/base/`
+3. Resources are embedded at compile time via `//go:embed` and used directly from the binary. `EmbeddedTmuxConf()` in `runtime/docker/resources.go` is called by the setup wizard to write `defaults/tmux.conf` when the baked-in tmux config is in use.
 
 **Change how sandbox state is persisted:**
 1. Modify `Meta` / `DirMeta` in `sandbox/meta.go`
@@ -465,13 +465,14 @@ Manager.Start (sandbox/lifecycle.go)
 2. Status constants are in the same file
 
 **Change config handling:**
-1. Profile config: `LoadConfig()` / `UpdateConfigFields()` / `DeleteConfigField()` in `sandbox/config.go`
-2. Global config: `LoadGlobalConfig()` / `UpdateGlobalConfigFields()` / `DeleteGlobalConfigField()` in `sandbox/config.go`
-3. `IsGlobalKey()` determines routing — add new global keys to `globalKnownSettings` or `globalKnownCollectionSettings`
-4. Add new profile fields to `YoloaiConfig` struct and the YAML node walker
-5. CLI `config get/set/reset` commands in `internal/cli/config.go` route via `IsGlobalKey()`
-6. Profile config at `~/.yoloai/profiles/base/config.yaml`, global config at `~/.yoloai/config.yaml`
-7. Global state like `setup_complete` is stored in `~/.yoloai/state.yaml` via `LoadState()`/`SaveState()` in `sandbox/state.go`
+1. Defaults config: `LoadDefaultsConfig()` (baked-in + defaults/config.yaml merge) / `UpdateConfigFields()` / `DeleteConfigField()` in `config/config.go`
+2. Baked-in defaults: `LoadBakedInDefaults()` in `config/config.go`; add new default values to `DefaultConfigYAML` in `config/defaults.go`
+3. Global config: `LoadGlobalConfig()` / `UpdateGlobalConfigFields()` / `DeleteGlobalConfigField()` in `config/config.go`
+4. `IsGlobalKey()` determines routing — add new global keys to `globalKnownSettings` or `globalKnownCollectionSettings`
+5. Add new profile/defaults fields to `YoloaiConfig` struct and the YAML node walker in `config/config.go`
+6. CLI `config get/set/reset` commands in `internal/cli/config.go` route via `config.IsGlobalKey()`
+7. Defaults config at `~/.yoloai/defaults/config.yaml`, global config at `~/.yoloai/config.yaml`
+8. Global state like `setup_complete` is stored in `~/.yoloai/state.yaml` via `LoadState()`/`SaveState()` in `config/state.go`
 
 **Add a new runtime backend:**
 1. Create `runtime/<name>/` package
