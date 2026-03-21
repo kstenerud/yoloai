@@ -110,7 +110,12 @@ def read_secrets():
         log_debug("secrets.skip", "no secrets directory")
         return
     wrote = False
-    for name in os.listdir(secrets_dir):
+    try:
+        names = os.listdir(secrets_dir)
+    except OSError as e:
+        log_error("secrets.error", "cannot list secrets dir", error=str(e))
+        return
+    for name in names:
         path = os.path.join(secrets_dir, name)
         if os.path.isfile(path):
             try:

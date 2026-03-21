@@ -92,7 +92,11 @@ def read_secrets(secrets_dir):
     """Read secret files from a directory into os.environ."""
     if not os.path.isdir(secrets_dir):
         return
-    for name in os.listdir(secrets_dir):
+    try:
+        names = os.listdir(secrets_dir)
+    except OSError:
+        return  # Not accessible (e.g. root-owned dir, container running as non-root)
+    for name in names:
         path = os.path.join(secrets_dir, name)
         if os.path.isfile(path):
             try:
