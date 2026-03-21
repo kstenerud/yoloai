@@ -22,6 +22,7 @@ import (
 // and connecting to Podman's Docker-compatible socket.
 type Runtime struct {
 	*docker.Runtime
+	rootless bool // true when connected to a rootless (user) Podman socket
 }
 
 // Compile-time checks.
@@ -46,7 +47,7 @@ func New(ctx context.Context) (*Runtime, error) {
 		return nil, fmt.Errorf("connect to podman: %w", err)
 	}
 
-	return &Runtime{Runtime: dockerRT}, nil
+	return &Runtime{Runtime: dockerRT, rootless: socketIsRootless(sock)}, nil
 }
 
 // Create wraps the Docker Create to inject --userns=keep-id for rootless mode.
@@ -60,7 +61,7 @@ func New(ctx context.Context) (*Runtime, error) {
 // their config. Without keep-id the container starts as root, and entrypoint.py
 // remaps yoloai to the macOS user's UID via gosu — the same path Docker takes.
 func (r *Runtime) Create(ctx context.Context, cfg runtime.InstanceConfig) error {
-	if isRootless() && cfg.UsernsMode == "" && goruntime.GOOS != "darwin" {
+	if r.rootless && cfg.UsernsMode == "" && goruntime.GOOS != "darwin" {
 		// Check if overlay mode is active (indicated by SYS_ADMIN capability)
 		hasOverlay := false
 		for _, cap := range cfg.CapAdd {
@@ -170,7 +171,7 @@ func (r *Runtime) ValidateIsolation(_ context.Context, isolation string) error {
 	if isolation != "container-enhanced" {
 		return nil
 	}
-	if isRootless() {
+	if r.rootless {
 		return fmt.Errorf("--isolation container-enhanced requires Podman running as root\n" +
 			"  gVisor (runsc) with rootless Podman fails due to cgroup v2 delegation\n" +
 			"  Run as root or use Docker for container-enhanced isolation")
@@ -192,16 +193,17 @@ func (r *Runtime) ValidateIsolation(_ context.Context, isolation string) error {
 //     the correct uid via gosu — the same path Docker takes.
 //   - root: keep-id is irrelevant when already running as root.
 func (r *Runtime) UsernsMode(hasSysAdmin bool) string {
-	if !isRootless() || hasSysAdmin || goruntime.GOOS == "darwin" {
+	if !r.rootless || hasSysAdmin || goruntime.GOOS == "darwin" {
 		return ""
 	}
 	return "keep-id"
 }
 
-// isRootless returns true when not running as root, indicating Podman
-// rootless mode where --userns=keep-id is needed for correct file ownership.
-var isRootless = defaultIsRootless
-
-func defaultIsRootless() bool {
-	return os.Getuid() != 0
+// socketIsRootless reports whether the given Podman socket URL points to a
+// rootless (user-space) daemon. The system socket (/run/podman/podman.sock)
+// is the only known non-rootless path; everything else (XDG_RUNTIME_DIR,
+// WSL2, Podman Machine, user-supplied CONTAINER_HOST) is treated as rootless.
+func socketIsRootless(sock string) bool {
+	path := strings.TrimPrefix(sock, "unix://")
+	return path != systemSockPath
 }

@@ -79,21 +79,20 @@ func TestDiscoverSocket_NoSocket(t *testing.T) {
 	assert.Contains(t, err.Error(), "no podman socket found")
 }
 
-func TestIsRootless_NonRoot(t *testing.T) {
-	// Save and restore
-	orig := isRootless
-	defer func() { isRootless = orig }()
-
-	isRootless = func() bool { return true }
-	assert.True(t, isRootless())
+func TestSocketIsRootless_UserSocket(t *testing.T) {
+	assert.True(t, socketIsRootless("unix:///run/user/1000/podman/podman.sock"))
 }
 
-func TestIsRootless_Root(t *testing.T) {
-	orig := isRootless
-	defer func() { isRootless = orig }()
+func TestSocketIsRootless_SystemSocket(t *testing.T) {
+	assert.False(t, socketIsRootless("unix://"+systemSockPath))
+}
 
-	isRootless = func() bool { return false }
-	assert.False(t, isRootless())
+func TestSocketIsRootless_WSL2Socket(t *testing.T) {
+	assert.True(t, socketIsRootless("unix:///mnt/wsl/podman-sockets/podman-machine-default/podman-root.sock"))
+}
+
+func TestSocketIsRootless_CustomSocket(t *testing.T) {
+	assert.True(t, socketIsRootless("unix:///custom/podman.sock"))
 }
 
 func TestDiscoverSocket_WSL2(t *testing.T) {
@@ -164,11 +163,7 @@ func TestValidateIsolation_Podman_NonEnhanced(t *testing.T) {
 }
 
 func TestValidateIsolation_Podman_Rootless(t *testing.T) {
-	orig := isRootless
-	defer func() { isRootless = orig }()
-	isRootless = func() bool { return true }
-
-	r := &Runtime{}
+	r := &Runtime{rootless: true}
 	err := r.ValidateIsolation(context.Background(), "container-enhanced")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "rootless")
@@ -176,15 +171,11 @@ func TestValidateIsolation_Podman_Rootless(t *testing.T) {
 }
 
 func TestValidateIsolation_Podman_RootNoRunsc(t *testing.T) {
-	orig := isRootless
-	defer func() { isRootless = orig }()
-	isRootless = func() bool { return false }
-
 	origLook := runscLookPath
 	defer func() { runscLookPath = origLook }()
 	runscLookPath = func(string) (string, error) { return "", fmt.Errorf("not found") }
 
-	r := &Runtime{}
+	r := &Runtime{rootless: false}
 	err := r.ValidateIsolation(context.Background(), "container-enhanced")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "runsc")
@@ -192,15 +183,11 @@ func TestValidateIsolation_Podman_RootNoRunsc(t *testing.T) {
 }
 
 func TestValidateIsolation_Podman_RootWithRunsc(t *testing.T) {
-	orig := isRootless
-	defer func() { isRootless = orig }()
-	isRootless = func() bool { return false }
-
 	origLook := runscLookPath
 	defer func() { runscLookPath = origLook }()
 	runscLookPath = func(string) (string, error) { return "/usr/local/sbin/runsc", nil }
 
-	r := &Runtime{}
+	r := &Runtime{rootless: false}
 	err := r.ValidateIsolation(context.Background(), "container-enhanced")
 	assert.NoError(t, err)
 }
