@@ -119,24 +119,12 @@ The main binary retains ownership of sandbox directories (written as the calling
 
 See [linux-vm-backends research](../research/linux-vm-backends.md) for full analysis.
 
-### gVisor integration (`security: gvisor`)
+### ~~gVisor integration (`security: gvisor`)~~ ✅
 
-Add an optional `security` config key to profile config. When set to `gvisor`, pass `--runtime=runsc` to `docker run`. Provides meaningful isolation improvement (host kernel not directly reachable by agent code) with no KVM requirement and near-zero integration complexity.
+Implemented as `isolation: container-enhanced`. Passes `--runtime=runsc` to Docker/Podman. Preflight check validates `runsc` binary and Docker runtime registration. Incompatibility with `:overlay` directories is enforced (gVisor VFS2 does not support overlayfs inside the container).
 
-Design:
-- Profile config key: `security: standard | gvisor | kata | kata-firecracker` (default: `standard`)
-- `standard` → no change (existing runc behavior)
-- `gvisor` → add `--runtime=runsc` to docker run
-- Preflight check: if `security: gvisor` and `runsc` not found in PATH, fail with actionable error
-- Known incompatibility: agents cannot run Docker-in-Docker inside gVisor sandbox; document this
+### ~~Kata Containers integration (`security: kata`)~~ ✅
 
-### Kata Containers integration (`security: kata`)
-
-When set to `kata` or `kata-firecracker`, pass `--runtime=kata-qemu` or `--runtime=kata-fc`. Provides hardware VM isolation (separate kernel per sandbox) while keeping full `docker exec` compatibility via kata-agent↔vsock.
-
-- Requires KVM on host (excludes standard cloud VMs without nested virt or .metal)
-- ~1-2s start overhead, ~100-150 MB per-sandbox VM overhead
-- Same preflight check pattern as gVisor
-- Defer until gVisor integration is validated
+Implemented as `isolation: vm` (Kata+QEMU) and `isolation: vm-enhanced` (Kata+Firecracker) via the containerd backend. Uses `io.containerd.kata.v2` and `io.containerd.kata-fc.v2` shimv2 runtimes. Preflight checks validate Kata shim binary, CNI plugins, and `/dev/kvm`. `vm-enhanced` additionally selects the `devmapper` snapshotter.
 
 Not worth building: raw Firecracker backend (requires full orchestration layer — rootfs images, vsock exec daemon, networking). Revisit only if yoloAI targets hosted/SaaS deployment model.
