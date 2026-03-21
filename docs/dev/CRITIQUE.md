@@ -17,11 +17,6 @@ The package layout (`cmd/`, `agent/`, `config/`, `runtime/`, `sandbox/`, `intern
 - `gosec` annotations with rationales on file operations show security awareness
 - `workspace/safety.go` (`IsDangerousDir`, `CheckPathOverlap`) is good hardening
 
-**Issues:**
-- **golangci-lint version mismatch** — project targets Go 1.26.1 but linter built with Go 1.25. `make check` fails in CI. This blocks releases.
-- One `panic()` in `config/homedir.go` — acceptable for fatal bootstrapping, but should log context first
-- `sandbox/lifecycle.go`: if `SaveMeta()` fails after prompt.txt write, state is inconsistent — no rollback
-
 ---
 
 ## 3. Testing — Good, with Gaps
@@ -59,9 +54,6 @@ The package layout (`cmd/`, `agent/`, `config/`, `runtime/`, `sandbox/`, `intern
 
 The user-facing `docs/GUIDE.md` matches implemented commands. Design docs accurately describe the copy/diff/apply model. `ARCHITECTURE.md`'s command→code map and data flow diagrams are current and accurate.
 
-**Minor drift:**
-- `--backend auto` detection order (Docker > Podman) not explicitly documented anywhere
-
 ---
 
 ## 6. Enterprise Readiness — Mixed
@@ -85,7 +77,6 @@ The user-facing `docs/GUIDE.md` matches implemented commands. Design docs accura
 
 | Priority | Issue | Location |
 |----------|-------|----------|
-| High | golangci-lint version mismatch breaks `make check` | `Makefile:23`, `go.mod:3` |
 | Medium | No filesystem locking for concurrent operations | `sandbox/` package |
 | Low | Add `yoloai system check` health command | new command |
 | Low | Log rotation policy | `sandbox/` or external |
@@ -94,4 +85,4 @@ The user-facing `docs/GUIDE.md` matches implemented commands. Design docs accura
 
 ## Bottom Line
 
-The codebase is genuinely well-engineered — the abstractions are right, the patterns are consistent, the security thinking is present, and the documentation culture is strong. The golangci-lint mismatch needs to be fixed immediately as it blocks the quality gate. Everything else is polish. For a beta product, this is above average. For GA enterprise deployment, resolve the high-priority items above first.
+The codebase is genuinely well-engineered — the abstractions are right, the patterns are consistent, the security thinking is present, and the documentation culture is strong. Remaining items are all polish or optional hardening. For a beta product, this is above average.

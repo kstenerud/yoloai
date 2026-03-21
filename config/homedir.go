@@ -25,6 +25,7 @@ func HomeDir() string {
 
 	home, err := os.UserHomeDir()
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "yoloai: cannot determine home directory: %v\n", err)
 		panic(fmt.Sprintf("yoloai: cannot determine home directory: %v", err))
 	}
 	return home

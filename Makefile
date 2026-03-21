@@ -20,7 +20,7 @@ lint:
 	if [ -n "$$UNFMT" ]; then \
 		echo "gofmt needed:"; echo "$$UNFMT"; exit 1; \
 	fi
-	PATH="$$HOME/go/bin:$$PATH" golangci-lint run ./...
+	GOTOOLCHAIN=$(shell go env GOVERSION) go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.11.3 run ./...
 
 tidy-check:
 	@cp go.mod go.mod.bak && cp go.sum go.sum.bak

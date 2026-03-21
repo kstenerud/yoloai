@@ -86,12 +86,20 @@ func (m *Manager) Start(ctx context.Context, name string, opts StartOptions) err
 		if promptText == "" {
 			return fmt.Errorf("--prompt/--prompt-file produced empty text")
 		}
-		// Overwrite prompt.txt with new prompt
-		if writeErr := os.WriteFile(filepath.Join(sandboxDir, "prompt.txt"), []byte(promptText), 0600); writeErr != nil {
+		// Overwrite prompt.txt with new prompt; save old content for rollback.
+		promptPath := filepath.Join(sandboxDir, "prompt.txt")
+		oldPrompt, _ := os.ReadFile(promptPath) //nolint:gosec // G304: promptPath is constructed from a validated sandbox name
+		if writeErr := os.WriteFile(promptPath, []byte(promptText), 0600); writeErr != nil {
 			return fmt.Errorf("write prompt.txt: %w", writeErr)
 		}
 		meta.HasPrompt = true
 		if saveErr := SaveMeta(sandboxDir, meta); saveErr != nil {
+			// Roll back prompt.txt so disk state remains consistent with environment.json.
+			if oldPrompt != nil {
+				_ = os.WriteFile(promptPath, oldPrompt, 0600) //nolint:gosec // G703: promptPath is the same validated path used above
+			} else {
+				_ = os.Remove(promptPath)
+			}
 			return fmt.Errorf("save meta: %w", saveErr)
 		}
 	}
