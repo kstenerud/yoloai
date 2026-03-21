@@ -57,7 +57,7 @@ Run AI coding CLI agents (Claude Code, Codex, and others) with their sandbox-byp
 │    ├── agent-state/  (agent's state directory)             │
 │    ├── log.txt        (session output)                     │
 │    ├── prompt.txt     (initial prompt)                     │
-│    └── meta.json      (config, paths, status)              │
+│    └── environment.json (config, paths, status)            │
 └────────────────────────────────────────────────────────────┘
 ```
 
@@ -75,9 +75,9 @@ The Docker container is disposable — it can crash, be destroyed, be recreated.
 - **`agent-state/`** — the agent's state directory (session history, settings)
 - **`prompt.txt`** — the initial prompt to feed the agent
 - **`log.txt`** — captured tmux output for post-mortem review
-- **`meta.json`** — sandbox configuration captured at creation time. Used by all lifecycle commands to reconstruct the container environment on restart.
+- **`environment.json`** — sandbox configuration captured at creation time. Used by all lifecycle commands to reconstruct the container environment on restart.
 
-**`meta.json` schema:**
+**`environment.json` schema:**
 
 ```json
 {
@@ -124,7 +124,7 @@ The Docker container is disposable — it can crash, be destroyed, be recreated.
 ```
 
 Field notes:
-- **No `status` field.** Container state (`running`/`stopped`/`exited`) is queried live from Docker, not stored. Runtime state is tracked separately in `state.json` alongside `meta.json`. This file is created at sandbox creation time and contains fields like `agent_files_initialized` (boolean) to track whether agent files have been seeded.
+- **No `status` field.** Container state (`running`/`stopped`/`exited`) is queried live from Docker, not stored. Runtime state is tracked separately in `state.json` alongside `environment.json`. This file is created at sandbox creation time and contains fields like `agent_files_initialized` (boolean) to track whether agent files have been seeded.
 - **`baseline_sha`** — always present for `:copy` dirs. For git repos, the HEAD SHA at copy time. For non-git dirs, the SHA of the synthetic initial commit (`git init` + `git add -A` + `git commit`). Never null — `yoloai diff` always uses `git diff <baseline_sha>` with no special cases.
 - **`network_mode`** — `"none"`, `"isolated"`, or `""` (default/unrestricted). Drives iptables rule generation in the entrypoint.
 - **`network_allow`** — the fully resolved allowlist (agent defaults + config + CLI), stored so iptables rules can be reapplied on restart.
@@ -156,7 +156,7 @@ Field notes:
 ├── config.yaml                  ← global config (tmux_conf, model_aliases; always active)
 └── sandboxes/
     └── <name>/
-        ├── meta.json            ← original paths, mode, profile, timestamps
+        ├── environment.json     ← original paths, mode, profile, timestamps
         ├── config.json          ← entrypoint configuration (bind-mounted into container)
         ├── state.json           ← runtime state (agent files initialized, etc.)
         ├── prompt.txt           ← initial prompt (if provided)
@@ -194,4 +194,4 @@ Field notes:
 
 ### Overlay + existing `.git/` directories
 
-When the original directory is a git repo, `.git/` is in the overlay lower layer (read-only). Git operations inside the sandbox (add, commit, etc.) write to `.git/` internals (objects, index, refs), and these writes go to the overlay upper directory via copy-on-write. The agent sees the full project; writes go to upper only. This means: (a) the upper directory will contain modified `.git/` files alongside project changes, and (b) `yoloai diff` must diff against the *original* repo's HEAD SHA (recorded in `meta.json`), not whatever HEAD the sandbox has moved to. This works correctly because `meta.json` records the original HEAD at sandbox creation time, and `yoloai diff` uses `git diff <original-HEAD>` regardless of subsequent commits inside the sandbox.
+When the original directory is a git repo, `.git/` is in the overlay lower layer (read-only). Git operations inside the sandbox (add, commit, etc.) write to `.git/` internals (objects, index, refs), and these writes go to the overlay upper directory via copy-on-write. The agent sees the full project; writes go to upper only. This means: (a) the upper directory will contain modified `.git/` files alongside project changes, and (b) `yoloai diff` must diff against the *original* repo's HEAD SHA (recorded in `environment.json`), not whatever HEAD the sandbox has moved to. This works correctly because `environment.json` records the original HEAD at sandbox creation time, and `yoloai diff` uses `git diff <original-HEAD>` regardless of subsequent commits inside the sandbox.

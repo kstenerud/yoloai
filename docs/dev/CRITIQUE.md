@@ -8,10 +8,6 @@
 
 The package layout (`cmd/`, `agent/`, `config/`, `runtime/`, `sandbox/`, `internal/cli/`) is clean and matches documented architecture. The `runtime.Runtime` interface is well-designed with no backend-specific types leaking out. The `Client` public API in `yoloai.go` is a nice touch for programmatic use.
 
-**Minor drift:**
-- `ARCHITECTURE.md` lists `sandbox_network_add.go` / `sandbox_network_remove.go` as separate files — actual code uses a single `sandbox_network.go`
-- `config_aliases.go` exists but is omitted from the file index
-
 ---
 
 ## 2. Code Quality — Strong
@@ -49,16 +45,13 @@ The package layout (`cmd/`, `agent/`, `config/`, `runtime/`, `sandbox/`, `intern
 - Manager → Runtime dependency injection is clean
 - Options structs (`CreateOptions`, `StartOptions`) bundle parameters without leaking
 - Podman embedding Docker with socket override is the right pattern for code reuse
+- Overlay capability validation uses `IsolationValidator` interface — backends opt in rather than failing at runtime
 
 **Concerns:**
 
 **a) Diff/apply mode branching** — `sandbox/diff.go` and `sandbox/apply.go` switch on `mode` string inline. No interface for "diffable directory." Adding a 4th mount mode (`:sync`, `:snapshot`) would require changes in 5+ files. Not a blocker now, but worth noting.
 
-**b) Overlay capability not validated pre-create** — `backendCaps()` checks backend support, but `CAP_SYS_ADMIN` availability is only discovered at container run time. Containerd implements `IsolationValidator`; Docker silently skips it. Result: confusing failure mode.
-
-**c) Silent partial diff** — if `git diff` fails on an overlay directory, `GenerateDiff()` continues silently. User may apply incomplete changes with no warning.
-
-**d) No filesystem locking** — rapid concurrent `yoloai new` / `yoloai destroy` with the same sandbox name can race. No lockfile on `~/.yoloai/sandboxes/<name>/`.
+**b) No filesystem locking** — rapid concurrent `yoloai new` / `yoloai destroy` with the same sandbox name can race. No lockfile on `~/.yoloai/sandboxes/<name>/`.
 
 ---
 
@@ -67,8 +60,6 @@ The package layout (`cmd/`, `agent/`, `config/`, `runtime/`, `sandbox/`, `intern
 The user-facing `docs/GUIDE.md` matches implemented commands. Design docs accurately describe the copy/diff/apply model. `ARCHITECTURE.md`'s command→code map and data flow diagrams are current and accurate.
 
 **Minor drift:**
-- `ARCHITECTURE.md` file index references two non-existent network files and omits `config_aliases.go`
-- `design/README.md` references `meta.json` but actual filename is `environment.json` (post-migration)
 - `--backend auto` detection order (Docker > Podman) not explicitly documented anywhere
 
 ---
@@ -95,10 +86,7 @@ The user-facing `docs/GUIDE.md` matches implemented commands. Design docs accura
 | Priority | Issue | Location |
 |----------|-------|----------|
 | High | golangci-lint version mismatch breaks `make check` | `Makefile:23`, `go.mod:3` |
-| High | Overlay capability not validated for Docker backend | `sandbox/create.go:58-103` |
-| High | Silent partial diff on git failure | `sandbox/diff.go` |
 | Medium | No filesystem locking for concurrent operations | `sandbox/` package |
-| Medium | ARCHITECTURE.md file index drift | `docs/dev/ARCHITECTURE.md:48,66` |
 | Low | Add `yoloai system check` health command | new command |
 | Low | Log rotation policy | `sandbox/` or external |
 
@@ -106,4 +94,4 @@ The user-facing `docs/GUIDE.md` matches implemented commands. Design docs accura
 
 ## Bottom Line
 
-The codebase is genuinely well-engineered — the abstractions are right, the patterns are consistent, the security thinking is present, and the documentation culture is strong. The golangci-lint mismatch needs to be fixed immediately as it blocks the quality gate. The silent partial diff and missing overlay validation are correctness issues that could bite users. Everything else is polish. For a beta product, this is above average. For GA enterprise deployment, resolve the high-priority items above first.
+The codebase is genuinely well-engineered — the abstractions are right, the patterns are consistent, the security thinking is present, and the documentation culture is strong. The golangci-lint mismatch needs to be fixed immediately as it blocks the quality gate. Everything else is polish. For a beta product, this is above average. For GA enterprise deployment, resolve the high-priority items above first.
