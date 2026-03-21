@@ -1053,36 +1053,36 @@ func TestPrepareSandboxState_NetworkAllowAddsExtraDomains(t *testing.T) {
 	assert.Contains(t, state.networkAllow, "api.example.com")
 }
 
-// isolationSnapshotter tests
+// IsolationSnapshotter tests
 
 func TestIsolationSnapshotter_VmEnhanced(t *testing.T) {
-	assert.Equal(t, "devmapper", isolationSnapshotter("vm-enhanced"))
+	assert.Equal(t, "devmapper", runtime.IsolationSnapshotter("vm-enhanced"))
 }
 
 func TestIsolationSnapshotter_Other(t *testing.T) {
-	assert.Equal(t, "", isolationSnapshotter("vm"))
-	assert.Equal(t, "", isolationSnapshotter("container"))
-	assert.Equal(t, "", isolationSnapshotter("container-enhanced"))
-	assert.Equal(t, "", isolationSnapshotter(""))
+	assert.Equal(t, "", runtime.IsolationSnapshotter("vm"))
+	assert.Equal(t, "", runtime.IsolationSnapshotter("container"))
+	assert.Equal(t, "", runtime.IsolationSnapshotter("container-enhanced"))
+	assert.Equal(t, "", runtime.IsolationSnapshotter(""))
 }
 
-// isolationContainerRuntime tests
+// IsolationContainerRuntime tests
 
 func TestIsolationContainerRuntime_Container(t *testing.T) {
-	assert.Equal(t, "", isolationContainerRuntime("container"))
-	assert.Equal(t, "", isolationContainerRuntime(""))
+	assert.Equal(t, "", runtime.IsolationContainerRuntime("container"))
+	assert.Equal(t, "", runtime.IsolationContainerRuntime(""))
 }
 
 func TestIsolationContainerRuntime_ContainerEnhanced(t *testing.T) {
-	assert.Equal(t, "runsc", isolationContainerRuntime("container-enhanced"))
+	assert.Equal(t, "runsc", runtime.IsolationContainerRuntime("container-enhanced"))
 }
 
 func TestIsolationContainerRuntime_VM(t *testing.T) {
-	assert.Equal(t, "io.containerd.kata.v2", isolationContainerRuntime("vm"))
+	assert.Equal(t, "io.containerd.kata.v2", runtime.IsolationContainerRuntime("vm"))
 }
 
 func TestIsolationContainerRuntime_VMEnhanced(t *testing.T) {
-	assert.Equal(t, "io.containerd.kata-fc.v2", isolationContainerRuntime("vm-enhanced"))
+	assert.Equal(t, "io.containerd.kata-fc.v2", runtime.IsolationContainerRuntime("vm-enhanced"))
 }
 
 // BackendCaps tests — each backend declares its own capabilities.
@@ -1094,8 +1094,6 @@ func TestBackendCaps_Docker(t *testing.T) {
 	assert.True(t, caps.NetworkIsolation)
 	assert.True(t, caps.OverlayDirs)
 	assert.True(t, caps.CapAdd)
-	assert.True(t, caps.NeedsHomeSeedConfig)
-	assert.False(t, caps.RewritesCopyWorkdir)
 }
 
 func TestBackendCaps_Containerd(t *testing.T) {
@@ -1103,8 +1101,6 @@ func TestBackendCaps_Containerd(t *testing.T) {
 	assert.True(t, caps.NetworkIsolation)
 	assert.False(t, caps.OverlayDirs) // overlayfs not supported inside Kata VMs
 	assert.True(t, caps.CapAdd)
-	assert.True(t, caps.NeedsHomeSeedConfig)
-	assert.False(t, caps.RewritesCopyWorkdir)
 }
 
 func TestBackendCaps_Tart(t *testing.T) {
@@ -1112,8 +1108,6 @@ func TestBackendCaps_Tart(t *testing.T) {
 	assert.False(t, caps.NetworkIsolation)
 	assert.False(t, caps.OverlayDirs)
 	assert.False(t, caps.CapAdd)
-	assert.True(t, caps.NeedsHomeSeedConfig)
-	assert.False(t, caps.RewritesCopyWorkdir)
 }
 
 func TestBackendCaps_Seatbelt(t *testing.T) {
@@ -1121,8 +1115,37 @@ func TestBackendCaps_Seatbelt(t *testing.T) {
 	assert.False(t, caps.NetworkIsolation)
 	assert.False(t, caps.OverlayDirs)
 	assert.False(t, caps.CapAdd)
-	assert.False(t, caps.NeedsHomeSeedConfig) // uses host native agent, not npm-installed
-	assert.True(t, caps.RewritesCopyWorkdir)  // :copy paths point to sandbox copy location
+}
+
+// ShouldSeedHomeConfig and ResolveCopyMount tests
+
+func TestShouldSeedHomeConfig_Docker(t *testing.T) {
+	assert.True(t, (*dockerrt.Runtime)(nil).ShouldSeedHomeConfig())
+}
+
+func TestShouldSeedHomeConfig_Containerd(t *testing.T) {
+	assert.True(t, (*containerdrt.Runtime)(nil).ShouldSeedHomeConfig())
+}
+
+func TestShouldSeedHomeConfig_Tart(t *testing.T) {
+	assert.True(t, (*tartrt.Runtime)(nil).ShouldSeedHomeConfig())
+}
+
+func TestShouldSeedHomeConfig_Seatbelt(t *testing.T) {
+	assert.False(t, (*seatbeltrt.Runtime)(nil).ShouldSeedHomeConfig()) // uses host native agent
+}
+
+func TestResolveCopyMount_Docker(t *testing.T) {
+	// Docker bind-mounts at the original host path — returns hostPath unchanged.
+	assert.Equal(t, "/home/user/project", (*dockerrt.Runtime)(nil).ResolveCopyMount("mysandbox", "/home/user/project"))
+}
+
+func TestResolveCopyMount_Containerd(t *testing.T) {
+	assert.Equal(t, "/home/user/project", (*containerdrt.Runtime)(nil).ResolveCopyMount("mysandbox", "/home/user/project"))
+}
+
+func TestResolveCopyMount_Tart(t *testing.T) {
+	assert.Equal(t, "/home/user/project", (*tartrt.Runtime)(nil).ResolveCopyMount("mysandbox", "/home/user/project"))
 }
 
 // checkIsolationPrerequisites tests

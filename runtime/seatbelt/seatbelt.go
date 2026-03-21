@@ -64,12 +64,21 @@ var _ runtime.Runtime = (*Runtime)(nil)
 // a container, and :copy workdir paths must point to the sandbox copy location.
 func (r *Runtime) Capabilities() runtime.BackendCaps {
 	return runtime.BackendCaps{
-		NetworkIsolation:    false,
-		OverlayDirs:         false,
-		CapAdd:              false,
-		NeedsHomeSeedConfig: false,
-		RewritesCopyWorkdir: true,
+		NetworkIsolation: false,
+		OverlayDirs:      false,
+		CapAdd:           false,
 	}
+}
+
+// ShouldSeedHomeConfig returns false — seatbelt runs the host's native agent
+// installation, not an npm-installed copy in a container image.
+func (r *Runtime) ShouldSeedHomeConfig() bool { return false }
+
+// ResolveCopyMount returns the sandbox copy directory path. Seatbelt runs the
+// agent directly on the host, so it must read :copy files from their actual
+// sandbox location rather than from a container bind-mount at the original path.
+func (r *Runtime) ResolveCopyMount(sbName, hostPath string) string {
+	return filepath.Join(r.sandboxDir, sbName, "work", config.EncodePath(hostPath))
 }
 
 // New creates a Runtime after verifying that we're on macOS and

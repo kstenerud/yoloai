@@ -61,13 +61,18 @@ var _ runtime.Runtime = (*Runtime)(nil)
 // Tart runs macOS VMs; no container-specific features are supported.
 func (r *Runtime) Capabilities() runtime.BackendCaps {
 	return runtime.BackendCaps{
-		NetworkIsolation:    false,
-		OverlayDirs:         false,
-		CapAdd:              false,
-		NeedsHomeSeedConfig: true,
-		RewritesCopyWorkdir: false,
+		NetworkIsolation: false,
+		OverlayDirs:      false,
+		CapAdd:           false,
 	}
 }
+
+// ShouldSeedHomeConfig returns true — Tart VMs use an npm-installed agent.
+func (r *Runtime) ShouldSeedHomeConfig() bool { return true }
+
+// ResolveCopyMount returns hostPath unchanged — Tart mounts copies at the
+// original host path inside the VM via VirtioFS.
+func (r *Runtime) ResolveCopyMount(_, hostPath string) string { return hostPath }
 
 // New creates a Runtime after verifying that tart is installed and the
 // platform is supported (macOS with Apple Silicon).

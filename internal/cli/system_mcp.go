@@ -6,6 +6,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"os"
 
 	"github.com/kstenerud/yoloai/internal/mcpsrv"
 	"github.com/kstenerud/yoloai/sandbox"
@@ -52,7 +53,10 @@ Add to ~/.claude.json to use with Claude Desktop:
 }
 
 func runMCPServe(cmd *cobra.Command, _ []string) error {
-	backend := detectContainerBackend(resolveContainerBackendConfig())
+	backend, warn := detectContainerBackend(resolveContainerBackendConfig())
+	if warn != "" {
+		fmt.Fprintln(os.Stderr, warn)
+	}
 	return withManager(cmd, backend, func(ctx context.Context, mgr *sandbox.Manager) error {
 		srv := mcpsrv.New(mgr)
 		return srv.ServeStdio(ctx)

@@ -318,13 +318,19 @@ func (r *Runtime) Name() string { return r.binaryName }
 // Capabilities returns the Docker backend's feature set.
 func (r *Runtime) Capabilities() runtime.BackendCaps {
 	return runtime.BackendCaps{
-		NetworkIsolation:    true,
-		OverlayDirs:         true,
-		CapAdd:              true,
-		NeedsHomeSeedConfig: true,
-		RewritesCopyWorkdir: false,
+		NetworkIsolation: true,
+		OverlayDirs:      true,
+		CapAdd:           true,
 	}
 }
+
+// ShouldSeedHomeConfig returns true — Docker containers use an npm-installed
+// agent, so the home-seed .claude.json must be patched from "native" to "npm-global".
+func (r *Runtime) ShouldSeedHomeConfig() bool { return true }
+
+// ResolveCopyMount returns hostPath unchanged — Docker bind-mounts the copy at
+// the original host path inside the container.
+func (r *Runtime) ResolveCopyMount(_, hostPath string) string { return hostPath }
 
 // dockerInfoOutput fetches the list of registered OCI runtime names from the
 // Docker daemon. Variable for testing.

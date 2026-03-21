@@ -53,31 +53,6 @@ const (
 	NetworkModeIsolated NetworkMode = "isolated" // allowlist only
 )
 
-// isolationContainerRuntime maps an isolation mode to the OCI runtime name
-// (shimv2 type for containerd, runtime name for Docker/Podman).
-// Returns "" for "container" isolation (uses the default runc; no extra binary needed).
-func isolationContainerRuntime(isolation string) string {
-	switch isolation {
-	case "container-enhanced":
-		return "runsc"
-	case "vm":
-		return "io.containerd.kata.v2"
-	case "vm-enhanced":
-		return "io.containerd.kata-fc.v2"
-	default:
-		return ""
-	}
-}
-
-// isolationSnapshotter maps an isolation mode to the containerd snapshotter name.
-// Returns "" for modes that use the backend default (overlayfs).
-func isolationSnapshotter(isolation string) string {
-	if isolation == "vm-enhanced" {
-		return "devmapper"
-	}
-	return ""
-}
-
 // checkIsolationPrerequisites delegates isolation prerequisite validation to the
 // runtime backend via the optional IsolationValidator interface.
 // If the backend does not implement IsolationValidator, validation is skipped.
@@ -401,44 +376,9 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 		}
 	}()
 
-	// Copy seed files into agent-state (config, OAuth credentials, etc.)
-	hasAPIKey := hasAnyAPIKey(agentDef)
-	copiedAuth, err := copySeedFiles(agentDef, sandboxDir, hasAPIKey)
+	agentFilesInitialized, err := m.seedSandbox(agentDef, sandboxDir, pr.isolation, pr.agentFiles)
 	if err != nil {
-		return nil, fmt.Errorf("copy seed files: %w", err)
-	}
-
-	// Warn when Claude is using short-lived OAuth credentials instead of a long-lived token.
-	// OAuth access tokens expire after ~30 minutes and refresh tokens are single-use,
-	// so the host's Claude Code can invalidate the sandbox's copy by refreshing first.
-	if agentDef.Name == "claude" && copiedAuth {
-		fmt.Fprintln(m.output, "Warning: using OAuth credentials from ~/.claude/.credentials.json")                         //nolint:errcheck // best-effort warning
-		fmt.Fprintln(m.output, "  These tokens expire after ~30 minutes and may fail in long-running sessions.")            //nolint:errcheck // best-effort warning
-		fmt.Fprintln(m.output, "  For reliable auth, run 'claude setup-token' and export CLAUDE_CODE_OAUTH_TOKEN instead.") //nolint:errcheck // best-effort warning
-		fmt.Fprintln(m.output)                                                                                              //nolint:errcheck // best-effort warning
-	}
-
-	// Ensure container-required settings (e.g., skip bypass permissions prompt)
-	if err := ensureContainerSettings(agentDef, sandboxDir, pr.isolation); err != nil {
-		return nil, fmt.Errorf("ensure container settings: %w", err)
-	}
-
-	// Copy agent_files (user-configured agent config files)
-	agentFilesInitialized := false
-	if pr.agentFiles != nil && agentDef.StateDir != "" {
-		if err := copyAgentFiles(agentDef, sandboxDir, pr.agentFiles); err != nil {
-			return nil, fmt.Errorf("copy agent files: %w", err)
-		}
-		agentFilesInitialized = true
-	}
-
-	// Fix install method in seeded .claude.json (host has "native", container uses npm).
-	// Skipped when NeedsHomeSeedConfig is false — the backend runs the host's native
-	// agent installation rather than the npm-installed copy in the container image.
-	if m.runtime.Capabilities().NeedsHomeSeedConfig {
-		if err := ensureHomeSeedConfig(agentDef, sandboxDir); err != nil {
-			return nil, fmt.Errorf("ensure home seed config: %w", err)
-		}
+		return nil, err
 	}
 
 	// Copy/overlay workdir and create git baseline.
@@ -455,19 +395,16 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 		return nil, err
 	}
 
-	// For backends that run directly on the host (no container image), :copy
-	// workdir mount paths must be rewritten to the actual copy location.
-	// Container backends mount the copy at the original host path inside the
-	// container; process-based backends (e.g. seatbelt) run directly on macOS
-	// where the agent sees the copy at its sandbox location, not the host path.
-	if m.runtime.Capabilities().RewritesCopyWorkdir {
-		if workdir.Mode == "copy" {
-			workdir.MountPath = WorkDir(opts.Name, workdir.Path)
-		}
-		for _, ad := range auxDirs {
-			if ad.Mode == "copy" {
-				ad.MountPath = WorkDir(opts.Name, ad.Path)
-			}
+	// For backends that run agents directly on the host (seatbelt), :copy mount paths
+	// must point to the sandbox copy location rather than the original host path.
+	// Container/VM backends bind-mount the copy at the original host path inside the
+	// container; ResolveCopyMount returns hostPath unchanged for those backends.
+	if workdir.Mode == "copy" && workdir.MountPath == "" {
+		workdir.MountPath = m.runtime.ResolveCopyMount(opts.Name, workdir.Path)
+	}
+	for _, ad := range auxDirs {
+		if ad.Mode == "copy" && ad.MountPath == "" {
+			ad.MountPath = m.runtime.ResolveCopyMount(opts.Name, ad.Path)
 		}
 	}
 
@@ -671,110 +608,7 @@ func (m *Manager) launchContainer(ctx context.Context, state *sandboxState) erro
 		return err
 	}
 
-	cname := InstanceName(state.name)
-
-	caps := m.runtime.Capabilities()
-
-	if state.networkMode == "isolated" && !caps.NetworkIsolation {
-		return fmt.Errorf("--network=isolated is not supported by the %s backend", m.runtime.Name())
-	}
-
-	resolvedImage := state.imageRef
-	if resolvedImage == "" {
-		resolvedImage = "yoloai-base"
-	}
-
-	instanceCfg := runtime.InstanceConfig{
-		Name:        cname,
-		ImageRef:    resolvedImage,
-		WorkingDir:  state.workdir.ResolvedMountPath(),
-		Mounts:      mounts,
-		Ports:       ports,
-		NetworkMode: state.networkMode,
-		UseInit:     true,
-	}
-
-	// Convert resource limits
-	if state.resources != nil {
-		rtResources, err := parseResourceLimits(state.resources)
-		if err != nil {
-			return err
-		}
-		instanceCfg.Resources = rtResources
-	}
-
-	if state.networkMode == "isolated" && caps.NetworkIsolation {
-		instanceCfg.CapAdd = append(instanceCfg.CapAdd, "NET_ADMIN")
-	}
-
-	// container-enhanced (gVisor) does not support overlayfs inside the container.
-	// Catch this combination early before Docker fails with an opaque error.
-	if state.isolation == "container-enhanced" && hasOverlayDirs(state) {
-		return fmt.Errorf(
-			":overlay directories require --isolation container; " +
-				"--isolation container-enhanced uses gVisor, which does not support overlayfs inside the container")
-	}
-
-	// CAP_SYS_ADMIN required for overlay mounts inside the container
-	if hasOverlayDirs(state) {
-		if !caps.OverlayDirs {
-			return fmt.Errorf(":overlay mode requires a container backend that supports overlayfs (not supported with %s)", m.runtime.Name())
-		}
-		instanceCfg.CapAdd = append(instanceCfg.CapAdd, "SYS_ADMIN")
-	}
-
-	// Recipe fields (cap_add, devices, setup) require a backend with CapAdd support
-	if !caps.CapAdd && (len(state.capAdd) > 0 || len(state.devices) > 0 || len(state.setup) > 0) {
-		return fmt.Errorf("cap_add, devices, and setup require a container backend (not supported with %s)", m.runtime.Name())
-	}
-	instanceCfg.CapAdd = append(instanceCfg.CapAdd, state.capAdd...)
-	instanceCfg.Devices = state.devices
-
-	// Set the runtime identifier for both Docker (OCI --runtime name) and containerd (shimv2 type).
-	// isolationContainerRuntime returns "" for container isolation where the default suffices.
-	instanceCfg.ContainerRuntime = isolationContainerRuntime(state.isolation)
-	instanceCfg.Snapshotter = isolationSnapshotter(state.isolation)
-	// Validate that isolation prerequisites are met (delegates to runtime.IsolationValidator).
-	if err := checkIsolationPrerequisites(ctx, m.runtime, state.isolation); err != nil {
-		return err
-	}
-
-	if err := m.runtime.Create(ctx, instanceCfg); err != nil {
-		return err
-	}
-
-	if err := m.runtime.Start(ctx, cname); err != nil {
-		return fmt.Errorf("start instance: %w", err)
-	}
-
-	// Wait briefly for entrypoint to read secrets before cleanup
-	if secretsDir != "" {
-		time.Sleep(1 * time.Second)
-	}
-
-	// Verify instance is still running (catches immediate crashes)
-	time.Sleep(1 * time.Second)
-	info, err := m.runtime.Inspect(ctx, cname)
-	if err != nil {
-		return fmt.Errorf("inspect instance after start: %w", err)
-	}
-	if !info.Running {
-		// Try sandbox.jsonl first — written by entrypoint.sh and entrypoint.py.
-		if tail := readLogTail(filepath.Join(state.sandboxDir, "logs", "sandbox.jsonl"), 20); tail != "" {
-			return fmt.Errorf("instance exited immediately:\n%s", tail)
-		}
-		// Try agent log file (written after tmux setup).
-		if tail := readLogTail(filepath.Join(state.sandboxDir, AgentLogFile), 20); tail != "" {
-			return fmt.Errorf("instance exited immediately:\n%s", tail)
-		}
-		// Fall back to container logs (captures pre-entrypoint crashes, e.g. gVisor startup errors).
-		if logs := m.runtime.Logs(ctx, cname, 50); logs != "" {
-			return fmt.Errorf("instance exited immediately:\n%s", logs)
-		}
-		return fmt.Errorf("instance exited immediately — %s", m.runtime.DiagHint(cname))
-	}
-
-	return nil
+	return m.buildAndStart(ctx, state, mounts, ports, secretsDir != "")
 }
 
 // printCreationOutput prints the context-aware summary.

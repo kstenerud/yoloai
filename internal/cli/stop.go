@@ -25,7 +25,10 @@ func newStopCmd() *cobra.Command {
 			}
 
 			// Resolve backend: from first named sandbox, or config default for --all
-			backend := detectContainerBackend(resolveContainerBackendConfig())
+			backend, warn := detectContainerBackend(resolveContainerBackendConfig())
+			if warn != "" {
+				fmt.Fprintln(os.Stderr, warn)
+			}
 			if !all && len(args) > 0 {
 				backend = resolveBackendForSandbox(args[0])
 			} else if !all {

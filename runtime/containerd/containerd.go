@@ -31,13 +31,18 @@ var _ runtime.IsolationValidator = (*Runtime)(nil)
 // Capabilities returns the containerd backend's feature set.
 func (r *Runtime) Capabilities() runtime.BackendCaps {
 	return runtime.BackendCaps{
-		NetworkIsolation:    true,
-		OverlayDirs:         false, // overlayfs-in-container not supported with Kata shim
-		CapAdd:              true,
-		NeedsHomeSeedConfig: true,
-		RewritesCopyWorkdir: false,
+		NetworkIsolation: true,
+		OverlayDirs:      false, // overlayfs-in-container not supported with Kata shim
+		CapAdd:           true,
 	}
 }
+
+// ShouldSeedHomeConfig returns true — containerd containers use an npm-installed agent.
+func (r *Runtime) ShouldSeedHomeConfig() bool { return true }
+
+// ResolveCopyMount returns hostPath unchanged — containerd bind-mounts the copy
+// at the original host path inside the container.
+func (r *Runtime) ResolveCopyMount(_, hostPath string) string { return hostPath }
 
 const containerdSock = "/run/containerd/containerd.sock"
 

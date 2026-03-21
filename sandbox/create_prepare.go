@@ -255,10 +255,10 @@ func (m *Manager) parseAndValidateDirs(ctx context.Context, opts CreateOptions, 
 
 	// Localhost URL warning for backends that isolate the agent inside a
 	// container or VM where localhost resolves to the container, not the host.
-	// Skipped for process-based backends (RewritesCopyWorkdir=true) that run
-	// the agent directly on the host, where localhost resolves correctly.
-	caps := m.runtime.Capabilities()
-	if !caps.RewritesCopyWorkdir {
+	// For process-based backends (seatbelt), the agent runs on the host and
+	// localhost resolves correctly — skip this warning.
+	if m.runtime.ShouldSeedHomeConfig() {
+		caps := m.runtime.Capabilities()
 		for _, key := range agentDef.AuthHintEnvVars {
 			for _, val := range []string{os.Getenv(key), mergedEnv[key]} {
 				if val != "" && containsLocalhost(val) {

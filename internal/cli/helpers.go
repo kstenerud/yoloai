@@ -91,7 +91,11 @@ func resolveBackend(cmd *cobra.Command) string {
 	}
 
 	// container/container-enhanced: prefer config, then auto-detect.
-	return detectContainerBackend(resolveContainerBackendConfig())
+	backend, warn := detectContainerBackend(resolveContainerBackendConfig())
+	if warn != "" {
+		fmt.Fprintln(os.Stderr, warn)
+	}
+	return backend
 }
 
 // flagStr returns the value of a string flag if it was set, or "" if not available.
@@ -101,24 +105,25 @@ func flagStr(cmd *cobra.Command, name string) string {
 }
 
 // detectContainerBackend picks docker or podman based on a config preference
-// and socket availability. Warns to stderr if the preferred backend isn't found.
-func detectContainerBackend(preference string) string {
+// and socket availability. Returns the chosen backend and an optional warning
+// message (non-empty when the preferred backend was unavailable).
+func detectContainerBackend(preference string) (backend string, warning string) {
 	if preference == "podman" {
 		if podmanrt.SocketExists() {
-			return "podman"
+			return "podman", ""
 		}
-		fmt.Fprintf(os.Stderr, "Warning: container_backend=podman not found; falling back to docker\n")
+		warning = "Warning: container_backend=podman not found; falling back to docker"
 	}
 	if dockerAvailable() {
-		return "docker"
+		return "docker", warning
 	}
 	if preference == "docker" {
-		fmt.Fprintf(os.Stderr, "Warning: container_backend=docker not found; falling back to podman\n")
+		warning = "Warning: container_backend=docker not found; falling back to podman"
 	}
 	if podmanrt.SocketExists() {
-		return "podman"
+		return "podman", warning
 	}
-	return "docker" // will fail hard in newRuntime() with a clear error
+	return "docker", warning // will fail hard in newRuntime() with a clear error
 }
 
 // dockerAvailable returns true if the Docker socket is reachable (stat only, no dial).
@@ -147,7 +152,11 @@ func resolveBackendForSandbox(name string) string {
 	if err == nil && meta.Backend != "" {
 		return meta.Backend
 	}
-	return detectContainerBackend(resolveContainerBackendConfig())
+	backend, warn := detectContainerBackend(resolveContainerBackendConfig())
+	if warn != "" {
+		fmt.Fprintln(os.Stderr, warn)
+	}
+	return backend
 }
 
 // withRuntime creates a runtime for the given backend, calls fn, and ensures cleanup.

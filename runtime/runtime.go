@@ -77,11 +77,9 @@ type ExecResult struct {
 // BackendCaps declares what features a runtime backend supports.
 // Each backend returns its own capabilities via Capabilities().
 type BackendCaps struct {
-	NetworkIsolation    bool // supports --network=isolated (iptables domain filtering)
-	OverlayDirs         bool // supports :overlay mount mode (overlayfs inside the container)
-	CapAdd              bool // supports cap_add, devices, and setup commands
-	NeedsHomeSeedConfig bool // entrypoint remaps yoloai's npm install method; false for seatbelt (runs host native agent)
-	RewritesCopyWorkdir bool // :copy workdir mount path must be rewritten to the sandbox copy location; true for seatbelt
+	NetworkIsolation bool // supports --network=isolated (iptables domain filtering)
+	OverlayDirs      bool // supports :overlay mount mode (overlayfs inside the container)
+	CapAdd           bool // supports cap_add, devices, and setup commands
 }
 
 // IsolationValidator is an optional interface implemented by Runtime backends
@@ -162,6 +160,19 @@ type Runtime interface {
 	// Used by sandbox/create.go to gate features and select backend-specific
 	// code paths without string-comparing backend names.
 	Capabilities() BackendCaps
+
+	// ShouldSeedHomeConfig reports whether this backend requires patching the
+	// home-seed .claude.json install method from "native" to "npm-global".
+	// Returns false for process-based backends (e.g. seatbelt) that run the
+	// host's native agent installation and do not use the npm copy in the image.
+	ShouldSeedHomeConfig() bool
+
+	// ResolveCopyMount returns the mount path the agent sees for a :copy directory.
+	// For container/VM backends, the copy is bind-mounted at the original host path
+	// inside the container, so this returns hostPath unchanged.
+	// For process-based backends (seatbelt), the agent runs directly on the host
+	// and sees the copy at its sandbox location, so this returns the rewritten path.
+	ResolveCopyMount(sandboxName, hostPath string) string
 
 	// Name returns the backend name (e.g., "docker", "tart", "seatbelt").
 	Name() string
