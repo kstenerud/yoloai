@@ -219,10 +219,17 @@ func GenerateOverlayPatch(ctx context.Context, rt runtime.Runtime, name string, 
 			return nil, fmt.Errorf("git diff (stat) in %s: %w", dc.HostPath, err)
 		}
 
+		// execInContainer returns strings.TrimSpace'd stdout, which strips
+		// the trailing newline. git apply requires a trailing newline to parse
+		// the patch correctly — add it back if absent.
+		patch := []byte(stdout)
+		if len(patch) > 0 && patch[len(patch)-1] != '\n' {
+			patch = append(patch, '\n')
+		}
 		patches = append(patches, PatchSet{
 			HostPath: dc.HostPath,
 			Mode:     "overlay",
-			Patch:    []byte(stdout),
+			Patch:    patch,
 			Stat:     strings.TrimRight(statOut, "\n"),
 		})
 	}
