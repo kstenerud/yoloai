@@ -99,15 +99,19 @@ type HostCapability struct {
 // FixStep is one discrete remediation action.
 type FixStep struct {
     Description string // human explanation
-    Command     string // shell command; empty if manual-only
-    NeedsRoot   bool   // true when Command requires sudo or root
+    Command     string // example shell command; empty if no command applies.
+                       // Commands are illustrative (typically Debian/Ubuntu);
+                       // the user is expected to adapt them to their distro.
+    NeedsRoot   bool   // true when the command typically requires sudo or root;
+                       // used for display (prefixing, labelling) only — never
+                       // used to gate execution.
 }
 
 // CheckResult records the outcome of one capability check.
 type CheckResult struct {
     Cap   HostCapability
     Err   error     // nil = satisfied
-    Steps []FixStep // populated only when Err != nil
+    Steps []FixStep // fix steps from Cap.Fix(env); nil when Err == nil
 }
 
 // Environment holds host context used by Fix functions to tailor advice.
@@ -333,17 +337,21 @@ Checking prerequisites for vm isolation (containerd):
   ✗  network namespace creation  operation not permitted
 
 To fix KVM device access:
-  sudo usermod -aG kvm $USER
-  newgrp kvm   # or log out and back in
+  (requires root) sudo usermod -aG kvm $USER
+                  newgrp kvm   # or log out and back in
 
 To fix network namespace creation — choose one option:
   Option A — run yoloai with sudo (simple, no persistent setup):
     sudo yoloai new mybox --isolation vm ...
   Option B — grant capabilities to the binary (lost on reinstall):
-    sudo setcap cap_sys_admin,cap_dac_override+ep $(which yoloai)
+    (requires root) sudo setcap cap_sys_admin,cap_dac_override+ep $(which yoloai)
+
+Note: example commands assume Debian/Ubuntu. Adapt as needed for your distro.
 ```
 
-`FormatDoctor` handles all formatting. Exit 0 = all passed, 1 = failures present
+`FormatDoctor` handles all formatting. Fix commands are always shown — they are
+advisory examples, never executed by yoloai. `NeedsRoot=true` steps are labelled
+`(requires root)` in the output. Exit 0 = all passed, 1 = failures present
 (CI-compatible, same as `system check`).
 
 ---
@@ -378,14 +386,10 @@ consistent and improvable in one place.
 
 **Outcome:** users can proactively diagnose prerequisites before hitting a runtime error.
 
-### Phase 3 — `--fix` flag (optional, post-release)
+~~### Phase 3 — `--fix` flag~~
 
-1. Add `--fix` to `system doctor`.
-2. For `NeedsRoot=false` steps with a `Command`: run with user confirmation.
-3. For `NeedsRoot=true` steps: print as copy-pasteable instructions only.
-4. `--yes` flag to skip confirmation prompt.
-
-**Deferred.** Phases 1 and 2 deliver the primary value.
+Not planned. Fix commands are advisory examples shown in the default `system doctor`
+output. yoloai does not execute remediation commands on the user's behalf.
 
 ---
 
