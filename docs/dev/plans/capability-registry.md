@@ -6,54 +6,56 @@ Capability checks and their remediation messages are written inline, ad-hoc, in 
 runtime package. Today:
 
 - `runtime/containerd/containerd.go` — `ValidateIsolation` hand-rolls checks for 6
-  prerequisites (socket, kata shim, CNI, netns, KVM, devmapper) with inline error strings.
+  prerequisites with inline error strings.
 - `runtime/docker/docker.go` — `ValidateIsolation` checks for `runsc` with an inline
   install URL; no structured remediation.
 - `runtime/podman/podman.go` — same pattern; checks rootless mode + `runsc`.
-- Error messages are plain text blobs: accurate but not structured, not context-sensitive,
-  and duplicated across backends.
-- There is no overview command — users have no way to ask "what do I need for vm isolation?"
+- Error messages are plain text blobs: not structured, not context-sensitive, duplicated.
+- There is no overview command. Users have no way to ask "what can I run on this machine?"
   before hitting a cryptic runtime error.
-- As more backends and isolation modes are added, each author re-invents the same check +
-  error-message pattern independently. Remediation advice drifts.
+- All failures look the same, whether the cause is a missing package (fixable in minutes)
+  or a fundamental hardware or platform mismatch (permanently unavailable).
 
-**Core goal:** centralize capability definitions — what it is, how to test for it, and how to
-help the user fix it — so messaging is consistent and improvable without touching runtime
-internals.
+**Core goal:** centralize capability definitions so messaging is consistent, fixable vs
+permanent failures are distinguished, and users get a clear picture of what they can run
+and what it takes to unlock more.
 
 ---
 
 ## Non-goals
 
 - No daemon or privileged helper process. yoloai stays a standalone binary.
-- No auto-apply of fixes without explicit user consent (`--fix` flag only, Phase 3+).
+- No auto-apply of fixes. Fix commands are advisory examples only.
 - No exhaustive environment fingerprinting. Cover the cases that actually matter: WSL2,
   running inside a Docker/LXC container, and bare-metal Linux/macOS.
 - No capability inheritance tree or scoring. Simple slices.
 
 ---
 
-## Interface change: `IsolationValidator` → `CapabilityProvider`
+## Interface changes
 
-The existing `IsolationValidator` interface is replaced entirely:
+### `IsolationValidator` → `CapabilityProvider` (in `runtime/runtime.go`)
+
+`IsolationValidator` is removed. `CapabilityProvider` replaces it and adds discovery:
 
 ```go
-// Before (runtime/runtime.go)
-type IsolationValidator interface {
-    ValidateIsolation(ctx context.Context, isolation string) error
-}
-
-// After
+// CapabilityProvider is an optional interface implemented by Runtime backends
+// that have host-level prerequisites beyond basic daemon connectivity.
 type CapabilityProvider interface {
     // RequiredCapabilities returns the host capabilities needed for the given
-    // isolation mode. An empty isolation string returns capabilities required
-    // for the backend in any mode (e.g. daemon socket reachable).
-    // Returns nil if the backend has no special requirements for this mode.
+    // isolation mode. An empty string returns capabilities for the base backend
+    // (e.g. daemon socket reachable). Returns nil if no special requirements
+    // exist for this mode.
     RequiredCapabilities(isolation string) []caps.HostCapability
+
+    // SupportedIsolationModes returns the isolation modes this backend can
+    // potentially support. Used by `system doctor` to discover what to check
+    // without requiring the caller to enumerate modes externally.
+    SupportedIsolationModes() []string
 }
 ```
 
-The `ValidateIsolation` method is removed from all backends. `system_check.go` and
+`ValidateIsolation` is deleted from all backends. `system_check.go` and
 `system_doctor.go` drive checks generically via `caps.RunChecks`. No per-backend
 formatting code survives.
 
@@ -67,11 +69,10 @@ Beta: acceptable.
 ```
 runtime/
   caps/
-    caps.go       — HostCapability, FixStep, Environment, CheckResult types
+    caps.go       — HostCapability, FixStep, Environment, CheckResult, Availability types
     detect.go     — DetectEnvironment(): IsRoot, IsWSL2, InContainer, KVMGroup
     check.go      — RunChecks(), FormatError(), FormatDoctor()
-    common.go     — shared HostCapability vars reused across backends
-                    (GVisorRunsc, PodmanRootless, etc.)
+    common.go     — shared HostCapability constructors reused across backends
 ```
 
 The `caps` package imports only stdlib. Backend packages import `caps` and assemble
@@ -81,18 +82,24 @@ their own `[]caps.HostCapability` slices, closing over any backend-specific stat
 ### Core types
 
 ```go
-// HostCapability describes one system prerequisite, how to test for it, and
-// how to help the user satisfy it.
+// HostCapability describes one system prerequisite, how to test for it,
+// whether a failure is permanent, and how to help the user fix it.
 type HostCapability struct {
-    ID      string  // stable machine-readable key, e.g. "kvm-device"
-    Summary string  // short label, e.g. "KVM device access"
-    Detail  string  // why it's needed; shown in --verbose / system doctor
+    ID      string // stable machine-readable key, e.g. "kvm-device"
+    Summary string // short label, e.g. "KVM device access"
+    Detail  string // why it's needed; shown in system doctor output
 
     // Check returns nil if the capability is satisfied.
     Check func(ctx context.Context) error
 
+    // Permanent returns true when a failed check cannot be resolved within
+    // the current environment — e.g. no KVM hardware, wrong OS. Called only
+    // when Check returns a non-nil error. If nil, failures are assumed fixable.
+    Permanent func(env Environment) bool
+
     // Fix returns ordered remediation steps tailored to the host environment.
-    // May return nil when no automated guidance is available.
+    // Called only when Check fails and Permanent returns false (or is nil).
+    // May return nil when no command-level guidance is available.
     Fix func(env Environment) []FixStep
 }
 
@@ -102,20 +109,30 @@ type FixStep struct {
     Command     string // example shell command; empty if no command applies.
                        // Commands are illustrative (typically Debian/Ubuntu);
                        // the user is expected to adapt them to their distro.
+    URL         string // reference URL for documentation; empty if not applicable
     NeedsRoot   bool   // true when the command typically requires sudo or root;
-                       // used for display (prefixing, labelling) only — never
-                       // used to gate execution.
+                       // used for display labelling only — never gates execution.
 }
+
+// Availability classifies a (backend, mode) combination after all checks run.
+type Availability int
+
+const (
+    Available    Availability = iota // all checks passed
+    NeedsSetup                       // all failures are fixable
+    Unavailable                      // at least one failure is permanent
+)
 
 // CheckResult records the outcome of one capability check.
 type CheckResult struct {
-    Cap   HostCapability
-    Err   error     // nil = satisfied
-    Steps []FixStep // fix steps from Cap.Fix(env); nil when Err == nil
+    Cap          HostCapability
+    Err          error        // nil = satisfied
+    IsPermanent  bool         // true when Err != nil and Cap.Permanent(env) == true
+    Steps        []FixStep    // populated only when Err != nil and not permanent
 }
 
-// Environment holds host context used by Fix functions to tailor advice.
-// Detected once at startup; passed to all Fix calls.
+// Environment holds host context used by Permanent and Fix functions.
+// Detected once per invocation; passed to all capability calls.
 type Environment struct {
     IsRoot      bool // os.Getuid() == 0
     IsWSL2      bool // /proc/version contains "microsoft"
@@ -124,35 +141,39 @@ type Environment struct {
 }
 ```
 
-### Shared capabilities (`caps/common.go`)
+### Shared capability constructors (`caps/common.go`)
 
-Capabilities shared by more than one backend live here as package-level vars. Examples:
+Capabilities shared by more than one backend are expressed as constructor functions,
+not package-level vars. This keeps them immutable and injectable-testable:
 
 ```go
-// GVisorRunsc checks that the runsc binary is in PATH.
-var GVisorRunsc = HostCapability{
-    ID:      "gvisor-runsc",
-    Summary: "gVisor runtime (runsc)",
-    Detail:  "Required for --isolation container-enhanced.",
-    Check: func(_ context.Context) error {
-        _, err := exec.LookPath("runsc")
-        return err
-    },
-    Fix: func(_ Environment) []FixStep {
-        return []FixStep{{
-            Description: "Install gVisor",
-            Command:     "",
-            NeedsRoot:   false,
-            // Installation is platform-specific; link to docs rather than
-            // a command that may be stale.
-        }}
-    },
+// NewGVisorRunsc returns a capability that checks for the runsc binary in PATH.
+// lookPath is injectable for testing (pass exec.LookPath in production).
+func NewGVisorRunsc(lookPath func(string) (string, error)) HostCapability {
+    return HostCapability{
+        ID:      "gvisor-runsc",
+        Summary: "gVisor runtime (runsc)",
+        Detail:  "Required for --isolation container-enhanced.",
+        Check: func(_ context.Context) error {
+            _, err := lookPath("runsc")
+            return err
+        },
+        Permanent: func(env Environment) bool {
+            return env.InContainer // can't install binaries inside a container
+        },
+        Fix: func(_ Environment) []FixStep {
+            return []FixStep{{
+                Description: "Install gVisor",
+                URL:         "https://gvisor.dev/docs/user_guide/install/",
+                NeedsRoot:   true,
+            }}
+        },
+    }
 }
 ```
 
-Backend-specific capabilities (e.g. kata shim, CNI bridge, devmapper probe) are defined
-as unexported vars inside their own backend package and assembled into the slice returned
-by `RequiredCapabilities`.
+Each shared capability is a constructor, not a var. Backends call them at
+`RequiredCapabilities` time, passing their injectable function pointers.
 
 ### Environment detection (`caps/detect.go`)
 
@@ -164,31 +185,36 @@ Uses injectable file paths for testability:
 
 ```go
 var (
-    procVersionPath = "/proc/version"      // isWSL2
-    dockerEnvPath   = "/.dockerenv"        // InContainer
-    cgroupPath      = "/proc/1/cgroup"     // InContainer (fallback)
-    groupFilePath   = "/etc/group"         // KVMGroup
+    procVersionPath = "/proc/version"  // IsWSL2
+    dockerEnvPath   = "/.dockerenv"    // InContainer
+    cgroupPath      = "/proc/1/cgroup" // InContainer (fallback)
+    groupFilePath   = "/etc/group"     // KVMGroup
 )
 ```
 
 `InContainer` is true if `/.dockerenv` exists OR `/proc/1/cgroup` contains `docker`,
-`lxc`, or `kubepods`. This covers Docker, Podman-in-Docker, and LXC containers. No
-false-positive on bare-metal or VM guests.
+`lxc`, or `kubepods`. Covers Docker, Podman-in-Docker, and LXC. No false-positive on
+bare-metal or VM guests.
 
 ### Check driver (`caps/check.go`)
 
 ```go
-// RunChecks runs each capability's Check function and returns one result per cap.
-// env is detected once by the caller and passed to Fix for failed checks.
+// RunChecks runs each capability's Check function and classifies each result
+// as satisfied, fixable-failure, or permanent-failure.
+// env is detected once by the caller and passed to Permanent and Fix.
 func RunChecks(ctx context.Context, caps []HostCapability, env Environment) []CheckResult
 
+// Availability returns the aggregate availability of a result set.
+func Availability(results []CheckResult) Availability
+
 // FormatError returns a single error describing all failed checks, suitable
-// for use in runtime error paths. Returns nil if all checks passed.
+// for use in runtime error paths (e.g. sandbox creation). Returns nil if all
+// checks passed.
 func FormatError(results []CheckResult) error
 
-// FormatDoctor writes a human-readable status table to w, with per-failure
-// fix steps. Used by `yoloai system doctor`.
-func FormatDoctor(w io.Writer, results []CheckResult)
+// FormatDoctor writes a human-readable status table and fix steps to w.
+// Used by `yoloai system doctor`. Handles empty results gracefully.
+func FormatDoctor(w io.Writer, label string, results []CheckResult)
 ```
 
 ---
@@ -198,98 +224,163 @@ func FormatDoctor(w io.Writer, results []CheckResult)
 ### Docker (`runtime/docker/`)
 
 ```go
+func (r *Runtime) SupportedIsolationModes() []string {
+    return []string{"container-enhanced"}
+}
+
 func (r *Runtime) RequiredCapabilities(isolation string) []caps.HostCapability {
     switch isolation {
     case "container-enhanced":
-        return []caps.HostCapability{caps.GVisorRunsc}
+        return []caps.HostCapability{
+            r.gvisorRunsc,      // caps.NewGVisorRunsc(r.lookPath) — set in New()
+            r.gvisorRegistered, // local cap: checks daemon runtime list
+        }
     default:
         return nil
     }
 }
 ```
 
-The existing `dockerInfoOutput` var and runtime-list logic moves into a local
-`caps.HostCapability` defined in `runtime/docker/caps.go`:
-
-```go
-var gvisorRegistered = caps.HostCapability{
-    ID:      "gvisor-registered",
-    Summary: "gVisor registered with Docker daemon",
-    ...
-    Check: func(ctx context.Context) error { /* uses dockerInfoOutput */ },
-    Fix:   func(_ caps.Environment) []caps.FixStep { ... },
-}
-```
-
-`container-enhanced` requires both `gvisorRegistered` AND `caps.GVisorRunsc` (binary in
-PATH is a prerequisite for daemon registration). Order matters: binary check first.
+`gvisorRunsc` and `gvisorRegistered` are set in `New()` (or `new` constructor) with
+injectable function pointers, so tests can swap them without touching shared state.
+`gvisorRegistered` is a local capability defined in `runtime/docker/caps.go` that
+wraps the existing `dockerInfoOutput` logic.
 
 ### Podman (`runtime/podman/`)
 
 ```go
+func (r *Runtime) SupportedIsolationModes() []string {
+    return []string{"container-enhanced"}
+}
+
 func (r *Runtime) RequiredCapabilities(isolation string) []caps.HostCapability {
     switch isolation {
     case "container-enhanced":
-        var list []caps.HostCapability
-        if r.rootless {
-            list = append(list, podmanRootRequired) // local cap: explains the constraint
+        return []caps.HostCapability{
+            r.gvisorRunsc,         // caps.NewGVisorRunsc(r.lookPath)
+            r.gvisorRootlessCheck, // local cap (see below)
         }
-        list = append(list, caps.GVisorRunsc)
-        return list
     default:
         return nil
     }
 }
 ```
 
-`podmanRootRequired` is a local cap that always fails when rootless and explains why
-(cgroup v2 delegation), with a Fix step pointing to root Podman or Docker.
+`gvisorRootlessCheck` is a local capability in `runtime/podman/caps.go`. When rootless,
+`Check` returns a descriptive error. `Permanent` returns true — rootless Podman cannot
+run gVisor; the user must switch to root Podman or Docker. This is correctly classified
+as permanently unavailable (not fixable within the current runtime configuration), so
+`system doctor` shows it under "Not available" rather than "Needs setup."
 
 ### Containerd (`runtime/containerd/`)
 
-Capabilities defined locally in `runtime/containerd/caps.go`:
-
 ```go
-var (
-    containerdSocket   caps.HostCapability  // net.Dial to socket
-    kataShimV2         caps.HostCapability  // exec.LookPath
-    kataFCShimV2       caps.HostCapability  // exec.LookPath
-    cniBridge          caps.HostCapability  // os.Stat
-    netnsCreation      caps.HostCapability  // netns.NewNamed probe
-    kvmDevice          caps.HostCapability  // os.Stat + group check
-    devmakerSnapshotter caps.HostCapability // client.SnapshotService probe; set in New()
-)
-```
+func (r *Runtime) SupportedIsolationModes() []string {
+    return []string{"vm", "vm-enhanced"}
+}
 
-The `var ( containerdSockPath = ... )` override vars stay in this package for testability
-and are closed over by the respective `Check` functions.
-
-```go
 func (r *Runtime) RequiredCapabilities(isolation string) []caps.HostCapability {
     base := []caps.HostCapability{
-        containerdSocket, kataShimV2, cniBridge, netnsCreation, kvmDevice,
+        r.containerdSocket, // net.Dial probe
+        r.kataShimV2,       // exec.LookPath
+        r.cniBridge,        // os.Stat
+        r.netnsCreation,    // netns.NewNamed probe
+        r.kvmDevice,        // os.Stat + group check; Permanent when no KVM hardware
     }
     switch isolation {
     case "vm-enhanced":
-        return append(base,
-            caps.HostCapability{ID: "kata-fc-shim", ...},  // kataFCShimV2
-            r.devmakerCap(),  // captures r.client
-        )
+        return append(base, r.kataFCShimV2, r.devmakerSnapshotter)
     default: // "vm"
         return base
     }
 }
 ```
 
+All capabilities are set in `New()` (or a constructor) with injectable function pointers.
+`kvmDevice.Permanent` returns true when `/dev/kvm` doesn't exist AND the machine has no
+hardware virtualization (checked via `/proc/cpuinfo` flags: `vmx` or `svm`). Absence from
+the kvm group is fixable; absence of the hardware is not.
+
+`devmakerSnapshotter` (note: "devmapper" throughout — the current "devmaker" typo in the
+codebase is fixed here) is built by `New()` since it needs `r.client`.
+
 ### Tart (`runtime/tart/`)
 
-No isolation modes. `RequiredCapabilities` returns nil for all inputs. Tart's platform
-prerequisites (macOS, Apple Silicon) are enforced in `New()` and are not expressible as
-`HostCapability` (they're OS-level, not fixable at runtime).
+```go
+func (r *Runtime) SupportedIsolationModes() []string { return nil }
+
+func (r *Runtime) RequiredCapabilities(_ string) []caps.HostCapability { return nil }
+```
+
+Tart's platform prerequisites (macOS, Apple Silicon) are enforced in `New()` and
+permanently prevent instantiation on other platforms. There are no isolation modes.
+`system doctor` shows Tart as unavailable when `New()` fails.
 
 ### Seatbelt (`runtime/seatbelt/`)
 
-Same as Tart — no isolation modes, `RequiredCapabilities` returns nil.
+Same as Tart — no isolation modes, no special host capabilities.
+
+---
+
+## `system doctor` command
+
+```
+yoloai system doctor [--isolation MODE] [--backend BACKEND] [--json]
+```
+
+**Default (no flags):** instantiates every known backend (ignoring connection errors),
+collects `SupportedIsolationModes()` from each, runs all capabilities, and renders a
+three-tier summary. This gives the user a complete picture of what their machine can run.
+
+**With `--isolation` / `--backend`:** scopes the check to that combination only.
+
+### Output format
+
+```
+$ yoloai system doctor
+
+Ready to use:
+  docker          container (default)
+  docker          container-enhanced
+  podman          container (default)
+
+Needs setup:
+  containerd      vm              2 of 5 checks failing
+  containerd      vm-enhanced     3 of 6 checks failing
+
+Not available on this machine:
+  podman          container-enhanced   rootless Podman cannot run gVisor
+  tart            (all modes)          requires macOS with Apple Silicon
+
+────────────────────────────────────────────────────
+Needs setup: containerd / vm
+
+  ✓  containerd socket           /run/containerd/containerd.sock
+  ✓  kata-containers             containerd-shim-kata-v2 in PATH
+  ✓  CNI plugins                 /opt/cni/bin/bridge
+  ✗  KVM device access           not in kvm group
+  ✗  network namespace creation  operation not permitted
+
+To fix KVM device access:
+  (requires root)  sudo usermod -aG kvm $USER
+                   newgrp kvm   # or log out and back in
+
+To fix network namespace creation — choose one option:
+  Option A — run as root (simplest):
+    sudo yoloai new mybox --isolation vm ...
+  Option B — grant capability to binary (lost on reinstall):
+  (requires root)  sudo setcap cap_sys_admin,cap_dac_override+ep $(which yoloai)
+
+Note: example commands assume Debian/Ubuntu. Adapt as needed for your distro.
+```
+
+`FormatDoctor` handles all output. Fix commands are advisory examples, never executed.
+`NeedsRoot=true` steps are labelled `(requires root)`. Backends with nil capabilities
+and successful `New()` show as "Ready to use" under their default isolation mode.
+Backends that fail `New()` show under "Not available" with the instantiation error.
+
+Exit codes: 0 = all checked backends/modes are ready, 1 = any failures present
+(CI-compatible with `system check`).
 
 ---
 
@@ -305,54 +396,13 @@ if isolation != "" {
         if !ok {
             return nil
         }
-        capList := cp.RequiredCapabilities(isolation)
         env := caps.DetectEnvironment()
-        results := caps.RunChecks(ctx, capList, env)
+        results := caps.RunChecks(ctx, cp.RequiredCapabilities(isolation), env)
         return caps.FormatError(results)
     })
     ...
 }
 ```
-
----
-
-## New command: `yoloai system doctor`
-
-```
-yoloai system doctor [--isolation MODE] [--backend BACKEND] [--json]
-```
-
-Without `--isolation`, checks all supported isolation modes for the backend in sequence.
-With `--isolation`, checks only that mode.
-
-```
-$ yoloai system doctor --isolation vm
-
-Checking prerequisites for vm isolation (containerd):
-
-  ✓  containerd socket           /run/containerd/containerd.sock
-  ✓  kata-containers             containerd-shim-kata-v2 in PATH
-  ✓  CNI plugins                 /opt/cni/bin/bridge
-  ✗  KVM device access           /dev/kvm: permission denied
-  ✗  network namespace creation  operation not permitted
-
-To fix KVM device access:
-  (requires root) sudo usermod -aG kvm $USER
-                  newgrp kvm   # or log out and back in
-
-To fix network namespace creation — choose one option:
-  Option A — run yoloai with sudo (simple, no persistent setup):
-    sudo yoloai new mybox --isolation vm ...
-  Option B — grant capabilities to the binary (lost on reinstall):
-    (requires root) sudo setcap cap_sys_admin,cap_dac_override+ep $(which yoloai)
-
-Note: example commands assume Debian/Ubuntu. Adapt as needed for your distro.
-```
-
-`FormatDoctor` handles all formatting. Fix commands are always shown — they are
-advisory examples, never executed by yoloai. `NeedsRoot=true` steps are labelled
-`(requires root)` in the output. Exit 0 = all passed, 1 = failures present
-(CI-compatible, same as `system check`).
 
 ---
 
@@ -363,49 +413,51 @@ advisory examples, never executed by yoloai. `NeedsRoot=true` steps are labelled
 1. Create `runtime/caps/` with `caps.go`, `detect.go`, `check.go`, `common.go`.
 2. Replace `runtime.IsolationValidator` with `runtime.CapabilityProvider` in `runtime.go`.
 3. Migrate each backend:
-   - `runtime/containerd/` — create `caps.go`, migrate `ValidateIsolation` logic,
-     implement `RequiredCapabilities`, delete `ValidateIsolation`.
-   - `runtime/docker/` — create `caps.go`, migrate `ValidateIsolation` logic,
-     implement `RequiredCapabilities`, delete `ValidateIsolation`.
+   - `runtime/containerd/` — create `caps.go`, migrate all check logic,
+     implement `RequiredCapabilities` and `SupportedIsolationModes`, delete `ValidateIsolation`.
+     Fix "devmaker" → "devmapper" typo throughout.
+   - `runtime/docker/` — same.
    - `runtime/podman/` — same.
-   - `runtime/tart/`, `runtime/seatbelt/` — add `RequiredCapabilities` returning nil.
+   - `runtime/tart/`, `runtime/seatbelt/` — implement `CapabilityProvider` returning nil.
 4. Update `system_check.go` to use `CapabilityProvider`.
-5. Update all tests: `containerd_test.go`, `docker_test.go`, `podman_test.go`.
-6. New tests in `runtime/caps/caps_test.go` and `runtime/caps/detect_test.go`.
+5. Update all tests. Backend tests now mock via injected constructors, not package-level
+   vars. Shared cap tests in `runtime/caps/caps_test.go` inject fake `lookPath` etc.
 
-**Outcome:** no user-visible change; all capability logic centralized; messaging
-consistent and improvable in one place.
+**Outcome:** no user-visible change; all capability logic centralized; permanent vs fixable
+failures distinguished; messaging consistent and improvable in one place.
 
 ### Phase 2 — `yoloai system doctor` command
 
 1. Create `internal/cli/system_doctor.go` with `newSystemDoctorCmd()`.
 2. Wire into the `system` subcommand.
-3. Call `FormatDoctor` from `caps/check.go` for output.
-4. Support `--json` output.
+3. Implement the three-tier output: Ready / Needs setup / Not available.
+4. Support `--json` output (array of `{backend, mode, availability, results}`).
 5. Update `docs/GUIDE.md` and `docs/design/commands.md`.
 
-**Outcome:** users can proactively diagnose prerequisites before hitting a runtime error.
-
-~~### Phase 3 — `--fix` flag~~
-
-Not planned. Fix commands are advisory examples shown in the default `system doctor`
-output. yoloai does not execute remediation commands on the user's behalf.
+**Outcome:** users get a complete picture of what their machine can run and what it takes
+to unlock more, before hitting any runtime errors.
 
 ---
 
 ## Testability
 
-All `Check` functions close over injectable vars (file paths, function pointers) defined
-in their own package — the same pattern used in `containerd_test.go` today. No global
-mutable state is introduced in `runtime/caps/`.
+All `Check`, `Permanent`, and `Fix` functions close over injected dependencies set at
+construction time. No package-level mutable state in `runtime/caps/`. Shared caps
+(`caps/common.go`) are constructors, not vars, so tests pass fake function pointers
+directly:
+
+```go
+cap := caps.NewGVisorRunsc(func(name string) (string, error) {
+    return "", errors.New("not found") // simulate missing binary
+})
+```
+
+Backend constructors (`New()` or test helpers) wire injectable functions when creating
+capability instances. This replaces the current `var capNetAdminCheckFunc = ...` pattern
+with proper dependency injection at object construction.
 
 `DetectEnvironment` uses injectable file path vars so it can be exercised in unit tests
 without root or a real container.
-
-`caps_test.go` tests each shared capability in isolation (injecting fake paths/funcs).
-Backend tests (`containerd_test.go`, etc.) test `RequiredCapabilities` using the existing
-mock-setup helpers, updated to replace `capNetAdminCheckFunc`-style vars with the new
-check-function injection pattern in the local `caps.go` files.
 
 ---
 
@@ -420,17 +472,17 @@ check-function injection pattern in the local `caps.go` files.
 | Create  | `runtime/caps/caps_test.go` |
 | Create  | `runtime/caps/detect_test.go` |
 | Modify  | `runtime/runtime.go` — replace `IsolationValidator` with `CapabilityProvider` |
-| Create  | `runtime/containerd/caps.go` — local capability definitions |
-| Modify  | `runtime/containerd/containerd.go` — implement `RequiredCapabilities`, delete `ValidateIsolation` |
-| Modify  | `runtime/containerd/containerd_test.go` — update to test `RequiredCapabilities` |
-| Create  | `runtime/docker/caps.go` — local capability definitions |
-| Modify  | `runtime/docker/docker.go` — implement `RequiredCapabilities`, delete `ValidateIsolation` |
-| Modify  | `runtime/docker/docker_test.go` — update tests |
-| Create  | `runtime/podman/caps.go` — local capability definitions |
-| Modify  | `runtime/podman/podman.go` — implement `RequiredCapabilities`, delete `ValidateIsolation` |
-| Modify  | `runtime/podman/podman_test.go` — update tests |
-| Modify  | `runtime/tart/tart.go` — add `RequiredCapabilities` returning nil |
-| Modify  | `runtime/seatbelt/seatbelt.go` — add `RequiredCapabilities` returning nil |
+| Create  | `runtime/containerd/caps.go` — local capability definitions and constructors |
+| Modify  | `runtime/containerd/containerd.go` — implement `CapabilityProvider`, delete `ValidateIsolation`, fix devmaker→devmapper typo |
+| Modify  | `runtime/containerd/containerd_test.go` — update to use injected constructors |
+| Create  | `runtime/docker/caps.go` |
+| Modify  | `runtime/docker/docker.go` — implement `CapabilityProvider`, delete `ValidateIsolation` |
+| Modify  | `runtime/docker/docker_test.go` |
+| Create  | `runtime/podman/caps.go` |
+| Modify  | `runtime/podman/podman.go` — implement `CapabilityProvider`, delete `ValidateIsolation` |
+| Modify  | `runtime/podman/podman_test.go` |
+| Modify  | `runtime/tart/tart.go` — implement `CapabilityProvider` (nil returns) |
+| Modify  | `runtime/seatbelt/seatbelt.go` — implement `CapabilityProvider` (nil returns) |
 | Modify  | `internal/cli/system_check.go` — use `CapabilityProvider` |
 | Create  | `internal/cli/system_doctor.go` |
 | Modify  | `internal/cli/system.go` — register `doctor` subcommand |
