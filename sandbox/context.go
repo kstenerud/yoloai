@@ -48,7 +48,7 @@ func GenerateContext(meta *Meta) string {
 	b.WriteString("\n## Files\n\n")
 	filesPath := "/yoloai/files/"
 	cachePath := "/yoloai/cache/"
-	if meta.Backend == "seatbelt" {
+	if meta.HostFilesystem {
 		filesPath = filepath.Join(Dir(meta.Name), "files") + "/"
 		cachePath = filepath.Join(Dir(meta.Name), "cache") + "/"
 	}
@@ -102,9 +102,10 @@ func GenerateContext(meta *Meta) string {
 }
 
 // runtimeDir returns the base path where runtime files live for this sandbox.
-// Docker uses /yoloai, seatbelt uses the sandbox directory on the host.
+// Container/VM backends use /yoloai inside the container; host-filesystem backends
+// (seatbelt, future SSH) use the sandbox directory on the host.
 func runtimeDir(meta *Meta) string {
-	if meta.Backend == "seatbelt" {
+	if meta.HostFilesystem {
 		return Dir(meta.Name)
 	}
 	return "/yoloai"

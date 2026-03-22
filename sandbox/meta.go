@@ -42,8 +42,9 @@ type Meta struct {
 	Setup              []string               `json:"setup,omitempty"`
 	AutoCommitInterval int                    `json:"auto_commit_interval,omitempty"`
 	Debug              bool                   `json:"debug,omitempty"`
-	UsernsMode         string                 `json:"userns_mode,omitempty"` // "keep-id" for Podman rootless keep-id; "" otherwise
-	Isolation          string                 `json:"isolation,omitempty"`   // isolation mode: container, container-enhanced, vm, vm-enhanced
+	UsernsMode         string                 `json:"userns_mode,omitempty"`     // "keep-id" for Podman rootless keep-id; "" otherwise
+	Isolation          string                 `json:"isolation,omitempty"`       // isolation mode: container, container-enhanced, vm, vm-enhanced
+	HostFilesystem     bool                   `json:"host_filesystem,omitempty"` // true when sandbox state lives on the host (seatbelt)
 }
 
 // WorkdirMeta stores the resolved workdir state at creation time.
@@ -74,8 +75,9 @@ func migrate(meta *Meta) error {
 			meta.Version, metaVersion)
 	}
 	if meta.Version < 1 {
-		// v0 → v1: bootstrap new fields added in this version.
-		// HostFilesystem is set by the Issue 1 migration when that field is added.
+		// v0 → v1: bootstrap HostFilesystem from the backend name.
+		// Seatbelt is the only backend where sandbox state lives on the host.
+		meta.HostFilesystem = (meta.Backend == "seatbelt")
 		meta.Version = 1
 	}
 	return nil

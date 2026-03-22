@@ -151,7 +151,7 @@ func (p *ProxyServer) createSandbox(ctx context.Context) (*sandbox.Meta, error) 
 func expandCmd(cmd []string, meta *sandbox.Meta) ([]string, error) {
 	filesDir := "/yoloai/files/"
 	cacheDir := "/yoloai/cache/"
-	if meta.Backend == "seatbelt" {
+	if meta.HostFilesystem {
 		filesDir = sandbox.FilesDir(meta.Name)
 		cacheDir = sandbox.CacheDir(meta.Name)
 	}

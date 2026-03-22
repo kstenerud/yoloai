@@ -499,6 +499,7 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 		Debug:              opts.Debug,
 		UsernsMode:         usernsMode,
 		Isolation:          pr.isolation,
+		HostFilesystem:     m.runtime.Capabilities().HostFilesystem,
 	}
 
 	if err := SaveMeta(sandboxDir, meta); err != nil {

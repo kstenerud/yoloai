@@ -146,8 +146,9 @@ func TestGenerateContext_WorkdirMountPath(t *testing.T) {
 
 func TestGenerateContext_SeatbeltFilesPath(t *testing.T) {
 	meta := &Meta{
-		Name:    "test-sb",
-		Backend: "seatbelt",
+		Name:           "test-sb",
+		Backend:        "seatbelt",
+		HostFilesystem: true,
 		Workdir: WorkdirMeta{
 			HostPath:  "/home/user/project",
 			MountPath: "/home/user/project",

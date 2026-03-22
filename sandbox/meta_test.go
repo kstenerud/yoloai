@@ -176,7 +176,7 @@ func TestMeta_VersionSetOnSave(t *testing.T) {
 	assert.Equal(t, metaVersion, loaded.Version)
 }
 
-func TestMeta_MigrateV0ToV1(t *testing.T) {
+func TestMeta_MigrateV0ToV1_Docker(t *testing.T) {
 	dir := t.TempDir()
 
 	// Write a legacy meta.json without a version field (simulates pre-versioning sandboxes).
@@ -193,6 +193,26 @@ func TestMeta_MigrateV0ToV1(t *testing.T) {
 	loaded, err := LoadMeta(dir)
 	require.NoError(t, err)
 	assert.Equal(t, 1, loaded.Version, "v0 should be migrated to v1")
+	assert.False(t, loaded.HostFilesystem, "docker backend should have HostFilesystem=false")
+}
+
+func TestMeta_MigrateV0ToV1_Seatbelt(t *testing.T) {
+	dir := t.TempDir()
+
+	legacyJSON := `{
+		"yoloai_version": "0.1.0",
+		"name": "old-seatbelt",
+		"created_at": "2025-01-01T00:00:00Z",
+		"backend": "seatbelt",
+		"agent": "claude",
+		"workdir": {"host_path": "/tmp/proj", "mount_path": "/tmp/proj", "mode": "copy"}
+	}`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, EnvironmentFile), []byte(legacyJSON), 0600))
+
+	loaded, err := LoadMeta(dir)
+	require.NoError(t, err)
+	assert.Equal(t, 1, loaded.Version, "v0 should be migrated to v1")
+	assert.True(t, loaded.HostFilesystem, "seatbelt backend should have HostFilesystem=true")
 }
 
 func TestMeta_FutureVersionReturnsError(t *testing.T) {
