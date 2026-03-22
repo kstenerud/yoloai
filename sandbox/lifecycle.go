@@ -296,10 +296,12 @@ func (m *Manager) Reset(ctx context.Context, opts ResetOptions) error {
 
 	var newSHA string
 	if meta.Workdir.Mode == "overlay" {
-		// Clear upper and ovlwork dirs (instant reset)
+		// Clear upper and ovlwork dirs (instant reset), ensure merged and lower exist
 		for _, d := range []string{
 			OverlayUpperDir(opts.Name, meta.Workdir.HostPath),
 			OverlayOvlworkDir(opts.Name, meta.Workdir.HostPath),
+			OverlayMergedDir(opts.Name, meta.Workdir.HostPath),
+			OverlayLowerDir(opts.Name, meta.Workdir.HostPath),
 		} {
 			if err := os.RemoveAll(d); err != nil {
 				return fmt.Errorf("clear overlay dir %s: %w", d, err)
@@ -376,6 +378,8 @@ func (m *Manager) Reset(ctx context.Context, opts ResetOptions) error {
 			for _, dir := range []string{
 				OverlayUpperDir(opts.Name, d.HostPath),
 				OverlayOvlworkDir(opts.Name, d.HostPath),
+				OverlayMergedDir(opts.Name, d.HostPath),
+				OverlayLowerDir(opts.Name, d.HostPath),
 			} {
 				if err := os.RemoveAll(dir); err != nil {
 					return fmt.Errorf("clear overlay dir for aux %s: %w", d.HostPath, err)

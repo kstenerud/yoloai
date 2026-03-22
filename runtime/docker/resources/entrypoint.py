@@ -200,25 +200,23 @@ def apply_overlays(cfg, yoloai_dir):
         log_debug("overlay.skip", "no overlay mounts configured")
         return
 
-    for i, overlay in enumerate(overlays):
+    for overlay in overlays:
         lower = overlay.get("lower", "")
+        upper = overlay.get("upper", "")
+        work = overlay.get("work", "")
         merged = overlay.get("merged", "")
-        if not lower or not merged:
+        if not lower or not upper or not work or not merged:
             continue
 
-        tmpfs_dir = f"/tmp/yoloai-overlay-{i}"
-        os.makedirs(tmpfs_dir, exist_ok=True)
-        subprocess.run(["mount", "-t", "tmpfs", "tmpfs", tmpfs_dir], check=True)
-        os.makedirs(os.path.join(tmpfs_dir, "upper"), exist_ok=True)
-        os.makedirs(os.path.join(tmpfs_dir, "work"), exist_ok=True)
-        os.makedirs(merged, exist_ok=True)
-
-        opts = (f"lowerdir={lower},"
-                f"upperdir={tmpfs_dir}/upper,"
-                f"workdir={tmpfs_dir}/work")
-        subprocess.run(["mount", "-t", "overlay", "overlay", "-o", opts, merged],
-                        check=True)
-        subprocess.run(["chown", "yoloai:yoloai", merged], capture_output=True)
+        opts = f"lowerdir={lower},upperdir={upper},workdir={work}"
+        try:
+            subprocess.run(["mount", "-t", "overlay", "overlay", "-o", opts, merged],
+                           check=True, capture_output=True)
+        except subprocess.CalledProcessError as e:
+            log_error("overlay.error", "overlay mount failed", path=merged,
+                      exit_code=e.returncode, stderr=e.stderr.decode(errors="replace").strip())
+            raise
+        subprocess.run(["chown", "-R", "yoloai:yoloai", merged], capture_output=True)
         log_info("overlay.mount", "overlayfs mounted", path=merged)
 
 

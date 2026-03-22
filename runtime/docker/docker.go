@@ -151,6 +151,16 @@ func (r *Runtime) Create(ctx context.Context, cfg runtime.InstanceConfig) error 
 		Runtime:      cfg.ContainerRuntime,
 	}
 
+	// CAP_SYS_ADMIN is required for overlay mounts inside the container.
+	// Docker's default AppArmor profile blocks mount(2) even with SYS_ADMIN;
+	// disable it so the entrypoint can mount overlayfs.
+	for _, cap := range cfg.CapAdd {
+		if cap == "SYS_ADMIN" {
+			hostConfig.SecurityOpt = append(hostConfig.SecurityOpt, "apparmor=unconfined")
+			break
+		}
+	}
+
 	if len(cfg.Devices) > 0 {
 		devices := make([]container.DeviceMapping, len(cfg.Devices))
 		for i, d := range cfg.Devices {

@@ -187,6 +187,17 @@ func WorkDir(name string, hostPath string) string {
 	return filepath.Join(Dir(name), "work", EncodePath(hostPath))
 }
 
+// OverlayWorkBaseDir returns the parent directory for all overlay layer
+// directories (upper, ovlwork, merged, lower). This entire directory is
+// bind-mounted as a single Docker volume so that upper and ovlwork share
+// the same underlying mount — a requirement for overlayfs to work inside
+// a Docker container.
+//
+//	~/.yoloai/sandboxes/<name>/work/<caret-encoded-path>/
+func OverlayWorkBaseDir(name string, hostPath string) string {
+	return filepath.Join(Dir(name), "work", EncodePath(hostPath))
+}
+
 // OverlayUpperDir returns the upper layer directory for an overlay mount.
 //
 //	~/.yoloai/sandboxes/<name>/work/<caret-encoded-path>/upper/
@@ -200,6 +211,23 @@ func OverlayUpperDir(name string, hostPath string) string {
 //	~/.yoloai/sandboxes/<name>/work/<caret-encoded-path>/ovlwork/
 func OverlayOvlworkDir(name string, hostPath string) string {
 	return filepath.Join(Dir(name), "work", EncodePath(hostPath), "ovlwork")
+}
+
+// OverlayLowerDir returns the mount-point directory inside OverlayWorkBaseDir
+// where the user's read-only workdir is bind-mounted (nested inside the
+// parent volume so all overlay dirs share the same Docker bind mount).
+//
+//	~/.yoloai/sandboxes/<name>/work/<caret-encoded-path>/lower/
+func OverlayLowerDir(name string, hostPath string) string {
+	return filepath.Join(Dir(name), "work", EncodePath(hostPath), "lower")
+}
+
+// OverlayMergedDir returns the directory inside OverlayWorkBaseDir that
+// serves as the overlayfs merge target (the unified view of lower+upper).
+//
+//	~/.yoloai/sandboxes/<name>/work/<caret-encoded-path>/merged/
+func OverlayMergedDir(name string, hostPath string) string {
+	return filepath.Join(Dir(name), "work", EncodePath(hostPath), "merged")
 }
 
 // FilesDir returns the host-side file exchange directory for a sandbox.

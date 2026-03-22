@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/kstenerud/yoloai/runtime"
@@ -30,7 +31,7 @@ func (m *Manager) buildAndStart(ctx context.Context, state *sandboxState, mounts
 	instanceCfg := runtime.InstanceConfig{
 		Name:        cname,
 		ImageRef:    resolvedImage,
-		WorkingDir:  state.workdir.ResolvedMountPath(),
+		WorkingDir:  overlayOrResolvedMountPath(state.workdir),
 		Mounts:      mounts,
 		Ports:       ports,
 		NetworkMode: state.networkMode,
@@ -98,17 +99,21 @@ func (m *Manager) buildAndStart(ctx context.Context, state *sandboxState, mounts
 		return fmt.Errorf("inspect instance after start: %w", err)
 	}
 	if !info.Running {
+		var parts []string
 		// Try sandbox.jsonl first — written by entrypoint.sh and entrypoint.py.
 		if tail := readLogTail(filepath.Join(state.sandboxDir, "logs", "sandbox.jsonl"), 20); tail != "" {
-			return fmt.Errorf("instance exited immediately:\n%s", tail)
+			parts = append(parts, tail)
+		} else if tail := readLogTail(filepath.Join(state.sandboxDir, AgentLogFile), 20); tail != "" {
+			// Try agent log file (written after tmux setup).
+			parts = append(parts, tail)
 		}
-		// Try agent log file (written after tmux setup).
-		if tail := readLogTail(filepath.Join(state.sandboxDir, AgentLogFile), 20); tail != "" {
-			return fmt.Errorf("instance exited immediately:\n%s", tail)
+		// Always append container logs — captures stderr output such as Python
+		// tracebacks that are not written to sandbox.jsonl.
+		if logs := m.runtime.Logs(ctx, cname, 20); logs != "" {
+			parts = append(parts, logs)
 		}
-		// Fall back to container logs (captures pre-entrypoint crashes, e.g. gVisor startup errors).
-		if logs := m.runtime.Logs(ctx, cname, 50); logs != "" {
-			return fmt.Errorf("instance exited immediately:\n%s", logs)
+		if len(parts) > 0 {
+			return fmt.Errorf("instance exited immediately:\n%s", strings.Join(parts, "\n"))
 		}
 		return fmt.Errorf("instance exited immediately — %s", m.runtime.DiagHint(cname))
 	}

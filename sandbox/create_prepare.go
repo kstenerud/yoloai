@@ -370,6 +370,8 @@ func setupWorkdir(sandboxName string, workdir *DirArg) (string, string, error) {
 		for _, d := range []string{
 			OverlayUpperDir(sandboxName, workdir.Path),
 			OverlayOvlworkDir(sandboxName, workdir.Path),
+			OverlayMergedDir(sandboxName, workdir.Path),
+			OverlayLowerDir(sandboxName, workdir.Path),
 		} {
 			if err := os.MkdirAll(d, 0750); err != nil {
 				return "", "", fmt.Errorf("create overlay dir %s: %w", d, err)
@@ -460,6 +462,8 @@ func setupAuxDirs(sandboxName string, auxDirs []*DirArg) ([]DirMeta, error) {
 			for _, d := range []string{
 				OverlayUpperDir(sandboxName, ad.Path),
 				OverlayOvlworkDir(sandboxName, ad.Path),
+				OverlayMergedDir(sandboxName, ad.Path),
+				OverlayLowerDir(sandboxName, ad.Path),
 			} {
 				if err := os.MkdirAll(d, 0750); err != nil {
 					return nil, fmt.Errorf("create overlay dir for aux %s: %w", ad.Path, err)
@@ -508,7 +512,7 @@ func collectOverlayMounts(workdir *DirArg, auxDirs []*DirArg) []overlayMountConf
 			Lower:  "/yoloai/overlay/" + encoded + "/lower",
 			Upper:  "/yoloai/overlay/" + encoded + "/upper",
 			Work:   "/yoloai/overlay/" + encoded + "/ovlwork",
-			Merged: workdir.ResolvedMountPath(),
+			Merged: "/yoloai/overlay/" + encoded + "/merged",
 		})
 	}
 	for _, ad := range auxDirs {
@@ -518,7 +522,7 @@ func collectOverlayMounts(workdir *DirArg, auxDirs []*DirArg) []overlayMountConf
 				Lower:  "/yoloai/overlay/" + encoded + "/lower",
 				Upper:  "/yoloai/overlay/" + encoded + "/upper",
 				Work:   "/yoloai/overlay/" + encoded + "/ovlwork",
-				Merged: ad.ResolvedMountPath(),
+				Merged: "/yoloai/overlay/" + encoded + "/merged",
 			})
 		}
 	}

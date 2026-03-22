@@ -443,7 +443,7 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions, c
 	copyDirs := collectCopyDirs(workdir, auxDirs)
 
 	// Build config.json
-	configData, err := buildContainerConfig(agentDef, agentCommand, tmuxConf, workdir.ResolvedMountPath(), opts.Debug, networkMode == "isolated", networkAllow, opts.Passthrough, overlayMounts, pr.setup, pr.autoCommitInterval, copyDirs, opts.Name, m.runtime.TmuxSocket(sandboxDir))
+	configData, err := buildContainerConfig(agentDef, agentCommand, tmuxConf, overlayOrResolvedMountPath(workdir), opts.Debug, networkMode == "isolated", networkAllow, opts.Passthrough, overlayMounts, pr.setup, pr.autoCommitInterval, copyDirs, opts.Name, m.runtime.TmuxSocket(sandboxDir))
 	if err != nil {
 		return nil, fmt.Errorf("build %s: %w", RuntimeConfigFile, err)
 	}
@@ -484,7 +484,7 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions, c
 		Model:         model,
 		Workdir: WorkdirMeta{
 			HostPath:    workdir.Path,
-			MountPath:   workdir.ResolvedMountPath(),
+			MountPath:   overlayOrResolvedMountPath(workdir),
 			Mode:        workdir.Mode,
 			BaselineSHA: baselineSHA,
 		},
@@ -992,19 +992,20 @@ func buildMounts(state *sandboxState, secretsDir string) []runtime.MountSpec {
 		})
 	case "overlay":
 		encoded := EncodePath(state.workdir.Path)
+		// Mount the entire overlay work base dir (upper/ovlwork/merged/lower) as
+		// a single bind mount so upper and ovlwork share the same underlying Docker
+		// volume — a kernel requirement for overlayfs to work inside a container.
+		// The user's workdir is then nested on top as a read-only bind mount at
+		// the lower/ subdirectory within the same volume.
 		mounts = append(mounts,
+			runtime.MountSpec{
+				Source: OverlayWorkBaseDir(state.name, state.workdir.Path),
+				Target: "/yoloai/overlay/" + encoded,
+			},
 			runtime.MountSpec{
 				Source:   state.workdir.Path,
 				Target:   "/yoloai/overlay/" + encoded + "/lower",
 				ReadOnly: true,
-			},
-			runtime.MountSpec{
-				Source: OverlayUpperDir(state.name, state.workdir.Path),
-				Target: "/yoloai/overlay/" + encoded + "/upper",
-			},
-			runtime.MountSpec{
-				Source: OverlayOvlworkDir(state.name, state.workdir.Path),
-				Target: "/yoloai/overlay/" + encoded + "/ovlwork",
 			},
 		)
 	default:
@@ -1028,17 +1029,13 @@ func buildMounts(state *sandboxState, secretsDir string) []runtime.MountSpec {
 			encoded := EncodePath(ad.Path)
 			mounts = append(mounts,
 				runtime.MountSpec{
+					Source: OverlayWorkBaseDir(state.name, ad.Path),
+					Target: "/yoloai/overlay/" + encoded,
+				},
+				runtime.MountSpec{
 					Source:   ad.Path,
 					Target:   "/yoloai/overlay/" + encoded + "/lower",
 					ReadOnly: true,
-				},
-				runtime.MountSpec{
-					Source: OverlayUpperDir(state.name, ad.Path),
-					Target: "/yoloai/overlay/" + encoded + "/upper",
-				},
-				runtime.MountSpec{
-					Source: OverlayOvlworkDir(state.name, ad.Path),
-					Target: "/yoloai/overlay/" + encoded + "/ovlwork",
 				},
 			)
 		case "rw":
@@ -1219,6 +1216,15 @@ func buildMounts(state *sandboxState, secretsDir string) []runtime.MountSpec {
 	return mounts
 }
 
+// overlayOrResolvedMountPath returns the container working directory path for a directory.
+// For overlay mode, this is the bind-mounted merged path; otherwise the resolved mount path.
+func overlayOrResolvedMountPath(d *DirArg) string {
+	if d.Mode == "overlay" {
+		return "/yoloai/overlay/" + EncodePath(d.Path) + "/merged"
+	}
+	return d.ResolvedMountPath()
+}
+
 // hasAnyAPIKey returns true if any of the agent's required API key env vars are set
 // in the process environment or in credOverrides (sudo-recovered credential defaults).
 func hasAnyAPIKey(agentDef *agent.Definition, credOverrides map[string]string) bool {
@@ -1392,8 +1398,12 @@ func ensureShellContainerSettings(sandboxDir string, _ string) error {
 			continue
 		}
 		dirBase := filepath.Base(def.StateDir)
-		settingsPath := filepath.Join(sandboxDir, "home-seed", dirBase, "settings.json")
+		dirPath := filepath.Join(sandboxDir, "home-seed", dirBase)
+		settingsPath := filepath.Join(dirPath, "settings.json")
 
+		if err := os.MkdirAll(dirPath, 0750); err != nil {
+			return fmt.Errorf("create %s dir: %w", dirBase, err)
+		}
 		settings, err := readJSONMap(settingsPath)
 		if err != nil {
 			return err

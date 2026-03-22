@@ -101,7 +101,7 @@ func TestCollectOverlayMounts_WorkdirOverlay(t *testing.T) {
 	workdir := &DirArg{Path: "/home/user/project", Mode: "overlay"}
 	result := collectOverlayMounts(workdir, nil)
 	require.Len(t, result, 1)
-	assert.Equal(t, "/home/user/project", result[0].Merged)
+	assert.Contains(t, result[0].Merged, "merged")
 	assert.Contains(t, result[0].Lower, "lower")
 	assert.Contains(t, result[0].Upper, "upper")
 	assert.Contains(t, result[0].Work, "ovlwork")
@@ -114,7 +114,7 @@ func TestCollectOverlayMounts_AuxOverlay(t *testing.T) {
 	}
 	result := collectOverlayMounts(workdir, auxDirs)
 	require.Len(t, result, 1)
-	assert.Equal(t, "/home/user/lib", result[0].Merged)
+	assert.Contains(t, result[0].Merged, "merged")
 }
 
 func TestCollectOverlayMounts_Multiple(t *testing.T) {
@@ -131,7 +131,7 @@ func TestCollectOverlayMounts_CustomMountPath(t *testing.T) {
 	workdir := &DirArg{Path: "/home/user/project", Mode: "overlay", MountPath: "/app"}
 	result := collectOverlayMounts(workdir, nil)
 	require.Len(t, result, 1)
-	assert.Equal(t, "/app", result[0].Merged)
+	assert.Contains(t, result[0].Merged, "merged")
 }
 
 // --- validateAndExpandMounts ---
