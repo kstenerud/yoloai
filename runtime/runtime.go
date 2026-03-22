@@ -86,6 +86,7 @@ type BackendCaps struct {
 	NetworkIsolation bool // supports --network=isolated (iptables domain filtering)
 	OverlayDirs      bool // supports :overlay mount mode (overlayfs inside the container)
 	CapAdd           bool // supports cap_add, devices, and setup commands
+	HostFilesystem   bool // true when sandbox state lives on the host (seatbelt, future SSH)
 }
 
 // IsolationValidator is an optional interface implemented by Runtime backends

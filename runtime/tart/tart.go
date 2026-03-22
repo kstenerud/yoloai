@@ -64,6 +64,7 @@ func (r *Runtime) Capabilities() runtime.BackendCaps {
 		NetworkIsolation: false,
 		OverlayDirs:      false,
 		CapAdd:           false,
+		HostFilesystem:   false,
 	}
 }
 

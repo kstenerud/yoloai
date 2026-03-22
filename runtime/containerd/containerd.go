@@ -35,6 +35,7 @@ func (r *Runtime) Capabilities() runtime.BackendCaps {
 		NetworkIsolation: true,
 		OverlayDirs:      false, // overlayfs-in-container not supported with Kata shim
 		CapAdd:           true,
+		HostFilesystem:   false,
 	}
 }
 

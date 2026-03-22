@@ -330,6 +330,7 @@ func (r *Runtime) Capabilities() runtime.BackendCaps {
 		NetworkIsolation: true,
 		OverlayDirs:      true,
 		CapAdd:           true,
+		HostFilesystem:   false,
 	}
 }
 
