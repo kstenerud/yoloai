@@ -123,7 +123,6 @@ ApplySettings: func(s map[string]any) {
     s["skipDangerousModePermissionPrompt"] = true
     s["sandbox"] = map[string]any{"enabled": false}
     s["preferredNotifChannel"] = "terminal_bell"
-    injectIdleHook(s)
 },
 
 // Gemini
@@ -131,6 +130,13 @@ ApplySettings: func(s map[string]any) {
     s["security"] = map[string]any{"folderTrust": map[string]any{"enabled": false}}
 },
 ```
+
+**`injectIdleHook` and package boundaries:** `injectIdleHook` currently lives in the
+sandbox layer. `agent/` cannot import `sandbox/`, so it cannot be called from an
+`ApplySettings` closure defined in `agent/agent.go`. Resolution: move `injectIdleHook`
+into the `agent/` package — it is agent-specific logic (it embeds Claude's idle
+detection hook into the settings map) and has no sandbox dependencies. Once moved, the
+Claude `ApplySettings` closure can call it directly.
 
 `sandbox/create.go` becomes:
 
@@ -159,7 +165,7 @@ SeedsAllAgents bool // true for the shell agent only
 
 ---
 
-## Issue 3 — `ShouldSeedHomeConfig()` rename to `AgentPreinstalled()`
+## Issue 3 — `ShouldSeedHomeConfig()` rename to `AgentProvisionedByBackend()`
 
 **Problem:** The method name is opaque. The actual question is: "is the agent binary
 already present on the target, or does this backend provision it as part of image
@@ -284,9 +290,14 @@ written into `runtime-config.json` at sandbox creation time via `PreferredTmuxSo
 sandbox creation time, instead of re-deriving it from the backend name. This removes
 the `backendName` parameter from `writeBugReportTmuxCapture()` entirely.
 
-Also rename `PreferredTmuxSocket()` → `TmuxSocket(name string)` on the Runtime
-interface, passing the sandbox name so backends that use per-sandbox sockets can
-incorporate it into the path.
+Also rename `PreferredTmuxSocket()` → `TmuxSocket(sandboxDir string)` on the Runtime
+interface, passing the sandbox directory so backends that use per-sandbox sockets can
+construct the full path. The parameter is `sandboxDir` rather than `name` because
+`runtime/seatbelt` cannot import `sandbox.Dir(name)` (wrong dependency direction) —
+it needs the resolved directory path directly. Docker and Containerd ignore the
+parameter and return `/tmp/yoloai-tmux.sock`; Seatbelt returns
+`filepath.Join(sandboxDir, "tmux", "tmux.sock")`. The call site in `sandbox/create.go`
+passes the sandbox directory it already holds.
 
 **Files to change:** `runtime/runtime.go`, all backend implementations
 (`runtime/docker/docker.go`, `runtime/containerd/containerd.go`,
@@ -428,6 +439,13 @@ appropriate typed constructor where the error has a clear exit-code category:
 - Permission denied → `NewPermissionError` (exit 8)
 - Operational failures (I/O, network, unexpected) → plain `fmt.Errorf` is correct
 
+**UsageError vs ConfigError boundary:** UsageError means the user passed a bad
+argument or flag (wrong type, mutually exclusive flags, unknown name). ConfigError
+means a config *file* is malformed, missing a required key, or contains an invalid
+value — the file itself is the problem, not the argument referencing it. "Profile does
+not exist" is UsageError (bad argument); "profile config.yaml is missing `agent` key"
+is ConfigError.
+
 Also add a note to `docs/dev/CODING-STANDARD.md` documenting this convention so new
 CLI commands get it right the first time.
 
@@ -454,6 +472,9 @@ this should be done via a local map rather than mutating the process environment
 **Fix:** Accumulate overrides in a local `map[string]string` and pass it to the env
 config builder, rather than writing to `os.Environ`. The local map is merged with
 `os.Environ` only at the point where the container's environment slice is assembled.
+**Precedence:** host env vars take priority — a key already set in `os.Environ` is
+not overridden by the credential defaults, preserving the existing `if os.Getenv(k) == ""`
+behaviour.
 
 **Files to change:** `sandbox/create.go` (credential injection and env assembly).
 
