@@ -234,14 +234,10 @@ func TestDocker_RemoveIdempotent(t *testing.T) {
 	assert.NoError(t, rt.Remove(ctx, name))
 }
 
-func TestDocker_ImageExists(t *testing.T) {
+func TestDocker_IsReady(t *testing.T) {
 	rt, ctx := dockerSetup(t)
 
-	exists, err := rt.ImageExists(ctx, "yoloai-base")
+	exists, err := rt.IsReady(ctx)
 	require.NoError(t, err)
 	assert.True(t, exists)
-
-	exists, err = rt.ImageExists(ctx, "yoloai-nonexistent-image-xyz")
-	require.NoError(t, err)
-	assert.False(t, exists)
 }

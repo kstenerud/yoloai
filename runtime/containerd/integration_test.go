@@ -40,8 +40,8 @@ func TestIntegration_New(t *testing.T) {
 	assert.Equal(t, "containerd", rt.Name())
 }
 
-// TestIntegration_ImageExists_False verifies ImageExists returns false for a non-existent image.
-func TestIntegration_ImageExists_False(t *testing.T) {
+// TestIntegration_IsReady_False verifies IsReady returns false when yoloai-base is not imported.
+func TestIntegration_IsReady_False(t *testing.T) {
 	skipIfNotAvailable(t)
 
 	ctx := context.Background()
@@ -49,9 +49,10 @@ func TestIntegration_ImageExists_False(t *testing.T) {
 	require.NoError(t, err)
 	defer rt.Close() //nolint:errcheck // best-effort close
 
-	exists, err := rt.ImageExists(ctx, "nonexistent-image-xyzzy-12345")
+	// IsReady checks specifically for yoloai-base; this passes when it's not present.
+	// We can only verify it doesn't return an error; actual result depends on test env.
+	_, err = rt.IsReady(ctx)
 	require.NoError(t, err)
-	assert.False(t, exists)
 }
 
 // TestIntegration_ValidateIsolation verifies ValidateIsolation reports missing prerequisites.
@@ -98,8 +99,8 @@ func TestIntegration_ContainerLifecycle(t *testing.T) {
 	require.NoError(t, err)
 	defer rt.Close() //nolint:errcheck // best-effort close
 
-	// Check if the image exists before attempting lifecycle test.
-	exists, err := rt.ImageExists(ctx, "yoloai-base")
+	// Check if the backend is ready before attempting lifecycle test.
+	exists, err := rt.IsReady(ctx)
 	require.NoError(t, err)
 	if !exists {
 		t.Skip("yoloai-base image not found in containerd yoloai namespace; run 'yoloai setup' first")

@@ -1,8 +1,8 @@
 package containerdrt
 
 // ABOUTME: Image management for the containerd backend.
-// EnsureImage builds via Docker and imports into the yoloai containerd namespace.
-// ImageExists checks for an existing image in that namespace.
+// Setup builds via Docker and imports into the yoloai containerd namespace.
+// IsReady checks for an existing image in that namespace.
 
 import (
 	"context"
@@ -26,19 +26,19 @@ const imageRef = "yoloai-base"
 // dockerImageRef is the full ref Docker uses when storing yoloai-base in containerd.
 const dockerImageRef = "docker.io/library/yoloai-base:latest"
 
-// EnsureImage builds the yoloai-base image using Docker and imports it into
-// the containerd yoloai namespace. If force is false and the image already
-// exists with accessible content, the build is skipped.
+// Setup builds the yoloai-base image using Docker and imports it into the
+// containerd yoloai namespace. If force is false and the image already exists
+// with accessible content, the build is skipped.
 //
 // Fast path: when Docker runs in containerd-snapshotter mode the image is
-// already in containerd's "moby" namespace. EnsureImage marks that namespace
-// as shareable, walks the descriptor tree, registers each blob in the yoloai
+// already in containerd's "moby" namespace. Setup marks that namespace as
+// shareable, walks the descriptor tree, registers each blob in the yoloai
 // namespace via a pure bolt metadata write (no data copy), and sets GC ref
 // labels so containerd's garbage collector can trace the full manifest tree.
 //
 // Slow path: docker save | ctr images import - is used when Docker is not in
 // containerd-snapshotter mode, or when the fast path fails verification.
-func (r *Runtime) EnsureImage(ctx context.Context, sourceDir string, output io.Writer, logger *slog.Logger, force bool) error {
+func (r *Runtime) Setup(ctx context.Context, sourceDir string, output io.Writer, logger *slog.Logger, force bool) error {
 	ctx = r.withNamespace(ctx)
 
 	if !force {
@@ -179,7 +179,7 @@ func (r *Runtime) linkFromDockerNamespace(ctx context.Context) error {
 	cs := r.client.ContentStore()
 	nsSvc := r.client.NamespaceService()
 
-	// ctx already carries the yoloai namespace (set by EnsureImage).
+	// ctx already carries the yoloai namespace (set by Setup).
 	// For namespace management and source-namespace lookups use a plain ctx.
 	baseCtx := context.Background()
 
@@ -243,7 +243,7 @@ func (r *Runtime) linkFromDockerNamespace(ctx context.Context) error {
 // has an accessible metadata entry in ctx's namespace. It walks via
 // images.Children, so it reads manifest content — if a manifest blob is
 // present but a child blob is gone, the walk finds and reports the gap.
-// Used both as an early-exit check in EnsureImage and as a post-share
+// Used both as an early-exit check in Setup and as a post-share
 // verification in linkFromDockerNamespace before the slow-path fallback.
 func (r *Runtime) verifyDescriptorTree(ctx context.Context, cs content.Store, desc ocispec.Descriptor) error {
 	if _, err := cs.Info(ctx, desc.Digest); err != nil {
@@ -350,11 +350,11 @@ func (r *Runtime) shareBlob(ctx context.Context, cs content.Store, desc ocispec.
 	return nil
 }
 
-// ImageExists checks if the yoloai-base image exists in the containerd yoloai namespace.
-func (r *Runtime) ImageExists(ctx context.Context, ref string) (bool, error) {
+// IsReady returns true if the yoloai-base image exists in the containerd yoloai namespace.
+func (r *Runtime) IsReady(ctx context.Context) (bool, error) {
 	ctx = r.withNamespace(ctx)
 
-	_, err := r.client.GetImage(ctx, ref)
+	_, err := r.client.GetImage(ctx, imageRef)
 	if err == nil {
 		return true, nil
 	}

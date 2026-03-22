@@ -22,9 +22,9 @@ func TestMain(m *testing.M) {
 	}
 	defer rt.Close() //nolint:errcheck // best-effort close in test main
 
-	exists, err := rt.ImageExists(ctx, "yoloai-base")
+	exists, err := rt.IsReady(ctx)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "ImageExists check failed: %v\n", err)
+		fmt.Fprintf(os.Stderr, "IsReady check failed: %v\n", err)
 		os.Exit(1)
 	}
 	if !exists {

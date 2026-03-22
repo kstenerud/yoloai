@@ -74,7 +74,7 @@ func runSystemCheck(cmd *cobra.Command, backend, agentName string) error {
 	{
 		r := checkResult{Name: "image"}
 		err := withRuntime(ctx, backend, func(ctx context.Context, rt runtime.Runtime) error {
-			exists, err := rt.ImageExists(ctx, "yoloai-base")
+			exists, err := rt.IsReady(ctx)
 			if err != nil {
 				return err
 			}

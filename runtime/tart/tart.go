@@ -67,8 +67,8 @@ func (r *Runtime) Capabilities() runtime.BackendCaps {
 	}
 }
 
-// ShouldSeedHomeConfig returns true — Tart VMs use an npm-installed agent.
-func (r *Runtime) ShouldSeedHomeConfig() bool { return true }
+// AgentProvisionedByBackend returns true — Tart VMs use an npm-installed agent.
+func (r *Runtime) AgentProvisionedByBackend() bool { return true }
 
 // ResolveCopyMount returns hostPath unchanged — Tart mounts copies at the
 // original host path inside the VM via VirtioFS.
@@ -331,9 +331,10 @@ func (r *Runtime) DiagHint(instanceName string) string {
 // Name returns the backend name.
 func (r *Runtime) Name() string { return "tart" }
 
-// PreferredTmuxSocket returns empty: tart VMs use the uid-based default socket.
+// TmuxSocket returns empty: tart VMs use the uid-based default socket.
 // The tart runtime handles socket injection internally in InteractiveExec.
-func (r *Runtime) PreferredTmuxSocket() string { return "" }
+// sandboxDir is ignored.
+func (r *Runtime) TmuxSocket(_ string) string { return "" }
 
 // AttachCommand returns the command to attach to the tmux session in a tart VM.
 // Tart runs commands directly with the caller's terminal; no script wrapper

@@ -49,7 +49,7 @@ func EnsureProfileImage(ctx context.Context, rt runtime.Runtime, profileName str
 		return fmt.Errorf("get home directory: %w", err)
 	}
 	baseProfileDir := filepath.Join(home, ".yoloai", "profiles", "base")
-	if err := rt.EnsureImage(ctx, baseProfileDir, output, logger, force); err != nil {
+	if err := rt.Setup(ctx, baseProfileDir, output, logger, force); err != nil {
 		return fmt.Errorf("ensure base image: %w", err)
 	}
 

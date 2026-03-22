@@ -23,7 +23,7 @@ func podmanSetup(t *testing.T) (*Runtime, context.Context) {
 	require.NoError(t, err, "Podman must be running with socket activated for integration tests")
 	t.Cleanup(func() { rt.Close() }) //nolint:errcheck // test cleanup
 
-	exists, err := rt.ImageExists(ctx, "yoloai-base")
+	exists, err := rt.IsReady(ctx)
 	require.NoError(t, err)
 	require.True(t, exists, "yoloai-base image must exist — run 'make build && ./yoloai setup' first")
 

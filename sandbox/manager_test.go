@@ -23,22 +23,22 @@ var errMockNotImplemented = fmt.Errorf("mock: not implemented")
 
 // mockRuntime implements runtime.Runtime for testing.
 type mockRuntime struct {
-	imageExistsResult bool  // returned by ImageExists
-	imageExistsErr    error // error returned by ImageExists
-	ensureImageCalled bool  // whether EnsureImage was invoked
-	ensureImageErr    error // error returned by EnsureImage
+	isReadyResult bool  // returned by IsReady
+	isReadyErr    error // error returned by IsReady
+	setupCalled   bool  // whether Setup was invoked
+	setupErr      error // error returned by Setup
 }
 
 // Compile-time check.
 var _ runtime.Runtime = (*mockRuntime)(nil)
 
-func (m *mockRuntime) EnsureImage(_ context.Context, _ string, _ io.Writer, _ *slog.Logger, _ bool) error {
-	m.ensureImageCalled = true
-	return m.ensureImageErr
+func (m *mockRuntime) Setup(_ context.Context, _ string, _ io.Writer, _ *slog.Logger, _ bool) error {
+	m.setupCalled = true
+	return m.setupErr
 }
 
-func (m *mockRuntime) ImageExists(_ context.Context, _ string) (bool, error) {
-	return m.imageExistsResult, m.imageExistsErr
+func (m *mockRuntime) IsReady(_ context.Context) (bool, error) {
+	return m.isReadyResult, m.isReadyErr
 }
 
 func (m *mockRuntime) Create(_ context.Context, _ runtime.InstanceConfig) error {
@@ -83,9 +83,9 @@ func (m *mockRuntime) DiagHint(instanceName string) string {
 }
 
 func (m *mockRuntime) Name() string                                        { return "docker" }
-func (m *mockRuntime) PreferredTmuxSocket() string                         { return "" }
+func (m *mockRuntime) TmuxSocket(_ string) string                          { return "" }
 func (m *mockRuntime) AttachCommand(_ string, _, _ int, _ string) []string { return nil }
-func (m *mockRuntime) ShouldSeedHomeConfig() bool                          { return true }
+func (m *mockRuntime) AgentProvisionedByBackend() bool                     { return true }
 func (m *mockRuntime) ResolveCopyMount(_, hostPath string) string          { return hostPath }
 func (m *mockRuntime) Capabilities() runtime.BackendCaps {
 	return runtime.BackendCaps{
@@ -176,7 +176,7 @@ func TestEnsureSetup_SkipsConfigOnSubsequentRun(t *testing.T) {
 	assert.NotContains(t, output.String(), "completion")
 }
 
-func TestEnsureSetup_AlwaysCallsEnsureImage(t *testing.T) {
+func TestEnsureSetup_AlwaysCallsSetup(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
 
@@ -185,12 +185,12 @@ func TestEnsureSetup_AlwaysCallsEnsureImage(t *testing.T) {
 	require.NoError(t, os.MkdirAll(defaultsDir, 0750))
 	dockerrt.RecordBuildChecksum(defaultsDir)
 
-	mock := &mockRuntime{} // EnsureImage returns nil (success)
+	mock := &mockRuntime{} // Setup returns nil (success)
 	mgr := NewManager(mock, slog.Default(), strings.NewReader(""), io.Discard)
 
 	err := mgr.EnsureSetup(context.Background())
 	require.NoError(t, err)
-	assert.True(t, mock.ensureImageCalled, "EnsureImage should always be called")
+	assert.True(t, mock.setupCalled, "Setup should always be called")
 }
 
 func TestEnsureSetup_RebuildWhenChecksumStale(t *testing.T) {
@@ -202,24 +202,24 @@ func TestEnsureSetup_RebuildWhenChecksumStale(t *testing.T) {
 	require.NoError(t, os.MkdirAll(defaultsDir, 0750))
 	require.NoError(t, os.WriteFile(filepath.Join(defaultsDir, ".last-build-checksum"), []byte("stale-checksum"), 0600))
 
-	mock := &mockRuntime{} // EnsureImage returns nil (success)
+	mock := &mockRuntime{} // Setup returns nil (success)
 	var output bytes.Buffer
 	mgr := NewManager(mock, slog.Default(), strings.NewReader(""), &output)
 
 	err := mgr.EnsureSetup(context.Background())
 	require.NoError(t, err)
-	assert.True(t, mock.ensureImageCalled, "EnsureImage should be called when checksum is stale")
+	assert.True(t, mock.setupCalled, "Setup should be called when checksum is stale")
 }
 
 func TestEnsureSetup_BuildsWhenImageMissing(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
 
-	mock := &mockRuntime{} // EnsureImage returns nil (success)
+	mock := &mockRuntime{} // Setup returns nil (success)
 	var output bytes.Buffer
 	mgr := NewManager(mock, slog.Default(), strings.NewReader(""), &output)
 
 	err := mgr.EnsureSetup(context.Background())
 	require.NoError(t, err)
-	assert.True(t, mock.ensureImageCalled, "EnsureImage should be called when image is missing")
+	assert.True(t, mock.setupCalled, "Setup should be called when image is missing")
 }

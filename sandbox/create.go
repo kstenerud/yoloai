@@ -440,7 +440,7 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 	copyDirs := collectCopyDirs(workdir, auxDirs)
 
 	// Build config.json
-	configData, err := buildContainerConfig(agentDef, agentCommand, tmuxConf, workdir.ResolvedMountPath(), opts.Debug, networkMode == "isolated", networkAllow, opts.Passthrough, overlayMounts, pr.setup, pr.autoCommitInterval, copyDirs, opts.Name, m.runtime.PreferredTmuxSocket())
+	configData, err := buildContainerConfig(agentDef, agentCommand, tmuxConf, workdir.ResolvedMountPath(), opts.Debug, networkMode == "isolated", networkAllow, opts.Passthrough, overlayMounts, pr.setup, pr.autoCommitInterval, copyDirs, opts.Name, m.runtime.TmuxSocket(sandboxDir))
 	if err != nil {
 		return nil, fmt.Errorf("build %s: %w", RuntimeConfigFile, err)
 	}

@@ -70,9 +70,9 @@ func (r *Runtime) Capabilities() runtime.BackendCaps {
 	}
 }
 
-// ShouldSeedHomeConfig returns false — seatbelt runs the host's native agent
-// installation, not an npm-installed copy in a container image.
-func (r *Runtime) ShouldSeedHomeConfig() bool { return false }
+// AgentProvisionedByBackend returns false — seatbelt runs the host's native
+// agent installation, not an npm-installed copy in a container image.
+func (r *Runtime) AgentProvisionedByBackend() bool { return false }
 
 // ResolveCopyMount returns the sandbox copy directory path. Seatbelt runs the
 // agent directly on the host, so it must read :copy files from their actual
@@ -374,9 +374,12 @@ func (r *Runtime) DiagHint(instanceName string) string {
 // Name returns the backend name.
 func (r *Runtime) Name() string { return "seatbelt" }
 
-// PreferredTmuxSocket returns empty: seatbelt uses a per-sandbox socket that
-// is injected by the runtime itself in InteractiveExec via buildTmuxCommand.
-func (r *Runtime) PreferredTmuxSocket() string { return "" }
+// TmuxSocket returns the per-sandbox tmux socket path for seatbelt. Each
+// seatbelt sandbox has its own socket under its sandbox directory, so the
+// socket path is derived from sandboxDir.
+func (r *Runtime) TmuxSocket(sandboxDir string) string {
+	return filepath.Join(sandboxDir, tmuxDir, tmuxSocketName)
+}
 
 // AttachCommand returns the command to attach to the tmux session for seatbelt.
 // Seatbelt runs commands directly with the caller's terminal; InteractiveExec

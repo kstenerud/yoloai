@@ -74,13 +74,13 @@ var provisionCommands = []string{
 	`grep -q 'brew shellenv' ~/.zprofile 2>/dev/null || echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> ~/.zprofile`,
 }
 
-// EnsureImage ensures the provisioned base VM image exists, pulling and
-// provisioning as needed. If imageRef is set in config (tart.image override),
-// it uses that as the base instead of the default.
-func (r *Runtime) EnsureImage(ctx context.Context, sourceDir string, output io.Writer, logger *slog.Logger, force bool) error {
+// Setup ensures the provisioned base VM image exists, pulling and provisioning
+// as needed. If imageRef is set in config (tart.image override), it uses that
+// as the base instead of the default.
+func (r *Runtime) Setup(ctx context.Context, sourceDir string, output io.Writer, logger *slog.Logger, force bool) error {
 	// Check if provisioned image already exists
 	if !force {
-		exists, err := r.ImageExists(ctx, provisionedImageName)
+		exists, err := r.vmExistsNamed(ctx, provisionedImageName)
 		if err != nil {
 			return fmt.Errorf("check base image: %w", err)
 		}
@@ -92,7 +92,7 @@ func (r *Runtime) EnsureImage(ctx context.Context, sourceDir string, output io.W
 	baseImage := r.resolveBaseImage(sourceDir)
 
 	// Check if the base image needs to be pulled
-	baseExists, err := r.ImageExists(ctx, baseImage)
+	baseExists, err := r.vmExistsNamed(ctx, baseImage)
 	if err != nil {
 		return fmt.Errorf("check base image: %w", err)
 	}
@@ -107,7 +107,7 @@ func (r *Runtime) EnsureImage(ctx context.Context, sourceDir string, output io.W
 	}
 
 	// Delete existing provisioned image if rebuilding
-	provExists, _ := r.ImageExists(ctx, provisionedImageName)
+	provExists, _ := r.vmExistsNamed(ctx, provisionedImageName)
 	if provExists {
 		fmt.Fprintln(output, "Removing old provisioned image...") //nolint:errcheck // best-effort
 		if _, err := r.runTart(ctx, "delete", provisionedImageName); err != nil {
@@ -137,14 +137,19 @@ func (r *Runtime) EnsureImage(ctx context.Context, sourceDir string, output io.W
 	return nil
 }
 
-// ImageExists checks if a Tart VM with the given name exists locally.
-func (r *Runtime) ImageExists(ctx context.Context, imageRef string) (bool, error) {
+// IsReady returns true if the provisioned yoloai-base VM exists locally.
+func (r *Runtime) IsReady(ctx context.Context) (bool, error) {
+	return r.vmExistsNamed(ctx, provisionedImageName)
+}
+
+// vmExistsNamed checks if a Tart VM with the given name exists locally.
+func (r *Runtime) vmExistsNamed(ctx context.Context, vmName string) (bool, error) {
 	out, err := r.runTart(ctx, "list", "--quiet")
 	if err != nil {
 		return false, fmt.Errorf("list VMs: %w", err)
 	}
 	for _, line := range strings.Split(out, "\n") {
-		if strings.TrimSpace(line) == imageRef {
+		if strings.TrimSpace(line) == vmName {
 			return true, nil
 		}
 	}

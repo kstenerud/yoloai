@@ -425,11 +425,11 @@ func TestValidateIsolation_FormatError(t *testing.T) {
 	assert.True(t, strings.Count(errStr, "  - ") >= 2, "expected at least 2 bullet points in: %s", errStr)
 }
 
-// PreferredTmuxSocket test
+// TmuxSocket test
 
-func TestPreferredTmuxSocket_Containerd(t *testing.T) {
+func TestTmuxSocket_Containerd(t *testing.T) {
 	r := &Runtime{}
-	assert.Equal(t, "/tmp/yoloai-tmux.sock", r.PreferredTmuxSocket())
+	assert.Equal(t, "/tmp/yoloai-tmux.sock", r.TmuxSocket("/any/path"))
 }
 
 // AttachCommand tests are in exec.go but verify routing here.

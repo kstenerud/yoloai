@@ -67,8 +67,6 @@ func runSandboxBugReport(cmd *cobra.Command, name string, reportType string) err
 // Called from both runSandboxBugReport (sandbox bugreport command) and
 // writeBugReportSandboxSectionsForFlag (--bugreport global flag on sandbox commands).
 func writeSandboxSections(ctx context.Context, w io.Writer, rt runtime.Runtime, name, reportType string) {
-	backend := resolveBackendForSandbox(name)
-
 	// Section 6: Sandbox detail
 	writeBugReportSandboxDetail(ctx, w, rt, name, reportType)
 
@@ -93,8 +91,7 @@ func writeSandboxSections(ctx context.Context, w io.Writer, rt runtime.Runtime, 
 		writeBugReportAgentOutput(w, name)
 
 		// Section 12: tmux screen capture (unsafe only)
-		stateDir := sandbox.Dir(name)
-		writeBugReportTmuxCapture(w, name, backend, stateDir)
+		writeBugReportTmuxCapture(w, name)
 	}
 }
 
@@ -279,11 +276,11 @@ func writeBugReportAgentOutput(w io.Writer, name string) {
 
 // writeBugReportTmuxCapture writes section 12: tmux screen capture.
 // Only included in unsafe reports. Silently omitted if sandbox is not running.
-func writeBugReportTmuxCapture(w io.Writer, name, backendName, stateDir string) {
+func writeBugReportTmuxCapture(w io.Writer, name string) {
+	tmuxSock := readTmuxSocketFromConfig(name)
 	var cmd *exec.Cmd
-	if backendName == "seatbelt" {
-		sock := fmt.Sprintf("%s/tmux/tmux.sock", stateDir)
-		cmd = exec.Command("tmux", "-S", sock, "capture-pane", "-p", "-t", "main") //nolint:gosec
+	if tmuxSock != "" {
+		cmd = exec.Command("tmux", "-S", tmuxSock, "capture-pane", "-p", "-t", "main") //nolint:gosec
 	} else {
 		cmd = exec.Command("tmux", "capture-pane", "-p", "-t", "main")
 	}
@@ -305,6 +302,30 @@ func writeBugReportTmuxCapture(w io.Writer, name, backendName, stateDir string) 
 }
 
 // sanitizeJSONLFile reads a JSONL file, filters/sanitizes it, and returns the result.
+// readTmuxSocketFromConfig reads the tmux_socket field from runtime-config.json
+// for the named sandbox. Returns empty string if the file is missing or has no
+// socket configured.
+func readTmuxSocketFromConfig(name string) string {
+	cfgPath := fmt.Sprintf("%s/%s", sandbox.Dir(name), sandbox.RuntimeConfigFile)
+	data, err := os.ReadFile(cfgPath) //nolint:gosec // G304: path derived from trusted sandbox dir
+	if err != nil {
+		return ""
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return ""
+	}
+	sockRaw, ok := raw["tmux_socket"]
+	if !ok {
+		return ""
+	}
+	var sock string
+	if err := json.Unmarshal(sockRaw, &sock); err != nil {
+		return ""
+	}
+	return sock
+}
+
 // omitEvents is a list of event patterns to skip (prefix match if ending in ".*").
 func sanitizeJSONLFile(path, reportType string, omitEvents []string) ([]byte, error) {
 	data, err := os.ReadFile(path) //nolint:gosec // G304: path derived from trusted sandbox dir

@@ -257,7 +257,7 @@ func (m *Manager) parseAndValidateDirs(ctx context.Context, opts CreateOptions, 
 	// container or VM where localhost resolves to the container, not the host.
 	// For process-based backends (seatbelt), the agent runs on the host and
 	// localhost resolves correctly — skip this warning.
-	if m.runtime.ShouldSeedHomeConfig() {
+	if m.runtime.AgentProvisionedByBackend() {
 		caps := m.runtime.Capabilities()
 		for _, key := range agentDef.AuthHintEnvVars {
 			for _, val := range []string{os.Getenv(key), mergedEnv[key]} {

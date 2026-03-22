@@ -113,12 +113,16 @@ type UsernsProvider interface {
 // lifecycle of sandbox instances (containers, VMs, etc.) and provide
 // image/environment management.
 type Runtime interface {
-	// EnsureImage ensures the base image is ready, seeding resources and
-	// building/pulling as needed. Writes progress to output.
-	EnsureImage(ctx context.Context, sourceDir string, output io.Writer, logger *slog.Logger, force bool) error
+	// Setup prepares the backend for launching agents (builds/pulls images,
+	// checks prerequisites). sourceDir is the profile directory containing
+	// build instructions (Dockerfile etc.); ignored by backends that don't
+	// build images. force=true rebuilds even if already ready.
+	Setup(ctx context.Context, sourceDir string, output io.Writer, logger *slog.Logger, force bool) error
 
-	// ImageExists checks whether the given image reference exists locally.
-	ImageExists(ctx context.Context, imageRef string) (bool, error)
+	// IsReady returns true if the backend is ready to launch agents (image
+	// built, prerequisites present, etc.). Each backend determines readiness
+	// by its own internal criteria — callers do not pass an image reference.
+	IsReady(ctx context.Context) (bool, error)
 
 	// Create creates a new sandbox instance from the given config.
 	Create(ctx context.Context, cfg InstanceConfig) error
@@ -167,11 +171,12 @@ type Runtime interface {
 	// code paths without string-comparing backend names.
 	Capabilities() BackendCaps
 
-	// ShouldSeedHomeConfig reports whether this backend requires patching the
-	// home-seed .claude.json install method from "native" to "npm-global".
-	// Returns false for process-based backends (e.g. seatbelt) that run the
-	// host's native agent installation and do not use the npm copy in the image.
-	ShouldSeedHomeConfig() bool
+	// AgentProvisionedByBackend reports whether the agent binary is provisioned
+	// as part of the backend's image/VM build. Returns true for container/VM
+	// backends (Docker, containerd, Tart) where the agent is npm-installed in
+	// the image; returns false for process-based backends (e.g. seatbelt) that
+	// run the host's native agent installation.
+	AgentProvisionedByBackend() bool
 
 	// ResolveCopyMount returns the mount path the agent sees for a :copy directory.
 	// For container/VM backends, the copy is bind-mounted at the original host path
@@ -183,12 +188,13 @@ type Runtime interface {
 	// Name returns the backend name (e.g., "docker", "tart", "seatbelt").
 	Name() string
 
-	// PreferredTmuxSocket returns the fixed tmux socket path this backend
-	// uses, or empty string if the backend uses the uid-based default socket.
-	// The value is written into runtime-config.json at sandbox creation time
-	// so all exec'd processes (including non-interactive execs) find the same
-	// tmux server as the container init process.
-	PreferredTmuxSocket() string
+	// TmuxSocket returns the tmux socket path for a sandbox, or empty string
+	// if the backend uses the uid-based default socket. sandboxDir is the
+	// resolved sandbox directory path. The value is written into
+	// runtime-config.json at sandbox creation time so all exec'd processes
+	// (including non-interactive execs) find the same tmux server as the
+	// container init process.
+	TmuxSocket(sandboxDir string) string
 
 	// AttachCommand returns the command to exec interactively to attach to
 	// the tmux session in a running instance. tmuxSocket is the fixed socket

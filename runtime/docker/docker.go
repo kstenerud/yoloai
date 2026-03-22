@@ -88,12 +88,12 @@ func (r *Runtime) Client() *dockerclient.Client {
 	return r.client
 }
 
-// EnsureImage builds/rebuilds the yoloai-base image as needed.
+// Setup builds/rebuilds the yoloai-base image as needed.
 // sourceDir is unused for the Docker backend (build inputs are embedded);
 // it is accepted for interface compatibility with other runtimes.
-func (r *Runtime) EnsureImage(ctx context.Context, sourceDir string, output io.Writer, logger *slog.Logger, force bool) error {
+func (r *Runtime) Setup(ctx context.Context, sourceDir string, output io.Writer, logger *slog.Logger, force bool) error {
 	// Check if image exists
-	exists, err := r.ImageExists(ctx, "yoloai-base")
+	exists, err := r.imageExists(ctx, "yoloai-base")
 	if err != nil {
 		return fmt.Errorf("check base image: %w", err)
 	}
@@ -113,8 +113,13 @@ func (r *Runtime) EnsureImage(ctx context.Context, sourceDir string, output io.W
 	return nil
 }
 
-// ImageExists checks if a Docker image with the given tag exists locally.
-func (r *Runtime) ImageExists(ctx context.Context, imageRef string) (bool, error) {
+// IsReady returns true if the yoloai-base Docker image exists locally.
+func (r *Runtime) IsReady(ctx context.Context) (bool, error) {
+	return r.imageExists(ctx, "yoloai-base")
+}
+
+// imageExists checks if a Docker image with the given tag exists locally.
+func (r *Runtime) imageExists(ctx context.Context, imageRef string) (bool, error) {
 	_, err := r.client.ImageInspect(ctx, imageRef)
 	if err == nil {
 		return true, nil
@@ -328,9 +333,9 @@ func (r *Runtime) Capabilities() runtime.BackendCaps {
 	}
 }
 
-// ShouldSeedHomeConfig returns true — Docker containers use an npm-installed
+// AgentProvisionedByBackend returns true — Docker containers use an npm-installed
 // agent, so the home-seed .claude.json must be patched from "native" to "npm-global".
-func (r *Runtime) ShouldSeedHomeConfig() bool { return true }
+func (r *Runtime) AgentProvisionedByBackend() bool { return true }
 
 // ResolveCopyMount returns hostPath unchanged — Docker bind-mounts the copy at
 // the original host path inside the container.
@@ -363,10 +368,11 @@ func (r *Runtime) ValidateIsolation(ctx context.Context, isolation string) error
 		"  Then add to /etc/docker/daemon.json: {\"runtimes\": {\"runsc\": {\"path\": \"/usr/local/sbin/runsc\"}}}")
 }
 
-// PreferredTmuxSocket returns the fixed tmux socket path for Docker/Podman
-// containers. A fixed path ensures exec'd processes find the same server as
-// the container init process (the uid-based default may differ under gVisor).
-func (r *Runtime) PreferredTmuxSocket() string { return "/tmp/yoloai-tmux.sock" }
+// TmuxSocket returns the fixed tmux socket path for Docker/Podman containers.
+// A fixed path ensures exec'd processes find the same server as the container
+// init process (the uid-based default may differ under gVisor). sandboxDir is
+// ignored — Docker containers always use the same socket path.
+func (r *Runtime) TmuxSocket(_ string) string { return "/tmp/yoloai-tmux.sock" }
 
 // AttachCommand returns the command to attach to the tmux session.
 // For gVisor on ARM64, setsid is used to work around missing TIOCSCTTY in

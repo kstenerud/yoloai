@@ -17,10 +17,10 @@ var requiredBinaries = []string{
 	"jq",
 }
 
-// EnsureImage verifies that all prerequisites are available. There is no
-// image to build — seatbelt runs the host's native tools. The sourceDir
-// parameter is unused.
-func (r *Runtime) EnsureImage(_ context.Context, _ string, output io.Writer, _ *slog.Logger, _ bool) error {
+// Setup verifies that all prerequisites are available. There is no image to
+// build — seatbelt runs the host's native tools. The sourceDir parameter is
+// unused.
+func (r *Runtime) Setup(_ context.Context, _ string, output io.Writer, _ *slog.Logger, _ bool) error {
 	for _, bin := range requiredBinaries {
 		if _, err := exec.LookPath(bin); err != nil {
 			return fmt.Errorf("%s not found in PATH: install it before using the seatbelt backend", bin)
@@ -30,9 +30,8 @@ func (r *Runtime) EnsureImage(_ context.Context, _ string, output io.Writer, _ *
 	return nil
 }
 
-// ImageExists returns true when all prerequisite binaries are available.
-// The imageRef parameter is unused for seatbelt.
-func (r *Runtime) ImageExists(_ context.Context, _ string) (bool, error) {
+// IsReady returns true when all prerequisite binaries are available.
+func (r *Runtime) IsReady(_ context.Context) (bool, error) {
 	for _, bin := range requiredBinaries {
 		if _, err := exec.LookPath(bin); err != nil {
 			return false, nil //nolint:nilerr // binary not found means unavailable, not an error condition

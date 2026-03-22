@@ -133,7 +133,7 @@ func runSystemBuild(cmd *cobra.Command, args []string, backend string) error {
 		if jsonEnabled(cmd) {
 			buildOut, _ = os.Open(os.DevNull)
 		}
-		if err := rt.EnsureImage(ctx, baseProfileDir, buildOut, slog.Default(), true); err != nil {
+		if err := rt.Setup(ctx, baseProfileDir, buildOut, slog.Default(), true); err != nil {
 			return err
 		}
 

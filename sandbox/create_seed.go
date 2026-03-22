@@ -41,7 +41,7 @@ func (m *Manager) seedSandbox(agentDef *agent.Definition, sandboxDir, isolation 
 
 	// Fix install method in seeded .claude.json (host has "native", container uses npm).
 	// Skipped for process-based backends that run the host's native agent installation.
-	if m.runtime.ShouldSeedHomeConfig() {
+	if m.runtime.AgentProvisionedByBackend() {
 		if err := ensureHomeSeedConfig(agentDef, sandboxDir); err != nil {
 			return false, fmt.Errorf("ensure home seed config: %w", err)
 		}

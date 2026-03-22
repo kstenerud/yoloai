@@ -16,8 +16,8 @@ import (
 
 // TestMain builds the base Docker image once before any integration tests run.
 // Individual tests still call integrationSetup(t) which uses IsolatedHome(t)
-// for per-test sandbox isolation; subsequent EnsureImage calls hit the cache
-// and return in milliseconds.
+// for per-test sandbox isolation; subsequent Setup calls hit the cache and
+// return in milliseconds.
 func TestMain(m *testing.M) {
 	ctx := context.Background()
 

@@ -1118,22 +1118,22 @@ func TestBackendCaps_Seatbelt(t *testing.T) {
 	assert.False(t, caps.CapAdd)
 }
 
-// ShouldSeedHomeConfig and ResolveCopyMount tests
+// AgentProvisionedByBackend and ResolveCopyMount tests
 
-func TestShouldSeedHomeConfig_Docker(t *testing.T) {
-	assert.True(t, (*dockerrt.Runtime)(nil).ShouldSeedHomeConfig())
+func TestAgentProvisionedByBackend_Docker(t *testing.T) {
+	assert.True(t, (*dockerrt.Runtime)(nil).AgentProvisionedByBackend())
 }
 
-func TestShouldSeedHomeConfig_Containerd(t *testing.T) {
-	assert.True(t, (*containerdrt.Runtime)(nil).ShouldSeedHomeConfig())
+func TestAgentProvisionedByBackend_Containerd(t *testing.T) {
+	assert.True(t, (*containerdrt.Runtime)(nil).AgentProvisionedByBackend())
 }
 
-func TestShouldSeedHomeConfig_Tart(t *testing.T) {
-	assert.True(t, (*tartrt.Runtime)(nil).ShouldSeedHomeConfig())
+func TestAgentProvisionedByBackend_Tart(t *testing.T) {
+	assert.True(t, (*tartrt.Runtime)(nil).AgentProvisionedByBackend())
 }
 
-func TestShouldSeedHomeConfig_Seatbelt(t *testing.T) {
-	assert.False(t, (*seatbeltrt.Runtime)(nil).ShouldSeedHomeConfig()) // uses host native agent
+func TestAgentProvisionedByBackend_Seatbelt(t *testing.T) {
+	assert.False(t, (*seatbeltrt.Runtime)(nil).AgentProvisionedByBackend()) // uses host native agent
 }
 
 func TestResolveCopyMount_Docker(t *testing.T) {

@@ -160,7 +160,7 @@ func (m *Manager) EnsureSetupNonInteractive(ctx context.Context) error {
 	}
 
 	// Seed resources and build/rebuild base image as needed
-	if err := m.runtime.EnsureImage(ctx, "", m.output, m.logger, false); err != nil {
+	if err := m.runtime.Setup(ctx, "", m.output, m.logger, false); err != nil {
 		return err
 	}
 

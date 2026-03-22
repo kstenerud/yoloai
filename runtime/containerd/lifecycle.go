@@ -189,7 +189,7 @@ func (r *Runtime) Create(ctx context.Context, cfg runtime.InstanceConfig) error 
 		}
 	}()
 
-	// Look up the image — do not pull; EnsureImage() is responsible for that.
+	// Look up the image — do not pull; Setup() is responsible for that.
 	img, err := r.client.GetImage(ctx, cfg.ImageRef)
 	if err != nil {
 		if errdefs.IsNotFound(err) {
