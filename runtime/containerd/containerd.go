@@ -8,12 +8,12 @@ import (
 	"net"
 	"os"
 	"os/exec"
-	"strconv"
 	"strings"
 
 	"github.com/containerd/containerd/v2/client"
 	"github.com/containerd/containerd/v2/pkg/namespaces"
 	"github.com/containerd/errdefs"
+	"github.com/vishvananda/netns"
 
 	"github.com/kstenerud/yoloai/config"
 	"github.com/kstenerud/yoloai/runtime"
@@ -89,14 +89,14 @@ func (r *Runtime) Close() error { return r.client.Close() }
 
 // Prerequisite check overrides — variable for testing.
 var (
-	containerdSockPath   = "/run/containerd/containerd.sock"
-	kataShimName         = "containerd-shim-kata-v2"
-	kataFCShimName       = "containerd-shim-kata-fc-v2"
-	cniBridgePath        = "/opt/cni/bin/bridge"
-	kvmDevPath           = "/dev/kvm"
-	capNetAdminCheckFunc = hasCapNetAdmin
-	wsl2CheckFunc        = isWSL2
-	devmakerCheckFunc    = checkDevmakerSnapshotter
+	containerdSockPath = "/run/containerd/containerd.sock"
+	kataShimName       = "containerd-shim-kata-v2"
+	kataFCShimName     = "containerd-shim-kata-fc-v2"
+	cniBridgePath      = "/opt/cni/bin/bridge"
+	kvmDevPath         = "/dev/kvm"
+	canCreateNetNSFunc = canCreateNetNS
+	wsl2CheckFunc      = isWSL2
+	devmakerCheckFunc  = checkDevmakerSnapshotter
 )
 
 // checkDevmakerSnapshotter probes the devmapper snapshotter by calling Stat with a
@@ -150,8 +150,11 @@ func (r *Runtime) ValidateIsolation(ctx context.Context, isolation string) error
 		missing = append(missing, "CNI plugins not found: sudo apt install containernetworking-plugins")
 	}
 
-	if !capNetAdminCheckFunc() {
-		missing = append(missing, "CAP_NET_ADMIN not available (required to create network namespaces for CNI)\n    Fix: run yoloai with sudo for vm isolation")
+	if err := canCreateNetNSFunc(); err != nil {
+		missing = append(missing, fmt.Sprintf("cannot create network namespaces: %s\n"+
+			"    vm isolation requires root (or CAP_SYS_ADMIN + CAP_DAC_OVERRIDE + CAP_NET_ADMIN + write to /var/run/netns/)\n"+
+			"    Simplest fix: sudo make smoketest  or  sudo yoloai new ...",
+			err))
 	}
 
 	if _, err := os.Stat(kvmDevPath); err != nil {
@@ -181,26 +184,18 @@ func isWSL2() bool {
 	return strings.Contains(strings.ToLower(string(data)), "microsoft")
 }
 
-// procSelfStatusPath is the path to /proc/self/status. Variable for testing.
-var procSelfStatusPath = "/proc/self/status"
-
-// hasCapNetAdmin reports whether the current process has CAP_NET_ADMIN
-// (bit 12 of CapEff in /proc/self/status). Required to create network namespaces.
-func hasCapNetAdmin() bool {
-	data, err := os.ReadFile(procSelfStatusPath)
+// canCreateNetNS tests whether the process can actually create a named network
+// namespace by attempting to create and immediately remove a probe namespace.
+// This is more reliable than checking individual capabilities because named
+// netns creation requires CAP_SYS_ADMIN (unshare) + CAP_DAC_OVERRIDE (write
+// to root-owned /var/run/netns/) — easier to test than enumerate.
+func canCreateNetNS() error {
+	probe := "yoloai-netns-probe"
+	// Attempt to create; ignore "already exists" (from a previous failed probe).
+	_, err := netns.NewNamed(probe)
 	if err != nil {
-		return false
+		return err
 	}
-	for _, line := range strings.Split(string(data), "\n") {
-		if strings.HasPrefix(line, "CapEff:") {
-			hexStr := strings.TrimSpace(strings.TrimPrefix(line, "CapEff:"))
-			caps, err := strconv.ParseUint(hexStr, 16, 64)
-			if err != nil {
-				return false
-			}
-			const capNetAdmin = 12
-			return caps&(1<<capNetAdmin) != 0
-		}
-	}
-	return false
+	_ = netns.DeleteNamed(probe)
+	return nil
 }

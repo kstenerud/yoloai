@@ -80,11 +80,8 @@ func TestIsWSL2_Microsoft(t *testing.T) {
 	tmp := filepath.Join(t.TempDir(), "version")
 	require.NoError(t, os.WriteFile(tmp, []byte("Linux version 5.15.0-microsoft-standard-WSL2"), 0o600))
 
-	orig := procSelfStatusPath
-	defer func() { procSelfStatusPath = orig }()
-	// isWSL2 reads /proc/version directly; we test via the exported helper by
-	// temporarily pointing the real /proc/version aside — instead just call the
-	// real isWSL2 to confirm it doesn't panic, and unit-test the logic inline.
+	// isWSL2 reads /proc/version directly; just call the real isWSL2 to
+	// confirm it doesn't panic, and unit-test the logic inline.
 	_ = isWSL2() // smoke: no panic
 
 	// Inline the same logic with a temp file to test the "microsoft" branch.
@@ -97,67 +94,6 @@ func TestIsWSL2_NonWSL(t *testing.T) {
 	require.NoError(t, os.WriteFile(tmp, []byte("Linux version 6.8.0-106-generic (buildd@lcy02-amd64-059)"), 0o600))
 	data, _ := os.ReadFile(tmp) //nolint:gosec // G304: test code with temp dir
 	assert.False(t, strings.Contains(strings.ToLower(string(data)), "microsoft"))
-}
-
-// hasCapNetAdmin tests
-
-func TestHasCapNetAdmin_WithCapability(t *testing.T) {
-	// CapEff with bit 12 (CAP_NET_ADMIN) set: 0x0000000000001000
-	tmp := filepath.Join(t.TempDir(), "status")
-	content := "Name:\ttest\nCapEff:\t0000000000001000\nCapPrm:\t0000000000000000\n"
-	require.NoError(t, os.WriteFile(tmp, []byte(content), 0o600))
-
-	orig := procSelfStatusPath
-	defer func() { procSelfStatusPath = orig }()
-	procSelfStatusPath = tmp
-
-	assert.True(t, hasCapNetAdmin())
-}
-
-func TestHasCapNetAdmin_WithoutCapability(t *testing.T) {
-	// CapEff with bit 12 clear (only bit 0 set = CAP_CHOWN)
-	tmp := filepath.Join(t.TempDir(), "status")
-	content := "Name:\ttest\nCapEff:\t0000000000000001\nCapPrm:\t0000000000000000\n"
-	require.NoError(t, os.WriteFile(tmp, []byte(content), 0o600))
-
-	orig := procSelfStatusPath
-	defer func() { procSelfStatusPath = orig }()
-	procSelfStatusPath = tmp
-
-	assert.False(t, hasCapNetAdmin())
-}
-
-func TestHasCapNetAdmin_AllCaps(t *testing.T) {
-	// CapEff with all bits set (root / full capabilities)
-	tmp := filepath.Join(t.TempDir(), "status")
-	content := "Name:\ttest\nCapEff:\tffffffffffffffff\nCapPrm:\t0000000000000000\n"
-	require.NoError(t, os.WriteFile(tmp, []byte(content), 0o600))
-
-	orig := procSelfStatusPath
-	defer func() { procSelfStatusPath = orig }()
-	procSelfStatusPath = tmp
-
-	assert.True(t, hasCapNetAdmin())
-}
-
-func TestHasCapNetAdmin_MissingFile(t *testing.T) {
-	orig := procSelfStatusPath
-	defer func() { procSelfStatusPath = orig }()
-	procSelfStatusPath = filepath.Join(t.TempDir(), "nonexistent")
-
-	assert.False(t, hasCapNetAdmin())
-}
-
-func TestHasCapNetAdmin_MalformedHex(t *testing.T) {
-	tmp := filepath.Join(t.TempDir(), "status")
-	content := "Name:\ttest\nCapEff:\tZZZZZZZZZZZZZZZZ\n"
-	require.NoError(t, os.WriteFile(tmp, []byte(content), 0o600))
-
-	orig := procSelfStatusPath
-	defer func() { procSelfStatusPath = orig }()
-	procSelfStatusPath = tmp
-
-	assert.False(t, hasCapNetAdmin())
 }
 
 // ValidateIsolation tests
@@ -196,7 +132,7 @@ func setupValidateIsolationMocks(t *testing.T) (sockPath string, restoreAll func
 	origFCShim := kataFCShimName
 	origCNI := cniBridgePath
 	origKVM := kvmDevPath
-	origCap := capNetAdminCheckFunc
+	origCAN := canCreateNetNSFunc
 	origWSL2 := wsl2CheckFunc
 	origDevmapper := devmakerCheckFunc
 
@@ -205,7 +141,7 @@ func setupValidateIsolationMocks(t *testing.T) (sockPath string, restoreAll func
 	kataFCShimName = "containerd-shim-kata-fc-v2"
 	cniBridgePath = cniBridgeFile
 	kvmDevPath = kvmFile
-	capNetAdminCheckFunc = func() bool { return true }
+	canCreateNetNSFunc = func() error { return nil }
 	wsl2CheckFunc = func() bool { return false }
 	devmakerCheckFunc = func(_ context.Context, _ *Runtime) error { return nil }
 
@@ -215,7 +151,7 @@ func setupValidateIsolationMocks(t *testing.T) (sockPath string, restoreAll func
 		kataFCShimName = origFCShim
 		cniBridgePath = origCNI
 		kvmDevPath = origKVM
-		capNetAdminCheckFunc = origCap
+		canCreateNetNSFunc = origCAN
 		wsl2CheckFunc = origWSL2
 		devmakerCheckFunc = origDevmapper
 	}
@@ -328,16 +264,16 @@ func TestValidateIsolation_CNIMissing(t *testing.T) {
 	assert.Contains(t, err.Error(), "CNI plugins not found")
 }
 
-func TestValidateIsolation_NoCapNetAdmin(t *testing.T) {
+func TestValidateIsolation_CannotCreateNetNS(t *testing.T) {
 	_, restore := setupValidateIsolationMocks(t)
 	defer restore()
 
-	capNetAdminCheckFunc = func() bool { return false }
+	canCreateNetNSFunc = func() error { return fmt.Errorf("operation not permitted") }
 
 	r := &Runtime{}
 	err := r.ValidateIsolation(context.Background(), "vm")
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "CAP_NET_ADMIN")
+	assert.Contains(t, err.Error(), "cannot create network namespaces")
 }
 
 func TestValidateIsolation_KVMMissing_NonWSL2(t *testing.T) {
@@ -373,14 +309,14 @@ func TestValidateIsolation_MultipleFailures(t *testing.T) {
 	// Fail three checks simultaneously.
 	cniBridgePath = filepath.Join(t.TempDir(), "no-bridge")
 	kvmDevPath = filepath.Join(t.TempDir(), "no-kvm")
-	capNetAdminCheckFunc = func() bool { return false }
+	canCreateNetNSFunc = func() error { return fmt.Errorf("operation not permitted") }
 
 	r := &Runtime{}
 	err := r.ValidateIsolation(context.Background(), "vm")
 	require.Error(t, err)
 	// All three failures should appear in the error message.
 	assert.Contains(t, err.Error(), "CNI plugins not found")
-	assert.Contains(t, err.Error(), "CAP_NET_ADMIN")
+	assert.Contains(t, err.Error(), "cannot create network namespaces")
 	assert.Contains(t, err.Error(), "/dev/kvm not found")
 }
 
@@ -414,7 +350,7 @@ func TestValidateIsolation_FormatError(t *testing.T) {
 	require.NoError(t, err)
 	// Run with multiple failures to check the joined error format.
 	cniBridgePath = filepath.Join(t.TempDir(), "no-bridge")
-	capNetAdminCheckFunc = func() bool { return false }
+	canCreateNetNSFunc = func() error { return fmt.Errorf("operation not permitted") }
 	err = r.ValidateIsolation(context.Background(), "vm")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "VM isolation mode requires additional setup")
