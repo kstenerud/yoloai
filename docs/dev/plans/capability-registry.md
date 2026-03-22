@@ -244,6 +244,10 @@ func FormatError(results []CheckResult) error
 // fix details to w. Takes a slice of BackendReport covering all (backend, mode)
 // combinations, including base modes. Handles empty slices gracefully
 // (prints "No backends available to check.").
+// For Unavailable entries, all failed checks are shown with fix steps where
+// available — permanent failures are labelled as such. This ensures users who
+// resolve a permanent blocker (e.g. by switching hardware) can see what else
+// needs setup.
 func FormatDoctor(w io.Writer, reports []BackendReport)
 ```
 
@@ -302,16 +306,20 @@ cannot run gVisor. The user must switch to root Podman or use Docker instead.
 ### Containerd (`runtime/containerd/`)
 
 ```go
-func (r *Runtime) BaseModeName() string         { return "container" }
+// BaseModeName returns "vm" because containerd in yoloai exists exclusively for
+// VM isolation — there is no useful base "container" mode without kata + KVM.
+func (r *Runtime) BaseModeName() string         { return "vm" }
 func (r *Runtime) SupportedIsolationModes() []string { return []string{"vm", "vm-enhanced"} }
 
 func (r *Runtime) RequiredCapabilities(isolation string) []caps.HostCapability {
+    // containerdSocket is intentionally omitted: New() already dials the socket
+    // and returns an error if unreachable. RequiredCapabilities is only called
+    // after a successful New(), so the socket is implicitly verified.
     base := []caps.HostCapability{
-        r.containerdSocket, // net.Dial probe
-        r.kataShimV2,       // exec.LookPath
-        r.cniBridge,        // os.Stat
-        r.netnsCreation,    // netns.NewNamed probe
-        r.kvmDevice,        // os.Stat + group check + heuristic permanence
+        r.kataShimV2,   // exec.LookPath
+        r.cniBridge,    // os.Stat
+        r.netnsCreation, // netns.NewNamed probe
+        r.kvmDevice,    // os.Stat + group check + heuristic permanence
     }
     switch isolation {
     case "vm-enhanced":
@@ -370,12 +378,17 @@ attempts all backends — including those not installed — so the output gives 
 picture of what the machine can and cannot run. A backend that fails `New()` is shown
 under "Not available" with its instantiation error.
 
-**With `--isolation` / `--backend`:** scopes to that combination only.
+**`--backend BACKEND` only:** checks all modes for that backend (base + all isolation
+modes), same output structure but scoped to one backend.
+
+**`--backend BACKEND --isolation MODE`:** checks only that specific combination.
+
+**`--isolation MODE` only:** checks that isolation mode across all backends that support it.
 
 ### Backend discovery
 
-`system_doctor.go` contains a static list of all known backends. This is the **one place
-in the CLI that imports all backend packages**:
+`system_doctor.go` contains a static list of all known backends for enumeration purposes
+(other CLI code imports backends individually via `newRuntime()`):
 
 ```go
 type backendEntry struct {
@@ -445,8 +458,14 @@ Note: example commands assume Debian/Ubuntu. Adapt as needed for your distro.
 `FormatDoctor` owns all output. Fix commands are advisory examples, never executed.
 `NeedsRoot=true` steps are labelled `(requires root)`.
 
-Exit codes: 0 = all attempted backends/modes are Ready, 1 = any NeedsSetup or
-Unavailable entries present (CI-compatible with `system check`).
+Exit codes:
+- **0** — no `NeedsSetup` entries (all backends either Ready or permanently Unavailable).
+- **1** — one or more `NeedsSetup` entries exist (user action could unlock them).
+
+`Unavailable` entries (wrong OS, no hardware) do not contribute to exit 1 — they are
+informational, not actionable. This makes the exit code meaningful in CI: exit 1 signals
+"there is something you could do to improve this machine's capabilities," not just "this
+machine isn't a Mac."
 
 ---
 
@@ -497,7 +516,29 @@ failures distinguished; messaging consistent and improvable in one place.
 1. Create `internal/cli/system_doctor.go`:
    - Define `backendEntry` and `allBackends` (imports all five backend packages).
    - Build `[]caps.BackendReport` by iterating `allBackends`.
-   - Call `caps.FormatDoctor` for human output; `--json` marshals the report slice.
+   - Call `caps.FormatDoctor` for human output.
+   - For `--json`: convert to a serializable type before marshalling, since
+     `BackendReport` contains `HostCapability` fields with func values that
+     cannot be JSON-encoded. Define `backendReportJSON` in `system_doctor.go`
+     (or `caps/check.go`) with only plain fields:
+     ```go
+     type checkResultJSON struct {
+         CapID       string     `json:"cap_id"`
+         CapSummary  string     `json:"cap_summary"`
+         OK          bool       `json:"ok"`
+         IsPermanent bool       `json:"is_permanent,omitempty"`
+         Error       string     `json:"error,omitempty"`
+         Steps       []FixStep  `json:"steps,omitempty"` // FixStep has no funcs; safe
+     }
+     type backendReportJSON struct {
+         Backend      string            `json:"backend"`
+         Mode         string            `json:"mode"`
+         IsBaseMode   bool              `json:"is_base_mode"`
+         Availability string            `json:"availability"` // "ready"/"needs_setup"/"unavailable"
+         InitError    string            `json:"init_error,omitempty"`
+         Checks       []checkResultJSON `json:"checks,omitempty"`
+     }
+     ```
 2. Wire into the `system` subcommand.
 3. Update `docs/GUIDE.md` and `docs/design/commands.md`.
 
