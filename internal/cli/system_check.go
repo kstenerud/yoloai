@@ -30,12 +30,14 @@ Checks performed:
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			backend := resolveBackend(cmd)
 			agentName, _ := cmd.Flags().GetString("agent")
-			return runSystemCheck(cmd, backend, agentName)
+			isolation, _ := cmd.Flags().GetString("isolation")
+			return runSystemCheck(cmd, backend, agentName, isolation)
 		},
 	}
 
 	cmd.Flags().String("backend", "", "Runtime backend (see 'yoloai system backends')")
 	cmd.Flags().String("agent", "", "Agent to check credentials for (default: configured agent)")
+	cmd.Flags().String("isolation", "", "Isolation mode to validate prerequisites for (e.g. vm, vm-enhanced)")
 
 	return cmd
 }
@@ -47,7 +49,7 @@ type checkResult struct {
 	Message string `json:"message,omitempty"`
 }
 
-func runSystemCheck(cmd *cobra.Command, backend, agentName string) error {
+func runSystemCheck(cmd *cobra.Command, backend, agentName, isolation string) error {
 	ctx := cmd.Context()
 	out := cmd.OutOrStdout()
 	isJSON := jsonEnabled(cmd)
@@ -125,6 +127,26 @@ func runSystemCheck(cmd *cobra.Command, backend, agentName string) error {
 				r.OK = true
 				r.Message = fmt.Sprintf("found: %s", strings.Join(found, ", "))
 			}
+		}
+		results = append(results, r)
+	}
+
+	// 4. Isolation prerequisites (only when --isolation is specified).
+	if isolation != "" {
+		r := checkResult{Name: "isolation"}
+		err := withRuntime(ctx, backend, func(ctx context.Context, rt runtime.Runtime) error {
+			v, ok := rt.(runtime.IsolationValidator)
+			if !ok {
+				return nil // backend does not have isolation-specific requirements
+			}
+			return v.ValidateIsolation(ctx, isolation)
+		})
+		if err != nil {
+			r.OK = false
+			r.Message = err.Error()
+			allOK = false
+		} else {
+			r.OK = true
 		}
 		results = append(results, r)
 	}

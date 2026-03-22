@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import atexit
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -45,6 +46,7 @@ class BackendSpec:
     label: str              # short label used in sandbox names and display
     check_backend: str      # daemon name for `yoloai system check --backend`
     is_vm: bool = False     # True → use VM_TIMEOUT for sentinel polling
+    check_isolation: str = ""  # isolation to validate in prereq check (empty = skip)
 
     @property
     def is_seatbelt(self) -> bool:
@@ -110,9 +112,9 @@ LINUX_BACKENDS: list[BackendSpec] = [
     BackendSpec("linux", "container-enhanced", None,     "cenhanced",
                 check_backend="docker"),
     BackendSpec("linux", "vm",                 None,     "vm",
-                check_backend="containerd", is_vm=True),
+                check_backend="containerd", is_vm=True, check_isolation="vm"),
     BackendSpec("linux", "vm-enhanced",        None,     "vmenhanced",
-                check_backend="containerd", is_vm=True),
+                check_backend="containerd", is_vm=True, check_isolation="vm-enhanced"),
 ]
 
 MACOS_BACKENDS: list[BackendSpec] = [
@@ -503,21 +505,22 @@ def check_prerequisites(
     ctx: RunContext,
     backends: list[BackendSpec],
 ) -> dict[str, PrereqResult]:
-    """Run `yoloai system check` for each unique daemon; return per-spec results."""
+    """Run `yoloai system check` for each unique (daemon, isolation) pair; return per-spec results."""
     print("Checking prerequisites...\n")
 
-    unique_daemons: set[str] = {spec.check_backend for spec in backends}
-    daemon_results: dict[str, tuple[bool, str]] = {}
+    # Deduplicate by (check_backend, check_isolation) so vm and vm-enhanced are
+    # checked separately (each needs its own isolation validation).
+    unique_keys: set[tuple[str, str]] = {
+        (spec.check_backend, spec.check_isolation) for spec in backends
+    }
+    check_results: dict[tuple[str, str], tuple[bool, str]] = {}
 
-    for daemon in sorted(unique_daemons):
+    for daemon, isolation in sorted(unique_keys):
+        cmd = [ctx.yoloai_bin, "system", "check", "--json", "--backend", daemon, "--agent", "claude"]
+        if isolation:
+            cmd += ["--isolation", isolation]
         try:
-            r = subprocess.run(
-                [
-                    ctx.yoloai_bin, "system", "check", "--json",
-                    "--backend", daemon, "--agent", "claude",
-                ],
-                capture_output=True, text=True, timeout=30,
-            )
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
             data: dict = json.loads(r.stdout)
             ok: bool = data.get("ok", False)
             note = ""
@@ -525,17 +528,18 @@ def check_prerequisites(
                 if not check.get("ok"):
                     note = check.get("message", "check failed")
                     break
-            daemon_results[daemon] = (ok, note)
+            check_results[(daemon, isolation)] = (ok, note)
         except subprocess.TimeoutExpired:
-            daemon_results[daemon] = (False, "system check timed out")
+            check_results[(daemon, isolation)] = (False, "system check timed out")
         except (json.JSONDecodeError, KeyError) as e:
-            daemon_results[daemon] = (False, f"could not parse system check output: {e}")
+            check_results[(daemon, isolation)] = (False, f"could not parse system check output: {e}")
         except FileNotFoundError:
-            daemon_results[daemon] = (False, "yoloai binary not found")
+            check_results[(daemon, isolation)] = (False, "yoloai binary not found")
 
     results: dict[str, PrereqResult] = {}
     for spec in backends:
-        ok, note = daemon_results.get(spec.check_backend, (False, "not checked"))
+        key = (spec.check_backend, spec.check_isolation)
+        ok, note = check_results.get(key, (False, "not checked"))
         results[spec.label] = PrereqResult(spec=spec, available=ok, note=note)
 
     col_w = max(len(label) for label in results) + 2
@@ -687,10 +691,28 @@ def main() -> int:
         and label in matrix_labels
     ]
     if unavailable_labels:
+        notes = [preq[label].note for label in unavailable_labels]
+        needs_cap_net_admin = any("CAP_NET_ADMIN" in note for note in notes)
+        setup_tip = ""
+        if needs_cap_net_admin:
+            # Resolve symlinks: setcap must target the real binary, and
+            # make smoketest rebuilds the binary, wiping any prior setcap.
+            real_bin = os.path.realpath(ctx.yoloai_bin)
+            setup_tip = (
+                "\nSetup tip: grant CAP_NET_ADMIN to the yoloai binary.\n"
+                "Note: 'make smoketest' rebuilds yoloai — setcap is lost on every rebuild.\n"
+                "Run this after each build, then re-run the smoke test directly:\n"
+                f"  sudo setcap cap_net_admin+ep {real_bin}\n"
+                f"  python3 scripts/smoke_test.py\n"
+                "Or run the smoke test as root:\n"
+                "  sudo make smoketest"
+            )
         if args.limited:
             print("WARNING: some backends unavailable (will skip their tests):")
             for label in unavailable_labels:
                 print(f"  {label}: {preq[label].note}")
+            if setup_tip:
+                print(setup_tip)
             print()
         else:
             print(
@@ -699,6 +721,8 @@ def main() -> int:
             )
             for label in unavailable_labels:
                 print(f"  {label}: {preq[label].note}")
+            if setup_tip:
+                print(setup_tip)
             return 1
 
     # -------------------------------------------------------------------------

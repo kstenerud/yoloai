@@ -69,11 +69,14 @@ integration-podman: build
 	@go test -tags=integration -v -count=1 -timeout=10m ./runtime/podman/
 
 ## smoketest: run end-to-end smoke tests against real agents (requires API keys and configured backends)
+## VM backends require CAP_NET_ADMIN. If setcap is configured, it is applied automatically after build.
 smoketest: build
+	@sudo -n setcap cap_net_admin+ep ./$(BINARY) 2>/dev/null && echo "setcap: cap_net_admin granted to ./$(BINARY)" || true
 	python3 scripts/smoke_test.py
 
 ## smoketest-limited: run smoke tests, skipping tests that require unavailable backends
 smoketest-limited: build
+	@sudo -n setcap cap_net_admin+ep ./$(BINARY) 2>/dev/null && echo "setcap: cap_net_admin granted to ./$(BINARY)" || true
 	python3 scripts/smoke_test.py --limited
 
 clean:
