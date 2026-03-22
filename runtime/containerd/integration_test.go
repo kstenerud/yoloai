@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/kstenerud/yoloai/runtime"
+	"github.com/kstenerud/yoloai/runtime/caps"
 )
 
 // skipIfNotAvailable skips the test if containerd is not available.
@@ -55,10 +56,10 @@ func TestIntegration_IsReady_False(t *testing.T) {
 	require.NoError(t, err)
 }
 
-// TestIntegration_ValidateIsolation verifies ValidateIsolation reports missing prerequisites.
-// On a machine without Kata, it should return an error listing missing items.
-// On a machine with full Kata setup, it should return nil.
-func TestIntegration_ValidateIsolation(t *testing.T) {
+// TestIntegration_RequiredCapabilities verifies RequiredCapabilities reports missing prerequisites.
+// On a machine without Kata, RunChecks should return failing results.
+// On a machine with full Kata setup, all checks should pass.
+func TestIntegration_RequiredCapabilities(t *testing.T) {
 	skipIfNotAvailable(t)
 
 	ctx := context.Background()
@@ -66,16 +67,17 @@ func TestIntegration_ValidateIsolation(t *testing.T) {
 	require.NoError(t, err)
 	defer rt.Close() //nolint:errcheck // best-effort close
 
-	// ValidateIsolation either passes (full setup) or returns an error (partial setup).
-	// Either outcome is acceptable for this test — we just verify it doesn't panic.
-	err = rt.ValidateIsolation(ctx, "vm")
-	t.Logf("ValidateIsolation('vm') result: %v", err)
+	capList := rt.RequiredCapabilities("vm")
+	require.NotNil(t, capList)
+	env := caps.DetectEnvironment()
+	results := caps.RunChecks(ctx, capList, env)
+	t.Logf("RequiredCapabilities('vm') results: %v", caps.FormatError(results))
 	// No assert — the result depends on the test machine configuration.
 }
 
-// TestIntegration_ValidateIsolation_VmEnhanced verifies the devmapper snapshotter probe
+// TestIntegration_RequiredCapabilities_VmEnhanced verifies the devmapper snapshotter probe
 // works against the real containerd daemon with vm-enhanced isolation.
-func TestIntegration_ValidateIsolation_VmEnhanced(t *testing.T) {
+func TestIntegration_RequiredCapabilities_VmEnhanced(t *testing.T) {
 	skipIfNotAvailable(t)
 
 	ctx := context.Background()
@@ -83,10 +85,12 @@ func TestIntegration_ValidateIsolation_VmEnhanced(t *testing.T) {
 	require.NoError(t, err)
 	defer rt.Close() //nolint:errcheck // best-effort close
 
-	err = rt.ValidateIsolation(ctx, "vm-enhanced")
-	t.Logf("ValidateIsolation('vm-enhanced') result: %v", err)
+	capList := rt.RequiredCapabilities("vm-enhanced")
+	require.NotNil(t, capList)
+	env := caps.DetectEnvironment()
+	results := caps.RunChecks(ctx, capList, env)
+	t.Logf("RequiredCapabilities('vm-enhanced') results: %v", caps.FormatError(results))
 	// No assert — the result depends on the test machine configuration.
-	// On the test VM with devmapper configured, this should return nil.
 }
 
 // TestIntegration_ContainerLifecycle runs a full create/start/stop/remove cycle.

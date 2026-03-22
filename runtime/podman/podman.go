@@ -15,6 +15,7 @@ import (
 
 	"github.com/kstenerud/yoloai/config"
 	"github.com/kstenerud/yoloai/runtime"
+	"github.com/kstenerud/yoloai/runtime/caps"
 	"github.com/kstenerud/yoloai/runtime/docker"
 )
 
@@ -23,11 +24,14 @@ import (
 type Runtime struct {
 	*docker.Runtime
 	rootless bool // true when connected to a rootless (user) Podman socket
+
+	// Capability fields — built once in New(), returned by RequiredCapabilities.
+	rootlessCheck caps.HostCapability
+	gvisorRunsc   caps.HostCapability
 }
 
 // Compile-time checks.
 var _ runtime.Runtime = (*Runtime)(nil)
-var _ runtime.IsolationValidator = (*Runtime)(nil)
 var _ runtime.UsernsProvider = (*Runtime)(nil)
 
 // New creates a Podman Runtime by discovering the Podman socket and
@@ -47,7 +51,11 @@ func New(ctx context.Context) (*Runtime, error) {
 		return nil, fmt.Errorf("connect to podman: %w", err)
 	}
 
-	return &Runtime{Runtime: dockerRT, rootless: socketIsRootless(sock)}, nil
+	rootless := socketIsRootless(sock)
+	r := &Runtime{Runtime: dockerRT, rootless: rootless}
+	r.rootlessCheck = buildRootlessCheckCap(rootless)
+	r.gvisorRunsc = caps.NewGVisorRunsc(runscLookPath)
+	return r, nil
 }
 
 // Create wraps the Docker Create to inject --userns=keep-id for rootless mode.
@@ -162,26 +170,23 @@ func defaultMachineSocketDiscovery() (string, error) {
 	return "unix://" + sock, nil
 }
 
-// ValidateIsolation checks that the host has the required runtime for the
-// given isolation mode. For container-enhanced (gVisor), it verifies that
-// the "runsc" OCI runtime is in containers.conf and that Podman is not
-// running in rootless mode (rootless Podman + runsc fails due to cgroup
-// delegation issues).
-func (r *Runtime) ValidateIsolation(_ context.Context, isolation string) error {
-	if isolation != "container-enhanced" {
+// BaseModeName returns "container" — Podman's default isolation mode.
+func (r *Runtime) BaseModeName() string { return "container" }
+
+// SupportedIsolationModes returns the isolation modes Podman can potentially support.
+func (r *Runtime) SupportedIsolationModes() []string { return []string{"container-enhanced"} }
+
+// RequiredCapabilities returns the host capabilities needed for the given isolation mode.
+func (r *Runtime) RequiredCapabilities(isolation string) []caps.HostCapability {
+	switch isolation {
+	case "container-enhanced":
+		// rootlessCheck first: it's a permanent blocker; surfacing it before
+		// gvisorRunsc avoids a confusing "install runsc" suggestion when the
+		// real answer is "rootless Podman can never run gVisor."
+		return []caps.HostCapability{r.rootlessCheck, r.gvisorRunsc}
+	default:
 		return nil
 	}
-	if r.rootless {
-		return fmt.Errorf("--isolation container-enhanced requires Podman running as root\n" +
-			"  gVisor (runsc) with rootless Podman fails due to cgroup v2 delegation\n" +
-			"  Run as root or use Docker for container-enhanced isolation")
-	}
-	if _, err := runscLookPath("runsc"); err != nil {
-		return fmt.Errorf("--isolation container-enhanced requires gVisor (runsc) in PATH\n" +
-			"  Install: https://gvisor.dev/docs/user_guide/install/\n" +
-			"  Then add to /etc/containers/containers.conf: [engine.runtimes] runsc = [\"/usr/local/sbin/runsc\"]")
-	}
-	return nil
 }
 
 // UsernsMode returns the user namespace mode for a new container.

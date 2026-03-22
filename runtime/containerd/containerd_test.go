@@ -2,8 +2,8 @@ package containerdrt
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +11,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/kstenerud/yoloai/runtime/caps"
 )
 
 // TestName verifies the backend name is "containerd".
@@ -96,269 +98,211 @@ func TestIsWSL2_NonWSL(t *testing.T) {
 	assert.False(t, strings.Contains(strings.ToLower(string(data)), "microsoft"))
 }
 
-// ValidateIsolation tests
+// RequiredCapabilities tests
 
-// setupValidateIsolationMocks configures all prerequisite check overrides so that
-// ValidateIsolation passes cleanly. Returns a restore function.
-func setupValidateIsolationMocks(t *testing.T) (sockPath string, restoreAll func()) {
+// buildTestRuntime constructs a Runtime with injected cap fields for unit testing.
+func buildTestRuntime(t *testing.T) (*Runtime, func()) {
 	t.Helper()
 	tmpDir := t.TempDir()
-
-	// Create a listening Unix socket so net.Dial succeeds.
-	sockPath = filepath.Join(tmpDir, "containerd.sock")
-	ln, err := net.Listen("unix", sockPath)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = ln.Close() })
-
-	// Create a fake CNI bridge binary (0o750: executable by group, acceptable for test bins).
-	cniBridgeDir := filepath.Join(tmpDir, "cni", "bin")
-	require.NoError(t, os.MkdirAll(cniBridgeDir, 0o750))
-	cniBridgeFile := filepath.Join(cniBridgeDir, "bridge")
-	require.NoError(t, os.WriteFile(cniBridgeFile, nil, 0o750)) //nolint:gosec // G306: intentional executable for test
-
-	// Create a fake /dev/kvm.
-	kvmFile := filepath.Join(tmpDir, "kvm")
-	require.NoError(t, os.WriteFile(kvmFile, nil, 0o600))
 
 	// Create fake kata shim binaries on PATH (must be executable for exec.LookPath).
 	fakeBinDir := filepath.Join(tmpDir, "bin")
 	require.NoError(t, os.MkdirAll(fakeBinDir, 0o750))
 	require.NoError(t, os.WriteFile(filepath.Join(fakeBinDir, "containerd-shim-kata-v2"), nil, 0o750))    //nolint:gosec // G306: intentional executable for test
 	require.NoError(t, os.WriteFile(filepath.Join(fakeBinDir, "containerd-shim-kata-fc-v2"), nil, 0o750)) //nolint:gosec // G306: intentional executable for test
-	t.Setenv("PATH", fakeBinDir+":"+os.Getenv("PATH"))
 
-	origSock := containerdSockPath
+	// Create fake CNI bridge.
+	cniBridgeDir := filepath.Join(tmpDir, "cni", "bin")
+	require.NoError(t, os.MkdirAll(cniBridgeDir, 0o750))
+	cniBridgeFile := filepath.Join(cniBridgeDir, "bridge")
+	require.NoError(t, os.WriteFile(cniBridgeFile, nil, 0o750)) //nolint:gosec // G306: intentional executable for test
+
+	// Create fake /dev/kvm.
+	kvmFile := filepath.Join(tmpDir, "kvm")
+	require.NoError(t, os.WriteFile(kvmFile, nil, 0o666)) //nolint:gosec // G306: open permissions so our open check passes
+
 	origShim := kataShimName
 	origFCShim := kataFCShimName
 	origCNI := cniBridgePath
 	origKVM := kvmDevPath
 	origCAN := canCreateNetNSFunc
-	origWSL2 := wsl2CheckFunc
-	origDevmapper := devmakerCheckFunc
 
-	containerdSockPath = sockPath
 	kataShimName = "containerd-shim-kata-v2"
 	kataFCShimName = "containerd-shim-kata-fc-v2"
 	cniBridgePath = cniBridgeFile
 	kvmDevPath = kvmFile
 	canCreateNetNSFunc = func() error { return nil }
-	wsl2CheckFunc = func() bool { return false }
-	devmakerCheckFunc = func(_ context.Context, _ *Runtime) error { return nil }
+	t.Setenv("PATH", fakeBinDir+":"+os.Getenv("PATH"))
 
-	return sockPath, func() {
-		containerdSockPath = origSock
+	r := &Runtime{namespace: "yoloai"}
+	r.kataShimV2 = buildKataShimV2Cap()
+	r.kataFCShimV2 = buildKataFCShimV2Cap()
+	r.cniBridge = buildCNIBridgeCap()
+	r.netnsCreation = buildNetnsCreationCap()
+	r.kvmDevice = buildKVMDeviceCap()
+	// devmapperSnapshotter requires a real client — leave zero-value for unit tests.
+	r.devmapperSnapshotter = caps.HostCapability{
+		ID:      "devmapper-snapshotter",
+		Summary: "devmapper snapshotter",
+		Check:   func(_ context.Context) error { return nil }, // pass by default
+	}
+
+	restore := func() {
 		kataShimName = origShim
 		kataFCShimName = origFCShim
 		cniBridgePath = origCNI
 		kvmDevPath = origKVM
 		canCreateNetNSFunc = origCAN
-		wsl2CheckFunc = origWSL2
-		devmakerCheckFunc = origDevmapper
 	}
+	return r, restore
 }
 
-func TestValidateIsolation_AllPrerequisitesMet(t *testing.T) {
-	_, restore := setupValidateIsolationMocks(t)
+func TestRequiredCapabilities_VM_AllPass(t *testing.T) {
+	r, restore := buildTestRuntime(t)
 	defer restore()
 
-	r := &Runtime{}
-	err := r.ValidateIsolation(context.Background(), "vm")
+	capList := r.RequiredCapabilities("vm")
+	require.Len(t, capList, 4)
+
+	env := caps.DetectEnvironment()
+	results := caps.RunChecks(context.Background(), capList, env)
+	err := caps.FormatError(results)
 	assert.NoError(t, err)
 }
 
-func TestValidateIsolation_VmEnhanced_AllPrerequisitesMet(t *testing.T) {
-	_, restore := setupValidateIsolationMocks(t)
+func TestRequiredCapabilities_VMEnhanced_HasMoreCaps(t *testing.T) {
+	r, restore := buildTestRuntime(t)
 	defer restore()
 
-	r := &Runtime{}
-	err := r.ValidateIsolation(context.Background(), "vm-enhanced")
-	assert.NoError(t, err)
+	vmCaps := r.RequiredCapabilities("vm")
+	vmEnhancedCaps := r.RequiredCapabilities("vm-enhanced")
+
+	assert.Greater(t, len(vmEnhancedCaps), len(vmCaps))
 }
 
-func TestValidateIsolation_VmEnhanced_FCShimMissing(t *testing.T) {
-	_, restore := setupValidateIsolationMocks(t)
+func TestRequiredCapabilities_KataShimMissing(t *testing.T) {
+	r, restore := buildTestRuntime(t)
+	defer restore()
+
+	kataShimName = "containerd-shim-kata-v2-nonexistent"
+	r.kataShimV2 = buildKataShimV2Cap()
+
+	capList := r.RequiredCapabilities("vm")
+	env := caps.DetectEnvironment()
+	results := caps.RunChecks(context.Background(), capList, env)
+	err := caps.FormatError(results)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "kata-containers shim")
+}
+
+func TestRequiredCapabilities_CNIMissing(t *testing.T) {
+	r, restore := buildTestRuntime(t)
+	defer restore()
+
+	cniBridgePath = filepath.Join(t.TempDir(), "no-bridge")
+	r.cniBridge = buildCNIBridgeCap()
+
+	capList := r.RequiredCapabilities("vm")
+	env := caps.DetectEnvironment()
+	results := caps.RunChecks(context.Background(), capList, env)
+	err := caps.FormatError(results)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "CNI plugins")
+}
+
+func TestRequiredCapabilities_CannotCreateNetNS(t *testing.T) {
+	r, restore := buildTestRuntime(t)
+	defer restore()
+
+	canCreateNetNSFunc = func() error { return errors.New("operation not permitted") }
+	r.netnsCreation = buildNetnsCreationCap()
+
+	capList := r.RequiredCapabilities("vm")
+	env := caps.DetectEnvironment()
+	results := caps.RunChecks(context.Background(), capList, env)
+	err := caps.FormatError(results)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "network namespace creation")
+}
+
+func TestRequiredCapabilities_KVMMissing(t *testing.T) {
+	r, restore := buildTestRuntime(t)
+	defer restore()
+
+	kvmDevPath = filepath.Join(t.TempDir(), "no-kvm")
+	r.kvmDevice = buildKVMDeviceCap()
+
+	capList := r.RequiredCapabilities("vm")
+	env := caps.DetectEnvironment()
+	results := caps.RunChecks(context.Background(), capList, env)
+	err := caps.FormatError(results)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "KVM device")
+}
+
+func TestRequiredCapabilities_FCShimMissing_VmEnhanced(t *testing.T) {
+	r, restore := buildTestRuntime(t)
 	defer restore()
 
 	kataFCShimName = "containerd-shim-kata-fc-v2-nonexistent"
+	r.kataFCShimV2 = buildKataFCShimV2Cap()
 
-	r := &Runtime{}
-	err := r.ValidateIsolation(context.Background(), "vm-enhanced")
+	capList := r.RequiredCapabilities("vm-enhanced")
+	env := caps.DetectEnvironment()
+	results := caps.RunChecks(context.Background(), capList, env)
+	err := caps.FormatError(results)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "kata shim not found")
+	assert.Contains(t, err.Error(), "Firecracker")
 }
 
-func TestValidateIsolation_VmEnhanced_DevmakerNotConfigured(t *testing.T) {
-	_, restore := setupValidateIsolationMocks(t)
+func TestRequiredCapabilities_DevmapperFailure_VmEnhanced(t *testing.T) {
+	r, restore := buildTestRuntime(t)
 	defer restore()
 
-	devmakerCheckFunc = func(_ context.Context, _ *Runtime) error {
-		return fmt.Errorf("devmapper snapshotter not configured: snapshotter not loaded: invalid argument\n    Run the devmapper setup script and restart containerd.")
+	r.devmapperSnapshotter = caps.HostCapability{
+		ID:      "devmapper-snapshotter",
+		Summary: "devmapper snapshotter",
+		Check:   func(_ context.Context) error { return fmt.Errorf("devmapper snapshotter not configured") },
+		Fix: func(_ caps.Environment) []caps.FixStep {
+			return []caps.FixStep{{Description: "run setup script", NeedsRoot: true}}
+		},
 	}
 
-	r := &Runtime{}
-	err := r.ValidateIsolation(context.Background(), "vm-enhanced")
+	capList := r.RequiredCapabilities("vm-enhanced")
+	env := caps.DetectEnvironment()
+	results := caps.RunChecks(context.Background(), capList, env)
+	err := caps.FormatError(results)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "devmapper snapshotter not configured")
+	assert.Contains(t, err.Error(), "devmapper")
 }
 
-func TestValidateIsolation_VmEnhanced_DevmakerOnlyCheckedForVmEnhanced(t *testing.T) {
-	_, restore := setupValidateIsolationMocks(t)
+func TestRequiredCapabilities_DevmapperNotCheckedForVM(t *testing.T) {
+	r, restore := buildTestRuntime(t)
 	defer restore()
 
-	// Devmapper check always fails — but vm (not vm-enhanced) should not call it.
-	devmakerCheckFunc = func(_ context.Context, _ *Runtime) error {
-		return fmt.Errorf("devmapper snapshotter not configured")
+	r.devmapperSnapshotter = caps.HostCapability{
+		ID:      "devmapper-snapshotter",
+		Summary: "devmapper snapshotter",
+		Check:   func(_ context.Context) error { return fmt.Errorf("devmapper snapshotter not configured") },
 	}
 
-	r := &Runtime{}
-	err := r.ValidateIsolation(context.Background(), "vm")
+	capList := r.RequiredCapabilities("vm")
+	env := caps.DetectEnvironment()
+	results := caps.RunChecks(context.Background(), capList, env)
+	err := caps.FormatError(results)
 	assert.NoError(t, err, "vm isolation should not probe devmapper snapshotter")
 }
 
-func TestValidateIsolation_Vm_UsesQemuShim(t *testing.T) {
-	_, restore := setupValidateIsolationMocks(t)
-	defer restore()
-
-	// vm isolation should check kataShimName (QEMU), not kataFCShimName (Firecracker).
-	kataShimName = "containerd-shim-kata-v2-nonexistent"
-
+func TestBaseModeName(t *testing.T) {
 	r := &Runtime{}
-	err := r.ValidateIsolation(context.Background(), "vm")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "kata shim not found")
+	assert.Equal(t, "vm", r.BaseModeName())
 }
 
-func TestValidateIsolation_SocketMissing(t *testing.T) {
-	_, restore := setupValidateIsolationMocks(t)
-	defer restore()
-
-	containerdSockPath = filepath.Join(t.TempDir(), "nonexistent.sock")
-
+func TestSupportedIsolationModes(t *testing.T) {
 	r := &Runtime{}
-	err := r.ValidateIsolation(context.Background(), "vm")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "containerd socket not found")
-}
-
-func TestValidateIsolation_KataShimMissing(t *testing.T) {
-	_, restore := setupValidateIsolationMocks(t)
-	defer restore()
-
-	kataShimName = "containerd-shim-kata-v2-nonexistent"
-
-	r := &Runtime{}
-	err := r.ValidateIsolation(context.Background(), "vm")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "kata shim not found")
-}
-
-func TestValidateIsolation_CNIMissing(t *testing.T) {
-	_, restore := setupValidateIsolationMocks(t)
-	defer restore()
-
-	cniBridgePath = filepath.Join(t.TempDir(), "no-bridge")
-
-	r := &Runtime{}
-	err := r.ValidateIsolation(context.Background(), "vm")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "CNI plugins not found")
-}
-
-func TestValidateIsolation_CannotCreateNetNS(t *testing.T) {
-	_, restore := setupValidateIsolationMocks(t)
-	defer restore()
-
-	canCreateNetNSFunc = func() error { return fmt.Errorf("operation not permitted") }
-
-	r := &Runtime{}
-	err := r.ValidateIsolation(context.Background(), "vm")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "cannot create network namespaces")
-}
-
-func TestValidateIsolation_KVMMissing_NonWSL2(t *testing.T) {
-	_, restore := setupValidateIsolationMocks(t)
-	defer restore()
-
-	kvmDevPath = filepath.Join(t.TempDir(), "no-kvm")
-	wsl2CheckFunc = func() bool { return false }
-
-	r := &Runtime{}
-	err := r.ValidateIsolation(context.Background(), "vm")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "/dev/kvm not found")
-}
-
-func TestValidateIsolation_KVMMissing_WSL2(t *testing.T) {
-	_, restore := setupValidateIsolationMocks(t)
-	defer restore()
-
-	kvmDevPath = filepath.Join(t.TempDir(), "no-kvm")
-	wsl2CheckFunc = func() bool { return true }
-
-	r := &Runtime{}
-	err := r.ValidateIsolation(context.Background(), "vm")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "nested virtualization")
-}
-
-func TestValidateIsolation_MultipleFailures(t *testing.T) {
-	_, restore := setupValidateIsolationMocks(t)
-	defer restore()
-
-	// Fail three checks simultaneously.
-	cniBridgePath = filepath.Join(t.TempDir(), "no-bridge")
-	kvmDevPath = filepath.Join(t.TempDir(), "no-kvm")
-	canCreateNetNSFunc = func() error { return fmt.Errorf("operation not permitted") }
-
-	r := &Runtime{}
-	err := r.ValidateIsolation(context.Background(), "vm")
-	require.Error(t, err)
-	// All three failures should appear in the error message.
-	assert.Contains(t, err.Error(), "CNI plugins not found")
-	assert.Contains(t, err.Error(), "cannot create network namespaces")
-	assert.Contains(t, err.Error(), "/dev/kvm not found")
-}
-
-func TestValidateIsolation_SocketPermissionDenied(t *testing.T) {
-	_, restore := setupValidateIsolationMocks(t)
-	defer restore()
-
-	// Simulate permission denied by pointing to a socket path whose directory
-	// is unreadable.
-	tmpDir := t.TempDir()
-	noAccessDir := filepath.Join(tmpDir, "noaccess")
-	require.NoError(t, os.MkdirAll(noAccessDir, 0o000))
-	t.Cleanup(func() { _ = os.Chmod(noAccessDir, 0o755) }) //nolint:gosec // G302: restoring test dir to allow cleanup
-	containerdSockPath = filepath.Join(noAccessDir, "containerd.sock")
-
-	r := &Runtime{}
-	err := r.ValidateIsolation(context.Background(), "vm")
-	require.Error(t, err)
-	// Either "permission denied" or "not found" branch — both are valid.
-	assert.True(t,
-		strings.Contains(err.Error(), "permission") || strings.Contains(err.Error(), "containerd socket"),
-		"expected socket error, got: %v", err)
-}
-
-func TestValidateIsolation_FormatError(t *testing.T) {
-	_, restore := setupValidateIsolationMocks(t)
-	defer restore()
-
-	r := &Runtime{}
-	err := r.ValidateIsolation(context.Background(), "vm")
-	require.NoError(t, err)
-	// Run with multiple failures to check the joined error format.
-	cniBridgePath = filepath.Join(t.TempDir(), "no-bridge")
-	canCreateNetNSFunc = func() error { return fmt.Errorf("operation not permitted") }
-	err = r.ValidateIsolation(context.Background(), "vm")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "VM isolation mode requires additional setup")
-	assert.Contains(t, err.Error(), "  - ")
-
-	// Verify that fmt.Errorf wrapping includes the error key phrases.
-	errStr := err.Error()
-	assert.True(t, strings.Count(errStr, "  - ") >= 2, "expected at least 2 bullet points in: %s", errStr)
+	modes := r.SupportedIsolationModes()
+	assert.Contains(t, modes, "vm")
+	assert.Contains(t, modes, "vm-enhanced")
 }
 
 // TmuxSocket test

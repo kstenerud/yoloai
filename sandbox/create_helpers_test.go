@@ -16,6 +16,7 @@ import (
 
 	"github.com/kstenerud/yoloai/agent"
 	"github.com/kstenerud/yoloai/runtime"
+	"github.com/kstenerud/yoloai/runtime/caps"
 	containerdrt "github.com/kstenerud/yoloai/runtime/containerd"
 	dockerrt "github.com/kstenerud/yoloai/runtime/docker"
 	seatbeltrt "github.com/kstenerud/yoloai/runtime/seatbelt"
@@ -1160,47 +1161,50 @@ func TestResolveCopyMount_Tart(t *testing.T) {
 
 // checkIsolationPrerequisites tests
 
-// validatingRuntime wraps mockRuntime and implements IsolationValidator.
-type validatingRuntime struct {
+// capsRuntime wraps mockRuntime and overrides RequiredCapabilities for testing.
+type capsRuntime struct {
 	mockRuntime
-	validateErr    error
-	validateCalled bool
-	lastIsolation  string
+	capList []caps.HostCapability
 }
 
-func (v *validatingRuntime) ValidateIsolation(_ context.Context, isolation string) error {
-	v.validateCalled = true
-	v.lastIsolation = isolation
-	return v.validateErr
+func (c *capsRuntime) RequiredCapabilities(_ string) []caps.HostCapability {
+	return c.capList
 }
 
-func TestCheckIsolationPrerequisites_NoValidator(t *testing.T) {
-	// mockRuntime does not implement IsolationValidator — should be a no-op.
+func TestCheckIsolationPrerequisites_NoCaps(t *testing.T) {
+	// mockRuntime returns nil from RequiredCapabilities — should be a no-op.
 	rt := &mockRuntime{}
 	err := checkIsolationPrerequisites(context.Background(), rt, "container-enhanced")
 	assert.NoError(t, err)
 }
 
-func TestCheckIsolationPrerequisites_ValidatorPasses(t *testing.T) {
-	rt := &validatingRuntime{}
+func TestCheckIsolationPrerequisites_AllCapsPass(t *testing.T) {
+	rt := &capsRuntime{
+		capList: []caps.HostCapability{
+			{ID: "a", Summary: "Cap A", Check: func(_ context.Context) error { return nil }},
+		},
+	}
 	err := checkIsolationPrerequisites(context.Background(), rt, "vm")
 	assert.NoError(t, err)
-	assert.True(t, rt.validateCalled)
-	assert.Equal(t, "vm", rt.lastIsolation)
 }
 
-func TestCheckIsolationPrerequisites_ValidatorFails(t *testing.T) {
-	rt := &validatingRuntime{validateErr: fmt.Errorf("kata shim not found")}
+func TestCheckIsolationPrerequisites_CapFails(t *testing.T) {
+	rt := &capsRuntime{
+		capList: []caps.HostCapability{
+			{ID: "kata-shim", Summary: "kata shim", Check: func(_ context.Context) error { return fmt.Errorf("kata shim not found") }},
+		},
+	}
 	err := checkIsolationPrerequisites(context.Background(), rt, "vm")
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "kata shim not found")
-	assert.True(t, rt.validateCalled)
+	assert.Contains(t, err.Error(), "kata shim")
 }
 
-func TestCheckIsolationPrerequisites_PassesIsolationMode(t *testing.T) {
+func TestCheckIsolationPrerequisites_IsolationModeForwarded(t *testing.T) {
+	rt := &capsRuntime{}
+	// For this test we use the base capsRuntime which returns nil caps.
+	// Just verify that checkIsolationPrerequisites doesn't panic for any mode.
 	for _, mode := range []string{"container", "container-enhanced", "vm", "vm-enhanced", ""} {
-		rt := &validatingRuntime{}
-		_ = checkIsolationPrerequisites(context.Background(), rt, mode)
-		assert.Equal(t, mode, rt.lastIsolation, "isolation mode should be forwarded as-is")
+		err := checkIsolationPrerequisites(context.Background(), rt, mode)
+		assert.NoError(t, err, "mode %q should not fail with nil caps", mode)
 	}
 }

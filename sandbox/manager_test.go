@@ -16,6 +16,7 @@ import (
 
 	"github.com/kstenerud/yoloai/config"
 	"github.com/kstenerud/yoloai/runtime"
+	"github.com/kstenerud/yoloai/runtime/caps"
 	dockerrt "github.com/kstenerud/yoloai/runtime/docker"
 )
 
@@ -87,6 +88,9 @@ func (m *mockRuntime) TmuxSocket(_ string) string                          { ret
 func (m *mockRuntime) AttachCommand(_ string, _, _ int, _ string) []string { return nil }
 func (m *mockRuntime) AgentProvisionedByBackend() bool                     { return true }
 func (m *mockRuntime) ResolveCopyMount(_, hostPath string) string          { return hostPath }
+func (m *mockRuntime) BaseModeName() string                                { return "container" }
+func (m *mockRuntime) SupportedIsolationModes() []string                   { return nil }
+func (m *mockRuntime) RequiredCapabilities(_ string) []caps.HostCapability { return nil }
 func (m *mockRuntime) Capabilities() runtime.BackendCaps {
 	return runtime.BackendCaps{
 		NetworkIsolation: true,

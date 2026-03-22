@@ -16,6 +16,7 @@ import (
 	"github.com/kstenerud/yoloai/config"
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/runtime"
+	"github.com/kstenerud/yoloai/runtime/caps"
 )
 
 // mkdirAllPerm creates a directory (and parents) then explicitly chmods it to
@@ -53,15 +54,16 @@ const (
 	NetworkModeIsolated NetworkMode = "isolated" // allowlist only
 )
 
-// checkIsolationPrerequisites delegates isolation prerequisite validation to the
-// runtime backend via the optional IsolationValidator interface.
-// If the backend does not implement IsolationValidator, validation is skipped.
+// checkIsolationPrerequisites validates isolation prerequisites via RequiredCapabilities.
+// Returns nil when all checks pass, or a formatted error listing missing prerequisites.
 func checkIsolationPrerequisites(ctx context.Context, rt runtime.Runtime, isolation string) error {
-	v, ok := rt.(runtime.IsolationValidator)
-	if !ok {
-		return nil
+	capList := rt.RequiredCapabilities(isolation)
+	if len(capList) == 0 {
+		return nil // backend has no requirements for this mode
 	}
-	return v.ValidateIsolation(ctx, isolation)
+	env := caps.DetectEnvironment()
+	results := caps.RunChecks(ctx, capList, env)
+	return caps.FormatError(results)
 }
 
 // DirMode specifies how a directory is mounted in the sandbox.

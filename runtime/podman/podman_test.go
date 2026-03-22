@@ -9,6 +9,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/kstenerud/yoloai/runtime/caps"
 )
 
 func TestDiscoverSocket_ContainerHost(t *testing.T) {
@@ -152,42 +154,77 @@ func TestDiscoverSocket_WSL2_FirstPathWins(t *testing.T) {
 	assert.Equal(t, "unix://"+first, sock)
 }
 
-// ValidateIsolation tests
+// RequiredCapabilities tests
 
-func TestValidateIsolation_Podman_NonEnhanced(t *testing.T) {
-	r := &Runtime{}
+func buildPodmanTestRuntime(rootless bool, lookPath func(string) (string, error)) *Runtime {
+	r := &Runtime{rootless: rootless}
+	r.rootlessCheck = buildRootlessCheckCap(rootless)
+	r.gvisorRunsc = caps.NewGVisorRunsc(lookPath)
+	return r
+}
+
+func TestRequiredCapabilities_Podman_NonEnhanced(t *testing.T) {
+	r := buildPodmanTestRuntime(false, func(string) (string, error) { return "/sbin/runsc", nil })
 	for _, mode := range []string{"", "container", "vm", "vm-enhanced"} {
-		err := r.ValidateIsolation(context.Background(), mode)
-		assert.NoError(t, err, "mode %q should not require validation", mode)
+		capList := r.RequiredCapabilities(mode)
+		assert.Nil(t, capList, "mode %q should return nil caps", mode)
 	}
 }
 
-func TestValidateIsolation_Podman_Rootless(t *testing.T) {
-	r := &Runtime{rootless: true}
-	err := r.ValidateIsolation(context.Background(), "container-enhanced")
+func TestRequiredCapabilities_Podman_Rootless(t *testing.T) {
+	r := buildPodmanTestRuntime(true, func(string) (string, error) { return "/sbin/runsc", nil })
+	capList := r.RequiredCapabilities("container-enhanced")
+	require.NotNil(t, capList)
+
+	env := caps.DetectEnvironment()
+	results := caps.RunChecks(context.Background(), capList, env)
+	err := caps.FormatError(results)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "rootless")
-	assert.Contains(t, err.Error(), "root")
 }
 
-func TestValidateIsolation_Podman_RootNoRunsc(t *testing.T) {
-	origLook := runscLookPath
-	defer func() { runscLookPath = origLook }()
-	runscLookPath = func(string) (string, error) { return "", fmt.Errorf("not found") }
+func TestRequiredCapabilities_Podman_RootNoRunsc(t *testing.T) {
+	r := buildPodmanTestRuntime(false, func(string) (string, error) { return "", fmt.Errorf("not found") })
+	capList := r.RequiredCapabilities("container-enhanced")
+	require.NotNil(t, capList)
 
-	r := &Runtime{rootless: false}
-	err := r.ValidateIsolation(context.Background(), "container-enhanced")
+	env := caps.DetectEnvironment()
+	results := caps.RunChecks(context.Background(), capList, env)
+	err := caps.FormatError(results)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "runsc")
-	assert.Contains(t, err.Error(), "gVisor")
+	assert.Contains(t, err.Error(), "gVisor runtime")
 }
 
-func TestValidateIsolation_Podman_RootWithRunsc(t *testing.T) {
-	origLook := runscLookPath
-	defer func() { runscLookPath = origLook }()
-	runscLookPath = func(string) (string, error) { return "/usr/local/sbin/runsc", nil }
+func TestRequiredCapabilities_Podman_RootWithRunsc(t *testing.T) {
+	r := buildPodmanTestRuntime(false, func(string) (string, error) { return "/usr/local/sbin/runsc", nil })
+	capList := r.RequiredCapabilities("container-enhanced")
+	require.NotNil(t, capList)
 
-	r := &Runtime{rootless: false}
-	err := r.ValidateIsolation(context.Background(), "container-enhanced")
+	env := caps.DetectEnvironment()
+	results := caps.RunChecks(context.Background(), capList, env)
+	err := caps.FormatError(results)
 	assert.NoError(t, err)
+}
+
+func TestBaseModeName_Podman(t *testing.T) {
+	r := &Runtime{}
+	assert.Equal(t, "container", r.BaseModeName())
+}
+
+func TestSupportedIsolationModes_Podman(t *testing.T) {
+	r := &Runtime{}
+	modes := r.SupportedIsolationModes()
+	assert.Contains(t, modes, "container-enhanced")
+}
+
+func TestRequiredCapabilities_Podman_RootlessIsPermanent(t *testing.T) {
+	r := buildPodmanTestRuntime(true, func(string) (string, error) { return "/sbin/runsc", nil })
+	capList := r.RequiredCapabilities("container-enhanced")
+	require.NotNil(t, capList)
+
+	env := caps.DetectEnvironment()
+	results := caps.RunChecks(context.Background(), capList, env)
+	// First result should be permanent (rootless is permanent)
+	require.NotEmpty(t, results)
+	assert.True(t, results[0].IsPermanent)
 }

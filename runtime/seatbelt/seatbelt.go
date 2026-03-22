@@ -17,6 +17,7 @@ import (
 	"github.com/kstenerud/yoloai/config"
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/runtime"
+	"github.com/kstenerud/yoloai/runtime/caps"
 	"github.com/kstenerud/yoloai/runtime/monitor"
 )
 
@@ -371,6 +372,15 @@ func (r *Runtime) DiagHint(instanceName string) string {
 	logPath := filepath.Join(r.sandboxDir, sandboxName(instanceName), backendDir, processLogFileName)
 	return fmt.Sprintf("check log at %s", logPath)
 }
+
+// BaseModeName returns "process" — Seatbelt runs agent processes directly.
+func (r *Runtime) BaseModeName() string { return "process" }
+
+// SupportedIsolationModes returns nil — Seatbelt has no additional isolation modes.
+func (r *Runtime) SupportedIsolationModes() []string { return nil }
+
+// RequiredCapabilities returns nil — Seatbelt's prerequisites are enforced in New().
+func (r *Runtime) RequiredCapabilities(_ string) []caps.HostCapability { return nil }
 
 // Name returns the backend name.
 func (r *Runtime) Name() string { return "seatbelt" }

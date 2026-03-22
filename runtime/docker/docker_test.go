@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/kstenerud/yoloai/runtime"
+	"github.com/kstenerud/yoloai/runtime/caps"
 )
 
 func TestConvertMounts_Empty(t *testing.T) {
@@ -95,51 +96,85 @@ func TestConvertPorts_Multiple(t *testing.T) {
 	require.Len(t, portSet, 2)
 }
 
-// ValidateIsolation tests
+// RequiredCapabilities tests
 
-func TestValidateIsolation_NonEnhanced(t *testing.T) {
+func TestRequiredCapabilities_Docker_NonEnhanced(t *testing.T) {
 	r := &Runtime{binaryName: "docker"}
 	for _, mode := range []string{"", "container", "vm", "vm-enhanced"} {
-		err := r.ValidateIsolation(context.Background(), mode)
-		assert.NoError(t, err, "mode %q should not require validation", mode)
+		capList := r.RequiredCapabilities(mode)
+		assert.Nil(t, capList, "mode %q should return nil caps", mode)
 	}
 }
 
-func TestValidateIsolation_RunscPresent(t *testing.T) {
+func buildDockerTestRuntime(binaryName string) *Runtime {
+	r := &Runtime{binaryName: binaryName}
+	r.gvisorRunsc = caps.NewGVisorRunsc(func(string) (string, error) {
+		return "/usr/local/sbin/runsc", nil // pass by default
+	})
+	r.gvisorRegistered = buildGVisorRegisteredCap(binaryName)
+	return r
+}
+
+func TestRequiredCapabilities_Docker_RunscPresent(t *testing.T) {
 	orig := dockerInfoOutput
 	defer func() { dockerInfoOutput = orig }()
 	dockerInfoOutput = func(_ context.Context, _ string) ([]byte, error) {
 		return []byte("runc\nrunsc\nio.containerd.runc.v2\n"), nil
 	}
 
-	r := &Runtime{binaryName: "docker"}
-	err := r.ValidateIsolation(context.Background(), "container-enhanced")
+	r := buildDockerTestRuntime("docker")
+	capList := r.RequiredCapabilities("container-enhanced")
+	require.NotNil(t, capList)
+
+	env := caps.DetectEnvironment()
+	results := caps.RunChecks(context.Background(), capList, env)
+	err := caps.FormatError(results)
 	assert.NoError(t, err)
 }
 
-func TestValidateIsolation_RunscMissing(t *testing.T) {
+func TestRequiredCapabilities_Docker_RunscMissing(t *testing.T) {
 	orig := dockerInfoOutput
 	defer func() { dockerInfoOutput = orig }()
 	dockerInfoOutput = func(_ context.Context, _ string) ([]byte, error) {
 		return []byte("runc\nio.containerd.runc.v2\n"), nil
 	}
 
-	r := &Runtime{binaryName: "docker"}
-	err := r.ValidateIsolation(context.Background(), "container-enhanced")
+	r := buildDockerTestRuntime("docker")
+	capList := r.RequiredCapabilities("container-enhanced")
+	require.NotNil(t, capList)
+
+	env := caps.DetectEnvironment()
+	results := caps.RunChecks(context.Background(), capList, env)
+	err := caps.FormatError(results)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "runsc")
-	assert.Contains(t, err.Error(), "gVisor")
+	assert.Contains(t, err.Error(), "gVisor registered")
 }
 
-func TestValidateIsolation_DockerInfoFails(t *testing.T) {
+func TestRequiredCapabilities_Docker_InfoFails(t *testing.T) {
 	orig := dockerInfoOutput
 	defer func() { dockerInfoOutput = orig }()
 	dockerInfoOutput = func(_ context.Context, _ string) ([]byte, error) {
 		return nil, fmt.Errorf("docker daemon not responding")
 	}
 
-	r := &Runtime{binaryName: "docker"}
-	err := r.ValidateIsolation(context.Background(), "container-enhanced")
+	r := buildDockerTestRuntime("docker")
+	capList := r.RequiredCapabilities("container-enhanced")
+	require.NotNil(t, capList)
+
+	env := caps.DetectEnvironment()
+	results := caps.RunChecks(context.Background(), capList, env)
+	err := caps.FormatError(results)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "check runtimes")
+}
+
+func TestBaseModeName_Docker(t *testing.T) {
+	r := &Runtime{}
+	assert.Equal(t, "container", r.BaseModeName())
+}
+
+func TestSupportedIsolationModes_Docker(t *testing.T) {
+	r := &Runtime{}
+	modes := r.SupportedIsolationModes()
+	assert.Contains(t, modes, "container-enhanced")
 }

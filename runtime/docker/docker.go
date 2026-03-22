@@ -24,17 +24,21 @@ import (
 
 	"github.com/kstenerud/yoloai/config"
 	"github.com/kstenerud/yoloai/runtime"
+	"github.com/kstenerud/yoloai/runtime/caps"
 )
 
 // Runtime implements runtime.Runtime using the Docker SDK.
 type Runtime struct {
 	client     *dockerclient.Client
 	binaryName string // CLI binary name ("docker" or "podman")
+
+	// Capability fields — built once in New(), returned by RequiredCapabilities.
+	gvisorRunsc      caps.HostCapability
+	gvisorRegistered caps.HostCapability
 }
 
-// Compile-time checks.
+// Compile-time check.
 var _ runtime.Runtime = (*Runtime)(nil)
-var _ runtime.IsolationValidator = (*Runtime)(nil)
 
 // New creates a Runtime and verifies the Docker daemon is reachable.
 func New(ctx context.Context) (*Runtime, error) {
@@ -79,7 +83,10 @@ func NewWithSocket(ctx context.Context, host string, binaryName string) (*Runtim
 		return nil, config.NewDependencyError("%s daemon is not responding, %s", binaryName, hint)
 	}
 
-	return &Runtime{client: cli, binaryName: binaryName}, nil
+	r := &Runtime{client: cli, binaryName: binaryName}
+	r.gvisorRunsc = caps.NewGVisorRunsc(exec.LookPath)
+	r.gvisorRegistered = buildGVisorRegisteredCap(binaryName)
+	return r, nil
 }
 
 // Client returns the underlying Docker SDK client.
@@ -358,25 +365,21 @@ var dockerInfoOutput = func(ctx context.Context, binaryName string) ([]byte, err
 	return exec.CommandContext(ctx, binaryName, "info", "--format", "{{range $k, $v := .Runtimes}}{{$k}}\n{{end}}").Output() //nolint:gosec // G204: binaryName is "docker" or "podman"
 }
 
-// ValidateIsolation checks that the host has the required runtime for the
-// given isolation mode. For container-enhanced (gVisor), verifies that the
-// "runsc" OCI runtime is registered with the Docker daemon.
-func (r *Runtime) ValidateIsolation(ctx context.Context, isolation string) error {
-	if isolation != "container-enhanced" {
+// BaseModeName returns "container" — Docker's default isolation mode.
+func (r *Runtime) BaseModeName() string { return "container" }
+
+// SupportedIsolationModes returns the isolation modes Docker can potentially support.
+func (r *Runtime) SupportedIsolationModes() []string { return []string{"container-enhanced"} }
+
+// RequiredCapabilities returns the host capabilities needed for the given isolation mode.
+func (r *Runtime) RequiredCapabilities(isolation string) []caps.HostCapability {
+	switch isolation {
+	case "container-enhanced":
+		// gvisorRunsc first: if the binary isn't present, registration can't work.
+		return []caps.HostCapability{r.gvisorRunsc, r.gvisorRegistered}
+	default:
 		return nil
 	}
-	out, err := dockerInfoOutput(ctx, r.binaryName)
-	if err != nil {
-		return fmt.Errorf("check runtimes: %w", err)
-	}
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		if strings.TrimSpace(line) == "runsc" {
-			return nil
-		}
-	}
-	return fmt.Errorf("--isolation container-enhanced requires gVisor (runsc) registered as a Docker runtime\n" +
-		"  Install: https://gvisor.dev/docs/user_guide/install/\n" +
-		"  Then add to /etc/docker/daemon.json: {\"runtimes\": {\"runsc\": {\"path\": \"/usr/local/sbin/runsc\"}}}")
 }
 
 // TmuxSocket returns the fixed tmux socket path for Docker/Podman containers.

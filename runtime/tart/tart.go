@@ -18,6 +18,7 @@ import (
 	"github.com/kstenerud/yoloai/config"
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/runtime"
+	"github.com/kstenerud/yoloai/runtime/caps"
 	"github.com/kstenerud/yoloai/runtime/monitor"
 )
 
@@ -328,6 +329,15 @@ func (r *Runtime) DiagHint(instanceName string) string {
 	logPath := filepath.Join(r.sandboxDir, sandboxName(instanceName), backendDir, vmLogFileName)
 	return fmt.Sprintf("check VM log at %s", logPath)
 }
+
+// BaseModeName returns "vm" — Tart runs macOS VMs.
+func (r *Runtime) BaseModeName() string { return "vm" }
+
+// SupportedIsolationModes returns nil — Tart has no additional isolation modes.
+func (r *Runtime) SupportedIsolationModes() []string { return nil }
+
+// RequiredCapabilities returns nil — Tart's prerequisites are enforced in New().
+func (r *Runtime) RequiredCapabilities(_ string) []caps.HostCapability { return nil }
 
 // Name returns the backend name.
 func (r *Runtime) Name() string { return "tart" }

@@ -7,6 +7,8 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+
+	"github.com/kstenerud/yoloai/runtime/caps"
 )
 
 // Sentinel errors used across all runtime implementations.
@@ -87,14 +89,6 @@ type BackendCaps struct {
 	OverlayDirs      bool // supports :overlay mount mode (overlayfs inside the container)
 	CapAdd           bool // supports cap_add, devices, and setup commands
 	HostFilesystem   bool // true when sandbox state lives on the host (seatbelt, future SSH)
-}
-
-// IsolationValidator is an optional interface implemented by Runtime backends
-// that support prerequisite checking for isolation modes. create.go delegates
-// to this interface via checkIsolationPrerequisites; backends that don't
-// implement it skip validation silently.
-type IsolationValidator interface {
-	ValidateIsolation(ctx context.Context, isolation string) error
 }
 
 // UsernsProvider is an optional interface implemented by backends that need
@@ -203,4 +197,19 @@ type Runtime interface {
 	// the current terminal dimensions (0 = unknown). isolation is the sandbox
 	// isolation mode (e.g. "container-enhanced").
 	AttachCommand(tmuxSocket string, rows, cols int, isolation string) []string
+
+	// RequiredCapabilities returns the host capabilities needed for the given
+	// isolation mode. Returns nil if the backend has no special requirements
+	// for this mode.
+	RequiredCapabilities(isolation string) []caps.HostCapability
+
+	// SupportedIsolationModes returns the isolation modes this backend can
+	// potentially support. Returns nil if the backend has no isolation modes.
+	// Used by `system doctor` to discover what to check without the caller
+	// enumerating modes externally.
+	SupportedIsolationModes() []string
+
+	// BaseModeName returns the human label for this backend's default (no-isolation)
+	// mode, shown in `system doctor` output. e.g. "container", "vm", "process".
+	BaseModeName() string
 }

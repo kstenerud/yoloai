@@ -4,30 +4,34 @@ package containerdrt
 
 import (
 	"context"
-	"fmt"
-	"net"
 	"os"
-	"os/exec"
 	"strings"
 
 	"github.com/containerd/containerd/v2/client"
 	"github.com/containerd/containerd/v2/pkg/namespaces"
-	"github.com/containerd/errdefs"
 	"github.com/vishvananda/netns"
 
 	"github.com/kstenerud/yoloai/config"
 	"github.com/kstenerud/yoloai/runtime"
+	"github.com/kstenerud/yoloai/runtime/caps"
 )
 
 // Runtime implements runtime.Runtime using the containerd API.
 type Runtime struct {
 	client    *client.Client
 	namespace string // always "yoloai"
+
+	// Capability fields — built once in New(), returned by RequiredCapabilities.
+	kataShimV2           caps.HostCapability
+	kataFCShimV2         caps.HostCapability
+	cniBridge            caps.HostCapability
+	netnsCreation        caps.HostCapability
+	kvmDevice            caps.HostCapability
+	devmapperSnapshotter caps.HostCapability
 }
 
-// Compile-time checks.
+// Compile-time check.
 var _ runtime.Runtime = (*Runtime)(nil)
-var _ runtime.IsolationValidator = (*Runtime)(nil)
 
 // Capabilities returns the containerd backend's feature set.
 func (r *Runtime) Capabilities() runtime.BackendCaps {
@@ -49,7 +53,7 @@ func (r *Runtime) ResolveCopyMount(_, hostPath string) string { return hostPath 
 const containerdSock = "/run/containerd/containerd.sock"
 
 // New connects to the containerd daemon and returns a Runtime.
-// It does not validate isolation prerequisites — that is done via ValidateIsolation.
+// It does not validate isolation prerequisites — use RequiredCapabilities for that.
 func New(_ context.Context) (*Runtime, error) {
 	// Fast-fail if the socket file doesn't exist — avoids a slow dial timeout
 	// on systems where containerd is not installed (e.g. macOS).
@@ -66,7 +70,14 @@ func New(_ context.Context) (*Runtime, error) {
 		}
 		return nil, config.NewDependencyError("connect to containerd: %w\n  Is containerd running? Try: sudo systemctl start containerd", err)
 	}
-	return &Runtime{client: c, namespace: "yoloai"}, nil
+	r := &Runtime{client: c, namespace: "yoloai"}
+	r.kataShimV2 = buildKataShimV2Cap()
+	r.kataFCShimV2 = buildKataFCShimV2Cap()
+	r.cniBridge = buildCNIBridgeCap()
+	r.netnsCreation = buildNetnsCreationCap()
+	r.kvmDevice = buildKVMDeviceCap()
+	r.devmapperSnapshotter = buildDevmapperSnapshotterCap(r)
+	return r, nil
 }
 
 // withNamespace injects the yoloai containerd namespace into the context.
@@ -87,102 +98,37 @@ func (r *Runtime) TmuxSocket(_ string) string { return "/tmp/yoloai-tmux.sock" }
 // Close releases the containerd client connection.
 func (r *Runtime) Close() error { return r.client.Close() }
 
+// BaseModeName returns "vm" — containerd in yoloai is exclusively for VM isolation.
+func (r *Runtime) BaseModeName() string { return "vm" }
+
+// SupportedIsolationModes returns the VM isolation modes this backend supports.
+func (r *Runtime) SupportedIsolationModes() []string { return []string{"vm", "vm-enhanced"} }
+
+// RequiredCapabilities returns the host capabilities needed for the given isolation mode.
+// containerdSocket is intentionally omitted: New() already verified it.
+func (r *Runtime) RequiredCapabilities(isolation string) []caps.HostCapability {
+	base := []caps.HostCapability{
+		r.kataShimV2,
+		r.cniBridge,
+		r.netnsCreation,
+		r.kvmDevice,
+	}
+	switch isolation {
+	case "vm-enhanced":
+		return append(base, r.kataFCShimV2, r.devmapperSnapshotter)
+	default: // "vm"
+		return base
+	}
+}
+
 // Prerequisite check overrides — variable for testing.
 var (
-	containerdSockPath = "/run/containerd/containerd.sock"
 	kataShimName       = "containerd-shim-kata-v2"
 	kataFCShimName     = "containerd-shim-kata-fc-v2"
 	cniBridgePath      = "/opt/cni/bin/bridge"
 	kvmDevPath         = "/dev/kvm"
 	canCreateNetNSFunc = canCreateNetNS
-	wsl2CheckFunc      = isWSL2
-	devmakerCheckFunc  = checkDevmakerSnapshotter
 )
-
-// checkDevmakerSnapshotter probes the devmapper snapshotter by calling Stat with a
-// non-existent key. A "not found" error means the snapshotter is registered and working;
-// any other error means it is not configured.
-func checkDevmakerSnapshotter(ctx context.Context, r *Runtime) error {
-	ctx = r.withNamespace(ctx)
-	_, err := r.client.SnapshotService("devmapper").Stat(ctx, "probe")
-	if err != nil && !errdefs.IsNotFound(err) {
-		return fmt.Errorf("devmapper snapshotter not configured: %w\n"+
-			"    Run the devmapper setup script and restart containerd", err)
-	}
-	return nil
-}
-
-// ValidateIsolation checks that all prerequisites for VM isolation are satisfied.
-// Implements runtime.IsolationValidator.
-func (r *Runtime) ValidateIsolation(ctx context.Context, isolation string) error {
-	var missing []string
-
-	// Use net.Dial to test actual connectivity — os.Open on a socket returns
-	// ENXIO (not EACCES) on Linux, so it can't distinguish permission from absence.
-	if conn, err := net.Dial("unix", containerdSockPath); err != nil {
-		if os.IsPermission(err) || strings.Contains(err.Error(), "permission denied") {
-			missing = append(missing, "no permission to access containerd socket\n"+
-				"    Option 1 (simplest): run yoloai with sudo\n"+
-				"    Option 2: configure containerd socket group access (run as root or with sudo):\n"+
-				"      sudo groupadd -f containerd\n"+
-				"      sudo usermod -aG containerd $USER\n"+
-				"      GID=$(getent group containerd | cut -d: -f3)\n"+
-				"      sudo mkdir -p /etc/containerd\n"+
-				"      printf '\\n[grpc]\\n  gid = %s\\n' \"$GID\" | sudo tee -a /etc/containerd/config.toml\n"+
-				"      sudo systemctl restart containerd\n"+
-				"      newgrp containerd   # activate without logging out")
-		} else {
-			missing = append(missing, fmt.Sprintf("containerd socket not found at %s\n    Fix: sudo systemctl start containerd", containerdSockPath))
-		}
-	} else {
-		_ = conn.Close()
-	}
-
-	shimName := kataShimName
-	if isolation == "vm-enhanced" {
-		shimName = kataFCShimName
-	}
-	if _, err := exec.LookPath(shimName); err != nil {
-		missing = append(missing, "kata shim not found: install kata-containers")
-	}
-
-	if _, err := os.Stat(cniBridgePath); err != nil {
-		missing = append(missing, "CNI plugins not found: sudo apt install containernetworking-plugins")
-	}
-
-	if err := canCreateNetNSFunc(); err != nil {
-		missing = append(missing, fmt.Sprintf("cannot create network namespaces: %s\n"+
-			"    vm isolation requires root (or CAP_SYS_ADMIN + CAP_DAC_OVERRIDE + CAP_NET_ADMIN + write to /var/run/netns/)\n"+
-			"    Simplest fix: sudo make smoketest  or  sudo yoloai new ...",
-			err))
-	}
-
-	if _, err := os.Stat(kvmDevPath); err != nil {
-		if wsl2CheckFunc() {
-			missing = append(missing, "nested virtualization not enabled — see WSL2 nested virt steps in docs")
-		} else {
-			missing = append(missing, "/dev/kvm not found: enable KVM in BIOS or check hypervisor settings")
-		}
-	}
-
-	if isolation == "vm-enhanced" {
-		if err := devmakerCheckFunc(ctx, r); err != nil {
-			missing = append(missing, err.Error())
-		}
-	}
-
-	if len(missing) > 0 {
-		return fmt.Errorf("VM isolation mode requires additional setup:\n  - %s",
-			strings.Join(missing, "\n  - "))
-	}
-	return nil
-}
-
-// isWSL2 returns true if running inside a WSL2 environment.
-func isWSL2() bool {
-	data, _ := os.ReadFile("/proc/version")
-	return strings.Contains(strings.ToLower(string(data)), "microsoft")
-}
 
 // canCreateNetNS tests whether the process can actually create a named network
 // namespace by attempting to create and immediately remove a probe namespace.
@@ -198,4 +144,10 @@ func canCreateNetNS() error {
 	}
 	_ = netns.DeleteNamed(probe)
 	return nil
+}
+
+// isWSL2 returns true if running inside a WSL2 environment.
+func isWSL2() bool {
+	data, _ := os.ReadFile("/proc/version")
+	return strings.Contains(strings.ToLower(string(data)), "microsoft")
 }

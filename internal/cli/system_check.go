@@ -11,6 +11,7 @@ import (
 
 	"github.com/kstenerud/yoloai/agent"
 	"github.com/kstenerud/yoloai/runtime"
+	"github.com/kstenerud/yoloai/runtime/caps"
 	"github.com/spf13/cobra"
 )
 
@@ -135,11 +136,13 @@ func runSystemCheck(cmd *cobra.Command, backend, agentName, isolation string) er
 	if isolation != "" {
 		r := checkResult{Name: "isolation"}
 		err := withRuntime(ctx, backend, func(ctx context.Context, rt runtime.Runtime) error {
-			v, ok := rt.(runtime.IsolationValidator)
-			if !ok {
-				return nil // backend does not have isolation-specific requirements
+			capList := rt.RequiredCapabilities(isolation)
+			if len(capList) == 0 {
+				return nil // backend has no requirements for this mode
 			}
-			return v.ValidateIsolation(ctx, isolation)
+			env := caps.DetectEnvironment()
+			results := caps.RunChecks(ctx, capList, env)
+			return caps.FormatError(results)
 		})
 		if err != nil {
 			r.OK = false
