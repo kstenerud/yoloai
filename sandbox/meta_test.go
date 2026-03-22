@@ -155,6 +155,58 @@ func TestMeta_ResourcesRoundTrip(t *testing.T) {
 	assert.Equal(t, "8g", loaded.Resources.Memory)
 }
 
+func TestMeta_VersionSetOnSave(t *testing.T) {
+	dir := t.TempDir()
+
+	meta := &Meta{
+		Name:  "test-version",
+		Agent: "claude",
+		Workdir: WorkdirMeta{
+			HostPath:  "/tmp/project",
+			MountPath: "/tmp/project",
+			Mode:      "copy",
+		},
+	}
+
+	require.NoError(t, SaveMeta(dir, meta))
+	assert.Equal(t, metaVersion, meta.Version)
+
+	loaded, err := LoadMeta(dir)
+	require.NoError(t, err)
+	assert.Equal(t, metaVersion, loaded.Version)
+}
+
+func TestMeta_MigrateV0ToV1(t *testing.T) {
+	dir := t.TempDir()
+
+	// Write a legacy meta.json without a version field (simulates pre-versioning sandboxes).
+	legacyJSON := `{
+		"yoloai_version": "0.1.0",
+		"name": "old-sandbox",
+		"created_at": "2025-01-01T00:00:00Z",
+		"backend": "docker",
+		"agent": "claude",
+		"workdir": {"host_path": "/tmp/proj", "mount_path": "/tmp/proj", "mode": "copy"}
+	}`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, EnvironmentFile), []byte(legacyJSON), 0600))
+
+	loaded, err := LoadMeta(dir)
+	require.NoError(t, err)
+	assert.Equal(t, 1, loaded.Version, "v0 should be migrated to v1")
+}
+
+func TestMeta_FutureVersionReturnsError(t *testing.T) {
+	dir := t.TempDir()
+
+	futureJSON := `{"version": 9999, "name": "future", "agent": "claude",
+		"workdir": {"host_path": "/tmp", "mount_path": "/tmp", "mode": "copy"}}`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, EnvironmentFile), []byte(futureJSON), 0600))
+
+	_, err := LoadMeta(dir)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "newer version")
+}
+
 func TestMeta_ResourcesOmittedWhenNil(t *testing.T) {
 	dir := t.TempDir()
 

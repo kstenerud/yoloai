@@ -11,8 +11,13 @@ import (
 	"github.com/kstenerud/yoloai/internal/fileutil"
 )
 
+// metaVersion is the current schema version for Meta. Bump when adding or
+// changing fields that require migration from older sandboxes.
+const metaVersion = 1
+
 // Meta holds sandbox configuration captured at creation time.
 type Meta struct {
+	Version       int       `json:"version"` // schema version; 0 = legacy (pre-versioning)
 	YoloaiVersion string    `json:"yoloai_version"`
 	Name          string    `json:"name"`
 	CreatedAt     time.Time `json:"created_at"`
@@ -58,8 +63,27 @@ type DirMeta struct {
 	BaselineSHA string `json:"baseline_sha,omitempty"`
 }
 
+// migrate applies forward migrations to meta loaded from disk.
+// Missing Version (old files) deserialises as 0 and is migrated to current.
+// A version higher than the binary knows is a hard error — the user should not
+// silently run an old binary against a sandbox created by a newer one.
+func migrate(meta *Meta) error {
+	if meta.Version > metaVersion {
+		return fmt.Errorf("sandbox was created with a newer version of yoloai "+
+			"(meta version %d, this binary knows %d); upgrade yoloai to use it",
+			meta.Version, metaVersion)
+	}
+	if meta.Version < 1 {
+		// v0 → v1: bootstrap new fields added in this version.
+		// HostFilesystem is set by the Issue 1 migration when that field is added.
+		meta.Version = 1
+	}
+	return nil
+}
+
 // SaveMeta writes environment.json to the given directory path.
 func SaveMeta(dir string, meta *Meta) error {
+	meta.Version = metaVersion
 	data, err := json.MarshalIndent(meta, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal %s: %w", EnvironmentFile, err)
@@ -85,6 +109,10 @@ func LoadMeta(dir string) (*Meta, error) {
 	var meta Meta
 	if err := json.Unmarshal(data, &meta); err != nil {
 		return nil, fmt.Errorf("parse %s: %w", EnvironmentFile, err)
+	}
+
+	if err := migrate(&meta); err != nil {
+		return nil, err
 	}
 
 	return &meta, nil
