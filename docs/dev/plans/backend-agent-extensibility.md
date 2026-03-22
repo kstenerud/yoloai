@@ -68,17 +68,11 @@ Replace all `meta.Backend == "seatbelt"` and `backendName == "seatbelt"` with
 `meta.HostFilesystem`.
 
 For the `sandbox_bugreport.go:214` container-log case: the `switch backendName` picks
-between `docker logs` and `podman logs`. This is specific to backends that have a
-Docker-compatible CLI. Add a second `BackendCaps` field:
-
-```go
-ContainerLogCmd string // e.g. "docker" or "podman"; empty for non-container backends
-```
-
-Or keep a simpler approach: the log command is already derivable from backend name at
-that call site, which only runs when a container exists. Acceptable to leave as-is if
-`ContainerLogCmd` feels over-engineered — the log path is already behind a
-`meta.Backend == "docker" || "podman"` guard that's correct by definition.
+between `docker logs` and `podman logs`. Leave this as-is. The log path is already
+guarded by a `meta.Backend == "docker" || "podman"` check that is correct by
+definition — only Docker-compatible backends produce container logs retrievable this
+way. Adding `ContainerLogCmd` to `BackendCaps` would be over-engineering a two-case
+switch that will only ever have two cases.
 
 **Files to change:** `runtime/runtime.go`, all backend `Capabilities()` methods,
 `sandbox/meta.go` (or wherever Meta is built), `sandbox/context.go`,
@@ -102,28 +96,18 @@ multiple places with agent-specific logic. Currently:
 
 **Fix:**
 
-Move agent-specific settings data onto `agent.Definition`:
+Add an `ApplySettings` function field to `agent.Definition` that owns the agent's
+settings transformation entirely:
 
 ```go
 // agent/agent.go
 type Definition struct {
     // ... existing fields ...
 
-    // SkipPermissionsPrompt suppresses the dangerous-mode permission prompt in the
-    // agent's settings file (used by Claude Code).
-    SkipPermissionsPrompt bool
-
-    // DisableSandboxSetting writes `"sandbox": {"enabled": false}` into the agent's
-    // settings file (used by Claude Code).
-    DisableSandboxSetting bool
-
-    // PreferredNotifChannel sets the notification channel in the agent's settings
-    // file (e.g. "terminal_bell" for Claude Code).
-    PreferredNotifChannel string
-
-    // DisableFolderTrust writes `"folderTrust": {"enabled": false}` into the agent's
-    // settings file (used by Gemini CLI).
-    DisableFolderTrust bool
+    // ApplySettings patches the agent's settings map before it is written to disk.
+    // Called with the parsed settings map; should mutate it in place.
+    // Nil means no patches are needed.
+    ApplySettings func(settings map[string]any)
 
     // ShortLivedOAuthWarning, if true, warns users when an OAuth credential file is
     // copied into the sandbox (used by Claude Code which uses short-lived tokens).
@@ -131,9 +115,35 @@ type Definition struct {
 }
 ```
 
-Then `sandbox/create.go` reads these fields and applies them without knowing the agent
-name. The `ensureShellContainerSettings()` duplication goes away because it iterates
-over the same `Definition` fields.
+Each agent definition sets its own `ApplySettings` inline:
+
+```go
+// Claude
+ApplySettings: func(s map[string]any) {
+    s["skipDangerousModePermissionPrompt"] = true
+    s["sandbox"] = map[string]any{"enabled": false}
+    s["preferredNotifChannel"] = "terminal_bell"
+    injectIdleHook(s)
+},
+
+// Gemini
+ApplySettings: func(s map[string]any) {
+    s["security"] = map[string]any{"folderTrust": map[string]any{"enabled": false}}
+},
+```
+
+`sandbox/create.go` becomes:
+
+```go
+if agentDef.ApplySettings != nil {
+    agentDef.ApplySettings(settings)
+}
+```
+
+No agent names in the sandbox layer. No agent-specific terminology on `Definition`.
+The `ensureShellContainerSettings()` duplication goes away because it iterates over
+the same `Definition` field. `ShortLivedOAuthWarning` stays as a bool because it
+drives a user-visible warning, not a settings file mutation.
 
 The `if agentDef.Name == "shell"` routing check at `create.go:1349` should also be
 replaced. The shell agent is special because it seeds home configs for *all* real
@@ -170,11 +180,23 @@ architectural distinction.
 
 Podman inherits from Docker — no separate implementation.
 
-**Fix:** Rename the interface method and all implementations to `AgentPreinstalled() bool`.
-Semantics flip: returns `true` when the agent is already on the target (seatbelt),
-`false` when the backend provisions it (docker/containerd/tart). Update both call
-sites to read `if !m.runtime.AgentPreinstalled()` instead of
-`if m.runtime.ShouldSeedHomeConfig()`.
+Current return values after rename:
+
+| Backend | `AgentProvisionedByBackend()` |
+|---------|------------------------------|
+| Docker | `true` |
+| Podman | `true` (inherits) |
+| Containerd | `true` |
+| Tart | `true` |
+| Seatbelt | `false` |
+
+**Fix:** Rename the interface method and all implementations to
+`AgentProvisionedByBackend() bool`. Returns `true` when the backend provisions the
+agent as part of image build (docker/containerd/tart), `false` when the agent is
+already present on the target (seatbelt). The positive form is preserved — call sites
+read `if m.runtime.AgentProvisionedByBackend()` instead of
+`if m.runtime.ShouldSeedHomeConfig()` — avoiding the double negative that
+`AgentPreinstalled()` would require.
 
 **Files to change:** `runtime/runtime.go`, `runtime/docker/docker.go`,
 `runtime/containerd/containerd.go`, `runtime/tart/tart.go`,
@@ -214,29 +236,40 @@ Seatbelt.
 - `EnsureImage` → `Setup` ("prepare this backend for launching agents")
 - `ImageExists` → `IsReady` ("is this backend ready to launch agents?")
 
-The Tart internal self-calls in `tart/build.go` use `r.ImageExists()` to check for
-the provisioned VM image — these should stay as `r.IsReady()` after the rename.
-
-The `system_check.go` call passes `"yoloai-base"` as the imageRef, which is
-Docker-specific. After the rename, `IsReady` takes no imageRef argument — it returns
-true if the backend is ready to run, which for Docker means the yoloai-base image
-exists, for Seatbelt means the agent binaries are present, etc. The imageRef argument
-is an implementation detail that should not be in the interface.
-
 Updated interface:
 
 ```go
 // Setup prepares the backend for launching agents (builds/pulls images, checks
-// prerequisites). force=true rebuilds even if already ready.
+// prerequisites). sourceDir is the profile directory containing build instructions
+// (Dockerfile etc.); ignored by backends that don't build images. force=true
+// rebuilds even if already ready.
 Setup(ctx context.Context, sourceDir string, output io.Writer, logger *slog.Logger, force bool) error
 
 // IsReady returns true if the backend is ready to launch agents (image built,
-// prerequisites present, etc.).
+// prerequisites present, etc.). Each backend determines readiness by its own
+// internal criteria — callers do not pass an image reference.
 IsReady(ctx context.Context) (bool, error)
 ```
 
-**Files to change:** `runtime/runtime.go`, all backend implementations, all call
-sites listed above.
+**Tart internal self-calls:** `tart/build.go` calls `r.ImageExists(ctx, name)` twice
+with specific VM names (`provisionedImageName`, `baseImage`) to check for individual
+VMs during the build process. These are asking "does *this specific named VM* exist?"
+— a different question from "is the backend generally ready?". After the rename, these
+become a private `vmExists(ctx, name string) (bool, error)` helper inside
+`tart/build.go`, not on the interface. `r.IsReady(ctx)` on Tart answers "does the
+provisioned yoloai-base VM exist?" — encapsulating the same check it performs today.
+
+**`system_check.go`:** Replace `rt.ImageExists(ctx, "yoloai-base")` with
+`rt.IsReady(ctx)`. The imageRef argument was a Docker implementation detail leaking
+into the call site.
+
+**`sourceDir` in `Setup`:** Already passed as `""` in some call sites and ignored by
+non-Docker backends. This is documented in the updated comment above; no signature
+change required.
+
+**Files to change:** `runtime/runtime.go`, all backend implementations,
+`internal/cli/system.go`, `internal/cli/system_check.go`, `sandbox/profile_build.go`,
+`sandbox/manager.go`, `runtime/tart/build.go` (extract private `vmExists` helper).
 
 ---
 
@@ -247,15 +280,18 @@ receives `backendName` and checks `if backendName == "seatbelt"` to decide betwe
 per-sandbox tmux socket and the global tmux session. The tmux socket path is already
 written into `runtime-config.json` at sandbox creation time via `PreferredTmuxSocket()`.
 
-**Fix:** Read the socket path from `meta.RuntimeConfig.TmuxSocket` (or equivalent
-stored field) instead of re-deriving it from the backend name. This removes the
-`backendName` parameter from `writeBugReportTmuxCapture()` entirely.
+**Fix:** Read the socket path from the tmux socket stored in `runtime-config.json` at
+sandbox creation time, instead of re-deriving it from the backend name. This removes
+the `backendName` parameter from `writeBugReportTmuxCapture()` entirely.
 
-Separately, `PreferredTmuxSocket()` should be renamed to `TmuxSocket(name string)`
-to accept the sandbox name (needed for per-sandbox sockets). This is a minor rename
-that makes the interface slightly cleaner.
+Also rename `PreferredTmuxSocket()` → `TmuxSocket(name string)` on the Runtime
+interface, passing the sandbox name so backends that use per-sandbox sockets can
+incorporate it into the path.
 
-**Files to change:** `internal/cli/sandbox_bugreport.go`.
+**Files to change:** `runtime/runtime.go`, all backend implementations
+(`runtime/docker/docker.go`, `runtime/containerd/containerd.go`,
+`runtime/tart/tart.go`, `runtime/seatbelt/seatbelt.go`), `sandbox/create.go`
+(call site), `internal/cli/sandbox_bugreport.go`.
 
 ---
 
@@ -337,13 +373,30 @@ type Meta struct {
 }
 ```
 
-In `LoadMeta`, after unmarshalling, check `meta.Version` and apply any forward
-migrations before returning. Missing `Version` (old files) is treated as version 0.
-Each migration function takes a `*Meta` and fills in defaults or transforms fields for
-that version step.
+In `LoadMeta`, after unmarshalling, apply migrations and return an error if the version
+is unrecognised:
 
-Start at version 1. Version 0 → 1 migration: set `HostFilesystem` based on
-`meta.Backend == "seatbelt"` (a one-time bootstrap for existing sandboxes).
+```go
+const metaVersion = 1
+
+func migrate(m *Meta) error {
+    if m.Version > metaVersion {
+        return fmt.Errorf("sandbox was created with a newer version of yoloai "+
+            "(meta version %d, this binary knows %d); upgrade yoloai to use it",
+            m.Version, metaVersion)
+    }
+    if m.Version < 1 {
+        // v0 → v1: bootstrap HostFilesystem from backend name.
+        m.HostFilesystem = (m.Backend == "seatbelt")
+        m.Version = 1
+    }
+    return nil
+}
+```
+
+Missing `Version` (old files) deserialises as 0 and is migrated forward. A version
+higher than the binary knows is a hard error with a clear message — the user should
+not silently run an old binary against a sandbox created by a newer one.
 
 **Files to change:** `sandbox/meta.go`.
 
@@ -423,21 +476,22 @@ use, add a comment saying so.
 
 ## Implementation order
 
-These are independent. Suggested order by risk/reward:
+These are mostly independent. Suggested order by risk/reward:
 
-1. **Issue 3** (rename `ShouldSeedHomeConfig`) — pure rename, zero behavior change,
-   lowest risk.
-2. **Issue 5** (tmux socket in bugreport) — small, self-contained.
-3. **Issue 6** (`InstanceConfig` grouping + convention doc) — zero behavior change,
+1. **Issue 6** (`InstanceConfig` grouping + convention doc) — zero behavior change,
    preserves future optionality.
-4. **Issue 10** (unused sentinel errors) — pure cleanup, no behavior change.
-5. **Issue 7** (`meta.json` versioning) — must land before Issue 1 adds `HostFilesystem`
-   to `Meta`, since the migration bootstraps from backend name.
+2. **Issue 10** (unused sentinel errors) — pure cleanup, no behavior change.
+3. **Issues 3 + 4** (rename `ShouldSeedHomeConfig`, `EnsureImage`, `ImageExists`) —
+   combine into a single pass since both touch `runtime/runtime.go` and all backend
+   packages. Pure renames, zero behavior change.
+4. **Issue 5** (tmux socket in bugreport + rename `PreferredTmuxSocket`) — touches
+   runtime interface and all backends; do as part of the same pass as Issues 3+4 if
+   convenient, or separately.
+5. **Issue 7** (`meta.json` versioning) — must land before Issue 1 adds
+   `HostFilesystem` to `Meta`, since the v0→v1 migration bootstraps from backend name.
 6. **Issue 1** (`HostFilesystem` cap + `meta.HostFilesystem`) — medium scope, removes
    the most fragile future breakage. Depends on Issue 7.
 7. **Issue 9** (`os.Setenv` mutation) — self-contained, do alongside Issue 1 or 2.
 8. **Issue 8** (typed errors in CLI) — audit-heavy but mechanical; do as a single pass.
-9. **Issue 2** (agent Definition fields) — largest change, highest reward for agent
-   extensibility.
-10. **Issue 4** (rename `EnsureImage`/`ImageExists`) — straightforward rename but
-    touches many files including tests.
+9. **Issue 2** (`ApplySettings` on agent Definition) — largest change, highest reward
+   for agent extensibility.
