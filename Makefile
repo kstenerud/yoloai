@@ -4,7 +4,7 @@ COMMIT  := $(shell git rev-parse --short HEAD 2>/dev/null || echo "none")
 DATE    := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 LDFLAGS := -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(DATE)
 
-.PHONY: build test fmt lint tidy-check govulncheck hadolint actionlint check cover integration e2e integration-podman smoketest smoketest-limited clean
+.PHONY: build test fmt lint tidy-check govulncheck hadolint actionlint check cover integration e2e integration-podman smoketest smoketest-full clean
 
 build:
 	CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o $(BINARY) ./cmd/yoloai
@@ -68,16 +68,14 @@ integration-podman: build
 	@echo "Running Podman integration tests..."
 	@go test -tags=integration -v -count=1 -timeout=10m ./runtime/podman/
 
-## smoketest: run end-to-end smoke tests against real agents (requires API keys and configured backends)
-## VM backends require CAP_NET_ADMIN. If setcap is configured, it is applied automatically after build.
+## smoketest: run end-to-end smoke tests, skipping tests for unavailable backends
+## VM backends require root (CAP_SYS_ADMIN + write to /var/run/netns/). Run as root to include them.
 smoketest: build
-	@sudo -n setcap cap_net_admin+ep ./$(BINARY) 2>/dev/null && echo "setcap: cap_net_admin granted to ./$(BINARY)" || true
-	python3 scripts/smoke_test.py
-
-## smoketest-limited: run smoke tests, skipping tests that require unavailable backends
-smoketest-limited: build
-	@sudo -n setcap cap_net_admin+ep ./$(BINARY) 2>/dev/null && echo "setcap: cap_net_admin granted to ./$(BINARY)" || true
 	python3 scripts/smoke_test.py --limited
+
+## smoketest-full: run smoke tests, failing if any optional backend is unavailable
+smoketest-full: build
+	python3 scripts/smoke_test.py
 
 clean:
 	rm -f $(BINARY)

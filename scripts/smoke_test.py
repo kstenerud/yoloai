@@ -692,20 +692,16 @@ def main() -> int:
     ]
     if unavailable_labels:
         notes = [preq[label].note for label in unavailable_labels]
-        needs_cap_net_admin = any("CAP_NET_ADMIN" in note for note in notes)
+        needs_root = any(
+            "network namespace" in note or "CAP_SYS_ADMIN" in note
+            for note in notes
+        )
         setup_tip = ""
-        if needs_cap_net_admin:
-            # Resolve symlinks: setcap must target the real binary, and
-            # make smoketest rebuilds the binary, wiping any prior setcap.
-            real_bin = os.path.realpath(ctx.yoloai_bin)
+        if needs_root:
             setup_tip = (
-                "\nSetup tip: grant CAP_NET_ADMIN to the yoloai binary.\n"
-                "Note: 'make smoketest' rebuilds yoloai — setcap is lost on every rebuild.\n"
-                "Run this after each build, then re-run the smoke test directly:\n"
-                f"  sudo setcap cap_net_admin+ep {real_bin}\n"
-                f"  python3 scripts/smoke_test.py\n"
-                "Or run the smoke test as root:\n"
-                "  sudo make smoketest"
+                "\nSetup tip: VM isolation requires root-level privileges.\n"
+                "Run the smoke test as root to include vm/vmenhanced backends:\n"
+                "  sudo make smoketest-full"
             )
         if args.limited:
             print("WARNING: some backends unavailable (will skip their tests):")
