@@ -122,6 +122,7 @@ type sandboxState struct {
 	profile           string
 	imageRef          string
 	env               map[string]string // merged env (base + profile chain)
+	credOverrides     map[string]string // sudo-recovered credential defaults (keys absent from os.Environ)
 	hasPrompt         bool
 	promptSourcePath  string // overrides default prompt.txt path for /yoloai/prompt.txt mount
 	networkMode       string
@@ -184,11 +185,13 @@ func (m *Manager) Create(ctx context.Context, opts CreateOptions) (string, error
 
 	slog.Info("creating sandbox", "event", "sandbox.create", "sandbox", opts.Name, "agent", opts.Agent, "backend", m.backend)
 	// When running as root under sudo, API key env vars (e.g. CLAUDE_CODE_OAUTH_TOKEN)
-	// are stripped by sudo. Restore them from the parent process's environment so that
-	// all downstream checks (hasAnyAPIKey, copySeedFiles, createSecretsDir) see them.
+	// are stripped by sudo. Recover them from the parent process's environment into a
+	// local map rather than mutating the process environment. Only keys absent from
+	// os.Environ are included so host values always take precedence.
+	credOverrides := make(map[string]string)
 	for k, v := range sudoParentEnv() {
 		if os.Getenv(k) == "" {
-			_ = os.Setenv(k, v)
+			credOverrides[k] = v
 		}
 	}
 	// Validate isolation prerequisites before the potentially expensive image build.
@@ -201,7 +204,7 @@ func (m *Manager) Create(ctx context.Context, opts CreateOptions) (string, error
 		return "", err
 	}
 
-	state, err := m.prepareSandboxState(ctx, opts)
+	state, err := m.prepareSandboxState(ctx, opts, credOverrides)
 	if err != nil {
 		return "", err
 	}
@@ -256,7 +259,7 @@ func checkUnappliedWork(name string) error {
 
 // prepareSandboxState handles validation, safety checks, directory
 // creation, workdir copy, git baseline, and meta/config writing.
-func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (*sandboxState, error) {
+func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions, credOverrides map[string]string) (*sandboxState, error) {
 	// Validate
 	if err := ValidateName(opts.Name); err != nil {
 		return nil, err
@@ -330,7 +333,7 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 	}
 
 	// Parse and validate directories, auth, safety checks, dirty repo warnings.
-	workdir, auxDirs, err := m.parseAndValidateDirs(ctx, opts, agentDef, pr.env, ycfg.Model)
+	workdir, auxDirs, err := m.parseAndValidateDirs(ctx, opts, agentDef, pr.env, ycfg.Model, credOverrides)
 	if err != nil {
 		return nil, err
 	}
@@ -562,6 +565,7 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions) (
 		profile:           pr.name,
 		imageRef:          pr.imageRef,
 		env:               pr.env,
+		credOverrides:     credOverrides,
 		hasPrompt:         hasPrompt,
 		networkMode:       networkMode,
 		networkAllow:      networkAllow,
@@ -594,7 +598,7 @@ func (m *Manager) launchContainer(ctx context.Context, state *sandboxState) erro
 		envVars = cfg.Env
 	}
 
-	secretsDir, err := createSecretsDir(state.agent, envVars, state.isolation)
+	secretsDir, err := createSecretsDir(state.agent, envVars, state.isolation, state.credOverrides)
 	if err != nil {
 		return fmt.Errorf("create secrets: %w", err)
 	}
@@ -888,9 +892,11 @@ func parsePortBindings(ports []string) ([]runtime.PortMapping, error) {
 
 // createSecretsDir creates a temp directory with one file per env var / API key.
 // Env vars are written first; API keys overwrite on conflict (take precedence).
+// credOverrides contains sudo-recovered credential defaults for keys absent from
+// os.Environ; they are used as a fallback so that creation under sudo sees credentials.
 // Returns empty string if nothing was written.
-func createSecretsDir(agentDef *agent.Definition, envVars map[string]string, security string) (string, error) {
-	if len(agentDef.APIKeyEnvVars) == 0 && len(agentDef.AuthHintEnvVars) == 0 && len(envVars) == 0 {
+func createSecretsDir(agentDef *agent.Definition, envVars map[string]string, security string, credOverrides map[string]string) (string, error) {
+	if len(agentDef.APIKeyEnvVars) == 0 && len(agentDef.AuthHintEnvVars) == 0 && len(envVars) == 0 && len(credOverrides) == 0 {
 		return "", nil
 	}
 
@@ -924,9 +930,13 @@ func createSecretsDir(agentDef *agent.Definition, envVars map[string]string, sec
 		wrote = true
 	}
 
-	// Write host env vars for API keys and auth hints (overwrites config env on conflict)
+	// Write host env vars for API keys and auth hints (overwrites config env on conflict).
+	// credOverrides provides sudo-recovered values for keys absent from os.Environ.
 	for _, key := range append(agentDef.APIKeyEnvVars, agentDef.AuthHintEnvVars...) {
 		value := os.Getenv(key)
+		if value == "" {
+			value = credOverrides[key]
+		}
 		if value == "" {
 			continue
 		}
@@ -1209,13 +1219,14 @@ func buildMounts(state *sandboxState, secretsDir string) []runtime.MountSpec {
 	return mounts
 }
 
-// hasAnyAPIKey returns true if any of the agent's required API key env vars are set.
-func hasAnyAPIKey(agentDef *agent.Definition) bool {
+// hasAnyAPIKey returns true if any of the agent's required API key env vars are set
+// in the process environment or in credOverrides (sudo-recovered credential defaults).
+func hasAnyAPIKey(agentDef *agent.Definition, credOverrides map[string]string) bool {
 	if len(agentDef.APIKeyEnvVars) == 0 {
 		return true // no API key required
 	}
 	for _, key := range agentDef.APIKeyEnvVars {
-		if os.Getenv(key) != "" {
+		if os.Getenv(key) != "" || credOverrides[key] != "" {
 			return true
 		}
 	}
@@ -1241,11 +1252,12 @@ func hasAnyAuthFile(agentDef *agent.Definition) bool {
 }
 
 // hasAnyAuthHint returns true if any of the agent's auth hint env vars are set
-// in the host environment or in the config env map. This allows agents like
-// aider to work with local model servers (Ollama, LM Studio) without a cloud API key.
-func hasAnyAuthHint(agentDef *agent.Definition, configEnv map[string]string) bool {
+// in the host environment, in the config env map, or in credOverrides
+// (sudo-recovered credential defaults). This allows agents like aider to work
+// with local model servers (Ollama, LM Studio) without a cloud API key.
+func hasAnyAuthHint(agentDef *agent.Definition, configEnv map[string]string, credOverrides map[string]string) bool {
 	for _, key := range agentDef.AuthHintEnvVars {
-		if os.Getenv(key) != "" {
+		if os.Getenv(key) != "" || credOverrides[key] != "" {
 			return true
 		}
 		if configEnv[key] != "" {

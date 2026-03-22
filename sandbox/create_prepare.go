@@ -214,7 +214,8 @@ func applyConfigDefaults(opts *CreateOptions, ycfg *config.YoloaiConfig, pr *pro
 // parseAndValidateDirs converts DirSpec values to DirArg, runs safety checks,
 // overlap detection, and dirty repo warnings. Returns nil workdir if the user cancelled.
 // cfgModel is the model from config.yaml (needed for local model server check).
-func (m *Manager) parseAndValidateDirs(ctx context.Context, opts CreateOptions, agentDef *agent.Definition, mergedEnv map[string]string, cfgModel string) (*DirArg, []*DirArg, error) {
+// credOverrides contains sudo-recovered credential defaults for keys absent from os.Environ.
+func (m *Manager) parseAndValidateDirs(ctx context.Context, opts CreateOptions, agentDef *agent.Definition, mergedEnv map[string]string, cfgModel string, credOverrides map[string]string) (*DirArg, []*DirArg, error) {
 	// Convert workdir DirSpec to DirArg
 	if opts.Workdir.Path == "" {
 		return nil, nil, NewUsageError("no workdir specified and no default workdir in profile")
@@ -229,9 +230,9 @@ func (m *Manager) parseAndValidateDirs(ctx context.Context, opts CreateOptions, 
 	}
 
 	// Auth checks
-	hasAPIKey := hasAnyAPIKey(agentDef)
+	hasAPIKey := hasAnyAPIKey(agentDef, credOverrides)
 	hasAuth := hasAnyAuthFile(agentDef)
-	hasAuthHint := hasAnyAuthHint(agentDef, mergedEnv)
+	hasAuthHint := hasAnyAuthHint(agentDef, mergedEnv, credOverrides)
 	if !hasAPIKey && !hasAuth && !hasAuthHint {
 		if agentDef.AuthOptional {
 			fmt.Fprintf(m.output, "Warning: no authentication detected for %s (it may use credentials yoloai cannot check)\n", agentDef.Name) //nolint:errcheck // best-effort warning

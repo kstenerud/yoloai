@@ -28,7 +28,7 @@ func TestHasAnyAPIKey_Set(t *testing.T) {
 	agentDef := agent.GetAgent("claude")
 	t.Setenv("ANTHROPIC_API_KEY", "sk-test-123")
 
-	assert.True(t, hasAnyAPIKey(agentDef))
+	assert.True(t, hasAnyAPIKey(agentDef, nil))
 }
 
 func TestHasAnyAPIKey_Unset(t *testing.T) {
@@ -36,12 +36,21 @@ func TestHasAnyAPIKey_Unset(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "")
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
 
-	assert.False(t, hasAnyAPIKey(agentDef))
+	assert.False(t, hasAnyAPIKey(agentDef, nil))
 }
 
 func TestHasAnyAPIKey_EmptyList(t *testing.T) {
 	agentDef := agent.GetAgent("test")
-	assert.True(t, hasAnyAPIKey(agentDef)) // no API key required = always true
+	assert.True(t, hasAnyAPIKey(agentDef, nil)) // no API key required = always true
+}
+
+func TestHasAnyAPIKey_CredOverride(t *testing.T) {
+	agentDef := agent.GetAgent("claude")
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
+
+	overrides := map[string]string{"ANTHROPIC_API_KEY": "sk-from-sudo"}
+	assert.True(t, hasAnyAPIKey(agentDef, overrides))
 }
 
 // hasAnyAuthFile tests
@@ -92,7 +101,7 @@ func TestCreateSecretsDir_WithKey(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "sk-test-secret")
 	agentDef := agent.GetAgent("claude")
 
-	dir, err := createSecretsDir(agentDef, nil, "")
+	dir, err := createSecretsDir(agentDef, nil, "", nil)
 	require.NoError(t, err)
 	require.NotEmpty(t, dir)
 	defer os.RemoveAll(dir) //nolint:errcheck
@@ -107,7 +116,7 @@ func TestCreateSecretsDir_NoKey(t *testing.T) {
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
 	agentDef := agent.GetAgent("claude")
 
-	dir, err := createSecretsDir(agentDef, nil, "")
+	dir, err := createSecretsDir(agentDef, nil, "", nil)
 	require.NoError(t, err)
 	assert.Empty(t, dir)
 }
@@ -115,7 +124,7 @@ func TestCreateSecretsDir_NoKey(t *testing.T) {
 func TestCreateSecretsDir_NoEnvVars(t *testing.T) {
 	agentDef := agent.GetAgent("test")
 
-	dir, err := createSecretsDir(agentDef, nil, "")
+	dir, err := createSecretsDir(agentDef, nil, "", nil)
 	require.NoError(t, err)
 	assert.Empty(t, dir)
 }
@@ -127,7 +136,7 @@ func TestCreateSecretsDir_WithEnvVars(t *testing.T) {
 		"CUSTOM_VAR":      "myvalue",
 	}
 
-	dir, err := createSecretsDir(agentDef, envVars, "")
+	dir, err := createSecretsDir(agentDef, envVars, "", nil)
 	require.NoError(t, err)
 	require.NotEmpty(t, dir)
 	defer os.RemoveAll(dir) //nolint:errcheck
@@ -148,7 +157,7 @@ func TestCreateSecretsDir_APIKeyOverridesEnv(t *testing.T) {
 		"ANTHROPIC_API_KEY": "should-be-overwritten",
 	}
 
-	dir, err := createSecretsDir(agentDef, envVars, "")
+	dir, err := createSecretsDir(agentDef, envVars, "", nil)
 	require.NoError(t, err)
 	require.NotEmpty(t, dir)
 	defer os.RemoveAll(dir) //nolint:errcheck
@@ -161,7 +170,7 @@ func TestCreateSecretsDir_APIKeyOverridesEnv(t *testing.T) {
 func TestCreateSecretsDir_EmptyBoth(t *testing.T) {
 	agentDef := agent.GetAgent("test")
 
-	dir, err := createSecretsDir(agentDef, map[string]string{}, "")
+	dir, err := createSecretsDir(agentDef, map[string]string{}, "", nil)
 	require.NoError(t, err)
 	assert.Empty(t, dir)
 }
@@ -641,7 +650,7 @@ func TestPrepareSandboxState_MissingName(t *testing.T) {
 		Name:    "",
 		Workdir: DirSpec{Path: tmpDir},
 		Agent:   "test",
-	})
+	}, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "name is required")
 }
@@ -656,7 +665,7 @@ func TestPrepareSandboxState_UnknownAgent(t *testing.T) {
 		Name:    "test",
 		Workdir: DirSpec{Path: tmpDir},
 		Agent:   "nonexistent-agent",
-	})
+	}, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unknown agent")
 }
@@ -671,7 +680,7 @@ func TestPrepareSandboxState_WorkdirMissing(t *testing.T) {
 		Name:    "test",
 		Workdir: DirSpec{Path: "/nonexistent/path"},
 		Agent:   "test",
-	})
+	}, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "workdir does not exist")
 }
@@ -694,7 +703,7 @@ func TestPrepareSandboxState_SandboxExists(t *testing.T) {
 		Name:    "existing",
 		Workdir: DirSpec{Path: tmpDir},
 		Agent:   "test",
-	})
+	}, nil)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrSandboxExists)
 }
@@ -711,7 +720,7 @@ func TestPrepareSandboxState_ConflictingPromptFlags(t *testing.T) {
 		Agent:      "test",
 		Prompt:     "hello",
 		PromptFile: "/some/file",
-	})
+	}, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "mutually exclusive")
 }
@@ -728,7 +737,7 @@ func TestPrepareSandboxState_MissingAPIKey(t *testing.T) {
 		Name:    "test",
 		Workdir: DirSpec{Path: tmpDir},
 		Agent:   "claude",
-	})
+	}, nil)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrMissingAPIKey)
 }
@@ -744,7 +753,7 @@ func TestPrepareSandboxState_DangerousDir(t *testing.T) {
 		Name:    "test",
 		Workdir: DirSpec{Path: "/"},
 		Agent:   "claude",
-	})
+	}, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "dangerous directory")
 }
@@ -762,7 +771,7 @@ func TestPrepareSandboxState_DangerousDirForce(t *testing.T) {
 		Name:    "test",
 		Workdir: DirSpec{Path: tmpDir, Mode: DirModeRW, Force: true},
 		Agent:   "claude",
-	})
+	}, nil)
 	// Should NOT fail on "dangerous directory" — :force bypasses it.
 	if err != nil {
 		assert.NotContains(t, err.Error(), "dangerous directory")
@@ -877,13 +886,13 @@ func TestCopySeedFiles_KeychainSkippedWhenFileExists(t *testing.T) {
 
 func TestHasAnyAuthHint_NoHintVars(t *testing.T) {
 	agentDef := agent.GetAgent("claude")
-	assert.False(t, hasAnyAuthHint(agentDef, nil))
+	assert.False(t, hasAnyAuthHint(agentDef, nil, nil))
 }
 
 func TestHasAnyAuthHint_HostEnvSet(t *testing.T) {
 	agentDef := agent.GetAgent("aider")
 	t.Setenv("OLLAMA_API_BASE", "http://localhost:11434")
-	assert.True(t, hasAnyAuthHint(agentDef, nil))
+	assert.True(t, hasAnyAuthHint(agentDef, nil, nil))
 }
 
 func TestHasAnyAuthHint_ConfigEnvSet(t *testing.T) {
@@ -891,7 +900,7 @@ func TestHasAnyAuthHint_ConfigEnvSet(t *testing.T) {
 	configEnv := map[string]string{
 		"OLLAMA_API_BASE": "http://localhost:11434",
 	}
-	assert.True(t, hasAnyAuthHint(agentDef, configEnv))
+	assert.True(t, hasAnyAuthHint(agentDef, configEnv, nil))
 }
 
 func TestHasAnyAuthHint_NeitherSet(t *testing.T) {
@@ -900,7 +909,7 @@ func TestHasAnyAuthHint_NeitherSet(t *testing.T) {
 	for _, key := range agentDef.AuthHintEnvVars {
 		t.Setenv(key, "")
 	}
-	assert.False(t, hasAnyAuthHint(agentDef, nil))
+	assert.False(t, hasAnyAuthHint(agentDef, nil, nil))
 }
 
 // Error message tests
@@ -925,7 +934,7 @@ func TestPrepareSandboxState_MissingAPIKeyErrorNoEmptyParens(t *testing.T) {
 		Name:    "test",
 		Workdir: DirSpec{Path: tmpDir},
 		Agent:   "aider",
-	})
+	}, nil)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrMissingAPIKey)
 	errMsg := err.Error()
@@ -953,7 +962,7 @@ func TestPrepareSandboxState_MissingAPIKeyErrorWithAuthFiles(t *testing.T) {
 		Name:    "test",
 		Workdir: DirSpec{Path: tmpDir},
 		Agent:   "claude",
-	})
+	}, nil)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrMissingAPIKey)
 	errMsg := err.Error()
@@ -995,7 +1004,7 @@ func TestPrepareSandboxState_NetworkIsolatedSetsAllowlist(t *testing.T) {
 		Agent:   "claude",
 		Network: NetworkModeIsolated,
 		Version: "test",
-	})
+	}, nil)
 	require.NoError(t, err)
 	require.NotNil(t, state)
 
@@ -1045,7 +1054,7 @@ func TestPrepareSandboxState_NetworkAllowAddsExtraDomains(t *testing.T) {
 		Network:      NetworkModeIsolated,
 		NetworkAllow: []string{"api.example.com"},
 		Version:      "test",
-	})
+	}, nil)
 	require.NoError(t, err)
 	require.NotNil(t, state)
 

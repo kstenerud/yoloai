@@ -488,7 +488,7 @@ func (m *Manager) recreateContainer(ctx context.Context, name string, meta *Meta
 	sandboxDir := Dir(name)
 
 	// Refresh seed files from host (handles OAuth token refresh between restarts)
-	hasAPIKey := hasAnyAPIKey(agentDef)
+	hasAPIKey := hasAnyAPIKey(agentDef, nil)
 	if _, err := copySeedFiles(agentDef, sandboxDir, hasAPIKey); err != nil {
 		return fmt.Errorf("refresh seed files: %w", err)
 	}

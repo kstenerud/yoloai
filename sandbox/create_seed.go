@@ -12,7 +12,7 @@ import (
 // Extracted from prepareSandboxState().
 func (m *Manager) seedSandbox(agentDef *agent.Definition, sandboxDir, isolation string, agentFiles *config.AgentFilesConfig) (agentFilesInitialized bool, err error) {
 	// Copy seed files into agent-state (config, OAuth credentials, etc.)
-	hasAPIKey := hasAnyAPIKey(agentDef)
+	hasAPIKey := hasAnyAPIKey(agentDef, nil)
 	copiedAuth, err := copySeedFiles(agentDef, sandboxDir, hasAPIKey)
 	if err != nil {
 		return false, fmt.Errorf("copy seed files: %w", err)
