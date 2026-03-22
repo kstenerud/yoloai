@@ -83,6 +83,25 @@ Do not add a `run:` prefix or any other framing — it adds no value and may con
 agent. The assertion only checks that the sentinel file exists, so it doesn't matter
 whether the agent uses its bash tool or a file-writing tool — both produce the file.
 
+## Flags
+
+### `--limited`
+
+Run the script on a machine that lacks some backends or capabilities (e.g. a laptop, a
+CI box, a VM without nested KVM). In limited mode:
+
+- Missing backends and capabilities produce a **warning**, not an abort
+- Each test that requires an unavailable backend is **loudly skipped** — printed
+  prominently to stdout so it is obvious what was not covered, rather than silently
+  omitted
+- The required default backend (docker/linux/container) is still required — there is no
+  point running any tests at all without it
+- The script exits 0 if all attempted tests pass, even if some were skipped
+
+Without `--limited`, any missing optional backend causes the script to abort after the
+prerequisites check, making the full run all-or-nothing. This keeps CI honest while
+allowing ad-hoc runs on less capable machines.
+
 ## Prerequisites check
 
 Before running any tests, the script runs a `check_prerequisites()` function that calls
@@ -98,9 +117,11 @@ The function then prints a summary table and takes one of three actions per back
 
 - **Required** (docker/linux/container — the default for T2–T6): abort with a clear
   message if unavailable. There is no point running any tests without it.
-- **Optional** (all other matrix entries): skip that backend's T1 run with a one-line
-  note explaining why. The rest of the test suite continues.
-- **All credentials missing**: abort immediately — no test can run.
+- **Optional** (all other matrix entries):
+  - Without `--limited`: abort after the prerequisites check listing what is missing
+  - With `--limited`: warn and mark those backends as skipped; continue with what is
+    available
+- **All credentials missing**: abort immediately in both modes — no test can run.
 
 This means on a freshly provisioned machine with nothing set up, the script tells you
 exactly what to fix rather than failing mid-run with an opaque error. On a

@@ -4,7 +4,7 @@ COMMIT  := $(shell git rev-parse --short HEAD 2>/dev/null || echo "none")
 DATE    := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 LDFLAGS := -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(DATE)
 
-.PHONY: build test fmt lint tidy-check govulncheck hadolint actionlint check cover integration e2e integration-podman clean
+.PHONY: build test fmt lint tidy-check govulncheck hadolint actionlint check cover integration e2e integration-podman smoketest smoketest-limited clean
 
 build:
 	CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o $(BINARY) ./cmd/yoloai
@@ -67,6 +67,14 @@ integration-podman: build
 	@./$(BINARY) system build --backend=podman
 	@echo "Running Podman integration tests..."
 	@go test -tags=integration -v -count=1 -timeout=10m ./runtime/podman/
+
+## smoketest: run end-to-end smoke tests against real agents (requires API keys and configured backends)
+smoketest: build
+	python3 scripts/smoke_test.py
+
+## smoketest-limited: run smoke tests, skipping tests that require unavailable backends
+smoketest-limited: build
+	python3 scripts/smoke_test.py --limited
 
 clean:
 	rm -f $(BINARY)
