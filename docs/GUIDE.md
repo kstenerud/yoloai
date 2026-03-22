@@ -33,6 +33,8 @@ Full reference for commands, flags, configuration, and internals. For a quick ov
 | `yoloai system agents [name]` | List available agents |
 | `yoloai system backends [name]` | List available runtime backends |
 | `yoloai system build [profile]` | Build or rebuild the base image (`--backend`, `--secret`, `--all`) |
+| `yoloai system check` | Verify prerequisites for CI/CD pipelines |
+| `yoloai system doctor` | Show capability status for all backends and isolation modes |
 | `yoloai system prune` | Remove orphaned resources (`--dry-run`, `--yes`, `--all`, `--backend`) |
 | `yoloai system setup` | Re-run interactive first-run setup |
 | `yoloai sandbox` (alias: `sb`) | Sandbox inspection |

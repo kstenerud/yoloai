@@ -38,6 +38,8 @@ Inspection:
   yoloai system agents [name]                    List available agents
   yoloai system backends [name]                  List available runtime backends
   yoloai system build [profile|--all]            Build/rebuild container image(s)
+  yoloai system check                            Verify prerequisites for CI/CD pipelines
+  yoloai system doctor                           Show capability status for all backends and isolation modes
   yoloai system prune                            Remove orphaned backend resources and stale temp files
   yoloai system setup                            Run interactive setup  (--agent, --backend, --tmux-conf for automation)
   yoloai sandbox                                 Sandbox inspection
@@ -511,6 +513,32 @@ Options:
 Useful after modifying a profile's Dockerfile or when the base image needs updating (e.g., new agent CLI versions).
 
 Profile Dockerfiles that install private dependencies (e.g., `RUN go mod download` from a private repo, `RUN npm install` from a private registry) need build-time credentials. yoloAI passes host credentials to Docker BuildKit via `--secret` so they're available during the build but never stored in image layers. Example: `RUN --mount=type=secret,id=npmrc,target=/root/.npmrc npm install` in the Dockerfile, with yoloAI automatically providing `~/.npmrc` as the secret source. Additional secrets can be passed via `yoloai system build --secret id=<name>,src=<path> <profile>`.
+
+### `yoloai system doctor`
+
+`yoloai system doctor` probes all known backends and their supported isolation modes, then prints a three-tier summary:
+
+- **Ready to use** — all prerequisites are satisfied.
+- **Needs setup** — prerequisites are missing but fixable (e.g. install a package, add a user to a group). Exit code 1 when any entry is in this tier.
+- **Not available on this machine** — hardware or OS mismatch (e.g. no KVM, wrong OS). Informational only; does not affect exit code.
+
+Flags:
+- `--backend BACKEND` — restrict to one backend.
+- `--isolation MODE` — restrict to one isolation mode.
+- `--json` — machine-readable output.
+
+Example:
+
+```
+$ yoloai system doctor
+Ready to use:
+  docker          container (default)
+  docker          container-enhanced
+  podman          container (default)
+
+Needs setup:
+  containerd      vm              2 of 4 checks failing
+```
 
 ### `yoloai system prune`
 

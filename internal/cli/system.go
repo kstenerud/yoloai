@@ -28,6 +28,7 @@ func newSystemCmd(version, commit, date string) *cobra.Command {
 		newSystemBackendsCmd(),
 		newSystemBuildCmd(),
 		newSystemCheckCmd(),
+		newSystemDoctorCmd(),
 		newSystemPruneCmd(),
 		newSystemSetupCmd(),
 		newCompletionCmd(),
