@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/kstenerud/yoloai/config"
+	"github.com/kstenerud/yoloai/internal/fileutil"
 )
 
 // ExpandPath composes tilde expansion with braced env var expansion.
@@ -35,5 +36,5 @@ func writeJSONMap(path string, m map[string]any) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, out, 0600)
+	return fileutil.WriteFile(path, out, 0600)
 }

@@ -14,6 +14,7 @@ import (
 
 	"github.com/kstenerud/yoloai/agent"
 	"github.com/kstenerud/yoloai/config"
+	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/workspace"
 )
 
@@ -107,14 +108,14 @@ func (m *Manager) start(ctx context.Context, name string, opts StartOptions) err
 		// Overwrite prompt.txt with new prompt; save old content for rollback.
 		promptPath := filepath.Join(sandboxDir, "prompt.txt")
 		oldPrompt, _ := os.ReadFile(promptPath) //nolint:gosec // G304: promptPath is constructed from a validated sandbox name
-		if writeErr := os.WriteFile(promptPath, []byte(promptText), 0600); writeErr != nil {
+		if writeErr := fileutil.WriteFile(promptPath, []byte(promptText), 0600); writeErr != nil {
 			return fmt.Errorf("write prompt.txt: %w", writeErr)
 		}
 		meta.HasPrompt = true
 		if saveErr := SaveMeta(sandboxDir, meta); saveErr != nil {
 			// Roll back prompt.txt so disk state remains consistent with environment.json.
 			if oldPrompt != nil {
-				_ = os.WriteFile(promptPath, oldPrompt, 0600) //nolint:gosec // G703: promptPath is the same validated path used above
+				_ = fileutil.WriteFile(promptPath, oldPrompt, 0600)
 			} else {
 				_ = os.Remove(promptPath)
 			}
@@ -306,7 +307,7 @@ func (m *Manager) Reset(ctx context.Context, opts ResetOptions) error {
 			if err := os.RemoveAll(d); err != nil {
 				return fmt.Errorf("clear overlay dir %s: %w", d, err)
 			}
-			if err := os.MkdirAll(d, 0750); err != nil {
+			if err := fileutil.MkdirAll(d, 0755); err != nil { //nolint:gosec // G301: world-traversable so container yoloai user can access merged/
 				return fmt.Errorf("recreate overlay dir %s: %w", d, err)
 			}
 		}
@@ -384,7 +385,7 @@ func (m *Manager) Reset(ctx context.Context, opts ResetOptions) error {
 				if err := os.RemoveAll(dir); err != nil {
 					return fmt.Errorf("clear overlay dir for aux %s: %w", d.HostPath, err)
 				}
-				if err := os.MkdirAll(dir, 0750); err != nil {
+				if err := fileutil.MkdirAll(dir, 0755); err != nil { //nolint:gosec // G301: world-traversable so container yoloai user can access merged/
 					return fmt.Errorf("recreate overlay dir for aux %s: %w", d.HostPath, err)
 				}
 			}
@@ -816,7 +817,7 @@ func (m *Manager) prepareCustomPromptFiles(name string, meta *Meta, promptText s
 	sandboxDir := Dir(name)
 
 	// Write resume-prompt.txt (custom prompt, no preamble)
-	if err := os.WriteFile(filepath.Join(sandboxDir, "resume-prompt.txt"), []byte(promptText), 0600); err != nil {
+	if err := fileutil.WriteFile(filepath.Join(sandboxDir, "resume-prompt.txt"), []byte(promptText), 0600); err != nil {
 		return fmt.Errorf("write resume-prompt.txt: %w", err)
 	}
 
@@ -845,7 +846,7 @@ func (m *Manager) prepareCustomPromptFiles(name string, meta *Meta, promptText s
 		return fmt.Errorf("marshal runtime-config.json: %w", err)
 	}
 
-	if err := os.WriteFile(configPath, updated, 0600); err != nil {
+	if err := fileutil.WriteFile(configPath, updated, 0600); err != nil {
 		return fmt.Errorf("write runtime-config.json: %w", err)
 	}
 
@@ -865,7 +866,7 @@ func (m *Manager) prepareResumeFiles(name string, meta *Meta) error {
 
 	// Write resume-prompt.txt (preamble + original prompt)
 	resumeText := resumePreamble + string(promptData)
-	if err := os.WriteFile(filepath.Join(sandboxDir, "resume-prompt.txt"), []byte(resumeText), 0600); err != nil { //nolint:gosec // G703: sandboxDir is an internal controlled path
+	if err := fileutil.WriteFile(filepath.Join(sandboxDir, "resume-prompt.txt"), []byte(resumeText), 0600); err != nil {
 		return fmt.Errorf("write resume-prompt.txt: %w", err)
 	}
 
@@ -894,7 +895,7 @@ func (m *Manager) prepareResumeFiles(name string, meta *Meta) error {
 		return fmt.Errorf("marshal runtime-config.json: %w", err)
 	}
 
-	if err := os.WriteFile(configPath, updated, 0600); err != nil {
+	if err := fileutil.WriteFile(configPath, updated, 0600); err != nil {
 		return fmt.Errorf("write runtime-config.json: %w", err)
 	}
 
@@ -1068,7 +1069,7 @@ func patchConfigDebug(sandboxDir string, debug bool) error {
 		return fmt.Errorf("marshal runtime-config.json for debug patch: %w", err)
 	}
 
-	if err := os.WriteFile(configPath, updated, 0600); err != nil {
+	if err := fileutil.WriteFile(configPath, updated, 0600); err != nil {
 		return fmt.Errorf("write runtime-config.json for debug patch: %w", err)
 	}
 	return nil
@@ -1094,7 +1095,7 @@ func PatchConfigAllowedDomains(sandboxDir string, domains []string) error {
 		return fmt.Errorf("marshal runtime-config.json for domain patch: %w", err)
 	}
 
-	if err := os.WriteFile(configPath, updated, 0600); err != nil {
+	if err := fileutil.WriteFile(configPath, updated, 0600); err != nil {
 		return fmt.Errorf("write runtime-config.json for domain patch: %w", err)
 	}
 	return nil

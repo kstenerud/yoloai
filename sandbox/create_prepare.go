@@ -8,6 +8,7 @@ import (
 
 	"github.com/kstenerud/yoloai/agent"
 	"github.com/kstenerud/yoloai/config"
+	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/workspace"
 )
 
@@ -373,12 +374,12 @@ func setupWorkdir(sandboxName string, workdir *DirArg) (string, string, error) {
 			OverlayMergedDir(sandboxName, workdir.Path),
 			OverlayLowerDir(sandboxName, workdir.Path),
 		} {
-			if err := os.MkdirAll(d, 0750); err != nil {
+			if err := fileutil.MkdirAll(d, 0755); err != nil { //nolint:gosec // G301: world-traversable so container yoloai user can access merged/
 				return "", "", fmt.Errorf("create overlay dir %s: %w", d, err)
 			}
 		}
 	default:
-		if err := os.MkdirAll(workCopyDir, 0750); err != nil {
+		if err := fileutil.MkdirAll(workCopyDir, 0750); err != nil {
 			return "", "", fmt.Errorf("create work dir: %w", err)
 		}
 	}
@@ -465,7 +466,7 @@ func setupAuxDirs(sandboxName string, auxDirs []*DirArg) ([]DirMeta, error) {
 				OverlayMergedDir(sandboxName, ad.Path),
 				OverlayLowerDir(sandboxName, ad.Path),
 			} {
-				if err := os.MkdirAll(d, 0750); err != nil {
+				if err := fileutil.MkdirAll(d, 0755); err != nil { //nolint:gosec // G301: world-traversable so container yoloai user can access merged/
 					return nil, fmt.Errorf("create overlay dir for aux %s: %w", ad.Path, err)
 				}
 			}

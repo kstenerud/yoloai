@@ -13,6 +13,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/kstenerud/yoloai/internal/fileutil"
 )
 
 const (
@@ -131,7 +133,7 @@ func (r *Runtime) Setup(ctx context.Context, sourceDir string, output io.Writer,
 
 	// Mark as provisioned
 	markerPath := filepath.Join(sourceDir, provisionMarkerFile)
-	_ = os.WriteFile(markerPath, []byte("1"), 0600) // best-effort
+	_ = fileutil.WriteFile(markerPath, []byte("1"), 0600) // best-effort
 
 	fmt.Fprintln(output, "Base VM image provisioned successfully.") //nolint:errcheck // best-effort
 	return nil

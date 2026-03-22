@@ -23,26 +23,20 @@ import (
 // bypass the process umask. Use this when the directory will be bind-mounted
 // into a container that may run under a different uid (e.g. gVisor).
 func mkdirAllPerm(path string, perm os.FileMode) error {
-	if err := os.MkdirAll(path, perm); err != nil {
+	if err := fileutil.MkdirAll(path, perm); err != nil {
 		return err
 	}
-	if err := os.Chmod(path, perm); err != nil { //nolint:gosec // G302: caller is responsible for choosing the perm
-		return err
-	}
-	return fileutil.ChownIfSudo(path)
+	return os.Chmod(path, perm) //nolint:gosec // G302: caller is responsible for choosing the perm
 }
 
 // writeFilePerm writes data to a file then explicitly chmods it to bypass the
 // process umask. Use this when the file will be bind-mounted into a container
 // that may run under a different uid (e.g. gVisor).
 func writeFilePerm(path string, data []byte, perm os.FileMode) error {
-	if err := os.WriteFile(path, data, perm); err != nil { //nolint:gosec // G703: path is always a trusted sandbox subpath
+	if err := fileutil.WriteFile(path, data, perm); err != nil { //nolint:gosec // G703: path is always a trusted sandbox subpath
 		return err
 	}
-	if err := os.Chmod(path, perm); err != nil { //nolint:gosec // G302: caller is responsible for choosing the perm
-		return err
-	}
-	return fileutil.ChownIfSudo(path)
+	return os.Chmod(path, perm) //nolint:gosec // G302: caller is responsible for choosing the perm
 }
 
 // NetworkMode specifies the sandbox's network access policy.
@@ -1403,7 +1397,7 @@ func ensureShellContainerSettings(sandboxDir string, _ string) error {
 		dirPath := filepath.Join(sandboxDir, "home-seed", dirBase)
 		settingsPath := filepath.Join(dirPath, "settings.json")
 
-		if err := os.MkdirAll(dirPath, 0750); err != nil {
+		if err := fileutil.MkdirAll(dirPath, 0750); err != nil {
 			return fmt.Errorf("create %s dir: %w", dirBase, err)
 		}
 		settings, err := readJSONMap(settingsPath)

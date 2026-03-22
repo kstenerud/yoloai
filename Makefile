@@ -4,9 +4,13 @@ COMMIT  := $(shell git rev-parse --short HEAD 2>/dev/null || echo "none")
 DATE    := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 LDFLAGS := -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(DATE)
 
-.PHONY: build test fmt lint tidy-check govulncheck hadolint actionlint check cover integration e2e integration-podman smoketest smoketest-full clean
+GOFILES := $(shell find . -name '*.go' -not -path './vendor/*')
 
-build:
+.PHONY: build test fmt lint tidy-check govulncheck hadolint actionlint check cover integration e2e integration-podman smoketest smoketest-full setcap clean
+
+build: $(BINARY)
+
+$(BINARY): $(GOFILES) go.mod go.sum
 	CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o $(BINARY) ./cmd/yoloai
 
 test:
@@ -76,6 +80,10 @@ smoketest: build
 ## smoketest-full: run smoke tests, failing if any optional backend is unavailable
 smoketest-full: build
 	python3 scripts/smoke_test.py
+
+## setcap: grant capabilities needed for VM backends (must re-run after each build)
+setcap: build
+	sudo setcap cap_sys_admin,cap_dac_override+ep ./$(BINARY)
 
 clean:
 	rm -f $(BINARY)

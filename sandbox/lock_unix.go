@@ -11,6 +11,7 @@ import (
 	"sort"
 
 	"github.com/kstenerud/yoloai/config"
+	"github.com/kstenerud/yoloai/internal/fileutil"
 	"golang.org/x/sys/unix"
 )
 
@@ -29,11 +30,11 @@ func lockPath(name string) string {
 // 0-byte advisory file and the next call for the same sandbox reuses it.
 // Locks are released automatically if the process exits or crashes.
 func acquireLock(name string) (func(), error) {
-	if err := os.MkdirAll(config.SandboxesDir(), 0750); err != nil {
+	if err := fileutil.MkdirAll(config.SandboxesDir(), 0750); err != nil {
 		return nil, fmt.Errorf("create sandboxes dir: %w", err)
 	}
 	path := lockPath(name)
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY, 0600) //nolint:gosec // path constructed from validated name
+	f, err := fileutil.OpenFile(path, os.O_CREATE|os.O_WRONLY, 0600) //nolint:gosec // path constructed from validated name
 	if err != nil {
 		return nil, fmt.Errorf("open sandbox lockfile: %w", err)
 	}
@@ -64,12 +65,12 @@ func acquireMultiLock(names ...string) (func(), error) {
 		}
 	}
 
-	if err := os.MkdirAll(config.SandboxesDir(), 0750); err != nil {
+	if err := fileutil.MkdirAll(config.SandboxesDir(), 0750); err != nil {
 		return nil, fmt.Errorf("create sandboxes dir: %w", err)
 	}
 	for _, name := range sorted {
 		path := lockPath(name)
-		f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY, 0600) //nolint:gosec // path constructed from validated name
+		f, err := fileutil.OpenFile(path, os.O_CREATE|os.O_WRONLY, 0600) //nolint:gosec // path constructed from validated name
 		if err != nil {
 			release()
 			return nil, fmt.Errorf("open sandbox lockfile for %q: %w", name, err)

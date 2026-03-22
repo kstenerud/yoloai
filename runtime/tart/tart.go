@@ -210,7 +210,7 @@ func (r *Runtime) Start(ctx context.Context, name string) error {
 
 	// Write PID file
 	pidPath := filepath.Join(sandboxPath, backendDir, pidFileName)
-	if err := os.WriteFile(pidPath, []byte(strconv.Itoa(cmd.Process.Pid)), 0600); err != nil {
+	if err := fileutil.WriteFile(pidPath, []byte(strconv.Itoa(cmd.Process.Pid)), 0600); err != nil {
 		// Kill the process we just started if we can't track it
 		_ = cmd.Process.Kill()
 		_ = cmd.Wait()
@@ -662,19 +662,19 @@ func (r *Runtime) runSetupScript(ctx context.Context, vmName, sandboxPath string
 
 	// Write setup script, status monitor, and tmux config to sandbox dir (shared via VirtioFS)
 	scriptPath := filepath.Join(sandboxPath, binDir, "sandbox-setup.py")
-	if err := os.WriteFile(scriptPath, monitor.SetupScript(), 0644); err != nil { //nolint:gosec // G306: script content, not user input
+	if err := fileutil.WriteFile(scriptPath, monitor.SetupScript(), 0644); err != nil { //nolint:gosec // G306: script content, not user input
 		return fmt.Errorf("write sandbox-setup.py: %w", err)
 	}
 	monitorPath := filepath.Join(sandboxPath, binDir, "status-monitor.py")
-	if err := os.WriteFile(monitorPath, monitor.Script(), 0644); err != nil { //nolint:gosec // G306: script content, not user input
+	if err := fileutil.WriteFile(monitorPath, monitor.Script(), 0644); err != nil { //nolint:gosec // G306: script content, not user input
 		return fmt.Errorf("write status monitor: %w", err)
 	}
 	diagPath := filepath.Join(sandboxPath, binDir, "diagnose-idle.sh")
-	if err := os.WriteFile(diagPath, monitor.DiagnoseScript(), 0755); err != nil { //nolint:gosec // G306: script needs exec permission
+	if err := fileutil.WriteFile(diagPath, monitor.DiagnoseScript(), 0755); err != nil { //nolint:gosec // G306: script needs exec permission
 		return fmt.Errorf("write diagnose script: %w", err)
 	}
 	tmuxConfPath := filepath.Join(sandboxPath, tmuxDir, "tmux.conf")
-	if err := os.WriteFile(tmuxConfPath, embeddedTmuxConf, 0600); err != nil {
+	if err := fileutil.WriteFile(tmuxConfPath, embeddedTmuxConf, 0600); err != nil {
 		return fmt.Errorf("write tmux.conf: %w", err)
 	}
 
@@ -712,7 +712,7 @@ func (r *Runtime) patchConfigWorkingDir(sandboxPath string) error {
 			if err != nil {
 				return err
 			}
-			return os.WriteFile(cfgPath, out, 0600)
+			return fileutil.WriteFile(cfgPath, out, 0600)
 		}
 	}
 

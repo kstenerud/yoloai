@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/sandbox"
 	"github.com/mark3labs/mcp-go/mcp"
 )
@@ -368,7 +369,7 @@ func (s *Server) handleSandboxReset(ctx context.Context, req mcp.CallToolRequest
 	// If a new prompt is provided, write it to prompt.txt before resetting.
 	if prompt != "" {
 		promptPath := sandbox.PromptFilePath(name)
-		if err := os.WriteFile(promptPath, []byte(prompt), 0600); err != nil {
+		if err := fileutil.WriteFile(promptPath, []byte(prompt), 0600); err != nil {
 			return textResult(errorf("write prompt for sandbox %q: %v", name, err)), nil
 		}
 	}
@@ -454,12 +455,12 @@ func (s *Server) handleSandboxFilesWrite(_ context.Context, req mcp.CallToolRequ
 	}
 
 	filesDir := sandbox.FilesDir(name)
-	if err := os.MkdirAll(filesDir, 0750); err != nil {
+	if err := fileutil.MkdirAll(filesDir, 0750); err != nil {
 		return textResult(errorf("create files dir for sandbox %q: %v", name, err)), nil
 	}
 
 	path := filepath.Join(filesDir, filename)
-	if err := os.WriteFile(path, []byte(content), 0600); err != nil { //nolint:gosec // path validated by validateFilename
+	if err := fileutil.WriteFile(path, []byte(content), 0600); err != nil { //nolint:gosec // path validated by validateFilename
 		return textResult(errorf("write file %q to sandbox %q: %v", filename, name, err)), nil
 	}
 

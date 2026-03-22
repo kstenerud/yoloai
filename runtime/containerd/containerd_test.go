@@ -126,18 +126,21 @@ func buildTestRuntime(t *testing.T) (*Runtime, func()) {
 	origCNI := cniBridgePath
 	origKVM := kvmDevPath
 	origCAN := canCreateNetNSFunc
+	origBridge := canRunCNIBridgeFunc
 
 	kataShimName = "containerd-shim-kata-v2"
 	kataFCShimName = "containerd-shim-kata-fc-v2"
 	cniBridgePath = cniBridgeFile
 	kvmDevPath = kvmFile
 	canCreateNetNSFunc = func() error { return nil }
+	canRunCNIBridgeFunc = func() error { return nil }
 	t.Setenv("PATH", fakeBinDir+":"+os.Getenv("PATH"))
 
 	r := &Runtime{namespace: "yoloai"}
 	r.kataShimV2 = buildKataShimV2Cap()
 	r.kataFCShimV2 = buildKataFCShimV2Cap()
 	r.cniBridge = buildCNIBridgeCap()
+	r.cniNetAdmin = buildCNINetAdminCap()
 	r.netnsCreation = buildNetnsCreationCap()
 	r.kvmDevice = buildKVMDeviceCap()
 	// devmapperSnapshotter requires a real client — leave zero-value for unit tests.
@@ -153,6 +156,7 @@ func buildTestRuntime(t *testing.T) (*Runtime, func()) {
 		cniBridgePath = origCNI
 		kvmDevPath = origKVM
 		canCreateNetNSFunc = origCAN
+		canRunCNIBridgeFunc = origBridge
 	}
 	return r, restore
 }
@@ -162,7 +166,7 @@ func TestRequiredCapabilities_VM_AllPass(t *testing.T) {
 	defer restore()
 
 	capList := r.RequiredCapabilities("vm")
-	require.Len(t, capList, 4)
+	require.Len(t, capList, 5)
 
 	env := caps.DetectEnvironment()
 	results := caps.RunChecks(context.Background(), capList, env)
@@ -208,6 +212,35 @@ func TestRequiredCapabilities_CNIMissing(t *testing.T) {
 	err := caps.FormatError(results)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "CNI plugins")
+}
+
+func TestRequiredCapabilities_CNINetAdminMissing(t *testing.T) {
+	r, restore := buildTestRuntime(t)
+	defer restore()
+
+	canRunCNIBridgeFunc = func() error {
+		return errors.New("CAP_NET_ADMIN not available: CNI bridge plugin cannot create network bridge")
+	}
+	r.cniNetAdmin = buildCNINetAdminCap()
+
+	capList := r.RequiredCapabilities("vm")
+	env := caps.DetectEnvironment()
+	results := caps.RunChecks(context.Background(), capList, env)
+	err := caps.FormatError(results)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "CAP_NET_ADMIN for CNI bridge")
+}
+
+// TestBridgeBinaryHasCNICaps_Missing verifies that a file with no xattr returns false.
+func TestBridgeBinaryHasCNICaps_Missing(t *testing.T) {
+	tmp := filepath.Join(t.TempDir(), "bridge")
+	require.NoError(t, os.WriteFile(tmp, nil, 0o750)) //nolint:gosec // G306: test binary
+	assert.False(t, bridgeBinaryHasCNICaps(tmp))
+}
+
+// TestBridgeBinaryHasCNICaps_Nonexistent verifies that a missing file returns false.
+func TestBridgeBinaryHasCNICaps_Nonexistent(t *testing.T) {
+	assert.False(t, bridgeBinaryHasCNICaps(filepath.Join(t.TempDir(), "no-bridge")))
 }
 
 func TestRequiredCapabilities_CannotCreateNetNS(t *testing.T) {

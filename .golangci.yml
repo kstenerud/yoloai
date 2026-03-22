@@ -13,6 +13,7 @@ linters:
     - gocritic
     - sloglint
     - nilerr
+    - forbidigo
   disable:
     - exhaustruct
     - varnamelen
@@ -23,6 +24,29 @@ linters:
         # layer — not a collision with Go's stdlib "runtime" in practice.
         - name: redefines-builtin-id
           disabled: true
+    forbidigo:
+      # Ban raw os file-creation calls. Use internal/fileutil wrappers instead
+      # so files are chowned to the real user when yoloai runs under sudo.
+      forbid:
+        - pattern: "^os\\.WriteFile$"
+          msg: "use fileutil.WriteFile (handles sudo chown)"
+        - pattern: "^os\\.OpenFile$"
+          msg: "use fileutil.OpenFile (handles sudo chown on O_CREATE)"
+        - pattern: "^os\\.MkdirAll$"
+          msg: "use fileutil.MkdirAll (handles sudo chown)"
+  exclusions:
+    rules:
+      # The fileutil package itself is allowed to call the stdlib functions it wraps.
+      - path: "internal/fileutil/fileutil\\.go"
+        linters:
+          - forbidigo
+      # Tests and test helpers create temp files for their own use — not ~/.yoloai paths.
+      - path: "_test\\.go"
+        linters:
+          - forbidigo
+      - path: "internal/testutil/"
+        linters:
+          - forbidigo
 
 run:
   timeout: 2m

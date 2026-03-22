@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/kstenerud/yoloai/internal/fileutil"
+
 	"github.com/kstenerud/yoloai/agent"
 )
 
@@ -138,14 +140,14 @@ func WriteContextFiles(sandboxDir string, meta *Meta, agentDef *agent.Definition
 
 	// Write context.md at sandbox root (reference copy)
 	contextPath := filepath.Join(sandboxDir, "context.md")
-	if err := os.WriteFile(contextPath, []byte(content), 0600); err != nil {
+	if err := fileutil.WriteFile(contextPath, []byte(content), 0600); err != nil {
 		return fmt.Errorf("write context.md: %w", err)
 	}
 
 	// Write full context inline into the agent's native instruction file
 	if agentDef.ContextFile != "" && agentDef.StateDir != "" {
 		refPath := filepath.Join(sandboxDir, AgentRuntimeDir, agentDef.ContextFile)
-		if err := os.WriteFile(refPath, []byte(content), 0600); err != nil {
+		if err := fileutil.WriteFile(refPath, []byte(content), 0600); err != nil {
 			return fmt.Errorf("write agent context file %s: %w", agentDef.ContextFile, err)
 		}
 
@@ -171,7 +173,7 @@ and outside the sandbox.
 Do not make assumptions about blocking decisions. Write the question file
 and wait. The question will be seen and answered by an external agent or user.
 `
-			f, err := os.OpenFile(refPath, os.O_APPEND|os.O_WRONLY, 0600) //nolint:gosec // path is from sandbox dir, controlled by yoloai
+			f, err := fileutil.OpenFile(refPath, os.O_APPEND|os.O_WRONLY, 0600) //nolint:gosec // path is from sandbox dir, controlled by yoloai
 			if err != nil {
 				return fmt.Errorf("open agent context file %s for append: %w", agentDef.ContextFile, err)
 			}

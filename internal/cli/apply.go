@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/sandbox"
 	"github.com/kstenerud/yoloai/workspace"
@@ -331,12 +332,12 @@ func applyOverlay(cmd *cobra.Command, name string, meta *sandbox.Meta, refs, pat
 
 		// --patches: export patch files
 		if patchesDir != "" {
-			if err := os.MkdirAll(patchesDir, 0750); err != nil {
+			if err := fileutil.MkdirAll(patchesDir, 0750); err != nil {
 				return fmt.Errorf("create patches directory: %w", err)
 			}
 			for i, ps := range patches {
 				dst := filepath.Join(patchesDir, fmt.Sprintf("overlay-%d.diff", i+1))
-				if err := os.WriteFile(dst, ps.Patch, 0600); err != nil { //nolint:gosec // G703: dst is constructed from user-provided --patches flag
+				if err := fileutil.WriteFile(dst, ps.Patch, 0600); err != nil { //nolint:gosec // G703: dst is constructed from user-provided --patches flag
 					return fmt.Errorf("write patch: %w", err)
 				}
 				if !jsonEnabled(cmd) {
@@ -744,7 +745,7 @@ func applySquashMulti(cmd *cobra.Command, name string, paths []string, _ *sandbo
 
 // exportPatches writes .patch files and optional wip.diff to the given directory.
 func exportPatches(cmd *cobra.Command, name string, paths []string, commits []sandbox.CommitInfo, hasWIP bool, dir string) error {
-	if err := os.MkdirAll(dir, 0750); err != nil {
+	if err := fileutil.MkdirAll(dir, 0750); err != nil {
 		return fmt.Errorf("create patches directory: %w", err)
 	}
 
@@ -765,7 +766,7 @@ func exportPatches(cmd *cobra.Command, name string, paths []string, commits []sa
 			if err != nil {
 				return fmt.Errorf("read patch %s: %w", f, err)
 			}
-			if err := os.WriteFile(dst, data, 0600); err != nil { //nolint:gosec // G703: dst is under controlled dir
+			if err := fileutil.WriteFile(dst, data, 0600); err != nil { //nolint:gosec // G703: dst is under controlled dir
 				return fmt.Errorf("write patch %s: %w", f, err)
 			}
 			if !isJSON {
@@ -781,7 +782,7 @@ func exportPatches(cmd *cobra.Command, name string, paths []string, commits []sa
 		}
 		if len(wipPatch) > 0 {
 			dst := filepath.Join(dir, "wip.diff")
-			if err := os.WriteFile(dst, wipPatch, 0600); err != nil {
+			if err := fileutil.WriteFile(dst, wipPatch, 0600); err != nil {
 				return fmt.Errorf("write wip.diff: %w", err)
 			}
 			if !isJSON {

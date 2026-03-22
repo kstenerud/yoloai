@@ -4,8 +4,11 @@ package containerdrt
 
 import (
 	"context"
+	"encoding/binary"
+	"fmt"
 	"os"
 	"strings"
+	"syscall"
 
 	"github.com/containerd/containerd/v2/client"
 	"github.com/containerd/containerd/v2/pkg/namespaces"
@@ -25,6 +28,7 @@ type Runtime struct {
 	kataShimV2           caps.HostCapability
 	kataFCShimV2         caps.HostCapability
 	cniBridge            caps.HostCapability
+	cniNetAdmin          caps.HostCapability
 	netnsCreation        caps.HostCapability
 	kvmDevice            caps.HostCapability
 	devmapperSnapshotter caps.HostCapability
@@ -74,6 +78,7 @@ func New(_ context.Context) (*Runtime, error) {
 	r.kataShimV2 = buildKataShimV2Cap()
 	r.kataFCShimV2 = buildKataFCShimV2Cap()
 	r.cniBridge = buildCNIBridgeCap()
+	r.cniNetAdmin = buildCNINetAdminCap()
 	r.netnsCreation = buildNetnsCreationCap()
 	r.kvmDevice = buildKVMDeviceCap()
 	r.devmapperSnapshotter = buildDevmapperSnapshotterCap(r)
@@ -110,6 +115,7 @@ func (r *Runtime) RequiredCapabilities(isolation string) []caps.HostCapability {
 	base := []caps.HostCapability{
 		r.kataShimV2,
 		r.cniBridge,
+		r.cniNetAdmin,
 		r.netnsCreation,
 		r.kvmDevice,
 	}
@@ -123,11 +129,12 @@ func (r *Runtime) RequiredCapabilities(isolation string) []caps.HostCapability {
 
 // Prerequisite check overrides — variable for testing.
 var (
-	kataShimName       = "containerd-shim-kata-v2"
-	kataFCShimName     = "containerd-shim-kata-fc-v2"
-	cniBridgePath      = "/opt/cni/bin/bridge"
-	kvmDevPath         = "/dev/kvm"
-	canCreateNetNSFunc = canCreateNetNS
+	kataShimName        = "containerd-shim-kata-v2"
+	kataFCShimName      = "containerd-shim-kata-fc-v2"
+	cniBridgePath       = "/opt/cni/bin/bridge"
+	kvmDevPath          = "/dev/kvm"
+	canCreateNetNSFunc  = canCreateNetNS
+	canRunCNIBridgeFunc = canRunCNIBridge
 )
 
 // canCreateNetNS tests whether the process can actually create a named network
@@ -144,6 +151,81 @@ func canCreateNetNS() error {
 	}
 	_ = netns.DeleteNamed(probe)
 	return nil
+}
+
+// CNI bridge capability bits required for the bridge plugin to run.
+// CAP_NET_ADMIN (12): create/configure bridge and veth pairs via RTNETLINK.
+// CAP_SYS_ADMIN (21): setns() to enter the container's network namespace.
+const (
+	capNetAdmin = 12
+	capSysAdmin = 21
+	cniCapMask  = (1 << capNetAdmin) | (1 << capSysAdmin)
+)
+
+// canRunCNIBridge returns nil if the CNI bridge plugin will be able to complete
+// the full CNI ADD workflow. The plugin runs as a subprocess with the same UID
+// as yoloai and needs:
+//   - CAP_NET_ADMIN: create/configure the bridge and veth pair
+//   - CAP_SYS_ADMIN: setns() to enter the container's network namespace
+//
+// Root always has these. Non-root requires them on the bridge binary itself
+// via setcap (file capabilities grant them at exec time regardless of the
+// parent's capability set).
+func canRunCNIBridge() error {
+	if os.Getuid() == 0 {
+		return nil // root: subprocess also runs as root
+	}
+	// Check CapEff in case the parent process already has both caps
+	// (e.g. via ambient capabilities or some other mechanism).
+	if capEff, ok := readCapEff(); ok && capEff&cniCapMask == cniCapMask {
+		return nil
+	}
+	// Accept if the bridge binary has both required caps as file capabilities
+	// (set via setcap). The plugin will receive them at exec time.
+	if bridgeBinaryHasCNICaps(cniBridgePath) {
+		return nil
+	}
+	return fmt.Errorf("CAP_NET_ADMIN+CAP_SYS_ADMIN not available: CNI bridge plugin cannot set up VM networking")
+}
+
+// readCapEff reads CapEff from /proc/self/status. Returns (0, false) on error.
+func readCapEff() (capEff uint64, ok bool) {
+	data, err := os.ReadFile("/proc/self/status")
+	if err != nil {
+		return 0, false
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if !strings.HasPrefix(line, "CapEff:") {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			return 0, false
+		}
+		if _, scanErr := fmt.Sscanf(fields[1], "%x", &capEff); scanErr != nil {
+			return 0, false
+		}
+		return capEff, true
+	}
+	return 0, false
+}
+
+// bridgeBinaryHasCNICaps reads the security.capability xattr from the CNI
+// bridge binary and returns true if both CAP_NET_ADMIN and CAP_SYS_ADMIN are
+// in the permitted set. The xattr layout (vfs_cap_data) is:
+//
+//	bytes 0-3:  magic_etc (LE32) — revision in high 24 bits
+//	bytes 4-7:  data[0].permitted  (LE32) — caps 0-31
+//	bytes 8-11: data[0].inheritable (LE32)
+//	bytes 12+:  data[1].* (caps 32-63, present in v2/v3 only)
+func bridgeBinaryHasCNICaps(path string) bool {
+	var buf [24]byte
+	n, err := syscall.Getxattr(path, "security.capability", buf[:])
+	if err != nil || n < 8 {
+		return false
+	}
+	permitted0 := binary.LittleEndian.Uint32(buf[4:8])
+	return permitted0&cniCapMask == cniCapMask
 }
 
 // isWSL2 returns true if running inside a WSL2 environment.

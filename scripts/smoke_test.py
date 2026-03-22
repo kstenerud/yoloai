@@ -344,7 +344,8 @@ def test_stop_start(t: Test, spec: BackendSpec) -> None:
     r = t.run("restart", name, "--prompt", prompt2, timeout=120)
     t.assert_ok(r, "restart")
 
-    t.wait_for_sentinel(name, sentinel=sentinel2, timeout=spec.sentinel_timeout())
+    # Restart adds stop+start overhead on top of model inference, so allow extra time.
+    t.wait_for_sentinel(name, sentinel=sentinel2, timeout=spec.sentinel_timeout() + 60)
 
 
 def test_files_exchange(t: Test, spec: BackendSpec) -> None:

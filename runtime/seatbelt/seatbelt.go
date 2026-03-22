@@ -214,7 +214,7 @@ func (r *Runtime) Start(ctx context.Context, name string) error {
 
 	// Open log file for stderr capture
 	logPath := filepath.Join(sandboxPath, backendDir, processLogFileName)
-	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600) //nolint:gosec // G304: sandboxPath is ~/.yoloai/sandboxes/<name>
+	logFile, err := fileutil.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600) //nolint:gosec // G304: sandboxPath is ~/.yoloai/sandboxes/<name>
 	if err != nil {
 		return fmt.Errorf("open log: %w", err)
 	}
@@ -242,7 +242,7 @@ func (r *Runtime) Start(ctx context.Context, name string) error {
 	// below detects early process exit via procDone, and (2) killByPID and
 	// isRunning gracefully handle stale PID files.
 	pidPath := filepath.Join(sandboxPath, backendDir, pidFileName)
-	if err := os.WriteFile(pidPath, []byte(strconv.Itoa(cmd.Process.Pid)), 0600); err != nil {
+	if err := fileutil.WriteFile(pidPath, []byte(strconv.Itoa(cmd.Process.Pid)), 0600); err != nil {
 		_ = cmd.Process.Kill()
 		_ = cmd.Wait()
 		logFile.Close() //nolint:errcheck,gosec // best-effort
@@ -431,7 +431,7 @@ func mountSymlinks(mounts []runtime.MountSpec) ([]string, error) {
 		// and sandbox-exec restrictions can prevent directory creation in
 		// certain locations. The entrypoint script handles these cases internally
 		// by setting up paths within its sandboxed HOME.
-		if err := os.MkdirAll(filepath.Dir(m.Target), 0750); err != nil { //nolint:gosec // G301: parent dirs for mount symlinks
+		if err := fileutil.MkdirAll(filepath.Dir(m.Target), 0750); err != nil { //nolint:gosec // G301: parent dirs for mount symlinks
 			continue
 		}
 		if err := os.Symlink(m.Source, m.Target); err != nil {
@@ -659,7 +659,7 @@ func (r *Runtime) patchConfigWorkingDir(sandboxPath string, mounts []runtime.Mou
 		if err != nil {
 			return err
 		}
-		return os.WriteFile(cfgPath, out, 0600)
+		return fileutil.WriteFile(cfgPath, out, 0600)
 	}
 
 	return nil

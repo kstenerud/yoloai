@@ -67,15 +67,19 @@ func WriteFile(path string, data []byte, perm fs.FileMode) error {
 }
 
 // OpenFile wraps os.OpenFile and fixes ownership when running under sudo.
-// Intended for O_CREATE calls; the caller is responsible for closing the file.
+// ChownIfSudo is only called when os.O_CREATE is set in flag — opening an
+// existing file for reading or appending does not change ownership.
+// The caller is responsible for closing the file.
 func OpenFile(path string, flag int, perm fs.FileMode) (*os.File, error) {
 	f, err := os.OpenFile(path, flag, perm) //nolint:gosec // G304: callers supply trusted paths
 	if err != nil {
 		return nil, err
 	}
-	if err := ChownIfSudo(path); err != nil {
-		f.Close() //nolint:errcheck,gosec // G104: best-effort cleanup; original error takes priority
-		return nil, err
+	if flag&os.O_CREATE != 0 {
+		if err := ChownIfSudo(path); err != nil {
+			f.Close() //nolint:errcheck,gosec // G104: best-effort cleanup; original error takes priority
+			return nil, err
+		}
 	}
 	return f, nil
 }

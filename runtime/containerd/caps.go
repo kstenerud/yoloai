@@ -91,6 +91,38 @@ func buildCNIBridgeCap() caps.HostCapability {
 	}
 }
 
+// buildCNINetAdminCap returns a HostCapability that checks whether the CNI
+// bridge plugin has the capabilities it needs to complete the full CNI ADD
+// workflow: CAP_NET_ADMIN (bridge/veth creation) and CAP_SYS_ADMIN (setns to
+// enter the container network namespace). The plugin runs as a subprocess, so
+// these must be reachable at exec time — either because yoloai is root, or
+// because the bridge binary has them as file capabilities via setcap.
+func buildCNINetAdminCap() caps.HostCapability {
+	return caps.HostCapability{
+		ID:      "cni-net-admin",
+		Summary: "CAP_NET_ADMIN for CNI bridge",
+		Detail:  "The CNI bridge plugin needs CAP_NET_ADMIN+CAP_SYS_ADMIN to set up VM networking. Run as root, or grant capabilities to the bridge binary.",
+		Check: func(_ context.Context) error {
+			return canRunCNIBridgeFunc()
+		},
+		Permanent: func(_ caps.Environment) bool { return false },
+		Fix: func(_ caps.Environment) []caps.FixStep {
+			return []caps.FixStep{
+				{
+					Description: "Run as root (simplest)",
+					Command:     "sudo yoloai new mybox --isolation vm ...",
+					NeedsRoot:   true,
+				},
+				{
+					Description: "Grant capabilities to the CNI bridge binary",
+					Command:     "sudo setcap cap_net_admin,cap_sys_admin+ep /opt/cni/bin/bridge",
+					NeedsRoot:   true,
+				},
+			}
+		},
+	}
+}
+
 // buildNetnsCreationCap returns a HostCapability that checks whether the process
 // can create named network namespaces.
 func buildNetnsCreationCap() caps.HostCapability {

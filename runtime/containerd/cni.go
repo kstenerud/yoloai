@@ -16,6 +16,7 @@ import (
 	"github.com/vishvananda/netns"
 
 	"github.com/kstenerud/yoloai/config"
+	"github.com/kstenerud/yoloai/internal/fileutil"
 )
 
 // cniStateFileName is the filename for per-sandbox CNI state.
@@ -68,7 +69,7 @@ func cniStatePath(sandboxDir string) string {
 // conflicts with Podman) take effect without manual intervention.
 func ensureCNIConflist() error {
 	dir := cniConfDir()
-	if err := os.MkdirAll(dir, 0o750); err != nil { //nolint:gosec // G301: 0750 is appropriate for CNI config dir
+	if err := fileutil.MkdirAll(dir, 0o750); err != nil { //nolint:gosec // G301: 0750 is appropriate for CNI config dir
 		return fmt.Errorf("create CNI config dir: %w", err)
 	}
 	path := filepath.Join(dir, "yoloai.conflist")
@@ -76,7 +77,7 @@ func ensureCNIConflist() error {
 	if err == nil && string(existing) == cniConflistTemplate {
 		return nil // up to date
 	}
-	if err := os.WriteFile(path, []byte(cniConflistTemplate), 0o644); err != nil { //nolint:gosec // G306: world-readable config is correct
+	if err := fileutil.WriteFile(path, []byte(cniConflistTemplate), 0o644); err != nil { //nolint:gosec // G306: world-readable config is correct
 		return fmt.Errorf("write CNI conflist: %w", err)
 	}
 	return nil
@@ -222,7 +223,7 @@ func runCNIAdd(ctx context.Context, netnsPath, sandboxDir, containerName string)
 	}
 
 	stateDir := filepath.Join(sandboxDir, config.BackendDirName)
-	if err := os.MkdirAll(stateDir, 0o750); err != nil {
+	if err := fileutil.MkdirAll(stateDir, 0o750); err != nil {
 		return fmt.Errorf("create backend dir: %w", err)
 	}
 
@@ -231,7 +232,7 @@ func runCNIAdd(ctx context.Context, netnsPath, sandboxDir, containerName string)
 		return fmt.Errorf("marshal CNI state: %w", err)
 	}
 
-	if err := os.WriteFile(cniStatePath(sandboxDir), data, 0o600); err != nil {
+	if err := fileutil.WriteFile(cniStatePath(sandboxDir), data, 0o600); err != nil {
 		return fmt.Errorf("write CNI state: %w", err)
 	}
 

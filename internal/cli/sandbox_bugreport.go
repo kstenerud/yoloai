@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"time"
 
+	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/sandbox"
 	"github.com/spf13/cobra"
@@ -29,7 +30,7 @@ func runSandboxBugReport(cmd *cobra.Command, name string, reportType string) err
 		return fmt.Errorf("bugreport: %w", err)
 	}
 
-	f, err := os.OpenFile(filename+".tmp", os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600) //nolint:gosec // G304: filename from bugReportFilename
+	f, err := fileutil.OpenFile(filename+".tmp", os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600) //nolint:gosec // G304: filename from bugReportFilename
 	if err != nil {
 		return fmt.Errorf("bugreport: open temp file: %w", err)
 	}

@@ -8,6 +8,7 @@ import (
 	"os"
 
 	"github.com/kstenerud/yoloai/config"
+	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
@@ -97,10 +98,10 @@ Default settings are stored in ~/.yoloai/defaults/config.yaml.`,
 				configPath := config.GlobalConfigPath()
 				if _, err := os.Stat(configPath); os.IsNotExist(err) {
 					dir := configPath[:len(configPath)-len("/config.yaml")]
-					if err := os.MkdirAll(dir, 0750); err != nil {
+					if err := fileutil.MkdirAll(dir, 0750); err != nil {
 						return fmt.Errorf("create config directory: %w", err)
 					}
-					if err := os.WriteFile(configPath, []byte("{}\n"), 0600); err != nil {
+					if err := fileutil.WriteFile(configPath, []byte("{}\n"), 0600); err != nil {
 						return fmt.Errorf("create config.yaml: %w", err)
 					}
 				}
@@ -113,11 +114,11 @@ Default settings are stored in ~/.yoloai/defaults/config.yaml.`,
 				configPath := config.ConfigPath()
 				if _, err := os.Stat(configPath); os.IsNotExist(err) {
 					dir := configPath[:len(configPath)-len("/config.yaml")]
-					if err := os.MkdirAll(dir, 0750); err != nil {
+					if err := fileutil.MkdirAll(dir, 0750); err != nil {
 						return fmt.Errorf("create config directory: %w", err)
 					}
 					scaffold := config.GenerateScaffoldConfig(config.DefaultConfigYAML)
-					if err := os.WriteFile(configPath, []byte(scaffold), 0600); err != nil {
+					if err := fileutil.WriteFile(configPath, []byte(scaffold), 0600); err != nil {
 						return fmt.Errorf("create defaults/config.yaml: %w", err)
 					}
 				}
