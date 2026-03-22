@@ -4,7 +4,6 @@
 package cli
 
 import (
-	"fmt"
 	"os"
 
 	"github.com/kstenerud/yoloai/sandbox"
@@ -123,6 +122,6 @@ func sandboxDispatch(cmd *cobra.Command, args []string) error {
 		}
 		return runSandboxBugReport(cmd, name, reportType)
 	default:
-		return fmt.Errorf("unknown subcommand %q: valid subcommands are info, log, exec, prompt, allow, allowed, deny, bugreport", subcmd)
+		return sandbox.NewUsageError("unknown subcommand %q: valid subcommands are info, log, exec, prompt, allow, allowed, deny, bugreport", subcmd)
 	}
 }

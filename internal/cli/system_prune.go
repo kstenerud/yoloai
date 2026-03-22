@@ -27,7 +27,7 @@ func newSystemPruneCmd() *cobra.Command {
 			backendFlag, _ := cmd.Flags().GetString("backend")
 
 			if all && backendFlag != "" {
-				return fmt.Errorf("--all and --backend are mutually exclusive")
+				return sandbox.NewUsageError("--all and --backend are mutually exclusive")
 			}
 
 			if all {

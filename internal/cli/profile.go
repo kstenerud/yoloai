@@ -48,7 +48,7 @@ func newProfileCreateCmd() *cobra.Command {
 			}
 
 			if config.ProfileExists(name) {
-				return fmt.Errorf("profile %q already exists", name)
+				return sandbox.NewUsageError("profile %q already exists", name)
 			}
 
 			dir := config.ProfileDirPath(name)
@@ -176,7 +176,7 @@ func newProfileInfoCmd() *cobra.Command {
 					return err
 				}
 				if !config.ProfileExists(name) {
-					return fmt.Errorf("profile %q does not exist", name)
+					return sandbox.NewUsageError("profile %q does not exist", name)
 				}
 
 				var err error
@@ -658,7 +658,7 @@ func newProfileDeleteCmd() *cobra.Command {
 			}
 
 			if !config.ProfileExists(name) {
-				return fmt.Errorf("profile %q does not exist", name)
+				return sandbox.NewUsageError("profile %q does not exist", name)
 			}
 
 			// Profiles no longer support inheritance — no dependency check needed.

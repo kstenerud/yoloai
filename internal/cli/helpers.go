@@ -32,7 +32,7 @@ func newRuntime(ctx context.Context, backend string) (runtime.Runtime, error) {
 	case "containerd":
 		return containerdrt.New(ctx)
 	default:
-		return nil, fmt.Errorf("unknown backend: %q (valid: docker, podman, tart, seatbelt, containerd)", backend)
+		return nil, sandbox.NewUsageError("unknown backend: %q (valid: docker, podman, tart, seatbelt, containerd)", backend)
 	}
 }
 

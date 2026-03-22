@@ -28,7 +28,7 @@ func runSandboxDeny(cmd *cobra.Command, name string, domains []string) error {
 	toRemove := make(map[string]bool, len(domains))
 	for _, d := range domains {
 		if !existing[d] {
-			return fmt.Errorf("domain %q is not in the allowlist", d)
+			return sandbox.NewUsageError("domain %q is not in the allowlist", d)
 		}
 		toRemove[d] = true
 	}

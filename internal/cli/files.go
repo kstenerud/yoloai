@@ -87,7 +87,7 @@ func filesDispatch(cmd *cobra.Command, args []string) error {
 	case "path":
 		return runFilesPath(cmd, name)
 	default:
-		return fmt.Errorf("unknown subcommand %q: valid subcommands are put, get, ls, rm, path", subcmd)
+		return sandbox.NewUsageError("unknown subcommand %q: valid subcommands are put, get, ls, rm, path", subcmd)
 	}
 }
 

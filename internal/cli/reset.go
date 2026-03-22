@@ -37,7 +37,7 @@ func newResetCmd() *cobra.Command {
 			}
 
 			if jsonEnabled(cmd) && attach {
-				return fmt.Errorf("--json and --attach are incompatible")
+				return sandbox.NewUsageError("--json and --attach are incompatible")
 			}
 
 			backend := resolveBackendForSandbox(name)

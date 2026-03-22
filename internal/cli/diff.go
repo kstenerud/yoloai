@@ -78,7 +78,7 @@ Examples:
 
 			// Ref-based diff not supported for overlay
 			if ref != "" && overlay {
-				return fmt.Errorf("ref-based diff is not supported for :overlay sandboxes (commits are not individually addressable from the host)")
+				return sandbox.NewPlatformError("ref-based diff is not supported for :overlay sandboxes (commits are not individually addressable from the host)")
 			}
 
 			// If ref is set, show that specific commit/range
@@ -259,7 +259,7 @@ func diffOverlay(cmd *cobra.Command, name string, stat, nameOnly bool) error {
 // diffLogOverlay lists commits for overlay sandboxes by executing git log inside the container.
 func diffLogOverlay(cmd *cobra.Command, name string, stat bool) error {
 	if stat {
-		return fmt.Errorf("--log --stat is not supported for :overlay sandboxes")
+		return sandbox.NewPlatformError("--log --stat is not supported for :overlay sandboxes")
 	}
 
 	backend := resolveBackendForSandbox(name)

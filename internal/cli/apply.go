@@ -69,7 +69,7 @@ Use --patches to export .patch files without applying them.`,
 
 			// Validate mutually exclusive options
 			if len(refs) > 0 && squash {
-				return fmt.Errorf("--squash cannot be used with commit refs — they are mutually exclusive")
+				return sandbox.NewUsageError("--squash cannot be used with commit refs — they are mutually exclusive")
 			}
 			// Load metadata for target directory and mode validation
 			meta, err := sandbox.LoadMeta(sandbox.Dir(name))
@@ -77,7 +77,7 @@ Use --patches to export .patch files without applying them.`,
 				return sandboxErrorHint(name, err)
 			}
 			if meta.Workdir.Mode == "rw" {
-				return fmt.Errorf("apply is not needed for :rw directories — changes are already live")
+				return sandbox.NewUsageError("apply is not needed for :rw directories — changes are already live")
 			}
 
 			slog.Info("applying changes", "event", "sandbox.apply", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
@@ -150,7 +150,7 @@ Use --patches to export .patch files without applying them.`,
 			// No commits, only WIP — use existing squash flow (HEAD == baseline equivalent)
 			if len(commits) == 0 && hasWIP {
 				if withTags {
-					return fmt.Errorf("--tags requires commits — cannot transfer tags with WIP-only changes")
+					return sandbox.NewUsageError("--tags requires commits — cannot transfer tags with WIP-only changes")
 				}
 				return applySquash(cmd, name, paths, meta, yes, dryRun)
 			}
@@ -301,10 +301,10 @@ Use --patches to export .patch files without applying them.`,
 func applyOverlay(cmd *cobra.Command, name string, meta *sandbox.Meta, refs, paths []string, patchesDir string, noWIP, yes, dryRun bool) error {
 	// Reject unsupported flag combos for overlay
 	if len(refs) > 0 {
-		return fmt.Errorf("selective ref apply is not supported for :overlay sandboxes")
+		return sandbox.NewPlatformError("selective ref apply is not supported for :overlay sandboxes")
 	}
 	if noWIP {
-		return fmt.Errorf("--no-wip is not supported for :overlay sandboxes (no commit/WIP separation)")
+		return sandbox.NewPlatformError("--no-wip is not supported for :overlay sandboxes (no commit/WIP separation)")
 	}
 
 	backend := resolveBackendForSandbox(name)

@@ -181,7 +181,7 @@ func newNewCmd(version string) *cobra.Command {
 			attach, _ := cmd.Flags().GetBool("attach")
 
 			if jsonEnabled(cmd) && attach {
-				return fmt.Errorf("--json and --attach are incompatible")
+				return sandbox.NewUsageError("--json and --attach are incompatible")
 			}
 			if networkNone && len(ports) > 0 {
 				return sandbox.NewUsageError("--port is incompatible with --network-none")

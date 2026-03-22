@@ -119,10 +119,10 @@ func runMCPProxy(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(positional) < 1 {
-		return fmt.Errorf("sandbox name is required")
+		return sandbox.NewUsageError("sandbox name is required")
 	}
 	if len(innerCmd) == 0 {
-		return fmt.Errorf("inner command required after '--'")
+		return sandbox.NewUsageError("inner command required after '--'")
 	}
 
 	name := positional[0]

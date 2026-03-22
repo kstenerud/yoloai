@@ -3,7 +3,6 @@ package cli
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/kstenerud/yoloai/sandbox"
 )
@@ -33,9 +32,9 @@ func loadIsolatedMeta(name string) (string, *sandbox.Meta, error) {
 	case "isolated":
 		// ok
 	case "none":
-		return "", nil, fmt.Errorf("sandbox %q uses --network-none; cannot modify network access", name)
+		return "", nil, sandbox.NewUsageError("sandbox %q uses --network-none; cannot modify network access", name)
 	default:
-		return "", nil, fmt.Errorf("sandbox %q is not using network isolation", name)
+		return "", nil, sandbox.NewUsageError("sandbox %q is not using network isolation", name)
 	}
 
 	return sandboxDir, meta, nil

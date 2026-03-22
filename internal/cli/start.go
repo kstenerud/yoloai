@@ -30,7 +30,7 @@ func newStartCmd() *cobra.Command {
 			promptFile, _ := cmd.Flags().GetString("prompt-file")
 
 			if jsonEnabled(cmd) && attach {
-				return fmt.Errorf("--json and --attach are incompatible")
+				return sandbox.NewUsageError("--json and --attach are incompatible")
 			}
 
 			// Set terminal title early so it shows the sandbox name during start

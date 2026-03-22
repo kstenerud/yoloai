@@ -13,6 +13,7 @@ import (
 	"text/tabwriter"
 
 	"github.com/kstenerud/yoloai/extension"
+	"github.com/kstenerud/yoloai/sandbox"
 	"github.com/spf13/cobra"
 )
 
@@ -86,16 +87,16 @@ func runExtension(cmd *cobra.Command, ext *extension.Extension, args []string) e
 		for _, a := range ext.Args {
 			expected = append(expected, "<"+a.Name+">")
 		}
-		return fmt.Errorf("expected %d argument(s): %s", len(ext.Args), strings.Join(expected, " "))
+		return sandbox.NewUsageError("expected %d argument(s): %s", len(ext.Args), strings.Join(expected, " "))
 	}
 	if len(args) > len(ext.Args) {
-		return fmt.Errorf("expected %d argument(s) but got %d", len(ext.Args), len(args))
+		return sandbox.NewUsageError("expected %d argument(s) but got %d", len(ext.Args), len(args))
 	}
 
 	// Resolve and validate agent
 	agentName := resolveAgentFromConfig()
 	if !ext.SupportsAgent(agentName) {
-		return fmt.Errorf("extension %q does not support agent %q (supports: %s)",
+		return sandbox.NewUsageError("extension %q does not support agent %q (supports: %s)",
 			ext.Name, agentName, strings.Join(ext.Agent.Names, ", "))
 	}
 

@@ -39,7 +39,7 @@ func Execute(ctx context.Context, version, commit, date string) (exitCode int) {
 		brType, _ := cmd.Root().PersistentFlags().GetString("bugreport")
 		if brType != "" {
 			if brType != "safe" && brType != "unsafe" {
-				return fmt.Errorf("--bugreport: must be safe or unsafe")
+				return sandbox.NewUsageError("--bugreport: must be safe or unsafe")
 			}
 			name, err := bugReportFilename(time.Now().UTC())
 			if err != nil {

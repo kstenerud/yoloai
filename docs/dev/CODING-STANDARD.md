@@ -153,6 +153,30 @@ Domain packages return typed errors (e.g., `ConfigError`, `SandboxNotFoundError`
 
 Cobra customization required: set `SilenceErrors: true` and `SilenceUsage: true` on the root command, then handle error formatting and exit codes in a custom `RunE` wrapper or post-run error handler.
 
+## Error Types and Exit Codes
+
+Return typed errors from `config/errors.go` (or their aliases in `sandbox/errors.go`)
+when the error has a clear exit-code category:
+
+- Bad flags / argument validation → `NewUsageError` (exit 2)
+- Config file malformed or missing required key → `NewConfigError` (exit 3)
+- Feature not available on this platform/backend → `NewPlatformError` (exit 6)
+- Missing API key / credential → `NewAuthError` (exit 7)
+- Permission denied → `NewPermissionError` (exit 8)
+
+Use plain `fmt.Errorf` for operational failures (I/O, network, unexpected errors).
+Wrap upstream errors with `%w`. Do not wrap user-facing validation messages — they
+have no upstream cause.
+
+**UsageError vs ConfigError:** UsageError = bad argument or flag passed by the user;
+ConfigError = a config file is malformed or missing a required value. "Profile does
+not exist" is UsageError (bad argument); "profile config.yaml is missing `agent` key"
+is ConfigError.
+
+**Do not change errors that wrap an upstream error with `%w`** — those are operational
+errors and should stay as `fmt.Errorf`. Only convert errors that are purely
+user-facing messages with no upstream cause to wrap.
+
 ## Testing
 
 - **Framework:** `testing` stdlib + `testify/assert` — reduces assertion boilerplate; stdlib `testing` is also acceptable, the key is consistency within the project

@@ -46,7 +46,7 @@ func newSystemBuildCmd() *cobra.Command {
 			backendFlag, _ := cmd.Flags().GetString("backend")
 
 			if all && backendFlag != "" {
-				return fmt.Errorf("--all and --backend are mutually exclusive")
+				return sandbox.NewUsageError("--all and --backend are mutually exclusive")
 			}
 
 			if all {
@@ -74,7 +74,7 @@ func runSystemBuild(cmd *cobra.Command, args []string, backend string) error {
 			return err
 		}
 		if !config.ProfileExists(profileName) {
-			return fmt.Errorf("profile %q does not exist", profileName)
+			return sandbox.NewUsageError("profile %q does not exist", profileName)
 		}
 		if !config.ProfileHasDockerfile(profileName) {
 			// Check if any ancestor has a Dockerfile
@@ -90,7 +90,7 @@ func runSystemBuild(cmd *cobra.Command, args []string, backend string) error {
 				}
 			}
 			if !hasAny {
-				return fmt.Errorf("profile %q has no Dockerfile (and no ancestor does either)", profileName)
+				return sandbox.NewUsageError("profile %q has no Dockerfile (and no ancestor does either)", profileName)
 			}
 		}
 
@@ -125,7 +125,7 @@ func runSystemBuild(cmd *cobra.Command, args []string, backend string) error {
 
 	// Build base image only
 	if len(secretFlags) > 0 {
-		return fmt.Errorf("--secret is only supported with profile builds")
+		return sandbox.NewUsageError("--secret is only supported with profile builds")
 	}
 	baseProfileDir := config.ProfileDirPath("base")
 	return withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {

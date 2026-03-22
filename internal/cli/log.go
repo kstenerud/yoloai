@@ -142,7 +142,7 @@ func parseLogLevel(s string) (int, error) {
 	case "debug", "info", "warn", "warning", "error":
 		return levelOrder(s), nil
 	default:
-		return 0, fmt.Errorf("unknown level %q: must be debug, info, warn, or error", s)
+		return 0, sandbox.NewUsageError("unknown level %q: must be debug, info, warn, or error", s)
 	}
 }
 
@@ -160,7 +160,7 @@ func parseSince(s string) (time.Time, error) {
 				t.Hour(), t.Minute(), t.Second(), 0, time.Local).UTC(), nil
 		}
 	}
-	return time.Time{}, fmt.Errorf("unrecognized format: use a duration (e.g. 5m) or local time (e.g. 14:20:00)")
+	return time.Time{}, sandbox.NewUsageError("unrecognized format: use a duration (e.g. 5m) or local time (e.g. 14:20:00)")
 }
 
 // filterSources returns active sources based on the --source flag.
