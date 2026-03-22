@@ -34,32 +34,41 @@ and what it takes to unlock more.
 
 ## Interface changes
 
-### `IsolationValidator` → `CapabilityProvider` (in `runtime/runtime.go`)
+### `IsolationValidator` removed; two methods added to `Runtime`
 
-`IsolationValidator` is removed. `CapabilityProvider` replaces it and adds discovery:
+`IsolationValidator` is removed. `RequiredCapabilities` and `SupportedIsolationModes`
+are added directly to the `Runtime` interface — not as a separate optional interface.
+All backends must implement both:
 
 ```go
-// CapabilityProvider is an optional interface implemented by Runtime backends
-// that have host-level prerequisites beyond basic daemon connectivity.
-type CapabilityProvider interface {
-    // RequiredCapabilities returns the host capabilities needed for the given
-    // isolation mode. An empty string returns capabilities for the base backend
-    // (e.g. daemon socket reachable). Returns nil if no special requirements
-    // exist for this mode.
-    RequiredCapabilities(isolation string) []caps.HostCapability
+// In the Runtime interface (runtime/runtime.go):
 
-    // SupportedIsolationModes returns the isolation modes this backend can
-    // potentially support. Used by `system doctor` to discover what to check
-    // without requiring the caller to enumerate modes externally.
-    SupportedIsolationModes() []string
-}
+// RequiredCapabilities returns the host capabilities needed for the given
+// isolation mode. Returns nil if the backend has no special requirements
+// for this mode. An empty string may be used to query base requirements
+// (e.g. daemon socket reachable), though most backends return nil for "".
+RequiredCapabilities(isolation string) []caps.HostCapability
+
+// SupportedIsolationModes returns the isolation modes this backend can
+// potentially support. Returns nil if the backend has no isolation modes.
+// Used by `system doctor` to discover what to check without the caller
+// enumerating modes externally.
+SupportedIsolationModes() []string
 ```
+
+Making these mandatory in `Runtime` (rather than an optional interface) means:
+- `system doctor` calls `SupportedIsolationModes()` on every backend without type
+  assertions — no backend silently produces no output.
+- `system_check.go` calls `rt.RequiredCapabilities(isolation)` directly.
+- The type-assertion pattern (`rt.(runtime.CapabilityProvider)`) is eliminated.
+- Backends with no isolation modes (Tart, Seatbelt) return nil from both methods —
+  four lines of boilerplate, no logic.
 
 `ValidateIsolation` is deleted from all backends. `system_check.go` and
 `system_doctor.go` drive checks generically via `caps.RunChecks`. No per-backend
 formatting code survives.
 
-This is a breaking change to the `runtime.Runtime` interface and all its implementations.
+This is a breaking change to the `Runtime` interface and all its implementations.
 Beta: acceptable.
 
 ---
@@ -304,21 +313,16 @@ the kvm group is fixable; absence of the hardware is not.
 `devmakerSnapshotter` (note: "devmapper" throughout — the current "devmaker" typo in the
 codebase is fixed here) is built by `New()` since it needs `r.client`.
 
-### Tart (`runtime/tart/`)
+### Tart (`runtime/tart/`) and Seatbelt (`runtime/seatbelt/`)
 
 ```go
-func (r *Runtime) SupportedIsolationModes() []string { return nil }
-
-func (r *Runtime) RequiredCapabilities(_ string) []caps.HostCapability { return nil }
+func (r *Runtime) SupportedIsolationModes() []string                    { return nil }
+func (r *Runtime) RequiredCapabilities(_ string) []caps.HostCapability  { return nil }
 ```
 
-Tart's platform prerequisites (macOS, Apple Silicon) are enforced in `New()` and
-permanently prevent instantiation on other platforms. There are no isolation modes.
-`system doctor` shows Tart as unavailable when `New()` fails.
-
-### Seatbelt (`runtime/seatbelt/`)
-
-Same as Tart — no isolation modes, no special host capabilities.
+No isolation modes, no special host capabilities. Platform prerequisites (macOS, Apple
+Silicon for Tart; macOS for Seatbelt) are enforced in `New()` — if instantiation fails,
+`system doctor` shows the backend as unavailable with the error from `New()`.
 
 ---
 
@@ -392,12 +396,12 @@ The isolation check (step 4) replaces `IsolationValidator` with `CapabilityProvi
 if isolation != "" {
     r := checkResult{Name: "isolation"}
     err := withRuntime(ctx, backend, func(ctx context.Context, rt runtime.Runtime) error {
-        cp, ok := rt.(runtime.CapabilityProvider)
-        if !ok {
-            return nil
+        capList := rt.RequiredCapabilities(isolation)
+        if len(capList) == 0 {
+            return nil // backend has no requirements for this mode
         }
         env := caps.DetectEnvironment()
-        results := caps.RunChecks(ctx, cp.RequiredCapabilities(isolation), env)
+        results := caps.RunChecks(ctx, capList, env)
         return caps.FormatError(results)
     })
     ...
@@ -471,7 +475,7 @@ without root or a real container.
 | Create  | `runtime/caps/common.go` |
 | Create  | `runtime/caps/caps_test.go` |
 | Create  | `runtime/caps/detect_test.go` |
-| Modify  | `runtime/runtime.go` — replace `IsolationValidator` with `CapabilityProvider` |
+| Modify  | `runtime/runtime.go` — remove `IsolationValidator`; add `RequiredCapabilities` and `SupportedIsolationModes` to `Runtime` interface |
 | Create  | `runtime/containerd/caps.go` — local capability definitions and constructors |
 | Modify  | `runtime/containerd/containerd.go` — implement `CapabilityProvider`, delete `ValidateIsolation`, fix devmaker→devmapper typo |
 | Modify  | `runtime/containerd/containerd_test.go` — update to use injected constructors |
@@ -481,8 +485,8 @@ without root or a real container.
 | Create  | `runtime/podman/caps.go` |
 | Modify  | `runtime/podman/podman.go` — implement `CapabilityProvider`, delete `ValidateIsolation` |
 | Modify  | `runtime/podman/podman_test.go` |
-| Modify  | `runtime/tart/tart.go` — implement `CapabilityProvider` (nil returns) |
-| Modify  | `runtime/seatbelt/seatbelt.go` — implement `CapabilityProvider` (nil returns) |
+| Modify  | `runtime/tart/tart.go` — add nil-returning `RequiredCapabilities` and `SupportedIsolationModes` |
+| Modify  | `runtime/seatbelt/seatbelt.go` — same |
 | Modify  | `internal/cli/system_check.go` — use `CapabilityProvider` |
 | Create  | `internal/cli/system_doctor.go` |
 | Modify  | `internal/cli/system.go` — register `doctor` subcommand |
