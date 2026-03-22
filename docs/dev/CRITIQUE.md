@@ -10,12 +10,19 @@ The package layout (`cmd/`, `agent/`, `config/`, `runtime/`, `sandbox/`, `intern
 
 ---
 
-## 2. Code Quality — Strong
+## 2. Code Quality — Good, with one gap
 
-- Consistent `fmt.Errorf("%w", err)` wrapping throughout
-- Sentinel errors in `sandbox/errors.go` and typed errors in `config/errors.go` (exit codes 2, 3) are correct
 - `gosec` annotations with rationales on file operations show security awareness
 - `workspace/safety.go` (`IsDangerousDir`, `CheckPathOverlap`) is good hardening
+- Typed errors in `config/errors.go` and `sandbox/errors.go` are well-designed with
+  correct exit-code semantics
+
+**Gap:** `internal/cli/` almost exclusively uses plain `fmt.Errorf` rather than the
+typed error constructors, so nearly all CLI errors exit 1 regardless of their actual
+category (usage error, config error, auth error, etc.). The typed error system exists
+but is not used where it matters most. Several sentinel errors in `sandbox/errors.go`
+(`ErrDockerUnavailable`, `ErrMissingAPIKey`, `ErrContainerNotRunning`, `ErrNoChanges`)
+appear unused. Both tracked in the backend-agent-extensibility plan (Issues 8 and 10).
 
 ---
 
@@ -64,7 +71,6 @@ The user-facing `docs/GUIDE.md` matches implemented commands. Design docs accura
 - Secrets mounted at `/run/secrets/` inside container (not baked into image)
 
 **Missing:**
-- No `yoloai system check` / health check command — CI/CD pipelines need a way to verify prereqs
 - No log rotation — `log.txt` in sandbox dir grows unbounded
 - Exit code for "unapplied changes" is missing — `yoloai destroy` with pending changes returns exit 1 (generic), not a distinct code
 - No concurrency controls — multiple simultaneous `yoloai new` calls to the same sandbox are not guarded
@@ -76,7 +82,6 @@ The user-facing `docs/GUIDE.md` matches implemented commands. Design docs accura
 
 | Priority | Issue | Location |
 |----------|-------|----------|
-| Low | Add `yoloai system check` health command | new command |
 | Low | Log rotation policy | `sandbox/` or external |
 
 ---

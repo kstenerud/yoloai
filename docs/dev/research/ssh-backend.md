@@ -88,19 +88,22 @@ use it.
 TmuxSocket(name string) string
 ```
 
-### `ShouldSeedHomeConfig()` → `NeedsNpmAgentInstall() bool`
+### `ShouldSeedHomeConfig()` → `AgentPreinstalled() bool`
 
-The current name is opaque. The actual question being asked is: "does this backend
-run the agent from an npm-installed binary (as in Docker images), or from a natively
-installed binary (as in Seatbelt and SSH)?" The npm-installed copy has its install
-method recorded as `"npm-global"` in `.claude.json`; the native copy says `"native"`.
-Renaming makes the intent clear.
+The current name is opaque. The actual question being asked is: "is the agent binary
+already present on the target, or does this backend provision it as part of image
+build?" SSH and Seatbelt targets have the agent installed by the user beforehand;
+Docker/Podman/containerd/Tart install the agent during image provisioning. The
+install method recorded in `.claude.json` (`"native"` vs `"npm-global"` vs whatever
+the installer uses) is a consequence of this distinction, not the question itself.
+Renaming makes the intent clear without encoding a specific package manager.
 
 ```go
-NeedsNpmAgentInstall() bool
+AgentPreinstalled() bool
 ```
 
-Returns `true` for Docker/Podman/containerd, `false` for Tart, Seatbelt, and SSH.
+Returns `true` for Seatbelt and SSH (agent already on target), `false` for
+Docker/Podman/containerd/Tart (agent provisioned by image build).
 
 ### `InstanceConfig` — no changes
 
@@ -108,14 +111,21 @@ Returns `true` for Docker/Podman/containerd, `false` for Tart, Seatbelt, and SSH
 `ContainerRuntime`, `Snapshotter`, `UseInit`, `UsernsMode`, `CapAdd`, `Devices`) that
 are irrelevant to SSH. The SSH backend ignores them.
 
-The alternative — splitting `InstanceConfig` into a common base and per-backend
-extensions — is appealing in principle but is not pursued here. The problem is that
-some "container-specific" fields are actually per-invocation decisions driven by CLI
-flags (e.g. `Resources`, `CapAdd` based on overlay mode). A proper split would require
-rethinking how these values flow from CLI → sandbox logic → backend, which is a larger
-refactor than the SSH backend warrants. Adding SSH-specific params to `InstanceConfig`
-would make the problem worse, so SSH-specific config (`host`, `key`, `port`) is passed
-to `ssh.New()` at construction time, not through `InstanceConfig`.
+**Why a split is not warranted here:** splitting `InstanceConfig` into a common base
+and per-backend extensions would require rethinking how values flow from CLI → sandbox
+logic → backend. The sandbox layer is what builds `InstanceConfig`, and it already
+makes backend-conditional decisions while doing so (e.g. `CapAdd` after mount
+resolution, `UsernsMode` after `CapAdd` is known). A split doesn't remove that
+coupling — it forces `sandbox/create.go` to branch on backend type to construct the
+right extension struct, reintroducing what the interface was supposed to abstract away.
+
+**When a split would be warranted:** backends with truly divergent invocation needs
+(Kubernetes, cloud VMs) would have near-zero field overlap with `InstanceConfig`. At
+that point the "just ignore what you don't use" approach produces real confusion. Until
+then, the right discipline is: SSH-specific construction params (`host`, `key`, `port`)
+go in `ssh.New()`, and `InstanceConfig` should not accumulate more container-specific
+fields than it already has. See `docs/dev/plans/backend-agent-extensibility.md`
+Issue 6 for the low-cost changes that keep this option open.
 
 ---
 
@@ -599,9 +609,9 @@ BackendCaps{
 }
 ```
 
-### `NeedsNpmAgentInstall()`
+### `AgentPreinstalled()`
 
-Returns `false`. Agent runs from its natively installed binary on the remote.
+Returns `true`. Agent runs from its natively installed binary on the remote.
 
 ### `ResolveCopyMount(sandboxName, hostPath string) string`
 
@@ -717,7 +727,7 @@ runtime/ssh/
 
 | File | Change |
 |------|--------|
-| `runtime/runtime.go` | Rename `EnsureImage` → `Setup`, `ImageExists` → `IsReady`, `PreferredTmuxSocket()` → `TmuxSocket(name string)`, `ShouldSeedHomeConfig` → `NeedsNpmAgentInstall` |
+| `runtime/runtime.go` | Rename `EnsureImage` → `Setup`, `ImageExists` → `IsReady`, `PreferredTmuxSocket()` → `TmuxSocket(name string)`, `ShouldSeedHomeConfig` → `AgentPreinstalled` |
 | `runtime/docker/`, `runtime/podman/`, `runtime/tart/`, `runtime/seatbelt/`, `runtime/containerd/` | Update each backend to implement the renamed methods |
 | `sandbox/create.go` | Replace all call sites for renamed methods; gate `:overlay` on `caps.OverlayDirs`; allow `:rw` for SSH via sync semantics; use `caps.OverlayDirs` rather than backend name strings |
 | `sandbox/diff.go`, `sandbox/apply.go` | Add SSH-specific apply path (apply locally + rsync) |
