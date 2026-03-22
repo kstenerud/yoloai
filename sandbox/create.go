@@ -1354,16 +1354,15 @@ func copySeedFiles(agentDef *agent.Definition, sandboxDir string, hasAPIKey bool
 }
 
 // ensureContainerSettings merges required container settings into agent-state/settings.json.
-// Agent-specific adjustments:
-//   - Claude Code: skip --dangerously-skip-permissions prompt, disable nested sandbox-exec.
-//   - Gemini CLI: disable folder-trust prompt (the container IS the sandbox).
-//   - Shell: apply each real agent's settings into home-seed subdirectories.
+// Agent-specific adjustments are driven by each agent's ApplySettings field.
+// Shell agents (SeedsAllAgents=true) apply each real agent's settings into
+// home-seed subdirectories instead.
 func ensureContainerSettings(agentDef *agent.Definition, sandboxDir, isolation string) error {
-	if agentDef.Name == "shell" {
+	if agentDef.SeedsAllAgents {
 		return ensureShellContainerSettings(sandboxDir, isolation)
 	}
 
-	if agentDef.StateDir == "" {
+	if agentDef.StateDir == "" || agentDef.ApplySettings == nil {
 		return nil
 	}
 
@@ -1376,131 +1375,35 @@ func ensureContainerSettings(agentDef *agent.Definition, sandboxDir, isolation s
 	}
 	settingsPath := filepath.Join(agentStateDir, "settings.json")
 
-	switch agentDef.Name {
-	case "claude":
-		settings, err := readJSONMap(settingsPath)
-		if err != nil {
-			return err
-		}
-		settings["skipDangerousModePermissionPrompt"] = true
-		// Disable Claude Code's built-in sandbox-exec to prevent nesting failures.
-		// sandbox-exec cannot be nested — an inner sandbox-exec inherits the outer
-		// profile's restrictions and typically fails.
-		settings["sandbox"] = map[string]interface{}{"enabled": false}
-		// Ensure Claude Code emits BEL for tmux tab highlighting
-		settings["preferredNotifChannel"] = "terminal_bell"
-		// Inject hooks for status tracking. Claude Code's own hook system is
-		// far more reliable than polling tmux capture-pane for a ready pattern.
-		injectIdleHook(settings)
-		return writeJSONMap(settingsPath, settings)
-
-	case "gemini":
-		settings, err := readJSONMap(settingsPath)
-		if err != nil {
-			return err
-		}
-		// Preserve existing security settings (e.g. auth.selectedType) while
-		// disabling folder trust — the container is already sandboxed.
-		security, _ := settings["security"].(map[string]interface{})
-		if security == nil {
-			security = map[string]interface{}{}
-		}
-		security["folderTrust"] = map[string]interface{}{"enabled": false}
-		settings["security"] = security
-		return writeJSONMap(settingsPath, settings)
-
-	default:
-		return nil
+	settings, err := readJSONMap(settingsPath)
+	if err != nil {
+		return err
 	}
+	agentDef.ApplySettings(settings)
+	return writeJSONMap(settingsPath, settings)
 }
 
 // ensureShellContainerSettings applies each real agent's container settings
 // to its home-seed subdirectory (e.g., home-seed/.claude/settings.json).
-func ensureShellContainerSettings(sandboxDir, isolation string) error {
+func ensureShellContainerSettings(sandboxDir string, _ string) error {
 	for _, name := range agent.RealAgents() {
 		def := agent.GetAgent(name)
-		if def.StateDir == "" {
+		if def.StateDir == "" || def.ApplySettings == nil {
 			continue
 		}
 		dirBase := filepath.Base(def.StateDir)
 		settingsPath := filepath.Join(sandboxDir, "home-seed", dirBase, "settings.json")
 
-		switch name {
-		case "claude":
-			settings, err := readJSONMap(settingsPath)
-			if err != nil {
-				return err
-			}
-			settings["skipDangerousModePermissionPrompt"] = true
-			settings["sandbox"] = map[string]interface{}{"enabled": false}
-			injectIdleHook(settings)
-			if err := writeJSONMap(settingsPath, settings); err != nil {
-				return err
-			}
-
-		case "gemini":
-			settings, err := readJSONMap(settingsPath)
-			if err != nil {
-				return err
-			}
-			security, _ := settings["security"].(map[string]interface{})
-			if security == nil {
-				security = map[string]interface{}{}
-			}
-			security["folderTrust"] = map[string]interface{}{"enabled": false}
-			settings["security"] = security
-			if err := writeJSONMap(settingsPath, settings); err != nil {
-				return err
-			}
+		settings, err := readJSONMap(settingsPath)
+		if err != nil {
+			return err
+		}
+		def.ApplySettings(settings)
+		if err := writeJSONMap(settingsPath, settings); err != nil {
+			return err
 		}
 	}
 	return nil
-}
-
-// statusIdleCommand writes idle status to agent-status.json and appends a
-// structured JSONL entry to logs/agent-hooks.jsonl when Claude finishes a
-// response (Notification hook). Uses $YOLOAI_DIR for portability across
-// backends (Docker=/yoloai, seatbelt=sandbox dir).
-const statusIdleCommand = `printf '{"ts":"%s","level":"info","event":"hook.idle","msg":"agent hook: idle","status":"idle"}\n' "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" >> "${YOLOAI_DIR:-/yoloai}/logs/agent-hooks.jsonl" && printf '{"status":"idle","exit_code":null,"timestamp":%d}\n' "$(date +%s)" > "${YOLOAI_DIR:-/yoloai}/agent-status.json"`
-
-// statusActiveCommand writes active status to agent-status.json and appends a
-// structured JSONL entry to logs/agent-hooks.jsonl when Claude starts working
-// (PreToolUse hook). This ensures the title updates from "> name" back to
-// "name" when the user submits a new prompt.
-const statusActiveCommand = `printf '{"ts":"%s","level":"info","event":"hook.active","msg":"agent hook: active","status":"active"}\n' "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" >> "${YOLOAI_DIR:-/yoloai}/logs/agent-hooks.jsonl" && printf '{"status":"active","exit_code":null,"timestamp":%d}\n' "$(date +%s)" > "${YOLOAI_DIR:-/yoloai}/agent-status.json"`
-
-// injectIdleHook merges hooks into Claude Code's settings map for status tracking.
-// Notification → idle (turn complete), PreToolUse → running (work started).
-// Preserves any existing hooks the user may have configured.
-func injectIdleHook(settings map[string]any) {
-	hooks, _ := settings["hooks"].(map[string]any)
-	if hooks == nil {
-		hooks = map[string]any{}
-	}
-
-	// Notification hook: mark idle when Claude finishes a response.
-	idleHook := map[string]any{
-		"type":    "command",
-		"command": statusIdleCommand,
-	}
-	idleGroup := map[string]any{
-		"hooks": []any{idleHook},
-	}
-	existingNotif, _ := hooks["Notification"].([]any)
-	hooks["Notification"] = append(existingNotif, idleGroup)
-
-	// PreToolUse hook: mark active when Claude starts using tools.
-	activeHook := map[string]any{
-		"type":    "command",
-		"command": statusActiveCommand,
-	}
-	activeGroup := map[string]any{
-		"hooks": []any{activeHook},
-	}
-	existingPre, _ := hooks["PreToolUse"].([]any)
-	hooks["PreToolUse"] = append(existingPre, activeGroup)
-
-	settings["hooks"] = hooks
 }
 
 // ensureHomeSeedConfig patches home-seed/.claude.json to set installMethod to

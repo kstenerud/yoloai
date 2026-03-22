@@ -18,8 +18,8 @@ func (m *Manager) seedSandbox(agentDef *agent.Definition, sandboxDir, isolation 
 		return false, fmt.Errorf("copy seed files: %w", err)
 	}
 
-	// Warn when Claude is using short-lived OAuth credentials instead of a long-lived token.
-	if agentDef.Name == "claude" && copiedAuth {
+	// Warn when an agent is using short-lived OAuth credentials instead of a long-lived token.
+	if agentDef.ShortLivedOAuthWarning && copiedAuth {
 		fmt.Fprintln(m.output, "Warning: using OAuth credentials from ~/.claude/.credentials.json")                         //nolint:errcheck // best-effort warning
 		fmt.Fprintln(m.output, "  These tokens expire after ~30 minutes and may fail in long-running sessions.")            //nolint:errcheck // best-effort warning
 		fmt.Fprintln(m.output, "  For reliable auth, run 'claude setup-token' and export CLAUDE_CODE_OAUTH_TOKEN instead.") //nolint:errcheck // best-effort warning

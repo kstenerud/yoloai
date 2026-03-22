@@ -76,6 +76,19 @@ type Definition struct {
 	NetworkAllowlist  []string          // domains allowed when network-isolated
 	ContextFile       string            // filename in StateDir for sandbox context reference (e.g., "CLAUDE.md")
 	AgentFilesExclude []string          // glob patterns to skip when copying agent_files (string form)
+
+	// ApplySettings patches the agent's settings map before it is written to disk.
+	// Called with the parsed settings map; mutates it in place.
+	// Nil means no patches are needed.
+	ApplySettings func(settings map[string]any)
+
+	// ShortLivedOAuthWarning, if true, warns users when an OAuth credential file
+	// is copied into the sandbox (used by Claude Code which uses short-lived tokens).
+	ShortLivedOAuthWarning bool
+
+	// SeedsAllAgents, if true, means this agent seeds home configs for all real
+	// agents rather than just itself (used by the shell agent).
+	SeedsAllAgents bool
 }
 
 var agents = map[string]*Definition{
@@ -141,6 +154,19 @@ var agents = map[string]*Definition{
 		NetworkAllowlist:  []string{"api.anthropic.com", "claude.ai", "platform.claude.com", "statsig.anthropic.com", "sentry.io"},
 		ContextFile:       "CLAUDE.md",
 		AgentFilesExclude: []string{"projects/", "statsig/", "todos/", ".credentials.json", "*.log"},
+		ApplySettings: func(s map[string]any) {
+			s["skipDangerousModePermissionPrompt"] = true
+			// Disable Claude Code's built-in sandbox-exec to prevent nesting failures.
+			// sandbox-exec cannot be nested — an inner sandbox-exec inherits the outer
+			// profile's restrictions and typically fails.
+			s["sandbox"] = map[string]any{"enabled": false}
+			// Ensure Claude Code emits BEL for tmux tab highlighting.
+			s["preferredNotifChannel"] = "terminal_bell"
+			// Inject hooks for status tracking. Claude Code's own hook system is
+			// far more reliable than polling tmux capture-pane for a ready pattern.
+			injectIdleHook(s)
+		},
+		ShortLivedOAuthWarning: true,
 	},
 	"gemini": {
 		Name:           "gemini",
@@ -172,6 +198,16 @@ var agents = map[string]*Definition{
 		NetworkAllowlist:  []string{"generativelanguage.googleapis.com", "cloudcode-pa.googleapis.com", "oauth2.googleapis.com"},
 		ContextFile:       "GEMINI.md",
 		AgentFilesExclude: []string{"logs/", "oauth_creds.json", "google_accounts.json"},
+		ApplySettings: func(s map[string]any) {
+			// Preserve existing security settings (e.g. auth.selectedType) while
+			// disabling folder trust — the container is already sandboxed.
+			security, _ := s["security"].(map[string]any)
+			if security == nil {
+				security = map[string]any{}
+			}
+			security["folderTrust"] = map[string]any{"enabled": false}
+			s["security"] = security
+		},
 	},
 	"opencode": {
 		Name:            "opencode",
@@ -353,9 +389,56 @@ func buildShellAgent() *Definition {
 		ModelFlag:        "",
 		ModelAliases:     nil,
 		NetworkAllowlist: networkAllowlist,
+		SeedsAllAgents:   true,
 	}
 }
 
 func init() {
 	agents["shell"] = buildShellAgent()
+}
+
+// statusIdleCommand writes idle status to agent-status.json and appends a
+// structured JSONL entry to logs/agent-hooks.jsonl when Claude finishes a
+// response (Notification hook). Uses $YOLOAI_DIR for portability across
+// backends (Docker=/yoloai, seatbelt=sandbox dir).
+const statusIdleCommand = `printf '{"ts":"%s","level":"info","event":"hook.idle","msg":"agent hook: idle","status":"idle"}\n' "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" >> "${YOLOAI_DIR:-/yoloai}/logs/agent-hooks.jsonl" && printf '{"status":"idle","exit_code":null,"timestamp":%d}\n' "$(date +%s)" > "${YOLOAI_DIR:-/yoloai}/agent-status.json"`
+
+// statusActiveCommand writes active status to agent-status.json and appends a
+// structured JSONL entry to logs/agent-hooks.jsonl when Claude starts working
+// (PreToolUse hook). This ensures the title updates from "> name" back to
+// "name" when the user submits a new prompt.
+const statusActiveCommand = `printf '{"ts":"%s","level":"info","event":"hook.active","msg":"agent hook: active","status":"active"}\n' "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" >> "${YOLOAI_DIR:-/yoloai}/logs/agent-hooks.jsonl" && printf '{"status":"active","exit_code":null,"timestamp":%d}\n' "$(date +%s)" > "${YOLOAI_DIR:-/yoloai}/agent-status.json"`
+
+// injectIdleHook merges hooks into Claude Code's settings map for status tracking.
+// Notification → idle (turn complete), PreToolUse → running (work started).
+// Preserves any existing hooks the user may have configured.
+func injectIdleHook(settings map[string]any) {
+	hooks, _ := settings["hooks"].(map[string]any)
+	if hooks == nil {
+		hooks = map[string]any{}
+	}
+
+	// Notification hook: mark idle when Claude finishes a response.
+	idleHook := map[string]any{
+		"type":    "command",
+		"command": statusIdleCommand,
+	}
+	idleGroup := map[string]any{
+		"hooks": []any{idleHook},
+	}
+	existingNotif, _ := hooks["Notification"].([]any)
+	hooks["Notification"] = append(existingNotif, idleGroup)
+
+	// PreToolUse hook: mark active when Claude starts using tools.
+	activeHook := map[string]any{
+		"type":    "command",
+		"command": statusActiveCommand,
+	}
+	activeGroup := map[string]any{
+		"hooks": []any{activeHook},
+	}
+	existingPre, _ := hooks["PreToolUse"].([]any)
+	hooks["PreToolUse"] = append(existingPre, activeGroup)
+
+	settings["hooks"] = hooks
 }

@@ -293,3 +293,99 @@ func TestGetAgent_Unknown(t *testing.T) {
 	assert.Nil(t, GetAgent("unknown"))
 	assert.Nil(t, GetAgent(""))
 }
+
+func TestApplySettings_Claude(t *testing.T) {
+	def := GetAgent("claude")
+	require.NotNil(t, def)
+	require.NotNil(t, def.ApplySettings, "claude should have ApplySettings set")
+
+	settings := map[string]any{}
+	def.ApplySettings(settings)
+
+	assert.Equal(t, true, settings["skipDangerousModePermissionPrompt"])
+	assert.Equal(t, map[string]any{"enabled": false}, settings["sandbox"])
+	assert.Equal(t, "terminal_bell", settings["preferredNotifChannel"])
+
+	// Verify idle hooks were injected
+	hooks, ok := settings["hooks"].(map[string]any)
+	require.True(t, ok, "hooks should be a map")
+	assert.NotNil(t, hooks["Notification"], "Notification hook should be set")
+	assert.NotNil(t, hooks["PreToolUse"], "PreToolUse hook should be set")
+}
+
+func TestApplySettings_ClaudePreservesExistingHooks(t *testing.T) {
+	def := GetAgent("claude")
+	require.NotNil(t, def)
+
+	existingHook := map[string]any{"type": "command", "command": "echo existing"}
+	existingGroup := map[string]any{"hooks": []any{existingHook}}
+	settings := map[string]any{
+		"hooks": map[string]any{
+			"Notification": []any{existingGroup},
+		},
+	}
+	def.ApplySettings(settings)
+
+	hooks := settings["hooks"].(map[string]any)
+	notifHooks := hooks["Notification"].([]any)
+	assert.Len(t, notifHooks, 2, "should preserve existing hook and append idle hook")
+}
+
+func TestApplySettings_Gemini(t *testing.T) {
+	def := GetAgent("gemini")
+	require.NotNil(t, def)
+	require.NotNil(t, def.ApplySettings, "gemini should have ApplySettings set")
+
+	settings := map[string]any{}
+	def.ApplySettings(settings)
+
+	security, ok := settings["security"].(map[string]any)
+	require.True(t, ok, "security should be a map")
+	folderTrust, ok := security["folderTrust"].(map[string]any)
+	require.True(t, ok, "folderTrust should be a map")
+	assert.Equal(t, false, folderTrust["enabled"])
+}
+
+func TestApplySettings_GeminiPreservesExistingSecurityFields(t *testing.T) {
+	def := GetAgent("gemini")
+	require.NotNil(t, def)
+
+	settings := map[string]any{
+		"security": map[string]any{"auth": map[string]any{"selectedType": "oauth"}},
+	}
+	def.ApplySettings(settings)
+
+	security := settings["security"].(map[string]any)
+	// Existing field should be preserved
+	assert.Equal(t, map[string]any{"selectedType": "oauth"}, security["auth"])
+	// folderTrust should be added
+	assert.Equal(t, map[string]any{"enabled": false}, security["folderTrust"])
+}
+
+func TestApplySettings_OtherAgentsNil(t *testing.T) {
+	for _, name := range []string{"aider", "codex", "opencode", "test", "idle"} {
+		def := GetAgent(name)
+		require.NotNil(t, def, "agent %q should exist", name)
+		assert.Nil(t, def.ApplySettings, "agent %q should have nil ApplySettings", name)
+	}
+}
+
+func TestShortLivedOAuthWarning(t *testing.T) {
+	assert.True(t, GetAgent("claude").ShortLivedOAuthWarning, "claude should have ShortLivedOAuthWarning=true")
+
+	for _, name := range []string{"aider", "gemini", "codex", "opencode", "test", "idle", "shell"} {
+		def := GetAgent(name)
+		require.NotNil(t, def, "agent %q should exist", name)
+		assert.False(t, def.ShortLivedOAuthWarning, "agent %q should have ShortLivedOAuthWarning=false", name)
+	}
+}
+
+func TestSeedsAllAgents(t *testing.T) {
+	assert.True(t, GetAgent("shell").SeedsAllAgents, "shell should have SeedsAllAgents=true")
+
+	for _, name := range []string{"aider", "claude", "gemini", "codex", "opencode", "test", "idle"} {
+		def := GetAgent(name)
+		require.NotNil(t, def, "agent %q should exist", name)
+		assert.False(t, def.SeedsAllAgents, "agent %q should have SeedsAllAgents=false", name)
+	}
+}
