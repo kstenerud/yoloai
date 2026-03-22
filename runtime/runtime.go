@@ -48,17 +48,23 @@ type ResourceLimits struct {
 
 // InstanceConfig holds the parameters for creating a sandbox instance.
 type InstanceConfig struct {
-	Name             string
-	ImageRef         string // image tag (Docker) or base VM name (Tart)
-	WorkingDir       string
-	Mounts           []MountSpec
-	Ports            []PortMapping
-	NetworkMode      string // "" = default, "none" = no network, "isolated" = allowlist only
-	CapAdd           []string
-	Devices          []string
-	UseInit          bool
-	UsernsMode       string // "" = default, "keep-id" = rootless Podman
-	Resources        *ResourceLimits
+	// Universal — all backends.
+	Name        string
+	WorkingDir  string
+	Mounts      []MountSpec
+	Ports       []PortMapping
+	NetworkMode string // "" = default, "none" = no network, "isolated" = allowlist only
+	Resources   *ResourceLimits
+
+	// Container/VM backends (Docker, Podman, containerd, Tart).
+	// Ignored by process-based and remote backends.
+	ImageRef   string // image tag (Docker) or base VM name (Tart)
+	CapAdd     []string
+	Devices    []string
+	UseInit    bool
+	UsernsMode string // "" = default, "keep-id" = rootless Podman
+
+	// containerd-specific. Ignored by all other backends.
 	ContainerRuntime string // OCI runtime name (shimv2 type for containerd, runtime name for Docker/Podman)
 	Snapshotter      string // containerd snapshotter name; "" = backend default (overlayfs)
 }

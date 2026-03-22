@@ -326,6 +326,10 @@ This is not hypothetical — it has burned us repeatedly: stale netns `file exis
 - Document unexported functions only when the name and type signature don't make intent obvious. No documentation on test functions or obvious one-liners
 - **No commented-out code.** Use version control.
 
+## Runtime Backend Extension
+
+**Backend-specific params in `New()`, not `InstanceConfig`.** Construction-time params specific to one backend (SSH host/key, Kubernetes namespace/kubeconfig, AWS region/AMI) belong in `New()`, not in `InstanceConfig`. Per-invocation params that are universal or translatable across backends belong in `InstanceConfig`. If a new backend needs per-invocation params with no `InstanceConfig` analog, introduce an optional interface (precedent: `IsolationValidator`, `UsernsProvider`) rather than widening `InstanceConfig`.
+
 ## What to Avoid
 
 - **`init()` abuse** — avoid `init()` except for truly global setup (e.g., registering a driver). Prefer explicit initialization in `main()` or constructors.
