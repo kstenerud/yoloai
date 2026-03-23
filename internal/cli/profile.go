@@ -704,11 +704,7 @@ func newProfileDeleteCmd() *cobra.Command {
 
 // findSandboxesWithProfile scans sandbox meta.json files for profile references.
 func findSandboxesWithProfile(profileName string) []string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return nil
-	}
-	sandboxesDir := filepath.Join(home, ".yoloai", "sandboxes")
+	sandboxesDir := filepath.Join(config.HomeDir(), ".yoloai", "sandboxes")
 	entries, err := os.ReadDir(sandboxesDir)
 	if err != nil {
 		return nil

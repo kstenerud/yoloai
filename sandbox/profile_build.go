@@ -44,11 +44,7 @@ func EnsureProfileImage(ctx context.Context, rt runtime.Runtime, profileName str
 	}
 
 	// Ensure base image first
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return fmt.Errorf("get home directory: %w", err)
-	}
-	baseProfileDir := filepath.Join(home, ".yoloai", "profiles", "base")
+	baseProfileDir := filepath.Join(config.HomeDir(), ".yoloai", "profiles", "base")
 	if err := rt.Setup(ctx, baseProfileDir, output, logger, force); err != nil {
 		return fmt.Errorf("ensure base image: %w", err)
 	}

@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kstenerud/yoloai/config"
 	"github.com/kstenerud/yoloai/runtime"
 )
 
@@ -424,10 +425,7 @@ func InspectSandboxWithBackend(ctx context.Context, rt runtime.Runtime, name str
 
 // ListSandboxes scans ~/.yoloai/sandboxes/ and returns info for all sandboxes.
 func ListSandboxes(ctx context.Context, rt runtime.Runtime) ([]*Info, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return nil, fmt.Errorf("get home directory: %w", err)
-	}
+	home := config.HomeDir()
 	sandboxesDir := filepath.Join(home, ".yoloai", "sandboxes")
 
 	entries, err := os.ReadDir(sandboxesDir)
@@ -465,10 +463,7 @@ func ListSandboxes(ctx context.Context, rt runtime.Runtime) ([]*Info, error) {
 // Returns (infos, unavailableBackends, error).
 // Sandboxes whose backends are unavailable get StatusUnavailable.
 func ListSandboxesMultiBackend(ctx context.Context, newRuntimeFunc func(context.Context, string) (runtime.Runtime, error)) ([]*Info, []string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return nil, nil, fmt.Errorf("get home directory: %w", err)
-	}
+	home := config.HomeDir()
 	sandboxesDir := filepath.Join(home, ".yoloai", "sandboxes")
 
 	entries, err := os.ReadDir(sandboxesDir)
