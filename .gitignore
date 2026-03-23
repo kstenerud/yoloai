@@ -4,6 +4,7 @@
 # Test artifacts
 coverage.out
 coverage.html
+.tart-provisioned
 
 # IDE
 .idea/
