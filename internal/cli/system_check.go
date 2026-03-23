@@ -82,7 +82,7 @@ func runSystemCheck(cmd *cobra.Command, backend, agentName, isolation string) er
 				return err
 			}
 			if !exists {
-				return fmt.Errorf("yoloai-base image not found — run 'yoloai system build'")
+				return fmt.Errorf("yoloai-base image not found — run 'yoloai system build --backend %s'", backend)
 			}
 			return nil
 		})

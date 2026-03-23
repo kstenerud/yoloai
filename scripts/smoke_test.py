@@ -502,11 +502,38 @@ def test_reset(t: Test, spec: BackendSpec) -> None:
 # Prerequisites check
 # ---------------------------------------------------------------------------
 
+def _run_system_check(ctx: RunContext, daemon: str, isolation: str) -> tuple[bool, str]:
+    """Run `yoloai system check` for one (daemon, isolation) pair."""
+    cmd = [ctx.yoloai_bin, "system", "check", "--json", "--backend", daemon, "--agent", "claude"]
+    if isolation:
+        cmd += ["--isolation", isolation]
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        data: dict = json.loads(r.stdout)
+        ok: bool = data.get("ok", False)
+        note = ""
+        for check in data.get("checks", []):
+            if not check.get("ok"):
+                note = check.get("message", "check failed")
+                break
+        return ok, note
+    except subprocess.TimeoutExpired:
+        return False, "system check timed out"
+    except (json.JSONDecodeError, KeyError) as e:
+        return False, f"could not parse system check output: {e}"
+    except FileNotFoundError:
+        return False, "yoloai binary not found"
+
+
 def check_prerequisites(
     ctx: RunContext,
     backends: list[BackendSpec],
 ) -> dict[str, PrereqResult]:
-    """Run `yoloai system check` for each unique (daemon, isolation) pair; return per-spec results."""
+    """Run `yoloai system check` for each unique (daemon, isolation) pair; return per-spec results.
+
+    If a backend is reachable but its image is missing, auto-builds the image
+    and rechecks before returning.
+    """
     print("Checking prerequisites...\n")
 
     # Deduplicate by (check_backend, check_isolation) so vm and vm-enhanced are
@@ -517,25 +544,31 @@ def check_prerequisites(
     check_results: dict[tuple[str, str], tuple[bool, str]] = {}
 
     for daemon, isolation in sorted(unique_keys):
-        cmd = [ctx.yoloai_bin, "system", "check", "--json", "--backend", daemon, "--agent", "claude"]
-        if isolation:
-            cmd += ["--isolation", isolation]
-        try:
-            r = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-            data: dict = json.loads(r.stdout)
-            ok: bool = data.get("ok", False)
-            note = ""
-            for check in data.get("checks", []):
-                if not check.get("ok"):
-                    note = check.get("message", "check failed")
-                    break
-            check_results[(daemon, isolation)] = (ok, note)
-        except subprocess.TimeoutExpired:
-            check_results[(daemon, isolation)] = (False, "system check timed out")
-        except (json.JSONDecodeError, KeyError) as e:
-            check_results[(daemon, isolation)] = (False, f"could not parse system check output: {e}")
-        except FileNotFoundError:
-            check_results[(daemon, isolation)] = (False, "yoloai binary not found")
+        check_results[(daemon, isolation)] = _run_system_check(ctx, daemon, isolation)
+
+    # Auto-build: if a backend's only failure is a missing image, build it and recheck.
+    # This handles the case where the smoke test runs as root and can reach a system-wide
+    # daemon (e.g. /run/podman/podman.sock) that hasn't had its image built yet.
+    image_missing_daemons: set[str] = set()
+    for (daemon, isolation), (ok, note) in check_results.items():
+        if not ok and "image not found" in note:
+            image_missing_daemons.add(daemon)
+
+    for daemon in sorted(image_missing_daemons):
+        print(f"  Building yoloai-base image for {daemon} backend...")
+        r = subprocess.run(
+            [ctx.yoloai_bin, "system", "build", "--backend", daemon],
+            timeout=600,
+        )
+        if r.returncode != 0:
+            continue
+        # Recheck all (daemon, *) pairs now that the image exists.
+        for (d, isolation) in list(check_results.keys()):
+            if d == daemon:
+                check_results[(d, isolation)] = _run_system_check(ctx, d, isolation)
+
+    if image_missing_daemons:
+        print()
 
     results: dict[str, PrereqResult] = {}
     for spec in backends:
