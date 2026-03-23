@@ -661,7 +661,12 @@ func (r *Runtime) runSetupScript(ctx context.Context, vmName, sandboxPath string
 		// mkdir may fail for system dirs like /var/folders on macOS - that's OK if parent exists
 		symlinkCmd := fmt.Sprintf("(mkdir -p '%s' 2>/dev/null || true) && rm -rf '%s' && ln -sfn '%s' '%s'", parent, target, vfsPath, target)
 		args := execArgs(vmName, "bash", "-c", symlinkCmd)
+		slog.Debug("tart setup: creating symlink", "vm", vmName, "target", target, "vfsPath", vfsPath, "cmd", symlinkCmd)
 		if _, err := r.runTart(ctx, args...); err != nil {
+			// Check if VM is still running to provide better error message
+			if !r.isRunning(ctx, vmName) {
+				return fmt.Errorf("create mount symlink for %s (VM appears to have crashed): %w", target, err)
+			}
 			return fmt.Errorf("create mount symlink for %s: %w", target, err)
 		}
 	}
