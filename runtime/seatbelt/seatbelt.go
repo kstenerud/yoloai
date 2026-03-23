@@ -135,9 +135,31 @@ func (r *Runtime) Create(_ context.Context, cfg runtime.InstanceConfig) error {
 		return fmt.Errorf("create secrets dir: %w", err)
 	}
 	for _, m := range cfg.Mounts {
-		if !strings.HasPrefix(m.Target, "/run/secrets/") {
+		// buildMounts creates a directory mount with Target="/run/secrets"
+		if m.Target != "/run/secrets" && !strings.HasPrefix(m.Target, "/run/secrets/") {
 			continue
 		}
+		// If it's a directory mount, copy all files from the source directory
+		if m.Target == "/run/secrets" {
+			entries, err := os.ReadDir(m.Source)
+			if err != nil {
+				continue // skip if directory read fails
+			}
+			for _, entry := range entries {
+				if entry.IsDir() {
+					continue
+				}
+				data, err := os.ReadFile(filepath.Join(m.Source, entry.Name())) //nolint:gosec // G304: source is from validated mount spec
+				if err != nil {
+					continue // skip files that can't be read
+				}
+				if err := fileutil.WriteFile(filepath.Join(secretsDir, entry.Name()), data, 0600); err != nil { //nolint:gosec // G703: secretsDir is an internal sandbox directory
+					return fmt.Errorf("copy secret %s: %w", entry.Name(), err)
+				}
+			}
+			continue
+		}
+		// Handle individual file mounts (legacy, may not be used anymore)
 		data, err := os.ReadFile(m.Source) //nolint:gosec // G304: source is from validated mount spec
 		if err != nil {
 			continue // skip missing secrets (may have been cleaned up)
