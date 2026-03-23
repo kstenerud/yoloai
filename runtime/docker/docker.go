@@ -27,6 +27,12 @@ import (
 	"github.com/kstenerud/yoloai/runtime/caps"
 )
 
+func init() {
+	runtime.Register("docker", func(ctx context.Context) (runtime.Runtime, error) {
+		return New(ctx)
+	})
+}
+
 // Runtime implements runtime.Runtime using the Docker SDK.
 type Runtime struct {
 	client     *dockerclient.Client

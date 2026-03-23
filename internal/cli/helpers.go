@@ -9,31 +9,22 @@ import (
 
 	"github.com/kstenerud/yoloai/config"
 	"github.com/kstenerud/yoloai/runtime"
-	containerdrt "github.com/kstenerud/yoloai/runtime/containerd"
-	dockerrt "github.com/kstenerud/yoloai/runtime/docker"
-	podmanrt "github.com/kstenerud/yoloai/runtime/podman"
-	seatbeltrt "github.com/kstenerud/yoloai/runtime/seatbelt"
-	tartrt "github.com/kstenerud/yoloai/runtime/tart"
+	_ "github.com/kstenerud/yoloai/runtime/docker"        // register backend
+	podmanrt "github.com/kstenerud/yoloai/runtime/podman" // register backend + SocketExists helper
+	_ "github.com/kstenerud/yoloai/runtime/seatbelt"      // register backend
+	_ "github.com/kstenerud/yoloai/runtime/tart"          // register backend
 	"github.com/kstenerud/yoloai/sandbox"
 	"github.com/spf13/cobra"
 )
 
 // newRuntime creates a runtime.Runtime for the given backend name.
+// Returns an error if the backend is not available on this platform.
 func newRuntime(ctx context.Context, backend string) (runtime.Runtime, error) {
-	switch backend {
-	case "docker", "":
-		return dockerrt.New(ctx)
-	case "podman":
-		return podmanrt.New(ctx)
-	case "tart":
-		return tartrt.New(ctx)
-	case "seatbelt":
-		return seatbeltrt.New(ctx)
-	case "containerd":
-		return containerdrt.New(ctx)
-	default:
-		return nil, sandbox.NewUsageError("unknown backend: %q (valid: docker, podman, tart, seatbelt, containerd)", backend)
+	// Default to docker if no backend specified
+	if backend == "" {
+		backend = "docker"
 	}
+	return runtime.New(ctx, backend)
 }
 
 // Flag resolution pattern: each resolve* pair follows the same priority:
@@ -85,9 +76,13 @@ func resolveBackend(cmd *cobra.Command) string {
 		return "seatbelt"
 	}
 
-	// Isolation-based routing: vm/vm-enhanced use containerd on Linux.
+	// Isolation-based routing: vm/vm-enhanced prefer containerd, but fall back
+	// if not available (e.g., on macOS where containerd is Linux-only).
 	if isolation == "vm" || isolation == "vm-enhanced" {
-		return "containerd"
+		if runtime.IsAvailable("containerd") {
+			return "containerd"
+		}
+		// Fall through to container backend detection
 	}
 
 	// container/container-enhanced: prefer config, then auto-detect.

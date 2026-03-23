@@ -31,9 +31,10 @@ import (
 
 	"github.com/kstenerud/yoloai/config"
 	"github.com/kstenerud/yoloai/runtime"
-	dockerrt "github.com/kstenerud/yoloai/runtime/docker"
-	seatbeltrt "github.com/kstenerud/yoloai/runtime/seatbelt"
-	tartrt "github.com/kstenerud/yoloai/runtime/tart"
+	_ "github.com/kstenerud/yoloai/runtime/docker"   // register backend
+	_ "github.com/kstenerud/yoloai/runtime/podman"   // register backend
+	_ "github.com/kstenerud/yoloai/runtime/seatbelt" // register backend
+	_ "github.com/kstenerud/yoloai/runtime/tart"     // register backend
 	"github.com/kstenerud/yoloai/sandbox"
 )
 
@@ -297,14 +298,8 @@ func resolveProfileFromConfig() string {
 }
 
 func newRuntime(ctx context.Context, backend string) (runtime.Runtime, error) {
-	switch backend {
-	case "docker", "":
-		return dockerrt.New(ctx)
-	case "tart":
-		return tartrt.New(ctx)
-	case "seatbelt":
-		return seatbeltrt.New(ctx)
-	default:
-		return nil, fmt.Errorf("unknown backend %q (valid: docker, tart, seatbelt)", backend)
+	if backend == "" {
+		backend = "docker"
 	}
+	return runtime.New(ctx, backend)
 }

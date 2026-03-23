@@ -17,7 +17,6 @@ import (
 	"github.com/kstenerud/yoloai/agent"
 	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/runtime/caps"
-	containerdrt "github.com/kstenerud/yoloai/runtime/containerd"
 	dockerrt "github.com/kstenerud/yoloai/runtime/docker"
 	seatbeltrt "github.com/kstenerud/yoloai/runtime/seatbelt"
 	tartrt "github.com/kstenerud/yoloai/runtime/tart"
@@ -1107,13 +1106,6 @@ func TestBackendCaps_Docker(t *testing.T) {
 	assert.True(t, caps.CapAdd)
 }
 
-func TestBackendCaps_Containerd(t *testing.T) {
-	caps := (*containerdrt.Runtime)(nil).Capabilities()
-	assert.True(t, caps.NetworkIsolation)
-	assert.False(t, caps.OverlayDirs) // overlayfs not supported inside Kata VMs
-	assert.True(t, caps.CapAdd)
-}
-
 func TestBackendCaps_Tart(t *testing.T) {
 	caps := (*tartrt.Runtime)(nil).Capabilities()
 	assert.False(t, caps.NetworkIsolation)
@@ -1134,10 +1126,6 @@ func TestAgentProvisionedByBackend_Docker(t *testing.T) {
 	assert.True(t, (*dockerrt.Runtime)(nil).AgentProvisionedByBackend())
 }
 
-func TestAgentProvisionedByBackend_Containerd(t *testing.T) {
-	assert.True(t, (*containerdrt.Runtime)(nil).AgentProvisionedByBackend())
-}
-
 func TestAgentProvisionedByBackend_Tart(t *testing.T) {
 	assert.True(t, (*tartrt.Runtime)(nil).AgentProvisionedByBackend())
 }
@@ -1149,10 +1137,6 @@ func TestAgentProvisionedByBackend_Seatbelt(t *testing.T) {
 func TestResolveCopyMount_Docker(t *testing.T) {
 	// Docker bind-mounts at the original host path — returns hostPath unchanged.
 	assert.Equal(t, "/home/user/project", (*dockerrt.Runtime)(nil).ResolveCopyMount("mysandbox", "/home/user/project"))
-}
-
-func TestResolveCopyMount_Containerd(t *testing.T) {
-	assert.Equal(t, "/home/user/project", (*containerdrt.Runtime)(nil).ResolveCopyMount("mysandbox", "/home/user/project"))
 }
 
 func TestResolveCopyMount_Tart(t *testing.T) {

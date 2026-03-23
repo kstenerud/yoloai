@@ -1,3 +1,5 @@
+//go:build linux
+
 package containerdrt
 
 // ABOUTME: Command execution inside containerd containers — non-interactive and interactive (PTY).

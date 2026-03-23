@@ -1,3 +1,5 @@
+//go:build linux
+
 package containerdrt
 
 // ABOUTME: Capability field constructors for the containerd backend — kata shim, CNI bridge,

@@ -1,3 +1,5 @@
+//go:build linux
+
 package containerdrt
 
 // ABOUTME: Prune orphaned containerd containers and CNI state from the yoloai namespace.

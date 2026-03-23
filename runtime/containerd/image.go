@@ -1,3 +1,5 @@
+//go:build linux
+
 package containerdrt
 
 // ABOUTME: Image management for the containerd backend.

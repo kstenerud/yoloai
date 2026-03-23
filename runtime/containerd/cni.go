@@ -1,3 +1,5 @@
+//go:build linux
+
 package containerdrt
 
 // ABOUTME: CNI network setup and teardown for containerd-managed containers.

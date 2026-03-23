@@ -22,6 +22,12 @@ import (
 	"github.com/kstenerud/yoloai/runtime/monitor"
 )
 
+func init() {
+	runtime.Register("tart", func(ctx context.Context) (runtime.Runtime, error) {
+		return New(ctx)
+	})
+}
+
 const (
 	// pidFileName stores the tart run process ID.
 	pidFileName = "tart.pid"

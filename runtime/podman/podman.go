@@ -19,6 +19,12 @@ import (
 	"github.com/kstenerud/yoloai/runtime/docker"
 )
 
+func init() {
+	runtime.Register("podman", func(ctx context.Context) (runtime.Runtime, error) {
+		return New(ctx)
+	})
+}
+
 // Runtime implements runtime.Runtime by embedding the Docker runtime
 // and connecting to Podman's Docker-compatible socket.
 type Runtime struct {

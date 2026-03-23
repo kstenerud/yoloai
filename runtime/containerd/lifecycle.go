@@ -1,3 +1,5 @@
+//go:build linux
+
 package containerdrt
 
 // ABOUTME: Container lifecycle operations — Create, Start, Stop, Remove, Inspect.

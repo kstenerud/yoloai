@@ -21,6 +21,12 @@ import (
 	"github.com/kstenerud/yoloai/runtime/monitor"
 )
 
+func init() {
+	runtime.Register("seatbelt", func(ctx context.Context) (runtime.Runtime, error) {
+		return New(ctx)
+	})
+}
+
 const (
 	// backendDir holds backend-specific files within the sandbox directory.
 	backendDir = config.BackendDirName
