@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -78,9 +79,18 @@ func (r *Runtime) Capabilities() runtime.BackendCaps {
 // AgentProvisionedByBackend returns true — Tart VMs use an npm-installed agent.
 func (r *Runtime) AgentProvisionedByBackend() bool { return true }
 
-// ResolveCopyMount returns hostPath unchanged — Tart mounts copies at the
-// original host path inside the VM via VirtioFS.
-func (r *Runtime) ResolveCopyMount(_, hostPath string) string { return hostPath }
+// ResolveCopyMount returns the VirtioFS path where the copy directory is accessible
+// inside the VM. Unlike Docker which can bind-mount at arbitrary paths, Tart VirtioFS
+// shares appear at /Volumes/My Shared Files/<sharename>/..., so we must return the
+// VirtioFS path where the sandbox work directory is accessible.
+func (r *Runtime) ResolveCopyMount(sandboxName, hostPath string) string {
+	// The copy is under ~/.yoloai/sandboxes/<sandboxName>/work/<encoded-hostPath>
+	// and is accessible via the yoloai VirtioFS share at:
+	// /Volumes/My Shared Files/yoloai/work/<encoded-hostPath>
+	encoded := config.EncodePath(hostPath)
+	vmSharedDir := filepath.Join(sharedDirVMPath, sharedDirName)
+	return filepath.Join(vmSharedDir, "work", encoded)
+}
 
 // New creates a Runtime after verifying that tart is installed and the
 // platform is supported (macOS with Apple Silicon).
@@ -114,18 +124,22 @@ func New(_ context.Context) (*Runtime, error) {
 // Create creates a new VM instance by cloning the base image and writing
 // the instance config to the sandbox directory.
 func (r *Runtime) Create(ctx context.Context, cfg runtime.InstanceConfig) error {
+	slog.Debug("tart Create: starting", "name", cfg.Name, "imageRef", cfg.ImageRef)
 	// Stop any stale processes and remove leftover VM (idempotent)
 	r.stopVM(ctx, cfg.Name)
 	if r.vmExists(ctx, cfg.Name) {
+		slog.Debug("tart Create: deleting existing VM", "name", cfg.Name)
 		if _, err := r.runTart(ctx, "delete", cfg.Name); err != nil {
 			return fmt.Errorf("remove existing VM: %w", err)
 		}
 	}
 
 	// Clone the base image to create an instance-specific VM
+	slog.Debug("tart Create: cloning", "imageRef", cfg.ImageRef, "name", cfg.Name)
 	if _, err := r.runTart(ctx, "clone", cfg.ImageRef, cfg.Name); err != nil {
 		return fmt.Errorf("clone VM: %w", err)
 	}
+	slog.Debug("tart Create: clone succeeded", "name", cfg.Name)
 
 	// Save instance config so Start can read mounts/network/ports
 	sandboxPath := filepath.Join(r.sandboxDir, sandboxName(cfg.Name))
@@ -169,6 +183,7 @@ func (r *Runtime) Create(ctx context.Context, cfg runtime.InstanceConfig) error 
 
 // Start boots the VM in the background and runs the setup script.
 func (r *Runtime) Start(ctx context.Context, name string) error {
+	slog.Debug("tart Start", "name", name)
 	sandboxPath := filepath.Join(r.sandboxDir, sandboxName(name))
 
 	// Check if already running
@@ -213,6 +228,7 @@ func (r *Runtime) Start(ctx context.Context, name string) error {
 		logFile.Close() //nolint:errcheck,gosec // best-effort
 		return fmt.Errorf("start VM: %w", err)
 	}
+	slog.Debug("tart run started", "name", name, "pid", cmd.Process.Pid)
 
 	// Write PID file
 	pidPath := filepath.Join(sandboxPath, backendDir, pidFileName)
@@ -243,12 +259,16 @@ func (r *Runtime) Start(ctx context.Context, name string) error {
 		}
 		return fmt.Errorf("wait for VM boot: %w\n%s", err, detail)
 	}
+	slog.Debug("tart Start: waitForBoot succeeded", "name", name)
 
 	// Brief delay to let the VM fully stabilize after first successful exec.
 	// Tart's guest agent may need a moment to be fully ready for complex commands.
+	slog.Debug("tart Start: sleeping 500ms for stabilization", "name", name)
 	time.Sleep(500 * time.Millisecond)
+	slog.Debug("tart Start: checking if VM is still running", "name", name, "isRunning", r.isRunning(ctx, name))
 
 	// Deliver setup script via shared directory and run it
+	slog.Debug("tart Start: calling runSetupScript", "name", name)
 	if err := r.runSetupScript(ctx, name, sandboxPath, cfg.Mounts); err != nil {
 		return fmt.Errorf("run setup script: %w", err)
 	}
@@ -634,13 +654,28 @@ func (r *Runtime) runSetupScript(ctx context.Context, vmName, sandboxPath string
 
 	// Create symlinks from expected mount targets to VirtioFS paths
 	for _, m := range mounts {
+		// Skip /run/secrets mounts - these are copied to sandbox/secrets/ during Create
+		// and accessible via /Volumes/My Shared Files/yoloai/secrets/ inside the VM.
+		// The setup script handles delivering them to the agent.
+		if m.Target == "/run/secrets" || strings.HasPrefix(m.Target, "/run/secrets/") {
+			continue
+		}
+
 		target := remapTargetPath(m.Target)
+		slog.Debug("tart setup: processing mount", "source", m.Source, "target", target)
 
 		var vfsPath string
 		if strings.HasPrefix(m.Source, sandboxPath+"/") {
 			// Source is under the sandbox dir — accessible via the yoloai share
 			relPath := strings.TrimPrefix(m.Source, sandboxPath+"/")
 			vfsPath = filepath.Join(vmSharedDir, relPath)
+			// Check if source exists on host
+			if stat, err := os.Stat(m.Source); err != nil {
+				slog.Debug("tart setup: mount source does not exist on host!", "source", m.Source, "error", err)
+				continue
+			} else {
+				slog.Debug("tart setup: mount under sandbox", "source", m.Source, "target", target, "relPath", relPath, "vfsPath", vfsPath, "sourceExists", true, "sourceIsDir", stat.IsDir())
+			}
 		} else if m.Source == sandboxPath {
 			vfsPath = vmSharedDir
 		} else if info, err := os.Stat(m.Source); err == nil && info.IsDir() {
@@ -657,9 +692,24 @@ func (r *Runtime) runSetupScript(ctx context.Context, vmName, sandboxPath string
 			continue // no symlink needed
 		}
 		parent := filepath.Dir(target)
+
+		// First, check if the VirtioFS path exists
+		checkCmd := fmt.Sprintf("ls -la '%s' 2>&1 || echo 'PATH_DOES_NOT_EXIST'", filepath.Dir(vfsPath))
+		checkArgs := execArgs(vmName, "bash", "-c", checkCmd)
+		if out, checkErr := r.runTart(ctx, checkArgs...); checkErr == nil {
+			slog.Debug("tart setup: VirtioFS parent directory listing", "path", filepath.Dir(vfsPath), "output", out)
+		} else {
+			slog.Debug("tart setup: failed to list VirtioFS parent", "path", filepath.Dir(vfsPath), "error", checkErr)
+		}
+
+		// Ensure parent directory exists. Use sudo if regular mkdir fails.
+		mkdirCmd := fmt.Sprintf("mkdir -p '%s' 2>/dev/null || sudo mkdir -p '%s'", parent, parent)
+		if _, mkdirErr := r.runTart(ctx, execArgs(vmName, "bash", "-c", mkdirCmd)...); mkdirErr != nil {
+			return fmt.Errorf("create parent directory %s: %w", parent, mkdirErr)
+		}
+
 		// Remove existing dir/file before symlinking (ln -sfn won't replace a directory)
-		// mkdir may fail for system dirs like /var/folders on macOS - that's OK if parent exists
-		symlinkCmd := fmt.Sprintf("(mkdir -p '%s' 2>/dev/null || true) && rm -rf '%s' && ln -sfn '%s' '%s'", parent, target, vfsPath, target)
+		symlinkCmd := fmt.Sprintf("rm -rf '%s' && ln -sfn '%s' '%s'", target, vfsPath, target)
 		args := execArgs(vmName, "bash", "-c", symlinkCmd)
 		slog.Debug("tart setup: creating symlink", "vm", vmName, "target", target, "vfsPath", vfsPath, "cmd", symlinkCmd)
 		if _, err := r.runTart(ctx, args...); err != nil {

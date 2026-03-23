@@ -1140,7 +1140,9 @@ func TestResolveCopyMount_Docker(t *testing.T) {
 }
 
 func TestResolveCopyMount_Tart(t *testing.T) {
-	assert.Equal(t, "/home/user/project", (*tartrt.Runtime)(nil).ResolveCopyMount("mysandbox", "/home/user/project"))
+	// Tart returns VirtioFS path, not the original host path
+	result := (*tartrt.Runtime)(nil).ResolveCopyMount("mysandbox", "/home/user/project")
+	assert.Equal(t, "/Volumes/My Shared Files/yoloai/work/^shome^suser^sproject", result)
 }
 
 // checkIsolationPrerequisites tests
