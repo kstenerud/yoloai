@@ -135,6 +135,262 @@ def write_status(status_file, status, exit_code=None):
         f.write("\n")
 
 
+# --- Backend abstraction ---
+#
+# Similar to Go's runtime.Register() pattern, each backend handles platform-specific
+# setup, secrets, paths, etc. Backends are selected by name at runtime.
+
+from abc import ABC, abstractmethod
+
+
+class Backend(ABC):
+    """Abstract base class for sandbox backends."""
+
+    def __init__(self, cfg, yoloai_dir):
+        self.cfg = cfg
+        self.yoloai_dir = yoloai_dir
+
+    @abstractmethod
+    def setup(self):
+        """Run backend-specific setup (mount symlinks, overlays, etc.)."""
+        pass
+
+    @abstractmethod
+    def get_tmux_socket(self):
+        """Return the tmux socket path, or None for default."""
+        pass
+
+    @abstractmethod
+    def get_working_dir(self):
+        """Return the working directory path, or None if not needed."""
+        pass
+
+    @abstractmethod
+    def prepare_environment(self):
+        """Set up environment variables before launching the agent."""
+        pass
+
+    @abstractmethod
+    def read_secrets(self, socket):
+        """Read secrets and make them available to the agent."""
+        pass
+
+
+class DockerBackend(Backend):
+    """Backend for Docker and Podman containers."""
+
+    def setup(self):
+        """Docker-specific setup: git baseline for overlays, auto-commit loop."""
+        log_info("sandbox.backend_setup", "Docker backend setup", backend="docker")
+
+        # Git baseline for overlay mounts
+        overlay_mounts = self.cfg.get("overlay_mounts", [])
+        for overlay in overlay_mounts:
+            merged = overlay.get("merged", "")
+            if not merged:
+                continue
+            log_debug("overlay.git_baseline", f"creating git baseline for overlay: {merged}")
+            # Remove .git dirs (creates whiteouts in upper layer)
+            for root, dirs, _files in os.walk(merged):
+                if ".git" in dirs:
+                    import shutil
+                    shutil.rmtree(os.path.join(root, ".git"), ignore_errors=True)
+                    dirs.remove(".git")
+            subprocess.run(["git", "-C", merged, "init"], capture_output=True)
+            subprocess.run(["git", "-C", merged, "add", "-A"], capture_output=True)
+            subprocess.run(
+                ["git", "-C", merged, "commit", "-m", "yoloai overlay baseline", "--no-gpg-sign"],
+                capture_output=True,
+            )
+            log_info("overlay.git_baseline", "git baseline commit created", path=merged)
+
+        # Auto-commit loop for :copy directories
+        auto_commit_interval = int(self.cfg.get("auto_commit_interval", 0))
+        copy_dirs = self.cfg.get("copy_dirs", [])
+
+        if auto_commit_interval > 0 and copy_dirs:
+            log_debug("auto_commit.start", f"starting auto-commit loop (interval={auto_commit_interval}s, dirs={len(copy_dirs)})")
+
+            def _auto_commit():
+                while True:
+                    time.sleep(auto_commit_interval)
+                    timestamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+                    for d in copy_dirs:
+                        subprocess.run(["git", "-C", d, "add", "-A"], capture_output=True)
+                        subprocess.run(
+                            ["git", "-C", d, "commit", "-m", f"yoloai auto-commit {timestamp}", "--no-gpg-sign"],
+                            capture_output=True,
+                        )
+
+            import threading
+            t = threading.Thread(target=_auto_commit, daemon=True)
+            t.start()
+
+    def get_tmux_socket(self):
+        """Docker uses a fixed socket path from config (for gVisor compatibility)."""
+        return self.cfg.get("tmux_socket") or None
+
+    def get_working_dir(self):
+        """Docker doesn't need explicit cd - containers start at the right path."""
+        return None
+
+    def prepare_environment(self):
+        """Docker environment is already prepared by entrypoint.py."""
+        pass
+
+    def read_secrets(self, socket):
+        """Read secrets from /run/secrets (inherited from entrypoint.py)."""
+        read_secrets("/run/secrets", socket=socket)
+
+
+class TartBackend(Backend):
+    """Backend for Tart macOS VMs with VirtioFS mounts."""
+
+    def setup(self):
+        """Tart-specific setup: create VirtioFS mount symlinks via sudo."""
+        log_info("sandbox.backend_setup", "Tart backend setup", backend="tart")
+
+        mount_map = self.cfg.get("mount_map", {})
+        if not mount_map:
+            return
+
+        log_debug("tart.symlinks", "creating VirtioFS mount symlinks")
+        for target, source in mount_map.items():
+            parent = os.path.dirname(target)
+            subprocess.run(["sudo", "mkdir", "-p", parent], capture_output=True)
+
+            # Remove existing symlink or empty directory
+            if os.path.islink(target):
+                subprocess.run(["sudo", "rm", "-f", target], capture_output=True)
+            elif os.path.isdir(target):
+                # Check if empty
+                try:
+                    if not os.listdir(target):
+                        subprocess.run(["sudo", "rmdir", target], capture_output=True)
+                except OSError:
+                    pass
+
+            subprocess.run(["sudo", "ln", "-sf", source, target], capture_output=True)
+
+    def get_tmux_socket(self):
+        """Tart uses the uid-based default socket (/tmp/tmux-<uid>/default)."""
+        return None
+
+    def get_working_dir(self):
+        """Tart needs explicit cd to the VirtioFS-mounted working directory."""
+        working_dir = self.cfg.get("working_dir", "")
+        if working_dir:
+            os.chdir(working_dir)
+        return working_dir
+
+    def prepare_environment(self):
+        """Tart needs Homebrew paths prepended for node/npm binaries."""
+        homebrew_bins = ["/opt/homebrew/opt/node/bin", "/opt/homebrew/bin", "/opt/homebrew/sbin", "/usr/local/bin"]
+        current_path = os.environ.get("PATH", "")
+        extras = [p for p in homebrew_bins if p not in current_path.split(":")]
+        if extras:
+            os.environ["PATH"] = ":".join(extras) + ":" + current_path
+            log_debug("tart.path_augment", "prepended Homebrew paths", added=":".join(extras))
+
+    def read_secrets(self, socket):
+        """Read secrets from VirtioFS-mounted secrets directory and pass to tmux."""
+        read_secrets(os.path.join(self.yoloai_dir, "secrets"), socket=socket)
+
+
+class SeatbeltBackend(Backend):
+    """Backend for macOS Seatbelt sandboxing (lightweight, no VM)."""
+
+    def setup(self):
+        """Seatbelt-specific setup: HOME redirection, CLI tool symlinks, git config."""
+        log_info("sandbox.backend_setup", "Seatbelt backend setup", backend="seatbelt")
+
+        original_home = os.environ.get("HOME", "")
+        new_home = os.path.join(self.yoloai_dir, "home")
+
+        os.environ["HOME"] = new_home
+        os.makedirs(os.path.join(new_home, ".local", "bin"), exist_ok=True)
+        os.environ["PATH"] = os.path.join(new_home, ".local", "bin") + ":" + os.environ.get("PATH", "")
+
+        # Symlink CLI tools from original HOME
+        original_bin = os.path.join(original_home, ".local", "bin")
+        new_bin = os.path.join(new_home, ".local", "bin")
+        if os.path.isdir(original_bin):
+            for name in os.listdir(original_bin):
+                src = os.path.join(original_bin, name)
+                dst = os.path.join(new_bin, name)
+                if os.access(src, os.X_OK) and not os.path.exists(dst):
+                    os.symlink(src, dst)
+
+        # Symlink git config
+        original_gitconfig = os.path.join(original_home, ".gitconfig")
+        new_gitconfig = os.path.join(new_home, ".gitconfig")
+        if os.path.isfile(original_gitconfig) and not os.path.exists(new_gitconfig):
+            os.symlink(original_gitconfig, new_gitconfig)
+
+        original_git_dir = os.path.join(original_home, ".config", "git")
+        new_config_dir = os.path.join(new_home, ".config")
+        new_git_dir = os.path.join(new_config_dir, "git")
+        if os.path.isdir(original_git_dir):
+            os.makedirs(new_config_dir, exist_ok=True)
+            if not os.path.exists(new_git_dir):
+                os.symlink(original_git_dir, new_git_dir)
+
+        # Symlink agent state dir
+        state_dir_name = self.cfg.get("state_dir_name", "")
+        if state_dir_name:
+            agent_dir = os.path.join(self.yoloai_dir, "agent-runtime")
+            state_link = os.path.join(new_home, state_dir_name)
+            if not os.path.islink(state_link):
+                os.symlink(agent_dir, state_link)
+
+        # Symlink home-seed files
+        home_seed = os.path.join(self.yoloai_dir, "home-seed")
+        if os.path.isdir(home_seed):
+            for name in os.listdir(home_seed):
+                if name in (".", ".."):
+                    continue
+                src = os.path.join(home_seed, name)
+                dst = os.path.join(new_home, name)
+                if not os.path.exists(dst):
+                    os.symlink(src, dst)
+
+    def get_tmux_socket(self):
+        """Seatbelt uses a per-sandbox socket in the sandbox directory."""
+        return os.path.join(self.yoloai_dir, "tmux", "tmux.sock")
+
+    def get_working_dir(self):
+        """Seatbelt needs explicit cd to the working directory."""
+        working_dir = self.cfg.get("working_dir", "")
+        if working_dir:
+            os.chdir(working_dir)
+        return working_dir
+
+    def prepare_environment(self):
+        """Seatbelt environment preparation (currently none needed)."""
+        pass
+
+    def read_secrets(self, socket):
+        """Read secrets from sandbox secrets directory and pass to tmux."""
+        read_secrets(os.path.join(self.yoloai_dir, "secrets"), socket=socket)
+
+
+# Backend registry (similar to Go's runtime.Register pattern)
+_backend_registry = {
+    "docker": DockerBackend,
+    "podman": DockerBackend,  # Podman uses Docker backend
+    "seatbelt": SeatbeltBackend,
+    "tart": TartBackend,
+}
+
+
+def get_backend(name, cfg, yoloai_dir):
+    """Create a backend instance by name."""
+    if name not in _backend_registry:
+        raise ValueError(f"Unknown backend: {name} (available: {list(_backend_registry.keys())})")
+    backend_class = _backend_registry[name]
+    return backend_class(cfg, yoloai_dir)
+
+
 # --- Shared setup functions ---
 
 def setup_tmux_session(cfg, yoloai_dir, socket=None):
@@ -212,20 +468,8 @@ def launch_agent(cfg, socket=None, working_dir=None, backend=""):
     model = cfg.get("model", "")
     log_debug("agent.launch", f"launching agent: {agent_command}")
 
-    # tart exec runs a non-login shell so PATH omits /opt/homebrew/bin.
-    # Prepend standard Homebrew prefixes so shutil.which() can find binaries
-    # installed by Homebrew (e.g. claude via npm).
-    # Include /opt/homebrew/opt/node/bin (node 25) before /opt/homebrew/bin so
-    # that the claude shebang (#!/usr/bin/env node) resolves node 25, not the
-    # node@24 keg that the Cirrus base image adds to PATH via ~/.zprofile.
-    if backend == "tart":
-        homebrew_bins = ["/opt/homebrew/opt/node/bin", "/opt/homebrew/bin", "/opt/homebrew/sbin", "/usr/local/bin"]
-        current_path = os.environ.get("PATH", "")
-        extras = [p for p in homebrew_bins if p not in current_path.split(":")]
-        if extras:
-            os.environ["PATH"] = ":".join(extras) + ":" + current_path
-            log_debug("tart.path_augment", "prepended Homebrew paths",
-                      added=":".join(extras))
+    # PATH augmentation for Tart is handled by backend.prepare_environment()
+    # before this function is called.
 
     # Diagnostic: verify Node.js works before launching the agent.
     # Node.js 22 has known syscall incompatibilities with gVisor ARM64 that
@@ -396,137 +640,6 @@ def launch_monitor(cfg_path, status_file, yoloai_dir, socket=None):
 
 # --- Backend-specific setup ---
 
-def setup_docker(cfg, yoloai_dir):
-    """Docker-specific setup: overlay git baseline and auto-commit loop."""
-    log_info("sandbox.backend_setup", "Docker backend setup", backend="docker")
-
-    # Git baseline for overlay mounts
-    overlay_mounts = cfg.get("overlay_mounts", [])
-    for overlay in overlay_mounts:
-        merged = overlay.get("merged", "")
-        if not merged:
-            continue
-        log_debug("overlay.git_baseline", f"creating git baseline for overlay: {merged}")
-        # Remove .git dirs (creates whiteouts in upper layer)
-        for root, dirs, _files in os.walk(merged):
-            if ".git" in dirs:
-                import shutil
-                shutil.rmtree(os.path.join(root, ".git"), ignore_errors=True)
-                dirs.remove(".git")
-        subprocess.run(["git", "-C", merged, "init"], capture_output=True)
-        subprocess.run(["git", "-C", merged, "add", "-A"], capture_output=True)
-        subprocess.run(
-            ["git", "-C", merged, "-c", "user.name=yoloai", "-c", "user.email=yoloai@local",
-             "commit", "-m", "baseline", "--allow-empty"],
-            capture_output=True,
-        )
-        log_info("overlay.git_baseline", "git baseline commit created", path=merged)
-
-    # Auto-commit loop for :copy directories
-    auto_commit_interval = int(cfg.get("auto_commit_interval", 0))
-    copy_dirs = cfg.get("copy_dirs", [])
-
-    if auto_commit_interval > 0 and copy_dirs:
-        log_debug("auto_commit.start", f"starting auto-commit loop (interval={auto_commit_interval}s, dirs={len(copy_dirs)})")
-
-        def _auto_commit():
-            while True:
-                time.sleep(auto_commit_interval)
-                timestamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-                for d in copy_dirs:
-                    subprocess.run(["git", "-C", d, "add", "-A"], capture_output=True)
-                    subprocess.run(
-                        ["git", "-C", d, "-c", "user.name=yoloai", "-c", "user.email=yoloai@localhost",
-                         "commit", "-m", f"auto-commit at {timestamp}"],
-                        capture_output=True,
-                    )
-
-        t = threading.Thread(target=_auto_commit, daemon=True)
-        t.start()
-
-
-def setup_seatbelt(cfg, sandbox_dir):
-    """Seatbelt-specific setup: HOME redirection, CLI tool symlinks, git config."""
-    log_info("sandbox.backend_setup", "Seatbelt backend setup", backend="seatbelt")
-
-    original_home = os.environ.get("HOME", "")
-    new_home = os.path.join(sandbox_dir, "home")
-
-    os.environ["HOME"] = new_home
-    os.makedirs(os.path.join(new_home, ".local", "bin"), exist_ok=True)
-    os.environ["PATH"] = os.path.join(new_home, ".local", "bin") + ":" + os.environ.get("PATH", "")
-
-    # Symlink CLI tools from original HOME
-    original_bin = os.path.join(original_home, ".local", "bin")
-    new_bin = os.path.join(new_home, ".local", "bin")
-    if os.path.isdir(original_bin):
-        for name in os.listdir(original_bin):
-            src = os.path.join(original_bin, name)
-            dst = os.path.join(new_bin, name)
-            if os.access(src, os.X_OK) and not os.path.exists(dst):
-                os.symlink(src, dst)
-
-    # Symlink git config
-    original_gitconfig = os.path.join(original_home, ".gitconfig")
-    new_gitconfig = os.path.join(new_home, ".gitconfig")
-    if os.path.isfile(original_gitconfig) and not os.path.exists(new_gitconfig):
-        os.symlink(original_gitconfig, new_gitconfig)
-
-    original_git_dir = os.path.join(original_home, ".config", "git")
-    new_config_dir = os.path.join(new_home, ".config")
-    new_git_dir = os.path.join(new_config_dir, "git")
-    if os.path.isdir(original_git_dir):
-        os.makedirs(new_config_dir, exist_ok=True)
-        if not os.path.exists(new_git_dir):
-            os.symlink(original_git_dir, new_git_dir)
-
-    # Symlink agent state dir
-    state_dir_name = cfg.get("state_dir_name", "")
-    if state_dir_name:
-        agent_dir = os.path.join(sandbox_dir, "agent-runtime")
-        state_link = os.path.join(new_home, state_dir_name)
-        if not os.path.islink(state_link):
-            os.symlink(agent_dir, state_link)
-
-    # Symlink home-seed files
-    home_seed = os.path.join(sandbox_dir, "home-seed")
-    if os.path.isdir(home_seed):
-        for name in os.listdir(home_seed):
-            if name in (".", ".."):
-                continue
-            src = os.path.join(home_seed, name)
-            dst = os.path.join(new_home, name)
-            if not os.path.exists(dst):
-                os.symlink(src, dst)
-
-
-def setup_tart(cfg, shared_dir):
-    """Tart-specific setup: VirtioFS mount symlinks via sudo."""
-    log_info("sandbox.backend_setup", "Tart backend setup", backend="tart")
-
-    mount_map = cfg.get("mount_map", {})
-    if not mount_map:
-        return
-
-    log_debug("tart.symlinks", "creating VirtioFS mount symlinks")
-    for target, source in mount_map.items():
-        parent = os.path.dirname(target)
-        subprocess.run(["sudo", "mkdir", "-p", parent], capture_output=True)
-
-        # Remove existing symlink or empty directory
-        if os.path.islink(target):
-            subprocess.run(["sudo", "rm", "-f", target], capture_output=True)
-        elif os.path.isdir(target):
-            # Check if empty
-            try:
-                if not os.listdir(target):
-                    subprocess.run(["sudo", "rmdir", target], capture_output=True)
-            except OSError:
-                pass
-
-        subprocess.run(["sudo", "ln", "-sf", source, target], capture_output=True)
-
-
 # --- Main ---
 
 DEBUG = False
@@ -539,19 +652,19 @@ def main():
         print(f"Usage: {sys.argv[0]} docker|seatbelt|tart [<dir>]", file=sys.stderr)
         sys.exit(1)
 
-    backend = sys.argv[1]
+    backend_name = sys.argv[1]
 
     # Determine yoloai_dir based on backend
-    if backend == "docker":
+    if backend_name == "docker":
         yoloai_dir = os.environ.get("YOLOAI_DIR", "/yoloai")
-    elif backend in ("seatbelt", "tart"):
+    elif backend_name in ("seatbelt", "tart"):
         if len(sys.argv) < 3:
-            print(f"Usage: {sys.argv[0]} {backend} <dir>", file=sys.stderr)
+            print(f"Usage: {sys.argv[0]} {backend_name} <dir>", file=sys.stderr)
             sys.exit(1)
         yoloai_dir = sys.argv[2]
         os.environ["YOLOAI_DIR"] = yoloai_dir
     else:
-        print(f"Unknown backend: {backend}", file=sys.stderr)
+        print(f"Unknown backend: {backend_name}", file=sys.stderr)
         sys.exit(1)
 
     # Open structured log (append mode — entrypoint.py may have written entries already).
@@ -570,41 +683,19 @@ def main():
     # Tell agents they're inside a sandbox
     os.environ["IS_SANDBOX"] = "1"
 
-    # Run backend-specific setup
-    if backend == "docker":
-        setup_docker(cfg, yoloai_dir)
-    elif backend == "seatbelt":
-        setup_seatbelt(cfg, yoloai_dir)
-    elif backend == "tart":
-        setup_tart(cfg, yoloai_dir)
+    # Create backend instance and run setup
+    backend = get_backend(backend_name, cfg, yoloai_dir)
+    backend.prepare_environment()
+    backend.setup()
 
-    # Determine tmux socket.
-    # Seatbelt uses a per-sandbox socket in the sandbox dir.
-    # Docker/Podman use a fixed path from runtime-config.json so that
-    # docker exec'd processes (which may not see the uid-based default
-    # /tmp/tmux-<uid>/default on gVisor ARM64) find the same socket.
-    socket = None
-    if backend == "seatbelt":
-        socket = os.path.join(yoloai_dir, "tmux", "tmux.sock")
-    elif backend in ("docker", "podman"):
-        socket = cfg.get("tmux_socket") or None
-
-    # Determine working directory (seatbelt and tart need explicit cd)
-    working_dir = None
-    if backend in ("seatbelt", "tart"):
-        working_dir = cfg.get("working_dir", "")
-        if working_dir:
-            os.chdir(working_dir)
+    # Get backend-specific paths
+    socket = backend.get_tmux_socket()
+    working_dir = backend.get_working_dir()
 
     setup_tmux_session(cfg, yoloai_dir, socket=socket)
 
-    # Read secrets and set env vars. For Docker, entrypoint.py already read them
-    # into os.environ which sandbox-setup.py inherits. For Tart/Seatbelt, we read
-    # them here and pass to tmux so the agent shell session inherits them.
-    if backend == "docker":
-        read_secrets("/run/secrets", socket=socket)
-    else:
-        read_secrets(os.path.join(yoloai_dir, "secrets"), socket=socket)
+    # Read secrets and pass to tmux session
+    backend.read_secrets(socket)
 
     # Under gVisor on ARM64 the docker exec'd process may see different
     # effective credentials than the container entrypoint, causing EACCES
