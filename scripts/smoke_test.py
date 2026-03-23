@@ -96,6 +96,9 @@ class RunContext:
     run_id: str
     fixture_dir: Path
     limited: bool
+    debug: bool = False
+    test_filter: Optional[list[str]] = None
+    backend_filter: Optional[list[str]] = None
     sandboxes: list[str] = field(default_factory=list)
     results: list[TestResult] = field(default_factory=list)
 
@@ -153,7 +156,10 @@ class Test:
 
     def run(self, *args: str, timeout: int = CMD_TIMEOUT) -> subprocess.CompletedProcess[str]:
         """Run a yoloai subcommand, logging the invocation and output."""
-        cmd = [self.ctx.yoloai_bin, *args]
+        cmd = [self.ctx.yoloai_bin]
+        if self.ctx.debug:
+            cmd.extend(["--bugreport", "unsafe"])
+        cmd.extend(args)
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
         with self.log_file.open("a") as f:
             f.write(f"$ {' '.join(cmd)}\n")
@@ -648,6 +654,27 @@ def parse_args() -> argparse.Namespace:
             "Tests requiring unavailable backends are loudly skipped."
         ),
     )
+    parser.add_argument(
+        "--test",
+        action="append",
+        help=(
+            "Run only specific test(s). Can be specified multiple times. "
+            "Examples: --test stop_start --test full_workflow/seatbelt"
+        ),
+    )
+    parser.add_argument(
+        "--backend",
+        action="append",
+        help=(
+            "Run full_workflow test only for specific backend(s). "
+            "Can be specified multiple times. Examples: --backend seatbelt --backend mac-vm"
+        ),
+    )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Add --bugreport unsafe to all yoloai commands for detailed debugging output",
+    )
     return parser.parse_args()
 
 
@@ -684,6 +711,9 @@ def main() -> int:
         run_id=run_id,
         fixture_dir=fixture_dir,
         limited=args.limited,
+        debug=args.debug,
+        test_filter=args.test,
+        backend_filter=args.backend,
     )
     atexit.register(cleanup, ctx)
 
@@ -756,16 +786,26 @@ def main() -> int:
             return 1
 
     # -------------------------------------------------------------------------
+    # Helper to check if a test should run based on --test filter
+    def should_run_test(test_name: str) -> bool:
+        if ctx.test_filter is None:
+            return True
+        return test_name in ctx.test_filter
+
     # Non-matrix tests (T2–T6) — run once on docker/linux/container
     # -------------------------------------------------------------------------
 
     print("Non-matrix tests (docker/linux/container):")
-    run_test(ctx, "stop_start",     lambda t: test_stop_start(t, DEFAULT_BACKEND))
-    run_test(ctx, "files_exchange", lambda t: test_files_exchange(t, DEFAULT_BACKEND))
-    run_test(ctx, "clone",          lambda t: test_clone(t, DEFAULT_BACKEND))
-    run_test(ctx, "reset",          lambda t: test_reset(t, DEFAULT_BACKEND))
+    if should_run_test("stop_start"):
+        run_test(ctx, "stop_start",     lambda t: test_stop_start(t, DEFAULT_BACKEND))
+    if should_run_test("files_exchange"):
+        run_test(ctx, "files_exchange", lambda t: test_files_exchange(t, DEFAULT_BACKEND))
+    if should_run_test("clone"):
+        run_test(ctx, "clone",          lambda t: test_clone(t, DEFAULT_BACKEND))
+    if should_run_test("reset"):
+        run_test(ctx, "reset",          lambda t: test_reset(t, DEFAULT_BACKEND))
 
-    if is_linux:
+    if is_linux and should_run_test("overlay"):
         run_test(ctx, "overlay", lambda t: test_overlay(t))
 
     # -------------------------------------------------------------------------
@@ -775,6 +815,13 @@ def main() -> int:
     print("\nBackend matrix (full_workflow):")
     for spec in matrix:
         test_name = f"full_workflow/{spec.label}"
+
+        # Skip if filtered out by --test or --backend
+        if not should_run_test(test_name):
+            continue
+        if ctx.backend_filter and spec.label not in ctx.backend_filter:
+            continue
+
         pr = preq.get(spec.label)
         if pr is None or not pr.available:
             reason = pr.note if pr else "not in prereq results"

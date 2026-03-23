@@ -93,18 +93,23 @@ def read_secrets(secrets_dir, socket=None):
 
     For Docker, entrypoint.py reads secrets and execs into sandbox-setup.py,
     so the environment is inherited. For Tart/Seatbelt, sandbox-setup.py runs
-    directly, so secrets must be explicitly passed to tmux via set-environment.
+    directly, so secrets must be explicitly passed to tmux via set-environment
+    and also exported in the agent launch command (since tmux set-environment
+    doesn't propagate to shells that are already running).
+
+    Returns a dict of {name: value} for all loaded secrets.
     """
     log_info("read_secrets.check", f"checking secrets_dir={secrets_dir}")
+    secrets = {}
     if not os.path.isdir(secrets_dir):
         log_info("read_secrets.not_dir", f"secrets_dir is not a directory: {secrets_dir}")
-        return
+        return secrets
     try:
         names = os.listdir(secrets_dir)
         log_info("read_secrets.found", f"found {len(names)} files in {secrets_dir}: {names}")
     except OSError as e:
         log_info("read_secrets.list_error", f"failed to list {secrets_dir}: {e}")
-        return  # Not accessible (e.g. root-owned dir, container running as non-root)
+        return secrets  # Not accessible (e.g. root-owned dir, container running as non-root)
     loaded_count = 0
     for name in names:
         path = os.path.join(secrets_dir, name)
@@ -113,6 +118,7 @@ def read_secrets(secrets_dir, socket=None):
                 with open(path) as f:
                     value = f.read()
                     os.environ[name] = value
+                    secrets[name] = value
                     # Also set in tmux so the agent shell session inherits it
                     if socket:
                         tmux("set-environment", "-t", "main", name, value, socket=socket)
@@ -121,6 +127,7 @@ def read_secrets(secrets_dir, socket=None):
                 log_info("read_secrets.read_error", f"failed to read {path}: {e}")
                 pass  # Already set by entrypoint.py (running as root), or not accessible
     log_info("read_secrets.done", f"loaded {loaded_count} secrets from {secrets_dir}")
+    return secrets
 
 
 def write_status(status_file, status, exit_code=None):
@@ -172,7 +179,10 @@ class Backend(ABC):
 
     @abstractmethod
     def read_secrets(self, socket):
-        """Read secrets and make them available to the agent."""
+        """Read secrets and make them available to the agent.
+
+        Returns a dict of {name: value} for all loaded secrets.
+        """
         pass
 
 
@@ -240,7 +250,7 @@ class DockerBackend(Backend):
 
     def read_secrets(self, socket):
         """Read secrets from /run/secrets (inherited from entrypoint.py)."""
-        read_secrets("/run/secrets", socket=socket)
+        return read_secrets("/run/secrets", socket=socket)
 
 
 class TartBackend(Backend):
@@ -294,7 +304,7 @@ class TartBackend(Backend):
 
     def read_secrets(self, socket):
         """Read secrets from VirtioFS-mounted secrets directory and pass to tmux."""
-        read_secrets(os.path.join(self.yoloai_dir, "secrets"), socket=socket)
+        return read_secrets(os.path.join(self.yoloai_dir, "secrets"), socket=socket)
 
 
 class SeatbeltBackend(Backend):
@@ -371,7 +381,7 @@ class SeatbeltBackend(Backend):
 
     def read_secrets(self, socket):
         """Read secrets from sandbox secrets directory and pass to tmux."""
-        read_secrets(os.path.join(self.yoloai_dir, "secrets"), socket=socket)
+        return read_secrets(os.path.join(self.yoloai_dir, "secrets"), socket=socket)
 
 
 # Backend registry (similar to Go's runtime.Register pattern)
@@ -461,7 +471,7 @@ def setup_tmux_session(cfg, yoloai_dir, socket=None):
              alive_after_pipe_pane=bool(_sessions_after_pp.strip()))
 
 
-def launch_agent(cfg, socket=None, working_dir=None, backend=""):
+def launch_agent(cfg, socket=None, working_dir=None, backend="", secrets=None):
     """Launch the agent command inside the tmux session."""
     agent_command = cfg.get("agent_command", "")
     agent = cfg.get("agent", "")
@@ -500,11 +510,21 @@ def launch_agent(cfg, socket=None, working_dir=None, backend=""):
             return
         log_debug("sandbox.agent_found", f"agent binary found: {found_at}")
 
+    # Build environment variable exports for secrets
+    # tmux set-environment doesn't propagate to shells that are already running,
+    # so we need to explicitly export them in the shell command before exec'ing the agent.
+    env_exports = ""
+    if secrets:
+        for name, value in secrets.items():
+            # Escape single quotes in the value by replacing ' with '\''
+            escaped_value = value.replace("'", "'\\''")
+            env_exports += f"export {name}='{escaped_value}'; "
+
     if working_dir:
         # Quote working_dir to handle paths with spaces (e.g. Tart VirtioFS paths)
-        send_cmd = f"cd '{working_dir}' && exec {agent_command}"
+        send_cmd = f"{env_exports}cd '{working_dir}' && exec {agent_command}"
     else:
-        send_cmd = f"exec {agent_command}"
+        send_cmd = f"{env_exports}exec {agent_command}"
 
     # For tart: the login shell's ~/.zprofile (from the Cirrus base image) puts
     # node@24 before node 25 in PATH. Prepend node 25's bin dir so the claude
@@ -695,7 +715,7 @@ def main():
     setup_tmux_session(cfg, yoloai_dir, socket=socket)
 
     # Read secrets and pass to tmux session
-    backend.read_secrets(socket)
+    secrets = backend.read_secrets(socket)
 
     # Under gVisor on ARM64 the docker exec'd process may see different
     # effective credentials than the container entrypoint, causing EACCES
@@ -708,7 +728,7 @@ def main():
                  uid=stat_info.st_uid, gid=stat_info.st_gid)
         os.chmod(socket, 0o777)
 
-    launch_agent(cfg, socket=socket, working_dir=working_dir, backend=backend)
+    launch_agent(cfg, socket=socket, working_dir=working_dir, backend=backend_name, secrets=secrets)
     monitor_exit(socket=socket)
     wait_for_ready(cfg, socket=socket)
     prompt_delivered = deliver_prompt(cfg, yoloai_dir, socket=socket)
