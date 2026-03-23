@@ -88,22 +88,39 @@ def set_title(title, socket=None):
     tmux("rename-window", "-t", "main", title, socket=socket)
 
 
-def read_secrets(secrets_dir):
-    """Read secret files from a directory into os.environ."""
+def read_secrets(secrets_dir, socket=None):
+    """Read secret files from a directory into os.environ and tmux environment.
+
+    For Docker, entrypoint.py reads secrets and execs into sandbox-setup.py,
+    so the environment is inherited. For Tart/Seatbelt, sandbox-setup.py runs
+    directly, so secrets must be explicitly passed to tmux via set-environment.
+    """
+    log_info("read_secrets.check", f"checking secrets_dir={secrets_dir}")
     if not os.path.isdir(secrets_dir):
+        log_info("read_secrets.not_dir", f"secrets_dir is not a directory: {secrets_dir}")
         return
     try:
         names = os.listdir(secrets_dir)
-    except OSError:
+        log_info("read_secrets.found", f"found {len(names)} files in {secrets_dir}: {names}")
+    except OSError as e:
+        log_info("read_secrets.list_error", f"failed to list {secrets_dir}: {e}")
         return  # Not accessible (e.g. root-owned dir, container running as non-root)
+    loaded_count = 0
     for name in names:
         path = os.path.join(secrets_dir, name)
         if os.path.isfile(path):
             try:
                 with open(path) as f:
-                    os.environ[name] = f.read()
-            except OSError:
+                    value = f.read()
+                    os.environ[name] = value
+                    # Also set in tmux so the agent shell session inherits it
+                    if socket:
+                        tmux("set-environment", "-t", "main", name, value, socket=socket)
+                    loaded_count += 1
+            except OSError as e:
+                log_info("read_secrets.read_error", f"failed to read {path}: {e}")
                 pass  # Already set by entrypoint.py (running as root), or not accessible
+    log_info("read_secrets.done", f"loaded {loaded_count} secrets from {secrets_dir}")
 
 
 def write_status(status_file, status, exit_code=None):
@@ -546,12 +563,6 @@ def main():
 
     DEBUG = cfg.get("debug", False)
 
-    # Read secrets and set env vars (seatbelt/tart only; docker handled by entrypoint.py)
-    if backend == "docker":
-        read_secrets("/run/secrets")
-    else:
-        read_secrets(os.path.join(yoloai_dir, "secrets"))
-
     # Suppress browser-open attempts inside the sandbox
     if "BROWSER" not in os.environ:
         os.environ["BROWSER"] = "true"
@@ -586,6 +597,14 @@ def main():
             os.chdir(working_dir)
 
     setup_tmux_session(cfg, yoloai_dir, socket=socket)
+
+    # Read secrets and set env vars. For Docker, entrypoint.py already read them
+    # into os.environ which sandbox-setup.py inherits. For Tart/Seatbelt, we read
+    # them here and pass to tmux so the agent shell session inherits them.
+    if backend == "docker":
+        read_secrets("/run/secrets", socket=socket)
+    else:
+        read_secrets(os.path.join(yoloai_dir, "secrets"), socket=socket)
 
     # Under gVisor on ARM64 the docker exec'd process may see different
     # effective credentials than the container entrypoint, causing EACCES
