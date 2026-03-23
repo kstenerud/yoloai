@@ -240,7 +240,8 @@ def launch_agent(cfg, socket=None, working_dir=None, backend=""):
         log_debug("sandbox.agent_found", f"agent binary found: {found_at}")
 
     if working_dir:
-        send_cmd = f"cd {working_dir} && exec {agent_command}"
+        # Quote working_dir to handle paths with spaces (e.g. Tart VirtioFS paths)
+        send_cmd = f"cd '{working_dir}' && exec {agent_command}"
     else:
         send_cmd = f"exec {agent_command}"
 
