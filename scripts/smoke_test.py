@@ -57,6 +57,8 @@ class BackendSpec:
         """Return the exchange dir path as seen from inside the sandbox."""
         if self.is_seatbelt:
             return str(Path.home() / ".yoloai" / "sandboxes" / sandbox_name / "files")
+        if self.is_vm and self.os == "mac":  # Tart VMs
+            return "/Volumes/My Shared Files/yoloai/files"
         return "/yoloai/files"
 
     def sentinel_timeout(self) -> int:

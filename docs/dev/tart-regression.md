@@ -1,8 +1,28 @@
-# Tart (mac-vm) Regression Investigation
+# Tart (mac-vm) Smoketest Bug - RESOLVED
 
 ## Status
 
-**Tart VMs are currently broken** - agents receive prompts but don't execute commands.
+**FIXED** - The issue was a bug in the smoketest, not in Tart itself.
+
+## Root Cause
+
+The smoketest's `BackendSpec.exchange_dir()` method returned `/yoloai/files` for all non-Seatbelt backends, but this path doesn't work for Tart VMs:
+- `/yoloai` is a read-only filesystem in Tart VMs
+- The correct path for Tart VMs is `/Volumes/My Shared Files/yoloai/files/` (VirtioFS mount point)
+
+## Fix
+
+Updated `scripts/smoke_test.py` line 56-60 to special-case Tart VMs:
+
+```python
+def exchange_dir(self, sandbox_name: str) -> str:
+    """Return the exchange dir path as seen from inside the sandbox."""
+    if self.is_seatbelt:
+        return str(Path.home() / ".yoloai" / "sandboxes" / sandbox_name / "files")
+    if self.is_vm and self.os == "mac":  # Tart VMs
+        return "/Volumes/My Shared Files/yoloai/files"
+    return "/yoloai/files"
+```
 
 ## Timeline
 
@@ -79,32 +99,24 @@ All expected mounts are present in instance.json:
 - Pattern suggests Claude Code receives prompt, thinks about it, but doesn't execute
 - Cannot see actual Claude Code UI output to confirm authentication status
 
-## Possible Root Causes
+## Investigation Notes
 
-### Theory 1: VirtioFS Mount Timing Issue
-The VirtioFS mount may not be fully initialized when sandbox-setup.py runs, causing:
-- Files created early in boot process not syncing correctly
-- Pipe-pane failing to create agent.log
-- Agent commands succeeding but files not appearing on host
+During investigation, several theories were explored but ultimately disproven:
 
-### Theory 2: Environment Variable Propagation
-Despite export being in the command string, the token may not reach Claude Code due to:
-- Shell initialization order in Tart VM
-- Different shell behavior (bash vs zsh)
-- Environment variable scope issues with `exec`
+### ❌ Theory 1: VirtioFS Mount Timing Issue
+The VirtioFS mount was fully initialized and working correctly.
 
-### Theory 3: Working Directory Issues
-The escaped path `^stmp^stest-seatbelt-fixture` might cause:
-- `cd` command failing silently
-- Agent starting in wrong directory
-- File creation happening in unexpected location
+### ❌ Theory 2: Environment Variable Propagation
+Secrets were correctly loaded and exported.
 
-### Theory 4: Architectural Regression
-Recent changes that could have broken Tart:
-- Backend refactoring (sandbox-setup.py ABC pattern)
-- Secret export mechanism (added in this PR)
-- Mount handling changes
-- tmux setup changes
+### ❌ Theory 3: Working Directory Issues
+The working directory was correct.
+
+### ❌ Theory 4: Architectural Regression
+No actual regression in Tart backend code - the issue was in the test itself.
+
+### ✅ Actual Cause: Wrong File Path in Test
+The smoketest was using `/yoloai/files` which is read-only in Tart VMs. The correct path is `/Volumes/My Shared Files/yoloai/files/` (the VirtioFS mount point for the yoloai shared directory).
 
 ## Debugging Limitations
 
@@ -128,13 +140,9 @@ Without SSH access to Tart VMs:
    - sandbox-setup.py backend refactoring
    - Secret handling changes
 
-## Workaround
+## Resolution
 
-None currently. Tart VMs are non-functional for automated workflows.
-Users can:
-- Use Seatbelt backend instead (lightweight macOS sandboxing - works)
-- Use Docker/Podman backends (work)
-- Manually attach and interact with Tart VMs (slow, no automation)
+Fixed in commit [hash to be filled]. All smoketests now passing.
 
 ## Related Files
 
@@ -146,10 +154,9 @@ Users can:
 ## Test Command
 
 ```bash
-# Quick test to reproduce
-yoloai new --backend tart --agent claude test-tart /tmp/test:copy \
-  --prompt "echo test > output.txt && touch /yoloai/files/done" --yes
+# Smoketest now passes
+make smoketest SMOKE_ARGS="--backend mac-vm"
 
-# Wait 30s, then check
-yoloai files test-tart ls  # Should show 'done' but doesn't
+# Or full smoketest
+make smoketest-full
 ```
