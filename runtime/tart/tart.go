@@ -244,6 +244,10 @@ func (r *Runtime) Start(ctx context.Context, name string) error {
 		return fmt.Errorf("wait for VM boot: %w\n%s", err, detail)
 	}
 
+	// Brief delay to let the VM fully stabilize after first successful exec.
+	// Tart's guest agent may need a moment to be fully ready for complex commands.
+	time.Sleep(500 * time.Millisecond)
+
 	// Deliver setup script via shared directory and run it
 	if err := r.runSetupScript(ctx, name, sandboxPath, cfg.Mounts); err != nil {
 		return fmt.Errorf("run setup script: %w", err)

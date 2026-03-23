@@ -43,6 +43,7 @@ row to the index.
 | VM dies when `Start()` context is cancelled | [Tart: tart run needs exec.Command](#tart-run-process-must-use-execcommand-not-execcommandcontext) |
 | `mkdir: /var/folders: Permission denied` during Tart setup | [Tart: mkdir system dirs fails](#tart-cannot-mkdir-system-directories-like-varfolders) |
 | Tart base image rebuilt every time `yoloai new` runs | [Tart: empty sourceDir breaks marker](#empty-sourcedir-breaks-tart-provisioning-marker-file-check) |
+| `tart exec` fails with "instance not found" right after boot | [Tart: exec needs stabilization delay](#tart-exec-needs-brief-stabilization-delay-after-boot) |
 | DNS works but HTTPS to api.anthropic.com times out | [DNS: timeout = API unreachable, not DNS](#request-timed-out-in-claude-code--api-unreachable-not-dns-failure) |
 | `iptables` warnings about legacy tables | [iptables-nft: legacy tables warning](#iptables--iptables-nft-both-iptables-legacy-and-iptables-nft-can-coexist) |
 | `--isolation vm` rejected on macOS / "containerd not available" | [Registry: containerd Linux-only](#containerd-backend-is-linux-only) |
@@ -568,4 +569,26 @@ if err := m.runtime.Setup(ctx, baseProfileDir, m.output, m.logger, false); err !
 **Impact:** Before the fix, every `yoloai new` command triggered a 2-3 minute base image rebuild, significantly slowing down sandbox creation and making tests much slower.
 
 **Code:** `sandbox/manager.go::RunSetup` line ~163, `runtime/tart/build.go::Setup` and `isProvisioned`
+
+### Tart exec needs brief stabilization delay after boot
+
+**Symptom:** VM starts successfully and passes initial `tart exec <vmName> true` check during boot wait, but immediately after, running commands with `tart exec` fails with:
+```
+instance not found
+```
+
+**Explanation:** The `waitForBoot` polling loop succeeds as soon as `tart exec <vmName> true` returns successfully once. However, Tart's guest agent (which handles exec requests via gRPC) may need a brief moment to fully stabilize before it can reliably handle more complex commands. The first simple `true` command succeeds, but subsequent commands that require more setup (like bash with complex shell commands) fail with "instance not found".
+
+This is likely a race condition where the guest agent is partially initialized - enough to handle a simple command, but not yet fully ready for complex operations.
+
+**Fix:** Add a 500ms stabilization delay after `waitForBoot` succeeds and before calling `runSetupScript`:
+```go
+// Brief delay to let the VM fully stabilize after first successful exec.
+// Tart's guest agent may need a moment to be fully ready for complex commands.
+time.Sleep(500 * time.Millisecond)
+```
+
+**Impact:** Without the delay, VM creation fails intermittently with "instance not found" errors, especially noticeable in automated tests where VMs are created and used quickly.
+
+**Code:** `runtime/tart/tart.go::Start` after `waitForBoot`
 
