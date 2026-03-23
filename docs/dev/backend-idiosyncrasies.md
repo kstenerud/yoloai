@@ -41,8 +41,36 @@ row to the index.
 | Secrets / files missing inside Tart VM | [Tart: VirtioFS directories only](#virtiofs-only-supports-directory-mounts-not-individual-files) |
 | Shell command fails with "no such file" on VirtioFS path | [Tart: VirtioFS path has spaces](#virtiofs-mount-path-inside-the-vm-contains-spaces) |
 | VM dies when `Start()` context is cancelled | [Tart: tart run needs exec.Command](#tart-run-process-must-use-execcommand-not-execcommandcontext) |
+| `mkdir: /var/folders: Permission denied` during Tart setup | [Tart: mkdir system dirs fails](#tart-cannot-mkdir-system-directories-like-varfolders) |
 | DNS works but HTTPS to api.anthropic.com times out | [DNS: timeout = API unreachable, not DNS](#request-timed-out-in-claude-code--api-unreachable-not-dns-failure) |
 | `iptables` warnings about legacy tables | [iptables-nft: legacy tables warning](#iptables--iptables-nft-both-iptables-legacy-and-iptables-nft-can-coexist) |
+| `--isolation vm` rejected on macOS / "containerd not available" | [Registry: containerd Linux-only](#containerd-backend-is-linux-only) |
+
+---
+
+## Runtime Backend Registry
+
+### containerd backend is Linux-only
+
+**Symptom:** Using `--os linux --isolation vm` on macOS fails with:
+```
+yoloai: --isolation vm requires containerd, which is not available on macOS.
+Use a Linux host for VM isolation, or use --os mac for macOS-native sandboxing:
+  container   macOS sandbox-exec (seatbelt)
+  vm          Full macOS VM (Tart)
+```
+
+**Explanation:** The backend registry pattern introduced in commit 69c18f1 makes
+backends register themselves at init() time only on supported platforms. Containerd
+uses `//go:build linux` tags and only registers on Linux. On macOS, attempting to
+use `--os linux --isolation vm` will fail at backend resolution time because containerd
+is not in the registry.
+
+**Fix:** On macOS, use `--os mac --isolation vm` to get Tart VMs instead. Smoke tests
+and other cross-platform tooling should avoid specifying `os=linux` with `isolation=vm`
+on macOS hosts.
+
+**Code:** `runtime/registry.go`, `runtime/containerd/containerd.go`, `internal/cli/helpers.go:resolveBackend()`
 
 ---
 
@@ -493,4 +521,22 @@ in `tart.go::runSetupScript`.
 `Start()` function's context is cancelled (e.g. on HTTP request completion or
 timeout). Must use bare `exec.Command`, then set `SysProcAttr{Setpgid: true}`
 to detach it from the parent process group. See `tart.go::Start`.
+
+### Tart cannot mkdir system directories like /var/folders
+
+**Symptom:** VM setup fails with:
+```
+mkdir: /var/folders: Permission denied
+```
+
+**Explanation:** During mount setup, Tart creates symlinks from expected mount paths
+to VirtioFS share paths. The setup tries to `mkdir -p` parent directories, but on macOS
+paths like `/var/folders/h8/...` (system temp directories) cannot be created by regular
+users. The parent directories already exist (created by macOS), so the mkdir failure can
+be ignored.
+
+**Fix:** Make mkdir non-fatal: `(mkdir -p '$parent' 2>/dev/null || true)`. If the parent
+exists (which it should for system paths), the symlink creation proceeds successfully.
+
+**Code:** `runtime/tart/tart.go::runSetupScript` line ~657
 

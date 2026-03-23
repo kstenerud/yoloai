@@ -122,8 +122,8 @@ MACOS_BACKENDS: list[BackendSpec] = [
                 check_backend="docker"),
     BackendSpec("linux", "container", "podman", "podman",
                 check_backend="podman"),
-    BackendSpec("linux", "vm",        None,     "linux-vm",
-                check_backend="tart",   is_vm=True),
+    # Note: linux+vm isolation requires containerd, which is Linux-only.
+    # On macOS, use mac+vm (Tart) instead.
     BackendSpec("mac",   "container", None,     "seatbelt",
                 check_backend="seatbelt"),
     BackendSpec("mac",   "vm",        None,     "mac-vm",

@@ -654,7 +654,8 @@ func (r *Runtime) runSetupScript(ctx context.Context, vmName, sandboxPath string
 		}
 		parent := filepath.Dir(target)
 		// Remove existing dir/file before symlinking (ln -sfn won't replace a directory)
-		symlinkCmd := fmt.Sprintf("mkdir -p '%s' && rm -rf '%s' && ln -sfn '%s' '%s'", parent, target, vfsPath, target)
+		// mkdir may fail for system dirs like /var/folders on macOS - that's OK if parent exists
+		symlinkCmd := fmt.Sprintf("(mkdir -p '%s' 2>/dev/null || true) && rm -rf '%s' && ln -sfn '%s' '%s'", parent, target, vfsPath, target)
 		args := execArgs(vmName, "bash", "-c", symlinkCmd)
 		if _, err := r.runTart(ctx, args...); err != nil {
 			return fmt.Errorf("create mount symlink for %s: %w", target, err)
