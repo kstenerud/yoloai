@@ -164,7 +164,7 @@ func (m *Manager) start(ctx context.Context, name string, opts StartOptions) err
 			}
 			defer m.cleanupResumeFiles(name)
 		}
-		if err := m.recreateContainer(ctx, name, meta, opts.Resume || customPrompt); err != nil {
+		if err := m.recreateContainer(ctx, name, meta, opts.Resume); err != nil {
 			return err
 		}
 		fmt.Fprintf(m.output, "Sandbox %s started\n", name) //nolint:errcheck // best-effort output
@@ -184,7 +184,7 @@ func (m *Manager) start(ctx context.Context, name string, opts StartOptions) err
 			}
 			defer m.cleanupResumeFiles(name)
 		}
-		if err := m.recreateContainer(ctx, name, meta, opts.Resume || customPrompt); err != nil {
+		if err := m.recreateContainer(ctx, name, meta, opts.Resume); err != nil {
 			return err
 		}
 		fmt.Fprintf(m.output, "Sandbox %s recreated and started\n", name) //nolint:errcheck // best-effort output
