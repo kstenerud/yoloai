@@ -42,6 +42,7 @@ row to the index.
 | Shell command fails with "no such file" on VirtioFS path | [Tart: VirtioFS path has spaces](#virtiofs-mount-path-inside-the-vm-contains-spaces) |
 | VM dies when `Start()` context is cancelled | [Tart: tart run needs exec.Command](#tart-run-process-must-use-execcommand-not-execcommandcontext) |
 | `mkdir: /var/folders: Permission denied` during Tart setup | [Tart: mkdir system dirs fails](#tart-cannot-mkdir-system-directories-like-varfolders) |
+| Tart base image rebuilt every time `yoloai new` runs | [Tart: empty sourceDir breaks marker](#empty-sourcedir-breaks-tart-provisioning-marker-file-check) |
 | DNS works but HTTPS to api.anthropic.com times out | [DNS: timeout = API unreachable, not DNS](#request-timed-out-in-claude-code--api-unreachable-not-dns-failure) |
 | `iptables` warnings about legacy tables | [iptables-nft: legacy tables warning](#iptables--iptables-nft-both-iptables-legacy-and-iptables-nft-can-coexist) |
 | `--isolation vm` rejected on macOS / "containerd not available" | [Registry: containerd Linux-only](#containerd-backend-is-linux-only) |
@@ -539,4 +540,32 @@ be ignored.
 exists (which it should for system paths), the symlink creation proceeds successfully.
 
 **Code:** `runtime/tart/tart.go::runSetupScript` line ~657
+
+### Empty sourceDir breaks Tart provisioning marker file check
+
+**Symptom:** Tart base image is rebuilt every time `yoloai new` is called, even though it was already provisioned. Output shows:
+```
+Removing old provisioned image...
+Cloning base image for provisioning...
+[... full provisioning steps ...]
+Base VM image provisioned successfully.
+```
+
+**Explanation:** The Setup method checks for a `.tart-provisioned` marker file to skip unnecessary rebuilds. When `sourceDir` is an empty string, `filepath.Join("", ".tart-provisioned")` evaluates to `.tart-provisioned` in the current directory rather than the intended `~/.yoloai/profiles/base/.tart-provisioned`. The marker check fails, so Setup always rebuilds.
+
+The marker is correctly written to the profile directory during provisioning, but the check looks in the wrong place when sourceDir is empty.
+
+**Fix:** Pass the correct base profile directory to Setup:
+```go
+// Before (manager.go line 163):
+if err := m.runtime.Setup(ctx, "", m.output, m.logger, false); err != nil {
+
+// After:
+baseProfileDir := config.ProfileDirPath("base")
+if err := m.runtime.Setup(ctx, baseProfileDir, m.output, m.logger, false); err != nil {
+```
+
+**Impact:** Before the fix, every `yoloai new` command triggered a 2-3 minute base image rebuild, significantly slowing down sandbox creation and making tests much slower.
+
+**Code:** `sandbox/manager.go::RunSetup` line ~163, `runtime/tart/build.go::Setup` and `isProvisioned`
 
