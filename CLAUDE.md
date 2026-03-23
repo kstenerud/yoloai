@@ -32,6 +32,7 @@ Development docs live in `docs/dev/`:
 - `docs/dev/OPEN_QUESTIONS.md` — Questions encountered during design/implementation that need resolution.
 - `docs/dev/plans/TODO.md` — Consolidated list of designed-but-unimplemented features with design references.
 - `docs/dev/old/PLAN.md` — Historical implementation plan (phases, architecture decisions). Reference for how yoloAI was built.
+- `docs/dev/backend-idiosyncrasies.md` — **Read this before diagnosing any backend problem.** Catalogs observed behaviors that contradict official documentation, required non-obvious workarounds, or have caused bugs before. Includes a symptom index for fast lookup.
 
 ## Architecture (from design docs)
 
@@ -58,6 +59,8 @@ Development docs live in `docs/dev/`:
 - **Factual accuracy matters:** Star counts, feature claims, and security assertions must be verified. Don't repeat marketing language or unverifiable numbers.
 - **Cross-platform awareness:** Always consider Linux, macOS (Docker Desktop + VirtioFS), and Windows/WSL. Note platform-specific tradeoffs explicitly.
 - **Commit granularity:** One commit per logical change. Research, design updates, and critique application get separate commits.
+- **Backend debugging:** Before diagnosing a backend problem (containerd, Kata, CNI, Docker, Podman, Tart, Seatbelt), read `docs/dev/backend-idiosyncrasies.md`. Use the symptom index to jump directly to the relevant entry. Do not repeat investigation that is already documented there.
+- **Recording new idiosyncrasies:** When you discover a backend behavior that contradicts documentation, required a surprising workaround, or could cause the same bug again — add an entry to `docs/dev/backend-idiosyncrasies.md`. Add a row to the symptom index. Keep entries concise: symptom, explanation, fix, code pointer. Do this before committing the fix.
 
 ## Critique Principles
 
