@@ -114,11 +114,11 @@ LINUX_BACKENDS: list[BackendSpec] = [
                 check_backend="docker"),
     BackendSpec("linux", "container",          "podman", "podman",
                 check_backend="podman"),
-    BackendSpec("linux", "container-enhanced", None,     "cenhanced",
+    BackendSpec("linux", "container-enhanced", None,     "docker-cenhanced",
                 check_backend="docker"),
-    BackendSpec("linux", "vm",                 None,     "vm",
+    BackendSpec("linux", "vm",                 None,     "containerd-vm",
                 check_backend="containerd", is_vm=True, check_isolation="vm"),
-    BackendSpec("linux", "vm-enhanced",        None,     "vmenhanced",
+    BackendSpec("linux", "vm-enhanced",        None,     "containerd-vmenhanced",
                 check_backend="containerd", is_vm=True, check_isolation="vm-enhanced"),
 ]
 
@@ -131,7 +131,7 @@ MACOS_BACKENDS: list[BackendSpec] = [
     # On macOS, use mac+vm (Tart) instead.
     BackendSpec("mac",   "container", None,     "seatbelt",
                 check_backend="seatbelt"),
-    BackendSpec("mac",   "vm",        None,     "mac-vm",
+    BackendSpec("mac",   "vm",        None,     "tart",
                 check_backend="tart",   is_vm=True),
 ]
 
@@ -669,7 +669,7 @@ def parse_args() -> argparse.Namespace:
         action="append",
         help=(
             "Run full_workflow test only for specific backend(s). "
-            "Can be specified multiple times. Examples: --backend seatbelt --backend mac-vm"
+            "Can be specified multiple times. Examples: --backend seatbelt --backend tart"
         ),
     )
     parser.add_argument(
