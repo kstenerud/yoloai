@@ -28,7 +28,8 @@ from typing import Callable, Optional
 
 SENTINEL = "done"
 DEFAULT_TIMEOUT = 90    # seconds: container + agent startup for non-VM backends
-VM_TIMEOUT = 180        # seconds: VM boot + agent startup (includes nested KVM overhead)
+VM_TIMEOUT = 180        # seconds: VM boot + agent startup (Firecracker/Tart)
+QEMU_TIMEOUT = 300      # seconds: QEMU-based Kata VM — slower boot than Firecracker
 CMD_TIMEOUT = 60        # seconds: individual yoloai commands
 
 
@@ -47,6 +48,7 @@ class BackendSpec:
     check_backend: str      # daemon name for `yoloai system check --backend`
     is_vm: bool = False     # True → use VM_TIMEOUT for sentinel polling
     check_isolation: str = ""  # isolation to validate in prereq check (empty = skip)
+    sentinel_timeout_override: int = 0  # non-zero overrides the default sentinel timeout
 
     @property
     def is_seatbelt(self) -> bool:
@@ -62,6 +64,8 @@ class BackendSpec:
         return "/yoloai/files"
 
     def sentinel_timeout(self) -> int:
+        if self.sentinel_timeout_override:
+            return self.sentinel_timeout_override
         return VM_TIMEOUT if self.is_vm else DEFAULT_TIMEOUT
 
     def new_args(self) -> list[str]:
@@ -117,7 +121,8 @@ LINUX_BACKENDS: list[BackendSpec] = [
     BackendSpec("linux", "container-enhanced", None,     "docker-cenhanced",
                 check_backend="docker"),
     BackendSpec("linux", "vm",                 None,     "containerd-vm",
-                check_backend="containerd", is_vm=True, check_isolation="vm"),
+                check_backend="containerd", is_vm=True, check_isolation="vm",
+                sentinel_timeout_override=QEMU_TIMEOUT),
     BackendSpec("linux", "vm-enhanced",        None,     "containerd-vmenhanced",
                 check_backend="containerd", is_vm=True, check_isolation="vm-enhanced"),
 ]
@@ -699,6 +704,18 @@ def main() -> int:
         print(
             "ERROR: yoloai not found. "
             "Run from the repo root after `make build`, or install to ~/bin/yoloai.",
+            file=sys.stderr,
+        )
+        return 1
+
+    # Detect the common mistake of `sudo python3 smoke_test.py` without -E,
+    # which strips ANTHROPIC_API_KEY and other credentials from the environment.
+    if os.getuid() == 0 and not os.environ.get("ANTHROPIC_API_KEY") and not os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"):
+        print(
+            "ERROR: running as root but no Claude credentials found in environment.\n"
+            "sudo strips environment variables by default. Use sudo -E to preserve them:\n"
+            "  sudo -E python3 scripts/smoke_test.py\n"
+            "  sudo -E make smoketest",
             file=sys.stderr,
         )
         return 1
