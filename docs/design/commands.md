@@ -50,6 +50,8 @@ Inspection:
   yoloai sandbox <name> allow <domain>...       Allow additional domains in an isolated sandbox
   yoloai sandbox <name> allowed                 Show allowed domains for a sandbox
   yoloai sandbox <name> deny <domain>...        Remove domains from the allowlist
+  yoloai sandbox <name> mount add <host-path> [<container-path>]  Add a bind mount to a running sandbox (Docker/Podman, Linux only)
+  yoloai sandbox <name> mount rm <container-path>                 Remove a live-added bind mount
   yoloai sandbox <name> bugreport <file>        Write a bug report for a sandbox to a file
   yoloai ls                                      List sandboxes (shortcut for 'sandbox list')
   yoloai log <name>                              Show sandbox log (shortcut for 'sandbox log')
@@ -476,6 +478,57 @@ No runtime needed — pure file read from meta.json.
 
 Requires `network_mode == "isolated"`. Errors if a specified domain is not in the allowlist.
 
+### `yoloai sandbox <name> mount`
+
+Commands for adding and removing bind mounts on a running sandbox, without tearing down the container and losing agent context.
+
+**Backend and platform support:** Docker and Podman on Linux only.
+
+- **Tart:** VirtioFS shares are passed as `--dir` flags to `tart run` and cannot be added to a running VM.
+- **Seatbelt:** The SBPL sandbox profile is generated at `Create` time and applied to the process at `Start` time. A running process's sandbox profile cannot be modified.
+- **Docker Desktop on macOS:** Container PIDs live inside the hypervisor's Linux VM and are not accessible via `nsenter` from the macOS host.
+
+**Mechanism:** `nsenter --mount --target <container-pid> -- mount --bind <host-path> <container-path>`. This enters the container's mount namespace from the host and performs the bind mount without restarting the container. Requires root — if yoloai is not running as root, the command fails with a clear error: `mount add requires root; try: sudo yoloai sandbox <name> mount add <path>`.
+
+**Persistence:** Live mounts are saved to `meta.json` (`live_mounts` field, same `DirMeta` structure as `directories`). On the next `yoloai start`, they are applied as regular Docker bind mounts during `ContainerCreate` — no nsenter needed on restart, since the container is freshly created with all mounts baked in. Live mounts survive stop/start cycles.
+
+**`sandbox info` output:** Live mounts appear in the Directories section, tagged `(live)` to distinguish them from mounts configured at creation.
+
+#### `yoloai sandbox <name> mount add <host-path> [<container-path>]`
+
+Adds a bind mount to a running sandbox.
+
+- `<host-path>`: Absolute or relative path on the host (resolved to absolute). Must exist.
+- `<container-path>`: Mount point inside the container. Defaults to the same absolute path as `<host-path>` (mirrored path convention, matching `yoloai new`).
+
+Options:
+- `--read-only` / `-r`: Mount read-only. Default is read-write.
+
+Procedure:
+1. Require sandbox to be running (active or idle). Error if stopped.
+2. Check backend is Docker or Podman, and host is Linux. Error otherwise with explanation.
+3. Resolve `<host-path>` to absolute. Error if it doesn't exist.
+4. Default `<container-path>` to `<host-path>` if omitted.
+5. Error if `<container-path>` is already in use (either from original mounts or a prior `mount add`).
+6. Create mount point inside container: `docker exec <instance> mkdir -p <container-path>`.
+7. Get container PID: `docker inspect --format '{{.State.Pid}}' <instance>`.
+8. Bind mount via nsenter: `nsenter --mount --target <pid> -- mount --bind <host-path> <container-path>` (append `,ro` remount for `--read-only`).
+9. Append to `live_mounts` in `meta.json`.
+10. Print: `<host-path> → <container-path>` (or `… (read-only)`).
+
+#### `yoloai sandbox <name> mount rm <container-path>`
+
+Removes a live-added bind mount from a running sandbox.
+
+Only removes mounts that were added via `mount add` (present in `live_mounts`). Cannot remove mounts configured at sandbox creation time — those are part of the container's core configuration and cannot be safely removed without restarting the container.
+
+Procedure:
+1. Require sandbox to be running.
+2. Look up `<container-path>` in `live_mounts`. Error if not found (with hint if it's an original mount).
+3. `nsenter --mount --target <pid> -- umount <container-path>`.
+4. Remove from `live_mounts` in `meta.json`.
+5. Print: `Removed <container-path>`.
+
 ### `yoloai sandbox list` / `yoloai ls`
 
 Lists all sandboxes with their current status.
@@ -860,10 +913,10 @@ Options:
 
 #### `yoloai files <sandbox> get <file/glob>... [-o dir]`
 
-Copy files from the sandbox's exchange directory to the host. File arguments are relative to the exchange directory and may be literal names or glob patterns. Multiple files/globs can be specified.
+Copy files or directories from the sandbox's exchange directory to the host. Arguments are relative to the exchange directory and may be literal names or glob patterns. Directories are copied recursively. Multiple files/globs can be specified.
 
 Options:
-- `-o`, `--output`: Destination directory (or file path for a single file). Defaults to `.` (current directory). When getting multiple files, the destination must be an existing directory.
+- `-o`, `--output`: Destination directory (or file path for a single file). Defaults to `.` (current directory). When getting multiple items, the destination must be an existing directory.
 - `--force`: Overwrite existing destination files instead of failing.
 
 #### `yoloai files <sandbox> ls [glob]...`

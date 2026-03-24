@@ -55,10 +55,38 @@ Design considerations:
 Enrich `yoloai ls` output for multi-sandbox workflows:
 - Agent type and model
 - Runtime duration (how long the sandbox has been running)
-- ~~Agent status (active/idle/exited)~~ (done)
 - Workdir dirty state (has uncommitted changes)
 
 Keep default output concise; add `--long` or `-l` flag for the full dashboard view.
+
+## Workflow Commands
+
+### `yoloai wait`
+
+Block until the agent in a named sandbox exits, then return the agent's exit code. Useful for CI/CD pipelines and scripting. Without `wait`, polling `yoloai list --json` is the only way to detect completion.
+
+```
+yoloai wait <name> [--timeout <duration>]
+```
+
+- Blocks until the sandbox's tmux pane is dead (agent has exited)
+- Returns the agent's exit code as yoloai's exit code (0 = done, non-zero = failed)
+- `--timeout`: fail with exit code 124 (matching `timeout(1)`) if the agent hasn't exited within the duration
+- Related to the deferred `yoloai run` (#56 in OPEN_QUESTIONS) — `run` would be sugar on top of `wait`
+
+See [OPEN_QUESTIONS.md](../OPEN_QUESTIONS.md) §77.
+
+## Sandbox Live Mounts
+
+### `sandbox mount add` / `sandbox mount rm`
+
+Add and remove bind mounts on a running sandbox without tearing it down. Preserves agent context when a mid-conversation need for an additional directory is discovered.
+
+See spec in [commands.md](../../design/commands.md) `### yoloai sandbox <name> mount`.
+
+Mechanism: `nsenter --mount --target <container-pid>` to enter the container's mount namespace and bind mount without restart. Requires root. Docker/Podman on Linux only (Tart and Seatbelt cannot support this structurally).
+
+Persistence: added to `live_mounts` in `meta.json` (new `DirMeta` slice field); applied as regular Docker mounts on next `start`.
 
 ## Idle Detection
 
@@ -75,10 +103,6 @@ See [idle detection research](../research/idle-detection.md) §3.9 Q1.
 When applying changes, also fetch any new git tags from the sandbox's copy of the workdir so that tags created by the agent (e.g. version bumps, release tags) land on the host. Currently `apply` syncs file changes but does not transfer tags.
 
 ## Seatbelt Improvements
-
-### ~~Dynamic toolchain detection in SBPL profiles~~ ✅
-
-Implemented in `profile.go:toolchainReadPaths()`. `GenerateProfile()` now resolves `python3`, `node`, `ruby`, `go`, `rustc`, `java` at runtime via `exec.LookPath`, extracts installation prefixes, and adds read rules for non-system paths.
 
 ### Per-agent sandbox access documentation
 
@@ -115,16 +139,59 @@ The helper should handle:
 
 The main binary retains ownership of sandbox directories (written as the calling user), so `yoloai destroy` and git ops work without permission errors.
 
-
-
 See [linux-vm-backends research](../research/linux-vm-backends.md) for full analysis.
 
-### ~~gVisor integration (`security: gvisor`)~~ ✅
+## Architecture Cleanup
 
-Implemented as `isolation: container-enhanced`. Passes `--runtime=runsc` to Docker/Podman. Preflight check validates `runsc` binary and Docker runtime registration. Incompatibility with `:overlay` directories is enforced (gVisor VFS2 does not support overlayfs inside the container).
+### Backend and agent extensibility refactor
 
-### ~~Kata Containers integration (`security: kata`)~~ ✅
+Five architectural issues that cause friction when adding new backends or agents. Each is independent. See [plan](backend-agent-extensibility.md) for full spec.
 
-Implemented as `isolation: vm` (Kata+QEMU) and `isolation: vm-enhanced` (Kata+Firecracker) via the containerd backend. Uses `io.containerd.kata.v2` and `io.containerd.kata-fc.v2` shimv2 runtimes. Preflight checks validate Kata shim binary, CNI plugins, and `/dev/kvm`. `vm-enhanced` additionally selects the `devmapper` snapshotter.
+Summary of issues:
+1. `meta.Backend` string comparisons (`== "seatbelt"`) scattered outside the dispatch layer — should use `meta.HostFilesystem` (a `BackendCaps`-derived field stored at creation time)
+2. Agent-specific switch statements in `sandbox/create.go` — should use an `ApplySettings` function field on `agent.Definition`
+3. Exit-code typed errors in `internal/cli/` — nearly all CLI errors exit 1 via plain `fmt.Errorf`; the typed error system (`sandbox/errors.go`) exists but is unused where it matters
+4. Several sentinel errors in `sandbox/errors.go` (`ErrDockerUnavailable`, `ErrMissingAPIKey`, `ErrContainerNotRunning`, `ErrNoChanges`) appear unused
+5. (See plan for issues 5–10)
 
-Not worth building: raw Firecracker backend (requires full orchestration layer — rootfs images, vsock exec daemon, networking). Revisit only if yoloAI targets hosted/SaaS deployment model.
+## Operational Hardening
+
+### Log rotation
+
+`log.txt` in the sandbox directory grows unbounded. There is no rotation or size cap. For long-running sandboxes or sessions that produce a lot of output, this can accumulate gigabytes of log data.
+
+Options: size-based rotation (cap at N MB, keep last N files), integration with `logrotate`, or a `--max-log-size` config key. Low priority but worth addressing before GA.
+
+### Concurrency guard for sandbox operations
+
+No concurrency controls exist. Multiple simultaneous `yoloai new` calls with the same sandbox name, or concurrent `yoloai start`/`destroy` on the same sandbox, are not guarded. Could result in corrupted `meta.json`, double container creation, or partial state.
+
+Fix: file-based lock per sandbox directory (e.g., `meta.lock`), held during operations that mutate sandbox state. Low priority for single-user CLIs but worth doing before any CI/CD integration.
+
+## Network
+
+### Comprehensive network allowlist audit
+
+All agents need a systematic audit of actual network traffic: capture traffic during full sessions (startup, auth, operation, token refresh, telemetry) and verify the allowlist covers everything. Gemini was missing `oauth2.googleapis.com` for OAuth token refresh; other agents likely have similar gaps.
+
+Most important for `--network-isolated` mode where missing domains cause silent failures.
+
+See [OPEN_QUESTIONS.md](../OPEN_QUESTIONS.md) §97.
+
+## Agent and Model Maintenance
+
+### Model alias tracking strategy
+
+Model aliases drift as providers release new models. Gemini's aliases already drifted once. Need a process to stay current: periodic manual review cadence, automated checks against provider APIs/docs, or pinning to stable `-latest` identifiers where available.
+
+See [OPEN_QUESTIONS.md](../OPEN_QUESTIONS.md) §98.
+
+### Codex research items
+
+Three unresolved questions needed before Codex network isolation is production-ready:
+
+- **Proxy support (#37):** Whether Codex's static Rust binary honors `HTTP_PROXY`/`HTTPS_PROXY` env vars is unverified. Critical for `--network-isolated` mode — if it ignores proxy env vars, iptables-only enforcement is the only option.
+- **Required network domains (#38):** Only `api.openai.com` is confirmed. Additional domains (telemetry, model downloads) may be required. Needs traffic capture during a full Codex session.
+- **TUI behavior in tmux (#39):** Interactive mode (`codex --yolo` without `exec`) behavior inside tmux is unverified. May affect idle detection and prompt delivery.
+
+See [OPEN_QUESTIONS.md](../OPEN_QUESTIONS.md) §37–39.
