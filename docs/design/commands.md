@@ -437,6 +437,8 @@ Stops and removes the container via the sandbox's backend. Removes `~/.yoloai/sa
 
 Accepts multiple sandbox names (e.g., `yoloai destroy sandbox1 sandbox2 sandbox3`) with a single confirmation prompt showing all sandboxes to be destroyed.
 
+**Wildcard support:** Sandbox names can include `*` and `?` wildcards for pattern matching. For example, `yoloai destroy test*` will destroy all sandboxes whose names start with "test". Wildcards are expanded against existing sandboxes; an error is returned if no matches are found.
+
 **Smart confirmation:** Confirmation is only required when the agent is still running or unapplied changes exist (detected via `git status --porcelain` on the host-side work directory, consistent with `list` CHANGES detection). If the sandbox is stopped/exited with no unapplied changes, destruction proceeds without prompting. `--yes` skips all confirmation regardless.
 
 Options:

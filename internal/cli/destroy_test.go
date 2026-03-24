@@ -52,3 +52,26 @@ func TestDestroyCmd_AllFlagRegistered(t *testing.T) {
 	assert.NotNil(t, cmd.Flags().Lookup("all"))
 	assert.NotNil(t, cmd.Flags().Lookup("yes"))
 }
+
+func TestHasWildcard(t *testing.T) {
+	tests := []struct {
+		input string
+		want  bool
+	}{
+		{"test*", true},
+		{"test?", true},
+		{"*test", true},
+		{"te*st", true},
+		{"te?st", true},
+		{"test", false},
+		{"test123", false},
+		{"", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got := hasWildcard(tt.input)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}

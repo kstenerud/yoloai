@@ -5,11 +5,44 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/sandbox"
 	"github.com/spf13/cobra"
 )
+
+// hasWildcard returns true if the string contains * or ? characters.
+func hasWildcard(s string) bool {
+	return strings.ContainsAny(s, "*?")
+}
+
+// expandWildcard matches a wildcard pattern against all sandbox names.
+// Returns matching sandbox names, or an error if no matches found.
+func expandWildcard(ctx context.Context, rt runtime.Runtime, pattern string) ([]string, error) {
+	infos, err := sandbox.ListSandboxes(ctx, rt)
+	if err != nil {
+		return nil, fmt.Errorf("list sandboxes: %w", err)
+	}
+
+	var matches []string
+	for _, info := range infos {
+		matched, err := filepath.Match(pattern, info.Meta.Name)
+		if err != nil {
+			return nil, fmt.Errorf("invalid pattern %q: %w", pattern, err)
+		}
+		if matched {
+			matches = append(matches, info.Meta.Name)
+		}
+	}
+
+	if len(matches) == 0 {
+		return nil, fmt.Errorf("no sandboxes match pattern %q", pattern)
+	}
+
+	return matches, nil
+}
 
 func newDestroyCmd() *cobra.Command {
 	cmd := &cobra.Command{
@@ -25,14 +58,15 @@ func newDestroyCmd() *cobra.Command {
 				return sandbox.NewUsageError("cannot specify sandbox names with --all")
 			}
 
-			// Resolve backend: from first named sandbox, or config default for --all
+			// Resolve backend: from first named sandbox, or config default for --all/wildcards
 			backend, warn := detectContainerBackend(resolveContainerBackendConfig())
 			if warn != "" {
 				fmt.Fprintln(os.Stderr, warn)
 			}
-			if !all && len(args) > 0 {
+			if !all && len(args) > 0 && !hasWildcard(args[0]) {
+				// Only resolve from first arg if it's not a wildcard pattern
 				backend = resolveBackendForSandbox(args[0])
-			} else if !all {
+			} else if !all && len(args) == 0 {
 				if envName := os.Getenv(EnvSandboxName); envName != "" {
 					backend = resolveBackendForSandbox(envName)
 				}
@@ -68,15 +102,24 @@ func newDestroyCmd() *cobra.Command {
 						}
 						names = []string{envName}
 					} else {
-						for _, name := range args {
-							if err := sandbox.ValidateName(name); err != nil {
-								return err
-							}
-							if _, err := sandbox.RequireSandboxDir(name); err != nil {
-								return fmt.Errorf("%s: %w", name, err)
+						// Expand wildcards in args
+						for _, arg := range args {
+							if hasWildcard(arg) {
+								expanded, err := expandWildcard(ctx, rt, arg)
+								if err != nil {
+									return err
+								}
+								names = append(names, expanded...)
+							} else {
+								if err := sandbox.ValidateName(arg); err != nil {
+									return err
+								}
+								if _, err := sandbox.RequireSandboxDir(arg); err != nil {
+									return fmt.Errorf("%s: %w", arg, err)
+								}
+								names = append(names, arg)
 							}
 						}
-						names = args
 					}
 				}
 

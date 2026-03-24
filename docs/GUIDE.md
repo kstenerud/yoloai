@@ -335,6 +335,10 @@ yoloai apply task --yes
 yoloai stop --all
 yoloai destroy --all --yes
 
+# Destroy sandboxes matching a wildcard pattern
+yoloai destroy test*         # destroy all sandboxes starting with "test"
+yoloai destroy *-old --yes   # skip confirmation for sandboxes ending with "-old"
+
 # Resume a stopped sandbox (re-feed original prompt with context)
 yoloai start task --resume
 yoloai start task -a            # start and auto-attach
