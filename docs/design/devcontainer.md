@@ -17,6 +17,10 @@ These are exactly the problems yoloAI solves. The two concerns are orthogonal:
 
 A user with an existing devcontainer.json should be able to get yoloAI's safety with zero new configuration.
 
+An additional benefit on macOS: standard devcontainer bind mounts go through Docker Desktop's filesystem translation layer, which is 3–4x slower than native Linux even with VirtioFS. yoloAI's copy mode puts the workdir in the container filesystem entirely, sidestepping this overhead.
+
+**Limitation: Dev Container Features.** The `features:` field is widely used in real-world devcontainer.json files to install tools declaratively (Node.js, Go, docker-in-docker, GitHub CLI, etc.). yoloAI does not support Features — they require the devcontainer CLI to install. If your devcontainer.json relies on `features` for its toolchain, `--devcontainer` will not reproduce your full environment; you will need a yoloAI profile with a Dockerfile that installs the equivalent packages directly.
+
 ## Feature 1: `--devcontainer` flag on `yoloai new`
 
 ### Invocation
@@ -52,7 +56,11 @@ Without an explicit path, yoloAI searches for `.devcontainer/devcontainer.json` 
 | `containerUser` | `container_user` in runtime-config.json | Same as `remoteUser`; `remoteUser` takes precedence if both are set |
 | `features` | **not supported** | Dev Container Features require the devcontainer CLI; out of scope |
 | `customizations.vscode` | **ignored** | VS Code-specific, not relevant to agent sandboxing |
-| `runArgs` | partial | `--cpus`, `--memory`, `--cap-add` parsed; unknown flags warned and skipped |
+| `runArgs` | partial | `--cpus`, `--memory`, `--cap-add` parsed; unknown flags warned and skipped; see note on iptables conflict |
+| `name` | **ignored** | Display name; yoloAI uses the sandbox name |
+| `waitFor` | **ignored** | Controls VS Code startup sequencing; yoloAI always waits for all setup commands |
+| `hostRequirements` | **ignored** | Codespaces sizing hints; not applicable to local Docker |
+| `shutdownAction` | **ignored** | Controls container lifecycle on VS Code close; yoloAI manages sandbox lifecycle |
 
 ### Image resolution
 
@@ -117,6 +125,8 @@ devcontainer images are often built around a specific non-root user (`node`, `vs
 
 The home directory is derived from the named user's passwd entry at runtime rather than assumed to be `/home/yoloai`.
 
+**`vscode` user and passwordless sudo:** The Microsoft devcontainer image family (`mcr.microsoft.com/devcontainers/*`) creates a `vscode` user with `NOPASSWD:ALL` sudo. This is expected behaviour for that image family — yoloAI does not need to do anything special when `remoteUser: vscode` is set. The agent will run with passwordless sudo available, which matches the devcontainer environment the user designed.
+
 **Implementation note:** `sandbox-setup.py` must also be audited for hardcoded `/home/yoloai` paths and updated to use the configured user and home directory before this is implemented.
 
 ### `workspaceFolder`
@@ -137,11 +147,17 @@ The mount mode suffix works exactly as it does without `--devcontainer`. `:copy`
 
 devcontainer.json `mounts` entries are passed through to the sandbox with one exception: any entry whose target path matches the workspace mount path (from `workspaceFolder`, or the default mirrored host path) is dropped with a warning. yoloAI's own workdir mount already covers that path — letting devcontainer's mount win would bypass copy mode.
 
+The following mount sources are also stripped with a warning, as they conflict with yoloAI's own mechanisms or represent sandbox escape risks:
+
+- **Docker socket** (`/var/run/docker.sock` or `//./pipe/docker_engine`): passing through the Docker socket gives the agent full access to the host Docker daemon — a complete sandbox escape. Stripped unconditionally with an error-level warning.
+- **Agent credential directories** (e.g. `~/.claude`, `~/.gemini`, `~/.codex`): yoloAI injects credentials via `/run/secrets` and its own entrypoint. Mounting credential directories from the host would conflict with this mechanism. Stripped with a warning; users should let yoloAI handle credential injection normally.
+
 All other mounts pass through unchanged. The workspace will be present at the expected path; it will just be yoloAI's managed copy rather than the live host directory.
 
 ### Error handling
 
 - Unknown `runArgs` flags: warn and skip (do not fail)
+- `runArgs` contains iptables-related flags (`--cap-add=NET_ADMIN`, `--cap-add=NET_RAW`): if `--network-isolated` is active, warn that yoloAI manages iptables and any iptables `postStartCommand` will conflict; pass the caps through anyway since they may be needed for other purposes
 - `features` present: warn that Features are not supported; continue without them
 - `dockerComposeFile` present: error: "Docker Compose devcontainers are not supported; use a profile with a Dockerfile instead"
 - Unsupported `image` platform (e.g., Windows containers): error with clear message
