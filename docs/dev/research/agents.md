@@ -117,6 +117,24 @@ claude --output-format stream-json --input-format stream-json --verbose --model 
 - **Docker quirks:** Official image sets `HOME=/app` so state files persist on mounted volume; no global git config — must set `user.name`/`user.email` in repo local config; auto-commits by default (disable with `--no-auto-commits`)
 - **Sources:** [Scripting docs](https://aider.chat/docs/scripting.html), [Docker docs](https://aider.chat/docs/install/docker.html)
 
+#### OpenCode
+
+- **Install:** `npm i -g @opencode/cli` or binary download from releases
+- **Headless command:** `opencode run "task"`
+- **API key env vars:** `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `GROQ_API_KEY`, `OPENROUTER_API_KEY`, `XAI_API_KEY`, + many more (75+ providers via AI SDK)
+- **Auth alternatives:** GitHub Copilot, OAuth (ChatGPT Plus/Pro), AWS Bedrock, Azure OpenAI, Vertex AI
+- **State dir:** `~/.local/share/opencode/` (Linux/macOS)
+- **Config dir:** `~/.config/opencode/` (global), `.opencode/` (project-local)
+- **Model selection:** `--model provider/model` (e.g., `openai/gpt-4o`, `anthropic/claude-sonnet-4-20250514`) — **requires `provider/model` format**
+- **Model discovery:** Use `/models` command in OpenCode to see available models after provider configuration
+- **Provider setup:** Run `/connect` in OpenCode to configure providers (OAuth, API keys, or local servers)
+- **Sandbox bypass:** None documented (OpenCode does not appear to have built-in sandboxing)
+- **Runtime:** Node.js (npm package)
+- **Root restriction:** None documented
+- **Docker quirks:** Provider configuration must be set up before model use; config files in `~/.config/opencode/` and `~/.local/share/opencode/` must be seeded or configured on first run
+- **Model format enforcement:** OpenCode validates that models follow the `provider/model` format and will reject models without a provider prefix with "Invalid model format" error
+- **Sources:** [Models documentation](https://opencode.ai/docs/models/), [Providers documentation](https://opencode.ai/docs/providers/), [GitHub repository](https://github.com/opencode-ai/opencode)
+
 #### Goose (Block)
 
 - **Install:** Install script (`curl ... | CONFIGURE=false bash`) or `brew install block-goose-cli`

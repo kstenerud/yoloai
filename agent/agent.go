@@ -233,9 +233,13 @@ var agents = map[string]*Definition{
 		},
 		ModelFlag: "--model",
 		ModelAliases: map[string]string{
+			// OpenCode requires provider/model format. Providers must be configured
+			// first via /connect in OpenCode. Use /models to see available models.
 			"sonnet": "anthropic/claude-sonnet-4-5-latest",
 			"opus":   "anthropic/claude-opus-4-latest",
 			"haiku":  "anthropic/claude-haiku-4-5-latest",
+			"gpt4o":  "openai/gpt-4o",
+			"mini":   "openai/gpt-4o-mini",
 		},
 		NetworkAllowlist:  []string{"api.anthropic.com", "api.openai.com", "generativelanguage.googleapis.com", "api.github.com", "api.githubcopilot.com"},
 		AgentFilesExclude: []string{"auth.json", "sessions/"},

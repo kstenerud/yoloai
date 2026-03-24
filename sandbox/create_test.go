@@ -519,3 +519,43 @@ func TestResolveDetectors_NoCapabilities(t *testing.T) {
 	detectors := resolveDetectors(idle)
 	assert.Nil(t, detectors)
 }
+
+func TestValidateModel_OpenCodeWithProviderPrefix(t *testing.T) {
+	agentDef := agent.GetAgent("opencode")
+	err := validateModel(agentDef, "openai/gpt-4o", "openai/gpt-4o")
+	assert.NoError(t, err)
+}
+
+func TestValidateModel_OpenCodeWithoutProviderPrefix(t *testing.T) {
+	agentDef := agent.GetAgent("opencode")
+	err := validateModel(agentDef, "gpt-4o", "gpt-4o")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "provider/model format")
+	assert.Contains(t, err.Error(), "openai/gpt-4o")
+}
+
+func TestValidateModel_OpenCodeResolvedWithoutPrefix(t *testing.T) {
+	agentDef := agent.GetAgent("opencode")
+	err := validateModel(agentDef, "claude-sonnet-4-5", "sonnet")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "You specified: \"sonnet\"")
+	assert.Contains(t, err.Error(), "Resolved to: \"claude-sonnet-4-5\"")
+}
+
+func TestValidateModel_OpenCodeEmptyModel(t *testing.T) {
+	agentDef := agent.GetAgent("opencode")
+	err := validateModel(agentDef, "", "")
+	assert.NoError(t, err)
+}
+
+func TestValidateModel_OtherAgentNoValidation(t *testing.T) {
+	agentDef := agent.GetAgent("claude")
+	err := validateModel(agentDef, "claude-sonnet-4-6", "sonnet")
+	assert.NoError(t, err)
+}
+
+func TestValidateModel_AiderNoValidation(t *testing.T) {
+	agentDef := agent.GetAgent("aider")
+	err := validateModel(agentDef, "sonnet", "sonnet")
+	assert.NoError(t, err)
+}

@@ -418,6 +418,11 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions, c
 	model := resolveModel(agentDef, opts.Model, pr.userAliases)
 	model = applyModelPrefix(agentDef, model, pr.env)
 
+	// Validate model format for agent-specific requirements
+	if err := validateModel(agentDef, model, opts.Model); err != nil {
+		return nil, err
+	}
+
 	// Build agent command
 	agentArgs := pr.agentArgs[opts.Agent]
 	agentCommand := buildAgentCommand(agentDef, model, promptText, agentArgs, opts.Passthrough)
@@ -694,6 +699,41 @@ func applyModelPrefix(agentDef *agent.Definition, model string, configEnv map[st
 		}
 	}
 	return model
+}
+
+// validateModel checks agent-specific model format requirements.
+// Returns an error if the model format is invalid for the given agent.
+func validateModel(agentDef *agent.Definition, resolvedModel string, originalModel string) error {
+	// Skip validation if no model specified
+	if resolvedModel == "" {
+		return nil
+	}
+
+	// OpenCode requires provider/model format (e.g., "openai/gpt-4o", "anthropic/claude-sonnet-4-20250514")
+	if agentDef.Name == "opencode" {
+		if !strings.Contains(resolvedModel, "/") {
+			return fmt.Errorf(
+				"opencode requires models in provider/model format (e.g., \"openai/gpt-4o\", \"anthropic/claude-sonnet-4-20250514\")\n\n"+
+					"You specified: %q\n"+
+					"Resolved to: %q\n\n"+
+					"To fix this:\n"+
+					"  1. Configure providers on your HOST (install opencode, run /connect)\n"+
+					"     OR set API key env vars: export OPENAI_API_KEY=sk-...\n"+
+					"  2. Use --model with provider prefix: --model openai/gpt-4o\n\n"+
+					"Valid examples:\n"+
+					"  openai/gpt-4o\n"+
+					"  openai/gpt-4o-mini\n"+
+					"  anthropic/claude-sonnet-4-20250514\n"+
+					"  opencode/gpt-5.1-codex (OpenCode Zen)\n\n"+
+					"Note: OpenCode config must be set up on your host machine.\n"+
+					"yoloAI will automatically seed it into containers.",
+				originalModel,
+				resolvedModel,
+			)
+		}
+	}
+
+	return nil
 }
 
 // buildAgentCommand constructs the full agent command string for config.json.

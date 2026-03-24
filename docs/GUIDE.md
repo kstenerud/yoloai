@@ -186,7 +186,15 @@ yoloai new task ./my-project --agent gemini --model preview-flash # gemini-3-fla
 yoloai new task ./my-project --agent codex --model default  # gpt-5.3-codex
 yoloai new task ./my-project --agent codex --model spark    # gpt-5.3-codex-spark
 yoloai new task ./my-project --agent codex --model mini     # codex-mini-latest
+
+# OpenCode model aliases (requires provider/model format)
+yoloai new task ./my-project --agent opencode --model sonnet        # anthropic/claude-sonnet-4-5-latest
+yoloai new task ./my-project --agent opencode --model gpt4o         # openai/gpt-4o
+yoloai new task ./my-project --agent opencode --model mini          # openai/gpt-4o-mini
+yoloai new task ./my-project --agent opencode --model openai/gpt-4o # explicit provider/model format
 ```
+
+**OpenCode Requirements:** OpenCode requires models in `provider/model` format (e.g., `openai/gpt-4o`, `anthropic/claude-sonnet-4-20250514`). Providers must be configured first — launch OpenCode and run `/connect` to set up authentication, then use `/models` to see available models.
 
 ### Custom Model Aliases
 
@@ -211,9 +219,46 @@ yoloai config reset model_aliases.fast
 
 User-defined aliases take priority over built-in agent aliases. Full model names always work regardless of aliases.
 
-### Local Models (Aider, OpenCode)
+### OpenCode Setup
 
-Aider and OpenCode support local model servers like Ollama and LM Studio. To use them without a cloud API key, set the appropriate environment variable:
+OpenCode requires provider configuration on your **host machine** before use. yoloAI automatically copies your OpenCode config into containers.
+
+**First-time setup (on your host machine):**
+
+1. **Install OpenCode** on your host (not in yoloAI):
+   ```bash
+   npm install -g @opencode/cli
+   ```
+
+2. **Configure providers** on your host:
+   ```bash
+   opencode  # Launch OpenCode
+   # Then run /connect and choose:
+   #   - ChatGPT Plus/Pro: Authenticate via browser (recommended)
+   #   - API Keys: Enter your OpenAI, Anthropic, or other provider API key
+   #   - Local Models: Configure Ollama, LM Studio, etc.
+   # Run /models to verify what's available
+   ```
+
+3. **Use with yoloAI** — Your config is automatically seeded into containers:
+   ```bash
+   yoloai new task ./my-project --agent opencode --model openai/gpt-4o
+   yoloai new task ./my-project --agent opencode --model anthropic/claude-sonnet-4-20250514
+   ```
+
+**Config files seeded:** `~/.local/share/opencode/auth.json`, `~/.config/opencode/.opencode.json`, GitHub Copilot credentials (if configured).
+
+**Alternative: Use API keys** — Instead of running `/connect`, set environment variables:
+```bash
+export OPENAI_API_KEY=sk-...
+yoloai new task ./my-project --agent opencode --model openai/gpt-4o
+```
+
+**Supported Providers:** OpenAI, Anthropic, Google Gemini, Groq, OpenRouter, XAI, GitHub Copilot, AWS Bedrock, Azure OpenAI, Vertex AI, and 75+ others via custom configuration.
+
+### Local Models (Aider)
+
+Aider supports local model servers like Ollama and LM Studio. To use them without a cloud API key, set the appropriate environment variable:
 
 ```bash
 export OLLAMA_API_BASE=http://host.docker.internal:11434
@@ -225,7 +270,7 @@ Or configure it persistently:
 yoloai config set env.OLLAMA_API_BASE http://host.docker.internal:11434
 ```
 
-The `host.docker.internal` hostname allows the container to reach services running on the host machine. OpenCode also supports GitHub Copilot credentials, AWS Bedrock, Azure OpenAI, and Vertex AI — see `yoloai system agents opencode` for details.
+The `host.docker.internal` hostname allows the container to reach services running on the host machine.
 
 ## Global Flags
 
