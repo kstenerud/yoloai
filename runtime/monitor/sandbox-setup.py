@@ -306,10 +306,31 @@ class TartBackend(Backend):
         if os.path.isdir(xcode_developer):
             # Point xcode-select to the mounted Xcode so xcrun can find simctl and other tools
             log_debug("tart.xcode_select", "configuring xcode-select", developer_dir=xcode_developer)
-            subprocess.run(
+            result = subprocess.run(
                 ["sudo", "xcode-select", "--switch", xcode_developer],
-                capture_output=True
+                capture_output=True,
+                text=True
             )
+            if result.returncode != 0:
+                log_debug("tart.xcode_select", "xcode-select failed", stderr=result.stderr)
+
+            # Add DEVELOPER_DIR to shell profile so it's set in interactive shells
+            shell_profile = os.path.expanduser("~/.zprofile")
+            developer_dir_export = f'export DEVELOPER_DIR="{xcode_developer}"\n'
+            try:
+                # Check if already present
+                if os.path.exists(shell_profile):
+                    with open(shell_profile, "r") as f:
+                        content = f.read()
+                    if "DEVELOPER_DIR" not in content:
+                        with open(shell_profile, "a") as f:
+                            f.write(developer_dir_export)
+                else:
+                    with open(shell_profile, "w") as f:
+                        f.write(developer_dir_export)
+                log_debug("tart.xcode_profile", "added DEVELOPER_DIR to shell profile")
+            except OSError as e:
+                log_debug("tart.xcode_profile", "failed to update shell profile", error=str(e))
 
             # Accept Xcode license (stored in VM's /Library/Preferences, not in Xcode.app)
             log_debug("tart.xcode_license", "accepting Xcode license")
@@ -347,7 +368,7 @@ class TartBackend(Backend):
             os.environ["DEVELOPER_DIR"] = xcode_developer
             log_debug("tart.xcode_setup", "configured Xcode environment", developer_dir=xcode_developer)
 
-            # Add Xcode binaries to PATH
+            # Add Xcode binaries to PATH (for this process and child processes)
             xcode_paths = [
                 os.path.join(xcode_developer, "usr/bin"),
                 os.path.join(xcode_developer, "Toolchains/XcodeDefault.xctoolchain/usr/bin"),
@@ -355,6 +376,22 @@ class TartBackend(Backend):
             for xcode_path in xcode_paths:
                 if os.path.isdir(xcode_path):
                     homebrew_bins.insert(0, xcode_path)
+
+            # Also add to shell profile for interactive shells
+            shell_profile = os.path.expanduser("~/.zprofile")
+            xcode_path_export = f'export PATH="{os.path.join(xcode_developer, "usr/bin")}:$PATH"\n'
+            try:
+                if os.path.exists(shell_profile):
+                    with open(shell_profile, "r") as f:
+                        content = f.read()
+                    if "host-xcode" not in content:
+                        with open(shell_profile, "a") as f:
+                            f.write(f"# Xcode tools from host mount\n{xcode_path_export}")
+                else:
+                    with open(shell_profile, "w") as f:
+                        f.write(f"# Xcode tools from host mount\n{xcode_path_export}")
+            except OSError:
+                pass  # Non-fatal if we can't update profile
 
         current_path = os.environ.get("PATH", "")
         extras = [p for p in homebrew_bins if p not in current_path.split(":")]
