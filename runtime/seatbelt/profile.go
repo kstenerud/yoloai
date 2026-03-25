@@ -107,6 +107,22 @@ func GenerateProfile(cfg runtime.InstanceConfig, sandboxDir, homeDir string) str
 	}
 	b.WriteString("\n")
 
+	// --- iOS/Xcode development directories ---
+	b.WriteString("; iOS/Xcode development (SwiftPM caches and Xcode metadata)\n")
+	for _, p := range resolvePathVariants(filepath.Join(homeDir, "Library", "Caches", "org.swift.swiftpm")) {
+		fmt.Fprintf(&b, "(allow file-read* file-write* (subpath %q))\n", p)
+	}
+	for _, p := range resolvePathVariants(filepath.Join(homeDir, "Library", "Developer", "Xcode")) {
+		fmt.Fprintf(&b, "(allow file-read* file-write* (subpath %q))\n", p)
+	}
+	for _, p := range resolvePathVariants(filepath.Join(homeDir, "Library", "Caches", "swift-build")) {
+		fmt.Fprintf(&b, "(allow file-read* file-write* (subpath %q))\n", p)
+	}
+	for _, p := range resolvePathVariants(filepath.Join(homeDir, "Library", "org.swift.swiftpm")) {
+		fmt.Fprintf(&b, "(allow file-read* file-write* (subpath %q))\n", p)
+	}
+	b.WriteString("\n")
+
 	// --- Network ---
 	b.WriteString("; Network access\n")
 	if cfg.NetworkMode != "none" {

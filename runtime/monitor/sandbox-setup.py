@@ -301,6 +301,22 @@ class TartBackend(Backend):
 
             subprocess.run(["sudo", "ln", "-sf", source, target], capture_output=True)
 
+        # Accept Xcode license if xcodebuild is available (e.g., from host-mounted Xcode)
+        # The license acceptance is stored in the VM's /Library/Preferences, not in Xcode.app
+        xcodebuild_path = "/Users/admin/host-xcode/Contents/Developer/usr/bin/xcodebuild"
+        if os.path.exists(xcodebuild_path):
+            log_debug("tart.xcode_license", "accepting Xcode license")
+            result = subprocess.run(
+                ["sudo", xcodebuild_path, "-license", "accept"],
+                capture_output=True,
+                text=True
+            )
+            if result.returncode == 0:
+                log_info("tart.xcode_license", "Xcode license accepted")
+            else:
+                log_debug("tart.xcode_license", "license acceptance failed or already accepted",
+                         stderr=result.stderr)
+
     def get_tmux_socket(self):
         """Tart uses the uid-based default socket (/tmp/tmux-<uid>/default)."""
         return None
@@ -313,13 +329,31 @@ class TartBackend(Backend):
         return working_dir
 
     def prepare_environment(self):
-        """Tart needs Homebrew paths prepended for node/npm binaries."""
+        """Tart needs Homebrew paths prepended for node/npm binaries, plus Xcode tools if mounted."""
         homebrew_bins = ["/opt/homebrew/opt/node/bin", "/opt/homebrew/bin", "/opt/homebrew/sbin", "/usr/local/bin"]
+
+        # Add host-mounted Xcode tools to PATH and set DEVELOPER_DIR if available
+        xcode_base = "/Users/admin/host-xcode/Contents"
+        xcode_developer = os.path.join(xcode_base, "Developer")
+        if os.path.isdir(xcode_developer):
+            # Set DEVELOPER_DIR so xcodebuild and other tools can find SDKs
+            os.environ["DEVELOPER_DIR"] = xcode_developer
+            log_debug("tart.xcode_setup", "configured Xcode environment", developer_dir=xcode_developer)
+
+            # Add Xcode binaries to PATH
+            xcode_paths = [
+                os.path.join(xcode_developer, "usr/bin"),
+                os.path.join(xcode_developer, "Toolchains/XcodeDefault.xctoolchain/usr/bin"),
+            ]
+            for xcode_path in xcode_paths:
+                if os.path.isdir(xcode_path):
+                    homebrew_bins.insert(0, xcode_path)
+
         current_path = os.environ.get("PATH", "")
         extras = [p for p in homebrew_bins if p not in current_path.split(":")]
         if extras:
             os.environ["PATH"] = ":".join(extras) + ":" + current_path
-            log_debug("tart.path_augment", "prepended Homebrew paths", added=":".join(extras))
+            log_debug("tart.path_augment", "prepended paths", added=":".join(extras))
 
     def read_secrets(self, socket):
         """Read secrets from VirtioFS-mounted secrets directory and pass to tmux."""

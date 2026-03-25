@@ -134,6 +134,9 @@ func (r *Runtime) Create(ctx context.Context, cfg runtime.InstanceConfig) error 
 		}
 	}
 
+	// Add auto-detected system mounts (Xcode, iOS Simulators) if they exist
+	r.addSystemMounts(&cfg)
+
 	// Clone the base image to create an instance-specific VM
 	slog.Debug("tart Create: cloning", "imageRef", cfg.ImageRef, "name", cfg.Name)
 	if _, err := r.runTart(ctx, "clone", cfg.ImageRef, cfg.Name); err != nil {
@@ -198,6 +201,13 @@ func (r *Runtime) Create(ctx context.Context, cfg runtime.InstanceConfig) error 
 		if err := fileutil.WriteFile(filepath.Join(secretsDir, keyName), data, 0600); err != nil { //nolint:gosec // G703: secretsDir is an internal sandbox directory
 			return fmt.Errorf("copy secret %s: %w", keyName, err)
 		}
+	}
+
+	// Add mount_map to runtime-config.json for symlink creation in the guest.
+	// VirtioFS mounts appear at /Volumes/My Shared Files/<name>/, but we need
+	// them at standard system paths (e.g., /Applications/Xcode.app).
+	if err := r.addMountMapToConfig(sandboxPath, cfg.Mounts); err != nil {
+		return fmt.Errorf("add mount map to config: %w", err)
 	}
 
 	return nil
@@ -441,7 +451,11 @@ func (r *Runtime) buildRunArgs(vmName, sandboxPath string, mounts []runtime.Moun
 			continue
 		}
 		dirName := mountDirName(m.Source)
-		args = append(args, "--dir", fmt.Sprintf("%s:%s", dirName, m.Source))
+		dirSpec := fmt.Sprintf("%s:%s", dirName, m.Source)
+		if m.ReadOnly {
+			dirSpec += ":ro"
+		}
+		args = append(args, "--dir", dirSpec)
 	}
 
 	return append(args, vmName)
@@ -881,4 +895,82 @@ func isMacOS() bool {
 // isAppleSilicon returns true if running on Apple Silicon.
 func isAppleSilicon() bool {
 	return goarch() == "arm64" && goos() == "darwin"
+}
+
+// addSystemMounts auto-detects and adds system development tools (Xcode, iOS
+// Simulators) as read-only mounts if they exist on the host. This ensures the
+// VM uses the same versions as the developer without duplicating large files.
+func (r *Runtime) addSystemMounts(cfg *runtime.InstanceConfig) {
+	homeDir := config.HomeDir()
+
+	// Xcode.app - mount at /Users/admin/host-xcode instead of /Applications to avoid
+	// conflicts with any existing Xcode in the VM. Tools will be available via PATH.
+	xcodeAppHost := "/Applications/Xcode.app"
+	if info, err := os.Stat(xcodeAppHost); err == nil && info.IsDir() {
+		cfg.Mounts = append(cfg.Mounts, runtime.MountSpec{
+			Source:   xcodeAppHost,
+			Target:   "/Users/admin/host-xcode", // Mount in user's home, not /Applications
+			ReadOnly: true,
+		})
+		slog.Debug("tart: auto-detected Xcode.app", "path", xcodeAppHost)
+	}
+
+	// iOS Simulators - reuse host's downloaded simulator runtimes
+	// Mount at the VM user's Library path, not the host user's path
+	coreSimulatorHost := filepath.Join(homeDir, "Library", "Developer", "CoreSimulator")
+	if info, err := os.Stat(coreSimulatorHost); err == nil && info.IsDir() {
+		cfg.Mounts = append(cfg.Mounts, runtime.MountSpec{
+			Source:   coreSimulatorHost,
+			Target:   "/Users/admin/Library/Developer/CoreSimulator", // VM user (admin) Library path
+			ReadOnly: true,
+		})
+		slog.Debug("tart: auto-detected CoreSimulator", "path", coreSimulatorHost)
+	}
+}
+
+// addMountMapToConfig adds a mount_map to runtime-config.json that tells
+// sandbox-setup.py where to create symlinks from target paths to VirtioFS mount points.
+func (r *Runtime) addMountMapToConfig(sandboxPath string, mounts []runtime.MountSpec) error {
+	// Build mount map: target path → VirtioFS mount point
+	mountMap := make(map[string]string)
+	for _, m := range mounts {
+		// Skip mounts under sandbox dir (already accessible via yoloai VirtioFS share)
+		if strings.HasPrefix(m.Source, sandboxPath+"/") || m.Source == sandboxPath {
+			continue
+		}
+		// Only add directory mounts (VirtioFS doesn't support files)
+		if info, err := os.Stat(m.Source); err != nil || !info.IsDir() {
+			continue
+		}
+		// VirtioFS mount appears at /Volumes/My Shared Files/<name>/
+		dirName := mountDirName(m.Source)
+		virtiofsMountPoint := filepath.Join(sharedDirVMPath, dirName)
+		mountMap[m.Target] = virtiofsMountPoint
+	}
+
+	if len(mountMap) == 0 {
+		return nil // nothing to add
+	}
+
+	// Read existing runtime-config.json
+	cfgPath := filepath.Join(sandboxPath, "runtime-config.json")
+	data, err := os.ReadFile(cfgPath) //nolint:gosec // G304: path within sandbox dir
+	if err != nil {
+		return err
+	}
+
+	var raw map[string]interface{}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+
+	// Add mount_map
+	raw["mount_map"] = mountMap
+
+	// Write back
+	out, err := json.MarshalIndent(raw, "", "  ")
+	if err != nil {
+		return err
+	}
+	return fileutil.WriteFile(cfgPath, out, 0600)
 }
