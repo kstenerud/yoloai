@@ -127,6 +127,32 @@ For large projects where copy speed is a concern, use `:overlay` mode — it pro
 - Requires `CAP_SYS_ADMIN` capability in the container
 - Not available with `--backend seatbelt` or `--backend tart`
 
+### Build Artifact Exclusion
+
+When creating sandboxes in `:copy` mode, yoloAI automatically excludes common build artifacts that would cause compilation failures inside the container. Build tools like Swift, Xcode, and npm embed hardcoded absolute paths in their build artifacts. When copied to the sandbox, these mismatched paths break builds.
+
+**Example:** Swift Package Manager creates precompiled header (PCH) files in `.build/` containing paths like `/Users/user/project/.build/...`. When this directory is copied to the sandbox at `/Users/user/.yoloai/sandboxes/name/work/...`, Swift rejects the PCH files:
+
+```
+error: PCH was compiled with module cache path '/Users/user/project/.build/...'
+but the path is currently '/Users/user/.yoloai/sandboxes/name/work/.build/...'
+```
+
+**Excluded artifacts:**
+- `.build/` — Swift Package Manager build artifacts
+- `DerivedData/` — Xcode derived data and build caches
+- `node_modules/` — Node.js dependencies (native modules can have hardcoded paths; also improves copy performance)
+- `__pycache__/` — Python bytecode cache
+- `*.xcworkspace/xcuserdata/` — Xcode workspace user-specific data
+- `*.xcodeproj/xcuserdata/` — Xcode project user-specific data
+
+These directories are regenerated automatically when the agent runs build commands inside the sandbox.
+
+**Important notes:**
+- Exclusion only applies to `:copy` mode — `:overlay` and `:rw` modes see all files
+- The exclusion list is conservative to avoid false positives (e.g., generic names like `build/`, `target/`, or `env/` are NOT excluded)
+- If you need to exclude additional project-specific artifacts, please file an issue on GitHub
+
 ## Auxiliary Directories
 
 You can mount additional directories alongside your workdir using the `-d` / `--dir` flag (repeatable). Auxiliary directories are read-only by default.

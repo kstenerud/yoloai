@@ -210,6 +210,159 @@ func TestCopyDir_SkipsBugreportFiles(t *testing.T) {
 	assert.Error(t, err, "nested bugreport .md.tmp file should not be copied")
 }
 
+func TestCopyDir_SkipsBuildArtifacts(t *testing.T) {
+	src := t.TempDir()
+	writeTestFile(t, src, "main.swift", "print(\"hello\")")
+	writeTestFile(t, src, "package.json", "{}")
+
+	// Swift Package Manager artifacts
+	require.NoError(t, os.MkdirAll(filepath.Join(src, ".build", "x86_64-apple-macosx", "debug"), 0750))
+	writeTestFile(t, src, ".build/x86_64-apple-macosx/debug/module.pcm", "PCH with hardcoded paths")
+
+	// Xcode derived data
+	require.NoError(t, os.MkdirAll(filepath.Join(src, "DerivedData", "MyApp", "Build"), 0750))
+	writeTestFile(t, src, "DerivedData/MyApp/Build/cache.db", "build cache")
+
+	// Node.js modules
+	require.NoError(t, os.MkdirAll(filepath.Join(src, "node_modules", "lodash"), 0750))
+	writeTestFile(t, src, "node_modules/lodash/index.js", "module.exports = {}")
+
+	// Python cache
+	require.NoError(t, os.MkdirAll(filepath.Join(src, "__pycache__"), 0750))
+	writeTestFile(t, src, "__pycache__/module.cpython-39.pyc", "bytecode")
+
+	// Xcode user data (nested pattern)
+	require.NoError(t, os.MkdirAll(filepath.Join(src, "MyApp.xcworkspace", "xcuserdata", "user.xcuserdatad"), 0750))
+	writeTestFile(t, src, "MyApp.xcworkspace/xcuserdata/user.xcuserdatad/UserInterfaceState.xcuserstate", "UI state")
+	require.NoError(t, os.MkdirAll(filepath.Join(src, "MyApp.xcodeproj", "xcuserdata", "user.xcuserdatad"), 0750))
+	writeTestFile(t, src, "MyApp.xcodeproj/xcuserdata/user.xcuserdatad/WorkspaceSettings.xcsettings", "settings")
+
+	// Nested artifacts (should also be excluded)
+	require.NoError(t, os.MkdirAll(filepath.Join(src, "subproject", "node_modules", "express"), 0750))
+	writeTestFile(t, src, "subproject/node_modules/express/index.js", "express")
+	require.NoError(t, os.MkdirAll(filepath.Join(src, "subproject", ".build", "debug"), 0750))
+	writeTestFile(t, src, "subproject/.build/debug/app", "binary")
+
+	dst := filepath.Join(t.TempDir(), "copy")
+	require.NoError(t, CopyDir(src, dst))
+
+	// Normal files should be copied
+	content, err := os.ReadFile(filepath.Join(dst, "main.swift")) //nolint:gosec
+	require.NoError(t, err)
+	assert.Equal(t, "print(\"hello\")", string(content))
+
+	content, err = os.ReadFile(filepath.Join(dst, "package.json")) //nolint:gosec
+	require.NoError(t, err)
+	assert.Equal(t, "{}", string(content))
+
+	// Build artifacts should NOT be copied
+	_, err = os.Stat(filepath.Join(dst, ".build"))
+	assert.True(t, os.IsNotExist(err), ".build directory should not be copied")
+
+	_, err = os.Stat(filepath.Join(dst, "DerivedData"))
+	assert.True(t, os.IsNotExist(err), "DerivedData directory should not be copied")
+
+	_, err = os.Stat(filepath.Join(dst, "node_modules"))
+	assert.True(t, os.IsNotExist(err), "node_modules directory should not be copied")
+
+	_, err = os.Stat(filepath.Join(dst, "__pycache__"))
+	assert.True(t, os.IsNotExist(err), "__pycache__ directory should not be copied")
+
+	_, err = os.Stat(filepath.Join(dst, "MyApp.xcworkspace", "xcuserdata"))
+	assert.True(t, os.IsNotExist(err), "xcworkspace xcuserdata should not be copied")
+
+	_, err = os.Stat(filepath.Join(dst, "MyApp.xcodeproj", "xcuserdata"))
+	assert.True(t, os.IsNotExist(err), "xcodeproj xcuserdata should not be copied")
+
+	// Nested artifacts should not be copied
+	_, err = os.Stat(filepath.Join(dst, "subproject", "node_modules"))
+	assert.True(t, os.IsNotExist(err), "nested node_modules should not be copied")
+
+	_, err = os.Stat(filepath.Join(dst, "subproject", ".build"))
+	assert.True(t, os.IsNotExist(err), "nested .build should not be copied")
+}
+
+func TestIsBuildArtifact_Directories(t *testing.T) {
+	tests := []struct {
+		path     string
+		isDir    bool
+		expected bool
+		desc     string
+	}{
+		{".build", true, true, "Swift .build directory"},
+		{".build/debug", true, true, "Swift .build subdirectory"},
+		{"src/.build", true, true, "nested .build"},
+		{"DerivedData", true, true, "Xcode DerivedData"},
+		{"DerivedData/MyApp/Build", true, true, "DerivedData subdirectory"},
+		{"node_modules", true, true, "Node.js node_modules"},
+		{"node_modules/lodash", true, true, "node_modules package"},
+		{"src/node_modules", true, true, "nested node_modules"},
+		{"__pycache__", true, true, "Python cache"},
+		{"src/__pycache__", true, true, "nested __pycache__"},
+		{"src", true, false, "normal directory"},
+		{"build", true, false, "lowercase build (too generic)"},
+		{"Build", true, false, "capital Build (too generic)"},
+		{"target", true, false, "target directory (too generic)"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.desc, func(t *testing.T) {
+			result := isBuildArtifact(tt.path, tt.isDir)
+			assert.Equal(t, tt.expected, result, "path: %s", tt.path)
+		})
+	}
+}
+
+func TestIsBuildArtifact_NestedPatterns(t *testing.T) {
+	tests := []struct {
+		path     string
+		expected bool
+		desc     string
+	}{
+		{"MyApp.xcworkspace/xcuserdata", true, "xcworkspace xcuserdata"},
+		{"MyApp.xcworkspace/xcuserdata/user.xcuserdatad", true, "xcworkspace xcuserdata subdirectory"},
+		{"MyApp.xcworkspace/xcuserdata/user.xcuserdatad/UserInterfaceState.xcuserstate", true, "file inside xcuserdata (excluded)"},
+		{"MyApp.xcodeproj/xcuserdata", true, "xcodeproj xcuserdata"},
+		{"MyApp.xcodeproj/xcuserdata/user.xcuserdatad", true, "xcodeproj xcuserdata subdirectory"},
+		{"sub/MyApp.xcworkspace/xcuserdata", true, "nested xcworkspace xcuserdata"},
+		{"sub/MyApp.xcodeproj/xcuserdata", true, "nested xcodeproj xcuserdata"},
+		{"MyApp.xcworkspace/project.pbxproj", false, "xcworkspace other file"},
+		{"MyApp.xcodeproj/project.pbxproj", false, "xcodeproj other file"},
+		{"xcuserdata", false, "xcuserdata without workspace/project"},
+		{"random.xcworkspace/other", false, "xcworkspace without xcuserdata"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.desc, func(t *testing.T) {
+			result := isBuildArtifact(tt.path, true)
+			assert.Equal(t, tt.expected, result, "path: %s", tt.path)
+		})
+	}
+}
+
+func TestIsBuildArtifact_Files(t *testing.T) {
+	tests := []struct {
+		path     string
+		expected bool
+		desc     string
+	}{
+		{"main.swift", false, "normal Swift file"},
+		{"package.json", false, "normal package file"},
+		{"src/file.txt", false, "normal nested file"},
+		{".build/debug/module.pcm", true, "file inside .build"},
+		{"node_modules/lodash/index.js", true, "file inside node_modules"},
+		{"__pycache__/module.pyc", true, "file inside __pycache__"},
+		{"DerivedData/cache.db", true, "file inside DerivedData"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.desc, func(t *testing.T) {
+			result := isBuildArtifact(tt.path, false)
+			assert.Equal(t, tt.expected, result, "path: %s", tt.path)
+		})
+	}
+}
+
 // RemoveGitDirs tests
 
 func TestRemoveGitDirs_RemovesGitDirectory(t *testing.T) {
