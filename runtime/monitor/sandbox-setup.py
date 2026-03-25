@@ -392,6 +392,7 @@ class SeatbeltBackend(Backend):
 
         # Create Swift wrapper to auto-add --disable-sandbox when running in Seatbelt
         # (macOS sandboxes don't nest, so Swift PM's sandbox-exec calls fail)
+        log_info("seatbelt.swift_wrapper", "about to create Swift wrapper file")
         swift_wrapper = os.path.join(new_home, ".swift-wrapper.sh")
         with open(swift_wrapper, "w") as f:
             f.write("""# Swift PM wrapper for yoloAI Seatbelt sandboxes
@@ -406,8 +407,10 @@ swift() {
     fi
 }
 """)
+        log_info("seatbelt.swift_wrapper", "Swift wrapper file created successfully")
 
         # Source the wrapper in shell startup files so it's available in interactive shells
+        log_info("seatbelt.swift_wrapper", "creating shell startup files with Swift wrapper")
         for rcfile in [".bashrc", ".bash_profile", ".zshrc"]:
             rc_path = os.path.join(new_home, rcfile)
             source_line = "source ~/.swift-wrapper.sh\n"
@@ -420,11 +423,13 @@ swift() {
                     if source_line.strip() not in content:
                         with open(rc_path, "a") as f:
                             f.write("\n" + source_line)
+                        log_info("seatbelt.swift_wrapper", f"appended to {rcfile}", path=rc_path)
                 else:
                     with open(rc_path, "w") as f:
                         f.write(source_line)
-            except OSError:
-                pass  # If we can't write, the wrapper won't work in interactive shells
+                    log_info("seatbelt.swift_wrapper", f"created {rcfile}", path=rc_path)
+            except OSError as e:
+                log_info("seatbelt.swift_wrapper_error", f"failed to update {rcfile}: {e}", path=rc_path, error=str(e))
 
     def get_tmux_socket(self):
         """Seatbelt uses a per-sandbox socket in the sandbox directory."""
