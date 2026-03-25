@@ -185,6 +185,21 @@ class Backend(ABC):
         """
         pass
 
+    @abstractmethod
+    def prepare_launch_command(self, base_cmd):
+        """Prepare the final shell command to launch the agent.
+
+        Allows each backend to customize the launch command (e.g., set PATH,
+        source wrapper scripts, etc.) before exec'ing the agent.
+
+        Args:
+            base_cmd: The base command string to execute
+
+        Returns:
+            The modified command string ready for tmux send-keys
+        """
+        pass
+
 
 class DockerBackend(Backend):
     """Backend for Docker and Podman containers."""
@@ -252,6 +267,10 @@ class DockerBackend(Backend):
         """Read secrets from /run/secrets (inherited from entrypoint.py)."""
         return read_secrets("/run/secrets", socket=socket)
 
+    def prepare_launch_command(self, base_cmd):
+        """Docker doesn't need command customization."""
+        return base_cmd
+
 
 class TartBackend(Backend):
     """Backend for Tart macOS VMs with VirtioFS mounts."""
@@ -305,6 +324,13 @@ class TartBackend(Backend):
     def read_secrets(self, socket):
         """Read secrets from VirtioFS-mounted secrets directory and pass to tmux."""
         return read_secrets(os.path.join(self.yoloai_dir, "secrets"), socket=socket)
+
+    def prepare_launch_command(self, base_cmd):
+        """Prepend node 25 to PATH to avoid broken node@24 from Cirrus base image."""
+        # The login shell's ~/.zprofile puts node@24 before node 25 in PATH.
+        # Prepend node 25's bin dir so the claude shebang (#!/usr/bin/env node)
+        # resolves to node 25, not the broken node@24.
+        return f'PATH="/opt/homebrew/opt/node/bin:$PATH" {base_cmd}'
 
 
 class SeatbeltBackend(Backend):
@@ -364,6 +390,23 @@ class SeatbeltBackend(Backend):
                 if not os.path.exists(dst):
                     os.symlink(src, dst)
 
+        # Create Swift wrapper to auto-add --disable-sandbox when running in Seatbelt
+        # (macOS sandboxes don't nest, so Swift PM's sandbox-exec calls fail)
+        swift_wrapper = os.path.join(new_home, ".swift-wrapper.sh")
+        with open(swift_wrapper, "w") as f:
+            f.write("""# Swift PM wrapper for yoloAI Seatbelt sandboxes
+# Automatically adds --disable-sandbox to swift build/test commands
+# because macOS sandboxes don't support nesting.
+
+swift() {
+    if [[ "$1" == "build" || "$1" == "test" ]]; then
+        command swift "$1" --disable-sandbox "${@:2}"
+    else
+        command swift "$@"
+    fi
+}
+""")
+
     def get_tmux_socket(self):
         """Seatbelt uses a per-sandbox socket in the sandbox directory."""
         return os.path.join(self.yoloai_dir, "tmux", "tmux.sock")
@@ -395,6 +438,12 @@ class SeatbeltBackend(Backend):
     def read_secrets(self, socket):
         """Read secrets from sandbox secrets directory and pass to tmux."""
         return read_secrets(os.path.join(self.yoloai_dir, "secrets"), socket=socket)
+
+    def prepare_launch_command(self, base_cmd):
+        """Source Swift wrapper to auto-add --disable-sandbox for Swift PM commands."""
+        # macOS sandboxes don't support nesting, so Swift PM's sandbox-exec calls
+        # fail. The wrapper automatically adds --disable-sandbox to swift build/test.
+        return f'source ~/.swift-wrapper.sh && {base_cmd}'
 
 
 # Backend registry (similar to Go's runtime.Register pattern)
@@ -484,7 +533,7 @@ def setup_tmux_session(cfg, yoloai_dir, socket=None):
              alive_after_pipe_pane=bool(_sessions_after_pp.strip()))
 
 
-def launch_agent(cfg, socket=None, working_dir=None, backend="", secrets=None):
+def launch_agent(cfg, socket=None, working_dir=None, backend_inst=None, secrets=None):
     """Launch the agent command inside the tmux session."""
     agent_command = cfg.get("agent_command", "")
     agent = cfg.get("agent", "")
@@ -516,7 +565,8 @@ def launch_agent(cfg, socket=None, working_dir=None, backend="", secrets=None):
             log_info("sandbox.agent_not_found", "agent binary not found",
                      agent_bin=agent_bin,
                      python_path=os.environ.get("PATH", ""))
-            rebuild_cmd = f"yoloai system build --backend {backend}" if backend else "yoloai system build"
+            backend_name = backend_inst.__class__.__name__.replace("Backend", "").lower() if backend_inst else ""
+            rebuild_cmd = f"yoloai system build --backend {backend_name}" if backend_name else "yoloai system build"
             tmux("send-keys", "-t", "main",
                  f"echo 'yoloai: {agent_bin} not found — run: {rebuild_cmd}'",
                  "Enter", socket=socket)
@@ -535,15 +585,12 @@ def launch_agent(cfg, socket=None, working_dir=None, backend="", secrets=None):
 
     if working_dir:
         # Quote working_dir to handle paths with spaces (e.g. Tart VirtioFS paths)
-        send_cmd = f"{env_exports}cd '{working_dir}' && exec {agent_command}"
+        base_cmd = f"{env_exports}cd '{working_dir}' && exec {agent_command}"
     else:
-        send_cmd = f"{env_exports}exec {agent_command}"
+        base_cmd = f"{env_exports}exec {agent_command}"
 
-    # For tart: the login shell's ~/.zprofile (from the Cirrus base image) puts
-    # node@24 before node 25 in PATH. Prepend node 25's bin dir so the claude
-    # shebang (#!/usr/bin/env node) resolves to node 25, not the broken node@24.
-    if backend == "tart":
-        send_cmd = f'PATH="/opt/homebrew/opt/node/bin:$PATH" {send_cmd}'
+    # Let the backend customize the launch command (PATH, wrapper scripts, etc.)
+    send_cmd = backend_inst.prepare_launch_command(base_cmd) if backend_inst else base_cmd
 
     tmux("send-keys", "-t", "main", send_cmd, "Enter", socket=socket)
     log_info("sandbox.agent_launch", "agent process started", agent=agent, model=model)
@@ -741,7 +788,7 @@ def main():
                  uid=stat_info.st_uid, gid=stat_info.st_gid)
         os.chmod(socket, 0o777)
 
-    launch_agent(cfg, socket=socket, working_dir=working_dir, backend=backend_name, secrets=secrets)
+    launch_agent(cfg, socket=socket, working_dir=working_dir, backend_inst=backend, secrets=secrets)
     monitor_exit(socket=socket)
     wait_for_ready(cfg, socket=socket)
     prompt_delivered = deliver_prompt(cfg, yoloai_dir, socket=socket)
