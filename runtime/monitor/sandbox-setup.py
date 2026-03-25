@@ -407,6 +407,25 @@ swift() {
 }
 """)
 
+        # Source the wrapper in shell startup files so it's available in interactive shells
+        for rcfile in [".bashrc", ".bash_profile", ".zshrc"]:
+            rc_path = os.path.join(new_home, rcfile)
+            source_line = "source ~/.swift-wrapper.sh\n"
+
+            # Append to existing file or create new one
+            try:
+                if os.path.isfile(rc_path):
+                    with open(rc_path, "r") as f:
+                        content = f.read()
+                    if source_line.strip() not in content:
+                        with open(rc_path, "a") as f:
+                            f.write("\n" + source_line)
+                else:
+                    with open(rc_path, "w") as f:
+                        f.write(source_line)
+            except OSError:
+                pass  # If we can't write, the wrapper won't work in interactive shells
+
     def get_tmux_socket(self):
         """Seatbelt uses a per-sandbox socket in the sandbox directory."""
         return os.path.join(self.yoloai_dir, "tmux", "tmux.sock")
