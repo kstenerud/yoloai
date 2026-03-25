@@ -686,6 +686,46 @@ Installing the binary alone is not enough — Docker must also have the runtime 
 - **`container-enhanced` + `:overlay` directories:** gVisor's VFS2 kernel does not support overlayfs mounts inside the container. Use `:copy` or `:rw` instead — yoloai will error if you combine them.
 - **`vm` and `vm-enhanced`:** Use the containerd backend, not Docker or Podman. Selected automatically when `--isolation vm` or `vm-enhanced` is used on Linux.
 
+## Toolchain Support
+
+### Swift Package Manager
+
+Swift PM works transparently in Seatbelt sandboxes. yoloAI automatically adds the `--disable-sandbox` flag to `swift build` and `swift test` commands via a shell wrapper function, since macOS sandboxes don't support nesting.
+
+**How it works:**
+
+- Swift PM normally runs `sandbox-exec` to securely compile Package.swift manifests
+- macOS doesn't allow nested sandboxing (one sandbox inside another)
+- yoloAI creates a shell wrapper that automatically adds `--disable-sandbox` for build/test commands
+- The outer Seatbelt sandbox still provides isolation; we're just disabling Swift PM's inner sandbox
+
+**Usage:**
+
+Run Swift commands normally inside Seatbelt sandboxes:
+
+```bash
+yoloai shell --backend seatbelt my-project ~/path/to/swift-project:rw
+# Inside the sandbox:
+swift build
+swift test
+swift run
+```
+
+The wrapper only affects `build` and `test` commands; other Swift commands work unchanged.
+
+**Cache isolation:**
+
+Swift PM's cache is redirected to `<sandbox>/cache/swiftpm/` to maintain isolation and avoid permission errors. You may see warnings about being unable to access the host's user-level cache — these are expected and harmless.
+
+**First build:**
+
+If you previously built the project outside the sandbox, clean the build directory first to avoid path mismatch errors:
+
+```bash
+rm -rf .build
+swift build
+```
+
 ## Development
 
 ```bash
