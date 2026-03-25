@@ -301,18 +301,25 @@ class TartBackend(Backend):
 
             subprocess.run(["sudo", "ln", "-sf", source, target], capture_output=True)
 
-        # Accept Xcode license if xcodebuild is available (e.g., from host-mounted Xcode)
-        # The license acceptance is stored in the VM's /Library/Preferences, not in Xcode.app
-        xcodebuild_path = "/Users/admin/host-xcode/Contents/Developer/usr/bin/xcodebuild"
-        if os.path.exists(xcodebuild_path):
+        # Configure xcode-select and accept license if Xcode is mounted from host
+        xcode_developer = "/Users/admin/host-xcode/Contents/Developer"
+        if os.path.isdir(xcode_developer):
+            # Point xcode-select to the mounted Xcode so xcrun can find simctl and other tools
+            log_debug("tart.xcode_select", "configuring xcode-select", developer_dir=xcode_developer)
+            subprocess.run(
+                ["sudo", "xcode-select", "--switch", xcode_developer],
+                capture_output=True
+            )
+
+            # Accept Xcode license (stored in VM's /Library/Preferences, not in Xcode.app)
             log_debug("tart.xcode_license", "accepting Xcode license")
             result = subprocess.run(
-                ["sudo", xcodebuild_path, "-license", "accept"],
+                ["sudo", "xcodebuild", "-license", "accept"],
                 capture_output=True,
                 text=True
             )
             if result.returncode == 0:
-                log_info("tart.xcode_license", "Xcode license accepted")
+                log_info("tart.xcode_setup", "Xcode configured and license accepted")
             else:
                 log_debug("tart.xcode_license", "license acceptance failed or already accepted",
                          stderr=result.stderr)
