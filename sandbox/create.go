@@ -726,7 +726,7 @@ func validateModel(agentDef *agent.Definition, resolvedModel string, originalMod
 					"  anthropic/claude-sonnet-4-20250514\n"+
 					"  opencode/gpt-5.1-codex (OpenCode Zen)\n\n"+
 					"Note: OpenCode config must be set up on your host machine.\n"+
-					"yoloAI will automatically seed it into containers.",
+					"yoloAI will automatically seed it into containers",
 				originalModel,
 				resolvedModel,
 			)

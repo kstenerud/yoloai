@@ -66,6 +66,7 @@ func GenerateProfile(cfg runtime.InstanceConfig, sandboxDir, homeDir string) str
 	// --- IPC ---
 	b.WriteString("; Mach and IPC (permissive initially)\n")
 	b.WriteString("(allow mach-lookup)\n")
+	b.WriteString("(allow system-socket)\n") // needed for nested sandbox-exec (Swift PM)
 	b.WriteString("(allow ipc-posix-shm-read-data)\n")
 	b.WriteString("(allow ipc-posix-shm-write-data)\n")
 	b.WriteString("(allow ipc-posix-shm-write-create)\n")

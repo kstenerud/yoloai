@@ -376,8 +376,21 @@ class SeatbeltBackend(Backend):
         return working_dir
 
     def prepare_environment(self):
-        """Seatbelt environment preparation (currently none needed)."""
-        pass
+        """Seatbelt environment preparation: Swift PM cache redirection."""
+        # Redirect Swift PM cache to sandbox-local directories to avoid
+        # "not accessible or not writable" errors and maintain isolation.
+        swiftpm_cache_dir = os.path.join(self.yoloai_dir, "cache", "swiftpm")
+        swiftpm_config_dir = os.path.join(self.yoloai_dir, "cache", "swiftpm-config")
+
+        os.makedirs(swiftpm_cache_dir, exist_ok=True)
+        os.makedirs(swiftpm_config_dir, exist_ok=True)
+
+        os.environ["SWIFTPM_CACHE_DIR"] = swiftpm_cache_dir
+        os.environ["SWIFTPM_CONFIG_DIR"] = swiftpm_config_dir
+        os.environ["SWIFTPM_DISABLE_TELEMETRY"] = "1"
+
+        log_debug("seatbelt.swiftpm_cache", "redirected Swift PM cache to sandbox",
+                  cache_dir=swiftpm_cache_dir, config_dir=swiftpm_config_dir)
 
     def read_secrets(self, socket):
         """Read secrets from sandbox secrets directory and pass to tmux."""
