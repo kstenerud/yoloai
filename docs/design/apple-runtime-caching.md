@@ -228,13 +228,17 @@ User: yoloai new test2 --runtime ios
 User: yoloai new test --runtime ios --runtime tvos
 
 1. Normalize input: ["ios", "tvos"] → sorted: ["ios", "tvos"]
-2. Generate cache key: "ios-tvos"
-3. Check if yoloai-base-ios-tvos exists → NO
-4. Find best parent: yoloai-base-ios (has 1 of 2 runtimes needed)
-5. Clone yoloai-base-ios → temp VM
-6. Copy only tvOS runtime (iOS already present)
-7. Snapshot as yoloai-base-ios-tvos
-8. Clone yoloai-base-ios-tvos → test
+2. Resolve versions: ios → ios:26.2, tvos → tvos:26.1 (query host for latest)
+3. Generate cache key: "ios-26.2-tvos-26.1"
+4. Acquire exclusive lock on "yoloai-base-ios-26.2-tvos-26.1"
+5. Check if yoloai-base-ios-26.2-tvos-26.1 exists → NO
+6. Find best parent: yoloai-base-ios-26.2 (has 1 of 2 runtimes needed)
+7. Clone yoloai-base-ios-26.2 → temp VM
+8. Copy only tvOS 26.1 runtime (iOS 26.2 already present)
+9. Snapshot as yoloai-base-ios-26.2-tvos-26.1
+10. Release lock
+11. Clone yoloai-base-ios-26.2-tvos-26.1 → test
+12. Cleanup temp VM
 ```
 
 **Time:** ~2 minutes (only copying tvOS, iOS reused)
@@ -613,7 +617,7 @@ Store minimal metadata for each cached base image:
 **Cleanup:**
 ```bash
 # Remove old runtime versions
-yoloai system clean-runtime-bases --keep-latest
+yoloai system runtime remove --older-than latest
 ```
 
 **Why no Xcode version tracking needed:**
@@ -883,8 +887,8 @@ See implementation plan: `docs/dev/plans/apple-runtime-caching.md`
 
 **Decision:** ✅ **RESOLVED** - Option A (no limit) + smart pruning.
 - No automatic limits or eviction
-- `yoloai system list-runtime-bases` shows cache size and hints to prune if large
-- `yoloai system clean-runtime-bases --keep-latest` removes old runtime versions
+- `yoloai system runtime list` shows cache size and hints to prune if large
+- `yoloai system runtime remove --older-than latest` removes old runtime versions
 - User has full control over what gets removed
 - Warn if total cache exceeds 100GB (in list command output)
 

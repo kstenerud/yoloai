@@ -32,9 +32,11 @@ Implementation plan for Apple runtime base image caching feature. Enables sandbo
 
 3. **Cache key generation**
    - File: `runtime/tart/runtime.go`
-   - Function: `GenerateCacheKey(runtimes []string) string`
-   - Sort runtimes alphabetically
-   - Join with hyphens: ["tvos", "ios"] → "ios-tvos"
+   - Function: `GenerateCacheKey(runtimes []RuntimeVersion) string`
+   - Input: Runtime+version pairs (e.g., [{platform: "ios", version: "26.2"}, {platform: "tvos", version: "26.1"}])
+   - Sort by platform alphabetically, then by version within platform
+   - Format each as `<platform>-<version>`, join with hyphens
+   - Example: [{tvos:26.1}, {ios:26.2}] → "ios-26.2-tvos-26.1"
 
 4. **Base image locking**
    - File: `runtime/tart/base_lock.go` (new, similar to `sandbox/lock_unix.go`)
@@ -171,19 +173,13 @@ Implementation plan for Apple runtime base image caching feature. Enables sandbo
 
 ### Phase 4: Polish and Optimization
 
-16. **Runtime version specifiers**
-    - Support `--runtime ios:26.1`
-    - Parse version from flag
-    - Match against runtime Info.plist
-    - Include version in cache key
-
-17. **Progress reporting**
+16. **Progress reporting**
     - Show spinner during long operations
     - Report: "Copying iOS runtime (15GB, ~2 min)..."
     - Update progress during copy
     - Final summary: "Saved 3 min on future sandboxes!"
 
-18. **Error recovery and edge cases**
+17. **Error recovery and edge cases**
     - **Non-existent runtime version**: Error immediately if requested version not available on host
       - Example: `--runtime ios:99.0` → "iOS 99.0 not available on host, latest is 26.2"
       - Query host runtimes during flag validation
@@ -218,10 +214,14 @@ Implementation plan for Apple runtime base image caching feature. Enables sandbo
       cmd.AddCommand(newSystemRuntimeCmd())
   }
   ```
-- `config/dirs.go` - Add metadata directory helper:
+- `config/dirs.go` - Add metadata and lock directory helpers:
   ```go
   func TartBaseMetadataDir() string {
       return filepath.Join(YoloaiDir(), "tart-base-metadata")
+  }
+
+  func TartBaseLocksDir() string {
+      return filepath.Join(YoloaiDir(), "tart-base-locks")
   }
   ```
 
