@@ -82,29 +82,39 @@ Sandbox 'test3' created successfully.
 
 ### Flag Design
 
-**`--apple-runtime <platform>`** (repeatable, case-insensitive)
+**`--apple-runtime <platform>[:version]`** (repeatable, case-insensitive)
 
-**Accepted values:**
+**Format:** `platform[:version]` where version is a specific version (e.g., `26.1`) or `latest` (implied if omitted).
+
+**Accepted platforms:**
 - `ios` → iOS Simulator runtime
 - `tvos` → tvOS Simulator runtime
 - `watchos` → watchOS Simulator runtime
 - `visionos` → visionOS Simulator runtime
 
-**Optional version specifier:**
-- `--apple-runtime ios` → Use latest iOS runtime from host
-- `--apple-runtime ios:26.1` → Use specific iOS 26.1 runtime
-- `--apple-runtime ios:latest` → Explicit latest (same as no version)
+**Version specifier:**
+- `ios` → Use latest iOS runtime (`:latest` is implied)
+- `ios:latest` → Use latest iOS runtime (explicit)
+- `ios:26.1` → Use specific iOS 26.1 runtime
+
+**Note:** If no version is specified, `:latest` is implied.
 
 **Examples:**
 ```bash
-# Single runtime
+# Single runtime (implicit latest)
 yoloai new sandbox1 --apple-runtime ios
 
+# Explicit latest
+yoloai new sandbox2 --apple-runtime ios:latest
+
 # Multiple runtimes (repeatable flag)
-yoloai new sandbox2 --apple-runtime ios --apple-runtime tvos
+yoloai new sandbox3 --apple-runtime ios --apple-runtime tvos
 
 # Specific versions
-yoloai new sandbox3 --apple-runtime ios:26.0 --apple-runtime tvos:26.1
+yoloai new sandbox4 --apple-runtime ios:26.0 --apple-runtime tvos:26.1
+
+# Mix of latest and specific
+yoloai new sandbox5 --apple-runtime ios:latest --apple-runtime tvos:26.1
 ```
 
 ### Cache Naming Scheme
@@ -138,7 +148,14 @@ Base images named by runtime+version combinations, sorted alphabetically:
 **Examples:**
 ```bash
 # Host has: iOS 26.2, iOS 26.1, tvOS 26.1
+
+# Implicit latest
 yoloai new test --apple-runtime ios
+# → Resolves to iOS 26.2 (latest)
+# → Cache name: yoloai-base-ios-26.2
+
+# Explicit latest (same result)
+yoloai new test --apple-runtime ios:latest
 # → Resolves to iOS 26.2 (latest)
 # → Cache name: yoloai-base-ios-26.2
 
@@ -182,8 +199,7 @@ User: yoloai new test2 --apple-runtime ios
 1. Normalize input: "ios" → ["ios"]
 2. Generate cache key: "ios"
 3. Check if yoloai-base-ios exists → YES
-4. Validate Xcode version matches (see Version Tracking below)
-5. Clone yoloai-base-ios → test2
+4. Clone yoloai-base-ios → test2
 ```
 
 **Time:** ~30 seconds (just clone, no copying)
@@ -331,426 +347,249 @@ Downloading in each VM would waste time and disk space.
 
 **Note:** yoloai never downloads runtimes automatically. User must download on host to enable sharing across all VMs.
 
-### Xcode Version Tracking
+### Base Image Metadata (No Xcode Tracking Needed)
 
 #### Metadata Storage
 
-Store metadata for each cached base image:
+Store minimal metadata for each cached base image:
 
 **Location:** `~/.yoloai/tart-base-metadata/<base-name>.json`
 
 **Format:**
 ```json
 {
-  "base_name": "yoloai-base-ios-tvos",
+  "base_name": "yoloai-base-ios-26.2-tvos-26.2",
   "runtimes": [
     {
       "platform": "ios",
-      "version": "26.1",
+      "version": "26.2",
       "build": "23B86"
     },
     {
       "platform": "tvos",
-      "version": "26.1",
+      "version": "26.2",
       "build": "23J579"
     }
   ],
-  "xcode_version": "26.1.1",
-  "xcode_build": "17B100",
-  "xcode_path": "/Applications/Xcode.app",
   "created": "2026-03-26T10:30:00Z",
   "disk_size": "35.2GB"
 }
 ```
 
-#### Version Detection
+**No Xcode version tracking** - runtime versions in cache names handle it automatically.
 
-**On VM creation (`yoloai new`):**
-```
-1. Check host Xcode version:
-   - xcodebuild -version → "Xcode 26.1.1"
-   - xcodebuild -version | tail -1 → "Build version 17B100"
+#### How Xcode Upgrades Work
 
-2. Load cached base metadata (if exists)
+**Automatic handling via runtime versions:**
 
-3. Compare versions:
-   - If metadata.xcode_version != current → WARN
-   - If metadata.xcode_build != current → WARN
+1. User upgrades Xcode (e.g., 26.0 → 26.1)
+2. New runtime becomes available (e.g., iOS 26.2)
+3. User runs: `yoloai new test --apple-runtime ios`
+4. Resolves to iOS 26.2 (latest)
+5. Cache miss: `yoloai-base-ios-26.2` doesn't exist
+6. Creates new base with iOS 26.2 and new Xcode
+7. Old `yoloai-base-ios-26.1` remains until cleaned
 
-4. Prompt user:
-   "Cached base 'yoloai-base-ios' was built with Xcode 26.0.1.
-    Current host has Xcode 26.1.1.
-    Runtime may be incompatible.
-
-    Options:
-    [R]ebuild base (recommended)
-    [U]se anyway
-    [A]bort"
+**Cleanup:**
+```bash
+# Remove old runtime versions
+yoloai system clean-runtime-bases --keep-latest
 ```
 
-#### Invalidation Strategy
-
-**On Xcode upgrade:**
-
-**Option 1: Automatic invalidation**
-- Detect version mismatch
-- Mark all runtime bases as "stale"
-- Prompt to rebuild on next use
-
-**Option 2: Manual invalidation**
-- User runs `yoloai system clean-runtime-bases --xcode-mismatch`
-- Removes all bases built with different Xcode version
-
-**Option 3: Version-specific caching**
-- Include Xcode version in base name: `yoloai-base-ios-xcode26.1`
-- Allows multiple Xcode versions to coexist
-- More disk space, but safer
-
-**Recommendation:** Option 1 (automatic invalidation) with manual cleanup command.
+**Why no Xcode version tracking needed:**
+- Runtime versions correlate naturally with Xcode versions
+- New Xcode → new runtimes → new bases created automatically
+- Old bases either work fine or produce real errors (better than warnings)
+- User controls cleanup with `--keep-latest`
+- Simpler implementation, less complexity
 
 ### Cache Management
+
+**Note:** `yoloai system runtime` commands are only available on macOS hosts (where Tart VMs can use Apple runtimes).
 
 #### List Cached Bases
 
 ```bash
-$ yoloai system list-runtime-bases
+$ yoloai system runtime list
 
 Runtime Base Images:
-  yoloai-base                        (no runtimes, Xcode 26.1.1, 20GB)
-  yoloai-base-ios-26.1              (iOS 26.1, Xcode 26.1.1, 25.3GB) [OLD]
-  yoloai-base-ios-26.2              (iOS 26.2, Xcode 26.1.1, 25.5GB)
-  yoloai-base-ios-26.2-tvos-26.1    (iOS 26.2, tvOS 26.1, Xcode 26.1.1, 35.8GB) [OLD tvOS]
-  yoloai-base-ios-26.2-tvos-26.2    (iOS 26.2, tvOS 26.2, Xcode 26.1.1, 36.0GB)
-  yoloai-base-tvos-26.1             (tvOS 26.1, Xcode 26.1.1, 28.1GB) [OLD]
-  yoloai-base-tvos-26.2             (tvOS 26.2, Xcode 26.1.1, 28.3GB)
+  yoloai-base                        (no runtimes, 20GB)
+  yoloai-base-ios-26.1              (iOS 26.1, 25.3GB)
+  yoloai-base-ios-26.2              (iOS 26.2, 25.5GB)
+  yoloai-base-ios-26.2-tvos-26.1    (iOS 26.2, tvOS 26.1, 35.8GB)
+  yoloai-base-ios-26.2-tvos-26.2    (iOS 26.2, tvOS 26.2, 36.0GB)
+  yoloai-base-tvos-26.1             (tvOS 26.1, 28.1GB)
+  yoloai-base-tvos-26.2             (tvOS 26.2, 28.3GB)
 
 Latest available on host: iOS 26.2, tvOS 26.2, watchOS 26.1
 
 Total cache size: 198GB
-Old versions (can be cleaned): 89GB
 
-Hint: Run 'yoloai system clean-runtime-bases --keep-latest' to free 89GB
+Hint: Run 'yoloai system runtime remove --older-than latest' to clean old versions
 ```
 
 **With filters:**
 ```bash
-# Show only stale bases (Xcode mismatch)
-yoloai system list-runtime-bases --stale
+# Show only bases with iOS (any version)
+yoloai system runtime list ios
 
-# Show only bases with specific runtime (any version)
-yoloai system list-runtime-bases --runtime ios
+# Show only bases with iOS 26.2 specifically
+yoloai system runtime list ios:26.2
 
-# Show only bases with specific runtime version
-yoloai system list-runtime-bases --runtime ios:26.1
+# Show bases with any runtime at version 26.2
+yoloai system runtime list 26.2
+
+# Show bases that have both iOS and tvOS 26.0
+yoloai system runtime list ios tvos:26.0
+
+# Show bases with iOS:latest and tvOS (any version)
+yoloai system runtime list ios:latest tvos
 ```
 
-#### Clean Stale Bases
+#### Add Base (Pre-warm Cache)
 
-**Xcode version mismatch:**
 ```bash
-$ yoloai system clean-runtime-bases --xcode-mismatch
+# Implicit latest
+$ yoloai system runtime add ios tvos
 
-Found 2 runtime bases built with old Xcode 26.0.1 (current is 26.1.1):
-  yoloai-base-ios-26.1       (25.3GB)
-  yoloai-base-ios-26.1-tvos-26.1 (35.8GB)
+Creating runtime base with iOS 26.2, tvOS 26.2...
+Found partial match: yoloai-base-ios-26.2 (already has iOS)
+Copying tvOS 26.2 runtime... done
+Snapshotting as yoloai-base-ios-26.2-tvos-26.2... done
 
-Remove? [y/N]: y
-Removing yoloai-base-ios-26.1...
-Removing yoloai-base-ios-26.1-tvos-26.1...
-Freed 61.1GB.
+Base created: yoloai-base-ios-26.2-tvos-26.2 (36GB)
 ```
 
-**Old runtime versions (recommended after OS updates):**
+**Explicit latest:**
 ```bash
-$ yoloai system clean-runtime-bases --keep-latest
+$ yoloai system runtime add ios:latest tvos:latest
 
-Current host has:
-  iOS 26.2, tvOS 26.2, watchOS 26.1
+Creating runtime base with iOS 26.2, tvOS 26.2...
+# (same as above)
+```
+
+**Specific versions:**
+```bash
+$ yoloai system runtime add ios:26.1 tvos:26.2
+
+Creating runtime base with iOS 26.1, tvOS 26.2...
+Copying iOS 26.1 runtime... done
+Copying tvOS 26.2 runtime... done
+Snapshotting as yoloai-base-ios-26.1-tvos-26.2... done
+
+Base created: yoloai-base-ios-26.1-tvos-26.2 (36GB)
+```
+
+**Use case:** Pre-create runtime bases before needing them (e.g., CI setup, team onboarding).
+
+#### Remove Bases
+
+**Remove anything older than latest (most common):**
+```bash
+$ yoloai system runtime remove --older-than latest
+
+Querying host for latest runtimes: iOS 26.2, tvOS 26.2, watchOS 26.1
 
 Found 4 bases with outdated runtime versions:
-  yoloai-base-ios-26.0       (iOS 26.0 → 26.2 available, 25GB)
-  yoloai-base-ios-26.1       (iOS 26.1 → 26.2 available, 25GB)
-  yoloai-base-ios-26.1-tvos-26.1 (iOS 26.1, tvOS 26.1 → newer available, 36GB)
-  yoloai-base-tvos-26.1      (tvOS 26.1 → 26.2 available, 28GB)
-
-Keep these bases:
-  yoloai-base-ios-26.2       (latest iOS)
-  yoloai-base-ios-26.2-tvos-26.2 (latest iOS + tvOS)
-  yoloai-base-watchos-26.1   (latest watchOS)
+  yoloai-base-ios-26.0       (iOS 26.0 < 26.2, 25GB)
+  yoloai-base-ios-26.1       (iOS 26.1 < 26.2, 25GB)
+  yoloai-base-ios-26.1-tvos-26.1 (iOS 26.1 < 26.2, tvOS 26.1 < 26.2, 36GB)
+  yoloai-base-tvos-26.1      (tvOS 26.1 < 26.2, 28GB)
 
 WARNING: 2 active sandboxes use bases that would be removed:
   sandbox 'test1' uses yoloai-base-ios-26.1
   sandbox 'test2' uses yoloai-base-ios-26.1-tvos-26.1
 
-Options:
-  [P]roceed anyway (sandboxes will still work with their current runtimes)
-  [U]pgrade sandboxes first (recreate with latest runtimes, then clean)
-  [A]bort
+Proceed? [y/N]: n
+Aborted.
+```
 
-Choice: U
+**Remove anything older than specific version:**
+```bash
+$ yoloai system runtime remove --older-than 26.2
 
-Upgrading sandboxes...
-  Recreating 'test1' with iOS 26.2...
-  Recreating 'test2' with iOS 26.2, tvOS 26.2...
-Done.
+Found 3 bases with any runtime older than 26.2:
+  yoloai-base-ios-26.0       (iOS 26.0 < 26.2, 25GB)
+  yoloai-base-ios-26.1       (iOS 26.1 < 26.2, 25GB)
+  yoloai-base-ios-26.1-tvos-26.1 (iOS 26.1 < 26.2, tvOS 26.1 < 26.2, 36GB)
 
-Removing old bases...
-Freed 114GB.
+Remove? [y/N]:
+```
+
+**Per-platform version constraints:**
+```bash
+$ yoloai system runtime remove --older-than ios:26.2 --older-than tvos:latest
+
+Querying host for latest tvOS: 26.2
+
+Found 2 bases matching criteria:
+  yoloai-base-ios-26.0       (iOS 26.0 < 26.2, 25GB)
+  yoloai-base-ios-26.1       (iOS 26.1 < 26.2, 25GB)
+  yoloai-base-ios-26.1-tvos-26.1 (iOS 26.1 < 26.2, tvOS 26.1 < 26.2, 36GB)
+
+Remove? [y/N]:
+```
+
+**Remove specific runtime:**
+```bash
+$ yoloai system runtime remove ios:26.1
+
+Found 2 bases with iOS 26.1:
+  yoloai-base-ios-26.1       (25GB)
+  yoloai-base-ios-26.1-tvos-26.1 (36GB)
+
+Remove? [y/N]: y
+Freed 61GB.
+```
+
+**Remove all (nuclear option):**
+```bash
+$ yoloai system runtime remove --all
+
+This will remove ALL runtime bases (7 bases, 198GB).
+Base yoloai-base (no runtimes) will be kept.
+
+Remove? [y/N]:
 ```
 
 **Flags:**
-- `--keep-latest` → Remove bases with outdated runtime versions (recommended)
-- `--xcode-mismatch` → Remove bases built with different Xcode version
-- `--all` → Remove all runtime bases (nuclear option)
+- `--older-than <version>` → Remove bases with any runtime older than version
+  - `--older-than latest` → Compare against latest available on host (most common)
+  - `--older-than 26.2` → Compare against specific version
+- `--older-than <platform:version>` → Per-platform version constraint (repeatable)
+  - `--older-than ios:latest` → iOS must be latest
+  - `--older-than ios:26.2 --older-than tvos:latest` → Mixed constraints
+- `--all` → Remove all runtime bases (keeps yoloai-base)
 - `--dry-run` → Show what would be removed without doing it
-- `--runtime ios` → Remove only bases containing iOS (any version)
-- `--runtime ios:26.1` → Remove only bases with specific iOS 26.1
-- `--force` → Skip sandbox usage check, remove anyway
+- `--yes` → Skip confirmation prompts
 
-#### Rebuild Bases
+**Positional argument:**
+- `remove [runtime[:version]]` → Remove only bases containing runtime (e.g., `remove ios` or `remove ios:26.1`)
 
+**Note:** `--older-than` flags are mutually exclusive with positional runtime filter.
+
+**Typical workflow after Xcode upgrade:**
 ```bash
-$ yoloai system rebuild-runtime-bases
+# 1. Check what's cached
+yoloai system runtime list
 
-Rebuilding all runtime bases with current Xcode 26.1.1 and latest runtime versions...
-Found 3 bases to rebuild:
-  yoloai-base-ios-26.1       → yoloai-base-ios-26.2 (iOS 26.1 → 26.2)
-  yoloai-base-ios-26.1-tvos-26.1 → yoloai-base-ios-26.2-tvos-26.2 (both updated)
-  yoloai-base-tvos-26.1      → yoloai-base-tvos-26.2 (tvOS 26.1 → 26.2)
+# 2. Check iOS-specific bases
+yoloai system runtime list ios
 
-This will create new bases with latest versions.
-Old bases will be kept unless you also run --clean-old.
+# 3. Remove old versions (optional - they don't hurt)
+yoloai system runtime remove --older-than latest
 
-Rebuild? [y/N]: y
+# 4. Or remove a specific old version
+yoloai system runtime remove ios:26.1
 
-Rebuilding as yoloai-base-ios-26.2...
-  Copying iOS 26.2 runtime... done
-  Snapshotting... done
-
-Rebuilding as yoloai-base-ios-26.2-tvos-26.2...
-  Starting from yoloai-base-ios-26.2 (has iOS 26.2)
-  Copying tvOS 26.2 runtime... done
-  Snapshotting... done
-
-Rebuilding as yoloai-base-tvos-26.2...
-  Copying tvOS 26.2 runtime... done
-  Snapshotting... done
-
-All bases rebuilt successfully.
-
-Hint: Run 'yoloai system clean-runtime-bases --keep-latest' to remove old versions.
+# 5. Create sandboxes - new bases created automatically as needed
+yoloai new test --apple-runtime ios
+# → Creates yoloai-base-ios-26.2 on first run
 ```
 
-**Flags:**
-- `--runtime ios` → Rebuild only bases containing iOS (any version → latest)
-- `--clean-old` → Also remove old bases after rebuilding
-- `--parallel` → Rebuild multiple bases concurrently
+## Implementation
 
-#### Upgrade Sandboxes
-
-When runtime versions are updated, existing sandboxes can be upgraded to use newer runtimes:
-
-```bash
-$ yoloai upgrade-runtimes test1
-
-Sandbox 'test1' currently uses:
-  Base: yoloai-base-ios-26.1
-  Runtimes: iOS 26.1
-
-Latest available:
-  iOS 26.2
-
-Upgrade to iOS 26.2? [y/N]: y
-
-Recreating sandbox with iOS 26.2...
-  Checking for base yoloai-base-ios-26.2... found
-  Cloning yoloai-base-ios-26.2 → test1
-  Preserving sandbox state (work dirs, agent state, logs)
-  Done.
-
-Sandbox 'test1' now uses iOS 26.2.
-```
-
-**Batch upgrade:**
-```bash
-$ yoloai upgrade-runtimes --all
-
-Found 3 sandboxes with outdated runtimes:
-  test1: iOS 26.1 → 26.2 available
-  test2: iOS 26.1, tvOS 26.1 → iOS 26.2, tvOS 26.2 available
-  test3: iOS 26.0 → 26.2 available
-
-Upgrade all? [y/N]: y
-Upgrading test1... done
-Upgrading test2... done
-Upgrading test3... done
-
-All sandboxes upgraded.
-```
-
-**Flags:**
-- `--all` → Upgrade all sandboxes with outdated runtimes
-- `--runtime ios` → Only upgrade sandboxes using iOS (to latest iOS)
-- `--dry-run` → Show what would be upgraded
-- `--force` → Skip confirmation prompts
-
-**Important:** Upgrading recreates the sandbox from a newer base. Sandbox state is preserved (work dirs, logs), but the VM itself is new.
-
-## Implementation Plan
-
-### Phase 1: Core Functionality (MVP)
-
-**Goal:** Basic runtime caching works end-to-end
-
-1. **Add `--apple-runtime` flag to `yoloai new` command**
-   - File: `internal/cli/commands.go`
-   - Add flag parsing and validation
-   - Pass to Create() call
-
-2. **Runtime name normalization**
-   - File: `runtime/tart/runtime.go` (new)
-   - Function: `NormalizeRuntimeName(input string) (string, error)`
-   - Case-insensitive mapping: ios/iOS/IOS → "ios"
-   - Validation: reject unknown platforms
-
-3. **Cache key generation**
-   - File: `runtime/tart/runtime.go`
-   - Function: `GenerateCacheKey(runtimes []string) string`
-   - Sort runtimes alphabetically
-   - Join with hyphens: ["tvos", "ios"] → "ios-tvos"
-
-4. **Base image cache lookup**
-   - File: `runtime/tart/tart.go`
-   - Function: `findCachedBase(cacheKey string) (string, bool)`
-   - Check if `yoloai-base-<cacheKey>` VM exists
-   - Return base name if found
-
-5. **Runtime copying implementation**
-   - File: `runtime/tart/runtime_copy.go` (new)
-   - Function: `CopyRuntimeToVM(vmName, platform, version string) error`
-   - Find runtime on host mount
-   - Copy with ditto + Info.plist fixup
-   - Verify with simctl
-
-6. **Base image snapshotting**
-   - File: `runtime/tart/tart.go`
-   - Function: `snapshotAsBase(tempVM, baseName string) error`
-   - Clone temp VM to new base name
-   - Delete temp VM
-   - Log creation
-
-7. **Integrate into Create() flow**
-   - File: `runtime/tart/tart.go`
-   - Modify `Create()` to handle runtime flags
-   - Check cache → create if missing → clone from cache
-   - Report progress to user
-
-**Acceptance criteria:**
-- `yoloai new test --apple-runtime ios` creates base and sandbox
-- Second `yoloai new test2 --apple-runtime ios` reuses cached base
-- Both sandboxes have working iOS simulator
-
-### Phase 2: Smart Reuse
-
-**Goal:** Minimize redundant copying via parent selection
-
-8. **Parent base selection**
-   - File: `runtime/tart/runtime.go`
-   - Function: `FindBestParentBase(runtimes []string) string`
-   - List existing bases, parse their runtimes
-   - Calculate overlap, return best match
-   - Fallback to `yoloai-base`
-
-9. **Incremental runtime copying**
-   - File: `runtime/tart/runtime_copy.go`
-   - Modify `CopyRuntimeToVM()` to check what's already present
-   - Only copy missing runtimes
-   - Report: "Reusing iOS from parent, copying tvOS..."
-
-10. **Cache metadata tracking**
-    - File: `runtime/tart/metadata.go` (new)
-    - Struct: `BaseMetadata` (runtimes, xcode_version, etc.)
-    - Functions: `SaveMetadata()`, `LoadMetadata()`
-    - Location: `~/.yoloai/tart-base-metadata/<base>.json`
-
-**Acceptance criteria:**
-- `yoloai new test --apple-runtime ios --apple-runtime tvos` reuses `yoloai-base-ios` if it exists
-- Only tvOS is copied (iOS reused)
-- Metadata correctly tracks both runtimes
-
-### Phase 3: Xcode Version Tracking
-
-**Goal:** Detect Xcode changes and invalidate stale bases
-
-11. **Detect Xcode version on host**
-    - File: `runtime/tart/xcode.go` (new)
-    - Function: `DetectXcodeVersion() (version, build string, err error)`
-    - Execute: `xcodebuild -version`
-    - Parse output
-
-12. **Store Xcode version in metadata**
-    - Extend `BaseMetadata` struct
-    - Save Xcode version during base creation
-    - Include in metadata.json
-
-13. **Validation on cache lookup**
-    - Modify `findCachedBase()` to load metadata
-    - Compare current Xcode vs metadata Xcode
-    - Warn if mismatch detected
-
-14. **`yoloai system clean-runtime-bases` command**
-    - File: `internal/cli/system.go`
-    - Add new command: `clean-runtime-bases`
-    - List stale bases (Xcode mismatch)
-    - Prompt for confirmation, delete
-
-**Acceptance criteria:**
-- After Xcode upgrade, `yoloai new --apple-runtime ios` warns about stale base
-- `yoloai system clean-runtime-bases` removes only mismatched bases
-- Metadata correctly tracks Xcode version
-
-### Phase 4: Management Commands
-
-**Goal:** User-friendly cache inspection and cleanup
-
-15. **`yoloai system list-runtime-bases` command**
-    - File: `internal/cli/system.go`
-    - List all `yoloai-base-*` VMs
-    - Load and display metadata
-    - Show disk sizes, runtimes, Xcode versions
-    - Add filters: `--stale`, `--runtime ios`
-
-16. **`yoloai system rebuild-runtime-bases` command**
-    - File: `internal/cli/system.go`
-    - Find all runtime bases
-    - Rebuild each from scratch with current Xcode
-    - Reuse parent selection for efficiency
-    - Prompt for confirmation
-
-**Acceptance criteria:**
-- `yoloai system list-runtime-bases` shows all bases with details
-- `yoloai system rebuild-runtime-bases` successfully recreates bases
-- Filters work correctly
-
-### Phase 5: Polish and Optimization
-
-17. **Runtime version specifiers**
-    - Support `--apple-runtime ios:26.1`
-    - Parse version from flag
-    - Match against runtime Info.plist
-    - Include version in cache key
-
-18. **Progress reporting**
-    - Show spinner during long operations
-    - Report: "Copying iOS runtime (15GB, ~2 min)..."
-    - Update progress during copy
-    - Final summary: "Saved 3 min on future sandboxes!"
-
-20. **Error recovery**
-    - Cleanup temp VMs on failure
-    - Partial base creation → delete incomplete base
-    - Retry logic for transient failures
-    - Clear error messages with next steps
+See implementation plan: `docs/dev/plans/apple-runtime-caching.md`
 
 ## Open Questions
 
@@ -781,7 +620,12 @@ All sandboxes upgraded.
 - **C. Keep both versions** (e.g., `yoloai-base-ios-xcode26.0` and `yoloai-base-ios-xcode26.1`)
 - **D. Manual cleanup only** (user must run clean command)
 
-**Recommendation:** Option B (warn on use) + Option D (provide cleanup command).
+**Decision:** ✅ **RESOLVED** - Version-based caching handles this automatically (no Xcode tracking needed).
+- Runtime versions in cache names naturally handle Xcode upgrades
+- New Xcode → new runtimes → new cache names → new bases created
+- Old bases remain until manually cleaned with `--keep-latest`
+- User controls when to upgrade sandboxes and clean old bases
+- Simpler than tracking Xcode versions separately
 
 ### 3. Cache Size Limits and Pruning
 
@@ -918,9 +762,9 @@ yoloai new test --apple-runtime ios
   - vs without caching: 5 × 25GB = 125GB (60% savings)
 
 **Reliability:**
-- Stale base detection: 100% (warn on Xcode mismatch)
-- Runtime copying: 95%+ success rate (fallback to download)
+- Runtime copying: 95%+ success rate
 - Cache invalidation: User-controlled, no surprise deletions
+- Version-based caching handles Xcode upgrades automatically
 
 ## Future Enhancements
 
