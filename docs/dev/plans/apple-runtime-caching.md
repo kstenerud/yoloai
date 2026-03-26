@@ -25,7 +25,8 @@ Implementation plan for Apple runtime base image caching feature. Enables sandbo
    - Parse format: `platform[:version]` (e.g., "ios", "ios:latest", "ios:26.1")
    - Case-insensitive platform: ios/iOS/IOS → "ios"
    - Version `:latest` treated same as omitted (both query host for latest)
-   - Validation: reject unknown platforms
+   - Validation: reject unknown platforms and non-existent versions
+   - Error immediately if requested version not available on host
    - Use `github.com/hashicorp/go-version` for version comparison
    - Parse simctl JSON output (schema documented in design doc)
 
@@ -182,11 +183,21 @@ Implementation plan for Apple runtime base image caching feature. Enables sandbo
     - Update progress during copy
     - Final summary: "Saved 3 min on future sandboxes!"
 
-18. **Error recovery**
-    - Cleanup temp VMs on failure
-    - Partial base creation → delete incomplete base
-    - Retry logic for transient failures
-    - Clear error messages with next steps
+18. **Error recovery and edge cases**
+    - **Non-existent runtime version**: Error immediately if requested version not available on host
+      - Example: `--runtime ios:99.0` → "iOS 99.0 not available on host, latest is 26.2"
+      - Query host runtimes during flag validation
+    - **Partial failure cleanup**: Undo anything created in the current command (best effort)
+      - Temp VM cleanup via defer (already in step 7)
+      - Delete partial base if snapshot fails
+      - Leave parent bases alone (they're valid, even if unused)
+    - **Corrupted metadata**: Delete base and rebuild from scratch
+      - Don't attempt to repair or rebuild metadata
+      - Log warning and proceed with rebuild
+      - User can manually recreate with `yoloai system runtime add`
+    - **Orphaned temp VMs**: Add to `yoloai system prune` command
+      - Find VMs matching `yoloai-base-*-tmp-*` pattern
+      - Safe to delete automatically
 
 ## Files to Create
 

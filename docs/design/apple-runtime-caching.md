@@ -307,6 +307,27 @@ func cleanupTempVM(ctx, vmName) {
 - Find VMs matching pattern `yoloai-base-*-tmp-*`
 - Delete automatically (they're always safe to remove)
 
+**Edge case handling:**
+
+1. **Non-existent runtime version:**
+   - User requests `--runtime ios:99.0` but host only has up to 26.2
+   - **Error immediately**: "iOS 99.0 not available on host, latest is 26.2"
+   - Do not attempt fuzzy matching or suggestions
+   - Query host runtimes during flag validation
+
+2. **Partial failure cleanup:**
+   - If base creation fails at any step, **undo anything created in that command** (best effort)
+   - Example: Disk full during snapshot → delete temp VM (already planned via defer)
+   - If temp VM was cloned from a newly-created parent base, leave parent alone (it's valid, just not used yet)
+   - Only clean resources created in the current operation
+
+3. **Corrupted metadata:**
+   - Base exists but `~/.yoloai/tart-base-metadata/<base>.json` is malformed or missing
+   - **Delete base and rebuild from scratch** (don't attempt repair)
+   - Rationale: Metadata is critical for parent selection; corrupted state indicates larger problem
+   - User can always recreate base with `yoloai system runtime add`
+   - Log warning: "Corrupted metadata for yoloai-base-ios-26.2, deleting and rebuilding"
+
 ### Base Image Locking
 
 **Problem:** Two concurrent `yoloai new` commands requesting the same runtime could both try to create the same base image simultaneously, resulting in duplicate work or corrupted state.
@@ -340,7 +361,7 @@ Timeline:
 - Automatic cleanup - flock releases on crash
 - Proven pattern - same mechanism as sandbox locking
 
-**Windows:** Uses no-op locks (same as sandbox locking on Windows). Concurrent base creation on Windows may result in duplicate work (last one wins), but this is acceptable given Windows is not the primary platform for macOS VM development.
+**Windows:** Uses no-op locks (same pattern as sandbox locking on Windows). Tart does not support Windows, and yoloAI does not currently support Windows either. If Windows support is added in the future, concurrent base creation may result in duplicate work, but this is acceptable given the rarity of the scenario.
 
 ### Parent Selection Strategy
 
