@@ -48,7 +48,7 @@ yoloai-base (no runtimes)
 
 **First time with iOS:**
 ```bash
-$ yoloai new test1 --apple-runtime ios
+$ yoloai new test1 --runtime ios
 Creating sandbox with iOS runtime...
 Runtime base 'yoloai-base-ios' not found, creating it...
 Copying iOS runtime from host... (2-3 min)
@@ -59,7 +59,7 @@ Sandbox 'test1' created successfully.
 
 **Second time with iOS:**
 ```bash
-$ yoloai new test2 --apple-runtime ios
+$ yoloai new test2 --runtime ios
 Creating sandbox with iOS runtime...
 Using cached base 'yoloai-base-ios'...
 Cloning sandbox... (30 seconds)
@@ -68,7 +68,7 @@ Sandbox 'test2' created successfully.
 
 **Mixed runtimes:**
 ```bash
-$ yoloai new test3 --apple-runtime ios --apple-runtime tvos
+$ yoloai new test3 --runtime ios --runtime tvos
 Creating sandbox with iOS, tvOS runtimes...
 Runtime base 'yoloai-base-ios-tvos' not found, creating it...
 Found partial match: yoloai-base-ios (already has iOS)
@@ -82,7 +82,7 @@ Sandbox 'test3' created successfully.
 
 ### Flag Design
 
-**`--apple-runtime <platform>[:version]`** (repeatable, case-insensitive)
+**`--runtime <platform>[:version]`** (repeatable, case-insensitive)
 
 **Format:** `platform[:version]` where version is a specific version (e.g., `26.1`) or `latest` (implied if omitted).
 
@@ -102,19 +102,19 @@ Sandbox 'test3' created successfully.
 **Examples:**
 ```bash
 # Single runtime (implicit latest)
-yoloai new sandbox1 --apple-runtime ios
+yoloai new sandbox1 --runtime ios
 
 # Explicit latest
-yoloai new sandbox2 --apple-runtime ios:latest
+yoloai new sandbox2 --runtime ios:latest
 
 # Multiple runtimes (repeatable flag)
-yoloai new sandbox3 --apple-runtime ios --apple-runtime tvos
+yoloai new sandbox3 --runtime ios --runtime tvos
 
 # Specific versions
-yoloai new sandbox4 --apple-runtime ios:26.0 --apple-runtime tvos:26.1
+yoloai new sandbox4 --runtime ios:26.0 --runtime tvos:26.1
 
 # Mix of latest and specific
-yoloai new sandbox5 --apple-runtime ios:latest --apple-runtime tvos:26.1
+yoloai new sandbox5 --runtime ios:latest --runtime tvos:26.1
 ```
 
 ### Cache Naming Scheme
@@ -132,11 +132,11 @@ Base images named by runtime+version combinations, sorted alphabetically:
 | User Request | Resolution | Base Image Name |
 |--------------|------------|----------------|
 | (none) | — | `yoloai-base` |
-| `--apple-runtime ios` | Query host → iOS 26.2 (latest) | `yoloai-base-ios-26.2` |
-| `--apple-runtime ios:26.1` | Use specific version | `yoloai-base-ios-26.1` |
-| `--apple-runtime ios --apple-runtime tvos` | iOS 26.2, tvOS 26.1 | `yoloai-base-ios-26.2-tvos-26.1` |
-| `--apple-runtime tvos --apple-runtime ios` | Same (sorted alphabetically) | `yoloai-base-ios-26.2-tvos-26.1` |
-| `--apple-runtime watchos --apple-runtime ios --apple-runtime tvos` | iOS 26.2, tvOS 26.1, watchOS 26.0 | `yoloai-base-ios-26.2-tvos-26.1-watchos-26.0` |
+| `--runtime ios` | Query host → iOS 26.2 (latest) | `yoloai-base-ios-26.2` |
+| `--runtime ios:26.1` | Use specific version | `yoloai-base-ios-26.1` |
+| `--runtime ios --runtime tvos` | iOS 26.2, tvOS 26.1 | `yoloai-base-ios-26.2-tvos-26.1` |
+| `--runtime tvos --runtime ios` | Same (sorted alphabetically) | `yoloai-base-ios-26.2-tvos-26.1` |
+| `--runtime watchos --runtime ios --runtime tvos` | iOS 26.2, tvOS 26.1, watchOS 26.0 | `yoloai-base-ios-26.2-tvos-26.1-watchos-26.0` |
 
 **Naming rules:**
 1. Resolve all runtimes to specific versions (query host or use user-specified)
@@ -150,22 +150,22 @@ Base images named by runtime+version combinations, sorted alphabetically:
 # Host has: iOS 26.2, iOS 26.1, tvOS 26.1
 
 # Implicit latest
-yoloai new test --apple-runtime ios
+yoloai new test --runtime ios
 # → Resolves to iOS 26.2 (latest)
 # → Cache name: yoloai-base-ios-26.2
 
 # Explicit latest (same result)
-yoloai new test --apple-runtime ios:latest
+yoloai new test --runtime ios:latest
 # → Resolves to iOS 26.2 (latest)
 # → Cache name: yoloai-base-ios-26.2
 
 # Specific version
-yoloai new test --apple-runtime ios:26.1
+yoloai new test --runtime ios:26.1
 # → Uses iOS 26.1
 # → Cache name: yoloai-base-ios-26.1
 
 # Multiple runtimes
-yoloai new test --apple-runtime tvos --apple-runtime ios
+yoloai new test --runtime tvos --runtime ios
 # → Resolves to: iOS 26.2, tvOS 26.1
 # → Sorted: ios-26.2, tvos-26.1
 # → Cache name: yoloai-base-ios-26.2-tvos-26.1
@@ -176,7 +176,7 @@ yoloai new test --apple-runtime tvos --apple-runtime ios
 #### Scenario 1: No cached base exists
 
 ```
-User: yoloai new test --apple-runtime ios
+User: yoloai new test --runtime ios
 
 1. Normalize input: "ios" → ["ios"]
 2. Generate cache key: "ios"
@@ -194,7 +194,7 @@ User: yoloai new test --apple-runtime ios
 #### Scenario 2: Cached base exists
 
 ```
-User: yoloai new test2 --apple-runtime ios
+User: yoloai new test2 --runtime ios
 
 1. Normalize input: "ios" → ["ios"]
 2. Generate cache key: "ios"
@@ -207,7 +207,7 @@ User: yoloai new test2 --apple-runtime ios
 #### Scenario 3: Subset match (smart reuse)
 
 ```
-User: yoloai new test --apple-runtime ios --apple-runtime tvos
+User: yoloai new test --runtime ios --runtime tvos
 
 1. Normalize input: ["ios", "tvos"] → sorted: ["ios", "tvos"]
 2. Generate cache key: "ios-tvos"
@@ -248,7 +248,7 @@ Existing bases:
 - `yoloai-base-tvos-26.1` ({tvos:26.1})
 - `yoloai-base-ios-26.1-tvos-26.1` ({ios:26.1, tvos:26.1})
 
-Request: `--apple-runtime ios --apple-runtime tvos --apple-runtime watchos`
+Request: `--runtime ios --runtime tvos --runtime watchos`
 - Resolves to: {ios:26.2, tvos:26.1, watchos:26.0}
 
 Overlap scores (exact version matching):
@@ -339,7 +339,7 @@ Error: iOS 26.2 runtime not found on host.
 To fix:
 1. On host Mac: Open Xcode > Settings > Platforms
 2. Download iOS Simulator runtime
-3. Try again: yoloai new sandbox --apple-runtime ios
+3. Try again: yoloai new sandbox --runtime ios
 
 Runtime must be on host so all VMs can share it.
 Downloading in each VM would waste time and disk space.
@@ -384,7 +384,7 @@ Store minimal metadata for each cached base image:
 
 1. User upgrades Xcode (e.g., 26.0 → 26.1)
 2. New runtime becomes available (e.g., iOS 26.2)
-3. User runs: `yoloai new test --apple-runtime ios`
+3. User runs: `yoloai new test --runtime ios`
 4. Resolves to iOS 26.2 (latest)
 5. Cache miss: `yoloai-base-ios-26.2` doesn't exist
 6. Creates new base with iOS 26.2 and new Xcode
@@ -583,7 +583,7 @@ yoloai system runtime remove --older-than latest
 yoloai system runtime remove ios:26.1
 
 # 5. Create sandboxes - new bases created automatically as needed
-yoloai new test --apple-runtime ios
+yoloai new test --runtime ios
 # → Creates yoloai-base-ios-26.2 on first run
 ```
 
@@ -664,7 +664,7 @@ See implementation plan: `docs/dev/plans/apple-runtime-caching.md`
   To fix:
     1. On host Mac: Open Xcode > Settings > Platforms
     2. Download iOS Simulator runtime
-    3. Try again: yoloai new sandbox --apple-runtime ios
+    3. Try again: yoloai new sandbox --runtime ios
 
   Runtime must be on host so all VMs can share it via cached base images.
   ```
@@ -740,7 +740,7 @@ if xcode_mounts:
 sudo xcode-select -s /Applications/Xcode-Beta.app
 
 # Create sandbox (auto-mounts the selected Xcode)
-yoloai new test --apple-runtime ios
+yoloai new test --runtime ios
 # → Mounts Xcode-Beta.app
 # → VM uses beta Xcode and its runtimes
 ```
@@ -779,14 +779,14 @@ Support both Apple Silicon and Intel Macs:
 
 Allow runtimes from non-standard locations:
 ```bash
-yoloai new test --apple-runtime ios:~/Downloads/iOS_26.1.dmg
+yoloai new test --runtime ios:~/Downloads/iOS_26.1.dmg
 ```
 
 ### Remote Base Image Registry
 
 Share cached bases across team:
 - Push base to registry: `yoloai system push-base yoloai-base-ios`
-- Pull from registry: `yoloai new test --apple-runtime ios --pull-base`
+- Pull from registry: `yoloai new test --runtime ios --pull-base`
 - Save team's bandwidth and time
 
 ### Profile Integration

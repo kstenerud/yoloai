@@ -14,9 +14,9 @@ Implementation plan for Apple runtime base image caching feature. Enables sandbo
 
 **Goal:** Basic runtime caching works end-to-end
 
-1. **Add `--apple-runtime` flag to `yoloai new` command**
+1. **Add `--runtime` flag to `yoloai new` command**
    - File: `internal/cli/commands.go`
-   - Add flag parsing and validation
+   - Add flag parsing and validation (ios, tvos, watchos, visionos)
    - Pass to Create() call
 
 2. **Runtime name normalization and version parsing**
@@ -60,8 +60,8 @@ Implementation plan for Apple runtime base image caching feature. Enables sandbo
    - Report progress to user
 
 **Acceptance criteria:**
-- `yoloai new test --apple-runtime ios` creates base and sandbox
-- Second `yoloai new test2 --apple-runtime ios` reuses cached base
+- `yoloai new test --runtime ios` creates base and sandbox
+- Second `yoloai new test2 --runtime ios` reuses cached base
 - Both sandboxes have working iOS simulator
 
 ### Phase 2: Smart Reuse
@@ -88,7 +88,7 @@ Implementation plan for Apple runtime base image caching feature. Enables sandbo
     - Location: `~/.yoloai/tart-base-metadata/<base>.json`
 
 **Acceptance criteria:**
-- `yoloai new test --apple-runtime ios --apple-runtime tvos` reuses `yoloai-base-ios` if it exists
+- `yoloai new test --runtime ios --runtime tvos` reuses `yoloai-base-ios` if it exists
 - Only tvOS is copied (iOS reused)
 - Metadata correctly tracks both runtimes
 
@@ -152,7 +152,7 @@ Implementation plan for Apple runtime base image caching feature. Enables sandbo
 ### Phase 4: Polish and Optimization
 
 15. **Runtime version specifiers**
-    - Support `--apple-runtime ios:26.1`
+    - Support `--runtime ios:26.1`
     - Parse version from flag
     - Match against runtime Info.plist
     - Include version in cache key
@@ -178,6 +178,6 @@ Implementation plan for Apple runtime base image caching feature. Enables sandbo
 
 ## Files to Modify
 
-- `internal/cli/commands.go` - Add `--apple-runtime` flag to `new` command
+- `internal/cli/commands.go` - Add `--runtime` flag to `new` command
 - `runtime/tart/tart.go` - Integrate caching into Create() flow, add snapshotting
 - `internal/cli/system.go` - Register runtime subcommand (darwin only)
