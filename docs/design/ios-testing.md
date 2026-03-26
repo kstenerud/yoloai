@@ -75,23 +75,27 @@ Local in VM (writable):
   /private/var/                               (~1GB - logs, caches)
 ```
 
-**Disk usage:**
-- Mounted: ~27GB (Xcode 11GB + runtime 16GB, on host)
-- Local: ~11GB actual usage
-- **VM size needed: 25-30GB**
-- **Savings: ~70GB per VM** vs fully local
+**Disk usage (what's actually stored IN the VM):**
+- Mounted from host: ~27GB (Xcode 11GB + runtime 16GB) - takes 0GB in VM
+- Local VM storage: ~11GB (simulator devices, build artifacts, caches, logs)
+- **Total VM disk used: ~11GB** (with host tools) vs ~100GB (fully local)
+
+**VM disk image size:**
+- Same for all VMs: ~50GB (standard Tart base)
+- Available space: ~39GB for builds/work
+- No different images needed - mounting is dynamic
 
 **Key discovery:** The 3.8GB dyld cache is NOT needed when runtime is mounted (validated via symlink testing).
 
 **If host has no Xcode:**
 - Mounts not created (directories don't exist)
+- VM disk used: ~20GB (just macOS + yoloAI files, no iOS tools)
 - VM works normally for non-iOS development
-- User's responsibility to install Xcode on host if iOS testing needed
 
-**Dynamic updates:**
+**Dynamic behavior:**
 - User installs Xcode on host → next VM start mounts it automatically
 - User installs new simulator runtime → available on next VM start
-- No VM regeneration needed
+- No VM regeneration needed - mounts are runtime configuration
 
 ## Implementation
 
