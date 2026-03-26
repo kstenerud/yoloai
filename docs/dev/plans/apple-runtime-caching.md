@@ -33,55 +33,66 @@ Implementation plan for Apple runtime base image caching feature. Enables sandbo
    - Sort runtimes alphabetically
    - Join with hyphens: ["tvos", "ios"] → "ios-tvos"
 
-4. **Base image cache lookup**
+4. **Base image locking**
+   - File: `runtime/tart/base_lock.go` (new, similar to `sandbox/lock_unix.go`)
+   - Function: `acquireBaseLock(baseName string) (func(), error)`
+   - Uses `flock(2)` for exclusive advisory locks on Unix/macOS
+   - Lock file: `~/.yoloai/tart-base-locks/<base-name>.lock`
+   - Blocks until lock is available (serializes concurrent base creation)
+   - Auto-releases on process exit/crash
+
+5. **Base image cache lookup**
    - File: `runtime/tart/tart.go`
    - Function: `findCachedBase(cacheKey string) (string, bool)`
    - Check if `yoloai-base-<cacheKey>` VM exists
    - Return base name if found
 
-5. **Runtime copying implementation**
+6. **Runtime copying implementation**
    - File: `runtime/tart/runtime_copy.go` (new)
    - Function: `CopyRuntimeToVM(vmName, platform, version string) error`
    - Find runtime on host mount
    - Copy with ditto + Info.plist fixup
    - Verify with simctl
 
-6. **Base image snapshotting**
+7. **Base image snapshotting**
    - File: `runtime/tart/tart.go`
    - Function: `snapshotAsBase(tempVM, baseName string) error`
    - Clone temp VM to new base name
    - Delete temp VM
    - Log creation
 
-7. **Integrate into Create() flow**
-   - File: `runtime/tart/tart.go`
-   - Modify `Create()` to handle runtime flags
-   - Check cache → create if missing → clone from cache
+8. **Integrate into Create() flow**
+   - File: `sandbox/create.go`
+   - Add base image resolution logic before calling runtime.Create()
+   - Acquire base lock, check cache, create if missing, release lock
+   - Pass resolved base name to runtime.Create()
    - Report progress to user
 
 **Acceptance criteria:**
 - `yoloai new test --runtime ios` creates base and sandbox
 - Second `yoloai new test2 --runtime ios` reuses cached base
 - Both sandboxes have working iOS simulator
+- Concurrent `yoloai new` with same runtime blocks second process until first completes
+- Second process discovers base exists and uses it (no duplicate work)
 
 ### Phase 2: Smart Reuse
 
 **Goal:** Minimize redundant copying via parent selection
 
-8. **Parent base selection**
+9. **Parent base selection**
    - File: `runtime/tart/runtime.go`
    - Function: `FindBestParentBase(runtimes []string) string`
    - List existing bases, parse their runtimes
    - Calculate overlap, return best match
    - Fallback to `yoloai-base`
 
-9. **Incremental runtime copying**
-   - File: `runtime/tart/runtime_copy.go`
-   - Modify `CopyRuntimeToVM()` to check what's already present
-   - Only copy missing runtimes
-   - Report: "Reusing iOS from parent, copying tvOS..."
+10. **Incremental runtime copying**
+    - File: `runtime/tart/runtime_copy.go`
+    - Modify `CopyRuntimeToVM()` to check what's already present
+    - Only copy missing runtimes
+    - Report: "Reusing iOS from parent, copying tvOS..."
 
-10. **Cache metadata tracking**
+11. **Cache metadata tracking**
     - File: `runtime/tart/metadata.go` (new)
     - Struct: `BaseMetadata` (runtimes, created, disk_size)
     - Functions: `SaveMetadata()`, `LoadMetadata()`
@@ -98,13 +109,13 @@ Implementation plan for Apple runtime base image caching feature. Enables sandbo
 
 **Note:** Commands only registered on macOS/Darwin hosts.
 
-11. **`yoloai system runtime` base command**
+12. **`yoloai system runtime` base command**
     - File: `internal/cli/system.go`
     - Add runtime subcommand group
     - Platform check: only register on darwin
     - Help text explains Apple runtime caching
 
-12. **`yoloai system runtime list [runtime[:version]...]` command**
+13. **`yoloai system runtime list [runtime[:version]...]` command**
     - File: `internal/cli/system_runtime.go` (new)
     - List all `yoloai-base-*` VMs (default: show all)
     - Load and display metadata
@@ -116,16 +127,16 @@ Implementation plan for Apple runtime base image caching feature. Enables sandbo
       - Multiple filters: `list ios tvos:26.0` → bases with iOS (any) AND tvOS 26.0
     - Query host for latest available runtimes (shown in output)
 
-13. **`yoloai system runtime add <runtime[:version]>...` command**
+14. **`yoloai system runtime add <runtime[:version]>...` command**
     - File: `internal/cli/system_runtime.go`
     - Pre-create runtime base without sandbox
     - Accept one or more runtime arguments: `add ios tvos`
     - Support version syntax: `add ios:26.1 tvos:26.2`
     - Default to latest if no version specified
-    - Reuse existing cache creation logic
+    - Reuse existing cache creation logic (including base locking)
     - Useful for CI setup, team onboarding
 
-14. **`yoloai system runtime remove [runtime[:version]]` command**
+15. **`yoloai system runtime remove [runtime[:version]]` command**
     - File: `internal/cli/system_runtime.go`
     - Remove runtime bases with filters
     - Optional positional filter: runtime (e.g., `remove ios:26.1`)
@@ -151,19 +162,19 @@ Implementation plan for Apple runtime base image caching feature. Enables sandbo
 
 ### Phase 4: Polish and Optimization
 
-15. **Runtime version specifiers**
+16. **Runtime version specifiers**
     - Support `--runtime ios:26.1`
     - Parse version from flag
     - Match against runtime Info.plist
     - Include version in cache key
 
-16. **Progress reporting**
+17. **Progress reporting**
     - Show spinner during long operations
     - Report: "Copying iOS runtime (15GB, ~2 min)..."
     - Update progress during copy
     - Final summary: "Saved 3 min on future sandboxes!"
 
-17. **Error recovery**
+18. **Error recovery**
     - Cleanup temp VMs on failure
     - Partial base creation → delete incomplete base
     - Retry logic for transient failures
@@ -171,9 +182,10 @@ Implementation plan for Apple runtime base image caching feature. Enables sandbo
 
 ## Files to Create
 
-- `runtime/tart/runtime.go` - Runtime parsing, normalization, cache key generation
+- `runtime/tart/runtime.go` - Runtime parsing, normalization, cache key generation, version comparison
 - `runtime/tart/runtime_copy.go` - Runtime copying logic
 - `runtime/tart/metadata.go` - Base metadata tracking
+- `runtime/tart/base_lock.go` - Base image locking (similar to `sandbox/lock_unix.go`)
 - `internal/cli/system_runtime.go` - Runtime management commands
 
 ## Files to Modify

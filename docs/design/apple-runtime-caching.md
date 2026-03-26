@@ -179,17 +179,22 @@ yoloai new test --runtime tvos --runtime ios
 User: yoloai new test --runtime ios
 
 1. Normalize input: "ios" → ["ios"]
-2. Generate cache key: "ios"
-3. Check if yoloai-base-ios exists → NO
-4. Find best parent base (see Parent Selection below)
-5. Clone parent base → temp VM
-6. Copy iOS runtime to temp VM
-7. Snapshot temp VM as yoloai-base-ios
-8. Clone yoloai-base-ios → test
-9. Cleanup temp VM
+2. Resolve to specific version: "ios" → "ios:26.2" (query host)
+3. Generate cache key: "ios-26.2"
+4. Acquire exclusive lock on "yoloai-base-ios-26.2" (blocks if another process is creating it)
+5. Check if yoloai-base-ios-26.2 exists → NO
+6. Find best parent base (see Parent Selection below)
+7. Clone parent base → temp VM
+8. Copy iOS 26.2 runtime to temp VM
+9. Snapshot temp VM as yoloai-base-ios-26.2
+10. Release lock
+11. Clone yoloai-base-ios-26.2 → test
+12. Cleanup temp VM
 ```
 
 **Time:** ~3-5 minutes (one-time cost)
+
+**Concurrency:** If another process tries to create the same base simultaneously, it blocks at step 4 until the first process completes, then discovers the base exists at step 5 and skips to step 11.
 
 #### Scenario 2: Cached base exists
 
@@ -197,9 +202,12 @@ User: yoloai new test --runtime ios
 User: yoloai new test2 --runtime ios
 
 1. Normalize input: "ios" → ["ios"]
-2. Generate cache key: "ios"
-3. Check if yoloai-base-ios exists → YES
-4. Clone yoloai-base-ios → test2
+2. Resolve to specific version: "ios" → "ios:26.2"
+3. Generate cache key: "ios-26.2"
+4. Acquire exclusive lock on "yoloai-base-ios-26.2" (non-blocking if just checking)
+5. Check if yoloai-base-ios-26.2 exists → YES
+6. Release lock
+7. Clone yoloai-base-ios-26.2 → test2
 ```
 
 **Time:** ~30 seconds (just clone, no copying)
@@ -220,6 +228,41 @@ User: yoloai new test --runtime ios --runtime tvos
 ```
 
 **Time:** ~2 minutes (only copying tvOS, iOS reused)
+
+### Base Image Locking
+
+**Problem:** Two concurrent `yoloai new` commands requesting the same runtime could both try to create the same base image simultaneously, resulting in duplicate work or corrupted state.
+
+**Solution:** Use advisory file locking (same pattern as sandbox locking in `sandbox/lock_unix.go`).
+
+**Mechanism:**
+- Lock file location: `~/.yoloai/tart-base-locks/<base-name>.lock`
+- Uses `flock(2)` on Unix/macOS for exclusive advisory locks
+- **Blocks until lock is available** (serializes concurrent base creation)
+- Auto-releases on process exit or crash
+- 0-byte files left on disk (harmless, reused on next lock)
+
+**Example flow:**
+```
+Process A: yoloai new test1 --runtime ios
+Process B: yoloai new test2 --runtime ios (starts 1 second later)
+
+Timeline:
+0s  - A: Acquires lock on "yoloai-base-ios-26.2.lock"
+0s  - A: Starts creating base (clone, copy runtime, snapshot)
+1s  - B: Tries to acquire same lock, BLOCKS waiting
+180s - A: Finishes base creation, releases lock
+180s - B: Acquires lock, checks base exists, releases lock
+180s - B: Clones existing base → test2 (fast)
+```
+
+**Benefits:**
+- No race conditions - fully serialized
+- No duplicate work - second process waits and reuses
+- Automatic cleanup - flock releases on crash
+- Proven pattern - same mechanism as sandbox locking
+
+**Windows:** Uses no-op locks (same as sandbox locking on Windows). Concurrent base creation on Windows may result in duplicate work (last one wins), but this is acceptable given Windows is not the primary platform for macOS VM development.
 
 ### Parent Selection Strategy
 
@@ -724,12 +767,13 @@ See implementation plan: `docs/dev/plans/apple-runtime-caching.md`
 - **C. Detect in-progress** (second user waits and uses result)
 - **D. Ignore** (rare enough not to worry)
 
-**Decision:** ✅ **RESOLVED** - Option D (document but don't fix).
-- Not worth implementing for MVP
-- Rare scenario (requires two users creating exact same runtime combo simultaneously)
-- Worst case: duplicate work, last one wins (harmless)
-- Document as known limitation in implementation notes
-- Can add lock file later if users report issues
+**Decision:** ✅ **RESOLVED** - Option A (lock file).
+- Use advisory file locking (same pattern as `sandbox/lock_unix.go`)
+- Lock file: `~/.yoloai/tart-base-locks/<base-name>.lock`
+- Second process blocks until first completes, then discovers base exists
+- No duplicate work, no race conditions
+- Automatic cleanup on crash (flock auto-releases)
+- Proven pattern already used for sandbox locking
 
 ### 6. Multiple Xcode Versions
 
@@ -808,6 +852,7 @@ yoloai new test --runtime ios
 - Runtime copying: 95%+ success rate
 - Cache invalidation: User-controlled, no surprise deletions
 - Version-based caching handles Xcode upgrades automatically
+- Concurrent base creation: Fully serialized via file locking (no race conditions)
 
 ## Future Enhancements
 
