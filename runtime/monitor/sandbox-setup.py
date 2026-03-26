@@ -337,41 +337,77 @@ class TartBackend(Backend):
             )
             # Don't log success/failure - silent operation
 
-        # Symlink mounted runtimes to system location if present
-        runtime_mount = "/Volumes/My Shared Files/m-coresim-runtime"
-        runtime_target = "/Library/Developer/CoreSimulator/Volumes"
+            # Run first launch to initialize device types and other Xcode components
+            result = subprocess.run(
+                ["sudo", "xcodebuild", "-runFirstLaunch"],
+                capture_output=True,
+                text=True
+            )
+            # Don't log success/failure - silent operation
 
-        if os.path.isdir(runtime_mount):
+        # Symlink mounted PrivateFrameworks to system location (required for CoreSimulator.framework)
+        privateframeworks_mount = "/Volumes/My Shared Files/m-PrivateFrameworks"
+        privateframeworks_target = "/Library/Developer/PrivateFrameworks"
+
+        if os.path.isdir(privateframeworks_mount):
+            # Create parent directory if needed
+            subprocess.run(["sudo", "mkdir", "-p", "/Library/Developer"],
+                         capture_output=True, text=True)
+
             # Only remove if it's already a symlink (safe)
-            if os.path.islink(runtime_target):
-                result = subprocess.run(["sudo", "rm", runtime_target],
+            if os.path.islink(privateframeworks_target):
+                result = subprocess.run(["sudo", "rm", privateframeworks_target],
                                       capture_output=True, text=True)
                 if result.returncode != 0:
                     import syslog
-                    syslog.syslog(syslog.LOG_ERR, f"Failed to remove runtime symlink: {result.stderr}")
+                    syslog.syslog(syslog.LOG_ERR, f"Failed to remove PrivateFrameworks symlink: {result.stderr}")
 
             # Create symlink (ln -sfn handles overwriting existing symlinks)
-            result = subprocess.run(["sudo", "ln", "-sfn", runtime_mount, runtime_target],
+            result = subprocess.run(["sudo", "ln", "-sfn", privateframeworks_mount, privateframeworks_target],
                                   capture_output=True, text=True)
             if result.returncode != 0:
                 import syslog
-                syslog.syslog(syslog.LOG_ERR, f"Failed to create runtime symlink: {result.stderr}")
+                syslog.syslog(syslog.LOG_ERR, f"Failed to create PrivateFrameworks symlink: {result.stderr}")
+
+        # NOTE: Mounting CoreSimulator Volumes from host does NOT work.
+        # CoreSimulator cannot discover runtimes from VirtioFS mounts, even with symlinks.
+        # Runtimes must be copied locally to /Library/Developer/CoreSimulator/Profiles/Runtimes/
+        # Users can copy from /Volumes/My Shared Files/m-Volumes/ if available on host.
 
         # Add iOS testing note to CLAUDE.md if Xcode is mounted (agent context)
         if os.path.isdir(xcode_mount):
             claude_md = os.path.expanduser("~/.claude/CLAUDE.md")
             os.makedirs(os.path.dirname(claude_md), exist_ok=True)
 
+            # Check if host has runtimes available to copy
+            runtime_mount = "/Volumes/My Shared Files/m-Volumes"
+            has_host_runtimes = os.path.isdir(runtime_mount)
+
             try:
                 with open(claude_md, "a") as f:
                     f.write("\n# iOS Simulator Testing\n\n")
-                    f.write("iOS/tvOS/watchOS/visionOS simulator testing is available.\n\n")
-                    f.write("Check available runtimes:\n")
+                    f.write("Xcode is mounted from the host. To enable iOS/tvOS/watchOS/visionOS testing:\n\n")
+
+                    if has_host_runtimes:
+                        f.write("## Copy runtime from host (fastest):\n")
+                        f.write("```bash\n")
+                        f.write("# See available runtimes on host\n")
+                        f.write("ls /Volumes/My\\ Shared\\ Files/m-Volumes/\n\n")
+                        f.write("# Copy iOS runtime (example)\n")
+                        f.write("sudo mkdir -p /Library/Developer/CoreSimulator/Profiles/Runtimes\n")
+                        f.write("sudo ditto \"/Volumes/My Shared Files/m-Volumes/iOS_*/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS\"*.simruntime \\\n")
+                        f.write("  /Library/Developer/CoreSimulator/Profiles/Runtimes/\n")
+                        f.write("sudo cp \"/Volumes/My Shared Files/m-Volumes/iOS_*/Library/Developer/CoreSimulator/Profiles/Runtimes/\"*/Contents/Info.plist \\\n")
+                        f.write("  /Library/Developer/CoreSimulator/Profiles/Runtimes/*/Contents/\n")
+                        f.write("```\n\n")
+
+                    f.write("## Or download runtime locally:\n")
+                    f.write("```bash\n")
+                    f.write("xcodebuild -downloadPlatform iOS\n")
+                    f.write("```\n\n")
+                    f.write("## Verify and use:\n")
                     f.write("```bash\n")
                     f.write("xcrun simctl list runtimes\n")
-                    f.write("```\n\n")
-                    f.write("Run tests:\n")
-                    f.write("```bash\n")
                     f.write("xcodebuild test -scheme YourScheme \\\n")
                     f.write("  -destination 'platform=iOS Simulator,name=iPhone 17 Pro'\n")
                     f.write("```\n")

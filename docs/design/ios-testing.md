@@ -1,19 +1,25 @@
 # iOS Testing Support Design
 
-**Status:** Design proposal
+**Status:** Implemented (Hybrid Approach)
 **Last updated:** 2026-03-26
 **Related:** `docs/dev/ios-testing-investigation.md` (investigation and validation)
 
 ## Overview
 
-Tart VMs automatically mount Xcode and simulator runtimes from the host, enabling iOS/tvOS/watchOS/visionOS testing with minimal VM disk usage.
+Tart VMs automatically mount Xcode from the host. **iOS simulator runtimes must be copied locally** because CoreSimulator cannot discover runtimes from VirtioFS mounts.
 
 ### Goals
 
-1. Automatic iOS simulator testing support in Tart VMs
-2. Minimize VM disk usage through VirtioFS mounting (~11GB usage vs ~100GB fully local)
-3. Zero configuration - just works if host has Xcode
-4. Dynamic updates - new host runtimes available on next VM start
+1. Automatic Xcode mounting for Tart VMs
+2. Minimize VM disk usage (~25GB usage vs ~100GB fully local with Xcode installed in VM)
+3. Auto-configuration - Xcode tools work immediately if host has Xcode
+4. Dynamic updates - Xcode updates on host available on next VM start
+
+### Revised Goals (after testing)
+
+- ✅ Mount Xcode and PrivateFrameworks from host
+- ❌ ~~Mount simulator runtimes~~ → **Doesn't work**: CoreSimulator cannot discover VirtioFS-mounted runtimes
+- ✅ Users copy or download runtimes locally (~8-16GB per runtime)
 
 ### Non-goals
 
@@ -21,17 +27,31 @@ Tart VMs automatically mount Xcode and simulator runtimes from the host, enablin
 - Docker backend support (no macOS container support)
 - Physical iOS device testing (out of scope)
 - Xcode UI testing (focus on command-line xcodebuild)
-- Downloading tools in VM (user's responsibility to install on host)
+- Mounting runtimes from host (discovered to be technically impossible)
+
+## Critical Finding: VirtioFS-Mounted Runtimes Don't Work
+
+**Symptom:** `xcrun simctl list runtimes` hangs indefinitely or shows no runtimes when `/Library/Developer/CoreSimulator/Volumes` is symlinked to a VirtioFS mount.
+
+**Root Cause:** CoreSimulator service cannot discover or access runtimes stored on VirtioFS mounts, even through symlinks. Testing showed that:
+- ✅ Local directory moved and symlinked works (symlink test in investigation)
+- ❌ VirtioFS mount symlinked doesn't work (actual VM testing)
+
+**Impact:** Original design assumed both Xcode and runtimes could be mounted. Actual implementation requires:
+- ✅ Mount Xcode and PrivateFrameworks from host (~13GB saved)
+- ❌ Cannot mount runtimes - must copy/download locally (~8-16GB per runtime in VM)
+
+**Workaround:** Users copy runtimes from `/Volumes/My Shared Files/m-Volumes/` (if host has them) or download with `xcodebuild -downloadPlatform iOS`.
 
 ## Architecture
 
-### Automatic mounting approach
+### Hybrid mounting approach (Implemented)
 
 **For all Tart VMs (no flag needed):**
-1. Try to mount standard Apple development paths from host
-2. Only mount if directories exist (silently skip if not)
-3. Setup script auto-configures if mounts are present
-4. No user intervention required
+1. Mount Xcode.app and PrivateFrameworks from host (if present)
+2. Setup script creates symlinks and runs xcodebuild -runFirstLaunch
+3. User copies or downloads runtimes locally in VM
+4. CoreSimulator discovers locally-stored runtimes
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -41,17 +61,21 @@ Tart VMs automatically mount Xcode and simulator runtimes from the host, enablin
 │  On VM start (every time):                                  │
 │    Check host for:                                          │
 │      /Applications/Xcode.app                                │
-│      /Library/Developer/CoreSimulator/Volumes/              │
 │      /Library/Developer/PrivateFrameworks                   │
 │    For each path that exists:                               │
 │      Add --dir argument to tart run command                 │
 │    Tart mounts directories via VirtioFS                     │
-│    Setup script detects mounts and configures paths         │
+│    Setup script:                                            │
+│      - Symlinks /Library/Developer/PrivateFrameworks        │
+│      - Runs xcode-select --switch                           │
+│      - Accepts Xcode license                                │
+│      - Runs xcodebuild -runFirstLaunch                      │
+│      - Adds instructions to CLAUDE.md for copying runtimes  │
 │                                                              │
 │  Result:                                                    │
-│    - Host has Xcode → iOS testing works automatically       │
-│    - Install Xcode later → works on next VM start           │
-│    - Install new runtime → available on next VM start       │
+│    - Host has Xcode → Xcode tools available in VM           │
+│    - User copies/downloads runtime → iOS testing works      │
+│    - Install Xcode later → detected on next VM start        │
 │    - Host has no Xcode → VM works normally (no iOS)         │
 │                                                              │
 └─────────────────────────────────────────────────────────────┘
@@ -59,27 +83,31 @@ Tart VMs automatically mount Xcode and simulator runtimes from the host, enablin
 
 ### VM Configuration
 
-**When host has Xcode + simulator runtimes:**
+**When host has Xcode (IMPLEMENTED):**
 
 **VM Configuration:**
 ```
 Mounts from host (read-only):
-  /Applications/Xcode.app
-  /Library/Developer/PrivateFrameworks
-  /Library/Developer/CoreSimulator/Volumes/  ← iOS runtimes
+  /Applications/Xcode.app                                  → /Volumes/My Shared Files/m-Xcode.app
+  /Library/Developer/PrivateFrameworks                     → /Volumes/My Shared Files/m-PrivateFrameworks
+                                                           → symlinked to /Library/Developer/PrivateFrameworks
 
 Local in VM (writable):
-  ~/Library/Developer/CoreSimulator/Devices/  (~600MB - simulator devices)
-  /Library/Developer/CoreSimulator/Images/    (~4KB - metadata)
-  /Library/Developer/CoreSimulator/Profiles/  (~5MB)
-  /opt/homebrew/                              (~2GB - if needed)
-  /private/var/                               (~1GB - logs, caches)
+  /Library/Developer/CoreSimulator/Profiles/Runtimes/      (~8-16GB per runtime - REQUIRED locally)
+  /Library/Developer/CoreSimulator/Devices/                (~600MB - simulator devices)
+  /Library/Developer/CoreSimulator/Images/                 (~4KB - metadata)
+  /Library/Developer/CoreSimulator/Caches/                 (~1GB - dyld caches)
+  /opt/homebrew/                                           (~2GB - if needed)
+  /private/var/                                            (~1GB - logs, caches)
 ```
 
+**Why runtimes must be local:**
+CoreSimulator cannot discover runtimes from VirtioFS mounts, even with symlinks. Testing confirmed that `xcrun simctl list runtimes` shows no runtimes when they're mounted via VirtioFS, but works correctly when runtimes are stored locally.
+
 **Disk usage (what's actually stored IN the VM):**
-- Mounted from host: ~27GB (Xcode 11GB + runtime 16GB) - takes 0GB in VM
-- Local VM storage: ~11GB (simulator devices, build artifacts, caches, logs)
-- **Total VM disk used: ~11GB** (with host tools) vs ~100GB (fully local)
+- Mounted from host: ~13GB (Xcode 11GB + PrivateFrameworks 2GB) - takes 0GB in VM
+- Local VM storage: ~12-25GB (one or more runtimes ~8-16GB each, plus devices/caches/logs)
+- **Total VM disk used: ~25GB** (with one runtime) vs ~100GB (fully local Xcode + runtime)
 
 **VM disk image size:**
 - Same for all VMs: ~50GB (standard Tart base)

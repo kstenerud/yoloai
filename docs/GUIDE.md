@@ -754,61 +754,87 @@ swift build
 
 ### iOS Simulator Testing (Tart only)
 
-Tart VMs automatically mount Xcode and simulator runtimes from your Mac.
+Tart VMs automatically mount Xcode from your Mac. **Simulator runtimes must be copied or downloaded locally in the VM.**
 
 **Prerequisites (on host Mac):**
 - Xcode installed at `/Applications/Xcode.app`
-- iOS/tvOS/watchOS/visionOS runtimes (download in Xcode > Settings > Components)
 
 **How it works:**
 
 1. Create any Tart VM: `yoloai new mysandbox`
-2. If host has Xcode → VM automatically mounts it
-3. If host has simulator runtimes → VM mounts them all
-4. No configuration needed - just works
+2. If host has Xcode → VM automatically mounts it and runs initial setup
+3. Copy runtime from host OR download it in the VM
+4. iOS testing works
+
+**Setup: Copy runtime from host (fastest if host has it)**
+
+```bash
+# Check what runtimes are available on host
+yoloai exec embsdk -- ls "/Volumes/My Shared Files/m-Volumes/"
+# Example output: iOS_23B86 (iOS 26.1), tvOS_23J579 (tvOS 26.1), etc.
+
+# Copy iOS runtime to VM (adjust iOS_* to match your host's runtime)
+yoloai exec embsdk -- bash <<'EOF'
+sudo mkdir -p /Library/Developer/CoreSimulator/Profiles/Runtimes
+sudo ditto "/Volumes/My Shared Files/m-Volumes/iOS_23B86/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.1.simruntime" \
+  /Library/Developer/CoreSimulator/Profiles/Runtimes/
+sudo cp "/Volumes/My Shared Files/m-Volumes/iOS_23B86/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.1.simruntime/Contents/Info.plist" \
+  "/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.1.simruntime/Contents/"
+EOF
+
+# Verify runtime is available
+yoloai exec embsdk -- xcrun simctl list runtimes
+```
+
+**Setup: Download runtime in VM (if host doesn't have it)**
+
+```bash
+# Download iOS runtime (this takes 10-15 minutes and ~8-16GB)
+yoloai exec embsdk -- xcodebuild -downloadPlatform iOS
+
+# Verify runtime is available
+yoloai exec embsdk -- xcrun simctl list runtimes
+```
 
 **Example: Running iOS tests**
 
 ```bash
-# Create sandbox (automatic iOS testing if Xcode on host)
-yoloai new embsdk ~/Projects/my-ios-app
-
-# Check what simulator runtimes are available
-yoloai exec embsdk -- xcrun simctl list runtimes
+# Create simulator device
+yoloai exec embsdk -- xcrun simctl create "Test iPhone" \
+  com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro \
+  com.apple.CoreSimulator.SimRuntime.iOS-26-1
 
 # Run iOS unit tests
 yoloai exec embsdk -- xcodebuild test \
   -scheme MyApp \
-  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
+  -destination 'platform=iOS Simulator,name=Test iPhone' \
   -resultBundlePath /tmp/test-results
 
-# Run tests on multiple platforms
+# Run tests on multiple platforms (requires copying/downloading tvOS runtime too)
 yoloai exec embsdk -- xcodebuild test -scheme MyApp \
-  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
+  -destination 'platform=iOS Simulator,name=Test iPhone' \
   -destination 'platform=tvOS Simulator,name=Apple TV 4K'
 ```
 
-**Adding more simulator runtimes:**
-
-1. On host Mac: Open Xcode > Settings > Components
-2. Download desired runtimes (iOS, tvOS, watchOS, visionOS)
-3. Restart sandbox: `yoloai exec embsdk -- exit` then run again
-4. New runtimes available immediately (no VM regeneration needed)
-
 **Disk usage:**
-- With host Xcode + runtimes: ~11GB used (in 50GB VM)
-- Without host tools: ~20GB used (normal development, no iOS testing)
+- Xcode mounted from host: 0GB (saves ~11GB)
+- iOS runtime local: ~8-16GB per OS version
+- Simulator devices/caches: ~2-5GB
+- **Total: ~25-40GB** (with 1-2 runtimes) vs ~100GB (Xcode + runtime both local)
+
+**Why runtimes must be local:**
+CoreSimulator cannot discover runtimes from VirtioFS mounts. Even with proper symlinks, `xcrun simctl` won't see mounted runtimes. This is a limitation of how CoreSimulator interacts with VirtioFS.
 
 **Troubleshooting:**
 
-*iOS tests don't work:*
-1. Verify Xcode installed on host: `ls /Applications/Xcode.app`
-2. Check runtimes on host: `xcrun simctl list runtimes` (run on host)
-3. Install missing tools on host, then restart VM
+*simctl hangs or shows no runtimes:*
+1. Verify PrivateFrameworks symlink exists: `yoloai exec embsdk -- ls -la /Library/Developer/PrivateFrameworks`
+2. If missing, restart the VM (setup script creates it on boot)
+3. Ensure runtime was copied to `/Library/Developer/CoreSimulator/Profiles/Runtimes/`
 
-*Specific runtime missing:*
-- Install on host in Xcode > Settings > Components
-- Restart VM to pick up new runtime
+*Xcode tools not found:*
+1. Verify Xcode installed on host: `ls /Applications/Xcode.app`
+2. Restart VM to trigger auto-mount and setup
 
 ## Development
 

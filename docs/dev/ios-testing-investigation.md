@@ -840,3 +840,126 @@ yoloai new sandbox --ios-testing --local-xcode  # Fully local
    - ❌ Xcode Cloud: External service, not self-hosted
    - ❌ Keep macOS-only: Doesn't meet user's iOS testing needs
    - ✅ **Solution:** Tart VM with 100GB disk and local Xcode installation works perfectly
+
+## Update: VirtioFS Mount Testing - CRITICAL FINDING ❌
+
+**Date:** 2026-03-26
+**Context:** Testing the implemented automatic mounting approach in actual Tart VM
+
+### Symptom
+
+After implementing automatic Xcode + runtime mounting, actual VM testing revealed:
+- ✅ `xcrun --version` works fine
+- ❌ `xcrun simctl list runtimes` **hangs indefinitely**
+- ❌ Even `xcrun simctl help` hangs
+
+### Investigation
+
+**Setup in VM:**
+```bash
+# Mounted from host via VirtioFS:
+/Volumes/My Shared Files/m-Xcode.app          # Xcode.app
+/Volumes/My Shared Files/m-PrivateFrameworks  # PrivateFrameworks
+/Volumes/My Shared Files/m-Volumes            # CoreSimulator runtimes
+
+# xcode-select configured:
+xcode-select -p  # → /Volumes/My Shared Files/m-Xcode.app/Contents/Developer
+```
+
+**Problem 1: Missing PrivateFrameworks symlink**
+
+Setup script failed to create `/Library/Developer/PrivateFrameworks` symlink. Without this:
+- xcodebuild cannot load CoreSimulator.framework
+- Error: `Library not loaded: /Library/Developer/PrivateFrameworks/CoreSimulator.framework/...`
+- Fix: `sudo ln -sfn "/Volumes/My Shared Files/m-PrivateFrameworks" /Library/Developer/PrivateFrameworks`
+
+**Problem 2: VirtioFS-mounted runtimes don't work**
+
+Even after creating proper symlinks:
+```bash
+sudo mkdir -p /Library/Developer/CoreSimulator
+sudo ln -s "/Volumes/My Shared Files/m-Volumes" /Library/Developer/CoreSimulator/Volumes
+```
+
+Result: `xcrun simctl list runtimes` still shows **no runtimes** (or hangs).
+
+### Root Cause
+
+**CoreSimulator cannot discover runtimes from VirtioFS mounts**, even through symlinks.
+
+**Critical difference from investigation "symlink test":**
+- ✅ **Symlink test** (line 656): Moved **local directory** to different location, created symlink → worked
+- ❌ **Actual VirtioFS**: Symlink points to **VirtioFS mount** → doesn't work
+
+VirtioFS mounts have different semantics than local filesystems. CoreSimulator's runtime discovery mechanism doesn't recognize runtimes accessed through VirtioFS.
+
+### Working Solution
+
+**Hybrid Approach (Validated in embsdk VM):**
+
+1. **Mount from host:**
+   - `/Applications/Xcode.app` → saves 11GB
+   - `/Library/Developer/PrivateFrameworks` → saves 2GB
+
+2. **Copy runtime locally:**
+   ```bash
+   sudo mkdir -p /Library/Developer/CoreSimulator/Profiles/Runtimes
+   
+   # Copy iOS runtime from host mount
+   sudo ditto "/Volumes/My Shared Files/m-Volumes/iOS_23B86/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.1.simruntime" \
+     /Library/Developer/CoreSimulator/Profiles/Runtimes/
+   
+   # Copy missing Info.plist (ditto hit permission error)
+   sudo cp "/Volumes/My Shared Files/m-Volumes/iOS_23B86/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.1.simruntime/Contents/Info.plist" \
+     "/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.1.simruntime/Contents/"
+   ```
+
+3. **Initialize Xcode:**
+   ```bash
+   sudo xcodebuild -runFirstLaunch
+   ```
+
+4. **Verify:**
+   ```bash
+   xcrun simctl list runtimes
+   # Output: iOS 26.1 (26.1 - 23B86) - com.apple.CoreSimulator.SimRuntime.iOS-26-1
+   
+   xcrun simctl list devicetypes | grep iPhone
+   # Output: iPhone 17 Pro, iPhone 16 Pro, etc.
+   
+   xcrun simctl create "Test iPhone" com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro com.apple.CoreSimulator.SimRuntime.iOS-26-1
+   # Output: B4BE9406-AE93-4D47-B8B7-C65FDDF324F0 (device created successfully)
+   ```
+
+### Disk Usage (Actual)
+
+**embsdk VM after fixing:**
+- Total VM size: 93GB (provisioned)
+- Used: ~25GB
+  - iOS runtime locally: ~15GB
+  - System + tools: ~10GB
+- Mounted from host (0GB in VM):
+  - Xcode: ~11GB
+  - PrivateFrameworks: ~2GB
+
+**Savings: ~13GB** compared to local Xcode installation
+
+### Conclusion
+
+**Original design assumption was WRONG:**
+- ❌ Cannot mount CoreSimulator/Volumes from host
+- ✅ Can mount Xcode.app and PrivateFrameworks
+
+**Updated implementation:**
+- Mount Xcode tools (saves ~13GB per VM)
+- Copy or download runtimes locally (~8-16GB per runtime)
+- Total VM size: ~25-40GB (vs ~100GB with local Xcode)
+
+**Why symlink test was misleading:**
+The symlink test moved a **local directory** and symlinked it, proving CoreSimulator works with symlinks. But VirtioFS mounts have different filesystem semantics that break CoreSimulator's runtime discovery, even through symlinks.
+
+**Impact on design:**
+- `runtime/tart/tart.go`: Remove CoreSimulator/Volumes from auto-mount list
+- `runtime/monitor/sandbox-setup.py`: Add PrivateFrameworks symlink, remove Volumes symlink, add -runFirstLaunch
+- `docs/design/ios-testing.md`: Update to reflect hybrid approach
+- `docs/GUIDE.md`: Add runtime copy instructions for users

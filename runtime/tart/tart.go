@@ -442,12 +442,13 @@ func (r *Runtime) buildRunArgs(vmName, sandboxPath string, mounts []runtime.Moun
 	mergedMounts := make(map[string]runtime.MountSpec) // key = Source path
 
 	// 1. Add Xcode system paths (checked at every start)
+	// NOTE: CoreSimulator/Volumes is NOT mounted because CoreSimulator cannot
+	// discover runtimes from VirtioFS mounts. Runtimes must be copied locally.
 	xcodePaths := []struct {
 		host string
 		name string
 	}{
 		{"/Applications/Xcode.app", "m-Xcode.app"},
-		{"/Library/Developer/CoreSimulator/Volumes", "m-coresim-runtime"},
 		{"/Library/Developer/PrivateFrameworks", "m-PrivateFrameworks"},
 	}
 
