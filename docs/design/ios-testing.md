@@ -113,7 +113,11 @@ func (r *Runtime) buildRunArgs(vmName, sandboxPath string, mounts []runtime.Moun
     // Share the sandbox directory into the VM
     args = append(args, "--dir", fmt.Sprintf("%s:%s", sharedDirName, sandboxPath))
 
-    // Always check for Xcode paths (regardless of instance.json config)
+    // Build merged mount list: Xcode system paths + user-specified mounts
+    // Deduplication: user-specified mounts take precedence over system paths
+    mergedMounts := make(map[string]runtime.MountSpec) // key = Source path
+
+    // 1. Add Xcode system paths (checked at every start)
     xcodePaths := []struct {
         host string
         name string
@@ -125,12 +129,15 @@ func (r *Runtime) buildRunArgs(vmName, sandboxPath string, mounts []runtime.Moun
 
     for _, p := range xcodePaths {
         if info, err := os.Stat(p.host); err == nil && info.IsDir() {
-            dirSpec := fmt.Sprintf("%s:%s:ro", p.name, p.host)
-            args = append(args, "--dir", dirSpec)
+            mergedMounts[p.host] = runtime.MountSpec{
+                Source:   p.host,
+                Target:   "/Volumes/My Shared Files/" + p.name,
+                ReadOnly: true,
+            }
         }
     }
 
-    // Add user-specified mounts from instance.json
+    // 2. Add user-specified mounts (override system paths if same Source)
     for _, m := range mounts {
         // Skip anything under the sandbox dir (already shared)
         if strings.HasPrefix(m.Source, sandboxPath+"/") || m.Source == sandboxPath {
@@ -140,6 +147,11 @@ func (r *Runtime) buildRunArgs(vmName, sandboxPath string, mounts []runtime.Moun
         if info, err := os.Stat(m.Source); err != nil || !info.IsDir() {
             continue
         }
+        mergedMounts[m.Source] = m  // Overwrites system path if duplicate
+    }
+
+    // 3. Build --dir arguments from merged list
+    for _, m := range mergedMounts {
         dirName := mountDirName(m.Source)
         dirSpec := fmt.Sprintf("%s:%s", dirName, m.Source)
         if m.ReadOnly {
@@ -151,6 +163,16 @@ func (r *Runtime) buildRunArgs(vmName, sandboxPath string, mounts []runtime.Moun
     return append(args, vmName)
 }
 ```
+
+**Integration with existing runtime:**
+- Called from `Start()` at line 238 (already exists)
+- Receives `cfg.Mounts` loaded from instance.json (line 227-235)
+- Returns `--dir` arguments passed to `tart run` (line 251)
+
+**Deduplication strategy:**
+- User-specified mounts **override** system Xcode paths if same Source
+- Example: User mounts `/Applications/Xcode.app:rw` → takes precedence over system's `:ro`
+- Prevents duplicate `--dir` arguments for the same path
 
 **Key points:**
 - Xcode paths checked at **every VM start** (not stored in instance.json)
@@ -192,10 +214,16 @@ class TartBackend:
         if os.path.isdir(runtime_mount):
             # Only remove if it's already a symlink (safe)
             if os.path.islink(runtime_target):
-                subprocess.run(["sudo", "rm", runtime_target], capture_output=True)
+                result = subprocess.run(["sudo", "rm", runtime_target],
+                                      capture_output=True, text=True)
+                if result.returncode != 0:
+                    syslog.syslog(syslog.LOG_ERR, f"Failed to remove runtime symlink: {result.stderr}")
+
             # Create symlink (ln -sfn handles overwriting existing symlinks)
-            subprocess.run(["sudo", "ln", "-sfn", runtime_mount, runtime_target],
-                         capture_output=True)
+            result = subprocess.run(["sudo", "ln", "-sfn", runtime_mount, runtime_target],
+                                  capture_output=True, text=True)
+            if result.returncode != 0:
+                syslog.syslog(syslog.LOG_ERR, f"Failed to create runtime symlink: {result.stderr}")
 ```
 
 **Note:** Silent operation - no output unless errors. Mounts either exist or they don't.
@@ -310,10 +338,17 @@ No user-facing errors for iOS testing. The system either works silently or doesn
 - User discovers when they try xcodebuild (command not found or no runtimes)
 
 **User action if iOS testing doesn't work:**
-1. Install Xcode on host
-2. Download simulator runtimes in Xcode > Settings > Components
+1. Install Xcode on host at `/Applications/Xcode.app` (default location)
+2. Download simulator runtimes in Xcode > Settings > Platforms & SDKs
 3. Restart VM (no regeneration needed)
 4. iOS testing now works
+
+**Xcode installation quality:**
+- yoloAI checks `os.path.isdir()` on `/Applications/Xcode.app`
+- Does NOT validate that Xcode is complete, uncorrupted, or functional
+- User responsibility to ensure Xcode is properly installed and licensed
+- Incomplete/corrupted Xcode will mount but xcodebuild will fail with errors
+- Troubleshooting: User should verify Xcode works on host before filing issues
 
 **Implementation notes:**
 - No warnings or prompts during VM creation
@@ -338,15 +373,29 @@ No user-facing errors for iOS testing. The system either works silently or doesn
 
 ### Manual Testing Checklist
 
+**Basic scenarios:**
 - [ ] Host with Xcode + runtimes → iOS testing works automatically
 - [ ] Host with Xcode only → xcodebuild works, simctl shows no runtimes
 - [ ] Host with no Xcode → VM works normally (no iOS testing)
 - [ ] Install Xcode on host, restart VM → iOS testing now works
 - [ ] Install new runtime on host, restart VM → new runtime available
 - [ ] Multiple VMs share host's Xcode simultaneously
+
+**Dynamic changes:**
+- [ ] Remove Xcode on host while VM running → VM continues working (mount stays active)
+- [ ] Restart VM after Xcode removed → VM starts normally (no iOS testing, no errors)
+- [ ] Update Xcode on host while VM running → VM uses old version until restart
+- [ ] Restart VM after Xcode update → VM uses new Xcode version
+
+**Deduplication:**
+- [ ] User explicitly mounts `/Applications/Xcode.app:rw` → user mount takes precedence
+- [ ] No duplicate --dir arguments in tart run command
+
+**Setup and configuration:**
 - [ ] Setup script silent operation (no output unless errors)
 - [ ] xcode-select points to mounted Xcode
 - [ ] Symlink to mounted runtimes created correctly
+- [ ] Error logging to syslog when xcode-select or symlink commands fail
 
 ## Documentation Updates
 
