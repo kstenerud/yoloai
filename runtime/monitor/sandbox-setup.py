@@ -301,10 +301,18 @@ class TartBackend(Backend):
                 subprocess.run(["sudo", "ln", "-sf", source, target], capture_output=True)
 
         # Auto-configure iOS testing if Xcode is mounted from host
-        xcode_mount = "/Volumes/My Shared Files/m-Xcode.app"
-        xcode_developer = os.path.join(xcode_mount, "Contents/Developer")
+        # Supports any Xcode name (m-Xcode.app, m-Xcode-Beta.app, etc.)
+        import glob
+        xcode_mounts = glob.glob("/Volumes/My Shared Files/m-Xcode*.app")
 
-        if os.path.isdir(xcode_developer):
+        if xcode_mounts:
+            xcode_mount = xcode_mounts[0]  # Use first found (should only be one)
+            xcode_developer = os.path.join(xcode_mount, "Contents/Developer")
+        else:
+            xcode_mount = None
+            xcode_developer = None
+
+        if xcode_developer and os.path.isdir(xcode_developer):
             # Point xcode-select to the mounted Xcode so xcrun can find simctl and other tools
             result = subprocess.run(
                 ["sudo", "xcode-select", "--switch", xcode_developer],

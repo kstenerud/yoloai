@@ -23,6 +23,17 @@ import (
 	"github.com/kstenerud/yoloai/runtime/monitor"
 )
 
+// getXcodeSelectPath returns the active Xcode developer directory path from xcode-select.
+// Returns empty string if xcode-select is not configured or fails.
+func getXcodeSelectPath() string {
+	cmd := exec.Command("xcode-select", "-p")
+	output, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(output))
+}
+
 func init() {
 	runtime.Register("tart", func(ctx context.Context) (runtime.Runtime, error) {
 		return New(ctx)
@@ -444,12 +455,24 @@ func (r *Runtime) buildRunArgs(vmName, sandboxPath string, mounts []runtime.Moun
 	// 1. Add Xcode system paths (checked at every start)
 	// NOTE: CoreSimulator/Volumes is NOT mounted because CoreSimulator cannot
 	// discover runtimes from VirtioFS mounts. Runtimes must be copied locally.
-	xcodePaths := []struct {
+	var xcodePaths []struct {
 		host string
 		name string
-	}{
-		{"/Applications/Xcode.app", "m-Xcode.app"},
-		{"/Library/Developer/PrivateFrameworks", "m-PrivateFrameworks"},
+	}
+
+	// Detect active Xcode via xcode-select (supports multiple Xcodes, custom paths)
+	if xcodeDevPath := getXcodeSelectPath(); xcodeDevPath != "" {
+		// xcode-select returns: /Applications/Xcode.app/Contents/Developer
+		// We need: /Applications/Xcode.app
+		xcodePath := filepath.Dir(filepath.Dir(xcodeDevPath))
+		mountName := "m-" + filepath.Base(xcodePath)
+		xcodePaths = append(xcodePaths, struct{ host, name string }{xcodePath, mountName})
+
+		// Also mount PrivateFrameworks from the same Xcode installation
+		privateFrameworks := filepath.Join(filepath.Dir(xcodeDevPath), "PrivateFrameworks")
+		if info, err := os.Stat(privateFrameworks); err == nil && info.IsDir() {
+			xcodePaths = append(xcodePaths, struct{ host, name string }{privateFrameworks, "m-PrivateFrameworks"})
+		}
 	}
 
 	for _, p := range xcodePaths {
