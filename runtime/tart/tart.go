@@ -745,7 +745,14 @@ func (r *Runtime) runSetupScript(ctx context.Context, vmName, sandboxPath string
 		}
 
 		// Remove existing dir/file before symlinking (ln -sfn won't replace a directory)
-		symlinkCmd := fmt.Sprintf("rm -rf '%s' && ln -sfn '%s' '%s'", target, vfsPath, target)
+		// System paths (like /Library/*) require sudo
+		needsSudo := strings.HasPrefix(target, "/Library/") || strings.HasPrefix(target, "/System/")
+		var symlinkCmd string
+		if needsSudo {
+			symlinkCmd = fmt.Sprintf("sudo rm -rf '%s' && sudo ln -sfn '%s' '%s'", target, vfsPath, target)
+		} else {
+			symlinkCmd = fmt.Sprintf("rm -rf '%s' && ln -sfn '%s' '%s'", target, vfsPath, target)
+		}
 		args := execArgs(vmName, "bash", "-c", symlinkCmd)
 		slog.Debug("tart setup: creating symlink", "vm", vmName, "target", target, "vfsPath", vfsPath, "cmd", symlinkCmd)
 		if _, err := r.runTart(ctx, args...); err != nil {
@@ -925,6 +932,18 @@ func (r *Runtime) addSystemMounts(cfg *runtime.InstanceConfig) {
 			ReadOnly: true,
 		})
 		slog.Debug("tart: auto-detected CoreSimulator", "path", coreSimulatorHost)
+	}
+
+	// Private frameworks needed by Xcode (CoreSimulator.framework, etc.)
+	// These are system-level frameworks that Xcode.app depends on but aren't bundled with it
+	privateFrameworksHost := "/Library/Developer/PrivateFrameworks"
+	if info, err := os.Stat(privateFrameworksHost); err == nil && info.IsDir() {
+		cfg.Mounts = append(cfg.Mounts, runtime.MountSpec{
+			Source:   privateFrameworksHost,
+			Target:   "/Library/Developer/PrivateFrameworks",
+			ReadOnly: true,
+		})
+		slog.Debug("tart: auto-detected PrivateFrameworks", "path", privateFrameworksHost)
 	}
 }
 
