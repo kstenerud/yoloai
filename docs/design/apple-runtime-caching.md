@@ -272,6 +272,8 @@ Overlap scores (exact version matching):
 
 ### Runtime Detection and Copying
 
+**IMPORTANT:** Runtime discovery must happen on the **host**, not inside the VM. CoreSimulator cannot discover runtimes from VirtioFS mounts (see `docs/dev/ios-testing-investigation.md` for details). The host must query available runtimes and coordinate copying them into the VM.
+
 #### Runtime Directory Mapping
 
 Map platform name to CoreSimulator directory prefix:
@@ -287,34 +289,49 @@ var runtimePrefixes = map[string]string{
 
 #### Finding Runtimes on Host
 
-**Source:** `/Volumes/My Shared Files/m-Volumes/` (VirtioFS mount of host's `/Library/Developer/CoreSimulator/Volumes/`)
-
-**Version selection:**
-- No version specified → pick latest by build number (e.g., iOS_23B86 over iOS_23A343)
-- Version specified → match against runtime version string in Info.plist
-
-**Algorithm:**
-```
-1. List directories in /Volumes/My Shared Files/m-Volumes/
-2. Filter by prefix (e.g., "iOS_" for ios platform)
-3. For each match:
-   - Read Info.plist from runtime bundle
-   - Extract version (e.g., "26.1")
-   - Extract build (e.g., "23B86")
-4. If version specified, filter by version match
-5. Sort by build number descending
-6. Pick first (latest)
-```
-
-#### Copying Runtime
-
-**Copy procedure (same as manual process, but automated):**
+**Runtime discovery happens on the host via `xcrun simctl`:**
 
 ```bash
-# 1. Create target directory
+# Query host for available runtimes
+xcrun simctl list runtimes --json
+```
+
+**Version selection:**
+- No version specified → pick latest by version number (e.g., 26.2 > 26.1)
+- Version specified → match against runtime version from simctl output
+
+**Algorithm (executed on host):**
+```
+1. Run: xcrun simctl list runtimes --json
+2. Parse JSON output to extract runtimes with:
+   - Platform (iOS, tvOS, watchOS, visionOS)
+   - Version (e.g., "26.2")
+   - Build ID (e.g., "23B86")
+   - Bundle path (e.g., "/Library/Developer/CoreSimulator/Volumes/iOS_23B86/Library/...")
+3. Filter by platform (e.g., "iOS" for ios platform)
+4. If version specified, filter by version match
+5. Sort by version number descending, then build as tiebreaker
+6. Pick first (latest)
+7. Return bundle path for copying
+```
+
+**Note:** This query must happen on the host before creating the VM, so we know which runtime bundles to copy into the base image.
+
+#### Copying Runtime into VM
+
+**Prerequisites:**
+1. Host has queried available runtimes via `xcrun simctl list runtimes --json`
+2. Selected runtime bundle path is known (e.g., `/Library/Developer/CoreSimulator/Volumes/iOS_23B86/...`)
+3. VM is running with VirtioFS mount of the runtime directory (read-only)
+
+**Copy procedure (executed inside the VM via `tart exec`):**
+
+```bash
+# 1. Create target directory in VM
 sudo mkdir -p /Library/Developer/CoreSimulator/Profiles/Runtimes
 
-# 2. Copy runtime bundle
+# 2. Copy runtime bundle from VirtioFS mount to local VM storage
+# (CoreSimulator cannot use VirtioFS mounts directly, so we copy locally)
 sudo ditto \
   "/Volumes/My Shared Files/m-Volumes/iOS_23B86/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.1.simruntime" \
   /Library/Developer/CoreSimulator/Profiles/Runtimes/
@@ -324,9 +341,11 @@ sudo cp \
   "/Volumes/My Shared Files/m-Volumes/iOS_23B86/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.1.simruntime/Contents/Info.plist" \
   "/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.1.simruntime/Contents/"
 
-# 4. Verify runtime is visible
+# 4. Verify runtime is visible to CoreSimulator in VM
 xcrun simctl list runtimes | grep "iOS 26.1"
 ```
+
+**Key insight:** Runtimes must be copied to local VM storage (`/Library/Developer/CoreSimulator/...`), not used from VirtioFS mounts. This is why base image caching provides value — copy once to base, clone the base for each sandbox.
 
 **Error handling:**
 - If host has no matching runtime → Fail with helpful error message
@@ -590,6 +609,30 @@ yoloai new test --runtime ios
 ## Implementation
 
 See implementation plan: `docs/dev/plans/apple-runtime-caching.md`
+
+### Integration Points
+
+**Base image creation orchestration** should live in the **sandbox package** (`sandbox/create.go`):
+1. CLI parses `--runtime` flags and passes to sandbox creation
+2. Sandbox package resolves base image name (generate cache key)
+3. Sandbox package checks if base exists (call Tart backend to list VMs)
+4. If base doesn't exist, sandbox package creates it:
+   - Calls Tart backend helper to create temp VM
+   - Discovers runtimes on host (via `xcrun simctl`)
+   - Calls Tart backend helper to copy runtimes into temp VM
+   - Calls Tart backend helper to snapshot temp VM as new base
+5. Sandbox package calls `runtime.Create()` with resolved base image name
+
+**Tart-specific logic** lives in the **Tart runtime package** (`runtime/tart/`):
+- Runtime discovery on host (`FindRuntimes()`)
+- Runtime copying into VM (`CopyRuntimeToVM()`)
+- Base image snapshotting (`SnapshotAsBase()`)
+- Parent base selection (`FindBestParentBase()`)
+
+**Rationale:** The sandbox package orchestrates the high-level flow (what bases to create), while the Tart package provides the low-level mechanics (how to create them). This separation allows for:
+- Platform-specific runtime logic stays in the runtime backend
+- Sandbox package remains backend-agnostic (could support other runtimes in future)
+- Tart package owns all Tart CLI interactions
 
 ## Open Questions
 

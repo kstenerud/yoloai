@@ -179,5 +179,34 @@ Implementation plan for Apple runtime base image caching feature. Enables sandbo
 ## Files to Modify
 
 - `internal/cli/commands.go` - Add `--runtime` flag to `new` command
-- `runtime/tart/tart.go` - Integrate caching into Create() flow, add snapshotting
-- `internal/cli/system.go` - Register runtime subcommand (darwin only)
+- `runtime/tart/tart.go` - Add helper functions for runtime operations
+- `sandbox/create.go` - Orchestrate base image resolution and creation
+- `internal/cli/system.go` - Register runtime subcommand (darwin only):
+  ```go
+  if runtime.GOOS == "darwin" {
+      cmd.AddCommand(newSystemRuntimeCmd())
+  }
+  ```
+- `config/dirs.go` - Add metadata directory helper:
+  ```go
+  func TartBaseMetadataDir() string {
+      return filepath.Join(YoloaiDir(), "tart-base-metadata")
+  }
+  ```
+
+## Architecture Notes
+
+**Base Image Creation Flow:**
+1. Sandbox package (`sandbox/create.go`) orchestrates the high-level flow
+2. Tart package (`runtime/tart/`) provides low-level mechanics
+3. Separation allows platform-specific logic to stay in runtime backend
+
+**Runtime Discovery:**
+- Must happen on **host**, not in VM
+- CoreSimulator cannot discover runtimes from VirtioFS mounts
+- Use `xcrun simctl list runtimes --json` on host before VM creation
+
+**Snapshotting:**
+- Verified: `tart clone` successfully snapshots VM state
+- System files (like `/Library/Developer/CoreSimulator/...`) persist through cloning
+- Stop VM before cloning to ensure all changes are flushed to disk
