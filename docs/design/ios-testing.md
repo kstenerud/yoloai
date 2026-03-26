@@ -286,75 +286,54 @@ No user-facing errors for iOS testing. The system either works silently or doesn
 
 ## Future Enhancements
 
-### Multiple iOS runtime support
+### None currently planned
 
-Allow mounting multiple iOS versions:
+The automatic mounting approach covers all expected use cases:
+- ✅ All simulator platforms (iOS/tvOS/watchOS/visionOS) work automatically
+- ✅ Multiple runtime versions already supported (mount entire Volumes directory)
+- ✅ Shared mounts across VMs (VirtioFS handles this)
+- ✅ Dynamic updates (new host runtimes available on VM restart)
 
-```yaml
-ios_testing:
-  runtimes:
-    - version: "26.1"
-      mount: true  # Mount from host
-    - version: "25.0"
-      download: true  # Download in VM
-```
+If additional features are needed in the future, they should maintain the current philosophy:
+- No configuration required
+- Silent operation
+- User provides tools on host, yoloAI provides plumbing
 
-### Runtime version selection
+## Resolved Design Questions
 
-Auto-detect required iOS version from Xcode project:
+**1. Xcode updates while VM running:**
+- ✅ **Decision:** Mounts established at VM start time
+- Updating Xcode on host while VM is running won't affect VM until restart
+- Document: "After updating Xcode on host, restart VM to use new version"
+- No detection or version checking needed
 
-```go
-// Parse .xcodeproj to find IPHONEOS_DEPLOYMENT_TARGET
-// Select matching runtime
-// Download if not available
-```
+**2. Multiple Xcode installations:**
+- ✅ **Decision:** Always mount `/Applications/Xcode.app` (standard location)
+- Users with multiple Xcodes can use `xcode-select` on host to symlink preferred version
+- Keep it simple - don't try to detect or choose between multiple installations
 
-### Xcode version management
+**3. Runtime version management:**
+- ✅ **Decision:** Mount entire `/Library/Developer/CoreSimulator/Volumes/` directory
+- Includes all installed runtimes (iOS, tvOS, watchOS, visionOS, all versions)
+- Let xcodebuild/simctl choose appropriate runtime based on project requirements
+- No manual selection or configuration needed
 
-Support multiple Xcode versions on host:
+**4. Simulator device persistence:**
+- ✅ **Decision:** Devices stored in VM's `~/Library/Developer/CoreSimulator/Devices/`
+- Backed by VM disk - persist across VM restarts automatically
+- Lost when VM is deleted/recreated (expected behavior)
+- No special handling needed
 
-```bash
-# Use specific Xcode version
-yoloai new embsdk --ios-testing --xcode-version 15.4
-```
+**5. tvOS/watchOS/visionOS support:**
+- ✅ **Decision:** Already works! All simulator platforms in same `Volumes/` directory
+- Mounting entire `Volumes/` provides all simulator types automatically
+- No future enhancement needed - works out of the box
 
-### Performance optimization
-
-- Parallel runtime downloads
-- Cached runtime downloads in yoloAI cache directory
-- Shared runtime mounts across multiple VMs
-
-## Open Questions
-
-1. **Xcode updates:**
-   - What happens when host Xcode is updated while VM is running?
-   - **Proposed:** Document that VM restart required after host Xcode update
-   - Could detect version mismatch on VM start and warn?
-
-2. **Multiple Xcode installations:**
-   - Some developers have multiple Xcode versions (Xcode.app, Xcode-beta.app)
-   - **Proposed:** Always use `/Applications/Xcode.app`, ignore others
-   - Or use `xcode-select -p` to find active version?
-
-3. **Runtime version management:**
-   - If host has multiple iOS runtimes, which to mount?
-   - **Proposed:** Mount entire Volumes directory (includes all runtimes)
-   - Let xcodebuild/simctl choose appropriate version
-
-4. **Simulator device persistence:**
-   - Simulator devices are stored in VM's CoreSimulator/Devices (backed by disk)
-   - Persist across VM restarts automatically
-   - Recreating VM loses devices (expected behavior)
-
-5. **tvOS/watchOS/visionOS support:**
-   - Same approach should work for other simulator platforms
-   - Runtimes all in same /Library/Developer/CoreSimulator/Volumes/
-   - **Proposed:** Future enhancement, same `--ios-testing` flag covers all
-
-6. **Interactive prompts:**
-   - Should warnings require user confirmation or just display?
-   - **Proposed:** Display warnings, let user Ctrl+C if they want to abort
-   - Avoid blocking prompts unless critically necessary
+**6. Interactive prompts:**
+- ✅ **Decision:** No prompts, warnings, or user interaction
+- Silent operation - mounts either exist or they don't
+- User discovers iOS testing capability by trying to use it
+- Removed from design entirely
 
 ## Success Metrics
 
