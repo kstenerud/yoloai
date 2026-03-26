@@ -827,7 +827,23 @@ All sandboxes upgraded.
 - **C. Prompt user** (ask before 15-min download)
 - **D. Flag-gated** (`--download-if-missing`)
 
-**Recommendation:** Option B (fail with message) + Option D (opt-in flag).
+**Decision:** ✅ **RESOLVED** - Option B (fail with helpful message).
+- No automatic downloading
+- No `--download-if-missing` flag
+- Clear error message with next steps:
+  ```
+  Error: iOS runtime not found on host.
+
+  To fix:
+  1. On host Mac: Open Xcode > Settings > Platforms
+  2. Download iOS Simulator runtime
+  3. Restart and try again
+
+  Or install manually in VM:
+    yoloai exec sandbox -- xcodebuild -downloadPlatform iOS
+  ```
+- Keeps workflow simple and predictable
+- User stays in control of where/when downloads happen
 
 ### 5. Concurrent Base Creation
 
@@ -839,7 +855,12 @@ All sandboxes upgraded.
 - **C. Detect in-progress** (second user waits and uses result)
 - **D. Ignore** (rare enough not to worry)
 
-**Recommendation:** Option D (ignore for MVP) → Option A (lock file) in Phase 5.
+**Decision:** ✅ **RESOLVED** - Option D (document but don't fix).
+- Not worth implementing for MVP
+- Rare scenario (requires two users creating exact same runtime combo simultaneously)
+- Worst case: duplicate work, last one wins (harmless)
+- Document as known limitation in implementation notes
+- Can add lock file later if users report issues
 
 ### 6. Multiple Xcode Versions
 
@@ -851,7 +872,52 @@ All sandboxes upgraded.
 - **C. Multiple Xcode support** (mount all, let user choose)
 - **D. Xcode path flag** (`--xcode-path /Applications/Xcode-15.app`)
 
-**Recommendation:** Option A (single Xcode) for MVP → Option B (xcode-select) later.
+**Decision:** ✅ **RESOLVED** - Option B (detect via xcode-select).
+- Respect user's xcode-select setting on host
+- Works with Xcodes at any location (standard or custom)
+
+**Implementation:**
+```go
+// In buildRunArgs(), detect active Xcode:
+xcodeDevPath := getCommandOutput("xcode-select", "-p")
+// e.g., "/Applications/Xcode-Beta.app/Contents/Developer"
+
+xcodePath := filepath.Dir(filepath.Dir(xcodeDevPath))
+// e.g., "/Applications/Xcode-Beta.app"
+
+// Generate VirtioFS mount name from Xcode path
+mountName := "m-" + filepath.Base(xcodePath)
+// e.g., "m-Xcode-Beta.app"
+
+// Mount to VM at: /Volumes/My Shared Files/m-Xcode-Beta.app
+```
+
+**In VM (setup script):**
+```python
+# Auto-detect any mounted Xcode (supports any name)
+xcode_mounts = glob.glob("/Volumes/My Shared Files/m-Xcode*.app")
+if xcode_mounts:
+    xcode_mount = xcode_mounts[0]  # Use first (should only be one)
+    xcode_developer = os.path.join(xcode_mount, "Contents/Developer")
+    subprocess.run(["sudo", "xcode-select", "--switch", xcode_developer])
+```
+
+**Why this works:**
+- VirtioFS can mount any path (standard `/Applications/Xcode.app` or custom `~/Developer/Xcode-Beta.app`)
+- Xcode.app is self-contained - works from any location
+- Path doesn't need to match between host and VM
+- Setup script auto-detects mounted Xcode (no hardcoded paths)
+
+**User workflow:**
+```bash
+# On host: switch to beta Xcode
+sudo xcode-select -s /Applications/Xcode-Beta.app
+
+# Create sandbox (auto-mounts the selected Xcode)
+yoloai new test --apple-runtime ios
+# → Mounts Xcode-Beta.app
+# → VM uses beta Xcode and its runtimes
+```
 
 ## Success Metrics
 
