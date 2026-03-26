@@ -279,71 +279,104 @@ class TartBackend(Backend):
         """Tart-specific setup: create VirtioFS mount symlinks via sudo."""
         log_info("sandbox.backend_setup", "Tart backend setup", backend="tart")
 
+        # Create symlinks for user-specified mounts
         mount_map = self.cfg.get("mount_map", {})
-        if not mount_map:
-            return
+        if mount_map:
+            log_debug("tart.symlinks", "creating VirtioFS mount symlinks")
+            for target, source in mount_map.items():
+                parent = os.path.dirname(target)
+                subprocess.run(["sudo", "mkdir", "-p", parent], capture_output=True)
 
-        log_debug("tart.symlinks", "creating VirtioFS mount symlinks")
-        for target, source in mount_map.items():
-            parent = os.path.dirname(target)
-            subprocess.run(["sudo", "mkdir", "-p", parent], capture_output=True)
+                # Remove existing symlink or empty directory
+                if os.path.islink(target):
+                    subprocess.run(["sudo", "rm", "-f", target], capture_output=True)
+                elif os.path.isdir(target):
+                    # Check if empty
+                    try:
+                        if not os.listdir(target):
+                            subprocess.run(["sudo", "rmdir", target], capture_output=True)
+                    except OSError:
+                        pass
 
-            # Remove existing symlink or empty directory
-            if os.path.islink(target):
-                subprocess.run(["sudo", "rm", "-f", target], capture_output=True)
-            elif os.path.isdir(target):
-                # Check if empty
-                try:
-                    if not os.listdir(target):
-                        subprocess.run(["sudo", "rmdir", target], capture_output=True)
-                except OSError:
-                    pass
+                subprocess.run(["sudo", "ln", "-sf", source, target], capture_output=True)
 
-            subprocess.run(["sudo", "ln", "-sf", source, target], capture_output=True)
+        # Auto-configure iOS testing if Xcode is mounted from host
+        xcode_mount = "/Volumes/My Shared Files/m-Xcode.app"
+        xcode_developer = os.path.join(xcode_mount, "Contents/Developer")
 
-        # Configure xcode-select and accept license if Xcode is mounted from host
-        xcode_developer = "/Users/admin/host-xcode/Contents/Developer"
         if os.path.isdir(xcode_developer):
             # Point xcode-select to the mounted Xcode so xcrun can find simctl and other tools
-            log_debug("tart.xcode_select", "configuring xcode-select", developer_dir=xcode_developer)
             result = subprocess.run(
                 ["sudo", "xcode-select", "--switch", xcode_developer],
                 capture_output=True,
                 text=True
             )
             if result.returncode != 0:
-                log_debug("tart.xcode_select", "xcode-select failed", stderr=result.stderr)
+                import syslog
+                syslog.syslog(syslog.LOG_ERR, f"Failed to configure xcode-select: {result.stderr}")
 
-            # Add DEVELOPER_DIR to shell profile so it's set in interactive shells
-            shell_profile = os.path.expanduser("~/.zprofile")
+            # Add DEVELOPER_DIR to shell profiles for persistence
             developer_dir_export = f'export DEVELOPER_DIR="{xcode_developer}"\n'
-            try:
-                # Check if already present
-                if os.path.exists(shell_profile):
-                    with open(shell_profile, "r") as f:
-                        content = f.read()
-                    if "DEVELOPER_DIR" not in content:
-                        with open(shell_profile, "a") as f:
-                            f.write(developer_dir_export)
-                else:
-                    with open(shell_profile, "w") as f:
+            path_export = f'export PATH="{xcode_developer}/usr/bin:$PATH"\n'
+
+            for profile in ["~/.zprofile", "~/.bash_profile"]:
+                profile_path = os.path.expanduser(profile)
+                try:
+                    # Append to existing file or create new one
+                    with open(profile_path, "a") as f:
                         f.write(developer_dir_export)
-                log_debug("tart.xcode_profile", "added DEVELOPER_DIR to shell profile")
-            except OSError as e:
-                log_debug("tart.xcode_profile", "failed to update shell profile", error=str(e))
+                        f.write(path_export)
+                except OSError:
+                    pass  # Non-fatal if we can't update profile
 
             # Accept Xcode license (stored in VM's /Library/Preferences, not in Xcode.app)
-            log_debug("tart.xcode_license", "accepting Xcode license")
             result = subprocess.run(
                 ["sudo", "xcodebuild", "-license", "accept"],
                 capture_output=True,
                 text=True
             )
-            if result.returncode == 0:
-                log_info("tart.xcode_setup", "Xcode configured and license accepted")
-            else:
-                log_debug("tart.xcode_license", "license acceptance failed or already accepted",
-                         stderr=result.stderr)
+            # Don't log success/failure - silent operation
+
+        # Symlink mounted runtimes to system location if present
+        runtime_mount = "/Volumes/My Shared Files/m-coresim-runtime"
+        runtime_target = "/Library/Developer/CoreSimulator/Volumes"
+
+        if os.path.isdir(runtime_mount):
+            # Only remove if it's already a symlink (safe)
+            if os.path.islink(runtime_target):
+                result = subprocess.run(["sudo", "rm", runtime_target],
+                                      capture_output=True, text=True)
+                if result.returncode != 0:
+                    import syslog
+                    syslog.syslog(syslog.LOG_ERR, f"Failed to remove runtime symlink: {result.stderr}")
+
+            # Create symlink (ln -sfn handles overwriting existing symlinks)
+            result = subprocess.run(["sudo", "ln", "-sfn", runtime_mount, runtime_target],
+                                  capture_output=True, text=True)
+            if result.returncode != 0:
+                import syslog
+                syslog.syslog(syslog.LOG_ERR, f"Failed to create runtime symlink: {result.stderr}")
+
+        # Add iOS testing note to CLAUDE.md if Xcode is mounted (agent context)
+        if os.path.isdir(xcode_mount):
+            claude_md = os.path.expanduser("~/.claude/CLAUDE.md")
+            os.makedirs(os.path.dirname(claude_md), exist_ok=True)
+
+            try:
+                with open(claude_md, "a") as f:
+                    f.write("\n# iOS Simulator Testing\n\n")
+                    f.write("iOS/tvOS/watchOS/visionOS simulator testing is available.\n\n")
+                    f.write("Check available runtimes:\n")
+                    f.write("```bash\n")
+                    f.write("xcrun simctl list runtimes\n")
+                    f.write("```\n\n")
+                    f.write("Run tests:\n")
+                    f.write("```bash\n")
+                    f.write("xcodebuild test -scheme YourScheme \\\n")
+                    f.write("  -destination 'platform=iOS Simulator,name=iPhone 17 Pro'\n")
+                    f.write("```\n")
+            except OSError:
+                pass  # Non-fatal if we can't write CLAUDE.md
 
     def get_tmux_socket(self):
         """Tart uses the uid-based default socket (/tmp/tmux-<uid>/default)."""
