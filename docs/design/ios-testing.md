@@ -297,9 +297,9 @@ No user-facing errors for iOS testing. The system either works silently or doesn
 
 1. **`docs/GUIDE.md`** - Add iOS testing section:
    - Prerequisites (Xcode on host)
-   - Quick start: `yoloai new sandbox --ios-testing`
-   - Approach explanations
-   - Troubleshooting
+   - Automatic mounting behavior (no flags needed)
+   - How to add simulator runtimes
+   - Example usage
 
 2. **`docs/ROADMAP.md`** - Mark iOS testing as implemented
 
