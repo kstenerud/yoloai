@@ -17,7 +17,7 @@ yoloai exec test1 -- sudo ditto "/Volumes/My Shared Files/m-Volumes/iOS_23B86/..
 
 **Pain points:**
 - Users must repeat runtime copying for every new sandbox
-- 2-3 minutes of copying per sandbox (or 15+ minutes if downloading)
+- 2-3 minutes of copying per sandbox
 - Manual commands are error-prone (wrong paths, missing Info.plist, etc.)
 - No way to pre-configure "iOS testing sandbox" as a template
 
@@ -313,34 +313,23 @@ xcrun simctl list runtimes | grep "iOS 26.1"
 ```
 
 **Error handling:**
-- If host has no matching runtime → Download with `xcodebuild -downloadPlatform <platform>`
-- If download disabled → Fail with helpful error message
+- If host has no matching runtime → Fail with helpful error message
 - If copy fails → Cleanup partial copy, report error
 
-#### Download Fallback
-
-If host doesn't have the requested runtime:
-
-**Option A: Auto-download (slower, always works)**
-```bash
-xcodebuild -downloadPlatform iOS
-# Takes 10-15 minutes
+**Missing runtime error message:**
 ```
-
-**Option B: Fail with helpful message (faster feedback)**
-```
-Error: iOS runtime not found on host.
+Error: iOS 26.2 runtime not found on host.
 
 To fix:
 1. On host Mac: Open Xcode > Settings > Platforms
 2. Download iOS Simulator runtime
-3. Restart VM and try again
+3. Try again: yoloai new sandbox --apple-runtime ios
 
-Or download in VM (slower):
-  yoloai new sandbox --apple-runtime ios --download-if-missing
+Runtime must be on host so all VMs can share it.
+Downloading in each VM would waste time and disk space.
 ```
 
-**Recommendation:** Default to Option B (fail fast), add `--download-if-missing` flag for Option A.
+**Note:** yoloai never downloads runtimes automatically. User must download on host to enable sharing across all VMs.
 
 ### Xcode Version Tracking
 
@@ -751,13 +740,7 @@ All sandboxes upgraded.
     - Match against runtime Info.plist
     - Include version in cache key
 
-18. **Download fallback**
-    - Add `--download-if-missing` flag
-    - If runtime not on host, download with xcodebuild
-    - Show progress, estimated time
-    - Cache downloaded runtime like copied ones
-
-19. **Progress reporting**
+18. **Progress reporting**
     - Show spinner during long operations
     - Report: "Copying iOS runtime (15GB, ~2 min)..."
     - Update progress during copy
@@ -830,20 +813,19 @@ All sandboxes upgraded.
 **Decision:** ✅ **RESOLVED** - Option B (fail with helpful message).
 - No automatic downloading
 - No `--download-if-missing` flag
-- Clear error message with next steps:
+- Clear error message directing user to download on host:
   ```
-  Error: iOS runtime not found on host.
+  Error: iOS 26.2 runtime not found on host.
 
   To fix:
-  1. On host Mac: Open Xcode > Settings > Platforms
-  2. Download iOS Simulator runtime
-  3. Restart and try again
+    1. On host Mac: Open Xcode > Settings > Platforms
+    2. Download iOS Simulator runtime
+    3. Try again: yoloai new sandbox --apple-runtime ios
 
-  Or install manually in VM:
-    yoloai exec sandbox -- xcodebuild -downloadPlatform iOS
+  Runtime must be on host so all VMs can share it via cached base images.
   ```
-- Keeps workflow simple and predictable
-- User stays in control of where/when downloads happen
+- User downloads once on host → all VMs benefit via caching
+- No re-downloading for each sandbox (fast 2-3min copy instead of 15min download)
 
 ### 5. Concurrent Base Creation
 
