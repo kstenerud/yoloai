@@ -178,6 +178,28 @@ class TartBackend:
 
 **Note:** Silent operation - no output unless errors. Mounts either exist or they don't.
 
+#### 3. Agent Context (optional)
+
+Add brief note to sandbox's CLAUDE.md if iOS testing is available:
+
+```python
+class TartBackend:
+    def setup(self):
+        # ... existing setup ...
+
+        # Add iOS testing note to CLAUDE.md if Xcode mounted
+        if os.path.isdir("/Volumes/My Shared Files/m-Xcode.app"):
+            claude_md = os.path.expanduser("~/.claude/CLAUDE.md")
+            os.makedirs(os.path.dirname(claude_md), exist_ok=True)
+
+            with open(claude_md, "a") as f:
+                f.write("\n# iOS Simulator Testing\n\n")
+                f.write("iOS/tvOS/watchOS/visionOS simulator testing available if host has Xcode installed.\n")
+                f.write("Use `xcrun simctl list runtimes` to see available platforms.\n")
+```
+
+**Note:** Optional enhancement - agents can discover iOS testing on their own, but this helps them know it's available.
+
 ### Phase 2: Documentation
 
 Add note to user-facing documentation:
