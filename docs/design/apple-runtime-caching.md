@@ -127,7 +127,7 @@ yoloai new sandbox5 --runtime ios:latest --runtime tvos:26.1
 
 **Naming format:** `yoloai-base-<platform>-<version>[-<platform>-<version>...]`
 
-Base images named by runtime+version combinations, sorted alphabetically:
+Base images named by runtime+version combinations, **sorted alphabetically by platform, then by version within platform:**
 
 | User Request | Resolution | Base Image Name |
 |--------------|------------|----------------|
@@ -136,14 +136,24 @@ Base images named by runtime+version combinations, sorted alphabetically:
 | `--runtime ios:26.1` | Use specific version | `yoloai-base-ios-26.1` |
 | `--runtime ios --runtime tvos` | iOS 26.2, tvOS 26.1 | `yoloai-base-ios-26.2-tvos-26.1` |
 | `--runtime tvos --runtime ios` | Same (sorted alphabetically) | `yoloai-base-ios-26.2-tvos-26.1` |
+| `--runtime ios:26.1 --runtime ios:26.2` | Both iOS versions | `yoloai-base-ios-26.1-ios-26.2` |
+| `--runtime ios:26.2 --runtime tvos:26.0 --runtime tvos:26.1` | iOS 26.2, tvOS 26.0, tvOS 26.1 | `yoloai-base-ios-26.2-tvos-26.0-tvos-26.1` |
+| `--runtime ios:26.1 --runtime ios:26.2 --runtime tvos:26.1` | iOS 26.1, iOS 26.2, tvOS 26.1 | `yoloai-base-ios-26.1-ios-26.2-tvos-26.1` |
 | `--runtime watchos --runtime ios --runtime tvos` | iOS 26.2, tvOS 26.1, watchOS 26.0 | `yoloai-base-ios-26.2-tvos-26.1-watchos-26.0` |
+
+**Multiple versions of same platform:**
+- Bases can contain multiple versions of the same platform
+- Example: `yoloai-base-ios-26.1-ios-26.2-tvos-26.1`
+- Sorted first by platform, then by version within platform
+- This allows incremental addition without rebuilding the entire base
 
 **Naming rules:**
 1. Resolve all runtimes to specific versions (query host or use user-specified)
 2. Sort by platform name alphabetically: `ios`, `tvos`, `visionos`, `watchos`
-3. Format: `<platform>-<version>` (e.g., `ios-26.2`)
-4. Join multiple runtimes with hyphens
-5. Always lowercase in cache name (normalized from case-insensitive input)
+3. Within each platform, sort by version number (semver order)
+4. Format: `<platform>-<version>` (e.g., `ios-26.2`)
+5. Join all runtime+version pairs with hyphens
+6. Always lowercase in cache name (normalized from case-insensitive input)
 
 **Examples:**
 ```bash
@@ -334,15 +344,17 @@ Timeline:
 
 ### Parent Selection Strategy
 
-When creating a new cached base, choose the best existing parent to minimize copying:
+When creating a new cached base, choose the best existing parent to minimize copying. **Bases can contain multiple versions of the same platform** (e.g., `ios-26.1-ios-26.2-tvos-26.1`).
 
 **Algorithm:**
 ```
 1. List all existing yoloai-base-* images
-2. Parse each into runtime+version set (e.g., "yoloai-base-ios-26.2-tvos-26.1" → {ios:26.2, tvos:26.1})
-3. Calculate exact match overlap with requested runtime+version combinations
-4. Select base with highest overlap (matching both platform AND version)
-5. Fallback: yoloai-base (no runtimes)
+2. Parse each into runtime+version set (e.g., "yoloai-base-ios-26.2-tvos-26.0-tvos-26.1" → {ios:26.2, tvos:26.0, tvos:26.1})
+3. Check if any base contains ALL requested runtime+version combinations (exact match)
+   - If yes, use that base directly (no copying needed)
+4. If no exact match, find base with most overlapping runtimes (exact version matches)
+5. Prioritize: maximize overlap (minimize copying), then minimize total base size
+6. Fallback: yoloai-base (no runtimes)
 ```
 
 **Version matching is exact:**
@@ -350,36 +362,54 @@ When creating a new cached base, choose the best existing parent to minimize cop
 - `yoloai-base-ios-26.1` does NOT match request for `ios:26.2` ❌
 - Must match both platform and version for overlap credit
 
-**Example:**
+**Multiple versions of same platform:**
+- A base can have `ios-26.1-ios-26.2` (both iOS 26.1 and 26.2)
+- If you need ios:26.1, and a base has `ios-26.1-ios-26.2`, that's a match ✅
+- You can add to existing bases rather than rebuilding from scratch
+
+**Example 1: Exact match**
 
 Existing bases:
-- `yoloai-base` (no runtimes)
-- `yoloai-base-ios-26.2` ({ios:26.2})
-- `yoloai-base-ios-26.1` ({ios:26.1})
-- `yoloai-base-tvos-26.1` ({tvos:26.1})
-- `yoloai-base-ios-26.1-tvos-26.1` ({ios:26.1, tvos:26.1})
+- `yoloai-base-ios-26.2-tvos-26.1`
 
-Request: `--runtime ios --runtime tvos --runtime watchos`
-- Resolves to: {ios:26.2, tvos:26.1, watchos:26.0}
+Request: `--runtime ios:26.2 --runtime tvos:26.1`
 
-Overlap scores (exact version matching):
-- `yoloai-base` → 0 matches
-- `yoloai-base-ios-26.2` → 1 match (ios:26.2) ✅
-- `yoloai-base-ios-26.1` → 0 matches (wrong iOS version) ❌
-- `yoloai-base-tvos-26.1` → 1 match (tvos:26.1) ✅
-- `yoloai-base-ios-26.1-tvos-26.1` → 1 match (tvos:26.1 only, iOS wrong version)
+**Result:** Use existing base directly (exact match, no copying needed)
 
-**Tiebreaker:** When multiple bases have same overlap, prefer:
-1. More total runtimes (partial match on multi-runtime base)
-2. Alphabetically earlier platform
+**Example 2: Partial match, add to existing base**
 
-**Winner:** `yoloai-base-ios-26.2` (has exact iOS 26.2 match)
+Existing bases:
+- `yoloai-base-ios-26.2-tvos-26.0` ({ios:26.2, tvos:26.0})
+
+Request: `--runtime ios:26.2 --runtime tvos:26.1`
+
+Overlap: ios:26.2 matches (1/2)
+
+**Result:**
+- Clone from `yoloai-base-ios-26.2-tvos-26.0`
+- Copy tvOS 26.1 (not present)
+- Snapshot as `yoloai-base-ios-26.2-tvos-26.0-tvos-26.1` (includes both tvOS versions)
+- 2 runtimes copied total, tvOS 26.0 reused from parent
+
+**Example 3: Multiple candidates**
+
+Existing bases:
+- `yoloai-base-ios-26.2` (1 runtime, 1 match)
+- `yoloai-base-tvos-26.1` (1 runtime, 1 match)
+- `yoloai-base-ios-26.1-tvos-26.1` (2 runtimes, 1 match - only tvOS matches)
+
+Request: `--runtime ios:26.2 --runtime tvos:26.1`
+
+**Tiebreaker:**
+1. Prefer base with most matches (all have 1 match - tie)
+2. Prefer base with fewer total runtimes (minimize base size)
+3. `yoloai-base-ios-26.2` and `yoloai-base-tvos-26.1` both have 1 runtime
+4. Pick alphabetically earlier platform: `yoloai-base-ios-26.2`
 
 **Result:**
 - Clone from `yoloai-base-ios-26.2`
-- Copy tvOS 26.1 (not present)
-- Copy watchOS 26.0 (not present)
-- Snapshot as `yoloai-base-ios-26.2-tvos-26.1-watchos-26.0`
+- Copy tvOS 26.1
+- Snapshot as `yoloai-base-ios-26.2-tvos-26.1`
 
 ### Runtime Detection and Copying
 
