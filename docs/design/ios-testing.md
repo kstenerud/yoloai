@@ -180,7 +180,7 @@ class TartBackend:
 
 #### 3. Agent Context (optional)
 
-Add brief note to sandbox's CLAUDE.md if iOS testing is available:
+Add iOS testing info to sandbox's CLAUDE.md if available:
 
 ```python
 class TartBackend:
@@ -195,13 +195,18 @@ class TartBackend:
             with open(claude_md, "a") as f:
                 f.write("\n# iOS Simulator Testing\n\n")
                 f.write("iOS/tvOS/watchOS/visionOS simulator testing is available.\n\n")
-                f.write("Check available runtimes: `xcrun simctl list runtimes`\n\n")
-                f.write("See docs/GUIDE.md iOS testing section for examples.\n")
+                f.write("Check available runtimes:\n")
+                f.write("```bash\n")
+                f.write("xcrun simctl list runtimes\n")
+                f.write("```\n\n")
+                f.write("Run tests:\n")
+                f.write("```bash\n")
+                f.write("xcodebuild test -scheme YourScheme \\\n")
+                f.write("  -destination 'platform=iOS Simulator,name=iPhone 17 Pro'\n")
+                f.write("```\n")
 ```
 
-**Note:** Optional enhancement - agents can discover iOS testing on their own, but this:
-- Lets them know the capability exists
-- Points to concrete examples in the guide
+**Note:** Optional enhancement - agents can discover iOS testing on their own, but including examples directly in CLAUDE.md helps them get started quickly.
 
 ### Phase 2: Documentation
 
