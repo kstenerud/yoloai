@@ -194,22 +194,25 @@ class TartBackend:
 
             with open(claude_md, "a") as f:
                 f.write("\n# iOS Simulator Testing\n\n")
-                f.write("iOS/tvOS/watchOS/visionOS simulator testing available if host has Xcode installed.\n")
-                f.write("Use `xcrun simctl list runtimes` to see available platforms.\n")
+                f.write("iOS/tvOS/watchOS/visionOS simulator testing is available.\n\n")
+                f.write("Check available runtimes: `xcrun simctl list runtimes`\n\n")
+                f.write("See docs/GUIDE.md iOS testing section for examples.\n")
 ```
 
-**Note:** Optional enhancement - agents can discover iOS testing on their own, but this helps them know it's available.
+**Note:** Optional enhancement - agents can discover iOS testing on their own, but this:
+- Lets them know the capability exists
+- Points to concrete examples in the guide
 
 ### Phase 2: Documentation
 
-Add note to user-facing documentation:
+Add iOS testing section to user-facing documentation:
 
 **docs/GUIDE.md** - Add iOS testing section:
 
 ```markdown
 ## iOS Simulator Testing (Tart only)
 
-Tart VMs automatically mount Xcode and simulator runtimes from your Mac:
+Tart VMs automatically mount Xcode and simulator runtimes from your Mac.
 
 ### Prerequisites (on host Mac)
 - Xcode installed at `/Applications/Xcode.app`
@@ -221,22 +224,48 @@ Tart VMs automatically mount Xcode and simulator runtimes from your Mac:
 3. If host has simulator runtimes → VM mounts them all
 4. No configuration needed - just works
 
-### Disk usage
-- With host Xcode + runtimes: ~25-30GB VM
-- Without host tools: ~20GB VM (no iOS testing)
+### Example: Running iOS tests
 
-### Adding runtimes
-- Install on host: Xcode > Settings > Components
-- Restart VM: runtimes available immediately (no VM regeneration needed)
-
-### Example
 \`\`\`bash
-# On host: Install Xcode and iOS runtime
-# Then:
-yoloai new embsdk
+# Create sandbox (automatic iOS testing if Xcode on host)
+yoloai new embsdk ~/Projects/my-ios-app
+
+# Check what simulator runtimes are available
+yoloai exec embsdk -- xcrun simctl list runtimes
+
+# Run iOS unit tests
+yoloai exec embsdk -- xcodebuild test \\
+  -scheme MyApp \\
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \\
+  -resultBundlePath /tmp/test-results
+
+# Run tests on multiple platforms
 yoloai exec embsdk -- xcodebuild test -scheme MyApp \\
-  -destination 'platform=iOS Simulator,name=iPhone 17 Pro'
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \\
+  -destination 'platform=tvOS Simulator,name=Apple TV 4K'
 \`\`\`
+
+### Adding more simulator runtimes
+
+1. On host Mac: Open Xcode > Settings > Components
+2. Download desired runtimes (iOS, tvOS, watchOS, visionOS)
+3. Restart sandbox: `yoloai exec embsdk -- exit` then run again
+4. New runtimes available immediately (no VM regeneration needed)
+
+### Disk usage
+- With host Xcode + runtimes: ~11GB used (in 50GB VM)
+- Without host tools: ~20GB used (normal development, no iOS testing)
+
+### Troubleshooting
+
+**iOS tests don't work:**
+1. Verify Xcode installed on host: `ls /Applications/Xcode.app`
+2. Check runtimes on host: `xcrun simctl list runtimes` (run on host)
+3. Install missing tools on host, then restart VM
+
+**Specific runtime missing:**
+- Install on host in Xcode > Settings > Components
+- Restart VM to pick up new runtime
 ```
 
 ### Phase 3: Error Handling
