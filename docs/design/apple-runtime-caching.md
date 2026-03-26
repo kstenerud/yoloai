@@ -229,6 +229,74 @@ User: yoloai new test --runtime ios --runtime tvos
 
 **Time:** ~2 minutes (only copying tvOS, iOS reused)
 
+### Error Recovery
+
+**Multi-step base creation workflow:**
+1. Clone parent base → temp VM
+2. Copy runtimes into temp VM
+3. Snapshot temp VM → new base
+4. Save metadata
+5. Cleanup temp VM
+
+**Temp VM naming convention:**
+```
+yoloai-base-<cacheKey>-tmp-<random>
+```
+Example: `yoloai-base-ios-26.1-tmp-a3f7b2`
+
+**Recovery strategy:**
+
+```go
+// Pseudocode for base creation with error recovery
+func createBase(ctx, cacheKey, runtimes) error {
+    tempName := fmt.Sprintf("yoloai-base-%s-tmp-%s", cacheKey, randomID())
+    baseName := fmt.Sprintf("yoloai-base-%s", cacheKey)
+
+    // Best-effort cleanup on any error
+    defer cleanupTempVM(ctx, tempName)
+
+    // Step 1: Clone parent
+    if err := cloneParent(ctx, parentBase, tempName); err != nil {
+        return fmt.Errorf("clone parent: %w", err)
+    }
+
+    // Step 2: Copy runtimes
+    for _, runtime := range runtimes {
+        if err := copyRuntime(ctx, tempName, runtime); err != nil {
+            // Temp VM cleaned by defer
+            return fmt.Errorf("copy %s %s: %w", runtime.Platform, runtime.Version, err)
+        }
+    }
+
+    // Step 3: Snapshot as new base
+    if err := snapshot(ctx, tempName, baseName); err != nil {
+        // Clean partial base if created
+        if vmExists(baseName) {
+            _ = deleteVM(baseName)
+        }
+        return fmt.Errorf("snapshot as %s: %w", baseName, err)
+    }
+
+    // Step 4: Save metadata (non-fatal)
+    if err := saveMetadata(baseName, meta); err != nil {
+        slog.Warn("failed to save metadata", "base", baseName, "error", err)
+    }
+
+    return nil
+}
+
+// Best-effort cleanup - never fails
+func cleanupTempVM(ctx, vmName) {
+    _ = runTart(ctx, "stop", vmName)
+    _ = runTart(ctx, "delete", vmName)
+}
+```
+
+**Orphaned temp VM cleanup:**
+- Add to `yoloai system prune` command
+- Find VMs matching pattern `yoloai-base-*-tmp-*`
+- Delete automatically (they're always safe to remove)
+
 ### Base Image Locking
 
 **Problem:** Two concurrent `yoloai new` commands requesting the same runtime could both try to create the same base image simultaneously, resulting in duplicate work or corrupted state.
@@ -339,23 +407,53 @@ var runtimePrefixes = map[string]string{
 xcrun simctl list runtimes --json
 ```
 
+**JSON Schema (from actual simctl output):**
+```json
+{
+  "runtimes": [
+    {
+      "platform": "iOS",              // "iOS", "tvOS", "watchOS", "visionOS"
+      "version": "26.1",               // Version (X.Y or X.Y.Z format)
+      "buildversion": "23B86",         // Build ID
+      "bundlePath": "/Library/Developer/CoreSimulator/Volumes/iOS_23B86/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.1.simruntime",
+      "identifier": "com.apple.CoreSimulator.SimRuntime.iOS-26-1",
+      "name": "iOS 26.1",              // Human-readable name
+      "isAvailable": true,             // Whether runtime is usable
+      "isInternal": false,
+      "supportedArchitectures": ["x86_64", "arm64"],
+      "supportedDeviceTypes": [...]    // Array of supported device types
+    }
+  ]
+}
+```
+
+**Key observations:**
+- `platform` field directly specifies iOS/tvOS/watchOS/visionOS (no need to parse identifier)
+- `bundlePath` provides full path to .simruntime bundle
+- Multiple builds per version are possible (e.g., iOS 26.0 build 23A339 AND 23A343)
+- Version format is X.Y or X.Y.Z (18.3.1, 26.0, 26.1)
+
 **Version selection:**
-- No version specified → pick latest by version number (e.g., 26.2 > 26.1)
+- No version specified → pick latest by semantic version (use `github.com/hashicorp/go-version`)
 - Version specified → match against runtime version from simctl output
+- If multiple builds of same version, pick latest build (lexicographic sort of buildversion)
 
 **Algorithm (executed on host):**
 ```
 1. Run: xcrun simctl list runtimes --json
-2. Parse JSON output to extract runtimes with:
-   - Platform (iOS, tvOS, watchOS, visionOS)
-   - Version (e.g., "26.2")
-   - Build ID (e.g., "23B86")
-   - Bundle path (e.g., "/Library/Developer/CoreSimulator/Volumes/iOS_23B86/Library/...")
+2. Parse JSON output into Runtime structs:
+   type Runtime struct {
+       Platform    string
+       Version     string
+       BuildVersion string
+       BundlePath  string
+   }
 3. Filter by platform (e.g., "iOS" for ios platform)
-4. If version specified, filter by version match
-5. Sort by version number descending, then build as tiebreaker
-6. Pick first (latest)
-7. Return bundle path for copying
+4. If version specified (e.g., "26.1"), filter by exact version match
+5. Parse versions using go-version library
+6. Sort by version descending, then buildversion descending (tiebreaker)
+7. Pick first (latest)
+8. Return bundlePath for copying
 ```
 
 **Note:** This query must happen on the host before creating the VM, so we know which runtime bundles to copy into the base image.
@@ -420,6 +518,7 @@ Store minimal metadata for each cached base image:
 **Format:**
 ```json
 {
+  "version": 0,
   "base_name": "yoloai-base-ios-26.2-tvos-26.2",
   "runtimes": [
     {
@@ -433,10 +532,18 @@ Store minimal metadata for each cached base image:
       "build": "23J579"
     }
   ],
-  "created": "2026-03-26T10:30:00Z",
-  "disk_size": "35.2GB"
+  "created_at": "2026-03-26T10:30:00Z",
+  "yoloai_version": "0.5.0"
 }
 ```
+
+**Schema notes:**
+- `version`: Schema version (currently 0; TODO: assign proper version when yoloAI 1.0 is released)
+- `base_name`: Redundant with filename but useful for validation
+- `runtimes`: Array of runtimes in this base (platform, version, build)
+- `created_at`: ISO 8601 timestamp (UTC)
+- `yoloai_version`: Version of yoloAI that created this base
+- No `disk_size` field - compute on-demand with `tart get` to avoid staleness
 
 **No Xcode version tracking** - runtime versions in cache names handle it automatically.
 

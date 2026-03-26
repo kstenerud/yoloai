@@ -26,6 +26,8 @@ Implementation plan for Apple runtime base image caching feature. Enables sandbo
    - Case-insensitive platform: ios/iOS/IOS → "ios"
    - Version `:latest` treated same as omitted (both query host for latest)
    - Validation: reject unknown platforms
+   - Use `github.com/hashicorp/go-version` for version comparison
+   - Parse simctl JSON output (schema documented in design doc)
 
 3. **Cache key generation**
    - File: `runtime/tart/runtime.go`
@@ -54,12 +56,15 @@ Implementation plan for Apple runtime base image caching feature. Enables sandbo
    - Copy with ditto + Info.plist fixup
    - Verify with simctl
 
-7. **Base image snapshotting**
+7. **Base image snapshotting and error recovery**
    - File: `runtime/tart/tart.go`
    - Function: `snapshotAsBase(tempVM, baseName string) error`
    - Clone temp VM to new base name
-   - Delete temp VM
-   - Log creation
+   - Handle errors: clean partial base if snapshot fails
+   - Function: `cleanupTempVM(vmName string) error` - best-effort cleanup
+   - Temp VM naming: `yoloai-base-<cacheKey>-tmp-<random>`
+   - Use defer for cleanup on any error
+   - Log creation with timestamps
 
 8. **Integrate into Create() flow**
    - File: `sandbox/create.go`
@@ -94,9 +99,12 @@ Implementation plan for Apple runtime base image caching feature. Enables sandbo
 
 11. **Cache metadata tracking**
     - File: `runtime/tart/metadata.go` (new)
-    - Struct: `BaseMetadata` (runtimes, created, disk_size)
+    - Struct: `BaseMetadata` (version=0, base_name, runtimes, created_at, yoloai_version)
     - Functions: `SaveMetadata()`, `LoadMetadata()`
     - Location: `~/.yoloai/tart-base-metadata/<base>.json`
+    - Schema version 0 for now (TODO: assign proper version at yoloAI 1.0)
+    - No disk_size field (compute on-demand to avoid staleness)
+    - Atomic writes (write to temp file, then rename)
 
 **Acceptance criteria:**
 - `yoloai new test --runtime ios --runtime tvos` reuses `yoloai-base-ios` if it exists
@@ -222,3 +230,10 @@ Implementation plan for Apple runtime base image caching feature. Enables sandbo
 - Verified: `tart clone` successfully snapshots VM state
 - System files (like `/Library/Developer/CoreSimulator/...`) persist through cloning
 - Stop VM before cloning to ensure all changes are flushed to disk
+
+**Testing:**
+- Unit tests: Version parsing, cache key generation, parent selection (no Tart needed)
+- Integration tests: Add to existing smoke test suite (`make smoke-test`)
+- Mock simctl output for unit testing runtime discovery
+- End-to-end test: Create sandbox with `--runtime ios`, verify it works
+- Concurrency test: Launch two `yoloai new` with same runtime, verify locking works
