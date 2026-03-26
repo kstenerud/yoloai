@@ -12,30 +12,52 @@ Design document is complete at `docs/design/ios-testing.md` with commit history:
 - `f120eab` - Add concrete iOS testing examples to guide
 - And earlier commits establishing the automatic mounting approach
 
-## Critical Open Question: Tart Mount Behavior
+## Critical Open Question: Tart Mount Behavior ✅ RESOLVED
 
-**Question:** What happens when you pass `tart run --dir=/NonExistent/Path:name:ro` where the source path doesn't exist?
+**Question:** What happens when you pass `tart run --dir=name:/NonExistent/Path:ro` where the source path doesn't exist?
 
-**Why this matters:**
-- If Tart silently skips missing mounts → We can speculatively add all mount specs at VM creation
-- User installs Xcode later → Automatically works on next VM start (no VM recreation needed)
-- If Tart fails to start → We must check path existence at VM creation time
-- User installs Xcode later → Must recreate VM to get iOS testing
-
-**Test to run:**
+**Test result (2026-03-26):**
 ```bash
-# Use an existing VM
-tart run yoloai-embsdk --no-graphics --dir=/NonExistent/FakePath:testmount:ro &
-
-# Expected outcomes:
-# A) VM fails to start → Must check existence at creation time
-# B) VM starts, mount silently skipped → Can speculatively add all mounts ✅
-# C) VM starts, empty mount created → Need to investigate further
+$ tart run yoloai-embsdk --no-graphics --dir=testmount:/NonExistent/FakePath:ro
+Error Domain=VZErrorDomain Code=2 "A directory sharing device configuration is invalid."
+UserInfo={NSLocalizedFailure=Invalid virtual machine configuration.,
+NSLocalizedFailureReason=A directory sharing device configuration is invalid.,
+NSUnderlyingError=0x87102f180 {Error Domain=NSPOSIXErrorDomain Code=2 "No such file or directory"}}
 ```
 
-**After testing:**
-- If B: Update design to remove existence checks, always add mount specs
-- If A or C: Keep current design with existence checks
+**Answer: Option A - VM fails to start**
+
+Tart/Virtualization.framework validates mount paths at VM start time. If any `--dir` path doesn't exist, the VM fails to start with `NSPOSIXErrorDomain Code=2`.
+
+**Implications for design:**
+
+**Original assumption (WRONG):** Check existence at VM creation, store mount specs in instance.json
+- ❌ Problem: User installs Xcode later → Must recreate VM
+
+**Better approach (CORRECT):** Check existence at VM **start time**, always probe for Xcode paths
+- ✅ User creates VM without Xcode → VM works fine
+- ✅ User installs Xcode later → Next VM start picks it up automatically
+- ✅ No VM recreation needed!
+
+**Implementation:**
+- Don't store Xcode mount specs in instance.json
+- At VM start: Always check for standard Xcode paths, add `--dir` if they exist
+- Leverage existing `os.Stat()` check in `buildRunArgs()` (line 450)
+
+**Verification tests:**
+```bash
+# VM starts normally without mount
+$ tart run yoloai-embsdk --no-graphics
+✅ Success
+
+# VM fails with non-existent mount path
+$ tart run yoloai-embsdk --no-graphics --dir=test:/NonExistent:ro
+❌ Error: NSPOSIXErrorDomain Code=2 "No such file or directory"
+
+# VM starts with valid mount path
+$ tart run yoloai-embsdk --no-graphics --dir=test:/tmp:ro
+✅ Success
+```
 
 ## Design Critique Issues (Must Fix Before Implementation)
 
@@ -64,28 +86,40 @@ Success Metrics:
 - `docs/design/ios-testing.md` - Goals section (line 14)
 - `docs/design/ios-testing.md` - Success Metrics section (line 400)
 
-#### 2. Mount Timing Ambiguity
+#### 2. Mount Timing - DESIGN CHANGE REQUIRED ✅
 
-**Current state:**
+**Original design (WRONG):**
 - Architecture says: "On VM creation: Check host for: ... → add mount if exists"
-- Resolved Questions say: "Mounts established at VM start time"
+- Stores mount specs in `instance.json` at creation time
+- Problem: Installing Xcode later requires VM recreation
 
-**Problem:** Unclear when mounts are CONFIGURED vs when they're MOUNTED
+**Correct approach (based on Tart test + code review):**
+- `--dir` is a `tart run` argument (start time, not creation time)
+- Tart validates mount paths at VM start, fails if any don't exist
+- **Solution:** Check for Xcode paths at VM **start time**, not creation time
 
-**Reality (from code review):**
-- VM creation: yoloAI stores mount specs in `instance.json`
-- VM start: yoloAI reads `instance.json`, passes `--dir` args to `tart run`
-- Tart mounts the directories at start time
+**New architecture:**
+```
+VM Creation:
+- No Xcode-specific mount specs stored in instance.json
+- Only user-specified mounts go in config
 
-**Current issue:** If mount specs are created based on what exists at VM creation time, installing Xcode later won't help (mount spec was never added).
+VM Start (buildRunArgs):
+1. Load user mounts from instance.json
+2. Additionally probe for Xcode paths (always, regardless of config):
+   - /Applications/Xcode.app
+   - ~/Library/Developer/CoreSimulator/Caches/dyld
+   - ~/Library/Developer/Xcode/UserData
+3. For each existing path: add --dir argument
+4. Start VM with combined mount list
+```
 
-**Resolution depends on Tart test above:**
-- If Tart skips missing mounts: Add all mount specs speculatively (solves this issue)
-- If Tart fails on missing mounts: Document that VM must be recreated after installing Xcode
+**Benefit:** Installing Xcode after VM creation works automatically on next VM start!
 
 **Files to update:**
 - `docs/design/ios-testing.md` - Architecture section (lines 40-49)
-- `docs/design/ios-testing.md` - Resolved Questions section (lines 364-368)
+- `docs/design/ios-testing.md` - Implementation Details for tart.go
+- `docs/design/ios-testing.md` - Remove all "VM recreation required" notes
 
 #### 3. Testing Section Completely Outdated
 
@@ -203,52 +237,66 @@ if result.returncode != 0:
 - `docs/design/ios-testing.md` - Setup Script section (lines 160-176)
 - Add note about error logging strategy
 
-#### 7. Document VM Regeneration Behavior
+#### 7. Document VM Regeneration Behavior ✅ NOT NEEDED
 
-**Missing from design:**
-What happens when user does `yoloai delete embsdk && yoloai new embsdk`?
+**With new start-time checking approach:**
+- VM regeneration is NOT required when installing Xcode
+- Xcode paths are checked at every VM start
+- This issue is resolved by the design change in #2
 
-**Answer (needs documentation):**
-- Mount specs are created fresh at VM creation
-- If host gained Xcode in the meantime, new VM gets it
-- This is automatic, no special handling needed
-
-**Add to design:**
-```markdown
-### VM Regeneration
-
-When a VM is deleted and recreated:
-- Mount specs are evaluated fresh based on current host state
-- If host gained/lost Xcode since last creation, new VM reflects this
-- No special handling needed - automatic
-```
-
-**Files to update:**
-- `docs/design/ios-testing.md` - Add new subsection in Architecture
+**No documentation needed** - the start-time checking design makes this automatic.
 
 ### Priority 3: Nice to Have
 
-#### 8. Xcode License Acceptance
+#### 8. Xcode License Acceptance ✅ VERIFIED NOT NEEDED
 
 **Question:** Investigation doc mentioned `sudo xcodebuild -license accept` but it's not in final design.
 
-**Investigation needed:**
-- If Xcode is mounted from host (where license already accepted), does VM need to accept again?
-- Test: Run `xcodebuild` in VM without accepting license, see if it prompts
+**Test performed (2026-03-26):**
+```bash
+# Start VM with Xcode mounted
+$ tart run yoloai-embsdk --no-graphics --dir=m-Xcode:/Applications/Xcode.app:ro
 
-**Likely answer:** Not needed (shared Xcode = shared license state)
+# Test xcodebuild without accepting license
+$ tart exec yoloai-embsdk /Volumes/My\ Shared\ Files/m-Xcode/Contents/Developer/usr/bin/xcodebuild -version
+Xcode 26.1.1
+Build version 17B100
 
-**Action:** Test and document result in design
+# Test full functionality
+$ tart exec yoloai-embsdk /Volumes/My\ Shared\ Files/m-Xcode/Contents/Developer/usr/bin/xcodebuild -showsdks
+[Shows all SDKs: iOS, tvOS, watchOS, visionOS, macOS - no license prompt]
+```
+
+**Answer:** ✅ License acceptance NOT needed in VM
+- Xcode license state is shared from the host
+- xcodebuild works fully without `sudo xcodebuild -license accept` in VM
+- No additional configuration needed in design or setup script
 
 ## Next Steps
 
-1. **Run critical Tart test** (see above)
-2. **Based on test result:**
-   - Option B (skips missing mounts): Update design to remove existence checks
-   - Option A (fails on missing mounts): Keep existence checks, document recreation needed
-3. **Fix all Priority 1 critique issues** in design document
-4. **Fix Priority 2 issues** if time permits
-5. **Begin implementation** following updated design
+1. ✅ ~~**Run critical Tart test**~~ (COMPLETED - Tart fails on missing paths)
+2. ✅ ~~**Determine start-time checking approach**~~ (COMPLETED - Better UX!)
+3. ✅ ~~**Update design document**~~ (COMPLETED - All Priority 1 & 2 issues fixed):
+   - ✅ Issue #2 (MAJOR): Changed from creation-time to start-time checking
+   - ✅ Issue #1: Fixed VM disk size numbers (lines 14, 419)
+   - ✅ Issue #3: Updated testing section with current design
+   - ✅ Issue #4: Fixed dangerous `rm -rf` to check for symlink first
+   - ✅ Issue #5: Support both bash and zsh profiles
+   - ✅ Issue #6: Added error handling with syslog
+   - ✅ Issue #7: Not needed with start-time checking
+4. **Begin implementation** following updated design
+
+**Design changes summary:**
+- Architecture diagram updated to show start-time checking
+- `buildRunArgs()` implementation checks Xcode paths at every VM start
+- Setup script fixes: safe symlink handling, bash+zsh support, error logging
+- Testing section updated to match final design
+- Success metrics clarified: ~11GB usage vs 50GB image size
+
+**Key insight from testing:**
+- Tart validates paths at start time and fails if missing
+- This enables **start-time checking** instead of creation-time
+- **Huge UX win:** Installing Xcode later works automatically on next VM start!
 
 ## Implementation Phases (After Design Fixes)
 

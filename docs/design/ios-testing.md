@@ -11,7 +11,7 @@ Tart VMs automatically mount Xcode and simulator runtimes from the host, enablin
 ### Goals
 
 1. Automatic iOS simulator testing support in Tart VMs
-2. Minimize VM disk usage through VirtioFS mounting (~25-30GB vs ~100GB)
+2. Minimize VM disk usage through VirtioFS mounting (~11GB usage vs ~100GB fully local)
 3. Zero configuration - just works if host has Xcode
 4. Dynamic updates - new host runtimes available on next VM start
 
@@ -38,20 +38,21 @@ Tart VMs automatically mount Xcode and simulator runtimes from the host, enablin
 │ Tart VM Auto-configuration                                  │
 ├─────────────────────────────────────────────────────────────┤
 │                                                              │
-│  On VM creation:                                            │
+│  On VM start (every time):                                  │
 │    Check host for:                                          │
-│      /Applications/Xcode.app         → add mount if exists │
-│      /Library/Developer/CoreSimulator/Volumes/ → add mount │
-│      /Library/Developer/PrivateFrameworks → add mount      │
-│                                                              │
-│  On VM start:                                               │
-│    Mount configured directories (whatever exists now)       │
+│      /Applications/Xcode.app                                │
+│      /Library/Developer/CoreSimulator/Volumes/              │
+│      /Library/Developer/PrivateFrameworks                   │
+│    For each path that exists:                               │
+│      Add --dir argument to tart run command                 │
+│    Tart mounts directories via VirtioFS                     │
 │    Setup script detects mounts and configures paths         │
 │                                                              │
 │  Result:                                                    │
-│    - Host has Xcode → iOS testing works automatically      │
-│    - Host adds runtime → available on next VM start        │
-│    - Host has no Xcode → VM works normally (no iOS)        │
+│    - Host has Xcode → iOS testing works automatically       │
+│    - Install Xcode later → works on next VM start           │
+│    - Install new runtime → available on next VM start       │
+│    - Host has no Xcode → VM works normally (no iOS)         │
 │                                                              │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -93,55 +94,69 @@ Local in VM (writable):
 - VM works normally for non-iOS development
 
 **Dynamic behavior:**
-- User installs Xcode on host → next VM start mounts it automatically
+- User installs Xcode on host → next VM start detects and mounts it automatically
 - User installs new simulator runtime → available on next VM start
-- No VM regeneration needed - mounts are runtime configuration
+- No VM regeneration needed - paths are checked at every start
 
 ## Implementation
 
 ### Phase 1: Tart Runtime Updates
 
-#### 1. Tart Runtime (`internal/runtime/tart/tart.go`)
+#### 1. Tart Runtime (`runtime/tart/tart.go`)
 
-Update `addSystemMounts()` to always try mounting Apple development tools:
+Update `buildRunArgs()` to check for Xcode paths at VM start time (not creation time):
 
 ```go
-func (r *Runtime) addSystemMounts(cfg *runtime.InstanceConfig) {
-    homeDir := config.HomeDir()
+func (r *Runtime) buildRunArgs(vmName, sandboxPath string, mounts []runtime.MountSpec) []string {
+    args := []string{"run", "--no-graphics"}
 
-    // Mount Xcode.app if it exists on host
-    xcodeAppHost := "/Applications/Xcode.app"
-    if info, err := os.Stat(xcodeAppHost); err == nil && info.IsDir() {
-        cfg.Mounts = append(cfg.Mounts, runtime.MountSpec{
-            Source:   xcodeAppHost,
-            Target:   "/Volumes/My Shared Files/m-Xcode.app",
-            ReadOnly: true,
-        })
+    // Share the sandbox directory into the VM
+    args = append(args, "--dir", fmt.Sprintf("%s:%s", sharedDirName, sandboxPath))
+
+    // Always check for Xcode paths (regardless of instance.json config)
+    xcodePaths := []struct {
+        host string
+        name string
+    }{
+        {"/Applications/Xcode.app", "m-Xcode.app"},
+        {"/Library/Developer/CoreSimulator/Volumes", "m-coresim-runtime"},
+        {"/Library/Developer/PrivateFrameworks", "m-PrivateFrameworks"},
     }
 
-    // Mount all simulator runtimes if directory exists
-    runtimePath := "/Library/Developer/CoreSimulator/Volumes"
-    if info, err := os.Stat(runtimePath); err == nil && info.IsDir() {
-        cfg.Mounts = append(cfg.Mounts, runtime.MountSpec{
-            Source:   runtimePath,
-            Target:   "/Volumes/My Shared Files/m-coresim-runtime",
-            ReadOnly: true,
-        })
+    for _, p := range xcodePaths {
+        if info, err := os.Stat(p.host); err == nil && info.IsDir() {
+            dirSpec := fmt.Sprintf("%s:%s:ro", p.name, p.host)
+            args = append(args, "--dir", dirSpec)
+        }
     }
 
-    // Mount PrivateFrameworks if exists
-    privateFrameworks := "/Library/Developer/PrivateFrameworks"
-    if info, err := os.Stat(privateFrameworks); err == nil && info.IsDir() {
-        cfg.Mounts = append(cfg.Mounts, runtime.MountSpec{
-            Source:   privateFrameworks,
-            Target:   "/Volumes/My Shared Files/m-PrivateFrameworks",
-            ReadOnly: true,
-        })
+    // Add user-specified mounts from instance.json
+    for _, m := range mounts {
+        // Skip anything under the sandbox dir (already shared)
+        if strings.HasPrefix(m.Source, sandboxPath+"/") || m.Source == sandboxPath {
+            continue
+        }
+        // Skip files — VirtioFS only supports directories
+        if info, err := os.Stat(m.Source); err != nil || !info.IsDir() {
+            continue
+        }
+        dirName := mountDirName(m.Source)
+        dirSpec := fmt.Sprintf("%s:%s", dirName, m.Source)
+        if m.ReadOnly {
+            dirSpec += ":ro"
+        }
+        args = append(args, "--dir", dirSpec)
     }
+
+    return append(args, vmName)
 }
 ```
 
-**Note:** This runs for all Tart VMs. Mounts only added if directories exist on host.
+**Key points:**
+- Xcode paths checked at **every VM start** (not stored in instance.json)
+- Paths probed regardless of whether they existed at creation time
+- User installs Xcode later → automatically detected on next start
+- No VM recreation needed
 
 #### 2. Setup Script Updates (`internal/runtime/monitor/sandbox-setup.py`)
 
@@ -158,20 +173,27 @@ class TartBackend:
         xcode_developer = "/Volumes/My Shared Files/m-Xcode.app/Contents/Developer"
         if os.path.isdir(xcode_developer):
             # Point xcode-select to mounted Xcode
-            subprocess.run(["sudo", "xcode-select", "--switch", xcode_developer],
-                         capture_output=True)
+            result = subprocess.run(["sudo", "xcode-select", "--switch", xcode_developer],
+                                  capture_output=True, text=True)
+            if result.returncode != 0:
+                syslog.syslog(syslog.LOG_ERR, f"Failed to configure xcode-select: {result.stderr}")
 
-            # Add to shell profile for persistence
-            with open(os.path.expanduser("~/.zprofile"), "a") as f:
-                f.write(f'export DEVELOPER_DIR="{xcode_developer}"\n')
-                f.write(f'export PATH="{xcode_developer}/usr/bin:$PATH"\n')
+            # Add to both zsh and bash profiles for persistence
+            for profile in ["~/.zprofile", "~/.bash_profile"]:
+                profile_path = os.path.expanduser(profile)
+                with open(profile_path, "a") as f:
+                    f.write(f'export DEVELOPER_DIR="{xcode_developer}"\n')
+                    f.write(f'export PATH="{xcode_developer}/usr/bin:$PATH"\n')
 
         # Symlink mounted runtimes to system location if present
         runtime_mount = "/Volumes/My Shared Files/m-coresim-runtime"
         runtime_target = "/Library/Developer/CoreSimulator/Volumes"
 
         if os.path.isdir(runtime_mount):
-            subprocess.run(["sudo", "rm", "-rf", runtime_target], capture_output=True)
+            # Only remove if it's already a symlink (safe)
+            if os.path.islink(runtime_target):
+                subprocess.run(["sudo", "rm", runtime_target], capture_output=True)
+            # Create symlink (ln -sfn handles overwriting existing symlinks)
             subprocess.run(["sudo", "ln", "-sfn", runtime_mount, runtime_target],
                          capture_output=True)
 ```
@@ -302,16 +324,17 @@ No user-facing errors for iOS testing. The system either works silently or doesn
 
 ### Unit Tests
 
-- `ios.DetectHostCapabilities()` with mocked filesystem
-- Approach selection logic
-- Mount configuration generation
+- Mount configuration in `buildRunArgs()` (all Xcode paths checked at start)
+- Setup script iOS detection and configuration
+- CLAUDE.md generation when Xcode present
 
 ### Integration Tests
 
-- Create VM with each approach (A, B, C)
-- Verify Xcode tools accessible
-- Verify iOS runtime discoverable
-- Run sample xcodebuild test command
+- Create VM, verify no Xcode mount specs in instance.json (checked at start, not creation)
+- Start VM with Xcode on host → iOS testing works
+- Start VM without Xcode on host → VM works normally (no iOS)
+- Install Xcode on host, restart VM → iOS testing now works (no recreation needed)
+- Install new runtime on host, restart VM → new runtime available
 
 ### Manual Testing Checklist
 
@@ -362,8 +385,9 @@ If additional features are needed in the future, they should maintain the curren
 ## Resolved Design Questions
 
 **1. Xcode updates while VM running:**
-- ✅ **Decision:** Mounts established at VM start time
+- ✅ **Decision:** Xcode paths checked and mounted at every VM start
 - Updating Xcode on host while VM is running won't affect VM until restart
+- Installing Xcode after VM creation works automatically on next start
 - Document: "After updating Xcode on host, restart VM to use new version"
 - No detection or version checking needed
 
@@ -397,7 +421,8 @@ If additional features are needed in the future, they should maintain the curren
 
 ## Success Metrics
 
-- VM disk size: ≤30GB (with host Xcode + runtimes) vs 100GB baseline
+- VM disk usage: ~11GB (with host tools mounted) vs ~100GB (fully local)
+- VM image size: 50GB (standard Tart base, regardless of iOS testing)
 - Setup time: Instant (just mount configuration, no detection/validation)
 - Zero configuration: Works automatically if host has tools
 - Dynamic updates: New host runtimes available on VM restart
