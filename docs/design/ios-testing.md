@@ -6,15 +6,14 @@
 
 ## Overview
 
-Enable iOS simulator testing in yoloAI sandboxes using Tart VMs with efficient disk usage through VirtioFS directory mounting.
+Tart VMs automatically mount Xcode and simulator runtimes from the host, enabling iOS/tvOS/watchOS/visionOS testing with minimal VM disk usage.
 
 ### Goals
 
-1. Support iOS simulator testing for Xcode projects
-2. Minimize VM disk usage through intelligent mounting
-3. Provide opt-in experience (don't force large VMs on all users)
-4. Auto-detect host capabilities and choose best approach
-5. Graceful degradation when host lacks iOS development tools
+1. Automatic iOS simulator testing support in Tart VMs
+2. Minimize VM disk usage through VirtioFS mounting (~25-30GB vs ~100GB)
+3. Zero configuration - just works if host has Xcode
+4. Dynamic updates - new host runtimes available on next VM start
 
 ### Non-goals
 
@@ -22,41 +21,44 @@ Enable iOS simulator testing in yoloAI sandboxes using Tart VMs with efficient d
 - Docker backend support (no macOS container support)
 - Physical iOS device testing (out of scope)
 - Xcode UI testing (focus on command-line xcodebuild)
+- Downloading tools in VM (user's responsibility to install on host)
 
 ## Architecture
 
-### Single approach: Mount what's available
+### Automatic mounting approach
 
-When `--ios-testing` is specified:
-1. Check what's available on host (Xcode, iOS runtime)
-2. Mount whatever is found
-3. Warn about anything missing
-4. Let user decide whether to install tools and regenerate
+**For all Tart VMs (no flag needed):**
+1. Try to mount standard Apple development paths from host
+2. Only mount if directories exist (silently skip if not)
+3. Setup script auto-configures if mounts are present
+4. No user intervention required
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│ iOS Testing Setup Flow                                      │
+│ Tart VM Auto-configuration                                  │
 ├─────────────────────────────────────────────────────────────┤
 │                                                              │
-│  Check host:                                                │
-│    /Applications/Xcode.app         → mount if exists       │
-│    /Library/Developer/CoreSimulator/Volumes/ → mount if exists │
-│    /Library/Developer/PrivateFrameworks      → mount if exists │
+│  On VM creation:                                            │
+│    Check host for:                                          │
+│      /Applications/Xcode.app         → add mount if exists │
+│      /Library/Developer/CoreSimulator/Volumes/ → add mount │
+│      /Library/Developer/PrivateFrameworks → add mount      │
 │                                                              │
-│  Warn if missing:                                           │
-│    ⚠ Xcode not found - install on host for best performance│
-│    ⚠ iOS runtime not found - will need to download in VM   │
+│  On VM start:                                               │
+│    Mount configured directories (whatever exists now)       │
+│    Setup script detects mounts and configures paths         │
 │                                                              │
-│  User options:                                              │
-│    1. Continue with what's available                        │
-│    2. Install missing tools on host, recreate sandbox       │
+│  Result:                                                    │
+│    - Host has Xcode → iOS testing works automatically      │
+│    - Host adds runtime → available on next VM start        │
+│    - Host has no Xcode → VM works normally (no iOS)        │
 │                                                              │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-### Configuration: Best case (Xcode + Runtime on host)
+### VM Configuration
 
-**When host has Xcode + iOS runtime:**
+**When host has Xcode + simulator runtimes:**
 
 **VM Configuration:**
 ```
@@ -81,328 +83,160 @@ Local in VM (writable):
 
 **Key discovery:** The 3.8GB dyld cache is NOT needed when runtime is mounted (validated via symlink testing).
 
-### Missing components handling
-
 **If host has no Xcode:**
-```
-⚠ Warning: Xcode not found at /Applications/Xcode.app
+- Mounts not created (directories don't exist)
+- VM works normally for non-iOS development
+- User's responsibility to install Xcode on host if iOS testing needed
 
-To enable iOS testing:
-  1. Install Xcode from App Store or Apple Developer
-  2. Recreate sandbox: yoloai delete <name> && yoloai new <name> --ios-testing
-
-Continuing without Xcode - iOS testing will not be available.
-```
-
-**If host has Xcode but no iOS runtime:**
-```
-⚠ Warning: iOS runtime not found in /Library/Developer/CoreSimulator/Volumes/
-
-Xcode will be mounted, but you'll need to download iOS runtime in VM:
-  - This will use ~16GB of VM disk space
-  - Download: yoloai exec <name> -- xcodebuild -downloadPlatform iOS
-
-Or install runtime on host and recreate sandbox for better disk efficiency.
-
-VM size: ~40-50GB (vs ~25-30GB with host runtime)
-```
-
-**User choice:**
-- Continue anyway and work with what's available
-- Ctrl+C, install missing components, recreate sandbox
-- User decides - no automatic fallbacks or hidden behavior
+**Dynamic updates:**
+- User installs Xcode on host → next VM start mounts it automatically
+- User installs new simulator runtime → available on next VM start
+- No VM regeneration needed
 
 ## Implementation
 
-### Phase 1: Core Infrastructure
+### Phase 1: Tart Runtime Updates
 
-#### 1. Detection Module (`internal/ios/detect.go`)
+#### 1. Tart Runtime (`internal/runtime/tart/tart.go`)
 
-```go
-package ios
-
-// HostCapabilities represents what iOS development tools are available on host
-type HostCapabilities struct {
-    HasXcode          bool
-    XcodePath         string
-    XcodeVersion      string
-    HasIOSRuntime     bool
-    IOSRuntimeVersions []string
-    RuntimePath       string
-}
-
-// DetectHostCapabilities checks what iOS development tools are available
-func DetectHostCapabilities() (*HostCapabilities, error) {
-    // Check for Xcode.app
-    // Check for iOS runtimes in /Library/Developer/CoreSimulator/Volumes/
-    // Parse versions
-    // Return what's found - don't make decisions
-}
-
-// Warnings returns user-facing warnings about missing components
-func (hc *HostCapabilities) Warnings() []string {
-    var warnings []string
-    if !hc.HasXcode {
-        warnings = append(warnings, "Xcode not found - install on host for iOS testing")
-    }
-    if !hc.HasIOSRuntime {
-        warnings = append(warnings, "iOS runtime not found - will need to download in VM (~16GB)")
-    }
-    return warnings
-}
-```
-
-#### 2. Tart Runtime Updates (`internal/runtime/tart/tart.go`)
-
-Update `addSystemMounts()` to include iOS testing mounts when enabled:
+Update `addSystemMounts()` to always try mounting Apple development tools:
 
 ```go
-func (r *Runtime) addSystemMounts(cfg *runtime.InstanceConfig, iosTestingEnabled bool) {
+func (r *Runtime) addSystemMounts(cfg *runtime.InstanceConfig) {
     homeDir := config.HomeDir()
 
-    // Existing: Xcode.app mount (always check if ios-testing enabled)
-    if iosTestingEnabled {
-        xcodeAppHost := "/Applications/Xcode.app"
-        if info, err := os.Stat(xcodeAppHost); err == nil && info.IsDir() {
-            cfg.Mounts = append(cfg.Mounts, runtime.MountSpec{
-                Source:   xcodeAppHost,
-                Target:   "/Volumes/My Shared Files/m-Xcode.app",
-                ReadOnly: true,
-            })
-        }
+    // Mount Xcode.app if it exists on host
+    xcodeAppHost := "/Applications/Xcode.app"
+    if info, err := os.Stat(xcodeAppHost); err == nil && info.IsDir() {
+        cfg.Mounts = append(cfg.Mounts, runtime.MountSpec{
+            Source:   xcodeAppHost,
+            Target:   "/Volumes/My Shared Files/m-Xcode.app",
+            ReadOnly: true,
+        })
+    }
 
-        // NEW: System CoreSimulator runtime mount (if exists)
-        runtimePath := "/Library/Developer/CoreSimulator/Volumes"
-        if info, err := os.Stat(runtimePath); err == nil && info.IsDir() {
-            cfg.Mounts = append(cfg.Mounts, runtime.MountSpec{
-                Source:   runtimePath,
-                Target:   "/Volumes/My Shared Files/m-coresim-runtime",
-                ReadOnly: true,
-            })
-        }
+    // Mount all simulator runtimes if directory exists
+    runtimePath := "/Library/Developer/CoreSimulator/Volumes"
+    if info, err := os.Stat(runtimePath); err == nil && info.IsDir() {
+        cfg.Mounts = append(cfg.Mounts, runtime.MountSpec{
+            Source:   runtimePath,
+            Target:   "/Volumes/My Shared Files/m-coresim-runtime",
+            ReadOnly: true,
+        })
+    }
 
-        // PrivateFrameworks mount (if exists)
-        privateFrameworks := "/Library/Developer/PrivateFrameworks"
-        if info, err := os.Stat(privateFrameworks); err == nil && info.IsDir() {
-            cfg.Mounts = append(cfg.Mounts, runtime.MountSpec{
-                Source:   privateFrameworks,
-                Target:   "/Volumes/My Shared Files/m-PrivateFrameworks",
-                ReadOnly: true,
-            })
-        }
+    // Mount PrivateFrameworks if exists
+    privateFrameworks := "/Library/Developer/PrivateFrameworks"
+    if info, err := os.Stat(privateFrameworks); err == nil && info.IsDir() {
+        cfg.Mounts = append(cfg.Mounts, runtime.MountSpec{
+            Source:   privateFrameworks,
+            Target:   "/Volumes/My Shared Files/m-PrivateFrameworks",
+            ReadOnly: true,
+        })
     }
 }
 ```
 
-#### 3. Setup Script Updates (`internal/runtime/monitor/sandbox-setup.py`)
+**Note:** This runs for all Tart VMs. Mounts only added if directories exist on host.
 
-Add iOS testing setup logic:
+#### 2. Setup Script Updates (`internal/runtime/monitor/sandbox-setup.py`)
+
+Auto-configure iOS testing if mounts are present:
 
 ```python
 class TartBackend:
-    def setup_ios_testing(self):
-        """Configure iOS testing with whatever's available from mounts"""
+    def setup(self):
+        """Existing setup, plus auto-configure iOS if mounted"""
 
-        # Check if Xcode is mounted
+        # Existing setup...
+
+        # Auto-configure iOS testing if Xcode is mounted
         xcode_developer = "/Volumes/My Shared Files/m-Xcode.app/Contents/Developer"
         if os.path.isdir(xcode_developer):
-            # Use mounted Xcode
-            subprocess.run(["sudo", "xcode-select", "--switch", xcode_developer])
+            # Point xcode-select to mounted Xcode
+            subprocess.run(["sudo", "xcode-select", "--switch", xcode_developer],
+                         capture_output=True)
 
-            # Add to shell profile
+            # Add to shell profile for persistence
             with open(os.path.expanduser("~/.zprofile"), "a") as f:
                 f.write(f'export DEVELOPER_DIR="{xcode_developer}"\n')
                 f.write(f'export PATH="{xcode_developer}/usr/bin:$PATH"\n')
 
-            print("✓ Using Xcode from host mount")
-        else:
-            print("⚠ Xcode not mounted - iOS testing not available")
-            return
-
-        # Check if runtime is mounted
+        # Symlink mounted runtimes to system location if present
         runtime_mount = "/Volumes/My Shared Files/m-coresim-runtime"
         runtime_target = "/Library/Developer/CoreSimulator/Volumes"
 
         if os.path.isdir(runtime_mount):
-            # Symlink mounted runtime to system location
-            subprocess.run(["sudo", "rm", "-rf", runtime_target])
-            subprocess.run(["sudo", "ln", "-sfn", runtime_mount, runtime_target])
-            print("✓ Using iOS runtime from host mount")
-        else:
-            print("⚠ iOS runtime not mounted - download in VM with:")
-            print("  xcodebuild -downloadPlatform iOS")
-            print("  (This will use ~16GB of VM disk space)")
+            subprocess.run(["sudo", "rm", "-rf", runtime_target], capture_output=True)
+            subprocess.run(["sudo", "ln", "-sfn", runtime_mount, runtime_target],
+                         capture_output=True)
 ```
 
-### Phase 2: CLI Integration
+**Note:** Silent operation - no output unless errors. Mounts either exist or they don't.
 
-#### New Command: `yoloai new` flag
+### Phase 2: Documentation
 
-Add `--ios-testing` flag to `yoloai new`:
+Add note to user-facing documentation:
 
-```go
-// internal/cli/new.go
+**docs/GUIDE.md** - Add iOS testing section:
 
-type NewOptions struct {
-    // Existing fields...
-    IOSTesting bool `flag:"--ios-testing" desc:"Enable iOS simulator testing support"`
-}
+```markdown
+## iOS Simulator Testing (Tart only)
 
-func (o *NewOptions) Run() error {
-    // Existing validation...
+Tart VMs automatically mount Xcode and simulator runtimes from your Mac:
 
-    if o.IOSTesting {
-        // Detect what's available on host
-        caps, err := ios.DetectHostCapabilities()
-        if err != nil {
-            return fmt.Errorf("failed to detect iOS capabilities: %w", err)
-        }
+### Prerequisites (on host Mac)
+- Xcode installed at `/Applications/Xcode.app`
+- iOS/tvOS/watchOS/visionOS runtimes (download in Xcode > Settings > Components)
 
-        // Show what we found
-        fmt.Println("Checking host for iOS development tools...")
-        if caps.HasXcode {
-            fmt.Printf("✓ Found Xcode %s\n", caps.XcodeVersion)
-        }
-        if caps.HasIOSRuntime {
-            fmt.Printf("✓ Found iOS runtime: %s\n", strings.Join(caps.IOSRuntimeVersions, ", "))
-        }
+### How it works
+1. Create any Tart VM: `yoloai new mysandbox`
+2. If host has Xcode → VM automatically mounts it
+3. If host has simulator runtimes → VM mounts them all
+4. No configuration needed - just works
 
-        // Show warnings about missing components
-        warnings := caps.Warnings()
-        for _, warning := range warnings {
-            fmt.Printf("⚠ %s\n", warning)
-        }
+### Disk usage
+- With host Xcode + runtimes: ~25-30GB VM
+- Without host tools: ~20GB VM (no iOS testing)
 
-        // Let user decide whether to continue
-        if len(warnings) > 0 {
-            fmt.Println("\nContinue anyway? (y/N)")
-            // Read user input, abort if not 'y'
-        }
+### Adding runtimes
+- Install on host: Xcode > Settings > Components
+- Restart VM: runtimes available immediately (no VM regeneration needed)
 
-        // Suggest appropriate VM size based on what's available
-        suggestedDiskSize := 30 // Default for full mount
-        if !caps.HasIOSRuntime {
-            suggestedDiskSize = 50 // Need space for runtime download
-        }
-        if !caps.HasXcode {
-            suggestedDiskSize = 100 // Need space for everything
-        }
-        if diskSize < suggestedDiskSize {
-            fmt.Printf("⚠ Suggested VM size for this configuration: %dGB (you specified %dGB)\n",
-                suggestedDiskSize, diskSize)
-        }
-
-        // Store capability info in metadata for setup script
-        metadata.IOSTestingEnabled = true
-        metadata.HostHasXcode = caps.HasXcode
-        metadata.HostHasRuntime = caps.HasIOSRuntime
-    }
-
-    // Continue with VM creation...
-}
+### Example
+\`\`\`bash
+# On host: Install Xcode and iOS runtime
+# Then:
+yoloai new embsdk
+yoloai exec embsdk -- xcodebuild test -scheme MyApp \\
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro'
+\`\`\`
 ```
 
-#### User Experience
+### Phase 3: Error Handling
 
-```bash
-# Best case: Host has everything
-$ yoloai new embsdk --ios-testing
-Checking host for iOS development tools...
-✓ Found Xcode 26.1.1
-✓ Found iOS runtime: 26.1
+No user-facing errors for iOS testing. The system either works silently or doesn't:
 
-Creating VM with iOS testing support...
-VM size: 30GB
-Xcode and runtime will be mounted from host.
+**Host has Xcode + runtimes:**
+- Mounts created, setup script configures, iOS testing works
+- No messages needed - just works
 
-# Missing runtime
-$ yoloai new embsdk --ios-testing
-Checking host for iOS development tools...
-✓ Found Xcode 26.1.1
-⚠ iOS runtime not found - will need to download in VM (~16GB)
+**Host missing Xcode or runtimes:**
+- Mounts not created (directories don't exist)
+- Setup script skips iOS configuration
+- VM works normally for other development
+- User discovers when they try xcodebuild (command not found or no runtimes)
 
-Continue anyway? (y/N) y
+**User action if iOS testing doesn't work:**
+1. Install Xcode on host
+2. Download simulator runtimes in Xcode > Settings > Components
+3. Restart VM (no regeneration needed)
+4. iOS testing now works
 
-Creating VM with iOS testing support...
-VM size: 50GB
-After VM creation, download runtime with:
-  yoloai exec embsdk -- xcodebuild -downloadPlatform iOS
-
-# Missing Xcode
-$ yoloai new embsdk --ios-testing
-Checking host for iOS development tools...
-⚠ Xcode not found - install on host for iOS testing
-
-To install Xcode:
-  1. Download from App Store or https://developer.apple.com
-  2. Run: sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer
-  3. Recreate sandbox: yoloai new embsdk --ios-testing
-
-Abort? (Y/n) y
-Cancelled.
-```
-
-### Phase 3: Configuration
-
-#### Profile-based iOS testing
-
-Allow profiles to specify iOS testing preferences:
-
-```yaml
-# ~/.yoloai/profiles/ios-dev/config.yaml
-tart:
-  disk_size: 30  # Adjust based on what's available on host
-
-ios_testing:
-  enabled: true
-  # Mounts whatever is available on host
-  # Shows warnings if components missing
-
-env:
-  - DEVELOPER_DIR=/Volumes/My Shared Files/m-Xcode.app/Contents/Developer
-```
-
-### Phase 4: Error Handling
-
-#### Common failure scenarios
-
-1. **No Xcode on host**
-   ```
-   ⚠ Xcode not found at /Applications/Xcode.app
-
-   iOS testing requires Xcode on host. To fix:
-   1. Install Xcode from App Store or https://developer.apple.com
-   2. Run: sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer
-   3. Recreate sandbox: yoloai new <name> --ios-testing
-
-   Continue without Xcode? iOS testing will not work. (y/N)
-   ```
-
-2. **No iOS runtime on host**
-   ```
-   ⚠ iOS runtime not found in /Library/Developer/CoreSimulator/Volumes/
-
-   Options:
-   1. Install on host (recommended):
-      - Open Xcode > Settings > Components
-      - Download iOS runtime
-      - Recreate sandbox for better disk efficiency
-   2. Download in VM (uses ~16GB VM disk):
-      - yoloai exec <name> -- xcodebuild -downloadPlatform iOS
-
-   Continue with in-VM download? (y/N)
-   ```
-
-3. **Disk space insufficient**
-   ```
-   ⚠ Specified VM size (20GB) may be insufficient for iOS testing
-
-   Recommended sizes:
-   - With host runtime: 30GB
-   - Without host runtime: 50GB (need space for ~16GB runtime download)
-
-   Continue anyway? (y/N)
-   ```
+**Implementation notes:**
+- No warnings or prompts during VM creation
+- No detection or validation logic needed
+- Clean separation: yoloAI provides plumbing, user provides tools
 
 ## Testing Strategy
 
@@ -421,15 +255,15 @@ env:
 
 ### Manual Testing Checklist
 
-- [ ] Host with Xcode + runtime → both mounted, no warnings
-- [ ] Host with Xcode only → Xcode mounted, warning about runtime
-- [ ] Host with no Xcode → warning, offer to abort
-- [ ] User can choose to continue despite warnings
-- [ ] Suggested VM sizes match configuration
-- [ ] VM restart preserves iOS testing configuration
-- [ ] Multiple VMs can share host's Xcode
-- [ ] Warning messages are clear and actionable
-- [ ] Setup script correctly detects mounts and configures paths
+- [ ] Host with Xcode + runtimes → iOS testing works automatically
+- [ ] Host with Xcode only → xcodebuild works, simctl shows no runtimes
+- [ ] Host with no Xcode → VM works normally (no iOS testing)
+- [ ] Install Xcode on host, restart VM → iOS testing now works
+- [ ] Install new runtime on host, restart VM → new runtime available
+- [ ] Multiple VMs share host's Xcode simultaneously
+- [ ] Setup script silent operation (no output unless errors)
+- [ ] xcode-select points to mounted Xcode
+- [ ] Symlink to mounted runtimes created correctly
 
 ## Documentation Updates
 
@@ -524,12 +358,13 @@ yoloai new embsdk --ios-testing --xcode-version 15.4
 
 ## Success Metrics
 
-- VM disk size for iOS testing: ≤30GB (with host runtime) vs 100GB baseline
-- Setup time: <5 minutes (with host Xcode + runtime)
-- Clear warnings when components missing
-- User understands what they need to install
-- User can run iOS tests immediately after `yoloai new` (if host has all components)
-- No hidden fallbacks or surprising behavior
+- VM disk size: ≤30GB (with host Xcode + runtimes) vs 100GB baseline
+- Setup time: Instant (just mount configuration, no detection/validation)
+- Zero configuration: Works automatically if host has tools
+- Dynamic updates: New host runtimes available on VM restart
+- Silent operation: No prompts, warnings, or user intervention
+- Clear separation: yoloAI provides plumbing, user provides tools
+- Just works: iOS testing available if host has Xcode, otherwise gracefully absent
 
 ## References
 
