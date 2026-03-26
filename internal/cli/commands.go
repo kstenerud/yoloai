@@ -194,6 +194,7 @@ func newNewCmd(version string) *cobra.Command {
 			targetOS, _ := cmd.Flags().GetString("os")
 			debug, _ := cmd.Flags().GetBool("debug")
 			envSlice, _ := cmd.Flags().GetStringSlice("env")
+			runtimes, _ := cmd.Flags().GetStringArray("runtime")
 
 			// Block unsupported isolation+os combinations early.
 			if goruntime.GOOS == "darwin" && targetOS != "mac" && (isolation == "vm" || isolation == "vm-enhanced") {
@@ -292,6 +293,7 @@ func newNewCmd(version string) *cobra.Command {
 					Memory:       memory,
 					Isolation:    isolation,
 					Env:          envMap,
+					Runtimes:     runtimes,
 				})
 				if err != nil {
 					return err
@@ -358,6 +360,7 @@ func newNewCmd(version string) *cobra.Command {
 	cmd.Flags().String("isolation", "", "Isolation mode: container (default), container-enhanced (gVisor), vm (Kata+QEMU), vm-enhanced (Kata+Firecracker)")
 	cmd.Flags().String("os", "", "Target OS: linux (default), mac")
 	cmd.Flags().StringSlice("env", nil, "Environment variable (KEY=VAL, repeatable)")
+	cmd.Flags().StringArray("runtime", []string{}, "Apple simulator runtime (ios, tvos, watchos, visionos). Repeatable. Example: --runtime ios --runtime tvos:26.1")
 
 	cmd.MarkFlagsMutuallyExclusive("network-none", "network-isolated")
 	cmd.MarkFlagsMutuallyExclusive("profile", "no-profile")

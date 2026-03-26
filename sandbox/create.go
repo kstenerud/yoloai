@@ -17,6 +17,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/runtime/caps"
+	"github.com/kstenerud/yoloai/runtime/tart"
 )
 
 // mkdirAllPerm creates a directory (and parents) then explicitly chmods it to
@@ -104,6 +105,7 @@ type CreateOptions struct {
 	Memory       string            // --memory flag (e.g., "8g", "512m")
 	Env          map[string]string // --env flags (KEY=VAL pairs)
 	Isolation    string            // --isolation flag (e.g., "container-enhanced", "vm")
+	Runtimes     []string          // --runtime flags (Apple simulator runtimes, e.g., ["ios", "tvos:26.1"])
 }
 
 // sandboxState holds resolved state computed during preparation.
@@ -301,6 +303,57 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions, c
 	pr, err := m.resolveProfileConfig(ctx, &opts, &agentDef, ycfg, gcfg)
 	if err != nil {
 		return nil, err
+	}
+
+	// Resolve Apple runtime base (if --runtime flags provided)
+	if len(opts.Runtimes) > 0 {
+		// Only on Tart backend
+		if m.backend != "tart" {
+			return nil, NewUsageError("--runtime flag only supported on tart backend (macOS VMs)")
+		}
+
+		// Type assert to access tart-specific methods
+		tartRuntime, ok := m.runtime.(*tart.Runtime)
+		if !ok {
+			return nil, fmt.Errorf("internal error: tart backend type mismatch")
+		}
+
+		// 1. Resolve runtime versions (queries host simctl)
+		resolved, err := tart.ResolveRuntimeVersions(opts.Runtimes)
+		if err != nil {
+			return nil, fmt.Errorf("resolve runtimes: %w", err)
+		}
+
+		// 2. Generate cache key
+		cacheKey := tart.GenerateCacheKey(resolved)
+		baseName := "yoloai-base-" + cacheKey
+
+		// 3. Acquire lock (blocks if another process creating)
+		release, err := tart.AcquireBaseLock(baseName)
+		if err != nil {
+			return nil, fmt.Errorf("acquire base lock: %w", err)
+		}
+		defer release()
+
+		// 4. Check if base exists
+		exists, err := tartRuntime.BaseExists(ctx, baseName)
+		if err != nil {
+			return nil, fmt.Errorf("check base: %w", err)
+		}
+
+		// 5. Create base if missing
+		if !exists {
+			_, _ = fmt.Fprintf(m.output, "Creating runtime base %s...\n", baseName)
+			if err := tartRuntime.CreateBase(ctx, baseName, resolved); err != nil {
+				return nil, fmt.Errorf("create base: %w", err)
+			}
+			_, _ = fmt.Fprintf(m.output, "Runtime base %s created\n", baseName)
+		} else {
+			_, _ = fmt.Fprintf(m.output, "Using cached base %s\n", baseName)
+		}
+
+		// 6. Override imageRef in profile result
+		pr.imageRef = baseName
 	}
 
 	// Apply config defaults and CLI overrides for resources.

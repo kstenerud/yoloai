@@ -5,6 +5,7 @@ package tart
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -952,6 +953,105 @@ func isMacOS() bool {
 // isAppleSilicon returns true if running on Apple Silicon.
 func isAppleSilicon() bool {
 	return goarch() == "arm64" && goos() == "darwin"
+}
+
+// BaseExists checks if a base VM exists.
+func (r *Runtime) BaseExists(ctx context.Context, baseName string) (bool, error) {
+	return r.vmExists(ctx, baseName), nil
+}
+
+// CreateBase creates a new runtime base image with specified runtimes.
+func (r *Runtime) CreateBase(ctx context.Context, baseName string, runtimes []RuntimeVersion) error {
+	tempVM := generateTempVMName(baseName)
+	defer r.cleanupTempVM(ctx, tempVM) // Always cleanup temp VM
+
+	// Clone yoloai-base to temp VM
+	if _, err := r.runTart(ctx, "clone", "yoloai-base", tempVM); err != nil {
+		return fmt.Errorf("clone base: %w", err)
+	}
+
+	// Start temp VM for runtime installation
+	if err := r.startTempVM(ctx, tempVM); err != nil {
+		return fmt.Errorf("start temp VM: %w", err)
+	}
+	defer r.stopVM(ctx, tempVM) // Ensure VM stopped before snapshot
+
+	// Copy each runtime into the VM
+	for _, rt := range runtimes {
+		fmt.Printf("Copying %s %s runtime...\n", rt.Platform, rt.Version)
+		if err := CopyRuntimeToVM(ctx, tempVM, rt); err != nil {
+			return fmt.Errorf("copy %s %s: %w", rt.Platform, rt.Version, err)
+		}
+	}
+
+	// Stop VM to flush all changes to disk
+	r.stopVM(ctx, tempVM)
+
+	// Wait for VM to fully stop
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		if !r.isRunning(ctx, tempVM) {
+			break
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+
+	// Snapshot temp VM as new base
+	if err := r.snapshotAsBase(ctx, tempVM, baseName); err != nil {
+		return fmt.Errorf("snapshot base: %w", err)
+	}
+
+	return nil
+}
+
+// generateTempVMName generates a unique temporary VM name.
+func generateTempVMName(baseName string) string {
+	// Generate 6 random hex chars
+	b := make([]byte, 3)
+	_, _ = rand.Read(b)
+	random := fmt.Sprintf("%x", b)
+	return fmt.Sprintf("%s-tmp-%s", baseName, random)
+}
+
+// startTempVM starts a temporary VM for runtime installation.
+func (r *Runtime) startTempVM(ctx context.Context, vmName string) error {
+	// Mount /Library/Developer/CoreSimulator/Volumes/ from host
+	volumesPath := "/Library/Developer/CoreSimulator/Volumes"
+	mountName := "m-Volumes"
+
+	// Build arguments for tart run
+	args := []string{"run", "--no-graphics",
+		"--dir", fmt.Sprintf("%s:%s:ro", mountName, volumesPath),
+		vmName}
+
+	// Start VM in background
+	cmd := exec.CommandContext(ctx, r.tartBin, args...) //nolint:gosec // G204: args are constructed internally
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("start VM: %w", err)
+	}
+
+	// Wait for boot
+	procDone := make(chan error, 1)
+	go func() { procDone <- cmd.Wait() }()
+
+	return r.waitForBoot(ctx, vmName, procDone)
+}
+
+// snapshotAsBase creates a new base image by cloning a temp VM.
+func (r *Runtime) snapshotAsBase(ctx context.Context, tempVM, baseName string) error {
+	// Clone temp VM to new base name
+	if _, err := r.runTart(ctx, "clone", tempVM, baseName); err != nil {
+		// If clone fails and partial base exists, delete it
+		_, _ = r.runTart(ctx, "delete", baseName)
+		return fmt.Errorf("clone to base: %w", err)
+	}
+	return nil
+}
+
+// cleanupTempVM removes a temporary VM (best-effort, never fails).
+func (r *Runtime) cleanupTempVM(ctx context.Context, vmName string) {
+	r.stopVM(ctx, vmName)
+	_, _ = r.runTart(ctx, "delete", vmName)
 }
 
 // addMountMapToConfig adds a mount_map to runtime-config.json that tells

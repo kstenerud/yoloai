@@ -43,6 +43,16 @@ func DefaultsConfigPath() string {
 	return filepath.Join(DefaultsDir(), "config.yaml")
 }
 
+// TartBaseMetadataDir returns the directory for Tart runtime base metadata.
+func TartBaseMetadataDir() string {
+	return filepath.Join(YoloaiDir(), "tart-base-metadata")
+}
+
+// TartBaseLocksDir returns the directory for Tart runtime base locks.
+func TartBaseLocksDir() string {
+	return filepath.Join(YoloaiDir(), "tart-base-locks")
+}
+
 // Shared sandbox subdirectory name constants. Used by sandbox/paths.go and
 // runtime backends to avoid duplicating these literal strings.
 const (
