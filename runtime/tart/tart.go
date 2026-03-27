@@ -978,7 +978,7 @@ func (r *Runtime) CreateBase(ctx context.Context, baseName string, runtimes []Ru
 
 	// Copy each runtime into the VM
 	for _, rt := range runtimes {
-		fmt.Printf("Copying %s %s runtime...\n", rt.Platform, rt.Version)
+		fmt.Printf("Copying %s %s runtime (this may take several minutes)...\n", rt.Platform, rt.Version)
 		if err := CopyRuntimeToVM(ctx, tempVM, rt); err != nil {
 			return fmt.Errorf("copy %s %s: %w", rt.Platform, rt.Version, err)
 		}
@@ -1015,13 +1015,14 @@ func generateTempVMName(baseName string) string {
 
 // startTempVM starts a temporary VM for runtime installation.
 func (r *Runtime) startTempVM(ctx context.Context, vmName string) error {
-	// Mount /Library/Developer/CoreSimulator/Volumes/ from host
+	// Mount /Library/Developer/CoreSimulator/Volumes/ and /tmp from host
 	volumesPath := "/Library/Developer/CoreSimulator/Volumes"
 	mountName := "m-Volumes"
 
 	// Build arguments for tart run
 	args := []string{"run", "--no-graphics",
 		"--dir", fmt.Sprintf("%s:%s:ro", mountName, volumesPath),
+		"--dir", "m-tmp:/tmp:ro",
 		vmName}
 
 	// Start VM in background

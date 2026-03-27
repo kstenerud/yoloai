@@ -44,6 +44,8 @@ row to the index.
 | `mkdir: /var/folders: Permission denied` during Tart setup | [Tart: mkdir system dirs fails](#tart-cannot-mkdir-system-directories-like-varfolders) |
 | Tart base image rebuilt every time `yoloai new` runs | [Tart: empty sourceDir breaks marker](#empty-sourcedir-breaks-tart-provisioning-marker-file-check) |
 | `tart exec` fails with "instance not found" right after boot | [Tart: exec needs stabilization delay](#tart-exec-needs-brief-stabilization-delay-after-boot) |
+| `tart exec` with `--` separator fails silently or returns exit status 1 | [Tart: no support for -- separator](#tart-exec-does-not-support----argument-separator) |
+| `xcrun simctl list runtimes` shows no runtimes when mounted via VirtioFS | [Tart: CoreSimulator requires sealed APFS](#coresimulator-cannot-discover-virtiofs-mounted-runtimes) |
 | DNS works but HTTPS to api.anthropic.com times out | [DNS: timeout = API unreachable, not DNS](#request-timed-out-in-claude-code--api-unreachable-not-dns-failure) |
 | `iptables` warnings about legacy tables | [iptables-nft: legacy tables warning](#iptables--iptables-nft-both-iptables-legacy-and-iptables-nft-can-coexist) |
 | `--isolation vm` rejected on macOS / "containerd not available" | [Registry: containerd Linux-only](#containerd-backend-is-linux-only) |
@@ -591,4 +593,78 @@ time.Sleep(500 * time.Millisecond)
 **Impact:** Without the delay, VM creation fails intermittently with "instance not found" errors, especially noticeable in automated tests where VMs are created and used quickly.
 
 **Code:** `runtime/tart/tart.go::Start` after `waitForBoot`
+
+### Tart exec does not support `--` argument separator
+
+**Symptom:** Commands constructed with `tart exec <vmName> -- <command>` fail silently or return `exit status 1` without clear error messages. For example:
+```bash
+tart exec vm-name -- sudo mkdir -p /some/path
+# Returns exit status 1 with no stderr
+```
+
+**Explanation:** Unlike many CLI tools that use `--` to separate flags from arguments, `tart exec` does not support or recognize the `--` separator. The tart command interprets `--` as a literal argument to pass to the VM, which confuses the command execution.
+
+The correct syntax is: `tart exec <vm-name> <command> [args...]`
+
+All working tart exec invocations in the codebase use the `execArgs()` helper function which does NOT include `--`. Additionally, sudo commands in provisioning are wrapped in `bash -c "..."` for proper shell expansion and error handling.
+
+**Fix:** Remove `--` separators from tart exec commands:
+```go
+// Wrong - includes --
+cmd := exec.CommandContext(ctx, "tart", "exec", vmName, "--", "sudo", "mkdir", "-p", path)
+
+// Correct - use execArgs helper
+args := execArgs(vmName, "bash", "-c", fmt.Sprintf("sudo mkdir -p %s", path))
+cmd := exec.CommandContext(ctx, r.tartBin, args...)
+```
+
+For commands that need shell features (variables, pipes, etc.) or sudo, wrap them in `bash -c "..."`:
+```go
+args := execArgs(vmName, "bash", "-c", "sudo mkdir -p /Library/Developer/...")
+```
+
+**Impact:** Commands fail with unclear exit status 1 errors. Runtime copying functionality completely broken during base image creation.
+
+**Code:** `runtime/tart/tart.go::execArgs`, `runtime/tart/build.go` (provisioning commands), `runtime/tart/runtime_copy.go` (needs fix)
+
+### CoreSimulator cannot discover VirtioFS-mounted runtimes
+
+**Symptom:** When iOS/tvOS/watchOS simulator runtimes are mounted via VirtioFS (even with proper symlinks), `xcrun simctl list runtimes` shows no runtimes or hangs indefinitely. The investigation document noted this empirically but didn't explain the technical mechanism.
+
+**Root cause - Runtimes are Sealed APFS Disk Images:**
+
+iOS Simulator runtimes are **not directories** - they are sealed APFS disk images:
+```bash
+$ mount | grep CoreSimulator/Volumes/iOS
+/dev/disk13s1 on /Library/Developer/CoreSimulator/Volumes/iOS_23E244
+  (apfs, sealed, local, nodev, nosuid, read-only, journaled, noatime, nobrowse)
+
+$ diskutil apfs list | grep -A5 "iOS 26.4 Simulator"
+|       Name:                      iOS 26.4 Simulator
+|       Mount Point:               /Library/Developer/CoreSimulator/Volumes/iOS_23E244
+|       Sealed:                    Yes  ← CRITICAL
+```
+
+**CoreSimulator's strict discovery requirements:**
+
+1. **Sealed APFS volumes required** - Runtimes must be mounted as `sealed` APFS volumes for Apple's cryptographic code signing verification. VirtioFS is a network filesystem (9P/virtio) and cannot provide APFS volume semantics or the `sealed` property.
+
+2. **Volume mount notifications** - CoreSimulator listens for macOS `DiskArbitration` volume mount events. From CoreSimulator.framework strings: `"Checking for mountable runtimes at '%@' due to volume mount notification"`. VirtioFS shares don't trigger system-level volume mount notifications.
+
+3. **Disk image management** - CoreSimulator uses `SimDiskImageManager` to track runtime disk images. It expects `mountable` `.dmg` files managed by the MobileAsset system, located in `/System/Library/AssetsV2/com_apple_MobileAsset_*SimulatorRuntime/`. These are auto-mounted with specific APFS properties.
+
+4. **Filesystem type checking** - Even symlinks to VirtioFS paths fail because CoreSimulator verifies the underlying filesystem type. Network filesystems are rejected.
+
+**Why "symlink test" in investigation was misleading:**
+
+The investigation's symlink test (docs/dev/ios-testing-investigation.md:656-662) moved a **local directory** to another location and symlinked it - this worked because both source and target were on the same local APFS volume. When the symlink points to a **VirtioFS mount**, the filesystem semantics are fundamentally different and CoreSimulator rejects it.
+
+**This is a fundamental architectural limitation** - VirtioFS cannot emulate sealed APFS volumes. Runtimes **must** be copied to local VM storage or downloaded fresh inside the VM.
+
+**Workaround:** Hybrid approach (validated in investigation):
+- Mount Xcode.app from host via VirtioFS (saves ~11GB) - works fine
+- Mount PrivateFrameworks from host via VirtioFS (saves ~2GB) - works fine
+- **Copy or download runtimes locally** inside VM (~8-16GB per runtime) - required
+
+**Code:** See `docs/dev/ios-testing-investigation.md` lines 844-966 for empirical testing; `runtime/tart/runtime_copy.go` for copy implementation.
 
