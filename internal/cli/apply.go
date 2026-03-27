@@ -130,26 +130,22 @@ Use --patches to export .patch files without applying them.`,
 				// If --tags is used, transfer tags even without commits
 				if withTags && len(unappliedTags) > 0 {
 					targetDir := meta.Workdir.HostPath
+					workDir := sandbox.WorkDir(name, meta.Workdir.HostPath)
 					if !jsonEnabled(cmd) {
 						fmt.Fprintln(cmd.OutOrStdout(), "No changes to apply") //nolint:errcheck
-						fmt.Fprintf(cmd.OutOrStdout(), "\nTransferring %d tag(s)...\n", len(unappliedTags)) //nolint:errcheck
+						fmt.Fprintf(cmd.OutOrStdout(), "\nTransferring %d tag(s) by matching commits...\n", len(unappliedTags)) //nolint:errcheck
 					}
-					// Transfer tags (no SHA mapping needed since no commits were applied)
-					tagsApplied := 0
-					tagsSkipped := 0
-					for _, tag := range unappliedTags {
-						if createErr := workspace.CreateTag(targetDir, tag.Name, tag.SHA, tag.Message); createErr != nil {
-							tagsSkipped++
-							if !jsonEnabled(cmd) {
-								fmt.Fprintf(cmd.ErrOrStderr(), "Warning: tag %q: %v\n", tag.Name, createErr) //nolint:errcheck
-							}
-						} else {
-							tagsApplied++
-							if !jsonEnabled(cmd) {
-								fmt.Fprintf(cmd.OutOrStdout(), "Tag %q applied\n", tag.Name) //nolint:errcheck
-							}
-						}
+					// Build SHA map by matching commits (author, timestamp, subject)
+					sandboxSHAs := make([]string, len(unappliedTags))
+					for i, tag := range unappliedTags {
+						sandboxSHAs[i] = tag.SHA
 					}
+					shaMap, matchErr := workspace.BuildSHAMapByMatching(workDir, targetDir, sandboxSHAs)
+					if matchErr != nil {
+						return fmt.Errorf("build SHA map: %w", matchErr)
+					}
+					// Transfer tags using the SHA map
+					tagsApplied, tagsSkipped := applyTags(cmd, unappliedTags, shaMap, targetDir, true)
 					if jsonEnabled(cmd) {
 						return writeJSON(cmd.OutOrStdout(), applyResult{
 							Target:      meta.Workdir.HostPath,
