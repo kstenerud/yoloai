@@ -48,6 +48,7 @@ row to the index.
 | `yoloai attach` fails with "no sessions" on Tart VM | [Tart: exec -t changes environment](#tart-exec--t-changes-environment-preventing-tmux-from-finding-socket) |
 | `xcrun simctl list runtimes` shows no runtimes when mounted via VirtioFS | [Tart: CoreSimulator requires sealed APFS](#coresimulator-cannot-discover-virtiofs-mounted-runtimes) |
 | `Failed to start launchd_sim: could not bind to session` when booting simulator | [Tart: ditto'd runtime is incomplete](#dittod-ios-runtime-is-incomplete-use-xcodebuild--downloadplatform) |
+| `git diff` fails with "unable to read" object / git corruption on Tart VM | [Tart: VirtioFS corrupts git repositories](#virtiofs-corrupts-git-repositories) |
 | DNS works but HTTPS to api.anthropic.com times out | [DNS: timeout = API unreachable, not DNS](#request-timed-out-in-claude-code--api-unreachable-not-dns-failure) |
 | `iptables` warnings about legacy tables | [iptables-nft: legacy tables warning](#iptables--iptables-nft-both-iptables-legacy-and-iptables-nft-can-coexist) |
 | `--isolation vm` rejected on macOS / "containerd not available" | [Registry: containerd Linux-only](#containerd-backend-is-linux-only) |
@@ -739,6 +740,63 @@ The download approach installs to the **same path** that ditto was copying to, p
 **Verification:** See `docs/dev/research/ios-runtime-download-verification.md` for complete manual verification that the download approach produces bootable simulators.
 
 **Code:** `runtime/tart/runtime_copy.go` (currently implements ditto approach, needs replacement with download approach)
+
+### VirtioFS corrupts git repositories
+
+**Symptom:** Git commands inside Tart VMs fail with corruption errors:
+```
+fatal: unable to read 5e01dacada080659f675a6213ba8f7a02447996f
+```
+
+Additionally:
+- Same file appears both staged and unstaged
+- `git status` shows changes but `git diff` fails
+- Corruption appears after `yoloai reset` operations
+
+**Root cause - VirtioFS/9P protocol limitations:**
+
+Git's object database has strict filesystem requirements that VirtioFS (9P protocol) cannot satisfy:
+
+1. **No hard link support** - Git uses hard links extensively for object deduplication and packing. The 9P protocol fundamentally does not support hard links (Plan 9 architecture has no "unix leftovers like hard/soft links"). When git tries to create hard links on VirtioFS, they're silently converted to copies or fail, corrupting the object database structure.
+
+2. **Data corruption during concurrent operations** - The Linux kernel mailing list documents 9p data corruption issues with writeback caching during concurrent file operations (LKML 2026/2/18/794). Git's object database relies on concurrent reads/writes to pack files and loose objects.
+
+3. **Atomic operation failures** - Git expects atomic rename operations for safe object creation. Network filesystems like VirtioFS may not provide proper atomicity guarantees, leading to partially-written objects or lost updates.
+
+4. **Cache coherency issues** - VirtioFS uses aggressive client-side caching for performance. Git's fsync expectations may not be honored, resulting in stale reads or lost writes.
+
+**Current yoloAI architecture (problematic):**
+
+For Tart VMs with `:copy` mode directories:
+1. Work directory copied to `~/.yoloai/sandboxes/<name>/work/` on host
+2. Shared back to VM via VirtioFS at `/Volumes/My Shared Files/yoloai/work/...`
+3. **Agent and git run inside VM on the VirtioFS mount** ← corruption happens here
+
+The corruption is especially triggered by `yoloai reset`, which:
+- Deletes and re-copies the work directory on the host
+- Restarts the container/VM
+- Git then operates on the fresh VirtioFS mount and corrupts its object database
+
+**Fix:** Work directories must be on **local VM storage**, not VirtioFS mounts:
+
+1. During sandbox creation: Copy work directory to local VM filesystem (e.g., `/Users/admin/yoloai-work/<escaped-path>`)
+2. Update runtime-config.json to use the local VM path as `working_dir`
+3. Git and agent operations run on local storage (fast, no corruption)
+4. During diff/apply: Copy changes from local VM → VirtioFS → host for final transfer
+
+VirtioFS should only be used for:
+- Transferring initial state (host → VM during creation)
+- Transferring final state (VM → host during diff/apply)
+- Never for active git operations
+
+**References:**
+- Linux kernel mailing list: [9p data corruption with writeback caching during concurrent operations](https://lkml.org/lkml/2026/2/18/794)
+- ddev project: [Git "dubious ownership" error triggered when using VirtioFS](https://github.com/ddev/ddev/issues/4829)
+- Hacker News discussion: [virtfs uses 9p - hard link limitations](https://news.ycombinator.com/item?id=33009752)
+
+**Impact:** All Tart VMs with `:copy` mode directories are affected. Git corruption can lead to data loss and broken repositories.
+
+**Code:** `runtime/tart/tart.go::ResolveCopyMount`, `runtime/tart/tart.go::Create`, `sandbox/lifecycle.go::Reset` (needs implementation)
 
 ---
 
