@@ -132,7 +132,7 @@ Use --patches to export .patch files without applying them.`,
 					targetDir := meta.Workdir.HostPath
 					workDir := sandbox.WorkDir(name, meta.Workdir.HostPath)
 					if !jsonEnabled(cmd) {
-						fmt.Fprintln(cmd.OutOrStdout(), "No changes to apply") //nolint:errcheck
+						fmt.Fprintln(cmd.OutOrStdout(), "No changes to apply")                                                  //nolint:errcheck
 						fmt.Fprintf(cmd.OutOrStdout(), "\nTransferring %d tag(s) by matching commits...\n", len(unappliedTags)) //nolint:errcheck
 					}
 					// Build SHA map by matching commits (author, timestamp, subject)
@@ -145,7 +145,7 @@ Use --patches to export .patch files without applying them.`,
 						return fmt.Errorf("build SHA map: %w", matchErr)
 					}
 					// Transfer tags using the SHA map
-					tagsApplied, tagsSkipped := applyTags(cmd, unappliedTags, shaMap, targetDir, true)
+					tagsApplied, tagsSkipped := applyTags(cmd, unappliedTags, shaMap, workDir, targetDir, true)
 					if jsonEnabled(cmd) {
 						return writeJSON(cmd.OutOrStdout(), applyResult{
 							Target:      meta.Workdir.HostPath,
@@ -177,6 +177,7 @@ Use --patches to export .patch files without applying them.`,
 			}
 
 			targetDir := meta.Workdir.HostPath
+			sandboxWorkDir := sandbox.WorkDir(name, meta.Workdir.HostPath)
 			isGit := workspace.IsGitRepo(targetDir)
 
 			// Non-git fallback: can't use git am on non-git targets
@@ -301,7 +302,7 @@ Use --patches to export .patch files without applying them.`,
 			}
 
 			// Apply tags
-			tagsApplied, tagsSkipped := applyTags(cmd, tags, shaMap, targetDir, withTags)
+			tagsApplied, tagsSkipped := applyTags(cmd, tags, shaMap, sandboxWorkDir, targetDir, withTags)
 
 			// Inform user if tags remain unapplied
 			if !jsonEnabled(cmd) && !withTags {
@@ -502,6 +503,7 @@ func parseApplyArgs(rest []string, cmd *cobra.Command) (refs []string, paths []s
 // applySelectedCommits cherry-picks specific commits into the target.
 func applySelectedCommits(cmd *cobra.Command, name string, refs, paths []string, meta *sandbox.Meta, yes, force, dryRun, withTags bool) error {
 	targetDir := meta.Workdir.HostPath
+	sandboxWorkDir := sandbox.WorkDir(name, meta.Workdir.HostPath)
 	if !workspace.IsGitRepo(targetDir) {
 		return fmt.Errorf("selective apply requires a git target directory — %s is not a git repository", targetDir)
 	}
@@ -625,7 +627,7 @@ func applySelectedCommits(cmd *cobra.Command, name string, refs, paths []string,
 	}
 
 	// Apply tags
-	tagsApplied, tagsSkipped := applyTags(cmd, selectedTags, shaMap, targetDir, withTags)
+	tagsApplied, tagsSkipped := applyTags(cmd, selectedTags, shaMap, sandboxWorkDir, targetDir, withTags)
 
 	// Inform user if tags remain unapplied
 	if !jsonEnabled(cmd) && !withTags {
@@ -871,8 +873,10 @@ func buildTagsByCommit(tags []sandbox.TagInfo) map[string][]string {
 }
 
 // applyTags transfers tags to the host using the sandbox→host SHA map.
+// sandboxWorkDir is used to fetch the full tag message (which is not stored
+// in TagInfo to keep tag listing fast and reliable).
 // Returns counts of applied and skipped tags. No-ops if withTags is false.
-func applyTags(cmd *cobra.Command, tags []sandbox.TagInfo, shaMap map[string]string, targetDir string, withTags bool) (applied, skipped int) {
+func applyTags(cmd *cobra.Command, tags []sandbox.TagInfo, shaMap map[string]string, sandboxWorkDir, targetDir string, withTags bool) (applied, skipped int) {
 	if !withTags || len(tags) == 0 {
 		return 0, 0
 	}
@@ -886,7 +890,9 @@ func applyTags(cmd *cobra.Command, tags []sandbox.TagInfo, shaMap map[string]str
 			}
 			continue
 		}
-		if createErr := workspace.CreateTag(targetDir, tag.Name, hostSHA, tag.Message); createErr != nil {
+		// Fetch full tag message from sandbox
+		message := sandbox.GetTagMessage(sandboxWorkDir, tag.Name)
+		if createErr := workspace.CreateTag(targetDir, tag.Name, hostSHA, message); createErr != nil {
 			skipped++
 			if !isJSON {
 				fmt.Fprintf(cmd.ErrOrStderr(), "Warning: tag %q: %v\n", tag.Name, createErr) //nolint:errcheck
