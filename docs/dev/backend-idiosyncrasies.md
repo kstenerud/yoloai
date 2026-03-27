@@ -46,6 +46,7 @@ row to the index.
 | `tart exec` fails with "instance not found" right after boot | [Tart: exec needs stabilization delay](#tart-exec-needs-brief-stabilization-delay-after-boot) |
 | `tart exec` with `--` separator fails silently or returns exit status 1 | [Tart: no support for -- separator](#tart-exec-does-not-support----argument-separator) |
 | `xcrun simctl list runtimes` shows no runtimes when mounted via VirtioFS | [Tart: CoreSimulator requires sealed APFS](#coresimulator-cannot-discover-virtiofs-mounted-runtimes) |
+| `Failed to start launchd_sim: could not bind to session` when booting simulator | [Tart: ditto'd runtime is incomplete](#dittod-ios-runtime-is-incomplete-use-xcodebuild--downloadplatform) |
 | DNS works but HTTPS to api.anthropic.com times out | [DNS: timeout = API unreachable, not DNS](#request-timed-out-in-claude-code--api-unreachable-not-dns-failure) |
 | `iptables` warnings about legacy tables | [iptables-nft: legacy tables warning](#iptables--iptables-nft-both-iptables-legacy-and-iptables-nft-can-coexist) |
 | `--isolation vm` rejected on macOS / "containerd not available" | [Registry: containerd Linux-only](#containerd-backend-is-linux-only) |
@@ -667,4 +668,50 @@ The investigation's symlink test (docs/dev/ios-testing-investigation.md:656-662)
 - **Copy or download runtimes locally** inside VM (~8-16GB per runtime) - required
 
 **Code:** See `docs/dev/ios-testing-investigation.md` lines 844-966 for empirical testing; `runtime/tart/runtime_copy.go` for copy implementation.
+
+### Ditto'd iOS runtime is incomplete; use `xcodebuild -downloadPlatform`
+
+**Symptom:** After copying an iOS runtime from the VirtioFS mount using `ditto`, the runtime is recognized by `xcrun simctl list runtimes` but simulator devices fail to boot with:
+```
+Failed to prepare device for impending launch.
+Unable to boot the Simulator.
+Failed to start launchd_sim: could not bind to session, launchd_sim may have crashed or quit responding
+```
+
+Additionally, CoreSimulator logs show warnings about missing dyld cache.
+
+**Root cause - Ditto cannot copy all protected files:**
+
+Using `ditto` to copy a runtime from the VirtioFS mount at `/Library/Developer/CoreSimulator/Volumes/iOS_*/Library/.../iOS X.Y.simruntime` to local VM storage produces an **incomplete runtime**:
+
+1. **Missing Info.plist** - Ditto may fail to copy `/Contents/Info.plist` due to permission errors, resulting in a malformed bundle that simctl cannot recognize without manual Info.plist creation.
+
+2. **Incomplete system services** - The `modelmanagerd` directory (and potentially others) at `/Contents/Resources/RuntimeRoot/private/var/db/modelmanagerd/` has permissions that block ditto from reading (700 perms, owned by _modelmanagerd). Ditto continues after permission errors but skips these protected files.
+
+3. **Missing or incomplete dyld cache** - Critical shared library cache components may be incomplete, causing simulator boot failures.
+
+Even though ditto reports copying ~15GB/16GB and exits successfully (albeit with permission errors), the resulting runtime lacks components necessary for the simulator to boot. The `launchd_sim` error is a symptom of the incomplete installation, not a sandbox permission issue.
+
+**Why the download approach works:**
+
+Running `xcodebuild -downloadPlatform iOS` **inside the VM** downloads and installs a complete runtime:
+- Downloads 8.46 GB runtime package from Apple
+- Installs to `/Library/Developer/CoreSimulator/Volumes/iOS_*/...` with all components
+- Runtime is fully functional - simulator devices boot successfully
+- No Info.plist workarounds needed
+- No launchd_sim errors
+
+The download approach installs to the **same path** that ditto was copying to, proving the issue was incomplete file copying, not the installation location.
+
+**Fix:** Replace runtime copying with download-inside-VM approach:
+1. Mount Xcode.app and PrivateFrameworks from host via VirtioFS (saves ~13GB)
+2. Configure Xcode inside VM (symlink, xcode-select, license, first-launch)
+3. Run `xcodebuild -downloadPlatform iOS` (or tvOS, watchOS, visionOS) to download complete runtime
+4. Verify runtime with `xcrun simctl list runtimes`
+
+**Verification:** See `docs/dev/research/ios-runtime-download-verification.md` for complete manual verification that the download approach produces bootable simulators.
+
+**Code:** `runtime/tart/runtime_copy.go` (currently implements ditto approach, needs replacement with download approach)
+
+---
 
