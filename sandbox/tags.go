@@ -42,40 +42,44 @@ func ListTagsBeyondBaseline(name string) ([]TagInfo, error) {
 		return nil, nil
 	}
 
-	// List tags with type, dereferenced SHA, obj SHA, and full message.
-	// Fields are separated by \x01; tag records by \x00 (null byte).
-	const tagFmt = "%(refname:short)\x01%(objecttype)\x01%(*objectname)\x01%(objectname)\x01%(contents)"
-	tagCmd := workspace.NewGitCmd(workDir, "for-each-ref", "-z", "--format="+tagFmt, "refs/tags")
+	// List tags with type, dereferenced SHA, obj SHA, subject, and body.
+	// Fields are separated by \x01; entries by \n.
+	// Using subject+body separately to handle multi-line messages correctly.
+	const tagFmt = "%(refname:short)\x01%(objecttype)\x01%(*objectname)\x01%(objectname)\x01%(contents:subject)\x01%(contents:body)"
+	tagCmd := workspace.NewGitCmd(workDir, "for-each-ref", "--format="+tagFmt, "refs/tags")
 	tagOut, err := tagCmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("git for-each-ref: %w", err)
 	}
 
-	raw := strings.TrimRight(string(tagOut), "\x00")
+	raw := strings.TrimRight(string(tagOut), "\n")
 	if raw == "" {
 		return nil, nil
 	}
 
 	var tags []TagInfo
-	for _, record := range strings.Split(raw, "\x00") {
-		if record == "" {
-			continue
-		}
-		parts := strings.SplitN(record, "\x01", 5)
-		if len(parts) < 5 {
+	for _, line := range strings.Split(raw, "\n") {
+		parts := strings.SplitN(line, "\x01", 6)
+		if len(parts) < 6 {
 			continue
 		}
 		tagName := parts[0]
 		objType := parts[1]
 		derefSHA := parts[2]
 		objSHA := parts[3]
-		message := strings.TrimSpace(parts[4])
+		subject := strings.TrimSpace(parts[4])
+		body := strings.TrimSpace(parts[5])
 
 		var commitSHA, tagMsg string
 		switch objType {
 		case "tag": // annotated tag: deref to the commit
 			commitSHA = derefSHA
-			tagMsg = message
+			// Combine subject and body with blank line separator (git convention)
+			if body != "" {
+				tagMsg = subject + "\n\n" + body
+			} else {
+				tagMsg = subject
+			}
 		case "commit": // lightweight tag: points directly to commit
 			commitSHA = objSHA
 		default:
@@ -145,38 +149,41 @@ func ListUnappliedTags(name string) ([]TagInfo, error) {
 
 // listAllTags returns all tags in a git repository.
 func listAllTags(gitDir string) ([]TagInfo, error) {
-	const tagFmt = "%(refname:short)\x01%(objecttype)\x01%(*objectname)\x01%(objectname)\x01%(contents)"
-	tagCmd := workspace.NewGitCmd(gitDir, "for-each-ref", "-z", "--format="+tagFmt, "refs/tags")
+	const tagFmt = "%(refname:short)\x01%(objecttype)\x01%(*objectname)\x01%(objectname)\x01%(contents:subject)\x01%(contents:body)"
+	tagCmd := workspace.NewGitCmd(gitDir, "for-each-ref", "--format="+tagFmt, "refs/tags")
 	tagOut, err := tagCmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("git for-each-ref: %w", err)
 	}
 
-	raw := strings.TrimRight(string(tagOut), "\x00")
+	raw := strings.TrimRight(string(tagOut), "\n")
 	if raw == "" {
 		return nil, nil
 	}
 
 	var tags []TagInfo
-	for _, record := range strings.Split(raw, "\x00") {
-		if record == "" {
-			continue
-		}
-		parts := strings.SplitN(record, "\x01", 5)
-		if len(parts) < 5 {
+	for _, line := range strings.Split(raw, "\n") {
+		parts := strings.SplitN(line, "\x01", 6)
+		if len(parts) < 6 {
 			continue
 		}
 		tagName := parts[0]
 		objType := parts[1]
 		derefSHA := parts[2]
 		objSHA := parts[3]
-		message := strings.TrimSpace(parts[4])
+		subject := strings.TrimSpace(parts[4])
+		body := strings.TrimSpace(parts[5])
 
 		var commitSHA, tagMsg string
 		switch objType {
 		case "tag": // annotated tag
 			commitSHA = derefSHA
-			tagMsg = message
+			// Combine subject and body with blank line separator (git convention)
+			if body != "" {
+				tagMsg = subject + "\n\n" + body
+			} else {
+				tagMsg = subject
+			}
 		case "commit": // lightweight tag
 			commitSHA = objSHA
 		default:
