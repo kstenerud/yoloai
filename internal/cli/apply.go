@@ -124,6 +124,8 @@ Use --patches to export .patch files without applying them.`,
 				slog.Debug("WIP to apply", "event", "sandbox.apply.wip", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
 			}
 			if len(commits) == 0 && !hasWIP {
+				// Check for tags even when there are no changes
+				tags, _ := sandbox.ListTagsBeyondBaseline(name)
 				if jsonEnabled(cmd) {
 					return writeJSON(cmd.OutOrStdout(), applyResult{
 						Target: meta.Workdir.HostPath,
@@ -131,6 +133,10 @@ Use --patches to export .patch files without applying them.`,
 					})
 				}
 				_, err = fmt.Fprintln(cmd.OutOrStdout(), "No changes to apply")
+				// Inform user if tags are available
+				if len(tags) > 0 && !withTags {
+					fmt.Fprintf(cmd.OutOrStdout(), "\nHint: %d tag(s) available in sandbox but not applied. Run with --tags to transfer them.\n", len(tags)) //nolint:errcheck
+				}
 				return err
 			}
 
