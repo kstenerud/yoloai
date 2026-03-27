@@ -124,8 +124,8 @@ Use --patches to export .patch files without applying them.`,
 				slog.Debug("WIP to apply", "event", "sandbox.apply.wip", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
 			}
 			if len(commits) == 0 && !hasWIP {
-				// Check for tags even when there are no changes
-				tags, _ := sandbox.ListTagsBeyondBaseline(name)
+				// Check for unapplied tags even when there are no changes
+				unappliedTags, _ := sandbox.ListUnappliedTags(name)
 				if jsonEnabled(cmd) {
 					return writeJSON(cmd.OutOrStdout(), applyResult{
 						Target: meta.Workdir.HostPath,
@@ -133,9 +133,9 @@ Use --patches to export .patch files without applying them.`,
 					})
 				}
 				_, err = fmt.Fprintln(cmd.OutOrStdout(), "No changes to apply")
-				// Inform user if tags are available
-				if len(tags) > 0 && !withTags {
-					fmt.Fprintf(cmd.OutOrStdout(), "\nHint: %d tag(s) available in sandbox but not applied. Run with --tags to transfer them.\n", len(tags)) //nolint:errcheck
+				// Inform user if tags are available but not on host
+				if len(unappliedTags) > 0 && !withTags {
+					fmt.Fprintf(cmd.OutOrStdout(), "\nHint: %d tag(s) available in sandbox but not on host. Run with --tags to transfer them.\n", len(unappliedTags)) //nolint:errcheck
 				}
 				return err
 			}
@@ -272,9 +272,12 @@ Use --patches to export .patch files without applying them.`,
 			// Apply tags
 			tagsApplied, tagsSkipped := applyTags(cmd, tags, shaMap, targetDir, withTags)
 
-			// Inform user if tags are available but weren't applied
-			if !jsonEnabled(cmd) && len(tags) > 0 && !withTags {
-				fmt.Fprintf(cmd.OutOrStdout(), "\nHint: %d tag(s) available in sandbox but not applied. Run with --tags to transfer them.\n", len(tags)) //nolint:errcheck
+			// Inform user if tags remain unapplied
+			if !jsonEnabled(cmd) && !withTags {
+				unappliedTags, _ := sandbox.ListUnappliedTags(name)
+				if len(unappliedTags) > 0 {
+					fmt.Fprintf(cmd.OutOrStdout(), "\nHint: %d tag(s) available in sandbox but not on host. Run with --tags to transfer them.\n", len(unappliedTags)) //nolint:errcheck
+				}
 			}
 
 			slog.Info("apply complete", "event", "sandbox.apply.complete", "sandbox", name, "commits_applied", commitsApplied, "wip_applied", wipApplied, "tags_applied", tagsApplied) //nolint:gosec // G706: name is validated by ValidateName
@@ -593,9 +596,12 @@ func applySelectedCommits(cmd *cobra.Command, name string, refs, paths []string,
 	// Apply tags
 	tagsApplied, tagsSkipped := applyTags(cmd, selectedTags, shaMap, targetDir, withTags)
 
-	// Inform user if tags are available but weren't applied
-	if !jsonEnabled(cmd) && len(selectedTags) > 0 && !withTags {
-		fmt.Fprintf(cmd.OutOrStdout(), "\nHint: %d tag(s) available in sandbox but not applied. Run with --tags to transfer them.\n", len(selectedTags)) //nolint:errcheck
+	// Inform user if tags remain unapplied
+	if !jsonEnabled(cmd) && !withTags {
+		unappliedTags, _ := sandbox.ListUnappliedTags(name)
+		if len(unappliedTags) > 0 {
+			fmt.Fprintf(cmd.OutOrStdout(), "\nHint: %d tag(s) available in sandbox but not on host. Run with --tags to transfer them.\n", len(unappliedTags)) //nolint:errcheck
+		}
 	}
 
 	if jsonEnabled(cmd) {
