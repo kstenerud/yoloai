@@ -154,12 +154,29 @@ func GenerateCacheKey(runtimes []RuntimeVersion) string {
 	return strings.Join(parts, "-")
 }
 
+// CapitalizePlatform converts lowercase platform to Apple's official capitalization
+// ios → iOS, tvos → tvOS, watchos → watchOS, visionos → visionOS
+func CapitalizePlatform(platform string) string {
+	switch platform {
+	case "ios":
+		return "iOS"
+	case "tvos":
+		return "tvOS"
+	case "watchos":
+		return "watchOS"
+	case "visionos":
+		return "visionOS"
+	default:
+		// Fallback to simple title case for unknown platforms
+		return strings.ToUpper(platform[:1]) + platform[1:]
+	}
+}
+
 // FormatRuntimeList returns a human-readable string like "iOS 26.4, tvOS 26.1"
 func FormatRuntimeList(runtimes []RuntimeVersion) string {
 	var parts []string
 	for _, rt := range runtimes {
-		platformCap := strings.ToUpper(rt.Platform[:1]) + rt.Platform[1:]
-		parts = append(parts, fmt.Sprintf("%s %s", platformCap, rt.Version))
+		parts = append(parts, fmt.Sprintf("%s %s", CapitalizePlatform(rt.Platform), rt.Version))
 	}
 	return strings.Join(parts, ", ")
 }

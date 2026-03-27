@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"strings"
 )
 
 // CopyRuntimeToVM downloads and installs a runtime using xcodebuild -downloadPlatform.
@@ -15,7 +14,7 @@ import (
 // VM must be running with Xcode configured.
 func CopyRuntimeToVM(ctx context.Context, vmName string, runtime RuntimeVersion) error {
 	// Capitalize platform for xcodebuild (iOS, tvOS, watchOS, visionOS)
-	platformCap := strings.ToUpper(runtime.Platform[:1]) + runtime.Platform[1:]
+	platformCap := CapitalizePlatform(runtime.Platform)
 
 	// Use xcodebuild to download the runtime (downloads latest for the platform)
 	// Note: xcodebuild -downloadPlatform doesn't support specific version selection;
