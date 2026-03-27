@@ -153,3 +153,13 @@ func GenerateCacheKey(runtimes []RuntimeVersion) string {
 
 	return strings.Join(parts, "-")
 }
+
+// FormatRuntimeList returns a human-readable string like "iOS 26.4, tvOS 26.1"
+func FormatRuntimeList(runtimes []RuntimeVersion) string {
+	var parts []string
+	for _, rt := range runtimes {
+		platformCap := strings.ToUpper(rt.Platform[:1]) + rt.Platform[1:]
+		parts = append(parts, fmt.Sprintf("%s %s", platformCap, rt.Version))
+	}
+	return strings.Join(parts, ", ")
+}

@@ -341,16 +341,33 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions, c
 			return nil, fmt.Errorf("check base: %w", err)
 		}
 
-		// 5. Create base if missing
+		// 5. Check base exists; error if not (don't auto-create)
 		if !exists {
-			_, _ = fmt.Fprintf(m.output, "Creating runtime base %s...\n", baseName)
-			if err := tartRuntime.CreateBase(ctx, baseName, resolved); err != nil {
-				return nil, fmt.Errorf("create base: %w", err)
+			// Build helpful error message
+			runtimeDesc := tart.FormatRuntimeList(resolved) // e.g., "iOS 26.4, tvOS 26.1"
+
+			// Show what was attempted (especially important when "latest" was implied)
+			var attemptedSpecs []string
+			for _, rt := range resolved {
+				attemptedSpecs = append(attemptedSpecs, fmt.Sprintf("%s:%s", rt.Platform, rt.Version))
 			}
-			_, _ = fmt.Fprintf(m.output, "Runtime base %s created\n", baseName)
-		} else {
-			_, _ = fmt.Fprintf(m.output, "Using cached base %s\n", baseName)
+
+			return nil, NewUsageError(
+				"Runtime base '%s' not found.\n\n"+
+					"Requested runtimes: %s\n"+
+					"Resolved to: %s\n\n"+
+					"To create this runtime base, run:\n"+
+					"  yoloai system runtime add %s\n\n"+
+					"To see existing runtime bases:\n"+
+					"  yoloai system runtime list",
+				baseName,
+				strings.Join(opts.Runtimes, ", "),
+				runtimeDesc,
+				strings.Join(attemptedSpecs, " "),
+			)
 		}
+
+		_, _ = fmt.Fprintf(m.output, "Using runtime base %s\n", baseName)
 
 		// 6. Override imageRef in profile result
 		pr.imageRef = baseName
