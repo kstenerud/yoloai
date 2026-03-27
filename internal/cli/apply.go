@@ -266,6 +266,11 @@ Use --patches to export .patch files without applying them.`,
 			// Apply tags
 			tagsApplied, tagsSkipped := applyTags(cmd, tags, shaMap, targetDir, withTags)
 
+			// Inform user if tags are available but weren't applied
+			if !jsonEnabled(cmd) && len(tags) > 0 && !withTags {
+				fmt.Fprintf(cmd.OutOrStdout(), "\nHint: %d tag(s) available in sandbox but not applied. Run with --tags to transfer them.\n", len(tags)) //nolint:errcheck
+			}
+
 			slog.Info("apply complete", "event", "sandbox.apply.complete", "sandbox", name, "commits_applied", commitsApplied, "wip_applied", wipApplied, "tags_applied", tagsApplied) //nolint:gosec // G706: name is validated by ValidateName
 			if jsonEnabled(cmd) {
 				return writeJSON(cmd.OutOrStdout(), applyResult{
@@ -581,6 +586,11 @@ func applySelectedCommits(cmd *cobra.Command, name string, refs, paths []string,
 
 	// Apply tags
 	tagsApplied, tagsSkipped := applyTags(cmd, selectedTags, shaMap, targetDir, withTags)
+
+	// Inform user if tags are available but weren't applied
+	if !jsonEnabled(cmd) && len(selectedTags) > 0 && !withTags {
+		fmt.Fprintf(cmd.OutOrStdout(), "\nHint: %d tag(s) available in sandbox but not applied. Run with --tags to transfer them.\n", len(selectedTags)) //nolint:errcheck
+	}
 
 	if jsonEnabled(cmd) {
 		return writeJSON(cmd.OutOrStdout(), applyResult{
