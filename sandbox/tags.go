@@ -43,23 +43,26 @@ func ListTagsBeyondBaseline(name string) ([]TagInfo, error) {
 	}
 
 	// List tags with type, dereferenced SHA, obj SHA, subject, and body.
-	// Fields are separated by \x01; entries by \n.
+	// Fields are separated by \x01; records by %x00 (null byte in format string).
 	// Using subject+body separately to handle multi-line messages correctly.
-	const tagFmt = "%(refname:short)\x01%(objecttype)\x01%(*objectname)\x01%(objectname)\x01%(contents:subject)\x01%(contents:body)"
+	const tagFmt = "%(refname:short)\x01%(objecttype)\x01%(*objectname)\x01%(objectname)\x01%(contents:subject)\x01%(contents:body)%x00"
 	tagCmd := workspace.NewGitCmd(workDir, "for-each-ref", "--format="+tagFmt, "refs/tags")
 	tagOut, err := tagCmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("git for-each-ref: %w", err)
 	}
 
-	raw := strings.TrimRight(string(tagOut), "\n")
+	raw := strings.TrimRight(string(tagOut), "\x00")
 	if raw == "" {
 		return nil, nil
 	}
 
 	var tags []TagInfo
-	for _, line := range strings.Split(raw, "\n") {
-		parts := strings.SplitN(line, "\x01", 6)
+	for _, record := range strings.Split(raw, "\x00") {
+		if record == "" {
+			continue
+		}
+		parts := strings.SplitN(record, "\x01", 6)
 		if len(parts) < 6 {
 			continue
 		}
@@ -149,21 +152,24 @@ func ListUnappliedTags(name string) ([]TagInfo, error) {
 
 // listAllTags returns all tags in a git repository.
 func listAllTags(gitDir string) ([]TagInfo, error) {
-	const tagFmt = "%(refname:short)\x01%(objecttype)\x01%(*objectname)\x01%(objectname)\x01%(contents:subject)\x01%(contents:body)"
+	const tagFmt = "%(refname:short)\x01%(objecttype)\x01%(*objectname)\x01%(objectname)\x01%(contents:subject)\x01%(contents:body)%x00"
 	tagCmd := workspace.NewGitCmd(gitDir, "for-each-ref", "--format="+tagFmt, "refs/tags")
 	tagOut, err := tagCmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("git for-each-ref: %w", err)
 	}
 
-	raw := strings.TrimRight(string(tagOut), "\n")
+	raw := strings.TrimRight(string(tagOut), "\x00")
 	if raw == "" {
 		return nil, nil
 	}
 
 	var tags []TagInfo
-	for _, line := range strings.Split(raw, "\n") {
-		parts := strings.SplitN(line, "\x01", 6)
+	for _, record := range strings.Split(raw, "\x00") {
+		if record == "" {
+			continue
+		}
+		parts := strings.SplitN(record, "\x01", 6)
 		if len(parts) < 6 {
 			continue
 		}
