@@ -42,9 +42,9 @@ func ListTagsBeyondBaseline(name string) ([]TagInfo, error) {
 		return nil, nil
 	}
 
-	// List tags with type, dereferenced SHA, obj SHA, and subject.
+	// List tags with type, dereferenced SHA, obj SHA, and full message.
 	// Fields are separated by \x01; entries by \n.
-	const tagFmt = "%(refname:short)\x01%(objecttype)\x01%(*objectname)\x01%(objectname)\x01%(contents:subject)"
+	const tagFmt = "%(refname:short)\x01%(objecttype)\x01%(*objectname)\x01%(objectname)\x01%(contents)"
 	tagCmd := workspace.NewGitCmd(workDir, "for-each-ref", "--format="+tagFmt, "refs/tags")
 	tagOut, err := tagCmd.Output()
 	if err != nil {
@@ -142,7 +142,7 @@ func ListUnappliedTags(name string) ([]TagInfo, error) {
 
 // listAllTags returns all tags in a git repository.
 func listAllTags(gitDir string) ([]TagInfo, error) {
-	const tagFmt = "%(refname:short)\x01%(objecttype)\x01%(*objectname)\x01%(objectname)\x01%(contents:subject)"
+	const tagFmt = "%(refname:short)\x01%(objecttype)\x01%(*objectname)\x01%(objectname)\x01%(contents)"
 	tagCmd := workspace.NewGitCmd(gitDir, "for-each-ref", "--format="+tagFmt, "refs/tags")
 	tagOut, err := tagCmd.Output()
 	if err != nil {
