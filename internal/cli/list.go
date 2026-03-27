@@ -153,12 +153,17 @@ func runList(cmd *cobra.Command, _ []string) error {
 	}
 
 	w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 3, ' ', 0)
-	fmt.Fprintln(w, "NAME\tSTATUS\tAGENT\tPROFILE\tAGE\tSIZE\tWORKDIR\tCHANGES") //nolint:errcheck
+	fmt.Fprintln(w, "NAME\tSTATUS\tBACKEND\tAGENT\tPROFILE\tAGE\tSIZE\tWORKDIR\tCHANGES") //nolint:errcheck
 	for _, info := range infos {
-		if info.Status == sandbox.StatusBroken {
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", //nolint:errcheck
+		if info.Status == sandbox.StatusBroken || info.Status == sandbox.StatusUnavailable {
+			backend := "-"
+			if info.Meta.Backend != "" {
+				backend = info.Meta.Backend
+			}
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", //nolint:errcheck
 				info.Meta.Name,
 				info.Status,
+				backend,
 				"-",
 				"-",
 				"-",
@@ -168,9 +173,14 @@ func runList(cmd *cobra.Command, _ []string) error {
 			)
 			continue
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", //nolint:errcheck
+		backend := info.Meta.Backend
+		if backend == "" {
+			backend = "docker" // fallback for old sandboxes without backend field
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", //nolint:errcheck
 			info.Meta.Name,
 			info.Status,
+			backend,
 			info.Meta.Agent,
 			formatProfile(info.Meta.Profile),
 			sandbox.FormatAge(info.Meta.CreatedAt),
