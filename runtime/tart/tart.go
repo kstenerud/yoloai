@@ -976,6 +976,12 @@ func (r *Runtime) CreateBase(ctx context.Context, baseName string, runtimes []Ru
 	}
 	defer r.stopVM(ctx, tempVM) // Ensure VM stopped before snapshot
 
+	// Configure Xcode in VM (required for xcodebuild)
+	fmt.Printf("Configuring Xcode...\n")
+	if err := r.configureXcodeInVM(ctx, tempVM); err != nil {
+		return fmt.Errorf("configure Xcode: %w", err)
+	}
+
 	// Copy each runtime into the VM
 	for _, rt := range runtimes {
 		fmt.Printf("Copying %s %s runtime (this may take several minutes)...\n", rt.Platform, rt.Version)
@@ -1015,15 +1021,33 @@ func generateTempVMName(baseName string) string {
 
 // startTempVM starts a temporary VM for runtime installation.
 func (r *Runtime) startTempVM(ctx context.Context, vmName string) error {
-	// Mount /Library/Developer/CoreSimulator/Volumes/ and /tmp from host
-	volumesPath := "/Library/Developer/CoreSimulator/Volumes"
-	mountName := "m-Volumes"
-
 	// Build arguments for tart run
-	args := []string{"run", "--no-graphics",
-		"--dir", fmt.Sprintf("%s:%s:ro", mountName, volumesPath),
-		"--dir", "m-tmp:/tmp:ro",
-		vmName}
+	args := []string{"run", "--no-graphics"}
+
+	// Mount Xcode (required for xcodebuild to work)
+	if xcodeDevPath := getXcodeSelectPath(); xcodeDevPath != "" {
+		// xcode-select returns: /Applications/Xcode.app/Contents/Developer
+		// We need: /Applications/Xcode.app
+		xcodePath := filepath.Dir(filepath.Dir(xcodeDevPath))
+		mountName := "m-" + filepath.Base(xcodePath)
+		args = append(args, "--dir", fmt.Sprintf("%s:%s:ro", mountName, xcodePath))
+
+		// Also mount PrivateFrameworks from the same Xcode installation
+		privateFrameworks := filepath.Join(filepath.Dir(xcodeDevPath), "PrivateFrameworks")
+		if info, err := os.Stat(privateFrameworks); err == nil && info.IsDir() {
+			args = append(args, "--dir", "m-PrivateFrameworks:"+privateFrameworks+":ro")
+		}
+	}
+
+	// Mount /Library/Developer/CoreSimulator/Volumes/ (not needed for xcodebuild, but kept for consistency)
+	volumesPath := "/Library/Developer/CoreSimulator/Volumes"
+	args = append(args, "--dir", "m-Volumes:"+volumesPath+":ro")
+
+	// Mount /tmp
+	args = append(args, "--dir", "m-tmp:/tmp:ro")
+
+	// Add VM name
+	args = append(args, vmName)
 
 	// Start VM in background
 	cmd := exec.CommandContext(ctx, r.tartBin, args...) //nolint:gosec // G204: args are constructed internally
@@ -1036,6 +1060,67 @@ func (r *Runtime) startTempVM(ctx context.Context, vmName string) error {
 	go func() { procDone <- cmd.Wait() }()
 
 	return r.waitForBoot(ctx, vmName, procDone)
+}
+
+// configureXcodeInVM sets up Xcode symlinks and configuration inside the VM.
+func (r *Runtime) configureXcodeInVM(ctx context.Context, vmName string) error {
+	// Get active Xcode path on host
+	xcodeDevPath := getXcodeSelectPath()
+	if xcodeDevPath == "" {
+		return fmt.Errorf("no active Xcode found (run xcode-select on host)")
+	}
+
+	// xcode-select returns: /Applications/Xcode.app/Contents/Developer
+	// We need: /Applications/Xcode.app
+	xcodePath := filepath.Dir(filepath.Dir(xcodeDevPath))
+	xcodeName := filepath.Base(xcodePath)
+
+	// VirtioFS mount point inside VM
+	vfsMountPoint := filepath.Join(sharedDirVMPath, "m-"+xcodeName)
+
+	// Create symlink from VirtioFS mount to expected location
+	symlinkCmd := fmt.Sprintf("sudo rm -rf '%s' && sudo ln -sf '%s' '%s'", xcodePath, vfsMountPoint, xcodePath)
+	args := execArgs(vmName, "bash", "-c", symlinkCmd)
+	if _, err := r.runTart(ctx, args...); err != nil {
+		return fmt.Errorf("create Xcode symlink: %w", err)
+	}
+
+	// Also symlink PrivateFrameworks if it's mounted
+	privateFrameworks := filepath.Join(filepath.Dir(xcodeDevPath), "PrivateFrameworks")
+	if info, err := os.Stat(privateFrameworks); err == nil && info.IsDir() {
+		vfsPrivate := filepath.Join(sharedDirVMPath, "m-PrivateFrameworks")
+		symlinkPrivateCmd := fmt.Sprintf("sudo rm -rf '%s' && sudo ln -sf '%s' '%s'", privateFrameworks, vfsPrivate, privateFrameworks)
+		args = execArgs(vmName, "bash", "-c", symlinkPrivateCmd)
+		if _, err := r.runTart(ctx, args...); err != nil {
+			// Non-fatal: PrivateFrameworks might not be critical
+			slog.Debug("failed to symlink PrivateFrameworks", "error", err)
+		}
+	}
+
+	// Set active developer directory
+	xcodeSelectCmd := fmt.Sprintf("sudo xcode-select -s '%s/Contents/Developer'", xcodePath)
+	args = execArgs(vmName, "bash", "-c", xcodeSelectCmd)
+	if _, err := r.runTart(ctx, args...); err != nil {
+		return fmt.Errorf("run xcode-select: %w", err)
+	}
+
+	// Accept Xcode license (non-interactive)
+	acceptLicenseCmd := "sudo xcodebuild -license accept"
+	args = execArgs(vmName, "bash", "-c", acceptLicenseCmd)
+	if _, err := r.runTart(ctx, args...); err != nil {
+		// Non-fatal: license might already be accepted or not required
+		slog.Debug("xcodebuild -license accept failed (might already be accepted)", "error", err)
+	}
+
+	// Run xcodebuild -runFirstLaunch to complete setup
+	firstLaunchCmd := "sudo xcodebuild -runFirstLaunch"
+	args = execArgs(vmName, "bash", "-c", firstLaunchCmd)
+	if _, err := r.runTart(ctx, args...); err != nil {
+		// Non-fatal: might not be needed
+		slog.Debug("xcodebuild -runFirstLaunch failed (might not be needed)", "error", err)
+	}
+
+	return nil
 }
 
 // snapshotAsBase creates a new base image by cloning a temp VM.
