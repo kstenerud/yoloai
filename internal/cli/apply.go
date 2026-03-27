@@ -126,6 +126,41 @@ Use --patches to export .patch files without applying them.`,
 			if len(commits) == 0 && !hasWIP {
 				// Check for unapplied tags even when there are no changes
 				unappliedTags, _ := sandbox.ListUnappliedTags(name)
+
+				// If --tags is used, transfer tags even without commits
+				if withTags && len(unappliedTags) > 0 {
+					targetDir := meta.Workdir.HostPath
+					if !jsonEnabled(cmd) {
+						fmt.Fprintln(cmd.OutOrStdout(), "No changes to apply") //nolint:errcheck
+						fmt.Fprintf(cmd.OutOrStdout(), "\nTransferring %d tag(s)...\n", len(unappliedTags)) //nolint:errcheck
+					}
+					// Transfer tags (no SHA mapping needed since no commits were applied)
+					tagsApplied := 0
+					tagsSkipped := 0
+					for _, tag := range unappliedTags {
+						if createErr := workspace.CreateTag(targetDir, tag.Name, tag.SHA, tag.Message); createErr != nil {
+							tagsSkipped++
+							if !jsonEnabled(cmd) {
+								fmt.Fprintf(cmd.ErrOrStderr(), "Warning: tag %q: %v\n", tag.Name, createErr) //nolint:errcheck
+							}
+						} else {
+							tagsApplied++
+							if !jsonEnabled(cmd) {
+								fmt.Fprintf(cmd.OutOrStdout(), "Tag %q applied\n", tag.Name) //nolint:errcheck
+							}
+						}
+					}
+					if jsonEnabled(cmd) {
+						return writeJSON(cmd.OutOrStdout(), applyResult{
+							Target:      meta.Workdir.HostPath,
+							TagsApplied: tagsApplied,
+							TagsSkipped: tagsSkipped,
+							Method:      "format-patch",
+						})
+					}
+					return nil
+				}
+
 				if jsonEnabled(cmd) {
 					return writeJSON(cmd.OutOrStdout(), applyResult{
 						Target: meta.Workdir.HostPath,
