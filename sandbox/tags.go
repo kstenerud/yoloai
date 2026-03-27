@@ -43,22 +43,25 @@ func ListTagsBeyondBaseline(name string) ([]TagInfo, error) {
 	}
 
 	// List tags with type, dereferenced SHA, obj SHA, and full message.
-	// Fields are separated by \x01; entries by \n.
+	// Fields are separated by \x01; tag records by \x00 (null byte).
 	const tagFmt = "%(refname:short)\x01%(objecttype)\x01%(*objectname)\x01%(objectname)\x01%(contents)"
-	tagCmd := workspace.NewGitCmd(workDir, "for-each-ref", "--format="+tagFmt, "refs/tags")
+	tagCmd := workspace.NewGitCmd(workDir, "for-each-ref", "-z", "--format="+tagFmt, "refs/tags")
 	tagOut, err := tagCmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("git for-each-ref: %w", err)
 	}
 
-	raw := strings.TrimRight(string(tagOut), "\n")
+	raw := strings.TrimRight(string(tagOut), "\x00")
 	if raw == "" {
 		return nil, nil
 	}
 
 	var tags []TagInfo
-	for _, line := range strings.Split(raw, "\n") {
-		parts := strings.SplitN(line, "\x01", 5)
+	for _, record := range strings.Split(raw, "\x00") {
+		if record == "" {
+			continue
+		}
+		parts := strings.SplitN(record, "\x01", 5)
 		if len(parts) < 5 {
 			continue
 		}
@@ -143,20 +146,23 @@ func ListUnappliedTags(name string) ([]TagInfo, error) {
 // listAllTags returns all tags in a git repository.
 func listAllTags(gitDir string) ([]TagInfo, error) {
 	const tagFmt = "%(refname:short)\x01%(objecttype)\x01%(*objectname)\x01%(objectname)\x01%(contents)"
-	tagCmd := workspace.NewGitCmd(gitDir, "for-each-ref", "--format="+tagFmt, "refs/tags")
+	tagCmd := workspace.NewGitCmd(gitDir, "for-each-ref", "-z", "--format="+tagFmt, "refs/tags")
 	tagOut, err := tagCmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("git for-each-ref: %w", err)
 	}
 
-	raw := strings.TrimRight(string(tagOut), "\n")
+	raw := strings.TrimRight(string(tagOut), "\x00")
 	if raw == "" {
 		return nil, nil
 	}
 
 	var tags []TagInfo
-	for _, line := range strings.Split(raw, "\n") {
-		parts := strings.SplitN(line, "\x01", 5)
+	for _, record := range strings.Split(raw, "\x00") {
+		if record == "" {
+			continue
+		}
+		parts := strings.SplitN(record, "\x01", 5)
 		if len(parts) < 5 {
 			continue
 		}
