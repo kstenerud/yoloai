@@ -413,10 +413,13 @@ func (r *Runtime) RequiredCapabilities(_ string) []caps.HostCapability { return 
 // Name returns the backend name.
 func (r *Runtime) Name() string { return "tart" }
 
-// TmuxSocket returns empty: tart VMs use the uid-based default socket.
-// The tart runtime handles socket injection internally in InteractiveExec.
-// sandboxDir is ignored.
-func (r *Runtime) TmuxSocket(_ string) string { return "" }
+// TmuxSocket returns the explicit tmux socket path for Tart VMs.
+// When tart exec allocates a PTY with -t, the environment changes (TMPDIR)
+// prevent tmux from finding its socket at the default location. We must
+// specify the socket explicitly with -S. The admin user in Tart VMs has
+// UID 501, so the socket is at /private/tmp/tmux-501/default.
+// sandboxDir is ignored (socket is inside the VM, not on host).
+func (r *Runtime) TmuxSocket(_ string) string { return "/private/tmp/tmux-501/default" }
 
 // AttachCommand returns the command to attach to the tmux session in a tart VM.
 // Tart runs commands directly with the caller's terminal; no script wrapper

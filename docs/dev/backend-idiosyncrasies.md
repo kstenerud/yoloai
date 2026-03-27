@@ -45,6 +45,7 @@ row to the index.
 | Tart base image rebuilt every time `yoloai new` runs | [Tart: empty sourceDir breaks marker](#empty-sourcedir-breaks-tart-provisioning-marker-file-check) |
 | `tart exec` fails with "instance not found" right after boot | [Tart: exec needs stabilization delay](#tart-exec-needs-brief-stabilization-delay-after-boot) |
 | `tart exec` with `--` separator fails silently or returns exit status 1 | [Tart: no support for -- separator](#tart-exec-does-not-support----argument-separator) |
+| `yoloai attach` fails with "no sessions" on Tart VM | [Tart: exec -t changes environment](#tart-exec--t-changes-environment-preventing-tmux-from-finding-socket) |
 | `xcrun simctl list runtimes` shows no runtimes when mounted via VirtioFS | [Tart: CoreSimulator requires sealed APFS](#coresimulator-cannot-discover-virtiofs-mounted-runtimes) |
 | `Failed to start launchd_sim: could not bind to session` when booting simulator | [Tart: ditto'd runtime is incomplete](#dittod-ios-runtime-is-incomplete-use-xcodebuild--downloadplatform) |
 | DNS works but HTTPS to api.anthropic.com times out | [DNS: timeout = API unreachable, not DNS](#request-timed-out-in-claude-code--api-unreachable-not-dns-failure) |
@@ -627,6 +628,32 @@ args := execArgs(vmName, "bash", "-c", "sudo mkdir -p /Library/Developer/...")
 **Impact:** Commands fail with unclear exit status 1 errors. Runtime copying functionality completely broken during base image creation.
 
 **Code:** `runtime/tart/tart.go::execArgs`, `runtime/tart/build.go` (provisioning commands), `runtime/tart/runtime_copy.go` (needs fix)
+
+### Tart exec -t changes environment, preventing tmux from finding socket
+
+**Symptom:** When running `yoloai attach` on a Tart VM, tmux fails with "no sessions" even though `tart exec yoloai-x tmux ls` shows the session exists. The attach command reaches "attaching to tmux session" in logs but then fails with exit status 1.
+
+**Explanation:** When `tart exec` is invoked with the `-t` flag (PTY allocation), it changes the environment in a way that prevents tmux from locating its socket at the default UID-based location. Specifically:
+
+- Without `-t`: tmux finds the socket at `/private/tmp/tmux-501/default`
+- With `-t`: tmux looks for the socket in a different location (likely due to `$TMPDIR` changes)
+
+The tmux server is created by the sandbox-setup script and uses the default socket location (no `-S` specified). Later, when attaching, `tart exec -i -t` creates an environment where tmux can't find this socket.
+
+**Fix:** Explicitly specify the tmux socket path with `-S` in all tmux commands. The Tart runtime's `TmuxSocket()` method now returns `/private/tmp/tmux-501/default` (the admin user's default socket). This path is written to `runtime-config.json` during sandbox creation and read back during attach, ensuring the attach command uses `-S` to specify the socket explicitly.
+
+Manual test that confirms the issue:
+```bash
+# Fails - tmux can't find socket
+tart exec -i -t yoloai-x tmux attach -t main
+
+# Works - explicit socket path
+tart exec -i -t yoloai-x tmux -S /private/tmp/tmux-501/default attach -t main
+```
+
+**Impact:** `yoloai attach` completely broken for Tart VMs. Users cannot attach to running sandboxes.
+
+**Code:** `runtime/tart/tart.go::TmuxSocket` (returns explicit socket path), `runtime/tart/tart.go::AttachCommand` (uses socket when provided)
 
 ### CoreSimulator cannot discover VirtioFS-mounted runtimes
 
