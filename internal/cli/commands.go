@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/creack/pty"
+	"github.com/kstenerud/yoloai/config"
 	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/sandbox"
 	"github.com/spf13/cobra"
@@ -190,11 +191,19 @@ func newNewCmd(version string) *cobra.Command {
 
 			cpus, _ := cmd.Flags().GetString("cpus")
 			memory, _ := cmd.Flags().GetString("memory")
-			isolation, _ := cmd.Flags().GetString("isolation")
-			targetOS, _ := cmd.Flags().GetString("os")
 			debug, _ := cmd.Flags().GetBool("debug")
 			envSlice, _ := cmd.Flags().GetStringSlice("env")
 			runtimes, _ := cmd.Flags().GetStringArray("runtime")
+
+			// Resolve isolation and os with config fallback (same priority as resolveBackend).
+			cfg, _ := config.LoadDefaultsConfig()
+			var cfgIsolation, cfgOS string
+			if cfg != nil {
+				cfgIsolation = cfg.Isolation
+				cfgOS = cfg.OS
+			}
+			isolation := coalesce(flagStr(cmd, "isolation"), cfgIsolation)
+			targetOS := coalesce(flagStr(cmd, "os"), cfgOS)
 
 			// Block unsupported isolation+os combinations early.
 			if goruntime.GOOS == "darwin" && targetOS != "mac" && (isolation == "vm" || isolation == "vm-enhanced") {

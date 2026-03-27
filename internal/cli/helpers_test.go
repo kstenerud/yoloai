@@ -69,6 +69,19 @@ func TestResolveBackend_OsMacIsolationVM(t *testing.T) {
 	assert.Equal(t, "tart", resolveBackend(cmd))
 }
 
+func TestResolveBackend_ConfigOsMacFlagIsolationVM(t *testing.T) {
+	dir := cliConfigDir(t)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte("os: mac\n"), 0600))
+
+	cmd := &cobra.Command{}
+	cmd.Flags().String("backend", "", "")
+	cmd.Flags().String("isolation", "", "")
+	cmd.Flags().String("os", "", "")
+	require.NoError(t, cmd.Flags().Set("isolation", "vm"))
+
+	assert.Equal(t, "tart", resolveBackend(cmd))
+}
+
 func TestResolveBackend_FlagEmptyNoConfig(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
