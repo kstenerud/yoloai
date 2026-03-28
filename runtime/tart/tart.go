@@ -91,17 +91,22 @@ func (r *Runtime) Capabilities() runtime.BackendCaps {
 // AgentProvisionedByBackend returns true — Tart VMs use an npm-installed agent.
 func (r *Runtime) AgentProvisionedByBackend() bool { return true }
 
-// ResolveCopyMount returns the VirtioFS path where the copy directory is accessible
-// inside the VM. Unlike Docker which can bind-mount at arbitrary paths, Tart VirtioFS
-// shares appear at /Volumes/My Shared Files/<sharename>/..., so we must return the
-// VirtioFS path where the sandbox work directory is accessible.
+// ResolveCopyMount returns the local VM path where the copy directory will be
+// stored. The actual directory is first staged via VirtioFS, then copied to local
+// VM storage during SetupWorkDirInVM.
 func (r *Runtime) ResolveCopyMount(sandboxName, hostPath string) string {
-	// The copy is under ~/.yoloai/sandboxes/<sandboxName>/work/<encoded-hostPath>
-	// and is accessible via the yoloai VirtioFS share at:
-	// /Volumes/My Shared Files/yoloai/work/<encoded-hostPath>
 	encoded := config.EncodePath(hostPath)
-	vmSharedDir := filepath.Join(sharedDirVMPath, sharedDirName)
-	return filepath.Join(vmSharedDir, "work", encoded)
+	return filepath.Join("/Users/admin/yoloai-work", encoded)
+}
+
+// SetupWorkDirInVM returns shell commands to copy from VirtioFS staging
+// to local VM storage and create git baseline. Called during Create/Reset.
+func (r *Runtime) SetupWorkDirInVM(virtiofsStagingPath, vmLocalPath string) []string {
+	return []string{
+		fmt.Sprintf("mkdir -p '%s'", filepath.Dir(vmLocalPath)),
+		fmt.Sprintf("rsync -a '%s/' '%s/'", virtiofsStagingPath, vmLocalPath),
+		fmt.Sprintf("cd '%s' && git init && git add -A && git commit --allow-empty -m 'baseline'", vmLocalPath),
+	}
 }
 
 // New creates a Runtime after verifying that tart is installed and the
@@ -753,6 +758,14 @@ func (r *Runtime) runSetupScript(ctx context.Context, vmName, sandboxPath string
 
 		target := remapTargetPath(m.Target)
 		slog.Debug("tart setup: processing mount", "source", m.Source, "target", target)
+
+		// Skip :copy workdirs - these are handled by executeVMWorkDirSetup() which
+		// copies from VirtioFS staging to local VM storage (/Users/admin/yoloai-work/).
+		// Creating symlinks for these paths would conflict with the VM-local storage.
+		if strings.HasPrefix(target, "/Users/admin/yoloai-work/") {
+			slog.Debug("tart setup: skipping copy workdir (handled by executeVMWorkDirSetup)", "target", target)
+			continue
+		}
 
 		var vfsPath string
 		if strings.HasPrefix(m.Source, sandboxPath+"/") {

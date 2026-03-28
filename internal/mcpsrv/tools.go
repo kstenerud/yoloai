@@ -288,7 +288,7 @@ func (s *Server) handleSandboxDiff(_ context.Context, req mcp.CallToolRequest) (
 	return textResult(strings.Join(parts, "\n\n")), nil
 }
 
-func (s *Server) handleSandboxDiffFile(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+func (s *Server) handleSandboxDiffFile(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	name := req.GetString("name", "")
 	path := req.GetString("path", "")
 
@@ -299,9 +299,14 @@ func (s *Server) handleSandboxDiffFile(_ context.Context, req mcp.CallToolReques
 		return textResult(errorf("path is required")), nil
 	}
 
-	result, err := sandbox.GenerateDiff(sandbox.DiffOptions{
-		Name:  name,
-		Paths: []string{path},
+	// GenerateDiff can work with nil runtime for Docker (host-side git)
+	// For Tart, we would need the runtime, but MCP server doesn't currently
+	// have access to it. Since MCP is primarily used with Docker backends,
+	// we pass nil for now. TODO: Add runtime support when MCP needs Tart.
+	result, err := sandbox.GenerateDiff(ctx, sandbox.DiffOptions{
+		Name:    name,
+		Paths:   []string{path},
+		Runtime: nil, // nil means host-side git (Docker backend)
 	})
 	if err != nil {
 		return textResult(errorf("diff file %q in sandbox %q: %v", path, name, err)), nil

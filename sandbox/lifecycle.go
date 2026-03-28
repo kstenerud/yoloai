@@ -15,6 +15,7 @@ import (
 	"github.com/kstenerud/yoloai/agent"
 	"github.com/kstenerud/yoloai/config"
 	"github.com/kstenerud/yoloai/internal/fileutil"
+	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/workspace"
 )
 
@@ -340,11 +341,18 @@ func (m *Manager) Reset(ctx context.Context, opts ResetOptions) error {
 			}
 			newSHA = sha
 		} else {
-			sha, err := workspace.Baseline(workDir)
-			if err != nil {
-				return fmt.Errorf("re-create git baseline: %w", err)
+			// Tart VMs require the container to be running to exec setup commands inside the VM.
+			// Docker creates baseline on the host before starting the container.
+			if _, ok := m.runtime.(runtime.WorkDirSetup); ok {
+				// Defer baseline creation — executeVMWorkDirSetup will call it after container start
+				newSHA = ""
+			} else {
+				sha, err := workspace.Baseline(workDir)
+				if err != nil {
+					return fmt.Errorf("re-create git baseline: %w", err)
+				}
+				newSHA = sha
 			}
-			newSHA = sha
 		}
 	}
 
@@ -442,7 +450,19 @@ func (m *Manager) Reset(ctx context.Context, opts ResetOptions) error {
 
 	slog.Info("reset complete", "event", "sandbox.reset.complete", "sandbox", opts.Name)
 	// Start the container
-	return m.start(ctx, opts.Name, StartOptions{})
+	if err := m.start(ctx, opts.Name, StartOptions{}); err != nil {
+		return err
+	}
+
+	// Execute VM-side work directory setup if baseline was deferred (Tart VMs)
+	// For :copy mode, if BaselineSHA is empty, VM setup is needed
+	if meta.Workdir.Mode == "copy" && meta.Workdir.BaselineSHA == "" {
+		if err := executeVMWorkDirSetup(ctx, m.runtime, opts.Name, sandboxDir, meta); err != nil {
+			return fmt.Errorf("VM work dir setup: %w", err)
+		}
+	}
+
+	return nil
 }
 
 // NeedsConfirmation checks if a sandbox requires confirmation before
@@ -910,6 +930,12 @@ func (m *Manager) cleanupResumeFiles(name string) {
 // resetInPlace resets the workspace while the agent is still running.
 // Syncs files from host, recreates git baseline, and notifies the agent via tmux.
 func (m *Manager) resetInPlace(ctx context.Context, opts ResetOptions, meta *Meta, sandboxDir string) error {
+	// Tart VMs store the work directory inside the VM, not on the host.
+	// In-place reset requires direct host access to the work directory.
+	if _, ok := m.runtime.(runtime.WorkDirSetup); ok {
+		return fmt.Errorf("in-place reset not supported for Tart VMs (work dir is inside VM)")
+	}
+
 	workDir := WorkDir(opts.Name, meta.Workdir.HostPath)
 
 	// Re-sync workdir from host (bind-mount makes changes visible in container)

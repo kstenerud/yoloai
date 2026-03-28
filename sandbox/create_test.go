@@ -232,7 +232,8 @@ func TestGitBaseline_EmptyGitRepo(t *testing.T) {
 
 	// setupWorkdir should remove the empty .git and create a fresh baseline
 	workdir := &DirArg{Path: dir, Mode: "copy"}
-	_, sha, err := setupWorkdir("test-sandbox", workdir)
+	rt := &mockRuntime{} // Docker-like backend: creates baseline on host
+	_, sha, err := setupWorkdir("test-sandbox", workdir, rt)
 	require.NoError(t, err)
 	assert.Len(t, sha, 40)
 

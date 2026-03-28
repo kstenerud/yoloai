@@ -1,10 +1,17 @@
 package sandbox
 
 import (
+	"context"
+	"io"
+	"log/slog"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/kstenerud/yoloai/agent"
 	"github.com/kstenerud/yoloai/config"
+	"github.com/kstenerud/yoloai/runtime"
+	"github.com/kstenerud/yoloai/runtime/caps"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -311,4 +318,150 @@ func TestApplyConfigDefaults_RecipesFromConfigWhenNoProfile(t *testing.T) {
 	assert.Equal(t, []string{"SYS_ADMIN"}, pr.capAdd)
 	assert.Equal(t, []string{"/dev/fuse"}, pr.devices)
 	assert.Equal(t, []string{"apt-get install -y vim"}, pr.setup)
+}
+
+// --- setupWorkdir baseline deferral ---
+
+// mockDockerRuntime implements runtime.Runtime without WorkDirSetup (Docker-like behavior).
+type mockDockerRuntime struct{}
+
+func (m *mockDockerRuntime) Capabilities() runtime.BackendCaps {
+	return runtime.BackendCaps{}
+}
+func (m *mockDockerRuntime) AgentProvisionedByBackend() bool { return false }
+func (m *mockDockerRuntime) Setup(ctx context.Context, sourceDir string, output io.Writer, logger *slog.Logger, force bool) error {
+	return nil
+}
+func (m *mockDockerRuntime) IsReady(ctx context.Context) (bool, error) { return true, nil }
+func (m *mockDockerRuntime) Create(ctx context.Context, cfg runtime.InstanceConfig) error {
+	return nil
+}
+func (m *mockDockerRuntime) Start(ctx context.Context, name string) error  { return nil }
+func (m *mockDockerRuntime) Stop(ctx context.Context, name string) error   { return nil }
+func (m *mockDockerRuntime) Remove(ctx context.Context, name string) error { return nil }
+func (m *mockDockerRuntime) Inspect(ctx context.Context, name string) (runtime.InstanceInfo, error) {
+	return runtime.InstanceInfo{}, nil
+}
+func (m *mockDockerRuntime) Exec(ctx context.Context, name string, cmd []string, user string) (runtime.ExecResult, error) {
+	return runtime.ExecResult{}, nil
+}
+func (m *mockDockerRuntime) InteractiveExec(ctx context.Context, name string, cmd []string, user string, workdir string) error {
+	return nil
+}
+func (m *mockDockerRuntime) Prune(ctx context.Context, knownInstances []string, dryRun bool, output io.Writer) (runtime.PruneResult, error) {
+	return runtime.PruneResult{}, nil
+}
+func (m *mockDockerRuntime) Close() error { return nil }
+func (m *mockDockerRuntime) Logs(ctx context.Context, name string, lines int) string {
+	return ""
+}
+func (m *mockDockerRuntime) DiagHint(name string) string { return "" }
+func (m *mockDockerRuntime) ResolveCopyMount(sandboxName, hostPath string) string {
+	return hostPath
+}
+func (m *mockDockerRuntime) BaseModeName() string              { return "container" }
+func (m *mockDockerRuntime) SupportedIsolationModes() []string { return nil }
+func (m *mockDockerRuntime) RequiredCapabilities(isolation string) []caps.HostCapability {
+	return nil
+}
+func (m *mockDockerRuntime) Name() string                        { return "mock" }
+func (m *mockDockerRuntime) TmuxSocket(sandboxDir string) string { return "" }
+func (m *mockDockerRuntime) AttachCommand(tmuxSocket string, rows, cols int, term string) []string {
+	return nil
+}
+
+// mockTartRuntime implements both runtime.Runtime and runtime.WorkDirSetup (Tart-like).
+type mockTartRuntime struct {
+	mockDockerRuntime
+}
+
+func (m *mockTartRuntime) SetupWorkDirInVM(virtiofsStagingPath, vmLocalPath string) []string {
+	return []string{
+		"mkdir -p /parent",
+		"rsync -a /staging/ /local/",
+		"cd /local && git init && git add -A && git commit -m 'baseline'",
+	}
+}
+
+// TestSetupWorkdir_DefersBaselineForWorkDirSetupBackends tests that backends
+// implementing WorkDirSetup (Tart) return empty SHA, deferring baseline creation.
+func TestSetupWorkdir_DefersBaselineForWorkDirSetupBackends(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping filesystem test in short mode")
+	}
+
+	sandboxName := "test-sandbox"
+	tempDir := t.TempDir()
+	sourceDir := filepath.Join(tempDir, "source")
+	require.NoError(t, os.MkdirAll(sourceDir, 0755))                                             //nolint:gosec // G301: test directory
+	require.NoError(t, os.WriteFile(filepath.Join(sourceDir, "file.txt"), []byte("test"), 0644)) //nolint:gosec // G306: test file
+
+	workdir := &DirArg{
+		Path: sourceDir,
+		Mode: "copy",
+	}
+
+	rt := &mockTartRuntime{}
+
+	// setupWorkdir should return empty SHA for WorkDirSetup backends
+	_, baselineSHA, err := setupWorkdir(sandboxName, workdir, rt)
+	require.NoError(t, err)
+	assert.Empty(t, baselineSHA, "baseline SHA should be empty for WorkDirSetup backends (baseline deferred to VM)")
+}
+
+// TestSetupWorkdir_CreatesBaselineForDockerBackends tests that non-WorkDirSetup
+// backends (Docker) get immediate baseline creation with non-empty SHA.
+func TestSetupWorkdir_CreatesBaselineForDockerBackends(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping filesystem test in short mode")
+	}
+
+	sandboxName := "test-sandbox"
+	tempDir := t.TempDir()
+	sourceDir := filepath.Join(tempDir, "source")
+	require.NoError(t, os.MkdirAll(sourceDir, 0755))                                             //nolint:gosec // G301: test directory
+	require.NoError(t, os.WriteFile(filepath.Join(sourceDir, "file.txt"), []byte("test"), 0644)) //nolint:gosec // G306: test file
+
+	workdir := &DirArg{
+		Path: sourceDir,
+		Mode: "copy",
+	}
+
+	rt := &mockDockerRuntime{}
+
+	// setupWorkdir should create baseline and return non-empty SHA for Docker
+	_, baselineSHA, err := setupWorkdir(sandboxName, workdir, rt)
+	require.NoError(t, err)
+	assert.NotEmpty(t, baselineSHA, "baseline SHA should be non-empty for Docker backends (immediate baseline)")
+	assert.Len(t, baselineSHA, 40, "SHA should be 40 characters (git SHA-1)")
+}
+
+// TestSetupWorkdir_OverlayModeDeferBaseline tests that overlay mode always
+// defers baseline creation regardless of backend.
+func TestSetupWorkdir_OverlayModeDeferBaseline(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping filesystem test in short mode")
+	}
+
+	sandboxName := "test-sandbox"
+	tempDir := t.TempDir()
+	sourceDir := filepath.Join(tempDir, "source")
+	require.NoError(t, os.MkdirAll(sourceDir, 0755)) //nolint:gosec // G301: test directory
+
+	workdir := &DirArg{
+		Path: sourceDir,
+		Mode: "overlay",
+	}
+
+	// Test with both runtime types
+	runtimes := []runtime.Runtime{
+		&mockDockerRuntime{},
+		&mockTartRuntime{},
+	}
+
+	for _, rt := range runtimes {
+		_, baselineSHA, err := setupWorkdir(sandboxName, workdir, rt)
+		require.NoError(t, err)
+		assert.Empty(t, baselineSHA, "overlay mode should defer baseline for all backends")
+	}
 }

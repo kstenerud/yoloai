@@ -654,7 +654,10 @@ func applySelectedCommits(cmd *cobra.Command, name string, refs, paths []string,
 func applySquash(cmd *cobra.Command, name string, paths []string, meta *sandbox.Meta, yes, dryRun bool) error {
 	// Check for aux :copy dirs
 	if len(meta.Directories) > 0 {
-		return applySquashMulti(cmd, name, paths, meta, yes, dryRun)
+		backend := resolveBackendForSandbox(name)
+		return withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
+			return applySquashMulti(cmd, ctx, rt, name, paths, meta, yes, dryRun)
+		})
 	}
 
 	patch, stat, err := sandbox.GeneratePatch(name, paths)
@@ -725,8 +728,8 @@ func applySquash(cmd *cobra.Command, name string, paths []string, meta *sandbox.
 }
 
 // applySquashMulti applies squashed patches for multiple :copy directories.
-func applySquashMulti(cmd *cobra.Command, name string, paths []string, _ *sandbox.Meta, yes, dryRun bool) error {
-	patches, err := sandbox.GenerateMultiPatch(name, paths)
+func applySquashMulti(cmd *cobra.Command, ctx context.Context, rt runtime.Runtime, name string, paths []string, _ *sandbox.Meta, yes, dryRun bool) error {
+	patches, err := sandbox.GenerateMultiPatch(ctx, rt, name, paths)
 	if err != nil {
 		return err
 	}

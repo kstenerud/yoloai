@@ -237,7 +237,7 @@ func (c *Client) Diff(_ context.Context, name string) ([]*sandbox.DiffResult, er
 // Equivalent to 'yoloai apply <name>'.
 // Returns ErrNoChanges if there is nothing to apply.
 func (c *Client) Apply(ctx context.Context, name string) ([]*sandbox.ApplyResult, error) {
-	return sandbox.ApplyAll(ctx, name)
+	return sandbox.ApplyAll(ctx, c.rt, name)
 }
 
 // List returns info for all sandboxes.

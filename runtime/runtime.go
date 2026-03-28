@@ -213,3 +213,11 @@ type Runtime interface {
 	// mode, shown in `system doctor` output. e.g. "container", "vm", "process".
 	BaseModeName() string
 }
+
+// WorkDirSetup is implemented by backends that store work directories
+// locally inside the VM/container rather than on the host filesystem.
+type WorkDirSetup interface {
+	// SetupWorkDirInVM returns shell commands to copy from VirtioFS staging
+	// to local VM storage and create git baseline. Called during Create/Reset.
+	SetupWorkDirInVM(virtiofsStagingPath, vmLocalPath string) []string
+}

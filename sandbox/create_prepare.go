@@ -4,11 +4,13 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/kstenerud/yoloai/agent"
 	"github.com/kstenerud/yoloai/config"
 	"github.com/kstenerud/yoloai/internal/fileutil"
+	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/workspace"
 )
 
@@ -361,7 +363,9 @@ func (m *Manager) parseAndValidateDirs(ctx context.Context, opts CreateOptions, 
 
 // setupWorkdir copies/overlays the workdir, strips git metadata, and creates
 // the git baseline. Returns the work copy directory path and baseline SHA.
-func setupWorkdir(sandboxName string, workdir *DirArg) (string, string, error) {
+// For backends implementing WorkDirSetup (e.g., Tart), baseline creation is
+// deferred until the VM starts, and this function returns empty SHA.
+func setupWorkdir(sandboxName string, workdir *DirArg, rt runtime.Runtime) (string, string, error) {
 	workCopyDir := WorkDir(sandboxName, workdir.Path)
 
 	switch workdir.Mode {
@@ -390,32 +394,42 @@ func setupWorkdir(sandboxName string, workdir *DirArg) (string, string, error) {
 	var baselineSHA string
 	switch workdir.Mode {
 	case "copy":
-		// Preserve original git history so the agent (and user) can
-		// git log, git show, git blame, etc. inside the sandbox.
-		// If the source was a git repo with commits, just record HEAD as baseline.
-		// For non-git directories or empty repos, create a fresh repo.
-		if workspace.IsGitRepo(workCopyDir) {
-			sha, err := workspace.HeadSHA(workCopyDir)
-			if err != nil {
-				// Git repo exists but has no commits (or is broken).
-				// Remove .git and create fresh baseline.
-				if rmErr := workspace.RemoveGitDirs(workCopyDir); rmErr != nil {
-					return "", "", fmt.Errorf("remove invalid git dir: %w", rmErr)
-				}
-				sha, err = workspace.Baseline(workCopyDir)
-				if err != nil {
-					return "", "", fmt.Errorf("git baseline after removing invalid repo: %w", err)
-				}
-				baselineSHA = sha
-			} else {
-				baselineSHA = sha
-			}
+		// For backends implementing WorkDirSetup (e.g., Tart), the work directory
+		// is copied to VirtioFS staging on the host, then moved to local VM storage
+		// and baselined inside the VM after start. For other backends (Docker),
+		// baseline is created on the host immediately after copying.
+		if _, ok := rt.(runtime.WorkDirSetup); ok {
+			// Tart: baseline will be created in VM after container start.
+			// Return empty SHA to signal deferred baseline creation.
+			baselineSHA = ""
 		} else {
-			sha, err := workspace.Baseline(workCopyDir)
-			if err != nil {
-				return "", "", fmt.Errorf("git baseline: %w", err)
+			// Docker: preserve original git history so the agent (and user) can
+			// git log, git show, git blame, etc. inside the sandbox.
+			// If the source was a git repo with commits, just record HEAD as baseline.
+			// For non-git directories or empty repos, create a fresh repo.
+			if workspace.IsGitRepo(workCopyDir) {
+				sha, err := workspace.HeadSHA(workCopyDir)
+				if err != nil {
+					// Git repo exists but has no commits (or is broken).
+					// Remove .git and create fresh baseline.
+					if rmErr := workspace.RemoveGitDirs(workCopyDir); rmErr != nil {
+						return "", "", fmt.Errorf("remove invalid git dir: %w", rmErr)
+					}
+					sha, err = workspace.Baseline(workCopyDir)
+					if err != nil {
+						return "", "", fmt.Errorf("git baseline after removing invalid repo: %w", err)
+					}
+					baselineSHA = sha
+				} else {
+					baselineSHA = sha
+				}
+			} else {
+				sha, err := workspace.Baseline(workCopyDir)
+				if err != nil {
+					return "", "", fmt.Errorf("git baseline: %w", err)
+				}
+				baselineSHA = sha
 			}
-			baselineSHA = sha
 		}
 	case "overlay":
 		baselineSHA = ""
@@ -425,6 +439,40 @@ func setupWorkdir(sandboxName string, workdir *DirArg) (string, string, error) {
 	}
 
 	return workCopyDir, baselineSHA, nil
+}
+
+// executeVMWorkDirSetup runs VM-side work directory setup for backends that
+// implement WorkDirSetup (e.g., Tart). It copies the work directory from
+// VirtioFS staging to local VM storage, creates the git baseline inside the VM,
+// retrieves the baseline SHA, and updates meta.json with the SHA.
+// Returns nil if the runtime does not implement WorkDirSetup (Docker/containerd).
+func executeVMWorkDirSetup(ctx context.Context, rt runtime.Runtime, name, sandboxDir string, meta *Meta) error {
+	setupIntf, ok := rt.(runtime.WorkDirSetup)
+	if !ok {
+		return nil // Docker/containerd - no VM setup needed
+	}
+
+	vfsPath := filepath.Join("/Volumes/My Shared Files/yoloai/work", config.EncodePath(meta.Workdir.HostPath))
+	vmLocalPath := rt.ResolveCopyMount(name, meta.Workdir.HostPath)
+
+	cmds := setupIntf.SetupWorkDirInVM(vfsPath, vmLocalPath)
+	for _, cmd := range cmds {
+		_, err := rt.Exec(ctx, InstanceName(name), []string{"bash", "-c", cmd}, "admin")
+		if err != nil {
+			return fmt.Errorf("setup work dir in VM: %w", err)
+		}
+	}
+
+	// Retrieve baseline SHA
+	result, err := rt.Exec(ctx, InstanceName(name),
+		[]string{"git", "-C", vmLocalPath, "rev-parse", "HEAD"}, "admin")
+	if err != nil {
+		return fmt.Errorf("get baseline SHA: %w", err)
+	}
+
+	// Update meta.json
+	meta.Workdir.BaselineSHA = strings.TrimSpace(result.Stdout)
+	return SaveMeta(sandboxDir, meta)
 }
 
 // setupAuxDirs copies/overlays each auxiliary directory and creates baselines.

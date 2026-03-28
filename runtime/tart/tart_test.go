@@ -426,3 +426,124 @@ func TestMountDirName(t *testing.T) {
 		})
 	}
 }
+
+// TestSetupWorkDirInVM tests the command generation for VM work directory setup.
+func TestSetupWorkDirInVM(t *testing.T) {
+	r := &Runtime{}
+
+	testCases := []struct {
+		name                string
+		virtiofsStagingPath string
+		vmLocalPath         string
+		expectMkdir         string
+		expectRsync         string
+		expectGit           string
+	}{
+		{
+			name:                "simple path",
+			virtiofsStagingPath: "/Volumes/My Shared Files/yoloai/work/encoded",
+			vmLocalPath:         "/Users/admin/yoloai-work/encoded",
+			expectMkdir:         "mkdir -p '/Users/admin/yoloai-work'",
+			expectRsync:         "rsync -a '/Volumes/My Shared Files/yoloai/work/encoded/' '/Users/admin/yoloai-work/encoded/'",
+			expectGit:           "cd '/Users/admin/yoloai-work/encoded' && git init && git add -A && git commit --allow-empty -m 'baseline'",
+		},
+		{
+			name:                "path with special characters",
+			virtiofsStagingPath: "/Volumes/My Shared Files/yoloai/work/project-name",
+			vmLocalPath:         "/Users/admin/yoloai-work/project-name",
+			expectMkdir:         "mkdir -p '/Users/admin/yoloai-work'",
+			expectRsync:         "rsync -a '/Volumes/My Shared Files/yoloai/work/project-name/' '/Users/admin/yoloai-work/project-name/'",
+			expectGit:           "cd '/Users/admin/yoloai-work/project-name' && git init && git add -A && git commit --allow-empty -m 'baseline'",
+		},
+		{
+			name:                "deeply nested path",
+			virtiofsStagingPath: "/Volumes/My Shared Files/yoloai/work/deep/nested/dir",
+			vmLocalPath:         "/Users/admin/yoloai-work/deep/nested/dir",
+			expectMkdir:         "mkdir -p '/Users/admin/yoloai-work/deep/nested'",
+			expectRsync:         "rsync -a '/Volumes/My Shared Files/yoloai/work/deep/nested/dir/' '/Users/admin/yoloai-work/deep/nested/dir/'",
+			expectGit:           "cd '/Users/admin/yoloai-work/deep/nested/dir' && git init && git add -A && git commit --allow-empty -m 'baseline'",
+		},
+		{
+			name:                "encoded path with special chars",
+			virtiofsStagingPath: "/Volumes/My Shared Files/yoloai/work/%2FUsers%2Fkarl%2Fproject",
+			vmLocalPath:         "/Users/admin/yoloai-work/%2FUsers%2Fkarl%2Fproject",
+			expectMkdir:         "mkdir -p '/Users/admin/yoloai-work'",
+			expectRsync:         "rsync -a '/Volumes/My Shared Files/yoloai/work/%2FUsers%2Fkarl%2Fproject/' '/Users/admin/yoloai-work/%2FUsers%2Fkarl%2Fproject/'",
+			expectGit:           "cd '/Users/admin/yoloai-work/%2FUsers%2Fkarl%2Fproject' && git init && git add -A && git commit --allow-empty -m 'baseline'",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			cmds := r.SetupWorkDirInVM(tc.virtiofsStagingPath, tc.vmLocalPath)
+
+			// Should return exactly 3 commands: mkdir, rsync, git
+			require.Len(t, cmds, 3, "should return 3 commands")
+
+			// Verify mkdir command
+			assert.Equal(t, tc.expectMkdir, cmds[0], "mkdir command should create parent directory")
+
+			// Verify rsync command
+			assert.Equal(t, tc.expectRsync, cmds[1], "rsync command should copy files with trailing slashes")
+
+			// Verify git baseline command
+			assert.Equal(t, tc.expectGit, cmds[2], "git command should initialize repo and create baseline commit")
+
+			// Verify all paths are properly quoted (protect against spaces)
+			for i, cmd := range cmds {
+				assert.Contains(t, cmd, "'", "command %d should contain single quotes for path quoting", i)
+			}
+		})
+	}
+}
+
+// TestSetupWorkDirInVM_TrailingSlashes verifies rsync gets trailing slashes.
+func TestSetupWorkDirInVM_TrailingSlashes(t *testing.T) {
+	r := &Runtime{}
+	cmds := r.SetupWorkDirInVM("/source", "/dest")
+
+	rsyncCmd := cmds[1]
+	// rsync behavior: trailing slash on source means "copy contents", not "copy dir itself"
+	assert.Contains(t, rsyncCmd, "'/source/'", "source should have trailing slash")
+	assert.Contains(t, rsyncCmd, "'/dest/'", "dest should have trailing slash")
+}
+
+// TestResolveCopyMount tests path encoding for copy mode directories.
+func TestResolveCopyMount(t *testing.T) {
+	r := &Runtime{}
+
+	testCases := []struct {
+		name        string
+		sandboxName string
+		hostPath    string
+		expectPath  string
+	}{
+		{
+			name:        "simple path",
+			sandboxName: "test-sandbox",
+			hostPath:    "/Users/karl/project",
+			expectPath:  "/Users/admin/yoloai-work/^sUsers^skarl^sproject", // ^s = / in caret encoding
+		},
+		{
+			name:        "path with spaces",
+			sandboxName: "test-sandbox",
+			hostPath:    "/Users/karl/my project",
+			expectPath:  "/Users/admin/yoloai-work/^sUsers^skarl^smy^_project", // ^_ = space in caret encoding
+		},
+		{
+			name:        "nested path",
+			sandboxName: "test-sandbox",
+			hostPath:    "/Users/karl/dev/work/project",
+			expectPath:  "/Users/admin/yoloai-work/^sUsers^skarl^sdev^swork^sproject",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			result := r.ResolveCopyMount(tc.sandboxName, tc.hostPath)
+			assert.Equal(t, tc.expectPath, result)
+			// Verify it's under /Users/admin/yoloai-work/
+			assert.Contains(t, result, "/Users/admin/yoloai-work/", "should be under VM work directory")
+		})
+	}
+}

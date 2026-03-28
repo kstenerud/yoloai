@@ -29,14 +29,14 @@ type ApplyResult struct {
 //
 // Returns ErrNoChanges if there are no patches to apply.
 // Returns an ApplyResult for each directory patched.
-func ApplyAll(_ context.Context, name string) ([]*ApplyResult, error) {
+func ApplyAll(ctx context.Context, rt runtime.Runtime, name string) ([]*ApplyResult, error) {
 	unlock, err := acquireLock(name)
 	if err != nil {
 		return nil, err
 	}
 	defer unlock()
 
-	patches, err := GenerateMultiPatch(name, nil)
+	patches, err := GenerateMultiPatch(ctx, rt, name, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -677,11 +677,21 @@ func GenerateWIPDiff(name string, paths []string) (patch []byte, stat string, er
 
 // GenerateMultiPatch produces patches for all :copy directories.
 // :rw dirs are skipped (changes are already live).
-func GenerateMultiPatch(name string, paths []string) ([]PatchSet, error) {
+// For Tart backends (WorkDirSetup interface), patches are generated inside the VM via exec.
+// For Docker backends, patches are generated on the host filesystem.
+func GenerateMultiPatch(ctx context.Context, rt runtime.Runtime, name string, paths []string) ([]PatchSet, error) {
+	meta, err := LoadMeta(Dir(name))
+	if err != nil {
+		return nil, fmt.Errorf("load metadata: %w", err)
+	}
+
 	contexts, err := LoadAllDiffContexts(name)
 	if err != nil {
 		return nil, err
 	}
+
+	// Check if this backend requires VM-exec (Tart)
+	_, needsVMExec := rt.(runtime.WorkDirSetup)
 
 	var patches []PatchSet
 	for _, dc := range contexts {
@@ -689,43 +699,106 @@ func GenerateMultiPatch(name string, paths []string) ([]PatchSet, error) {
 			continue
 		}
 
-		if err := workspace.StageUntracked(dc.WorkDir); err != nil {
-			return nil, fmt.Errorf("stage untracked in %s: %w", dc.HostPath, err)
-		}
+		if needsVMExec {
+			// Tart: generate patch inside VM
+			patch, stat, vmErr := generateVMPatch(ctx, name, dc.WorkDir, dc.BaselineSHA, paths, rt, meta)
+			if vmErr != nil {
+				return nil, vmErr
+			}
+			if len(patch) == 0 {
+				continue
+			}
+			patches = append(patches, PatchSet{
+				HostPath: dc.HostPath,
+				Mode:     dc.Mode,
+				Patch:    patch,
+				Stat:     stat,
+			})
+		} else {
+			// Docker: generate patch on host
+			if stageErr := workspace.StageUntracked(dc.WorkDir); stageErr != nil {
+				return nil, fmt.Errorf("stage untracked in %s: %w", dc.HostPath, stageErr)
+			}
 
-		patchArgs := []string{"diff", "--binary", dc.BaselineSHA}
-		if len(paths) > 0 {
-			patchArgs = append(patchArgs, "--")
-			patchArgs = append(patchArgs, paths...)
-		}
-		patchCmd := workspace.NewGitCmd(dc.WorkDir, patchArgs...)
-		patchOut, err := patchCmd.Output()
-		if err != nil {
-			return nil, fmt.Errorf("git diff (patch) in %s: %w", dc.HostPath, err)
-		}
+			patchArgs := []string{"diff", "--binary", dc.BaselineSHA}
+			if len(paths) > 0 {
+				patchArgs = append(patchArgs, "--")
+				patchArgs = append(patchArgs, paths...)
+			}
+			patchCmd := workspace.NewGitCmd(dc.WorkDir, patchArgs...)
+			patchOut, patchErr := patchCmd.Output()
+			if patchErr != nil {
+				return nil, fmt.Errorf("git diff (patch) in %s: %w", dc.HostPath, patchErr)
+			}
 
-		if len(patchOut) == 0 {
-			continue
-		}
+			if len(patchOut) == 0 {
+				continue
+			}
 
-		statArgs := []string{"diff", "--stat", dc.BaselineSHA}
-		if len(paths) > 0 {
-			statArgs = append(statArgs, "--")
-			statArgs = append(statArgs, paths...)
-		}
-		statCmd := workspace.NewGitCmd(dc.WorkDir, statArgs...)
-		statOut, err := statCmd.Output()
-		if err != nil {
-			return nil, fmt.Errorf("git diff (stat) in %s: %w", dc.HostPath, err)
-		}
+			statArgs := []string{"diff", "--stat", dc.BaselineSHA}
+			if len(paths) > 0 {
+				statArgs = append(statArgs, "--")
+				statArgs = append(statArgs, paths...)
+			}
+			statCmd := workspace.NewGitCmd(dc.WorkDir, statArgs...)
+			statOut, statErr := statCmd.Output()
+			if statErr != nil {
+				return nil, fmt.Errorf("git diff (stat) in %s: %w", dc.HostPath, statErr)
+			}
 
-		patches = append(patches, PatchSet{
-			HostPath: dc.HostPath,
-			Mode:     dc.Mode,
-			Patch:    patchOut,
-			Stat:     strings.TrimRight(string(statOut), "\n"),
-		})
+			patches = append(patches, PatchSet{
+				HostPath: dc.HostPath,
+				Mode:     dc.Mode,
+				Patch:    patchOut,
+				Stat:     strings.TrimRight(string(statOut), "\n"),
+			})
+		}
 	}
 
 	return patches, nil
+}
+
+// generateVMPatch generates a patch inside a VM (Tart backend) by executing git commands.
+func generateVMPatch(ctx context.Context, sandboxName, vmWorkDir, baselineSHA string, paths []string, rt runtime.Runtime, meta *Meta) ([]byte, string, error) {
+	// Stage untracked files
+	_, err := execInContainer(ctx, rt, sandboxName, meta, []string{"git", "-C", vmWorkDir, "add", "-A"})
+	if err != nil {
+		return nil, "", fmt.Errorf("stage untracked: %w", err)
+	}
+
+	// Generate binary patch
+	patchArgs := []string{"git", "-C", vmWorkDir, "diff", "--binary", baselineSHA}
+	if len(paths) > 0 {
+		patchArgs = append(patchArgs, "--")
+		patchArgs = append(patchArgs, paths...)
+	}
+	stdout, err := execInContainer(ctx, rt, sandboxName, meta, patchArgs)
+	if err != nil {
+		return nil, "", fmt.Errorf("git diff (patch): %w", err)
+	}
+
+	if len(stdout) == 0 {
+		return nil, "", nil
+	}
+
+	// Generate stat
+	statArgs := []string{"git", "-C", vmWorkDir, "diff", "--stat", baselineSHA}
+	if len(paths) > 0 {
+		statArgs = append(statArgs, "--")
+		statArgs = append(statArgs, paths...)
+	}
+	statOut, err := execInContainer(ctx, rt, sandboxName, meta, statArgs)
+	if err != nil {
+		return nil, "", fmt.Errorf("git diff (stat): %w", err)
+	}
+
+	// execInContainer returns strings.TrimSpace'd stdout, which strips
+	// the trailing newline. git apply requires a trailing newline to parse
+	// the patch correctly — add it back if absent.
+	patch := []byte(stdout)
+	if len(patch) > 0 && patch[len(patch)-1] != '\n' {
+		patch = append(patch, '\n')
+	}
+
+	return patch, strings.TrimRight(statOut, "\n"), nil
 }

@@ -11,10 +11,11 @@ import (
 
 // DiffOptions controls diff generation.
 type DiffOptions struct {
-	Name     string   // sandbox name
-	Stat     bool     // true for --stat summary only
-	NameOnly bool     // true for --name-only (list changed files)
-	Paths    []string // optional path filter (relative to workdir)
+	Name     string          // sandbox name
+	Stat     bool            // true for --stat summary only
+	NameOnly bool            // true for --name-only (list changed files)
+	Paths    []string        // optional path filter (relative to workdir)
+	Runtime  runtime.Runtime // runtime backend (required for VM-exec diff path)
 }
 
 // DiffResult is an alias for workspace.DiffResult.
@@ -26,7 +27,7 @@ type DiffResult = workspace.DiffResult
 // For :rw mode: runs git diff HEAD on the live host directory.
 // Returns an informational DiffResult (not error) for :rw non-git dirs.
 // Set opts.Stat for a summary, opts.NameOnly for a file list only.
-func GenerateDiff(opts DiffOptions) (*DiffResult, error) {
+func GenerateDiff(ctx context.Context, opts DiffOptions) (*DiffResult, error) {
 	workDir, baselineSHA, mode, err := loadDiffContext(opts.Name)
 	if err != nil {
 		return nil, err
@@ -41,9 +42,62 @@ func GenerateDiff(opts DiffOptions) (*DiffResult, error) {
 			Mode:   "overlay",
 			Empty:  true,
 		}, nil
-	default:
+	default: // "copy"
+		// Check if backend needs VM-side git operations
+		if opts.Runtime != nil {
+			if _, ok := opts.Runtime.(runtime.WorkDirSetup); ok {
+				// Tart: exec git inside VM
+				return generateVMDiff(ctx, opts.Name, workDir, baselineSHA, opts)
+			}
+		}
+		// Docker: host-side git (or nil runtime for tests)
 		return workspace.CopyDiff(workDir, baselineSHA, opts.Paths, opts.Stat, opts.NameOnly)
 	}
+}
+
+// generateVMDiff generates a diff for :copy mode on VM-based backends (Tart)
+// by executing git commands inside the running VM.
+func generateVMDiff(ctx context.Context, sandboxName, vmWorkDir, baselineSHA string, opts DiffOptions) (*DiffResult, error) {
+	meta, err := LoadMeta(Dir(sandboxName))
+	if err != nil {
+		return nil, fmt.Errorf("load metadata: %w", err)
+	}
+
+	// Stage untracked files
+	_, err = execInContainer(ctx, opts.Runtime, sandboxName, meta, []string{"git", "-C", vmWorkDir, "add", "-A"})
+	if err != nil {
+		return nil, fmt.Errorf("stage untracked files: %w", err)
+	}
+
+	// Build git diff command
+	args := []string{"git", "-c", "core.hooksPath=/dev/null", "-C", vmWorkDir, "diff"}
+	switch {
+	case opts.Stat:
+		args = append(args, "--stat")
+	case opts.NameOnly:
+		args = append(args, "--name-only")
+	default:
+		args = append(args, "--binary")
+	}
+	args = append(args, baselineSHA)
+
+	if len(opts.Paths) > 0 {
+		args = append(args, "--")
+		args = append(args, opts.Paths...)
+	}
+
+	stdout, err := execInContainer(ctx, opts.Runtime, sandboxName, meta, args)
+	if err != nil {
+		return nil, fmt.Errorf("git diff: %w", err)
+	}
+
+	result := strings.TrimRight(stdout, "\n")
+	return &DiffResult{
+		Output:  result,
+		WorkDir: vmWorkDir,
+		Mode:    "copy",
+		Empty:   len(result) == 0,
+	}, nil
 }
 
 // CommitDiffOptions controls commit-level diff generation.

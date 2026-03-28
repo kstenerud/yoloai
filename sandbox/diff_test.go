@@ -1,6 +1,7 @@
 package sandbox
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -83,7 +84,7 @@ func TestGenerateDiff_CopyMode_ModifiedFile(t *testing.T) {
 	workDir := createCopySandbox(t, tmpDir, "test-mod", "/tmp/project")
 	writeTestFile(t, workDir, "file.txt", "modified content\n")
 
-	result, err := GenerateDiff(DiffOptions{Name: "test-mod"})
+	result, err := GenerateDiff(context.Background(), DiffOptions{Name: "test-mod"})
 	require.NoError(t, err)
 	assert.False(t, result.Empty)
 	assert.Equal(t, "copy", result.Mode)
@@ -98,7 +99,7 @@ func TestGenerateDiff_CopyMode_UntrackedFile(t *testing.T) {
 	workDir := createCopySandbox(t, tmpDir, "test-new", "/tmp/project")
 	writeTestFile(t, workDir, "created.txt", "new file content\n")
 
-	result, err := GenerateDiff(DiffOptions{Name: "test-new"})
+	result, err := GenerateDiff(context.Background(), DiffOptions{Name: "test-new"})
 	require.NoError(t, err)
 	assert.False(t, result.Empty)
 	assert.Contains(t, result.Output, "created.txt")
@@ -117,7 +118,7 @@ func TestGenerateDiff_CopyMode_BinaryFile(t *testing.T) {
 		0600,
 	))
 
-	result, err := GenerateDiff(DiffOptions{Name: "test-bin"})
+	result, err := GenerateDiff(context.Background(), DiffOptions{Name: "test-bin"})
 	require.NoError(t, err)
 	assert.False(t, result.Empty)
 	// --binary produces a GIT binary patch
@@ -131,7 +132,7 @@ func TestGenerateDiff_CopyMode_Empty(t *testing.T) {
 	createCopySandbox(t, tmpDir, "test-empty", "/tmp/project")
 	// No modifications
 
-	result, err := GenerateDiff(DiffOptions{Name: "test-empty"})
+	result, err := GenerateDiff(context.Background(), DiffOptions{Name: "test-empty"})
 	require.NoError(t, err)
 	assert.True(t, result.Empty)
 }
@@ -144,7 +145,7 @@ func TestGenerateDiff_CopyMode_PathFilter(t *testing.T) {
 	writeTestFile(t, workDir, "file.txt", "modified\n")
 	writeTestFile(t, workDir, "other.txt", "also new\n")
 
-	result, err := GenerateDiff(DiffOptions{
+	result, err := GenerateDiff(context.Background(), DiffOptions{
 		Name:  "test-filter",
 		Paths: []string{"file.txt"},
 	})
@@ -171,7 +172,7 @@ func TestGenerateDiff_RWMode_GitRepo(t *testing.T) {
 	// Modify the live file
 	writeTestFile(t, hostDir, "file.txt", "modified\n")
 
-	result, err := GenerateDiff(DiffOptions{Name: "test-rw"})
+	result, err := GenerateDiff(context.Background(), DiffOptions{Name: "test-rw"})
 	require.NoError(t, err)
 	assert.False(t, result.Empty)
 	assert.Equal(t, "rw", result.Mode)
@@ -187,7 +188,7 @@ func TestGenerateDiff_RWMode_NotGitRepo(t *testing.T) {
 
 	createRWSandbox(t, tmpDir, "test-rw-nogit", hostDir)
 
-	result, err := GenerateDiff(DiffOptions{Name: "test-rw-nogit"})
+	result, err := GenerateDiff(context.Background(), DiffOptions{Name: "test-rw-nogit"})
 	require.NoError(t, err)
 	assert.True(t, result.Empty)
 	assert.Contains(t, result.Output, "not a git repository")
@@ -203,7 +204,7 @@ func TestGenerateDiffStat_CopyMode(t *testing.T) {
 	writeTestFile(t, workDir, "file.txt", "modified content\n")
 	writeTestFile(t, workDir, "new.txt", "added file\n")
 
-	result, err := GenerateDiff(DiffOptions{Name: "test-stat", Stat: true})
+	result, err := GenerateDiff(context.Background(), DiffOptions{Name: "test-stat", Stat: true})
 	require.NoError(t, err)
 	assert.False(t, result.Empty)
 	assert.Contains(t, result.Output, "file.txt")

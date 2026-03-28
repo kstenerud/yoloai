@@ -222,6 +222,16 @@ func (m *Manager) Create(ctx context.Context, opts CreateOptions) (string, error
 		return "", err
 	}
 
+	// Execute VM-side work directory setup if baseline was deferred
+	if state.meta.Workdir.Mode == "copy" && state.meta.Workdir.BaselineSHA == "" {
+		if err := executeVMWorkDirSetup(ctx, m.runtime, state.name, state.sandboxDir, state.meta); err != nil {
+			// Clean up on failure
+			_ = os.RemoveAll(state.sandboxDir)
+			_ = m.runtime.Remove(ctx, InstanceName(state.name))
+			return "", fmt.Errorf("execute VM work dir setup: %w", err)
+		}
+	}
+
 	slog.Info("sandbox created", "event", "sandbox.create.complete", "sandbox", state.name)
 	m.printCreationOutput(state, opts.Attach)
 	return state.name, nil
@@ -452,7 +462,7 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions, c
 
 	// Copy/overlay workdir and create git baseline.
 	slog.Debug("setting up workdir", "event", "sandbox.create.workdir", "mode", string(workdir.Mode))
-	workCopyDir, baselineSHA, err := setupWorkdir(opts.Name, workdir)
+	workCopyDir, baselineSHA, err := setupWorkdir(opts.Name, workdir, m.runtime)
 	if err != nil {
 		return nil, err
 	}

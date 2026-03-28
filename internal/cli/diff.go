@@ -98,43 +98,57 @@ Examples:
 				return diffMultiDir(cmd, name, stat)
 			}
 
-			opts := sandbox.DiffOptions{
-				Name:     name,
-				Paths:    paths,
-				NameOnly: nameOnly,
-			}
+			backend := resolveBackendForSandbox(name)
+			var finalErr error
+			_ = withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error { //nolint:errcheck // error handled via finalErr
+				opts := sandbox.DiffOptions{
+					Name:     name,
+					Paths:    paths,
+					NameOnly: nameOnly,
+					Runtime:  rt,
+				}
 
-			if nameOnly {
-				result, err := sandbox.GenerateDiff(opts)
+				if nameOnly {
+					result, err := sandbox.GenerateDiff(ctx, opts)
+					if err != nil {
+						finalErr = err
+						return err
+					}
+					if jsonEnabled(cmd) {
+						finalErr = writeJSON(cmd.OutOrStdout(), result)
+						return finalErr
+					}
+					if result.Empty {
+						_, err = fmt.Fprintln(cmd.OutOrStdout(), "No changes")
+						finalErr = err
+						return err
+					}
+					_, err = fmt.Fprintln(cmd.OutOrStdout(), result.Output)
+					finalErr = err
+					return err
+				}
+
+				opts.Stat = stat
+				result, err := sandbox.GenerateDiff(ctx, opts)
 				if err != nil {
+					finalErr = err
 					return err
 				}
 				if jsonEnabled(cmd) {
-					return writeJSON(cmd.OutOrStdout(), result)
+					finalErr = writeJSON(cmd.OutOrStdout(), result)
+					return finalErr
 				}
 				if result.Empty {
 					_, err = fmt.Fprintln(cmd.OutOrStdout(), "No changes")
+					finalErr = err
 					return err
 				}
+
 				_, err = fmt.Fprintln(cmd.OutOrStdout(), result.Output)
+				finalErr = err
 				return err
-			}
-
-			opts.Stat = stat
-			result, err := sandbox.GenerateDiff(opts)
-			if err != nil {
-				return err
-			}
-			if jsonEnabled(cmd) {
-				return writeJSON(cmd.OutOrStdout(), result)
-			}
-			if result.Empty {
-				_, err = fmt.Fprintln(cmd.OutOrStdout(), "No changes")
-				return err
-			}
-
-			_, err = fmt.Fprintln(cmd.OutOrStdout(), result.Output)
-			return err
+			})
+			return finalErr
 		},
 	}
 
