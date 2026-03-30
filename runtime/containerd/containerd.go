@@ -7,8 +7,10 @@ package containerdrt
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"strings"
 	"syscall"
 
@@ -236,23 +238,23 @@ func bridgeBinaryHasCNICaps(path string) bool {
 	return permitted0&cniCapMask == cniCapMask
 }
 
-// instancePrefix is the "yoloai-" prefix applied to all instance names.
-const instancePrefix = "yoloai-"
-
-// GitExec runs a git command inside the container (containerd uses VM filesystem).
-// workDir is the path inside the container where git should run.
-// name may be a sandbox name or instance name; both are accepted.
-func (r *Runtime) GitExec(ctx context.Context, name, workDir string, args ...string) (string, error) {
-	// Callers in the sandbox package pass the sandbox name (e.g. "mybox").
-	// Containerd containers are named with the instance prefix (e.g. "yoloai-mybox").
-	instanceName := instancePrefix + strings.TrimPrefix(name, instancePrefix)
-	gitArgs := append([]string{"-c", "core.hooksPath=/dev/null", "-C", workDir}, args...)
-	cmd := append([]string{"git"}, gitArgs...)
-	result, err := r.Exec(ctx, instanceName, cmd, "")
+// GitExec runs a git command on the host filesystem.
+// For containerd (Kata VM) backends, :copy-mode work directories are stored on
+// the host at ~/.yoloai/sandboxes/<name>/work/<encoded>/ and bind-mounted into
+// the VM — the host copy is authoritative for diff/apply operations.
+// workDir is a host path; name is unused (kept for interface compatibility).
+func (r *Runtime) GitExec(ctx context.Context, _ string, workDir string, args ...string) (string, error) {
+	cmdArgs := append([]string{"-c", "core.hooksPath=/dev/null", "-C", workDir}, args...)
+	cmd := exec.CommandContext(ctx, "git", cmdArgs...) //nolint:gosec // G204: workDir from validated sandbox state
+	output, err := cmd.Output()
 	if err != nil {
-		return "", err
+		var exitErr *exec.ExitError
+		if ok := errors.As(err, &exitErr); ok {
+			return "", fmt.Errorf("exec exited with code %d: %s", exitErr.ExitCode(), strings.TrimSpace(string(exitErr.Stderr)))
+		}
+		return "", fmt.Errorf("git %v: %w", args, err)
 	}
-	return result.Stdout, nil
+	return strings.TrimSpace(string(output)), nil
 }
 
 // isWSL2 returns true if running inside a WSL2 environment.

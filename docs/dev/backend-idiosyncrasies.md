@@ -53,6 +53,7 @@ row to the index.
 | DNS works but HTTPS to api.anthropic.com times out | [DNS: timeout = API unreachable, not DNS](#request-timed-out-in-claude-code--api-unreachable-not-dns-failure) |
 | `iptables` warnings about legacy tables | [iptables-nft: legacy tables warning](#iptables--iptables-nft-both-iptables-legacy-and-iptables-nft-can-coexist) |
 | `--isolation vm` rejected on macOS / "containerd not available" | [Registry: containerd Linux-only](#containerd-backend-is-linux-only) |
+| `yoloai diff` fails: `cannot change to '.../work/^s...'` on containerd-vm | [Containerd: GitExec must run on host](#gitexec-must-run-on-host-not-inside-the-vm) |
 
 ---
 
@@ -531,6 +532,19 @@ chance to call `deleteNetNS()`, the named netns file persists at
 
 Must call `deleteNetNS(nsName)` unconditionally before `createNetNS()`. This is
 safe because `deleteNetNS` is idempotent (ignores ENOENT). See `cni.go::setupCNI`.
+
+### GitExec must run on host, not inside the VM
+
+**Symptom:** `yoloai diff` on a containerd-vm sandbox fails with:
+```
+exec exited with code 128: fatal: cannot change to '/home/<user>/.yoloai/sandboxes/<name>/work/^stmp^s...': No such file or directory
+```
+
+**Explanation:** For `:copy` mode, `sandbox.WorkDir()` stores the work copy on the HOST at `~/.yoloai/sandboxes/<name>/work/<caret-encoded-path>/` and bind-mounts it into the VM at the original project path (e.g. `/tmp/project/`). The `GitExec` interface is called with the HOST path to the work copy. If `GitExec` execs git inside the VM, the VM only has the work copy accessible at the original project path — not at the sandbox `work/` path — so git fails with ENOENT.
+
+**Fix:** Containerd's `GitExec` runs git on the HOST, just like Docker's. The work copy is HOST-resident; there is no need to enter the VM. The old implementation exed inside the container which was wrong for copy-mode dirs.
+
+**Code:** `runtime/containerd/containerd.go::GitExec`
 
 ---
 
