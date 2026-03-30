@@ -544,8 +544,9 @@ def check_prerequisites(
 ) -> dict[str, PrereqResult]:
     """Run `yoloai system check` for each unique (daemon, isolation) pair; return per-spec results.
 
-    If a backend is reachable but its image is missing, auto-builds the image
-    and rechecks before returning.
+    For every reachable daemon, runs `yoloai system build` upfront so that the
+    image is guaranteed to be current before any test starts.  Build output is
+    forwarded to stdout so the user can see progress and know it isn't stuck.
     """
     print("Checking prerequisites...\n")
 
@@ -559,29 +560,26 @@ def check_prerequisites(
     for daemon, isolation in sorted(unique_keys):
         check_results[(daemon, isolation)] = _run_system_check(ctx, daemon, isolation)
 
-    # Auto-build: if a backend's only failure is a missing image, build it and recheck.
-    # This handles the case where the smoke test runs as root and can reach a system-wide
-    # daemon (e.g. /run/podman/podman.sock) that hasn't had its image built yet.
-    image_missing_daemons: set[str] = set()
-    for (daemon, isolation), (ok, note) in check_results.items():
-        if not ok and "image not found" in note:
-            image_missing_daemons.add(daemon)
+    # Build images upfront for every known daemon.  This ensures `yoloai new`
+    # never triggers an inline build that would blow the per-command timeout.
+    # If the daemon isn't running, `system build` exits quickly with an error
+    # and we skip the recheck.  If the image is already up to date the build
+    # returns quickly too.
+    all_daemons: set[str] = {daemon for (daemon, _) in check_results}
 
-    for daemon in sorted(image_missing_daemons):
-        print(f"  Building yoloai-base image for {daemon} backend...")
+    for daemon in sorted(all_daemons):
+        print(f"  Building yoloai-base image for {daemon} backend (output below)...")
         r = subprocess.run(
             [ctx.yoloai_bin, "system", "build", "--backend", daemon],
             timeout=600,
         )
+        print()
         if r.returncode != 0:
             continue
-        # Recheck all (daemon, *) pairs now that the image exists.
+        # Recheck all (daemon, *) pairs now that the image is current.
         for (d, isolation) in list(check_results.keys()):
             if d == daemon:
                 check_results[(d, isolation)] = _run_system_check(ctx, d, isolation)
-
-    if image_missing_daemons:
-        print()
 
     results: dict[str, PrereqResult] = {}
     for spec in backends:
@@ -605,7 +603,7 @@ def check_prerequisites(
 # ---------------------------------------------------------------------------
 
 def cleanup(ctx: RunContext) -> None:
-    """Destroy all tracked sandboxes and remove the temp dir."""
+    """Destroy all tracked sandboxes and remove non-log temp files."""
     if ctx.sandboxes:
         print(f"\nCleaning up {len(ctx.sandboxes)} sandbox(es)...")
         for name in ctx.sandboxes:
@@ -613,7 +611,15 @@ def cleanup(ctx: RunContext) -> None:
                 [ctx.yoloai_bin, "destroy", "--yes", name],
                 capture_output=True, timeout=30,
             )
-    shutil.rmtree(ctx.tmpdir, ignore_errors=True)
+    # Remove everything except the logs directory so failures are diagnosable.
+    for entry in ctx.tmpdir.iterdir():
+        if entry.name == "logs":
+            continue
+        if entry.is_dir():
+            shutil.rmtree(entry, ignore_errors=True)
+        else:
+            entry.unlink(missing_ok=True)
+    print(f"Logs retained at: {ctx.tmpdir / 'logs'}")
 
 
 # ---------------------------------------------------------------------------
