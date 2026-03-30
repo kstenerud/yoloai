@@ -376,6 +376,24 @@ func (r *Runtime) Exec(ctx context.Context, name string, cmd []string, _ string)
 	return runtime.RunCmdExec(c)
 }
 
+// GitExec runs a git command inside the VM (Tart uses VM filesystem).
+// workDir is the path inside the VM where git should run.
+func (r *Runtime) GitExec(ctx context.Context, name, workDir string, args ...string) (string, error) {
+	if !r.isRunning(ctx, name) {
+		return "", runtime.ErrNotRunning
+	}
+
+	// Build git command with -C workDir
+	gitArgs := append([]string{"-c", "core.hooksPath=/dev/null", "-C", workDir}, args...)
+	cmd := append([]string{"git"}, gitArgs...)
+
+	result, err := r.Exec(ctx, name, cmd, "")
+	if err != nil {
+		return "", err
+	}
+	return result.Stdout, nil
+}
+
 // InteractiveExec runs a command interactively inside the VM by shelling
 // out to tart exec with stdin/stdout/stderr connected and PTY allocated.
 // The user parameter is ignored — tart exec runs as the VM's logged-in user.

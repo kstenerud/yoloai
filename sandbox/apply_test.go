@@ -1,6 +1,7 @@
 package sandbox
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,8 +10,22 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/workspace"
 )
+
+// getTestRuntime returns a Docker runtime for testing :copy mode operations.
+// For :copy mode, git runs on the host, so Docker's GitExec will work correctly.
+func getTestRuntime(t *testing.T) runtime.Runtime {
+	t.Helper()
+	ctx := context.Background()
+	rt, err := runtime.New(ctx, "docker")
+	require.NoError(t, err, "failed to create Docker runtime for test")
+	t.Cleanup(func() {
+		_ = rt.Close()
+	})
+	return rt
+}
 
 // GeneratePatch tests
 
@@ -267,7 +282,8 @@ func TestListCommitsBeyondBaseline_NoCommits(t *testing.T) {
 
 	createCopySandbox(t, tmpDir, "test-list-none", "/tmp/project")
 
-	commits, err := ListCommitsBeyondBaseline("test-list-none")
+	rt := getTestRuntime(t)
+	commits, err := ListCommitsBeyondBaseline(context.Background(), rt, "test-list-none")
 	require.NoError(t, err)
 	assert.Empty(t, commits)
 }
@@ -284,7 +300,8 @@ func TestListCommitsBeyondBaseline_Single(t *testing.T) {
 		{"add feature X", "feature.txt", "feature X\n"},
 	})
 
-	commits, err := ListCommitsBeyondBaseline("test-list-one")
+	rt := getTestRuntime(t)
+	commits, err := ListCommitsBeyondBaseline(context.Background(), rt, "test-list-one")
 	require.NoError(t, err)
 	require.Len(t, commits, 1)
 	assert.Equal(t, "add feature X", commits[0].Subject)
@@ -305,7 +322,8 @@ func TestListCommitsBeyondBaseline_Multiple(t *testing.T) {
 		{"third commit", "c.txt", "c\n"},
 	})
 
-	commits, err := ListCommitsBeyondBaseline("test-list-multi")
+	rt := getTestRuntime(t)
+	commits, err := ListCommitsBeyondBaseline(context.Background(), rt, "test-list-multi")
 	require.NoError(t, err)
 	require.Len(t, commits, 3)
 	assert.Equal(t, "first commit", commits[0].Subject)
@@ -321,7 +339,8 @@ func TestListCommitsBeyondBaseline_RWError(t *testing.T) {
 	require.NoError(t, os.MkdirAll(hostDir, 0750))
 	createRWSandbox(t, tmpDir, "test-list-rw", hostDir)
 
-	_, err := ListCommitsBeyondBaseline("test-list-rw")
+	rt := getTestRuntime(t)
+	_, err := ListCommitsBeyondBaseline(context.Background(), rt, "test-list-rw")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), ":rw directories")
 }
@@ -675,7 +694,8 @@ func TestAdvanceBaseline_UpdatesMeta(t *testing.T) {
 	})
 
 	// Before: commits visible
-	commits, err := ListCommitsBeyondBaseline(name)
+	rt := getTestRuntime(t)
+	commits, err := ListCommitsBeyondBaseline(context.Background(), rt, name)
 	require.NoError(t, err)
 	require.Len(t, commits, 1)
 
@@ -683,7 +703,7 @@ func TestAdvanceBaseline_UpdatesMeta(t *testing.T) {
 	require.NoError(t, AdvanceBaseline(name))
 
 	// After: no commits beyond baseline
-	commits, err = ListCommitsBeyondBaseline(name)
+	commits, err = ListCommitsBeyondBaseline(context.Background(), rt, name)
 	require.NoError(t, err)
 	assert.Empty(t, commits)
 
@@ -757,7 +777,8 @@ func TestAdvanceBaseline_NewCommitsStillVisible(t *testing.T) {
 	gitCommit(t, workDir, "new commit")
 
 	// Only new commit should be visible
-	commits, err := ListCommitsBeyondBaseline(name)
+	rt := getTestRuntime(t)
+	commits, err := ListCommitsBeyondBaseline(context.Background(), rt, name)
 	require.NoError(t, err)
 	require.Len(t, commits, 1)
 	assert.Equal(t, "new commit", commits[0].Subject)
@@ -777,11 +798,12 @@ func TestResolveRef_FullSHA(t *testing.T) {
 		{"add feature", "feature.txt", "feature\n"},
 	})
 
-	commits, err := ListCommitsBeyondBaseline("test-resolve-full")
+	rt := getTestRuntime(t)
+	commits, err := ListCommitsBeyondBaseline(context.Background(), rt, "test-resolve-full")
 	require.NoError(t, err)
 	require.Len(t, commits, 1)
 
-	resolved, err := ResolveRef("test-resolve-full", commits[0].SHA)
+	resolved, err := ResolveRef(context.Background(), rt, "test-resolve-full", commits[0].SHA)
 	require.NoError(t, err)
 	assert.Equal(t, commits[0].SHA, resolved.SHA)
 	assert.Equal(t, "add feature", resolved.Subject)
@@ -799,12 +821,13 @@ func TestResolveRef_ShortSHA(t *testing.T) {
 		{"add feature", "feature.txt", "feature\n"},
 	})
 
-	commits, err := ListCommitsBeyondBaseline("test-resolve-short")
+	rt := getTestRuntime(t)
+	commits, err := ListCommitsBeyondBaseline(context.Background(), rt, "test-resolve-short")
 	require.NoError(t, err)
 	require.Len(t, commits, 1)
 
 	// Use first 7 chars
-	resolved, err := ResolveRef("test-resolve-short", commits[0].SHA[:7])
+	resolved, err := ResolveRef(context.Background(), rt, "test-resolve-short", commits[0].SHA[:7])
 	require.NoError(t, err)
 	assert.Equal(t, commits[0].SHA, resolved.SHA)
 }
@@ -821,7 +844,8 @@ func TestResolveRef_NotFound(t *testing.T) {
 		{"add feature", "feature.txt", "feature\n"},
 	})
 
-	_, err := ResolveRef("test-resolve-nf", "deadbeef")
+	rt := getTestRuntime(t)
+	_, err := ResolveRef(context.Background(), rt, "test-resolve-nf", "deadbeef")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "not found")
 }
@@ -841,11 +865,12 @@ func TestResolveRefs_SingleRef(t *testing.T) {
 		{"second", "b.txt", "b\n"},
 	})
 
-	commits, err := ListCommitsBeyondBaseline("test-resolverefs-single")
+	rt := getTestRuntime(t)
+	commits, err := ListCommitsBeyondBaseline(context.Background(), rt, "test-resolverefs-single")
 	require.NoError(t, err)
 	require.Len(t, commits, 2)
 
-	resolved, err := ResolveRefs("test-resolverefs-single", []string{commits[1].SHA[:7]})
+	resolved, err := ResolveRefs(context.Background(), rt, "test-resolverefs-single", []string{commits[1].SHA[:7]})
 	require.NoError(t, err)
 	require.Len(t, resolved, 1)
 	assert.Equal(t, commits[1].SHA, resolved[0].SHA)
@@ -865,13 +890,14 @@ func TestResolveRefs_Range(t *testing.T) {
 		{"third", "c.txt", "c\n"},
 	})
 
-	commits, err := ListCommitsBeyondBaseline("test-resolverefs-range")
+	rt := getTestRuntime(t)
+	commits, err := ListCommitsBeyondBaseline(context.Background(), rt, "test-resolverefs-range")
 	require.NoError(t, err)
 	require.Len(t, commits, 3)
 
 	// Range first..third = second and third (exclusive start, inclusive end)
 	rangeRef := commits[0].SHA[:7] + ".." + commits[2].SHA[:7]
-	resolved, err := ResolveRefs("test-resolverefs-range", []string{rangeRef})
+	resolved, err := ResolveRefs(context.Background(), rt, "test-resolverefs-range", []string{rangeRef})
 	require.NoError(t, err)
 	require.Len(t, resolved, 2)
 	assert.Equal(t, "second", resolved[0].Subject)
@@ -890,7 +916,8 @@ func TestResolveRefs_NotFound(t *testing.T) {
 		{"first", "a.txt", "a\n"},
 	})
 
-	_, err := ResolveRefs("test-resolverefs-nf", []string{"deadbeef"})
+	rt := getTestRuntime(t)
+	_, err := ResolveRefs(context.Background(), rt, "test-resolverefs-nf", []string{"deadbeef"})
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "not found")
 }
@@ -963,7 +990,8 @@ func TestGenerateFormatPatchForRefs_Single(t *testing.T) {
 		{"second", "b.txt", "b\n"},
 	})
 
-	commits, err := ListCommitsBeyondBaseline("test-fpref-single")
+	rt := getTestRuntime(t)
+	commits, err := ListCommitsBeyondBaseline(context.Background(), rt, "test-fpref-single")
 	require.NoError(t, err)
 	require.Len(t, commits, 2)
 
@@ -991,7 +1019,8 @@ func TestGenerateFormatPatchForRefs_Multiple(t *testing.T) {
 		{"third", "c.txt", "c\n"},
 	})
 
-	commits, err := ListCommitsBeyondBaseline("test-fpref-multi")
+	rt := getTestRuntime(t)
+	commits, err := ListCommitsBeyondBaseline(context.Background(), rt, "test-fpref-multi")
 	require.NoError(t, err)
 	require.Len(t, commits, 3)
 
@@ -1020,7 +1049,8 @@ func TestAdvanceBaselineTo_UpdatesMeta(t *testing.T) {
 		{"third", "c.txt", "c\n"},
 	})
 
-	commits, err := ListCommitsBeyondBaseline(name)
+	rt := getTestRuntime(t)
+	commits, err := ListCommitsBeyondBaseline(context.Background(), rt, name)
 	require.NoError(t, err)
 	require.Len(t, commits, 3)
 
@@ -1033,7 +1063,7 @@ func TestAdvanceBaselineTo_UpdatesMeta(t *testing.T) {
 	assert.Equal(t, commits[1].SHA, meta.Workdir.BaselineSHA)
 
 	// Only third commit should remain visible
-	remaining, err := ListCommitsBeyondBaseline(name)
+	remaining, err := ListCommitsBeyondBaseline(context.Background(), rt, name)
 	require.NoError(t, err)
 	require.Len(t, remaining, 1)
 	assert.Equal(t, "third", remaining[0].Subject)
@@ -1056,12 +1086,13 @@ func TestSelectiveApplyFlow(t *testing.T) {
 		{"add C", "c.txt", "c content\n"},
 	})
 
-	commits, err := ListCommitsBeyondBaseline(name)
+	rt := getTestRuntime(t)
+	commits, err := ListCommitsBeyondBaseline(context.Background(), rt, name)
 	require.NoError(t, err)
 	require.Len(t, commits, 3)
 
 	// Resolve first two commits
-	resolved, err := ResolveRefs(name, []string{commits[0].SHA[:7], commits[1].SHA[:7]})
+	resolved, err := ResolveRefs(context.Background(), rt, name, []string{commits[0].SHA[:7], commits[1].SHA[:7]})
 	require.NoError(t, err)
 	require.Len(t, resolved, 2)
 
@@ -1100,7 +1131,7 @@ func TestSelectiveApplyFlow(t *testing.T) {
 	require.NoError(t, AdvanceBaselineTo(name, commits[prefixEnd].SHA))
 
 	// Only C should remain
-	remaining, err := ListCommitsBeyondBaseline(name)
+	remaining, err := ListCommitsBeyondBaseline(context.Background(), rt, name)
 	require.NoError(t, err)
 	require.Len(t, remaining, 1)
 	assert.Equal(t, "add C", remaining[0].Subject)
@@ -1122,7 +1153,8 @@ func TestApplyFlow_CommitsOnly(t *testing.T) {
 	})
 
 	// Verify state: commits but no WIP
-	commits, err := ListCommitsBeyondBaseline("test-flow-commits")
+	rt := getTestRuntime(t)
+	commits, err := ListCommitsBeyondBaseline(context.Background(), rt, "test-flow-commits")
 	require.NoError(t, err)
 	assert.Len(t, commits, 2)
 
@@ -1173,7 +1205,8 @@ func TestApplyFlow_CommitsAndWIP(t *testing.T) {
 	writeTestFile(t, workDir, "wip.txt", "wip content\n")
 
 	// Verify state
-	commits, err := ListCommitsBeyondBaseline("test-flow-both")
+	rt := getTestRuntime(t)
+	commits, err := ListCommitsBeyondBaseline(context.Background(), rt, "test-flow-both")
 	require.NoError(t, err)
 	assert.Len(t, commits, 1)
 
@@ -1219,7 +1252,8 @@ func TestApplyFlow_WIPOnly(t *testing.T) {
 	writeTestFile(t, workDir, "file.txt", "wip changes\n")
 
 	// Verify state: no commits, only WIP
-	commits, err := ListCommitsBeyondBaseline("test-flow-wip")
+	rt := getTestRuntime(t)
+	commits, err := ListCommitsBeyondBaseline(context.Background(), rt, "test-flow-wip")
 	require.NoError(t, err)
 	assert.Empty(t, commits)
 

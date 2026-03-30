@@ -43,61 +43,33 @@ func GenerateDiff(ctx context.Context, opts DiffOptions) (*DiffResult, error) {
 			Empty:  true,
 		}, nil
 	default: // "copy"
-		// Check if backend needs VM-side git operations
-		if opts.Runtime != nil {
-			if _, ok := opts.Runtime.(runtime.WorkDirSetup); ok {
-				// Tart: exec git inside VM
-				return generateVMDiff(ctx, opts.Name, workDir, baselineSHA, opts)
-			}
+		// Stage untracked files
+		_, err := opts.Runtime.GitExec(ctx, opts.Name, workDir, "add", "-A")
+		if err != nil {
+			return nil, err
 		}
-		// Docker: host-side git (or nil runtime for tests)
-		return workspace.CopyDiff(workDir, baselineSHA, opts.Paths, opts.Stat, opts.NameOnly)
-	}
-}
 
-// generateVMDiff generates a diff for :copy mode on VM-based backends (Tart)
-// by executing git commands inside the running VM.
-func generateVMDiff(ctx context.Context, sandboxName, vmWorkDir, baselineSHA string, opts DiffOptions) (*DiffResult, error) {
-	meta, err := LoadMeta(Dir(sandboxName))
-	if err != nil {
-		return nil, fmt.Errorf("load metadata: %w", err)
-	}
+		// Build git diff command
+		args := []string{"diff", "--binary", baselineSHA}
+		if opts.Stat {
+			args = []string{"diff", "--stat", baselineSHA}
+		}
+		if opts.NameOnly {
+			args = []string{"diff", "--name-only", baselineSHA}
+		}
+		if len(opts.Paths) > 0 {
+			args = append(args, "--")
+			args = append(args, opts.Paths...)
+		}
 
-	// Stage untracked files
-	_, err = execInContainer(ctx, opts.Runtime, sandboxName, meta, []string{"git", "-C", vmWorkDir, "add", "-A"})
-	if err != nil {
-		return nil, fmt.Errorf("stage untracked files: %w", err)
+		output, err := opts.Runtime.GitExec(ctx, opts.Name, workDir, args...)
+		return &DiffResult{
+			Output:  output,
+			WorkDir: workDir,
+			Mode:    "copy",
+			Empty:   len(strings.TrimSpace(output)) == 0,
+		}, err
 	}
-
-	// Build git diff command
-	args := []string{"git", "-c", "core.hooksPath=/dev/null", "-C", vmWorkDir, "diff"}
-	switch {
-	case opts.Stat:
-		args = append(args, "--stat")
-	case opts.NameOnly:
-		args = append(args, "--name-only")
-	default:
-		args = append(args, "--binary")
-	}
-	args = append(args, baselineSHA)
-
-	if len(opts.Paths) > 0 {
-		args = append(args, "--")
-		args = append(args, opts.Paths...)
-	}
-
-	stdout, err := execInContainer(ctx, opts.Runtime, sandboxName, meta, args)
-	if err != nil {
-		return nil, fmt.Errorf("git diff: %w", err)
-	}
-
-	result := strings.TrimRight(stdout, "\n")
-	return &DiffResult{
-		Output:  result,
-		WorkDir: vmWorkDir,
-		Mode:    "copy",
-		Empty:   len(result) == 0,
-	}, nil
 }
 
 // CommitDiffOptions controls commit-level diff generation.
@@ -161,8 +133,8 @@ type CommitInfoWithStat struct {
 
 // ListCommitsWithStats returns commits beyond baseline with per-commit
 // --stat summaries. Returns an empty slice if HEAD == baseline.
-func ListCommitsWithStats(name string) ([]CommitInfoWithStat, error) {
-	commits, err := ListCommitsBeyondBaseline(name)
+func ListCommitsWithStats(ctx context.Context, rt runtime.Runtime, name string) ([]CommitInfoWithStat, error) {
+	commits, err := ListCommitsBeyondBaseline(ctx, rt, name)
 	if err != nil {
 		return nil, err
 	}

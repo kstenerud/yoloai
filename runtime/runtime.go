@@ -138,6 +138,12 @@ type Runtime interface {
 	// Exec runs a command inside a running instance and returns the result.
 	Exec(ctx context.Context, name string, cmd []string, user string) (ExecResult, error)
 
+	// GitExec runs a git command inside an instance or on the host, depending
+	// on the backend. workDir is the git working directory (container path for
+	// VMs, host path for Docker). Returns stdout on success.
+	// This abstracts away VM-vs-host implementation details for git operations.
+	GitExec(ctx context.Context, name, workDir string, args ...string) (string, error)
+
 	// InteractiveExec runs a command interactively (with TTY) inside an instance.
 	// Stdin/stdout/stderr are connected to the current terminal.
 	// If workDir is non-empty, the command runs in that directory.

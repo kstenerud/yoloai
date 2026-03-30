@@ -106,7 +106,13 @@ Use --patches to export .patch files without applying them.`,
 			}
 
 			// Query work copy for commits and WIP
-			commits, err := sandbox.ListCommitsBeyondBaseline(name)
+			backend := resolveBackendForSandbox(name)
+			var commits []sandbox.CommitInfo
+			err = withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
+				var listErr error
+				commits, listErr = sandbox.ListCommitsBeyondBaseline(ctx, rt, name)
+				return listErr
+			})
 			if err != nil {
 				return err
 			}
@@ -509,7 +515,13 @@ func applySelectedCommits(cmd *cobra.Command, name string, refs, paths []string,
 	}
 
 	// Resolve refs to full SHAs
-	resolved, err := sandbox.ResolveRefs(name, refs)
+	backend := resolveBackendForSandbox(name)
+	var resolved []sandbox.CommitInfo
+	err := withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
+		var resolveErr error
+		resolved, resolveErr = sandbox.ResolveRefs(ctx, rt, name, refs)
+		return resolveErr
+	})
 	if err != nil {
 		return err
 	}
@@ -608,7 +620,12 @@ func applySelectedCommits(cmd *cobra.Command, name string, refs, paths []string,
 
 	// Advance baseline using contiguous prefix logic (skip for path-filtered applies)
 	if len(paths) == 0 {
-		allCommits, err := sandbox.ListCommitsBeyondBaseline(name)
+		var allCommits []sandbox.CommitInfo
+		err = withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
+			var listErr error
+			allCommits, listErr = sandbox.ListCommitsBeyondBaseline(ctx, rt, name)
+			return listErr
+		})
 		if err != nil {
 			return fmt.Errorf("advance baseline: %w", err)
 		}

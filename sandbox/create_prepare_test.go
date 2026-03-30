@@ -345,6 +345,9 @@ func (m *mockDockerRuntime) Inspect(ctx context.Context, name string) (runtime.I
 func (m *mockDockerRuntime) Exec(ctx context.Context, name string, cmd []string, user string) (runtime.ExecResult, error) {
 	return runtime.ExecResult{}, nil
 }
+func (m *mockDockerRuntime) GitExec(ctx context.Context, name, workDir string, args ...string) (string, error) {
+	return "", nil
+}
 func (m *mockDockerRuntime) InteractiveExec(ctx context.Context, name string, cmd []string, user string, workdir string) error {
 	return nil
 }

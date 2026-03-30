@@ -373,7 +373,13 @@ func diffLog(cmd *cobra.Command, name string, stat bool) error {
 	tagsByCommit := buildTagsByCommit(tags)
 
 	if stat {
-		commits, err := sandbox.ListCommitsWithStats(name)
+		backend := resolveBackendForSandbox(name)
+		var commits []sandbox.CommitInfoWithStat
+		err := withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
+			var listErr error
+			commits, listErr = sandbox.ListCommitsWithStats(ctx, rt, name)
+			return listErr
+		})
 		if err != nil {
 			return err
 		}
@@ -394,7 +400,13 @@ func diffLog(cmd *cobra.Command, name string, stat bool) error {
 			}
 		}
 	} else {
-		commits, err := sandbox.ListCommitsBeyondBaseline(name)
+		backend := resolveBackendForSandbox(name)
+		var commits []sandbox.CommitInfo
+		err := withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
+			var listErr error
+			commits, listErr = sandbox.ListCommitsBeyondBaseline(ctx, rt, name)
+			return listErr
+		})
 		if err != nil {
 			return err
 		}
@@ -510,8 +522,14 @@ func diffMultiDir(cmd *cobra.Command, name string, stat bool) error {
 // diffLogJSON outputs commit log as JSON.
 func diffLogJSON(cmd *cobra.Command, name string, stat bool) error {
 	var commits any
+	backend := resolveBackendForSandbox(name)
 	if stat {
-		c, err := sandbox.ListCommitsWithStats(name)
+		var c []sandbox.CommitInfoWithStat
+		err := withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
+			var listErr error
+			c, listErr = sandbox.ListCommitsWithStats(ctx, rt, name)
+			return listErr
+		})
 		if err != nil {
 			return err
 		}
@@ -520,7 +538,13 @@ func diffLogJSON(cmd *cobra.Command, name string, stat bool) error {
 		}
 		commits = c
 	} else {
-		c, err := sandbox.ListCommitsBeyondBaseline(name)
+		backend := resolveBackendForSandbox(name)
+		var c []sandbox.CommitInfo
+		err := withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
+			var listErr error
+			c, listErr = sandbox.ListCommitsBeyondBaseline(ctx, rt, name)
+			return listErr
+		})
 		if err != nil {
 			return err
 		}

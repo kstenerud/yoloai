@@ -5,6 +5,7 @@ package seatbelt
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -371,6 +372,24 @@ func (r *Runtime) Exec(_ context.Context, name string, cmd []string, _ string) (
 	execCmd := r.buildExecCommand(sandboxPath, cmd)
 
 	return runtime.RunCmdExec(execCmd)
+}
+
+// GitExec runs a git command on the host filesystem (Seatbelt uses host paths).
+// For Seatbelt, workDir is a host path and git is executed directly on the host.
+// The name parameter is ignored (needed for VM backends).
+func (r *Runtime) GitExec(ctx context.Context, name, workDir string, args ...string) (string, error) {
+	_ = name // unused for Seatbelt (host-side git)
+	cmdArgs := append([]string{"-c", "core.hooksPath=/dev/null", "-C", workDir}, args...)
+	cmd := exec.CommandContext(ctx, "git", cmdArgs...) //nolint:gosec // G204: workDir from validated sandbox state
+	output, err := cmd.Output()
+	if err != nil {
+		var exitErr *exec.ExitError
+		if ok := errors.As(err, &exitErr); ok {
+			return "", fmt.Errorf("git %v: %w: %s", args, err, strings.TrimSpace(string(exitErr.Stderr)))
+		}
+		return "", fmt.Errorf("git %v: %w", args, err)
+	}
+	return strings.TrimSpace(string(output)), nil
 }
 
 // InteractiveExec runs a command interactively. For tmux commands, injects

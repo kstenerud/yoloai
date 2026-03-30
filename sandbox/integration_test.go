@@ -63,7 +63,7 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 		0600,
 	))
 
-	diffResult, err := GenerateDiff(ctx, DiffOptions{Name: sandboxName})
+	diffResult, err := GenerateDiff(ctx, DiffOptions{Name: sandboxName, Runtime: mgr.runtime})
 	require.NoError(t, err)
 	assert.False(t, diffResult.Empty)
 	assert.Contains(t, diffResult.Output, "fmt")
@@ -365,7 +365,7 @@ func TestIntegration_DiffClean(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { mgr.Destroy(ctx, "diffclean") }) //nolint:errcheck // test cleanup
 
-	diffResult, err := GenerateDiff(ctx, DiffOptions{Name: "diffclean"})
+	diffResult, err := GenerateDiff(ctx, DiffOptions{Name: "diffclean", Runtime: mgr.runtime})
 	require.NoError(t, err)
 	assert.True(t, diffResult.Empty)
 }
@@ -394,7 +394,7 @@ func TestIntegration_DiffWithChanges(t *testing.T) {
 		0600,
 	))
 
-	diffResult, err := GenerateDiff(ctx, DiffOptions{Name: "diffchanges"})
+	diffResult, err := GenerateDiff(ctx, DiffOptions{Name: "diffchanges", Runtime: mgr.runtime})
 	require.NoError(t, err)
 	assert.False(t, diffResult.Empty)
 	assert.Contains(t, diffResult.Output, "fmt")
@@ -608,7 +608,7 @@ func TestIntegration_AgentStubWorkflow(t *testing.T) {
 	assert.FileExists(t, filepath.Join(workDir, "agent-output.txt"))
 
 	// Diff should detect the new file
-	diffResult, err := GenerateDiff(ctx, DiffOptions{Name: "stubworkflow"})
+	diffResult, err := GenerateDiff(ctx, DiffOptions{Name: "stubworkflow", Runtime: mgr.runtime})
 	require.NoError(t, err)
 	assert.False(t, diffResult.Empty, "diff should not be empty after agent created a file")
 	assert.Contains(t, diffResult.Output, "agent-output.txt")
