@@ -54,6 +54,7 @@ row to the index.
 | `iptables` warnings about legacy tables | [iptables-nft: legacy tables warning](#iptables--iptables-nft-both-iptables-legacy-and-iptables-nft-can-coexist) |
 | `--isolation vm` rejected on macOS / "containerd not available" | [Registry: containerd Linux-only](#containerd-backend-is-linux-only) |
 | `yoloai diff` fails: `cannot change to '.../work/^s...'` on containerd-vm | [Containerd: GitExec must run on host](#gitexec-must-run-on-host-not-inside-the-vm) |
+| Smoke test: `full_workflow/containerd-vm` fails with "agent idle for 9s+" | [QEMU: slow startup exceeds stall grace](#qemu-slow-startup-exceeds-smoke-test-stall-grace-period) |
 
 ---
 
@@ -851,6 +852,20 @@ VirtioFS should only be used for:
 **Impact:** All Tart VMs with `:copy` mode directories are affected. Git corruption can lead to data loss and broken repositories.
 
 **Code:** `runtime/tart/tart.go::ResolveCopyMount`, `runtime/tart/tart.go::Create`, `sandbox/lifecycle.go::Reset` (needs implementation)
+
+---
+
+### QEMU: slow startup exceeds smoke test stall grace period
+
+**Symptom:** `full_workflow/containerd-vm` fails with `"agent idle for 9s+ without sentinel 'done'"` even though the sandbox and agent are healthy.
+
+**Explanation:** The smoke test's `wait_for_sentinel` has a stall detection mechanism: after a 30s grace period, if the sandbox status is "idle" for 3 consecutive 3-second polls (9s), the test fails early. For QEMU-backed Kata VMs, QEMU boots slower than Firecracker. By the time the QEMU VM starts, Claude loads, and Haiku model inference runs for the prompt command, the 30s grace period has already expired. The status becomes "idle" (Claude ready at `❯` or model inference in progress without a tool hook firing) and the stall detection triggers before the `done` file is created.
+
+Firecracker (`containerd-vmenhanced`) starts faster and completes the task well within the grace period, so it is not affected.
+
+**Fix:** `BackendSpec` now has a `stall_grace_secs` field. `containerd-vm` sets it to 90s, giving QEMU enough time to boot and process the prompt before stall detection activates. The stall detection still fires at 90+9=99s for genuinely stuck QEMU agents (vs. the full 300s QEMU_TIMEOUT).
+
+**Code:** `scripts/smoke_test.py::BackendSpec.stall_grace_secs`, `Test.wait_for_sentinel`
 
 ---
 

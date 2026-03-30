@@ -55,6 +55,7 @@ class BackendSpec:
     check_isolation: str = ""  # isolation to validate in prereq check (empty = skip)
     sentinel_timeout_override: int = 0  # non-zero overrides the default sentinel timeout
     retries: int = 0        # number of times to retry the test on failure
+    stall_grace_secs: int = 0  # non-zero overrides global STALL_GRACE_SECS for this backend
 
     @property
     def is_seatbelt(self) -> bool:
@@ -73,6 +74,9 @@ class BackendSpec:
         if self.sentinel_timeout_override:
             return self.sentinel_timeout_override
         return VM_TIMEOUT if self.is_vm else DEFAULT_TIMEOUT
+
+    def sentinel_stall_grace(self) -> int:
+        return self.stall_grace_secs if self.stall_grace_secs else STALL_GRACE_SECS
 
     def new_args(self) -> list[str]:
         """Return --os / --isolation / --backend flags for `yoloai new`."""
@@ -129,7 +133,7 @@ LINUX_BACKENDS: list[BackendSpec] = [
                 check_backend="docker"),
     BackendSpec("linux", "vm",                 None,     "containerd-vm",
                 check_backend="containerd", is_vm=True, check_isolation="vm",
-                sentinel_timeout_override=QEMU_TIMEOUT),
+                sentinel_timeout_override=QEMU_TIMEOUT, stall_grace_secs=90),
     BackendSpec("linux", "vm-enhanced",        None,     "containerd-vmenhanced",
                 check_backend="containerd", is_vm=True, check_isolation="vm-enhanced",
                 sentinel_timeout_override=QEMU_TIMEOUT),
@@ -250,13 +254,15 @@ class Test:
         sandbox_name: str,
         sentinel: str = SENTINEL,
         timeout: int = DEFAULT_TIMEOUT,
+        stall_grace_secs: int = STALL_GRACE_SECS,
     ) -> None:
         """Poll `yoloai files ls` until `sentinel` appears as an exact line.
 
         Fails early if the sandbox reaches a terminal state (done/failed/stopped/…)
         or sustains an idle state for STALL_IDLE_COUNT × 3s without the sentinel.
-        Stall detection is skipped for the first STALL_GRACE_SECS to avoid false
-        positives during slow VM startup.
+        Stall detection is skipped for the first stall_grace_secs to avoid false
+        positives during slow VM startup. Use spec.sentinel_stall_grace() to get
+        the per-backend value.
         """
         deadline = time.monotonic() + timeout
         start = time.monotonic()
@@ -270,7 +276,7 @@ class Test:
                     return
 
             elapsed = time.monotonic() - start
-            if elapsed >= STALL_GRACE_SECS:
+            if elapsed >= stall_grace_secs:
                 status = self._sandbox_status(sandbox_name)
                 if status in STALL_TERMINAL:
                     raise AssertionError(
@@ -373,7 +379,7 @@ def test_full_workflow(t: Test, spec: BackendSpec) -> None:
     )
     t.assert_ok(r, "new")
 
-    t.wait_for_sentinel(name, timeout=spec.sentinel_timeout())
+    t.wait_for_sentinel(name, timeout=spec.sentinel_timeout(), stall_grace_secs=spec.sentinel_stall_grace())
 
     r = t.run("diff", name)
     t.assert_ok(r, "diff")
@@ -440,7 +446,7 @@ def test_start_done_agent(t: Test, spec: BackendSpec) -> None:
     )
     t.assert_ok(r, "new")
     # Sentinel appears immediately (touch runs before sleep).
-    t.wait_for_sentinel(name, timeout=spec.sentinel_timeout())
+    t.wait_for_sentinel(name, timeout=spec.sentinel_timeout(), stall_grace_secs=spec.sentinel_stall_grace())
     # After sleep 5 the pane dies and the status-monitor writes "done".
     # No idle hook races: the shell agent has no Notification hook.
     t.wait_for_done(name)
@@ -473,7 +479,7 @@ def test_stop_start(t: Test, spec: BackendSpec) -> None:
         timeout=120,
     )
     t.assert_ok(r, "new")
-    t.wait_for_sentinel(name, timeout=spec.sentinel_timeout())
+    t.wait_for_sentinel(name, timeout=spec.sentinel_timeout(), stall_grace_secs=spec.sentinel_stall_grace())
 
     # restart = stop + start internally.  A new prompt with a different sentinel
     # proves the agent ran successfully with injected credentials after restart.
@@ -483,7 +489,7 @@ def test_stop_start(t: Test, spec: BackendSpec) -> None:
     t.assert_ok(r, "restart")
 
     # Restart adds stop+start overhead on top of model inference, so allow extra time.
-    t.wait_for_sentinel(name, sentinel=sentinel2, timeout=spec.sentinel_timeout() + 60)
+    t.wait_for_sentinel(name, sentinel=sentinel2, timeout=spec.sentinel_timeout() + 60, stall_grace_secs=spec.sentinel_stall_grace())
 
 
 def test_files_exchange(t: Test, spec: BackendSpec) -> None:
@@ -593,7 +599,7 @@ def test_clone(t: Test, spec: BackendSpec) -> None:
         timeout=120,
     )
     t.assert_ok(r, "new sandbox A")
-    t.wait_for_sentinel(name_a, timeout=spec.sentinel_timeout())
+    t.wait_for_sentinel(name_a, timeout=spec.sentinel_timeout(), stall_grace_secs=spec.sentinel_stall_grace())
 
     name_b = f"{t.ctx.run_id}-clone-b"
     r = t.run("clone", name_a, name_b, timeout=CMD_TIMEOUT)
@@ -626,7 +632,7 @@ def test_reset(t: Test, spec: BackendSpec) -> None:
         timeout=120,
     )
     t.assert_ok(r, "new")
-    t.wait_for_sentinel(name, timeout=spec.sentinel_timeout())
+    t.wait_for_sentinel(name, timeout=spec.sentinel_timeout(), stall_grace_secs=spec.sentinel_stall_grace())
 
     r = t.run("diff", name)
     t.assert_ok(r, "diff before reset")
