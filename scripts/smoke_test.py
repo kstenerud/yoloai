@@ -168,6 +168,11 @@ class Test:
         self.log_file = ctx.log_dir / f"{safe}.log"
         self.log_file.parent.mkdir(parents=True, exist_ok=True)
 
+    @property
+    def debug_new_flags(self) -> list[str]:
+        """Return --debug flag for `yoloai new` when debug mode is active."""
+        return ["--debug"] if self.ctx.debug else []
+
     def run(self, *args: str, timeout: int = CMD_TIMEOUT) -> subprocess.CompletedProcess[str]:
         """Run a yoloai subcommand, logging the invocation and output."""
         cmd = [self.ctx.yoloai_bin]
@@ -344,6 +349,7 @@ def test_full_workflow(t: Test, spec: BackendSpec) -> None:
         "--prompt", prompt,
         "--yes",
         *spec.new_args(),
+        *t.debug_new_flags,
         timeout=120,
     )
     t.assert_ok(r, "new")
@@ -393,6 +399,7 @@ def test_stop_start(t: Test, spec: BackendSpec) -> None:
         "--prompt", prompt,
         "--yes",
         *spec.new_args(),
+        *t.debug_new_flags,
         timeout=120,
     )
     t.assert_ok(r, "new")
@@ -418,6 +425,7 @@ def test_files_exchange(t: Test, spec: BackendSpec) -> None:
         "new", name, str(project),
         "--no-start", "--yes",
         *spec.new_args(),
+        *t.debug_new_flags,
         timeout=60,
     )
     t.assert_ok(r, "new --no-start")
@@ -471,6 +479,7 @@ def test_overlay(t: Test) -> None:
         "--prompt", prompt,
         "--yes",
         *overlay_spec.new_args(),
+        *t.debug_new_flags,
         timeout=120,
     )
     t.assert_ok(r, "new with :overlay workdir")
@@ -510,6 +519,7 @@ def test_clone(t: Test, spec: BackendSpec) -> None:
         "--prompt", prompt,
         "--yes",
         *spec.new_args(),
+        *t.debug_new_flags,
         timeout=120,
     )
     t.assert_ok(r, "new sandbox A")
@@ -542,6 +552,7 @@ def test_reset(t: Test, spec: BackendSpec) -> None:
         "--prompt", prompt,
         "--yes",
         *spec.new_args(),
+        *t.debug_new_flags,
         timeout=120,
     )
     t.assert_ok(r, "new")
@@ -730,7 +741,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--debug",
         action="store_true",
-        help="Add --bugreport unsafe to all yoloai commands for detailed debugging output",
+        help="Add --debug to 'yoloai new' and --bugreport unsafe to all commands",
     )
     return parser.parse_args()
 

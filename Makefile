@@ -76,7 +76,7 @@ integration-podman: build
 ## VM backends require root (CAP_SYS_ADMIN + write to /var/run/netns/).
 ## Run as root: sudo -E make smoketest
 smoketest: build
-	python3 scripts/smoke_test.py --limited
+	python3 scripts/smoke_test.py --limited --debug
 
 ## smoketest-full: run smoke tests, failing if any optional backend is unavailable
 ## Run as root: sudo -E make smoketest-full
