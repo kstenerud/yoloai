@@ -227,6 +227,24 @@ class Test:
         except Exception:
             return "unknown"
 
+    def wait_for_done(self, sandbox_name: str, timeout: int = 30) -> None:
+        """Poll until the sandbox status is 'done' or 'failed'.
+
+        Used after wait_for_sentinel when the test needs the agent to have
+        fully exited (StatusDone) before calling start — e.g. to exercise the
+        relaunchAgent* code path rather than the container-recreation path.
+        """
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            status = self._sandbox_status(sandbox_name)
+            if status in ("done", "failed"):
+                return
+            time.sleep(1)
+        raise AssertionError(
+            f"sandbox {sandbox_name!r} did not reach done/failed within {timeout}s "
+            f"(last status: {self._sandbox_status(sandbox_name)!r})"
+        )
+
     def wait_for_sentinel(
         self,
         sandbox_name: str,
@@ -381,6 +399,57 @@ def test_full_workflow(t: Test, spec: BackendSpec) -> None:
     t.assert_ok(r, "sandbox info")
     t.assert_in(name, r.stdout, "sandbox info (name)")
     t.assert_in("claude", r.stdout, "sandbox info (agent)")
+
+
+def test_start_done_agent(t: Test, spec: BackendSpec) -> None:
+    """new (shell agent) → wait → start → assert exit 0.
+
+    Regression test for: relaunchAgent* functions failed when tmux used a fixed
+    socket path (-S /tmp/yoloai-tmux.sock) because the tmux respawn-pane call
+    omitted -S, causing tmux to look for the uid-based default socket.
+
+    The bug path is StatusDone → relaunchAgent (plain start, no prompt).
+    `restart` (stop+start) goes through container recreation and does not
+    exercise this code path at all.
+
+    We use --agent shell because it runs via PromptModeHeadless (sh -c "PROMPT"),
+    exits after the task, and causes a reliable pane death so the status-monitor
+    writes "done". Claude runs in interactive mode and never exits, leaving
+    status stuck at "idle" (flaky hook-based detection).
+
+    The prompt includes "sleep 5" so the shell pane stays alive long enough for
+    sandbox-setup.py to reach its `tmux wait-for yoloai-exit` call. Without the
+    sleep the shell exits in <1s, the tmux server shuts down before wait-for
+    runs, sandbox-setup.py crashes, and the container exits — causing `new` to
+    fail with "instance exited immediately". After the sleep ends the pane dies
+    and the status-monitor reliably writes "done"; the container stays alive
+    because wait-for yoloai-exit keeps blocking until docker stop.
+    """
+    project = t.project("start-done")
+    name = t.sandbox("start-done")
+    exdir = spec.exchange_dir(name)
+
+    r = t.run(
+        "new", name, str(project),
+        "--agent", "shell",
+        "--prompt", f"touch {exdir}/{SENTINEL}; sleep 5",
+        "--yes",
+        *spec.new_args(),
+        *t.debug_new_flags,
+        timeout=120,
+    )
+    t.assert_ok(r, "new")
+    # Sentinel appears immediately (touch runs before sleep).
+    t.wait_for_sentinel(name, timeout=spec.sentinel_timeout())
+    # After sleep 5 the pane dies and the status-monitor writes "done".
+    # No idle hook races: the shell agent has no Notification hook.
+    t.wait_for_done(name)
+
+    # Plain start (no --prompt, no --resume) → relaunchAgent → respawn-pane.
+    # Before the fix, tmux respawn-pane without -S failed here and start
+    # exited non-zero.
+    r = t.run("start", name, timeout=CMD_TIMEOUT)
+    t.assert_ok(r, "start after agent done")
 
 
 def test_stop_start(t: Test, spec: BackendSpec) -> None:
@@ -877,6 +946,8 @@ def main() -> int:
     # -------------------------------------------------------------------------
 
     print("Non-matrix tests (docker/linux/container):")
+    if should_run_test("start_done_agent"):
+        run_test(ctx, "start_done_agent", lambda t: test_start_done_agent(t, DEFAULT_BACKEND))
     if should_run_test("stop_start"):
         run_test(ctx, "stop_start",     lambda t: test_stop_start(t, DEFAULT_BACKEND))
     if should_run_test("files_exchange"):
