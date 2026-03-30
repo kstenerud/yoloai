@@ -4,6 +4,8 @@ package tart
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"log/slog"
@@ -14,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/kstenerud/yoloai/config"
 	"github.com/kstenerud/yoloai/internal/fileutil"
 )
 
@@ -23,9 +26,6 @@ const (
 
 	// provisionedImageName is the local VM name for the provisioned base image.
 	provisionedImageName = "yoloai-base"
-
-	// provisionMarkerFile tracks whether the base image has been provisioned.
-	provisionMarkerFile = ".tart-provisioned"
 )
 
 // provisionCommands are the shell commands to install dev tools in the base VM.
@@ -80,18 +80,17 @@ var provisionCommands = []string{
 // as needed. If imageRef is set in config (tart.image override), it uses that
 // as the base instead of the default.
 func (r *Runtime) Setup(ctx context.Context, sourceDir string, output io.Writer, logger *slog.Logger, force bool) error {
-	// Check if provisioned image already exists
+	baseImage := r.resolveBaseImage(sourceDir)
+
 	if !force {
-		exists, err := r.vmExistsNamed(ctx, provisionedImageName)
+		rebuild, err := r.needsBuild(ctx, baseImage)
 		if err != nil {
 			return fmt.Errorf("check base image: %w", err)
 		}
-		if exists && r.isProvisioned(sourceDir) {
+		if !rebuild {
 			return nil
 		}
 	}
-
-	baseImage := r.resolveBaseImage(sourceDir)
 
 	// Check if the base image needs to be pulled
 	baseExists, err := r.vmExistsNamed(ctx, baseImage)
@@ -131,9 +130,8 @@ func (r *Runtime) Setup(ctx context.Context, sourceDir string, output io.Writer,
 		return fmt.Errorf("provision VM: %w", err)
 	}
 
-	// Mark as provisioned
-	markerPath := filepath.Join(sourceDir, provisionMarkerFile)
-	_ = fileutil.WriteFile(markerPath, []byte("1"), 0600) // best-effort
+	// Record the checksum so future runs can skip this provisioning step.
+	r.recordBuildChecksum(baseImage)
 
 	fmt.Fprintln(output, "Base VM image provisioned successfully.") //nolint:errcheck // best-effort
 	return nil
@@ -167,11 +165,47 @@ func (r *Runtime) resolveBaseImage(_ string) string {
 	return defaultBaseImage
 }
 
-// isProvisioned checks if the base image was already provisioned.
-func (r *Runtime) isProvisioned(sourceDir string) bool {
-	markerPath := filepath.Join(sourceDir, provisionMarkerFile)
-	_, err := os.Stat(markerPath)
-	return err == nil
+// tartBaseChecksumPath returns the path where the tart base image build
+// checksum is stored.
+func tartBaseChecksumPath() string {
+	return filepath.Join(config.CacheDir(), ".tart-base-checksum")
+}
+
+// provisionChecksum computes a SHA-256 of the provision commands and the base
+// image name. Any change to either invalidates the stored checksum and triggers
+// a rebuild.
+func (r *Runtime) provisionChecksum(baseImage string) string {
+	h := sha256.New()
+	for _, cmd := range provisionCommands {
+		h.Write([]byte(cmd))
+	}
+	h.Write([]byte(baseImage))
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// needsBuild returns true when the provisioned VM image is absent or was built
+// from different inputs (commands or base image changed).
+func (r *Runtime) needsBuild(ctx context.Context, baseImage string) (bool, error) {
+	exists, err := r.vmExistsNamed(ctx, provisionedImageName)
+	if err != nil {
+		return true, err
+	}
+	if !exists {
+		return true, nil
+	}
+	current := r.provisionChecksum(baseImage)
+	last, err := os.ReadFile(tartBaseChecksumPath()) //nolint:gosec // G304: path is ~/.yoloai/cache/
+	if err != nil {
+		return true, nil //nolint:nilerr // no record → rebuild; read error is expected on first run
+	}
+	return string(last) != current, nil
+}
+
+// recordBuildChecksum persists the current provision checksum so future
+// needsBuild calls can skip an unnecessary rebuild.
+func (r *Runtime) recordBuildChecksum(baseImage string) {
+	sum := r.provisionChecksum(baseImage)
+	_ = fileutil.WriteFile(tartBaseChecksumPath(), []byte(sum), 0600) //nolint:gosec // G304: path is ~/.yoloai/cache/
 }
 
 // pullImage pulls a Tart VM image from a registry.
