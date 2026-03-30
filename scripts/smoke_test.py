@@ -125,7 +125,8 @@ LINUX_BACKENDS: list[BackendSpec] = [
                 check_backend="containerd", is_vm=True, check_isolation="vm",
                 sentinel_timeout_override=QEMU_TIMEOUT),
     BackendSpec("linux", "vm-enhanced",        None,     "containerd-vmenhanced",
-                check_backend="containerd", is_vm=True, check_isolation="vm-enhanced"),
+                check_backend="containerd", is_vm=True, check_isolation="vm-enhanced",
+                sentinel_timeout_override=QEMU_TIMEOUT),
 ]
 
 MACOS_BACKENDS: list[BackendSpec] = [
