@@ -179,7 +179,7 @@ func loadDiffContext(name string) (workDir string, baselineSHA string, mode stri
 
 	switch mode {
 	case "copy":
-		workDir = WorkDir(name, meta.Workdir.HostPath)
+		workDir = copyGitWorkDir(name, meta.Workdir.HostPath, meta.Workdir.MountPath)
 		baselineSHA = meta.Workdir.BaselineSHA
 		if baselineSHA == "" {
 			return "", "", "", fmt.Errorf("sandbox has no baseline SHA — was it created before diff support?")
@@ -229,7 +229,7 @@ func LoadAllDiffContexts(name string) ([]DiffContext, error) {
 	case "copy":
 		contexts = append(contexts, DiffContext{
 			HostPath:    meta.Workdir.HostPath,
-			WorkDir:     WorkDir(name, meta.Workdir.HostPath),
+			WorkDir:     copyGitWorkDir(name, meta.Workdir.HostPath, meta.Workdir.MountPath),
 			BaselineSHA: meta.Workdir.BaselineSHA,
 			Mode:        "copy",
 		})
@@ -258,7 +258,7 @@ func LoadAllDiffContexts(name string) ([]DiffContext, error) {
 		case "copy":
 			contexts = append(contexts, DiffContext{
 				HostPath:    d.HostPath,
-				WorkDir:     WorkDir(name, d.HostPath),
+				WorkDir:     copyGitWorkDir(name, d.HostPath, d.MountPath),
 				BaselineSHA: d.BaselineSHA,
 				Mode:        "copy",
 			})
@@ -319,6 +319,18 @@ func GenerateMultiDiff(opts DiffOptions) ([]*DiffResult, error) {
 	}
 
 	return results, nil
+}
+
+// copyGitWorkDir returns the path where git should run for a copy-mode directory.
+// For VM backends (e.g. Tart), the work copy is copied to a VM-local path stored in
+// mountPath, which differs from hostPath. For host-based backends (Docker, Seatbelt),
+// mountPath equals hostPath (Docker) or equals the host staging copy (Seatbelt), so
+// mountPath being distinct from hostPath reliably identifies a VM backend.
+func copyGitWorkDir(sandboxName, hostPath, mountPath string) string {
+	if mountPath != "" && mountPath != hostPath {
+		return mountPath
+	}
+	return WorkDir(sandboxName, hostPath)
 }
 
 // ListCommitsBeyondBaselineOverlay returns commits beyond the baseline for

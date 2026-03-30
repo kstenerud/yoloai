@@ -236,12 +236,19 @@ func bridgeBinaryHasCNICaps(path string) bool {
 	return permitted0&cniCapMask == cniCapMask
 }
 
+// instancePrefix is the "yoloai-" prefix applied to all instance names.
+const instancePrefix = "yoloai-"
+
 // GitExec runs a git command inside the container (containerd uses VM filesystem).
 // workDir is the path inside the container where git should run.
+// name may be a sandbox name or instance name; both are accepted.
 func (r *Runtime) GitExec(ctx context.Context, name, workDir string, args ...string) (string, error) {
+	// Callers in the sandbox package pass the sandbox name (e.g. "mybox").
+	// Containerd containers are named with the instance prefix (e.g. "yoloai-mybox").
+	instanceName := instancePrefix + strings.TrimPrefix(name, instancePrefix)
 	gitArgs := append([]string{"-c", "core.hooksPath=/dev/null", "-C", workDir}, args...)
 	cmd := append([]string{"git"}, gitArgs...)
-	result, err := r.Exec(ctx, name, cmd, "")
+	result, err := r.Exec(ctx, instanceName, cmd, "")
 	if err != nil {
 		return "", err
 	}

@@ -378,8 +378,12 @@ func (r *Runtime) Exec(ctx context.Context, name string, cmd []string, _ string)
 
 // GitExec runs a git command inside the VM (Tart uses VM filesystem).
 // workDir is the path inside the VM where git should run.
+// name may be a sandbox name or instance name; both are accepted.
 func (r *Runtime) GitExec(ctx context.Context, name, workDir string, args ...string) (string, error) {
-	if !r.isRunning(ctx, name) {
+	// Callers in the sandbox package pass the sandbox name (e.g. "mybox").
+	// The Tart VM is named with the instance prefix (e.g. "yoloai-mybox").
+	vmName := instancePrefix + strings.TrimPrefix(name, instancePrefix)
+	if !r.isRunning(ctx, vmName) {
 		return "", runtime.ErrNotRunning
 	}
 
@@ -387,7 +391,7 @@ func (r *Runtime) GitExec(ctx context.Context, name, workDir string, args ...str
 	gitArgs := append([]string{"-c", "core.hooksPath=/dev/null", "-C", workDir}, args...)
 	cmd := append([]string{"git"}, gitArgs...)
 
-	result, err := r.Exec(ctx, name, cmd, "")
+	result, err := r.Exec(ctx, vmName, cmd, "")
 	if err != nil {
 		return "", err
 	}
