@@ -32,6 +32,11 @@ VM_TIMEOUT = 180        # seconds: VM boot + agent startup (Firecracker/Tart)
 QEMU_TIMEOUT = 300      # seconds: QEMU-based Kata VM — slower boot than Firecracker
 CMD_TIMEOUT = 60        # seconds: individual yoloai commands
 
+STALL_GRACE_SECS = 30   # ignore stall detection for this many seconds after polling starts
+STALL_IDLE_COUNT = 3    # consecutive idle polls before declaring a stall (3×3s = 9s sustained idle)
+# Terminal sandbox statuses that mean the agent will never write the sentinel.
+STALL_TERMINAL = {"done", "failed", "stopped", "removed", "broken", "unavailable"}
+
 
 # ---------------------------------------------------------------------------
 # Data structures
@@ -204,21 +209,62 @@ class Test:
                 f"{step}: expected {needle!r} in output\ngot: {haystack[:400]}"
             )
 
+    def _sandbox_status(self, sandbox_name: str) -> str:
+        """Return the sandbox status string, or 'unknown' on any error."""
+        try:
+            r = subprocess.run(
+                [self.ctx.yoloai_bin, "sandbox", sandbox_name, "info", "--json"],
+                capture_output=True, text=True, timeout=15,
+            )
+            data = json.loads(r.stdout)
+            return str(data.get("status", "unknown"))
+        except Exception:
+            return "unknown"
+
     def wait_for_sentinel(
         self,
         sandbox_name: str,
         sentinel: str = SENTINEL,
         timeout: int = DEFAULT_TIMEOUT,
     ) -> None:
-        """Poll `yoloai files ls` until `sentinel` appears as an exact line."""
+        """Poll `yoloai files ls` until `sentinel` appears as an exact line.
+
+        Fails early if the sandbox reaches a terminal state (done/failed/stopped/…)
+        or sustains an idle state for STALL_IDLE_COUNT × 3s without the sentinel.
+        Stall detection is skipped for the first STALL_GRACE_SECS to avoid false
+        positives during slow VM startup.
+        """
         deadline = time.monotonic() + timeout
+        start = time.monotonic()
+        consecutive_idle = 0
+
         while time.monotonic() < deadline:
             r = self.run("files", sandbox_name, "ls", timeout=15)
             if r.returncode == 0:
                 lines = [line.strip() for line in r.stdout.splitlines()]
                 if sentinel in lines:
                     return
+
+            elapsed = time.monotonic() - start
+            if elapsed >= STALL_GRACE_SECS:
+                status = self._sandbox_status(sandbox_name)
+                if status in STALL_TERMINAL:
+                    raise AssertionError(
+                        f"agent reached terminal state {status!r} "
+                        f"without sentinel {sentinel!r}"
+                    )
+                if status == "idle":
+                    consecutive_idle += 1
+                    if consecutive_idle >= STALL_IDLE_COUNT:
+                        raise AssertionError(
+                            f"agent idle for {consecutive_idle * 3}s+ "
+                            f"without sentinel {sentinel!r}"
+                        )
+                else:
+                    consecutive_idle = 0
+
             time.sleep(3)
+
         raise AssertionError(
             f"sentinel {sentinel!r} not seen in {timeout}s "
             f"(log: {self.log_file})"
