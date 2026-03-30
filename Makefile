@@ -73,12 +73,14 @@ integration-podman: build
 	@go test -tags=integration -v -count=1 -timeout=10m ./runtime/podman/
 
 ## smoketest: run end-to-end smoke tests, skipping tests for unavailable backends
-## VM backends require root (CAP_SYS_ADMIN + write to /var/run/netns/). Run as root to include them.
-smoketest: build
+## VM backends require root (CAP_SYS_ADMIN + write to /var/run/netns/).
+## Build first, then run as root: make build && sudo -E make smoketest
+smoketest:
 	python3 scripts/smoke_test.py --limited
 
 ## smoketest-full: run smoke tests, failing if any optional backend is unavailable
-smoketest-full: build
+## Build first, then run as root: make build && sudo -E make smoketest-full
+smoketest-full:
 	python3 scripts/smoke_test.py
 
 ## setcap: grant capabilities needed for VM backends (must re-run after each build)
