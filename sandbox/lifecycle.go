@@ -649,6 +649,29 @@ func (m *Manager) recreateContainer(ctx context.Context, name string, meta *Meta
 	return nil
 }
 
+// tmuxCmd builds a tmux command slice, injecting -S <socket> when the sandbox
+// uses a fixed socket path (Docker, containerd, Tart). Without this, tmux
+// clients connect to the uid-based default socket which does not exist in
+// containers that started tmux with an explicit -S path.
+func tmuxCmd(socket string, args ...string) []string {
+	cmd := []string{"tmux"}
+	if socket != "" {
+		cmd = append(cmd, "-S", socket)
+	}
+	return append(cmd, args...)
+}
+
+// tmuxShellPrefix returns a shell snippet that defines a _tmux() function
+// wrapping tmux with -S <socket> when the sandbox uses a fixed socket path.
+// Shell scripts that run tmux commands should source this prefix and call
+// _tmux instead of tmux.
+func tmuxShellPrefix(socket string) string {
+	if socket != "" {
+		return fmt.Sprintf("_tmux() { tmux -S %q \"$@\"; }", socket)
+	}
+	return "_tmux() { tmux \"$@\"; }"
+}
+
 // relaunchAgent relaunches the agent in the existing tmux session.
 func (m *Manager) relaunchAgent(ctx context.Context, name string, meta *Meta) error {
 	sandboxDir := Dir(name)
@@ -664,9 +687,9 @@ func (m *Manager) relaunchAgent(ctx context.Context, name string, meta *Meta) er
 		return fmt.Errorf("parse runtime-config.json: %w", err)
 	}
 
-	_, err = execInContainer(ctx, m.runtime, name, meta, []string{
-		"tmux", "respawn-pane", "-t", "main", "-k", cfg.AgentCommand,
-	})
+	_, err = execInContainer(ctx, m.runtime, name, meta,
+		tmuxCmd(cfg.TmuxSocket, "respawn-pane", "-t", "main", "-k", cfg.AgentCommand),
+	)
 	if err != nil {
 		return fmt.Errorf("relaunch agent: %w", err)
 	}
@@ -701,9 +724,9 @@ func (m *Manager) relaunchAgentWithResume(ctx context.Context, name string, meta
 	interactiveCmd := buildAgentCommand(agentDef, meta.Model, "", agentArgs, cfg.Passthrough)
 
 	// Respawn with interactive command
-	_, err = execInContainer(ctx, m.runtime, name, meta, []string{
-		"tmux", "respawn-pane", "-t", "main", "-k", interactiveCmd,
-	})
+	_, err = execInContainer(ctx, m.runtime, name, meta,
+		tmuxCmd(cfg.TmuxSocket, "respawn-pane", "-t", "main", "-k", interactiveCmd),
+	)
 	if err != nil {
 		return fmt.Errorf("relaunch agent: %w", err)
 	}
@@ -730,7 +753,7 @@ func (m *Manager) sendResumePrompt(ctx context.Context, name, sandboxDir string,
 	case cfg.ReadyPattern != "":
 		// Poll tmux capture-pane output for the ready pattern
 		waitCmd = fmt.Sprintf(`for i in $(seq 1 60); do
-    if tmux capture-pane -t main -p 2>/dev/null | grep -q '%s'; then
+    if _tmux capture-pane -t main -p 2>/dev/null | grep -q '%s'; then
         break
     fi
     sleep 1
@@ -750,16 +773,17 @@ done`, cfg.ReadyPattern)
 	statusWrite := `printf '{"status":"active","timestamp":%d}' "$(date +%%s)" > "${YOLOAI_DIR:-/yoloai}/agent-status.json"`
 
 	script := fmt.Sprintf(`%s
+%s
 printf '%%s' "$1" > /tmp/yoloai-resume.txt
-tmux load-buffer /tmp/yoloai-resume.txt
-tmux paste-buffer -t main
+_tmux load-buffer /tmp/yoloai-resume.txt
+_tmux paste-buffer -t main
 sleep 0.5
 for key in %s; do
-    tmux send-keys -t main "$key"
+    _tmux send-keys -t main "$key"
     sleep 0.2
 done
 rm -f /tmp/yoloai-resume.txt
-%s`, waitCmd, cfg.SubmitSequence, statusWrite)
+%s`, tmuxShellPrefix(cfg.TmuxSocket), waitCmd, cfg.SubmitSequence, statusWrite)
 
 	_, err = execInContainer(ctx, m.runtime, name, meta, []string{
 		"bash", "-c", "nohup bash -c '" + strings.ReplaceAll(script, "'", "'\"'\"'") + "' _ \"$1\" >/dev/null 2>&1 &", "_", resumeText,
@@ -790,9 +814,9 @@ func (m *Manager) relaunchAgentWithCustomPrompt(ctx context.Context, name string
 	agentArgs := resolveAgentArgs(meta.Agent, meta.Profile)
 	interactiveCmd := buildAgentCommand(agentDef, meta.Model, "", agentArgs, cfg.Passthrough)
 
-	_, err = execInContainer(ctx, m.runtime, name, meta, []string{
-		"tmux", "respawn-pane", "-t", "main", "-k", interactiveCmd,
-	})
+	_, err = execInContainer(ctx, m.runtime, name, meta,
+		tmuxCmd(cfg.TmuxSocket, "respawn-pane", "-t", "main", "-k", interactiveCmd),
+	)
 	if err != nil {
 		return fmt.Errorf("relaunch agent: %w", err)
 	}
@@ -807,7 +831,7 @@ func (m *Manager) sendCustomPrompt(ctx context.Context, name, sandboxDir string,
 	switch {
 	case cfg.ReadyPattern != "":
 		waitCmd = fmt.Sprintf(`for i in $(seq 1 60); do
-    if tmux capture-pane -t main -p 2>/dev/null | grep -q '%s'; then
+    if _tmux capture-pane -t main -p 2>/dev/null | grep -q '%s'; then
         break
     fi
     sleep 1
@@ -826,16 +850,17 @@ done`, cfg.ReadyPattern)
 	statusWrite := `printf '{"status":"active","timestamp":%d}' "$(date +%%s)" > "${YOLOAI_DIR:-/yoloai}/agent-status.json"`
 
 	script := fmt.Sprintf(`%s
+%s
 printf '%%s' "$1" > /tmp/yoloai-custom-prompt.txt
-tmux load-buffer /tmp/yoloai-custom-prompt.txt
-tmux paste-buffer -t main
+_tmux load-buffer /tmp/yoloai-custom-prompt.txt
+_tmux paste-buffer -t main
 sleep 0.5
 for key in %s; do
-    tmux send-keys -t main "$key"
+    _tmux send-keys -t main "$key"
     sleep 0.2
 done
 rm -f /tmp/yoloai-custom-prompt.txt
-%s`, waitCmd, cfg.SubmitSequence, statusWrite)
+%s`, tmuxShellPrefix(cfg.TmuxSocket), waitCmd, cfg.SubmitSequence, statusWrite)
 
 	_, err := execInContainer(ctx, m.runtime, name, meta, []string{
 		"bash", "-c", "nohup bash -c '" + strings.ReplaceAll(script, "'", "'\"'\"'") + "' _ \"$1\" >/dev/null 2>&1 &", "_", promptText,
