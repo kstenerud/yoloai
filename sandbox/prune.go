@@ -37,13 +37,13 @@ func PruneTempFiles(dryRun bool, maxAge time.Duration) ([]string, error) {
 		}
 
 		path := "/tmp/" + entry.Name()
-		pruned = append(pruned, path)
 
 		if !dryRun {
 			if err := os.RemoveAll(path); err != nil {
-				return pruned, fmt.Errorf("remove %s: %w", path, err)
+				continue // skip entries we can't remove (e.g. root-owned from sudo runs)
 			}
 		}
+		pruned = append(pruned, path)
 	}
 
 	return pruned, nil
