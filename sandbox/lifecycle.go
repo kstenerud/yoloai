@@ -634,7 +634,19 @@ func (m *Manager) recreateContainer(ctx context.Context, name string, meta *Meta
 		state.promptSourcePath = filepath.Join(sandboxDir, "resume-prompt.txt")
 	}
 
-	return m.launchContainer(ctx, state)
+	if err := m.launchContainer(ctx, state); err != nil {
+		return err
+	}
+
+	// Execute VM-side work directory setup if baseline was deferred (Tart VMs)
+	// For :copy mode, if BaselineSHA is empty, VM setup is needed
+	if meta.Workdir.Mode == "copy" && meta.Workdir.BaselineSHA == "" {
+		if err := executeVMWorkDirSetup(ctx, m.runtime, name, sandboxDir, meta); err != nil {
+			return fmt.Errorf("VM work dir setup: %w", err)
+		}
+	}
+
+	return nil
 }
 
 // relaunchAgent relaunches the agent in the existing tmux session.
