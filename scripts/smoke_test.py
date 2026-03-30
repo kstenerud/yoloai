@@ -99,6 +99,7 @@ class SkipTest(Exception):
 class RunContext:
     yoloai_bin: str
     tmpdir: Path
+    log_dir: Path
     run_id: str
     fixture_dir: Path
     limited: bool
@@ -158,7 +159,7 @@ class Test:
         self.name = name
         # Sanitise the name for use as a filename.
         safe = name.replace("/", "-").replace(" ", "_")
-        self.log_file = ctx.tmpdir / "logs" / f"{safe}.log"
+        self.log_file = ctx.log_dir / f"{safe}.log"
         self.log_file.parent.mkdir(parents=True, exist_ok=True)
 
     def run(self, *args: str, timeout: int = CMD_TIMEOUT) -> subprocess.CompletedProcess[str]:
@@ -603,7 +604,11 @@ def check_prerequisites(
 # ---------------------------------------------------------------------------
 
 def cleanup(ctx: RunContext) -> None:
-    """Destroy all tracked sandboxes and remove non-log temp files."""
+    """Destroy all tracked sandboxes and remove the scratch tmpdir.
+
+    Logs are written to ctx.log_dir (~/.yoloai/smoke-logs/<run_id>/) and are
+    never deleted here — they persist until the user cleans them up manually.
+    """
     if ctx.sandboxes:
         print(f"\nCleaning up {len(ctx.sandboxes)} sandbox(es)...")
         for name in ctx.sandboxes:
@@ -611,15 +616,7 @@ def cleanup(ctx: RunContext) -> None:
                 [ctx.yoloai_bin, "destroy", "--yes", name],
                 capture_output=True, timeout=30,
             )
-    # Remove everything except the logs directory so failures are diagnosable.
-    for entry in ctx.tmpdir.iterdir():
-        if entry.name == "logs":
-            continue
-        if entry.is_dir():
-            shutil.rmtree(entry, ignore_errors=True)
-        else:
-            entry.unlink(missing_ok=True)
-    print(f"Logs retained at: {ctx.tmpdir / 'logs'}")
+    shutil.rmtree(ctx.tmpdir, ignore_errors=True)
 
 
 # ---------------------------------------------------------------------------
@@ -726,13 +723,16 @@ def main() -> int:
         )
         return 1
 
-    tmpdir = Path(tempfile.mkdtemp(prefix="yoloai-smoke-"))
     run_id = f"smoke-{int(time.time())}"
+    tmpdir = Path(tempfile.mkdtemp(prefix="yoloai-smoke-"))
+    log_dir = Path.home() / ".yoloai" / "smoke-logs" / run_id
+    log_dir.mkdir(parents=True, exist_ok=True)
     fixture_dir = create_fixture(tmpdir)
 
     ctx = RunContext(
         yoloai_bin=yoloai_bin,
         tmpdir=tmpdir,
+        log_dir=log_dir,
         run_id=run_id,
         fixture_dir=fixture_dir,
         limited=args.limited,
@@ -753,7 +753,8 @@ def main() -> int:
 
     print(f"yoloai smoke test  run={run_id}")
     print(f"host={'linux' if is_linux else 'macos'}  limited={args.limited}")
-    print(f"binary={yoloai_bin}\n")
+    print(f"binary={yoloai_bin}")
+    print(f"logs={log_dir}\n")
 
     preq = check_prerequisites(ctx, all_specs)
 
