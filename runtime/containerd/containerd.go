@@ -236,6 +236,18 @@ func bridgeBinaryHasCNICaps(path string) bool {
 	return permitted0&cniCapMask == cniCapMask
 }
 
+// GitExec runs a git command inside the container (containerd uses VM filesystem).
+// workDir is the path inside the container where git should run.
+func (r *Runtime) GitExec(ctx context.Context, name, workDir string, args ...string) (string, error) {
+	gitArgs := append([]string{"-c", "core.hooksPath=/dev/null", "-C", workDir}, args...)
+	cmd := append([]string{"git"}, gitArgs...)
+	result, err := r.Exec(ctx, name, cmd, "")
+	if err != nil {
+		return "", err
+	}
+	return result.Stdout, nil
+}
+
 // isWSL2 returns true if running inside a WSL2 environment.
 func isWSL2() bool {
 	data, _ := os.ReadFile("/proc/version")
