@@ -10,9 +10,9 @@ import (
 // seedSandbox copies seed files, agent config files, and seeds the home config.
 // Returns agentFilesInitialized so the caller can persist it to SandboxState.
 // Extracted from prepareSandboxState().
-func (m *Manager) seedSandbox(agentDef *agent.Definition, sandboxDir, isolation string, agentFiles *config.AgentFilesConfig) (agentFilesInitialized bool, err error) {
+func (m *Manager) seedSandbox(agentDef *agent.Definition, sandboxDir, isolation string, agentFiles *config.AgentFilesConfig, credOverrides map[string]string) (agentFilesInitialized bool, err error) {
 	// Copy seed files into agent-state (config, OAuth credentials, etc.)
-	hasAPIKey := hasAnyAPIKey(agentDef, nil)
+	hasAPIKey := hasAnyAPIKey(agentDef, credOverrides)
 	copiedAuth, err := copySeedFiles(agentDef, sandboxDir, hasAPIKey)
 	if err != nil {
 		return false, fmt.Errorf("copy seed files: %w", err)

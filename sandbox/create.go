@@ -455,7 +455,7 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions, c
 		}
 	}()
 
-	agentFilesInitialized, err := m.seedSandbox(agentDef, sandboxDir, pr.isolation, pr.agentFiles)
+	agentFilesInitialized, err := m.seedSandbox(agentDef, sandboxDir, pr.isolation, pr.agentFiles, credOverrides)
 	if err != nil {
 		return nil, err
 	}
