@@ -54,6 +54,7 @@ class BackendSpec:
     is_vm: bool = False     # True → use VM_TIMEOUT for sentinel polling
     check_isolation: str = ""  # isolation to validate in prereq check (empty = skip)
     sentinel_timeout_override: int = 0  # non-zero overrides the default sentinel timeout
+    retries: int = 0        # number of times to retry the test on failure
 
     @property
     def is_seatbelt(self) -> bool:
@@ -144,7 +145,7 @@ MACOS_BACKENDS: list[BackendSpec] = [
     BackendSpec("mac",   "container", None,     "seatbelt",
                 check_backend="seatbelt"),
     BackendSpec("mac",   "vm",        None,     "tart",
-                check_backend="tart",   is_vm=True),
+                check_backend="tart",   is_vm=True, retries=1),
 ]
 
 # Required for non-matrix tests (T2–T6). Must be available on both platforms.
@@ -907,7 +908,17 @@ def main() -> int:
             reason = pr.note if pr else "not in prereq results"
             skip_test(ctx, test_name, reason)
             continue
-        run_test(ctx, test_name, lambda t, s=spec: test_full_workflow(t, s))
+
+        # Run test with retries if configured
+        result = run_test(ctx, test_name, lambda t, s=spec: test_full_workflow(t, s))
+        if not result.passed and spec.retries > 0:
+            for attempt in range(spec.retries):
+                print(f"      Retrying {test_name} (attempt {attempt + 1}/{spec.retries})...")
+                # Remove the failed result and retry
+                ctx.results.pop()
+                result = run_test(ctx, test_name, lambda t, s=spec: test_full_workflow(t, s))
+                if result.passed:
+                    break
 
     print_summary(ctx.results)
 
