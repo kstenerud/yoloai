@@ -62,12 +62,14 @@ func newSystemBuildCmd() *cobra.Command {
 	cmd.Flags().String("backend", "", "Runtime backend (see 'yoloai system backends')")
 	cmd.Flags().StringSlice("secret", nil, "Build secret (id=<name>,src=<path>); can be repeated")
 	cmd.Flags().Bool("all", false, "Build across all available backends")
+	cmd.Flags().Bool("force", false, "Force rebuild even if image is up to date")
 
 	return cmd
 }
 
 func runSystemBuild(cmd *cobra.Command, args []string, backend string) error {
 	secretFlags, _ := cmd.Flags().GetStringSlice("secret")
+	force, _ := cmd.Flags().GetBool("force")
 
 	if len(args) > 0 {
 		// Build a specific profile's image chain
@@ -114,7 +116,7 @@ func runSystemBuild(cmd *cobra.Command, args []string, backend string) error {
 			if jsonEnabled(cmd) {
 				buildOut, _ = os.Open(os.DevNull)
 			}
-			if err := sandbox.EnsureProfileImage(ctx, rt, profileName, secrets, buildOut, slog.Default(), true); err != nil {
+			if err := sandbox.EnsureProfileImage(ctx, rt, profileName, secrets, buildOut, slog.Default(), force); err != nil {
 				return err
 			}
 			if jsonEnabled(cmd) {
@@ -135,7 +137,7 @@ func runSystemBuild(cmd *cobra.Command, args []string, backend string) error {
 		if jsonEnabled(cmd) {
 			buildOut, _ = os.Open(os.DevNull)
 		}
-		if err := rt.Setup(ctx, baseProfileDir, buildOut, slog.Default(), true); err != nil {
+		if err := rt.Setup(ctx, baseProfileDir, buildOut, slog.Default(), force); err != nil {
 			return err
 		}
 
