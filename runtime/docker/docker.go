@@ -155,9 +155,18 @@ func (r *Runtime) Create(ctx context.Context, cfg runtime.InstanceConfig) error 
 		ExposedPorts: exposedPorts,
 	}
 
+	// Translate "isolated" to default bridge network. Network isolation is
+	// implemented via iptables inside the container (entrypoint.py), not by
+	// Docker's network layer. Docker doesn't have a network named "isolated",
+	// so passing it directly causes "network isolated not found" on start.
+	dockerNetworkMode := cfg.NetworkMode
+	if dockerNetworkMode == "isolated" {
+		dockerNetworkMode = "" // default bridge network
+	}
+
 	hostConfig := &container.HostConfig{
 		Init:         &cfg.UseInit,
-		NetworkMode:  container.NetworkMode(cfg.NetworkMode),
+		NetworkMode:  container.NetworkMode(dockerNetworkMode),
 		PortBindings: portBindings,
 		Mounts:       mounts,
 		CapAdd:       cfg.CapAdd,

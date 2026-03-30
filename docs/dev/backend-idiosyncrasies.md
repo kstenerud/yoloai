@@ -32,6 +32,7 @@ row to the index.
 | CNI-FORWARD rules deleted for a running container | [CNI: pre-flight n.Remove deletes live rules](#the-pre-flight-nremove-can-delete-rules-for-running-containers) |
 | IPAM allocates duplicate IP after replace | [CNI: stale IPAM lease](#cnI-results-cache-lives-at-varlibcniresults) |
 | Two concurrent `yoloai new` with same name corrupts networking | [CNI: concurrent creation race](#two-yoloai-new-invocations-for-the-same-container-name-within-1s-will-corrupt-networking) |
+| `start instance: instance not found` with `--network-isolated` | [Docker: isolated network mode](#docker-does-not-have-an-isolated-network-mode) |
 | `overlayfs mount` fails with `EPERM` inside Docker | [Docker: AppArmor blocks mount](#apparmor-blocks-mount2-even-with-cap_sys_admin) |
 | `git apply` silently fails on overlay patch | [Docker: Exec strips trailing newline](#docker-sdk-exec-strips-the-trailing-newline) |
 | `tmux attach` exits with `EACCES` on `/dev/tty` (gVisor ARM64) | [Docker: gVisor ARM64 TIOCSCTTY](#gvisor-on-arm64-docker-exec--it-does-not-call-tiocsctty) |
@@ -344,6 +345,45 @@ exec -it`). See `docker.go::AttachCommand`.
 
 Note: this is ARM64-specific. On AMD64, `script` creates a fresh PTY and CTY
 cleanly without this issue.
+
+### Docker does not have an "isolated" network mode
+
+**Symptom:** Using `--network-isolated` with Docker backend fails during container start with:
+```
+yoloai: start instance: instance not found
+```
+
+Docker daemon logs show:
+```
+Error response from daemon: failed to set up container networking: network isolated not found
+```
+
+**Explanation:** Network isolation in yoloAI is implemented via iptables rules inside
+the container (see `entrypoint.py::isolate_network()`), not by Docker's network layer.
+The value `NetworkMode: "isolated"` is yoloAI's internal representation, not a Docker
+network name. When this string is passed directly to `docker.ContainerCreate()`, Docker
+accepts it (container creation succeeds), but `docker.ContainerStart()` fails because
+Docker cannot find a network named "isolated".
+
+The Docker client's error type for "network not found" is `errdefs.IsNotFound`, which
+the runtime translates to `runtime.ErrNotFound`, producing the misleading message
+"instance not found" (the instance exists, but its network doesn't).
+
+**Fix:** In the Docker backend's `Create()` method, translate `NetworkMode == "isolated"`
+to `""` (default bridge network) before passing to Docker. The entrypoint script will
+apply the actual iptables-based network isolation after the container starts.
+
+```go
+dockerNetworkMode := cfg.NetworkMode
+if dockerNetworkMode == "isolated" {
+    dockerNetworkMode = "" // default bridge network
+}
+```
+
+**Impact:** Affects all Docker/Podman backends. Podman embeds the Docker runtime and
+inherits the same fix.
+
+**Code:** `runtime/docker/docker.go::Create` line ~152-171
 
 ---
 
