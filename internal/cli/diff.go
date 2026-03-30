@@ -424,7 +424,13 @@ func diffLog(cmd *cobra.Command, name string, stat bool) error {
 	}
 
 	// Check for uncommitted changes
-	hasWIP, err := sandbox.HasUncommittedChanges(name)
+	backend := resolveBackendForSandbox(name)
+	var hasWIP bool
+	err := withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
+		var wipErr error
+		hasWIP, wipErr = sandbox.HasUncommittedChanges(ctx, rt, name)
+		return wipErr
+	})
 	if err == nil && hasWIP {
 		fmt.Fprintln(out, "  *  (uncommitted changes)") //nolint:errcheck
 	}
@@ -554,7 +560,12 @@ func diffLogJSON(cmd *cobra.Command, name string, stat bool) error {
 		commits = c
 	}
 
-	hasWIP, _ := sandbox.HasUncommittedChanges(name)
+	backendWIP := resolveBackendForSandbox(name)
+	var hasWIP bool
+	_ = withRuntime(cmd.Context(), backendWIP, func(ctx context.Context, rt runtime.Runtime) error {
+		hasWIP, _ = sandbox.HasUncommittedChanges(ctx, rt, name)
+		return nil
+	})
 	tags, _ := sandbox.ListTagsBeyondBaseline(name)
 	if tags == nil {
 		tags = []sandbox.TagInfo{}

@@ -371,9 +371,27 @@ func (r *Runtime) Exec(ctx context.Context, name string, cmd []string, _ string)
 
 	args := execArgs(name, cmd...)
 
+	slog.Debug("tart Exec", "vm", name, "args", args)
+
 	c := exec.CommandContext(ctx, r.tartBin, args...) //nolint:gosec // G204: vmName and cmd are from validated sandbox state
 
 	return runtime.RunCmdExec(c)
+}
+
+// ExecRaw is like Exec but preserves exact stdout/stderr without trimming
+// whitespace. Use this for commands whose output is whitespace-sensitive.
+func (r *Runtime) ExecRaw(ctx context.Context, name string, cmd []string, _ string) (runtime.ExecResult, error) {
+	if !r.isRunning(ctx, name) {
+		return runtime.ExecResult{}, runtime.ErrNotRunning
+	}
+
+	args := execArgs(name, cmd...)
+
+	slog.Debug("tart ExecRaw", "vm", name, "args", args)
+
+	c := exec.CommandContext(ctx, r.tartBin, args...) //nolint:gosec // G204: vmName and cmd are from validated sandbox state
+
+	return runtime.RunCmdExecRaw(c)
 }
 
 // translateWorkDirToVMPath translates host sandbox work paths to VM paths.
@@ -441,7 +459,8 @@ func (r *Runtime) GitExec(ctx context.Context, name, workDir string, args ...str
 	gitArgs := append([]string{"-c", "core.hooksPath=/dev/null", "-C", actualWorkDir}, args...)
 	cmd := append([]string{"git"}, gitArgs...)
 
-	result, err := r.Exec(ctx, vmName, cmd, "")
+	// Use ExecRaw to preserve exact git output (patches are whitespace-sensitive)
+	result, err := r.ExecRaw(ctx, vmName, cmd, "")
 	if err != nil {
 		return "", err
 	}

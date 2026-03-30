@@ -90,7 +90,7 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 	assert.Equal(t, 0, result.ExitCode)
 
 	// Generate patch and apply to a target directory
-	patch, stat, err := GeneratePatch(sandboxName, nil)
+	patch, stat, err := GeneratePatch(ctx, mgr.runtime, sandboxName, nil)
 	require.NoError(t, err)
 	assert.NotEmpty(t, patch)
 	assert.Contains(t, stat, "main.go")
@@ -426,7 +426,7 @@ func TestIntegration_ApplyPatch(t *testing.T) {
 	))
 
 	// Generate patch
-	patch, stat, err := GeneratePatch("applypatch", nil)
+	patch, stat, err := GeneratePatch(ctx, mgr.runtime, "applypatch", nil)
 	require.NoError(t, err)
 	assert.NotEmpty(t, patch)
 	assert.Contains(t, stat, "main.go")
@@ -614,7 +614,7 @@ func TestIntegration_AgentStubWorkflow(t *testing.T) {
 	assert.Contains(t, diffResult.Output, "agent-output.txt")
 
 	// Generate patch and apply to a fresh copy of the original project
-	patch, stat, err := GeneratePatch("stubworkflow", nil)
+	patch, stat, err := GeneratePatch(ctx, mgr.runtime, "stubworkflow", nil)
 	require.NoError(t, err)
 	assert.NotEmpty(t, patch)
 	assert.Contains(t, stat, "agent-output.txt")

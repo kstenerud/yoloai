@@ -3,6 +3,7 @@ package sandbox
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -401,8 +402,13 @@ func setupWorkdir(sandboxName string, workdir *DirArg, rt runtime.Runtime) (stri
 		if _, ok := rt.(runtime.WorkDirSetup); ok {
 			// Tart: baseline will be created in VM after container start.
 			// Return empty SHA to signal deferred baseline creation.
+			slog.Debug("setupWorkdir: runtime implements WorkDirSetup, deferring baseline to VM",
+				"backend", rt.Name())
 			baselineSHA = ""
 		} else {
+			slog.Debug("setupWorkdir: runtime does NOT implement WorkDirSetup, creating baseline on host",
+				"backend", rt.Name())
+
 			// Docker: preserve original git history so the agent (and user) can
 			// git log, git show, git blame, etc. inside the sandbox.
 			// If the source was a git repo with commits, just record HEAD as baseline.

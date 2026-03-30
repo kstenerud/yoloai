@@ -39,3 +39,33 @@ func RunCmdExec(cmd *exec.Cmd) (ExecResult, error) {
 
 	return result, nil
 }
+
+// RunCmdExecRaw is like RunCmdExec but preserves exact stdout/stderr without
+// trimming whitespace. Use this for commands (like git diff) whose output is
+// whitespace-sensitive.
+func RunCmdExecRaw(cmd *exec.Cmd) (ExecResult, error) {
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	err := cmd.Run()
+	exitCode := 0
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok { //nolint:errorlint // ExitError is concrete type
+			exitCode = exitErr.ExitCode()
+		} else {
+			return ExecResult{}, fmt.Errorf("exec: %w", err)
+		}
+	}
+
+	result := ExecResult{
+		Stdout:   stdout.String(),
+		ExitCode: exitCode,
+	}
+
+	if exitCode != 0 {
+		return result, fmt.Errorf("exec exited with code %d: %s", exitCode, stderr.String())
+	}
+
+	return result, nil
+}

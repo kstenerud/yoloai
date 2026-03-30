@@ -322,7 +322,8 @@ func (r *Runtime) GitExec(ctx context.Context, name, workDir string, args ...str
 		}
 		return "", fmt.Errorf("git %v: %w", args, err)
 	}
-	return strings.TrimSpace(string(output)), nil
+	// Don't trim output - git patches are whitespace-sensitive
+	return string(output), nil
 }
 
 // InteractiveExec runs an interactive command inside a Docker container

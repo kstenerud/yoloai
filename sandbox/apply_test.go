@@ -36,7 +36,8 @@ func TestGeneratePatch_CopyMode(t *testing.T) {
 	workDir := createCopySandbox(t, tmpDir, "test-patch", "/tmp/project")
 	writeTestFile(t, workDir, "file.txt", "modified content\n")
 
-	patch, stat, err := GeneratePatch("test-patch", nil)
+	rt := getTestRuntime(t)
+	patch, stat, err := GeneratePatch(context.Background(), rt, "test-patch", nil)
 	require.NoError(t, err)
 	assert.NotEmpty(t, patch)
 	assert.Contains(t, stat, "file.txt")
@@ -51,7 +52,8 @@ func TestGeneratePatch_RWMode_Error(t *testing.T) {
 	require.NoError(t, os.MkdirAll(hostDir, 0750))
 	createRWSandbox(t, tmpDir, "test-rw-patch", hostDir)
 
-	_, _, err := GeneratePatch("test-rw-patch", nil)
+	rt := getTestRuntime(t)
+	_, _, err := GeneratePatch(context.Background(), rt, "test-rw-patch", nil)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), ":rw directories")
 }
@@ -64,7 +66,8 @@ func TestGeneratePatch_PathFilter(t *testing.T) {
 	writeTestFile(t, workDir, "file.txt", "changed\n")
 	writeTestFile(t, workDir, "other.txt", "also changed\n")
 
-	patch, stat, err := GeneratePatch("test-patch-filter", []string{"file.txt"})
+	rt := getTestRuntime(t)
+	patch, stat, err := GeneratePatch(context.Background(), rt, "test-patch-filter", []string{"file.txt"})
 	require.NoError(t, err)
 	assert.NotEmpty(t, patch)
 	assert.Contains(t, stat, "file.txt")
@@ -78,7 +81,8 @@ func TestGeneratePatch_Empty(t *testing.T) {
 
 	createCopySandbox(t, tmpDir, "test-patch-empty", "/tmp/project")
 
-	patch, stat, err := GeneratePatch("test-patch-empty", nil)
+	rt := getTestRuntime(t)
+	patch, stat, err := GeneratePatch(context.Background(), rt, "test-patch-empty", nil)
 	require.NoError(t, err)
 	assert.Empty(t, patch)
 	assert.Empty(t, stat)
@@ -93,7 +97,8 @@ func TestApplyPatch_GitTarget(t *testing.T) {
 	workDir := createCopySandbox(t, tmpDir, "test-apply-git", "/tmp/project")
 	writeTestFile(t, workDir, "file.txt", "modified by agent\n")
 
-	patch, _, err := GeneratePatch("test-apply-git", nil)
+	rt := getTestRuntime(t)
+	patch, _, err := GeneratePatch(context.Background(), rt, "test-apply-git", nil)
 	require.NoError(t, err)
 
 	// Create target git repo with original content
@@ -118,7 +123,8 @@ func TestApplyPatch_NonGitTarget(t *testing.T) {
 	workDir := createCopySandbox(t, tmpDir, "test-apply-nongit", "/tmp/project")
 	writeTestFile(t, workDir, "file.txt", "modified by agent\n")
 
-	patch, _, err := GeneratePatch("test-apply-nongit", nil)
+	rt := getTestRuntime(t)
+	patch, _, err := GeneratePatch(context.Background(), rt, "test-apply-nongit", nil)
 	require.NoError(t, err)
 
 	// Create target dir (no git) with original content
@@ -140,7 +146,8 @@ func TestApplyPatch_NewFile(t *testing.T) {
 	workDir := createCopySandbox(t, tmpDir, "test-apply-new", "/tmp/project")
 	writeTestFile(t, workDir, "created.txt", "brand new file\n")
 
-	patch, _, err := GeneratePatch("test-apply-new", nil)
+	rt := getTestRuntime(t)
+	patch, _, err := GeneratePatch(context.Background(), rt, "test-apply-new", nil)
 	require.NoError(t, err)
 
 	// Target has original file but not the new one
@@ -191,7 +198,8 @@ func TestApplyPatch_DeleteFile(t *testing.T) {
 	// Delete the file in work copy
 	require.NoError(t, os.Remove(filepath.Join(workDir, "remove.txt")))
 
-	patch, _, err := GeneratePatch(name, nil)
+	rt := getTestRuntime(t)
+	patch, _, err := GeneratePatch(context.Background(), rt, name, nil)
 	require.NoError(t, err)
 
 	// Target has both files
@@ -218,7 +226,8 @@ func TestCheckPatch_Conflict(t *testing.T) {
 	workDir := createCopySandbox(t, tmpDir, "test-conflict", "/tmp/project")
 	writeTestFile(t, workDir, "file.txt", "agent version\n")
 
-	patch, _, err := GeneratePatch("test-conflict", nil)
+	rt := getTestRuntime(t)
+	patch, _, err := GeneratePatch(context.Background(), rt, "test-conflict", nil)
 	require.NoError(t, err)
 
 	// Target has different content than what patch expects
@@ -240,7 +249,8 @@ func TestCheckPatch_Clean(t *testing.T) {
 	workDir := createCopySandbox(t, tmpDir, "test-clean", "/tmp/project")
 	writeTestFile(t, workDir, "file.txt", "modified\n")
 
-	patch, _, err := GeneratePatch("test-clean", nil)
+	rt := getTestRuntime(t)
+	patch, _, err := GeneratePatch(context.Background(), rt, "test-clean", nil)
 	require.NoError(t, err)
 
 	// Target matches original
@@ -353,7 +363,8 @@ func TestHasUncommittedChanges_Clean(t *testing.T) {
 
 	createCopySandbox(t, tmpDir, "test-wip-clean", "/tmp/project")
 
-	has, err := HasUncommittedChanges("test-wip-clean")
+	rt := getTestRuntime(t)
+	has, err := HasUncommittedChanges(context.Background(), rt, "test-wip-clean")
 	require.NoError(t, err)
 	assert.False(t, has)
 }
@@ -365,7 +376,8 @@ func TestHasUncommittedChanges_Modified(t *testing.T) {
 	workDir := createCopySandbox(t, tmpDir, "test-wip-mod", "/tmp/project")
 	writeTestFile(t, workDir, "file.txt", "modified\n")
 
-	has, err := HasUncommittedChanges("test-wip-mod")
+	rt := getTestRuntime(t)
+	has, err := HasUncommittedChanges(context.Background(), rt, "test-wip-mod")
 	require.NoError(t, err)
 	assert.True(t, has)
 }
@@ -377,7 +389,8 @@ func TestHasUncommittedChanges_NewFile(t *testing.T) {
 	workDir := createCopySandbox(t, tmpDir, "test-wip-new", "/tmp/project")
 	writeTestFile(t, workDir, "brand-new.txt", "new file\n")
 
-	has, err := HasUncommittedChanges("test-wip-new")
+	rt := getTestRuntime(t)
+	has, err := HasUncommittedChanges(context.Background(), rt, "test-wip-new")
 	require.NoError(t, err)
 	assert.True(t, has)
 }
@@ -394,7 +407,8 @@ func TestHasUncommittedChanges_OnlyCommits(t *testing.T) {
 		{"add stuff", "new.txt", "committed\n"},
 	})
 
-	has, err := HasUncommittedChanges("test-wip-committed")
+	rt := getTestRuntime(t)
+	has, err := HasUncommittedChanges(context.Background(), rt, "test-wip-committed")
 	require.NoError(t, err)
 	assert.False(t, has)
 }
@@ -413,7 +427,8 @@ func TestGenerateFormatPatch_Single(t *testing.T) {
 		{"add feature", "feature.txt", "feature\n"},
 	})
 
-	patchDir, files, err := GenerateFormatPatch("test-fp-one", nil)
+	rt := getTestRuntime(t)
+	patchDir, files, err := GenerateFormatPatch(context.Background(), rt, "test-fp-one", nil)
 	require.NoError(t, err)
 	defer os.RemoveAll(patchDir) //nolint:errcheck
 
@@ -440,7 +455,8 @@ func TestGenerateFormatPatch_Multiple(t *testing.T) {
 		{"third", "c.txt", "c\n"},
 	})
 
-	patchDir, files, err := GenerateFormatPatch("test-fp-multi", nil)
+	rt := getTestRuntime(t)
+	patchDir, files, err := GenerateFormatPatch(context.Background(), rt, "test-fp-multi", nil)
 	require.NoError(t, err)
 	defer os.RemoveAll(patchDir) //nolint:errcheck
 
@@ -459,7 +475,8 @@ func TestGenerateFormatPatch_NoCommits(t *testing.T) {
 
 	createCopySandbox(t, tmpDir, "test-fp-empty", "/tmp/project")
 
-	patchDir, files, err := GenerateFormatPatch("test-fp-empty", nil)
+	rt := getTestRuntime(t)
+	patchDir, files, err := GenerateFormatPatch(context.Background(), rt, "test-fp-empty", nil)
 	require.NoError(t, err)
 	defer os.RemoveAll(patchDir) //nolint:errcheck
 
@@ -479,7 +496,8 @@ func TestGenerateFormatPatch_PathFilter(t *testing.T) {
 		{"change b", "b.txt", "b content\n"},
 	})
 
-	patchDir, files, err := GenerateFormatPatch("test-fp-filter", []string{"a.txt"})
+	rt := getTestRuntime(t)
+	patchDir, files, err := GenerateFormatPatch(context.Background(), rt, "test-fp-filter", []string{"a.txt"})
 	require.NoError(t, err)
 	defer os.RemoveAll(patchDir) //nolint:errcheck
 
@@ -496,7 +514,8 @@ func TestGenerateWIPDiff_NoChanges(t *testing.T) {
 
 	createCopySandbox(t, tmpDir, "test-wip-diff-none", "/tmp/project")
 
-	patch, stat, err := GenerateWIPDiff("test-wip-diff-none", nil)
+	rt := getTestRuntime(t)
+	patch, stat, err := GenerateWIPDiff(context.Background(), rt, "test-wip-diff-none", nil)
 	require.NoError(t, err)
 	assert.Empty(t, patch)
 	assert.Empty(t, stat)
@@ -517,7 +536,8 @@ func TestGenerateWIPDiff_Modified(t *testing.T) {
 	// Add uncommitted changes on top
 	writeTestFile(t, workDir, "wip.txt", "work in progress\n")
 
-	patch, stat, err := GenerateWIPDiff("test-wip-diff-mod", nil)
+	rt := getTestRuntime(t)
+	patch, stat, err := GenerateWIPDiff(context.Background(), rt, "test-wip-diff-mod", nil)
 	require.NoError(t, err)
 	assert.NotEmpty(t, patch)
 	assert.Contains(t, stat, "wip.txt")
@@ -534,7 +554,8 @@ func TestGenerateWIPDiff_PathFilter(t *testing.T) {
 	writeTestFile(t, workDir, "file.txt", "changed\n")
 	writeTestFile(t, workDir, "other.txt", "also changed\n")
 
-	patch, stat, err := GenerateWIPDiff("test-wip-diff-filter", []string{"file.txt"})
+	rt := getTestRuntime(t)
+	patch, stat, err := GenerateWIPDiff(context.Background(), rt, "test-wip-diff-filter", []string{"file.txt"})
 	require.NoError(t, err)
 	assert.NotEmpty(t, patch)
 	assert.Contains(t, stat, "file.txt")
@@ -555,7 +576,8 @@ func TestApplyFormatPatch_Single(t *testing.T) {
 		{"add feature", "feature.txt", "feature content\n"},
 	})
 
-	patchDir, files, err := GenerateFormatPatch("test-am-one", nil)
+	rt := getTestRuntime(t)
+	patchDir, files, err := GenerateFormatPatch(context.Background(), rt, "test-am-one", nil)
 	require.NoError(t, err)
 	defer os.RemoveAll(patchDir) //nolint:errcheck
 
@@ -588,7 +610,8 @@ func TestApplyFormatPatch_Multiple(t *testing.T) {
 		{"second commit", "b.txt", "b\n"},
 	})
 
-	patchDir, files, err := GenerateFormatPatch("test-am-multi", nil)
+	rt := getTestRuntime(t)
+	patchDir, files, err := GenerateFormatPatch(context.Background(), rt, "test-am-multi", nil)
 	require.NoError(t, err)
 	defer os.RemoveAll(patchDir) //nolint:errcheck
 
@@ -626,7 +649,8 @@ func TestApplyFormatPatch_Conflict(t *testing.T) {
 		{"modify file", "file.txt", "agent version of file\n"},
 	})
 
-	patchDir, files, err := GenerateFormatPatch("test-am-conflict", nil)
+	rt := getTestRuntime(t)
+	patchDir, files, err := GenerateFormatPatch(context.Background(), rt, "test-am-conflict", nil)
 	require.NoError(t, err)
 	defer os.RemoveAll(patchDir) //nolint:errcheck
 
@@ -656,7 +680,8 @@ func TestApplyFormatPatch_PreservesAuthorship(t *testing.T) {
 		{"my commit message", "new.txt", "new content\n"},
 	})
 
-	patchDir, files, err := GenerateFormatPatch("test-am-author", nil)
+	rt := getTestRuntime(t)
+	patchDir, files, err := GenerateFormatPatch(context.Background(), rt, "test-am-author", nil)
 	require.NoError(t, err)
 	defer os.RemoveAll(patchDir) //nolint:errcheck
 
@@ -700,7 +725,7 @@ func TestAdvanceBaseline_UpdatesMeta(t *testing.T) {
 	require.Len(t, commits, 1)
 
 	// Advance baseline
-	require.NoError(t, AdvanceBaseline(name))
+	require.NoError(t, AdvanceBaseline(context.Background(), rt, name))
 
 	// After: no commits beyond baseline
 	commits, err = ListCommitsBeyondBaseline(context.Background(), rt, name)
@@ -729,15 +754,16 @@ func TestAdvanceBaseline_DiffEmptyAfterAdvance(t *testing.T) {
 	})
 
 	// Before: diff is non-empty
-	patch, _, err := GeneratePatch(name, nil)
+	rt := getTestRuntime(t)
+	patch, _, err := GeneratePatch(context.Background(), rt, name, nil)
 	require.NoError(t, err)
 	assert.NotEmpty(t, patch)
 
 	// Advance baseline
-	require.NoError(t, AdvanceBaseline(name))
+	require.NoError(t, AdvanceBaseline(context.Background(), rt, name))
 
 	// After: diff is empty
-	patch, stat, err := GeneratePatch(name, nil)
+	patch, stat, err := GeneratePatch(context.Background(), rt, name, nil)
 	require.NoError(t, err)
 	assert.Empty(t, patch)
 	assert.Empty(t, stat)
@@ -752,7 +778,8 @@ func TestAdvanceBaseline_RWNoop(t *testing.T) {
 	createRWSandbox(t, tmpDir, "test-advance-rw", hostDir)
 
 	// Should return nil (no-op)
-	assert.NoError(t, AdvanceBaseline("test-advance-rw"))
+	rt := getTestRuntime(t)
+	assert.NoError(t, AdvanceBaseline(context.Background(), rt, "test-advance-rw"))
 }
 
 func TestAdvanceBaseline_NewCommitsStillVisible(t *testing.T) {
@@ -769,7 +796,8 @@ func TestAdvanceBaseline_NewCommitsStillVisible(t *testing.T) {
 	})
 
 	// Advance baseline past old commit
-	require.NoError(t, AdvanceBaseline(name))
+	rt := getTestRuntime(t)
+	require.NoError(t, AdvanceBaseline(context.Background(), rt, name))
 
 	// Add a new commit after advancing
 	writeTestFile(t, workDir, "new.txt", "new\n")
@@ -777,7 +805,6 @@ func TestAdvanceBaseline_NewCommitsStillVisible(t *testing.T) {
 	gitCommit(t, workDir, "new commit")
 
 	// Only new commit should be visible
-	rt := getTestRuntime(t)
 	commits, err := ListCommitsBeyondBaseline(context.Background(), rt, name)
 	require.NoError(t, err)
 	require.Len(t, commits, 1)
@@ -996,7 +1023,7 @@ func TestGenerateFormatPatchForRefs_Single(t *testing.T) {
 	require.Len(t, commits, 2)
 
 	// Only generate patch for the second commit
-	patchDir, files, err := GenerateFormatPatchForRefs("test-fpref-single", []string{commits[1].SHA}, nil)
+	patchDir, files, err := GenerateFormatPatchForRefs(context.Background(), rt, "test-fpref-single", []string{commits[1].SHA}, nil)
 	require.NoError(t, err)
 	defer os.RemoveAll(patchDir) //nolint:errcheck
 
@@ -1025,7 +1052,7 @@ func TestGenerateFormatPatchForRefs_Multiple(t *testing.T) {
 	require.Len(t, commits, 3)
 
 	// Only generate patches for first and third
-	patchDir, files, err := GenerateFormatPatchForRefs("test-fpref-multi", []string{commits[0].SHA, commits[2].SHA}, nil)
+	patchDir, files, err := GenerateFormatPatchForRefs(context.Background(), rt, "test-fpref-multi", []string{commits[0].SHA, commits[2].SHA}, nil)
 	require.NoError(t, err)
 	defer os.RemoveAll(patchDir) //nolint:errcheck
 
@@ -1098,7 +1125,7 @@ func TestSelectiveApplyFlow(t *testing.T) {
 
 	// Generate patches for selected commits
 	shas := []string{resolved[0].SHA, resolved[1].SHA}
-	patchDir, files, err := GenerateFormatPatchForRefs(name, shas, nil)
+	patchDir, files, err := GenerateFormatPatchForRefs(context.Background(), rt, name, shas, nil)
 	require.NoError(t, err)
 	defer os.RemoveAll(patchDir) //nolint:errcheck
 
@@ -1158,12 +1185,12 @@ func TestApplyFlow_CommitsOnly(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, commits, 2)
 
-	hasWIP, err := HasUncommittedChanges("test-flow-commits")
+	hasWIP, err := HasUncommittedChanges(context.Background(), rt, "test-flow-commits")
 	require.NoError(t, err)
 	assert.False(t, hasWIP)
 
 	// Generate and apply
-	patchDir, files, err := GenerateFormatPatch("test-flow-commits", nil)
+	patchDir, files, err := GenerateFormatPatch(context.Background(), rt, "test-flow-commits", nil)
 	require.NoError(t, err)
 	defer os.RemoveAll(patchDir) //nolint:errcheck
 
@@ -1210,12 +1237,12 @@ func TestApplyFlow_CommitsAndWIP(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, commits, 1)
 
-	hasWIP, err := HasUncommittedChanges("test-flow-both")
+	hasWIP, err := HasUncommittedChanges(context.Background(), rt, "test-flow-both")
 	require.NoError(t, err)
 	assert.True(t, hasWIP)
 
 	// Apply commits first
-	patchDir, files, err := GenerateFormatPatch("test-flow-both", nil)
+	patchDir, files, err := GenerateFormatPatch(context.Background(), rt, "test-flow-both", nil)
 	require.NoError(t, err)
 	defer os.RemoveAll(patchDir) //nolint:errcheck
 
@@ -1230,7 +1257,7 @@ func TestApplyFlow_CommitsAndWIP(t *testing.T) {
 	require.NoError(t, err)
 
 	// Then apply WIP
-	wipPatch, _, err := GenerateWIPDiff("test-flow-both", nil)
+	wipPatch, _, err := GenerateWIPDiff(context.Background(), rt, "test-flow-both", nil)
 	require.NoError(t, err)
 	require.NotEmpty(t, wipPatch)
 
@@ -1257,12 +1284,12 @@ func TestApplyFlow_WIPOnly(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, commits)
 
-	hasWIP, err := HasUncommittedChanges("test-flow-wip")
+	hasWIP, err := HasUncommittedChanges(context.Background(), rt, "test-flow-wip")
 	require.NoError(t, err)
 	assert.True(t, hasWIP)
 
 	// Falls back to squash path — use GeneratePatch
-	patch, stat, err := GeneratePatch("test-flow-wip", nil)
+	patch, stat, err := GeneratePatch(context.Background(), rt, "test-flow-wip", nil)
 	require.NoError(t, err)
 	assert.NotEmpty(t, patch)
 	assert.Contains(t, stat, "file.txt")
@@ -1296,7 +1323,8 @@ func TestApplyFlow_NonGitFallback(t *testing.T) {
 	// Non-git target → must fall back to squash
 	// The CLI does this, but we test the underlying primitives:
 	// GeneratePatch works for squash fallback
-	patch, stat, err := GeneratePatch("test-flow-nongit", nil)
+	rt := getTestRuntime(t)
+	patch, stat, err := GeneratePatch(context.Background(), rt, "test-flow-nongit", nil)
 	require.NoError(t, err)
 	assert.NotEmpty(t, patch)
 	assert.Contains(t, stat, "feature.txt")

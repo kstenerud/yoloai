@@ -119,7 +119,11 @@ Use --patches to export .patch files without applying them.`,
 
 			var hasWIP bool
 			if !noWIP {
-				hasWIP, err = sandbox.HasUncommittedChanges(name)
+				err = withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
+					var wipErr error
+					hasWIP, wipErr = sandbox.HasUncommittedChanges(ctx, rt, name)
+					return wipErr
+				})
 				if err != nil {
 					return err
 				}
@@ -257,7 +261,13 @@ Use --patches to export .patch files without applying them.`,
 			}
 
 			// Apply commits via format-patch/am
-			patchDir, files, err := sandbox.GenerateFormatPatch(name, paths)
+			var patchDir string
+			var files []string
+			err = withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
+				var genErr error
+				patchDir, files, genErr = sandbox.GenerateFormatPatch(ctx, rt, name, paths)
+				return genErr
+			})
 			if err != nil {
 				return err
 			}
@@ -278,7 +288,10 @@ Use --patches to export .patch files without applying them.`,
 
 			// Advance baseline past applied commits (skip for path-filtered applies)
 			if len(paths) == 0 {
-				if err := sandbox.AdvanceBaseline(name); err != nil {
+				err = withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
+					return sandbox.AdvanceBaseline(ctx, rt, name)
+				})
+				if err != nil {
 					return fmt.Errorf("advance baseline: %w", err)
 				}
 			}
@@ -286,7 +299,12 @@ Use --patches to export .patch files without applying them.`,
 			// Apply WIP changes
 			wipApplied := false
 			if hasWIP {
-				wipPatch, _, wipErr := sandbox.GenerateWIPDiff(name, paths)
+				var wipPatch []byte
+				wipErr := withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
+					var genErr error
+					wipPatch, _, genErr = sandbox.GenerateWIPDiff(ctx, rt, name, paths)
+					return genErr
+				})
 				if wipErr != nil {
 					if !jsonEnabled(cmd) {
 						fmt.Fprintf(cmd.ErrOrStderr(), "Warning: failed to generate WIP diff: %v\n", wipErr) //nolint:errcheck
@@ -604,7 +622,14 @@ func applySelectedCommits(cmd *cobra.Command, name string, refs, paths []string,
 		shas[i] = c.SHA
 	}
 
-	patchDir, files, err := sandbox.GenerateFormatPatchForRefs(name, shas, paths)
+	backend = resolveBackendForSandbox(name)
+	var patchDir string
+	var files []string
+	err = withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
+		var genErr error
+		patchDir, files, genErr = sandbox.GenerateFormatPatchForRefs(ctx, rt, name, shas, paths)
+		return genErr
+	})
 	if err != nil {
 		return err
 	}
@@ -677,7 +702,14 @@ func applySquash(cmd *cobra.Command, name string, paths []string, meta *sandbox.
 		})
 	}
 
-	patch, stat, err := sandbox.GeneratePatch(name, paths)
+	var patch []byte
+	var stat string
+	backend := resolveBackendForSandbox(name)
+	err := withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
+		var genErr error
+		patch, stat, genErr = sandbox.GeneratePatch(ctx, rt, name, paths)
+		return genErr
+	})
 	if err != nil {
 		return err
 	}
@@ -727,7 +759,11 @@ func applySquash(cmd *cobra.Command, name string, paths []string, meta *sandbox.
 
 	// Advance baseline past applied changes (skip for path-filtered applies)
 	if len(paths) == 0 {
-		if err := sandbox.AdvanceBaseline(name); err != nil {
+		backend := resolveBackendForSandbox(name)
+		err := withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
+			return sandbox.AdvanceBaseline(ctx, rt, name)
+		})
+		if err != nil {
 			return fmt.Errorf("advance baseline: %w", err)
 		}
 	}
@@ -802,7 +838,7 @@ func applySquashMulti(cmd *cobra.Command, ctx context.Context, rt runtime.Runtim
 
 	// Advance baseline for workdir
 	if len(paths) == 0 {
-		if err := sandbox.AdvanceBaseline(name); err != nil {
+		if err := sandbox.AdvanceBaseline(ctx, rt, name); err != nil {
 			return fmt.Errorf("advance baseline: %w", err)
 		}
 	}
@@ -828,7 +864,14 @@ func exportPatches(cmd *cobra.Command, name string, paths []string, commits []sa
 	out := cmd.OutOrStdout()
 
 	if len(commits) > 0 {
-		patchDir, files, err := sandbox.GenerateFormatPatch(name, paths)
+		backend := resolveBackendForSandbox(name)
+		var patchDir string
+		var files []string
+		err := withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
+			var genErr error
+			patchDir, files, genErr = sandbox.GenerateFormatPatch(ctx, rt, name, paths)
+			return genErr
+		})
 		if err != nil {
 			return err
 		}
@@ -851,7 +894,13 @@ func exportPatches(cmd *cobra.Command, name string, paths []string, commits []sa
 	}
 
 	if hasWIP {
-		wipPatch, _, err := sandbox.GenerateWIPDiff(name, paths)
+		backend := resolveBackendForSandbox(name)
+		var wipPatch []byte
+		err := withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
+			var genErr error
+			wipPatch, _, genErr = sandbox.GenerateWIPDiff(ctx, rt, name, paths)
+			return genErr
+		})
 		if err != nil {
 			return err
 		}

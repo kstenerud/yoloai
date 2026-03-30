@@ -153,7 +153,7 @@ func TestIntegrationTart_FullLifecycle(t *testing.T) {
 	assert.Contains(t, result.Stdout, "main.go", "changes should persist in VM local storage")
 
 	// Generate patch and apply to a target directory
-	patch, stat, err := GeneratePatch(sandboxName, nil)
+	patch, stat, err := GeneratePatch(ctx, mgr.runtime, sandboxName, nil)
 	require.NoError(t, err)
 	assert.NotEmpty(t, patch)
 	assert.Contains(t, stat, "main.go")

@@ -56,7 +56,7 @@ func ApplyAll(ctx context.Context, rt runtime.Runtime, name string) ([]*ApplyRes
 		})
 	}
 
-	if err := AdvanceBaseline(name); err != nil {
+	if err := AdvanceBaseline(ctx, rt, name); err != nil {
 		return nil, fmt.Errorf("advance baseline: %w", err)
 	}
 
@@ -72,7 +72,7 @@ type PatchSet = workspace.PatchSet
 // GeneratePatch produces a binary patch from the work copy against
 // the baseline SHA. Optionally filtered to specific paths.
 // Returns the patch bytes and a stat summary string.
-func GeneratePatch(name string, paths []string) (patch []byte, stat string, err error) {
+func GeneratePatch(ctx context.Context, rt runtime.Runtime, name string, paths []string) (patch []byte, stat string, err error) {
 	workDir, baselineSHA, mode, err := loadDiffContext(name)
 	if err != nil {
 		return nil, "", err
@@ -86,8 +86,10 @@ func GeneratePatch(name string, paths []string) (patch []byte, stat string, err 
 		return nil, "", fmt.Errorf("use GenerateOverlayPatch for :overlay directories")
 	}
 
-	if err := workspace.StageUntracked(workDir); err != nil {
-		return nil, "", err
+	// Stage untracked files
+	_, err = rt.GitExec(ctx, name, workDir, "add", "-A")
+	if err != nil {
+		return nil, "", fmt.Errorf("git add: %w", err)
 	}
 
 	// Generate binary patch
@@ -97,8 +99,7 @@ func GeneratePatch(name string, paths []string) (patch []byte, stat string, err 
 		patchArgs = append(patchArgs, paths...)
 	}
 
-	patchCmd := workspace.NewGitCmd(workDir, patchArgs...)
-	patchOut, err := patchCmd.Output()
+	patchOut, err := rt.GitExec(ctx, name, workDir, patchArgs...)
 	if err != nil {
 		return nil, "", fmt.Errorf("git diff (patch): %w", err)
 	}
@@ -110,13 +111,12 @@ func GeneratePatch(name string, paths []string) (patch []byte, stat string, err 
 		statArgs = append(statArgs, paths...)
 	}
 
-	statCmd := workspace.NewGitCmd(workDir, statArgs...)
-	statOut, err := statCmd.Output()
+	statOut, err := rt.GitExec(ctx, name, workDir, statArgs...)
 	if err != nil {
 		return nil, "", fmt.Errorf("git diff (stat): %w", err)
 	}
 
-	return patchOut, strings.TrimRight(string(statOut), "\n"), nil
+	return []byte(patchOut), strings.TrimRight(statOut, "\n"), nil
 }
 
 // updateOverlayBaseline updates the baseline SHA for an overlay directory in meta.json.
@@ -303,7 +303,7 @@ func ListCommitsBeyondBaseline(ctx context.Context, rt runtime.Runtime, name str
 
 // HasUncommittedChanges checks whether the work copy has uncommitted
 // changes (staged or unstaged, including untracked files).
-func HasUncommittedChanges(name string) (bool, error) {
+func HasUncommittedChanges(ctx context.Context, rt runtime.Runtime, name string) (bool, error) {
 	workDir, _, mode, err := loadDiffContext(name)
 	if err != nil {
 		return false, err
@@ -317,19 +317,27 @@ func HasUncommittedChanges(name string) (bool, error) {
 		return false, fmt.Errorf("uncommitted-change check for :overlay directories requires container exec")
 	}
 
-	if err := workspace.StageUntracked(workDir); err != nil {
-		return false, err
+	// Stage untracked files
+	_, err = rt.GitExec(ctx, name, workDir, "add", "-A")
+	if err != nil {
+		return false, fmt.Errorf("git add: %w", err)
 	}
 
-	cmd := workspace.NewGitCmd(workDir, "diff", "--quiet", "HEAD")
-	err = cmd.Run()
+	_, err = rt.GitExec(ctx, name, workDir, "diff", "--quiet", "HEAD")
 	if err == nil {
 		return false, nil // exit 0 = clean
 	}
 
-	// git diff --quiet exits 1 when there are differences
+	// git diff --quiet exits 1 when there are differences.
+	// For direct exec.Cmd, check for *exec.ExitError.
 	var exitErr *exec.ExitError
 	if ok := errors.As(err, &exitErr); ok && exitErr.ExitCode() == 1 {
+		return true, nil
+	}
+
+	// For runtime.RunCmdExec (used by Tart and other backends),
+	// check for the "exec exited with code 1" error message.
+	if strings.Contains(err.Error(), "exec exited with code 1") {
 		return true, nil
 	}
 
@@ -440,7 +448,7 @@ func ResolveRefs(ctx context.Context, rt runtime.Runtime, name string, refs []st
 // within the sandbox work copy. When paths is non-empty, patches are filtered
 // to only include changes in those paths. Returns the temp directory and sorted
 // file list. The caller is responsible for os.RemoveAll(patchDir).
-func GenerateFormatPatchForRefs(name string, shas, paths []string) (patchDir string, files []string, err error) {
+func GenerateFormatPatchForRefs(ctx context.Context, rt runtime.Runtime, name string, shas, paths []string) (patchDir string, files []string, err error) {
 	workDir, _, mode, loadErr := loadDiffContext(name)
 	if loadErr != nil {
 		return "", nil, loadErr
@@ -465,10 +473,10 @@ func GenerateFormatPatchForRefs(name string, shas, paths []string) (patchDir str
 			args = append(args, "--")
 			args = append(args, paths...)
 		}
-		cmd := workspace.NewGitCmd(workDir, args...)
-		if output, runErr := cmd.CombinedOutput(); runErr != nil {
+		_, runErr := rt.GitExec(ctx, name, workDir, args...)
+		if runErr != nil {
 			os.RemoveAll(patchDir) //nolint:errcheck,gosec // best-effort cleanup
-			return "", nil, fmt.Errorf("git format-patch -1 %s: %s: %w", sha, strings.TrimSpace(string(output)), runErr)
+			return "", nil, fmt.Errorf("git format-patch -1 %s: %w", sha, runErr)
 		}
 	}
 
@@ -519,7 +527,7 @@ func AdvanceBaselineTo(name, sha string) error {
 // of its work copy. This should be called after a successful apply so that
 // subsequent diff/apply operations don't re-show already-applied commits.
 // For :rw mode sandboxes, this is a no-op.
-func AdvanceBaseline(name string) error {
+func AdvanceBaseline(ctx context.Context, rt runtime.Runtime, name string) error {
 	sandboxDir, err := RequireSandboxDir(name)
 	if err != nil {
 		return err
@@ -539,12 +547,12 @@ func AdvanceBaseline(name string) error {
 	}
 
 	workDir := WorkDir(name, meta.Workdir.HostPath)
-	sha, err := workspace.HeadSHA(workDir)
+	sha, err := rt.GitExec(ctx, name, workDir, "rev-parse", "HEAD")
 	if err != nil {
-		return err
+		return fmt.Errorf("git rev-parse: %w", err)
 	}
 
-	meta.Workdir.BaselineSHA = sha
+	meta.Workdir.BaselineSHA = strings.TrimSpace(sha)
 	return SaveMeta(sandboxDir, meta)
 }
 
@@ -552,7 +560,7 @@ func AdvanceBaseline(name string) error {
 // beyond the baseline. Returns the temp directory path and sorted list
 // of .patch filenames. The caller is responsible for os.RemoveAll(patchDir).
 // When paths is non-empty, only commits touching those paths are included.
-func GenerateFormatPatch(name string, paths []string) (patchDir string, files []string, err error) {
+func GenerateFormatPatch(ctx context.Context, rt runtime.Runtime, name string, paths []string) (patchDir string, files []string, err error) {
 	workDir, baselineSHA, mode, loadErr := loadDiffContext(name)
 	if loadErr != nil {
 		return "", nil, loadErr
@@ -573,28 +581,28 @@ func GenerateFormatPatch(name string, paths []string) (patchDir string, files []
 
 	if len(paths) == 0 {
 		// All commits
-		cmd := workspace.NewGitCmd(workDir, "format-patch", "--output-directory="+patchDir, baselineSHA+"..HEAD")
-		if output, runErr := cmd.CombinedOutput(); runErr != nil {
+		output, runErr := rt.GitExec(ctx, name, workDir, "format-patch", "--output-directory="+patchDir, baselineSHA+"..HEAD")
+		if runErr != nil {
 			os.RemoveAll(patchDir) //nolint:errcheck,gosec // best-effort cleanup
-			return "", nil, fmt.Errorf("git format-patch: %s: %w", strings.TrimSpace(string(output)), runErr)
+			return "", nil, fmt.Errorf("git format-patch: %w", runErr)
 		}
+		_ = output // format-patch writes to files, not stdout
 	} else {
 		// Only commits touching specified paths
 		revArgs := []string{"rev-list", "--reverse", baselineSHA + "..HEAD", "--"}
 		revArgs = append(revArgs, paths...)
-		revCmd := workspace.NewGitCmd(workDir, revArgs...)
-		revOut, revErr := revCmd.Output()
+		revOut, revErr := rt.GitExec(ctx, name, workDir, revArgs...)
 		if revErr != nil {
 			os.RemoveAll(patchDir) //nolint:errcheck,gosec // best-effort cleanup
 			return "", nil, fmt.Errorf("git rev-list: %w", revErr)
 		}
 
-		shas := strings.Fields(strings.TrimSpace(string(revOut)))
+		shas := strings.Fields(strings.TrimSpace(revOut))
 		for _, sha := range shas {
-			cmd := workspace.NewGitCmd(workDir, "format-patch", "-1", "--output-directory="+patchDir, sha)
-			if output, runErr := cmd.CombinedOutput(); runErr != nil {
+			_, runErr := rt.GitExec(ctx, name, workDir, "format-patch", "-1", "--output-directory="+patchDir, sha)
+			if runErr != nil {
 				os.RemoveAll(patchDir) //nolint:errcheck,gosec // best-effort cleanup
-				return "", nil, fmt.Errorf("git format-patch -1 %s: %s: %w", sha, strings.TrimSpace(string(output)), runErr)
+				return "", nil, fmt.Errorf("git format-patch -1 %s: %w", sha, runErr)
 			}
 		}
 	}
@@ -619,7 +627,7 @@ func GenerateFormatPatch(name string, paths []string) (patchDir string, files []
 // GenerateWIPDiff produces a binary patch of uncommitted changes (against
 // HEAD, not the baseline). This captures only work-in-progress changes
 // that the agent hasn't committed. Returns empty patch if no uncommitted changes.
-func GenerateWIPDiff(name string, paths []string) (patch []byte, stat string, err error) {
+func GenerateWIPDiff(ctx context.Context, rt runtime.Runtime, name string, paths []string) (patch []byte, stat string, err error) {
 	workDir, _, mode, loadErr := loadDiffContext(name)
 	if loadErr != nil {
 		return nil, "", loadErr
@@ -633,8 +641,10 @@ func GenerateWIPDiff(name string, paths []string) (patch []byte, stat string, er
 		return nil, "", fmt.Errorf("WIP diff for :overlay directories requires container exec")
 	}
 
-	if err := workspace.StageUntracked(workDir); err != nil {
-		return nil, "", err
+	// Stage untracked files
+	_, err = rt.GitExec(ctx, name, workDir, "add", "-A")
+	if err != nil {
+		return nil, "", fmt.Errorf("git add: %w", err)
 	}
 
 	// Generate binary patch against HEAD
@@ -644,13 +654,12 @@ func GenerateWIPDiff(name string, paths []string) (patch []byte, stat string, er
 		patchArgs = append(patchArgs, paths...)
 	}
 
-	patchCmd := workspace.NewGitCmd(workDir, patchArgs...)
-	patchOut, err := patchCmd.Output()
+	patchOut, err := rt.GitExec(ctx, name, workDir, patchArgs...)
 	if err != nil {
 		return nil, "", fmt.Errorf("git diff (WIP patch): %w", err)
 	}
 
-	if len(patchOut) == 0 {
+	if patchOut == "" {
 		return nil, "", nil
 	}
 
@@ -661,13 +670,12 @@ func GenerateWIPDiff(name string, paths []string) (patch []byte, stat string, er
 		statArgs = append(statArgs, paths...)
 	}
 
-	statCmd := workspace.NewGitCmd(workDir, statArgs...)
-	statOut, err := statCmd.Output()
+	statOut, err := rt.GitExec(ctx, name, workDir, statArgs...)
 	if err != nil {
 		return nil, "", fmt.Errorf("git diff (WIP stat): %w", err)
 	}
 
-	return patchOut, strings.TrimRight(string(statOut), "\n"), nil
+	return []byte(patchOut), strings.TrimRight(statOut, "\n"), nil
 }
 
 // GenerateMultiPatch produces patches for all :copy directories.

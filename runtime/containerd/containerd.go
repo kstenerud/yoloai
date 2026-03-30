@@ -254,7 +254,8 @@ func (r *Runtime) GitExec(ctx context.Context, _ string, workDir string, args ..
 		}
 		return "", fmt.Errorf("git %v: %w", args, err)
 	}
-	return strings.TrimSpace(string(output)), nil
+	// Don't trim output - git patches are whitespace-sensitive
+	return string(output), nil
 }
 
 // isWSL2 returns true if running inside a WSL2 environment.
