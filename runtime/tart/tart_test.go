@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/kstenerud/yoloai/config"
 	"github.com/kstenerud/yoloai/runtime"
 )
 
@@ -544,6 +545,57 @@ func TestResolveCopyMount(t *testing.T) {
 			assert.Equal(t, tc.expectPath, result)
 			// Verify it's under /Users/admin/yoloai-work/
 			assert.Contains(t, result, "/Users/admin/yoloai-work/", "should be under VM work directory")
+		})
+	}
+}
+
+// TestTranslateWorkDirToVMPath tests host-to-VM path translation for GitExec.
+func TestTranslateWorkDirToVMPath(t *testing.T) {
+	r := &Runtime{
+		sandboxDir: config.SandboxesDir(),
+	}
+
+	testCases := []struct {
+		name       string
+		input      string
+		expectPath string
+	}{
+		{
+			name:       "host sandbox work path",
+			input:      filepath.Join(config.SandboxesDir(), "mybox/work/^sUsers^skarl^sproject"),
+			expectPath: "/Users/admin/yoloai-work/^sUsers^skarl^sproject",
+		},
+		{
+			name:       "nested encoded path",
+			input:      filepath.Join(config.SandboxesDir(), "test/work/^svar^sfolders^sh8^sp75r4zq95d59q622q33pngzr0000gn^sT^syoloai-smoke-dvrjw0tc^sproject-workflow-tart"),
+			expectPath: "/Users/admin/yoloai-work/^svar^sfolders^sh8^sp75r4zq95d59q622q33pngzr0000gn^sT^syoloai-smoke-dvrjw0tc^sproject-workflow-tart",
+		},
+		{
+			name:       "already VM path",
+			input:      "/Users/admin/yoloai-work/^sUsers^skarl^sproject",
+			expectPath: "/Users/admin/yoloai-work/^sUsers^skarl^sproject",
+		},
+		{
+			name:       "non-sandbox path",
+			input:      "/some/other/path",
+			expectPath: "/some/other/path",
+		},
+		{
+			name:       "sandbox but not work dir",
+			input:      filepath.Join(config.SandboxesDir(), "mybox/files"),
+			expectPath: filepath.Join(config.SandboxesDir(), "mybox/files"),
+		},
+		{
+			name:       "deeply nested work subdir",
+			input:      filepath.Join(config.SandboxesDir(), "mybox/work/^sUsers^skarl^sproject/subdir/nested"),
+			expectPath: "/Users/admin/yoloai-work/^sUsers^skarl^sproject/subdir/nested",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			result := r.translateWorkDirToVMPath(tc.input)
+			assert.Equal(t, tc.expectPath, result)
 		})
 	}
 }

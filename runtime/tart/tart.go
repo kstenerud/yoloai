@@ -376,8 +376,51 @@ func (r *Runtime) Exec(ctx context.Context, name string, cmd []string, _ string)
 	return runtime.RunCmdExec(c)
 }
 
+// translateWorkDirToVMPath translates host sandbox work paths to VM paths.
+// Host path pattern: ~/.yoloai/sandboxes/<name>/work/<encoded>/
+// VM path pattern: /Users/admin/yoloai-work/<encoded>/
+// If workDir is already a VM path or not a sandbox work path, returns it unchanged.
+func (r *Runtime) translateWorkDirToVMPath(workDir string) string {
+	// Already a VM path — no translation needed
+	if strings.HasPrefix(workDir, "/Users/admin/yoloai-work/") {
+		return workDir
+	}
+
+	// Check if this is a host sandbox work path
+	// Pattern: ~/.yoloai/sandboxes/<name>/work/<encoded>
+	sandboxesDir := config.SandboxesDir()
+	// Normalize by resolving ~ if present
+	if strings.HasPrefix(workDir, "~/") {
+		home, _ := os.UserHomeDir()
+		workDir = filepath.Join(home, workDir[2:])
+	}
+
+	// Check if path starts with sandboxes dir
+	if !strings.HasPrefix(workDir, sandboxesDir+string(filepath.Separator)) {
+		return workDir // Not a sandbox work path
+	}
+
+	// Extract path components after sandboxes dir
+	// Pattern: <sandboxesDir>/<sandboxName>/work/<encodedPath>
+	relPath := strings.TrimPrefix(workDir, sandboxesDir+string(filepath.Separator))
+	parts := strings.Split(relPath, string(filepath.Separator))
+
+	// Need at least 3 parts: <sandboxName>/work/<encodedPath>
+	if len(parts) < 3 || parts[1] != "work" {
+		return workDir // Not a work directory
+	}
+
+	// Extract the encoded path (everything after "work/")
+	encodedPath := filepath.Join(parts[2:]...)
+
+	// Construct VM path
+	return filepath.Join("/Users/admin/yoloai-work", encodedPath)
+}
+
 // GitExec runs a git command inside the VM (Tart uses VM filesystem).
-// workDir is the path inside the VM where git should run.
+// workDir may be either a host path (~/.yoloai/sandboxes/<name>/work/<encoded>)
+// or a VM path (/Users/admin/yoloai-work/<encoded>). Host paths are translated
+// to VM paths automatically.
 // name may be a sandbox name or instance name; both are accepted.
 func (r *Runtime) GitExec(ctx context.Context, name, workDir string, args ...string) (string, error) {
 	// Callers in the sandbox package pass the sandbox name (e.g. "mybox").
@@ -387,8 +430,15 @@ func (r *Runtime) GitExec(ctx context.Context, name, workDir string, args ...str
 		return "", runtime.ErrNotRunning
 	}
 
+	// Translate host sandbox work paths to VM paths.
+	// Callers may pass either host paths (~/.yoloai/sandboxes/<name>/work/<encoded>)
+	// or VM paths (/Users/admin/yoloai-work/<encoded>).
+	// Other backends (Docker, Containerd) run git on the host, so they use host paths.
+	// Tart runs git inside the VM, so it needs VM paths.
+	actualWorkDir := r.translateWorkDirToVMPath(workDir)
+
 	// Build git command with -C workDir
-	gitArgs := append([]string{"-c", "core.hooksPath=/dev/null", "-C", workDir}, args...)
+	gitArgs := append([]string{"-c", "core.hooksPath=/dev/null", "-C", actualWorkDir}, args...)
 	cmd := append([]string{"git"}, gitArgs...)
 
 	result, err := r.Exec(ctx, vmName, cmd, "")
