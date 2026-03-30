@@ -690,13 +690,9 @@ def parse_args() -> argparse.Namespace:
 
 
 def find_yoloai() -> Optional[str]:
-    for candidate in [
-        shutil.which("yoloai"),
-        str(Path.home() / "bin" / "yoloai"),
-        "./yoloai",
-    ]:
-        if candidate and Path(candidate).is_file():
-            return candidate
+    # Smoke test must use the locally built binary from the repo
+    if Path("./yoloai").is_file():
+        return "./yoloai"
     return None
 
 

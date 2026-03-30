@@ -74,13 +74,13 @@ integration-podman: build
 
 ## smoketest: run end-to-end smoke tests, skipping tests for unavailable backends
 ## VM backends require root (CAP_SYS_ADMIN + write to /var/run/netns/).
-## Build first, then run as root: make build && sudo -E make smoketest
-smoketest:
+## Run as root: sudo -E make smoketest
+smoketest: build
 	python3 scripts/smoke_test.py --limited
 
 ## smoketest-full: run smoke tests, failing if any optional backend is unavailable
-## Build first, then run as root: make build && sudo -E make smoketest-full
-smoketest-full:
+## Run as root: sudo -E make smoketest-full
+smoketest-full: build
 	python3 scripts/smoke_test.py
 
 ## setcap: grant capabilities needed for VM backends (must re-run after each build)
