@@ -138,10 +138,16 @@ type Runtime interface {
 	// Exec runs a command inside a running instance and returns the result.
 	Exec(ctx context.Context, name string, cmd []string, user string) (ExecResult, error)
 
-	// GitExec runs a git command inside an instance or on the host, depending
-	// on the backend. workDir is the git working directory (container path for
-	// VMs, host path for Docker). Returns stdout on success.
-	// This abstracts away VM-vs-host implementation details for git operations.
+	// GitExec runs a git command for the given instance. The workDir parameter
+	// should be a host path (e.g., ~/.yoloai/sandboxes/<name>/work/<encoded>)
+	// as provided by the sandbox package helpers (copyGitWorkDir, WorkDir, etc.).
+	//
+	// Backends are responsible for translating paths to their execution context:
+	// - Docker/Podman/Seatbelt/Containerd: git runs on host, use workDir as-is
+	// - Tart: git runs inside VM, translates host paths to VM paths automatically
+	//
+	// Returns stdout on success. This abstraction allows callers to use host paths
+	// uniformly while backends handle their specific execution environments.
 	GitExec(ctx context.Context, name, workDir string, args ...string) (string, error)
 
 	// InteractiveExec runs a command interactively (with TTY) inside an instance.
