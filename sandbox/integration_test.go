@@ -575,6 +575,48 @@ func TestIntegration_DestroyCleanup(t *testing.T) {
 	assert.Equal(t, StatusRemoved, status)
 }
 
+// TestIntegration_NetworkIsolation verifies that network-isolated sandboxes block
+// outbound traffic. The isolation is enforced by iptables rules applied in
+// entrypoint.py; this test confirms those rules are actually in effect.
+func TestIntegration_NetworkIsolation(t *testing.T) {
+	mgr, ctx := integrationSetup(t)
+	projectDir := createProjectDir(t)
+
+	_, err := mgr.Create(ctx, CreateOptions{
+		Name:    "netisolated",
+		Workdir: DirSpec{Path: projectDir},
+		Agent:   "test",
+		Network: NetworkModeIsolated,
+		// No NetworkAllow entries — all outbound should be blocked.
+		Version: "test",
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { mgr.Destroy(ctx, "netisolated") }) //nolint:errcheck // test cleanup
+
+	testutil.WaitForActive(ctx, t, mgr.runtime, InstanceName("netisolated"), 15*time.Second)
+
+	// The entrypoint applies iptables rules before starting the agent, but
+	// WaitForActive only confirms the container process is running, not that
+	// the Python setup has completed. Give it a moment.
+	time.Sleep(2 * time.Second)
+
+	// curl to a well-known external IP should be blocked by the iptables REJECT rule.
+	// Exec returns a non-nil error when the command exits non-zero, so we discard
+	// the error and check ExitCode directly.
+	external, _ := mgr.runtime.Exec(ctx, InstanceName("netisolated"),
+		[]string{"curl", "-sf", "--max-time", "5", "https://1.1.1.1"}, "yoloai")
+	assert.NotEqual(t, 0, external.ExitCode,
+		"curl to external IP should be blocked by network isolation")
+
+	// Loopback must still be reachable — isolation must not block intra-container traffic.
+	// Nothing listens on 127.0.0.1:80, so curl gets "connection refused" (exit 7),
+	// which is distinct from an iptables timeout (exit 28). The point is that loopback
+	// traffic is not blocked by our rules.
+	lo, _ := mgr.runtime.Exec(ctx, InstanceName("netisolated"),
+		[]string{"curl", "-sf", "--max-time", "5", "http://127.0.0.1"}, "yoloai")
+	assert.NotEqual(t, 28, lo.ExitCode, "loopback should not time out (iptables must allow lo)")
+}
+
 // TestIntegration_AgentStubWorkflow tests the full agent-does-work → diff → apply pipeline.
 // It uses the "test" agent (bash), starts the container, execs a command inside
 // to simulate agent output, then verifies diff detects the change and apply lands

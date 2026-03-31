@@ -9,6 +9,34 @@ import (
 	yrt "github.com/kstenerud/yoloai/runtime"
 )
 
+// WaitForStatus polls statusFn until it returns want or timeout elapses.
+// Pass a closure that calls sandbox.DetectStatus (or any other status source)
+// rather than a Runtime directly — sandbox status is a higher-level concept
+// than runtime running/stopped state.
+//
+// Example:
+//
+//	testutil.WaitForStatus(ctx, t, func(ctx context.Context) (string, error) {
+//	    s, err := sandbox.DetectStatus(ctx, rt, sandbox.InstanceName(name), sandbox.Dir(name))
+//	    return string(s), err
+//	}, string(sandbox.StatusDone), 30*time.Second)
+func WaitForStatus(ctx context.Context, t *testing.T, statusFn func(context.Context) (string, error), want string, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	var last string
+	for time.Now().Before(deadline) {
+		got, err := statusFn(ctx)
+		if err == nil {
+			last = got
+			if got == want {
+				return
+			}
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	t.Fatalf("status never became %q within %s (last seen: %q)", want, timeout, last)
+}
+
 // WaitForActive polls rt.Inspect until the instance is running or timeout elapses.
 // instanceName must already be the resolved runtime instance name (e.g. sandbox.InstanceName(name)).
 func WaitForActive(ctx context.Context, t *testing.T, rt yrt.Runtime, instanceName string, timeout time.Duration) {

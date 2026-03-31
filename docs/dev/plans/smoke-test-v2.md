@@ -39,6 +39,9 @@ backends?*
 | `TestIntegration_Overlay` | `sandbox/integration_test.go` | Moved from smoke; skip if no CAP_SYS_ADMIN |
 
 Also add `testutil.WaitForStatus` helper to support `TestCLI_StartAfterDone`.
+Signature accepts a `func(context.Context) (string, error)` status poller rather than a
+`runtime.Runtime` directly — sandbox status is a higher-level concept than container
+running/stopped state, and importing `sandbox` from `testutil` would create an import cycle.
 
 ### Smoke test (`smoke_test.py`)
 
@@ -56,7 +59,7 @@ smoketest: build
     python3 scripts/smoke_test.py --limited --debug
 
 smoketest-full: build
-    python3 scripts/smoke_test.py --full
+    python3 scripts/smoke_test.py --full --debug
 ```
 
 ---
@@ -74,7 +77,9 @@ Intended for developer local runs and PR CI.
 
 **Tests**: `full_workflow` and `stop_start` on each matrix backend.
 
-Target wall-clock time: under 5 minutes on a warm machine.
+Target wall-clock time: under 15 minutes on a warm machine with pre-pulled images. Docker
+runs fast; containerd-vm (QEMU) can take 5–10 minutes for two sentinel waits.
+The 5-minute target is not realistic once `stop_start` is on the VM backend.
 
 ### Full (`smoketest-full`)
 
@@ -130,6 +135,19 @@ the git baseline in VM-local storage. Without it, the agent can still write file
 will fail because the baseline is absent. The original `stop_start` test only checked
 the sentinel and would have missed this (and did: see commit ee314b8).
 
+### T4: isolation_check (matrix — base + full)
+
+*New.*
+
+`new --network-isolated` → start → wait for active → exec `curl -sf --max-time 5 https://1.1.1.1` →
+assert non-zero exit. Then exec `curl -sf --max-time 5 http://127.0.0.1` → assert exit is not
+28 (loopback is not blocked by our rules; connection refused (7) is the expected result since
+nothing listens on port 80).
+
+Verifies that iptables rules applied by `entrypoint.py` are actually in effect, not just configured.
+Runs across the backend matrix because each backend's entrypoint path is independent. Requires
+`NET_ADMIN` cap, which the sandbox layer adds automatically for isolated sandboxes.
+
 ### T3: clone (matrix — full only)
 
 `new A` → wait for sentinel → `clone A B` → `diff B` → assert agent-written file appears.
@@ -138,6 +156,12 @@ Kept in smoke (rather than moved fully to integration) because it specifically p
 agent-written changes — not just mechanically-seeded work-copy state — survive a clone.
 The integration test (`TestIntegration_Clone`) covers the mechanics; this covers the
 agent + clone combination. Full tier only; runs across matrix backends.
+
+**Known gap:** `TestIntegration_Clone` only exercises Docker. On VM backends the baseline
+lives in VM-local storage and is re-established by `executeVMWorkDirSetup`. A regression
+in the VM clone path would only be caught by the smoke T3 (full tier), not by CI.
+Consider adding `TestIntegration_Clone` to `sandbox/integration_tart_test.go` to get
+mechanical coverage of that path without requiring a real agent.
 
 ---
 
@@ -157,8 +181,15 @@ succeed when the sandbox is in `StatusDone`.
 The test uses `--agent shell` because it exits via `PromptModeHeadless` and reliably
 reaches `StatusDone`. Claude's interactive mode leaves status stuck at `idle`.
 
-Add `testutil.WaitForStatus(ctx, t, rt, instance, status string, timeout)` to
-`internal/testutil/wait.go` alongside the existing `WaitForActive`.
+Add `testutil.WaitForStatus(ctx, t, statusFn func(context.Context) (string, error), want string, timeout)` to
+`internal/testutil/wait.go` alongside the existing `WaitForActive`. Usage:
+
+```go
+testutil.WaitForStatus(ctx, t, func(ctx context.Context) (string, error) {
+    s, err := sandbox.DetectStatus(ctx, rt, sandbox.InstanceName(name), sandbox.Dir(name))
+    return string(s), err
+}, string(sandbox.StatusDone), 30*time.Second)
+```
 
 ### TestCLI_FilesExchange (`internal/cli/integration_test.go`)
 
@@ -180,7 +211,8 @@ the CLI argument parsing and `--yes` flag path.
 2. Manually write a changed file into the sandbox work copy (same pattern as
    `TestCLI_Diff`)
 3. `apply <name> --yes` → assert exit 0
-4. Assert the change exists in the original project dir
+4. Assert `main.go` in the original project dir contains the expected modification string
+   (e.g. `"apply-test"` — use a distinctive value to prevent false positives)
 
 ### TestIntegration_Clone (`sandbox/integration_test.go`)
 
@@ -195,8 +227,9 @@ Tests that `clone` captures work-copy state including changes, not just the base
 
 Tests the `:overlay` workdir mode end-to-end.
 
-Skip if `CAP_SYS_ADMIN` is not available (use `unix.Prctl` or check capabilities; print
-a clear skip message rather than failing).
+Skip if `CAP_SYS_ADMIN` is not available. Check with `os.Geteuid() != 0` as a proxy
+(not `unix.Prctl` — `prctl(2)` manipulates process attributes, it does not query capabilities).
+Print a clear skip message rather than failing.
 
 1. Create sandbox with overlay workdir (`<project>:overlay`)
 2. Start container; exec a write command inside
@@ -216,6 +249,12 @@ parser.add_argument("--full", action="store_true",
 - With `--full`: FULL_*_BACKENDS matrix; T1 + T2 + T3.
 - `--full` and `--limited` are mutually exclusive; check at startup with a clear error.
 
+**Breaking change:** The current `smoketest-full` Makefile target runs
+`python3 scripts/smoke_test.py` with no flags, which previously ran the full matrix.
+After this change, that bare invocation runs the base tier. Any script or runbook invoking
+the smoke test directly (not via `make`) must be updated to add `--full`. Document in
+`docs/BREAKING-CHANGES.md`.
+
 ```python
 FULL_ONLY_TESTS = {"clone"}
 
@@ -224,7 +263,81 @@ def is_full_test(name: str) -> bool:
     return base in FULL_ONLY_TESTS
 ```
 
-`smoketest-full` drops `--debug` (bugreport overhead unnecessary for release validation).
+`smoketest-full` uses `--debug` (same as base tier — `--debug` only affects log verbosity,
+not test behavior, and verbose output is more valuable for the infrequent pre-release run
+where no operator is nearby to rerun with debug enabled).
+
+---
+
+## Go integration test conventions
+
+**Parallelism:** New tests do not use `t.Parallel()`, consistent with the existing
+`sandbox/integration_test.go` and `internal/cli/integration_test.go` suites. These tests
+share Docker state and isolated HOME directories; parallelism would require unique sandbox
+names per test and careful cleanup ordering.
+
+**Smoke test cleanup:** The smoke test uses `atexit.register(cleanup, ctx)` which destroys
+all sandboxes registered via `ctx.alloc_name()` — including sandboxes from new tests —
+regardless of whether the test passed or failed. No new cleanup code is needed for T4.
+
+---
+
+## CI integration
+
+### GitHub Actions capabilities
+
+| Tier | GitHub-hosted? | Notes |
+|------|---------------|-------|
+| `make check` + `make integration` | ✓ already in CI | PR gate; no API key needed |
+| Nightly Docker smoke | ✓ feasible | `ubuntu-latest`; needs `ANTHROPIC_API_KEY` secret |
+| `smoketest-full` (full matrix) | ✗ | Self-hosted only — QEMU and Tart need bare metal |
+
+Standard `ubuntu-latest` runners run in VMs. They support Docker (including `NET_ADMIN`
+for network isolation tests) but do not expose `/dev/kvm`, so containerd-vm (QEMU) and
+nested-VM backends cannot run. macOS runners are VMs — Tart cannot run VMs inside them.
+
+### Nightly smoke job
+
+Add to `ci.yml`:
+
+```yaml
+on:
+  # existing triggers ...
+  schedule:
+    - cron: '0 3 * * *'   # nightly at 03:00 UTC
+
+jobs:
+  # existing jobs ...
+
+  smoke-docker:
+    runs-on: ubuntu-latest
+    needs: integration
+    if: github.event_name == 'schedule' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Build binary and base image
+        run: make build base-image
+      - name: Run smoke tests (Docker)
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: make smoketest
+```
+
+With `--limited`, unavailable backends (containerd-vm) are skipped automatically —
+no extra scoping is needed. The job exercises T1 (`full_workflow`), T2 (`stop_start`),
+and T4 (`isolation_check`) against Docker. This gives a "real Claude worked end-to-end"
+signal in CI without requiring self-hosted infrastructure.
+
+### Pre-release full tier
+
+`smoketest-full` runs manually on:
+- A self-hosted Linux machine with QEMU/KVM for containerd-vm and containerd-vmenhanced.
+- A self-hosted macOS Apple Silicon machine for Tart.
+
+These are not automatable on GitHub-hosted runners and are intentionally pre-release only.
 
 ---
 
