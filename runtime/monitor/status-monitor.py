@@ -24,7 +24,11 @@ POLL_INTERVAL = 2  # seconds between detector polls
 MEDIUM_STABILITY = 2  # consecutive matches for medium confidence
 LOW_STABILITY = 3  # consecutive matches for low confidence
 HOOK_IDLE_AGE = 15  # seconds of no "active" hook write before inferring idle
-HOOK_IDLE_GRACE = 8  # seconds idle must persist before HookDetector reports idle
+HOOK_IDLE_GRACE = 2  # seconds idle must persist before HookDetector reports idle
+# HOOK_IDLE_GRACE was 8s when the Notification hook was used, because Notification
+# fires after every assistant response including intermediate ones in multi-tool
+# sequences. The Stop hook fires only once per turn (not between tool calls), so
+# a 2s grace period is sufficient to absorb any filesystem write latency.
 GLOBAL_HOLD_CYCLES = 2  # consecutive non-idle cycles needed to leave idle
 
 # Wait channels indicating terminal input wait (idle)
@@ -183,15 +187,14 @@ class HookDetector:
     """Reads status from status.json written by agent hooks.
 
     Returns "idle" when:
-    - The file says "idle" (Notification hook fired) AND idle has persisted
-      for at least HOOK_IDLE_GRACE seconds. The grace period filters out
-      brief idle blips between tool calls in multi-tool sequences — the
-      Notification hook fires after every assistant response, not just when
-      Claude is truly waiting for user input.
+    - The file says "idle" (Stop hook fired) AND idle has persisted for at
+      least HOOK_IDLE_GRACE seconds. The Stop hook fires once per turn, not
+      between individual tool calls, so the grace period only needs to cover
+      filesystem write latency (2s).
     - The file says "active" but the write is stale (age > HOOK_IDLE_AGE).
-      A stale "active" means PreToolUse hasn't fired recently, implying the
-      agent stopped working. This provides idle detection even when the
-      Notification hook fails to fire (a known upstream issue).
+      A stale "active" means PreToolUse/UserPromptSubmit hasn't fired
+      recently, implying the agent stopped working. This provides idle
+      detection if the Stop hook fails to fire.
 
     Returns "active" when:
     - The file says "active" and the last hook write is recent (< HOOK_IDLE_AGE).

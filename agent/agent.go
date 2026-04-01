@@ -403,26 +403,35 @@ func init() {
 
 // statusIdleCommand writes idle status to agent-status.json and appends a
 // structured JSONL entry to logs/agent-hooks.jsonl when Claude finishes a
-// response (Notification hook). Uses $YOLOAI_DIR for portability across
+// response (Stop hook). Uses $YOLOAI_DIR for portability across
 // backends (Docker=/yoloai, seatbelt=sandbox dir).
 const statusIdleCommand = `printf '{"ts":"%s","level":"info","event":"hook.idle","msg":"agent hook: idle","status":"idle"}\n' "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" >> "${YOLOAI_DIR:-/yoloai}/logs/agent-hooks.jsonl" && printf '{"status":"idle","exit_code":null,"timestamp":%d}\n' "$(date +%s)" > "${YOLOAI_DIR:-/yoloai}/agent-status.json"`
 
 // statusActiveCommand writes active status to agent-status.json and appends a
 // structured JSONL entry to logs/agent-hooks.jsonl when Claude starts working
-// (PreToolUse hook). This ensures the title updates from "> name" back to
-// "name" when the user submits a new prompt.
+// (PreToolUse and UserPromptSubmit hooks). This ensures the title updates from
+// "> name" back to "name" as soon as a new prompt is submitted or a tool is called.
 const statusActiveCommand = `printf '{"ts":"%s","level":"info","event":"hook.active","msg":"agent hook: active","status":"active"}\n' "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" >> "${YOLOAI_DIR:-/yoloai}/logs/agent-hooks.jsonl" && printf '{"status":"active","exit_code":null,"timestamp":%d}\n' "$(date +%s)" > "${YOLOAI_DIR:-/yoloai}/agent-status.json"`
 
 // injectIdleHook merges hooks into Claude Code's settings map for status tracking.
-// Notification → idle (turn complete), PreToolUse → running (work started).
+// Stop → idle (turn complete), PreToolUse + UserPromptSubmit → running (work started).
 // Preserves any existing hooks the user may have configured.
+//
+// We use the Stop hook (not Notification) because Stop fires immediately at the
+// end of every turn. The Notification hook's idle_prompt type fires only after
+// messageIdleNotifThresholdMs of inactivity (default: 60 seconds), making it
+// useless as a completion signal. Notification also fires on permission_prompt
+// and other non-idle events that would incorrectly mark the agent as idle.
+//
+// UserPromptSubmit is added alongside PreToolUse so the active signal fires as
+// soon as the user submits a new prompt, before any tool calls begin.
 func injectIdleHook(settings map[string]any) {
 	hooks, _ := settings["hooks"].(map[string]any)
 	if hooks == nil {
 		hooks = map[string]any{}
 	}
 
-	// Notification hook: mark idle when Claude finishes a response.
+	// Stop hook: mark idle when Claude concludes its response.
 	idleHook := map[string]any{
 		"type":    "command",
 		"command": statusIdleCommand,
@@ -430,8 +439,8 @@ func injectIdleHook(settings map[string]any) {
 	idleGroup := map[string]any{
 		"hooks": []any{idleHook},
 	}
-	existingNotif, _ := hooks["Notification"].([]any)
-	hooks["Notification"] = append(existingNotif, idleGroup)
+	existingStop, _ := hooks["Stop"].([]any)
+	hooks["Stop"] = append(existingStop, idleGroup)
 
 	// PreToolUse hook: mark active when Claude starts using tools.
 	activeHook := map[string]any{
@@ -443,6 +452,12 @@ func injectIdleHook(settings map[string]any) {
 	}
 	existingPre, _ := hooks["PreToolUse"].([]any)
 	hooks["PreToolUse"] = append(existingPre, activeGroup)
+
+	// UserPromptSubmit hook: mark active as soon as a new prompt is submitted,
+	// before PreToolUse fires. This closes the window where the agent appears
+	// idle between prompt submission and the first tool call.
+	existingSubmit, _ := hooks["UserPromptSubmit"].([]any)
+	hooks["UserPromptSubmit"] = append(existingSubmit, activeGroup)
 
 	settings["hooks"] = hooks
 }
