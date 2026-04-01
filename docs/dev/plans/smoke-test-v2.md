@@ -154,6 +154,15 @@ shows nothing and the diff/apply assertion is vacuous.
 Tests credential re-injection AND full workflow correctness after a container restart.
 Runs across the backend matrix because both are per-backend concerns.
 
+**Prompt fragility:** The prompt assumes the agent executes shell commands verbatim.
+Claude Code wraps commands in tool calls and may add preamble, confirmation prompts, or
+refuse commands it interprets as destructive. If agent behavior changes between versions,
+the sentinel may never appear, making T2 flaky. Mitigations: (1) the prompt is kept
+minimal and imperative to maximize compliance, (2) if flakiness becomes a problem, T2
+could switch to `--agent shell` for deterministic restart testing while T1 retains the
+real-agent coverage, (3) as a fallback assertion, check whether the agent wrote *anything*
+to the work copy (weaker but more resilient than checking for a specific file).
+
 The diff/apply step after restart is load-bearing. The `recreateContainer` code path
 (used by `restart`) must call `executeVMWorkDirSetup` on VM backends to re-establish
 the git baseline in VM-local storage. Without it, the agent can still write files
@@ -509,14 +518,112 @@ tradeoff is documented in `docs/design/security.md` (line 106). The mitigation i
 the container's namespace isolation limits the blast radius, and `:copy` mode avoids the
 capability entirely.
 
-### Concurrent sandbox operations
+### Concurrent sandbox creation (known crash path)
 
-No test runs sandbox operations concurrently (e.g., creating two sandboxes simultaneously,
-or diff on one while apply runs on another). Race conditions in shared state — Docker daemon
-API, sandbox directory listing, file locks — would only be caught by concurrent testing.
-A basic concurrent test (`t.Run` two goroutines that each create/diff/destroy separate
-sandboxes) would catch lock contention and shared-state races without complex orchestration.
-This is deferred as a future improvement.
+Two concurrent `yoloai new` with the same name corrupts CNI networking on containerd
+backends — `netns.NewNamed` switches the OS thread and the pre-flight DEL deletes live
+rules from the first sandbox (documented in `docs/dev/backend-idiosyncrasies.md`). This
+is not a speculative race condition; it's a known bug with a code-level workaround but no
+test verifying the workaround holds.
+
+Beyond the same-name case, no test runs sandbox operations concurrently at all (e.g.,
+creating two different sandboxes simultaneously, or diff on one while apply runs on
+another). Race conditions in shared state — Docker daemon API, sandbox directory listing,
+file locks — would only be caught by concurrent testing.
+
+A test for the specific same-name concurrent creation case should be prioritized for
+multi-user/CI environments. A broader concurrent test (`t.Run` two goroutines that each
+create/diff/destroy separate sandboxes) would catch lock contention and shared-state races
+without complex orchestration. Consider also adding a file lock guard on sandbox name in
+the creation path as a defense-in-depth measure.
+
+### Status monitor accuracy
+
+The status monitor (`runtime/monitor/status-monitor.py`) determines agent idle/active
+state. It has 5 detector implementations (hook, wchan, ready_pattern, context_signal,
+output_stability), stability counting logic (MEDIUM_STABILITY, LOW_STABILITY,
+GLOBAL_HOLD_CYCLES), grace periods, and priority ordering. None of it is tested — no unit
+tests, no integration tests.
+
+A false-positive idle detection could signal turn completion while the agent is still
+working. A false-negative could leave the sandbox stuck in "running" state indefinitely.
+The smoke tests implicitly depend on correct status transitions (sentinel wait uses status
+to detect stalls), but no test verifies the monitor itself.
+
+High-value first test: `TestMonitor_HookDetector` — feed scripted hook events (touch
+idle/active marker files), verify the monitor produces correct status JSON transitions.
+This can run without a real agent.
+
+### Cleanup-on-error paths
+
+`sandbox/create.go` silently ignores errors during failure cleanup:
+```go
+_ = os.RemoveAll(state.sandboxDir)
+_ = m.runtime.Remove(ctx, InstanceName(state.name))
+```
+
+If `runtime.Remove()` fails (e.g., orphaned Kata shim with EADDRINUSE — documented in
+`backend-idiosyncrasies.md`), the container keeps running while the sandbox directory is
+deleted. This creates orphaned resources that `system prune` must clean up, but the user
+gets no indication.
+
+A focused test: create a sandbox, manually remove its sandbox directory, then verify
+`system prune` finds and removes the orphaned container. This tests the safety net without
+needing to simulate a crash.
+
+### Backend workaround regression coverage
+
+`docs/dev/backend-idiosyncrasies.md` catalogs 10+ workarounds (Kata stale sockets,
+containerd snapshot GC, Tart VirtioFS corruption, gVisor permissions, Docker exec newline
+stripping). Each has a code-level fix but no test verifying the fix prevents the bad state.
+If a refactor removes a workaround, nothing catches the regression.
+
+Most impactful subset to test first: (1) Kata stale socket recovery (pre-flight cleanup
+in containerd backend), (2) containerd snapshot orphan recovery, (3) gVisor permission
+detection (standard gets 0750/0600, gVisor gets 0777/0666 — see next entry).
+
+### gVisor permission mode detection
+
+`docs/design/security.md` documents that gVisor gets relaxed permissions (0777/0666) and
+standard Docker gets restrictive ones (0750/0600). The detection and permission-setting
+logic is in production code but has no test. A regression here is silent — files would be
+world-readable on standard Docker or inaccessible on gVisor.
+
+Test: create a standard sandbox, verify work dir permissions are 0750. The gVisor path
+can't run on CI (not available on standard runners) but the standard-mode permission
+assertion can.
+
+---
+
+## Confidence statement
+
+What this test suite verifies when fully implemented:
+
+- **Happy-path lifecycle** across all backends: create, start, exec, diff, apply, stop,
+  restart, destroy, clone.
+- **Credential injection** — secrets appear inside the container, host temp file cleaned
+  up after start.
+- **Network isolation** — iptables rules enforced on container backends (Docker, Podman,
+  containerd-vm).
+- **Diff/apply correctness** — agent-written changes are captured and applied to the
+  project directory.
+- **Restart resilience** — credentials re-injected, work-copy baseline re-established,
+  diff/apply works after restart.
+- **Read-only mount enforcement** — writes to RO aux dirs fail inside the container.
+
+What it does **not** verify:
+
+- **Failure recovery** — crash during create, orphaned resources after abnormal exit,
+  cleanup-on-error paths.
+- **Concurrent operations** — race conditions in creation, diff, apply with simultaneous
+  sandboxes.
+- **Status monitor accuracy** — no test for detector logic, stability counting, or grace
+  period timing.
+- **Backend workaround stability** — Kata socket recovery, containerd snapshot GC, Tart
+  VirtioFS workarounds are untested.
+- **gVisor permission modes** — standard vs gVisor permission detection is untested.
+- **Agent behavior drift** — smoke tests assume Claude executes prompts verbatim; behavior
+  changes across agent versions could cause flakiness.
 
 ---
 
@@ -533,13 +640,13 @@ This is deferred as a future improvement.
 
 ## Implementation status
 
-What exists today vs what this plan specifies. Updated 2026-03-31.
+What exists today vs what this plan specifies. Updated 2026-04-01.
 
 ### Done (in code)
 
 - [x] `TestIntegration_NetworkIsolation` — runtime-config.json + curl assertions (`sandbox/integration_test.go`)
 - [x] `TestIntegration_ReadOnlyMountVerified` — exec write to RO aux dir fails (`sandbox/integration_test.go`)
-- [x] `TestIntegration_CredentialInjection` — /run/secrets lifecycle + host cleanup (`sandbox/integration_test.go`)
+- [x] `TestIntegration_CredentialInjection` — /run/secrets lifecycle + host cleanup (`sandbox/integration_test.go`). Happy path only; failure-path cleanup (crash during create) is untested but handled by Go defers which survive panics.
 - [x] `testutil.WaitForStatus` helper (`internal/testutil/wait.go`)
 - [x] Nightly `smoke-docker` CI job (`.github/workflows/ci.yml`)
 - [x] Nightly `nightly-audit` CI job — govulncheck + hadolint + actionlint (`.github/workflows/ci.yml`)
