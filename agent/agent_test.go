@@ -309,8 +309,9 @@ func TestApplySettings_Claude(t *testing.T) {
 	// Verify idle hooks were injected
 	hooks, ok := settings["hooks"].(map[string]any)
 	require.True(t, ok, "hooks should be a map")
-	assert.NotNil(t, hooks["Notification"], "Notification hook should be set")
+	assert.NotNil(t, hooks["Stop"], "Stop hook should be set")
 	assert.NotNil(t, hooks["PreToolUse"], "PreToolUse hook should be set")
+	assert.NotNil(t, hooks["UserPromptSubmit"], "UserPromptSubmit hook should be set")
 }
 
 func TestApplySettings_ClaudePreservesExistingHooks(t *testing.T) {
@@ -321,14 +322,14 @@ func TestApplySettings_ClaudePreservesExistingHooks(t *testing.T) {
 	existingGroup := map[string]any{"hooks": []any{existingHook}}
 	settings := map[string]any{
 		"hooks": map[string]any{
-			"Notification": []any{existingGroup},
+			"Stop": []any{existingGroup},
 		},
 	}
 	def.ApplySettings(settings)
 
 	hooks := settings["hooks"].(map[string]any)
-	notifHooks := hooks["Notification"].([]any)
-	assert.Len(t, notifHooks, 2, "should preserve existing hook and append idle hook")
+	stopHooks := hooks["Stop"].([]any)
+	assert.Len(t, stopHooks, 2, "should preserve existing hook and append idle hook")
 }
 
 func TestApplySettings_Gemini(t *testing.T) {
