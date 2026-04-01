@@ -587,8 +587,11 @@ def test_isolation_check(t: Test, spec: BackendSpec) -> None:
 
     Only runs on container backends where iptables rules are applied by entrypoint.
     """
-    if spec.isolation not in ("container", "container-enhanced"):
-        raise SkipTest(f"isolation_check only runs on container backends (got {spec.isolation})")
+    if spec.isolation != "container":
+        raise SkipTest(
+            f"isolation_check only runs on plain container backends (got {spec.isolation}); "
+            "container-enhanced (gVisor) has its own network stack and doesn't honor iptables rules"
+        )
 
     project = t.project(f"isolation-{spec.label}")
     name = t.sandbox(f"isolation-{spec.label}")
