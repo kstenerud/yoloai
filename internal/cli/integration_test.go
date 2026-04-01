@@ -381,3 +381,77 @@ func TestCLI_BugreportCommand_Safe(t *testing.T) {
 	assert.NotContains(t, out, "Agent output")
 	assert.NotContains(t, out, "prompt.txt") // prompt.txt section omitted in safe mode
 }
+
+func TestCLI_StartAfterDone(t *testing.T) {
+	projectDir := cliSetup(t)
+
+	// Shell agent exits after sleep, reaching StatusDone
+	_, _, err := runCLI(t, "new", "--agent", "shell", "--prompt", "sleep 5", "cli-startdone", projectDir)
+	require.NoError(t, err)
+	t.Cleanup(func() { destroySandbox(t, "cli-startdone") })
+
+	rt, err := dockerrt.New(context.Background())
+	require.NoError(t, err)
+	defer rt.Close() //nolint:errcheck // test cleanup
+
+	testutil.WaitForStatus(context.Background(), t, func(ctx context.Context) (string, error) {
+		s, err := sandbox.DetectStatus(ctx, rt, sandbox.InstanceName("cli-startdone"), sandbox.Dir("cli-startdone"))
+		return string(s), err
+	}, string(sandbox.StatusDone), 60*time.Second)
+
+	// start must succeed on a done sandbox (regression test for baef847)
+	_, _, err = runCLI(t, "start", "cli-startdone")
+	require.NoError(t, err)
+}
+
+func TestCLI_FilesExchange(t *testing.T) {
+	projectDir := cliSetup(t)
+
+	_, _, err := runCLI(t, "new", "--agent", "test", "--no-start", "cli-files", projectDir)
+	require.NoError(t, err)
+	t.Cleanup(func() { destroySandbox(t, "cli-files") })
+
+	// Put
+	srcDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(srcDir, "somefile.txt"), []byte("hello files"), 0600))
+	_, _, err = runCLI(t, "files", "cli-files", "put", filepath.Join(srcDir, "somefile.txt"))
+	require.NoError(t, err)
+
+	// Ls
+	stdout, _, err := runCLI(t, "files", "cli-files", "ls")
+	require.NoError(t, err)
+	assert.Contains(t, stdout, "somefile.txt")
+
+	// Get
+	outDir := t.TempDir()
+	_, _, err = runCLI(t, "files", "cli-files", "get", "somefile.txt", "-o", outDir)
+	require.NoError(t, err)
+	content, err := os.ReadFile(filepath.Join(outDir, "somefile.txt")) //nolint:gosec // test path
+	require.NoError(t, err)
+	assert.Equal(t, "hello files", string(content))
+}
+
+func TestCLI_Apply(t *testing.T) {
+	projectDir := cliSetup(t)
+
+	_, _, err := runCLI(t, "new", "--agent", "test", "--no-start", "cli-apply", projectDir)
+	require.NoError(t, err)
+	t.Cleanup(func() { destroySandbox(t, "cli-apply") })
+
+	// Seed work copy with a distinctive change
+	meta, err := sandbox.LoadMeta(sandbox.Dir("cli-apply"))
+	require.NoError(t, err)
+	workDir := sandbox.WorkDir("cli-apply", meta.Workdir.HostPath)
+	require.NoError(t, os.WriteFile(
+		filepath.Join(workDir, "main.go"),
+		[]byte("package main\n\nimport \"fmt\"\n\nfunc main() { fmt.Println(\"apply-test\") }\n"),
+		0600,
+	))
+
+	_, _, err = runCLI(t, "apply", "cli-apply", "--yes")
+	require.NoError(t, err)
+
+	applied, err := os.ReadFile(filepath.Join(projectDir, "main.go")) //nolint:gosec // test path
+	require.NoError(t, err)
+	assert.Contains(t, string(applied), "apply-test")
+}
