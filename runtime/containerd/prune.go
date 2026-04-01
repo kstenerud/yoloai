@@ -39,16 +39,18 @@ func (r *Runtime) Prune(ctx context.Context, knownInstances []string, dryRun boo
 			continue
 		}
 
-		result.Items = append(result.Items, runtime.PruneItem{
+		item := runtime.PruneItem{
 			Kind: "container",
 			Name: name,
-		})
+		}
 
 		if !dryRun {
 			if err := r.Remove(ctx, name); err != nil {
 				fmt.Fprintf(output, "Warning: failed to remove container %s: %v\n", name, err) //nolint:errcheck // best-effort output
+				continue
 			}
 		}
+		result.Items = append(result.Items, item)
 	}
 
 	return result, nil

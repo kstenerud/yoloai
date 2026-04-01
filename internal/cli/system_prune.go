@@ -129,16 +129,18 @@ func runSystemPrune(cmd *cobra.Command, backend string, dryRun, yes bool) error 
 	}
 
 	// 9. Remove orphaned backend resources.
+	var actualResult runtime.PruneResult
 	if len(scanResult.Items) > 0 {
 		err := withRuntime(ctx, backend, func(ctx context.Context, rt runtime.Runtime) error {
-			_, err := rt.Prune(ctx, knownInstances, false, output)
+			var err error
+			actualResult, err = rt.Prune(ctx, knownInstances, false, output)
 			return err
 		})
 		if err != nil {
 			return err
 		}
 		if !isJSON {
-			for _, item := range scanResult.Items {
+			for _, item := range actualResult.Items {
 				fmt.Fprintf(output, "Removed %s %s\n", item.Kind, item.Name) //nolint:errcheck
 			}
 		}
@@ -251,10 +253,14 @@ func runSystemPruneAll(cmd *cobra.Command, dryRun, yes bool) error {
 	}
 
 	// Remove orphaned resources from each available backend.
+	var actualItems []runtime.PruneItem
 	if len(allItems) > 0 {
 		for _, name := range availableBackends {
 			err := withRuntime(ctx, name, func(ctx context.Context, rt runtime.Runtime) error {
-				_, err := rt.Prune(ctx, knownInstances, false, output)
+				actual, err := rt.Prune(ctx, knownInstances, false, output)
+				if err == nil {
+					actualItems = append(actualItems, actual.Items...)
+				}
 				return err
 			})
 			if err != nil {
@@ -262,7 +268,7 @@ func runSystemPruneAll(cmd *cobra.Command, dryRun, yes bool) error {
 			}
 		}
 		if !isJSON {
-			for _, item := range allItems {
+			for _, item := range actualItems {
 				fmt.Fprintf(output, "Removed %s %s\n", item.Kind, item.Name) //nolint:errcheck
 			}
 		}

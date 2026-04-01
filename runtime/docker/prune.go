@@ -41,16 +41,18 @@ func (r *Runtime) Prune(ctx context.Context, knownInstances []string, dryRun boo
 			continue
 		}
 
-		result.Items = append(result.Items, runtime.PruneItem{
+		item := runtime.PruneItem{
 			Kind: "container",
 			Name: name,
-		})
+		}
 
 		if !dryRun {
 			if err := r.client.ContainerRemove(ctx, name, container.RemoveOptions{Force: true}); err != nil {
 				fmt.Fprintf(output, "Warning: failed to remove container %s: %v\n", name, err) //nolint:errcheck // best-effort output
+				continue
 			}
 		}
+		result.Items = append(result.Items, item)
 	}
 
 	// Scan for dangling images (stale build layers from image rebuilds).
@@ -67,16 +69,19 @@ func (r *Runtime) Prune(ctx context.Context, knownInstances []string, dryRun boo
 		if len(shortID) > 12 {
 			shortID = shortID[:12]
 		}
-		result.Items = append(result.Items, runtime.PruneItem{
+
+		item := runtime.PruneItem{
 			Kind: "image",
 			Name: shortID,
-		})
+		}
 
 		if !dryRun {
-			if _, removeErr := r.client.ImageRemove(ctx, img.ID, image.RemoveOptions{Force: false, PruneChildren: true}); removeErr != nil {
+			if _, removeErr := r.client.ImageRemove(ctx, img.ID, image.RemoveOptions{Force: true, PruneChildren: true}); removeErr != nil {
 				fmt.Fprintf(output, "Warning: failed to remove image %s: %v\n", shortID, removeErr) //nolint:errcheck // best-effort output
+				continue
 			}
 		}
+		result.Items = append(result.Items, item)
 	}
 
 	return result, nil
