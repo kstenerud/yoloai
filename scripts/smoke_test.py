@@ -106,10 +106,57 @@ class TestResult:
     passed: bool = False
     skipped: bool = False
     reason: str = ""
+    elapsed_s: float = 0.0
 
 
 class SkipTest(Exception):
     pass
+
+
+def _xml_escape(s: str) -> str:
+    """Escape a string for safe embedding in XML."""
+    return (
+        s.replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+        .replace("'", "&apos;")
+    )
+
+
+class JUnitWriter:
+    """Incrementally writes JUnit XML test results, crash-resilient via atexit."""
+
+    def __init__(self, path: str) -> None:
+        self._path = path
+        self._f = open(path, "w")  # noqa: SIM115
+        self._f.write('<?xml version="1.0" encoding="UTF-8"?>\n')
+        self._f.write('<testsuites>\n')
+        self._f.write('  <testsuite name="smoke">\n')
+        self._closed = False
+        atexit.register(self.close)
+
+    def write_testcase(self, result: TestResult) -> None:
+        name = _xml_escape(result.name)
+        self._f.write(
+            f'    <testcase name="{name}" time="{result.elapsed_s:.2f}">\n'
+        )
+        if result.skipped:
+            msg = _xml_escape(result.reason)
+            self._f.write(f'      <skipped message="{msg}" />\n')
+        elif not result.passed:
+            msg = _xml_escape(result.reason)
+            self._f.write(f'      <failure message="{msg}">{msg}</failure>\n')
+        self._f.write("    </testcase>\n")
+        self._f.flush()
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        self._f.write("  </testsuite>\n")
+        self._f.write("</testsuites>\n")
+        self._f.close()
 
 
 @dataclass
@@ -125,6 +172,7 @@ class RunContext:
     backend_filter: Optional[list[str]] = None
     sandboxes: list[str] = field(default_factory=list)
     results: list[TestResult] = field(default_factory=list)
+    junit: Optional[JUnitWriter] = None
 
 
 # ---------------------------------------------------------------------------
@@ -343,28 +391,31 @@ def run_test(
 ) -> TestResult:
     t = Test(ctx, name)
     print(f"  {name} ...", end="", flush=True)
+    start = time.monotonic()
     try:
         fn(t)
-        result = TestResult(name=name, passed=True)
+        result = TestResult(name=name, passed=True, elapsed_s=time.monotonic() - start)
         print(" PASS")
     except SkipTest as e:
-        result = TestResult(name=name, skipped=True, reason=str(e))
+        result = TestResult(name=name, skipped=True, reason=str(e), elapsed_s=time.monotonic() - start)
         print(f"\n  *** SKIP [{name}]: {e}")
     except AssertionError as e:
-        result = TestResult(name=name, passed=False, reason=str(e))
+        result = TestResult(name=name, passed=False, reason=str(e), elapsed_s=time.monotonic() - start)
         print(f"\n  *** FAIL [{name}]")
         for line in str(e).splitlines():
             print(f"      {line}")
         print(f"      log: {t.log_file}")
     except subprocess.TimeoutExpired as e:
-        result = TestResult(name=name, passed=False, reason=f"command timed out: {e}")
+        result = TestResult(name=name, passed=False, reason=f"command timed out: {e}", elapsed_s=time.monotonic() - start)
         print(f"\n  *** FAIL [{name}]: command timed out")
         print(f"      log: {t.log_file}")
     except Exception as e:
-        result = TestResult(name=name, passed=False, reason=f"{type(e).__name__}: {e}")
+        result = TestResult(name=name, passed=False, reason=f"{type(e).__name__}: {e}", elapsed_s=time.monotonic() - start)
         print(f"\n  *** ERROR [{name}]: {type(e).__name__}: {e}")
         print(f"      log: {t.log_file}")
     ctx.results.append(result)
+    if ctx.junit:
+        ctx.junit.write_testcase(result)
     return result
 
 
@@ -372,6 +423,8 @@ def skip_test(ctx: RunContext, name: str, reason: str) -> TestResult:
     result = TestResult(name=name, skipped=True, reason=reason)
     print(f"  *** SKIP [{name}]: {reason}")
     ctx.results.append(result)
+    if ctx.junit:
+        ctx.junit.write_testcase(result)
     return result
 
 
@@ -751,6 +804,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Add --debug to 'yoloai new' and --bugreport unsafe to all commands",
     )
+    parser.add_argument(
+        "--junit",
+        metavar="PATH",
+        help="Write JUnit XML test results to PATH (crash-resilient via atexit)",
+    )
     return parser.parse_args()
 
 
@@ -802,6 +860,8 @@ def main() -> int:
         test_filter=args.test,
         backend_filter=args.backend,
     )
+    if args.junit:
+        ctx.junit = JUnitWriter(args.junit)
     atexit.register(cleanup, ctx)
 
     is_linux = sys.platform.startswith("linux")
