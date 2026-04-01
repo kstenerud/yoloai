@@ -844,26 +844,43 @@ func TestIntegration_Overlay(t *testing.T) {
 	// chown -R can make overlayfs directories opaque, hiding the lower layer's git
 	// objects. In production the agent (or auto-commit) creates a fresh repo; we
 	// replicate that here.
+	//
+	// Poll until git init + commit succeeds. The overlay mount is done by the
+	// entrypoint; on slow systems WaitForActive may return before the mount is
+	// fully visible to subsequent exec calls.
+	// Initialize git and create baseline commit inside the container, then
+	// retrieve the SHA in a separate exec to avoid mixing git commit output
+	// with the SHA.
 	initCmd := fmt.Sprintf(
-		"cd %s && rm -rf .git && git init && git config user.email test@test && git config user.name test && git add -A && git commit -m baseline",
+		"cd %s && rm -rf .git && git init -b main && git config user.email test@test && git config user.name test && git add -A && git commit -q -m baseline",
 		containerPath,
 	)
-	execResult, err := mgr.runtime.Exec(ctx, InstanceName("overlay-integ"),
-		[]string{"sh", "-c", initCmd}, "yoloai")
-	require.NoError(t, err)
-	require.Equal(t, 0, execResult.ExitCode, "git init inside overlay should succeed")
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		initResult, initErr := mgr.runtime.Exec(ctx, InstanceName("overlay-integ"),
+			[]string{"sh", "-c", initCmd}, "yoloai")
+		if initErr == nil && initResult.ExitCode == 0 {
+			break
+		}
+		if time.Now().Add(500 * time.Millisecond).After(deadline) {
+			require.NoError(t, initErr, "git init inside overlay should succeed within 10s")
+			require.Equal(t, 0, initResult.ExitCode, "git init exit code")
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
 
-	// Update the baseline SHA in meta.json so diff knows the starting point
 	shaResult, err := mgr.runtime.Exec(ctx, InstanceName("overlay-integ"),
 		[]string{"git", "-C", containerPath, "rev-parse", "HEAD"}, "yoloai")
 	require.NoError(t, err)
-	require.NoError(t, updateOverlayBaseline("overlay-integ", projectDir, strings.TrimSpace(shaResult.Stdout)))
+	baselineSHA := strings.TrimSpace(shaResult.Stdout)
+	require.Len(t, baselineSHA, 40, "baseline SHA should be 40 hex chars")
+	require.NoError(t, updateOverlayBaseline("overlay-integ", projectDir, baselineSHA))
 
 	// Write a file inside the container (overlay captures it in upper layer)
-	execResult, err = mgr.runtime.Exec(ctx, InstanceName("overlay-integ"),
+	writeResult, err := mgr.runtime.Exec(ctx, InstanceName("overlay-integ"),
 		[]string{"sh", "-c", fmt.Sprintf("echo overlay-test > %s/output.txt", containerPath)}, "yoloai")
 	require.NoError(t, err)
-	assert.Equal(t, 0, execResult.ExitCode)
+	assert.Equal(t, 0, writeResult.ExitCode)
 
 	// Diff: must use GenerateOverlayDiff (GenerateDiff returns a stub for overlay)
 	diffResults, err := GenerateOverlayDiff(ctx, mgr.runtime, DiffOptions{Name: "overlay-integ"})
