@@ -52,7 +52,8 @@ running/stopped state, and importing `sandbox` from `testutil` would create an i
 ### Smoke test (`smoke_test.py`)
 
 - Add `--full` flag to select backend matrix width and test depth
-- Remove: `start_done_agent`, `files_exchange`, `clone`, `reset`, `overlay` (moved down)
+- Remove: `start_done_agent`, `files_exchange`, `reset`, `overlay` (moved to integration tier)
+- Restrict `clone` to full tier only (stays in smoke as T3)
 - Base tier: `full_workflow` (docker + one VM) + `stop_start`
 - Full tier: `full_workflow` on full matrix + `stop_start` on full matrix + `clone`
   (kept in full because it confirms agent-written changes survive a clone, not just
@@ -92,7 +93,7 @@ Intended for developer local runs and nightly CI.
 - Linux: docker, containerd-vm
 - macOS: docker, tart
 
-**Tests**: `full_workflow` and `stop_start` on each matrix backend.
+**Tests**: `full_workflow`, `stop_start`, and `isolation_check` on each matrix backend.
 
 Target wall-clock time: under 30 minutes on a warm machine with pre-pulled images. Docker
 tests finish in ~5 minutes; containerd-vm (QEMU) dominates with 5–10 min per sentinel
@@ -111,7 +112,8 @@ Intended for pre-release runs on the dedicated test machine.
 - Linux: docker, podman, docker-cenhanced, containerd-vm, containerd-vmenhanced
 - macOS: docker, podman, seatbelt, tart
 
-**Tests**: `full_workflow`, `stop_start`, and `clone` on the full matrix.
+**Tests**: `full_workflow`, `stop_start`, and `clone` on the full matrix;
+`isolation_check` on container backends only (Docker, Podman, containerd-vm).
 
 ---
 
@@ -599,17 +601,14 @@ assertion can.
 
 What this test suite verifies when fully implemented:
 
-- **Happy-path lifecycle** across all backends: create, start, exec, diff, apply, stop,
-  restart, destroy, clone.
-- **Credential injection** — secrets appear inside the container, host temp file cleaned
-  up after start.
-- **Network isolation** — iptables rules enforced on container backends (Docker, Podman,
-  containerd-vm).
-- **Diff/apply correctness** — agent-written changes are captured and applied to the
-  project directory.
-- **Restart resilience** — credentials re-injected, work-copy baseline re-established,
-  diff/apply works after restart.
-- **Read-only mount enforcement** — writes to RO aux dirs fail inside the container.
+- **Happy-path lifecycle on Docker** (integration tier, PR gate): create, start, exec,
+  diff, apply, stop, restart, destroy, clone, overlay, credential injection, read-only
+  mount enforcement, network isolation.
+- **End-to-end agent workflow on docker + primary VM** (smoke base, nightly): real agent
+  produces output, diff/apply captures it, restart re-injects credentials and preserves
+  work-copy baseline, network isolation enforced on container backends.
+- **Full backend matrix** (smoke full, pre-release): all of the above across Docker,
+  Podman, gVisor, containerd-vm (QEMU), containerd-vmenhanced, Seatbelt, and Tart.
 
 What it does **not** verify:
 
@@ -672,3 +671,12 @@ What exists today vs what this plan specifies. Updated 2026-04-01.
 - [ ] JUnit artifact upload in CI smoke job
 - [ ] Nightly failure alerting verification (GitHub notification settings)
 - [ ] Breaking change entry in `docs/BREAKING-CHANGES.md` for `--limited` removal
+
+### Future (from known gaps — lower priority)
+
+- [ ] `TestMonitor_HookDetector` — status monitor unit test: feed scripted hook events, verify status JSON transitions
+- [ ] Standard-mode permission assertion — verify work dir gets 0750 on non-gVisor Docker
+- [ ] Orphan detection via `system prune` — create sandbox, remove its directory, verify prune finds the container
+- [ ] Concurrent same-name creation test — verify two parallel `new` with same name doesn't corrupt CNI state
+- [ ] Kata stale socket recovery test — verify pre-flight cleanup handles `/run/kata/<name>` leftover
+- [ ] Containerd snapshot orphan recovery test — verify snapshot GC after abnormal exit

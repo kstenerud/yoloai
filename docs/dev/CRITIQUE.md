@@ -1,6 +1,14 @@
 # Critique
 
-(Empty - ready for next critique cycle)
+## Previous Critique (2026-04-01, round 6): Smoke Test V2 Internal Consistency — Resolved
+
+All issues addressed in `docs/dev/plans/smoke-test-v2.md`:
+
+- #1: T4 (isolation_check) added to both base and full tier test lists
+- #2: Summary reworded — clone distinguished as "restrict to full tier" vs removed tests "moved to integration"
+- #3: Confidence statement split by tier: Docker (integration/PR gate), docker+VM (smoke base/nightly), full matrix (smoke full/pre-release)
+- #4: Full tier definition now notes "isolation_check on container backends only"
+- #5: "Future (from known gaps)" subsection added to implementation status with 6 test suggestions
 
 ## Previous Critique (2026-04-01, round 5): Smoke Test V2 Enterprise Reliability Gaps — Resolved
 
