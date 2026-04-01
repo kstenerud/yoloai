@@ -1,11 +1,18 @@
 #!/usr/bin/env python3
 """End-to-end smoke tests for yoloai against real agents.
 
-Run with: python3 scripts/smoke_test.py [--limited]
-Or via:   make smoketest / make smoketest-limited
+Run with: python3 scripts/smoke_test.py [--full]
+Or via:   make smoketest / make smoketest-full
+
+Base tier (default): docker + containerd-vm on Linux, docker + tart on macOS.
+Full tier (--full):  all backends including podman, gVisor, vm-enhanced.
+
+Tests that don't need a real agent (files exchange, reset, start-after-done,
+overlay) have been moved to Go integration tests (sandbox/integration_test.go,
+internal/cli/integration_test.go).
 
 Requires ANTHROPIC_API_KEY and configured backends.
-See docs/dev/plans/smoke-test-redesign.md for the full design.
+See docs/dev/plans/smoke-test-v2.md for the full design.
 """
 from __future__ import annotations
 
@@ -112,7 +119,7 @@ class RunContext:
     log_dir: Path
     run_id: str
     fixture_dir: Path
-    limited: bool
+    full: bool
     debug: bool = False
     test_filter: Optional[list[str]] = None
     backend_filter: Optional[list[str]] = None
@@ -124,7 +131,24 @@ class RunContext:
 # Backend matrices
 # ---------------------------------------------------------------------------
 
-LINUX_BACKENDS: list[BackendSpec] = [
+# Base tier: fast, reliable backends for PR gates and nightly smoke.
+BASE_LINUX_BACKENDS: list[BackendSpec] = [
+    BackendSpec("linux", "container",          "docker", "docker",
+                check_backend="docker"),
+    BackendSpec("linux", "vm",                 None,     "containerd-vm",
+                check_backend="containerd", is_vm=True, check_isolation="vm",
+                sentinel_timeout_override=QEMU_TIMEOUT, stall_grace_secs=90),
+]
+
+BASE_MACOS_BACKENDS: list[BackendSpec] = [
+    BackendSpec("linux", "container", "docker", "docker",
+                check_backend="docker"),
+    BackendSpec("mac",   "vm",        None,     "tart",
+                check_backend="tart",   is_vm=True, retries=1),
+]
+
+# Full tier: all backends for pre-release validation.
+FULL_LINUX_BACKENDS: list[BackendSpec] = [
     BackendSpec("linux", "container",          "docker", "docker",
                 check_backend="docker"),
     BackendSpec("linux", "container",          "podman", "podman",
@@ -139,7 +163,7 @@ LINUX_BACKENDS: list[BackendSpec] = [
                 sentinel_timeout_override=QEMU_TIMEOUT),
 ]
 
-MACOS_BACKENDS: list[BackendSpec] = [
+FULL_MACOS_BACKENDS: list[BackendSpec] = [
     BackendSpec("linux", "container", "docker", "docker",
                 check_backend="docker"),
     BackendSpec("linux", "container", "podman", "podman",
@@ -152,10 +176,17 @@ MACOS_BACKENDS: list[BackendSpec] = [
                 check_backend="tart",   is_vm=True, retries=1),
 ]
 
-# Required for non-matrix tests (T2–T6). Must be available on both platforms.
+# Required for non-matrix tests. Must be available on both platforms.
 DEFAULT_BACKEND = BackendSpec(
     "linux", "container", "docker", "docker", check_backend="docker"
 )
+
+# Tests restricted to --full tier.
+FULL_ONLY_TESTS = {"clone"}
+
+def is_full_test(name: str) -> bool:
+    """Return True if this test requires --full."""
+    return name.split("/")[0] in FULL_ONLY_TESTS
 
 
 # ---------------------------------------------------------------------------
@@ -407,67 +438,17 @@ def test_full_workflow(t: Test, spec: BackendSpec) -> None:
     t.assert_in("claude", r.stdout, "sandbox info (agent)")
 
 
-def test_start_done_agent(t: Test, spec: BackendSpec) -> None:
-    """new (shell agent) → wait → start → assert exit 0.
-
-    Regression test for: relaunchAgent* functions failed when tmux used a fixed
-    socket path (-S /tmp/yoloai-tmux.sock) because the tmux respawn-pane call
-    omitted -S, causing tmux to look for the uid-based default socket.
-
-    The bug path is StatusDone → relaunchAgent (plain start, no prompt).
-    `restart` (stop+start) goes through container recreation and does not
-    exercise this code path at all.
-
-    We use --agent shell because it runs via PromptModeHeadless (sh -c "PROMPT"),
-    exits after the task, and causes a reliable pane death so the status-monitor
-    writes "done". Claude runs in interactive mode and never exits, leaving
-    status stuck at "idle" (flaky hook-based detection).
-
-    The prompt includes "sleep 5" so the shell pane stays alive long enough for
-    sandbox-setup.py to reach its `tmux wait-for yoloai-exit` call. Without the
-    sleep the shell exits in <1s, the tmux server shuts down before wait-for
-    runs, sandbox-setup.py crashes, and the container exits — causing `new` to
-    fail with "instance exited immediately". After the sleep ends the pane dies
-    and the status-monitor reliably writes "done"; the container stays alive
-    because wait-for yoloai-exit keeps blocking until docker stop.
-    """
-    project = t.project("start-done")
-    name = t.sandbox("start-done")
-    exdir = spec.exchange_dir(name)
-
-    r = t.run(
-        "new", name, str(project),
-        "--agent", "shell",
-        "--prompt", f"touch {exdir}/{SENTINEL}; sleep 5",
-        "--yes",
-        *spec.new_args(),
-        *t.debug_new_flags,
-        timeout=120,
-    )
-    t.assert_ok(r, "new")
-    # Sentinel appears immediately (touch runs before sleep).
-    t.wait_for_sentinel(name, timeout=spec.sentinel_timeout(), stall_grace_secs=spec.sentinel_stall_grace())
-    # After sleep 5 the pane dies and the status-monitor writes "done".
-    # No idle hook races: the shell agent has no Notification hook.
-    t.wait_for_done(name)
-
-    # Plain start (no --prompt, no --resume) → relaunchAgent → respawn-pane.
-    # Before the fix, tmux respawn-pane without -S failed here and start
-    # exited non-zero.
-    r = t.run("start", name, timeout=CMD_TIMEOUT)
-    t.assert_ok(r, "start after agent done")
-
-
 def test_stop_start(t: Test, spec: BackendSpec) -> None:
-    """new → wait → restart with new prompt → wait for new sentinel.
+    """new → wait → restart with new prompt → wait → diff → apply → verify.
 
     Uses `yoloai restart --prompt` (= stop + start internally) to verify
-    credential re-injection after a container restart.
+    credential re-injection after a container restart. The second prompt
+    writes to the work copy so we can verify diff/apply end-to-end.
     """
-    project = t.project("stop-start")
-    name = t.sandbox("stop-start")
+    project = t.project(f"stop-start-{spec.label}")
+    name = t.sandbox(f"stop-start-{spec.label}")
     exdir = spec.exchange_dir(name)
-    prompt = f"touch {exdir}/{SENTINEL}"
+    prompt = f"echo smoke > output.txt && touch {exdir}/{SENTINEL}"
 
     r = t.run(
         "new", name, str(project),
@@ -483,98 +464,30 @@ def test_stop_start(t: Test, spec: BackendSpec) -> None:
 
     # restart = stop + start internally.  A new prompt with a different sentinel
     # proves the agent ran successfully with injected credentials after restart.
+    # The prompt writes to the work copy so diff/apply can verify.
     sentinel2 = "done2"
-    prompt2 = f"touch {exdir}/{sentinel2}"
+    prompt2 = f"echo restarted > output2.txt && touch {exdir}/{sentinel2}"
     r = t.run("restart", name, "--prompt", prompt2, timeout=120)
     t.assert_ok(r, "restart")
 
     # Restart adds stop+start overhead on top of model inference, so allow extra time.
     t.wait_for_sentinel(name, sentinel=sentinel2, timeout=spec.sentinel_timeout() + 60, stall_grace_secs=spec.sentinel_stall_grace())
 
-
-def test_files_exchange(t: Test, spec: BackendSpec) -> None:
-    """put → ls → get, without starting an agent."""
-    project = t.project("files")
-    name = t.sandbox("files")
-
-    r = t.run(
-        "new", name, str(project),
-        "--no-start", "--yes",
-        *spec.new_args(),
-        *t.debug_new_flags,
-        timeout=60,
-    )
-    t.assert_ok(r, "new --no-start")
-
-    src_file = t.ctx.tmpdir / "somefile.txt"
-    src_file.write_text("hello from smoke test\n")
-
-    r = t.run("files", name, "put", str(src_file))
-    t.assert_ok(r, "files put")
-
-    r = t.run("files", name, "ls")
-    t.assert_ok(r, "files ls")
-    lines = [line.strip() for line in r.stdout.splitlines()]
-    if "somefile.txt" not in lines:
-        raise AssertionError(
-            f"somefile.txt not found in files ls output: {r.stdout!r}"
-        )
-
-    got_dir = t.ctx.tmpdir / "got"
-    got_dir.mkdir(exist_ok=True)
-    r = t.run("files", name, "get", "somefile.txt", "-o", str(got_dir))
-    t.assert_ok(r, "files get")
-
-    got_file = got_dir / "somefile.txt"
-    if not got_file.exists():
-        raise AssertionError("somefile.txt not found after files get")
-    if "hello from smoke test" not in got_file.read_text():
-        raise AssertionError(
-            f"somefile.txt content mismatch: {got_file.read_text()!r}"
-        )
-
-
-def test_overlay(t: Test) -> None:
-    """Overlay workdir: new → wait → diff → apply.
-
-    Always uses docker/container.  container-enhanced (gVisor) is incompatible
-    with overlayfs.  CAP_SYS_ADMIN is added automatically by yoloai when overlay
-    dirs are present.
-    """
-    overlay_spec = BackendSpec(
-        "linux", "container", "docker", "overlay", check_backend="docker"
-    )
-    project = t.project("overlay")
-    name = t.sandbox("overlay")
-    exdir = "/yoloai/files"
-    prompt = f"echo smoke > output.txt && touch {exdir}/{SENTINEL}"
-
-    r = t.run(
-        "new", name, f"{project}:overlay",
-        "--model", "haiku",
-        "--prompt", prompt,
-        "--yes",
-        *overlay_spec.new_args(),
-        *t.debug_new_flags,
-        timeout=120,
-    )
-    t.assert_ok(r, "new with :overlay workdir")
-
-    t.wait_for_sentinel(name, timeout=DEFAULT_TIMEOUT)
-
+    # Verify diff shows the restarted agent's output
     r = t.run("diff", name)
-    t.assert_ok(r, "diff")
-    t.assert_in("output.txt", r.stdout, "diff output")
+    t.assert_ok(r, "diff after restart")
+    t.assert_in("output2.txt", r.stdout, "diff after restart")
 
+    # Apply and verify the file lands in the project directory
     r = t.run("apply", name, "--yes")
-    t.assert_ok(r, "apply")
+    t.assert_ok(r, "apply after restart")
 
-    output_file = project / "output.txt"
-    if not output_file.exists():
-        raise AssertionError("output.txt not found in project dir after apply")
-    if "smoke" not in output_file.read_text():
+    output2 = project / "output2.txt"
+    if not output2.exists():
+        raise AssertionError("output2.txt not found in project dir after apply")
+    if "restarted" not in output2.read_text():
         raise AssertionError(
-            f"output.txt does not contain 'smoke': {output_file.read_text()!r}"
+            f"output2.txt does not contain 'restarted': {output2.read_text()!r}"
         )
 
 
@@ -612,38 +525,56 @@ def test_clone(t: Test, spec: BackendSpec) -> None:
     t.assert_in("clone-output.txt", r.stdout, "cloned diff output")
 
 
-def test_reset(t: Test, spec: BackendSpec) -> None:
-    """new → wait → diff (non-empty) → reset → diff (empty).
+def test_isolation_check(t: Test, spec: BackendSpec) -> None:
+    """Verify network-isolated sandbox blocks outbound traffic.
 
-    reset is synchronous; no additional wait is needed after it returns.
+    Creates a sandbox with --network-isolated, waits for it to become active,
+    then execs curl to an external address (should be blocked) and to localhost
+    (should not timeout — proves networking stack is functional, not just broken).
+
+    Only runs on container backends where iptables rules are applied by entrypoint.
     """
-    project = t.project("reset")
-    name = t.sandbox("reset")
-    exdir = spec.exchange_dir(name)
-    prompt = f"echo smoke > reset-me.txt && touch {exdir}/{SENTINEL}"
+    if spec.isolation not in ("container", "container-enhanced"):
+        raise SkipTest(f"isolation_check only runs on container backends (got {spec.isolation})")
+
+    project = t.project(f"isolation-{spec.label}")
+    name = t.sandbox(f"isolation-{spec.label}")
 
     r = t.run(
         "new", name, str(project),
-        "--model", "haiku",
-        "--prompt", prompt,
-        "--yes",
+        "--no-start", "--yes",
+        "--network-isolated",
         *spec.new_args(),
         *t.debug_new_flags,
-        timeout=120,
+        timeout=60,
     )
-    t.assert_ok(r, "new")
-    t.wait_for_sentinel(name, timeout=spec.sentinel_timeout(), stall_grace_secs=spec.sentinel_stall_grace())
+    t.assert_ok(r, "new --network-isolated")
 
-    r = t.run("diff", name)
-    t.assert_ok(r, "diff before reset")
-    t.assert_in("reset-me.txt", r.stdout, "diff before reset")
+    r = t.run("start", name, timeout=CMD_TIMEOUT)
+    t.assert_ok(r, "start")
 
-    r = t.run("reset", name, timeout=120)
-    t.assert_ok(r, "reset")
+    # Wait for the container to be active
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
+        status = t._sandbox_status(name)
+        if status == "active" or status == "idle":
+            break
+        time.sleep(1)
 
-    r = t.run("diff", name)
-    t.assert_ok(r, "diff after reset")
-    t.assert_in("No changes", r.stdout, "diff after reset")
+    # Outbound to external address should be blocked by iptables rules
+    r = t.run("exec", name, "--", "curl", "-s", "--max-time", "5", "http://1.1.1.1", timeout=30)
+    if r.returncode == 0:
+        raise AssertionError(
+            "curl to 1.1.1.1 succeeded but should be blocked by network isolation"
+        )
+
+    # Localhost should not get exit code 28 (timeout) — proves the networking
+    # stack is functional, not just broken
+    r = t.run("exec", name, "--", "curl", "-s", "--max-time", "3", "http://127.0.0.1:1", timeout=30)
+    if r.returncode == 28:
+        raise AssertionError(
+            "curl to 127.0.0.1 timed out (exit 28) — networking stack may be broken, not isolated"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -791,11 +722,12 @@ def parse_args() -> argparse.Namespace:
         description="End-to-end smoke tests for yoloai against real agents.",
     )
     parser.add_argument(
-        "--limited",
+        "--full",
         action="store_true",
         help=(
-            "Warn about missing backends instead of aborting. "
-            "Tests requiring unavailable backends are loudly skipped."
+            "Run the full backend matrix (all backends). "
+            "Without --full, only base-tier backends are tested. "
+            "Missing backends are skipped with a warning."
         ),
     )
     parser.add_argument(
@@ -865,7 +797,7 @@ def main() -> int:
         log_dir=log_dir,
         run_id=run_id,
         fixture_dir=fixture_dir,
-        limited=args.limited,
+        full=args.full,
         debug=args.debug,
         test_filter=args.test,
         backend_filter=args.backend,
@@ -873,7 +805,10 @@ def main() -> int:
     atexit.register(cleanup, ctx)
 
     is_linux = sys.platform.startswith("linux")
-    matrix = LINUX_BACKENDS if is_linux else MACOS_BACKENDS
+    if ctx.full:
+        matrix = FULL_LINUX_BACKENDS if is_linux else FULL_MACOS_BACKENDS
+    else:
+        matrix = BASE_LINUX_BACKENDS if is_linux else BASE_MACOS_BACKENDS
 
     # Build the full list of specs to check: default backend + matrix (deduped).
     matrix_labels = {s.label for s in matrix}
@@ -881,8 +816,9 @@ def main() -> int:
         s for s in matrix if s.label != DEFAULT_BACKEND.label
     ]
 
+    tier = "full" if ctx.full else "base"
     print(f"yoloai smoke test  run={run_id}")
-    print(f"host={'linux' if is_linux else 'macos'}  limited={args.limited}")
+    print(f"host={'linux' if is_linux else 'macos'}  tier={tier}")
     print(f"binary={yoloai_bin}")
     print(f"logs={log_dir}\n")
 
@@ -923,23 +859,14 @@ def main() -> int:
                 "Run the smoke test as root to include vm/vmenhanced backends:\n"
                 "  sudo make smoketest-full"
             )
-        if args.limited:
-            print("WARNING: some backends unavailable (will skip their tests):")
-            for label in unavailable_labels:
-                print(f"  {label}: {preq[label].note}")
-            if setup_tip:
-                print(setup_tip)
-            print()
-        else:
-            print(
-                "ERROR: some backends are unavailable. "
-                "Use --limited to skip them and run with what is available:"
-            )
-            for label in unavailable_labels:
-                print(f"  {label}: {preq[label].note}")
-            if setup_tip:
-                print(setup_tip)
-            return 1
+        # Always warn+skip for unavailable backends (base tier is designed to
+        # be runnable with partial backends; full tier warns but doesn't abort).
+        print("WARNING: some backends unavailable (will skip their tests):")
+        for label in unavailable_labels:
+            print(f"  {label}: {preq[label].note}")
+        if setup_tip:
+            print(setup_tip)
+        print()
 
     # -------------------------------------------------------------------------
     # Helper to check if a test should run based on --test filter
@@ -948,54 +875,56 @@ def main() -> int:
             return True
         return test_name in ctx.test_filter
 
-    # Non-matrix tests (T2–T6) — run once on docker/linux/container
+    def run_matrix_test(
+        test_label: str,
+        test_fn: Callable[[Test, BackendSpec], None],
+    ) -> None:
+        """Run a test across the backend matrix with prereq checks and retries."""
+        for spec in matrix:
+            test_name = f"{test_label}/{spec.label}"
+
+            if not should_run_test(test_name):
+                continue
+            if ctx.backend_filter and spec.label not in ctx.backend_filter:
+                continue
+
+            pr = preq.get(spec.label)
+            if pr is None or not pr.available:
+                reason = pr.note if pr else "not in prereq results"
+                skip_test(ctx, test_name, reason)
+                continue
+
+            result = run_test(ctx, test_name, lambda t, s=spec: test_fn(t, s))
+            if not result.passed and spec.retries > 0:
+                for attempt in range(spec.retries):
+                    print(f"      Retrying {test_name} (attempt {attempt + 1}/{spec.retries})...")
+                    ctx.results.pop()
+                    result = run_test(ctx, test_name, lambda t, s=spec: test_fn(t, s))
+                    if result.passed:
+                        break
+
+    # -------------------------------------------------------------------------
+    # Non-matrix tests (full tier only)
     # -------------------------------------------------------------------------
 
-    print("Non-matrix tests (docker/linux/container):")
-    if should_run_test("start_done_agent"):
-        run_test(ctx, "start_done_agent", lambda t: test_start_done_agent(t, DEFAULT_BACKEND))
-    if should_run_test("stop_start"):
-        run_test(ctx, "stop_start",     lambda t: test_stop_start(t, DEFAULT_BACKEND))
-    if should_run_test("files_exchange"):
-        run_test(ctx, "files_exchange", lambda t: test_files_exchange(t, DEFAULT_BACKEND))
     if should_run_test("clone"):
-        run_test(ctx, "clone",          lambda t: test_clone(t, DEFAULT_BACKEND))
-    if should_run_test("reset"):
-        run_test(ctx, "reset",          lambda t: test_reset(t, DEFAULT_BACKEND))
-
-    if is_linux and should_run_test("overlay"):
-        run_test(ctx, "overlay", lambda t: test_overlay(t))
+        if ctx.full:
+            run_test(ctx, "clone", lambda t: test_clone(t, DEFAULT_BACKEND))
+        else:
+            skip_test(ctx, "clone", "full tier only (use --full)")
 
     # -------------------------------------------------------------------------
-    # T1: full_workflow — run across the backend matrix
+    # Matrix tests: full_workflow, stop_start, isolation_check
     # -------------------------------------------------------------------------
 
     print("\nBackend matrix (full_workflow):")
-    for spec in matrix:
-        test_name = f"full_workflow/{spec.label}"
+    run_matrix_test("full_workflow", test_full_workflow)
 
-        # Skip if filtered out by --test or --backend
-        if not should_run_test(test_name):
-            continue
-        if ctx.backend_filter and spec.label not in ctx.backend_filter:
-            continue
+    print("\nBackend matrix (stop_start):")
+    run_matrix_test("stop_start", test_stop_start)
 
-        pr = preq.get(spec.label)
-        if pr is None or not pr.available:
-            reason = pr.note if pr else "not in prereq results"
-            skip_test(ctx, test_name, reason)
-            continue
-
-        # Run test with retries if configured
-        result = run_test(ctx, test_name, lambda t, s=spec: test_full_workflow(t, s))
-        if not result.passed and spec.retries > 0:
-            for attempt in range(spec.retries):
-                print(f"      Retrying {test_name} (attempt {attempt + 1}/{spec.retries})...")
-                # Remove the failed result and retry
-                ctx.results.pop()
-                result = run_test(ctx, test_name, lambda t, s=spec: test_full_workflow(t, s))
-                if result.passed:
-                    break
+    print("\nBackend matrix (isolation_check):")
+    run_matrix_test("isolation_check", test_isolation_check)
 
     print_summary(ctx.results)
 

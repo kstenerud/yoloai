@@ -72,16 +72,16 @@ integration-podman: build
 	@echo "Running Podman integration tests..."
 	@go test -tags=integration -v -count=1 -timeout=10m ./runtime/podman/
 
-## smoketest: run end-to-end smoke tests, skipping tests for unavailable backends
+## smoketest: run base-tier smoke tests (docker + containerd-vm / tart)
 ## VM backends require root (CAP_SYS_ADMIN + write to /var/run/netns/).
 ## Run as root: sudo -E make smoketest
 smoketest: build
-	python3 scripts/smoke_test.py --limited --debug $(SMOKE_ARGS)
+	python3 scripts/smoke_test.py --debug $(SMOKE_ARGS)
 
-## smoketest-full: run smoke tests, failing if any optional backend is unavailable
+## smoketest-full: run full-tier smoke tests (all backends including podman, gVisor)
 ## Run as root: sudo -E make smoketest-full
 smoketest-full: build
-	python3 scripts/smoke_test.py --debug $(SMOKE_ARGS)
+	python3 scripts/smoke_test.py --full --debug $(SMOKE_ARGS)
 
 ## setcap: grant capabilities needed for VM backends (must re-run after each build)
 setcap: build
