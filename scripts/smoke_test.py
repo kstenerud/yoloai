@@ -208,7 +208,7 @@ FULL_LINUX_BACKENDS: list[BackendSpec] = [
                 sentinel_timeout_override=QEMU_TIMEOUT, stall_grace_secs=90),
     BackendSpec("linux", "vm-enhanced",        None,     "containerd-vmenhanced",
                 check_backend="containerd", is_vm=True, check_isolation="vm-enhanced",
-                sentinel_timeout_override=QEMU_TIMEOUT),
+                sentinel_timeout_override=QEMU_TIMEOUT, stall_grace_secs=90),
 ]
 
 FULL_MACOS_BACKENDS: list[BackendSpec] = [
