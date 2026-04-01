@@ -4,6 +4,16 @@ Tracks breaking changes made during beta. Each entry should be included in relea
 
 ## Unreleased
 
+### Smoke test `--limited` flag replaced by `--full`
+
+**Previous behavior:** `python3 scripts/smoke_test.py` ran the full backend matrix by default. `--limited` skipped unavailable backends instead of aborting.
+
+**New behavior:** The default (no flag) runs a base tier with only the most reliable backends (docker + containerd-vm on Linux, docker + tart on macOS). `--full` enables the full backend matrix (adds podman, gVisor, vm-enhanced). Missing backends are always skipped with a warning, never an abort.
+
+**Rationale:** Base tier is fast enough for PR gates and nightly CI. Full tier is for pre-release validation. The old `--limited` flag was backwards — it made the safe option the non-default.
+
+**Migration:** Replace `--limited` with no flag (base tier). Replace bare invocation with `--full` for pre-release runs. `make smoketest` now runs base tier; `make smoketest-full` runs full tier.
+
 ### Profile system redesigned: `profiles/base/` replaced by `defaults/`, no default profile setting
 
 **Previous behavior:** Profile defaults lived in `~/.yoloai/profiles/base/` (config.yaml, Dockerfile, entrypoint.sh, tmux.conf). The `profile` config key let users set a default profile applied to all new sandboxes without `--profile`. Profile config merged over base config (base → profile → CLI). Profiles referenced a parent via `extends: base`.

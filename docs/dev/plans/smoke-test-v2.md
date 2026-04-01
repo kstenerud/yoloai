@@ -650,27 +650,27 @@ What exists today vs what this plan specifies. Updated 2026-04-01.
 - [x] Nightly `smoke-docker` CI job (`.github/workflows/ci.yml`)
 - [x] Nightly `nightly-audit` CI job — govulncheck + hadolint + actionlint (`.github/workflows/ci.yml`)
 - [x] Schedule trigger (`cron: '0 3 * * *'`) in CI
-- [x] Makefile `smoketest` target uses `--limited --debug $(SMOKE_ARGS)` (will become `--debug $(SMOKE_ARGS)` when `--full` lands)
-- [x] Makefile `smoketest-full` target uses `--debug $(SMOKE_ARGS)` (will become `--full --debug $(SMOKE_ARGS)` when `--full` lands)
+- [x] Makefile `smoketest` target uses `--debug $(SMOKE_ARGS)` (base tier, no flag)
+- [x] Makefile `smoketest-full` target uses `--full --debug $(SMOKE_ARGS)` (full tier)
+- [x] Replace `--limited` with `--full` flag in `smoke_test.py`
+- [x] Split `LINUX_BACKENDS` / `MACOS_BACKENDS` into `BASE_*` / `FULL_*` constants
+- [x] Add `FULL_ONLY_TESTS` set and `is_full_test()` gate
+- [x] T2 (`stop_start`): prompt writes to work copy + diff/apply assertion after restart; runs across backend matrix
+- [x] T4 (`isolation_check`): new smoke test function — curl to external blocked, localhost not timeout
+- [x] T3 (`clone`): restricted to full tier only
+- [x] Remove smoke tests moved to integration tier: `start_done_agent`, `files_exchange`, `overlay`, `reset`
+- [x] `TestCLI_StartAfterDone` (`internal/cli/integration_test.go`)
+- [x] `TestCLI_FilesExchange` (`internal/cli/integration_test.go`)
+- [x] `TestCLI_Apply` (`internal/cli/integration_test.go`)
+- [x] `TestIntegration_Clone` (`sandbox/integration_test.go`)
+- [x] `TestIntegration_Overlay` (`sandbox/integration_test.go`) — includes overlayfs chown workaround
+- [x] `--junit <path>` flag with incremental XML output + atexit crash resilience
+- [x] Breaking change entry in `docs/BREAKING-CHANGES.md` for `--limited` removal
 
-### Pending (design only)
+### Pending (lower priority)
 
-- [ ] Replace `--limited` with `--full` flag in `smoke_test.py`
-- [ ] Split `LINUX_BACKENDS` / `MACOS_BACKENDS` into `BASE_*` / `FULL_*` constants
-- [ ] Add `FULL_ONLY_TESTS` set and `is_full_test()` gate
-- [ ] T2 (`stop_start`): update prompt to write to work copy + add diff/apply assertion
-- [ ] T4 (`isolation_check`): new smoke test function
-- [ ] T3 (`clone`): restrict to full tier only
-- [ ] Remove smoke tests moved to integration tier: `start_done_agent`, `files_exchange`, `overlay`, `reset`
-- [ ] `TestCLI_StartAfterDone` (`internal/cli/integration_test.go`)
-- [ ] `TestCLI_FilesExchange` (`internal/cli/integration_test.go`)
-- [ ] `TestCLI_Apply` (`internal/cli/integration_test.go`)
-- [ ] `TestIntegration_Clone` (`sandbox/integration_test.go`)
-- [ ] `TestIntegration_Overlay` (`sandbox/integration_test.go`)
-- [ ] `--junit <path>` flag with incremental XML output
 - [ ] JUnit artifact upload in CI smoke job
 - [ ] Nightly failure alerting verification (GitHub notification settings)
-- [ ] Breaking change entry in `docs/BREAKING-CHANGES.md` for `--limited` removal
 
 ### Future (from known gaps — lower priority)
 
