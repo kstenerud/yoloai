@@ -4,8 +4,10 @@ package sandbox
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -765,4 +767,118 @@ func TestIntegration_AgentStubWorkflow(t *testing.T) {
 	))
 	require.NoError(t, workspace.ApplyPatch(patch, targetDir, false))
 	assert.FileExists(t, filepath.Join(targetDir, "agent-output.txt"))
+}
+
+func TestIntegration_Clone(t *testing.T) {
+	mgr, ctx := integrationSetup(t)
+	projectDir := createProjectDir(t)
+
+	_, err := mgr.Create(ctx, CreateOptions{
+		Name:    "clone-a",
+		Workdir: DirSpec{Path: projectDir},
+		Agent:   "test",
+		NoStart: true,
+		Version: "test",
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		mgr.Destroy(ctx, "clone-a") //nolint:errcheck // test cleanup
+		mgr.Destroy(ctx, "clone-b") //nolint:errcheck // test cleanup
+	})
+
+	// Seed a change in A's work copy
+	meta, err := LoadMeta(Dir("clone-a"))
+	require.NoError(t, err)
+	workDir := WorkDir("clone-a", meta.Workdir.HostPath)
+	require.NoError(t, os.WriteFile(
+		filepath.Join(workDir, "main.go"),
+		[]byte("package main\n\nimport \"fmt\"\n\nfunc main() { fmt.Println(\"clone-test\") }\n"),
+		0600,
+	))
+
+	// Clone A → B
+	require.NoError(t, mgr.Clone(ctx, CloneOptions{Source: "clone-a", Dest: "clone-b"}))
+
+	// Diff on clone should show the seeded change
+	diffResult, err := GenerateDiff(ctx, DiffOptions{Name: "clone-b", Runtime: mgr.runtime})
+	require.NoError(t, err)
+	assert.False(t, diffResult.Empty, "cloned sandbox should have changes")
+	assert.Contains(t, diffResult.Output, "clone-test")
+}
+
+func TestIntegration_Overlay(t *testing.T) {
+	mgr, ctx := integrationSetup(t)
+	projectDir := createProjectDir(t)
+
+	_, err := mgr.Create(ctx, CreateOptions{
+		Name:    "overlay-integ",
+		Workdir: DirSpec{Path: projectDir, Mode: DirModeOverlay},
+		Agent:   "test",
+		Version: "test",
+	})
+	if err != nil {
+		if strings.Contains(err.Error(), "overlay") || strings.Contains(err.Error(), "mount") ||
+			strings.Contains(err.Error(), "CAP_SYS_ADMIN") || strings.Contains(err.Error(), "permission") {
+			t.Skip("overlay not supported: " + err.Error())
+		}
+		require.NoError(t, err) // fail on unexpected errors
+	}
+	t.Cleanup(func() {
+		// The overlayfs workdir (ovlwork/) contains root-owned kernel files that
+		// cannot be removed by the test process. Clean them up via exec as root
+		// inside the still-running container before destroying the sandbox.
+		ovlEncoded := EncodePath(projectDir)
+		mgr.runtime.Exec(ctx, InstanceName("overlay-integ"), //nolint:errcheck // best-effort
+			[]string{"rm", "-rf", "/yoloai/overlay/" + ovlEncoded + "/ovlwork"}, "root")
+		mgr.Destroy(ctx, "overlay-integ") //nolint:errcheck // test cleanup
+	})
+
+	testutil.WaitForActive(ctx, t, mgr.runtime, InstanceName("overlay-integ"), 15*time.Second)
+
+	// For overlay mode, MountPath is /yoloai/overlay/<encoded>/merged — not the host path.
+	meta, err := LoadMeta(Dir("overlay-integ"))
+	require.NoError(t, err)
+	containerPath := meta.Workdir.MountPath
+
+	// Re-initialize git inside the container's overlay merged dir. The entrypoint's
+	// chown -R can make overlayfs directories opaque, hiding the lower layer's git
+	// objects. In production the agent (or auto-commit) creates a fresh repo; we
+	// replicate that here.
+	initCmd := fmt.Sprintf(
+		"cd %s && rm -rf .git && git init && git config user.email test@test && git config user.name test && git add -A && git commit -m baseline",
+		containerPath,
+	)
+	execResult, err := mgr.runtime.Exec(ctx, InstanceName("overlay-integ"),
+		[]string{"sh", "-c", initCmd}, "yoloai")
+	require.NoError(t, err)
+	require.Equal(t, 0, execResult.ExitCode, "git init inside overlay should succeed")
+
+	// Update the baseline SHA in meta.json so diff knows the starting point
+	shaResult, err := mgr.runtime.Exec(ctx, InstanceName("overlay-integ"),
+		[]string{"git", "-C", containerPath, "rev-parse", "HEAD"}, "yoloai")
+	require.NoError(t, err)
+	require.NoError(t, updateOverlayBaseline("overlay-integ", projectDir, strings.TrimSpace(shaResult.Stdout)))
+
+	// Write a file inside the container (overlay captures it in upper layer)
+	execResult, err = mgr.runtime.Exec(ctx, InstanceName("overlay-integ"),
+		[]string{"sh", "-c", fmt.Sprintf("echo overlay-test > %s/output.txt", containerPath)}, "yoloai")
+	require.NoError(t, err)
+	assert.Equal(t, 0, execResult.ExitCode)
+
+	// Diff: must use GenerateOverlayDiff (GenerateDiff returns a stub for overlay)
+	diffResults, err := GenerateOverlayDiff(ctx, mgr.runtime, DiffOptions{Name: "overlay-integ"})
+	require.NoError(t, err)
+	require.NotEmpty(t, diffResults, "overlay diff should return results")
+	assert.False(t, diffResults[0].Empty, "overlay should have changes after exec write")
+	assert.Contains(t, diffResults[0].Output, "output.txt")
+
+	// Apply: must use GenerateOverlayPatch (ApplyAll skips overlay dirs)
+	patches, err := GenerateOverlayPatch(ctx, mgr.runtime, "overlay-integ", nil)
+	require.NoError(t, err)
+	require.NotEmpty(t, patches)
+	require.NoError(t, workspace.ApplyPatch(patches[0].Patch, projectDir, false))
+
+	applied, err := os.ReadFile(filepath.Join(projectDir, "output.txt")) //nolint:gosec // test path
+	require.NoError(t, err)
+	assert.Contains(t, string(applied), "overlay-test")
 }
