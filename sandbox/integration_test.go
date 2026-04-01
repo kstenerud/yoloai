@@ -3,6 +3,7 @@
 package sandbox
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -593,6 +594,14 @@ func TestIntegration_NetworkIsolation(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { mgr.Destroy(ctx, "netisolated") }) //nolint:errcheck // test cleanup
 
+	// Verify runtime-config.json has network_isolated: true so the test
+	// can't pass vacuously (e.g., if the config field were never written).
+	rcData, err := os.ReadFile(filepath.Join(Dir("netisolated"), RuntimeConfigFile)) //nolint:gosec // test path
+	require.NoError(t, err)
+	var rc map[string]any
+	require.NoError(t, json.Unmarshal(rcData, &rc))
+	assert.Equal(t, true, rc["network_isolated"], "runtime-config.json must have network_isolated: true")
+
 	testutil.WaitForActive(ctx, t, mgr.runtime, InstanceName("netisolated"), 15*time.Second)
 
 	// The entrypoint applies iptables rules before starting the agent, but
@@ -615,6 +624,93 @@ func TestIntegration_NetworkIsolation(t *testing.T) {
 	lo, _ := mgr.runtime.Exec(ctx, InstanceName("netisolated"),
 		[]string{"curl", "-sf", "--max-time", "5", "http://127.0.0.1"}, "yoloai")
 	assert.NotEqual(t, 28, lo.ExitCode, "loopback should not time out (iptables must allow lo)")
+}
+
+// TestIntegration_ReadOnlyMountVerified verifies that a read-only aux directory
+// mount is actually enforced inside the container, not just recorded in meta.json.
+// TestIntegration_AuxDirRO only checks the meta; this test proves the kernel
+// enforces the mount flag.
+func TestIntegration_ReadOnlyMountVerified(t *testing.T) {
+	mgr, ctx := integrationSetup(t)
+	projectDir := createProjectDir(t)
+	auxDir := createAuxDir(t, "readonly-verify")
+
+	_, err := mgr.Create(ctx, CreateOptions{
+		Name:    "romount",
+		Workdir: DirSpec{Path: projectDir},
+		Agent:   "test",
+		AuxDirs: []DirSpec{{Path: auxDir}}, // default mode = read-only
+		Version: "test",
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { mgr.Destroy(ctx, "romount") }) //nolint:errcheck // test cleanup
+
+	testutil.WaitForActive(ctx, t, mgr.runtime, InstanceName("romount"), 15*time.Second)
+
+	// Attempt to write to the read-only aux dir from inside the container.
+	// The mount target mirrors the host path by default.
+	result, _ := mgr.runtime.Exec(ctx, InstanceName("romount"),
+		[]string{"sh", "-c", "echo pwned > " + auxDir + "/attack.txt"}, "yoloai")
+	assert.NotEqual(t, 0, result.ExitCode,
+		"write to read-only aux dir mount should fail inside the container")
+
+	// Verify the host-side aux dir is unmodified.
+	assert.NoFileExists(t, filepath.Join(auxDir, "attack.txt"))
+}
+
+// TestIntegration_CredentialInjection verifies the /run/secrets credential
+// lifecycle: secrets are readable inside the agent's process tree, and the
+// host-side temp directory is cleaned up after container start.
+//
+// Docker exec does NOT inherit the entrypoint's environment (it starts a new
+// process chain), so we verify credentials by having the test agent's prompt
+// write the env var to a file, then reading that file via exec.
+func TestIntegration_CredentialInjection(t *testing.T) {
+	mgr, ctx := integrationSetup(t)
+	projectDir := createProjectDir(t)
+
+	meta, err := mgr.Create(ctx, CreateOptions{
+		Name:    "credinject",
+		Workdir: DirSpec{Path: projectDir},
+		Agent:   "test",
+		Prompt:  "printenv TEST_CREDENTIAL > /tmp/cred-check; sleep 5",
+		Env:     map[string]string{"TEST_CREDENTIAL": "secret-value-xyz"},
+		Version: "test",
+	})
+	require.NoError(t, err)
+	_ = meta
+	t.Cleanup(func() { mgr.Destroy(ctx, "credinject") }) //nolint:errcheck // test cleanup
+
+	testutil.WaitForActive(ctx, t, mgr.runtime, InstanceName("credinject"), 15*time.Second)
+
+	// Poll until the prompt has written the credential file. The test agent
+	// runs sh -c "PROMPT" via tmux; on slow CI runners a fixed sleep was
+	// insufficient and caused flaky failures.
+	var credOutput string
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		r, execErr := mgr.runtime.Exec(ctx, InstanceName("credinject"),
+			[]string{"cat", "/tmp/cred-check"}, "yoloai")
+		if execErr == nil && r.ExitCode == 0 && r.Stdout != "" {
+			credOutput = r.Stdout
+			break
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	require.NotEmpty(t, credOutput, "credential file was never written by prompt within 15s")
+	assert.Equal(t, "secret-value-xyz", credOutput,
+		"credential should be injected via /run/secrets and available in agent env")
+
+	// The host-side temp secrets dir (yoloai-secrets-*) should have been
+	// removed by the defer in launchContainer. Check that no matching dir
+	// remains in the system temp directory.
+	tmpParent := os.TempDir()
+	entries, err := os.ReadDir(tmpParent)
+	require.NoError(t, err)
+	for _, e := range entries {
+		assert.False(t, e.IsDir() && len(e.Name()) > 15 && e.Name()[:15] == "yoloai-secrets-",
+			"host-side secrets temp dir should be cleaned up: %s", e.Name())
+	}
 }
 
 // TestIntegration_AgentStubWorkflow tests the full agent-does-work → diff → apply pipeline.

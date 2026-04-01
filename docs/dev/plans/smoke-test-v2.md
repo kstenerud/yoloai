@@ -1,5 +1,9 @@
 # Smoke Test V2: Base / Full Split
 
+> **This is a design spec**, not a description of current state. See the
+> [Implementation status](#implementation-status) section at the end for what
+> exists today vs what remains to be built.
+
 ## Motivation
 
 The current smoke test has no depth tiers: `smoketest` and `smoketest-full` differ only
@@ -37,6 +41,8 @@ backends?*
 | `TestCLI_Apply` | `internal/cli/integration_test.go` | New — `apply` end-to-end via CLI |
 | `TestIntegration_Clone` | `sandbox/integration_test.go` | New — clone captures work-copy state |
 | `TestIntegration_Overlay` | `sandbox/integration_test.go` | Moved from smoke; skip if no CAP_SYS_ADMIN |
+| `TestIntegration_ReadOnlyMountVerified` | `sandbox/integration_test.go` | New — exec write to RO aux dir fails |
+| `TestIntegration_CredentialInjection` | `sandbox/integration_test.go` | New — /run/secrets lifecycle + host cleanup |
 
 Also add `testutil.WaitForStatus` helper to support `TestCLI_StartAfterDone`.
 Signature accepts a `func(context.Context) (string, error)` status poller rather than a
@@ -56,10 +62,21 @@ running/stopped state, and importing `sandbox` from `testutil` would create an i
 
 ```makefile
 smoketest: build
-    python3 scripts/smoke_test.py --limited --debug
+    python3 scripts/smoke_test.py --limited --debug $(SMOKE_ARGS)
 
 smoketest-full: build
-    python3 scripts/smoke_test.py --full --debug
+    python3 scripts/smoke_test.py --debug $(SMOKE_ARGS)
+```
+
+Currently uses `--limited` for the base tier (skip unavailable backends). When the
+`--full` flag is implemented and `--limited` removed, this becomes:
+
+```makefile
+smoketest: build
+    python3 scripts/smoke_test.py --debug $(SMOKE_ARGS)
+
+smoketest-full: build
+    python3 scripts/smoke_test.py --full --debug $(SMOKE_ARGS)
 ```
 
 ---
@@ -68,8 +85,8 @@ smoketest-full: build
 
 ### Base (`smoketest`)
 
-Runs with `--limited --debug`. Skips unavailable backends rather than aborting.
-Intended for developer local runs and PR CI.
+Runs with `--debug` (no `--full`). Skips unavailable backends rather than aborting.
+Intended for developer local runs and nightly CI.
 
 **Backend matrix** — docker + primary VM per platform:
 - Linux: docker, containerd-vm
@@ -77,13 +94,17 @@ Intended for developer local runs and PR CI.
 
 **Tests**: `full_workflow` and `stop_start` on each matrix backend.
 
-Target wall-clock time: under 15 minutes on a warm machine with pre-pulled images. Docker
-runs fast; containerd-vm (QEMU) can take 5–10 minutes for two sentinel waits.
-The 5-minute target is not realistic once `stop_start` is on the VM backend.
+Target wall-clock time: under 30 minutes on a warm machine with pre-pulled images. Docker
+tests finish in ~5 minutes; containerd-vm (QEMU) dominates with 5–10 min per sentinel
+wait and T2 requiring two waits plus restart overhead (~15–20 min on containerd-vm alone).
+
+If the base tier consistently exceeds 30 minutes, consider running T2 on Docker only in
+the base tier (with full-matrix T2 in the full tier). This would roughly halve base tier
+wall time.
 
 ### Full (`smoketest-full`)
 
-Runs without `--limited`. Aborts if any configured backend is unavailable.
+Runs with `--full`. Aborts if any configured backend is unavailable.
 Intended for pre-release runs on the dedicated test machine.
 
 **Backend matrix** — all backends per platform:
@@ -122,8 +143,13 @@ All non-matrix tests use `DEFAULT_BACKEND` (docker/linux/container) in both tier
 
 *Strengthened from current implementation; promoted to a matrix test.*
 
-`new` → wait for sentinel → `restart --prompt <sentinel2>` → wait for sentinel2 →
-`diff` → `apply` → assert applied content.
+`new --prompt "echo smoke > output.txt && touch <exdir>/done"` → wait for sentinel →
+`restart --prompt "echo restarted > output2.txt && touch <exdir>/done2"` → wait for
+sentinel2 → `diff` → assert `output2.txt` in diff → `apply` → assert `output2.txt`
+exists in project dir with content `"restarted"`.
+
+The prompt must write to the work copy (not just the exchange dir). Without this, `diff`
+shows nothing and the diff/apply assertion is vacuous.
 
 Tests credential re-injection AND full workflow correctness after a container restart.
 Runs across the backend matrix because both are per-backend concerns.
@@ -135,7 +161,7 @@ the git baseline in VM-local storage. Without it, the agent can still write file
 will fail because the baseline is absent. The original `stop_start` test only checked
 the sentinel and would have missed this (and did: see commit ee314b8).
 
-### T4: isolation_check (matrix — base + full)
+### T4: isolation_check (container backends only — base + full)
 
 *New.*
 
@@ -145,8 +171,21 @@ assert non-zero exit. Then exec `curl -sf --max-time 5 http://127.0.0.1` → ass
 nothing listens on port 80).
 
 Verifies that iptables rules applied by `entrypoint.py` are actually in effect, not just configured.
-Runs across the backend matrix because each backend's entrypoint path is independent. Requires
-`NET_ADMIN` cap, which the sandbox layer adds automatically for isolated sandboxes.
+Requires `NET_ADMIN` cap, which the sandbox layer adds automatically for isolated sandboxes.
+
+**Scoped to container backends only** (Docker, Podman, containerd-vm). The iptables rules are
+applied by `entrypoint.py` inside the container — identical code regardless of the OCI runtime.
+Running T4 on every backend adds minutes for zero additional coverage. VM backends like Tart
+and Seatbelt don't use `entrypoint.py` and may implement isolation differently (or not at all);
+skip them with a clear message rather than producing a misleading result.
+
+**Relationship to `TestIntegration_NetworkIsolation`:** The Go integration test
+(`sandbox/integration_test.go`) already covers the same assertions (curl to 1.1.1.1,
+loopback check, runtime-config.json verification) against Docker. T4 in the smoke tier
+adds value by running the check across additional container backends (Podman,
+containerd-vm) and validating that isolation works in the full `new` → agent startup
+flow, not just the programmatic sandbox API. If only Docker needs coverage, the
+integration test is sufficient and T4 can be deferred.
 
 ### T3: clone (matrix — full only)
 
@@ -227,9 +266,16 @@ Tests that `clone` captures work-copy state including changes, not just the base
 
 Tests the `:overlay` workdir mode end-to-end.
 
-Skip if `CAP_SYS_ADMIN` is not available. Check with `os.Geteuid() != 0` as a proxy
-(not `unix.Prctl` — `prctl(2)` manipulates process attributes, it does not query capabilities).
-Print a clear skip message rather than failing.
+The overlayfs `mount` call runs **inside the container** (via `entrypoint.py`), not on
+the host. Docker grants CAP_SYS_ADMIN to containers regardless of host euid — any user
+in the `docker` group can create containers with elevated capabilities. Therefore, do NOT
+use `os.Geteuid() != 0` as a skip guard (it would skip on CI and most dev machines).
+
+Instead, attempt the overlay creation and skip on failure. The test should catch the
+`Create` error and call `t.Skip("overlay not supported: ...")` if it indicates a
+capability or mount failure. This handles rootless Docker/Podman (where user-namespace
+CAP_SYS_ADMIN may be insufficient for real overlayfs) without false skips on standard
+Docker.
 
 1. Create sandbox with overlay workdir (`<project>:overlay`)
 2. Start container; exec a write command inside
@@ -242,18 +288,22 @@ Print a clear skip message rather than failing.
 
 ```python
 parser.add_argument("--full", action="store_true",
-    help="Run the full test suite and all backend matrix entries.")
+    help="Run the full test suite and all backend matrix entries. "
+         "Aborts if any configured backend is unavailable.")
 ```
 
-- Without `--full`: BASE_*_BACKENDS matrix; T1 + T2 only.
-- With `--full`: FULL_*_BACKENDS matrix; T1 + T2 + T3.
-- `--full` and `--limited` are mutually exclusive; check at startup with a clear error.
+- Without `--full` (default): BASE_*_BACKENDS matrix; T1 + T2 + T4 only.
+  Unavailable backends are skipped with a warning (current `--limited` behavior).
+- With `--full`: FULL_*_BACKENDS matrix; T1 + T2 + T3 + T4. Aborts if any configured
+  backend is unavailable.
 
-**Breaking change:** The current `smoketest-full` Makefile target runs
-`python3 scripts/smoke_test.py` with no flags, which previously ran the full matrix.
-After this change, that bare invocation runs the base tier. Any script or runbook invoking
-the smoke test directly (not via `make`) must be updated to add `--full`. Document in
-`docs/BREAKING-CHANGES.md`.
+The `--limited` flag is removed. Its skip-on-unavailable behavior becomes the default.
+This eliminates the three-way confusion between `--full`, `--limited`, and bare invocation.
+
+**Breaking change:** Bare invocation of `smoke_test.py` (without `make`) previously ran
+the full matrix and aborted on missing backends. After this change, bare invocation runs
+the base tier with skip behavior. Scripts that need the full matrix must add `--full`.
+Document in `docs/BREAKING-CHANGES.md`.
 
 ```python
 FULL_ONLY_TESTS = {"clone"}
@@ -263,9 +313,12 @@ def is_full_test(name: str) -> bool:
     return base in FULL_ONLY_TESTS
 ```
 
-`smoketest-full` uses `--debug` (same as base tier — `--debug` only affects log verbosity,
-not test behavior, and verbose output is more valuable for the infrequent pre-release run
-where no operator is nearby to rerun with debug enabled).
+Both tiers use `--debug`. It only affects log verbosity, not test behavior, and verbose
+output is most valuable for the full pre-release run where no operator is nearby.
+
+Each test gets its own project directory via `t.project(label)` (a temp dir with a seed
+`main.go`). Tests may use generic filenames like `output.txt` without collision risk
+because project directories are never shared between tests.
 
 ---
 
@@ -277,8 +330,9 @@ share Docker state and isolated HOME directories; parallelism would require uniq
 names per test and careful cleanup ordering.
 
 **Smoke test cleanup:** The smoke test uses `atexit.register(cleanup, ctx)` which destroys
-all sandboxes registered via `ctx.alloc_name()` — including sandboxes from new tests —
-regardless of whether the test passed or failed. No new cleanup code is needed for T4.
+all sandboxes registered via `t.sandbox(label)` (appends to `ctx.sandboxes`) — including
+sandboxes from new tests — regardless of whether the test passed or failed. No new
+cleanup code is needed for T4.
 
 ---
 
@@ -326,10 +380,41 @@ jobs:
         run: make smoketest
 ```
 
-With `--limited`, unavailable backends (containerd-vm) are skipped automatically —
+Without `--full`, unavailable backends (containerd-vm) are skipped automatically —
 no extra scoping is needed. The job exercises T1 (`full_workflow`), T2 (`stop_start`),
 and T4 (`isolation_check`) against Docker. This gives a "real Claude worked end-to-end"
 signal in CI without requiring self-hosted infrastructure.
+
+### Nightly audit job
+
+A separate `nightly-audit` job (schedule-only) runs `govulncheck`, `hadolint`, and
+`actionlint`. These catch vulnerability disclosures and Dockerfile drift between PRs.
+No API key needed.
+
+### Nightly failure alerting
+
+Unmonitored nightly jobs are write-only infrastructure. GitHub Actions sends email
+notifications to repo watchers on workflow failure by default. Verify this is enabled
+(Settings → Notifications → "Send notifications for failed workflows only"). For
+additional alerting (e.g., Slack), add a final job with `if: failure()` that posts to a
+webhook:
+
+```yaml
+notify-failure:
+  needs: [smoke-docker, nightly-audit]
+  if: failure()
+  runs-on: ubuntu-latest
+  steps:
+    - name: Notify
+      run: curl -X POST "${{ secrets.SLACK_WEBHOOK }}" ...
+```
+
+The nightly smoke job and nightly audit job should both trigger alerts.
+
+API key expiry is a common silent failure mode. If `ANTHROPIC_API_KEY` expires, the
+nightly smoke job will fail with an auth error. The failure alert covers this, but
+consider adding a comment in the workflow file noting the key's expected rotation
+cadence so maintainers know to check it.
 
 ### Pre-release full tier
 
@@ -341,6 +426,100 @@ These are not automatable on GitHub-hosted runners and are intentionally pre-rel
 
 ---
 
+## Tier ownership
+
+Each test tier answers a different question. This table is the definitive guide to
+which tier a new test belongs in.
+
+| Tier | Question answered | Real agent? | Real container? | CI? |
+|------|-------------------|-------------|-----------------|-----|
+| Unit (`go test ./...`) | Does the logic work? | No | No | PR gate |
+| Integration (`make integration`) | Does lifecycle work with Docker? | No (stub agent) | Yes | PR gate |
+| E2E (`make e2e`) | Does the binary start, parse args, and exit cleanly? | No | Yes | PR gate |
+| Smoke base (`make smoketest`) | Does a real agent work end-to-end on Docker? | Yes | Yes | Nightly |
+| Smoke full (`make smoketest-full`) | Does the full backend matrix pass? | Yes | Yes | Pre-release |
+
+The **e2e tier** validates binary-level concerns (exit codes, error messages, `--json` output
+format). It is not a workflow test — it does not modify work copies or exercise diff/apply
+with real content. The smoke tier owns that question.
+
+---
+
+## JUnit XML output
+
+Add `--junit <path>` flag to `smoke_test.py`:
+
+```python
+parser.add_argument("--junit", metavar="PATH",
+    help="Write JUnit XML test report to PATH")
+```
+
+Hand-roll the XML (the format is simple; no third-party dependency needed):
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites>
+  <testsuite name="smoke" tests="N" failures="F" skipped="S" time="T">
+    <testcase name="full_workflow/docker" time="12.3"/>
+    <testcase name="isolation_check/docker" time="4.1"/>
+    <testcase name="clone/docker">
+      <skipped message="full tier only"/>
+    </testcase>
+    <testcase name="full_workflow/containerd-vm">
+      <failure message="sentinel not seen in 300s"/>
+    </testcase>
+  </testsuite>
+</testsuites>
+```
+
+The nightly CI job writes the XML and uploads it:
+
+```yaml
+- name: Run smoke tests (Docker)
+  env:
+    ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+  run: make smoketest SMOKE_ARGS='--junit smoke-results.xml'
+
+- uses: actions/upload-artifact@v4
+  if: always()
+  with:
+    name: smoke-test-results
+    path: smoke-results.xml
+```
+
+This gives historical tracking via GitHub Actions artifacts without any external service.
+
+**Crash resilience:** Write the XML incrementally — open the file and write the
+`<testsuites><testsuite>` header at the start of the run, append `<testcase>` elements
+as each test completes, and write the closing tags at the end. If the process is killed
+mid-run (e.g., OOM on a CI runner), the partial file is still parseable by most JUnit
+consumers. Use `atexit.register` to attempt writing closing tags on abnormal exit.
+
+---
+
+## Known gaps
+
+### CAP_SYS_ADMIN containment (overlay mode)
+
+`TestIntegration_Overlay` tests that overlay diff/apply works, but `CAP_SYS_ADMIN` is a
+broad capability that permits namespace manipulation, mount operations, and more. There is
+no test that verifies the sandbox doesn't *leak* this capability in a way that allows
+container escape. A full container escape test is out of scope for this plan, but the
+tradeoff is documented in `docs/design/security.md` (line 106). The mitigation is that
+the container's namespace isolation limits the blast radius, and `:copy` mode avoids the
+capability entirely.
+
+### Concurrent sandbox operations
+
+No test runs sandbox operations concurrently (e.g., creating two sandboxes simultaneously,
+or diff on one while apply runs on another). Race conditions in shared state — Docker daemon
+API, sandbox directory listing, file locks — would only be caught by concurrent testing.
+A basic concurrent test (`t.Run` two goroutines that each create/diff/destroy separate
+sandboxes) would catch lock contention and shared-state races without complex orchestration.
+This is deferred as a future improvement.
+
+---
+
 ## Out of scope
 
 - `attach` — inherently interactive (tmux); not automatable.
@@ -349,3 +528,40 @@ These are not automatable on GitHub-hosted runners and are intentionally pre-rel
   covered in `sandbox/integration_test.go` and `internal/cli/integration_test.go`.
 - Multi-agent (Gemini, Codex) — separate run mode gated on key presence.
 - `profile` / `config` commands — admin surface; not lifecycle.
+
+---
+
+## Implementation status
+
+What exists today vs what this plan specifies. Updated 2026-03-31.
+
+### Done (in code)
+
+- [x] `TestIntegration_NetworkIsolation` — runtime-config.json + curl assertions (`sandbox/integration_test.go`)
+- [x] `TestIntegration_ReadOnlyMountVerified` — exec write to RO aux dir fails (`sandbox/integration_test.go`)
+- [x] `TestIntegration_CredentialInjection` — /run/secrets lifecycle + host cleanup (`sandbox/integration_test.go`)
+- [x] `testutil.WaitForStatus` helper (`internal/testutil/wait.go`)
+- [x] Nightly `smoke-docker` CI job (`.github/workflows/ci.yml`)
+- [x] Nightly `nightly-audit` CI job — govulncheck + hadolint + actionlint (`.github/workflows/ci.yml`)
+- [x] Schedule trigger (`cron: '0 3 * * *'`) in CI
+- [x] Makefile `smoketest` target uses `--limited --debug $(SMOKE_ARGS)` (will become `--debug $(SMOKE_ARGS)` when `--full` lands)
+- [x] Makefile `smoketest-full` target uses `--debug $(SMOKE_ARGS)` (will become `--full --debug $(SMOKE_ARGS)` when `--full` lands)
+
+### Pending (design only)
+
+- [ ] Replace `--limited` with `--full` flag in `smoke_test.py`
+- [ ] Split `LINUX_BACKENDS` / `MACOS_BACKENDS` into `BASE_*` / `FULL_*` constants
+- [ ] Add `FULL_ONLY_TESTS` set and `is_full_test()` gate
+- [ ] T2 (`stop_start`): update prompt to write to work copy + add diff/apply assertion
+- [ ] T4 (`isolation_check`): new smoke test function
+- [ ] T3 (`clone`): restrict to full tier only
+- [ ] Remove smoke tests moved to integration tier: `start_done_agent`, `files_exchange`, `overlay`, `reset`
+- [ ] `TestCLI_StartAfterDone` (`internal/cli/integration_test.go`)
+- [ ] `TestCLI_FilesExchange` (`internal/cli/integration_test.go`)
+- [ ] `TestCLI_Apply` (`internal/cli/integration_test.go`)
+- [ ] `TestIntegration_Clone` (`sandbox/integration_test.go`)
+- [ ] `TestIntegration_Overlay` (`sandbox/integration_test.go`)
+- [ ] `--junit <path>` flag with incremental XML output
+- [ ] JUnit artifact upload in CI smoke job
+- [ ] Nightly failure alerting verification (GitHub notification settings)
+- [ ] Breaking change entry in `docs/BREAKING-CHANGES.md` for `--limited` removal

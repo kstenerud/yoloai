@@ -90,3 +90,22 @@ jobs:
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: make smoketest
+
+  nightly-audit:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule'
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Run govulncheck
+        run: make govulncheck
+
+      - name: Run hadolint
+        run: make hadolint
+
+      - name: Run actionlint
+        run: make actionlint
