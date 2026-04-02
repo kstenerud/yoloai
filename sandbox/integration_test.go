@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -807,6 +808,9 @@ func TestIntegration_Clone(t *testing.T) {
 }
 
 func TestIntegration_Overlay(t *testing.T) {
+	if runtime.GOOS == "darwin" {
+		t.Skip("overlayfs lower-layer files are immutable on Docker Desktop/VirtioFS; test requires native Linux overlayfs")
+	}
 	mgr, ctx := integrationSetup(t)
 	projectDir := createProjectDir(t)
 
