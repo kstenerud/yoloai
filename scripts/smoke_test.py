@@ -867,7 +867,7 @@ def main() -> int:
         print(
             "ERROR: full smoke tests require root on Linux (for VM/namespace backends).\n"
             "Run with:\n"
-            "  sudo -E make smoketest-full\n"
+            "  make smoketest-full          (auto-escalates to root)\n"
             "  sudo -E python3 scripts/smoke_test.py --full",
             file=sys.stderr,
         )

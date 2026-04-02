@@ -79,13 +79,18 @@ smoketest: build
 	python3 scripts/smoke_test.py --debug $(SMOKE_ARGS)
 
 ## smoketest-full: run full-tier smoke tests (all backends including podman, gVisor)
-## Run as root: sudo -E make smoketest-full
+## Automatically escalates to root on Linux (preserving PATH and env).
 smoketest-full: build
-	python3 scripts/smoke_test.py --full --debug $(SMOKE_ARGS)
+	@if [ "$$(uname)" = "Linux" ] && [ "$$(id -u)" != "0" ]; then \
+		echo "==> Escalating to root for full smoke tests..."; \
+		exec sudo -E PATH="$$PATH" $(MAKE) smoketest-full SMOKE_ARGS="$(SMOKE_ARGS)"; \
+	else \
+		python3 scripts/smoke_test.py --full --debug $(SMOKE_ARGS); \
+	fi
 
 ## releasetest: run every test tier, fastest first
 ## Runs: lint → unit → integration → e2e → podman integration → full smoke
-## Requires root for VM backends: sudo -E make releasetest
+## Automatically escalates to root on Linux for smoke tests.
 releasetest: check integration-podman smoketest-full
 
 ## setcap: grant capabilities needed for VM backends (must re-run after each build)
