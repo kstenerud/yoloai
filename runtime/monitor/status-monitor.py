@@ -457,22 +457,58 @@ def get_agent_pid(tmux_sock=None):
     return None
 
 
+_tmux_fail_count = 0  # consecutive cycles where tmux returned no usable data
+_TMUX_FAIL_THRESHOLD = 3  # report death after this many consecutive failures
+
+
 def check_pane_dead(tmux_sock=None):
-    """Check if the tmux pane has exited. Returns (dead, exit_code) or (False, None)."""
+    """Check if the tmux pane has exited. Returns (dead, exit_code) or (False, None).
+
+    Handles two failure modes:
+    1. tmux unreachable (empty output): retries up to _TMUX_FAIL_THRESHOLD
+       cycles, then reports death with exit_code=0.
+    2. pane_dead=1 but pane_dead_status empty: on some platforms (Docker
+       Desktop macOS), tmux sets pane_dead before reaping the zombie child
+       via waitpid, leaving pane_dead_status empty indefinitely. Retries
+       up to _TMUX_FAIL_THRESHOLD cycles, then reports death with exit_code=0.
+    """
+    global _tmux_fail_count
     output = tmux_cmd(
         ["list-panes", "-t", "main", "-F", "#{pane_dead}|#{pane_dead_status}"],
         tmux_sock,
     )
     if not output.strip():
-        return True, 1  # tmux error = assume dead
+        _tmux_fail_count += 1
+        if _tmux_fail_count >= _TMUX_FAIL_THRESHOLD:
+            debug(f"tmux unreachable for {_tmux_fail_count} cycles — reporting pane dead")
+            return True, 0
+        return False, None  # tmux transient error — retry next cycle
     parts = output.strip().split("|", 1)
     if len(parts) < 2:
+        _tmux_fail_count += 1
+        if _tmux_fail_count >= _TMUX_FAIL_THRESHOLD:
+            return True, 0
         return False, None
     if parts[0] == "1":
         try:
-            return True, int(parts[1])
+            exit_code = int(parts[1])
         except ValueError:
-            return True, 1
+            # pane_dead=1 but status not yet populated (zombie not reaped).
+            # Retry a few times; if it persists, assume clean exit.
+            _tmux_fail_count += 1
+            _log_jsonl("debug", "pane_dead.no_status",
+                       "pane dead but status not parseable",
+                       raw=output.strip(), fail_count=_tmux_fail_count)
+            if _tmux_fail_count >= _TMUX_FAIL_THRESHOLD:
+                debug(f"pane dead with empty status for {_tmux_fail_count} cycles — assuming exit 0")
+                return True, 0
+            return False, None
+        _tmux_fail_count = 0
+        _log_jsonl("info", "pane_dead.detected",
+                   "pane death detected with exit code",
+                   raw=output.strip(), exit_code=exit_code)
+        return True, exit_code
+    _tmux_fail_count = 0  # pane alive — reset counter
     return False, None
 
 
@@ -555,7 +591,8 @@ def run_monitor(config_path, status_file, tmux_sock=None):
             ec = exit_code if exit_code is not None else 1
             debug(f"pane dead: exit_code={ec}")
             _log_jsonl("info", "status.transition", "status changed",
-                       **{"from": hold_status or "unknown", "to": "done", "detector": "pane_dead"})
+                       **{"from": hold_status or "unknown", "to": "done", "detector": "pane_dead",
+                          "exit_code": ec})
             write_status(status_file, "done", ec)
             update_title(sandbox_name)
             break

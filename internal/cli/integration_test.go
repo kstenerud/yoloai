@@ -388,7 +388,18 @@ func TestCLI_StartAfterDone(t *testing.T) {
 	// Shell agent exits after sleep, reaching StatusDone
 	_, _, err := runCLI(t, "new", "--agent", "shell", "--prompt", "sleep 5", "cli-startdone", projectDir)
 	require.NoError(t, err)
-	t.Cleanup(func() { destroySandbox(t, "cli-startdone") })
+	t.Cleanup(func() {
+		if t.Failed() {
+			// Dump diagnostic logs to help debug flaky failures.
+			sdir := sandbox.Dir("cli-startdone")
+			for _, rel := range []string{"agent-status.json", "logs/monitor.jsonl", "logs/sandbox.jsonl"} {
+				if data, readErr := os.ReadFile(filepath.Join(sdir, rel)); readErr == nil {
+					t.Logf("=== %s ===\n%s", rel, data)
+				}
+			}
+		}
+		destroySandbox(t, "cli-startdone")
+	})
 
 	rt, err := dockerrt.New(context.Background())
 	require.NoError(t, err)

@@ -194,7 +194,14 @@ def isolate_network(cfg):
 
 
 def apply_overlays(cfg, yoloai_dir):
-    """Mount overlayfs for each configured overlay mount."""
+    """Mount overlayfs for each configured overlay mount.
+
+    After mounting, verifies the overlay is writable. On macOS Docker Desktop
+    (VirtioFS), the host-mounted upper/work directories lack xattr support,
+    causing the kernel to silently downgrade the overlay to read-only. When
+    this happens, we remount using container-local upper/work directories.
+    Trade-off: changes won't persist across container restarts on that platform.
+    """
     overlays = cfg.get("overlay_mounts", [])
     if not overlays:
         log_debug("overlay.skip", "no overlay mounts configured")
@@ -216,6 +223,54 @@ def apply_overlays(cfg, yoloai_dir):
             log_error("overlay.error", "overlay mount failed", path=merged,
                       exit_code=e.returncode, stderr=e.stderr.decode(errors="replace").strip())
             raise
+
+        # Verify the overlay is writable. VirtioFS (macOS Docker Desktop)
+        # lacks trusted.* xattr support, so overlayfs silently mounts read-only.
+        probe = os.path.join(merged, ".yoloai-probe")
+        try:
+            with open(probe, "w") as f:
+                f.write("")
+            os.unlink(probe)
+            log_debug("overlay.writable", "overlay is writable", path=merged)
+        except OSError:
+            # Read-only overlay — remount with container-local upper/work on
+            # a tmpfs. We use tmpfs (not the container rootfs) because the
+            # rootfs is typically overlay2, and nesting overlayfs on overlayfs
+            # fails on many kernel versions.
+            log_info("overlay.virtofs_fallback",
+                     "overlay is read-only (VirtioFS?), remounting with tmpfs-backed dirs",
+                     path=merged)
+            subprocess.run(["umount", merged], capture_output=True)
+
+            import base64
+            encoded = base64.b64encode(merged.encode()).decode()
+            local_base = f"/run/yoloai-overlay/{encoded}"
+            os.makedirs(local_base, exist_ok=True)
+            subprocess.run(["mount", "-t", "tmpfs", "tmpfs", local_base],
+                           check=True, capture_output=True)
+            local_upper = os.path.join(local_base, "upper")
+            local_work = os.path.join(local_base, "ovlwork")
+            os.makedirs(local_upper)
+            os.makedirs(local_work)
+
+            # Preserve any prior state from the original (VirtioFS) upper dir.
+            if os.path.isdir(upper) and os.listdir(upper):
+                subprocess.run(["cp", "-a", upper + "/.", local_upper],
+                               capture_output=True)
+
+            local_opts = f"lowerdir={lower},upperdir={local_upper},workdir={local_work}"
+            try:
+                subprocess.run(["mount", "-t", "overlay", "overlay", "-o", local_opts, merged],
+                               check=True, capture_output=True)
+            except subprocess.CalledProcessError as e:
+                log_error("overlay.error", "overlay remount with tmpfs-backed dirs failed",
+                          path=merged, exit_code=e.returncode,
+                          stderr=e.stderr.decode(errors="replace").strip())
+                raise
+            log_info("overlay.local_upper",
+                     "overlay remounted with tmpfs-backed upper; changes won't persist across restarts",
+                     path=merged)
+
         subprocess.run(["chown", "-R", "yoloai:yoloai", merged], capture_output=True)
         log_info("overlay.mount", "overlayfs mounted", path=merged)
 
