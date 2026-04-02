@@ -832,6 +832,7 @@ def wait_for_ready(cfg, socket=None):
     max_wait = 60
     waited = 0
 
+    found = False
     while waited < max_wait:
         pane = tmux_output("capture-pane", "-t", "main", "-p", socket=socket)
 
@@ -846,10 +847,16 @@ def wait_for_ready(cfg, socket=None):
             continue
 
         if ready_pattern in pane:
+            found = True
             break
 
         time.sleep(1)
         waited += 1
+
+    if not found:
+        log_info("agent.wait_ready_timeout",
+                 f"ready pattern not found after {max_wait}s, proceeding anyway",
+                 pattern=ready_pattern)
 
     # Wait for screen to stabilize (no changes for 1 consecutive check)
     prev = ""
@@ -868,15 +875,36 @@ def wait_for_ready(cfg, socket=None):
 def deliver_prompt(cfg, yoloai_dir, socket=None):
     """Deliver prompt file to the agent via tmux paste-buffer."""
     prompt_file = os.path.join(yoloai_dir, "prompt.txt")
-    if not os.path.isfile(prompt_file):
-        log_info("sandbox.prompt_skip", "no prompt.txt; agent started without prompt")
+
+    # Retry prompt.txt existence check — on Kata VMs (VirtioFS), the bind
+    # mount may not be visible immediately after container start.
+    for attempt in range(5):
+        if os.path.isfile(prompt_file):
+            break
+        if attempt == 0:
+            log_info("sandbox.prompt_wait", "prompt.txt not yet visible, retrying",
+                     path=prompt_file)
+        time.sleep(1)
+    else:
+        log_info("sandbox.prompt_skip",
+                 "no prompt.txt after retries; agent started without prompt",
+                 path=prompt_file)
         return False
 
     submit_sequence = cfg.get("submit_sequence", "")
     log_debug("prompt.deliver", "delivering prompt")
 
-    tmux("load-buffer", prompt_file, socket=socket)
-    tmux("paste-buffer", "-t", "main", socket=socket)
+    r = tmux("load-buffer", prompt_file, socket=socket)
+    if r.returncode != 0:
+        log_error("prompt.load_buffer_failed", "tmux load-buffer failed",
+                  exit_code=r.returncode, stderr=r.stderr.strip())
+        return False
+
+    r = tmux("paste-buffer", "-t", "main", socket=socket)
+    if r.returncode != 0:
+        log_error("prompt.paste_buffer_failed", "tmux paste-buffer failed",
+                  exit_code=r.returncode, stderr=r.stderr.strip())
+        return False
 
     time.sleep(0.5)
     for key in submit_sequence.split():
