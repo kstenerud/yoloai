@@ -403,6 +403,9 @@ var dockerInfoOutput = func(ctx context.Context, binaryName string) ([]byte, err
 // BaseModeName returns "container" — Docker's default isolation mode.
 func (r *Runtime) BaseModeName() string { return "container" }
 
+// PrepareAgentCommand returns the command unchanged — Docker needs no prefix.
+func (r *Runtime) PrepareAgentCommand(cmd string) string { return cmd }
+
 // SupportedIsolationModes returns the isolation modes Docker can potentially support.
 func (r *Runtime) SupportedIsolationModes() []string { return []string{"container-enhanced"} }
 

@@ -95,6 +95,7 @@ func (m *mockRuntime) ResolveCopyMount(_, hostPath string) string          { ret
 func (m *mockRuntime) BaseModeName() string                                { return "container" }
 func (m *mockRuntime) SupportedIsolationModes() []string                   { return nil }
 func (m *mockRuntime) RequiredCapabilities(_ string) []caps.HostCapability { return nil }
+func (m *mockRuntime) PrepareAgentCommand(cmd string) string               { return cmd }
 func (m *mockRuntime) Capabilities() runtime.BackendCaps {
 	return runtime.BackendCaps{
 		NetworkIsolation: true,

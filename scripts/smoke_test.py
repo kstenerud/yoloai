@@ -283,6 +283,8 @@ class Test:
     def project(self, label: str) -> Path:
         """Return a fresh copy of the project fixture for this test."""
         dest = self.ctx.tmpdir / f"project-{label}"
+        if dest.exists():
+            shutil.rmtree(dest)
         shutil.copytree(self.ctx.fixture_dir, dest)
         return dest
 
@@ -383,6 +385,18 @@ class Test:
 # ---------------------------------------------------------------------------
 # Test runner
 # ---------------------------------------------------------------------------
+
+def _destroy_retry_sandboxes(ctx: RunContext, count_before: int) -> None:
+    """Destroy sandboxes added since *count_before* so a retry starts clean."""
+    stale = ctx.sandboxes[count_before:]
+    for name in stale:
+        subprocess.run(
+            [ctx.yoloai_bin, "destroy", "--yes", name],
+            capture_output=True,
+            timeout=30,
+        )
+    del ctx.sandboxes[count_before:]
+
 
 def run_test(
     ctx: RunContext,
@@ -587,10 +601,10 @@ def test_isolation_check(t: Test, spec: BackendSpec) -> None:
 
     Only runs on container backends where iptables rules are applied by entrypoint.
     """
-    if spec.isolation != "container":
+    if spec.isolation != "container" or spec.is_seatbelt:
         raise SkipTest(
-            f"isolation_check only runs on plain container backends (got {spec.isolation}); "
-            "container-enhanced (gVisor) has its own network stack and doesn't honor iptables rules"
+            f"isolation_check only runs on plain container backends (got {spec.label}); "
+            "seatbelt and container-enhanced (gVisor) don't support iptables-based network isolation"
         )
 
     project = t.project(f"isolation-{spec.label}")
@@ -957,11 +971,15 @@ def main() -> int:
                 skip_test(ctx, test_name, reason)
                 continue
 
+            sandbox_count_before = len(ctx.sandboxes)
             result = run_test(ctx, test_name, lambda t, s=spec: test_fn(t, s))
-            if not result.passed and spec.retries > 0:
+            if not result.passed and not result.skipped and spec.retries > 0:
                 for attempt in range(spec.retries):
                     print(f"      Retrying {test_name} (attempt {attempt + 1}/{spec.retries})...")
                     ctx.results.pop()
+                    # Destroy sandboxes created during the failed attempt so
+                    # the retry can create fresh ones with the same names.
+                    _destroy_retry_sandboxes(ctx, sandbox_count_before)
                     result = run_test(ctx, test_name, lambda t, s=spec: test_fn(t, s))
                     if result.passed:
                         break

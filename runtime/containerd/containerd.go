@@ -116,6 +116,9 @@ func (r *Runtime) Close() error { return r.client.Close() }
 // BaseModeName returns "vm" — containerd in yoloai is exclusively for VM isolation.
 func (r *Runtime) BaseModeName() string { return "vm" }
 
+// PrepareAgentCommand returns the command unchanged — containerd needs no prefix.
+func (r *Runtime) PrepareAgentCommand(cmd string) string { return cmd }
+
 // SupportedIsolationModes returns the VM isolation modes this backend supports.
 func (r *Runtime) SupportedIsolationModes() []string { return []string{"vm", "vm-enhanced"} }
 

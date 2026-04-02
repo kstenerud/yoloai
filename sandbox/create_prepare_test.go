@@ -362,8 +362,9 @@ func (m *mockDockerRuntime) DiagHint(name string) string { return "" }
 func (m *mockDockerRuntime) ResolveCopyMount(sandboxName, hostPath string) string {
 	return hostPath
 }
-func (m *mockDockerRuntime) BaseModeName() string              { return "container" }
-func (m *mockDockerRuntime) SupportedIsolationModes() []string { return nil }
+func (m *mockDockerRuntime) BaseModeName() string                  { return "container" }
+func (m *mockDockerRuntime) SupportedIsolationModes() []string     { return nil }
+func (m *mockDockerRuntime) PrepareAgentCommand(cmd string) string { return cmd }
 func (m *mockDockerRuntime) RequiredCapabilities(isolation string) []caps.HostCapability {
 	return nil
 }

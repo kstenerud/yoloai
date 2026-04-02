@@ -224,6 +224,11 @@ type Runtime interface {
 	// BaseModeName returns the human label for this backend's default (no-isolation)
 	// mode, shown in `system doctor` output. e.g. "container", "vm", "process".
 	BaseModeName() string
+
+	// PrepareAgentCommand wraps an agent launch command with backend-specific
+	// environment setup (PATH overrides, shell wrappers, etc.). Mirrors the
+	// Python prepare_launch_command() in sandbox-setup.py.
+	PrepareAgentCommand(cmd string) string
 }
 
 // WorkDirSetup is implemented by backends that store work directories

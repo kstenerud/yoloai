@@ -424,6 +424,12 @@ func (r *Runtime) DiagHint(instanceName string) string {
 // BaseModeName returns "process" — Seatbelt runs agent processes directly.
 func (r *Runtime) BaseModeName() string { return "process" }
 
+// PrepareAgentCommand sources the Swift wrapper that auto-adds --disable-sandbox
+// for Swift PM commands inside the macOS sandbox.
+func (r *Runtime) PrepareAgentCommand(cmd string) string {
+	return "source ~/.swift-wrapper.sh && " + cmd
+}
+
 // SupportedIsolationModes returns nil — Seatbelt has no additional isolation modes.
 func (r *Runtime) SupportedIsolationModes() []string { return nil }
 

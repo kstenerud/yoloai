@@ -638,9 +638,10 @@ func (m *Manager) recreateContainer(ctx context.Context, name string, meta *Meta
 		return err
 	}
 
-	// Execute VM-side work directory setup if baseline was deferred (Tart VMs)
-	// For :copy mode, if BaselineSHA is empty, VM setup is needed
-	if meta.Workdir.Mode == "copy" && meta.Workdir.BaselineSHA == "" {
+	// Execute VM-side work directory setup (Tart VMs).
+	// Always re-run when recreating: the old VM was destroyed, so its local
+	// work directory no longer exists even if BaselineSHA is already set.
+	if meta.Workdir.Mode == "copy" {
 		if err := executeVMWorkDirSetup(ctx, m.runtime, name, sandboxDir, meta); err != nil {
 			return fmt.Errorf("VM work dir setup: %w", err)
 		}
@@ -813,7 +814,7 @@ func (m *Manager) relaunchAgentWithCustomPrompt(ctx context.Context, name string
 
 	agentArgs := resolveAgentArgs(meta.Agent, meta.Profile)
 	interactiveCmd := buildAgentCommand(agentDef, meta.Model, "", agentArgs, cfg.Passthrough)
-
+	interactiveCmd = m.runtime.PrepareAgentCommand(interactiveCmd)
 	_, err = execInContainer(ctx, m.runtime, name, meta,
 		tmuxCmd(cfg.TmuxSocket, "respawn-pane", "-t", "main", "-k", interactiveCmd),
 	)

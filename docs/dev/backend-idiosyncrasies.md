@@ -42,7 +42,7 @@ row to the index.
 | Secrets / files missing inside Tart VM | [Tart: VirtioFS directories only](#virtiofs-only-supports-directory-mounts-not-individual-files) |
 | Shell command fails with "no such file" on VirtioFS path | [Tart: VirtioFS path has spaces](#virtiofs-mount-path-inside-the-vm-contains-spaces) |
 | VM dies when `Start()` context is cancelled | [Tart: tart run needs exec.Command](#tart-run-process-must-use-execcommand-not-execcommandcontext) |
-| `mkdir: /var/folders: Permission denied` during Tart setup | [Tart: mkdir system dirs fails](#tart-cannot-mkdir-system-directories-like-varfolders) |
+| `mkdir: /var/folders: Permission denied` or `ln: ... Permission denied` during Tart setup | [Tart: mkdir/symlink system dirs fails](#tart-cannot-mkdirsymlink-system-directories-like-varfolders) |
 | Tart base image rebuilt every time `yoloai new` runs | [Tart: empty sourceDir breaks marker](#empty-sourcedir-breaks-tart-provisioning-marker-file-check) |
 | `tart exec` fails with "instance not found" right after boot | [Tart: exec needs stabilization delay](#tart-exec-needs-brief-stabilization-delay-after-boot) |
 | `tart exec` with `--` separator fails silently or returns exit status 1 | [Tart: no support for -- separator](#tart-exec-does-not-support----argument-separator) |
@@ -50,6 +50,8 @@ row to the index.
 | `xcrun simctl list runtimes` shows no runtimes when mounted via VirtioFS | [Tart: CoreSimulator requires sealed APFS](#coresimulator-cannot-discover-virtiofs-mounted-runtimes) |
 | `Failed to start launchd_sim: could not bind to session` when booting simulator | [Tart: ditto'd runtime is incomplete](#dittod-ios-runtime-is-incomplete-use-xcodebuild--downloadplatform) |
 | `git diff` fails with "unable to read" object / git corruption on Tart VM | [Tart: VirtioFS corrupts git repositories](#virtiofs-corrupts-git-repositories) |
+| Agent silently fails after `yoloai restart` on Tart (node not found) | [Tart: node@24 in .zprofile breaks agent launch](#node24-in-zprofile-breaks-agent-launch-after-restart) |
+| Agent silently fails after `yoloai restart` on Seatbelt (Swift PM sandbox error) | [Seatbelt: swift-wrapper not sourced on restart](#swift-wrapper-not-sourced-on-restart) |
 | DNS works but HTTPS to api.anthropic.com times out | [DNS: timeout = API unreachable, not DNS](#request-timed-out-in-claude-code--api-unreachable-not-dns-failure) |
 | `iptables` warnings about legacy tables | [iptables-nft: legacy tables warning](#iptables--iptables-nft-both-iptables-legacy-and-iptables-nft-can-coexist) |
 | `--isolation vm` rejected on macOS / "containerd not available" | [Registry: containerd Linux-only](#containerd-backend-is-linux-only) |
@@ -584,23 +586,29 @@ in `tart.go::runSetupScript`.
 timeout). Must use bare `exec.Command`, then set `SysProcAttr{Setpgid: true}`
 to detach it from the parent process group. See `tart.go::Start`.
 
-### Tart cannot mkdir system directories like /var/folders
+### Tart cannot mkdir/symlink system directories like /var/folders
 
 **Symptom:** VM setup fails with:
 ```
 mkdir: /var/folders: Permission denied
 ```
+or:
+```
+ln: /var/folders/.../project-name: Permission denied
+```
 
 **Explanation:** During mount setup, Tart creates symlinks from expected mount paths
-to VirtioFS share paths. The setup tries to `mkdir -p` parent directories, but on macOS
-paths like `/var/folders/h8/...` (system temp directories) cannot be created by regular
-users. The parent directories already exist (created by macOS), so the mkdir failure can
-be ignored.
+to VirtioFS share paths. Both `mkdir -p` and `ln -sfn` can fail on system paths like
+`/var/folders/...` (macOS temp directories) and `/private/var/...` because these are
+root-owned inside the Tart VM. The parent directories already exist (created by macOS),
+and the symlink needs `sudo` to write into them.
 
-**Fix:** Make mkdir non-fatal: `(mkdir -p '$parent' 2>/dev/null || true)`. If the parent
-exists (which it should for system paths), the symlink creation proceeds successfully.
+**Fix:** Make mkdir non-fatal: `(mkdir -p ... || sudo mkdir -p ... || true)`. For the
+symlink, try without sudo first, fall back to sudo:
+`(rm -rf '$target' && ln -sfn ...) || (sudo rm -rf '$target' && sudo ln -sfn ...)`.
+This avoids hardcoding which paths need sudo.
 
-**Code:** `runtime/tart/tart.go::runSetupScript` line ~657
+**Code:** `runtime/tart/tart.go::runSetupScript` line ~900
 
 ### Empty sourceDir breaks Tart provisioning marker file check
 
@@ -852,6 +860,30 @@ VirtioFS should only be used for:
 **Impact:** All Tart VMs with `:copy` mode directories are affected. Git corruption can lead to data loss and broken repositories.
 
 **Code:** `runtime/tart/tart.go::ResolveCopyMount`, `runtime/tart/tart.go::Create`, `sandbox/lifecycle.go::Reset` (needs implementation)
+
+### node@24 in .zprofile breaks agent launch after restart
+
+**Symptom:** Agent silently fails to start after `yoloai restart` on a Tart VM. The tmux pane shows a shell prompt but no agent process. Works fine on first `yoloai new`.
+
+**Explanation:** The Cirrus CI base image's `~/.zprofile` puts `node@24` before `node 25` in PATH. The Claude Code shebang (`#!/usr/bin/env node`) resolves to the broken `node@24`. On first launch, the Python `sandbox-setup.py` calls `prepare_launch_command()` which prepends `/opt/homebrew/opt/node/bin` to PATH. But `yoloai restart` relaunches the agent from Go via `respawn-pane` in `lifecycle.go`, bypassing the Python path entirely.
+
+**Fix:** Added `PrepareAgentCommand(cmd string) string` to the `runtime.Runtime` interface. The Tart implementation prepends `PATH="/opt/homebrew/opt/node/bin:$PATH"` to the command, matching the Python workaround. `lifecycle.go` calls this before `respawn-pane`.
+
+**Code:** `runtime/tart/tart.go::PrepareAgentCommand`, `sandbox/lifecycle.go` (relaunch path), `runtime/monitor/sandbox-setup.py::TartBackend.prepare_launch_command`
+
+---
+
+## Seatbelt (macOS sandboxing)
+
+### swift-wrapper not sourced on restart
+
+**Symptom:** Agent silently fails after `yoloai restart` on a Seatbelt sandbox when the project uses Swift PM. Swift build/test commands fail with sandbox-exec nesting errors. Works fine on first launch.
+
+**Explanation:** macOS sandboxes don't support nesting, so Swift PM's internal `sandbox-exec` calls fail. The workaround is `~/.swift-wrapper.sh`, which intercepts swift commands and adds `--disable-sandbox`. On first launch, Python `sandbox-setup.py` calls `prepare_launch_command()` which sources the wrapper. But `yoloai restart` relaunches from Go, bypassing the Python path.
+
+**Fix:** The Seatbelt implementation of `PrepareAgentCommand()` prepends `source ~/.swift-wrapper.sh &&` to the command.
+
+**Code:** `runtime/seatbelt/seatbelt.go::PrepareAgentCommand`, `sandbox/lifecycle.go` (relaunch path), `runtime/monitor/sandbox-setup.py::SeatbeltBackend.prepare_launch_command`
 
 ---
 

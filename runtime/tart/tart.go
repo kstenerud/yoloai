@@ -500,6 +500,12 @@ func (r *Runtime) DiagHint(instanceName string) string {
 // BaseModeName returns "vm" — Tart runs macOS VMs.
 func (r *Runtime) BaseModeName() string { return "vm" }
 
+// PrepareAgentCommand prepends node 25 to PATH to avoid broken node@24 from
+// the Cirrus base image's .zprofile.
+func (r *Runtime) PrepareAgentCommand(cmd string) string {
+	return fmt.Sprintf(`PATH="/opt/homebrew/opt/node/bin:$PATH" %s`, cmd)
+}
+
 // SupportedIsolationModes returns nil — Tart has no additional isolation modes.
 func (r *Runtime) SupportedIsolationModes() []string { return nil }
 
@@ -896,21 +902,19 @@ func (r *Runtime) runSetupScript(ctx context.Context, vmName, sandboxPath string
 			slog.Debug("tart setup: failed to list VirtioFS parent", "path", filepath.Dir(vfsPath), "error", checkErr)
 		}
 
-		// Ensure parent directory exists. Use sudo if regular mkdir fails.
-		mkdirCmd := fmt.Sprintf("mkdir -p '%s' 2>/dev/null || sudo mkdir -p '%s'", parent, parent)
+		// Ensure parent directory exists. Non-fatal: system paths like /var/folders
+		// already exist and cannot be mkdir'd by regular users.
+		mkdirCmd := fmt.Sprintf("(mkdir -p '%s' 2>/dev/null || sudo mkdir -p '%s' 2>/dev/null || true)", parent, parent)
 		if _, mkdirErr := r.runTart(ctx, execArgs(vmName, "bash", "-c", mkdirCmd)...); mkdirErr != nil {
 			return fmt.Errorf("create parent directory %s: %w", parent, mkdirErr)
 		}
 
-		// Remove existing dir/file before symlinking (ln -sfn won't replace a directory)
-		// System paths (like /Library/*) require sudo
-		needsSudo := strings.HasPrefix(target, "/Library/") || strings.HasPrefix(target, "/System/")
-		var symlinkCmd string
-		if needsSudo {
-			symlinkCmd = fmt.Sprintf("sudo rm -rf '%s' && sudo ln -sfn '%s' '%s'", target, vfsPath, target)
-		} else {
-			symlinkCmd = fmt.Sprintf("rm -rf '%s' && ln -sfn '%s' '%s'", target, vfsPath, target)
-		}
+		// Remove existing dir/file before symlinking (ln -sfn won't replace a directory).
+		// Try without sudo first; fall back to sudo for system paths (/var, /Library, etc.).
+		symlinkCmd := fmt.Sprintf(
+			"(rm -rf '%s' && ln -sfn '%s' '%s') 2>/dev/null || (sudo rm -rf '%s' && sudo ln -sfn '%s' '%s')",
+			target, vfsPath, target, target, vfsPath, target,
+		)
 		args := execArgs(vmName, "bash", "-c", symlinkCmd)
 		slog.Debug("tart setup: creating symlink", "vm", vmName, "target", target, "vfsPath", vfsPath, "cmd", symlinkCmd)
 		if _, err := r.runTart(ctx, args...); err != nil {
