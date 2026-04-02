@@ -21,6 +21,17 @@ func GoProject(t *testing.T) string {
 	return dir
 }
 
+// GoProjectNoGit creates a temp directory containing a minimal Go project (main.go)
+// without a git repository. Useful for overlay tests where the entrypoint's chown
+// makes inherited .git directories unreliable through overlayfs.
+func GoProjectNoGit(t *testing.T) string {
+	t.Helper()
+	dir := filepath.Join(t.TempDir(), "project")
+	require.NoError(t, os.MkdirAll(dir, 0750))
+	WriteFile(t, dir, "main.go", "package main\n\nfunc main() {}\n")
+	return dir
+}
+
 // AuxDir creates a temp directory named name containing a single data.txt file.
 // Returns the directory path.
 func AuxDir(t *testing.T, name string) string {

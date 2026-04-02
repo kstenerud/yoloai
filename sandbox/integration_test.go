@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -808,11 +807,14 @@ func TestIntegration_Clone(t *testing.T) {
 }
 
 func TestIntegration_Overlay(t *testing.T) {
-	if runtime.GOOS == "darwin" {
-		t.Skip("overlayfs lower-layer files are immutable on Docker Desktop/VirtioFS; test requires native Linux overlayfs")
-	}
 	mgr, ctx := integrationSetup(t)
-	projectDir := createProjectDir(t)
+
+	// Use a project dir WITHOUT git. The entrypoint's chown -R on the overlay
+	// merged dir makes overlayfs directories opaque, hiding the lower layer's
+	// .git objects. Removing .git via whiteout + re-creating is unreliable
+	// across kernel versions. Starting without .git avoids the problem entirely
+	// and matches the real-world smoke test fixture (no pre-existing git repo).
+	projectDir := testutil.GoProjectNoGit(t)
 
 	_, err := mgr.Create(ctx, CreateOptions{
 		Name:    "overlay-integ",
@@ -844,40 +846,32 @@ func TestIntegration_Overlay(t *testing.T) {
 	require.NoError(t, err)
 	containerPath := meta.Workdir.MountPath
 
-	// Re-initialize git inside the container's overlay merged dir. The entrypoint's
-	// chown -R can make overlayfs directories opaque, hiding the lower layer's git
-	// objects. In production the agent (or auto-commit) creates a fresh repo; we
-	// replicate that here.
+	// Create a git baseline inside the container. No .git exists in the lower
+	// layer, so git init creates a fresh repo in the upper layer with no
+	// overlayfs whiteout complications.
 	//
-	// Poll until git init + commit succeeds. The overlay mount is done by the
-	// entrypoint; on slow systems WaitForActive may return before the mount is
-	// fully visible to subsequent exec calls.
-	// Initialize git and create baseline commit inside the container, then
-	// retrieve the SHA in a separate exec to avoid mixing git commit output
-	// with the SHA.
+	// Poll because the overlay mount is done by the entrypoint; on slow systems
+	// WaitForActive may return before the mount is visible to exec calls.
 	initCmd := fmt.Sprintf(
-		"cd %s && rm -rf .git && git init -b main && git config user.email test@test && git config user.name test && git add -A && git commit -q -m baseline",
+		"cd %s && git init -b main && git config user.email test@test && git config user.name test && git add -A && git commit -q -m baseline",
 		containerPath,
 	)
-	deadline := time.Now().Add(10 * time.Second)
+	var baselineSHA string
+	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
 		initResult, initErr := mgr.runtime.Exec(ctx, InstanceName("overlay-integ"),
 			[]string{"sh", "-c", initCmd}, "yoloai")
 		if initErr == nil && initResult.ExitCode == 0 {
-			break
-		}
-		if time.Now().Add(500 * time.Millisecond).After(deadline) {
-			require.NoError(t, initErr, "git init inside overlay should succeed within 10s")
-			require.Equal(t, 0, initResult.ExitCode, "git init exit code")
+			shaResult, shaErr := mgr.runtime.Exec(ctx, InstanceName("overlay-integ"),
+				[]string{"git", "-C", containerPath, "rev-parse", "HEAD"}, "yoloai")
+			if shaErr == nil && len(strings.TrimSpace(shaResult.Stdout)) == 40 {
+				baselineSHA = strings.TrimSpace(shaResult.Stdout)
+				break
+			}
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
-
-	shaResult, err := mgr.runtime.Exec(ctx, InstanceName("overlay-integ"),
-		[]string{"git", "-C", containerPath, "rev-parse", "HEAD"}, "yoloai")
-	require.NoError(t, err)
-	baselineSHA := strings.TrimSpace(shaResult.Stdout)
-	require.Len(t, baselineSHA, 40, "baseline SHA should be 40 hex chars")
+	require.NotEmpty(t, baselineSHA, "git init + commit inside overlay should produce a valid SHA within 15s")
 	require.NoError(t, updateOverlayBaseline("overlay-integ", projectDir, baselineSHA))
 
 	// Write a file inside the container (overlay captures it in upper layer)
