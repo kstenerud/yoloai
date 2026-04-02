@@ -860,10 +860,33 @@ def main() -> int:
         )
         return 1
 
+    # On Linux, full-tier smoke tests need root for VM/namespace backends.
+    # Catch the common mistake of forgetting sudo early, before we hit a
+    # confusing PermissionError on a root-owned smoke-logs directory.
+    if sys.platform == "linux" and args.full and os.getuid() != 0:
+        print(
+            "ERROR: full smoke tests require root on Linux (for VM/namespace backends).\n"
+            "Run with:\n"
+            "  sudo -E make smoketest-full\n"
+            "  sudo -E python3 scripts/smoke_test.py --full",
+            file=sys.stderr,
+        )
+        return 1
+
     run_id = f"smoke-{int(time.time())}"
     tmpdir = Path(tempfile.mkdtemp(prefix="yoloai-smoke-"))
     log_dir = Path.home() / ".yoloai" / "smoke-logs" / run_id
-    log_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        log_dir.mkdir(parents=True, exist_ok=True)
+    except PermissionError:
+        print(
+            f"ERROR: cannot create {log_dir}\n"
+            f"The directory {log_dir.parent} is likely owned by root from a previous sudo run.\n"
+            f"Fix with:\n"
+            f"  sudo chown -R $(id -un):$(id -gn) {log_dir.parent}",
+            file=sys.stderr,
+        )
+        return 1
     fixture_dir = create_fixture(tmpdir)
 
     ctx = RunContext(
