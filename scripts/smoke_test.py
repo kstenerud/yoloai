@@ -185,7 +185,7 @@ BASE_LINUX_BACKENDS: list[BackendSpec] = [
                 check_backend="docker"),
     BackendSpec("linux", "vm",                 None,     "containerd-vm",
                 check_backend="containerd", is_vm=True, check_isolation="vm",
-                sentinel_timeout_override=QEMU_TIMEOUT, stall_grace_secs=90),
+                sentinel_timeout_override=QEMU_TIMEOUT, stall_grace_secs=120),
 ]
 
 BASE_MACOS_BACKENDS: list[BackendSpec] = [
@@ -205,10 +205,10 @@ FULL_LINUX_BACKENDS: list[BackendSpec] = [
                 check_backend="docker"),
     BackendSpec("linux", "vm",                 None,     "containerd-vm",
                 check_backend="containerd", is_vm=True, check_isolation="vm",
-                sentinel_timeout_override=QEMU_TIMEOUT, stall_grace_secs=90),
+                sentinel_timeout_override=QEMU_TIMEOUT, stall_grace_secs=120),
     BackendSpec("linux", "vm-enhanced",        None,     "containerd-vmenhanced",
                 check_backend="containerd", is_vm=True, check_isolation="vm-enhanced",
-                sentinel_timeout_override=QEMU_TIMEOUT, stall_grace_secs=90),
+                sentinel_timeout_override=QEMU_TIMEOUT, stall_grace_secs=120),
 ]
 
 FULL_MACOS_BACKENDS: list[BackendSpec] = [

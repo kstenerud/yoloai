@@ -895,7 +895,7 @@ VirtioFS should only be used for:
 
 Firecracker (`containerd-vmenhanced`) starts faster and completes the task well within the grace period, so it is not affected.
 
-**Fix:** `BackendSpec` now has a `stall_grace_secs` field. `containerd-vm` sets it to 90s, giving QEMU enough time to boot and process the prompt before stall detection activates. The stall detection still fires at 90+9=99s for genuinely stuck QEMU agents (vs. the full 300s QEMU_TIMEOUT).
+**Fix:** `BackendSpec` now has a `stall_grace_secs` field. `containerd-vm` sets it to 120s, giving QEMU enough time to boot and process the prompt before stall detection activates. The stall detection still fires at 120+9=129s for genuinely stuck QEMU agents (vs. the full 300s QEMU_TIMEOUT).
 
 **Code:** `scripts/smoke_test.py::BackendSpec.stall_grace_secs`, `Test.wait_for_sentinel`
 
