@@ -6,7 +6,7 @@ LDFLAGS := -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.dat
 
 GOFILES := $(shell find . -name '*.go' -not -path './vendor/*')
 
-.PHONY: build test fmt lint tidy-check govulncheck hadolint actionlint check cover integration e2e integration-podman smoketest smoketest-full setcap clean
+.PHONY: build test fmt lint tidy-check govulncheck hadolint actionlint check cover integration e2e integration-podman smoketest smoketest-full releasetest setcap clean
 
 build: $(BINARY)
 
@@ -82,6 +82,11 @@ smoketest: build
 ## Run as root: sudo -E make smoketest-full
 smoketest-full: build
 	python3 scripts/smoke_test.py --full --debug $(SMOKE_ARGS)
+
+## releasetest: run every test tier, fastest first
+## Runs: lint → unit → integration → e2e → podman integration → full smoke
+## Requires root for VM backends: sudo -E make releasetest
+releasetest: check integration-podman smoketest-full
 
 ## setcap: grant capabilities needed for VM backends (must re-run after each build)
 setcap: build
