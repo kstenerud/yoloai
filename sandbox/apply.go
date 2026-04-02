@@ -119,6 +119,54 @@ func GeneratePatch(ctx context.Context, rt runtime.Runtime, name string, paths [
 	return []byte(patchOut), strings.TrimRight(statOut, "\n"), nil
 }
 
+// ensureOverlayBaseline resolves or creates a git baseline for an overlay directory.
+// If the overlay already has a valid HEAD commit, its SHA is returned. Otherwise
+// (e.g. the entrypoint's chown broke git visibility through overlayfs), a fresh
+// git repo is initialised inside the container and used as the baseline.
+// The resolved SHA is persisted to meta.json so subsequent calls are a no-op.
+func ensureOverlayBaseline(ctx context.Context, rt runtime.Runtime, name string, meta *Meta, dc DiffContext) (string, error) {
+	if dc.BaselineSHA != "" {
+		return dc.BaselineSHA, nil
+	}
+
+	// Try to resolve existing HEAD.
+	stdout, err := execInContainer(ctx, rt, name, meta, []string{
+		"git", "-C", dc.WorkDir, "rev-parse", "HEAD",
+	})
+	if err == nil {
+		sha := strings.TrimSpace(stdout)
+		if len(sha) == 40 {
+			if updateErr := updateOverlayBaseline(name, dc.HostPath, sha); updateErr != nil {
+				return "", updateErr
+			}
+			return sha, nil
+		}
+	}
+
+	// HEAD resolution failed — likely the entrypoint's chown broke git visibility
+	// through overlayfs. Create a fresh baseline from the current working tree.
+	initCmd := fmt.Sprintf(
+		"cd %s && git init -b main && git config user.email yoloai@localhost && git config user.name yoloai && git add -A && git commit -q -m baseline",
+		dc.WorkDir,
+	)
+	_, initErr := execInContainer(ctx, rt, name, meta, []string{"sh", "-c", initCmd})
+	if initErr != nil {
+		return "", fmt.Errorf("create overlay baseline for %s: %w (original HEAD error: %w)", dc.HostPath, initErr, err)
+	}
+
+	stdout, err = execInContainer(ctx, rt, name, meta, []string{
+		"git", "-C", dc.WorkDir, "rev-parse", "HEAD",
+	})
+	if err != nil {
+		return "", fmt.Errorf("resolve baseline SHA after init for %s: %w", dc.HostPath, err)
+	}
+	sha := strings.TrimSpace(stdout)
+	if updateErr := updateOverlayBaseline(name, dc.HostPath, sha); updateErr != nil {
+		return "", updateErr
+	}
+	return sha, nil
+}
+
 // updateOverlayBaseline updates the baseline SHA for an overlay directory in meta.json.
 func updateOverlayBaseline(name, hostPath, sha string) error {
 	sandboxDir, err := RequireSandboxDir(name)
@@ -170,19 +218,10 @@ func GenerateOverlayPatch(ctx context.Context, rt runtime.Runtime, name string, 
 			continue
 		}
 
-		// Resolve baseline SHA if deferred
-		baselineSHA := dc.BaselineSHA
-		if baselineSHA == "" {
-			stdout, err := execInContainer(ctx, rt, name, meta, []string{
-				"git", "-C", dc.WorkDir, "rev-parse", "HEAD",
-			})
-			if err != nil {
-				return nil, fmt.Errorf("resolve baseline SHA for %s: %w", dc.HostPath, err)
-			}
-			baselineSHA = strings.TrimSpace(stdout)
-			if updateErr := updateOverlayBaseline(name, dc.HostPath, baselineSHA); updateErr != nil {
-				return nil, updateErr
-			}
+		// Resolve baseline SHA if deferred (creates fresh baseline if git is broken)
+		baselineSHA, baselineErr := ensureOverlayBaseline(ctx, rt, name, meta, dc)
+		if baselineErr != nil {
+			return nil, baselineErr
 		}
 
 		// Stage untracked files

@@ -352,18 +352,9 @@ func ListCommitsBeyondBaselineOverlay(ctx context.Context, rt runtime.Runtime, n
 			continue
 		}
 
-		baselineSHA := dc.BaselineSHA
-		if baselineSHA == "" {
-			stdout, execErr := execInContainer(ctx, rt, name, meta, []string{
-				"git", "-C", dc.WorkDir, "rev-parse", "HEAD",
-			})
-			if execErr != nil {
-				return nil, fmt.Errorf("resolve baseline SHA for %s: %w", dc.HostPath, execErr)
-			}
-			baselineSHA = strings.TrimSpace(stdout)
-			if updateErr := updateOverlayBaseline(name, dc.HostPath, baselineSHA); updateErr != nil {
-				return nil, updateErr
-			}
+		baselineSHA, baselineErr := ensureOverlayBaseline(ctx, rt, name, meta, dc)
+		if baselineErr != nil {
+			return nil, baselineErr
 		}
 
 		stdout, err := execInContainer(ctx, rt, name, meta, []string{
@@ -415,20 +406,10 @@ func generateOverlayDiff(ctx context.Context, rt runtime.Runtime, name string, s
 			continue
 		}
 
-		// Resolve baseline SHA if deferred
-		baselineSHA := dc.BaselineSHA
-		if baselineSHA == "" {
-			stdout, execErr := execInContainer(ctx, rt, name, meta, []string{
-				"git", "-C", dc.WorkDir, "rev-parse", "HEAD",
-			})
-			if execErr != nil {
-				return nil, fmt.Errorf("resolve baseline SHA for %s: %w", dc.HostPath, execErr)
-			}
-			baselineSHA = strings.TrimSpace(stdout)
-			// Update meta.json with resolved SHA
-			if updateErr := updateOverlayBaseline(name, dc.HostPath, baselineSHA); updateErr != nil {
-				return nil, updateErr
-			}
+		// Resolve baseline SHA if deferred (creates fresh baseline if git is broken)
+		baselineSHA, baselineErr := ensureOverlayBaseline(ctx, rt, name, meta, dc)
+		if baselineErr != nil {
+			return nil, baselineErr
 		}
 
 		// Stage untracked files
