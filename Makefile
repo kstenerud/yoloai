@@ -45,7 +45,7 @@ actionlint:
 	go run github.com/rhysd/actionlint/cmd/actionlint@latest
 
 ## check: run all CI checks locally (same as PR checks)
-check: lint tidy-check hadolint actionlint test base-image integration e2e
+check: lint tidy-check hadolint actionlint test
 
 ## cover: show test coverage per package and total
 cover:
@@ -91,7 +91,7 @@ smoketest-full: build
 ## releasetest: run every test tier, fastest first
 ## Runs: lint → unit → integration → e2e → podman integration → full smoke
 ## Automatically escalates to root on Linux for smoke tests.
-releasetest: check integration-podman smoketest-full
+releasetest: check integration e2e integration-podman smoketest-full
 
 ## setcap: grant capabilities needed for VM backends (must re-run after each build)
 setcap: build
