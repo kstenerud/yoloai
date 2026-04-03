@@ -30,6 +30,32 @@ func setupFilesTest(t *testing.T) (string, string) {
 
 // --- put ---
 
+func TestFilesPut_CreatesFilesDirIfMissing(t *testing.T) {
+	// Regression: sandboxes created before the files/ feature was added have no
+	// host-side files/ directory. `files put` must create it rather than letting
+	// cp create a plain file named "files".
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	name := "testbox"
+	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
+	require.NoError(t, os.MkdirAll(sandboxDir, 0750)) // sandbox exists but no files/ subdir
+
+	src := filepath.Join(t.TempDir(), "hello.txt")
+	require.NoError(t, os.WriteFile(src, []byte("hello"), 0600))
+
+	cmd := newFilesCmd()
+	cmd.SetOut(new(bytes.Buffer))
+	cmd.SetArgs([]string{name, "put", src})
+	require.NoError(t, cmd.Execute())
+
+	filesDir := filepath.Join(sandboxDir, "files")
+	require.DirExists(t, filesDir, "files/ directory should have been created")
+	got, err := os.ReadFile(filepath.Join(filesDir, "hello.txt")) //nolint:gosec // test helper
+	require.NoError(t, err)
+	assert.Equal(t, "hello", string(got))
+}
+
 func TestFilesPut_SingleFile(t *testing.T) {
 	name, filesDir := setupFilesTest(t)
 
