@@ -385,8 +385,8 @@ func TestCLI_BugreportCommand_Safe(t *testing.T) {
 func TestCLI_StartAfterDone(t *testing.T) {
 	projectDir := cliSetup(t)
 
-	// Shell agent exits after sleep, reaching StatusDone
-	_, _, err := runCLI(t, "new", "--agent", "shell", "--prompt", "sleep 5", "cli-startdone", projectDir)
+	// Test agent exits after sleep, reaching StatusDone
+	_, _, err := runCLI(t, "new", "--agent", "test", "--prompt", "sleep 5", "cli-startdone", projectDir)
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		if t.Failed() {
