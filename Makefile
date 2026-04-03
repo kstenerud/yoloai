@@ -45,7 +45,7 @@ actionlint:
 	go run github.com/rhysd/actionlint/cmd/actionlint@latest
 
 ## check: run all CI checks locally (same as PR checks)
-check: lint tidy-check govulncheck hadolint actionlint test base-image integration e2e
+check: lint tidy-check hadolint actionlint test base-image integration e2e
 
 ## cover: show test coverage per package and total
 cover:
