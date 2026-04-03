@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/sandbox"
 	"github.com/spf13/cobra"
 )
@@ -100,6 +101,9 @@ func runFilesPut(cmd *cobra.Command, name string, args []string) error {
 		return err
 	}
 	filesDir := sandbox.FilesDir(name)
+	if err := fileutil.MkdirAll(filesDir, 0750); err != nil {
+		return fmt.Errorf("create files directory: %w", err)
+	}
 	force, _ := cmd.Flags().GetBool("force")
 
 	expanded, err := expandHostGlobs(args)
