@@ -57,6 +57,29 @@ func Baseline(workDir string) (string, error) {
 	return HeadSHA(workDir)
 }
 
+// BaselineUncommittedChanges commits any pre-existing uncommitted changes in
+// workDir as "yoloai: pre-session state", returning the resulting HEAD SHA.
+// If the working tree is already clean, it returns the current HEAD unchanged.
+// This ensures agent diffs only reflect what the agent changed, not changes
+// the user had before the session started.
+func BaselineUncommittedChanges(workDir string) (string, error) {
+	out, err := NewGitCmd(workDir, "status", "--porcelain").Output()
+	if err != nil || len(strings.TrimSpace(string(out))) == 0 {
+		return HeadSHA(workDir)
+	}
+	if err := RunGitCmd(workDir, "add", "-A"); err != nil {
+		return "", fmt.Errorf("stage pre-session changes: %w", err)
+	}
+	if err := RunGitCmd(workDir,
+		"-c", "user.email=yoloai@localhost",
+		"-c", "user.name=yoloai",
+		"commit", "-m", "yoloai: pre-session state",
+	); err != nil {
+		return "", fmt.Errorf("commit pre-session state: %w", err)
+	}
+	return HeadSHA(workDir)
+}
+
 // StageUntracked runs `git add -A` in the work directory to capture
 // files created by the agent that are not yet tracked.
 func StageUntracked(workDir string) error {

@@ -123,6 +123,49 @@ func TestStageUntracked_DeletedFiles(t *testing.T) {
 	assert.Contains(t, string(output), "a.txt")
 }
 
+// BaselineUncommittedChanges tests
+
+func TestBaselineUncommittedChanges_DirtyTree(t *testing.T) {
+	dir := t.TempDir()
+	initGitRepo(t, dir)
+	writeTestFile(t, dir, "file.txt", "original\n")
+	gitAdd(t, dir, ".")
+	gitCommit(t, dir, "initial")
+
+	originalSHA, err := HeadSHA(dir)
+	require.NoError(t, err)
+
+	// Make the tree dirty
+	writeTestFile(t, dir, "file.txt", "modified\n")
+	writeTestFile(t, dir, "new.txt", "untracked\n")
+
+	newSHA, err := BaselineUncommittedChanges(dir)
+	require.NoError(t, err)
+	assert.NotEqual(t, originalSHA, newSHA, "should have created a new commit")
+	assert.Len(t, newSHA, 40)
+
+	// Verify the pre-session commit message
+	cmd := NewGitCmd(dir, "log", "-1", "--format=%s")
+	out, err := cmd.Output()
+	require.NoError(t, err)
+	assert.Equal(t, "yoloai: pre-session state", strings.TrimSpace(string(out)))
+}
+
+func TestBaselineUncommittedChanges_CleanTree(t *testing.T) {
+	dir := t.TempDir()
+	initGitRepo(t, dir)
+	writeTestFile(t, dir, "file.txt", "content\n")
+	gitAdd(t, dir, ".")
+	gitCommit(t, dir, "initial")
+
+	originalSHA, err := HeadSHA(dir)
+	require.NoError(t, err)
+
+	newSHA, err := BaselineUncommittedChanges(dir)
+	require.NoError(t, err)
+	assert.Equal(t, originalSHA, newSHA, "clean tree should not create a new commit")
+}
+
 // Baseline tests
 
 func TestBaseline_CreatesRepoWithCommit(t *testing.T) {

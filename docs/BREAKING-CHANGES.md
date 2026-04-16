@@ -4,6 +4,16 @@ Tracks breaking changes made during beta. Each entry should be included in relea
 
 ## Unreleased
 
+### `apply --force` flag removed; dirty trees are handled automatically
+
+**Previous behavior:** `yoloai apply` errored when the target repo had uncommitted changes unless `--force` was passed.
+
+**New behavior:** `yoloai apply` auto-stashes uncommitted changes before applying commits (via `git am --autostash`) and restores them afterward. The `--force` flag no longer exists.
+
+**Rationale:** Users who start a sandbox with a dirty tree couldn't apply agent changes without first committing or stashing manually. The guard was designed to prevent accidental data loss, but `git am --autostash` provides the same safety automatically.
+
+**Migration:** Remove `--force` from any `yoloai apply` invocations. If the stash pop produces conflicts, git will report them with instructions.
+
 ### Smoke test `--limited` flag replaced by `--full`
 
 **Previous behavior:** `python3 scripts/smoke_test.py` ran the full backend matrix by default. `--limited` skipped unavailable backends instead of aborting.

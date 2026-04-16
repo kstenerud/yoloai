@@ -114,7 +114,12 @@ func ApplyFormatPatch(patchDir string, files []string, targetDir string) (map[st
 		fullPaths[i] = filepath.Join(patchDir, f)
 	}
 
-	args := append([]string{"am", "--3way"}, fullPaths...)
+	// --autostash requires at least one existing commit; skip for empty repos.
+	amArgs := []string{"am", "--3way"}
+	if preTip != "" {
+		amArgs = append(amArgs, "--autostash")
+	}
+	args := append(amArgs, fullPaths...)
 	cmd := NewGitCmd(targetDir, args...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {

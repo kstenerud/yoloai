@@ -427,6 +427,11 @@ func setupWorkdir(sandboxName string, workdir *DirArg, rt runtime.Runtime) (stri
 					}
 					baselineSHA = sha
 				} else {
+					// Commit any pre-existing dirty changes so agent diffs are clean.
+					sha, err = workspace.BaselineUncommittedChanges(workCopyDir)
+					if err != nil {
+						return "", "", fmt.Errorf("baseline pre-session state: %w", err)
+					}
 					baselineSHA = sha
 				}
 			} else {
@@ -503,9 +508,9 @@ func setupAuxDirs(sandboxName string, auxDirs []*DirArg) ([]DirMeta, error) {
 				return nil, fmt.Errorf("copy aux dir %s: %w", ad.Path, err)
 			}
 			if workspace.IsGitRepo(auxWorkDir) {
-				sha, err := workspace.HeadSHA(auxWorkDir)
+				sha, err := workspace.BaselineUncommittedChanges(auxWorkDir)
 				if err != nil {
-					return nil, fmt.Errorf("read HEAD of copied aux dir %s: %w", ad.Path, err)
+					return nil, fmt.Errorf("baseline pre-session state for aux dir %s: %w", ad.Path, err)
 				}
 				dm.BaselineSHA = sha
 			} else {

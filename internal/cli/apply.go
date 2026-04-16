@@ -61,7 +61,6 @@ Use --patches to export .patch files without applying them.`,
 				}
 			}
 			noWIP, _ := cmd.Flags().GetBool("no-wip")
-			force, _ := cmd.Flags().GetBool("force")
 			dryRun, _ := cmd.Flags().GetBool("dry-run")
 			withTags, _ := cmd.Flags().GetBool("tags")
 
@@ -97,7 +96,7 @@ Use --patches to export .patch files without applying them.`,
 
 			// Selective apply: specific commit refs
 			if len(refs) > 0 {
-				return applySelectedCommits(cmd, name, refs, paths, meta, yes, force, dryRun, withTags)
+				return applySelectedCommits(cmd, name, refs, paths, meta, yes, dryRun, withTags)
 			}
 
 			// --squash: flatten everything into one unstaged patch
@@ -202,18 +201,6 @@ Use --patches to export .patch files without applying them.`,
 					return sandbox.NewUsageError("--tags requires commits — cannot transfer tags with WIP-only changes")
 				}
 				return applySquash(cmd, name, paths, meta, yes, dryRun)
-			}
-
-			// Pre-flight: check for dirty repo when applying commits
-			if isGit {
-				warning, checkErr := workspace.CheckDirtyRepo(targetDir)
-				if checkErr != nil {
-					return checkErr
-				}
-				if warning != "" && !force {
-					return fmt.Errorf("target repo has uncommitted changes (%s)\n"+
-						"commit or stash them first, or use --force to proceed anyway", warning)
-				}
 			}
 
 			// Fetch tags beyond baseline (best-effort; errors don't fail the apply).
@@ -356,7 +343,6 @@ Use --patches to export .patch files without applying them.`,
 	cmd.Flags().Bool("squash", false, "Flatten all changes into a single unstaged patch")
 	cmd.Flags().String("patches", "", "Export .patch files to directory instead of applying")
 	cmd.Flags().Bool("no-wip", false, "Skip uncommitted changes, only apply commits")
-	cmd.Flags().Bool("force", false, "Proceed even if host repo has uncommitted changes")
 	cmd.Flags().Bool("dry-run", false, "Show what would be applied without applying")
 	cmd.Flags().Bool("tags", false, "Transfer git tags created by the agent")
 
@@ -525,7 +511,7 @@ func parseApplyArgs(rest []string, cmd *cobra.Command) (refs []string, paths []s
 }
 
 // applySelectedCommits cherry-picks specific commits into the target.
-func applySelectedCommits(cmd *cobra.Command, name string, refs, paths []string, meta *sandbox.Meta, yes, force, dryRun, withTags bool) error {
+func applySelectedCommits(cmd *cobra.Command, name string, refs, paths []string, meta *sandbox.Meta, yes, dryRun, withTags bool) error {
 	targetDir := meta.Workdir.HostPath
 	sandboxWorkDir := sandbox.WorkDir(name, meta.Workdir.HostPath)
 	if !workspace.IsGitRepo(targetDir) {
@@ -553,16 +539,6 @@ func applySelectedCommits(cmd *cobra.Command, name string, refs, paths []string,
 		}
 		_, err = fmt.Fprintln(cmd.OutOrStdout(), "No commits matched")
 		return err
-	}
-
-	// Pre-flight: dirty repo check
-	warning, checkErr := workspace.CheckDirtyRepo(targetDir)
-	if checkErr != nil {
-		return checkErr
-	}
-	if warning != "" && !force {
-		return fmt.Errorf("target repo has uncommitted changes (%s)\n"+
-			"commit or stash them first, or use --force to proceed anyway", warning)
 	}
 
 	// Fetch tags (best-effort); filter to those on selected commits.
