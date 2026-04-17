@@ -114,16 +114,35 @@ func ApplyFormatPatch(patchDir string, files []string, targetDir string) (map[st
 		fullPaths[i] = filepath.Join(patchDir, f)
 	}
 
-	// --autostash requires at least one existing commit; skip for empty repos.
-	amArgs := []string{"am", "--3way"}
+	// Stash uncommitted changes so git am starts from a clean tree.
+	// git am --autostash requires Git 2.27+ which isn't guaranteed on macOS;
+	// manage the stash manually so any git version works.
+	stashed := false
 	if preTip != "" {
-		amArgs = append(amArgs, "--autostash")
+		stashed, err = stashIfDirty(targetDir)
+		if err != nil {
+			return nil, fmt.Errorf("stash uncommitted changes: %w", err)
+		}
 	}
-	args := append(amArgs, fullPaths...)
+
+	args := append([]string{"am", "--3way"}, fullPaths...)
 	cmd := NewGitCmd(targetDir, args...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
+		// am failed — abort cleanly, then restore the stash so the user
+		// is back to their original state and can retry.
+		_ = RunGitCmd(targetDir, "am", "--abort")
+		if stashed {
+			_ = RunGitCmd(targetDir, "stash", "pop")
+		}
 		return nil, formatAMError(output, targetDir)
+	}
+
+	if stashed {
+		if err := RunGitCmd(targetDir, "stash", "pop"); err != nil {
+			return nil, fmt.Errorf("restore stashed changes after apply: %w\n"+
+				"Your commits were applied. Run 'git stash pop' in %s to restore your pre-session changes.", err, targetDir)
+		}
 	}
 
 	// Collect new host SHAs in chronological order.
@@ -254,6 +273,20 @@ func formatApplyError(gitErr error, targetDir string) error {
 	}
 
 	return fmt.Errorf("git apply failed in %s: %w", targetDir, gitErr)
+}
+
+// stashIfDirty runs `git stash push --include-untracked` if the working tree
+// has uncommitted changes. Returns true if a stash was created.
+func stashIfDirty(dir string) (bool, error) {
+	out, err := NewGitCmd(dir, "status", "--porcelain").Output()
+	if err != nil || len(strings.TrimSpace(string(out))) == 0 {
+		return false, nil
+	}
+	cmd := NewGitCmd(dir, "stash", "push", "--include-untracked", "--message", "yoloai pre-apply")
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return false, fmt.Errorf("%s: %w", strings.TrimSpace(string(output)), err)
+	}
+	return true, nil
 }
 
 // formatAMError wraps a git am failure with actionable guidance.
