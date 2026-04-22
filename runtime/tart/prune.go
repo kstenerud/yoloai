@@ -4,6 +4,7 @@ package tart
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -39,9 +40,14 @@ func (r *Runtime) Prune(ctx context.Context, knownInstances []string, dryRun boo
 		}
 
 		if !dryRun {
+			// Stop the VM before deleting — tart delete fails on running VMs.
+			r.stopVM(ctx, name)
 			if _, err := r.runTart(ctx, "delete", name); err != nil {
-				fmt.Fprintf(output, "Warning: failed to delete VM %s: %v\n", name, err) //nolint:errcheck // best-effort output
-				continue
+				if !errors.Is(err, runtime.ErrNotFound) {
+					fmt.Fprintf(output, "Warning: failed to delete VM %s: %v\n", name, err) //nolint:errcheck // best-effort output
+					continue
+				}
+				// VM already gone — treat as successful deletion.
 			}
 		}
 		result.Items = append(result.Items, item)

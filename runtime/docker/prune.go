@@ -8,6 +8,7 @@ import (
 	"io"
 	"strings"
 
+	cerrdefs "github.com/containerd/errdefs"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/api/types/image"
@@ -48,8 +49,11 @@ func (r *Runtime) Prune(ctx context.Context, knownInstances []string, dryRun boo
 
 		if !dryRun {
 			if err := r.client.ContainerRemove(ctx, name, container.RemoveOptions{Force: true}); err != nil {
-				fmt.Fprintf(output, "Warning: failed to remove container %s: %v\n", name, err) //nolint:errcheck // best-effort output
-				continue
+				if !cerrdefs.IsNotFound(err) {
+					fmt.Fprintf(output, "Warning: failed to remove container %s: %v\n", name, err) //nolint:errcheck // best-effort output
+					continue
+				}
+				// Container already gone — treat as successful deletion.
 			}
 		}
 		result.Items = append(result.Items, item)
@@ -77,8 +81,11 @@ func (r *Runtime) Prune(ctx context.Context, knownInstances []string, dryRun boo
 
 		if !dryRun {
 			if _, removeErr := r.client.ImageRemove(ctx, img.ID, image.RemoveOptions{Force: true, PruneChildren: true}); removeErr != nil {
-				fmt.Fprintf(output, "Warning: failed to remove image %s: %v\n", shortID, removeErr) //nolint:errcheck // best-effort output
-				continue
+				if !cerrdefs.IsNotFound(removeErr) {
+					fmt.Fprintf(output, "Warning: failed to remove image %s: %v\n", shortID, removeErr) //nolint:errcheck // best-effort output
+					continue
+				}
+				// Image already gone — treat as successful deletion.
 			}
 		}
 		result.Items = append(result.Items, item)

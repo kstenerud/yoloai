@@ -6,6 +6,7 @@ package containerdrt
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -46,8 +47,11 @@ func (r *Runtime) Prune(ctx context.Context, knownInstances []string, dryRun boo
 
 		if !dryRun {
 			if err := r.Remove(ctx, name); err != nil {
-				fmt.Fprintf(output, "Warning: failed to remove container %s: %v\n", name, err) //nolint:errcheck // best-effort output
-				continue
+				if !errors.Is(err, runtime.ErrNotFound) {
+					fmt.Fprintf(output, "Warning: failed to remove container %s: %v\n", name, err) //nolint:errcheck // best-effort output
+					continue
+				}
+				// Container already gone — treat as successful deletion.
 			}
 		}
 		result.Items = append(result.Items, item)
