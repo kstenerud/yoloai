@@ -414,23 +414,23 @@ func setupWorkdir(sandboxName string, workdir *DirArg, rt runtime.Runtime) (stri
 			// If the source was a git repo with commits, just record HEAD as baseline.
 			// For non-git directories or empty repos, create a fresh repo.
 			if workspace.IsGitRepo(workCopyDir) {
-				sha, err := workspace.HeadSHA(workCopyDir)
+				_, err := workspace.HeadSHA(workCopyDir)
 				if err != nil {
 					// Git repo exists but has no commits (or is broken).
 					// Remove .git and create fresh baseline.
 					if rmErr := workspace.RemoveGitDirs(workCopyDir); rmErr != nil {
 						return "", "", fmt.Errorf("remove invalid git dir: %w", rmErr)
 					}
-					sha, err = workspace.Baseline(workCopyDir)
-					if err != nil {
-						return "", "", fmt.Errorf("git baseline after removing invalid repo: %w", err)
+					sha, baselineErr := workspace.Baseline(workCopyDir)
+					if baselineErr != nil {
+						return "", "", fmt.Errorf("git baseline after removing invalid repo: %w", baselineErr)
 					}
 					baselineSHA = sha
 				} else {
 					// Commit any pre-existing dirty changes so agent diffs are clean.
-					sha, err = workspace.BaselineUncommittedChanges(workCopyDir)
-					if err != nil {
-						return "", "", fmt.Errorf("baseline pre-session state: %w", err)
+					sha, baselineErr := workspace.BaselineUncommittedChanges(workCopyDir)
+					if baselineErr != nil {
+						return "", "", fmt.Errorf("baseline pre-session state: %w", baselineErr)
 					}
 					baselineSHA = sha
 				}

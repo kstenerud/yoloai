@@ -140,8 +140,7 @@ func ApplyFormatPatch(patchDir string, files []string, targetDir string) (map[st
 
 	if stashed {
 		if err := RunGitCmd(targetDir, "stash", "pop"); err != nil {
-			return nil, fmt.Errorf("restore stashed changes after apply: %w\n"+
-				"Your commits were applied. Run 'git stash pop' in %s to restore your pre-session changes.", err, targetDir)
+			return nil, fmt.Errorf("restore stashed changes after apply: %w (your commits were applied; run 'git stash pop' in %s to restore pre-session changes)", err, targetDir)
 		}
 	}
 
@@ -279,7 +278,10 @@ func formatApplyError(gitErr error, targetDir string) error {
 // has uncommitted changes. Returns true if a stash was created.
 func stashIfDirty(dir string) (bool, error) {
 	out, err := NewGitCmd(dir, "status", "--porcelain").Output()
-	if err != nil || len(strings.TrimSpace(string(out))) == 0 {
+	if err != nil {
+		return false, fmt.Errorf("git status: %w", err)
+	}
+	if len(strings.TrimSpace(string(out))) == 0 {
 		return false, nil
 	}
 	cmd := NewGitCmd(dir, "stash", "push", "--include-untracked", "--message", "yoloai pre-apply")
