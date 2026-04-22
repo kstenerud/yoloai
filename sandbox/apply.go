@@ -6,9 +6,10 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"sort"
+	"path/filepath"
 	"strings"
 
+	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/workspace"
 )
@@ -506,32 +507,27 @@ func GenerateFormatPatchForRefs(ctx context.Context, rt runtime.Runtime, name st
 		return "", nil, fmt.Errorf("create temp dir: %w", err)
 	}
 
-	for _, sha := range shas {
-		args := []string{"format-patch", "-1", "--output-directory=" + patchDir, sha}
+	for i, sha := range shas {
+		args := []string{"format-patch", "--stdout", "-1", sha}
 		if len(paths) > 0 {
 			args = append(args, "--")
 			args = append(args, paths...)
 		}
-		_, runErr := rt.GitExec(ctx, name, workDir, args...)
+		output, runErr := rt.GitExec(ctx, name, workDir, args...)
 		if runErr != nil {
 			os.RemoveAll(patchDir) //nolint:errcheck,gosec // best-effort cleanup
 			return "", nil, fmt.Errorf("git format-patch -1 %s: %w", sha, runErr)
 		}
-	}
-
-	// Read and sort patch files
-	entries, err := os.ReadDir(patchDir)
-	if err != nil {
-		os.RemoveAll(patchDir) //nolint:errcheck,gosec // best-effort cleanup
-		return "", nil, fmt.Errorf("read patch dir: %w", err)
-	}
-
-	for _, e := range entries {
-		if strings.HasSuffix(e.Name(), ".patch") {
-			files = append(files, e.Name())
+		if strings.TrimSpace(output) == "" {
+			continue
 		}
+		fname := fmt.Sprintf("%04d-%s.patch", i+1, sha[:min(12, len(sha))])
+		if writeErr := fileutil.WriteFile(filepath.Join(patchDir, fname), []byte(output), 0600); writeErr != nil {
+			os.RemoveAll(patchDir) //nolint:errcheck,gosec // best-effort cleanup
+			return "", nil, fmt.Errorf("write patch %s: %w", fname, writeErr)
+		}
+		files = append(files, fname)
 	}
-	sort.Strings(files)
 
 	return patchDir, files, nil
 }
@@ -618,47 +614,38 @@ func GenerateFormatPatch(ctx context.Context, rt runtime.Runtime, name string, p
 		return "", nil, fmt.Errorf("create temp dir: %w", err)
 	}
 
-	if len(paths) == 0 {
-		// All commits
-		output, runErr := rt.GitExec(ctx, name, workDir, "format-patch", "--output-directory="+patchDir, baselineSHA+"..HEAD")
+	// Get the list of commits to generate patches for.
+	// Use --stdout to capture patch content via rt.GitExec return value,
+	// which works for all backends (Docker runs git on host, Tart runs git
+	// in VM but returns stdout to host).
+	revArgs := []string{"rev-list", "--reverse", baselineSHA + "..HEAD"}
+	if len(paths) > 0 {
+		revArgs = append(revArgs, "--")
+		revArgs = append(revArgs, paths...)
+	}
+	revOut, revErr := rt.GitExec(ctx, name, workDir, revArgs...)
+	if revErr != nil {
+		os.RemoveAll(patchDir) //nolint:errcheck,gosec // best-effort cleanup
+		return "", nil, fmt.Errorf("git rev-list: %w", revErr)
+	}
+
+	shas := strings.Fields(strings.TrimSpace(revOut))
+	for i, sha := range shas {
+		output, runErr := rt.GitExec(ctx, name, workDir, "format-patch", "--stdout", "-1", sha)
 		if runErr != nil {
 			os.RemoveAll(patchDir) //nolint:errcheck,gosec // best-effort cleanup
-			return "", nil, fmt.Errorf("git format-patch: %w", runErr)
+			return "", nil, fmt.Errorf("git format-patch -1 %s: %w", sha, runErr)
 		}
-		_ = output // format-patch writes to files, not stdout
-	} else {
-		// Only commits touching specified paths
-		revArgs := []string{"rev-list", "--reverse", baselineSHA + "..HEAD", "--"}
-		revArgs = append(revArgs, paths...)
-		revOut, revErr := rt.GitExec(ctx, name, workDir, revArgs...)
-		if revErr != nil {
+		if strings.TrimSpace(output) == "" {
+			continue
+		}
+		fname := fmt.Sprintf("%04d-%s.patch", i+1, sha[:min(12, len(sha))])
+		if writeErr := fileutil.WriteFile(filepath.Join(patchDir, fname), []byte(output), 0600); writeErr != nil {
 			os.RemoveAll(patchDir) //nolint:errcheck,gosec // best-effort cleanup
-			return "", nil, fmt.Errorf("git rev-list: %w", revErr)
+			return "", nil, fmt.Errorf("write patch %s: %w", fname, writeErr)
 		}
-
-		shas := strings.Fields(strings.TrimSpace(revOut))
-		for _, sha := range shas {
-			_, runErr := rt.GitExec(ctx, name, workDir, "format-patch", "-1", "--output-directory="+patchDir, sha)
-			if runErr != nil {
-				os.RemoveAll(patchDir) //nolint:errcheck,gosec // best-effort cleanup
-				return "", nil, fmt.Errorf("git format-patch -1 %s: %w", sha, runErr)
-			}
-		}
+		files = append(files, fname)
 	}
-
-	// Read and sort patch files
-	entries, err := os.ReadDir(patchDir)
-	if err != nil {
-		os.RemoveAll(patchDir) //nolint:errcheck,gosec // best-effort cleanup
-		return "", nil, fmt.Errorf("read patch dir: %w", err)
-	}
-
-	for _, e := range entries {
-		if strings.HasSuffix(e.Name(), ".patch") {
-			files = append(files, e.Name())
-		}
-	}
-	sort.Strings(files)
 
 	return patchDir, files, nil
 }
