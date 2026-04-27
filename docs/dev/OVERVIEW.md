@@ -54,29 +54,29 @@ internal/cli/helpers.go            runtime_imports_linux.go
 Each backend's init() calls:
   runtime.Register(name, factory)
 
-                ┌──────────────────────────────┐
-                │      runtime/registry.go     │
-                │                              │
-                │  backends map[string]Factory  │
-                │                              │
-                │  Register(name, factory)     │
-                │  New(ctx, name) → Runtime    │
-                │  Available() → []string      │
-                └──────────────┬───────────────┘
+               ┌──────────────────────────────┐
+               │      runtime/registry.go     │
+               │                              │
+               │  backends map[string]Factory │
+               │                              │
+               │  Register(name, factory)     │
+               │  New(ctx, name) → Runtime    │
+               │  Available() → []string      │
+               └───────────────┬──────────────┘
                                │
         ┌──────────┬───────────┼──────────┬────────────┐
         ▼          ▼           ▼          ▼            ▼
-   "docker"   "podman"   "containerd"  "tart"    "seatbelt"
+    "docker"   "podman"   "containerd"  "tart"    "seatbelt"
         │          │           │          │            │
         ▼          ▼           ▼          ▼            ▼
-   ┌─────────────────────────────────────────────────────┐
-   │             runtime.Runtime interface               │
-   │                                                     │
-   │  Setup · Create · Start · Stop · Remove · Inspect   │
-   │  Exec · GitExec · InteractiveExec                   │
-   │  Capabilities · RequiredCapabilities                │
-   │  Prune · Logs · DiagHint · Close                    │
-   └─────────────────────────────────────────────────────┘
+     ┌─────────────────────────────────────────────────────┐
+     │             runtime.Runtime interface               │
+     │                                                     │
+     │  Setup · Create · Start · Stop · Remove · Inspect   │
+     │  Exec · GitExec · InteractiveExec                   │
+     │  Capabilities · RequiredCapabilities                │
+     │  Prune · Logs · DiagHint · Close                    │
+     └─────────────────────────────────────────────────────┘
 ```
 
 ## Sandbox Lifecycle
@@ -87,7 +87,7 @@ A sandbox progresses through well-defined states. The `active` state has sub-sta
               yoloai new
                   │
                   ▼
-             ┌─────────┐
+             ┌──────────┐
              │  active  │ ← yoloai start (from stopped)
              └────┬─────┘
                   │
@@ -101,14 +101,14 @@ A sandbox progresses through well-defined states. The `active` state has sub-sta
           yoloai stop      │
                  │         │
                  ▼         │
-             ┌─────────┐   │
+             ┌──────────┐  │
              │ stopped  │──┘
              └────┬─────┘
                   │
            yoloai destroy
                   │
                   ▼
-             ┌─────────┐
+             ┌──────────┐
              │ removed  │  (container gone, sandbox dir remains)
              └────┬─────┘
                   │
@@ -131,38 +131,38 @@ Host                            Container
 ────                            ─────────
 
 :copy (default for workdir)
-┌──────────┐   full copy    ┌──────────────┐
-│ original │ ──────────────►│ work/<path>/ │ ← agent edits here
-│ project/ │                │ (git baseline)│
-└──────────┘                └──────────────┘
+┌──────────┐   full copy     ┌────────────────┐
+│ original │ ──────────────► │ work/<path>/   │ ← agent edits here
+│ project/ │                 │ (git baseline) │
+└──────────┘                 └────────────────┘
      ▲                             │
      │     diff: git diff vs       │
      └──── apply: git apply ◄──────┘
 
 
 :overlay (Linux only, needs CAP_SYS_ADMIN)
-┌──────────┐                ┌──────────────────────┐
-│ original │ ─── lower ────►│ overlayfs merged/    │ ← agent sees this
-│ project/ │   (read-only)  │  upper/ has changes  │
-└──────────┘                └──────────────────────┘
+┌──────────┐                 ┌──────────────────────┐
+│ original │ ─── lower ────► │ overlayfs merged/    │ ← agent sees this
+│ project/ │   (read-only)   │  upper/ has changes  │
+└──────────┘                 └──────────────────────┘
      ▲                             │
      │     diff/apply via git      │
      └──── inside container ◄──────┘
 
 
 :rw (live bind-mount)
-┌──────────┐   bind-mount   ┌──────────────┐
-│ original │ ◄─────────────►│ same files   │ ← changes are immediate
-│ project/ │   (read-write) │              │
-└──────────┘                └──────────────┘
+┌──────────┐   bind-mount    ┌──────────────┐
+│ original │ ◄─────────────► │ same files   │ ← changes are immediate
+│ project/ │   (read-write)  │              │
+└──────────┘                 └──────────────┘
      no diff/apply needed — changes already live
 
 
 :ro (read-only, aux dirs only)
-┌──────────┐   bind-mount   ┌──────────────┐
-│ original │ ──────────────►│ same files   │ ← read-only inside
-│ library/ │   (read-only)  │              │
-└──────────┘                └──────────────┘
+┌──────────┐   bind-mount    ┌──────────────┐
+│ original │ ──────────────► │ same files   │ ← read-only inside
+│ library/ │   (read-only)   │              │
+└──────────┘                 └──────────────┘
 ```
 
 ## Create Flow
@@ -170,11 +170,13 @@ Host                            Container
 Creating a sandbox happens in three stages: prepare resolves all configuration, seed copies agent credentials and config files into the sandbox directory, and build/start launches the container or VM.
 
 ```
-yoloai new myproject ./src:copy
-          │
-          ▼
-┌─────────────────────── PREPARE (create_prepare.go) ──────────┐
-│                                                               │
+             ┌───────────── CMDLINE ───────────────┐
+             │   yoloai new myproject ./src:copy   │
+             └─────────────────┬───────────────────┘
+                               │
+                               ▼
+┌──────────────── PREPARE (create_prepare.go) ─────────────────┐
+│                                                              │
 │  resolve profile chain  →  merge config  →  build image      │
 │  resolve agent (CLI → profile → defaults → "claude")         │
 │  resolve model + aliases                                     │
@@ -183,35 +185,35 @@ yoloai new myproject ./src:copy
 │  check dirty repos (warn unless --force)                     │
 │  validate isolation prerequisites (caps check)               │
 │  detect credentials                                          │
-│                                                               │
-│  output: sandboxState struct                                  │
-└──────────────────────────────┬────────────────────────────────┘
+│                                                              │
+│  output: sandboxState struct                                 │
+└──────────────────────────────┬───────────────────────────────┘
                                │
                                ▼
-┌─────────────────────── SEED (create_seed.go) ─────────────────┐
-│                                                                │
-│  copy agent seed files from host                               │
-│    (e.g. ~/.claude/.credentials.json → agent-runtime/)         │
-│  patch container settings (e.g. skip permission prompts)       │
-│  copy user-configured agent_files                              │
-│                                                                │
-└──────────────────────────────┬─────────────────────────────────┘
+┌─────────────────── SEED (create_seed.go) ────────────────────┐
+│                                                              │
+│  copy agent seed files from host                             │
+│    (e.g. ~/.claude/.credentials.json → agent-runtime/)       │
+│  patch container settings (e.g. skip permission prompts)     │
+│  copy user-configured agent_files                            │
+│                                                              │
+└──────────────────────────────┬───────────────────────────────┘
                                │
                                ▼
-┌─────────────────────── BUILD & START (create.go) ─────────────┐
-│                                                                │
-│  prepare workdir (copy files / create overlay dirs)            │
-│  create git baseline (for :copy mode)                          │
-│  generate runtime-config.json (entrypoint configuration)       │
-│  prepare prompt delivery (interactive paste / headless arg)    │
-│  assemble InstanceConfig (mounts, ports, caps, resources)      │
-│                                                                │
-│  runtime.Create()  →  runtime.Start()                          │
-│                                                                │
-│  save environment.json (sandbox metadata)                      │
-│  attach to tmux session (unless --detach)                      │
-│                                                                │
-└────────────────────────────────────────────────────────────────┘
+┌───────────────── BUILD & START (create.go) ──────────────────┐
+│                                                              │
+│  prepare workdir (copy files / create overlay dirs)          │
+│  create git baseline (for :copy mode)                        │
+│  generate runtime-config.json (entrypoint configuration)     │
+│  prepare prompt delivery (interactive paste / headless arg)  │
+│  assemble InstanceConfig (mounts, ports, caps, resources)    │
+│                                                              │
+│  runtime.Create()  →  runtime.Start()                        │
+│                                                              │
+│  save environment.json (sandbox metadata)                    │
+│  attach to tmux session (unless --detach)                    │
+│                                                              │
+└──────────────────────────────────────────────────────────────┘
 ```
 
 ## Diff/Apply Flow
@@ -219,39 +221,39 @@ yoloai new myproject ./src:copy
 The core workflow: an AI agent makes changes inside the sandbox, the user reviews a diff, then applies approved changes back to the host. This protects the original project from unreviewed modifications.
 
 ```
-  Agent works inside sandbox
-            │
-            ▼
-  yoloai diff myproject
-            │
-            ▼
-   ┌────────────────────────────────┐
-   │  For each :copy/:overlay dir: │
-   │    git add -A (stage changes) │
-   │    git diff --binary baseline │
-   └───────────────┬────────────────┘
-                   │
-                   ▼
-         ┌──────────────────┐
-         │   patch output   │ ← user reviews this
-         │   (unified diff) │
-         └────────┬─────────┘
-                  │
-        user approves
-                  │
-                  ▼
-  yoloai apply myproject
-                  │
-                  ▼
-   ┌─────────────────────────────────────┐
-   │  For each :copy/:overlay dir:      │
-   │    generate binary patch            │
-   │    apply to host (git apply)        │
-   │    advance baseline SHA in meta     │
-   └─────────────────────────────────────┘
-                  │
-                  ▼
-    Host project updated with agent's changes
+        Agent works inside sandbox
+                    │
+                    ▼
+          yoloai diff myproject
+                    │
+                    ▼
+    ┌────────────────────────────────┐
+    │  For each :copy/:overlay dir:  │
+    │    git add -A (stage changes)  │
+    │    git diff --binary baseline  │
+    └───────────────┬────────────────┘
+                    │
+                    ▼
+           ┌──────────────────┐
+           │  patch output    │ ← user reviews this
+           │  (unified diff)  │
+           └────────┬─────────┘
+                    │
+              user approves
+                    │
+                    ▼
+          yoloai apply myproject
+                    │
+                    ▼
+   ┌──────────────────────────────────┐
+   │  For each :copy/:overlay dir:    │
+   │    generate binary patch         │
+   │    apply to host (git apply)     │
+   │    advance baseline SHA in meta  │
+   └────────────────┬─────────────────┘
+                    │
+                    ▼
+ Host project updated with agent's changes
 ```
 
 ## Configuration Hierarchy
@@ -259,29 +261,29 @@ The core workflow: an AI agent makes changes inside the sandbox, the user review
 Configuration merges bottom-up: baked-in defaults are overridden by user defaults, then profile settings, then CLI flags. Profiles can extend other profiles, forming a chain that merges left to right.
 
 ```
-  ┌──────────────────────────────────────┐
-  │           CLI flags                  │  ← highest priority
+  ┌─────────────────────────────────────┐
+  │           CLI flags                 │  ← highest priority
   │  --agent codex --model o3 --cpus 4  │
-  └─────────────────┬────────────────────┘
-                    │ overrides
-  ┌─────────────────▼────────────────────┐
-  │       Profile config chain           │
-  │  ~/.yoloai/profiles/<name>/          │
-  │         config.yaml                  │
-  │                                      │
-  │  my-project → python-base → base    │
-  │  (child overrides parent)            │
-  └─────────────────┬────────────────────┘
-                    │ overrides
-  ┌─────────────────▼────────────────────┐
-  │         User defaults                │
-  │  ~/.yoloai/defaults/config.yaml      │
-  └─────────────────┬────────────────────┘
-                    │ overrides
-  ┌─────────────────▼────────────────────┐
-  │       Baked-in defaults              │  ← lowest priority
-  │  (config/defaults.go)                │
-  └──────────────────────────────────────┘
+  └──────────────────┬──────────────────┘
+                     │ overrides
+  ┌──────────────────▼──────────────────┐
+  │        Profile config chain         │
+  │   ~/.yoloai/profiles/<name>/        │
+  │          config.yaml                │
+  │                                     │
+  │   my-project → python-base → base   │
+  │   (child overrides parent)          │
+  └──────────────────┬──────────────────┘
+                     │ overrides
+  ┌──────────────────▼──────────────────┐
+  │            User defaults            │
+  │  ~/.yoloai/defaults/config.yaml     │
+  └──────────────────┬──────────────────┘
+                     │ overrides
+  ┌──────────────────▼──────────────────┐
+  │          Baked-in defaults          │  ← lowest priority
+  │  (config/defaults.go)               │
+  └─────────────────────────────────────┘
 
 
   Two config scopes:
@@ -300,28 +302,28 @@ Configuration merges bottom-up: baked-in defaults are overridden by user default
 The `yoloai doctor` command probes the host environment, checks each backend's prerequisites, and reports what's available. Failing checks include fix instructions so users can resolve issues.
 
 ```
-  yoloai doctor
-       │
-       ▼
-  ┌───────────────────────────────┐
-  │  caps.DetectEnvironment()     │
-  │                               │
-  │  isRoot?  isWSL2?             │
-  │  inContainer?  kvmGroup?      │
-  └───────────────┬───────────────┘
-                  │
-                  ▼
+                     yoloai doctor
+                          │
+                          ▼
+          ┌───────────────────────────────┐
+          │  caps.DetectEnvironment()     │
+          │                               │
+          │  isRoot?  isWSL2?             │
+          │  inContainer?  kvmGroup?      │
+          └───────────────┬───────────────┘
+                          │
+                          ▼
   ┌───────────────────────────────────────────────────┐
   │  For each registered backend:                     │
   │                                                   │
   │    runtime.New(ctx, name)                         │
   │         │                                         │
-  │         ├── RequiredCapabilities(baseMode)         │
+  │         ├── RequiredCapabilities(baseMode)        │
   │         │     → [HostCapability, ...]             │
   │         │                                         │
   │         └── For each SupportedIsolationModes():   │
-  │               RequiredCapabilities(mode)           │
-  │                    → [HostCapability, ...]         │
+  │               RequiredCapabilities(mode)          │
+  │                    → [HostCapability, ...]        │
   └───────────────────────┬───────────────────────────┘
                           │
                           ▼
@@ -339,12 +341,12 @@ The `yoloai doctor` command probes the host environment, checks each backend's p
   ┌───────────────────────────────────────────────────┐
   │  caps.FormatDoctor(reports, output)               │
   │                                                   │
-  │  Backend     Mode                Status            │
-  │  ──────────  ──────────────────  ────────          │
-  │  docker      container           Ready             │
-  │  docker      container-enhanced  NeedsSetup        │
-  │  tart        vm                  Ready             │
-  │  containerd  vm                  Unavailable        │
+  │  Backend     Mode                Status           │
+  │  ──────────  ──────────────────  ────────         │
+  │  docker      container           Ready            │
+  │  docker      container-enhanced  NeedsSetup       │
+  │  tart        vm                  Ready            │
+  │  containerd  vm                  Unavailable      │
   │                                                   │
   │  ▸ gvisor-runsc: install runsc (instructions...)  │
   └───────────────────────────────────────────────────┘
