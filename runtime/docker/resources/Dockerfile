@@ -80,7 +80,8 @@ ENV DISABLE_INSTALLATION_CHECKS=1
 RUN npm install -g @anthropic-ai/claude-code \
     && npm install -g @google/gemini-cli \
     && npm install -g @openai/codex \
-    && npm install -g opencode-ai
+    && npm install -g opencode-ai \
+    && npm install -g @mariozechner/pi-coding-agent
 # hadolint ignore=DL3013
 RUN pip install --break-system-packages --no-cache-dir aider-chat
 
@@ -90,7 +91,8 @@ RUN printf '#!/bin/sh\nexec aider --yes-always "$@"\n' > /usr/local/bin/yolo-aid
     && printf '#!/bin/sh\nexec codex --dangerously-bypass-approvals-and-sandbox "$@"\n' > /usr/local/bin/yolo-codex \
     && printf '#!/bin/sh\nexec gemini --yolo "$@"\n' > /usr/local/bin/yolo-gemini \
     && printf '#!/bin/sh\nexec opencode "$@"\n' > /usr/local/bin/yolo-opencode \
-    && chmod +x /usr/local/bin/yolo-aider /usr/local/bin/yolo-claude /usr/local/bin/yolo-codex /usr/local/bin/yolo-gemini /usr/local/bin/yolo-opencode
+    && printf '#!/bin/sh\nexec pi "$@"\n' > /usr/local/bin/yolo-pi \
+    && chmod +x /usr/local/bin/yolo-aider /usr/local/bin/yolo-claude /usr/local/bin/yolo-codex /usr/local/bin/yolo-gemini /usr/local/bin/yolo-opencode /usr/local/bin/yolo-pi
 
 # gosu for dropping privileges
 ARG GOSU_VERSION=1.17
@@ -113,6 +115,7 @@ RUN mkdir -p \
         /home/yoloai/.claude \
         /home/yoloai/.gemini \
         /home/yoloai/.codex \
+        /home/yoloai/.pi/agent \
         /home/yoloai/.local/share/opencode \
         /home/yoloai/.config/github-copilot \
         /home/yoloai/.config/opencode \

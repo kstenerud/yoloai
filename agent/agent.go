@@ -2,11 +2,15 @@
 package agent
 
 import (
+	_ "embed"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 )
+
+//go:embed pi-yoloai-status.ts
+var piYoloaiStatusExtension []byte
 
 // PromptMode determines how the agent receives its initial prompt.
 type PromptMode string
@@ -76,6 +80,12 @@ type Definition struct {
 	NetworkAllowlist  []string          // domains allowed when network-isolated
 	ContextFile       string            // filename in StateDir for sandbox context reference (e.g., "CLAUDE.md")
 	AgentFilesExclude []string          // glob patterns to skip when copying agent_files (string form)
+
+	// EmbeddedFiles maps target paths (relative to the agent's StateDir / the
+	// per-sandbox AgentRuntimeDir) to file contents that yoloAI writes at
+	// sandbox creation. Used to inject yoloAI-managed agent extensions such
+	// as pi's status hook.
+	EmbeddedFiles map[string][]byte
 
 	// ApplySettings patches the agent's settings map before it is written to disk.
 	// Called with the parsed settings map; mutates it in place.
@@ -272,6 +282,68 @@ var agents = map[string]*Definition{
 		NetworkAllowlist:  []string{"api.openai.com"},
 		AgentFilesExclude: []string{"auth.json", "sessions/"},
 	},
+	"pi": {
+		Name:           "pi",
+		Description:    "pi coding agent",
+		InteractiveCmd: "pi",
+		HeadlessCmd:    `pi "$PROMPT"`,
+		PromptMode:     PromptModeInteractive,
+		APIKeyEnvVars: []string{
+			"ANTHROPIC_API_KEY",                // Anthropic Claude API key
+			"ANTHROPIC_OAUTH_TOKEN",            // Anthropic OAuth token (alternative to API key)
+			"OPENAI_API_KEY",                   // OpenAI GPT API key
+			"AZURE_OPENAI_API_KEY",             // Azure OpenAI API key
+			"AZURE_OPENAI_BASE_URL",            // Azure OpenAI/Cognitive Services base URL (e.g. https://{resource}.openai.azure.com)
+			"AZURE_OPENAI_RESOURCE_NAME",       // Azure OpenAI resource name (alternative to base URL)
+			"AZURE_OPENAI_API_VERSION",         // Azure OpenAI API version (default: v1)
+			"AZURE_OPENAI_DEPLOYMENT_NAME_MAP", // Azure OpenAI model=deployment map (comma-separated)
+			"DEEPSEEK_API_KEY",                 // DeepSeek API key
+			"GEMINI_API_KEY",                   // Google Gemini API key
+			"GROQ_API_KEY",                     // Groq API key
+			"CEREBRAS_API_KEY",                 // Cerebras API key
+			"XAI_API_KEY",                      // XAI Grok API key
+			"FIREWORKS_API_KEY",                // Fireworks API key
+			"OPENROUTER_API_KEY",               // OpenRouter API key
+			"AI_GATEWAY_API_KEY",               // Vercel AI Gateway API key
+			"ZAI_API_KEY",                      // ZAI API key
+			"MISTRAL_API_KEY",                  // Mistral API key
+			"MINIMAX_API_KEY",                  // MiniMax API key
+			"OPENCODE_API_KEY",                 // OpenCode Zen/OpenCode Go API key
+			"KIMI_API_KEY",                     // Kimi For Coding API key
+			"CLOUDFLARE_API_KEY",               // Cloudflare API token (Workers AI)
+			"CLOUDFLARE_ACCOUNT_ID",            // Cloudflare account id (required for Workers AI)
+			"AWS_PROFILE",                      // AWS profile for Amazon Bedrock
+			"AWS_ACCESS_KEY_ID",                // AWS access key for Amazon Bedrock
+			"AWS_SECRET_ACCESS_KEY",            // AWS secret key for Amazon Bedrock
+			"AWS_BEARER_TOKEN_BEDROCK",         // Bedrock API key (bearer token)
+			"AWS_REGION",                       // AWS region for Amazon Bedrock (e.g., us-east-1)
+			"PI_CODING_AGENT_DIR",              // Session storage directory (default: ~/.pi/agent)
+			"PI_PACKAGE_DIR",                   // Override package directory (for Nix/Guix store paths)
+			"PI_OFFLINE",                       // Disable startup network operations when set to 1/true/yes
+			"PI_TELEMETRY",                     // Override install telemetry when set to 1/true/yes or 0/false/no
+			"PI_SHARE_VIEWER_URL",              // Base URL for /share command (default: https://pi.dev/session/)
+			"PI_AI_ANTIGRAVITY_VERSION",        // Override Antigravity User-Agent version (e.g., 1.23.0)
+		},
+		SeedFiles: []SeedFile{
+			{HostPath: "~/.pi/agent/auth.json", TargetPath: "agent/auth.json", AuthOnly: true},
+			{HostPath: "~/.pi/agent/models.json", TargetPath: "agent/models.json"},
+			{HostPath: "~/.pi/agent/settings.json", TargetPath: "agent/settings.json"},
+		},
+		StateDir:       "/home/yoloai/.pi/",
+		SubmitSequence: "Enter",
+		StartupDelay:   3 * time.Second,
+		Idle: IdleSupport{
+			Hook:            true,
+			WchanApplicable: true,
+		},
+		ModelFlag:         "--model",
+		NetworkAllowlist:  []string{},
+		ContextFile:       "agent/AGENTS.md",
+		AgentFilesExclude: []string{"auth.json", "models.json", "settings.json", "AGENTS.md", "sessions/", "extensions/yoloai-status.ts"},
+		EmbeddedFiles: map[string][]byte{
+			"agent/extensions/yoloai-status.ts": piYoloaiStatusExtension,
+		},
+	},
 	"test": {
 		Name:           "test",
 		Description:    "Bash shell for testing and development",
@@ -382,7 +454,7 @@ func buildShellAgent() *Definition {
 	return &Definition{
 		Name:             "shell",
 		Description:      "Bash shell with all agents' credentials seeded",
-		InteractiveCmd:   `bash -c 'printf "\n  yoloai shell — launch any agent with yolo-<name>\n  Available: yolo-aider  yolo-claude  yolo-codex  yolo-gemini  yolo-opencode\n\n"; exec bash'`,
+		InteractiveCmd:   `bash -c 'printf "\n  yoloai shell — launch any agent with yolo-<name>\n  Available: yolo-aider  yolo-claude  yolo-codex  yolo-gemini  yolo-opencode  yolo-pi\n\n"; exec bash'`,
 		HeadlessCmd:      `sh -c "PROMPT"`,
 		PromptMode:       PromptModeHeadless,
 		APIKeyEnvVars:    apiKeys,

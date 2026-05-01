@@ -172,6 +172,7 @@ yoloai new task . --security gvisor
 | `gemini`   | Runs [Gemini](https://github.com/google-gemini) via API key or subscription credentials |
 | `aider`    | Runs [Aider](https://github.com/Aider-AI/aider) (your config is copied in) |
 | `opencode` | Runs [OpenCode](https://github.com/anomalyco/opencode) (your config is copied in) |
+| `pi`       | Runs [Pi Coding Agent](https://pi.dev) via API key or subscription credentials |
 | `shell`    | Runs a tmux shell with all agents credentials seeded |
 | `idle`     | Runs an idle process to allow MCP proxying |
 
