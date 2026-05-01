@@ -144,6 +144,19 @@ func WriteContextFiles(sandboxDir string, meta *Meta, agentDef *agent.Definition
 		return fmt.Errorf("write context.md: %w", err)
 	}
 
+	// Embedded agent files (e.g. pi's status hook extension). Paths are
+	// relative to AgentRuntimeDir, which is bind-mounted at the agent's
+	// StateDir inside the container.
+	for relPath, fileContent := range agentDef.EmbeddedFiles {
+		targetPath := filepath.Join(sandboxDir, AgentRuntimeDir, relPath)
+		if err := fileutil.MkdirAll(filepath.Dir(targetPath), 0750); err != nil {
+			return fmt.Errorf("create dir for embedded file %s: %w", relPath, err)
+		}
+		if err := fileutil.WriteFile(targetPath, fileContent, 0600); err != nil {
+			return fmt.Errorf("write embedded file %s: %w", relPath, err)
+		}
+	}
+
 	// Write full context inline into the agent's native instruction file
 	if agentDef.ContextFile != "" && agentDef.StateDir != "" {
 		refPath := filepath.Join(sandboxDir, AgentRuntimeDir, agentDef.ContextFile)
