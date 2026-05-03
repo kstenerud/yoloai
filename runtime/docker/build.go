@@ -114,6 +114,13 @@ func buildBaseImage(ctx context.Context, client *dockerclient.Client, sourceDir 
 	return nil
 }
 
+// CreateBuildContext creates an in-memory tar archive containing the
+// embedded Dockerfile and entrypoints. Exported so other backends (e.g.
+// containerd) can pipe it to `docker build -` without duplicating resources.
+func CreateBuildContext() (io.Reader, error) {
+	return createBuildContext()
+}
+
 // createBuildContext creates an in-memory tar archive containing the
 // embedded Dockerfile and entrypoints.
 func createBuildContext() (io.Reader, error) {

@@ -20,6 +20,7 @@ import (
 	"github.com/containerd/containerd/v2/pkg/labels"
 	"github.com/containerd/containerd/v2/pkg/namespaces"
 	"github.com/containerd/errdefs"
+	dockerrt "github.com/kstenerud/yoloai/runtime/docker"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 )
 
@@ -65,14 +66,21 @@ func (r *Runtime) Setup(ctx context.Context, sourceDir string, output io.Writer,
 			"    docker load -i yoloai-base.tar | ctr -n yoloai images import -")
 	}
 
-	// Build the image with Docker.
-	fmt.Fprintln(output, "Building yoloai-base image with Docker (this may take a few minutes)...") //nolint:errcheck // best-effort output
-	logger.Info("building yoloai-base image", "sourceDir", sourceDir)
+	// Build the image with Docker using the embedded build context (tar piped to
+	// stdin). The profiles/base directory may not exist, so we must not pass it
+	// as the build context.
+	buildCtx, err := dockerrt.CreateBuildContext()
+	if err != nil {
+		return fmt.Errorf("create build context: %w", err)
+	}
 
-	buildCmd := exec.CommandContext(ctx, dockerBin, "build", "-t", imageRef, sourceDir) //nolint:gosec // G204: sourceDir is a trusted config path
+	fmt.Fprintln(output, "Building yoloai-base image with Docker (this may take a few minutes)...") //nolint:errcheck // best-effort output
+	logger.Info("building yoloai-base image")
+
+	buildCmd := exec.CommandContext(ctx, dockerBin, "build", "-t", imageRef, "-f", "Dockerfile", "-") //nolint:gosec // G204: args are constants
 	buildCmd.Stdout = output
 	buildCmd.Stderr = output
-	buildCmd.Stdin = nil
+	buildCmd.Stdin = buildCtx
 
 	if err := buildCmd.Run(); err != nil {
 		return fmt.Errorf("docker build: %w", err)
