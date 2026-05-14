@@ -262,11 +262,16 @@ Use --patches to export .patch files without applying them.`,
 
 			commitsApplied := 0
 			var shaMap map[string]string
+			var stashErr error
 			if len(files) > 0 {
 				shaMap, err = workspace.ApplyFormatPatch(patchDir, files, targetDir)
-				if err != nil {
+				if err != nil && shaMap == nil {
+					// git am itself failed; nothing was applied.
 					return err
 				}
+				// err may be a stash-pop conflict (commits were applied); save it
+				// and surface it after baseline advancement.
+				stashErr = err
 				commitsApplied = len(files)
 				if !jsonEnabled(cmd) {
 					fmt.Fprintf(cmd.OutOrStdout(), "%d commit(s) applied to %s\n", len(files), targetDir) //nolint:errcheck
@@ -281,6 +286,10 @@ Use --patches to export .patch files without applying them.`,
 				if err != nil {
 					return fmt.Errorf("advance baseline: %w", err)
 				}
+			}
+
+			if stashErr != nil {
+				return stashErr
 			}
 
 			// Apply WIP changes
@@ -612,9 +621,13 @@ func applySelectedCommits(cmd *cobra.Command, name string, refs, paths []string,
 	defer os.RemoveAll(patchDir) //nolint:errcheck
 
 	shaMap, err := workspace.ApplyFormatPatch(patchDir, files, targetDir)
-	if err != nil {
+	if err != nil && shaMap == nil {
+		// git am itself failed; nothing was applied.
 		return err
 	}
+	// err may be a stash-pop conflict (commits were applied); save it and
+	// surface it after baseline advancement.
+	stashErr := err
 	if !jsonEnabled(cmd) {
 		fmt.Fprintf(cmd.OutOrStdout(), "%d commit(s) applied to %s\n", len(files), targetDir) //nolint:errcheck
 	}
@@ -665,7 +678,7 @@ func applySelectedCommits(cmd *cobra.Command, name string, refs, paths []string,
 		})
 	}
 
-	return nil
+	return stashErr
 }
 
 // applySquash implements the squashed-patch apply mode.

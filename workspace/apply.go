@@ -138,13 +138,7 @@ func ApplyFormatPatch(patchDir string, files []string, targetDir string) (map[st
 		return nil, formatAMError(output, targetDir)
 	}
 
-	if stashed {
-		if err := RunGitCmd(targetDir, "stash", "pop"); err != nil {
-			return nil, fmt.Errorf("restore stashed changes after apply: %w (your commits were applied; run 'git stash pop' in %s to restore pre-session changes)", err, targetDir)
-		}
-	}
-
-	// Collect new host SHAs in chronological order.
+	// Collect new host SHAs in chronological order before restoring the stash.
 	// When preTip is empty (applied to a repo with no prior commits), list all commits.
 	logArgs := []string{"log", "--reverse", "--format=%H"}
 	if preTip != "" {
@@ -152,16 +146,26 @@ func ApplyFormatPatch(patchDir string, files []string, targetDir string) (map[st
 	}
 	logCmd := NewGitCmd(targetDir, logArgs...)
 	logOut, logErr := logCmd.Output()
-	if logErr != nil {
-		return nil, nil //nolint:nilerr // SHA map is best-effort; commits are already applied
-	}
-	hostSHAs := strings.Fields(strings.TrimSpace(string(logOut)))
 
 	// Pair positionally: sandboxSHA[i] → hostSHA[i].
-	shaMap := make(map[string]string, len(sandboxSHAs))
-	for i, sandboxSHA := range sandboxSHAs {
-		if i < len(hostSHAs) {
-			shaMap[strings.ToLower(sandboxSHA)] = hostSHAs[i]
+	// shaMap is nil only when log fails (best-effort); in all other cases it is
+	// non-nil so callers can distinguish "am succeeded" from "am failed".
+	var shaMap map[string]string
+	if logErr == nil { //nolint:nestif // linear flow, not truly nested
+		hostSHAs := strings.Fields(strings.TrimSpace(string(logOut)))
+		shaMap = make(map[string]string, len(sandboxSHAs))
+		for i, sandboxSHA := range sandboxSHAs {
+			if i < len(hostSHAs) {
+				shaMap[strings.ToLower(sandboxSHA)] = hostSHAs[i]
+			}
+		}
+	}
+
+	if stashed {
+		if err := RunGitCmd(targetDir, "stash", "pop"); err != nil {
+			// Commits were applied successfully; return shaMap so callers can
+			// advance the baseline before surfacing the stash conflict to the user.
+			return shaMap, fmt.Errorf("restore stashed changes after apply: %w (your commits were applied; run 'git stash pop' in %s to restore pre-session changes)", err, targetDir)
 		}
 	}
 	return shaMap, nil
