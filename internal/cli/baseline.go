@@ -1,6 +1,6 @@
-// ABOUTME: Implements the `yoloai baseline` command with `advance` and `set`
-// ABOUTME: subcommands for manually correcting stuck sandbox baselines after
-// ABOUTME: stash-pop conflicts or non-contiguous selective applies.
+// ABOUTME: Implements the `yoloai baseline` command with `advance`, `set`, and
+// ABOUTME: `log` subcommands for manually correcting stuck sandbox baselines
+// ABOUTME: after stash-pop conflicts or non-contiguous selective applies.
 package cli
 
 import (
@@ -18,7 +18,7 @@ func newBaselineCmd() *cobra.Command {
 		Short:   "Manage sandbox baseline SHA",
 		GroupID: groupWorkflow,
 	}
-	cmd.AddCommand(newBaselineAdvanceCmd(), newBaselineSetCmd())
+	cmd.AddCommand(newBaselineAdvanceCmd(), newBaselineSetCmd(), newBaselineLogCmd())
 	return cmd
 }
 
@@ -35,13 +35,12 @@ func newBaselineAdvanceCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			_ = meta // mode already validated inside loadBaselineContext
 
 			sha, err := workspace.HeadSHA(workDir)
 			if err != nil {
 				return fmt.Errorf("resolve HEAD: %w", err)
 			}
-			return advanceBaselineAndPrint(cmd, name, sha, workDir)
+			return advanceBaselineAndPrint(cmd, name, meta.Workdir.BaselineSHA, sha, workDir)
 		},
 	}
 }
@@ -55,7 +54,7 @@ func newBaselineSetCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name, shortSHA := args[0], args[1]
-			_, workDir, err := loadBaselineContext(name)
+			meta, workDir, err := loadBaselineContext(name)
 			if err != nil {
 				return err
 			}
@@ -67,7 +66,7 @@ func newBaselineSetCmd() *cobra.Command {
 			}
 			sha := strings.TrimSpace(string(out))
 
-			return advanceBaselineAndPrint(cmd, name, sha, workDir)
+			return advanceBaselineAndPrint(cmd, name, meta.Workdir.BaselineSHA, sha, workDir)
 		},
 	}
 }
@@ -94,7 +93,8 @@ func loadBaselineContext(name string) (*sandbox.Meta, string, error) {
 
 // advanceBaselineAndPrint updates the baseline to sha and prints a
 // confirmation line: "Baseline advanced to <short-sha> (<subject>)".
-func advanceBaselineAndPrint(cmd *cobra.Command, name, sha, workDir string) error {
+// If oldSHA is non-empty, it also prints a "Previous baseline" undo hint.
+func advanceBaselineAndPrint(cmd *cobra.Command, name, oldSHA, sha, workDir string) error {
 	if err := sandbox.AdvanceBaselineTo(name, sha); err != nil {
 		return fmt.Errorf("update baseline: %w", err)
 	}
@@ -111,6 +111,69 @@ func advanceBaselineAndPrint(cmd *cobra.Command, name, sha, workDir string) erro
 	if len(shortSHA) > 8 {
 		shortSHA = shortSHA[:8]
 	}
-	_, werr := fmt.Fprintf(cmd.OutOrStdout(), "Baseline advanced to %s (%s)\n", shortSHA, subject)
-	return werr
+	w := cmd.OutOrStdout()
+	if _, err := fmt.Fprintf(w, "Baseline advanced to %s (%s)\n", shortSHA, subject); err != nil {
+		return err
+	}
+	if oldSHA != "" {
+		oldShort := oldSHA
+		if len(oldShort) > 8 {
+			oldShort = oldShort[:8]
+		}
+		_, werr := fmt.Fprintf(w, "Previous baseline: %s  — to undo: yoloai baseline set %s %s\n", oldShort, name, oldShort)
+		return werr
+	}
+	return nil
+}
+
+// newBaselineLogCmd implements `yoloai baseline log <name>`.
+// It prints the full git log of the sandbox work copy, marking the current
+// baseline commit.
+func newBaselineLogCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "log <name>",
+		Short: "Show commit log of the sandbox work copy, marking the current baseline",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			name := args[0]
+			meta, workDir, err := loadBaselineContext(name)
+			if err != nil {
+				return err
+			}
+
+			out, err := workspace.NewGitCmd(workDir, "log", "--format=%H %s").Output()
+			if err != nil {
+				return fmt.Errorf("git log: %w", err)
+			}
+
+			baselineSHA := meta.Workdir.BaselineSHA
+			w := cmd.OutOrStdout()
+			for _, line := range strings.Split(strings.TrimRight(string(out), "\n"), "\n") {
+				if line == "" {
+					continue
+				}
+				// Split full SHA from subject on the first space.
+				idx := strings.IndexByte(line, ' ')
+				if idx < 0 {
+					if _, err := fmt.Fprintln(w, line); err != nil {
+						return err
+					}
+					continue
+				}
+				fullSHA, subject := line[:idx], line[idx+1:]
+				shortSHA := fullSHA
+				if len(shortSHA) > 8 {
+					shortSHA = shortSHA[:8]
+				}
+				marker := ""
+				if baselineSHA != "" && fullSHA == baselineSHA {
+					marker = "  ← baseline"
+				}
+				if _, err := fmt.Fprintf(w, "%s  %s%s\n", shortSHA, subject, marker); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+	}
 }
