@@ -49,10 +49,11 @@ type Meta struct {
 
 // WorkdirMeta stores the resolved workdir state at creation time.
 type WorkdirMeta struct {
-	HostPath    string `json:"host_path"`
-	MountPath   string `json:"mount_path"`
-	Mode        string `json:"mode"`
-	BaselineSHA string `json:"baseline_sha,omitempty"`
+	HostPath     string `json:"host_path"`
+	MountPath    string `json:"mount_path"`
+	Mode         string `json:"mode"`
+	BaselineSHA  string `json:"baseline_sha,omitempty"`
+	InceptionSHA string `json:"inception_sha,omitempty"`
 }
 
 // DirMeta stores resolved directory state at creation time.

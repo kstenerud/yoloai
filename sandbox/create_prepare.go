@@ -483,6 +483,9 @@ func executeVMWorkDirSetup(ctx context.Context, rt runtime.Runtime, name, sandbo
 
 	// Update meta.json
 	meta.Workdir.BaselineSHA = strings.TrimSpace(result.Stdout)
+	if meta.Workdir.InceptionSHA == "" {
+		meta.Workdir.InceptionSHA = meta.Workdir.BaselineSHA
+	}
 	return SaveMeta(sandboxDir, meta)
 }
 
