@@ -127,8 +127,10 @@ func advanceBaselineAndPrint(cmd *cobra.Command, name, oldSHA, sha, workDir stri
 }
 
 // newBaselineLogCmd implements `yoloai baseline log <name>`.
-// It prints the full git log of the sandbox work copy, marking the current
-// baseline commit.
+// It prints the sandbox work copy's git log, bounded at the baseline commit.
+// When a baseline is set, only commits from the baseline onward (inclusive)
+// are shown — this avoids dumping the full pre-session project history for
+// large repos. Without a baseline, the full log is shown.
 func newBaselineLogCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "log <name>",
@@ -141,39 +143,65 @@ func newBaselineLogCmd() *cobra.Command {
 				return err
 			}
 
-			out, err := workspace.NewGitCmd(workDir, "log", "--format=%H %s").Output()
+			baselineSHA := meta.Workdir.BaselineSHA
+			w := cmd.OutOrStdout()
+
+			// When a baseline is set, show only commits beyond it plus the
+			// baseline itself. This avoids loading the full pre-session history.
+			var logArgs []string
+			if baselineSHA != "" {
+				logArgs = []string{"log", "--format=%H %s", baselineSHA + "..HEAD"}
+			} else {
+				logArgs = []string{"log", "--format=%H %s"}
+			}
+
+			out, err := workspace.NewGitCmd(workDir, logArgs...).Output()
 			if err != nil {
 				return fmt.Errorf("git log: %w", err)
 			}
 
-			baselineSHA := meta.Workdir.BaselineSHA
-			w := cmd.OutOrStdout()
-			for _, line := range strings.Split(strings.TrimRight(string(out), "\n"), "\n") {
-				if line == "" {
-					continue
+			if err := printLogLines(w, string(out), ""); err != nil {
+				return err
+			}
+
+			// Append the baseline commit itself with the ← baseline marker.
+			if baselineSHA != "" {
+				baseOut, err := workspace.NewGitCmd(workDir, "log", "--format=%H %s", "-1", baselineSHA).Output()
+				if err != nil {
+					return fmt.Errorf("git log baseline: %w", err)
 				}
-				// Split full SHA from subject on the first space.
-				idx := strings.IndexByte(line, ' ')
-				if idx < 0 {
-					if _, err := fmt.Fprintln(w, line); err != nil {
-						return err
-					}
-					continue
-				}
-				fullSHA, subject := line[:idx], line[idx+1:]
-				shortSHA := fullSHA
-				if len(shortSHA) > 8 {
-					shortSHA = shortSHA[:8]
-				}
-				marker := ""
-				if baselineSHA != "" && fullSHA == baselineSHA {
-					marker = "  ← baseline"
-				}
-				if _, err := fmt.Fprintf(w, "%s  %s%s\n", shortSHA, subject, marker); err != nil {
-					return err
-				}
+				return printLogLines(w, string(baseOut), baselineSHA)
 			}
 			return nil
 		},
 	}
+}
+
+// printLogLines prints git log output (one "%H %s" line per commit), marking
+// the commit whose full SHA matches markerSHA with "  ← baseline".
+func printLogLines(w interface{ Write([]byte) (int, error) }, output, markerSHA string) error {
+	for _, line := range strings.Split(strings.TrimRight(output, "\n"), "\n") {
+		if line == "" {
+			continue
+		}
+		idx := strings.IndexByte(line, ' ')
+		var fullSHA, subject string
+		if idx < 0 {
+			fullSHA, subject = line, ""
+		} else {
+			fullSHA, subject = line[:idx], line[idx+1:]
+		}
+		shortSHA := fullSHA
+		if len(shortSHA) > 8 {
+			shortSHA = shortSHA[:8]
+		}
+		marker := ""
+		if markerSHA != "" && fullSHA == markerSHA {
+			marker = "  ← baseline"
+		}
+		if _, err := fmt.Fprintf(w, "%s  %s%s\n", shortSHA, subject, marker); err != nil {
+			return err
+		}
+	}
+	return nil
 }
