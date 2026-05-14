@@ -52,6 +52,7 @@ func registerCommands(root *cobra.Command, version, commit, date string) {
 		newAttachCmd(),
 		newDiffCmd(),
 		newApplyCmd(),
+		newBaselineCmd(),
 		newFilesCmd(),
 		newXCmd(),
 
