@@ -127,10 +127,12 @@ func advanceBaselineAndPrint(cmd *cobra.Command, name, oldSHA, sha, workDir stri
 }
 
 // newBaselineLogCmd implements `yoloai baseline log <name>`.
-// It prints the sandbox work copy's git log, bounded at the baseline commit.
-// When a baseline is set, only commits from the baseline onward (inclusive)
-// are shown — this avoids dumping the full pre-session project history for
-// large repos. Without a baseline, the full log is shown.
+// It prints the sandbox work copy's git log from the sandbox inception commit
+// to HEAD, marking the current baseline. The inception commit is identified
+// as the first commit authored by yoloai@localhost (the commit created by
+// workspace.Baseline at sandbox creation time). This bounds the output to
+// the sandbox session regardless of where the current baseline sits, so the
+// log remains useful for recovery even after an accidental baseline advance.
 func newBaselineLogCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "log <name>",
@@ -146,33 +148,35 @@ func newBaselineLogCmd() *cobra.Command {
 			baselineSHA := meta.Workdir.BaselineSHA
 			w := cmd.OutOrStdout()
 
-			// When a baseline is set, show only commits beyond it plus the
-			// baseline itself. This avoids loading the full pre-session history.
-			var logArgs []string
-			if baselineSHA != "" {
-				logArgs = []string{"log", "--format=%H %s", baselineSHA + "..HEAD"}
-			} else {
-				logArgs = []string{"log", "--format=%H %s"}
+			// Find the sandbox inception commit: the first commit authored by
+			// yoloai@localhost (workspace.Baseline always uses this identity).
+			inceptionOut, err := workspace.NewGitCmd(workDir,
+				"log", "--format=%H", "--author=yoloai@localhost",
+				"--reverse", "--max-count=1",
+			).Output()
+			if err != nil || strings.TrimSpace(string(inceptionOut)) == "" {
+				// No inception commit found — fall back to full log.
+				out, logErr := workspace.NewGitCmd(workDir, "log", "--format=%H %s").Output()
+				if logErr != nil {
+					return fmt.Errorf("git log: %w", logErr)
+				}
+				return printLogLines(w, string(out), baselineSHA)
 			}
+			inceptionSHA := strings.TrimSpace(string(inceptionOut))
 
-			out, err := workspace.NewGitCmd(workDir, logArgs...).Output()
+			// Show commits after inception (agent work), then the inception commit.
+			out, err := workspace.NewGitCmd(workDir, "log", "--format=%H %s", inceptionSHA+"..HEAD").Output()
 			if err != nil {
 				return fmt.Errorf("git log: %w", err)
 			}
-
-			if err := printLogLines(w, string(out), ""); err != nil {
+			if err := printLogLines(w, string(out), baselineSHA); err != nil {
 				return err
 			}
-
-			// Append the baseline commit itself with the ← baseline marker.
-			if baselineSHA != "" {
-				baseOut, err := workspace.NewGitCmd(workDir, "log", "--format=%H %s", "-1", baselineSHA).Output()
-				if err != nil {
-					return fmt.Errorf("git log baseline: %w", err)
-				}
-				return printLogLines(w, string(baseOut), baselineSHA)
+			inceptionLine, err := workspace.NewGitCmd(workDir, "log", "--format=%H %s", "-1", inceptionSHA).Output()
+			if err != nil {
+				return fmt.Errorf("git log inception: %w", err)
 			}
-			return nil
+			return printLogLines(w, string(inceptionLine), baselineSHA)
 		},
 	}
 }
