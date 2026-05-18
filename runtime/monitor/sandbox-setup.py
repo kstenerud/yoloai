@@ -802,12 +802,15 @@ def launch_vscode_tunnel(cfg, socket=None):
                  exit_code=r.returncode, stderr=r.stderr.strip())
         return
 
+    # Capture tunnel output via tmux pipe-pane (does not affect the process TTY,
+    # so interactive prompts — provider selection, device-auth codes — work correctly).
+    tmux("pipe-pane", "-t", "main:vscode-tunnel",
+         f"cat >> /yoloai/logs/vscode-tunnel.log", socket=socket)
+
     # --accept-server-license-terms suppresses the VS Code Server license prompt.
-    # Output is tee'd to logs/vscode-tunnel.log so the URL survives window clears.
-    tunnel_cmd = (
-        f"exec code tunnel --name {tunnel_name} --accept-server-license-terms"
-        f" 2>&1 | tee /yoloai/logs/vscode-tunnel.log"
-    )
+    # Do NOT pipe stdout — VS Code CLI needs a real TTY for the provider-selection
+    # menu and device-auth flow on first run.
+    tunnel_cmd = f"exec code tunnel --name {tunnel_name} --accept-server-license-terms"
     tmux("send-keys", "-t", "main:vscode-tunnel", tunnel_cmd, "Enter", socket=socket)
     log_info("vscode_tunnel.launch", "VS Code tunnel started", tunnel_name=tunnel_name)
 
