@@ -312,6 +312,14 @@ def main():
 
     running_as_root = (os.geteuid() == 0)
 
+    if running_as_root and cfg.get("isolation") == "container-nestable":
+        try:
+            subprocess.run(["mount", "--make-shared", "/"], check=True, capture_output=True)
+            log_info("mount.shared", "root mount set to shared propagation")
+        except subprocess.CalledProcessError as e:
+            log_error("mount.shared_error", "mount --make-shared / failed",
+                      exit_code=e.returncode, stderr=e.stderr.decode(errors="replace").strip())
+
     remap_uid(cfg, running_as_root)
     read_secrets()
 

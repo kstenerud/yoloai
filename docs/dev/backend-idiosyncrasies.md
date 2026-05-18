@@ -34,6 +34,7 @@ row to the index.
 | Two concurrent `yoloai new` with same name corrupts networking | [CNI: concurrent creation race](#two-yoloai-new-invocations-for-the-same-container-name-within-1s-will-corrupt-networking) |
 | `start instance: instance not found` with `--network-isolated` | [Docker: isolated network mode](#docker-does-not-have-an-isolated-network-mode) |
 | `overlayfs mount` fails with `EPERM` inside Docker | [Docker: AppArmor blocks mount](#apparmor-blocks-mount2-even-with-cap_sys_admin) |
+| `Seccomp_filters: 1` inside sandbox despite `container-nestable`; proc mount in userns fails | [Docker: Proxmox LXC seccomp survives seccomp=unconfined](#proxmox-lxc-seccomp-survives-secompunconfined-at-the-docker-layer) |
 | `git apply` silently fails on overlay patch | [Docker: Exec strips trailing newline](#docker-sdk-exec-strips-the-trailing-newline) |
 | `tmux attach` exits with `EACCES` on `/dev/tty` (gVisor ARM64) | [Docker: gVisor ARM64 TIOCSCTTY](#gvisor-on-arm64-docker-exec--it-does-not-call-tiocsctty) |
 | Container starts as root / wrong uid under rootless Podman | [Podman: rootless detection uses socket path](#rootless-detection-must-use-socket-path-not-osgetuid) |
@@ -388,6 +389,35 @@ if dockerNetworkMode == "isolated" {
 inherits the same fix.
 
 **Code:** `runtime/docker/docker.go::Create` line ~152-171
+
+### Proxmox LXC seccomp survives `seccomp=unconfined` at the Docker layer
+
+**Symptom:** Inside a `container-nestable` sandbox, `cat /proc/self/status` shows:
+```
+Seccomp: 2
+Seccomp_filters: 1
+```
+despite yoloai correctly setting `seccomp=unconfined` on the Docker container. Rootless Docker and rootless Podman both fail when they try to mount proc inside a user namespace:
+```
+runc create failed: unable to start container process: error mounting "proc" to rootfs at "/proc": operation not permitted
+```
+or:
+```
+crun: open /proc/sys/net/ipv4/ping_group_range: Read-only file system
+```
+Confirmed by: `unshare --user --map-root-user --mount --fork sh -c 'mount -t proc proc /proc'` returning `permission denied`.
+
+**Explanation:** When Docker/containerd itself runs inside an unprivileged Proxmox LXC container with `features: nesting=1`, Proxmox applies its own nesting seccomp profile to the LXC container. That filter sits below the Docker layer and cannot be removed by `seccomp=unconfined` at the Docker level — seccomp filters stack and can only be restricted, never relaxed, by child processes. The nesting profile allows most syscalls but blocks `mount(2)` with proc/sysfs types inside user namespaces, which is exactly what rootlesskit (Docker rootless) and crun (rootless Podman) require.
+
+**Workaround (host):** On the Proxmox host, add to `/etc/pve/lxc/<ctid>.conf`:
+```
+lxc.seccomp.profile:
+```
+An empty value disables LXC seccomp for that container entirely. The container must be stopped and restarted. This is appropriate for a trusted dev workstation LXC container.
+
+**Impact on yoloai:** `container-nestable` rootless workflows (rootless Docker, rootless Podman) silently fail on Proxmox LXC hosts even though yoloai's configuration is correct. Rootful Podman (`sudo podman --cgroups=disabled`) still works because it doesn't use a user namespace. See also the GUIDE.md prerequisites note for `container-nestable`.
+
+**Code:** `sandbox/create_instance.go` — the seccomp setting is correct; the failure is environmental.
 
 ---
 

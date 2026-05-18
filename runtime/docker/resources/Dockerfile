@@ -29,7 +29,36 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ipset \
     dnsutils \
     sudo \
+    uidmap \
+    slirp4netns \
+    fuse-overlayfs \
+    iproute2 \
     && rm -rf /var/lib/apt/lists/*
+
+# Docker CE + Compose plugin
+# hadolint ignore=DL3008
+RUN install -m 0755 -d /etc/apt/keyrings \
+    && curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc \
+    && chmod a+r /etc/apt/keyrings/docker.asc \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian bookworm stable" \
+       > /etc/apt/sources.list.d/docker.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+       docker-ce \
+       docker-ce-cli \
+       docker-ce-rootless-extras \
+       containerd.io \
+       docker-buildx-plugin \
+       docker-compose-plugin \
+    && rm -rf /var/lib/apt/lists/*
+
+# Podman (for nested container workflows — works without cgroup write access)
+# hadolint ignore=DL3008
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    podman \
+    && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p /etc/containers \
+    && printf '{"default":[{"type":"insecureAcceptAnything"}]}\n' > /etc/containers/policy.json
 
 # Node.js 20 LTS via NodeSource (22 has syscall incompatibilities with gVisor ARM64)
 ARG NODE_MAJOR=20
@@ -44,7 +73,7 @@ RUN mkdir -p /etc/apt/keyrings \
     && rm -rf /var/lib/apt/lists/*
 
 # Go (latest stable)
-ARG GO_VERSION=1.24.1
+ARG GO_VERSION=1.26.2
 RUN curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-$(dpkg --print-architecture | sed 's/i386/386/').tar.gz" \
       -o /tmp/go.tar.gz \
     && tar -C /usr/local -xzf /tmp/go.tar.gz \
@@ -103,7 +132,10 @@ RUN curl -fsSL "https://github.com/tianon/gosu/releases/download/${GOSU_VERSION}
 RUN groupadd -g 1001 yoloai \
     && useradd -m -u 1001 -g yoloai -s /bin/bash yoloai \
     && echo 'yoloai ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/yoloai \
-    && chmod 0440 /etc/sudoers.d/yoloai
+    && chmod 0440 /etc/sudoers.d/yoloai \
+    && echo "yoloai:1001:64535" > /etc/subuid \
+    && echo "yoloai:1001:64535" > /etc/subgid \
+    && usermod -aG docker yoloai
 
 # Pre-create agent state directories and home seed file placeholders so
 # bind mount targets exist in the image. Kata Containers (and any OCI runtime

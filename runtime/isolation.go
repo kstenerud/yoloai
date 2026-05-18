@@ -11,6 +11,8 @@ func IsolationContainerRuntime(isolation string) string {
 		return "io.containerd.kata.v2"
 	case "vm-enhanced":
 		return "io.containerd.kata-fc.v2"
+	case "container-privileged", "container-nestable":
+		return "" // standard runc, no OCI runtime change
 	default:
 		return ""
 	}

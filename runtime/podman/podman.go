@@ -180,7 +180,9 @@ func defaultMachineSocketDiscovery() (string, error) {
 func (r *Runtime) BaseModeName() string { return "container" }
 
 // SupportedIsolationModes returns the isolation modes Podman can potentially support.
-func (r *Runtime) SupportedIsolationModes() []string { return []string{"container-enhanced"} }
+func (r *Runtime) SupportedIsolationModes() []string {
+	return []string{"container-enhanced", "container-privileged", "container-nestable"}
+}
 
 // RequiredCapabilities returns the host capabilities needed for the given isolation mode.
 func (r *Runtime) RequiredCapabilities(isolation string) []caps.HostCapability {

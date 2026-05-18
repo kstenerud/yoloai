@@ -237,8 +237,15 @@ func (r *Runtime) Create(ctx context.Context, cfg runtime.InstanceConfig) error 
 		specOpts = append(specOpts, oci.WithProcessCwd(cfg.WorkingDir))
 	}
 
-	if len(cfg.CapAdd) > 0 {
-		specOpts = append(specOpts, oci.WithAddedCapabilities(cfg.CapAdd))
+	if cfg.Privileged {
+		specOpts = append(specOpts, oci.WithPrivileged)
+	} else {
+		if len(cfg.CapAdd) > 0 {
+			specOpts = append(specOpts, oci.WithAddedCapabilities(cfg.CapAdd))
+		}
+		if cfg.Seccomp == "unconfined" {
+			specOpts = append(specOpts, oci.WithSeccompUnconfined)
+		}
 	}
 
 	// Always bind-mount a working resolv.conf so the container can resolve DNS.

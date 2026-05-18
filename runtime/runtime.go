@@ -60,11 +60,15 @@ type InstanceConfig struct {
 
 	// Container/VM backends (Docker, Podman, containerd, Tart).
 	// Ignored by process-based and remote backends.
-	ImageRef   string // image tag (Docker) or base VM name (Tart)
-	CapAdd     []string
-	Devices    []string
-	UseInit    bool
-	UsernsMode string // "" = default, "keep-id" = rootless Podman
+	ImageRef     string // image tag (Docker) or base VM name (Tart)
+	CapAdd       []string
+	Devices      []string
+	UseInit      bool
+	UsernsMode   string   // "" = default, "keep-id" = rootless Podman
+	Privileged   bool     // run container with all capabilities, seccomp=unconfined, AppArmor=unconfined
+	Seccomp      string   // seccomp profile: "" = default, "unconfined" = disable seccomp filter
+	CgroupnsMode string   // cgroup namespace: "" = default (private), "host" = share host cgroup namespace
+	ContainerEnv []string // environment variables set directly on the container (not via secrets)
 
 	// containerd-specific. Ignored by all other backends.
 	ContainerRuntime string // OCI runtime name (shimv2 type for containerd, runtime name for Docker/Podman)

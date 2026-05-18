@@ -3,6 +3,7 @@ package sandbox
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -73,6 +74,21 @@ func (m *Manager) buildAndStart(ctx context.Context, state *sandboxState, mounts
 	}
 	instanceCfg.CapAdd = append(instanceCfg.CapAdd, state.capAdd...)
 	instanceCfg.Devices = state.devices
+
+	// Apply isolation mode security settings for the new container-level modes.
+	switch state.isolation {
+	case "container-privileged":
+		instanceCfg.Privileged = true
+	case "container-nestable":
+		instanceCfg.Seccomp = "unconfined"
+		instanceCfg.CapAdd = append(instanceCfg.CapAdd, "NET_ADMIN", "NET_RAW", "SYS_ADMIN")
+		instanceCfg.CgroupnsMode = "host"
+		for _, dev := range []string{"/dev/fuse", "/dev/net/tun"} {
+			if _, err := os.Stat(dev); err == nil {
+				instanceCfg.Devices = append(instanceCfg.Devices, dev)
+			}
+		}
+	}
 
 	// Set the runtime identifier for both Docker (OCI --runtime name) and containerd (shimv2 type).
 	// IsolationContainerRuntime returns "" for container isolation where the default suffices.

@@ -155,6 +155,10 @@ func (r *Runtime) Create(ctx context.Context, cfg runtime.InstanceConfig) error 
 		ExposedPorts: exposedPorts,
 	}
 
+	if len(cfg.ContainerEnv) > 0 {
+		containerConfig.Env = cfg.ContainerEnv
+	}
+
 	// Translate "isolated" to default bridge network. Network isolation is
 	// implemented via iptables inside the container (entrypoint.py), not by
 	// Docker's network layer. Docker doesn't have a network named "isolated",
@@ -172,16 +176,29 @@ func (r *Runtime) Create(ctx context.Context, cfg runtime.InstanceConfig) error 
 		CapAdd:       cfg.CapAdd,
 		UsernsMode:   container.UsernsMode(cfg.UsernsMode),
 		Runtime:      cfg.ContainerRuntime,
+		Privileged:   cfg.Privileged,
+		CgroupnsMode: container.CgroupnsMode(cfg.CgroupnsMode),
 	}
 
 	// CAP_SYS_ADMIN is required for overlay mounts inside the container.
 	// Docker's default AppArmor profile blocks mount(2) even with SYS_ADMIN;
 	// disable it so the entrypoint can mount overlayfs.
-	for _, cap := range cfg.CapAdd {
-		if cap == "SYS_ADMIN" {
-			hostConfig.SecurityOpt = append(hostConfig.SecurityOpt, "apparmor=unconfined")
-			break
+	// Privileged mode already disables AppArmor so no SecurityOpt is needed.
+	if !cfg.Privileged {
+		for _, cap := range cfg.CapAdd {
+			if cap == "SYS_ADMIN" {
+				hostConfig.SecurityOpt = append(hostConfig.SecurityOpt, "apparmor=unconfined")
+				break
+			}
 		}
+	}
+
+	// Apply seccomp profile when explicitly requested.
+	// "unconfined" disables the default seccomp filter — required for Docker-in-Docker
+	// (rootless: allows unshare(CLONE_NEWUSER); rootful: allows namespace syscalls).
+	// Privileged mode already disables seccomp so we skip the opt to avoid redundancy.
+	if cfg.Seccomp != "" && !cfg.Privileged {
+		hostConfig.SecurityOpt = append(hostConfig.SecurityOpt, "seccomp="+cfg.Seccomp)
 	}
 
 	if len(cfg.Devices) > 0 {
@@ -407,7 +424,9 @@ func (r *Runtime) BaseModeName() string { return "container" }
 func (r *Runtime) PrepareAgentCommand(cmd string) string { return cmd }
 
 // SupportedIsolationModes returns the isolation modes Docker can potentially support.
-func (r *Runtime) SupportedIsolationModes() []string { return []string{"container-enhanced"} }
+func (r *Runtime) SupportedIsolationModes() []string {
+	return []string{"container-enhanced", "container-privileged", "container-nestable"}
+}
 
 // RequiredCapabilities returns the host capabilities needed for the given isolation mode.
 func (r *Runtime) RequiredCapabilities(isolation string) []caps.HostCapability {

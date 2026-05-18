@@ -170,6 +170,7 @@ type containerConfig struct {
 	Detectors          []string             `json:"detectors,omitempty"`
 	SandboxName        string               `json:"sandbox_name"`
 	TmuxSocket         string               `json:"tmux_socket,omitempty"`
+	Isolation          string               `json:"isolation,omitempty"`
 }
 
 // Create creates and optionally starts a new sandbox.
@@ -524,7 +525,7 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions, c
 	copyDirs := collectCopyDirs(workdir, auxDirs)
 
 	// Build config.json
-	configData, err := buildContainerConfig(agentDef, agentCommand, tmuxConf, overlayOrResolvedMountPath(workdir), opts.Debug, networkMode == "isolated", networkAllow, opts.Passthrough, overlayMounts, pr.setup, pr.autoCommitInterval, copyDirs, opts.Name, m.runtime.TmuxSocket(sandboxDir))
+	configData, err := buildContainerConfig(agentDef, agentCommand, tmuxConf, overlayOrResolvedMountPath(workdir), opts.Debug, networkMode == "isolated", networkAllow, opts.Passthrough, overlayMounts, pr.setup, pr.autoCommitInterval, copyDirs, opts.Name, m.runtime.TmuxSocket(sandboxDir), pr.isolation)
 	if err != nil {
 		return nil, fmt.Errorf("build %s: %w", RuntimeConfigFile, err)
 	}
@@ -912,7 +913,7 @@ func effectiveGID() int {
 }
 
 // buildContainerConfig creates the config.json content.
-func buildContainerConfig(agentDef *agent.Definition, agentCommand string, tmuxConf string, workingDir string, debug bool, networkIsolated bool, allowedDomains []string, passthrough []string, overlayMounts []overlayMountConfig, setupCommands []string, autoCommitInterval int, copyDirs []string, sandboxName string, tmuxSocket string) ([]byte, error) {
+func buildContainerConfig(agentDef *agent.Definition, agentCommand string, tmuxConf string, workingDir string, debug bool, networkIsolated bool, allowedDomains []string, passthrough []string, overlayMounts []overlayMountConfig, setupCommands []string, autoCommitInterval int, copyDirs []string, sandboxName string, tmuxSocket string, isolation string) ([]byte, error) {
 	var stateDirName string
 	if agentDef.StateDir != "" {
 		stateDirName = filepath.Base(agentDef.StateDir)
@@ -940,6 +941,7 @@ func buildContainerConfig(agentDef *agent.Definition, agentCommand string, tmuxC
 		Detectors:          resolveDetectors(agentDef.Idle),
 		SandboxName:        sandboxName,
 		TmuxSocket:         tmuxSocket,
+		Isolation:          isolation,
 	}
 	return json.MarshalIndent(cfg, "", "  ")
 }
