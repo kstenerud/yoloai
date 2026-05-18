@@ -29,6 +29,7 @@ func newRestartCmd() *cobra.Command {
 			resume, _ := cmd.Flags().GetBool("resume")
 			prompt, _ := cmd.Flags().GetString("prompt")
 			promptFile, _ := cmd.Flags().GetString("prompt-file")
+			isolation, _ := cmd.Flags().GetString("isolation")
 
 			if jsonEnabled(cmd) && attach {
 				return sandbox.NewUsageError("--json and --attach are incompatible")
@@ -52,6 +53,7 @@ func newRestartCmd() *cobra.Command {
 					Resume:     resume,
 					Prompt:     prompt,
 					PromptFile: promptFile,
+					Isolation:  isolation,
 				}); err != nil {
 					return err
 				}
@@ -87,6 +89,7 @@ func newRestartCmd() *cobra.Command {
 	cmd.Flags().Bool("resume", false, "Re-feed original prompt with continuation preamble")
 	cmd.Flags().StringP("prompt", "p", "", "New prompt text (overwrites existing prompt)")
 	cmd.Flags().StringP("prompt-file", "f", "", "File containing new prompt")
+	cmd.Flags().String("isolation", "", "Override isolation mode (e.g. container-privileged for Docker-in-Docker)")
 
 	cmd.MarkFlagsMutuallyExclusive("resume", "prompt")
 	cmd.MarkFlagsMutuallyExclusive("resume", "prompt-file")

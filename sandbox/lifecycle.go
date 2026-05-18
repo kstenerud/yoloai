@@ -57,6 +57,7 @@ type StartOptions struct {
 	Resume     bool   // re-feed original prompt with continuation preamble
 	Prompt     string // if set, overwrite prompt.txt and send directly (no preamble)
 	PromptFile string // if set, read from file, overwrite prompt.txt, send directly
+	Isolation  string // if set, override the isolation mode stored in meta.json
 }
 
 // Start ensures a sandbox is running — idempotent.
@@ -79,6 +80,34 @@ func (m *Manager) start(ctx context.Context, name string, opts StartOptions) err
 	meta, err := LoadMeta(sandboxDir)
 	if err != nil {
 		return err
+	}
+
+	// Apply isolation override before recreating the container.
+	if opts.Isolation != "" && opts.Isolation != meta.Isolation {
+		if err := config.ValidateIsolationMode(opts.Isolation); err != nil {
+			return err
+		}
+		supported := m.runtime.SupportedIsolationModes()
+		if opts.Isolation != "container" && len(supported) > 0 {
+			ok := false
+			for _, s := range supported {
+				if s == opts.Isolation {
+					ok = true
+					break
+				}
+			}
+			if !ok {
+				return NewUsageError("isolation mode %q is not supported by the %s backend", opts.Isolation, m.runtime.Name())
+			}
+		}
+		if err := checkIsolationPrerequisites(ctx, m.runtime, opts.Isolation); err != nil {
+			return err
+		}
+		meta.Isolation = opts.Isolation
+		if err := SaveMeta(sandboxDir, meta); err != nil {
+			return fmt.Errorf("save meta: %w", err)
+		}
+		fmt.Fprintf(m.output, "Isolation mode updated to %s\n", opts.Isolation) //nolint:errcheck // best-effort output
 	}
 
 	cname := InstanceName(name)
