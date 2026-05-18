@@ -181,7 +181,7 @@ func (r *Runtime) BaseModeName() string { return "container" }
 
 // SupportedIsolationModes returns the isolation modes Podman can potentially support.
 func (r *Runtime) SupportedIsolationModes() []string {
-	return []string{"container-enhanced", "container-privileged", "container-nestable"}
+	return []string{"container-enhanced", "container-privileged"}
 }
 
 // RequiredCapabilities returns the host capabilities needed for the given isolation mode.

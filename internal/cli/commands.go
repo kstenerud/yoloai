@@ -230,14 +230,14 @@ func newNewCmd(version string) *cobra.Command {
 						"--os mac for lightweight macOS sandboxing.\n\n" +
 						"For details, see: https://github.com/anthropics/claude-code/issues/35454")
 			}
-			// Block container-privileged and container-nestable on macOS (Seatbelt/Tart only).
-			if (isolation == "container-privileged" || isolation == "container-nestable") && goruntime.GOOS == "darwin" {
+			// Block container-privileged on macOS (Seatbelt/Tart only).
+			if isolation == "container-privileged" && goruntime.GOOS == "darwin" {
 				return sandbox.NewUsageError(
 					"--isolation %s is Linux-only (Docker or Podman required).\n"+
 						"macOS backends (Seatbelt, Tart) do not support this mode.\n"+
 						"Use a Linux host or omit --isolation for the default mode.", isolation)
 			}
-			if (isolation == "container-privileged" || isolation == "container-nestable") && targetOS == "mac" {
+			if isolation == "container-privileged" && targetOS == "mac" {
 				return sandbox.NewUsageError(
 					"--isolation %s is not available with --os mac.\n"+
 						"Available isolation modes with --os mac:\n"+
@@ -381,7 +381,7 @@ func newNewCmd(version string) *cobra.Command {
 	cmd.Flags().BoolP("yes", "y", false, "Skip confirmations")
 	cmd.Flags().String("cpus", "", "CPU limit (e.g., 4, 2.5)")
 	cmd.Flags().String("memory", "", "Memory limit (e.g., 8g, 512m)")
-	cmd.Flags().String("isolation", "", "Isolation mode: container (default), container-enhanced (gVisor), container-privileged (--privileged), container-nestable (Docker-in-Docker), vm (Kata+QEMU), vm-enhanced (Kata+Firecracker)")
+	cmd.Flags().String("isolation", "", "Isolation mode: container (default), container-enhanced (gVisor), container-privileged (--privileged, use for Docker-in-Docker), vm (Kata+QEMU), vm-enhanced (Kata+Firecracker)")
 	cmd.Flags().String("os", "", "Target OS: linux (default), mac")
 	cmd.Flags().StringSlice("env", nil, "Environment variable (KEY=VAL, repeatable)")
 	cmd.Flags().StringArray("runtime", []string{}, "Apple simulator runtime (ios, tvos, watchos, visionos). Repeatable. Example: --runtime ios --runtime tvos:26.1")

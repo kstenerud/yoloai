@@ -34,7 +34,9 @@ row to the index.
 | Two concurrent `yoloai new` with same name corrupts networking | [CNI: concurrent creation race](#two-yoloai-new-invocations-for-the-same-container-name-within-1s-will-corrupt-networking) |
 | `start instance: instance not found` with `--network-isolated` | [Docker: isolated network mode](#docker-does-not-have-an-isolated-network-mode) |
 | `overlayfs mount` fails with `EPERM` inside Docker | [Docker: AppArmor blocks mount](#apparmor-blocks-mount2-even-with-cap_sys_admin) |
-| `Seccomp_filters: 1` inside sandbox despite `container-nestable`; proc mount in userns fails | [Docker: Proxmox LXC seccomp survives seccomp=unconfined](#proxmox-lxc-seccomp-survives-secompunconfined-at-the-docker-layer) |
+| `sysctl: permission denied on key "net.ipv4.ip_forward"` starting inner Docker daemon | [Docker: /proc/sys and /sys/fs/cgroup read-only without systempaths=unconfined](#procsys-and-sysfsgroup-are-read-only-without-systempathsunconfined) |
+| `mkdir /sys/fs/cgroup/docker: read-only file system` when inner Docker runs containers | [Docker: /proc/sys and /sys/fs/cgroup read-only without systempaths=unconfined](#procsys-and-sysfsgroup-are-read-only-without-systempathsunconfined) |
+| `Seccomp_filters: 1` inside sandbox despite `container-privileged`; proc mount in userns fails | [Docker: Proxmox LXC seccomp survives seccomp=unconfined](#proxmox-lxc-seccomp-survives-secompunconfined-at-the-docker-layer) |
 | `git apply` silently fails on overlay patch | [Docker: Exec strips trailing newline](#docker-sdk-exec-strips-the-trailing-newline) |
 | `tmux attach` exits with `EACCES` on `/dev/tty` (gVisor ARM64) | [Docker: gVisor ARM64 TIOCSCTTY](#gvisor-on-arm64-docker-exec--it-does-not-call-tiocsctty) |
 | Container starts as root / wrong uid under rootless Podman | [Podman: rootless detection uses socket path](#rootless-detection-must-use-socket-path-not-osgetuid) |
@@ -326,6 +328,31 @@ Workaround: add `security-opt apparmor=unconfined` whenever `SYS_ADMIN` appears
 in `CapAdd`. See `docker.go::Create`. This is not advisory — the mount literally
 fails otherwise.
 
+### `/proc/sys` and `/sys/fs/cgroup` are read-only without `systempaths=unconfined`
+
+**Symptom:** Starting an inner Docker daemon inside a `container-privileged` sandbox fails with:
+```
+sysctl: permission denied on key "net.ipv4.ip_forward"
+```
+or containers launched by the inner daemon fail with:
+```
+mkdir /sys/fs/cgroup/docker: read-only file system
+```
+
+**Explanation:** Docker bind-mounts `/proc/sys` and `/sys` (including `/sys/fs/cgroup`) as
+read-only in all containers unless `--privileged` or `--security-opt systempaths=unconfined`
+is used. An inner Docker daemon needs to write `net.ipv4.ip_forward` via `/proc/sys` and
+create cgroup subtrees under `/sys/fs/cgroup` for every container it runs.
+
+**Fix:** Use `container-privileged` (`--privileged`) for Docker-in-Docker workloads. Privileged
+mode makes `/proc/sys` and `/sys/fs/cgroup` writable and works on all Docker versions.
+`systempaths=unconfined` achieves the same with a narrower capability grant but requires
+Docker ≥ 20.10 and is rejected by older daemons with `invalid --security-opt`.
+
+**Code:** `sandbox/create_instance.go` case `container-privileged`.
+
+---
+
 ### Docker SDK `Exec` strips the trailing newline
 
 `ContainerExecAttach` + `stdcopy.StdCopy` output is fed through
@@ -392,7 +419,7 @@ inherits the same fix.
 
 ### Proxmox LXC seccomp survives `seccomp=unconfined` at the Docker layer
 
-**Symptom:** Inside a `container-nestable` sandbox, `cat /proc/self/status` shows:
+**Symptom:** Inside a `container-privileged` sandbox on a Proxmox LXC host, `cat /proc/self/status` shows:
 ```
 Seccomp: 2
 Seccomp_filters: 1
@@ -415,7 +442,7 @@ lxc.seccomp.profile:
 ```
 An empty value disables LXC seccomp for that container entirely. The container must be stopped and restarted. This is appropriate for a trusted dev workstation LXC container.
 
-**Impact on yoloai:** `container-nestable` rootless workflows (rootless Docker, rootless Podman) silently fail on Proxmox LXC hosts even though yoloai's configuration is correct. Rootful Podman (`sudo podman --cgroups=disabled`) still works because it doesn't use a user namespace. See also the GUIDE.md prerequisites note for `container-nestable`.
+**Impact on yoloai:** Rootless Docker silently fails inside `container-privileged` sandboxes on Proxmox LXC hosts even though yoloai's configuration is correct. Rootful Docker works because it does not use a user namespace.
 
 **Code:** `sandbox/create_instance.go` — the seccomp setting is correct; the failure is environmental.
 

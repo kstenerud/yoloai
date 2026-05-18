@@ -537,7 +537,7 @@ yoloai config reset env.OLLAMA_API_BASE
 | `model` | (empty) | Model name or alias passed to the agent |
 | `os` | `linux` | Guest OS: `linux` (default), `mac` (requires macOS host) |
 | `container_backend` | (auto-detect) | Linux container backend: `docker`, `podman`, or `""` (auto-detect, prefers docker) |
-| `isolation` | `container` | Isolation mode: `container` (runc), `container-enhanced` (gVisor), `container-privileged` (Docker `--privileged`), `container-nestable` (Docker-in-Docker), `vm` (Kata+QEMU), `vm-enhanced` (Kata+Firecracker) |
+| `isolation` | `container` | Isolation mode: `container` (runc), `container-enhanced` (gVisor), `container-privileged` (Docker `--privileged`, use for Docker-in-Docker), `vm` (Kata+QEMU), `vm-enhanced` (Kata+Firecracker) |
 | `tart.image` | (empty) | Custom base VM image for tart backend |
 | `env.<NAME>` | (empty) | Environment variable forwarded to container |
 | `agent_args.<AGENT>` | (empty) | Default CLI args for an agent (e.g., `agent_args.aider`) |
@@ -675,8 +675,7 @@ On Docker and Podman backends, you can select isolation modes that trade securit
 
 | Mode | Requires | Description |
 |------|----------|-------------|
-| `container-privileged` | nothing (standard Docker) | Docker `--privileged` — all capabilities, seccomp=unconfined, AppArmor=unconfined |
-| `container-nestable` | nothing (standard Docker) | Targeted grant: `seccomp=unconfined` + `CAP_NET_ADMIN` + `CAP_NET_RAW` + `CAP_SYS_ADMIN` — minimum for Docker-in-Docker |
+| `container-privileged` | nothing (standard Docker) | Docker `--privileged` — all capabilities, seccomp=unconfined, AppArmor=unconfined. Use for Docker-in-Docker and Compose stacks. |
 | `container` | nothing | Default `runc` — Linux namespaces and cgroups |
 | `container-enhanced` | `runsc` in PATH + Docker runtime registered | gVisor userspace kernel — intercepts syscalls in userspace, no KVM needed |
 | `vm` | KVM + Kata Containers | Kata Containers with QEMU VM |
@@ -689,26 +688,21 @@ yoloai config set isolation container-enhanced
 # Or specify per sandbox
 yoloai new task . --isolation container-enhanced
 
-# Allow Docker-in-Docker inside the sandbox
-yoloai new task . --isolation container-nestable
+# Allow Docker-in-Docker or Compose stacks inside the sandbox
+yoloai new task . --isolation container-privileged
 ```
 
 Isolation modes are silently ignored on non-container backends (tart, seatbelt). Using `--isolation` explicitly on an incompatible backend is an error.
 
-**`container-privileged` and `container-nestable` — nested containers:**
+**`container-privileged` — Docker-in-Docker and Compose:**
 
-These modes extend the isolation spectrum in the direction of greater capability rather than greater security. Both use standard `runc` (no OCI runtime change) and work with Docker and Podman backends on Linux. They are not supported on macOS (Seatbelt/Tart).
+This mode passes Docker's `--privileged` flag. The container receives all Linux capabilities, disables seccomp, and disables AppArmor/SELinux enforcement. Use it when the agent needs to run Docker or Compose stacks inside the sandbox.
 
-- **`container-privileged`**: Passes Docker's `--privileged` flag. The container receives all Linux capabilities, disables seccomp, and disables AppArmor/SELinux enforcement. Recommended when you need rootful Docker (`dockerd`) or Compose stacks inside the sandbox — full cgroup write access is available.
+Docker CE and the Compose plugin are pre-installed. `fuse-overlayfs` is configured as the default storage driver in `/etc/docker/daemon.json` — `overlay2` fails with EPERM in nested container environments.
 
-- **`container-nestable`**: Grants a targeted capability bundle: `seccomp=unconfined`, `CAP_NET_ADMIN`, `CAP_NET_RAW`, `CAP_SYS_ADMIN`, and `cgroupns=host`. The `/dev/fuse` and `/dev/net/tun` devices are mapped in automatically. **Podman is the recommended tool in this mode** — it works without cgroup write access. Rootful Docker requires cgroup write access and will fail; use `container-privileged` instead. Rootless Docker works but has limitations (see context file inside the sandbox).
+**Security stance:** `--privileged` grants the agent near-full host kernel access. A rogue agent could escape the container. Use this mode only with agents and prompts you trust. It protects against accidental damage (copy/diff/apply workflow, clean teardown) but not against deliberate malicious behavior.
 
-No host prerequisites are needed for either mode on a standard Linux machine running Docker directly. However, if Docker itself runs inside an **unprivileged Proxmox LXC container**, additional host-level configuration is required for `container-nestable` rootless workflows:
-
-- **LXC seccomp:** Add `lxc.seccomp.profile:` (empty value) to `/etc/pve/lxc/<ctid>.conf` and restart the LXC container. Without this, Proxmox's nesting seccomp profile blocks proc mounts inside user namespaces, breaking rootless Docker and rootless Podman even though yoloai's `seccomp=unconfined` setting is correct. Rootful `sudo podman --cgroups=disabled` still works without this fix.
-- **`/dev/fuse`:** Add `lxc.cgroup2.devices.allow: c 10:229 rwm` and `lxc.mount.entry: /dev/fuse dev/fuse none bind,optional,create=file` to expose `/dev/fuse` into the LXC container. Without it, fuse-overlayfs is unavailable and Docker rootless must fall back to the VFS storage driver.
-
-See `docs/dev/backend-idiosyncrasies.md` (Proxmox LXC seccomp entry) for details.
+Not supported on macOS (Seatbelt/Tart). No additional host prerequisites are needed on a standard Linux machine. On Proxmox LXC hosts, ensure `features: nesting=1` is set on the LXC container.
 
 **Setup — gVisor (`container-enhanced`):**
 
@@ -731,7 +725,7 @@ Installing the binary alone is not enough — Docker must also have the runtime 
 
 - **`container-enhanced` + `:overlay` directories:** gVisor's VFS2 kernel does not support overlayfs mounts inside the container. Use `:copy` or `:rw` instead — yoloai will error if you combine them.
 - **`vm` and `vm-enhanced`:** Use the containerd backend, not Docker or Podman. Selected automatically when `--isolation vm` or `vm-enhanced` is used on Linux.
-- **`container-privileged` and `container-nestable`:** Linux-only (Docker/Podman backends). Not supported on macOS (Seatbelt/Tart).
+- **`container-privileged`:** Linux-only (Docker/Podman backends). Not supported on macOS (Seatbelt/Tart).
 
 ## Toolchain Support
 

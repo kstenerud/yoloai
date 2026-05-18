@@ -88,43 +88,15 @@ func GenerateContext(meta *Meta) string {
 		}
 	}
 
-	// Docker-in-Docker section (isolation-specific)
-	switch meta.Isolation {
-	case "container-nestable":
+	// Docker-in-Docker section (privileged mode only)
+	if meta.Isolation == "container-privileged" {
 		b.WriteString("\n## Nested Containers (Docker-in-Docker)\n\n")
-		b.WriteString("This sandbox is configured for nested container workflows (`container-nestable` mode).\n")
-		b.WriteString("Podman, Docker CE (including `docker-ce-rootless-extras`), `slirp4netns`, `fuse-overlayfs`, and `iproute2` are pre-installed.\n")
-		b.WriteString("Device `/dev/net/tun` is available. `/dev/fuse` is available only if the host exposes it (not guaranteed in all environments, e.g. Proxmox LXC without explicit device passthrough). The following are pre-configured:\n\n")
-		b.WriteString("- `/etc/subuid` and `/etc/subgid`: `yoloai:1001:64535`\n")
-		b.WriteString("- `/etc/containers/policy.json`: permissive (allows pulling any image)\n")
-		b.WriteString("- Capabilities: `NET_ADMIN`, `NET_RAW`, `SYS_ADMIN`; `seccomp=unconfined`; `AppArmor=unconfined`; `cgroupns=host`\n\n")
-		b.WriteString("**Podman (recommended)** — works without cgroup write access:\n")
+		b.WriteString("This sandbox runs in privileged mode. Docker CE and the Compose plugin are pre-installed.\n")
+		b.WriteString("`fuse-overlayfs` is the configured storage driver (set in `/etc/docker/daemon.json`).\n\n")
 		b.WriteString("```bash\n")
-		b.WriteString("podman run --rm --network=slirp4netns --cgroups=disabled <image>\n")
-		b.WriteString("# Or without network (simplest):\n")
-		b.WriteString("podman run --rm --network=none --cgroups=disabled <image>\n")
-		b.WriteString("```\n\n")
-		b.WriteString("**Rootless Docker** — uses `fuse-overlayfs` storage and `slirp4netns` networking:\n")
-		b.WriteString("```bash\n")
-		b.WriteString("export XDG_RUNTIME_DIR=/run/user/$(id -u) && mkdir -p \"$XDG_RUNTIME_DIR\"\n")
-		b.WriteString("dockerd-rootless.sh --storage-driver=fuse-overlayfs &\n")
-		b.WriteString("# Wait ~5 seconds, then:\n")
-		b.WriteString("docker run <image>\n")
-		b.WriteString("```\n\n")
-		b.WriteString("**Rootful Docker** — requires `container-privileged` mode (cgroupfs is read-only here):\n")
-		b.WriteString("Use `--isolation container-privileged` instead for rootful Docker or Compose stacks.\n")
-	case "container-privileged":
-		b.WriteString("\n## Nested Containers (Docker-in-Docker)\n\n")
-		b.WriteString("This sandbox runs in privileged mode (`container-privileged`). Docker CE and Podman are pre-installed.\n\n")
-		b.WriteString("**Docker (rootful):**\n")
-		b.WriteString("```bash\n")
-		b.WriteString("sudo dockerd --storage-driver=vfs &   # vfs always works; overlay2 may work on newer kernels\n")
+		b.WriteString("sudo dockerd &   # daemon.json sets fuse-overlayfs automatically\n")
 		b.WriteString("docker run <image>\n")
 		b.WriteString("docker compose up\n")
-		b.WriteString("```\n\n")
-		b.WriteString("**Podman:**\n")
-		b.WriteString("```bash\n")
-		b.WriteString("podman run --rm <image>\n")
 		b.WriteString("```\n")
 	}
 

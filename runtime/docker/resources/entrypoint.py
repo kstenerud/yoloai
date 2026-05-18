@@ -312,7 +312,7 @@ def main():
 
     running_as_root = (os.geteuid() == 0)
 
-    if running_as_root and cfg.get("isolation") == "container-nestable":
+    if running_as_root and cfg.get("isolation") == "container-privileged":
         try:
             subprocess.run(["mount", "--make-shared", "/"], check=True, capture_output=True)
             log_info("mount.shared", "root mount set to shared propagation")

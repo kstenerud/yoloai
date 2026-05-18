@@ -4,6 +4,16 @@ Tracks breaking changes made during beta. Each entry should be included in relea
 
 ## Unreleased
 
+### `container-nestable` isolation mode removed; use `container-privileged` instead
+
+**Previous behavior:** `--isolation container-nestable` created a container with a targeted capability grant (`CAP_NET_ADMIN`, `CAP_NET_RAW`, `CAP_SYS_ADMIN`, `seccomp=unconfined`, `cgroupns=host`) intended as a minimal Docker-in-Docker mode.
+
+**New behavior:** The mode no longer exists. `--isolation container-privileged` is the supported mode for Docker-in-Docker and Compose workloads. It passes `--privileged`, which grants full access to `/proc/sys` and `/sys/fs/cgroup` — both required for an inner Docker daemon. The sandbox image's `/etc/docker/daemon.json` pre-configures `fuse-overlayfs` as the storage driver.
+
+**Rationale:** The capability delta between `container-nestable` and `container-privileged` was too narrow to provide a meaningful security boundary. Both modes required `CAP_SYS_ADMIN` + `seccomp=unconfined` + `apparmor=unconfined`, which is sufficient for container escape. Maintaining a separate mode implied a safety tier that didn't exist in practice.
+
+**Migration:** Replace `--isolation container-nestable` with `--isolation container-privileged`. Update any profile `config.yaml` files with `isolation: container-nestable` to `isolation: container-privileged`.
+
 ### `apply --force` flag removed; dirty trees are handled automatically
 
 **Previous behavior:** `yoloai apply` errored when the target repo had uncommitted changes unless `--force` was passed.

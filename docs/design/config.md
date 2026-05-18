@@ -167,7 +167,7 @@ Profiles live in `~/.yoloai/profiles/<name>/` and are always selected explicitly
 
 **Implemented profile fields:** `agent`, `model`, `os`, `container_backend`, `tart.image`, `env`, `agent_args`, `agent_files`, `ports`, `workdir`, `directories`, `resources`, `network`, `mounts`, `isolation`, `cap_add`, `devices`, `setup`, `auto_commit_interval`. Unknown fields are an error — `yoloai new` fails with a clear message listing the unrecognized keys. This catches typos and fields that have been renamed.
 
-**Machine-specific fields — fail loudly if prerequisites are absent.** `isolation` and `os` select runtime environments that may not be available on every machine. `isolation: vm` uses Kata Containers on Linux (requires KVM) and Tart on macOS (requires Tart installed). `isolation: vm-enhanced` is Linux-only and additionally requires Firecracker. `isolation: container-privileged` and `isolation: container-nestable` are Linux-only (Docker/Podman) and not supported on macOS. `os: linux` is the default and works everywhere. `os: mac` requires a macOS host; the specific backend depends on `isolation` (`container` → Seatbelt, `vm` → Tart). All other isolation levels may also have prerequisites (e.g. `container-enhanced` requires gVisor). If the required prerequisites are not present, `yoloai new` fails with a clear error — it does not silently fall back to a different mode. A profile that specifies `isolation` or `os` will not work everywhere.
+**Machine-specific fields — fail loudly if prerequisites are absent.** `isolation` and `os` select runtime environments that may not be available on every machine. `isolation: vm` uses Kata Containers on Linux (requires KVM) and Tart on macOS (requires Tart installed). `isolation: vm-enhanced` is Linux-only and additionally requires Firecracker. `isolation: container-privileged` is Linux-only (Docker/Podman) and not supported on macOS. `os: linux` is the default and works everywhere. `os: mac` requires a macOS host; the specific backend depends on `isolation` (`container` → Seatbelt, `vm` → Tart). All other isolation levels may also have prerequisites (e.g. `container-enhanced` requires gVisor). If the required prerequisites are not present, `yoloai new` fails with a clear error — it does not silently fall back to a different mode. A profile that specifies `isolation` or `os` will not work everywhere.
 
 **Backend handling:**
 - `os` — optional. Selects the guest OS for the sandbox. Valid values: `linux` (default), `mac`. `linux` is the default and requires no special hardware. `mac` requires a macOS host; the backend depends on `isolation`: `container` uses Seatbelt, `vm` uses Tart. Fails loudly on non-macOS hosts or if the required backend is not installed. CLI `--os` overrides.
@@ -235,8 +235,7 @@ directories:
 # --- Machine-specific fields ---
 # isolation: container                    # os=linux: Docker or Podman; os=mac: Seatbelt
 # isolation: container-enhanced           # os=linux: gVisor required; os=mac: not supported
-# isolation: container-privileged         # os=linux: Docker/Podman (--privileged, all caps); os=mac: not supported
-# isolation: container-nestable           # os=linux: Docker/Podman (seccomp=unconfined + NET_ADMIN/NET_RAW/SYS_ADMIN); os=mac: not supported
+# isolation: container-privileged         # os=linux: Docker/Podman (--privileged, all caps; use for Docker-in-Docker); os=mac: not supported
 # isolation: vm                           # os=linux: KVM + Kata required; os=mac: Tart required
 # isolation: vm-enhanced                  # os=linux: KVM + Kata + Firecracker required; os=mac: not supported
 # os: linux                               # explicit default; Linux container/VM
@@ -258,7 +257,7 @@ CLI workdir **replaces** profile workdir. CLI `-d` dirs are **additive** with pr
 | `agent`                | Profile overrides baked-in. CLI `--agent` overrides.                                 |
 | `model`                | Profile overrides baked-in. CLI `--model` overrides.                                 |
 | `os`                   | Profile overrides baked-in. CLI `--os` overrides. Valid: `linux` (default), `mac`. `mac` requires macOS host; backend depends on `isolation` (`container` → Seatbelt, `vm` → Tart). Fails loudly on non-macOS hosts. |
-| `isolation`            | Profile overrides baked-in. CLI `--isolation` overrides. Valid: `container`, `container-enhanced`, `container-privileged`, `container-nestable`, `vm`, `vm-enhanced`. Backend is host-dependent (`vm` → Kata on Linux, Tart on macOS; `container-privileged`/`container-nestable` → Linux Docker/Podman only); fails loudly if prerequisites absent. |
+| `isolation`            | Profile overrides baked-in. CLI `--isolation` overrides. Valid: `container`, `container-enhanced`, `container-privileged`, `vm`, `vm-enhanced`. Backend is host-dependent (`vm` → Kata on Linux, Tart on macOS; `container-privileged` → Linux Docker/Podman only); fails loudly if prerequisites absent. |
 | `tart.image`           | Profile overrides baked-in.                                                           |
 | `ports`                | Additive                                                                              |
 | `env`                  | Merged (profile wins on conflict)                                                     |

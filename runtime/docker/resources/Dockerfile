@@ -52,13 +52,6 @@ RUN install -m 0755 -d /etc/apt/keyrings \
        docker-compose-plugin \
     && rm -rf /var/lib/apt/lists/*
 
-# Podman (for nested container workflows — works without cgroup write access)
-# hadolint ignore=DL3008
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    podman \
-    && rm -rf /var/lib/apt/lists/* \
-    && mkdir -p /etc/containers \
-    && printf '{"default":[{"type":"insecureAcceptAnything"}]}\n' > /etc/containers/policy.json
 
 # Node.js 20 LTS via NodeSource (22 has syscall incompatibilities with gVisor ARM64)
 ARG NODE_MAJOR=20
@@ -127,6 +120,17 @@ RUN curl -fsSL "https://github.com/tianon/gosu/releases/download/${GOSU_VERSION}
       -o /usr/local/bin/gosu \
     && chmod +x /usr/local/bin/gosu \
     && gosu --version
+
+# Docker daemon config: use fuse-overlayfs storage driver.
+# overlay2 requires an unprivileged user namespace mount that is blocked by the
+# outer Docker layer (EPERM); fuse-overlayfs works in all nesting configurations.
+RUN mkdir -p /etc/docker \
+    && printf '{"storage-driver":"fuse-overlayfs"}\n' > /etc/docker/daemon.json
+
+# Add /sbin and /usr/sbin to PATH so tools like sysctl are found by subprocesses
+# (rootlesskit child scripts, dockerd hooks) that don't inherit a full login PATH.
+# hadolint ignore=SC2016
+RUN echo 'export PATH="/usr/sbin:/sbin:$PATH"' > /etc/profile.d/sbin-path.sh
 
 # Non-root user (placeholder UID/GID — entrypoint adjusts at runtime)
 RUN groupadd -g 1001 yoloai \

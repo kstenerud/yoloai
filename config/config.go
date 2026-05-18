@@ -92,10 +92,10 @@ var knownSettings = []knownSetting{
 // Empty string is allowed (means "use default").
 func ValidateIsolationMode(mode string) error {
 	switch mode {
-	case "", "container", "container-enhanced", "container-privileged", "container-nestable", "vm", "vm-enhanced":
+	case "", "container", "container-enhanced", "container-privileged", "vm", "vm-enhanced":
 		return nil
 	default:
-		return NewUsageError("unknown isolation mode %q: valid values are container, container-enhanced, container-privileged, container-nestable, vm, vm-enhanced", mode)
+		return NewUsageError("unknown isolation mode %q: valid values are container, container-enhanced, container-privileged, vm, vm-enhanced", mode)
 	}
 }
 
