@@ -30,6 +30,7 @@ func newRestartCmd() *cobra.Command {
 			prompt, _ := cmd.Flags().GetString("prompt")
 			promptFile, _ := cmd.Flags().GetString("prompt-file")
 			isolation, _ := cmd.Flags().GetString("isolation")
+			vscodeTunnel, _ := cmd.Flags().GetBool("vscode-tunnel")
 
 			if jsonEnabled(cmd) && attach {
 				return sandbox.NewUsageError("--json and --attach are incompatible")
@@ -50,10 +51,11 @@ func newRestartCmd() *cobra.Command {
 					return err
 				}
 				if err := mgr.Start(ctx, name, sandbox.StartOptions{
-					Resume:     resume,
-					Prompt:     prompt,
-					PromptFile: promptFile,
-					Isolation:  isolation,
+					Resume:       resume,
+					Prompt:       prompt,
+					PromptFile:   promptFile,
+					Isolation:    isolation,
+					VscodeTunnel: vscodeTunnel,
 				}); err != nil {
 					return err
 				}
@@ -90,6 +92,7 @@ func newRestartCmd() *cobra.Command {
 	cmd.Flags().StringP("prompt", "p", "", "New prompt text (overwrites existing prompt)")
 	cmd.Flags().StringP("prompt-file", "f", "", "File containing new prompt")
 	cmd.Flags().String("isolation", "", "Override isolation mode (e.g. container-privileged for Docker-in-Docker)")
+	cmd.Flags().Bool("vscode-tunnel", false, "Enable VS Code Remote Tunnel (persisted; tunnel starts with the restarted container)")
 
 	cmd.MarkFlagsMutuallyExclusive("resume", "prompt")
 	cmd.MarkFlagsMutuallyExclusive("resume", "prompt-file")

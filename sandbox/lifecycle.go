@@ -54,10 +54,11 @@ func (m *Manager) stop(ctx context.Context, name string) error {
 
 // StartOptions holds parameters for the start command.
 type StartOptions struct {
-	Resume     bool   // re-feed original prompt with continuation preamble
-	Prompt     string // if set, overwrite prompt.txt and send directly (no preamble)
-	PromptFile string // if set, read from file, overwrite prompt.txt, send directly
-	Isolation  string // if set, override the isolation mode stored in meta.json
+	Resume       bool   // re-feed original prompt with continuation preamble
+	Prompt       string // if set, overwrite prompt.txt and send directly (no preamble)
+	PromptFile   string // if set, read from file, overwrite prompt.txt, send directly
+	Isolation    string // if set, override the isolation mode stored in meta.json
+	VscodeTunnel bool   // if true, enable VS Code Remote Tunnel (persisted to meta)
 }
 
 // Start ensures a sandbox is running — idempotent.
@@ -108,6 +109,18 @@ func (m *Manager) start(ctx context.Context, name string, opts StartOptions) err
 			return fmt.Errorf("save meta: %w", err)
 		}
 		fmt.Fprintf(m.output, "Isolation mode updated to %s\n", opts.Isolation) //nolint:errcheck // best-effort output
+	}
+
+	// Enable VS Code Remote Tunnel if requested and not already enabled.
+	if opts.VscodeTunnel && !meta.VscodeTunnel {
+		meta.VscodeTunnel = true
+		if err := SaveMeta(sandboxDir, meta); err != nil {
+			return fmt.Errorf("save meta: %w", err)
+		}
+		if err := patchConfigVscodeTunnel(sandboxDir, name); err != nil {
+			return fmt.Errorf("patch runtime-config.json for vscode-tunnel: %w", err)
+		}
+		fmt.Fprintln(m.output, "VS Code tunnel enabled") //nolint:errcheck // best-effort output
 	}
 
 	cname := InstanceName(name)
@@ -1142,6 +1155,34 @@ func resolveAgentArgs(agentName, profileName string) string {
 		}
 	}
 	return cfg.AgentArgs[agentName]
+}
+
+// patchConfigVscodeTunnel reads runtime-config.json, enables the vscode_tunnel
+// fields, and writes it back. Called when --vscode-tunnel is added to an
+// existing sandbox via start/restart.
+func patchConfigVscodeTunnel(sandboxDir, sandboxName string) error {
+	configPath := filepath.Join(sandboxDir, RuntimeConfigFile)
+	data, err := os.ReadFile(configPath) //nolint:gosec // path is sandbox-controlled
+	if err != nil {
+		return fmt.Errorf("read runtime-config.json: %w", err)
+	}
+
+	var cfg containerConfig
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return fmt.Errorf("parse runtime-config.json: %w", err)
+	}
+
+	cfg.VscodeTunnel = true
+	cfg.VscodeTunnelName = sanitizeTunnelName(sandboxName)
+	updated, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal runtime-config.json: %w", err)
+	}
+
+	if err := fileutil.WriteFile(configPath, updated, 0600); err != nil {
+		return fmt.Errorf("write runtime-config.json: %w", err)
+	}
+	return nil
 }
 
 // patchConfigDebug reads runtime-config.json, sets the debug field, and writes it back.

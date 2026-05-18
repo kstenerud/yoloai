@@ -28,6 +28,7 @@ func newStartCmd() *cobra.Command {
 			resume, _ := cmd.Flags().GetBool("resume")
 			prompt, _ := cmd.Flags().GetString("prompt")
 			promptFile, _ := cmd.Flags().GetString("prompt-file")
+			vscodeTunnel, _ := cmd.Flags().GetBool("vscode-tunnel")
 
 			if jsonEnabled(cmd) && attach {
 				return sandbox.NewUsageError("--json and --attach are incompatible")
@@ -44,9 +45,10 @@ func newStartCmd() *cobra.Command {
 			return withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
 				mgr := sandbox.NewManager(rt, slog.Default(), cmd.InOrStdin(), cmd.ErrOrStderr())
 				if err := mgr.Start(ctx, name, sandbox.StartOptions{
-					Resume:     resume,
-					Prompt:     prompt,
-					PromptFile: promptFile,
+					Resume:       resume,
+					Prompt:       prompt,
+					PromptFile:   promptFile,
+					VscodeTunnel: vscodeTunnel,
 				}); err != nil {
 					return sandboxErrorHint(name, err)
 				}
@@ -82,6 +84,7 @@ func newStartCmd() *cobra.Command {
 	cmd.Flags().Bool("resume", false, "Re-feed original prompt with continuation preamble")
 	cmd.Flags().StringP("prompt", "p", "", "New prompt text (overwrites existing prompt)")
 	cmd.Flags().StringP("prompt-file", "f", "", "File containing new prompt")
+	cmd.Flags().Bool("vscode-tunnel", false, "Enable VS Code Remote Tunnel (persisted; takes effect on container recreate)")
 
 	cmd.MarkFlagsMutuallyExclusive("resume", "prompt")
 	cmd.MarkFlagsMutuallyExclusive("resume", "prompt-file")
