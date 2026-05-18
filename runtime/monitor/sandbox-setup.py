@@ -788,15 +788,17 @@ def launch_agent(cfg, socket=None, working_dir=None, backend_inst=None, secrets=
 
 
 def launch_vscode_tunnel(cfg, socket=None):
-    """Launch VS Code Remote Tunnel in a separate tmux window.
+    """Launch VS Code Remote Tunnel in a background tmux window.
 
-    On first run the tunnel prints a GitHub device-auth URL; the user switches
-    to the 'vscode-tunnel' window (Ctrl-b n) to authenticate. Subsequent runs
+    The window is created with -d so focus stays on the agent window.
+    On first run the tunnel prompts for auth; the user switches to the
+    'vscode-tunnel' window (Ctrl-b n) to complete it. Subsequent runs
     reuse cached credentials from ~/.vscode/cli/ and start immediately.
     """
     tunnel_name = cfg.get("vscode_tunnel_name", cfg.get("sandbox_name", "sandbox"))
 
-    r = tmux("new-window", "-t", "main", "-n", "vscode-tunnel", socket=socket)
+    # -d creates the window in the background so focus stays on the agent window.
+    r = tmux("new-window", "-d", "-t", "main", "-n", "vscode-tunnel", socket=socket)
     if r.returncode != 0:
         log_info("vscode_tunnel.window_error", "failed to create vscode-tunnel window",
                  exit_code=r.returncode, stderr=r.stderr.strip())
@@ -807,10 +809,9 @@ def launch_vscode_tunnel(cfg, socket=None):
     tmux("pipe-pane", "-t", "main:vscode-tunnel",
          f"cat >> /yoloai/logs/vscode-tunnel.log", socket=socket)
 
-    # --accept-server-license-terms suppresses the VS Code Server license prompt.
     # Do NOT pipe stdout — VS Code CLI needs a real TTY for the provider-selection
     # menu and device-auth flow on first run.
-    tunnel_cmd = f"exec code tunnel --name {tunnel_name} --accept-server-license-terms"
+    tunnel_cmd = f"exec code tunnel --name {tunnel_name}"
     tmux("send-keys", "-t", "main:vscode-tunnel", tunnel_cmd, "Enter", socket=socket)
     log_info("vscode_tunnel.launch", "VS Code tunnel started", tunnel_name=tunnel_name)
 

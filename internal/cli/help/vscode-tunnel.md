@@ -21,14 +21,9 @@ ADD TO AN EXISTING SANDBOX
 
 FIRST-RUN AUTHENTICATION
 
-  The first time you use a tunnel, VS Code CLI needs to authenticate
-  with GitHub or a Microsoft account. The tunnel window shows a prompt:
-
-     ? How would you like to log in to Visual Studio Code?
-     > Microsoft Account
-       GitHub Account
-
-  Switch to the tunnel window to complete auth:
+  The first time you use a tunnel, VS Code CLI shows a license agreement
+  then prompts you to choose an auth provider (Microsoft or GitHub).
+  Switch to the tunnel window to complete both steps:
 
      1. Attach to the sandbox:   yoloai attach my-task
      2. Switch windows:          Ctrl-b n  (next window)
