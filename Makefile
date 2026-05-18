@@ -5,12 +5,13 @@ DATE    := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 LDFLAGS := -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(DATE)
 
 GOFILES := $(shell find . -name '*.go' -not -path './vendor/*')
+EMBEDFILES := $(shell find runtime internal -type f \( -name 'Dockerfile' -o -name '*.sh' -o -name '*.py' -o -name '*.conf' -o -name '*.md' \) -not -path './vendor/*')
 
 .PHONY: build test fmt lint tidy-check govulncheck hadolint actionlint check cover integration e2e integration-podman smoketest smoketest-full releasetest setcap clean
 
 build: $(BINARY)
 
-$(BINARY): $(GOFILES) go.mod go.sum
+$(BINARY): $(GOFILES) $(EMBEDFILES) go.mod go.sum
 	CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" -o $(BINARY) ./cmd/yoloai
 
 test:
