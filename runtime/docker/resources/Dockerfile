@@ -108,7 +108,7 @@ RUN pip install --break-system-packages --no-cache-dir aider-chat
 
 # VS Code CLI for Remote Tunnels (code tunnel)
 RUN ARCH=$(dpkg --print-architecture | sed 's/amd64/x64/') \
-    && curl -fsSL "https://code.visualstudio.com/sha/download?build=stable&os=cli-linux-${ARCH}" \
+    && curl -fsSL "https://code.visualstudio.com/sha/download?build=stable&os=cli-alpine-${ARCH}" \
     -o /tmp/vscode-cli.tar.gz \
     && tar -xzf /tmp/vscode-cli.tar.gz -C /usr/local/bin \
     && rm /tmp/vscode-cli.tar.gz
