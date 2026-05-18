@@ -53,6 +53,13 @@ func TartBaseLocksDir() string {
 	return filepath.Join(YoloaiDir(), "tart-base-locks")
 }
 
+// VscodeCLIDir returns ~/.yoloai/vscode-cli/, the persistent store for VS Code
+// CLI authentication tokens. Bind-mounted into containers as ~/.vscode/cli/ when
+// --vscode-tunnel is enabled, so the user only needs to authenticate once.
+func VscodeCLIDir() string {
+	return filepath.Join(YoloaiDir(), "vscode-cli")
+}
+
 // Shared sandbox subdirectory name constants. Used by sandbox/paths.go and
 // runtime backends to avoid duplicating these literal strings.
 const (

@@ -45,6 +45,7 @@ type Meta struct {
 	UsernsMode         string                 `json:"userns_mode,omitempty"`     // "keep-id" for Podman rootless keep-id; "" otherwise
 	Isolation          string                 `json:"isolation,omitempty"`       // isolation mode: container, container-enhanced, vm, vm-enhanced
 	HostFilesystem     bool                   `json:"host_filesystem,omitempty"` // true when sandbox state lives on the host (seatbelt)
+	VscodeTunnel       bool                   `json:"vscode_tunnel,omitempty"`   // true when VS Code Remote Tunnel is enabled
 }
 
 // WorkdirMeta stores the resolved workdir state at creation time.

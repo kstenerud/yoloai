@@ -787,6 +787,31 @@ def launch_agent(cfg, socket=None, working_dir=None, backend_inst=None, secrets=
              pane_sample=pane.strip()[:400] if pane else "")
 
 
+def launch_vscode_tunnel(cfg, socket=None):
+    """Launch VS Code Remote Tunnel in a separate tmux window.
+
+    On first run the tunnel prints a GitHub device-auth URL; the user switches
+    to the 'vscode-tunnel' window (Ctrl-b n) to authenticate. Subsequent runs
+    reuse cached credentials from ~/.vscode/cli/ and start immediately.
+    """
+    tunnel_name = cfg.get("vscode_tunnel_name", cfg.get("sandbox_name", "sandbox"))
+
+    r = tmux("new-window", "-t", "main", "-n", "vscode-tunnel", socket=socket)
+    if r.returncode != 0:
+        log_info("vscode_tunnel.window_error", "failed to create vscode-tunnel window",
+                 exit_code=r.returncode, stderr=r.stderr.strip())
+        return
+
+    # --accept-server-license-terms suppresses the VS Code Server license prompt.
+    # Output is tee'd to logs/vscode-tunnel.log so the URL survives window clears.
+    tunnel_cmd = (
+        f"exec code tunnel --name {tunnel_name} --accept-server-license-terms"
+        f" 2>&1 | tee /yoloai/logs/vscode-tunnel.log"
+    )
+    tmux("send-keys", "-t", "main:vscode-tunnel", tunnel_cmd, "Enter", socket=socket)
+    log_info("vscode_tunnel.launch", "VS Code tunnel started", tunnel_name=tunnel_name)
+
+
 def monitor_exit(socket=None):
     """Daemon thread: poll pane_dead and detach clients when agent exits."""
     def _monitor():
@@ -996,6 +1021,10 @@ def main():
         os.chmod(socket, 0o777)
 
     launch_agent(cfg, socket=socket, working_dir=working_dir, backend_inst=backend, secrets=secrets)
+
+    if cfg.get("vscode_tunnel"):
+        launch_vscode_tunnel(cfg, socket=socket)
+
     monitor_exit(socket=socket)
     wait_for_ready(cfg, socket=socket)
     prompt_delivered = deliver_prompt(cfg, yoloai_dir, socket=socket)

@@ -106,6 +106,7 @@ type CreateOptions struct {
 	Env          map[string]string // --env flags (KEY=VAL pairs)
 	Isolation    string            // --isolation flag (e.g., "container-enhanced", "vm")
 	Runtimes     []string          // --runtime flags (Apple simulator runtimes, e.g., ["ios", "tvos:26.1"])
+	VscodeTunnel bool              // --vscode-tunnel flag
 }
 
 // sandboxState holds resolved state computed during preparation.
@@ -134,6 +135,7 @@ type sandboxState struct {
 	setup             []string // setup commands from config/profile
 	isolation         string   // isolation mode from config/profile
 	isolationExplicit bool     // true when isolation was set via --isolation flag
+	vscodeTunnel      bool     // true when VS Code Remote Tunnel is enabled
 	meta              *Meta
 	configJSON        []byte
 }
@@ -171,6 +173,8 @@ type containerConfig struct {
 	SandboxName        string               `json:"sandbox_name"`
 	TmuxSocket         string               `json:"tmux_socket,omitempty"`
 	Isolation          string               `json:"isolation,omitempty"`
+	VscodeTunnel       bool                 `json:"vscode_tunnel,omitempty"`
+	VscodeTunnelName   string               `json:"vscode_tunnel_name,omitempty"`
 }
 
 // Create creates and optionally starts a new sandbox.
@@ -525,7 +529,8 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions, c
 	copyDirs := collectCopyDirs(workdir, auxDirs)
 
 	// Build config.json
-	configData, err := buildContainerConfig(agentDef, agentCommand, tmuxConf, overlayOrResolvedMountPath(workdir), opts.Debug, networkMode == "isolated", networkAllow, opts.Passthrough, overlayMounts, pr.setup, pr.autoCommitInterval, copyDirs, opts.Name, m.runtime.TmuxSocket(sandboxDir), pr.isolation)
+	vscodeTunnelName := sanitizeTunnelName(opts.Name)
+	configData, err := buildContainerConfig(agentDef, agentCommand, tmuxConf, overlayOrResolvedMountPath(workdir), opts.Debug, networkMode == "isolated", networkAllow, opts.Passthrough, overlayMounts, pr.setup, pr.autoCommitInterval, copyDirs, opts.Name, m.runtime.TmuxSocket(sandboxDir), pr.isolation, opts.VscodeTunnel, vscodeTunnelName)
 	if err != nil {
 		return nil, fmt.Errorf("build %s: %w", RuntimeConfigFile, err)
 	}
@@ -586,6 +591,7 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions, c
 		UsernsMode:         usernsMode,
 		Isolation:          pr.isolation,
 		HostFilesystem:     m.runtime.Capabilities().HostFilesystem,
+		VscodeTunnel:       opts.VscodeTunnel,
 	}
 
 	if err := SaveMeta(sandboxDir, meta); err != nil {
@@ -661,6 +667,7 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions, c
 		setup:             pr.setup,
 		isolation:         pr.isolation,
 		isolationExplicit: pr.isolationExplicit,
+		vscodeTunnel:      opts.VscodeTunnel,
 		meta:              meta,
 		configJSON:        configData,
 	}, nil
@@ -844,6 +851,26 @@ func buildAgentCommand(agentDef *agent.Definition, model string, prompt string, 
 	return cmd
 }
 
+// sanitizeTunnelName converts a sandbox name to a valid VS Code tunnel name.
+// VS Code tunnel names are limited to 20 characters, lowercase alphanumeric
+// and hyphens, with no leading or trailing hyphens.
+func sanitizeTunnelName(name string) string {
+	name = strings.ToLower(name)
+	// Replace underscores and dots with hyphens (sandbox names allow both)
+	name = strings.NewReplacer("_", "-", ".", "-").Replace(name)
+	// Truncate to 20 chars
+	if len(name) > 20 {
+		name = name[:20]
+	}
+	// Strip trailing hyphens introduced by truncation
+	name = strings.TrimRight(name, "-")
+	// Ensure minimum 3 chars (pad with 'x' if needed)
+	for len(name) < 3 {
+		name += "x"
+	}
+	return name
+}
+
 // shellEscapeForDoubleQuotes escapes a string for embedding inside
 // double quotes in a shell command.
 func shellEscapeForDoubleQuotes(s string) string {
@@ -913,7 +940,7 @@ func effectiveGID() int {
 }
 
 // buildContainerConfig creates the config.json content.
-func buildContainerConfig(agentDef *agent.Definition, agentCommand string, tmuxConf string, workingDir string, debug bool, networkIsolated bool, allowedDomains []string, passthrough []string, overlayMounts []overlayMountConfig, setupCommands []string, autoCommitInterval int, copyDirs []string, sandboxName string, tmuxSocket string, isolation string) ([]byte, error) {
+func buildContainerConfig(agentDef *agent.Definition, agentCommand string, tmuxConf string, workingDir string, debug bool, networkIsolated bool, allowedDomains []string, passthrough []string, overlayMounts []overlayMountConfig, setupCommands []string, autoCommitInterval int, copyDirs []string, sandboxName string, tmuxSocket string, isolation string, vscodeTunnel bool, vscodeTunnelName string) ([]byte, error) {
 	var stateDirName string
 	if agentDef.StateDir != "" {
 		stateDirName = filepath.Base(agentDef.StateDir)
@@ -942,6 +969,8 @@ func buildContainerConfig(agentDef *agent.Definition, agentCommand string, tmuxC
 		SandboxName:        sandboxName,
 		TmuxSocket:         tmuxSocket,
 		Isolation:          isolation,
+		VscodeTunnel:       vscodeTunnel,
+		VscodeTunnelName:   vscodeTunnelName,
 	}
 	return json.MarshalIndent(cfg, "", "  ")
 }
@@ -1176,6 +1205,17 @@ func buildMounts(state *sandboxState, secretsDir string) []runtime.MountSpec {
 		mounts = append(mounts, runtime.MountSpec{
 			Source: filepath.Join(state.sandboxDir, AgentRuntimeDir),
 			Target: state.agent.StateDir,
+		})
+	}
+
+	// VS Code CLI credential dir — persists tunnel auth tokens across container
+	// recreations so the user only needs to authenticate once.
+	if state.vscodeTunnel {
+		vscodeCLIDir := config.VscodeCLIDir()
+		_ = fileutil.MkdirAll(vscodeCLIDir, 0755) //nolint:gosec // G301: world-executable dir, no secrets inside
+		mounts = append(mounts, runtime.MountSpec{
+			Source: vscodeCLIDir,
+			Target: "/home/yoloai/.vscode/cli",
 		})
 	}
 

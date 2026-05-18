@@ -195,6 +195,7 @@ func newNewCmd(version string) *cobra.Command {
 			debug, _ := cmd.Flags().GetBool("debug")
 			envSlice, _ := cmd.Flags().GetStringSlice("env")
 			runtimes, _ := cmd.Flags().GetStringArray("runtime")
+			vscodeTunnel, _ := cmd.Flags().GetBool("vscode-tunnel")
 
 			// Resolve isolation and os with config fallback (same priority as resolveBackend).
 			cfg, _ := config.LoadDefaultsConfig()
@@ -318,6 +319,7 @@ func newNewCmd(version string) *cobra.Command {
 					Isolation:    isolation,
 					Env:          envMap,
 					Runtimes:     runtimes,
+					VscodeTunnel: vscodeTunnel,
 				})
 				if err != nil {
 					return err
@@ -385,6 +387,7 @@ func newNewCmd(version string) *cobra.Command {
 	cmd.Flags().String("os", "", "Target OS: linux (default), mac")
 	cmd.Flags().StringSlice("env", nil, "Environment variable (KEY=VAL, repeatable)")
 	cmd.Flags().StringArray("runtime", []string{}, "Apple simulator runtime (ios, tvos, watchos, visionos). Repeatable. Example: --runtime ios --runtime tvos:26.1")
+	cmd.Flags().Bool("vscode-tunnel", false, "Launch a VS Code Remote Tunnel alongside the agent (connect from VS Code on any machine)")
 
 	cmd.MarkFlagsMutuallyExclusive("network-none", "network-isolated")
 	cmd.MarkFlagsMutuallyExclusive("profile", "no-profile")

@@ -106,6 +106,13 @@ RUN npm install -g @anthropic-ai/claude-code \
 # hadolint ignore=DL3013
 RUN pip install --break-system-packages --no-cache-dir aider-chat
 
+# VS Code CLI for Remote Tunnels (code tunnel)
+RUN ARCH=$(dpkg --print-architecture | sed 's/amd64/x64/') \
+    && curl -fsSL "https://code.visualstudio.com/sha/download?build=stable&os=cli-linux-${ARCH}" \
+    -o /tmp/vscode-cli.tar.gz \
+    && tar -xzf /tmp/vscode-cli.tar.gz -C /usr/local/bin \
+    && rm /tmp/vscode-cli.tar.gz
+
 # Agent launcher shortcuts (yolo-<agent> runs with full permissions bypassed)
 RUN printf '#!/bin/sh\nexec aider --yes-always "$@"\n' > /usr/local/bin/yolo-aider \
     && printf '#!/bin/sh\nexec claude --dangerously-skip-permissions "$@"\n' > /usr/local/bin/yolo-claude \
@@ -152,6 +159,7 @@ RUN mkdir -p \
         /home/yoloai/.local/share/opencode \
         /home/yoloai/.config/github-copilot \
         /home/yoloai/.config/opencode \
+        /home/yoloai/.vscode/cli \
     && touch \
         /home/yoloai/.claude.json \
         /home/yoloai/.opencode.json \

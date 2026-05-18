@@ -656,6 +656,7 @@ func (m *Manager) recreateContainer(ctx context.Context, name string, meta *Meta
 		devices:      meta.Devices,
 		setup:        meta.Setup,
 		isolation:    meta.Isolation,
+		vscodeTunnel: meta.VscodeTunnel,
 		configJSON:   configData,
 	}
 
