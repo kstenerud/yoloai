@@ -7,6 +7,7 @@ AVAILABLE HELP TOPICS
   extensions    User-defined custom commands (yoloai x)
   security      Credentials, network isolation, copy protection
   flags         Key flags reference
+  vscode-tunnel VS Code Remote Tunnel: connect from any machine
 
 USAGE
 
@@ -19,5 +20,7 @@ ALIASES
   configuration Same as 'config'
   x, ext        Same as 'extensions'
   credentials   Same as 'security'
+  tunnel        Same as 'vscode-tunnel'
+  remote        Same as 'vscode-tunnel'
 
 More info: https://github.com/kstenerud/yoloai/blob/main/docs/GUIDE.md

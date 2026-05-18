@@ -751,6 +751,10 @@ func (m *Manager) printCreationOutput(state *sandboxState, autoAttach bool) {
 	} else {
 		fmt.Fprintf(m.output, "Run 'yoloai attach %s' to start working (Ctrl-b d to detach)\n", state.name) //nolint:errcheck // best-effort output
 	}
+	if state.vscodeTunnel {
+		fmt.Fprintln(m.output, "\nVS Code tunnel starting in the 'vscode-tunnel' tmux window.")          //nolint:errcheck // best-effort output
+		fmt.Fprintln(m.output, "Run 'yoloai help vscode-tunnel' for setup and connection instructions.") //nolint:errcheck // best-effort output
+	}
 }
 
 // resolveModel expands a model alias. User-configured aliases (from

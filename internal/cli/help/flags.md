@@ -27,6 +27,9 @@ CREATING SANDBOXES (yoloai new)
   --security <mode>   OCI runtime security mode: standard, gvisor,
                       kata, kata-firecracker (docker/podman only;
                       kata modes are experimental)
+  --vscode-tunnel     Launch a VS Code Remote Tunnel (connect from VS Code
+                      on any machine via vscode.dev/tunnel/<name>)
+                      See: yoloai help vscode-tunnel
 
 REVIEWING AND APPLYING
 
