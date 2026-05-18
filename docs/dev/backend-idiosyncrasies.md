@@ -55,6 +55,7 @@ row to the index.
 | `git diff` fails with "unable to read" object / git corruption on Tart VM | [Tart: VirtioFS corrupts git repositories](#virtiofs-corrupts-git-repositories) |
 | Agent silently fails after `yoloai restart` on Tart (node not found) | [Tart: node@24 in .zprofile breaks agent launch](#node24-in-zprofile-breaks-agent-launch-after-restart) |
 | Agent silently fails after `yoloai restart` on Seatbelt (Swift PM sandbox error) | [Seatbelt: swift-wrapper not sourced on restart](#swift-wrapper-not-sourced-on-restart) |
+| VS Code tunnel re-prompts for login on every container restart | [VS Code CLI: hostname-based keychain encryption](#vs-code-cli-file-keychain-uses-hostname-in-encryption-key) |
 | DNS works but HTTPS to api.anthropic.com times out | [DNS: timeout = API unreachable, not DNS](#request-timed-out-in-claude-code--api-unreachable-not-dns-failure) |
 | `iptables` warnings about legacy tables | [iptables-nft: legacy tables warning](#iptables--iptables-nft-both-iptables-legacy-and-iptables-nft-can-coexist) |
 | `--isolation vm` rejected on macOS / "containerd not available" | [Registry: containerd Linux-only](#containerd-backend-is-linux-only) |
@@ -955,6 +956,24 @@ Firecracker (`containerd-vmenhanced`) starts faster and completes the task well 
 **Fix:** `BackendSpec` now has a `stall_grace_secs` field. `containerd-vm` sets it to 120s, giving QEMU enough time to boot and process the prompt before stall detection activates. The stall detection still fires at 120+9=129s for genuinely stuck QEMU agents (vs. the full 300s QEMU_TIMEOUT).
 
 **Code:** `scripts/smoke_test.py::BackendSpec.stall_grace_secs`, `Test.wait_for_sentinel`
+
+---
+
+### VS Code CLI: file keychain uses hostname in encryption key
+
+**Symptom:** VS Code tunnel re-prompts for GitHub/Microsoft login on every `yoloai restart`, even though `~/.yoloai/vscode-cli/token.json` exists and the machine-id is stable. `code tunnel user show --verbose` prints "Using file keychain storage" but then "not logged in".
+
+**Explanation:** VS Code CLI encrypts the stored credential using AES with a key derived from the container hostname. Docker assigns the container ID as the hostname, so every new container gets a different hostname — making the token from the previous container undecryptable. `DBUS_SESSION_BUS_ADDRESS=disabled:` (the previous workaround) correctly triggers file-based storage, but does not prevent the hostname-based key rotation; the token is written in one container and silently rejected in the next.
+
+The VS Code CLI binary exposes two undocumented env vars that fix this:
+- `VSCODE_CLI_USE_FILE_KEYCHAIN=1` — forces file-based storage explicitly (bypasses D-Bus check entirely, cleaner than relying on D-Bus failure as a side-effect).
+- `VSCODE_CLI_DISABLE_KEYCHAIN_ENCRYPT=1` — disables AES encryption of the stored token, making the file portable across hostname changes.
+
+**Fix:** `sandbox-setup.py::launch_vscode_tunnel` sets both env vars in the tunnel launch command instead of `DBUS_SESSION_BUS_ADDRESS=disabled:`.
+
+**Note:** After upgrading, delete `~/.yoloai/vscode-cli/token.json` and re-authenticate once. The old token was encrypted; it cannot be read by the new code. Subsequent restarts will use the unencrypted token and skip the login prompt.
+
+**Code:** `runtime/monitor/sandbox-setup.py::launch_vscode_tunnel`
 
 ---
 

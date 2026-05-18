@@ -811,7 +811,19 @@ def launch_vscode_tunnel(cfg, socket=None):
 
     # Do NOT pipe stdout — VS Code CLI needs a real TTY for the provider-selection
     # menu and device-auth flow on first run.
-    tunnel_cmd = f"exec code tunnel --name {tunnel_name}"
+    #
+    # VSCODE_CLI_USE_FILE_KEYCHAIN=1  — bypass D-Bus entirely; use file-based
+    # storage in ~/.vscode/cli/ (covered by the ~/.yoloai/vscode-cli/ bind mount).
+    #
+    # VSCODE_CLI_DISABLE_KEYCHAIN_ENCRYPT=1  — disable AES encryption of the
+    # stored token. VS Code CLI derives the encryption key from the container
+    # hostname, which changes on every restart (Docker assigns the container ID
+    # as hostname). Disabling encryption makes the token portable across restarts.
+    tunnel_cmd = (
+        f"VSCODE_CLI_USE_FILE_KEYCHAIN=1 "
+        f"VSCODE_CLI_DISABLE_KEYCHAIN_ENCRYPT=1 "
+        f"exec code tunnel --accept-server-license-terms --name {tunnel_name}"
+    )
     tmux("send-keys", "-t", "main:vscode-tunnel", tunnel_cmd, "Enter", socket=socket)
     log_info("vscode_tunnel.launch", "VS Code tunnel started", tunnel_name=tunnel_name)
 

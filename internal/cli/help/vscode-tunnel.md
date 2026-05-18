@@ -21,9 +21,9 @@ ADD TO AN EXISTING SANDBOX
 
 FIRST-RUN AUTHENTICATION
 
-  The first time you use a tunnel, VS Code CLI shows a license agreement
-  then prompts you to choose an auth provider (Microsoft or GitHub).
-  Switch to the tunnel window to complete both steps:
+  The first time you use a tunnel, VS Code CLI prompts you to choose an
+  auth provider (Microsoft or GitHub). Switch to the tunnel window to
+  complete this:
 
      1. Attach to the sandbox:   yoloai attach my-task
      2. Switch windows:          Ctrl-b n  (next window)

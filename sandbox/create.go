@@ -2,6 +2,8 @@ package sandbox
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -38,6 +40,22 @@ func writeFilePerm(path string, data []byte, perm os.FileMode) error {
 		return err
 	}
 	return os.Chmod(path, perm) //nolint:gosec // G302: caller is responsible for choosing the perm
+}
+
+// ensureMachineID creates a stable machine-id file at path if it doesn't exist.
+// The ID is a random 32-character lowercase hex string (same format as Linux
+// /etc/machine-id) followed by a newline. It is bind-mounted read-only at
+// /etc/machine-id in the container so that VS Code CLI sees a consistent machine
+// fingerprint across container restarts and does not invalidate stored tokens.
+func ensureMachineID(path string) error {
+	if _, err := os.Stat(path); err == nil {
+		return nil
+	}
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return err
+	}
+	return writeFilePerm(path, []byte(hex.EncodeToString(b)+"\n"), 0444)
 }
 
 // NetworkMode specifies the sandbox's network access policy.
@@ -1221,6 +1239,17 @@ func buildMounts(state *sandboxState, secretsDir string) []runtime.MountSpec {
 			Source: vscodeCLIDir,
 			Target: "/home/yoloai/.vscode/cli",
 		})
+
+		// Stable machine-id — VS Code CLI ties its token to /etc/machine-id; a
+		// fresh random ID on each container restart causes re-authentication.
+		machineIDPath := filepath.Join(state.sandboxDir, MachineIDFile)
+		if err := ensureMachineID(machineIDPath); err == nil {
+			mounts = append(mounts, runtime.MountSpec{
+				Source:   machineIDPath,
+				Target:   "/etc/machine-id",
+				ReadOnly: true,
+			})
+		}
 	}
 
 	// Structured log directory (cli.jsonl, sandbox.jsonl, monitor.jsonl, agent-hooks.jsonl, agent.log)

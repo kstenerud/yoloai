@@ -38,6 +38,11 @@ const (
 	// LogsDir holds per-sandbox structured log files.
 	LogsDir = "logs"
 
+	// MachineIDFile stores a stable machine-id for the sandbox. Bind-mounted at
+	// /etc/machine-id to prevent VS Code CLI from seeing a new machine on every
+	// container restart (which would invalidate stored tunnel auth tokens).
+	MachineIDFile = "machine-id"
+
 	// CLIJSONLFile is the relative path to the CLI structured log within the sandbox dir.
 	CLIJSONLFile = "logs/cli.jsonl"
 
@@ -168,6 +173,11 @@ func AgentLogPath(name string) string {
 // PromptFilePath returns the path to prompt.txt for a sandbox.
 func PromptFilePath(name string) string {
 	return filepath.Join(Dir(name), "prompt.txt")
+}
+
+// MachineIDPath returns the path to the stable machine-id file for a sandbox.
+func MachineIDPath(name string) string {
+	return filepath.Join(Dir(name), MachineIDFile)
 }
 
 // RequireSandboxDir returns the sandbox directory path after verifying it exists.
