@@ -56,6 +56,7 @@ row to the index.
 | Agent silently fails after `yoloai restart` on Tart (node not found) | [Tart: node@24 in .zprofile breaks agent launch](#node24-in-zprofile-breaks-agent-launch-after-restart) |
 | Agent silently fails after `yoloai restart` on Seatbelt (Swift PM sandbox error) | [Seatbelt: swift-wrapper not sourced on restart](#swift-wrapper-not-sourced-on-restart) |
 | VS Code tunnel re-prompts for login on every container restart | [VS Code CLI: hostname-based keychain encryption](#vs-code-cli-file-keychain-uses-hostname-in-encryption-key) |
+| Second sandbox tunnel loops `error access singleton` forever | [VS Code CLI: singleton lock blocks concurrent tunnels](#vs-code-cli-singleton-lock-blocks-concurrent-tunnels) |
 | DNS works but HTTPS to api.anthropic.com times out | [DNS: timeout = API unreachable, not DNS](#request-timed-out-in-claude-code--api-unreachable-not-dns-failure) |
 | `iptables` warnings about legacy tables | [iptables-nft: legacy tables warning](#iptables--iptables-nft-both-iptables-legacy-and-iptables-nft-can-coexist) |
 | `--isolation vm` rejected on macOS / "containerd not available" | [Registry: containerd Linux-only](#containerd-backend-is-linux-only) |
@@ -974,6 +975,21 @@ The VS Code CLI binary exposes two undocumented env vars that fix this:
 **Note:** After upgrading, delete `~/.yoloai/vscode-cli/token.json` and re-authenticate once. The old token was encrypted; it cannot be read by the new code. Subsequent restarts will use the unencrypted token and skip the login prompt.
 
 **Code:** `runtime/monitor/sandbox-setup.py::launch_vscode_tunnel`
+
+---
+
+### VS Code CLI: singleton lock blocks concurrent tunnels
+
+**Symptom:** Starting a second sandbox with `--vscode-tunnel` while another is already running loops forever with:
+```
+warn error access singleton, retrying: the process holding the singleton lock file (pid=120) exited
+```
+
+**Explanation:** VS Code CLI uses a file lock (`tunnel-stable.lock`) to enforce a single tunnel instance per data directory. When all sandboxes share the same `~/.yoloai/vscode-cli/` directory, the first sandbox acquires the lock via `flock(2)`. The second sandbox detects that the recorded PID no longer exists in *its* PID namespace, but cannot acquire the `flock` because the first sandbox's process still holds it from the host filesystem. VS Code CLI retries indefinitely.
+
+**Fix:** Each sandbox now gets its own per-sandbox vscode-cli data directory (`~/.yoloai/sandboxes/<name>/vscode-cli/`). The lock, tunnel config, and server binary are all sandbox-local. To avoid requiring re-authentication for every new sandbox, `token.json` is seeded from the global credential store (`~/.yoloai/vscode-cli/token.json`) when the per-sandbox directory is first created.
+
+**Code:** `sandbox/create.go::buildMounts` (vscodeTunnel section)
 
 ---
 

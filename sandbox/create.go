@@ -1230,13 +1230,25 @@ func buildMounts(state *sandboxState, secretsDir string) []runtime.MountSpec {
 		})
 	}
 
-	// VS Code CLI credential dir — persists tunnel auth tokens across container
-	// recreations so the user only needs to authenticate once.
+	// VS Code CLI data dir — per-sandbox to prevent singleton lock conflicts when
+	// multiple sandboxes run tunnels concurrently. Token is seeded from the global
+	// dir (~/.yoloai/vscode-cli/) on first use so re-authentication is only needed
+	// once across all sandboxes.
 	if state.vscodeTunnel {
-		vscodeCLIDir := config.VscodeCLIDir()
-		_ = fileutil.MkdirAll(vscodeCLIDir, 0755) //nolint:gosec // G301: world-executable dir, no secrets inside
+		vscodeSandboxCLIDir := filepath.Join(state.sandboxDir, "vscode-cli")
+		_ = fileutil.MkdirAll(vscodeSandboxCLIDir, 0750) //nolint:gosec // G301: sandbox dir, private
+
+		// Seed token from global dir if this sandbox hasn't authenticated yet.
+		globalTokenPath := filepath.Join(config.VscodeCLIDir(), "token.json")
+		sandboxTokenPath := filepath.Join(vscodeSandboxCLIDir, "token.json")
+		if _, err := os.Stat(sandboxTokenPath); os.IsNotExist(err) {
+			if data, err2 := os.ReadFile(globalTokenPath); err2 == nil { //nolint:gosec // G304: path is sandbox-controlled
+				_ = fileutil.WriteFile(sandboxTokenPath, data, 0600)
+			}
+		}
+
 		mounts = append(mounts, runtime.MountSpec{
-			Source: vscodeCLIDir,
+			Source: vscodeSandboxCLIDir,
 			Target: "/home/yoloai/.vscode/cli",
 		})
 
