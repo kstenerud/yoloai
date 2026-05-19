@@ -33,10 +33,10 @@ Two specific conflations make this worse:
 ┌─────────────────────────────────────────────────────────┐
 │  Layer 1: Environment (high-level, per-project intent)  │
 │                                                         │
-│  auto-detected or declared via --env / .yoloai.yaml     │
+│  auto-detected or declared via --archetype / .yoloai.yaml│
 │  devcontainer.json and docker-compose.yaml are sources  │
 │                                                         │
-│  simple | compose | devcontainer | ios | ...            │
+│  simple | compose | devcontainer | apple | ...           │
 └─────────────────────────────────────────────────────────┘
                           ↓ expands to
 ┌─────────────────────────────────────────────────────────┐
@@ -49,7 +49,7 @@ Two specific conflations make this worse:
 └─────────────────────────────────────────────────────────┘
 ```
 
-The two layers are separate. Layer 1 is sugar over Layer 2. A user who specifies every flag explicitly bypasses Layer 1 entirely — nothing changes for them. A user who specifies an environment gets Layer 2 configured automatically, with an explanation of what was set and why.
+The two layers are separate. Layer 1 is sugar over Layer 2. A user who specifies every flag explicitly bypasses Layer 1 entirely — nothing changes for them. A user who specifies an archetype gets Layer 2 configured automatically, with an explanation of what was set and why.
 
 ---
 
@@ -78,6 +78,8 @@ For projects that need Docker Compose services alongside the agent (databases, m
 ### `devcontainer`
 
 For projects with `.devcontainer/devcontainer.json`. yoloAI reads this file as a complete description of the project's environment and satisfies it natively — without the devcontainer CLI and without nested containers.
+
+**`devcontainer.json` as an editor-neutral project spec:** The devcontainer spec (`containers.dev`) has grown well beyond VS Code. GitHub Codespaces, JetBrains IDEs, the `@devcontainers/cli` standalone tool, and GitHub Actions' `devcontainers/ci` action all read the same file. Lifecycle commands and port forwarding are honored by all of them; `customizations.vscode` is a vendor-extension block that non-VS-Code tools skip. yoloAI follows the same pattern — the `devcontainer` archetype delivers lifecycle commands, port forwarding, and image config regardless of whether `--vscode-tunnel` is active. VS Code extensions and settings injection is an additive layer that activates only when `--vscode-tunnel` is also specified. This means headless agent use (no VS Code, no tunnel) against a project like foley still gets postgres, mailpit, and localstack started — the services the agent needs to run and test the code.
 
 **Why devcontainers and yoloAI compose well:** The devcontainer workflow that many users have adopted for agent safety (`--dangerously-skip-permissions` inside a devcontainer) has a real gap: the workspace is typically bind-mounted from the host, so destructive file operations reach the user's real files. Network access is unrestricted. There is no review step before changes land. These are exactly the problems yoloAI solves — the two concerns are orthogonal. A user with an existing devcontainer.json should be able to get yoloAI's safety with zero new configuration.
 
@@ -251,7 +253,9 @@ For projects that require Xcode to build or test (iOS apps, macOS apps, Swift pa
 
 **Expands to:** backend=tart, os=mac. No Docker involved. Requires Apple Silicon macOS on the host.
 
-**Auto-detection on non-macOS:** Detects `.xcodeproj`, `.xcworkspace`, or `Package.swift` at the workdir root, but warns: "This looks like an Apple platform project. The Tart backend requires Apple Silicon macOS." Does not hard-fail, in case the user is inspecting the project without intending to build.
+**Auto-detection on non-macOS:** Detects `.xcodeproj`, `.xcworkspace`, or `Package.swift` at the workdir root, but warns: "This looks like an Apple platform project. The Tart backend requires Apple Silicon macOS." Does not hard-fail (in case the user is inspecting the project without intending to build), but the sandbox will fail to start if the host is not Apple Silicon macOS.
+
+**Explicit `--archetype apple` on non-macOS:** Errors immediately: "The `apple` archetype requires Apple Silicon macOS (Tart backend). Use `--archetype simple` for agent-only work on this project." A user who explicitly requests an archetype that cannot work on their host gets an error, not a deferred failure.
 
 ---
 
@@ -265,9 +269,9 @@ When neither `--env` nor `.yoloai.yaml env:` is specified, yoloAI inspects the w
 4. Nothing detected → `simple`
 
 **Overrides:**
-- `.yoloai.yaml` in the project root with `env:` declared → use that, skip detection
-- `--env <archetype>` on the command line → use that, skip detection
-- `--env simple` → explicitly suppress auto-detection and use bare container
+- `.yoloai.yaml` in the project root with `archetype:` declared → use that, skip detection
+- `--archetype <name>` on the command line → use that, skip detection
+- `--archetype simple` → explicitly suppress auto-detection and use bare container
 - `--backend seatbelt` alongside `apple` archetype → use lightweight host-process sandbox instead of Tart VM
 
 ### Transparency Rule
@@ -286,16 +290,22 @@ Auto-detection is never silent. When an archetype is inferred, yoloAI prints a c
     · .vscode/extensions.json written with 6 recommended extensions
     · .vscode/settings.json written with Go formatter/linter settings
     · Ports 8080, 5432, 8025, 4566 will be forwarded
-  To suppress: --env simple   To inspect full config: --dry-run
+  To suppress: --archetype simple   To inspect full config: --dry-run
 ```
 
 `--dry-run` prints the complete expanded Layer 2 configuration (every effective flag, as if the user had typed them all) and exits without creating the sandbox. This lets users graduate from archetypes to explicit flags when they need precise control.
 
 ---
 
+### Transparency output suppression
+
+The causal chain output is for user education. It is suppressed under `--quiet` and omitted from the `--json` output (which instead includes an `inference` field with the structured equivalent — detected archetype, detected signals, and effective Layer 2 overrides). Users who always run with `--quiet` or `--json` can inspect inference via `yoloai sandbox <name> info`.
+
+---
+
 ## Transparency in Ongoing Operation
 
-The chosen archetype and its full expansion are stored in `environment.json` at creation time:
+The chosen archetype and its full expansion are stored in `environment.json` at creation time, under an `archetype` field:
 - `yoloai sandbox info` always shows what the archetype expanded to
 - `yoloai start` / `yoloai restart` re-runs lifecycle commands using stored config without re-running detection
 
@@ -344,7 +354,7 @@ A project can include a `.yoloai.yaml` at its root. Checked into the project rep
 
 ```yaml
 # .yoloai.yaml
-env: devcontainer          # explicit archetype; suppresses auto-detection
+archetype: devcontainer    # explicit archetype; suppresses auto-detection
 
 # Mounts evaluated by yoloAI on the host before sandbox start.
 # Use this for credentials that aren't appropriate to put in devcontainer.json
@@ -358,6 +368,8 @@ requires:
 ```
 
 Mount precedence (highest to lowest): CLI flags > `.yoloai.yaml` > profile config > baked-in defaults.
+
+**`.yoloai.yaml` + `--profile` interaction:** When `--profile` is specified alongside `archetype: devcontainer`, the profile image takes precedence over the devcontainer `image:` or `build:` fields (with a note in output). All other archetype behaviour still applies — lifecycle commands, port forwarding, VS Code workspace injection, and mounts from `.yoloai.yaml` are all honoured. The archetype is never suppressed by `--profile`.
 
 ---
 
@@ -378,9 +390,9 @@ When `--profile` is specified with the `devcontainer` archetype, the profile ima
 
 ## Resolved Design Decisions
 
-- **`--devcontainer` shorthand flag:** No new flag. Use `--env devcontainer` or rely on auto-detection. Adding a flag just to alias an `--env` value adds surface area without value.
+- **`--devcontainer` shorthand flag:** No new flag. Use `--archetype devcontainer` or rely on auto-detection. Adding a flag just to alias an `--archetype` value adds surface area without value.
 
-- **`requires:` validation:** Warn and prompt at creation time. If the constraint isn't met, print a clear message and ask "Continue anyway? [y/N]". Honour the `--yes` flag to skip the prompt in non-interactive / scripted use. This makes mismatches visible without being a hard blocker.
+- **`requires:` validation:** Warn and prompt at creation time. If the constraint isn't met, print a clear message and ask "Continue anyway? [y/N]". Honour the `--yes` flag to skip the prompt in non-interactive/scripted use. This makes mismatches visible without being a hard blocker.
 
 - **`postStartCommand` string/array/object forms:** Implement all three forms correctly. The devcontainer spec defines the object form as parallel named commands — all must succeed. Sequential fallback with a warning is incorrect behaviour; it would silently break projects that depend on parallelism (e.g. starting a database and a cache concurrently before the app starts). The correct implementation in `sandbox-setup.py`:
   - **String:** `subprocess.run(['sh', '-c', cmd])` — shell interprets `&&`, pipes, etc.
