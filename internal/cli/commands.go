@@ -368,7 +368,7 @@ func newNewCmd(version string) *cobra.Command {
 
 				// Wait for tmux session to be ready before attaching
 				containerName := sandbox.InstanceName(sandboxName)
-				if err := waitForTmux(ctx, rt, containerName, sandboxName, 30*time.Second, user); err != nil {
+				if err := waitForTmux(ctx, rt, containerName, sandboxName, 120*time.Second, user); err != nil {
 					return fmt.Errorf("waiting for tmux session: %w", err)
 				}
 
@@ -473,16 +473,19 @@ func readTmuxSocket(sandboxName string) string {
 	return cfg.TmuxSocket
 }
 
-// waitForTmux polls until the tmux session is ready in the container.
+// waitForTmux polls until the agent has been launched inside the container.
 // Returns early if the container stops running or the context is cancelled.
 //
 // Detection strategy (both are checked on each poll cycle):
 //  1. sandbox.jsonl: read the container's structured log on the host and look
-//     for the "sandbox.tmux_start" event. This is the primary check and works
-//     even when docker exec is unreliable (e.g. gVisor on ARM64 where exec
-//     into the container may behave differently).
+//     for the "sandbox.agent_launch" event (agent started) or
+//     "sandbox.agent_not_found" (binary missing — still need to attach to show
+//     the error). This is the primary check and works even when docker exec is
+//     unreliable (e.g. gVisor on ARM64). Checking agent_launch rather than
+//     tmux_start ensures we wait for lifecycle commands (onCreateCommand,
+//     postStartCommand) to complete before attaching.
 //  2. docker exec: run "tmux has-session -t main" inside the container.
-//     This is the fallback and covers backends that don't write sandbox.jsonl.
+//     This is the fallback for backends that don't write sandbox.jsonl.
 func waitForTmux(ctx context.Context, rt runtime.Runtime, containerName, sandboxName string, timeout time.Duration, user string) error {
 	jsonlPath := sandbox.SandboxJSONLPath(sandboxName)
 	tmuxSocket := readTmuxSocket(sandboxName)
@@ -500,11 +503,13 @@ func waitForTmux(ctx context.Context, rt runtime.Runtime, containerName, sandbox
 			return fmt.Errorf("container %s is not running", containerName)
 		}
 
-		// Primary: check sandbox.jsonl for the "sandbox.tmux_start" event.
-		// The container writes this immediately after tmux new-session succeeds,
-		// so it's visible to the host without requiring docker exec.
+		// Primary: check sandbox.jsonl for agent_launch or agent_not_found.
+		// agent_launch is written by launch_agent() after lifecycle commands
+		// finish, so attaching at this point means the user sees the agent
+		// (or the "not found" error) immediately.
 		if data, readErr := os.ReadFile(jsonlPath); readErr == nil { //nolint:gosec // G304: path from trusted sandbox dir
-			if bytes.Contains(data, []byte(`"sandbox.tmux_start"`)) {
+			if bytes.Contains(data, []byte(`"sandbox.agent_launch"`)) ||
+				bytes.Contains(data, []byte(`"sandbox.agent_not_found"`)) {
 				return nil
 			}
 		}
