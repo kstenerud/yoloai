@@ -64,7 +64,7 @@ func newAttachCmd() *cobra.Command {
 					}
 				}
 
-				slog.Debug("attaching to tmux session", "event", "sandbox.attach", "container", containerName)
+				slog.Debug("attaching to tmux session", "event", "sandbox.attach", "container", containerName) //nolint:gosec // G706: containerName comes from trusted sandbox metadata
 				return attachToSandbox(ctx, rt, containerName, name, user)
 			})
 		},

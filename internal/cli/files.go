@@ -326,7 +326,7 @@ func expandHostGlobs(args []string) ([]string, error) {
 	var result []string
 
 	for _, arg := range args {
-		if _, err := os.Stat(arg); err == nil {
+		if _, err := os.Stat(arg); err == nil { //nolint:gosec // G703: path is CLI-supplied by the user
 			// Literal path exists — use it directly
 			if !seen[arg] {
 				seen[arg] = true

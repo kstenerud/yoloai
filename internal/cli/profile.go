@@ -681,7 +681,7 @@ func newProfileDeleteCmd() *cobra.Command {
 			}
 
 			dir := config.ProfileDirPath(name)
-			if err := os.RemoveAll(dir); err != nil {
+			if err := os.RemoveAll(dir); err != nil { //nolint:gosec // G703: dir is derived from validated profile name
 				return fmt.Errorf("remove profile directory: %w", err)
 			}
 

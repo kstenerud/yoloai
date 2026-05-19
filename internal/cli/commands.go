@@ -61,6 +61,7 @@ func registerCommands(root *cobra.Command, version, commit, date string) {
 		newLsAliasCmd(),
 		newLogAliasCmd(),
 		newExecAliasCmd(),
+		newVscodeAliasCmd(),
 
 		// Admin
 		newSystemCmd(version, commit, date),
@@ -121,6 +122,16 @@ func newExecAliasCmd() *cobra.Command {
 		GroupID: groupSandboxTools,
 		Args:    cobra.MinimumNArgs(1),
 		RunE:    runExec,
+	}
+}
+
+func newVscodeAliasCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:     "vscode <name>",
+		Short:   "Open a sandbox in VS Code (shortcut for 'sandbox vscode')",
+		GroupID: groupSandboxTools,
+		Args:    cobra.ExactArgs(1),
+		RunE:    newSandboxVscodeCmd().RunE,
 	}
 }
 
@@ -293,6 +304,7 @@ func newNewCmd(version string) *cobra.Command {
 				if jsonEnabled(cmd) {
 					mgrOutput = io.Discard
 				}
+				archetypeFlag, _ := cmd.Flags().GetString("archetype")
 				mgr := sandbox.NewManager(rt, slog.Default(), cmd.InOrStdin(), mgrOutput)
 				sandboxName, err := mgr.Create(ctx, sandbox.CreateOptions{
 					Name:         name,
@@ -320,6 +332,7 @@ func newNewCmd(version string) *cobra.Command {
 					Env:          envMap,
 					Runtimes:     runtimes,
 					VscodeTunnel: vscodeTunnel,
+					Archetype:    archetypeFlag,
 				})
 				if err != nil {
 					return err
@@ -388,6 +401,7 @@ func newNewCmd(version string) *cobra.Command {
 	cmd.Flags().StringSlice("env", nil, "Environment variable (KEY=VAL, repeatable)")
 	cmd.Flags().StringArray("runtime", []string{}, "Apple simulator runtime (ios, tvos, watchos, visionos). Repeatable. Example: --runtime ios --runtime tvos:26.1")
 	cmd.Flags().Bool("vscode-tunnel", false, "Launch a VS Code Remote Tunnel alongside the agent (connect from VS Code on any machine)")
+	cmd.Flags().String("archetype", "", fmt.Sprintf("Environment archetype (%s)", strings.Join(sandbox.ValidArchetypes(), "|")))
 
 	cmd.MarkFlagsMutuallyExclusive("network-none", "network-isolated")
 	cmd.MarkFlagsMutuallyExclusive("profile", "no-profile")

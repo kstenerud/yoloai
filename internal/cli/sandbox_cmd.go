@@ -15,6 +15,7 @@ import (
 var sandboxSubcmds = map[string]bool{
 	"info": true, "log": true, "exec": true, "prompt": true,
 	"allow": true, "allowed": true, "deny": true, "bugreport": true,
+	"vscode": true,
 }
 
 func newSandboxCmd() *cobra.Command {
@@ -32,6 +33,7 @@ func newSandboxCmd() *cobra.Command {
 	listCmd := newSandboxListCmd()
 	listCmd.Hidden = true
 	cmd.AddCommand(listCmd)
+	cmd.AddCommand(newSandboxVscodeCmd())
 
 	cmd.SetUsageTemplate(`Usage:
   {{.CommandPath}} list [flags]
@@ -46,7 +48,8 @@ Commands:
   <name> allow <domain>...   Allow additional domains (network-isolated)
   <name> allowed             Show allowed domains
   <name> deny <domain>...    Remove domains from the allowlist
-  <name> bugreport [safe|unsafe]  Write a bug report for the sandbox{{if gt (len .Aliases) 0}}
+  <name> bugreport [safe|unsafe]  Write a bug report for the sandbox
+  <name> vscode                   Open sandbox in VS Code (attach-to-container){{if gt (len .Aliases) 0}}
 
 Aliases:
   {{.NameAndAliases}}{{end}}{{if .HasAvailableLocalFlags}}
@@ -121,7 +124,9 @@ func sandboxDispatch(cmd *cobra.Command, args []string) error {
 			reportType = rest[0]
 		}
 		return runSandboxBugReport(cmd, name, reportType)
+	case "vscode":
+		return newSandboxVscodeCmd().RunE(cmd, append([]string{name}, rest...))
 	default:
-		return sandbox.NewUsageError("unknown subcommand %q: valid subcommands are info, log, exec, prompt, allow, allowed, deny, bugreport", subcmd)
+		return sandbox.NewUsageError("unknown subcommand %q: valid subcommands are info, log, exec, prompt, allow, allowed, deny, bugreport, vscode", subcmd)
 	}
 }
