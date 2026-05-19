@@ -8,7 +8,7 @@ GLOBAL FLAGS
 
 CREATING SANDBOXES (yoloai new)
 
-  --agent <name>      Agent to use (claude, gemini, etc.)
+  --agent <name>      Agent to use (aider, claude, codex, gemini, opencode, pi, etc.)
   --model, -m <name>  Model name or alias
   --backend <name>    Runtime backend (docker, tart, seatbelt)
   --prompt, -p <text> Prompt for headless mode

@@ -10,7 +10,7 @@ import "strings"
 const DefaultConfigYAML = `# --- Agent ---
 
 # Agent to launch inside the sandbox.
-# Valid values: aider, claude, codex, gemini, opencode
+# Valid values: aider, claude, codex, gemini, opencode, pi
 # CLI --agent overrides.
 agent: claude
 

@@ -170,9 +170,50 @@ func TestGetAgent_Codex(t *testing.T) {
 	assert.Equal(t, []string{"api.openai.com"}, def.NetworkAllowlist)
 }
 
+func TestGetAgent_Pi(t *testing.T) {
+	def := GetAgent("pi")
+	require.NotNil(t, def)
+
+	assert.Equal(t, "pi", def.Name)
+	assert.NotEmpty(t, def.Description)
+	assert.Equal(t, "pi", def.InteractiveCmd)
+	assert.Contains(t, def.HeadlessCmd, `pi "$PROMPT"`)
+	assert.Equal(t, PromptModeInteractive, def.PromptMode)
+	assert.Contains(t, def.APIKeyEnvVars, "ANTHROPIC_API_KEY")
+	assert.Contains(t, def.APIKeyEnvVars, "OPENAI_API_KEY")
+	assert.Contains(t, def.APIKeyEnvVars, "GEMINI_API_KEY")
+	assert.Contains(t, def.APIKeyEnvVars, "DEEPSEEK_API_KEY")
+	assert.Contains(t, def.APIKeyEnvVars, "GROQ_API_KEY")
+	assert.Contains(t, def.APIKeyEnvVars, "XAI_API_KEY")
+	require.Len(t, def.SeedFiles, 3)
+	assert.Equal(t, "~/.pi/agent/auth.json", def.SeedFiles[0].HostPath)
+	assert.Equal(t, "agent/auth.json", def.SeedFiles[0].TargetPath)
+	assert.True(t, def.SeedFiles[0].AuthOnly)
+	assert.Equal(t, "~/.pi/agent/models.json", def.SeedFiles[1].HostPath)
+	assert.Equal(t, "agent/models.json", def.SeedFiles[1].TargetPath)
+	assert.False(t, def.SeedFiles[1].AuthOnly)
+	assert.Equal(t, "~/.pi/agent/settings.json", def.SeedFiles[2].HostPath)
+	assert.Equal(t, "agent/settings.json", def.SeedFiles[2].TargetPath)
+	assert.False(t, def.SeedFiles[2].AuthOnly)
+	assert.Equal(t, "/home/yoloai/.pi/", def.StateDir)
+	assert.Equal(t, "Enter", def.SubmitSequence)
+	assert.Equal(t, 3*time.Second, def.StartupDelay)
+	assert.Equal(t, "--model", def.ModelFlag)
+	assert.Empty(t, def.Idle.ReadyPattern)
+	assert.False(t, def.Idle.ContextSignal)
+	assert.True(t, def.Idle.Hook)
+	assert.True(t, def.Idle.WchanApplicable)
+	assert.Equal(t, "agent/AGENTS.md", def.ContextFile)
+	require.NotNil(t, def.EmbeddedFiles)
+	ext, ok := def.EmbeddedFiles["agent/extensions/yoloai-status.ts"]
+	require.True(t, ok, "pi should embed agent/extensions/yoloai-status.ts")
+	assert.Contains(t, string(ext), "agent_start")
+	assert.Contains(t, string(ext), "agent_end")
+}
+
 func TestAllAgentNames(t *testing.T) {
 	names := AllAgentNames()
-	assert.Equal(t, []string{"aider", "claude", "codex", "gemini", "idle", "opencode", "shell", "test"}, names)
+	assert.Equal(t, []string{"aider", "claude", "codex", "gemini", "idle", "opencode", "pi", "shell", "test"}, names)
 }
 
 func TestGetAgent_Test(t *testing.T) {
@@ -197,7 +238,7 @@ func TestGetAgent_Test(t *testing.T) {
 
 func TestRealAgents(t *testing.T) {
 	names := RealAgents()
-	assert.Equal(t, []string{"aider", "claude", "codex", "gemini", "opencode"}, names)
+	assert.Equal(t, []string{"aider", "claude", "codex", "gemini", "opencode", "pi"}, names)
 }
 
 func TestGetAgent_Shell(t *testing.T) {
@@ -211,6 +252,7 @@ func TestGetAgent_Shell(t *testing.T) {
 	assert.Contains(t, def.InteractiveCmd, "yolo-gemini")
 	assert.Contains(t, def.InteractiveCmd, "yolo-aider")
 	assert.Contains(t, def.InteractiveCmd, "yolo-opencode")
+	assert.Contains(t, def.InteractiveCmd, "yolo-pi")
 	assert.Contains(t, def.HeadlessCmd, "sh -c")
 	assert.Equal(t, PromptModeHeadless, def.PromptMode)
 	assert.Equal(t, "", def.StateDir)
@@ -255,6 +297,9 @@ func TestGetAgent_Shell(t *testing.T) {
 	assert.Contains(t, targetPaths, ".config/github-copilot/hosts.json") // was already HomeDir, unchanged
 	assert.Contains(t, targetPaths, ".config/github-copilot/apps.json")  // was already HomeDir, unchanged
 	assert.Contains(t, targetPaths, ".config/opencode/.opencode.json")   // was already HomeDir, unchanged
+	assert.Contains(t, targetPaths, ".pi/agent/auth.json")
+	assert.Contains(t, targetPaths, ".pi/agent/models.json")
+	assert.Contains(t, targetPaths, ".pi/agent/settings.json")
 
 	// Each seed file should have OwnerAPIKeys set
 	for _, sf := range def.SeedFiles {
@@ -276,6 +321,7 @@ func TestStateRelPath(t *testing.T) {
 		{"gemini", ".gemini"},
 		{"codex", ".codex"},
 		{"opencode", ".local/share/opencode"},
+		{"pi", ".pi"},
 		{"aider", ""}, // no StateDir
 		{"test", ""},  // no StateDir
 		{"shell", ""}, // no StateDir
@@ -364,7 +410,7 @@ func TestApplySettings_GeminiPreservesExistingSecurityFields(t *testing.T) {
 }
 
 func TestApplySettings_OtherAgentsNil(t *testing.T) {
-	for _, name := range []string{"aider", "codex", "opencode", "test", "idle"} {
+	for _, name := range []string{"aider", "codex", "opencode", "pi", "test", "idle"} {
 		def := GetAgent(name)
 		require.NotNil(t, def, "agent %q should exist", name)
 		assert.Nil(t, def.ApplySettings, "agent %q should have nil ApplySettings", name)
@@ -374,7 +420,7 @@ func TestApplySettings_OtherAgentsNil(t *testing.T) {
 func TestShortLivedOAuthWarning(t *testing.T) {
 	assert.True(t, GetAgent("claude").ShortLivedOAuthWarning, "claude should have ShortLivedOAuthWarning=true")
 
-	for _, name := range []string{"aider", "gemini", "codex", "opencode", "test", "idle", "shell"} {
+	for _, name := range []string{"aider", "gemini", "codex", "opencode", "pi", "test", "idle", "shell"} {
 		def := GetAgent(name)
 		require.NotNil(t, def, "agent %q should exist", name)
 		assert.False(t, def.ShortLivedOAuthWarning, "agent %q should have ShortLivedOAuthWarning=false", name)
@@ -384,7 +430,7 @@ func TestShortLivedOAuthWarning(t *testing.T) {
 func TestSeedsAllAgents(t *testing.T) {
 	assert.True(t, GetAgent("shell").SeedsAllAgents, "shell should have SeedsAllAgents=true")
 
-	for _, name := range []string{"aider", "claude", "gemini", "codex", "opencode", "test", "idle"} {
+	for _, name := range []string{"aider", "claude", "gemini", "codex", "opencode", "pi", "test", "idle"} {
 		def := GetAgent(name)
 		require.NotNil(t, def, "agent %q should exist", name)
 		assert.False(t, def.SeedsAllAgents, "agent %q should have SeedsAllAgents=false", name)

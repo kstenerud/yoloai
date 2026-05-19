@@ -361,7 +361,7 @@ Developers already using or interested in the Pinix platform who want an intelli
 |--------|-----------|--------|
 | Core purpose | General-purpose AI agent runtime | Sandboxed AI coding agent runner |
 | Sandboxing model | Platform-provided (Pinix BoxLite micro-VMs) — incidental | Intentional isolation (Docker / Tart / Seatbelt) |
-| Supported agents | Custom agent (OpenRouter LLM) | Claude Code, Gemini CLI, Codex, Aider, OpenCode |
+| Supported agents | Custom agent (OpenRouter LLM) | Claude Code, Gemini CLI, Codex, Aider, OpenCode, Pi |
 | Copy/diff/apply workflow | No | Yes (core differentiator) |
 | User reviews changes before apply | No | Yes |
 | Persistent sandbox state | Yes (SQLite, `data/` dir survives upgrades) | Yes (`~/.yoloai/sandboxes/<name>/`) |

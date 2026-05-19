@@ -237,6 +237,41 @@ func TestWriteContextFiles_WritesContextAndRef(t *testing.T) {
 	}
 }
 
+func TestWriteContextFiles_WritesEmbeddedFiles(t *testing.T) {
+	sandboxDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(sandboxDir, AgentRuntimeDir), 0750); err != nil {
+		t.Fatal(err)
+	}
+
+	meta := &Meta{
+		Workdir: WorkdirMeta{
+			HostPath:  "/project",
+			MountPath: "/project",
+			Mode:      "copy",
+		},
+	}
+	agentDef := &agent.Definition{
+		Name:     "pi",
+		StateDir: "/home/yoloai/.pi/",
+		EmbeddedFiles: map[string][]byte{
+			"agent/extensions/yoloai-status.ts": []byte("hello world"),
+		},
+	}
+
+	if err := WriteContextFiles(sandboxDir, meta, agentDef); err != nil {
+		t.Fatalf("WriteContextFiles: %v", err)
+	}
+
+	embeddedPath := filepath.Join(sandboxDir, AgentRuntimeDir, "agent", "extensions", "yoloai-status.ts")
+	data, err := os.ReadFile(embeddedPath) //nolint:gosec // G304: test helper path
+	if err != nil {
+		t.Fatalf("read embedded file: %v", err)
+	}
+	if string(data) != "hello world" {
+		t.Errorf("embedded file content mismatch: got %q", string(data))
+	}
+}
+
 func TestWriteContextFiles_NoRefWhenEmpty(t *testing.T) {
 	sandboxDir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(sandboxDir, AgentRuntimeDir), 0750); err != nil {
