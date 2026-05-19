@@ -17,6 +17,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -913,47 +914,71 @@ def wait_for_ready(cfg, socket=None):
         prev = curr
 
 
-def deliver_prompt(cfg, yoloai_dir, socket=None):
-    """Deliver prompt file to the agent via tmux paste-buffer."""
+def deliver_prompt(cfg, yoloai_dir, socket=None, preamble=None):
+    """Deliver preamble and/or prompt file to the agent via tmux paste-buffer.
+
+    preamble is prepended to the user prompt when provided (e.g. lifecycle
+    status notice). If preamble is set but no prompt.txt exists, the preamble
+    alone is delivered so the agent has context from the start.
+    """
     prompt_file = os.path.join(yoloai_dir, "prompt.txt")
 
     # Retry prompt.txt existence check — on Kata VMs (VirtioFS), the bind
     # mount may not be visible immediately after container start.
+    has_prompt = False
     for attempt in range(5):
         if os.path.isfile(prompt_file):
+            has_prompt = True
             break
-        if attempt == 0:
+        if attempt == 0 and not preamble:
             log_info("sandbox.prompt_wait", "prompt.txt not yet visible, retrying",
                      path=prompt_file)
         time.sleep(1)
-    else:
+
+    if not has_prompt and not preamble:
         log_info("sandbox.prompt_skip",
                  "no prompt.txt after retries; agent started without prompt",
                  path=prompt_file)
         return False
 
+    # Build content: preamble (if any) followed by user prompt (if any).
+    parts = []
+    if preamble:
+        parts.append(preamble)
+    if has_prompt:
+        with open(prompt_file) as f:
+            parts.append(f.read())
+    content = "\n\n".join(parts)
+
     submit_sequence = cfg.get("submit_sequence", "")
-    log_debug("prompt.deliver", "delivering prompt")
+    log_debug("prompt.deliver", "delivering prompt", has_preamble=bool(preamble),
+              has_user_prompt=has_prompt)
 
-    r = tmux("load-buffer", prompt_file, socket=socket)
-    if r.returncode != 0:
-        log_error("prompt.load_buffer_failed", "tmux load-buffer failed",
-                  exit_code=r.returncode, stderr=r.stderr.strip())
-        return False
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as tmp:
+        tmp.write(content)
+        tmpname = tmp.name
+    try:
+        r = tmux("load-buffer", tmpname, socket=socket)
+        if r.returncode != 0:
+            log_error("prompt.load_buffer_failed", "tmux load-buffer failed",
+                      exit_code=r.returncode, stderr=r.stderr.strip())
+            return False
 
-    r = tmux("paste-buffer", "-t", "main", socket=socket)
-    if r.returncode != 0:
-        log_error("prompt.paste_buffer_failed", "tmux paste-buffer failed",
-                  exit_code=r.returncode, stderr=r.stderr.strip())
-        return False
+        r = tmux("paste-buffer", "-t", "main", socket=socket)
+        if r.returncode != 0:
+            log_error("prompt.paste_buffer_failed", "tmux paste-buffer failed",
+                      exit_code=r.returncode, stderr=r.stderr.strip())
+            return False
 
-    time.sleep(0.5)
-    for key in submit_sequence.split():
-        tmux("send-keys", "-t", "main", key, socket=socket)
-        time.sleep(0.2)
+        time.sleep(0.5)
+        for key in submit_sequence.split():
+            tmux("send-keys", "-t", "main", key, socket=socket)
+            time.sleep(0.2)
+    finally:
+        os.unlink(tmpname)
 
     log_info("sandbox.prompt_deliver", "prompt delivered", method="paste-buffer")
-    return True
+    return has_prompt  # True only when a real user task was submitted
 
 
 def start_dockerd(log):
@@ -1059,6 +1084,74 @@ def run_lifecycle_commands(cfg, yoloai_dir, log):
             # Continue with remaining on-start commands (partial start is better than none)
 
 
+def _cmd_str(entry):
+    """Return a human-readable string for a lifecycle command entry."""
+    kind = entry.get("type", "")
+    cmd = entry.get("cmd")
+    if kind == "string":
+        return str(cmd)
+    if kind == "array" and isinstance(cmd, list):
+        return " ".join(str(c) for c in cmd)
+    if kind == "object" and isinstance(cmd, dict):
+        return "{" + ", ".join(f"{k}: {v}" for k, v in cmd.items()) + "}"
+    return str(cmd)
+
+
+def lifecycle_preamble(cfg, yoloai_dir):
+    """Return a preamble describing lifecycle commands running in the background.
+
+    Returns empty string if no lifecycle commands are pending.
+    """
+    lifecycle = cfg.get("lifecycle")
+    if not lifecycle:
+        return ""
+
+    marker = os.path.join(yoloai_dir, "lifecycle-on-create-done")
+    on_create_done = lifecycle.get("on_create_done", False) or os.path.exists(marker)
+
+    pending = []
+    if not on_create_done:
+        for entry in lifecycle.get("on_create", []):
+            pending.append(f"  onCreateCommand: {_cmd_str(entry)}")
+    for entry in lifecycle.get("on_start", []):
+        pending.append(f"  postStartCommand: {_cmd_str(entry)}")
+
+    if not pending:
+        return ""
+
+    return (
+        "[yoloai] The following setup commands are running in the background:\n"
+        + "\n".join(pending)
+        + "\nSome services may not be ready yet. You can start working now — "
+        "a notification will appear in this session when setup is complete."
+    )
+
+
+def run_lifecycle_background(cfg, yoloai_dir, socket, log):
+    """Run lifecycle commands in a background thread, then notify the agent.
+
+    Called from a daemon thread so it never blocks the main setup flow.
+    """
+    run_lifecycle_commands(cfg, yoloai_dir, log)
+    log_info("lifecycle.background_done", "background lifecycle commands complete")
+
+    # Deliver a completion notification to the agent pane.
+    msg = "[yoloai] Background setup complete — all services are now available."
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as tmp:
+        tmp.write(msg)
+        tmpname = tmp.name
+    try:
+        tmux("load-buffer", tmpname, socket=socket)
+        tmux("paste-buffer", "-t", "main", socket=socket)
+        time.sleep(0.3)
+        submit_sequence = cfg.get("submit_sequence", "")
+        for key in submit_sequence.split():
+            tmux("send-keys", "-t", "main", key, socket=socket)
+            time.sleep(0.2)
+    finally:
+        os.unlink(tmpname)
+
+
 def launch_monitor(cfg_path, status_file, yoloai_dir, socket=None):
     """Launch the Python status monitor as a background process."""
     monitor_script = os.path.join(yoloai_dir, "bin", "status-monitor.py")
@@ -1125,10 +1218,17 @@ def main():
 
     setup_tmux_session(cfg, yoloai_dir, socket=socket)
 
-    # Run lifecycle commands (on-create once, on-start every time) before agent launch.
+    # Launch lifecycle commands in a background thread so the agent starts
+    # immediately. The preamble tells the agent what is still setting up;
+    # run_lifecycle_background sends a notification when it completes.
     def _log_lifecycle(msg):
         log_info("lifecycle.event", msg)
-    run_lifecycle_commands(cfg, yoloai_dir, _log_lifecycle)
+    preamble = lifecycle_preamble(cfg, yoloai_dir) or None
+    threading.Thread(
+        target=run_lifecycle_background,
+        args=(cfg, yoloai_dir, socket, _log_lifecycle),
+        daemon=True,
+    ).start()
 
     # Read secrets and pass to tmux session
     secrets = backend.read_secrets(socket)
@@ -1151,7 +1251,7 @@ def main():
 
     monitor_exit(socket=socket)
     wait_for_ready(cfg, socket=socket)
-    prompt_delivered = deliver_prompt(cfg, yoloai_dir, socket=socket)
+    prompt_delivered = deliver_prompt(cfg, yoloai_dir, socket=socket, preamble=preamble)
 
     # Write initial status and set title
     status_file = os.path.join(yoloai_dir, "agent-status.json")

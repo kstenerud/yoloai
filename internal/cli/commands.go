@@ -368,7 +368,7 @@ func newNewCmd(version string) *cobra.Command {
 
 				// Wait for tmux session to be ready before attaching
 				containerName := sandbox.InstanceName(sandboxName)
-				if err := waitForTmux(ctx, rt, containerName, sandboxName, 120*time.Second, user); err != nil {
+				if err := waitForTmux(ctx, rt, containerName, sandboxName, 300*time.Second, user); err != nil {
 					return fmt.Errorf("waiting for tmux session: %w", err)
 				}
 
@@ -507,14 +507,29 @@ func waitForTmux(ctx context.Context, rt runtime.Runtime, containerName, sandbox
 		// agent_launch is written by launch_agent() after lifecycle commands
 		// finish, so attaching at this point means the user sees the agent
 		// (or the "not found" error) immediately.
+		// When sandbox.jsonl is readable, skip the exec fallback: the tmux
+		// session is created before lifecycle commands run, so has-session
+		// succeeds long before the agent is actually launched.
 		if data, readErr := os.ReadFile(jsonlPath); readErr == nil { //nolint:gosec // G304: path from trusted sandbox dir
 			if bytes.Contains(data, []byte(`"sandbox.agent_launch"`)) ||
 				bytes.Contains(data, []byte(`"sandbox.agent_not_found"`)) {
 				return nil
 			}
+			// Log exists but agent not yet launched — skip exec fallback and
+			// keep polling.
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(500 * time.Millisecond):
+			}
+			continue
 		}
 
-		// Fallback: docker exec tmux has-session (unreliable under gVisor).
+		// Fallback: docker exec tmux has-session.
+		// Only reached when sandbox.jsonl is unreadable (old container images
+		// that predate structured logging). The tmux session existing is
+		// sufficient in that case because those images launch the agent
+		// synchronously before writing any log.
 		tmuxArgs := []string{"tmux"}
 		if tmuxSocket != "" {
 			tmuxArgs = append(tmuxArgs, "-S", tmuxSocket)
