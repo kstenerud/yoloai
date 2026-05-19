@@ -134,6 +134,38 @@ func TestFilterMounts_TypeBindFormat(t *testing.T) {
 	assert.Contains(t, warnings[0], "docker socket")
 }
 
+func TestFilterMounts_SourceFirstKeyValueFormat(t *testing.T) {
+	// devcontainer.json may use source=...,target=...,type=bind (source before type)
+	dc := &DevcontainerConfig{
+		Mounts: []string{"source=/home/user/.config/sops/age,target=/root/.config/sops/age,type=bind,consistency=cached"},
+	}
+	mounts, warnings := dc.FilterMounts("/workdir")
+	require.Len(t, mounts, 1)
+	assert.Empty(t, warnings)
+	assert.Equal(t, "/home/user/.config/sops/age:/root/.config/sops/age", mounts[0])
+}
+
+func TestFilterMounts_KeyValueReadOnly(t *testing.T) {
+	dc := &DevcontainerConfig{
+		Mounts: []string{"source=/safe/path,target=/container/path,type=bind,readonly"},
+	}
+	mounts, warnings := dc.FilterMounts("/workdir")
+	require.Len(t, mounts, 1)
+	assert.Empty(t, warnings)
+	assert.Equal(t, "/safe/path:/container/path:ro", mounts[0])
+}
+
+func TestFilterMounts_NormalizedOutput(t *testing.T) {
+	// Verify that key=value mounts are always returned in host:container[:ro] format.
+	dc := &DevcontainerConfig{
+		Mounts: []string{"type=bind,source=/safe/path,target=/container/path"},
+	}
+	mounts, warnings := dc.FilterMounts("/workdir")
+	require.Len(t, mounts, 1)
+	assert.Empty(t, warnings)
+	assert.Equal(t, "/safe/path:/container/path", mounts[0])
+}
+
 func TestMergedEnv_MergeAndPrecedence(t *testing.T) {
 	dc := &DevcontainerConfig{
 		ContainerEnv: map[string]string{"FOO": "container", "BAR": "container"},

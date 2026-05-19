@@ -176,16 +176,37 @@ func (dc *DevcontainerConfig) FilterMounts(workdirMountPath string) (mounts []st
 			continue
 		}
 
-		mounts = append(mounts, expanded)
+		// Normalize to host:container[:ro] so downstream parseConfigMount works
+		// regardless of whether the devcontainer used Docker --mount syntax.
+		normalized := src + ":" + target
+		if extractMountReadOnly(expanded) {
+			normalized += ":ro"
+		}
+		mounts = append(mounts, normalized)
 	}
 	return mounts, warnings
 }
 
+// isMountKeyValueFormat returns true if the mount string uses Docker --mount
+// key=value syntax (e.g. "source=/path,target=/path,type=bind"), regardless of
+// key order. Normal host:container paths start with "/" and contain no "=".
+func isMountKeyValueFormat(m string) bool {
+	for _, part := range strings.Split(m, ",") {
+		k, _, ok := strings.Cut(part, "=")
+		if ok {
+			switch k {
+			case "type", "source", "src", "target", "dst", "destination", "readonly", "ro":
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // extractMountSource extracts the source/host path from a mount string.
-// Handles: type=bind,source=/path,target=/path  OR  /host:/container[:ro]
+// Handles: key=value Docker --mount syntax  OR  /host:/container[:ro]
 func extractMountSource(m string) string {
-	// type=bind,source=...,target=... form
-	if strings.HasPrefix(m, "type=") {
+	if isMountKeyValueFormat(m) {
 		for _, part := range strings.Split(m, ",") {
 			if k, v, ok := strings.Cut(part, "="); ok && (k == "source" || k == "src") {
 				return v
@@ -203,8 +224,7 @@ func extractMountSource(m string) string {
 
 // extractMountTarget extracts the target/container path from a mount string.
 func extractMountTarget(m string) string {
-	// type=bind,source=...,target=... form
-	if strings.HasPrefix(m, "type=") {
+	if isMountKeyValueFormat(m) {
 		for _, part := range strings.Split(m, ",") {
 			if k, v, ok := strings.Cut(part, "="); ok && (k == "target" || k == "dst" || k == "destination") {
 				return v
@@ -218,6 +238,25 @@ func extractMountTarget(m string) string {
 		return parts[1]
 	}
 	return ""
+}
+
+// extractMountReadOnly returns true if the mount string marks the mount read-only.
+func extractMountReadOnly(m string) bool {
+	if isMountKeyValueFormat(m) {
+		for _, part := range strings.Split(m, ",") {
+			part = strings.TrimSpace(part)
+			if part == "readonly" || part == "ro" {
+				return true
+			}
+			if k, v, ok := strings.Cut(part, "="); ok && (k == "readonly" || k == "ro") {
+				return v == "true" || v == "1"
+			}
+		}
+		return false
+	}
+	// /host:/container[:ro] form
+	parts := strings.SplitN(m, ":", 3)
+	return len(parts) == 3 && parts[2] == "ro"
 }
 
 // isCredentialDir returns true if the path is an agent credential directory.
