@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -810,6 +811,7 @@ func (m *Manager) launchContainer(ctx context.Context, state *sandboxState) erro
 	if err != nil {
 		return err
 	}
+	ports = filterAvailablePorts(ports, m.output)
 
 	return m.buildAndStart(ctx, state, mounts, ports, secretsDir != "")
 }
@@ -1147,6 +1149,24 @@ func ReadPrompt(prompt, promptFile string) (string, error) {
 }
 
 // parsePortBindings converts ["host:container", ...] to runtime port mappings.
+// filterAvailablePorts removes any port mappings where the host port is already
+// in use, printing a warning for each skipped entry. Best-effort: a TOCTOU race
+// is possible but Docker's own error is the fallback for that case.
+func filterAvailablePorts(ports []runtime.PortMapping, output io.Writer) []runtime.PortMapping {
+	var available []runtime.PortMapping
+	for _, p := range ports {
+		l, err := net.Listen("tcp", ":"+p.HostPort)
+		if err != nil {
+			fmt.Fprintf(output, "Warning: skipping port %s:%s — host port %s is already in use\n", //nolint:errcheck // best-effort output
+				p.HostPort, p.InstancePort, p.HostPort)
+			continue
+		}
+		_ = l.Close()
+		available = append(available, p)
+	}
+	return available
+}
+
 func parsePortBindings(ports []string) ([]runtime.PortMapping, error) {
 	if len(ports) == 0 {
 		return nil, nil
