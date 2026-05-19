@@ -1,4 +1,4 @@
-> **Design documents:** [Overview](README.md) | [Commands](commands.md) | [Config](config.md) | [Setup](setup.md) | [Security](security.md)
+> **Design documents:** [Overview](README.md) | [Commands](commands.md) | [Config](config.md) | [Setup](setup.md) | [Security](security.md) | [Environments](environments.md)
 
 # `yoloai reconfigure` Design
 

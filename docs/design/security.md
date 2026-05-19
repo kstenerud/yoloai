@@ -1,4 +1,4 @@
-> **Design documents:** [Overview](README.md) | [Commands](commands.md) | [Config](config.md) | [Setup](setup.md) | [Research](../dev/RESEARCH.md) | [research/](../dev/research/)
+> **Design documents:** [Overview](README.md) | [Commands](commands.md) | [Config](config.md) | [Setup](setup.md) | [Environments](environments.md) | [Research](../dev/RESEARCH.md) | [research/](../dev/research/)
 
 ## Credential Management
 

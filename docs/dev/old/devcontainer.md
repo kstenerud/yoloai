@@ -1,6 +1,8 @@
-> **Design documents:** [Overview](README.md) | [Commands](commands.md) | [Config](config.md) | [Setup](setup.md) | [Security](security.md) | [Research](../dev/RESEARCH.md)
+> **Design documents:** [Overview](README.md) | [Commands](commands.md) | [Config](config.md) | [Setup](setup.md) | [Security](security.md) | [Environments](environments.md) | [Research](../dev/RESEARCH.md)
 
 # Dev Container Integration
+
+> **Status: Not implemented.** This document is a design spec only. No code in the codebase implements `--devcontainer`, `yoloai sandbox vscode`, or any of the field mappings described below.
 
 ## Goal
 
