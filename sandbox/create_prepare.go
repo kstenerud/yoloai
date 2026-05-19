@@ -700,6 +700,7 @@ func (m *Manager) resolveAndApplyArchetype(ctx context.Context, opts *CreateOpti
 	case ArchetypeCompose:
 		if opts.Isolation == "" || opts.Isolation == "container" {
 			opts.Isolation = "container-privileged"
+			pr.isolation = "container-privileged"
 			bullets = append(bullets, "isolation set to container-privileged (Compose requires nested Docker)")
 		}
 		pr.archetypeDockerDRequired = true
@@ -759,6 +760,7 @@ func (m *Manager) resolveAndApplyArchetype(ctx context.Context, opts *CreateOpti
 			if dc.PostStartCommandUsesCompose() {
 				if opts.Isolation == "" || opts.Isolation == "container" {
 					opts.Isolation = "container-privileged"
+					pr.isolation = "container-privileged"
 					bullets = append(bullets, "isolation set to container-privileged (postStartCommand uses docker compose)")
 				}
 				pr.archetypeDockerDRequired = true
