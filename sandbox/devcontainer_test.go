@@ -5,6 +5,7 @@ package sandbox
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -104,8 +105,9 @@ func TestFilterMounts_WorkdirConflict(t *testing.T) {
 }
 
 func TestFilterMounts_PassThrough(t *testing.T) {
+	src := t.TempDir()
 	dc := &DevcontainerConfig{
-		Mounts: []string{"/home/user/.config/sops:/home/yoloai/.config/sops:ro"},
+		Mounts: []string{src + ":/home/yoloai/.config/sops:ro"},
 	}
 	mounts, warnings := dc.FilterMounts("/workdir")
 	assert.Len(t, mounts, 1)
@@ -116,8 +118,9 @@ func TestFilterMounts_ExpandLocalEnvHome(t *testing.T) {
 	homeDir, err := os.UserHomeDir()
 	require.NoError(t, err)
 
+	// Use actual home dir (must exist) as the source to pass the existence check.
 	dc := &DevcontainerConfig{
-		Mounts: []string{"${localEnv:HOME}/.ssh:/home/user/.ssh:ro"},
+		Mounts: []string{"${localEnv:HOME}:/home/user/homedir:ro"},
 	}
 	mounts, _ := dc.FilterMounts("/workdir")
 	require.Len(t, mounts, 1)
@@ -134,36 +137,49 @@ func TestFilterMounts_TypeBindFormat(t *testing.T) {
 	assert.Contains(t, warnings[0], "docker socket")
 }
 
+func TestFilterMounts_MissingSourcePath(t *testing.T) {
+	dc := &DevcontainerConfig{
+		Mounts: []string{"/nonexistent/path/on/host:/container/path"},
+	}
+	mounts, warnings := dc.FilterMounts("/workdir")
+	assert.Empty(t, mounts)
+	require.Len(t, warnings, 1)
+	assert.Contains(t, warnings[0], "source path does not exist")
+}
+
 func TestFilterMounts_SourceFirstKeyValueFormat(t *testing.T) {
 	// devcontainer.json may use source=...,target=...,type=bind (source before type)
+	src := t.TempDir()
 	dc := &DevcontainerConfig{
-		Mounts: []string{"source=/home/user/.config/sops/age,target=/root/.config/sops/age,type=bind,consistency=cached"},
+		Mounts: []string{fmt.Sprintf("source=%s,target=/root/.config/sops/age,type=bind,consistency=cached", src)},
 	}
 	mounts, warnings := dc.FilterMounts("/workdir")
 	require.Len(t, mounts, 1)
 	assert.Empty(t, warnings)
-	assert.Equal(t, "/home/user/.config/sops/age:/root/.config/sops/age", mounts[0])
+	assert.Equal(t, src+":/root/.config/sops/age", mounts[0])
 }
 
 func TestFilterMounts_KeyValueReadOnly(t *testing.T) {
+	src := t.TempDir()
 	dc := &DevcontainerConfig{
-		Mounts: []string{"source=/safe/path,target=/container/path,type=bind,readonly"},
+		Mounts: []string{fmt.Sprintf("source=%s,target=/container/path,type=bind,readonly", src)},
 	}
 	mounts, warnings := dc.FilterMounts("/workdir")
 	require.Len(t, mounts, 1)
 	assert.Empty(t, warnings)
-	assert.Equal(t, "/safe/path:/container/path:ro", mounts[0])
+	assert.Equal(t, src+":/container/path:ro", mounts[0])
 }
 
 func TestFilterMounts_NormalizedOutput(t *testing.T) {
 	// Verify that key=value mounts are always returned in host:container[:ro] format.
+	src := t.TempDir()
 	dc := &DevcontainerConfig{
-		Mounts: []string{"type=bind,source=/safe/path,target=/container/path"},
+		Mounts: []string{fmt.Sprintf("type=bind,source=%s,target=/container/path", src)},
 	}
 	mounts, warnings := dc.FilterMounts("/workdir")
 	require.Len(t, mounts, 1)
 	assert.Empty(t, warnings)
-	assert.Equal(t, "/safe/path:/container/path", mounts[0])
+	assert.Equal(t, src+":/container/path", mounts[0])
 }
 
 func TestMergedEnv_MergeAndPrecedence(t *testing.T) {

@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
@@ -179,12 +180,13 @@ func TestResolveArchetype_DevcontainerDockerComposeFileErrors(t *testing.T) {
 
 func TestResolveArchetype_DevcontainerFiltersMounts(t *testing.T) {
 	dir := makeWorkdir(t)
-	dcContent := `{
+	safePath := t.TempDir()
+	dcContent := fmt.Sprintf(`{
 		"mounts": [
 			"/var/run/docker.sock:/var/run/docker.sock",
-			"/safe/path:/container/safe:ro"
+			"%s:/container/safe:ro"
 		]
-	}`
+	}`, safePath)
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "devcontainer.json"), []byte(dcContent), 0600))
 
 	m := newTestManager(nil)
@@ -195,7 +197,7 @@ func TestResolveArchetype_DevcontainerFiltersMounts(t *testing.T) {
 	require.NoError(t, err)
 	// Docker socket filtered out, safe path passes through
 	assert.Len(t, dcMounts, 1)
-	assert.Contains(t, dcMounts[0], "/safe/path")
+	assert.Contains(t, dcMounts[0], safePath)
 	assert.Len(t, warnings, 1)
 	assert.Contains(t, warnings[0], "docker socket")
 }

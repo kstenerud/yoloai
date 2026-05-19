@@ -169,6 +169,12 @@ func (dc *DevcontainerConfig) FilterMounts(workdirMountPath string) (mounts []st
 			continue
 		}
 
+		// Strip mounts whose source path does not exist on the host
+		if _, err := os.Stat(src); os.IsNotExist(err) {
+			warnings = append(warnings, fmt.Sprintf("Warning: stripped devcontainer mount %q — source path does not exist on host", m))
+			continue
+		}
+
 		// Strip mounts whose target conflicts with workdir mount path
 		target := extractMountTarget(expanded)
 		if workdirMountPath != "" && target == workdirMountPath {
