@@ -167,6 +167,10 @@ RUN mkdir -p \
         /home/yoloai/.tmux.conf \
     && chown -R yoloai:yoloai /home/yoloai
 
+# UTF-8 locale — C.UTF-8 is always present on Debian/Ubuntu without locale-gen.
+# Without this, apps like Claude Code fall back to ASCII rendering.
+ENV LANG=C.UTF-8
+
 # Internal directory for sandbox runtime files
 ENV YOLOAI_DIR=/yoloai
 RUN mkdir -p \

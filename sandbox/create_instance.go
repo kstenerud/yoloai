@@ -36,6 +36,8 @@ func (m *Manager) buildAndStart(ctx context.Context, state *sandboxState, mounts
 		Ports:       ports,
 		NetworkMode: state.networkMode,
 		UseInit:     true,
+		// C.UTF-8 is always present without locale-gen; without it apps like Claude Code render ASCII-only.
+		ContainerEnv: []string{"LANG=C.UTF-8"},
 	}
 
 	// Convert resource limits
