@@ -321,6 +321,14 @@ Starts a VS Code Remote Tunnel inside the sandbox. Accessible from VS Code on an
 
 Best for: remote machines, machines without Docker on the developer's local machine, or when the developer and agent need to share the same environment interactively.
 
+**Connecting to the agent via tunnel:** VS Code opens a terminal inside the sandbox (the container filesystem), not inside the agent's tmux session. To interact with the agent, open a terminal in VS Code and run:
+
+```
+tmux attach
+```
+
+This attaches to the agent's tmux session. Use `Ctrl-b d` to detach without stopping the agent.
+
 ### Container Attach (`yoloai sandbox <name> vscode`)
 
 Opens a running sandbox in VS Code using "Attach to Running Container". Requires VS Code and Docker on the local machine. If `code` is on PATH, opens directly; otherwise prints instructions.

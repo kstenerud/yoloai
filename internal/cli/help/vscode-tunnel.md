@@ -54,6 +54,17 @@ CONNECTING
 
   Tunnel name is derived from the sandbox name (lowercase, max 20 chars).
 
+INTERACTING WITH THE AGENT VIA TUNNEL
+
+  VS Code terminals open inside the sandbox container, not inside the
+  agent's tmux session. To interact with the agent from VS Code, open a
+  terminal and run:
+
+     tmux attach
+
+  This attaches to the agent session. Use Ctrl-b d to detach without
+  stopping the agent.
+
 LOGS
 
   Tunnel output is logged to /yoloai/logs/vscode-tunnel.log inside
