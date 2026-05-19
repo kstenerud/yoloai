@@ -16,6 +16,7 @@ import (
 // Stored as sandbox-state.json in the sandbox directory alongside environment.json.
 type SandboxState struct {
 	AgentFilesInitialized bool `json:"agent_files_initialized"`
+	OnCreateCommandsDone  bool `json:"on_create_commands_done,omitempty"`
 }
 
 // SaveSandboxState writes sandbox-state.json to the given sandbox directory.

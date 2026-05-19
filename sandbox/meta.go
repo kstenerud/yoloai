@@ -46,6 +46,7 @@ type Meta struct {
 	Isolation          string                 `json:"isolation,omitempty"`       // isolation mode: container, container-enhanced, vm, vm-enhanced
 	HostFilesystem     bool                   `json:"host_filesystem,omitempty"` // true when sandbox state lives on the host (seatbelt)
 	VscodeTunnel       bool                   `json:"vscode_tunnel,omitempty"`   // true when VS Code Remote Tunnel is enabled
+	Archetype          string                 `json:"archetype,omitempty"`       // resolved environment archetype (simple, compose, devcontainer, apple)
 }
 
 // WorkdirMeta stores the resolved workdir state at creation time.
