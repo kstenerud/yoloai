@@ -376,18 +376,21 @@ When `--profile` is specified with the `devcontainer` archetype, the profile ima
 
 ---
 
-## Open Questions
+## Resolved Design Decisions
 
-- **`--devcontainer` shorthand flag:** Keep as an alias for `--env devcontainer` for discoverability? Probably yes — it's a widely recognised term and discoverable in `yoloai new --help`.
+- **`--devcontainer` shorthand flag:** No new flag. Use `--env devcontainer` or rely on auto-detection. Adding a flag just to alias an `--env` value adds surface area without value.
 
-- **`requires:` validation strictness:** Hard-fail at creation time if the profile doesn't satisfy `requires:` constraints, or warn and continue? Failing is safer but may block users with slightly-different toolchain versions.
+- **`requires:` validation:** Warn and prompt at creation time. If the constraint isn't met, print a clear message and ask "Continue anyway? [y/N]". Honour the `--yes` flag to skip the prompt in non-interactive / scripted use. This makes mismatches visible without being a hard blocker.
 
-- **`postStartCommand` string/array/object forms:** devcontainer.json allows `"cmd arg"` (string, run via `/bin/sh -c`), `["cmd", "arg"]` (array, direct exec), and `{"name": "cmd", "name2": "cmd2"}` (object, named parallel commands — all must succeed). The string and array forms map directly to yoloAI setup commands. The object form needs to be run with parallel execution semantics, which the current setup command runner (sequential `sh -c` per entry) does not support; simplest approach is to run each value sequentially as a shell command and warn that parallel semantics are not preserved.
+- **`postStartCommand` string/array/object forms:** Implement all three forms correctly. The devcontainer spec defines the object form as parallel named commands — all must succeed. Sequential fallback with a warning is incorrect behaviour; it would silently break projects that depend on parallelism (e.g. starting a database and a cache concurrently before the app starts). The correct implementation in `sandbox-setup.py`:
+  - **String:** `subprocess.run(['sh', '-c', cmd])` — shell interprets `&&`, pipes, etc.
+  - **Array:** `subprocess.run(cmd)` — direct exec, no shell, arguments passed as-is.
+  - **Object:** Launch all values with `subprocess.Popen`, then call `.wait()` on each, collect exit codes, fail if any are non-zero. Python's `concurrent.futures.ThreadPoolExecutor` is the clean way to do this — submit each command as a future, wait for all, report failures by name. This applies to all lifecycle hooks that accept these forms (`onCreateCommand`, `updateContentCommand`, `postCreateCommand`, `postStartCommand`).
 
-- **`postCreateCommand` tracking across resets:** `yoloai reset` re-copies the workdir but preserves the container and its writable layer. The effects of one-time commands already live in that writable layer and persist across resets — no re-run needed, matching devcontainer behaviour. Confirm before implementing.
+- **`postCreateCommand` tracking across resets:** `yoloai reset` re-copies the workdir but preserves the container and its writable layer. One-time command effects already live in that writable layer and persist across resets — no re-run needed, matching devcontainer behaviour.
 
-- **Archetype extensibility:** Should users be able to define custom archetypes in `~/.yoloai/`? Hold — risks recreating the complexity problem in a different form.
+- **Archetype extensibility:** Not until there are strong requests for it. Risk of recreating the complexity problem in a different form.
 
-- **`apple` archetype name vs `ios`:** The archetype covers all Apple platform development (iOS, macOS, watchOS, visionOS). `apple` is more accurate but `ios` is what most users would search for. Could support both as aliases.
+- **`apple` archetype name:** Use `apple`. Users will figure it out.
 
-- **Implementation sequencing:** The `devcontainer` archetype has three mostly independent work streams: (1) lifecycle commands + port injection — no image changes needed, (2) VS Code workspace file injection — no image changes needed, (3) image wrapping with the dependency check layer — requires remoteUser work as a prerequisite when the devcontainer image uses a non-`yoloai` user. Streams 1 and 2 can ship first and cover the majority of real-world use cases including foley.
+- **Implementation sequencing:** Ship streams 1 (lifecycle commands + port injection) and 2 (VS Code workspace injection) first — they cover the majority of real-world use cases including foley and require no image changes. Stream 3 (image wrapping with the dependency check layer) depends on remoteUser work and is a possible future enhancement if there is sufficient demand.
