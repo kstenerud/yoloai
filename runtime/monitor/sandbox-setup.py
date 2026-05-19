@@ -956,6 +956,109 @@ def deliver_prompt(cfg, yoloai_dir, socket=None):
     return True
 
 
+def start_dockerd(log):
+    """Start the Docker daemon and wait for it to be ready."""
+    import shutil as _shutil
+    import time as _time
+    if _shutil.which("docker") is None:
+        log("dockerd: docker not found, skipping")
+        return
+    # Check if already running
+    r = subprocess.run(["docker", "info"], capture_output=True)
+    if r.returncode == 0:
+        log("dockerd: already running")
+        return
+    log("dockerd: starting...")
+    subprocess.Popen(
+        ["sudo", "dockerd", "--storage-driver=fuse-overlayfs"],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    # Poll socket until ready (30s timeout)
+    deadline = _time.time() + 30
+    while _time.time() < deadline:
+        r = subprocess.run(["docker", "info"], capture_output=True)
+        if r.returncode == 0:
+            log("dockerd: ready")
+            return
+        _time.sleep(0.5)
+    log("dockerd: timed out waiting for daemon")
+    # Don't hard-fail — lifecycle commands will fail with a clear error
+
+
+def run_lifecycle_command(cmd_entry, log):
+    """Run one lifecycle command entry (string, array, or object form).
+
+    Object form runs all values in parallel; fails if any exit non-zero.
+    Returns True on success, False on failure.
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    kind = cmd_entry.get("type")
+    cmd  = cmd_entry.get("cmd")
+
+    if kind == "string":
+        r = subprocess.run(["sh", "-c", cmd])
+        if r.returncode != 0:
+            log(f"lifecycle command failed (exit {r.returncode}): {cmd}")
+            return False
+    elif kind == "array":
+        r = subprocess.run(cmd)
+        if r.returncode != 0:
+            log(f"lifecycle command failed (exit {r.returncode}): {cmd}")
+            return False
+    elif kind == "object":
+        failures = []
+        def run_one(name, subcmd):
+            r = subprocess.run(["sh", "-c", subcmd] if isinstance(subcmd, str) else subcmd)
+            return name, r.returncode
+        with ThreadPoolExecutor() as pool:
+            futures = {pool.submit(run_one, n, c): n for n, c in cmd.items()}
+            for fut in as_completed(futures):
+                name, rc = fut.result()
+                if rc != 0:
+                    failures.append(f"{name} (exit {rc})")
+        if failures:
+            log(f"lifecycle commands failed: {', '.join(failures)}")
+            return False
+    return True
+
+
+def run_lifecycle_commands(cfg, yoloai_dir, log):
+    """Run lifecycle commands from the runtime config.
+
+    On-create commands run once (guarded by marker file).
+    On-start commands run on every start.
+    dockerd is started first if required.
+    """
+    lifecycle = cfg.get("lifecycle")
+    if not lifecycle:
+        return
+
+    if lifecycle.get("dockerd_required"):
+        start_dockerd(log)
+
+    marker = os.path.join(yoloai_dir, "lifecycle-on-create-done")
+
+    if not lifecycle.get("on_create_done") and not os.path.exists(marker):
+        log("lifecycle: running on-create commands")
+        for entry in lifecycle.get("on_create", []):
+            if not run_lifecycle_command(entry, log):
+                log("lifecycle: on-create command failed; skipping remaining on-create commands")
+                break
+        else:
+            # All on-create commands succeeded — write marker
+            try:
+                open(marker, "w").close()
+            except OSError as e:
+                log(f"lifecycle: could not write marker: {e}")
+
+    log("lifecycle: running on-start commands")
+    for entry in lifecycle.get("on_start", []):
+        if not run_lifecycle_command(entry, log):
+            log("lifecycle: on-start command failed")
+            # Continue with remaining on-start commands (partial start is better than none)
+
+
 def launch_monitor(cfg_path, status_file, yoloai_dir, socket=None):
     """Launch the Python status monitor as a background process."""
     monitor_script = os.path.join(yoloai_dir, "bin", "status-monitor.py")
@@ -1021,6 +1124,11 @@ def main():
     working_dir = backend.get_working_dir()
 
     setup_tmux_session(cfg, yoloai_dir, socket=socket)
+
+    # Run lifecycle commands (on-create once, on-start every time) before agent launch.
+    def _log_lifecycle(msg):
+        log_info("lifecycle.event", msg)
+    run_lifecycle_commands(cfg, yoloai_dir, _log_lifecycle)
 
     # Read secrets and pass to tmux session
     secrets = backend.read_secrets(socket)

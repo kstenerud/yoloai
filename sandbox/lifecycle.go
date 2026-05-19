@@ -83,6 +83,21 @@ func (m *Manager) start(ctx context.Context, name string, opts StartOptions) err
 		return err
 	}
 
+	// Sync lifecycle on-create-done marker to sandbox state.
+	// Python writes a marker file after successful on-create commands; Go
+	// reads it on next start and persists the flag to sandbox-state.json so
+	// subsequent runtime-config.json writes can set on_create_done: true.
+	markerPath := filepath.Join(sandboxDir, "lifecycle-on-create-done")
+	if _, markerErr := os.Stat(markerPath); markerErr == nil {
+		state, stateErr := LoadSandboxState(sandboxDir)
+		if stateErr == nil && !state.OnCreateCommandsDone {
+			state.OnCreateCommandsDone = true
+			if saveErr := SaveSandboxState(sandboxDir, state); saveErr != nil {
+				slog.Warn("lifecycle: could not save sandbox state", "error", saveErr)
+			}
+		}
+	}
+
 	// Apply isolation override before recreating the container.
 	if opts.Isolation != "" && opts.Isolation != meta.Isolation {
 		if err := config.ValidateIsolationMode(opts.Isolation); err != nil {
