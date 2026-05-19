@@ -75,7 +75,8 @@ Dependency direction: `cmd/yoloai` → `cli` → `sandbox` + `runtime`; `sandbox
 | `attach.go` | `yoloai attach` — attach to sandbox tmux session via `runtime.InteractiveExec`. |
 | `diff.go` | `yoloai diff` — show agent changes. Supports `--stat`, `--log`, commit refs, and ranges. |
 | `destroy.go` | `yoloai destroy` — stop and remove sandbox with confirmation logic. |
-| `sandbox_cmd.go` | `yoloai sandbox` parent command with name-first dispatch. Subcommands: list, info, log, exec, prompt, allow, allowed, deny, bugreport, clone. |
+| `sandbox_cmd.go` | `yoloai sandbox` parent command with name-first dispatch. Subcommands: list, info, log, exec, prompt, allow, allowed, deny, bugreport, clone, vscode. |
+| `sandbox_vscode.go` | `yoloai sandbox <name> vscode` — open sandbox in VS Code via attach URI. Builds `vscode-remote://attached-container+<hex-json>/<workdir>` URI and launches `code --folder-uri` or prints instructions. |
 | `sandbox_info.go` | `yoloai sandbox <name> info` — display sandbox config, meta, and status. |
 | `sandbox_clone.go` | `yoloai clone` / `yoloai sandbox clone` — clone a sandbox. |
 | `sandbox_prompt.go` | `yoloai sandbox <name> prompt` — show the prompt text for a sandbox. |
@@ -254,7 +255,7 @@ Dynamic capability detection system. Probes the host, checks backend prerequisit
 | `paths.go` | `EncodePath()` / `DecodePath()` — caret encoding for filesystem-safe names. `InstanceName()`, `Dir()`, `WorkDir()`, `RequireSandboxDir()`. `OverlayUpperDir()` / `OverlayOvlworkDir()` for `:overlay` mount paths. Centralized filename constants (`EnvironmentFile`, `RuntimeConfigFile`, `AgentStatusFile`, `SandboxStateFile`, etc.). |
 | `parse.go` | `ParseDirArg()` — parses `path:copy`, `path:overlay`, `path:rw`, `path:force` suffixes into `DirSpec`. |
 | `context.go` | `GenerateContext()` — builds markdown description of sandbox environment (dirs, network, resources). `WriteContextFiles()` — writes `context.md` and inlines context into agent instruction file (e.g., `CLAUDE.md`). |
-| `sandbox_state.go` | `SandboxState` struct, `LoadSandboxState()`, `SaveSandboxState()` — per-sandbox runtime state (`sandbox-state.json`, legacy: `state.json`). Tracks `agent_files_initialized`. |
+| `sandbox_state.go` | `SandboxState` struct, `LoadSandboxState()`, `SaveSandboxState()` — per-sandbox runtime state (`sandbox-state.json`, legacy: `state.json`). Tracks `agent_files_initialized` and `on_create_commands_done`. |
 | `agent_files.go` | `copyAgentFiles()` — copies files from host into sandbox `agent-runtime/` per `agent_files` config. Handles string/list forms, exclusion patterns, first-run tracking via `SandboxState`. |
 | `profile_build.go` | Profile image building — ensures profile images are built in dependency order (base → parent → child). Staleness detection. |
 | `prune.go` | `PruneTempFiles()` — cleans up stale `/tmp/yoloai-*` temporary directories. |
@@ -266,6 +267,10 @@ Dynamic capability detection system. Probes the host, checks backend prerequisit
 | `setup.go` | `RunSetup()`, `runNewUserSetup()` — interactive first-run setup: tmux config, default backend, default agent. |
 | `confirm.go` | `Confirm()` — context-aware y/N interactive prompt with stdin/context racing. |
 | `errors.go` | Sentinel errors (`ErrSandboxNotFound`, `ErrSandboxExists`, `ErrNoChanges`, etc.). |
+| `archetype.go` | `Archetype` type, constants (simple/compose/devcontainer/apple), `ParseArchetype()`, `ValidArchetypes()`, `DetectArchetype()` — auto-detects project type from workdir signals. |
+| `devcontainer.go` | `LifecycleCmd` (string/array/object unmarshaling), `DevcontainerConfig` struct, `LoadDevcontainer()`, `ExtractPorts()`, `FilterMounts()`, `MergedEnv()`, `ParsedRunArgs()`, `WarnIgnoredFields()`, `PostStartCommandUsesCompose()`, `DockerComposeFilePresent()`. |
+| `yoloaiyaml.go` | `YoloAIProjectConfig` struct, `LoadYoloAIYaml()` — loads `.yoloai.yaml` project config with archetype declaration, extra mounts, and requires constraints. |
+| `vscode.go` | `InjectVSCodeWorkspace()` — writes `.vscode/extensions.json` and `.vscode/settings.json` from devcontainer.json customizations into the workdir copy. Existing keys win. |
 | `*_test.go` | Unit tests for each file above. `integration_test.go` has the `integration` build tag. |
 
 ### `workspace/`
@@ -365,6 +370,7 @@ Host context: `IsRoot`, `IsWSL2`, `InContainer`, `KVMGroup`. Detected once per i
 | `yoloai sandbox <name> allow` | `cli/sandbox_allow.go` | `sandbox.PatchConfigAllowedDomains()` + `tryLivePatchNetwork` ipset update |
 | `yoloai sandbox <name> allowed` | `cli/sandbox_allowed.go` | `sandbox.LoadMeta()` — pure file read |
 | `yoloai sandbox <name> deny` | `cli/sandbox_deny.go` | `sandbox.PatchConfigAllowedDomains()` + `tryLivePatchNetwork` ipset removal |
+| `yoloai sandbox <name> vscode` | `cli/sandbox_vscode.go:newSandboxVscodeCmd` | Builds `vscode-remote://attached-container+<hex>/<path>` URI and launches `code --folder-uri` |
 | `yoloai files` | `cli/files.go:newFilesCmd` | File exchange via `~/.yoloai/sandboxes/<name>/files/` |
 | `yoloai profile` | `cli/profile.go:newProfileCmd` | Profile create/list/info/delete |
 | `yoloai help` | `cli/help.go:newHelpCmd` | Topic-based help with embedded markdown |
@@ -388,7 +394,12 @@ newNewCmd (cli/commands.go)
     → Manager.Create (sandbox/create.go)
       → EnsureSetup: create dirs, seed resources, build image, write config.yaml
       → prepareSandboxState (sandbox/create_prepare.go):
-          resolve profile chain → ParseDirArg → validate name/agent/workdir/auxdirs → safety checks
+          resolve profile chain → applyConfigDefaults
+          → resolveAndApplyArchetype: load .yoloai.yaml → CLI > yaml > auto-detect priority
+              → devcontainer: load devcontainer.json → merge ports/env/mounts, set workspaceFolder
+              → compose: set isolation=container-privileged, archetypeDockerDRequired=true
+              → transparency output (signals, bullets, suppress hint)
+          → ParseDirArg → validate name/agent/workdir/auxdirs → safety checks
           → :copy dirs: copyDir (cp -rp / clonefile on macOS) → removeGitDirs → gitBaseline
           → :overlay dirs: createOverlayDirs (upper/ovlwork in sandbox state)
           → seedSandbox (sandbox/create_seed.go):
