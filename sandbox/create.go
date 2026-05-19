@@ -125,6 +125,7 @@ type CreateOptions struct {
 	Isolation    string            // --isolation flag (e.g., "container-enhanced", "vm")
 	Runtimes     []string          // --runtime flags (Apple simulator runtimes, e.g., ["ios", "tvos:26.1"])
 	VscodeTunnel bool              // --vscode-tunnel flag
+	Archetype    string            // --archetype flag (empty = auto-detect)
 }
 
 // sandboxState holds resolved state computed during preparation.
@@ -156,6 +157,13 @@ type sandboxState struct {
 	vscodeTunnel      bool     // true when VS Code Remote Tunnel is enabled
 	meta              *Meta
 	configJSON        []byte
+	// Archetype fields
+	archetype                 Archetype
+	dockerdRequired           bool
+	devcontainer              *DevcontainerConfig
+	devcontainerMounts        []string
+	devcontainerMountWarnings []string
+	workdirMode               string // resolved workdir mode ("copy", "overlay", "rw")
 }
 
 // overlayMountConfig describes a single overlay mount for config.json.
@@ -164,6 +172,14 @@ type overlayMountConfig struct {
 	Upper  string `json:"upper"`
 	Work   string `json:"work"`
 	Merged string `json:"merged"`
+}
+
+// lifecycleConfig describes lifecycle command execution for a sandbox.
+type lifecycleConfig struct {
+	DockerDRequired bool             `json:"dockerd_required"`
+	OnCreateDone    bool             `json:"on_create_done"`
+	OnCreate        []map[string]any `json:"on_create,omitempty"`
+	OnStart         []map[string]any `json:"on_start,omitempty"`
 }
 
 // containerConfig is the serializable form of runtime-config.json.
@@ -193,6 +209,7 @@ type containerConfig struct {
 	Isolation          string               `json:"isolation,omitempty"`
 	VscodeTunnel       bool                 `json:"vscode_tunnel,omitempty"`
 	VscodeTunnelName   string               `json:"vscode_tunnel_name,omitempty"`
+	Lifecycle          *lifecycleConfig     `json:"lifecycle,omitempty"`
 }
 
 // Create creates and optionally starts a new sandbox.
@@ -411,6 +428,38 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions, c
 		return nil, err
 	}
 
+	// Resolve and apply archetype (after applyConfigDefaults, before validateAndExpandMounts).
+	resolvedArchetype, devcontainerCfg, dcMounts, dcMountWarnings, err := m.resolveAndApplyArchetype(ctx, &opts, pr)
+	if err != nil {
+		return nil, err
+	}
+
+	// Phase 4: add devcontainer mounts and .yoloai.yaml mounts to pr.mounts (dedup).
+	seen := make(map[string]bool)
+	for _, m := range pr.mounts {
+		seen[m] = true
+	}
+	for _, m := range dcMounts {
+		if !seen[m] {
+			pr.mounts = append(pr.mounts, m)
+			seen[m] = true
+		}
+	}
+	// .yoloai.yaml mounts are already in opts but need to be added to pr.mounts
+	// They are handled inside resolveAndApplyArchetype.
+
+	// Print devcontainer mount warnings
+	for _, w := range dcMountWarnings {
+		fmt.Fprintln(m.output, w) //nolint:errcheck // best-effort warning
+	}
+
+	// Load sandbox state to check on-create-done (for lifecycle config).
+	existingState, stateLoadErr := LoadSandboxState(Dir(opts.Name))
+	state_onCreateDone := false
+	if stateLoadErr == nil {
+		state_onCreateDone = existingState.OnCreateCommandsDone
+	}
+
 	// Validate and expand config mounts.
 	mergedMounts, err := validateAndExpandMounts(pr.mounts)
 	if err != nil {
@@ -490,6 +539,14 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions, c
 		return nil, err
 	}
 
+	// Phase 5: VS Code workspace injection (devcontainer + vscode-tunnel + copy/overlay).
+	if resolvedArchetype == ArchetypeDevcontainer && opts.VscodeTunnel &&
+		workdir.Mode != "rw" && devcontainerCfg != nil {
+		if injectErr := InjectVSCodeWorkspace(workCopyDir, devcontainerCfg); injectErr != nil {
+			slog.Warn("vscode workspace injection failed", "error", injectErr) // non-fatal
+		}
+	}
+
 	// Copy/overlay aux dirs and create baselines.
 	slog.Debug("setting up aux dirs", "event", "sandbox.create.aux_dirs", "count", len(auxDirs))
 	dirMetas, err := setupAuxDirs(opts.Name, auxDirs)
@@ -548,7 +605,33 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions, c
 
 	// Build config.json
 	vscodeTunnelName := sanitizeTunnelName(opts.Name)
-	configData, err := buildContainerConfig(agentDef, agentCommand, tmuxConf, overlayOrResolvedMountPath(workdir), opts.Debug, networkMode == "isolated", networkAllow, opts.Passthrough, overlayMounts, pr.setup, pr.autoCommitInterval, copyDirs, opts.Name, m.runtime.TmuxSocket(sandboxDir), pr.isolation, opts.VscodeTunnel, vscodeTunnelName)
+	// Build lifecycle config if archetype requires it
+	var lifecycleCfg *lifecycleConfig
+	// Read archetype-specific fields from the result of resolveAndApplyArchetype
+	archetypeDockerDRequired := pr.archetypeDockerDRequired
+	if resolvedArchetype == ArchetypeDevcontainer || archetypeDockerDRequired {
+		lc := &lifecycleConfig{
+			DockerDRequired: archetypeDockerDRequired,
+			OnCreateDone:    state_onCreateDone,
+		}
+		if devcontainerCfg != nil {
+			if !devcontainerCfg.OnCreateCommand.IsZero() {
+				lc.OnCreate = append(lc.OnCreate, lifecycleCmdToJSON(devcontainerCfg.OnCreateCommand))
+			}
+			if !devcontainerCfg.UpdateContentCommand.IsZero() {
+				lc.OnCreate = append(lc.OnCreate, lifecycleCmdToJSON(devcontainerCfg.UpdateContentCommand))
+			}
+			if !devcontainerCfg.PostCreateCommand.IsZero() {
+				lc.OnCreate = append(lc.OnCreate, lifecycleCmdToJSON(devcontainerCfg.PostCreateCommand))
+			}
+			if !devcontainerCfg.PostStartCommand.IsZero() {
+				lc.OnStart = append(lc.OnStart, lifecycleCmdToJSON(devcontainerCfg.PostStartCommand))
+			}
+		}
+		lifecycleCfg = lc
+	}
+
+	configData, err := buildContainerConfig(agentDef, agentCommand, tmuxConf, overlayOrResolvedMountPath(workdir), opts.Debug, networkMode == "isolated", networkAllow, opts.Passthrough, overlayMounts, pr.setup, pr.autoCommitInterval, copyDirs, opts.Name, m.runtime.TmuxSocket(sandboxDir), pr.isolation, opts.VscodeTunnel, vscodeTunnelName, lifecycleCfg)
 	if err != nil {
 		return nil, fmt.Errorf("build %s: %w", RuntimeConfigFile, err)
 	}
@@ -610,6 +693,7 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions, c
 		Isolation:          pr.isolation,
 		HostFilesystem:     m.runtime.Capabilities().HostFilesystem,
 		VscodeTunnel:       opts.VscodeTunnel,
+		Archetype:          string(resolvedArchetype),
 	}
 
 	if err := SaveMeta(sandboxDir, meta); err != nil {
@@ -662,32 +746,38 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions, c
 
 	success = true
 	return &sandboxState{
-		name:              opts.Name,
-		sandboxDir:        sandboxDir,
-		workdir:           workdir,
-		workCopyDir:       workCopyDir,
-		auxDirs:           auxDirs,
-		agent:             agentDef,
-		model:             model,
-		profile:           pr.name,
-		imageRef:          pr.imageRef,
-		env:               pr.env,
-		credOverrides:     credOverrides,
-		hasPrompt:         hasPrompt,
-		networkMode:       networkMode,
-		networkAllow:      networkAllow,
-		ports:             opts.Ports,
-		configMounts:      mergedMounts,
-		tmuxConf:          tmuxConf,
-		resources:         pr.resources,
-		capAdd:            pr.capAdd,
-		devices:           pr.devices,
-		setup:             pr.setup,
-		isolation:         pr.isolation,
-		isolationExplicit: pr.isolationExplicit,
-		vscodeTunnel:      opts.VscodeTunnel,
-		meta:              meta,
-		configJSON:        configData,
+		name:                      opts.Name,
+		sandboxDir:                sandboxDir,
+		workdir:                   workdir,
+		workCopyDir:               workCopyDir,
+		auxDirs:                   auxDirs,
+		agent:                     agentDef,
+		model:                     model,
+		profile:                   pr.name,
+		imageRef:                  pr.imageRef,
+		env:                       pr.env,
+		credOverrides:             credOverrides,
+		hasPrompt:                 hasPrompt,
+		networkMode:               networkMode,
+		networkAllow:              networkAllow,
+		ports:                     opts.Ports,
+		configMounts:              mergedMounts,
+		tmuxConf:                  tmuxConf,
+		resources:                 pr.resources,
+		capAdd:                    pr.capAdd,
+		devices:                   pr.devices,
+		setup:                     pr.setup,
+		isolation:                 pr.isolation,
+		isolationExplicit:         pr.isolationExplicit,
+		vscodeTunnel:              opts.VscodeTunnel,
+		meta:                      meta,
+		configJSON:                configData,
+		archetype:                 resolvedArchetype,
+		dockerdRequired:           archetypeDockerDRequired,
+		devcontainer:              devcontainerCfg,
+		devcontainerMounts:        dcMounts,
+		devcontainerMountWarnings: dcMountWarnings,
+		workdirMode:               string(workdir.Mode),
 	}, nil
 }
 
@@ -962,7 +1052,7 @@ func effectiveGID() int {
 }
 
 // buildContainerConfig creates the config.json content.
-func buildContainerConfig(agentDef *agent.Definition, agentCommand string, tmuxConf string, workingDir string, debug bool, networkIsolated bool, allowedDomains []string, passthrough []string, overlayMounts []overlayMountConfig, setupCommands []string, autoCommitInterval int, copyDirs []string, sandboxName string, tmuxSocket string, isolation string, vscodeTunnel bool, vscodeTunnelName string) ([]byte, error) {
+func buildContainerConfig(agentDef *agent.Definition, agentCommand string, tmuxConf string, workingDir string, debug bool, networkIsolated bool, allowedDomains []string, passthrough []string, overlayMounts []overlayMountConfig, setupCommands []string, autoCommitInterval int, copyDirs []string, sandboxName string, tmuxSocket string, isolation string, vscodeTunnel bool, vscodeTunnelName string, lifecycle *lifecycleConfig) ([]byte, error) {
 	var stateDirName string
 	if agentDef.StateDir != "" {
 		stateDirName = filepath.Base(agentDef.StateDir)
@@ -993,8 +1083,26 @@ func buildContainerConfig(agentDef *agent.Definition, agentCommand string, tmuxC
 		Isolation:          isolation,
 		VscodeTunnel:       vscodeTunnel,
 		VscodeTunnelName:   vscodeTunnelName,
+		Lifecycle:          lifecycle,
 	}
 	return json.MarshalIndent(cfg, "", "  ")
+}
+
+// lifecycleCmdToJSON converts a LifecycleCmd to the runtime-config.json representation.
+func lifecycleCmdToJSON(lc LifecycleCmd) map[string]any {
+	if lc.IsZero() {
+		return nil
+	}
+	switch v := lc.Raw().(type) {
+	case string:
+		return map[string]any{"type": "string", "cmd": v}
+	case []string:
+		return map[string]any{"type": "array", "cmd": v}
+	case map[string]any:
+		return map[string]any{"type": "object", "cmd": v}
+	default:
+		return nil
+	}
 }
 
 // ReadPrompt reads the prompt from --prompt, --prompt-file, or stdin ("-").

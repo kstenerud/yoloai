@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	goruntime "runtime"
 	"strings"
 
 	"github.com/kstenerud/yoloai/agent"
@@ -32,6 +33,8 @@ type profileResult struct {
 	isolation          string
 	isolationExplicit  bool // true when isolation was set via --isolation flag (not config/profile default)
 	userAliases        map[string]string
+	// Archetype-specific resolved fields
+	archetypeDockerDRequired bool // true when archetype requires dockerd auto-start
 }
 
 // resolveProfileConfig resolves the profile chain, merges config, and builds
@@ -607,6 +610,268 @@ func collectCopyDirs(workdir *DirArg, auxDirs []*DirArg) []string {
 		}
 	}
 	return copyDirs
+}
+
+// resolveAndApplyArchetype loads .yoloai.yaml, resolves the archetype with priority
+// (CLI > .yoloai.yaml > auto-detect), validates platform requirements, handles
+// requires: prompts, expands archetype effects on opts and pr, and prints transparency output.
+//
+// Returns: (resolved archetype, devcontainer config, safe devcontainer mounts, mount warnings, error).
+func (m *Manager) resolveAndApplyArchetype(ctx context.Context, opts *CreateOptions, pr *profileResult) (Archetype, *DevcontainerConfig, []string, []string, error) {
+	workdir := opts.Workdir.Path
+
+	// Step 1: Load .yoloai.yaml
+	yamlCfg, _, yamlErr := LoadYoloAIYaml(workdir)
+	if yamlErr != nil {
+		return "", nil, nil, nil, fmt.Errorf("load .yoloai.yaml: %w", yamlErr)
+	}
+
+	// Resolve archetype with priority: CLI > .yoloai.yaml > auto-detect
+	var archetype Archetype
+	var signals []string
+	var source string
+
+	switch {
+	case opts.Archetype != "":
+		// CLI flag takes highest priority
+		a, err := ParseArchetype(opts.Archetype)
+		if err != nil {
+			return "", nil, nil, nil, err
+		}
+		archetype = a
+		source = "--archetype flag"
+	case yamlCfg != nil && yamlCfg.Archetype != "":
+		// .yoloai.yaml overrides auto-detection
+		a, err := ParseArchetype(yamlCfg.Archetype)
+		if err != nil {
+			return "", nil, nil, nil, err
+		}
+		archetype = a
+		source = ".yoloai.yaml"
+	default:
+		// Auto-detect from workdir
+		archetype, signals = DetectArchetype(workdir)
+		source = "auto-detected"
+	}
+
+	// Step 2: Platform check for apple archetype
+	if archetype == ArchetypeApple {
+		isAppleSilicon := goruntime.GOOS == "darwin" && goruntime.GOARCH == "arm64"
+		if !isAppleSilicon {
+			if opts.Archetype != "" {
+				// Explicit --archetype apple on non-macOS → hard error
+				return "", nil, nil, nil, fmt.Errorf(
+					"the \"apple\" archetype requires Apple Silicon macOS (Tart backend); " +
+						"use --archetype simple for agent-only work on this project")
+			}
+			// Auto-detected apple on non-macOS → warn but don't fail
+			fmt.Fprintf(m.output, "Warning: This looks like an Apple platform project. The Tart backend requires Apple Silicon macOS.\n") //nolint:errcheck // best-effort warning
+		}
+	}
+
+	// Step 3: requires: validation
+	if yamlCfg != nil && len(yamlCfg.Requires) > 0 {
+		for tool, constraint := range yamlCfg.Requires {
+			fmt.Fprintf(m.output, "Warning: requires: %s %s — version verification not yet implemented; continuing.\n", tool, constraint) //nolint:errcheck // best-effort warning
+		}
+		if !opts.Yes {
+			confirmed, err := Confirm(ctx, "Continue anyway? [y/N] ", m.input, m.output)
+			if err != nil {
+				return "", nil, nil, nil, err
+			}
+			if !confirmed {
+				return "", nil, nil, nil, fmt.Errorf("aborted due to unverified requires: constraints")
+			}
+		}
+	}
+
+	// Step 4: Archetype expansion
+	var devcontainerCfg *DevcontainerConfig
+	var dcMounts []string
+	var dcMountWarnings []string
+	var bullets []string
+
+	workdirMountPath := opts.Workdir.MountPath
+	if workdirMountPath == "" {
+		workdirMountPath = opts.Workdir.Path
+	}
+
+	switch archetype {
+	case ArchetypeCompose:
+		if opts.Isolation == "" || opts.Isolation == "container" {
+			opts.Isolation = "container-privileged"
+			bullets = append(bullets, "isolation set to container-privileged (Compose requires nested Docker)")
+		}
+		pr.archetypeDockerDRequired = true
+		bullets = append(bullets, "dockerd will auto-start before lifecycle commands")
+
+	case ArchetypeDevcontainer:
+		// Load devcontainer.json
+		dcPath := ""
+		for _, candidate := range []string{
+			filepath.Join(workdir, ".devcontainer", "devcontainer.json"),
+			filepath.Join(workdir, "devcontainer.json"),
+		} {
+			if fileExists(candidate) {
+				dcPath = candidate
+				break
+			}
+		}
+		if dcPath != "" {
+			dc, err := LoadDevcontainer(dcPath)
+			if err != nil {
+				return "", nil, nil, nil, fmt.Errorf("load devcontainer.json: %w", err)
+			}
+			devcontainerCfg = dc
+
+			// Error if dockerComposeFile is present
+			if dc.DockerComposeFilePresent() {
+				return "", nil, nil, nil, fmt.Errorf(
+					"docker Compose devcontainers are not supported; " +
+						"use a project with devcontainer.json and docker-compose.yaml side by side instead")
+			}
+
+			// Warn about ignored fields
+			dc.WarnIgnoredFields(m.output)
+
+			// Handle runArgs
+			cpus, memory, capAdd, unknownWarnings := dc.ParsedRunArgs()
+			for _, w := range unknownWarnings {
+				fmt.Fprintln(m.output, w) //nolint:errcheck // best-effort warning
+			}
+			if cpus != "" && (pr.resources == nil || pr.resources.CPUs == "") {
+				if pr.resources == nil {
+					pr.resources = &config.ResourceLimits{}
+				}
+				pr.resources.CPUs = cpus
+				bullets = append(bullets, fmt.Sprintf("CPUs set to %s (from runArgs)", cpus))
+			}
+			if memory != "" && (pr.resources == nil || pr.resources.Memory == "") {
+				if pr.resources == nil {
+					pr.resources = &config.ResourceLimits{}
+				}
+				pr.resources.Memory = memory
+				bullets = append(bullets, fmt.Sprintf("memory set to %s (from runArgs)", memory))
+			}
+			pr.capAdd = append(pr.capAdd, capAdd...)
+
+			// Compose detection via postStartCommand
+			if dc.PostStartCommandUsesCompose() {
+				if opts.Isolation == "" || opts.Isolation == "container" {
+					opts.Isolation = "container-privileged"
+					bullets = append(bullets, "isolation set to container-privileged (postStartCommand uses docker compose)")
+				}
+				pr.archetypeDockerDRequired = true
+				bullets = append(bullets, "dockerd will auto-start before lifecycle commands")
+			}
+
+			// Merge env (existing wins — user's explicit --env flags take precedence)
+			merged := dc.MergedEnv()
+			if len(merged) > 0 {
+				if pr.env == nil {
+					pr.env = make(map[string]string)
+				}
+				for k, v := range merged {
+					if _, exists := pr.env[k]; !exists {
+						pr.env[k] = v
+					}
+				}
+				bullets = append(bullets, fmt.Sprintf("environment variables merged from devcontainer.json (%d keys)", len(merged)))
+			}
+
+			// Merge ports (dedup)
+			ports := dc.ExtractPorts()
+			if len(ports) > 0 {
+				seenPorts := make(map[string]bool)
+				for _, p := range opts.Ports {
+					seenPorts[p] = true
+				}
+				for _, p := range ports {
+					if !seenPorts[p] {
+						opts.Ports = append(opts.Ports, p)
+						seenPorts[p] = true
+					}
+				}
+				bullets = append(bullets, fmt.Sprintf("ports %v forwarded", ports))
+			}
+
+			// Override workdir mount path from workspaceFolder
+			if dc.WorkspaceFolder != "" {
+				opts.Workdir.MountPath = dc.WorkspaceFolder
+				workdirMountPath = dc.WorkspaceFolder
+				bullets = append(bullets, fmt.Sprintf("workdir mount path set to %s (workspaceFolder)", dc.WorkspaceFolder))
+			}
+
+			// Filter mounts
+			dcMounts, dcMountWarnings = dc.FilterMounts(workdirMountPath)
+			if len(dcMounts) > 0 {
+				bullets = append(bullets, fmt.Sprintf("%d devcontainer mounts passed through", len(dcMounts)))
+			}
+
+			// Add lifecycle command bullets
+			if !dc.OnCreateCommand.IsZero() {
+				bullets = append(bullets, "onCreateCommand will run once at first start")
+			}
+			if !dc.UpdateContentCommand.IsZero() {
+				bullets = append(bullets, "updateContentCommand will run once at first start")
+			}
+			if !dc.PostCreateCommand.IsZero() {
+				bullets = append(bullets, "postCreateCommand will run once at first start")
+			}
+			if !dc.PostStartCommand.IsZero() {
+				bullets = append(bullets, "postStartCommand will run on each start")
+			}
+		}
+
+	case ArchetypeApple:
+		// Backend is tart (managed via CLI flags, not opts.Isolation); just note it.
+		bullets = append(bullets, "backend=tart required (Apple Silicon macOS VM)")
+
+	case ArchetypeSimple:
+		// no-op
+	}
+
+	// Add .yoloai.yaml mounts to pr.mounts (before validateAndExpandMounts runs)
+	if yamlCfg != nil && len(yamlCfg.Mounts) > 0 {
+		seenYamlMounts := make(map[string]bool)
+		for _, mount := range pr.mounts {
+			seenYamlMounts[mount] = true
+		}
+		for _, mount := range yamlCfg.Mounts {
+			if !seenYamlMounts[mount] {
+				pr.mounts = append(pr.mounts, mount)
+				seenYamlMounts[mount] = true
+			}
+		}
+	}
+
+	// Step 5: Transparency output
+	// Only print when archetype isn't "simple" (no signals = no message needed)
+	// and not in quiet/json mode (output is io.Discard for json mode)
+	if archetype != ArchetypeSimple || source != "auto-detected" {
+		switch {
+		case len(signals) > 0:
+			for _, sig := range signals {
+				fmt.Fprintf(m.output, "→ Detected %s\n", sig) //nolint:errcheck // best-effort output
+			}
+		case source == ".yoloai.yaml":
+			fmt.Fprintf(m.output, "→ .yoloai.yaml declares archetype: %s\n", string(archetype)) //nolint:errcheck // best-effort output
+		case source == "--archetype flag":
+			fmt.Fprintf(m.output, "→ --archetype %s\n", string(archetype)) //nolint:errcheck // best-effort output
+		}
+		if archetype != ArchetypeSimple {
+			fmt.Fprintf(m.output, "  Archetype: %s\n", string(archetype)) //nolint:errcheck // best-effort output
+			if len(bullets) > 0 {
+				fmt.Fprintln(m.output, "  Because of this:") //nolint:errcheck // best-effort output
+				for _, b := range bullets {
+					fmt.Fprintf(m.output, "    · %s\n", b) //nolint:errcheck // best-effort output
+				}
+			}
+			fmt.Fprintf(m.output, "  To suppress: --archetype simple\n") //nolint:errcheck // best-effort output
+		}
+	}
+
+	return archetype, devcontainerCfg, dcMounts, dcMountWarnings, nil
 }
 
 // validateAndExpandMounts validates and expands config mount paths.

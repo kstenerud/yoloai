@@ -1,0 +1,380 @@
+// ABOUTME: Tests for resolveAndApplyArchetype: CLI flag, .yoloai.yaml, and auto-detection priority.
+// ABOUTME: Covers devcontainer expansion, compose expansion, and transparency output suppression.
+
+package sandbox
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"io"
+	"log/slog"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+// newTestManager builds a Manager with Discard output for resolution tests.
+func newTestManager(output io.Writer) *Manager {
+	if output == nil {
+		output = io.Discard
+	}
+	return NewManager(&mockDockerRuntime{}, slog.Default(), strings.NewReader("y\n"), output)
+}
+
+// makeWorkdir creates a temp dir suitable as a sandbox workdir.
+func makeWorkdir(t *testing.T) string {
+	t.Helper()
+	return t.TempDir()
+}
+
+// --- Priority tests ---
+
+func TestResolveArchetype_CLIFlagOverridesAll(t *testing.T) {
+	dir := makeWorkdir(t)
+	// Plant a .yoloai.yaml with a different archetype
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".yoloai.yaml"), []byte("archetype: compose\n"), 0600))
+	// Plant a compose file too (auto-detect would pick compose)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "docker-compose.yaml"), []byte("services: {}"), 0600))
+
+	m := newTestManager(nil)
+	opts := &CreateOptions{
+		Workdir:   DirSpec{Path: dir},
+		Archetype: "simple", // CLI overrides
+		Yes:       true,
+	}
+	pr := &profileResult{}
+
+	arch, dc, _, _, err := m.resolveAndApplyArchetype(context.Background(), opts, pr)
+	require.NoError(t, err)
+	assert.Equal(t, ArchetypeSimple, arch)
+	assert.Nil(t, dc)
+}
+
+func TestResolveArchetype_YamlOverridesAutoDetect(t *testing.T) {
+	dir := makeWorkdir(t)
+	// Plant a .yoloai.yaml declaring simple (overriding what auto-detect would find)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".yoloai.yaml"), []byte("archetype: simple\n"), 0600))
+	// Plant a compose file (auto-detect would pick compose)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "docker-compose.yaml"), []byte("services: {}"), 0600))
+
+	m := newTestManager(nil)
+	opts := &CreateOptions{
+		Workdir: DirSpec{Path: dir},
+		Yes:     true,
+	}
+	pr := &profileResult{}
+
+	arch, _, _, _, err := m.resolveAndApplyArchetype(context.Background(), opts, pr)
+	require.NoError(t, err)
+	assert.Equal(t, ArchetypeSimple, arch)
+}
+
+func TestResolveArchetype_AutoDetectSimple(t *testing.T) {
+	dir := makeWorkdir(t)
+	m := newTestManager(nil)
+	opts := &CreateOptions{Workdir: DirSpec{Path: dir}, Yes: true}
+	pr := &profileResult{}
+
+	arch, _, _, _, err := m.resolveAndApplyArchetype(context.Background(), opts, pr)
+	require.NoError(t, err)
+	assert.Equal(t, ArchetypeSimple, arch)
+}
+
+func TestResolveArchetype_AutoDetectCompose(t *testing.T) {
+	dir := makeWorkdir(t)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "docker-compose.yaml"), []byte("services: {}"), 0600))
+
+	var buf bytes.Buffer
+	m := newTestManager(&buf)
+	opts := &CreateOptions{Workdir: DirSpec{Path: dir}, Yes: true}
+	pr := &profileResult{}
+
+	arch, _, _, _, err := m.resolveAndApplyArchetype(context.Background(), opts, pr)
+	require.NoError(t, err)
+	assert.Equal(t, ArchetypeCompose, arch)
+	// Should have set container-privileged isolation and dockerd required
+	assert.Equal(t, "container-privileged", opts.Isolation)
+	assert.True(t, pr.archetypeDockerDRequired)
+}
+
+func TestResolveArchetype_AutoDetectDevcontainer(t *testing.T) {
+	dir := makeWorkdir(t)
+	dcDir := filepath.Join(dir, ".devcontainer")
+	require.NoError(t, os.MkdirAll(dcDir, 0750))
+	require.NoError(t, os.WriteFile(filepath.Join(dcDir, "devcontainer.json"), []byte(`{
+		"name": "test",
+		"forwardPorts": [3000]
+	}`), 0600))
+
+	m := newTestManager(nil)
+	opts := &CreateOptions{Workdir: DirSpec{Path: dir}, Yes: true}
+	pr := &profileResult{}
+
+	arch, dc, _, _, err := m.resolveAndApplyArchetype(context.Background(), opts, pr)
+	require.NoError(t, err)
+	assert.Equal(t, ArchetypeDevcontainer, arch)
+	require.NotNil(t, dc)
+	assert.Equal(t, []int{3000}, dc.ForwardPorts)
+	// Ports should be merged into opts
+	assert.Contains(t, opts.Ports, "3000:3000")
+}
+
+// --- Devcontainer expansion ---
+
+func TestResolveArchetype_DevcontainerMergesEnv(t *testing.T) {
+	dir := makeWorkdir(t)
+	dcContent := `{
+		"containerEnv": {"FOO": "bar", "EXISTING": "old"},
+		"remoteEnv": {"FOO": "remote"}
+	}`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "devcontainer.json"), []byte(dcContent), 0600))
+
+	m := newTestManager(nil)
+	opts := &CreateOptions{
+		Workdir: DirSpec{Path: dir},
+		Yes:     true,
+	}
+	pr := &profileResult{env: map[string]string{"EXISTING": "user-set"}}
+
+	_, _, _, _, err := m.resolveAndApplyArchetype(context.Background(), opts, pr)
+	require.NoError(t, err)
+	// remoteEnv wins over containerEnv for FOO
+	assert.Equal(t, "remote", pr.env["FOO"])
+	// pr.env existing key wins over devcontainer env
+	assert.Equal(t, "user-set", pr.env["EXISTING"])
+}
+
+func TestResolveArchetype_DevcontainerWorkspaceFolder(t *testing.T) {
+	dir := makeWorkdir(t)
+	dcContent := `{"workspaceFolder": "/workspace/myproject"}`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "devcontainer.json"), []byte(dcContent), 0600))
+
+	m := newTestManager(nil)
+	opts := &CreateOptions{Workdir: DirSpec{Path: dir}, Yes: true}
+	pr := &profileResult{}
+
+	_, _, _, _, err := m.resolveAndApplyArchetype(context.Background(), opts, pr)
+	require.NoError(t, err)
+	assert.Equal(t, "/workspace/myproject", opts.Workdir.MountPath)
+}
+
+func TestResolveArchetype_DevcontainerDockerComposeFileErrors(t *testing.T) {
+	dir := makeWorkdir(t)
+	dcContent := `{"dockerComposeFile": "docker-compose.yml"}`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "devcontainer.json"), []byte(dcContent), 0600))
+
+	m := newTestManager(nil)
+	opts := &CreateOptions{Workdir: DirSpec{Path: dir}, Yes: true}
+	pr := &profileResult{}
+
+	_, _, _, _, err := m.resolveAndApplyArchetype(context.Background(), opts, pr)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "Compose devcontainers are not supported")
+}
+
+func TestResolveArchetype_DevcontainerFiltersMounts(t *testing.T) {
+	dir := makeWorkdir(t)
+	dcContent := `{
+		"mounts": [
+			"/var/run/docker.sock:/var/run/docker.sock",
+			"/safe/path:/container/safe:ro"
+		]
+	}`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "devcontainer.json"), []byte(dcContent), 0600))
+
+	m := newTestManager(nil)
+	opts := &CreateOptions{Workdir: DirSpec{Path: dir}, Yes: true}
+	pr := &profileResult{}
+
+	_, _, dcMounts, warnings, err := m.resolveAndApplyArchetype(context.Background(), opts, pr)
+	require.NoError(t, err)
+	// Docker socket filtered out, safe path passes through
+	assert.Len(t, dcMounts, 1)
+	assert.Contains(t, dcMounts[0], "/safe/path")
+	assert.Len(t, warnings, 1)
+	assert.Contains(t, warnings[0], "docker socket")
+}
+
+func TestResolveArchetype_DevcontainerPostStartCompose(t *testing.T) {
+	dir := makeWorkdir(t)
+	dcContent := `{"postStartCommand": "docker compose up -d"}`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "devcontainer.json"), []byte(dcContent), 0600))
+
+	m := newTestManager(nil)
+	opts := &CreateOptions{Workdir: DirSpec{Path: dir}, Yes: true}
+	pr := &profileResult{}
+
+	_, _, _, _, err := m.resolveAndApplyArchetype(context.Background(), opts, pr)
+	require.NoError(t, err)
+	assert.Equal(t, "container-privileged", opts.Isolation)
+	assert.True(t, pr.archetypeDockerDRequired)
+}
+
+// --- Transparency output ---
+
+func TestResolveArchetype_TransparencyOutput_Simple(t *testing.T) {
+	dir := makeWorkdir(t)
+	var buf bytes.Buffer
+	m := newTestManager(&buf)
+	opts := &CreateOptions{Workdir: DirSpec{Path: dir}, Yes: true}
+	pr := &profileResult{}
+
+	arch, _, _, _, err := m.resolveAndApplyArchetype(context.Background(), opts, pr)
+	require.NoError(t, err)
+	assert.Equal(t, ArchetypeSimple, arch)
+	// Simple + auto-detected → no transparency output
+	assert.Empty(t, buf.String())
+}
+
+func TestResolveArchetype_TransparencyOutput_CLIFlag(t *testing.T) {
+	dir := makeWorkdir(t)
+	var buf bytes.Buffer
+	m := newTestManager(&buf)
+	opts := &CreateOptions{
+		Workdir:   DirSpec{Path: dir},
+		Archetype: "simple",
+		Yes:       true,
+	}
+	pr := &profileResult{}
+
+	_, _, _, _, err := m.resolveAndApplyArchetype(context.Background(), opts, pr)
+	require.NoError(t, err)
+	// CLI flag → should print "→ --archetype simple"
+	assert.Contains(t, buf.String(), "--archetype simple")
+}
+
+func TestResolveArchetype_TransparencyOutput_Compose(t *testing.T) {
+	dir := makeWorkdir(t)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "docker-compose.yaml"), []byte("services: {}"), 0600))
+
+	var buf bytes.Buffer
+	m := newTestManager(&buf)
+	opts := &CreateOptions{Workdir: DirSpec{Path: dir}, Yes: true}
+	pr := &profileResult{}
+
+	_, _, _, _, err := m.resolveAndApplyArchetype(context.Background(), opts, pr)
+	require.NoError(t, err)
+	output := buf.String()
+	// Should contain archetype and suppression hint
+	assert.Contains(t, output, "compose")
+	assert.Contains(t, output, "--archetype simple")
+}
+
+// --- .yoloai.yaml mounts merged ---
+
+func TestResolveArchetype_YamlMountsMerged(t *testing.T) {
+	dir := makeWorkdir(t)
+	content := "mounts:\n  - /data:/container/data:ro\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".yoloai.yaml"), []byte(content), 0600))
+
+	m := newTestManager(nil)
+	opts := &CreateOptions{Workdir: DirSpec{Path: dir}, Yes: true}
+	pr := &profileResult{}
+
+	_, _, _, _, err := m.resolveAndApplyArchetype(context.Background(), opts, pr)
+	require.NoError(t, err)
+	assert.Contains(t, pr.mounts, "/data:/container/data:ro")
+}
+
+func TestResolveArchetype_YamlMountsDeduped(t *testing.T) {
+	dir := makeWorkdir(t)
+	content := "mounts:\n  - /data:/container/data:ro\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".yoloai.yaml"), []byte(content), 0600))
+
+	m := newTestManager(nil)
+	opts := &CreateOptions{Workdir: DirSpec{Path: dir}, Yes: true}
+	// Pre-existing mount already in pr.mounts
+	pr := &profileResult{mounts: []string{"/data:/container/data:ro"}}
+
+	_, _, _, _, err := m.resolveAndApplyArchetype(context.Background(), opts, pr)
+	require.NoError(t, err)
+	// Should not duplicate
+	count := 0
+	for _, m := range pr.mounts {
+		if m == "/data:/container/data:ro" {
+			count++
+		}
+	}
+	assert.Equal(t, 1, count)
+}
+
+// --- requires: validation ---
+
+func TestResolveArchetype_Requires_SkippedWithYes(t *testing.T) {
+	dir := makeWorkdir(t)
+	content := "requires:\n  yoloai: \">=1.0\"\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".yoloai.yaml"), []byte(content), 0600))
+
+	m := newTestManager(nil)
+	opts := &CreateOptions{Workdir: DirSpec{Path: dir}, Yes: true}
+	pr := &profileResult{}
+
+	_, _, _, _, err := m.resolveAndApplyArchetype(context.Background(), opts, pr)
+	require.NoError(t, err) // Yes=true skips the prompt
+}
+
+func TestResolveArchetype_Requires_AbortsOnNo(t *testing.T) {
+	dir := makeWorkdir(t)
+	content := "requires:\n  yoloai: \">=99.0\"\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".yoloai.yaml"), []byte(content), 0600))
+
+	// Use "n\n" to decline the requires prompt
+	m := NewManager(&mockDockerRuntime{}, slog.Default(), strings.NewReader("n\n"), io.Discard)
+	opts := &CreateOptions{Workdir: DirSpec{Path: dir}, Yes: false}
+	pr := &profileResult{}
+
+	_, _, _, _, err := m.resolveAndApplyArchetype(context.Background(), opts, pr)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "aborted")
+}
+
+// --- RunArgs expansion ---
+
+func TestResolveArchetype_DevcontainerRunArgs_CPUMemory(t *testing.T) {
+	dir := makeWorkdir(t)
+	dcContent := `{"runArgs": ["--cpus", "4", "--memory", "8g"]}`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "devcontainer.json"), []byte(dcContent), 0600))
+
+	m := newTestManager(nil)
+	opts := &CreateOptions{Workdir: DirSpec{Path: dir}, Yes: true}
+	pr := &profileResult{}
+
+	_, _, _, _, err := m.resolveAndApplyArchetype(context.Background(), opts, pr)
+	require.NoError(t, err)
+	require.NotNil(t, pr.resources)
+	assert.Equal(t, "4", pr.resources.CPUs)
+	assert.Equal(t, "8g", pr.resources.Memory)
+}
+
+// --- Lifecycle command to JSON ---
+
+func TestLifecycleCmdToJSON_String(t *testing.T) {
+	var cmd LifecycleCmd
+	require.NoError(t, json.Unmarshal([]byte(`"npm install"`), &cmd))
+	result := lifecycleCmdToJSON(cmd)
+	assert.Equal(t, "string", result["type"])
+	assert.Equal(t, "npm install", result["cmd"])
+}
+
+func TestLifecycleCmdToJSON_Array(t *testing.T) {
+	var cmd LifecycleCmd
+	require.NoError(t, json.Unmarshal([]byte(`["go", "mod", "download"]`), &cmd))
+	result := lifecycleCmdToJSON(cmd)
+	assert.Equal(t, "array", result["type"])
+	assert.Equal(t, []string{"go", "mod", "download"}, result["cmd"])
+}
+
+func TestLifecycleCmdToJSON_Object(t *testing.T) {
+	var cmd LifecycleCmd
+	require.NoError(t, json.Unmarshal([]byte(`{"step1": "make build"}`), &cmd))
+	result := lifecycleCmdToJSON(cmd)
+	assert.Equal(t, "object", result["type"])
+	obj, ok := result["cmd"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "make build", obj["step1"])
+}
