@@ -5,9 +5,9 @@ DATE    := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 LDFLAGS := -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(DATE)
 
 GOFILES := $(shell find . -name '*.go' -not -path './vendor/*')
-EMBEDFILES := $(shell find runtime internal -type f \( -name 'Dockerfile' -o -name '*.sh' -o -name '*.py' -o -name '*.conf' -o -name '*.md' \) -not -path './vendor/*')
+EMBEDFILES := $(shell find runtime internal -type f \( -name 'Dockerfile' -o -name '*.sh' -o -name '*.py' -o -name '*.conf' -o -name '*.md' \) -not -path './vendor/*' -not -path '*/__pycache__/*' -not -path '*/tests/*')
 
-.PHONY: build test fmt lint tidy-check govulncheck hadolint actionlint check cover integration e2e integration-podman smoketest smoketest-full releasetest setcap clean
+.PHONY: build test fmt lint tidy-check govulncheck hadolint actionlint check cover integration e2e integration-podman python-test python-typecheck setup-dev-python smoketest smoketest-full releasetest setcap clean
 
 build: $(BINARY)
 
@@ -46,7 +46,30 @@ actionlint:
 	go run github.com/rhysd/actionlint/cmd/actionlint@latest
 
 ## check: run all CI checks locally (same as PR checks)
-check: lint tidy-check hadolint actionlint test
+check: lint tidy-check hadolint actionlint test python-test
+
+## python-test: run pytest on runtime/monitor/tests (skip when pytest absent)
+## Detects pytest availability so fresh clones without dev deps still get a
+## clean `make check`. CI installs deps via `make setup-dev-python` and
+## treats this target as required.
+python-test: python-typecheck
+	@if python3 -m pytest --version >/dev/null 2>&1; then \
+		python3 -m pytest runtime/monitor/tests/ -v; \
+	else \
+		echo "Python tests skipped (install pytest + mypy via 'make setup-dev-python' to enable)"; \
+	fi
+
+## python-typecheck: run mypy --strict on the typed Python surface
+python-typecheck:
+	@if python3 -m mypy --version >/dev/null 2>&1; then \
+		python3 -m mypy --strict runtime/monitor/setup_helpers.py runtime/monitor/tests/; \
+	else \
+		echo "Python type-check skipped (install mypy via 'make setup-dev-python' to enable)"; \
+	fi
+
+## setup-dev-python: install Python dev deps (pytest, mypy) for python-test/python-typecheck
+setup-dev-python:
+	python3 -m pip install -r runtime/monitor/tests/requirements-dev.txt
 
 ## cover: show test coverage per package and total
 cover:

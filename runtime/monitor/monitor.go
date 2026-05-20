@@ -14,6 +14,9 @@ var embeddedDiagnoseIdle []byte
 //go:embed sandbox-setup.py
 var embeddedSandboxSetup []byte
 
+//go:embed setup_helpers.py
+var embeddedSetupHelpers []byte
+
 // Script returns the embedded status-monitor.py content.
 func Script() []byte {
 	return embeddedStatusMonitor
@@ -27,4 +30,11 @@ func DiagnoseScript() []byte {
 // SetupScript returns the embedded sandbox-setup.py content.
 func SetupScript() []byte {
 	return embeddedSandboxSetup
+}
+
+// SetupHelpers returns the embedded setup_helpers.py content. The helpers
+// module is imported by sandbox-setup.py at runtime, so backends must write
+// it alongside sandbox-setup.py in the sandbox bin dir.
+func SetupHelpers() []byte {
+	return embeddedSetupHelpers
 }

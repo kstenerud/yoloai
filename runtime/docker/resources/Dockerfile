@@ -191,6 +191,7 @@ COPY tmux.conf /yoloai/tmux/tmux.conf
 COPY entrypoint.sh /yoloai/bin/entrypoint.sh
 COPY entrypoint.py /yoloai/bin/entrypoint.py
 COPY sandbox-setup.py /yoloai/bin/sandbox-setup.py
+COPY setup_helpers.py /yoloai/bin/setup_helpers.py
 COPY status-monitor.py /yoloai/bin/status-monitor.py
 COPY diagnose-idle.sh /yoloai/bin/diagnose-idle.sh
 RUN chmod +x /yoloai/bin/entrypoint.sh /yoloai/bin/entrypoint.py /yoloai/bin/diagnose-idle.sh

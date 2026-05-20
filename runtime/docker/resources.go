@@ -23,6 +23,10 @@ var embeddedTmuxConf []byte
 // from the runtime/monitor package for inclusion in Docker image builds.
 var embeddedSandboxSetup = monitor.SetupScript()
 
+// embeddedSetupHelpers provides the typed pure-function helpers module
+// imported by sandbox-setup.py at runtime. Must ship alongside it.
+var embeddedSetupHelpers = monitor.SetupHelpers()
+
 // embeddedStatusMonitor provides the shared Python status monitor script
 // from the runtime/monitor package for inclusion in Docker image builds.
 var embeddedStatusMonitor = monitor.Script()

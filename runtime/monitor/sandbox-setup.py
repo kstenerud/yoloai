@@ -22,6 +22,14 @@ import threading
 import time
 from pathlib import Path
 
+from setup_helpers import (
+    cmd_str as _cmd_str_helper,
+    compose_prompt_content,
+    lifecycle_preamble as _lifecycle_preamble_helper,
+    load_secret_files,
+    read_runtime_config,
+)
+
 
 # --- JSONL logger ---
 
@@ -61,33 +69,10 @@ def log_debug(event, msg, **fields):
 
 # --- Utility functions ---
 
-# RUNTIME_CONFIG_SCHEMA_VERSION must equal the runtimeConfigSchemaVersion
-# constant in sandbox/create.go. Bumped together by W2 (architecture
-# remediation plan) when the runtime-config.json contract changes in a
-# non-additive way.
-RUNTIME_CONFIG_SCHEMA_VERSION = 1
-
 
 def read_config(path):
-    """Read and return the runtime-config.json as a dict.
-
-    Validates that the file's schema_version matches what this Python expects.
-    On mismatch, fail loudly with a specific message — silently parsing a
-    newer or older shape risks misinterpreting fields.
-    """
-    with open(path) as f:
-        cfg = json.load(f)
-    got = cfg.get("schema_version")
-    # schema_version absent (legacy file written before W2) is tolerated.
-    # Mismatch with a non-None value means coordinated Go/Python drift.
-    if got is not None and got != RUNTIME_CONFIG_SCHEMA_VERSION:
-        raise RuntimeError(
-            f"schema_version mismatch in {path}: got {got}, "
-            f"expected {RUNTIME_CONFIG_SCHEMA_VERSION} "
-            f"(runtime-config.json was written by an incompatible yoloai version; "
-            f"re-create the sandbox)"
-        )
-    return cfg
+    """Read and return the runtime-config.json as a dict."""
+    return read_runtime_config(path)
 
 
 def tmux(*args, socket=None):
@@ -124,33 +109,16 @@ def read_secrets(secrets_dir, socket=None):
     Returns a dict of {name: value} for all loaded secrets.
     """
     log_info("read_secrets.check", f"checking secrets_dir={secrets_dir}")
-    secrets = {}
     if not os.path.isdir(secrets_dir):
         log_info("read_secrets.not_dir", f"secrets_dir is not a directory: {secrets_dir}")
-        return secrets
-    try:
-        names = os.listdir(secrets_dir)
-        log_info("read_secrets.found", f"found {len(names)} files in {secrets_dir}: {names}")
-    except OSError as e:
-        log_info("read_secrets.list_error", f"failed to list {secrets_dir}: {e}")
-        return secrets  # Not accessible (e.g. root-owned dir, container running as non-root)
-    loaded_count = 0
-    for name in names:
-        path = os.path.join(secrets_dir, name)
-        if os.path.isfile(path):
-            try:
-                with open(path) as f:
-                    value = f.read()
-                    os.environ[name] = value
-                    secrets[name] = value
-                    # Also set in tmux so the agent shell session inherits it
-                    if socket:
-                        tmux("set-environment", "-t", "main", name, value, socket=socket)
-                    loaded_count += 1
-            except OSError as e:
-                log_info("read_secrets.read_error", f"failed to read {path}: {e}")
-                pass  # Already set by entrypoint.py (running as root), or not accessible
-    log_info("read_secrets.done", f"loaded {loaded_count} secrets from {secrets_dir}")
+        return {}
+    secrets = load_secret_files(secrets_dir)
+    log_info("read_secrets.done", f"loaded {len(secrets)} secrets from {secrets_dir}")
+    for name, value in secrets.items():
+        os.environ[name] = value
+        # Also set in tmux so the agent shell session inherits it.
+        if socket:
+            tmux("set-environment", "-t", "main", name, value, socket=socket)
     return secrets
 
 
@@ -978,13 +946,11 @@ def deliver_prompt(cfg, yoloai_dir, socket=None, preamble=None):
         return False
 
     # Build content: preamble (if any) followed by user prompt (if any).
-    parts = []
-    if preamble:
-        parts.append(preamble)
+    prompt_text = None
     if has_prompt:
         with open(prompt_file) as f:
-            parts.append(f.read())
-    content = "\n\n".join(parts)
+            prompt_text = f.read()
+    content = compose_prompt_content(preamble, prompt_text) or ""
 
     submit_sequence = cfg.get("submit_sequence", "")
     log_debug("prompt.deliver", "delivering prompt", has_preamble=bool(preamble),
@@ -1122,15 +1088,7 @@ def run_lifecycle_commands(cfg, yoloai_dir, log):
 
 def _cmd_str(entry):
     """Return a human-readable string for a lifecycle command entry."""
-    kind = entry.get("type", "")
-    cmd = entry.get("cmd")
-    if kind == "string":
-        return str(cmd)
-    if kind == "array" and isinstance(cmd, list):
-        return " ".join(str(c) for c in cmd)
-    if kind == "object" and isinstance(cmd, dict):
-        return "{" + ", ".join(f"{k}: {v}" for k, v in cmd.items()) + "}"
-    return str(cmd)
+    return _cmd_str_helper(entry)
 
 
 def lifecycle_preamble(cfg, yoloai_dir):
@@ -1138,29 +1096,7 @@ def lifecycle_preamble(cfg, yoloai_dir):
 
     Returns empty string if no lifecycle commands are pending.
     """
-    lifecycle = cfg.get("lifecycle")
-    if not lifecycle:
-        return ""
-
-    marker = os.path.join(yoloai_dir, "lifecycle-on-create-done")
-    on_create_done = lifecycle.get("on_create_done", False) or os.path.exists(marker)
-
-    pending = []
-    if not on_create_done:
-        for entry in lifecycle.get("on_create", []):
-            pending.append(f"  onCreateCommand: {_cmd_str(entry)}")
-    for entry in lifecycle.get("on_start", []):
-        pending.append(f"  postStartCommand: {_cmd_str(entry)}")
-
-    if not pending:
-        return ""
-
-    return (
-        "[yoloai] The following setup commands are running in the background:\n"
-        + "\n".join(pending)
-        + "\nSome services may not be ready yet. You can start working now — "
-        "a notification will appear in this session when setup is complete."
-    )
+    return _lifecycle_preamble_helper(cfg, yoloai_dir)
 
 
 def run_lifecycle_background(cfg, yoloai_dir, socket, log, pane_ready_event):

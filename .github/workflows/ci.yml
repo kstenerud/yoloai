@@ -21,11 +21,18 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
       - name: Install golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
           version: v2.10.1
           args: --help
+
+      - name: Install Python dev deps
+        run: make setup-dev-python
 
       - name: Run checks
         run: make check

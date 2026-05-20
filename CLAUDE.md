@@ -50,7 +50,9 @@ Development docs live in `docs/dev/`:
 
 ## Code Quality Gate
 
-**Before considering any code change complete, run `make check`.** This runs gofmt verification, golangci-lint, go mod tidy check, and all tests. All must pass before committing. If `make check` fails, fix the issues before proceeding. Subagents implementing code changes must include `make check` as a final step.
+**Before considering any code change complete, run `make check`.** This runs gofmt verification, golangci-lint, go mod tidy check, all Go tests, and the Python test/typecheck targets. All must pass before committing. If `make check` fails, fix the issues before proceeding. Subagents implementing code changes must include `make check` as a final step.
+
+The Python portion (`make python-test` + `make python-typecheck`) covers the typed pure-function surface in `runtime/monitor/setup_helpers.py` and its tests under `runtime/monitor/tests/`. The targets skip silently if `pytest`/`mypy` aren't installed, so fresh clones still get a green `make check`. To install the dev deps locally: `make setup-dev-python`. CI installs them and treats both targets as required.
 
 For Claude Code users, this is enforced automatically: `.claude/settings.json` registers hooks that stamp the project when a source file is edited and run `make check` at end of turn if the stamp exists. On failure, the Stop hook blocks completion and feeds the output back. The hook scripts live at `.claude/hooks/post-edit.sh` and `.claude/hooks/on-stop.sh` and are committed so any clone of the repo picks them up.
 

@@ -1,0 +1,6 @@
+# Dev-only Python deps for unit-testing the sandbox-side scripts in
+# runtime/monitor/. Installed via `make setup-dev-python`. Pinned to
+# major versions to keep the dev environment reproducible without
+# being so strict that minor patches break the build.
+pytest>=8,<9
+mypy>=1.10,<2
