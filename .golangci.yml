@@ -17,12 +17,15 @@ linters:
     - durationcheck
     - exhaustive
     - cyclop
+    - gocognit
   disable:
     - exhaustruct
     - varnamelen
   settings:
     cyclop:
       max-complexity: 15
+    gocognit:
+      min-complexity: 20
     exhaustive:
       default-signifies-exhaustive: true
     revive:
