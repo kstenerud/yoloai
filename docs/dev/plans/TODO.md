@@ -3,6 +3,10 @@
 Designed features not yet implemented. Each links to its design spec.
 Create a plan file in this directory before starting implementation.
 
+## Architecture Remediation
+
+Cross-cutting refactor work tracked separately from features. See [architecture-remediation.md](architecture-remediation.md), which itself references the audit at [../architecture-audit-2026-05.md](../architecture-audit-2026-05.md). Touches the Go↔Python boundary, the `runtime.Runtime` interface, dependency direction, error patterns, and slog conventions.
+
 ## Parallel Agent Workflows
 
 Based on [parallel agents research](../research/parallel-agents.md).
