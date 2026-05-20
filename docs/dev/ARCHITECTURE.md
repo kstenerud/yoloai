@@ -23,12 +23,15 @@ runtime/tart/            → Tart (macOS VM) implementation of runtime.Runtime
 runtime/seatbelt/        → Seatbelt (macOS sandbox-exec) implementation of runtime.Runtime
 runtime/containerd/      → Containerd implementation of runtime.Runtime (Kata Containers VM isolation)
 runtime/monitor/         → Embedded monitoring scripts shared across all backends (sandbox-setup.py, status-monitor.py, diagnose-idle.sh)
-sandbox/                 → Core logic: create, lifecycle, diff, apply, clone, inspect
+sandbox/                 → Core logic: Manager, create, lifecycle, clone, inspect
+sandbox/archetype/       → Project archetype detection (devcontainer, compose, apple, simple) + .yoloai.yaml + VS Code workspace injection
+sandbox/patch/           → Git-format diff/apply machinery for :copy, :overlay, and :rw modes
+sandbox/store/           → On-disk sandbox state: paths, Meta record, SandboxState completion flags
 workspace/               → Workspace utilities (copy, git, safety checks, tags)
 test/e2e/                → End-to-end tests against the compiled binary (build tag: e2e)
 ```
 
-Dependency direction: `cmd/yoloai` → `cli` → `sandbox` + `runtime`; `sandbox` → `runtime` + `agent` + `workspace`; `agent` stands alone. Top-level `yoloai.go` → `sandbox` + `runtime` + `config` (public API for library consumers).
+Dependency direction: `cmd/yoloai` → `cli` → `sandbox` + `sandbox/patch` + `sandbox/store` + `runtime`; `sandbox` → `sandbox/archetype` + `sandbox/store` + `runtime` + `agent` + `workspace`; `sandbox/patch` → `sandbox` + `sandbox/store`; `sandbox/store` is a leaf (only imports stdlib, `config`, `internal/*`); `agent` stands alone. Top-level `yoloai.go` → `sandbox` + `sandbox/patch` + `sandbox/store` + `runtime` + `config` (public API for library consumers).
 
 ## File Index
 
@@ -248,30 +251,51 @@ Dynamic capability detection system. Probes the host, checks backend prerequisit
 | `create_seed.go` | `seedSandbox()` — copies seed files, agent config files, home config into sandbox directories. |
 | `lifecycle.go` | `Start()`, `Stop()`, `Destroy()`, `Reset()` — sandbox lifecycle. `recreateContainer()` and `relaunchAgent()` for restart scenarios. `resetInPlace()` for in-place resets (default). `clearCacheAndFiles()` clears cache/files dirs. `clearOverlayDirs()` clears upper/ovlwork for instant `:overlay` reset. |
 | `clone.go` | `Clone()` — clone an existing sandbox with new name. `CloneOptions` configures source/dest. |
-| `diff.go` | `GenerateDiff()`, `GenerateMultiDiff()`, `GenerateDiffStat()`, `GenerateCommitDiff()`, `ListCommitsWithStats()` — diff generation for `:copy`, `:overlay`, and `:rw` modes. |
-| `apply.go` | `GeneratePatch()`, `CheckPatch()`, `ApplyPatch()` — squash apply via `git apply`. `GenerateFormatPatch()`, `ApplyFormatPatch()` — per-commit apply via `git am`. `ApplyAll()` — apply all directories. `ListCommitsBeyondBaseline()`, `AdvanceBaseline()`, `AdvanceBaselineTo()`. |
 | `inspect.go` | `DetectStatus()` — reads `agent-status.json` written by in-container monitor; falls back to exec-based tmux query for old sandboxes. `InspectSandbox()`, `ListSandboxes()` — metadata + live status. |
-| `meta.go` | `Meta` / `WorkdirMeta` / `DirMeta` structs, `SaveMeta()` / `LoadMeta()` — sandbox metadata persistence as `environment.json` (legacy: `meta.json`). `Meta.Backend` records which runtime backend was used. |
-| `paths.go` | `EncodePath()` / `DecodePath()` — caret encoding for filesystem-safe names. `InstanceName()`, `Dir()`, `WorkDir()`, `RequireSandboxDir()`. `OverlayUpperDir()` / `OverlayOvlworkDir()` for `:overlay` mount paths. Centralized filename constants (`EnvironmentFile`, `RuntimeConfigFile`, `AgentStatusFile`, `SandboxStateFile`, etc.). |
 | `parse.go` | `ParseDirArg()` — parses `path:copy`, `path:overlay`, `path:rw`, `path:force` suffixes into `DirSpec`. |
 | `context.go` | `GenerateContext()` — builds markdown description of sandbox environment (dirs, network, resources). `WriteContextFiles()` — writes `context.md` and inlines context into agent instruction file (e.g., `CLAUDE.md`). |
-| `sandbox_state.go` | `SandboxState` struct, `LoadSandboxState()`, `SaveSandboxState()` — per-sandbox runtime state (`sandbox-state.json`, legacy: `state.json`). Tracks `agent_files_initialized` and `on_create_commands_done`. |
-| `agent_files.go` | `copyAgentFiles()` — copies files from host into sandbox `agent-runtime/` per `agent_files` config. Handles string/list forms, exclusion patterns, first-run tracking via `SandboxState`. |
+| `agent_files.go` | `copyAgentFiles()` — copies files from host into sandbox `agent-runtime/` per `agent_files` config. Handles string/list forms, exclusion patterns, first-run tracking via `store.SandboxState`. |
 | `profile_build.go` | Profile image building — ensures profile images are built in dependency order (base → parent → child). Staleness detection. |
 | `prune.go` | `PruneTempFiles()` — cleans up stale `/tmp/yoloai-*` temporary directories. |
 | `tags.go` | Git tag information — `TagInfo`, commit matching helpers, delegates to `workspace` package. |
 | `fileutil.go` | Path expansion wrappers (delegates to `config.ExpandPath` and `internal/fileutil`). JSON read/write helpers. |
 | `keychain_darwin.go` | macOS Keychain integration — reads credentials via `security find-generic-password` when seed files are missing. |
 | `keychain_other.go` | Non-macOS stub for Keychain integration. |
-| `lock_unix.go` / `lock_windows.go` | Per-sandbox advisory file locking via flock(2) on Unix/macOS; no-op on Windows. |
+| `lock_unix.go` / `lock_windows.go` | Per-sandbox advisory file locking via flock(2) on Unix/macOS; no-op on Windows. `AcquireLock` is exported for use from `sandbox/patch`. |
 | `setup.go` | `RunSetup()`, `runNewUserSetup()` — interactive first-run setup: tmux config, default backend, default agent. |
 | `confirm.go` | `Confirm()` — context-aware y/N interactive prompt with stdin/context racing. |
-| `errors.go` | Sentinel errors (`ErrSandboxNotFound`, `ErrSandboxExists`, `ErrNoChanges`, etc.). |
+| `errors.go` | Sentinel errors (`ErrSandboxNotFound`, `ErrSandboxExists`, `ErrNoChanges`, etc.); `ErrSandboxNotFound` is re-exported from `sandbox/store` for visibility. |
+| `*_test.go` | Unit tests for each file above. `integration_test.go` has the `integration` build tag. |
+
+### `sandbox/archetype/`
+
+Environment archetype detection, devcontainer.json parsing, `.yoloai.yaml` loading, and VS Code workspace injection. Imported by `sandbox/` (one-way; archetype/ does not import sandbox/).
+
+| File | Purpose |
+|------|---------|
 | `archetype.go` | `Archetype` type, constants (simple/compose/devcontainer/apple), `ParseArchetype()`, `ValidArchetypes()`, `DetectArchetype()` — auto-detects project type from workdir signals. |
-| `devcontainer.go` | `LifecycleCmd` (string/array/object unmarshaling), `DevcontainerConfig` struct, `LoadDevcontainer()`, `ExtractPorts()`, `FilterMounts()`, `MergedEnv()`, `ParsedRunArgs()`, `WarnIgnoredFields()`, `PostStartCommandUsesCompose()`, `DockerComposeFilePresent()`. |
+| `devcontainer.go` | `LifecycleCmd` (string/array/object unmarshaling), `DevcontainerConfig` struct, `LoadDevcontainer()`, `ExtractPorts()`, `FilterMounts()`, `MergedEnv()`, `ParsedRunArgs()`, `WarnIgnoredFields()`, `PostStartCommandUsesCompose()`, `DockerComposeFilePresent()`, `LifecycleCmdToJSON()`. |
 | `yoloaiyaml.go` | `YoloAIProjectConfig` struct, `LoadYoloAIYaml()` — loads `.yoloai.yaml` project config with archetype declaration, extra mounts, and requires constraints. |
 | `vscode.go` | `InjectVSCodeWorkspace()` — writes `.vscode/extensions.json` and `.vscode/settings.json` from devcontainer.json customizations into the workdir copy. Existing keys win. |
-| `*_test.go` | Unit tests for each file above. `integration_test.go` has the `integration` build tag. |
+
+### `sandbox/patch/`
+
+Git-format diff and apply machinery. Imports `sandbox/` (for exec helpers and locks) and `sandbox/store` (for Meta and path helpers).
+
+| File | Purpose |
+|------|---------|
+| `diff.go` | `GenerateDiff()`, `GenerateMultiDiff()`, `GenerateOverlayDiff()`, `GenerateCommitDiff()`, `ListCommitsWithStats()`, `DiffContext`, `LoadAllDiffContexts()` — diff generation for `:copy`, `:overlay`, and `:rw` modes. |
+| `apply.go` | `ApplyAll()`, `GeneratePatch()`, `GenerateFormatPatch()`, `GenerateMultiPatch()`, `GenerateOverlayPatch()`, `GenerateWIPDiff()`, `UpdateOverlayBaselineToHEAD()`, `UpdateOverlayBaseline()`, `AdvanceBaseline()`, `AdvanceBaselineTo()`, `HasUncommittedChanges()`, `ListCommitsBeyondBaseline()`, `ResolveRef()`, `ResolveRefs()`. |
+
+### `sandbox/store/`
+
+On-disk sandbox state — paths, metadata, and creation-completion flags. Leaf subpackage; imports only stdlib, `config`, `internal/fileutil`, `internal/yoerrors`. Imported by `sandbox/`, `sandbox/patch/`, and most external callers.
+
+| File | Purpose |
+|------|---------|
+| `paths.go` | `EncodePath()` / `DecodePath()` — caret encoding for filesystem-safe names. `InstanceName()`, `Dir()`, `WorkDir()`, `RequireSandboxDir()`. `OverlayUpperDir()` / `OverlayOvlworkDir()` for `:overlay` mount paths. Centralized filename constants (`EnvironmentFile`, `RuntimeConfigFile`, `AgentStatusFile`, `SandboxStateFile`, etc.) and `ErrSandboxNotFound`. |
+| `meta.go` | `Meta` / `WorkdirMeta` / `DirMeta` structs, `SaveMeta()` / `LoadMeta()` — sandbox metadata persistence as `environment.json` (legacy: `meta.json`). `Meta.Backend` records which runtime backend was used. |
+| `sandbox_state.go` | `SandboxState` struct, `LoadSandboxState()`, `SaveSandboxState()` — per-sandbox runtime state (`sandbox-state.json`, legacy: `state.json`). Tracks `agent_files_initialized` and `on_create_commands_done`. Separate from `Meta` which is immutable after creation. |
 
 ### `workspace/`
 
@@ -294,35 +318,47 @@ High-level public API for library consumers. Wraps `sandbox.Manager` and `runtim
 ### `sandbox.Manager`
 Central orchestrator. Holds a `runtime.Runtime`, backend name, logger, and I/O streams. All sandbox operations go through it: `Create()`, `Start()`, `Stop()`, `Destroy()`, `Reset()`, `Clone()`, `Inspect()`, `List()`, `EnsureSetup()`. The backend name is stored so it can be persisted in `Meta` at sandbox creation time.
 
-### `sandbox.Meta` / `sandbox.WorkdirMeta` / `sandbox.DirMeta`
-Persisted as `environment.json` (legacy: `meta.json`) in each sandbox dir. Records creation-time state: agent, model, profile, workdir path/mode/baseline SHA, auxiliary directories (via `Directories` field), network mode/allow, ports, resources, mounts, backend. Each directory (workdir and aux dirs) has its own `DirMeta` with host path, mount path, mode, and baseline SHA.
+### `store.Meta` / `store.WorkdirMeta` / `store.DirMeta`
+Persisted as `environment.json` (legacy: `meta.json`) in each sandbox dir. Records creation-time state: agent, model, profile, workdir path/mode/baseline SHA, auxiliary directories (via `Directories` field), network mode/allow, ports, resources, mounts, backend. Each directory (workdir and aux dirs) has its own `DirMeta` with host path, mount path, mode, and baseline SHA. Lives in `sandbox/store`.
 
-### `sandbox.SandboxState`
-Per-sandbox runtime state persisted as `sandbox-state.json` (legacy: `state.json`). Tracks mutable state like `agent_files_initialized` (boolean). Separate from `Meta` which is immutable after creation.
+### `store.SandboxState`
+Per-sandbox runtime state persisted as `sandbox-state.json` (legacy: `state.json`). Tracks mutable state like `agent_files_initialized` (boolean). Separate from `Meta` which is immutable after creation. Lives in `sandbox/store`.
 
 ### `sandbox.CreateOptions` / `sandbox.DirSpec`
 All parameters for `Manager.Create()`. `DirSpec` specifies a directory path and its mount mode (copy/overlay/rw/force). `CreateOptions` includes name, workdir `DirSpec`, auxiliary `DirSpec` list, agent, model, prompt, network, ports, profile, replace, attach, passthrough args.
 
-### `sandbox.DiffOptions` / `sandbox.DiffResult`
-Input/output for `GenerateDiff()` / `GenerateMultiDiff()`. Supports path filtering and stat-only mode. `DiffResult` carries the diff text, workdir, mode, and empty flag.
+### `patch.DiffOptions` / `patch.DiffResult`
+Input/output for `patch.GenerateDiff()` / `patch.GenerateMultiDiff()`. Supports path filtering and stat-only mode. `DiffResult` carries the diff text, workdir, mode, and empty flag. Lives in `sandbox/patch`.
 
 ### `sandbox.CloneOptions`
 Parameters for `Manager.Clone()`. Source and destination sandbox names, optional overrides.
+
+### `archetype.Archetype` / `archetype.DevcontainerConfig` / `archetype.YoloAIProjectConfig`
+Project-archetype detection types. Lives in `sandbox/archetype`.
 
 ### `agent.Definition`
 Describes an agent's commands (interactive/headless), prompt delivery mode, API key env vars (`APIKeyEnvVars`), auth hint env vars (`AuthHintEnvVars`), `AuthOptional` flag, seed files, state directory, tmux submit sequence, `ReadyPattern`, model flag/aliases/prefixes (`ModelPrefixes`), network allowlist, `ContextFile` (native instruction file for sandbox context injection), `AgentFilesExclude` (glob patterns to skip when copying agent_files), and `IdleSupport`. Built-in: `aider`, `claude`, `codex`, `gemini`, `opencode`, `test`, and `idle`.
 
 ### `runtime.Runtime`
-Pluggable runtime interface for backend abstraction. Methods: `Setup()`, `IsReady()`, `Create()`, `Start()`, `Stop()`, `Remove()`, `Inspect()`, `Exec()`, `GitExec()`, `InteractiveExec()`, `Prune()`, `Close()`, `Logs()`, `DiagHint()`, `Capabilities()`, `AgentProvisionedByBackend()`, `ResolveCopyMount()`, `Name()`, `TmuxSocket()`, `AttachCommand()`, `RequiredCapabilities()`, `SupportedIsolationModes()`, `BaseModeName()`, `PrepareAgentCommand()`. Allows swapping container/VM backends.
+Pluggable runtime interface for backend abstraction. Core methods: `Setup()`, `IsReady()`, `Create()`, `Start()`, `Stop()`, `Remove()`, `Inspect()`, `Exec()`, `GitExec()`, `InteractiveExec()`, `Prune()`, `Close()`, `Logs()`, `DiagHint()`, `Descriptor()`, `TmuxSocket()`, `AttachCommand()`, `PrepareAgentCommand()`. Static per-backend facts (Name, BaseModeName, AgentProvisionedByBackend, SupportedIsolationModes, Capabilities) are bundled into `BackendDescriptor` returned by `Descriptor()`. Allows swapping container/VM backends.
+
+### `runtime.BackendDescriptor`
+Bundles each backend's static facts: `Name`, `BaseModeName`, `AgentProvisionedByBackend`, `SupportedIsolationModes`, `Capabilities`. Returned by `Runtime.Descriptor()`; values are compile-time constants per backend.
 
 ### `runtime.BackendCaps`
-Declares what features a backend supports: `NetworkIsolation`, `OverlayDirs`, `CapAdd`, `HostFilesystem`. Used by sandbox logic to gate features without string-comparing backend names.
+Declares what features a backend supports: `NetworkIsolation`, `OverlayDirs`, `CapAdd`, `HostFilesystem`. Embedded in `BackendDescriptor`. Used by sandbox logic to gate features without string-comparing backend names.
 
 ### `runtime.Factory` / Backend Registry
 `Factory` is `func(context.Context) (Runtime, error)`. Backends register via `runtime.Register()` in their `init()` functions. `runtime.New(ctx, name)` creates a Runtime by name. `runtime.Available()` lists registered backends. Platform-specific backends (containerd on Linux, tart/seatbelt on macOS) only register on their supported platforms.
 
-### `runtime.UsernsProvider` / `runtime.WorkDirSetup`
-Optional interfaces. `UsernsProvider` is implemented by Podman for rootless `keep-id` mode. `WorkDirSetup` is implemented by Tart for VM-local workdir copies.
+### Optional Runtime interfaces
+Five optional interfaces extend the core Runtime with backend-specific capabilities. Callers use type assertion or helper functions (`ResolveCopyMountFor`, `RequiredCapabilitiesFor`) that fall back to documented defaults when the backend doesn't implement them.
+
+- `UsernsProvider` — Podman rootless `keep-id` mode.
+- `WorkDirSetup` — Tart VM-local workdir copies.
+- `StdioExecer` — Docker/Podman MCP-proxy stdio bridging.
+- `CopyMountResolver` — Seatbelt and Tart rewrite `:copy` mount paths; container backends use the host path unchanged.
+- `IsolationCapabilityProvider` — Docker/Podman/containerd declare per-isolation prerequisite capabilities; tart/seatbelt have none.
 
 ### `runtime.InstanceConfig`
 Configuration for `Runtime.Create()`. Describes image, working directory, mounts, ports, network mode, resource limits, capabilities, devices, user namespace mode, and container runtime (OCI/Kata).
