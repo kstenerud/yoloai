@@ -213,68 +213,73 @@ func GenerateOverlayPatch(ctx context.Context, rt runtime.Runtime, name string, 
 	}
 
 	var patches []PatchSet
-
 	for _, dc := range contexts {
 		if dc.Mode != "overlay" {
 			continue
 		}
-
-		// Resolve baseline SHA if deferred (creates fresh baseline if git is broken)
-		baselineSHA, baselineErr := ensureOverlayBaseline(ctx, rt, name, meta, dc)
-		if baselineErr != nil {
-			return nil, baselineErr
-		}
-
-		// Stage untracked files
-		_, err := execInContainer(ctx, rt, name, meta, []string{
-			"git", "-C", dc.WorkDir, "add", "-A",
-		})
+		ps, err := generateOverlayPatchForContext(ctx, rt, name, meta, dc, paths)
 		if err != nil {
-			return nil, fmt.Errorf("stage untracked in %s: %w", dc.HostPath, err)
+			return nil, err
 		}
-
-		// Generate binary patch
-		patchArgs := []string{"git", "-c", "core.hooksPath=/dev/null", "-C", dc.WorkDir, "diff", "--binary", baselineSHA}
-		if len(paths) > 0 {
-			patchArgs = append(patchArgs, "--")
-			patchArgs = append(patchArgs, paths...)
+		if ps != nil {
+			patches = append(patches, *ps)
 		}
-		stdout, err := execInContainer(ctx, rt, name, meta, patchArgs)
-		if err != nil {
-			return nil, fmt.Errorf("git diff (patch) in %s: %w", dc.HostPath, err)
-		}
-
-		if len(stdout) == 0 {
-			continue
-		}
-
-		// Generate stat summary
-		statArgs := []string{"git", "-c", "core.hooksPath=/dev/null", "-C", dc.WorkDir, "diff", "--stat", baselineSHA}
-		if len(paths) > 0 {
-			statArgs = append(statArgs, "--")
-			statArgs = append(statArgs, paths...)
-		}
-		statOut, err := execInContainer(ctx, rt, name, meta, statArgs)
-		if err != nil {
-			return nil, fmt.Errorf("git diff (stat) in %s: %w", dc.HostPath, err)
-		}
-
-		// execInContainer returns strings.TrimSpace'd stdout, which strips
-		// the trailing newline. git apply requires a trailing newline to parse
-		// the patch correctly — add it back if absent.
-		patch := []byte(stdout)
-		if len(patch) > 0 && patch[len(patch)-1] != '\n' {
-			patch = append(patch, '\n')
-		}
-		patches = append(patches, PatchSet{
-			HostPath: dc.HostPath,
-			Mode:     "overlay",
-			Patch:    patch,
-			Stat:     strings.TrimRight(statOut, "\n"),
-		})
 	}
 
 	return patches, nil
+}
+
+// generateOverlayPatchForContext produces a PatchSet for a single overlay diff
+// context. Returns nil if there are no changes.
+func generateOverlayPatchForContext(ctx context.Context, rt runtime.Runtime, name string, meta *Meta, dc DiffContext, paths []string) (*PatchSet, error) {
+	baselineSHA, err := ensureOverlayBaseline(ctx, rt, name, meta, dc)
+	if err != nil {
+		return nil, err
+	}
+
+	if _, err := execInContainer(ctx, rt, name, meta, []string{
+		"git", "-C", dc.WorkDir, "add", "-A",
+	}); err != nil {
+		return nil, fmt.Errorf("stage untracked in %s: %w", dc.HostPath, err)
+	}
+
+	patchArgs := append([]string{"git", "-c", "core.hooksPath=/dev/null", "-C", dc.WorkDir, "diff", "--binary", baselineSHA}, pathFilterArgs(paths)...)
+	stdout, err := execInContainer(ctx, rt, name, meta, patchArgs)
+	if err != nil {
+		return nil, fmt.Errorf("git diff (patch) in %s: %w", dc.HostPath, err)
+	}
+	if len(stdout) == 0 {
+		return nil, nil
+	}
+
+	statArgs := append([]string{"git", "-c", "core.hooksPath=/dev/null", "-C", dc.WorkDir, "diff", "--stat", baselineSHA}, pathFilterArgs(paths)...)
+	statOut, err := execInContainer(ctx, rt, name, meta, statArgs)
+	if err != nil {
+		return nil, fmt.Errorf("git diff (stat) in %s: %w", dc.HostPath, err)
+	}
+
+	// execInContainer returns strings.TrimSpace'd stdout, which strips
+	// the trailing newline. git apply requires a trailing newline to parse
+	// the patch correctly — add it back if absent.
+	patch := []byte(stdout)
+	if len(patch) > 0 && patch[len(patch)-1] != '\n' {
+		patch = append(patch, '\n')
+	}
+	return &PatchSet{
+		HostPath: dc.HostPath,
+		Mode:     "overlay",
+		Patch:    patch,
+		Stat:     strings.TrimRight(statOut, "\n"),
+	}, nil
+}
+
+// pathFilterArgs returns the "--" separator followed by paths when paths is
+// non-empty, for appending to a git diff command.
+func pathFilterArgs(paths []string) []string {
+	if len(paths) == 0 {
+		return nil
+	}
+	return append([]string{"--"}, paths...)
 }
 
 // UpdateOverlayBaselineToHEAD advances the overlay baseline for a directory
@@ -445,31 +450,53 @@ func ResolveRefs(ctx context.Context, rt runtime.Runtime, name string, refs []st
 		return nil, err
 	}
 
-	// Build SHA index for fast lookup
-	shaIndex := make(map[string]int) // full SHA -> index in allCommits
-	for i, c := range allCommits {
-		shaIndex[strings.ToLower(c.SHA)] = i
+	shaIndex := buildSHAIndex(allCommits)
+	selected, err := selectRefs(refs, allCommits, shaIndex)
+	if err != nil {
+		return nil, err
 	}
 
-	// Resolve short SHA to full
-	resolve := func(ref string) (string, error) {
-		ref = strings.ToLower(ref)
-		var found string
-		for _, c := range allCommits {
-			if strings.HasPrefix(strings.ToLower(c.SHA), ref) {
-				if found != "" {
-					return "", fmt.Errorf("ref %q is ambiguous — matches multiple commits", ref)
-				}
-				found = strings.ToLower(c.SHA)
+	var result []CommitInfo
+	for _, c := range allCommits {
+		if selected[strings.ToLower(c.SHA)] {
+			result = append(result, c)
+		}
+	}
+	return result, nil
+}
+
+// buildSHAIndex maps full lowercased SHAs to their index in allCommits.
+func buildSHAIndex(commits []CommitInfo) map[string]int {
+	idx := make(map[string]int, len(commits))
+	for i, c := range commits {
+		idx[strings.ToLower(c.SHA)] = i
+	}
+	return idx
+}
+
+// resolveShortRef expands a short SHA prefix to the full lowercased SHA.
+// Returns an error if the ref is ambiguous or not found.
+func resolveShortRef(ref string, allCommits []CommitInfo) (string, error) {
+	ref = strings.ToLower(ref)
+	var found string
+	for _, c := range allCommits {
+		if strings.HasPrefix(strings.ToLower(c.SHA), ref) {
+			if found != "" {
+				return "", fmt.Errorf("ref %q is ambiguous — matches multiple commits", ref)
 			}
+			found = strings.ToLower(c.SHA)
 		}
-		if found == "" {
-			return "", fmt.Errorf("ref %q not found among sandbox commits", ref)
-		}
-		return found, nil
 	}
+	if found == "" {
+		return "", fmt.Errorf("ref %q not found among sandbox commits", ref)
+	}
+	return found, nil
+}
 
-	selected := make(map[string]bool) // full SHA (lowered) -> true
+// selectRefs builds the set of selected SHAs from a list of ref strings.
+func selectRefs(refs []string, allCommits []CommitInfo, shaIndex map[string]int) (map[string]bool, error) {
+	resolve := func(ref string) (string, error) { return resolveShortRef(ref, allCommits) }
+	selected := make(map[string]bool)
 	for _, ref := range refs {
 		if before, after, isRange := strings.Cut(ref, ".."); isRange {
 			if err := selectRefRange(before, after, allCommits, shaIndex, resolve, selected); err != nil {
@@ -483,16 +510,7 @@ func ResolveRefs(ctx context.Context, rt runtime.Runtime, name string, refs []st
 			selected[fullSHA] = true
 		}
 	}
-
-	// Return in chronological order
-	var result []CommitInfo
-	for _, c := range allCommits {
-		if selected[strings.ToLower(c.SHA)] {
-			result = append(result, c)
-		}
-	}
-
-	return result, nil
+	return selected, nil
 }
 
 // GenerateFormatPatchForRefs creates .patch files for specific commits (by SHA)

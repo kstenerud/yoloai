@@ -650,29 +650,42 @@ func initializeAgentFilesIfNeeded(agentDef *agent.Definition, sandboxDir string,
 	if sbState.AgentFilesInitialized || agentDef.StateDir == "" {
 		return nil
 	}
-	cfg, cfgErr := config.LoadConfig()
-	if cfgErr == nil {
-		agentFilesConfig := cfg.AgentFiles
-		if meta.Profile != "" {
-			chain, chainErr := config.ResolveProfileChain(meta.Profile)
-			if chainErr == nil {
-				merged, mergeErr := config.MergeProfileChain(cfg, chain)
-				if mergeErr == nil && merged.AgentFiles != nil {
-					agentFilesConfig = merged.AgentFiles
-				}
-			}
-		}
-		if agentFilesConfig != nil {
-			if copyErr := copyAgentFiles(agentDef, sandboxDir, agentFilesConfig); copyErr != nil {
-				return fmt.Errorf("copy agent files on restart: %w", copyErr)
-			}
-			sbState.AgentFilesInitialized = true
-			if saveErr := SaveSandboxState(sandboxDir, sbState); saveErr != nil {
-				return fmt.Errorf("save sandbox state: %w", saveErr)
-			}
-		}
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		// Preserves pre-refactor behavior: config load failures must not block
+		// sandbox start. The agent_files copy is a best-effort convenience.
+		return nil //nolint:nilerr // intentional: best-effort, not load-bearing
+	}
+	agentFilesConfig := resolvedAgentFiles(cfg, meta)
+	if agentFilesConfig == nil {
+		return nil
+	}
+	if err := copyAgentFiles(agentDef, sandboxDir, agentFilesConfig); err != nil {
+		return fmt.Errorf("copy agent files on restart: %w", err)
+	}
+	sbState.AgentFilesInitialized = true
+	if err := SaveSandboxState(sandboxDir, sbState); err != nil {
+		return fmt.Errorf("save sandbox state: %w", err)
 	}
 	return nil
+}
+
+// resolvedAgentFiles returns the effective AgentFiles config after merging the
+// profile chain if a profile is set. Returns nil if no AgentFiles are configured.
+func resolvedAgentFiles(cfg *config.YoloaiConfig, meta *Meta) *config.AgentFilesConfig {
+	agentFilesConfig := cfg.AgentFiles
+	if meta.Profile == "" {
+		return agentFilesConfig
+	}
+	chain, err := config.ResolveProfileChain(meta.Profile)
+	if err != nil {
+		return agentFilesConfig
+	}
+	merged, err := config.MergeProfileChain(cfg, chain)
+	if err != nil || merged.AgentFiles == nil {
+		return agentFilesConfig
+	}
+	return merged.AgentFiles
 }
 
 // resolveEnvForRestart loads the global config env and merges the profile

@@ -205,47 +205,8 @@ func toolchainReadPaths() []string {
 	var result []string
 
 	for _, name := range toolchains {
-		binPath, err := lookPath(name)
-		if err != nil {
-			continue
-		}
-		resolved, err := filepath.EvalSymlinks(binPath)
-		if err != nil {
-			continue
-		}
-		prefix := filepath.Dir(filepath.Dir(resolved))
-
-		// Skip root prefix.
-		if prefix == "/" {
-			continue
-		}
-
-		// Skip prefixes with fewer than 3 path components.
-		parts := strings.Split(prefix, "/")
-		count := 0
-		for _, p := range parts {
-			if p != "" {
-				count++
-			}
-		}
-		if count < 2 {
-			continue
-		}
-
-		// Skip if already covered by a system read path.
-		covered := false
-		for _, sysPath := range sysPaths {
-			if prefix == sysPath || strings.HasPrefix(prefix, sysPath+"/") {
-				covered = true
-				break
-			}
-		}
-		if covered {
-			continue
-		}
-
-		// Deduplicate.
-		if seen[prefix] {
+		prefix, ok := resolveToolchainPrefix(name)
+		if !ok || prefix == "/" || pathComponentCount(prefix) < 2 || isCoveredBySysPaths(prefix, sysPaths) || seen[prefix] {
 			continue
 		}
 		seen[prefix] = true
@@ -253,6 +214,42 @@ func toolchainReadPaths() []string {
 	}
 
 	return result
+}
+
+// resolveToolchainPrefix resolves a binary name to its installation prefix
+// (two directories above the resolved binary path). Returns ("", false) on error.
+func resolveToolchainPrefix(name string) (string, bool) {
+	binPath, err := lookPath(name)
+	if err != nil {
+		return "", false
+	}
+	resolved, err := filepath.EvalSymlinks(binPath)
+	if err != nil {
+		return "", false
+	}
+	return filepath.Dir(filepath.Dir(resolved)), true
+}
+
+// pathComponentCount returns the number of non-empty path components in p.
+func pathComponentCount(p string) int {
+	count := 0
+	for _, part := range strings.Split(p, "/") {
+		if part != "" {
+			count++
+		}
+	}
+	return count
+}
+
+// isCoveredBySysPaths reports whether prefix is equal to or nested under any
+// of the given system paths.
+func isCoveredBySysPaths(prefix string, sysPaths []string) bool {
+	for _, sysPath := range sysPaths {
+		if prefix == sysPath || strings.HasPrefix(prefix, sysPath+"/") {
+			return true
+		}
+	}
+	return false
 }
 
 // resolvePathVariants returns the path variants needed for SBPL rules.

@@ -49,60 +49,71 @@ func copyDirWalk(src, dst string, srcInfo os.FileInfo) error {
 	if err := fileutil.MkdirAll(dst, srcInfo.Mode().Perm()); err != nil {
 		return fmt.Errorf("create destination: %w", err)
 	}
-
 	return filepath.WalkDir(src, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-
-		// Compute relative path (used by multiple checks below)
-		rel, err := filepath.Rel(src, path)
-		if err != nil {
-			return fmt.Errorf("rel path: %w", err)
-		}
-
-		// Skip yoloai-generated bugreport files
-		if !d.IsDir() && isBugreportFile(d.Name()) {
-			return nil
-		}
-
-		// Skip build artifacts
-		if isBuildArtifact(rel, d.IsDir()) {
-			if d.IsDir() {
-				return filepath.SkipDir // Skip entire directory tree
-			}
-			return nil
-		}
-
-		target := filepath.Join(dst, rel)
-
-		// Handle symlinks before anything else — d.Type() doesn't follow them.
-		if d.Type()&fs.ModeSymlink != 0 {
-			link, err := os.Readlink(path)
-			if err != nil {
-				return fmt.Errorf("readlink %s: %w", path, err)
-			}
-			if err := os.Symlink(link, target); err != nil { //nolint:gosec // G122: target is derived from a controlled destination root, TOCTOU not applicable here
-				return err
-			}
-			return fileutil.ChownIfSudo(target)
-		}
-
-		if d.IsDir() {
-			info, err := d.Info()
-			if err != nil {
-				return fmt.Errorf("dir info %s: %w", path, err)
-			}
-			return fileutil.MkdirAll(target, info.Mode().Perm())
-		}
-
-		// Regular file.
-		info, err := d.Info()
-		if err != nil {
-			return fmt.Errorf("file info %s: %w", path, err)
-		}
-		return copyFile(path, target, info)
+		return copyDirEntry(src, dst, path, d)
 	})
+}
+
+// copyDirEntry handles a single entry produced by filepath.WalkDir, skipping
+// unwanted files and recreating the entry (symlink, directory, or file) under dst.
+func copyDirEntry(src, dst, path string, d fs.DirEntry) error {
+	rel, err := filepath.Rel(src, path)
+	if err != nil {
+		return fmt.Errorf("rel path: %w", err)
+	}
+
+	if !d.IsDir() && isBugreportFile(d.Name()) {
+		return nil
+	}
+	if isBuildArtifact(rel, d.IsDir()) {
+		if d.IsDir() {
+			return filepath.SkipDir
+		}
+		return nil
+	}
+
+	target := filepath.Join(dst, rel)
+
+	if d.Type()&fs.ModeSymlink != 0 {
+		return copySymlink(path, target)
+	}
+	if d.IsDir() {
+		return copyEntryDir(path, target, d)
+	}
+	return copyEntryFile(path, target, d)
+}
+
+// copySymlink recreates a symlink at target pointing to the same destination as path.
+func copySymlink(path, target string) error {
+	link, err := os.Readlink(path)
+	if err != nil {
+		return fmt.Errorf("readlink %s: %w", path, err)
+	}
+	if err := os.Symlink(link, target); err != nil { //nolint:gosec // G122: target is derived from a controlled destination root, TOCTOU not applicable here
+		return err
+	}
+	return fileutil.ChownIfSudo(target)
+}
+
+// copyEntryDir creates the target directory preserving source permissions.
+func copyEntryDir(path, target string, d fs.DirEntry) error {
+	info, err := d.Info()
+	if err != nil {
+		return fmt.Errorf("dir info %s: %w", path, err)
+	}
+	return fileutil.MkdirAll(target, info.Mode().Perm())
+}
+
+// copyEntryFile copies a regular file preserving its permissions.
+func copyEntryFile(path, target string, d fs.DirEntry) error {
+	info, err := d.Info()
+	if err != nil {
+		return fmt.Errorf("file info %s: %w", path, err)
+	}
+	return copyFile(path, target, info)
 }
 
 // copyFile copies a regular file preserving permissions and modification time.

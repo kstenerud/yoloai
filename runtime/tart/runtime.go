@@ -81,9 +81,9 @@ func QueryAvailableRuntimes() ([]RuntimeVersion, error) {
 	return runtimes, nil
 }
 
-// ResolveRuntimeVersions resolves user input to specific runtime versions
-// If version omitted/":latest", picks latest by semantic version
-// If version specified, matches exact version or errors
+// ResolveRuntimeVersions resolves user input to specific runtime versions.
+// If version omitted/":latest", picks latest by semantic version.
+// If version specified, matches exact version or errors.
 func ResolveRuntimeVersions(inputs []string) ([]RuntimeVersion, error) {
 	available, err := QueryAvailableRuntimes()
 	if err != nil {
@@ -92,45 +92,57 @@ func ResolveRuntimeVersions(inputs []string) ([]RuntimeVersion, error) {
 
 	var resolved []RuntimeVersion
 	for _, input := range inputs {
-		platform, requestedVersion, err := ParseRuntime(input)
+		rv, err := resolveRuntimeVersion(input, available)
 		if err != nil {
 			return nil, err
 		}
+		resolved = append(resolved, rv)
+	}
+	return resolved, nil
+}
 
-		// Find matching runtimes for this platform
-		var candidates []RuntimeVersion
-		for _, rt := range available {
-			if rt.Platform == platform {
-				if requestedVersion == "" || rt.Version == requestedVersion {
-					candidates = append(candidates, rt)
-				}
-			}
-		}
-
-		if len(candidates) == 0 {
-			if requestedVersion != "" {
-				return nil, fmt.Errorf("%s %s not found on host", platform, requestedVersion)
-			}
-			return nil, fmt.Errorf("no %s runtimes available on host", platform)
-		}
-
-		// Pick latest by semantic version
-		best := candidates[0]
-		if len(candidates) > 1 {
-			bestVer, _ := version.NewVersion(best.Version)
-			for _, candidate := range candidates[1:] {
-				candVer, _ := version.NewVersion(candidate.Version)
-				if candVer != nil && bestVer != nil && candVer.GreaterThan(bestVer) {
-					best = candidate
-					bestVer = candVer
-				}
-			}
-		}
-
-		resolved = append(resolved, best)
+// resolveRuntimeVersion resolves a single runtime input string against the
+// list of available runtimes, returning the best matching version.
+func resolveRuntimeVersion(input string, available []RuntimeVersion) (RuntimeVersion, error) {
+	platform, requestedVersion, err := ParseRuntime(input)
+	if err != nil {
+		return RuntimeVersion{}, err
 	}
 
-	return resolved, nil
+	candidates := filterCandidates(available, platform, requestedVersion)
+	if len(candidates) == 0 {
+		if requestedVersion != "" {
+			return RuntimeVersion{}, fmt.Errorf("%s %s not found on host", platform, requestedVersion)
+		}
+		return RuntimeVersion{}, fmt.Errorf("no %s runtimes available on host", platform)
+	}
+
+	return pickLatest(candidates), nil
+}
+
+// filterCandidates returns runtimes matching platform and (optionally) requestedVersion.
+func filterCandidates(available []RuntimeVersion, platform, requestedVersion string) []RuntimeVersion {
+	var candidates []RuntimeVersion
+	for _, rt := range available {
+		if rt.Platform == platform && (requestedVersion == "" || rt.Version == requestedVersion) {
+			candidates = append(candidates, rt)
+		}
+	}
+	return candidates
+}
+
+// pickLatest returns the candidate with the highest semantic version.
+func pickLatest(candidates []RuntimeVersion) RuntimeVersion {
+	best := candidates[0]
+	bestVer, _ := version.NewVersion(best.Version)
+	for _, candidate := range candidates[1:] {
+		candVer, _ := version.NewVersion(candidate.Version)
+		if candVer != nil && bestVer != nil && candVer.GreaterThan(bestVer) {
+			best = candidate
+			bestVer = candVer
+		}
+	}
+	return best
 }
 
 // GenerateCacheKey creates a sorted, deterministic cache key from runtime versions

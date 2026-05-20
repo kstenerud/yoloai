@@ -471,8 +471,29 @@ func ListSandboxesMultiBackend(ctx context.Context, newRuntimeFunc func(context.
 		return nil, nil, fmt.Errorf("read sandboxes directory: %w", err)
 	}
 
-	// Group sandboxes by backend
-	backendSandboxes := make(map[string][]string)
+	backendSandboxes := groupSandboxesByBackend(entries, sandboxesDir)
+
+	var result []*Info
+	var unavailableBackends []string
+	unavailableSet := make(map[string]bool)
+
+	for backend, names := range backendSandboxes {
+		if backend == "" {
+			result = append(result, brokenInfos(names)...)
+			continue
+		}
+		infos, unavail := inspectBackendGroup(ctx, newRuntimeFunc, backend, names, unavailableSet)
+		result = append(result, infos...)
+		unavailableBackends = append(unavailableBackends, unavail...)
+	}
+
+	return result, unavailableBackends, nil
+}
+
+// groupSandboxesByBackend maps backend name → sandbox names from the sandbox directory entries.
+// Broken sandboxes (unreadable meta) are keyed to "".
+func groupSandboxesByBackend(entries []os.DirEntry, sandboxesDir string) map[string][]string {
+	byBackend := make(map[string][]string)
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
@@ -480,70 +501,59 @@ func ListSandboxesMultiBackend(ctx context.Context, newRuntimeFunc func(context.
 		sandboxDir := filepath.Join(sandboxesDir, entry.Name())
 		meta, err := LoadMeta(sandboxDir)
 		if err != nil {
-			// Broken sandbox - will be added with StatusBroken
-			backendSandboxes[""] = append(backendSandboxes[""], entry.Name())
+			byBackend[""] = append(byBackend[""], entry.Name())
 			continue
 		}
 		backend := meta.Backend
 		if backend == "" {
-			backend = "docker" // fallback for old sandboxes
+			backend = "docker"
 		}
-		backendSandboxes[backend] = append(backendSandboxes[backend], entry.Name())
+		byBackend[backend] = append(byBackend[backend], entry.Name())
+	}
+	return byBackend
+}
+
+// brokenInfos returns a StatusBroken Info entry for each sandbox name.
+func brokenInfos(names []string) []*Info {
+	infos := make([]*Info, len(names))
+	for i, name := range names {
+		infos[i] = &Info{
+			Meta:       &Meta{Name: name},
+			Status:     StatusBroken,
+			HasChanges: "-",
+			DiskUsage:  "-",
+		}
+	}
+	return infos
+}
+
+// inspectBackendGroup inspects all sandboxes for a single backend, returning
+// their Info entries and any newly discovered unavailable backend names.
+func inspectBackendGroup(ctx context.Context, newRuntimeFunc func(context.Context, string) (runtime.Runtime, error), backend string, names []string, unavailableSet map[string]bool) ([]*Info, []string) {
+	var unavailableBackends []string
+	rt, err := newRuntimeFunc(ctx, backend)
+	var effectiveRT runtime.Runtime
+	if err == nil {
+		effectiveRT = rt
+		defer rt.Close() //nolint:errcheck,gosec // best-effort cleanup
+	} else if !unavailableSet[backend] {
+		unavailableBackends = append(unavailableBackends, backend)
+		unavailableSet[backend] = true
 	}
 
 	var result []*Info
-	var unavailableBackends []string
-	unavailableSet := make(map[string]bool)
-
-	// Process each backend group
-	for backend, names := range backendSandboxes {
-		if backend == "" {
-			// Broken sandboxes
-			for _, name := range names {
-				result = append(result, &Info{
-					Meta:       &Meta{Name: name},
-					Status:     StatusBroken,
-					HasChanges: "-",
-					DiskUsage:  "-",
-				})
-			}
+	for _, name := range names {
+		info, inspectErr := InspectSandboxWithBackend(ctx, effectiveRT, name)
+		if inspectErr != nil {
+			result = append(result, &Info{
+				Meta:       &Meta{Name: name},
+				Status:     StatusBroken,
+				HasChanges: "-",
+				DiskUsage:  "-",
+			})
 			continue
 		}
-
-		// Try to create runtime for this backend
-		rt, err := newRuntimeFunc(ctx, backend)
-		var runtimeAvailable bool
-		if err == nil {
-			runtimeAvailable = true
-			defer rt.Close() //nolint:errcheck,gosec // best-effort cleanup
-		} else if !unavailableSet[backend] {
-			// Backend unavailable - track it
-			unavailableBackends = append(unavailableBackends, backend)
-			unavailableSet[backend] = true
-		}
-
-		// Inspect each sandbox in this backend group
-		for _, name := range names {
-			var info *Info
-			if runtimeAvailable {
-				info, err = InspectSandboxWithBackend(ctx, rt, name)
-			} else {
-				info, err = InspectSandboxWithBackend(ctx, nil, name)
-			}
-
-			if err != nil {
-				// Broken sandbox
-				result = append(result, &Info{
-					Meta:       &Meta{Name: name},
-					Status:     StatusBroken,
-					HasChanges: "-",
-					DiskUsage:  "-",
-				})
-				continue
-			}
-			result = append(result, info)
-		}
+		result = append(result, info)
 	}
-
-	return result, unavailableBackends, nil
+	return result, unavailableBackends
 }

@@ -423,31 +423,27 @@ func TestParseResourceLimits(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := parseResourceLimits(tt.input)
-			if tt.wantErr {
-				if err == nil {
-					t.Fatal("expected error, got nil")
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if tt.wantNil {
-				if result != nil {
-					t.Errorf("expected nil result, got %+v", result)
-				}
-				return
-			}
-			require.NotNil(t, result, "expected non-nil result")
-			if result.NanoCPUs != tt.wantCPU {
-				t.Errorf("NanoCPUs = %d, want %d", result.NanoCPUs, tt.wantCPU)
-			}
-			if result.Memory != tt.wantMem {
-				t.Errorf("Memory = %d, want %d", result.Memory, tt.wantMem)
-			}
+			checkResourceLimits(t, tt.input, tt.wantCPU, tt.wantMem, tt.wantNil, tt.wantErr)
 		})
 	}
+}
+
+// checkResourceLimits is the assertion body for a single TestParseResourceLimits case.
+func checkResourceLimits(t *testing.T, input *config.ResourceLimits, wantCPU, wantMem int64, wantNil, wantErr bool) {
+	t.Helper()
+	result, err := parseResourceLimits(input)
+	if wantErr {
+		require.Error(t, err)
+		return
+	}
+	require.NoError(t, err)
+	if wantNil {
+		require.Nil(t, result)
+		return
+	}
+	require.NotNil(t, result)
+	require.Equal(t, wantCPU, result.NanoCPUs, "NanoCPUs")
+	require.Equal(t, wantMem, result.Memory, "Memory")
 }
 
 func TestParseMemoryString(t *testing.T) {

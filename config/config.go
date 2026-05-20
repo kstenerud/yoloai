@@ -578,7 +578,6 @@ func LoadGlobalConfig() (*GlobalConfig, error) {
 	}
 
 	cfg := &GlobalConfig{}
-
 	if doc.Kind != yaml.DocumentNode || len(doc.Content) == 0 {
 		return cfg, nil
 	}
@@ -590,30 +589,48 @@ func LoadGlobalConfig() (*GlobalConfig, error) {
 	for i := 0; i < len(root.Content)-1; i += 2 {
 		key := root.Content[i]
 		val := root.Content[i+1]
-
-		switch key.Value {
-		case "tmux_conf":
-			expanded, expandErr := expandEnvBraced(val.Value)
-			if expandErr != nil {
-				return nil, fmt.Errorf("tmux_conf: %w", expandErr)
-			}
-			cfg.TmuxConf = expanded
-		case "model_aliases":
-			if val.Kind == yaml.MappingNode {
-				cfg.ModelAliases = make(map[string]string, len(val.Content)/2)
-				for k := 0; k < len(val.Content)-1; k += 2 {
-					aliasKey := val.Content[k].Value
-					aliasExpanded, aliasErr := expandEnvBraced(val.Content[k+1].Value)
-					if aliasErr != nil {
-						return nil, fmt.Errorf("model_aliases.%s: %w", aliasKey, aliasErr)
-					}
-					cfg.ModelAliases[aliasKey] = aliasExpanded
-				}
-			}
+		if err := applyGlobalConfigField(cfg, key.Value, val); err != nil {
+			return nil, err
 		}
 	}
 
 	return cfg, nil
+}
+
+// applyGlobalConfigField updates cfg for a single top-level key/value pair.
+func applyGlobalConfigField(cfg *GlobalConfig, key string, val *yaml.Node) error {
+	switch key {
+	case "tmux_conf":
+		expanded, err := expandEnvBraced(val.Value)
+		if err != nil {
+			return fmt.Errorf("tmux_conf: %w", err)
+		}
+		cfg.TmuxConf = expanded
+	case "model_aliases":
+		if val.Kind != yaml.MappingNode {
+			return nil
+		}
+		aliases, err := parseModelAliases(val)
+		if err != nil {
+			return err
+		}
+		cfg.ModelAliases = aliases
+	}
+	return nil
+}
+
+// parseModelAliases expands env vars in each alias value and returns the map.
+func parseModelAliases(val *yaml.Node) (map[string]string, error) {
+	aliases := make(map[string]string, len(val.Content)/2)
+	for k := 0; k < len(val.Content)-1; k += 2 {
+		aliasKey := val.Content[k].Value
+		expanded, err := expandEnvBraced(val.Content[k+1].Value)
+		if err != nil {
+			return nil, fmt.Errorf("model_aliases.%s: %w", aliasKey, err)
+		}
+		aliases[aliasKey] = expanded
+	}
+	return aliases, nil
 }
 
 // ReadConfigRaw reads the raw bytes of config.yaml. Returns nil, nil if the

@@ -91,43 +91,44 @@ func killStaleKataShims(namespace, name string) bool {
 	if err != nil {
 		return false
 	}
-	// Match either the bare container name or the namespace-prefixed form.
 	namespacedName := namespace + "-" + name
 	killed := false
 	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		pid, err := strconv.Atoi(e.Name())
-		if err != nil || pid <= 1 {
-			continue
-		}
-		cmdlineData, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid)) //nolint:gosec // G304: reading kernel proc file
-		if err != nil {
-			continue // process gone or no permission
-		}
-		// /proc/<pid>/cmdline args are NUL-separated.
-		args := strings.Split(string(cmdlineData), "\x00")
-		if len(args) == 0 {
-			continue
-		}
-		// Only target Kata shimv2 processes.
-		if !strings.Contains(args[0], "containerd-shim-kata") {
-			continue
-		}
-		// Look for -id <name> in the argument list (bare or namespace-prefixed).
-		for i, arg := range args {
-			if arg == "-id" && i+1 < len(args) {
-				id := args[i+1]
-				if id == name || id == namespacedName {
-					_ = syscall.Kill(pid, syscall.SIGKILL)
-					killed = true
-					break
-				}
-			}
+		if killKataShimEntry(e, name, namespacedName) {
+			killed = true
 		}
 	}
 	return killed
+}
+
+// killKataShimEntry checks whether a /proc entry is a Kata shim matching name
+// or namespacedName and kills it if so. Returns true if a process was killed.
+func killKataShimEntry(e os.DirEntry, name, namespacedName string) bool {
+	if !e.IsDir() {
+		return false
+	}
+	pid, err := strconv.Atoi(e.Name())
+	if err != nil || pid <= 1 {
+		return false
+	}
+	cmdlineData, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid)) //nolint:gosec // G304: reading kernel proc file
+	if err != nil {
+		return false
+	}
+	args := strings.Split(string(cmdlineData), "\x00")
+	if len(args) == 0 || !strings.Contains(args[0], "containerd-shim-kata") {
+		return false
+	}
+	for i, arg := range args {
+		if arg == "-id" && i+1 < len(args) {
+			id := args[i+1]
+			if id == name || id == namespacedName {
+				_ = syscall.Kill(pid, syscall.SIGKILL)
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // removeKataStateDir removes stale kata runtime-rs state that would prevent a

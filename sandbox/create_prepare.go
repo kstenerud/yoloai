@@ -593,52 +593,76 @@ func executeVMWorkDirSetup(ctx context.Context, rt runtime.Runtime, name, sandbo
 func setupAuxDirs(sandboxName string, auxDirs []*DirArg) ([]DirMeta, error) {
 	var dirMetas []DirMeta
 	for _, ad := range auxDirs {
-		mode := ad.Mode
-		if mode == "" {
-			mode = "ro"
+		dm, err := setupAuxDir(sandboxName, ad)
+		if err != nil {
+			return nil, err
 		}
-
-		dm := DirMeta{
-			HostPath:  ad.Path,
-			MountPath: ad.ResolvedMountPath(),
-			Mode:      mode,
-		}
-
-		switch ad.Mode {
-		case "copy":
-			auxWorkDir := WorkDir(sandboxName, ad.Path)
-			if err := workspace.CopyDir(ad.Path, auxWorkDir); err != nil {
-				return nil, fmt.Errorf("copy aux dir %s: %w", ad.Path, err)
-			}
-			if workspace.IsGitRepo(auxWorkDir) {
-				sha, err := workspace.BaselineUncommittedChanges(auxWorkDir)
-				if err != nil {
-					return nil, fmt.Errorf("baseline pre-session state for aux dir %s: %w", ad.Path, err)
-				}
-				dm.BaselineSHA = sha
-			} else {
-				sha, err := workspace.Baseline(auxWorkDir)
-				if err != nil {
-					return nil, fmt.Errorf("git baseline for aux dir %s: %w", ad.Path, err)
-				}
-				dm.BaselineSHA = sha
-			}
-		case "overlay":
-			for _, d := range []string{
-				OverlayUpperDir(sandboxName, ad.Path),
-				OverlayOvlworkDir(sandboxName, ad.Path),
-				OverlayMergedDir(sandboxName, ad.Path),
-				OverlayLowerDir(sandboxName, ad.Path),
-			} {
-				if err := fileutil.MkdirAll(d, 0755); err != nil { //nolint:gosec // G301: world-traversable so container yoloai user can access merged/
-					return nil, fmt.Errorf("create overlay dir for aux %s: %w", ad.Path, err)
-				}
-			}
-		}
-
 		dirMetas = append(dirMetas, dm)
 	}
 	return dirMetas, nil
+}
+
+// setupAuxDir prepares a single auxiliary directory (copy, overlay, or read-only)
+// and returns its DirMeta.
+func setupAuxDir(sandboxName string, ad *DirArg) (DirMeta, error) {
+	mode := ad.Mode
+	if mode == "" {
+		mode = "ro"
+	}
+	dm := DirMeta{
+		HostPath:  ad.Path,
+		MountPath: ad.ResolvedMountPath(),
+		Mode:      mode,
+	}
+	switch ad.Mode {
+	case "copy":
+		sha, err := setupAuxCopy(sandboxName, ad.Path)
+		if err != nil {
+			return DirMeta{}, err
+		}
+		dm.BaselineSHA = sha
+	case "overlay":
+		if err := setupAuxOverlay(sandboxName, ad.Path); err != nil {
+			return DirMeta{}, err
+		}
+	}
+	return dm, nil
+}
+
+// setupAuxCopy copies the directory into the sandbox work tree and returns its
+// baseline SHA.
+func setupAuxCopy(sandboxName, path string) (string, error) {
+	auxWorkDir := WorkDir(sandboxName, path)
+	if err := workspace.CopyDir(path, auxWorkDir); err != nil {
+		return "", fmt.Errorf("copy aux dir %s: %w", path, err)
+	}
+	if workspace.IsGitRepo(auxWorkDir) {
+		sha, err := workspace.BaselineUncommittedChanges(auxWorkDir)
+		if err != nil {
+			return "", fmt.Errorf("baseline pre-session state for aux dir %s: %w", path, err)
+		}
+		return sha, nil
+	}
+	sha, err := workspace.Baseline(auxWorkDir)
+	if err != nil {
+		return "", fmt.Errorf("git baseline for aux dir %s: %w", path, err)
+	}
+	return sha, nil
+}
+
+// setupAuxOverlay creates the overlay layer directories for an auxiliary directory.
+func setupAuxOverlay(sandboxName, path string) error {
+	for _, d := range []string{
+		OverlayUpperDir(sandboxName, path),
+		OverlayOvlworkDir(sandboxName, path),
+		OverlayMergedDir(sandboxName, path),
+		OverlayLowerDir(sandboxName, path),
+	} {
+		if err := fileutil.MkdirAll(d, 0755); err != nil { //nolint:gosec // G301: world-traversable so container yoloai user can access merged/
+			return fmt.Errorf("create overlay dir for aux %s: %w", path, err)
+		}
+	}
+	return nil
 }
 
 // buildNetworkConfig determines the network mode and allowlist from options
