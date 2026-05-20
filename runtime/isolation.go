@@ -26,3 +26,26 @@ func IsolationSnapshotter(isolation string) string {
 	}
 	return ""
 }
+
+// IsolationEnforcesInSandboxIptables reports whether the OCI runtime used for
+// the given isolation mode honors iptables rules applied inside the sandbox.
+//
+// Network isolation in yoloai is currently implemented by entrypoint.py
+// installing iptables + ipset rules inside the running container. That only
+// works when the in-sandbox kernel actually evaluates iptables.
+//
+//   - "container", "container-privileged", "" — standard runc; host kernel
+//     enforces iptables in the container's netns. Works.
+//   - "vm", "vm-enhanced" — Kata Containers; the guest Linux kernel inside
+//     the VM enforces iptables exactly like bare metal. Works.
+//   - "container-enhanced" — gVisor (runsc). gVisor implements its own
+//     userspace netstack (the "Sentry") and does not evaluate iptables rules
+//     installed inside the sandbox. Does NOT work — a sandbox configured
+//     with --network-isolated would be wide open.
+//
+// The redesign in docs/design/network-isolation.md moves enforcement to the
+// host netns, which removes the dependency on the in-sandbox kernel. Until
+// that lands, the broken combination must be rejected at sandbox creation.
+func IsolationEnforcesInSandboxIptables(isolation string) bool {
+	return isolation != "container-enhanced"
+}

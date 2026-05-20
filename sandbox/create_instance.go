@@ -42,8 +42,25 @@ func (m *Manager) buildInstanceConfig(state *sandboxState, mounts []runtime.Moun
 	cname := InstanceName(state.name)
 	caps := m.runtime.Capabilities()
 
-	if state.networkMode == "isolated" && !caps.NetworkIsolation {
-		return runtime.InstanceConfig{}, fmt.Errorf("--network=isolated is not supported by the %s backend", m.runtime.Name())
+	if state.networkMode == "isolated" {
+		if !caps.NetworkIsolation {
+			return runtime.InstanceConfig{}, fmt.Errorf("--network=isolated is not supported by the %s backend", m.runtime.Name())
+		}
+		// Per-isolation-mode check: some OCI runtimes (notably gVisor / runsc
+		// for --isolation=container-enhanced) do not honor iptables rules
+		// applied inside the sandbox, so the in-sandbox enforcement is a
+		// silent no-op. Refuse rather than lie. See
+		// docs/design/network-isolation.md for the redesign that removes this
+		// limitation by moving enforcement to the host netns.
+		if !runtime.IsolationEnforcesInSandboxIptables(state.isolation) {
+			return runtime.InstanceConfig{}, fmt.Errorf(
+				"--network=isolated cannot be enforced with --isolation=%s: "+
+					"gVisor's userspace netstack ignores in-sandbox iptables rules. "+
+					"Use --isolation=container (default) or a VM-based isolation mode "+
+					"(--isolation=vm or --isolation=vm-enhanced) instead",
+				state.isolation,
+			)
+		}
 	}
 
 	resolvedImage := state.imageRef

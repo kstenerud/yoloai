@@ -33,6 +33,7 @@ row to the index.
 | IPAM allocates duplicate IP after replace | [CNI: stale IPAM lease](#cnI-results-cache-lives-at-varlibcniresults) |
 | Two concurrent `yoloai new` with same name corrupts networking | [CNI: concurrent creation race](#two-yoloai-new-invocations-for-the-same-container-name-within-1s-will-corrupt-networking) |
 | `start instance: instance not found` with `--network-isolated` | [Docker: isolated network mode](#docker-does-not-have-an-isolated-network-mode) |
+| `--network-isolated` silently unenforced under `--isolation container-enhanced` | [gVisor netstack ignores iptables](#gvisor-netstack-ignores-in-sandbox-iptables-rules) |
 | `overlayfs mount` fails with `EPERM` inside Docker | [Docker: AppArmor blocks mount](#apparmor-blocks-mount2-even-with-cap_sys_admin) |
 | `sysctl: permission denied on key "net.ipv4.ip_forward"` starting inner Docker daemon | [Docker: /proc/sys and /sys/fs/cgroup read-only without systempaths=unconfined](#procsys-and-sysfsgroup-are-read-only-without-systempathsunconfined) |
 | `mkdir /sys/fs/cgroup/docker: read-only file system` when inner Docker runs containers | [Docker: /proc/sys and /sys/fs/cgroup read-only without systempaths=unconfined](#procsys-and-sysfsgroup-are-read-only-without-systempathsunconfined) |
@@ -418,6 +419,26 @@ if dockerNetworkMode == "isolated" {
 inherits the same fix.
 
 **Code:** `runtime/docker/docker.go::Create` line ~152-171
+
+### gVisor netstack ignores in-sandbox iptables rules
+
+**Symptom:** A sandbox created with `--isolation container-enhanced` (gVisor / runsc) and `--network-isolated` appears to apply the deny-by-default rules in its startup log (`network.isolate iptables default-deny applied`), but outbound traffic to non-allowlisted destinations is **not** blocked. Egress to any IP succeeds.
+
+**Explanation:** gVisor implements its own userspace network stack (the "Sentry"). The `iptables` command inside a runsc sandbox writes rules into a guest-only table that gVisor's netstack does not consult. The host kernel never sees those rules — outbound packets traverse the host veth and exit normally. The Linux netfilter machinery that `entrypoint.py::isolate_network` relies on is bypassed entirely.
+
+This applies to both backends that can load runsc:
+- `docker` with `--isolation container-enhanced`
+- `podman` with `--isolation container-enhanced`
+
+Standard runc (`--isolation container`, `--isolation container-privileged`) is unaffected because the host kernel evaluates iptables in the container's netns. Kata-based isolation modes (`vm`, `vm-enhanced`) are unaffected because the guest Linux kernel inside the VM evaluates iptables exactly like bare metal.
+
+The entrypoint loud-failure fix (`NetworkIsolationError`) catches *some* gVisor failures incidentally — gVisor's iptables emulation rejects `-m set --match-set`, so the ipset-backed allowlist rule fails at container start, taking the sandbox down. That's accidental and brittle: future gVisor versions may accept the rule without enforcing it, putting us back in silent-no-op territory.
+
+**Fix:** Reject the combination at sandbox creation, before the container is built. `runtime.IsolationEnforcesInSandboxIptables(isolation)` returns false for `container-enhanced`; `sandbox/create_instance.go::buildInstanceConfig` checks this when `state.networkMode == "isolated"` and returns an explicit error pointing the user at the working isolation modes.
+
+**Permanent fix:** The redesign in [`docs/design/network-isolation.md`](../design/network-isolation.md) moves enforcement to the host netns, where gVisor's netstack is irrelevant — packets leaving the gVisor sandbox traverse the host veth and hit the host iptables rules like any other backend. Until that lands, the combination is rejected.
+
+**Code:** `runtime/isolation.go::IsolationEnforcesInSandboxIptables`, `sandbox/create_instance.go::buildInstanceConfig`
 
 ### Proxmox LXC seccomp survives `seccomp=unconfined` at the Docker layer
 
