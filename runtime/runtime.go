@@ -86,6 +86,17 @@ type ExecResult struct {
 	ExitCode int
 }
 
+// BackendDescriptor bundles the static facts each backend declares.
+// Returned by Runtime.Descriptor(). Values are compile-time constants per
+// backend (verified by the W11 spike, docs/dev/research/runtime-interface-spike.md).
+type BackendDescriptor struct {
+	Name                      string      // "docker", "podman", "tart", "seatbelt", "containerd"
+	BaseModeName              string      // human label for the backend's default (no-isolation) mode
+	AgentProvisionedByBackend bool        // true when the backend's image/VM ships the agent binary
+	SupportedIsolationModes   []string    // non-default isolation modes this backend can support
+	Capabilities              BackendCaps // feature-set flags
+}
+
 // BackendCaps declares what features a runtime backend supports.
 // Each backend returns its own capabilities via Capabilities().
 type BackendCaps struct {
@@ -176,6 +187,13 @@ type Runtime interface {
 	// an instance fails to start or crashes. The hint is included in error
 	// messages shown to the user.
 	DiagHint(instanceName string) string
+
+	// Descriptor returns a BackendDescriptor with static facts about this backend.
+	// Values are compile-time constants and do not change after construction.
+	// Callers may use Descriptor() instead of calling Name(), BaseModeName(),
+	// AgentProvisionedByBackend(), SupportedIsolationModes(), and Capabilities()
+	// separately; all fields mirror those individual methods exactly.
+	Descriptor() BackendDescriptor
 
 	// Capabilities returns the feature set supported by this backend.
 	// Used by sandbox/create.go to gate features and select backend-specific

@@ -405,6 +405,22 @@ func (r *Runtime) DiagHint(instanceName string) string {
 // Name returns the backend name.
 func (r *Runtime) Name() string { return r.binaryName }
 
+// Descriptor returns a BackendDescriptor with the static facts for this backend.
+func (r *Runtime) Descriptor() runtime.BackendDescriptor {
+	return runtime.BackendDescriptor{
+		Name:                      r.binaryName,
+		BaseModeName:              "container",
+		AgentProvisionedByBackend: true,
+		SupportedIsolationModes:   []string{"container-enhanced", "container-privileged"},
+		Capabilities: runtime.BackendCaps{
+			NetworkIsolation: true,
+			OverlayDirs:      true,
+			CapAdd:           true,
+			HostFilesystem:   false,
+		},
+	}
+}
+
 // Capabilities returns the Docker backend's feature set.
 func (r *Runtime) Capabilities() runtime.BackendCaps {
 	return runtime.BackendCaps{

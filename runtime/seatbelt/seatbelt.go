@@ -80,6 +80,22 @@ func (r *Runtime) Capabilities() runtime.BackendCaps {
 	}
 }
 
+// Descriptor returns a BackendDescriptor with the static facts for this backend.
+func (r *Runtime) Descriptor() runtime.BackendDescriptor {
+	return runtime.BackendDescriptor{
+		Name:                      "seatbelt",
+		BaseModeName:              "process",
+		AgentProvisionedByBackend: false,
+		SupportedIsolationModes:   nil,
+		Capabilities: runtime.BackendCaps{
+			NetworkIsolation: false,
+			OverlayDirs:      false,
+			CapAdd:           false,
+			HostFilesystem:   true,
+		},
+	}
+}
+
 // AgentProvisionedByBackend returns false — seatbelt runs the host's native
 // agent installation, not an npm-installed copy in a container image.
 func (r *Runtime) AgentProvisionedByBackend() bool { return false }

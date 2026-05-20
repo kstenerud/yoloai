@@ -57,6 +57,22 @@ func (r *Runtime) Capabilities() runtime.BackendCaps {
 	}
 }
 
+// Descriptor returns a BackendDescriptor with the static facts for this backend.
+func (r *Runtime) Descriptor() runtime.BackendDescriptor {
+	return runtime.BackendDescriptor{
+		Name:                      "containerd",
+		BaseModeName:              "vm",
+		AgentProvisionedByBackend: true,
+		SupportedIsolationModes:   []string{"vm", "vm-enhanced"},
+		Capabilities: runtime.BackendCaps{
+			NetworkIsolation: true,
+			OverlayDirs:      false,
+			CapAdd:           true,
+			HostFilesystem:   false,
+		},
+	}
+}
+
 // AgentProvisionedByBackend returns true — containerd containers use an npm-installed agent.
 func (r *Runtime) AgentProvisionedByBackend() bool { return true }
 

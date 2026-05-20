@@ -104,6 +104,13 @@ func (m *mockRuntime) Capabilities() runtime.BackendCaps {
 	}
 }
 
+func (m *mockRuntime) Descriptor() runtime.BackendDescriptor {
+	return runtime.BackendDescriptor{
+		Name:         "mock",
+		BaseModeName: "container",
+	}
+}
+
 func TestEnsureSetup_CreatesDirectories(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)

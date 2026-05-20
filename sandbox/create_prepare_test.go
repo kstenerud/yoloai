@@ -373,6 +373,12 @@ func (m *mockDockerRuntime) TmuxSocket(sandboxDir string) string { return "" }
 func (m *mockDockerRuntime) AttachCommand(tmuxSocket string, rows, cols int, term string) []string {
 	return nil
 }
+func (m *mockDockerRuntime) Descriptor() runtime.BackendDescriptor {
+	return runtime.BackendDescriptor{
+		Name:         "mock",
+		BaseModeName: "container",
+	}
+}
 
 // mockTartRuntime implements both runtime.Runtime and runtime.WorkDirSetup (Tart-like).
 type mockTartRuntime struct {

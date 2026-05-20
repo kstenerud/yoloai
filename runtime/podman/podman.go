@@ -174,6 +174,23 @@ func defaultMachineSocketDiscovery() (string, error) {
 // BaseModeName returns "container" — Podman's default isolation mode.
 func (r *Runtime) BaseModeName() string { return "container" }
 
+// Descriptor returns a BackendDescriptor with the static facts for this backend.
+// Overrides the embedded docker.Runtime.Descriptor() to use "podman" as the name.
+func (r *Runtime) Descriptor() runtime.BackendDescriptor {
+	return runtime.BackendDescriptor{
+		Name:                      "podman",
+		BaseModeName:              "container",
+		AgentProvisionedByBackend: true,
+		SupportedIsolationModes:   []string{"container-enhanced", "container-privileged"},
+		Capabilities: runtime.BackendCaps{
+			NetworkIsolation: true,
+			OverlayDirs:      true,
+			CapAdd:           true,
+			HostFilesystem:   false,
+		},
+	}
+}
+
 // SupportedIsolationModes returns the isolation modes Podman can potentially support.
 func (r *Runtime) SupportedIsolationModes() []string {
 	return []string{"container-enhanced", "container-privileged"}

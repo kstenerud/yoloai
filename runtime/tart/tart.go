@@ -89,6 +89,22 @@ func (r *Runtime) Capabilities() runtime.BackendCaps {
 	}
 }
 
+// Descriptor returns a BackendDescriptor with the static facts for this backend.
+func (r *Runtime) Descriptor() runtime.BackendDescriptor {
+	return runtime.BackendDescriptor{
+		Name:                      "tart",
+		BaseModeName:              "vm",
+		AgentProvisionedByBackend: true,
+		SupportedIsolationModes:   nil,
+		Capabilities: runtime.BackendCaps{
+			NetworkIsolation: false,
+			OverlayDirs:      false,
+			CapAdd:           false,
+			HostFilesystem:   false,
+		},
+	}
+}
+
 // AgentProvisionedByBackend returns true — Tart VMs use an npm-installed agent.
 func (r *Runtime) AgentProvisionedByBackend() bool { return true }
 
