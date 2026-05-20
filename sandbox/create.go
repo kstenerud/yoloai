@@ -521,13 +521,12 @@ func (m *Manager) resolveRuntimeBase(ctx context.Context, opts *CreateOptions, p
 	if len(opts.Runtimes) == 0 {
 		return nil
 	}
-	if m.backend != "tart" {
-		return NewUsageError("--runtime flag only supported on tart backend (macOS VMs)")
-	}
-
+	// Backend dispatch by type assertion, not by string comparison on m.backend
+	// (W10 of the architecture remediation plan: avoid backend-name leaks in
+	// sandbox/). If the active runtime isn't Tart, --runtime is meaningless.
 	tartRuntime, ok := m.runtime.(*tart.Runtime)
 	if !ok {
-		return fmt.Errorf("internal error: tart backend type mismatch")
+		return NewUsageError("--runtime flag only supported on tart backend (macOS VMs)")
 	}
 
 	resolved, err := tart.ResolveRuntimeVersions(opts.Runtimes)

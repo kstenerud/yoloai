@@ -363,6 +363,20 @@ func (r *Runtime) InteractiveExec(ctx context.Context, name string, cmd []string
 	return c.Run()
 }
 
+// StdioExec runs cmd inside the container with stdio connected to the
+// caller-supplied reader and writers. Implements runtime.StdioExecer; used by
+// the MCP proxy to bridge stdio between an outer agent and an inner MCP server
+// running in the sandbox.
+func (r *Runtime) StdioExec(ctx context.Context, name string, cmd []string, stdin io.Reader, stdout, stderr io.Writer) error {
+	args := []string{"exec", "-i", name}
+	args = append(args, cmd...)
+	c := exec.CommandContext(ctx, r.binaryName, args...) //nolint:gosec // G204: name and cmd are from validated sandbox state
+	c.Stdin = stdin
+	c.Stdout = stdout
+	c.Stderr = stderr
+	return c.Run()
+}
+
 // Close releases the Docker client connection.
 func (r *Runtime) Close() error {
 	return r.client.Close()

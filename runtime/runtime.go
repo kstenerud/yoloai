@@ -242,3 +242,15 @@ type WorkDirSetup interface {
 	// to local VM storage and create git baseline. Called during Create/Reset.
 	SetupWorkDirInVM(virtiofsStagingPath, vmLocalPath string) []string
 }
+
+// StdioExecer is an optional interface implemented by backends that can run a
+// child process inside a sandbox with stdio piped to caller-provided
+// reader/writers. Used by the MCP proxy to bridge an outer agent's stdio to an
+// inner MCP server running inside the sandbox. Returns when the child exits.
+//
+// Backends that don't implement this (e.g. Tart, Seatbelt — which don't
+// natively support docker-style "exec -i with stdin pipe") cause the MCP proxy
+// to fail with a clear error pointing at the backend.
+type StdioExecer interface {
+	StdioExec(ctx context.Context, name string, cmd []string, stdin io.Reader, stdout, stderr io.Writer) error
+}

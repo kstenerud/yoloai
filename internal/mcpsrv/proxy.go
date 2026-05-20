@@ -8,11 +8,11 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"strconv"
 	"strings"
 	"sync"
 
+	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/sandbox"
 )
 
@@ -219,25 +219,33 @@ var injectedToolDefs = []map[string]any{
 }
 
 func (p *ProxyServer) run(ctx context.Context, in io.Reader, out io.Writer, _ *sandbox.Meta, innerCmd []string) error {
-	// Start inner MCP server via docker exec
+	// Run the inner MCP server inside the sandbox via the backend's StdioExecer.
+	// Backends that don't implement it (Tart, Seatbelt) are not supported by the
+	// MCP proxy — fail with a clear error. W10 of the architecture remediation
+	// plan: no hardcoded "docker" string here.
+	execer, ok := p.mgr.Runtime().(runtime.StdioExecer)
+	if !ok {
+		return fmt.Errorf("MCP proxy: runtime backend %T does not support stdio exec", p.mgr.Runtime())
+	}
 	containerName := sandbox.InstanceName(p.sandboxName)
-	dockerArgs := append([]string{"exec", "-i", containerName}, innerCmd...)
-	cmd := exec.CommandContext(ctx, "docker", dockerArgs...) //nolint:gosec // G204: innerCmd is user-provided
 
-	innerIn, err := cmd.StdinPipe()
-	if err != nil {
-		return fmt.Errorf("get inner stdin pipe: %w", err)
-	}
-	innerOut, err := cmd.StdoutPipe()
-	if err != nil {
-		return fmt.Errorf("get inner stdout pipe: %w", err)
-	}
-	cmd.Stderr = os.Stderr
+	innerInRead, innerIn := io.Pipe()
+	innerOut, innerOutWrite := io.Pipe()
 
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("start inner MCP server in sandbox %q: %w", p.sandboxName, err)
-	}
-	defer cmd.Wait() //nolint:errcheck // best-effort
+	// Run the inner exec in a goroutine; on exit, close the pipes so the
+	// outer reader and writer loops below see EOF and unwind.
+	execDone := make(chan error, 1)
+	go func() {
+		err := execer.StdioExec(ctx, containerName, innerCmd, innerInRead, innerOutWrite, os.Stderr)
+		_ = innerOutWrite.Close()
+		_ = innerInRead.Close()
+		execDone <- err
+	}()
+	defer func() {
+		_ = innerIn.Close()
+		_ = innerOut.Close()
+		<-execDone // wait for goroutine to finish before returning
+	}()
 
 	// localIDs tracks IDs of tool/call requests we handle locally.
 	localIDs := make(map[string]bool)

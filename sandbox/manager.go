@@ -199,6 +199,11 @@ func (m *Manager) Inspect(ctx context.Context, name string) (*Info, error) {
 	return InspectSandbox(ctx, m.runtime, name)
 }
 
+// Runtime returns the active runtime backend. Exposed so callers (e.g. the MCP
+// proxy) can type-assert against optional interfaces like runtime.StdioExecer
+// without going behind Manager's back via shell invocations.
+func (m *Manager) Runtime() runtime.Runtime { return m.runtime }
+
 // Status returns the current lifecycle status of a sandbox.
 func (m *Manager) Status(ctx context.Context, name string) (Status, error) {
 	return DetectStatus(ctx, m.runtime, InstanceName(name), Dir(name))

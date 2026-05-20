@@ -151,7 +151,7 @@ func writeBugReportSandboxDetail(ctx context.Context, w io.Writer, rt runtime.Ru
 	}
 
 	// Container log
-	writeContainerLog(w, name, resolveBackendForSandbox(name))
+	writeContainerLog(ctx, w, rt, name)
 
 	fmt.Fprintln(w, "</details>") //nolint:errcheck
 	fmt.Fprintln(w)               //nolint:errcheck
@@ -202,29 +202,20 @@ func writePlainFileSection(w io.Writer, label, path string) {
 	fmt.Fprintln(w)            //nolint:errcheck
 }
 
-// writeContainerLog fetches container logs via the backend CLI.
-func writeContainerLog(w io.Writer, name, backendName string) {
+// writeContainerLog fetches container logs via Runtime.Logs. Replaces the
+// previous backend-name switch (W10 of the architecture remediation plan).
+const containerLogTailLines = 1000
+
+func writeContainerLog(ctx context.Context, w io.Writer, rt runtime.Runtime, name string) {
 	fmt.Fprintln(w, "**Container log:**") //nolint:errcheck
 	fmt.Fprintln(w)                       //nolint:errcheck
 
-	containerName := sandbox.InstanceName(name)
-	var args []string
-	switch backendName {
-	case "docker":
-		args = []string{"docker", "logs", containerName}
-	case "podman":
-		args = []string{"podman", "logs", containerName}
-	default:
-		fmt.Fprintf(w, "*(not available for %s backend)*\n\n", backendName) //nolint:errcheck
-		return
-	}
-
-	out, err := exec.Command(args[0], args[1:]...).CombinedOutput() //nolint:gosec // args[0] is trusted ("docker"/"podman")
-	fmt.Fprintln(w, "```")                                          //nolint:errcheck
-	if err != nil && len(out) == 0 {
-		fmt.Fprintf(w, "*(error: %s)*\n", err) //nolint:errcheck
+	logs := rt.Logs(ctx, sandbox.InstanceName(name), containerLogTailLines)
+	fmt.Fprintln(w, "```") //nolint:errcheck
+	if logs == "" {
+		fmt.Fprintln(w, "*(no logs available)*") //nolint:errcheck
 	} else {
-		fmt.Fprintf(w, "%s", out) //nolint:errcheck
+		fmt.Fprintln(w, logs) //nolint:errcheck
 	}
 	fmt.Fprintln(w, "```") //nolint:errcheck
 	fmt.Fprintln(w)        //nolint:errcheck
