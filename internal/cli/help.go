@@ -139,6 +139,7 @@ func unknownTopicError(topic string) error {
 // definitions so it stays in sync with the code.
 func generateAgentsTopic() string {
 	var b strings.Builder
+	realAgents := agent.RealAgents()
 
 	b.WriteString("AGENTS AND MODELS\n")
 	b.WriteString("\n")
@@ -149,39 +150,7 @@ func generateAgentsTopic() string {
 	b.WriteString("\n")
 	b.WriteString("AVAILABLE AGENTS\n")
 	b.WriteString("\n")
-
-	realAgents := agent.RealAgents()
-
-	// Find the longest agent name for alignment.
-	maxName := 0
-	for _, name := range realAgents {
-		if len(name) > maxName {
-			maxName = len(name)
-		}
-	}
-
-	for _, name := range realAgents {
-		def := agent.GetAgent(name)
-		suffix := ""
-		if name == "claude" {
-			suffix = " (default)"
-		}
-		label := name + suffix
-
-		keys := ""
-		if len(def.APIKeyEnvVars) > 0 {
-			keys = "Requires " + def.APIKeyEnvVars[0]
-		}
-
-		// Pad to align descriptions: "  name (default)   Description   Requires KEY"
-		// Use maxName + len(" (default)") as the label column width.
-		labelWidth := maxName + len(" (default)")
-		fmt.Fprintf(&b, "  %-*s  %s", labelWidth, label, def.Description)
-		if keys != "" {
-			fmt.Fprintf(&b, "\n  %-*s  %s", labelWidth, "", keys)
-		}
-		b.WriteString("\n")
-	}
+	writeAgentList(&b, realAgents)
 
 	b.WriteString("\n")
 	b.WriteString("  Agent details:   yoloai system agents <name>\n")
@@ -190,37 +159,7 @@ func generateAgentsTopic() string {
 	b.WriteString("\n")
 	b.WriteString("  Each agent supports shorthand model aliases with --model.\n")
 	b.WriteString("  Run 'yoloai system agents <name>' for the full list.\n")
-
-	// Show aliases for agents that have them, grouped by agent.
-	for _, name := range realAgents {
-		def := agent.GetAgent(name)
-		if len(def.ModelAliases) == 0 {
-			continue
-		}
-
-		// Title-case the agent name.
-		title := strings.ToUpper(name[:1]) + name[1:]
-		fmt.Fprintf(&b, "\n  %s:\n", title)
-
-		// Sort aliases for stable output.
-		aliases := make([]string, 0, len(def.ModelAliases))
-		for alias := range def.ModelAliases {
-			aliases = append(aliases, alias)
-		}
-		sort.Strings(aliases)
-
-		// Find max alias length for alignment.
-		maxAlias := 0
-		for _, alias := range aliases {
-			if len(alias) > maxAlias {
-				maxAlias = len(alias)
-			}
-		}
-
-		for _, alias := range aliases {
-			fmt.Fprintf(&b, "     %-*s → %s\n", maxAlias, alias, def.ModelAliases[alias])
-		}
-	}
+	writeAgentAliases(&b, realAgents)
 
 	b.WriteString("\n")
 	b.WriteString("  Set a default model:\n")
@@ -237,6 +176,62 @@ func generateAgentsTopic() string {
 	b.WriteString("More info: https://github.com/kstenerud/yoloai/blob/main/docs/GUIDE.md#agents-and-models\n")
 
 	return b.String()
+}
+
+// writeAgentList writes the AVAILABLE AGENTS section to b.
+func writeAgentList(b *strings.Builder, realAgents []string) {
+	maxName := 0
+	for _, name := range realAgents {
+		if len(name) > maxName {
+			maxName = len(name)
+		}
+	}
+	labelWidth := maxName + len(" (default)")
+
+	for _, name := range realAgents {
+		def := agent.GetAgent(name)
+		label := name
+		if name == "claude" {
+			label = name + " (default)"
+		}
+		keys := ""
+		if len(def.APIKeyEnvVars) > 0 {
+			keys = "Requires " + def.APIKeyEnvVars[0]
+		}
+		fmt.Fprintf(b, "  %-*s  %s", labelWidth, label, def.Description)
+		if keys != "" {
+			fmt.Fprintf(b, "\n  %-*s  %s", labelWidth, "", keys)
+		}
+		b.WriteString("\n")
+	}
+}
+
+// writeAgentAliases writes the per-agent model alias tables to b.
+func writeAgentAliases(b *strings.Builder, realAgents []string) {
+	for _, name := range realAgents {
+		def := agent.GetAgent(name)
+		if len(def.ModelAliases) == 0 {
+			continue
+		}
+		title := strings.ToUpper(name[:1]) + name[1:]
+		fmt.Fprintf(b, "\n  %s:\n", title)
+
+		aliases := make([]string, 0, len(def.ModelAliases))
+		for alias := range def.ModelAliases {
+			aliases = append(aliases, alias)
+		}
+		sort.Strings(aliases)
+
+		maxAlias := 0
+		for _, alias := range aliases {
+			if len(alias) > maxAlias {
+				maxAlias = len(alias)
+			}
+		}
+		for _, alias := range aliases {
+			fmt.Fprintf(b, "     %-*s → %s\n", maxAlias, alias, def.ModelAliases[alias])
+		}
+	}
 }
 
 // levenshtein computes the Levenshtein distance between two strings.

@@ -109,36 +109,48 @@ func runDestroyCmd(cmd *cobra.Command, args []string) error {
 // resolveDestroyNames resolves sandbox names from args or --all, returning nil if already handled.
 func resolveDestroyNames(cmd *cobra.Command, ctx context.Context, rt runtime.Runtime, args []string, all bool) ([]string, error) {
 	if all {
-		infos, err := sandbox.ListSandboxes(ctx, rt)
-		if err != nil {
-			return nil, err
-		}
-		if len(infos) == 0 {
-			if jsonEnabled(cmd) {
-				return nil, writeJSON(cmd.OutOrStdout(), []struct{}{})
-			}
-			_, err = fmt.Fprintln(cmd.OutOrStdout(), "No sandboxes to destroy")
-			return nil, err
-		}
-		names := make([]string, 0, len(infos))
-		for _, info := range infos {
-			names = append(names, info.Meta.Name)
-		}
-		return names, nil
+		return resolveDestroyAll(cmd, ctx, rt)
 	}
-
 	if len(args) == 0 {
-		envName := os.Getenv(EnvSandboxName)
-		if envName == "" {
-			return nil, sandbox.NewUsageError("at least one sandbox name is required (or use --all or set YOLOAI_SANDBOX)")
-		}
-		if err := sandbox.ValidateName(envName); err != nil {
-			return nil, err
-		}
-		return []string{envName}, nil
+		return resolveDestroyFromEnv()
 	}
+	return resolveDestroyArgs(ctx, rt, args)
+}
 
-	// Expand wildcards in args
+// resolveDestroyAll resolves names when --all is set, returning nil if none exist.
+func resolveDestroyAll(cmd *cobra.Command, ctx context.Context, rt runtime.Runtime) ([]string, error) {
+	infos, err := sandbox.ListSandboxes(ctx, rt)
+	if err != nil {
+		return nil, err
+	}
+	if len(infos) == 0 {
+		if jsonEnabled(cmd) {
+			return nil, writeJSON(cmd.OutOrStdout(), []struct{}{})
+		}
+		_, err = fmt.Fprintln(cmd.OutOrStdout(), "No sandboxes to destroy")
+		return nil, err
+	}
+	names := make([]string, 0, len(infos))
+	for _, info := range infos {
+		names = append(names, info.Meta.Name)
+	}
+	return names, nil
+}
+
+// resolveDestroyFromEnv resolves the sandbox name from the environment when no args are given.
+func resolveDestroyFromEnv() ([]string, error) {
+	envName := os.Getenv(EnvSandboxName)
+	if envName == "" {
+		return nil, sandbox.NewUsageError("at least one sandbox name is required (or use --all or set YOLOAI_SANDBOX)")
+	}
+	if err := sandbox.ValidateName(envName); err != nil {
+		return nil, err
+	}
+	return []string{envName}, nil
+}
+
+// resolveDestroyArgs expands wildcards and validates each named sandbox arg.
+func resolveDestroyArgs(ctx context.Context, rt runtime.Runtime, args []string) ([]string, error) {
 	var names []string
 	for _, arg := range args {
 		if hasWildcard(arg) {
@@ -147,15 +159,15 @@ func resolveDestroyNames(cmd *cobra.Command, ctx context.Context, rt runtime.Run
 				return nil, err
 			}
 			names = append(names, expanded...)
-		} else {
-			if err := sandbox.ValidateName(arg); err != nil {
-				return nil, err
-			}
-			if _, err := sandbox.RequireSandboxDir(arg); err != nil {
-				return nil, fmt.Errorf("%s: %w", arg, err)
-			}
-			names = append(names, arg)
+			continue
 		}
+		if err := sandbox.ValidateName(arg); err != nil {
+			return nil, err
+		}
+		if _, err := sandbox.RequireSandboxDir(arg); err != nil {
+			return nil, fmt.Errorf("%s: %w", arg, err)
+		}
+		names = append(names, arg)
 	}
 	return names, nil
 }

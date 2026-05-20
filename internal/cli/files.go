@@ -326,38 +326,38 @@ func expandHostGlobs(args []string) ([]string, error) {
 	var result []string
 
 	for _, arg := range args {
-		if _, err := os.Stat(arg); err == nil { //nolint:gosec // G703: path is CLI-supplied by the user
-			// Literal path exists — use it directly
-			if !seen[arg] {
-				seen[arg] = true
-				result = append(result, arg)
-			}
-			continue
+		expanded, err := expandHostGlob(arg)
+		if err != nil {
+			return nil, err
 		}
-
-		if hasGlobMeta(arg) {
-			matches, err := filepath.Glob(arg)
-			if err != nil {
-				return nil, fmt.Errorf("invalid glob pattern %s: %w", arg, err)
+		for _, p := range expanded {
+			if !seen[p] {
+				seen[p] = true
+				result = append(result, p)
 			}
-			if len(matches) == 0 {
-				return nil, fmt.Errorf("no files match pattern: %s", arg)
-			}
-			for _, m := range matches {
-				if !seen[m] {
-					seen[m] = true
-					result = append(result, m)
-				}
-			}
-			continue
-		}
-
-		// Not a glob, doesn't exist — pass through for later error handling
-		if !seen[arg] {
-			seen[arg] = true
-			result = append(result, arg)
 		}
 	}
 
 	return result, nil
+}
+
+// expandHostGlob expands a single argument into one or more paths.
+// Returns the literal path if it exists, glob matches if it contains metacharacters,
+// or the original arg (pass-through for later error handling).
+func expandHostGlob(arg string) ([]string, error) {
+	if _, err := os.Stat(arg); err == nil { //nolint:gosec // G703: path is CLI-supplied by the user
+		return []string{arg}, nil
+	}
+	if hasGlobMeta(arg) {
+		matches, err := filepath.Glob(arg)
+		if err != nil {
+			return nil, fmt.Errorf("invalid glob pattern %s: %w", arg, err)
+		}
+		if len(matches) == 0 {
+			return nil, fmt.Errorf("no files match pattern: %s", arg)
+		}
+		return matches, nil
+	}
+	// Not a glob, doesn't exist — pass through for later error handling
+	return []string{arg}, nil
 }

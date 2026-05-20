@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -937,54 +938,14 @@ func exportPatches(cmd *cobra.Command, name string, paths []string, commits []sa
 	out := cmd.OutOrStdout()
 
 	if len(commits) > 0 {
-		backend := resolveBackendForSandbox(name)
-		var patchDir string
-		var files []string
-		err := withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
-			var genErr error
-			patchDir, files, genErr = sandbox.GenerateFormatPatch(ctx, rt, name, paths)
-			return genErr
-		})
-		if err != nil {
+		if err := exportCommitPatches(cmd, name, paths, dir, isJSON, out); err != nil {
 			return err
-		}
-		defer os.RemoveAll(patchDir) //nolint:errcheck
-
-		for _, f := range files {
-			src := filepath.Join(patchDir, f)
-			dst := filepath.Join(dir, f)
-			data, err := os.ReadFile(src) //nolint:gosec // G304: controlled path
-			if err != nil {
-				return fmt.Errorf("read patch %s: %w", f, err)
-			}
-			if err := fileutil.WriteFile(dst, data, 0600); err != nil { //nolint:gosec // G703: dst is under controlled dir
-				return fmt.Errorf("write patch %s: %w", f, err)
-			}
-			if !isJSON {
-				fmt.Fprintf(out, "  %s\n", dst) //nolint:errcheck
-			}
 		}
 	}
 
 	if hasWIP {
-		backend := resolveBackendForSandbox(name)
-		var wipPatch []byte
-		err := withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
-			var genErr error
-			wipPatch, _, genErr = sandbox.GenerateWIPDiff(ctx, rt, name, paths)
-			return genErr
-		})
-		if err != nil {
+		if err := exportWIPDiff(cmd, name, paths, dir, isJSON, out); err != nil {
 			return err
-		}
-		if len(wipPatch) > 0 {
-			dst := filepath.Join(dir, "wip.diff")
-			if err := fileutil.WriteFile(dst, wipPatch, 0600); err != nil {
-				return fmt.Errorf("write wip.diff: %w", err)
-			}
-			if !isJSON {
-				fmt.Fprintf(out, "  %s\n", dst) //nolint:errcheck
-			}
 		}
 	}
 
@@ -1001,6 +962,63 @@ func exportPatches(cmd *cobra.Command, name string, paths []string, commits []sa
 	fmt.Fprintln(out, "To apply commits:  git am --3way <patches>/*.patch") //nolint:errcheck
 	fmt.Fprintln(out, "To apply WIP:      git apply wip.diff")              //nolint:errcheck
 
+	return nil
+}
+
+// exportCommitPatches generates format-patch files from sandbox commits and copies them to dir.
+func exportCommitPatches(cmd *cobra.Command, name string, paths []string, dir string, isJSON bool, out io.Writer) error {
+	backend := resolveBackendForSandbox(name)
+	var patchDir string
+	var files []string
+	err := withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
+		var genErr error
+		patchDir, files, genErr = sandbox.GenerateFormatPatch(ctx, rt, name, paths)
+		return genErr
+	})
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(patchDir) //nolint:errcheck
+
+	for _, f := range files {
+		src := filepath.Join(patchDir, f)
+		dst := filepath.Join(dir, f)
+		data, err := os.ReadFile(src) //nolint:gosec // G304: controlled path
+		if err != nil {
+			return fmt.Errorf("read patch %s: %w", f, err)
+		}
+		if err := fileutil.WriteFile(dst, data, 0600); err != nil { //nolint:gosec // G703: dst is under controlled dir
+			return fmt.Errorf("write patch %s: %w", f, err)
+		}
+		if !isJSON {
+			fmt.Fprintf(out, "  %s\n", dst) //nolint:errcheck
+		}
+	}
+	return nil
+}
+
+// exportWIPDiff generates a wip.diff from uncommitted changes and writes it to dir.
+func exportWIPDiff(cmd *cobra.Command, name string, paths []string, dir string, isJSON bool, out io.Writer) error {
+	backend := resolveBackendForSandbox(name)
+	var wipPatch []byte
+	err := withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
+		var genErr error
+		wipPatch, _, genErr = sandbox.GenerateWIPDiff(ctx, rt, name, paths)
+		return genErr
+	})
+	if err != nil {
+		return err
+	}
+	if len(wipPatch) == 0 {
+		return nil
+	}
+	dst := filepath.Join(dir, "wip.diff")
+	if err := fileutil.WriteFile(dst, wipPatch, 0600); err != nil {
+		return fmt.Errorf("write wip.diff: %w", err)
+	}
+	if !isJSON {
+		fmt.Fprintf(out, "  %s\n", dst) //nolint:errcheck
+	}
 	return nil
 }
 

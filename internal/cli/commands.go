@@ -537,62 +537,16 @@ func waitForTmux(ctx context.Context, rt runtime.Runtime, containerName, sandbox
 	deadline := time.Now().Add(timeout)
 	var lastExecErr error
 	for time.Now().Before(deadline) {
-		// Check if context was cancelled (e.g. Ctrl+C)
-		if ctx.Err() != nil {
-			return ctx.Err()
+		ready, err := pollTmuxReady(ctx, rt, containerName, jsonlPath, tmuxSocket, user)
+		if err != nil {
+			return err
 		}
-
-		// Check if container is still running
-		info, err := rt.Inspect(ctx, containerName)
-		if err != nil || !info.Running {
-			return fmt.Errorf("container %s is not running", containerName)
-		}
-
-		// Primary: check sandbox.jsonl for agent_launch or agent_not_found.
-		// agent_launch is written by launch_agent() after lifecycle commands
-		// finish, so attaching at this point means the user sees the agent
-		// (or the "not found" error) immediately.
-		// When sandbox.jsonl is readable, skip the exec fallback: the tmux
-		// session is created before lifecycle commands run, so has-session
-		// succeeds long before the agent is actually launched.
-		if data, readErr := os.ReadFile(jsonlPath); readErr == nil { //nolint:gosec // G304: path from trusted sandbox dir
-			if bytes.Contains(data, []byte(`"sandbox.agent_launch"`)) ||
-				bytes.Contains(data, []byte(`"sandbox.agent_not_found"`)) {
-				return nil
-			}
-			// Log exists but agent not yet launched — skip exec fallback and
-			// keep polling.
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-time.After(500 * time.Millisecond):
-			}
-			continue
-		}
-
-		// Fallback: docker exec tmux has-session.
-		// Only reached when sandbox.jsonl is unreadable (old container images
-		// that predate structured logging). The tmux session existing is
-		// sufficient in that case because those images launch the agent
-		// synchronously before writing any log.
-		tmuxArgs := []string{"tmux"}
-		if tmuxSocket != "" {
-			tmuxArgs = append(tmuxArgs, "-S", tmuxSocket)
-		}
-		tmuxArgs = append(tmuxArgs, "has-session", "-t", "main")
-		_, err = rt.Exec(ctx, containerName, tmuxArgs, user)
-		if err == nil {
+		if ready {
 			return nil
 		}
 		lastExecErr = err
-		slog.Debug("waitForTmux: exec check failed", "event", "sandbox.wait_tmux.exec_fail", //nolint:gosec // G706: slog uses structured logging, not vulnerable to log injection
-			"container", containerName, "error", err)
-
-		// Context-aware sleep
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(500 * time.Millisecond):
+		if err := sleepOrCancel(ctx, 500*time.Millisecond); err != nil {
+			return err
 		}
 	}
 	slog.Debug("waitForTmux: timed out", "event", "sandbox.wait_tmux.timeout", //nolint:gosec // G706: slog uses structured logging, not vulnerable to log injection
@@ -602,6 +556,68 @@ func waitForTmux(ctx context.Context, rt runtime.Runtime, containerName, sandbox
 		return fmt.Errorf("tmux session not ready after %s\n\nContainer logs:\n%s", timeout, logs)
 	}
 	return fmt.Errorf("tmux session not ready after %s", timeout)
+}
+
+// pollTmuxReady performs one readiness check cycle. Returns (true, nil) when ready,
+// (false, nil) to keep polling, or (false, err) on a hard error.
+func pollTmuxReady(ctx context.Context, rt runtime.Runtime, containerName, jsonlPath, tmuxSocket, user string) (bool, error) {
+	if ctx.Err() != nil {
+		return false, ctx.Err()
+	}
+
+	info, err := rt.Inspect(ctx, containerName)
+	if err != nil || !info.Running {
+		return false, fmt.Errorf("container %s is not running", containerName)
+	}
+
+	// Primary: check sandbox.jsonl for agent_launch or agent_not_found.
+	// agent_launch is written by launch_agent() after lifecycle commands
+	// finish, so attaching at this point means the user sees the agent
+	// (or the "not found" error) immediately.
+	// When sandbox.jsonl is readable, skip the exec fallback: the tmux
+	// session is created before lifecycle commands run, so has-session
+	// succeeds long before the agent is actually launched.
+	if data, readErr := os.ReadFile(jsonlPath); readErr == nil { //nolint:gosec // G304: path from trusted sandbox dir
+		if bytes.Contains(data, []byte(`"sandbox.agent_launch"`)) ||
+			bytes.Contains(data, []byte(`"sandbox.agent_not_found"`)) {
+			return true, nil
+		}
+		// Log exists but agent not yet launched — signal keep polling.
+		return false, nil
+	}
+
+	// Fallback: docker exec tmux has-session.
+	// Only reached when sandbox.jsonl is unreadable (old container images
+	// that predate structured logging). The tmux session existing is
+	// sufficient in that case because those images launch the agent
+	// synchronously before writing any log.
+	tmuxArgs := buildTmuxHasSessionArgs(tmuxSocket)
+	_, execErr := rt.Exec(ctx, containerName, tmuxArgs, user)
+	if execErr == nil {
+		return true, nil
+	}
+	slog.Debug("waitForTmux: exec check failed", "event", "sandbox.wait_tmux.exec_fail", //nolint:gosec // G706: slog uses structured logging, not vulnerable to log injection
+		"container", containerName, "error", execErr)
+	return false, nil
+}
+
+// buildTmuxHasSessionArgs constructs the tmux has-session argument list.
+func buildTmuxHasSessionArgs(tmuxSocket string) []string {
+	args := []string{"tmux"}
+	if tmuxSocket != "" {
+		args = append(args, "-S", tmuxSocket)
+	}
+	return append(args, "has-session", "-t", "main")
+}
+
+// sleepOrCancel waits for the given duration or returns ctx.Err() if cancelled.
+func sleepOrCancel(ctx context.Context, d time.Duration) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(d):
+		return nil
+	}
 }
 
 // setTerminalTitle sets the terminal title for the host terminal.

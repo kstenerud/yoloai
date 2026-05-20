@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"regexp"
 	"strings"
@@ -369,57 +370,80 @@ func diffLog(cmd *cobra.Command, name string, stat bool) error {
 	tagsByCommit := buildTagsByCommit(tags)
 
 	if stat {
-		backend := resolveBackendForSandbox(name)
-		var commits []sandbox.CommitInfoWithStat
-		err := withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
-			var listErr error
-			commits, listErr = sandbox.ListCommitsWithStats(ctx, rt, name)
-			return listErr
-		})
-		if err != nil {
+		if err := diffLogWithStat(cmd, name, out, tagsByCommit); err != nil {
 			return err
-		}
-		if len(commits) == 0 {
-			_, err = fmt.Fprintln(out, "No commits beyond baseline")
-			return err
-		}
-		for i, c := range commits {
-			line := fmt.Sprintf("%3d  %.12s  %s", i+1, c.SHA, c.Subject)
-			if names := tagsByCommit[strings.ToLower(c.SHA)]; len(names) > 0 {
-				line += "  [tag: " + strings.Join(names, ", ") + "]"
-			}
-			fmt.Fprintln(out, line) //nolint:errcheck
-			if c.Stat != "" {
-				for _, statLine := range strings.Split(c.Stat, "\n") {
-					fmt.Fprintf(out, "     %s\n", statLine) //nolint:errcheck
-				}
-			}
 		}
 	} else {
-		backend := resolveBackendForSandbox(name)
-		var commits []sandbox.CommitInfo
-		err := withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
-			var listErr error
-			commits, listErr = sandbox.ListCommitsBeyondBaseline(ctx, rt, name)
-			return listErr
-		})
-		if err != nil {
+		if err := diffLogBasic(cmd, name, out, tagsByCommit); err != nil {
 			return err
-		}
-		if len(commits) == 0 {
-			_, err = fmt.Fprintln(out, "No commits beyond baseline")
-			return err
-		}
-		for i, c := range commits {
-			line := fmt.Sprintf("%3d  %.12s  %s", i+1, c.SHA, c.Subject)
-			if names := tagsByCommit[strings.ToLower(c.SHA)]; len(names) > 0 {
-				line += "  [tag: " + strings.Join(names, ", ") + "]"
-			}
-			fmt.Fprintln(out, line) //nolint:errcheck
 		}
 	}
 
-	// Check for uncommitted changes
+	diffLogWIP(cmd, name, out)
+	return nil
+}
+
+// diffLogWithStat prints commits with file-change statistics.
+func diffLogWithStat(cmd *cobra.Command, name string, out io.Writer, tagsByCommit map[string][]string) error {
+	backend := resolveBackendForSandbox(name)
+	var commits []sandbox.CommitInfoWithStat
+	err := withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
+		var listErr error
+		commits, listErr = sandbox.ListCommitsWithStats(ctx, rt, name)
+		return listErr
+	})
+	if err != nil {
+		return err
+	}
+	if len(commits) == 0 {
+		_, err = fmt.Fprintln(out, "No commits beyond baseline")
+		return err
+	}
+	for i, c := range commits {
+		line := formatCommitLine(i+1, c.SHA, c.Subject, tagsByCommit)
+		fmt.Fprintln(out, line) //nolint:errcheck
+		if c.Stat != "" {
+			for _, statLine := range strings.Split(c.Stat, "\n") {
+				fmt.Fprintf(out, "     %s\n", statLine) //nolint:errcheck
+			}
+		}
+	}
+	return nil
+}
+
+// diffLogBasic prints commits without statistics.
+func diffLogBasic(cmd *cobra.Command, name string, out io.Writer, tagsByCommit map[string][]string) error {
+	backend := resolveBackendForSandbox(name)
+	var commits []sandbox.CommitInfo
+	err := withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
+		var listErr error
+		commits, listErr = sandbox.ListCommitsBeyondBaseline(ctx, rt, name)
+		return listErr
+	})
+	if err != nil {
+		return err
+	}
+	if len(commits) == 0 {
+		_, err = fmt.Fprintln(out, "No commits beyond baseline")
+		return err
+	}
+	for i, c := range commits {
+		fmt.Fprintln(out, formatCommitLine(i+1, c.SHA, c.Subject, tagsByCommit)) //nolint:errcheck
+	}
+	return nil
+}
+
+// formatCommitLine formats a single commit log line with optional tag annotation.
+func formatCommitLine(n int, sha, subject string, tagsByCommit map[string][]string) string {
+	line := fmt.Sprintf("%3d  %.12s  %s", n, sha, subject)
+	if names := tagsByCommit[strings.ToLower(sha)]; len(names) > 0 {
+		line += "  [tag: " + strings.Join(names, ", ") + "]"
+	}
+	return line
+}
+
+// diffLogWIP appends an uncommitted-changes indicator if WIP is present (best-effort).
+func diffLogWIP(cmd *cobra.Command, name string, out io.Writer) {
 	backend := resolveBackendForSandbox(name)
 	var hasWIP bool
 	err := withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
@@ -430,8 +454,6 @@ func diffLog(cmd *cobra.Command, name string, stat bool) error {
 	if err == nil && hasWIP {
 		fmt.Fprintln(out, "  *  (uncommitted changes)") //nolint:errcheck
 	}
-
-	return nil
 }
 
 // diffRef shows the diff for a specific commit or range.

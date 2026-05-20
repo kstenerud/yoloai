@@ -48,86 +48,90 @@ Examples:
   yoloai system runtime add ios:26.4 tvos:26.1
   yoloai system runtime add ios tvos watchos`,
 		Args: cobra.MinimumNArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			// Check macOS
-			if runtime.GOOS != "darwin" {
-				return sandbox.NewUsageError("yoloai system runtime commands are only available on macOS")
-			}
-
-			// Check Tart backend
-			ctx := cmd.Context()
-			available, note := checkBackend(ctx, "tart")
-			if !available {
-				return sandbox.NewUsageError("Tart backend not available: %s\n\nInstall Tart: brew install cirruslabs/cli/tart", note)
-			}
-
-			// Get Tart runtime
-			rt, err := newRuntime(ctx, "tart")
-			if err != nil {
-				return fmt.Errorf("create tart runtime: %w", err)
-			}
-			defer rt.Close() //nolint:errcheck
-
-			tartRuntime, ok := rt.(*tart.Runtime)
-			if !ok {
-				return fmt.Errorf("internal error: tart backend type mismatch")
-			}
-
-			// Resolve runtime versions
-			fmt.Fprintf(cmd.OutOrStdout(), "\nResolving runtime versions...\n") //nolint:errcheck
-			resolved, err := tart.ResolveRuntimeVersions(args)
-			if err != nil {
-				return fmt.Errorf("resolve runtimes: %w", err)
-			}
-
-			// Show what was resolved
-			for i, rt := range resolved {
-				// Check if version was explicitly specified or is "latest"
-				inputParts := strings.SplitN(args[i], ":", 2)
-				platformCap := strings.ToUpper(rt.Platform[:1]) + rt.Platform[1:]
-				if len(inputParts) == 1 || inputParts[1] == "" || inputParts[1] == "latest" {
-					fmt.Fprintf(cmd.OutOrStdout(), "  %s (latest) → %s %s\n", //nolint:errcheck
-						rt.Platform, platformCap, rt.Version)
-				} else {
-					fmt.Fprintf(cmd.OutOrStdout(), "  %s:%s → %s %s\n", //nolint:errcheck
-						rt.Platform, rt.Version, platformCap, rt.Version)
-				}
-			}
-
-			// Generate cache key and base name
-			cacheKey := tart.GenerateCacheKey(resolved)
-			baseName := "yoloai-base-" + cacheKey
-
-			// Check if base already exists
-			exists, err := tartRuntime.BaseExists(ctx, baseName)
-			if err != nil {
-				return fmt.Errorf("check base: %w", err)
-			}
-			if exists {
-				return sandbox.NewUsageError("Runtime base '%s' already exists.\n\nUse 'yoloai system runtime list' to see all bases.", baseName)
-			}
-
-			// Create the base
-			fmt.Fprintf(cmd.OutOrStdout(), "\nCreating runtime base: %s\n\n", baseName) //nolint:errcheck
-
-			// Acquire lock (blocks if another process creating)
-			release, err := tart.AcquireBaseLock(baseName)
-			if err != nil {
-				return fmt.Errorf("acquire base lock: %w", err)
-			}
-			defer release()
-
-			// Create base with output streaming to stdout (not stderr)
-			if err := tartRuntime.CreateBase(ctx, baseName, resolved); err != nil {
-				return fmt.Errorf("create base: %w", err)
-			}
-
-			fmt.Fprintf(cmd.OutOrStdout(), "\nRuntime base created successfully\n") //nolint:errcheck
-			return nil
-		},
+		RunE: runSystemRuntimeAdd,
 	}
 
 	return cmd
+}
+
+// runSystemRuntimeAdd implements the system runtime add command body.
+func runSystemRuntimeAdd(cmd *cobra.Command, args []string) error {
+	if runtime.GOOS != "darwin" {
+		return sandbox.NewUsageError("yoloai system runtime commands are only available on macOS")
+	}
+
+	ctx := cmd.Context()
+	available, note := checkBackend(ctx, "tart")
+	if !available {
+		return sandbox.NewUsageError("Tart backend not available: %s\n\nInstall Tart: brew install cirruslabs/cli/tart", note)
+	}
+
+	tartRuntime, closeRT, err := openTartRuntime(ctx)
+	if err != nil {
+		return err
+	}
+	defer closeRT()
+
+	fmt.Fprintf(cmd.OutOrStdout(), "\nResolving runtime versions...\n") //nolint:errcheck
+	resolved, err := tart.ResolveRuntimeVersions(args)
+	if err != nil {
+		return fmt.Errorf("resolve runtimes: %w", err)
+	}
+
+	printResolvedVersions(cmd, args, resolved)
+
+	cacheKey := tart.GenerateCacheKey(resolved)
+	baseName := "yoloai-base-" + cacheKey
+
+	exists, err := tartRuntime.BaseExists(ctx, baseName)
+	if err != nil {
+		return fmt.Errorf("check base: %w", err)
+	}
+	if exists {
+		return sandbox.NewUsageError("Runtime base '%s' already exists.\n\nUse 'yoloai system runtime list' to see all bases.", baseName)
+	}
+
+	fmt.Fprintf(cmd.OutOrStdout(), "\nCreating runtime base: %s\n\n", baseName) //nolint:errcheck
+
+	release, err := tart.AcquireBaseLock(baseName)
+	if err != nil {
+		return fmt.Errorf("acquire base lock: %w", err)
+	}
+	defer release()
+
+	if err := tartRuntime.CreateBase(ctx, baseName, resolved); err != nil {
+		return fmt.Errorf("create base: %w", err)
+	}
+
+	fmt.Fprintf(cmd.OutOrStdout(), "\nRuntime base created successfully\n") //nolint:errcheck
+	return nil
+}
+
+// printResolvedVersions prints the resolved platform versions to stdout.
+func printResolvedVersions(cmd *cobra.Command, args []string, resolved []tart.RuntimeVersion) {
+	for i, rv := range resolved {
+		inputParts := strings.SplitN(args[i], ":", 2)
+		platformCap := strings.ToUpper(rv.Platform[:1]) + rv.Platform[1:]
+		if len(inputParts) == 1 || inputParts[1] == "" || inputParts[1] == "latest" {
+			fmt.Fprintf(cmd.OutOrStdout(), "  %s (latest) → %s %s\n", rv.Platform, platformCap, rv.Version) //nolint:errcheck
+		} else {
+			fmt.Fprintf(cmd.OutOrStdout(), "  %s:%s → %s %s\n", rv.Platform, rv.Version, platformCap, rv.Version) //nolint:errcheck
+		}
+	}
+}
+
+// openTartRuntime opens the tart backend and returns the typed runtime and a close func.
+func openTartRuntime(ctx context.Context) (*tart.Runtime, func(), error) {
+	rt, err := newRuntime(ctx, "tart")
+	if err != nil {
+		return nil, nil, fmt.Errorf("create tart runtime: %w", err)
+	}
+	tartRuntime, ok := rt.(*tart.Runtime)
+	if !ok {
+		_ = rt.Close()
+		return nil, nil, fmt.Errorf("internal error: tart backend type mismatch")
+	}
+	return tartRuntime, func() { _ = rt.Close() }, nil
 }
 
 func newSystemRuntimeListCmd() *cobra.Command {
@@ -160,16 +164,11 @@ func runSystemRuntimeList(cmd *cobra.Command, args []string) error {
 		return sandbox.NewUsageError("Tart backend not available: %s\n\nInstall Tart: brew install cirruslabs/cli/tart", note)
 	}
 
-	rt, err := newRuntime(ctx, "tart")
+	tartRuntime, closeRT, err := openTartRuntime(ctx)
 	if err != nil {
-		return fmt.Errorf("create tart runtime: %w", err)
+		return err
 	}
-	defer rt.Close() //nolint:errcheck
-
-	tartRuntime, ok := rt.(*tart.Runtime)
-	if !ok {
-		return fmt.Errorf("internal error: tart backend type mismatch")
-	}
+	defer closeRT()
 
 	bases, err := listRuntimeBases(ctx, tartRuntime)
 	if err != nil {
@@ -238,7 +237,12 @@ func printRuntimeBaseList(cmd *cobra.Command, bases []runtimeBase, availableRunt
 	return nil
 }
 
+type runtimeRemoveOpts struct {
+	yes bool
+}
+
 func newSystemRuntimeRemoveCmd() *cobra.Command {
+	opts := &runtimeRemoveOpts{}
 	cmd := &cobra.Command{
 		Use:   "remove <base-name>",
 		Short: "Remove a runtime base image",
@@ -249,82 +253,87 @@ The base name should be the full name as shown in 'yoloai system runtime list'.
 Example:
   yoloai system runtime remove yoloai-base-ios-26.4`,
 		Args: cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			baseName := args[0]
-			yes, _ := cmd.Flags().GetBool("yes")
-
-			// Check macOS
-			if runtime.GOOS != "darwin" {
-				return sandbox.NewUsageError("yoloai system runtime commands are only available on macOS")
-			}
-
-			// Check Tart backend
-			ctx := cmd.Context()
-			available, note := checkBackend(ctx, "tart")
-			if !available {
-				return sandbox.NewUsageError("Tart backend not available: %s\n\nInstall Tart: brew install cirruslabs/cli/tart", note)
-			}
-
-			// Get Tart runtime
-			rt, err := newRuntime(ctx, "tart")
-			if err != nil {
-				return fmt.Errorf("create tart runtime: %w", err)
-			}
-			defer rt.Close() //nolint:errcheck
-
-			tartRuntime, ok := rt.(*tart.Runtime)
-			if !ok {
-				return fmt.Errorf("internal error: tart backend type mismatch")
-			}
-
-			// Check if base exists
-			exists, err := tartRuntime.BaseExists(ctx, baseName)
-			if err != nil {
-				return fmt.Errorf("check base: %w", err)
-			}
-			if !exists {
-				return sandbox.NewUsageError("Runtime base '%s' not found.\n\nUse 'yoloai system runtime list' to see available bases.", baseName)
-			}
-
-			// Get size for display
-			bases, err := listRuntimeBases(ctx, tartRuntime)
-			if err != nil {
-				return fmt.Errorf("list bases: %w", err)
-			}
-			var size int64
-			for _, base := range bases {
-				if base.Name == baseName {
-					size = base.Size
-					break
-				}
-			}
-
-			// Confirm deletion unless --yes
-			if !yes {
-				fmt.Fprintf(cmd.OutOrStdout(), "\nThis will delete runtime base '%s' (%s).\n", baseName, formatSize(size)) //nolint:errcheck
-				fmt.Fprintf(cmd.OutOrStdout(), "Continue? [y/N]: ")                                                        //nolint:errcheck
-				var response string
-				fmt.Scanln(&response) //nolint:errcheck,gosec
-				if strings.ToLower(strings.TrimSpace(response)) != "y" {
-					fmt.Fprintln(cmd.OutOrStdout(), "Cancelled.") //nolint:errcheck
-					return nil
-				}
-			}
-
-			// Delete the base
-			fmt.Fprintf(cmd.OutOrStdout(), "\nDeleting %s...\n", baseName) //nolint:errcheck
-			if err := deleteBase(ctx, baseName); err != nil {
-				return fmt.Errorf("delete base: %w", err)
-			}
-
-			fmt.Fprintf(cmd.OutOrStdout(), "Freed %s\n", formatSize(size)) //nolint:errcheck
-			return nil
-		},
+		RunE: func(cmd *cobra.Command, args []string) error { return runSystemRuntimeRemove(cmd, args, opts) },
 	}
 
-	cmd.Flags().Bool("yes", false, "Skip confirmation prompt")
+	cmd.Flags().BoolVar(&opts.yes, "yes", false, "Skip confirmation prompt")
 
 	return cmd
+}
+
+// runSystemRuntimeRemove implements the system runtime remove command body.
+func runSystemRuntimeRemove(cmd *cobra.Command, args []string, opts *runtimeRemoveOpts) error {
+	baseName := args[0]
+
+	if runtime.GOOS != "darwin" {
+		return sandbox.NewUsageError("yoloai system runtime commands are only available on macOS")
+	}
+
+	ctx := cmd.Context()
+	available, note := checkBackend(ctx, "tart")
+	if !available {
+		return sandbox.NewUsageError("Tart backend not available: %s\n\nInstall Tart: brew install cirruslabs/cli/tart", note)
+	}
+
+	tartRuntime, closeRT, err := openTartRuntime(ctx)
+	if err != nil {
+		return err
+	}
+	defer closeRT()
+
+	exists, err := tartRuntime.BaseExists(ctx, baseName)
+	if err != nil {
+		return fmt.Errorf("check base: %w", err)
+	}
+	if !exists {
+		return sandbox.NewUsageError("Runtime base '%s' not found.\n\nUse 'yoloai system runtime list' to see available bases.", baseName)
+	}
+
+	size, err := runtimeBaseSize(ctx, tartRuntime, baseName)
+	if err != nil {
+		return err
+	}
+
+	if !opts.yes {
+		if cancelled, err := confirmRuntimeRemove(cmd, baseName, size); err != nil || cancelled {
+			return err
+		}
+	}
+
+	fmt.Fprintf(cmd.OutOrStdout(), "\nDeleting %s...\n", baseName) //nolint:errcheck
+	if err := deleteBase(ctx, baseName); err != nil {
+		return fmt.Errorf("delete base: %w", err)
+	}
+
+	fmt.Fprintf(cmd.OutOrStdout(), "Freed %s\n", formatSize(size)) //nolint:errcheck
+	return nil
+}
+
+// runtimeBaseSize returns the disk size of the named runtime base.
+func runtimeBaseSize(ctx context.Context, tartRuntime *tart.Runtime, baseName string) (int64, error) {
+	bases, err := listRuntimeBases(ctx, tartRuntime)
+	if err != nil {
+		return 0, fmt.Errorf("list bases: %w", err)
+	}
+	for _, base := range bases {
+		if base.Name == baseName {
+			return base.Size, nil
+		}
+	}
+	return 0, nil
+}
+
+// confirmRuntimeRemove prompts the user to confirm deletion. Returns (true, nil) if cancelled.
+func confirmRuntimeRemove(cmd *cobra.Command, baseName string, size int64) (cancelled bool, err error) {
+	fmt.Fprintf(cmd.OutOrStdout(), "\nThis will delete runtime base '%s' (%s).\n", baseName, formatSize(size)) //nolint:errcheck
+	fmt.Fprintf(cmd.OutOrStdout(), "Continue? [y/N]: ")                                                        //nolint:errcheck
+	var response string
+	fmt.Scanln(&response) //nolint:errcheck,gosec
+	if strings.ToLower(strings.TrimSpace(response)) != "y" {
+		fmt.Fprintln(cmd.OutOrStdout(), "Cancelled.") //nolint:errcheck
+		return true, nil
+	}
+	return false, nil
 }
 
 // runtimeBase represents a runtime base image.

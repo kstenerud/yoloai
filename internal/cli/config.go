@@ -41,43 +41,55 @@ With a dotted key (e.g., backend), prints just that value.
 Global settings (tmux_conf, model_aliases) are stored in ~/.yoloai/config.yaml.
 Default settings are stored in ~/.yoloai/defaults/config.yaml.`,
 		Args: cobra.MaximumNArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if len(args) == 0 {
-				out, err := config.GetEffectiveConfig()
-				if err != nil {
-					return err
-				}
-				if jsonEnabled(cmd) {
-					var m map[string]any
-					if err := yaml.Unmarshal([]byte(out), &m); err != nil {
-						return fmt.Errorf("parse config: %w", err)
-					}
-					return writeJSON(cmd.OutOrStdout(), m)
-				}
-				_, err = fmt.Fprint(cmd.OutOrStdout(), out)
-				return err
-			}
-
-			value, found, err := config.GetConfigValue(args[0])
-			if err != nil {
-				return err
-			}
-			if !found {
-				if jsonEnabled(cmd) {
-					return fmt.Errorf("key %q not found", args[0])
-				}
-				os.Exit(1)
-			}
-			if jsonEnabled(cmd) {
-				return writeJSON(cmd.OutOrStdout(), map[string]string{
-					"key":   args[0],
-					"value": value,
-				})
-			}
-			_, err = fmt.Fprintln(cmd.OutOrStdout(), value)
-			return err
-		},
+		RunE: runConfigGet,
 	}
+}
+
+// runConfigGet implements the config get command body.
+func runConfigGet(cmd *cobra.Command, args []string) error {
+	if len(args) == 0 {
+		return configGetAll(cmd)
+	}
+	return configGetKey(cmd, args[0])
+}
+
+// configGetAll prints all effective configuration values.
+func configGetAll(cmd *cobra.Command) error {
+	out, err := config.GetEffectiveConfig()
+	if err != nil {
+		return err
+	}
+	if jsonEnabled(cmd) {
+		var m map[string]any
+		if err := yaml.Unmarshal([]byte(out), &m); err != nil {
+			return fmt.Errorf("parse config: %w", err)
+		}
+		return writeJSON(cmd.OutOrStdout(), m)
+	}
+	_, err = fmt.Fprint(cmd.OutOrStdout(), out)
+	return err
+}
+
+// configGetKey prints a single configuration value by dotted key.
+func configGetKey(cmd *cobra.Command, key string) error {
+	value, found, err := config.GetConfigValue(key)
+	if err != nil {
+		return err
+	}
+	if !found {
+		if jsonEnabled(cmd) {
+			return fmt.Errorf("key %q not found", key)
+		}
+		os.Exit(1)
+	}
+	if jsonEnabled(cmd) {
+		return writeJSON(cmd.OutOrStdout(), map[string]string{
+			"key":   key,
+			"value": value,
+		})
+	}
+	_, err = fmt.Fprintln(cmd.OutOrStdout(), value)
+	return err
 }
 
 func newConfigSetCmd() *cobra.Command {
@@ -93,52 +105,67 @@ Preserves comments and formatting.
 Global settings (tmux_conf, model_aliases) are stored in ~/.yoloai/config.yaml.
 Default settings are stored in ~/.yoloai/defaults/config.yaml.`,
 		Args: cobra.ExactArgs(2),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if config.IsGlobalKey(args[0]) {
-				configPath := config.GlobalConfigPath()
-				if _, err := os.Stat(configPath); os.IsNotExist(err) {
-					dir := configPath[:len(configPath)-len("/config.yaml")]
-					if err := fileutil.MkdirAll(dir, 0750); err != nil {
-						return fmt.Errorf("create config directory: %w", err)
-					}
-					if err := fileutil.WriteFile(configPath, []byte("{}\n"), 0600); err != nil {
-						return fmt.Errorf("create config.yaml: %w", err)
-					}
-				}
-				if err := config.UpdateGlobalConfigFields(map[string]string{
-					args[0]: args[1],
-				}); err != nil {
-					return err
-				}
-			} else {
-				configPath := config.ConfigPath()
-				if _, err := os.Stat(configPath); os.IsNotExist(err) {
-					dir := configPath[:len(configPath)-len("/config.yaml")]
-					if err := fileutil.MkdirAll(dir, 0750); err != nil {
-						return fmt.Errorf("create config directory: %w", err)
-					}
-					scaffold := config.GenerateScaffoldConfig(config.DefaultConfigYAML)
-					if err := fileutil.WriteFile(configPath, []byte(scaffold), 0600); err != nil {
-						return fmt.Errorf("create defaults/config.yaml: %w", err)
-					}
-				}
-				if err := config.UpdateConfigFields(map[string]string{
-					args[0]: args[1],
-				}); err != nil {
-					return err
-				}
-			}
-
-			if jsonEnabled(cmd) {
-				return writeJSON(cmd.OutOrStdout(), map[string]string{
-					"key":    args[0],
-					"value":  args[1],
-					"action": "set",
-				})
-			}
-			return nil
-		},
+		RunE: runConfigSet,
 	}
+}
+
+// runConfigSet implements the config set command body.
+func runConfigSet(cmd *cobra.Command, args []string) error {
+	key, value := args[0], args[1]
+	if config.IsGlobalKey(key) {
+		if err := ensureGlobalConfig(); err != nil {
+			return err
+		}
+		if err := config.UpdateGlobalConfigFields(map[string]string{key: value}); err != nil {
+			return err
+		}
+	} else {
+		if err := ensureProfileConfig(); err != nil {
+			return err
+		}
+		if err := config.UpdateConfigFields(map[string]string{key: value}); err != nil {
+			return err
+		}
+	}
+
+	if jsonEnabled(cmd) {
+		return writeJSON(cmd.OutOrStdout(), map[string]string{
+			"key":    key,
+			"value":  value,
+			"action": "set",
+		})
+	}
+	return nil
+}
+
+// ensureGlobalConfig creates the global config file if it does not exist.
+func ensureGlobalConfig() error {
+	configPath := config.GlobalConfigPath()
+	if _, err := os.Stat(configPath); !os.IsNotExist(err) {
+		return nil
+	}
+	dir := configPath[:len(configPath)-len("/config.yaml")]
+	if err := fileutil.MkdirAll(dir, 0750); err != nil {
+		return fmt.Errorf("create config directory: %w", err)
+	}
+	return fileutil.WriteFile(configPath, []byte("{}\n"), 0600)
+}
+
+// ensureProfileConfig creates the profile config file if it does not exist.
+func ensureProfileConfig() error {
+	configPath := config.ConfigPath()
+	if _, err := os.Stat(configPath); !os.IsNotExist(err) {
+		return nil
+	}
+	dir := configPath[:len(configPath)-len("/config.yaml")]
+	if err := fileutil.MkdirAll(dir, 0750); err != nil {
+		return fmt.Errorf("create config directory: %w", err)
+	}
+	scaffold := config.GenerateScaffoldConfig(config.DefaultConfigYAML)
+	if err := fileutil.WriteFile(configPath, []byte(scaffold), 0600); err != nil {
+		return fmt.Errorf("create defaults/config.yaml: %w", err)
+	}
+	return nil
 }
 
 func newConfigResetCmd() *cobra.Command {

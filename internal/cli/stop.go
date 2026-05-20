@@ -63,46 +63,54 @@ func runStopCmd(cmd *cobra.Command, args []string) error {
 // resolveStopNames resolves sandbox names to stop. Returns nil if already handled (empty with output).
 func resolveStopNames(cmd *cobra.Command, ctx context.Context, rt runtime.Runtime, args []string, all bool) ([]string, error) {
 	if all {
-		infos, err := sandbox.ListSandboxes(ctx, rt)
-		if err != nil {
-			return nil, err
-		}
-		var names []string
-		for _, info := range infos {
-			switch info.Status {
-			case sandbox.StatusActive, sandbox.StatusIdle, sandbox.StatusDone, sandbox.StatusFailed:
-				names = append(names, info.Meta.Name)
-			default:
-				// StatusStopped, StatusRemoved, StatusBroken, StatusUnavailable: skip
-			}
-		}
-		if len(names) == 0 {
-			if jsonEnabled(cmd) {
-				return nil, writeJSON(cmd.OutOrStdout(), []struct{}{})
-			}
-			_, err = fmt.Fprintln(cmd.OutOrStdout(), "No running sandboxes to stop")
-			return nil, err
-		}
-		return names, nil
+		return resolveStopAll(cmd, ctx, rt)
 	}
-
 	if len(args) == 0 {
-		envName := os.Getenv(EnvSandboxName)
-		if envName == "" {
-			return nil, sandbox.NewUsageError("at least one sandbox name is required (or use --all or set YOLOAI_SANDBOX)")
-		}
-		if err := sandbox.ValidateName(envName); err != nil {
-			return nil, err
-		}
-		return []string{envName}, nil
+		return resolveStopFromEnv()
 	}
-
 	for _, name := range args {
 		if err := sandbox.ValidateName(name); err != nil {
 			return nil, err
 		}
 	}
 	return args, nil
+}
+
+// resolveStopAll collects running sandbox names when --all is set.
+func resolveStopAll(cmd *cobra.Command, ctx context.Context, rt runtime.Runtime) ([]string, error) {
+	infos, err := sandbox.ListSandboxes(ctx, rt)
+	if err != nil {
+		return nil, err
+	}
+	var names []string
+	for _, info := range infos {
+		switch info.Status {
+		case sandbox.StatusActive, sandbox.StatusIdle, sandbox.StatusDone, sandbox.StatusFailed:
+			names = append(names, info.Meta.Name)
+		default:
+			// StatusStopped, StatusRemoved, StatusBroken, StatusUnavailable: skip
+		}
+	}
+	if len(names) == 0 {
+		if jsonEnabled(cmd) {
+			return nil, writeJSON(cmd.OutOrStdout(), []struct{}{})
+		}
+		_, err = fmt.Fprintln(cmd.OutOrStdout(), "No running sandboxes to stop")
+		return nil, err
+	}
+	return names, nil
+}
+
+// resolveStopFromEnv resolves the sandbox name from the environment when no args are given.
+func resolveStopFromEnv() ([]string, error) {
+	envName := os.Getenv(EnvSandboxName)
+	if envName == "" {
+		return nil, sandbox.NewUsageError("at least one sandbox name is required (or use --all or set YOLOAI_SANDBOX)")
+	}
+	if err := sandbox.ValidateName(envName); err != nil {
+		return nil, err
+	}
+	return []string{envName}, nil
 }
 
 // executeStop stops sandboxes and returns an error if any fail.

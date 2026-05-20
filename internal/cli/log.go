@@ -52,52 +52,59 @@ func parseLogRecord(line string, src logSource) (logRecord, bool) {
 	}
 
 	rec := logRecord{source: src, raw: line}
+	rec.ts = parseLogTimestamp(raw)
+	rec.level = rawJSONString(raw, "level")
+	rec.event = rawJSONString(raw, "event")
+	rec.msg = rawJSONString(raw, "msg")
+	rec.extra = collectLogExtras(raw)
 
+	return rec, true
+}
+
+// parseLogTimestamp extracts and parses the "ts" field, falling back to now.
+func parseLogTimestamp(raw map[string]json.RawMessage) time.Time {
 	if v, ok := raw["ts"]; ok {
 		var ts string
 		if json.Unmarshal(v, &ts) == nil {
 			// Accept both RFC3339 milliseconds (our format) and full RFC3339.
 			for _, layout := range []string{"2006-01-02T15:04:05.000Z", time.RFC3339} {
 				if t, err := time.Parse(layout, ts); err == nil {
-					rec.ts = t
-					break
+					return t
 				}
 			}
 		}
 	}
-	if rec.ts.IsZero() {
-		rec.ts = time.Now().UTC()
-	}
+	return time.Now().UTC()
+}
 
-	jsonString := func(key string) string {
-		if v, ok := raw[key]; ok {
-			var s string
-			if json.Unmarshal(v, &s) == nil {
-				return s
-			}
+// rawJSONString extracts a string value from a raw JSON map by key.
+func rawJSONString(raw map[string]json.RawMessage, key string) string {
+	if v, ok := raw[key]; ok {
+		var s string
+		if json.Unmarshal(v, &s) == nil {
+			return s
 		}
-		return ""
 	}
+	return ""
+}
 
-	rec.level = jsonString("level")
-	rec.event = jsonString("event")
-	rec.msg = jsonString("msg")
-
+// collectLogExtras collects all fields except the standard log fields as ordered pairs.
+func collectLogExtras(raw map[string]json.RawMessage) [][2]string {
 	skip := map[string]bool{"ts": true, "level": true, "event": true, "msg": true}
+	var extra [][2]string
 	for k, v := range raw {
 		if skip[k] {
 			continue
 		}
 		var s string
 		if json.Unmarshal(v, &s) == nil {
-			rec.extra = append(rec.extra, [2]string{k, s})
+			extra = append(extra, [2]string{k, s})
 		} else {
 			// non-string: emit as JSON token
-			rec.extra = append(rec.extra, [2]string{k, string(v)})
+			extra = append(extra, [2]string{k, string(v)})
 		}
 	}
-
-	return rec, true
+	return extra
 }
 
 // levelOrder returns numeric order for log level comparisons.
