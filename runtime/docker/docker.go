@@ -77,7 +77,7 @@ func NewWithSocket(ctx context.Context, host string, binaryName string) (*Runtim
 	_, err = cli.Ping(ctx)
 	if err != nil {
 		_ = cli.Close()
-		if os.IsPermission(err) || strings.Contains(err.Error(), "permission denied") {
+		if runtime.IsPermissionDenied(err) {
 			return nil, yoerrors.NewPermissionError("%s socket permission denied: add your user to the %s group or run with sudo", binaryName, binaryName)
 		}
 		var hint string

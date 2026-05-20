@@ -8,7 +8,9 @@ package containerdrt
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"strings"
@@ -176,7 +178,7 @@ func buildKVMDeviceCap() caps.HostCapability {
 				// Check group membership via detectKVMGroup (simplified: just check if we can open it).
 				f, openErr := os.Open(kvmDevPath) //nolint:gosec // G304: kvmDevPath is an injectable var pointing to /dev/kvm
 				if openErr != nil {
-					if strings.Contains(openErr.Error(), "permission denied") {
+					if errors.Is(openErr, fs.ErrPermission) {
 						return fmt.Errorf("permission denied on /dev/kvm: add user to 'kvm' group")
 					}
 					// Device exists but open failed for another reason; it may still be usable.

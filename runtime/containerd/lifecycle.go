@@ -439,7 +439,7 @@ func createTaskWithRetry(ctx context.Context, ctr client.Container) (client.Task
 		if createTaskErr == nil {
 			break
 		}
-		if !strings.Contains(strings.ToLower(createTaskErr.Error()), "address in use") {
+		if !runtime.IsAddressInUse(createTaskErr) {
 			break // non-retryable error
 		}
 	}

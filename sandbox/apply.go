@@ -375,14 +375,16 @@ func HasUncommittedChanges(ctx context.Context, rt runtime.Runtime, name string)
 
 	// git diff --quiet exits 1 when there are differences.
 	// For direct exec.Cmd, check for *exec.ExitError.
-	var exitErr *exec.ExitError
-	if ok := errors.As(err, &exitErr); ok && exitErr.ExitCode() == 1 {
+	// git diff --quiet exits 1 when there are differences. Two error shapes
+	// surface here depending on which backend ran git: exec.ExitError for
+	// direct os/exec callers, runtime.ExecError for backends that route via
+	// runtime.RunCmdExec (Tart, containerd, etc.). Match both via errors.As.
+	var execErr *runtime.ExecError
+	if ok := errors.As(err, &execErr); ok && execErr.ExitCode == 1 {
 		return true, nil
 	}
-
-	// For runtime.RunCmdExec (used by Tart and other backends),
-	// check for the "exec exited with code 1" error message.
-	if strings.Contains(err.Error(), "exec exited with code 1") {
+	var exitErr *exec.ExitError
+	if ok := errors.As(err, &exitErr); ok && exitErr.ExitCode() == 1 {
 		return true, nil
 	}
 

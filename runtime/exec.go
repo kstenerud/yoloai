@@ -9,10 +9,23 @@ import (
 	"strings"
 )
 
+// ExecError is returned by RunCmdExec/RunCmdExecRaw when the command runs but
+// exits with a non-zero code. Carrying the code as a field (not embedded in
+// the error string) lets callers match exit codes via errors.As instead of
+// string-matching the error message. W8 of the architecture remediation plan.
+type ExecError struct {
+	ExitCode int
+	Stderr   string
+}
+
+func (e *ExecError) Error() string {
+	return fmt.Sprintf("exec exited with code %d: %s", e.ExitCode, e.Stderr)
+}
+
 // RunCmdExec runs an exec.Cmd, captures stdout/stderr, and returns an
-// ExecResult. On non-zero exit the result is returned alongside an error
+// ExecResult. On non-zero exit the result is returned alongside an *ExecError
 // containing the exit code and stderr. Non-ExitError failures (e.g.
-// binary not found) are returned directly.
+// binary not found) are wrapped and returned directly.
 func RunCmdExec(cmd *exec.Cmd) (ExecResult, error) {
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -34,7 +47,7 @@ func RunCmdExec(cmd *exec.Cmd) (ExecResult, error) {
 	}
 
 	if exitCode != 0 {
-		return result, fmt.Errorf("exec exited with code %d: %s", exitCode, strings.TrimSpace(stderr.String()))
+		return result, &ExecError{ExitCode: exitCode, Stderr: strings.TrimSpace(stderr.String())}
 	}
 
 	return result, nil
@@ -64,7 +77,7 @@ func RunCmdExecRaw(cmd *exec.Cmd) (ExecResult, error) {
 	}
 
 	if exitCode != 0 {
-		return result, fmt.Errorf("exec exited with code %d: %s", exitCode, stderr.String())
+		return result, &ExecError{ExitCode: exitCode, Stderr: stderr.String()}
 	}
 
 	return result, nil

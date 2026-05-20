@@ -79,7 +79,7 @@ func New(_ context.Context) (*Runtime, error) {
 	}
 	c, err := client.New(containerdSock)
 	if err != nil {
-		if os.IsPermission(err) || strings.Contains(err.Error(), "permission denied") {
+		if runtime.IsPermissionDenied(err) {
 			return nil, yoerrors.NewPermissionError("no permission to access containerd socket at %s\n  Fix: run yoloai with sudo", containerdSock)
 		}
 		return nil, yoerrors.NewDependencyError("connect to containerd: %w\n  Is containerd running? Try: sudo systemctl start containerd", err)
