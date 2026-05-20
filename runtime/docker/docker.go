@@ -47,6 +47,7 @@ type Runtime struct {
 
 // Compile-time check.
 var _ runtime.Runtime = (*Runtime)(nil)
+var _ runtime.IsolationCapabilityProvider = (*Runtime)(nil)
 
 // New creates a Runtime and verifies the Docker daemon is reachable.
 func New(ctx context.Context) (*Runtime, error) {
@@ -417,10 +418,6 @@ func (r *Runtime) Descriptor() runtime.BackendDescriptor {
 		},
 	}
 }
-
-// ResolveCopyMount returns hostPath unchanged — Docker bind-mounts the copy at
-// the original host path inside the container.
-func (r *Runtime) ResolveCopyMount(_, hostPath string) string { return hostPath }
 
 // dockerInfoOutput fetches the list of registered OCI runtime names from the
 // Docker daemon. Variable for testing.

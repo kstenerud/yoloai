@@ -11,7 +11,6 @@ import (
 	"github.com/kstenerud/yoloai/agent"
 	"github.com/kstenerud/yoloai/config"
 	"github.com/kstenerud/yoloai/runtime"
-	"github.com/kstenerud/yoloai/runtime/caps"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -354,15 +353,9 @@ func (m *mockDockerRuntime) Close() error { return nil }
 func (m *mockDockerRuntime) Logs(ctx context.Context, name string, lines int) string {
 	return ""
 }
-func (m *mockDockerRuntime) DiagHint(name string) string { return "" }
-func (m *mockDockerRuntime) ResolveCopyMount(sandboxName, hostPath string) string {
-	return hostPath
-}
+func (m *mockDockerRuntime) DiagHint(name string) string           { return "" }
 func (m *mockDockerRuntime) PrepareAgentCommand(cmd string) string { return cmd }
-func (m *mockDockerRuntime) RequiredCapabilities(isolation string) []caps.HostCapability {
-	return nil
-}
-func (m *mockDockerRuntime) TmuxSocket(sandboxDir string) string { return "" }
+func (m *mockDockerRuntime) TmuxSocket(sandboxDir string) string   { return "" }
 func (m *mockDockerRuntime) AttachCommand(tmuxSocket string, rows, cols int, term string) []string {
 	return nil
 }

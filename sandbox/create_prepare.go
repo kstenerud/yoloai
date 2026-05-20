@@ -563,7 +563,7 @@ func executeVMWorkDirSetup(ctx context.Context, rt runtime.Runtime, name, sandbo
 	}
 
 	vfsPath := filepath.Join("/Volumes/My Shared Files/yoloai/work", config.EncodePath(meta.Workdir.HostPath))
-	vmLocalPath := rt.ResolveCopyMount(name, meta.Workdir.HostPath)
+	vmLocalPath := runtime.ResolveCopyMountFor(rt, name, meta.Workdir.HostPath)
 
 	cmds := setupIntf.SetupWorkDirInVM(vfsPath, vmLocalPath)
 	for _, cmd := range cmds {

@@ -46,6 +46,7 @@ type Runtime struct {
 
 // Compile-time check.
 var _ runtime.Runtime = (*Runtime)(nil)
+var _ runtime.IsolationCapabilityProvider = (*Runtime)(nil)
 
 // Descriptor returns a BackendDescriptor with the static facts for this backend.
 func (r *Runtime) Descriptor() runtime.BackendDescriptor {
@@ -62,10 +63,6 @@ func (r *Runtime) Descriptor() runtime.BackendDescriptor {
 		},
 	}
 }
-
-// ResolveCopyMount returns hostPath unchanged — containerd bind-mounts the copy
-// at the original host path inside the container.
-func (r *Runtime) ResolveCopyMount(_, hostPath string) string { return hostPath }
 
 const containerdSock = "/run/containerd/containerd.sock"
 

@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/runtime/caps"
 )
 
@@ -119,7 +120,7 @@ func collectDoctorReports(ctx context.Context, env caps.Environment, backendFilt
 			if isolationFilter != "" && mode != isolationFilter {
 				continue
 			}
-			capList := rt.RequiredCapabilities(mode)
+			capList := runtime.RequiredCapabilitiesFor(rt, mode)
 			results := caps.RunChecks(ctx, capList, env)
 			avail := caps.ComputeAvailability(results)
 			reports = append(reports, caps.BackendReport{

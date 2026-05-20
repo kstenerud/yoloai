@@ -72,7 +72,7 @@ const (
 // checkIsolationPrerequisites validates isolation prerequisites via RequiredCapabilities.
 // Returns nil when all checks pass, or a formatted error listing missing prerequisites.
 func checkIsolationPrerequisites(ctx context.Context, rt runtime.Runtime, isolation string) error {
-	capList := rt.RequiredCapabilities(isolation)
+	capList := runtime.RequiredCapabilitiesFor(rt, isolation)
 	if len(capList) == 0 {
 		return nil // backend has no requirements for this mode
 	}
@@ -681,11 +681,11 @@ func (m *Manager) setupAllWorkdirs(opts CreateOptions, workdir *DirArg, auxDirs 
 	// For backends that run agents directly on the host (seatbelt), :copy mount paths
 	// must point to the sandbox copy location rather than the original host path.
 	if workdir.Mode == "copy" && workdir.MountPath == "" {
-		workdir.MountPath = m.runtime.ResolveCopyMount(opts.Name, workdir.Path)
+		workdir.MountPath = runtime.ResolveCopyMountFor(m.runtime, opts.Name, workdir.Path)
 	}
 	for _, ad := range auxDirs {
 		if ad.Mode == "copy" && ad.MountPath == "" {
-			ad.MountPath = m.runtime.ResolveCopyMount(opts.Name, ad.Path)
+			ad.MountPath = runtime.ResolveCopyMountFor(m.runtime, opts.Name, ad.Path)
 		}
 	}
 

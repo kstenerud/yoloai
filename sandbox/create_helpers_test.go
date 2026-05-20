@@ -1185,13 +1185,14 @@ func TestAgentProvisionedByBackend_Seatbelt(t *testing.T) {
 }
 
 func TestResolveCopyMount_Docker(t *testing.T) {
-	// Docker bind-mounts at the original host path — returns hostPath unchanged.
-	assert.Equal(t, "/home/user/project", (*dockerrt.Runtime)(nil).ResolveCopyMount("mysandbox", "/home/user/project"))
+	// Docker doesn't implement CopyMountResolver — helper falls back to hostPath.
+	rt := (*dockerrt.Runtime)(nil)
+	assert.Equal(t, "/home/user/project", runtime.ResolveCopyMountFor(rt, "mysandbox", "/home/user/project"))
 }
 
 func TestResolveCopyMount_Tart(t *testing.T) {
-	// Tart returns local VM path where work directory will be copied
-	result := (*tartrt.Runtime)(nil).ResolveCopyMount("mysandbox", "/home/user/project")
+	// Tart implements CopyMountResolver — returns local VM path.
+	result := runtime.ResolveCopyMountFor((*tartrt.Runtime)(nil), "mysandbox", "/home/user/project")
 	assert.Equal(t, "/Users/admin/yoloai-work/^shome^suser^sproject", result)
 }
 

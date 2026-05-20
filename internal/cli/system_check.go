@@ -185,7 +185,7 @@ func checkAgentResult(agentName string) (checkResult, bool) {
 func checkIsolationResult(ctx context.Context, backend, isolation string) (checkResult, bool) {
 	r := checkResult{Name: "isolation"}
 	err := withRuntime(ctx, backend, func(ctx context.Context, rt runtime.Runtime) error {
-		capList := rt.RequiredCapabilities(isolation)
+		capList := runtime.RequiredCapabilitiesFor(rt, isolation)
 		if len(capList) == 0 {
 			return nil // backend has no requirements for this mode
 		}

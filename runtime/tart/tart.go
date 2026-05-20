@@ -21,7 +21,6 @@ import (
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/internal/yoerrors"
 	"github.com/kstenerud/yoloai/runtime"
-	"github.com/kstenerud/yoloai/runtime/caps"
 	"github.com/kstenerud/yoloai/runtime/monitor"
 )
 
@@ -77,6 +76,7 @@ type Runtime struct {
 
 // Compile-time check.
 var _ runtime.Runtime = (*Runtime)(nil)
+var _ runtime.CopyMountResolver = (*Runtime)(nil)
 
 // Descriptor returns a BackendDescriptor with the static facts for this backend.
 func (r *Runtime) Descriptor() runtime.BackendDescriptor {
@@ -469,9 +469,6 @@ func (r *Runtime) DiagHint(instanceName string) string {
 func (r *Runtime) PrepareAgentCommand(cmd string) string {
 	return fmt.Sprintf(`PATH="/opt/homebrew/opt/node/bin:$PATH" %s`, cmd)
 }
-
-// RequiredCapabilities returns nil — Tart's prerequisites are enforced in New().
-func (r *Runtime) RequiredCapabilities(_ string) []caps.HostCapability { return nil }
 
 // TmuxSocket returns the explicit tmux socket path for Tart VMs.
 // When tart exec allocates a PTY with -t, the environment changes (TMPDIR)

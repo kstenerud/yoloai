@@ -19,7 +19,6 @@ import (
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/internal/yoerrors"
 	"github.com/kstenerud/yoloai/runtime"
-	"github.com/kstenerud/yoloai/runtime/caps"
 	"github.com/kstenerud/yoloai/runtime/monitor"
 )
 
@@ -64,8 +63,9 @@ type Runtime struct {
 	sandboxDir     string // ~/.yoloai/sandboxes/ base path
 }
 
-// Compile-time check.
+// Compile-time checks.
 var _ runtime.Runtime = (*Runtime)(nil)
+var _ runtime.CopyMountResolver = (*Runtime)(nil)
 
 // Descriptor returns a BackendDescriptor with the static facts for this backend.
 func (r *Runtime) Descriptor() runtime.BackendDescriptor {
@@ -441,9 +441,6 @@ func (r *Runtime) DiagHint(instanceName string) string {
 func (r *Runtime) PrepareAgentCommand(cmd string) string {
 	return "source ~/.swift-wrapper.sh && " + cmd
 }
-
-// RequiredCapabilities returns nil — Seatbelt's prerequisites are enforced in New().
-func (r *Runtime) RequiredCapabilities(_ string) []caps.HostCapability { return nil }
 
 // TmuxSocket returns the per-sandbox tmux socket path for seatbelt. Each
 // seatbelt sandbox has its own socket under its sandbox directory, so the

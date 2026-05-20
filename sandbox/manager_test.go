@@ -16,7 +16,6 @@ import (
 
 	"github.com/kstenerud/yoloai/config"
 	"github.com/kstenerud/yoloai/runtime"
-	"github.com/kstenerud/yoloai/runtime/caps"
 	dockerrt "github.com/kstenerud/yoloai/runtime/docker"
 )
 
@@ -89,8 +88,6 @@ func (m *mockRuntime) DiagHint(instanceName string) string {
 
 func (m *mockRuntime) TmuxSocket(_ string) string                          { return "" }
 func (m *mockRuntime) AttachCommand(_ string, _, _ int, _ string) []string { return nil }
-func (m *mockRuntime) ResolveCopyMount(_, hostPath string) string          { return hostPath }
-func (m *mockRuntime) RequiredCapabilities(_ string) []caps.HostCapability { return nil }
 func (m *mockRuntime) PrepareAgentCommand(cmd string) string               { return cmd }
 
 func (m *mockRuntime) Descriptor() runtime.BackendDescriptor {

@@ -119,6 +119,40 @@ type UsernsProvider interface {
 	UsernsMode(hasSysAdmin bool) string
 }
 
+// CopyMountResolver is an optional interface implemented by backends that
+// rewrite :copy mount paths from host paths to sandbox-local paths. Backends
+// that don't implement it (the default) see :copy mounts at the original
+// host path inside the container.
+type CopyMountResolver interface {
+	ResolveCopyMount(sandboxName, hostPath string) string
+}
+
+// ResolveCopyMountFor returns the in-sandbox path for a :copy directory.
+// Falls back to hostPath when the backend doesn't implement CopyMountResolver.
+func ResolveCopyMountFor(rt Runtime, sandboxName, hostPath string) string {
+	if p, ok := rt.(CopyMountResolver); ok {
+		return p.ResolveCopyMount(sandboxName, hostPath)
+	}
+	return hostPath
+}
+
+// IsolationCapabilityProvider is an optional interface implemented by
+// backends that need specific host capabilities (binaries present, kernel
+// features, etc.) for non-default isolation modes. Backends that don't
+// implement it have no isolation-mode prerequisites.
+type IsolationCapabilityProvider interface {
+	RequiredCapabilities(isolation string) []caps.HostCapability
+}
+
+// RequiredCapabilitiesFor returns the host capabilities needed for the given
+// isolation mode, or nil when the backend has no requirements for the mode.
+func RequiredCapabilitiesFor(rt Runtime, isolation string) []caps.HostCapability {
+	if p, ok := rt.(IsolationCapabilityProvider); ok {
+		return p.RequiredCapabilities(isolation)
+	}
+	return nil
+}
+
 // Runtime is the sandbox backend interface. Implementations manage the
 // lifecycle of sandbox instances (containers, VMs, etc.) and provide
 // image/environment management.
@@ -192,13 +226,6 @@ type Runtime interface {
 	// Values are compile-time constants and do not change after construction.
 	Descriptor() BackendDescriptor
 
-	// ResolveCopyMount returns the mount path the agent sees for a :copy directory.
-	// For container/VM backends, the copy is bind-mounted at the original host path
-	// inside the container, so this returns hostPath unchanged.
-	// For process-based backends (seatbelt), the agent runs directly on the host
-	// and sees the copy at its sandbox location, so this returns the rewritten path.
-	ResolveCopyMount(sandboxName, hostPath string) string
-
 	// TmuxSocket returns the tmux socket path for a sandbox, or empty string
 	// if the backend uses the uid-based default socket. sandboxDir is the
 	// resolved sandbox directory path. The value is written into
@@ -213,11 +240,6 @@ type Runtime interface {
 	// the current terminal dimensions (0 = unknown). isolation is the sandbox
 	// isolation mode (e.g. "container-enhanced").
 	AttachCommand(tmuxSocket string, rows, cols int, isolation string) []string
-
-	// RequiredCapabilities returns the host capabilities needed for the given
-	// isolation mode. Returns nil if the backend has no special requirements
-	// for this mode.
-	RequiredCapabilities(isolation string) []caps.HostCapability
 
 	// PrepareAgentCommand wraps an agent launch command with backend-specific
 	// environment setup (PATH overrides, shell wrappers, etc.). Mirrors the
