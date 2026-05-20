@@ -34,6 +34,8 @@ Boundary safety leads because the audit's biggest finding (F1) reduces to it. Me
 
 Anything found mid-workstream that wasn't in the original audit goes in `docs/dev/discovered-findings.md` (create on first hit). W14's re-audit incorporates it. Don't expand a workstream's scope to absorb new findings — leave the workstream scoped to what was planned.
 
+**Severity gate.** **Critical findings escalate immediately, do not park.** Critical = observable data loss, security issues, observable regressions in shipped behavior, or anything that would block the current release. Everything else (architectural smells, latent bugs without observable symptoms, refactoring opportunities) parks in `discovered-findings.md` until W14. The discoverer makes the call; when uncertain, escalate.
+
 ---
 
 ## Workstreams
@@ -48,6 +50,7 @@ Two explicit phases — the rollback story only makes sense if both phases exist
 
 **Steps:**
 
+0. **Prerequisite sweep.** Read every `prepare_launch_command` per-backend impl in `sandbox-setup.py`. Confirm all wrappers are static strings (no runtime-state dependencies). If any are dynamic — e.g., a wrapper that reads `/proc` or queries `tart exec` at launch time — W1's design needs an extension: Python re-computes from data Go provides, but the wrapper itself stays in Python for that case. If all wrappers are static, proceed.
 1. In Go's sandbox creation path, compute the fully-wrapped agent command via `Runtime.PrepareAgentCommand(rawCmd)`. Write the result to `runtime-config.json` as `agent_command_final` (keep raw `agent_command` for diagnostics).
 2. In Python `sandbox-setup.py::launch_agent`, **if `runtime-config.use_stored_agent_cmd: true`**, read `agent_command_final` and `send-keys` it verbatim. Otherwise fall back to `prepare_launch_command()`. Per-backend Python overrides remain.
 3. **`sandbox/lifecycle.go::respawn-pane` reads `agent_command_final` from `runtime-config.json` and uses it verbatim** when the gate is on; otherwise unchanged. This is the single-source-of-truth invariant: `PrepareAgentCommand` is called exactly once per sandbox, at creation.
@@ -60,9 +63,11 @@ Two explicit phases — the rollback story only makes sense if both phases exist
 
 #### W1b — Remove the gate + legacy code (one release later)
 
+"One release later" anchors to: **the release immediately following W1a's release, with a minimum 4-week gap from W1a's tag to W1b's start.** The gap exists to let regression reports surface; 4 weeks is a coarse beta-cadence approximation. If a regression surfaces during the gap, W1b waits a further release cycle.
+
 **Steps:**
 
-1. After one release with no reported regressions, remove the `use_stored_agent_cmd` gate.
+1. After one release (per the cadence above) with no reported regressions, remove the `use_stored_agent_cmd` gate.
 2. Delete `prepare_launch_command()` from `sandbox-setup.py` and all per-backend overrides.
 3. Rewrite the two restart-bypass entries in `backend-idiosyncrasies.md` (Tart node@24, Seatbelt swift-wrapper) to focus on the *environmental* facts (Cirrus base image's .zprofile; macOS sandbox-exec doesn't nest) and note that yoloAI handles them via the stored final command. The environmental facts don't go away when W1 lands — only the failure mode does.
 
@@ -95,7 +100,7 @@ What Tier 1 doesn't catch is **semantic regressions** — a field's meaning sile
 
 **Downgrade policy:**
 
-When a newer yoloai wrote files and an older binary reads them (downgrade scenario), the older binary **hard-fails** with a specific message. Best-effort backward-compat is rejected because (a) it hides real incompatibilities and (b) the workaround is straightforward: re-create the sandbox with the older yoloai. This matches yoloAI's beta-status policy.
+When a newer yoloai wrote files and an older binary reads them (downgrade scenario), the older binary **hard-fails** with a specific message rather than risking silent misinterpretation. This trades user inconvenience for safety: re-creating the sandbox loses agent session state (chat history, work-in-progress), so the practical workaround is "use the newer binary." The hard-fail is conservative because (a) silent best-effort reads hide real incompatibilities and (b) yoloAI is in public beta where breaking changes are explicit. If user reports indicate downgrade is a common practical scenario, revisit: a `--accept-newer-schema` flag could opt the user into best-effort reads with a clear warning. Documented as a trade-off, not a "straightforward" workaround.
 
 **Steps:**
 
@@ -336,11 +341,10 @@ Group of independent small wins. Each is its own commit.
 - **13b.** Split `internal/cli/apply.go` (1068 lines). Three workflows: `apply.go` (entry + shared), `apply_squash.go`, `apply_selective.go`, `apply_export.go`. **Acceptance:** no file >400 lines.
 - **13c.** Generic `Wait[T any]` helper in `internal/testutil/wait.go`. **Acceptance:** `WaitForActive` / `WaitForStopped` become one-line wrappers over the generic.
 - **13d.** Run `gopls modernize` once. **Acceptance:** one commit applying analyzer-driven idiom updates (`for range n`, `min`/`max`, `slices.Concat`, etc.). Review the diff carefully — reject any changes that are stylistic preferences rather than correctness improvements.
-- **13e.** Audit `sandbox/setup_test.go` (632 lines). **Acceptance:** either justified in a top-of-file comment ("setup is genuinely complex because X, Y, Z") or split.
 
 **Size:** XS each · **Risk:** none-to-low · **Blocks:** nothing.
 
-*(`yoloai.Client` fate moved to `OPEN_QUESTIONS.md` #101 — it's a decision needing data, not a refactor.)*
+*(`yoloai.Client` fate moved to `OPEN_QUESTIONS.md` #101. `sandbox/setup_test.go` 632-line audit moved to `OPEN_QUESTIONS.md` #102 — both are decisions needing analysis, not refactors.)*
 
 ### W14 — Re-audit checkpoint *(new, addresses M4)*
 
@@ -359,10 +363,12 @@ Triggered after Phase 1+2+3 (W1–W6) lands. Verifies the audit findings actuall
 5. Incorporate anything in `docs/dev/discovered-findings.md` into the addendum.
 6. If new findings emerge, file as `architecture-audit-YYYY-MM.md` (the 2026-05 file is a frozen snapshot).
 
+**Definition of "closed."** An F-finding is `closed` iff every workstream listed as addressing it has its acceptance criteria fully met (verified by running the captured scripts in `scripts/audit/` and comparing output to the original audit's evidence). `partial` means at least one but not all addressing workstreams are complete. `open` means none are.
+
 **Acceptance:**
 - `scripts/audit/` exists with at least the four scripts above; each prints structured output suitable for diffing across runs.
 - A "Status as of <date>" section appended to `architecture-audit-2026-05.md`.
-- Each F-number from the original audit has a current status: closed / open / partial.
+- Each F-number from the original audit has a current status (closed / open / partial) determined by the rule above.
 - `discovered-findings.md` is reviewed; relevant items are folded into the addendum.
 - Any net-new findings are filed as a new dated audit, not as edits to the original.
 
@@ -391,12 +397,6 @@ Triggered after Phase 1+2+3 (W1–W6) lands. Verifies the audit findings actuall
 - **Removing `yoloai.Client` public API.** Tracked as `OPEN_QUESTIONS.md` #101 — needs an external-user check.
 - **Full JSON Schema validation.** Deferred to W2 Tier 2; revisit only when a concrete semantic-regression bug is observed.
 - **containerd in CI.** Out of scope for W6; needs a Kata-capable runner. Future work.
-
-## Workstream-blocking open questions
-
-These must be resolved before starting the relevant work. (Resolved by W7 step 1 and W11 spike; the originally-listed W7/W11 questions are now part of those workstreams. Only W1's question remains genuinely outside-the-workstream.)
-
-- **W1:** are there any agents whose `prepare_launch_command` depends on container-runtime state not known at sandbox creation time? Sweep all `prepare_launch_command` per-backend impls; confirm all wrappers are static strings. If any are dynamic, W1's design needs an extension (Python re-computes from data Go provides, but the wrapper itself stays in Python for that one case).
 
 ---
 
