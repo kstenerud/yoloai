@@ -26,13 +26,11 @@ row to the index.
 | Containerd socket: no error from `os.Stat` despite permission denied | [Containerd: Stat can't detect EPERM](#osstat-on-the-containerd-socket-does-not-detect-permission-denied) |
 | Containerd GC removes blobs; image becomes unrunnable | [Containerd: GC removes child blobs](#containerd-gc-removes-child-blobs-while-leaving-the-root-manifest-intact) |
 | `already exists` on snapshot create after crash | [Containerd: orphaned snapshots](#kata-orphaned-snapshots-from-crashed-runs-must-be-pre-cleared) |
-| `PermissionError` reading secrets in Kata VM | [Containerd: 0600 secrets after gosu](#kata-0600-secret-files-cause-permissionerror-after-gosu-uid-switch) |
 | CNI bridge plugin: "netns and CNI_NETNS should not be the same" | [CNI: netns.NewNamed switches OS thread](#netnsnewnamed-switches-the-os-thread-via-unshare-and-never-restores-it) |
 | `createNetNS` fails with "file exists" (EEXIST) | [CNI: stale netns file](#stale-named-netns-files-at-varrunnetnsname-persist-after-failed-runs) |
 | CNI-FORWARD rules deleted for a running container | [CNI: pre-flight n.Remove deletes live rules](#the-pre-flight-nremove-can-delete-rules-for-running-containers) |
 | IPAM allocates duplicate IP after replace | [CNI: stale IPAM lease](#cnI-results-cache-lives-at-varlibcniresults) |
 | Two concurrent `yoloai new` with same name corrupts networking | [CNI: concurrent creation race](#two-yoloai-new-invocations-for-the-same-container-name-within-1s-will-corrupt-networking) |
-| `start instance: instance not found` with `--network-isolated` | [Docker: isolated network mode](#docker-does-not-have-an-isolated-network-mode) |
 | `--network-isolated` silently unenforced under `--isolation container-enhanced` | [gVisor netstack ignores iptables](#gvisor-netstack-ignores-in-sandbox-iptables-rules) |
 | `overlayfs mount` fails with `EPERM` inside Docker | [Docker: AppArmor blocks mount](#apparmor-blocks-mount2-even-with-cap_sys_admin) |
 | `sysctl: permission denied on key "net.ipv4.ip_forward"` starting inner Docker daemon | [Docker: /proc/sys and /sys/fs/cgroup read-only without systempaths=unconfined](#procsys-and-sysfsgroup-are-read-only-without-systempathsunconfined) |
@@ -47,7 +45,6 @@ row to the index.
 | Shell command fails with "no such file" on VirtioFS path | [Tart: VirtioFS path has spaces](#virtiofs-mount-path-inside-the-vm-contains-spaces) |
 | VM dies when `Start()` context is cancelled | [Tart: tart run needs exec.Command](#tart-run-process-must-use-execcommand-not-execcommandcontext) |
 | `mkdir: /var/folders: Permission denied` or `ln: ... Permission denied` during Tart setup | [Tart: mkdir/symlink system dirs fails](#tart-cannot-mkdirsymlink-system-directories-like-varfolders) |
-| Tart base image rebuilt every time `yoloai new` runs | [Tart: empty sourceDir breaks marker](#empty-sourcedir-breaks-tart-provisioning-marker-file-check) |
 | `tart exec` fails with "instance not found" right after boot | [Tart: exec needs stabilization delay](#tart-exec-needs-brief-stabilization-delay-after-boot) |
 | `tart exec` with `--` separator fails silently or returns exit status 1 | [Tart: no support for -- separator](#tart-exec-does-not-support----argument-separator) |
 | `yoloai attach` fails with "no sessions" on Tart VM | [Tart: exec -t changes environment](#tart-exec--t-changes-environment-preventing-tmux-from-finding-socket) |
@@ -60,35 +57,7 @@ row to the index.
 | Second sandbox tunnel loops `error access singleton` forever | [VS Code CLI: singleton lock blocks concurrent tunnels](#vs-code-cli-singleton-lock-blocks-concurrent-tunnels) |
 | DNS works but HTTPS to api.anthropic.com times out | [DNS: timeout = API unreachable, not DNS](#request-timed-out-in-claude-code--api-unreachable-not-dns-failure) |
 | `iptables` warnings about legacy tables | [iptables-nft: legacy tables warning](#iptables--iptables-nft-both-iptables-legacy-and-iptables-nft-can-coexist) |
-| `--isolation vm` rejected on macOS / "containerd not available" | [Registry: containerd Linux-only](#containerd-backend-is-linux-only) |
-| `yoloai diff` fails: `cannot change to '.../work/^s...'` on containerd-vm | [Containerd: GitExec must run on host](#gitexec-must-run-on-host-not-inside-the-vm) |
 | Smoke test: `full_workflow/containerd-vm` fails with "agent idle for 9s+" | [QEMU: slow startup exceeds stall grace](#qemu-slow-startup-exceeds-smoke-test-stall-grace-period) |
-
----
-
-## Runtime Backend Registry
-
-### containerd backend is Linux-only
-
-**Symptom:** Using `--os linux --isolation vm` on macOS fails with:
-```
-yoloai: --isolation vm requires containerd, which is not available on macOS.
-Use a Linux host for VM isolation, or use --os mac for macOS-native sandboxing:
-  container   macOS sandbox-exec (seatbelt)
-  vm          Full macOS VM (Tart)
-```
-
-**Explanation:** The backend registry pattern introduced in commit 69c18f1 makes
-backends register themselves at init() time only on supported platforms. Containerd
-uses `//go:build linux` tags and only registers on Linux. On macOS, attempting to
-use `--os linux --isolation vm` will fail at backend resolution time because containerd
-is not in the registry.
-
-**Fix:** On macOS, use `--os mac --isolation vm` to get Tart VMs instead. Smoke tests
-and other cross-platform tooling should avoid specifying `os=linux` with `isolation=vm`
-on macOS hosts.
-
-**Code:** `runtime/registry.go`, `runtime/containerd/containerd.go`, `internal/cli/helpers.go:resolveBackend()`
 
 ---
 
@@ -317,8 +286,6 @@ the VM. `000` = TCP timeout/refused; `4xx` = TCP connected, HTTP response receiv
 
 ---
 
----
-
 ## Docker
 
 ### AppArmor blocks `mount(2)` even with `CAP_SYS_ADMIN`
@@ -380,45 +347,6 @@ exec -it`). See `docker.go::AttachCommand`.
 
 Note: this is ARM64-specific. On AMD64, `script` creates a fresh PTY and CTY
 cleanly without this issue.
-
-### Docker does not have an "isolated" network mode
-
-**Symptom:** Using `--network-isolated` with Docker backend fails during container start with:
-```
-yoloai: start instance: instance not found
-```
-
-Docker daemon logs show:
-```
-Error response from daemon: failed to set up container networking: network isolated not found
-```
-
-**Explanation:** Network isolation in yoloAI is implemented via iptables rules inside
-the container (see `entrypoint.py::isolate_network()`), not by Docker's network layer.
-The value `NetworkMode: "isolated"` is yoloAI's internal representation, not a Docker
-network name. When this string is passed directly to `docker.ContainerCreate()`, Docker
-accepts it (container creation succeeds), but `docker.ContainerStart()` fails because
-Docker cannot find a network named "isolated".
-
-The Docker client's error type for "network not found" is `errdefs.IsNotFound`, which
-the runtime translates to `runtime.ErrNotFound`, producing the misleading message
-"instance not found" (the instance exists, but its network doesn't).
-
-**Fix:** In the Docker backend's `Create()` method, translate `NetworkMode == "isolated"`
-to `""` (default bridge network) before passing to Docker. The entrypoint script will
-apply the actual iptables-based network isolation after the container starts.
-
-```go
-dockerNetworkMode := cfg.NetworkMode
-if dockerNetworkMode == "isolated" {
-    dockerNetworkMode = "" // default bridge network
-}
-```
-
-**Impact:** Affects all Docker/Podman backends. Podman embeds the Docker runtime and
-inherits the same fix.
-
-**Code:** `runtime/docker/docker.go::Create` line ~152-171
 
 ### gVisor netstack ignores in-sandbox iptables rules
 
@@ -584,16 +512,6 @@ Must poll `task.Status()` until the status is `Running` or `Stopped`. The
 60-second timeout is chosen based on observed Kata boot times (Dragonball ~5s,
 Firecracker ~10s on fast hardware; slow CI can be 30s+). See `lifecycle.go::Start`.
 
-### Kata: 0600 secret files cause `PermissionError` after gosu uid switch
-
-Secret files bind-mounted into Kata containers are owned by root with mode
-0600. `entrypoint.py` reads them as root (before `gosu` switches to uid 1001).
-`sandbox-setup.py` runs after `gosu` and cannot read 0600 files owned by uid 0.
-
-Workaround in `sandbox-setup.py`: wrap secret file reads in `try/except OSError`
-and skip unreadable files. `entrypoint.py` already handles the secrets correctly
-before the uid switch. See commit bf23e95.
-
 ### `netns.NewNamed()` switches the OS thread via `unshare(CLONE_NEWNET)` and never restores it
 
 `netns.NewNamed()` internally calls `unshare(CLONE_NEWNET)`, which moves the
@@ -615,19 +533,6 @@ chance to call `deleteNetNS()`, the named netns file persists at
 
 Must call `deleteNetNS(nsName)` unconditionally before `createNetNS()`. This is
 safe because `deleteNetNS` is idempotent (ignores ENOENT). See `cni.go::setupCNI`.
-
-### GitExec must run on host, not inside the VM
-
-**Symptom:** `yoloai diff` on a containerd-vm sandbox fails with:
-```
-exec exited with code 128: fatal: cannot change to '/home/<user>/.yoloai/sandboxes/<name>/work/^stmp^s...': No such file or directory
-```
-
-**Explanation:** For `:copy` mode, `sandbox.WorkDir()` stores the work copy on the HOST at `~/.yoloai/sandboxes/<name>/work/<caret-encoded-path>/` and bind-mounts it into the VM at the original project path (e.g. `/tmp/project/`). The `GitExec` interface is called with the HOST path to the work copy. If `GitExec` execs git inside the VM, the VM only has the work copy accessible at the original project path — not at the sandbox `work/` path — so git fails with ENOENT.
-
-**Fix:** Containerd's `GitExec` runs git on the HOST, just like Docker's. The work copy is HOST-resident; there is no need to enter the VM. The old implementation exed inside the container which was wrong for copy-mode dirs.
-
-**Code:** `runtime/containerd/containerd.go::GitExec`
 
 ---
 
@@ -689,34 +594,6 @@ symlink, try without sudo first, fall back to sudo:
 This avoids hardcoding which paths need sudo.
 
 **Code:** `runtime/tart/tart.go::runSetupScript` line ~900
-
-### Empty sourceDir breaks Tart provisioning marker file check
-
-**Symptom:** Tart base image is rebuilt every time `yoloai new` is called, even though it was already provisioned. Output shows:
-```
-Removing old provisioned image...
-Cloning base image for provisioning...
-[... full provisioning steps ...]
-Base VM image provisioned successfully.
-```
-
-**Explanation:** The Setup method checks for a `.tart-provisioned` marker file to skip unnecessary rebuilds. When `sourceDir` is an empty string, `filepath.Join("", ".tart-provisioned")` evaluates to `.tart-provisioned` in the current directory rather than the intended `~/.yoloai/profiles/base/.tart-provisioned`. The marker check fails, so Setup always rebuilds.
-
-The marker is correctly written to the profile directory during provisioning, but the check looks in the wrong place when sourceDir is empty.
-
-**Fix:** Pass the correct base profile directory to Setup:
-```go
-// Before (manager.go line 163):
-if err := m.runtime.Setup(ctx, "", m.output, m.logger, false); err != nil {
-
-// After:
-baseProfileDir := config.ProfileDirPath("base")
-if err := m.runtime.Setup(ctx, baseProfileDir, m.output, m.logger, false); err != nil {
-```
-
-**Impact:** Before the fix, every `yoloai new` command triggered a 2-3 minute base image rebuild, significantly slowing down sandbox creation and making tests much slower.
-
-**Code:** `sandbox/manager.go::RunSetup` line ~163, `runtime/tart/build.go::Setup` and `isProvisioned`
 
 ### Tart exec needs brief stabilization delay after boot
 
