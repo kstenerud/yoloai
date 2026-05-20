@@ -17,3 +17,4 @@ Research documents supporting yoloAI's design decisions. Each file covers a broa
 | [Podman](research/podman.md) | Podman backend: SDK options, Docker-compat socket, rootless file ownership, overlay concerns, implementation scope, open questions |
 | [Linux VM Backends](research/linux-vm-backends.md) | VM-level isolation beyond Docker: Firecracker, gVisor, Kata Containers, Cloud Hypervisor, Lima, Sysbox; comparison matrix and yoloAI recommendation |
 | [SSH Backend](research/ssh-backend.md) | Design for a remote SSH backend: connection model, provisioning, file sync, workdir modes, secrets, diff/apply, implementation plan, open questions |
+| [Runtime interface spike](research/runtime-interface-spike.md) | W11 spike — catalogs `Runtime` interface methods across 5 backends, classifies static-vs-dynamic, recommends BackendDescriptor + ≤14-method core + optional interfaces. |
