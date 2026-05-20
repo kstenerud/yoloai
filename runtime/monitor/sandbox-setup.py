@@ -1127,13 +1127,23 @@ def lifecycle_preamble(cfg, yoloai_dir):
     )
 
 
-def run_lifecycle_background(cfg, yoloai_dir, socket, log):
+def run_lifecycle_background(cfg, yoloai_dir, socket, log, pane_ready_event):
     """Run lifecycle commands in a background thread, then notify the agent.
 
     Called from a daemon thread so it never blocks the main setup flow.
+    pane_ready_event is set by the main thread once it has finished its own
+    tmux pane writes (launch_agent + deliver_prompt). The banner waits on
+    this event so it cannot interleave into the agent's startup command or
+    the initial prompt — both of those write the same pane via send-keys /
+    paste-buffer and would race otherwise.
     """
     run_lifecycle_commands(cfg, yoloai_dir, log)
     log_info("lifecycle.background_done", "background lifecycle commands complete")
+
+    # Wait for the main thread to finish writing to the pane before we add
+    # the completion banner. Without this, a fast lifecycle (e.g. none
+    # configured) lands the banner in the middle of the agent's exec line.
+    pane_ready_event.wait()
 
     # Deliver a completion notification to the agent pane.
     msg = "[yoloai] Background setup complete — all services are now available."
@@ -1221,12 +1231,16 @@ def main():
     # Launch lifecycle commands in a background thread so the agent starts
     # immediately. The preamble tells the agent what is still setting up;
     # run_lifecycle_background sends a notification when it completes.
+    # pane_ready gates the notification on completion of the main thread's
+    # own pane writes (launch_agent + deliver_prompt), so the banner cannot
+    # race into the agent's startup line or its initial prompt.
     def _log_lifecycle(msg):
         log_info("lifecycle.event", msg)
     preamble = lifecycle_preamble(cfg, yoloai_dir) or None
+    pane_ready = threading.Event()
     threading.Thread(
         target=run_lifecycle_background,
-        args=(cfg, yoloai_dir, socket, _log_lifecycle),
+        args=(cfg, yoloai_dir, socket, _log_lifecycle, pane_ready),
         daemon=True,
     ).start()
 
@@ -1252,6 +1266,9 @@ def main():
     monitor_exit(socket=socket)
     wait_for_ready(cfg, socket=socket)
     prompt_delivered = deliver_prompt(cfg, yoloai_dir, socket=socket, preamble=preamble)
+    # Main thread is done writing to the tmux pane; the lifecycle background
+    # banner is now safe to deliver.
+    pane_ready.set()
 
     # Write initial status and set title
     status_file = os.path.join(yoloai_dir, "agent-status.json")
