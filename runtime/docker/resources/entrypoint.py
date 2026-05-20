@@ -129,12 +129,44 @@ def read_secrets():
         log_debug("secrets.skip", "no secrets to inject")
 
 
+class NetworkIsolationError(RuntimeError):
+    """Raised when network isolation rules cannot be applied.
+
+    A sandbox configured with network_isolated=true MUST NOT start if the
+    iptables/ipset rules can't be installed — silent failure would leave the
+    agent with unrestricted egress while the user believes it is contained.
+    """
+
+
+def _run_strict(args, event, **fields):
+    """Run a command and raise NetworkIsolationError on non-zero exit or missing binary."""
+    try:
+        result = subprocess.run(args, capture_output=True, text=True)
+    except FileNotFoundError as e:
+        log_error(event, "required binary not found", cmd=args, error=str(e), **fields)
+        raise NetworkIsolationError(f"required binary not found: {args[0]}") from e
+    if result.returncode != 0:
+        stderr = (result.stderr or "").strip()
+        log_error(event, "command failed", cmd=args,
+                  exit_code=result.returncode, stderr=stderr, **fields)
+        raise NetworkIsolationError(
+            f"{' '.join(args)} failed (exit {result.returncode}): {stderr}"
+        )
+    return result
+
+
 def isolate_network(cfg):
-    """Apply iptables default-deny and allowlist rules."""
+    """Apply iptables default-deny and allowlist rules.
+
+    Raises NetworkIsolationError if any rule fails to install, so the
+    container fails to start rather than running with unenforced isolation.
+    """
     if not cfg.get("network_isolated", False):
         return
 
-    # Resolve allowed domains to IPs.
+    # Resolve allowed domains to IPs. A domain that doesn't resolve is logged
+    # but not fatal — the user may have listed a domain that's down or typo'd,
+    # and we still want the deny-by-default posture applied.
     allowed_domains = cfg.get("allowed_domains", [])
     allowed_ips = set()
     for domain in allowed_domains:
@@ -143,10 +175,15 @@ def isolate_network(cfg):
             for r in results:
                 ip = r[4][0]
                 allowed_ips.add((domain, ip))
-        except OSError:
-            pass
+        except OSError as e:
+            log_error("network.resolve_failed",
+                      "could not resolve allowlisted domain; entry will be ignored",
+                      domain=domain, error=str(e))
 
-    # Read nameservers from /etc/resolv.conf.
+    # Read nameservers from /etc/resolv.conf. Without these, DNS lookups
+    # inside the sandbox will be blocked by the default-deny rule, so warn
+    # loudly — the symptom (every hostname fails to resolve) is otherwise
+    # hard to attribute to network isolation.
     nameservers = []
     try:
         with open("/etc/resolv.conf") as f:
@@ -155,40 +192,54 @@ def isolate_network(cfg):
                     parts = line.split()
                     if len(parts) >= 2:
                         nameservers.append(parts[1])
-    except OSError:
-        pass
+    except OSError as e:
+        log_error("network.resolv_conf_unreadable",
+                  "cannot read /etc/resolv.conf; DNS will be blocked",
+                  error=str(e))
+    if not nameservers:
+        log_error("network.no_nameservers",
+                  "no nameservers found in /etc/resolv.conf; DNS will be blocked "
+                  "and allowlisted domains will be unreachable by name")
 
-    # Set up ipset for allowed IPs.
-    subprocess.run(["ipset", "create", "allowed-domains", "hash:net"],
-                   capture_output=True)
-    subprocess.run(["ipset", "flush", "allowed-domains"], capture_output=True)
-    for _domain, ip in allowed_ips:
-        subprocess.run(["ipset", "add", "allowed-domains", ip], capture_output=True)
+    # Set up ipset for allowed IPs. -exist makes create/add idempotent so
+    # restart in the same netns doesn't fail on the second pass.
+    _run_strict(["ipset", "create", "-exist", "allowed-domains", "hash:net"],
+                "network.ipset_create_failed")
+    _run_strict(["ipset", "flush", "allowed-domains"],
+                "network.ipset_flush_failed")
+    for domain, ip in allowed_ips:
+        _run_strict(["ipset", "add", "-exist", "allowed-domains", ip],
+                    "network.ipset_add_failed", domain=domain, ip=ip)
 
-    # Flush existing OUTPUT rules.
-    subprocess.run(["iptables", "-F", "OUTPUT"], capture_output=True)
+    # Flush existing OUTPUT rules so we start from a known state.
+    _run_strict(["iptables", "-F", "OUTPUT"], "network.iptables_flush_failed")
 
     # Allow loopback.
-    subprocess.run(["iptables", "-A", "OUTPUT", "-o", "lo", "-j", "ACCEPT"],
-                   capture_output=True)
+    _run_strict(["iptables", "-A", "OUTPUT", "-o", "lo", "-j", "ACCEPT"],
+                "network.iptables_loopback_failed")
     # Allow established/related.
-    subprocess.run(["iptables", "-A", "OUTPUT", "-m", "state",
-                    "--state", "ESTABLISHED,RELATED", "-j", "ACCEPT"],
-                   capture_output=True)
+    _run_strict(["iptables", "-A", "OUTPUT", "-m", "state",
+                 "--state", "ESTABLISHED,RELATED", "-j", "ACCEPT"],
+                "network.iptables_established_failed")
     # Allow DNS to configured nameservers.
     for ns in nameservers:
         for proto in ("udp", "tcp"):
-            subprocess.run(["iptables", "-A", "OUTPUT", "-d", ns, "-p", proto,
-                             "--dport", "53", "-j", "ACCEPT"], capture_output=True)
+            _run_strict(["iptables", "-A", "OUTPUT", "-d", ns, "-p", proto,
+                         "--dport", "53", "-j", "ACCEPT"],
+                        "network.iptables_dns_failed", nameserver=ns, proto=proto)
     # Allow traffic to allowlisted IPs.
-    subprocess.run(["iptables", "-A", "OUTPUT", "-m", "set",
-                    "--match-set", "allowed-domains", "dst", "-j", "ACCEPT"],
-                   capture_output=True)
-    # Reject everything else.
-    subprocess.run(["iptables", "-A", "OUTPUT", "-j", "REJECT",
-                    "--reject-with", "icmp-port-unreachable"], capture_output=True)
+    _run_strict(["iptables", "-A", "OUTPUT", "-m", "set",
+                 "--match-set", "allowed-domains", "dst", "-j", "ACCEPT"],
+                "network.iptables_allowlist_failed")
+    # Reject everything else. This is the load-bearing rule — if every prior
+    # rule succeeded but this one failed, the sandbox would be wide open.
+    _run_strict(["iptables", "-A", "OUTPUT", "-j", "REJECT",
+                 "--reject-with", "icmp-port-unreachable"],
+                "network.iptables_reject_failed")
 
-    log_info("network.isolate", "iptables default-deny applied")
+    log_info("network.isolate", "iptables default-deny applied",
+             nameserver_count=len(nameservers),
+             allowed_ip_count=len(allowed_ips))
     for domain, ip in allowed_ips:
         log_info("network.allow", "domain added to allowlist", domain=domain, ip=ip)
 
