@@ -363,8 +363,6 @@ func statusJSONBytes(status string, exitCode *int, ts int64) []byte {
 	return data
 }
 
-func intPtr(v int) *int { return &v }
-
 func TestDetectStatus_StatusJSON_Active(t *testing.T) {
 	dir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(dir, AgentStatusFile),
@@ -398,7 +396,7 @@ func TestDetectStatus_StatusJSON_Idle(t *testing.T) {
 func TestDetectStatus_StatusJSON_Done(t *testing.T) {
 	dir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(dir, AgentStatusFile),
-		statusJSONBytes("done", intPtr(0), time.Now().Unix()), 0600))
+		statusJSONBytes("done", new(0), time.Now().Unix()), 0600))
 
 	mock := &inspectMockRuntime{
 		inspectFn: func(_ context.Context, _ string) (runtime.InstanceInfo, error) {
@@ -413,7 +411,7 @@ func TestDetectStatus_StatusJSON_Done(t *testing.T) {
 func TestDetectStatus_StatusJSON_Failed(t *testing.T) {
 	dir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(dir, AgentStatusFile),
-		statusJSONBytes("done", intPtr(1), time.Now().Unix()), 0600))
+		statusJSONBytes("done", new(1), time.Now().Unix()), 0600))
 
 	mock := &inspectMockRuntime{
 		inspectFn: func(_ context.Context, _ string) (runtime.InstanceInfo, error) {
@@ -446,7 +444,7 @@ func TestDetectStatus_StatusJSON_Stale(t *testing.T) {
 func TestDetectStatus_StatusJSON_StaleDone(t *testing.T) {
 	dir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(dir, AgentStatusFile),
-		statusJSONBytes("done", intPtr(0), time.Now().Add(-30*time.Second).Unix()), 0600))
+		statusJSONBytes("done", new(0), time.Now().Add(-30*time.Second).Unix()), 0600))
 
 	mock := &inspectMockRuntime{
 		inspectFn: func(_ context.Context, _ string) (runtime.InstanceInfo, error) {
@@ -476,10 +474,10 @@ func TestParseStatusJSON(t *testing.T) {
 		{"idle fresh", statusJSONBytes("idle", nil, now), StatusIdle, true},
 		{"active stale", statusJSONBytes("active", nil, old), "", false},
 		{"idle stale", statusJSONBytes("idle", nil, old), StatusIdle, true},
-		{"done success", statusJSONBytes("done", intPtr(0), now), StatusDone, true},
-		{"done failure", statusJSONBytes("done", intPtr(1), now), StatusFailed, true},
-		{"done stale success", statusJSONBytes("done", intPtr(0), old), StatusDone, true},
-		{"done stale failure", statusJSONBytes("done", intPtr(1), old), StatusFailed, true},
+		{"done success", statusJSONBytes("done", new(0), now), StatusDone, true},
+		{"done failure", statusJSONBytes("done", new(1), now), StatusFailed, true},
+		{"done stale success", statusJSONBytes("done", new(0), old), StatusDone, true},
+		{"done stale failure", statusJSONBytes("done", new(1), old), StatusFailed, true},
 		{"done no exit code", statusJSONBytes("done", nil, now), StatusFailed, true},
 		{"unknown status", statusJSONBytes("unknown", nil, now), "", false},
 		{"zero timestamp", statusJSONBytes("active", nil, 0), "", false},

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -69,12 +70,7 @@ func (ext *Extension) SupportsAgent(name string) bool {
 	if ext.Agent == nil {
 		return true
 	}
-	for _, n := range ext.Agent.Names {
-		if n == name {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(ext.Agent.Names, name)
 }
 
 // ExitError carries a script exit code through Cobra back to the root command.

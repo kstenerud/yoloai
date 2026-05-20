@@ -155,7 +155,7 @@ func runList(cmd *cobra.Command, _ []string) error {
 			infos = []*sandbox.Info{}
 		}
 		// Create output structure with unavailable_backends field
-		output := map[string]interface{}{
+		output := map[string]any{
 			"sandboxes":            infos,
 			"unavailable_backends": unavailableBackends,
 		}

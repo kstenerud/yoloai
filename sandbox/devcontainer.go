@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"strings"
 )
@@ -69,10 +70,10 @@ type DevcontainerConfig struct {
 	RemoteEnv    map[string]string `json:"remoteEnv,omitempty"`
 	ContainerEnv map[string]string `json:"containerEnv,omitempty"`
 
-	OnCreateCommand      LifecycleCmd `json:"onCreateCommand,omitempty"`
-	UpdateContentCommand LifecycleCmd `json:"updateContentCommand,omitempty"`
-	PostCreateCommand    LifecycleCmd `json:"postCreateCommand,omitempty"`
-	PostStartCommand     LifecycleCmd `json:"postStartCommand,omitempty"`
+	OnCreateCommand      LifecycleCmd `json:"onCreateCommand"`
+	UpdateContentCommand LifecycleCmd `json:"updateContentCommand"`
+	PostCreateCommand    LifecycleCmd `json:"postCreateCommand"`
+	PostStartCommand     LifecycleCmd `json:"postStartCommand"`
 
 	Mounts          []string `json:"mounts,omitempty"`
 	WorkspaceFolder string   `json:"workspaceFolder,omitempty"`
@@ -83,16 +84,16 @@ type DevcontainerConfig struct {
 
 	Features          map[string]any `json:"features,omitempty"`
 	RunArgs           []string       `json:"runArgs,omitempty"`
-	InitializeCommand LifecycleCmd   `json:"initializeCommand,omitempty"`
-	PostAttachCommand LifecycleCmd   `json:"postAttachCommand,omitempty"`
+	InitializeCommand LifecycleCmd   `json:"initializeCommand"`
+	PostAttachCommand LifecycleCmd   `json:"postAttachCommand"`
 	DockerComposeFile any            `json:"dockerComposeFile,omitempty"` // string or []string
 
 	Customizations struct {
 		VSCode struct {
 			Extensions []string       `json:"extensions,omitempty"`
 			Settings   map[string]any `json:"settings,omitempty"`
-		} `json:"vscode,omitempty"`
-	} `json:"customizations,omitempty"`
+		} `json:"vscode"`
+	} `json:"customizations"`
 
 	Name             string `json:"name,omitempty"`
 	WaitFor          string `json:"waitFor,omitempty"`
@@ -197,7 +198,7 @@ func (dc *DevcontainerConfig) FilterMounts(workdirMountPath string) (mounts []st
 // key=value syntax (e.g. "source=/path,target=/path,type=bind"), regardless of
 // key order. Normal host:container paths start with "/" and contain no "=".
 func isMountKeyValueFormat(m string) bool {
-	for _, part := range strings.Split(m, ",") {
+	for part := range strings.SplitSeq(m, ",") {
 		k, _, ok := strings.Cut(part, "=")
 		if ok {
 			switch k {
@@ -213,7 +214,7 @@ func isMountKeyValueFormat(m string) bool {
 // Handles: key=value Docker --mount syntax  OR  /host:/container[:ro]
 func extractMountSource(m string) string {
 	if isMountKeyValueFormat(m) {
-		for _, part := range strings.Split(m, ",") {
+		for part := range strings.SplitSeq(m, ",") {
 			if k, v, ok := strings.Cut(part, "="); ok && (k == "source" || k == "src") {
 				return v
 			}
@@ -231,7 +232,7 @@ func extractMountSource(m string) string {
 // extractMountTarget extracts the target/container path from a mount string.
 func extractMountTarget(m string) string {
 	if isMountKeyValueFormat(m) {
-		for _, part := range strings.Split(m, ",") {
+		for part := range strings.SplitSeq(m, ",") {
 			if k, v, ok := strings.Cut(part, "="); ok && (k == "target" || k == "dst" || k == "destination") {
 				return v
 			}
@@ -249,7 +250,7 @@ func extractMountTarget(m string) string {
 // extractMountReadOnly returns true if the mount string marks the mount read-only.
 func extractMountReadOnly(m string) bool {
 	if isMountKeyValueFormat(m) {
-		for _, part := range strings.Split(m, ",") {
+		for part := range strings.SplitSeq(m, ",") {
 			part = strings.TrimSpace(part)
 			if part == "readonly" || part == "ro" {
 				return true
@@ -284,12 +285,8 @@ func isCredentialDir(path string) bool {
 // MergedEnv merges remoteEnv and containerEnv. remoteEnv takes precedence on conflict.
 func (dc *DevcontainerConfig) MergedEnv() map[string]string {
 	result := make(map[string]string)
-	for k, v := range dc.ContainerEnv {
-		result[k] = v
-	}
-	for k, v := range dc.RemoteEnv {
-		result[k] = v
-	}
+	maps.Copy(result, dc.ContainerEnv)
+	maps.Copy(result, dc.RemoteEnv)
 	return result
 }
 

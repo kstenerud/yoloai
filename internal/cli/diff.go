@@ -327,13 +327,11 @@ func parseDiffArgs(rest []string, cmd *cobra.Command) (ref string, paths []strin
 		// rest was already after name, so dashAt-1 gives us how many
 		// of rest are before the dash. But ArgsLenAtDash counts from
 		// the full args array. We need to adjust: name consumed 1 arg.
-		beforeDash := dashAt - 1 // how many of rest[] are before "--"
-		if beforeDash < 0 {
-			beforeDash = 0
-		}
-		if beforeDash > len(rest) {
-			beforeDash = len(rest)
-		}
+		beforeDash := min(
+			// how many of rest[] are before "--"
+			max(
+
+				dashAt-1, 0), len(rest))
 
 		// Everything before dash is the ref (at most 1)
 		if beforeDash > 0 {
@@ -403,7 +401,7 @@ func diffLogWithStat(cmd *cobra.Command, name string, out io.Writer, tagsByCommi
 		line := formatCommitLine(i+1, c.SHA, c.Subject, tagsByCommit)
 		fmt.Fprintln(out, line) //nolint:errcheck
 		if c.Stat != "" {
-			for _, statLine := range strings.Split(c.Stat, "\n") {
+			for statLine := range strings.SplitSeq(c.Stat, "\n") {
 				fmt.Fprintf(out, "     %s\n", statLine) //nolint:errcheck
 			}
 		}

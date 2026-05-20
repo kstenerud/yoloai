@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"os"
 	"path/filepath"
 	goruntime "runtime"
@@ -236,9 +237,7 @@ func applyCLIOverrides(opts *CreateOptions, pr *profileResult) error {
 		if pr.env == nil {
 			pr.env = make(map[string]string)
 		}
-		for k, v := range opts.Env {
-			pr.env[k] = v
-		}
+		maps.Copy(pr.env, opts.Env)
 	}
 
 	return nil

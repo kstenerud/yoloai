@@ -220,8 +220,7 @@ func (r *Runtime) buildProfileImageCLI(ctx context.Context, sourceDir string, ta
 	cmd.Stderr = output
 
 	if err := cmd.Run(); err != nil {
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
+		if exitErr, ok := errors.AsType[*exec.ExitError](err); ok {
 			return fmt.Errorf("%s build exited with code %d", r.binaryName, exitErr.ExitCode())
 		}
 		return fmt.Errorf("%s build: %w", r.binaryName, err)

@@ -34,7 +34,7 @@ func ListTagsBeyondBaseline(name string) ([]TagInfo, error) {
 	}
 
 	beyondSet := make(map[string]bool)
-	for _, sha := range strings.Fields(string(revOut)) {
+	for sha := range strings.FieldsSeq(string(revOut)) {
 		beyondSet[strings.ToLower(sha)] = true
 	}
 
@@ -138,7 +138,7 @@ func listAllTags(gitDir string) ([]TagInfo, error) {
 	}
 
 	var tags []TagInfo
-	for _, line := range strings.Split(raw, "\n") {
+	for line := range strings.SplitSeq(raw, "\n") {
 		parts := strings.SplitN(line, "\x01", 4)
 		if len(parts) < 4 {
 			continue

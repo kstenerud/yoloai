@@ -233,7 +233,7 @@ func resolveToolchainPrefix(name string) (string, bool) {
 // pathComponentCount returns the number of non-empty path components in p.
 func pathComponentCount(p string) int {
 	count := 0
-	for _, part := range strings.Split(p, "/") {
+	for part := range strings.SplitSeq(p, "/") {
 		if part != "" {
 			count++
 		}

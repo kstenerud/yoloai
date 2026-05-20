@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -212,10 +213,8 @@ func (m *Manager) runNewUserSetup(ctx context.Context, opts SetupOptions) error 
 
 // validateTmuxConf checks that the value is one of the accepted tmux_conf modes.
 func validateTmuxConf(value string) error {
-	for _, v := range validTmuxConf {
-		if value == v {
-			return nil
-		}
+	if slices.Contains(validTmuxConf, value) {
+		return nil
 	}
 	return fmt.Errorf("invalid --tmux-conf value %q (valid: %s)", value, strings.Join(validTmuxConf, ", "))
 }
@@ -264,7 +263,7 @@ func (m *Manager) promptTmuxSetup(ctx context.Context, userConfig string, noConf
 		fmt.Fprintln(m.output, "include sensible defaults (mouse scroll, colors, vim-friendly settings).") //nolint:errcheck // best-effort output
 		fmt.Fprintln(m.output)                                                                             //nolint:errcheck // best-effort output
 		fmt.Fprintln(m.output, "Your config (~/.tmux.conf):")                                              //nolint:errcheck // best-effort output
-		for _, line := range strings.Split(strings.TrimRight(userConfig, "\n"), "\n") {
+		for line := range strings.SplitSeq(strings.TrimRight(userConfig, "\n"), "\n") {
 			fmt.Fprintf(m.output, "  %s\n", line) //nolint:errcheck // best-effort output
 		}
 	}

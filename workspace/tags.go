@@ -59,7 +59,7 @@ func BuildSHAMapByMatching(sandboxDir, hostDir string, sandboxSHAs []string) (ma
 		Subject   string
 	}
 	hostCommits := make(map[commitKey]string)
-	for _, line := range strings.Split(strings.TrimSpace(string(output)), "\n") {
+	for line := range strings.SplitSeq(strings.TrimSpace(string(output)), "\n") {
 		if line == "" {
 			continue
 		}

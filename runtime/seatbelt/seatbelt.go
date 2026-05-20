@@ -340,7 +340,7 @@ func (r *Runtime) Remove(ctx context.Context, name string) error {
 	// Clean up mount symlinks
 	manifestPath := filepath.Join(sandboxPath, backendDir, symlinkManifestName)
 	if data, err := os.ReadFile(manifestPath); err == nil { //nolint:gosec // G304: path within sandbox dir
-		for _, linkPath := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+		for linkPath := range strings.SplitSeq(strings.TrimSpace(string(data)), "\n") {
 			if linkPath == "" {
 				continue
 			}
@@ -672,7 +672,7 @@ func (r *Runtime) buildExecCommand(sandboxPath string, cmd []string) *exec.Cmd {
 	// not the seatbelt copy path.
 	cfgPath := filepath.Join(sandboxPath, "runtime-config.json")
 	if data, err := os.ReadFile(cfgPath); err == nil { //nolint:gosec // G304: path within sandbox dir
-		var raw map[string]interface{}
+		var raw map[string]any
 		if err := json.Unmarshal(data, &raw); err == nil {
 			if wd, ok := raw["working_dir"].(string); ok && wd != "" {
 				c.Dir = wd
@@ -718,7 +718,7 @@ func (r *Runtime) patchConfigWorkingDir(sandboxPath string, mounts []runtime.Mou
 		return err
 	}
 
-	var raw map[string]interface{}
+	var raw map[string]any
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
 	}

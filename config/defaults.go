@@ -123,7 +123,7 @@ const DefaultGlobalConfigYAML = `# yoloai global configuration
 // until the user uncomments and edits specific settings.
 func GenerateScaffoldConfig(bakedInYAML string) string {
 	var out strings.Builder
-	for _, line := range strings.Split(bakedInYAML, "\n") {
+	for line := range strings.SplitSeq(bakedInYAML, "\n") {
 		trimmed := strings.TrimSpace(line)
 		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
 			out.WriteString(line + "\n")

@@ -53,13 +53,14 @@ func registerExtensionSubcommands(parent *cobra.Command) {
 // newExtensionRunCmd creates a Cobra command for a single extension.
 func newExtensionRunCmd(ext *extension.Extension) *cobra.Command {
 	// Build Use string with arg placeholders
-	use := ext.Name
+	var use strings.Builder
+	use.WriteString(ext.Name)
 	for _, a := range ext.Args {
-		use += " <" + a.Name + ">"
+		use.WriteString(" <" + a.Name + ">")
 	}
 
 	cmd := &cobra.Command{
-		Use:   use,
+		Use:   use.String(),
 		Short: ext.Description,
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -122,8 +123,7 @@ func runExtension(cmd *cobra.Command, ext *extension.Extension, args []string) e
 	sh.Stderr = cmd.ErrOrStderr()
 
 	if err := sh.Run(); err != nil {
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
+		if exitErr, ok := errors.AsType[*exec.ExitError](err); ok {
 			return &extension.ExitError{Code: exitErr.ExitCode()}
 		}
 		return fmt.Errorf("run extension %q: %w", ext.Name, err)

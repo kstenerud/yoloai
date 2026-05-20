@@ -684,7 +684,7 @@ func (r *Runtime) vmExists(ctx context.Context, vmName string) bool {
 	if err != nil {
 		return false
 	}
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		if strings.TrimSpace(line) == vmName {
 			return true
 		}
@@ -866,8 +866,8 @@ func (r *Runtime) createVMMountSymlinks(ctx context.Context, vmName, sandboxPath
 // resolveMountVFSPath resolves the VirtioFS path for a mount source.
 // Returns the vfsPath and true if the mount should be symlinked, or ("", false) to skip.
 func resolveMountVFSPath(source, sandboxPath, vmSharedDir string) (string, bool) {
-	if strings.HasPrefix(source, sandboxPath+"/") {
-		relPath := strings.TrimPrefix(source, sandboxPath+"/")
+	if after, ok := strings.CutPrefix(source, sandboxPath+"/"); ok {
+		relPath := after
 		vfsPath := filepath.Join(vmSharedDir, relPath)
 		if stat, err := os.Stat(source); err != nil {
 			slog.Debug("tart setup: mount source does not exist on host!", "source", source, "err", err)
@@ -954,7 +954,7 @@ func (r *Runtime) patchConfigWorkingDir(sandboxPath string) error {
 		return err
 	}
 
-	var raw map[string]interface{}
+	var raw map[string]any
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
 	}
@@ -988,7 +988,7 @@ func (r *Runtime) stopVM(ctx context.Context, vmName string) {
 	if err != nil {
 		return // no matching processes
 	}
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+	for line := range strings.SplitSeq(strings.TrimSpace(string(out)), "\n") {
 		pid, err := strconv.Atoi(strings.TrimSpace(line))
 		if err != nil {
 			continue
@@ -1266,7 +1266,7 @@ func (r *Runtime) addMountMapToConfig(sandboxPath string, mounts []runtime.Mount
 		return err
 	}
 
-	var raw map[string]interface{}
+	var raw map[string]any
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
 	}

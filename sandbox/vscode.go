@@ -6,6 +6,7 @@ package sandbox
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 
@@ -92,18 +93,15 @@ func mergeSettingsJSON(vscodeDir string, newSettings map[string]any) error {
 	merged := make(map[string]any)
 
 	// Start with devcontainer settings as base
-	for k, v := range newSettings {
-		merged[k] = v
-	}
+	maps.Copy(merged, newSettings)
 
 	// Overlay with existing file (existing keys win)
 	data, err := os.ReadFile(path) //nolint:gosec // G304: path is in workdir copy
 	if err == nil {
 		var existing map[string]any
 		if jsonErr := json.Unmarshal(data, &existing); jsonErr == nil {
-			for k, v := range existing {
-				merged[k] = v // existing always wins
-			}
+			// existing always wins
+			maps.Copy(merged, existing)
 		}
 	}
 

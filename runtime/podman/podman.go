@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	goruntime "runtime"
+	"slices"
 	"strings"
 
 	"github.com/kstenerud/yoloai/internal/yoerrors"
@@ -77,13 +78,7 @@ func New(ctx context.Context) (*Runtime, error) {
 func (r *Runtime) Create(ctx context.Context, cfg runtime.InstanceConfig) error {
 	if r.rootless && cfg.UsernsMode == "" && goruntime.GOOS != "darwin" {
 		// Check if overlay mode is active (indicated by SYS_ADMIN capability)
-		hasOverlay := false
-		for _, cap := range cfg.CapAdd {
-			if cap == "SYS_ADMIN" {
-				hasOverlay = true
-				break
-			}
-		}
+		hasOverlay := slices.Contains(cfg.CapAdd, "SYS_ADMIN")
 		// Only use keep-id for normal mounts; overlay needs root in container
 		if !hasOverlay {
 			cfg.UsernsMode = "keep-id"

@@ -297,7 +297,7 @@ func sanitizeText(text string) string {
 // those event patterns are removed. String values are sanitized in all modes.
 func sanitizeJSONLBytes(data []byte, omitEvents []string) []byte {
 	var out bytes.Buffer
-	for _, line := range bytes.Split(data, []byte("\n")) {
+	for line := range bytes.SplitSeq(data, []byte("\n")) {
 		trimmed := bytes.TrimSpace(line)
 		if len(trimmed) == 0 {
 			continue
@@ -336,8 +336,8 @@ func extractJSONLEvent(line []byte) string {
 // Pattern ending in ".*" does prefix match; otherwise exact match.
 func shouldOmitEvent(event string, omitEvents []string) bool {
 	for _, pattern := range omitEvents {
-		if strings.HasSuffix(pattern, ".*") {
-			prefix := strings.TrimSuffix(pattern, ".*")
+		if before, ok := strings.CutSuffix(pattern, ".*"); ok {
+			prefix := before
 			if strings.HasPrefix(event, prefix) {
 				return true
 			}

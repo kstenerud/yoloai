@@ -369,7 +369,7 @@ func ListCommitsBeyondBaselineOverlay(ctx context.Context, rt runtime.Runtime, n
 			continue
 		}
 
-		for _, line := range strings.Split(lines, "\n") {
+		for line := range strings.SplitSeq(lines, "\n") {
 			sha, subject, ok := strings.Cut(line, " ")
 			if !ok {
 				continue

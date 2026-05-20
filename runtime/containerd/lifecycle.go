@@ -223,7 +223,7 @@ func (r *Runtime) Create(ctx context.Context, cfg runtime.InstanceConfig) error 
 	// Kata config: only override when a non-default config path is needed
 	// (e.g. Firecracker). For the default kata.v2 runtime, pass nil to let
 	// the shim use its built-in default (Dragonball VMM).
-	var kataOpts interface{}
+	var kataOpts any
 	if cfgPath := kataConfigPath(cfg.ContainerRuntime); cfgPath != "" {
 		kataOpts = &runtimeoptions.Options{ConfigPath: cfgPath}
 	}

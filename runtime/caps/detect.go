@@ -72,7 +72,7 @@ func detectKVMGroup() bool {
 	}
 
 	// Look for a "kvm:" line that contains the username.
-	for _, line := range strings.Split(string(data), "\n") {
+	for line := range strings.SplitSeq(string(data), "\n") {
 		if !strings.HasPrefix(line, "kvm:") {
 			continue
 		}
@@ -81,8 +81,8 @@ func detectKVMGroup() bool {
 		if len(parts) < 4 {
 			continue
 		}
-		members := strings.Split(parts[3], ",")
-		for _, m := range members {
+		members := strings.SplitSeq(parts[3], ",")
+		for m := range members {
 			if strings.TrimSpace(m) == username {
 				return true
 			}
@@ -98,7 +98,7 @@ func usernameFromPasswd(uid int) string {
 		return ""
 	}
 	uidStr := itoa(uid)
-	for _, line := range strings.Split(string(data), "\n") {
+	for line := range strings.SplitSeq(string(data), "\n") {
 		parts := strings.SplitN(line, ":", 7)
 		if len(parts) < 4 {
 			continue

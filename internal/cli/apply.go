@@ -135,13 +135,7 @@ func parseApplyArgs(rest []string, cmd *cobra.Command) (refs []string, paths []s
 	dashAt := cmd.ArgsLenAtDash()
 	if dashAt >= 0 {
 		// Explicit "--" separator. Account for name already consumed.
-		beforeDash := dashAt - 1
-		if beforeDash < 0 {
-			beforeDash = 0
-		}
-		if beforeDash > len(rest) {
-			beforeDash = len(rest)
-		}
+		beforeDash := min(max(dashAt-1, 0), len(rest))
 		refs = rest[:beforeDash]
 		paths = rest[beforeDash:]
 		return refs, paths

@@ -231,13 +231,13 @@ func printStep(w io.Writer, step FixStep, indent string) {
 	if step.NeedsRoot {
 		prefix := indent + "(requires root)  "
 		if step.Command != "" {
-			for _, line := range strings.Split(step.Command, "\n") {
+			for line := range strings.SplitSeq(step.Command, "\n") {
 				fmt.Fprintf(w, "%s%s\n", prefix, line) //nolint:errcheck
 				prefix = indent + "                 "
 			}
 		}
 	} else if step.Command != "" {
-		for _, line := range strings.Split(step.Command, "\n") {
+		for line := range strings.SplitSeq(step.Command, "\n") {
 			fmt.Fprintf(w, "%s%s\n", indent, line) //nolint:errcheck
 		}
 	}

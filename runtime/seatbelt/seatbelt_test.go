@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -481,7 +482,7 @@ func TestPatchConfigWorkingDir_CopyMode(t *testing.T) {
 	}
 
 	cfgPath := filepath.Join(sandboxPath, "runtime-config.json")
-	cfgData, err := json.Marshal(map[string]interface{}{
+	cfgData, err := json.Marshal(map[string]any{
 		"working_dir": "/original/path",
 		"other_key":   "other_value",
 	})
@@ -505,7 +506,7 @@ func TestPatchConfigWorkingDir_CopyMode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var raw map[string]interface{}
+	var raw map[string]any
 	if err := json.Unmarshal(data, &raw); err != nil {
 		t.Fatal(err)
 	}
@@ -576,7 +577,7 @@ func TestPatchConfigWorkingDir_AlreadyCorrect(t *testing.T) {
 	}
 
 	// working_dir already equals the copy source
-	cfgData, err := json.Marshal(map[string]interface{}{
+	cfgData, err := json.Marshal(map[string]any{
 		"working_dir": workDir,
 	})
 	if err != nil {
@@ -607,7 +608,7 @@ func TestPatchConfigWorkingDir_AlreadyCorrect(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var raw map[string]interface{}
+	var raw map[string]any
 	if err := json.Unmarshal(data, &raw); err != nil {
 		t.Fatal(err)
 	}
@@ -683,13 +684,7 @@ func TestToolchainReadPaths_DetectsPython(t *testing.T) {
 	prefix := filepath.Dir(filepath.Dir(resolved))
 
 	paths := toolchainReadPaths()
-	found := false
-	for _, p := range paths {
-		if p == prefix {
-			found = true
-			break
-		}
-	}
+	found := slices.Contains(paths, prefix)
 	// The prefix might be skipped if it's under a system path or is a parent
 	// of system paths (e.g. /usr when /usr/bin is a system path) — that's
 	// correct behavior. Only fail if it's unrelated to any system prefix.

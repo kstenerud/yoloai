@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -99,13 +100,7 @@ func (m *Manager) applyIsolationOverride(ctx context.Context, opts StartOptions,
 	}
 	supported := m.runtime.SupportedIsolationModes()
 	if opts.Isolation != "container" && len(supported) > 0 {
-		ok := false
-		for _, s := range supported {
-			if s == opts.Isolation {
-				ok = true
-				break
-			}
-		}
+		ok := slices.Contains(supported, opts.Isolation)
 		if !ok {
 			return NewUsageError("isolation mode %q is not supported by the %s backend", opts.Isolation, m.runtime.Name())
 		}
@@ -930,10 +925,7 @@ func (m *Manager) sendResumePrompt(ctx context.Context, name, sandboxDir string,
     sleep 1
 done`, cfg.ReadyPattern)
 	case cfg.StartupDelay > 0:
-		delaySec := cfg.StartupDelay / 1000
-		if delaySec < 1 {
-			delaySec = 1
-		}
+		delaySec := max(cfg.StartupDelay/1000, 1)
 		waitCmd = fmt.Sprintf("sleep %d", delaySec)
 	default:
 		waitCmd = "sleep 3"
@@ -1015,10 +1007,7 @@ func (m *Manager) sendCustomPrompt(ctx context.Context, name, sandboxDir string,
     sleep 1
 done`, cfg.ReadyPattern)
 	case cfg.StartupDelay > 0:
-		delaySec := cfg.StartupDelay / 1000
-		if delaySec < 1 {
-			delaySec = 1
-		}
+		delaySec := max(cfg.StartupDelay/1000, 1)
 		waitCmd = fmt.Sprintf("sleep %d", delaySec)
 	default:
 		waitCmd = "sleep 3"

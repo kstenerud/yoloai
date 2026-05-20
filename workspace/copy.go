@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/kstenerud/yoloai/internal/fileutil"
@@ -291,9 +292,9 @@ func removeBuildArtifacts(root string) error {
 	}
 
 	// Remove in reverse order so nested entries are removed before parents.
-	for i := len(toRemove) - 1; i >= 0; i-- {
-		if err := os.RemoveAll(toRemove[i]); err != nil {
-			return fmt.Errorf("remove %s: %w", toRemove[i], err)
+	for _, t := range slices.Backward(toRemove) {
+		if err := os.RemoveAll(t); err != nil {
+			return fmt.Errorf("remove %s: %w", t, err)
 		}
 	}
 	return nil
@@ -322,9 +323,9 @@ func RemoveGitDirs(root string) error {
 	}
 
 	// Remove in reverse order so nested entries are removed before parents.
-	for i := len(toRemove) - 1; i >= 0; i-- {
-		if err := os.RemoveAll(toRemove[i]); err != nil {
-			return fmt.Errorf("remove %s: %w", toRemove[i], err)
+	for _, t := range slices.Backward(toRemove) {
+		if err := os.RemoveAll(t); err != nil {
+			return fmt.Errorf("remove %s: %w", t, err)
 		}
 	}
 	return nil

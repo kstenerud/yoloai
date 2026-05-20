@@ -138,43 +138,35 @@ func finalizeBugReport(exitCode int, runErr error, panicked bool) {
 
 // errorExitCode maps an error to the appropriate exit code.
 func errorExitCode(err error) int {
-	var exitErr *extension.ExitError
-	if errors.As(err, &exitErr) {
+	if exitErr, ok := errors.AsType[*extension.ExitError](err); ok {
 		return exitErr.Code
 	}
 
-	var usageErr *sandbox.UsageError
-	if errors.As(err, &usageErr) {
+	if _, ok := errors.AsType[*sandbox.UsageError](err); ok {
 		return 2
 	}
 
-	var configErr *sandbox.ConfigError
-	if errors.As(err, &configErr) {
+	if _, ok := errors.AsType[*sandbox.ConfigError](err); ok {
 		return 3
 	}
 
-	var activeWorkErr *sandbox.ActiveWorkError
-	if errors.As(err, &activeWorkErr) {
+	if _, ok := errors.AsType[*sandbox.ActiveWorkError](err); ok {
 		return 4
 	}
 
-	var depErr *sandbox.DependencyError
-	if errors.As(err, &depErr) {
+	if _, ok := errors.AsType[*sandbox.DependencyError](err); ok {
 		return 5
 	}
 
-	var platErr *sandbox.PlatformError
-	if errors.As(err, &platErr) {
+	if _, ok := errors.AsType[*sandbox.PlatformError](err); ok {
 		return 6
 	}
 
-	var authErr *sandbox.AuthError
-	if errors.As(err, &authErr) {
+	if _, ok := errors.AsType[*sandbox.AuthError](err); ok {
 		return 7
 	}
 
-	var permErr *sandbox.PermissionError
-	if errors.As(err, &permErr) {
+	if _, ok := errors.AsType[*sandbox.PermissionError](err); ok {
 		return 8
 	}
 

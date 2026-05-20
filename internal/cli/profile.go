@@ -733,12 +733,12 @@ func findSandboxesWithProfile(profileName string) []string {
 
 // joinNames joins strings with ", ".
 func joinNames(names []string) string {
-	result := ""
+	var result strings.Builder
 	for i, name := range names {
 		if i > 0 {
-			result += ", "
+			result.WriteString(", ")
 		}
-		result += name
+		result.WriteString(name)
 	}
-	return result
+	return result.String()
 }

@@ -332,7 +332,7 @@ func TestRemapTargetPath(t *testing.T) {
 
 func TestPatchConfigWorkingDir_RemapsDockerPath(t *testing.T) {
 	sandboxDir := t.TempDir()
-	cfg := map[string]interface{}{
+	cfg := map[string]any{
 		"agent_command": "claude",
 		"working_dir":   "/home/yoloai/project",
 	}
@@ -345,14 +345,14 @@ func TestPatchConfigWorkingDir_RemapsDockerPath(t *testing.T) {
 
 	data, err := os.ReadFile(filepath.Join(sandboxDir, "runtime-config.json")) //nolint:gosec // test
 	require.NoError(t, err)
-	var result map[string]interface{}
+	var result map[string]any
 	require.NoError(t, json.Unmarshal(data, &result))
 	assert.Equal(t, "/Users/admin/project", result["working_dir"])
 }
 
 func TestPatchConfigWorkingDir_NoopWhenNoRemap(t *testing.T) {
 	sandboxDir := t.TempDir()
-	cfg := map[string]interface{}{
+	cfg := map[string]any{
 		"agent_command": "claude",
 		"working_dir":   "/tmp/foo",
 	}
@@ -365,7 +365,7 @@ func TestPatchConfigWorkingDir_NoopWhenNoRemap(t *testing.T) {
 
 	data, err := os.ReadFile(filepath.Join(sandboxDir, "runtime-config.json")) //nolint:gosec // test
 	require.NoError(t, err)
-	var result map[string]interface{}
+	var result map[string]any
 	require.NoError(t, json.Unmarshal(data, &result))
 	assert.Equal(t, "/tmp/foo", result["working_dir"])
 }
@@ -379,7 +379,7 @@ func TestPatchConfigWorkingDir_MissingConfig(t *testing.T) {
 
 func TestPatchConfigWorkingDir_NoWorkingDirKey(t *testing.T) {
 	sandboxDir := t.TempDir()
-	cfg := map[string]interface{}{
+	cfg := map[string]any{
 		"agent_command": "claude",
 	}
 	cfgData, err := json.MarshalIndent(cfg, "", "  ")
@@ -392,7 +392,7 @@ func TestPatchConfigWorkingDir_NoWorkingDirKey(t *testing.T) {
 	// File should remain unchanged
 	data, err := os.ReadFile(filepath.Join(sandboxDir, "runtime-config.json")) //nolint:gosec // test
 	require.NoError(t, err)
-	var result map[string]interface{}
+	var result map[string]any
 	require.NoError(t, json.Unmarshal(data, &result))
 	assert.Nil(t, result["working_dir"])
 }

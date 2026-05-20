@@ -59,7 +59,7 @@ func CheckPathOverlap(paths []string) error {
 		resolved[i] = r
 	}
 
-	for i := 0; i < len(resolved); i++ {
+	for i := range resolved {
 		for j := i + 1; j < len(resolved); j++ {
 			if pathsOverlap(resolved[i], resolved[j]) {
 				shorter, longer := resolved[i], resolved[j]

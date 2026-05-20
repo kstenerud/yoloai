@@ -23,7 +23,7 @@ func buildGVisorRegisteredCap(binaryName string) caps.HostCapability {
 			if err != nil {
 				return fmt.Errorf("check runtimes: %w", err)
 			}
-			for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+			for line := range strings.SplitSeq(strings.TrimSpace(string(out)), "\n") {
 				if strings.TrimSpace(line) == "runsc" {
 					return nil
 				}

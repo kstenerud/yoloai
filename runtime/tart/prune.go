@@ -25,7 +25,7 @@ func (r *Runtime) Prune(ctx context.Context, knownInstances []string, dryRun boo
 	}
 
 	var result runtime.PruneResult
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		name := strings.TrimSpace(line)
 		if name == "" || !strings.HasPrefix(name, "yoloai-") {
 			continue

@@ -352,8 +352,8 @@ func listRuntimeBases(ctx context.Context, tartRuntime *tart.Runtime) ([]runtime
 	}
 
 	var bases []runtimeBase
-	lines := strings.Split(strings.TrimSpace(output), "\n")
-	for _, line := range lines {
+	lines := strings.SplitSeq(strings.TrimSpace(output), "\n")
+	for line := range lines {
 		// tart list output format (columns separated by spaces):
 		// NAME  SIZE  DISK  ...
 		// Parse the line

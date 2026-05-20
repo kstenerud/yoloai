@@ -119,7 +119,7 @@ func detectChanges(workDir string) string {
 	if err != nil {
 		return "-"
 	}
-	for _, line := range strings.Split(strings.TrimSpace(string(output)), "\n") {
+	for line := range strings.SplitSeq(strings.TrimSpace(string(output)), "\n") {
 		if len(line) < 3 {
 			continue
 		}

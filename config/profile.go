@@ -5,10 +5,13 @@ package config
 
 import (
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 
@@ -452,8 +455,8 @@ func LoadProfileConfig(name string) (*YoloaiConfig, error) {
 // "yoloai-base" if none has a Dockerfile.
 func ResolveProfileImage(profileName string, chain []string) string {
 	// Walk from most-derived (last) to root (first), skip "base"
-	for i := len(chain) - 1; i >= 0; i-- {
-		name := chain[i]
+	for _, name := range slices.Backward(chain) {
+
 		if name == "base" {
 			continue
 		}
@@ -500,8 +503,8 @@ func ResolveProfileChain(name string) ([]string, error) {
 	// Prepend "base" and reverse the chain so it's root-first
 	result := make([]string, 0, len(chain)+1)
 	result = append(result, "base")
-	for i := len(chain) - 1; i >= 0; i-- {
-		result = append(result, chain[i])
+	for _, c := range slices.Backward(chain) {
+		result = append(result, c)
 	}
 	return result, nil
 }
@@ -544,12 +547,12 @@ func loadProfileLegacy(name string) (legacyProfileConfig, error) {
 
 // formatCycle formats a cycle for error messages: "A → B → A"
 func formatCycle(chain []string, repeated string) string {
-	s := ""
+	var s strings.Builder
 	for _, name := range chain {
-		s += name + " → "
+		s.WriteString(name + " → ")
 	}
-	s += repeated
-	return s
+	s.WriteString(repeated)
+	return s.String()
 }
 
 // mergedConfigFromBase initialises a MergedConfig from the baked-in base YoloaiConfig.
@@ -566,15 +569,11 @@ func mergedConfigFromBase(base *YoloaiConfig) *MergedConfig {
 	}
 	if len(base.Env) > 0 {
 		merged.Env = make(map[string]string, len(base.Env))
-		for k, v := range base.Env {
-			merged.Env[k] = v
-		}
+		maps.Copy(merged.Env, base.Env)
 	}
 	if len(base.AgentArgs) > 0 {
 		merged.AgentArgs = make(map[string]string, len(base.AgentArgs))
-		for k, v := range base.AgentArgs {
-			merged.AgentArgs[k] = v
-		}
+		maps.Copy(merged.AgentArgs, base.AgentArgs)
 	}
 	if base.Resources != nil {
 		merged.Resources = &ResourceLimits{
@@ -669,17 +668,13 @@ func applyProfileMaps(merged *MergedConfig, profile *ProfileConfig) {
 		if merged.Env == nil {
 			merged.Env = make(map[string]string)
 		}
-		for k, v := range profile.Env {
-			merged.Env[k] = v
-		}
+		maps.Copy(merged.Env, profile.Env)
 	}
 	if len(profile.AgentArgs) > 0 {
 		if merged.AgentArgs == nil {
 			merged.AgentArgs = make(map[string]string)
 		}
-		for k, v := range profile.AgentArgs {
-			merged.AgentArgs[k] = v
-		}
+		maps.Copy(merged.AgentArgs, profile.AgentArgs)
 	}
 }
 

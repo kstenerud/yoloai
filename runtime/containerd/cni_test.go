@@ -64,7 +64,7 @@ func TestEnsureCNIConflist(t *testing.T) {
 	// Override the CNI conf dir by pointing to a temp dir.
 	// We can't easily override cniConfDir() directly, so just test the file
 	// is valid JSON by parsing it.
-	var parsed map[string]interface{}
+	var parsed map[string]any
 	err := json.Unmarshal([]byte(cniConflistTemplate), &parsed)
 	assert.NoError(t, err, "cniConflistTemplate should be valid JSON")
 	assert.Equal(t, "yoloai", parsed["name"])

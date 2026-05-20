@@ -151,7 +151,7 @@ func cleanupStaleIPAMLeases(containerName string) {
 		}
 		// Lease format: "<containerID>\n<interface>" in modern plugins,
 		// or just "<containerID>" in older ones. Match the first line.
-		firstLine := strings.SplitN(strings.TrimRight(string(data), "\r\n"), "\n", 2)[0]
+		firstLine, _, _ := strings.Cut(strings.TrimRight(string(data), "\r\n"), "\n")
 		if strings.TrimSpace(firstLine) == containerName {
 			_ = os.Remove(path)
 		}

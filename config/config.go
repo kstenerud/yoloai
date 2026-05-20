@@ -5,6 +5,7 @@ package config
 
 import (
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"sort"
@@ -450,12 +451,8 @@ func mergeMapFields(base, override map[string]string) map[string]string {
 		return nil
 	}
 	result := make(map[string]string, len(base)+len(override))
-	for k, v := range base {
-		result[k] = v
-	}
-	for k, v := range override {
-		result[k] = v
-	}
+	maps.Copy(result, base)
+	maps.Copy(result, override)
 	return result
 }
 
@@ -1135,7 +1132,7 @@ func sortMappingNode(node *yaml.Node) {
 		val *yaml.Node
 	}
 	pairs := make([]kv, n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		pairs[i] = kv{node.Content[i*2], node.Content[i*2+1]}
 	}
 	sort.Slice(pairs, func(i, j int) bool {

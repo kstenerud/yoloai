@@ -327,9 +327,9 @@ func TestEnsureContainerSettings_GeminiDisablesFolderTrust(t *testing.T) {
 	settings, err := readJSONMap(filepath.Join(sandboxDir, AgentRuntimeDir, "settings.json"))
 	require.NoError(t, err)
 
-	security, ok := settings["security"].(map[string]interface{})
+	security, ok := settings["security"].(map[string]any)
 	require.True(t, ok)
-	folderTrust, ok := security["folderTrust"].(map[string]interface{})
+	folderTrust, ok := security["folderTrust"].(map[string]any)
 	require.True(t, ok)
 	assert.Equal(t, false, folderTrust["enabled"])
 }
@@ -352,12 +352,12 @@ func TestEnsureContainerSettings_GeminiPreservesAuthSettings(t *testing.T) {
 	settings, err := readJSONMap(settingsPath)
 	require.NoError(t, err)
 
-	security := settings["security"].(map[string]interface{})
+	security := settings["security"].(map[string]any)
 	// folderTrust should be disabled
-	folderTrust := security["folderTrust"].(map[string]interface{})
+	folderTrust := security["folderTrust"].(map[string]any)
 	assert.Equal(t, false, folderTrust["enabled"])
 	// auth should be preserved
-	auth := security["auth"].(map[string]interface{})
+	auth := security["auth"].(map[string]any)
 	assert.Equal(t, "oauth-personal", auth["selectedType"])
 }
 

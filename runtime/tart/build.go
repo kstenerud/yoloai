@@ -148,7 +148,7 @@ func (r *Runtime) vmExistsNamed(ctx context.Context, vmName string) (bool, error
 	if err != nil {
 		return false, fmt.Errorf("list VMs: %w", err)
 	}
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		if strings.TrimSpace(line) == vmName {
 			return true, nil
 		}

@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 
 	goruntime "runtime"
@@ -185,11 +186,8 @@ func (r *Runtime) Create(ctx context.Context, cfg runtime.InstanceConfig) error 
 	// disable it so the entrypoint can mount overlayfs.
 	// Privileged mode already disables AppArmor so no SecurityOpt is needed.
 	if !cfg.Privileged {
-		for _, cap := range cfg.CapAdd {
-			if cap == "SYS_ADMIN" {
-				hostConfig.SecurityOpt = append(hostConfig.SecurityOpt, "apparmor=unconfined")
-				break
-			}
+		if slices.Contains(cfg.CapAdd, "SYS_ADMIN") {
+			hostConfig.SecurityOpt = append(hostConfig.SecurityOpt, "apparmor=unconfined")
 		}
 	}
 

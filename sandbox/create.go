@@ -11,6 +11,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -756,11 +757,8 @@ func resolveUsernsMode(rt runtime.Runtime, workdir *DirArg, auxDirs []*DirArg, c
 		}
 	}
 	if !hasSysAdmin {
-		for _, cap := range capAdd {
-			if cap == "SYS_ADMIN" {
-				hasSysAdmin = true
-				break
-			}
+		if slices.Contains(capAdd, "SYS_ADMIN") {
+			hasSysAdmin = true
 		}
 	}
 	return up.UsernsMode(hasSysAdmin)
@@ -1338,7 +1336,7 @@ func sudoParentEnv() map[string]string {
 	if err != nil {
 		return result
 	}
-	for _, kv := range strings.Split(string(data), "\x00") {
+	for kv := range strings.SplitSeq(string(data), "\x00") {
 		k, v, ok := strings.Cut(kv, "=")
 		if ok && k != "" {
 			result[k] = v
@@ -1513,7 +1511,7 @@ func buildHomeSeedMounts(state *sandboxState) []runtime.MountSpec {
 		// top-level directory once rather than individual files. This lets
 		// agents create new state files at runtime.
 		if strings.Contains(sf.TargetPath, "/") {
-			topDir := strings.SplitN(sf.TargetPath, "/", 2)[0]
+			topDir, _, _ := strings.Cut(sf.TargetPath, "/")
 			if mountedDirs[topDir] {
 				continue
 			}

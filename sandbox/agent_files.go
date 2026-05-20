@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/kstenerud/yoloai/agent"
@@ -136,14 +137,12 @@ func copyAgentFilesList(sandboxDir string, files []string) error {
 // filepath.Match against the basename.
 func shouldExclude(rel string, isDir bool, patterns []string) bool {
 	for _, pattern := range patterns {
-		if strings.HasSuffix(pattern, "/") {
+		if before, ok := strings.CutSuffix(pattern, "/"); ok {
 			// Directory pattern: match against any path component
-			dirName := strings.TrimSuffix(pattern, "/")
+			dirName := before
 			parts := strings.Split(rel, string(filepath.Separator))
-			for _, part := range parts {
-				if part == dirName {
-					return true
-				}
+			if slices.Contains(parts, dirName) {
+				return true
 			}
 		} else {
 			// File pattern: match against basename

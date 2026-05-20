@@ -193,16 +193,16 @@ func newBaselineLogCmd() *cobra.Command {
 // printLogLines prints git log output (one "%H %s" line per commit), marking
 // the commit whose full SHA matches markerSHA with "  ← baseline".
 func printLogLines(w interface{ Write([]byte) (int, error) }, output, markerSHA string) error {
-	for _, line := range strings.Split(strings.TrimRight(output, "\n"), "\n") {
+	for line := range strings.SplitSeq(strings.TrimRight(output, "\n"), "\n") {
 		if line == "" {
 			continue
 		}
-		idx := strings.IndexByte(line, ' ')
+		before, after, ok := strings.Cut(line, " ")
 		var fullSHA, subject string
-		if idx < 0 {
+		if !ok {
 			fullSHA, subject = line, ""
 		} else {
-			fullSHA, subject = line[:idx], line[idx+1:]
+			fullSHA, subject = before, after
 		}
 		shortSHA := fullSHA
 		if len(shortSHA) > 8 {

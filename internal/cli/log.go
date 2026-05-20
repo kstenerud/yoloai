@@ -177,7 +177,7 @@ func filterSources(sourceFlag string) []logSource {
 		return allLogSources
 	}
 	keySet := make(map[string]bool)
-	for _, k := range strings.Split(sourceFlag, ",") {
+	for k := range strings.SplitSeq(sourceFlag, ",") {
 		keySet[strings.TrimSpace(k)] = true
 	}
 	var result []logSource
