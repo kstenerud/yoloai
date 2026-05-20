@@ -90,11 +90,20 @@ e2e: base-image
 	go test -tags=e2e -v -count=1 -timeout=15m ./test/e2e/
 
 ## integration-podman: run Podman integration tests (requires Podman with socket)
+##
+## Two suites run under YOLOAI_TEST_BACKEND=podman:
+##   1. ./runtime/podman/                    — backend-internal tests
+##   2. ./internal/cli/ launch/lifecycle subset — CLI flow against podman
+##      Catches sandbox-setup.py regressions that only surface on a non-Docker
+##      runtime (CI's Docker job won't notice; that's the point of the matrix).
 integration-podman: build
 	@echo "Building base image with Podman..."
 	@./$(BINARY) system build --backend=podman
-	@echo "Running Podman integration tests..."
+	@echo "Running Podman runtime tests..."
 	@go test -tags=integration -v -count=1 -timeout=10m ./runtime/podman/
+	@echo "Running CLI lifecycle subset against Podman..."
+	@YOLOAI_TEST_BACKEND=podman go test -tags=integration -v -count=1 -timeout=10m \
+		-run '^TestCLI_(StartStop|StartAfterDone)$$' ./internal/cli/
 
 ## smoketest: run base-tier smoke tests (docker + containerd-vm / tart)
 ## VM backends require root (CAP_SYS_ADMIN + write to /var/run/netns/).

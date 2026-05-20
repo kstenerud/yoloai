@@ -9,7 +9,32 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/kstenerud/yoloai/internal/testutil"
 )
+
+// writeTestBackendConfig pins the CLI's container-backend selection to the
+// integration backend named by YOLOAI_TEST_BACKEND (default "docker"). Without
+// this, autodetect prefers Docker whenever its socket exists, which would
+// mismatch the runtime that test code constructs via
+// testutil.NewIntegrationRuntime on a host where both Docker and Podman are
+// installed (e.g. the ubuntu-24.04 GitHub runner).
+func writeTestBackendConfig(home string) error {
+	backend := testutil.IntegrationBackendName()
+	if backend == "" || backend == "docker" {
+		// Autodetect already prefers docker; nothing to pin.
+		return nil
+	}
+	cfgDir := filepath.Join(home, ".yoloai")
+	if err := os.MkdirAll(cfgDir, 0700); err != nil {
+		return fmt.Errorf("mkdir %s: %w", cfgDir, err)
+	}
+	return os.WriteFile(
+		filepath.Join(cfgDir, "config.yaml"),
+		[]byte(fmt.Sprintf("container_backend: %s\n", backend)),
+		0600,
+	)
+}
 
 // TestMain runs EnsureSetup once (via a throwaway sandbox creation) before any
 // integration tests run, so the base Docker image is ready. Individual tests
@@ -23,6 +48,11 @@ func TestMain(m *testing.M) {
 	}
 	defer os.RemoveAll(tmpHome)
 	os.Setenv("HOME", tmpHome) //nolint:errcheck // best-effort env set in test main
+
+	if err := writeTestBackendConfig(tmpHome); err != nil {
+		fmt.Fprintf(os.Stderr, "failed to write test backend config: %v\n", err)
+		os.Exit(1)
+	}
 
 	// Bootstrap: create a throwaway sandbox to trigger EnsureSetup (image build).
 	// Use a project subdirectory — tmpHome itself triggers the "dangerous directory" safety check.

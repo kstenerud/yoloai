@@ -23,6 +23,7 @@ func cliSetup(t *testing.T) (projectDir string) {
 	t.Helper()
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
+	require.NoError(t, writeTestBackendConfig(tmpHome))
 
 	projectDir = filepath.Join(tmpHome, "project")
 	require.NoError(t, os.MkdirAll(projectDir, 0750))
