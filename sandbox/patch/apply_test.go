@@ -14,7 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/kstenerud/yoloai/runtime"
-	"github.com/kstenerud/yoloai/sandbox"
+	"github.com/kstenerud/yoloai/sandbox/store"
 	"github.com/kstenerud/yoloai/workspace"
 )
 
@@ -177,7 +177,7 @@ func TestApplyPatch_DeleteFile(t *testing.T) {
 	name := "test-apply-del"
 	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
 	hostPath := "/tmp/project"
-	workDir := filepath.Join(sandboxDir, "work", sandbox.EncodePath(hostPath))
+	workDir := filepath.Join(sandboxDir, "work", store.EncodePath(hostPath))
 	require.NoError(t, os.MkdirAll(workDir, 0750))
 
 	initGitRepo(t, workDir)
@@ -187,17 +187,17 @@ func TestApplyPatch_DeleteFile(t *testing.T) {
 	gitCommit(t, workDir, "yoloai baseline")
 	sha := gitHEAD(t, workDir)
 
-	meta := &sandbox.Meta{
+	meta := &store.Meta{
 		Name:  name,
 		Agent: "test",
-		Workdir: sandbox.WorkdirMeta{
+		Workdir: store.WorkdirMeta{
 			HostPath:    hostPath,
 			MountPath:   hostPath,
 			Mode:        "copy",
 			BaselineSHA: sha,
 		},
 	}
-	require.NoError(t, sandbox.SaveMeta(sandboxDir, meta))
+	require.NoError(t, store.SaveMeta(sandboxDir, meta))
 
 	// Delete the file in work copy
 	require.NoError(t, os.Remove(filepath.Join(workDir, "remove.txt")))
@@ -737,9 +737,9 @@ func TestAdvanceBaseline_UpdatesMeta(t *testing.T) {
 	assert.Empty(t, commits)
 
 	// Verify meta.json has new SHA
-	meta, err := sandbox.LoadMeta(sandbox.Dir(name))
+	meta, err := store.LoadMeta(store.Dir(name))
 	require.NoError(t, err)
-	workDir := sandbox.WorkDir(name, meta.Workdir.HostPath)
+	workDir := store.WorkDir(name, meta.Workdir.HostPath)
 	headSHA := gitHEAD(t, workDir)
 	assert.Equal(t, headSHA, meta.Workdir.BaselineSHA)
 }
@@ -1089,7 +1089,7 @@ func TestAdvanceBaselineTo_UpdatesMeta(t *testing.T) {
 	require.NoError(t, AdvanceBaselineTo(name, commits[1].SHA))
 
 	// Verify meta has the second commit's SHA
-	meta, err := sandbox.LoadMeta(sandbox.Dir(name))
+	meta, err := store.LoadMeta(store.Dir(name))
 	require.NoError(t, err)
 	assert.Equal(t, commits[1].SHA, meta.Workdir.BaselineSHA)
 

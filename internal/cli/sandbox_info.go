@@ -14,6 +14,7 @@ import (
 
 	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/sandbox"
+	"github.com/kstenerud/yoloai/sandbox/store"
 	"github.com/spf13/cobra"
 )
 
@@ -36,8 +37,8 @@ func runSandboxInfo(cmd *cobra.Command, name string) error {
 			}
 			result := infoJSON{
 				Info:          info,
-				ConfigPath:    filepath.Join(sandbox.Dir(name), sandbox.RuntimeConfigFile),
-				PromptPreview: loadPromptPreview(sandbox.Dir(name)),
+				ConfigPath:    filepath.Join(store.Dir(name), store.RuntimeConfigFile),
+				PromptPreview: loadPromptPreview(store.Dir(name)),
 			}
 			return writeJSON(cmd.OutOrStdout(), result)
 		}
@@ -71,9 +72,9 @@ func printSandboxInfo(cmd *cobra.Command, name string, info *sandbox.Info) {
 		fmt.Fprintf(w, "Image:       %s\n", meta.ImageRef) //nolint:errcheck
 	}
 
-	sandboxDir := sandbox.Dir(name)
-	fmt.Fprintf(w, "Sandbox dir: %s\n", sandboxDir)                                           //nolint:errcheck
-	fmt.Fprintf(w, "Config:      %s\n", filepath.Join(sandboxDir, sandbox.RuntimeConfigFile)) //nolint:errcheck
+	sandboxDir := store.Dir(name)
+	fmt.Fprintf(w, "Sandbox dir: %s\n", sandboxDir)                                         //nolint:errcheck
+	fmt.Fprintf(w, "Config:      %s\n", filepath.Join(sandboxDir, store.RuntimeConfigFile)) //nolint:errcheck
 
 	if preview := loadPromptPreview(sandboxDir); preview != "" {
 		fmt.Fprintf(w, "Prompt:      %s\n", preview) //nolint:errcheck
@@ -85,7 +86,7 @@ func printSandboxInfo(cmd *cobra.Command, name string, info *sandbox.Info) {
 }
 
 // printSandboxDirs prints workdir and auxiliary directory information.
-func printSandboxDirs(w io.Writer, meta *sandbox.Meta) {
+func printSandboxDirs(w io.Writer, meta *store.Meta) {
 	if meta.Workdir.MountPath != "" && meta.Workdir.MountPath != meta.Workdir.HostPath {
 		fmt.Fprintf(w, "Workdir:     %s → %s (%s)\n", meta.Workdir.HostPath, meta.Workdir.MountPath, meta.Workdir.Mode) //nolint:errcheck
 	} else {
@@ -101,7 +102,7 @@ func printSandboxDirs(w io.Writer, meta *sandbox.Meta) {
 }
 
 // printSandboxNetwork prints network mode and port information.
-func printSandboxNetwork(w io.Writer, meta *sandbox.Meta) {
+func printSandboxNetwork(w io.Writer, meta *store.Meta) {
 	if meta.NetworkMode != "" {
 		if meta.NetworkMode == "isolated" && len(meta.NetworkAllow) > 0 {
 			fmt.Fprintf(w, "Network:     isolated (%s)\n", strings.Join(meta.NetworkAllow, ", ")) //nolint:errcheck
@@ -115,7 +116,7 @@ func printSandboxNetwork(w io.Writer, meta *sandbox.Meta) {
 }
 
 // printSandboxResources prints resource limits and summary information.
-func printSandboxResources(w io.Writer, meta *sandbox.Meta, info *sandbox.Info) {
+func printSandboxResources(w io.Writer, meta *store.Meta, info *sandbox.Info) {
 	if meta.Resources != nil {
 		var parts []string
 		if meta.Resources.CPUs != "" {

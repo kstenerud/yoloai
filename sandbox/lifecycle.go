@@ -17,6 +17,7 @@ import (
 	"github.com/kstenerud/yoloai/config"
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/runtime"
+	"github.com/kstenerud/yoloai/sandbox/store"
 	"github.com/kstenerud/yoloai/workspace"
 )
 
@@ -46,11 +47,11 @@ func (m *Manager) Stop(ctx context.Context, name string) error {
 }
 
 func (m *Manager) stop(ctx context.Context, name string) error {
-	if _, err := RequireSandboxDir(name); err != nil {
+	if _, err := store.RequireSandboxDir(name); err != nil {
 		return err
 	}
-	slog.Info("stopping sandbox", "event", "sandbox.stop", "container", InstanceName(name))
-	return m.runtime.Stop(ctx, InstanceName(name))
+	slog.Info("stopping sandbox", "event", "sandbox.stop", "container", store.InstanceName(name))
+	return m.runtime.Stop(ctx, store.InstanceName(name))
 }
 
 // StartOptions holds parameters for the start command.
@@ -79,10 +80,10 @@ func syncLifecycleMarker(sandboxDir string) {
 	if _, markerErr := os.Stat(markerPath); markerErr != nil {
 		return
 	}
-	state, stateErr := LoadSandboxState(sandboxDir)
+	state, stateErr := store.LoadSandboxState(sandboxDir)
 	if stateErr == nil && !state.OnCreateCommandsDone {
 		state.OnCreateCommandsDone = true
-		if saveErr := SaveSandboxState(sandboxDir, state); saveErr != nil {
+		if saveErr := store.SaveSandboxState(sandboxDir, state); saveErr != nil {
 			slog.Warn("lifecycle: could not save sandbox state", "err", saveErr)
 		}
 	}
@@ -91,7 +92,7 @@ func syncLifecycleMarker(sandboxDir string) {
 // applyIsolationOverride applies the isolation mode override from opts to meta
 // if it differs from the current value. Validates mode, checks backend support,
 // and saves meta. No-op when opts.Isolation is empty or unchanged.
-func (m *Manager) applyIsolationOverride(ctx context.Context, opts StartOptions, sandboxDir string, meta *Meta) error {
+func (m *Manager) applyIsolationOverride(ctx context.Context, opts StartOptions, sandboxDir string, meta *store.Meta) error {
 	if opts.Isolation == "" || opts.Isolation == meta.Isolation {
 		return nil
 	}
@@ -110,7 +111,7 @@ func (m *Manager) applyIsolationOverride(ctx context.Context, opts StartOptions,
 		return err
 	}
 	meta.Isolation = opts.Isolation
-	if err := SaveMeta(sandboxDir, meta); err != nil {
+	if err := store.SaveMeta(sandboxDir, meta); err != nil {
 		return fmt.Errorf("save meta: %w", err)
 	}
 	fmt.Fprintf(m.output, "Isolation mode updated to %s\n", opts.Isolation) //nolint:errcheck // best-effort output
@@ -119,12 +120,12 @@ func (m *Manager) applyIsolationOverride(ctx context.Context, opts StartOptions,
 
 // applyVscodeTunnelOption enables the VS Code Remote Tunnel in meta and
 // runtime-config.json when opts.VscodeTunnel is true and not already enabled.
-func (m *Manager) applyVscodeTunnelOption(opts StartOptions, sandboxDir, name string, meta *Meta) error {
+func (m *Manager) applyVscodeTunnelOption(opts StartOptions, sandboxDir, name string, meta *store.Meta) error {
 	if !opts.VscodeTunnel || meta.VscodeTunnel {
 		return nil
 	}
 	meta.VscodeTunnel = true
-	if err := SaveMeta(sandboxDir, meta); err != nil {
+	if err := store.SaveMeta(sandboxDir, meta); err != nil {
 		return fmt.Errorf("save meta: %w", err)
 	}
 	if err := patchConfigVscodeTunnel(sandboxDir, name); err != nil {
@@ -137,7 +138,7 @@ func (m *Manager) applyVscodeTunnelOption(opts StartOptions, sandboxDir, name st
 // preparePromptForStart validates prompt options, reads the custom prompt text
 // if provided, and persists it to prompt.txt + meta. Returns the prompt text
 // and whether a custom prompt is in use.
-func preparePromptForStart(opts StartOptions, sandboxDir string, meta *Meta) (promptText string, customPrompt bool, err error) {
+func preparePromptForStart(opts StartOptions, sandboxDir string, meta *store.Meta) (promptText string, customPrompt bool, err error) {
 	customPrompt = opts.Prompt != "" || opts.PromptFile != ""
 	if opts.Resume && customPrompt {
 		return "", false, fmt.Errorf("--resume and --prompt/--prompt-file are mutually exclusive")
@@ -164,7 +165,7 @@ func preparePromptForStart(opts StartOptions, sandboxDir string, meta *Meta) (pr
 		return "", false, fmt.Errorf("write prompt.txt: %w", writeErr)
 	}
 	meta.HasPrompt = true
-	if saveErr := SaveMeta(sandboxDir, meta); saveErr != nil {
+	if saveErr := store.SaveMeta(sandboxDir, meta); saveErr != nil {
 		// Roll back prompt.txt so disk state remains consistent with environment.json.
 		if oldPrompt != nil {
 			_ = fileutil.WriteFile(promptPath, oldPrompt, 0600)
@@ -177,7 +178,7 @@ func preparePromptForStart(opts StartOptions, sandboxDir string, meta *Meta) (pr
 }
 
 // handleTerminalStatus relaunches the agent after it has exited (Done/Failed).
-func (m *Manager) handleTerminalStatus(ctx context.Context, name string, meta *Meta, opts StartOptions, promptText string, customPrompt bool) error {
+func (m *Manager) handleTerminalStatus(ctx context.Context, name string, meta *store.Meta, opts StartOptions, promptText string, customPrompt bool) error {
 	slog.Info("relaunching agent", "event", "sandbox.start.agent.relaunch", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
 	switch {
 	case customPrompt:
@@ -200,7 +201,7 @@ func (m *Manager) handleTerminalStatus(ctx context.Context, name string, meta *M
 // handleStoppedOrRemovedStatus recreates the container for a sandbox whose
 // container is stopped or removed. removeStopped indicates the container still
 // exists and must be removed first. successMsg is printed on success.
-func (m *Manager) handleStoppedOrRemovedStatus(ctx context.Context, cname, name string, meta *Meta, opts StartOptions, promptText string, customPrompt, removeStopped bool, successMsg string) error {
+func (m *Manager) handleStoppedOrRemovedStatus(ctx context.Context, cname, name string, meta *store.Meta, opts StartOptions, promptText string, customPrompt, removeStopped bool, successMsg string) error {
 	if removeStopped {
 		if err := m.runtime.Remove(ctx, cname); err != nil {
 			return fmt.Errorf("remove stopped instance: %w", err)
@@ -228,12 +229,12 @@ func (m *Manager) handleStoppedOrRemovedStatus(ctx context.Context, cname, name 
 
 func (m *Manager) start(ctx context.Context, name string, opts StartOptions) error {
 	slog.Info("starting sandbox", "event", "sandbox.start", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
-	sandboxDir, err := RequireSandboxDir(name)
+	sandboxDir, err := store.RequireSandboxDir(name)
 	if err != nil {
 		return err
 	}
 
-	meta, err := LoadMeta(sandboxDir)
+	meta, err := store.LoadMeta(sandboxDir)
 	if err != nil {
 		return err
 	}
@@ -254,7 +255,7 @@ func (m *Manager) start(ctx context.Context, name string, opts StartOptions) err
 		return err
 	}
 
-	cname := InstanceName(name)
+	cname := store.InstanceName(name)
 	status, err := DetectStatus(ctx, m.runtime, cname, sandboxDir)
 	if err != nil {
 		return fmt.Errorf("detect status: %w", err)
@@ -299,14 +300,14 @@ func (m *Manager) Destroy(ctx context.Context, name string) error {
 
 func (m *Manager) destroy(ctx context.Context, name string) error {
 	slog.Info("destroying sandbox", "event", "sandbox.destroy", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
-	if _, err := RequireSandboxDir(name); err != nil {
+	if _, err := store.RequireSandboxDir(name); err != nil {
 		if errors.Is(err, ErrSandboxNotFound) {
 			return nil // nothing to destroy
 		}
 		return err
 	}
 
-	cname := InstanceName(name)
+	cname := store.InstanceName(name)
 
 	// Stop instance (ignore errors — may not be running)
 	_ = m.runtime.Stop(ctx, cname)
@@ -316,7 +317,7 @@ func (m *Manager) destroy(ctx context.Context, name string) error {
 
 	// Remove sandbox directory. Some files (e.g. Go module cache) are
 	// read-only, so make everything writable first.
-	if err := forceRemoveAll(Dir(name)); err != nil {
+	if err := forceRemoveAll(store.Dir(name)); err != nil {
 		fmt.Fprintf(m.output, "Warning: could not fully remove sandbox directory: %v\n", err) //nolint:errcheck // best-effort output
 	}
 
@@ -327,10 +328,10 @@ func (m *Manager) destroy(ctx context.Context, name string) error {
 // recreates them for a fresh state.
 func resetOverlayDirs(sandboxName, hostPath string) error {
 	for _, d := range []string{
-		OverlayUpperDir(sandboxName, hostPath),
-		OverlayOvlworkDir(sandboxName, hostPath),
-		OverlayMergedDir(sandboxName, hostPath),
-		OverlayLowerDir(sandboxName, hostPath),
+		store.OverlayUpperDir(sandboxName, hostPath),
+		store.OverlayOvlworkDir(sandboxName, hostPath),
+		store.OverlayMergedDir(sandboxName, hostPath),
+		store.OverlayLowerDir(sandboxName, hostPath),
 	} {
 		if err := os.RemoveAll(d); err != nil {
 			return fmt.Errorf("clear overlay dir %s: %w", d, err)
@@ -344,8 +345,8 @@ func resetOverlayDirs(sandboxName, hostPath string) error {
 
 // resetCopyWorkdir removes the work copy, re-copies from the host path, and
 // records the git baseline. Returns the new baseline SHA (empty if deferred).
-func (m *Manager) resetCopyWorkdir(sandboxName string, meta *Meta) (string, error) {
-	workDir := WorkDir(sandboxName, meta.Workdir.HostPath)
+func (m *Manager) resetCopyWorkdir(sandboxName string, meta *store.Meta) (string, error) {
+	workDir := store.WorkDir(sandboxName, meta.Workdir.HostPath)
 
 	if err := os.RemoveAll(workDir); err != nil {
 		return "", fmt.Errorf("remove work copy: %w", err)
@@ -379,8 +380,8 @@ func (m *Manager) resetCopyWorkdir(sandboxName string, meta *Meta) (string, erro
 }
 
 // resetAuxCopyDir resets a single aux :copy dir and returns the new baseline SHA.
-func resetAuxCopyDir(sandboxName string, d DirMeta) (string, error) {
-	auxWorkDir := WorkDir(sandboxName, d.HostPath)
+func resetAuxCopyDir(sandboxName string, d store.DirMeta) (string, error) {
+	auxWorkDir := store.WorkDir(sandboxName, d.HostPath)
 	if err := os.RemoveAll(auxWorkDir); err != nil {
 		return "", fmt.Errorf("remove aux work copy %s: %w", d.HostPath, err)
 	}
@@ -406,7 +407,7 @@ func resetAuxCopyDir(sandboxName string, d DirMeta) (string, error) {
 
 // resetAuxDirs resets all aux :copy and :overlay directories in meta,
 // updating BaselineSHA in-place.
-func resetAuxDirs(sandboxName string, meta *Meta) error {
+func resetAuxDirs(sandboxName string, meta *store.Meta) error {
 	for i, d := range meta.Directories {
 		switch d.Mode {
 		case "copy":
@@ -428,18 +429,18 @@ func resetAuxDirs(sandboxName string, meta *Meta) error {
 // clearAgentState wipes and recreates the agent-runtime directory and resets
 // the AgentFilesInitialized flag.
 func clearAgentState(sandboxDir string, perms IsolationPerms) error {
-	agentStateDir := filepath.Join(sandboxDir, AgentRuntimeDir)
+	agentStateDir := filepath.Join(sandboxDir, store.AgentRuntimeDir)
 	if err := os.RemoveAll(agentStateDir); err != nil {
-		return fmt.Errorf("remove %s: %w", AgentRuntimeDir, err)
+		return fmt.Errorf("remove %s: %w", store.AgentRuntimeDir, err)
 	}
 	if err := mkdirAllPerm(agentStateDir, perms.Dir); err != nil {
-		return fmt.Errorf("recreate %s: %w", AgentRuntimeDir, err)
+		return fmt.Errorf("recreate %s: %w", store.AgentRuntimeDir, err)
 	}
 	// Reset agent_files flag so files get re-seeded on next start
-	sbState, stateErr := LoadSandboxState(sandboxDir)
+	sbState, stateErr := store.LoadSandboxState(sandboxDir)
 	if stateErr == nil {
 		sbState.AgentFilesInitialized = false
-		_ = SaveSandboxState(sandboxDir, sbState)
+		_ = store.SaveSandboxState(sandboxDir, sbState)
 	}
 	return nil
 }
@@ -455,12 +456,12 @@ func (m *Manager) Reset(ctx context.Context, opts ResetOptions) error {
 	defer unlock()
 
 	slog.Info("resetting sandbox", "event", "sandbox.reset", "sandbox", opts.Name)
-	sandboxDir, err := RequireSandboxDir(opts.Name)
+	sandboxDir, err := store.RequireSandboxDir(opts.Name)
 	if err != nil {
 		return err
 	}
 
-	meta, err := LoadMeta(sandboxDir)
+	meta, err := store.LoadMeta(sandboxDir)
 	if err != nil {
 		return err
 	}
@@ -481,7 +482,7 @@ func (m *Manager) Reset(ctx context.Context, opts ResetOptions) error {
 
 	// Auto-upgrade to restart: container not running
 	if !opts.Restart {
-		status, err := DetectStatus(ctx, m.runtime, InstanceName(opts.Name), sandboxDir)
+		status, err := DetectStatus(ctx, m.runtime, store.InstanceName(opts.Name), sandboxDir)
 		if err != nil || (status != StatusActive && status != StatusIdle) {
 			fmt.Fprintf(m.output, "Container is not running, upgrading to restart\n") //nolint:errcheck // best-effort output
 			opts.Restart = true
@@ -497,15 +498,15 @@ func (m *Manager) Reset(ctx context.Context, opts ResetOptions) error {
 
 // reinitLogs removes and recreates the sandbox log files with appropriate permissions.
 func reinitLogs(sandboxDir string, perms IsolationPerms) {
-	_ = os.RemoveAll(filepath.Join(sandboxDir, LogsDir))
-	_ = mkdirAllPerm(filepath.Join(sandboxDir, LogsDir), perms.Dir)
-	for _, logFile := range []string{SandboxJSONLFile, MonitorJSONLFile, HooksJSONLFile} {
+	_ = os.RemoveAll(filepath.Join(sandboxDir, store.LogsDir))
+	_ = mkdirAllPerm(filepath.Join(sandboxDir, store.LogsDir), perms.Dir)
+	for _, logFile := range []string{store.SandboxJSONLFile, store.MonitorJSONLFile, store.HooksJSONLFile} {
 		_ = writeFilePerm(filepath.Join(sandboxDir, logFile), nil, perms.File)
 	}
 }
 
 // resetWorkdir resets the main workdir (overlay or copy) and returns the new baseline SHA.
-func (m *Manager) resetWorkdir(sandboxName string, meta *Meta) (string, error) {
+func (m *Manager) resetWorkdir(sandboxName string, meta *store.Meta) (string, error) {
 	if meta.Workdir.Mode == "overlay" {
 		if err := resetOverlayDirs(sandboxName, meta.Workdir.HostPath); err != nil {
 			return "", err
@@ -550,7 +551,7 @@ func (m *Manager) applyPostResetOptions(opts ResetOptions, sandboxDir string, pe
 
 // prepareResetRestart performs the full stop → wipe → recopy → start flow for
 // reset --restart. Extracted from Reset to reduce its cyclomatic complexity.
-func (m *Manager) prepareResetRestart(ctx context.Context, opts ResetOptions, sandboxDir string, meta *Meta) error {
+func (m *Manager) prepareResetRestart(ctx context.Context, opts ResetOptions, sandboxDir string, meta *store.Meta) error {
 	// Stop the container (if running)
 	_ = m.stop(ctx, opts.Name)
 
@@ -573,7 +574,7 @@ func (m *Manager) prepareResetRestart(ctx context.Context, opts ResetOptions, sa
 
 	// Update meta.json
 	meta.Workdir.BaselineSHA = newSHA
-	if err := SaveMeta(sandboxDir, meta); err != nil {
+	if err := store.SaveMeta(sandboxDir, meta); err != nil {
 		return err
 	}
 
@@ -606,7 +607,7 @@ func (m *Manager) prepareResetRestart(ctx context.Context, opts ResetOptions, sa
 // exist (uncommitted changes or commits beyond baseline).
 // Returns a reason string for the confirmation prompt.
 func (m *Manager) NeedsConfirmation(ctx context.Context, name string) (bool, string) {
-	status, err := DetectStatus(ctx, m.runtime, InstanceName(name), Dir(name))
+	status, err := DetectStatus(ctx, m.runtime, store.InstanceName(name), store.Dir(name))
 	if err != nil {
 		return false, ""
 	}
@@ -615,13 +616,13 @@ func (m *Manager) NeedsConfirmation(ctx context.Context, name string) (bool, str
 		return true, "agent is still running"
 	}
 
-	meta, err := LoadMeta(Dir(name))
+	meta, err := store.LoadMeta(store.Dir(name))
 	if err != nil {
 		return false, ""
 	}
 
 	if meta.Workdir.Mode == "copy" || meta.Workdir.Mode == "overlay" {
-		workDir := WorkDir(name, meta.Workdir.HostPath)
+		workDir := store.WorkDir(name, meta.Workdir.HostPath)
 		if hasUnappliedWork(workDir, meta.Workdir.BaselineSHA) {
 			return true, "unapplied changes exist"
 		}
@@ -629,7 +630,7 @@ func (m *Manager) NeedsConfirmation(ctx context.Context, name string) (bool, str
 
 	for _, d := range meta.Directories {
 		if d.Mode == "copy" || d.Mode == "overlay" {
-			auxWorkDir := WorkDir(name, d.HostPath)
+			auxWorkDir := store.WorkDir(name, d.HostPath)
 			if hasUnappliedWork(auxWorkDir, d.BaselineSHA) {
 				return true, "unapplied changes exist"
 			}
@@ -642,7 +643,7 @@ func (m *Manager) NeedsConfirmation(ctx context.Context, name string) (bool, str
 // initializeAgentFilesIfNeeded copies agent_files into the sandbox when they
 // have not yet been initialized (e.g., sandbox predates the feature or
 // ClearState was used). No-op if already initialized or no StateDir configured.
-func initializeAgentFilesIfNeeded(agentDef *agent.Definition, sandboxDir string, meta *Meta, sbState *SandboxState) error {
+func initializeAgentFilesIfNeeded(agentDef *agent.Definition, sandboxDir string, meta *store.Meta, sbState *store.SandboxState) error {
 	if sbState.AgentFilesInitialized || agentDef.StateDir == "" {
 		return nil
 	}
@@ -660,7 +661,7 @@ func initializeAgentFilesIfNeeded(agentDef *agent.Definition, sandboxDir string,
 		return fmt.Errorf("copy agent files on restart: %w", err)
 	}
 	sbState.AgentFilesInitialized = true
-	if err := SaveSandboxState(sandboxDir, sbState); err != nil {
+	if err := store.SaveSandboxState(sandboxDir, sbState); err != nil {
 		return fmt.Errorf("save sandbox state: %w", err)
 	}
 	return nil
@@ -668,7 +669,7 @@ func initializeAgentFilesIfNeeded(agentDef *agent.Definition, sandboxDir string,
 
 // resolvedAgentFiles returns the effective AgentFiles config after merging the
 // profile chain if a profile is set. Returns nil if no AgentFiles are configured.
-func resolvedAgentFiles(cfg *config.YoloaiConfig, meta *Meta) *config.AgentFilesConfig {
+func resolvedAgentFiles(cfg *config.YoloaiConfig, meta *store.Meta) *config.AgentFilesConfig {
 	agentFilesConfig := cfg.AgentFiles
 	if meta.Profile == "" {
 		return agentFilesConfig
@@ -686,7 +687,7 @@ func resolvedAgentFiles(cfg *config.YoloaiConfig, meta *Meta) *config.AgentFiles
 
 // resolveEnvForRestart loads the global config env and merges the profile
 // chain if a profile is set. Returns the resolved environment map.
-func resolveEnvForRestart(meta *Meta) (map[string]string, error) {
+func resolveEnvForRestart(meta *store.Meta) (map[string]string, error) {
 	cfg, err := config.LoadConfig()
 	if err != nil {
 		return nil, fmt.Errorf("load config: %w", err)
@@ -705,13 +706,13 @@ func resolveEnvForRestart(meta *Meta) (map[string]string, error) {
 }
 
 // recreateContainer creates a new Docker container from meta.json.
-func (m *Manager) recreateContainer(ctx context.Context, name string, meta *Meta, resume bool) error {
+func (m *Manager) recreateContainer(ctx context.Context, name string, meta *store.Meta, resume bool) error {
 	agentDef := agent.GetAgent(meta.Agent)
 	if agentDef == nil {
 		return fmt.Errorf("unknown agent: %s", meta.Agent)
 	}
 
-	sandboxDir := Dir(name)
+	sandboxDir := store.Dir(name)
 
 	// Refresh seed files from host (handles OAuth token refresh between restarts)
 	hasAPIKey := hasAnyAPIKey(agentDef, nil)
@@ -728,7 +729,7 @@ func (m *Manager) recreateContainer(ctx context.Context, name string, meta *Meta
 
 	// Copy agent_files if not yet initialized (e.g., sandbox created before
 	// agent_files was configured, or after --clean reset)
-	sbState, stateErr := LoadSandboxState(sandboxDir)
+	sbState, stateErr := store.LoadSandboxState(sandboxDir)
 	if stateErr != nil {
 		return fmt.Errorf("load sandbox state: %w", stateErr)
 	}
@@ -737,7 +738,7 @@ func (m *Manager) recreateContainer(ctx context.Context, name string, meta *Meta
 	}
 
 	// Read existing runtime-config.json
-	configData, err := os.ReadFile(filepath.Join(sandboxDir, RuntimeConfigFile)) //nolint:gosec // path is sandbox-controlled
+	configData, err := os.ReadFile(filepath.Join(sandboxDir, store.RuntimeConfigFile)) //nolint:gosec // path is sandbox-controlled
 	if err != nil {
 		return fmt.Errorf("read runtime-config.json: %w", err)
 	}
@@ -774,7 +775,7 @@ func (m *Manager) recreateContainer(ctx context.Context, name string, meta *Meta
 		name:         name,
 		sandboxDir:   sandboxDir,
 		workdir:      workdir,
-		workCopyDir:  WorkDir(name, meta.Workdir.HostPath),
+		workCopyDir:  store.WorkDir(name, meta.Workdir.HostPath),
 		auxDirs:      auxDirs,
 		agent:        agentDef,
 		model:        meta.Model,
@@ -840,11 +841,11 @@ func tmuxShellPrefix(socket string) string {
 }
 
 // relaunchAgent relaunches the agent in the existing tmux session.
-func (m *Manager) relaunchAgent(ctx context.Context, name string, meta *Meta) error {
-	sandboxDir := Dir(name)
+func (m *Manager) relaunchAgent(ctx context.Context, name string, meta *store.Meta) error {
+	sandboxDir := store.Dir(name)
 
 	// Read runtime-config.json to get agent_command
-	configData, err := os.ReadFile(filepath.Join(sandboxDir, RuntimeConfigFile)) //nolint:gosec // path is sandbox-controlled
+	configData, err := os.ReadFile(filepath.Join(sandboxDir, store.RuntimeConfigFile)) //nolint:gosec // path is sandbox-controlled
 	if err != nil {
 		return fmt.Errorf("read runtime-config.json: %w", err)
 	}
@@ -866,10 +867,10 @@ func (m *Manager) relaunchAgent(ctx context.Context, name string, meta *Meta) er
 
 // relaunchAgentWithResume relaunches the agent in interactive mode and sends
 // the resume prompt (preamble + original prompt) via tmux.
-func (m *Manager) relaunchAgentWithResume(ctx context.Context, name string, meta *Meta) error {
-	sandboxDir := Dir(name)
+func (m *Manager) relaunchAgentWithResume(ctx context.Context, name string, meta *store.Meta) error {
+	sandboxDir := store.Dir(name)
 
-	configData, err := os.ReadFile(filepath.Join(sandboxDir, RuntimeConfigFile)) //nolint:gosec // path is sandbox-controlled
+	configData, err := os.ReadFile(filepath.Join(sandboxDir, store.RuntimeConfigFile)) //nolint:gosec // path is sandbox-controlled
 	if err != nil {
 		return fmt.Errorf("read runtime-config.json: %w", err)
 	}
@@ -904,7 +905,7 @@ func (m *Manager) relaunchAgentWithResume(ctx context.Context, name string, meta
 
 // sendResumePrompt waits for the agent to be ready and delivers the resume
 // prompt (preamble + original prompt) via tmux load-buffer/paste-buffer.
-func (m *Manager) sendResumePrompt(ctx context.Context, name, sandboxDir string, cfg containerConfig, meta *Meta) error {
+func (m *Manager) sendResumePrompt(ctx context.Context, name, sandboxDir string, cfg containerConfig, meta *store.Meta) error {
 	promptData, err := os.ReadFile(filepath.Join(sandboxDir, "prompt.txt")) //nolint:gosec // path is sandbox-controlled
 	if err != nil {
 		return fmt.Errorf("read prompt.txt: %w", err)
@@ -957,10 +958,10 @@ rm -f /tmp/yoloai-resume.txt
 
 // relaunchAgentWithCustomPrompt relaunches the agent in interactive mode and sends
 // the custom prompt directly (no resume preamble) via tmux.
-func (m *Manager) relaunchAgentWithCustomPrompt(ctx context.Context, name string, meta *Meta, promptText string) error {
-	sandboxDir := Dir(name)
+func (m *Manager) relaunchAgentWithCustomPrompt(ctx context.Context, name string, meta *store.Meta, promptText string) error {
+	sandboxDir := store.Dir(name)
 
-	configData, err := os.ReadFile(filepath.Join(sandboxDir, RuntimeConfigFile)) //nolint:gosec // path is sandbox-controlled
+	configData, err := os.ReadFile(filepath.Join(sandboxDir, store.RuntimeConfigFile)) //nolint:gosec // path is sandbox-controlled
 	if err != nil {
 		return fmt.Errorf("read runtime-config.json: %w", err)
 	}
@@ -997,7 +998,7 @@ func (m *Manager) relaunchAgentWithCustomPrompt(ctx context.Context, name string
 
 // sendCustomPrompt waits for the agent to be ready and delivers the custom
 // prompt directly (without resume preamble) via tmux load-buffer/paste-buffer.
-func (m *Manager) sendCustomPrompt(ctx context.Context, name, sandboxDir string, cfg containerConfig, promptText string, meta *Meta) error {
+func (m *Manager) sendCustomPrompt(ctx context.Context, name, sandboxDir string, cfg containerConfig, promptText string, meta *store.Meta) error {
 	var waitCmd string
 	switch {
 	case cfg.ReadyPattern != "":
@@ -1038,8 +1039,8 @@ rm -f /tmp/yoloai-custom-prompt.txt
 
 // prepareCustomPromptFiles writes the resume-prompt.txt (custom prompt, no preamble)
 // and patches runtime-config.json for interactive command mode.
-func (m *Manager) prepareCustomPromptFiles(name string, meta *Meta, promptText string) error {
-	sandboxDir := Dir(name)
+func (m *Manager) prepareCustomPromptFiles(name string, meta *store.Meta, promptText string) error {
+	sandboxDir := store.Dir(name)
 
 	// Write resume-prompt.txt (custom prompt, no preamble)
 	if err := fileutil.WriteFile(filepath.Join(sandboxDir, "resume-prompt.txt"), []byte(promptText), 0600); err != nil {
@@ -1047,7 +1048,7 @@ func (m *Manager) prepareCustomPromptFiles(name string, meta *Meta, promptText s
 	}
 
 	// Patch runtime-config.json: replace agent_command with interactive version
-	configPath := filepath.Join(sandboxDir, RuntimeConfigFile)
+	configPath := filepath.Join(sandboxDir, store.RuntimeConfigFile)
 	configData, err := os.ReadFile(configPath) //nolint:gosec // path is sandbox-controlled
 	if err != nil {
 		return fmt.Errorf("read runtime-config.json: %w", err)
@@ -1080,8 +1081,8 @@ func (m *Manager) prepareCustomPromptFiles(name string, meta *Meta, promptText s
 
 // prepareResumeFiles writes the resume-prompt.txt and patches runtime-config.json
 // for resume mode (interactive command).
-func (m *Manager) prepareResumeFiles(name string, meta *Meta) error {
-	sandboxDir := Dir(name)
+func (m *Manager) prepareResumeFiles(name string, meta *store.Meta) error {
+	sandboxDir := store.Dir(name)
 
 	// Read original prompt
 	promptData, err := os.ReadFile(filepath.Join(sandboxDir, "prompt.txt")) //nolint:gosec // path is sandbox-controlled
@@ -1096,7 +1097,7 @@ func (m *Manager) prepareResumeFiles(name string, meta *Meta) error {
 	}
 
 	// Patch runtime-config.json: replace agent_command with interactive version
-	configPath := filepath.Join(sandboxDir, RuntimeConfigFile)
+	configPath := filepath.Join(sandboxDir, store.RuntimeConfigFile)
 	configData, err := os.ReadFile(configPath) //nolint:gosec // path is sandbox-controlled
 	if err != nil {
 		return fmt.Errorf("read runtime-config.json: %w", err)
@@ -1129,19 +1130,19 @@ func (m *Manager) prepareResumeFiles(name string, meta *Meta) error {
 
 // cleanupResumeFiles removes the temporary resume-prompt.txt file.
 func (m *Manager) cleanupResumeFiles(name string) {
-	_ = os.Remove(filepath.Join(Dir(name), "resume-prompt.txt"))
+	_ = os.Remove(filepath.Join(store.Dir(name), "resume-prompt.txt"))
 }
 
 // resetInPlace resets the workspace while the agent is still running.
 // Syncs files from host, recreates git baseline, and notifies the agent via tmux.
-func (m *Manager) resetInPlace(ctx context.Context, opts ResetOptions, meta *Meta, sandboxDir string) error {
+func (m *Manager) resetInPlace(ctx context.Context, opts ResetOptions, meta *store.Meta, sandboxDir string) error {
 	// Tart VMs store the work directory inside the VM, not on the host.
 	// In-place reset requires direct host access to the work directory.
 	if _, ok := m.runtime.(runtime.WorkDirSetup); ok {
 		return fmt.Errorf("in-place reset not supported for Tart VMs (work dir is inside VM)")
 	}
 
-	workDir := WorkDir(opts.Name, meta.Workdir.HostPath)
+	workDir := store.WorkDir(opts.Name, meta.Workdir.HostPath)
 
 	// Re-sync workdir from host (bind-mount makes changes visible in container)
 	if err := rsyncDir(meta.Workdir.HostPath, workDir); err != nil {
@@ -1166,7 +1167,7 @@ func (m *Manager) resetInPlace(ctx context.Context, opts ResetOptions, meta *Met
 
 	// Update meta.json
 	meta.Workdir.BaselineSHA = newSHA
-	if err := SaveMeta(sandboxDir, meta); err != nil {
+	if err := store.SaveMeta(sandboxDir, meta); err != nil {
 		return err
 	}
 
@@ -1182,7 +1183,7 @@ func (m *Manager) resetInPlace(ctx context.Context, opts ResetOptions, meta *Met
 // clearCacheAndFiles clears the cache and files directories unless --keep-X flags are set.
 func (m *Manager) clearCacheAndFiles(opts ResetOptions) error {
 	// Load metadata to check security mode for permissions
-	meta, err := LoadMeta(Dir(opts.Name))
+	meta, err := store.LoadMeta(store.Dir(opts.Name))
 	if err != nil {
 		return fmt.Errorf("load metadata: %w", err)
 	}
@@ -1190,7 +1191,7 @@ func (m *Manager) clearCacheAndFiles(opts ResetOptions) error {
 	perms := Perms(meta.Isolation)
 
 	if !opts.KeepCache {
-		cacheDir := CacheDir(opts.Name)
+		cacheDir := store.CacheDir(opts.Name)
 		if err := os.RemoveAll(cacheDir); err != nil {
 			return fmt.Errorf("remove cache: %w", err)
 		}
@@ -1199,7 +1200,7 @@ func (m *Manager) clearCacheAndFiles(opts ResetOptions) error {
 		}
 	}
 	if !opts.KeepFiles {
-		filesDir := FilesDir(opts.Name)
+		filesDir := store.FilesDir(opts.Name)
 		if err := os.RemoveAll(filesDir); err != nil {
 			return fmt.Errorf("remove files: %w", err)
 		}
@@ -1226,9 +1227,9 @@ const resetNotification = "[yoloai] Workspace has been reset to match the curren
 
 // sendResetNotification delivers a notification (and optionally the prompt)
 // to the running agent via tmux load-buffer + paste-buffer + send-keys.
-func (m *Manager) sendResetNotification(ctx context.Context, name, sandboxDir string, noPrompt, hasPrompt bool, meta *Meta) error {
+func (m *Manager) sendResetNotification(ctx context.Context, name, sandboxDir string, noPrompt, hasPrompt bool, meta *store.Meta) error {
 	// Read runtime-config.json for submit_sequence
-	configData, err := os.ReadFile(filepath.Join(sandboxDir, RuntimeConfigFile)) //nolint:gosec // path is sandbox-controlled
+	configData, err := os.ReadFile(filepath.Join(sandboxDir, store.RuntimeConfigFile)) //nolint:gosec // path is sandbox-controlled
 	if err != nil {
 		return fmt.Errorf("read runtime-config.json: %w", err)
 	}
@@ -1285,7 +1286,7 @@ func resolveAgentArgs(agentName, profileName string) string {
 // fields, and writes it back. Called when --vscode-tunnel is added to an
 // existing sandbox via start/restart.
 func patchConfigVscodeTunnel(sandboxDir, sandboxName string) error {
-	configPath := filepath.Join(sandboxDir, RuntimeConfigFile)
+	configPath := filepath.Join(sandboxDir, store.RuntimeConfigFile)
 	data, err := os.ReadFile(configPath) //nolint:gosec // path is sandbox-controlled
 	if err != nil {
 		return fmt.Errorf("read runtime-config.json: %w", err)
@@ -1311,7 +1312,7 @@ func patchConfigVscodeTunnel(sandboxDir, sandboxName string) error {
 
 // patchConfigDebug reads runtime-config.json, sets the debug field, and writes it back.
 func patchConfigDebug(sandboxDir string, debug bool) error {
-	configPath := filepath.Join(sandboxDir, RuntimeConfigFile)
+	configPath := filepath.Join(sandboxDir, store.RuntimeConfigFile)
 	data, err := os.ReadFile(configPath) //nolint:gosec // path is sandbox-controlled
 	if err != nil {
 		return fmt.Errorf("read runtime-config.json for debug patch: %w", err)
@@ -1337,7 +1338,7 @@ func patchConfigDebug(sandboxDir string, debug bool) error {
 // PatchConfigAllowedDomains reads runtime-config.json, updates the allowed_domains
 // field, and writes it back. Used by network-allow to persist domain changes.
 func PatchConfigAllowedDomains(sandboxDir string, domains []string) error {
-	configPath := filepath.Join(sandboxDir, RuntimeConfigFile)
+	configPath := filepath.Join(sandboxDir, store.RuntimeConfigFile)
 	data, err := os.ReadFile(configPath) //nolint:gosec // path is sandbox-controlled
 	if err != nil {
 		return fmt.Errorf("read runtime-config.json for domain patch: %w", err)

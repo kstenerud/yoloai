@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/kstenerud/yoloai/runtime"
+	"github.com/kstenerud/yoloai/sandbox/store"
 )
 
 // buildAndStart constructs the runtime InstanceConfig from sandboxState and
@@ -15,7 +16,7 @@ import (
 // a temporary directory that the caller will remove after this call returns.
 // Extracted from launchContainer().
 func (m *Manager) buildAndStart(ctx context.Context, state *sandboxState, mounts []runtime.MountSpec, ports []runtime.PortMapping, hasSecrets bool) error {
-	cname := InstanceName(state.name)
+	cname := store.InstanceName(state.name)
 	instanceCfg, err := m.buildInstanceConfig(state, mounts, ports)
 	if err != nil {
 		return err
@@ -39,7 +40,7 @@ func (m *Manager) buildAndStart(ctx context.Context, state *sandboxState, mounts
 
 // buildInstanceConfig constructs the runtime.InstanceConfig from sandbox state.
 func (m *Manager) buildInstanceConfig(state *sandboxState, mounts []runtime.MountSpec, ports []runtime.PortMapping) (runtime.InstanceConfig, error) {
-	cname := InstanceName(state.name)
+	cname := store.InstanceName(state.name)
 	desc := m.runtime.Descriptor()
 	caps := desc.Capabilities
 
@@ -163,7 +164,7 @@ func (m *Manager) verifyInstanceRunning(ctx context.Context, state *sandboxState
 	// Try sandbox.jsonl first — written by entrypoint.sh and entrypoint.py.
 	if tail := readLogTail(filepath.Join(state.sandboxDir, "logs", "sandbox.jsonl"), 20); tail != "" {
 		parts = append(parts, tail)
-	} else if tail := readLogTail(filepath.Join(state.sandboxDir, AgentLogFile), 20); tail != "" {
+	} else if tail := readLogTail(filepath.Join(state.sandboxDir, store.AgentLogFile), 20); tail != "" {
 		// Try agent log file (written after tmux setup).
 		parts = append(parts, tail)
 	}

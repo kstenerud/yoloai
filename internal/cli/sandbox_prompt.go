@@ -6,12 +6,12 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/kstenerud/yoloai/sandbox"
+	"github.com/kstenerud/yoloai/sandbox/store"
 	"github.com/spf13/cobra"
 )
 
 func runSandboxPrompt(cmd *cobra.Command, name string) error {
-	sandboxDir, err := sandbox.RequireSandboxDir(name)
+	sandboxDir, err := store.RequireSandboxDir(name)
 	if err != nil {
 		return err
 	}

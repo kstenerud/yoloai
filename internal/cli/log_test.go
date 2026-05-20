@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kstenerud/yoloai/sandbox"
+	"github.com/kstenerud/yoloai/sandbox/store"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -22,13 +22,13 @@ func setupLogTest(t *testing.T, name string) string {
 	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
 	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, "logs"), 0750))
 
-	meta := &sandbox.Meta{
+	meta := &store.Meta{
 		Name:      name,
 		Agent:     "claude",
 		CreatedAt: time.Now(),
-		Workdir:   sandbox.WorkdirMeta{HostPath: "/tmp/test", Mode: "copy"},
+		Workdir:   store.WorkdirMeta{HostPath: "/tmp/test", Mode: "copy"},
 	}
-	require.NoError(t, sandbox.SaveMeta(sandboxDir, meta))
+	require.NoError(t, store.SaveMeta(sandboxDir, meta))
 	return sandboxDir
 }
 

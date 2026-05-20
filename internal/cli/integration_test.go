@@ -13,6 +13,7 @@ import (
 
 	"github.com/kstenerud/yoloai/internal/testutil"
 	"github.com/kstenerud/yoloai/sandbox"
+	"github.com/kstenerud/yoloai/sandbox/store"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -139,7 +140,7 @@ func TestCLI_Diff(t *testing.T) {
 	t.Cleanup(func() { destroySandbox(t, "cli-diff") })
 
 	// Modify work copy
-	meta, err := sandbox.LoadMeta(sandbox.Dir("cli-diff"))
+	meta, err := store.LoadMeta(sandbox.Dir("cli-diff"))
 	require.NoError(t, err)
 	workDir := sandbox.WorkDir("cli-diff", meta.Workdir.HostPath)
 	require.NoError(t, os.WriteFile(
@@ -229,7 +230,7 @@ func TestCLI_NetworkLifecycle(t *testing.T) {
 	t.Cleanup(func() { destroySandbox(t, "cli-net") })
 
 	// Verify meta has network isolation
-	meta, err := sandbox.LoadMeta(sandbox.Dir("cli-net"))
+	meta, err := store.LoadMeta(sandbox.Dir("cli-net"))
 	require.NoError(t, err)
 	assert.Equal(t, "isolated", meta.NetworkMode)
 	initialDomains := len(meta.NetworkAllow)
@@ -247,7 +248,7 @@ func TestCLI_NetworkLifecycle(t *testing.T) {
 	assert.Contains(t, stdout, "extra.example.com")
 
 	// Verify persisted
-	meta, err = sandbox.LoadMeta(sandbox.Dir("cli-net"))
+	meta, err = store.LoadMeta(sandbox.Dir("cli-net"))
 	require.NoError(t, err)
 	assert.Contains(t, meta.NetworkAllow, "extra.example.com")
 	assert.Contains(t, meta.NetworkAllow, "api.test.com")
@@ -272,7 +273,7 @@ func TestCLI_NetworkLifecycle(t *testing.T) {
 	assert.Contains(t, stdout, "api.test.com")
 
 	// Verify removal persisted
-	meta, err = sandbox.LoadMeta(sandbox.Dir("cli-net"))
+	meta, err = store.LoadMeta(sandbox.Dir("cli-net"))
 	require.NoError(t, err)
 	assert.Contains(t, meta.NetworkAllow, "extra.example.com")
 	assert.NotContains(t, meta.NetworkAllow, "api.test.com")
@@ -448,7 +449,7 @@ func TestCLI_Apply(t *testing.T) {
 	t.Cleanup(func() { destroySandbox(t, "cli-apply") })
 
 	// Seed work copy with a distinctive change
-	meta, err := sandbox.LoadMeta(sandbox.Dir("cli-apply"))
+	meta, err := store.LoadMeta(sandbox.Dir("cli-apply"))
 	require.NoError(t, err)
 	workDir := sandbox.WorkDir("cli-apply", meta.Workdir.HostPath)
 	require.NoError(t, os.WriteFile(

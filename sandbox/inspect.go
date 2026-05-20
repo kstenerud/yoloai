@@ -15,6 +15,7 @@ import (
 
 	"github.com/kstenerud/yoloai/config"
 	"github.com/kstenerud/yoloai/runtime"
+	"github.com/kstenerud/yoloai/sandbox/store"
 )
 
 // Status represents the current state of a sandbox.
@@ -45,7 +46,7 @@ const (
 
 // Info holds the combined metadata and live state for a sandbox.
 type Info struct {
-	Meta        *Meta       `json:"meta"`
+	Meta        *store.Meta `json:"meta"`
 	Status      Status      `json:"status"`
 	AgentStatus AgentStatus `json:"agent_status,omitempty"` // agent activity status (may be empty)
 	HasChanges  string      `json:"has_changes"`            // "yes", "no", or "-" (unknown/not applicable)
@@ -157,7 +158,7 @@ func hasUnappliedWork(workDir, baselineSHA string) bool {
 // usernames from the OCI image manifest (the placeholder UID used at build time),
 // not the container's live /etc/passwd (updated by the entrypoint's uid-remap step).
 // Use the numeric host UID instead to match the remapped container user.
-func ContainerUser(meta *Meta) string {
+func ContainerUser(meta *store.Meta) string {
 	if meta == nil {
 		return "yoloai"
 	}
@@ -207,8 +208,8 @@ func Perms(isolation string) IsolationPerms {
 }
 
 // ExecInContainer runs a command inside a sandbox instance and returns stdout.
-func ExecInContainer(ctx context.Context, rt runtime.Runtime, sandboxName string, meta *Meta, cmd []string) (string, error) {
-	result, err := rt.Exec(ctx, InstanceName(sandboxName), cmd, ContainerUser(meta))
+func ExecInContainer(ctx context.Context, rt runtime.Runtime, sandboxName string, meta *store.Meta, cmd []string) (string, error) {
+	result, err := rt.Exec(ctx, store.InstanceName(sandboxName), cmd, ContainerUser(meta))
 	if err != nil {
 		return "", err
 	}
@@ -254,7 +255,7 @@ func DetectStatus(ctx context.Context, rt runtime.Runtime, containerName string,
 
 	// Try agent-status.json (fast path — no exec)
 	if sandboxDir != "" {
-		statusPath := filepath.Join(sandboxDir, AgentStatusFile)
+		statusPath := filepath.Join(sandboxDir, store.AgentStatusFile)
 		data, readErr := os.ReadFile(statusPath) //nolint:gosec // path is sandbox-controlled
 		if readErr == nil && len(data) > 0 {
 			if status, ok := parseStatusJSON(data); ok {
@@ -323,24 +324,24 @@ func parseStatusJSON(data []byte) (Status, bool) {
 
 // InspectSandbox loads metadata and queries the runtime for a single sandbox.
 func InspectSandbox(ctx context.Context, rt runtime.Runtime, name string) (*Info, error) {
-	sandboxDir, err := RequireSandboxDir(name)
+	sandboxDir, err := store.RequireSandboxDir(name)
 	if err != nil {
 		return nil, err
 	}
 
-	meta, err := LoadMeta(sandboxDir)
+	meta, err := store.LoadMeta(sandboxDir)
 	if err != nil {
 		return nil, fmt.Errorf("load metadata: %w", err)
 	}
 
-	status, err := DetectStatus(ctx, rt, InstanceName(name), sandboxDir)
+	status, err := DetectStatus(ctx, rt, store.InstanceName(name), sandboxDir)
 	if err != nil {
 		return nil, err
 	}
 
 	changes := "-"
 	if meta.Workdir.Mode == "copy" || meta.Workdir.Mode == "overlay" {
-		workDir := WorkDir(name, meta.Workdir.HostPath)
+		workDir := store.WorkDir(name, meta.Workdir.HostPath)
 		if hasUnappliedWork(workDir, meta.Workdir.BaselineSHA) {
 			changes = "yes"
 		} else if detectChanges(workDir) != "-" {
@@ -352,7 +353,7 @@ func InspectSandbox(ctx context.Context, rt runtime.Runtime, name string) (*Info
 	if changes == "no" {
 		for _, d := range meta.Directories {
 			if d.Mode == "copy" || d.Mode == "overlay" {
-				auxWorkDir := WorkDir(name, d.HostPath)
+				auxWorkDir := store.WorkDir(name, d.HostPath)
 				if hasUnappliedWork(auxWorkDir, d.BaselineSHA) {
 					changes = "yes"
 					break
@@ -375,11 +376,11 @@ func InspectSandbox(ctx context.Context, rt runtime.Runtime, name string) (*Info
 }
 
 // detectWorkdirChanges returns "yes", "no", or "-" for a sandbox's workdir and aux dirs.
-func detectWorkdirChanges(name string, meta *Meta) string {
+func detectWorkdirChanges(name string, meta *store.Meta) string {
 	if meta.Workdir.Mode != "copy" && meta.Workdir.Mode != "overlay" {
 		return "-"
 	}
-	workDir := WorkDir(name, meta.Workdir.HostPath)
+	workDir := store.WorkDir(name, meta.Workdir.HostPath)
 	if hasUnappliedWork(workDir, meta.Workdir.BaselineSHA) {
 		return "yes"
 	}
@@ -389,7 +390,7 @@ func detectWorkdirChanges(name string, meta *Meta) string {
 	// workdir has no unapplied work — check aux dirs before reporting "no"
 	for _, d := range meta.Directories {
 		if d.Mode == "copy" || d.Mode == "overlay" {
-			auxWorkDir := WorkDir(name, d.HostPath)
+			auxWorkDir := store.WorkDir(name, d.HostPath)
 			if hasUnappliedWork(auxWorkDir, d.BaselineSHA) {
 				return "yes"
 			}
@@ -402,12 +403,12 @@ func detectWorkdirChanges(name string, meta *Meta) string {
 // If rt is nil, returns basic info (from meta.json and filesystem) with StatusUnavailable.
 // If rt is available, performs full inspection including container state.
 func InspectSandboxWithBackend(ctx context.Context, rt runtime.Runtime, name string) (*Info, error) {
-	sandboxDir, err := RequireSandboxDir(name)
+	sandboxDir, err := store.RequireSandboxDir(name)
 	if err != nil {
 		return nil, err
 	}
 
-	meta, err := LoadMeta(sandboxDir)
+	meta, err := store.LoadMeta(sandboxDir)
 	if err != nil {
 		return nil, fmt.Errorf("load metadata: %w", err)
 	}
@@ -428,7 +429,7 @@ func InspectSandboxWithBackend(ctx context.Context, rt runtime.Runtime, name str
 	}
 
 	// Runtime available - perform full inspection
-	status, err := DetectStatus(ctx, rt, InstanceName(name), sandboxDir)
+	status, err := DetectStatus(ctx, rt, store.InstanceName(name), sandboxDir)
 	if err != nil {
 		return nil, err
 	}
@@ -463,7 +464,7 @@ func ListSandboxes(ctx context.Context, rt runtime.Runtime) ([]*Info, error) {
 		if err != nil {
 			// Include broken sandboxes with minimal info
 			result = append(result, &Info{
-				Meta:       &Meta{Name: entry.Name()},
+				Meta:       &store.Meta{Name: entry.Name()},
 				Status:     StatusBroken,
 				HasChanges: "-",
 				DiskUsage:  "-",
@@ -520,7 +521,7 @@ func groupSandboxesByBackend(entries []os.DirEntry, sandboxesDir string) map[str
 			continue
 		}
 		sandboxDir := filepath.Join(sandboxesDir, entry.Name())
-		meta, err := LoadMeta(sandboxDir)
+		meta, err := store.LoadMeta(sandboxDir)
 		if err != nil {
 			byBackend[""] = append(byBackend[""], entry.Name())
 			continue
@@ -539,7 +540,7 @@ func brokenInfos(names []string) []*Info {
 	infos := make([]*Info, len(names))
 	for i, name := range names {
 		infos[i] = &Info{
-			Meta:       &Meta{Name: name},
+			Meta:       &store.Meta{Name: name},
 			Status:     StatusBroken,
 			HasChanges: "-",
 			DiskUsage:  "-",
@@ -567,7 +568,7 @@ func inspectBackendGroup(ctx context.Context, newRuntimeFunc func(context.Contex
 		info, inspectErr := InspectSandboxWithBackend(ctx, effectiveRT, name)
 		if inspectErr != nil {
 			result = append(result, &Info{
-				Meta:       &Meta{Name: name},
+				Meta:       &store.Meta{Name: name},
 				Status:     StatusBroken,
 				HasChanges: "-",
 				DiskUsage:  "-",

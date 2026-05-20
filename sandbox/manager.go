@@ -12,6 +12,7 @@ import (
 	"github.com/kstenerud/yoloai/config"
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/runtime"
+	"github.com/kstenerud/yoloai/sandbox/store"
 	"golang.org/x/term"
 )
 
@@ -206,17 +207,17 @@ func (m *Manager) Runtime() runtime.Runtime { return m.runtime }
 
 // Status returns the current lifecycle status of a sandbox.
 func (m *Manager) Status(ctx context.Context, name string) (Status, error) {
-	return DetectStatus(ctx, m.runtime, InstanceName(name), Dir(name))
+	return DetectStatus(ctx, m.runtime, store.InstanceName(name), store.Dir(name))
 }
 
 // SandboxFiles returns the path to the per-sandbox file exchange directory.
 func (m *Manager) SandboxFiles(name string) string {
-	return FilesDir(name)
+	return store.FilesDir(name)
 }
 
 // SandboxCache returns the path to the per-sandbox cache directory.
 func (m *Manager) SandboxCache(name string) string {
-	return CacheDir(name)
+	return store.CacheDir(name)
 }
 
 // SendInput sends text to the sandbox agent's terminal via tmux send-keys.
@@ -224,7 +225,7 @@ func (m *Manager) SandboxCache(name string) string {
 // at its prompt, this sends a follow-up message. The caller should check
 // Manager.Status before calling to know which case applies.
 func (m *Manager) SendInput(ctx context.Context, name string, text string) error {
-	containerName := InstanceName(name)
+	containerName := store.InstanceName(name)
 	_, err := m.runtime.Exec(ctx, containerName,
 		[]string{"tmux", "send-keys", "-t", "main", text, "Enter"},
 		"yoloai",

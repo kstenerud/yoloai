@@ -10,6 +10,7 @@ import (
 	"os/exec"
 
 	"github.com/kstenerud/yoloai/sandbox"
+	"github.com/kstenerud/yoloai/sandbox/store"
 	"github.com/spf13/cobra"
 )
 
@@ -24,12 +25,12 @@ func newSandboxVscodeCmd() *cobra.Command {
 				return err
 			}
 
-			sandboxDir, err := sandbox.RequireSandboxDir(name)
+			sandboxDir, err := store.RequireSandboxDir(name)
 			if err != nil {
 				return sandbox.ErrSandboxNotFound
 			}
 
-			meta, err := sandbox.LoadMeta(sandboxDir)
+			meta, err := store.LoadMeta(sandboxDir)
 			if err != nil {
 				return fmt.Errorf("load sandbox metadata: %w", err)
 			}
@@ -47,7 +48,7 @@ func newSandboxVscodeCmd() *cobra.Command {
 			}
 
 			// Build the attach URI
-			containerName := sandbox.InstanceName(meta.Name)
+			containerName := store.InstanceName(meta.Name)
 			payload := map[string]string{"containerName": containerName}
 			jsonBytes, err := json.Marshal(payload)
 			if err != nil {

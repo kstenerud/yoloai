@@ -15,6 +15,7 @@ import (
 	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/sandbox"
 	"github.com/kstenerud/yoloai/sandbox/patch"
+	"github.com/kstenerud/yoloai/sandbox/store"
 )
 
 // ProxyOptions controls how the proxy server creates or reuses a sandbox.
@@ -84,7 +85,7 @@ func (p *ProxyServer) ServeStdio(ctx context.Context) error {
 
 // ensureRunning guarantees the sandbox container is running, creating it if
 // needed. Returns the sandbox metadata for path template expansion.
-func (p *ProxyServer) ensureRunning(ctx context.Context) (*sandbox.Meta, error) {
+func (p *ProxyServer) ensureRunning(ctx context.Context) (*store.Meta, error) {
 	info, err := p.mgr.Inspect(ctx, p.sandboxName)
 
 	if errors.Is(err, sandbox.ErrSandboxNotFound) {
@@ -113,7 +114,7 @@ func (p *ProxyServer) ensureRunning(ctx context.Context) (*sandbox.Meta, error) 
 }
 
 // createSandbox creates a new sandbox with the proxy's options.
-func (p *ProxyServer) createSandbox(ctx context.Context) (*sandbox.Meta, error) {
+func (p *ProxyServer) createSandbox(ctx context.Context) (*store.Meta, error) {
 	if p.opts.Workdir.Path == "" {
 		return nil, fmt.Errorf("sandbox %q does not exist — provide --workdir to create it", p.sandboxName)
 	}
@@ -149,12 +150,12 @@ func (p *ProxyServer) createSandbox(ctx context.Context) (*sandbox.Meta, error) 
 //	{files}    — the file exchange directory (/yoloai/files/)
 //	{cache}    — the cache directory (/yoloai/cache/)
 //	{dir:N}    — meta.Directories[N].MountPath (Nth auxiliary directory, 0-indexed)
-func expandCmd(cmd []string, meta *sandbox.Meta) ([]string, error) {
+func expandCmd(cmd []string, meta *store.Meta) ([]string, error) {
 	filesDir := "/yoloai/files/"
 	cacheDir := "/yoloai/cache/"
 	if meta.HostFilesystem {
-		filesDir = sandbox.FilesDir(meta.Name)
-		cacheDir = sandbox.CacheDir(meta.Name)
+		filesDir = store.FilesDir(meta.Name)
+		cacheDir = store.CacheDir(meta.Name)
 	}
 
 	expanded := make([]string, len(cmd))
@@ -219,7 +220,7 @@ var injectedToolDefs = []map[string]any{
 	},
 }
 
-func (p *ProxyServer) run(ctx context.Context, in io.Reader, out io.Writer, _ *sandbox.Meta, innerCmd []string) error {
+func (p *ProxyServer) run(ctx context.Context, in io.Reader, out io.Writer, _ *store.Meta, innerCmd []string) error {
 	// Run the inner MCP server inside the sandbox via the backend's StdioExecer.
 	// Backends that don't implement it (Tart, Seatbelt) are not supported by the
 	// MCP proxy — fail with a clear error. W10 of the architecture remediation
@@ -228,7 +229,7 @@ func (p *ProxyServer) run(ctx context.Context, in io.Reader, out io.Writer, _ *s
 	if !ok {
 		return fmt.Errorf("MCP proxy: runtime backend %T does not support stdio exec", p.mgr.Runtime())
 	}
-	containerName := sandbox.InstanceName(p.sandboxName)
+	containerName := store.InstanceName(p.sandboxName)
 
 	innerInRead, innerIn := io.Pipe()
 	innerOut, innerOutWrite := io.Pipe()

@@ -16,6 +16,7 @@ import (
 	"github.com/kstenerud/yoloai/config"
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/sandbox"
+	"github.com/kstenerud/yoloai/sandbox/store"
 	"github.com/spf13/cobra"
 )
 
@@ -716,7 +717,7 @@ func findSandboxesWithProfile(profileName string) []string {
 		if !e.IsDir() {
 			continue
 		}
-		metaPath := filepath.Join(sandboxesDir, e.Name(), sandbox.EnvironmentFile)
+		metaPath := filepath.Join(sandboxesDir, e.Name(), store.EnvironmentFile)
 		data, readErr := os.ReadFile(metaPath) //nolint:gosec // G304: path is from sandboxes dir
 		if readErr != nil {
 			continue

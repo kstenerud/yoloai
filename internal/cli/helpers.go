@@ -14,6 +14,7 @@ import (
 	_ "github.com/kstenerud/yoloai/runtime/seatbelt"      // register backend
 	_ "github.com/kstenerud/yoloai/runtime/tart"          // register backend
 	"github.com/kstenerud/yoloai/sandbox"
+	"github.com/kstenerud/yoloai/sandbox/store"
 	"github.com/spf13/cobra"
 )
 
@@ -143,7 +144,7 @@ func resolveContainerBackendConfig() string {
 // Falls back to config default if meta.json can't be read.
 // Used by lifecycle commands that operate on an existing sandbox.
 func resolveBackendForSandbox(name string) string {
-	meta, err := sandbox.LoadMeta(sandbox.Dir(name))
+	meta, err := store.LoadMeta(store.Dir(name))
 	if err == nil && meta.Backend != "" {
 		return meta.Backend
 	}
@@ -229,5 +230,5 @@ func sandboxErrorHint(name string, err error) error {
 	if err == nil || errors.Is(err, sandbox.ErrSandboxNotFound) {
 		return err
 	}
-	return fmt.Errorf("%w\n  sandbox dir: %s\n  to remove: yoloai destroy %s", err, sandbox.Dir(name), name)
+	return fmt.Errorf("%w\n  sandbox dir: %s\n  to remove: yoloai destroy %s", err, store.Dir(name), name)
 }

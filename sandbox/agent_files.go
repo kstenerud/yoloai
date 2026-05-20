@@ -14,6 +14,7 @@ import (
 	"github.com/kstenerud/yoloai/agent"
 	"github.com/kstenerud/yoloai/config"
 	"github.com/kstenerud/yoloai/internal/fileutil"
+	"github.com/kstenerud/yoloai/sandbox/store"
 	"github.com/kstenerud/yoloai/workspace"
 )
 
@@ -52,7 +53,7 @@ func copyAgentFilesFromBaseDir(agentDef *agent.Definition, sandboxDir, baseDir s
 		return nil // source doesn't exist, skip silently
 	}
 
-	agentStateDir := filepath.Join(sandboxDir, AgentRuntimeDir)
+	agentStateDir := filepath.Join(sandboxDir, store.AgentRuntimeDir)
 
 	return filepath.WalkDir(srcDir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
@@ -97,7 +98,7 @@ func copyAgentFilesFromBaseDir(agentDef *agent.Definition, sandboxDir, baseDir s
 // Each entry is copied to agent-runtime/basename. Missing entries are skipped.
 // Existing files are not overwritten.
 func copyAgentFilesList(sandboxDir string, files []string) error {
-	agentStateDir := filepath.Join(sandboxDir, AgentRuntimeDir)
+	agentStateDir := filepath.Join(sandboxDir, store.AgentRuntimeDir)
 
 	for _, src := range files {
 		info, err := os.Stat(src)

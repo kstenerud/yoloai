@@ -11,12 +11,13 @@ import (
 	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/sandbox"
 	"github.com/kstenerud/yoloai/sandbox/patch"
+	"github.com/kstenerud/yoloai/sandbox/store"
 	"github.com/kstenerud/yoloai/workspace"
 	"github.com/spf13/cobra"
 )
 
 // applySquash implements the squashed-patch apply mode.
-func applySquash(cmd *cobra.Command, name string, paths []string, meta *sandbox.Meta, yes, dryRun bool) error {
+func applySquash(cmd *cobra.Command, name string, paths []string, meta *store.Meta, yes, dryRun bool) error {
 	// Check for aux :copy dirs
 	if len(meta.Directories) > 0 {
 		backend := resolveBackendForSandbox(name)
@@ -108,7 +109,7 @@ func applySquashPatch(cmd *cobra.Command, name string, paths []string, targetDir
 }
 
 // applySquashMulti applies squashed patches for multiple :copy directories.
-func applySquashMulti(cmd *cobra.Command, ctx context.Context, rt runtime.Runtime, name string, paths []string, _ *sandbox.Meta, yes, dryRun bool) error {
+func applySquashMulti(cmd *cobra.Command, ctx context.Context, rt runtime.Runtime, name string, paths []string, _ *store.Meta, yes, dryRun bool) error {
 	patches, err := patch.GenerateMultiPatch(ctx, rt, name, paths)
 	if err != nil {
 		return err

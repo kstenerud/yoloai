@@ -11,6 +11,7 @@ import (
 	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/sandbox"
 	"github.com/kstenerud/yoloai/sandbox/patch"
+	"github.com/kstenerud/yoloai/sandbox/store"
 	"github.com/spf13/cobra"
 )
 
@@ -63,7 +64,7 @@ func runDiffCmd(cmd *cobra.Command, args []string) error {
 	logFlag, _ := cmd.Flags().GetBool("log")
 
 	// Load meta early to detect overlay dirs
-	meta, metaErr := sandbox.LoadMeta(sandbox.Dir(name))
+	meta, metaErr := store.LoadMeta(store.Dir(name))
 	if metaErr != nil {
 		return sandboxErrorHint(name, metaErr)
 	}
@@ -150,7 +151,7 @@ func diffSingle(cmd *cobra.Command, name string, paths []string, stat, nameOnly 
 }
 
 // hasOverlayDirs returns true if any directory in the sandbox uses overlay mode.
-func hasOverlayDirs(meta *sandbox.Meta) bool {
+func hasOverlayDirs(meta *store.Meta) bool {
 	if meta.Workdir.Mode == "overlay" {
 		return true
 	}
@@ -164,7 +165,7 @@ func hasOverlayDirs(meta *sandbox.Meta) bool {
 
 // requireOverlayRunning verifies the sandbox container is running (required for overlay ops).
 func requireOverlayRunning(ctx context.Context, rt runtime.Runtime, name string) error {
-	info, err := rt.Inspect(ctx, sandbox.InstanceName(name))
+	info, err := rt.Inspect(ctx, store.InstanceName(name))
 	if err != nil {
 		return fmt.Errorf("overlay sandbox %s must be running for this operation — use 'yoloai start %s'", name, name)
 	}

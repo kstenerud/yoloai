@@ -6,6 +6,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/kstenerud/yoloai/sandbox/store"
 	"github.com/kstenerud/yoloai/workspace"
 )
 
@@ -23,7 +24,7 @@ type CloneOptions struct {
 func (m *Manager) Clone(ctx context.Context, opts CloneOptions) error {
 	_ = ctx // reserved for future use
 
-	if err := ValidateName(opts.Dest); err != nil {
+	if err := store.ValidateName(opts.Dest); err != nil {
 		return err
 	}
 
@@ -33,12 +34,12 @@ func (m *Manager) Clone(ctx context.Context, opts CloneOptions) error {
 	}
 	defer unlock()
 
-	srcDir, err := RequireSandboxDir(opts.Source)
+	srcDir, err := store.RequireSandboxDir(opts.Source)
 	if err != nil {
 		return fmt.Errorf("source sandbox %q: %w", opts.Source, err)
 	}
 
-	dstDir := Dir(opts.Dest)
+	dstDir := store.Dir(opts.Dest)
 	if _, err := os.Stat(dstDir); err == nil {
 		return fmt.Errorf("destination sandbox %q already exists", opts.Dest)
 	}
@@ -49,7 +50,7 @@ func (m *Manager) Clone(ctx context.Context, opts CloneOptions) error {
 		return fmt.Errorf("copy sandbox directory: %w", err)
 	}
 
-	meta, err := LoadMeta(dstDir)
+	meta, err := store.LoadMeta(dstDir)
 	if err != nil {
 		os.RemoveAll(dstDir) //nolint:errcheck,gosec // best-effort cleanup
 		return fmt.Errorf("load cloned meta: %w", err)
@@ -58,7 +59,7 @@ func (m *Manager) Clone(ctx context.Context, opts CloneOptions) error {
 	meta.Name = opts.Dest
 	meta.CreatedAt = time.Now()
 
-	if err := SaveMeta(dstDir, meta); err != nil {
+	if err := store.SaveMeta(dstDir, meta); err != nil {
 		os.RemoveAll(dstDir) //nolint:errcheck,gosec // best-effort cleanup
 		return fmt.Errorf("update cloned meta: %w", err)
 	}

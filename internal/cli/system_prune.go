@@ -12,6 +12,7 @@ import (
 	"github.com/kstenerud/yoloai/config"
 	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/sandbox"
+	"github.com/kstenerud/yoloai/sandbox/store"
 	"github.com/spf13/cobra"
 )
 
@@ -341,10 +342,10 @@ func scanSandboxes() (knownInstances []string, broken []brokenSandbox) {
 		name := entry.Name()
 		dir := filepath.Join(sandboxesDir, name)
 
-		if _, err := sandbox.LoadMeta(dir); err != nil {
+		if _, err := store.LoadMeta(dir); err != nil {
 			broken = append(broken, brokenSandbox{name: name, path: dir})
 		} else {
-			knownInstances = append(knownInstances, sandbox.InstanceName(name))
+			knownInstances = append(knownInstances, store.InstanceName(name))
 		}
 	}
 

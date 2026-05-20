@@ -5,16 +5,16 @@ package cli
 import (
 	"fmt"
 
-	"github.com/kstenerud/yoloai/sandbox"
+	"github.com/kstenerud/yoloai/sandbox/store"
 	"github.com/spf13/cobra"
 )
 
 func runSandboxAllowed(cmd *cobra.Command, name string) error {
-	sandboxDir, err := sandbox.RequireSandboxDir(name)
+	sandboxDir, err := store.RequireSandboxDir(name)
 	if err != nil {
 		return err
 	}
-	meta, err := sandbox.LoadMeta(sandboxDir)
+	meta, err := store.LoadMeta(sandboxDir)
 	if err != nil {
 		return err
 	}

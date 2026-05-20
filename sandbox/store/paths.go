@@ -1,12 +1,20 @@
-// Package sandbox implements sandbox lifecycle operations.
-package sandbox
+// Package store manages on-disk sandbox state: directory paths, the
+// per-sandbox Meta record, and the SandboxState completion flags. All
+// other sandbox/ subpackages consume types from here; this package
+// imports only the standard library, config, and internal helpers.
+package store
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 
 	"github.com/kstenerud/yoloai/config"
+	"github.com/kstenerud/yoloai/internal/yoerrors"
 )
+
+// ErrSandboxNotFound is returned when a sandbox directory does not exist.
+var ErrSandboxNotFound = errors.New("sandbox not found")
 
 // Centralized sandbox file and directory names. All code that reads/writes
 // these files should reference these constants rather than using literal strings.
@@ -75,16 +83,16 @@ func DecodePath(encoded string) (string, error) {
 // and Docker container names.
 func ValidateName(name string) error {
 	if name == "" {
-		return NewUsageError("sandbox name is required")
+		return yoerrors.NewUsageError("sandbox name is required")
 	}
 	if len(name) > config.MaxNameLength {
-		return NewUsageError("invalid sandbox name: must be at most %d characters (got %d)", config.MaxNameLength, len(name))
+		return yoerrors.NewUsageError("invalid sandbox name: must be at most %d characters (got %d)", config.MaxNameLength, len(name))
 	}
 	if name[0] == '/' || name[0] == '\\' {
-		return NewUsageError("invalid sandbox name %q: looks like a path (did you swap the arguments?)", name)
+		return yoerrors.NewUsageError("invalid sandbox name %q: looks like a path (did you swap the arguments?)", name)
 	}
 	if !config.ValidNameRe.MatchString(name) {
-		return NewUsageError("invalid sandbox name %q: must start with a letter or digit and contain only letters, digits, underscores, dots, or hyphens", name)
+		return yoerrors.NewUsageError("invalid sandbox name %q: must start with a letter or digit and contain only letters, digits, underscores, dots, or hyphens", name)
 	}
 	return nil
 }

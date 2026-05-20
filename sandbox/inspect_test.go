@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/kstenerud/yoloai/runtime"
+	"github.com/kstenerud/yoloai/sandbox/store"
 )
 
 // inspectMockRuntime extends mockRuntime to support Inspect and Exec for inspect tests.
@@ -177,16 +178,16 @@ func TestInspectSandbox_Removed(t *testing.T) {
 	name := "test-removed"
 	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
 	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
-	meta := &Meta{
+	meta := &store.Meta{
 		Name:  name,
 		Agent: "claude",
-		Workdir: WorkdirMeta{
+		Workdir: store.WorkdirMeta{
 			HostPath: "/tmp/test",
 			Mode:     "copy",
 		},
 		CreatedAt: time.Now(),
 	}
-	require.NoError(t, SaveMeta(sandboxDir, meta))
+	require.NoError(t, store.SaveMeta(sandboxDir, meta))
 
 	mock := &inspectMockRuntime{
 		inspectFn: func(_ context.Context, _ string) (runtime.InstanceInfo, error) {
@@ -224,16 +225,16 @@ func TestListSandboxes_IncludesBroken(t *testing.T) {
 	// Create a valid sandbox
 	validDir := filepath.Join(sandboxesDir, "valid")
 	require.NoError(t, os.MkdirAll(validDir, 0750))
-	meta := &Meta{
+	meta := &store.Meta{
 		Name:  "valid",
 		Agent: "claude",
-		Workdir: WorkdirMeta{
+		Workdir: store.WorkdirMeta{
 			HostPath: "/tmp/test",
 			Mode:     "copy",
 		},
 		CreatedAt: time.Now(),
 	}
-	require.NoError(t, SaveMeta(validDir, meta))
+	require.NoError(t, store.SaveMeta(validDir, meta))
 
 	// Create a broken sandbox (dir exists but no environment.json)
 	brokenDir := filepath.Join(sandboxesDir, "broken")
@@ -289,7 +290,7 @@ func TestDetectStatus_Done(t *testing.T) {
 	dir := t.TempDir()
 	exitCode := 0
 	statusData := fmt.Sprintf(`{"status":"done","exit_code":%d,"timestamp":%d}`, exitCode, time.Now().Unix())
-	require.NoError(t, os.WriteFile(filepath.Join(dir, AgentStatusFile), []byte(statusData), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, store.AgentStatusFile), []byte(statusData), 0600))
 
 	mock := &inspectMockRuntime{
 		inspectFn: func(_ context.Context, _ string) (runtime.InstanceInfo, error) {
@@ -305,7 +306,7 @@ func TestDetectStatus_Failed(t *testing.T) {
 	dir := t.TempDir()
 	exitCode := 1
 	statusData := fmt.Sprintf(`{"status":"done","exit_code":%d,"timestamp":%d}`, exitCode, time.Now().Unix())
-	require.NoError(t, os.WriteFile(filepath.Join(dir, AgentStatusFile), []byte(statusData), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, store.AgentStatusFile), []byte(statusData), 0600))
 
 	mock := &inspectMockRuntime{
 		inspectFn: func(_ context.Context, _ string) (runtime.InstanceInfo, error) {
@@ -365,7 +366,7 @@ func statusJSONBytes(status string, exitCode *int, ts int64) []byte {
 
 func TestDetectStatus_StatusJSON_Active(t *testing.T) {
 	dir := t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(dir, AgentStatusFile),
+	require.NoError(t, os.WriteFile(filepath.Join(dir, store.AgentStatusFile),
 		statusJSONBytes("active", nil, time.Now().Unix()), 0600))
 
 	mock := &inspectMockRuntime{
@@ -380,7 +381,7 @@ func TestDetectStatus_StatusJSON_Active(t *testing.T) {
 
 func TestDetectStatus_StatusJSON_Idle(t *testing.T) {
 	dir := t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(dir, AgentStatusFile),
+	require.NoError(t, os.WriteFile(filepath.Join(dir, store.AgentStatusFile),
 		statusJSONBytes("idle", nil, time.Now().Unix()), 0600))
 
 	mock := &inspectMockRuntime{
@@ -395,7 +396,7 @@ func TestDetectStatus_StatusJSON_Idle(t *testing.T) {
 
 func TestDetectStatus_StatusJSON_Done(t *testing.T) {
 	dir := t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(dir, AgentStatusFile),
+	require.NoError(t, os.WriteFile(filepath.Join(dir, store.AgentStatusFile),
 		statusJSONBytes("done", new(0), time.Now().Unix()), 0600))
 
 	mock := &inspectMockRuntime{
@@ -410,7 +411,7 @@ func TestDetectStatus_StatusJSON_Done(t *testing.T) {
 
 func TestDetectStatus_StatusJSON_Failed(t *testing.T) {
 	dir := t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(dir, AgentStatusFile),
+	require.NoError(t, os.WriteFile(filepath.Join(dir, store.AgentStatusFile),
 		statusJSONBytes("done", new(1), time.Now().Unix()), 0600))
 
 	mock := &inspectMockRuntime{
@@ -425,7 +426,7 @@ func TestDetectStatus_StatusJSON_Failed(t *testing.T) {
 
 func TestDetectStatus_StatusJSON_Stale(t *testing.T) {
 	dir := t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(dir, AgentStatusFile),
+	require.NoError(t, os.WriteFile(filepath.Join(dir, store.AgentStatusFile),
 		statusJSONBytes("active", nil, time.Now().Add(-30*time.Second).Unix()), 0600))
 
 	mock := &inspectMockRuntime{
@@ -443,7 +444,7 @@ func TestDetectStatus_StatusJSON_Stale(t *testing.T) {
 
 func TestDetectStatus_StatusJSON_StaleDone(t *testing.T) {
 	dir := t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(dir, AgentStatusFile),
+	require.NoError(t, os.WriteFile(filepath.Join(dir, store.AgentStatusFile),
 		statusJSONBytes("done", new(0), time.Now().Add(-30*time.Second).Unix()), 0600))
 
 	mock := &inspectMockRuntime{

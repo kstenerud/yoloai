@@ -18,6 +18,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/kstenerud/yoloai/runtime"
+	"github.com/kstenerud/yoloai/sandbox/store"
 )
 
 // lifecycleMockRuntime extends mockRuntime for lifecycle tests.
@@ -76,17 +77,17 @@ func createTestSandbox(t *testing.T, tmpDir, name, hostPath, mode string) {
 	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
 	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
 
-	meta := &Meta{
+	meta := &store.Meta{
 		Name:      name,
 		Agent:     "claude",
 		CreatedAt: time.Now(),
-		Workdir: WorkdirMeta{
+		Workdir: store.WorkdirMeta{
 			HostPath:  hostPath,
 			MountPath: hostPath,
 			Mode:      mode,
 		},
 	}
-	require.NoError(t, SaveMeta(sandboxDir, meta))
+	require.NoError(t, store.SaveMeta(sandboxDir, meta))
 }
 
 // Stop tests
@@ -206,7 +207,7 @@ func TestStart_Stopped(t *testing.T) {
 	err := mgr.Start(context.Background(), "test-start-stopped", StartOptions{})
 	assert.Error(t, err)
 	assert.True(t, removeCalled, "should remove stopped container before recreating")
-	assert.Contains(t, err.Error(), RuntimeConfigFile)
+	assert.Contains(t, err.Error(), store.RuntimeConfigFile)
 }
 
 func TestStart_SandboxNotFound(t *testing.T) {
@@ -238,7 +239,7 @@ func TestStart_Removed(t *testing.T) {
 	err := mgr.Start(context.Background(), "test-start-removed", StartOptions{})
 	assert.Error(t, err)
 	// Should be a recreateContainer error (runtime-config.json missing), not a routing error
-	assert.Contains(t, err.Error(), RuntimeConfigFile)
+	assert.Contains(t, err.Error(), store.RuntimeConfigFile)
 }
 
 func TestStart_Resume_RequiresPrompt(t *testing.T) {
@@ -269,18 +270,18 @@ func TestStart_Resume_DoneStatus(t *testing.T) {
 	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
 
 	// Create meta with HasPrompt=true
-	meta := &Meta{
+	meta := &store.Meta{
 		Name:      name,
 		Agent:     "claude",
 		HasPrompt: true,
 		CreatedAt: time.Now(),
-		Workdir: WorkdirMeta{
+		Workdir: store.WorkdirMeta{
 			HostPath:  "/tmp/project",
 			MountPath: "/tmp/project",
 			Mode:      "copy",
 		},
 	}
-	require.NoError(t, SaveMeta(sandboxDir, meta))
+	require.NoError(t, store.SaveMeta(sandboxDir, meta))
 
 	// Write prompt.txt
 	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, "prompt.txt"), []byte("Write hello world"), 0600))
@@ -293,11 +294,11 @@ func TestStart_Resume_DoneStatus(t *testing.T) {
 	}
 	cfgData, err := json.MarshalIndent(cfg, "", "  ")
 	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, RuntimeConfigFile), cfgData, 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, store.RuntimeConfigFile), cfgData, 0600))
 
 	// Write agent-status.json indicating done (exit code 0)
 	statusData := fmt.Sprintf(`{"status":"done","exit_code":0,"timestamp":%d}`, time.Now().Unix())
-	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, AgentStatusFile), []byte(statusData), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, store.AgentStatusFile), []byte(statusData), 0600))
 
 	// Track exec calls
 	var execCalls [][]string
@@ -344,18 +345,18 @@ func TestStart_Resume_StoppedStatus(t *testing.T) {
 	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
 	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
 
-	meta := &Meta{
+	meta := &store.Meta{
 		Name:      name,
 		Agent:     "claude",
 		HasPrompt: true,
 		CreatedAt: time.Now(),
-		Workdir: WorkdirMeta{
+		Workdir: store.WorkdirMeta{
 			HostPath:  "/tmp/project",
 			MountPath: "/tmp/project",
 			Mode:      "copy",
 		},
 	}
-	require.NoError(t, SaveMeta(sandboxDir, meta))
+	require.NoError(t, store.SaveMeta(sandboxDir, meta))
 
 	// Write prompt.txt
 	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, "prompt.txt"), []byte("Write hello world"), 0600))
@@ -368,7 +369,7 @@ func TestStart_Resume_StoppedStatus(t *testing.T) {
 	}
 	cfgData, err := json.MarshalIndent(cfg, "", "  ")
 	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, RuntimeConfigFile), cfgData, 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, store.RuntimeConfigFile), cfgData, 0600))
 
 	mock := &lifecycleMockRuntime{
 		inspectFn: func(_ context.Context, _ string) (runtime.InstanceInfo, error) {
@@ -388,7 +389,7 @@ func TestStart_Resume_StoppedStatus(t *testing.T) {
 	_ = mgr.Start(context.Background(), name, StartOptions{Resume: true})
 
 	// Verify runtime-config.json was patched to interactive command
-	updatedCfgData, err := os.ReadFile(filepath.Join(sandboxDir, RuntimeConfigFile)) //nolint:gosec // test file in controlled temp dir
+	updatedCfgData, err := os.ReadFile(filepath.Join(sandboxDir, store.RuntimeConfigFile)) //nolint:gosec // test file in controlled temp dir
 	require.NoError(t, err)
 	var updatedCfg containerConfig
 	require.NoError(t, json.Unmarshal(updatedCfgData, &updatedCfg))
@@ -430,7 +431,7 @@ func TestNeedsConfirmation_ChangesExist(t *testing.T) {
 	name := "test-confirm-changes"
 	hostPath := "/tmp/project"
 	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
-	workDir := filepath.Join(sandboxDir, "work", EncodePath(hostPath))
+	workDir := filepath.Join(sandboxDir, "work", store.EncodePath(hostPath))
 	require.NoError(t, os.MkdirAll(workDir, 0750))
 
 	initGitRepo(t, workDir)
@@ -438,17 +439,17 @@ func TestNeedsConfirmation_ChangesExist(t *testing.T) {
 	gitAdd(t, workDir, ".")
 	gitCommit(t, workDir, "initial")
 
-	meta := &Meta{
+	meta := &store.Meta{
 		Name:      name,
 		Agent:     "claude",
 		CreatedAt: time.Now(),
-		Workdir: WorkdirMeta{
+		Workdir: store.WorkdirMeta{
 			HostPath:  hostPath,
 			MountPath: hostPath,
 			Mode:      "copy",
 		},
 	}
-	require.NoError(t, SaveMeta(sandboxDir, meta))
+	require.NoError(t, store.SaveMeta(sandboxDir, meta))
 
 	// Make changes in work dir
 	writeTestFile(t, workDir, "file.txt", "modified")
@@ -474,7 +475,7 @@ func TestNeedsConfirmation_NoChanges(t *testing.T) {
 	name := "test-confirm-clean"
 	hostPath := "/tmp/project"
 	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
-	workDir := filepath.Join(sandboxDir, "work", EncodePath(hostPath))
+	workDir := filepath.Join(sandboxDir, "work", store.EncodePath(hostPath))
 	require.NoError(t, os.MkdirAll(workDir, 0750))
 
 	initGitRepo(t, workDir)
@@ -482,17 +483,17 @@ func TestNeedsConfirmation_NoChanges(t *testing.T) {
 	gitAdd(t, workDir, ".")
 	gitCommit(t, workDir, "initial")
 
-	meta := &Meta{
+	meta := &store.Meta{
 		Name:      name,
 		Agent:     "claude",
 		CreatedAt: time.Now(),
-		Workdir: WorkdirMeta{
+		Workdir: store.WorkdirMeta{
 			HostPath:  hostPath,
 			MountPath: hostPath,
 			Mode:      "copy",
 		},
 	}
-	require.NoError(t, SaveMeta(sandboxDir, meta))
+	require.NoError(t, store.SaveMeta(sandboxDir, meta))
 
 	mock := &lifecycleMockRuntime{
 		inspectFn: func(_ context.Context, _ string) (runtime.InstanceInfo, error) {
@@ -549,7 +550,7 @@ func TestReset_RecopiesWorkdir(t *testing.T) {
 	// Create sandbox with work copy
 	name := "test-reset"
 	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
-	workDir := filepath.Join(sandboxDir, "work", EncodePath(origDir))
+	workDir := filepath.Join(sandboxDir, "work", store.EncodePath(origDir))
 	require.NoError(t, os.MkdirAll(workDir, 0750))
 
 	// Create cache and files dirs with content (should be cleared by default)
@@ -567,18 +568,18 @@ func TestReset_RecopiesWorkdir(t *testing.T) {
 	gitCommit(t, workDir, "yoloai baseline")
 	sha := gitHEAD(t, workDir)
 
-	meta := &Meta{
+	meta := &store.Meta{
 		Name:      name,
 		Agent:     "claude",
 		CreatedAt: time.Now(),
-		Workdir: WorkdirMeta{
+		Workdir: store.WorkdirMeta{
 			HostPath:    origDir,
 			MountPath:   origDir,
 			Mode:        "copy",
 			BaselineSHA: sha,
 		},
 	}
-	require.NoError(t, SaveMeta(sandboxDir, meta))
+	require.NoError(t, store.SaveMeta(sandboxDir, meta))
 
 	// Modify work copy
 	writeTestFile(t, workDir, "file.txt", "modified by agent\n")
@@ -607,7 +608,7 @@ func TestReset_RecopiesWorkdir(t *testing.T) {
 	assert.Equal(t, "original content\n", string(content))
 
 	// Verify new baseline SHA in meta
-	updatedMeta, err := LoadMeta(sandboxDir)
+	updatedMeta, err := store.LoadMeta(sandboxDir)
 	require.NoError(t, err)
 	assert.NotEmpty(t, updatedMeta.Workdir.BaselineSHA)
 	assert.NotEqual(t, sha, updatedMeta.Workdir.BaselineSHA) // new baseline
@@ -629,8 +630,8 @@ func TestReset_State(t *testing.T) {
 
 	name := "test-reset-state"
 	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
-	workDir := filepath.Join(sandboxDir, "work", EncodePath(origDir))
-	agentStateDir := filepath.Join(sandboxDir, AgentRuntimeDir)
+	workDir := filepath.Join(sandboxDir, "work", store.EncodePath(origDir))
+	agentStateDir := filepath.Join(sandboxDir, store.AgentRuntimeDir)
 	require.NoError(t, os.MkdirAll(workDir, 0750))
 	require.NoError(t, os.MkdirAll(agentStateDir, 0750))
 
@@ -643,18 +644,18 @@ func TestReset_State(t *testing.T) {
 	gitCommit(t, workDir, "yoloai baseline")
 	sha := gitHEAD(t, workDir)
 
-	meta := &Meta{
+	meta := &store.Meta{
 		Name:      name,
 		Agent:     "claude",
 		CreatedAt: time.Now(),
-		Workdir: WorkdirMeta{
+		Workdir: store.WorkdirMeta{
 			HostPath:    origDir,
 			MountPath:   origDir,
 			Mode:        "copy",
 			BaselineSHA: sha,
 		},
 	}
-	require.NoError(t, SaveMeta(sandboxDir, meta))
+	require.NoError(t, store.SaveMeta(sandboxDir, meta))
 
 	mock := &lifecycleMockRuntime{
 		stopFn: func(_ context.Context, _ string) error {
@@ -708,7 +709,7 @@ func TestReset_OriginalMissing(t *testing.T) {
 
 	name := "test-reset-missing"
 	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
-	workDir := filepath.Join(sandboxDir, "work", EncodePath(origDir))
+	workDir := filepath.Join(sandboxDir, "work", store.EncodePath(origDir))
 	require.NoError(t, os.MkdirAll(workDir, 0750))
 
 	writeTestFile(t, workDir, "file.txt", "content\n")
@@ -717,18 +718,18 @@ func TestReset_OriginalMissing(t *testing.T) {
 	gitCommit(t, workDir, "yoloai baseline")
 	sha := gitHEAD(t, workDir)
 
-	meta := &Meta{
+	meta := &store.Meta{
 		Name:      name,
 		Agent:     "claude",
 		CreatedAt: time.Now(),
-		Workdir: WorkdirMeta{
+		Workdir: store.WorkdirMeta{
 			HostPath:    origDir,
 			MountPath:   origDir,
 			Mode:        "copy",
 			BaselineSHA: sha,
 		},
 	}
-	require.NoError(t, SaveMeta(sandboxDir, meta))
+	require.NoError(t, store.SaveMeta(sandboxDir, meta))
 
 	// Delete the original
 	require.NoError(t, os.RemoveAll(origDir))
@@ -767,7 +768,7 @@ func TestReset_InPlace_SyncsWorkdir(t *testing.T) {
 	// Create sandbox with work copy
 	name := "test-reset-inplace"
 	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
-	workDir := filepath.Join(sandboxDir, "work", EncodePath(origDir))
+	workDir := filepath.Join(sandboxDir, "work", store.EncodePath(origDir))
 	require.NoError(t, os.MkdirAll(workDir, 0750))
 
 	// Create cache and files dirs with content
@@ -785,19 +786,19 @@ func TestReset_InPlace_SyncsWorkdir(t *testing.T) {
 	gitCommit(t, workDir, "yoloai baseline")
 	sha := gitHEAD(t, workDir)
 
-	meta := &Meta{
+	meta := &store.Meta{
 		Name:      name,
 		Agent:     "claude",
 		HasPrompt: true,
 		CreatedAt: time.Now(),
-		Workdir: WorkdirMeta{
+		Workdir: store.WorkdirMeta{
 			HostPath:    origDir,
 			MountPath:   origDir,
 			Mode:        "copy",
 			BaselineSHA: sha,
 		},
 	}
-	require.NoError(t, SaveMeta(sandboxDir, meta))
+	require.NoError(t, store.SaveMeta(sandboxDir, meta))
 
 	// Simulate agent changes in work copy
 	writeTestFile(t, workDir, "file.txt", "modified by agent\n")
@@ -834,7 +835,7 @@ func TestReset_InPlace_SyncsWorkdir(t *testing.T) {
 	assert.NoFileExists(t, filepath.Join(workDir, "agent-new.txt"))
 
 	// Verify new baseline SHA in meta
-	updatedMeta, err := LoadMeta(sandboxDir)
+	updatedMeta, err := store.LoadMeta(sandboxDir)
 	require.NoError(t, err)
 	assert.NotEmpty(t, updatedMeta.Workdir.BaselineSHA)
 	assert.NotEqual(t, sha, updatedMeta.Workdir.BaselineSHA)
@@ -861,7 +862,7 @@ func TestReset_InPlace_KeepCache(t *testing.T) {
 
 	name := "test-reset-keep-cache"
 	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
-	workDir := filepath.Join(sandboxDir, "work", EncodePath(origDir))
+	workDir := filepath.Join(sandboxDir, "work", store.EncodePath(origDir))
 	require.NoError(t, os.MkdirAll(workDir, 0750))
 
 	// Create cache and files dirs with content
@@ -878,18 +879,18 @@ func TestReset_InPlace_KeepCache(t *testing.T) {
 	gitCommit(t, workDir, "yoloai baseline")
 	sha := gitHEAD(t, workDir)
 
-	meta := &Meta{
+	meta := &store.Meta{
 		Name:      name,
 		Agent:     "claude",
 		CreatedAt: time.Now(),
-		Workdir: WorkdirMeta{
+		Workdir: store.WorkdirMeta{
 			HostPath:    origDir,
 			MountPath:   origDir,
 			Mode:        "copy",
 			BaselineSHA: sha,
 		},
 	}
-	require.NoError(t, SaveMeta(sandboxDir, meta))
+	require.NoError(t, store.SaveMeta(sandboxDir, meta))
 
 	mock := &lifecycleMockRuntime{
 		inspectFn: func(_ context.Context, _ string) (runtime.InstanceInfo, error) {
@@ -921,7 +922,7 @@ func TestReset_InPlace_KeepFiles(t *testing.T) {
 
 	name := "test-reset-keep-files"
 	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
-	workDir := filepath.Join(sandboxDir, "work", EncodePath(origDir))
+	workDir := filepath.Join(sandboxDir, "work", store.EncodePath(origDir))
 	require.NoError(t, os.MkdirAll(workDir, 0750))
 
 	// Create cache and files dirs with content
@@ -938,18 +939,18 @@ func TestReset_InPlace_KeepFiles(t *testing.T) {
 	gitCommit(t, workDir, "yoloai baseline")
 	sha := gitHEAD(t, workDir)
 
-	meta := &Meta{
+	meta := &store.Meta{
 		Name:      name,
 		Agent:     "claude",
 		CreatedAt: time.Now(),
-		Workdir: WorkdirMeta{
+		Workdir: store.WorkdirMeta{
 			HostPath:    origDir,
 			MountPath:   origDir,
 			Mode:        "copy",
 			BaselineSHA: sha,
 		},
 	}
-	require.NoError(t, SaveMeta(sandboxDir, meta))
+	require.NoError(t, store.SaveMeta(sandboxDir, meta))
 
 	mock := &lifecycleMockRuntime{
 		inspectFn: func(_ context.Context, _ string) (runtime.InstanceInfo, error) {
@@ -979,7 +980,7 @@ func TestReset_UpgradesToRestartWhenNotRunning(t *testing.T) {
 	// Create sandbox with work copy
 	name := "test-reset-upgrade-restart"
 	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
-	workDir := filepath.Join(sandboxDir, "work", EncodePath(origDir))
+	workDir := filepath.Join(sandboxDir, "work", store.EncodePath(origDir))
 	require.NoError(t, os.MkdirAll(workDir, 0750))
 
 	writeTestFile(t, workDir, "file.txt", "original content\n")
@@ -988,18 +989,18 @@ func TestReset_UpgradesToRestartWhenNotRunning(t *testing.T) {
 	gitCommit(t, workDir, "yoloai baseline")
 	sha := gitHEAD(t, workDir)
 
-	meta := &Meta{
+	meta := &store.Meta{
 		Name:      name,
 		Agent:     "claude",
 		CreatedAt: time.Now(),
-		Workdir: WorkdirMeta{
+		Workdir: store.WorkdirMeta{
 			HostPath:    origDir,
 			MountPath:   origDir,
 			Mode:        "copy",
 			BaselineSHA: sha,
 		},
 	}
-	require.NoError(t, SaveMeta(sandboxDir, meta))
+	require.NoError(t, store.SaveMeta(sandboxDir, meta))
 
 	// Modify work copy
 	writeTestFile(t, workDir, "file.txt", "modified by agent\n")
@@ -1030,7 +1031,7 @@ func TestReset_UpgradesToRestartWhenNotRunning(t *testing.T) {
 	assert.Equal(t, "original content\n", string(content))
 
 	// Verify new baseline SHA in meta
-	updatedMeta, err := LoadMeta(sandboxDir)
+	updatedMeta, err := store.LoadMeta(sandboxDir)
 	require.NoError(t, err)
 	assert.NotEmpty(t, updatedMeta.Workdir.BaselineSHA)
 	assert.NotEqual(t, sha, updatedMeta.Workdir.BaselineSHA)
@@ -1043,11 +1044,11 @@ func TestPatchConfigDebug_SetTrue(t *testing.T) {
 	cfg := containerConfig{AgentCommand: "claude", WorkingDir: "/project"}
 	cfgData, err := json.MarshalIndent(cfg, "", "  ")
 	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, RuntimeConfigFile), cfgData, 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, store.RuntimeConfigFile), cfgData, 0600))
 
 	require.NoError(t, patchConfigDebug(sandboxDir, true))
 
-	data, err := os.ReadFile(filepath.Join(sandboxDir, RuntimeConfigFile)) //nolint:gosec // test
+	data, err := os.ReadFile(filepath.Join(sandboxDir, store.RuntimeConfigFile)) //nolint:gosec // test
 	require.NoError(t, err)
 	var result containerConfig
 	require.NoError(t, json.Unmarshal(data, &result))
@@ -1059,11 +1060,11 @@ func TestPatchConfigDebug_SetFalse(t *testing.T) {
 	cfg := containerConfig{AgentCommand: "claude", Debug: true}
 	cfgData, err := json.MarshalIndent(cfg, "", "  ")
 	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, RuntimeConfigFile), cfgData, 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, store.RuntimeConfigFile), cfgData, 0600))
 
 	require.NoError(t, patchConfigDebug(sandboxDir, false))
 
-	data, err := os.ReadFile(filepath.Join(sandboxDir, RuntimeConfigFile)) //nolint:gosec // test
+	data, err := os.ReadFile(filepath.Join(sandboxDir, store.RuntimeConfigFile)) //nolint:gosec // test
 	require.NoError(t, err)
 	var result containerConfig
 	require.NoError(t, json.Unmarshal(data, &result))
@@ -1081,11 +1082,11 @@ func TestPatchConfigDebug_PreservesOtherFields(t *testing.T) {
 	cfg := containerConfig{AgentCommand: "claude --print", WorkingDir: "/home/user/project"}
 	cfgData, err := json.MarshalIndent(cfg, "", "  ")
 	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, RuntimeConfigFile), cfgData, 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, store.RuntimeConfigFile), cfgData, 0600))
 
 	require.NoError(t, patchConfigDebug(sandboxDir, true))
 
-	data, err := os.ReadFile(filepath.Join(sandboxDir, RuntimeConfigFile)) //nolint:gosec // test
+	data, err := os.ReadFile(filepath.Join(sandboxDir, store.RuntimeConfigFile)) //nolint:gosec // test
 	require.NoError(t, err)
 	var result containerConfig
 	require.NoError(t, json.Unmarshal(data, &result))
@@ -1101,11 +1102,11 @@ func TestPatchConfigAllowedDomains_SetDomains(t *testing.T) {
 	cfg := containerConfig{AgentCommand: "claude"}
 	cfgData, err := json.MarshalIndent(cfg, "", "  ")
 	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, RuntimeConfigFile), cfgData, 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, store.RuntimeConfigFile), cfgData, 0600))
 
 	require.NoError(t, PatchConfigAllowedDomains(sandboxDir, []string{"api.anthropic.com", "sentry.io"}))
 
-	data, err := os.ReadFile(filepath.Join(sandboxDir, RuntimeConfigFile)) //nolint:gosec // test
+	data, err := os.ReadFile(filepath.Join(sandboxDir, store.RuntimeConfigFile)) //nolint:gosec // test
 	require.NoError(t, err)
 	var result containerConfig
 	require.NoError(t, json.Unmarshal(data, &result))
@@ -1117,11 +1118,11 @@ func TestPatchConfigAllowedDomains_ReplacesExisting(t *testing.T) {
 	cfg := containerConfig{AgentCommand: "claude", AllowedDomains: []string{"old.com"}}
 	cfgData, err := json.MarshalIndent(cfg, "", "  ")
 	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, RuntimeConfigFile), cfgData, 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, store.RuntimeConfigFile), cfgData, 0600))
 
 	require.NoError(t, PatchConfigAllowedDomains(sandboxDir, []string{"new.com"}))
 
-	data, err := os.ReadFile(filepath.Join(sandboxDir, RuntimeConfigFile)) //nolint:gosec // test
+	data, err := os.ReadFile(filepath.Join(sandboxDir, store.RuntimeConfigFile)) //nolint:gosec // test
 	require.NoError(t, err)
 	var result containerConfig
 	require.NoError(t, json.Unmarshal(data, &result))
@@ -1133,11 +1134,11 @@ func TestPatchConfigAllowedDomains_EmptyListClears(t *testing.T) {
 	cfg := containerConfig{AgentCommand: "claude", AllowedDomains: []string{"api.com"}}
 	cfgData, err := json.MarshalIndent(cfg, "", "  ")
 	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, RuntimeConfigFile), cfgData, 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, store.RuntimeConfigFile), cfgData, 0600))
 
 	require.NoError(t, PatchConfigAllowedDomains(sandboxDir, []string{}))
 
-	data, err := os.ReadFile(filepath.Join(sandboxDir, RuntimeConfigFile)) //nolint:gosec // test
+	data, err := os.ReadFile(filepath.Join(sandboxDir, store.RuntimeConfigFile)) //nolint:gosec // test
 	require.NoError(t, err)
 	var result containerConfig
 	require.NoError(t, json.Unmarshal(data, &result))
@@ -1182,13 +1183,13 @@ func TestDestroy_ReadOnlyFiles(t *testing.T) {
 	require.NoError(t, os.Chmod(readonlyDir, 0o555))               //nolint:gosec // intentionally read-only for test
 	require.NoError(t, os.Chmod(filepath.Dir(readonlyDir), 0o555)) //nolint:gosec // intentionally read-only for test
 
-	meta := &Meta{
+	meta := &store.Meta{
 		Name:      name,
 		Agent:     "claude",
 		CreatedAt: time.Now(),
-		Workdir:   WorkdirMeta{HostPath: "/tmp/project", Mode: "copy"},
+		Workdir:   store.WorkdirMeta{HostPath: "/tmp/project", Mode: "copy"},
 	}
-	require.NoError(t, SaveMeta(sandboxDir, meta))
+	require.NoError(t, store.SaveMeta(sandboxDir, meta))
 
 	mock := &lifecycleMockRuntime{}
 	mgr := newLifecycleMgr(mock)

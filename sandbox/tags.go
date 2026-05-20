@@ -4,18 +4,19 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/kstenerud/yoloai/sandbox/store"
 	"github.com/kstenerud/yoloai/workspace"
 )
 
 // loadDiffContext returns the work directory, baseline SHA, and workdir mode for
 // a sandbox. Used by tags.go to locate commits relative to the baseline.
 func loadDiffContext(name string) (workDir string, baselineSHA string, mode string, err error) {
-	sandboxDir, dirErr := RequireSandboxDir(name)
+	sandboxDir, dirErr := store.RequireSandboxDir(name)
 	if dirErr != nil {
 		return "", "", "", dirErr
 	}
 
-	meta, loadErr := LoadMeta(sandboxDir)
+	meta, loadErr := store.LoadMeta(sandboxDir)
 	if loadErr != nil {
 		return "", "", "", loadErr
 	}
@@ -28,7 +29,7 @@ func loadDiffContext(name string) (workDir string, baselineSHA string, mode stri
 		if mountPath != "" && mountPath != meta.Workdir.HostPath {
 			workDir = mountPath
 		} else {
-			workDir = WorkDir(name, meta.Workdir.HostPath)
+			workDir = store.WorkDir(name, meta.Workdir.HostPath)
 		}
 		baselineSHA = meta.Workdir.BaselineSHA
 		if baselineSHA == "" {
@@ -104,7 +105,7 @@ func ListTagsBeyondBaseline(name string) ([]TagInfo, error) {
 // This is useful for showing hints about tags that haven't been transferred yet,
 // even if their commits have already been applied.
 func ListUnappliedTags(name string) ([]TagInfo, error) {
-	meta, err := LoadMeta(Dir(name))
+	meta, err := store.LoadMeta(store.Dir(name))
 	if err != nil {
 		return nil, err
 	}
@@ -113,7 +114,7 @@ func ListUnappliedTags(name string) ([]TagInfo, error) {
 		return nil, nil
 	}
 
-	workDir := WorkDir(name, meta.Workdir.HostPath)
+	workDir := store.WorkDir(name, meta.Workdir.HostPath)
 	targetDir := meta.Workdir.HostPath
 
 	// Check if target is a git repo

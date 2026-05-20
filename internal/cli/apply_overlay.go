@@ -12,13 +12,14 @@ import (
 	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/sandbox"
 	"github.com/kstenerud/yoloai/sandbox/patch"
+	"github.com/kstenerud/yoloai/sandbox/store"
 	"github.com/kstenerud/yoloai/workspace"
 	"github.com/spf13/cobra"
 	"os"
 )
 
 // applyOverlay handles apply for sandboxes with overlay directories.
-func applyOverlay(cmd *cobra.Command, name string, meta *sandbox.Meta, refs, paths []string, patchesDir string, noWIP, yes, dryRun bool) error {
+func applyOverlay(cmd *cobra.Command, name string, meta *store.Meta, refs, paths []string, patchesDir string, noWIP, yes, dryRun bool) error {
 	// Reject unsupported flag combos for overlay
 	if len(refs) > 0 {
 		return sandbox.NewPlatformError("selective ref apply is not supported for :overlay sandboxes")
@@ -83,7 +84,7 @@ func applyOverlayExportPatches(cmd *cobra.Command, patches []patch.PatchSet, pat
 }
 
 // applyOverlayPatches applies overlay patches to the host and advances baselines.
-func applyOverlayPatches(cmd *cobra.Command, ctx context.Context, rt runtime.Runtime, name string, meta *sandbox.Meta, patches []patch.PatchSet, yes, dryRun bool) error {
+func applyOverlayPatches(cmd *cobra.Command, ctx context.Context, rt runtime.Runtime, name string, meta *store.Meta, patches []patch.PatchSet, yes, dryRun bool) error {
 	isJSON := jsonEnabled(cmd)
 	out := cmd.OutOrStdout()
 	if !isJSON {

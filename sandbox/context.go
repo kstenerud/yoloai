@@ -12,11 +12,12 @@ import (
 	"github.com/kstenerud/yoloai/internal/fileutil"
 
 	"github.com/kstenerud/yoloai/agent"
+	"github.com/kstenerud/yoloai/sandbox/store"
 )
 
 // GenerateContext builds a markdown description of the sandbox environment
 // from Meta fields. Sections are omitted when they have no content.
-func GenerateContext(meta *Meta) string {
+func GenerateContext(meta *store.Meta) string {
 	var b strings.Builder
 
 	b.WriteString("# Sandbox Environment\n\n")
@@ -51,8 +52,8 @@ func GenerateContext(meta *Meta) string {
 	filesPath := "/yoloai/files/"
 	cachePath := "/yoloai/cache/"
 	if meta.HostFilesystem {
-		filesPath = filepath.Join(Dir(meta.Name), "files") + "/"
-		cachePath = filepath.Join(Dir(meta.Name), "cache") + "/"
+		filesPath = filepath.Join(store.Dir(meta.Name), "files") + "/"
+		cachePath = filepath.Join(store.Dir(meta.Name), "cache") + "/"
 	}
 	fmt.Fprintf(&b, "The **shared files directory** is at `%s`.\n", filesPath)
 	fmt.Fprintf(&b, "Files shared via `yoloai files put` appear here, and anything you write here can be retrieved by the user with `yoloai files get`.\n")
@@ -107,9 +108,9 @@ func GenerateContext(meta *Meta) string {
 		fmt.Fprintf(&b, "This sandbox has `--debug` enabled. The idle detection monitor writes detailed logs to `%s/logs/monitor.jsonl`.\n\n", rtDir)
 		b.WriteString("If the user asks you to help debug idle detection (e.g. status stuck on active/idle), check these files:\n\n")
 		fmt.Fprintf(&b, "- `%s/logs/monitor.jsonl` — per-cycle trace: each detector's result, stability counters, final decision\n", rtDir)
-		fmt.Fprintf(&b, "- `%s/%s` — current status written by the monitor\n", rtDir, AgentStatusFile)
-		fmt.Fprintf(&b, "- `%s/%s` — sandbox config including detector stack (`detectors` field) and idle settings\n", rtDir, RuntimeConfigFile)
-		fmt.Fprintf(&b, "\nYou can also run `%s/%s/diagnose-idle.sh` for a point-in-time snapshot of all idle detection state.\n", rtDir, BinDir)
+		fmt.Fprintf(&b, "- `%s/%s` — current status written by the monitor\n", rtDir, store.AgentStatusFile)
+		fmt.Fprintf(&b, "- `%s/%s` — sandbox config including detector stack (`detectors` field) and idle settings\n", rtDir, store.RuntimeConfigFile)
+		fmt.Fprintf(&b, "\nYou can also run `%s/%s/diagnose-idle.sh` for a point-in-time snapshot of all idle detection state.\n", rtDir, store.BinDir)
 	}
 
 	return b.String()
@@ -118,9 +119,9 @@ func GenerateContext(meta *Meta) string {
 // runtimeDir returns the base path where runtime files live for this sandbox.
 // Container/VM backends use /yoloai inside the container; host-filesystem backends
 // (seatbelt, future SSH) use the sandbox directory on the host.
-func runtimeDir(meta *Meta) string {
+func runtimeDir(meta *store.Meta) string {
 	if meta.HostFilesystem {
-		return Dir(meta.Name)
+		return store.Dir(meta.Name)
 	}
 	return "/yoloai"
 }
@@ -147,7 +148,7 @@ func writeDir(b *strings.Builder, mountPath, hostPath, mode string, isWorkdir bo
 
 // WriteContextFiles writes the sandbox context file and optional per-agent
 // instruction file into the sandbox directory.
-func WriteContextFiles(sandboxDir string, meta *Meta, agentDef *agent.Definition) error {
+func WriteContextFiles(sandboxDir string, meta *store.Meta, agentDef *agent.Definition) error {
 	content := GenerateContext(meta)
 
 	// Write context.md at sandbox root (reference copy)
@@ -158,7 +159,7 @@ func WriteContextFiles(sandboxDir string, meta *Meta, agentDef *agent.Definition
 
 	// Write full context inline into the agent's native instruction file
 	if agentDef.ContextFile != "" && agentDef.StateDir != "" {
-		refPath := filepath.Join(sandboxDir, AgentRuntimeDir, agentDef.ContextFile)
+		refPath := filepath.Join(sandboxDir, store.AgentRuntimeDir, agentDef.ContextFile)
 		if err := fileutil.WriteFile(refPath, []byte(content), 0600); err != nil {
 			return fmt.Errorf("write agent context file %s: %w", agentDef.ContextFile, err)
 		}

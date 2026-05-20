@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/kstenerud/yoloai/sandbox"
+	"github.com/kstenerud/yoloai/sandbox/store"
 	"github.com/spf13/cobra"
 )
 
@@ -26,10 +27,10 @@ type logSource struct {
 }
 
 var allLogSources = []logSource{
-	{"cli", "cli    ", sandbox.CLIJSONLPath},
-	{"sandbox", "sandbox", sandbox.SandboxJSONLPath},
-	{"monitor", "monitor", sandbox.MonitorJSONLPath},
-	{"hooks", "hooks  ", sandbox.HooksJSONLPath},
+	{"cli", "cli    ", store.CLIJSONLPath},
+	{"sandbox", "sandbox", store.SandboxJSONLPath},
+	{"monitor", "monitor", store.MonitorJSONLPath},
+	{"hooks", "hooks  ", store.HooksJSONLPath},
 }
 
 // logRecord is a parsed JSONL log entry.
@@ -378,7 +379,7 @@ func tailFilePoll(
 
 // sandboxIsDone returns true if the sandbox's agent-status.json shows the agent has exited.
 func sandboxIsDone(name string) bool {
-	statusPath := sandbox.AgentStatusFilePath(name)
+	statusPath := store.AgentStatusFilePath(name)
 	data, err := os.ReadFile(statusPath) //nolint:gosec
 	if err != nil {
 		return false
@@ -446,7 +447,7 @@ func runLogFollow(cmd *cobra.Command, name string, sources []logSource, minLevel
 
 // runLogAgent shows the raw agent terminal output (logs/agent.log).
 func runLogAgent(cmd *cobra.Command, name string, rawMode bool) error {
-	logPath := sandbox.AgentLogPath(name)
+	logPath := store.AgentLogPath(name)
 	f, err := os.Open(logPath) //nolint:gosec
 	if err != nil {
 		if os.IsNotExist(err) {

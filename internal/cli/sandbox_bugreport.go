@@ -15,6 +15,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/sandbox"
+	"github.com/kstenerud/yoloai/sandbox/store"
 	"github.com/spf13/cobra"
 )
 
@@ -72,20 +73,20 @@ func writeSandboxSections(ctx context.Context, w io.Writer, rt runtime.Runtime, 
 	writeBugReportSandboxDetail(ctx, w, rt, name, reportType)
 
 	// Section 7: cli.jsonl
-	writeBugReportJSONLFile(w, "logs/cli.jsonl", sandbox.CLIJSONLPath(name), reportType, nil)
+	writeBugReportJSONLFile(w, "logs/cli.jsonl", store.CLIJSONLPath(name), reportType, nil)
 
 	// Section 8: sandbox.jsonl (omit setup_cmd.* and network.allow in safe mode)
 	var omitEvents []string
 	if reportType == "safe" {
 		omitEvents = []string{"setup_cmd.*", "network.allow"}
 	}
-	writeBugReportJSONLFile(w, "logs/sandbox.jsonl", sandbox.SandboxJSONLPath(name), reportType, omitEvents)
+	writeBugReportJSONLFile(w, "logs/sandbox.jsonl", store.SandboxJSONLPath(name), reportType, omitEvents)
 
 	// Section 9: monitor.jsonl (full in both modes)
-	writeBugReportJSONLFile(w, "logs/monitor.jsonl", sandbox.MonitorJSONLPath(name), reportType, nil)
+	writeBugReportJSONLFile(w, "logs/monitor.jsonl", store.MonitorJSONLPath(name), reportType, nil)
 
 	// Section 10: agent-hooks.jsonl (full in both modes)
-	writeBugReportJSONLFile(w, "logs/agent-hooks.jsonl", sandbox.HooksJSONLPath(name), reportType, nil)
+	writeBugReportJSONLFile(w, "logs/agent-hooks.jsonl", store.HooksJSONLPath(name), reportType, nil)
 
 	if reportType == "unsafe" {
 		// Section 11: Agent output (unsafe only)
@@ -128,20 +129,20 @@ func writeBugReportSandboxDetail(ctx context.Context, w io.Writer, rt runtime.Ru
 		fmt.Fprintln(w)                                     //nolint:errcheck
 	}
 
-	sandboxDir := sandbox.Dir(name)
+	sandboxDir := store.Dir(name)
 
 	// environment.json
 	writeJSONFileSection(w, "environment.json",
-		fmt.Sprintf("%s/%s", sandboxDir, sandbox.EnvironmentFile),
+		fmt.Sprintf("%s/%s", sandboxDir, store.EnvironmentFile),
 		reportType, []string{"network_allow", "setup"})
 
 	// agent-status.json (full contents in both modes)
 	writePlainFileSection(w, "agent-status.json",
-		fmt.Sprintf("%s/%s", sandboxDir, sandbox.AgentStatusFile))
+		fmt.Sprintf("%s/%s", sandboxDir, store.AgentStatusFile))
 
 	// runtime-config.json
 	writeJSONFileSection(w, "runtime-config.json",
-		fmt.Sprintf("%s/%s", sandboxDir, sandbox.RuntimeConfigFile),
+		fmt.Sprintf("%s/%s", sandboxDir, store.RuntimeConfigFile),
 		reportType, []string{"setup_commands", "allowed_domains"})
 
 	// prompt.txt (unsafe only; omitted in safe mode — may contain sensitive task descriptions)
@@ -210,7 +211,7 @@ func writeContainerLog(ctx context.Context, w io.Writer, rt runtime.Runtime, nam
 	fmt.Fprintln(w, "**Container log:**") //nolint:errcheck
 	fmt.Fprintln(w)                       //nolint:errcheck
 
-	logs := rt.Logs(ctx, sandbox.InstanceName(name), containerLogTailLines)
+	logs := rt.Logs(ctx, store.InstanceName(name), containerLogTailLines)
 	fmt.Fprintln(w, "```") //nolint:errcheck
 	if logs == "" {
 		fmt.Fprintln(w, "*(no logs available)*") //nolint:errcheck
@@ -242,7 +243,7 @@ func writeBugReportJSONLFile(w io.Writer, title, path, reportType string, omitEv
 // writeBugReportAgentOutput writes section 11: ANSI-stripped agent output.
 // Only included in unsafe reports.
 func writeBugReportAgentOutput(w io.Writer, name string) {
-	path := sandbox.AgentLogPath(name)
+	path := store.AgentLogPath(name)
 	f, err := os.Open(path) //nolint:gosec
 	if err != nil {
 		fmt.Fprintln(w, "<details>")                       //nolint:errcheck
@@ -298,7 +299,7 @@ func writeBugReportTmuxCapture(w io.Writer, name string) {
 // for the named sandbox. Returns empty string if the file is missing or has no
 // socket configured.
 func readTmuxSocketFromConfig(name string) string {
-	cfgPath := fmt.Sprintf("%s/%s", sandbox.Dir(name), sandbox.RuntimeConfigFile)
+	cfgPath := fmt.Sprintf("%s/%s", store.Dir(name), store.RuntimeConfigFile)
 	data, err := os.ReadFile(cfgPath) //nolint:gosec // G304: path derived from trusted sandbox dir
 	if err != nil {
 		return ""

@@ -1,7 +1,6 @@
-package sandbox
-
 // ABOUTME: Per-sandbox persistent state tracking (sandbox-state.json).
 // ABOUTME: Tracks initialization flags like agent_files seeding across container restarts.
+package store
 
 import (
 	"encoding/json"

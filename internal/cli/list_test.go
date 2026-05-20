@@ -7,17 +7,18 @@ import (
 	"time"
 
 	"github.com/kstenerud/yoloai/sandbox"
+	"github.com/kstenerud/yoloai/sandbox/store"
 	"github.com/stretchr/testify/assert"
 )
 
 func makeInfo(name string, status sandbox.Status, agent, profile, changes string) *sandbox.Info {
 	return &sandbox.Info{
-		Meta: &sandbox.Meta{
+		Meta: &store.Meta{
 			Name:      name,
 			Agent:     agent,
 			Profile:   profile,
 			CreatedAt: time.Now(),
-			Workdir:   sandbox.WorkdirMeta{HostPath: "/tmp/" + name},
+			Workdir:   store.WorkdirMeta{HostPath: "/tmp/" + name},
 		},
 		Status:     status,
 		HasChanges: changes,
@@ -27,7 +28,7 @@ func makeInfo(name string, status sandbox.Status, agent, profile, changes string
 
 func makeBrokenInfo(name string) *sandbox.Info {
 	return &sandbox.Info{
-		Meta:       &sandbox.Meta{Name: name},
+		Meta:       &store.Meta{Name: name},
 		Status:     sandbox.StatusBroken,
 		HasChanges: "-",
 		DiskUsage:  "-",

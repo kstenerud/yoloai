@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/kstenerud/yoloai/internal/testutil"
+	"github.com/kstenerud/yoloai/sandbox/store"
 	"github.com/kstenerud/yoloai/workspace"
 )
 
@@ -36,15 +37,15 @@ func createRWSandbox(t *testing.T, tmpDir, name, hostPath string) {
 	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
 	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
 
-	meta := &Meta{
+	meta := &store.Meta{
 		Name:      name,
 		Agent:     "test",
 		CreatedAt: time.Now(),
-		Workdir: WorkdirMeta{
+		Workdir: store.WorkdirMeta{
 			HostPath:  hostPath,
 			MountPath: hostPath,
 			Mode:      "rw",
 		},
 	}
-	require.NoError(t, SaveMeta(sandboxDir, meta))
+	require.NoError(t, store.SaveMeta(sandboxDir, meta))
 }

@@ -4,11 +4,14 @@ import (
 	"errors"
 
 	"github.com/kstenerud/yoloai/internal/yoerrors"
+	"github.com/kstenerud/yoloai/sandbox/store"
 )
 
 // Sentinel errors for sandbox operations.
 var (
-	ErrSandboxNotFound     = errors.New("sandbox not found")
+	// ErrSandboxNotFound is forwarded from store so callers that imported
+	// sandbox.ErrSandboxNotFound before the store carve continue to work.
+	ErrSandboxNotFound     = store.ErrSandboxNotFound
 	ErrSandboxExists       = errors.New("sandbox already exists")
 	ErrMissingAPIKey       = errors.New("required API key not set")
 	ErrContainerNotRunning = errors.New("container is not running")

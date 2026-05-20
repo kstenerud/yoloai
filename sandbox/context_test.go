@@ -9,16 +9,17 @@ import (
 
 	"github.com/kstenerud/yoloai/agent"
 	"github.com/kstenerud/yoloai/config"
+	"github.com/kstenerud/yoloai/sandbox/store"
 )
 
 func TestGenerateContext_AllFields(t *testing.T) {
-	meta := &Meta{
-		Workdir: WorkdirMeta{
+	meta := &store.Meta{
+		Workdir: store.WorkdirMeta{
 			HostPath:  "/home/user/project",
 			MountPath: "/home/user/project",
 			Mode:      "copy",
 		},
-		Directories: []DirMeta{
+		Directories: []store.DirMeta{
 			{HostPath: "/opt/lib", MountPath: "/home/user/lib", Mode: "ro"},
 			{HostPath: "/data/shared", MountPath: "/data/shared", Mode: "rw"},
 		},
@@ -62,8 +63,8 @@ func assertContextContains(t *testing.T, result string) {
 }
 
 func TestGenerateContext_MinimalFields(t *testing.T) {
-	meta := &Meta{
-		Workdir: WorkdirMeta{
+	meta := &store.Meta{
+		Workdir: store.WorkdirMeta{
 			HostPath:  "/home/user/project",
 			MountPath: "/home/user/project",
 			Mode:      "copy",
@@ -84,8 +85,8 @@ func TestGenerateContext_MinimalFields(t *testing.T) {
 }
 
 func TestGenerateContext_NetworkNone(t *testing.T) {
-	meta := &Meta{
-		Workdir: WorkdirMeta{
+	meta := &store.Meta{
+		Workdir: store.WorkdirMeta{
 			HostPath:  "/project",
 			MountPath: "/project",
 			Mode:      "copy",
@@ -101,8 +102,8 @@ func TestGenerateContext_NetworkNone(t *testing.T) {
 }
 
 func TestGenerateContext_WorkdirMountPath(t *testing.T) {
-	meta := &Meta{
-		Workdir: WorkdirMeta{
+	meta := &store.Meta{
+		Workdir: store.WorkdirMeta{
 			HostPath:  "/host/project",
 			MountPath: "/container/project",
 			Mode:      "copy",
@@ -117,11 +118,11 @@ func TestGenerateContext_WorkdirMountPath(t *testing.T) {
 }
 
 func TestGenerateContext_SeatbeltFilesPath(t *testing.T) {
-	meta := &Meta{
+	meta := &store.Meta{
 		Name:           "test-sb",
 		Backend:        "seatbelt",
 		HostFilesystem: true,
-		Workdir: WorkdirMeta{
+		Workdir: store.WorkdirMeta{
 			HostPath:  "/home/user/project",
 			MountPath: "/home/user/project",
 			Mode:      "copy",
@@ -130,14 +131,14 @@ func TestGenerateContext_SeatbeltFilesPath(t *testing.T) {
 
 	result := GenerateContext(meta)
 
-	expectedFilesPath := filepath.Join(Dir("test-sb"), "files") + "/"
+	expectedFilesPath := filepath.Join(store.Dir("test-sb"), "files") + "/"
 	if !strings.Contains(result, expectedFilesPath) {
 		t.Errorf("expected seatbelt files path %q in context, got:\n%s", expectedFilesPath, result)
 	}
 	if strings.Contains(result, "/yoloai/files/") {
 		t.Error("seatbelt context should not contain /yoloai/files/")
 	}
-	expectedCachePath := filepath.Join(Dir("test-sb"), "cache") + "/"
+	expectedCachePath := filepath.Join(store.Dir("test-sb"), "cache") + "/"
 	if !strings.Contains(result, expectedCachePath) {
 		t.Errorf("expected seatbelt cache path %q in context, got:\n%s", expectedCachePath, result)
 	}
@@ -147,10 +148,10 @@ func TestGenerateContext_SeatbeltFilesPath(t *testing.T) {
 }
 
 func TestGenerateContext_DockerFilesPath(t *testing.T) {
-	meta := &Meta{
+	meta := &store.Meta{
 		Name:    "test-sb",
 		Backend: "docker",
-		Workdir: WorkdirMeta{
+		Workdir: store.WorkdirMeta{
 			HostPath:  "/home/user/project",
 			MountPath: "/home/user/project",
 			Mode:      "copy",
@@ -169,12 +170,12 @@ func TestGenerateContext_DockerFilesPath(t *testing.T) {
 
 func TestWriteContextFiles_WritesContextAndRef(t *testing.T) {
 	sandboxDir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(sandboxDir, AgentRuntimeDir), 0750); err != nil {
+	if err := os.MkdirAll(filepath.Join(sandboxDir, store.AgentRuntimeDir), 0750); err != nil {
 		t.Fatal(err)
 	}
 
-	meta := &Meta{
-		Workdir: WorkdirMeta{
+	meta := &store.Meta{
+		Workdir: store.WorkdirMeta{
 			HostPath:  "/project",
 			MountPath: "/project",
 			Mode:      "copy",
@@ -200,7 +201,7 @@ func TestWriteContextFiles_WritesContextAndRef(t *testing.T) {
 	}
 
 	// Check agent instruction file contains full context (inlined, not a pointer)
-	refData, err := os.ReadFile(filepath.Join(sandboxDir, AgentRuntimeDir, "CLAUDE.md")) //nolint:gosec // G304: test helper path
+	refData, err := os.ReadFile(filepath.Join(sandboxDir, store.AgentRuntimeDir, "CLAUDE.md")) //nolint:gosec // G304: test helper path
 	if err != nil {
 		t.Fatalf("read agent instruction file: %v", err)
 	}
@@ -211,12 +212,12 @@ func TestWriteContextFiles_WritesContextAndRef(t *testing.T) {
 
 func TestWriteContextFiles_NoRefWhenEmpty(t *testing.T) {
 	sandboxDir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(sandboxDir, AgentRuntimeDir), 0750); err != nil {
+	if err := os.MkdirAll(filepath.Join(sandboxDir, store.AgentRuntimeDir), 0750); err != nil {
 		t.Fatal(err)
 	}
 
-	meta := &Meta{
-		Workdir: WorkdirMeta{
+	meta := &store.Meta{
+		Workdir: store.WorkdirMeta{
 			HostPath:  "/project",
 			MountPath: "/project",
 			Mode:      "copy",
@@ -237,8 +238,8 @@ func TestWriteContextFiles_NoRefWhenEmpty(t *testing.T) {
 	}
 
 	// No agent ref file should be created
-	entries, _ := os.ReadDir(filepath.Join(sandboxDir, AgentRuntimeDir))
+	entries, _ := os.ReadDir(filepath.Join(sandboxDir, store.AgentRuntimeDir))
 	for _, e := range entries {
-		t.Errorf("unexpected file in %s: %s", AgentRuntimeDir, e.Name())
+		t.Errorf("unexpected file in %s: %s", store.AgentRuntimeDir, e.Name())
 	}
 }

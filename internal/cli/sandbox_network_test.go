@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/kstenerud/yoloai/sandbox"
+	"github.com/kstenerud/yoloai/sandbox/store"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -24,15 +24,15 @@ func createNetworkSandbox(t *testing.T, name, networkMode string, domains []stri
 	sandboxDir := filepath.Join(tmpHome, ".yoloai", "sandboxes", name)
 	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
 
-	meta := &sandbox.Meta{
+	meta := &store.Meta{
 		Name:         name,
 		Agent:        "test",
 		Backend:      "docker",
 		NetworkMode:  networkMode,
 		NetworkAllow: domains,
-		Workdir:      sandbox.WorkdirMeta{HostPath: "/tmp/test", MountPath: "/tmp/test", Mode: "copy"},
+		Workdir:      store.WorkdirMeta{HostPath: "/tmp/test", MountPath: "/tmp/test", Mode: "copy"},
 	}
-	require.NoError(t, sandbox.SaveMeta(sandboxDir, meta))
+	require.NoError(t, store.SaveMeta(sandboxDir, meta))
 
 	// Write minimal runtime-config.json that PatchConfigAllowedDomains can parse
 	cfg := map[string]any{
@@ -44,7 +44,7 @@ func createNetworkSandbox(t *testing.T, name, networkMode string, domains []stri
 	}
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, sandbox.RuntimeConfigFile), data, 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, store.RuntimeConfigFile), data, 0600))
 
 	return sandboxDir
 }
@@ -108,19 +108,19 @@ func TestLoadIsolatedMeta_NoMeta(t *testing.T) {
 func TestSaveNetworkAllowlist_UpdatesBothFiles(t *testing.T) {
 	sandboxDir := createNetworkSandbox(t, "save-both", "isolated", []string{"old.example.com"})
 
-	meta, err := sandbox.LoadMeta(sandboxDir)
+	meta, err := store.LoadMeta(sandboxDir)
 	require.NoError(t, err)
 	meta.NetworkAllow = []string{"old.example.com", "new.example.com"}
 
 	require.NoError(t, saveNetworkAllowlist(sandboxDir, meta))
 
 	// Verify environment.json
-	reloaded, err := sandbox.LoadMeta(sandboxDir)
+	reloaded, err := store.LoadMeta(sandboxDir)
 	require.NoError(t, err)
 	assert.Equal(t, []string{"old.example.com", "new.example.com"}, reloaded.NetworkAllow)
 
 	// Verify runtime-config.json
-	data, err := os.ReadFile(filepath.Join(sandboxDir, sandbox.RuntimeConfigFile)) //nolint:gosec // test path
+	data, err := os.ReadFile(filepath.Join(sandboxDir, store.RuntimeConfigFile)) //nolint:gosec // test path
 	require.NoError(t, err)
 	var cfg map[string]any
 	require.NoError(t, json.Unmarshal(data, &cfg))
@@ -133,22 +133,22 @@ func TestSaveNetworkAllowlist_UpdatesBothFiles(t *testing.T) {
 func TestSaveNetworkAllowlist_EmptyList(t *testing.T) {
 	sandboxDir := createNetworkSandbox(t, "save-empty", "isolated", []string{"was.here.com"})
 
-	meta, err := sandbox.LoadMeta(sandboxDir)
+	meta, err := store.LoadMeta(sandboxDir)
 	require.NoError(t, err)
 	meta.NetworkAllow = nil
 
 	require.NoError(t, saveNetworkAllowlist(sandboxDir, meta))
 
-	reloaded, err := sandbox.LoadMeta(sandboxDir)
+	reloaded, err := store.LoadMeta(sandboxDir)
 	require.NoError(t, err)
 	assert.Nil(t, reloaded.NetworkAllow)
 }
 
 func TestSaveNetworkAllowlist_NoConfigJSON(t *testing.T) {
 	sandboxDir := createNetworkSandbox(t, "save-nocfg", "isolated", []string{"x.com"})
-	require.NoError(t, os.Remove(filepath.Join(sandboxDir, sandbox.RuntimeConfigFile)))
+	require.NoError(t, os.Remove(filepath.Join(sandboxDir, store.RuntimeConfigFile)))
 
-	meta, err := sandbox.LoadMeta(sandboxDir)
+	meta, err := store.LoadMeta(sandboxDir)
 	require.NoError(t, err)
 	meta.NetworkAllow = []string{"y.com"}
 

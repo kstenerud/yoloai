@@ -5,6 +5,7 @@ import (
 	"context"
 
 	"github.com/kstenerud/yoloai/sandbox"
+	"github.com/kstenerud/yoloai/sandbox/store"
 )
 
 // ipsetResolveDomains is the shell script fragment that resolves domains to IPs
@@ -18,12 +19,12 @@ done`
 
 // loadIsolatedMeta loads sandbox metadata and validates that the sandbox uses
 // network isolation. Returns the sandbox directory and metadata.
-func loadIsolatedMeta(name string) (string, *sandbox.Meta, error) {
-	sandboxDir, err := sandbox.RequireSandboxDir(name)
+func loadIsolatedMeta(name string) (string, *store.Meta, error) {
+	sandboxDir, err := store.RequireSandboxDir(name)
 	if err != nil {
 		return "", nil, err
 	}
-	meta, err := sandbox.LoadMeta(sandboxDir)
+	meta, err := store.LoadMeta(sandboxDir)
 	if err != nil {
 		return "", nil, err
 	}
@@ -41,8 +42,8 @@ func loadIsolatedMeta(name string) (string, *sandbox.Meta, error) {
 }
 
 // saveNetworkAllowlist persists an updated allowlist to both environment.json and runtime-config.json.
-func saveNetworkAllowlist(sandboxDir string, meta *sandbox.Meta) error {
-	if err := sandbox.SaveMeta(sandboxDir, meta); err != nil {
+func saveNetworkAllowlist(sandboxDir string, meta *store.Meta) error {
+	if err := store.SaveMeta(sandboxDir, meta); err != nil {
 		return err
 	}
 	return sandbox.PatchConfigAllowedDomains(sandboxDir, meta.NetworkAllow)
@@ -66,7 +67,7 @@ func tryLivePatchNetwork(ctx context.Context, backend, name, script string, scri
 
 	execArgs := []string{"sh", "-c", script, "_"}
 	execArgs = append(execArgs, scriptArgs...)
-	_, err = rt.Exec(ctx, sandbox.InstanceName(name), execArgs, "0")
+	_, err = rt.Exec(ctx, store.InstanceName(name), execArgs, "0")
 	if err != nil {
 		return false, err // exec failed — caller decides how to report
 	}

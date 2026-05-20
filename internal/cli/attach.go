@@ -13,6 +13,7 @@ import (
 	"github.com/creack/pty"
 	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/sandbox"
+	"github.com/kstenerud/yoloai/sandbox/store"
 	"github.com/spf13/cobra"
 )
 
@@ -60,7 +61,7 @@ func attachInRuntime(cmd *cobra.Command, ctx context.Context, rt runtime.Runtime
 		return sandboxErrorHint(name, err)
 	}
 
-	containerName := sandbox.InstanceName(name)
+	containerName := store.InstanceName(name)
 	user := tmuxExecUser(info.Meta)
 
 	if err := checkAttachStatus(info.Status, name, opts.resume); err != nil {
@@ -102,14 +103,14 @@ func checkAttachStatus(status sandbox.Status, name string, resume bool) error {
 //   - Podman --userns=keep-id: empty (use container default)
 //   - gVisor: numeric host UID (gVisor resolves usernames from OCI manifest, not /etc/passwd)
 //   - default: "yoloai"
-func tmuxExecUser(meta *sandbox.Meta) string {
+func tmuxExecUser(meta *store.Meta) string {
 	return sandbox.ContainerUser(meta)
 }
 
 // readTmuxSocket returns the tmux socket path configured for a sandbox, or
 // empty string if not set (backend does not use a custom socket).
 func readTmuxSocket(sandboxName string) string {
-	data, err := os.ReadFile(sandbox.RuntimeConfigFilePath(sandboxName)) //nolint:gosec // G304: path from trusted sandbox dir
+	data, err := os.ReadFile(store.RuntimeConfigFilePath(sandboxName)) //nolint:gosec // G304: path from trusted sandbox dir
 	if err != nil {
 		return ""
 	}
@@ -136,7 +137,7 @@ func readTmuxSocket(sandboxName string) string {
 //  2. docker exec: run "tmux has-session -t main" inside the container.
 //     This is the fallback for backends that don't write sandbox.jsonl.
 func waitForTmux(ctx context.Context, rt runtime.Runtime, containerName, sandboxName string, timeout time.Duration, user string) error {
-	jsonlPath := sandbox.SandboxJSONLPath(sandboxName)
+	jsonlPath := store.SandboxJSONLPath(sandboxName)
 	tmuxSocket := readTmuxSocket(sandboxName)
 	deadline := time.Now().Add(timeout)
 	var lastExecErr error
@@ -260,7 +261,7 @@ func attachToSandbox(ctx context.Context, rt runtime.Runtime, containerName, san
 	setTerminalTitle(sandboxName)
 	defer setTerminalTitle("")
 
-	meta, err := sandbox.LoadMeta(sandbox.Dir(sandboxName))
+	meta, err := store.LoadMeta(store.Dir(sandboxName))
 	if err != nil {
 		return fmt.Errorf("load sandbox metadata: %w", err)
 	}

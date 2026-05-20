@@ -13,6 +13,7 @@ import (
 
 	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/sandbox"
+	"github.com/kstenerud/yoloai/sandbox/store"
 	"github.com/kstenerud/yoloai/workspace"
 )
 
@@ -172,12 +173,12 @@ func ListCommitsWithStats(ctx context.Context, rt runtime.Runtime, name string) 
 
 // loadDiffContext loads the metadata and resolves paths needed for diff.
 func loadDiffContext(name string) (workDir string, baselineSHA string, mode string, err error) {
-	sandboxDir, dirErr := sandbox.RequireSandboxDir(name)
+	sandboxDir, dirErr := store.RequireSandboxDir(name)
 	if dirErr != nil {
 		return "", "", "", dirErr
 	}
 
-	meta, loadErr := sandbox.LoadMeta(sandboxDir)
+	meta, loadErr := store.LoadMeta(sandboxDir)
 	if loadErr != nil {
 		return "", "", "", loadErr
 	}
@@ -219,12 +220,12 @@ type DiffContext struct {
 // LoadAllDiffContexts returns diff contexts for workdir + all aux dirs
 // that have diffable content (:copy, :overlay, or :rw). Read-only dirs are skipped.
 func LoadAllDiffContexts(name string) ([]DiffContext, error) {
-	sandboxDir, err := sandbox.RequireSandboxDir(name)
+	sandboxDir, err := store.RequireSandboxDir(name)
 	if err != nil {
 		return nil, err
 	}
 
-	meta, err := sandbox.LoadMeta(sandboxDir)
+	meta, err := store.LoadMeta(sandboxDir)
 	if err != nil {
 		return nil, err
 	}
@@ -337,13 +338,13 @@ func copyGitWorkDir(sandboxName, hostPath, mountPath string) string {
 	if mountPath != "" && mountPath != hostPath {
 		return mountPath
 	}
-	return sandbox.WorkDir(sandboxName, hostPath)
+	return store.WorkDir(sandboxName, hostPath)
 }
 
 // ListCommitsBeyondBaselineOverlay returns commits beyond the baseline for
 // overlay-mode directories by executing git log inside the running container.
 func ListCommitsBeyondBaselineOverlay(ctx context.Context, rt runtime.Runtime, name string) ([]CommitInfo, error) {
-	meta, err := sandbox.LoadMeta(sandbox.Dir(name))
+	meta, err := store.LoadMeta(store.Dir(name))
 	if err != nil {
 		return nil, fmt.Errorf("load metadata: %w", err)
 	}
@@ -396,7 +397,7 @@ func GenerateOverlayDiff(ctx context.Context, rt runtime.Runtime, opts DiffOptio
 }
 
 func generateOverlayDiff(ctx context.Context, rt runtime.Runtime, name string, stat, nameOnly bool) ([]*DiffResult, error) {
-	meta, err := sandbox.LoadMeta(sandbox.Dir(name))
+	meta, err := store.LoadMeta(store.Dir(name))
 	if err != nil {
 		return nil, fmt.Errorf("load metadata: %w", err)
 	}

@@ -20,6 +20,7 @@ import (
 	dockerrt "github.com/kstenerud/yoloai/runtime/docker"
 	seatbeltrt "github.com/kstenerud/yoloai/runtime/seatbelt"
 	tartrt "github.com/kstenerud/yoloai/runtime/tart"
+	"github.com/kstenerud/yoloai/sandbox/store"
 )
 
 // hasAnyAPIKey tests
@@ -188,7 +189,7 @@ func TestCopySeedFiles_CopiesExistingFiles(t *testing.T) {
 
 	// Create sandbox dir structure
 	sandboxDir := filepath.Join(tmpDir, "sandbox")
-	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, AgentRuntimeDir), 0750))
+	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, store.AgentRuntimeDir), 0750))
 	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, "home-seed"), 0750))
 
 	agentDef := agent.GetAgent("claude")
@@ -197,7 +198,7 @@ func TestCopySeedFiles_CopiesExistingFiles(t *testing.T) {
 	assert.False(t, copied) // copied only tracks auth-only files; settings.json is not auth-only
 
 	// settings.json should be in agent-runtime (not auth-only)
-	assert.FileExists(t, filepath.Join(sandboxDir, AgentRuntimeDir, "settings.json"))
+	assert.FileExists(t, filepath.Join(sandboxDir, store.AgentRuntimeDir, "settings.json"))
 }
 
 func TestCopySeedFiles_SkipsAuthWhenAPIKeySet(t *testing.T) {
@@ -210,7 +211,7 @@ func TestCopySeedFiles_SkipsAuthWhenAPIKeySet(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(claudeDir, ".credentials.json"), []byte(`{}`), 0600))
 
 	sandboxDir := filepath.Join(tmpDir, "sandbox")
-	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, AgentRuntimeDir), 0750))
+	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, store.AgentRuntimeDir), 0750))
 	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, "home-seed"), 0750))
 
 	agentDef := agent.GetAgent("claude")
@@ -218,7 +219,7 @@ func TestCopySeedFiles_SkipsAuthWhenAPIKeySet(t *testing.T) {
 	require.NoError(t, err)
 
 	// Auth-only file should NOT be copied when API key is set
-	assert.NoFileExists(t, filepath.Join(sandboxDir, AgentRuntimeDir, ".credentials.json"))
+	assert.NoFileExists(t, filepath.Join(sandboxDir, store.AgentRuntimeDir, ".credentials.json"))
 }
 
 func TestCopySeedFiles_CopiesAuthWhenNoAPIKey(t *testing.T) {
@@ -231,7 +232,7 @@ func TestCopySeedFiles_CopiesAuthWhenNoAPIKey(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(claudeDir, ".credentials.json"), []byte(`{"token":"x"}`), 0600))
 
 	sandboxDir := filepath.Join(tmpDir, "sandbox")
-	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, AgentRuntimeDir), 0750))
+	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, store.AgentRuntimeDir), 0750))
 	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, "home-seed"), 0750))
 
 	agentDef := agent.GetAgent("claude")
@@ -239,7 +240,7 @@ func TestCopySeedFiles_CopiesAuthWhenNoAPIKey(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, copied)
 
-	assert.FileExists(t, filepath.Join(sandboxDir, AgentRuntimeDir, ".credentials.json"))
+	assert.FileExists(t, filepath.Join(sandboxDir, store.AgentRuntimeDir, ".credentials.json"))
 }
 
 func TestCopySeedFiles_HomeDirFiles(t *testing.T) {
@@ -250,7 +251,7 @@ func TestCopySeedFiles_HomeDirFiles(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, ".claude.json"), []byte(`{"install":"native"}`), 0600))
 
 	sandboxDir := filepath.Join(tmpDir, "sandbox")
-	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, AgentRuntimeDir), 0750))
+	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, store.AgentRuntimeDir), 0750))
 	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, "home-seed"), 0750))
 
 	agentDef := agent.GetAgent("claude")
@@ -266,7 +267,7 @@ func TestCopySeedFiles_SkipsMissingFiles(t *testing.T) {
 	t.Setenv("HOME", tmpDir)
 
 	sandboxDir := filepath.Join(tmpDir, "sandbox")
-	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, AgentRuntimeDir), 0750))
+	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, store.AgentRuntimeDir), 0750))
 	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, "home-seed"), 0750))
 
 	agentDef := agent.GetAgent("claude")
@@ -279,33 +280,33 @@ func TestCopySeedFiles_SkipsMissingFiles(t *testing.T) {
 
 func TestEnsureContainerSettings_SetsSkipPermissions(t *testing.T) {
 	sandboxDir := t.TempDir()
-	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, AgentRuntimeDir), 0750))
+	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, store.AgentRuntimeDir), 0750))
 
 	agentDef := agent.GetAgent("claude")
 	require.NoError(t, ensureContainerSettings(agentDef, sandboxDir, ""))
 
-	settings, err := readJSONMap(filepath.Join(sandboxDir, AgentRuntimeDir, "settings.json"))
+	settings, err := readJSONMap(filepath.Join(sandboxDir, store.AgentRuntimeDir, "settings.json"))
 	require.NoError(t, err)
 	assert.Equal(t, true, settings["skipDangerousModePermissionPrompt"])
 }
 
 func TestEnsureContainerSettings_NoopForTestAgent(t *testing.T) {
 	sandboxDir := t.TempDir()
-	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, AgentRuntimeDir), 0750))
+	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, store.AgentRuntimeDir), 0750))
 
 	agentDef := agent.GetAgent("test")
 	require.NoError(t, ensureContainerSettings(agentDef, sandboxDir, ""))
 
 	// No settings file should be created for test agent
-	assert.NoFileExists(t, filepath.Join(sandboxDir, AgentRuntimeDir, "settings.json"))
+	assert.NoFileExists(t, filepath.Join(sandboxDir, store.AgentRuntimeDir, "settings.json"))
 }
 
 func TestEnsureContainerSettings_PreservesExisting(t *testing.T) {
 	sandboxDir := t.TempDir()
-	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, AgentRuntimeDir), 0750))
+	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, store.AgentRuntimeDir), 0750))
 
 	// Pre-populate settings
-	settingsPath := filepath.Join(sandboxDir, AgentRuntimeDir, "settings.json")
+	settingsPath := filepath.Join(sandboxDir, store.AgentRuntimeDir, "settings.json")
 	require.NoError(t, writeJSONMap(settingsPath, map[string]any{"customKey": "customValue"}))
 
 	agentDef := agent.GetAgent("claude")
@@ -319,12 +320,12 @@ func TestEnsureContainerSettings_PreservesExisting(t *testing.T) {
 
 func TestEnsureContainerSettings_GeminiDisablesFolderTrust(t *testing.T) {
 	sandboxDir := t.TempDir()
-	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, AgentRuntimeDir), 0750))
+	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, store.AgentRuntimeDir), 0750))
 
 	agentDef := agent.GetAgent("gemini")
 	require.NoError(t, ensureContainerSettings(agentDef, sandboxDir, ""))
 
-	settings, err := readJSONMap(filepath.Join(sandboxDir, AgentRuntimeDir, "settings.json"))
+	settings, err := readJSONMap(filepath.Join(sandboxDir, store.AgentRuntimeDir, "settings.json"))
 	require.NoError(t, err)
 
 	security, ok := settings["security"].(map[string]any)
@@ -336,10 +337,10 @@ func TestEnsureContainerSettings_GeminiDisablesFolderTrust(t *testing.T) {
 
 func TestEnsureContainerSettings_GeminiPreservesAuthSettings(t *testing.T) {
 	sandboxDir := t.TempDir()
-	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, AgentRuntimeDir), 0750))
+	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, store.AgentRuntimeDir), 0750))
 
 	// Pre-populate settings with auth config (as would come from seed file)
-	settingsPath := filepath.Join(sandboxDir, AgentRuntimeDir, "settings.json")
+	settingsPath := filepath.Join(sandboxDir, store.AgentRuntimeDir, "settings.json")
 	require.NoError(t, writeJSONMap(settingsPath, map[string]any{
 		"security": map[string]any{
 			"auth": map[string]any{"selectedType": "oauth-personal"},
@@ -473,7 +474,7 @@ func TestBuildMounts_IncludesAgentState(t *testing.T) {
 	for _, m := range mounts {
 		if m.Target == agentDef.StateDir {
 			found = true
-			assert.Equal(t, "/sandbox/"+AgentRuntimeDir, m.Source)
+			assert.Equal(t, "/sandbox/"+store.AgentRuntimeDir, m.Source)
 		}
 	}
 	assert.True(t, found, "should include agent runtime mount")
@@ -692,7 +693,7 @@ func TestPrepareSandboxState_SandboxExists(t *testing.T) {
 	// Create existing sandbox dir with valid environment.json
 	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", "existing")
 	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
-	require.NoError(t, SaveMeta(sandboxDir, &Meta{
+	require.NoError(t, store.SaveMeta(sandboxDir, &store.Meta{
 		Name:  "existing",
 		Agent: "test",
 	}))
@@ -822,7 +823,7 @@ func TestCopySeedFiles_KeychainFallback(t *testing.T) {
 	t.Setenv("HOME", tmpDir)
 
 	sandboxDir := filepath.Join(tmpDir, "sandbox")
-	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, AgentRuntimeDir), 0750))
+	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, store.AgentRuntimeDir), 0750))
 	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, "home-seed"), 0750))
 
 	agentDef := agent.GetAgent("claude")
@@ -842,7 +843,7 @@ func TestCopySeedFiles_KeychainFallback(t *testing.T) {
 	assert.True(t, copied)
 
 	// Credentials from keychain should be written to agent-runtime
-	data, err := os.ReadFile(filepath.Join(sandboxDir, AgentRuntimeDir, ".credentials.json")) //nolint:gosec // test path
+	data, err := os.ReadFile(filepath.Join(sandboxDir, store.AgentRuntimeDir, ".credentials.json")) //nolint:gosec // test path
 	require.NoError(t, err)
 	assert.Equal(t, `{"token":"from-keychain"}`, string(data))
 }
@@ -857,7 +858,7 @@ func TestCopySeedFiles_KeychainSkippedWhenFileExists(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(claudeDir, ".credentials.json"), []byte(`{"token":"from-file"}`), 0600))
 
 	sandboxDir := filepath.Join(tmpDir, "sandbox")
-	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, AgentRuntimeDir), 0750))
+	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, store.AgentRuntimeDir), 0750))
 	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, "home-seed"), 0750))
 
 	agentDef := agent.GetAgent("claude")
@@ -877,7 +878,7 @@ func TestCopySeedFiles_KeychainSkippedWhenFileExists(t *testing.T) {
 	assert.False(t, keychainCalled, "keychainReader should not be called when file exists")
 
 	// Should have the file contents, not keychain
-	data, err := os.ReadFile(filepath.Join(sandboxDir, AgentRuntimeDir, ".credentials.json")) //nolint:gosec // test path
+	data, err := os.ReadFile(filepath.Join(sandboxDir, store.AgentRuntimeDir, ".credentials.json")) //nolint:gosec // test path
 	require.NoError(t, err)
 	assert.Equal(t, `{"token":"from-file"}`, string(data))
 }

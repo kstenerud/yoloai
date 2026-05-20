@@ -13,12 +13,13 @@ import (
 	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/sandbox"
 	"github.com/kstenerud/yoloai/sandbox/patch"
+	"github.com/kstenerud/yoloai/sandbox/store"
 	"github.com/kstenerud/yoloai/workspace"
 	"github.com/spf13/cobra"
 )
 
 // runApplyFormatPatch handles the default format-patch apply flow.
-func runApplyFormatPatch(cmd *cobra.Command, name string, paths []string, meta *sandbox.Meta, patchesDir string, yes, dryRun, noWIP, withTags bool) error {
+func runApplyFormatPatch(cmd *cobra.Command, name string, paths []string, meta *store.Meta, patchesDir string, yes, dryRun, noWIP, withTags bool) error {
 	// Query work copy for commits and WIP
 	backend := resolveBackendForSandbox(name)
 	var commits []patch.CommitInfo
@@ -77,14 +78,14 @@ func runApplyFormatPatch(cmd *cobra.Command, name string, paths []string, meta *
 }
 
 // runApplyNoChanges handles the case where there are no commits or WIP to apply.
-func runApplyNoChanges(cmd *cobra.Command, name string, meta *sandbox.Meta, withTags bool) error {
+func runApplyNoChanges(cmd *cobra.Command, name string, meta *store.Meta, withTags bool) error {
 	// Check for unapplied tags even when there are no changes
 	unappliedTags, _ := sandbox.ListUnappliedTags(name)
 
 	// If --tags is used, transfer tags even without commits
 	if withTags && len(unappliedTags) > 0 {
 		targetDir := meta.Workdir.HostPath
-		workDir := sandbox.WorkDir(name, meta.Workdir.HostPath)
+		workDir := store.WorkDir(name, meta.Workdir.HostPath)
 		if !jsonEnabled(cmd) {
 			fmt.Fprintln(cmd.OutOrStdout(), "No changes to apply")                                                  //nolint:errcheck
 			fmt.Fprintf(cmd.OutOrStdout(), "\nTransferring %d tag(s) by matching commits...\n", len(unappliedTags)) //nolint:errcheck
@@ -126,9 +127,9 @@ func runApplyNoChanges(cmd *cobra.Command, name string, meta *sandbox.Meta, with
 }
 
 // runApplyCommits applies commits via format-patch/am to the target directory.
-func runApplyCommits(cmd *cobra.Command, name string, paths []string, meta *sandbox.Meta, commits []patch.CommitInfo, hasWIP, yes, dryRun, withTags bool) error {
+func runApplyCommits(cmd *cobra.Command, name string, paths []string, meta *store.Meta, commits []patch.CommitInfo, hasWIP, yes, dryRun, withTags bool) error {
 	targetDir := meta.Workdir.HostPath
-	sandboxWorkDir := sandbox.WorkDir(name, meta.Workdir.HostPath)
+	sandboxWorkDir := store.WorkDir(name, meta.Workdir.HostPath)
 	isGit := workspace.IsGitRepo(targetDir)
 	backend := resolveBackendForSandbox(name)
 

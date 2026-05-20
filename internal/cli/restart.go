@@ -9,6 +9,7 @@ import (
 
 	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/sandbox"
+	"github.com/kstenerud/yoloai/sandbox/store"
 	"github.com/spf13/cobra"
 )
 
@@ -105,12 +106,12 @@ func restartInRuntime(cmd *cobra.Command, ctx context.Context, rt runtime.Runtim
 
 // attachAfterRestart waits for tmux and attaches to the sandbox after a restart.
 func attachAfterRestart(cmd *cobra.Command, ctx context.Context, rt runtime.Runtime, name string) error {
-	meta, err := sandbox.LoadMeta(sandbox.Dir(name))
+	meta, err := store.LoadMeta(store.Dir(name))
 	if err != nil {
 		return err
 	}
 	user := tmuxExecUser(meta)
-	containerName := sandbox.InstanceName(name)
+	containerName := store.InstanceName(name)
 	if err := waitForTmux(ctx, rt, containerName, name, 300*time.Second, user); err != nil {
 		return fmt.Errorf("waiting for tmux session: %w", err)
 	}

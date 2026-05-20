@@ -10,6 +10,7 @@ import (
 
 	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/sandbox"
+	"github.com/kstenerud/yoloai/sandbox/store"
 	"github.com/spf13/cobra"
 )
 
@@ -143,7 +144,7 @@ func resolveDestroyFromEnv() ([]string, error) {
 	if envName == "" {
 		return nil, sandbox.NewUsageError("at least one sandbox name is required (or use --all or set YOLOAI_SANDBOX)")
 	}
-	if err := sandbox.ValidateName(envName); err != nil {
+	if err := store.ValidateName(envName); err != nil {
 		return nil, err
 	}
 	return []string{envName}, nil
@@ -161,10 +162,10 @@ func resolveDestroyArgs(ctx context.Context, rt runtime.Runtime, args []string) 
 			names = append(names, expanded...)
 			continue
 		}
-		if err := sandbox.ValidateName(arg); err != nil {
+		if err := store.ValidateName(arg); err != nil {
 			return nil, err
 		}
-		if _, err := sandbox.RequireSandboxDir(arg); err != nil {
+		if _, err := store.RequireSandboxDir(arg); err != nil {
 			return nil, fmt.Errorf("%s: %w", arg, err)
 		}
 		names = append(names, arg)

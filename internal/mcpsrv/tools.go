@@ -13,6 +13,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/sandbox"
 	"github.com/kstenerud/yoloai/sandbox/patch"
+	"github.com/kstenerud/yoloai/sandbox/store"
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
@@ -333,7 +334,7 @@ func (s *Server) handleSandboxLog(_ context.Context, req mcp.CallToolRequest) (*
 		lines = 100
 	}
 
-	logPath := sandbox.AgentLogPath(name)
+	logPath := store.AgentLogPath(name)
 	output, err := tailFile(logPath, lines)
 	if err != nil {
 		return textResult(errorf("read log for sandbox %q: %v", name, err)), nil
@@ -374,7 +375,7 @@ func (s *Server) handleSandboxReset(ctx context.Context, req mcp.CallToolRequest
 
 	// If a new prompt is provided, write it to prompt.txt before resetting.
 	if prompt != "" {
-		promptPath := sandbox.PromptFilePath(name)
+		promptPath := store.PromptFilePath(name)
 		if err := fileutil.WriteFile(promptPath, []byte(prompt), 0600); err != nil {
 			return textResult(errorf("write prompt for sandbox %q: %v", name, err)), nil
 		}
@@ -398,7 +399,7 @@ func (s *Server) handleSandboxFilesList(_ context.Context, req mcp.CallToolReque
 		return textResult(errorf("name is required")), nil
 	}
 
-	filesDir := sandbox.FilesDir(name)
+	filesDir := store.FilesDir(name)
 	entries, err := os.ReadDir(filesDir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -433,7 +434,7 @@ func (s *Server) handleSandboxFilesRead(_ context.Context, req mcp.CallToolReque
 		return textResult(errorf("%v", err)), nil
 	}
 
-	path := filepath.Join(sandbox.FilesDir(name), filename)
+	path := filepath.Join(store.FilesDir(name), filename)
 	data, err := os.ReadFile(path) //nolint:gosec // path validated by validateFilename
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -460,7 +461,7 @@ func (s *Server) handleSandboxFilesWrite(_ context.Context, req mcp.CallToolRequ
 		return textResult(errorf("%v", err)), nil
 	}
 
-	filesDir := sandbox.FilesDir(name)
+	filesDir := store.FilesDir(name)
 	if err := fileutil.MkdirAll(filesDir, 0750); err != nil {
 		return textResult(errorf("create files dir for sandbox %q: %v", name, err)), nil
 	}

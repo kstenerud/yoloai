@@ -9,6 +9,7 @@ import (
 
 	"github.com/kstenerud/yoloai/sandbox"
 	"github.com/kstenerud/yoloai/sandbox/patch"
+	"github.com/kstenerud/yoloai/sandbox/store"
 	"github.com/kstenerud/yoloai/workspace"
 	"github.com/spf13/cobra"
 )
@@ -75,8 +76,8 @@ func newBaselineSetCmd() *cobra.Command {
 // loadBaselineContext loads the sandbox metadata, validates that the workdir
 // mode supports baseline management (:copy only), and returns the work copy
 // path on the host. Returns a clear user-facing error for :rw and :overlay.
-func loadBaselineContext(name string) (*sandbox.Meta, string, error) {
-	meta, err := sandbox.LoadMeta(sandbox.Dir(name))
+func loadBaselineContext(name string) (*store.Meta, string, error) {
+	meta, err := store.LoadMeta(store.Dir(name))
 	if err != nil {
 		return nil, "", sandboxErrorHint(name, err)
 	}
@@ -88,7 +89,7 @@ func loadBaselineContext(name string) (*sandbox.Meta, string, error) {
 		return nil, "", sandbox.NewUsageError("use git commands inside the container to manage overlay baselines")
 	}
 
-	workDir := sandbox.WorkDir(name, meta.Workdir.HostPath)
+	workDir := store.WorkDir(name, meta.Workdir.HostPath)
 	return meta, workDir, nil
 }
 

@@ -14,6 +14,7 @@ import (
 
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/sandbox"
+	"github.com/kstenerud/yoloai/sandbox/store"
 	"github.com/spf13/cobra"
 )
 
@@ -58,14 +59,14 @@ func filesDispatch(cmd *cobra.Command, args []string) error {
 		if envName == "" {
 			return sandbox.NewUsageError("sandbox name required before subcommand (or set YOLOAI_SANDBOX)")
 		}
-		if err := sandbox.ValidateName(envName); err != nil {
+		if err := store.ValidateName(envName); err != nil {
 			return err
 		}
 		name = envName
 		subcmd = args[0]
 		rest = args[1:]
 	} else {
-		if err := sandbox.ValidateName(args[0]); err != nil {
+		if err := store.ValidateName(args[0]); err != nil {
 			return err
 		}
 		name = args[0]
@@ -97,10 +98,10 @@ func runFilesPut(cmd *cobra.Command, name string, args []string) error {
 		return sandbox.NewUsageError("at least one file is required")
 	}
 
-	if _, err := sandbox.RequireSandboxDir(name); err != nil {
+	if _, err := store.RequireSandboxDir(name); err != nil {
 		return err
 	}
-	filesDir := sandbox.FilesDir(name)
+	filesDir := store.FilesDir(name)
 	if err := fileutil.MkdirAll(filesDir, 0750); err != nil {
 		return fmt.Errorf("create files directory: %w", err)
 	}
@@ -144,10 +145,10 @@ func runFilesGet(cmd *cobra.Command, name string, args []string) error {
 		return sandbox.NewUsageError("file name is required")
 	}
 
-	if _, err := sandbox.RequireSandboxDir(name); err != nil {
+	if _, err := store.RequireSandboxDir(name); err != nil {
 		return err
 	}
-	filesDir := sandbox.FilesDir(name)
+	filesDir := store.FilesDir(name)
 
 	files, err := expandExchangeGlobs(filesDir, args)
 	if err != nil {
@@ -199,10 +200,10 @@ func runFilesGet(cmd *cobra.Command, name string, args []string) error {
 }
 
 func runFilesLs(cmd *cobra.Command, name string, args []string) error {
-	if _, err := sandbox.RequireSandboxDir(name); err != nil {
+	if _, err := store.RequireSandboxDir(name); err != nil {
 		return err
 	}
-	filesDir := sandbox.FilesDir(name)
+	filesDir := store.FilesDir(name)
 
 	patterns := args
 	if len(patterns) == 0 {
@@ -225,10 +226,10 @@ func runFilesRm(cmd *cobra.Command, name string, args []string) error {
 		return sandbox.NewUsageError("glob pattern is required")
 	}
 
-	if _, err := sandbox.RequireSandboxDir(name); err != nil {
+	if _, err := store.RequireSandboxDir(name); err != nil {
 		return err
 	}
-	filesDir := sandbox.FilesDir(name)
+	filesDir := store.FilesDir(name)
 
 	matches, err := expandExchangeGlobs(filesDir, args)
 	if err != nil {
@@ -246,11 +247,11 @@ func runFilesRm(cmd *cobra.Command, name string, args []string) error {
 }
 
 func runFilesPath(cmd *cobra.Command, name string) error {
-	if _, err := sandbox.RequireSandboxDir(name); err != nil {
+	if _, err := store.RequireSandboxDir(name); err != nil {
 		return err
 	}
 
-	fmt.Fprintln(cmd.OutOrStdout(), sandbox.FilesDir(name)) //nolint:errcheck // best-effort output
+	fmt.Fprintln(cmd.OutOrStdout(), store.FilesDir(name)) //nolint:errcheck // best-effort output
 	return nil
 }
 

@@ -19,6 +19,7 @@ import (
 	dockerrt "github.com/kstenerud/yoloai/runtime/docker"
 	seatbeltrt "github.com/kstenerud/yoloai/runtime/seatbelt"
 	tartrt "github.com/kstenerud/yoloai/runtime/tart"
+	"github.com/kstenerud/yoloai/sandbox/store"
 	"github.com/kstenerud/yoloai/workspace"
 )
 
@@ -251,7 +252,7 @@ func TestGitBaseline_EmptyGitRepo(t *testing.T) {
 	assert.Len(t, sha, 40)
 
 	// Clean up the test sandbox directory
-	require.NoError(t, os.RemoveAll(WorkDir("test-sandbox", dir)))
+	require.NoError(t, os.RemoveAll(store.WorkDir("test-sandbox", dir)))
 }
 
 // removeGitDirs tests

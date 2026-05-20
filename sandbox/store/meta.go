@@ -1,4 +1,6 @@
-package sandbox
+// ABOUTME: Sandbox environment metadata (environment.json) load/save.
+// ABOUTME: Tracks agent, model, directories, and creation-time settings.
+package store
 
 import (
 	"encoding/json"

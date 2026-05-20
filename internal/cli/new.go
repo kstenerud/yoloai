@@ -16,6 +16,7 @@ import (
 	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/sandbox"
 	"github.com/kstenerud/yoloai/sandbox/archetype"
+	"github.com/kstenerud/yoloai/sandbox/store"
 	"github.com/spf13/cobra"
 )
 
@@ -258,7 +259,7 @@ func executeNewCreate(cmd *cobra.Command, ctx context.Context, rt runtime.Runtim
 		if sandboxName == "" {
 			return nil
 		}
-		meta, loadErr := sandbox.LoadMeta(sandbox.Dir(sandboxName))
+		meta, loadErr := store.LoadMeta(store.Dir(sandboxName))
 		if loadErr != nil {
 			return loadErr
 		}
@@ -269,12 +270,12 @@ func executeNewCreate(cmd *cobra.Command, ctx context.Context, rt runtime.Runtim
 		return nil
 	}
 
-	meta, loadErr := sandbox.LoadMeta(sandbox.Dir(sandboxName))
+	meta, loadErr := store.LoadMeta(store.Dir(sandboxName))
 	if loadErr != nil {
 		return loadErr
 	}
 	user := tmuxExecUser(meta)
-	containerName := sandbox.InstanceName(sandboxName)
+	containerName := store.InstanceName(sandboxName)
 	if err := waitForTmux(ctx, rt, containerName, sandboxName, 300*time.Second, user); err != nil {
 		return fmt.Errorf("waiting for tmux session: %w", err)
 	}

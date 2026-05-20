@@ -12,12 +12,13 @@ import (
 	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/sandbox"
 	"github.com/kstenerud/yoloai/sandbox/patch"
+	"github.com/kstenerud/yoloai/sandbox/store"
 	"github.com/kstenerud/yoloai/workspace"
 	"github.com/spf13/cobra"
 )
 
 // applySelectedCommits cherry-picks specific commits into the target.
-func applySelectedCommits(cmd *cobra.Command, name string, refs, paths []string, meta *sandbox.Meta, yes, dryRun, withTags bool) error {
+func applySelectedCommits(cmd *cobra.Command, name string, refs, paths []string, meta *store.Meta, yes, dryRun, withTags bool) error {
 	targetDir := meta.Workdir.HostPath
 	if !workspace.IsGitRepo(targetDir) {
 		return fmt.Errorf("selective apply requires a git target directory — %s is not a git repository", targetDir)
@@ -70,7 +71,7 @@ func applySelectedCommits(cmd *cobra.Command, name string, refs, paths []string,
 		}
 	}
 
-	return finishSelectiveApply(cmd, name, files, shaMap, stashErr, selectedTags, sandbox.WorkDir(name, targetDir), targetDir, withTags)
+	return finishSelectiveApply(cmd, name, files, shaMap, stashErr, selectedTags, store.WorkDir(name, targetDir), targetDir, withTags)
 }
 
 // resolveSelectiveRefs resolves the ref arguments to CommitInfo slices.

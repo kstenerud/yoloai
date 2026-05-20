@@ -10,6 +10,7 @@ import (
 
 	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/sandbox"
+	"github.com/kstenerud/yoloai/sandbox/store"
 	"github.com/spf13/cobra"
 )
 
@@ -39,7 +40,7 @@ func runExec(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("sandbox %q: %w", name, sandbox.ErrContainerNotRunning)
 		}
 
-		containerName := sandbox.InstanceName(name)
+		containerName := store.InstanceName(name)
 		slog.Debug("exec in container", "event", "sandbox.exec", "container", containerName, "cmd", cmdArgs) //nolint:gosec // G706: values are internal, not user-controlled log injection
 
 		if err := rt.InteractiveExec(ctx, containerName, cmdArgs, tmuxExecUser(info.Meta), info.Meta.Workdir.MountPath); err != nil {

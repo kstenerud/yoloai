@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/kstenerud/yoloai/sandbox"
+	"github.com/kstenerud/yoloai/sandbox/store"
 	"github.com/kstenerud/yoloai/workspace"
 	"github.com/spf13/cobra"
 )
@@ -88,7 +89,7 @@ func runApplyCmd(cmd *cobra.Command, args []string) error {
 		return sandbox.NewUsageError("--squash cannot be used with commit refs — they are mutually exclusive")
 	}
 	// Load metadata for target directory and mode validation
-	meta, err := sandbox.LoadMeta(sandbox.Dir(name))
+	meta, err := store.LoadMeta(store.Dir(name))
 	if err != nil {
 		return sandboxErrorHint(name, err)
 	}
