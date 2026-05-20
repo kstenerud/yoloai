@@ -153,3 +153,47 @@ The architecture is **mostly sound and unusually well-documented for a one-perso
 - [Eleven Tips for Structuring Your Go Projects — Alex Edwards](https://www.alexedwards.net/blog/11-tips-for-structuring-your-go-projects)
 - [Go 1.26 — Small Changes, Big Impact for Real-World Go Systems](https://medium.com/@anand.hv123/go-1-26-is-around-the-corner-small-changes-big-impact-for-real-world-go-systems-b7e5bd271f51)
 - [Using go fix to modernize Go code — The Go Programming Language](https://go.dev/blog/gofix)
+
+---
+
+## Status as of 2026-05-20 (W14 re-audit checkpoint)
+
+Remediation status after Phase 1–4 + most of Phase 6 of [`plans/architecture-remediation.md`](plans/architecture-remediation.md). Verified by running the captured audit scripts in `scripts/audit/` (`import-graph.sh`, `error-handling.sh`, `observability.sh`, `runtime-interface-shape.sh`) and comparing output to the original audit's evidence.
+
+A finding is **closed** when every workstream listed as addressing it has its acceptance criteria met. **Partial** = at least one but not all addressing workstreams complete. **Open** = none complete.
+
+| Finding | Status | Notes |
+|---|---|---|
+| F1 — Go ⇄ Python boundary | **partial** | Issues 1 (W3), 3 (W5+W6), 4 (W2), 5 (W4) all closed. Issue 2 (two sources of truth for agent wrap) is **partial**: W1a shipped behind the `use_stored_agent_cmd` gate; W1b (remove gate + legacy `prepare_launch_command`) is scheduled one release after W1a per plan. |
+| F2 — 24-method `Runtime` interface | **open** | W11 not yet started. `runtime-interface-shape.sh` confirms method count still 24, optional adapters still 3 (`UsernsProvider`, `WorkDirSetup`, `StdioExecer`). |
+| F3 — `sandbox/` overpopulation, `create.go` god file | **open** | W12 (folds `soc-refactor.md`) not yet started. |
+| F4 — backend-name leaks outside `runtime/` | **closed** | W10 done: mcpsrv bridge uses `Runtime.InteractiveExec`; tart precondition lives in `runtime/tart/tart.go::Create`; bugreport uses `Runtime.Logs`. No new `BackendCaps` bool added. |
+| F5 — `runtime/*` imports `config/` for typed errors | **closed** | W7 done: typed errors moved to `internal/yoerrors/`. `import-graph.sh` shows 7 remaining `runtime/* → config/` imports, all for *path/constant helpers* (`SandboxesDir`, `BackendDirName`, `EncodePath`, `CacheDir`, etc.) — outside F5's stated scope of error-constructor coupling. Path-helper coupling is a smaller, separate concern and not flagged as a new finding. |
+| F6 — `commands.go` 690 lines + `apply.go` 1068 lines | **closed** | W13a split `commands.go` → 60 lines (registerCommands + group constants); per-command bodies in `new.go`, `aliases.go`, `completion.go`, `version.go`; shared attach helpers in `attach.go`. W13b split `apply.go` 1068 → 6 files, largest 287 lines (`apply_format_patch.go`). |
+| F7 — dual command dispatch | **open (out of scope)** | Parked in `OPEN_QUESTIONS.md` #100 per the remediation plan's "out of scope" list. Needs usage data before deciding. |
+| F8 — `strings.Contains(err.Error(), ...)` fragility | **closed** | W8 done: 5 sites → 1 documented chokepoint in `runtime/errs.go` (`IsPermissionDenied` and `IsAddressInUse`). `error-handling.sh` confirms a single residual site with the W8 rationale. |
+| F9 — slog convention drift | **closed** | W9 done: `.golangci.yml` has `sloglint: {static-msg: true, key-naming-case: snake, forbidden-keys: [error]}`. `observability.sh`: 0 calls use the forbidden `"error"` key; 6 use the canonical `"err"`. |
+| F10 — no schema version on boundary JSON | **closed** | W2 Tier 1 done: `runtime-config.json` carries `schema_version: 1`; Go and Python both hard-fail on mismatch with the documented message. Tier 2 (full JSON Schema) explicitly deferred per plan. |
+
+### Smaller items (audit Section 5)
+
+| Item | Status | Notes |
+|---|---|---|
+| `yoloai.Client` public API fate | **open** | Tracked in `OPEN_QUESTIONS.md` #101. |
+| `PrepareAgentCommand` duplicates Python `prepare_launch_command` | **partial** | Covered under F1 issue 2 (W1a shipped, W1b pending). |
+| `sandbox/setup.go` 632-line test file | **open** | Tracked in `OPEN_QUESTIONS.md` #102. |
+| Generic `internal/testutil/wait.go` | **closed** | W13c done (commit `c7277e7`): `Wait[T]`, `WaitForActive`/`WaitForStopped` are now one-liners over the generic. |
+| `gopls modernize` one-time sweep | **closed** | W13d done: 213 fixes across 48 files (any-over-interface{}, `errors.AsType`, `maps.Copy`, `min`/`max`, `slices.Contains`/`Backward`, `strings.Cut`/`CutPrefix`/`CutSuffix`/`SplitSeq`, `range n`, unused `intPtr` removed). |
+
+### Discovered findings during execution
+
+`docs/dev/discovered-findings.md` was not created during the Phase 1–4 + Phase 6 work — no out-of-scope issues required parking. Two observations worth recording here (neither rises to a new F-number):
+
+- **Path-helper coupling from `runtime/*` to `config/`.** As noted under F5, 7 imports remain for path constants and `EncodePath`/`SandboxesDir`/`HomeDir` helpers. Untangling would require either inverting (moving the helpers down into a leaf package the backends and config both depend on) or threading the paths through `InstanceConfig`. Not a correctness or testability problem today; flag if the path layout becomes a friction point.
+- **`runtime/errs.go` has only the documented chokepoints.** The W8 acceptance is met and there is no incremental work to do here.
+
+### Remaining workstreams
+
+Phase 5 (structural — W11, W12) is the bulk of the remaining program. W1b (remove the agent-wrap gate one release after W1a) is calendar-bound, not effort-bound. Net of these, the audit's two material risks ("uncovered Python boundary" and "Runtime interface accreted past comfortable") are halved: the Python boundary is now under test and version-gated, while the Runtime interface refactor still owes work.
+
+The audit-2026-05 snapshot stays frozen as a point-in-time evidence base. Any net-new findings raised in future passes will be filed as `architecture-audit-YYYY-MM.md` per the W14 plan.
