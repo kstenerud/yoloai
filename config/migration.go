@@ -4,6 +4,8 @@ package config
 
 import (
 	"os"
+
+	"github.com/kstenerud/yoloai/internal/yoerrors"
 )
 
 // CheckDefaultsDir verifies that ~/.yoloai/defaults/ exists. If it doesn't,
@@ -25,5 +27,5 @@ func CheckDefaultsDir() error {
 		"  Then remove any 'profile:' line from config.yaml (that key no longer exists).\n\n" +
 		"  Note: after migration, 'base' will appear as a regular profile in 'yoloai profile list'.\n" +
 		"  You may want to remove it: yoloai profile delete base\n"
-	return NewConfigError("%s", msg)
+	return yoerrors.NewConfigError("%s", msg)
 }

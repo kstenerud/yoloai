@@ -19,6 +19,7 @@ import (
 
 	"github.com/kstenerud/yoloai/config"
 	"github.com/kstenerud/yoloai/internal/fileutil"
+	"github.com/kstenerud/yoloai/internal/yoerrors"
 	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/runtime/caps"
 	"github.com/kstenerud/yoloai/runtime/monitor"
@@ -114,15 +115,15 @@ func (r *Runtime) SetupWorkDirInVM(virtiofsStagingPath, vmLocalPath string) []st
 func New(_ context.Context) (*Runtime, error) {
 	// Platform checks first — no amount of software installation can fix these.
 	if !isMacOS() {
-		return nil, config.NewPlatformError("tart backend requires macOS with Apple Silicon")
+		return nil, yoerrors.NewPlatformError("tart backend requires macOS with Apple Silicon")
 	}
 	if !isAppleSilicon() {
-		return nil, config.NewPlatformError("tart backend requires Apple Silicon (M1 or later)")
+		return nil, yoerrors.NewPlatformError("tart backend requires Apple Silicon (M1 or later)")
 	}
 
 	tartBin, err := exec.LookPath("tart")
 	if err != nil {
-		return nil, config.NewDependencyError("tart is not installed. Install it with: brew install cirruslabs/cli/tart")
+		return nil, yoerrors.NewDependencyError("tart is not installed. Install it with: brew install cirruslabs/cli/tart")
 	}
 
 	// Read config for optional tart.image override

@@ -3,7 +3,7 @@ package sandbox
 import (
 	"errors"
 
-	"github.com/kstenerud/yoloai/config"
+	"github.com/kstenerud/yoloai/internal/yoerrors"
 )
 
 // Sentinel errors for sandbox operations.
@@ -15,44 +15,48 @@ var (
 	ErrNoChanges           = errors.New("no changes to apply")
 )
 
-// UsageError is an alias for config.UsageError.
-type UsageError = config.UsageError
+// Typed error aliases. The canonical definitions live in internal/yoerrors;
+// these aliases preserve the historical sandbox.XxxError call sites without
+// forcing every caller to import yoerrors directly.
+
+// UsageError is an alias for yoerrors.UsageError.
+type UsageError = yoerrors.UsageError
 
 // NewUsageError wraps a message as a UsageError.
-var NewUsageError = config.NewUsageError
+var NewUsageError = yoerrors.NewUsageError
 
-// ConfigError is an alias for config.ConfigError.
-type ConfigError = config.ConfigError
+// ConfigError is an alias for yoerrors.ConfigError.
+type ConfigError = yoerrors.ConfigError
 
 // NewConfigError wraps a message as a ConfigError.
-var NewConfigError = config.NewConfigError
+var NewConfigError = yoerrors.NewConfigError
 
-// ActiveWorkError is an alias for config.ActiveWorkError.
-type ActiveWorkError = config.ActiveWorkError
+// ActiveWorkError is an alias for yoerrors.ActiveWorkError.
+type ActiveWorkError = yoerrors.ActiveWorkError
 
 // NewActiveWorkError wraps a message as an ActiveWorkError.
-var NewActiveWorkError = config.NewActiveWorkError
+var NewActiveWorkError = yoerrors.NewActiveWorkError
 
-// DependencyError is an alias for config.DependencyError.
-type DependencyError = config.DependencyError
+// DependencyError is an alias for yoerrors.DependencyError.
+type DependencyError = yoerrors.DependencyError
 
 // NewDependencyError wraps a message as a DependencyError.
-var NewDependencyError = config.NewDependencyError
+var NewDependencyError = yoerrors.NewDependencyError
 
-// PlatformError is an alias for config.PlatformError.
-type PlatformError = config.PlatformError
+// PlatformError is an alias for yoerrors.PlatformError.
+type PlatformError = yoerrors.PlatformError
 
 // NewPlatformError wraps a message as a PlatformError.
-var NewPlatformError = config.NewPlatformError
+var NewPlatformError = yoerrors.NewPlatformError
 
-// AuthError is an alias for config.AuthError.
-type AuthError = config.AuthError
+// AuthError is an alias for yoerrors.AuthError.
+type AuthError = yoerrors.AuthError
 
 // NewAuthError wraps a message as an AuthError.
-var NewAuthError = config.NewAuthError
+var NewAuthError = yoerrors.NewAuthError
 
-// PermissionError is an alias for config.PermissionError.
-type PermissionError = config.PermissionError
+// PermissionError is an alias for yoerrors.PermissionError.
+type PermissionError = yoerrors.PermissionError
 
 // NewPermissionError wraps a message as a PermissionError.
-var NewPermissionError = config.NewPermissionError
+var NewPermissionError = yoerrors.NewPermissionError

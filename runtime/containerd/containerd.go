@@ -18,7 +18,7 @@ import (
 	"github.com/containerd/containerd/v2/pkg/namespaces"
 	"github.com/vishvananda/netns"
 
-	"github.com/kstenerud/yoloai/config"
+	"github.com/kstenerud/yoloai/internal/yoerrors"
 	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/runtime/caps"
 )
@@ -73,16 +73,16 @@ func New(_ context.Context) (*Runtime, error) {
 	// on systems where containerd is not installed (e.g. macOS).
 	if _, err := os.Stat(containerdSock); err != nil {
 		if os.IsPermission(err) {
-			return nil, config.NewPermissionError("no permission to access containerd socket at %s\n  Fix: run yoloai with sudo or configure containerd group access", containerdSock)
+			return nil, yoerrors.NewPermissionError("no permission to access containerd socket at %s\n  Fix: run yoloai with sudo or configure containerd group access", containerdSock)
 		}
-		return nil, config.NewDependencyError("containerd socket not found at %s\n  Is containerd running? Try: sudo systemctl start containerd", containerdSock)
+		return nil, yoerrors.NewDependencyError("containerd socket not found at %s\n  Is containerd running? Try: sudo systemctl start containerd", containerdSock)
 	}
 	c, err := client.New(containerdSock)
 	if err != nil {
 		if os.IsPermission(err) || strings.Contains(err.Error(), "permission denied") {
-			return nil, config.NewPermissionError("no permission to access containerd socket at %s\n  Fix: run yoloai with sudo", containerdSock)
+			return nil, yoerrors.NewPermissionError("no permission to access containerd socket at %s\n  Fix: run yoloai with sudo", containerdSock)
 		}
-		return nil, config.NewDependencyError("connect to containerd: %w\n  Is containerd running? Try: sudo systemctl start containerd", err)
+		return nil, yoerrors.NewDependencyError("connect to containerd: %w\n  Is containerd running? Try: sudo systemctl start containerd", err)
 	}
 	r := &Runtime{client: c, namespace: "yoloai"}
 	r.kataShimV2 = buildKataShimV2Cap()

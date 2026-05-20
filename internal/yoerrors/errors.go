@@ -1,11 +1,14 @@
-package config
+// Package yoerrors provides typed errors used across yoloAI packages to drive
+// CLI exit codes. Lives in internal/ rather than config/ because runtime
+// backends (Docker, Podman, Seatbelt, Tart) need to surface these errors —
+// having them in config/ inverted the dependency direction (runtime → config),
+// which W7 of the architecture remediation plan corrects.
+package yoerrors
 
 // ABOUTME: Error types for usage and configuration problems.
 // ABOUTME: Used by CLI to determine exit codes.
 
-import (
-	"fmt"
-)
+import "fmt"
 
 // UsageError indicates bad arguments or missing required args (exit code 2).
 type UsageError struct {

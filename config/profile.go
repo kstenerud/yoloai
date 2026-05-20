@@ -11,6 +11,8 @@ import (
 	"strconv"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/kstenerud/yoloai/internal/yoerrors"
 )
 
 // ProfileConfig holds the parsed fields from a profile's config.yaml file.
@@ -86,16 +88,16 @@ func ProfileDirPath(name string) string {
 // Rejects empty names and names that look like paths.
 func ValidateProfileName(name string) error {
 	if name == "" {
-		return NewUsageError("profile name is required")
+		return yoerrors.NewUsageError("profile name is required")
 	}
 	if len(name) > MaxNameLength {
-		return NewUsageError("invalid profile name: must be at most %d characters (got %d)", MaxNameLength, len(name))
+		return yoerrors.NewUsageError("invalid profile name: must be at most %d characters (got %d)", MaxNameLength, len(name))
 	}
 	if name[0] == '/' || name[0] == '\\' {
-		return NewUsageError("invalid profile name %q: looks like a path", name)
+		return yoerrors.NewUsageError("invalid profile name %q: looks like a path", name)
 	}
 	if !ValidNameRe.MatchString(name) {
-		return NewUsageError("invalid profile name %q: must start with a letter or digit and contain only letters, digits, underscores, dots, or hyphens", name)
+		return yoerrors.NewUsageError("invalid profile name %q: must start with a letter or digit and contain only letters, digits, underscores, dots, or hyphens", name)
 	}
 	return nil
 }

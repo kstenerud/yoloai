@@ -17,6 +17,7 @@ import (
 
 	"github.com/kstenerud/yoloai/config"
 	"github.com/kstenerud/yoloai/internal/fileutil"
+	"github.com/kstenerud/yoloai/internal/yoerrors"
 	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/runtime/caps"
 	"github.com/kstenerud/yoloai/runtime/monitor"
@@ -94,12 +95,12 @@ func (r *Runtime) ResolveCopyMount(sbName, hostPath string) string {
 // sandbox-exec is available.
 func New(_ context.Context) (*Runtime, error) {
 	if !isMacOS() {
-		return nil, config.NewPlatformError("seatbelt backend requires macOS")
+		return nil, yoerrors.NewPlatformError("seatbelt backend requires macOS")
 	}
 
 	sandboxExecBin, err := exec.LookPath("sandbox-exec")
 	if err != nil {
-		return nil, config.NewDependencyError("sandbox-exec not found: %w", err)
+		return nil, yoerrors.NewDependencyError("sandbox-exec not found: %w", err)
 	}
 
 	return &Runtime{

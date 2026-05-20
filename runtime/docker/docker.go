@@ -23,7 +23,7 @@ import (
 	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/docker/go-connections/nat"
 
-	"github.com/kstenerud/yoloai/config"
+	"github.com/kstenerud/yoloai/internal/yoerrors"
 	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/runtime/caps"
 )
@@ -50,7 +50,7 @@ var _ runtime.Runtime = (*Runtime)(nil)
 // New creates a Runtime and verifies the Docker daemon is reachable.
 func New(ctx context.Context) (*Runtime, error) {
 	if _, err := exec.LookPath("docker"); err != nil {
-		return nil, config.NewDependencyError("docker is not installed, install it from https://docs.docker.com/get-docker/")
+		return nil, yoerrors.NewDependencyError("docker is not installed, install it from https://docs.docker.com/get-docker/")
 	}
 	return NewWithSocket(ctx, "", "docker")
 }
@@ -78,7 +78,7 @@ func NewWithSocket(ctx context.Context, host string, binaryName string) (*Runtim
 	if err != nil {
 		_ = cli.Close()
 		if os.IsPermission(err) || strings.Contains(err.Error(), "permission denied") {
-			return nil, config.NewPermissionError("%s socket permission denied: add your user to the %s group or run with sudo", binaryName, binaryName)
+			return nil, yoerrors.NewPermissionError("%s socket permission denied: add your user to the %s group or run with sudo", binaryName, binaryName)
 		}
 		var hint string
 		switch binaryName {
@@ -87,7 +87,7 @@ func NewWithSocket(ctx context.Context, host string, binaryName string) (*Runtim
 		default:
 			hint = "start Docker Desktop or run 'sudo systemctl start docker'"
 		}
-		return nil, config.NewDependencyError("%s daemon is not responding, %s", binaryName, hint)
+		return nil, yoerrors.NewDependencyError("%s daemon is not responding, %s", binaryName, hint)
 	}
 
 	r := &Runtime{client: cli, binaryName: binaryName}

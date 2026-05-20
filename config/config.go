@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/kstenerud/yoloai/internal/fileutil"
+	"github.com/kstenerud/yoloai/internal/yoerrors"
 	"gopkg.in/yaml.v3"
 )
 
@@ -95,7 +96,7 @@ func ValidateIsolationMode(mode string) error {
 	case "", "container", "container-enhanced", "container-privileged", "vm", "vm-enhanced":
 		return nil
 	default:
-		return NewUsageError("unknown isolation mode %q: valid values are container, container-enhanced, container-privileged, vm, vm-enhanced", mode)
+		return yoerrors.NewUsageError("unknown isolation mode %q: valid values are container, container-enhanced, container-privileged, vm, vm-enhanced", mode)
 	}
 }
 

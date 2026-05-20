@@ -9,7 +9,6 @@ import (
 	"os"
 	"time"
 
-	"github.com/kstenerud/yoloai/config"
 	"github.com/kstenerud/yoloai/extension"
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/sandbox"
@@ -154,27 +153,27 @@ func errorExitCode(err error) int {
 		return 3
 	}
 
-	var activeWorkErr *config.ActiveWorkError
+	var activeWorkErr *sandbox.ActiveWorkError
 	if errors.As(err, &activeWorkErr) {
 		return 4
 	}
 
-	var depErr *config.DependencyError
+	var depErr *sandbox.DependencyError
 	if errors.As(err, &depErr) {
 		return 5
 	}
 
-	var platErr *config.PlatformError
+	var platErr *sandbox.PlatformError
 	if errors.As(err, &platErr) {
 		return 6
 	}
 
-	var authErr *config.AuthError
+	var authErr *sandbox.AuthError
 	if errors.As(err, &authErr) {
 		return 7
 	}
 
-	var permErr *config.PermissionError
+	var permErr *sandbox.PermissionError
 	if errors.As(err, &permErr) {
 		return 8
 	}
