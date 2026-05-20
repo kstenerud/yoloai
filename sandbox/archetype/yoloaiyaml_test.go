@@ -1,7 +1,7 @@
 // ABOUTME: Tests for LoadYoloAIYaml: missing file, valid file, unknown archetype, tilde expansion.
 // ABOUTME: Covers all return paths including not-found, parse success, and validation errors.
 
-package sandbox
+package archetype
 
 import (
 	"os"

@@ -15,6 +15,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kstenerud/yoloai/sandbox/archetype"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -52,7 +53,7 @@ func TestResolveArchetype_CLIFlagOverridesAll(t *testing.T) {
 
 	arch, dc, _, _, err := m.resolveAndApplyArchetype(context.Background(), opts, pr)
 	require.NoError(t, err)
-	assert.Equal(t, ArchetypeSimple, arch)
+	assert.Equal(t, archetype.ArchetypeSimple, arch)
 	assert.Nil(t, dc)
 }
 
@@ -72,7 +73,7 @@ func TestResolveArchetype_YamlOverridesAutoDetect(t *testing.T) {
 
 	arch, _, _, _, err := m.resolveAndApplyArchetype(context.Background(), opts, pr)
 	require.NoError(t, err)
-	assert.Equal(t, ArchetypeSimple, arch)
+	assert.Equal(t, archetype.ArchetypeSimple, arch)
 }
 
 func TestResolveArchetype_AutoDetectSimple(t *testing.T) {
@@ -83,7 +84,7 @@ func TestResolveArchetype_AutoDetectSimple(t *testing.T) {
 
 	arch, _, _, _, err := m.resolveAndApplyArchetype(context.Background(), opts, pr)
 	require.NoError(t, err)
-	assert.Equal(t, ArchetypeSimple, arch)
+	assert.Equal(t, archetype.ArchetypeSimple, arch)
 }
 
 func TestResolveArchetype_AutoDetectCompose(t *testing.T) {
@@ -97,7 +98,7 @@ func TestResolveArchetype_AutoDetectCompose(t *testing.T) {
 
 	arch, _, _, _, err := m.resolveAndApplyArchetype(context.Background(), opts, pr)
 	require.NoError(t, err)
-	assert.Equal(t, ArchetypeCompose, arch)
+	assert.Equal(t, archetype.ArchetypeCompose, arch)
 	// Should have set container-privileged isolation and dockerd required
 	assert.Equal(t, "container-privileged", opts.Isolation)
 	assert.True(t, pr.archetypeDockerDRequired)
@@ -118,7 +119,7 @@ func TestResolveArchetype_AutoDetectDevcontainer(t *testing.T) {
 
 	arch, dc, _, _, err := m.resolveAndApplyArchetype(context.Background(), opts, pr)
 	require.NoError(t, err)
-	assert.Equal(t, ArchetypeDevcontainer, arch)
+	assert.Equal(t, archetype.ArchetypeDevcontainer, arch)
 	require.NotNil(t, dc)
 	assert.Equal(t, []int{3000}, dc.ForwardPorts)
 	// Ports should be merged into opts
@@ -228,7 +229,7 @@ func TestResolveArchetype_TransparencyOutput_Simple(t *testing.T) {
 
 	arch, _, _, _, err := m.resolveAndApplyArchetype(context.Background(), opts, pr)
 	require.NoError(t, err)
-	assert.Equal(t, ArchetypeSimple, arch)
+	assert.Equal(t, archetype.ArchetypeSimple, arch)
 	// Simple + auto-detected → no transparency output
 	assert.Empty(t, buf.String())
 }
@@ -356,7 +357,7 @@ func TestResolveArchetype_DevcontainerRunArgs_CPUMemory(t *testing.T) {
 // --- Lifecycle command to JSON ---
 
 func TestLifecycleCmdToJSON_String(t *testing.T) {
-	var cmd LifecycleCmd
+	var cmd archetype.LifecycleCmd
 	require.NoError(t, json.Unmarshal([]byte(`"npm install"`), &cmd))
 	result := lifecycleCmdToJSON(cmd)
 	assert.Equal(t, "string", result["type"])
@@ -364,7 +365,7 @@ func TestLifecycleCmdToJSON_String(t *testing.T) {
 }
 
 func TestLifecycleCmdToJSON_Array(t *testing.T) {
-	var cmd LifecycleCmd
+	var cmd archetype.LifecycleCmd
 	require.NoError(t, json.Unmarshal([]byte(`["go", "mod", "download"]`), &cmd))
 	result := lifecycleCmdToJSON(cmd)
 	assert.Equal(t, "array", result["type"])
@@ -372,7 +373,7 @@ func TestLifecycleCmdToJSON_Array(t *testing.T) {
 }
 
 func TestLifecycleCmdToJSON_Object(t *testing.T) {
-	var cmd LifecycleCmd
+	var cmd archetype.LifecycleCmd
 	require.NoError(t, json.Unmarshal([]byte(`{"step1": "make build"}`), &cmd))
 	result := lifecycleCmdToJSON(cmd)
 	assert.Equal(t, "object", result["type"])

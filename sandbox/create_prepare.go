@@ -15,6 +15,7 @@ import (
 	"github.com/kstenerud/yoloai/config"
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/runtime"
+	"github.com/kstenerud/yoloai/sandbox/archetype"
 	"github.com/kstenerud/yoloai/workspace"
 )
 
@@ -737,22 +738,22 @@ func collectCopyDirs(workdir *DirArg, auxDirs []*DirArg) []string {
 // requires: prompts, expands archetype effects on opts and pr, and prints transparency output.
 //
 // Returns: (resolved archetype, devcontainer config, safe devcontainer mounts, mount warnings, error).
-func (m *Manager) resolveAndApplyArchetype(ctx context.Context, opts *CreateOptions, pr *profileResult) (Archetype, *DevcontainerConfig, []string, []string, error) {
+func (m *Manager) resolveAndApplyArchetype(ctx context.Context, opts *CreateOptions, pr *profileResult) (archetype.Archetype, *archetype.DevcontainerConfig, []string, []string, error) {
 	workdir := opts.Workdir.Path
 
 	// Step 1: Load .yoloai.yaml
-	yamlCfg, _, yamlErr := LoadYoloAIYaml(workdir)
+	yamlCfg, _, yamlErr := archetype.LoadYoloAIYaml(workdir)
 	if yamlErr != nil {
 		return "", nil, nil, nil, fmt.Errorf("load .yoloai.yaml: %w", yamlErr)
 	}
 
-	archetype, signals, source, err := resolveArchetype(opts, yamlCfg, workdir)
+	arch, signals, source, err := resolveArchetype(opts, yamlCfg, workdir)
 	if err != nil {
 		return "", nil, nil, nil, err
 	}
 
 	// Step 2: Platform check for apple archetype
-	if err := checkAppleArchetype(m.output, archetype, opts.Archetype); err != nil {
+	if err := checkAppleArchetype(m.output, arch, opts.Archetype); err != nil {
 		return "", nil, nil, nil, err
 	}
 
@@ -762,41 +763,41 @@ func (m *Manager) resolveAndApplyArchetype(ctx context.Context, opts *CreateOpti
 	}
 
 	// Step 4: Archetype expansion
-	devcontainerCfg, dcMounts, dcMountWarnings, bullets, err := m.expandArchetype(ctx, opts, pr, archetype, yamlCfg)
+	devcontainerCfg, dcMounts, dcMountWarnings, bullets, err := m.expandArchetype(ctx, opts, pr, arch, yamlCfg)
 	if err != nil {
 		return "", nil, nil, nil, err
 	}
 
 	// Step 5: Transparency output
-	printArchetypeOutput(m.output, archetype, source, signals, bullets)
+	printArchetypeOutput(m.output, arch, source, signals, bullets)
 
-	return archetype, devcontainerCfg, dcMounts, dcMountWarnings, nil
+	return arch, devcontainerCfg, dcMounts, dcMountWarnings, nil
 }
 
 // resolveArchetype determines the archetype from CLI, .yoloai.yaml, or auto-detection.
-func resolveArchetype(opts *CreateOptions, yamlCfg *YoloAIProjectConfig, workdir string) (Archetype, []string, string, error) {
+func resolveArchetype(opts *CreateOptions, yamlCfg *archetype.YoloAIProjectConfig, workdir string) (archetype.Archetype, []string, string, error) {
 	switch {
 	case opts.Archetype != "":
-		a, err := ParseArchetype(opts.Archetype)
+		a, err := archetype.ParseArchetype(opts.Archetype)
 		if err != nil {
 			return "", nil, "", err
 		}
 		return a, nil, "--archetype flag", nil
 	case yamlCfg != nil && yamlCfg.Archetype != "":
-		a, err := ParseArchetype(yamlCfg.Archetype)
+		a, err := archetype.ParseArchetype(yamlCfg.Archetype)
 		if err != nil {
 			return "", nil, "", err
 		}
 		return a, nil, ".yoloai.yaml", nil
 	default:
-		archetype, signals := DetectArchetype(workdir)
-		return archetype, signals, "auto-detected", nil
+		arch, signals := archetype.DetectArchetype(workdir)
+		return arch, signals, "auto-detected", nil
 	}
 }
 
 // checkAppleArchetype validates platform requirements for the apple archetype.
-func checkAppleArchetype(output io.Writer, archetype Archetype, cliArchetype string) error {
-	if archetype != ArchetypeApple {
+func checkAppleArchetype(output io.Writer, arch archetype.Archetype, cliArchetype string) error {
+	if arch != archetype.ArchetypeApple {
 		return nil
 	}
 	isAppleSilicon := goruntime.GOOS == "darwin" && goruntime.GOARCH == "arm64"
@@ -815,7 +816,7 @@ func checkAppleArchetype(output io.Writer, archetype Archetype, cliArchetype str
 }
 
 // checkRequires validates the requires: constraints from .yoloai.yaml.
-func checkRequires(ctx context.Context, input io.Reader, output io.Writer, yamlCfg *YoloAIProjectConfig, yes bool) error {
+func checkRequires(ctx context.Context, input io.Reader, output io.Writer, yamlCfg *archetype.YoloAIProjectConfig, yes bool) error {
 	if yamlCfg == nil || len(yamlCfg.Requires) == 0 {
 		return nil
 	}
@@ -837,24 +838,24 @@ func checkRequires(ctx context.Context, input io.Reader, output io.Writer, yamlC
 
 // expandArchetype applies archetype-specific settings to opts and pr.
 // Returns (devcontainerCfg, dcMounts, dcMountWarnings, bullets, error).
-func (m *Manager) expandArchetype(ctx context.Context, opts *CreateOptions, pr *profileResult, archetype Archetype, yamlCfg *YoloAIProjectConfig) (*DevcontainerConfig, []string, []string, []string, error) {
+func (m *Manager) expandArchetype(ctx context.Context, opts *CreateOptions, pr *profileResult, arch archetype.Archetype, yamlCfg *archetype.YoloAIProjectConfig) (*archetype.DevcontainerConfig, []string, []string, []string, error) {
 	var bullets []string
-	var devcontainerCfg *DevcontainerConfig
+	var devcontainerCfg *archetype.DevcontainerConfig
 	var dcMounts []string
 	var dcMountWarnings []string
 
-	switch archetype {
-	case ArchetypeCompose:
+	switch arch {
+	case archetype.ArchetypeCompose:
 		bullets = applyComposeArchetype(opts, pr)
-	case ArchetypeDevcontainer:
+	case archetype.ArchetypeDevcontainer:
 		var err error
 		devcontainerCfg, dcMounts, dcMountWarnings, bullets, err = m.applyDevcontainerArchetype(ctx, opts, pr)
 		if err != nil {
 			return nil, nil, nil, nil, err
 		}
-	case ArchetypeApple:
+	case archetype.ArchetypeApple:
 		bullets = append(bullets, "backend=tart required (Apple Silicon macOS VM)")
-	case ArchetypeSimple:
+	case archetype.ArchetypeSimple:
 		// no-op
 	}
 
@@ -876,7 +877,7 @@ func applyComposeArchetype(opts *CreateOptions, pr *profileResult) []string {
 }
 
 // applyDevcontainerArchetype loads and applies devcontainer.json settings.
-func (m *Manager) applyDevcontainerArchetype(ctx context.Context, opts *CreateOptions, pr *profileResult) (*DevcontainerConfig, []string, []string, []string, error) {
+func (m *Manager) applyDevcontainerArchetype(ctx context.Context, opts *CreateOptions, pr *profileResult) (*archetype.DevcontainerConfig, []string, []string, []string, error) {
 	_ = ctx // reserved for future use
 	workdir := opts.Workdir.Path
 	var bullets []string
@@ -886,7 +887,7 @@ func (m *Manager) applyDevcontainerArchetype(ctx context.Context, opts *CreateOp
 		return nil, nil, nil, bullets, nil
 	}
 
-	dc, err := LoadDevcontainer(dcPath)
+	dc, err := archetype.LoadDevcontainer(dcPath)
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("load devcontainer.json: %w", err)
 	}
@@ -925,7 +926,7 @@ func findDevcontainerPath(workdir string) string {
 		filepath.Join(workdir, ".devcontainer", "devcontainer.json"),
 		filepath.Join(workdir, "devcontainer.json"),
 	} {
-		if fileExists(candidate) {
+		if _, err := os.Stat(candidate); err == nil {
 			return candidate
 		}
 	}
@@ -933,7 +934,7 @@ func findDevcontainerPath(workdir string) string {
 }
 
 // applyDevcontainerRunArgs applies runArgs (cpus, memory, capAdd) from devcontainer.json.
-func applyDevcontainerRunArgs(dc *DevcontainerConfig, pr *profileResult, bullets []string, output io.Writer) []string {
+func applyDevcontainerRunArgs(dc *archetype.DevcontainerConfig, pr *profileResult, bullets []string, output io.Writer) []string {
 	cpus, memory, capAdd, unknownWarnings := dc.ParsedRunArgs()
 	for _, w := range unknownWarnings {
 		fmt.Fprintln(output, w) //nolint:errcheck // best-effort warning
@@ -957,7 +958,7 @@ func applyDevcontainerRunArgs(dc *DevcontainerConfig, pr *profileResult, bullets
 }
 
 // applyDevcontainerCompose checks postStartCommand for compose usage and sets isolation.
-func applyDevcontainerCompose(dc *DevcontainerConfig, opts *CreateOptions, pr *profileResult, bullets []string) []string {
+func applyDevcontainerCompose(dc *archetype.DevcontainerConfig, opts *CreateOptions, pr *profileResult, bullets []string) []string {
 	if !dc.PostStartCommandUsesCompose() {
 		return bullets
 	}
@@ -972,7 +973,7 @@ func applyDevcontainerCompose(dc *DevcontainerConfig, opts *CreateOptions, pr *p
 }
 
 // applyDevcontainerEnv merges environment variables from devcontainer.json.
-func applyDevcontainerEnv(dc *DevcontainerConfig, pr *profileResult, bullets []string) []string {
+func applyDevcontainerEnv(dc *archetype.DevcontainerConfig, pr *profileResult, bullets []string) []string {
 	merged := dc.MergedEnv()
 	if len(merged) == 0 {
 		return bullets
@@ -989,7 +990,7 @@ func applyDevcontainerEnv(dc *DevcontainerConfig, pr *profileResult, bullets []s
 }
 
 // applyDevcontainerPorts merges port forwards from devcontainer.json.
-func applyDevcontainerPorts(dc *DevcontainerConfig, opts *CreateOptions, bullets []string) []string {
+func applyDevcontainerPorts(dc *archetype.DevcontainerConfig, opts *CreateOptions, bullets []string) []string {
 	ports := dc.ExtractPorts()
 	if len(ports) == 0 {
 		return bullets
@@ -1008,7 +1009,7 @@ func applyDevcontainerPorts(dc *DevcontainerConfig, opts *CreateOptions, bullets
 }
 
 // applyDevcontainerWorkspaceFolder applies workspaceFolder to the workdir mount path.
-func applyDevcontainerWorkspaceFolder(dc *DevcontainerConfig, opts *CreateOptions, bullets []string) []string {
+func applyDevcontainerWorkspaceFolder(dc *archetype.DevcontainerConfig, opts *CreateOptions, bullets []string) []string {
 	if dc.WorkspaceFolder == "" {
 		return bullets
 	}
@@ -1017,7 +1018,7 @@ func applyDevcontainerWorkspaceFolder(dc *DevcontainerConfig, opts *CreateOption
 }
 
 // appendLifecycleBullets adds lifecycle command summary bullets.
-func appendLifecycleBullets(dc *DevcontainerConfig, bullets []string) []string {
+func appendLifecycleBullets(dc *archetype.DevcontainerConfig, bullets []string) []string {
 	if !dc.OnCreateCommand.IsZero() {
 		bullets = append(bullets, "onCreateCommand will run once at first start")
 	}
@@ -1034,7 +1035,7 @@ func appendLifecycleBullets(dc *DevcontainerConfig, bullets []string) []string {
 }
 
 // mergeYamlMounts adds .yoloai.yaml mounts to pr.mounts (dedup).
-func mergeYamlMounts(pr *profileResult, yamlCfg *YoloAIProjectConfig) {
+func mergeYamlMounts(pr *profileResult, yamlCfg *archetype.YoloAIProjectConfig) {
 	if yamlCfg == nil || len(yamlCfg.Mounts) == 0 {
 		return
 	}
@@ -1051,8 +1052,8 @@ func mergeYamlMounts(pr *profileResult, yamlCfg *YoloAIProjectConfig) {
 }
 
 // printArchetypeOutput prints transparency information about the resolved archetype.
-func printArchetypeOutput(output io.Writer, archetype Archetype, source string, signals []string, bullets []string) {
-	if archetype == ArchetypeSimple && source == "auto-detected" {
+func printArchetypeOutput(output io.Writer, arch archetype.Archetype, source string, signals []string, bullets []string) {
+	if arch == archetype.ArchetypeSimple && source == "auto-detected" {
 		return
 	}
 	switch {
@@ -1061,12 +1062,12 @@ func printArchetypeOutput(output io.Writer, archetype Archetype, source string, 
 			fmt.Fprintf(output, "→ Detected %s\n", sig) //nolint:errcheck // best-effort output
 		}
 	case source == ".yoloai.yaml":
-		fmt.Fprintf(output, "→ .yoloai.yaml declares archetype: %s\n", string(archetype)) //nolint:errcheck // best-effort output
+		fmt.Fprintf(output, "→ .yoloai.yaml declares archetype: %s\n", string(arch)) //nolint:errcheck // best-effort output
 	case source == "--archetype flag":
-		fmt.Fprintf(output, "→ --archetype %s\n", string(archetype)) //nolint:errcheck // best-effort output
+		fmt.Fprintf(output, "→ --archetype %s\n", string(arch)) //nolint:errcheck // best-effort output
 	}
-	if archetype != ArchetypeSimple {
-		fmt.Fprintf(output, "  Archetype: %s\n", string(archetype)) //nolint:errcheck // best-effort output
+	if arch != archetype.ArchetypeSimple {
+		fmt.Fprintf(output, "  Archetype: %s\n", string(arch)) //nolint:errcheck // best-effort output
 		if len(bullets) > 0 {
 			fmt.Fprintln(output, "  Because of this:") //nolint:errcheck // best-effort output
 			for _, b := range bullets {

@@ -1,7 +1,9 @@
 // ABOUTME: Defines environment archetypes and auto-detection logic for project types.
 // ABOUTME: Archetypes: simple, compose, devcontainer, apple. Detection inspects the workdir.
 
-package sandbox
+// Package archetype parses .yoloai.yaml project configs, devcontainer.json files, and detects
+// which environment archetype (simple, compose, devcontainer, apple) applies to a workdir.
+package archetype
 
 import (
 	"fmt"

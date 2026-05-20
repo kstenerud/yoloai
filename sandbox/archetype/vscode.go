@@ -1,7 +1,7 @@
 // ABOUTME: VS Code workspace file injection for the devcontainer archetype.
 // ABOUTME: Writes .vscode/extensions.json and .vscode/settings.json into the workdir copy.
 
-package sandbox
+package archetype
 
 import (
 	"encoding/json"

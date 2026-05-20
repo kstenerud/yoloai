@@ -15,6 +15,7 @@ import (
 	"github.com/kstenerud/yoloai/config"
 	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/sandbox"
+	"github.com/kstenerud/yoloai/sandbox/archetype"
 	"github.com/spf13/cobra"
 )
 
@@ -53,7 +54,7 @@ func newNewCmd(version string) *cobra.Command {
 	cmd.Flags().StringSlice("env", nil, "Environment variable (KEY=VAL, repeatable)")
 	cmd.Flags().StringArray("runtime", []string{}, "Apple simulator runtime (ios, tvos, watchos, visionos). Repeatable. Example: --runtime ios --runtime tvos:26.1")
 	cmd.Flags().Bool("vscode-tunnel", false, "Launch a VS Code Remote Tunnel alongside the agent (connect from VS Code on any machine)")
-	cmd.Flags().String("archetype", "", fmt.Sprintf("Environment archetype (%s)", strings.Join(sandbox.ValidArchetypes(), "|")))
+	cmd.Flags().String("archetype", "", fmt.Sprintf("Environment archetype (%s)", strings.Join(archetype.ValidArchetypes(), "|")))
 
 	cmd.MarkFlagsMutuallyExclusive("network-none", "network-isolated")
 	cmd.MarkFlagsMutuallyExclusive("profile", "no-profile")

@@ -22,6 +22,7 @@ import (
 	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/runtime/caps"
 	"github.com/kstenerud/yoloai/runtime/tart"
+	"github.com/kstenerud/yoloai/sandbox/archetype"
 )
 
 // mkdirAllPerm creates a directory (and parents) then explicitly chmods it to
@@ -160,9 +161,9 @@ type sandboxState struct {
 	meta              *Meta
 	configJSON        []byte
 	// Archetype fields
-	archetype                 Archetype
+	archetype                 archetype.Archetype
 	dockerdRequired           bool
-	devcontainer              *DevcontainerConfig
+	devcontainer              *archetype.DevcontainerConfig
 	devcontainerMounts        []string
 	devcontainerMountWarnings []string
 	workdirMode               string // resolved workdir mode ("copy", "overlay", "rw")
@@ -379,7 +380,7 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions, c
 }
 
 // resolveProfileAndArchetype resolves profile config, runtime base, archetype, mounts, and lifecycle state.
-func (m *Manager) resolveProfileAndArchetype(ctx context.Context, opts *CreateOptions, agentDef *agent.Definition, ycfg *config.YoloaiConfig, gcfg *config.GlobalConfig) (*profileResult, Archetype, *DevcontainerConfig, []string, []string, []string, bool, error) {
+func (m *Manager) resolveProfileAndArchetype(ctx context.Context, opts *CreateOptions, agentDef *agent.Definition, ycfg *config.YoloaiConfig, gcfg *config.GlobalConfig) (*profileResult, archetype.Archetype, *archetype.DevcontainerConfig, []string, []string, []string, bool, error) {
 	pr, err := m.resolveProfileConfig(ctx, opts, &agentDef, ycfg, gcfg)
 	if err != nil {
 		return nil, "", nil, nil, nil, nil, false, err
@@ -424,7 +425,7 @@ func (m *Manager) createAndSeedSandbox(ctx context.Context, sandboxDir string, a
 
 // buildConfigAndMeta builds the container config and sandbox meta structs.
 // Returns (configData, meta, tmuxConf, promptText, error).
-func (m *Manager) buildConfigAndMeta(ctx context.Context, opts CreateOptions, pr *profileResult, agentDef *agent.Definition, workdir *DirArg, auxDirs []*DirArg, gcfg *config.GlobalConfig, dirMetas []DirMeta, baselineSHA string, mergedMounts []string, resolvedArchetype Archetype, devcontainerCfg *DevcontainerConfig, state_onCreateDone bool, sandboxDir string) ([]byte, *Meta, string, string, error) {
+func (m *Manager) buildConfigAndMeta(ctx context.Context, opts CreateOptions, pr *profileResult, agentDef *agent.Definition, workdir *DirArg, auxDirs []*DirArg, gcfg *config.GlobalConfig, dirMetas []DirMeta, baselineSHA string, mergedMounts []string, resolvedArchetype archetype.Archetype, devcontainerCfg *archetype.DevcontainerConfig, state_onCreateDone bool, sandboxDir string) ([]byte, *Meta, string, string, error) {
 	_ = ctx // reserved for future use
 	promptText, hasPrompt, model, agentCommand, tmuxConf, err := resolveAgentParams(agentDef, opts, pr, gcfg)
 	if err != nil {
@@ -449,7 +450,7 @@ func (m *Manager) buildConfigAndMeta(ctx context.Context, opts CreateOptions, pr
 }
 
 // buildSandboxStateResult constructs the sandboxState from all resolved values.
-func buildSandboxStateResult(opts CreateOptions, sandboxDir string, workdir *DirArg, workCopyDir string, auxDirs []*DirArg, agentDef *agent.Definition, meta *Meta, pr *profileResult, mergedMounts []string, configData []byte, tmuxConf string, resolvedArchetype Archetype, archetypeDockerDRequired bool, devcontainerCfg *DevcontainerConfig, dcMounts []string, dcMountWarnings []string, credOverrides map[string]string) *sandboxState {
+func buildSandboxStateResult(opts CreateOptions, sandboxDir string, workdir *DirArg, workCopyDir string, auxDirs []*DirArg, agentDef *agent.Definition, meta *Meta, pr *profileResult, mergedMounts []string, configData []byte, tmuxConf string, resolvedArchetype archetype.Archetype, archetypeDockerDRequired bool, devcontainerCfg *archetype.DevcontainerConfig, dcMounts []string, dcMountWarnings []string, credOverrides map[string]string) *sandboxState {
 	return &sandboxState{
 		name:                      opts.Name,
 		sandboxDir:                sandboxDir,
@@ -657,7 +658,7 @@ func createSandboxDirs(sandboxDir string, perms IsolationPerms) error {
 }
 
 // setupAllWorkdirs sets up the workdir and aux dirs, and resolves copy mount paths.
-func (m *Manager) setupAllWorkdirs(opts CreateOptions, workdir *DirArg, auxDirs []*DirArg, resolvedArchetype Archetype, devcontainerCfg *DevcontainerConfig) (string, string, []DirMeta, error) {
+func (m *Manager) setupAllWorkdirs(opts CreateOptions, workdir *DirArg, auxDirs []*DirArg, resolvedArchetype archetype.Archetype, devcontainerCfg *archetype.DevcontainerConfig) (string, string, []DirMeta, error) {
 	slog.Debug("setting up workdir", "event", "sandbox.create.workdir", "mode", string(workdir.Mode))
 	workCopyDir, baselineSHA, err := setupWorkdir(opts.Name, workdir, m.runtime)
 	if err != nil {
@@ -665,9 +666,9 @@ func (m *Manager) setupAllWorkdirs(opts CreateOptions, workdir *DirArg, auxDirs 
 	}
 
 	// VS Code workspace injection (devcontainer + vscode-tunnel + copy/overlay).
-	if resolvedArchetype == ArchetypeDevcontainer && opts.VscodeTunnel &&
+	if resolvedArchetype == archetype.ArchetypeDevcontainer && opts.VscodeTunnel &&
 		workdir.Mode != "rw" && devcontainerCfg != nil {
-		if injectErr := InjectVSCodeWorkspace(workCopyDir, devcontainerCfg); injectErr != nil {
+		if injectErr := archetype.InjectVSCodeWorkspace(workCopyDir, devcontainerCfg); injectErr != nil {
 			slog.Warn("vscode workspace injection failed", "err", injectErr) // non-fatal
 		}
 	}
@@ -718,8 +719,8 @@ func resolveAgentParams(agentDef *agent.Definition, opts CreateOptions, pr *prof
 }
 
 // buildLifecycleConfig builds the lifecycle config if the archetype requires it.
-func buildLifecycleConfig(resolvedArchetype Archetype, archetypeDockerDRequired bool, onCreateDone bool, devcontainerCfg *DevcontainerConfig) *lifecycleConfig {
-	if resolvedArchetype != ArchetypeDevcontainer && !archetypeDockerDRequired {
+func buildLifecycleConfig(resolvedArchetype archetype.Archetype, archetypeDockerDRequired bool, onCreateDone bool, devcontainerCfg *archetype.DevcontainerConfig) *lifecycleConfig {
+	if resolvedArchetype != archetype.ArchetypeDevcontainer && !archetypeDockerDRequired {
 		return nil
 	}
 	lc := &lifecycleConfig{
@@ -1159,7 +1160,7 @@ func buildContainerConfig(agentDef *agent.Definition, agentCommand string, agent
 }
 
 // lifecycleCmdToJSON converts a LifecycleCmd to the runtime-config.json representation.
-func lifecycleCmdToJSON(lc LifecycleCmd) map[string]any {
+func lifecycleCmdToJSON(lc archetype.LifecycleCmd) map[string]any {
 	if lc.IsZero() {
 		return nil
 	}

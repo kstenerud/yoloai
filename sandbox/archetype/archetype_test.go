@@ -1,7 +1,7 @@
 // ABOUTME: Tests for ParseArchetype, ValidArchetypes, and DetectArchetype auto-detection.
 // ABOUTME: Covers detection priority: devcontainer > compose > apple > simple.
 
-package sandbox
+package archetype
 
 import (
 	"os"

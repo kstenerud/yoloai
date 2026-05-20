@@ -1,7 +1,7 @@
 // ABOUTME: Tests for InjectVSCodeWorkspace, mergeExtensionsJSON, and mergeSettingsJSON.
 // ABOUTME: Covers nil/empty skip, dedup of extensions, and existing-key-wins for settings.
 
-package sandbox
+package archetype
 
 import (
 	"encoding/json"

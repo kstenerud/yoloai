@@ -1,7 +1,7 @@
 // ABOUTME: Tests for devcontainer.json parsing, port extraction, mount filtering, and env merging.
 // ABOUTME: Covers all three LifecycleCmd forms and all FilterMounts stripping rules.
 
-package sandbox
+package archetype
 
 import (
 	"encoding/json"

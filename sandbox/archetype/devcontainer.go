@@ -1,7 +1,7 @@
 // ABOUTME: Parses the subset of devcontainer.json fields that yoloAI uses.
 // ABOUTME: Provides filtering, port extraction, env merging, and run-args parsing.
 
-package sandbox
+package archetype
 
 import (
 	"encoding/json"
