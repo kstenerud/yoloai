@@ -62,7 +62,7 @@ python-test: python-typecheck
 ## python-typecheck: run mypy --strict on the typed Python surface
 python-typecheck:
 	@if python3 -m mypy --version >/dev/null 2>&1; then \
-		python3 -m mypy --strict runtime/monitor/setup_helpers.py runtime/monitor/tests/; \
+		python3 -m mypy --strict runtime/monitor/setup_helpers.py runtime/monitor/tmux_io.py runtime/monitor/tests/; \
 	else \
 		echo "Python type-check skipped (install mypy via 'make setup-dev-python' to enable)"; \
 	fi

@@ -27,6 +27,10 @@ var embeddedSandboxSetup = monitor.SetupScript()
 // imported by sandbox-setup.py at runtime. Must ship alongside it.
 var embeddedSetupHelpers = monitor.SetupHelpers()
 
+// embeddedTmuxIO provides the injectable tmux/subprocess wrappers module
+// imported by sandbox-setup.py at runtime. Must ship alongside it.
+var embeddedTmuxIO = monitor.TmuxIO()
+
 // embeddedStatusMonitor provides the shared Python status monitor script
 // from the runtime/monitor package for inclusion in Docker image builds.
 var embeddedStatusMonitor = monitor.Script()

@@ -927,6 +927,10 @@ func writeVMSetupScripts(sandboxPath string) error {
 	if err := fileutil.WriteFile(helpersPath, monitor.SetupHelpers(), 0644); err != nil { //nolint:gosec // G306: script content
 		return fmt.Errorf("write setup_helpers.py: %w", err)
 	}
+	tmuxIOPath := filepath.Join(sandboxPath, binDir, "tmux_io.py")
+	if err := fileutil.WriteFile(tmuxIOPath, monitor.TmuxIO(), 0644); err != nil { //nolint:gosec // G306: script content
+		return fmt.Errorf("write tmux_io.py: %w", err)
+	}
 	monitorPath := filepath.Join(sandboxPath, binDir, "status-monitor.py")
 	if err := fileutil.WriteFile(monitorPath, monitor.Script(), 0644); err != nil { //nolint:gosec // G306: script content
 		return fmt.Errorf("write status monitor: %w", err)

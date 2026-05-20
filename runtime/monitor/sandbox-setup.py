@@ -29,6 +29,8 @@ from setup_helpers import (
     load_secret_files,
     read_runtime_config,
 )
+import tmux_io
+from tmux_io import set_title, tmux, tmux_output
 
 
 # --- JSONL logger ---
@@ -46,7 +48,7 @@ def _init_sandbox_log(yoloai_dir):
 
 
 def _log(level, event, msg, **fields):
-    now = datetime.datetime.utcnow()
+    now = datetime.datetime.now(datetime.timezone.utc)
     ts = now.strftime("%Y-%m-%dT%H:%M:%S.") + f"{now.microsecond // 1000:03d}Z"
     entry = {"ts": ts, "level": level, "event": event, "msg": msg}
     entry.update(fields)
@@ -73,28 +75,6 @@ def log_debug(event, msg, **fields):
 def read_config(path):
     """Read and return the runtime-config.json as a dict."""
     return read_runtime_config(path)
-
-
-def tmux(*args, socket=None):
-    """Run a tmux command, optionally with a per-sandbox socket."""
-    cmd = ["tmux"]
-    if socket:
-        cmd.extend(["-S", socket])
-    cmd.extend(args)
-    return subprocess.run(cmd, capture_output=True, text=True)
-
-
-def tmux_output(*args, socket=None):
-    """Run a tmux command and return stdout, or empty string on failure."""
-    result = tmux(*args, socket=socket)
-    if result.returncode == 0:
-        return result.stdout
-    return ""
-
-
-def set_title(title, socket=None):
-    """Set tmux window title."""
-    tmux("rename-window", "-t", "main", title, socket=socket)
 
 
 def read_secrets(secrets_dir, socket=None):
@@ -219,9 +199,9 @@ class DockerBackend(Backend):
                     import shutil
                     shutil.rmtree(os.path.join(root, ".git"), ignore_errors=True)
                     dirs.remove(".git")
-            subprocess.run(["git", "-C", merged, "init"], capture_output=True)
-            subprocess.run(["git", "-C", merged, "add", "-A"], capture_output=True)
-            subprocess.run(
+            tmux_io.run(["git", "-C", merged, "init"], capture_output=True)
+            tmux_io.run(["git", "-C", merged, "add", "-A"], capture_output=True)
+            tmux_io.run(
                 ["git", "-C", merged, "commit", "-m", "yoloai overlay baseline", "--no-gpg-sign"],
                 capture_output=True,
             )
@@ -239,8 +219,8 @@ class DockerBackend(Backend):
                     time.sleep(auto_commit_interval)
                     timestamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
                     for d in copy_dirs:
-                        subprocess.run(["git", "-C", d, "add", "-A"], capture_output=True)
-                        subprocess.run(
+                        tmux_io.run(["git", "-C", d, "add", "-A"], capture_output=True)
+                        tmux_io.run(
                             ["git", "-C", d, "commit", "-m", f"yoloai auto-commit {timestamp}", "--no-gpg-sign"],
                             capture_output=True,
                         )
@@ -283,20 +263,20 @@ class TartBackend(Backend):
             log_debug("tart.symlinks", "creating VirtioFS mount symlinks")
             for target, source in mount_map.items():
                 parent = os.path.dirname(target)
-                subprocess.run(["sudo", "mkdir", "-p", parent], capture_output=True)
+                tmux_io.run(["sudo", "mkdir", "-p", parent], capture_output=True)
 
                 # Remove existing symlink or empty directory
                 if os.path.islink(target):
-                    subprocess.run(["sudo", "rm", "-f", target], capture_output=True)
+                    tmux_io.run(["sudo", "rm", "-f", target], capture_output=True)
                 elif os.path.isdir(target):
                     # Check if empty
                     try:
                         if not os.listdir(target):
-                            subprocess.run(["sudo", "rmdir", target], capture_output=True)
+                            tmux_io.run(["sudo", "rmdir", target], capture_output=True)
                     except OSError:
                         pass
 
-                subprocess.run(["sudo", "ln", "-sf", source, target], capture_output=True)
+                tmux_io.run(["sudo", "ln", "-sf", source, target], capture_output=True)
 
         # Auto-configure iOS testing if Xcode is mounted from host
         # Supports any Xcode name (m-Xcode.app, m-Xcode-Beta.app, etc.)
@@ -312,7 +292,7 @@ class TartBackend(Backend):
 
         if xcode_developer and os.path.isdir(xcode_developer):
             # Point xcode-select to the mounted Xcode so xcrun can find simctl and other tools
-            result = subprocess.run(
+            result = tmux_io.run(
                 ["sudo", "xcode-select", "--switch", xcode_developer],
                 capture_output=True,
                 text=True
@@ -336,7 +316,7 @@ class TartBackend(Backend):
                     pass  # Non-fatal if we can't update profile
 
             # Accept Xcode license (stored in VM's /Library/Preferences, not in Xcode.app)
-            result = subprocess.run(
+            result = tmux_io.run(
                 ["sudo", "xcodebuild", "-license", "accept"],
                 capture_output=True,
                 text=True
@@ -344,7 +324,7 @@ class TartBackend(Backend):
             # Don't log success/failure - silent operation
 
             # Run first launch to initialize device types and other Xcode components
-            result = subprocess.run(
+            result = tmux_io.run(
                 ["sudo", "xcodebuild", "-runFirstLaunch"],
                 capture_output=True,
                 text=True
@@ -357,19 +337,19 @@ class TartBackend(Backend):
 
         if os.path.isdir(privateframeworks_mount):
             # Create parent directory if needed
-            subprocess.run(["sudo", "mkdir", "-p", "/Library/Developer"],
+            tmux_io.run(["sudo", "mkdir", "-p", "/Library/Developer"],
                          capture_output=True, text=True)
 
             # Only remove if it's already a symlink (safe)
             if os.path.islink(privateframeworks_target):
-                result = subprocess.run(["sudo", "rm", privateframeworks_target],
+                result = tmux_io.run(["sudo", "rm", privateframeworks_target],
                                       capture_output=True, text=True)
                 if result.returncode != 0:
                     import syslog
                     syslog.syslog(syslog.LOG_ERR, f"Failed to remove PrivateFrameworks symlink: {result.stderr}")
 
             # Create symlink (ln -sfn handles overwriting existing symlinks)
-            result = subprocess.run(["sudo", "ln", "-sfn", privateframeworks_mount, privateframeworks_target],
+            result = tmux_io.run(["sudo", "ln", "-sfn", privateframeworks_mount, privateframeworks_target],
                                   capture_output=True, text=True)
             if result.returncode != 0:
                 import syslog
@@ -664,7 +644,7 @@ def setup_tmux_session(cfg, yoloai_dir, socket=None):
         cmd = ["tmux"] + base_args + session_args
 
     log_debug("tmux.start", f"starting tmux session (tmux_conf={tmux_conf})")
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    result = tmux_io.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
         log_info("tmux.error", "tmux new-session failed",
                  cmd=" ".join(cmd),
@@ -723,7 +703,7 @@ def launch_agent(cfg, socket=None, working_dir=None, backend_inst=None, secrets=
     # Diagnostic: verify Node.js works before launching the agent.
     # Node.js 22 has known syscall incompatibilities with gVisor ARM64 that
     # cause silent immediate crashes with no output.
-    node_check = subprocess.run(["node", "--version"], capture_output=True, text=True)
+    node_check = tmux_io.run(["node", "--version"], capture_output=True, text=True)
     log_info("sandbox.node_check", "node version check",
              version=node_check.stdout.strip(),
              returncode=node_check.returncode,
@@ -991,7 +971,7 @@ def start_dockerd(log):
         log("dockerd: docker not found, skipping")
         return
     # Check if already running
-    r = subprocess.run(["docker", "info"], capture_output=True)
+    r = tmux_io.run(["docker", "info"], capture_output=True)
     if r.returncode == 0:
         log("dockerd: already running")
         return
@@ -1003,7 +983,7 @@ def start_dockerd(log):
     # Poll socket until ready (30s timeout)
     deadline = _time.time() + 30
     while _time.time() < deadline:
-        r = subprocess.run(["docker", "info"], capture_output=True)
+        r = tmux_io.run(["docker", "info"], capture_output=True)
         if r.returncode == 0:
             log("dockerd: ready")
             return
@@ -1024,19 +1004,19 @@ def run_lifecycle_command(cmd_entry, log):
     cmd  = cmd_entry.get("cmd")
 
     if kind == "string":
-        r = subprocess.run(["sh", "-c", cmd])
+        r = tmux_io.run(["sh", "-c", cmd])
         if r.returncode != 0:
             log(f"lifecycle command failed (exit {r.returncode}): {cmd}")
             return False
     elif kind == "array":
-        r = subprocess.run(cmd)
+        r = tmux_io.run(cmd)
         if r.returncode != 0:
             log(f"lifecycle command failed (exit {r.returncode}): {cmd}")
             return False
     elif kind == "object":
         failures = []
         def run_one(name, subcmd):
-            r = subprocess.run(["sh", "-c", subcmd] if isinstance(subcmd, str) else subcmd)
+            r = tmux_io.run(["sh", "-c", subcmd] if isinstance(subcmd, str) else subcmd)
             return name, r.returncode
         with ThreadPoolExecutor() as pool:
             futures = {pool.submit(run_one, n, c): n for n, c in cmd.items()}
@@ -1259,13 +1239,13 @@ def main():
     log_info("sandbox.ready", "sandbox fully initialized")
 
     # Block — process stops only on explicit stop/kill.
-    # Use subprocess.run (not os.execvp) so the Python process stays alive
+    # Use tmux_io.run (not os.execvp) so the Python process stays alive
     # and the monitor_exit daemon thread can detach clients when the agent exits.
     cmd = ["tmux"]
     if socket:
         cmd.extend(["-S", socket])
     cmd.extend(["wait-for", "yoloai-exit"])
-    result = subprocess.run(cmd)
+    result = tmux_io.run(cmd)
 
     log_info("sandbox.agent_exit", "agent process exited", exit_code=result.returncode)
     sys.exit(result.returncode)

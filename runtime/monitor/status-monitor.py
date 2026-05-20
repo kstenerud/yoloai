@@ -523,7 +523,7 @@ def _log_jsonl(level, event, msg, **fields):
     """Write a structured JSONL entry to logs/monitor.jsonl."""
     if _monitor_log is None:
         return
-    now = datetime.datetime.utcnow()
+    now = datetime.datetime.now(datetime.timezone.utc)
     ts = now.strftime("%Y-%m-%dT%H:%M:%S.") + f"{now.microsecond // 1000:03d}Z"
     entry = {"ts": ts, "level": level, "event": event, "msg": msg}
     entry.update(fields)

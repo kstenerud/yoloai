@@ -35,10 +35,11 @@ func TestCreateBuildContext(t *testing.T) {
 	assert.Contains(t, found, "entrypoint.py")
 	assert.Contains(t, found, "sandbox-setup.py")
 	assert.Contains(t, found, "setup_helpers.py")
+	assert.Contains(t, found, "tmux_io.py")
 	assert.Contains(t, found, "status-monitor.py")
 	assert.Contains(t, found, "diagnose-idle.sh")
 	assert.Contains(t, found, "tmux.conf")
-	assert.Len(t, found, 8)
+	assert.Len(t, found, 9)
 }
 
 func TestCreateProfileBuildContext(t *testing.T) {

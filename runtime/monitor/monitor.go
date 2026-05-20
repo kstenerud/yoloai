@@ -17,6 +17,9 @@ var embeddedSandboxSetup []byte
 //go:embed setup_helpers.py
 var embeddedSetupHelpers []byte
 
+//go:embed tmux_io.py
+var embeddedTmuxIO []byte
+
 // Script returns the embedded status-monitor.py content.
 func Script() []byte {
 	return embeddedStatusMonitor
@@ -37,4 +40,11 @@ func SetupScript() []byte {
 // it alongside sandbox-setup.py in the sandbox bin dir.
 func SetupHelpers() []byte {
 	return embeddedSetupHelpers
+}
+
+// TmuxIO returns the embedded tmux_io.py content. The module is imported by
+// sandbox-setup.py at runtime (and by status-monitor.py when wired in), so
+// backends must write it alongside sandbox-setup.py in the sandbox bin dir.
+func TmuxIO() []byte {
+	return embeddedTmuxIO
 }
