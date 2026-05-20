@@ -103,9 +103,23 @@ func TestBuildAgentCommand_AgentArgsOnly(t *testing.T) {
 	assert.Equal(t, "claude --dangerously-skip-permissions --verbose", result)
 }
 
+func TestBuildContainerConfig_LaunchPrefixStored(t *testing.T) {
+	// W1a: the wrap prefix passed in is stored verbatim, gate is set true.
+	// Single source of truth: at runtime, Python and Go restart both read
+	// agent_launch_prefix instead of re-invoking PrepareAgentCommand.
+	agentDef := agent.GetAgent("claude")
+	prefix := `PATH="/opt/homebrew/opt/node/bin:$PATH" `
+	data, err := buildContainerConfig(agentDef, "claude", prefix, "default", "/tmp", false, false, nil, nil, nil, nil, 0, nil, "test", "", "", false, "", nil)
+	require.NoError(t, err)
+	var cfg containerConfig
+	require.NoError(t, json.Unmarshal(data, &cfg))
+	assert.Equal(t, prefix, cfg.AgentLaunchPrefix, "launch prefix must be stored verbatim")
+	assert.True(t, cfg.UseLaunchPrefix, "use_launch_prefix gate must be true for new sandboxes")
+}
+
 func TestBuildContainerConfig_ValidJSON(t *testing.T) {
 	agentDef := agent.GetAgent("claude")
-	data, err := buildContainerConfig(agentDef, "claude --dangerously-skip-permissions", "default+host", "/Users/test/project", false, false, nil, nil, nil, nil, 0, nil, "test", "", "", false, "", nil)
+	data, err := buildContainerConfig(agentDef, "claude --dangerously-skip-permissions", "", "default+host", "/Users/test/project", false, false, nil, nil, nil, nil, 0, nil, "test", "", "", false, "", nil)
 	require.NoError(t, err)
 
 	var cfg containerConfig
@@ -135,7 +149,7 @@ func TestBuildContainerConfig_StateDirName(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.agent, func(t *testing.T) {
 			agentDef := agent.GetAgent(tt.agent)
-			data, err := buildContainerConfig(agentDef, "cmd", "default", "/tmp", false, false, nil, nil, nil, nil, 0, nil, "test", "", "", false, "", nil)
+			data, err := buildContainerConfig(agentDef, "cmd", "", "default", "/tmp", false, false, nil, nil, nil, nil, 0, nil, "test", "", "", false, "", nil)
 			require.NoError(t, err)
 			var cfg containerConfig
 			require.NoError(t, json.Unmarshal(data, &cfg))
@@ -344,7 +358,7 @@ func TestCreate_CleansUpOnPrepareFail(t *testing.T) {
 func TestBuildContainerConfig_NetworkIsolated(t *testing.T) {
 	agentDef := agent.GetAgent("claude")
 	domains := []string{"api.anthropic.com", "sentry.io"}
-	data, err := buildContainerConfig(agentDef, "claude", "default", "/tmp", false, true, domains, nil, nil, nil, 0, nil, "test", "", "", false, "", nil)
+	data, err := buildContainerConfig(agentDef, "claude", "", "default", "/tmp", false, true, domains, nil, nil, nil, 0, nil, "test", "", "", false, "", nil)
 	require.NoError(t, err)
 
 	var cfg containerConfig
@@ -357,7 +371,7 @@ func TestBuildContainerConfig_NetworkIsolated(t *testing.T) {
 func TestBuildContainerConfig_AutoCommitInterval(t *testing.T) {
 	agentDef := agent.GetAgent("claude")
 	copyDirs := []string{"/home/user/project", "/home/user/lib"}
-	data, err := buildContainerConfig(agentDef, "claude", "default", "/tmp", false, false, nil, nil, nil, nil, 60, copyDirs, "test", "", "", false, "", nil)
+	data, err := buildContainerConfig(agentDef, "claude", "", "default", "/tmp", false, false, nil, nil, nil, nil, 60, copyDirs, "test", "", "", false, "", nil)
 	require.NoError(t, err)
 
 	var cfg containerConfig
@@ -369,7 +383,7 @@ func TestBuildContainerConfig_AutoCommitInterval(t *testing.T) {
 
 func TestBuildContainerConfig_AutoCommitIntervalZero(t *testing.T) {
 	agentDef := agent.GetAgent("claude")
-	data, err := buildContainerConfig(agentDef, "claude", "default", "/tmp", false, false, nil, nil, nil, nil, 0, nil, "test", "", "", false, "", nil)
+	data, err := buildContainerConfig(agentDef, "claude", "", "default", "/tmp", false, false, nil, nil, nil, nil, 0, nil, "test", "", "", false, "", nil)
 	require.NoError(t, err)
 
 	var cfg containerConfig

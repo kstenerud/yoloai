@@ -984,7 +984,14 @@ func (m *Manager) relaunchAgentWithCustomPrompt(ctx context.Context, name string
 
 	agentArgs := resolveAgentArgs(meta.Agent, meta.Profile)
 	interactiveCmd := buildAgentCommand(agentDef, meta.Model, "", agentArgs, cfg.Passthrough)
-	interactiveCmd = m.runtime.PrepareAgentCommand(interactiveCmd)
+	// Prefer the stored launch prefix (W1a single-source-of-truth) when the gate
+	// is set; fall back to re-invoking PrepareAgentCommand for sandboxes created
+	// before this field existed. W1b retires the fallback one release later.
+	if cfg.UseLaunchPrefix {
+		interactiveCmd = cfg.AgentLaunchPrefix + interactiveCmd
+	} else {
+		interactiveCmd = m.runtime.PrepareAgentCommand(interactiveCmd)
+	}
 	_, err = execInContainer(ctx, m.runtime, name, meta,
 		tmuxCmd(cfg.TmuxSocket, "respawn-pane", "-t", "main", "-k", interactiveCmd),
 	)

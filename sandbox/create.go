@@ -188,6 +188,8 @@ type containerConfig struct {
 	HostUID            int                  `json:"host_uid"`
 	HostGID            int                  `json:"host_gid"`
 	AgentCommand       string               `json:"agent_command"`
+	AgentLaunchPrefix  string               `json:"agent_launch_prefix"`
+	UseLaunchPrefix    bool                 `json:"use_launch_prefix"`
 	StartupDelay       int                  `json:"startup_delay"`
 	ReadyPattern       string               `json:"ready_pattern"`
 	SubmitSequence     string               `json:"submit_sequence"`
@@ -425,7 +427,7 @@ func (m *Manager) buildConfigAndMeta(ctx context.Context, opts CreateOptions, pr
 	archetypeDockerDRequired := pr.archetypeDockerDRequired
 	lifecycleCfg := buildLifecycleConfig(resolvedArchetype, archetypeDockerDRequired, state_onCreateDone, devcontainerCfg)
 
-	configData, err := buildContainerConfig(agentDef, agentCommand, tmuxConf, overlayOrResolvedMountPath(workdir), opts.Debug, networkMode == "isolated", networkAllow, opts.Passthrough, collectOverlayMounts(workdir, auxDirs), pr.setup, pr.autoCommitInterval, collectCopyDirs(workdir, auxDirs), opts.Name, m.runtime.TmuxSocket(sandboxDir), pr.isolation, opts.VscodeTunnel, sanitizeTunnelName(opts.Name), lifecycleCfg)
+	configData, err := buildContainerConfig(agentDef, agentCommand, m.runtime.PrepareAgentCommand(""), tmuxConf, overlayOrResolvedMountPath(workdir), opts.Debug, networkMode == "isolated", networkAllow, opts.Passthrough, collectOverlayMounts(workdir, auxDirs), pr.setup, pr.autoCommitInterval, collectCopyDirs(workdir, auxDirs), opts.Name, m.runtime.TmuxSocket(sandboxDir), pr.isolation, opts.VscodeTunnel, sanitizeTunnelName(opts.Name), lifecycleCfg)
 	if err != nil {
 		return nil, nil, "", "", fmt.Errorf("build %s: %w", RuntimeConfigFile, err)
 	}
@@ -1106,15 +1108,22 @@ func effectiveGID() int {
 }
 
 // buildContainerConfig creates the config.json content.
-func buildContainerConfig(agentDef *agent.Definition, agentCommand string, tmuxConf string, workingDir string, debug bool, networkIsolated bool, allowedDomains []string, passthrough []string, overlayMounts []overlayMountConfig, setupCommands []string, autoCommitInterval int, copyDirs []string, sandboxName string, tmuxSocket string, isolation string, vscodeTunnel bool, vscodeTunnelName string, lifecycle *lifecycleConfig) ([]byte, error) {
+// agentLaunchPrefix is the backend-specific wrap prefix that PrepareAgentCommand
+// would prepend (e.g. 'PATH="/opt/homebrew/opt/node/bin:$PATH" ' for Tart);
+// computed once by the caller, stored here as single source of truth for the
+// agent-command wrap (W1a of the architecture remediation plan).
+func buildContainerConfig(agentDef *agent.Definition, agentCommand string, agentLaunchPrefix string, tmuxConf string, workingDir string, debug bool, networkIsolated bool, allowedDomains []string, passthrough []string, overlayMounts []overlayMountConfig, setupCommands []string, autoCommitInterval int, copyDirs []string, sandboxName string, tmuxSocket string, isolation string, vscodeTunnel bool, vscodeTunnelName string, lifecycle *lifecycleConfig) ([]byte, error) {
 	var stateDirName string
 	if agentDef.StateDir != "" {
 		stateDirName = filepath.Base(agentDef.StateDir)
 	}
+
 	cfg := containerConfig{
 		HostUID:            effectiveUID(),
 		HostGID:            effectiveGID(),
 		AgentCommand:       agentCommand,
+		AgentLaunchPrefix:  agentLaunchPrefix,
+		UseLaunchPrefix:    true,
 		StartupDelay:       int(agentDef.StartupDelay / time.Millisecond),
 		ReadyPattern:       agentDef.Idle.ReadyPattern,
 		SubmitSequence:     agentDef.SubmitSequence,

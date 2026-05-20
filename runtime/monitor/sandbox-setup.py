@@ -769,8 +769,15 @@ def launch_agent(cfg, socket=None, working_dir=None, backend_inst=None, secrets=
     else:
         base_cmd = f"{env_exports}exec {agent_command}"
 
-    # Let the backend customize the launch command (PATH, wrapper scripts, etc.)
-    send_cmd = backend_inst.prepare_launch_command(base_cmd) if backend_inst else base_cmd
+    # Prefer the stored launch prefix (W1a single-source-of-truth) when the gate
+    # is set; fall back to backend.prepare_launch_command for sandboxes created
+    # before this field existed. W1b retires the fallback one release later.
+    if cfg.get("use_launch_prefix"):
+        send_cmd = cfg.get("agent_launch_prefix", "") + base_cmd
+    elif backend_inst:
+        send_cmd = backend_inst.prepare_launch_command(base_cmd)
+    else:
+        send_cmd = base_cmd
 
     tmux("send-keys", "-t", "main", send_cmd, "Enter", socket=socket)
     log_info("sandbox.agent_launch", "agent process started", agent=agent, model=model)
