@@ -14,6 +14,7 @@ import (
 
 	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/sandbox"
+	"github.com/kstenerud/yoloai/sandbox/patch"
 )
 
 // ProxyOptions controls how the proxy server creates or reuses a sandbox.
@@ -432,7 +433,7 @@ func (p *ProxyServer) tryHandleLocalToolCall(
 func (p *ProxyServer) handleProxyDiff(args map[string]any) map[string]any {
 	stat, _ := args["stat"].(bool)
 
-	results, err := sandbox.GenerateMultiDiff(sandbox.DiffOptions{Name: p.sandboxName, Stat: stat})
+	results, err := patch.GenerateMultiDiff(patch.DiffOptions{Name: p.sandboxName, Stat: stat})
 	if err != nil {
 		return mcpTextContent(errorf("diff sandbox %q: %v", p.sandboxName, err))
 	}

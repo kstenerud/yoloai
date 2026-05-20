@@ -19,7 +19,7 @@ import (
 func TestAcquireLock_CreatesDir(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
-	unlock, err := acquireLock("mybox")
+	unlock, err := AcquireLock("mybox")
 	require.NoError(t, err)
 	unlock()
 }
@@ -29,13 +29,13 @@ func TestAcquireLock_CreatesDir(t *testing.T) {
 func TestAcquireLock_MutualExclusion(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
-	unlock1, err := acquireLock("mybox")
+	unlock1, err := AcquireLock("mybox")
 	require.NoError(t, err)
 
 	// Goroutine 2 tries to acquire the same lock — should block.
 	acquired := make(chan struct{})
 	go func() {
-		unlock2, err2 := acquireLock("mybox")
+		unlock2, err2 := AcquireLock("mybox")
 		if err2 == nil {
 			close(acquired)
 			unlock2()
@@ -64,11 +64,11 @@ func TestAcquireLock_MutualExclusion(t *testing.T) {
 func TestAcquireLock_IndependentSandboxes(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
-	unlock1, err := acquireLock("box-a")
+	unlock1, err := AcquireLock("box-a")
 	require.NoError(t, err)
 	defer unlock1()
 
-	unlock2, err := acquireLock("box-b")
+	unlock2, err := AcquireLock("box-b")
 	require.NoError(t, err)
 	unlock2()
 }
@@ -79,7 +79,7 @@ func TestAcquireLock_Reacquirable(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
 	for range 3 {
-		unlock, err := acquireLock("mybox")
+		unlock, err := AcquireLock("mybox")
 		require.NoError(t, err)
 		unlock()
 	}
@@ -90,7 +90,7 @@ func TestAcquireLock_Reacquirable(t *testing.T) {
 func TestAcquireLock_LockfileLeftOnDisk(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
-	unlock, err := acquireLock("mybox")
+	unlock, err := AcquireLock("mybox")
 	require.NoError(t, err)
 	unlock()
 

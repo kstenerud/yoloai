@@ -10,6 +10,7 @@ import (
 
 	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/sandbox"
+	"github.com/kstenerud/yoloai/sandbox/patch"
 	"github.com/spf13/cobra"
 )
 
@@ -119,7 +120,7 @@ func diffSingle(cmd *cobra.Command, name string, paths []string, stat, nameOnly 
 	backend := resolveBackendForSandbox(name)
 	var finalErr error
 	_ = withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error { //nolint:errcheck // error handled via finalErr
-		opts := sandbox.DiffOptions{
+		opts := patch.DiffOptions{
 			Name:     name,
 			Paths:    paths,
 			NameOnly: nameOnly,
@@ -127,7 +128,7 @@ func diffSingle(cmd *cobra.Command, name string, paths []string, stat, nameOnly 
 			Runtime:  rt,
 		}
 
-		result, err := sandbox.GenerateDiff(ctx, opts)
+		result, err := patch.GenerateDiff(ctx, opts)
 		if err != nil {
 			finalErr = err
 			return err
@@ -183,13 +184,13 @@ func diffOverlay(cmd *cobra.Command, name string, stat, nameOnly bool) error {
 		}
 
 		// Get overlay diffs via container exec
-		overlayResults, err := sandbox.GenerateOverlayDiff(ctx, rt, sandbox.DiffOptions{Name: name, Stat: stat, NameOnly: nameOnly})
+		overlayResults, err := patch.GenerateOverlayDiff(ctx, rt, patch.DiffOptions{Name: name, Stat: stat, NameOnly: nameOnly})
 		if err != nil {
 			return err
 		}
 
 		// Get non-overlay diffs (copy/rw) via host
-		hostResults, err := sandbox.GenerateMultiDiff(sandbox.DiffOptions{Name: name, Stat: stat})
+		hostResults, err := patch.GenerateMultiDiff(patch.DiffOptions{Name: name, Stat: stat})
 		if err != nil {
 			return err
 		}
@@ -198,7 +199,7 @@ func diffOverlay(cmd *cobra.Command, name string, stat, nameOnly bool) error {
 
 		if jsonEnabled(cmd) {
 			if merged == nil {
-				merged = []*sandbox.DiffResult{}
+				merged = []*patch.DiffResult{}
 			}
 			return writeJSON(cmd.OutOrStdout(), merged)
 		}
@@ -208,8 +209,8 @@ func diffOverlay(cmd *cobra.Command, name string, stat, nameOnly bool) error {
 }
 
 // mergeOverlayDiffResults merges overlay results into host results.
-func mergeOverlayDiffResults(hostResults, overlayResults []*sandbox.DiffResult) []*sandbox.DiffResult {
-	var merged []*sandbox.DiffResult
+func mergeOverlayDiffResults(hostResults, overlayResults []*patch.DiffResult) []*patch.DiffResult {
+	var merged []*patch.DiffResult
 	for _, r := range hostResults {
 		if r.Mode == "overlay" {
 			// Find matching overlay result
@@ -239,7 +240,7 @@ func mergeOverlayDiffResults(hostResults, overlayResults []*sandbox.DiffResult) 
 }
 
 // printMergedDiffResults prints multiple diff results to stdout.
-func printMergedDiffResults(cmd *cobra.Command, merged []*sandbox.DiffResult) error {
+func printMergedDiffResults(cmd *cobra.Command, merged []*patch.DiffResult) error {
 	allEmpty := true
 	for _, r := range merged {
 		if !r.Empty {
@@ -279,14 +280,14 @@ func diffLogOverlay(cmd *cobra.Command, name string, stat bool) error {
 			return err
 		}
 
-		commits, err := sandbox.ListCommitsBeyondBaselineOverlay(ctx, rt, name)
+		commits, err := patch.ListCommitsBeyondBaselineOverlay(ctx, rt, name)
 		if err != nil {
 			return err
 		}
 
 		if jsonEnabled(cmd) {
 			if commits == nil {
-				commits = []sandbox.CommitInfo{}
+				commits = []patch.CommitInfo{}
 			}
 			result := struct {
 				Commits               any  `json:"commits"`
@@ -384,10 +385,10 @@ func diffLog(cmd *cobra.Command, name string, stat bool) error {
 // diffLogWithStat prints commits with file-change statistics.
 func diffLogWithStat(cmd *cobra.Command, name string, out io.Writer, tagsByCommit map[string][]string) error {
 	backend := resolveBackendForSandbox(name)
-	var commits []sandbox.CommitInfoWithStat
+	var commits []patch.CommitInfoWithStat
 	err := withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
 		var listErr error
-		commits, listErr = sandbox.ListCommitsWithStats(ctx, rt, name)
+		commits, listErr = patch.ListCommitsWithStats(ctx, rt, name)
 		return listErr
 	})
 	if err != nil {
@@ -412,10 +413,10 @@ func diffLogWithStat(cmd *cobra.Command, name string, out io.Writer, tagsByCommi
 // diffLogBasic prints commits without statistics.
 func diffLogBasic(cmd *cobra.Command, name string, out io.Writer, tagsByCommit map[string][]string) error {
 	backend := resolveBackendForSandbox(name)
-	var commits []sandbox.CommitInfo
+	var commits []patch.CommitInfo
 	err := withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
 		var listErr error
-		commits, listErr = sandbox.ListCommitsBeyondBaseline(ctx, rt, name)
+		commits, listErr = patch.ListCommitsBeyondBaseline(ctx, rt, name)
 		return listErr
 	})
 	if err != nil {
@@ -446,7 +447,7 @@ func diffLogWIP(cmd *cobra.Command, name string, out io.Writer) {
 	var hasWIP bool
 	err := withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
 		var wipErr error
-		hasWIP, wipErr = sandbox.HasUncommittedChanges(ctx, rt, name)
+		hasWIP, wipErr = patch.HasUncommittedChanges(ctx, rt, name)
 		return wipErr
 	})
 	if err == nil && hasWIP {
@@ -456,7 +457,7 @@ func diffLogWIP(cmd *cobra.Command, name string, out io.Writer) {
 
 // diffRef shows the diff for a specific commit or range.
 func diffRef(cmd *cobra.Command, name, ref string, stat bool) error {
-	result, err := sandbox.GenerateCommitDiff(sandbox.CommitDiffOptions{
+	result, err := patch.GenerateCommitDiff(patch.CommitDiffOptions{
 		Name: name,
 		Ref:  ref,
 		Stat: stat,
@@ -503,7 +504,7 @@ func agentRunningWarning(cmd *cobra.Command, name string) {
 
 // diffMultiDir shows diffs for all diffable directories with per-dir headers.
 func diffMultiDir(cmd *cobra.Command, name string, stat bool) error {
-	results, err := sandbox.GenerateMultiDiff(sandbox.DiffOptions{Name: name, Stat: stat})
+	results, err := patch.GenerateMultiDiff(patch.DiffOptions{Name: name, Stat: stat})
 	if err != nil {
 		return err
 	}
@@ -546,32 +547,32 @@ func diffLogJSON(cmd *cobra.Command, name string, stat bool) error {
 	var commits any
 	backend := resolveBackendForSandbox(name)
 	if stat {
-		var c []sandbox.CommitInfoWithStat
+		var c []patch.CommitInfoWithStat
 		err := withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
 			var listErr error
-			c, listErr = sandbox.ListCommitsWithStats(ctx, rt, name)
+			c, listErr = patch.ListCommitsWithStats(ctx, rt, name)
 			return listErr
 		})
 		if err != nil {
 			return err
 		}
 		if c == nil {
-			c = []sandbox.CommitInfoWithStat{}
+			c = []patch.CommitInfoWithStat{}
 		}
 		commits = c
 	} else {
 		backend := resolveBackendForSandbox(name)
-		var c []sandbox.CommitInfo
+		var c []patch.CommitInfo
 		err := withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
 			var listErr error
-			c, listErr = sandbox.ListCommitsBeyondBaseline(ctx, rt, name)
+			c, listErr = patch.ListCommitsBeyondBaseline(ctx, rt, name)
 			return listErr
 		})
 		if err != nil {
 			return err
 		}
 		if c == nil {
-			c = []sandbox.CommitInfo{}
+			c = []patch.CommitInfo{}
 		}
 		commits = c
 	}
@@ -579,7 +580,7 @@ func diffLogJSON(cmd *cobra.Command, name string, stat bool) error {
 	backendWIP := resolveBackendForSandbox(name)
 	var hasWIP bool
 	_ = withRuntime(cmd.Context(), backendWIP, func(ctx context.Context, rt runtime.Runtime) error {
-		hasWIP, _ = sandbox.HasUncommittedChanges(ctx, rt, name)
+		hasWIP, _ = patch.HasUncommittedChanges(ctx, rt, name)
 		return nil
 	})
 	tags, _ := sandbox.ListTagsBeyondBaseline(name)
@@ -602,12 +603,12 @@ func diffLogJSON(cmd *cobra.Command, name string, stat bool) error {
 
 // diffMultiDirJSON outputs multi-directory diffs as JSON.
 func diffMultiDirJSON(cmd *cobra.Command, name string, stat bool) error {
-	results, err := sandbox.GenerateMultiDiff(sandbox.DiffOptions{Name: name, Stat: stat})
+	results, err := patch.GenerateMultiDiff(patch.DiffOptions{Name: name, Stat: stat})
 	if err != nil {
 		return err
 	}
 	if results == nil {
-		results = []*sandbox.DiffResult{}
+		results = []*patch.DiffResult{}
 	}
 	return writeJSON(cmd.OutOrStdout(), results)
 }

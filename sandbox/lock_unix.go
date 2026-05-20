@@ -22,14 +22,14 @@ func lockPath(name string) string {
 	return filepath.Join(config.SandboxesDir(), name+".lock") //nolint:gosec // name is validated by ValidateName
 }
 
-// acquireLock creates (or opens) the per-sandbox lockfile and acquires an
+// AcquireLock creates (or opens) the per-sandbox lockfile and acquires an
 // exclusive flock. It blocks until the lock is available. The returned
 // release function must be called when the protected operation completes.
 //
 // The lockfile is left on disk after release; this is harmless — it is a
 // 0-byte advisory file and the next call for the same sandbox reuses it.
 // Locks are released automatically if the process exits or crashes.
-func acquireLock(name string) (func(), error) {
+func AcquireLock(name string) (func(), error) {
 	if err := fileutil.MkdirAll(config.SandboxesDir(), 0750); err != nil {
 		return nil, fmt.Errorf("create sandboxes dir: %w", err)
 	}

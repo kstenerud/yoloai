@@ -206,8 +206,8 @@ func Perms(isolation string) IsolationPerms {
 	}
 }
 
-// execInContainer runs a command inside a sandbox instance and returns stdout.
-func execInContainer(ctx context.Context, rt runtime.Runtime, sandboxName string, meta *Meta, cmd []string) (string, error) {
+// ExecInContainer runs a command inside a sandbox instance and returns stdout.
+func ExecInContainer(ctx context.Context, rt runtime.Runtime, sandboxName string, meta *Meta, cmd []string) (string, error) {
 	result, err := rt.Exec(ctx, InstanceName(sandboxName), cmd, ContainerUser(meta))
 	if err != nil {
 		return "", err

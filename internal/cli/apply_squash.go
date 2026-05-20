@@ -10,6 +10,7 @@ import (
 
 	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/sandbox"
+	"github.com/kstenerud/yoloai/sandbox/patch"
 	"github.com/kstenerud/yoloai/workspace"
 	"github.com/spf13/cobra"
 )
@@ -24,18 +25,18 @@ func applySquash(cmd *cobra.Command, name string, paths []string, meta *sandbox.
 		})
 	}
 
-	var patch []byte
+	var patchBytes []byte
 	var stat string
 	backend := resolveBackendForSandbox(name)
 	err := withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
 		var genErr error
-		patch, stat, genErr = sandbox.GeneratePatch(ctx, rt, name, paths)
+		patchBytes, stat, genErr = patch.GeneratePatch(ctx, rt, name, paths)
 		return genErr
 	})
 	if err != nil {
 		return err
 	}
-	if len(patch) == 0 {
+	if len(patchBytes) == 0 {
 		if jsonEnabled(cmd) {
 			return writeJSON(cmd.OutOrStdout(), applyResult{
 				Target: meta.Workdir.HostPath,
@@ -58,14 +59,14 @@ func applySquash(cmd *cobra.Command, name string, paths []string, meta *sandbox.
 		return nil
 	}
 
-	return applySquashPatch(cmd, name, paths, targetDir, patch, yes, backend)
+	return applySquashPatch(cmd, name, paths, targetDir, patchBytes, yes, backend)
 }
 
 // applySquashPatch applies a squash patch after confirmation.
-func applySquashPatch(cmd *cobra.Command, name string, paths []string, targetDir string, patch []byte, yes bool, backend string) error {
+func applySquashPatch(cmd *cobra.Command, name string, paths []string, targetDir string, patchBytes []byte, yes bool, backend string) error {
 	isGit := workspace.IsGitRepo(targetDir)
 
-	if err := workspace.CheckPatch(patch, targetDir, isGit); err != nil {
+	if err := workspace.CheckPatch(patchBytes, targetDir, isGit); err != nil {
 		return err
 	}
 
@@ -80,14 +81,14 @@ func applySquashPatch(cmd *cobra.Command, name string, paths []string, targetDir
 		}
 	}
 
-	if err := workspace.ApplyPatch(patch, targetDir, isGit); err != nil {
+	if err := workspace.ApplyPatch(patchBytes, targetDir, isGit); err != nil {
 		return err
 	}
 
 	// Advance baseline past applied changes (skip for path-filtered applies)
 	if len(paths) == 0 {
 		err := withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
-			return sandbox.AdvanceBaseline(ctx, rt, name)
+			return patch.AdvanceBaseline(ctx, rt, name)
 		})
 		if err != nil {
 			return fmt.Errorf("advance baseline: %w", err)
@@ -108,7 +109,7 @@ func applySquashPatch(cmd *cobra.Command, name string, paths []string, targetDir
 
 // applySquashMulti applies squashed patches for multiple :copy directories.
 func applySquashMulti(cmd *cobra.Command, ctx context.Context, rt runtime.Runtime, name string, paths []string, _ *sandbox.Meta, yes, dryRun bool) error {
-	patches, err := sandbox.GenerateMultiPatch(ctx, rt, name, paths)
+	patches, err := patch.GenerateMultiPatch(ctx, rt, name, paths)
 	if err != nil {
 		return err
 	}
@@ -155,7 +156,7 @@ func applySquashMulti(cmd *cobra.Command, ctx context.Context, rt runtime.Runtim
 
 	// Advance baseline for workdir
 	if len(paths) == 0 {
-		if err := sandbox.AdvanceBaseline(ctx, rt, name); err != nil {
+		if err := patch.AdvanceBaseline(ctx, rt, name); err != nil {
 			return fmt.Errorf("advance baseline: %w", err)
 		}
 	}
@@ -172,7 +173,7 @@ func applySquashMulti(cmd *cobra.Command, ctx context.Context, rt runtime.Runtim
 }
 
 // applyMultiPatches checks and applies a slice of PatchSet values to their host paths.
-func applyMultiPatches(cmd *cobra.Command, patches []sandbox.PatchSet, isJSON bool) error {
+func applyMultiPatches(cmd *cobra.Command, patches []patch.PatchSet, isJSON bool) error {
 	out := cmd.OutOrStdout()
 	for _, ps := range patches {
 		isGit := workspace.IsGitRepo(ps.HostPath)

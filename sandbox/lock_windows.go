@@ -6,8 +6,8 @@
 
 package sandbox
 
-// acquireLock is a no-op on Windows.
-func acquireLock(_ string) (func(), error) {
+// AcquireLock is a no-op on Windows.
+func AcquireLock(_ string) (func(), error) {
 	return func() {}, nil
 }
 

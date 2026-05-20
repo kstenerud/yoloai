@@ -11,6 +11,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/sandbox"
+	"github.com/kstenerud/yoloai/sandbox/patch"
 	"github.com/kstenerud/yoloai/workspace"
 	"github.com/spf13/cobra"
 	"os"
@@ -32,7 +33,7 @@ func applyOverlay(cmd *cobra.Command, name string, meta *sandbox.Meta, refs, pat
 			return err
 		}
 
-		patches, err := sandbox.GenerateOverlayPatch(ctx, rt, name, paths)
+		patches, err := patch.GenerateOverlayPatch(ctx, rt, name, paths)
 		if err != nil {
 			return err
 		}
@@ -58,7 +59,7 @@ func applyOverlay(cmd *cobra.Command, name string, meta *sandbox.Meta, refs, pat
 }
 
 // applyOverlayExportPatches exports overlay patches to a directory.
-func applyOverlayExportPatches(cmd *cobra.Command, patches []sandbox.PatchSet, patchesDir string) error {
+func applyOverlayExportPatches(cmd *cobra.Command, patches []patch.PatchSet, patchesDir string) error {
 	if err := fileutil.MkdirAll(patchesDir, 0750); err != nil {
 		return fmt.Errorf("create patches directory: %w", err)
 	}
@@ -82,7 +83,7 @@ func applyOverlayExportPatches(cmd *cobra.Command, patches []sandbox.PatchSet, p
 }
 
 // applyOverlayPatches applies overlay patches to the host and advances baselines.
-func applyOverlayPatches(cmd *cobra.Command, ctx context.Context, rt runtime.Runtime, name string, meta *sandbox.Meta, patches []sandbox.PatchSet, yes, dryRun bool) error {
+func applyOverlayPatches(cmd *cobra.Command, ctx context.Context, rt runtime.Runtime, name string, meta *sandbox.Meta, patches []patch.PatchSet, yes, dryRun bool) error {
 	isJSON := jsonEnabled(cmd)
 	out := cmd.OutOrStdout()
 	if !isJSON {
@@ -124,7 +125,7 @@ func applyOverlayPatches(cmd *cobra.Command, ctx context.Context, rt runtime.Run
 
 	// Advance overlay baseline
 	for _, ps := range patches {
-		if err := sandbox.UpdateOverlayBaselineToHEAD(ctx, rt, name, ps.HostPath); err != nil {
+		if err := patch.UpdateOverlayBaselineToHEAD(ctx, rt, name, ps.HostPath); err != nil {
 			return fmt.Errorf("advance overlay baseline: %w", err)
 		}
 	}

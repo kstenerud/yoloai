@@ -1,4 +1,10 @@
-package sandbox
+// ABOUTME: Diff generation for sandbox work directories across :copy, :overlay, and :rw modes.
+// ABOUTME: Provides context loading, multi-dir diff, overlay diff, and commit-level diff helpers.
+
+// Package patch generates and applies git-format patches between a sandbox's
+// host work directory and its in-sandbox copy. Covers :copy, :overlay, and
+// :rw modes; supports format-patch, squash, selective, and export workflows.
+package patch
 
 import (
 	"context"
@@ -6,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/kstenerud/yoloai/runtime"
+	"github.com/kstenerud/yoloai/sandbox"
 	"github.com/kstenerud/yoloai/workspace"
 )
 
@@ -165,12 +172,12 @@ func ListCommitsWithStats(ctx context.Context, rt runtime.Runtime, name string) 
 
 // loadDiffContext loads the metadata and resolves paths needed for diff.
 func loadDiffContext(name string) (workDir string, baselineSHA string, mode string, err error) {
-	sandboxDir, dirErr := RequireSandboxDir(name)
+	sandboxDir, dirErr := sandbox.RequireSandboxDir(name)
 	if dirErr != nil {
 		return "", "", "", dirErr
 	}
 
-	meta, loadErr := LoadMeta(sandboxDir)
+	meta, loadErr := sandbox.LoadMeta(sandboxDir)
 	if loadErr != nil {
 		return "", "", "", loadErr
 	}
@@ -212,12 +219,12 @@ type DiffContext struct {
 // LoadAllDiffContexts returns diff contexts for workdir + all aux dirs
 // that have diffable content (:copy, :overlay, or :rw). Read-only dirs are skipped.
 func LoadAllDiffContexts(name string) ([]DiffContext, error) {
-	sandboxDir, err := RequireSandboxDir(name)
+	sandboxDir, err := sandbox.RequireSandboxDir(name)
 	if err != nil {
 		return nil, err
 	}
 
-	meta, err := LoadMeta(sandboxDir)
+	meta, err := sandbox.LoadMeta(sandboxDir)
 	if err != nil {
 		return nil, err
 	}
@@ -330,13 +337,13 @@ func copyGitWorkDir(sandboxName, hostPath, mountPath string) string {
 	if mountPath != "" && mountPath != hostPath {
 		return mountPath
 	}
-	return WorkDir(sandboxName, hostPath)
+	return sandbox.WorkDir(sandboxName, hostPath)
 }
 
 // ListCommitsBeyondBaselineOverlay returns commits beyond the baseline for
 // overlay-mode directories by executing git log inside the running container.
 func ListCommitsBeyondBaselineOverlay(ctx context.Context, rt runtime.Runtime, name string) ([]CommitInfo, error) {
-	meta, err := LoadMeta(Dir(name))
+	meta, err := sandbox.LoadMeta(sandbox.Dir(name))
 	if err != nil {
 		return nil, fmt.Errorf("load metadata: %w", err)
 	}
@@ -357,7 +364,7 @@ func ListCommitsBeyondBaselineOverlay(ctx context.Context, rt runtime.Runtime, n
 			return nil, baselineErr
 		}
 
-		stdout, err := execInContainer(ctx, rt, name, meta, []string{
+		stdout, err := sandbox.ExecInContainer(ctx, rt, name, meta, []string{
 			"git", "-C", dc.WorkDir, "log", "--reverse", "--format=%H %s", baselineSHA + "..HEAD",
 		})
 		if err != nil {
@@ -389,7 +396,7 @@ func GenerateOverlayDiff(ctx context.Context, rt runtime.Runtime, opts DiffOptio
 }
 
 func generateOverlayDiff(ctx context.Context, rt runtime.Runtime, name string, stat, nameOnly bool) ([]*DiffResult, error) {
-	meta, err := LoadMeta(Dir(name))
+	meta, err := sandbox.LoadMeta(sandbox.Dir(name))
 	if err != nil {
 		return nil, fmt.Errorf("load metadata: %w", err)
 	}
@@ -413,7 +420,7 @@ func generateOverlayDiff(ctx context.Context, rt runtime.Runtime, name string, s
 		}
 
 		// Stage untracked files
-		_, err := execInContainer(ctx, rt, name, meta, []string{
+		_, err := sandbox.ExecInContainer(ctx, rt, name, meta, []string{
 			"git", "-C", dc.WorkDir, "add", "-A",
 		})
 		if err != nil {
@@ -432,7 +439,7 @@ func generateOverlayDiff(ctx context.Context, rt runtime.Runtime, name string, s
 		}
 		args = append(args, baselineSHA)
 
-		stdout, err := execInContainer(ctx, rt, name, meta, args)
+		stdout, err := sandbox.ExecInContainer(ctx, rt, name, meta, args)
 		if err != nil {
 			return nil, fmt.Errorf("git diff in %s: %w", dc.HostPath, err)
 		}

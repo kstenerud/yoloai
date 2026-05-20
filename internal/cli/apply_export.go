@@ -12,12 +12,12 @@ import (
 
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/runtime"
-	"github.com/kstenerud/yoloai/sandbox"
+	"github.com/kstenerud/yoloai/sandbox/patch"
 	"github.com/spf13/cobra"
 )
 
 // exportPatches writes .patch files and optional wip.diff to the given directory.
-func exportPatches(cmd *cobra.Command, name string, paths []string, commits []sandbox.CommitInfo, hasWIP bool, dir string) error {
+func exportPatches(cmd *cobra.Command, name string, paths []string, commits []patch.CommitInfo, hasWIP bool, dir string) error {
 	if err := fileutil.MkdirAll(dir, 0750); err != nil {
 		return fmt.Errorf("create patches directory: %w", err)
 	}
@@ -60,7 +60,7 @@ func exportCommitPatches(cmd *cobra.Command, name string, paths []string, dir st
 	var files []string
 	err := withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
 		var genErr error
-		patchDir, files, genErr = sandbox.GenerateFormatPatch(ctx, rt, name, paths)
+		patchDir, files, genErr = patch.GenerateFormatPatch(ctx, rt, name, paths)
 		return genErr
 	})
 	if err != nil {
@@ -91,7 +91,7 @@ func exportWIPDiff(cmd *cobra.Command, name string, paths []string, dir string, 
 	var wipPatch []byte
 	err := withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
 		var genErr error
-		wipPatch, _, genErr = sandbox.GenerateWIPDiff(ctx, rt, name, paths)
+		wipPatch, _, genErr = patch.GenerateWIPDiff(ctx, rt, name, paths)
 		return genErr
 	})
 	if err != nil {

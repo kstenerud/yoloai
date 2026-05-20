@@ -7,6 +7,49 @@ import (
 	"github.com/kstenerud/yoloai/workspace"
 )
 
+// loadDiffContext returns the work directory, baseline SHA, and workdir mode for
+// a sandbox. Used by tags.go to locate commits relative to the baseline.
+func loadDiffContext(name string) (workDir string, baselineSHA string, mode string, err error) {
+	sandboxDir, dirErr := RequireSandboxDir(name)
+	if dirErr != nil {
+		return "", "", "", dirErr
+	}
+
+	meta, loadErr := LoadMeta(sandboxDir)
+	if loadErr != nil {
+		return "", "", "", loadErr
+	}
+
+	mode = meta.Workdir.Mode
+
+	switch mode {
+	case "copy":
+		mountPath := meta.Workdir.MountPath
+		if mountPath != "" && mountPath != meta.Workdir.HostPath {
+			workDir = mountPath
+		} else {
+			workDir = WorkDir(name, meta.Workdir.HostPath)
+		}
+		baselineSHA = meta.Workdir.BaselineSHA
+		if baselineSHA == "" {
+			return "", "", "", fmt.Errorf("sandbox has no baseline SHA — was it created before diff support?")
+		}
+	case "overlay":
+		workDir = meta.Workdir.MountPath
+		if workDir == "" {
+			workDir = meta.Workdir.HostPath
+		}
+		baselineSHA = meta.Workdir.BaselineSHA
+	case "rw":
+		workDir = meta.Workdir.HostPath
+		baselineSHA = "HEAD"
+	default:
+		return "", "", "", fmt.Errorf("unsupported workdir mode: %s", mode)
+	}
+
+	return workDir, baselineSHA, mode, nil
+}
+
 // TagInfo holds information about a git tag in the sandbox.
 type TagInfo struct {
 	Name    string `json:"name"`

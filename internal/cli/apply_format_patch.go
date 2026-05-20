@@ -12,6 +12,7 @@ import (
 
 	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/sandbox"
+	"github.com/kstenerud/yoloai/sandbox/patch"
 	"github.com/kstenerud/yoloai/workspace"
 	"github.com/spf13/cobra"
 )
@@ -20,10 +21,10 @@ import (
 func runApplyFormatPatch(cmd *cobra.Command, name string, paths []string, meta *sandbox.Meta, patchesDir string, yes, dryRun, noWIP, withTags bool) error {
 	// Query work copy for commits and WIP
 	backend := resolveBackendForSandbox(name)
-	var commits []sandbox.CommitInfo
+	var commits []patch.CommitInfo
 	err := withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
 		var listErr error
-		commits, listErr = sandbox.ListCommitsBeyondBaseline(ctx, rt, name)
+		commits, listErr = patch.ListCommitsBeyondBaseline(ctx, rt, name)
 		return listErr
 	})
 	if err != nil {
@@ -34,7 +35,7 @@ func runApplyFormatPatch(cmd *cobra.Command, name string, paths []string, meta *
 	if !noWIP {
 		err = withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
 			var wipErr error
-			hasWIP, wipErr = sandbox.HasUncommittedChanges(ctx, rt, name)
+			hasWIP, wipErr = patch.HasUncommittedChanges(ctx, rt, name)
 			return wipErr
 		})
 		if err != nil {
@@ -125,7 +126,7 @@ func runApplyNoChanges(cmd *cobra.Command, name string, meta *sandbox.Meta, with
 }
 
 // runApplyCommits applies commits via format-patch/am to the target directory.
-func runApplyCommits(cmd *cobra.Command, name string, paths []string, meta *sandbox.Meta, commits []sandbox.CommitInfo, hasWIP, yes, dryRun, withTags bool) error {
+func runApplyCommits(cmd *cobra.Command, name string, paths []string, meta *sandbox.Meta, commits []patch.CommitInfo, hasWIP, yes, dryRun, withTags bool) error {
 	targetDir := meta.Workdir.HostPath
 	sandboxWorkDir := sandbox.WorkDir(name, meta.Workdir.HostPath)
 	isGit := workspace.IsGitRepo(targetDir)
@@ -163,7 +164,7 @@ func runApplyCommits(cmd *cobra.Command, name string, paths []string, meta *sand
 	// Advance baseline past applied commits (skip for path-filtered applies)
 	if len(paths) == 0 {
 		if err := withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
-			return sandbox.AdvanceBaseline(ctx, rt, name)
+			return patch.AdvanceBaseline(ctx, rt, name)
 		}); err != nil {
 			return fmt.Errorf("advance baseline: %w", err)
 		}
@@ -199,7 +200,7 @@ func runApplyCommits(cmd *cobra.Command, name string, paths []string, meta *sand
 }
 
 // printApplyCommitsSummary prints the list of commits about to be applied (human-readable only).
-func printApplyCommitsSummary(cmd *cobra.Command, commits []sandbox.CommitInfo, tags []sandbox.TagInfo, tagsByCommit map[string][]string, hasWIP, withTags bool) {
+func printApplyCommitsSummary(cmd *cobra.Command, commits []patch.CommitInfo, tags []sandbox.TagInfo, tagsByCommit map[string][]string, hasWIP, withTags bool) {
 	if jsonEnabled(cmd) {
 		return
 	}
@@ -227,7 +228,7 @@ func applyFormatPatchFiles(cmd *cobra.Command, name string, paths []string, targ
 	var files []string
 	if err = withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
 		var genErr error
-		patchDir, files, genErr = sandbox.GenerateFormatPatch(ctx, rt, name, paths)
+		patchDir, files, genErr = patch.GenerateFormatPatch(ctx, rt, name, paths)
 		return genErr
 	}); err != nil {
 		return 0, nil, nil, err
@@ -260,7 +261,7 @@ func applyWIPChanges(cmd *cobra.Command, name string, paths []string, targetDir 
 	var wipPatch []byte
 	wipErr := withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
 		var genErr error
-		wipPatch, _, genErr = sandbox.GenerateWIPDiff(ctx, rt, name, paths)
+		wipPatch, _, genErr = patch.GenerateWIPDiff(ctx, rt, name, paths)
 		return genErr
 	})
 	if wipErr != nil {

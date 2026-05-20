@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/kstenerud/yoloai/sandbox"
+	"github.com/kstenerud/yoloai/sandbox/patch"
 	"github.com/kstenerud/yoloai/workspace"
 	"github.com/spf13/cobra"
 )
@@ -95,7 +96,7 @@ func loadBaselineContext(name string) (*sandbox.Meta, string, error) {
 // confirmation line: "Baseline advanced to <short-sha> (<subject>)".
 // If oldSHA is non-empty, it also prints a "Previous baseline" undo hint.
 func advanceBaselineAndPrint(cmd *cobra.Command, name, oldSHA, sha, workDir string) error {
-	if err := sandbox.AdvanceBaselineTo(name, sha); err != nil {
+	if err := patch.AdvanceBaselineTo(name, sha); err != nil {
 		return fmt.Errorf("update baseline: %w", err)
 	}
 

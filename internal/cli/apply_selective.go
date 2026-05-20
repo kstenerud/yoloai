@@ -11,6 +11,7 @@ import (
 
 	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/sandbox"
+	"github.com/kstenerud/yoloai/sandbox/patch"
 	"github.com/kstenerud/yoloai/workspace"
 	"github.com/spf13/cobra"
 )
@@ -73,11 +74,11 @@ func applySelectedCommits(cmd *cobra.Command, name string, refs, paths []string,
 }
 
 // resolveSelectiveRefs resolves the ref arguments to CommitInfo slices.
-func resolveSelectiveRefs(cmd *cobra.Command, name string, refs []string, backend string) ([]sandbox.CommitInfo, error) {
-	var resolved []sandbox.CommitInfo
+func resolveSelectiveRefs(cmd *cobra.Command, name string, refs []string, backend string) ([]patch.CommitInfo, error) {
+	var resolved []patch.CommitInfo
 	if err := withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
 		var resolveErr error
-		resolved, resolveErr = sandbox.ResolveRefs(ctx, rt, name, refs)
+		resolved, resolveErr = patch.ResolveRefs(ctx, rt, name, refs)
 		return resolveErr
 	}); err != nil {
 		return nil, err
@@ -121,7 +122,7 @@ func finishSelectiveApply(cmd *cobra.Command, name string, files []string, shaMa
 }
 
 // applyFormatPatchForRefs generates format-patch for specific refs and applies it.
-func applyFormatPatchForRefs(cmd *cobra.Command, name string, _ []string, resolved []sandbox.CommitInfo, paths []string, targetDir, backend string) (files []string, shaMap map[string]string, stashErr, err error) {
+func applyFormatPatchForRefs(cmd *cobra.Command, name string, _ []string, resolved []patch.CommitInfo, paths []string, targetDir, backend string) (files []string, shaMap map[string]string, stashErr, err error) {
 	shas := make([]string, len(resolved))
 	for i, c := range resolved {
 		shas[i] = c.SHA
@@ -130,7 +131,7 @@ func applyFormatPatchForRefs(cmd *cobra.Command, name string, _ []string, resolv
 	var patchDir string
 	if err = withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
 		var genErr error
-		patchDir, files, genErr = sandbox.GenerateFormatPatchForRefs(ctx, rt, name, shas, paths)
+		patchDir, files, genErr = patch.GenerateFormatPatchForRefs(ctx, rt, name, shas, paths)
 		return genErr
 	}); err != nil {
 		return nil, nil, nil, err
@@ -149,7 +150,7 @@ func applyFormatPatchForRefs(cmd *cobra.Command, name string, _ []string, resolv
 }
 
 // filterTagsForResolved fetches tags beyond baseline and filters to those on the resolved commits.
-func filterTagsForResolved(name string, resolved []sandbox.CommitInfo) []sandbox.TagInfo {
+func filterTagsForResolved(name string, resolved []patch.CommitInfo) []sandbox.TagInfo {
 	allTags, _ := sandbox.ListTagsBeyondBaseline(name)
 	resolvedSet := make(map[string]bool, len(resolved))
 	for _, c := range resolved {
@@ -165,7 +166,7 @@ func filterTagsForResolved(name string, resolved []sandbox.CommitInfo) []sandbox
 }
 
 // printSelectiveApplySummary prints the commit summary for selective apply.
-func printSelectiveApplySummary(cmd *cobra.Command, resolved []sandbox.CommitInfo, tagsByCommit map[string][]string, selectedTags []sandbox.TagInfo, withTags bool) {
+func printSelectiveApplySummary(cmd *cobra.Command, resolved []patch.CommitInfo, tagsByCommit map[string][]string, selectedTags []sandbox.TagInfo, withTags bool) {
 	out := cmd.OutOrStdout()
 	fmt.Fprintf(out, "Commits to apply (%d):\n", len(resolved)) //nolint:errcheck
 	for _, c := range resolved {
@@ -182,11 +183,11 @@ func printSelectiveApplySummary(cmd *cobra.Command, resolved []sandbox.CommitInf
 }
 
 // advanceSelectiveBaseline advances the baseline using contiguous prefix logic after a selective apply.
-func advanceSelectiveBaseline(cmd *cobra.Command, name, backend string, resolved []sandbox.CommitInfo) error {
-	var allCommits []sandbox.CommitInfo
+func advanceSelectiveBaseline(cmd *cobra.Command, name, backend string, resolved []patch.CommitInfo) error {
+	var allCommits []patch.CommitInfo
 	err := withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
 		var listErr error
-		allCommits, listErr = sandbox.ListCommitsBeyondBaseline(ctx, rt, name)
+		allCommits, listErr = patch.ListCommitsBeyondBaseline(ctx, rt, name)
 		return listErr
 	})
 	if err != nil {
@@ -200,7 +201,7 @@ func advanceSelectiveBaseline(cmd *cobra.Command, name, backend string, resolved
 
 	prefixEnd := workspace.ContiguousPrefixEnd(allCommits, appliedSet)
 	if prefixEnd >= 0 {
-		if err := sandbox.AdvanceBaselineTo(name, allCommits[prefixEnd].SHA); err != nil {
+		if err := patch.AdvanceBaselineTo(name, allCommits[prefixEnd].SHA); err != nil {
 			return fmt.Errorf("advance baseline: %w", err)
 		}
 	}

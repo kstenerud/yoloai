@@ -1,4 +1,7 @@
-package sandbox
+// ABOUTME: Apply operations: patch generation, baseline advancement, overlay apply,
+// ABOUTME: selective ref resolution, format-patch, and WIP diff for sandbox work directories.
+
+package patch
 
 import (
 	"context"
@@ -11,6 +14,7 @@ import (
 
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/runtime"
+	"github.com/kstenerud/yoloai/sandbox"
 	"github.com/kstenerud/yoloai/workspace"
 )
 
@@ -31,7 +35,7 @@ type ApplyResult struct {
 // Returns ErrNoChanges if there are no patches to apply.
 // Returns an ApplyResult for each directory patched.
 func ApplyAll(ctx context.Context, rt runtime.Runtime, name string) ([]*ApplyResult, error) {
-	unlock, err := acquireLock(name)
+	unlock, err := sandbox.AcquireLock(name)
 	if err != nil {
 		return nil, err
 	}
@@ -42,7 +46,7 @@ func ApplyAll(ctx context.Context, rt runtime.Runtime, name string) ([]*ApplyRes
 		return nil, err
 	}
 	if len(patches) == 0 {
-		return nil, ErrNoChanges
+		return nil, sandbox.ErrNoChanges
 	}
 
 	var results []*ApplyResult
@@ -125,19 +129,19 @@ func GeneratePatch(ctx context.Context, rt runtime.Runtime, name string, paths [
 // (e.g. the entrypoint's chown broke git visibility through overlayfs), a fresh
 // git repo is initialised inside the container and used as the baseline.
 // The resolved SHA is persisted to meta.json so subsequent calls are a no-op.
-func ensureOverlayBaseline(ctx context.Context, rt runtime.Runtime, name string, meta *Meta, dc DiffContext) (string, error) {
+func ensureOverlayBaseline(ctx context.Context, rt runtime.Runtime, name string, meta *sandbox.Meta, dc DiffContext) (string, error) {
 	if dc.BaselineSHA != "" {
 		return dc.BaselineSHA, nil
 	}
 
 	// Try to resolve existing HEAD.
-	stdout, err := execInContainer(ctx, rt, name, meta, []string{
+	stdout, err := sandbox.ExecInContainer(ctx, rt, name, meta, []string{
 		"git", "-C", dc.WorkDir, "rev-parse", "HEAD",
 	})
 	if err == nil {
 		sha := strings.TrimSpace(stdout)
 		if len(sha) == 40 {
-			if updateErr := updateOverlayBaseline(name, dc.HostPath, sha); updateErr != nil {
+			if updateErr := UpdateOverlayBaseline(name, dc.HostPath, sha); updateErr != nil {
 				return "", updateErr
 			}
 			return sha, nil
@@ -150,32 +154,32 @@ func ensureOverlayBaseline(ctx context.Context, rt runtime.Runtime, name string,
 		"cd %s && git init -b main && git config user.email yoloai@localhost && git config user.name yoloai && git add -A && git commit -q -m baseline",
 		dc.WorkDir,
 	)
-	_, initErr := execInContainer(ctx, rt, name, meta, []string{"sh", "-c", initCmd})
+	_, initErr := sandbox.ExecInContainer(ctx, rt, name, meta, []string{"sh", "-c", initCmd})
 	if initErr != nil {
 		return "", fmt.Errorf("create overlay baseline for %s: %w (original HEAD error: %w)", dc.HostPath, initErr, err)
 	}
 
-	stdout, err = execInContainer(ctx, rt, name, meta, []string{
+	stdout, err = sandbox.ExecInContainer(ctx, rt, name, meta, []string{
 		"git", "-C", dc.WorkDir, "rev-parse", "HEAD",
 	})
 	if err != nil {
 		return "", fmt.Errorf("resolve baseline SHA after init for %s: %w", dc.HostPath, err)
 	}
 	sha := strings.TrimSpace(stdout)
-	if updateErr := updateOverlayBaseline(name, dc.HostPath, sha); updateErr != nil {
+	if updateErr := UpdateOverlayBaseline(name, dc.HostPath, sha); updateErr != nil {
 		return "", updateErr
 	}
 	return sha, nil
 }
 
-// updateOverlayBaseline updates the baseline SHA for an overlay directory in meta.json.
-func updateOverlayBaseline(name, hostPath, sha string) error {
-	sandboxDir, err := RequireSandboxDir(name)
+// UpdateOverlayBaseline updates the baseline SHA for an overlay directory in meta.json.
+func UpdateOverlayBaseline(name, hostPath, sha string) error {
+	sandboxDir, err := sandbox.RequireSandboxDir(name)
 	if err != nil {
 		return err
 	}
 
-	meta, err := LoadMeta(sandboxDir)
+	meta, err := sandbox.LoadMeta(sandboxDir)
 	if err != nil {
 		return err
 	}
@@ -197,13 +201,13 @@ func updateOverlayBaseline(name, hostPath, sha string) error {
 		}
 	}
 
-	return SaveMeta(sandboxDir, meta)
+	return sandbox.SaveMeta(sandboxDir, meta)
 }
 
 // GenerateOverlayPatch produces a binary patch for overlay-mode directories
 // by executing git commands inside the running container.
 func GenerateOverlayPatch(ctx context.Context, rt runtime.Runtime, name string, paths []string) ([]PatchSet, error) {
-	meta, err := LoadMeta(Dir(name))
+	meta, err := sandbox.LoadMeta(sandbox.Dir(name))
 	if err != nil {
 		return nil, fmt.Errorf("load metadata: %w", err)
 	}
@@ -231,20 +235,20 @@ func GenerateOverlayPatch(ctx context.Context, rt runtime.Runtime, name string, 
 
 // generateOverlayPatchForContext produces a PatchSet for a single overlay diff
 // context. Returns nil if there are no changes.
-func generateOverlayPatchForContext(ctx context.Context, rt runtime.Runtime, name string, meta *Meta, dc DiffContext, paths []string) (*PatchSet, error) {
+func generateOverlayPatchForContext(ctx context.Context, rt runtime.Runtime, name string, meta *sandbox.Meta, dc DiffContext, paths []string) (*PatchSet, error) {
 	baselineSHA, err := ensureOverlayBaseline(ctx, rt, name, meta, dc)
 	if err != nil {
 		return nil, err
 	}
 
-	if _, err := execInContainer(ctx, rt, name, meta, []string{
+	if _, err := sandbox.ExecInContainer(ctx, rt, name, meta, []string{
 		"git", "-C", dc.WorkDir, "add", "-A",
 	}); err != nil {
 		return nil, fmt.Errorf("stage untracked in %s: %w", dc.HostPath, err)
 	}
 
 	patchArgs := append([]string{"git", "-c", "core.hooksPath=/dev/null", "-C", dc.WorkDir, "diff", "--binary", baselineSHA}, pathFilterArgs(paths)...)
-	stdout, err := execInContainer(ctx, rt, name, meta, patchArgs)
+	stdout, err := sandbox.ExecInContainer(ctx, rt, name, meta, patchArgs)
 	if err != nil {
 		return nil, fmt.Errorf("git diff (patch) in %s: %w", dc.HostPath, err)
 	}
@@ -253,12 +257,12 @@ func generateOverlayPatchForContext(ctx context.Context, rt runtime.Runtime, nam
 	}
 
 	statArgs := append([]string{"git", "-c", "core.hooksPath=/dev/null", "-C", dc.WorkDir, "diff", "--stat", baselineSHA}, pathFilterArgs(paths)...)
-	statOut, err := execInContainer(ctx, rt, name, meta, statArgs)
+	statOut, err := sandbox.ExecInContainer(ctx, rt, name, meta, statArgs)
 	if err != nil {
 		return nil, fmt.Errorf("git diff (stat) in %s: %w", dc.HostPath, err)
 	}
 
-	// execInContainer returns strings.TrimSpace'd stdout, which strips
+	// ExecInContainer returns strings.TrimSpace'd stdout, which strips
 	// the trailing newline. git apply requires a trailing newline to parse
 	// the patch correctly — add it back if absent.
 	patch := []byte(stdout)
@@ -286,7 +290,7 @@ func pathFilterArgs(paths []string) []string {
 // to the current HEAD inside the running container. Called after a successful
 // overlay apply to prevent re-applying already-applied changes.
 func UpdateOverlayBaselineToHEAD(ctx context.Context, rt runtime.Runtime, name, hostPath string) error {
-	meta, err := LoadMeta(Dir(name))
+	meta, err := sandbox.LoadMeta(sandbox.Dir(name))
 	if err != nil {
 		return fmt.Errorf("load metadata: %w", err)
 	}
@@ -299,13 +303,13 @@ func UpdateOverlayBaselineToHEAD(ctx context.Context, rt runtime.Runtime, name, 
 		if dc.Mode != "overlay" || dc.HostPath != hostPath {
 			continue
 		}
-		stdout, err := execInContainer(ctx, rt, name, meta, []string{
+		stdout, err := sandbox.ExecInContainer(ctx, rt, name, meta, []string{
 			"git", "-C", dc.WorkDir, "rev-parse", "HEAD",
 		})
 		if err != nil {
 			return fmt.Errorf("get HEAD for %s: %w", hostPath, err)
 		}
-		return updateOverlayBaseline(name, hostPath, strings.TrimSpace(stdout))
+		return UpdateOverlayBaseline(name, hostPath, strings.TrimSpace(stdout))
 	}
 
 	return nil
@@ -567,12 +571,12 @@ func GenerateFormatPatchForRefs(ctx context.Context, rt runtime.Runtime, name st
 // Unlike AdvanceBaseline (which advances to HEAD), this advances to an
 // arbitrary commit -- used after selective apply.
 func AdvanceBaselineTo(name, sha string) error {
-	sandboxDir, err := RequireSandboxDir(name)
+	sandboxDir, err := sandbox.RequireSandboxDir(name)
 	if err != nil {
 		return err
 	}
 
-	meta, err := LoadMeta(sandboxDir)
+	meta, err := sandbox.LoadMeta(sandboxDir)
 	if err != nil {
 		return err
 	}
@@ -582,11 +586,11 @@ func AdvanceBaselineTo(name, sha string) error {
 	}
 
 	if meta.Workdir.Mode == "overlay" {
-		return nil // baseline managed via updateOverlayBaseline
+		return nil // baseline managed via UpdateOverlayBaseline
 	}
 
 	meta.Workdir.BaselineSHA = sha
-	return SaveMeta(sandboxDir, meta)
+	return sandbox.SaveMeta(sandboxDir, meta)
 }
 
 // AdvanceBaseline updates the sandbox's baseline SHA to the current HEAD
@@ -594,12 +598,12 @@ func AdvanceBaselineTo(name, sha string) error {
 // subsequent diff/apply operations don't re-show already-applied commits.
 // For :rw mode sandboxes, this is a no-op.
 func AdvanceBaseline(ctx context.Context, rt runtime.Runtime, name string) error {
-	sandboxDir, err := RequireSandboxDir(name)
+	sandboxDir, err := sandbox.RequireSandboxDir(name)
 	if err != nil {
 		return err
 	}
 
-	meta, err := LoadMeta(sandboxDir)
+	meta, err := sandbox.LoadMeta(sandboxDir)
 	if err != nil {
 		return err
 	}
@@ -609,17 +613,17 @@ func AdvanceBaseline(ctx context.Context, rt runtime.Runtime, name string) error
 	}
 
 	if meta.Workdir.Mode == "overlay" {
-		return nil // baseline managed via updateOverlayBaseline
+		return nil // baseline managed via UpdateOverlayBaseline
 	}
 
-	workDir := WorkDir(name, meta.Workdir.HostPath)
+	workDir := sandbox.WorkDir(name, meta.Workdir.HostPath)
 	sha, err := rt.GitExec(ctx, name, workDir, "rev-parse", "HEAD")
 	if err != nil {
 		return fmt.Errorf("git rev-parse: %w", err)
 	}
 
 	meta.Workdir.BaselineSHA = strings.TrimSpace(sha)
-	return SaveMeta(sandboxDir, meta)
+	return sandbox.SaveMeta(sandboxDir, meta)
 }
 
 // GenerateFormatPatch creates .patch files (one per commit) for commits

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/kstenerud/yoloai/internal/testutil"
+	"github.com/kstenerud/yoloai/sandbox/patch"
 	"github.com/kstenerud/yoloai/workspace"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -66,7 +67,7 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 		0600,
 	))
 
-	diffResult, err := GenerateDiff(ctx, DiffOptions{Name: sandboxName, Runtime: mgr.runtime})
+	diffResult, err := patch.GenerateDiff(ctx, patch.DiffOptions{Name: sandboxName, Runtime: mgr.runtime})
 	require.NoError(t, err)
 	assert.False(t, diffResult.Empty)
 	assert.Contains(t, diffResult.Output, "fmt")
@@ -93,9 +94,9 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 	assert.Equal(t, 0, result.ExitCode)
 
 	// Generate patch and apply to a target directory
-	patch, stat, err := GeneratePatch(ctx, mgr.runtime, sandboxName, nil)
+	patchBytes, stat, err := patch.GeneratePatch(ctx, mgr.runtime, sandboxName, nil)
 	require.NoError(t, err)
-	assert.NotEmpty(t, patch)
+	assert.NotEmpty(t, patchBytes)
 	assert.Contains(t, stat, "main.go")
 
 	targetDir := t.TempDir()
@@ -105,7 +106,7 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 		0600,
 	))
 
-	require.NoError(t, workspace.ApplyPatch(patch, targetDir, false))
+	require.NoError(t, workspace.ApplyPatch(patchBytes, targetDir, false))
 
 	applied, err := os.ReadFile(filepath.Join(targetDir, "main.go")) //nolint:gosec // G304: test file path
 	require.NoError(t, err)
@@ -368,7 +369,7 @@ func TestIntegration_DiffClean(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { mgr.Destroy(ctx, "diffclean") }) //nolint:errcheck // test cleanup
 
-	diffResult, err := GenerateDiff(ctx, DiffOptions{Name: "diffclean", Runtime: mgr.runtime})
+	diffResult, err := patch.GenerateDiff(ctx, patch.DiffOptions{Name: "diffclean", Runtime: mgr.runtime})
 	require.NoError(t, err)
 	assert.True(t, diffResult.Empty)
 }
@@ -397,7 +398,7 @@ func TestIntegration_DiffWithChanges(t *testing.T) {
 		0600,
 	))
 
-	diffResult, err := GenerateDiff(ctx, DiffOptions{Name: "diffchanges", Runtime: mgr.runtime})
+	diffResult, err := patch.GenerateDiff(ctx, patch.DiffOptions{Name: "diffchanges", Runtime: mgr.runtime})
 	require.NoError(t, err)
 	assert.False(t, diffResult.Empty)
 	assert.Contains(t, diffResult.Output, "fmt")
@@ -429,9 +430,9 @@ func TestIntegration_ApplyPatch(t *testing.T) {
 	))
 
 	// Generate patch
-	patch, stat, err := GeneratePatch(ctx, mgr.runtime, "applypatch", nil)
+	patchBytes, stat, err := patch.GeneratePatch(ctx, mgr.runtime, "applypatch", nil)
 	require.NoError(t, err)
-	assert.NotEmpty(t, patch)
+	assert.NotEmpty(t, patchBytes)
 	assert.Contains(t, stat, "main.go")
 
 	// Apply to a fresh copy of the original
@@ -442,7 +443,7 @@ func TestIntegration_ApplyPatch(t *testing.T) {
 		0600,
 	))
 
-	require.NoError(t, workspace.ApplyPatch(patch, targetDir, false))
+	require.NoError(t, workspace.ApplyPatch(patchBytes, targetDir, false))
 
 	applied, err := os.ReadFile(filepath.Join(targetDir, "main.go")) //nolint:gosec // test path
 	require.NoError(t, err)
@@ -748,15 +749,15 @@ func TestIntegration_AgentStubWorkflow(t *testing.T) {
 	assert.FileExists(t, filepath.Join(workDir, "agent-output.txt"))
 
 	// Diff should detect the new file
-	diffResult, err := GenerateDiff(ctx, DiffOptions{Name: "stubworkflow", Runtime: mgr.runtime})
+	diffResult, err := patch.GenerateDiff(ctx, patch.DiffOptions{Name: "stubworkflow", Runtime: mgr.runtime})
 	require.NoError(t, err)
 	assert.False(t, diffResult.Empty, "diff should not be empty after agent created a file")
 	assert.Contains(t, diffResult.Output, "agent-output.txt")
 
 	// Generate patch and apply to a fresh copy of the original project
-	patch, stat, err := GeneratePatch(ctx, mgr.runtime, "stubworkflow", nil)
+	patchBytes, stat, err := patch.GeneratePatch(ctx, mgr.runtime, "stubworkflow", nil)
 	require.NoError(t, err)
-	assert.NotEmpty(t, patch)
+	assert.NotEmpty(t, patchBytes)
 	assert.Contains(t, stat, "agent-output.txt")
 
 	targetDir := t.TempDir()
@@ -765,7 +766,7 @@ func TestIntegration_AgentStubWorkflow(t *testing.T) {
 		[]byte("package main\n\nfunc main() {}\n"),
 		0600,
 	))
-	require.NoError(t, workspace.ApplyPatch(patch, targetDir, false))
+	require.NoError(t, workspace.ApplyPatch(patchBytes, targetDir, false))
 	assert.FileExists(t, filepath.Join(targetDir, "agent-output.txt"))
 }
 
@@ -800,7 +801,7 @@ func TestIntegration_Clone(t *testing.T) {
 	require.NoError(t, mgr.Clone(ctx, CloneOptions{Source: "clone-a", Dest: "clone-b"}))
 
 	// Diff on clone should show the seeded change
-	diffResult, err := GenerateDiff(ctx, DiffOptions{Name: "clone-b", Runtime: mgr.runtime})
+	diffResult, err := patch.GenerateDiff(ctx, patch.DiffOptions{Name: "clone-b", Runtime: mgr.runtime})
 	require.NoError(t, err)
 	assert.False(t, diffResult.Empty, "cloned sandbox should have changes")
 	assert.Contains(t, diffResult.Output, "clone-test")
@@ -872,7 +873,7 @@ func TestIntegration_Overlay(t *testing.T) {
 		time.Sleep(500 * time.Millisecond)
 	}
 	require.NotEmpty(t, baselineSHA, "git init + commit inside overlay should produce a valid SHA within 15s")
-	require.NoError(t, updateOverlayBaseline("overlay-integ", projectDir, baselineSHA))
+	require.NoError(t, patch.UpdateOverlayBaseline("overlay-integ", projectDir, baselineSHA))
 
 	// Write a file inside the container (overlay captures it in upper layer)
 	writeResult, err := mgr.runtime.Exec(ctx, InstanceName("overlay-integ"),
@@ -881,14 +882,14 @@ func TestIntegration_Overlay(t *testing.T) {
 	assert.Equal(t, 0, writeResult.ExitCode)
 
 	// Diff: must use GenerateOverlayDiff (GenerateDiff returns a stub for overlay)
-	diffResults, err := GenerateOverlayDiff(ctx, mgr.runtime, DiffOptions{Name: "overlay-integ"})
+	diffResults, err := patch.GenerateOverlayDiff(ctx, mgr.runtime, patch.DiffOptions{Name: "overlay-integ"})
 	require.NoError(t, err)
 	require.NotEmpty(t, diffResults, "overlay diff should return results")
 	assert.False(t, diffResults[0].Empty, "overlay should have changes after exec write")
 	assert.Contains(t, diffResults[0].Output, "output.txt")
 
 	// Apply: must use GenerateOverlayPatch (ApplyAll skips overlay dirs)
-	patches, err := GenerateOverlayPatch(ctx, mgr.runtime, "overlay-integ", nil)
+	patches, err := patch.GenerateOverlayPatch(ctx, mgr.runtime, "overlay-integ", nil)
 	require.NoError(t, err)
 	require.NotEmpty(t, patches)
 	require.NoError(t, workspace.ApplyPatch(patches[0].Patch, projectDir, false))

@@ -14,6 +14,7 @@ import (
 
 	"github.com/kstenerud/yoloai/internal/testutil"
 	tartrt "github.com/kstenerud/yoloai/runtime/tart"
+	"github.com/kstenerud/yoloai/sandbox/patch"
 	"github.com/kstenerud/yoloai/workspace"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -126,7 +127,7 @@ func TestIntegrationTart_FullLifecycle(t *testing.T) {
 	assert.Contains(t, result.Stdout, "main.go", "git should detect modified file")
 
 	// Generate diff (should use VM-exec path for Tart)
-	diffResult, err := GenerateDiff(ctx, DiffOptions{Name: sandboxName})
+	diffResult, err := patch.GenerateDiff(ctx, patch.DiffOptions{Name: sandboxName})
 	require.NoError(t, err)
 	assert.False(t, diffResult.Empty, "diff should not be empty after modification")
 	assert.Contains(t, diffResult.Output, "fmt.Println", "diff should contain modification")
@@ -153,9 +154,9 @@ func TestIntegrationTart_FullLifecycle(t *testing.T) {
 	assert.Contains(t, result.Stdout, "main.go", "changes should persist in VM local storage")
 
 	// Generate patch and apply to a target directory
-	patch, stat, err := GeneratePatch(ctx, mgr.runtime, sandboxName, nil)
+	patchBytes, stat, err := patch.GeneratePatch(ctx, mgr.runtime, sandboxName, nil)
 	require.NoError(t, err)
-	assert.NotEmpty(t, patch)
+	assert.NotEmpty(t, patchBytes)
 	assert.Contains(t, stat, "main.go")
 
 	targetDir := t.TempDir()
@@ -165,7 +166,7 @@ func TestIntegrationTart_FullLifecycle(t *testing.T) {
 		0600,
 	))
 
-	require.NoError(t, workspace.ApplyPatch(patch, targetDir, false))
+	require.NoError(t, workspace.ApplyPatch(patchBytes, targetDir, false))
 
 	applied, err := os.ReadFile(filepath.Join(targetDir, "main.go")) //nolint:gosec // G304: test file path
 	require.NoError(t, err)
@@ -247,7 +248,7 @@ func TestIntegrationTart_MultipleAuxDirs(t *testing.T) {
 	}
 
 	// Generate diff (should include changes from all directories)
-	diffResult, err := GenerateDiff(ctx, DiffOptions{Name: sandboxName})
+	diffResult, err := patch.GenerateDiff(ctx, patch.DiffOptions{Name: sandboxName})
 	require.NoError(t, err)
 	assert.False(t, diffResult.Empty, "diff should detect changes in aux directories")
 }
@@ -311,7 +312,7 @@ func TestIntegrationTart_GitCorruption(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 0, result.ExitCode)
 
-	diffResult, err := GenerateDiff(ctx, DiffOptions{Name: sandboxName})
+	diffResult, err := patch.GenerateDiff(ctx, patch.DiffOptions{Name: sandboxName})
 	require.NoError(t, err)
 	assert.False(t, diffResult.Empty)
 	assert.Contains(t, diffResult.Output, "test.txt")

@@ -12,6 +12,7 @@ import (
 
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/sandbox"
+	"github.com/kstenerud/yoloai/sandbox/patch"
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
@@ -271,7 +272,7 @@ func (s *Server) handleSandboxDiff(_ context.Context, req mcp.CallToolRequest) (
 		return textResult(errorf("name is required")), nil
 	}
 
-	results, err := sandbox.GenerateMultiDiff(sandbox.DiffOptions{Name: name, Stat: stat})
+	results, err := patch.GenerateMultiDiff(patch.DiffOptions{Name: name, Stat: stat})
 	if err != nil {
 		return textResult(errorf("diff sandbox %q: %v", name, err)), nil
 	}
@@ -303,7 +304,7 @@ func (s *Server) handleSandboxDiffFile(ctx context.Context, req mcp.CallToolRequ
 	// For Tart, we would need the runtime, but MCP server doesn't currently
 	// have access to it. Since MCP is primarily used with Docker backends,
 	// we pass nil for now. TODO: Add runtime support when MCP needs Tart.
-	result, err := sandbox.GenerateDiff(ctx, sandbox.DiffOptions{
+	result, err := patch.GenerateDiff(ctx, patch.DiffOptions{
 		Name:    name,
 		Paths:   []string{path},
 		Runtime: nil, // nil means host-side git (Docker backend)

@@ -36,6 +36,7 @@ import (
 	_ "github.com/kstenerud/yoloai/runtime/seatbelt" // register backend
 	_ "github.com/kstenerud/yoloai/runtime/tart"     // register backend
 	"github.com/kstenerud/yoloai/sandbox"
+	"github.com/kstenerud/yoloai/sandbox/patch"
 )
 
 // Sentinel errors returned by Client methods.
@@ -236,15 +237,15 @@ func (c *Client) Run(ctx context.Context, opts RunOptions) (*sandbox.Info, error
 
 // Diff returns the diff of agent changes for a sandbox.
 // Equivalent to 'yoloai diff <name>'.
-func (c *Client) Diff(_ context.Context, name string) ([]*sandbox.DiffResult, error) {
-	return sandbox.GenerateMultiDiff(sandbox.DiffOptions{Name: name})
+func (c *Client) Diff(_ context.Context, name string) ([]*patch.DiffResult, error) {
+	return patch.GenerateMultiDiff(patch.DiffOptions{Name: name})
 }
 
 // Apply applies the agent's changes back to the original host directories.
 // Equivalent to 'yoloai apply <name>'.
 // Returns ErrNoChanges if there is nothing to apply.
-func (c *Client) Apply(ctx context.Context, name string) ([]*sandbox.ApplyResult, error) {
-	return sandbox.ApplyAll(ctx, c.rt, name)
+func (c *Client) Apply(ctx context.Context, name string) ([]*patch.ApplyResult, error) {
+	return patch.ApplyAll(ctx, c.rt, name)
 }
 
 // List returns info for all sandboxes.

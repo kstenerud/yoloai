@@ -37,7 +37,7 @@ type ResetOptions struct {
 // Stop stops a sandbox's instance.
 // Returns nil if the instance is already stopped or removed.
 func (m *Manager) Stop(ctx context.Context, name string) error {
-	unlock, err := acquireLock(name)
+	unlock, err := AcquireLock(name)
 	if err != nil {
 		return err
 	}
@@ -64,7 +64,7 @@ type StartOptions struct {
 
 // Start ensures a sandbox is running — idempotent.
 func (m *Manager) Start(ctx context.Context, name string, opts StartOptions) error {
-	unlock, err := acquireLock(name)
+	unlock, err := AcquireLock(name)
 	if err != nil {
 		return err
 	}
@@ -289,7 +289,7 @@ func (m *Manager) start(ctx context.Context, name string, opts StartOptions) err
 // Always succeeds — confirmation logic is handled by the CLI layer via
 // NeedsConfirmation before calling this method.
 func (m *Manager) Destroy(ctx context.Context, name string) error {
-	unlock, err := acquireLock(name)
+	unlock, err := AcquireLock(name)
 	if err != nil {
 		return err
 	}
@@ -448,7 +448,7 @@ func clearAgentState(sandboxDir string, perms IsolationPerms) error {
 // the git baseline. By default, resets in-place (agent stays running).
 // With --restart, stops and restarts the container.
 func (m *Manager) Reset(ctx context.Context, opts ResetOptions) error {
-	unlock, err := acquireLock(opts.Name)
+	unlock, err := AcquireLock(opts.Name)
 	if err != nil {
 		return err
 	}
@@ -854,7 +854,7 @@ func (m *Manager) relaunchAgent(ctx context.Context, name string, meta *Meta) er
 		return fmt.Errorf("parse runtime-config.json: %w", err)
 	}
 
-	_, err = execInContainer(ctx, m.runtime, name, meta,
+	_, err = ExecInContainer(ctx, m.runtime, name, meta,
 		tmuxCmd(cfg.TmuxSocket, "respawn-pane", "-t", "main", "-k", cfg.AgentCommand),
 	)
 	if err != nil {
@@ -891,7 +891,7 @@ func (m *Manager) relaunchAgentWithResume(ctx context.Context, name string, meta
 	interactiveCmd := buildAgentCommand(agentDef, meta.Model, "", agentArgs, cfg.Passthrough)
 
 	// Respawn with interactive command
-	_, err = execInContainer(ctx, m.runtime, name, meta,
+	_, err = ExecInContainer(ctx, m.runtime, name, meta,
 		tmuxCmd(cfg.TmuxSocket, "respawn-pane", "-t", "main", "-k", interactiveCmd),
 	)
 	if err != nil {
@@ -949,7 +949,7 @@ done
 rm -f /tmp/yoloai-resume.txt
 %s`, tmuxShellPrefix(cfg.TmuxSocket), waitCmd, cfg.SubmitSequence, statusWrite)
 
-	_, err = execInContainer(ctx, m.runtime, name, meta, []string{
+	_, err = ExecInContainer(ctx, m.runtime, name, meta, []string{
 		"bash", "-c", "nohup bash -c '" + strings.ReplaceAll(script, "'", "'\"'\"'") + "' _ \"$1\" >/dev/null 2>&1 &", "_", resumeText,
 	})
 	return err
@@ -985,7 +985,7 @@ func (m *Manager) relaunchAgentWithCustomPrompt(ctx context.Context, name string
 	} else {
 		interactiveCmd = m.runtime.PrepareAgentCommand(interactiveCmd)
 	}
-	_, err = execInContainer(ctx, m.runtime, name, meta,
+	_, err = ExecInContainer(ctx, m.runtime, name, meta,
 		tmuxCmd(cfg.TmuxSocket, "respawn-pane", "-t", "main", "-k", interactiveCmd),
 	)
 	if err != nil {
@@ -1030,7 +1030,7 @@ done
 rm -f /tmp/yoloai-custom-prompt.txt
 %s`, tmuxShellPrefix(cfg.TmuxSocket), waitCmd, cfg.SubmitSequence, statusWrite)
 
-	_, err := execInContainer(ctx, m.runtime, name, meta, []string{
+	_, err := ExecInContainer(ctx, m.runtime, name, meta, []string{
 		"bash", "-c", "nohup bash -c '" + strings.ReplaceAll(script, "'", "'\"'\"'") + "' _ \"$1\" >/dev/null 2>&1 &", "_", promptText,
 	})
 	return err
@@ -1256,7 +1256,7 @@ for key in %s; do
 done
 rm -f /tmp/yoloai-reset.txt`, appendPrompt, cfg.SubmitSequence)
 
-	_, err = execInContainer(ctx, m.runtime, name, meta, []string{
+	_, err = ExecInContainer(ctx, m.runtime, name, meta, []string{
 		"bash", "-c", script, "_", resetNotification,
 	})
 	return err
