@@ -112,3 +112,7 @@ Land in additive steps to keep mid-refactor builds green:
 6. Extract the dynamic-but-not-universal methods (`TmuxSocket`, `ResolveCopyMount`, `RequiredCapabilities`) into optional interfaces with documented default fallbacks at call sites.
 
 The migration is mostly mechanical once step 1–3 land; the risk is step 5 (interface narrowing), which is the pre-merge abort point per the plan.
+
+## Outcome
+
+Landed in four commits matching the plan's W11 steps 1–4. The deprecated single-arg `Register` overload (step 3 cushion) was unnecessary in practice — all five backends and tests sit in this repo, so the signature changed in one move. Each backend now declares its descriptor as a package-level `var descriptor = runtime.BackendDescriptor{...}` and passes it to both `runtime.Register(name, factory, descriptor)` and its own `Descriptor()` method, eliminating duplication. The registry exposes `runtime.Descriptor(name) (BackendDescriptor, bool)` and `runtime.Descriptors() []BackendDescriptor` for callers that need static facts without instantiating a backend; tests that previously used `(*xxxrt.Runtime)(nil).Descriptor()` tricks now go through the registry.

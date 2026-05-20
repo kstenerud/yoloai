@@ -158,7 +158,7 @@ Shared test helpers — a non-`_test.go` package importable by test files across
 | File | Purpose |
 |------|---------|
 | `runtime.go` | `Runtime` interface — pluggable backend abstraction. Generic types: `MountSpec`, `PortMapping`, `InstanceConfig`, `InstanceInfo`, `ExecResult`, `BackendCaps`, `ResourceLimits`, `PruneItem`, `PruneResult`. Optional interfaces: `UsernsProvider`, `WorkDirSetup`. Sentinel errors: `ErrNotFound`, `ErrNotRunning`. |
-| `registry.go` | Backend registry. `Register()` called by each backend's `init()`. `New()` creates a Runtime by name. `Available()` lists registered backends. |
+| `registry.go` | Backend registry. `Register(name, factory, descriptor)` called by each backend's `init()` with a `(Factory, BackendDescriptor)` tuple. `New()` instantiates a Runtime by name. `Descriptor(name)` and `Descriptors()` return static facts without instantiating. `Available()` lists registered backend names. |
 | `isolation.go` | `IsolationContainerRuntime()` — maps isolation modes to OCI runtimes (e.g., `container-enhanced` → `runsc`, `vm` → `kata`). `IsolationSnapshotter()` — maps to containerd snapshotters. |
 | `exec.go` | `RunCmdExec()`, `RunCmdExecRaw()` — shared helpers for running `exec.Cmd` and building `ExecResult`. |
 
@@ -349,7 +349,7 @@ Bundles each backend's static facts: `Name`, `BaseModeName`, `AgentProvisionedBy
 Declares what features a backend supports: `NetworkIsolation`, `OverlayDirs`, `CapAdd`, `HostFilesystem`. Embedded in `BackendDescriptor`. Used by sandbox logic to gate features without string-comparing backend names.
 
 ### `runtime.Factory` / Backend Registry
-`Factory` is `func(context.Context) (Runtime, error)`. Backends register via `runtime.Register()` in their `init()` functions. `runtime.New(ctx, name)` creates a Runtime by name. `runtime.Available()` lists registered backends. Platform-specific backends (containerd on Linux, tart/seatbelt on macOS) only register on their supported platforms.
+`Factory` is `func(context.Context) (Runtime, error)`. Backends register `(Factory, BackendDescriptor)` tuples via `runtime.Register(name, factory, descriptor)` in their `init()` functions. `runtime.New(ctx, name)` creates a Runtime by name; `runtime.Descriptor(name)` returns the static descriptor without instantiating; `runtime.Descriptors()` enumerates all registered descriptors. `runtime.Available()` lists registered backend names. Platform-specific backends (containerd on Linux, tart/seatbelt on macOS) only register on their supported platforms.
 
 ### Optional Runtime interfaces
 Five optional interfaces extend the core Runtime with backend-specific capabilities. Callers use type assertion or helper functions (`ResolveCopyMountFor`, `RequiredCapabilitiesFor`) that fall back to documented defaults when the backend doesn't implement them.
@@ -662,7 +662,7 @@ newSystemDoctorCmd (cli/system_doctor.go)
 **Add a new runtime backend:**
 1. Create `runtime/<name>/` package
 2. Implement the `runtime.Runtime` interface (see `runtime/podman/` for an example that embeds an existing backend and overrides only what differs)
-3. Call `runtime.Register(name, factory)` in your package's `init()` function
+3. Declare a package-level `var descriptor = runtime.BackendDescriptor{...}` and call `runtime.Register(name, factory, descriptor)` in your package's `init()` function. The descriptor's `Name` must match the registration name. Return the same `descriptor` from your `Descriptor()` method.
 4. Add a blank import in the appropriate platform file (`yoloai.go` for all platforms, or a `_linux.go` / `_darwin.go` file for platform-specific backends)
 5. Backend is selectable via `--backend` flag (on new/build/setup) or `backend` config. Lifecycle commands read backend from sandbox `environment.json`
 

@@ -22,10 +22,25 @@ import (
 	"github.com/kstenerud/yoloai/runtime/monitor"
 )
 
+// descriptor holds the static facts for the seatbelt backend; shared by the
+// registry registration and the Runtime.Descriptor() method.
+var descriptor = runtime.BackendDescriptor{
+	Name:                      "seatbelt",
+	BaseModeName:              "process",
+	AgentProvisionedByBackend: false,
+	SupportedIsolationModes:   nil,
+	Capabilities: runtime.BackendCaps{
+		NetworkIsolation: false,
+		OverlayDirs:      false,
+		CapAdd:           false,
+		HostFilesystem:   true,
+	},
+}
+
 func init() {
 	runtime.Register("seatbelt", func(ctx context.Context) (runtime.Runtime, error) {
 		return New(ctx)
-	})
+	}, descriptor)
 }
 
 const (
@@ -69,18 +84,7 @@ var _ runtime.CopyMountResolver = (*Runtime)(nil)
 
 // Descriptor returns a BackendDescriptor with the static facts for this backend.
 func (r *Runtime) Descriptor() runtime.BackendDescriptor {
-	return runtime.BackendDescriptor{
-		Name:                      "seatbelt",
-		BaseModeName:              "process",
-		AgentProvisionedByBackend: false,
-		SupportedIsolationModes:   nil,
-		Capabilities: runtime.BackendCaps{
-			NetworkIsolation: false,
-			OverlayDirs:      false,
-			CapAdd:           false,
-			HostFilesystem:   true,
-		},
-	}
+	return descriptor
 }
 
 // ResolveCopyMount returns the sandbox copy directory path. Seatbelt runs the

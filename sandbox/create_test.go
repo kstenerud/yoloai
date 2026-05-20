@@ -16,17 +16,14 @@ import (
 	"github.com/kstenerud/yoloai/agent"
 	"github.com/kstenerud/yoloai/config"
 	"github.com/kstenerud/yoloai/runtime"
-	dockerrt "github.com/kstenerud/yoloai/runtime/docker"
-	seatbeltrt "github.com/kstenerud/yoloai/runtime/seatbelt"
-	tartrt "github.com/kstenerud/yoloai/runtime/tart"
 	"github.com/kstenerud/yoloai/sandbox/store"
 	"github.com/kstenerud/yoloai/workspace"
 )
 
 func TestBackendCaps(t *testing.T) {
-	assert.True(t, (&dockerrt.Runtime{}).Descriptor().Capabilities.CapAdd)
-	assert.False(t, (*tartrt.Runtime)(nil).Descriptor().Capabilities.CapAdd)
-	assert.False(t, (*seatbeltrt.Runtime)(nil).Descriptor().Capabilities.CapAdd)
+	assert.True(t, mustDescriptor(t, "docker").Capabilities.CapAdd)
+	assert.False(t, mustDescriptor(t, "tart").Capabilities.CapAdd)
+	assert.False(t, mustDescriptor(t, "seatbelt").Capabilities.CapAdd)
 }
 
 func TestResolveModel_Alias(t *testing.T) {

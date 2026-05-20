@@ -35,10 +35,25 @@ func getXcodeSelectPath() string {
 	return strings.TrimSpace(string(output))
 }
 
+// descriptor holds the static facts for the tart backend; shared by the
+// registry registration and the Runtime.Descriptor() method.
+var descriptor = runtime.BackendDescriptor{
+	Name:                      "tart",
+	BaseModeName:              "vm",
+	AgentProvisionedByBackend: true,
+	SupportedIsolationModes:   nil,
+	Capabilities: runtime.BackendCaps{
+		NetworkIsolation: false,
+		OverlayDirs:      false,
+		CapAdd:           false,
+		HostFilesystem:   false,
+	},
+}
+
 func init() {
 	runtime.Register("tart", func(ctx context.Context) (runtime.Runtime, error) {
 		return New(ctx)
-	})
+	}, descriptor)
 }
 
 const (
@@ -80,18 +95,7 @@ var _ runtime.CopyMountResolver = (*Runtime)(nil)
 
 // Descriptor returns a BackendDescriptor with the static facts for this backend.
 func (r *Runtime) Descriptor() runtime.BackendDescriptor {
-	return runtime.BackendDescriptor{
-		Name:                      "tart",
-		BaseModeName:              "vm",
-		AgentProvisionedByBackend: true,
-		SupportedIsolationModes:   nil,
-		Capabilities: runtime.BackendCaps{
-			NetworkIsolation: false,
-			OverlayDirs:      false,
-			CapAdd:           false,
-			HostFilesystem:   false,
-		},
-	}
+	return descriptor
 }
 
 // ResolveCopyMount returns the local VM path where the copy directory will be

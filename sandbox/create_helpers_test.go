@@ -18,7 +18,7 @@ import (
 	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/runtime/caps"
 	dockerrt "github.com/kstenerud/yoloai/runtime/docker"
-	seatbeltrt "github.com/kstenerud/yoloai/runtime/seatbelt"
+	_ "github.com/kstenerud/yoloai/runtime/seatbelt" // backend init() registers the descriptor for tests
 	tartrt "github.com/kstenerud/yoloai/runtime/tart"
 	"github.com/kstenerud/yoloai/sandbox/store"
 )
@@ -1147,25 +1147,34 @@ func TestIsolationContainerRuntime_VMEnhanced(t *testing.T) {
 }
 
 // BackendCaps tests — each backend declares its own capabilities.
-// Capabilities() is a pure static declaration; calling via nil pointer is safe
-// because the method returns a constant struct without accessing receiver fields.
+// Read the static descriptor via the registry rather than instantiating the
+// runtime; the backend packages register themselves at init().
+
+// mustDescriptor returns the registered descriptor for name, failing the test
+// if the backend isn't registered (e.g., test ran on an unsupported platform).
+func mustDescriptor(t *testing.T, name string) runtime.BackendDescriptor {
+	t.Helper()
+	desc, ok := runtime.Descriptor(name)
+	require.True(t, ok, "backend %q not registered", name)
+	return desc
+}
 
 func TestBackendCaps_Docker(t *testing.T) {
-	caps := (&dockerrt.Runtime{}).Descriptor().Capabilities
+	caps := mustDescriptor(t, "docker").Capabilities
 	assert.True(t, caps.NetworkIsolation)
 	assert.True(t, caps.OverlayDirs)
 	assert.True(t, caps.CapAdd)
 }
 
 func TestBackendCaps_Tart(t *testing.T) {
-	caps := (*tartrt.Runtime)(nil).Descriptor().Capabilities
+	caps := mustDescriptor(t, "tart").Capabilities
 	assert.False(t, caps.NetworkIsolation)
 	assert.False(t, caps.OverlayDirs)
 	assert.False(t, caps.CapAdd)
 }
 
 func TestBackendCaps_Seatbelt(t *testing.T) {
-	caps := (*seatbeltrt.Runtime)(nil).Descriptor().Capabilities
+	caps := mustDescriptor(t, "seatbelt").Capabilities
 	assert.False(t, caps.NetworkIsolation)
 	assert.False(t, caps.OverlayDirs)
 	assert.False(t, caps.CapAdd)
@@ -1174,15 +1183,15 @@ func TestBackendCaps_Seatbelt(t *testing.T) {
 // AgentProvisionedByBackend and ResolveCopyMount tests
 
 func TestAgentProvisionedByBackend_Docker(t *testing.T) {
-	assert.True(t, (&dockerrt.Runtime{}).Descriptor().AgentProvisionedByBackend)
+	assert.True(t, mustDescriptor(t, "docker").AgentProvisionedByBackend)
 }
 
 func TestAgentProvisionedByBackend_Tart(t *testing.T) {
-	assert.True(t, (*tartrt.Runtime)(nil).Descriptor().AgentProvisionedByBackend)
+	assert.True(t, mustDescriptor(t, "tart").AgentProvisionedByBackend)
 }
 
 func TestAgentProvisionedByBackend_Seatbelt(t *testing.T) {
-	assert.False(t, (*seatbeltrt.Runtime)(nil).Descriptor().AgentProvisionedByBackend) // uses host native agent
+	assert.False(t, mustDescriptor(t, "seatbelt").AgentProvisionedByBackend) // uses host native agent
 }
 
 func TestResolveCopyMount_Docker(t *testing.T) {

@@ -29,10 +29,25 @@ import (
 	"github.com/kstenerud/yoloai/runtime/caps"
 )
 
+// descriptor holds the static facts for the docker backend; shared by the
+// registry registration and the Runtime.Descriptor() method.
+var descriptor = runtime.BackendDescriptor{
+	Name:                      "docker",
+	BaseModeName:              "container",
+	AgentProvisionedByBackend: true,
+	SupportedIsolationModes:   []string{"container-enhanced", "container-privileged"},
+	Capabilities: runtime.BackendCaps{
+		NetworkIsolation: true,
+		OverlayDirs:      true,
+		CapAdd:           true,
+		HostFilesystem:   false,
+	},
+}
+
 func init() {
 	runtime.Register("docker", func(ctx context.Context) (runtime.Runtime, error) {
 		return New(ctx)
-	})
+	}, descriptor)
 }
 
 // Runtime implements runtime.Runtime using the Docker SDK.
@@ -404,19 +419,10 @@ func (r *Runtime) DiagHint(instanceName string) string {
 }
 
 // Descriptor returns a BackendDescriptor with the static facts for this backend.
+// Always returns the package-level descriptor; podman's Runtime overrides this
+// method to return its own descriptor.
 func (r *Runtime) Descriptor() runtime.BackendDescriptor {
-	return runtime.BackendDescriptor{
-		Name:                      r.binaryName,
-		BaseModeName:              "container",
-		AgentProvisionedByBackend: true,
-		SupportedIsolationModes:   []string{"container-enhanced", "container-privileged"},
-		Capabilities: runtime.BackendCaps{
-			NetworkIsolation: true,
-			OverlayDirs:      true,
-			CapAdd:           true,
-			HostFilesystem:   false,
-		},
-	}
+	return descriptor
 }
 
 // dockerInfoOutput fetches the list of registered OCI runtime names from the

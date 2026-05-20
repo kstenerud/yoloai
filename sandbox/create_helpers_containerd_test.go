@@ -12,14 +12,14 @@ import (
 )
 
 func TestBackendCaps_Containerd(t *testing.T) {
-	caps := (*containerdrt.Runtime)(nil).Descriptor().Capabilities
+	caps := mustDescriptor(t, "containerd").Capabilities
 	assert.True(t, caps.NetworkIsolation)
 	assert.False(t, caps.OverlayDirs) // overlayfs not supported inside Kata VMs
 	assert.True(t, caps.CapAdd)
 }
 
 func TestAgentProvisionedByBackend_Containerd(t *testing.T) {
-	assert.True(t, (*containerdrt.Runtime)(nil).Descriptor().AgentProvisionedByBackend)
+	assert.True(t, mustDescriptor(t, "containerd").AgentProvisionedByBackend)
 }
 
 func TestResolveCopyMount_Containerd(t *testing.T) {

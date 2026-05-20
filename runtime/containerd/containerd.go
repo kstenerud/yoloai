@@ -23,10 +23,25 @@ import (
 	"github.com/kstenerud/yoloai/runtime/caps"
 )
 
+// descriptor holds the static facts for the containerd backend; shared by the
+// registry registration and the Runtime.Descriptor() method.
+var descriptor = runtime.BackendDescriptor{
+	Name:                      "containerd",
+	BaseModeName:              "vm",
+	AgentProvisionedByBackend: true,
+	SupportedIsolationModes:   []string{"vm", "vm-enhanced"},
+	Capabilities: runtime.BackendCaps{
+		NetworkIsolation: true,
+		OverlayDirs:      false,
+		CapAdd:           true,
+		HostFilesystem:   false,
+	},
+}
+
 func init() {
 	runtime.Register("containerd", func(ctx context.Context) (runtime.Runtime, error) {
 		return New(ctx)
-	})
+	}, descriptor)
 }
 
 // Runtime implements runtime.Runtime using the containerd API.
@@ -50,18 +65,7 @@ var _ runtime.IsolationCapabilityProvider = (*Runtime)(nil)
 
 // Descriptor returns a BackendDescriptor with the static facts for this backend.
 func (r *Runtime) Descriptor() runtime.BackendDescriptor {
-	return runtime.BackendDescriptor{
-		Name:                      "containerd",
-		BaseModeName:              "vm",
-		AgentProvisionedByBackend: true,
-		SupportedIsolationModes:   []string{"vm", "vm-enhanced"},
-		Capabilities: runtime.BackendCaps{
-			NetworkIsolation: true,
-			OverlayDirs:      false,
-			CapAdd:           true,
-			HostFilesystem:   false,
-		},
-	}
+	return descriptor
 }
 
 const containerdSock = "/run/containerd/containerd.sock"

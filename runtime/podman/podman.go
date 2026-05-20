@@ -20,10 +20,25 @@ import (
 	"github.com/kstenerud/yoloai/runtime/docker"
 )
 
+// descriptor holds the static facts for the podman backend; shared by the
+// registry registration and the Runtime.Descriptor() method.
+var descriptor = runtime.BackendDescriptor{
+	Name:                      "podman",
+	BaseModeName:              "container",
+	AgentProvisionedByBackend: true,
+	SupportedIsolationModes:   []string{"container-enhanced", "container-privileged"},
+	Capabilities: runtime.BackendCaps{
+		NetworkIsolation: true,
+		OverlayDirs:      true,
+		CapAdd:           true,
+		HostFilesystem:   false,
+	},
+}
+
 func init() {
 	runtime.Register("podman", func(ctx context.Context) (runtime.Runtime, error) {
 		return New(ctx)
-	})
+	}, descriptor)
 }
 
 // Runtime implements runtime.Runtime by embedding the Docker runtime
@@ -173,20 +188,9 @@ func defaultMachineSocketDiscovery() (string, error) {
 }
 
 // Descriptor returns a BackendDescriptor with the static facts for this backend.
-// Overrides the embedded docker.Runtime.Descriptor() to use "podman" as the name.
+// Overrides the embedded docker.Runtime.Descriptor() to return the podman descriptor.
 func (r *Runtime) Descriptor() runtime.BackendDescriptor {
-	return runtime.BackendDescriptor{
-		Name:                      "podman",
-		BaseModeName:              "container",
-		AgentProvisionedByBackend: true,
-		SupportedIsolationModes:   []string{"container-enhanced", "container-privileged"},
-		Capabilities: runtime.BackendCaps{
-			NetworkIsolation: true,
-			OverlayDirs:      true,
-			CapAdd:           true,
-			HostFilesystem:   false,
-		},
-	}
+	return descriptor
 }
 
 // RequiredCapabilities returns the host capabilities needed for the given isolation mode.
