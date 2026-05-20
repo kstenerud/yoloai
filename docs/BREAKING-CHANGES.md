@@ -4,6 +4,21 @@ Tracks breaking changes made during beta. Each entry should be included in relea
 
 ## Unreleased
 
+### Cross-process JSON files gain `schema_version` field with mismatch-fails-loudly policy
+
+**Previous behavior:** `runtime-config.json` and `agent-status.json` had no explicit version field. Drift between Go (writer/reader) and Python (reader/writer) could silently misinterpret fields.
+
+**New behavior:** Both files carry `"schema_version": 1`. Mismatch between writer and reader (e.g., a newer yoloai writes a file an older yoloai reads) causes Go's `parseStatusJSON` to discard the file and Python's `read_config` / status-monitor.py to raise `RuntimeError` with a specific message naming the file and the version mismatch. Missing `schema_version` is tolerated as legacy (pre-W2) and follows the original parsing path; only an explicit non-matching value triggers a failure.
+
+**Rationale:** W2 of the architecture remediation plan ([`dev/plans/architecture-remediation.md`](dev/plans/architecture-remediation.md)). The cross-process boundary needs a tripwire so coordinated Go/Python changes are explicit, not silent. Hard-fail on mismatch trades the inconvenience of re-creating a sandbox for the safety of not misreading a structurally different file.
+
+**Bump policy:**
+- **Additive changes** (new optional field with sensible defaults on both sides) do NOT require a version bump.
+- **Required-field changes, removals, renames, semantic changes** require bumping the constant in three places coordinated: `runtimeConfigSchemaVersion` in `sandbox/create.go`, `RUNTIME_CONFIG_SCHEMA_VERSION` in `sandbox-setup.py`, and the inline `runtime_config_schema_version` in `status-monitor.py` (or `agentStatusSchemaVersion` in `sandbox/inspect.go` + `AGENT_STATUS_SCHEMA_VERSION` in `sandbox-setup.py` + shell-hook literals in `agent/agent.go`).
+- Recreating a sandbox is the workaround for users running across an incompatible upgrade.
+
+**Migration:** none required when upgrading — newly-created sandboxes carry `schema_version: 1`; existing sandboxes (no field) continue to work. If a future version bumps the constant and you downgrade, the older binary will hard-fail; re-create the sandbox.
+
 ### `container-nestable` isolation mode removed; use `container-privileged` instead
 
 **Previous behavior:** `--isolation container-nestable` created a container with a targeted capability grant (`CAP_NET_ADMIN`, `CAP_NET_RAW`, `CAP_SYS_ADMIN`, `seccomp=unconfined`, `cgroupns=host`) intended as a minimal Docker-in-Docker mode.

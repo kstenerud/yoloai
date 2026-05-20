@@ -183,8 +183,17 @@ type lifecycleConfig struct {
 	OnStart         []map[string]any `json:"on_start,omitempty"`
 }
 
+// runtimeConfigSchemaVersion is the contract version between Go (writer) and
+// Python (reader, via sandbox-setup.py and status-monitor.py) for
+// runtime-config.json. Bump when adding a required field, removing a field,
+// renaming, or changing the semantics of any field. Additive changes (new
+// optional fields with sensible defaults on both sides) do NOT require a bump.
+// W2 of the architecture remediation plan.
+const runtimeConfigSchemaVersion = 1
+
 // containerConfig is the serializable form of runtime-config.json.
 type containerConfig struct {
+	SchemaVersion      int                  `json:"schema_version"`
 	HostUID            int                  `json:"host_uid"`
 	HostGID            int                  `json:"host_gid"`
 	AgentCommand       string               `json:"agent_command"`
@@ -1118,6 +1127,7 @@ func buildContainerConfig(agentDef *agent.Definition, agentCommand string, agent
 	}
 
 	cfg := containerConfig{
+		SchemaVersion:      runtimeConfigSchemaVersion,
 		HostUID:            effectiveUID(),
 		HostGID:            effectiveGID(),
 		AgentCommand:       agentCommand,

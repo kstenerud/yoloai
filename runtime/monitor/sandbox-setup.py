@@ -61,10 +61,33 @@ def log_debug(event, msg, **fields):
 
 # --- Utility functions ---
 
+# RUNTIME_CONFIG_SCHEMA_VERSION must equal the runtimeConfigSchemaVersion
+# constant in sandbox/create.go. Bumped together by W2 (architecture
+# remediation plan) when the runtime-config.json contract changes in a
+# non-additive way.
+RUNTIME_CONFIG_SCHEMA_VERSION = 1
+
+
 def read_config(path):
-    """Read and return the runtime-config.json as a dict."""
+    """Read and return the runtime-config.json as a dict.
+
+    Validates that the file's schema_version matches what this Python expects.
+    On mismatch, fail loudly with a specific message — silently parsing a
+    newer or older shape risks misinterpreting fields.
+    """
     with open(path) as f:
-        return json.load(f)
+        cfg = json.load(f)
+    got = cfg.get("schema_version")
+    # schema_version absent (legacy file written before W2) is tolerated.
+    # Mismatch with a non-None value means coordinated Go/Python drift.
+    if got is not None and got != RUNTIME_CONFIG_SCHEMA_VERSION:
+        raise RuntimeError(
+            f"schema_version mismatch in {path}: got {got}, "
+            f"expected {RUNTIME_CONFIG_SCHEMA_VERSION} "
+            f"(runtime-config.json was written by an incompatible yoloai version; "
+            f"re-create the sandbox)"
+        )
+    return cfg
 
 
 def tmux(*args, socket=None):
@@ -131,9 +154,15 @@ def read_secrets(secrets_dir, socket=None):
     return secrets
 
 
+# AGENT_STATUS_SCHEMA_VERSION must equal sandbox.agentStatusSchemaVersion in
+# sandbox/inspect.go. W2 of the architecture remediation plan.
+AGENT_STATUS_SCHEMA_VERSION = 1
+
+
 def write_status(status_file, status, exit_code=None):
     """Write agent-status.json."""
     data = {
+        "schema_version": AGENT_STATUS_SCHEMA_VERSION,
         "status": status,
         "exit_code": exit_code,
         "timestamp": int(time.time()),

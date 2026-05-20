@@ -405,13 +405,13 @@ func init() {
 // structured JSONL entry to logs/agent-hooks.jsonl when Claude finishes a
 // response (Stop hook). Uses $YOLOAI_DIR for portability across
 // backends (Docker=/yoloai, seatbelt=sandbox dir).
-const statusIdleCommand = `printf '{"ts":"%s","level":"info","event":"hook.idle","msg":"agent hook: idle","status":"idle"}\n' "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" >> "${YOLOAI_DIR:-/yoloai}/logs/agent-hooks.jsonl" && printf '{"status":"idle","exit_code":null,"timestamp":%d}\n' "$(date +%s)" > "${YOLOAI_DIR:-/yoloai}/agent-status.json"`
+const statusIdleCommand = `printf '{"ts":"%s","level":"info","event":"hook.idle","msg":"agent hook: idle","status":"idle"}\n' "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" >> "${YOLOAI_DIR:-/yoloai}/logs/agent-hooks.jsonl" && printf '{"schema_version":1,"status":"idle","exit_code":null,"timestamp":%d}\n' "$(date +%s)" > "${YOLOAI_DIR:-/yoloai}/agent-status.json"`
 
 // statusActiveCommand writes active status to agent-status.json and appends a
 // structured JSONL entry to logs/agent-hooks.jsonl when Claude starts working
 // (PreToolUse and UserPromptSubmit hooks). This ensures the title updates from
 // "> name" back to "name" as soon as a new prompt is submitted or a tool is called.
-const statusActiveCommand = `printf '{"ts":"%s","level":"info","event":"hook.active","msg":"agent hook: active","status":"active"}\n' "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" >> "${YOLOAI_DIR:-/yoloai}/logs/agent-hooks.jsonl" && printf '{"status":"active","exit_code":null,"timestamp":%d}\n' "$(date +%s)" > "${YOLOAI_DIR:-/yoloai}/agent-status.json"`
+const statusActiveCommand = `printf '{"ts":"%s","level":"info","event":"hook.active","msg":"agent hook: active","status":"active"}\n' "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" >> "${YOLOAI_DIR:-/yoloai}/logs/agent-hooks.jsonl" && printf '{"schema_version":1,"status":"active","exit_code":null,"timestamp":%d}\n' "$(date +%s)" > "${YOLOAI_DIR:-/yoloai}/agent-status.json"`
 
 // injectIdleHook merges hooks into Claude Code's settings map for status tracking.
 // Stop → idle (turn complete), PreToolUse + UserPromptSubmit → running (work started).

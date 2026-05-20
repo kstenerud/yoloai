@@ -80,7 +80,10 @@ def write_status(status_file, status, exit_code=None):
     Sets source="monitor" so the HookDetector can distinguish monitor writes
     from hook writes (which don't set source).
     """
+    # AGENT_STATUS_SCHEMA_VERSION must equal sandbox.agentStatusSchemaVersion
+    # in sandbox/inspect.go and the constant in sandbox-setup.py.
     data = {
+        "schema_version": 1,
         "status": status,
         "exit_code": exit_code,
         "timestamp": int(time.time()),
@@ -546,8 +549,21 @@ def run_monitor(config_path, status_file, tmux_sock=None):
     """Main monitor loop."""
     global _monitor_log, _debug_enabled
 
+    # RUNTIME_CONFIG_SCHEMA_VERSION must equal sandbox-setup.py's constant and
+    # sandbox/create.go's runtimeConfigSchemaVersion. W2 of the architecture
+    # remediation plan.
+    runtime_config_schema_version = 1
+
     with open(config_path) as f:
         config = json.load(f)
+
+    got_schema = config.get("schema_version")
+    if got_schema is not None and got_schema != runtime_config_schema_version:
+        raise RuntimeError(
+            f"schema_version mismatch in {config_path}: got {got_schema}, "
+            f"expected {runtime_config_schema_version} "
+            f"(runtime-config.json was written by an incompatible yoloai version)"
+        )
 
     # Derive yoloai_dir from config path (e.g. /yoloai/runtime-config.json → /yoloai)
     yoloai_dir = os.path.dirname(os.path.abspath(config_path))

@@ -219,12 +219,22 @@ func execInContainer(ctx context.Context, rt runtime.Runtime, sandboxName string
 // falling back to exec-based detection.
 const statusFileStaleness = 10 * time.Second
 
+// agentStatusSchemaVersion is the contract version for agent-status.json. Must
+// equal the AGENT_STATUS_SCHEMA_VERSION constants in sandbox-setup.py and
+// status-monitor.py, and the literal in agent.go's shell hook commands. W2 of
+// the architecture remediation plan.
+const agentStatusSchemaVersion = 1
+
 // statusJSON is the structure written by the in-container status monitor.
-// Designed for extensibility — new fields can be added without breaking readers.
+// Designed for extensibility — new fields can be added without breaking
+// readers. The schema_version field is omitempty so files written by older
+// yoloai versions (before W2) parse with SchemaVersion=0; the reader tolerates
+// 0 and otherwise enforces a match.
 type statusJSON struct {
-	Status    string `json:"status"`              // "active", "idle", "done"
-	ExitCode  *int   `json:"exit_code,omitempty"` // set when status is "done"
-	Timestamp int64  `json:"timestamp"`           // unix seconds
+	SchemaVersion int    `json:"schema_version,omitempty"`
+	Status        string `json:"status"`              // "active", "idle", "done"
+	ExitCode      *int   `json:"exit_code,omitempty"` // set when status is "done"
+	Timestamp     int64  `json:"timestamp"`           // unix seconds
 }
 
 // DetectStatus queries the runtime and agent-status.json to determine sandbox status.
@@ -263,6 +273,17 @@ func DetectStatus(ctx context.Context, rt runtime.Runtime, containerName string,
 func parseStatusJSON(data []byte) (Status, bool) {
 	var s statusJSON
 	if err := json.Unmarshal(data, &s); err != nil {
+		return "", false
+	}
+
+	// schema_version=0 means the file was written before W2 (no version
+	// field). Any non-zero value must match the expected version; mismatch
+	// signals coordinated Python/Go drift and we treat the file as unusable.
+	if s.SchemaVersion != 0 && s.SchemaVersion != agentStatusSchemaVersion {
+		slog.Warn("agent-status.json schema_version mismatch — file ignored",
+			"event", "sandbox.inspect.schema_mismatch",
+			"got", s.SchemaVersion,
+			"expected", agentStatusSchemaVersion)
 		return "", false
 	}
 

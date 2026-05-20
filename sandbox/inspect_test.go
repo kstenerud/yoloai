@@ -483,6 +483,11 @@ func TestParseStatusJSON(t *testing.T) {
 		{"done no exit code", statusJSONBytes("done", nil, now), StatusFailed, true},
 		{"unknown status", statusJSONBytes("unknown", nil, now), "", false},
 		{"zero timestamp", statusJSONBytes("active", nil, 0), "", false},
+		// W2 schema versioning: missing schema_version (=0) is tolerated;
+		// mismatched non-zero schema_version causes the reader to discard the
+		// status as unusable rather than misinterpret it.
+		{"schema_version match", []byte(`{"schema_version":1,"status":"active","timestamp":` + fmt.Sprint(now) + `}`), StatusActive, true},
+		{"schema_version mismatch", []byte(`{"schema_version":99,"status":"active","timestamp":` + fmt.Sprint(now) + `}`), "", false},
 	}
 
 	for _, tc := range tests {
