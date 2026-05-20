@@ -112,7 +112,7 @@ func (r *Runtime) Setup(ctx context.Context, sourceDir string, output io.Writer,
 	if provExists {
 		fmt.Fprintln(output, "Removing old provisioned image...") //nolint:errcheck // best-effort
 		if _, err := r.runTart(ctx, "delete", provisionedImageName); err != nil {
-			logger.Warn("failed to delete old provisioned image", "error", err)
+			logger.Warn("failed to delete old provisioned image", "err", err)
 		}
 	}
 

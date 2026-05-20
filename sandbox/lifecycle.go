@@ -82,7 +82,7 @@ func syncLifecycleMarker(sandboxDir string) {
 	if stateErr == nil && !state.OnCreateCommandsDone {
 		state.OnCreateCommandsDone = true
 		if saveErr := SaveSandboxState(sandboxDir, state); saveErr != nil {
-			slog.Warn("lifecycle: could not save sandbox state", "error", saveErr)
+			slog.Warn("lifecycle: could not save sandbox state", "err", saveErr)
 		}
 	}
 }

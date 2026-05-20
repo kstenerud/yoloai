@@ -659,7 +659,7 @@ func (m *Manager) setupAllWorkdirs(opts CreateOptions, workdir *DirArg, auxDirs 
 	if resolvedArchetype == ArchetypeDevcontainer && opts.VscodeTunnel &&
 		workdir.Mode != "rw" && devcontainerCfg != nil {
 		if injectErr := InjectVSCodeWorkspace(workCopyDir, devcontainerCfg); injectErr != nil {
-			slog.Warn("vscode workspace injection failed", "error", injectErr) // non-fatal
+			slog.Warn("vscode workspace injection failed", "err", injectErr) // non-fatal
 		}
 	}
 

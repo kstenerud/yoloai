@@ -597,7 +597,7 @@ func pollTmuxReady(ctx context.Context, rt runtime.Runtime, containerName, jsonl
 		return true, nil
 	}
 	slog.Debug("waitForTmux: exec check failed", "event", "sandbox.wait_tmux.exec_fail", //nolint:gosec // G706: slog uses structured logging, not vulnerable to log injection
-		"container", containerName, "error", execErr)
+		"container", containerName, "err", execErr)
 	return false, nil
 }
 

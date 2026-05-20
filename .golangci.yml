@@ -28,6 +28,11 @@ linters:
       min-complexity: 20
     exhaustive:
       default-signifies-exhaustive: true
+    sloglint:
+      static-msg: true
+      key-naming-case: snake
+      forbidden-keys:
+        - error  # canonical key is "err" — wider Go ecosystem standardizes on err
     revive:
       rules:
         # internal/runtime is an intentional name for the runtime abstraction

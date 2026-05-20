@@ -152,7 +152,7 @@ func (r *Runtime) Create(ctx context.Context, cfg runtime.InstanceConfig) error 
 	}
 
 	// Clone the base image to create an instance-specific VM
-	slog.Debug("tart Create: cloning", "imageRef", cfg.ImageRef, "name", cfg.Name)
+	slog.Debug("tart Create: cloning", "image_ref", cfg.ImageRef, "name", cfg.Name)
 	if _, err := r.runTart(ctx, "clone", cfg.ImageRef, cfg.Name); err != nil {
 		return fmt.Errorf("clone VM: %w", err)
 	}
@@ -869,7 +869,7 @@ func resolveMountVFSPath(source, sandboxPath, vmSharedDir string) (string, bool)
 		relPath := strings.TrimPrefix(source, sandboxPath+"/")
 		vfsPath := filepath.Join(vmSharedDir, relPath)
 		if stat, err := os.Stat(source); err != nil {
-			slog.Debug("tart setup: mount source does not exist on host!", "source", source, "error", err)
+			slog.Debug("tart setup: mount source does not exist on host!", "source", source, "err", err)
 			return "", false
 		} else {
 			slog.Debug("tart setup: mount under sandbox", "source", source, "relPath", relPath, "vfsPath", vfsPath, "sourceIsDir", stat.IsDir())
@@ -893,7 +893,7 @@ func (r *Runtime) createSingleVMSymlink(ctx context.Context, vmName, target, vfs
 	if out, checkErr := r.runTart(ctx, execArgs(vmName, "bash", "-c", checkCmd)...); checkErr == nil {
 		slog.Debug("tart setup: VirtioFS parent directory listing", "path", filepath.Dir(vfsPath), "output", out)
 	} else {
-		slog.Debug("tart setup: failed to list VirtioFS parent", "path", filepath.Dir(vfsPath), "error", checkErr)
+		slog.Debug("tart setup: failed to list VirtioFS parent", "path", filepath.Dir(vfsPath), "err", checkErr)
 	}
 
 	mkdirCmd := fmt.Sprintf("(mkdir -p '%s' 2>/dev/null || sudo mkdir -p '%s' 2>/dev/null || true)", parent, parent)
@@ -1179,7 +1179,7 @@ func (r *Runtime) configureXcodeInVM(ctx context.Context, vmName string) error {
 		args = execArgs(vmName, "bash", "-c", symlinkPrivateCmd)
 		if _, err := r.runTart(ctx, args...); err != nil {
 			// Non-fatal: PrivateFrameworks might not be critical
-			slog.Debug("failed to symlink PrivateFrameworks", "error", err)
+			slog.Debug("failed to symlink PrivateFrameworks", "err", err)
 		}
 	}
 
@@ -1195,7 +1195,7 @@ func (r *Runtime) configureXcodeInVM(ctx context.Context, vmName string) error {
 	args = execArgs(vmName, "bash", "-c", acceptLicenseCmd)
 	if _, err := r.runTart(ctx, args...); err != nil {
 		// Non-fatal: license might already be accepted or not required
-		slog.Debug("xcodebuild -license accept failed (might already be accepted)", "error", err)
+		slog.Debug("xcodebuild -license accept failed (might already be accepted)", "err", err)
 	}
 
 	// Run xcodebuild -runFirstLaunch to complete setup
@@ -1203,7 +1203,7 @@ func (r *Runtime) configureXcodeInVM(ctx context.Context, vmName string) error {
 	args = execArgs(vmName, "bash", "-c", firstLaunchCmd)
 	if _, err := r.runTart(ctx, args...); err != nil {
 		// Non-fatal: might not be needed
-		slog.Debug("xcodebuild -runFirstLaunch failed (might not be needed)", "error", err)
+		slog.Debug("xcodebuild -runFirstLaunch failed (might not be needed)", "err", err)
 	}
 
 	return nil
