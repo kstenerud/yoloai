@@ -329,21 +329,21 @@ func checkAgentAuth(agentDef *agent.Definition, hasAPIKey, hasAuth, hasAuthHint 
 // checkLocalhostURLs warns if auth hint env vars contain localhost addresses
 // that won't work inside a container/VM sandbox.
 func (m *Manager) checkLocalhostURLs(agentDef *agent.Definition, mergedEnv map[string]string) error {
-	if !m.runtime.AgentProvisionedByBackend() {
+	desc := m.runtime.Descriptor()
+	if !desc.AgentProvisionedByBackend {
 		return nil
 	}
-	caps := m.runtime.Capabilities()
 	for _, key := range agentDef.AuthHintEnvVars {
 		for _, val := range []string{os.Getenv(key), mergedEnv[key]} {
 			if val == "" || !containsLocalhost(val) {
 				continue
 			}
 			hint := "use the host's routable IP instead"
-			if caps.NetworkIsolation {
+			if desc.Capabilities.NetworkIsolation {
 				hint = "use host.docker.internal instead"
 			}
 			return NewUsageError("%s contains a localhost address (%s) which won't work inside a %s sandbox — %s",
-				key, val, m.runtime.Name(), hint)
+				key, val, desc.Name, hint)
 		}
 	}
 	return nil
@@ -508,11 +508,11 @@ func createCopyBaseline(workCopyDir string, rt runtime.Runtime) (string, error) 
 		// Tart: baseline will be created in VM after container start.
 		// Return empty SHA to signal deferred baseline creation.
 		slog.Debug("setupWorkdir: runtime implements WorkDirSetup, deferring baseline to VM",
-			"backend", rt.Name())
+			"backend", rt.Descriptor().Name)
 		return "", nil
 	}
 	slog.Debug("setupWorkdir: runtime does NOT implement WorkDirSetup, creating baseline on host",
-		"backend", rt.Name())
+		"backend", rt.Descriptor().Name)
 
 	// Docker: preserve original git history so the agent (and user) can
 	// git log, git show, git blame, etc. inside the sandbox.

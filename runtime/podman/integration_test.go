@@ -248,5 +248,5 @@ func TestPodman_Name(t *testing.T) {
 	rt, ctx := podmanSetup(t)
 	_ = ctx // unused but keep for consistency
 
-	assert.Equal(t, "podman", rt.Name())
+	assert.Equal(t, "podman", rt.Descriptor().Name)
 }

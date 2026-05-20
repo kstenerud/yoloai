@@ -29,7 +29,7 @@ type ProfileImageBuilder interface {
 // are a no-op. If force is true, all images in the chain are rebuilt.
 // secrets are Docker BuildKit --secret specs passed to profile image builds.
 func EnsureProfileImage(ctx context.Context, rt runtime.Runtime, profileName string, secrets []string, output io.Writer, logger *slog.Logger, force bool) error {
-	if !rt.Capabilities().CapAdd {
+	if !rt.Descriptor().Capabilities.CapAdd {
 		return nil
 	}
 

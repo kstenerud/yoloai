@@ -325,10 +325,6 @@ func TestApplyConfigDefaults_RecipesFromConfigWhenNoProfile(t *testing.T) {
 // mockDockerRuntime implements runtime.Runtime without WorkDirSetup (Docker-like behavior).
 type mockDockerRuntime struct{}
 
-func (m *mockDockerRuntime) Capabilities() runtime.BackendCaps {
-	return runtime.BackendCaps{}
-}
-func (m *mockDockerRuntime) AgentProvisionedByBackend() bool { return false }
 func (m *mockDockerRuntime) Setup(ctx context.Context, sourceDir string, output io.Writer, logger *slog.Logger, force bool) error {
 	return nil
 }
@@ -362,13 +358,10 @@ func (m *mockDockerRuntime) DiagHint(name string) string { return "" }
 func (m *mockDockerRuntime) ResolveCopyMount(sandboxName, hostPath string) string {
 	return hostPath
 }
-func (m *mockDockerRuntime) BaseModeName() string                  { return "container" }
-func (m *mockDockerRuntime) SupportedIsolationModes() []string     { return nil }
 func (m *mockDockerRuntime) PrepareAgentCommand(cmd string) string { return cmd }
 func (m *mockDockerRuntime) RequiredCapabilities(isolation string) []caps.HostCapability {
 	return nil
 }
-func (m *mockDockerRuntime) Name() string                        { return "mock" }
 func (m *mockDockerRuntime) TmuxSocket(sandboxDir string) string { return "" }
 func (m *mockDockerRuntime) AttachCommand(tmuxSocket string, rows, cols int, term string) []string {
 	return nil

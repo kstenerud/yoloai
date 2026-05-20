@@ -1150,21 +1150,21 @@ func TestIsolationContainerRuntime_VMEnhanced(t *testing.T) {
 // because the method returns a constant struct without accessing receiver fields.
 
 func TestBackendCaps_Docker(t *testing.T) {
-	caps := (*dockerrt.Runtime)(nil).Capabilities()
+	caps := (&dockerrt.Runtime{}).Descriptor().Capabilities
 	assert.True(t, caps.NetworkIsolation)
 	assert.True(t, caps.OverlayDirs)
 	assert.True(t, caps.CapAdd)
 }
 
 func TestBackendCaps_Tart(t *testing.T) {
-	caps := (*tartrt.Runtime)(nil).Capabilities()
+	caps := (*tartrt.Runtime)(nil).Descriptor().Capabilities
 	assert.False(t, caps.NetworkIsolation)
 	assert.False(t, caps.OverlayDirs)
 	assert.False(t, caps.CapAdd)
 }
 
 func TestBackendCaps_Seatbelt(t *testing.T) {
-	caps := (*seatbeltrt.Runtime)(nil).Capabilities()
+	caps := (*seatbeltrt.Runtime)(nil).Descriptor().Capabilities
 	assert.False(t, caps.NetworkIsolation)
 	assert.False(t, caps.OverlayDirs)
 	assert.False(t, caps.CapAdd)
@@ -1173,15 +1173,15 @@ func TestBackendCaps_Seatbelt(t *testing.T) {
 // AgentProvisionedByBackend and ResolveCopyMount tests
 
 func TestAgentProvisionedByBackend_Docker(t *testing.T) {
-	assert.True(t, (*dockerrt.Runtime)(nil).AgentProvisionedByBackend())
+	assert.True(t, (&dockerrt.Runtime{}).Descriptor().AgentProvisionedByBackend)
 }
 
 func TestAgentProvisionedByBackend_Tart(t *testing.T) {
-	assert.True(t, (*tartrt.Runtime)(nil).AgentProvisionedByBackend())
+	assert.True(t, (*tartrt.Runtime)(nil).Descriptor().AgentProvisionedByBackend)
 }
 
 func TestAgentProvisionedByBackend_Seatbelt(t *testing.T) {
-	assert.False(t, (*seatbeltrt.Runtime)(nil).AgentProvisionedByBackend()) // uses host native agent
+	assert.False(t, (*seatbeltrt.Runtime)(nil).Descriptor().AgentProvisionedByBackend) // uses host native agent
 }
 
 func TestResolveCopyMount_Docker(t *testing.T) {

@@ -23,10 +23,9 @@ import (
 )
 
 func TestBackendCaps(t *testing.T) {
-	// Capabilities() is a pure static declaration; call via nil pointer is safe.
-	assert.True(t, (*dockerrt.Runtime)(nil).Capabilities().CapAdd)
-	assert.False(t, (*tartrt.Runtime)(nil).Capabilities().CapAdd)
-	assert.False(t, (*seatbeltrt.Runtime)(nil).Capabilities().CapAdd)
+	assert.True(t, (&dockerrt.Runtime{}).Descriptor().Capabilities.CapAdd)
+	assert.False(t, (*tartrt.Runtime)(nil).Descriptor().Capabilities.CapAdd)
+	assert.False(t, (*seatbeltrt.Runtime)(nil).Descriptor().Capabilities.CapAdd)
 }
 
 func TestResolveModel_Alias(t *testing.T) {

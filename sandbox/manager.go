@@ -37,11 +37,11 @@ func WithProgress(fn func(name, msg string)) ManagerOption {
 
 // NewManager creates a Manager with the given runtime, logger, input reader
 // for interactive prompts, and output writer for user-facing messages.
-// The backend name is read from rt.Name() when rt is non-nil.
+// The backend name is read from rt.Descriptor().Name when rt is non-nil.
 func NewManager(rt runtime.Runtime, logger *slog.Logger, input io.Reader, output io.Writer, opts ...ManagerOption) *Manager {
 	backend := ""
 	if rt != nil {
-		backend = rt.Name()
+		backend = rt.Descriptor().Name
 	}
 	m := &Manager{
 		runtime: rt,

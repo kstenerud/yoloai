@@ -98,7 +98,7 @@ type BackendDescriptor struct {
 }
 
 // BackendCaps declares what features a runtime backend supports.
-// Each backend returns its own capabilities via Capabilities().
+// Each backend returns its capabilities via BackendDescriptor.Capabilities.
 type BackendCaps struct {
 	NetworkIsolation bool // supports --network=isolated (iptables domain filtering)
 	OverlayDirs      bool // supports :overlay mount mode (overlayfs inside the container)
@@ -190,22 +190,7 @@ type Runtime interface {
 
 	// Descriptor returns a BackendDescriptor with static facts about this backend.
 	// Values are compile-time constants and do not change after construction.
-	// Callers may use Descriptor() instead of calling Name(), BaseModeName(),
-	// AgentProvisionedByBackend(), SupportedIsolationModes(), and Capabilities()
-	// separately; all fields mirror those individual methods exactly.
 	Descriptor() BackendDescriptor
-
-	// Capabilities returns the feature set supported by this backend.
-	// Used by sandbox/create.go to gate features and select backend-specific
-	// code paths without string-comparing backend names.
-	Capabilities() BackendCaps
-
-	// AgentProvisionedByBackend reports whether the agent binary is provisioned
-	// as part of the backend's image/VM build. Returns true for container/VM
-	// backends (Docker, containerd, Tart) where the agent is npm-installed in
-	// the image; returns false for process-based backends (e.g. seatbelt) that
-	// run the host's native agent installation.
-	AgentProvisionedByBackend() bool
 
 	// ResolveCopyMount returns the mount path the agent sees for a :copy directory.
 	// For container/VM backends, the copy is bind-mounted at the original host path
@@ -213,9 +198,6 @@ type Runtime interface {
 	// For process-based backends (seatbelt), the agent runs directly on the host
 	// and sees the copy at its sandbox location, so this returns the rewritten path.
 	ResolveCopyMount(sandboxName, hostPath string) string
-
-	// Name returns the backend name (e.g., "docker", "tart", "seatbelt").
-	Name() string
 
 	// TmuxSocket returns the tmux socket path for a sandbox, or empty string
 	// if the backend uses the uid-based default socket. sandboxDir is the
@@ -236,16 +218,6 @@ type Runtime interface {
 	// isolation mode. Returns nil if the backend has no special requirements
 	// for this mode.
 	RequiredCapabilities(isolation string) []caps.HostCapability
-
-	// SupportedIsolationModes returns the isolation modes this backend can
-	// potentially support. Returns nil if the backend has no isolation modes.
-	// Used by `system doctor` to discover what to check without the caller
-	// enumerating modes externally.
-	SupportedIsolationModes() []string
-
-	// BaseModeName returns the human label for this backend's default (no-isolation)
-	// mode, shown in `system doctor` output. e.g. "container", "vm", "process".
-	BaseModeName() string
 
 	// PrepareAgentCommand wraps an agent launch command with backend-specific
 	// environment setup (PATH overrides, shell wrappers, etc.). Mirrors the

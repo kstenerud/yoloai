@@ -109,13 +109,13 @@ func collectDoctorReports(ctx context.Context, env caps.Environment, backendFilt
 		if isolationFilter == "" {
 			reports = append(reports, caps.BackendReport{
 				Backend:      b.Name,
-				Mode:         rt.BaseModeName(),
+				Mode:         rt.Descriptor().BaseModeName,
 				IsBaseMode:   true,
 				Availability: caps.Ready,
 			})
 		}
 
-		for _, mode := range rt.SupportedIsolationModes() {
+		for _, mode := range rt.Descriptor().SupportedIsolationModes {
 			if isolationFilter != "" && mode != isolationFilter {
 				continue
 			}

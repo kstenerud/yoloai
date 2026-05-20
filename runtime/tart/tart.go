@@ -78,17 +78,6 @@ type Runtime struct {
 // Compile-time check.
 var _ runtime.Runtime = (*Runtime)(nil)
 
-// Capabilities returns the Tart backend's feature set.
-// Tart runs macOS VMs; no container-specific features are supported.
-func (r *Runtime) Capabilities() runtime.BackendCaps {
-	return runtime.BackendCaps{
-		NetworkIsolation: false,
-		OverlayDirs:      false,
-		CapAdd:           false,
-		HostFilesystem:   false,
-	}
-}
-
 // Descriptor returns a BackendDescriptor with the static facts for this backend.
 func (r *Runtime) Descriptor() runtime.BackendDescriptor {
 	return runtime.BackendDescriptor{
@@ -104,9 +93,6 @@ func (r *Runtime) Descriptor() runtime.BackendDescriptor {
 		},
 	}
 }
-
-// AgentProvisionedByBackend returns true — Tart VMs use an npm-installed agent.
-func (r *Runtime) AgentProvisionedByBackend() bool { return true }
 
 // ResolveCopyMount returns the local VM path where the copy directory will be
 // stored. The actual directory is first staged via VirtioFS, then copied to local
@@ -478,23 +464,14 @@ func (r *Runtime) DiagHint(instanceName string) string {
 	return fmt.Sprintf("check VM log at %s", logPath)
 }
 
-// BaseModeName returns "vm" — Tart runs macOS VMs.
-func (r *Runtime) BaseModeName() string { return "vm" }
-
 // PrepareAgentCommand prepends node 25 to PATH to avoid broken node@24 from
 // the Cirrus base image's .zprofile.
 func (r *Runtime) PrepareAgentCommand(cmd string) string {
 	return fmt.Sprintf(`PATH="/opt/homebrew/opt/node/bin:$PATH" %s`, cmd)
 }
 
-// SupportedIsolationModes returns nil — Tart has no additional isolation modes.
-func (r *Runtime) SupportedIsolationModes() []string { return nil }
-
 // RequiredCapabilities returns nil — Tart's prerequisites are enforced in New().
 func (r *Runtime) RequiredCapabilities(_ string) []caps.HostCapability { return nil }
-
-// Name returns the backend name.
-func (r *Runtime) Name() string { return "tart" }
 
 // TmuxSocket returns the explicit tmux socket path for Tart VMs.
 // When tart exec allocates a PTY with -t, the environment changes (TMPDIR)

@@ -17,10 +17,10 @@ import (
 	"github.com/kstenerud/yoloai/runtime/caps"
 )
 
-// TestName verifies the backend name is "containerd".
-func TestName(t *testing.T) {
+// TestDescriptor_Name verifies the backend name reported by Descriptor().
+func TestDescriptor_Name(t *testing.T) {
 	r := &Runtime{namespace: "yoloai"}
-	assert.Equal(t, "containerd", r.Name())
+	assert.Equal(t, "containerd", r.Descriptor().Name)
 }
 
 // TestWithNamespace verifies that withNamespace injects the correct namespace.
@@ -328,14 +328,14 @@ func TestRequiredCapabilities_DevmapperNotCheckedForVM(t *testing.T) {
 	assert.NoError(t, err, "vm isolation should not probe devmapper snapshotter")
 }
 
-func TestBaseModeName(t *testing.T) {
+func TestDescriptor_BaseModeName(t *testing.T) {
 	r := &Runtime{}
-	assert.Equal(t, "vm", r.BaseModeName())
+	assert.Equal(t, "vm", r.Descriptor().BaseModeName)
 }
 
-func TestSupportedIsolationModes(t *testing.T) {
+func TestDescriptor_SupportedIsolationModes(t *testing.T) {
 	r := &Runtime{}
-	modes := r.SupportedIsolationModes()
+	modes := r.Descriptor().SupportedIsolationModes
 	assert.Contains(t, modes, "vm")
 	assert.Contains(t, modes, "vm-enhanced")
 }

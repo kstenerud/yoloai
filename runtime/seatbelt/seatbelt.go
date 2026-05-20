@@ -67,19 +67,6 @@ type Runtime struct {
 // Compile-time check.
 var _ runtime.Runtime = (*Runtime)(nil)
 
-// Capabilities returns the Seatbelt backend's feature set.
-// Seatbelt runs agent processes via sandbox-exec directly on macOS; it uses
-// the host's native agent installation rather than an npm-installed copy in
-// a container, and :copy workdir paths must point to the sandbox copy location.
-func (r *Runtime) Capabilities() runtime.BackendCaps {
-	return runtime.BackendCaps{
-		NetworkIsolation: false,
-		OverlayDirs:      false,
-		CapAdd:           false,
-		HostFilesystem:   true,
-	}
-}
-
 // Descriptor returns a BackendDescriptor with the static facts for this backend.
 func (r *Runtime) Descriptor() runtime.BackendDescriptor {
 	return runtime.BackendDescriptor{
@@ -95,10 +82,6 @@ func (r *Runtime) Descriptor() runtime.BackendDescriptor {
 		},
 	}
 }
-
-// AgentProvisionedByBackend returns false — seatbelt runs the host's native
-// agent installation, not an npm-installed copy in a container image.
-func (r *Runtime) AgentProvisionedByBackend() bool { return false }
 
 // ResolveCopyMount returns the sandbox copy directory path. Seatbelt runs the
 // agent directly on the host, so it must read :copy files from their actual
@@ -453,23 +436,14 @@ func (r *Runtime) DiagHint(instanceName string) string {
 	return fmt.Sprintf("check log at %s", logPath)
 }
 
-// BaseModeName returns "process" — Seatbelt runs agent processes directly.
-func (r *Runtime) BaseModeName() string { return "process" }
-
 // PrepareAgentCommand sources the Swift wrapper that auto-adds --disable-sandbox
 // for Swift PM commands inside the macOS sandbox.
 func (r *Runtime) PrepareAgentCommand(cmd string) string {
 	return "source ~/.swift-wrapper.sh && " + cmd
 }
 
-// SupportedIsolationModes returns nil — Seatbelt has no additional isolation modes.
-func (r *Runtime) SupportedIsolationModes() []string { return nil }
-
 // RequiredCapabilities returns nil — Seatbelt's prerequisites are enforced in New().
 func (r *Runtime) RequiredCapabilities(_ string) []caps.HostCapability { return nil }
-
-// Name returns the backend name.
-func (r *Runtime) Name() string { return "seatbelt" }
 
 // TmuxSocket returns the per-sandbox tmux socket path for seatbelt. Each
 // seatbelt sandbox has its own socket under its sandbox directory, so the

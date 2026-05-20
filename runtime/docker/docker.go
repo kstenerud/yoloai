@@ -402,9 +402,6 @@ func (r *Runtime) DiagHint(instanceName string) string {
 	return fmt.Sprintf("run '%s logs %s' to see what went wrong", r.binaryName, instanceName)
 }
 
-// Name returns the backend name.
-func (r *Runtime) Name() string { return r.binaryName }
-
 // Descriptor returns a BackendDescriptor with the static facts for this backend.
 func (r *Runtime) Descriptor() runtime.BackendDescriptor {
 	return runtime.BackendDescriptor{
@@ -421,20 +418,6 @@ func (r *Runtime) Descriptor() runtime.BackendDescriptor {
 	}
 }
 
-// Capabilities returns the Docker backend's feature set.
-func (r *Runtime) Capabilities() runtime.BackendCaps {
-	return runtime.BackendCaps{
-		NetworkIsolation: true,
-		OverlayDirs:      true,
-		CapAdd:           true,
-		HostFilesystem:   false,
-	}
-}
-
-// AgentProvisionedByBackend returns true — Docker containers use an npm-installed
-// agent, so the home-seed .claude.json must be patched from "native" to "npm-global".
-func (r *Runtime) AgentProvisionedByBackend() bool { return true }
-
 // ResolveCopyMount returns hostPath unchanged — Docker bind-mounts the copy at
 // the original host path inside the container.
 func (r *Runtime) ResolveCopyMount(_, hostPath string) string { return hostPath }
@@ -445,16 +428,8 @@ var dockerInfoOutput = func(ctx context.Context, binaryName string) ([]byte, err
 	return exec.CommandContext(ctx, binaryName, "info", "--format", "{{range $k, $v := .Runtimes}}{{$k}}\n{{end}}").Output() //nolint:gosec // G204: binaryName is "docker" or "podman"
 }
 
-// BaseModeName returns "container" — Docker's default isolation mode.
-func (r *Runtime) BaseModeName() string { return "container" }
-
 // PrepareAgentCommand returns the command unchanged — Docker needs no prefix.
 func (r *Runtime) PrepareAgentCommand(cmd string) string { return cmd }
-
-// SupportedIsolationModes returns the isolation modes Docker can potentially support.
-func (r *Runtime) SupportedIsolationModes() []string {
-	return []string{"container-enhanced", "container-privileged"}
-}
 
 // RequiredCapabilities returns the host capabilities needed for the given isolation mode.
 func (r *Runtime) RequiredCapabilities(isolation string) []caps.HostCapability {

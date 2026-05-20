@@ -87,27 +87,21 @@ func (m *mockRuntime) DiagHint(instanceName string) string {
 	return "check logs for " + instanceName
 }
 
-func (m *mockRuntime) Name() string                                        { return "docker" }
 func (m *mockRuntime) TmuxSocket(_ string) string                          { return "" }
 func (m *mockRuntime) AttachCommand(_ string, _, _ int, _ string) []string { return nil }
-func (m *mockRuntime) AgentProvisionedByBackend() bool                     { return true }
 func (m *mockRuntime) ResolveCopyMount(_, hostPath string) string          { return hostPath }
-func (m *mockRuntime) BaseModeName() string                                { return "container" }
-func (m *mockRuntime) SupportedIsolationModes() []string                   { return nil }
 func (m *mockRuntime) RequiredCapabilities(_ string) []caps.HostCapability { return nil }
 func (m *mockRuntime) PrepareAgentCommand(cmd string) string               { return cmd }
-func (m *mockRuntime) Capabilities() runtime.BackendCaps {
-	return runtime.BackendCaps{
-		NetworkIsolation: true,
-		OverlayDirs:      true,
-		CapAdd:           true,
-	}
-}
 
 func (m *mockRuntime) Descriptor() runtime.BackendDescriptor {
 	return runtime.BackendDescriptor{
 		Name:         "mock",
 		BaseModeName: "container",
+		Capabilities: runtime.BackendCaps{
+			NetworkIsolation: true,
+			OverlayDirs:      true,
+			CapAdd:           true,
+		},
 	}
 }
 

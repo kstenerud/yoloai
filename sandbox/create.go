@@ -443,7 +443,7 @@ func (m *Manager) buildConfigAndMeta(ctx context.Context, opts CreateOptions, pr
 	}
 
 	usernsMode := resolveUsernsMode(m.runtime, workdir, auxDirs, pr.capAdd)
-	meta := buildMeta(opts, pr, workdir, baselineSHA, dirMetas, hasPrompt, networkMode, networkAllow, usernsMode, m.runtime.Capabilities().HostFilesystem, string(resolvedArchetype), m.backend, model, mergedMounts)
+	meta := buildMeta(opts, pr, workdir, baselineSHA, dirMetas, hasPrompt, networkMode, networkAllow, usernsMode, m.runtime.Descriptor().Capabilities.HostFilesystem, string(resolvedArchetype), m.backend, model, mergedMounts)
 
 	return configData, meta, tmuxConf, promptText, nil
 }

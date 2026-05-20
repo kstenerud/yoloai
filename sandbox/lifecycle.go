@@ -98,11 +98,12 @@ func (m *Manager) applyIsolationOverride(ctx context.Context, opts StartOptions,
 	if err := config.ValidateIsolationMode(opts.Isolation); err != nil {
 		return err
 	}
-	supported := m.runtime.SupportedIsolationModes()
+	desc := m.runtime.Descriptor()
+	supported := desc.SupportedIsolationModes
 	if opts.Isolation != "container" && len(supported) > 0 {
 		ok := slices.Contains(supported, opts.Isolation)
 		if !ok {
-			return NewUsageError("isolation mode %q is not supported by the %s backend", opts.Isolation, m.runtime.Name())
+			return NewUsageError("isolation mode %q is not supported by the %s backend", opts.Isolation, desc.Name)
 		}
 	}
 	if err := checkIsolationPrerequisites(ctx, m.runtime, opts.Isolation); err != nil {

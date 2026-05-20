@@ -168,13 +168,11 @@ func TestRequiredCapabilities_Docker_InfoFails(t *testing.T) {
 	assert.Contains(t, err.Error(), "check runtimes")
 }
 
-func TestBaseModeName_Docker(t *testing.T) {
-	r := &Runtime{}
-	assert.Equal(t, "container", r.BaseModeName())
-}
-
-func TestSupportedIsolationModes_Docker(t *testing.T) {
-	r := &Runtime{}
-	modes := r.SupportedIsolationModes()
-	assert.Contains(t, modes, "container-enhanced")
+func TestDescriptor_Docker(t *testing.T) {
+	r := &Runtime{binaryName: "docker"}
+	d := r.Descriptor()
+	assert.Equal(t, "docker", d.Name)
+	assert.Equal(t, "container", d.BaseModeName)
+	assert.True(t, d.AgentProvisionedByBackend)
+	assert.Contains(t, d.SupportedIsolationModes, "container-enhanced")
 }

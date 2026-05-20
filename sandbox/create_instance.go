@@ -40,11 +40,12 @@ func (m *Manager) buildAndStart(ctx context.Context, state *sandboxState, mounts
 // buildInstanceConfig constructs the runtime.InstanceConfig from sandbox state.
 func (m *Manager) buildInstanceConfig(state *sandboxState, mounts []runtime.MountSpec, ports []runtime.PortMapping) (runtime.InstanceConfig, error) {
 	cname := InstanceName(state.name)
-	caps := m.runtime.Capabilities()
+	desc := m.runtime.Descriptor()
+	caps := desc.Capabilities
 
 	if state.networkMode == "isolated" {
 		if !caps.NetworkIsolation {
-			return runtime.InstanceConfig{}, fmt.Errorf("--network=isolated is not supported by the %s backend", m.runtime.Name())
+			return runtime.InstanceConfig{}, fmt.Errorf("--network=isolated is not supported by the %s backend", desc.Name)
 		}
 		// Per-isolation-mode check: some OCI runtimes (notably gVisor / runsc
 		// for --isolation=container-enhanced) do not honor iptables rules
@@ -88,7 +89,7 @@ func (m *Manager) buildInstanceConfig(state *sandboxState, mounts []runtime.Moun
 		instanceCfg.CapAdd = append(instanceCfg.CapAdd, "NET_ADMIN")
 	}
 
-	if err := applyOverlayAndCaps(state, caps, &instanceCfg, m.runtime.Name()); err != nil {
+	if err := applyOverlayAndCaps(state, caps, &instanceCfg, desc.Name); err != nil {
 		return runtime.InstanceConfig{}, err
 	}
 

@@ -206,15 +206,12 @@ func TestRequiredCapabilities_Podman_RootWithRunsc(t *testing.T) {
 	assert.NoError(t, err)
 }
 
-func TestBaseModeName_Podman(t *testing.T) {
+func TestDescriptor_Podman(t *testing.T) {
 	r := &Runtime{}
-	assert.Equal(t, "container", r.BaseModeName())
-}
-
-func TestSupportedIsolationModes_Podman(t *testing.T) {
-	r := &Runtime{}
-	modes := r.SupportedIsolationModes()
-	assert.Contains(t, modes, "container-enhanced")
+	d := r.Descriptor()
+	assert.Equal(t, "podman", d.Name)
+	assert.Equal(t, "container", d.BaseModeName)
+	assert.Contains(t, d.SupportedIsolationModes, "container-enhanced")
 }
 
 func TestRequiredCapabilities_Podman_RootlessIsPermanent(t *testing.T) {

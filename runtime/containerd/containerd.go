@@ -47,16 +47,6 @@ type Runtime struct {
 // Compile-time check.
 var _ runtime.Runtime = (*Runtime)(nil)
 
-// Capabilities returns the containerd backend's feature set.
-func (r *Runtime) Capabilities() runtime.BackendCaps {
-	return runtime.BackendCaps{
-		NetworkIsolation: true,
-		OverlayDirs:      false, // overlayfs-in-container not supported with Kata shim
-		CapAdd:           true,
-		HostFilesystem:   false,
-	}
-}
-
 // Descriptor returns a BackendDescriptor with the static facts for this backend.
 func (r *Runtime) Descriptor() runtime.BackendDescriptor {
 	return runtime.BackendDescriptor{
@@ -72,9 +62,6 @@ func (r *Runtime) Descriptor() runtime.BackendDescriptor {
 		},
 	}
 }
-
-// AgentProvisionedByBackend returns true — containerd containers use an npm-installed agent.
-func (r *Runtime) AgentProvisionedByBackend() bool { return true }
 
 // ResolveCopyMount returns hostPath unchanged — containerd bind-mounts the copy
 // at the original host path inside the container.
@@ -117,9 +104,6 @@ func (r *Runtime) withNamespace(ctx context.Context) context.Context {
 	return namespaces.WithNamespace(ctx, r.namespace)
 }
 
-// Name returns the backend name.
-func (r *Runtime) Name() string { return "containerd" }
-
 // TmuxSocket returns the fixed tmux socket path for containerd. A fixed path
 // is required for Kata Containers because exec'd processes run inside the VM
 // in a clean environment and may resolve a different uid-based socket path
@@ -129,14 +113,8 @@ func (r *Runtime) TmuxSocket(_ string) string { return "/tmp/yoloai-tmux.sock" }
 // Close releases the containerd client connection.
 func (r *Runtime) Close() error { return r.client.Close() }
 
-// BaseModeName returns "vm" — containerd in yoloai is exclusively for VM isolation.
-func (r *Runtime) BaseModeName() string { return "vm" }
-
 // PrepareAgentCommand returns the command unchanged — containerd needs no prefix.
 func (r *Runtime) PrepareAgentCommand(cmd string) string { return cmd }
-
-// SupportedIsolationModes returns the VM isolation modes this backend supports.
-func (r *Runtime) SupportedIsolationModes() []string { return []string{"vm", "vm-enhanced"} }
 
 // RequiredCapabilities returns the host capabilities needed for the given isolation mode.
 // containerdSocket is intentionally omitted: New() already verified it.
