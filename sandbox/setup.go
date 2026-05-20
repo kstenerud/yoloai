@@ -152,38 +152,37 @@ func (m *Manager) RunSetup(ctx context.Context, opts SetupOptions) error {
 	return nil
 }
 
+// setupTmuxConf handles step 1 of first-run setup: configure the tmux_conf setting.
+// If opts.TmuxConf is set the flag value is validated and applied directly.
+// Otherwise, the user's existing tmux config is classified and the appropriate
+// interactive prompt (or auto-selection for power users) is used.
+func (m *Manager) setupTmuxConf(ctx context.Context, opts SetupOptions) error {
+	if opts.TmuxConf != "" {
+		if err := validateTmuxConf(opts.TmuxConf); err != nil {
+			return err
+		}
+		return m.setTmuxConf(opts.TmuxConf)
+	}
+
+	class, userConfig := classifyTmuxConfig()
+	switch class {
+	case tmuxConfigLarge:
+		// Power user — skip prompt, auto-configure default+host
+		return m.setTmuxConf("default+host")
+	case tmuxConfigNone:
+		return m.promptTmuxSetup(ctx, "", true)
+	default: // tmuxConfigSmall
+		return m.promptTmuxSetup(ctx, userConfig, false)
+	}
+}
+
 // runNewUserSetup orchestrates the interactive first-run setup prompts.
 // Steps: tmux config → default backend → default agent → mark complete.
 // Returns errSetupPreview if the user chose [p] in the tmux prompt.
 func (m *Manager) runNewUserSetup(ctx context.Context, opts SetupOptions) error {
 	// Step 1: Tmux config
-	if opts.TmuxConf != "" {
-		if err := validateTmuxConf(opts.TmuxConf); err != nil {
-			return err
-		}
-		if err := m.setTmuxConf(opts.TmuxConf); err != nil {
-			return err
-		}
-	} else {
-		class, userConfig := classifyTmuxConfig()
-
-		switch class {
-		case tmuxConfigLarge:
-			// Power user — skip prompt, auto-configure default+host
-			if err := m.setTmuxConf("default+host"); err != nil {
-				return err
-			}
-
-		case tmuxConfigNone:
-			if err := m.promptTmuxSetup(ctx, "", true); err != nil {
-				return err
-			}
-
-		case tmuxConfigSmall:
-			if err := m.promptTmuxSetup(ctx, userConfig, false); err != nil {
-				return err
-			}
-		}
+	if err := m.setupTmuxConf(ctx, opts); err != nil {
+		return err
 	}
 
 	// Step 2: Default backend (skip if only one option)

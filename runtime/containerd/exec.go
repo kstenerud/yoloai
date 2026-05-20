@@ -12,6 +12,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/containerd/containerd/v2/client"
 	"github.com/containerd/containerd/v2/pkg/cio"
 	"github.com/containerd/errdefs"
 	"github.com/creack/pty"
@@ -70,20 +71,9 @@ func containerEnv(ctx context.Context, ctr interface {
 func (r *Runtime) Exec(ctx context.Context, name string, cmd []string, user string) (runtime.ExecResult, error) {
 	ctx = r.withNamespace(ctx)
 
-	ctr, err := r.client.LoadContainer(ctx, name)
+	ctr, task, err := r.loadContainerAndTask(ctx, name)
 	if err != nil {
-		if errdefs.IsNotFound(err) {
-			return runtime.ExecResult{}, runtime.ErrNotFound
-		}
-		return runtime.ExecResult{}, fmt.Errorf("load container: %w", err)
-	}
-
-	task, err := ctr.Task(ctx, nil)
-	if err != nil {
-		if errdefs.IsNotFound(err) {
-			return runtime.ExecResult{}, runtime.ErrNotRunning
-		}
-		return runtime.ExecResult{}, fmt.Errorf("load task: %w", err)
+		return runtime.ExecResult{}, err
 	}
 
 	execID := fmt.Sprintf("exec-%d", os.Getpid())
@@ -136,20 +126,9 @@ func (r *Runtime) Exec(ctx context.Context, name string, cmd []string, user stri
 func (r *Runtime) InteractiveExec(ctx context.Context, name string, cmd []string, user string, workDir string) error {
 	ctx = r.withNamespace(ctx)
 
-	ctr, err := r.client.LoadContainer(ctx, name)
+	ctr, task, err := r.loadContainerAndTask(ctx, name)
 	if err != nil {
-		if errdefs.IsNotFound(err) {
-			return runtime.ErrNotFound
-		}
-		return fmt.Errorf("load container: %w", err)
-	}
-
-	task, err := ctr.Task(ctx, nil)
-	if err != nil {
-		if errdefs.IsNotFound(err) {
-			return runtime.ErrNotRunning
-		}
-		return fmt.Errorf("load task: %w", err)
+		return err
 	}
 
 	// Set raw mode on the host terminal.
@@ -161,34 +140,110 @@ func (r *Runtime) InteractiveExec(ctx context.Context, name string, cmd []string
 	//nolint:errcheck,gosec // G115: best-effort restore; uintptr->int safe for fd
 	defer term.Restore(int(os.Stdin.Fd()), oldState)
 
-	// Create FIFO set in a temp dir with terminal=true.
+	process, exitCh, err := startInteractiveExec(ctx, task, ctr, cmd, user, workDir)
+	if err != nil {
+		return err
+	}
+	defer func() { _, _ = process.Delete(ctx) }()
+
+	// Send initial terminal size after start.
+	if rows, cols := termSize(); rows > 0 {
+		_ = process.Resize(ctx, uint32(cols), uint32(rows)) //nolint:gosec // G115: int->uint32 conversion is safe for terminal dimensions
+	}
+
+	forwardSIGWINCH(ctx, process)
+
+	<-exitCh
+	return nil
+}
+
+// loadContainerAndTask loads a container and its task from containerd, returning
+// ErrNotFound if the container is missing and ErrNotRunning if no task exists.
+func (r *Runtime) loadContainerAndTask(ctx context.Context, name string) (client.Container, client.Task, error) {
+	ctr, err := r.client.LoadContainer(ctx, name)
+	if err != nil {
+		if errdefs.IsNotFound(err) {
+			return nil, nil, runtime.ErrNotFound
+		}
+		return nil, nil, fmt.Errorf("load container: %w", err)
+	}
+	task, err := ctr.Task(ctx, nil)
+	if err != nil {
+		if errdefs.IsNotFound(err) {
+			return nil, nil, runtime.ErrNotRunning
+		}
+		return nil, nil, fmt.Errorf("load task: %w", err)
+	}
+	return ctr, task, nil
+}
+
+// forwardSIGWINCH starts a goroutine that forwards SIGWINCH to the container process.
+func forwardSIGWINCH(ctx context.Context, process client.Process) {
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGWINCH)
+	go func() {
+		for range sigCh {
+			if rows, cols := termSize(); rows > 0 {
+				_ = process.Resize(ctx, uint32(cols), uint32(rows)) //nolint:gosec // G115: int->uint32 conversion is safe for terminal dimensions
+			}
+		}
+	}()
+}
+
+// startInteractiveExec creates the FIFO set, builds the process spec, and starts the exec.
+// Returns the process, an exit channel, and any error.
+func startInteractiveExec(ctx context.Context, task client.Task, ctr client.Container, cmd []string, user, workDir string) (client.Process, <-chan client.ExitStatus, error) {
 	fifoDir, err := os.MkdirTemp("", "yoloai-exec-")
 	if err != nil {
-		return fmt.Errorf("create FIFO dir: %w", err)
+		return nil, nil, fmt.Errorf("create FIFO dir: %w", err)
 	}
-	defer os.RemoveAll(fifoDir) //nolint:errcheck // best-effort cleanup
 
 	execID := fmt.Sprintf("exec-interactive-%d", os.Getpid())
-
 	fifoSet, err := cio.NewFIFOSetInDir(fifoDir, execID, true /* terminal */)
 	if err != nil {
-		return fmt.Errorf("create FIFO set: %w", err)
+		_ = os.RemoveAll(fifoDir) // best-effort cleanup
+		return nil, nil, fmt.Errorf("create FIFO set: %w", err)
 	}
 
-	// Attach using real stdin/stdout — the shim bridges them to the container PTY.
 	ioAttach := cio.NewAttach(cio.WithTerminal, cio.WithStreams(os.Stdin, os.Stdout, nil))
 
-	// For interactive PTY execs, TERM must be set so ncurses/tmux can
-	// initialize. The container OCI spec does not include TERM (it's a
-	// runtime property, not an image property). Use the host's TERM value
-	// so the terminal type matches the PTY being bridged.
+	// For interactive PTY execs, TERM must be set so ncurses/tmux can initialize.
 	env := containerEnv(ctx, ctr)
-	term := os.Getenv("TERM")
-	if term == "" {
-		term = "xterm-256color"
+	termVal := os.Getenv("TERM")
+	if termVal == "" {
+		termVal = "xterm-256color"
 	}
-	env = append(env, "TERM="+term)
+	env = append(env, "TERM="+termVal)
 
+	processSpec := buildInteractiveProcessSpec(cmd, user, workDir, env)
+
+	process, err := task.Exec(ctx, execID, processSpec, func(id string) (cio.IO, error) {
+		return ioAttach(fifoSet)
+	})
+	if err != nil {
+		_ = os.RemoveAll(fifoDir) // best-effort cleanup
+		return nil, nil, fmt.Errorf("exec create: %w", err)
+	}
+	// fifoDir cleanup handled by caller via process.Delete
+
+	exitCh, err := process.Wait(ctx)
+	if err != nil {
+		_, _ = process.Delete(ctx)
+		_ = os.RemoveAll(fifoDir) // best-effort cleanup
+		return nil, nil, fmt.Errorf("exec wait: %w", err)
+	}
+
+	if err := process.Start(ctx); err != nil {
+		_, _ = process.Delete(ctx)
+		_ = os.RemoveAll(fifoDir) // best-effort cleanup
+		return nil, nil, fmt.Errorf("exec start: %w", err)
+	}
+
+	return process, exitCh, nil
+}
+
+// buildInteractiveProcessSpec constructs the OCI process spec for a PTY exec.
+func buildInteractiveProcessSpec(cmd []string, user, workDir string, env []string) *specs.Process {
 	processSpec := &specs.Process{
 		Args:     cmd,
 		Cwd:      "/",
@@ -210,42 +265,5 @@ func (r *Runtime) InteractiveExec(ctx context.Context, name string, cmd []string
 			Height: uint(rows), //nolint:gosec // G115
 		}
 	}
-
-	process, err := task.Exec(ctx, execID, processSpec, func(id string) (cio.IO, error) {
-		return ioAttach(fifoSet)
-	})
-	if err != nil {
-		return fmt.Errorf("exec create: %w", err)
-	}
-	defer func() { _, _ = process.Delete(ctx) }()
-
-	exitCh, err := process.Wait(ctx)
-	if err != nil {
-		return fmt.Errorf("exec wait: %w", err)
-	}
-
-	if err := process.Start(ctx); err != nil {
-		return fmt.Errorf("exec start: %w", err)
-	}
-
-	// Send initial terminal size after start.
-	if rows, cols := termSize(); rows > 0 {
-		_ = process.Resize(ctx, uint32(cols), uint32(rows)) //nolint:gosec // G115: int->uint32 conversion is safe for terminal dimensions
-	}
-
-	// Forward SIGWINCH (terminal resize) in a goroutine.
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGWINCH)
-	defer signal.Stop(sigCh)
-
-	go func() {
-		for range sigCh {
-			if rows, cols := termSize(); rows > 0 {
-				_ = process.Resize(ctx, uint32(cols), uint32(rows)) //nolint:gosec // G115: int->uint32 conversion is safe for terminal dimensions
-			}
-		}
-	}()
-
-	<-exitCh
-	return nil
+	return processSpec
 }

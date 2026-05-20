@@ -44,46 +44,13 @@ const dockerImageRef = "docker.io/library/yoloai-base:latest"
 func (r *Runtime) Setup(ctx context.Context, sourceDir string, output io.Writer, logger *slog.Logger, force bool) error {
 	ctx = r.withNamespace(ctx)
 
-	if !force {
-		if img, err := r.client.GetImage(ctx, imageRef); err == nil {
-			// Image record exists — verify the FULL descriptor tree is accessible.
-			// Checking only the root is insufficient: GC can remove child blobs
-			// (platform manifests, configs, compressed layers) while leaving the
-			// root manifest list entry intact, causing img.Unpack to fail later.
-			if err := r.verifyDescriptorTree(ctx, r.client.ContentStore(), img.Target()); err == nil {
-				return nil // all blobs accessible
-			}
-			// One or more blobs missing — fall through to rebuild/reimport.
-		}
+	if r.imageAlreadyReady(ctx, force) {
+		return nil
 	}
 
-	// Verify docker is available.
-	dockerBin, err := exec.LookPath("docker")
+	dockerBin, err := r.buildDockerImage(ctx, output, logger)
 	if err != nil {
-		return fmt.Errorf("docker is required to build the yoloai-base image for the containerd backend\n" +
-			"  Install Docker: https://docs.docker.com/get-docker/\n" +
-			"  Alternatively, import a pre-built image with:\n" +
-			"    docker load -i yoloai-base.tar | ctr -n yoloai images import -")
-	}
-
-	// Build the image with Docker using the embedded build context (tar piped to
-	// stdin). The profiles/base directory may not exist, so we must not pass it
-	// as the build context.
-	buildCtx, err := dockerrt.CreateBuildContext()
-	if err != nil {
-		return fmt.Errorf("create build context: %w", err)
-	}
-
-	fmt.Fprintln(output, "Building yoloai-base image with Docker (this may take a few minutes)...") //nolint:errcheck // best-effort output
-	logger.Info("building yoloai-base image")
-
-	buildCmd := exec.CommandContext(ctx, dockerBin, "build", "-t", imageRef, "-f", "Dockerfile", "-") //nolint:gosec // G204: args are constants
-	buildCmd.Stdout = output
-	buildCmd.Stderr = output
-	buildCmd.Stdin = buildCtx
-
-	if err := buildCmd.Run(); err != nil {
-		return fmt.Errorf("docker build: %w", err)
+		return err
 	}
 
 	// Fast path: Docker running in containerd-snapshotter mode stores images
@@ -101,16 +68,58 @@ func (r *Runtime) Setup(ctx context.Context, sourceDir string, output io.Writer,
 	// Slow path: docker save | ctr images import -
 	// Used when Docker is not in containerd-snapshotter mode, or when the
 	// fast path fails verification.
+	return r.slowPathImport(ctx, dockerBin, output)
+}
+
+// imageAlreadyReady returns true if force is false and the full image descriptor
+// tree is accessible in the containerd namespace.
+func (r *Runtime) imageAlreadyReady(ctx context.Context, force bool) bool {
+	if force {
+		return false
+	}
+	img, err := r.client.GetImage(ctx, imageRef)
+	if err != nil {
+		return false
+	}
+	// Verify the FULL descriptor tree is accessible — not just the root manifest.
+	// GC can remove child blobs while leaving the root manifest list entry intact.
+	return r.verifyDescriptorTree(ctx, r.client.ContentStore(), img.Target()) == nil
+}
+
+// buildDockerImage builds the yoloai-base image using Docker and returns the docker binary path.
+func (r *Runtime) buildDockerImage(ctx context.Context, output io.Writer, logger *slog.Logger) (string, error) {
+	dockerBin, err := exec.LookPath("docker")
+	if err != nil {
+		return "", fmt.Errorf("docker is required to build the yoloai-base image for the containerd backend\n" +
+			"  Install Docker: https://docs.docker.com/get-docker/\n" +
+			"  Alternatively, import a pre-built image with:\n" +
+			"    docker load -i yoloai-base.tar | ctr -n yoloai images import -")
+	}
+
+	buildCtx, err := dockerrt.CreateBuildContext()
+	if err != nil {
+		return "", fmt.Errorf("create build context: %w", err)
+	}
+
+	fmt.Fprintln(output, "Building yoloai-base image with Docker (this may take a few minutes)...") //nolint:errcheck // best-effort output
+	logger.Info("building yoloai-base image")
+
+	buildCmd := exec.CommandContext(ctx, dockerBin, "build", "-t", imageRef, "-f", "Dockerfile", "-") //nolint:gosec // G204: args are constants
+	buildCmd.Stdout = output
+	buildCmd.Stderr = output
+	buildCmd.Stdin = buildCtx
+
+	if err := buildCmd.Run(); err != nil {
+		return "", fmt.Errorf("docker build: %w", err)
+	}
+	return dockerBin, nil
+}
+
+// slowPathImport uses "docker save | ctr images import -" to import the image.
+func (r *Runtime) slowPathImport(ctx context.Context, dockerBin string, output io.Writer) error {
 	ctrBin, err := exec.LookPath("ctr")
 	if err != nil {
-		var hint string
-		switch runtime.GOOS {
-		case "linux":
-			hint = "  Ubuntu/Debian: sudo apt install containerd\n  RHEL/Fedora:   sudo dnf install containerd"
-		default:
-			hint = "  containerd requires a Linux host; see https://containerd.io/docs/getting-started/"
-		}
-		return fmt.Errorf("ctr (containerd CLI) not found; install containerd:\n%s", hint)
+		return fmt.Errorf("ctr (containerd CLI) not found; install containerd:\n%s", ctrInstallHint())
 	}
 
 	fmt.Fprintln(output, "Importing image into containerd namespace yoloai (this may take a few minutes)...") //nolint:errcheck // best-effort output
@@ -160,6 +169,16 @@ func (r *Runtime) Setup(ctx context.Context, sourceDir string, output io.Writer,
 
 	fmt.Fprintln(output, "Image imported successfully.") //nolint:errcheck // best-effort output
 	return nil
+}
+
+// ctrInstallHint returns a platform-appropriate hint for installing containerd.
+func ctrInstallHint() string {
+	switch runtime.GOOS {
+	case "linux":
+		return "  Ubuntu/Debian: sudo apt install containerd\n  RHEL/Fedora:   sudo dnf install containerd"
+	default:
+		return "  containerd requires a Linux host; see https://containerd.io/docs/getting-started/"
+	}
 }
 
 // linkFromDockerNamespace registers the yoloai-base image in the yoloai

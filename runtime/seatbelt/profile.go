@@ -22,115 +22,133 @@ func GenerateProfile(cfg runtime.InstanceConfig, sandboxDir, homeDir string) str
 	b.WriteString("(version 1)\n")
 	b.WriteString("(deny default)\n\n")
 
-	// --- Process control ---
+	writeProfileHeader(&b)
+	writeProfileSystemPaths(&b)
+	writeProfileSandboxDir(&b, sandboxDir)
+	writeProfileMountRules(&b, cfg.Mounts)
+	writeProfileHomeDir(&b, homeDir)
+	writeProfileNetwork(&b, cfg.NetworkMode)
+	writeProfileDevices(&b)
+
+	return b.String()
+}
+
+// writeProfileHeader writes process, system-info, and IPC rules.
+func writeProfileHeader(b *strings.Builder) {
 	b.WriteString("; Process execution and signals\n")
 	b.WriteString("(allow process-exec)\n")
 	b.WriteString("(allow process-fork)\n")
 	b.WriteString("(allow signal)\n\n")
 
-	// --- System information ---
 	b.WriteString("; System information\n")
 	b.WriteString("(allow sysctl-read)\n")
 	b.WriteString("(allow file-read-metadata)\n\n")
 
-	// --- Root directory entry (needed by bash/dyld to resolve paths) ---
 	b.WriteString("; Root directory listing\n")
 	b.WriteString("(allow file-read* (literal \"/\"))\n\n")
 
-	// --- System libraries and binaries ---
-	b.WriteString("; System libraries, frameworks, and binaries\n")
-	for _, path := range systemReadPaths() {
-		fmt.Fprintf(&b, "(allow file-read* (subpath %q))\n", path)
-	}
-	b.WriteString("\n")
-
-	// --- Detected toolchain paths ---
-	toolchainPaths := toolchainReadPaths()
-	if len(toolchainPaths) > 0 {
-		b.WriteString("; Detected toolchain installation prefixes\n")
-		for _, path := range toolchainPaths {
-			for _, p := range resolvePathVariants(path) {
-				fmt.Fprintf(&b, "(allow file-read* (subpath %q))\n", p)
-			}
-		}
-		b.WriteString("\n")
-	}
-
-	// --- Temp directories ---
-	b.WriteString("; Temporary directories\n")
-	for _, path := range tempPaths() {
-		fmt.Fprintf(&b, "(allow file-read* file-write* (subpath %q))\n", path)
-	}
-	b.WriteString("\n")
-
-	// --- IPC ---
 	b.WriteString("; Mach and IPC\n")
 	b.WriteString("(allow mach-lookup)\n")
 	b.WriteString("(allow ipc-posix-shm-read-data)\n")
 	b.WriteString("(allow ipc-posix-shm-write-data)\n")
 	b.WriteString("(allow ipc-posix-shm-write-create)\n")
 	b.WriteString("(allow ipc-posix-sem)\n\n")
+}
 
-	// --- Sandbox directory (always read-write) ---
-	b.WriteString("; Sandbox directory\n")
-	for _, p := range resolvePathVariants(sandboxDir) {
-		fmt.Fprintf(&b, "(allow file-read* file-write* (subpath %q))\n", p)
+// writeProfileSystemPaths writes rules for system libraries, toolchains, and temp dirs.
+func writeProfileSystemPaths(b *strings.Builder) {
+	b.WriteString("; System libraries, frameworks, and binaries\n")
+	for _, path := range systemReadPaths() {
+		fmt.Fprintf(b, "(allow file-read* (subpath %q))\n", path)
 	}
 	b.WriteString("\n")
 
-	// --- Mount-derived filesystem rules ---
+	toolchainPaths := toolchainReadPaths()
+	if len(toolchainPaths) > 0 {
+		b.WriteString("; Detected toolchain installation prefixes\n")
+		for _, path := range toolchainPaths {
+			for _, p := range resolvePathVariants(path) {
+				fmt.Fprintf(b, "(allow file-read* (subpath %q))\n", p)
+			}
+		}
+		b.WriteString("\n")
+	}
+
+	b.WriteString("; Temporary directories\n")
+	for _, path := range tempPaths() {
+		fmt.Fprintf(b, "(allow file-read* file-write* (subpath %q))\n", path)
+	}
+	b.WriteString("\n")
+}
+
+// writeProfileSandboxDir writes read-write rules for the sandbox directory.
+func writeProfileSandboxDir(b *strings.Builder, sandboxDir string) {
+	b.WriteString("; Sandbox directory\n")
+	for _, p := range resolvePathVariants(sandboxDir) {
+		fmt.Fprintf(b, "(allow file-read* file-write* (subpath %q))\n", p)
+	}
+	b.WriteString("\n")
+}
+
+// writeProfileMountRules writes filesystem rules derived from mount specs.
+func writeProfileMountRules(b *strings.Builder, mounts []runtime.MountSpec) {
 	b.WriteString("; Mount-derived filesystem rules\n")
-	for _, m := range cfg.Mounts {
+	for _, m := range mounts {
 		if m.Source == "" {
 			continue
 		}
 		for _, src := range resolvePathVariants(m.Source) {
 			if m.ReadOnly {
-				fmt.Fprintf(&b, "(allow file-read* (subpath %q))\n", src)
+				fmt.Fprintf(b, "(allow file-read* (subpath %q))\n", src)
 			} else {
-				fmt.Fprintf(&b, "(allow file-read* file-write* (subpath %q))\n", src)
+				fmt.Fprintf(b, "(allow file-read* file-write* (subpath %q))\n", src)
 			}
 		}
 	}
 	b.WriteString("\n")
+}
 
-	// --- Home directory (minimal access — credentials excluded by default) ---
+// writeProfileHomeDir writes rules for the user's home directory (minimal access).
+func writeProfileHomeDir(b *strings.Builder, homeDir string) {
 	b.WriteString("; Home directory (agent binaries and git config only)\n")
 	for _, p := range resolvePathVariants(filepath.Join(homeDir, ".local")) {
-		fmt.Fprintf(&b, "(allow file-read* (subpath %q))\n", p)
+		fmt.Fprintf(b, "(allow file-read* (subpath %q))\n", p)
 	}
 	for _, p := range resolvePathVariants(filepath.Join(homeDir, ".gitconfig")) {
-		fmt.Fprintf(&b, "(allow file-read* (literal %q))\n", p)
+		fmt.Fprintf(b, "(allow file-read* (literal %q))\n", p)
 	}
 	for _, p := range resolvePathVariants(filepath.Join(homeDir, ".config", "git")) {
-		fmt.Fprintf(&b, "(allow file-read* (subpath %q))\n", p)
+		fmt.Fprintf(b, "(allow file-read* (subpath %q))\n", p)
 	}
 	b.WriteString("\n")
 
-	// --- iOS/Xcode development directories ---
 	b.WriteString("; iOS/Xcode development (SwiftPM caches and Xcode metadata)\n")
 	for _, p := range resolvePathVariants(filepath.Join(homeDir, "Library", "Caches", "org.swift.swiftpm")) {
-		fmt.Fprintf(&b, "(allow file-read* file-write* (subpath %q))\n", p)
+		fmt.Fprintf(b, "(allow file-read* file-write* (subpath %q))\n", p)
 	}
 	for _, p := range resolvePathVariants(filepath.Join(homeDir, "Library", "Developer", "Xcode")) {
-		fmt.Fprintf(&b, "(allow file-read* file-write* (subpath %q))\n", p)
+		fmt.Fprintf(b, "(allow file-read* file-write* (subpath %q))\n", p)
 	}
 	for _, p := range resolvePathVariants(filepath.Join(homeDir, "Library", "Caches", "swift-build")) {
-		fmt.Fprintf(&b, "(allow file-read* file-write* (subpath %q))\n", p)
+		fmt.Fprintf(b, "(allow file-read* file-write* (subpath %q))\n", p)
 	}
 	for _, p := range resolvePathVariants(filepath.Join(homeDir, "Library", "org.swift.swiftpm")) {
-		fmt.Fprintf(&b, "(allow file-read* file-write* (subpath %q))\n", p)
+		fmt.Fprintf(b, "(allow file-read* file-write* (subpath %q))\n", p)
 	}
 	b.WriteString("\n")
+}
 
-	// --- Network ---
+// writeProfileNetwork writes network access rules.
+func writeProfileNetwork(b *strings.Builder, networkMode string) {
 	b.WriteString("; Network access\n")
-	if cfg.NetworkMode != "none" {
+	if networkMode != "none" {
 		b.WriteString("(allow network*)\n")
 	}
 	b.WriteString("\n")
+}
 
-	// --- Pseudo-terminals ---
+// writeProfileDevices writes pseudo-terminal and device access rules.
+func writeProfileDevices(b *strings.Builder) {
 	b.WriteString("; Pseudo-terminal access (required for tmux/agent)\n")
 	b.WriteString("(allow file-ioctl)\n") // terminal control (tcsetattr, TIOCGWINSZ, etc.)
 	b.WriteString("(allow file-read* file-write* (regex #\"/dev/pty.*\"))\n")
@@ -139,8 +157,6 @@ func GenerateProfile(cfg runtime.InstanceConfig, sandboxDir, homeDir string) str
 	b.WriteString("(allow file-read* file-write* (literal \"/dev/null\"))\n")
 	b.WriteString("(allow file-read* file-write* (literal \"/dev/random\"))\n")
 	b.WriteString("(allow file-read* file-write* (literal \"/dev/urandom\"))\n")
-
-	return b.String()
 }
 
 // systemReadPaths returns paths that should be readable for system

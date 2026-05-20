@@ -28,64 +28,36 @@ func TestGenerateContext_AllFields(t *testing.T) {
 	}
 
 	result := GenerateContext(meta)
+	assertContextContains(t, result)
+}
 
-	// Header
-	if !strings.Contains(result, "# Sandbox Environment") {
-		t.Error("missing header")
+// assertContextContains checks all expected sections are present in the context output.
+func assertContextContains(t *testing.T, result string) {
+	t.Helper()
+	checks := []struct {
+		substr string
+		label  string
+	}{
+		{"# Sandbox Environment", "missing header"},
+		{"yoloAI sandbox", "missing sandbox description"},
+		{"## Directories", "missing Directories section"},
+		{"/home/user/project (copy) ← working directory", "missing workdir line"},
+		{"/home/user/lib → /opt/lib (ro)", "missing aux dir with mount path redirect"},
+		{"/data/shared (rw)", "missing rw aux dir"},
+		{"## Files", "missing Files section"},
+		{"/yoloai/files/", "missing files exchange path"},
+		{"## Cache", "missing Cache section"},
+		{"/yoloai/cache/", "missing cache path"},
+		{"## Terminology", "missing Terminology section"},
+		{"## Network", "missing Network section"},
+		{"Isolated. Allowed domains: api.anthropic.com, sentry.io", "missing network domains"},
+		{"## Resources", "missing Resources section"},
+		{"4 cpus, 8g memory", "missing resource limits"},
 	}
-	if !strings.Contains(result, "yoloAI sandbox") {
-		t.Error("missing sandbox description")
-	}
-
-	// Directories
-	if !strings.Contains(result, "## Directories") {
-		t.Error("missing Directories section")
-	}
-	if !strings.Contains(result, "/home/user/project (copy) ← working directory") {
-		t.Error("missing workdir line")
-	}
-	if !strings.Contains(result, "/home/user/lib → /opt/lib (ro)") {
-		t.Error("missing aux dir with mount path redirect")
-	}
-	if !strings.Contains(result, "/data/shared (rw)") {
-		t.Error("missing rw aux dir")
-	}
-
-	// Files
-	if !strings.Contains(result, "## Files") {
-		t.Error("missing Files section")
-	}
-	if !strings.Contains(result, "/yoloai/files/") {
-		t.Error("missing files exchange path")
-	}
-
-	// Cache
-	if !strings.Contains(result, "## Cache") {
-		t.Error("missing Cache section")
-	}
-	if !strings.Contains(result, "/yoloai/cache/") {
-		t.Error("missing cache path")
-	}
-
-	// Terminology
-	if !strings.Contains(result, "## Terminology") {
-		t.Error("missing Terminology section")
-	}
-
-	// Network
-	if !strings.Contains(result, "## Network") {
-		t.Error("missing Network section")
-	}
-	if !strings.Contains(result, "Isolated. Allowed domains: api.anthropic.com, sentry.io") {
-		t.Error("missing network domains")
-	}
-
-	// Resources
-	if !strings.Contains(result, "## Resources") {
-		t.Error("missing Resources section")
-	}
-	if !strings.Contains(result, "4 cpus, 8g memory") {
-		t.Error("missing resource limits")
+	for _, c := range checks {
+		if !strings.Contains(result, c.substr) {
+			t.Error(c.label)
+		}
 	}
 }
 

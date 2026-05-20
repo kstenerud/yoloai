@@ -68,39 +68,44 @@ func runClone(cmd *cobra.Command, args []string) error {
 	// Start (and optionally attach) — needs a runtime.
 	backend := resolveBackendForSandbox(dst)
 	return withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
-		startMgr := sandbox.NewManager(rt, slog.Default(), cmd.InOrStdin(), cmd.ErrOrStderr())
-		if err := startMgr.Start(ctx, dst, sandbox.StartOptions{
-			Prompt:     prompt,
-			PromptFile: promptFile,
-		}); err != nil {
-			return err
-		}
-
-		if jsonEnabled(cmd) {
-			return writeJSON(cmd.OutOrStdout(), map[string]any{
-				"source": src,
-				"dest":   dst,
-				"action": "started",
-			})
-		}
-
-		fmt.Fprintf(cmd.OutOrStdout(), "Cloned %s → %s (started)\n", src, dst) //nolint:errcheck
-
-		if !attach {
-			return nil
-		}
-
-		meta, err := sandbox.LoadMeta(sandbox.Dir(dst))
-		if err != nil {
-			return err
-		}
-		user := tmuxExecUser(meta)
-		containerName := sandbox.InstanceName(dst)
-		if err := waitForTmux(ctx, rt, containerName, dst, 300*time.Second, user); err != nil {
-			return fmt.Errorf("waiting for tmux session: %w", err)
-		}
-		return attachToSandbox(ctx, rt, containerName, dst, user)
+		return runCloneStart(cmd, ctx, rt, src, dst, prompt, promptFile, attach)
 	})
+}
+
+// runCloneStart starts the cloned sandbox and optionally attaches.
+func runCloneStart(cmd *cobra.Command, ctx context.Context, rt runtime.Runtime, src, dst, prompt, promptFile string, attach bool) error {
+	startMgr := sandbox.NewManager(rt, slog.Default(), cmd.InOrStdin(), cmd.ErrOrStderr())
+	if err := startMgr.Start(ctx, dst, sandbox.StartOptions{
+		Prompt:     prompt,
+		PromptFile: promptFile,
+	}); err != nil {
+		return err
+	}
+
+	if jsonEnabled(cmd) {
+		return writeJSON(cmd.OutOrStdout(), map[string]any{
+			"source": src,
+			"dest":   dst,
+			"action": "started",
+		})
+	}
+
+	fmt.Fprintf(cmd.OutOrStdout(), "Cloned %s → %s (started)\n", src, dst) //nolint:errcheck
+
+	if !attach {
+		return nil
+	}
+
+	meta, err := sandbox.LoadMeta(sandbox.Dir(dst))
+	if err != nil {
+		return err
+	}
+	user := tmuxExecUser(meta)
+	containerName := sandbox.InstanceName(dst)
+	if err := waitForTmux(ctx, rt, containerName, dst, 300*time.Second, user); err != nil {
+		return fmt.Errorf("waiting for tmux session: %w", err)
+	}
+	return attachToSandbox(ctx, rt, containerName, dst, user)
 }
 
 // addCloneFlags registers the shared flags for clone commands.

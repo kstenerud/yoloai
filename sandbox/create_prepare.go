@@ -3,6 +3,7 @@ package sandbox
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -69,12 +70,31 @@ func (m *Manager) resolveProfileConfig(ctx context.Context, opts *CreateOptions,
 		return nil, err
 	}
 
+	if err := applyMergedProfileToOpts(opts, agentDef, merged, pr, ycfg.Agent); err != nil {
+		return nil, err
+	}
+
+	pr.name = opts.Profile
+	pr.imageRef = config.ResolveProfileImage(opts.Profile, chain)
+
+	// Build profile image if needed (Docker only)
+	if err := EnsureProfileImage(ctx, m.runtime, opts.Profile, AutoBuildSecrets(), m.output, m.logger, false); err != nil {
+		return nil, fmt.Errorf("build profile image: %w", err)
+	}
+
+	return pr, nil
+}
+
+// applyMergedProfileToOpts applies merged profile values to opts and pr.
+// baseAgent is the agent name from the base config (ycfg.Agent), used to
+// detect whether the CLI override has been applied.
+func applyMergedProfileToOpts(opts *CreateOptions, agentDef **agent.Definition, merged *config.MergedConfig, pr *profileResult, baseAgent string) error {
 	// Apply merged values where CLI didn't override
-	if opts.Agent == ycfg.Agent && merged.Agent != "" {
+	if opts.Agent == baseAgent && merged.Agent != "" {
 		opts.Agent = merged.Agent
 		def := agent.GetAgent(opts.Agent)
 		if def == nil {
-			return nil, NewUsageError("unknown agent from profile: %s", opts.Agent)
+			return NewUsageError("unknown agent from profile: %s", opts.Agent)
 		}
 		*agentDef = def
 	}
@@ -95,7 +115,7 @@ func (m *Manager) resolveProfileConfig(ctx context.Context, opts *CreateOptions,
 	if opts.Workdir.Path == "" && merged.Workdir != nil {
 		wdPath, err := ExpandPath(merged.Workdir.Path)
 		if err != nil {
-			return nil, fmt.Errorf("expand profile workdir path: %w", err)
+			return fmt.Errorf("expand profile workdir path: %w", err)
 		}
 		opts.Workdir = DirSpec{
 			Path:      wdPath,
@@ -105,19 +125,9 @@ func (m *Manager) resolveProfileConfig(ctx context.Context, opts *CreateOptions,
 	}
 
 	// Profile directories: prepend before CLI aux dirs
-	var profileDirs []DirSpec
-	for _, pd := range merged.Directories {
-		dirPath, err := ExpandPath(pd.Path)
-		if err != nil {
-			return nil, fmt.Errorf("expand profile directory path: %w", err)
-		}
-		profileDirs = append(profileDirs, DirSpec{
-			Path:      dirPath,
-			Mode:      DirMode(pd.Mode),
-			MountPath: pd.Mount,
-		})
+	if err := prependProfileDirs(opts, merged.Directories); err != nil {
+		return err
 	}
-	opts.AuxDirs = append(profileDirs, opts.AuxDirs...)
 
 	// Profile ports: additive
 	opts.Ports = append(merged.Ports, opts.Ports...)
@@ -136,55 +146,71 @@ func (m *Manager) resolveProfileConfig(ctx context.Context, opts *CreateOptions,
 	pr.setup = merged.Setup
 	pr.autoCommitInterval = merged.AutoCommitInterval
 	pr.isolation = merged.Isolation
-	pr.name = opts.Profile
 
-	// Resolve image ref
-	pr.imageRef = config.ResolveProfileImage(opts.Profile, chain)
+	return nil
+}
 
-	// Build profile image if needed (Docker only)
-	if err := EnsureProfileImage(ctx, m.runtime, opts.Profile, AutoBuildSecrets(), m.output, m.logger, false); err != nil {
-		return nil, fmt.Errorf("build profile image: %w", err)
+// prependProfileDirs prepends profile directory specs before the CLI aux dirs.
+func prependProfileDirs(opts *CreateOptions, profileDirs []config.ProfileDir) error {
+	var dirs []DirSpec
+	for _, pd := range profileDirs {
+		dirPath, err := ExpandPath(pd.Path)
+		if err != nil {
+			return fmt.Errorf("expand profile directory path: %w", err)
+		}
+		dirs = append(dirs, DirSpec{
+			Path:      dirPath,
+			Mode:      DirMode(pd.Mode),
+			MountPath: pd.Mount,
+		})
 	}
-
-	return pr, nil
+	opts.AuxDirs = append(dirs, opts.AuxDirs...)
+	return nil
 }
 
 // applyConfigDefaults fills in values from base config when the profile didn't
 // set them, and applies CLI overrides for resources.
 func applyConfigDefaults(opts *CreateOptions, ycfg *config.YoloaiConfig, pr *profileResult) error {
-	// Resources from base config (if profile didn't set them)
-	if pr.resources == nil && ycfg.Resources != nil {
-		r := *ycfg.Resources
-		pr.resources = &r
+	if opts.Profile == "" {
+		applyBaseConfigDefaults(opts, ycfg, pr)
 	}
+	applyBaseResourceDefaults(ycfg, pr)
+	return applyCLIOverrides(opts, pr)
+}
 
-	// Mounts from base config (if profile didn't set them)
-	if opts.Profile == "" && len(ycfg.Mounts) > 0 {
+// applyBaseConfigDefaults applies mounts, ports, caps, and network from base
+// config when no profile is active.
+func applyBaseConfigDefaults(opts *CreateOptions, ycfg *config.YoloaiConfig, pr *profileResult) {
+	if len(ycfg.Mounts) > 0 {
 		pr.mounts = ycfg.Mounts
 	}
-
-	// Ports from base config (if profile didn't set them)
-	if opts.Profile == "" && len(ycfg.Ports) > 0 {
+	if len(ycfg.Ports) > 0 {
 		opts.Ports = append(ycfg.Ports, opts.Ports...)
 	}
+	pr.capAdd = ycfg.CapAdd
+	pr.devices = ycfg.Devices
+	pr.setup = ycfg.Setup
+	pr.isolation = ycfg.Isolation
 
-	// Recipes from base config (if profile didn't set them)
-	if opts.Profile == "" {
-		pr.capAdd = ycfg.CapAdd
-		pr.devices = ycfg.Devices
-		pr.setup = ycfg.Setup
-		pr.isolation = ycfg.Isolation
-	}
-
-	// Network from base config (if profile didn't set it and CLI didn't override)
-	if opts.Profile == "" && ycfg.Network != nil && opts.Network == NetworkModeDefault {
+	if ycfg.Network != nil && opts.Network == NetworkModeDefault {
 		if ycfg.Network.Isolated {
 			opts.Network = NetworkModeIsolated
 		}
 		opts.NetworkAllow = append(ycfg.Network.Allow, opts.NetworkAllow...)
 	}
+}
 
-	// CLI overrides for resources
+// applyBaseResourceDefaults applies resource limits from base config when the
+// profile didn't set them.
+func applyBaseResourceDefaults(ycfg *config.YoloaiConfig, pr *profileResult) {
+	if pr.resources == nil && ycfg.Resources != nil {
+		r := *ycfg.Resources
+		pr.resources = &r
+	}
+}
+
+// applyCLIOverrides applies CLI flag overrides for resources, isolation, and env.
+func applyCLIOverrides(opts *CreateOptions, pr *profileResult) error {
 	if opts.CPUs != "" {
 		if pr.resources == nil {
 			pr.resources = &config.ResourceLimits{}
@@ -198,7 +224,6 @@ func applyConfigDefaults(opts *CreateOptions, ycfg *config.YoloaiConfig, pr *pro
 		pr.resources.Memory = opts.Memory
 	}
 
-	// CLI --isolation overrides config/profile isolation mode
 	if opts.Isolation != "" {
 		if err := config.ValidateIsolationMode(opts.Isolation); err != nil {
 			return err
@@ -207,7 +232,6 @@ func applyConfigDefaults(opts *CreateOptions, ycfg *config.YoloaiConfig, pr *pro
 		pr.isolationExplicit = true
 	}
 
-	// CLI --env overrides config/profile env vars
 	if len(opts.Env) > 0 {
 		if pr.env == nil {
 			pr.env = make(map[string]string)
@@ -238,131 +262,181 @@ func (m *Manager) parseAndValidateDirs(ctx context.Context, opts CreateOptions, 
 		return nil, nil, NewUsageError("workdir does not exist: %s", workdir.Path)
 	}
 
-	// Auth checks
+	if err := m.checkAuthAndLocalhostWarnings(agentDef, mergedEnv, cfgModel, opts, credOverrides); err != nil {
+		return nil, nil, err
+	}
+
+	auxDirs, err := buildAuxDirs(opts.AuxDirs)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	if err := checkDirSafety(workdir, auxDirs, m.output); err != nil {
+		return nil, nil, err
+	}
+
+	if err := checkDirOverlaps(workdir, auxDirs); err != nil {
+		return nil, nil, err
+	}
+
+	cancelled, err := m.checkDirtyRepos(ctx, workdir, auxDirs, opts.Yes)
+	if err != nil {
+		return nil, nil, err
+	}
+	if cancelled {
+		return nil, nil, nil // user cancelled
+	}
+
+	return workdir, auxDirs, nil
+}
+
+// checkAuthAndLocalhostWarnings performs auth checks and localhost URL warnings.
+func (m *Manager) checkAuthAndLocalhostWarnings(agentDef *agent.Definition, mergedEnv map[string]string, cfgModel string, opts CreateOptions, credOverrides map[string]string) error {
 	hasAPIKey := hasAnyAPIKey(agentDef, credOverrides)
 	hasAuth := hasAnyAuthFile(agentDef)
 	hasAuthHint := hasAnyAuthHint(agentDef, mergedEnv, credOverrides)
-	if !hasAPIKey && !hasAuth && !hasAuthHint {
-		if agentDef.AuthOptional {
-			fmt.Fprintf(m.output, "Warning: no authentication detected for %s (it may use credentials yoloai cannot check)\n", agentDef.Name) //nolint:errcheck // best-effort warning
-		} else {
-			msg := fmt.Sprintf("no authentication found for %s: set %s",
-				agentDef.Name, strings.Join(agentDef.APIKeyEnvVars, "/"))
-			if authDesc := describeSeedAuthFiles(agentDef); authDesc != "" {
-				msg += fmt.Sprintf(" or provide OAuth credentials (%s)", authDesc)
-			}
-			if len(agentDef.AuthHintEnvVars) > 0 {
-				msg += fmt.Sprintf(", or set %s for local models", strings.Join(agentDef.AuthHintEnvVars, "/"))
-			}
-			return nil, nil, NewAuthError("%s: %w", msg, ErrMissingAPIKey)
-		}
+	if err := checkAgentAuth(agentDef, hasAPIKey, hasAuth, hasAuthHint, m.output); err != nil {
+		return err
 	}
 
 	// Local model server requires a model
 	if !hasAPIKey && !hasAuth && hasAuthHint && opts.Model == "" && cfgModel == "" {
-		return nil, nil, NewUsageError("a model is required when using a local model server: use --model or 'yoloai config set model <model>'")
+		return NewUsageError("a model is required when using a local model server: use --model or 'yoloai config set model <model>'")
 	}
 
-	// Localhost URL warning for backends that isolate the agent inside a
-	// container or VM where localhost resolves to the container, not the host.
-	// For process-based backends (seatbelt), the agent runs on the host and
-	// localhost resolves correctly — skip this warning.
-	if m.runtime.AgentProvisionedByBackend() {
-		caps := m.runtime.Capabilities()
-		for _, key := range agentDef.AuthHintEnvVars {
-			for _, val := range []string{os.Getenv(key), mergedEnv[key]} {
-				if val != "" && containsLocalhost(val) {
-					hint := "use the host's routable IP instead"
-					if caps.NetworkIsolation {
-						hint = "use host.docker.internal instead"
-					}
-					return nil, nil, NewUsageError("%s contains a localhost address (%s) which won't work inside a %s sandbox — %s",
-						key, val, m.runtime.Name(), hint)
-				}
+	return m.checkLocalhostURLs(agentDef, mergedEnv)
+}
+
+// checkAgentAuth verifies that the agent has the necessary authentication configured.
+func checkAgentAuth(agentDef *agent.Definition, hasAPIKey, hasAuth, hasAuthHint bool, output io.Writer) error {
+	if hasAPIKey || hasAuth || hasAuthHint {
+		return nil
+	}
+	if agentDef.AuthOptional {
+		fmt.Fprintf(output, "Warning: no authentication detected for %s (it may use credentials yoloai cannot check)\n", agentDef.Name) //nolint:errcheck // best-effort warning
+		return nil
+	}
+	msg := fmt.Sprintf("no authentication found for %s: set %s",
+		agentDef.Name, strings.Join(agentDef.APIKeyEnvVars, "/"))
+	if authDesc := describeSeedAuthFiles(agentDef); authDesc != "" {
+		msg += fmt.Sprintf(" or provide OAuth credentials (%s)", authDesc)
+	}
+	if len(agentDef.AuthHintEnvVars) > 0 {
+		msg += fmt.Sprintf(", or set %s for local models", strings.Join(agentDef.AuthHintEnvVars, "/"))
+	}
+	return NewAuthError("%s: %w", msg, ErrMissingAPIKey)
+}
+
+// checkLocalhostURLs warns if auth hint env vars contain localhost addresses
+// that won't work inside a container/VM sandbox.
+func (m *Manager) checkLocalhostURLs(agentDef *agent.Definition, mergedEnv map[string]string) error {
+	if !m.runtime.AgentProvisionedByBackend() {
+		return nil
+	}
+	caps := m.runtime.Capabilities()
+	for _, key := range agentDef.AuthHintEnvVars {
+		for _, val := range []string{os.Getenv(key), mergedEnv[key]} {
+			if val == "" || !containsLocalhost(val) {
+				continue
 			}
+			hint := "use the host's routable IP instead"
+			if caps.NetworkIsolation {
+				hint = "use host.docker.internal instead"
+			}
+			return NewUsageError("%s contains a localhost address (%s) which won't work inside a %s sandbox — %s",
+				key, val, m.runtime.Name(), hint)
 		}
 	}
+	return nil
+}
 
-	// Convert auxiliary DirSpec values to DirArg
+// buildAuxDirs converts auxiliary DirSpec values to DirArg and checks existence.
+func buildAuxDirs(auxSpecs []DirSpec) ([]*DirArg, error) {
 	var auxDirs []*DirArg
-	for _, auxSpec := range opts.AuxDirs {
+	for _, auxSpec := range auxSpecs {
 		auxDir := dirSpecToDirArg(auxSpec)
 		if _, err := os.Stat(auxDir.Path); err != nil {
-			return nil, nil, NewUsageError("directory does not exist: %s", auxDir.Path)
+			return nil, NewUsageError("directory does not exist: %s", auxDir.Path)
 		}
 		auxDirs = append(auxDirs, auxDir)
 	}
+	return auxDirs, nil
+}
 
-	// Safety checks — workdir
+// checkDirSafety checks for dangerous directories in workdir and aux dirs.
+func checkDirSafety(workdir *DirArg, auxDirs []*DirArg, output io.Writer) error {
 	if workspace.IsDangerousDir(workdir.Path) {
 		if workdir.Force {
-			fmt.Fprintf(m.output, "WARNING: mounting dangerous directory %s\n", workdir.Path) //nolint:errcheck // best-effort output
+			fmt.Fprintf(output, "WARNING: mounting dangerous directory %s\n", workdir.Path) //nolint:errcheck // best-effort output
 		} else {
-			return nil, nil, NewUsageError("refusing to mount dangerous directory %s (use :force to override)", workdir.Path)
+			return NewUsageError("refusing to mount dangerous directory %s (use :force to override)", workdir.Path)
 		}
 	}
-
-	// Safety checks — aux dirs
 	for _, ad := range auxDirs {
 		if workspace.IsDangerousDir(ad.Path) {
 			if ad.Force {
-				fmt.Fprintf(m.output, "WARNING: mounting dangerous directory %s\n", ad.Path) //nolint:errcheck // best-effort output
+				fmt.Fprintf(output, "WARNING: mounting dangerous directory %s\n", ad.Path) //nolint:errcheck // best-effort output
 			} else {
-				return nil, nil, NewUsageError("refusing to mount dangerous directory %s (use :force to override)", ad.Path)
+				return NewUsageError("refusing to mount dangerous directory %s (use :force to override)", ad.Path)
 			}
 		}
 	}
+	return nil
+}
 
-	// Overlap checks
+// checkDirOverlaps checks for path overlaps and duplicate mount paths.
+func checkDirOverlaps(workdir *DirArg, auxDirs []*DirArg) error {
 	allPaths := []string{workdir.Path}
 	for _, ad := range auxDirs {
 		allPaths = append(allPaths, ad.Path)
 	}
 	if err := workspace.CheckPathOverlap(allPaths); err != nil {
-		return nil, nil, NewUsageError("%s", err)
+		return NewUsageError("%s", err)
 	}
 
-	// Duplicate mount path check
 	mountPaths := map[string]string{workdir.ResolvedMountPath(): workdir.Path}
 	for _, ad := range auxDirs {
 		mp := ad.ResolvedMountPath()
 		if prev, exists := mountPaths[mp]; exists {
-			return nil, nil, NewUsageError("duplicate container mount path %s (from %s and %s)", mp, prev, ad.Path)
+			return NewUsageError("duplicate container mount path %s (from %s and %s)", mp, prev, ad.Path)
 		}
 		mountPaths[mp] = ad.Path
 	}
+	return nil
+}
 
-	// Dirty repo warnings
+// checkDirtyRepos checks for uncommitted changes in workdir and aux dirs.
+// Returns (cancelled, error): cancelled is true if the user declined to continue.
+func (m *Manager) checkDirtyRepos(ctx context.Context, workdir *DirArg, auxDirs []*DirArg, yes bool) (bool, error) {
 	var dirtyWarnings []string
 	if msg, err := workspace.CheckDirtyRepo(workdir.Path); err != nil {
-		return nil, nil, fmt.Errorf("check repo status: %w", err)
+		return false, fmt.Errorf("check repo status: %w", err)
 	} else if msg != "" {
 		dirtyWarnings = append(dirtyWarnings, fmt.Sprintf("%s: %s", workdir.Path, msg))
 	}
 	for _, ad := range auxDirs {
 		if ad.Mode == "copy" || ad.Mode == "overlay" || ad.Mode == "rw" {
 			if msg, err := workspace.CheckDirtyRepo(ad.Path); err != nil {
-				return nil, nil, fmt.Errorf("check repo status: %w", err)
+				return false, fmt.Errorf("check repo status: %w", err)
 			} else if msg != "" {
 				dirtyWarnings = append(dirtyWarnings, fmt.Sprintf("%s: %s", ad.Path, msg))
 			}
 		}
 	}
-	if len(dirtyWarnings) > 0 && !opts.Yes {
+	if len(dirtyWarnings) > 0 && !yes {
 		for _, w := range dirtyWarnings {
 			fmt.Fprintf(m.output, "WARNING: %s has uncommitted changes (%s)\n", strings.SplitN(w, ": ", 2)[0], strings.SplitN(w, ": ", 2)[1]) //nolint:errcheck // best-effort output
 		}
 		fmt.Fprintln(m.output, "These changes will be visible to the agent and could be modified or lost.") //nolint:errcheck // best-effort output
 		confirmed, err := Confirm(ctx, "Continue? [y/N] ", m.input, m.output)
 		if err != nil {
-			return nil, nil, err
+			return false, err
 		}
 		if !confirmed {
-			return nil, nil, nil // user cancelled
+			return true, nil // user cancelled
 		}
 	}
-
-	return workdir, auxDirs, nil
+	return false, nil
 }
 
 // setupWorkdir copies/overlays the workdir, strips git metadata, and creates
@@ -372,10 +446,24 @@ func (m *Manager) parseAndValidateDirs(ctx context.Context, opts CreateOptions, 
 func setupWorkdir(sandboxName string, workdir *DirArg, rt runtime.Runtime) (string, string, error) {
 	workCopyDir := WorkDir(sandboxName, workdir.Path)
 
+	if err := setupWorkdirDirs(sandboxName, workdir, workCopyDir); err != nil {
+		return "", "", err
+	}
+
+	baselineSHA, err := createWorkdirBaseline(workdir, workCopyDir, rt)
+	if err != nil {
+		return "", "", err
+	}
+
+	return workCopyDir, baselineSHA, nil
+}
+
+// setupWorkdirDirs creates the appropriate directory structure for the workdir mode.
+func setupWorkdirDirs(sandboxName string, workdir *DirArg, workCopyDir string) error {
 	switch workdir.Mode {
 	case "copy":
 		if err := workspace.CopyDir(workdir.Path, workCopyDir); err != nil {
-			return "", "", fmt.Errorf("copy workdir: %w", err)
+			return fmt.Errorf("copy workdir: %w", err)
 		}
 	case "overlay":
 		for _, d := range []string{
@@ -385,74 +473,83 @@ func setupWorkdir(sandboxName string, workdir *DirArg, rt runtime.Runtime) (stri
 			OverlayLowerDir(sandboxName, workdir.Path),
 		} {
 			if err := fileutil.MkdirAll(d, 0755); err != nil { //nolint:gosec // G301: world-traversable so container yoloai user can access merged/
-				return "", "", fmt.Errorf("create overlay dir %s: %w", d, err)
+				return fmt.Errorf("create overlay dir %s: %w", d, err)
 			}
 		}
 	default:
 		if err := fileutil.MkdirAll(workCopyDir, 0750); err != nil {
-			return "", "", fmt.Errorf("create work dir: %w", err)
+			return fmt.Errorf("create work dir: %w", err)
 		}
 	}
+	return nil
+}
 
-	// Git baseline (overlay defers baseline to container entrypoint)
-	var baselineSHA string
+// createWorkdirBaseline creates or resolves the git baseline SHA for the workdir.
+func createWorkdirBaseline(workdir *DirArg, workCopyDir string, rt runtime.Runtime) (string, error) {
 	switch workdir.Mode {
 	case "copy":
-		// For backends implementing WorkDirSetup (e.g., Tart), the work directory
-		// is copied to VirtioFS staging on the host, then moved to local VM storage
-		// and baselined inside the VM after start. For other backends (Docker),
-		// baseline is created on the host immediately after copying.
-		if _, ok := rt.(runtime.WorkDirSetup); ok {
-			// Tart: baseline will be created in VM after container start.
-			// Return empty SHA to signal deferred baseline creation.
-			slog.Debug("setupWorkdir: runtime implements WorkDirSetup, deferring baseline to VM",
-				"backend", rt.Name())
-			baselineSHA = ""
-		} else {
-			slog.Debug("setupWorkdir: runtime does NOT implement WorkDirSetup, creating baseline on host",
-				"backend", rt.Name())
-
-			// Docker: preserve original git history so the agent (and user) can
-			// git log, git show, git blame, etc. inside the sandbox.
-			// If the source was a git repo with commits, just record HEAD as baseline.
-			// For non-git directories or empty repos, create a fresh repo.
-			if workspace.IsGitRepo(workCopyDir) {
-				_, err := workspace.HeadSHA(workCopyDir)
-				if err != nil {
-					// Git repo exists but has no commits (or is broken).
-					// Remove .git and create fresh baseline.
-					if rmErr := workspace.RemoveGitDirs(workCopyDir); rmErr != nil {
-						return "", "", fmt.Errorf("remove invalid git dir: %w", rmErr)
-					}
-					sha, baselineErr := workspace.Baseline(workCopyDir)
-					if baselineErr != nil {
-						return "", "", fmt.Errorf("git baseline after removing invalid repo: %w", baselineErr)
-					}
-					baselineSHA = sha
-				} else {
-					// Commit any pre-existing dirty changes so agent diffs are clean.
-					sha, baselineErr := workspace.BaselineUncommittedChanges(workCopyDir)
-					if baselineErr != nil {
-						return "", "", fmt.Errorf("baseline pre-session state: %w", baselineErr)
-					}
-					baselineSHA = sha
-				}
-			} else {
-				sha, err := workspace.Baseline(workCopyDir)
-				if err != nil {
-					return "", "", fmt.Errorf("git baseline: %w", err)
-				}
-				baselineSHA = sha
-			}
-		}
+		return createCopyBaseline(workCopyDir, rt)
 	case "overlay":
-		baselineSHA = ""
+		return "", nil
 	default:
 		sha, _ := workspace.HeadSHA(workdir.Path)
-		baselineSHA = sha
+		return sha, nil
 	}
+}
 
-	return workCopyDir, baselineSHA, nil
+// createCopyBaseline creates the git baseline for a copy-mode workdir.
+// For backends implementing WorkDirSetup (e.g., Tart), baseline creation is
+// deferred until the VM starts, and this function returns empty SHA.
+func createCopyBaseline(workCopyDir string, rt runtime.Runtime) (string, error) {
+	// For backends implementing WorkDirSetup (e.g., Tart), the work directory
+	// is copied to VirtioFS staging on the host, then moved to local VM storage
+	// and baselined inside the VM after start. For other backends (Docker),
+	// baseline is created on the host immediately after copying.
+	if _, ok := rt.(runtime.WorkDirSetup); ok {
+		// Tart: baseline will be created in VM after container start.
+		// Return empty SHA to signal deferred baseline creation.
+		slog.Debug("setupWorkdir: runtime implements WorkDirSetup, deferring baseline to VM",
+			"backend", rt.Name())
+		return "", nil
+	}
+	slog.Debug("setupWorkdir: runtime does NOT implement WorkDirSetup, creating baseline on host",
+		"backend", rt.Name())
+
+	// Docker: preserve original git history so the agent (and user) can
+	// git log, git show, git blame, etc. inside the sandbox.
+	// If the source was a git repo with commits, just record HEAD as baseline.
+	// For non-git directories or empty repos, create a fresh repo.
+	if workspace.IsGitRepo(workCopyDir) {
+		return createBaselineForGitRepo(workCopyDir)
+	}
+	sha, err := workspace.Baseline(workCopyDir)
+	if err != nil {
+		return "", fmt.Errorf("git baseline: %w", err)
+	}
+	return sha, nil
+}
+
+// createBaselineForGitRepo creates a baseline for a directory that is already a git repo.
+func createBaselineForGitRepo(workCopyDir string) (string, error) {
+	_, err := workspace.HeadSHA(workCopyDir)
+	if err != nil {
+		// Git repo exists but has no commits (or is broken).
+		// Remove .git and create fresh baseline.
+		if rmErr := workspace.RemoveGitDirs(workCopyDir); rmErr != nil {
+			return "", fmt.Errorf("remove invalid git dir: %w", rmErr)
+		}
+		sha, baselineErr := workspace.Baseline(workCopyDir)
+		if baselineErr != nil {
+			return "", fmt.Errorf("git baseline after removing invalid repo: %w", baselineErr)
+		}
+		return sha, nil
+	}
+	// Commit any pre-existing dirty changes so agent diffs are clean.
+	sha, baselineErr := workspace.BaselineUncommittedChanges(workCopyDir)
+	if baselineErr != nil {
+		return "", fmt.Errorf("baseline pre-session state: %w", baselineErr)
+	}
+	return sha, nil
 }
 
 // executeVMWorkDirSetup runs VM-side work directory setup for backends that
@@ -626,254 +723,335 @@ func (m *Manager) resolveAndApplyArchetype(ctx context.Context, opts *CreateOpti
 		return "", nil, nil, nil, fmt.Errorf("load .yoloai.yaml: %w", yamlErr)
 	}
 
-	// Resolve archetype with priority: CLI > .yoloai.yaml > auto-detect
-	var archetype Archetype
-	var signals []string
-	var source string
-
-	switch {
-	case opts.Archetype != "":
-		// CLI flag takes highest priority
-		a, err := ParseArchetype(opts.Archetype)
-		if err != nil {
-			return "", nil, nil, nil, err
-		}
-		archetype = a
-		source = "--archetype flag"
-	case yamlCfg != nil && yamlCfg.Archetype != "":
-		// .yoloai.yaml overrides auto-detection
-		a, err := ParseArchetype(yamlCfg.Archetype)
-		if err != nil {
-			return "", nil, nil, nil, err
-		}
-		archetype = a
-		source = ".yoloai.yaml"
-	default:
-		// Auto-detect from workdir
-		archetype, signals = DetectArchetype(workdir)
-		source = "auto-detected"
+	archetype, signals, source, err := resolveArchetype(opts, yamlCfg, workdir)
+	if err != nil {
+		return "", nil, nil, nil, err
 	}
 
 	// Step 2: Platform check for apple archetype
-	if archetype == ArchetypeApple {
-		isAppleSilicon := goruntime.GOOS == "darwin" && goruntime.GOARCH == "arm64"
-		if !isAppleSilicon {
-			if opts.Archetype != "" {
-				// Explicit --archetype apple on non-macOS → hard error
-				return "", nil, nil, nil, fmt.Errorf(
-					"the \"apple\" archetype requires Apple Silicon macOS (Tart backend); " +
-						"use --archetype simple for agent-only work on this project")
-			}
-			// Auto-detected apple on non-macOS → warn but don't fail
-			fmt.Fprintf(m.output, "Warning: This looks like an Apple platform project. The Tart backend requires Apple Silicon macOS.\n") //nolint:errcheck // best-effort warning
-		}
+	if err := checkAppleArchetype(m.output, archetype, opts.Archetype); err != nil {
+		return "", nil, nil, nil, err
 	}
 
 	// Step 3: requires: validation
-	if yamlCfg != nil && len(yamlCfg.Requires) > 0 {
-		for tool, constraint := range yamlCfg.Requires {
-			fmt.Fprintf(m.output, "Warning: requires: %s %s — version verification not yet implemented; continuing.\n", tool, constraint) //nolint:errcheck // best-effort warning
-		}
-		if !opts.Yes {
-			confirmed, err := Confirm(ctx, "Continue anyway? [y/N] ", m.input, m.output)
-			if err != nil {
-				return "", nil, nil, nil, err
-			}
-			if !confirmed {
-				return "", nil, nil, nil, fmt.Errorf("aborted due to unverified requires: constraints")
-			}
-		}
+	if err := checkRequires(ctx, m.input, m.output, yamlCfg, opts.Yes); err != nil {
+		return "", nil, nil, nil, err
 	}
 
 	// Step 4: Archetype expansion
+	devcontainerCfg, dcMounts, dcMountWarnings, bullets, err := m.expandArchetype(ctx, opts, pr, archetype, yamlCfg)
+	if err != nil {
+		return "", nil, nil, nil, err
+	}
+
+	// Step 5: Transparency output
+	printArchetypeOutput(m.output, archetype, source, signals, bullets)
+
+	return archetype, devcontainerCfg, dcMounts, dcMountWarnings, nil
+}
+
+// resolveArchetype determines the archetype from CLI, .yoloai.yaml, or auto-detection.
+func resolveArchetype(opts *CreateOptions, yamlCfg *YoloAIProjectConfig, workdir string) (Archetype, []string, string, error) {
+	switch {
+	case opts.Archetype != "":
+		a, err := ParseArchetype(opts.Archetype)
+		if err != nil {
+			return "", nil, "", err
+		}
+		return a, nil, "--archetype flag", nil
+	case yamlCfg != nil && yamlCfg.Archetype != "":
+		a, err := ParseArchetype(yamlCfg.Archetype)
+		if err != nil {
+			return "", nil, "", err
+		}
+		return a, nil, ".yoloai.yaml", nil
+	default:
+		archetype, signals := DetectArchetype(workdir)
+		return archetype, signals, "auto-detected", nil
+	}
+}
+
+// checkAppleArchetype validates platform requirements for the apple archetype.
+func checkAppleArchetype(output io.Writer, archetype Archetype, cliArchetype string) error {
+	if archetype != ArchetypeApple {
+		return nil
+	}
+	isAppleSilicon := goruntime.GOOS == "darwin" && goruntime.GOARCH == "arm64"
+	if isAppleSilicon {
+		return nil
+	}
+	if cliArchetype != "" {
+		// Explicit --archetype apple on non-macOS → hard error
+		return fmt.Errorf(
+			"the \"apple\" archetype requires Apple Silicon macOS (Tart backend); " +
+				"use --archetype simple for agent-only work on this project")
+	}
+	// Auto-detected apple on non-macOS → warn but don't fail
+	fmt.Fprintf(output, "Warning: This looks like an Apple platform project. The Tart backend requires Apple Silicon macOS.\n") //nolint:errcheck // best-effort warning
+	return nil
+}
+
+// checkRequires validates the requires: constraints from .yoloai.yaml.
+func checkRequires(ctx context.Context, input io.Reader, output io.Writer, yamlCfg *YoloAIProjectConfig, yes bool) error {
+	if yamlCfg == nil || len(yamlCfg.Requires) == 0 {
+		return nil
+	}
+	for tool, constraint := range yamlCfg.Requires {
+		fmt.Fprintf(output, "Warning: requires: %s %s — version verification not yet implemented; continuing.\n", tool, constraint) //nolint:errcheck // best-effort warning
+	}
+	if yes {
+		return nil
+	}
+	confirmed, err := Confirm(ctx, "Continue anyway? [y/N] ", input, output)
+	if err != nil {
+		return err
+	}
+	if !confirmed {
+		return fmt.Errorf("aborted due to unverified requires: constraints")
+	}
+	return nil
+}
+
+// expandArchetype applies archetype-specific settings to opts and pr.
+// Returns (devcontainerCfg, dcMounts, dcMountWarnings, bullets, error).
+func (m *Manager) expandArchetype(ctx context.Context, opts *CreateOptions, pr *profileResult, archetype Archetype, yamlCfg *YoloAIProjectConfig) (*DevcontainerConfig, []string, []string, []string, error) {
+	var bullets []string
 	var devcontainerCfg *DevcontainerConfig
 	var dcMounts []string
 	var dcMountWarnings []string
+
+	switch archetype {
+	case ArchetypeCompose:
+		bullets = applyComposeArchetype(opts, pr)
+	case ArchetypeDevcontainer:
+		var err error
+		devcontainerCfg, dcMounts, dcMountWarnings, bullets, err = m.applyDevcontainerArchetype(ctx, opts, pr)
+		if err != nil {
+			return nil, nil, nil, nil, err
+		}
+	case ArchetypeApple:
+		bullets = append(bullets, "backend=tart required (Apple Silicon macOS VM)")
+	case ArchetypeSimple:
+		// no-op
+	}
+
+	mergeYamlMounts(pr, yamlCfg)
+	return devcontainerCfg, dcMounts, dcMountWarnings, bullets, nil
+}
+
+// applyComposeArchetype applies compose-specific settings to opts and pr.
+func applyComposeArchetype(opts *CreateOptions, pr *profileResult) []string {
 	var bullets []string
+	if opts.Isolation == "" || opts.Isolation == "container" {
+		opts.Isolation = "container-privileged"
+		pr.isolation = "container-privileged"
+		bullets = append(bullets, "isolation set to container-privileged (Compose requires nested Docker)")
+	}
+	pr.archetypeDockerDRequired = true
+	bullets = append(bullets, "dockerd will auto-start before lifecycle commands")
+	return bullets
+}
+
+// applyDevcontainerArchetype loads and applies devcontainer.json settings.
+func (m *Manager) applyDevcontainerArchetype(ctx context.Context, opts *CreateOptions, pr *profileResult) (*DevcontainerConfig, []string, []string, []string, error) {
+	_ = ctx // reserved for future use
+	workdir := opts.Workdir.Path
+	var bullets []string
+
+	dcPath := findDevcontainerPath(workdir)
+	if dcPath == "" {
+		return nil, nil, nil, bullets, nil
+	}
+
+	dc, err := LoadDevcontainer(dcPath)
+	if err != nil {
+		return nil, nil, nil, nil, fmt.Errorf("load devcontainer.json: %w", err)
+	}
+
+	if dc.DockerComposeFilePresent() {
+		return nil, nil, nil, nil, fmt.Errorf(
+			"docker Compose devcontainers are not supported; " +
+				"use a project with devcontainer.json and docker-compose.yaml side by side instead")
+	}
+
+	dc.WarnIgnoredFields(m.output)
+
+	bullets = applyDevcontainerRunArgs(dc, pr, bullets, m.output)
+	bullets = applyDevcontainerCompose(dc, opts, pr, bullets)
+	bullets = applyDevcontainerEnv(dc, pr, bullets)
+	bullets = applyDevcontainerPorts(dc, opts, bullets)
+	bullets = applyDevcontainerWorkspaceFolder(dc, opts, bullets)
 
 	workdirMountPath := opts.Workdir.MountPath
 	if workdirMountPath == "" {
 		workdirMountPath = opts.Workdir.Path
 	}
-
-	switch archetype {
-	case ArchetypeCompose:
-		if opts.Isolation == "" || opts.Isolation == "container" {
-			opts.Isolation = "container-privileged"
-			pr.isolation = "container-privileged"
-			bullets = append(bullets, "isolation set to container-privileged (Compose requires nested Docker)")
-		}
-		pr.archetypeDockerDRequired = true
-		bullets = append(bullets, "dockerd will auto-start before lifecycle commands")
-
-	case ArchetypeDevcontainer:
-		// Load devcontainer.json
-		dcPath := ""
-		for _, candidate := range []string{
-			filepath.Join(workdir, ".devcontainer", "devcontainer.json"),
-			filepath.Join(workdir, "devcontainer.json"),
-		} {
-			if fileExists(candidate) {
-				dcPath = candidate
-				break
-			}
-		}
-		if dcPath != "" {
-			dc, err := LoadDevcontainer(dcPath)
-			if err != nil {
-				return "", nil, nil, nil, fmt.Errorf("load devcontainer.json: %w", err)
-			}
-			devcontainerCfg = dc
-
-			// Error if dockerComposeFile is present
-			if dc.DockerComposeFilePresent() {
-				return "", nil, nil, nil, fmt.Errorf(
-					"docker Compose devcontainers are not supported; " +
-						"use a project with devcontainer.json and docker-compose.yaml side by side instead")
-			}
-
-			// Warn about ignored fields
-			dc.WarnIgnoredFields(m.output)
-
-			// Handle runArgs
-			cpus, memory, capAdd, unknownWarnings := dc.ParsedRunArgs()
-			for _, w := range unknownWarnings {
-				fmt.Fprintln(m.output, w) //nolint:errcheck // best-effort warning
-			}
-			if cpus != "" && (pr.resources == nil || pr.resources.CPUs == "") {
-				if pr.resources == nil {
-					pr.resources = &config.ResourceLimits{}
-				}
-				pr.resources.CPUs = cpus
-				bullets = append(bullets, fmt.Sprintf("CPUs set to %s (from runArgs)", cpus))
-			}
-			if memory != "" && (pr.resources == nil || pr.resources.Memory == "") {
-				if pr.resources == nil {
-					pr.resources = &config.ResourceLimits{}
-				}
-				pr.resources.Memory = memory
-				bullets = append(bullets, fmt.Sprintf("memory set to %s (from runArgs)", memory))
-			}
-			pr.capAdd = append(pr.capAdd, capAdd...)
-
-			// Compose detection via postStartCommand
-			if dc.PostStartCommandUsesCompose() {
-				if opts.Isolation == "" || opts.Isolation == "container" {
-					opts.Isolation = "container-privileged"
-					pr.isolation = "container-privileged"
-					bullets = append(bullets, "isolation set to container-privileged (postStartCommand uses docker compose)")
-				}
-				pr.archetypeDockerDRequired = true
-				bullets = append(bullets, "dockerd will auto-start before lifecycle commands")
-			}
-
-			// Merge env (existing wins — user's explicit --env flags take precedence)
-			merged := dc.MergedEnv()
-			if len(merged) > 0 {
-				if pr.env == nil {
-					pr.env = make(map[string]string)
-				}
-				for k, v := range merged {
-					if _, exists := pr.env[k]; !exists {
-						pr.env[k] = v
-					}
-				}
-				bullets = append(bullets, fmt.Sprintf("environment variables merged from devcontainer.json (%d keys)", len(merged)))
-			}
-
-			// Merge ports (dedup)
-			ports := dc.ExtractPorts()
-			if len(ports) > 0 {
-				seenPorts := make(map[string]bool)
-				for _, p := range opts.Ports {
-					seenPorts[p] = true
-				}
-				for _, p := range ports {
-					if !seenPorts[p] {
-						opts.Ports = append(opts.Ports, p)
-						seenPorts[p] = true
-					}
-				}
-				bullets = append(bullets, fmt.Sprintf("ports %v forwarded", ports))
-			}
-
-			// Override workdir mount path from workspaceFolder
-			if dc.WorkspaceFolder != "" {
-				opts.Workdir.MountPath = dc.WorkspaceFolder
-				workdirMountPath = dc.WorkspaceFolder
-				bullets = append(bullets, fmt.Sprintf("workdir mount path set to %s (workspaceFolder)", dc.WorkspaceFolder))
-			}
-
-			// Filter mounts
-			dcMounts, dcMountWarnings = dc.FilterMounts(workdirMountPath)
-			if len(dcMounts) > 0 {
-				bullets = append(bullets, fmt.Sprintf("%d devcontainer mounts passed through", len(dcMounts)))
-			}
-
-			// Add lifecycle command bullets
-			if !dc.OnCreateCommand.IsZero() {
-				bullets = append(bullets, "onCreateCommand will run once at first start")
-			}
-			if !dc.UpdateContentCommand.IsZero() {
-				bullets = append(bullets, "updateContentCommand will run once at first start")
-			}
-			if !dc.PostCreateCommand.IsZero() {
-				bullets = append(bullets, "postCreateCommand will run once at first start")
-			}
-			if !dc.PostStartCommand.IsZero() {
-				bullets = append(bullets, "postStartCommand will run on each start")
-			}
-		}
-
-	case ArchetypeApple:
-		// Backend is tart (managed via CLI flags, not opts.Isolation); just note it.
-		bullets = append(bullets, "backend=tart required (Apple Silicon macOS VM)")
-
-	case ArchetypeSimple:
-		// no-op
+	dcMounts, dcMountWarnings := dc.FilterMounts(workdirMountPath)
+	if len(dcMounts) > 0 {
+		bullets = append(bullets, fmt.Sprintf("%d devcontainer mounts passed through", len(dcMounts)))
 	}
 
-	// Add .yoloai.yaml mounts to pr.mounts (before validateAndExpandMounts runs)
-	if yamlCfg != nil && len(yamlCfg.Mounts) > 0 {
-		seenYamlMounts := make(map[string]bool)
-		for _, mount := range pr.mounts {
+	bullets = appendLifecycleBullets(dc, bullets)
+
+	return dc, dcMounts, dcMountWarnings, bullets, nil
+}
+
+// findDevcontainerPath returns the path to devcontainer.json, or empty string if not found.
+func findDevcontainerPath(workdir string) string {
+	for _, candidate := range []string{
+		filepath.Join(workdir, ".devcontainer", "devcontainer.json"),
+		filepath.Join(workdir, "devcontainer.json"),
+	} {
+		if fileExists(candidate) {
+			return candidate
+		}
+	}
+	return ""
+}
+
+// applyDevcontainerRunArgs applies runArgs (cpus, memory, capAdd) from devcontainer.json.
+func applyDevcontainerRunArgs(dc *DevcontainerConfig, pr *profileResult, bullets []string, output io.Writer) []string {
+	cpus, memory, capAdd, unknownWarnings := dc.ParsedRunArgs()
+	for _, w := range unknownWarnings {
+		fmt.Fprintln(output, w) //nolint:errcheck // best-effort warning
+	}
+	if cpus != "" && (pr.resources == nil || pr.resources.CPUs == "") {
+		if pr.resources == nil {
+			pr.resources = &config.ResourceLimits{}
+		}
+		pr.resources.CPUs = cpus
+		bullets = append(bullets, fmt.Sprintf("CPUs set to %s (from runArgs)", cpus))
+	}
+	if memory != "" && (pr.resources == nil || pr.resources.Memory == "") {
+		if pr.resources == nil {
+			pr.resources = &config.ResourceLimits{}
+		}
+		pr.resources.Memory = memory
+		bullets = append(bullets, fmt.Sprintf("memory set to %s (from runArgs)", memory))
+	}
+	pr.capAdd = append(pr.capAdd, capAdd...)
+	return bullets
+}
+
+// applyDevcontainerCompose checks postStartCommand for compose usage and sets isolation.
+func applyDevcontainerCompose(dc *DevcontainerConfig, opts *CreateOptions, pr *profileResult, bullets []string) []string {
+	if !dc.PostStartCommandUsesCompose() {
+		return bullets
+	}
+	if opts.Isolation == "" || opts.Isolation == "container" {
+		opts.Isolation = "container-privileged"
+		pr.isolation = "container-privileged"
+		bullets = append(bullets, "isolation set to container-privileged (postStartCommand uses docker compose)")
+	}
+	pr.archetypeDockerDRequired = true
+	bullets = append(bullets, "dockerd will auto-start before lifecycle commands")
+	return bullets
+}
+
+// applyDevcontainerEnv merges environment variables from devcontainer.json.
+func applyDevcontainerEnv(dc *DevcontainerConfig, pr *profileResult, bullets []string) []string {
+	merged := dc.MergedEnv()
+	if len(merged) == 0 {
+		return bullets
+	}
+	if pr.env == nil {
+		pr.env = make(map[string]string)
+	}
+	for k, v := range merged {
+		if _, exists := pr.env[k]; !exists {
+			pr.env[k] = v
+		}
+	}
+	return append(bullets, fmt.Sprintf("environment variables merged from devcontainer.json (%d keys)", len(merged)))
+}
+
+// applyDevcontainerPorts merges port forwards from devcontainer.json.
+func applyDevcontainerPorts(dc *DevcontainerConfig, opts *CreateOptions, bullets []string) []string {
+	ports := dc.ExtractPorts()
+	if len(ports) == 0 {
+		return bullets
+	}
+	seenPorts := make(map[string]bool)
+	for _, p := range opts.Ports {
+		seenPorts[p] = true
+	}
+	for _, p := range ports {
+		if !seenPorts[p] {
+			opts.Ports = append(opts.Ports, p)
+			seenPorts[p] = true
+		}
+	}
+	return append(bullets, fmt.Sprintf("ports %v forwarded", ports))
+}
+
+// applyDevcontainerWorkspaceFolder applies workspaceFolder to the workdir mount path.
+func applyDevcontainerWorkspaceFolder(dc *DevcontainerConfig, opts *CreateOptions, bullets []string) []string {
+	if dc.WorkspaceFolder == "" {
+		return bullets
+	}
+	opts.Workdir.MountPath = dc.WorkspaceFolder
+	return append(bullets, fmt.Sprintf("workdir mount path set to %s (workspaceFolder)", dc.WorkspaceFolder))
+}
+
+// appendLifecycleBullets adds lifecycle command summary bullets.
+func appendLifecycleBullets(dc *DevcontainerConfig, bullets []string) []string {
+	if !dc.OnCreateCommand.IsZero() {
+		bullets = append(bullets, "onCreateCommand will run once at first start")
+	}
+	if !dc.UpdateContentCommand.IsZero() {
+		bullets = append(bullets, "updateContentCommand will run once at first start")
+	}
+	if !dc.PostCreateCommand.IsZero() {
+		bullets = append(bullets, "postCreateCommand will run once at first start")
+	}
+	if !dc.PostStartCommand.IsZero() {
+		bullets = append(bullets, "postStartCommand will run on each start")
+	}
+	return bullets
+}
+
+// mergeYamlMounts adds .yoloai.yaml mounts to pr.mounts (dedup).
+func mergeYamlMounts(pr *profileResult, yamlCfg *YoloAIProjectConfig) {
+	if yamlCfg == nil || len(yamlCfg.Mounts) == 0 {
+		return
+	}
+	seenYamlMounts := make(map[string]bool)
+	for _, mount := range pr.mounts {
+		seenYamlMounts[mount] = true
+	}
+	for _, mount := range yamlCfg.Mounts {
+		if !seenYamlMounts[mount] {
+			pr.mounts = append(pr.mounts, mount)
 			seenYamlMounts[mount] = true
 		}
-		for _, mount := range yamlCfg.Mounts {
-			if !seenYamlMounts[mount] {
-				pr.mounts = append(pr.mounts, mount)
-				seenYamlMounts[mount] = true
-			}
-		}
 	}
+}
 
-	// Step 5: Transparency output
-	// Only print when archetype isn't "simple" (no signals = no message needed)
-	// and not in quiet/json mode (output is io.Discard for json mode)
-	if archetype != ArchetypeSimple || source != "auto-detected" {
-		switch {
-		case len(signals) > 0:
-			for _, sig := range signals {
-				fmt.Fprintf(m.output, "→ Detected %s\n", sig) //nolint:errcheck // best-effort output
-			}
-		case source == ".yoloai.yaml":
-			fmt.Fprintf(m.output, "→ .yoloai.yaml declares archetype: %s\n", string(archetype)) //nolint:errcheck // best-effort output
-		case source == "--archetype flag":
-			fmt.Fprintf(m.output, "→ --archetype %s\n", string(archetype)) //nolint:errcheck // best-effort output
-		}
-		if archetype != ArchetypeSimple {
-			fmt.Fprintf(m.output, "  Archetype: %s\n", string(archetype)) //nolint:errcheck // best-effort output
-			if len(bullets) > 0 {
-				fmt.Fprintln(m.output, "  Because of this:") //nolint:errcheck // best-effort output
-				for _, b := range bullets {
-					fmt.Fprintf(m.output, "    · %s\n", b) //nolint:errcheck // best-effort output
-				}
-			}
-			fmt.Fprintf(m.output, "  To suppress: --archetype simple\n") //nolint:errcheck // best-effort output
-		}
+// printArchetypeOutput prints transparency information about the resolved archetype.
+func printArchetypeOutput(output io.Writer, archetype Archetype, source string, signals []string, bullets []string) {
+	if archetype == ArchetypeSimple && source == "auto-detected" {
+		return
 	}
-
-	return archetype, devcontainerCfg, dcMounts, dcMountWarnings, nil
+	switch {
+	case len(signals) > 0:
+		for _, sig := range signals {
+			fmt.Fprintf(output, "→ Detected %s\n", sig) //nolint:errcheck // best-effort output
+		}
+	case source == ".yoloai.yaml":
+		fmt.Fprintf(output, "→ .yoloai.yaml declares archetype: %s\n", string(archetype)) //nolint:errcheck // best-effort output
+	case source == "--archetype flag":
+		fmt.Fprintf(output, "→ --archetype %s\n", string(archetype)) //nolint:errcheck // best-effort output
+	}
+	if archetype != ArchetypeSimple {
+		fmt.Fprintf(output, "  Archetype: %s\n", string(archetype)) //nolint:errcheck // best-effort output
+		if len(bullets) > 0 {
+			fmt.Fprintln(output, "  Because of this:") //nolint:errcheck // best-effort output
+			for _, b := range bullets {
+				fmt.Fprintf(output, "    · %s\n", b) //nolint:errcheck // best-effort output
+			}
+		}
+		fmt.Fprintf(output, "  To suppress: --archetype simple\n") //nolint:errcheck // best-effort output
+	}
 }
 
 // validateAndExpandMounts validates and expands config mount paths.

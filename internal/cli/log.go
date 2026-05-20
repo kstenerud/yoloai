@@ -307,53 +307,66 @@ func tailFile(
 		case <-ticker.C:
 		}
 
-		f, err := os.Open(src.path("")) //nolint:gosec // path is trusted
-		if err != nil {
-			continue
-		}
-		if _, err := f.Seek(offset, io.SeekStart); err != nil {
-			_ = f.Close()
-			continue
-		}
-		scanner := bufio.NewScanner(f)
-		scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
-		aborted := false
-		for scanner.Scan() {
-			line := strings.TrimSpace(scanner.Text())
-			if line == "" {
-				continue
-			}
-			rec, ok := parseLogRecord(line, src)
-			if !ok {
-				continue
-			}
-			if levelOrder(rec.level) < minLevel {
-				continue
-			}
-			if !sinceTime.IsZero() && rec.ts.Before(sinceTime) {
-				continue
-			}
-			offset += int64(len(scanner.Bytes()) + 1) // +1 for newline
-			var toSend string
-			if rawMode {
-				toSend = line
-			} else {
-				toSend = formatRecord(rec, terminalWidth())
-			}
-			select {
-			case ch <- toSend:
-			case <-done:
-				aborted = true
-			}
-			if aborted {
-				break
-			}
-		}
-		_ = f.Close()
+		newOffset, aborted := tailFilePoll(src, offset, minLevel, sinceTime, rawMode, ch, done)
+		offset = newOffset
 		if aborted {
 			return
 		}
 	}
+}
+
+// tailFilePoll opens the file, reads new lines from offset, and sends them to ch.
+// Returns the new offset and whether the done channel was signalled.
+func tailFilePoll(
+	src logSource,
+	offset int64,
+	minLevel int,
+	sinceTime time.Time,
+	rawMode bool,
+	ch chan<- string,
+	done <-chan struct{},
+) (newOffset int64, aborted bool) {
+	f, err := os.Open(src.path("")) //nolint:gosec // path is trusted
+	if err != nil {
+		return offset, false
+	}
+	if _, err := f.Seek(offset, io.SeekStart); err != nil {
+		_ = f.Close()
+		return offset, false
+	}
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		rec, ok := parseLogRecord(line, src)
+		if !ok {
+			continue
+		}
+		if levelOrder(rec.level) < minLevel {
+			continue
+		}
+		if !sinceTime.IsZero() && rec.ts.Before(sinceTime) {
+			continue
+		}
+		offset += int64(len(scanner.Bytes()) + 1) // +1 for newline
+		var toSend string
+		if rawMode {
+			toSend = line
+		} else {
+			toSend = formatRecord(rec, terminalWidth())
+		}
+		select {
+		case ch <- toSend:
+		case <-done:
+			_ = f.Close()
+			return offset, true
+		}
+	}
+	_ = f.Close()
+	return offset, false
 }
 
 // sandboxIsDone returns true if the sandbox's agent-status.json shows the agent has exited.

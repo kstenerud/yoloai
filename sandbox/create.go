@@ -309,179 +309,21 @@ func checkUnappliedWork(name string) error {
 // prepareSandboxState handles validation, safety checks, directory
 // creation, workdir copy, git baseline, and meta/config writing.
 func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions, credOverrides map[string]string) (*sandboxState, error) {
-	// Validate
-	if err := ValidateName(opts.Name); err != nil {
-		return nil, err
-	}
-
-	agentDef := agent.GetAgent(opts.Agent)
-	if agentDef == nil {
-		return nil, NewUsageError("unknown agent: %s", opts.Agent)
-	}
-
-	// --force implies --replace
-	if opts.Force {
-		opts.Replace = true
-	}
-
-	sandboxDir := Dir(opts.Name)
-	if _, err := os.Stat(sandboxDir); err == nil && !opts.Replace {
-		// Directory exists — check if it's a complete sandbox
-		if _, metaErr := LoadMeta(sandboxDir); metaErr != nil {
-			// Broken sandbox (no valid meta.json) — auto-clean
-			_ = os.RemoveAll(sandboxDir)
-		} else {
-			return nil, fmt.Errorf("sandbox %q already exists (use --replace to recreate): %w", opts.Name, ErrSandboxExists)
-		}
-	}
-
-	if opts.Prompt != "" && opts.PromptFile != "" {
-		return nil, NewUsageError("--prompt and --prompt-file are mutually exclusive")
-	}
-
-	// Load config early — needed for auth hint check and later for tmux_conf.
-	ycfg, err := config.LoadConfig()
-	if err != nil {
-		return nil, fmt.Errorf("load config: %w", err)
-	}
-
-	gcfg, err := config.LoadGlobalConfig()
-	if err != nil {
-		return nil, fmt.Errorf("load global config: %w", err)
-	}
-
-	// Resolve profile config: profile chain, config merging, image building.
-	pr, err := m.resolveProfileConfig(ctx, &opts, &agentDef, ycfg, gcfg)
+	agentDef, sandboxDir, ycfg, gcfg, err := m.validateAndLoadConfig(opts)
 	if err != nil {
 		return nil, err
 	}
 
-	// Resolve Apple runtime base (if --runtime flags provided)
-	if len(opts.Runtimes) > 0 {
-		// Only on Tart backend
-		if m.backend != "tart" {
-			return nil, NewUsageError("--runtime flag only supported on tart backend (macOS VMs)")
-		}
-
-		// Type assert to access tart-specific methods
-		tartRuntime, ok := m.runtime.(*tart.Runtime)
-		if !ok {
-			return nil, fmt.Errorf("internal error: tart backend type mismatch")
-		}
-
-		// 1. Resolve runtime versions (queries host simctl)
-		resolved, err := tart.ResolveRuntimeVersions(opts.Runtimes)
-		if err != nil {
-			return nil, fmt.Errorf("resolve runtimes: %w", err)
-		}
-
-		// 2. Generate cache key
-		cacheKey := tart.GenerateCacheKey(resolved)
-		baseName := "yoloai-base-" + cacheKey
-
-		// 3. Acquire lock (blocks if another process creating)
-		release, err := tart.AcquireBaseLock(baseName)
-		if err != nil {
-			return nil, fmt.Errorf("acquire base lock: %w", err)
-		}
-		defer release()
-
-		// 4. Check if base exists
-		exists, err := tartRuntime.BaseExists(ctx, baseName)
-		if err != nil {
-			return nil, fmt.Errorf("check base: %w", err)
-		}
-
-		// 5. Check base exists; error if not (don't auto-create)
-		if !exists {
-			// Build helpful error message
-			runtimeDesc := tart.FormatRuntimeList(resolved) // e.g., "iOS 26.4, tvOS 26.1"
-
-			// Show what was attempted (especially important when "latest" was implied)
-			var attemptedSpecs []string
-			for _, rt := range resolved {
-				attemptedSpecs = append(attemptedSpecs, fmt.Sprintf("%s:%s", rt.Platform, rt.Version))
-			}
-
-			return nil, NewUsageError(
-				"Runtime base '%s' not found.\n\n"+
-					"Requested runtimes: %s\n"+
-					"Resolved to: %s\n\n"+
-					"To create this runtime base, run:\n"+
-					"  yoloai system runtime add %s\n\n"+
-					"To see existing runtime bases:\n"+
-					"  yoloai system runtime list",
-				baseName,
-				strings.Join(opts.Runtimes, ", "),
-				runtimeDesc,
-				strings.Join(attemptedSpecs, " "),
-			)
-		}
-
-		_, _ = fmt.Fprintf(m.output, "Using runtime base %s\n", baseName)
-
-		// 6. Override imageRef in profile result
-		pr.imageRef = baseName
-	}
-
-	// Apply config defaults and CLI overrides for resources.
-	if err := applyConfigDefaults(&opts, ycfg, pr); err != nil {
-		return nil, err
-	}
-
-	// Resolve and apply archetype (after applyConfigDefaults, before validateAndExpandMounts).
-	resolvedArchetype, devcontainerCfg, dcMounts, dcMountWarnings, err := m.resolveAndApplyArchetype(ctx, &opts, pr)
+	// Phase 1: Resolve profile, runtime base, archetype, and mounts.
+	pr, resolvedArchetype, devcontainerCfg, dcMounts, dcMountWarnings, mergedMounts, state_onCreateDone, err := m.resolveProfileAndArchetype(ctx, &opts, agentDef, ycfg, gcfg)
 	if err != nil {
 		return nil, err
 	}
 
-	// Phase 4: add devcontainer mounts and .yoloai.yaml mounts to pr.mounts (dedup).
-	seen := make(map[string]bool)
-	for _, m := range pr.mounts {
-		seen[m] = true
-	}
-	for _, m := range dcMounts {
-		if !seen[m] {
-			pr.mounts = append(pr.mounts, m)
-			seen[m] = true
-		}
-	}
-	// .yoloai.yaml mounts are already in opts but need to be added to pr.mounts
-	// They are handled inside resolveAndApplyArchetype.
-
-	// Print devcontainer mount warnings
-	for _, w := range dcMountWarnings {
-		fmt.Fprintln(m.output, w) //nolint:errcheck // best-effort warning
-	}
-
-	// Load sandbox state to check on-create-done (for lifecycle config).
-	existingState, stateLoadErr := LoadSandboxState(Dir(opts.Name))
-	state_onCreateDone := false
-	if stateLoadErr == nil {
-		state_onCreateDone = existingState.OnCreateCommandsDone
-	}
-
-	// Validate and expand config mounts.
-	mergedMounts, err := validateAndExpandMounts(pr.mounts)
-	if err != nil {
+	if err := m.replaceSandboxIfNeeded(ctx, opts, sandboxDir); err != nil {
 		return nil, err
 	}
 
-	// --replace: destroy existing sandbox (--force skips safety check)
-	if opts.Replace {
-		if _, err := os.Stat(sandboxDir); err == nil {
-			if !opts.Force {
-				if err := checkUnappliedWork(opts.Name); err != nil {
-					return nil, err
-				}
-			}
-			if err := m.destroy(ctx, opts.Name); err != nil {
-				return nil, fmt.Errorf("replace existing sandbox: %w", err)
-			}
-		}
-	}
-
-	// Parse and validate directories, auth, safety checks, dirty repo warnings.
 	workdir, auxDirs, err := m.parseAndValidateDirs(ctx, opts, agentDef, pr.env, ycfg.Model, credOverrides)
 	if err != nil {
 		return nil, err
@@ -490,34 +332,11 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions, c
 		return nil, nil // user cancelled
 	}
 
-	// Create directory structure.
-	// Host-only dirs (sandboxDir, home-seed, bin, tmux, backend) use 0750.
-	// Dirs bind-mounted into the container use restricted permissions by default
-	// (0750), but gVisor requires 0777 due to user namespace UID remapping where
-	// container root is remapped to a non-root host uid.
-	for _, dir := range []string{
-		sandboxDir,
-		filepath.Join(sandboxDir, "home-seed"),
-		filepath.Join(sandboxDir, BinDir),
-		filepath.Join(sandboxDir, TmuxDir),
-		filepath.Join(sandboxDir, BackendDir),
-	} {
-		if err := fileutil.MkdirAll(dir, 0750); err != nil {
-			return nil, fmt.Errorf("create directory %s: %w", dir, err)
-		}
-	}
-
+	// Phase 2: Create directory structure and seed sandbox.
 	perms := Perms(pr.isolation)
-
-	for _, dir := range []string{
-		filepath.Join(sandboxDir, "work"),
-		filepath.Join(sandboxDir, AgentRuntimeDir),
-		filepath.Join(sandboxDir, "files"),
-		filepath.Join(sandboxDir, "cache"),
-	} {
-		if err := mkdirAllPerm(dir, perms.Dir); err != nil {
-			return nil, fmt.Errorf("create directory %s: %w", dir, err)
-		}
+	agentFilesInitialized, err := m.createAndSeedSandbox(ctx, sandboxDir, agentDef, pr, credOverrides, perms)
+	if err != nil {
+		return nil, err
 	}
 
 	// Cleanup sandbox directory on failure
@@ -528,19 +347,313 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions, c
 		}
 	}()
 
-	agentFilesInitialized, err := m.seedSandbox(agentDef, sandboxDir, pr.isolation, pr.agentFiles, credOverrides)
+	workCopyDir, baselineSHA, dirMetas, err := m.setupAllWorkdirs(opts, workdir, auxDirs, resolvedArchetype, devcontainerCfg)
 	if err != nil {
 		return nil, err
 	}
 
-	// Copy/overlay workdir and create git baseline.
+	// Phase 3: Build config, meta, and state files.
+	configData, meta, tmuxConf, promptText, err := m.buildConfigAndMeta(ctx, opts, pr, agentDef, workdir, auxDirs, gcfg, dirMetas, baselineSHA, mergedMounts, resolvedArchetype, devcontainerCfg, state_onCreateDone, sandboxDir)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := writeStatFiles(sandboxDir, meta, agentDef, agentFilesInitialized, meta.HasPrompt, promptText, configData, perms); err != nil {
+		return nil, err
+	}
+
+	success = true
+	return buildSandboxStateResult(opts, sandboxDir, workdir, workCopyDir, auxDirs, agentDef, meta, pr, mergedMounts, configData, tmuxConf, resolvedArchetype, pr.archetypeDockerDRequired, devcontainerCfg, dcMounts, dcMountWarnings, credOverrides), nil
+}
+
+// resolveProfileAndArchetype resolves profile config, runtime base, archetype, mounts, and lifecycle state.
+func (m *Manager) resolveProfileAndArchetype(ctx context.Context, opts *CreateOptions, agentDef *agent.Definition, ycfg *config.YoloaiConfig, gcfg *config.GlobalConfig) (*profileResult, Archetype, *DevcontainerConfig, []string, []string, []string, bool, error) {
+	pr, err := m.resolveProfileConfig(ctx, opts, &agentDef, ycfg, gcfg)
+	if err != nil {
+		return nil, "", nil, nil, nil, nil, false, err
+	}
+
+	if err := m.resolveRuntimeBase(ctx, opts, pr); err != nil {
+		return nil, "", nil, nil, nil, nil, false, err
+	}
+
+	if err := applyConfigDefaults(opts, ycfg, pr); err != nil {
+		return nil, "", nil, nil, nil, nil, false, err
+	}
+
+	resolvedArchetype, devcontainerCfg, dcMounts, dcMountWarnings, err := m.resolveAndApplyArchetype(ctx, opts, pr)
+	if err != nil {
+		return nil, "", nil, nil, nil, nil, false, err
+	}
+
+	mergeDcMounts(pr, dcMounts)
+	for _, w := range dcMountWarnings {
+		fmt.Fprintln(m.output, w) //nolint:errcheck // best-effort warning
+	}
+
+	state_onCreateDone := loadOnCreateDone(opts.Name)
+
+	mergedMounts, err := validateAndExpandMounts(pr.mounts)
+	if err != nil {
+		return nil, "", nil, nil, nil, nil, false, err
+	}
+
+	return pr, resolvedArchetype, devcontainerCfg, dcMounts, dcMountWarnings, mergedMounts, state_onCreateDone, nil
+}
+
+// createAndSeedSandbox creates directory structure and seeds the sandbox with agent files.
+func (m *Manager) createAndSeedSandbox(ctx context.Context, sandboxDir string, agentDef *agent.Definition, pr *profileResult, credOverrides map[string]string, perms IsolationPerms) (bool, error) {
+	_ = ctx // reserved for future use
+	if err := createSandboxDirs(sandboxDir, perms); err != nil {
+		return false, err
+	}
+	return m.seedSandbox(agentDef, sandboxDir, pr.isolation, pr.agentFiles, credOverrides)
+}
+
+// buildConfigAndMeta builds the container config and sandbox meta structs.
+// Returns (configData, meta, tmuxConf, promptText, error).
+func (m *Manager) buildConfigAndMeta(ctx context.Context, opts CreateOptions, pr *profileResult, agentDef *agent.Definition, workdir *DirArg, auxDirs []*DirArg, gcfg *config.GlobalConfig, dirMetas []DirMeta, baselineSHA string, mergedMounts []string, resolvedArchetype Archetype, devcontainerCfg *DevcontainerConfig, state_onCreateDone bool, sandboxDir string) ([]byte, *Meta, string, string, error) {
+	_ = ctx // reserved for future use
+	promptText, hasPrompt, model, agentCommand, tmuxConf, err := resolveAgentParams(agentDef, opts, pr, gcfg)
+	if err != nil {
+		return nil, nil, "", "", err
+	}
+
+	networkMode, networkAllow := buildNetworkConfig(opts, agentDef)
+	slog.Debug("building runtime config", "event", "sandbox.create.config", "network_mode", networkMode)
+
+	archetypeDockerDRequired := pr.archetypeDockerDRequired
+	lifecycleCfg := buildLifecycleConfig(resolvedArchetype, archetypeDockerDRequired, state_onCreateDone, devcontainerCfg)
+
+	configData, err := buildContainerConfig(agentDef, agentCommand, tmuxConf, overlayOrResolvedMountPath(workdir), opts.Debug, networkMode == "isolated", networkAllow, opts.Passthrough, collectOverlayMounts(workdir, auxDirs), pr.setup, pr.autoCommitInterval, collectCopyDirs(workdir, auxDirs), opts.Name, m.runtime.TmuxSocket(sandboxDir), pr.isolation, opts.VscodeTunnel, sanitizeTunnelName(opts.Name), lifecycleCfg)
+	if err != nil {
+		return nil, nil, "", "", fmt.Errorf("build %s: %w", RuntimeConfigFile, err)
+	}
+
+	usernsMode := resolveUsernsMode(m.runtime, workdir, auxDirs, pr.capAdd)
+	meta := buildMeta(opts, pr, workdir, baselineSHA, dirMetas, hasPrompt, networkMode, networkAllow, usernsMode, m.runtime.Capabilities().HostFilesystem, string(resolvedArchetype), m.backend, model, mergedMounts)
+
+	return configData, meta, tmuxConf, promptText, nil
+}
+
+// buildSandboxStateResult constructs the sandboxState from all resolved values.
+func buildSandboxStateResult(opts CreateOptions, sandboxDir string, workdir *DirArg, workCopyDir string, auxDirs []*DirArg, agentDef *agent.Definition, meta *Meta, pr *profileResult, mergedMounts []string, configData []byte, tmuxConf string, resolvedArchetype Archetype, archetypeDockerDRequired bool, devcontainerCfg *DevcontainerConfig, dcMounts []string, dcMountWarnings []string, credOverrides map[string]string) *sandboxState {
+	return &sandboxState{
+		name:                      opts.Name,
+		sandboxDir:                sandboxDir,
+		workdir:                   workdir,
+		workCopyDir:               workCopyDir,
+		auxDirs:                   auxDirs,
+		agent:                     agentDef,
+		model:                     meta.Model,
+		profile:                   pr.name,
+		imageRef:                  pr.imageRef,
+		env:                       pr.env,
+		credOverrides:             credOverrides,
+		hasPrompt:                 meta.HasPrompt,
+		networkMode:               meta.NetworkMode,
+		networkAllow:              meta.NetworkAllow,
+		ports:                     opts.Ports,
+		configMounts:              mergedMounts,
+		tmuxConf:                  tmuxConf,
+		resources:                 pr.resources,
+		capAdd:                    pr.capAdd,
+		devices:                   pr.devices,
+		setup:                     pr.setup,
+		isolation:                 pr.isolation,
+		isolationExplicit:         pr.isolationExplicit,
+		vscodeTunnel:              opts.VscodeTunnel,
+		meta:                      meta,
+		configJSON:                configData,
+		archetype:                 resolvedArchetype,
+		dockerdRequired:           archetypeDockerDRequired,
+		devcontainer:              devcontainerCfg,
+		devcontainerMounts:        dcMounts,
+		devcontainerMountWarnings: dcMountWarnings,
+		workdirMode:               string(workdir.Mode),
+	}
+}
+
+// validateAndLoadConfig performs initial validation and loads config files.
+func (m *Manager) validateAndLoadConfig(opts CreateOptions) (*agent.Definition, string, *config.YoloaiConfig, *config.GlobalConfig, error) {
+	if err := ValidateName(opts.Name); err != nil {
+		return nil, "", nil, nil, err
+	}
+
+	agentDef := agent.GetAgent(opts.Agent)
+	if agentDef == nil {
+		return nil, "", nil, nil, NewUsageError("unknown agent: %s", opts.Agent)
+	}
+
+	if opts.Force {
+		opts.Replace = true
+	}
+
+	sandboxDir := Dir(opts.Name)
+	if _, err := os.Stat(sandboxDir); err == nil && !opts.Replace {
+		if _, metaErr := LoadMeta(sandboxDir); metaErr != nil {
+			_ = os.RemoveAll(sandboxDir)
+		} else {
+			return nil, "", nil, nil, fmt.Errorf("sandbox %q already exists (use --replace to recreate): %w", opts.Name, ErrSandboxExists)
+		}
+	}
+
+	if opts.Prompt != "" && opts.PromptFile != "" {
+		return nil, "", nil, nil, NewUsageError("--prompt and --prompt-file are mutually exclusive")
+	}
+
+	ycfg, err := config.LoadConfig()
+	if err != nil {
+		return nil, "", nil, nil, fmt.Errorf("load config: %w", err)
+	}
+	gcfg, err := config.LoadGlobalConfig()
+	if err != nil {
+		return nil, "", nil, nil, fmt.Errorf("load global config: %w", err)
+	}
+
+	return agentDef, sandboxDir, ycfg, gcfg, nil
+}
+
+// resolveRuntimeBase resolves the Tart runtime base image if --runtime flags are provided.
+func (m *Manager) resolveRuntimeBase(ctx context.Context, opts *CreateOptions, pr *profileResult) error {
+	if len(opts.Runtimes) == 0 {
+		return nil
+	}
+	if m.backend != "tart" {
+		return NewUsageError("--runtime flag only supported on tart backend (macOS VMs)")
+	}
+
+	tartRuntime, ok := m.runtime.(*tart.Runtime)
+	if !ok {
+		return fmt.Errorf("internal error: tart backend type mismatch")
+	}
+
+	resolved, err := tart.ResolveRuntimeVersions(opts.Runtimes)
+	if err != nil {
+		return fmt.Errorf("resolve runtimes: %w", err)
+	}
+
+	cacheKey := tart.GenerateCacheKey(resolved)
+	baseName := "yoloai-base-" + cacheKey
+
+	release, err := tart.AcquireBaseLock(baseName)
+	if err != nil {
+		return fmt.Errorf("acquire base lock: %w", err)
+	}
+	defer release()
+
+	exists, err := tartRuntime.BaseExists(ctx, baseName)
+	if err != nil {
+		return fmt.Errorf("check base: %w", err)
+	}
+	if !exists {
+		return m.runtimeBaseNotFoundError(baseName, opts.Runtimes, resolved)
+	}
+
+	_, _ = fmt.Fprintf(m.output, "Using runtime base %s\n", baseName)
+	pr.imageRef = baseName
+	return nil
+}
+
+// runtimeBaseNotFoundError builds the detailed error message when a tart runtime base is missing.
+func (m *Manager) runtimeBaseNotFoundError(baseName string, runtimes []string, resolved []tart.RuntimeVersion) error {
+	runtimeDesc := tart.FormatRuntimeList(resolved)
+	var attemptedSpecs []string
+	for _, rt := range resolved {
+		attemptedSpecs = append(attemptedSpecs, fmt.Sprintf("%s:%s", rt.Platform, rt.Version))
+	}
+	return NewUsageError(
+		"Runtime base '%s' not found.\n\n"+
+			"Requested runtimes: %s\n"+
+			"Resolved to: %s\n\n"+
+			"To create this runtime base, run:\n"+
+			"  yoloai system runtime add %s\n\n"+
+			"To see existing runtime bases:\n"+
+			"  yoloai system runtime list",
+		baseName,
+		strings.Join(runtimes, ", "),
+		runtimeDesc,
+		strings.Join(attemptedSpecs, " "),
+	)
+}
+
+// mergeDcMounts merges devcontainer mounts into pr.mounts (dedup).
+func mergeDcMounts(pr *profileResult, dcMounts []string) {
+	seen := make(map[string]bool)
+	for _, m := range pr.mounts {
+		seen[m] = true
+	}
+	for _, m := range dcMounts {
+		if !seen[m] {
+			pr.mounts = append(pr.mounts, m)
+			seen[m] = true
+		}
+	}
+}
+
+// loadOnCreateDone returns the on-create-done flag from sandbox state, defaulting to false.
+func loadOnCreateDone(sandboxName string) bool {
+	existingState, err := LoadSandboxState(Dir(sandboxName))
+	if err != nil {
+		return false
+	}
+	return existingState.OnCreateCommandsDone
+}
+
+// replaceSandboxIfNeeded destroys the existing sandbox if --replace is set.
+func (m *Manager) replaceSandboxIfNeeded(ctx context.Context, opts CreateOptions, sandboxDir string) error {
+	if !opts.Replace {
+		return nil
+	}
+	if _, err := os.Stat(sandboxDir); os.IsNotExist(err) {
+		return nil // nothing to replace
+	}
+	if !opts.Force {
+		if err := checkUnappliedWork(opts.Name); err != nil {
+			return err
+		}
+	}
+	if err := m.destroy(ctx, opts.Name); err != nil {
+		return fmt.Errorf("replace existing sandbox: %w", err)
+	}
+	return nil
+}
+
+// createSandboxDirs creates the directory structure for a new sandbox.
+func createSandboxDirs(sandboxDir string, perms IsolationPerms) error {
+	for _, dir := range []string{
+		sandboxDir,
+		filepath.Join(sandboxDir, "home-seed"),
+		filepath.Join(sandboxDir, BinDir),
+		filepath.Join(sandboxDir, TmuxDir),
+		filepath.Join(sandboxDir, BackendDir),
+	} {
+		if err := fileutil.MkdirAll(dir, 0750); err != nil {
+			return fmt.Errorf("create directory %s: %w", dir, err)
+		}
+	}
+	for _, dir := range []string{
+		filepath.Join(sandboxDir, "work"),
+		filepath.Join(sandboxDir, AgentRuntimeDir),
+		filepath.Join(sandboxDir, "files"),
+		filepath.Join(sandboxDir, "cache"),
+	} {
+		if err := mkdirAllPerm(dir, perms.Dir); err != nil {
+			return fmt.Errorf("create directory %s: %w", dir, err)
+		}
+	}
+	return nil
+}
+
+// setupAllWorkdirs sets up the workdir and aux dirs, and resolves copy mount paths.
+func (m *Manager) setupAllWorkdirs(opts CreateOptions, workdir *DirArg, auxDirs []*DirArg, resolvedArchetype Archetype, devcontainerCfg *DevcontainerConfig) (string, string, []DirMeta, error) {
 	slog.Debug("setting up workdir", "event", "sandbox.create.workdir", "mode", string(workdir.Mode))
 	workCopyDir, baselineSHA, err := setupWorkdir(opts.Name, workdir, m.runtime)
 	if err != nil {
-		return nil, err
+		return "", "", nil, err
 	}
 
-	// Phase 5: VS Code workspace injection (devcontainer + vscode-tunnel + copy/overlay).
+	// VS Code workspace injection (devcontainer + vscode-tunnel + copy/overlay).
 	if resolvedArchetype == ArchetypeDevcontainer && opts.VscodeTunnel &&
 		workdir.Mode != "rw" && devcontainerCfg != nil {
 		if injectErr := InjectVSCodeWorkspace(workCopyDir, devcontainerCfg); injectErr != nil {
@@ -548,17 +661,14 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions, c
 		}
 	}
 
-	// Copy/overlay aux dirs and create baselines.
 	slog.Debug("setting up aux dirs", "event", "sandbox.create.aux_dirs", "count", len(auxDirs))
 	dirMetas, err := setupAuxDirs(opts.Name, auxDirs)
 	if err != nil {
-		return nil, err
+		return "", "", nil, err
 	}
 
 	// For backends that run agents directly on the host (seatbelt), :copy mount paths
 	// must point to the sandbox copy location rather than the original host path.
-	// Container/VM backends bind-mount the copy at the original host path inside the
-	// container; ResolveCopyMount returns hostPath unchanged for those backends.
 	if workdir.Mode == "copy" && workdir.MountPath == "" {
 		workdir.MountPath = m.runtime.ResolveCopyMount(opts.Name, workdir.Path)
 	}
@@ -568,105 +678,91 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions, c
 		}
 	}
 
-	// Read prompt
+	return workCopyDir, baselineSHA, dirMetas, nil
+}
+
+// resolveAgentParams resolves prompt, model, agent command, and tmux config.
+func resolveAgentParams(agentDef *agent.Definition, opts CreateOptions, pr *profileResult, gcfg *config.GlobalConfig) (string, bool, string, string, string, error) {
 	promptText, err := ReadPrompt(opts.Prompt, opts.PromptFile)
 	if err != nil {
-		return nil, err
+		return "", false, "", "", "", err
 	}
 	hasPrompt := promptText != ""
 
-	// Resolve model alias and apply provider prefix if needed
 	model := resolveModel(agentDef, opts.Model, pr.userAliases)
 	model = applyModelPrefix(agentDef, model, pr.env)
-
-	// Validate model format for agent-specific requirements
 	if err := validateModel(agentDef, model, opts.Model); err != nil {
-		return nil, err
+		return "", false, "", "", "", err
 	}
 
-	// Build agent command
 	agentArgs := pr.agentArgs[opts.Agent]
 	agentCommand := buildAgentCommand(agentDef, model, promptText, agentArgs, opts.Passthrough)
 
-	// Read tmux_conf from global config
 	tmuxConf := gcfg.TmuxConf
 	if tmuxConf == "" {
-		tmuxConf = "default" // fallback if not set
+		tmuxConf = "default"
 	}
 
-	// Determine network mode and allowlist.
-	networkMode, networkAllow := buildNetworkConfig(opts, agentDef)
-	slog.Debug("building runtime config", "event", "sandbox.create.config", "network_mode", networkMode)
+	return promptText, hasPrompt, model, agentCommand, tmuxConf, nil
+}
 
-	// Build overlay mount configs for config.json.
-	overlayMounts := collectOverlayMounts(workdir, auxDirs)
-
-	// Collect mount paths of all :copy directories for auto-commit loop.
-	copyDirs := collectCopyDirs(workdir, auxDirs)
-
-	// Build config.json
-	vscodeTunnelName := sanitizeTunnelName(opts.Name)
-	// Build lifecycle config if archetype requires it
-	var lifecycleCfg *lifecycleConfig
-	// Read archetype-specific fields from the result of resolveAndApplyArchetype
-	archetypeDockerDRequired := pr.archetypeDockerDRequired
-	if resolvedArchetype == ArchetypeDevcontainer || archetypeDockerDRequired {
-		lc := &lifecycleConfig{
-			DockerDRequired: archetypeDockerDRequired,
-			OnCreateDone:    state_onCreateDone,
-		}
-		if devcontainerCfg != nil {
-			if !devcontainerCfg.OnCreateCommand.IsZero() {
-				lc.OnCreate = append(lc.OnCreate, lifecycleCmdToJSON(devcontainerCfg.OnCreateCommand))
-			}
-			if !devcontainerCfg.UpdateContentCommand.IsZero() {
-				lc.OnCreate = append(lc.OnCreate, lifecycleCmdToJSON(devcontainerCfg.UpdateContentCommand))
-			}
-			if !devcontainerCfg.PostCreateCommand.IsZero() {
-				lc.OnCreate = append(lc.OnCreate, lifecycleCmdToJSON(devcontainerCfg.PostCreateCommand))
-			}
-			if !devcontainerCfg.PostStartCommand.IsZero() {
-				lc.OnStart = append(lc.OnStart, lifecycleCmdToJSON(devcontainerCfg.PostStartCommand))
-			}
-		}
-		lifecycleCfg = lc
+// buildLifecycleConfig builds the lifecycle config if the archetype requires it.
+func buildLifecycleConfig(resolvedArchetype Archetype, archetypeDockerDRequired bool, onCreateDone bool, devcontainerCfg *DevcontainerConfig) *lifecycleConfig {
+	if resolvedArchetype != ArchetypeDevcontainer && !archetypeDockerDRequired {
+		return nil
 	}
-
-	configData, err := buildContainerConfig(agentDef, agentCommand, tmuxConf, overlayOrResolvedMountPath(workdir), opts.Debug, networkMode == "isolated", networkAllow, opts.Passthrough, overlayMounts, pr.setup, pr.autoCommitInterval, copyDirs, opts.Name, m.runtime.TmuxSocket(sandboxDir), pr.isolation, opts.VscodeTunnel, vscodeTunnelName, lifecycleCfg)
-	if err != nil {
-		return nil, fmt.Errorf("build %s: %w", RuntimeConfigFile, err)
+	lc := &lifecycleConfig{
+		DockerDRequired: archetypeDockerDRequired,
+		OnCreateDone:    onCreateDone,
 	}
-
-	// Determine effective user namespace mode. Backends that implement
-	// UsernsProvider (currently Podman rootless) may request "keep-id" to map
-	// the container uid to the host user. keep-id also changes the tmux exec
-	// user from "yoloai" to "" (host user) — see inspect.go:tmuxExecUser.
-	// CAP_SYS_ADMIN (required for overlay mounts) disqualifies keep-id because
-	// overlay needs real root inside the container.
-	usernsMode := ""
-	if up, ok := m.runtime.(runtime.UsernsProvider); ok {
-		hasSysAdmin := workdir.Mode == "overlay"
-		for _, ad := range auxDirs {
-			if ad.Mode == "overlay" {
-				hasSysAdmin = true
-				break
-			}
+	if devcontainerCfg != nil {
+		if !devcontainerCfg.OnCreateCommand.IsZero() {
+			lc.OnCreate = append(lc.OnCreate, lifecycleCmdToJSON(devcontainerCfg.OnCreateCommand))
 		}
-		for _, cap := range pr.capAdd {
+		if !devcontainerCfg.UpdateContentCommand.IsZero() {
+			lc.OnCreate = append(lc.OnCreate, lifecycleCmdToJSON(devcontainerCfg.UpdateContentCommand))
+		}
+		if !devcontainerCfg.PostCreateCommand.IsZero() {
+			lc.OnCreate = append(lc.OnCreate, lifecycleCmdToJSON(devcontainerCfg.PostCreateCommand))
+		}
+		if !devcontainerCfg.PostStartCommand.IsZero() {
+			lc.OnStart = append(lc.OnStart, lifecycleCmdToJSON(devcontainerCfg.PostStartCommand))
+		}
+	}
+	return lc
+}
+
+// resolveUsernsMode determines the effective user namespace mode for the runtime.
+func resolveUsernsMode(rt runtime.Runtime, workdir *DirArg, auxDirs []*DirArg, capAdd []string) string {
+	up, ok := rt.(runtime.UsernsProvider)
+	if !ok {
+		return ""
+	}
+	hasSysAdmin := workdir.Mode == "overlay"
+	for _, ad := range auxDirs {
+		if ad.Mode == "overlay" {
+			hasSysAdmin = true
+			break
+		}
+	}
+	if !hasSysAdmin {
+		for _, cap := range capAdd {
 			if cap == "SYS_ADMIN" {
 				hasSysAdmin = true
 				break
 			}
 		}
-		usernsMode = up.UsernsMode(hasSysAdmin)
 	}
+	return up.UsernsMode(hasSysAdmin)
+}
 
-	// Write state files
-	meta := &Meta{
+// buildMeta constructs the Meta struct for a new sandbox.
+func buildMeta(opts CreateOptions, pr *profileResult, workdir *DirArg, baselineSHA string, dirMetas []DirMeta, hasPrompt bool, networkMode string, networkAllow []string, usernsMode string, hostFilesystem bool, archetypeStr string, backend string, model string, mergedMounts []string) *Meta {
+	return &Meta{
 		YoloaiVersion: opts.Version,
 		Name:          opts.Name,
 		CreatedAt:     time.Now(),
-		Backend:       m.backend,
+		Backend:       backend,
 		Profile:       pr.name,
 		ImageRef:      pr.imageRef,
 		Agent:         opts.Agent,
@@ -692,94 +788,50 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions, c
 		Debug:              opts.Debug,
 		UsernsMode:         usernsMode,
 		Isolation:          pr.isolation,
-		HostFilesystem:     m.runtime.Capabilities().HostFilesystem,
+		HostFilesystem:     hostFilesystem,
 		VscodeTunnel:       opts.VscodeTunnel,
-		Archetype:          string(resolvedArchetype),
+		Archetype:          archetypeStr,
 	}
+}
 
+// writeStatFiles writes all state files for the new sandbox (meta, sandbox-state,
+// prompt, logs, agent-status, runtime-config, context).
+func writeStatFiles(sandboxDir string, meta *Meta, agentDef *agent.Definition, agentFilesInitialized bool, hasPrompt bool, promptText string, configData []byte, perms IsolationPerms) error {
 	if err := SaveMeta(sandboxDir, meta); err != nil {
-		return nil, err
+		return err
 	}
-
 	if err := SaveSandboxState(sandboxDir, &SandboxState{
 		AgentFilesInitialized: agentFilesInitialized,
 	}); err != nil {
-		return nil, err
+		return err
 	}
-
 	if hasPrompt {
 		if err := fileutil.WriteFile(filepath.Join(sandboxDir, "prompt.txt"), []byte(promptText), 0600); err != nil {
-			return nil, fmt.Errorf("write prompt.txt: %w", err)
+			return fmt.Errorf("write prompt.txt: %w", err)
 		}
 	}
 
-	// Determine appropriate permissions based on security mode.
-	// gVisor user namespaces require world-readable/writable permissions because
-	// container uids are remapped (e.g., root→uid 501, yoloai→uid 1000+501).
-	// Standard Docker doesn't need this, so we use restrictive permissions.
 	configPerm := os.FileMode(0644) // always 0644 (no secrets, read-only in container)
 
 	if err := mkdirAllPerm(filepath.Join(sandboxDir, LogsDir), perms.Dir); err != nil {
-		return nil, fmt.Errorf("create logs dir: %w", err)
+		return fmt.Errorf("create logs dir: %w", err)
 	}
-
-	// Pre-create log files so any uid inside the container can append to them.
-	// Under gVisor, the entrypoint (running as root) creates the file, and
-	// sandbox-setup.py (re-execed as yoloai user) gets EPERM without 0666.
 	for _, logFile := range []string{SandboxJSONLFile, MonitorJSONLFile, HooksJSONLFile} {
 		p := filepath.Join(sandboxDir, logFile)
 		if err := writeFilePerm(p, nil, perms.File); err != nil {
-			return nil, fmt.Errorf("create log file %s: %w", logFile, err)
+			return fmt.Errorf("create log file %s: %w", logFile, err)
 		}
 	}
-
 	if err := writeFilePerm(filepath.Join(sandboxDir, AgentStatusFile), []byte("{}\n"), perms.File); err != nil {
-		return nil, fmt.Errorf("write %s: %w", AgentStatusFile, err)
+		return fmt.Errorf("write %s: %w", AgentStatusFile, err)
 	}
-
 	if err := writeFilePerm(filepath.Join(sandboxDir, RuntimeConfigFile), configData, configPerm); err != nil {
-		return nil, fmt.Errorf("write %s: %w", RuntimeConfigFile, err)
+		return fmt.Errorf("write %s: %w", RuntimeConfigFile, err)
 	}
-
 	if err := WriteContextFiles(sandboxDir, meta, agentDef); err != nil {
-		return nil, fmt.Errorf("write context files: %w", err)
+		return fmt.Errorf("write context files: %w", err)
 	}
-
-	success = true
-	return &sandboxState{
-		name:                      opts.Name,
-		sandboxDir:                sandboxDir,
-		workdir:                   workdir,
-		workCopyDir:               workCopyDir,
-		auxDirs:                   auxDirs,
-		agent:                     agentDef,
-		model:                     model,
-		profile:                   pr.name,
-		imageRef:                  pr.imageRef,
-		env:                       pr.env,
-		credOverrides:             credOverrides,
-		hasPrompt:                 hasPrompt,
-		networkMode:               networkMode,
-		networkAllow:              networkAllow,
-		ports:                     opts.Ports,
-		configMounts:              mergedMounts,
-		tmuxConf:                  tmuxConf,
-		resources:                 pr.resources,
-		capAdd:                    pr.capAdd,
-		devices:                   pr.devices,
-		setup:                     pr.setup,
-		isolation:                 pr.isolation,
-		isolationExplicit:         pr.isolationExplicit,
-		vscodeTunnel:              opts.VscodeTunnel,
-		meta:                      meta,
-		configJSON:                configData,
-		archetype:                 resolvedArchetype,
-		dockerdRequired:           archetypeDockerDRequired,
-		devcontainer:              devcontainerCfg,
-		devcontainerMounts:        dcMounts,
-		devcontainerMountWarnings: dcMountWarnings,
-		workdirMode:               string(workdir.Mode),
-	}, nil
+	return nil
 }
 
 // launchContainer creates a sandbox instance from sandboxState, starts it,
@@ -1280,14 +1332,23 @@ func sudoParentEnv() map[string]string {
 // buildMounts constructs the bind mounts for the sandbox instance.
 func buildMounts(state *sandboxState, secretsDir string) []runtime.MountSpec {
 	var mounts []runtime.MountSpec
+	mounts = append(mounts, buildWorkdirMounts(state)...)
+	mounts = append(mounts, buildAuxDirMounts(state)...)
+	mounts = append(mounts, buildAgentMounts(state)...)
+	mounts = append(mounts, buildSystemMounts(state)...)
+	mounts = append(mounts, buildGitAndTmuxMounts(state)...)
+	mounts = append(mounts, buildConfigAndSecretsMounts(state, secretsDir)...)
+	return mounts
+}
 
-	// Work directory
+// buildWorkdirMounts returns the mount specs for the sandbox workdir.
+func buildWorkdirMounts(state *sandboxState) []runtime.MountSpec {
 	switch state.workdir.Mode {
 	case "copy":
-		mounts = append(mounts, runtime.MountSpec{
+		return []runtime.MountSpec{{
 			Source: state.workCopyDir,
 			Target: state.workdir.ResolvedMountPath(),
-		})
+		}}
 	case "overlay":
 		encoded := EncodePath(state.workdir.Path)
 		// Mount the entire overlay work base dir (upper/ovlwork/merged/lower) as
@@ -1295,60 +1356,74 @@ func buildMounts(state *sandboxState, secretsDir string) []runtime.MountSpec {
 		// volume — a kernel requirement for overlayfs to work inside a container.
 		// The user's workdir is then nested on top as a read-only bind mount at
 		// the lower/ subdirectory within the same volume.
-		mounts = append(mounts,
-			runtime.MountSpec{
+		return []runtime.MountSpec{
+			{
 				Source: OverlayWorkBaseDir(state.name, state.workdir.Path),
 				Target: "/yoloai/overlay/" + encoded,
 			},
-			runtime.MountSpec{
+			{
 				Source:   state.workdir.Path,
 				Target:   "/yoloai/overlay/" + encoded + "/lower",
 				ReadOnly: true,
 			},
-		)
+		}
 	default:
-		mounts = append(mounts, runtime.MountSpec{
+		return []runtime.MountSpec{{
 			Source:   state.workdir.Path,
 			Target:   state.workdir.ResolvedMountPath(),
 			ReadOnly: state.workdir.Mode != "rw",
-		})
+		}}
 	}
+}
 
-	// Auxiliary directories
+// buildAuxDirMounts returns the mount specs for all auxiliary directories.
+func buildAuxDirMounts(state *sandboxState) []runtime.MountSpec {
+	var mounts []runtime.MountSpec
 	for _, ad := range state.auxDirs {
-		mountTarget := ad.ResolvedMountPath()
-		switch ad.Mode {
-		case "copy":
-			mounts = append(mounts, runtime.MountSpec{
-				Source: WorkDir(state.name, ad.Path),
-				Target: mountTarget,
-			})
-		case "overlay":
-			encoded := EncodePath(ad.Path)
-			mounts = append(mounts,
-				runtime.MountSpec{
-					Source: OverlayWorkBaseDir(state.name, ad.Path),
-					Target: "/yoloai/overlay/" + encoded,
-				},
-				runtime.MountSpec{
-					Source:   ad.Path,
-					Target:   "/yoloai/overlay/" + encoded + "/lower",
-					ReadOnly: true,
-				},
-			)
-		case "rw":
-			mounts = append(mounts, runtime.MountSpec{
-				Source: ad.Path,
-				Target: mountTarget,
-			})
-		default: // read-only (empty mode or explicit "ro")
-			mounts = append(mounts, runtime.MountSpec{
-				Source:   ad.Path,
-				Target:   mountTarget,
-				ReadOnly: true,
-			})
-		}
+		mounts = append(mounts, buildSingleAuxDirMount(state.name, ad)...)
 	}
+	return mounts
+}
+
+// buildSingleAuxDirMount returns mount specs for one auxiliary directory.
+func buildSingleAuxDirMount(sandboxName string, ad *DirArg) []runtime.MountSpec {
+	mountTarget := ad.ResolvedMountPath()
+	switch ad.Mode {
+	case "copy":
+		return []runtime.MountSpec{{
+			Source: WorkDir(sandboxName, ad.Path),
+			Target: mountTarget,
+		}}
+	case "overlay":
+		encoded := EncodePath(ad.Path)
+		return []runtime.MountSpec{
+			{
+				Source: OverlayWorkBaseDir(sandboxName, ad.Path),
+				Target: "/yoloai/overlay/" + encoded,
+			},
+			{
+				Source:   ad.Path,
+				Target:   "/yoloai/overlay/" + encoded + "/lower",
+				ReadOnly: true,
+			},
+		}
+	case "rw":
+		return []runtime.MountSpec{{
+			Source: ad.Path,
+			Target: mountTarget,
+		}}
+	default: // read-only (empty mode or explicit "ro")
+		return []runtime.MountSpec{{
+			Source:   ad.Path,
+			Target:   mountTarget,
+			ReadOnly: true,
+		}}
+	}
+}
+
+// buildAgentMounts returns mount specs for the agent runtime dir, VS Code CLI, and home-seed files.
+func buildAgentMounts(state *sandboxState) []runtime.MountSpec {
+	var mounts []runtime.MountSpec
 
 	// Agent runtime directory (agent's own managed state)
 	if state.agent.StateDir != "" {
@@ -1358,85 +1433,59 @@ func buildMounts(state *sandboxState, secretsDir string) []runtime.MountSpec {
 		})
 	}
 
+	// VS Code CLI data dir
+	if state.vscodeTunnel {
+		mounts = append(mounts, buildVscodeMounts(state)...)
+	}
+
+	// Home-seed files and directories (mounted into /home/yoloai/)
+	mounts = append(mounts, buildHomeSeedMounts(state)...)
+
+	return mounts
+}
+
+// buildVscodeMounts returns mount specs for VS Code tunnel support.
+func buildVscodeMounts(state *sandboxState) []runtime.MountSpec {
+	var mounts []runtime.MountSpec
+
 	// VS Code CLI data dir — per-sandbox to prevent singleton lock conflicts when
 	// multiple sandboxes run tunnels concurrently. Token is seeded from the global
 	// dir (~/.yoloai/vscode-cli/) on first use so re-authentication is only needed
 	// once across all sandboxes.
-	if state.vscodeTunnel {
-		vscodeSandboxCLIDir := filepath.Join(state.sandboxDir, "vscode-cli")
-		_ = fileutil.MkdirAll(vscodeSandboxCLIDir, 0750) //nolint:gosec // G301: sandbox dir, private
+	vscodeSandboxCLIDir := filepath.Join(state.sandboxDir, "vscode-cli")
+	_ = fileutil.MkdirAll(vscodeSandboxCLIDir, 0750) //nolint:gosec // G301: sandbox dir, private
 
-		// Seed token from global dir if this sandbox hasn't authenticated yet.
-		globalTokenPath := filepath.Join(config.VscodeCLIDir(), "token.json")
-		sandboxTokenPath := filepath.Join(vscodeSandboxCLIDir, "token.json")
-		if _, err := os.Stat(sandboxTokenPath); os.IsNotExist(err) {
-			if data, err2 := os.ReadFile(globalTokenPath); err2 == nil { //nolint:gosec // G304: path is sandbox-controlled
-				_ = fileutil.WriteFile(sandboxTokenPath, data, 0600)
-			}
-		}
-
-		mounts = append(mounts, runtime.MountSpec{
-			Source: vscodeSandboxCLIDir,
-			Target: "/home/yoloai/.vscode/cli",
-		})
-
-		// Stable machine-id — VS Code CLI ties its token to /etc/machine-id; a
-		// fresh random ID on each container restart causes re-authentication.
-		machineIDPath := filepath.Join(state.sandboxDir, MachineIDFile)
-		if err := ensureMachineID(machineIDPath); err == nil {
-			mounts = append(mounts, runtime.MountSpec{
-				Source:   machineIDPath,
-				Target:   "/etc/machine-id",
-				ReadOnly: true,
-			})
+	// Seed token from global dir if this sandbox hasn't authenticated yet.
+	globalTokenPath := filepath.Join(config.VscodeCLIDir(), "token.json")
+	sandboxTokenPath := filepath.Join(vscodeSandboxCLIDir, "token.json")
+	if _, err := os.Stat(sandboxTokenPath); os.IsNotExist(err) {
+		if data, err2 := os.ReadFile(globalTokenPath); err2 == nil { //nolint:gosec // G304: path is sandbox-controlled
+			_ = fileutil.WriteFile(sandboxTokenPath, data, 0600)
 		}
 	}
 
-	// Structured log directory (cli.jsonl, sandbox.jsonl, monitor.jsonl, agent-hooks.jsonl, agent.log)
 	mounts = append(mounts, runtime.MountSpec{
-		Source: filepath.Join(state.sandboxDir, LogsDir),
-		Target: "/yoloai/" + LogsDir,
+		Source: vscodeSandboxCLIDir,
+		Target: "/home/yoloai/.vscode/cli",
 	})
 
-	// Agent status file (for in-container status monitor)
-	mounts = append(mounts, runtime.MountSpec{
-		Source: filepath.Join(state.sandboxDir, AgentStatusFile),
-		Target: "/yoloai/" + AgentStatusFile,
-	})
-
-	// Prompt file
-	if state.hasPrompt {
-		promptSource := filepath.Join(state.sandboxDir, "prompt.txt")
-		if state.promptSourcePath != "" {
-			promptSource = state.promptSourcePath
-		}
+	// Stable machine-id — VS Code CLI ties its token to /etc/machine-id; a
+	// fresh random ID on each container restart causes re-authentication.
+	machineIDPath := filepath.Join(state.sandboxDir, MachineIDFile)
+	if err := ensureMachineID(machineIDPath); err == nil {
 		mounts = append(mounts, runtime.MountSpec{
-			Source:   promptSource,
-			Target:   "/yoloai/prompt.txt",
+			Source:   machineIDPath,
+			Target:   "/etc/machine-id",
 			ReadOnly: true,
 		})
 	}
 
-	// Runtime config file
-	mounts = append(mounts, runtime.MountSpec{
-		Source:   filepath.Join(state.sandboxDir, RuntimeConfigFile),
-		Target:   "/yoloai/" + RuntimeConfigFile,
-		ReadOnly: true,
-	})
+	return mounts
+}
 
-	// File exchange directory
-	mounts = append(mounts, runtime.MountSpec{
-		Source: filepath.Join(state.sandboxDir, "files"),
-		Target: "/yoloai/files",
-	})
-
-	// Cache directory
-	mounts = append(mounts, runtime.MountSpec{
-		Source: filepath.Join(state.sandboxDir, "cache"),
-		Target: "/yoloai/cache",
-	})
-
-	// Home-seed files and directories (mounted into /home/yoloai/)
+// buildHomeSeedMounts returns mount specs for home-seed files.
+func buildHomeSeedMounts(state *sandboxState) []runtime.MountSpec {
+	var mounts []runtime.MountSpec
 	mountedDirs := map[string]bool{}
 	for _, sf := range state.agent.SeedFiles {
 		if !sf.HomeDir {
@@ -1470,10 +1519,64 @@ func buildMounts(state *sandboxState, secretsDir string) []runtime.MountSpec {
 			})
 		}
 	}
+	return mounts
+}
 
-	// Defaults tmux config: mount defaults/tmux.conf over the image-baked copy
-	// when the file exists and the mode uses the baked-in config.
-	// This lets users customize the config by editing ~/.yoloai/defaults/tmux.conf.
+// buildSystemMounts returns mount specs for logs, status, prompt, config, files, and cache.
+func buildSystemMounts(state *sandboxState) []runtime.MountSpec {
+	mounts := []runtime.MountSpec{
+		// Structured log directory
+		{
+			Source: filepath.Join(state.sandboxDir, LogsDir),
+			Target: "/yoloai/" + LogsDir,
+		},
+		// Agent status file (for in-container status monitor)
+		{
+			Source: filepath.Join(state.sandboxDir, AgentStatusFile),
+			Target: "/yoloai/" + AgentStatusFile,
+		},
+	}
+
+	// Prompt file
+	if state.hasPrompt {
+		promptSource := filepath.Join(state.sandboxDir, "prompt.txt")
+		if state.promptSourcePath != "" {
+			promptSource = state.promptSourcePath
+		}
+		mounts = append(mounts, runtime.MountSpec{
+			Source:   promptSource,
+			Target:   "/yoloai/prompt.txt",
+			ReadOnly: true,
+		})
+	}
+
+	mounts = append(mounts,
+		// Runtime config file
+		runtime.MountSpec{
+			Source:   filepath.Join(state.sandboxDir, RuntimeConfigFile),
+			Target:   "/yoloai/" + RuntimeConfigFile,
+			ReadOnly: true,
+		},
+		// File exchange directory
+		runtime.MountSpec{
+			Source: filepath.Join(state.sandboxDir, "files"),
+			Target: "/yoloai/files",
+		},
+		// Cache directory
+		runtime.MountSpec{
+			Source: filepath.Join(state.sandboxDir, "cache"),
+			Target: "/yoloai/cache",
+		},
+	)
+
+	return mounts
+}
+
+// buildGitAndTmuxMounts returns mount specs for git identity and tmux configuration.
+func buildGitAndTmuxMounts(state *sandboxState) []runtime.MountSpec {
+	var mounts []runtime.MountSpec
+
+	// Defaults tmux config
 	if state.tmuxConf == "default" || state.tmuxConf == "default+host" {
 		defaultsTmuxConf := filepath.Join(config.DefaultsDir(), "tmux.conf")
 		if _, err := os.Stat(defaultsTmuxConf); err == nil {
@@ -1523,6 +1626,13 @@ func buildMounts(state *sandboxState, secretsDir string) []runtime.MountSpec {
 			ReadOnly: true,
 		})
 	}
+
+	return mounts
+}
+
+// buildConfigAndSecretsMounts returns mount specs for config/profile mounts and secrets.
+func buildConfigAndSecretsMounts(state *sandboxState, secretsDir string) []runtime.MountSpec {
+	var mounts []runtime.MountSpec
 
 	// Config/profile mounts (host:container[:ro])
 	for _, m := range state.configMounts {
@@ -1632,41 +1742,16 @@ func copySeedFiles(agentDef *agent.Definition, sandboxDir string, hasAPIKey bool
 	homeSeedDir := filepath.Join(sandboxDir, "home-seed")
 
 	for _, sf := range agentDef.SeedFiles {
-		if sf.AuthOnly {
-			if len(sf.OwnerAPIKeys) > 0 {
-				// Per-file API key check (used by shell agent)
-				skip := false
-				for _, key := range sf.OwnerAPIKeys {
-					if os.Getenv(key) != "" {
-						skip = true
-						break
-					}
-				}
-				if skip {
-					continue
-				}
-			} else if hasAPIKey {
-				continue // auth file not needed when API key is set
-			}
+		if shouldSkipSeedFile(sf, hasAPIKey) {
+			continue
 		}
 
-		hostPath := ExpandTilde(sf.HostPath)
-
-		var data []byte
-		if _, err := os.Stat(hostPath); err == nil {
-			fileData, readErr := os.ReadFile(hostPath) //nolint:gosec // G304: path is from agent definition, not user input
-			if readErr != nil {
-				return copiedAuth, fmt.Errorf("read %s: %w", hostPath, readErr)
-			}
-			data = fileData
-		} else if sf.KeychainService != "" {
-			keychainData, keychainErr := keychainReader(sf.KeychainService)
-			if keychainErr != nil {
-				continue // neither file nor keychain available
-			}
-			data = keychainData
-		} else {
-			continue // skip missing files
+		data, ok, err := loadSeedFileData(sf)
+		if err != nil {
+			return copiedAuth, err
+		}
+		if !ok {
+			continue
 		}
 
 		baseDir := agentStateDir
@@ -1675,11 +1760,9 @@ func copySeedFiles(agentDef *agent.Definition, sandboxDir string, hasAPIKey bool
 		}
 		targetPath := filepath.Join(baseDir, sf.TargetPath)
 
-		// Ensure parent directory exists
 		if err := fileutil.MkdirAll(filepath.Dir(targetPath), 0750); err != nil {
 			return copiedAuth, fmt.Errorf("create dir for %s: %w", sf.TargetPath, err)
 		}
-
 		if err := fileutil.WriteFile(targetPath, data, 0600); err != nil { //nolint:gosec // G703: targetPath is constructed from internal agent config, not user input
 			return copiedAuth, fmt.Errorf("write %s: %w", targetPath, err)
 		}
@@ -1689,6 +1772,43 @@ func copySeedFiles(agentDef *agent.Definition, sandboxDir string, hasAPIKey bool
 	}
 
 	return copiedAuth, nil
+}
+
+// shouldSkipSeedFile returns true if the seed file should be skipped.
+func shouldSkipSeedFile(sf agent.SeedFile, hasAPIKey bool) bool {
+	if !sf.AuthOnly {
+		return false
+	}
+	if len(sf.OwnerAPIKeys) > 0 {
+		// Per-file API key check (used by shell agent): skip if any key is set
+		for _, key := range sf.OwnerAPIKeys {
+			if os.Getenv(key) != "" {
+				return true
+			}
+		}
+		return false
+	}
+	return hasAPIKey // auth file not needed when API key is set
+}
+
+// loadSeedFileData reads data from the host file or keychain for a seed file.
+// Returns (data, true, nil) if found, (nil, false, nil) if not found, or (nil, false, err) on error.
+func loadSeedFileData(sf agent.SeedFile) ([]byte, bool, error) {
+	hostPath := ExpandTilde(sf.HostPath)
+	if _, err := os.Stat(hostPath); err == nil {
+		data, readErr := os.ReadFile(hostPath) //nolint:gosec // G304: path is from agent definition, not user input
+		if readErr != nil {
+			return nil, false, fmt.Errorf("read %s: %w", hostPath, readErr)
+		}
+		return data, true, nil
+	}
+	if sf.KeychainService != "" {
+		data, keychainErr := keychainReader(sf.KeychainService)
+		if keychainErr == nil {
+			return data, true, nil
+		}
+	}
+	return nil, false, nil
 }
 
 // ensureContainerSettings merges required container settings into agent-state/settings.json.

@@ -177,44 +177,8 @@ func (r *Runtime) Create(ctx context.Context, cfg runtime.InstanceConfig) error 
 	// /run/secrets directory mount created by buildMounts is inaccessible
 	// inside the VM. We copy them into the sandbox directory, which is shared
 	// via the yoloai VirtioFS share, so sandbox-setup.py can read them.
-	secretsDir := filepath.Join(sandboxPath, "secrets")
-	if err := fileutil.MkdirAll(secretsDir, 0700); err != nil {
-		return fmt.Errorf("create secrets dir: %w", err)
-	}
-	for _, m := range cfg.Mounts {
-		// buildMounts creates a directory mount with Target="/run/secrets"
-		if m.Target != "/run/secrets" && !strings.HasPrefix(m.Target, "/run/secrets/") {
-			continue
-		}
-		// If it's a directory mount, copy all files from the source directory
-		if m.Target == "/run/secrets" {
-			entries, err := os.ReadDir(m.Source)
-			if err != nil {
-				continue // skip if directory read fails
-			}
-			for _, entry := range entries {
-				if entry.IsDir() {
-					continue
-				}
-				data, err := os.ReadFile(filepath.Join(m.Source, entry.Name())) //nolint:gosec // G304: source is from validated mount spec
-				if err != nil {
-					continue // skip files that can't be read
-				}
-				if err := fileutil.WriteFile(filepath.Join(secretsDir, entry.Name()), data, 0600); err != nil { //nolint:gosec // G703: secretsDir is an internal sandbox directory
-					return fmt.Errorf("copy secret %s: %w", entry.Name(), err)
-				}
-			}
-			continue
-		}
-		// Handle individual file mounts (legacy, may not be used anymore)
-		data, err := os.ReadFile(m.Source) //nolint:gosec // G304: source is from validated mount spec
-		if err != nil {
-			continue // skip missing secrets (may have been cleaned up)
-		}
-		keyName := filepath.Base(m.Target)
-		if err := fileutil.WriteFile(filepath.Join(secretsDir, keyName), data, 0600); err != nil { //nolint:gosec // G703: secretsDir is an internal sandbox directory
-			return fmt.Errorf("copy secret %s: %w", keyName, err)
-		}
+	if err := copySecretsToSandbox(sandboxPath, cfg.Mounts); err != nil {
+		return err
 	}
 
 	// Add mount_map to runtime-config.json for symlink creation in the guest.
@@ -844,11 +808,31 @@ func remapTargetPath(target string) string {
 func (r *Runtime) runSetupScript(ctx context.Context, vmName, sandboxPath string, mounts []runtime.MountSpec) error {
 	vmSharedDir := filepath.Join(sharedDirVMPath, sharedDirName)
 
-	// Create symlinks from expected mount targets to VirtioFS paths
+	if err := r.createVMMountSymlinks(ctx, vmName, sandboxPath, vmSharedDir, mounts); err != nil {
+		return err
+	}
+
+	if err := r.patchConfigWorkingDir(sandboxPath); err != nil {
+		return fmt.Errorf("patch config working dir: %w", err)
+	}
+
+	if err := writeVMSetupScripts(sandboxPath); err != nil {
+		return err
+	}
+
+	setupCmd := fmt.Sprintf("nohup python3 '%s/bin/sandbox-setup.py' tart '%s' </dev/null >'%s/setup.log' 2>&1 &",
+		vmSharedDir, vmSharedDir, vmSharedDir)
+	args := execArgs(vmName, "bash", "-c", setupCmd)
+	if _, err := r.runTart(ctx, args...); err != nil {
+		return fmt.Errorf("exec setup script: %w", err)
+	}
+
+	return nil
+}
+
+// createVMMountSymlinks creates symlinks in the VM from expected mount targets to VirtioFS paths.
+func (r *Runtime) createVMMountSymlinks(ctx context.Context, vmName, sandboxPath, vmSharedDir string, mounts []runtime.MountSpec) error {
 	for _, m := range mounts {
-		// Skip /run/secrets mounts - these are copied to sandbox/secrets/ during Create
-		// and accessible via /Volumes/My Shared Files/yoloai/secrets/ inside the VM.
-		// The setup script handles delivering them to the agent.
 		if m.Target == "/run/secrets" || strings.HasPrefix(m.Target, "/run/secrets/") {
 			continue
 		}
@@ -856,88 +840,90 @@ func (r *Runtime) runSetupScript(ctx context.Context, vmName, sandboxPath string
 		target := remapTargetPath(m.Target)
 		slog.Debug("tart setup: processing mount", "source", m.Source, "target", target)
 
-		// Skip :copy workdirs - these are handled by executeVMWorkDirSetup() which
-		// copies from VirtioFS staging to local VM storage (/Users/admin/yoloai-work/).
-		// Creating symlinks for these paths would conflict with the VM-local storage.
 		if strings.HasPrefix(target, "/Users/admin/yoloai-work/") {
 			slog.Debug("tart setup: skipping copy workdir (handled by executeVMWorkDirSetup)", "target", target)
 			continue
 		}
 
-		var vfsPath string
-		if strings.HasPrefix(m.Source, sandboxPath+"/") {
-			// Source is under the sandbox dir — accessible via the yoloai share
-			relPath := strings.TrimPrefix(m.Source, sandboxPath+"/")
-			vfsPath = filepath.Join(vmSharedDir, relPath)
-			// Check if source exists on host
-			if stat, err := os.Stat(m.Source); err != nil {
-				slog.Debug("tart setup: mount source does not exist on host!", "source", m.Source, "error", err)
-				continue
-			} else {
-				slog.Debug("tart setup: mount under sandbox", "source", m.Source, "target", target, "relPath", relPath, "vfsPath", vfsPath, "sourceExists", true, "sourceIsDir", stat.IsDir())
-			}
-		} else if m.Source == sandboxPath {
-			vfsPath = vmSharedDir
-		} else if info, err := os.Stat(m.Source); err == nil && info.IsDir() {
-			// External directory — has its own VirtioFS share
-			vfsPath = filepath.Join(sharedDirVMPath, mountDirName(m.Source))
-		} else {
-			continue // skip files outside sandbox dir (can't share via VirtioFS)
+		vfsPath, ok := resolveMountVFSPath(m.Source, sandboxPath, vmSharedDir)
+		if !ok {
+			continue
 		}
 
-		// Clean trailing slashes — ln treats /foo/ as "inside /foo" not "replace /foo"
 		target = strings.TrimRight(target, "/")
-
 		if vfsPath == target {
-			continue // no symlink needed
+			continue
 		}
-		parent := filepath.Dir(target)
 
-		// First, check if the VirtioFS path exists
-		checkCmd := fmt.Sprintf("ls -la '%s' 2>&1 || echo 'PATH_DOES_NOT_EXIST'", filepath.Dir(vfsPath))
-		checkArgs := execArgs(vmName, "bash", "-c", checkCmd)
-		if out, checkErr := r.runTart(ctx, checkArgs...); checkErr == nil {
-			slog.Debug("tart setup: VirtioFS parent directory listing", "path", filepath.Dir(vfsPath), "output", out)
+		if err := r.createSingleVMSymlink(ctx, vmName, target, vfsPath); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// resolveMountVFSPath resolves the VirtioFS path for a mount source.
+// Returns the vfsPath and true if the mount should be symlinked, or ("", false) to skip.
+func resolveMountVFSPath(source, sandboxPath, vmSharedDir string) (string, bool) {
+	if strings.HasPrefix(source, sandboxPath+"/") {
+		relPath := strings.TrimPrefix(source, sandboxPath+"/")
+		vfsPath := filepath.Join(vmSharedDir, relPath)
+		if stat, err := os.Stat(source); err != nil {
+			slog.Debug("tart setup: mount source does not exist on host!", "source", source, "error", err)
+			return "", false
 		} else {
-			slog.Debug("tart setup: failed to list VirtioFS parent", "path", filepath.Dir(vfsPath), "error", checkErr)
+			slog.Debug("tart setup: mount under sandbox", "source", source, "relPath", relPath, "vfsPath", vfsPath, "sourceIsDir", stat.IsDir())
 		}
+		return vfsPath, true
+	}
+	if source == sandboxPath {
+		return vmSharedDir, true
+	}
+	if info, err := os.Stat(source); err == nil && info.IsDir() {
+		return filepath.Join(sharedDirVMPath, mountDirName(source)), true
+	}
+	return "", false
+}
 
-		// Ensure parent directory exists. Non-fatal: system paths like /var/folders
-		// already exist and cannot be mkdir'd by regular users.
-		mkdirCmd := fmt.Sprintf("(mkdir -p '%s' 2>/dev/null || sudo mkdir -p '%s' 2>/dev/null || true)", parent, parent)
-		if _, mkdirErr := r.runTart(ctx, execArgs(vmName, "bash", "-c", mkdirCmd)...); mkdirErr != nil {
-			return fmt.Errorf("create parent directory %s: %w", parent, mkdirErr)
-		}
+// createSingleVMSymlink creates a single symlink in the VM from target to vfsPath.
+func (r *Runtime) createSingleVMSymlink(ctx context.Context, vmName, target, vfsPath string) error {
+	parent := filepath.Dir(target)
 
-		// Remove existing dir/file before symlinking (ln -sfn won't replace a directory).
-		// Try without sudo first; fall back to sudo for system paths (/var, /Library, etc.).
-		symlinkCmd := fmt.Sprintf(
-			"(rm -rf '%s' && ln -sfn '%s' '%s') 2>/dev/null || (sudo rm -rf '%s' && sudo ln -sfn '%s' '%s')",
-			target, vfsPath, target, target, vfsPath, target,
-		)
-		args := execArgs(vmName, "bash", "-c", symlinkCmd)
-		slog.Debug("tart setup: creating symlink", "vm", vmName, "target", target, "vfsPath", vfsPath, "cmd", symlinkCmd)
-		if _, err := r.runTart(ctx, args...); err != nil {
-			// Check if VM is still running to provide better error message
-			if !r.isRunning(ctx, vmName) {
-				return fmt.Errorf("create mount symlink for %s (VM appears to have crashed): %w", target, err)
-			}
-			return fmt.Errorf("create mount symlink for %s: %w", target, err)
-		}
+	checkCmd := fmt.Sprintf("ls -la '%s' 2>&1 || echo 'PATH_DOES_NOT_EXIST'", filepath.Dir(vfsPath))
+	if out, checkErr := r.runTart(ctx, execArgs(vmName, "bash", "-c", checkCmd)...); checkErr == nil {
+		slog.Debug("tart setup: VirtioFS parent directory listing", "path", filepath.Dir(vfsPath), "output", out)
+	} else {
+		slog.Debug("tart setup: failed to list VirtioFS parent", "path", filepath.Dir(vfsPath), "error", checkErr)
 	}
 
-	// Patch runtime-config.json to remap working_dir for macOS VM paths
-	if err := r.patchConfigWorkingDir(sandboxPath); err != nil {
-		return fmt.Errorf("patch config working dir: %w", err)
+	mkdirCmd := fmt.Sprintf("(mkdir -p '%s' 2>/dev/null || sudo mkdir -p '%s' 2>/dev/null || true)", parent, parent)
+	if _, mkdirErr := r.runTart(ctx, execArgs(vmName, "bash", "-c", mkdirCmd)...); mkdirErr != nil {
+		return fmt.Errorf("create parent directory %s: %w", parent, mkdirErr)
 	}
 
-	// Write setup script, status monitor, and tmux config to sandbox dir (shared via VirtioFS)
+	symlinkCmd := fmt.Sprintf(
+		"(rm -rf '%s' && ln -sfn '%s' '%s') 2>/dev/null || (sudo rm -rf '%s' && sudo ln -sfn '%s' '%s')",
+		target, vfsPath, target, target, vfsPath, target,
+	)
+	args := execArgs(vmName, "bash", "-c", symlinkCmd)
+	slog.Debug("tart setup: creating symlink", "vm", vmName, "target", target, "vfsPath", vfsPath, "cmd", symlinkCmd)
+	if _, err := r.runTart(ctx, args...); err != nil {
+		if !r.isRunning(ctx, vmName) {
+			return fmt.Errorf("create mount symlink for %s (VM appears to have crashed): %w", target, err)
+		}
+		return fmt.Errorf("create mount symlink for %s: %w", target, err)
+	}
+	return nil
+}
+
+// writeVMSetupScripts writes setup script, status monitor, and tmux config to the sandbox dir.
+func writeVMSetupScripts(sandboxPath string) error {
 	scriptPath := filepath.Join(sandboxPath, binDir, "sandbox-setup.py")
-	if err := fileutil.WriteFile(scriptPath, monitor.SetupScript(), 0644); err != nil { //nolint:gosec // G306: script content, not user input
+	if err := fileutil.WriteFile(scriptPath, monitor.SetupScript(), 0644); err != nil { //nolint:gosec // G306: script content
 		return fmt.Errorf("write sandbox-setup.py: %w", err)
 	}
 	monitorPath := filepath.Join(sandboxPath, binDir, "status-monitor.py")
-	if err := fileutil.WriteFile(monitorPath, monitor.Script(), 0644); err != nil { //nolint:gosec // G306: script content, not user input
+	if err := fileutil.WriteFile(monitorPath, monitor.Script(), 0644); err != nil { //nolint:gosec // G306: script content
 		return fmt.Errorf("write status monitor: %w", err)
 	}
 	diagPath := filepath.Join(sandboxPath, binDir, "diagnose-idle.sh")
@@ -948,17 +934,6 @@ func (r *Runtime) runSetupScript(ctx context.Context, vmName, sandboxPath string
 	if err := fileutil.WriteFile(tmuxConfPath, embeddedTmuxConf, 0600); err != nil {
 		return fmt.Errorf("write tmux.conf: %w", err)
 	}
-
-	// Run the setup script in the background inside the VM.
-	// Paths must be quoted — VirtioFS mount path contains spaces.
-	setupCmd := fmt.Sprintf("nohup python3 '%s/bin/sandbox-setup.py' tart '%s' </dev/null >'%s/setup.log' 2>&1 &",
-		vmSharedDir, vmSharedDir, vmSharedDir)
-	args := execArgs(vmName, "bash", "-c", setupCmd)
-	_, err := r.runTart(ctx, args...)
-	if err != nil {
-		return fmt.Errorf("exec setup script: %w", err)
-	}
-
 	return nil
 }
 
@@ -1296,4 +1271,53 @@ func (r *Runtime) addMountMapToConfig(sandboxPath string, mounts []runtime.Mount
 		return err
 	}
 	return fileutil.WriteFile(cfgPath, out, 0600)
+}
+
+// copySecretsToSandbox copies secret files from mount specs into the sandbox secrets directory.
+func copySecretsToSandbox(sandboxPath string, mounts []runtime.MountSpec) error {
+	secretsDir := filepath.Join(sandboxPath, "secrets")
+	if err := fileutil.MkdirAll(secretsDir, 0700); err != nil {
+		return fmt.Errorf("create secrets dir: %w", err)
+	}
+	for _, m := range mounts {
+		if m.Target != "/run/secrets" && !strings.HasPrefix(m.Target, "/run/secrets/") {
+			continue
+		}
+		if m.Target == "/run/secrets" {
+			if err := copySecretDir(secretsDir, m.Source); err != nil {
+				return err
+			}
+			continue
+		}
+		data, err := os.ReadFile(m.Source) //nolint:gosec // G304: source is from validated mount spec
+		if err != nil {
+			continue
+		}
+		keyName := filepath.Base(m.Target)
+		if err := fileutil.WriteFile(filepath.Join(secretsDir, keyName), data, 0600); err != nil { //nolint:gosec // G703: secretsDir is an internal sandbox directory
+			return fmt.Errorf("copy secret %s: %w", keyName, err)
+		}
+	}
+	return nil
+}
+
+// copySecretDir copies all non-directory files from srcDir into destDir.
+func copySecretDir(destDir, srcDir string) error {
+	entries, err := os.ReadDir(srcDir)
+	if err != nil {
+		return nil //nolint:nilerr // intentional: skip if directory read fails
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(srcDir, entry.Name())) //nolint:gosec // G304: source is from validated mount spec
+		if err != nil {
+			continue
+		}
+		if err := fileutil.WriteFile(filepath.Join(destDir, entry.Name()), data, 0600); err != nil { //nolint:gosec // G703: destDir is an internal sandbox directory
+			return fmt.Errorf("copy secret %s: %w", entry.Name(), err)
+		}
+	}
+	return nil
 }

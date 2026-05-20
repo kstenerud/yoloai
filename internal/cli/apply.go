@@ -43,309 +43,7 @@ Use --squash to flatten everything into a single unstaged patch.
 Use --patches to export .patch files without applying them.`,
 		GroupID: groupWorkflow,
 		Args:    cobra.ArbitraryArgs,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			name, rest, err := resolveName(cmd, args)
-			if err != nil {
-				return err
-			}
-			defer openCLIJSONLSink(name, cmd)()
-
-			yes := effectiveYes(cmd)
-			squash, _ := cmd.Flags().GetBool("squash")
-			patchesDir, _ := cmd.Flags().GetString("patches")
-			if patchesDir != "" {
-				var expandErr error
-				patchesDir, expandErr = sandbox.ExpandPath(patchesDir)
-				if expandErr != nil {
-					return fmt.Errorf("expand patches path: %w", expandErr)
-				}
-			}
-			noWIP, _ := cmd.Flags().GetBool("no-wip")
-			dryRun, _ := cmd.Flags().GetBool("dry-run")
-			withTags, _ := cmd.Flags().GetBool("tags")
-
-			// Parse refs and paths from remaining args
-			refs, paths := parseApplyArgs(rest, cmd)
-
-			// Validate mutually exclusive options
-			if len(refs) > 0 && squash {
-				return sandbox.NewUsageError("--squash cannot be used with commit refs — they are mutually exclusive")
-			}
-			// Load metadata for target directory and mode validation
-			meta, err := sandbox.LoadMeta(sandbox.Dir(name))
-			if err != nil {
-				return sandboxErrorHint(name, err)
-			}
-			if meta.Workdir.Mode == "rw" {
-				return sandbox.NewUsageError("apply is not needed for :rw directories — changes are already live")
-			}
-
-			slog.Info("applying changes", "event", "sandbox.apply", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
-			if hasOverlayDirs(meta) {
-				return applyOverlay(cmd, name, meta, refs, paths, patchesDir, noWIP, yes, dryRun)
-			}
-
-			if !jsonEnabled(cmd) {
-				fmt.Fprintf(cmd.OutOrStdout(), "Target: %s\n\n", meta.Workdir.HostPath) //nolint:errcheck
-			}
-
-			// Best-effort agent-running warning
-			if !jsonEnabled(cmd) {
-				agentRunningWarning(cmd, name)
-			}
-
-			// Selective apply: specific commit refs
-			if len(refs) > 0 {
-				return applySelectedCommits(cmd, name, refs, paths, meta, yes, dryRun, withTags)
-			}
-
-			// --squash: flatten everything into one unstaged patch
-			if squash {
-				return applySquash(cmd, name, paths, meta, yes, dryRun)
-			}
-
-			// Query work copy for commits and WIP
-			backend := resolveBackendForSandbox(name)
-			var commits []sandbox.CommitInfo
-			err = withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
-				var listErr error
-				commits, listErr = sandbox.ListCommitsBeyondBaseline(ctx, rt, name)
-				return listErr
-			})
-			if err != nil {
-				return err
-			}
-
-			var hasWIP bool
-			if !noWIP {
-				err = withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
-					var wipErr error
-					hasWIP, wipErr = sandbox.HasUncommittedChanges(ctx, rt, name)
-					return wipErr
-				})
-				if err != nil {
-					return err
-				}
-			}
-
-			slog.Debug("commits to apply", "event", "sandbox.apply.commits", "sandbox", name, "count", len(commits)) //nolint:gosec // G706: name is validated by ValidateName
-			if hasWIP {
-				slog.Debug("WIP to apply", "event", "sandbox.apply.wip", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
-			}
-			if len(commits) == 0 && !hasWIP {
-				// Check for unapplied tags even when there are no changes
-				unappliedTags, _ := sandbox.ListUnappliedTags(name)
-
-				// If --tags is used, transfer tags even without commits
-				if withTags && len(unappliedTags) > 0 {
-					targetDir := meta.Workdir.HostPath
-					workDir := sandbox.WorkDir(name, meta.Workdir.HostPath)
-					if !jsonEnabled(cmd) {
-						fmt.Fprintln(cmd.OutOrStdout(), "No changes to apply")                                                  //nolint:errcheck
-						fmt.Fprintf(cmd.OutOrStdout(), "\nTransferring %d tag(s) by matching commits...\n", len(unappliedTags)) //nolint:errcheck
-					}
-					// Build SHA map by matching commits (author, timestamp, subject)
-					sandboxSHAs := make([]string, len(unappliedTags))
-					for i, tag := range unappliedTags {
-						sandboxSHAs[i] = tag.SHA
-					}
-					shaMap, matchErr := workspace.BuildSHAMapByMatching(workDir, targetDir, sandboxSHAs)
-					if matchErr != nil {
-						return fmt.Errorf("build SHA map: %w", matchErr)
-					}
-					// Transfer tags using the SHA map
-					tagsApplied, tagsSkipped := applyTags(cmd, unappliedTags, shaMap, workDir, targetDir, true)
-					if jsonEnabled(cmd) {
-						return writeJSON(cmd.OutOrStdout(), applyResult{
-							Target:      meta.Workdir.HostPath,
-							TagsApplied: tagsApplied,
-							TagsSkipped: tagsSkipped,
-							Method:      "format-patch",
-						})
-					}
-					return nil
-				}
-
-				if jsonEnabled(cmd) {
-					return writeJSON(cmd.OutOrStdout(), applyResult{
-						Target: meta.Workdir.HostPath,
-						Method: "format-patch",
-					})
-				}
-				_, err = fmt.Fprintln(cmd.OutOrStdout(), "No changes to apply")
-				// Inform user if tags are available but not on host
-				if len(unappliedTags) > 0 && !withTags {
-					fmt.Fprintf(cmd.OutOrStdout(), "\nHint: %d tag(s) available in sandbox but not on host. Run with --tags to transfer them.\n", len(unappliedTags)) //nolint:errcheck
-				}
-				return err
-			}
-
-			// --patches: export patch files to a directory
-			if patchesDir != "" {
-				return exportPatches(cmd, name, paths, commits, hasWIP, patchesDir)
-			}
-
-			targetDir := meta.Workdir.HostPath
-			sandboxWorkDir := sandbox.WorkDir(name, meta.Workdir.HostPath)
-			isGit := workspace.IsGitRepo(targetDir)
-
-			// Non-git fallback: can't use git am on non-git targets
-			if !isGit && len(commits) > 0 {
-				fmt.Fprintln(cmd.ErrOrStderr(), "Note: target is not a git repository — falling back to squashed patch") //nolint:errcheck
-				return applySquash(cmd, name, paths, meta, yes, dryRun)
-			}
-
-			// No commits, only WIP — use existing squash flow (HEAD == baseline equivalent)
-			if len(commits) == 0 && hasWIP {
-				if withTags {
-					return sandbox.NewUsageError("--tags requires commits — cannot transfer tags with WIP-only changes")
-				}
-				return applySquash(cmd, name, paths, meta, yes, dryRun)
-			}
-
-			// Fetch tags beyond baseline (best-effort; errors don't fail the apply).
-			tags, _ := sandbox.ListTagsBeyondBaseline(name)
-			tagsByCommit := buildTagsByCommit(tags)
-
-			// Show summary
-			if !jsonEnabled(cmd) {
-				out := cmd.OutOrStdout()
-				fmt.Fprintf(out, "Commits to apply (%d):\n", len(commits)) //nolint:errcheck
-				for _, c := range commits {
-					line := fmt.Sprintf("  %.12s %s", c.SHA, c.Subject)
-					if names := tagsByCommit[strings.ToLower(c.SHA)]; len(names) > 0 {
-						line += "  [tag: " + strings.Join(names, ", ") + "]"
-					}
-					fmt.Fprintln(out, line) //nolint:errcheck
-				}
-				if hasWIP {
-					fmt.Fprintln(out, "\n+ uncommitted changes (will be applied as unstaged files)") //nolint:errcheck
-				}
-				if len(tags) > 0 && !withTags {
-					fmt.Fprintf(out, "\nWARNING: %d tag(s) will NOT be applied (cancel this apply and redo with --tags to include them)\n", len(tags)) //nolint:errcheck
-				}
-				fmt.Fprintln(out) //nolint:errcheck
-			}
-
-			// --dry-run: show summary and stop
-			if dryRun {
-				if !jsonEnabled(cmd) {
-					fmt.Fprintln(cmd.OutOrStdout(), "(dry run)") //nolint:errcheck
-				}
-				return nil
-			}
-
-			// Confirmation
-			if !yes {
-				prompt := fmt.Sprintf("Apply to %s? [y/N] ", targetDir)
-				confirmed, confirmErr := sandbox.Confirm(cmd.Context(), prompt, os.Stdin, cmd.ErrOrStderr())
-				if confirmErr != nil {
-					return confirmErr
-				}
-				if !confirmed {
-					return nil
-				}
-			}
-
-			// Apply commits via format-patch/am
-			var patchDir string
-			var files []string
-			err = withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
-				var genErr error
-				patchDir, files, genErr = sandbox.GenerateFormatPatch(ctx, rt, name, paths)
-				return genErr
-			})
-			if err != nil {
-				return err
-			}
-			defer os.RemoveAll(patchDir) //nolint:errcheck // best-effort cleanup
-
-			commitsApplied := 0
-			var shaMap map[string]string
-			var stashErr error
-			if len(files) > 0 {
-				shaMap, err = workspace.ApplyFormatPatch(patchDir, files, targetDir)
-				if err != nil && shaMap == nil {
-					// git am itself failed; nothing was applied.
-					return err
-				}
-				// err may be a stash-pop conflict (commits were applied); save it
-				// and surface it after baseline advancement.
-				stashErr = err
-				commitsApplied = len(files)
-				if !jsonEnabled(cmd) {
-					fmt.Fprintf(cmd.OutOrStdout(), "%d commit(s) applied to %s\n", len(files), targetDir) //nolint:errcheck
-				}
-			}
-
-			// Advance baseline past applied commits (skip for path-filtered applies)
-			if len(paths) == 0 {
-				err = withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
-					return sandbox.AdvanceBaseline(ctx, rt, name)
-				})
-				if err != nil {
-					return fmt.Errorf("advance baseline: %w", err)
-				}
-			}
-
-			if stashErr != nil {
-				return stashErr
-			}
-
-			// Apply WIP changes
-			wipApplied := false
-			if hasWIP {
-				var wipPatch []byte
-				wipErr := withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
-					var genErr error
-					wipPatch, _, genErr = sandbox.GenerateWIPDiff(ctx, rt, name, paths)
-					return genErr
-				})
-				if wipErr != nil {
-					if !jsonEnabled(cmd) {
-						fmt.Fprintf(cmd.ErrOrStderr(), "Warning: failed to generate WIP diff: %v\n", wipErr) //nolint:errcheck
-					}
-				} else if len(wipPatch) > 0 {
-					if err := workspace.ApplyPatch(wipPatch, targetDir, isGit); err != nil {
-						if !jsonEnabled(cmd) {
-							fmt.Fprintf(cmd.ErrOrStderr(), //nolint:errcheck // best-effort warning
-								"Warning: failed to apply WIP changes: %v\n"+
-									"Commits were applied successfully. WIP changes need manual application.\n", err)
-						}
-					} else {
-						wipApplied = true
-						if !jsonEnabled(cmd) {
-							fmt.Fprintln(cmd.OutOrStdout(), "Uncommitted changes applied (unstaged)") //nolint:errcheck
-						}
-					}
-				}
-			}
-
-			// Apply tags
-			tagsApplied, tagsSkipped := applyTags(cmd, tags, shaMap, sandboxWorkDir, targetDir, withTags)
-
-			// Inform user if tags remain unapplied
-			if !jsonEnabled(cmd) && !withTags {
-				unappliedTags, _ := sandbox.ListUnappliedTags(name)
-				if len(unappliedTags) > 0 {
-					fmt.Fprintf(cmd.OutOrStdout(), "\nHint: %d tag(s) available in sandbox but not on host. Run with --tags to transfer them.\n", len(unappliedTags)) //nolint:errcheck
-				}
-			}
-
-			slog.Info("apply complete", "event", "sandbox.apply.complete", "sandbox", name, "commits_applied", commitsApplied, "wip_applied", wipApplied, "tags_applied", tagsApplied) //nolint:gosec // G706: name is validated by ValidateName
-			if jsonEnabled(cmd) {
-				return writeJSON(cmd.OutOrStdout(), applyResult{
-					Target:         targetDir,
-					CommitsApplied: commitsApplied,
-					WIPApplied:     wipApplied,
-					TagsApplied:    tagsApplied,
-					TagsSkipped:    tagsSkipped,
-					Method:         "format-patch",
-				})
-			}
-
-			return nil
-		},
+		RunE:    runApplyCmd,
 	}
 
 	cmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
@@ -361,6 +59,340 @@ Use --patches to export .patch files without applying them.`,
 	cmd.MarkFlagsMutuallyExclusive("dry-run", "patches")
 
 	return cmd
+}
+
+func runApplyCmd(cmd *cobra.Command, args []string) error {
+	name, rest, err := resolveName(cmd, args)
+	if err != nil {
+		return err
+	}
+	defer openCLIJSONLSink(name, cmd)()
+
+	yes := effectiveYes(cmd)
+	squash, _ := cmd.Flags().GetBool("squash")
+	patchesDir, _ := cmd.Flags().GetString("patches")
+	if patchesDir != "" {
+		var expandErr error
+		patchesDir, expandErr = sandbox.ExpandPath(patchesDir)
+		if expandErr != nil {
+			return fmt.Errorf("expand patches path: %w", expandErr)
+		}
+	}
+	noWIP, _ := cmd.Flags().GetBool("no-wip")
+	dryRun, _ := cmd.Flags().GetBool("dry-run")
+	withTags, _ := cmd.Flags().GetBool("tags")
+
+	// Parse refs and paths from remaining args
+	refs, paths := parseApplyArgs(rest, cmd)
+
+	// Validate mutually exclusive options
+	if len(refs) > 0 && squash {
+		return sandbox.NewUsageError("--squash cannot be used with commit refs — they are mutually exclusive")
+	}
+	// Load metadata for target directory and mode validation
+	meta, err := sandbox.LoadMeta(sandbox.Dir(name))
+	if err != nil {
+		return sandboxErrorHint(name, err)
+	}
+	if meta.Workdir.Mode == "rw" {
+		return sandbox.NewUsageError("apply is not needed for :rw directories — changes are already live")
+	}
+
+	slog.Info("applying changes", "event", "sandbox.apply", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
+	if hasOverlayDirs(meta) {
+		return applyOverlay(cmd, name, meta, refs, paths, patchesDir, noWIP, yes, dryRun)
+	}
+
+	if !jsonEnabled(cmd) {
+		fmt.Fprintf(cmd.OutOrStdout(), "Target: %s\n\n", meta.Workdir.HostPath) //nolint:errcheck
+	}
+
+	// Best-effort agent-running warning
+	if !jsonEnabled(cmd) {
+		agentRunningWarning(cmd, name)
+	}
+
+	// Selective apply: specific commit refs
+	if len(refs) > 0 {
+		return applySelectedCommits(cmd, name, refs, paths, meta, yes, dryRun, withTags)
+	}
+
+	// --squash: flatten everything into one unstaged patch
+	if squash {
+		return applySquash(cmd, name, paths, meta, yes, dryRun)
+	}
+
+	return runApplyFormatPatch(cmd, name, paths, meta, patchesDir, yes, dryRun, noWIP, withTags)
+}
+
+// runApplyFormatPatch handles the default format-patch apply flow.
+func runApplyFormatPatch(cmd *cobra.Command, name string, paths []string, meta *sandbox.Meta, patchesDir string, yes, dryRun, noWIP, withTags bool) error {
+	// Query work copy for commits and WIP
+	backend := resolveBackendForSandbox(name)
+	var commits []sandbox.CommitInfo
+	err := withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
+		var listErr error
+		commits, listErr = sandbox.ListCommitsBeyondBaseline(ctx, rt, name)
+		return listErr
+	})
+	if err != nil {
+		return err
+	}
+
+	var hasWIP bool
+	if !noWIP {
+		err = withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
+			var wipErr error
+			hasWIP, wipErr = sandbox.HasUncommittedChanges(ctx, rt, name)
+			return wipErr
+		})
+		if err != nil {
+			return err
+		}
+	}
+
+	slog.Debug("commits to apply", "event", "sandbox.apply.commits", "sandbox", name, "count", len(commits)) //nolint:gosec // G706: name is validated by ValidateName
+	if hasWIP {
+		slog.Debug("WIP to apply", "event", "sandbox.apply.wip", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
+	}
+	if len(commits) == 0 && !hasWIP {
+		return runApplyNoChanges(cmd, name, meta, withTags)
+	}
+
+	// --patches: export patch files to a directory
+	if patchesDir != "" {
+		return exportPatches(cmd, name, paths, commits, hasWIP, patchesDir)
+	}
+
+	targetDir := meta.Workdir.HostPath
+	isGit := workspace.IsGitRepo(targetDir)
+
+	// Non-git fallback: can't use git am on non-git targets
+	if !isGit && len(commits) > 0 {
+		fmt.Fprintln(cmd.ErrOrStderr(), "Note: target is not a git repository — falling back to squashed patch") //nolint:errcheck
+		return applySquash(cmd, name, paths, meta, yes, dryRun)
+	}
+
+	// No commits, only WIP — use existing squash flow (HEAD == baseline equivalent)
+	if len(commits) == 0 && hasWIP {
+		if withTags {
+			return sandbox.NewUsageError("--tags requires commits — cannot transfer tags with WIP-only changes")
+		}
+		return applySquash(cmd, name, paths, meta, yes, dryRun)
+	}
+
+	return runApplyCommits(cmd, name, paths, meta, commits, hasWIP, yes, dryRun, withTags)
+}
+
+// runApplyNoChanges handles the case where there are no commits or WIP to apply.
+func runApplyNoChanges(cmd *cobra.Command, name string, meta *sandbox.Meta, withTags bool) error {
+	// Check for unapplied tags even when there are no changes
+	unappliedTags, _ := sandbox.ListUnappliedTags(name)
+
+	// If --tags is used, transfer tags even without commits
+	if withTags && len(unappliedTags) > 0 {
+		targetDir := meta.Workdir.HostPath
+		workDir := sandbox.WorkDir(name, meta.Workdir.HostPath)
+		if !jsonEnabled(cmd) {
+			fmt.Fprintln(cmd.OutOrStdout(), "No changes to apply")                                                  //nolint:errcheck
+			fmt.Fprintf(cmd.OutOrStdout(), "\nTransferring %d tag(s) by matching commits...\n", len(unappliedTags)) //nolint:errcheck
+		}
+		// Build SHA map by matching commits (author, timestamp, subject)
+		sandboxSHAs := make([]string, len(unappliedTags))
+		for i, tag := range unappliedTags {
+			sandboxSHAs[i] = tag.SHA
+		}
+		shaMap, matchErr := workspace.BuildSHAMapByMatching(workDir, targetDir, sandboxSHAs)
+		if matchErr != nil {
+			return fmt.Errorf("build SHA map: %w", matchErr)
+		}
+		// Transfer tags using the SHA map
+		tagsApplied, tagsSkipped := applyTags(cmd, unappliedTags, shaMap, workDir, targetDir, true)
+		if jsonEnabled(cmd) {
+			return writeJSON(cmd.OutOrStdout(), applyResult{
+				Target:      meta.Workdir.HostPath,
+				TagsApplied: tagsApplied,
+				TagsSkipped: tagsSkipped,
+				Method:      "format-patch",
+			})
+		}
+		return nil
+	}
+
+	if jsonEnabled(cmd) {
+		return writeJSON(cmd.OutOrStdout(), applyResult{
+			Target: meta.Workdir.HostPath,
+			Method: "format-patch",
+		})
+	}
+	_, err := fmt.Fprintln(cmd.OutOrStdout(), "No changes to apply")
+	// Inform user if tags are available but not on host
+	if len(unappliedTags) > 0 && !withTags {
+		fmt.Fprintf(cmd.OutOrStdout(), "\nHint: %d tag(s) available in sandbox but not on host. Run with --tags to transfer them.\n", len(unappliedTags)) //nolint:errcheck
+	}
+	return err
+}
+
+// runApplyCommits applies commits via format-patch/am to the target directory.
+func runApplyCommits(cmd *cobra.Command, name string, paths []string, meta *sandbox.Meta, commits []sandbox.CommitInfo, hasWIP, yes, dryRun, withTags bool) error {
+	targetDir := meta.Workdir.HostPath
+	sandboxWorkDir := sandbox.WorkDir(name, meta.Workdir.HostPath)
+	isGit := workspace.IsGitRepo(targetDir)
+	backend := resolveBackendForSandbox(name)
+
+	// Fetch tags beyond baseline (best-effort; errors don't fail the apply).
+	tags, _ := sandbox.ListTagsBeyondBaseline(name)
+	tagsByCommit := buildTagsByCommit(tags)
+
+	printApplyCommitsSummary(cmd, commits, tags, tagsByCommit, hasWIP, withTags)
+
+	if dryRun {
+		if !jsonEnabled(cmd) {
+			fmt.Fprintln(cmd.OutOrStdout(), "(dry run)") //nolint:errcheck
+		}
+		return nil
+	}
+
+	if !yes {
+		prompt := fmt.Sprintf("Apply to %s? [y/N] ", targetDir)
+		confirmed, confirmErr := sandbox.Confirm(cmd.Context(), prompt, os.Stdin, cmd.ErrOrStderr())
+		if confirmErr != nil {
+			return confirmErr
+		}
+		if !confirmed {
+			return nil
+		}
+	}
+
+	commitsApplied, shaMap, stashErr, err := applyFormatPatchFiles(cmd, name, paths, targetDir, backend)
+	if err != nil {
+		return err
+	}
+
+	// Advance baseline past applied commits (skip for path-filtered applies)
+	if len(paths) == 0 {
+		if err := withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
+			return sandbox.AdvanceBaseline(ctx, rt, name)
+		}); err != nil {
+			return fmt.Errorf("advance baseline: %w", err)
+		}
+	}
+
+	if stashErr != nil {
+		return stashErr
+	}
+
+	wipApplied := applyWIPChanges(cmd, name, paths, targetDir, isGit, hasWIP, backend)
+	tagsApplied, tagsSkipped := applyTags(cmd, tags, shaMap, sandboxWorkDir, targetDir, withTags)
+
+	if !jsonEnabled(cmd) && !withTags {
+		unappliedTags, _ := sandbox.ListUnappliedTags(name)
+		if len(unappliedTags) > 0 {
+			fmt.Fprintf(cmd.OutOrStdout(), "\nHint: %d tag(s) available in sandbox but not on host. Run with --tags to transfer them.\n", len(unappliedTags)) //nolint:errcheck
+		}
+	}
+
+	slog.Info("apply complete", "event", "sandbox.apply.complete", "sandbox", name, "commits_applied", commitsApplied, "wip_applied", wipApplied, "tags_applied", tagsApplied) //nolint:gosec // G706: name is validated by ValidateName
+	if jsonEnabled(cmd) {
+		return writeJSON(cmd.OutOrStdout(), applyResult{
+			Target:         targetDir,
+			CommitsApplied: commitsApplied,
+			WIPApplied:     wipApplied,
+			TagsApplied:    tagsApplied,
+			TagsSkipped:    tagsSkipped,
+			Method:         "format-patch",
+		})
+	}
+
+	return nil
+}
+
+// printApplyCommitsSummary prints the list of commits about to be applied (human-readable only).
+func printApplyCommitsSummary(cmd *cobra.Command, commits []sandbox.CommitInfo, tags []sandbox.TagInfo, tagsByCommit map[string][]string, hasWIP, withTags bool) {
+	if jsonEnabled(cmd) {
+		return
+	}
+	out := cmd.OutOrStdout()
+	fmt.Fprintf(out, "Commits to apply (%d):\n", len(commits)) //nolint:errcheck
+	for _, c := range commits {
+		line := fmt.Sprintf("  %.12s %s", c.SHA, c.Subject)
+		if names := tagsByCommit[strings.ToLower(c.SHA)]; len(names) > 0 {
+			line += "  [tag: " + strings.Join(names, ", ") + "]"
+		}
+		fmt.Fprintln(out, line) //nolint:errcheck
+	}
+	if hasWIP {
+		fmt.Fprintln(out, "\n+ uncommitted changes (will be applied as unstaged files)") //nolint:errcheck
+	}
+	if len(tags) > 0 && !withTags {
+		fmt.Fprintf(out, "\nWARNING: %d tag(s) will NOT be applied (cancel this apply and redo with --tags to include them)\n", len(tags)) //nolint:errcheck
+	}
+	fmt.Fprintln(out) //nolint:errcheck
+}
+
+// applyFormatPatchFiles generates a format-patch and applies it, returning stats and any deferred error.
+func applyFormatPatchFiles(cmd *cobra.Command, name string, paths []string, targetDir, backend string) (commitsApplied int, shaMap map[string]string, stashErr, err error) {
+	var patchDir string
+	var files []string
+	if err = withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
+		var genErr error
+		patchDir, files, genErr = sandbox.GenerateFormatPatch(ctx, rt, name, paths)
+		return genErr
+	}); err != nil {
+		return 0, nil, nil, err
+	}
+	defer os.RemoveAll(patchDir) //nolint:errcheck // best-effort cleanup
+
+	if len(files) == 0 {
+		return 0, nil, nil, nil
+	}
+
+	shaMap, err = workspace.ApplyFormatPatch(patchDir, files, targetDir)
+	if err != nil && shaMap == nil {
+		// git am itself failed; nothing was applied.
+		return 0, nil, nil, err
+	}
+	stashErr = err
+	commitsApplied = len(files)
+	if !jsonEnabled(cmd) {
+		fmt.Fprintf(cmd.OutOrStdout(), "%d commit(s) applied to %s\n", len(files), targetDir) //nolint:errcheck
+	}
+	return commitsApplied, shaMap, stashErr, nil
+}
+
+// applyWIPChanges applies uncommitted changes from sandbox to the target directory.
+// Returns true if WIP was applied successfully.
+func applyWIPChanges(cmd *cobra.Command, name string, paths []string, targetDir string, isGit, hasWIP bool, backend string) bool {
+	if !hasWIP {
+		return false
+	}
+	var wipPatch []byte
+	wipErr := withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
+		var genErr error
+		wipPatch, _, genErr = sandbox.GenerateWIPDiff(ctx, rt, name, paths)
+		return genErr
+	})
+	if wipErr != nil {
+		if !jsonEnabled(cmd) {
+			fmt.Fprintf(cmd.ErrOrStderr(), "Warning: failed to generate WIP diff: %v\n", wipErr) //nolint:errcheck
+		}
+		return false
+	}
+	if len(wipPatch) == 0 {
+		return false
+	}
+	if err := workspace.ApplyPatch(wipPatch, targetDir, isGit); err != nil {
+		if !jsonEnabled(cmd) {
+			fmt.Fprintf(cmd.ErrOrStderr(), //nolint:errcheck // best-effort warning
+				"Warning: failed to apply WIP changes: %v\n"+
+					"Commits were applied successfully. WIP changes need manual application.\n", err)
+		}
+		return false
+	}
+	if !jsonEnabled(cmd) {
+		fmt.Fprintln(cmd.OutOrStdout(), "Uncommitted changes applied (unstaged)") //nolint:errcheck
+	}
+	return true
 }
 
 // applyOverlay handles apply for sandboxes with overlay directories.
@@ -397,85 +429,94 @@ func applyOverlay(cmd *cobra.Command, name string, meta *sandbox.Meta, refs, pat
 
 		// --patches: export patch files
 		if patchesDir != "" {
-			if err := fileutil.MkdirAll(patchesDir, 0750); err != nil {
-				return fmt.Errorf("create patches directory: %w", err)
-			}
-			for i, ps := range patches {
-				dst := filepath.Join(patchesDir, fmt.Sprintf("overlay-%d.diff", i+1))
-				if err := fileutil.WriteFile(dst, ps.Patch, 0600); err != nil { //nolint:gosec // G703: dst is constructed from user-provided --patches flag
-					return fmt.Errorf("write patch: %w", err)
-				}
-				if !jsonEnabled(cmd) {
-					fmt.Fprintf(cmd.OutOrStdout(), "  %s\n", dst) //nolint:errcheck
-				}
-			}
-			if jsonEnabled(cmd) {
-				return writeJSON(cmd.OutOrStdout(), applyResult{
-					Target:     patchesDir,
-					WIPApplied: true,
-					Method:     "overlay",
-				})
-			}
-			return nil
+			return applyOverlayExportPatches(cmd, patches, patchesDir)
 		}
 
-		// Show summary
-		isJSON := jsonEnabled(cmd)
-		out := cmd.OutOrStdout()
-		if !isJSON {
-			for _, ps := range patches {
-				fmt.Fprintf(out, "=== %s (%s) ===\n", ps.HostPath, ps.Mode) //nolint:errcheck
-				fmt.Fprintln(out, ps.Stat)                                  //nolint:errcheck
-			}
-		}
-
-		// --dry-run: show summary and stop
-		if dryRun {
-			if !isJSON {
-				fmt.Fprintln(out, "(dry run)") //nolint:errcheck
-			}
-			return nil
-		}
-
-		// Confirmation
-		if !yes {
-			confirmed, confirmErr := sandbox.Confirm(cmd.Context(), "Apply these changes? [y/N] ", os.Stdin, cmd.ErrOrStderr())
-			if confirmErr != nil {
-				return confirmErr
-			}
-			if !confirmed {
-				return nil
-			}
-		}
-
-		// Apply each patch to host
-		for _, ps := range patches {
-			isGit := workspace.IsGitRepo(ps.HostPath)
-			if err := workspace.ApplyPatch(ps.Patch, ps.HostPath, isGit); err != nil {
-				return fmt.Errorf("%s: %w", ps.HostPath, err)
-			}
-			if !isJSON {
-				fmt.Fprintf(out, "Changes applied to %s\n", ps.HostPath) //nolint:errcheck
-			}
-		}
-
-		// Advance overlay baseline
-		for _, ps := range patches {
-			if err := sandbox.UpdateOverlayBaselineToHEAD(ctx, rt, name, ps.HostPath); err != nil {
-				return fmt.Errorf("advance overlay baseline: %w", err)
-			}
-		}
-
-		if isJSON {
-			return writeJSON(out, applyResult{
-				Target:     meta.Workdir.HostPath,
-				WIPApplied: true,
-				Method:     "overlay",
-			})
-		}
-
-		return nil
+		return applyOverlayPatches(cmd, ctx, rt, name, meta, patches, yes, dryRun)
 	})
+}
+
+// applyOverlayExportPatches exports overlay patches to a directory.
+func applyOverlayExportPatches(cmd *cobra.Command, patches []sandbox.PatchSet, patchesDir string) error {
+	if err := fileutil.MkdirAll(patchesDir, 0750); err != nil {
+		return fmt.Errorf("create patches directory: %w", err)
+	}
+	for i, ps := range patches {
+		dst := filepath.Join(patchesDir, fmt.Sprintf("overlay-%d.diff", i+1))
+		if err := fileutil.WriteFile(dst, ps.Patch, 0600); err != nil { //nolint:gosec // G703: dst is constructed from user-provided --patches flag
+			return fmt.Errorf("write patch: %w", err)
+		}
+		if !jsonEnabled(cmd) {
+			fmt.Fprintf(cmd.OutOrStdout(), "  %s\n", dst) //nolint:errcheck
+		}
+	}
+	if jsonEnabled(cmd) {
+		return writeJSON(cmd.OutOrStdout(), applyResult{
+			Target:     patchesDir,
+			WIPApplied: true,
+			Method:     "overlay",
+		})
+	}
+	return nil
+}
+
+// applyOverlayPatches applies overlay patches to the host and advances baselines.
+func applyOverlayPatches(cmd *cobra.Command, ctx context.Context, rt runtime.Runtime, name string, meta *sandbox.Meta, patches []sandbox.PatchSet, yes, dryRun bool) error {
+	isJSON := jsonEnabled(cmd)
+	out := cmd.OutOrStdout()
+	if !isJSON {
+		for _, ps := range patches {
+			fmt.Fprintf(out, "=== %s (%s) ===\n", ps.HostPath, ps.Mode) //nolint:errcheck
+			fmt.Fprintln(out, ps.Stat)                                  //nolint:errcheck
+		}
+	}
+
+	// --dry-run: show summary and stop
+	if dryRun {
+		if !isJSON {
+			fmt.Fprintln(out, "(dry run)") //nolint:errcheck
+		}
+		return nil
+	}
+
+	// Confirmation
+	if !yes {
+		confirmed, confirmErr := sandbox.Confirm(cmd.Context(), "Apply these changes? [y/N] ", os.Stdin, cmd.ErrOrStderr())
+		if confirmErr != nil {
+			return confirmErr
+		}
+		if !confirmed {
+			return nil
+		}
+	}
+
+	// Apply each patch to host
+	for _, ps := range patches {
+		isGit := workspace.IsGitRepo(ps.HostPath)
+		if err := workspace.ApplyPatch(ps.Patch, ps.HostPath, isGit); err != nil {
+			return fmt.Errorf("%s: %w", ps.HostPath, err)
+		}
+		if !isJSON {
+			fmt.Fprintf(out, "Changes applied to %s\n", ps.HostPath) //nolint:errcheck
+		}
+	}
+
+	// Advance overlay baseline
+	for _, ps := range patches {
+		if err := sandbox.UpdateOverlayBaselineToHEAD(ctx, rt, name, ps.HostPath); err != nil {
+			return fmt.Errorf("advance overlay baseline: %w", err)
+		}
+	}
+
+	if isJSON {
+		return writeJSON(out, applyResult{
+			Target:     meta.Workdir.HostPath,
+			WIPApplied: true,
+			Method:     "overlay",
+		})
+	}
+
+	return nil
 }
 
 // parseApplyArgs separates ref arguments from path arguments.
@@ -522,66 +563,31 @@ func parseApplyArgs(rest []string, cmd *cobra.Command) (refs []string, paths []s
 // applySelectedCommits cherry-picks specific commits into the target.
 func applySelectedCommits(cmd *cobra.Command, name string, refs, paths []string, meta *sandbox.Meta, yes, dryRun, withTags bool) error {
 	targetDir := meta.Workdir.HostPath
-	sandboxWorkDir := sandbox.WorkDir(name, meta.Workdir.HostPath)
 	if !workspace.IsGitRepo(targetDir) {
 		return fmt.Errorf("selective apply requires a git target directory — %s is not a git repository", targetDir)
 	}
 
-	// Resolve refs to full SHAs
 	backend := resolveBackendForSandbox(name)
-	var resolved []sandbox.CommitInfo
-	err := withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
-		var resolveErr error
-		resolved, resolveErr = sandbox.ResolveRefs(ctx, rt, name, refs)
-		return resolveErr
-	})
+	resolved, err := resolveSelectiveRefs(cmd, name, refs, backend)
 	if err != nil {
 		return err
 	}
 
 	if len(resolved) == 0 {
 		if jsonEnabled(cmd) {
-			return writeJSON(cmd.OutOrStdout(), applyResult{
-				Target: targetDir,
-				Method: "selective",
-			})
+			return writeJSON(cmd.OutOrStdout(), applyResult{Target: targetDir, Method: "selective"})
 		}
-		_, err = fmt.Fprintln(cmd.OutOrStdout(), "No commits matched")
+		_, err := fmt.Fprintln(cmd.OutOrStdout(), "No commits matched")
 		return err
 	}
 
-	// Fetch tags (best-effort); filter to those on selected commits.
-	allTags, _ := sandbox.ListTagsBeyondBaseline(name)
-	resolvedSet := make(map[string]bool, len(resolved))
-	for _, c := range resolved {
-		resolvedSet[strings.ToLower(c.SHA)] = true
-	}
-	var selectedTags []sandbox.TagInfo
-	for _, t := range allTags {
-		if resolvedSet[strings.ToLower(t.SHA)] {
-			selectedTags = append(selectedTags, t)
-		}
-	}
+	selectedTags := filterTagsForResolved(name, resolved)
 	tagsByCommit := buildTagsByCommit(selectedTags)
 
-	// Show summary
 	if !jsonEnabled(cmd) {
-		out := cmd.OutOrStdout()
-		fmt.Fprintf(out, "Commits to apply (%d):\n", len(resolved)) //nolint:errcheck
-		for _, c := range resolved {
-			line := fmt.Sprintf("  %.12s %s", c.SHA, c.Subject)
-			if names := tagsByCommit[strings.ToLower(c.SHA)]; len(names) > 0 {
-				line += "  [tag: " + strings.Join(names, ", ") + "]"
-			}
-			fmt.Fprintln(out, line) //nolint:errcheck
-		}
-		if len(selectedTags) > 0 && !withTags {
-			fmt.Fprintf(out, "\nWARNING: %d tag(s) will NOT be applied (cancel this apply and redo with --tags to include them)\n", len(selectedTags)) //nolint:errcheck
-		}
-		fmt.Fprintln(out) //nolint:errcheck
+		printSelectiveApplySummary(cmd, resolved, tagsByCommit, selectedTags, withTags)
 	}
 
-	// --dry-run: show summary and stop
 	if dryRun {
 		if !jsonEnabled(cmd) {
 			fmt.Fprintln(cmd.OutOrStdout(), "(dry run)") //nolint:errcheck
@@ -589,78 +595,56 @@ func applySelectedCommits(cmd *cobra.Command, name string, refs, paths []string,
 		return nil
 	}
 
-	// Confirmation
-	if !yes {
-		prompt := fmt.Sprintf("Apply to %s? [y/N] ", targetDir)
-		confirmed, confirmErr := sandbox.Confirm(cmd.Context(), prompt, os.Stdin, cmd.ErrOrStderr())
-		if confirmErr != nil {
-			return confirmErr
-		}
-		if !confirmed {
-			return nil
-		}
+	confirmed, confirmErr := confirmSelectiveApply(cmd, yes, targetDir)
+	if confirmErr != nil {
+		return confirmErr
+	}
+	if !confirmed {
+		return nil
 	}
 
-	// Generate patches for selected commits only
-	shas := make([]string, len(resolved))
-	for i, c := range resolved {
-		shas[i] = c.SHA
-	}
-
-	backend = resolveBackendForSandbox(name)
-	var patchDir string
-	var files []string
-	err = withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
-		var genErr error
-		patchDir, files, genErr = sandbox.GenerateFormatPatchForRefs(ctx, rt, name, shas, paths)
-		return genErr
-	})
+	files, shaMap, stashErr, err := applyFormatPatchForRefs(cmd, name, refs, resolved, paths, targetDir, backend)
 	if err != nil {
 		return err
 	}
-	defer os.RemoveAll(patchDir) //nolint:errcheck
 
-	shaMap, err := workspace.ApplyFormatPatch(patchDir, files, targetDir)
-	if err != nil && shaMap == nil {
-		// git am itself failed; nothing was applied.
-		return err
-	}
-	// err may be a stash-pop conflict (commits were applied); save it and
-	// surface it after baseline advancement.
-	stashErr := err
-	if !jsonEnabled(cmd) {
-		fmt.Fprintf(cmd.OutOrStdout(), "%d commit(s) applied to %s\n", len(files), targetDir) //nolint:errcheck
-	}
-
-	// Advance baseline using contiguous prefix logic (skip for path-filtered applies)
 	if len(paths) == 0 {
-		var allCommits []sandbox.CommitInfo
-		err = withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
-			var listErr error
-			allCommits, listErr = sandbox.ListCommitsBeyondBaseline(ctx, rt, name)
-			return listErr
-		})
-		if err != nil {
-			return fmt.Errorf("advance baseline: %w", err)
-		}
-
-		appliedSet := make(map[string]bool, len(resolved))
-		for _, c := range resolved {
-			appliedSet[c.SHA] = true
-		}
-
-		prefixEnd := workspace.ContiguousPrefixEnd(allCommits, appliedSet)
-		if prefixEnd >= 0 {
-			if err := sandbox.AdvanceBaselineTo(name, allCommits[prefixEnd].SHA); err != nil {
-				return fmt.Errorf("advance baseline: %w", err)
-			}
+		if err := advanceSelectiveBaseline(cmd, name, backend, resolved); err != nil {
+			return err
 		}
 	}
 
-	// Apply tags
+	return finishSelectiveApply(cmd, name, files, shaMap, stashErr, selectedTags, sandbox.WorkDir(name, targetDir), targetDir, withTags)
+}
+
+// resolveSelectiveRefs resolves the ref arguments to CommitInfo slices.
+func resolveSelectiveRefs(cmd *cobra.Command, name string, refs []string, backend string) ([]sandbox.CommitInfo, error) {
+	var resolved []sandbox.CommitInfo
+	if err := withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
+		var resolveErr error
+		resolved, resolveErr = sandbox.ResolveRefs(ctx, rt, name, refs)
+		return resolveErr
+	}); err != nil {
+		return nil, err
+	}
+	return resolved, nil
+}
+
+// confirmSelectiveApply prompts the user if yes is false.
+// Returns (true, nil) if confirmed or yes is true, (false, nil) if declined, (false, err) on error.
+func confirmSelectiveApply(cmd *cobra.Command, yes bool, targetDir string) (bool, error) {
+	if yes {
+		return true, nil
+	}
+	prompt := fmt.Sprintf("Apply to %s? [y/N] ", targetDir)
+	confirmed, confirmErr := sandbox.Confirm(cmd.Context(), prompt, os.Stdin, cmd.ErrOrStderr())
+	return confirmed, confirmErr
+}
+
+// finishSelectiveApply prints results, handles tags, and returns any stash error.
+func finishSelectiveApply(cmd *cobra.Command, name string, files []string, shaMap map[string]string, stashErr error, selectedTags []sandbox.TagInfo, sandboxWorkDir, targetDir string, withTags bool) error {
 	tagsApplied, tagsSkipped := applyTags(cmd, selectedTags, shaMap, sandboxWorkDir, targetDir, withTags)
 
-	// Inform user if tags remain unapplied
 	if !jsonEnabled(cmd) && !withTags {
 		unappliedTags, _ := sandbox.ListUnappliedTags(name)
 		if len(unappliedTags) > 0 {
@@ -679,6 +663,93 @@ func applySelectedCommits(cmd *cobra.Command, name string, refs, paths []string,
 	}
 
 	return stashErr
+}
+
+// applyFormatPatchForRefs generates format-patch for specific refs and applies it.
+func applyFormatPatchForRefs(cmd *cobra.Command, name string, _ []string, resolved []sandbox.CommitInfo, paths []string, targetDir, backend string) (files []string, shaMap map[string]string, stashErr, err error) {
+	shas := make([]string, len(resolved))
+	for i, c := range resolved {
+		shas[i] = c.SHA
+	}
+
+	var patchDir string
+	if err = withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
+		var genErr error
+		patchDir, files, genErr = sandbox.GenerateFormatPatchForRefs(ctx, rt, name, shas, paths)
+		return genErr
+	}); err != nil {
+		return nil, nil, nil, err
+	}
+	defer os.RemoveAll(patchDir) //nolint:errcheck
+
+	shaMap, err = workspace.ApplyFormatPatch(patchDir, files, targetDir)
+	if err != nil && shaMap == nil {
+		return nil, nil, nil, err
+	}
+	stashErr = err
+	if !jsonEnabled(cmd) {
+		fmt.Fprintf(cmd.OutOrStdout(), "%d commit(s) applied to %s\n", len(files), targetDir) //nolint:errcheck
+	}
+	return files, shaMap, stashErr, nil
+}
+
+// filterTagsForResolved fetches tags beyond baseline and filters to those on the resolved commits.
+func filterTagsForResolved(name string, resolved []sandbox.CommitInfo) []sandbox.TagInfo {
+	allTags, _ := sandbox.ListTagsBeyondBaseline(name)
+	resolvedSet := make(map[string]bool, len(resolved))
+	for _, c := range resolved {
+		resolvedSet[strings.ToLower(c.SHA)] = true
+	}
+	var selectedTags []sandbox.TagInfo
+	for _, t := range allTags {
+		if resolvedSet[strings.ToLower(t.SHA)] {
+			selectedTags = append(selectedTags, t)
+		}
+	}
+	return selectedTags
+}
+
+// printSelectiveApplySummary prints the commit summary for selective apply.
+func printSelectiveApplySummary(cmd *cobra.Command, resolved []sandbox.CommitInfo, tagsByCommit map[string][]string, selectedTags []sandbox.TagInfo, withTags bool) {
+	out := cmd.OutOrStdout()
+	fmt.Fprintf(out, "Commits to apply (%d):\n", len(resolved)) //nolint:errcheck
+	for _, c := range resolved {
+		line := fmt.Sprintf("  %.12s %s", c.SHA, c.Subject)
+		if names := tagsByCommit[strings.ToLower(c.SHA)]; len(names) > 0 {
+			line += "  [tag: " + strings.Join(names, ", ") + "]"
+		}
+		fmt.Fprintln(out, line) //nolint:errcheck
+	}
+	if len(selectedTags) > 0 && !withTags {
+		fmt.Fprintf(out, "\nWARNING: %d tag(s) will NOT be applied (cancel this apply and redo with --tags to include them)\n", len(selectedTags)) //nolint:errcheck
+	}
+	fmt.Fprintln(out) //nolint:errcheck
+}
+
+// advanceSelectiveBaseline advances the baseline using contiguous prefix logic after a selective apply.
+func advanceSelectiveBaseline(cmd *cobra.Command, name, backend string, resolved []sandbox.CommitInfo) error {
+	var allCommits []sandbox.CommitInfo
+	err := withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
+		var listErr error
+		allCommits, listErr = sandbox.ListCommitsBeyondBaseline(ctx, rt, name)
+		return listErr
+	})
+	if err != nil {
+		return fmt.Errorf("advance baseline: %w", err)
+	}
+
+	appliedSet := make(map[string]bool, len(resolved))
+	for _, c := range resolved {
+		appliedSet[c.SHA] = true
+	}
+
+	prefixEnd := workspace.ContiguousPrefixEnd(allCommits, appliedSet)
+	if prefixEnd >= 0 {
+		if err := sandbox.AdvanceBaselineTo(name, allCommits[prefixEnd].SHA); err != nil {
+			return fmt.Errorf("advance baseline: %w", err)
+		}
+	}
+	return nil
 }
 
 // applySquash implements the squashed-patch apply mode.
@@ -725,6 +796,11 @@ func applySquash(cmd *cobra.Command, name string, paths []string, meta *sandbox.
 		return nil
 	}
 
+	return applySquashPatch(cmd, name, paths, targetDir, patch, yes, backend)
+}
+
+// applySquashPatch applies a squash patch after confirmation.
+func applySquashPatch(cmd *cobra.Command, name string, paths []string, targetDir string, patch []byte, yes bool, backend string) error {
 	isGit := workspace.IsGitRepo(targetDir)
 
 	if err := workspace.CheckPatch(patch, targetDir, isGit); err != nil {
@@ -748,7 +824,6 @@ func applySquash(cmd *cobra.Command, name string, paths []string, meta *sandbox.
 
 	// Advance baseline past applied changes (skip for path-filtered applies)
 	if len(paths) == 0 {
-		backend := resolveBackendForSandbox(name)
 		err := withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
 			return sandbox.AdvanceBaseline(ctx, rt, name)
 		})
@@ -765,7 +840,7 @@ func applySquash(cmd *cobra.Command, name string, paths []string, meta *sandbox.
 		})
 	}
 
-	_, err = fmt.Fprintf(cmd.OutOrStdout(), "Changes applied to %s\n", targetDir)
+	_, err := fmt.Fprintf(cmd.OutOrStdout(), "Changes applied to %s\n", targetDir)
 	return err
 }
 
@@ -812,17 +887,8 @@ func applySquashMulti(cmd *cobra.Command, ctx context.Context, rt runtime.Runtim
 		}
 	}
 
-	for _, ps := range patches {
-		isGit := workspace.IsGitRepo(ps.HostPath)
-		if err := workspace.CheckPatch(ps.Patch, ps.HostPath, isGit); err != nil {
-			return fmt.Errorf("%s: %w", ps.HostPath, err)
-		}
-		if err := workspace.ApplyPatch(ps.Patch, ps.HostPath, isGit); err != nil {
-			return fmt.Errorf("%s: %w", ps.HostPath, err)
-		}
-		if !isJSON {
-			fmt.Fprintf(out, "Changes applied to %s\n", ps.HostPath) //nolint:errcheck
-		}
+	if err := applyMultiPatches(cmd, patches, isJSON); err != nil {
+		return err
 	}
 
 	// Advance baseline for workdir
@@ -840,6 +906,24 @@ func applySquashMulti(cmd *cobra.Command, ctx context.Context, rt runtime.Runtim
 		})
 	}
 
+	return nil
+}
+
+// applyMultiPatches checks and applies a slice of PatchSet values to their host paths.
+func applyMultiPatches(cmd *cobra.Command, patches []sandbox.PatchSet, isJSON bool) error {
+	out := cmd.OutOrStdout()
+	for _, ps := range patches {
+		isGit := workspace.IsGitRepo(ps.HostPath)
+		if err := workspace.CheckPatch(ps.Patch, ps.HostPath, isGit); err != nil {
+			return fmt.Errorf("%s: %w", ps.HostPath, err)
+		}
+		if err := workspace.ApplyPatch(ps.Patch, ps.HostPath, isGit); err != nil {
+			return fmt.Errorf("%s: %w", ps.HostPath, err)
+		}
+		if !isJSON {
+			fmt.Fprintf(out, "Changes applied to %s\n", ps.HostPath) //nolint:errcheck
+		}
+	}
 	return nil
 }
 

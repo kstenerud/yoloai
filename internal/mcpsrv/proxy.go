@@ -257,59 +257,7 @@ func (p *ProxyServer) run(ctx context.Context, in io.Reader, out io.Writer, _ *s
 
 	// Forward inner→outer, intercepting tools/list results to inject our tools
 	innerDone := make(chan error, 1)
-	go func() {
-		scanner := bufio.NewScanner(innerOut)
-		scanner.Buffer(make([]byte, 4*1024*1024), 4*1024*1024)
-		for scanner.Scan() {
-			line := scanner.Bytes()
-			var msg jsonRPCMsg
-			if err := json.Unmarshal(line, &msg); err != nil {
-				outMu.Lock()
-				fmt.Fprintf(out, "%s\n", line) //nolint:errcheck,gosec // G705: intentional proxy forwarding
-				outMu.Unlock()
-				continue
-			}
-
-			// Discard responses for locally-handled requests
-			if msg.ID != nil {
-				idStr := string(msg.ID)
-				localMu.Lock()
-				isLocal := localIDs[idStr]
-				if isLocal {
-					delete(localIDs, idStr)
-				}
-				localMu.Unlock()
-				if isLocal {
-					continue
-				}
-			}
-
-			// Intercept tools/list result to inject our tools
-			if msg.Result != nil && msg.ID != nil {
-				var result map[string]json.RawMessage
-				if err := json.Unmarshal(msg.Result, &result); err == nil {
-					if _, hasTools := result["tools"]; hasTools {
-						var tools []json.RawMessage
-						if err := json.Unmarshal(result["tools"], &tools); err == nil {
-							for _, t := range injectedToolDefs {
-								if toolJSON, marshalErr := json.Marshal(t); marshalErr == nil {
-									tools = append(tools, toolJSON)
-								}
-							}
-							result["tools"], _ = json.Marshal(tools)
-							msg.Result, _ = json.Marshal(result)
-						}
-					}
-				}
-			}
-
-			if err := writeOut(msg); err != nil {
-				innerDone <- err
-				return
-			}
-		}
-		innerDone <- scanner.Err()
-	}()
+	go p.forwardInnerToOuter(innerOut, out, outMu, &localMu, localIDs, writeOut, innerDone)
 
 	// Read from outer agent, handle injected tools locally, forward the rest
 	outerScanner := bufio.NewScanner(in)
@@ -320,40 +268,8 @@ func (p *ProxyServer) run(ctx context.Context, in io.Reader, out io.Writer, _ *s
 			return ctx.Err()
 		default:
 		}
-
-		line := outerScanner.Bytes()
-		var msg jsonRPCMsg
-		if err := json.Unmarshal(line, &msg); err != nil {
-			fmt.Fprintln(innerIn, string(line)) //nolint:errcheck,gosec // G705: intentional proxy forwarding
-			continue
-		}
-
-		if msg.Method == "tools/call" {
-			var params struct {
-				Name      string         `json:"name"`
-				Arguments map[string]any `json:"arguments"`
-			}
-			if err := json.Unmarshal(msg.Params, &params); err == nil && params.Name == "sandbox_diff" {
-				result := p.handleProxyDiff(params.Arguments)
-				resp := jsonRPCMsg{
-					JSONRPC: "2.0",
-					ID:      msg.ID,
-					Result:  mustMarshal(result),
-				}
-				if err := writeOut(resp); err != nil {
-					return err
-				}
-				if msg.ID != nil {
-					localMu.Lock()
-					localIDs[string(msg.ID)] = true
-					localMu.Unlock()
-				}
-				continue
-			}
-		}
-
-		if _, err := fmt.Fprintln(innerIn, string(line)); err != nil { //nolint:gosec // G705: intentional proxy forwarding
-			return fmt.Errorf("write to inner MCP server: %w", err)
+		if err := p.handleOuterMessage(outerScanner.Bytes(), innerIn, &localMu, localIDs, writeOut); err != nil {
+			return err
 		}
 	}
 
@@ -363,6 +279,145 @@ func (p *ProxyServer) run(ctx context.Context, in io.Reader, out io.Writer, _ *s
 
 	_ = innerIn.Close()
 	return <-innerDone
+}
+
+// forwardInnerToOuter reads from innerOut and forwards messages to out,
+// discarding locally-handled responses and injecting tools into tools/list results.
+func (p *ProxyServer) forwardInnerToOuter(
+	innerOut io.Reader,
+	out io.Writer,
+	outMu *sync.Mutex,
+	localMu *sync.Mutex,
+	localIDs map[string]bool,
+	writeOut func(jsonRPCMsg) error,
+	done chan<- error,
+) {
+	scanner := bufio.NewScanner(innerOut)
+	scanner.Buffer(make([]byte, 4*1024*1024), 4*1024*1024)
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		var msg jsonRPCMsg
+		if err := json.Unmarshal(line, &msg); err != nil {
+			outMu.Lock()
+			fmt.Fprintf(out, "%s\n", line) //nolint:errcheck,gosec // G705: intentional proxy forwarding
+			outMu.Unlock()
+			continue
+		}
+
+		// Discard responses for locally-handled requests
+		if discardLocalResponse(&msg, localMu, localIDs) {
+			continue
+		}
+
+		injectToolsIfNeeded(&msg)
+
+		if err := writeOut(msg); err != nil {
+			done <- err
+			return
+		}
+	}
+	done <- scanner.Err()
+}
+
+// discardLocalResponse checks if msg is a response for a locally-handled request
+// and removes it from the tracking map. Returns true if the message should be discarded.
+func discardLocalResponse(msg *jsonRPCMsg, localMu *sync.Mutex, localIDs map[string]bool) bool {
+	if msg.ID == nil {
+		return false
+	}
+	idStr := string(msg.ID)
+	localMu.Lock()
+	isLocal := localIDs[idStr]
+	if isLocal {
+		delete(localIDs, idStr)
+	}
+	localMu.Unlock()
+	return isLocal
+}
+
+// injectToolsIfNeeded modifies a tools/list response to include injected tool definitions.
+func injectToolsIfNeeded(msg *jsonRPCMsg) {
+	if msg.Result == nil || msg.ID == nil {
+		return
+	}
+	var result map[string]json.RawMessage
+	if err := json.Unmarshal(msg.Result, &result); err != nil {
+		return
+	}
+	if _, hasTools := result["tools"]; !hasTools {
+		return
+	}
+	var tools []json.RawMessage
+	if err := json.Unmarshal(result["tools"], &tools); err != nil {
+		return
+	}
+	for _, t := range injectedToolDefs {
+		if toolJSON, marshalErr := json.Marshal(t); marshalErr == nil {
+			tools = append(tools, toolJSON)
+		}
+	}
+	result["tools"], _ = json.Marshal(tools)
+	msg.Result, _ = json.Marshal(result)
+}
+
+// handleOuterMessage processes a single message from the outer agent.
+// It handles injected tool calls locally and forwards everything else to innerIn.
+func (p *ProxyServer) handleOuterMessage(
+	line []byte,
+	innerIn io.Writer,
+	localMu *sync.Mutex,
+	localIDs map[string]bool,
+	writeOut func(jsonRPCMsg) error,
+) error {
+	var msg jsonRPCMsg
+	if err := json.Unmarshal(line, &msg); err != nil {
+		fmt.Fprintln(innerIn, string(line)) //nolint:errcheck,gosec // G705: intentional proxy forwarding
+		return nil                          //nolint:nilerr // intentional: forward raw line when JSON is unparseable
+	}
+
+	if msg.Method == "tools/call" {
+		if handled, err := p.tryHandleLocalToolCall(msg, localMu, localIDs, writeOut); handled {
+			return err
+		}
+	}
+
+	if _, err := fmt.Fprintln(innerIn, string(line)); err != nil { //nolint:gosec // G705: intentional proxy forwarding
+		return fmt.Errorf("write to inner MCP server: %w", err)
+	}
+	return nil
+}
+
+// tryHandleLocalToolCall attempts to handle a tools/call message for locally-injected tools.
+// Returns (true, err) if the message was handled locally, (false, nil) otherwise.
+func (p *ProxyServer) tryHandleLocalToolCall(
+	msg jsonRPCMsg,
+	localMu *sync.Mutex,
+	localIDs map[string]bool,
+	writeOut func(jsonRPCMsg) error,
+) (bool, error) {
+	var params struct {
+		Name      string         `json:"name"`
+		Arguments map[string]any `json:"arguments"`
+	}
+	if err := json.Unmarshal(msg.Params, &params); err != nil || params.Name != "sandbox_diff" {
+		return false, nil //nolint:nilerr // intentional: non-matching calls are forwarded to inner server
+	}
+
+	result := p.handleProxyDiff(params.Arguments)
+	resp := jsonRPCMsg{
+		JSONRPC: "2.0",
+		ID:      msg.ID,
+		Result:  mustMarshal(result),
+	}
+	if err := writeOut(resp); err != nil {
+		return true, err
+	}
+	if msg.ID != nil {
+		localMu.Lock()
+		localIDs[string(msg.ID)] = true
+		localMu.Unlock()
+	}
+	return true, nil
 }
 
 // handleProxyDiff handles sandbox_diff tool calls locally.

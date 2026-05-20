@@ -160,6 +160,33 @@ type RunOptions struct {
 // If opts.Wait is true, Run blocks until the agent finishes and returns the
 // final sandbox Info. If opts.Wait is false, Run returns immediately after
 // the agent is launched; the Info reflects the initial state.
+// pollUntilDone polls the sandbox status until it reaches a terminal state.
+func (c *Client) pollUntilDone(ctx context.Context, name string, progress func(string, string)) (*sandbox.Info, error) {
+	for {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(5 * time.Second):
+		}
+
+		info, err := c.manager.Inspect(ctx, name)
+		if err != nil {
+			return nil, fmt.Errorf("inspect sandbox: %w", err)
+		}
+		switch info.Status {
+		case sandbox.StatusDone, sandbox.StatusFailed, sandbox.StatusStopped, sandbox.StatusRemoved:
+			return info, nil
+		case sandbox.StatusActive, sandbox.StatusIdle:
+			// still running — continue polling
+		default: // StatusBroken, StatusUnavailable
+			return info, nil
+		}
+		if progress != nil {
+			progress(name, string(info.Status))
+		}
+	}
+}
+
 func (c *Client) Run(ctx context.Context, opts RunOptions) (*sandbox.Info, error) {
 	if err := c.manager.EnsureSetup(ctx); err != nil {
 		return nil, fmt.Errorf("setup: %w", err)
@@ -196,35 +223,15 @@ func (c *Client) Run(ctx context.Context, opts RunOptions) (*sandbox.Info, error
 		return nil, fmt.Errorf("create sandbox: %w", err)
 	}
 
-	progress := opts.OnProgress
-	if progress != nil {
-		progress(opts.Name, "agent running")
+	if opts.OnProgress != nil {
+		opts.OnProgress(opts.Name, "agent running")
 	}
 
 	if !opts.Wait {
 		return c.manager.Inspect(ctx, opts.Name)
 	}
 
-	// Poll until done
-	for {
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-time.After(5 * time.Second):
-		}
-
-		info, err := c.manager.Inspect(ctx, opts.Name)
-		if err != nil {
-			return nil, fmt.Errorf("inspect sandbox: %w", err)
-		}
-		switch info.Status {
-		case sandbox.StatusDone, sandbox.StatusFailed, sandbox.StatusStopped, sandbox.StatusRemoved:
-			return info, nil
-		}
-		if progress != nil {
-			progress(opts.Name, string(info.Status))
-		}
-	}
+	return c.pollUntilDone(ctx, opts.Name, opts.OnProgress)
 }
 
 // Diff returns the diff of agent changes for a sandbox.

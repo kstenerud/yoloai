@@ -41,6 +41,31 @@ func DirArgToSpec(d *DirArg) DirSpec {
 	}
 }
 
+// applyDirSuffix applies a single recognized suffix token to result.
+// Returns an error if the suffix conflicts with an already-set mode.
+func applyDirSuffix(result *DirArg, suffix, arg string) error {
+	switch suffix {
+	case "copy":
+		if result.Mode == "rw" || result.Mode == "overlay" {
+			return fmt.Errorf("cannot combine :copy and :%s on %q", result.Mode, arg)
+		}
+		result.Mode = "copy"
+	case "overlay":
+		if result.Mode == "copy" || result.Mode == "rw" {
+			return fmt.Errorf("cannot combine :overlay and :%s on %q", result.Mode, arg)
+		}
+		result.Mode = "overlay"
+	case "rw":
+		if result.Mode == "copy" || result.Mode == "overlay" {
+			return fmt.Errorf("cannot combine :rw and :%s on %q", result.Mode, arg)
+		}
+		result.Mode = "rw"
+	case "force":
+		result.Force = true
+	}
+	return nil
+}
+
 // ParseDirArg parses a directory argument with optional suffixes.
 // Suffixes (:copy, :rw, :force) can be combined in any order.
 // Default mode (no :copy or :rw) is determined by the caller
@@ -70,24 +95,8 @@ func ParseDirArg(arg string) (*DirArg, error) {
 			break
 		}
 
-		switch suffix {
-		case "copy":
-			if result.Mode == "rw" || result.Mode == "overlay" {
-				return nil, fmt.Errorf("cannot combine :copy and :%s on %q", result.Mode, arg)
-			}
-			result.Mode = "copy"
-		case "overlay":
-			if result.Mode == "copy" || result.Mode == "rw" {
-				return nil, fmt.Errorf("cannot combine :overlay and :%s on %q", result.Mode, arg)
-			}
-			result.Mode = "overlay"
-		case "rw":
-			if result.Mode == "copy" || result.Mode == "overlay" {
-				return nil, fmt.Errorf("cannot combine :rw and :%s on %q", result.Mode, arg)
-			}
-			result.Mode = "rw"
-		case "force":
-			result.Force = true
+		if err := applyDirSuffix(result, suffix, arg); err != nil {
+			return nil, err
 		}
 
 		remaining = remaining[:idx]

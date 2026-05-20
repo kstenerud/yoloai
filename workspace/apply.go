@@ -80,6 +80,39 @@ func ApplyPatch(patch []byte, targetDir string, isGit bool) error {
 // git am --3way. Returns a map of sandbox SHA → host SHA for applied commits,
 // which callers can use to re-create tags on the host. On failure, returns an
 // error with guidance about git am --continue/--skip/--abort.
+// extractSandboxSHAs reads the sandbox-side commit SHAs from patch file headers.
+func extractSandboxSHAs(patchDir string, files []string) ([]string, error) {
+	sandboxSHAs := make([]string, 0, len(files))
+	for _, f := range files {
+		sha, parseErr := parsePatchSHA(filepath.Join(patchDir, f))
+		if parseErr != nil {
+			return nil, parseErr
+		}
+		sandboxSHAs = append(sandboxSHAs, sha)
+	}
+	return sandboxSHAs, nil
+}
+
+// buildSHAMap pairs sandbox SHAs with the host SHAs created after applying patches.
+func buildSHAMap(targetDir, preTip string, sandboxSHAs []string) map[string]string {
+	logArgs := []string{"log", "--reverse", "--format=%H"}
+	if preTip != "" {
+		logArgs = append(logArgs, preTip+"..HEAD")
+	}
+	logOut, logErr := NewGitCmd(targetDir, logArgs...).Output()
+	if logErr != nil {
+		return nil
+	}
+	hostSHAs := strings.Fields(strings.TrimSpace(string(logOut)))
+	shaMap := make(map[string]string, len(sandboxSHAs))
+	for i, sandboxSHA := range sandboxSHAs {
+		if i < len(hostSHAs) {
+			shaMap[strings.ToLower(sandboxSHA)] = hostSHAs[i]
+		}
+	}
+	return shaMap
+}
+
 func ApplyFormatPatch(patchDir string, files []string, targetDir string) (map[string]string, error) {
 	if len(files) == 0 {
 		return nil, nil
@@ -99,13 +132,9 @@ func ApplyFormatPatch(patchDir string, files []string, targetDir string) (map[st
 	}
 
 	// Extract sandbox SHAs from patch file headers (first line: "From <sha> <date>").
-	sandboxSHAs := make([]string, 0, len(files))
-	for _, f := range files {
-		sha, parseErr := parsePatchSHA(filepath.Join(patchDir, f))
-		if parseErr != nil {
-			return nil, parseErr
-		}
-		sandboxSHAs = append(sandboxSHAs, sha)
+	sandboxSHAs, err := extractSandboxSHAs(patchDir, files)
+	if err != nil {
+		return nil, err
 	}
 
 	// Build full paths
@@ -117,7 +146,7 @@ func ApplyFormatPatch(patchDir string, files []string, targetDir string) (map[st
 	// Stash uncommitted changes so git am starts from a clean tree.
 	// git am --autostash requires Git 2.27+ which isn't guaranteed on macOS;
 	// manage the stash manually so any git version works.
-	stashed := false
+	var stashed bool
 	if preTip != "" {
 		stashed, err = stashIfDirty(targetDir)
 		if err != nil {
@@ -138,28 +167,10 @@ func ApplyFormatPatch(patchDir string, files []string, targetDir string) (map[st
 		return nil, formatAMError(output, targetDir)
 	}
 
-	// Collect new host SHAs in chronological order before restoring the stash.
-	// When preTip is empty (applied to a repo with no prior commits), list all commits.
-	logArgs := []string{"log", "--reverse", "--format=%H"}
-	if preTip != "" {
-		logArgs = append(logArgs, preTip+"..HEAD")
-	}
-	logCmd := NewGitCmd(targetDir, logArgs...)
-	logOut, logErr := logCmd.Output()
-
 	// Pair positionally: sandboxSHA[i] → hostSHA[i].
 	// shaMap is nil only when log fails (best-effort); in all other cases it is
 	// non-nil so callers can distinguish "am succeeded" from "am failed".
-	var shaMap map[string]string
-	if logErr == nil { //nolint:nestif // linear flow, not truly nested
-		hostSHAs := strings.Fields(strings.TrimSpace(string(logOut)))
-		shaMap = make(map[string]string, len(sandboxSHAs))
-		for i, sandboxSHA := range sandboxSHAs {
-			if i < len(hostSHAs) {
-				shaMap[strings.ToLower(sandboxSHA)] = hostSHAs[i]
-			}
-		}
-	}
+	shaMap := buildSHAMap(targetDir, preTip, sandboxSHAs)
 
 	if stashed {
 		if err := RunGitCmd(targetDir, "stash", "pop"); err != nil {

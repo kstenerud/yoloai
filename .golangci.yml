@@ -14,10 +14,17 @@ linters:
     - sloglint
     - nilerr
     - forbidigo
+    - durationcheck
+    - exhaustive
+    - cyclop
   disable:
     - exhaustruct
     - varnamelen
   settings:
+    cyclop:
+      max-complexity: 15
+    exhaustive:
+      default-signifies-exhaustive: true
     revive:
       rules:
         # internal/runtime is an intentional name for the runtime abstraction

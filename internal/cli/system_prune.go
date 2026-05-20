@@ -49,37 +49,26 @@ func newSystemPruneCmd() *cobra.Command {
 func runSystemPrune(cmd *cobra.Command, backend string, dryRun, yes bool) error {
 	ctx := cmd.Context()
 	output := cmd.OutOrStdout()
+	isJSON := jsonEnabled(cmd)
 
-	// 1. Scan sandbox directories to build known instances + broken sandbox list.
 	knownInstances, brokenSandboxes := scanSandboxes()
 
-	// 2. Scan for orphaned backend resources (always dry-run first).
 	var scanResult runtime.PruneResult
-	err := withRuntime(ctx, backend, func(ctx context.Context, rt runtime.Runtime) error {
+	if err := withRuntime(ctx, backend, func(ctx context.Context, rt runtime.Runtime) error {
 		var err error
 		scanResult, err = rt.Prune(ctx, knownInstances, true, output)
 		return err
-	})
-	if err != nil {
+	}); err != nil {
 		return err
 	}
 
-	// 3. Scan for stale temp files.
 	staleTempDirs, err := sandbox.PruneTempFiles(true, 1*time.Hour)
 	if err != nil {
 		return fmt.Errorf("scan temp files: %w", err)
 	}
 
-	isJSON := jsonEnabled(cmd)
+	printBrokenSandboxWarnings(output, brokenSandboxes, isJSON)
 
-	// 4. Print broken sandbox warnings (human-readable only).
-	if !isJSON {
-		for _, bs := range brokenSandboxes {
-			fmt.Fprintf(output, "Warning: broken sandbox at %s — use 'yoloai destroy %s' to remove\n", bs.path, bs.name) //nolint:errcheck
-		}
-	}
-
-	// 5. Check if there's anything to prune.
 	totalItems := len(scanResult.Items) + len(staleTempDirs)
 	if totalItems == 0 {
 		if isJSON {
@@ -89,26 +78,8 @@ func runSystemPrune(cmd *cobra.Command, backend string, dryRun, yes bool) error 
 		return nil
 	}
 
-	// 6. Report what was found (human-readable only).
-	if !isJSON {
-		if len(scanResult.Items) > 0 {
-			fmt.Fprintln(output, "Orphaned resources:") //nolint:errcheck
-			for _, item := range scanResult.Items {
-				fmt.Fprintf(output, "  %s %s\n", item.Kind, item.Name) //nolint:errcheck
-			}
-			fmt.Fprintln(output) //nolint:errcheck
-		}
+	printPruneFoundItems(output, scanResult.Items, staleTempDirs, isJSON)
 
-		if len(staleTempDirs) > 0 {
-			fmt.Fprintln(output, "Stale temporary files:") //nolint:errcheck
-			for _, path := range staleTempDirs {
-				fmt.Fprintf(output, "  %s\n", path) //nolint:errcheck
-			}
-			fmt.Fprintln(output) //nolint:errcheck
-		}
-	}
-
-	// 7. If dry-run, stop here.
 	if dryRun {
 		if isJSON {
 			return writePruneJSON(cmd, scanResult, staleTempDirs, true)
@@ -116,10 +87,8 @@ func runSystemPrune(cmd *cobra.Command, backend string, dryRun, yes bool) error 
 		return nil
 	}
 
-	// 8. Confirm unless --yes.
 	if !yes {
-		prompt := fmt.Sprintf("Remove %d resource(s)? [y/N]: ", totalItems)
-		confirmed, err := sandbox.Confirm(ctx, prompt, cmd.InOrStdin(), cmd.ErrOrStderr())
+		confirmed, err := confirmPrune(cmd, ctx, totalItems)
 		if err != nil {
 			return err
 		}
@@ -128,15 +97,24 @@ func runSystemPrune(cmd *cobra.Command, backend string, dryRun, yes bool) error 
 		}
 	}
 
-	// 9. Remove orphaned backend resources.
-	var actualResult runtime.PruneResult
+	return executePruneSingle(cmd, ctx, backend, knownInstances, scanResult, staleTempDirs, output, isJSON)
+}
+
+// confirmPrune prompts the user to confirm removal and returns whether they confirmed.
+func confirmPrune(cmd *cobra.Command, ctx context.Context, totalItems int) (bool, error) {
+	prompt := fmt.Sprintf("Remove %d resource(s)? [y/N]: ", totalItems)
+	return sandbox.Confirm(ctx, prompt, cmd.InOrStdin(), cmd.ErrOrStderr())
+}
+
+// executePruneSingle carries out the actual removal for a single backend.
+func executePruneSingle(cmd *cobra.Command, ctx context.Context, backend string, knownInstances []string, scanResult runtime.PruneResult, staleTempDirs []string, output interface{ Write([]byte) (int, error) }, isJSON bool) error {
 	if len(scanResult.Items) > 0 {
-		err := withRuntime(ctx, backend, func(ctx context.Context, rt runtime.Runtime) error {
+		var actualResult runtime.PruneResult
+		if err := withRuntime(ctx, backend, func(ctx context.Context, rt runtime.Runtime) error {
 			var err error
 			actualResult, err = rt.Prune(ctx, knownInstances, false, output)
 			return err
-		})
-		if err != nil {
+		}); err != nil {
 			return err
 		}
 		if !isJSON {
@@ -146,7 +124,6 @@ func runSystemPrune(cmd *cobra.Command, backend string, dryRun, yes bool) error 
 		}
 	}
 
-	// 10. Remove stale temp files.
 	if _, err := sandbox.PruneTempFiles(false, 1*time.Hour); err != nil {
 		return fmt.Errorf("remove temp files: %w", err)
 	}
@@ -159,20 +136,129 @@ func runSystemPrune(cmd *cobra.Command, backend string, dryRun, yes bool) error 
 	if isJSON {
 		return writePruneJSON(cmd, scanResult, staleTempDirs, false)
 	}
-
 	return nil
+}
+
+// printBrokenSandboxWarnings prints warnings for broken sandboxes (human-readable only).
+func printBrokenSandboxWarnings(output interface{ Write([]byte) (int, error) }, brokenSandboxes []brokenSandbox, isJSON bool) {
+	if isJSON {
+		return
+	}
+	for _, bs := range brokenSandboxes {
+		fmt.Fprintf(output, "Warning: broken sandbox at %s — use 'yoloai destroy %s' to remove\n", bs.path, bs.name) //nolint:errcheck
+	}
+}
+
+// printPruneFoundItems reports what was found to prune (human-readable only).
+func printPruneFoundItems(output interface{ Write([]byte) (int, error) }, items []runtime.PruneItem, staleTempDirs []string, isJSON bool) {
+	if isJSON {
+		return
+	}
+	if len(items) > 0 {
+		fmt.Fprintln(output, "Orphaned resources:") //nolint:errcheck
+		for _, item := range items {
+			fmt.Fprintf(output, "  %s %s\n", item.Kind, item.Name) //nolint:errcheck
+		}
+		fmt.Fprintln(output) //nolint:errcheck
+	}
+	if len(staleTempDirs) > 0 {
+		fmt.Fprintln(output, "Stale temporary files:") //nolint:errcheck
+		for _, path := range staleTempDirs {
+			fmt.Fprintf(output, "  %s\n", path) //nolint:errcheck
+		}
+		fmt.Fprintln(output) //nolint:errcheck
+	}
 }
 
 // runSystemPruneAll prunes orphaned resources across all available backends.
 func runSystemPruneAll(cmd *cobra.Command, dryRun, yes bool) error {
 	ctx := cmd.Context()
 	output := cmd.OutOrStdout()
+	isJSON := jsonEnabled(cmd)
 
 	knownInstances, brokenSandboxes := scanSandboxes()
+	allItems, availableBackends := scanAllBackendsForPrune(ctx, knownInstances, output)
 
-	// Scan all available backends, aggregating results.
+	staleTempDirs, err := sandbox.PruneTempFiles(true, 1*time.Hour)
+	if err != nil {
+		return fmt.Errorf("scan temp files: %w", err)
+	}
+
+	scanResult := runtime.PruneResult{Items: allItems}
+	printBrokenSandboxWarnings(output, brokenSandboxes, isJSON)
+
+	totalItems := len(allItems) + len(staleTempDirs)
+	if done, doneErr := pruneEmptyOrDryRun(cmd, output, scanResult, staleTempDirs, totalItems, dryRun, isJSON); done {
+		return doneErr
+	}
+
+	if !yes {
+		confirmed, err := confirmPrune(cmd, ctx, totalItems)
+		if err != nil {
+			return err
+		}
+		if !confirmed {
+			return nil
+		}
+	}
+
+	return executeAllPrune(cmd, ctx, availableBackends, knownInstances, scanResult, staleTempDirs, output, isJSON)
+}
+
+// pruneEmptyOrDryRun handles the "nothing to prune" and dry-run early exit cases.
+// Returns (true, err) if the caller should return, (false, nil) to continue.
+func pruneEmptyOrDryRun(cmd *cobra.Command, output interface{ Write([]byte) (int, error) }, scanResult runtime.PruneResult, staleTempDirs []string, totalItems int, dryRun, isJSON bool) (bool, error) {
+	if totalItems == 0 {
+		if isJSON {
+			return true, writePruneJSON(cmd, scanResult, staleTempDirs, dryRun)
+		}
+		fmt.Fprintln(output, "Nothing to prune.") //nolint:errcheck
+		return true, nil
+	}
+
+	printPruneFoundItems(output, scanResult.Items, staleTempDirs, isJSON)
+
+	if dryRun {
+		if isJSON {
+			return true, writePruneJSON(cmd, scanResult, staleTempDirs, true)
+		}
+		return true, nil
+	}
+	return false, nil
+}
+
+// executeAllPrune carries out the actual removal across all backends.
+func executeAllPrune(cmd *cobra.Command, _ context.Context, availableBackends, knownInstances []string, scanResult runtime.PruneResult, staleTempDirs []string, output interface{ Write([]byte) (int, error) }, isJSON bool) error {
+	if len(scanResult.Items) > 0 {
+		ctx := cmd.Context()
+		actualItems := executeAllBackendsPrune(ctx, availableBackends, knownInstances, output)
+		if !isJSON {
+			for _, item := range actualItems {
+				fmt.Fprintf(output, "Removed %s %s\n", item.Kind, item.Name) //nolint:errcheck
+			}
+		}
+	}
+
+	if _, err := sandbox.PruneTempFiles(false, 1*time.Hour); err != nil {
+		return fmt.Errorf("remove temp files: %w", err)
+	}
+	if !isJSON {
+		for _, path := range staleTempDirs {
+			fmt.Fprintf(output, "Removed temp dir %s\n", path) //nolint:errcheck
+		}
+	}
+
+	if isJSON {
+		return writePruneJSON(cmd, scanResult, staleTempDirs, false)
+	}
+	return nil
+}
+
+// scanAllBackendsForPrune scans all available backends for orphaned resources.
+func scanAllBackendsForPrune(ctx context.Context, knownInstances []string, output interface{ Write([]byte) (int, error) }) ([]runtime.PruneItem, []string) {
 	var allItems []runtime.PruneItem
 	var availableBackends []string
+
 	for _, b := range knownBackends {
 		available, _ := checkBackend(ctx, b.Name)
 		if !available {
@@ -193,101 +279,25 @@ func runSystemPruneAll(cmd *cobra.Command, dryRun, yes bool) error {
 		allItems = append(allItems, result.Items...)
 	}
 
-	staleTempDirs, err := sandbox.PruneTempFiles(true, 1*time.Hour)
-	if err != nil {
-		return fmt.Errorf("scan temp files: %w", err)
-	}
+	return allItems, availableBackends
+}
 
-	isJSON := jsonEnabled(cmd)
-	scanResult := runtime.PruneResult{Items: allItems}
-
-	if !isJSON {
-		for _, bs := range brokenSandboxes {
-			fmt.Fprintf(output, "Warning: broken sandbox at %s — use 'yoloai destroy %s' to remove\n", bs.path, bs.name) //nolint:errcheck
-		}
-	}
-
-	totalItems := len(allItems) + len(staleTempDirs)
-	if totalItems == 0 {
-		if isJSON {
-			return writePruneJSON(cmd, scanResult, staleTempDirs, dryRun)
-		}
-		fmt.Fprintln(output, "Nothing to prune.") //nolint:errcheck
-		return nil
-	}
-
-	if !isJSON {
-		if len(allItems) > 0 {
-			fmt.Fprintln(output, "Orphaned resources:") //nolint:errcheck
-			for _, item := range allItems {
-				fmt.Fprintf(output, "  %s %s\n", item.Kind, item.Name) //nolint:errcheck
-			}
-			fmt.Fprintln(output) //nolint:errcheck
-		}
-
-		if len(staleTempDirs) > 0 {
-			fmt.Fprintln(output, "Stale temporary files:") //nolint:errcheck
-			for _, path := range staleTempDirs {
-				fmt.Fprintf(output, "  %s\n", path) //nolint:errcheck
-			}
-			fmt.Fprintln(output) //nolint:errcheck
-		}
-	}
-
-	if dryRun {
-		if isJSON {
-			return writePruneJSON(cmd, scanResult, staleTempDirs, true)
-		}
-		return nil
-	}
-
-	if !yes {
-		prompt := fmt.Sprintf("Remove %d resource(s)? [y/N]: ", totalItems)
-		confirmed, err := sandbox.Confirm(ctx, prompt, cmd.InOrStdin(), cmd.ErrOrStderr())
-		if err != nil {
-			return err
-		}
-		if !confirmed {
-			return nil
-		}
-	}
-
-	// Remove orphaned resources from each available backend.
+// executeAllBackendsPrune removes orphaned resources from each available backend.
+func executeAllBackendsPrune(ctx context.Context, availableBackends, knownInstances []string, output interface{ Write([]byte) (int, error) }) []runtime.PruneItem {
 	var actualItems []runtime.PruneItem
-	if len(allItems) > 0 {
-		for _, name := range availableBackends {
-			err := withRuntime(ctx, name, func(ctx context.Context, rt runtime.Runtime) error {
-				actual, err := rt.Prune(ctx, knownInstances, false, output)
-				if err == nil {
-					actualItems = append(actualItems, actual.Items...)
-				}
-				return err
-			})
-			if err != nil {
-				fmt.Fprintf(output, "Warning: prune %s failed: %v\n", name, err) //nolint:errcheck
+	for _, name := range availableBackends {
+		err := withRuntime(ctx, name, func(ctx context.Context, rt runtime.Runtime) error {
+			actual, err := rt.Prune(ctx, knownInstances, false, output)
+			if err == nil {
+				actualItems = append(actualItems, actual.Items...)
 			}
-		}
-		if !isJSON {
-			for _, item := range actualItems {
-				fmt.Fprintf(output, "Removed %s %s\n", item.Kind, item.Name) //nolint:errcheck
-			}
-		}
-	}
-
-	if _, err := sandbox.PruneTempFiles(false, 1*time.Hour); err != nil {
-		return fmt.Errorf("remove temp files: %w", err)
-	}
-	if !isJSON {
-		for _, path := range staleTempDirs {
-			fmt.Fprintf(output, "Removed temp dir %s\n", path) //nolint:errcheck
+			return err
+		})
+		if err != nil {
+			fmt.Fprintf(output, "Warning: prune %s failed: %v\n", name, err) //nolint:errcheck
 		}
 	}
-
-	if isJSON {
-		return writePruneJSON(cmd, scanResult, staleTempDirs, false)
-	}
-
-	return nil
+	return actualItems
 }
 
 // writePruneJSON outputs prune results as JSON.

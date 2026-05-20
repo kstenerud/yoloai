@@ -173,18 +173,8 @@ var ReservedNames = map[string]bool{
 	"x": true, "ext": true, "sb": true,
 }
 
-// Validate checks that an extension is well-formed. Returns an error describing
-// the first problem found.
-func Validate(ext *Extension) error {
-	if ext.Action == "" {
-		return fmt.Errorf("extension %q: action is required", ext.Name)
-	}
-
-	if ReservedNames[ext.Name] {
-		return fmt.Errorf("extension %q: name conflicts with built-in command", ext.Name)
-	}
-
-	// Validate args
+// validateExtArgs checks that all arg definitions in the extension are valid.
+func validateExtArgs(ext *Extension) error {
 	argNames := make(map[string]bool)
 	for _, a := range ext.Args {
 		if a.Name == "" {
@@ -198,8 +188,11 @@ func Validate(ext *Extension) error {
 		}
 		argNames[a.Name] = true
 	}
+	return nil
+}
 
-	// Validate flags
+// validateExtFlags checks that all flag definitions in the extension are valid.
+func validateExtFlags(ext *Extension) error {
 	flagNames := make(map[string]bool)
 	flagShorts := make(map[string]bool)
 	for _, f := range ext.Flags {
@@ -216,19 +209,48 @@ func Validate(ext *Extension) error {
 			return fmt.Errorf("extension %q: flag %q conflicts with reserved flag", ext.Name, f.Name)
 		}
 		flagNames[f.Name] = true
-
-		if f.Short != "" {
-			if len(f.Short) != 1 {
-				return fmt.Errorf("extension %q: flag short %q must be a single character", ext.Name, f.Short)
-			}
-			if flagShorts[f.Short] {
-				return fmt.Errorf("extension %q: duplicate flag short %q", ext.Name, f.Short)
-			}
-			if reservedFlags[f.Short] {
-				return fmt.Errorf("extension %q: flag short %q conflicts with reserved flag", ext.Name, f.Short)
-			}
-			flagShorts[f.Short] = true
+		if err := validateExtFlagShort(ext.Name, f.Short, flagShorts); err != nil {
+			return err
 		}
+	}
+	return nil
+}
+
+// validateExtFlagShort checks a single flag's short form for validity.
+func validateExtFlagShort(extName, short string, flagShorts map[string]bool) error {
+	if short == "" {
+		return nil
+	}
+	if len(short) != 1 {
+		return fmt.Errorf("extension %q: flag short %q must be a single character", extName, short)
+	}
+	if flagShorts[short] {
+		return fmt.Errorf("extension %q: duplicate flag short %q", extName, short)
+	}
+	if reservedFlags[short] {
+		return fmt.Errorf("extension %q: flag short %q conflicts with reserved flag", extName, short)
+	}
+	flagShorts[short] = true
+	return nil
+}
+
+// Validate checks that an extension is well-formed. Returns an error describing
+// the first problem found.
+func Validate(ext *Extension) error {
+	if ext.Action == "" {
+		return fmt.Errorf("extension %q: action is required", ext.Name)
+	}
+
+	if ReservedNames[ext.Name] {
+		return fmt.Errorf("extension %q: name conflicts with built-in command", ext.Name)
+	}
+
+	if err := validateExtArgs(ext); err != nil {
+		return err
+	}
+
+	if err := validateExtFlags(ext); err != nil {
+		return err
 	}
 
 	// Validate agent constraint

@@ -353,6 +353,30 @@ func InspectSandbox(ctx context.Context, rt runtime.Runtime, name string) (*Info
 	}, nil
 }
 
+// detectWorkdirChanges returns "yes", "no", or "-" for a sandbox's workdir and aux dirs.
+func detectWorkdirChanges(name string, meta *Meta) string {
+	if meta.Workdir.Mode != "copy" && meta.Workdir.Mode != "overlay" {
+		return "-"
+	}
+	workDir := WorkDir(name, meta.Workdir.HostPath)
+	if hasUnappliedWork(workDir, meta.Workdir.BaselineSHA) {
+		return "yes"
+	}
+	if detectChanges(workDir) == "-" {
+		return "-"
+	}
+	// workdir has no unapplied work — check aux dirs before reporting "no"
+	for _, d := range meta.Directories {
+		if d.Mode == "copy" || d.Mode == "overlay" {
+			auxWorkDir := WorkDir(name, d.HostPath)
+			if hasUnappliedWork(auxWorkDir, d.BaselineSHA) {
+				return "yes"
+			}
+		}
+	}
+	return "no"
+}
+
 // InspectSandboxWithBackend loads metadata and optionally queries the runtime.
 // If rt is nil, returns basic info (from meta.json and filesystem) with StatusUnavailable.
 // If rt is available, performs full inspection including container state.
@@ -367,12 +391,13 @@ func InspectSandboxWithBackend(ctx context.Context, rt runtime.Runtime, name str
 		return nil, fmt.Errorf("load metadata: %w", err)
 	}
 
+	diskUsage := "-"
+	if size, err := DirSize(sandboxDir); err == nil {
+		diskUsage = FormatSize(size)
+	}
+
 	// If runtime is nil, return basic info with unavailable status
 	if rt == nil {
-		diskUsage := "-"
-		if size, err := DirSize(sandboxDir); err == nil {
-			diskUsage = FormatSize(size)
-		}
 		return &Info{
 			Meta:       meta,
 			Status:     StatusUnavailable,
@@ -387,38 +412,10 @@ func InspectSandboxWithBackend(ctx context.Context, rt runtime.Runtime, name str
 		return nil, err
 	}
 
-	changes := "-"
-	if meta.Workdir.Mode == "copy" || meta.Workdir.Mode == "overlay" {
-		workDir := WorkDir(name, meta.Workdir.HostPath)
-		if hasUnappliedWork(workDir, meta.Workdir.BaselineSHA) {
-			changes = "yes"
-		} else if detectChanges(workDir) != "-" {
-			changes = "no"
-		}
-	}
-
-	// Also check aux :copy/:overlay dirs for changes
-	if changes == "no" {
-		for _, d := range meta.Directories {
-			if d.Mode == "copy" || d.Mode == "overlay" {
-				auxWorkDir := WorkDir(name, d.HostPath)
-				if hasUnappliedWork(auxWorkDir, d.BaselineSHA) {
-					changes = "yes"
-					break
-				}
-			}
-		}
-	}
-
-	diskUsage := "-"
-	if size, err := DirSize(sandboxDir); err == nil {
-		diskUsage = FormatSize(size)
-	}
-
 	return &Info{
 		Meta:       meta,
 		Status:     status,
-		HasChanges: changes,
+		HasChanges: detectWorkdirChanges(name, meta),
 		DiskUsage:  diskUsage,
 	}, nil
 }

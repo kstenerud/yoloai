@@ -4,6 +4,7 @@ package cli
 // ABOUTME: are available on the current machine, with fix instructions for missing prerequisites.
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/spf13/cobra"
@@ -64,6 +65,26 @@ func runSystemDoctor(cmd *cobra.Command, backendFilter, isolationFilter string, 
 	out := cmd.OutOrStdout()
 
 	env := caps.DetectEnvironment()
+	reports := collectDoctorReports(ctx, env, backendFilter, isolationFilter)
+
+	if isJSON {
+		return writeJSON(out, convertDoctorReportsToJSON(reports))
+	}
+
+	caps.FormatDoctor(out, reports)
+
+	// Exit 1 if any NeedsSetup entries (user action could unlock them).
+	// Unavailable entries do not cause exit 1 — they are not actionable.
+	for _, r := range reports {
+		if r.Availability == caps.NeedsSetup {
+			return fmt.Errorf("one or more backends need setup")
+		}
+	}
+	return nil
+}
+
+// collectDoctorReports iterates over known backends and builds the full report list.
+func collectDoctorReports(ctx context.Context, env caps.Environment, backendFilter, isolationFilter string) []caps.BackendReport {
 	var reports []caps.BackendReport
 
 	for _, b := range knownBackends {
@@ -73,7 +94,6 @@ func runSystemDoctor(cmd *cobra.Command, backendFilter, isolationFilter string, 
 
 		rt, err := newRuntime(ctx, b.Name)
 		if err != nil {
-			// Backend unavailable — only include if no isolation filter, or we can't know.
 			if isolationFilter == "" {
 				reports = append(reports, caps.BackendReport{
 					Backend:      b.Name,
@@ -86,17 +106,15 @@ func runSystemDoctor(cmd *cobra.Command, backendFilter, isolationFilter string, 
 			continue
 		}
 
-		// Base mode report (no isolation filter, or no isolation filter mismatch).
 		if isolationFilter == "" {
 			reports = append(reports, caps.BackendReport{
 				Backend:      b.Name,
 				Mode:         rt.BaseModeName(),
 				IsBaseMode:   true,
-				Availability: caps.Ready, // New() succeeded → base mode is Ready
+				Availability: caps.Ready,
 			})
 		}
 
-		// Isolation mode reports.
 		for _, mode := range rt.SupportedIsolationModes() {
 			if isolationFilter != "" && mode != isolationFilter {
 				continue
@@ -116,51 +134,43 @@ func runSystemDoctor(cmd *cobra.Command, backendFilter, isolationFilter string, 
 		_ = rt.Close() //nolint:errcheck,gosec // best-effort cleanup
 	}
 
-	if isJSON {
-		jsonReports := make([]backendReportJSON, 0, len(reports))
-		for _, r := range reports {
-			jr := backendReportJSON{
-				Backend:    r.Backend,
-				Mode:       r.Mode,
-				IsBaseMode: r.IsBaseMode,
-			}
-			switch r.Availability {
-			case caps.Ready:
-				jr.Availability = "ready"
-			case caps.NeedsSetup:
-				jr.Availability = "needs_setup"
-			default:
-				jr.Availability = "unavailable"
-			}
-			if r.InitErr != nil {
-				jr.InitError = r.InitErr.Error()
-			}
-			for _, cr := range r.Results {
-				jcr := checkResultJSON{
-					CapID:      cr.Cap.ID,
-					CapSummary: cr.Cap.Summary,
-					OK:         cr.Err == nil,
-				}
-				if cr.Err != nil {
-					jcr.IsPermanent = cr.IsPermanent
-					jcr.Error = cr.Err.Error()
-					jcr.Steps = cr.Steps
-				}
-				jr.Checks = append(jr.Checks, jcr)
-			}
-			jsonReports = append(jsonReports, jr)
-		}
-		return writeJSON(out, jsonReports)
-	}
+	return reports
+}
 
-	caps.FormatDoctor(out, reports)
-
-	// Exit 1 if any NeedsSetup entries (user action could unlock them).
-	// Unavailable entries do not cause exit 1 — they are not actionable.
+// convertDoctorReportsToJSON converts BackendReport slice to JSON-serializable form.
+func convertDoctorReportsToJSON(reports []caps.BackendReport) []backendReportJSON {
+	jsonReports := make([]backendReportJSON, 0, len(reports))
 	for _, r := range reports {
-		if r.Availability == caps.NeedsSetup {
-			return fmt.Errorf("one or more backends need setup")
+		jr := backendReportJSON{
+			Backend:    r.Backend,
+			Mode:       r.Mode,
+			IsBaseMode: r.IsBaseMode,
 		}
+		switch r.Availability {
+		case caps.Ready:
+			jr.Availability = "ready"
+		case caps.NeedsSetup:
+			jr.Availability = "needs_setup"
+		default:
+			jr.Availability = "unavailable"
+		}
+		if r.InitErr != nil {
+			jr.InitError = r.InitErr.Error()
+		}
+		for _, cr := range r.Results {
+			jcr := checkResultJSON{
+				CapID:      cr.Cap.ID,
+				CapSummary: cr.Cap.Summary,
+				OK:         cr.Err == nil,
+			}
+			if cr.Err != nil {
+				jcr.IsPermanent = cr.IsPermanent
+				jcr.Error = cr.Err.Error()
+				jcr.Steps = cr.Steps
+			}
+			jr.Checks = append(jr.Checks, jcr)
+		}
+		jsonReports = append(jsonReports, jr)
 	}
-	return nil
+	return jsonReports
 }

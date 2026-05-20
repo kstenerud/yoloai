@@ -211,18 +211,61 @@ func (r *Runtime) Create(ctx context.Context, cfg runtime.InstanceConfig) error 
 	// Unpack the image into the snapshotter if not already done.
 	// WithNewSnapshot requires the layer snapshot chain to already exist;
 	// it does NOT unpack — it only calls Prepare(parent) on the final digest.
-	if unpacked, err := img.IsUnpacked(ctx, snapshotter); err == nil && !unpacked {
-		if err := img.Unpack(ctx, snapshotter); err != nil {
-			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-				createErr = fmt.Errorf("unpack image: %w", err)
-			} else {
-				createErr = fmt.Errorf("unpack image: %w\n  Hint: image content may have been removed by containerd GC; run 'yoloai system build --force' to rebuild", err)
-			}
-			return createErr
-		}
+	if err := ensureImageUnpacked(ctx, img, snapshotter); err != nil {
+		createErr = err
+		return createErr
 	}
 
 	// Build OCI spec options.
+	specOpts := buildContainerSpecOpts(img, netnsPath, cfg)
+
+	// Kata config: only override when a non-default config path is needed
+	// (e.g. Firecracker). For the default kata.v2 runtime, pass nil to let
+	// the shim use its built-in default (Dragonball VMM).
+	var kataOpts interface{}
+	if cfgPath := kataConfigPath(cfg.ContainerRuntime); cfgPath != "" {
+		kataOpts = &runtimeoptions.Options{ConfigPath: cfgPath}
+	}
+
+	ctrOpts := []client.NewContainerOpts{
+		client.WithSnapshotter(snapshotter),
+		client.WithNewSnapshot(cfg.Name, img),
+		client.WithNewSpec(specOpts...),
+		client.WithRuntime(cfg.ContainerRuntime, kataOpts),
+	}
+
+	// Pre-clear stale container, snapshot, and Kata shim state.
+	if err := r.clearStaleContainerState(ctx, cfg.Name, snapshotter); err != nil {
+		createErr = err
+		return createErr
+	}
+
+	if _, err := r.client.NewContainer(ctx, cfg.Name, ctrOpts...); err != nil {
+		createErr = fmt.Errorf("create container: %w", err)
+		return createErr
+	}
+
+	return nil
+}
+
+// ensureImageUnpacked unpacks the image into the snapshotter if not already done.
+// Returns a user-friendly error with a GC hint for non-context errors.
+func ensureImageUnpacked(ctx context.Context, img client.Image, snapshotter string) error {
+	unpacked, err := img.IsUnpacked(ctx, snapshotter)
+	if err != nil || unpacked {
+		return nil //nolint:nilerr // intentional: skip unpack if already done or can't check — let NewSnapshot fail if needed
+	}
+	if err := img.Unpack(ctx, snapshotter); err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return fmt.Errorf("unpack image: %w", err)
+		}
+		return fmt.Errorf("unpack image: %w\n  Hint: image content may have been removed by containerd GC; run 'yoloai system build --force' to rebuild", err)
+	}
+	return nil
+}
+
+// buildContainerSpecOpts assembles the OCI spec options for a new container.
+func buildContainerSpecOpts(img client.Image, netnsPath string, cfg runtime.InstanceConfig) []oci.SpecOpts {
 	specOpts := []oci.SpecOpts{
 		oci.WithDefaultSpec(),
 		oci.WithImageConfig(img),
@@ -248,6 +291,12 @@ func (r *Runtime) Create(ctx context.Context, cfg runtime.InstanceConfig) error 
 		}
 	}
 
+	return append(specOpts, oci.WithMounts(buildContainerMounts(cfg.Mounts)))
+}
+
+// buildContainerMounts builds the bind-mount list for a new container,
+// including a working resolv.conf for DNS resolution.
+func buildContainerMounts(mounts []runtime.MountSpec) []specs.Mount {
 	// Always bind-mount a working resolv.conf so the container can resolve DNS.
 	// Docker handles this automatically; raw containerd does not.
 	// On systemd-resolved hosts (Ubuntu), /etc/resolv.conf → stub-resolv.conf
@@ -267,8 +316,7 @@ func (r *Runtime) Create(ctx context.Context, cfg runtime.InstanceConfig) error 
 		},
 	}
 
-	// Convert user-specified mounts.
-	for _, m := range cfg.Mounts {
+	for _, m := range mounts {
 		opts := []string{"rbind"}
 		if m.ReadOnly {
 			opts = append(opts, "ro")
@@ -282,34 +330,22 @@ func (r *Runtime) Create(ctx context.Context, cfg runtime.InstanceConfig) error 
 			Options:     opts,
 		})
 	}
-	specOpts = append(specOpts, oci.WithMounts(extraMounts))
+	return extraMounts
+}
 
-	// Kata config: only override when a non-default config path is needed
-	// (e.g. Firecracker). For the default kata.v2 runtime, pass nil to let
-	// the shim use its built-in default (Dragonball VMM).
-	var kataOpts interface{}
-	if cfgPath := kataConfigPath(cfg.ContainerRuntime); cfgPath != "" {
-		kataOpts = &runtimeoptions.Options{ConfigPath: cfgPath}
-	}
-
-	ctrOpts := []client.NewContainerOpts{
-		client.WithSnapshotter(snapshotter),
-		client.WithNewSnapshot(cfg.Name, img),
-		client.WithNewSpec(specOpts...),
-		client.WithRuntime(cfg.ContainerRuntime, kataOpts),
-	}
-
+// clearStaleContainerState removes any stale container, snapshot, and Kata shim
+// state left from a previous failed run.
+func (r *Runtime) clearStaleContainerState(ctx context.Context, name, snapshotter string) error {
 	// Pre-clear any stale container with this name from a previous failed run.
 	// Use retryDelete to handle Kata shim teardown lag (same as in Remove).
-	if existingCtr, loadErr := r.client.LoadContainer(ctx, cfg.Name); loadErr == nil {
+	if existingCtr, loadErr := r.client.LoadContainer(ctx, name); loadErr == nil {
 		if err := retryDelete(ctx, existingCtr); err != nil && !errdefs.IsNotFound(err) {
-			createErr = fmt.Errorf("stale container %q could not be deleted: %w", cfg.Name, err)
-			return createErr
+			return fmt.Errorf("stale container %q could not be deleted: %w", name, err)
 		}
 	}
 	// Also pre-clear any stale snapshot that may have been orphaned (e.g. if the
 	// container was deleted but snapshot cleanup failed due to permissions or a crash).
-	_ = r.client.SnapshotService(snapshotter).Remove(ctx, cfg.Name)
+	_ = r.client.SnapshotService(snapshotter).Remove(ctx, name)
 
 	// Kill any orphaned Kata shim processes for this container name. These are
 	// left behind when a previous NewTask() call spawned a shim that then failed
@@ -317,16 +353,10 @@ func (r *Runtime) Create(ctx context.Context, cfg runtime.InstanceConfig) error 
 	// Unix sockets (which the kernel releases on process exit), filesystem sockets
 	// persist until explicitly deleted. The next shim start fails with EADDRINUSE
 	// if /run/kata/<namespace>-<name>/shim-monitor.sock still exists on disk.
-	if killStaleKataShims(r.namespace, cfg.Name) {
+	if killStaleKataShims(r.namespace, name) {
 		time.Sleep(500 * time.Millisecond)
 	}
-	removeKataStateDir(r.namespace, cfg.Name)
-
-	if _, err := r.client.NewContainer(ctx, cfg.Name, ctrOpts...); err != nil {
-		createErr = fmt.Errorf("create container: %w", err)
-		return createErr
-	}
-
+	removeKataStateDir(r.namespace, name)
 	return nil
 }
 
@@ -343,15 +373,8 @@ func (r *Runtime) Start(ctx context.Context, name string) error {
 		return fmt.Errorf("load container: %w", err)
 	}
 
-	// Check for an existing task: a stopped task must be deleted before
-	// creating a new one.
-	if existingTask, taskErr := ctr.Task(ctx, nil); taskErr == nil {
-		status, _ := existingTask.Status(ctx)
-		if status.Status == client.Running {
-			return nil // already running
-		}
-		// Task exists but is stopped — delete it before creating a new task.
-		_, _ = existingTask.Delete(ctx)
+	if alreadyRunning := cleanupStoppedTask(ctx, ctr); alreadyRunning {
+		return nil
 	}
 
 	// Kill any orphaned Kata shim processes and remove stale runtime-rs state
@@ -365,8 +388,42 @@ func (r *Runtime) Start(ctx context.Context, name string) error {
 	removeKataStateDir(r.namespace, name)
 
 	// Create task with null IO — agent logs go to bind-mounted log.txt.
+	task, err := createTaskWithRetry(ctx, ctr)
+	if err != nil {
+		return fmt.Errorf("create task: %w", err)
+	}
+
+	if err := task.Start(ctx); err != nil {
+		_, _ = task.Delete(ctx)
+		return fmt.Errorf("start task: %w", err)
+	}
+
+	return waitForTaskRunning(ctx, task)
+}
+
+// cleanupStoppedTask checks for an existing task on the container.
+// If the task is running it returns true (already running).
+// If stopped, it deletes the task and returns false so a new task can be created.
+func cleanupStoppedTask(ctx context.Context, ctr client.Container) (alreadyRunning bool) {
+	existingTask, taskErr := ctr.Task(ctx, nil)
+	if taskErr != nil {
+		return false // no task — proceed to create
+	}
+	status, _ := existingTask.Status(ctx)
+	if status.Status == client.Running {
+		return true
+	}
+	// Task exists but is stopped — delete it before creating a new task.
+	_, _ = existingTask.Delete(ctx)
+	return false
+}
+
+// createTaskWithRetry creates a new task, retrying on "address in use" errors
+// that indicate a stale Kata shim socket.
+func createTaskWithRetry(ctx context.Context, ctr client.Container) (client.Task, error) {
 	const shimMaxRetries = 5
 	const shimRetryDelay = 2 * time.Second
+
 	var task client.Task
 	var createTaskErr error
 	for attempt := range shimMaxRetries {
@@ -374,7 +431,7 @@ func (r *Runtime) Start(ctx context.Context, name string) error {
 			select {
 			case <-time.After(shimRetryDelay):
 			case <-ctx.Done():
-				return ctx.Err()
+				return nil, ctx.Err()
 			}
 		}
 		task, createTaskErr = ctr.NewTask(ctx, cio.NullIO)
@@ -385,20 +442,14 @@ func (r *Runtime) Start(ctx context.Context, name string) error {
 			break // non-retryable error
 		}
 	}
-	if createTaskErr != nil {
-		return fmt.Errorf("create task: %w", createTaskErr)
-	}
+	return task, createTaskErr
+}
 
-	if err := task.Start(ctx); err != nil {
-		_, _ = task.Delete(ctx)
-		return fmt.Errorf("start task: %w", err)
-	}
-
-	// task.Start returns once the shim acknowledges the RPC, but for
-	// slow-starting runtimes (e.g. Kata Containers which boots a full VM)
-	// the task may still be in Created state for many seconds. Poll until
-	// it reaches Running or Stopped so that callers can rely on the
-	// returned nil meaning "container is actually running".
+// waitForTaskRunning polls until the task reaches Running or Stopped state.
+// task.Start returns once the shim acknowledges the RPC, but for slow-starting
+// runtimes (e.g. Kata Containers which boots a full VM) the task may still be
+// in Created state for many seconds.
+func waitForTaskRunning(ctx context.Context, task client.Task) error {
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 	timer := time.NewTimer(60 * time.Second)
@@ -412,6 +463,8 @@ func (r *Runtime) Start(ctx context.Context, name string) error {
 			case client.Stopped:
 				_, _ = task.Delete(ctx)
 				return fmt.Errorf("task exited immediately after start (exit code: %d)", status.ExitStatus)
+			default:
+				// transitioning (Created/Paused/Pausing/Unknown) — poll again
 			}
 		}
 		select {

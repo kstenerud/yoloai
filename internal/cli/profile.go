@@ -150,109 +150,112 @@ func newProfileInfoCmd() *cobra.Command {
 			return names, cobra.ShellCompDirectiveNoFileComp
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			name := args[0]
-
-			var chain []string
-			var merged *config.MergedConfig
-			var image string
-			var hasDockerfile bool
-
-			if name == "base" {
-				// Base profile: no chain resolution needed
-				chain = []string{"base"}
-				image = "yoloai-base"
-				hasDockerfile = config.ProfileHasDockerfile("base")
-
-				baseCfg, err := config.LoadBakedInDefaults()
-				if err != nil {
-					return err
-				}
-				merged, err = config.MergeProfileChain(baseCfg, chain)
-				if err != nil {
-					return err
-				}
-			} else {
-				if err := config.ValidateProfileName(name); err != nil {
-					return err
-				}
-				if !config.ProfileExists(name) {
-					return sandbox.NewUsageError("profile %q does not exist", name)
-				}
-
-				var err error
-				chain, err = config.ResolveProfileChain(name)
-				if err != nil {
-					return err
-				}
-
-				baseCfg, err := config.LoadBakedInDefaults()
-				if err != nil {
-					return err
-				}
-				merged, err = config.MergeProfileChain(baseCfg, chain)
-				if err != nil {
-					return err
-				}
-
-				image = config.ResolveProfileImage(name, chain)
-				hasDockerfile = config.ProfileHasDockerfile(name)
-			}
-
-			if diffMode {
-				var parentMerged *config.MergedConfig
-				if name == "base" {
-					parentMerged = &config.MergedConfig{}
-				} else {
-					parentChain := chain[:len(chain)-1]
-					baseCfg, err := config.LoadBakedInDefaults()
-					if err != nil {
-						return err
-					}
-					parentMerged, err = config.MergeProfileChain(baseCfg, parentChain)
-					if err != nil {
-						return err
-					}
-				}
-
-				if jsonEnabled(cmd) {
-					return writeJSON(cmd.OutOrStdout(), profileDiffJSON{
-						Profile:   name,
-						Chain:     chain,
-						Inherited: parentMerged,
-						Merged:    merged,
-					})
-				}
-
-				return printProfileDiff(cmd, name, "", chain, parentMerged, merged)
-			}
-
-			if jsonEnabled(cmd) {
-				return writeJSON(cmd.OutOrStdout(), profileInfoJSON{
-					Profile:     name,
-					Chain:       chain,
-					Image:       image,
-					Dockerfile:  hasDockerfile,
-					Agent:       merged.Agent,
-					Model:       merged.Model,
-					Backend:     merged.Backend,
-					TartImage:   merged.TartImage,
-					Isolation:   merged.Isolation,
-					Env:         merged.Env,
-					AgentArgs:   merged.AgentArgs,
-					Ports:       merged.Ports,
-					Workdir:     merged.Workdir,
-					Directories: merged.Directories,
-					Resources:   merged.Resources,
-					Network:     merged.Network,
-					Mounts:      merged.Mounts,
-				})
-			}
-
-			return printProfileInfo(cmd, name, "", chain, image, hasDockerfile, merged)
+			return runProfileInfoCmd(cmd, args[0], diffMode)
 		},
 	}
 	cmd.Flags().BoolVar(&diffMode, "diff", false, "Show only changes from parent profile")
 	return cmd
+}
+
+func runProfileInfoCmd(cmd *cobra.Command, name string, diffMode bool) error {
+	chain, merged, image, hasDockerfile, err := resolveProfileInfo(name)
+	if err != nil {
+		return err
+	}
+
+	if diffMode {
+		return runProfileInfoDiff(cmd, name, chain, merged)
+	}
+
+	if jsonEnabled(cmd) {
+		return writeJSON(cmd.OutOrStdout(), profileInfoJSON{
+			Profile:     name,
+			Chain:       chain,
+			Image:       image,
+			Dockerfile:  hasDockerfile,
+			Agent:       merged.Agent,
+			Model:       merged.Model,
+			Backend:     merged.Backend,
+			TartImage:   merged.TartImage,
+			Isolation:   merged.Isolation,
+			Env:         merged.Env,
+			AgentArgs:   merged.AgentArgs,
+			Ports:       merged.Ports,
+			Workdir:     merged.Workdir,
+			Directories: merged.Directories,
+			Resources:   merged.Resources,
+			Network:     merged.Network,
+			Mounts:      merged.Mounts,
+		})
+	}
+
+	return printProfileInfo(cmd, name, "", chain, image, hasDockerfile, merged)
+}
+
+// resolveProfileInfo loads chain, merged config, image, and dockerfile flag for a profile.
+func resolveProfileInfo(name string) (chain []string, merged *config.MergedConfig, image string, hasDockerfile bool, err error) {
+	if name == "base" {
+		chain = []string{"base"}
+		image = "yoloai-base"
+		hasDockerfile = config.ProfileHasDockerfile("base")
+		baseCfg, err := config.LoadBakedInDefaults()
+		if err != nil {
+			return nil, nil, "", false, err
+		}
+		merged, err = config.MergeProfileChain(baseCfg, chain)
+		return chain, merged, image, hasDockerfile, err
+	}
+
+	if err = config.ValidateProfileName(name); err != nil {
+		return nil, nil, "", false, err
+	}
+	if !config.ProfileExists(name) {
+		return nil, nil, "", false, sandbox.NewUsageError("profile %q does not exist", name)
+	}
+	chain, err = config.ResolveProfileChain(name)
+	if err != nil {
+		return nil, nil, "", false, err
+	}
+	baseCfg, err := config.LoadBakedInDefaults()
+	if err != nil {
+		return nil, nil, "", false, err
+	}
+	merged, err = config.MergeProfileChain(baseCfg, chain)
+	if err != nil {
+		return nil, nil, "", false, err
+	}
+	image = config.ResolveProfileImage(name, chain)
+	hasDockerfile = config.ProfileHasDockerfile(name)
+	return chain, merged, image, hasDockerfile, nil
+}
+
+// runProfileInfoDiff handles the --diff mode for profile info.
+func runProfileInfoDiff(cmd *cobra.Command, name string, chain []string, merged *config.MergedConfig) error {
+	var parentMerged *config.MergedConfig
+	if name == "base" {
+		parentMerged = &config.MergedConfig{}
+	} else {
+		parentChain := chain[:len(chain)-1]
+		baseCfg, err := config.LoadBakedInDefaults()
+		if err != nil {
+			return err
+		}
+		parentMerged, err = config.MergeProfileChain(baseCfg, parentChain)
+		if err != nil {
+			return err
+		}
+	}
+
+	if jsonEnabled(cmd) {
+		return writeJSON(cmd.OutOrStdout(), profileDiffJSON{
+			Profile:   name,
+			Chain:     chain,
+			Inherited: parentMerged,
+			Merged:    merged,
+		})
+	}
+
+	return printProfileDiff(cmd, name, "", chain, parentMerged, merged)
 }
 
 // profileInfoJSON is the JSON output structure for `profile info`.
@@ -302,6 +305,16 @@ func printProfileInfo(cmd *cobra.Command, name, extends string, chain []string, 
 	}
 	fmt.Fprintf(out, "Dockerfile:  %s\n", dockerfileStr) //nolint:errcheck
 
+	printProfileInfoScalars(out, merged)
+	printProfileInfoMaps(out, merged)
+	printProfileInfoDirs(out, merged)
+	printProfileInfoResources(out, merged)
+
+	return nil
+}
+
+// printProfileInfoScalars prints scalar profile fields.
+func printProfileInfoScalars(out io.Writer, merged *config.MergedConfig) {
 	if merged.Agent != "" {
 		fmt.Fprintf(out, "Agent:       %s\n", merged.Agent) //nolint:errcheck
 	}
@@ -317,25 +330,35 @@ func printProfileInfo(cmd *cobra.Command, name, extends string, chain []string, 
 	if merged.Isolation != "" {
 		fmt.Fprintf(out, "Isolation:   %s\n", merged.Isolation) //nolint:errcheck
 	}
+}
 
+// printProfileInfoMaps prints map and list fields (env, agent args, ports, mounts).
+func printProfileInfoMaps(out io.Writer, merged *config.MergedConfig) {
 	if len(merged.Env) > 0 {
 		fmt.Fprintln(out, "Env:") //nolint:errcheck
 		for _, k := range sortedKeys(merged.Env) {
 			fmt.Fprintf(out, "  %s: %s\n", k, merged.Env[k]) //nolint:errcheck
 		}
 	}
-
 	if len(merged.AgentArgs) > 0 {
 		fmt.Fprintln(out, "Agent args:") //nolint:errcheck
 		for _, k := range sortedKeys(merged.AgentArgs) {
 			fmt.Fprintf(out, "  %s: %s\n", k, merged.AgentArgs[k]) //nolint:errcheck
 		}
 	}
-
 	if len(merged.Ports) > 0 {
 		fmt.Fprintf(out, "Ports:       %s\n", strings.Join(merged.Ports, ", ")) //nolint:errcheck
 	}
+	if len(merged.Mounts) > 0 {
+		fmt.Fprintln(out, "Mounts:") //nolint:errcheck
+		for _, m := range merged.Mounts {
+			fmt.Fprintf(out, "  %s\n", m) //nolint:errcheck
+		}
+	}
+}
 
+// printProfileInfoDirs prints workdir and directories fields.
+func printProfileInfoDirs(out io.Writer, merged *config.MergedConfig) {
 	if merged.Workdir != nil {
 		w := merged.Workdir
 		s := w.Path
@@ -347,7 +370,6 @@ func printProfileInfo(cmd *cobra.Command, name, extends string, chain []string, 
 		}
 		fmt.Fprintf(out, "Workdir:     %s\n", s) //nolint:errcheck
 	}
-
 	if len(merged.Directories) > 0 {
 		fmt.Fprintln(out, "Directories:") //nolint:errcheck
 		for _, d := range merged.Directories {
@@ -361,7 +383,10 @@ func printProfileInfo(cmd *cobra.Command, name, extends string, chain []string, 
 			fmt.Fprintln(out, s) //nolint:errcheck
 		}
 	}
+}
 
+// printProfileInfoResources prints resources and network fields.
+func printProfileInfoResources(out io.Writer, merged *config.MergedConfig) {
 	if merged.Resources != nil && (merged.Resources.CPUs != "" || merged.Resources.Memory != "") {
 		var parts []string
 		if merged.Resources.CPUs != "" {
@@ -372,7 +397,6 @@ func printProfileInfo(cmd *cobra.Command, name, extends string, chain []string, 
 		}
 		fmt.Fprintf(out, "Resources:   %s\n", strings.Join(parts, ", ")) //nolint:errcheck
 	}
-
 	if merged.Network != nil && merged.Network.Isolated {
 		s := "isolated"
 		if len(merged.Network.Allow) > 0 {
@@ -380,15 +404,6 @@ func printProfileInfo(cmd *cobra.Command, name, extends string, chain []string, 
 		}
 		fmt.Fprintf(out, "Network:     %s\n", s) //nolint:errcheck
 	}
-
-	if len(merged.Mounts) > 0 {
-		fmt.Fprintln(out, "Mounts:") //nolint:errcheck
-		for _, m := range merged.Mounts {
-			fmt.Fprintf(out, "  %s\n", m) //nolint:errcheck
-		}
-	}
-
-	return nil
 }
 
 // printProfileDiff renders the human-readable diff output for `profile info --diff`.
@@ -403,45 +418,21 @@ func printProfileDiff(cmd *cobra.Command, name, extends string, chain []string, 
 		fmt.Fprintf(out, "Chain:     %s\n", strings.Join(chain, " → ")) //nolint:errcheck
 	}
 
-	hasDiff := false
-
-	hasDiff = printScalarDiff(out, "Agent", parent.Agent, merged.Agent) || hasDiff
-	hasDiff = printScalarDiff(out, "Model", parent.Model, merged.Model) || hasDiff
-	hasDiff = printScalarDiff(out, "Backend", parent.Backend, merged.Backend) || hasDiff
-	hasDiff = printScalarDiff(out, "Tart image", parent.TartImage, merged.TartImage) || hasDiff
-	hasDiff = printScalarDiff(out, "Isolation", parent.Isolation, merged.Isolation) || hasDiff
-
-	if printed := printMapDiff(out, "Env", parent.Env, merged.Env); printed {
-		hasDiff = true
-	}
-
-	if printed := printMapDiff(out, "Agent args", parent.AgentArgs, merged.AgentArgs); printed {
-		hasDiff = true
-	}
-
-	if printed := printListAdditions(out, "Ports", parent.Ports, merged.Ports); printed {
-		hasDiff = true
-	}
-
-	if printed := printListAdditions(out, "Mounts", parent.Mounts, merged.Mounts); printed {
-		hasDiff = true
-	}
-
-	if printed := printWorkdirDiff(out, parent.Workdir, merged.Workdir); printed {
-		hasDiff = true
-	}
-
-	if printed := printDirAdditions(out, parent.Directories, merged.Directories); printed {
-		hasDiff = true
-	}
-
-	if printed := printResourcesDiff(out, parent.Resources, merged.Resources); printed {
-		hasDiff = true
-	}
-
-	if printed := printNetworkDiff(out, parent.Network, merged.Network); printed {
-		hasDiff = true
-	}
+	hasDiff := anyDiff(
+		printScalarDiff(out, "Agent", parent.Agent, merged.Agent),
+		printScalarDiff(out, "Model", parent.Model, merged.Model),
+		printScalarDiff(out, "Backend", parent.Backend, merged.Backend),
+		printScalarDiff(out, "Tart image", parent.TartImage, merged.TartImage),
+		printScalarDiff(out, "Isolation", parent.Isolation, merged.Isolation),
+		printMapDiff(out, "Env", parent.Env, merged.Env),
+		printMapDiff(out, "Agent args", parent.AgentArgs, merged.AgentArgs),
+		printListAdditions(out, "Ports", parent.Ports, merged.Ports),
+		printListAdditions(out, "Mounts", parent.Mounts, merged.Mounts),
+		printWorkdirDiff(out, parent.Workdir, merged.Workdir),
+		printDirAdditions(out, parent.Directories, merged.Directories),
+		printResourcesDiff(out, parent.Resources, merged.Resources),
+		printNetworkDiff(out, parent.Network, merged.Network),
+	)
 
 	if !hasDiff {
 		parentName := "base"
@@ -452,6 +443,16 @@ func printProfileDiff(cmd *cobra.Command, name, extends string, chain []string, 
 	}
 
 	return nil
+}
+
+// anyDiff returns true if any of the provided values is true.
+func anyDiff(vals ...bool) bool {
+	for _, v := range vals {
+		if v {
+			return true
+		}
+	}
+	return false
 }
 
 // printScalarDiff prints a scalar field diff. Returns true if printed.

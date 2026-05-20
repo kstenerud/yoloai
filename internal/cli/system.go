@@ -72,65 +72,76 @@ func runSystemBuild(cmd *cobra.Command, args []string, backend string) error {
 	force, _ := cmd.Flags().GetBool("force")
 
 	if len(args) > 0 {
-		// Build a specific profile's image chain
-		profileName := args[0]
-		if err := config.ValidateProfileName(profileName); err != nil {
-			return err
-		}
-		if !config.ProfileExists(profileName) {
-			return sandbox.NewUsageError("profile %q does not exist", profileName)
-		}
-		if !config.ProfileHasDockerfile(profileName) {
-			// Check if any ancestor has a Dockerfile
-			chain, chainErr := config.ResolveProfileChain(profileName)
-			if chainErr != nil {
-				return chainErr
-			}
-			hasAny := false
-			for _, name := range chain {
-				if name != "base" && config.ProfileHasDockerfile(name) {
-					hasAny = true
-					break
-				}
-			}
-			if !hasAny {
-				return sandbox.NewUsageError("profile %q has no Dockerfile (and no ancestor does either)", profileName)
-			}
-		}
-
-		// Validate user-provided secrets and expand tildes
-		var secrets []string
-		for _, s := range secretFlags {
-			expanded, secretErr := sandbox.ValidateBuildSecret(s)
-			if secretErr != nil {
-				return secretErr
-			}
-			secrets = append(secrets, expanded)
-		}
-
-		// Prepend auto-detected secrets
-		secrets = append(sandbox.AutoBuildSecrets(), secrets...)
-
-		return withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
-			buildOut := os.Stderr
-			if jsonEnabled(cmd) {
-				buildOut, _ = os.Open(os.DevNull)
-			}
-			if err := sandbox.EnsureProfileImage(ctx, rt, profileName, secrets, buildOut, slog.Default(), force); err != nil {
-				return err
-			}
-			if jsonEnabled(cmd) {
-				return writeJSON(cmd.OutOrStdout(), map[string]string{"action": "built", "profile": profileName})
-			}
-			_, err := fmt.Fprintf(cmd.OutOrStdout(), "Profile image built successfully\n")
-			return err
-		})
+		return runSystemBuildProfile(cmd, args[0], secretFlags, backend, force)
 	}
 
 	// Build base image only
 	if len(secretFlags) > 0 {
 		return sandbox.NewUsageError("--secret is only supported with profile builds")
 	}
+	return runSystemBuildBase(cmd, backend, force)
+}
+
+// runSystemBuildProfile validates and builds a profile image chain.
+func runSystemBuildProfile(cmd *cobra.Command, profileName string, secretFlags []string, backend string, force bool) error {
+	if err := config.ValidateProfileName(profileName); err != nil {
+		return err
+	}
+	if !config.ProfileExists(profileName) {
+		return sandbox.NewUsageError("profile %q does not exist", profileName)
+	}
+	if err := checkProfileHasDockerfile(profileName); err != nil {
+		return err
+	}
+
+	// Validate user-provided secrets and expand tildes
+	var secrets []string
+	for _, s := range secretFlags {
+		expanded, secretErr := sandbox.ValidateBuildSecret(s)
+		if secretErr != nil {
+			return secretErr
+		}
+		secrets = append(secrets, expanded)
+	}
+
+	// Prepend auto-detected secrets
+	secrets = append(sandbox.AutoBuildSecrets(), secrets...)
+
+	return withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
+		buildOut := os.Stderr
+		if jsonEnabled(cmd) {
+			buildOut, _ = os.Open(os.DevNull)
+		}
+		if err := sandbox.EnsureProfileImage(ctx, rt, profileName, secrets, buildOut, slog.Default(), force); err != nil {
+			return err
+		}
+		if jsonEnabled(cmd) {
+			return writeJSON(cmd.OutOrStdout(), map[string]string{"action": "built", "profile": profileName})
+		}
+		_, err := fmt.Fprintf(cmd.OutOrStdout(), "Profile image built successfully\n")
+		return err
+	})
+}
+
+// checkProfileHasDockerfile returns an error if the profile and all its ancestors lack a Dockerfile.
+func checkProfileHasDockerfile(profileName string) error {
+	if config.ProfileHasDockerfile(profileName) {
+		return nil
+	}
+	chain, chainErr := config.ResolveProfileChain(profileName)
+	if chainErr != nil {
+		return chainErr
+	}
+	for _, name := range chain {
+		if name != "base" && config.ProfileHasDockerfile(name) {
+			return nil
+		}
+	}
+	return sandbox.NewUsageError("profile %q has no Dockerfile (and no ancestor does either)", profileName)
+}
+
+// runSystemBuildBase builds the base image.
+func runSystemBuildBase(cmd *cobra.Command, backend string, force bool) error {
 	baseProfileDir := config.ProfileDirPath("base")
 	return withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
 		buildOut := os.Stderr
@@ -140,7 +151,6 @@ func runSystemBuild(cmd *cobra.Command, args []string, backend string) error {
 		if err := rt.Setup(ctx, baseProfileDir, buildOut, slog.Default(), force); err != nil {
 			return err
 		}
-
 		if jsonEnabled(cmd) {
 			return writeJSON(cmd.OutOrStdout(), map[string]string{"action": "built"})
 		}

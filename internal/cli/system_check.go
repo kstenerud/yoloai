@@ -59,99 +59,36 @@ func runSystemCheck(cmd *cobra.Command, backend, agentName, isolation string) er
 	allOK := true
 
 	// 1. Backend connectivity.
-	{
-		available, note := checkBackend(ctx, backend)
-		msg := ""
-		if !available {
-			msg = note
-			allOK = false
-		}
-		results = append(results, checkResult{
-			Name:    "backend",
-			OK:      available,
-			Message: msg,
-		})
+	r1, ok1 := checkBackendResult(ctx, backend)
+	results = append(results, r1)
+	if !ok1 {
+		allOK = false
 	}
 
 	// 2. Base image exists (only meaningful if backend is reachable).
-	{
-		r := checkResult{Name: "image"}
-		err := withRuntime(ctx, backend, func(ctx context.Context, rt runtime.Runtime) error {
-			exists, err := rt.IsReady(ctx)
-			if err != nil {
-				return err
-			}
-			if !exists {
-				return fmt.Errorf("yoloai-base image not found — run 'yoloai system build --backend %s'", backend)
-			}
-			return nil
-		})
-		if err != nil {
-			r.OK = false
-			r.Message = err.Error()
-			allOK = false
-		} else {
-			r.OK = true
-		}
-		results = append(results, r)
+	r2, ok2 := checkImageResult(ctx, backend)
+	results = append(results, r2)
+	if !ok2 {
+		allOK = false
 	}
 
 	// 3. Agent credentials.
-	{
-		r := checkResult{Name: "agent"}
-		if agentName == "" {
-			agentName = resolveAgent(cmd)
-		}
-		def := agent.GetAgent(agentName)
-		switch {
-		case def == nil:
-			r.OK = false
-			r.Message = fmt.Sprintf("unknown agent %q", agentName)
-			allOK = false
-		case len(def.APIKeyEnvVars) == 0:
-			// Agent needs no credentials (e.g. shell, test).
-			r.OK = true
-			r.Message = fmt.Sprintf("agent %q requires no credentials", agentName)
-		default:
-			var found []string
-			for _, key := range def.APIKeyEnvVars {
-				if os.Getenv(key) != "" {
-					found = append(found, key)
-				}
-			}
-			if len(found) == 0 {
-				r.OK = false
-				r.Message = fmt.Sprintf("no credentials set for agent %q (need one of: %s)",
-					agentName, strings.Join(def.APIKeyEnvVars, ", "))
-				allOK = false
-			} else {
-				r.OK = true
-				r.Message = fmt.Sprintf("found: %s", strings.Join(found, ", "))
-			}
-		}
-		results = append(results, r)
+	if agentName == "" {
+		agentName = resolveAgent(cmd)
+	}
+	r3, ok3 := checkAgentResult(agentName)
+	results = append(results, r3)
+	if !ok3 {
+		allOK = false
 	}
 
 	// 4. Isolation prerequisites (only when --isolation is specified).
 	if isolation != "" {
-		r := checkResult{Name: "isolation"}
-		err := withRuntime(ctx, backend, func(ctx context.Context, rt runtime.Runtime) error {
-			capList := rt.RequiredCapabilities(isolation)
-			if len(capList) == 0 {
-				return nil // backend has no requirements for this mode
-			}
-			env := caps.DetectEnvironment()
-			results := caps.RunChecks(ctx, capList, env)
-			return caps.FormatError(results)
-		})
-		if err != nil {
-			r.OK = false
-			r.Message = err.Error()
+		r4, ok4 := checkIsolationResult(ctx, backend, isolation)
+		results = append(results, r4)
+		if !ok4 {
 			allOK = false
-		} else {
-			r.OK = true
 		}
-		results = append(results, r)
 	}
 
 	if isJSON {
@@ -178,4 +115,89 @@ func runSystemCheck(cmd *cobra.Command, backend, agentName, isolation string) er
 		return fmt.Errorf("one or more checks failed")
 	}
 	return nil
+}
+
+// checkBackendResult checks backend connectivity and returns the result.
+func checkBackendResult(ctx context.Context, backend string) (checkResult, bool) {
+	available, note := checkBackend(ctx, backend)
+	msg := ""
+	if !available {
+		msg = note
+	}
+	return checkResult{Name: "backend", OK: available, Message: msg}, available
+}
+
+// checkImageResult checks whether the base image exists and returns the result.
+func checkImageResult(ctx context.Context, backend string) (checkResult, bool) {
+	r := checkResult{Name: "image"}
+	err := withRuntime(ctx, backend, func(ctx context.Context, rt runtime.Runtime) error {
+		exists, err := rt.IsReady(ctx)
+		if err != nil {
+			return err
+		}
+		if !exists {
+			return fmt.Errorf("yoloai-base image not found — run 'yoloai system build --backend %s'", backend)
+		}
+		return nil
+	})
+	if err != nil {
+		r.OK = false
+		r.Message = err.Error()
+		return r, false
+	}
+	r.OK = true
+	return r, true
+}
+
+// checkAgentResult checks agent credentials and returns the result.
+func checkAgentResult(agentName string) (checkResult, bool) {
+	r := checkResult{Name: "agent"}
+	def := agent.GetAgent(agentName)
+	switch {
+	case def == nil:
+		r.OK = false
+		r.Message = fmt.Sprintf("unknown agent %q", agentName)
+		return r, false
+	case len(def.APIKeyEnvVars) == 0:
+		r.OK = true
+		r.Message = fmt.Sprintf("agent %q requires no credentials", agentName)
+		return r, true
+	default:
+		var found []string
+		for _, key := range def.APIKeyEnvVars {
+			if os.Getenv(key) != "" {
+				found = append(found, key)
+			}
+		}
+		if len(found) == 0 {
+			r.OK = false
+			r.Message = fmt.Sprintf("no credentials set for agent %q (need one of: %s)",
+				agentName, strings.Join(def.APIKeyEnvVars, ", "))
+			return r, false
+		}
+		r.OK = true
+		r.Message = fmt.Sprintf("found: %s", strings.Join(found, ", "))
+		return r, true
+	}
+}
+
+// checkIsolationResult checks isolation prerequisites and returns the result.
+func checkIsolationResult(ctx context.Context, backend, isolation string) (checkResult, bool) {
+	r := checkResult{Name: "isolation"}
+	err := withRuntime(ctx, backend, func(ctx context.Context, rt runtime.Runtime) error {
+		capList := rt.RequiredCapabilities(isolation)
+		if len(capList) == 0 {
+			return nil // backend has no requirements for this mode
+		}
+		env := caps.DetectEnvironment()
+		checkResults := caps.RunChecks(ctx, capList, env)
+		return caps.FormatError(checkResults)
+	})
+	if err != nil {
+		r.OK = false
+		r.Message = err.Error()
+		return r, false
+	}
+	r.OK = true
+	return r, true
 }

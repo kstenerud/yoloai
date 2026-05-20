@@ -143,100 +143,99 @@ Examples:
   yoloai system runtime list ios
   yoloai system runtime list ios tvos`,
 		Args: cobra.ArbitraryArgs,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			// Check macOS
-			if runtime.GOOS != "darwin" {
-				return sandbox.NewUsageError("yoloai system runtime commands are only available on macOS")
-			}
-
-			// Check Tart backend
-			ctx := cmd.Context()
-			available, note := checkBackend(ctx, "tart")
-			if !available {
-				return sandbox.NewUsageError("Tart backend not available: %s\n\nInstall Tart: brew install cirruslabs/cli/tart", note)
-			}
-
-			// Get Tart runtime
-			rt, err := newRuntime(ctx, "tart")
-			if err != nil {
-				return fmt.Errorf("create tart runtime: %w", err)
-			}
-			defer rt.Close() //nolint:errcheck
-
-			tartRuntime, ok := rt.(*tart.Runtime)
-			if !ok {
-				return fmt.Errorf("internal error: tart backend type mismatch")
-			}
-
-			// List all bases (call tart list and filter for yoloai-base-*)
-			bases, err := listRuntimeBases(ctx, tartRuntime)
-			if err != nil {
-				return fmt.Errorf("list bases: %w", err)
-			}
-
-			// Apply filters if provided
-			if len(args) > 0 {
-				filtered := []runtimeBase{}
-				for _, base := range bases {
-					// Check if any filter matches
-					match := false
-					for _, filter := range args {
-						if strings.Contains(base.CacheKey, strings.ToLower(filter)) {
-							match = true
-							break
-						}
-					}
-					if match {
-						filtered = append(filtered, base)
-					}
-				}
-				bases = filtered
-			}
-
-			// Query latest available versions on host
-			availableRuntimes, err := tart.QueryAvailableRuntimes()
-			if err != nil {
-				// Non-fatal: just skip showing latest
-				availableRuntimes = nil
-			}
-
-			// Display results
-			out := cmd.OutOrStdout()
-			fmt.Fprintln(out) //nolint:errcheck
-			if len(bases) == 0 {
-				fmt.Fprintln(out, "No runtime base images found.")                  //nolint:errcheck
-				fmt.Fprintln(out)                                                   //nolint:errcheck
-				fmt.Fprintln(out, "Create one with: yoloai system runtime add ios") //nolint:errcheck
-				return nil
-			}
-
-			fmt.Fprintln(out, "Runtime Base Images:") //nolint:errcheck
-			totalSize := int64(0)
-			for _, base := range bases {
-				if base.CacheKey == "" {
-					fmt.Fprintf(out, "  %-32s (no runtimes, %s)\n", base.Name, formatSize(base.Size)) //nolint:errcheck
-				} else {
-					runtimes := formatCacheKey(base.CacheKey)
-					fmt.Fprintf(out, "  %-32s (%s, %s)\n", base.Name, runtimes, formatSize(base.Size)) //nolint:errcheck
-				}
-				totalSize += base.Size
-			}
-
-			// Show latest available on host
-			if len(availableRuntimes) > 0 {
-				fmt.Fprintln(out) //nolint:errcheck
-				latest := formatAvailableRuntimes(availableRuntimes)
-				fmt.Fprintf(out, "Latest available on host: %s\n", latest) //nolint:errcheck
-			}
-
-			fmt.Fprintln(out)                                                                                        //nolint:errcheck
-			fmt.Fprintf(out, "Total: %d %s, %s\n", len(bases), pluralize("base", len(bases)), formatSize(totalSize)) //nolint:errcheck
-
-			return nil
-		},
+		RunE: runSystemRuntimeList,
 	}
 
 	return cmd
+}
+
+func runSystemRuntimeList(cmd *cobra.Command, args []string) error {
+	if runtime.GOOS != "darwin" {
+		return sandbox.NewUsageError("yoloai system runtime commands are only available on macOS")
+	}
+
+	ctx := cmd.Context()
+	available, note := checkBackend(ctx, "tart")
+	if !available {
+		return sandbox.NewUsageError("Tart backend not available: %s\n\nInstall Tart: brew install cirruslabs/cli/tart", note)
+	}
+
+	rt, err := newRuntime(ctx, "tart")
+	if err != nil {
+		return fmt.Errorf("create tart runtime: %w", err)
+	}
+	defer rt.Close() //nolint:errcheck
+
+	tartRuntime, ok := rt.(*tart.Runtime)
+	if !ok {
+		return fmt.Errorf("internal error: tart backend type mismatch")
+	}
+
+	bases, err := listRuntimeBases(ctx, tartRuntime)
+	if err != nil {
+		return fmt.Errorf("list bases: %w", err)
+	}
+
+	bases = filterRuntimeBases(bases, args)
+
+	availableRuntimes, err := tart.QueryAvailableRuntimes()
+	if err != nil {
+		availableRuntimes = nil
+	}
+
+	return printRuntimeBaseList(cmd, bases, availableRuntimes)
+}
+
+// filterRuntimeBases filters bases by platform name filters (case-insensitive substring match).
+func filterRuntimeBases(bases []runtimeBase, filters []string) []runtimeBase {
+	if len(filters) == 0 {
+		return bases
+	}
+	filtered := []runtimeBase{}
+	for _, base := range bases {
+		for _, filter := range filters {
+			if strings.Contains(base.CacheKey, strings.ToLower(filter)) {
+				filtered = append(filtered, base)
+				break
+			}
+		}
+	}
+	return filtered
+}
+
+// printRuntimeBaseList displays runtime base images to stdout.
+func printRuntimeBaseList(cmd *cobra.Command, bases []runtimeBase, availableRuntimes []tart.RuntimeVersion) error {
+	out := cmd.OutOrStdout()
+	fmt.Fprintln(out) //nolint:errcheck
+	if len(bases) == 0 {
+		fmt.Fprintln(out, "No runtime base images found.")                  //nolint:errcheck
+		fmt.Fprintln(out)                                                   //nolint:errcheck
+		fmt.Fprintln(out, "Create one with: yoloai system runtime add ios") //nolint:errcheck
+		return nil
+	}
+
+	fmt.Fprintln(out, "Runtime Base Images:") //nolint:errcheck
+	totalSize := int64(0)
+	for _, base := range bases {
+		if base.CacheKey == "" {
+			fmt.Fprintf(out, "  %-32s (no runtimes, %s)\n", base.Name, formatSize(base.Size)) //nolint:errcheck
+		} else {
+			runtimes := formatCacheKey(base.CacheKey)
+			fmt.Fprintf(out, "  %-32s (%s, %s)\n", base.Name, runtimes, formatSize(base.Size)) //nolint:errcheck
+		}
+		totalSize += base.Size
+	}
+
+	if len(availableRuntimes) > 0 {
+		fmt.Fprintln(out) //nolint:errcheck
+		latest := formatAvailableRuntimes(availableRuntimes)
+		fmt.Fprintf(out, "Latest available on host: %s\n", latest) //nolint:errcheck
+	}
+
+	fmt.Fprintln(out)                                                                                        //nolint:errcheck
+	fmt.Fprintf(out, "Total: %d %s, %s\n", len(bases), pluralize("base", len(bases)), formatSize(totalSize)) //nolint:errcheck
+
+	return nil
 }
 
 func newSystemRuntimeRemoveCmd() *cobra.Command {

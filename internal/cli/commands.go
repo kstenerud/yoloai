@@ -142,238 +142,7 @@ func newNewCmd(version string) *cobra.Command {
 		GroupID: groupLifecycle,
 		Args:    cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// Parse positional args considering --
-			dashIdx := cmd.ArgsLenAtDash()
-			var positional, passthrough []string
-			if dashIdx < 0 {
-				positional = args
-			} else {
-				positional = args[:dashIdx]
-				passthrough = args[dashIdx:]
-			}
-
-			profileFlag := resolveProfile(cmd)
-
-			if len(positional) < 1 {
-				return sandbox.NewUsageError("sandbox name is required")
-			}
-			if len(positional) < 2 && profileFlag == "" {
-				return sandbox.NewUsageError("workdir is required (or use --profile)\n\nUsage: yoloai new [flags] <name> <workdir> [-- <agent-args>...]\n\nExample: yoloai new %s .", positional[0])
-			}
-			if len(positional) > 2 {
-				return sandbox.NewUsageError("too many positional arguments (expected <name> [workdir])")
-			}
-
-			name := positional[0]
-			var rawWorkdirArg string
-			if len(positional) >= 2 {
-				rawWorkdirArg = positional[1]
-			}
-
-			prompt, _ := cmd.Flags().GetString("prompt")
-			promptFile, _ := cmd.Flags().GetString("prompt-file")
-			model := resolveModel(cmd)
-			agentName := resolveAgent(cmd)
-			networkNone, _ := cmd.Flags().GetBool("network-none")
-			networkIsolated, _ := cmd.Flags().GetBool("network-isolated")
-			networkAllow, _ := cmd.Flags().GetStringSlice("network-allow")
-			ports, _ := cmd.Flags().GetStringSlice("port")
-			rawDirs, _ := cmd.Flags().GetStringSlice("dir")
-
-			// --network-allow implies --network-isolated
-			if len(networkAllow) > 0 {
-				networkIsolated = true
-			}
-
-			replace, _ := cmd.Flags().GetBool("replace")
-			force, _ := cmd.Flags().GetBool("force")
-			if force {
-				replace = true
-			}
-			noStart, _ := cmd.Flags().GetBool("no-start")
-			attach, _ := cmd.Flags().GetBool("attach")
-
-			if jsonEnabled(cmd) && attach {
-				return sandbox.NewUsageError("--json and --attach are incompatible")
-			}
-			if networkNone && len(ports) > 0 {
-				return sandbox.NewUsageError("--port is incompatible with --network-none")
-			}
-			yes := effectiveYes(cmd)
-
-			cpus, _ := cmd.Flags().GetString("cpus")
-			memory, _ := cmd.Flags().GetString("memory")
-			debug, _ := cmd.Flags().GetBool("debug")
-			envSlice, _ := cmd.Flags().GetStringSlice("env")
-			runtimes, _ := cmd.Flags().GetStringArray("runtime")
-			vscodeTunnel, _ := cmd.Flags().GetBool("vscode-tunnel")
-
-			// Resolve isolation and os with config fallback (same priority as resolveBackend).
-			cfg, _ := config.LoadDefaultsConfig()
-			var cfgIsolation, cfgOS string
-			if cfg != nil {
-				cfgIsolation = cfg.Isolation
-				cfgOS = cfg.OS
-			}
-			isolation := coalesce(flagStr(cmd, "isolation"), cfgIsolation)
-			targetOS := coalesce(flagStr(cmd, "os"), cfgOS)
-
-			// Block unsupported isolation+os combinations early.
-			if goruntime.GOOS == "darwin" && targetOS != "mac" && (isolation == "vm" || isolation == "vm-enhanced") {
-				return sandbox.NewUsageError(
-					"--isolation %s requires containerd, which is not available on macOS.\n"+
-						"Use a Linux host for VM isolation, or use --os mac for macOS-native sandboxing:\n"+
-						"  container   macOS sandbox-exec (seatbelt)\n"+
-						"  vm          Full macOS VM (Tart)", isolation)
-			}
-			if targetOS == "mac" && (isolation == "container-enhanced" || isolation == "vm-enhanced") {
-				return sandbox.NewUsageError(
-					"--isolation %s is not available with --os mac.\n"+
-						"Available isolation modes with --os mac:\n"+
-						"  container   macOS sandbox-exec (seatbelt)\n"+
-						"  vm          Full macOS VM (Tart)", isolation)
-			}
-			// Block container-enhanced (gVisor) on macOS due to known bug.
-			if isolation == "container-enhanced" && targetOS != "mac" && goruntime.GOOS == "darwin" {
-				return sandbox.NewUsageError(
-					"--isolation container-enhanced (gVisor) is not supported on macOS due to a bug\n" +
-						"that causes Claude Code to hang indefinitely during initialization.\n\n" +
-						"Workaround: Omit --isolation (use default container isolation) or use\n" +
-						"--os mac for lightweight macOS sandboxing.\n\n" +
-						"For details, see: https://github.com/anthropics/claude-code/issues/35454")
-			}
-			// Block container-privileged on macOS (Seatbelt/Tart only).
-			if isolation == "container-privileged" && goruntime.GOOS == "darwin" {
-				return sandbox.NewUsageError(
-					"--isolation %s is Linux-only (Docker or Podman required).\n"+
-						"macOS backends (Seatbelt, Tart) do not support this mode.\n"+
-						"Use a Linux host or omit --isolation for the default mode.", isolation)
-			}
-			if isolation == "container-privileged" && targetOS == "mac" {
-				return sandbox.NewUsageError(
-					"--isolation %s is not available with --os mac.\n"+
-						"Available isolation modes with --os mac:\n"+
-						"  container   macOS sandbox-exec (seatbelt)\n"+
-						"  vm          Full macOS VM (Tart)", isolation)
-			}
-
-			envMap := make(map[string]string, len(envSlice))
-			for _, e := range envSlice {
-				k, v, ok := strings.Cut(e, "=")
-				if !ok {
-					return sandbox.NewUsageError("invalid --env value %q: must be KEY=VAL", e)
-				}
-				envMap[k] = v
-			}
-
-			// Parse raw CLI dir args into DirSpec values
-			var workdirSpec sandbox.DirSpec
-			if rawWorkdirArg != "" {
-				parsed, parseErr := sandbox.ParseDirArg(rawWorkdirArg)
-				if parseErr != nil {
-					return sandbox.NewUsageError("invalid workdir: %s", parseErr)
-				}
-				workdirSpec = sandbox.DirArgToSpec(parsed)
-			}
-			var auxDirSpecs []sandbox.DirSpec
-			for _, rawDir := range rawDirs {
-				parsed, parseErr := sandbox.ParseDirArg(rawDir)
-				if parseErr != nil {
-					return sandbox.NewUsageError("invalid directory %q: %s", rawDir, parseErr)
-				}
-				auxDirSpecs = append(auxDirSpecs, sandbox.DirArgToSpec(parsed))
-			}
-
-			// Resolve network mode
-			networkMode := sandbox.NetworkModeDefault
-			if networkNone {
-				networkMode = sandbox.NetworkModeNone
-			} else if networkIsolated {
-				networkMode = sandbox.NetworkModeIsolated
-			}
-
-			// Set terminal title early so it shows the sandbox name during create
-			if attach && !noStart {
-				setTerminalTitle(name)
-				defer setTerminalTitle("")
-			}
-
-			backend := resolveBackend(cmd)
-			return withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
-				mgrOutput := cmd.ErrOrStderr()
-				if jsonEnabled(cmd) {
-					mgrOutput = io.Discard
-				}
-				archetypeFlag, _ := cmd.Flags().GetString("archetype")
-				mgr := sandbox.NewManager(rt, slog.Default(), cmd.InOrStdin(), mgrOutput)
-				sandboxName, err := mgr.Create(ctx, sandbox.CreateOptions{
-					Name:         name,
-					Workdir:      workdirSpec,
-					AuxDirs:      auxDirSpecs,
-					Agent:        agentName,
-					Model:        model,
-					Profile:      profileFlag,
-					Prompt:       prompt,
-					PromptFile:   promptFile,
-					Network:      networkMode,
-					NetworkAllow: networkAllow,
-					Ports:        ports,
-					Replace:      replace,
-					Force:        force,
-					NoStart:      noStart,
-					Attach:       attach,
-					Yes:          yes,
-					Passthrough:  passthrough,
-					Version:      version,
-					Debug:        debug,
-					CPUs:         cpus,
-					Memory:       memory,
-					Isolation:    isolation,
-					Env:          envMap,
-					Runtimes:     runtimes,
-					VscodeTunnel: vscodeTunnel,
-					Archetype:    archetypeFlag,
-				})
-				if err != nil {
-					return err
-				}
-
-				// Register sandbox name so --bugreport can include sandbox sections
-				// if a subsequent step (e.g. waitForTmux) fails.
-				if sandboxName != "" && bugReportFile != nil {
-					bugReportSandboxName = sandboxName
-				}
-
-				if jsonEnabled(cmd) {
-					if sandboxName == "" {
-						return nil
-					}
-					meta, loadErr := sandbox.LoadMeta(sandbox.Dir(sandboxName))
-					if loadErr != nil {
-						return loadErr
-					}
-					return writeJSON(cmd.OutOrStdout(), meta)
-				}
-
-				if sandboxName == "" || !attach || noStart {
-					return nil
-				}
-
-				// Load meta to determine correct tmux exec user
-				meta, loadErr := sandbox.LoadMeta(sandbox.Dir(sandboxName))
-				if loadErr != nil {
-					return loadErr
-				}
-				user := tmuxExecUser(meta)
-
-				// Wait for tmux session to be ready before attaching
-				containerName := sandbox.InstanceName(sandboxName)
-				if err := waitForTmux(ctx, rt, containerName, sandboxName, 300*time.Second, user); err != nil {
-					return fmt.Errorf("waiting for tmux session: %w", err)
-				}
-
-				return attachToSandbox(ctx, rt, containerName, sandboxName, user)
-			})
+			return runNewCmd(cmd, args, version)
 		},
 	}
 
@@ -408,6 +177,282 @@ func newNewCmd(version string) *cobra.Command {
 	cmd.MarkFlagsMutuallyExclusive("no-start", "attach")
 
 	return cmd
+}
+
+func runNewCmd(cmd *cobra.Command, args []string, version string) error {
+	name, rawWorkdirArg, passthrough, profileFlag, err := parseNewCmdPositional(cmd, args)
+	if err != nil {
+		return err
+	}
+
+	opts, err := resolveNewCmdOptions(cmd, version, name, rawWorkdirArg, passthrough, profileFlag)
+	if err != nil {
+		return err
+	}
+
+	if opts.Attach && !opts.NoStart {
+		setTerminalTitle(name)
+		defer setTerminalTitle("")
+	}
+
+	backend := resolveBackend(cmd)
+	return withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
+		return executeNewCreate(cmd, ctx, rt, opts)
+	})
+}
+
+// parseNewCmdPositional validates and splits positional args for the new command.
+func parseNewCmdPositional(cmd *cobra.Command, args []string) (name, rawWorkdirArg string, passthrough []string, profileFlag string, err error) {
+	dashIdx := cmd.ArgsLenAtDash()
+	var positional []string
+	if dashIdx < 0 {
+		positional = args
+	} else {
+		positional = args[:dashIdx]
+		passthrough = args[dashIdx:]
+	}
+
+	profileFlag = resolveProfile(cmd)
+
+	if len(positional) < 1 {
+		return "", "", nil, "", sandbox.NewUsageError("sandbox name is required")
+	}
+	if len(positional) < 2 && profileFlag == "" {
+		return "", "", nil, "", sandbox.NewUsageError("workdir is required (or use --profile)\n\nUsage: yoloai new [flags] <name> <workdir> [-- <agent-args>...]\n\nExample: yoloai new %s .", positional[0])
+	}
+	if len(positional) > 2 {
+		return "", "", nil, "", sandbox.NewUsageError("too many positional arguments (expected <name> [workdir])")
+	}
+
+	name = positional[0]
+	if len(positional) >= 2 {
+		rawWorkdirArg = positional[1]
+	}
+	return name, rawWorkdirArg, passthrough, profileFlag, nil
+}
+
+// resolveNewCmdOptions reads all flags and builds the sandbox.CreateOptions.
+func resolveNewCmdOptions(cmd *cobra.Command, version, name, rawWorkdirArg string, passthrough []string, profileFlag string) (sandbox.CreateOptions, error) {
+	prompt, _ := cmd.Flags().GetString("prompt")
+	promptFile, _ := cmd.Flags().GetString("prompt-file")
+	model := resolveModel(cmd)
+	agentName := resolveAgent(cmd)
+	networkNone, _ := cmd.Flags().GetBool("network-none")
+	networkIsolated, _ := cmd.Flags().GetBool("network-isolated")
+	networkAllow, _ := cmd.Flags().GetStringSlice("network-allow")
+	ports, _ := cmd.Flags().GetStringSlice("port")
+	rawDirs, _ := cmd.Flags().GetStringSlice("dir")
+
+	if len(networkAllow) > 0 {
+		networkIsolated = true
+	}
+
+	replace, _ := cmd.Flags().GetBool("replace")
+	force, _ := cmd.Flags().GetBool("force")
+	if force {
+		replace = true
+	}
+	noStart, _ := cmd.Flags().GetBool("no-start")
+	attach, _ := cmd.Flags().GetBool("attach")
+
+	if jsonEnabled(cmd) && attach {
+		return sandbox.CreateOptions{}, sandbox.NewUsageError("--json and --attach are incompatible")
+	}
+	if networkNone && len(ports) > 0 {
+		return sandbox.CreateOptions{}, sandbox.NewUsageError("--port is incompatible with --network-none")
+	}
+
+	cpus, _ := cmd.Flags().GetString("cpus")
+	memory, _ := cmd.Flags().GetString("memory")
+	debug, _ := cmd.Flags().GetBool("debug")
+	envSlice, _ := cmd.Flags().GetStringSlice("env")
+	runtimes, _ := cmd.Flags().GetStringArray("runtime")
+	vscodeTunnel, _ := cmd.Flags().GetBool("vscode-tunnel")
+	archetypeFlag, _ := cmd.Flags().GetString("archetype")
+
+	isolation, _, err := resolveNewIsolationOS(cmd)
+	if err != nil {
+		return sandbox.CreateOptions{}, err
+	}
+
+	envMap, err := parseEnvSlice(envSlice)
+	if err != nil {
+		return sandbox.CreateOptions{}, err
+	}
+
+	workdirSpec, auxDirSpecs, err := resolveNewDirSpecs(rawWorkdirArg, rawDirs)
+	if err != nil {
+		return sandbox.CreateOptions{}, err
+	}
+
+	networkMode := sandbox.NetworkModeDefault
+	if networkNone {
+		networkMode = sandbox.NetworkModeNone
+	} else if networkIsolated {
+		networkMode = sandbox.NetworkModeIsolated
+	}
+
+	return sandbox.CreateOptions{
+		Name:         name,
+		Workdir:      workdirSpec,
+		AuxDirs:      auxDirSpecs,
+		Agent:        agentName,
+		Model:        model,
+		Profile:      profileFlag,
+		Prompt:       prompt,
+		PromptFile:   promptFile,
+		Network:      networkMode,
+		NetworkAllow: networkAllow,
+		Ports:        ports,
+		Replace:      replace,
+		Force:        force,
+		NoStart:      noStart,
+		Attach:       attach,
+		Yes:          effectiveYes(cmd),
+		Passthrough:  passthrough,
+		Version:      version,
+		Debug:        debug,
+		CPUs:         cpus,
+		Memory:       memory,
+		Isolation:    isolation,
+		Env:          envMap,
+		Runtimes:     runtimes,
+		VscodeTunnel: vscodeTunnel,
+		Archetype:    archetypeFlag,
+	}, nil
+}
+
+// parseEnvSlice parses KEY=VAL env flag values into a map.
+func parseEnvSlice(envSlice []string) (map[string]string, error) {
+	envMap := make(map[string]string, len(envSlice))
+	for _, e := range envSlice {
+		k, v, ok := strings.Cut(e, "=")
+		if !ok {
+			return nil, sandbox.NewUsageError("invalid --env value %q: must be KEY=VAL", e)
+		}
+		envMap[k] = v
+	}
+	return envMap, nil
+}
+
+// resolveNewDirSpecs parses rawWorkdirArg and rawDirs into DirSpec values.
+func resolveNewDirSpecs(rawWorkdirArg string, rawDirs []string) (workdirSpec sandbox.DirSpec, auxDirSpecs []sandbox.DirSpec, err error) {
+	if rawWorkdirArg != "" {
+		parsed, parseErr := sandbox.ParseDirArg(rawWorkdirArg)
+		if parseErr != nil {
+			return sandbox.DirSpec{}, nil, sandbox.NewUsageError("invalid workdir: %s", parseErr)
+		}
+		workdirSpec = sandbox.DirArgToSpec(parsed)
+	}
+	for _, rawDir := range rawDirs {
+		parsed, parseErr := sandbox.ParseDirArg(rawDir)
+		if parseErr != nil {
+			return sandbox.DirSpec{}, nil, sandbox.NewUsageError("invalid directory %q: %s", rawDir, parseErr)
+		}
+		auxDirSpecs = append(auxDirSpecs, sandbox.DirArgToSpec(parsed))
+	}
+	return workdirSpec, auxDirSpecs, nil
+}
+
+// executeNewCreate performs the actual sandbox creation and optional attach inside withRuntime.
+func executeNewCreate(cmd *cobra.Command, ctx context.Context, rt runtime.Runtime, opts sandbox.CreateOptions) error {
+	mgrOutput := cmd.ErrOrStderr()
+	if jsonEnabled(cmd) {
+		mgrOutput = io.Discard
+	}
+	mgr := sandbox.NewManager(rt, slog.Default(), cmd.InOrStdin(), mgrOutput)
+	sandboxName, err := mgr.Create(ctx, opts)
+	if err != nil {
+		return err
+	}
+
+	if sandboxName != "" && bugReportFile != nil {
+		bugReportSandboxName = sandboxName
+	}
+
+	if jsonEnabled(cmd) {
+		if sandboxName == "" {
+			return nil
+		}
+		meta, loadErr := sandbox.LoadMeta(sandbox.Dir(sandboxName))
+		if loadErr != nil {
+			return loadErr
+		}
+		return writeJSON(cmd.OutOrStdout(), meta)
+	}
+
+	if sandboxName == "" || !opts.Attach || opts.NoStart {
+		return nil
+	}
+
+	meta, loadErr := sandbox.LoadMeta(sandbox.Dir(sandboxName))
+	if loadErr != nil {
+		return loadErr
+	}
+	user := tmuxExecUser(meta)
+	containerName := sandbox.InstanceName(sandboxName)
+	if err := waitForTmux(ctx, rt, containerName, sandboxName, 300*time.Second, user); err != nil {
+		return fmt.Errorf("waiting for tmux session: %w", err)
+	}
+	return attachToSandbox(ctx, rt, containerName, sandboxName, user)
+}
+
+// resolveNewIsolationOS resolves the --isolation and --os flags with config fallback
+// and validates their combinations, returning an error for unsupported combos.
+func resolveNewIsolationOS(cmd *cobra.Command) (isolation, targetOS string, err error) {
+	cfg, _ := config.LoadDefaultsConfig()
+	var cfgIsolation, cfgOS string
+	if cfg != nil {
+		cfgIsolation = cfg.Isolation
+		cfgOS = cfg.OS
+	}
+	isolation = coalesce(flagStr(cmd, "isolation"), cfgIsolation)
+	targetOS = coalesce(flagStr(cmd, "os"), cfgOS)
+
+	if err := validateIsolationOSCombo(isolation, targetOS); err != nil {
+		return "", "", err
+	}
+	return isolation, targetOS, nil
+}
+
+// validateIsolationOSCombo returns an error for unsupported isolation+OS combinations.
+func validateIsolationOSCombo(isolation, targetOS string) error {
+	if goruntime.GOOS == "darwin" && targetOS != "mac" && (isolation == "vm" || isolation == "vm-enhanced") {
+		return sandbox.NewUsageError(
+			"--isolation %s requires containerd, which is not available on macOS.\n"+
+				"Use a Linux host for VM isolation, or use --os mac for macOS-native sandboxing:\n"+
+				"  container   macOS sandbox-exec (seatbelt)\n"+
+				"  vm          Full macOS VM (Tart)", isolation)
+	}
+	if targetOS == "mac" && (isolation == "container-enhanced" || isolation == "vm-enhanced") {
+		return sandbox.NewUsageError(
+			"--isolation %s is not available with --os mac.\n"+
+				"Available isolation modes with --os mac:\n"+
+				"  container   macOS sandbox-exec (seatbelt)\n"+
+				"  vm          Full macOS VM (Tart)", isolation)
+	}
+	if isolation == "container-enhanced" && targetOS != "mac" && goruntime.GOOS == "darwin" {
+		return sandbox.NewUsageError(
+			"--isolation container-enhanced (gVisor) is not supported on macOS due to a bug\n" +
+				"that causes Claude Code to hang indefinitely during initialization.\n\n" +
+				"Workaround: Omit --isolation (use default container isolation) or use\n" +
+				"--os mac for lightweight macOS sandboxing.\n\n" +
+				"For details, see: https://github.com/anthropics/claude-code/issues/35454")
+	}
+	if isolation == "container-privileged" && goruntime.GOOS == "darwin" {
+		return sandbox.NewUsageError(
+			"--isolation %s is Linux-only (Docker or Podman required).\n"+
+				"macOS backends (Seatbelt, Tart) do not support this mode.\n"+
+				"Use a Linux host or omit --isolation for the default mode.", isolation)
+	}
+	if isolation == "container-privileged" && targetOS == "mac" {
+		return sandbox.NewUsageError(
+			"--isolation %s is not available with --os mac.\n"+
+				"Available isolation modes with --os mac:\n"+
+				"  container   macOS sandbox-exec (seatbelt)\n"+
+				"  vm          Full macOS VM (Tart)", isolation)
+	}
+	return nil
 }
 
 func newCompletionCmd() *cobra.Command {

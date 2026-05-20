@@ -37,119 +37,7 @@ Examples:
   yoloai diff mybox -- src/          # full diff filtered to path`,
 		GroupID: groupWorkflow,
 		Args:    cobra.ArbitraryArgs,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			name, rest, err := resolveName(cmd, args)
-			if err != nil {
-				return err
-			}
-			defer openCLIJSONLSink(name, cmd)()
-
-			stat, _ := cmd.Flags().GetBool("stat")
-			nameOnly, _ := cmd.Flags().GetBool("name-only")
-			logFlag, _ := cmd.Flags().GetBool("log")
-
-			// Load meta early to detect overlay dirs
-			meta, metaErr := sandbox.LoadMeta(sandbox.Dir(name))
-			if metaErr != nil {
-				return sandboxErrorHint(name, metaErr)
-			}
-			overlay := hasOverlayDirs(meta)
-			slog.Debug("generating diff", "event", "sandbox.diff", "sandbox", name, "workdir_mode", meta.Workdir.Mode) //nolint:gosec // G706: name is validated by ValidateName
-
-			// Skip agent warning in JSON mode
-			if !jsonEnabled(cmd) {
-				agentRunningWarning(cmd, name)
-			}
-
-			// --log: list commits
-			if logFlag {
-				if overlay {
-					return diffLogOverlay(cmd, name, stat)
-				}
-				if jsonEnabled(cmd) {
-					return diffLogJSON(cmd, name, stat)
-				}
-				return diffLog(cmd, name, stat)
-			}
-
-			// Parse ref vs paths: split on "--" if present, otherwise
-			// try to detect ref from the first positional arg.
-			ref, paths := parseDiffArgs(rest, cmd)
-
-			// Ref-based diff not supported for overlay
-			if ref != "" && overlay {
-				return sandbox.NewPlatformError("ref-based diff is not supported for :overlay sandboxes (commits are not individually addressable from the host)")
-			}
-
-			// If ref is set, show that specific commit/range
-			if ref != "" {
-				return diffRef(cmd, name, ref, stat)
-			}
-
-			// Default: monolithic diff
-			if overlay {
-				return diffOverlay(cmd, name, stat, nameOnly)
-			}
-
-			if len(meta.Directories) > 0 && len(paths) == 0 {
-				if jsonEnabled(cmd) {
-					return diffMultiDirJSON(cmd, name, stat)
-				}
-				return diffMultiDir(cmd, name, stat)
-			}
-
-			backend := resolveBackendForSandbox(name)
-			var finalErr error
-			_ = withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error { //nolint:errcheck // error handled via finalErr
-				opts := sandbox.DiffOptions{
-					Name:     name,
-					Paths:    paths,
-					NameOnly: nameOnly,
-					Runtime:  rt,
-				}
-
-				if nameOnly {
-					result, err := sandbox.GenerateDiff(ctx, opts)
-					if err != nil {
-						finalErr = err
-						return err
-					}
-					if jsonEnabled(cmd) {
-						finalErr = writeJSON(cmd.OutOrStdout(), result)
-						return finalErr
-					}
-					if result.Empty {
-						_, err = fmt.Fprintln(cmd.OutOrStdout(), "No changes")
-						finalErr = err
-						return err
-					}
-					_, err = fmt.Fprintln(cmd.OutOrStdout(), result.Output)
-					finalErr = err
-					return err
-				}
-
-				opts.Stat = stat
-				result, err := sandbox.GenerateDiff(ctx, opts)
-				if err != nil {
-					finalErr = err
-					return err
-				}
-				if jsonEnabled(cmd) {
-					finalErr = writeJSON(cmd.OutOrStdout(), result)
-					return finalErr
-				}
-				if result.Empty {
-					_, err = fmt.Fprintln(cmd.OutOrStdout(), "No changes")
-					finalErr = err
-					return err
-				}
-
-				_, err = fmt.Fprintln(cmd.OutOrStdout(), result.Output)
-				finalErr = err
-				return err
-			})
-			return finalErr
-		},
+		RunE:    runDiffCmd,
 	}
 
 	cmd.Flags().Bool("stat", false, "Show summary (files changed, insertions, deletions)")
@@ -159,6 +47,104 @@ Examples:
 	cmd.MarkFlagsMutuallyExclusive("stat", "name-only")
 
 	return cmd
+}
+
+func runDiffCmd(cmd *cobra.Command, args []string) error {
+	name, rest, err := resolveName(cmd, args)
+	if err != nil {
+		return err
+	}
+	defer openCLIJSONLSink(name, cmd)()
+
+	stat, _ := cmd.Flags().GetBool("stat")
+	nameOnly, _ := cmd.Flags().GetBool("name-only")
+	logFlag, _ := cmd.Flags().GetBool("log")
+
+	// Load meta early to detect overlay dirs
+	meta, metaErr := sandbox.LoadMeta(sandbox.Dir(name))
+	if metaErr != nil {
+		return sandboxErrorHint(name, metaErr)
+	}
+	overlay := hasOverlayDirs(meta)
+	slog.Debug("generating diff", "event", "sandbox.diff", "sandbox", name, "workdir_mode", meta.Workdir.Mode) //nolint:gosec // G706: name is validated by ValidateName
+
+	// Skip agent warning in JSON mode
+	if !jsonEnabled(cmd) {
+		agentRunningWarning(cmd, name)
+	}
+
+	// --log: list commits
+	if logFlag {
+		if overlay {
+			return diffLogOverlay(cmd, name, stat)
+		}
+		if jsonEnabled(cmd) {
+			return diffLogJSON(cmd, name, stat)
+		}
+		return diffLog(cmd, name, stat)
+	}
+
+	// Parse ref vs paths: split on "--" if present, otherwise
+	// try to detect ref from the first positional arg.
+	ref, paths := parseDiffArgs(rest, cmd)
+
+	// Ref-based diff not supported for overlay
+	if ref != "" && overlay {
+		return sandbox.NewPlatformError("ref-based diff is not supported for :overlay sandboxes (commits are not individually addressable from the host)")
+	}
+
+	// If ref is set, show that specific commit/range
+	if ref != "" {
+		return diffRef(cmd, name, ref, stat)
+	}
+
+	// Default: monolithic diff
+	if overlay {
+		return diffOverlay(cmd, name, stat, nameOnly)
+	}
+
+	if len(meta.Directories) > 0 && len(paths) == 0 {
+		if jsonEnabled(cmd) {
+			return diffMultiDirJSON(cmd, name, stat)
+		}
+		return diffMultiDir(cmd, name, stat)
+	}
+
+	return diffSingle(cmd, name, paths, stat, nameOnly)
+}
+
+// diffSingle runs a diff for a single (non-overlay, non-multi) directory.
+func diffSingle(cmd *cobra.Command, name string, paths []string, stat, nameOnly bool) error {
+	backend := resolveBackendForSandbox(name)
+	var finalErr error
+	_ = withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error { //nolint:errcheck // error handled via finalErr
+		opts := sandbox.DiffOptions{
+			Name:     name,
+			Paths:    paths,
+			NameOnly: nameOnly,
+			Stat:     stat,
+			Runtime:  rt,
+		}
+
+		result, err := sandbox.GenerateDiff(ctx, opts)
+		if err != nil {
+			finalErr = err
+			return err
+		}
+		if jsonEnabled(cmd) {
+			finalErr = writeJSON(cmd.OutOrStdout(), result)
+			return finalErr
+		}
+		if result.Empty {
+			_, err = fmt.Fprintln(cmd.OutOrStdout(), "No changes")
+			finalErr = err
+			return err
+		}
+		_, err = fmt.Fprintln(cmd.OutOrStdout(), result.Output)
+		finalErr = err
+		return err
+	})
+	return finalErr
 }
 
 // hasOverlayDirs returns true if any directory in the sandbox uses overlay mode.
@@ -207,33 +193,7 @@ func diffOverlay(cmd *cobra.Command, name string, stat, nameOnly bool) error {
 			return err
 		}
 
-		// Merge: replace overlay placeholder entries from hostResults with actual overlay results
-		var merged []*sandbox.DiffResult
-		for _, r := range hostResults {
-			if r.Mode == "overlay" {
-				// Find matching overlay result
-				for _, or := range overlayResults {
-					if or.WorkDir == r.WorkDir {
-						merged = append(merged, or)
-						break
-					}
-				}
-			} else {
-				merged = append(merged, r)
-			}
-		}
-		// Add any overlay results not matched (shouldn't happen, but be safe)
-		matchedOverlay := make(map[string]bool)
-		for _, r := range hostResults {
-			if r.Mode == "overlay" {
-				matchedOverlay[r.WorkDir] = true
-			}
-		}
-		for _, or := range overlayResults {
-			if !matchedOverlay[or.WorkDir] {
-				merged = append(merged, or)
-			}
-		}
+		merged := mergeOverlayDiffResults(hostResults, overlayResults)
 
 		if jsonEnabled(cmd) {
 			if merged == nil {
@@ -242,32 +202,68 @@ func diffOverlay(cmd *cobra.Command, name string, stat, nameOnly bool) error {
 			return writeJSON(cmd.OutOrStdout(), merged)
 		}
 
-		allEmpty := true
-		for _, r := range merged {
-			if !r.Empty {
-				allEmpty = false
-				break
-			}
-		}
-		if allEmpty {
-			_, err = fmt.Fprintln(cmd.OutOrStdout(), "No changes")
-			return err
-		}
-
-		var sb strings.Builder
-		for _, r := range merged {
-			if r.Empty {
-				continue
-			}
-			fmt.Fprintf(&sb, "=== %s (%s) ===\n", r.WorkDir, r.Mode)
-			sb.WriteString(r.Output)
-			sb.WriteString("\n\n")
-		}
-
-		output := strings.TrimRight(sb.String(), "\n") + "\n"
-		_, err = fmt.Fprint(cmd.OutOrStdout(), output)
-		return err
+		return printMergedDiffResults(cmd, merged)
 	})
+}
+
+// mergeOverlayDiffResults merges overlay results into host results.
+func mergeOverlayDiffResults(hostResults, overlayResults []*sandbox.DiffResult) []*sandbox.DiffResult {
+	var merged []*sandbox.DiffResult
+	for _, r := range hostResults {
+		if r.Mode == "overlay" {
+			// Find matching overlay result
+			for _, or := range overlayResults {
+				if or.WorkDir == r.WorkDir {
+					merged = append(merged, or)
+					break
+				}
+			}
+		} else {
+			merged = append(merged, r)
+		}
+	}
+	// Add any overlay results not matched (shouldn't happen, but be safe)
+	matchedOverlay := make(map[string]bool)
+	for _, r := range hostResults {
+		if r.Mode == "overlay" {
+			matchedOverlay[r.WorkDir] = true
+		}
+	}
+	for _, or := range overlayResults {
+		if !matchedOverlay[or.WorkDir] {
+			merged = append(merged, or)
+		}
+	}
+	return merged
+}
+
+// printMergedDiffResults prints multiple diff results to stdout.
+func printMergedDiffResults(cmd *cobra.Command, merged []*sandbox.DiffResult) error {
+	allEmpty := true
+	for _, r := range merged {
+		if !r.Empty {
+			allEmpty = false
+			break
+		}
+	}
+	if allEmpty {
+		_, err := fmt.Fprintln(cmd.OutOrStdout(), "No changes")
+		return err
+	}
+
+	var sb strings.Builder
+	for _, r := range merged {
+		if r.Empty {
+			continue
+		}
+		fmt.Fprintf(&sb, "=== %s (%s) ===\n", r.WorkDir, r.Mode)
+		sb.WriteString(r.Output)
+		sb.WriteString("\n\n")
+	}
+
+	output := strings.TrimRight(sb.String(), "\n") + "\n"
+	_, err := fmt.Fprint(cmd.OutOrStdout(), output)
+	return err
 }
 
 // diffLogOverlay lists commits for overlay sandboxes by executing git log inside the container.

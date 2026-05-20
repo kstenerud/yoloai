@@ -56,42 +56,60 @@ func filterInfos(infos []*sandbox.Info, f listFilters) []*sandbox.Info {
 
 	var result []*sandbox.Info
 	for _, info := range infos {
-		if f.active && info.Status != sandbox.StatusActive && info.Status != sandbox.StatusIdle {
-			continue
+		if matchesFilters(info, f) {
+			result = append(result, info)
 		}
-		if f.idle && info.Status != sandbox.StatusIdle {
-			continue
-		}
-		if f.done && info.Status != sandbox.StatusDone && info.Status != sandbox.StatusFailed {
-			continue
-		}
-		if f.stopped && info.Status != sandbox.StatusStopped {
-			continue
-		}
-		if f.agent != "" {
-			if info.Status == sandbox.StatusBroken || info.Meta.Agent != f.agent {
-				continue
-			}
-		}
-		if f.profile != "" {
-			if info.Status == sandbox.StatusBroken {
-				continue
-			}
-			p := info.Meta.Profile
-			if f.profile == "base" {
-				if p != "" && p != "base" {
-					continue
-				}
-			} else if p != f.profile {
-				continue
-			}
-		}
-		if f.changes && info.HasChanges != "yes" {
-			continue
-		}
-		result = append(result, info)
 	}
 	return result
+}
+
+// matchesFilters returns true if info satisfies all active filter criteria.
+// matchesStatusFilter returns false if the sandbox status does not satisfy
+// the status-related flags (active, idle, done, stopped).
+func matchesStatusFilter(info *sandbox.Info, f listFilters) bool {
+	if f.active && info.Status != sandbox.StatusActive && info.Status != sandbox.StatusIdle {
+		return false
+	}
+	if f.idle && info.Status != sandbox.StatusIdle {
+		return false
+	}
+	if f.done && info.Status != sandbox.StatusDone && info.Status != sandbox.StatusFailed {
+		return false
+	}
+	if f.stopped && info.Status != sandbox.StatusStopped {
+		return false
+	}
+	return true
+}
+
+func matchesFilters(info *sandbox.Info, f listFilters) bool {
+	if !matchesStatusFilter(info, f) {
+		return false
+	}
+	if f.agent != "" {
+		if info.Status == sandbox.StatusBroken || info.Meta.Agent != f.agent {
+			return false
+		}
+	}
+	if f.profile != "" && !matchesProfileFilter(info, f.profile) {
+		return false
+	}
+	if f.changes && info.HasChanges != "yes" {
+		return false
+	}
+	return true
+}
+
+// matchesProfileFilter returns true if the sandbox matches the profile filter.
+func matchesProfileFilter(info *sandbox.Info, profileFilter string) bool {
+	if info.Status == sandbox.StatusBroken {
+		return false
+	}
+	p := info.Meta.Profile
+	if profileFilter == "base" {
+		return p == "" || p == "base"
+	}
+	return p == profileFilter
 }
 
 // formatProfile returns the display string for a profile name.

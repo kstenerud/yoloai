@@ -76,6 +76,22 @@ func FormatError(results []CheckResult) error {
 // combinations, including base modes. Handles empty slices gracefully.
 // For Unavailable entries, all failed checks are shown with fix steps where
 // available — permanent failures are labelled as such.
+// printUnavailableFixSections prints detailed fix sections for unavailable
+// backends that have actionable results (i.e., non-init errors).
+func printUnavailableFixSections(w io.Writer, unavailable []BackendReport) {
+	for _, r := range unavailable {
+		if r.InitErr != nil {
+			continue // no cap results to show
+		}
+		for _, result := range r.Results {
+			if result.Err != nil {
+				printFixSection(w, r)
+				break
+			}
+		}
+	}
+}
+
 func FormatDoctor(w io.Writer, reports []BackendReport) {
 	if len(reports) == 0 {
 		fmt.Fprintln(w, "No backends available to check.") //nolint:errcheck
@@ -99,27 +115,21 @@ func FormatDoctor(w io.Writer, reports []BackendReport) {
 	if len(ready) > 0 {
 		fmt.Fprintln(w, "\nReady to use:") //nolint:errcheck
 		for _, r := range ready {
-			label := modeLabel(r)
-			fmt.Fprintf(w, "  %-16s %s\n", r.Backend, label) //nolint:errcheck
+			fmt.Fprintf(w, "  %-16s %s\n", r.Backend, modeLabel(r)) //nolint:errcheck
 		}
 	}
 
 	if len(needsSetup) > 0 {
 		fmt.Fprintln(w, "\nNeeds setup:") //nolint:errcheck
 		for _, r := range needsSetup {
-			label := modeLabel(r)
-			failing := countFailing(r.Results)
-			total := len(r.Results)
-			fmt.Fprintf(w, "  %-16s %-24s %d of %d checks failing\n", r.Backend, label, failing, total) //nolint:errcheck
+			fmt.Fprintf(w, "  %-16s %-24s %d of %d checks failing\n", r.Backend, modeLabel(r), countFailing(r.Results), len(r.Results)) //nolint:errcheck
 		}
 	}
 
 	if len(unavailable) > 0 {
 		fmt.Fprintln(w, "\nNot available on this machine:") //nolint:errcheck
 		for _, r := range unavailable {
-			label := modeLabel(r)
-			reason := unavailableReason(r)
-			fmt.Fprintf(w, "  %-16s %-24s %s\n", r.Backend, label, reason) //nolint:errcheck
+			fmt.Fprintf(w, "  %-16s %-24s %s\n", r.Backend, modeLabel(r), unavailableReason(r)) //nolint:errcheck
 		}
 	}
 
@@ -130,21 +140,7 @@ func FormatDoctor(w io.Writer, reports []BackendReport) {
 
 	// Print detailed sections for Unavailable entries too — so users who
 	// resolve a permanent blocker can see what else needs setup.
-	for _, r := range unavailable {
-		if r.InitErr != nil {
-			continue // no cap results to show
-		}
-		hasFix := false
-		for _, result := range r.Results {
-			if result.Err != nil {
-				hasFix = true
-				break
-			}
-		}
-		if hasFix {
-			printFixSection(w, r)
-		}
-	}
+	printUnavailableFixSections(w, unavailable)
 
 	// Distro note.
 	fmt.Fprintln(w, "\nNote: example commands assume Debian/Ubuntu. Adapt as needed for your distro.") //nolint:errcheck

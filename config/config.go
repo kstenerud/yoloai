@@ -162,212 +162,245 @@ func GlobalConfigPath() string {
 	return filepath.Join(YoloaiDir(), "config.yaml")
 }
 
+// yoloaiConfigHandler is a function that handles a single YAML key in a YoloaiConfig.
+type yoloaiConfigHandler func(cfg *YoloaiConfig, val *yaml.Node) error
+
+// yoloaiConfigHandlers maps top-level YAML keys to their handler functions.
+var yoloaiConfigHandlers = map[string]yoloaiConfigHandler{
+	"agent":                yoloaiScalarHandler(func(c *YoloaiConfig) *string { return &c.Agent }),
+	"model":                yoloaiScalarHandler(func(c *YoloaiConfig) *string { return &c.Model }),
+	"os":                   yoloaiScalarHandler(func(c *YoloaiConfig) *string { return &c.OS }),
+	"container_backend":    yoloaiScalarHandler(func(c *YoloaiConfig) *string { return &c.ContainerBackend }),
+	"mounts":               yoloaiExpandedSeqHandler(func(c *YoloaiConfig) *[]string { return &c.Mounts }, "mounts[]"),
+	"ports":                yoloaiRawSeqHandler(func(c *YoloaiConfig) *[]string { return &c.Ports }),
+	"cap_add":              yoloaiExpandedSeqHandler(func(c *YoloaiConfig) *[]string { return &c.CapAdd }, "cap_add[]"),
+	"devices":              yoloaiExpandedSeqHandler(func(c *YoloaiConfig) *[]string { return &c.Devices }, "devices[]"),
+	"setup":                yoloaiExpandedSeqHandler(func(c *YoloaiConfig) *[]string { return &c.Setup }, "setup[]"),
+	"env":                  yoloaiStringMapHandler(func(c *YoloaiConfig) *map[string]string { return &c.Env }, "env"),
+	"agent_args":           yoloaiStringMapHandler(func(c *YoloaiConfig) *map[string]string { return &c.AgentArgs }, "agent_args"),
+	"tart":                 handleYoloaiTart,
+	"resources":            handleYoloaiResources,
+	"network":              handleYoloaiNetwork,
+	"agent_files":          handleYoloaiAgentFiles,
+	"auto_commit_interval": handleYoloaiAutoCommitInterval,
+	"isolation":            handleYoloaiIsolation,
+}
+
+// yoloaiScalarHandler returns a handler that expands env vars and stores the result in the field pointed to by ptr.
+func yoloaiScalarHandler(ptr func(*YoloaiConfig) *string) yoloaiConfigHandler {
+	return func(cfg *YoloaiConfig, val *yaml.Node) error {
+		expanded, err := expandEnvBraced(val.Value)
+		if err != nil {
+			return err
+		}
+		*ptr(cfg) = expanded
+		return nil
+	}
+}
+
+// yoloaiExpandedSeqHandler returns a handler that appends expanded sequence items to the slice pointed to by ptr.
+func yoloaiExpandedSeqHandler(ptr func(*YoloaiConfig) *[]string, label string) yoloaiConfigHandler {
+	return func(cfg *YoloaiConfig, val *yaml.Node) error {
+		if val.Kind != yaml.SequenceNode {
+			return nil
+		}
+		for _, item := range val.Content {
+			expanded, err := expandEnvBraced(item.Value)
+			if err != nil {
+				return fmt.Errorf("%s: %w", label, err)
+			}
+			*ptr(cfg) = append(*ptr(cfg), expanded)
+		}
+		return nil
+	}
+}
+
+// yoloaiRawSeqHandler returns a handler that appends raw (unexpanded) sequence items to the slice pointed to by ptr.
+func yoloaiRawSeqHandler(ptr func(*YoloaiConfig) *[]string) yoloaiConfigHandler {
+	return func(cfg *YoloaiConfig, val *yaml.Node) error {
+		if val.Kind != yaml.SequenceNode {
+			return nil
+		}
+		for _, item := range val.Content {
+			*ptr(cfg) = append(*ptr(cfg), item.Value)
+		}
+		return nil
+	}
+}
+
+// yoloaiStringMapHandler returns a handler that populates a map[string]string field with expanded values.
+func yoloaiStringMapHandler(ptr func(*YoloaiConfig) *map[string]string, prefix string) yoloaiConfigHandler {
+	return func(cfg *YoloaiConfig, val *yaml.Node) error {
+		if val.Kind != yaml.MappingNode {
+			return nil
+		}
+		m := make(map[string]string, len(val.Content)/2)
+		for k := 0; k < len(val.Content)-1; k += 2 {
+			key := val.Content[k].Value
+			expanded, err := expandEnvBraced(val.Content[k+1].Value)
+			if err != nil {
+				return fmt.Errorf("%s.%s: %w", prefix, key, err)
+			}
+			m[key] = expanded
+		}
+		*ptr(cfg) = m
+		return nil
+	}
+}
+
+func handleYoloaiTart(cfg *YoloaiConfig, val *yaml.Node) error {
+	if val.Kind != yaml.MappingNode {
+		return nil
+	}
+	for k := 0; k < len(val.Content)-1; k += 2 {
+		subKey := val.Content[k].Value
+		subExpanded, err := expandEnvBraced(val.Content[k+1].Value)
+		if err != nil {
+			return fmt.Errorf("tart.%s: %w", subKey, err)
+		}
+		if subKey == "image" {
+			cfg.TartImage = subExpanded
+		}
+	}
+	return nil
+}
+
+func handleYoloaiResources(cfg *YoloaiConfig, val *yaml.Node) error {
+	if val.Kind != yaml.MappingNode {
+		return nil
+	}
+	cfg.Resources = &ResourceLimits{}
+	for k := 0; k < len(val.Content)-1; k += 2 {
+		subKey := val.Content[k].Value
+		subExpanded, err := expandEnvBraced(val.Content[k+1].Value)
+		if err != nil {
+			return fmt.Errorf("resources.%s: %w", subKey, err)
+		}
+		switch subKey {
+		case "cpus":
+			cfg.Resources.CPUs = subExpanded
+		case "memory":
+			cfg.Resources.Memory = subExpanded
+		}
+	}
+	return nil
+}
+
+func handleYoloaiNetwork(cfg *YoloaiConfig, val *yaml.Node) error {
+	if val.Kind != yaml.MappingNode {
+		return nil
+	}
+	cfg.Network = &NetworkConfig{}
+	for k := 0; k < len(val.Content)-1; k += 2 {
+		subKey := val.Content[k].Value
+		switch subKey {
+		case "isolated":
+			cfg.Network.Isolated = val.Content[k+1].Value == "true"
+		case "allow":
+			if val.Content[k+1].Kind == yaml.SequenceNode {
+				for _, item := range val.Content[k+1].Content {
+					cfg.Network.Allow = append(cfg.Network.Allow, item.Value)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func handleYoloaiAgentFiles(cfg *YoloaiConfig, val *yaml.Node) error {
+	af, err := parseAgentFilesNode(val)
+	if err != nil {
+		return err
+	}
+	cfg.AgentFiles = af
+	return nil
+}
+
+func handleYoloaiAutoCommitInterval(cfg *YoloaiConfig, val *yaml.Node) error {
+	n, err := strconv.Atoi(val.Value)
+	if err != nil {
+		return err
+	}
+	cfg.AutoCommitInterval = n
+	return nil
+}
+
+func handleYoloaiIsolation(cfg *YoloaiConfig, val *yaml.Node) error {
+	expanded, err := expandEnvBraced(val.Value)
+	if err != nil {
+		return err
+	}
+	if err := ValidateIsolationMode(expanded); err != nil {
+		return err
+	}
+	cfg.Isolation = expanded
+	return nil
+}
+
 // parseConfigYAML parses a config YAML document into a YoloaiConfig.
 // source is used in error messages. knownKeys is the set of allowed top-level keys;
 // if nil, no unknown-key validation is performed.
 func parseConfigYAML(data []byte, source string, knownKeys map[string]bool) (*YoloaiConfig, error) {
-	// Parse into a yaml.Node tree to extract fields without losing structure.
+	root, err := parseYAMLRoot(data, source, knownKeys)
+	if err != nil {
+		return nil, err
+	}
+	if root == nil {
+		return &YoloaiConfig{}, nil
+	}
+
+	cfg := &YoloaiConfig{}
+	for i := 0; i < len(root.Content)-1; i += 2 {
+		key := root.Content[i].Value
+		val := root.Content[i+1]
+		handler, ok := yoloaiConfigHandlers[key]
+		if !ok {
+			continue
+		}
+		if err := handler(cfg, val); err != nil {
+			return nil, fmt.Errorf("%s: %s: %w", source, key, err)
+		}
+	}
+	return cfg, nil
+}
+
+// parseYAMLRoot parses data into a yaml.Node and returns the root mapping node.
+// Returns nil if the document is empty or not a mapping. Validates unknown keys
+// against knownKeys when non-nil.
+func parseYAMLRoot(data []byte, source string, knownKeys map[string]bool) (*yaml.Node, error) {
 	var doc yaml.Node
 	if err := yaml.Unmarshal(data, &doc); err != nil {
 		return nil, fmt.Errorf("parse %s: %w", source, err)
 	}
-
-	cfg := &YoloaiConfig{}
-
 	if doc.Kind != yaml.DocumentNode || len(doc.Content) == 0 {
-		return cfg, nil
+		return nil, nil
 	}
 	root := doc.Content[0]
 	if root.Kind != yaml.MappingNode {
-		return cfg, nil
+		return nil, nil
 	}
-
-	// Validate unknown keys if knownKeys is provided.
 	if knownKeys != nil {
-		var unknown []string
-		for i := 0; i < len(root.Content)-1; i += 2 {
-			key := root.Content[i].Value
-			if !knownKeys[key] {
-				unknown = append(unknown, key)
-			}
-		}
-		if len(unknown) > 0 {
-			sort.Strings(unknown)
-			return nil, fmt.Errorf("%s: unknown config field(s): %s", source, strings.Join(unknown, ", "))
+		if err := validateKnownKeys(root, source, knownKeys); err != nil {
+			return nil, err
 		}
 	}
+	return root, nil
+}
 
+// validateKnownKeys checks that all top-level keys in root are present in knownKeys.
+func validateKnownKeys(root *yaml.Node, source string, knownKeys map[string]bool) error {
+	var unknown []string
 	for i := 0; i < len(root.Content)-1; i += 2 {
-		key := root.Content[i]
-		val := root.Content[i+1]
-
-		switch key.Value {
-		case "agent_args":
-			if val.Kind == yaml.MappingNode {
-				cfg.AgentArgs = make(map[string]string, len(val.Content)/2)
-				for k := 0; k < len(val.Content)-1; k += 2 {
-					agentKey := val.Content[k].Value
-					agentExpanded, agentErr := expandEnvBraced(val.Content[k+1].Value)
-					if agentErr != nil {
-						return nil, fmt.Errorf("agent_args.%s: %w", agentKey, agentErr)
-					}
-					cfg.AgentArgs[agentKey] = agentExpanded
-				}
-			}
-		case "env":
-			if val.Kind == yaml.MappingNode {
-				cfg.Env = make(map[string]string, len(val.Content)/2)
-				for k := 0; k < len(val.Content)-1; k += 2 {
-					envKey := val.Content[k].Value
-					envExpanded, envErr := expandEnvBraced(val.Content[k+1].Value)
-					if envErr != nil {
-						return nil, fmt.Errorf("env.%s: %w", envKey, envErr)
-					}
-					cfg.Env[envKey] = envExpanded
-				}
-			}
-		case "tart":
-			if val.Kind == yaml.MappingNode {
-				for k := 0; k < len(val.Content)-1; k += 2 {
-					subKey := val.Content[k].Value
-					subExpanded, subErr := expandEnvBraced(val.Content[k+1].Value)
-					if subErr != nil {
-						return nil, fmt.Errorf("tart.%s: %w", subKey, subErr)
-					}
-					if subKey == "image" {
-						cfg.TartImage = subExpanded
-					}
-				}
-			}
-		case "resources":
-			if val.Kind == yaml.MappingNode {
-				cfg.Resources = &ResourceLimits{}
-				for k := 0; k < len(val.Content)-1; k += 2 {
-					subKey := val.Content[k].Value
-					subExpanded, subErr := expandEnvBraced(val.Content[k+1].Value)
-					if subErr != nil {
-						return nil, fmt.Errorf("resources.%s: %w", subKey, subErr)
-					}
-					switch subKey {
-					case "cpus":
-						cfg.Resources.CPUs = subExpanded
-					case "memory":
-						cfg.Resources.Memory = subExpanded
-					}
-				}
-			}
-		case "mounts":
-			if val.Kind == yaml.SequenceNode {
-				for _, item := range val.Content {
-					expanded, expandErr := expandEnvBraced(item.Value)
-					if expandErr != nil {
-						return nil, fmt.Errorf("mounts[]: %w", expandErr)
-					}
-					cfg.Mounts = append(cfg.Mounts, expanded)
-				}
-			}
-		case "ports":
-			if val.Kind == yaml.SequenceNode {
-				for _, item := range val.Content {
-					cfg.Ports = append(cfg.Ports, item.Value)
-				}
-			}
-		case "cap_add":
-			if val.Kind == yaml.SequenceNode {
-				for _, item := range val.Content {
-					expanded, expandErr := expandEnvBraced(item.Value)
-					if expandErr != nil {
-						return nil, fmt.Errorf("cap_add[]: %w", expandErr)
-					}
-					cfg.CapAdd = append(cfg.CapAdd, expanded)
-				}
-			}
-		case "devices":
-			if val.Kind == yaml.SequenceNode {
-				for _, item := range val.Content {
-					expanded, expandErr := expandEnvBraced(item.Value)
-					if expandErr != nil {
-						return nil, fmt.Errorf("devices[]: %w", expandErr)
-					}
-					cfg.Devices = append(cfg.Devices, expanded)
-				}
-			}
-		case "setup":
-			if val.Kind == yaml.SequenceNode {
-				for _, item := range val.Content {
-					expanded, expandErr := expandEnvBraced(item.Value)
-					if expandErr != nil {
-						return nil, fmt.Errorf("setup[]: %w", expandErr)
-					}
-					cfg.Setup = append(cfg.Setup, expanded)
-				}
-			}
-		case "network":
-			if val.Kind == yaml.MappingNode {
-				cfg.Network = &NetworkConfig{}
-				for k := 0; k < len(val.Content)-1; k += 2 {
-					subKey := val.Content[k].Value
-					switch subKey {
-					case "isolated":
-						cfg.Network.Isolated = val.Content[k+1].Value == "true"
-					case "allow":
-						if val.Content[k+1].Kind == yaml.SequenceNode {
-							for _, item := range val.Content[k+1].Content {
-								cfg.Network.Allow = append(cfg.Network.Allow, item.Value)
-							}
-						}
-					}
-				}
-			}
-		case "container_backend":
-			expanded, err := expandEnvBraced(val.Value)
-			if err != nil {
-				return nil, fmt.Errorf("container_backend: %w", err)
-			}
-			cfg.ContainerBackend = expanded
-		case "agent":
-			expanded, err := expandEnvBraced(val.Value)
-			if err != nil {
-				return nil, fmt.Errorf("agent: %w", err)
-			}
-			cfg.Agent = expanded
-		case "model":
-			expanded, err := expandEnvBraced(val.Value)
-			if err != nil {
-				return nil, fmt.Errorf("model: %w", err)
-			}
-			cfg.Model = expanded
-		case "os":
-			expanded, err := expandEnvBraced(val.Value)
-			if err != nil {
-				return nil, fmt.Errorf("os: %w", err)
-			}
-			cfg.OS = expanded
-		case "agent_files":
-			af, afErr := parseAgentFilesNode(val)
-			if afErr != nil {
-				return nil, fmt.Errorf("agent_files: %w", afErr)
-			}
-			cfg.AgentFiles = af
-		case "auto_commit_interval":
-			n, aErr := strconv.Atoi(val.Value)
-			if aErr != nil {
-				return nil, fmt.Errorf("auto_commit_interval: %w", aErr)
-			}
-			cfg.AutoCommitInterval = n
-		case "isolation":
-			expanded, err := expandEnvBraced(val.Value)
-			if err != nil {
-				return nil, fmt.Errorf("isolation: %w", err)
-			}
-			if err := ValidateIsolationMode(expanded); err != nil {
-				return nil, fmt.Errorf("isolation: %w", err)
-			}
-			cfg.Isolation = expanded
+		key := root.Content[i].Value
+		if !knownKeys[key] {
+			unknown = append(unknown, key)
 		}
 	}
-
-	return cfg, nil
+	if len(unknown) > 0 {
+		sort.Strings(unknown)
+		return fmt.Errorf("%s: unknown config field(s): %s", source, strings.Join(unknown, ", "))
+	}
+	return nil
 }
 
 // LoadBakedInDefaults parses the embedded defaults YAML into a YoloaiConfig.
@@ -401,6 +434,77 @@ func LoadDefaultsConfig() (*YoloaiConfig, error) {
 	return mergeConfigs(base, override), nil
 }
 
+// mergeStringField returns override if non-empty, else base.
+func mergeStringField(base, override string) string {
+	if override != "" {
+		return override
+	}
+	return base
+}
+
+// mergeMapFields merges two map[string]string values: override wins on conflict.
+// Returns nil if both are empty.
+func mergeMapFields(base, override map[string]string) map[string]string {
+	if len(base) == 0 && len(override) == 0 {
+		return nil
+	}
+	result := make(map[string]string, len(base)+len(override))
+	for k, v := range base {
+		result[k] = v
+	}
+	for k, v := range override {
+		result[k] = v
+	}
+	return result
+}
+
+// mergeSlices concatenates base and override. Returns nil if both are empty.
+func mergeSlices(base, override []string) []string {
+	if len(base) == 0 && len(override) == 0 {
+		return nil
+	}
+	return append(append([]string{}, base...), override...)
+}
+
+// mergeResources merges two ResourceLimits: per-field, non-empty override wins.
+// Returns nil if both are nil.
+func mergeResources(base, override *ResourceLimits) *ResourceLimits {
+	if base == nil && override == nil {
+		return nil
+	}
+	result := &ResourceLimits{}
+	if base != nil {
+		result.CPUs = base.CPUs
+		result.Memory = base.Memory
+	}
+	if override != nil {
+		result.CPUs = mergeStringField(result.CPUs, override.CPUs)
+		result.Memory = mergeStringField(result.Memory, override.Memory)
+	}
+	return result
+}
+
+// mergeNetwork merges two NetworkConfig values: Isolated is last-wins, Allow is additive.
+// Returns nil if both are nil.
+func mergeNetwork(base, override *NetworkConfig) *NetworkConfig {
+	if base == nil && override == nil {
+		return nil
+	}
+	result := &NetworkConfig{}
+	if base != nil {
+		result.Isolated = base.Isolated
+		result.Allow = append(result.Allow, base.Allow...)
+	}
+	if override != nil {
+		result.Isolated = override.Isolated
+		result.Allow = append(result.Allow, override.Allow...)
+	}
+	if len(result.Allow) == 0 {
+		result.Allow = nil
+	}
+	return result
+}
+
 // mergeConfigs merges override into base, returning a new YoloaiConfig.
 // Merge semantics:
 //   - Scalars (OS, Agent, Model, ContainerBackend, TartImage, Isolation): non-empty overrides
@@ -411,133 +515,33 @@ func LoadDefaultsConfig() (*YoloaiConfig, error) {
 //   - AgentFiles: replacement semantics (non-nil replaces)
 //   - AutoCommitInterval: non-zero override wins
 func mergeConfigs(base, override *YoloaiConfig) *YoloaiConfig {
-	result := &YoloaiConfig{
-		OS:                 base.OS,
-		ContainerBackend:   base.ContainerBackend,
-		TartImage:          base.TartImage,
-		Agent:              base.Agent,
-		Model:              base.Model,
-		Isolation:          base.Isolation,
-		AutoCommitInterval: base.AutoCommitInterval,
-		AgentFiles:         base.AgentFiles,
-	}
-
-	// Scalars: non-empty override wins
-	if override.OS != "" {
-		result.OS = override.OS
-	}
-	if override.ContainerBackend != "" {
-		result.ContainerBackend = override.ContainerBackend
-	}
-	if override.TartImage != "" {
-		result.TartImage = override.TartImage
-	}
-	if override.Agent != "" {
-		result.Agent = override.Agent
-	}
-	if override.Model != "" {
-		result.Model = override.Model
-	}
-	if override.Isolation != "" {
-		result.Isolation = override.Isolation
-	}
-
-	// AutoCommitInterval: non-zero override wins
-	if override.AutoCommitInterval > 0 {
-		result.AutoCommitInterval = override.AutoCommitInterval
-	}
-
-	// AgentFiles: replacement semantics
+	agentFiles := base.AgentFiles
 	if override.AgentFiles != nil {
-		result.AgentFiles = override.AgentFiles
+		agentFiles = override.AgentFiles
 	}
-
-	// Env: map merge, override wins on conflict
-	if len(base.Env) > 0 || len(override.Env) > 0 {
-		result.Env = make(map[string]string)
-		for k, v := range base.Env {
-			result.Env[k] = v
-		}
-		for k, v := range override.Env {
-			result.Env[k] = v
-		}
+	autoCommit := base.AutoCommitInterval
+	if override.AutoCommitInterval > 0 {
+		autoCommit = override.AutoCommitInterval
 	}
-
-	// AgentArgs: map merge, override wins on conflict
-	if len(base.AgentArgs) > 0 || len(override.AgentArgs) > 0 {
-		result.AgentArgs = make(map[string]string)
-		for k, v := range base.AgentArgs {
-			result.AgentArgs[k] = v
-		}
-		for k, v := range override.AgentArgs {
-			result.AgentArgs[k] = v
-		}
+	return &YoloaiConfig{
+		OS:                 mergeStringField(base.OS, override.OS),
+		ContainerBackend:   mergeStringField(base.ContainerBackend, override.ContainerBackend),
+		TartImage:          mergeStringField(base.TartImage, override.TartImage),
+		Agent:              mergeStringField(base.Agent, override.Agent),
+		Model:              mergeStringField(base.Model, override.Model),
+		Isolation:          mergeStringField(base.Isolation, override.Isolation),
+		AutoCommitInterval: autoCommit,
+		AgentFiles:         agentFiles,
+		Env:                mergeMapFields(base.Env, override.Env),
+		AgentArgs:          mergeMapFields(base.AgentArgs, override.AgentArgs),
+		Mounts:             mergeSlices(base.Mounts, override.Mounts),
+		Ports:              mergeSlices(base.Ports, override.Ports),
+		CapAdd:             mergeSlices(base.CapAdd, override.CapAdd),
+		Devices:            mergeSlices(base.Devices, override.Devices),
+		Setup:              mergeSlices(base.Setup, override.Setup),
+		Resources:          mergeResources(base.Resources, override.Resources),
+		Network:            mergeNetwork(base.Network, override.Network),
 	}
-
-	// Lists: additive
-	result.Mounts = append(append([]string{}, base.Mounts...), override.Mounts...)
-	result.Ports = append(append([]string{}, base.Ports...), override.Ports...)
-	result.CapAdd = append(append([]string{}, base.CapAdd...), override.CapAdd...)
-	result.Devices = append(append([]string{}, base.Devices...), override.Devices...)
-	result.Setup = append(append([]string{}, base.Setup...), override.Setup...)
-
-	// Normalize empty slices to nil
-	if len(result.Mounts) == 0 {
-		result.Mounts = nil
-	}
-	if len(result.Ports) == 0 {
-		result.Ports = nil
-	}
-	if len(result.CapAdd) == 0 {
-		result.CapAdd = nil
-	}
-	if len(result.Devices) == 0 {
-		result.Devices = nil
-	}
-	if len(result.Setup) == 0 {
-		result.Setup = nil
-	}
-	if len(result.Env) == 0 {
-		result.Env = nil
-	}
-	if len(result.AgentArgs) == 0 {
-		result.AgentArgs = nil
-	}
-
-	// Resources: per-field override
-	if base.Resources != nil || override.Resources != nil {
-		result.Resources = &ResourceLimits{}
-		if base.Resources != nil {
-			result.Resources.CPUs = base.Resources.CPUs
-			result.Resources.Memory = base.Resources.Memory
-		}
-		if override.Resources != nil {
-			if override.Resources.CPUs != "" {
-				result.Resources.CPUs = override.Resources.CPUs
-			}
-			if override.Resources.Memory != "" {
-				result.Resources.Memory = override.Resources.Memory
-			}
-		}
-	}
-
-	// Network: Isolated overrides (last wins), Allow is additive
-	if base.Network != nil || override.Network != nil {
-		result.Network = &NetworkConfig{}
-		if base.Network != nil {
-			result.Network.Isolated = base.Network.Isolated
-			result.Network.Allow = append(result.Network.Allow, base.Network.Allow...)
-		}
-		if override.Network != nil {
-			result.Network.Isolated = override.Network.Isolated
-			result.Network.Allow = append(result.Network.Allow, override.Network.Allow...)
-		}
-		if len(result.Network.Allow) == 0 {
-			result.Network.Allow = nil
-		}
-	}
-
-	return result
 }
 
 // LoadConfig reads ~/.yoloai/defaults/config.yaml and extracts known fields.
@@ -662,11 +666,9 @@ func IsGlobalKey(path string) bool {
 	return isGlobalKey(path)
 }
 
-// GetEffectiveConfig returns YAML showing all known settings with their
-// effective values (file overrides + defaults), plus any extra keys from the
-// files that aren't in the known settings list.
-func GetEffectiveConfig() (string, error) {
-	// Build node tree with all known defaults (both global and profile).
+// buildEffectiveConfigDefaults constructs a yaml.Node mapping tree with all
+// known settings at their default values (scalars and empty collections).
+func buildEffectiveConfigDefaults() *yaml.Node {
 	root := &yaml.Node{Kind: yaml.MappingNode}
 	for _, s := range globalKnownSettings {
 		setYAMLField(root, s.Path, s.Default)
@@ -674,58 +676,67 @@ func GetEffectiveConfig() (string, error) {
 	for _, s := range knownSettings {
 		setYAMLField(root, s.Path, s.Default)
 	}
-
-	// Add non-scalar defaults (maps/lists) as empty containers.
 	for _, cs := range globalKnownCollectionSettings {
-		parts := splitDottedPath(cs.Path)
-		parent := root
-		for _, p := range parts[:len(parts)-1] {
-			parent = getOrCreateMapping(parent, p)
-		}
-		setNodeValue(parent, parts[len(parts)-1], &yaml.Node{Kind: cs.Kind})
+		setCollectionDefault(root, cs)
 	}
 	for _, cs := range knownCollectionSettings {
-		parts := splitDottedPath(cs.Path)
-		parent := root
-		for _, p := range parts[:len(parts)-1] {
-			parent = getOrCreateMapping(parent, p)
-		}
-		setNodeValue(parent, parts[len(parts)-1], &yaml.Node{Kind: cs.Kind})
+		setCollectionDefault(root, cs)
 	}
+	return root
+}
 
-	// Overlay values from the global config file.
-	globalData, err := ReadGlobalConfigRaw()
+// setCollectionDefault adds an empty collection node at the path given by cs.
+func setCollectionDefault(root *yaml.Node, cs knownCollectionSetting) {
+	parts := splitDottedPath(cs.Path)
+	parent := root
+	for _, p := range parts[:len(parts)-1] {
+		parent = getOrCreateMapping(parent, p)
+	}
+	setNodeValue(parent, parts[len(parts)-1], &yaml.Node{Kind: cs.Kind})
+}
+
+// overlayConfigFile reads raw YAML from readFn and merges it into root.
+// Errors from readFn are returned; YAML parse errors are silently ignored
+// (best-effort overlay, matching original GetEffectiveConfig behaviour).
+func overlayConfigFile(root *yaml.Node, readFn func() ([]byte, error)) error {
+	data, err := readFn()
 	if err != nil {
+		return err
+	}
+	if data == nil {
+		return nil
+	}
+	mergeRawYAMLInto(root, data)
+	return nil
+}
+
+// mergeRawYAMLInto parses data as YAML and merges its top-level mapping into root.
+// Parse errors are silently ignored (best-effort overlay).
+func mergeRawYAMLInto(root *yaml.Node, data []byte) {
+	var doc yaml.Node
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		return //nolint:nilerr // best-effort: ignore YAML parse errors in effective-config overlay
+	}
+	if doc.Kind == yaml.DocumentNode && len(doc.Content) > 0 {
+		if src := doc.Content[0]; src.Kind == yaml.MappingNode {
+			mergeNodes(root, src)
+		}
+	}
+}
+
+// GetEffectiveConfig returns YAML showing all known settings with their
+// effective values (file overrides + defaults), plus any extra keys from the
+// files that aren't in the known settings list.
+func GetEffectiveConfig() (string, error) {
+	root := buildEffectiveConfigDefaults()
+
+	if err := overlayConfigFile(root, ReadGlobalConfigRaw); err != nil {
 		return "", err
 	}
-	if globalData != nil {
-		var doc yaml.Node
-		if err := yaml.Unmarshal(globalData, &doc); err == nil {
-			if doc.Kind == yaml.DocumentNode && len(doc.Content) > 0 {
-				if src := doc.Content[0]; src.Kind == yaml.MappingNode {
-					mergeNodes(root, src)
-				}
-			}
-		}
-	}
-
-	// Overlay values from the defaults config file.
-	data, err := ReadConfigRaw()
-	if err != nil {
+	if err := overlayConfigFile(root, ReadConfigRaw); err != nil {
 		return "", err
 	}
-	if data != nil {
-		var doc yaml.Node
-		if err := yaml.Unmarshal(data, &doc); err == nil {
-			if doc.Kind == yaml.DocumentNode && len(doc.Content) > 0 {
-				if src := doc.Content[0]; src.Kind == yaml.MappingNode {
-					mergeNodes(root, src)
-				}
-			}
-		}
-	}
 
-	// Sort all mappings alphabetically for predictable, scannable output.
 	sortMappingNodesRecursive(root)
 
 	doc := yaml.Node{Kind: yaml.DocumentNode, Content: []*yaml.Node{root}}

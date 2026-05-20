@@ -6,6 +6,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -40,92 +41,102 @@ func runSandboxInfo(cmd *cobra.Command, name string) error {
 			}
 			return writeJSON(cmd.OutOrStdout(), result)
 		}
-		w := cmd.OutOrStdout()
-		meta := info.Meta
 
-		fmt.Fprintf(w, "Name:        %s\n", meta.Name)   //nolint:errcheck
-		fmt.Fprintf(w, "Status:      %s\n", info.Status) //nolint:errcheck
-		fmt.Fprintf(w, "Agent:       %s\n", meta.Agent)  //nolint:errcheck
-
-		if meta.Model != "" {
-			fmt.Fprintf(w, "Model:       %s\n", meta.Model) //nolint:errcheck
-		}
-
-		fmt.Fprintf(w, "Backend:     %s\n", meta.Backend) //nolint:errcheck
-
-		if meta.Isolation != "" {
-			fmt.Fprintf(w, "Isolation:   %s\n", meta.Isolation) //nolint:errcheck
-		}
-
-		if meta.Profile != "" {
-			fmt.Fprintf(w, "Profile:     %s\n", meta.Profile) //nolint:errcheck
-		}
-
-		if meta.ImageRef != "" && meta.ImageRef != "yoloai-base" {
-			fmt.Fprintf(w, "Image:       %s\n", meta.ImageRef) //nolint:errcheck
-		}
-
-		sandboxDir := sandbox.Dir(name)
-		fmt.Fprintf(w, "Sandbox dir: %s\n", sandboxDir)                                           //nolint:errcheck
-		fmt.Fprintf(w, "Config:      %s\n", filepath.Join(sandboxDir, sandbox.RuntimeConfigFile)) //nolint:errcheck
-
-		if preview := loadPromptPreview(sandboxDir); preview != "" {
-			fmt.Fprintf(w, "Prompt:      %s\n", preview) //nolint:errcheck
-		}
-
-		if meta.Workdir.MountPath != "" && meta.Workdir.MountPath != meta.Workdir.HostPath {
-			fmt.Fprintf(w, "Workdir:     %s → %s (%s)\n", meta.Workdir.HostPath, meta.Workdir.MountPath, meta.Workdir.Mode) //nolint:errcheck
-		} else {
-			fmt.Fprintf(w, "Workdir:     %s (%s)\n", meta.Workdir.HostPath, meta.Workdir.Mode) //nolint:errcheck
-		}
-
-		for _, d := range meta.Directories {
-			if d.MountPath != d.HostPath {
-				fmt.Fprintf(w, "Dir:         %s → %s (%s)\n", d.HostPath, d.MountPath, d.Mode) //nolint:errcheck
-			} else {
-				fmt.Fprintf(w, "Dir:         %s (%s)\n", d.HostPath, d.Mode) //nolint:errcheck
-			}
-		}
-
-		if meta.NetworkMode != "" {
-			if meta.NetworkMode == "isolated" && len(meta.NetworkAllow) > 0 {
-				fmt.Fprintf(w, "Network:     isolated (%s)\n", strings.Join(meta.NetworkAllow, ", ")) //nolint:errcheck
-			} else {
-				fmt.Fprintf(w, "Network:     %s\n", meta.NetworkMode) //nolint:errcheck
-			}
-		}
-		if len(meta.Ports) > 0 {
-			fmt.Fprintf(w, "Ports:       %s\n", strings.Join(meta.Ports, ", ")) //nolint:errcheck
-		}
-
-		if meta.Resources != nil {
-			var parts []string
-			if meta.Resources.CPUs != "" {
-				parts = append(parts, meta.Resources.CPUs+" cpus")
-			}
-			if meta.Resources.Memory != "" {
-				parts = append(parts, meta.Resources.Memory+" memory")
-			}
-			if len(parts) > 0 {
-				fmt.Fprintf(w, "Resources:   %s\n", strings.Join(parts, ", ")) //nolint:errcheck
-			}
-		}
-
-		fmt.Fprintf(w, "Created:     %s (%s)\n", meta.CreatedAt.Format("2006-01-02T15:04:05Z07:00"), sandbox.FormatAge(meta.CreatedAt)) //nolint:errcheck
-
-		if meta.Workdir.BaselineSHA != "" {
-			fmt.Fprintf(w, "Baseline:    %s\n", meta.Workdir.BaselineSHA) //nolint:errcheck
-		}
-		if meta.YoloaiVersion != "" {
-			fmt.Fprintf(w, "Version:     %s\n", meta.YoloaiVersion) //nolint:errcheck
-		}
-
-		fmt.Fprintf(w, "Disk Usage:  %s\n", info.DiskUsage)  //nolint:errcheck
-		fmt.Fprintf(w, "Changes:     %s\n", info.HasChanges) //nolint:errcheck
-
+		printSandboxInfo(cmd, name, info)
 		slog.Debug("show complete", "event", "sandbox.info", "sandbox", name) //nolint:gosec // G706: name is an internal sandbox name, not user-injected log data
 		return nil
 	})
+}
+
+// printSandboxInfo prints sandbox info in human-readable format.
+func printSandboxInfo(cmd *cobra.Command, name string, info *sandbox.Info) {
+	w := cmd.OutOrStdout()
+	meta := info.Meta
+
+	fmt.Fprintf(w, "Name:        %s\n", meta.Name)   //nolint:errcheck
+	fmt.Fprintf(w, "Status:      %s\n", info.Status) //nolint:errcheck
+	fmt.Fprintf(w, "Agent:       %s\n", meta.Agent)  //nolint:errcheck
+
+	if meta.Model != "" {
+		fmt.Fprintf(w, "Model:       %s\n", meta.Model) //nolint:errcheck
+	}
+	fmt.Fprintf(w, "Backend:     %s\n", meta.Backend) //nolint:errcheck
+	if meta.Isolation != "" {
+		fmt.Fprintf(w, "Isolation:   %s\n", meta.Isolation) //nolint:errcheck
+	}
+	if meta.Profile != "" {
+		fmt.Fprintf(w, "Profile:     %s\n", meta.Profile) //nolint:errcheck
+	}
+	if meta.ImageRef != "" && meta.ImageRef != "yoloai-base" {
+		fmt.Fprintf(w, "Image:       %s\n", meta.ImageRef) //nolint:errcheck
+	}
+
+	sandboxDir := sandbox.Dir(name)
+	fmt.Fprintf(w, "Sandbox dir: %s\n", sandboxDir)                                           //nolint:errcheck
+	fmt.Fprintf(w, "Config:      %s\n", filepath.Join(sandboxDir, sandbox.RuntimeConfigFile)) //nolint:errcheck
+
+	if preview := loadPromptPreview(sandboxDir); preview != "" {
+		fmt.Fprintf(w, "Prompt:      %s\n", preview) //nolint:errcheck
+	}
+
+	printSandboxDirs(w, meta)
+	printSandboxNetwork(w, meta)
+	printSandboxResources(w, meta, info)
+}
+
+// printSandboxDirs prints workdir and auxiliary directory information.
+func printSandboxDirs(w io.Writer, meta *sandbox.Meta) {
+	if meta.Workdir.MountPath != "" && meta.Workdir.MountPath != meta.Workdir.HostPath {
+		fmt.Fprintf(w, "Workdir:     %s → %s (%s)\n", meta.Workdir.HostPath, meta.Workdir.MountPath, meta.Workdir.Mode) //nolint:errcheck
+	} else {
+		fmt.Fprintf(w, "Workdir:     %s (%s)\n", meta.Workdir.HostPath, meta.Workdir.Mode) //nolint:errcheck
+	}
+	for _, d := range meta.Directories {
+		if d.MountPath != d.HostPath {
+			fmt.Fprintf(w, "Dir:         %s → %s (%s)\n", d.HostPath, d.MountPath, d.Mode) //nolint:errcheck
+		} else {
+			fmt.Fprintf(w, "Dir:         %s (%s)\n", d.HostPath, d.Mode) //nolint:errcheck
+		}
+	}
+}
+
+// printSandboxNetwork prints network mode and port information.
+func printSandboxNetwork(w io.Writer, meta *sandbox.Meta) {
+	if meta.NetworkMode != "" {
+		if meta.NetworkMode == "isolated" && len(meta.NetworkAllow) > 0 {
+			fmt.Fprintf(w, "Network:     isolated (%s)\n", strings.Join(meta.NetworkAllow, ", ")) //nolint:errcheck
+		} else {
+			fmt.Fprintf(w, "Network:     %s\n", meta.NetworkMode) //nolint:errcheck
+		}
+	}
+	if len(meta.Ports) > 0 {
+		fmt.Fprintf(w, "Ports:       %s\n", strings.Join(meta.Ports, ", ")) //nolint:errcheck
+	}
+}
+
+// printSandboxResources prints resource limits and summary information.
+func printSandboxResources(w io.Writer, meta *sandbox.Meta, info *sandbox.Info) {
+	if meta.Resources != nil {
+		var parts []string
+		if meta.Resources.CPUs != "" {
+			parts = append(parts, meta.Resources.CPUs+" cpus")
+		}
+		if meta.Resources.Memory != "" {
+			parts = append(parts, meta.Resources.Memory+" memory")
+		}
+		if len(parts) > 0 {
+			fmt.Fprintf(w, "Resources:   %s\n", strings.Join(parts, ", ")) //nolint:errcheck
+		}
+	}
+	fmt.Fprintf(w, "Created:     %s (%s)\n", meta.CreatedAt.Format("2006-01-02T15:04:05Z07:00"), sandbox.FormatAge(meta.CreatedAt)) //nolint:errcheck
+	if meta.Workdir.BaselineSHA != "" {
+		fmt.Fprintf(w, "Baseline:    %s\n", meta.Workdir.BaselineSHA) //nolint:errcheck
+	}
+	if meta.YoloaiVersion != "" {
+		fmt.Fprintf(w, "Version:     %s\n", meta.YoloaiVersion) //nolint:errcheck
+	}
+	fmt.Fprintf(w, "Disk Usage:  %s\n", info.DiskUsage)  //nolint:errcheck
+	fmt.Fprintf(w, "Changes:     %s\n", info.HasChanges) //nolint:errcheck
 }
 
 // loadPromptPreview reads prompt.txt and returns the first 200 characters.

@@ -411,6 +411,30 @@ func ResolveRef(ctx context.Context, rt runtime.Runtime, name, ref string) (Comm
 	}
 }
 
+// selectRefRange resolves a "start..end" range ref and marks matching commits
+// in the selected set. Returns an error if either endpoint cannot be resolved
+// or if start comes after end.
+func selectRefRange(before, after string, allCommits []CommitInfo, shaIndex map[string]int,
+	resolve func(string) (string, error), selected map[string]bool) error {
+	startSHA, err := resolve(before)
+	if err != nil {
+		return err
+	}
+	endSHA, err := resolve(after)
+	if err != nil {
+		return err
+	}
+	startIdx, endIdx := shaIndex[startSHA], shaIndex[endSHA]
+	if startIdx > endIdx {
+		return fmt.Errorf("invalid range: %s is after %s", before, after)
+	}
+	// Range is exclusive of start, inclusive of end (git convention)
+	for i := startIdx + 1; i <= endIdx; i++ {
+		selected[strings.ToLower(allCommits[i].SHA)] = true
+	}
+	return nil
+}
+
 // ResolveRefs resolves a list of ref strings (short SHAs or "sha..sha" ranges)
 // to an ordered list of CommitInfo. For ranges, all commits between the two
 // endpoints (inclusive of end, exclusive of start) are included.
@@ -448,21 +472,8 @@ func ResolveRefs(ctx context.Context, rt runtime.Runtime, name string, refs []st
 	selected := make(map[string]bool) // full SHA (lowered) -> true
 	for _, ref := range refs {
 		if before, after, isRange := strings.Cut(ref, ".."); isRange {
-			startSHA, err := resolve(before)
-			if err != nil {
+			if err := selectRefRange(before, after, allCommits, shaIndex, resolve, selected); err != nil {
 				return nil, err
-			}
-			endSHA, err := resolve(after)
-			if err != nil {
-				return nil, err
-			}
-			startIdx, endIdx := shaIndex[startSHA], shaIndex[endSHA]
-			if startIdx > endIdx {
-				return nil, fmt.Errorf("invalid range: %s is after %s", before, after)
-			}
-			// Range is exclusive of start, inclusive of end (git convention)
-			for i := startIdx + 1; i <= endIdx; i++ {
-				selected[strings.ToLower(allCommits[i].SHA)] = true
 			}
 		} else {
 			fullSHA, err := resolve(ref)

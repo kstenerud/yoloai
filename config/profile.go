@@ -143,6 +143,237 @@ func ListProfiles() ([]string, error) {
 	return names, nil
 }
 
+// profileConfigHandler is a function that handles a single YAML key in a ProfileConfig.
+type profileConfigHandler func(cfg *ProfileConfig, val *yaml.Node) error
+
+// profileConfigHandlers maps top-level YAML keys to their handler functions.
+var profileConfigHandlers = map[string]profileConfigHandler{
+	"agent":                profileScalarHandler(func(c *ProfileConfig) *string { return &c.Agent }),
+	"model":                profileScalarHandler(func(c *ProfileConfig) *string { return &c.Model }),
+	"os":                   profileScalarHandler(func(c *ProfileConfig) *string { return &c.OS }),
+	"backend":              profileScalarHandler(func(c *ProfileConfig) *string { return &c.Backend }),
+	"container_backend":    profileScalarHandler(func(c *ProfileConfig) *string { return &c.ContainerBackend }),
+	"mounts":               profileExpandedSeqHandler(func(c *ProfileConfig) *[]string { return &c.Mounts }, "mounts[]"),
+	"ports":                profileRawSeqHandler(func(c *ProfileConfig) *[]string { return &c.Ports }),
+	"cap_add":              profileExpandedSeqHandler(func(c *ProfileConfig) *[]string { return &c.CapAdd }, "cap_add[]"),
+	"devices":              profileExpandedSeqHandler(func(c *ProfileConfig) *[]string { return &c.Devices }, "devices[]"),
+	"setup":                profileExpandedSeqHandler(func(c *ProfileConfig) *[]string { return &c.Setup }, "setup[]"),
+	"env":                  profileStringMapHandler(func(c *ProfileConfig) *map[string]string { return &c.Env }, "env"),
+	"agent_args":           profileStringMapHandler(func(c *ProfileConfig) *map[string]string { return &c.AgentArgs }, "agent_args"),
+	"tart":                 handleProfileTart,
+	"resources":            handleProfileResources,
+	"network":              handleProfileNetwork,
+	"workdir":              handleProfileWorkdir,
+	"directories":          handleProfileDirectories,
+	"agent_files":          handleProfileAgentFiles,
+	"auto_commit_interval": handleProfileAutoCommitInterval,
+	"isolation":            handleProfileIsolation,
+}
+
+// profileScalarHandler returns a handler that expands env vars and stores the result in the field pointed to by ptr.
+func profileScalarHandler(ptr func(*ProfileConfig) *string) profileConfigHandler {
+	return func(cfg *ProfileConfig, val *yaml.Node) error {
+		expanded, err := expandEnvBraced(val.Value)
+		if err != nil {
+			return err
+		}
+		*ptr(cfg) = expanded
+		return nil
+	}
+}
+
+// profileExpandedSeqHandler returns a handler that appends expanded sequence items to the slice pointed to by ptr.
+func profileExpandedSeqHandler(ptr func(*ProfileConfig) *[]string, label string) profileConfigHandler {
+	return func(cfg *ProfileConfig, val *yaml.Node) error {
+		if val.Kind != yaml.SequenceNode {
+			return nil
+		}
+		for _, item := range val.Content {
+			expanded, err := expandEnvBraced(item.Value)
+			if err != nil {
+				return fmt.Errorf("%s: %w", label, err)
+			}
+			*ptr(cfg) = append(*ptr(cfg), expanded)
+		}
+		return nil
+	}
+}
+
+// profileRawSeqHandler returns a handler that appends raw (unexpanded) sequence items to the slice pointed to by ptr.
+func profileRawSeqHandler(ptr func(*ProfileConfig) *[]string) profileConfigHandler {
+	return func(cfg *ProfileConfig, val *yaml.Node) error {
+		if val.Kind != yaml.SequenceNode {
+			return nil
+		}
+		for _, item := range val.Content {
+			*ptr(cfg) = append(*ptr(cfg), item.Value)
+		}
+		return nil
+	}
+}
+
+// profileStringMapHandler returns a handler that populates a map[string]string field with expanded values.
+func profileStringMapHandler(ptr func(*ProfileConfig) *map[string]string, prefix string) profileConfigHandler {
+	return func(cfg *ProfileConfig, val *yaml.Node) error {
+		if val.Kind != yaml.MappingNode {
+			return nil
+		}
+		m := make(map[string]string, len(val.Content)/2)
+		for k := 0; k < len(val.Content)-1; k += 2 {
+			key := val.Content[k].Value
+			expanded, err := expandEnvBraced(val.Content[k+1].Value)
+			if err != nil {
+				return fmt.Errorf("%s.%s: %w", prefix, key, err)
+			}
+			m[key] = expanded
+		}
+		*ptr(cfg) = m
+		return nil
+	}
+}
+
+func handleProfileTart(cfg *ProfileConfig, val *yaml.Node) error {
+	if val.Kind != yaml.MappingNode {
+		return nil
+	}
+	for k := 0; k < len(val.Content)-1; k += 2 {
+		subKey := val.Content[k].Value
+		subExpanded, err := expandEnvBraced(val.Content[k+1].Value)
+		if err != nil {
+			return fmt.Errorf("tart.%s: %w", subKey, err)
+		}
+		if subKey == "image" {
+			cfg.TartImage = subExpanded
+		}
+	}
+	return nil
+}
+
+func handleProfileResources(cfg *ProfileConfig, val *yaml.Node) error {
+	if val.Kind != yaml.MappingNode {
+		return nil
+	}
+	cfg.Resources = &ResourceLimits{}
+	for k := 0; k < len(val.Content)-1; k += 2 {
+		subKey := val.Content[k].Value
+		subExpanded, err := expandEnvBraced(val.Content[k+1].Value)
+		if err != nil {
+			return fmt.Errorf("resources.%s: %w", subKey, err)
+		}
+		switch subKey {
+		case "cpus":
+			cfg.Resources.CPUs = subExpanded
+		case "memory":
+			cfg.Resources.Memory = subExpanded
+		}
+	}
+	return nil
+}
+
+func handleProfileNetwork(cfg *ProfileConfig, val *yaml.Node) error {
+	if val.Kind != yaml.MappingNode {
+		return nil
+	}
+	cfg.Network = &NetworkConfig{}
+	for k := 0; k < len(val.Content)-1; k += 2 {
+		subKey := val.Content[k].Value
+		switch subKey {
+		case "isolated":
+			cfg.Network.Isolated = val.Content[k+1].Value == "true"
+		case "allow":
+			if val.Content[k+1].Kind == yaml.SequenceNode {
+				for _, item := range val.Content[k+1].Content {
+					cfg.Network.Allow = append(cfg.Network.Allow, item.Value)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func handleProfileWorkdir(cfg *ProfileConfig, val *yaml.Node) error {
+	if val.Kind != yaml.MappingNode {
+		return nil
+	}
+	w := &ProfileWorkdir{}
+	for k := 0; k < len(val.Content)-1; k += 2 {
+		wKey := val.Content[k].Value
+		expanded, err := expandEnvBraced(val.Content[k+1].Value)
+		if err != nil {
+			return fmt.Errorf("workdir.%s: %w", wKey, err)
+		}
+		switch wKey {
+		case "path":
+			w.Path = expanded
+		case "mode":
+			w.Mode = expanded
+		case "mount":
+			w.Mount = expanded
+		}
+	}
+	cfg.Workdir = w
+	return nil
+}
+
+func handleProfileDirectories(cfg *ProfileConfig, val *yaml.Node) error {
+	if val.Kind != yaml.SequenceNode {
+		return nil
+	}
+	for _, item := range val.Content {
+		if item.Kind != yaml.MappingNode {
+			continue
+		}
+		d := ProfileDir{}
+		for k := 0; k < len(item.Content)-1; k += 2 {
+			dKey := item.Content[k].Value
+			expanded, err := expandEnvBraced(item.Content[k+1].Value)
+			if err != nil {
+				return fmt.Errorf("directories[].%s: %w", dKey, err)
+			}
+			switch dKey {
+			case "path":
+				d.Path = expanded
+			case "mode":
+				d.Mode = expanded
+			case "mount":
+				d.Mount = expanded
+			}
+		}
+		cfg.Directories = append(cfg.Directories, d)
+	}
+	return nil
+}
+
+func handleProfileAgentFiles(cfg *ProfileConfig, val *yaml.Node) error {
+	af, err := parseAgentFilesNode(val)
+	if err != nil {
+		return fmt.Errorf("agent_files: %w", err)
+	}
+	cfg.AgentFiles = af
+	return nil
+}
+
+func handleProfileAutoCommitInterval(cfg *ProfileConfig, val *yaml.Node) error {
+	n, err := strconv.Atoi(val.Value)
+	if err != nil {
+		return fmt.Errorf("auto_commit_interval: %w", err)
+	}
+	cfg.AutoCommitInterval = n
+	return nil
+}
+
+func handleProfileIsolation(cfg *ProfileConfig, val *yaml.Node) error {
+	expanded, err := expandEnvBraced(val.Value)
+	if err != nil {
+		return fmt.Errorf("isolation: %w", err)
+	}
+	if err := ValidateIsolationMode(expanded); err != nil {
+		return fmt.Errorf("isolation: %w", err)
+	}
+	cfg.Isolation = expanded
+	return nil
+}
+
 // LoadProfile reads and parses a profile's config.yaml file.
 func LoadProfile(name string) (*ProfileConfig, error) {
 	dir := ProfileDirPath(name)
@@ -173,225 +404,14 @@ func LoadProfile(name string) (*ProfileConfig, error) {
 	}
 
 	for i := 0; i < len(root.Content)-1; i += 2 {
-		key := root.Content[i]
+		key := root.Content[i].Value
 		val := root.Content[i+1]
-
-		switch key.Value {
-		case "agent":
-			expanded, expandErr := expandEnvBraced(val.Value)
-			if expandErr != nil {
-				return nil, fmt.Errorf("agent: %w", expandErr)
-			}
-			cfg.Agent = expanded
-		case "model":
-			expanded, expandErr := expandEnvBraced(val.Value)
-			if expandErr != nil {
-				return nil, fmt.Errorf("model: %w", expandErr)
-			}
-			cfg.Model = expanded
-		case "os":
-			expanded, expandErr := expandEnvBraced(val.Value)
-			if expandErr != nil {
-				return nil, fmt.Errorf("os: %w", expandErr)
-			}
-			cfg.OS = expanded
-		case "backend":
-			expanded, expandErr := expandEnvBraced(val.Value)
-			if expandErr != nil {
-				return nil, fmt.Errorf("backend: %w", expandErr)
-			}
-			cfg.Backend = expanded
-		case "container_backend":
-			expanded, expandErr := expandEnvBraced(val.Value)
-			if expandErr != nil {
-				return nil, fmt.Errorf("container_backend: %w", expandErr)
-			}
-			cfg.ContainerBackend = expanded
-		case "tart":
-			if val.Kind == yaml.MappingNode {
-				for k := 0; k < len(val.Content)-1; k += 2 {
-					subKey := val.Content[k].Value
-					subExpanded, subErr := expandEnvBraced(val.Content[k+1].Value)
-					if subErr != nil {
-						return nil, fmt.Errorf("tart.%s: %w", subKey, subErr)
-					}
-					if subKey == "image" {
-						cfg.TartImage = subExpanded
-					}
-				}
-			}
-		case "agent_args":
-			if val.Kind == yaml.MappingNode {
-				cfg.AgentArgs = make(map[string]string, len(val.Content)/2)
-				for k := 0; k < len(val.Content)-1; k += 2 {
-					agentKey := val.Content[k].Value
-					agentExpanded, agentErr := expandEnvBraced(val.Content[k+1].Value)
-					if agentErr != nil {
-						return nil, fmt.Errorf("agent_args.%s: %w", agentKey, agentErr)
-					}
-					cfg.AgentArgs[agentKey] = agentExpanded
-				}
-			}
-		case "env":
-			if val.Kind == yaml.MappingNode {
-				cfg.Env = make(map[string]string, len(val.Content)/2)
-				for k := 0; k < len(val.Content)-1; k += 2 {
-					envKey := val.Content[k].Value
-					envExpanded, envErr := expandEnvBraced(val.Content[k+1].Value)
-					if envErr != nil {
-						return nil, fmt.Errorf("env.%s: %w", envKey, envErr)
-					}
-					cfg.Env[envKey] = envExpanded
-				}
-			}
-		case "ports":
-			if val.Kind == yaml.SequenceNode {
-				for _, item := range val.Content {
-					cfg.Ports = append(cfg.Ports, item.Value)
-				}
-			}
-		case "mounts":
-			if val.Kind == yaml.SequenceNode {
-				for _, item := range val.Content {
-					expanded, expandErr := expandEnvBraced(item.Value)
-					if expandErr != nil {
-						return nil, fmt.Errorf("mounts[]: %w", expandErr)
-					}
-					cfg.Mounts = append(cfg.Mounts, expanded)
-				}
-			}
-		case "cap_add":
-			if val.Kind == yaml.SequenceNode {
-				for _, item := range val.Content {
-					expanded, expandErr := expandEnvBraced(item.Value)
-					if expandErr != nil {
-						return nil, fmt.Errorf("cap_add[]: %w", expandErr)
-					}
-					cfg.CapAdd = append(cfg.CapAdd, expanded)
-				}
-			}
-		case "devices":
-			if val.Kind == yaml.SequenceNode {
-				for _, item := range val.Content {
-					expanded, expandErr := expandEnvBraced(item.Value)
-					if expandErr != nil {
-						return nil, fmt.Errorf("devices[]: %w", expandErr)
-					}
-					cfg.Devices = append(cfg.Devices, expanded)
-				}
-			}
-		case "setup":
-			if val.Kind == yaml.SequenceNode {
-				for _, item := range val.Content {
-					expanded, expandErr := expandEnvBraced(item.Value)
-					if expandErr != nil {
-						return nil, fmt.Errorf("setup[]: %w", expandErr)
-					}
-					cfg.Setup = append(cfg.Setup, expanded)
-				}
-			}
-		case "workdir":
-			if val.Kind == yaml.MappingNode {
-				w := &ProfileWorkdir{}
-				for k := 0; k < len(val.Content)-1; k += 2 {
-					wKey := val.Content[k].Value
-					wVal := val.Content[k+1].Value
-					expanded, wErr := expandEnvBraced(wVal)
-					if wErr != nil {
-						return nil, fmt.Errorf("workdir.%s: %w", wKey, wErr)
-					}
-					switch wKey {
-					case "path":
-						w.Path = expanded
-					case "mode":
-						w.Mode = expanded
-					case "mount":
-						w.Mount = expanded
-					}
-				}
-				cfg.Workdir = w
-			}
-		case "directories":
-			if val.Kind == yaml.SequenceNode {
-				for _, item := range val.Content {
-					if item.Kind == yaml.MappingNode {
-						d := ProfileDir{}
-						for k := 0; k < len(item.Content)-1; k += 2 {
-							dKey := item.Content[k].Value
-							dVal := item.Content[k+1].Value
-							expanded, dErr := expandEnvBraced(dVal)
-							if dErr != nil {
-								return nil, fmt.Errorf("directories[].%s: %w", dKey, dErr)
-							}
-							switch dKey {
-							case "path":
-								d.Path = expanded
-							case "mode":
-								d.Mode = expanded
-							case "mount":
-								d.Mount = expanded
-							}
-						}
-						cfg.Directories = append(cfg.Directories, d)
-					}
-				}
-			}
-		case "resources":
-			if val.Kind == yaml.MappingNode {
-				cfg.Resources = &ResourceLimits{}
-				for k := 0; k < len(val.Content)-1; k += 2 {
-					subKey := val.Content[k].Value
-					subExpanded, subErr := expandEnvBraced(val.Content[k+1].Value)
-					if subErr != nil {
-						return nil, fmt.Errorf("resources.%s: %w", subKey, subErr)
-					}
-					switch subKey {
-					case "cpus":
-						cfg.Resources.CPUs = subExpanded
-					case "memory":
-						cfg.Resources.Memory = subExpanded
-					}
-				}
-			}
-		case "network":
-			if val.Kind == yaml.MappingNode {
-				cfg.Network = &NetworkConfig{}
-				for k := 0; k < len(val.Content)-1; k += 2 {
-					subKey := val.Content[k].Value
-					switch subKey {
-					case "isolated":
-						cfg.Network.Isolated = val.Content[k+1].Value == "true"
-					case "allow":
-						if val.Content[k+1].Kind == yaml.SequenceNode {
-							for _, item := range val.Content[k+1].Content {
-								cfg.Network.Allow = append(cfg.Network.Allow, item.Value)
-							}
-						}
-					}
-				}
-			}
-		case "agent_files":
-			af, afErr := parseAgentFilesNode(val)
-			if afErr != nil {
-				return nil, fmt.Errorf("agent_files: %w", afErr)
-			}
-			cfg.AgentFiles = af
-		case "auto_commit_interval":
-			n, aErr := strconv.Atoi(val.Value)
-			if aErr != nil {
-				return nil, fmt.Errorf("auto_commit_interval: %w", aErr)
-			}
-			cfg.AutoCommitInterval = n
-		case "isolation":
-			expanded, expandErr := expandEnvBraced(val.Value)
-			if expandErr != nil {
-				return nil, fmt.Errorf("isolation: %w", expandErr)
-			}
-			if err := ValidateIsolationMode(expanded); err != nil {
-				return nil, fmt.Errorf("isolation: %w", err)
-			}
-			cfg.Isolation = expanded
-			// Unknown fields are silently ignored
+		handler, ok := profileConfigHandlers[key]
+		if !ok {
+			continue // unknown fields are silently ignored
+		}
+		if err := handler(cfg, val); err != nil {
+			return nil, err
 		}
 	}
 
@@ -530,16 +550,17 @@ func formatCycle(chain []string, repeated string) string {
 	return s
 }
 
-// MergeProfileChain merges base config with each profile in the chain.
-// chain is root-first, e.g. ["base", "go-dev", "go-web"].
-func MergeProfileChain(base *YoloaiConfig, chain []string) (*MergedConfig, error) {
+// mergedConfigFromBase initialises a MergedConfig from the baked-in base YoloaiConfig.
+func mergedConfigFromBase(base *YoloaiConfig) *MergedConfig {
 	merged := &MergedConfig{
-		Agent:            base.Agent,
-		Model:            base.Model,
-		OS:               base.OS,
-		ContainerBackend: base.ContainerBackend,
-		TartImage:        base.TartImage,
-		Isolation:        base.Isolation,
+		Agent:              base.Agent,
+		Model:              base.Model,
+		OS:                 base.OS,
+		ContainerBackend:   base.ContainerBackend,
+		TartImage:          base.TartImage,
+		Isolation:          base.Isolation,
+		AgentFiles:         base.AgentFiles,
+		AutoCommitInterval: base.AutoCommitInterval,
 	}
 	if len(base.Env) > 0 {
 		merged.Env = make(map[string]string, len(base.Env))
@@ -547,37 +568,33 @@ func MergeProfileChain(base *YoloaiConfig, chain []string) (*MergedConfig, error
 			merged.Env[k] = v
 		}
 	}
-
-	if base.Resources != nil {
-		merged.Resources = &ResourceLimits{}
-		if base.Resources.CPUs != "" {
-			merged.Resources.CPUs = base.Resources.CPUs
-		}
-		if base.Resources.Memory != "" {
-			merged.Resources.Memory = base.Resources.Memory
+	if len(base.AgentArgs) > 0 {
+		merged.AgentArgs = make(map[string]string, len(base.AgentArgs))
+		for k, v := range base.AgentArgs {
+			merged.AgentArgs[k] = v
 		}
 	}
-
-	if base.Network != nil {
-		merged.Network = &NetworkConfig{
-			Isolated: base.Network.Isolated,
+	if base.Resources != nil {
+		merged.Resources = &ResourceLimits{
+			CPUs:   base.Resources.CPUs,
+			Memory: base.Resources.Memory,
 		}
+	}
+	if base.Network != nil {
+		merged.Network = &NetworkConfig{Isolated: base.Network.Isolated}
 		if len(base.Network.Allow) > 0 {
 			merged.Network.Allow = make([]string, len(base.Network.Allow))
 			copy(merged.Network.Allow, base.Network.Allow)
 		}
 	}
-
 	if len(base.Mounts) > 0 {
 		merged.Mounts = make([]string, len(base.Mounts))
 		copy(merged.Mounts, base.Mounts)
 	}
-
 	if len(base.Ports) > 0 {
 		merged.Ports = make([]string, len(base.Ports))
 		copy(merged.Ports, base.Ports)
 	}
-
 	if len(base.CapAdd) > 0 {
 		merged.CapAdd = append([]string{}, base.CapAdd...)
 	}
@@ -587,122 +604,97 @@ func MergeProfileChain(base *YoloaiConfig, chain []string) (*MergedConfig, error
 	if len(base.Setup) > 0 {
 		merged.Setup = append([]string{}, base.Setup...)
 	}
+	return merged
+}
 
-	if len(base.AgentArgs) > 0 {
-		merged.AgentArgs = make(map[string]string, len(base.AgentArgs))
-		for k, v := range base.AgentArgs {
+// applyProfileToMerged applies a single ProfileConfig on top of merged in place.
+func applyProfileToMerged(merged *MergedConfig, profile *ProfileConfig) {
+	// Scalars: non-empty overrides previous
+	merged.Agent = mergeStringField(merged.Agent, profile.Agent)
+	merged.Model = mergeStringField(merged.Model, profile.Model)
+	merged.OS = mergeStringField(merged.OS, profile.OS)
+	merged.Backend = mergeStringField(merged.Backend, profile.Backend)
+	merged.ContainerBackend = mergeStringField(merged.ContainerBackend, profile.ContainerBackend)
+	merged.TartImage = mergeStringField(merged.TartImage, profile.TartImage)
+	merged.Isolation = mergeStringField(merged.Isolation, profile.Isolation)
+
+	// AgentFiles: replacement semantics
+	if profile.AgentFiles != nil {
+		merged.AgentFiles = profile.AgentFiles
+	}
+	// AutoCommitInterval: non-zero wins
+	if profile.AutoCommitInterval > 0 {
+		merged.AutoCommitInterval = profile.AutoCommitInterval
+	}
+	// Workdir: child wins over parent
+	if profile.Workdir != nil {
+		merged.Workdir = profile.Workdir
+	}
+
+	// Maps: merge, later wins on conflict
+	applyProfileMaps(merged, profile)
+
+	// Additive fields
+	merged.Ports = append(merged.Ports, profile.Ports...)
+	merged.Mounts = append(merged.Mounts, profile.Mounts...)
+	merged.CapAdd = append(merged.CapAdd, profile.CapAdd...)
+	merged.Devices = append(merged.Devices, profile.Devices...)
+	merged.Setup = append(merged.Setup, profile.Setup...)
+	merged.Directories = append(merged.Directories, profile.Directories...)
+
+	// Resources: per-field override
+	if profile.Resources != nil {
+		if merged.Resources == nil {
+			merged.Resources = &ResourceLimits{}
+		}
+		merged.Resources.CPUs = mergeStringField(merged.Resources.CPUs, profile.Resources.CPUs)
+		merged.Resources.Memory = mergeStringField(merged.Resources.Memory, profile.Resources.Memory)
+	}
+
+	// Network: isolated overrides (last wins), allow is additive
+	if profile.Network != nil {
+		if merged.Network == nil {
+			merged.Network = &NetworkConfig{}
+		}
+		merged.Network.Isolated = profile.Network.Isolated
+		merged.Network.Allow = append(merged.Network.Allow, profile.Network.Allow...)
+	}
+}
+
+// applyProfileMaps merges profile map fields (Env, AgentArgs) into merged.
+func applyProfileMaps(merged *MergedConfig, profile *ProfileConfig) {
+	if len(profile.Env) > 0 {
+		if merged.Env == nil {
+			merged.Env = make(map[string]string)
+		}
+		for k, v := range profile.Env {
+			merged.Env[k] = v
+		}
+	}
+	if len(profile.AgentArgs) > 0 {
+		if merged.AgentArgs == nil {
+			merged.AgentArgs = make(map[string]string)
+		}
+		for k, v := range profile.AgentArgs {
 			merged.AgentArgs[k] = v
 		}
 	}
+}
 
-	merged.AgentFiles = base.AgentFiles
-	merged.AutoCommitInterval = base.AutoCommitInterval
+// MergeProfileChain merges base config with each profile in the chain.
+// chain is root-first, e.g. ["base", "go-dev", "go-web"].
+func MergeProfileChain(base *YoloaiConfig, chain []string) (*MergedConfig, error) {
+	merged := mergedConfigFromBase(base)
 
-	// Apply each non-base profile in order
 	for _, name := range chain {
 		if name == "base" {
 			continue
 		}
-
 		profile, err := LoadProfile(name)
 		if err != nil {
 			return nil, err
 		}
-
-		// Scalars: non-empty overrides previous
-		if profile.Agent != "" {
-			merged.Agent = profile.Agent
-		}
-		if profile.Model != "" {
-			merged.Model = profile.Model
-		}
-		if profile.OS != "" {
-			merged.OS = profile.OS
-		}
-		if profile.Backend != "" {
-			merged.Backend = profile.Backend
-		}
-		if profile.ContainerBackend != "" {
-			merged.ContainerBackend = profile.ContainerBackend
-		}
-		if profile.TartImage != "" {
-			merged.TartImage = profile.TartImage
-		}
-		if profile.Isolation != "" {
-			merged.Isolation = profile.Isolation
-		}
-
-		// Env: map merge, later wins on conflict
-		if len(profile.Env) > 0 {
-			if merged.Env == nil {
-				merged.Env = make(map[string]string)
-			}
-			for k, v := range profile.Env {
-				merged.Env[k] = v
-			}
-		}
-
-		// AgentArgs: map merge, later wins on conflict
-		if len(profile.AgentArgs) > 0 {
-			if merged.AgentArgs == nil {
-				merged.AgentArgs = make(map[string]string)
-			}
-			for k, v := range profile.AgentArgs {
-				merged.AgentArgs[k] = v
-			}
-		}
-
-		// Ports: additive
-		merged.Ports = append(merged.Ports, profile.Ports...)
-
-		// Directories: additive
-		merged.Directories = append(merged.Directories, profile.Directories...)
-
-		// Workdir: child wins over parent
-		if profile.Workdir != nil {
-			merged.Workdir = profile.Workdir
-		}
-
-		// Resources: per-field override
-		if profile.Resources != nil {
-			if merged.Resources == nil {
-				merged.Resources = &ResourceLimits{}
-			}
-			if profile.Resources.CPUs != "" {
-				merged.Resources.CPUs = profile.Resources.CPUs
-			}
-			if profile.Resources.Memory != "" {
-				merged.Resources.Memory = profile.Resources.Memory
-			}
-		}
-
-		// Network: isolated overrides (last wins), allow is additive
-		if profile.Network != nil {
-			if merged.Network == nil {
-				merged.Network = &NetworkConfig{}
-			}
-			merged.Network.Isolated = profile.Network.Isolated
-			merged.Network.Allow = append(merged.Network.Allow, profile.Network.Allow...)
-		}
-
-		// Mounts: additive
-		merged.Mounts = append(merged.Mounts, profile.Mounts...)
-
-		// Recipes: additive
-		merged.CapAdd = append(merged.CapAdd, profile.CapAdd...)
-		merged.Devices = append(merged.Devices, profile.Devices...)
-		merged.Setup = append(merged.Setup, profile.Setup...)
-
-		// AgentFiles: replacement semantics (child replaces parent entirely)
-		if profile.AgentFiles != nil {
-			merged.AgentFiles = profile.AgentFiles
-		}
-
-		// AutoCommitInterval: scalar override (non-zero wins)
-		if profile.AutoCommitInterval > 0 {
-			merged.AutoCommitInterval = profile.AutoCommitInterval
-		}
-
+		applyProfileToMerged(merged, profile)
 	}
 
 	return merged, nil

@@ -69,31 +69,9 @@ func sandboxDispatch(cmd *cobra.Command, args []string) error {
 		return cmd.Help()
 	}
 
-	var name, subcmd string
-	var rest []string
-
-	if sandboxSubcmds[args[0]] {
-		// args[0] is a subcommand — name must come from YOLOAI_SANDBOX
-		envName := os.Getenv(EnvSandboxName)
-		if envName == "" {
-			return sandbox.NewUsageError("sandbox name required before subcommand (or set YOLOAI_SANDBOX)")
-		}
-		if err := sandbox.ValidateName(envName); err != nil {
-			return err
-		}
-		name = envName
-		subcmd = args[0]
-		rest = args[1:]
-	} else {
-		if err := sandbox.ValidateName(args[0]); err != nil {
-			return err
-		}
-		name = args[0]
-		if len(args) < 2 {
-			return sandbox.NewUsageError("subcommand required: info, log, exec, prompt, allow, allowed, deny")
-		}
-		subcmd = args[1]
-		rest = args[2:]
+	name, subcmd, rest, err := resolveSandboxDispatchArgs(args)
+	if err != nil {
+		return err
 	}
 
 	// Track sandbox name so the --bugreport flag defer can include sandbox sections.
@@ -129,4 +107,27 @@ func sandboxDispatch(cmd *cobra.Command, args []string) error {
 	default:
 		return sandbox.NewUsageError("unknown subcommand %q: valid subcommands are info, log, exec, prompt, allow, allowed, deny, bugreport, vscode", subcmd)
 	}
+}
+
+// resolveSandboxDispatchArgs extracts name, subcmd, and rest args from sandbox dispatch args.
+func resolveSandboxDispatchArgs(args []string) (name, subcmd string, rest []string, err error) {
+	if sandboxSubcmds[args[0]] {
+		// args[0] is a subcommand — name must come from YOLOAI_SANDBOX
+		envName := os.Getenv(EnvSandboxName)
+		if envName == "" {
+			return "", "", nil, sandbox.NewUsageError("sandbox name required before subcommand (or set YOLOAI_SANDBOX)")
+		}
+		if err := sandbox.ValidateName(envName); err != nil {
+			return "", "", nil, err
+		}
+		return envName, args[0], args[1:], nil
+	}
+
+	if err := sandbox.ValidateName(args[0]); err != nil {
+		return "", "", nil, err
+	}
+	if len(args) < 2 {
+		return "", "", nil, sandbox.NewUsageError("subcommand required: info, log, exec, prompt, allow, allowed, deny")
+	}
+	return args[0], args[1], args[2:], nil
 }
