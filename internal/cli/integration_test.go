@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/kstenerud/yoloai/internal/testutil"
-	dockerrt "github.com/kstenerud/yoloai/runtime/docker"
 	"github.com/kstenerud/yoloai/sandbox"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -162,8 +161,7 @@ func TestCLI_StartStop(t *testing.T) {
 	t.Cleanup(func() { destroySandbox(t, "cli-startstop") })
 
 	// Wait for container to become active
-	rt, err := dockerrt.New(context.Background())
-	require.NoError(t, err)
+	rt := testutil.NewIntegrationRuntime(context.Background(), t)
 	defer rt.Close() //nolint:errcheck // test cleanup
 	testutil.WaitForActive(context.Background(), t, rt, sandbox.InstanceName("cli-startstop"), 15*time.Second)
 
@@ -401,8 +399,7 @@ func TestCLI_StartAfterDone(t *testing.T) {
 		destroySandbox(t, "cli-startdone")
 	})
 
-	rt, err := dockerrt.New(context.Background())
-	require.NoError(t, err)
+	rt := testutil.NewIntegrationRuntime(context.Background(), t)
 	defer rt.Close() //nolint:errcheck // test cleanup
 
 	testutil.WaitForStatus(context.Background(), t, func(ctx context.Context) (string, error) {
