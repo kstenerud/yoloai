@@ -52,6 +52,8 @@ Development docs live in `docs/dev/`:
 
 **Before considering any code change complete, run `make check`.** This runs gofmt verification, golangci-lint, go mod tidy check, and all tests. All must pass before committing. If `make check` fails, fix the issues before proceeding. Subagents implementing code changes must include `make check` as a final step.
 
+For Claude Code users, this is enforced automatically: `.claude/settings.json` registers hooks that stamp the project when a source file is edited and run `make check` at end of turn if the stamp exists. On failure, the Stop hook blocks completion and feeds the output back. The hook scripts live at `.claude/hooks/post-edit.sh` and `.claude/hooks/on-stop.sh` and are committed so any clone of the repo picks them up.
+
 ## Workflow Conventions
 
 - **Critique cycle:** Write a critique in `docs/dev/CRITIQUE.md`, apply corrections to design docs and research files in `docs/dev/research/`, mark critique as done, empty CRITIQUE.md for the next round.

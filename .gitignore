@@ -17,8 +17,11 @@ coverage.html
 .DS_Store
 Thumbs.db
 
-# Claude Code
-.claude/
+# Claude Code — ignore personal config and runtime state, but track team-wide
+# settings and hook scripts so cloned repos pick them up automatically.
+.claude/*
+!.claude/settings.json
+!.claude/hooks/
 
 # Temporary files
 *.tmp
