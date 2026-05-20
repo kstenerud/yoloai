@@ -1,5 +1,7 @@
 # Separation-of-Concerns Refactor Plan
 
+> **Status:** This plan is the detailed design for **W12** of [`architecture-remediation.md`](architecture-remediation.md). The four issues below are folded into W12's scope; this document remains as the detailed step-by-step. Don't start the work here independently — run it as W12 of the broader plan.
+
 Addresses four architectural issues identified in a code review:
 
 1. **Behavioral `BackendCaps` checks scattered through the sandbox layer** — the
