@@ -8,6 +8,11 @@ import (
 	"time"
 
 	"github.com/kstenerud/yoloai/config"
+	// Blank imports register backend descriptors so migrate() can look up
+	// HostFilesystem from runtime.Descriptor(name). The actual factories
+	// are not invoked here — only the static descriptors are needed.
+	_ "github.com/kstenerud/yoloai/runtime/docker"
+	_ "github.com/kstenerud/yoloai/runtime/seatbelt"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -213,6 +218,29 @@ func TestMeta_MigrateV0ToV1_Seatbelt(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 1, loaded.Version, "v0 should be migrated to v1")
 	assert.True(t, loaded.HostFilesystem, "seatbelt backend should have HostFilesystem=true")
+}
+
+func TestMeta_MigrateV0ToV1_UnknownBackendDefaultsToFalse(t *testing.T) {
+	// If a meta file names a backend that isn't registered on this platform
+	// (or doesn't exist at all), migration should default HostFilesystem to
+	// false rather than panicking or rejecting the load. The conservative
+	// answer keeps the upgrade path forward-compatible.
+	dir := t.TempDir()
+
+	legacyJSON := `{
+		"yoloai_version": "0.1.0",
+		"name": "old-mystery",
+		"created_at": "2025-01-01T00:00:00Z",
+		"backend": "not-a-real-backend",
+		"agent": "claude",
+		"workdir": {"host_path": "/tmp/proj", "mount_path": "/tmp/proj", "mode": "copy"}
+	}`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, EnvironmentFile), []byte(legacyJSON), 0600))
+
+	loaded, err := LoadMeta(dir)
+	require.NoError(t, err)
+	assert.Equal(t, 1, loaded.Version, "v0 should be migrated to v1 even with unknown backend")
+	assert.False(t, loaded.HostFilesystem, "unknown backend should default to HostFilesystem=false")
 }
 
 func TestMeta_FutureVersionReturnsError(t *testing.T) {

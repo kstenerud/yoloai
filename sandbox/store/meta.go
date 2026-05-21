@@ -11,6 +11,7 @@ import (
 
 	"github.com/kstenerud/yoloai/config"
 	"github.com/kstenerud/yoloai/internal/fileutil"
+	"github.com/kstenerud/yoloai/runtime"
 )
 
 // metaVersion is the current schema version for Meta. Bump when adding or
@@ -80,9 +81,16 @@ func migrate(meta *Meta) error {
 			meta.Version, metaVersion)
 	}
 	if meta.Version < 1 {
-		// v0 → v1: bootstrap HostFilesystem from the backend name.
-		// Seatbelt is the only backend where sandbox state lives on the host.
-		meta.HostFilesystem = (meta.Backend == "seatbelt")
+		// v0 → v1: bootstrap HostFilesystem from the backend's descriptor
+		// capability. The descriptor is the single source of truth; backends
+		// declare their own HostFilesystem flag (see runtime.BackendCaps).
+		//
+		// If the named backend isn't registered on this platform we default
+		// to false — a meta whose backend can't be instantiated here will
+		// fail downstream anyway, and false is the conservative answer.
+		if desc, ok := runtime.Descriptor(meta.Backend); ok {
+			meta.HostFilesystem = desc.Capabilities.HostFilesystem
+		}
 		meta.Version = 1
 	}
 	return nil

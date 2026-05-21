@@ -103,6 +103,13 @@ func flagStr(cmd *cobra.Command, name string) string {
 // detectContainerBackend picks docker or podman based on a config preference
 // and socket availability. Returns the chosen backend and an optional warning
 // message (non-empty when the preferred backend was unavailable).
+//
+// The "docker" / "podman" string literals below are user-facing config values,
+// not dispatch decisions: the user (or their config file) types the preference
+// name and this helper resolves it to whichever backend is actually installed.
+// Per development-principles.md §2, capability-based dispatch belongs at the
+// backend selection point (newRuntime); this function is upstream of that —
+// it's preference resolution for the container-backend slot specifically.
 func detectContainerBackend(preference string) (backend string, warning string) {
 	if preference == "podman" {
 		if podmanrt.SocketExists() {

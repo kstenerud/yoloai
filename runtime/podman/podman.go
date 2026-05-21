@@ -32,6 +32,7 @@ var descriptor = runtime.BackendDescriptor{
 		OverlayDirs:      true,
 		CapAdd:           true,
 		HostFilesystem:   false,
+		ContainerAttach:  true,
 	},
 }
 

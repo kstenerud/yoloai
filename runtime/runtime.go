@@ -104,6 +104,7 @@ type BackendCaps struct {
 	OverlayDirs      bool // supports :overlay mount mode (overlayfs inside the container)
 	CapAdd           bool // supports cap_add, devices, and setup commands
 	HostFilesystem   bool // true when sandbox state lives on the host (seatbelt, future SSH)
+	ContainerAttach  bool // exposes a docker-compatible container surface so VS Code's "Attach to Running Container" works
 }
 
 // UsernsProvider is an optional interface implemented by backends that need

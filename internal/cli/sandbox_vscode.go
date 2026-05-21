@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os/exec"
 
+	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/sandbox"
 	"github.com/kstenerud/yoloai/sandbox/store"
 	"github.com/spf13/cobra"
@@ -35,11 +36,13 @@ func newSandboxVscodeCmd() *cobra.Command {
 				return fmt.Errorf("load sandbox metadata: %w", err)
 			}
 
-			// Check backend support for container attach
-			switch meta.Backend {
-			case "docker", "podman":
-				// supported
-			default:
+			// Check backend support for container attach. Query the
+			// backend descriptor's ContainerAttach capability rather than
+			// matching on backend names — new container-compatible
+			// backends will be supported automatically when they declare
+			// the capability.
+			desc, descOK := runtime.Descriptor(meta.Backend)
+			if !descOK || !desc.Capabilities.ContainerAttach {
 				fmt.Fprintf(cmd.OutOrStdout(), //nolint:errcheck // best-effort output
 					"Container attach is not supported for the %s backend.\n"+
 						"Use --vscode-tunnel when creating the sandbox instead.\n",
