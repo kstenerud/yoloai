@@ -266,3 +266,49 @@ type WorkDirSetup interface {
 type StdioExecer interface {
 	StdioExec(ctx context.Context, name string, cmd []string, stdin io.Reader, stdout, stderr io.Writer) error
 }
+
+// CachePruner is an optional interface for backends that maintain an
+// image/snapshot/build cache that accumulates across sandbox runs. The
+// `Prune()` method on the core interface only removes orphaned yoloai
+// instances; this reclaims the heavier backend-managed storage (image layers,
+// overlay snapshots, BuildKit cache, volumes). Called by `yoloai system prune
+// --cache`.
+//
+// More aggressive than `Prune`: removes ALL unused content the backend tracks,
+// not just yoloai's. Documented as a "machine dedicated to yoloai" operation.
+// Forces a base-image rebuild on next sandbox creation.
+type CachePruner interface {
+	PruneCache(ctx context.Context, dryRun bool, output io.Writer) error
+}
+
+// CacheUsage reports the backend's on-disk cache footprint. Returned by
+// DiskUsageReporter.
+type CacheUsage struct {
+	BytesUsed int64  // -1 if unknown
+	Detail    string // optional human-readable breakdown ("32 images, 304 snapshots")
+}
+
+// DiskUsageReporter is an optional interface for backends that can estimate
+// how much of their on-disk storage is consumed. Called by `yoloai system
+// disk` to surface backend usage to the user.
+type DiskUsageReporter interface {
+	CacheUsage(ctx context.Context) (CacheUsage, error)
+}
+
+// PruneCacheFor calls rt.PruneCache if implemented; otherwise prints a notice
+// that the backend has no cache to prune and returns nil.
+func PruneCacheFor(ctx context.Context, rt Runtime, dryRun bool, output io.Writer) error {
+	if p, ok := rt.(CachePruner); ok {
+		return p.PruneCache(ctx, dryRun, output)
+	}
+	return nil
+}
+
+// CacheUsageFor calls rt.CacheUsage if implemented; otherwise returns a
+// CacheUsage with BytesUsed=-1 to signal "unknown".
+func CacheUsageFor(ctx context.Context, rt Runtime) (CacheUsage, error) {
+	if r, ok := rt.(DiskUsageReporter); ok {
+		return r.CacheUsage(ctx)
+	}
+	return CacheUsage{BytesUsed: -1}, nil
+}

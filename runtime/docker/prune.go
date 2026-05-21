@@ -9,6 +9,8 @@ import (
 	"strings"
 
 	cerrdefs "github.com/containerd/errdefs"
+	"github.com/docker/docker/api/types"
+	"github.com/docker/docker/api/types/build"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/api/types/image"
@@ -124,4 +126,89 @@ func formatBytes(b uint64) string {
 	default:
 		return fmt.Sprintf("%d B", b)
 	}
+}
+
+// PruneCache implements runtime.CachePruner. Removes unused images, stopped
+// containers, unused volumes, unused networks, and the full BuildKit cache.
+// Equivalent to `docker system prune -a --force --volumes` plus a buildx
+// prune. Forces a yoloai-base rebuild on next sandbox creation.
+//
+// Affects ALL backend content, not just yoloai's — appropriate for a host
+// dedicated to yoloai testing; on shared hosts users should run the backend's
+// own prune commands instead.
+func (r *Runtime) PruneCache(ctx context.Context, dryRun bool, output io.Writer) error {
+	if dryRun {
+		// PruneReport has no dry-run mode in the Docker API; report intent and
+		// fall through to leave nothing removed.
+		fmt.Fprintf(output, "%s: cache prune skipped (--dry-run): would remove unused images, volumes, build cache\n", r.binaryName) //nolint:errcheck
+		return nil
+	}
+
+	var reclaimed uint64
+
+	// Containers first (stopped only). Removing stopped containers releases
+	// holds on otherwise-unreferenced images.
+	if rep, err := r.client.ContainersPrune(ctx, filters.NewArgs()); err == nil {
+		reclaimed += rep.SpaceReclaimed
+	} else {
+		fmt.Fprintf(output, "%s: containers prune failed: %v\n", r.binaryName, err) //nolint:errcheck
+	}
+
+	// Images: -a (also non-dangling). Won't touch images still referenced by
+	// running containers.
+	if rep, err := r.client.ImagesPrune(ctx, filters.NewArgs(filters.Arg("dangling", "false"))); err == nil {
+		reclaimed += rep.SpaceReclaimed
+	} else {
+		fmt.Fprintf(output, "%s: images prune failed: %v\n", r.binaryName, err) //nolint:errcheck
+	}
+
+	// Volumes (only unused ones).
+	if rep, err := r.client.VolumesPrune(ctx, filters.NewArgs()); err == nil {
+		reclaimed += rep.SpaceReclaimed
+	} else {
+		fmt.Fprintf(output, "%s: volumes prune failed: %v\n", r.binaryName, err) //nolint:errcheck
+	}
+
+	// Networks (only unused user-defined networks; defaults are preserved).
+	if _, err := r.client.NetworksPrune(ctx, filters.NewArgs()); err != nil {
+		fmt.Fprintf(output, "%s: networks prune failed: %v\n", r.binaryName, err) //nolint:errcheck
+	}
+
+	// BuildKit cache: usually the biggest single category on a heavy-build host.
+	if rep, err := r.client.BuildCachePrune(ctx, build.CachePruneOptions{All: true}); err == nil && rep != nil {
+		reclaimed += rep.SpaceReclaimed
+	} else if err != nil {
+		fmt.Fprintf(output, "%s: build cache prune failed: %v\n", r.binaryName, err) //nolint:errcheck
+	}
+
+	fmt.Fprintf(output, "%s: reclaimed %s\n", r.binaryName, formatBytes(reclaimed)) //nolint:errcheck
+	return nil
+}
+
+// CacheUsage implements runtime.DiskUsageReporter. Returns the total
+// daemon-managed bytes (images + containers + volumes + build cache) with a
+// short breakdown.
+func (r *Runtime) CacheUsage(ctx context.Context) (runtime.CacheUsage, error) {
+	du, err := r.client.DiskUsage(ctx, types.DiskUsageOptions{})
+	if err != nil {
+		return runtime.CacheUsage{BytesUsed: -1}, fmt.Errorf("%s disk usage: %w", r.binaryName, err)
+	}
+	var total int64
+	for _, img := range du.Images {
+		total += img.Size
+	}
+	for _, ct := range du.Containers {
+		total += ct.SizeRw
+	}
+	for _, v := range du.Volumes {
+		if v.UsageData != nil && v.UsageData.Size > 0 {
+			total += v.UsageData.Size
+		}
+	}
+	for _, bc := range du.BuildCache {
+		total += bc.Size
+	}
+	detail := fmt.Sprintf("%d images, %d containers, %d volumes, %d build-cache entries",
+		len(du.Images), len(du.Containers), len(du.Volumes), len(du.BuildCache))
+	return runtime.CacheUsage{BytesUsed: total, Detail: detail}, nil
 }

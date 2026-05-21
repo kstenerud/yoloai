@@ -62,6 +62,8 @@ type Runtime struct {
 // Compile-time check.
 var _ runtime.Runtime = (*Runtime)(nil)
 var _ runtime.IsolationCapabilityProvider = (*Runtime)(nil)
+var _ runtime.CachePruner = (*Runtime)(nil)
+var _ runtime.DiskUsageReporter = (*Runtime)(nil)
 
 // Descriptor returns a BackendDescriptor with the static facts for this backend.
 func (r *Runtime) Descriptor() runtime.BackendDescriptor {

@@ -56,6 +56,8 @@ type Runtime struct {
 var _ runtime.Runtime = (*Runtime)(nil)
 var _ runtime.UsernsProvider = (*Runtime)(nil)
 var _ runtime.IsolationCapabilityProvider = (*Runtime)(nil)
+var _ runtime.CachePruner = (*Runtime)(nil)       // inherited from embedded docker.Runtime
+var _ runtime.DiskUsageReporter = (*Runtime)(nil) // inherited from embedded docker.Runtime
 
 // New creates a Podman Runtime by discovering the Podman socket and
 // connecting via the Docker SDK.

@@ -736,7 +736,7 @@ def check_prerequisites(
         if pct >= 90:
             print(f"  WARNING: host / is {pct}% full ({free_gb}G free).")
             print( "           Containerd-based tests are likely to fail with ENOSPC.")
-            print( "           Consider: sudo nerdctl --namespace yoloai system prune -a --force\n")
+            print( "           Consider: yoloai system prune --all --cache --yes\n")
         elif pct >= 80:
             print(f"  Note: host / is {pct}% full ({free_gb}G free); watch for ENOSPC on containerd tests.\n")
     except OSError:
