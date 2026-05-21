@@ -7,7 +7,7 @@ LDFLAGS := -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.dat
 GOFILES := $(shell find . -name '*.go' -not -path './vendor/*')
 EMBEDFILES := $(shell find runtime internal -type f \( -name 'Dockerfile' -o -name '*.sh' -o -name '*.py' -o -name '*.conf' -o -name '*.md' \) -not -path './vendor/*' -not -path '*/__pycache__/*' -not -path '*/tests/*')
 
-.PHONY: build test fmt lint tidy-check govulncheck hadolint actionlint check cover integration e2e integration-podman python-test python-typecheck setup-dev-python smoketest smoketest-full releasetest setcap clean
+.PHONY: build test fmt lint tidy-check govulncheck hadolint actionlint check cover integration e2e integration-podman integration-seatbelt integration-tart python-test python-typecheck setup-dev-python smoketest smoketest-full releasetest setcap clean
 
 build: $(BINARY)
 
@@ -104,6 +104,19 @@ integration-podman: build
 	@echo "Running CLI lifecycle subset against Podman..."
 	@YOLOAI_TEST_BACKEND=podman go test -tags=integration -v -count=1 -timeout=10m \
 		-run '^TestCLI_(StartStop|StartAfterDone)$$' ./internal/cli/
+
+## integration-seatbelt: run Seatbelt integration tests (requires macOS with sandbox-exec)
+## On non-macOS platforms the tests skip cleanly via TestMain (exit 0).
+## Pair-runs are encouraged on macOS as part of releasetest on Apple Silicon machines.
+integration-seatbelt:
+	go test -tags=integration -v -count=1 -timeout=5m ./runtime/seatbelt/
+
+## integration-tart: run Tart integration tests (requires macOS with Apple Silicon + tart)
+## On platforms without tart the tests skip cleanly via TestMain (exit 0).
+## The TestTart_FullVMLifecycle test is gated behind YOLOAI_TEST_TART_VM=1
+## because it clones the base image (multi-GB, multi-minute).
+integration-tart:
+	go test -tags=integration -v -count=1 -timeout=10m ./runtime/tart/
 
 ## smoketest: run base-tier smoke tests (docker + containerd-vm / tart)
 ## VM backends require root (CAP_SYS_ADMIN + write to /var/run/netns/).
