@@ -39,8 +39,17 @@ tidy-check:
 govulncheck:
 	GOTOOLCHAIN=$(shell go env GOVERSION) go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
+## hadolint: lint the Dockerfile (skip when neither hadolint CLI nor Docker is available)
+## Prefers a local hadolint install; falls back to Docker; skips if neither is usable.
+## CI installs hadolint and treats this target as required.
 hadolint:
-	docker run --rm -i hadolint/hadolint < runtime/docker/resources/Dockerfile
+	@if command -v hadolint >/dev/null 2>&1; then \
+		hadolint runtime/docker/resources/Dockerfile; \
+	elif docker info >/dev/null 2>&1; then \
+		docker run --rm -i hadolint/hadolint < runtime/docker/resources/Dockerfile; \
+	else \
+		echo "hadolint: skipping (install hadolint or start Docker to enable)"; \
+	fi
 
 actionlint:
 	go run github.com/rhysd/actionlint/cmd/actionlint@latest
@@ -83,8 +92,17 @@ cover:
 base-image: build
 	./$(BINARY) system build
 
-integration: base-image
-	go test -tags=integration -v -count=1 -timeout=10m ./sandbox/ ./runtime/docker/ ./internal/cli/
+integration:
+	@if docker info >/dev/null 2>&1; then \
+		$(MAKE) base-image && \
+		go test -tags=integration -v -count=1 -timeout=10m ./sandbox/ ./runtime/docker/ ./internal/cli/; \
+	else \
+		echo "Docker unavailable — skipping Docker integration tests"; \
+	fi
+	@if [ "$$(uname -s)" = "Darwin" ] && [ "$$(uname -m)" = "arm64" ]; then \
+		echo "Apple Silicon detected — running seatbelt and tart integration tests"; \
+		$(MAKE) integration-seatbelt integration-tart; \
+	fi
 
 e2e: base-image
 	go test -tags=e2e -v -count=1 -timeout=15m ./test/e2e/

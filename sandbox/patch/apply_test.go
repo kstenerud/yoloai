@@ -5,6 +5,7 @@ package patch
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/kstenerud/yoloai/internal/yoerrors"
 	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/sandbox/store"
 	"github.com/kstenerud/yoloai/workspace"
@@ -20,11 +22,18 @@ import (
 
 // getTestRuntime returns a Docker runtime for testing :copy mode operations.
 // For :copy mode, git runs on the host, so Docker's GitExec will work correctly.
+// Skips the test if Docker is unavailable.
 func getTestRuntime(t *testing.T) runtime.Runtime {
 	t.Helper()
 	ctx := context.Background()
 	rt, err := runtime.New(ctx, "docker")
-	require.NoError(t, err, "failed to create Docker runtime for test")
+	if err != nil {
+		var depErr *yoerrors.DependencyError
+		if errors.As(err, &depErr) {
+			t.Skipf("Docker unavailable, skipping test: %v", err)
+		}
+		require.NoError(t, err, "failed to create Docker runtime for test")
+	}
 	t.Cleanup(func() {
 		_ = rt.Close()
 	})

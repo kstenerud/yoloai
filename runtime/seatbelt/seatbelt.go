@@ -118,8 +118,10 @@ func New(_ context.Context) (*Runtime, error) {
 func (r *Runtime) Create(_ context.Context, cfg runtime.InstanceConfig) error {
 	sandboxPath := filepath.Join(r.sandboxDir, sandboxName(cfg.Name))
 
-	if err := fileutil.MkdirAll(filepath.Join(sandboxPath, backendDir), 0750); err != nil {
-		return fmt.Errorf("create backend dir: %w", err)
+	for _, dir := range []string{backendDir, binDir, tmuxDir} {
+		if err := fileutil.MkdirAll(filepath.Join(sandboxPath, dir), 0750); err != nil {
+			return fmt.Errorf("create %s dir: %w", dir, err)
+		}
 	}
 
 	cfgData, err := json.Marshal(cfg)
@@ -334,13 +336,14 @@ func (r *Runtime) Stop(_ context.Context, name string) error {
 	return nil
 }
 
-// Remove stops the instance and cleans up seatbelt-specific files.
+// Remove stops the instance and removes all sandbox state from disk.
 func (r *Runtime) Remove(ctx context.Context, name string) error {
 	sandboxPath := filepath.Join(r.sandboxDir, sandboxName(name))
 
 	_ = r.Stop(ctx, name)
 
-	// Clean up mount symlinks
+	// Clean up external mount symlinks before removing the sandbox directory,
+	// since the symlink manifest lives inside sandboxPath.
 	manifestPath := filepath.Join(sandboxPath, backendDir, symlinkManifestName)
 	if data, err := os.ReadFile(manifestPath); err == nil { //nolint:gosec // G304: path within sandbox dir
 		for linkPath := range strings.SplitSeq(strings.TrimSpace(string(data)), "\n") {
@@ -348,20 +351,12 @@ func (r *Runtime) Remove(ctx context.Context, name string) error {
 				continue
 			}
 			_ = os.Remove(linkPath) //nolint:gosec // G703: linkPath is derived from internal agent mount config
-			// Try to remove empty parent dirs we may have created
 			parent := filepath.Dir(linkPath)
 			_ = os.Remove(parent) //nolint:gosec // G703: parent is filepath.Dir of an internal controlled path
 		}
 	}
 
-	// Clean up subdirectories
-	for _, d := range []string{backendDir, binDir, tmuxDir} {
-		_ = os.RemoveAll(filepath.Join(sandboxPath, d))
-	}
-
-	// Clean up secrets directory
-	_ = os.RemoveAll(filepath.Join(sandboxPath, "secrets"))
-
+	_ = os.RemoveAll(sandboxPath)
 	return nil
 }
 
@@ -369,8 +364,10 @@ func (r *Runtime) Remove(ctx context.Context, name string) error {
 func (r *Runtime) Inspect(_ context.Context, name string) (runtime.InstanceInfo, error) {
 	sandboxPath := filepath.Join(r.sandboxDir, sandboxName(name))
 
-	pidPath := filepath.Join(sandboxPath, backendDir, pidFileName)
-	if _, err := os.Stat(pidPath); os.IsNotExist(err) {
+	// Use the instance config as the existence marker — it's written by Create,
+	// while the PID file only exists after Start.
+	cfgPath := filepath.Join(sandboxPath, backendDir, seatbeltConfigFileName)
+	if _, err := os.Stat(cfgPath); os.IsNotExist(err) {
 		return runtime.InstanceInfo{}, runtime.ErrNotFound
 	}
 
