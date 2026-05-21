@@ -19,13 +19,12 @@ import (
 )
 
 // applyOverlay handles apply for sandboxes with overlay directories.
-func applyOverlay(cmd *cobra.Command, name string, meta *store.Meta, refs, paths []string, patchesDir string, noWIP, yes, dryRun bool) error {
-	// Reject unsupported flag combos for overlay
+// --include-wip has no effect here: overlay sandboxes have no commit history
+// inside the agent's workspace, so all upper-layer changes are applied as a
+// single patch regardless.
+func applyOverlay(cmd *cobra.Command, name string, meta *store.Meta, refs, paths []string, patchesDir string, yes, dryRun bool) error {
 	if len(refs) > 0 {
 		return sandbox.NewPlatformError("selective ref apply is not supported for :overlay sandboxes")
-	}
-	if noWIP {
-		return sandbox.NewPlatformError("--no-wip is not supported for :overlay sandboxes (no commit/WIP separation)")
 	}
 
 	backend := resolveBackendForSandbox(name)

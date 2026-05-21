@@ -17,7 +17,9 @@ import (
 )
 
 // exportPatches writes .patch files and optional wip.diff to the given directory.
-func exportPatches(cmd *cobra.Command, name string, paths []string, commits []patch.CommitInfo, hasWIP bool, dir string) error {
+// wip.diff is only written when includeWIP is true; without it the user gets a
+// hint that uncommitted changes exist and how to bring them in.
+func exportPatches(cmd *cobra.Command, name string, paths []string, commits []patch.CommitInfo, hasWIP, includeWIP bool, dir string) error {
 	if err := fileutil.MkdirAll(dir, 0750); err != nil {
 		return fmt.Errorf("create patches directory: %w", err)
 	}
@@ -31,24 +33,30 @@ func exportPatches(cmd *cobra.Command, name string, paths []string, commits []pa
 		}
 	}
 
-	if hasWIP {
+	wipExported := false
+	if hasWIP && includeWIP {
 		if err := exportWIPDiff(cmd, name, paths, dir, isJSON, out); err != nil {
 			return err
 		}
+		wipExported = true
 	}
 
 	if isJSON {
 		return writeJSON(out, applyResult{
 			Target:         dir,
 			CommitsApplied: len(commits),
-			WIPApplied:     hasWIP,
+			WIPApplied:     wipExported,
 			Method:         "patches-export",
 		})
 	}
 
 	fmt.Fprintln(out)                                                       //nolint:errcheck
 	fmt.Fprintln(out, "To apply commits:  git am --3way <patches>/*.patch") //nolint:errcheck
-	fmt.Fprintln(out, "To apply WIP:      git apply wip.diff")              //nolint:errcheck
+	if wipExported {
+		fmt.Fprintln(out, "To apply WIP:      git apply wip.diff") //nolint:errcheck
+	} else if hasWIP {
+		fmt.Fprintln(out, "Note: sandbox has uncommitted changes (not exported); re-run with --include-wip to write wip.diff.") //nolint:errcheck
+	}
 
 	return nil
 }

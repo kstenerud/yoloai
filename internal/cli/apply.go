@@ -30,15 +30,18 @@ func newApplyCmd() *cobra.Command {
 		Short: "Apply agent changes back to original work directory",
 		Long: `Apply agent changes back to the original directory.
 
-By default, individual commits are preserved using git format-patch/am.
-Uncommitted (WIP) changes are applied as unstaged modifications.
+By default, only committed changes are applied (individual commits via
+git format-patch/am). Uncommitted (WIP) edits the agent left behind are
+detected and reported but NOT applied; pass --include-wip to also bring
+them across as unstaged modifications.
 
 Specific commits can be cherry-picked by providing ref arguments:
   yoloai apply mybox abc123 def456       # specific commits
   yoloai apply mybox abc123..def456      # range
-  yoloai apply mybox                     # all (unchanged behavior)
+  yoloai apply mybox                     # all commits (default)
 
-Use --squash to flatten everything into a single unstaged patch.
+Use --squash to flatten the committed changes into a single unstaged
+patch (combine with --include-wip to include uncommitted edits too).
 Use --patches to export .patch files without applying them.`,
 		GroupID: groupWorkflow,
 		Args:    cobra.ArbitraryArgs,
@@ -46,14 +49,13 @@ Use --patches to export .patch files without applying them.`,
 	}
 
 	cmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
-	cmd.Flags().Bool("squash", false, "Flatten all changes into a single unstaged patch")
+	cmd.Flags().Bool("squash", false, "Flatten changes into a single unstaged patch")
 	cmd.Flags().String("patches", "", "Export .patch files to directory instead of applying")
-	cmd.Flags().Bool("no-wip", false, "Skip uncommitted changes, only apply commits")
+	cmd.Flags().Bool("include-wip", false, "Also apply uncommitted (work-in-progress) changes; default is commits only")
 	cmd.Flags().Bool("dry-run", false, "Show what would be applied without applying")
 	cmd.Flags().Bool("tags", false, "Transfer git tags created by the agent")
 
 	cmd.MarkFlagsMutuallyExclusive("squash", "patches")
-	cmd.MarkFlagsMutuallyExclusive("squash", "no-wip")
 	cmd.MarkFlagsMutuallyExclusive("squash", "tags")
 	cmd.MarkFlagsMutuallyExclusive("dry-run", "patches")
 
@@ -77,7 +79,7 @@ func runApplyCmd(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("expand patches path: %w", expandErr)
 		}
 	}
-	noWIP, _ := cmd.Flags().GetBool("no-wip")
+	includeWIP, _ := cmd.Flags().GetBool("include-wip")
 	dryRun, _ := cmd.Flags().GetBool("dry-run")
 	withTags, _ := cmd.Flags().GetBool("tags")
 
@@ -99,7 +101,7 @@ func runApplyCmd(cmd *cobra.Command, args []string) error {
 
 	slog.Info("applying changes", "event", "sandbox.apply", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
 	if hasOverlayDirs(meta) {
-		return applyOverlay(cmd, name, meta, refs, paths, patchesDir, noWIP, yes, dryRun)
+		return applyOverlay(cmd, name, meta, refs, paths, patchesDir, yes, dryRun)
 	}
 
 	if !jsonEnabled(cmd) {
@@ -116,12 +118,12 @@ func runApplyCmd(cmd *cobra.Command, args []string) error {
 		return applySelectedCommits(cmd, name, refs, paths, meta, yes, dryRun, withTags)
 	}
 
-	// --squash: flatten everything into one unstaged patch
+	// --squash: flatten into one unstaged patch (commits only unless --include-wip).
 	if squash {
-		return applySquash(cmd, name, paths, meta, yes, dryRun)
+		return applySquash(cmd, name, paths, meta, yes, dryRun, includeWIP)
 	}
 
-	return runApplyFormatPatch(cmd, name, paths, meta, patchesDir, yes, dryRun, noWIP, withTags)
+	return runApplyFormatPatch(cmd, name, paths, meta, patchesDir, yes, dryRun, includeWIP, withTags)
 }
 
 // parseApplyArgs separates ref arguments from path arguments.

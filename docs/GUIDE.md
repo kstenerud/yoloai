@@ -480,8 +480,8 @@ yoloai apply task --squash
 # Export .patch files for manual curation
 yoloai apply task --patches ./my-patches
 
-# Skip uncommitted (WIP) changes, only apply commits
-yoloai apply task --no-wip
+# Also bring across uncommitted (WIP) edits as unstaged files (default: commits only)
+yoloai apply task --include-wip
 
 # Apply specific commits by ref
 yoloai apply task abc123 def456

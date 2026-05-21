@@ -46,7 +46,7 @@ These were deferred from MVP but might be cheap to add and valuable for dogfoodi
 
 20. ~~**Multiple `:copy` directories in diff/apply**~~ — **Resolved:** Post-MVP (MVP has single workdir, no aux dirs). Show all with headers per directory. Apply all at once with single confirmation. If one fails, stop and report which failed. User can re-run with `[-- <path>...]` to apply selectively.
 
-86. ~~**Commit-preserving apply**~~ — **Resolved:** `yoloai apply` now preserves individual commits by default using `git format-patch` + `git am --3way`. Uncommitted changes are applied as unstaged on top. `--squash` for legacy single-patch behavior. `--patches <dir>` exports `.patch` files for manual curation (selective apply via deleting unwanted patches, or standard git tools like `git rebase -i` / `git cherry-pick`). `--no-wip` to skip uncommitted changes. See [commands.md](../design/commands.md) `yoloai apply` section.
+86. ~~**Commit-preserving apply**~~ — **Resolved:** `yoloai apply` preserves individual commits by default using `git format-patch` + `git am --3way`. Defaults to **commits only**; uncommitted (WIP) changes are reported via a hint but not applied. Opt in to applying WIP as unstaged modifications with `--include-wip`. `--squash` flattens into a single unstaged patch (commits only unless `--include-wip` is also set). `--patches <dir>` exports `.patch` files for manual curation; writes `wip.diff` only with `--include-wip`. See [commands.md](../design/commands.md) `yoloai apply` section and the WIP semantics flip in [BREAKING-CHANGES.md](../BREAKING-CHANGES.md).
 
 21. ~~**Overlay apply — patch transfer to host**~~ — **Resolved:** Capture `git diff` output from `docker exec` stdout, pipe to `git apply` on host. No temp file needed.
 

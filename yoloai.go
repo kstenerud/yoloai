@@ -241,11 +241,27 @@ func (c *Client) Diff(_ context.Context, name string) ([]*patch.DiffResult, erro
 	return patch.GenerateMultiDiff(patch.DiffOptions{Name: name})
 }
 
-// Apply applies the agent's changes back to the original host directories.
-// Equivalent to 'yoloai apply <name>'.
+// Apply applies the agent's committed changes back to the original host
+// directories. Equivalent to 'yoloai apply <name>'.
+// Uncommitted (work-in-progress) edits the agent left behind are NOT applied;
+// use ApplyWithOptions to opt in.
 // Returns ErrNoChanges if there is nothing to apply.
 func (c *Client) Apply(ctx context.Context, name string) ([]*patch.ApplyResult, error) {
-	return patch.ApplyAll(ctx, c.rt, name)
+	return patch.ApplyAll(ctx, c.rt, name, false)
+}
+
+// ApplyOptions controls Client.ApplyWithOptions.
+type ApplyOptions struct {
+	// IncludeWIP, when true, additionally applies the agent's uncommitted
+	// changes as unstaged modifications on the host. Mirrors the CLI's
+	// `yoloai apply --include-wip`.
+	IncludeWIP bool
+}
+
+// ApplyWithOptions is Apply with explicit options. Returns ErrNoChanges if
+// there is nothing to apply.
+func (c *Client) ApplyWithOptions(ctx context.Context, name string, opts ApplyOptions) ([]*patch.ApplyResult, error) {
+	return patch.ApplyAll(ctx, c.rt, name, opts.IncludeWIP)
 }
 
 // List returns info for all sandboxes.

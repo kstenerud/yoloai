@@ -390,7 +390,7 @@ Options:
 
 ### `yoloai apply`
 
-`yoloai apply <name> [--squash | --patches <dir>] [--no-wip] [--force] [-- <path>...]`
+`yoloai apply <name> [--squash | --patches <dir>] [--include-wip] [--force] [-- <path>...]`
 
 For `:copy` directories only. `:rw` directories need no apply — changes are already live. Read-only directories have no changes. For dirs that had no original git repo, excludes the synthetic `.git/` directory created by yoloAI.
 
@@ -402,11 +402,12 @@ Runs entirely on the host — reads from `work/<encoded-path>/`. Does not requir
 2. Check for commits beyond baseline (`git rev-list <baseline>..HEAD` in the work copy).
 3. If commits exist:
    - `git format-patch <baseline>..HEAD` in the work copy → temp directory.
-   - Show summary: "N commits to apply (+ uncommitted changes)" with `git log --oneline <baseline>..HEAD`.
+   - Show summary: "N commits to apply" with `git log --oneline <baseline>..HEAD`. If uncommitted changes also exist, a hint is printed pointing at `--include-wip`.
    - `git am --3way *.patch` on the host repo — preserves commit messages, authorship, and individual commits.
-   - If uncommitted changes also exist in the work copy (and `--no-wip` not set): `git diff HEAD` → `git apply` on the host (left unstaged).
+   - If uncommitted changes also exist in the work copy AND `--include-wip` is set: `git diff HEAD` → `git apply` on the host (left unstaged).
 4. If no commits beyond baseline:
-   - Apply uncommitted changes as an unstaged patch via `git diff <baseline>` → `git apply` on the host.
+   - With `--include-wip`: apply uncommitted changes as an unstaged patch via `git diff <baseline>` → `git apply` on the host.
+   - Without `--include-wip`: report "No changes to apply" and hint about `--include-wip` if uncommitted edits exist.
 
 Without `-- <path>...`, applies all changes. With `-- <path>...`, `git format-patch` filters to commits touching those paths and `git diff` is scoped to those paths. The `--` separator is required to distinguish paths from sandbox names.
 
@@ -424,9 +425,9 @@ Without `-- <path>...`, applies all changes. With `-- <path>...`, `git format-pa
 
 **Options:**
 
-- `--squash`: Flatten all changes (commits + uncommitted) into a single unstaged patch. Generates one `git diff <baseline>` and applies it with `git apply`. Shows a summary via `git diff --stat` and verifies cleanly with `git apply --check` before prompting for confirmation. Useful when you want to review everything as a single diff before committing.
-- `--no-wip`: Skip uncommitted changes, only apply commits. Has no effect with `--squash` (which always includes everything). Has no effect when there are no commits beyond baseline.
-- `--patches <dir>`: Export `.patch` files to the specified directory instead of applying. Also exports `wip.diff` if uncommitted changes exist (unless `--no-wip`). Prints instructions for manual application (`git am --3way <dir>/*.patch`). Useful for selective commit application — the user can delete unwanted `.patch` files before running `git am`, or use standard git tools (`git rebase -i`, `git cherry-pick`) after importing.
+- `--squash`: Flatten committed changes into a single unstaged patch (`git diff <baseline> HEAD`). With `--include-wip`, flattens commits + uncommitted edits together (`git diff <baseline>` after `git add -A`). Shows a summary via `git diff --stat` and verifies cleanly with `git apply --check` before prompting for confirmation.
+- `--include-wip`: Also apply the agent's uncommitted (work-in-progress) edits. Default is commits-only; with this flag, uncommitted changes are applied as unstaged modifications on top of the commits.
+- `--patches <dir>`: Export `.patch` files to the specified directory instead of applying. With `--include-wip`, also writes `wip.diff`. Prints instructions for manual application (`git am --3way <dir>/*.patch`). Useful for selective commit application — the user can delete unwanted `.patch` files before running `git am`, or use standard git tools (`git rebase -i`, `git cherry-pick`) after importing.
 - `--force`: Proceed even if the host repo has uncommitted changes.
 
 ### `yoloai destroy`

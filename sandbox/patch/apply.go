@@ -35,14 +35,14 @@ type ApplyResult struct {
 //
 // Returns ErrNoChanges if there are no patches to apply.
 // Returns an ApplyResult for each directory patched.
-func ApplyAll(ctx context.Context, rt runtime.Runtime, name string) ([]*ApplyResult, error) {
+func ApplyAll(ctx context.Context, rt runtime.Runtime, name string, includeWIP bool) ([]*ApplyResult, error) {
 	unlock, err := sandbox.AcquireLock(name)
 	if err != nil {
 		return nil, err
 	}
 	defer unlock()
 
-	patches, err := GenerateMultiPatch(ctx, rt, name, nil)
+	patches, err := GenerateMultiPatch(ctx, rt, name, nil, includeWIP)
 	if err != nil {
 		return nil, err
 	}
@@ -75,10 +75,17 @@ type CommitInfo = workspace.CommitInfo
 // PatchSet is an alias for workspace.PatchSet.
 type PatchSet = workspace.PatchSet
 
-// GeneratePatch produces a binary patch from the work copy against
-// the baseline SHA. Optionally filtered to specific paths.
-// Returns the patch bytes and a stat summary string.
-func GeneratePatch(ctx context.Context, rt runtime.Runtime, name string, paths []string) (patch []byte, stat string, err error) {
+// GeneratePatch produces a binary patch from the work copy against the
+// baseline SHA. Optionally filtered to specific paths.
+//
+// includeWIP=true diffs from baseline to the live working tree, including
+// uncommitted edits and untracked files (the historical behavior; first
+// stages untracked via `git add -A`).
+//
+// includeWIP=false diffs only baseline → HEAD, so uncommitted/untracked
+// changes the agent left behind are excluded. The CLI default is false; the
+// caller opts in via `yoloai apply --include-wip`.
+func GeneratePatch(ctx context.Context, rt runtime.Runtime, name string, paths []string, includeWIP bool) (patch []byte, stat string, err error) {
 	workDir, baselineSHA, mode, err := loadDiffContext(name)
 	if err != nil {
 		return nil, "", err
@@ -92,14 +99,21 @@ func GeneratePatch(ctx context.Context, rt runtime.Runtime, name string, paths [
 		return nil, "", fmt.Errorf("use GenerateOverlayPatch for :overlay directories")
 	}
 
-	// Stage untracked files
-	_, err = rt.GitExec(ctx, name, workDir, "add", "-A")
-	if err != nil {
-		return nil, "", fmt.Errorf("git add: %w", err)
+	// Pick the diff endpoint. baselineSHA..HEAD ignores the index and working
+	// tree entirely; baselineSHA against the working tree (after `git add -A`)
+	// includes them.
+	endpoint := "HEAD"
+	if includeWIP {
+		if _, addErr := rt.GitExec(ctx, name, workDir, "add", "-A"); addErr != nil {
+			return nil, "", fmt.Errorf("git add: %w", addErr)
+		}
+		endpoint = ""
 	}
 
-	// Generate binary patch
 	patchArgs := []string{"diff", "--binary", baselineSHA}
+	if endpoint != "" {
+		patchArgs = append(patchArgs, endpoint)
+	}
 	if len(paths) > 0 {
 		patchArgs = append(patchArgs, "--")
 		patchArgs = append(patchArgs, paths...)
@@ -110,8 +124,10 @@ func GeneratePatch(ctx context.Context, rt runtime.Runtime, name string, paths [
 		return nil, "", fmt.Errorf("git diff (patch): %w", err)
 	}
 
-	// Generate stat summary
 	statArgs := []string{"diff", "--stat", baselineSHA}
+	if endpoint != "" {
+		statArgs = append(statArgs, endpoint)
+	}
 	if len(paths) > 0 {
 		statArgs = append(statArgs, "--")
 		statArgs = append(statArgs, paths...)
@@ -743,7 +759,7 @@ func GenerateWIPDiff(ctx context.Context, rt runtime.Runtime, name string, paths
 // GenerateMultiPatch produces patches for all :copy directories.
 // :rw dirs are skipped (changes are already live).
 // Uses rt.GitExec to run git commands (works on both Docker and VM backends).
-func GenerateMultiPatch(ctx context.Context, rt runtime.Runtime, name string, paths []string) ([]PatchSet, error) {
+func GenerateMultiPatch(ctx context.Context, rt runtime.Runtime, name string, paths []string, includeWIP bool) ([]PatchSet, error) {
 	contexts, err := LoadAllDiffContexts(name)
 	if err != nil {
 		return nil, err
@@ -755,11 +771,18 @@ func GenerateMultiPatch(ctx context.Context, rt runtime.Runtime, name string, pa
 			continue
 		}
 
-		// Stage untracked files
-		_, _ = rt.GitExec(ctx, name, dc.WorkDir, "add", "-A")
+		// See GeneratePatch for the includeWIP semantics. Untracked staging
+		// happens only when the caller asked to include WIP.
+		endpoint := "HEAD"
+		if includeWIP {
+			_, _ = rt.GitExec(ctx, name, dc.WorkDir, "add", "-A")
+			endpoint = ""
+		}
 
-		// Generate binary patch
 		patchArgs := []string{"diff", "--binary", dc.BaselineSHA}
+		if endpoint != "" {
+			patchArgs = append(patchArgs, endpoint)
+		}
 		if len(paths) > 0 {
 			patchArgs = append(patchArgs, "--")
 			patchArgs = append(patchArgs, paths...)
@@ -773,8 +796,10 @@ func GenerateMultiPatch(ctx context.Context, rt runtime.Runtime, name string, pa
 			continue
 		}
 
-		// Generate stat
 		statArgs := []string{"diff", "--stat", dc.BaselineSHA}
+		if endpoint != "" {
+			statArgs = append(statArgs, endpoint)
+		}
 		if len(paths) > 0 {
 			statArgs = append(statArgs, "--")
 			statArgs = append(statArgs, paths...)

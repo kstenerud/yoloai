@@ -17,12 +17,12 @@ import (
 )
 
 // applySquash implements the squashed-patch apply mode.
-func applySquash(cmd *cobra.Command, name string, paths []string, meta *store.Meta, yes, dryRun bool) error {
+func applySquash(cmd *cobra.Command, name string, paths []string, meta *store.Meta, yes, dryRun, includeWIP bool) error {
 	// Check for aux :copy dirs
 	if len(meta.Directories) > 0 {
 		backend := resolveBackendForSandbox(name)
 		return withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
-			return applySquashMulti(cmd, ctx, rt, name, paths, meta, yes, dryRun)
+			return applySquashMulti(cmd, ctx, rt, name, paths, meta, yes, dryRun, includeWIP)
 		})
 	}
 
@@ -31,11 +31,15 @@ func applySquash(cmd *cobra.Command, name string, paths []string, meta *store.Me
 	backend := resolveBackendForSandbox(name)
 	err := withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
 		var genErr error
-		patchBytes, stat, genErr = patch.GeneratePatch(ctx, rt, name, paths)
+		patchBytes, stat, genErr = patch.GeneratePatch(ctx, rt, name, paths, includeWIP)
 		return genErr
 	})
 	if err != nil {
 		return err
+	}
+	// Surface uncommitted changes the user might want to bring along.
+	if !includeWIP {
+		warnSquashSkippedWIP(cmd, name, backend)
 	}
 	if len(patchBytes) == 0 {
 		if jsonEnabled(cmd) {
@@ -61,6 +65,34 @@ func applySquash(cmd *cobra.Command, name string, paths []string, meta *store.Me
 	}
 
 	return applySquashPatch(cmd, name, paths, targetDir, patchBytes, yes, backend)
+}
+
+// reportSquashMultiNoChanges emits the "nothing to do" output for the
+// multi-:copy squash path in either JSON or human mode.
+func reportSquashMultiNoChanges(cmd *cobra.Command) error {
+	if jsonEnabled(cmd) {
+		return writeJSON(cmd.OutOrStdout(), applyResult{Target: "multi", Method: "squash"})
+	}
+	_, err := fmt.Fprintln(cmd.OutOrStdout(), "No changes to apply")
+	return err
+}
+
+// warnSquashSkippedWIP prints the --include-wip hint when squash is excluding
+// uncommitted work. Best-effort: a failed WIP check is silently swallowed
+// because squash can still succeed on the committed delta.
+func warnSquashSkippedWIP(cmd *cobra.Command, name, backend string) {
+	if jsonEnabled(cmd) {
+		return
+	}
+	var hasWIP bool
+	_ = withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
+		var wipErr error
+		hasWIP, wipErr = patch.HasUncommittedChanges(ctx, rt, name)
+		return wipErr
+	})
+	if hasWIP {
+		fmt.Fprintln(cmd.OutOrStdout(), "Note: sandbox has uncommitted changes (excluded from squash); re-run with --include-wip to fold them in.") //nolint:errcheck
+	}
 }
 
 // applySquashPatch applies a squash patch after confirmation.
@@ -109,20 +141,16 @@ func applySquashPatch(cmd *cobra.Command, name string, paths []string, targetDir
 }
 
 // applySquashMulti applies squashed patches for multiple :copy directories.
-func applySquashMulti(cmd *cobra.Command, ctx context.Context, rt runtime.Runtime, name string, paths []string, _ *store.Meta, yes, dryRun bool) error {
-	patches, err := patch.GenerateMultiPatch(ctx, rt, name, paths)
+func applySquashMulti(cmd *cobra.Command, ctx context.Context, rt runtime.Runtime, name string, paths []string, _ *store.Meta, yes, dryRun, includeWIP bool) error {
+	patches, err := patch.GenerateMultiPatch(ctx, rt, name, paths, includeWIP)
 	if err != nil {
 		return err
 	}
+	if !includeWIP {
+		warnSquashSkippedWIP(cmd, name, resolveBackendForSandbox(name))
+	}
 	if len(patches) == 0 {
-		if jsonEnabled(cmd) {
-			return writeJSON(cmd.OutOrStdout(), applyResult{
-				Target: "multi",
-				Method: "squash",
-			})
-		}
-		_, err = fmt.Fprintln(cmd.OutOrStdout(), "No changes to apply")
-		return err
+		return reportSquashMultiNoChanges(cmd)
 	}
 
 	isJSON := jsonEnabled(cmd)

@@ -4,6 +4,28 @@ Tracks breaking changes made during beta. Each entry should be included in relea
 
 ## Unreleased
 
+### `yoloai apply` defaults to commits-only; `--no-wip` removed in favor of `--include-wip`
+
+**Previous behavior:** `yoloai apply` applied agent commits AND uncommitted work-in-progress edits as unstaged files in the same invocation. `--no-wip` opted out of the WIP application.
+
+**New behavior:** `yoloai apply` defaults to **committed changes only**. Uncommitted edits the agent left in the work copy are detected, reported as a hint, and NOT applied. To bring them across as unstaged modifications (the old default), pass `--include-wip`. The `--no-wip` flag has been removed.
+
+The flip applies uniformly across the apply surface:
+
+- Default format-patch path: applies commits; prints `Note: sandbox has uncommitted changes …` when WIP is present and excluded.
+- `--squash`: flattens commits only (`git diff baselineSHA HEAD`). With `--include-wip`, flattens everything including uncommitted (`git diff baselineSHA`, after `git add -A`).
+- `--patches`: writes `*.patch` for commits; writes `wip.diff` only when `--include-wip` is set.
+- `--squash` and `--include-wip` are no longer mutually exclusive — `--squash` controls patch shape, `--include-wip` controls scope.
+- `:overlay` sandboxes have no commit/WIP distinction; the flag has no effect there and is silently accepted (previously `--no-wip` errored on overlay).
+
+**Rationale:** "Apply commits the agent made" is what users typically want; uncommitted edits are by definition unsettled work the agent didn't finalize. Defaulting to including them surprised users who weren't expecting the agent's scratch state in their tree. Making `--include-wip` opt-in matches the project's `--X-to-enable-non-default-behavior` CLI convention ([`dev/CLI-STANDARD.md`](dev/CLI-STANDARD.md)) and surfaces the WIP state explicitly so users can choose.
+
+**Migration:**
+- Drop `--no-wip` (it was a no-op for the new behavior anyway).
+- If you relied on `yoloai apply` bringing across uncommitted edits, add `--include-wip` to the command.
+- The Go library API `Client.Apply(ctx, name)` is now commits-only; use the new `Client.ApplyWithOptions(ctx, name, ApplyOptions{IncludeWIP: true})` for the old behavior.
+- Internal `patch.GeneratePatch`, `patch.GenerateMultiPatch`, and `patch.ApplyAll` gain an `includeWIP bool` parameter at the end of their signatures.
+
 ### Cross-process JSON files gain `schema_version` field with mismatch-fails-loudly policy
 
 **Previous behavior:** `runtime-config.json` and `agent-status.json` had no explicit version field. Drift between Go (writer/reader) and Python (reader/writer) could silently misinterpret fields.

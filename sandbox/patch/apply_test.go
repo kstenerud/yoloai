@@ -41,7 +41,7 @@ func TestGeneratePatch_CopyMode(t *testing.T) {
 	writeTestFile(t, workDir, "file.txt", "modified content\n")
 
 	rt := getTestRuntime(t)
-	patch, stat, err := GeneratePatch(context.Background(), rt, "test-patch", nil)
+	patch, stat, err := GeneratePatch(context.Background(), rt, "test-patch", nil, true)
 	require.NoError(t, err)
 	assert.NotEmpty(t, patch)
 	assert.Contains(t, stat, "file.txt")
@@ -57,7 +57,7 @@ func TestGeneratePatch_RWMode_Error(t *testing.T) {
 	createRWSandbox(t, tmpDir, "test-rw-patch", hostDir)
 
 	rt := getTestRuntime(t)
-	_, _, err := GeneratePatch(context.Background(), rt, "test-rw-patch", nil)
+	_, _, err := GeneratePatch(context.Background(), rt, "test-rw-patch", nil, true)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), ":rw directories")
 }
@@ -71,7 +71,7 @@ func TestGeneratePatch_PathFilter(t *testing.T) {
 	writeTestFile(t, workDir, "other.txt", "also changed\n")
 
 	rt := getTestRuntime(t)
-	patch, stat, err := GeneratePatch(context.Background(), rt, "test-patch-filter", []string{"file.txt"})
+	patch, stat, err := GeneratePatch(context.Background(), rt, "test-patch-filter", []string{"file.txt"}, true)
 	require.NoError(t, err)
 	assert.NotEmpty(t, patch)
 	assert.Contains(t, stat, "file.txt")
@@ -86,10 +86,56 @@ func TestGeneratePatch_Empty(t *testing.T) {
 	createCopySandbox(t, tmpDir, "test-patch-empty", "/tmp/project")
 
 	rt := getTestRuntime(t)
-	patch, stat, err := GeneratePatch(context.Background(), rt, "test-patch-empty", nil)
+	patch, stat, err := GeneratePatch(context.Background(), rt, "test-patch-empty", nil, true)
 	require.NoError(t, err)
 	assert.Empty(t, patch)
 	assert.Empty(t, stat)
+}
+
+// TestGeneratePatch_IncludeWIPFalse_ExcludesUncommitted verifies the new
+// commits-only default: a sandbox with one committed change + an uncommitted
+// edit produces a patch that contains the commit only.
+func TestGeneratePatch_IncludeWIPFalse_ExcludesUncommitted(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	workDir := createCopySandboxWithCommits(t, tmpDir, "test-wip-excluded", "/tmp/project", []struct {
+		subject  string
+		filename string
+		content  string
+	}{
+		{"add committed.txt", "committed.txt", "committed body\n"},
+	})
+	// Uncommitted edit AFTER the commit.
+	writeTestFile(t, workDir, "wip.txt", "wip body\n")
+
+	rt := getTestRuntime(t)
+	patch, _, err := GeneratePatch(context.Background(), rt, "test-wip-excluded", nil, false)
+	require.NoError(t, err)
+	assert.Contains(t, string(patch), "committed.txt", "committed change must be in patch")
+	assert.NotContains(t, string(patch), "wip.txt", "uncommitted file must NOT be in patch when includeWIP=false")
+}
+
+// TestGeneratePatch_IncludeWIPTrue_IncludesUncommitted is the mirror: with
+// the flag on, the same sandbox produces a patch containing both files.
+func TestGeneratePatch_IncludeWIPTrue_IncludesUncommitted(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	workDir := createCopySandboxWithCommits(t, tmpDir, "test-wip-included", "/tmp/project", []struct {
+		subject  string
+		filename string
+		content  string
+	}{
+		{"add committed.txt", "committed.txt", "committed body\n"},
+	})
+	writeTestFile(t, workDir, "wip.txt", "wip body\n")
+
+	rt := getTestRuntime(t)
+	patch, _, err := GeneratePatch(context.Background(), rt, "test-wip-included", nil, true)
+	require.NoError(t, err)
+	assert.Contains(t, string(patch), "committed.txt")
+	assert.Contains(t, string(patch), "wip.txt", "uncommitted file must be in patch when includeWIP=true")
 }
 
 // ApplyPatch tests
@@ -102,7 +148,7 @@ func TestApplyPatch_GitTarget(t *testing.T) {
 	writeTestFile(t, workDir, "file.txt", "modified by agent\n")
 
 	rt := getTestRuntime(t)
-	patch, _, err := GeneratePatch(context.Background(), rt, "test-apply-git", nil)
+	patch, _, err := GeneratePatch(context.Background(), rt, "test-apply-git", nil, true)
 	require.NoError(t, err)
 
 	// Create target git repo with original content
@@ -128,7 +174,7 @@ func TestApplyPatch_NonGitTarget(t *testing.T) {
 	writeTestFile(t, workDir, "file.txt", "modified by agent\n")
 
 	rt := getTestRuntime(t)
-	patch, _, err := GeneratePatch(context.Background(), rt, "test-apply-nongit", nil)
+	patch, _, err := GeneratePatch(context.Background(), rt, "test-apply-nongit", nil, true)
 	require.NoError(t, err)
 
 	// Create target dir (no git) with original content
@@ -151,7 +197,7 @@ func TestApplyPatch_NewFile(t *testing.T) {
 	writeTestFile(t, workDir, "created.txt", "brand new file\n")
 
 	rt := getTestRuntime(t)
-	patch, _, err := GeneratePatch(context.Background(), rt, "test-apply-new", nil)
+	patch, _, err := GeneratePatch(context.Background(), rt, "test-apply-new", nil, true)
 	require.NoError(t, err)
 
 	// Target has original file but not the new one
@@ -203,7 +249,7 @@ func TestApplyPatch_DeleteFile(t *testing.T) {
 	require.NoError(t, os.Remove(filepath.Join(workDir, "remove.txt")))
 
 	rt := getTestRuntime(t)
-	patch, _, err := GeneratePatch(context.Background(), rt, name, nil)
+	patch, _, err := GeneratePatch(context.Background(), rt, name, nil, true)
 	require.NoError(t, err)
 
 	// Target has both files
@@ -231,7 +277,7 @@ func TestCheckPatch_Conflict(t *testing.T) {
 	writeTestFile(t, workDir, "file.txt", "agent version\n")
 
 	rt := getTestRuntime(t)
-	patch, _, err := GeneratePatch(context.Background(), rt, "test-conflict", nil)
+	patch, _, err := GeneratePatch(context.Background(), rt, "test-conflict", nil, true)
 	require.NoError(t, err)
 
 	// Target has different content than what patch expects
@@ -254,7 +300,7 @@ func TestCheckPatch_Clean(t *testing.T) {
 	writeTestFile(t, workDir, "file.txt", "modified\n")
 
 	rt := getTestRuntime(t)
-	patch, _, err := GeneratePatch(context.Background(), rt, "test-clean", nil)
+	patch, _, err := GeneratePatch(context.Background(), rt, "test-clean", nil, true)
 	require.NoError(t, err)
 
 	// Target matches original
@@ -759,7 +805,7 @@ func TestAdvanceBaseline_DiffEmptyAfterAdvance(t *testing.T) {
 
 	// Before: diff is non-empty
 	rt := getTestRuntime(t)
-	patch, _, err := GeneratePatch(context.Background(), rt, name, nil)
+	patch, _, err := GeneratePatch(context.Background(), rt, name, nil, true)
 	require.NoError(t, err)
 	assert.NotEmpty(t, patch)
 
@@ -767,7 +813,7 @@ func TestAdvanceBaseline_DiffEmptyAfterAdvance(t *testing.T) {
 	require.NoError(t, AdvanceBaseline(context.Background(), rt, name))
 
 	// After: diff is empty
-	patch, stat, err := GeneratePatch(context.Background(), rt, name, nil)
+	patch, stat, err := GeneratePatch(context.Background(), rt, name, nil, true)
 	require.NoError(t, err)
 	assert.Empty(t, patch)
 	assert.Empty(t, stat)
@@ -1293,7 +1339,7 @@ func TestApplyFlow_WIPOnly(t *testing.T) {
 	assert.True(t, hasWIP)
 
 	// Falls back to squash path — use GeneratePatch
-	patch, stat, err := GeneratePatch(context.Background(), rt, "test-flow-wip", nil)
+	patch, stat, err := GeneratePatch(context.Background(), rt, "test-flow-wip", nil, true)
 	require.NoError(t, err)
 	assert.NotEmpty(t, patch)
 	assert.Contains(t, stat, "file.txt")
@@ -1328,7 +1374,7 @@ func TestApplyFlow_NonGitFallback(t *testing.T) {
 	// The CLI does this, but we test the underlying primitives:
 	// GeneratePatch works for squash fallback
 	rt := getTestRuntime(t)
-	patch, stat, err := GeneratePatch(context.Background(), rt, "test-flow-nongit", nil)
+	patch, stat, err := GeneratePatch(context.Background(), rt, "test-flow-nongit", nil, true)
 	require.NoError(t, err)
 	assert.NotEmpty(t, patch)
 	assert.Contains(t, stat, "feature.txt")
