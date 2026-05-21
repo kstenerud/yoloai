@@ -20,7 +20,6 @@ import argparse
 import atexit
 import json
 import os
-import shlex
 import shutil
 import subprocess
 import sys
@@ -76,7 +75,9 @@ class BackendSpec:
         if self.is_seatbelt:
             return str(Path.home() / ".yoloai" / "sandboxes" / sandbox_name / "files")
         if self.is_vm and self.os == "mac":  # Tart VMs
-            return "/Volumes/My Shared Files/yoloai/files"
+            # Tart setup creates /Users/admin/.yoloai → /Volumes/My Shared Files/yoloai
+            # (virtiofs path has spaces; the symlink is space-free).
+            return "/Users/admin/.yoloai/files"
         return "/yoloai/files"
 
     def sentinel_timeout(self) -> int:
@@ -496,13 +497,8 @@ def _prompt(exdir: str, work: str, sentinel: str = SENTINEL) -> str:
     doesn't allocate disk blocks — so the success signal survives a mid-prompt
     ENOSPC, and the host can tell "agent never started" (neither file present)
     from "agent started but didn't finish" (in-progress lingering).
-
-    Paths are shell-quoted because the Tart VirtioFS mount path contains
-    spaces (/Volumes/My Shared Files/...) which bash would word-split.
     """
-    ip = shlex.quote(f"{exdir}/{IN_PROGRESS}")
-    done = shlex.quote(f"{exdir}/{sentinel}")
-    return f"touch {ip} && {work} && mv {ip} {done}"
+    return f"touch {exdir}/{IN_PROGRESS} && {work} && mv {exdir}/{IN_PROGRESS} {exdir}/{sentinel}"
 
 
 def test_full_workflow(t: Test, spec: BackendSpec) -> None:

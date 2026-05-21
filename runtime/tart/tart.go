@@ -47,6 +47,11 @@ var descriptor = runtime.BackendDescriptor{
 		OverlayDirs:      false,
 		CapAdd:           false,
 		HostFilesystem:   false,
+		// Tart VMs use a VirtioFS share at "/Volumes/My Shared Files/yoloai"
+		// (path contains spaces). The setup script creates a symlink
+		// /Users/admin/.yoloai → /Volumes/My Shared Files/yoloai so that
+		// shell commands inside the VM can reference state without quoting.
+		VMRuntimeDir: "/Users/admin/.yoloai",
 	},
 }
 

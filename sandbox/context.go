@@ -12,6 +12,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/fileutil"
 
 	"github.com/kstenerud/yoloai/agent"
+	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/sandbox/store"
 )
 
@@ -117,11 +118,15 @@ func GenerateContext(meta *store.Meta) string {
 }
 
 // runtimeDir returns the base path where runtime files live for this sandbox.
-// Container/VM backends use /yoloai inside the container; host-filesystem backends
-// (seatbelt, future SSH) use the sandbox directory on the host.
+// Container backends use /yoloai; host-filesystem backends (seatbelt) use the
+// host sandbox dir; VM backends that declare VMRuntimeDir use that path
+// (e.g. Tart uses /Users/admin/.yoloai, the symlinked path with no spaces).
 func runtimeDir(meta *store.Meta) string {
 	if meta.HostFilesystem {
 		return store.Dir(meta.Name)
+	}
+	if desc, ok := runtime.Descriptor(meta.Backend); ok && desc.Capabilities.VMRuntimeDir != "" {
+		return desc.Capabilities.VMRuntimeDir
 	}
 	return "/yoloai"
 }
