@@ -349,7 +349,7 @@ construction uses named fields (not positional). Positional literals break silen
 when fields are reordered or inserted; named fields make adding or reordering fields
 zero-cost at call sites. Fix any positional constructions found.
 
-**Fix C — Document the extension convention in `docs/dev/CODING-STANDARD.md`:**
+**Fix C — Document the extension convention in `docs/dev/standards/GO.md`:**
 
 Add a short paragraph establishing the pattern to follow when adding new backends:
 
@@ -362,7 +362,7 @@ Add a short paragraph establishing the pattern to follow when adding new backend
 > widening `InstanceConfig`.
 
 **Files to change:** `runtime/runtime.go` (field grouping), any call sites with
-positional construction (TBD from grep), `docs/dev/CODING-STANDARD.md`.
+positional construction (TBD from grep), `docs/dev/standards/GO.md`.
 
 ---
 
@@ -446,11 +446,11 @@ value — the file itself is the problem, not the argument referencing it. "Prof
 not exist" is UsageError (bad argument); "profile config.yaml is missing `agent` key"
 is ConfigError.
 
-Also add a note to `docs/dev/CODING-STANDARD.md` documenting this convention so new
+Also add a note to `docs/dev/standards/GO.md` documenting this convention so new
 CLI commands get it right the first time.
 
 **Files to change:** All files in `internal/cli/` with mistyped errors (audit
-required), `docs/dev/CODING-STANDARD.md`.
+required), `docs/dev/standards/GO.md`.
 
 ---
 

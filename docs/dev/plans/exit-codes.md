@@ -245,12 +245,12 @@ if errors.As(runErr, &permErr) { return 8 }
 
 ### Phase 4: Update documentation
 
-- **`docs/dev/CLI-STANDARD.md`**: Expand the exit codes table with codes 4–8.
+- **`docs/dev/standards/CLI.md`**: Expand the exit codes table with codes 4–8.
 - **`docs/GUIDE.md`**: Add a "Exit codes" section under "Scripting / CI" if one doesn't exist.
 
 ---
 
-## CLI-STANDARD.md Table (updated)
+## standards/CLI.md Table (updated)
 
 | Code | Meaning |
 |------|---------|

@@ -10,36 +10,27 @@ Standards live one level below `principles/`. Principles explain **why**; standa
 
 ## Index
 
-| Standard                                       | Status              | Scope                                                                                                       |
-| ---------------------------------------------- | ------------------- | ----------------------------------------------------------------------------------------------------------- |
-| [GO.md](GO.md)                                 | Phase 3 (planned)   | Go source code (`cmd/`, `internal/`, `runtime/`); gofmt, golangci-lint set, package layout, naming, errors. |
-| [CLI.md](CLI.md)                               | Phase 3 (planned)   | The `yoloai` CLI: Cobra subcommands, flag naming, argument order, exit codes, help text format.             |
-| [SHELL.md](SHELL.md)                           | Phase 3 (planned)   | Shell scripts (`.claude/hooks/*.sh`, container entrypoint, install scripts); bash strict mode, ShellCheck.  |
-| [PYTHON.md](PYTHON.md)                         | Phase 3 (planned)   | `runtime/monitor/` and other Python helpers; typing, pytest, mypy, pure-function discipline.                |
-| [MAKEFILE.md](MAKEFILE.md)                     | Phase 3 (planned)   | `Makefile`; target naming, `make check` contract, `.PHONY` discipline.                                      |
-| [DOCKERFILE.md](DOCKERFILE.md)                 | Phase 3 (planned)   | Profile Dockerfiles in `~/.yoloai/profiles/<name>/Dockerfile` and `runtime/docker/Dockerfile.base`.         |
-| [MARKDOWN.md](MARKDOWN.md)                     | Phase 3 (planned)   | Documentation prose; heading / table / cross-reference discipline; ABOUTME header for source files.         |
-
-## During Phase 1 / 2
-
-The two existing standards still live at their old paths:
-
-- `../CODING-STANDARD.md` — Go code style (will move to `standards/GO.md` in Phase 3).
-- `../CLI-STANDARD.md` — CLI conventions (will move to `standards/CLI.md` in Phase 3).
-
-When a principles doc cites the standard, it cites the eventual `standards/` path. The standards file itself is moved in Phase 3 with no content drift.
+| Standard                       | Scope                                                                                                       |
+| ------------------------------ | ----------------------------------------------------------------------------------------------------------- |
+| [GO.md](GO.md)                 | Go source code (`cmd/`, `internal/`, `runtime/`, `sandbox/`); gofmt, golangci-lint set, package layout, naming, error handling, dependency policy. |
+| [CLI.md](CLI.md)               | The `yoloai` CLI: Cobra subcommand layout, flag naming, argument order, exit codes, help text format, stdout/stderr discipline. |
+| [SHELL.md](SHELL.md)           | Shell scripts (`.claude/hooks/*.sh`, `scripts/audit/*.sh`, `runtime/docker/resources/entrypoint.sh`, `runtime/monitor/*.sh`); three contexts, strict mode, ShellCheck. |
+| [PYTHON.md](PYTHON.md)         | `runtime/monitor/` Python surface; typed pure functions vs I/O seams, pytest, mypy `--strict`. |
+| [MAKEFILE.md](MAKEFILE.md)     | `Makefile`; target naming, `.PHONY` discipline, the `make check` contract, test tiers, tool pinning.        |
+| [DOCKERFILE.md](DOCKERFILE.md) | Base image at `runtime/docker/resources/Dockerfile` and profile Dockerfiles at `~/.yoloai/profiles/<name>/Dockerfile`; hadolint, apt patterns, layer ordering. |
+| [MARKDOWN.md](MARKDOWN.md)     | Documentation prose; ABOUTME headers, heading discipline, table style, cross-reference paths, file-naming conventions. |
 
 ## How to use these docs
 
 - **Writing code.** Open the relevant standard alongside what you're working on. Standards are short by design.
-- **Reviewing code.** Cite the standard by name and section (e.g., `GO.md §Errors — wrap with `%w`, never `%s`). Style disagreements get resolved here, not in the agent's session log.
+- **Reviewing code.** Cite the standard by name and section (e.g., `GO.md §Errors — wrap with %w, never %s`). Style disagreements get resolved here, not in the agent's session log.
 - **Onboarding a contributor.** Principles + standards + `CLAUDE.md` is the contract. Anything not in the standards is open.
 
 ## How standards change
 
 Standards are versioned in git with the rest of the codebase. To change a rule:
 
-1. Open the PR with the standards edit.
+1. Open a PR with the standards edit.
 2. Either include the codebase changes that bring existing code into compliance, or note the migration plan in the PR description.
 3. The PR description includes the rationale. If the change is non-trivial (touches an axis multiple files depend on), add a D-entry to `../working-notes.md`.
 

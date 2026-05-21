@@ -433,7 +433,7 @@ Operational state (`setup_complete`) lives in `~/.yoloai/state.yaml`.
 **Decision.** Adopt a `docs/dev/principles/` + `docs/dev/standards/` split, modelled on the foley project but adapted for yoloAI's single-author OSS CLI scope. Four principle docs (general, development, testing, security-sandbox); standards file per language / surface. `docs/dev/working-notes.md` (this file) holds D-numbered decisions.
 
 **Rejected.**
-- *Keep `CODING-STANDARD.md` and `CLI-STANDARD.md` as the entire surface* — rejected because they answer *how* but not *why*; principles questions ("should this be a feature flag?", "should this validate at this layer?") had no canonical home.
+- *Keep `standards/GO.md` and `standards/CLI.md` as the entire surface* — rejected because they answer *how* but not *why*; principles questions ("should this be a feature flag?", "should this validate at this layer?") had no canonical home.
 - *Skip working-notes / D-log* — rejected because principles need provenance; without it, a future contributor has no way to judge whether a rule still applies.
 - *Include business-principles* — rejected; yoloAI has no customer-facing surface in the foley sense.
 

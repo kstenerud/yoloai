@@ -100,7 +100,7 @@ cheaper than the wrong abstraction." Metz's canonical failure path: see duplicat
 → extract prematurely → add a parameter for each exception → the abstraction now
 does something nobody wanted. She names the escape: "prefer duplication over the
 wrong abstraction." This directly backs the "premature abstraction" warning in
-`docs/dev/CODING-STANDARD.md` §What to Avoid: "Three similar lines of code are
+`docs/dev/standards/GO.md` §What to Avoid: "Three similar lines of code are
 better than a premature helper function."
 
 ### SOLID — Robert C. Martin (1995–2002)
@@ -136,7 +136,7 @@ Martin also published *Clean Code* (Prentice Hall, 2008) which popularized SRP
 beyond OOP into a general function/method discipline. Chapter 3 "Functions" — "The
 first rule of functions is that they should be small. The second rule is that they
 should be smaller than that" — backs the 40-line function guideline in
-`CODING-STANDARD.md`.
+`standards/GO.md`.
 
 ### Separation of Concerns — Edsger W. Dijkstra (1974)
 
@@ -151,7 +151,7 @@ In yoloAI's architecture: `runtime/` manages backend lifecycle; `sandbox/` manag
 sandbox state and orchestration; `internal/cli/` handles argument parsing and
 output. These are three separate concerns. The design rule that CLI commands are
 thin wrappers — "parse args, call into domain packages, format output"
-(`CODING-STANDARD.md` §CLI Framework) — is SoC applied structurally.
+(`standards/GO.md` §CLI Framework) — is SoC applied structurally.
 
 ### Encapsulation — David L. Parnas (1972)
 
@@ -194,7 +194,7 @@ mount at mirrored host paths because a user reading an error trace inside the
 sandbox should see the same path they see outside. Remapping paths to `/work/`
 would have been astonishing. The POLA argument is explicit in D3: "Principle of
 least astonishment: an agent reading an error trace inside the sandbox should see
-the same path the user sees outside." The CODING-STANDARD.md names the principle:
+the same path the user sees outside." The `standards/GO.md` names the principle:
 "Names should enhance readability and describe 'what', not 'how'."
 
 ### Convention over Configuration — David H. Hansson (2004–2006)
@@ -205,7 +205,7 @@ Hansson describes it in the Rails documentation and in his talks as: "when the
 framework can make a reasonable default decision, it should, and only expose
 configuration when the user needs to deviate."
 
-The principle appears in yoloAI's two-layer API design (`CODING-STANDARD.md` §API
+The principle appears in yoloAI's two-layer API design (`standards/GO.md` §API
 Design, §Two-Layer API): the high-level API covers 80% of use cases with sensible
 defaults; the low-level API handles the rest. The mount mode taxonomy (D4) is CoC
 applied to yoloAI: `:copy` is the safe default for workdir, `:ro` is the safe
@@ -240,7 +240,7 @@ change the answer."
 Applied to yoloAI: `runtime.Runtime.Inspect()` (query — returns state, no side
 effects) and `runtime.Runtime.Create()` (command — creates the instance, returns
 only an error). The `IsReady()` predicate is a query; `Setup()` is a command. The
-CODING-STANDARD.md enforces this indirectly: typed error returns from domain
+`standards/GO.md` enforces this indirectly: typed error returns from domain
 packages use the error value to signal failure, not to carry side-effect state.
 
 Meyer's *Object-Oriented Software Construction* is also the source of Design by
@@ -263,7 +263,7 @@ credited Knuth; the Knuth cite is the standard. The key discipline is the word
 "premature" — optimization driven by measurement of actual bottlenecks is exactly
 what Knuth advocates. Optimization driven by speculation is what is condemned.
 
-Applied to yoloAI: `CODING-STANDARD.md` §What to Avoid explicitly names "Premature
+Applied to yoloAI: `standards/GO.md` §What to Avoid explicitly names "Premature
 abstraction" as the Go-specific manifestation. The abstraction anti-pattern (extract
 a helper before the duplication makes the pattern clear) is premature optimization
 applied to code structure: optimizing for a reuse case that doesn't yet exist.
@@ -343,7 +343,7 @@ methods irrelevant to them, or return `errors.ErrUnsupported`, making the interf
 a lie. The optional interface design (type-assert to check; call if present; skip
 if absent) is honest: it does not promise what it cannot deliver.
 
-This pattern is documented in `CODING-STANDARD.md` §Runtime Backend Extension:
+This pattern is documented in `standards/GO.md` §Runtime Backend Extension:
 "Construction-time params specific to one backend belong in `New()`, not in
 `InstanceConfig`." The corollary: per-invocation optional features belong in
 optional interfaces, not in `InstanceConfig` with ignored-per-backend fields.
@@ -458,7 +458,7 @@ invariant held.
 Martin Fowler discusses it at martinfowler.com/ieeeSoftware/failFast.pdf (2004,
 the Shore article was published in IEEE Software which Fowler edited at the time).
 
-Applied to yoloAI: the error-handling discipline in `CODING-STANDARD.md` §Error
+Applied to yoloAI: the error-handling discipline in `standards/GO.md` §Error
 Handling — "Happy path at minimal indentation (early returns for errors)" — is fail
 fast implemented in Go's idiom. Each function checks its inputs and fails
 immediately; it does not attempt to proceed with invalid state.
@@ -467,12 +467,12 @@ immediately; it does not attempt to proceed with invalid state.
 
 Meyer's DbC (cited in §1) backs this: a constructor's postcondition is that the
 constructed object is valid. If it can't be, the constructor should fail (return
-an error in Go's idiom). The `CODING-STANDARD.md` pattern: `func NewXxx(docker
+an error in Go's idiom). The `standards/GO.md` pattern: `func NewXxx(docker
 DockerClient, cfg Config) *XxxManager` — the constructor validates its inputs and
 either returns a valid manager or an error. No partially-initialized objects.
 
 In Go, this aligns with the "accept interfaces, return structs" principle
-(`CODING-STANDARD.md` §Code Organization Patterns): returning a concrete struct
+(`standards/GO.md` §Code Organization Patterns): returning a concrete struct
 from a constructor communicates "this is the thing, fully initialized." An
 unexported zero value is an invalid state by convention.
 
@@ -488,7 +488,7 @@ start.
 
 ### Go-specific — `errgroup`, `context.Context`, no fire-and-forget goroutines
 
-`CODING-STANDARD.md` §Goroutine Discipline: "No fire-and-forget goroutines — every
+`standards/GO.md` §Goroutine Discipline: "No fire-and-forget goroutines — every
 goroutine must have a shutdown path." A fire-and-forget goroutine is the opposite
 of fail-fast: it can fail in the background, invisibly. The `errgroup.Group`
 pattern is fail-fast for concurrent operations: the first goroutine to return an
@@ -571,7 +571,7 @@ the error cannot be usefully handled in a defer), Go convention is to write
 not checked. The explicit discard makes the decision visible in code review rather
 than silently absent.
 
-`CODING-STANDARD.md` §Error Handling: "Never `panic` in library code — return
+`standards/GO.md` §Error Handling: "Never `panic` in library code — return
 errors." This is the producer side of the "act on every return value" principle:
 domain packages return errors, not panics, so callers can act on them.
 
@@ -581,7 +581,7 @@ Uber Go Style Guide (github.com/uber-go/guide/blob/master/style.md, maintained
 since 2018): §"Handle Errors" — "Do not discard errors using `_` variables. If a
 function returns an error, make sure to check it." The guide also documents the
 `errors.Is` / `errors.As` pattern for inspecting wrapped errors, which yoloAI uses
-(`CODING-STANDARD.md` §Error Handling: "Inspect errors with `errors.Is` and
+(`standards/GO.md` §Error Handling: "Inspect errors with `errors.Is` and
 `errors.As`").
 
 ### Google Go Style Guide (2022)

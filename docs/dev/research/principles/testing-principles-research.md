@@ -177,7 +177,7 @@ without editing the code under test. For error-path testing the seam is the entr
 point to an error condition: a filesystem that fails, a container that doesn't
 start, a daemon that isn't running. yoloAI's error handling design (typed errors
 at the CLI boundary, domain errors wrapped with context — documented in
-`docs/dev/CODING-STANDARD.md` §Error Handling) creates seams that make error paths
+`docs/dev/standards/GO.md` §Error Handling) creates seams that make error paths
 testable. The `TestCLI_StartAfterDone` test (commit `c10d6eb`) is a worked example:
 tests the behavior when `start` is called on a sandbox that is already done.
 
@@ -193,7 +193,7 @@ first test he writes for the `Dollar` class tests that it doesn't exist yet — 
 test fails (red) before any code. The discipline of writing the error test first
 means error paths are built into the code's design, not bolted on. For yoloAI,
 error cases are specifically listed during test design (table-driven test cases
-include error inputs by default — `docs/dev/CODING-STANDARD.md` §Testing).
+include error inputs by default — `docs/dev/standards/GO.md` §Testing).
 
 ### Worked example — containerd GitExec error type
 
@@ -217,7 +217,7 @@ its original formulation. Beck states it as a practice without naming it as a
 named principle: the test captures "I was wrong about this" and prevents "I'm wrong
 about it again."
 
-Applied to yoloAI: `docs/dev/CODING-STANDARD.md` §Testing states explicitly: "Bug
+Applied to yoloAI: `docs/dev/standards/GO.md` §Testing states explicitly: "Bug
 fixes require a regression test." This is the Beck discipline restated as a project
 rule.
 
@@ -323,9 +323,7 @@ subtests (`t.Run`), and helper infrastructure (`t.Helper`). The package's design
 choice — no assertion library, no mock framework, no fixture system — is a
 statement about what belongs in the testing layer. Assertions, fakes, and test
 fixtures are userspace concerns; the standard library provides only the runner.
-yoloAI follows this with `testify/assert` for assertion sugar (`docs/dev/
-CODING-STANDARD.md` §Testing: "testing stdlib + testify/assert — reduces assertion
-boilerplate") but no mock framework and no external fixture library.
+yoloAI follows this with `testify/assert` for assertion sugar (`docs/dev/standards/GO.md` §Testing: "testing stdlib + testify/assert — reduces assertion boilerplate") but no mock framework and no external fixture library.
 
 ---
 
@@ -476,7 +474,7 @@ it can be used here." The implication: the consumer defines what behavior it nee
 a fake implements that behavior; the production type also implements it. No mock
 framework is required.
 
-yoloAI's coding standard (`docs/dev/CODING-STANDARD.md` §Testing): "Mocking:
+yoloAI's coding standard (`docs/dev/standards/GO.md` §Testing): "Mocking:
 define interfaces at the consumption site, not the implementation site. Mock via
 interface satisfaction." And §Code Organization Patterns: "Accept interfaces, return
 structs — define interfaces at the point of consumption, not alongside the

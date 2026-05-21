@@ -1,10 +1,10 @@
-# Coding Standard
+# Go Coding Standard
 
-Reference for consistent code style and practices across the yoloAI codebase.
+Reference for consistent Go code style and practices across yoloAI.
 
 Based on Effective Go, Go Code Review Comments, Google Go Style Guide, and Uber Go Style Guide — filtered for a modern Go 1.22+ CLI project where navigability, clarity, and maintainability matter most.
 
-See also: global `CLAUDE.md` for language-agnostic naming philosophy and comment principles.
+See also: `../principles/development-principles.md` (the *why* behind these rules — boundary discipline, validate-at-every-layer, parse-don't-validate, warnings-are-signal), `../principles/testing-principles.md` (testing discipline), `CLI.md` (CLI-specific concerns), and global `~/.claude/CLAUDE.md` for language-agnostic naming and comment principles.
 
 ## Language and Toolchain
 

@@ -123,7 +123,7 @@ Threshold: any bug fix is accompanied by a test that would have caught it. The t
 - Smoke test stop/start fix on Kata VM backends (commit `53b849e`): the flaky test path was fixed and a stable assertion added. Flaky tests don't catch regressions; they train people to ignore red.
 - `TestIntegration_FullLifecycle` (commit `028e86d`): exercises the full container lifecycle as a regression guard against the recurring "container vanished" failure modes.
 - The containerd `GitExec` typed-error fix (commit `8749864`) shipped with a regression test for the error type contract.
-- `CODING-STANDARD.md` §Testing states the rule explicitly: "Bug fixes require a regression test."
+- `standards/GO.md` §Testing states the rule explicitly: "Bug fixes require a regression test."
 
 ### Cost-vs-benefit
 
@@ -236,8 +236,8 @@ Threshold: define the interface at the consumer's site (Go convention — "accep
 ### Worked examples
 
 - `runtime.Runtime` is the canonical interface; `internal/runtime/fake/` (where it exists for testing) implements it with predetermined results. The fake doesn't record interactions; it implements the behaviour contract.
-- `CODING-STANDARD.md` §Testing: "Mocking: define interfaces at the consumption site, not the implementation site. Mock via interface satisfaction."
-- `CODING-STANDARD.md` §Code Organization Patterns: "Accept interfaces, return structs — define interfaces at the point of consumption, not alongside the implementation."
+- `standards/GO.md` §Testing: "Mocking: define interfaces at the consumption site, not the implementation site. Mock via interface satisfaction."
+- `standards/GO.md` §Code Organization Patterns: "Accept interfaces, return structs — define interfaces at the point of consumption, not alongside the implementation."
 - No `gomock` / `mockery` / `mockgen` in `go.mod`. Verified by `grep` against the lockfile.
 - `testify/assert` is used for assertion sugar; `testify/mock` is *not* used. The split is deliberate.
 
@@ -249,7 +249,7 @@ Cost of applying: a few lines of code to write each fake. Damage prevented: gene
 
 Martin Fowler "Mocks Aren't Stubs" (martinfowler.com/articles/mocksArentStubs.html, 2007/2014); Michael Feathers *Working Effectively with Legacy Code* (Prentice Hall, 2004) — the seam model; Go `testing` documentation; Effective Go (go.dev/doc/effective_go) §Interfaces. Full citations: `../research/principles/testing-principles-research.md §8`.
 
-Originally established in `CODING-STANDARD.md` §Testing; ratified in D22.
+Originally established in `standards/GO.md` §Testing; ratified in D22.
 
 ---
 

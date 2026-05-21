@@ -20,7 +20,7 @@ Complementary docs:
 - `general-principles.md` — strategic disposition (boring tech, ecosystem-first, blast radius bounded). Applies across surfaces.
 - `testing-principles.md` — how we test it. Tests are the safety net that makes the refactoring this doc demands actually safe.
 - `security-principles.md` — what containment guarantees the production code must preserve.
-- `../standards/GO.md` (planned), `../standards/CLI.md` (planned), `../CODING-STANDARD.md`, `../CLI-STANDARD.md` — concrete style and naming rules.
+- `../standards/GO.md` and `../standards/CLI.md` — concrete style and naming rules.
 
 ---
 
@@ -434,4 +434,4 @@ The development principles parallel the general / testing / security principles 
 - `general-principles.md §3` (don't reinvent the wheel) is the strategic version of this doc's "use boring stdlib + ecosystem tools."
 - `testing-principles.md` is the safety net that makes the boundary discipline (§2) and refactor-in-cleanup-batches (§9) actually safe.
 - `security-principles.md` cites this doc's validate-at-every-layer (§3) and parse-don't-validate (§4) as the structural enforcement of containment.
-- `../standards/GO.md` (planned) is the concrete style and naming that grounds these principles in everyday Go code.
+- `../standards/GO.md` and `../standards/CLI.md` ground these principles in concrete everyday Go and CLI code.

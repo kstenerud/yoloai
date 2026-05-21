@@ -27,5 +27,5 @@ Completed in Pass 3:
 
 Completed in Pass 4:
 - Command classification — moved `files` and `x` from Admin to Workflow in design doc
-- `--no-*` flag naming — documented convention in CLI-STANDARD.md (--no-X for default-on, --X for default-off)
+- `--no-*` flag naming — documented convention in standards/CLI.md (--no-X for default-on, --X for default-off)
 - `sandbox network-allow` naming — replaced with `sandbox network {add,list,remove}` namespace

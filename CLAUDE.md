@@ -26,10 +26,8 @@ Development docs live in `docs/dev/`:
 
 - `docs/dev/ARCHITECTURE.md` — Code navigation guide: package map, file index, key types, command→code map, data flows, "where to change" recipes, testing. Keep in sync when architecture changes.
 - `docs/dev/principles/README.md` — Index of principle docs (general / development / testing / security-sandbox). Principles explain **why** — cite the relevant section when you make a non-obvious design or code choice. A principle wins over any conflicting standard.
-- `docs/dev/standards/README.md` — Index of per-technology standards (Go, CLI, Shell, Python, Makefile, Dockerfile, Markdown). Standards explain **what** and **how**. During Phase 1/2, the existing `CODING-STANDARD.md` and `CLI-STANDARD.md` still live at their old paths; they move into `standards/` in Phase 3.
+- `docs/dev/standards/README.md` — Index of per-technology standards: `GO.md`, `CLI.md`, `SHELL.md`, `PYTHON.md`, `MAKEFILE.md`, `DOCKERFILE.md`, `MARKDOWN.md`. Standards explain **what** and **how**.
 - `docs/dev/working-notes.md` — Append-only decision log (D-numbered entries). New non-trivial decisions land here first; principles and standards cite D-entries by number. Retroactive entries are flagged `(retroactive)`.
-- `docs/dev/CODING-STANDARD.md` — Code style: Go 1.22+, gofmt, golangci-lint, Cobra, project structure, naming, error handling, dependency policy. (Moves to `standards/GO.md` in Phase 3.)
-- `docs/dev/CLI-STANDARD.md` — CLI design conventions: argument ordering (options first), flag naming, exit codes, error messages, help text format. (Moves to `standards/CLI.md` in Phase 3.)
 - `docs/dev/RESEARCH.md` — Index of research documents. Detailed research split into topic files in `docs/dev/research/`: competitors, agents, security, sandboxing, implementation. Principles also have backing research in `docs/dev/research/principles/`.
 - `docs/dev/CRITIQUE.md` — Rolling critique document. After a critique pass, findings are applied to design docs and research files, then CRITIQUE.md is emptied for the next round.
 - `docs/dev/OPEN_QUESTIONS.md` — Questions encountered during design/implementation that need resolution.

@@ -4,6 +4,8 @@ Reference for consistent CLI behavior across all yoloAI commands.
 
 Based on POSIX Utility Conventions, GNU Coding Standards, and [clig.dev](https://clig.dev/).
 
+See also: `../principles/general-principles.md §3` (don't reinvent the wheel — compose with unix tools), `../principles/development-principles.md §2` (thin interface layer — CLI parses args and dispatches, no business logic), `GO.md` (Cobra command implementation conventions).
+
 ## Argument Ordering
 
 **Options first, then positional arguments** (POSIX Guideline 9). Avoids ambiguity when parsing variable-length positional lists.

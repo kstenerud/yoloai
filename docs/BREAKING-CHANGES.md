@@ -18,7 +18,7 @@ The flip applies uniformly across the apply surface:
 - `--squash` and `--include-wip` are no longer mutually exclusive — `--squash` controls patch shape, `--include-wip` controls scope.
 - `:overlay` sandboxes have no commit/WIP distinction; the flag has no effect there and is silently accepted (previously `--no-wip` errored on overlay).
 
-**Rationale:** "Apply commits the agent made" is what users typically want; uncommitted edits are by definition unsettled work the agent didn't finalize. Defaulting to including them surprised users who weren't expecting the agent's scratch state in their tree. Making `--include-wip` opt-in matches the project's `--X-to-enable-non-default-behavior` CLI convention ([`dev/CLI-STANDARD.md`](dev/CLI-STANDARD.md)) and surfaces the WIP state explicitly so users can choose.
+**Rationale:** "Apply commits the agent made" is what users typically want; uncommitted edits are by definition unsettled work the agent didn't finalize. Defaulting to including them surprised users who weren't expecting the agent's scratch state in their tree. Making `--include-wip` opt-in matches the project's `--X-to-enable-non-default-behavior` CLI convention ([`dev/standards/CLI.md`](dev/standards/CLI.md)) and surfaces the WIP state explicitly so users can choose.
 
 **Migration:**
 - Drop `--no-wip` (it was a no-op for the new behavior anyway).

@@ -172,7 +172,7 @@ These were deferred from MVP but might be cheap to add and valuable for dogfoodi
 
 78. ~~**Multiple `:copy` sandboxes from same source — sequential apply conflicts**~~ — **Removed.** The "compare two approaches in parallel" scenario is contrived — in practice you'd use `reset` or `--replace` to iterate sequentially. Accidental overlap (forgot a sandbox exists) is already covered by `git apply` error wrapping (#59).
 
-79. ~~**`yoloai apply` auto-starting container for overlay should print a message**~~ — **Resolved:** Print "Starting container for overlay diff..." to stderr when auto-starting a stopped container during `yoloai apply`. Consistent with CLI-STANDARD.md progress-on-stderr convention.
+79. ~~**`yoloai apply` auto-starting container for overlay should print a message**~~ — **Resolved:** Print "Starting container for overlay diff..." to stderr when auto-starting a stopped container during `yoloai apply`. Consistent with standards/CLI.md progress-on-stderr convention.
 
 80. ~~**Cannot add `--port` after sandbox creation**~~ — **Resolved:** Docker limitation — port mappings cannot be added to running containers. Document in `--port` help text: "Ports must be specified at creation time. To add ports later, use `yoloai new --replace`." No code change, just documentation.
 
