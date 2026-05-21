@@ -20,6 +20,7 @@ import argparse
 import atexit
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -495,8 +496,13 @@ def _prompt(exdir: str, work: str, sentinel: str = SENTINEL) -> str:
     doesn't allocate disk blocks — so the success signal survives a mid-prompt
     ENOSPC, and the host can tell "agent never started" (neither file present)
     from "agent started but didn't finish" (in-progress lingering).
+
+    Paths are shell-quoted because the Tart VirtioFS mount path contains
+    spaces (/Volumes/My Shared Files/...) which bash would word-split.
     """
-    return f"touch {exdir}/{IN_PROGRESS} && {work} && mv {exdir}/{IN_PROGRESS} {exdir}/{sentinel}"
+    ip = shlex.quote(f"{exdir}/{IN_PROGRESS}")
+    done = shlex.quote(f"{exdir}/{sentinel}")
+    return f"touch {ip} && {work} && mv {ip} {done}"
 
 
 def test_full_workflow(t: Test, spec: BackendSpec) -> None:
