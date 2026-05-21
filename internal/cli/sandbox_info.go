@@ -142,7 +142,7 @@ func printSandboxResources(w io.Writer, meta *store.Meta, info *sandbox.Info) {
 
 // loadPromptPreview reads prompt.txt and returns the first 200 characters.
 func loadPromptPreview(sandboxDir string) string {
-	data, err := os.ReadFile(filepath.Join(sandboxDir, "prompt.txt")) //nolint:gosec
+	data, err := os.ReadFile(filepath.Join(sandboxDir, "prompt.txt")) //nolint:gosec // G304: sandboxDir is the yoloAI-owned ~/.yoloai/sandboxes/<name>/ path resolved upstream
 	if err != nil {
 		return ""
 	}

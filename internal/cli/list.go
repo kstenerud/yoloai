@@ -218,6 +218,6 @@ func runList(cmd *cobra.Command, _ []string) error {
 		fmt.Fprintln(cmd.OutOrStdout(), "Sandboxes using these backends show status 'unavailable'.")                                  //nolint:errcheck
 	}
 
-	slog.Debug("list complete", "event", "sandbox.list", "count", len(infos)) //nolint:gosec
+	slog.Debug("list complete", "event", "sandbox.list", "count", len(infos))
 	return nil
 }

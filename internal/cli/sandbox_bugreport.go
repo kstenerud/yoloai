@@ -244,7 +244,7 @@ func writeBugReportJSONLFile(w io.Writer, title, path, reportType string, omitEv
 // Only included in unsafe reports.
 func writeBugReportAgentOutput(w io.Writer, name string) {
 	path := store.AgentLogPath(name)
-	f, err := os.Open(path) //nolint:gosec
+	f, err := os.Open(path) //nolint:gosec // G304: path is store.AgentLogPath(name) — yoloAI-owned
 	if err != nil {
 		fmt.Fprintln(w, "<details>")                       //nolint:errcheck
 		fmt.Fprintln(w, "<summary>Agent output</summary>") //nolint:errcheck
@@ -273,7 +273,7 @@ func writeBugReportTmuxCapture(w io.Writer, name string) {
 	tmuxSock := readTmuxSocketFromConfig(name)
 	var cmd *exec.Cmd
 	if tmuxSock != "" {
-		cmd = exec.Command("tmux", "-S", tmuxSock, "capture-pane", "-p", "-t", "main") //nolint:gosec
+		cmd = exec.Command("tmux", "-S", tmuxSock, "capture-pane", "-p", "-t", "main") //nolint:gosec // G204: tmuxSock is read from a yoloAI-owned config and validated as a path
 	} else {
 		cmd = exec.Command("tmux", "capture-pane", "-p", "-t", "main")
 	}

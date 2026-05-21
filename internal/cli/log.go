@@ -380,7 +380,7 @@ func tailFilePoll(
 // sandboxIsDone returns true if the sandbox's agent-status.json shows the agent has exited.
 func sandboxIsDone(name string) bool {
 	statusPath := store.AgentStatusFilePath(name)
-	data, err := os.ReadFile(statusPath) //nolint:gosec
+	data, err := os.ReadFile(statusPath) //nolint:gosec // G304: statusPath is store.AgentStatusFilePath(name) — yoloAI-owned
 	if err != nil {
 		return false
 	}
@@ -408,7 +408,7 @@ func runLogFollow(cmd *cobra.Command, name string, sources []logSource, minLevel
 	for _, src := range sources {
 		// Calculate initial offset (end of file)
 		var offset int64
-		if f, err := os.Open(src.path(name)); err == nil { //nolint:gosec
+		if f, err := os.Open(src.path(name)); err == nil { //nolint:gosec // G304: src.path is a known yoloAI log path (logs/<source>.jsonl)
 			offset, _ = f.Seek(0, io.SeekEnd)
 			_ = f.Close()
 		}
@@ -448,7 +448,7 @@ func runLogFollow(cmd *cobra.Command, name string, sources []logSource, minLevel
 // runLogAgent shows the raw agent terminal output (logs/agent.log).
 func runLogAgent(cmd *cobra.Command, name string, rawMode bool) error {
 	logPath := store.AgentLogPath(name)
-	f, err := os.Open(logPath) //nolint:gosec
+	f, err := os.Open(logPath) //nolint:gosec // G304: logPath is store.AgentLogPath(name) — yoloAI-owned
 	if err != nil {
 		if os.IsNotExist(err) {
 			fmt.Fprintln(cmd.OutOrStdout(), "No agent output yet") //nolint:errcheck

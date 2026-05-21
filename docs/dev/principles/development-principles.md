@@ -269,6 +269,18 @@ Deferred `Close()` on read-only resources is a documented acceptable case:
 defer f.Close() //nolint:errcheck // read-only file; Close errors don't affect data already read
 ```
 
+### Category-level justifications
+
+Three categories of suppression are policy-justified — the *category* is documented here, and per-site `//nolint:` directives don't need to repeat the rationale. Adding a per-site comment is welcome but not required for these specific patterns:
+
+1. **`//nolint:errcheck` on `fmt.F*` writes to a CLI writer** — `cmd.OutOrStdout()`, `os.Stdout`, `os.Stderr`, a `tabwriter.Writer`, a `bufio.Writer` wrapping one of the above. The error returns reflect pipe-closure / disk-full / closed-writer conditions that have no actionable response inside a CLI command; logging the error would either spam (if the writer is closed) or recurse (if the logger is the writer).
+
+2. **`//nolint:gosec` on `os.ReadFile` / `os.Open` of test fixtures in `*_test.go` files.** Test paths come from `t.TempDir()` or `testdata/`; G304's "path from variable" check doesn't apply at the test boundary where paths are by definition controlled. Production-code G304 suppressions still require per-site justification.
+
+3. **`//nolint:errcheck` on `defer Close()` / `defer Cleanup()` / `defer os.Remove(All)()` cleanup paths** where the cleanup error has no actionable response and the primary path has already succeeded. (Writable-file `Close()` is a different shape — see the worked example in §Pattern below; the error there *is* actionable.)
+
+Suppressions outside these three categories require a per-site comment explaining why the finding does not apply. The category list is closed — proposing a new category goes through a D-entry in `../working-notes.md`.
+
 ### Pattern
 
 ```go
