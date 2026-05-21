@@ -458,7 +458,7 @@ func TestCLI_Apply(t *testing.T) {
 		0600,
 	))
 
-	_, _, err = runCLI(t, "apply", "cli-apply", "--yes")
+	_, _, err = runCLI(t, "apply", "--include-wip", "cli-apply", "--yes")
 	require.NoError(t, err)
 
 	applied, err := os.ReadFile(filepath.Join(projectDir, "main.go")) //nolint:gosec // test path

@@ -1,6 +1,6 @@
 //go:build integration
 
-package sandbox
+package sandbox_test
 
 import (
 	"context"
@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	dockerrt "github.com/kstenerud/yoloai/runtime/docker"
+	sandbox "github.com/kstenerud/yoloai/sandbox"
 )
 
 // TestMain builds the base Docker image once before any integration tests run.
@@ -36,7 +37,7 @@ func TestMain(m *testing.M) {
 	}
 	defer rt.Close() //nolint:errcheck // best-effort close in test main
 
-	mgr := NewManager(rt, slog.Default(), strings.NewReader(""), io.Discard)
+	mgr := sandbox.NewManager(rt, slog.Default(), strings.NewReader(""), io.Discard)
 	if err := mgr.EnsureSetup(ctx); err != nil {
 		fmt.Fprintf(os.Stderr, "EnsureSetup failed: %v\n", err)
 		os.Exit(1)

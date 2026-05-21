@@ -1,6 +1,6 @@
 //go:build integration
 
-package sandbox
+package sandbox_test
 
 import (
 	"context"
@@ -11,13 +11,14 @@ import (
 
 	"github.com/kstenerud/yoloai/internal/testutil"
 	dockerrt "github.com/kstenerud/yoloai/runtime/docker"
+	sandbox "github.com/kstenerud/yoloai/sandbox"
 	"github.com/stretchr/testify/require"
 )
 
 // integrationSetup sets HOME to a temp dir, connects to Docker,
 // builds the base image, and returns a Manager. Uses t.Cleanup
 // for automatic teardown.
-func integrationSetup(t *testing.T) (*Manager, context.Context) {
+func integrationSetup(t *testing.T) (*sandbox.Manager, context.Context) {
 	t.Helper()
 	ctx := context.Background()
 
@@ -27,7 +28,7 @@ func integrationSetup(t *testing.T) (*Manager, context.Context) {
 	require.NoError(t, err, "Docker must be running for integration tests")
 	t.Cleanup(func() { rt.Close() }) //nolint:errcheck // test cleanup
 
-	mgr := NewManager(rt, slog.Default(), strings.NewReader(""), io.Discard)
+	mgr := sandbox.NewManager(rt, slog.Default(), strings.NewReader(""), io.Discard)
 	require.NoError(t, mgr.EnsureSetup(ctx))
 
 	return mgr, ctx
