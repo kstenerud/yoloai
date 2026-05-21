@@ -25,6 +25,7 @@ row to the index.
 | `docker save \| ctr import` hangs indefinitely | [Containerd: pipe hang on ctr failure](#docker-save--ctr-import-hangs-if-ctr-fails-early) |
 | Containerd socket: no error from `os.Stat` despite permission denied | [Containerd: Stat can't detect EPERM](#osstat-on-the-containerd-socket-does-not-detect-permission-denied) |
 | Containerd GC removes blobs; image becomes unrunnable | [Containerd: GC removes child blobs](#containerd-gc-removes-child-blobs-while-leaving-the-root-manifest-intact) |
+| `yoloai apply` fails on containerd with `git diff --quiet: exec exited with code 1` | [Containerd: GitExec must return *runtime.ExecError](#gitexec-must-return-runtimeexecerror-not-a-plain-fmterrorf-on-non-zero-exit) |
 | `already exists` on snapshot create after crash | [Containerd: orphaned snapshots](#kata-orphaned-snapshots-from-crashed-runs-must-be-pre-cleared) |
 | CNI bridge plugin: "netns and CNI_NETNS should not be the same" | [CNI: netns.NewNamed switches OS thread](#netnsnewnamed-switches-the-os-thread-via-unshare-and-never-restores-it) |
 | `createNetNS` fails with "file exists" (EEXIST) | [CNI: stale netns file](#stale-named-netns-files-at-varrunnetnsname-persist-after-failed-runs) |
@@ -458,6 +459,29 @@ save` blocks indefinitely on a write to a broken pipe. The parent process hangs.
 
 Must wait on `importCmd.Wait()` first, and if it fails, immediately call
 `saveCmd.Process.Kill()` before calling `saveCmd.Wait()`. See `image.go::Setup`.
+
+### `GitExec` must return `*runtime.ExecError` (not a plain `fmt.Errorf`) on non-zero exit
+
+`sandbox/patch/apply.go::HasUncommittedChanges` runs `git diff --quiet HEAD`
+and treats exit 1 as "diffs present" via `errors.As(err, *runtime.ExecError)`.
+After W8 of the architecture remediation (`e59704b`) replaced the previous
+text-match (`strings.Contains(err.Error(), "exec exited with code 1")`) with
+the typed-error check, containerd's `GitExec` silently broke `yoloai apply` on
+every sandbox with uncommitted changes — including the smoke test's
+`stop_start/containerd-vm`. Symptom: `apply: exit 1` with stderr
+`git diff --quiet: exec exited with code 1`.
+
+Docker / podman / seatbelt wrap the original `*exec.ExitError` via `%w`, so
+`errors.As(err, *exec.ExitError)` (the fallback branch) recognises exit 1.
+Tart goes through `runtime.RunCmdExecRaw`, which directly returns
+`*runtime.ExecError`. Containerd unwrapped the `*exec.ExitError` into a plain
+`fmt.Errorf("exec exited with code %d: %s", ...)` string, losing the error
+type and breaking both branches.
+
+Fix: construct `&runtime.ExecError{ExitCode, Stderr}` directly so callers can
+match exit codes through `errors.As`. Regression test at
+`runtime/containerd/containerd_test.go::TestGitExec_ExitOneReturnsExecError`.
+See `runtime/containerd/containerd.go::GitExec`.
 
 ### `os.Stat` on the containerd socket does not detect permission denied
 

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -14,6 +15,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/runtime/caps"
 )
 
@@ -32,6 +34,38 @@ func TestWithNamespace(t *testing.T) {
 	// We don't import namespaces package here to keep the test minimal, so just
 	// verify the context is distinct from the input.
 	assert.NotEqual(t, context.Background(), ctx)
+}
+
+// TestGitExec_ExitOneReturnsExecError verifies that non-zero git exit returns
+// *runtime.ExecError so callers can match exit codes via errors.As. Regression
+// guard: sandbox/patch/apply.go treats `git diff --quiet` exit 1 as "diffs
+// present" via errors.As(&runtime.ExecError); previously containerd's GitExec
+// unwrapped the ExitError into a plain string error and the match silently
+// fell through to "real error", failing `yoloai apply` on every changed sandbox.
+func TestGitExec_ExitOneReturnsExecError(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	// Initialize a temp repo with one committed file, then modify it — `git
+	// diff --quiet HEAD` exits 1 because the tracked file's content changed.
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "f"), []byte("v1"), 0600))
+	for _, args := range [][]string{
+		{"init", "-q"},
+		{"add", "f"},
+		{"-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "init"},
+	} {
+		c := exec.Command("git", append([]string{"-C", dir}, args...)...) //nolint:gosec // G204: test-only, args are constants
+		require.NoError(t, c.Run(), "git %v", args)
+	}
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "f"), []byte("v2"), 0600))
+
+	r := &Runtime{}
+	_, err := r.GitExec(context.Background(), "", dir, "diff", "--quiet", "HEAD")
+	require.Error(t, err)
+	var execErr *runtime.ExecError
+	require.True(t, errors.As(err, &execErr), "GitExec must return *runtime.ExecError on non-zero exit; got %T: %v", err, err)
+	assert.Equal(t, 1, execErr.ExitCode)
 }
 
 // TestIsWSL2_Linux verifies isWSL2 doesn't panic in a regular Linux environment.

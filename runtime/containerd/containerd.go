@@ -246,9 +246,15 @@ func (r *Runtime) GitExec(ctx context.Context, _ string, workDir string, args ..
 	cmd := exec.CommandContext(ctx, "git", cmdArgs...) //nolint:gosec // G204: workDir from validated sandbox state
 	output, err := cmd.Output()
 	if err != nil {
+		// Return *runtime.ExecError on non-zero exit so callers can match
+		// exit codes via errors.As (e.g. apply.go treats `git diff --quiet`
+		// exit 1 as "diffs present", not as an error).
 		var exitErr *exec.ExitError
 		if ok := errors.As(err, &exitErr); ok {
-			return "", fmt.Errorf("exec exited with code %d: %s", exitErr.ExitCode(), strings.TrimSpace(string(exitErr.Stderr)))
+			return "", &runtime.ExecError{
+				ExitCode: exitErr.ExitCode(),
+				Stderr:   strings.TrimSpace(string(exitErr.Stderr)),
+			}
 		}
 		return "", fmt.Errorf("git %v: %w", args, err)
 	}
