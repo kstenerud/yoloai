@@ -34,6 +34,7 @@ from typing import Callable, Optional
 # ---------------------------------------------------------------------------
 
 SENTINEL = "done"
+IN_PROGRESS = "in-progress"  # sentinel touched at prompt start; renamed to SENTINEL on success
 DEFAULT_TIMEOUT = 90    # seconds: container + agent startup for non-VM backends
 VM_TIMEOUT = 180        # seconds: VM boot + agent startup (Firecracker/Tart)
 QEMU_TIMEOUT = 300      # seconds: QEMU-based Kata VM — slower boot than Firecracker
@@ -365,14 +366,14 @@ class Test:
                 if status in STALL_TERMINAL:
                     raise AssertionError(
                         f"agent reached terminal state {status!r} "
-                        f"without sentinel {sentinel!r}"
+                        f"without sentinel {sentinel!r}{self._sentinel_diag(sandbox_name)}"
                     )
                 if status == "idle":
                     consecutive_idle += 1
                     if consecutive_idle >= STALL_IDLE_COUNT:
                         raise AssertionError(
                             f"agent idle for {consecutive_idle * 3}s+ "
-                            f"without sentinel {sentinel!r}"
+                            f"without sentinel {sentinel!r}{self._sentinel_diag(sandbox_name)}"
                         )
                 else:
                     consecutive_idle = 0
@@ -381,8 +382,32 @@ class Test:
 
         raise AssertionError(
             f"sentinel {sentinel!r} not seen in {timeout}s "
-            f"(log: {self.log_file})"
+            f"(log: {self.log_file}){self._sentinel_diag(sandbox_name)}"
         )
+
+    def _sentinel_diag(self, sandbox_name: str) -> str:
+        """Build a one-line diagnostic for sentinel-wait failures.
+
+        Reports what (if anything) is in the exchange dir plus the host disk
+        state, so "agent idle 9s+" tells you which failure mode you hit:
+        - in-progress present → agent ran the prompt but didn't finish (often ENOSPC mid-write)
+        - exchange dir empty → agent never started the prompt
+        - host disk near full → almost certainly ENOSPC; prune containerd
+        """
+        parts: list[str] = []
+        ls = self.run("files", sandbox_name, "ls", timeout=15)
+        if ls.returncode == 0:
+            present = sorted(line.strip() for line in ls.stdout.splitlines() if line.strip())
+            parts.append(f"exchange dir: {present if present else 'empty'}")
+        else:
+            parts.append("exchange dir: <ls failed>")
+        try:
+            usage = shutil.disk_usage("/")
+            pct = usage.used * 100 // usage.total
+            parts.append(f"host /: {pct}% used, {usage.free // (1024 ** 3)}G free")
+        except OSError:
+            pass
+        return "\n      " + "; ".join(parts)
 
 
 # ---------------------------------------------------------------------------
@@ -462,12 +487,24 @@ def create_fixture(tmpdir: Path) -> Path:
 # Tests
 # ---------------------------------------------------------------------------
 
+def _prompt(exdir: str, work: str, sentinel: str = SENTINEL) -> str:
+    """Wrap the agent's work in a two-stage sentinel.
+
+    `touch in-progress` signals the prompt started; `mv in-progress <sentinel>`
+    signals it completed. The rename is the completion signal because rename(2)
+    doesn't allocate disk blocks — so the success signal survives a mid-prompt
+    ENOSPC, and the host can tell "agent never started" (neither file present)
+    from "agent started but didn't finish" (in-progress lingering).
+    """
+    return f"touch {exdir}/{IN_PROGRESS} && {work} && mv {exdir}/{IN_PROGRESS} {exdir}/{sentinel}"
+
+
 def test_full_workflow(t: Test, spec: BackendSpec) -> None:
     """new → wait → diff → apply (assert content) → log → info."""
     project = t.project(f"workflow-{spec.label}")
     name = t.sandbox(f"workflow-{spec.label}")
     exdir = spec.exchange_dir(name)
-    prompt = f"echo smoke > output.txt && touch {exdir}/{SENTINEL}"
+    prompt = _prompt(exdir, "echo smoke > output.txt")
 
     r = t.run(
         "new", name, str(project),
@@ -518,7 +555,7 @@ def test_stop_start(t: Test, spec: BackendSpec) -> None:
     project = t.project(f"stop-start-{spec.label}")
     name = t.sandbox(f"stop-start-{spec.label}")
     exdir = spec.exchange_dir(name)
-    prompt = f"echo smoke > output.txt && touch {exdir}/{SENTINEL}"
+    prompt = _prompt(exdir, "echo smoke > output.txt")
 
     r = t.run(
         "new", name, str(project),
@@ -536,7 +573,7 @@ def test_stop_start(t: Test, spec: BackendSpec) -> None:
     # proves the agent ran successfully with injected credentials after restart.
     # The prompt writes to the work copy so diff/apply can verify.
     sentinel2 = "done2"
-    prompt2 = f"echo restarted > output2.txt && touch {exdir}/{sentinel2}"
+    prompt2 = _prompt(exdir, "echo restarted > output2.txt", sentinel=sentinel2)
     r = t.run("restart", name, "--prompt", prompt2, timeout=120)
     t.assert_ok(r, "restart")
 
@@ -570,7 +607,7 @@ def test_clone(t: Test, spec: BackendSpec) -> None:
     project = t.project("clone")
     name_a = t.sandbox("clone-a")
     exdir = spec.exchange_dir(name_a)
-    prompt = f"echo smoke > clone-output.txt && touch {exdir}/{SENTINEL}"
+    prompt = _prompt(exdir, "echo smoke > clone-output.txt")
 
     r = t.run(
         "new", name_a, str(project),
@@ -688,6 +725,22 @@ def check_prerequisites(
     forwarded to stdout so the user can see progress and know it isn't stuck.
     """
     print("Checking prerequisites...\n")
+
+    # Disk pre-flight: containerd snapshots accumulate, and ENOSPC inside a
+    # Kata VM surfaces as a silent agent-idle hang rather than a clear error.
+    # Warn loudly (but don't abort) when the host is near-full.
+    try:
+        usage = shutil.disk_usage("/")
+        pct = usage.used * 100 // usage.total
+        free_gb = usage.free // (1024 ** 3)
+        if pct >= 90:
+            print(f"  WARNING: host / is {pct}% full ({free_gb}G free).")
+            print( "           Containerd-based tests are likely to fail with ENOSPC.")
+            print( "           Consider: sudo nerdctl --namespace yoloai system prune -a --force\n")
+        elif pct >= 80:
+            print(f"  Note: host / is {pct}% full ({free_gb}G free); watch for ENOSPC on containerd tests.\n")
+    except OSError:
+        pass
 
     # Deduplicate by (check_backend, check_isolation) so vm and vm-enhanced are
     # checked separately (each needs its own isolation validation).
