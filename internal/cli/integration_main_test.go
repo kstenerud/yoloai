@@ -7,7 +7,9 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/kstenerud/yoloai/internal/testutil"
@@ -25,15 +27,37 @@ func writeTestBackendConfig(home string) error {
 		// Autodetect already prefers docker; nothing to pin.
 		return nil
 	}
-	cfgDir := filepath.Join(home, ".yoloai")
-	if err := os.MkdirAll(cfgDir, 0700); err != nil {
-		return fmt.Errorf("mkdir %s: %w", cfgDir, err)
+	// container_backend is a defaults-level key — it lives in defaults/config.yaml,
+	// not the global config.yaml. Writing to the wrong file silently has no effect.
+	defaultsDir := filepath.Join(home, ".yoloai", "defaults")
+	if err := os.MkdirAll(defaultsDir, 0700); err != nil {
+		return fmt.Errorf("mkdir %s: %w", defaultsDir, err)
 	}
 	return os.WriteFile(
-		filepath.Join(cfgDir, "config.yaml"),
+		filepath.Join(defaultsDir, "config.yaml"),
 		[]byte(fmt.Sprintf("container_backend: %s\n", backend)),
 		0600,
 	)
+}
+
+// pinPodmanSocket discovers the Podman Machine socket path using the real HOME
+// and sets CONTAINER_HOST so discoverSocket() finds it after HOME is overridden.
+// On macOS, "podman machine inspect" reads machine state from the real HOME; once
+// we override HOME for test isolation, the subprocess fails and socket discovery
+// falls through to "no podman socket found".
+func pinPodmanSocket() {
+	if testutil.IntegrationBackendName() != "podman" {
+		return
+	}
+	out, err := exec.Command("podman", "machine", "inspect", "--format", "{{.ConnectionInfo.PodmanSocket.Path}}").Output() //nolint:gosec // trusted binary path
+	if err != nil {
+		return
+	}
+	sock := strings.TrimSpace(string(out))
+	if sock == "" || sock == "<no value>" {
+		return
+	}
+	os.Setenv("CONTAINER_HOST", "unix://"+sock) //nolint:errcheck // best-effort env pin in test setup
 }
 
 // TestMain runs EnsureSetup once (via a throwaway sandbox creation) before any
@@ -41,6 +65,10 @@ func writeTestBackendConfig(home string) error {
 // still call cliSetup(t) for per-test HOME isolation; subsequent EnsureSetup
 // calls inside cliSetup hit the image cache and return in milliseconds.
 func TestMain(m *testing.M) {
+	// Pin CONTAINER_HOST before overriding HOME — podman machine inspect reads
+	// machine state from the real HOME directory.
+	pinPodmanSocket()
+
 	tmpHome, err := os.MkdirTemp("", "yoloai-cli-setup-*")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to create temp home: %v\n", err)
