@@ -2,13 +2,13 @@
 
 Reference for consistent Go code style and practices across yoloAI.
 
-Based on Effective Go, Go Code Review Comments, Google Go Style Guide, and Uber Go Style Guide — filtered for a modern Go 1.22+ CLI project where navigability, clarity, and maintainability matter most.
+Based on Effective Go, Go Code Review Comments, Google Go Style Guide, and Uber Go Style Guide — filtered for a modern Go CLI project where navigability, clarity, and maintainability matter most.
 
 See also: `../principles/development-principles.md` (the *why* behind these rules — boundary discipline, validate-at-every-layer, parse-don't-validate, warnings-are-signal), `../principles/testing-principles.md` (testing discipline), `CLI.md` (CLI-specific concerns), and global `~/.claude/CLAUDE.md` for language-agnostic naming and comment principles.
 
 ## Language and Toolchain
 
-- **Go 1.22+** (latest stable)
+- **Go 1.26+** — pinned by the `go` directive in `go.mod` (currently `go 1.26.1`). The Makefile passes `GOTOOLCHAIN=$(shell go env GOVERSION)` to the linter run, so the toolchain in use is the one Go itself picks for the directive.
 - `gofmt` mandatory — non-negotiable, runs on save
 - `goimports` for import grouping and cleanup
 - Module path: `github.com/kstenerud/yoloai` (update when repo is created)

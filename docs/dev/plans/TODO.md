@@ -129,6 +129,26 @@ Design considerations:
 - Consider whether the base profile should ship with sensible defaults for common caches
 - Read-write mount; acceptable since these are caches, not project files
 
+## Tart Runtime
+
+### Skip symlink creation for `:copy` workdirs
+
+Tart's workdir-mount path currently fails when the source is a temporary directory (e.g., a Go `t.TempDir()` location) because the runtime tries to create a symlink that hits a permission or already-exists case. The integration test `sandbox/integration_tart_test.go` documents the symptom (test is gated behind `YOLOAI_TEST_TART=1` and disabled by default).
+
+Fix: in the Tart backend's mount-resolution path, detect `:copy` workdir mode and skip symlink creation — the copy is the canonical surface, no extra symlink needed. Test on an Apple Silicon machine with `YOLOAI_TEST_TART=1 go test -tags=integration ./sandbox/`.
+
+Source TODO: `sandbox/integration_tart_test.go:33-37` (the test is skipped pending this fix).
+
+## MCP Server
+
+### Pass runtime to MCP diff tool for non-Docker backends
+
+`internal/mcpsrv/tools.go` calls `patch.GenerateDiff` with `Runtime: nil`, which works for Docker (host-side git) but fails for Tart (where git runs inside the VM via the runtime exec). The MCP server doesn't currently have a runtime handle; it would need one to support diff for VM-backed sandboxes.
+
+Fix: thread the active `runtime.Runtime` through the MCP server struct (`internal/mcpsrv/server.go`) and pass it via `patch.DiffOptions.Runtime` for the affected MCP tools. Verify against Tart on Apple Silicon once that backend is fully tested.
+
+Source TODO: `internal/mcpsrv/tools.go:304-307` ("MCP is primarily used with Docker backends, we pass nil for now").
+
 ## VM-Level Isolation Backends (containerd backend)
 
 ### Privileged helper for CNI/netns setup

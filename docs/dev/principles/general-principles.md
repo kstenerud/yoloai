@@ -63,15 +63,17 @@ Every new dependency must answer "what failure mode does this introduce, and can
 
 ### Worked examples — yoloAI's concrete token accounting
 
-| Token | Spent on                                  | Justification                                                                                                       |
-| ----- | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| 1     | Pluggable `runtime.Runtime` abstraction   | Five backends ship today (Docker / Podman / Tart / Seatbelt / containerd). The architectural bet is the moat.       |
-| 2     | Copy/diff/apply via `git format-patch`/`am` | The differentiator. No competitor protects originals with a review step. The bet is that this UX wins the category. |
-| 3     | **Unspent — reserved**                    | For a future deliberate departure when warranted.                                                                   |
+| Token | Spent on                                    | Justification                                                                                                                                                              |
+| ----- | ------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1     | Pluggable `runtime.Runtime` abstraction     | Five backends ship today (Docker / Podman / Tart / Seatbelt / containerd). The architectural bet is the moat.                                                              |
+| 2     | Copy/diff/apply via `git format-patch`/`am` | The differentiator. No competitor protects originals with a review step. The bet is that this UX wins the category.                                                        |
+| 3     | MCP server (`mark3labs/mcp-go`)             | `internal/mcpsrv/` exposes yoloAI as an MCP tool surface so editor-side agents can drive sandboxes. The bet is that MCP becomes the integration interface for AI tooling.  |
+
+The reserved-token slot is now fully spent. Future departures from boring require a deliberate D-entry justifying the spend; there is no headroom for casual novelty.
 
 Boring choices in the operational + supporting stack (no token spent):
 
-- Go 1.22+ + standard library + Cobra (CLI framework).
+- Go (current toolchain pinned in `go.mod`) + standard library + Cobra (CLI framework).
 - Docker / Podman / containerd via existing client libraries; no custom container runtime.
 - `git diff` / `git format-patch` / `git am` as the diff/apply primitive.
 - `iptables` + `ipset` for network isolation (same as Anthropic devcontainer, Trail of Bits devcontainer).

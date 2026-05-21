@@ -235,7 +235,7 @@ Threshold: define the interface at the consumer's site (Go convention — "accep
 
 ### Worked examples
 
-- `runtime.Runtime` is the canonical interface; `internal/runtime/fake/` (where it exists for testing) implements it with predetermined results. The fake doesn't record interactions; it implements the behaviour contract.
+- `runtime.Runtime` is the canonical interface. The current codebase tests it primarily at the *integration* layer against real daemons (`runtime/<backend>/integration_test.go`, build tag `integration`); a dedicated `runtime.Fake` for unit-layer tests above the seam does not yet exist. The principle still applies: when a unit test does need a `runtime.Runtime` substitute, write a hand-rolled fake (struct implementing the interface with predetermined results), not a generated mock that records call sequences.
 - `standards/GO.md` §Testing: "Mocking: define interfaces at the consumption site, not the implementation site. Mock via interface satisfaction."
 - `standards/GO.md` §Code Organization Patterns: "Accept interfaces, return structs — define interfaces at the point of consumption, not alongside the implementation."
 - No `gomock` / `mockery` / `mockgen` in `go.mod`. Verified by `grep` against the lockfile.

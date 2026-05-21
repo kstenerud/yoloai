@@ -73,17 +73,19 @@ Kent Beck (YAGNI); Robert C. Martin (SOLID, *Clean Code*); Sandi Metz ("The Wron
 
 ### Pattern
 
-Import direction is strict:
+Import direction is strict. Public packages live at the module root (`agent/`, `config/`, `runtime/`, `sandbox/`, `workspace/`, `extension/`); private support packages live under `internal/` (`internal/cli/`, `internal/mcpsrv/`, `internal/yoerrors/`, `internal/fileutil/`, `internal/testutil/`). The layering:
 
 ```
-cmd/yoloai/main.go     → internal/cli/  + internal/sandbox/
-internal/cli/          → internal/sandbox/ + internal/agent/ + internal/config/
-internal/sandbox/      → internal/runtime/ + internal/agent/ + internal/config/
-internal/runtime/<be>/ → backend SDK + internal/runtime/ (interfaces only)
-internal/config/       → (leaf — nothing internal)
+cmd/yoloai/main.go     → internal/cli/  + sandbox/  + runtime/
+internal/cli/          → sandbox/  + agent/  + config/  + workspace/
+sandbox/               → runtime/  + agent/  + config/  + workspace/
+workspace/             → config/  (uses git via os/exec; no runtime dep)
+runtime/<backend>/     → backend SDK + runtime/  (interfaces only)  + config/  (leaf types)
+agent/                 → config/  (agent definitions reference config types)
+config/                → (leaf — nothing internal)
 ```
 
-No reverse imports. No circular imports. Backend types do not appear outside `internal/runtime/<backend>/`. Backend name strings do not appear in the dispatch (W10).
+No reverse imports. No circular imports. Backend types do not appear outside `runtime/<backend>/`. Backend name strings do not appear in the dispatch (W10). `config/` is depended on by everyone but depends on nothing internal — it carries the leaf types (paths, profile names, mount specs) that compose the rest.
 
 ### What does NOT live in the interface layer
 

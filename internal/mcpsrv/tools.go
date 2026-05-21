@@ -304,7 +304,7 @@ func (s *Server) handleSandboxDiffFile(ctx context.Context, req mcp.CallToolRequ
 	// GenerateDiff can work with nil runtime for Docker (host-side git)
 	// For Tart, we would need the runtime, but MCP server doesn't currently
 	// have access to it. Since MCP is primarily used with Docker backends,
-	// we pass nil for now. TODO: Add runtime support when MCP needs Tart.
+	// we pass nil for now. Tracked: docs/dev/plans/TODO.md §MCP Server.
 	result, err := patch.GenerateDiff(ctx, patch.DiffOptions{
 		Name:    name,
 		Paths:   []string{path},
