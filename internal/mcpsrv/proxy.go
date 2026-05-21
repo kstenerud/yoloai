@@ -1,3 +1,5 @@
+// ABOUTME: ProxyServer wraps any MCP server running inside a sandbox, forwarding
+// ABOUTME: JSON-RPC stdio while injecting the sandbox_diff tool transparently.
 package mcpsrv
 
 import (

@@ -1,3 +1,5 @@
+// ABOUTME: CommitExists, BuildSHAMapByMatching, and CreateTag for transferring
+// ABOUTME: agent-created git tags from the sandbox workdir to the host repo on apply.
 package workspace
 
 import (

@@ -1,3 +1,5 @@
+// ABOUTME: Public high-level Client API (Run, Apply, Diff, Destroy) for embedding
+// ABOUTME: yoloAI in Go programs without interacting with the CLI or sandbox package.
 // Package yoloai provides a simple, high-level API for running AI coding agents
 // in isolated sandboxes. For advanced use, import the sandbox and config packages
 // directly.

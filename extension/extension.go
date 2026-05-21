@@ -1,3 +1,5 @@
+// ABOUTME: Extension type, Load/LoadAll, and Validate for user-defined YAML commands.
+// ABOUTME: Consumed by internal/cli to register extension commands in the Cobra tree.
 // Package extension implements loading, validation, and types for yoloAI
 // extensions — user-defined custom commands stored as YAML files.
 package extension

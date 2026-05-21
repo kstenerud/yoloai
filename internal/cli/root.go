@@ -1,3 +1,5 @@
+// ABOUTME: Execute() entry point and root Cobra command wiring, including
+// ABOUTME: exit-code mapping, bug-report lifecycle, and command group registration.
 // Package cli defines the Cobra command tree for the yoloAI CLI.
 package cli
 

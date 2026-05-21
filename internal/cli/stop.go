@@ -1,3 +1,5 @@
+// ABOUTME: Cobra "stop" command: stops one or more running sandbox containers
+// ABOUTME: while preserving their state for a later restart.
 package cli
 
 import (

@@ -1,3 +1,5 @@
+// ABOUTME: Cobra "destroy" command: stops and removes one or more sandboxes,
+// ABOUTME: with wildcard expansion, --all, and active-work confirmation logic.
 package cli
 
 import (

@@ -1,3 +1,5 @@
+// ABOUTME: EnvSandboxName constant and resolveName() for reading the sandbox
+// ABOUTME: name from CLI args or the YOLOAI_SANDBOX environment variable fallback.
 package cli
 
 import (

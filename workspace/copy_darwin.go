@@ -1,5 +1,7 @@
 //go:build darwin
 
+// ABOUTME: macOS APFS clonefile(2) fast-path for CopyDir; falls through to the
+// ABOUTME: walk-based copy in copy.go when the filesystem doesn't support it.
 package workspace
 
 import "golang.org/x/sys/unix"

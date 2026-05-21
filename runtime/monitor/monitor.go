@@ -1,3 +1,5 @@
+// ABOUTME: Embeds Python scripts (status-monitor, sandbox-setup, setup_helpers,
+// ABOUTME: tmux_io, diagnose-idle) and exposes them for all runtime backends to install.
 // Package monitor embeds the Python status monitor script and the
 // consolidated sandbox setup script shared across all runtime backends
 // (Docker, Tart, Seatbelt).

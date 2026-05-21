@@ -1,3 +1,5 @@
+// ABOUTME: Cobra "exec" command: runs an arbitrary command interactively inside
+// ABOUTME: a running sandbox container, propagating the exit code to the host.
 package cli
 
 import (

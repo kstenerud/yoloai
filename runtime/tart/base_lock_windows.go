@@ -1,5 +1,7 @@
 //go:build windows
 
+// ABOUTME: Windows stub for AcquireBaseLock — always errors because Tart is macOS-only.
+// ABOUTME: Keeps the tart package compilable on Windows without build-tag exclusions.
 package tart
 
 import "fmt"

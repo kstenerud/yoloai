@@ -1,3 +1,5 @@
+// ABOUTME: Status/AgentStatus types and InspectSandbox/ListSandboxes/DetectStatus:
+// ABOUTME: the read-only view of a sandbox's live state consumed by CLI commands.
 package sandbox
 
 import (

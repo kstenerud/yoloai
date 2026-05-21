@@ -1,3 +1,5 @@
+// ABOUTME: buildAndStart and buildInstanceConfig translate sandboxState into a
+// ABOUTME: runtime.InstanceConfig, start the container, and verify it is running.
 package sandbox
 
 import (

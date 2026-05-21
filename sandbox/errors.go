@@ -1,3 +1,5 @@
+// ABOUTME: Sentinel errors and typed error aliases (UsageError, ConfigError, etc.)
+// ABOUTME: re-exported from internal/yoerrors so callers import only sandbox/.
 package sandbox
 
 import (

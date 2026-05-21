@@ -1,3 +1,5 @@
+// ABOUTME: os.MkdirAll/WriteFile/OpenFile wrappers that fix ownership under sudo
+// ABOUTME: so ~/.yoloai files are owned by the real user, not root.
 // Package fileutil provides os.MkdirAll / os.WriteFile / os.OpenFile wrappers
 // that fix file ownership when yoloai is invoked via sudo.
 //

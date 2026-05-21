@@ -1,3 +1,5 @@
+// ABOUTME: Poll-loop helpers (Wait, WaitForStatus, WaitForActive, WaitForStopped)
+// ABOUTME: for blocking integration tests until a sandbox or container reaches a state.
 package testutil
 
 import (

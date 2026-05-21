@@ -1,3 +1,5 @@
+// ABOUTME: Cobra "reset" command: re-copies workdir into the sandbox and resets
+// ABOUTME: the diff baseline, with optional container restart and auto-attach.
 package cli
 
 import (

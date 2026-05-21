@@ -1,3 +1,5 @@
+// ABOUTME: Low-level sandbox create helpers: mkdirAllPerm, machine-id generation,
+// ABOUTME: and directory/file write utilities used by the create pipeline.
 package sandbox
 
 import (

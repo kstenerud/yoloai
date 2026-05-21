@@ -1,3 +1,5 @@
+// ABOUTME: YOLOAI_TEST_BACKEND resolver and NewIntegrationRuntime constructor for
+// ABOUTME: parametrizing integration tests across docker/podman/containerd backends.
 package testutil
 
 import (

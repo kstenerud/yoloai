@@ -1,3 +1,5 @@
+// ABOUTME: IsolatedHome sets HOME to a temp dir for the test, preventing config
+// ABOUTME: reads from the real user's home directory during unit tests.
 package testutil
 
 import "testing"

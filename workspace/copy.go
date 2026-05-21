@@ -1,3 +1,5 @@
+// ABOUTME: CopyDir walks a directory tree preserving permissions and symlinks,
+// ABOUTME: trying the fast cloneDir path first then falling back to a file-by-file copy.
 package workspace
 
 import (

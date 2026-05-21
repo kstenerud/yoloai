@@ -1,3 +1,5 @@
+// ABOUTME: Manager.Clone deep-copies an existing sandbox state directory to a
+// ABOUTME: new name, preserving agent state and workdir while resetting identity.
 package sandbox
 
 import (

@@ -1,3 +1,5 @@
+// ABOUTME: NewGitCmd, HeadSHA, IsEmptyRepo, RunGitCmd — low-level git wrappers
+// ABOUTME: with hooks disabled, shared by copy/diff/apply operations in workspace/.
 package workspace
 
 import (

@@ -1,3 +1,5 @@
+// ABOUTME: MCP tool definitions and handlers for sandbox lifecycle, diff, log,
+// ABOUTME: input, reset, and file-exchange operations exposed to outer agents.
 package mcpsrv
 
 import (

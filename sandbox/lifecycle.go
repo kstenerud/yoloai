@@ -1,3 +1,5 @@
+// ABOUTME: Manager.Stop, Start, Reset, and Destroy: the four core lifecycle
+// ABOUTME: verbs that drive sandbox containers through their state transitions.
 package sandbox
 
 import (

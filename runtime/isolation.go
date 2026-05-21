@@ -1,3 +1,5 @@
+// ABOUTME: Isolation-mode helpers mapping isolation strings to OCI runtime names,
+// ABOUTME: containerd snapshotters, and iptables-enforcement capability flags.
 // Package runtime defines the pluggable Runtime interface for sandbox backends.
 package runtime
 

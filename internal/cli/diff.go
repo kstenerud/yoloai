@@ -1,3 +1,5 @@
+// ABOUTME: Cobra "diff" command: shows agent changes as a unified diff, commit
+// ABOUTME: log, or per-ref diff; handles :copy, :overlay, and multi-directory sandboxes.
 package cli
 
 import (

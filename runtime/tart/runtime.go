@@ -1,3 +1,5 @@
+// ABOUTME: Apple simulator RuntimeVersion type, ParseRuntime, and QueryAvailableRuntimes
+// ABOUTME: for resolving iOS/tvOS/watchOS runtime versions via xcrun simctl.
 package tart
 
 import (

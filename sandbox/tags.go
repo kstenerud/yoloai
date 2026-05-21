@@ -1,3 +1,5 @@
+// ABOUTME: Git tag helpers for sandboxes: ListTagsBeyondBaseline, ListUnappliedTags,
+// ABOUTME: and listAllTags used by the diff/apply pipeline to surface agent-created tags.
 package sandbox
 
 import (

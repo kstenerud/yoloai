@@ -1,3 +1,5 @@
+// ABOUTME: seedSandbox copies agent credentials, settings, and agent_files into
+// ABOUTME: the sandbox state directory before the container is first launched.
 package sandbox
 
 import (

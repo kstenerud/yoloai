@@ -1,3 +1,5 @@
+// ABOUTME: Git helpers (InitGitRepo, GitAdd, GitCommit, WriteFile) for setting up
+// ABOUTME: throwaway repositories used by sandbox and workspace integration tests.
 // Package testutil provides shared test helpers for use across all test packages.
 // It is not a _test.go file so it can be imported by test files in other packages.
 package testutil

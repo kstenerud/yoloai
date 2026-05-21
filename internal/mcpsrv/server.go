@@ -1,3 +1,5 @@
+// ABOUTME: Server type and ServeStdio entry point for the orchestration MCP server.
+// ABOUTME: Outer agents (Claude Desktop, etc.) call its tools to drive inner sandboxes.
 // Package mcpsrv implements the yoloAI MCP server, exposing sandbox
 // operations as tools for outer agents driving the two-layer agentic workflow.
 package mcpsrv

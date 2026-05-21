@@ -1,5 +1,7 @@
 //go:build !darwin
 
+// ABOUTME: Non-macOS stub for cloneDir that always returns an error, causing
+// ABOUTME: CopyDir to fall through to the portable walk-based implementation.
 package workspace
 
 import "errors"

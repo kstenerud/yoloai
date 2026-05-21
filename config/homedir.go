@@ -1,3 +1,5 @@
+// ABOUTME: HomeDir() resolves the real user's home directory under sudo,
+// ABOUTME: preventing ~/.yoloai data from being created under /root when run via sudo.
 package config
 
 import (

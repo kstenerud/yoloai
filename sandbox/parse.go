@@ -1,3 +1,5 @@
+// ABOUTME: ParseDirArg parses "path[:suffix...]=[mount]" directory arguments,
+// ABOUTME: producing DirArg structs consumed by CreateOptions workdir/aux fields.
 package sandbox
 
 import (

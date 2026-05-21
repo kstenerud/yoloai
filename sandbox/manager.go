@@ -1,3 +1,5 @@
+// ABOUTME: Manager type and NewManager constructor: the central orchestrator that
+// ABOUTME: holds a Runtime and coordinates all sandbox CRUD and lifecycle operations.
 package sandbox
 
 import (

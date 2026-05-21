@@ -1,3 +1,5 @@
+// ABOUTME: ExpandPath/ExpandTilde wrappers and readJSONMap/writeJSONMap helpers
+// ABOUTME: for reading and writing agent settings JSON within a sandbox directory.
 package sandbox
 
 import (

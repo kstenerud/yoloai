@@ -1,3 +1,5 @@
+// ABOUTME: Binary entry point: sets up signal handling and delegates to cli.Execute.
+// ABOUTME: Thin wrapper so the main package stays free of business logic.
 // Package main is the entry point for the yoloAI CLI.
 package main
 

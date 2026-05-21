@@ -1,3 +1,5 @@
+// ABOUTME: Agent definitions (Claude, Gemini, Codex, Aider, OpenCode, etc.)
+// ABOUTME: Consumed by sandbox/create.go to launch, seed, and configure agents.
 // Package agent defines built-in agent definitions for yoloAI.
 package agent
 

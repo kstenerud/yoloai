@@ -1,3 +1,5 @@
+// ABOUTME: Backend/agent/model/profile resolution helpers and withRuntime/withManager
+// ABOUTME: wrappers shared by all Cobra command handlers in internal/cli.
 package cli
 
 import (

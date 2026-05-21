@@ -1,3 +1,5 @@
+// ABOUTME: Embeds Docker build resources (Dockerfile, entrypoints, tmux config,
+// ABOUTME: Python monitor scripts) and exposes them for the Docker backend image builder.
 // Package docker embeds Docker build resources (Dockerfile, entrypoint, tmux config).
 package docker
 

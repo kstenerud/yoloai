@@ -1,3 +1,5 @@
+// ABOUTME: IsDangerousDir, CheckPathOverlap, and CheckDirtyRepo guard sandbox
+// ABOUTME: creation from mounting system paths or mounting a dirty git repo.
 package workspace
 
 import (

@@ -1,5 +1,7 @@
 //go:build !windows
 
+// ABOUTME: Advisory flock-based mutex for Tart base VM creation, preventing
+// ABOUTME: concurrent builds of the same base image from different processes.
 package tart
 
 import (

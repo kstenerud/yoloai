@@ -1,3 +1,5 @@
+// ABOUTME: DiffResult type and CopyDiff: generates a git diff for :copy workdirs
+// ABOUTME: against a baseline SHA, consumed by sandbox/patch to build diffs.
 package workspace
 
 import (

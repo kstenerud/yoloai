@@ -1,3 +1,5 @@
+// ABOUTME: Cobra "attach" command: waits for tmux readiness then attaches the
+// ABOUTME: user's terminal to the running sandbox session.
 package cli
 
 import (

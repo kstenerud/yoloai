@@ -1,3 +1,5 @@
+// ABOUTME: CopyRuntimeToVM installs an Apple simulator runtime into a Tart VM
+// ABOUTME: via xcodebuild -downloadPlatform, plus simctl verification.
 package tart
 
 import (

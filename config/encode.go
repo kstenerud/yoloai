@@ -1,3 +1,5 @@
+// ABOUTME: Caret-encoding codec for turning arbitrary host paths into
+// ABOUTME: filesystem-safe directory names used under ~/.yoloai/sandboxes/.
 package config
 
 import (

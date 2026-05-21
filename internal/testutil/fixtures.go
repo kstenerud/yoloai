@@ -1,3 +1,5 @@
+// ABOUTME: Reusable test project fixtures (GoProject, MultiFileProject, AuxDir)
+// ABOUTME: that create temp directories with committed git repos for integration tests.
 package testutil
 
 import (

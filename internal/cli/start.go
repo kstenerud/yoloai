@@ -1,3 +1,5 @@
+// ABOUTME: Cobra "start" command: restarts a stopped sandbox with optional new
+// ABOUTME: prompt, resume preamble, and auto-attach after the container comes up.
 package cli
 
 import (

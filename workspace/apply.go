@@ -1,3 +1,5 @@
+// ABOUTME: CheckPatch/PatchSet types and git-apply helpers used by the patch package
+// ABOUTME: to verify and land agent commits onto the host working directory.
 package workspace
 
 import (

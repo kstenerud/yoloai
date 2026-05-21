@@ -1,3 +1,5 @@
+// ABOUTME: All sandbox filesystem path constants and helper functions (Dir, WorkDir,
+// ABOUTME: OverlayUpperDir, FilesDir, etc.) that form the canonical layout under ~/.yoloai/.
 // Package store manages on-disk sandbox state: directory paths, the
 // per-sandbox Meta record, and the SandboxState completion flags. All
 // other sandbox/ subpackages consume types from here; this package

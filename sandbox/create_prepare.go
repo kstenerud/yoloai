@@ -1,3 +1,5 @@
+// ABOUTME: resolveProfileConfig chains profile configs, builds profile images,
+// ABOUTME: and merges all settings into a profileResult for sandbox creation.
 package sandbox
 
 import (
