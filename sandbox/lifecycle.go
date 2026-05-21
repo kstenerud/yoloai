@@ -204,7 +204,15 @@ func (m *Manager) handleTerminalStatus(ctx context.Context, name string, meta *s
 // container is stopped or removed. removeStopped indicates the container still
 // exists and must be removed first. successMsg is printed on success.
 func (m *Manager) handleStoppedOrRemovedStatus(ctx context.Context, cname, name string, meta *store.Meta, opts StartOptions, promptText string, customPrompt, removeStopped bool, successMsg string) error {
-	if removeStopped {
+	if removeStopped && !m.runtime.Descriptor().Capabilities.HostFilesystem {
+		// Container backends (Docker, Podman, containerd): the sandbox directory
+		// lives on the host separately from the container, so Remove only deletes
+		// the stopped container and the sandbox directory is preserved.
+		//
+		// Host-filesystem backends (Seatbelt): the sandbox directory IS the
+		// container state. Remove would destroy the work copy, prompt.txt, and
+		// other sandbox files. Skip Remove — the process is already dead after
+		// Stop, and Create+Start will refresh scripts and credentials in place.
 		if err := m.runtime.Remove(ctx, cname); err != nil {
 			return fmt.Errorf("remove stopped instance: %w", err)
 		}
