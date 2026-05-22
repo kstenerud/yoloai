@@ -434,6 +434,8 @@ _PRESERVE_FILES = (
     "resume-prompt.txt",
     "runtime-config.json",
     "lifecycle-on-create-done",
+    "setup.log",
+    "xcodebuild-firstlaunch.log",
 )
 _PRESERVE_DIRS = (
     "logs",

@@ -263,24 +263,30 @@ class TartBackend(Backend):
             log_debug("tart.symlinks", "creating VirtioFS mount symlinks")
             for target, source in mount_map.items():
                 parent = os.path.dirname(target)
+                log_debug("tart.symlink.mkdir", "creating parent dir", target=target)
                 tmux_io.run(["sudo", "mkdir", "-p", parent], capture_output=True)
 
                 # Remove existing symlink or empty directory
                 if os.path.islink(target):
+                    log_debug("tart.symlink.rm", "removing existing symlink", target=target)
                     tmux_io.run(["sudo", "rm", "-f", target], capture_output=True)
                 elif os.path.isdir(target):
                     # Check if empty
                     try:
                         if not os.listdir(target):
+                            log_debug("tart.symlink.rmdir", "removing empty dir", target=target)
                             tmux_io.run(["sudo", "rmdir", target], capture_output=True)
                     except OSError:
                         pass
 
+                log_debug("tart.symlink.ln", "creating symlink", target=target, source=source)
                 tmux_io.run(["sudo", "ln", "-sf", source, target], capture_output=True)
+                log_debug("tart.symlink.done", "symlink ready", target=target)
 
         # Auto-configure iOS testing if Xcode is mounted from host
         # Supports any Xcode name (m-Xcode.app, m-Xcode-Beta.app, etc.)
         import glob
+        log_debug("tart.xcode.scan", "scanning for mounted Xcode")
         xcode_mounts = glob.glob("/Volumes/My Shared Files/m-Xcode*.app")
 
         if xcode_mounts:
@@ -291,6 +297,7 @@ class TartBackend(Backend):
             xcode_developer = None
 
         if xcode_developer and os.path.isdir(xcode_developer):
+            log_debug("tart.xcode.select", "switching xcode-select", developer=xcode_developer)
             # Point xcode-select to the mounted Xcode so xcrun can find simctl and other tools
             result = tmux_io.run(
                 ["sudo", "xcode-select", "--switch", xcode_developer],
@@ -315,18 +322,20 @@ class TartBackend(Backend):
                 except OSError:
                     pass  # Non-fatal if we can't update profile
 
+            log_debug("tart.xcode.license", "accepting xcode license")
             # Accept Xcode license (stored in VM's /Library/Preferences, not in Xcode.app)
             result = tmux_io.run(
                 ["sudo", "xcodebuild", "-license", "accept"],
                 capture_output=True,
                 text=True
             )
-            # Don't log success/failure - silent operation
+            log_debug("tart.xcode.license.done", "xcode license accepted")
 
             # Run first launch in background — this initializes device types and can
             # take 60-120+ seconds on first run. State persists in the Xcode.app bundle
             # via VirtioFS, so subsequent VMs find it already done. Running it in the
             # background lets the agent start immediately instead of blocking setup.
+            log_debug("tart.xcode.firstlaunch", "starting xcodebuild -runFirstLaunch in background")
             xcodebuild_log = os.path.join(self.yoloai_dir, "xcodebuild-firstlaunch.log")
             try:
                 with open(xcodebuild_log, "w") as _xcodebuild_logf:
@@ -338,6 +347,7 @@ class TartBackend(Backend):
                     )
             except OSError:
                 pass  # Non-fatal
+            log_debug("tart.xcode.firstlaunch.started", "xcodebuild -runFirstLaunch launched")
 
         # Symlink mounted PrivateFrameworks to system location (required for CoreSimulator.framework)
         privateframeworks_mount = "/Volumes/My Shared Files/m-PrivateFrameworks"

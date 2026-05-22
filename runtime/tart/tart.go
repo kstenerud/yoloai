@@ -1251,7 +1251,7 @@ func (r *Runtime) addMountMapToConfig(sandboxPath string, mounts []runtime.Mount
 		// VirtioFS mount appears at /Volumes/My Shared Files/<name>/
 		dirName := mountDirName(m.Source)
 		virtiofsMountPoint := filepath.Join(sharedDirVMPath, dirName)
-		mountMap[m.Target] = virtiofsMountPoint
+		mountMap[remapTargetPath(m.Target)] = virtiofsMountPoint
 	}
 
 	if len(mountMap) == 0 {

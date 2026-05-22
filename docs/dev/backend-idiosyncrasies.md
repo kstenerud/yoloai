@@ -61,6 +61,7 @@ row to the index.
 | `Can't open socket to ipset` / network isolation fails on Podman macOS | [Podman macOS: iptables-nft lacks xt_set module](#podman-macos-iptables-nft-lacks-xt_set-module-ipset-unusable) |
 | Smoke test: `full_workflow/containerd-vm` fails with "agent idle for 9s+" | [QEMU: slow startup exceeds stall grace](#qemu-slow-startup-exceeds-smoke-test-stall-grace-period) |
 | Smoke test: `full_workflow/tart` or `stop_start/tart` fails; exchange dir empty | [Tart: xcodebuild -runFirstLaunch blocks agent startup](#tart-xcodebuild--runfirstlaunch-blocks-agent-startup) |
+| `yoloai new --attach` hangs after "Sandbox created"; Python setup never completes | [Tart: mount_map uses Docker paths, triggering macOS automount](#tart-mount_map-uses-docker-style-paths-triggering-macos-automount-hang) |
 
 ---
 
@@ -910,6 +911,18 @@ The pattern of "fails then passes on retry" comes from VirtioFS persistence: `xc
 **Fix:** `xcodebuild -runFirstLaunch` now runs in the background via `subprocess.Popen(..., start_new_session=True)` with a log file at `{yoloai_dir}/xcodebuild-firstlaunch.log`. The agent starts immediately; xcodebuild completes in the background. Additionally, `stall_grace_secs=120` is set on all tart `BackendSpec` entries in the smoke test as a defensive measure.
 
 **Code:** `runtime/monitor/sandbox-setup.py::TartBackend.setup`, `scripts/smoke_test.py::BASE_MACOS_BACKENDS`
+
+---
+
+### Tart: mount_map uses Docker-style paths, triggering macOS automount hang
+
+**Symptom:** `yoloai new --attach` with a Tart VM hangs indefinitely after printing "Sandbox created". Python's sandbox-setup.py stops producing log entries after `tart.symlinks` and never creates the tmux session. The `done` sentinel never appears in smoke tests even after 180s.
+
+**Explanation:** `addMountMapToConfig` writes mount targets into `runtime-config.json`'s `mount_map` using the original Docker-style paths (e.g. `/home/yoloai/.config/git`). Python's `TartBackend.setup()` reads this map and calls `sudo mkdir -p /home/yoloai/.config` to create the symlink parent. On macOS, `/home` is managed by `automountd` — attempting to mkdir inside it triggers a network automount lookup for the `yoloai` home directory, which hangs until the lookup times out (60-120+ seconds). The Go-side `createVMMountSymlinks` correctly applies `remapTargetPath` (mapping `/home/yoloai/...` to `/Users/admin/...`), but the Python-side `mount_map` was missing this translation.
+
+**Fix:** Apply `remapTargetPath` to mount targets in `addMountMapToConfig` before writing to `mount_map`. Python now receives `/Users/admin/.config/git` instead of `/home/yoloai/.config/git` and creates the parent dir at a valid macOS path with no automount involvement.
+
+**Code:** `runtime/tart/tart.go::addMountMapToConfig` (apply `remapTargetPath`), `runtime/monitor/sandbox-setup.py::TartBackend.setup` (uses mount_map targets)
 
 ---
 
