@@ -62,6 +62,7 @@ row to the index.
 | Smoke test: `full_workflow/containerd-vm` fails with "agent idle for 9s+" | [QEMU: slow startup exceeds stall grace](#qemu-slow-startup-exceeds-smoke-test-stall-grace-period) |
 | Smoke test: `full_workflow/tart` or `stop_start/tart` fails; exchange dir empty | [Tart: xcodebuild -runFirstLaunch blocks agent startup](#tart-xcodebuild--runfirstlaunch-blocks-agent-startup) |
 | `yoloai new --attach` hangs after "Sandbox created"; Python setup never completes | [Tart: mount_map uses Docker paths, triggering macOS automount](#tart-mount_map-uses-docker-style-paths-triggering-macos-automount-hang) |
+| `FileNotFoundError` at `get_working_dir()` / agent starts in wrong directory | [Tart: workdir setup races Python startup](#tart-vm-workdir-setup-races-python-startup) |
 
 ---
 
@@ -923,6 +924,20 @@ The pattern of "fails then passes on retry" comes from VirtioFS persistence: `xc
 **Fix:** Apply `remapTargetPath` to mount targets in `addMountMapToConfig` before writing to `mount_map`. Python now receives `/Users/admin/.config/git` instead of `/home/yoloai/.config/git` and creates the parent dir at a valid macOS path with no automount involvement.
 
 **Code:** `runtime/tart/tart.go::addMountMapToConfig` (apply `remapTargetPath`), `runtime/monitor/sandbox-setup.py::TartBackend.setup` (uses mount_map targets)
+
+---
+
+### Tart: VM workdir setup races Python startup
+
+**Symptom:** `FileNotFoundError: No such file or directory: '/Users/admin/yoloai-work/...'` in setup.log. The agent never starts. Appears after fixing the automount hang (below), because that hang was accidentally delaying Python long enough for the Go-side rsync to finish.
+
+**Explanation:** Python's `sandbox-setup.py` is launched via `nohup ... &` inside `launchContainer`. Go's `executeVMWorkDirSetup` (which runs rsync + git baseline to populate the workdir) is called *after* `launchContainer` returns. Python therefore reaches `backend.get_working_dir()` → `os.chdir(working_dir)` before the directory exists, crashing immediately.
+
+Previously, Python was delayed 60-120s by the automount hang on `/home/yoloai/.config`, which gave rsync enough time to finish. Fixing the automount bug removed that accidental delay.
+
+**Fix:** `TartBackend.get_working_dir()` now polls for the directory with a 120s timeout instead of calling `os.chdir` unconditionally. Python waits for Go to finish rsync before proceeding.
+
+**Code:** `runtime/monitor/sandbox-setup.py::TartBackend.get_working_dir`
 
 ---
 

@@ -425,8 +425,20 @@ class TartBackend(Backend):
     def get_working_dir(self):
         """Tart needs explicit cd to the VirtioFS-mounted working directory."""
         working_dir = self.cfg.get("working_dir", "")
-        if working_dir:
-            os.chdir(working_dir)
+        if not working_dir:
+            return working_dir
+
+        # Go's executeVMWorkDirSetup (rsync + git baseline) runs after launching
+        # the Python script, so the directory may not exist yet. Wait for it.
+        deadline = time.time() + 120
+        while not os.path.isdir(working_dir):
+            if time.time() >= deadline:
+                log_info("tart.workdir.timeout", "working dir not ready after 120s, continuing anyway",
+                         path=working_dir)
+                return working_dir
+            time.sleep(1)
+
+        os.chdir(working_dir)
         return working_dir
 
     def prepare_environment(self):
