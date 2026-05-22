@@ -235,12 +235,19 @@ def isolate_network(cfg):
                          "--dport", "53", "-j", "ACCEPT"],
                         "network.iptables_dns_failed", nameserver=ns, proto=proto)
     # Allow traffic to allowlisted IPs — via ipset match if available, else
-    # individual per-IP rules (iptables-nft doesn't support --match-set).
+    # individual per-IP rules.  iptables-nft may lack xt_set even when the
+    # ipset binary works (e.g. Podman Machine on macOS), so catch failure here
+    # too and fall through to the per-IP path.
     if use_ipset:
-        _run_strict(["iptables", "-A", "OUTPUT", "-m", "set",
-                     "--match-set", "allowed-domains", "dst", "-j", "ACCEPT"],
-                    "network.iptables_allowlist_failed")
-    else:
+        try:
+            _run_strict(["iptables", "-A", "OUTPUT", "-m", "set",
+                         "--match-set", "allowed-domains", "dst", "-j", "ACCEPT"],
+                        "network.iptables_allowlist_failed")
+        except NetworkIsolationError:
+            log_info("network.ipset_match_unavailable",
+                     "iptables --match-set failed; falling back to per-IP rules")
+            use_ipset = False
+    if not use_ipset:
         for domain, ip in allowed_ips:
             _run_strict(["iptables", "-A", "OUTPUT", "-d", ip, "-j", "ACCEPT"],
                         "network.iptables_perip_failed", domain=domain, ip=ip)
