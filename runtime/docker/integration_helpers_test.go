@@ -72,6 +72,10 @@ func createTestContainer(t *testing.T, rt *Runtime, ctx context.Context, cfg run
 		}
 	}
 
+	// Pre-cleanup: evict any stale container left by a previous failed run.
+	_ = rt.Stop(ctx, cfg.Name)
+	_ = rt.Remove(ctx, cfg.Name)
+
 	_, err := rt.client.ContainerCreate(ctx, containerConfig, hostConfig, &network.NetworkingConfig{}, nil, cfg.Name)
 	require.NoError(t, err)
 
