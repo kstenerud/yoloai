@@ -185,7 +185,7 @@ class RunContext:
 # Base tier: fast, reliable backends for PR gates and nightly smoke.
 BASE_LINUX_BACKENDS: list[BackendSpec] = [
     BackendSpec("linux", "container",          "docker", "docker",
-                check_backend="docker"),
+                check_backend="docker", retries=1),
     BackendSpec("linux", "vm",                 None,     "containerd-vm",
                 check_backend="containerd", is_vm=True, check_isolation="vm",
                 sentinel_timeout_override=QEMU_TIMEOUT, stall_grace_secs=120,
@@ -202,7 +202,7 @@ BASE_MACOS_BACKENDS: list[BackendSpec] = [
 # Full tier: all backends for pre-release validation.
 FULL_LINUX_BACKENDS: list[BackendSpec] = [
     BackendSpec("linux", "container",          "docker", "docker",
-                check_backend="docker"),
+                check_backend="docker", retries=1),
     BackendSpec("linux", "container",          "podman", "podman",
                 check_backend="podman"),
     BackendSpec("linux", "container-enhanced", None,     "docker-cenhanced",
@@ -250,13 +250,17 @@ def is_full_test(name: str) -> bool:
 class Test:
     """Encapsulates one test run: log file, sandbox tracking, and assertion helpers."""
 
-    def __init__(self, ctx: RunContext, name: str) -> None:
+    def __init__(self, ctx: RunContext, name: str, attempt: int = 1) -> None:
         self.ctx = ctx
         self.name = name
+        self.attempt = attempt
         # Sanitise the name for use as a filename.
         safe = name.replace("/", "-").replace(" ", "_")
         self.log_file = ctx.log_dir / f"{safe}.log"
         self.log_file.parent.mkdir(parents=True, exist_ok=True)
+        # Sandboxes created by this attempt (subset of ctx.sandboxes). Used by
+        # run_test to preserve diagnostic state when the attempt fails.
+        self.local_sandboxes: list[str] = []
 
     @property
     def debug_new_flags(self) -> list[str]:
@@ -284,6 +288,7 @@ class Test:
         """Allocate a sandbox name and register it for cleanup."""
         name = f"{self.ctx.run_id}-{label}"
         self.ctx.sandboxes.append(name)
+        self.local_sandboxes.append(name)
         return name
 
     def project(self, label: str) -> Path:
@@ -416,6 +421,118 @@ class Test:
 # Test runner
 # ---------------------------------------------------------------------------
 
+# Files and directories copied out of ~/.yoloai/sandboxes/<name>/ when a test
+# fails. Kept intentionally narrow: enough to answer "did the prompt arrive,
+# did the agent launch, what status did it land in, what files did it touch"
+# without dragging in credentials (agent-state/) or build caches (cache/).
+# work/ is included so the user can inspect the agent's actual diff.
+_PRESERVE_FILES = (
+    "meta.json",
+    "sandbox-state.json",
+    "agent-status.json",
+    "prompt.txt",
+    "resume-prompt.txt",
+    "runtime-config.json",
+    "lifecycle-on-create-done",
+)
+_PRESERVE_DIRS = (
+    "logs",
+    "files",
+    "work",
+)
+
+
+def _sudo_uid_gid() -> tuple[Optional[int], Optional[int]]:
+    """Return (uid, gid) of the sudo invoker when running as root via sudo.
+    Mirrors internal/fileutil.SudoUID/SudoGID. Returns (None, None) otherwise.
+    """
+    if os.geteuid() != 0:
+        return None, None
+    try:
+        return int(os.environ["SUDO_UID"]), int(os.environ["SUDO_GID"])
+    except (KeyError, ValueError):
+        return None, None
+
+
+def _fix_preserved_perms(target: Path) -> None:
+    """Chown to the sudo invoker (if any) and widen perms to 755/644.
+
+    Sandbox source files under ~/.yoloai/sandboxes/ are often mode 600/700 and
+    root-owned when the smoke test ran under sudo. shutil.copy2/copytree
+    preserve those perms, which then trips `golangci-lint ./...` during the
+    next `make check` (the user's shell can't traverse root:700 dirs). Open
+    up the preserved copies — they are diagnostic artifacts, not credentials.
+    """
+    uid, gid = _sudo_uid_gid()
+
+    def adjust(path: str, is_dir: bool) -> None:
+        try:
+            os.chmod(path, 0o755 if is_dir else 0o644)
+        except OSError:
+            pass
+        if uid is not None and gid is not None:
+            try:
+                os.chown(path, uid, gid)
+            except OSError:
+                pass
+
+    adjust(str(target), is_dir=True)
+    for root, dirs, files in os.walk(target):
+        for d in dirs:
+            adjust(os.path.join(root, d), is_dir=True)
+        for f in files:
+            adjust(os.path.join(root, f), is_dir=False)
+
+
+def _preserve_sandbox(sandbox_name: str, dest_parent: Path) -> Optional[Path]:
+    """Copy diagnostic state from ~/.yoloai/sandboxes/<sandbox_name>/ to
+    dest_parent/<sandbox_name>/. Returns the target dir, or None if the source
+    doesn't exist (e.g. the test failed before the sandbox was created).
+    """
+    src = Path.home() / ".yoloai" / "sandboxes" / sandbox_name
+    if not src.is_dir():
+        return None
+    target = dest_parent / sandbox_name
+    target.mkdir(parents=True, exist_ok=True)
+    for f in _PRESERVE_FILES:
+        src_f = src / f
+        if src_f.is_file():
+            try:
+                shutil.copy2(src_f, target / f)
+            except OSError:
+                pass
+    for d in _PRESERVE_DIRS:
+        src_d = src / d
+        if src_d.is_dir():
+            try:
+                shutil.copytree(src_d, target / d, dirs_exist_ok=True)
+            except OSError:
+                pass
+    return target
+
+
+def _preserve_failed_attempt(
+    ctx: RunContext, test_name: str, sandbox_names: list[str], attempt: int
+) -> Optional[Path]:
+    """Mirror each sandbox in *sandbox_names* under <log_dir>/sandboxes/<test>/attemptN/.
+    Returns the attempt directory if anything was preserved, else None.
+    """
+    if not sandbox_names:
+        return None
+    # test_name typically contains "/" (e.g. "stop_start/docker"); pathlib
+    # keeps that as a real subdirectory, which groups attempts naturally.
+    base = ctx.log_dir / "sandboxes" / test_name / f"attempt{attempt}"
+    preserved_any = False
+    for name in sandbox_names:
+        out = _preserve_sandbox(name, base)
+        if out is not None:
+            preserved_any = True
+    if preserved_any:
+        _fix_preserved_perms(base)
+        return base
+    return None
+
+
 def _destroy_retry_sandboxes(ctx: RunContext, count_before: int) -> None:
     """Destroy sandboxes added since *count_before* so a retry starts clean."""
     stale = ctx.sandboxes[count_before:]
@@ -432,8 +549,9 @@ def run_test(
     ctx: RunContext,
     name: str,
     fn: Callable[[Test], None],
+    attempt: int = 1,
 ) -> TestResult:
-    t = Test(ctx, name)
+    t = Test(ctx, name, attempt=attempt)
     print(f"  {name} ...", end="", flush=True)
     start = time.monotonic()
     try:
@@ -457,6 +575,14 @@ def run_test(
         result = TestResult(name=name, passed=False, reason=f"{type(e).__name__}: {e}", elapsed_s=time.monotonic() - start)
         print(f"\n  *** ERROR [{name}]: {type(e).__name__}: {e}")
         print(f"      log: {t.log_file}")
+    # Preserve sandbox state on failure so the user can diagnose later.
+    # cleanup() destroys all sandboxes at exit, so this must happen before
+    # we return — and retries destroy the prior attempt's sandboxes, so the
+    # copy happens per attempt rather than only at end-of-run.
+    if not result.passed and not result.skipped and t.local_sandboxes:
+        preserved = _preserve_failed_attempt(ctx, name, t.local_sandboxes, attempt)
+        if preserved is not None:
+            print(f"      preserved: {preserved}")
     ctx.results.append(result)
     if ctx.junit:
         ctx.junit.write_testcase(result)
@@ -497,8 +623,16 @@ def _prompt(exdir: str, work: str, sentinel: str = SENTINEL) -> str:
     doesn't allocate disk blocks — so the success signal survives a mid-prompt
     ENOSPC, and the host can tell "agent never started" (neither file present)
     from "agent started but didn't finish" (in-progress lingering).
+
+    The "Run this shell command…" preamble is not cosmetic. Haiku sometimes
+    interprets a bare shell snippet as "what is this code?" and replies with a
+    clarifying question instead of executing it — confirmed by a preserved
+    stop_start failure where agent-status went idle while agent.log showed
+    "Could you clarify what you'd like me to do with it?" The explicit
+    instruction collapses that ambiguity.
     """
-    return f"touch {exdir}/{IN_PROGRESS} && {work} && mv {exdir}/{IN_PROGRESS} {exdir}/{sentinel}"
+    cmd = f"touch {exdir}/{IN_PROGRESS} && {work} && mv {exdir}/{IN_PROGRESS} {exdir}/{sentinel}"
+    return f"Run this shell command exactly as written; do not modify it or ask for clarification:\n{cmd}"
 
 
 def test_full_workflow(t: Test, spec: BackendSpec) -> None:
@@ -1053,15 +1187,18 @@ def main() -> int:
                 continue
 
             sandbox_count_before = len(ctx.sandboxes)
-            result = run_test(ctx, test_name, lambda t, s=spec: test_fn(t, s))
+            result = run_test(ctx, test_name, lambda t, s=spec: test_fn(t, s), attempt=1)
             if not result.passed and not result.skipped and spec.retries > 0:
-                for attempt in range(spec.retries):
-                    print(f"      Retrying {test_name} (attempt {attempt + 1}/{spec.retries})...")
+                for retry_idx in range(spec.retries):
+                    attempt = retry_idx + 2  # attempt 1 was the initial run
+                    print(f"      Retrying {test_name} (attempt {retry_idx + 1}/{spec.retries})...")
                     ctx.results.pop()
                     # Destroy sandboxes created during the failed attempt so
                     # the retry can create fresh ones with the same names.
+                    # run_test has already preserved their state under
+                    # <log_dir>/sandboxes/<test>/attempt<N>/ before we get here.
                     _destroy_retry_sandboxes(ctx, sandbox_count_before)
-                    result = run_test(ctx, test_name, lambda t, s=spec: test_fn(t, s))
+                    result = run_test(ctx, test_name, lambda t, s=spec: test_fn(t, s), attempt=attempt)
                     if result.passed:
                         break
 
