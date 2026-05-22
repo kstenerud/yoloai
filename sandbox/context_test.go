@@ -9,6 +9,7 @@ import (
 
 	"github.com/kstenerud/yoloai/agent"
 	"github.com/kstenerud/yoloai/config"
+	_ "github.com/kstenerud/yoloai/runtime/tart" // registers tart descriptor for VMRuntimeDir test
 	"github.com/kstenerud/yoloai/sandbox/store"
 )
 
@@ -165,6 +166,33 @@ func TestGenerateContext_DockerFilesPath(t *testing.T) {
 	}
 	if !strings.Contains(result, "/yoloai/cache/") {
 		t.Error("docker context should contain /yoloai/cache/")
+	}
+}
+
+func TestGenerateContext_TartFilesPath(t *testing.T) {
+	meta := &store.Meta{
+		Name:    "test-sb",
+		Backend: "tart",
+		Workdir: store.WorkdirMeta{
+			HostPath:  "/Users/admin/project",
+			MountPath: "/Users/admin/project",
+			Mode:      "copy",
+		},
+	}
+
+	result := GenerateContext(meta)
+
+	if !strings.Contains(result, "/Users/admin/.yoloai/files/") {
+		t.Errorf("tart context should contain /Users/admin/.yoloai/files/, got:\n%s", result)
+	}
+	if !strings.Contains(result, "/Users/admin/.yoloai/cache/") {
+		t.Errorf("tart context should contain /Users/admin/.yoloai/cache/, got:\n%s", result)
+	}
+	if strings.Contains(result, "/yoloai/files/") {
+		t.Error("tart context should not contain /yoloai/files/")
+	}
+	if strings.Contains(result, "/yoloai/cache/") {
+		t.Error("tart context should not contain /yoloai/cache/")
 	}
 }
 

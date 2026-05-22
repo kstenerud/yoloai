@@ -50,8 +50,9 @@ func GenerateContext(meta *store.Meta) string {
 
 	// Files section (exchange directory is always available)
 	b.WriteString("\n## Files\n\n")
-	filesPath := "/yoloai/files/"
-	cachePath := "/yoloai/cache/"
+	rtDir := runtimeDir(meta)
+	filesPath := rtDir + "/files/"
+	cachePath := rtDir + "/cache/"
 	if meta.HostFilesystem {
 		filesPath = filepath.Join(store.Dir(meta.Name), "files") + "/"
 		cachePath = filepath.Join(store.Dir(meta.Name), "cache") + "/"
@@ -104,7 +105,6 @@ func GenerateContext(meta *store.Meta) string {
 
 	// Debug section (only when --debug is enabled)
 	if meta.Debug {
-		rtDir := runtimeDir(meta)
 		b.WriteString("\n## Idle Detection Debugging\n\n")
 		fmt.Fprintf(&b, "This sandbox has `--debug` enabled. The idle detection monitor writes detailed logs to `%s/logs/monitor.jsonl`.\n\n", rtDir)
 		b.WriteString("If the user asks you to help debug idle detection (e.g. status stuck on active/idle), check these files:\n\n")
@@ -172,25 +172,20 @@ func WriteContextFiles(sandboxDir string, meta *store.Meta, agentDef *agent.Defi
 		// Append Q&A protocol section to Claude's CLAUDE.md so it knows
 		// how to ask questions through the file exchange directory.
 		if agentDef.ContextFile == "CLAUDE.md" {
-			qa := `
-## yoloAI File Exchange Protocol
-
-You are running inside a yoloAI sandbox. A file exchange directory is
-available at ` + "`/yoloai/files/`" + ` — readable and writable from both inside
-and outside the sandbox.
-
-**When you need to ask a question or need input to continue:**
-
-1. Write your question to ` + "`/yoloai/files/question.json`" + `:
-   ` + "```json" + `
-   {"question": "your question here", "context": "optional context"}
-   ` + "```" + `
-2. Poll ` + "`/yoloai/files/answer.json`" + ` every 5 seconds until it appears.
-3. Read the answer and continue your task.
-
-Do not make assumptions about blocking decisions. Write the question file
-and wait. The question will be seen and answered by an external agent or user.
-`
+			filesDir := runtimeDir(meta) + "/files"
+			qa := "\n## yoloAI File Exchange Protocol\n\n" +
+				"You are running inside a yoloAI sandbox. A file exchange directory is\n" +
+				"available at `" + filesDir + "/` — readable and writable from both inside\n" +
+				"and outside the sandbox.\n\n" +
+				"**When you need to ask a question or need input to continue:**\n\n" +
+				"1. Write your question to `" + filesDir + "/question.json`:\n" +
+				"   ```json\n" +
+				"   {\"question\": \"your question here\", \"context\": \"optional context\"}\n" +
+				"   ```\n" +
+				"2. Poll `" + filesDir + "/answer.json` every 5 seconds until it appears.\n" +
+				"3. Read the answer and continue your task.\n\n" +
+				"Do not make assumptions about blocking decisions. Write the question file\n" +
+				"and wait. The question will be seen and answered by an external agent or user.\n"
 			f, err := fileutil.OpenFile(refPath, os.O_APPEND|os.O_WRONLY, 0600) //nolint:gosec // path is from sandbox dir, controlled by yoloai
 			if err != nil {
 				return fmt.Errorf("open agent context file %s for append: %w", agentDef.ContextFile, err)
