@@ -196,7 +196,7 @@ BASE_MACOS_BACKENDS: list[BackendSpec] = [
     BackendSpec("linux", "container", "docker", "docker",
                 check_backend="docker", retries=1),
     BackendSpec("mac",   "vm",        None,     "tart",
-                check_backend="tart",   is_vm=True, retries=1),
+                check_backend="tart",   is_vm=True, retries=1, stall_grace_secs=120),
 ]
 
 # Full tier: all backends for pre-release validation.
@@ -227,7 +227,7 @@ FULL_MACOS_BACKENDS: list[BackendSpec] = [
     BackendSpec("mac",   "container", None,     "seatbelt",
                 check_backend="seatbelt"),
     BackendSpec("mac",   "vm",        None,     "tart",
-                check_backend="tart",   is_vm=True, retries=1),
+                check_backend="tart",   is_vm=True, retries=1, stall_grace_secs=120),
 ]
 
 # Required for non-matrix tests. Must be available on both platforms.

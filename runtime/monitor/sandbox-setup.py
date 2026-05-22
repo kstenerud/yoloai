@@ -323,13 +323,21 @@ class TartBackend(Backend):
             )
             # Don't log success/failure - silent operation
 
-            # Run first launch to initialize device types and other Xcode components
-            result = tmux_io.run(
-                ["sudo", "xcodebuild", "-runFirstLaunch"],
-                capture_output=True,
-                text=True
-            )
-            # Don't log success/failure - silent operation
+            # Run first launch in background — this initializes device types and can
+            # take 60-120+ seconds on first run. State persists in the Xcode.app bundle
+            # via VirtioFS, so subsequent VMs find it already done. Running it in the
+            # background lets the agent start immediately instead of blocking setup.
+            xcodebuild_log = os.path.join(self.yoloai_dir, "xcodebuild-firstlaunch.log")
+            try:
+                with open(xcodebuild_log, "w") as _xcodebuild_logf:
+                    subprocess.Popen(
+                        ["sudo", "xcodebuild", "-runFirstLaunch"],
+                        stdout=_xcodebuild_logf,
+                        stderr=subprocess.STDOUT,
+                        start_new_session=True,
+                    )
+            except OSError:
+                pass  # Non-fatal
 
         # Symlink mounted PrivateFrameworks to system location (required for CoreSimulator.framework)
         privateframeworks_mount = "/Volumes/My Shared Files/m-PrivateFrameworks"
