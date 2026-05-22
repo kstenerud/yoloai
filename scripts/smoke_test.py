@@ -799,7 +799,7 @@ def check_prerequisites(
 def cleanup(ctx: RunContext) -> None:
     """Destroy all tracked sandboxes and remove the scratch tmpdir.
 
-    Logs are written to ctx.log_dir (~/.yoloai/smoke-logs/<run_id>/) and are
+    Logs are written to ctx.log_dir (./yoloai-smoketest-<timestamp>/) and are
     never deleted here — they persist until the user cleans them up manually.
     """
     if ctx.sandboxes:
@@ -920,7 +920,7 @@ def main() -> int:
 
     # On Linux, full-tier smoke tests need root for VM/namespace backends.
     # Catch the common mistake of forgetting sudo early, before we hit a
-    # confusing PermissionError on a root-owned smoke-logs directory.
+    # confusing PermissionError on a root-owned current directory.
     if sys.platform == "linux" and args.full and os.getuid() != 0:
         print(
             "ERROR: full smoke tests require root on Linux (for VM/namespace backends).\n"
@@ -933,15 +933,15 @@ def main() -> int:
 
     run_id = f"smoke-{int(time.time())}"
     tmpdir = Path(tempfile.mkdtemp(prefix="yoloai-smoke-"))
-    log_dir = Path.home() / ".yoloai" / "smoke-logs" / run_id
+    _t = time.time()
+    _ms = int(_t * 1000) % 1000
+    log_dir = Path.cwd() / time.strftime(f"yoloai-smoketest-%Y%m%d-%H%M%S.{_ms:03d}", time.gmtime(_t))
     try:
         log_dir.mkdir(parents=True, exist_ok=True)
     except PermissionError:
         print(
             f"ERROR: cannot create {log_dir}\n"
-            f"The directory {log_dir.parent} is likely owned by root from a previous sudo run.\n"
-            f"Fix with:\n"
-            f"  sudo chown -R $(id -un):$(id -gn) {log_dir.parent}",
+            f"Check that the current directory is writable.",
             file=sys.stderr,
         )
         return 1
@@ -975,7 +975,7 @@ def main() -> int:
     ]
 
     tier = "full" if ctx.full else "base"
-    print(f"yoloai smoke test  run={run_id}")
+    print(f"yoloai smoke test  run={log_dir.name}")
     print(f"host={'linux' if is_linux else 'macos'}  tier={tier}")
     print(f"binary={yoloai_bin}")
     print(f"logs={log_dir}\n")
