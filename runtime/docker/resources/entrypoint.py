@@ -201,15 +201,22 @@ def isolate_network(cfg):
                   "no nameservers found in /etc/resolv.conf; DNS will be blocked "
                   "and allowlisted domains will be unreachable by name")
 
-    # Set up ipset for allowed IPs. -exist makes create/add idempotent so
-    # restart in the same netns doesn't fail on the second pass.
-    _run_strict(["ipset", "create", "-exist", "allowed-domains", "hash:net"],
-                "network.ipset_create_failed")
-    _run_strict(["ipset", "flush", "allowed-domains"],
-                "network.ipset_flush_failed")
-    for domain, ip in allowed_ips:
-        _run_strict(["ipset", "add", "-exist", "allowed-domains", ip],
-                    "network.ipset_add_failed", domain=domain, ip=ip)
+    # Try to set up ipset for efficient IP matching.  ipset+iptables-nft may
+    # not be available everywhere (e.g. Podman on macOS uses iptables-nft which
+    # lacks the xt_set module), so we probe and fall back to per-IP rules.
+    use_ipset = False
+    try:
+        _run_strict(["ipset", "create", "-exist", "allowed-domains", "hash:net"],
+                    "network.ipset_create_failed")
+        _run_strict(["ipset", "flush", "allowed-domains"],
+                    "network.ipset_flush_failed")
+        for domain, ip in allowed_ips:
+            _run_strict(["ipset", "add", "-exist", "allowed-domains", ip],
+                        "network.ipset_add_failed", domain=domain, ip=ip)
+        use_ipset = True
+    except NetworkIsolationError:
+        log_info("network.ipset_unavailable",
+                 "ipset not available; will use per-IP iptables rules")
 
     # Flush existing OUTPUT rules so we start from a known state.
     _run_strict(["iptables", "-F", "OUTPUT"], "network.iptables_flush_failed")
@@ -227,10 +234,16 @@ def isolate_network(cfg):
             _run_strict(["iptables", "-A", "OUTPUT", "-d", ns, "-p", proto,
                          "--dport", "53", "-j", "ACCEPT"],
                         "network.iptables_dns_failed", nameserver=ns, proto=proto)
-    # Allow traffic to allowlisted IPs.
-    _run_strict(["iptables", "-A", "OUTPUT", "-m", "set",
-                 "--match-set", "allowed-domains", "dst", "-j", "ACCEPT"],
-                "network.iptables_allowlist_failed")
+    # Allow traffic to allowlisted IPs — via ipset match if available, else
+    # individual per-IP rules (iptables-nft doesn't support --match-set).
+    if use_ipset:
+        _run_strict(["iptables", "-A", "OUTPUT", "-m", "set",
+                     "--match-set", "allowed-domains", "dst", "-j", "ACCEPT"],
+                    "network.iptables_allowlist_failed")
+    else:
+        for domain, ip in allowed_ips:
+            _run_strict(["iptables", "-A", "OUTPUT", "-d", ip, "-j", "ACCEPT"],
+                        "network.iptables_perip_failed", domain=domain, ip=ip)
     # Reject everything else. This is the load-bearing rule — if every prior
     # rule succeeded but this one failed, the sandbox would be wide open.
     _run_strict(["iptables", "-A", "OUTPUT", "-j", "REJECT",

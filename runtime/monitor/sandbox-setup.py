@@ -1039,7 +1039,7 @@ def run_lifecycle_commands(cfg, yoloai_dir, log):
     """
     lifecycle = cfg.get("lifecycle")
     if not lifecycle:
-        return
+        return False
 
     if lifecycle.get("dockerd_required"):
         start_dockerd(log)
@@ -1064,6 +1064,7 @@ def run_lifecycle_commands(cfg, yoloai_dir, log):
         if not run_lifecycle_command(entry, log):
             log("lifecycle: on-start command failed")
             # Continue with remaining on-start commands (partial start is better than none)
+    return True
 
 
 def _cmd_str(entry):
@@ -1089,13 +1090,17 @@ def run_lifecycle_background(cfg, yoloai_dir, socket, log, pane_ready_event):
     the initial prompt — both of those write the same pane via send-keys /
     paste-buffer and would race otherwise.
     """
-    run_lifecycle_commands(cfg, yoloai_dir, log)
-    log_info("lifecycle.background_done", "background lifecycle commands complete")
+    ran = run_lifecycle_commands(cfg, yoloai_dir, log)
+    if ran:
+        log_info("lifecycle.background_done", "background lifecycle commands complete")
 
     # Wait for the main thread to finish writing to the pane before we add
     # the completion banner. Without this, a fast lifecycle (e.g. none
     # configured) lands the banner in the middle of the agent's exec line.
     pane_ready_event.wait()
+
+    if not ran:
+        return
 
     # Deliver a completion notification to the agent pane.
     msg = "[yoloai] Background setup complete — all services are now available."

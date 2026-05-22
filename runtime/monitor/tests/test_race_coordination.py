@@ -96,7 +96,7 @@ def test_lifecycle_banner_orders_after_agent_launch(
 
     Sequencing:
       1. Start the lifecycle thread. With the fix in place, it finishes
-         `run_lifecycle_commands` (no-op cfg) and blocks on `pane_ready`.
+         `run_lifecycle_commands` and blocks on `pane_ready`.
       2. Sleep briefly so the lifecycle thread reaches its block — this
          is observation latency, not a synchronization primitive. Under
          the broken code, this also gives the banner time to fire.
@@ -111,6 +111,9 @@ def test_lifecycle_banner_orders_after_agent_launch(
         "agent": "test-agent",
         "model": "test-model",
         "submit_sequence": "Enter",
+        "lifecycle": {
+            "on_start": [{"type": "string", "cmd": "echo ordering-probe"}],
+        },
     }
 
     lifecycle_thread = threading.Thread(
@@ -141,13 +144,16 @@ def test_lifecycle_banner_orders_after_agent_launch(
 
     entries = recorder.snapshot()
     launch_seqs = [seq for seq, name, _ in entries if name == "launch_agent"]
-    banner_seqs = [seq for seq, name, _ in entries if name == "lifecycle"]
+    # Only the banner tmux calls must come after launch_agent; on_start
+    # commands run before pane_ready.wait() and are allowed to interleave.
+    banner_seqs = [seq for seq, name, cmd in entries
+                   if name == "lifecycle" and cmd and cmd[0] == "tmux"]
     assert launch_seqs, f"expected launch_agent calls in log; got {entries}"
-    assert banner_seqs, f"expected lifecycle banner calls in log; got {entries}"
+    assert banner_seqs, f"expected lifecycle banner tmux calls in log; got {entries}"
     assert max(launch_seqs) < min(banner_seqs), (
         "lifecycle banner call interleaved with launch_agent: "
         f"max(launch_agent seq)={max(launch_seqs)} "
-        f"min(lifecycle seq)={min(banner_seqs)} entries={entries}"
+        f"min(banner seq)={min(banner_seqs)} entries={entries}"
     )
 
 
@@ -198,4 +204,34 @@ def test_lifecycle_commands_run_before_banner_within_thread(
         "lifecycle banner ran before its on_start command: "
         f"max(cmd seq)={max(cmd_seqs)} min(banner seq)={min(banner_seqs)} "
         f"entries={entries}"
+    )
+
+
+def test_no_banner_when_no_lifecycle(tmp_path: Path, recorder: CallRecorder) -> None:
+    """Banner is NOT sent when no lifecycle commands are configured.
+
+    Before the fix, run_lifecycle_background always sent the banner even
+    with no lifecycle key in cfg. This caused the agent to receive a
+    spurious '[yoloai] Background setup complete' message and go idle.
+    """
+    pane_ready = threading.Event()
+    pane_ready.set()
+    cfg: dict[str, Any] = {
+        "submit_sequence": "Enter",
+    }
+
+    lifecycle_thread = threading.Thread(
+        name="lifecycle",
+        target=sandbox_setup.run_lifecycle_background,
+        args=(cfg, str(tmp_path), None, _noop_log, pane_ready),
+        daemon=True,
+    )
+    lifecycle_thread.start()
+    lifecycle_thread.join(timeout=5)
+    assert not lifecycle_thread.is_alive(), "lifecycle thread did not finish"
+
+    entries = recorder.snapshot()
+    banner_seqs = [seq for seq, _, cmd in entries if cmd and cmd[0] == "tmux"]
+    assert not banner_seqs, (
+        f"expected no banner tmux calls with no lifecycle config; got {entries}"
     )

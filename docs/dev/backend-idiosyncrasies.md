@@ -58,6 +58,7 @@ row to the index.
 | Second sandbox tunnel loops `error access singleton` forever | [VS Code CLI: singleton lock blocks concurrent tunnels](#vs-code-cli-singleton-lock-blocks-concurrent-tunnels) |
 | DNS works but HTTPS to api.anthropic.com times out | [DNS: timeout = API unreachable, not DNS](#request-timed-out-in-claude-code--api-unreachable-not-dns-failure) |
 | `iptables` warnings about legacy tables | [iptables-nft: legacy tables warning](#iptables--iptables-nft-both-iptables-legacy-and-iptables-nft-can-coexist) |
+| `Can't open socket to ipset` / network isolation fails on Podman macOS | [Podman macOS: iptables-nft lacks xt_set module](#podman-macos-iptables-nft-lacks-xt_set-module-ipset-unusable) |
 | Smoke test: `full_workflow/containerd-vm` fails with "agent idle for 9s+" | [QEMU: slow startup exceeds stall grace](#qemu-slow-startup-exceeds-smoke-test-stall-grace-period) |
 
 ---
@@ -425,6 +426,21 @@ the VM user's uid (1000) into the container — not the macOS user's uid (e.g.
 Workaround: skip `keep-id` on macOS (`runtime.GOOS == "darwin"`). The
 entrypoint uses `gosu` to remap `yoloai` to the correct uid, which is the same
 path Docker takes. See `podman.go::Create`.
+
+### Podman macOS: iptables-nft lacks `xt_set` module; ipset unusable
+
+On macOS, Podman Machine runs a Linux VM using `iptables-nft`. The `xt_set`
+kernel module (which backs `iptables -m set --match-set`) is not loaded in
+Podman Machine's kernel, so any `iptables` rule referencing an ipset set fails
+with: `Can't open socket to ipset`.
+
+Symptom: `isolate_network()` in `entrypoint.py` fails during `ipset create` or
+the `--match-set` `iptables` rule, taking down the container with a
+`NetworkIsolationError`.
+
+Fix: probe for ipset availability with a try/except around the `ipset create`
+call. On failure, fall back to per-IP `iptables -d <ip> -j ACCEPT` rules for
+each allowlisted address. See `entrypoint.py::isolate_network`.
 
 ### Per-file bind mounts rejected by Podman's Docker-compatible API
 
