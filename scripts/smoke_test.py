@@ -865,17 +865,25 @@ def check_prerequisites(
     print("Checking prerequisites...\n")
 
     # Disk pre-flight: containerd snapshots accumulate, and ENOSPC inside a
-    # Kata VM surfaces as a silent agent-idle hang rather than a clear error.
-    # Warn loudly (but don't abort) when the host is near-full.
+    # Kata VM surfaces indirectly — typically as ConnectionRefused /
+    # FailToOpenSocket from the agent process (network plumbing depends on
+    # disk-backed state), then "agent idle 9s+" from this harness. Burning
+    # several minutes of model retries to discover that is wasteful, so abort
+    # at >=90% with a prune hint. Soft-note at 80-89% (still likely to pass).
     try:
         usage = shutil.disk_usage("/")
         pct = usage.used * 100 // usage.total
         free_gb = usage.free // (1024 ** 3)
         if pct >= 90:
-            print(f"  WARNING: host / is {pct}% full ({free_gb}G free).")
-            print( "           Containerd-based tests are likely to fail with ENOSPC.")
-            print( "           Consider: yoloai system prune --all --cache --yes\n")
-        elif pct >= 80:
+            print(
+                f"ERROR: host / is {pct}% full ({free_gb}G free).\n"
+                "Containerd-based tests fail with ENOSPC-adjacent network errors "
+                "at this fill level. Free space before running:\n"
+                "  sudo yoloai system prune --all --cache --yes",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        if pct >= 80:
             print(f"  Note: host / is {pct}% full ({free_gb}G free); watch for ENOSPC on containerd tests.\n")
     except OSError:
         pass
