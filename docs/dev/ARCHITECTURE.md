@@ -622,7 +622,10 @@ newSystemDoctorCmd (cli/system_doctor.go)
 **Change container setup (Dockerfile, entrypoint):**
 1. Edit files in `runtime/docker/resources/`
 2. They're embedded at compile time via `//go:embed` in `runtime/docker/resources.go`
-3. `EmbeddedTmuxConf()` in `runtime/docker/resources.go` is called by the setup wizard to write `defaults/tmux.conf` when the baked-in tmux config is in use
+
+**Change the default tmux config:**
+1. Edit `internal/resources/tmux/tmux.conf` (neutral location — shared by setup wizard and Docker image build)
+2. `tmuxres.Embedded()` exposes the bytes; `sandbox/setup.go` uses it to write `defaults/tmux.conf` and `runtime/docker` ships it inside the image
 
 **Change shared monitoring scripts (sandbox-setup.py, status-monitor.py):**
 1. Edit files in `runtime/monitor/`

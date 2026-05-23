@@ -169,10 +169,10 @@ func hasOverlayDirs(meta *store.Meta) bool {
 func requireOverlayRunning(ctx context.Context, rt runtime.Runtime, name string) error {
 	info, err := rt.Inspect(ctx, store.InstanceName(name))
 	if err != nil {
-		return fmt.Errorf("overlay sandbox %s must be running for this operation — use 'yoloai start %s'", name, name)
+		return fmt.Errorf(":overlay sandbox %s must be running for this operation — use 'yoloai start %s'", name, name)
 	}
 	if !info.Running {
-		return fmt.Errorf("overlay sandbox %s must be running for this operation — use 'yoloai start %s'", name, name)
+		return fmt.Errorf(":overlay sandbox %s must be running for this operation — use 'yoloai start %s'", name, name)
 	}
 	return nil
 }

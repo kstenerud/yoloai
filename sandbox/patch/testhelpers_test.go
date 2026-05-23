@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"github.com/kstenerud/yoloai/internal/testutil"
+
+	_ "github.com/kstenerud/yoloai/runtime/docker" // register backend for tests
 )
 
 func initGitRepo(t *testing.T, dir string)    { t.Helper(); testutil.InitGitRepo(t, dir) }

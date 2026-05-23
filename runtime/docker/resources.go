@@ -1,11 +1,13 @@
-// ABOUTME: Embeds Docker build resources (Dockerfile, entrypoints, tmux config,
-// ABOUTME: Python monitor scripts) and exposes them for the Docker backend image builder.
-// Package docker embeds Docker build resources (Dockerfile, entrypoint, tmux config).
+// ABOUTME: Embeds Docker build resources (Dockerfile, entrypoints, Python
+// ABOUTME: monitor scripts) and exposes them for the Docker backend image builder.
+// Package docker embeds Docker build resources (Dockerfile, entrypoints, scripts).
+// The shared tmux.conf lives in internal/resources/tmux (neutral location).
 package docker
 
 import (
 	_ "embed"
 
+	tmuxres "github.com/kstenerud/yoloai/internal/resources/tmux"
 	"github.com/kstenerud/yoloai/runtime/monitor"
 )
 
@@ -18,8 +20,9 @@ var embeddedEntrypoint []byte
 //go:embed resources/entrypoint.py
 var embeddedEntrypointPy []byte
 
-//go:embed resources/tmux.conf
-var embeddedTmuxConf []byte
+// embeddedTmuxConf is the shared default tmux.conf, sourced from the neutral
+// internal/resources/tmux package rather than re-embedded here.
+var embeddedTmuxConf = tmuxres.Embedded()
 
 // embeddedSandboxSetup provides the consolidated Python sandbox setup script
 // from the runtime/monitor package for inclusion in Docker image builds.
@@ -39,8 +42,3 @@ var embeddedStatusMonitor = monitor.Script()
 
 // embeddedDiagnoseIdle provides the idle detection diagnostic script.
 var embeddedDiagnoseIdle = monitor.DiagnoseScript()
-
-// EmbeddedTmuxConf returns the embedded tmux.conf content.
-func EmbeddedTmuxConf() []byte {
-	return embeddedTmuxConf
-}

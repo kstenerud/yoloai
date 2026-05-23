@@ -18,7 +18,7 @@ import (
 	"github.com/kstenerud/yoloai/agent"
 	"github.com/kstenerud/yoloai/config"
 	"github.com/kstenerud/yoloai/internal/fileutil"
-	dockerrt "github.com/kstenerud/yoloai/runtime/docker"
+	tmuxres "github.com/kstenerud/yoloai/internal/resources/tmux"
 )
 
 // errSetupPreview signals that the user chose [p] to preview the merged
@@ -302,9 +302,9 @@ func (m *Manager) promptTmuxSetup(ctx context.Context, userConfig string, noConf
 		return m.setTmuxConf("host")
 
 	case "p":
-		fmt.Fprintln(m.output)                                    //nolint:errcheck // best-effort output
-		fmt.Fprintln(m.output, "--- yoloai defaults ---")         //nolint:errcheck // best-effort output
-		fmt.Fprint(m.output, string(dockerrt.EmbeddedTmuxConf())) //nolint:errcheck // best-effort output
+		fmt.Fprintln(m.output)                            //nolint:errcheck // best-effort output
+		fmt.Fprintln(m.output, "--- yoloai defaults ---") //nolint:errcheck // best-effort output
+		fmt.Fprint(m.output, string(tmuxres.Embedded()))  //nolint:errcheck // best-effort output
 		if !noConfig && userConfig != "" {
 			fmt.Fprintln(m.output)                        //nolint:errcheck // best-effort output
 			fmt.Fprintln(m.output, "--- your config ---") //nolint:errcheck // best-effort output
@@ -420,7 +420,7 @@ func (m *Manager) setTmuxConf(value string) error {
 	if value == "default" || value == "default+host" {
 		destPath := filepath.Join(config.DefaultsDir(), "tmux.conf")
 		if _, err := os.Stat(destPath); os.IsNotExist(err) {
-			if writeErr := fileutil.WriteFile(destPath, dockerrt.EmbeddedTmuxConf(), 0644); writeErr != nil { //nolint:gosec // G306: tmux.conf contains no secrets; 0644 required so uid 1001 (yoloai in Kata VMs) can read it
+			if writeErr := fileutil.WriteFile(destPath, tmuxres.Embedded(), 0644); writeErr != nil { //nolint:gosec // G306: tmux.conf contains no secrets; 0644 required so uid 1001 (yoloai in Kata VMs) can read it
 				return fmt.Errorf("write defaults/tmux.conf: %w", writeErr)
 			}
 		}
