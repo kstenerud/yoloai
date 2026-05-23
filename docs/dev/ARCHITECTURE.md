@@ -71,7 +71,7 @@ Dependency direction: `cmd/yoloai` → `cli` → `sandbox` + `sandbox/patch` + `
 | `system_check.go` | `yoloai system check` — verifies prerequisites for CI/CD pipelines. Checks backend connectivity, base image, and agent credentials. Exits 1 on failure. |
 | `system_doctor.go` | `yoloai system doctor` — shows what backends and isolation modes are available on the current machine, with fix instructions for missing prerequisites. |
 | `system_mcp.go` | `yoloai mcp serve` — starts the orchestration MCP server on stdio. `yoloai mcp proxy` — proxies an inner MCP server through a sandbox. |
-| `system_runtime.go` | `yoloai system runtime` — manage Apple simulator runtime base images (pre-create, list, remove). |
+| `system_tart.go` | `yoloai system tart` — manage Apple simulator runtime base images (pre-create, list, remove). The legacy `yoloai system runtime` name remains as a hidden alias with a deprecation warning. |
 | `help.go` | `yoloai help [topic]` — topic-based help system with embedded markdown content and fuzzy suggestion. |
 | `help/` | Embedded markdown help topic files (quickstart, agents, workflow, config, etc.). |
 | `apply.go` | `yoloai apply` — apply changes back to host. Squash and selective-commit modes, `--export` for `.patch` files. |
@@ -394,7 +394,7 @@ Host context: `IsRoot`, `IsWSL2`, `InContainer`, `KVMGroup`. Detected once per i
 | `yoloai system check` | `cli/system_check.go:newSystemCheckCmd` | Verifies backend connectivity, base image, agent credentials |
 | `yoloai system doctor` | `cli/system_doctor.go:newSystemDoctorCmd` | `caps.RunChecks()` + `caps.FormatDoctor()` in `runtime/caps/` |
 | `yoloai system prune` | `cli/system_prune.go:newSystemPruneCmd` | `runtime.Prune()` + `sandbox.PruneTempFiles()` |
-| `yoloai system runtime` | `cli/system_runtime.go` | `tart.RuntimeVersion` / `tart.CopyRuntimeToVM()` |
+| `yoloai system tart` | `cli/system_tart.go` | `tart.RuntimeVersion` / `tart.CopyRuntimeToVM()` / `tart.Runtime.ListVMs` / `tart.Runtime.DeleteVM` |
 | `yoloai mcp serve` | `cli/system_mcp.go` | `mcpsrv.New()` — MCP server on stdio |
 | `yoloai mcp proxy` | `cli/system_mcp.go` | MCP proxy through sandbox |
 | `yoloai sandbox list` | `cli/list.go:newSandboxListCmd` | `sandbox.ListSandboxes()` in `sandbox/inspect.go` |

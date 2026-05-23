@@ -1,12 +1,12 @@
 package cli
 
-// ABOUTME: `yoloai system runtime` commands for managing Apple simulator runtime base images.
+// ABOUTME: `yoloai system tart` commands for managing Apple simulator runtime base images.
 // ABOUTME: Pre-create, list, and remove runtime bases (iOS, tvOS, watchOS, visionOS).
 
 import (
 	"context"
 	"fmt"
-	"os/exec"
+	"os"
 	"runtime"
 	"strings"
 
@@ -15,24 +15,72 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func newSystemRuntimeCmd() *cobra.Command {
+// newSystemTartCmd defines `yoloai system tart` (formerly `yoloai system runtime`).
+// The old `runtime` name remains a hidden alias that emits a deprecation warning.
+func newSystemTartCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "runtime",
-		Short: "Manage Apple simulator runtime base images",
-		Long:  "Pre-create and manage base images with iOS/tvOS/watchOS/visionOS runtimes.\n\nOnly available on macOS with Tart backend.",
+		Use:     "tart",
+		Aliases: []string{"runtime"},
+		Short:   "Manage Apple simulator runtime base images (Tart backend)",
+		Long: `Pre-create and manage Tart base VMs with iOS/tvOS/watchOS/visionOS runtimes.
+
+Only available on macOS with the Tart backend.`,
+		PersistentPreRunE: requireTartBackend,
 	}
 
 	cmd.AddCommand(
-		newSystemRuntimeAddCmd(),
-		newSystemRuntimeListCmd(),
-		newSystemRuntimeRemoveCmd(),
+		newSystemTartAddCmd(),
+		newSystemTartListCmd(),
+		newSystemTartRemoveCmd(),
 	)
 
 	return cmd
 }
 
-func newSystemRuntimeAddCmd() *cobra.Command {
-	cmd := &cobra.Command{
+// invokedViaRuntimeAlias reports whether the user typed "system runtime …"
+// rather than "system tart …". Cobra's CalledAs() is only populated on the
+// resolved leaf command, so we sniff os.Args directly for the contiguous
+// "system runtime" pair, skipping global flags.
+func invokedViaRuntimeAlias(args []string) bool {
+	// Skip the program name. Walk positional arguments (anything that doesn't
+	// start with "-") until we find "system" followed immediately by "runtime".
+	var positional []string
+	for _, a := range args[1:] {
+		if strings.HasPrefix(a, "-") {
+			continue
+		}
+		positional = append(positional, a)
+	}
+	for i := 0; i+1 < len(positional); i++ {
+		if positional[i] == "system" && positional[i+1] == "runtime" {
+			return true
+		}
+	}
+	return false
+}
+
+// requireTartBackend gates the `system tart` subtree: it warns when invoked
+// via the deprecated `system runtime` alias and verifies that the Tart
+// backend is available before any subcommand runs.
+func requireTartBackend(cmd *cobra.Command, _ []string) error {
+	if invokedViaRuntimeAlias(os.Args) {
+		fmt.Fprintln(cmd.ErrOrStderr(), //nolint:errcheck // best-effort warning
+			"warning: 'yoloai system runtime' is deprecated; use 'yoloai system tart' instead.")
+	}
+
+	if runtime.GOOS != "darwin" {
+		return sandbox.NewUsageError("yoloai system tart commands are only available on macOS")
+	}
+
+	available, note := checkBackend(cmd.Context(), "tart")
+	if !available {
+		return sandbox.NewUsageError("Tart backend not available: %s\n\nInstall Tart: brew install cirruslabs/cli/tart", note)
+	}
+	return nil
+}
+
+func newSystemTartAddCmd() *cobra.Command {
+	return &cobra.Command{
 		Use:   "add <platform>...",
 		Short: "Create a runtime base image with specified platforms",
 		Long: `Create a runtime base image with one or more Apple simulator runtimes.
@@ -44,28 +92,17 @@ Version syntax: platform[:version]
   - ios tvos      (multiple platforms)
 
 Examples:
-  yoloai system runtime add ios
-  yoloai system runtime add ios:26.4 tvos:26.1
-  yoloai system runtime add ios tvos watchos`,
+  yoloai system tart add ios
+  yoloai system tart add ios:26.4 tvos:26.1
+  yoloai system tart add ios tvos watchos`,
 		Args: cobra.MinimumNArgs(1),
-		RunE: runSystemRuntimeAdd,
+		RunE: runSystemTartAdd,
 	}
-
-	return cmd
 }
 
-// runSystemRuntimeAdd implements the system runtime add command body.
-func runSystemRuntimeAdd(cmd *cobra.Command, args []string) error {
-	if runtime.GOOS != "darwin" {
-		return sandbox.NewUsageError("yoloai system runtime commands are only available on macOS")
-	}
-
+// runSystemTartAdd implements the `system tart add` command body.
+func runSystemTartAdd(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
-	available, note := checkBackend(ctx, "tart")
-	if !available {
-		return sandbox.NewUsageError("Tart backend not available: %s\n\nInstall Tart: brew install cirruslabs/cli/tart", note)
-	}
-
 	tartRuntime, closeRT, err := openTartRuntime(ctx)
 	if err != nil {
 		return err
@@ -88,7 +125,7 @@ func runSystemRuntimeAdd(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("check base: %w", err)
 	}
 	if exists {
-		return sandbox.NewUsageError("Runtime base '%s' already exists.\n\nUse 'yoloai system runtime list' to see all bases.", baseName)
+		return sandbox.NewUsageError("Runtime base '%s' already exists.\n\nUse 'yoloai system tart list' to see all bases.", baseName)
 	}
 
 	fmt.Fprintf(cmd.OutOrStdout(), "\nCreating runtime base: %s\n\n", baseName) //nolint:errcheck
@@ -134,8 +171,8 @@ func openTartRuntime(ctx context.Context) (*tart.Runtime, func(), error) {
 	return tartRuntime, func() { _ = rt.Close() }, nil
 }
 
-func newSystemRuntimeListCmd() *cobra.Command {
-	cmd := &cobra.Command{
+func newSystemTartListCmd() *cobra.Command {
+	return &cobra.Command{
 		Use:   "list [filter...]",
 		Short: "List runtime base images",
 		Long: `List all runtime base images with their platform versions and sizes.
@@ -143,27 +180,16 @@ func newSystemRuntimeListCmd() *cobra.Command {
 Optionally filter by platform name (ios, tvos, watchos, visionos).
 
 Examples:
-  yoloai system runtime list
-  yoloai system runtime list ios
-  yoloai system runtime list ios tvos`,
+  yoloai system tart list
+  yoloai system tart list ios
+  yoloai system tart list ios tvos`,
 		Args: cobra.ArbitraryArgs,
-		RunE: runSystemRuntimeList,
+		RunE: runSystemTartList,
 	}
-
-	return cmd
 }
 
-func runSystemRuntimeList(cmd *cobra.Command, args []string) error {
-	if runtime.GOOS != "darwin" {
-		return sandbox.NewUsageError("yoloai system runtime commands are only available on macOS")
-	}
-
+func runSystemTartList(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
-	available, note := checkBackend(ctx, "tart")
-	if !available {
-		return sandbox.NewUsageError("Tart backend not available: %s\n\nInstall Tart: brew install cirruslabs/cli/tart", note)
-	}
-
 	tartRuntime, closeRT, err := openTartRuntime(ctx)
 	if err != nil {
 		return err
@@ -207,9 +233,9 @@ func printRuntimeBaseList(cmd *cobra.Command, bases []runtimeBase, availableRunt
 	out := cmd.OutOrStdout()
 	fmt.Fprintln(out) //nolint:errcheck
 	if len(bases) == 0 {
-		fmt.Fprintln(out, "No runtime base images found.")                  //nolint:errcheck
-		fmt.Fprintln(out)                                                   //nolint:errcheck
-		fmt.Fprintln(out, "Create one with: yoloai system runtime add ios") //nolint:errcheck
+		fmt.Fprintln(out, "No runtime base images found.")               //nolint:errcheck
+		fmt.Fprintln(out)                                                //nolint:errcheck
+		fmt.Fprintln(out, "Create one with: yoloai system tart add ios") //nolint:errcheck
 		return nil
 	}
 
@@ -241,19 +267,19 @@ type runtimeRemoveOpts struct {
 	yes bool
 }
 
-func newSystemRuntimeRemoveCmd() *cobra.Command {
+func newSystemTartRemoveCmd() *cobra.Command {
 	opts := &runtimeRemoveOpts{}
 	cmd := &cobra.Command{
 		Use:   "remove <base-name>",
 		Short: "Remove a runtime base image",
 		Long: `Remove a runtime base image to free disk space.
 
-The base name should be the full name as shown in 'yoloai system runtime list'.
+The base name should be the full name as shown in 'yoloai system tart list'.
 
 Example:
-  yoloai system runtime remove yoloai-base-ios-26.4`,
+  yoloai system tart remove yoloai-base-ios-26.4`,
 		Args: cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error { return runSystemRuntimeRemove(cmd, args, opts) },
+		RunE: func(cmd *cobra.Command, args []string) error { return runSystemTartRemove(cmd, args, opts) },
 	}
 
 	cmd.Flags().BoolVar(&opts.yes, "yes", false, "Skip confirmation prompt")
@@ -261,20 +287,11 @@ Example:
 	return cmd
 }
 
-// runSystemRuntimeRemove implements the system runtime remove command body.
-func runSystemRuntimeRemove(cmd *cobra.Command, args []string, opts *runtimeRemoveOpts) error {
+// runSystemTartRemove implements the `system tart remove` command body.
+func runSystemTartRemove(cmd *cobra.Command, args []string, opts *runtimeRemoveOpts) error {
 	baseName := args[0]
 
-	if runtime.GOOS != "darwin" {
-		return sandbox.NewUsageError("yoloai system runtime commands are only available on macOS")
-	}
-
 	ctx := cmd.Context()
-	available, note := checkBackend(ctx, "tart")
-	if !available {
-		return sandbox.NewUsageError("Tart backend not available: %s\n\nInstall Tart: brew install cirruslabs/cli/tart", note)
-	}
-
 	tartRuntime, closeRT, err := openTartRuntime(ctx)
 	if err != nil {
 		return err
@@ -286,7 +303,7 @@ func runSystemRuntimeRemove(cmd *cobra.Command, args []string, opts *runtimeRemo
 		return fmt.Errorf("check base: %w", err)
 	}
 	if !exists {
-		return sandbox.NewUsageError("Runtime base '%s' not found.\n\nUse 'yoloai system runtime list' to see available bases.", baseName)
+		return sandbox.NewUsageError("Runtime base '%s' not found.\n\nUse 'yoloai system tart list' to see available bases.", baseName)
 	}
 
 	size, err := runtimeBaseSize(ctx, tartRuntime, baseName)
@@ -301,7 +318,7 @@ func runSystemRuntimeRemove(cmd *cobra.Command, args []string, opts *runtimeRemo
 	}
 
 	fmt.Fprintf(cmd.OutOrStdout(), "\nDeleting %s...\n", baseName) //nolint:errcheck
-	if err := deleteBase(ctx, baseName); err != nil {
+	if err := tartRuntime.DeleteVM(ctx, baseName); err != nil {
 		return fmt.Errorf("delete base: %w", err)
 	}
 
@@ -336,72 +353,36 @@ func confirmRuntimeRemove(cmd *cobra.Command, baseName string, size int64) (canc
 	return false, nil
 }
 
-// runtimeBase represents a runtime base image.
+// runtimeBase represents a runtime base image as shown to the user.
 type runtimeBase struct {
 	Name     string
 	CacheKey string // e.g., "ios-26.4-tvos-26.1" (extracted from name)
 	Size     int64
 }
 
-// listRuntimeBases lists all yoloai-base-* VMs.
+// listRuntimeBases lists all yoloai-base-* VMs via the typed tart.Runtime API.
 func listRuntimeBases(ctx context.Context, tartRuntime *tart.Runtime) ([]runtimeBase, error) {
-	// Call tart list to get all VMs
-	output, err := runTartCommand(ctx, "list")
+	entries, err := tartRuntime.ListVMs(ctx)
 	if err != nil {
 		return nil, err
 	}
 
 	var bases []runtimeBase
-	lines := strings.SplitSeq(strings.TrimSpace(output), "\n")
-	for line := range lines {
-		// tart list output format (columns separated by spaces):
-		// NAME  SIZE  DISK  ...
-		// Parse the line
-		fields := strings.Fields(line)
-		if len(fields) < 2 {
+	for _, entry := range entries {
+		if !strings.HasPrefix(entry.Name, "yoloai-base") {
 			continue
 		}
-
-		name := fields[0]
-		if !strings.HasPrefix(name, "yoloai-base") {
-			continue
-		}
-
-		// Extract cache key from name
 		var cacheKey string
-		if name != "yoloai-base" {
-			cacheKey = strings.TrimPrefix(name, "yoloai-base-")
+		if entry.Name != "yoloai-base" {
+			cacheKey = strings.TrimPrefix(entry.Name, "yoloai-base-")
 		}
-
-		// Parse size (format: "20GB" or "36.5GB")
-		sizeStr := fields[1]
-		size := parseSize(sizeStr)
-
 		bases = append(bases, runtimeBase{
-			Name:     name,
+			Name:     entry.Name,
 			CacheKey: cacheKey,
-			Size:     size,
+			Size:     entry.Size,
 		})
 	}
-
 	return bases, nil
-}
-
-// runTartCommand runs a tart command and returns stdout.
-func runTartCommand(ctx context.Context, args ...string) (string, error) {
-	// Use exec to run tart
-	cmd := exec.CommandContext(ctx, "tart", args...) //nolint:gosec // G204: args are constructed internally
-	output, err := cmd.Output()
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(string(output)), nil
-}
-
-// deleteBase deletes a base VM using tart delete.
-func deleteBase(ctx context.Context, baseName string) error {
-	_, err := runTartCommand(ctx, "delete", baseName)
-	return err
 }
 
 // formatCacheKey converts "ios-26.4-tvos-26.1" to "iOS 26.4, tvOS 26.1".
@@ -446,15 +427,6 @@ func formatAvailableRuntimes(runtimes []tart.RuntimeVersion) string {
 	}
 
 	return strings.Join(parts, ", ")
-}
-
-// parseSize parses size strings like "20GB", "36.5GB" to bytes.
-func parseSize(sizeStr string) int64 {
-	// Remove "GB" suffix and parse as float
-	sizeStr = strings.TrimSuffix(strings.TrimSpace(sizeStr), "GB")
-	var size float64
-	fmt.Sscanf(sizeStr, "%f", &size) //nolint:errcheck,gosec // best-effort parse
-	return int64(size * 1024 * 1024 * 1024)
 }
 
 // formatSize formats bytes as "20 GB", "36 GB", etc.

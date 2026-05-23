@@ -329,7 +329,7 @@ func cleanupTempVM(ctx, vmName) {
    - Base exists but `~/.yoloai/tart-base-metadata/<base>.json` is malformed or missing
    - **Delete base and rebuild from scratch** (don't attempt repair)
    - Rationale: Metadata is critical for parent selection; corrupted state indicates larger problem
-   - User can always recreate base with `yoloai system runtime add`
+   - User can always recreate base with `yoloai system tart add`
    - Log warning: "Corrupted metadata for yoloai-base-ios-26.2, deleting and rebuilding"
 
 ### Base Image Locking
@@ -617,7 +617,7 @@ Store minimal metadata for each cached base image:
 **Cleanup:**
 ```bash
 # Remove old runtime versions
-yoloai system runtime remove --older-than latest
+yoloai system tart remove --older-than latest
 ```
 
 **Why no Xcode version tracking needed:**
@@ -629,12 +629,12 @@ yoloai system runtime remove --older-than latest
 
 ### Cache Management
 
-**Note:** `yoloai system runtime` commands are only available on macOS hosts (where Tart VMs can use Apple runtimes).
+**Note:** `yoloai system tart` commands are only available on macOS hosts (where Tart VMs can use Apple runtimes).
 
 #### List Cached Bases
 
 ```bash
-$ yoloai system runtime list
+$ yoloai system tart list
 
 Runtime Base Images:
   yoloai-base                        (no runtimes, 20GB)
@@ -649,32 +649,32 @@ Latest available on host: iOS 26.2, tvOS 26.2, watchOS 26.1
 
 Total cache size: 198GB
 
-Hint: Run 'yoloai system runtime remove --older-than latest' to clean old versions
+Hint: Run 'yoloai system tart remove --older-than latest' to clean old versions
 ```
 
 **With filters:**
 ```bash
 # Show only bases with iOS (any version)
-yoloai system runtime list ios
+yoloai system tart list ios
 
 # Show only bases with iOS 26.2 specifically
-yoloai system runtime list ios:26.2
+yoloai system tart list ios:26.2
 
 # Show bases with any runtime at version 26.2
-yoloai system runtime list 26.2
+yoloai system tart list 26.2
 
 # Show bases that have both iOS and tvOS 26.0
-yoloai system runtime list ios tvos:26.0
+yoloai system tart list ios tvos:26.0
 
 # Show bases with iOS:latest and tvOS (any version)
-yoloai system runtime list ios:latest tvos
+yoloai system tart list ios:latest tvos
 ```
 
 #### Add Base (Pre-warm Cache)
 
 ```bash
 # Implicit latest
-$ yoloai system runtime add ios tvos
+$ yoloai system tart add ios tvos
 
 Creating runtime base with iOS 26.2, tvOS 26.2...
 Found partial match: yoloai-base-ios-26.2 (already has iOS)
@@ -686,7 +686,7 @@ Base created: yoloai-base-ios-26.2-tvos-26.2 (36GB)
 
 **Explicit latest:**
 ```bash
-$ yoloai system runtime add ios:latest tvos:latest
+$ yoloai system tart add ios:latest tvos:latest
 
 Creating runtime base with iOS 26.2, tvOS 26.2...
 # (same as above)
@@ -694,7 +694,7 @@ Creating runtime base with iOS 26.2, tvOS 26.2...
 
 **Specific versions:**
 ```bash
-$ yoloai system runtime add ios:26.1 tvos:26.2
+$ yoloai system tart add ios:26.1 tvos:26.2
 
 Creating runtime base with iOS 26.1, tvOS 26.2...
 Copying iOS 26.1 runtime... done
@@ -710,7 +710,7 @@ Base created: yoloai-base-ios-26.1-tvos-26.2 (36GB)
 
 **Remove anything older than latest (most common):**
 ```bash
-$ yoloai system runtime remove --older-than latest
+$ yoloai system tart remove --older-than latest
 
 Querying host for latest runtimes: iOS 26.2, tvOS 26.2, watchOS 26.1
 
@@ -730,7 +730,7 @@ Aborted.
 
 **Remove anything older than specific version:**
 ```bash
-$ yoloai system runtime remove --older-than 26.2
+$ yoloai system tart remove --older-than 26.2
 
 Found 3 bases with any runtime older than 26.2:
   yoloai-base-ios-26.0       (iOS 26.0 < 26.2, 25GB)
@@ -742,7 +742,7 @@ Remove? [y/N]:
 
 **Per-platform version constraints:**
 ```bash
-$ yoloai system runtime remove --older-than ios:26.2 --older-than tvos:latest
+$ yoloai system tart remove --older-than ios:26.2 --older-than tvos:latest
 
 Querying host for latest tvOS: 26.2
 
@@ -756,7 +756,7 @@ Remove? [y/N]:
 
 **Remove specific runtime:**
 ```bash
-$ yoloai system runtime remove ios:26.1
+$ yoloai system tart remove ios:26.1
 
 Found 2 bases with iOS 26.1:
   yoloai-base-ios-26.1       (25GB)
@@ -768,7 +768,7 @@ Freed 61GB.
 
 **Remove all (nuclear option):**
 ```bash
-$ yoloai system runtime remove --all
+$ yoloai system tart remove --all
 
 This will remove ALL runtime bases (7 bases, 198GB).
 Base yoloai-base (no runtimes) will be kept.
@@ -795,16 +795,16 @@ Remove? [y/N]:
 **Typical workflow after Xcode upgrade:**
 ```bash
 # 1. Check what's cached
-yoloai system runtime list
+yoloai system tart list
 
 # 2. Check iOS-specific bases
-yoloai system runtime list ios
+yoloai system tart list ios
 
 # 3. Remove old versions (optional - they don't hurt)
-yoloai system runtime remove --older-than latest
+yoloai system tart remove --older-than latest
 
 # 4. Or remove a specific old version
-yoloai system runtime remove ios:26.1
+yoloai system tart remove ios:26.1
 
 # 5. Create sandboxes - new bases created automatically as needed
 yoloai new test --runtime ios
@@ -887,8 +887,8 @@ See implementation plan: `docs/dev/plans/apple-runtime-caching.md`
 
 **Decision:** ✅ **RESOLVED** - Option A (no limit) + smart pruning.
 - No automatic limits or eviction
-- `yoloai system runtime list` shows cache size and hints to prune if large
-- `yoloai system runtime remove --older-than latest` removes old runtime versions
+- `yoloai system tart list` shows cache size and hints to prune if large
+- `yoloai system tart remove --older-than latest` removes old runtime versions
 - User has full control over what gets removed
 - Warn if total cache exceeds 100GB (in list command output)
 

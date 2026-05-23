@@ -4,6 +4,18 @@ Tracks breaking changes made during beta. Each entry should be included in relea
 
 ## Unreleased
 
+### `yoloai system runtime` renamed to `yoloai system tart`
+
+**Previous behavior:** Apple simulator runtime base images were managed via `yoloai system runtime add|list|remove`. The command name read as generic, but the surface is structurally Tart-only (and is the only CLI subtree that imports `runtime/tart` directly).
+
+**New behavior:** The subtree is now `yoloai system tart` (Pattern B, mirroring `podman machine`). The old `yoloai system runtime ...` invocations continue to work as a hidden alias and print a deprecation warning to stderr. The alias will be removed in a future breaking-changes window.
+
+**Rationale:** Backend-scoped commands should name the backend explicitly. The new name makes the Tart scope honest and reserves `yoloai system <backend>` as the convention for any future backend-specific surfaces. Tracked in `docs/design/layering.md` D1 and W-L2 of `docs/dev/plans/layering-refactor.md`.
+
+**Migration:**
+- Replace `yoloai system runtime ...` with `yoloai system tart ...` in scripts, docs, and CI.
+- Until the alias is removed, the old invocation still works but emits a warning.
+
 ### `yoloai apply` defaults to commits-only; `--no-wip` removed in favor of `--include-wip`
 
 **Previous behavior:** `yoloai apply` applied agent commits AND uncommitted work-in-progress edits as unstaged files in the same invocation. `--no-wip` opted out of the WIP application.
