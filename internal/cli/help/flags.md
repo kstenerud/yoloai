@@ -10,7 +10,8 @@ CREATING SANDBOXES (yoloai new)
 
   --agent <name>      Agent to use (claude, gemini, etc.)
   --model, -m <name>  Model name or alias
-  --backend <name>    Runtime backend (docker, tart, seatbelt)
+  --backend <name>    Runtime backend (docker, podman, tart, seatbelt,
+                      containerd)
   --prompt, -p <text> Prompt for headless mode
   --prompt-file, -f   File containing the prompt
   --dir, -d <path>    Auxiliary directory (repeatable)
@@ -24,9 +25,13 @@ CREATING SANDBOXES (yoloai new)
   --yes, -y           Skip confirmations
   --cpus <num>        CPU limit (e.g., 4, 2.5)
   --memory <size>     Memory limit (e.g., 8g, 512m)
-  --security <mode>   OCI runtime security mode: standard, gvisor,
-                      kata, kata-firecracker (docker/podman only;
-                      kata modes are experimental)
+  --isolation <mode>  Isolation mode: container (default),
+                      container-enhanced (gVisor), container-privileged
+                      (--privileged, for Docker-in-Docker workloads),
+                      vm (Kata+QEMU), vm-enhanced (Kata+Firecracker).
+                      VM modes require containerd backend; both are
+                      experimental.
+  --os <name>         Target OS: linux (default), mac
   --vscode-tunnel     Launch a VS Code Remote Tunnel (connect from VS Code
                       on any machine via vscode.dev/tunnel/<name>)
                       See: yoloai help vscode-tunnel

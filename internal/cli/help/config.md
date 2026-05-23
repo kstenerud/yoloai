@@ -18,9 +18,12 @@ KEY SETTINGS
 
   agent            Agent to use (default: claude)
   model            Model name or alias (default: agent's default)
-  backend          Runtime backend: docker, tart, seatbelt
-  security         OCI runtime security mode (docker/podman only):
-                   standard, gvisor, kata, kata-firecracker (experimental)
+  backend          Runtime backend: docker, podman, tart, seatbelt, containerd
+  isolation        Isolation mode (container backends only): container,
+                   container-enhanced (gVisor), container-privileged,
+                   vm (Kata+QEMU), vm-enhanced (Kata+Firecracker).
+                   VM modes are experimental.
+  os               Target OS: linux (default), mac
   tmux_conf        Tmux config mode: default+host, default, host, none
   env.<NAME>       Environment variable forwarded to container
 
