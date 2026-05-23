@@ -1,5 +1,20 @@
 # Critique
 
+## Previous Critique (2026-05-23, round 7): Layering Refactor — Resolved
+
+All 10 findings addressed across `docs/design/layering.md`, `docs/dev/plans/layering-refactor.md`, `docs/dev/research/layering-open-questions.md`, and `docs/dev/research/layering-comparators.md`:
+
+- #1 (HIGH): W-L8e acceptance grep updated to current import paths (`sandbox`/`runtime` at repo root); note added that W-L12 will require an update
+- #2 (HIGH): `layering-open-questions.md` W-L11 reference removed; verified all four SSH-design renames (`Setup`, `IsReady`, `TmuxSocket(sandboxDir)`, `AgentProvisionedByBackend`) already in `runtime/runtime.go` — no work remains
+- #3 (MED): W-L8b/W-L8c rewritten — W-L8b adds Client methods only (CLI untouched); W-L8c does the first CLI migration; W-L8d migrates the rest. Clean dependency chain.
+- #4 (MED): W-L10 allowlist switched to file-based for `system_tart.go`; W-L10 step 2 notes that W-L13 must update the allowlist to directory-based when it restructures `internal/cli/` into subpackages
+- #5 (MED): W-L14 acceptance now requires verification steps to be **run** on a real Mac, not just documented; W-L14 explicitly blocks without macOS hardware
+- #6 (MED): §9.1 of `layering.md` now states multi-level chains of new branches error explicitly (user picked option b — no git reimplementation)
+- #7 (MED): Orphan audit MODIFYs distributed (user picked option a) — L9 (overlay-sandbox jargon) and L25 (workdirs.md "Docker only") bundled into W-L1; L20 (3× Tart guard) and L21 (tart binary shell-out) bundled into W-L2
+- #8 (LOW): D9 — `yoloai.SandboxNameFromEnv()` helper noted in W-L8a's design-review "Considerations to surface" list; deferred as a potential future addition, not blocking
+- #9 (LOW): W-L3 open question on `Pros`/`Cons` resolved — they are CLI-presentation language (selling pitch), not runtime facts; descriptor stays operational-only
+- #10 (LOW): Comparator §1 takeaway updated to note Docker's BuildKit parallel-path is the specific failure mode Pattern C exists to prevent
+
 ## Previous Critique (2026-04-01, round 6): Smoke Test V2 Internal Consistency — Resolved
 
 All issues addressed in `docs/dev/plans/smoke-test-v2.md`:

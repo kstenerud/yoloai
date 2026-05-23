@@ -275,6 +275,7 @@ The agent may decide mid-session that work belongs on a feature branch. Inside t
 - **Merge conflict during apply: error.** We are not reimplementing git's merge logic.
 - **Branch deletion in the sandbox does not propagate to the host.** Apply is additive.
 - **Branch rename:** out of scope (nice-to-have, not planned).
+- **Multi-level chains of new branches: error.** If the agent creates `feature-b` from `feature-a` and `feature-a` does not exist on the host, apply errors with a clear message. Reason: applying a chain requires topologically-ordered branch creation that approaches reimplementing git. A user who wants a chained branch can apply the first branch, attach, and recreate the chain manually.
 
 **Implications for the Client API (W-L8a):**
 

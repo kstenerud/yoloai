@@ -124,6 +124,14 @@ declares its capabilities, the client adjusts. When a fundamentally new feature 
 through the existing interface shape, a new command group is acceptable (docker buildx), but only as
 a last resort.
 
+**The Docker comparison cuts both ways for yoloAI.** The clean REST boundary supports Pattern C
+(yoloai.Client as the CLI's spine), but the BuildKit / `docker buildx` situation is precisely the
+failure mode Pattern C is designed to prevent: `docker build` and `docker buildx build` are two
+parallel implementations of the same surface, not one layered over the other — exactly today's
+`internal/cli/` vs `yoloai.Client` problem in yoloAI. The lesson: an interface boundary holds
+structurally only when every CLI feature is forced through it. When a new feature is allowed a
+parallel path (BuildKit) "just for now," the parallel path becomes permanent.
+
 ---
 
 ## Comparator 2: kubectl + client-go

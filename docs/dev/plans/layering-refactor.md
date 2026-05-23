@@ -45,29 +45,34 @@ Same convention as architecture-remediation.md: mid-workstream discoveries that 
 
 ## Workstreams
 
-### W-L1 — Move `EmbeddedTmuxConf` out of `runtime/docker`
+### W-L1 — Move `EmbeddedTmuxConf` out of `runtime/docker`; clean up leftover audit doc/string leaks
 
-`sandbox/setup.go` imports `runtime/docker` to call `EmbeddedTmuxConf()`. The tmux config isn't Docker-specific — every backend that runs tmux uses it. Move to a neutral package.
+`sandbox/setup.go` imports `runtime/docker` to call `EmbeddedTmuxConf()`. The tmux config isn't Docker-specific — every backend that runs tmux uses it. Move to a neutral package. Bundle in two minor user-facing leaks from the audit (L9, L25) — same character as the `--security` doc bug, low risk to land together.
 
 **Steps:**
 
-1. Create `internal/resources/tmux/` (or `sandbox/tmuxconf/`; pick whichever fits the package taxonomy better). Move the embedded file and `EmbeddedTmuxConf()` there.
-2. Update `sandbox/setup.go:307,423` to import the new location.
-3. Update `runtime/docker/`: remove the embed and the function. Re-export from the new location only if existing external code depends on the old import path (unlikely — `internal/` enforcement).
+1. **EmbeddedTmuxConf relocation (L27):**
+   - Create `internal/resources/tmux/` (or `sandbox/tmuxconf/`; pick whichever fits the package taxonomy better). Move the embedded file and `EmbeddedTmuxConf()` there.
+   - Update `sandbox/setup.go:307,423` to import the new location.
+   - Update `runtime/docker/`: remove the embed and the function.
+2. **L9 — Replace "overlay sandbox" with ":overlay sandbox" in `internal/cli/diff.go:172,175`.** The leading colon matches the documented user-facing mount-mode vocabulary (see L10 for the canonical form).
+3. **L25 — Fix `internal/cli/help/workdirs.md:14,27`.** Replace "Docker only" / "not available with seatbelt or tart" with accurate container-backend phrasing: "container backends only (docker, podman, containerd)".
 4. Run `make check`.
 
 **Acceptance:**
 - `sandbox/` does not import `runtime/docker`. Verify by `grep -r "runtime/docker" sandbox/` returning no matches.
+- `internal/cli/diff.go` error messages use `:overlay sandbox` (with leading colon) where they refer to the documented mount mode.
+- `internal/cli/help/workdirs.md` accurately reflects all container backends supporting `:overlay`.
 - `make check` passes.
 - All backends still get a working tmux config (smoke test on docker + at least one other backend if available).
 
-**Size:** XS · **Risk:** low · **Blocks:** nothing · **Addresses:** Audit L27.
+**Size:** XS · **Risk:** low · **Blocks:** nothing · **Addresses:** Audit L9, L25, L27.
 
 ---
 
-### W-L2 — Rename `yoloai system runtime` → `yoloai system tart`
+### W-L2 — Rename `yoloai system runtime` → `yoloai system tart`; collapse Tart-side duplication
 
-Today's `system runtime` command tree is structurally Tart-only but reads as generic. Rename to make the scope explicit (Pattern B; "podman machine" model).
+Today's `system runtime` command tree is structurally Tart-only but reads as generic. Rename to make the scope explicit (Pattern B; "podman machine" model). Bundle in two natural-companion cleanups from the audit (L20, L21) — they live in the same file and share the same Tart scope.
 
 **Steps:**
 
@@ -75,16 +80,20 @@ Today's `system runtime` command tree is structurally Tart-only but reads as gen
 2. Move `internal/cli/system_runtime.go` → `internal/cli/system_tart.go`. Rename Cobra command from `runtime` to `tart` under the `system` group.
 3. Wire the old `runtime` name as a hidden alias with deprecation warning. Use Cobra's `Aliases` field; emit warning in `PersistentPreRunE`.
 4. Update help text and any documentation references (`GUIDE.md`, `commands.md`, embedded help).
-5. Add entry to `docs/BREAKING-CHANGES.md` for the deprecation.
-6. Run `make check`.
+5. **L20 — Collapse the 3× Tart availability check.** Extract a single `requireTartBackend(ctx)` helper (or use a single `PersistentPreRunE` on the tart command group). Replace the three duplicated checks at `system_runtime.go:64,162,273` (now `system_tart.go`).
+6. **L21 — Route the `tart` binary call through `runtime/tart`.** Replace the `exec.CommandContext(ctx, "tart", ...)` in `runTartCommand` (`system_runtime.go:390-395`) with a typed function in `runtime/tart` (e.g., `tart.ListBaseVMs(ctx)`). Once the command tree is explicitly Tart-scoped (post-rename), calling into `runtime/tart` is honest — no abstraction theatre needed.
+7. Add entry to `docs/BREAKING-CHANGES.md` for the deprecation.
+8. Run `make check`.
 
 **Acceptance:**
 - `yoloai system tart ...` works for all current subcommands (create, list, delete, base list, etc.).
 - `yoloai system runtime ...` works but emits a deprecation warning to stderr.
 - Help text under `yoloai system` lists `tart` as the canonical name.
+- The Tart availability check is invoked from one place (helper or `PersistentPreRunE`); no three-times-duplicated `checkBackend(ctx, "tart")` block remains.
+- `system_tart.go` calls `runtime/tart` typed functions; no `exec.Command("tart", ...)` shelling from the CLI layer.
 - `BREAKING-CHANGES.md` documents the rename and the deprecation timeline.
 
-**Size:** S · **Risk:** low (user-visible — coordinate with release notes) · **Blocks:** nothing · **Addresses:** Audit L19, OPEN_QUESTIONS Q1, [design.md D1](../../design/layering.md#7-decisions-for-the-user).
+**Size:** S · **Risk:** low (user-visible — coordinate with release notes) · **Blocks:** nothing · **Addresses:** Audit L19, L20, L21; OPEN_QUESTIONS Q1; [design.md D1](../../design/layering.md#7-decisions).
 
 ---
 
@@ -212,6 +221,9 @@ The structural refactor. CLI commands consume `yoloai.Client` instead of buildin
 **Steps:**
 
 1. Catalog every public CLI command (run, new, attach, diff, apply, destroy, list, inspect, exec, reset, baseline, profile, config, info, bugreport, start, stop, restart). **Also include `wait`** — a new Client method (`Client.Wait(ctx, name, opts) (exitCode int, err error)`) that blocks until the agent exits, returning its exit code. The corresponding `yoloai wait <name>` CLI command lands in W-L8b. See [layering.md §9.2](../../design/layering.md#92-yoloai-wait-q77).
+
+**Considerations to surface in the design review** (not blockers):
+- A `yoloai.SandboxNameFromEnv() string` helper as a public-package convenience for embedded consumers that want `YOLOAI_SANDBOX` env-var semantics (D9 — currently the CLI handles env-var fallback in `internal/cli/envname.go`, but a future MCP/HTTP/library consumer would have to re-implement it).
 2. For each: identify the method it should call on `yoloai.Client`, the `<Op>Options` struct shape, and the return type.
 3. Note gaps: methods or options that don't exist today (audit found at least: overlay diff/apply, format-patch apply, selective apply, attach with TTY).
 4. Write the API surface as a Go file (`yoloai/api_surface.go`) or as a section in `yoloai.go` doc comments. Submit for review before implementation begins. **This is a design review checkpoint** — do not start W-L8b until the surface is approved.
@@ -223,35 +235,39 @@ The structural refactor. CLI commands consume `yoloai.Client` instead of buildin
 
 **Size:** S · **Risk:** low · **Blocks:** W-L8b–e.
 
-#### W-L8b — Add missing methods to `yoloai.Client`
+#### W-L8b — Add Client methods (move orchestration into `yoloai.Client`)
+
+This sub-workstream adds Client methods *only* — it moves orchestration logic from CLI command files into the Client, but **the CLI continues to call the old direct paths until W-L8c/d migrates each command**. Splitting the "add method" step from the "migrate CLI" step avoids the trap of mixing two concerns in one PR.
 
 **Steps:**
 
-1. Implement each missing Client method identified in W-L8a. Move the orchestration logic from the CLI command into the Client method; keep the CLI command calling the new method.
-2. Move tests as the logic moves: orchestration tests (current in `internal/cli/*_test.go` where they test orchestration not presentation) get parallel coverage in `yoloai/` tests.
-3. Ship each method as a separate PR. Each PR: add method to Client + migrate one CLI command + tests.
+1. Implement each missing Client method identified in W-L8a. Move the orchestration logic from the CLI command into the Client method. The CLI command, for now, can either (a) keep calling its old direct path unchanged, or (b) call the new Client method as a pass-through if that's trivial — but the formal CLI migration is W-L8c/d's job.
+2. Move tests as the logic moves: orchestration tests (currently in `internal/cli/*_test.go` where they test orchestration rather than presentation) get parallel coverage in `yoloai/` tests.
+3. Ship each method as a separate PR. Each PR: one new Client method + its tests. No `internal/cli/` rewrites in this phase.
 
 **Acceptance per method:**
 - The method exists on `yoloai.Client` and is exported.
-- The corresponding CLI command calls only the new method for orchestration (no direct `runtime/` or `sandbox/` orchestration calls).
-- Test coverage equals or exceeds the pre-refactor coverage for that command path.
+- Orchestration logic that previously lived in the CLI command file is now reachable from (or has moved into) the Client method.
+- Test coverage equals or exceeds the pre-refactor coverage for that orchestration logic.
+- The CLI continues to work; user-visible behavior unchanged.
 - `make check` passes.
 
-**Size:** L (one method per PR; ~12–15 PRs total) · **Risk:** medium (refactoring with parallel feature work — coordinate via a moratorium on adding new direct-orchestration logic to CLI commands during this phase) · **Blocks:** W-L8e.
+**Size:** L (one method per PR; ~12–15 PRs total) · **Risk:** medium (parallel feature work — coordinate via a moratorium on adding new direct-orchestration logic to CLI commands during this phase) · **Blocks:** W-L8c.
 
-#### W-L8c — Migrate first generic command (proof of concept)
+#### W-L8c — Migrate first CLI command (proof of concept)
 
-Pick one low-risk command — `list`, `inspect`, or `info` — as the first CLI command to fully convert. It should already have a Client method (from W-L8b) and exercise the IOStreams pattern.
+The Client methods now exist (from W-L8b). W-L8c is the **first CLI-callsite migration**: rewrite one low-risk command (`list`, `inspect`, or `info` — pick at implementation time) to call only the Client method, removing direct `sandbox/` and `runtime/` imports from that command's file. The point is to establish the conventions on a small target before mass migration.
 
 **Steps:**
 
-1. Refactor the chosen CLI file to call only `yoloai.Client.<Method>` for orchestration. Remove any direct `sandbox/` or `runtime/` import.
-2. Establish the conventions (how options are built, how errors are mapped to exit codes, how output is formatted, where IOStreams lives) — document these in `internal/cli/CONVENTIONS.md` or similar for subsequent migrations.
+1. Refactor the chosen CLI file to call only `yoloai.Client.<Method>` for orchestration. Remove direct `sandbox/` or `runtime/` imports from that file (the chokepoint in `helpers.go` still imports `runtime/` for backend registration — that's expected).
+2. Establish the conventions for subsequent migrations: how options are built, how typed errors map to exit codes, how output is formatted (text vs JSON), where `IOStreams` lives. Document these in `internal/cli/CONVENTIONS.md` (new file) for W-L8d to follow.
 3. Run smoke tests on multiple backends.
 
 **Acceptance:**
-- The chosen command's CLI file does not import `internal/sandbox` or `internal/runtime` (except the registration chokepoint).
-- Conventions are documented for future CLI command migrations.
+- The chosen command's CLI file does not import `sandbox` or any concrete `runtime/<backend>` package (except `helpers.go`'s registration chokepoint).
+- `internal/cli/CONVENTIONS.md` exists with documented conventions.
+- Smoke tests pass on the available backends.
 
 **Size:** S · **Risk:** low · **Blocks:** W-L8d.
 
@@ -284,7 +300,7 @@ Once all generic CLI commands consume `yoloai.Client`, the old direct paths can 
 4. Run `make check`.
 
 **Acceptance:**
-- `grep -rn '"github.com/kstenerud/yoloai/internal/sandbox"\|"github.com/kstenerud/yoloai/internal/runtime"' internal/cli/ | grep -v _test.go | grep -v helpers.go | grep -v tart` returns no matches (allowing for the chokepoint in helpers.go and backend-scoped subcommand directories).
+- `grep -rn '"github.com/kstenerud/yoloai/sandbox"\|"github.com/kstenerud/yoloai/runtime"' internal/cli/ | grep -v _test.go | grep -v helpers.go | grep -v system_tart` returns no matches (allowing for the chokepoint in `helpers.go` and the Tart-scoped command file `system_tart.go`). **Note:** these are the current import paths (root-level packages); after W-L12 moves the packages under `internal/`, the grep must be updated accordingly.
 - ARCHITECTURE.md describes the new layering.
 
 **Size:** S · **Risk:** low (mostly deletions) · **Blocks:** W-L10.
@@ -315,7 +331,7 @@ A test (or linter rule) that fails CI if forbidden imports appear in `internal/c
 **Steps:**
 
 1. Write a Go test (e.g., `internal/cli/layering_test.go`) that uses `go/packages` to enumerate imports of every `internal/cli/` file. Fail if any non-allowlisted file imports `internal/runtime/<concrete>` packages or `internal/sandbox`.
-2. Allowlist: the chokepoint (`helpers.go` or wherever `newRuntime()` lives) for the registration imports; backend-scoped subcommand directories (`internal/cli/tart/`, etc.) for their own backend's package.
+2. Allowlist: the chokepoint (`helpers.go` or wherever `newRuntime()` lives) for the registration imports; **the flat backend-scoped file `system_tart.go`** by filename (this is the only backend-scoped CLI file at W-L10 time; W-L13 later restructures into `internal/cli/system/tart/` and the allowlist must be updated to be directory-based at that time).
 3. Add similar test for `sandbox/`: must not import any concrete `runtime/<backend>` package.
 4. Optionally implement as a `golangci-lint` custom linter rule if test-based enforcement is awkward.
 5. Add `runtime.Registered()`-iteration enforcement: a test that fails if `info.go`/`setup.go`/`bugreport_writer.go` regrows a hard-coded backend list (heuristic: search for ≥3 backend-name string literals in the same file).
@@ -416,7 +432,7 @@ Tart writes `"The number of VMs exceeds the system limit"` to stderr/`vm.log` wh
 - `ErrConcurrentVMLimit` exists and is exported from the typed-error package.
 - `runtime/tart/`'s `Run()` returns this error (wrapped) when the stderr substring matches.
 - A unit test feeds a synthetic stderr buffer matching the prefix and asserts the typed error.
-- macOS verification steps in step 4 are documented (as a separate verification PR/commit) — without them, the work isn't shippable.
+- **macOS verification steps in step 4 have been run on a real Apple Silicon Mac**, with results documented in a separate verification commit. All four checks (verbatim stderr prefix when starting a 3rd VM; exit code is 1; `vm.log` is fully flushed before process exit; stale-quota edge case from tart issue #967) are explicitly confirmed. If macOS hardware isn't available during implementation, W-L14 is **blocked**, not documented-around — it does not ship without verified results.
 - `make check` passes.
 
 **Size:** S · **Risk:** low (small surface, contained to runtime/tart/) · **Blocks:** nothing · **Depends on:** W7 typed-error package; coordinates loosely with W-L7 (which also touches Tart-specific surface).
@@ -439,7 +455,7 @@ The two plans interleave:
 
 These will be answered by the implementer during the workstream, not pre-decided:
 
-- **W-L3:** Should `BackendDescriptor` carry fields like `Pros`/`Cons` (currently in `knownBackends`), or are those CLI-presentation concerns that should stay in a CLI-side rendering struct? Resolves by reading current `knownBackends` carefully — if the fields are descriptive metadata, they belong in the descriptor; if they're CLI's interpretation, keep them in CLI.
+- **W-L3:** ~~Should `BackendDescriptor` carry fields like `Pros`/`Cons` (currently in `knownBackends`)?~~ **Resolved (Round 7 critique):** Pros/Cons are CLI-presentation language (a selling pitch — "Most portable", "Strong isolation", etc.), not runtime facts. They belong in a CLI-side rendering struct that wraps the descriptor. `BackendDescriptor` carries only operational metadata (Name, Description, Platforms, Requires, Notes, and the new Probe/VersionString/CleanupHint additions). This keeps the runtime layer presentation-free.
 - **W-L4:** Should `Probe()` cache results? A naive implementation re-probes on every `yoloai info` call. Likely yes, with a short TTL. Defer to implementation.
 - **W-L7:** Does the `AppleSimulatorRuntimes` interface need to be in a new package, or can it live in `runtime/`? Likely `runtime/` — it's a runtime capability.
 - **W-L8a:** How are streaming operations (attach, exec) shaped in the Client API? Pass explicit `io.Reader`/`io.Writer`, or return a typed `Stream` object? Decide during the design checkpoint.

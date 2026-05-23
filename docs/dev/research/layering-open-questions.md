@@ -460,11 +460,12 @@ approach (which soc-refactor.md rejects) may still be the code W-L7 has to work 
 **backend-agent-extensibility.md Issue 3–4 — Interface rename**
 > `ShouldSeedHomeConfig()` → `AgentProvisionedByBackend()` and
 > `EnsureImage`/`ImageExists` → `Setup`/`IsReady`.
-**Status: These renames overlap with W-L11.** The layering-refactor.md:311 W-L11 workstream
-proposes renaming these same methods. Verify which names are currently in the codebase
-(`ARCHITECTURE.md:343` shows `Setup()`, `IsReady()` — so W-L11's renames for those two
-are *already done*). Only the `TmuxSocket(name)` and `AgentPreinstalled()` renames in
-W-L11 remain as new work.
+**Status: Already landed in `runtime/runtime.go`.** All four renames are present:
+`Setup(ctx, sourceDir, ...)`, `IsReady(ctx)`, `TmuxSocket(sandboxDir)` (with the
+per-sandbox arg the SSH design wanted), and `AgentProvisionedByBackend` as a
+`BackendDescriptor` field. The W-L11 workstream that was briefly added to lift these
+renames out of the SSH design doc was removed once verification confirmed the
+work was complete. No work remains.
 
 ---
 
