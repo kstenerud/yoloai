@@ -23,7 +23,13 @@ Findings that turned up mid-workstream (architecture-remediation, layering-refac
 
 ## Findings
 
-*(none yet — file initialized 2026-05-23 ahead of layering-refactor kickoff)*
+### DF1 — `--security` flag was never in a tagged release; existing BREAKING-CHANGES entry is misleading
+
+- **Discovered:** 2026-05-23 · **Workstream:** W-L9
+- **Severity:** LOW
+- **Disposition:** PARKED
+- **Description:** D6 in `layering.md` was conditional: add a BREAKING-CHANGES entry for `--security` → `--isolation` only if `--security` ever shipped in a tagged release. Audit of `git grep '\.Flags().String."security"' v0.1.0..v0.2.6` confirms the CLI flag was never registered in any released tag — `--isolation` has been the public flag name since v0.2.0. The flag existed only on `main` between commit 87956ac and a rename predating v0.2.0. The existing `--security`-related Unreleased entry in `docs/BREAKING-CHANGES.md` is therefore inaccurate for that portion. It does, however, also cover the `backend` → `container_backend` config-key rename, which IS a real v0.1.x → v0.2.x breaking change and should remain documented. W-L9 closes as **N/A**: no new entry needed, and rewording the existing one is scope-creep for W-L9. A future docs pass can correct the conflation.
+- **Pointer:** `docs/BREAKING-CHANGES.md:97`
 
 ## Policy origin
 
