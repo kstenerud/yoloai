@@ -298,14 +298,14 @@ These remain the same as today and would be the same if starting over:
 
 ## 8. Migration delta vs. starting fresh
 
-The phased plan in [`layering-refactor.md`](../dev/plans/layering-refactor.md) gets us close to this layout. The remaining differences after the plan completes:
+The phased plan in [`layering-refactor.md`](../dev/plans/layering-refactor.md) converges to this layout. Resolutions as of 2026-05-23:
 
-- **Package paths.** The plan does not propose moving `sandbox/` → `internal/orchestration/` or `runtime/` → `internal/runtime/`. That move is mechanical but disruptive (every import path changes). Defer until the layering refactor is otherwise complete, then do as one large rename PR.
-- **`internal/cli/` reorganization into `commands/` and `system/`.** The plan leaves CLI files flat; the greenfield groups them by command tree. Low-priority cosmetic; can be done anytime after W-L8e.
-- **`internal/resources/`.** W-L1 moves the tmux config; the broader resources/ directory is forward-looking and only gets populated as new shared resources appear.
-- **`yoloai.Client` declared externally stable.** Deferred until a real consumer materializes ([`layering.md` §6](layering.md#6-public-api-stabilitydecoupled)). The greenfield declares from day one.
+- **Package paths** — *Approved, in scope, deferred to W-L12.* Moving `sandbox/` → `internal/orchestration/` and `runtime/` → `internal/runtime/` is mechanical but disruptive; lands as one rename PR after W-L8e when the Client surface is stable. ([D14](layering.md#7-decisions))
+- **`internal/cli/` reorganization into `commands/` / `system/` / `system/tart/`.** *Approved, in scope, deferred to W-L13.* Same posture as W-L12. Importantly, W-L13 strengthens W-L10's enforcement: `system/tart/` becomes a separate Go package so the layering linter can scope-check imports structurally. ([D15](layering.md#7-decisions))
+- **`internal/resources/`.** W-L1 moves the tmux config; the broader `resources/` directory grows organically as new shared resources appear (not a refactor target in itself).
+- **`yoloai.Client` declared externally stable.** *Deferred until a real consumer materializes* ([`layering.md` §6](layering.md#6-public-api-stabilitydecoupled), [D3](layering.md#7-decisions)). The greenfield would declare from day one; the refactor defers.
 
-These are decisions that can be made independently of the main refactor.
+The "deferred to W-L1x" items can land independently of the main W-L8 work but should not happen *during* it.
 
 ---
 

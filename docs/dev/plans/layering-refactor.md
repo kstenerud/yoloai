@@ -21,6 +21,7 @@ Phased plan to implement the architecture defined in [`docs/design/layering.md`]
 | **2 — Capability scaffolding** | W-L3, W-L4, W-L5, W-L6, W-L7 | Grow `BackendDescriptor` and optional interfaces so generic code can stop name-checking backends. Each workstream removes a specific leak from the audit. |
 | **3 — Orchestration boundary** | W-L8 (a–e) | The structural refactor: `yoloai.Client` becomes the CLI's spine. The largest and highest-impact phase. Each sub-step is shippable. |
 | **4 — Enforcement** | W-L10 | A test or linter rule preventing regression. Without enforcement, layering erodes under schedule pressure. |
+| **5 — Greenfield consolidation** | W-L12, W-L13, W-L14 | Optional, post-W-L8e. Package-path migration + CLI directory reorg + Tart concurrent-VM detection. Mechanical but disruptive; defer until layering is stable. |
 
 Phases 1 and 2 are largely independent — can be parallelized. Phase 3 depends on Phase 2 (the descriptor extensions are consumed by `yoloai.Client`). Phase 4 lands once Phase 3 is far enough along that the forbidden import set is stable.
 
@@ -210,7 +211,7 @@ The structural refactor. CLI commands consume `yoloai.Client` instead of buildin
 
 **Steps:**
 
-1. Catalog every public CLI command (run, new, attach, diff, apply, destroy, list, inspect, exec, reset, baseline, profile, config, info, bugreport, start, stop, restart).
+1. Catalog every public CLI command (run, new, attach, diff, apply, destroy, list, inspect, exec, reset, baseline, profile, config, info, bugreport, start, stop, restart). **Also include `wait`** — a new Client method (`Client.Wait(ctx, name, opts) (exitCode int, err error)`) that blocks until the agent exits, returning its exit code. The corresponding `yoloai wait <name>` CLI command lands in W-L8b. See [layering.md §9.2](../../design/layering.md#92-yoloai-wait-q77).
 2. For each: identify the method it should call on `yoloai.Client`, the `<Op>Options` struct shape, and the return type.
 3. Note gaps: methods or options that don't exist today (audit found at least: overlay diff/apply, format-patch apply, selective apply, attach with TTY).
 4. Write the API surface as a Go file (`yoloai/api_surface.go`) or as a section in `yoloai.go` doc comments. Submit for review before implementation begins. **This is a design review checkpoint** — do not start W-L8b until the surface is approved.
@@ -331,14 +332,94 @@ A test (or linter rule) that fails CI if forbidden imports appear in `internal/c
 
 ## Sizing summary
 
+Pre-AI estimates below; AI-assisted execution is observed to compress these significantly.
+
 | Phase | Workstreams | Estimated effort (focused work) |
 |---|---|---|
 | 1 — Cleanup & naming | W-L1 (XS), W-L2 (S), W-L9 (XS) | ~3–5 days |
 | 2 — Capability scaffolding | W-L3 (M), W-L4 (S), W-L5 (S), W-L6 (S), W-L7 (S) | ~3–4 weeks |
 | 3 — Orchestration boundary | W-L8a–e (S/L/S/L/S) | ~6–10 weeks |
 | 4 — Enforcement | W-L10 (S) | ~3 days |
+| 5 — Greenfield consolidation | W-L12 (M), W-L13 (S), W-L14 (S) | ~2–3 weeks |
 
 Total: roughly 11–16 weeks of focused architectural work. Spread across releases alongside ongoing feature work. The structural refactor (W-L8) is by far the largest and benefits from a code-freeze-on-direct-orchestration policy while it's in flight.
+
+---
+
+---
+
+### W-L12 — Migrate package paths to `internal/*`
+
+`sandbox/` and `runtime/` live at the repo root today because `yoloai.Client` consumed them (and historically Go's `internal/` rule would have blocked that consumption). After W-L8 lands, only the Client surface needs to import them — and the Client can import from `internal/` freely. Move both packages under `internal/` to enforce the public-surface boundary structurally rather than by convention. See [`layering-greenfield.md` §1](../../design/layering-greenfield.md#1-public-surface).
+
+**Steps:**
+
+1. Move `sandbox/` → `internal/orchestration/` (or `internal/sandbox/` — pick whichever fits the naming hierarchy better; "orchestration" is the greenfield doc's name).
+2. Move `runtime/` → `internal/runtime/`.
+3. Update every import path. Use `gofmt -r` or a structured search-replace; verify with `goimports` + `go build`.
+4. Update `docs/dev/ARCHITECTURE.md` package map.
+5. Run `make check`.
+
+**Acceptance:**
+
+- `grep -rn '"github.com/kstenerud/yoloai/sandbox\|"github.com/kstenerud/yoloai/runtime' --include='*.go' .` returns no matches (except inside `internal/`).
+- Only `yoloai` (root) and `cmd/yoloai` are non-`internal` Go packages.
+- ARCHITECTURE.md reflects the new layout.
+- `make check` passes.
+
+**Size:** M · **Risk:** medium (large diff, but mechanical) · **Blocks:** nothing · **Depends on:** W-L8e (the Client surface must be stable; if the Client is mid-migration, an import-path move will conflict).
+
+---
+
+### W-L13 — Reorganize `internal/cli/*.go` into subdirectories
+
+Today `internal/cli/` is flat: ~50 `.go` files at one level. The greenfield groups them: `commands/` (per-command files), `system/` (admin subtree with `system/tart/` for backend-scoped commands), `mcp/`, `profile/`, `config/`, plus `streams.go` and `format/`. The reorganization enforces the backend-scope rule structurally — a linter rule can assert "files under `cli/system/tart/` may import `runtime/tart`; files elsewhere in `cli/` may not."
+
+**Steps:**
+
+1. Create the subdirectory structure per [`layering-greenfield.md` §2](../../design/layering-greenfield.md#2-package-tree).
+2. Move files into their new homes. Most files stay in the same `package cli`; some become subpackages (e.g. `package cli/system/tart`) — keep the package name simple per Go convention.
+3. Update `internal/cli/commands.go` (or wherever Cobra wires the root command) to import from the new subpackages.
+4. Convert backend-scoped commands (`system_runtime.go` → `system/tart/runtime.go` etc.) — these become a separate Go package so the layering linter (W-L10) can scope-check imports.
+5. Update `docs/dev/ARCHITECTURE.md`.
+6. Run `make check`.
+
+**Acceptance:**
+
+- Directory structure matches `layering-greenfield.md` §2 (with tolerance for naming decisions made during implementation).
+- Backend-scoped subdirectories are separate Go packages; the layering linter (W-L10) can enforce their import scope.
+- ARCHITECTURE.md reflects the new layout.
+- `make check` passes.
+
+**Size:** S · **Risk:** low (mostly file moves and package renames) · **Blocks:** strengthens W-L10's enforcement · **Depends on:** W-L8e.
+
+---
+
+### W-L14 — Tart concurrent-VM limit detection (`ErrConcurrentVMLimit`)
+
+Tart writes `"The number of VMs exceeds the system limit"` to stderr/`vm.log` when Apple's `VZError.virtualMachineLimitExceeded` (code 6) fires. Detect this in `runtime/tart/` and surface as a typed error that propagates through `yoloai.Client` to the CLI as a clear user message. Per [D11](../../design/layering.md#7-decisions), do **not** hard-code the VM count — defer to Tart's signal so behavior tracks Apple's policy if the limit changes.
+
+**Steps:**
+
+1. Add `ErrConcurrentVMLimit` to the runtime typed-error set (per [W7](architecture-remediation.md#w7) — `internal/yoerrors/` once W7 lands; or whichever package currently holds the typed errors).
+2. In `runtime/tart/`'s run path: when `tart run` exits non-zero, read the captured stderr (and/or `vm.log`) for the substring `"The number of VMs exceeds the system limit"`. If matched, wrap the underlying error with `ErrConcurrentVMLimit`.
+3. The `yoloai.Client` `Run()` method propagates the typed error. The CLI maps it to a user-facing message + exit code (decided in `exit-codes.md`).
+4. **macOS verification before commit** (cannot do on Linux host — see [`tart-limit-detection.md` §What needs testing on a real Mac before committing`](../research/tart-limit-detection.md)):
+   - Confirm the verbatim stderr prefix on a real host by trying to start a 3rd concurrent macOS VM
+   - Confirm the exit code is 1 (no per-error exit codes in Tart)
+   - Confirm `vm.log` is fully flushed before Tart's process exits (Swift `fputs` is unbuffered, but verify)
+   - Investigate the stale-VM quota-leaking case from [tart issue #967](https://github.com/cirruslabs/tart/issues/967) — if it can leak quota, we may need a `tart list` cross-check too
+5. Run `make check`.
+
+**Acceptance:**
+
+- `ErrConcurrentVMLimit` exists and is exported from the typed-error package.
+- `runtime/tart/`'s `Run()` returns this error (wrapped) when the stderr substring matches.
+- A unit test feeds a synthetic stderr buffer matching the prefix and asserts the typed error.
+- macOS verification steps in step 4 are documented (as a separate verification PR/commit) — without them, the work isn't shippable.
+- `make check` passes.
+
+**Size:** S · **Risk:** low (small surface, contained to runtime/tart/) · **Blocks:** nothing · **Depends on:** W7 typed-error package; coordinates loosely with W-L7 (which also touches Tart-specific surface).
 
 ---
 

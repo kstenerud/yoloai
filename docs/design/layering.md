@@ -219,20 +219,31 @@ This resolves [OPEN_QUESTIONS.md #101](../dev/OPEN_QUESTIONS.md) — the questio
 
 ---
 
-## 7. Decisions for the user
+## 7. Decisions
 
-These are the choices where this design has a recommendation but explicit approval is requested before implementation. Each cites the relevant evidence.
+Recorded resolutions, with evidence. All decisions below are locked in for the rearchitecture as of 2026-05-23.
 
-| # | Decision | Recommendation | Evidence |
+| # | Decision | Resolution | Evidence |
 |---|---|---|---|
-| **D1** | Rename `yoloai system runtime` → `yoloai system tart`? | **Yes** — current name is mis-scoped (reads generic, is Tart-only). | Audit L19; comparators §5 (Podman `machine`). |
+| **D1** | Rename `yoloai system runtime` → `yoloai system tart`? | **Yes.** Current name is mis-scoped (reads generic, is Tart-only). | Audit L19; comparators §5 (Podman `machine`). |
 | **D2** | Move `EmbeddedTmuxConf` out of `runtime/docker`? | **Yes** — into `internal/resources/tmux` or `sandbox/tmuxconf`. Used by every backend. | Audit L27. |
-| **D3** | `yoloai.Client` stability declaration? | **Defer** — internal-grade through v1, declare external only when a consumer appears. | §6 above; OPEN_QUESTIONS #101. |
-| **D4** | Add `BackendSpecific map[string]any` escape hatch to `InstanceConfig` now, or wait for proliferation? | **Wait** — until named fields cross ~4–5 backend-specific entries. Premature now. | §5.5; comparator synthesis. |
-| **D5** | Backend-scoped subcommand naming: `yoloai <backend> ...` (top-level) vs `yoloai system <backend> ...` (current shape)? | **Keep `system <backend>`** — administrative ops are not sandbox lifecycle ops; the `system` prefix is correct. | §5.2; existing commands.md convention. |
-| **D6** | `--security` flag deprecation note in BREAKING-CHANGES.md? | **Conditional** — yes if `--security` shipped in any released version; no otherwise. Requires verifying release history. | Audit Q4. |
-| **D7** | Convert `--isolation` flag values to expose impl tech in long help (`vm (Kata+QEMU)`) vs hide it (`vm`)? | **Keep as-is** — power users benefit from knowing what powers each mode (nerdctl pattern); abstractions that lie are worse than abstractions that name names. | §5.5; comparators §4 nerdctl. |
-| **D8** | Move `--runtime` (Apple simulator) handling out of `sandbox/create.go` — via optional interface or via tart-scoped extraction? | **Optional interface** (`AppleSimulatorRuntimes`). Matches yoloAI's existing pattern (`UsernsProvider`, `StdioExecer`). | Audit L28; §5.3. |
+| **D3** | `yoloai.Client` stability declaration? | **Defer.** Internal-grade through v1; declare external only when a consumer appears. | §6; OPEN_QUESTIONS #101. |
+| **D4** | Add `BackendSpecific map[string]any` escape hatch to `InstanceConfig` now? | **Wait** — until named fields cross ~4–5 backend-specific entries. Premature now. | §5.5; comparator synthesis. |
+| **D5** | Backend-scoped subcommand naming: top-level `yoloai <backend> ...` or `yoloai system <backend> ...`? | **Keep `system <backend>`** — administrative ops are not sandbox lifecycle ops. | §5.2; commands.md convention. |
+| **D6** | `--security` flag deprecation note in BREAKING-CHANGES.md? | **Conditional** — yes if `--security` shipped in any released version; no otherwise. Verify before W-L9. | Audit Q4. |
+| **D7** | Expose impl tech in `--isolation` long help (`vm (Kata+QEMU)`) vs hide it? | **Keep as-is.** Power users benefit from knowing what powers each mode (nerdctl pattern); abstractions that lie are worse. | §5.5; comparators §4. |
+| **D8** | Move `--runtime` (Apple simulator) out of `sandbox/create.go` — optional interface or tart-scoped extraction? | **Optional interface** (`AppleSimulatorRuntimes`). Matches yoloAI's existing pattern. | Audit L28; §5.3. |
+| **D9** | Q100: dual command dispatch — keep both `yoloai diff <name>` and `yoloai sandbox <name> diff`, or deprecate one? | **Keep both.** Both paths pass an explicit name to the same Client method; cost is presentation test surface, not API shape. Q100 closed as deferred-indefinitely. | OPEN_QUESTIONS #100; layering-open-questions.md §Q100. |
+| **D10** | MCP Go SDK choice: official `modelcontextprotocol/go-sdk` vs community `mark3labs/mcp-go`? | **Stay on `mark3labs/mcp-go`** (currently v0.54.0). Migrate to official SDK when either yoloai needs elicitation or the official's open #958 (panic-handling) closes. | [`mcp-sdk-evaluation.md`](../dev/research/mcp-sdk-evaluation.md). |
+| **D11** | Q94: how to surface Tart's concurrent-VM limit — hard-code "2" or detect from Tart? | **Detect from Tart.** Read stderr/`vm.log` for `"The number of VMs exceeds the system limit"`; convert to typed `ErrConcurrentVMLimit`. No hard-coded number — tracks Apple's policy as it evolves. Verification on macOS required before commit. | [`tart-limit-detection.md`](../dev/research/tart-limit-detection.md). |
+| **D12** | Q94: Xcode installation in Tart base images? | **User prerequisite.** Pre-installing inflates download (Xcode is ~30 GB); lazy install needs Apple ID interaction. Document; revisit if Tart usage shows friction. | Audit Q94; OPEN_QUESTIONS #94. |
+| **D13** | `exit-codes.md` OQ1: wrap sentinel errors with `%w` vs replace with typed errors at origin? | **Replace at origin.** Aligns with W7 (typed errors → `yoerrors/`). | exit-codes.md OQ1. |
+| **D14** | Package paths: migrate `sandbox/` → `internal/orchestration/` and `runtime/` → `internal/runtime/`? | **In scope, deferred to after W-L8e.** Mechanical but disruptive (every import path changes); cleaner as one rename PR once W-L8 is stable. Tracked as W-L12. | layering-greenfield.md §8. |
+| **D15** | CLI directory reorg: `internal/cli/*.go` flat → grouped subdirs? | **In scope, deferred to after W-L8e.** Same posture as D14 — mechanical, lower priority than the architectural work. Tracked as W-L13. | layering-greenfield.md §8. |
+| **D16** | `yoloai mcp` command group placement: Lifecycle (current) or Admin (greenfield)? | **Move to Admin.** MCP server is administrative surface, not sandbox lifecycle. | layering-greenfield.md §4. |
+| **D17** | Q77 `yoloai wait` command — add as Client method during the refactor? | **Yes.** Include `Client.Wait(ctx, name, opts) (exitCode int, err error)` in W-L8a's catalog. Enables CI/scripting workflows. | OPEN_QUESTIONS #77; §9.2. |
+| **D18** | Q93 (MCP-in-container), Q97 (network allowlist audit), Q102 (setup_test.go size), network-isolation OQs — address during the refactor? | **Defer all.** None affect architecture shape. Park as discovered-findings if surfaced mid-workstream. | layering-open-questions.md §INFLUENCES. |
+| **D19** | Discovered-findings file (`docs/dev/discovered-findings.md`)? | **Create empty with header.** Done 2026-05-23. | [`discovered-findings.md`](../dev/discovered-findings.md). |
 
 ---
 
@@ -248,7 +259,46 @@ The design's promise is not "no leaks." It is: **leaks are named, located, and m
 
 ---
 
-## 9. References
+## 9. Forward-looking feature compatibility
+
+The architecture must *tolerate* the following near-term features without redesign. The features themselves are not delivered by this design — they ship after the refactor — but the Client API surface (W-L8a) is designed with their shape in mind so adding them is a method addition, not a redesign.
+
+### 9.1 Branch-aware apply
+
+The agent may decide mid-session that work belongs on a feature branch. Inside the sandbox, the agent creates branches and commits to them. `yoloai apply` must mirror the sandbox's branch topology onto the host, not just apply commits to the host's current HEAD.
+
+**Semantics:**
+
+- Branches that exist in the sandbox but not on the host are created on the host pointing at the matching base commit, then their commits are applied via `git format-patch` + `git am`.
+- WIP changes (uncommitted in the sandbox) are applied after committed changes, on the currently-active branch — which, after apply, is the same branch on the host as in the sandbox.
+- **Branch-name conflict with the host: error.** No silent overwrite, no auto-suffix.
+- **Merge conflict during apply: error.** We are not reimplementing git's merge logic.
+- **Branch deletion in the sandbox does not propagate to the host.** Apply is additive.
+- **Branch rename:** out of scope (nice-to-have, not planned).
+
+**Implications for the Client API (W-L8a):**
+
+- `ApplyOptions` includes a mode that triggers branch-mirroring (e.g. `MirrorBranches bool`, or a richer `BranchPolicy` if granularity is needed later).
+- `ApplyResult` reports which branches were created/updated so the CLI can render a summary.
+- `DiffResult` (and `yoloai diff` output) indicates when the sandbox's HEAD has diverged from the baseline branch, so the user knows a branch-aware apply will occur.
+
+**Status:** Deferred. Implementation lands after the layering refactor. The architecture is responsible for not painting this feature into a corner.
+
+### 9.2 `yoloai wait` (Q77)
+
+A Client method that blocks until the sandbox's agent exits, returning the agent's exit code. Enables CI / scripting workflows ("run agent, wait, diff, apply, destroy" as one pipeline).
+
+**Implication for the Client API:** include `Wait(ctx, name string, opts WaitOptions) (exitCode int, err error)` in W-L8a's catalog. Small addition; lands with the first wave of Client methods.
+
+### 9.3 Additional presentation surfaces
+
+The architecture is designed so that future surfaces (MCP server completion, potential HTTP API, library use) consume `yoloai.Client` exclusively. Adding a new surface is a new directory under `internal/<surface>/` and method wiring — not a Client redesign. MCP already exists but bypasses Client; W-L8b/d migrates it to the same surface as the CLI.
+
+**Test for "is this surface compatible with the architecture?":** Can it be expressed as `parse-input → Client.Method(opts) → format-output`? If yes, add the surface. If no, the Client surface is missing the operation — extend the Client first.
+
+---
+
+## 10. References
 
 - [Layering Leak Audit](../dev/research/layering-leak-audit.md) — empirical inventory of all 31 findings (L1–L31) with verdicts.
 - [Comparator Research](../dev/research/layering-comparators.md) — Docker, kubectl, Terraform, containerd/nerdctl, Podman, HashiCorp, GitHub CLI.
