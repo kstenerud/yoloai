@@ -2,6 +2,26 @@
 
 Research/design date: 2026-03-21
 
+> **Status: Deferred (2026-05-23).** The value proposition this design rests on
+> has weakened: VS Code Remote Tunnel support delivers the "use remote compute
+> from a familiar UI" use case with a real IDE on top of a real sandbox, and
+> `DOCKER_HOST=ssh://user@host` lets the existing docker backend use a remote
+> daemon with full container isolation. The remaining niche — diff/apply
+> against local files while running on a remote host that can't run docker —
+> is too narrow to justify a backend's worth of maintenance surface (a custom
+> provisioner, multi-distro support, weaker isolation than every other backend,
+> non-trivial secrets handling).
+>
+> The interface-rename ideas in §2 (`EnsureImage → Setup`, `ImageExists →
+> IsReady`, `PreferredTmuxSocket() → TmuxSocket(name)`, `ShouldSeedHomeConfig →
+> AgentPreinstalled`) were independently valuable and **have already landed**
+> in subsequent W-numbered work — `runtime/runtime.go` today has `Setup`,
+> `IsReady`, `TmuxSocket(sandboxDir)`, and `AgentProvisionedByBackend` (the
+> equivalent of `AgentPreinstalled`). No work to lift; the rename has happened.
+>
+> The rest of this document remains as a record. If demand for a custom SSH
+> backend materializes later, the design is ready to pick up.
+
 ## Problem Statement
 
 All existing yoloAI backends run locally: Docker/Podman/containerd on the host machine,
