@@ -39,6 +39,7 @@ row to the index.
 | `Seccomp_filters: 1` inside sandbox despite `container-privileged`; proc mount in userns fails | [Docker: Proxmox LXC seccomp survives seccomp=unconfined](#proxmox-lxc-seccomp-survives-secompunconfined-at-the-docker-layer) |
 | `git apply` silently fails on overlay patch | [Docker: Exec strips trailing newline](#docker-sdk-exec-strips-the-trailing-newline) |
 | `tmux attach` exits with `EACCES` on `/dev/tty` (gVisor ARM64) | [Docker: gVisor ARM64 TIOCSCTTY](#gvisor-on-arm64-docker-exec--it-does-not-call-tiocsctty) |
+| `failed to create an image ... after deleting the existing one: AlreadyExists` (intermittent) | [Docker: AlreadyExists race on rebuild of identical tag](#docker-daemon-races-on-alreadyexists-when-rebuilding-an-existing-tag-with-identical-content) |
 | Container starts as root / wrong uid under rootless Podman | [Podman: rootless detection uses socket path](#rootless-detection-must-use-socket-path-not-osgetuid) |
 | Wrong uid inside container on macOS Podman | [Podman: macOS keep-id maps VM uid](#macos---usernkeep-id-maps-the-podman-machine-uid-1000-not-the-macos-uid) |
 | Podman rejects per-file bind mounts for secrets | [Podman: per-file bind mounts rejected](#per-file-bind-mounts-rejected-by-podmans-docker-compatible-api) |
@@ -338,6 +339,33 @@ is silently rejected or applies incorrectly.
 Workaround: re-append `\n` to the patch bytes if the last byte is not `\n`
 before calling `git apply`. See `Fix: restore trailing newline in overlay patch
 output` (commit f9bf669).
+
+### Docker daemon races on AlreadyExists when rebuilding an existing tag with identical content
+
+**Symptom:** `make releasetest` / `make integration` intermittently fails with:
+```
+docker build: failed to create an image docker.io/library/yoloai-base:latest with target sha256:<id>
+  after deleting the existing one: AlreadyExists: image "docker.io/library/yoloai-base:latest": already exists
+```
+Re-running the same command without code changes succeeds.
+
+**Explanation:** When BuildKit finalizes an image whose computed SHA matches the existing tag (byte-identical build inputs), it deletes the old reference and re-tags. The daemon's image-store (especially with the containerd snapshotter enabled, which is the default on recent Docker versions) reports `delete` complete before the reference is fully released. The immediate `create` then sees the old entry and fails with `AlreadyExists`. The race window is small (typically a few ms) and depends on snapshotter, daemon version, and load.
+
+**Triggers it reliably in tests:**
+- `make integration` first runs `make base-image` (populates the daemon's image), then test code with a fresh `HOME=tmpdir` calls `EnsureSetup` → the new HOME has no `~/.yoloai/cache/.base-image-checksum`, so `NeedsBuild()` returns true → docker SDK rebuilds the exact same content under the exact same tag → race.
+
+**Fix in test code:** pre-seed the checksum in the per-test HOME immediately after `HOME` is overridden:
+```go
+os.MkdirAll(filepath.Join(tmpHome, ".yoloai", "cache"), 0750)
+dockerrt.RecordBuildChecksum("")
+```
+`RecordBuildChecksum` writes `~/.yoloai/cache/.base-image-checksum` using the binary's current build-inputs hash; on the next `NeedsBuild()` call the existing image is judged fresh and no rebuild is attempted. Applied at `sandbox/integration_main_test.go:TestMain` and `internal/cli/integration_main_test.go:TestMain`.
+
+**Workaround for users hitting it interactively:** re-run the command, or delete `~/.yoloai/cache/.base-image-checksum` and let yoloai rebuild from scratch (which produces a fresh SHA when source changed, or trips the race again if not).
+
+**Code:** `runtime/docker/build.go::Setup`, `runtime/docker/build.go::buildBaseImage`.
+
+---
 
 ### gVisor on ARM64: `docker exec -it` does not call `TIOCSCTTY`
 

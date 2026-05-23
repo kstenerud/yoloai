@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/kstenerud/yoloai/internal/testutil"
+	dockerrt "github.com/kstenerud/yoloai/runtime/docker"
 )
 
 // writeTestBackendConfig pins the CLI's container-backend selection to the
@@ -80,6 +81,24 @@ func TestMain(m *testing.M) {
 	if err := writeTestBackendConfig(tmpHome); err != nil {
 		fmt.Fprintf(os.Stderr, "failed to write test backend config: %v\n", err)
 		os.Exit(1)
+	}
+
+	// Pre-seed the build-inputs checksum in the per-test HOME. `make integration`
+	// builds the base image (via `make base-image`) immediately before this test
+	// runs, so the docker daemon already has yoloai-base:latest with bytes that
+	// match the current embedded build inputs. Without this seed, the bootstrap
+	// invocation below reads the checksum from the fresh tmp HOME, finds nothing,
+	// and triggers a redundant rebuild — which races with the daemon's
+	// delete-then-create on the tag and intermittently fails with
+	// "AlreadyExists after deleting the existing one".
+	// See backend-idiosyncrasies.md "Docker daemon races on AlreadyExists when
+	// rebuilding an existing tag with identical content".
+	if testutil.IntegrationBackendName() == "" || testutil.IntegrationBackendName() == "docker" {
+		if err := os.MkdirAll(filepath.Join(tmpHome, ".yoloai", "cache"), 0750); err != nil {
+			fmt.Fprintf(os.Stderr, "failed to create cache dir: %v\n", err)
+			os.Exit(1)
+		}
+		dockerrt.RecordBuildChecksum("")
 	}
 
 	// Bootstrap: create a throwaway sandbox to trigger EnsureSetup (image build).

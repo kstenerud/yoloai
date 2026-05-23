@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -36,6 +37,21 @@ func TestMain(m *testing.M) {
 		os.Exit(0)
 	}
 	defer rt.Close() //nolint:errcheck // best-effort close in test main
+
+	// Pre-seed the build-inputs checksum in the per-test HOME. `make integration`
+	// builds the base image (via `make base-image`) immediately before this test
+	// runs, so the docker daemon already has yoloai-base:latest with bytes that
+	// match the current embedded build inputs. Without this seed, EnsureSetup
+	// reads the checksum from the fresh tmp HOME, finds nothing, and triggers a
+	// redundant rebuild — which races with the daemon's delete-then-create on
+	// the tag and surfaces as "AlreadyExists after deleting the existing one".
+	// See backend-idiosyncrasies.md "Docker daemon races on AlreadyExists when
+	// rebuilding an existing tag with identical content".
+	if err := os.MkdirAll(filepath.Join(tmpHome, ".yoloai", "cache"), 0750); err != nil {
+		fmt.Fprintf(os.Stderr, "failed to create cache dir: %v\n", err)
+		os.Exit(1)
+	}
+	dockerrt.RecordBuildChecksum("")
 
 	mgr := sandbox.NewManager(rt, slog.Default(), strings.NewReader(""), io.Discard)
 	if err := mgr.EnsureSetup(ctx); err != nil {
