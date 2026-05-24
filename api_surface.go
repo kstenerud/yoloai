@@ -576,17 +576,65 @@ const (
 	BugReportUnsafe BugReportMode = "unsafe"
 )
 
-// BugReportOptions configures BugReport.
+// BugReportOptions configures BugReport and StartBugReporter.
 type BugReportOptions struct {
-	Mode BugReportMode // zero value is BugReportSafe via Client method default
+	// Mode selects the redaction level. Zero value is BugReportSafe via
+	// Client method default.
+	Mode BugReportMode
+
+	// OutputDir is the directory the report file is written to. Empty
+	// means current working directory. The filename is auto-generated as
+	// `yoloai-bugreport-<timestamp>.md`.
+	OutputDir string
 }
 
-// BugReport collects sandbox + system + log diagnostics and writes them to
-// a single markdown file in CWD. Returns the absolute path of the written
-// file. The top-level `--bugreport` flag (flight recorder for any CLI
-// invocation) is implemented as middleware on the CLI side that calls this
-// method on panic / error — it remains a CLI concern.
+// BugReport captures a one-shot snapshot of a sandbox plus relevant system
+// state to a markdown file in CWD. Returns the absolute path of the written
+// file. Complementary to StartBugReporter below — BugReport gathers state
+// *at the moment of the call* (sandbox config, log tails, runtime info)
+// without buffering any runtime events. CLI: `yoloai sandbox <name> bugreport
+// [safe|unsafe]`.
 func (clientAPI) BugReport(ctx context.Context, name string, opts BugReportOptions) (path string, err error) {
+	panic("design-only")
+}
+
+// BugReportSession is the handle returned by StartBugReporter. Buffers
+// runtime events (slog records, command invocations, error wraps) from
+// Start time until Stop or Discard is called. Embedders scope a session
+// however they want — wrap a single risky Client call, record for a
+// fixed duration, span the entire program lifetime.
+type BugReportSession interface {
+	// Stop flushes the buffered events together with a final state
+	// snapshot to a markdown file in the configured output directory
+	// (BugReportOptions.OutputDir, default = CWD). Returns the absolute
+	// path of the written report.
+	Stop() (path string, err error)
+
+	// Discard throws away the buffered events without writing anything.
+	// Use on the success path to avoid leaving stale bug reports on disk.
+	Discard()
+}
+
+// StartBugReporter begins buffering runtime events. The returned session
+// captures slog records, internal Client method spans, and any wrapped
+// errors until Stop or Discard is called. Multiple sessions can be active
+// simultaneously (each gets its own independent buffer); nested sessions
+// are independent.
+//
+// The CLI's top-level `--bugreport` flag is a thin wrapper:
+//
+//	session := client.StartBugReporter(ctx, BugReportOptions{Mode: BugReportUnsafe})
+//	defer func() {
+//	    if r := recover(); r != nil || cmdErr != nil {
+//	        path, _ := session.Stop()
+//	        fmt.Fprintln(os.Stderr, "Bug report written:", path)
+//	    } else {
+//	        session.Discard()
+//	    }
+//	}()
+//
+// Embedders use the same primitive scoped to whatever lifetime they want.
+func (clientAPI) StartBugReporter(ctx context.Context, opts BugReportOptions) BugReportSession {
 	panic("design-only")
 }
 
@@ -726,11 +774,27 @@ type PruneResult struct {
 	FreedBytes   int64
 }
 
-// SetupOptions mirrors `sandbox.SetupOptions` (TmuxConf, Backend, Agent).
+// TmuxConfMode selects how yoloai writes the per-sandbox tmux config.
+// Replaces the open-string field that used to accept these values.
+type TmuxConfMode string
+
+const (
+	TmuxConfDefault     TmuxConfMode = "default"      // baked-in defaults only
+	TmuxConfDefaultHost TmuxConfMode = "default+host" // defaults + user's ~/.tmux.conf
+	TmuxConfHost        TmuxConfMode = "host"         // user's ~/.tmux.conf only
+	TmuxConfNone        TmuxConfMode = "none"         // no config (raw tmux)
+)
+
+// SetupOptions carries every answer the first-run setup wizard would
+// have collected. The CLI's `yoloai system setup` is an interactive
+// wizard that fills these in by prompting the user (or accepting flag
+// overrides), then calls Client.Setup with the populated struct.
+// Embedders set these directly. Client.Setup never prompts — every
+// answer must be supplied here.
 type SetupOptions struct {
-	TmuxConf string // "default", "default+host", "host", "none"
-	Backend  string
-	Agent    string
+	TmuxConf TmuxConfMode // required
+	Backend  string       // initial default container_backend ("docker", "podman", ...); empty = no default set
+	Agent    string       // initial default agent name; empty = no default set
 }
 
 func (clientAPI) Build(ctx context.Context, opts BuildOptions) error { panic("design-only") }
@@ -959,33 +1023,66 @@ const (
 //       follows Go stdlib convention (ErrXxx for sentinels, XxxError for
 //       types). See "Error taxonomy" section above for the full definitions.
 //
-// Q-C.  Streaming-vs-buffered ergonomics for `Logs` / `Diff` / `Apply`.
+// Q-C.  Streaming-vs-buffered ergonomics for `Diff` / `Apply`.
 //       `Logs` already takes an `io.Writer`. Should `Diff` / `Apply` also
-//       support streaming (large diffs OOM the result type)? Recommended
-//       for V1: keep result-typed return (CLI consumers already use this
-//       shape; embedders for bulk diffing are rare). Add streaming
-//       variants on demand.
+//       support streaming (large diffs OOM the result type)?
+//       **RESOLVED 2026-05-24:** Defer. Diff returns []*DiffResult, Apply
+//       returns *ApplyResult. The observed-workflow ceiling (~50MB across
+//       10 commits × 100 files × 500 lines) is well within slice-result
+//       budget; the pathological monorepo case is unobserved today. Key
+//       reasoning: adding streaming methods later is non-breaking
+//       (additive); pre-empting the surface now carries dead weight if
+//       no consumer materializes. Revisit when a streaming consumer
+//       (MCP/HTTP server returning diffs to a remote client, batch
+//       multi-sandbox diff command) actually exists.
 //
 // Q-D.  Where do `RunOptions.Wait` and `Wait()` overlap?  Run(Wait=true)
-//       returns *Info; Wait() returns exit code + error. They serve
-//       different consumers (sync `new --wait` users vs scripted
-//       `yoloai wait`). Recommendation: keep both. The CLI's `wait`
-//       command translates Wait()'s int back into a process exit code.
+//       returns *Info; Wait() returns exit code + error.
+//       **RESOLVED 2026-05-24:** Keep both. Run(Wait=true) is the
+//       one-call sync-embedder API with rich *Info return. Wait() is the
+//       standalone block-until-terminal that the new `yoloai wait <name>`
+//       CLI consumes and that embedders operating on an existing
+//       sandbox call directly. Internal polling logic is shared; the
+//       public surface honestly reflects the two use cases.
 //
 // Q-E.  Should `BugReport` collect the `--bugreport unsafe` flight
 //       recorder log automatically?  Today `--bugreport` is a middleware
 //       wrapper around every CLI command that captures runtime events.
-//       The on-demand `sandbox <name> bugreport` is distinct. Recommendation:
-//       expose only the on-demand version on Client; the flight recorder
-//       stays CLI middleware.
+//       The on-demand `sandbox <name> bugreport` is distinct.
+//       **RESOLVED 2026-05-24:** Two complementary primitives on Client.
+//         BugReport(ctx, name, opts) — one-shot snapshot at call time.
+//         StartBugReporter(ctx, opts) BugReportSession — session that
+//         buffers events until Stop / Discard.
+//       Reframing credit: the flight recorder is a session primitive
+//       (turn on, do stuff, turn off — get a dump), not a CLI-invocation
+//       wrapper. The CLI's --bugreport flag becomes a thin wrapper
+//       around StartBugReporter. Embedders use the same primitive
+//       scoped to whatever lifetime they want.
 //
 // Q-F.  `Setup()` on Client interactive prompts?  Setup is the only
 //       non-streaming method that today reads from stdin (tmux conf prompt,
-//       backend choice, agent choice). Options: (1) keep stdin-reading in
-//       Client (Manager already does), (2) require all answers in
-//       SetupOptions before calling. Recommendation: SetupOptions for
-//       embedders + a separate `RunInteractiveSetup(ctx, IOStreams)` for
-//       the CLI's wizard.
+//       backend choice, agent choice).
+//       **RESOLVED 2026-05-24:** Client.Setup is non-interactive.
+//       SetupOptions carries every answer the wizard would have collected;
+//       the wizard itself lives in internal/cli/system_setup.go (or
+//       wherever the CLI's interactive prompts go). The CLI fills out
+//       SetupOptions from user input, then calls Client.Setup with all
+//       answers in hand.
+//
+//       **Broader principle, articulated by reviewer:** the Client is the
+//       orchestration layer; all user interaction lives in the CLI. Same
+//       separation that already drives "CLI calls Client for everything"
+//       elsewhere in the refactor. Applied here, this means:
+//         - Client.Setup never reads stdin.
+//         - Client.Run / Client.Apply / Client.Destroy continue to gate
+//           confirmations via Yes / Force fields in their Options structs;
+//           Manager's existing dirty-repo / replace / unapplied-changes
+//           prompts migrate out of sandbox/ into the CLI in W-L8d, with
+//           Client returning a UsageError or sentinel when the gate is
+//           closed and the operation needs confirmation.
+//         - This is the difference between an interactive CLI experience
+//           and the Client API: the CLI's job is to collect and confirm;
+//           the Client's job is to act, given answers.
 //
 // Q-G.  Should `Setup` / `Build` / `Doctor` move to a `yoloai.Admin{}`
 //       sub-Client to keep the main surface focused?  Today's `Client` is
