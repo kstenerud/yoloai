@@ -81,37 +81,44 @@ func SandboxNameFromEnv() string { panic("design-only") }
 // Shared enums (referenced by Options structs throughout)
 // =============================================================================
 
-// IsolationMode selects the OCI / VM isolation level for a sandbox.
+// IsolationMode selects the OCI / VM isolation level for a sandbox. The
+// zero value means "unspecified" — Client methods canonicalize it to
+// IsolationContainer at the boundary. Every named constant is a real
+// string so debug output, JSON, and stored metadata are always
+// self-describing (no "" → mystery default mapping).
 type IsolationMode string
 
 const (
-	IsolationContainer           IsolationMode = ""                     // default: runc
+	IsolationContainer           IsolationMode = "container"            // runc; current default
 	IsolationContainerEnhanced   IsolationMode = "container-enhanced"   // gVisor
 	IsolationContainerPrivileged IsolationMode = "container-privileged" // runc + --privileged
 	IsolationVM                  IsolationMode = "vm"                   // Kata + QEMU
 	IsolationVMEnhanced          IsolationMode = "vm-enhanced"          // Kata + Firecracker
 )
 
-// HostOS selects the operating-system environment the agent runs in.
+// HostOS selects the operating-system environment the agent runs in. Zero
+// value means "unspecified" — Client methods canonicalize to OSLinux.
 type HostOS string
 
 const (
-	OSLinux HostOS = ""    // default: Linux container or VM
-	OSMac   HostOS = "mac" // macOS-native sandbox (Seatbelt or Tart)
+	OSLinux HostOS = "linux" // Linux container or VM (current default)
+	OSMac   HostOS = "mac"   // macOS-native sandbox (Seatbelt or Tart)
 )
 
 // NetworkMode selects a sandbox's outbound network policy. Modeled as one
 // enum field rather than two booleans — the invalid "isolated AND none"
-// combination is unrepresentable.
+// combination is unrepresentable. Zero value means "unspecified" — Client
+// methods canonicalize to NetworkOpen.
 type NetworkMode string
 
 const (
-	NetworkOpen     NetworkMode = ""         // zero value; full outbound access
+	NetworkOpen     NetworkMode = "open"     // full outbound access (current default)
 	NetworkIsolated NetworkMode = "isolated" // iptables + ipset domain allowlist
 	NetworkNone     NetworkMode = "none"     // no outbound traffic
 )
 
 // TmuxConfMode selects how yoloai writes the per-sandbox tmux config.
+// Setup requires a non-empty value; no canonicalization.
 type TmuxConfMode string
 
 const (
@@ -121,23 +128,28 @@ const (
 	TmuxConfNone        TmuxConfMode = "none"         // no config (raw tmux)
 )
 
-// ApplyMode selects how Apply emits its output.
+// ApplyMode selects an override to Apply's default behavior. The zero
+// value means "no override — do the normal per-directory apply"
+// (git format-patch + am for :copy directories; in-container diff-and-apply
+// for :overlay directories). The two named constants are overrides that
+// change the behavior away from that default; there is no named "default"
+// constant because that would just be the absence of a choice.
 type ApplyMode string
 
 const (
-	ApplyDefault ApplyMode = ""       // git format-patch + am (or overlay exec)
-	ApplySquash  ApplyMode = "squash" // flatten into one unstaged patch
-	ApplyExport  ApplyMode = "export" // write *.patch files; don't touch host
+	ApplySquash ApplyMode = "squash" // flatten everything into one unstaged patch
+	ApplyExport ApplyMode = "export" // write *.patch files to ExportDir; don't apply
 )
 
-// LogFormat selects which log stream to emit.
+// LogFormat selects which log stream to emit. Zero value means
+// "unspecified" — canonicalized to LogStructured.
 type LogFormat string
 
 const (
-	LogStructured    LogFormat = ""          // pretty-printed merge-sorted JSONL (default)
-	LogStructuredRaw LogFormat = "raw"       // raw JSONL lines
-	LogAgent         LogFormat = "agent"     // agent terminal, ANSI stripped
-	LogAgentRaw      LogFormat = "agent-raw" // raw agent terminal stream
+	LogStructured    LogFormat = "structured" // pretty-printed merge-sorted JSONL (current default)
+	LogStructuredRaw LogFormat = "raw"        // raw JSONL lines
+	LogAgent         LogFormat = "agent"      // agent terminal, ANSI stripped
+	LogAgentRaw      LogFormat = "agent-raw"  // raw agent terminal stream
 )
 
 // BugReportMode selects the redaction level for BugReport.
@@ -244,10 +256,10 @@ type RunOptions struct {
 	Profile string // profile name
 	Prompt  string // initial prompt; empty = interactive
 
-	Isolation IsolationMode
-	OS        HostOS
+	Isolation IsolationMode // empty = canonicalized to IsolationContainer
+	OS        HostOS        // empty = canonicalized to OSLinux
 
-	Network      NetworkMode // outbound policy (open / isolated / none)
+	Network      NetworkMode // outbound policy; empty = canonicalized to NetworkOpen
 	AllowDomains []string    // initial allowlist; only meaningful with NetworkIsolated
 
 	Env       map[string]string
@@ -393,7 +405,7 @@ func (*Sandbox) Exec(ctx context.Context, opts ExecOptions, io IOStreams) (*Exec
 
 // LogOptions configures Logs.
 type LogOptions struct {
-	Format   LogFormat
+	Format   LogFormat     // empty = canonicalized to LogStructured
 	Sources  []string      // for LogStructured / LogStructuredRaw: cli, sandbox, monitor, hooks
 	MinLevel string        // debug | info | warn | error
 	Since    time.Duration // 0 = no filter
@@ -455,10 +467,10 @@ func (*Workdir) Diff(ctx context.Context, opts DiffOptions) ([]*DiffResult, erro
 
 // ApplyOptions configures Apply.
 type ApplyOptions struct {
-	Mode       ApplyMode
-	ExportDir  string   // required when Mode == ApplyExport
-	Refs       []string // specific commits or ranges
-	Paths      []string // pathspec filter
+	Mode       ApplyMode // empty = default behavior; ApplySquash / ApplyExport override
+	ExportDir  string    // required when Mode == ApplyExport
+	Refs       []string  // specific commits or ranges
+	Paths      []string  // pathspec filter
 	IncludeWIP bool
 	DryRun     bool // invalid with ApplyExport
 	WithTags   bool // invalid with ApplySquash
@@ -567,7 +579,7 @@ func (*Network) Allowed(ctx context.Context) ([]string, error)     { panic("desi
 
 // BugReportOptions configures BugReport and StartBugReporter.
 type BugReportOptions struct {
-	Mode      BugReportMode // zero value is BugReportSafe
+	Mode      BugReportMode // empty = canonicalized to BugReportSafe
 	OutputDir string        // directory to write the report; "" = CWD
 }
 
