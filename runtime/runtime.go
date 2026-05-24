@@ -149,6 +149,20 @@ type CopyMountResolver interface {
 	ResolveCopyMount(sandboxName, hostPath string) string
 }
 
+// AppleSimulatorRuntimes is an optional interface implemented by backends
+// that manage Apple simulator (iOS/tvOS/watchOS/visionOS) runtime base
+// images. Currently only Tart implements it, but the interface lets the
+// orchestration layer react to the capability without importing the
+// concrete backend package.
+//
+// runtimeSpecs are user-facing strings like "ios", "ios:26.4", "tvos:latest".
+// The returned imageRef is the base-image name the caller should use when
+// creating the sandbox. Errors from this method are user-shaped (UsageError
+// when the requested base doesn't exist locally and must be created first).
+type AppleSimulatorRuntimes interface {
+	PrepareRuntimeBase(ctx context.Context, runtimeSpecs []string) (imageRef string, err error)
+}
+
 // ResolveCopyMountFor returns the in-sandbox path for a :copy directory.
 // Falls back to hostPath when the backend doesn't implement CopyMountResolver.
 func ResolveCopyMountFor(rt Runtime, sandboxName, hostPath string) string {

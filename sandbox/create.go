@@ -23,7 +23,6 @@ import (
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/runtime/caps"
-	"github.com/kstenerud/yoloai/runtime/tart"
 	"github.com/kstenerud/yoloai/sandbox/archetype"
 	"github.com/kstenerud/yoloai/sandbox/store"
 )
@@ -530,66 +529,25 @@ func (m *Manager) validateAndLoadConfig(opts CreateOptions) (*agent.Definition, 
 	return agentDef, sandboxDir, ycfg, gcfg, nil
 }
 
-// resolveRuntimeBase resolves the Tart runtime base image if --runtime flags are provided.
+// resolveRuntimeBase resolves an Apple simulator runtime base image when
+// --runtime flags are provided. Dispatches via the AppleSimulatorRuntimes
+// optional interface so sandbox/ doesn't import any concrete backend; only
+// backends that opt in (currently Tart) handle the request.
 func (m *Manager) resolveRuntimeBase(ctx context.Context, opts *CreateOptions, pr *profileResult) error {
 	if len(opts.Runtimes) == 0 {
 		return nil
 	}
-	// Backend dispatch by type assertion, not by string comparison on m.backend
-	// (W10 of the architecture remediation plan: avoid backend-name leaks in
-	// sandbox/). If the active runtime isn't Tart, --runtime is meaningless.
-	tartRuntime, ok := m.runtime.(*tart.Runtime)
+	asr, ok := m.runtime.(runtime.AppleSimulatorRuntimes)
 	if !ok {
-		return NewUsageError("--runtime flag only supported on tart backend (macOS VMs)")
+		return NewUsageError("--runtime flag is only supported on backends that manage Apple simulator runtimes (currently: tart)")
 	}
-
-	resolved, err := tart.ResolveRuntimeVersions(opts.Runtimes)
+	imageRef, err := asr.PrepareRuntimeBase(ctx, opts.Runtimes)
 	if err != nil {
-		return fmt.Errorf("resolve runtimes: %w", err)
+		return err
 	}
-
-	cacheKey := tart.GenerateCacheKey(resolved)
-	baseName := "yoloai-base-" + cacheKey
-
-	release, err := tart.AcquireBaseLock(baseName)
-	if err != nil {
-		return fmt.Errorf("acquire base lock: %w", err)
-	}
-	defer release()
-
-	exists, err := tartRuntime.BaseExists(ctx, baseName)
-	if err != nil {
-		return fmt.Errorf("check base: %w", err)
-	}
-	if !exists {
-		return m.runtimeBaseNotFoundError(baseName, opts.Runtimes, resolved)
-	}
-
-	_, _ = fmt.Fprintf(m.output, "Using runtime base %s\n", baseName)
-	pr.imageRef = baseName
+	_, _ = fmt.Fprintf(m.output, "Using runtime base %s\n", imageRef)
+	pr.imageRef = imageRef
 	return nil
-}
-
-// runtimeBaseNotFoundError builds the detailed error message when a tart runtime base is missing.
-func (m *Manager) runtimeBaseNotFoundError(baseName string, runtimes []string, resolved []tart.RuntimeVersion) error {
-	runtimeDesc := tart.FormatRuntimeList(resolved)
-	var attemptedSpecs []string
-	for _, rt := range resolved {
-		attemptedSpecs = append(attemptedSpecs, fmt.Sprintf("%s:%s", rt.Platform, rt.Version))
-	}
-	return NewUsageError(
-		"Runtime base '%s' not found.\n\n"+
-			"Requested runtimes: %s\n"+
-			"Resolved to: %s\n\n"+
-			"To create this runtime base, run:\n"+
-			"  yoloai system runtime add %s\n\n"+
-			"To see existing runtime bases:\n"+
-			"  yoloai system runtime list",
-		baseName,
-		strings.Join(runtimes, ", "),
-		runtimeDesc,
-		strings.Join(attemptedSpecs, " "),
-	)
 }
 
 // mergeDcMounts merges devcontainer mounts into pr.mounts (dedup).
