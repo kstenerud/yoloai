@@ -273,30 +273,55 @@ func (clientAPI) Diff(ctx context.Context, name string, opts DiffOptions) ([]*Di
 	panic("design-only")
 }
 
-// ApplyOptions configures Apply. The CLI's `apply` flag set
-// (`--squash`, `--patches`, `--include-wip`, `--dry-run`, `--tags`, refs +
-// paths) maps directly. Overlay-vs-copy and format-patch-vs-am dispatch
-// happens inside; the caller doesn't choose.
+// ApplyMode selects how Apply emits its output. The three modes were
+// previously represented by overlapping booleans (Squash, PatchesDir) with
+// MarkFlagsMutuallyExclusive guarding the invalid pairs at the CLI layer;
+// here the mutex moves into the type.
+type ApplyMode string
+
+const (
+	// ApplyDefault commits the agent's changes back to the host repo using
+	// git format-patch + git am (or overlay-aware exec for :overlay dirs).
+	// This is the zero value so callers who don't care get the right default.
+	ApplyDefault ApplyMode = ""
+
+	// ApplySquash flattens all in-scope changes into a single unstaged
+	// patch on the host. Mutex with ApplyExport. Mutex with WithTags
+	// (squashing collapses commit boundaries; tags don't survive).
+	ApplySquash ApplyMode = "squash"
+
+	// ApplyExport writes one *.patch file per commit to ExportDir and does
+	// not touch the host repo. Mutex with ApplySquash and DryRun (export
+	// already doesn't apply anything, so DryRun is meaningless).
+	ApplyExport ApplyMode = "export"
+)
+
+// ApplyOptions configures Apply.
 //
 // **Gap closed by this design:** today `yoloai.Client.Apply` only handles
 // the basic commits-only path. ApplyOptions surfaces the full CLI surface
 // (audit findings: overlay apply, format-patch apply, selective apply).
+//
+// Validation: Mode-incompatible combinations (e.g. ApplyExport + DryRun,
+// ApplySquash + WithTags) return a UsageError from the Client method; the
+// CLI no longer needs MarkFlagsMutuallyExclusive once it routes through
+// this type.
 type ApplyOptions struct {
-	Refs       []string // specific commits or ranges; empty = all agent commits
-	Paths      []string // pathspec filter; empty = all paths
-	Squash     bool     // flatten committed changes into one unstaged patch
-	PatchesDir string   // export *.patch files to this dir instead of applying
-	IncludeWIP bool     // also apply uncommitted edits as unstaged changes
-	DryRun     bool     // print what would be applied; don't touch the host repo
-	WithTags   bool     // also transfer git tags created by the agent
-	Yes        bool     // skip interactive confirmation prompts
+	Mode       ApplyMode // ApplyDefault, ApplySquash, or ApplyExport
+	ExportDir  string    // required when Mode == ApplyExport; ignored otherwise
+	Refs       []string  // specific commits or ranges; empty = all agent commits
+	Paths      []string  // pathspec filter; empty = all paths
+	IncludeWIP bool      // also apply uncommitted edits as unstaged changes
+	DryRun     bool      // print what would be applied; invalid with ApplyExport
+	WithTags   bool      // also transfer git tags created by the agent; invalid with ApplySquash
+	Yes        bool      // skip interactive confirmation prompts
 }
 
 // ApplyResult mirrors `patch.ApplyResult` plus a top-level rollup for
 // callers that don't want to iterate per-directory.
 type ApplyResult struct {
 	Per     []*PerDirApplyResult
-	Patches []string // when PatchesDir was set, list of written *.patch files
+	Patches []string // populated only when Mode == ApplyExport: written *.patch files
 	Skipped []string // dirs skipped (overlay-and-running-required, :rw, …)
 }
 
@@ -372,14 +397,36 @@ func (clientAPI) Exec(ctx context.Context, name string, opts ExecOptions, io IOS
 	panic("design-only")
 }
 
+// LogFormat selects which log stream to emit. Replaces the previous
+// (Agent, AgentRaw, Raw) boolean triplet — at most one was meant to be
+// true, modeled here as one field.
+type LogFormat string
+
+const (
+	// LogStructured is the default: pretty-printed merge-sorted stream of
+	// all four structured JSONL logs (cli, sandbox, monitor, hooks). Maps
+	// to today's `yoloai log <name>` with no flag.
+	LogStructured LogFormat = ""
+
+	// LogStructuredRaw emits the same structured log as raw JSONL lines.
+	// Maps to `--raw`.
+	LogStructuredRaw LogFormat = "raw"
+
+	// LogAgent emits the agent's terminal output with ANSI escape
+	// sequences stripped. Maps to `--agent`.
+	LogAgent LogFormat = "agent"
+
+	// LogAgentRaw emits the raw agent terminal stream (ANSI preserved).
+	// Maps to `--agent-raw`.
+	LogAgentRaw LogFormat = "agent-raw"
+)
+
 // LogOptions configures Logs. Maps directly to the CLI's `yoloai log <name>`
 // flag set after the JSONL redesign (see BREAKING-CHANGES "sandbox <name> log
 // redesigned").
 type LogOptions struct {
-	Agent    bool          // --agent: agent terminal output (ANSI stripped)
-	AgentRaw bool          // --agent-raw: raw agent terminal stream
-	Raw      bool          // --raw: emit raw JSONL of structured log
-	Sources  []string      // --source: filter to cli, sandbox, monitor, hooks
+	Format   LogFormat     // which stream to emit; default = LogStructured
+	Sources  []string      // --source: filter to cli, sandbox, monitor, hooks (only meaningful for LogStructured / LogStructuredRaw)
 	MinLevel string        // --level: debug|info|warn|error
 	Since    time.Duration // --since: time window (0 = no filter)
 	Follow   bool          // --follow / -f: tail live; returns when sandbox is done
@@ -464,10 +511,25 @@ func (clientAPI) DenyDomains(ctx context.Context, name string, domains []string)
 // Bug report  (CLI: sandbox <name> bugreport [safe|unsafe], top-level --bugreport)
 // =============================================================================
 
-// BugReportOptions configures BugReport. Today's CLI accepts a positional
-// "safe" / "unsafe" arg; here Mode is the enum equivalent.
+// BugReportMode selects redaction level for BugReport. Today the CLI
+// takes a positional "safe" / "unsafe" arg — typed enum here keeps
+// invalid third values out of the type.
+type BugReportMode string
+
+const (
+	// BugReportSafe redacts credentials, API keys, and other sensitive
+	// content from logs before inclusion. Default and recommended for
+	// reports filed publicly.
+	BugReportSafe BugReportMode = "safe"
+
+	// BugReportUnsafe includes full unredacted content. Use only for
+	// private debugging where the report won't be shared.
+	BugReportUnsafe BugReportMode = "unsafe"
+)
+
+// BugReportOptions configures BugReport.
 type BugReportOptions struct {
-	Mode string // "safe" (redacted) or "unsafe" (full content)
+	Mode BugReportMode // zero value is BugReportSafe via Client method default
 }
 
 // BugReport collects sandbox + system + log diagnostics and writes them to
