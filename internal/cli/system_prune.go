@@ -323,21 +323,21 @@ func scanAllBackendsForPrune(ctx context.Context, knownInstances []string, outpu
 	var allItems []runtime.PruneItem
 	var availableBackends []string
 
-	for _, b := range knownBackends {
-		available, _ := checkBackend(ctx, b.Name)
+	for _, desc := range runtime.Descriptors() {
+		available, _ := checkBackend(ctx, desc.Name)
 		if !available {
 			continue
 		}
-		availableBackends = append(availableBackends, b.Name)
+		availableBackends = append(availableBackends, desc.Name)
 
 		var result runtime.PruneResult
-		err := withRuntime(ctx, b.Name, func(ctx context.Context, rt runtime.Runtime) error {
+		err := withRuntime(ctx, desc.Name, func(ctx context.Context, rt runtime.Runtime) error {
 			var err error
 			result, err = rt.Prune(ctx, knownInstances, true, output)
 			return err
 		})
 		if err != nil {
-			fmt.Fprintf(output, "Warning: scan %s failed: %v\n", b.Name, err) //nolint:errcheck
+			fmt.Fprintf(output, "Warning: scan %s failed: %v\n", desc.Name, err) //nolint:errcheck
 			continue
 		}
 		allItems = append(allItems, result.Items...)

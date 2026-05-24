@@ -27,6 +27,10 @@ import (
 // registry registration and the Runtime.Descriptor() method.
 var descriptor = runtime.BackendDescriptor{
 	Name:                      "containerd",
+	Description:               "Linux VMs via Kata Containers (--isolation vm/vm-enhanced)",
+	Platforms:                 []string{"linux"},
+	Requires:                  "containerd, Kata Containers shim, CNI plugins, /dev/kvm",
+	InstallHint:               "sudo apt install containerd kata-containers containernetworking-plugins",
 	BaseModeName:              "vm",
 	AgentProvisionedByBackend: true,
 	SupportedIsolationModes:   []string{"vm", "vm-enhanced"},
@@ -36,7 +40,17 @@ var descriptor = runtime.BackendDescriptor{
 		CapAdd:           true,
 		HostFilesystem:   false,
 	},
-	Probe: probe,
+	Probe:         probe,
+	VersionString: versionString,
+}
+
+// versionString returns containerd's daemon version via `containerd --version`.
+func versionString(ctx context.Context) string {
+	out, err := exec.CommandContext(ctx, "containerd", "--version").Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
 }
 
 // probe reports whether containerd is usable. Stat-only check on the daemon

@@ -44,19 +44,19 @@ func runSystemDisk(cmd *cobra.Command, _ []string) error {
 	sandboxesSize := dirSize(config.SandboxesDir())
 	fmt.Fprintf(w, "sandboxes\t%s\t%s\n", humanBytes(sandboxesSize), config.SandboxesDir()) //nolint:errcheck
 
-	for _, b := range knownBackends {
-		available, _ := checkBackend(ctx, b.Name)
+	for _, desc := range runtime.Descriptors() {
+		available, _ := checkBackend(ctx, desc.Name)
 		if !available {
 			continue
 		}
-		usage, err := backendUsage(ctx, b.Name)
+		usage, err := backendUsage(ctx, desc.Name)
 		switch {
 		case err != nil:
-			fmt.Fprintf(w, "%s\t-\t%v\n", b.Name, err) //nolint:errcheck
+			fmt.Fprintf(w, "%s\t-\t%v\n", desc.Name, err) //nolint:errcheck
 		case usage.BytesUsed < 0:
-			fmt.Fprintf(w, "%s\t?\t%s\n", b.Name, usage.Detail) //nolint:errcheck
+			fmt.Fprintf(w, "%s\t?\t%s\n", desc.Name, usage.Detail) //nolint:errcheck
 		default:
-			fmt.Fprintf(w, "%s\t%s\t%s\n", b.Name, humanBytes(usage.BytesUsed), usage.Detail) //nolint:errcheck
+			fmt.Fprintf(w, "%s\t%s\t%s\n", desc.Name, humanBytes(usage.BytesUsed), usage.Detail) //nolint:errcheck
 		}
 	}
 	if err := w.Flush(); err != nil {
@@ -82,13 +82,13 @@ func collectDiskJSON(ctx context.Context) map[string]any {
 	entries := []map[string]any{
 		{"source": "sandboxes", "bytes": dirSize(sandboxesDir), "detail": sandboxesDir},
 	}
-	for _, b := range knownBackends {
-		available, _ := checkBackend(ctx, b.Name)
+	for _, desc := range runtime.Descriptors() {
+		available, _ := checkBackend(ctx, desc.Name)
 		if !available {
 			continue
 		}
-		entry := map[string]any{"source": b.Name}
-		usage, err := backendUsage(ctx, b.Name)
+		entry := map[string]any{"source": desc.Name}
+		usage, err := backendUsage(ctx, desc.Name)
 		if err != nil {
 			entry["error"] = err.Error()
 		} else {

@@ -26,6 +26,10 @@ import (
 // registry registration and the Runtime.Descriptor() method.
 var descriptor = runtime.BackendDescriptor{
 	Name:                      "seatbelt",
+	Description:               "macOS sandbox; near-instant, uses host tools, less isolation",
+	Platforms:                 []string{"darwin"},
+	Requires:                  "macOS (sandbox-exec is built-in)",
+	InstallHint:               "",
 	BaseModeName:              "process",
 	AgentProvisionedByBackend: false,
 	SupportedIsolationModes:   nil,
@@ -35,7 +39,8 @@ var descriptor = runtime.BackendDescriptor{
 		CapAdd:           false,
 		HostFilesystem:   true,
 	},
-	Probe: probe,
+	Probe:         probe,
+	VersionString: func(_ context.Context) string { return "built-in" },
 }
 
 // probe reports whether Seatbelt is usable. sandbox-exec ships with every

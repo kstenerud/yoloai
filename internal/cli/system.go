@@ -166,15 +166,15 @@ func runSystemBuildAll(cmd *cobra.Command, args []string) error {
 	isJSON := jsonEnabled(cmd)
 
 	var builtBackends []string
-	for _, b := range knownBackends {
-		available, _ := checkBackend(ctx, b.Name)
+	for _, desc := range runtime.Descriptors() {
+		available, _ := checkBackend(ctx, desc.Name)
 		if !available {
 			continue
 		}
-		if err := runSystemBuild(cmd, args, b.Name); err != nil {
-			return fmt.Errorf("build %s: %w", b.Name, err)
+		if err := runSystemBuild(cmd, args, desc.Name); err != nil {
+			return fmt.Errorf("build %s: %w", desc.Name, err)
 		}
-		builtBackends = append(builtBackends, b.Name)
+		builtBackends = append(builtBackends, desc.Name)
 	}
 
 	if len(builtBackends) == 0 {

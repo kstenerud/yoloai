@@ -91,6 +91,10 @@ type ExecResult struct {
 // backend (verified by the W11 spike, docs/dev/research/runtime-interface-spike.md).
 type BackendDescriptor struct {
 	Name                      string      // "docker", "podman", "tart", "seatbelt", "containerd"
+	Description               string      // one-line user-facing summary ("Linux containers; portable …")
+	Platforms                 []string    // host OSes this backend can run on; GOOS-style ("linux", "darwin", "windows")
+	Requires                  string      // human-readable prerequisites ("Docker Engine installed and running")
+	InstallHint               string      // install URL or shell command; "" when no install is needed
 	BaseModeName              string      // human label for the backend's default (no-isolation) mode
 	AgentProvisionedByBackend bool        // true when the backend's image/VM ships the agent binary
 	SupportedIsolationModes   []string    // non-default isolation modes this backend can support
@@ -115,6 +119,14 @@ type BackendDescriptor struct {
 	// podman, "" for backends without a special hostname (callers substitute
 	// generic phrasing like "the host's routable IP").
 	HostFromContainer string
+
+	// VersionString reports the backend's CLI / daemon version for
+	// diagnostic output (yoloai info, bug reports). Returns "built-in" for
+	// backends that ship as part of the OS (seatbelt) and "" when the
+	// version cannot be determined. May fork+exec the backend's CLI; called
+	// from human-paced commands, not hot paths. nil is treated as "" by
+	// callers — every shipped backend supplies a real implementation.
+	VersionString func(ctx context.Context) string
 }
 
 // BackendCaps declares what features a runtime backend supports.

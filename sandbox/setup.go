@@ -19,6 +19,7 @@ import (
 	"github.com/kstenerud/yoloai/config"
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	tmuxres "github.com/kstenerud/yoloai/internal/resources/tmux"
+	yoloairuntime "github.com/kstenerud/yoloai/runtime"
 )
 
 // errSetupPreview signals that the user chose [p] to preview the merged
@@ -98,21 +99,28 @@ func countSignificantLines(content string) int {
 	return count
 }
 
-// availableBackends returns the backends available on this platform.
+// availableBackends returns the backends offered as the user's default in
+// the first-run setup wizard. Iterates runtime.Descriptors() and filters by
+// (a) Platforms ∋ host GOOS, (b) backend is a primary choice — containerd
+// is excluded because users don't pick it directly; --isolation vm /
+// vm-enhanced auto-routes to it. The Apple Silicon constraint for tart is
+// applied here rather than via Platforms (which is GOOS-granular) so the
+// option list stays empty on Intel Macs.
 func availableBackends() []setupOption {
-	opts := []setupOption{
-		{"docker", "Linux containers; portable, lightweight, fast"},
-		{"podman", "Linux containers; daemonless, rootless by default"},
-	}
-	if detectedOS() == "darwin" {
-		opts = append(opts, setupOption{
-			"seatbelt", "macOS sandbox; near-instant, uses host tools, less isolation",
-		})
-		if detectedArch() == "arm64" {
-			opts = append(opts, setupOption{
-				"tart", "macOS VMs; native macOS env, strong isolation, heavier",
-			})
+	hostOS := detectedOS()
+	hostArch := detectedArch()
+	var opts []setupOption
+	for _, desc := range yoloairuntime.Descriptors() {
+		if desc.Name == "containerd" {
+			continue
 		}
+		if !slices.Contains(desc.Platforms, hostOS) {
+			continue
+		}
+		if desc.Name == "tart" && hostArch != "arm64" {
+			continue
+		}
+		opts = append(opts, setupOption{name: desc.Name, blurb: desc.Description})
 	}
 	return opts
 }

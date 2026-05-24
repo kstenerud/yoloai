@@ -39,6 +39,10 @@ func getXcodeSelectPath() string {
 // registry registration and the Runtime.Descriptor() method.
 var descriptor = runtime.BackendDescriptor{
 	Name:                      "tart",
+	Description:               "macOS VMs; native macOS env, strong isolation, heavier",
+	Platforms:                 []string{"darwin"},
+	Requires:                  "Tart CLI installed, Apple Silicon Mac",
+	InstallHint:               "brew install cirruslabs/cli/tart",
 	BaseModeName:              "vm",
 	AgentProvisionedByBackend: true,
 	SupportedIsolationModes:   nil,
@@ -53,7 +57,17 @@ var descriptor = runtime.BackendDescriptor{
 		// shell commands inside the VM can reference state without quoting.
 		VMRuntimeDir: "/Users/admin/.yoloai",
 	},
-	Probe: probe,
+	Probe:         probe,
+	VersionString: versionString,
+}
+
+// versionString returns tart's CLI version string.
+func versionString(ctx context.Context) string {
+	out, err := exec.CommandContext(ctx, "tart", "--version").Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
 }
 
 // probe reports whether Tart is usable. Tart requires macOS on Apple Silicon

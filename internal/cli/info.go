@@ -1,7 +1,8 @@
 package cli
 
-// ABOUTME: Backend and agent info commands, and helpers shared with
-// ABOUTME: system_info.go (checkBackend, knownBackends, etc.).
+// ABOUTME: Backend and agent info commands, plus the shared probe-based
+// ABOUTME: checkBackend helper. All static facts come from runtime.Descriptors();
+// ABOUTME: only the per-backend tradeoffs (CLI-presentation language) live here.
 
 import (
 	"context"
@@ -10,119 +11,51 @@ import (
 	"text/tabwriter"
 
 	"github.com/kstenerud/yoloai/agent"
+	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/sandbox"
 	"github.com/spf13/cobra"
 )
 
-// backendInfo describes a runtime backend for display purposes.
-type backendInfo struct {
-	Name        string
-	Description string
-	Detail      backendDetail
-}
-
-// backendDetail holds extended information shown by `info backends <name>`.
-type backendDetail struct {
-	Environment string
-	Platforms   string
-	Requires    string
-	InstallHint string
-	Tradeoffs   []string
-}
-
-// knownBackends is the registry of all supported backends.
-var knownBackends = []backendInfo{
-	{
-		Name:        "docker",
-		Description: "Linux containers (Docker)",
-		Detail: backendDetail{
-			Environment: "Linux (Ubuntu-based container)",
-			Platforms:   "Linux, macOS (via Docker Desktop), Windows (via WSL2 + Docker Desktop)",
-			Requires:    "Docker Engine or Docker Desktop installed and running",
-			InstallHint: "https://docs.docker.com/get-docker/",
-			Tradeoffs: []string{
-				"Most portable — works everywhere Docker runs",
-				"Containers are lightweight and fast to create",
-				"Always provides a Linux environment, even on macOS/Windows hosts",
-				"File I/O on macOS may be slower due to VirtioFS layer",
-			},
-		},
+// backendTradeoffs is the bullet-list shown under `yoloai system backends
+// <name>`. Pros/cons are CLI-presentation language (a selling pitch) rather
+// than runtime metadata; per the round-7 critique resolution they stay here
+// instead of going on BackendDescriptor. Backends without an entry render
+// the table without a Tradeoffs section — which is the right default for
+// any future backend that hasn't been editorially described yet.
+var backendTradeoffs = map[string][]string{
+	"docker": {
+		"Most portable — works everywhere Docker runs",
+		"Containers are lightweight and fast to create",
+		"Always provides a Linux environment, even on macOS/Windows hosts",
+		"File I/O on macOS may be slower due to VirtioFS layer",
 	},
-	{
-		Name:        "podman",
-		Description: "Linux containers (Podman)",
-		Detail: backendDetail{
-			Environment: "Linux (Ubuntu-based container)",
-			Platforms:   "Linux, macOS (via Podman Machine)",
-			Requires:    "Podman installed with API socket activated",
-			InstallHint: "https://podman.io/docs/installation",
-			Tradeoffs: []string{
-				"Daemonless — no background service required",
-				"Rootless by default — better security posture",
-				"Docker-compatible — uses same container images and commands",
-				"Podman socket must be started manually (systemctl --user start podman.socket)",
-			},
-		},
+	"podman": {
+		"Daemonless — no background service required",
+		"Rootless by default — better security posture",
+		"Docker-compatible — uses same container images and commands",
+		"Podman socket must be started manually (systemctl --user start podman.socket)",
 	},
-	{
-		Name:        "tart",
-		Description: "macOS VMs (Apple Virtualization)",
-		Detail: backendDetail{
-			Environment: "macOS (full VM via Apple Virtualization framework)",
-			Platforms:   "macOS only (Apple Silicon — M1 or later)",
-			Requires:    "Tart CLI installed, Apple Silicon Mac",
-			InstallHint: "brew install cirruslabs/cli/tart",
-			Tradeoffs: []string{
-				"Native macOS environment for macOS-specific development (Xcode, Swift, etc.)",
-				"Stronger isolation than seatbelt — full VM boundary",
-				"Heavier than containers — VMs take longer to create and use more resources",
-				"Apple Silicon only — does not work on Intel Macs",
-			},
-		},
+	"tart": {
+		"Native macOS environment for macOS-specific development (Xcode, Swift, etc.)",
+		"Stronger isolation than seatbelt — full VM boundary",
+		"Heavier than containers — VMs take longer to create and use more resources",
+		"Apple Silicon only — does not work on Intel Macs",
 	},
-	{
-		Name:        "seatbelt",
-		Description: "macOS process sandbox (sandbox-exec)",
-		Detail: backendDetail{
-			Environment: "macOS (native process with restricted filesystem/network access)",
-			Platforms:   "macOS (any architecture)",
-			Requires:    "macOS (sandbox-exec is built-in)",
-			Tradeoffs: []string{
-				"Lightest weight — no container or VM overhead, near-instant startup",
-				"Runs natively on the host with the same tools already installed",
-				"Less isolation than Docker or Tart — process-level sandbox only",
-				"sandbox-exec is deprecated by Apple but still functional",
-			},
-		},
+	"seatbelt": {
+		"Lightest weight — no container or VM overhead, near-instant startup",
+		"Runs natively on the host with the same tools already installed",
+		"Less isolation than Docker or Tart — process-level sandbox only",
+		"sandbox-exec is deprecated by Apple but still functional",
 	},
-	{
-		Name:        "containerd",
-		Description: "Linux VMs via Kata Containers (--isolation vm/vm-enhanced)",
-		Detail: backendDetail{
-			Environment: "Linux (Ubuntu-based container inside a hardware VM)",
-			Platforms:   "Linux only (requires KVM; excludes standard cloud VMs without nested virt or .metal)",
-			Requires:    "containerd, Kata Containers shim, CNI plugins, /dev/kvm",
-			InstallHint: "sudo apt install containerd kata-containers containernetworking-plugins",
-			Tradeoffs: []string{
-				"Strongest isolation — each sandbox runs in a separate hardware VM (Kata + QEMU or Firecracker)",
-				"Host kernel is not directly reachable from inside the sandbox",
-				"~1-2s additional startup overhead per sandbox vs Docker containers",
-				"~100-150 MB per-sandbox VM memory overhead",
-				"Requires KVM — not available on standard cloud VMs without nested virtualization",
-				"Used automatically with --isolation vm or --isolation vm-enhanced",
-			},
-		},
+	"containerd": {
+		"Strongest isolation — each sandbox runs in a separate hardware VM (Kata + QEMU or Firecracker)",
+		"Host kernel is not directly reachable from inside the sandbox",
+		"~1-2s additional startup overhead per sandbox vs Docker containers",
+		"~100-150 MB per-sandbox VM memory overhead",
+		"Requires KVM — not available on standard cloud VMs without nested virtualization",
+		"Used automatically with --isolation vm or --isolation vm-enhanced",
 	},
 }
-
-// knownBackendsByName provides lookup by name.
-var knownBackendsByName = func() map[string]*backendInfo {
-	m := make(map[string]*backendInfo, len(knownBackends))
-	for i := range knownBackends {
-		m[knownBackends[i].Name] = &knownBackends[i]
-	}
-	return m
-}()
 
 func newSystemBackendsCmd() *cobra.Command {
 	return &cobra.Command{
@@ -130,9 +63,10 @@ func newSystemBackendsCmd() *cobra.Command {
 		Short: "List available runtime backends",
 		Args:  cobra.MaximumNArgs(1),
 		ValidArgsFunction: func(_ *cobra.Command, _ []string, _ string) ([]string, cobra.ShellCompDirective) {
-			names := make([]string, len(knownBackends))
-			for i, b := range knownBackends {
-				names[i] = b.Name
+			descs := runtime.Descriptors()
+			names := make([]string, len(descs))
+			for i, d := range descs {
+				names[i] = d.Name
 			}
 			return names, cobra.ShellCompDirectiveNoFileComp
 		},
@@ -145,9 +79,12 @@ func newSystemBackendsCmd() *cobra.Command {
 	}
 }
 
-// listBackends displays the summary table of all backends.
+// listBackends displays the summary table of all backends, iterating
+// runtime.Descriptors() rather than a CLI-local list — new backends
+// register themselves and auto-appear in this listing.
 func listBackends(cmd *cobra.Command) error {
 	ctx := cmd.Context()
+	descs := runtime.Descriptors()
 
 	if jsonEnabled(cmd) {
 		type backendJSON struct {
@@ -156,12 +93,12 @@ func listBackends(cmd *cobra.Command) error {
 			Available   bool   `json:"available"`
 			Note        string `json:"note,omitempty"`
 		}
-		var items []backendJSON
-		for _, b := range knownBackends {
-			available, note := checkBackend(ctx, b.Name)
+		items := make([]backendJSON, 0, len(descs))
+		for _, d := range descs {
+			available, note := checkBackend(ctx, d.Name)
 			items = append(items, backendJSON{
-				Name:        b.Name,
-				Description: b.Description,
+				Name:        d.Name,
+				Description: d.Description,
 				Available:   available,
 				Note:        note,
 			})
@@ -172,48 +109,45 @@ func listBackends(cmd *cobra.Command) error {
 	w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 3, ' ', 0)
 	fmt.Fprintln(w, "BACKEND\tDESCRIPTION\tAVAILABLE\tNOTE") //nolint:errcheck // best-effort output
 
-	for _, b := range knownBackends {
-		available, note := checkBackend(ctx, b.Name)
+	for _, d := range descs {
+		available, note := checkBackend(ctx, d.Name)
 		avail := "yes"
 		if !available {
 			avail = "no"
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", b.Name, b.Description, avail, note) //nolint:errcheck // best-effort output
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", d.Name, d.Description, avail, note) //nolint:errcheck // best-effort output
 	}
 
 	return w.Flush()
 }
 
 // showBackendDetail displays detailed information about a single backend.
+// Descriptor fields supply the operational metadata; backendTradeoffs is
+// the CLI-only selling-pitch bullet list (kept separate per round-7 critique).
 func showBackendDetail(cmd *cobra.Command, name string) error {
-	b, ok := knownBackendsByName[name]
+	desc, ok := runtime.Descriptor(name)
 	if !ok {
-		names := make([]string, len(knownBackends))
-		for i, kb := range knownBackends {
-			names[i] = kb.Name
-		}
-		return sandbox.NewUsageError("unknown backend %q (valid: %s)", name, strings.Join(names, ", "))
+		return sandbox.NewUsageError("unknown backend %q (valid: %s)", name, strings.Join(backendNames(), ", "))
 	}
+	tradeoffs := backendTradeoffs[name]
 
 	ctx := cmd.Context()
 
 	if jsonEnabled(cmd) {
-		available, note := checkBackend(ctx, b.Name)
+		available, note := checkBackend(ctx, desc.Name)
 		return writeJSON(cmd.OutOrStdout(), map[string]any{
-			"name":         b.Name,
-			"description":  b.Description,
+			"name":         desc.Name,
+			"description":  desc.Description,
 			"available":    available,
 			"note":         note,
-			"environment":  b.Detail.Environment,
-			"platforms":    b.Detail.Platforms,
-			"requires":     b.Detail.Requires,
-			"install_hint": b.Detail.InstallHint,
-			"tradeoffs":    b.Detail.Tradeoffs,
+			"platforms":    desc.Platforms,
+			"requires":     desc.Requires,
+			"install_hint": desc.InstallHint,
+			"tradeoffs":    tradeoffs,
 		})
 	}
 
 	out := cmd.OutOrStdout()
-	d := b.Detail
 
 	available, note := checkBackend(ctx, name)
 	avail := "yes"
@@ -224,22 +158,34 @@ func showBackendDetail(cmd *cobra.Command, name string) error {
 		}
 	}
 
-	fmt.Fprintf(out, "Backend:     %s\n", b.Name)        //nolint:errcheck
-	fmt.Fprintf(out, "Description: %s\n", b.Description) //nolint:errcheck
-	fmt.Fprintf(out, "Available:   %s\n", avail)         //nolint:errcheck
-	fmt.Fprintf(out, "Environment: %s\n", d.Environment) //nolint:errcheck
-	fmt.Fprintf(out, "Platforms:   %s\n", d.Platforms)   //nolint:errcheck
-	fmt.Fprintf(out, "Requires:    %s\n", d.Requires)    //nolint:errcheck
-	if d.InstallHint != "" {
-		fmt.Fprintf(out, "Install:     %s\n", d.InstallHint) //nolint:errcheck
+	fmt.Fprintf(out, "Backend:     %s\n", desc.Name)                          //nolint:errcheck
+	fmt.Fprintf(out, "Description: %s\n", desc.Description)                   //nolint:errcheck
+	fmt.Fprintf(out, "Available:   %s\n", avail)                              //nolint:errcheck
+	fmt.Fprintf(out, "Platforms:   %s\n", strings.Join(desc.Platforms, ", ")) //nolint:errcheck
+	fmt.Fprintf(out, "Requires:    %s\n", desc.Requires)                      //nolint:errcheck
+	if desc.InstallHint != "" {
+		fmt.Fprintf(out, "Install:     %s\n", desc.InstallHint) //nolint:errcheck
 	}
-	fmt.Fprintln(out)               //nolint:errcheck
-	fmt.Fprintln(out, "Tradeoffs:") //nolint:errcheck
-	for _, t := range d.Tradeoffs {
-		fmt.Fprintf(out, "  - %s\n", t) //nolint:errcheck
+	if len(tradeoffs) > 0 {
+		fmt.Fprintln(out)               //nolint:errcheck
+		fmt.Fprintln(out, "Tradeoffs:") //nolint:errcheck
+		for _, t := range tradeoffs {
+			fmt.Fprintf(out, "  - %s\n", t) //nolint:errcheck
+		}
 	}
 
 	return nil
+}
+
+// backendNames returns sorted names of all registered backends; used in
+// usage-error messages enumerating valid choices.
+func backendNames() []string {
+	descs := runtime.Descriptors()
+	names := make([]string, len(descs))
+	for i, d := range descs {
+		names[i] = d.Name
+	}
+	return names
 }
 
 // checkBackend attempts to create a runtime for the given backend name.

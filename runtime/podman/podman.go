@@ -24,6 +24,10 @@ import (
 // registry registration and the Runtime.Descriptor() method.
 var descriptor = runtime.BackendDescriptor{
 	Name:                      "podman",
+	Description:               "Linux containers; daemonless, rootless by default",
+	Platforms:                 []string{"linux", "darwin"},
+	Requires:                  "Podman installed with API socket activated",
+	InstallHint:               "https://podman.io/docs/installation",
 	BaseModeName:              "container",
 	AgentProvisionedByBackend: true,
 	SupportedIsolationModes:   []string{"container-enhanced", "container-privileged"},
@@ -37,6 +41,16 @@ var descriptor = runtime.BackendDescriptor{
 	Probe:             probe,
 	CleanupHint:       func(image string) string { return "podman rmi " + image },
 	HostFromContainer: "host.docker.internal",
+	VersionString:     versionString,
+}
+
+// versionString returns the podman client version string from `podman version`.
+func versionString(ctx context.Context) string {
+	out, err := exec.CommandContext(ctx, "podman", "version", "--format", "{{.Client.Version}}").Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
 }
 
 // probe reports whether Podman is usable. discoverSocket is stat-only across

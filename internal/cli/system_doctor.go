@@ -88,16 +88,16 @@ func runSystemDoctor(cmd *cobra.Command, backendFilter, isolationFilter string, 
 func collectDoctorReports(ctx context.Context, env caps.Environment, backendFilter, isolationFilter string) []caps.BackendReport {
 	var reports []caps.BackendReport
 
-	for _, b := range knownBackends {
-		if backendFilter != "" && b.Name != backendFilter {
+	for _, desc := range runtime.Descriptors() {
+		if backendFilter != "" && desc.Name != backendFilter {
 			continue
 		}
 
-		rt, err := newRuntime(ctx, b.Name)
+		rt, err := newRuntime(ctx, desc.Name)
 		if err != nil {
 			if isolationFilter == "" {
 				reports = append(reports, caps.BackendReport{
-					Backend:      b.Name,
+					Backend:      desc.Name,
 					Mode:         "?",
 					IsBaseMode:   true,
 					InitErr:      err,
@@ -109,7 +109,7 @@ func collectDoctorReports(ctx context.Context, env caps.Environment, backendFilt
 
 		if isolationFilter == "" {
 			reports = append(reports, caps.BackendReport{
-				Backend:      b.Name,
+				Backend:      desc.Name,
 				Mode:         rt.Descriptor().BaseModeName,
 				IsBaseMode:   true,
 				Availability: caps.Ready,
@@ -124,7 +124,7 @@ func collectDoctorReports(ctx context.Context, env caps.Environment, backendFilt
 			results := caps.RunChecks(ctx, capList, env)
 			avail := caps.ComputeAvailability(results)
 			reports = append(reports, caps.BackendReport{
-				Backend:      b.Name,
+				Backend:      desc.Name,
 				Mode:         mode,
 				IsBaseMode:   false,
 				Results:      results,

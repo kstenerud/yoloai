@@ -14,6 +14,13 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/kstenerud/yoloai/config"
+
+	// availableBackends iterates runtime.Descriptors(); register every
+	// backend the platform tests assert on (docker, podman, tart, seatbelt).
+	_ "github.com/kstenerud/yoloai/runtime/docker"
+	_ "github.com/kstenerud/yoloai/runtime/podman"
+	_ "github.com/kstenerud/yoloai/runtime/seatbelt"
+	_ "github.com/kstenerud/yoloai/runtime/tart"
 )
 
 func TestCountSignificantLines(t *testing.T) {

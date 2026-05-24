@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/kstenerud/yoloai/config"
+	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/sandbox"
 	"github.com/spf13/cobra"
 )
@@ -49,8 +50,8 @@ func newSystemInfoCmd(version, commit, date string) *cobra.Command {
 			fmt.Fprintln(out)              //nolint:errcheck
 			fmt.Fprintln(out, "Backends:") //nolint:errcheck
 			ctx := cmd.Context()
-			for _, b := range knownBackends {
-				available, note := checkBackend(ctx, b.Name)
+			for _, desc := range runtime.Descriptors() {
+				available, note := checkBackend(ctx, desc.Name)
 				status := "available"
 				if !available {
 					status = "unavailable"
@@ -58,7 +59,7 @@ func newSystemInfoCmd(version, commit, date string) *cobra.Command {
 						status += " (" + note + ")"
 					}
 				}
-				fmt.Fprintf(out, "  %-12s %s\n", b.Name, status) //nolint:errcheck
+				fmt.Fprintf(out, "  %-12s %s\n", desc.Name, status) //nolint:errcheck
 			}
 
 			return nil
@@ -86,10 +87,10 @@ func writeSystemInfoJSON(cmd *cobra.Command, version, commit, date string) error
 
 	var backends []backendStatus
 	ctx := cmd.Context()
-	for _, b := range knownBackends {
-		available, note := checkBackend(ctx, b.Name)
+	for _, desc := range runtime.Descriptors() {
+		available, note := checkBackend(ctx, desc.Name)
 		backends = append(backends, backendStatus{
-			Name:      b.Name,
+			Name:      desc.Name,
 			Available: available,
 			Note:      note,
 		})

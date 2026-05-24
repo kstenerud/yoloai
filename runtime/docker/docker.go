@@ -33,6 +33,10 @@ import (
 // registry registration and the Runtime.Descriptor() method.
 var descriptor = runtime.BackendDescriptor{
 	Name:                      "docker",
+	Description:               "Linux containers; portable, lightweight, fast",
+	Platforms:                 []string{"linux", "darwin", "windows"},
+	Requires:                  "Docker Engine or Docker Desktop installed and running",
+	InstallHint:               "https://docs.docker.com/get-docker/",
 	BaseModeName:              "container",
 	AgentProvisionedByBackend: true,
 	SupportedIsolationModes:   []string{"container-enhanced", "container-privileged"},
@@ -46,6 +50,7 @@ var descriptor = runtime.BackendDescriptor{
 	Probe:             probe,
 	CleanupHint:       func(image string) string { return "docker rmi " + image },
 	HostFromContainer: "host.docker.internal",
+	VersionString:     versionString,
 }
 
 // probe reports whether Docker is usable. Stat-only — never dials the socket —
@@ -60,6 +65,19 @@ func probe(_ context.Context) (bool, string) {
 		return true, ""
 	}
 	return false, "docker socket not found (set DOCKER_HOST or start the docker daemon)"
+}
+
+// versionString runs `docker version` and returns a "Client: X / Server: Y"
+// summary. Returns "" if the docker binary is missing or the daemon is
+// unreachable — callers (bug reports, yoloai info) treat empty as "no
+// version known" and fall back to the probe's availability verdict.
+func versionString(ctx context.Context) string {
+	out, err := exec.CommandContext(ctx, "docker", "version", "--format",
+		"Client: {{.Client.Version}} / Server: {{.Server.Version}}").Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
 }
 
 func init() {

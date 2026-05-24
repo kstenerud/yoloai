@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/kstenerud/yoloai/config"
+	yoloairuntime "github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/sandbox"
 )
 
@@ -111,50 +112,36 @@ func writeBugReportSystem(w io.Writer) {
 }
 
 // writeBugReportBackends writes section 4: backend availability and versions.
+// Iterates runtime.Descriptors() so any newly-registered backend appears in
+// bug reports automatically; the version string comes from each descriptor's
+// VersionString hook so per-backend exec invocations no longer live here.
 func writeBugReportBackends(ctx context.Context, w io.Writer) {
 	fmt.Fprintln(w, "<details>")                   //nolint:errcheck
 	fmt.Fprintln(w, "<summary>Backends</summary>") //nolint:errcheck
 	fmt.Fprintln(w)                                //nolint:errcheck
 
-	type backendEntry struct {
-		name        string
-		binary      string
-		versionArgs []string
-	}
-
-	backends := []backendEntry{
-		{"docker", "docker", []string{"version", "--format", "Client: {{.Client.Version}} / Server: {{.Server.Version}}"}},
-		{"podman", "podman", []string{"version", "--format", "{{.Client.Version}}"}},
-		{"tart", "tart", []string{"--version"}},
-		{"seatbelt", "", nil}, // built-in
-	}
-
-	for _, b := range backends {
-		available, note := checkBackend(ctx, b.name)
+	for _, desc := range yoloairuntime.Descriptors() {
+		available, note := checkBackend(ctx, desc.Name)
 		status := "available"
 		if !available {
 			status = "unavailable"
 		}
 
 		var versionStr string
-		if b.binary == "" {
-			versionStr = "built-in"
-		} else if available {
-			out, err := exec.CommandContext(ctx, b.binary, b.versionArgs...).Output() //nolint:gosec // args are static constants
-			if err == nil {
-				versionStr = strings.TrimSpace(string(out))
-			} else {
+		if available && desc.VersionString != nil {
+			versionStr = desc.VersionString(ctx)
+			if versionStr == "" {
 				versionStr = "(version check failed)"
 			}
 		}
 
 		switch {
 		case note != "":
-			fmt.Fprintf(w, "- **%s:** %s — %s\n", b.name, status, note) //nolint:errcheck
+			fmt.Fprintf(w, "- **%s:** %s — %s\n", desc.Name, status, note) //nolint:errcheck
 		case versionStr != "":
-			fmt.Fprintf(w, "- **%s:** %s — %s\n", b.name, status, versionStr) //nolint:errcheck
+			fmt.Fprintf(w, "- **%s:** %s — %s\n", desc.Name, status, versionStr) //nolint:errcheck
 		default:
-			fmt.Fprintf(w, "- **%s:** %s\n", b.name, status) //nolint:errcheck
+			fmt.Fprintf(w, "- **%s:** %s\n", desc.Name, status) //nolint:errcheck
 		}
 	}
 
