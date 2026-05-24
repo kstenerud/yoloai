@@ -53,6 +53,23 @@ var descriptor = runtime.BackendDescriptor{
 		// shell commands inside the VM can reference state without quoting.
 		VMRuntimeDir: "/Users/admin/.yoloai",
 	},
+	Probe: probe,
+}
+
+// probe reports whether Tart is usable. Tart requires macOS on Apple Silicon
+// and the `tart` binary on PATH. We don't run `tart --version` here — that's a
+// fork+exec on every dispatch; LookPath suffices for "is it installed".
+func probe(_ context.Context) (bool, string) {
+	if !isMacOS() {
+		return false, "tart requires macOS"
+	}
+	if !isAppleSilicon() {
+		return false, "tart requires Apple Silicon"
+	}
+	if _, err := exec.LookPath("tart"); err != nil {
+		return false, "tart binary not found (install with: brew install cirruslabs/cli/tart)"
+	}
+	return true, ""
 }
 
 func init() {

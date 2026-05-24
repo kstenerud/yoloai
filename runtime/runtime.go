@@ -95,6 +95,13 @@ type BackendDescriptor struct {
 	AgentProvisionedByBackend bool        // true when the backend's image/VM ships the agent binary
 	SupportedIsolationModes   []string    // non-default isolation modes this backend can support
 	Capabilities              BackendCaps // feature-set flags
+	// Probe reports whether this backend is usable right now and, on failure,
+	// a short user-facing reason ("docker socket not reachable", "tart binary
+	// not found", …). Implementations must be fast and side-effect-free — they
+	// run on `yoloai info`, setup wizards, and detect-backend dispatch, so
+	// stat the socket / LookPath the binary; do not dial. nil is permitted but
+	// every shipped backend supplies a real probe.
+	Probe func(ctx context.Context) (available bool, reason string)
 }
 
 // BackendCaps declares what features a runtime backend supports.

@@ -11,10 +11,10 @@ import (
 
 	"github.com/kstenerud/yoloai/config"
 	"github.com/kstenerud/yoloai/runtime"
-	_ "github.com/kstenerud/yoloai/runtime/docker"        // register backend
-	podmanrt "github.com/kstenerud/yoloai/runtime/podman" // register backend + SocketExists helper
-	_ "github.com/kstenerud/yoloai/runtime/seatbelt"      // register backend
-	_ "github.com/kstenerud/yoloai/runtime/tart"          // register backend
+	_ "github.com/kstenerud/yoloai/runtime/docker"   // register backend
+	_ "github.com/kstenerud/yoloai/runtime/podman"   // register backend
+	_ "github.com/kstenerud/yoloai/runtime/seatbelt" // register backend
+	_ "github.com/kstenerud/yoloai/runtime/tart"     // register backend
 	"github.com/kstenerud/yoloai/sandbox"
 	"github.com/kstenerud/yoloai/sandbox/store"
 	"github.com/spf13/cobra"
@@ -89,7 +89,7 @@ func resolveBackend(cmd *cobra.Command) string {
 	}
 
 	// container/container-enhanced: prefer config, then auto-detect.
-	backend, warn := detectContainerBackend(resolveContainerBackendConfig())
+	backend, warn := runtime.SelectContainerBackend(cmd.Context(), resolveContainerBackendConfig())
 	if warn != "" {
 		fmt.Fprintln(os.Stderr, warn)
 	}
@@ -100,44 +100,6 @@ func resolveBackend(cmd *cobra.Command) string {
 func flagStr(cmd *cobra.Command, name string) string {
 	v, _ := cmd.Flags().GetString(name)
 	return v
-}
-
-// detectContainerBackend picks docker or podman based on a config preference
-// and socket availability. Returns the chosen backend and an optional warning
-// message (non-empty when the preferred backend was unavailable).
-//
-// The "docker" / "podman" string literals below are user-facing config values,
-// not dispatch decisions: the user (or their config file) types the preference
-// name and this helper resolves it to whichever backend is actually installed.
-// Per development-principles.md §2, capability-based dispatch belongs at the
-// backend selection point (newRuntime); this function is upstream of that —
-// it's preference resolution for the container-backend slot specifically.
-func detectContainerBackend(preference string) (backend string, warning string) {
-	if preference == "podman" {
-		if podmanrt.SocketExists() {
-			return "podman", ""
-		}
-		warning = "Warning: container_backend=podman not found; falling back to docker"
-	}
-	if dockerAvailable() {
-		return "docker", warning
-	}
-	if preference == "docker" {
-		warning = "Warning: container_backend=docker not found; falling back to podman"
-	}
-	if podmanrt.SocketExists() {
-		return "podman", warning
-	}
-	return "docker", warning // will fail hard in newRuntime() with a clear error
-}
-
-// dockerAvailable returns true if the Docker socket is reachable (stat only, no dial).
-func dockerAvailable() bool {
-	if host := os.Getenv("DOCKER_HOST"); host != "" {
-		return true // assume reachable if explicitly configured
-	}
-	_, err := os.Stat("/var/run/docker.sock")
-	return err == nil
 }
 
 // resolveContainerBackendConfig reads the container_backend config preference.
@@ -157,7 +119,9 @@ func resolveBackendForSandbox(name string) string {
 	if err == nil && meta.Backend != "" {
 		return meta.Backend
 	}
-	backend, warn := detectContainerBackend(resolveContainerBackendConfig())
+	// Probe is stat-only so an empty context is fine here; full ctx threading
+	// for the rare "meta corrupt" fallback is out of scope for W-L4.
+	backend, warn := runtime.SelectContainerBackend(context.Background(), resolveContainerBackendConfig())
 	if warn != "" {
 		fmt.Fprintln(os.Stderr, warn)
 	}

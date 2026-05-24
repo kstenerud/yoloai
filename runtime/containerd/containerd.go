@@ -36,6 +36,17 @@ var descriptor = runtime.BackendDescriptor{
 		CapAdd:           true,
 		HostFilesystem:   false,
 	},
+	Probe: probe,
+}
+
+// probe reports whether containerd is usable. Stat-only check on the daemon
+// socket; never dials. Matches the fast-fail path in New() so callers get the
+// same verdict without paying for client construction.
+func probe(_ context.Context) (bool, string) {
+	if _, err := os.Stat(containerdSock); err != nil {
+		return false, "containerd socket not found (start with: sudo systemctl start containerd)"
+	}
+	return true, ""
 }
 
 func init() {

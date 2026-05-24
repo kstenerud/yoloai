@@ -43,6 +43,21 @@ var descriptor = runtime.BackendDescriptor{
 		HostFilesystem:   false,
 		ContainerAttach:  true,
 	},
+	Probe: probe,
+}
+
+// probe reports whether Docker is usable. Stat-only — never dials the socket —
+// because it runs on every `yoloai info` call and inside auto-detect dispatch.
+// An explicit DOCKER_HOST is treated as a positive signal (caller knows where
+// the daemon is); otherwise the default /var/run/docker.sock must exist.
+func probe(_ context.Context) (bool, string) {
+	if host := os.Getenv("DOCKER_HOST"); host != "" {
+		return true, ""
+	}
+	if _, err := os.Stat("/var/run/docker.sock"); err == nil {
+		return true, ""
+	}
+	return false, "docker socket not found (set DOCKER_HOST or start the docker daemon)"
 }
 
 func init() {

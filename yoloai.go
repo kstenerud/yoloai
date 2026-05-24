@@ -90,7 +90,7 @@ func New(ctx context.Context) (*Client, error) {
 func NewWithOptions(ctx context.Context, opts Options) (*Client, error) {
 	backend := opts.Backend
 	if backend == "" {
-		backend = resolveBackendFromConfig()
+		backend = resolveBackendFromConfig(ctx)
 	}
 	logger := opts.Logger
 	if logger == nil {
@@ -295,12 +295,20 @@ func (c *Client) Destroy(ctx context.Context, name string, force bool) error {
 
 // --- private helpers ---
 
-func resolveBackendFromConfig() string {
-	cfg, err := config.LoadDefaultsConfig()
-	if err == nil && cfg.ContainerBackend != "" {
-		return cfg.ContainerBackend
+// resolveBackendFromConfig picks the container backend for a Client created
+// without an explicit Backend in Options. Reads the user's container_backend
+// preference from config and lets runtime.SelectContainerBackend probe it —
+// if the preferred backend isn't available, the helper falls back to any
+// other registered container backend with a stderr-side warning. The Client
+// emits no warning of its own (embedders may want to suppress it); we
+// silently take the fallback verdict.
+func resolveBackendFromConfig(ctx context.Context) string {
+	var preferred string
+	if cfg, err := config.LoadDefaultsConfig(); err == nil {
+		preferred = cfg.ContainerBackend
 	}
-	return "docker"
+	backend, _ := runtime.SelectContainerBackend(ctx, preferred)
+	return backend
 }
 
 func resolveAgentFromConfig() string {

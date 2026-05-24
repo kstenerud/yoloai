@@ -34,6 +34,17 @@ var descriptor = runtime.BackendDescriptor{
 		HostFilesystem:   false,
 		ContainerAttach:  true,
 	},
+	Probe: probe,
+}
+
+// probe reports whether Podman is usable. discoverSocket is stat-only across
+// the known socket paths plus CONTAINER_HOST/DOCKER_HOST/podman machine; no
+// dial, matching docker's probe contract.
+func probe(_ context.Context) (bool, string) {
+	if _, err := discoverSocket(); err == nil {
+		return true, ""
+	}
+	return false, "podman socket not found (start podman.socket or 'podman machine start')"
 }
 
 func init() {
@@ -104,13 +115,6 @@ func (r *Runtime) Create(ctx context.Context, cfg runtime.InstanceConfig) error 
 		}
 	}
 	return r.Runtime.Create(ctx, cfg)
-}
-
-// SocketExists returns true if a Podman socket can be found without dialing it.
-// Used by backend auto-detection in cli/helpers.go.
-func SocketExists() bool {
-	_, err := discoverSocket()
-	return err == nil
 }
 
 // discoverSocket finds the Podman API socket path.

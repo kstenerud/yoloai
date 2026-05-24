@@ -9,6 +9,7 @@ import (
 	"os"
 
 	"github.com/kstenerud/yoloai/internal/mcpsrv"
+	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/sandbox"
 	"github.com/spf13/cobra"
 )
@@ -53,7 +54,7 @@ Add to ~/.claude.json to use with Claude Desktop:
 }
 
 func runMCPServe(cmd *cobra.Command, _ []string) error {
-	backend, warn := detectContainerBackend(resolveContainerBackendConfig())
+	backend, warn := runtime.SelectContainerBackend(cmd.Context(), resolveContainerBackendConfig())
 	if warn != "" {
 		fmt.Fprintln(os.Stderr, warn)
 	}

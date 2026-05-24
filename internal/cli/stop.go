@@ -36,7 +36,7 @@ func runStopCmd(cmd *cobra.Command, args []string) error {
 	}
 
 	// Resolve backend: from first named sandbox, or config default for --all
-	backend, warn := detectContainerBackend(resolveContainerBackendConfig())
+	backend, warn := runtime.SelectContainerBackend(cmd.Context(), resolveContainerBackendConfig())
 	if warn != "" {
 		fmt.Fprintln(os.Stderr, warn)
 	}
