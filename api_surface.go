@@ -200,11 +200,16 @@ const (
 type Client struct{}
 
 // Options configures a Client.
+//
+// No Input or Output field by design. The Client is non-interactive (Q-F)
+// so it never reads stdin; embedders that need to relay user-facing
+// progress events use the OnProgress callback on each method's Options
+// struct (Q-? cleanup, 2026-05-24). Streaming methods (Attach, Exec,
+// ProxyMCP) take IOStreams per-call; that's the only place an input
+// stream appears in the API.
 type Options struct {
-	Backend string    // explicit backend; "" = read from config, auto-detect
-	Logger  any       // *slog.Logger; any here to avoid pulling slog into design
-	Output  io.Writer // human-readable progress; default io.Discard
-	Input   io.Reader // interactive input; default os.Stdin
+	Backend string // explicit backend; "" = read from config, auto-detect
+	Logger  any    // *slog.Logger; nil = slog.Default(). `any` here to avoid pulling slog into design
 }
 
 func New(ctx context.Context) (*Client, error)                          { panic("design-only") }
@@ -274,16 +279,17 @@ type RunOptions struct {
 
 	Runtimes []string // tart-only: pre-built Apple simulator runtime base
 
-	Wait       bool // block until terminal status
-	OnProgress func(name string, msg string)
+	Wait       bool             // block until terminal status
+	OnProgress func(msg string) // called with human-readable progress lines; nil = silent
 }
 
 func (*Client) Run(ctx context.Context, opts RunOptions) (*Info, error) { panic("design-only") }
 
 // CloneOptions configures Clone.
 type CloneOptions struct {
-	Source string // existing sandbox name
-	Dest   string // new sandbox name; must not exist
+	Source     string           // existing sandbox name
+	Dest       string           // new sandbox name; must not exist
+	OnProgress func(msg string) // human-readable progress; nil = silent
 }
 
 func (*Client) Clone(ctx context.Context, opts CloneOptions) (*Info, error) {
@@ -662,11 +668,12 @@ func (*SystemClient) Agent(name string) (*AgentInfo, error) { panic("design-only
 
 // BuildOptions configures Build.
 type BuildOptions struct {
-	Profile string
-	Backend string
-	All     bool // build across every available backend (exclusive with Backend)
-	Force   bool
-	Secrets []string
+	Profile    string
+	Backend    string
+	All        bool // build across every available backend (exclusive with Backend)
+	Force      bool
+	Secrets    []string
+	OnProgress func(msg string) // human-readable progress (image build steps); nil = silent
 }
 
 func (*SystemClient) Build(ctx context.Context, opts BuildOptions) error { panic("design-only") }
@@ -692,8 +699,9 @@ func (*SystemClient) DiskUsage(ctx context.Context) (*DiskUsage, error) { panic(
 
 // DoctorOptions configures Doctor.
 type DoctorOptions struct {
-	Backend   string        // filter to one backend
-	Isolation IsolationMode // filter to one isolation mode
+	Backend    string           // filter to one backend
+	Isolation  IsolationMode    // filter to one isolation mode
+	OnProgress func(msg string) // human-readable progress (per-check); nil = silent
 }
 
 // DoctorReport is the verdict for one backend+mode pair.
@@ -716,6 +724,7 @@ type PruneOptions struct {
 	DryRun       bool
 	Cache        bool // also prune backend caches (forces base rebuild)
 	IncludeStale bool
+	OnProgress   func(msg string) // human-readable progress (per-item); nil = silent
 }
 
 type PruneResult struct {
@@ -733,9 +742,10 @@ func (*SystemClient) Prune(ctx context.Context, opts PruneOptions) (*PruneResult
 // then calls Setup with the populated struct. Embedders set these
 // directly. Setup never prompts — every answer must be supplied here.
 type SetupOptions struct {
-	TmuxConf TmuxConfMode // required
-	Backend  string       // initial default container_backend; "" = no default set
-	Agent    string       // initial default agent name; "" = no default set
+	TmuxConf   TmuxConfMode     // required
+	Backend    string           // initial default container_backend; "" = no default set
+	Agent      string           // initial default agent name; "" = no default set
+	OnProgress func(msg string) // human-readable progress (per-step); nil = silent
 }
 
 func (*SystemClient) Setup(ctx context.Context, opts SetupOptions) error { panic("design-only") }
