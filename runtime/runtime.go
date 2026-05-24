@@ -102,6 +102,19 @@ type BackendDescriptor struct {
 	// stat the socket / LookPath the binary; do not dial. nil is permitted but
 	// every shipped backend supplies a real probe.
 	Probe func(ctx context.Context) (available bool, reason string)
+
+	// CleanupHint returns a user-facing command that removes the named image
+	// from this backend's local store (e.g. "docker rmi yoloai-myprofile").
+	// Returns "" for backends that don't manage container images (tart,
+	// seatbelt). The returned string is shown verbatim to the user in
+	// post-delete hints; it must be a single shell command, no formatting.
+	CleanupHint func(image string) string
+
+	// HostFromContainer is the hostname inside the sandbox that resolves to
+	// the host's network stack — "host.docker.internal" for docker and
+	// podman, "" for backends without a special hostname (callers substitute
+	// generic phrasing like "the host's routable IP").
+	HostFromContainer string
 }
 
 // BackendCaps declares what features a runtime backend supports.

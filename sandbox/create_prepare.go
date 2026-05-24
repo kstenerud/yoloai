@@ -343,8 +343,8 @@ func (m *Manager) checkLocalhostURLs(agentDef *agent.Definition, mergedEnv map[s
 				continue
 			}
 			hint := "use the host's routable IP instead"
-			if desc.Capabilities.NetworkIsolation {
-				hint = "use host.docker.internal instead"
+			if desc.HostFromContainer != "" {
+				hint = "use " + desc.HostFromContainer + " instead"
 			}
 			return NewUsageError("%s contains a localhost address (%s) which won't work inside a %s sandbox — %s",
 				key, val, desc.Name, hint)

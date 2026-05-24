@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/kstenerud/yoloai/agent"
+	"github.com/kstenerud/yoloai/runtime"
 	"github.com/spf13/cobra"
 )
 
@@ -171,11 +172,25 @@ func generateAgentsTopic() string {
 	b.WriteString("  Some agents (e.g. aider) support local model servers (Ollama, LM Studio):\n")
 	b.WriteString("\n")
 	b.WriteString("     yoloai config set env.OLLAMA_API_BASE \\\n")
-	b.WriteString("       http://host.docker.internal:11434\n")
+	fmt.Fprintf(&b, "       http://%s:11434\n", containerHostExample()) //nolint:errcheck
 	b.WriteString("\n")
 	b.WriteString("More info: https://github.com/kstenerud/yoloai/blob/main/docs/GUIDE.md#agents-and-models\n")
 
 	return b.String()
+}
+
+// containerHostExample returns a hostname for the LOCAL MODELS example —
+// the first non-empty HostFromContainer found among registered backends,
+// or "<your-host-ip>" when no backend declares one. Iterating descriptors
+// keeps the example honest if a new container backend ships without
+// docker's host.docker.internal convention.
+func containerHostExample() string {
+	for _, desc := range runtime.Descriptors() {
+		if desc.HostFromContainer != "" {
+			return desc.HostFromContainer
+		}
+	}
+	return "<your-host-ip>"
 }
 
 // writeAgentList writes the AVAILABLE AGENTS section to b.

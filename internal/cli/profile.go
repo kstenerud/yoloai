@@ -15,6 +15,7 @@ import (
 
 	"github.com/kstenerud/yoloai/config"
 	"github.com/kstenerud/yoloai/internal/fileutil"
+	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/sandbox"
 	"github.com/kstenerud/yoloai/sandbox/store"
 	"github.com/spf13/cobra"
@@ -693,8 +694,8 @@ func newProfileDeleteCmd() *cobra.Command {
 					"action": "deleted",
 				})
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "Deleted profile '%s'\n", name)                                                                   //nolint:errcheck
-			fmt.Fprintf(cmd.OutOrStdout(), "Note: if a Docker image 'yoloai-%s' exists, remove it with: docker rmi yoloai-%s\n", name, name) //nolint:errcheck
+			fmt.Fprintf(cmd.OutOrStdout(), "Deleted profile '%s'\n", name) //nolint:errcheck
+			writeProfileImageCleanupHints(cmd.OutOrStdout(), "yoloai-"+name)
 			return nil
 		},
 	}
@@ -702,6 +703,20 @@ func newProfileDeleteCmd() *cobra.Command {
 	cmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
 
 	return cmd
+}
+
+// writeProfileImageCleanupHints prints a "yoloai-<profile> may exist on
+// backend X; remove with: …" line for each registered backend that builds
+// per-profile images. Iterates the registry so a new container backend
+// auto-participates by declaring CleanupHint on its descriptor.
+func writeProfileImageCleanupHints(w io.Writer, image string) {
+	for _, desc := range runtime.Descriptors() {
+		if desc.CleanupHint == nil {
+			continue
+		}
+		fmt.Fprintf(w, "Note: if a %s image '%s' exists, remove it with: %s\n", //nolint:errcheck
+			desc.Name, image, desc.CleanupHint(image))
+	}
 }
 
 // findSandboxesWithProfile scans sandbox meta.json files for profile references.

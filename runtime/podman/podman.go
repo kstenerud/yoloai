@@ -34,7 +34,9 @@ var descriptor = runtime.BackendDescriptor{
 		HostFilesystem:   false,
 		ContainerAttach:  true,
 	},
-	Probe: probe,
+	Probe:             probe,
+	CleanupHint:       func(image string) string { return "podman rmi " + image },
+	HostFromContainer: "host.docker.internal",
 }
 
 // probe reports whether Podman is usable. discoverSocket is stat-only across

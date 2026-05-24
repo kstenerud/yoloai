@@ -43,7 +43,9 @@ var descriptor = runtime.BackendDescriptor{
 		HostFilesystem:   false,
 		ContainerAttach:  true,
 	},
-	Probe: probe,
+	Probe:             probe,
+	CleanupHint:       func(image string) string { return "docker rmi " + image },
+	HostFromContainer: "host.docker.internal",
 }
 
 // probe reports whether Docker is usable. Stat-only — never dials the socket —
