@@ -144,6 +144,8 @@ David L. Parnas (1972); OWASP secure-coding guidance; project D6 + D10. Full cit
 
 **Principle.** When data crosses a trust boundary or has invariants downstream code depends on, transform it into a distinct domain type whose existence proves the invariants hold. Downstream code takes the parsed type, not the raw input. The function that constructs the type is the *only* place the checks happen; once a value has the parsed type, no further validation is needed at every call site.
 
+The same shape applies to **API-type design even without a trust boundary**: when an Options struct has fields whose valid combinations are constrained (mutually-exclusive booleans, free-form strings that should be one of N values), collapse them into a typed enum so the invalid state is unrepresentable. Callers can't accidentally set both `NetworkIsolated=true` and `NetworkNone=true` if the type doesn't permit that combination. This is the same discipline applied to programmatically-constructed API inputs rather than parsed user input — see the W-L8a entries in the table below.
+
 Adopted from Alexis King, "[Parse, don't validate](https://lexi-lambda.github.io/blog/2019/11/05/parse-don-t-validate/)" (2019). The original argument is framed in Haskell; Go cannot enforce the discipline at the type level the way Haskell does, but the convention is still load-bearing.
 
 ### Pattern
@@ -167,6 +169,10 @@ For every domain concept yoloAI cares about:
 | Agent name                        | `string`          | `AgentName`             | Known agent in the registry                       |
 | Backend descriptor (W11)          | (factory return)  | `BackendDescriptor`     | Capabilities enumerated                           |
 | Patch (D9)                        | `[]byte`          | `Patch` (`patch/`)      | Valid `git format-patch` output                   |
+| Network policy (W-L8a)            | `(bool, bool)`    | `yoloai.NetworkMode`    | "Open / isolated / none" — invalid combo unrepresentable |
+| Isolation mode (W-L8a)            | `string`          | `yoloai.IsolationMode`  | One of the five known modes; typo = compile error |
+| Apply mode (W-L8a)                | `(bool, string)`  | `yoloai.ApplyMode`      | Default / squash / export; mutex enforced by type |
+| Log format (W-L8a)                | `(bool,bool,bool)`| `yoloai.LogFormat`      | Structured / structured-raw / agent / agent-raw — at most one |
 
 Go limits (named in the research file): same-package construction is unrestricted; no compile-time proof; `any`-typed maps and reflection can bypass. Mitigation: parser and type live in a small dedicated package so accidental bypass is hard.
 

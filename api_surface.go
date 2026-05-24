@@ -74,6 +74,55 @@ func SandboxNameFromEnv() string { panic("design-only") }
 // Sandbox lifecycle  (CLI: new, clone, start, stop, restart, destroy, reset, wait)
 // =============================================================================
 
+// IsolationMode selects the OCI / VM isolation level for a sandbox.
+// Replaces the open `string` field that previously accepted these values
+// — typed enum makes typos a compile error and gives gopls completion at
+// the call site.
+type IsolationMode string
+
+const (
+	// IsolationContainer is the default: a standard Linux container under
+	// runc (Linux namespaces + cgroups). Zero value so callers who don't
+	// set isolation get the right default.
+	IsolationContainer IsolationMode = ""
+
+	// IsolationContainerEnhanced runs the container under gVisor (runsc),
+	// a userspace kernel that intercepts syscalls. Stronger isolation
+	// boundary than runc, with a perf cost. Docker / Podman only.
+	IsolationContainerEnhanced IsolationMode = "container-enhanced"
+
+	// IsolationContainerPrivileged runs the container with --privileged
+	// (full /proc/sys, /sys/fs/cgroup, all capabilities). Required for
+	// Docker-in-Docker and similar workloads. Reduces isolation.
+	IsolationContainerPrivileged IsolationMode = "container-privileged"
+
+	// IsolationVM runs the workload inside a Kata Containers VM backed by
+	// QEMU. Hardware-virt boundary; auto-routes to the containerd backend.
+	// Linux + KVM only.
+	IsolationVM IsolationMode = "vm"
+
+	// IsolationVMEnhanced runs the workload inside a Kata Containers VM
+	// backed by Firecracker. Faster startup than QEMU, smaller surface;
+	// containerd backend, Linux + KVM only.
+	IsolationVMEnhanced IsolationMode = "vm-enhanced"
+)
+
+// HostOS selects the operating-system environment the agent runs in.
+// Replaces a free-form `OS string` field. Used by RunOptions.OS to route
+// to seatbelt/tart on macOS; defaults to OSLinux (which dispatches to
+// docker/podman/containerd based on Isolation).
+type HostOS string
+
+const (
+	// OSLinux is the default: the agent runs inside a Linux container or
+	// VM. Backend selected by Isolation. Zero value.
+	OSLinux HostOS = ""
+
+	// OSMac selects a macOS-native sandbox (Seatbelt or Tart). Requires a
+	// macOS host. With IsolationVM, routes to Tart; otherwise Seatbelt.
+	OSMac HostOS = "mac"
+)
+
 // NetworkMode selects a sandbox's outbound network policy. The three modes
 // are mutually exclusive — modeled as one enum field rather than two
 // booleans (the previous --network-isolated + --network-none flag pair) so
@@ -116,8 +165,8 @@ type RunOptions struct {
 	Profile string // profile name; default: none
 	Prompt  string // initial prompt sent to the agent; default: empty (interactive)
 
-	Isolation string // "container", "container-enhanced", "container-privileged", "vm", "vm-enhanced"
-	OS        string // "linux" (default) or "mac" (routes to seatbelt/tart)
+	Isolation IsolationMode // typed enum; zero value = IsolationContainer
+	OS        HostOS        // typed enum; zero value = OSLinux
 
 	Network      NetworkMode // network policy; zero value = open (default)
 	AllowDomains []string    // initial allowlist; only meaningful when Network == NetworkIsolated
@@ -149,9 +198,9 @@ type CloneOptions struct {
 
 // StartOptions configures Start. Mirrors today's `sandbox.StartOptions`.
 type StartOptions struct {
-	Attach            bool   // also attach to the tmux session after start
-	Prompt            string // optional prompt to inject after agent relaunch
-	IsolationOverride string // change isolation mode on restart; rebuilds container
+	Attach            bool          // also attach to the tmux session after start
+	Prompt            string        // optional prompt to inject after agent relaunch
+	IsolationOverride IsolationMode // change isolation mode on restart; rebuilds container; zero value = leave unchanged
 }
 
 // StopOptions configures Stop. Currently empty — the CLI flags (`--all`,
@@ -558,13 +607,29 @@ type BackendInfo struct {
 	Version     string // VersionString() output; "" when unavailable
 }
 
+// PromptMode mirrors `agent.PromptMode` (the existing typed string in the
+// agent package). Defined here as a synthetic placeholder; W-L8b will
+// replace this with a type alias (`type PromptMode = agent.PromptMode`) so
+// embedders don't have to import internal/agent.
+type PromptMode string
+
+const (
+	// PromptModeInteractive: the agent runs the prompt in its interactive
+	// REPL — `yoloai attach` shows live progress.
+	PromptModeInteractive PromptMode = "interactive"
+
+	// PromptModeHeadless: the agent runs the prompt non-interactively and
+	// exits when done. Output captured to the agent log.
+	PromptModeHeadless PromptMode = "headless"
+)
+
 // AgentInfo is the public face of `agent.Definition` (which lives in
 // internal/ after Phase 5). Reexported so the CLI doesn't have to import
 // internal/agent.
 type AgentInfo struct {
 	Name          string
 	Description   string
-	PromptMode    string
+	PromptMode    PromptMode
 	APIKeyEnvVars []string
 	ModelAliases  map[string]string
 }
@@ -621,11 +686,30 @@ type DoctorOptions struct {
 	Isolation string // filter to one isolation mode
 }
 
+// Availability is the verdict of a Doctor check for one backend+mode pair.
+// Replaces a free-form string with three named values.
+type Availability string
+
+const (
+	// AvailabilityReady means the backend is fully functional in the
+	// selected mode. All RequiredCapabilities checks passed.
+	AvailabilityReady Availability = "ready"
+
+	// AvailabilityWarning means the backend works in the selected mode but
+	// one or more optional capability checks raised non-fatal concerns
+	// (e.g. an old kernel that may degrade gracefully).
+	AvailabilityWarning Availability = "warning"
+
+	// AvailabilityUnavailable means the backend cannot run in the selected
+	// mode on this host. InitErr or MissingCaps carries the detail.
+	AvailabilityUnavailable Availability = "unavailable"
+)
+
 type DoctorReport struct {
 	Backend      string
-	Mode         string
+	Mode         IsolationMode // backend's mode under check; "" for IsBaseMode
 	IsBaseMode   bool
-	Availability string // "ready" | "unavailable" | "warning"
+	Availability Availability
 	InitErr      error
 	MissingCaps  []string // names of failed RequiredCapabilities checks
 }
