@@ -74,6 +74,33 @@ func SandboxNameFromEnv() string { panic("design-only") }
 // Sandbox lifecycle  (CLI: new, clone, start, stop, restart, destroy, reset, wait)
 // =============================================================================
 
+// NetworkMode selects a sandbox's outbound network policy. The three modes
+// are mutually exclusive — modeled as one enum field rather than two
+// booleans (the previous --network-isolated + --network-none flag pair) so
+// the invalid "isolated AND none" combination is unrepresentable. The CLI's
+// flags marshal to these values: no flag → NetworkOpen, --network-isolated
+// → NetworkIsolated, --network-none → NetworkNone.
+type NetworkMode string
+
+const (
+	// NetworkOpen leaves the sandbox's network unchanged: full outbound
+	// access via the backend's default networking. This is the zero value
+	// so callers who don't care about networking get sensible defaults.
+	NetworkOpen NetworkMode = ""
+
+	// NetworkIsolated enforces an iptables + ipset domain allowlist inside
+	// the sandbox. The agent's default allowlist plus any AllowDomains
+	// added via RunOptions are permitted; everything else is blocked.
+	// Requires a backend that supports network isolation
+	// (BackendCaps.NetworkIsolation = true).
+	NetworkIsolated NetworkMode = "isolated"
+
+	// NetworkNone disables outbound traffic entirely. Stronger than
+	// NetworkIsolated — the agent cannot reach the LLM API either, so
+	// only suitable for fully offline workflows.
+	NetworkNone NetworkMode = "none"
+)
+
 // RunOptions configures Run / Create. Field set unifies the current
 // `yoloai.Client.Run`'s subset with the full surface of `sandbox.CreateOptions`
 // (the CLI's `yoloai new` flag set). Fields below match the CLI flag names
@@ -92,9 +119,8 @@ type RunOptions struct {
 	Isolation string // "container", "container-enhanced", "container-privileged", "vm", "vm-enhanced"
 	OS        string // "linux" (default) or "mac" (routes to seatbelt/tart)
 
-	NetworkIsolated bool     // --network-isolated; iptables + ipset allowlist
-	NetworkNone     bool     // --network-none; no outbound traffic
-	AllowDomains    []string // initial allowlist when NetworkIsolated
+	Network      NetworkMode // network policy; zero value = open (default)
+	AllowDomains []string    // initial allowlist; only meaningful when Network == NetworkIsolated
 
 	Env       map[string]string // YOLOAI_BUILD_* and YOLOAI_RUNTIME_* vars merged into the agent env
 	Mounts    []string          // raw `--mount` strings, parsed and validated by the runtime
