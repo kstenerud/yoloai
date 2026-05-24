@@ -817,21 +817,147 @@ type DirSpec struct {
 }
 
 // =============================================================================
+// Error taxonomy
+// =============================================================================
+//
+// Every Client method returns nil, one of the five stable sentinels, a
+// *UsageError, or an *UnrecoverableError — no "other". Internal callers
+// wrap raw errors into one of these categories before returning. The
+// taxonomy is exhaustive so embedders never need to string-match.
+//
+// Naming follows Go stdlib convention: ErrXxx for sentinel values
+// (matched with errors.Is), XxxError for struct types (matched with
+// errors.As).
+
+// Stable sentinels. Each corresponds to a Client method with a meaningful
+// recoverable failure mode the embedder might program around. Promotion
+// rule: add a sentinel when (and only when) there's a real call site that
+// would branch on it. The five below cover every such case identified
+// during W-L8a.
+var (
+	// ErrSandboxExists is returned by Run when a sandbox with the given
+	// name already exists and Replace is false.
+	ErrSandboxExists error
+
+	// ErrSandboxNotFound is returned by any name-based method (Inspect,
+	// Start, Stop, Destroy, Diff, Apply, Reset, Logs, Attach, Exec, …)
+	// when the named sandbox does not exist. Replaces today's wrapped
+	// fs.ErrNotExist which embedders had to string-match around.
+	ErrSandboxNotFound error
+
+	// ErrUnappliedChanges is returned by Destroy when the sandbox has
+	// unapplied changes and DestroyOptions.Force is false.
+	ErrUnappliedChanges error
+
+	// ErrNoChanges is returned by Apply when there are no agent commits
+	// (or WIP edits, with IncludeWIP) to apply.
+	ErrNoChanges error
+
+	// ErrBackendUnavailable is returned by New when the requested or
+	// auto-selected backend is not usable on this host (daemon not
+	// running, binary not installed, etc.). Embedders may want to fall
+	// back to another backend before giving up.
+	ErrBackendUnavailable error
+)
+
+// UsageError indicates the caller passed something the Client refused
+// before doing any work — a missing required field, an invalid flag
+// combination, an unknown agent name, etc. The CLI maps this to exit
+// code 2 with a "Run 'yoloai <cmd> -h' for help" hint. Re-exports the
+// existing internal/yoerrors.UsageError type; declared here for the
+// design's stability commitment.
+type UsageError struct {
+	Msg string
+	// Hint is optional follow-up text (e.g. suggested alternatives,
+	// related help command). Empty when there's no specific hint.
+	Hint string
+}
+
+func (e *UsageError) Error() string { panic("design-only") }
+
+// UnrecoverableError indicates the Client started an operation, hit a
+// state it can't recover from, and gave up. The Code field categorizes
+// the failure for embedder branching and CLI exit-code mapping. Cause
+// (when set) is the underlying error; Unwrap returns it so
+// errors.Is/errors.As walks past UnrecoverableError to find any sentinel
+// nested inside.
+type UnrecoverableError struct {
+	Code    UnrecoverableCode
+	Message string // single-sentence user-facing summary
+	Detail  string // optional longer context (multi-line)
+	Cause   error  // wrapped underlying error; nil when none
+}
+
+func (e *UnrecoverableError) Error() string { panic("design-only") }
+func (e *UnrecoverableError) Unwrap() error { panic("design-only") }
+
+// UnrecoverableCode is the typed enum of categories an UnrecoverableError
+// can carry. Closed set, decided by us; embedders pattern-match on these
+// for retry/abandon logic and the CLI maps each to a specific exit code.
+type UnrecoverableCode string
+
+const (
+	// UnrecoverableAgentCrash: the agent process died abnormally
+	// (segfault, OOM kill, panic). Cause carries the exit code / signal
+	// if known.
+	UnrecoverableAgentCrash UnrecoverableCode = "agent_crash"
+
+	// UnrecoverableBackendFailure: a backend operation failed mid-flight
+	// in a way that left state inconsistent (container died during
+	// exec, VM unresponsive after boot).
+	UnrecoverableBackendFailure UnrecoverableCode = "backend_failure"
+
+	// UnrecoverableBuildFailure: an image build or VM provisioning step
+	// failed; the underlying Dockerfile / tart-base error is in Cause.
+	UnrecoverableBuildFailure UnrecoverableCode = "build_failure"
+
+	// UnrecoverableStateCorrupted: sandbox state files on disk are
+	// inconsistent (missing meta.json after creation succeeded, runtime
+	// config schema mismatch). User must destroy and recreate.
+	UnrecoverableStateCorrupted UnrecoverableCode = "state_corrupted"
+
+	// UnrecoverableVMBootFailure: a Kata or Tart VM never reached a
+	// usable state (shim crashed, kernel panic, network never came up).
+	UnrecoverableVMBootFailure UnrecoverableCode = "vm_boot_failure"
+
+	// UnrecoverableNotImplemented: the requested operation requires an
+	// optional backend capability the active backend doesn't provide
+	// (e.g. mcp proxy on tart needs StdioExecer).
+	UnrecoverableNotImplemented UnrecoverableCode = "not_implemented"
+
+	// UnrecoverableInternal: assertion-failure category — a "shouldn't
+	// happen" path was reached. Always indicates a yoloai bug; users
+	// should file a bug report.
+	UnrecoverableInternal UnrecoverableCode = "internal"
+)
+
+// =============================================================================
 // Open questions for the reviewer
 // =============================================================================
 //
 // Q-A.  ListOptions vs separate filter methods?  Today the CLI parses
 //       `--active --idle --agent foo` into runtime filters. Could expose as
 //       method options (chosen) or as separate methods (List, ListByAgent).
-//       Recommendation: ListOptions (one method, ergonomic for embedders).
+//       **RESOLVED 2026-05-24:** Option 1 — one List(ctx, ListOptions)
+//       method. CLI fills the struct from flags; embedders set fields
+//       directly. No convenience wrappers in V1.
 //
 // Q-B.  Error mapping.  W7 (architecture-remediation) lands typed errors
 //       under `internal/yoerrors`. Should the Client surface promise
-//       specific sentinels (ErrSandboxNotFound, ErrUnappliedChanges,
-//       ErrBackendUnavailable) as part of its stability contract? D3 defers
-//       the broader stability question. Recommendation: document the three
-//       sentinels already aliased in `yoloai.go` as stable; everything
-//       else is internal.
+//       specific sentinels as part of its stability contract?
+//       **RESOLVED 2026-05-24:** Three-category exhaustive taxonomy.
+//         (1) Five stable sentinels — ErrSandboxExists, ErrSandboxNotFound,
+//             ErrUnappliedChanges, ErrNoChanges, ErrBackendUnavailable.
+//             Promotion rule: add only when a real call site needs to
+//             branch on it.
+//         (2) *UsageError — caller did something refused before any work.
+//             Re-exports internal/yoerrors. Detected with errors.As.
+//         (3) *UnrecoverableError — Client started, hit something it
+//             couldn't recover from, gave up. Carries UnrecoverableCode +
+//             Message + Detail + wrapped Cause. Detected with errors.As.
+//       No "other" — every Client error fits one of these three. Naming
+//       follows Go stdlib convention (ErrXxx for sentinels, XxxError for
+//       types). See "Error taxonomy" section above for the full definitions.
 //
 // Q-C.  Streaming-vs-buffered ergonomics for `Logs` / `Diff` / `Apply`.
 //       `Logs` already takes an `io.Writer`. Should `Diff` / `Apply` also
