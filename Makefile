@@ -104,7 +104,11 @@ integration:
 		$(MAKE) integration-seatbelt integration-tart; \
 	fi
 
-e2e: base-image
+e2e: build
+	@if ! docker info >/dev/null 2>&1; then \
+		echo "e2e tests require Docker — start Docker Desktop and retry"; exit 1; \
+	fi
+	./$(BINARY) system build --backend docker
 	go test -tags=e2e -v -count=1 -timeout=15m ./test/e2e/
 
 ## integration-podman: run Podman integration tests (requires Podman with socket)
