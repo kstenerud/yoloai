@@ -1,7 +1,9 @@
 // ABOUTME: Isolation-mode helpers mapping isolation strings to OCI runtime names,
-// ABOUTME: containerd snapshotters, and iptables-enforcement capability flags.
+// ABOUTME: containerd snapshotters, iptables enforcement, and OS/host availability.
 // Package runtime defines the pluggable Runtime interface for sandbox backends.
 package runtime
+
+import "fmt"
 
 // IsolationContainerRuntime returns the OCI runtime name for the given isolation
 // mode, or "" for the backend default (standard runc).
@@ -50,4 +52,68 @@ func IsolationSnapshotter(isolation string) string {
 // that lands, the broken combination must be rejected at sandbox creation.
 func IsolationEnforcesInSandboxIptables(isolation string) bool {
 	return isolation != "container-enhanced"
+}
+
+// SupportsOverlayDirs reports whether the given isolation mode is compatible
+// with :overlay-mounted directories. Returns false for "container-enhanced"
+// (gVisor; runsc does not implement the in-container overlayfs(2) mount that
+// yoloai's entrypoint installs). All other modes (container,
+// container-privileged, vm, vm-enhanced) run a Linux kernel with overlayfs
+// support — though the backend itself must additionally declare
+// BackendCaps.OverlayDirs for the feature to actually be enabled.
+func SupportsOverlayDirs(isolation string) bool {
+	return isolation != "container-enhanced"
+}
+
+// IsolationAvailability reports whether the given isolation mode is available
+// on the host/target-OS combination. Returns available=true with empty
+// reason/help when supported. Otherwise reason is a single user-facing
+// sentence explaining why, and help is optional follow-up text (suggested
+// alternatives, issue links). Both strings are pre-formatted for direct use
+// in an error message.
+//
+// hostOS is runtime.GOOS-style ("darwin", "linux", "windows"); targetOS is
+// the --os flag value ("mac", "linux", or ""). Encodes the rules previously
+// repeated across `validateIsolationOSCombo` in internal/cli/new.go.
+func IsolationAvailability(isolation, targetOS, hostOS string) (available bool, reason string, help string) {
+	macAlternatives := "Available isolation modes with --os mac:\n" +
+		"  container   macOS sandbox-exec (seatbelt)\n" +
+		"  vm          Full macOS VM (Tart)"
+
+	// Cases ordered to match the original validateIsolationOSCombo precedence
+	// so error messages are byte-for-byte identical to the pre-refactor output.
+	switch {
+	case hostOS == "darwin" && targetOS != "mac" && (isolation == "vm" || isolation == "vm-enhanced"):
+		return false,
+			fmt.Sprintf("--isolation %s requires containerd, which is not available on macOS.", isolation),
+			"Use a Linux host for VM isolation, or use --os mac for macOS-native sandboxing:\n" +
+				"  container   macOS sandbox-exec (seatbelt)\n" +
+				"  vm          Full macOS VM (Tart)"
+
+	case targetOS == "mac" && (isolation == "container-enhanced" || isolation == "vm-enhanced"):
+		return false,
+			fmt.Sprintf("--isolation %s is not available with --os mac.", isolation),
+			macAlternatives
+
+	case isolation == "container-enhanced" && targetOS != "mac" && hostOS == "darwin":
+		return false,
+			"--isolation container-enhanced (gVisor) is not supported on macOS due to a bug\n" +
+				"that causes Claude Code to hang indefinitely during initialization.",
+			"Workaround: Omit --isolation (use default container isolation) or use\n" +
+				"--os mac for lightweight macOS sandboxing.\n\n" +
+				"For details, see: https://github.com/anthropics/claude-code/issues/35454"
+
+	case isolation == "container-privileged" && hostOS == "darwin":
+		return false,
+			fmt.Sprintf("--isolation %s is Linux-only (Docker or Podman required).", isolation),
+			"macOS backends (Seatbelt, Tart) do not support this mode.\n" +
+				"Use a Linux host or omit --isolation for the default mode."
+
+	case isolation == "container-privileged" && targetOS == "mac":
+		return false,
+			fmt.Sprintf("--isolation %s is not available with --os mac.", isolation),
+			macAlternatives
+	}
+
+	return true, "", ""
 }

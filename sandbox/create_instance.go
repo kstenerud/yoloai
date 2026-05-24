@@ -123,9 +123,11 @@ func applyResourceLimits(state *sandboxState, instanceCfg *runtime.InstanceConfi
 
 // applyOverlayAndCaps validates and applies overlay/capability requirements to the instance config.
 func applyOverlayAndCaps(state *sandboxState, caps runtime.BackendCaps, instanceCfg *runtime.InstanceConfig, runtimeName string) error {
-	// container-enhanced (gVisor) does not support overlayfs inside the container.
-	// Catch this combination early before Docker fails with an opaque error.
-	if state.isolation == "container-enhanced" && hasOverlayDirs(state) {
+	// Catch isolation-mode/overlay conflicts early before Docker fails with
+	// an opaque error. runtime.SupportsOverlayDirs encodes the policy
+	// (container-enhanced / gVisor is the rejection case); the message stays
+	// here because it's CLI-shaped advice.
+	if hasOverlayDirs(state) && !runtime.SupportsOverlayDirs(state.isolation) {
 		return fmt.Errorf(
 			":overlay directories require --isolation container; " +
 				"--isolation container-enhanced uses gVisor, which does not support overlayfs inside the container")

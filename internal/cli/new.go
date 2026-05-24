@@ -300,42 +300,17 @@ func resolveNewIsolationOS(cmd *cobra.Command) (isolation, targetOS string, err 
 	return isolation, targetOS, nil
 }
 
-// validateIsolationOSCombo returns an error for unsupported isolation+OS combinations.
+// validateIsolationOSCombo returns an error for unsupported isolation+OS
+// combinations. Thin wrapper over runtime.IsolationAvailability: the runtime
+// package owns the rules and their messages, the CLI just turns the verdict
+// into a UsageError.
 func validateIsolationOSCombo(isolation, targetOS string) error {
-	if goruntime.GOOS == "darwin" && targetOS != "mac" && (isolation == "vm" || isolation == "vm-enhanced") {
-		return sandbox.NewUsageError(
-			"--isolation %s requires containerd, which is not available on macOS.\n"+
-				"Use a Linux host for VM isolation, or use --os mac for macOS-native sandboxing:\n"+
-				"  container   macOS sandbox-exec (seatbelt)\n"+
-				"  vm          Full macOS VM (Tart)", isolation)
+	available, reason, help := runtime.IsolationAvailability(isolation, targetOS, goruntime.GOOS)
+	if available {
+		return nil
 	}
-	if targetOS == "mac" && (isolation == "container-enhanced" || isolation == "vm-enhanced") {
-		return sandbox.NewUsageError(
-			"--isolation %s is not available with --os mac.\n"+
-				"Available isolation modes with --os mac:\n"+
-				"  container   macOS sandbox-exec (seatbelt)\n"+
-				"  vm          Full macOS VM (Tart)", isolation)
+	if help != "" {
+		return sandbox.NewUsageError("%s\n%s", reason, help)
 	}
-	if isolation == "container-enhanced" && targetOS != "mac" && goruntime.GOOS == "darwin" {
-		return sandbox.NewUsageError(
-			"--isolation container-enhanced (gVisor) is not supported on macOS due to a bug\n" +
-				"that causes Claude Code to hang indefinitely during initialization.\n\n" +
-				"Workaround: Omit --isolation (use default container isolation) or use\n" +
-				"--os mac for lightweight macOS sandboxing.\n\n" +
-				"For details, see: https://github.com/anthropics/claude-code/issues/35454")
-	}
-	if isolation == "container-privileged" && goruntime.GOOS == "darwin" {
-		return sandbox.NewUsageError(
-			"--isolation %s is Linux-only (Docker or Podman required).\n"+
-				"macOS backends (Seatbelt, Tart) do not support this mode.\n"+
-				"Use a Linux host or omit --isolation for the default mode.", isolation)
-	}
-	if isolation == "container-privileged" && targetOS == "mac" {
-		return sandbox.NewUsageError(
-			"--isolation %s is not available with --os mac.\n"+
-				"Available isolation modes with --os mac:\n"+
-				"  container   macOS sandbox-exec (seatbelt)\n"+
-				"  vm          Full macOS VM (Tart)", isolation)
-	}
-	return nil
+	return sandbox.NewUsageError("%s", reason)
 }
