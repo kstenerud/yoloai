@@ -6,23 +6,34 @@
 // Package yoloai_apidesign holds the W-L8a design checkpoint for the
 // `yoloai.Client` surface that the CLI will consume after Phase 3 (W-L8b/c/d/e)
 // of the layering refactor lands. Build tag `never` keeps the file out of
-// every build — it's read like a header, not compiled. Once each method on
-// `clientAPI` below is implemented on the real `yoloai.Client` (in W-L8b)
-// this file is deleted.
+// every build — it's read like a header, not compiled.
 //
-// **Scope.** Every public CLI command in `internal/cli/` is mapped to either:
-//   (a) a method on `clientAPI`, or
-//   (b) a documented exception (presentation, config-file, vscode launcher).
+// **Structural shape (Shape B, resolved 2026-05-24 / Q-G).** Resource-bound
+// handles, GCS-style: `client.Sandbox(name)` returns a cheap `*Sandbox`
+// handle that wraps `(client, name)`. Sandbox-scoped operations are methods
+// on the handle; sub-groupings (Workdir, Files, Network) are nested handles
+// off the sandbox. Admin sits on a separate `*SystemClient` reachable via
+// `client.System()`. Cross-sandbox operations (List, Run, Clone, the
+// bug-report primitives) stay on `*Client` directly. The motivation: drop
+// the artificial method prefixes (FilesPut/FilesGet/...) in favor of
+// structural namespacing (Files().Put / Files().Get), and let the type
+// hierarchy match the conceptual hierarchy.
 //
-// **Reviewer's checklist (W-L8a acceptance criteria from layering-refactor.md):**
-//   1. Every CLI command has either a clientAPI method + Options struct or an
+// **Scope.** Every public CLI command in `internal/cli/` is mapped to
+// either a handle method (Sandbox / Workdir / Files / Network /
+// SystemClient) or a Client method, or a documented exception. Once each
+// is implemented on real types in W-L8b this file is deleted.
+//
+// **Acceptance criteria from layering-refactor.md:**
+//   1. Every CLI command has either a method on a handle/sub-client or an
 //      explicit exception comment.
-//   2. Streaming / interactive operations take an explicit IOStreams struct so
-//      TTY handling is visible in the signature (kubectl's lesson: don't try
-//      to hide stdio).
+//   2. Streaming / interactive operations take an explicit IOStreams struct
+//      so TTY handling is visible in the signature.
 //   3. Reviewer approval gates W-L8b.
 //
-// Open questions for reviewer attention are tagged **OPEN-Q** in comments.
+// **Reviewer audit trail.** All seven W-L8a open questions resolved (Q-A
+// through Q-G). Resolutions live in the "Open questions" section at the
+// tail with **RESOLVED <date>** markers.
 
 package yoloai
 
@@ -63,169 +74,265 @@ type IOStreams struct {
 
 // SandboxNameFromEnv returns the YOLOAI_SANDBOX env-var value (or "") so
 // embedders can match the CLI's name-from-env fallback without
-// re-implementing internal/cli/envname.go. **OPEN-Q (D9):** keep as a
-// package-level helper as designed, or move to a `yoloai.Config{}` value?
-// Recommended: keep as the standalone helper — embedders that don't want
-// env semantics ignore it, and it stays useful even before Client
-// construction.
+// re-implementing internal/cli/envname.go (D9).
 func SandboxNameFromEnv() string { panic("design-only") }
 
 // =============================================================================
-// Sandbox lifecycle  (CLI: new, clone, start, stop, restart, destroy, reset, wait)
+// Shared enums (referenced by Options structs throughout)
 // =============================================================================
 
 // IsolationMode selects the OCI / VM isolation level for a sandbox.
-// Replaces the open `string` field that previously accepted these values
-// — typed enum makes typos a compile error and gives gopls completion at
-// the call site.
 type IsolationMode string
 
 const (
-	// IsolationContainer is the default: a standard Linux container under
-	// runc (Linux namespaces + cgroups). Zero value so callers who don't
-	// set isolation get the right default.
-	IsolationContainer IsolationMode = ""
-
-	// IsolationContainerEnhanced runs the container under gVisor (runsc),
-	// a userspace kernel that intercepts syscalls. Stronger isolation
-	// boundary than runc, with a perf cost. Docker / Podman only.
-	IsolationContainerEnhanced IsolationMode = "container-enhanced"
-
-	// IsolationContainerPrivileged runs the container with --privileged
-	// (full /proc/sys, /sys/fs/cgroup, all capabilities). Required for
-	// Docker-in-Docker and similar workloads. Reduces isolation.
-	IsolationContainerPrivileged IsolationMode = "container-privileged"
-
-	// IsolationVM runs the workload inside a Kata Containers VM backed by
-	// QEMU. Hardware-virt boundary; auto-routes to the containerd backend.
-	// Linux + KVM only.
-	IsolationVM IsolationMode = "vm"
-
-	// IsolationVMEnhanced runs the workload inside a Kata Containers VM
-	// backed by Firecracker. Faster startup than QEMU, smaller surface;
-	// containerd backend, Linux + KVM only.
-	IsolationVMEnhanced IsolationMode = "vm-enhanced"
+	IsolationContainer           IsolationMode = ""                     // default: runc
+	IsolationContainerEnhanced   IsolationMode = "container-enhanced"   // gVisor
+	IsolationContainerPrivileged IsolationMode = "container-privileged" // runc + --privileged
+	IsolationVM                  IsolationMode = "vm"                   // Kata + QEMU
+	IsolationVMEnhanced          IsolationMode = "vm-enhanced"          // Kata + Firecracker
 )
 
 // HostOS selects the operating-system environment the agent runs in.
-// Replaces a free-form `OS string` field. Used by RunOptions.OS to route
-// to seatbelt/tart on macOS; defaults to OSLinux (which dispatches to
-// docker/podman/containerd based on Isolation).
 type HostOS string
 
 const (
-	// OSLinux is the default: the agent runs inside a Linux container or
-	// VM. Backend selected by Isolation. Zero value.
-	OSLinux HostOS = ""
-
-	// OSMac selects a macOS-native sandbox (Seatbelt or Tart). Requires a
-	// macOS host. With IsolationVM, routes to Tart; otherwise Seatbelt.
-	OSMac HostOS = "mac"
+	OSLinux HostOS = ""    // default: Linux container or VM
+	OSMac   HostOS = "mac" // macOS-native sandbox (Seatbelt or Tart)
 )
 
-// NetworkMode selects a sandbox's outbound network policy. The three modes
-// are mutually exclusive — modeled as one enum field rather than two
-// booleans (the previous --network-isolated + --network-none flag pair) so
-// the invalid "isolated AND none" combination is unrepresentable. The CLI's
-// flags marshal to these values: no flag → NetworkOpen, --network-isolated
-// → NetworkIsolated, --network-none → NetworkNone.
+// NetworkMode selects a sandbox's outbound network policy. Modeled as one
+// enum field rather than two booleans — the invalid "isolated AND none"
+// combination is unrepresentable.
 type NetworkMode string
 
 const (
-	// NetworkOpen leaves the sandbox's network unchanged: full outbound
-	// access via the backend's default networking. This is the zero value
-	// so callers who don't care about networking get sensible defaults.
-	NetworkOpen NetworkMode = ""
-
-	// NetworkIsolated enforces an iptables + ipset domain allowlist inside
-	// the sandbox. The agent's default allowlist plus any AllowDomains
-	// added via RunOptions are permitted; everything else is blocked.
-	// Requires a backend that supports network isolation
-	// (BackendCaps.NetworkIsolation = true).
-	NetworkIsolated NetworkMode = "isolated"
-
-	// NetworkNone disables outbound traffic entirely. Stronger than
-	// NetworkIsolated — the agent cannot reach the LLM API either, so
-	// only suitable for fully offline workflows.
-	NetworkNone NetworkMode = "none"
+	NetworkOpen     NetworkMode = ""         // zero value; full outbound access
+	NetworkIsolated NetworkMode = "isolated" // iptables + ipset domain allowlist
+	NetworkNone     NetworkMode = "none"     // no outbound traffic
 )
 
-// RunOptions configures Run / Create. Field set unifies the current
-// `yoloai.Client.Run`'s subset with the full surface of `sandbox.CreateOptions`
-// (the CLI's `yoloai new` flag set). Fields below match the CLI flag names
-// 1:1 unless noted; field tags are advisory for future YAML/JSON marshaling.
+// TmuxConfMode selects how yoloai writes the per-sandbox tmux config.
+type TmuxConfMode string
+
+const (
+	TmuxConfDefault     TmuxConfMode = "default"      // baked-in defaults only
+	TmuxConfDefaultHost TmuxConfMode = "default+host" // defaults + user's ~/.tmux.conf
+	TmuxConfHost        TmuxConfMode = "host"         // user's ~/.tmux.conf only
+	TmuxConfNone        TmuxConfMode = "none"         // no config (raw tmux)
+)
+
+// ApplyMode selects how Apply emits its output.
+type ApplyMode string
+
+const (
+	ApplyDefault ApplyMode = ""       // git format-patch + am (or overlay exec)
+	ApplySquash  ApplyMode = "squash" // flatten into one unstaged patch
+	ApplyExport  ApplyMode = "export" // write *.patch files; don't touch host
+)
+
+// LogFormat selects which log stream to emit.
+type LogFormat string
+
+const (
+	LogStructured    LogFormat = ""          // pretty-printed merge-sorted JSONL (default)
+	LogStructuredRaw LogFormat = "raw"       // raw JSONL lines
+	LogAgent         LogFormat = "agent"     // agent terminal, ANSI stripped
+	LogAgentRaw      LogFormat = "agent-raw" // raw agent terminal stream
+)
+
+// BugReportMode selects the redaction level for BugReport.
+type BugReportMode string
+
+const (
+	BugReportSafe   BugReportMode = "safe"   // redacted; default
+	BugReportUnsafe BugReportMode = "unsafe" // full unredacted content
+)
+
+// Availability is the verdict of a Doctor check for one backend+mode pair.
+type Availability string
+
+const (
+	AvailabilityReady       Availability = "ready"
+	AvailabilityWarning     Availability = "warning"
+	AvailabilityUnavailable Availability = "unavailable"
+)
+
+// PromptMode mirrors `agent.PromptMode` (the existing typed string in the
+// agent package). Synthetic here; W-L8b will replace with a type alias
+// (`type PromptMode = agent.PromptMode`).
+type PromptMode string
+
+const (
+	PromptModeInteractive PromptMode = "interactive"
+	PromptModeHeadless    PromptMode = "headless"
+)
+
+// =============================================================================
+// Client — top-level entry point
+// =============================================================================
+
+// Client is the entry point for every yoloai operation. Construct via
+// yoloai.New(ctx) or yoloai.NewWithOptions(ctx, Options{...}). Safe for
+// concurrent use.
+//
+// Methods split by surface:
+//   - Creation methods (Run, Clone) return *Info; the embedder builds a
+//     handle for follow-up via client.Sandbox(name).
+//   - Cross-sandbox queries (List) live directly on Client.
+//   - Per-sandbox operations live on the *Sandbox handle from
+//     client.Sandbox(name).
+//   - Admin operations live on the *SystemClient from client.System().
+//   - Bug-report primitives live on Client (BugReport takes a name
+//     explicitly, since it's often called from error paths without a
+//     handle in scope; StartBugReporter is name-less).
+type Client struct{}
+
+// Options configures a Client.
+type Options struct {
+	Backend string    // explicit backend; "" = read from config, auto-detect
+	Logger  any       // *slog.Logger; any here to avoid pulling slog into design
+	Output  io.Writer // human-readable progress; default io.Discard
+	Input   io.Reader // interactive input; default os.Stdin
+}
+
+func New(ctx context.Context) (*Client, error)                          { panic("design-only") }
+func NewWithOptions(ctx context.Context, opts Options) (*Client, error) { panic("design-only") }
+func (*Client) Close() error                                            { panic("design-only") }
+
+// Sandbox returns a name-bound handle for sandbox-scoped operations. Cheap
+// — no IO, never errors. The sandbox isn't looked up until you call a
+// method on the handle (Inspect, Diff, etc.), which is where
+// ErrSandboxNotFound surfaces if the name doesn't exist. Matches GCS's
+// Bucket/Object handle convention.
+func (*Client) Sandbox(name string) *Sandbox { panic("design-only") }
+
+// System returns the admin sub-client (`yoloai system …` commands).
+func (*Client) System() *SystemClient { panic("design-only") }
+
+// List returns sandboxes matching opts. Cross-sandbox; lives directly on
+// Client (a Sandbox handle wouldn't make sense — there's no "name" yet).
+type ListOptions struct {
+	Statuses []string // "active", "idle", "done", ...; empty = all
+	Agents   []string // filter by agent name
+	Profiles []string // filter by profile ("" for unprofiled)
+	Changes  bool     // only sandboxes with unapplied changes
+}
+
+func (*Client) List(ctx context.Context, opts ListOptions) ([]*Info, error) {
+	panic("design-only")
+}
+
+// =============================================================================
+// Client.Run / Client.Clone — creation methods
+// =============================================================================
+//
+// Run and Clone are on Client (not Sandbox) because they CREATE a sandbox;
+// there's no name-bound handle until after they return. The embedder
+// constructs a Sandbox handle from info.Meta.Name for follow-up
+// operations. CLI: `yoloai new`, `yoloai clone`.
+
+// RunOptions configures Run. Field set unifies the existing Client.Run
+// subset with sandbox.CreateOptions (the full `yoloai new` flag set).
 type RunOptions struct {
 	Name    string  // required; sandbox identifier
-	Workdir DirSpec // primary work directory; required (set Path + Mode)
+	Workdir DirSpec // primary work directory; required (Path + Mode)
 
-	AuxDirs []DirSpec // additional `-d <dir>` mounts (read-only by default)
+	AuxDirs []DirSpec // additional `-d <dir>` mounts; read-only by default
 
-	Agent   string // "claude", "gemini", "codex", "opencode", "aider", "test"; default: config or "claude"
-	Model   string // agent-specific model id or alias; default: agent default
-	Profile string // profile name; default: none
-	Prompt  string // initial prompt sent to the agent; default: empty (interactive)
+	Agent   string // "claude", "gemini", "codex", "opencode", "aider", "test"
+	Model   string // agent-specific model id or alias
+	Profile string // profile name
+	Prompt  string // initial prompt; empty = interactive
 
-	Isolation IsolationMode // typed enum; zero value = IsolationContainer
-	OS        HostOS        // typed enum; zero value = OSLinux
+	Isolation IsolationMode
+	OS        HostOS
 
-	Network      NetworkMode // network policy; zero value = open (default)
-	AllowDomains []string    // initial allowlist; only meaningful when Network == NetworkIsolated
+	Network      NetworkMode // outbound policy (open / isolated / none)
+	AllowDomains []string    // initial allowlist; only meaningful with NetworkIsolated
 
-	Env       map[string]string // YOLOAI_BUILD_* and YOLOAI_RUNTIME_* vars merged into the agent env
-	Mounts    []string          // raw `--mount` strings, parsed and validated by the runtime
-	Ports     []string          // raw `--port <host:container>` mappings
-	Secrets   []string          // build-time secrets (`id=…,src=…`); validated and tilde-expanded
-	BuildArgs map[string]string // --build-arg key=value pairs for the image build
+	Env       map[string]string
+	Mounts    []string
+	Ports     []string
+	Secrets   []string
+	BuildArgs map[string]string
 
 	Replace bool // destroy any existing sandbox with the same name first
-	Yes     bool // skip interactive confirmation prompts (dirty repos, replace warnings, ...)
-	NoStart bool // create state but do not start the container yet (today: --no-start)
+	Yes     bool // skip confirmation prompts (dirty repo warnings etc.)
+	NoStart bool // create state but don't start the container yet
 
-	Runtimes []string // tart-only: pre-built Apple simulator runtime base ("ios:26.4", "tvos")
+	Runtimes []string // tart-only: pre-built Apple simulator runtime base
 
-	// Wait, if true, blocks until the agent reaches a terminal status
-	// (StatusDone, StatusFailed, StatusStopped). Mirrors the existing
-	// Client.Run(opts.Wait) semantic. OnProgress receives status updates.
-	Wait       bool
-	OnProgress func(name, msg string)
+	Wait       bool // block until terminal status
+	OnProgress func(name string, msg string)
 }
 
-// CloneOptions configures Clone. Mirrors `sandbox.CloneOptions`.
+func (*Client) Run(ctx context.Context, opts RunOptions) (*Info, error) { panic("design-only") }
+
+// CloneOptions configures Clone.
 type CloneOptions struct {
 	Source string // existing sandbox name
-	Dest   string // new sandbox name (must not exist; not subject to Replace)
+	Dest   string // new sandbox name; must not exist
 }
 
-// StartOptions configures Start. Mirrors today's `sandbox.StartOptions`.
+func (*Client) Clone(ctx context.Context, opts CloneOptions) (*Info, error) {
+	panic("design-only")
+}
+
+// =============================================================================
+// Sandbox handle — name-bound; methods for one sandbox
+// =============================================================================
+
+// Sandbox is a cheap name-bound handle. Construct via Client.Sandbox(name).
+// Never errors at construction time; the name is "validated" by the first
+// method call (Inspect, etc.), which returns ErrSandboxNotFound if the
+// sandbox doesn't exist. Matches GCS's BucketHandle convention.
+type Sandbox struct{}
+
+// Name returns the bound sandbox name.
+func (*Sandbox) Name() string { panic("design-only") }
+
+// --- lifecycle + introspection ---
+
+// Inspect returns the full sandbox snapshot — metadata, lifecycle state,
+// agent status, exchange-dir path, original prompt, baseline SHA, etc.
+// Multiple backend round-trips; not cheap. Use Status for the polling
+// case.
+func (*Sandbox) Inspect(ctx context.Context) (*Info, error) { panic("design-only") }
+
+// Status returns just the lifecycle enum. Single cheap check; the polling
+// companion to Inspect.
+func (*Sandbox) Status(ctx context.Context) (Status, error) { panic("design-only") }
+
+// StartOptions configures Start.
 type StartOptions struct {
-	Attach            bool          // also attach to the tmux session after start
-	Prompt            string        // optional prompt to inject after agent relaunch
-	IsolationOverride IsolationMode // change isolation mode on restart; rebuilds container; zero value = leave unchanged
+	Attach            bool          // also attach to tmux after start
+	Prompt            string        // optional prompt to inject after relaunch
+	IsolationOverride IsolationMode // change isolation on restart; rebuilds container
 }
 
-// StopOptions configures Stop. Currently empty — the CLI flags (`--all`,
-// wildcards) are CLI-side argument parsing, not options to the underlying
-// per-sandbox operation. Reserved for future use (e.g., --timeout).
+func (*Sandbox) Start(ctx context.Context, opts StartOptions) error { panic("design-only") }
+
+// StopOptions configures Stop. Reserved for future use (e.g. --timeout).
 type StopOptions struct{}
 
-// RestartOptions configures Restart (CLI `restart` command). Today the CLI
-// composes Stop+Start; surfacing Restart as a single method lets future
-// optimizations land without a CLI rewrite.
+func (*Sandbox) Stop(ctx context.Context, opts StopOptions) error { panic("design-only") }
+
+// RestartOptions configures Restart.
 type RestartOptions struct {
 	Attach bool
 }
 
-// DestroyOptions configures Destroy. `Force` replaces the existing
-// `force bool` arg; richer struct lets us add dry-run, timeout, etc. later.
+func (*Sandbox) Restart(ctx context.Context, opts RestartOptions) error { panic("design-only") }
+
+// DestroyOptions configures Destroy.
 type DestroyOptions struct {
 	Force bool // destroy even when the sandbox has unapplied changes
 }
 
-// ResetOptions mirrors today's `sandbox.ResetOptions`. The CLI flags
-// `--restart`, `--clear-state`, `--keep-cache`, `--keep-files`, `--attach`,
-// `--prompt` all map 1:1.
+func (*Sandbox) Destroy(ctx context.Context, opts DestroyOptions) error { panic("design-only") }
+
+// ResetOptions configures Reset.
 type ResetOptions struct {
-	Name       string
 	Restart    bool
 	ClearState bool
 	KeepCache  bool
@@ -234,160 +341,154 @@ type ResetOptions struct {
 	Prompt     string
 }
 
-// WaitOptions configures Wait — the new method that yields the agent's exit
-// code (D17 / OPEN_QUESTIONS Q77).
+func (*Sandbox) Reset(ctx context.Context, opts ResetOptions) error { panic("design-only") }
+
+// WaitOptions configures Wait — block until terminal status.
 type WaitOptions struct {
-	// Timeout caps how long Wait blocks; 0 = no timeout. On expiry, Wait
-	// returns ctx.Err() (DeadlineExceeded) with exitCode=-1.
-	Timeout time.Duration
-
-	// PollInterval overrides the 5 s default poll cadence. Embedders running
-	// many concurrent waits may want a longer interval to reduce load.
-	PollInterval time.Duration
-
-	// OnStatus, if set, is invoked once per poll with the current status.
-	// Safe to call concurrently from multiple goroutines (per-Wait call
-	// site only).
-	OnStatus func(status string)
+	Timeout      time.Duration       // 0 = no timeout
+	PollInterval time.Duration       // 0 = default 5 s
+	OnStatus     func(status Status) // called once per poll
 }
 
-func (clientAPI) Run(ctx context.Context, opts RunOptions) (*Info, error)     { panic("design-only") }
-func (clientAPI) Clone(ctx context.Context, opts CloneOptions) (*Info, error) { panic("design-only") }
-func (clientAPI) Start(ctx context.Context, name string, opts StartOptions) error {
-	panic("design-only")
-}
-func (clientAPI) Stop(ctx context.Context, name string, opts StopOptions) error { panic("design-only") }
-func (clientAPI) Restart(ctx context.Context, name string, opts RestartOptions) error {
-	panic("design-only")
-}
-func (clientAPI) Destroy(ctx context.Context, name string, opts DestroyOptions) error {
-	panic("design-only")
-}
-func (clientAPI) Reset(ctx context.Context, opts ResetOptions) error { panic("design-only") }
-
-// Wait blocks until the named sandbox reaches a terminal status
-// (StatusDone, StatusFailed, StatusStopped) or ctx is cancelled. Returns
-// the agent's exit code (0 for StatusDone with a clean agent, non-zero
-// otherwise) and a wrapped error on cancel / timeout / inspect failure.
-// CLI: new `yoloai wait <name>` command lands in W-L8b.
-func (clientAPI) Wait(ctx context.Context, name string, opts WaitOptions) (exitCode int, err error) {
+// Wait blocks until the sandbox reaches a terminal status (StatusDone,
+// StatusFailed, StatusStopped) or ctx is cancelled. Returns the agent's
+// exit code (0 for clean StatusDone, non-zero otherwise) and a wrapped
+// error on cancel / timeout / inspect failure.
+func (*Sandbox) Wait(ctx context.Context, opts WaitOptions) (exitCode int, err error) {
 	panic("design-only")
 }
 
-// =============================================================================
-// Read / inspect  (CLI: list, sandbox <name> info, sandbox <name> prompt)
-// =============================================================================
+// --- streaming / interactive ---
 
-// ListOptions filters the List output. The CLI's `yoloai ls --active`,
-// `--idle`, `--agent claude`, `--profile foo`, etc., map to fields here.
-type ListOptions struct {
-	Statuses []string // "active", "idle", "done", "stopped", "failed", "broken"; empty = all
-	Agents   []string // filter by agent name
-	Profiles []string // filter by profile (use "" for unprofiled)
-	Changes  bool     // only sandboxes with unapplied changes
+// AttachOptions configures Attach.
+type AttachOptions struct{}
+
+// Attach blocks until the user detaches or the agent exits. Requires
+// IOStreams.TTY=true; non-TTY attach returns a *UsageError.
+func (*Sandbox) Attach(ctx context.Context, opts AttachOptions, io IOStreams) error {
+	panic("design-only")
 }
 
-func (clientAPI) List(ctx context.Context, opts ListOptions) ([]*Info, error) { panic("design-only") }
-func (clientAPI) Inspect(ctx context.Context, name string) (*Info, error)     { panic("design-only") }
-func (clientAPI) Status(ctx context.Context, name string) (Status, error)     { panic("design-only") }
+// ExecOptions configures Exec.
+type ExecOptions struct {
+	Command []string
+	Env     map[string]string
+	WorkDir string
+	User    string
+}
 
-// Prompt returns the original prompt the sandbox was created with. CLI:
-// `yoloai sandbox <name> prompt`.
-func (clientAPI) Prompt(ctx context.Context, name string) (string, error) { panic("design-only") }
+// ExecResult is returned for non-streaming Exec. When io.TTY=true, output
+// went straight to io.Out/Err and the fields here are empty.
+type ExecResult struct {
+	Stdout   string
+	Stderr   string
+	ExitCode int
+}
+
+// Exec runs cmd inside the sandbox. TTY semantics chosen at the call site
+// via IOStreams (kubectl pattern).
+func (*Sandbox) Exec(ctx context.Context, opts ExecOptions, io IOStreams) (*ExecResult, error) {
+	panic("design-only")
+}
+
+// LogOptions configures Logs.
+type LogOptions struct {
+	Format   LogFormat
+	Sources  []string      // for LogStructured / LogStructuredRaw: cli, sandbox, monitor, hooks
+	MinLevel string        // debug | info | warn | error
+	Since    time.Duration // 0 = no filter
+	Follow   bool          // tail live; returns when sandbox is done
+}
+
+// Logs streams the requested log to w.
+func (*Sandbox) Logs(ctx context.Context, opts LogOptions, w io.Writer) error {
+	panic("design-only")
+}
+
+// ProxyMCP bridges the caller's stdio to an inner MCP server running
+// inside the sandbox. Requires the backend to implement
+// runtime.StdioExecer; returns *UsageError otherwise.
+func (*Sandbox) ProxyMCP(ctx context.Context, io IOStreams) error { panic("design-only") }
+
+// --- sub-handles ---
+
+// Workdir returns a handle for diff/apply/baseline operations on the
+// sandbox's work tree.
+func (*Sandbox) Workdir() *Workdir { panic("design-only") }
+
+// Files returns a handle for the sandbox's exchange directory (the
+// host-shared `/yoloai/files/` location).
+func (*Sandbox) Files() *Files { panic("design-only") }
+
+// Network returns a handle for the sandbox's network allowlist (when
+// created with NetworkIsolated).
+func (*Sandbox) Network() *Network { panic("design-only") }
 
 // =============================================================================
-// Workflow: diff / apply / baseline  (CLI: diff, apply, baseline …)
+// Workdir — diff / apply / baseline (sub-handle off Sandbox)
 // =============================================================================
 
-// DiffOptions configures Diff. The CLI's `yoloai diff <name> [<ref>] [-- <path>...]`
-// translates `<ref>` into Ref and the path tail into Paths.
+// Workdir scopes diff / apply / baseline operations on a single sandbox.
+// Constructed via Sandbox.Workdir(); never errors.
+type Workdir struct{}
+
+// DiffOptions configures Diff.
 type DiffOptions struct {
 	Ref      string   // single ref or "A..B" range; "" = full agent diff
-	Paths    []string // pathspec filters; "" = all paths
-	Stat     bool     // --stat: per-file insertion/deletion summary
-	NameOnly bool     // --name-only: just the file list, no hunks
+	Paths    []string // pathspec filters; empty = all
+	Stat     bool     // --stat
+	NameOnly bool     // --name-only
 }
 
-// DiffResult mirrors `patch.DiffResult` (which itself aliases workspace.DiffResult).
-// Re-exported here so embedders don't have to import the patch package.
+// DiffResult mirrors patch.DiffResult.
 type DiffResult struct {
-	Dir    string // sandbox dir relative path
+	Dir    string
 	Mode   string // "copy" or "overlay"
-	Patch  string // unified diff text
-	Stat   string // populated when DiffOptions.Stat = true
-	IsBase bool   // workdir vs auxiliary dir
+	Patch  string
+	Stat   string
+	IsBase bool
 }
 
-func (clientAPI) Diff(ctx context.Context, name string, opts DiffOptions) ([]*DiffResult, error) {
+func (*Workdir) Diff(ctx context.Context, opts DiffOptions) ([]*DiffResult, error) {
 	panic("design-only")
 }
 
-// ApplyMode selects how Apply emits its output. The three modes were
-// previously represented by overlapping booleans (Squash, PatchesDir) with
-// MarkFlagsMutuallyExclusive guarding the invalid pairs at the CLI layer;
-// here the mutex moves into the type.
-type ApplyMode string
-
-const (
-	// ApplyDefault commits the agent's changes back to the host repo using
-	// git format-patch + git am (or overlay-aware exec for :overlay dirs).
-	// This is the zero value so callers who don't care get the right default.
-	ApplyDefault ApplyMode = ""
-
-	// ApplySquash flattens all in-scope changes into a single unstaged
-	// patch on the host. Mutex with ApplyExport. Mutex with WithTags
-	// (squashing collapses commit boundaries; tags don't survive).
-	ApplySquash ApplyMode = "squash"
-
-	// ApplyExport writes one *.patch file per commit to ExportDir and does
-	// not touch the host repo. Mutex with ApplySquash and DryRun (export
-	// already doesn't apply anything, so DryRun is meaningless).
-	ApplyExport ApplyMode = "export"
-)
-
 // ApplyOptions configures Apply.
-//
-// **Gap closed by this design:** today `yoloai.Client.Apply` only handles
-// the basic commits-only path. ApplyOptions surfaces the full CLI surface
-// (audit findings: overlay apply, format-patch apply, selective apply).
-//
-// Validation: Mode-incompatible combinations (e.g. ApplyExport + DryRun,
-// ApplySquash + WithTags) return a UsageError from the Client method; the
-// CLI no longer needs MarkFlagsMutuallyExclusive once it routes through
-// this type.
 type ApplyOptions struct {
-	Mode       ApplyMode // ApplyDefault, ApplySquash, or ApplyExport
-	ExportDir  string    // required when Mode == ApplyExport; ignored otherwise
-	Refs       []string  // specific commits or ranges; empty = all agent commits
-	Paths      []string  // pathspec filter; empty = all paths
-	IncludeWIP bool      // also apply uncommitted edits as unstaged changes
-	DryRun     bool      // print what would be applied; invalid with ApplyExport
-	WithTags   bool      // also transfer git tags created by the agent; invalid with ApplySquash
-	Yes        bool      // skip interactive confirmation prompts
+	Mode       ApplyMode
+	ExportDir  string   // required when Mode == ApplyExport
+	Refs       []string // specific commits or ranges
+	Paths      []string // pathspec filter
+	IncludeWIP bool
+	DryRun     bool // invalid with ApplyExport
+	WithTags   bool // invalid with ApplySquash
+	Yes        bool // skip confirmation prompts
 }
 
-// ApplyResult mirrors `patch.ApplyResult` plus a top-level rollup for
-// callers that don't want to iterate per-directory.
+// ApplyResult bundles per-directory outcomes plus a top-level rollup.
 type ApplyResult struct {
 	Per     []*PerDirApplyResult
-	Patches []string // populated only when Mode == ApplyExport: written *.patch files
-	Skipped []string // dirs skipped (overlay-and-running-required, :rw, …)
+	Patches []string // populated only when Mode == ApplyExport
+	Skipped []string
 }
 
-// PerDirApplyResult is the existing `patch.ApplyResult` shape lifted here.
+// PerDirApplyResult lifts patch.ApplyResult.
 type PerDirApplyResult struct {
 	Dir        string
 	Applied    bool
 	Conflicts  bool
 	Patch      string // dry-run only
-	ErrMessage string // non-empty if this dir errored without aborting the run
+	ErrMessage string
 }
 
-func (clientAPI) Apply(ctx context.Context, name string, opts ApplyOptions) (*ApplyResult, error) {
+func (*Workdir) Apply(ctx context.Context, opts ApplyOptions) (*ApplyResult, error) {
 	panic("design-only")
 }
 
-// Baseline operations. CLI: `yoloai baseline {advance|set|log} <name>`.
+// Baseline operations. CLI: `yoloai baseline {advance|set|log}`. Baselines
+// are part of the work-tree concept (the baseline SHA marks where the
+// agent's accumulated changes start), so they live here rather than as a
+// separate sub-handle.
 
 type BaselineEntry struct {
 	When time.Time
@@ -395,255 +496,117 @@ type BaselineEntry struct {
 	Note string
 }
 
-func (clientAPI) AdvanceBaseline(ctx context.Context, name string) error { panic("design-only") }
-func (clientAPI) SetBaseline(ctx context.Context, name, sha string) error {
-	panic("design-only")
-}
-func (clientAPI) BaselineLog(ctx context.Context, name string) ([]BaselineEntry, error) {
-	panic("design-only")
-}
-
-// =============================================================================
-// Streaming / interactive  (CLI: attach, exec, log, mcp proxy)
-// =============================================================================
-
-// AttachOptions configures Attach. Modeled on `docker attach`; today's CLI
-// flag set is minimal. **OPEN-Q:** add a DetachKeys field for callers that
-// want to override `Ctrl-b d`? Defer until a real consumer asks.
-type AttachOptions struct{}
-
-// Attach blocks until the user detaches (or the agent exits). Requires
-// IOStreams.TTY=true; non-TTY attach returns a UsageError.
-// Backend must register a fixed tmux socket via `runtime-config.json`.
-func (clientAPI) Attach(ctx context.Context, name string, opts AttachOptions, io IOStreams) error {
-	panic("design-only")
-}
-
-// ExecOptions configures Exec. The split between interactive and
-// non-interactive exec is signalled by IOStreams.TTY at call time, not by
-// a flag — same shape as `kubectl exec`.
-type ExecOptions struct {
-	Command []string          // the command to run inside the sandbox
-	Env     map[string]string // extra env vars for the exec'd process
-	WorkDir string            // working dir inside the sandbox; empty = container default
-	User    string            // override the run-as user; empty = container default
-}
-
-// ExecResult is returned for non-streaming Exec calls. When IOStreams is
-// provided and TTY=true, the result fields are unused — output went
-// straight to IOStreams.Out / Err.
-type ExecResult struct {
-	Stdout   string
-	Stderr   string
-	ExitCode int
-}
-
-// Exec runs cmd inside the sandbox. When io.TTY is true the call streams
-// stdio through io and blocks until the command exits; the returned
-// ExecResult.Stdout/Stderr are empty in that case. Non-TTY callers leave
-// io.In nil and read Stdout/Stderr from the result.
-func (clientAPI) Exec(ctx context.Context, name string, opts ExecOptions, io IOStreams) (*ExecResult, error) {
-	panic("design-only")
-}
-
-// LogFormat selects which log stream to emit. Replaces the previous
-// (Agent, AgentRaw, Raw) boolean triplet — at most one was meant to be
-// true, modeled here as one field.
-type LogFormat string
-
-const (
-	// LogStructured is the default: pretty-printed merge-sorted stream of
-	// all four structured JSONL logs (cli, sandbox, monitor, hooks). Maps
-	// to today's `yoloai log <name>` with no flag.
-	LogStructured LogFormat = ""
-
-	// LogStructuredRaw emits the same structured log as raw JSONL lines.
-	// Maps to `--raw`.
-	LogStructuredRaw LogFormat = "raw"
-
-	// LogAgent emits the agent's terminal output with ANSI escape
-	// sequences stripped. Maps to `--agent`.
-	LogAgent LogFormat = "agent"
-
-	// LogAgentRaw emits the raw agent terminal stream (ANSI preserved).
-	// Maps to `--agent-raw`.
-	LogAgentRaw LogFormat = "agent-raw"
-)
-
-// LogOptions configures Logs. Maps directly to the CLI's `yoloai log <name>`
-// flag set after the JSONL redesign (see BREAKING-CHANGES "sandbox <name> log
-// redesigned").
-type LogOptions struct {
-	Format   LogFormat     // which stream to emit; default = LogStructured
-	Sources  []string      // --source: filter to cli, sandbox, monitor, hooks (only meaningful for LogStructured / LogStructuredRaw)
-	MinLevel string        // --level: debug|info|warn|error
-	Since    time.Duration // --since: time window (0 = no filter)
-	Follow   bool          // --follow / -f: tail live; returns when sandbox is done
-}
-
-// Logs streams the requested log to w. Returns nil when the source is
-// exhausted (or, with Follow=true, when the sandbox reaches a terminal
-// status). The caller is responsible for w being a TTY-suitable writer if
-// they expect color / pagination.
-func (clientAPI) Logs(ctx context.Context, name string, opts LogOptions, w io.Writer) error {
-	panic("design-only")
-}
-
-// ProxyMCP bridges an outer agent's stdio (via io.In / io.Out) to an inner
-// MCP server running inside the sandbox. Requires the backend to implement
-// `runtime.StdioExecer`; returns a UsageError when it doesn't. CLI:
-// `yoloai mcp proxy <name>`.
-func (clientAPI) ProxyMCP(ctx context.Context, name string, io IOStreams) error {
+func (*Workdir) AdvanceBaseline(ctx context.Context) error         { panic("design-only") }
+func (*Workdir) SetBaseline(ctx context.Context, sha string) error { panic("design-only") }
+func (*Workdir) BaselineLog(ctx context.Context) ([]BaselineEntry, error) {
 	panic("design-only")
 }
 
 // =============================================================================
-// Files exchange  (CLI: files <name> {put|get|ls|rm|path})
+// Files — exchange-dir operations (sub-handle off Sandbox)
 // =============================================================================
 
-// FilesPutOptions configures FilesPut. Source globs are expanded by the
-// caller (CLI) before invocation; Client doesn't do host glob resolution.
-type FilesPutOptions struct {
-	Sources []string // host paths (already glob-expanded by caller)
-	Force   bool     // overwrite existing files
+// Files scopes exchange-directory operations on a single sandbox.
+// Constructed via Sandbox.Files(); never errors. Replaces the
+// FilesPut/FilesGet/FilesLs/FilesRm prefix dance with structural
+// namespacing.
+//
+// The host path to the exchange dir lives on *Info (returned by
+// Sandbox.Inspect) as Info.ExchangeDir — no separate FilesPath method.
+type Files struct{}
+
+// PutOptions configures Put. Host glob expansion happens at the caller
+// (the CLI does shell globbing); Sources are already-resolved host paths.
+type PutOptions struct {
+	Sources []string
+	Force   bool
 }
 
-// FilesGetOptions configures FilesGet. Patterns are matched inside the
-// sandbox exchange dir; Output is a host directory (or file path for a
-// single-file get).
-type FilesGetOptions struct {
-	Patterns []string // glob patterns evaluated inside the sandbox
-	Output   string   // host destination dir/file
-	Force    bool     // overwrite existing destination paths
+func (*Files) Put(ctx context.Context, opts PutOptions) error { panic("design-only") }
+
+// GetOptions configures Get. Patterns match inside the sandbox exchange
+// dir; Output is a host destination (dir or file).
+type GetOptions struct {
+	Patterns []string
+	Output   string
+	Force    bool
 }
 
-// FileEntry describes a single file in the exchange directory.
+// FileEntry describes one file in the exchange directory.
 type FileEntry struct {
-	Path string // path relative to the exchange dir
-	Size int64  // bytes
-	Mode uint32 // unix file mode
+	Path string
+	Size int64
+	Mode uint32
 }
 
-func (clientAPI) FilesPut(ctx context.Context, name string, opts FilesPutOptions) error {
+func (*Files) Get(ctx context.Context, opts GetOptions) (written []string, err error) {
 	panic("design-only")
 }
-func (clientAPI) FilesGet(ctx context.Context, name string, opts FilesGetOptions) (written []string, err error) {
+func (*Files) Ls(ctx context.Context, patterns []string) ([]FileEntry, error) {
 	panic("design-only")
 }
-func (clientAPI) FilesLs(ctx context.Context, name string, patterns []string) ([]FileEntry, error) {
-	panic("design-only")
-}
-func (clientAPI) FilesRm(ctx context.Context, name string, patterns []string) error {
-	panic("design-only")
-}
-
-// FilesPath returns the host path to a sandbox's exchange directory. Pure
-// path lookup, no Client state needed — exposed as a Client method anyway
-// so CLI code paths stay uniform (always "ask the Client").
-func (clientAPI) FilesPath(name string) string { panic("design-only") }
+func (*Files) Rm(ctx context.Context, patterns []string) error { panic("design-only") }
 
 // =============================================================================
-// Network allowlist  (CLI: sandbox <name> {allow|allowed|deny})
+// Network — allowlist operations (sub-handle off Sandbox)
 // =============================================================================
 
-func (clientAPI) AllowDomains(ctx context.Context, name string, domains []string) error {
-	panic("design-only")
-}
-func (clientAPI) AllowedDomains(ctx context.Context, name string) ([]string, error) {
-	panic("design-only")
-}
-func (clientAPI) DenyDomains(ctx context.Context, name string, domains []string) error {
-	panic("design-only")
-}
+// Network scopes network-allowlist operations on a single sandbox.
+// Constructed via Sandbox.Network(); never errors. Only meaningful when
+// the sandbox was created with NetworkIsolated; otherwise methods return
+// *UsageError.
+type Network struct{}
+
+func (*Network) Allow(ctx context.Context, domains []string) error { panic("design-only") }
+func (*Network) Deny(ctx context.Context, domains []string) error  { panic("design-only") }
+func (*Network) Allowed(ctx context.Context) ([]string, error)     { panic("design-only") }
 
 // =============================================================================
-// Bug report  (CLI: sandbox <name> bugreport [safe|unsafe], top-level --bugreport)
+// Client — bug-report primitives
 // =============================================================================
-
-// BugReportMode selects redaction level for BugReport. Today the CLI
-// takes a positional "safe" / "unsafe" arg — typed enum here keeps
-// invalid third values out of the type.
-type BugReportMode string
-
-const (
-	// BugReportSafe redacts credentials, API keys, and other sensitive
-	// content from logs before inclusion. Default and recommended for
-	// reports filed publicly.
-	BugReportSafe BugReportMode = "safe"
-
-	// BugReportUnsafe includes full unredacted content. Use only for
-	// private debugging where the report won't be shared.
-	BugReportUnsafe BugReportMode = "unsafe"
-)
 
 // BugReportOptions configures BugReport and StartBugReporter.
 type BugReportOptions struct {
-	// Mode selects the redaction level. Zero value is BugReportSafe via
-	// Client method default.
-	Mode BugReportMode
-
-	// OutputDir is the directory the report file is written to. Empty
-	// means current working directory. The filename is auto-generated as
-	// `yoloai-bugreport-<timestamp>.md`.
-	OutputDir string
+	Mode      BugReportMode // zero value is BugReportSafe
+	OutputDir string        // directory to write the report; "" = CWD
 }
 
-// BugReport captures a one-shot snapshot of a sandbox plus relevant system
-// state to a markdown file in CWD. Returns the absolute path of the written
-// file. Complementary to StartBugReporter below — BugReport gathers state
-// *at the moment of the call* (sandbox config, log tails, runtime info)
-// without buffering any runtime events. CLI: `yoloai sandbox <name> bugreport
-// [safe|unsafe]`.
-func (clientAPI) BugReport(ctx context.Context, name string, opts BugReportOptions) (path string, err error) {
+// BugReport captures a one-shot snapshot of a sandbox plus relevant
+// system state to a markdown file. Returns the absolute path of the
+// written file. Distinct from StartBugReporter — BugReport gathers state
+// AT the call moment without buffering events. CLI: `yoloai sandbox
+// <name> bugreport [safe|unsafe]`.
+//
+// Lives on Client (taking name explicitly) rather than Sandbox so it's
+// usable from error paths where you don't have a handle in scope (e.g.
+// inside a defer after Run failed).
+func (*Client) BugReport(ctx context.Context, name string, opts BugReportOptions) (path string, err error) {
 	panic("design-only")
 }
 
 // BugReportSession is the handle returned by StartBugReporter. Buffers
-// runtime events (slog records, command invocations, error wraps) from
-// Start time until Stop or Discard is called. Embedders scope a session
-// however they want — wrap a single risky Client call, record for a
-// fixed duration, span the entire program lifetime.
+// runtime events until Stop or Discard.
 type BugReportSession interface {
-	// Stop flushes the buffered events together with a final state
-	// snapshot to a markdown file in the configured output directory
-	// (BugReportOptions.OutputDir, default = CWD). Returns the absolute
-	// path of the written report.
-	Stop() (path string, err error)
-
-	// Discard throws away the buffered events without writing anything.
-	// Use on the success path to avoid leaving stale bug reports on disk.
-	Discard()
+	Stop() (path string, err error) // flush + write report
+	Discard()                       // throw away buffered events
 }
 
-// StartBugReporter begins buffering runtime events. The returned session
-// captures slog records, internal Client method spans, and any wrapped
-// errors until Stop or Discard is called. Multiple sessions can be active
-// simultaneously (each gets its own independent buffer); nested sessions
-// are independent.
-//
-// The CLI's top-level `--bugreport` flag is a thin wrapper:
-//
-//	session := client.StartBugReporter(ctx, BugReportOptions{Mode: BugReportUnsafe})
-//	defer func() {
-//	    if r := recover(); r != nil || cmdErr != nil {
-//	        path, _ := session.Stop()
-//	        fmt.Fprintln(os.Stderr, "Bug report written:", path)
-//	    } else {
-//	        session.Discard()
-//	    }
-//	}()
-//
-// Embedders use the same primitive scoped to whatever lifetime they want.
-func (clientAPI) StartBugReporter(ctx context.Context, opts BugReportOptions) BugReportSession {
+// StartBugReporter begins buffering runtime events. Embedders scope the
+// session however they want (single risky call, fixed duration, program
+// lifetime). The CLI's top-level `--bugreport` flag is a thin wrapper.
+func (*Client) StartBugReporter(ctx context.Context, opts BugReportOptions) BugReportSession {
 	panic("design-only")
 }
 
 // =============================================================================
-// Admin: backends + agents + system info  (CLI: system info|backends|agents)
+// SystemClient — admin sub-client (off Client)
 // =============================================================================
 
-// BackendInfo bundles a BackendDescriptor with its current Probe verdict so
-// the CLI can render the table without re-probing.
+// SystemClient scopes `yoloai system …` operations. Constructed via
+// Client.System(); never errors at construction.
+type SystemClient struct{}
+
+// BackendInfo bundles a BackendDescriptor with its current Probe verdict.
 type BackendInfo struct {
 	Name        string
 	Description string
@@ -655,25 +618,7 @@ type BackendInfo struct {
 	Version     string // VersionString() output; "" when unavailable
 }
 
-// PromptMode mirrors `agent.PromptMode` (the existing typed string in the
-// agent package). Defined here as a synthetic placeholder; W-L8b will
-// replace this with a type alias (`type PromptMode = agent.PromptMode`) so
-// embedders don't have to import internal/agent.
-type PromptMode string
-
-const (
-	// PromptModeInteractive: the agent runs the prompt in its interactive
-	// REPL — `yoloai attach` shows live progress.
-	PromptModeInteractive PromptMode = "interactive"
-
-	// PromptModeHeadless: the agent runs the prompt non-interactively and
-	// exits when done. Output captured to the agent log.
-	PromptModeHeadless PromptMode = "headless"
-)
-
-// AgentInfo is the public face of `agent.Definition` (which lives in
-// internal/ after Phase 5). Reexported so the CLI doesn't have to import
-// internal/agent.
+// AgentInfo is the public face of `agent.Definition`.
 type AgentInfo struct {
 	Name          string
 	Description   string
@@ -682,15 +627,7 @@ type AgentInfo struct {
 	ModelAliases  map[string]string
 }
 
-func (clientAPI) Backends(ctx context.Context) ([]BackendInfo, error) { panic("design-only") }
-func (clientAPI) Backend(ctx context.Context, name string) (*BackendInfo, error) {
-	panic("design-only")
-}
-func (clientAPI) Agents() []AgentInfo                   { panic("design-only") }
-func (clientAPI) Agent(name string) (*AgentInfo, error) { panic("design-only") }
-
-// SystemInfo bundles paths + disk usage + version metadata for the
-// `yoloai system info` command.
+// SystemInfo bundles paths + disk usage + version metadata.
 type SystemInfo struct {
 	Version           string
 	Commit            string
@@ -703,20 +640,30 @@ type SystemInfo struct {
 	Backends          []BackendInfo
 }
 
-func (clientAPI) SystemInfo(ctx context.Context) (*SystemInfo, error) { panic("design-only") }
+func (*SystemClient) Info(ctx context.Context) (*SystemInfo, error)       { panic("design-only") }
+func (*SystemClient) Backends(ctx context.Context) ([]BackendInfo, error) { panic("design-only") }
+func (*SystemClient) Backend(ctx context.Context, name string) (*BackendInfo, error) {
+	panic("design-only")
+}
+func (*SystemClient) Agents() []AgentInfo                   { panic("design-only") }
+func (*SystemClient) Agent(name string) (*AgentInfo, error) { panic("design-only") }
 
-// =============================================================================
-// Admin: build / check / disk / doctor / prune / setup
-// =============================================================================
-
+// BuildOptions configures Build.
 type BuildOptions struct {
-	Profile string   // build a profile image; "" = base image only
-	Backend string   // explicit backend to build for; "" = config default
-	All     bool     // build across every available backend (mutually exclusive with Backend)
-	Force   bool     // rebuild even when checksum says it's current
-	Secrets []string // --secret id=…,src=… ; validated by the caller
+	Profile string
+	Backend string
+	All     bool // build across every available backend (exclusive with Backend)
+	Force   bool
+	Secrets []string
 }
 
+func (*SystemClient) Build(ctx context.Context, opts BuildOptions) error { panic("design-only") }
+
+// Check is a short summary of backend availability. Distinct from Doctor
+// (which is the full capability report).
+func (*SystemClient) Check(ctx context.Context) error { panic("design-only") }
+
+// DiskUsage reports per-backend disk consumption.
 type DiskUsage struct {
 	Sandboxes  int64
 	PerBackend []BackendDiskUsage
@@ -724,49 +671,39 @@ type DiskUsage struct {
 
 type BackendDiskUsage struct {
 	Name   string
-	Bytes  int64  // -1 when unknown
-	Detail string // human-readable hint
-	Error  string // non-empty on probe failure
+	Bytes  int64
+	Detail string
+	Error  string
 }
 
+func (*SystemClient) DiskUsage(ctx context.Context) (*DiskUsage, error) { panic("design-only") }
+
+// DoctorOptions configures Doctor.
 type DoctorOptions struct {
-	Backend   string // filter to one backend
-	Isolation string // filter to one isolation mode
+	Backend   string        // filter to one backend
+	Isolation IsolationMode // filter to one isolation mode
 }
 
-// Availability is the verdict of a Doctor check for one backend+mode pair.
-// Replaces a free-form string with three named values.
-type Availability string
-
-const (
-	// AvailabilityReady means the backend is fully functional in the
-	// selected mode. All RequiredCapabilities checks passed.
-	AvailabilityReady Availability = "ready"
-
-	// AvailabilityWarning means the backend works in the selected mode but
-	// one or more optional capability checks raised non-fatal concerns
-	// (e.g. an old kernel that may degrade gracefully).
-	AvailabilityWarning Availability = "warning"
-
-	// AvailabilityUnavailable means the backend cannot run in the selected
-	// mode on this host. InitErr or MissingCaps carries the detail.
-	AvailabilityUnavailable Availability = "unavailable"
-)
-
+// DoctorReport is the verdict for one backend+mode pair.
 type DoctorReport struct {
 	Backend      string
-	Mode         IsolationMode // backend's mode under check; "" for IsBaseMode
+	Mode         IsolationMode // "" when IsBaseMode
 	IsBaseMode   bool
 	Availability Availability
 	InitErr      error
-	MissingCaps  []string // names of failed RequiredCapabilities checks
+	MissingCaps  []string
 }
 
+func (*SystemClient) Doctor(ctx context.Context, opts DoctorOptions) ([]DoctorReport, error) {
+	panic("design-only")
+}
+
+// PruneOptions configures Prune.
 type PruneOptions struct {
-	Backend      string // limit pruning to one backend; "" = all available
+	Backend      string // "" = all
 	DryRun       bool
-	Cache        bool // also prune backend image/snapshot cache (forces base rebuild)
-	IncludeStale bool // include stale yoloai temp dirs older than --keep-newer
+	Cache        bool // also prune backend caches (forces base rebuild)
+	IncludeStale bool
 }
 
 type PruneResult struct {
@@ -774,105 +711,56 @@ type PruneResult struct {
 	FreedBytes   int64
 }
 
-// TmuxConfMode selects how yoloai writes the per-sandbox tmux config.
-// Replaces the open-string field that used to accept these values.
-type TmuxConfMode string
+func (*SystemClient) Prune(ctx context.Context, opts PruneOptions) (*PruneResult, error) {
+	panic("design-only")
+}
 
-const (
-	TmuxConfDefault     TmuxConfMode = "default"      // baked-in defaults only
-	TmuxConfDefaultHost TmuxConfMode = "default+host" // defaults + user's ~/.tmux.conf
-	TmuxConfHost        TmuxConfMode = "host"         // user's ~/.tmux.conf only
-	TmuxConfNone        TmuxConfMode = "none"         // no config (raw tmux)
-)
-
-// SetupOptions carries every answer the first-run setup wizard would
-// have collected. The CLI's `yoloai system setup` is an interactive
-// wizard that fills these in by prompting the user (or accepting flag
-// overrides), then calls Client.Setup with the populated struct.
-// Embedders set these directly. Client.Setup never prompts — every
-// answer must be supplied here.
+// SetupOptions carries every answer the first-run setup wizard would have
+// collected. The CLI's `yoloai system setup` is an interactive wizard
+// that fills these in by prompting the user (or accepting flag overrides),
+// then calls Setup with the populated struct. Embedders set these
+// directly. Setup never prompts — every answer must be supplied here.
 type SetupOptions struct {
 	TmuxConf TmuxConfMode // required
-	Backend  string       // initial default container_backend ("docker", "podman", ...); empty = no default set
-	Agent    string       // initial default agent name; empty = no default set
+	Backend  string       // initial default container_backend; "" = no default set
+	Agent    string       // initial default agent name; "" = no default set
 }
 
-func (clientAPI) Build(ctx context.Context, opts BuildOptions) error { panic("design-only") }
-func (clientAPI) Check(ctx context.Context) error                    { panic("design-only") }
-func (clientAPI) DiskUsage(ctx context.Context) (*DiskUsage, error)  { panic("design-only") }
-func (clientAPI) Doctor(ctx context.Context, opts DoctorOptions) ([]DoctorReport, error) {
-	panic("design-only")
-}
-func (clientAPI) Prune(ctx context.Context, opts PruneOptions) (*PruneResult, error) {
-	panic("design-only")
-}
-func (clientAPI) Setup(ctx context.Context, opts SetupOptions) error { panic("design-only") }
-
-// =============================================================================
-// Exceptions — CLI commands that do NOT go through Client
-// =============================================================================
-
-// The following CLI commands are intentionally not on Client. Each
-// exception is justified.
-//
-//   help [topic]                  Pure presentation. Renders embedded
-//                                 markdown topics. No sandbox state.
-//
-//   completion <shell>            Shell completion script generation.
-//                                 Pure cobra/CLI machinery.
-//
-//   version                       Build-time constants. No state.
-//
-//   config get|set|reset          User-config file edits. CLI calls
-//                                 `internal/config` directly. `config/` is a
-//                                 leaf utility package, not an orchestration
-//                                 dependency — W-L8e's import ban targets
-//                                 `internal/sandbox` and `internal/runtime`.
-//
-//   profile create|list|info|delete   Same rationale as `config`:
-//                                 file-system ops on `~/.yoloai/profiles/`
-//                                 with no sandbox state. CLI uses `config/`
-//                                 and `os.RemoveAll` directly; the
-//                                 cleanup-hint iteration over descriptors
-//                                 (W-L5) already goes through `runtime/`.
-//
-//   sandbox <name> vscode         Spawns external `code` binary with a
-//                                 sandbox-targeted attach URL. CLI calls
-//                                 Client.Inspect to get container name +
-//                                 image, then exec.Command("code", …)
-//                                 directly. The external-process launch is
-//                                 CLI work, not orchestration.
-//
-//   mcp serve                     The MCP server itself CONSUMES Client (it
-//                                 is a peer to the CLI surface). The
-//                                 `serve` command's body is `mcpsrv.New
-//                                 (yoloai.Client).Run(ctx)` after Phase 3.
-//
-//   system tart                   Backend-scoped per Pattern B (W-L2).
-//                                 Imports `runtime/tart` directly. The
-//                                 W-L10 enforcement linter explicitly
-//                                 allowlists `system_tart.go`.
-//
-//   x [extension]                 Extension dispatcher (yoloai x <ext>
-//                                 forwards to an executable in
-//                                 `~/.yoloai/extensions/`). Pure CLI shell
-//                                 invocation; no sandbox state.
+func (*SystemClient) Setup(ctx context.Context, opts SetupOptions) error { panic("design-only") }
 
 // =============================================================================
 // Re-exported types
 // =============================================================================
 //
-// The real implementation will re-export the following types from internal
-// packages so embedders don't pull internal/ paths. Listed here for review;
-// W-L8b lands the actual aliases.
+// W-L8b lands real aliases or re-exports. Listed here so the design
+// type-checks without pulling internal packages.
 
-// Status re-exports sandbox.Status. (TBD: aliases vs typedefs vs duplicate
-// constants. Recommended: aliases, like the existing sandbox.UsageError =
-// yoerrors.UsageError pattern.)
+// Status re-exports sandbox.Status.
 type Status = string
 
-// Info re-exports sandbox.Info.
-type Info = struct{}
+// Info bundles sandbox metadata + lifecycle state. Returned by
+// Sandbox.Inspect. Includes ExchangeDir and Prompt fields so embedders
+// don't need separate FilesPath / Prompt methods (collapsed per Q-G
+// resolution).
+type Info = struct {
+	// Identity + metadata
+	Meta any // sandbox.Meta — full metadata struct
+
+	// Lifecycle state
+	Status      Status
+	AgentStatus string // "active", "idle", "done", etc. (separate from lifecycle)
+	HasChanges  bool   // unapplied agent commits or WIP edits
+
+	// Convenience fields lifted to avoid separate methods
+	ExchangeDir string // host path to the sandbox's /yoloai/files/ exchange dir
+	Prompt      string // original prompt the sandbox was created with
+	BaselineSHA string // current baseline ref
+
+	// Backend-side facts
+	Backend   string
+	Image     string
+	Isolation IsolationMode
+}
 
 // DirSpec re-exports sandbox.DirSpec.
 type DirSpec struct {
@@ -893,20 +781,15 @@ type DirSpec struct {
 // (matched with errors.Is), XxxError for struct types (matched with
 // errors.As).
 
-// Stable sentinels. Each corresponds to a Client method with a meaningful
-// recoverable failure mode the embedder might program around. Promotion
-// rule: add a sentinel when (and only when) there's a real call site that
-// would branch on it. The five below cover every such case identified
-// during W-L8a.
+// Stable sentinels.
 var (
 	// ErrSandboxExists is returned by Run when a sandbox with the given
 	// name already exists and Replace is false.
 	ErrSandboxExists error
 
-	// ErrSandboxNotFound is returned by any name-based method (Inspect,
-	// Start, Stop, Destroy, Diff, Apply, Reset, Logs, Attach, Exec, …)
-	// when the named sandbox does not exist. Replaces today's wrapped
-	// fs.ErrNotExist which embedders had to string-match around.
+	// ErrSandboxNotFound is returned by any name-based method when the
+	// named sandbox does not exist. Replaces today's wrapped
+	// fs.ErrNotExist.
 	ErrSandboxNotFound error
 
 	// ErrUnappliedChanges is returned by Destroy when the sandbox has
@@ -914,101 +797,106 @@ var (
 	ErrUnappliedChanges error
 
 	// ErrNoChanges is returned by Apply when there are no agent commits
-	// (or WIP edits, with IncludeWIP) to apply.
+	// (or WIP edits) to apply.
 	ErrNoChanges error
 
 	// ErrBackendUnavailable is returned by New when the requested or
-	// auto-selected backend is not usable on this host (daemon not
-	// running, binary not installed, etc.). Embedders may want to fall
-	// back to another backend before giving up.
+	// auto-selected backend is not usable on this host.
 	ErrBackendUnavailable error
 )
 
 // UsageError indicates the caller passed something the Client refused
-// before doing any work — a missing required field, an invalid flag
-// combination, an unknown agent name, etc. The CLI maps this to exit
-// code 2 with a "Run 'yoloai <cmd> -h' for help" hint. Re-exports the
-// existing internal/yoerrors.UsageError type; declared here for the
-// design's stability commitment.
+// before doing any work. CLI maps to exit code 2 with a "Run 'yoloai
+// <cmd> -h' for help" hint. Re-exports internal/yoerrors.UsageError.
 type UsageError struct {
-	Msg string
-	// Hint is optional follow-up text (e.g. suggested alternatives,
-	// related help command). Empty when there's no specific hint.
-	Hint string
+	Msg  string
+	Hint string // optional follow-up text
 }
 
-func (e *UsageError) Error() string { panic("design-only") }
+func (*UsageError) Error() string { panic("design-only") }
 
 // UnrecoverableError indicates the Client started an operation, hit a
-// state it can't recover from, and gave up. The Code field categorizes
-// the failure for embedder branching and CLI exit-code mapping. Cause
-// (when set) is the underlying error; Unwrap returns it so
-// errors.Is/errors.As walks past UnrecoverableError to find any sentinel
-// nested inside.
+// state it can't recover from, and gave up. Code categorizes the failure
+// for embedder branching and CLI exit-code mapping. Unwrap returns Cause
+// so errors.Is/errors.As walks past UnrecoverableError to find any
+// sentinel inside.
 type UnrecoverableError struct {
 	Code    UnrecoverableCode
-	Message string // single-sentence user-facing summary
-	Detail  string // optional longer context (multi-line)
-	Cause   error  // wrapped underlying error; nil when none
+	Message string
+	Detail  string
+	Cause   error
 }
 
-func (e *UnrecoverableError) Error() string { panic("design-only") }
-func (e *UnrecoverableError) Unwrap() error { panic("design-only") }
+func (*UnrecoverableError) Error() string { panic("design-only") }
+func (*UnrecoverableError) Unwrap() error { panic("design-only") }
 
-// UnrecoverableCode is the typed enum of categories an UnrecoverableError
-// can carry. Closed set, decided by us; embedders pattern-match on these
-// for retry/abandon logic and the CLI maps each to a specific exit code.
+// UnrecoverableCode is the typed enum of UnrecoverableError categories.
 type UnrecoverableCode string
 
 const (
-	// UnrecoverableAgentCrash: the agent process died abnormally
-	// (segfault, OOM kill, panic). Cause carries the exit code / signal
-	// if known.
-	UnrecoverableAgentCrash UnrecoverableCode = "agent_crash"
-
-	// UnrecoverableBackendFailure: a backend operation failed mid-flight
-	// in a way that left state inconsistent (container died during
-	// exec, VM unresponsive after boot).
+	UnrecoverableAgentCrash     UnrecoverableCode = "agent_crash"
 	UnrecoverableBackendFailure UnrecoverableCode = "backend_failure"
-
-	// UnrecoverableBuildFailure: an image build or VM provisioning step
-	// failed; the underlying Dockerfile / tart-base error is in Cause.
-	UnrecoverableBuildFailure UnrecoverableCode = "build_failure"
-
-	// UnrecoverableStateCorrupted: sandbox state files on disk are
-	// inconsistent (missing meta.json after creation succeeded, runtime
-	// config schema mismatch). User must destroy and recreate.
+	UnrecoverableBuildFailure   UnrecoverableCode = "build_failure"
 	UnrecoverableStateCorrupted UnrecoverableCode = "state_corrupted"
-
-	// UnrecoverableVMBootFailure: a Kata or Tart VM never reached a
-	// usable state (shim crashed, kernel panic, network never came up).
-	UnrecoverableVMBootFailure UnrecoverableCode = "vm_boot_failure"
-
-	// UnrecoverableNotImplemented: the requested operation requires an
-	// optional backend capability the active backend doesn't provide
-	// (e.g. mcp proxy on tart needs StdioExecer).
+	UnrecoverableVMBootFailure  UnrecoverableCode = "vm_boot_failure"
 	UnrecoverableNotImplemented UnrecoverableCode = "not_implemented"
-
-	// UnrecoverableInternal: assertion-failure category — a "shouldn't
-	// happen" path was reached. Always indicates a yoloai bug; users
-	// should file a bug report.
-	UnrecoverableInternal UnrecoverableCode = "internal"
+	UnrecoverableInternal       UnrecoverableCode = "internal"
 )
 
 // =============================================================================
-// Open questions for the reviewer
+// Exceptions — CLI commands that do NOT go through Client / Sandbox / System
 // =============================================================================
 //
-// Q-A.  ListOptions vs separate filter methods?  Today the CLI parses
-//       `--active --idle --agent foo` into runtime filters. Could expose as
-//       method options (chosen) or as separate methods (List, ListByAgent).
-//       **RESOLVED 2026-05-24:** Option 1 — one List(ctx, ListOptions)
-//       method. CLI fills the struct from flags; embedders set fields
-//       directly. No convenience wrappers in V1.
+//   help [topic]                  Pure presentation. Renders embedded
+//                                 markdown topics. No sandbox state.
 //
-// Q-B.  Error mapping.  W7 (architecture-remediation) lands typed errors
-//       under `internal/yoerrors`. Should the Client surface promise
-//       specific sentinels as part of its stability contract?
+//   completion <shell>            Shell completion script generation.
+//                                 Pure cobra/CLI machinery.
+//
+//   version                       Build-time constants. No state.
+//
+//   config get|set|reset          User-config file edits. CLI calls
+//                                 `internal/config` directly. config/ is a
+//                                 leaf utility package, not an orchestration
+//                                 dependency — W-L8e's import ban targets
+//                                 internal/sandbox and internal/runtime.
+//
+//   profile create|list|info|delete   Same rationale as `config`:
+//                                 filesystem ops on ~/.yoloai/profiles/.
+//                                 CLI uses config/ and os.RemoveAll
+//                                 directly; the cleanup-hint iteration
+//                                 over descriptors (W-L5) already goes
+//                                 through runtime/.
+//
+//   sandbox <name> vscode         Spawns external `code` binary with a
+//                                 sandbox-targeted attach URL. CLI calls
+//                                 client.Sandbox(name).Inspect for the
+//                                 container info, then exec.Command
+//                                 directly. The external-process launch
+//                                 is CLI work, not orchestration.
+//
+//   mcp serve                     The MCP server CONSUMES Client (peer to
+//                                 the CLI surface). The `serve` command
+//                                 body is `mcpsrv.New(client).Run(ctx)`.
+//
+//   system tart                   Backend-scoped per Pattern B (W-L2).
+//                                 Imports runtime/tart directly. The
+//                                 W-L10 enforcement linter allowlists
+//                                 system_tart.go.
+//
+//   x [extension]                 Extension dispatcher. Pure CLI shell
+//                                 invocation; no sandbox state.
+
+// =============================================================================
+// Open questions for the reviewer  (all resolved)
+// =============================================================================
+//
+// Q-A.  ListOptions vs separate filter methods?
+//       **RESOLVED 2026-05-24:** One Client.List(ctx, ListOptions) method.
+//       CLI fills the struct from flags; embedders set fields directly.
+//       No convenience wrappers in V1.
+//
+// Q-B.  Error mapping. Which sentinels are stable contract?
 //       **RESOLVED 2026-05-24:** Three-category exhaustive taxonomy.
 //         (1) Five stable sentinels — ErrSandboxExists, ErrSandboxNotFound,
 //             ErrUnappliedChanges, ErrNoChanges, ErrBackendUnavailable.
@@ -1019,79 +907,60 @@ const (
 //         (3) *UnrecoverableError — Client started, hit something it
 //             couldn't recover from, gave up. Carries UnrecoverableCode +
 //             Message + Detail + wrapped Cause. Detected with errors.As.
-//       No "other" — every Client error fits one of these three. Naming
-//       follows Go stdlib convention (ErrXxx for sentinels, XxxError for
-//       types). See "Error taxonomy" section above for the full definitions.
+//       No "other" — every Client error fits one of these three.
 //
-// Q-C.  Streaming-vs-buffered ergonomics for `Diff` / `Apply`.
-//       `Logs` already takes an `io.Writer`. Should `Diff` / `Apply` also
-//       support streaming (large diffs OOM the result type)?
-//       **RESOLVED 2026-05-24:** Defer. Diff returns []*DiffResult, Apply
-//       returns *ApplyResult. The observed-workflow ceiling (~50MB across
-//       10 commits × 100 files × 500 lines) is well within slice-result
-//       budget; the pathological monorepo case is unobserved today. Key
-//       reasoning: adding streaming methods later is non-breaking
-//       (additive); pre-empting the surface now carries dead weight if
-//       no consumer materializes. Revisit when a streaming consumer
-//       (MCP/HTTP server returning diffs to a remote client, batch
-//       multi-sandbox diff command) actually exists.
+// Q-C.  Streaming-vs-buffered for Diff / Apply?
+//       **RESOLVED 2026-05-24:** Defer. Workdir.Diff returns []*DiffResult,
+//       Workdir.Apply returns *ApplyResult. Observed-workflow ceiling
+//       (~50MB across 10 commits × 100 files × 500 lines) is well within
+//       slice-result budget. Adding streaming methods later is non-breaking;
+//       pre-empting the surface now carries dead weight.
 //
-// Q-D.  Where do `RunOptions.Wait` and `Wait()` overlap?  Run(Wait=true)
-//       returns *Info; Wait() returns exit code + error.
-//       **RESOLVED 2026-05-24:** Keep both. Run(Wait=true) is the
-//       one-call sync-embedder API with rich *Info return. Wait() is the
-//       standalone block-until-terminal that the new `yoloai wait <name>`
-//       CLI consumes and that embedders operating on an existing
-//       sandbox call directly. Internal polling logic is shared; the
-//       public surface honestly reflects the two use cases.
+// Q-D.  Run(Wait=true) vs separate Wait()?
+//       **RESOLVED 2026-05-24:** Keep both. Client.Run(Wait=true) is the
+//       one-call sync-embedder API with rich *Info return.
+//       Sandbox.Wait() is the standalone block-until-terminal that the
+//       new `yoloai wait <name>` CLI consumes and that embedders
+//       operating on an existing sandbox call directly. Internal polling
+//       logic is shared.
 //
-// Q-E.  Should `BugReport` collect the `--bugreport unsafe` flight
-//       recorder log automatically?  Today `--bugreport` is a middleware
-//       wrapper around every CLI command that captures runtime events.
-//       The on-demand `sandbox <name> bugreport` is distinct.
-//       **RESOLVED 2026-05-24:** Two complementary primitives on Client.
-//         BugReport(ctx, name, opts) — one-shot snapshot at call time.
-//         StartBugReporter(ctx, opts) BugReportSession — session that
-//         buffers events until Stop / Discard.
+// Q-E.  Flight recorder shape?
+//       **RESOLVED 2026-05-24:** Two complementary primitives.
+//         Client.BugReport(ctx, name, opts) — one-shot snapshot at call
+//             time.
+//         Client.StartBugReporter(ctx, opts) BugReportSession — session
+//             that buffers events until Stop / Discard.
 //       Reframing credit: the flight recorder is a session primitive
-//       (turn on, do stuff, turn off — get a dump), not a CLI-invocation
-//       wrapper. The CLI's --bugreport flag becomes a thin wrapper
-//       around StartBugReporter. Embedders use the same primitive
-//       scoped to whatever lifetime they want.
+//       (turn on, do stuff, turn off), not a CLI-invocation wrapper.
+//       CLI's --bugreport flag becomes a thin wrapper around the session.
 //
-// Q-F.  `Setup()` on Client interactive prompts?  Setup is the only
-//       non-streaming method that today reads from stdin (tmux conf prompt,
-//       backend choice, agent choice).
-//       **RESOLVED 2026-05-24:** Client.Setup is non-interactive.
-//       SetupOptions carries every answer the wizard would have collected;
-//       the wizard itself lives in internal/cli/system_setup.go (or
-//       wherever the CLI's interactive prompts go). The CLI fills out
-//       SetupOptions from user input, then calls Client.Setup with all
-//       answers in hand.
-//
-//       **Broader principle, articulated by reviewer:** the Client is the
+// Q-F.  Setup interactive prompts?
+//       **RESOLVED 2026-05-24:** Client never reads stdin. SystemClient.Setup
+//       takes a fully-populated SetupOptions and acts. The wizard moves
+//       to internal/cli/.
+//       **Broader principle articulated by reviewer:** the Client is the
 //       orchestration layer; all user interaction lives in the CLI. Same
-//       separation that already drives "CLI calls Client for everything"
-//       elsewhere in the refactor. Applied here, this means:
-//         - Client.Setup never reads stdin.
-//         - Client.Run / Client.Apply / Client.Destroy continue to gate
-//           confirmations via Yes / Force fields in their Options structs;
-//           Manager's existing dirty-repo / replace / unapplied-changes
-//           prompts migrate out of sandbox/ into the CLI in W-L8d, with
-//           Client returning a UsageError or sentinel when the gate is
-//           closed and the operation needs confirmation.
-//         - This is the difference between an interactive CLI experience
-//           and the Client API: the CLI's job is to collect and confirm;
-//           the Client's job is to act, given answers.
+//       separation applies (W-L8d) to Run / Apply / Destroy's dirty-repo
+//       / replace / unapplied-changes prompts — they migrate out of
+//       sandbox.Manager into the CLI, with Client returning a UsageError
+//       or sentinel when a gate is closed.
 //
-// Q-G.  Should `Setup` / `Build` / `Doctor` move to a `yoloai.Admin{}`
-//       sub-Client to keep the main surface focused?  Today's `Client` is
-//       sandbox-focused; bolting admin onto it grows the type. Recommended:
-//       single Client for V1, split if it gets >40 methods. Currently
-//       ~30 (including admin), comfortable.
-
-// clientAPI is a synthetic interface type that exists only so the methods
-// above type-check as Go. The real W-L8b implementation declares each
-// method on `*Client` directly. Reviewers should read the methods as
-// `func (c *Client) X(...)`, not as interface members.
-type clientAPI struct{}
+// Q-G.  Admin sub-Client / structural grouping?
+//       **RESOLVED 2026-05-24:** Shape B — name-bound handles + System
+//       sub-client (GCS-style cheap handles). Five conceptual groups
+//       become five structural homes:
+//         Sandbox     (lifecycle + interaction)        client.Sandbox(name)
+//         Workdir     (diff / apply / baseline)        sandbox.Workdir()
+//         Files       (exchange dir)                   sandbox.Files()
+//         Network     (allowlist)                      sandbox.Network()
+//         System      (admin)                          client.System()
+//       Cross-sandbox ops (List, Run, Clone, BugReport, StartBugReporter)
+//       stay directly on Client. ExchangeDir + Prompt collapse into
+//       *Info fields (no separate methods). Drops artificial method
+//       prefixes (FilesPut → Files().Put, AllowDomains → Network().Allow)
+//       in favor of structural namespacing.
+//       Research: aligns with cloud.google.com/go/storage's
+//       BucketHandle/ObjectHandle convention. kubernetes-client-go uses
+//       a similar pattern (CoreV1().Pods(ns).Get). go-github and stripe
+//       use sub-clients with IDs-per-call — less idiomatic for yoloai's
+//       repeated-name workflow.
