@@ -785,15 +785,41 @@ func (*Workdir) Apply(ctx context.Context, opts ApplyOptions) (*ApplyResult, err
 // agent's accumulated changes start), so they live here rather than as a
 // separate sub-handle.
 
-type BaselineEntry struct {
-	When time.Time
-	SHA  string
-	Note string
+// BaselineLogEntry is one commit in the sandbox's work-copy history, as
+// reported by Workdir.BaselineLog. The list runs from the sandbox's
+// inception commit (immutable creation-time SHA stored in
+// meta.Workdir.InceptionSHA) to HEAD; exactly one entry has
+// IsBaseline=true — the commit that meta.Workdir.BaselineSHA currently
+// points at.
+//
+// Used for recovery / debugging — "where am I relative to baseline?"
+// and "I accidentally advanced too far; pick a commit to SetBaseline
+// to." Common workflows don't need this: Apply advances baseline
+// automatically (see Workdir.AdvanceBaseline), and Diff computes
+// against the baseline internally. The CLI surfaces this via
+// `yoloai baseline log <name>`.
+type BaselineLogEntry struct {
+	SHA        string // full git commit hash
+	Subject    string // first line of the commit message
+	IsBaseline bool   // true for the entry the current baseline points at
 }
 
-func (*Workdir) AdvanceBaseline(ctx context.Context) error         { panic("design-only") }
+// AdvanceBaseline moves the sandbox baseline to the work copy's current
+// HEAD. Use after an out-of-band apply (raw `git am`, CI tool, etc.)
+// so subsequent Diff / Apply don't re-process commits that are already
+// on the host.
+func (*Workdir) AdvanceBaseline(ctx context.Context) error { panic("design-only") }
+
+// SetBaseline pins the baseline to a specific commit SHA. Recovery
+// tool — primarily for fixing baselines that got stuck (e.g. after a
+// git stash pop conflict during apply that left the baseline behind
+// the actually-applied commits) or were advanced too far by mistake.
 func (*Workdir) SetBaseline(ctx context.Context, sha string) error { panic("design-only") }
-func (*Workdir) BaselineLog(ctx context.Context) ([]BaselineEntry, error) {
+
+// BaselineLog returns the sandbox work copy's commit history from
+// inception to HEAD with the current baseline marked. Debug / recovery
+// tool; not part of the common Diff/Apply workflow.
+func (*Workdir) BaselineLog(ctx context.Context) ([]BaselineLogEntry, error) {
 	panic("design-only")
 }
 
