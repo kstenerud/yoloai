@@ -1209,12 +1209,8 @@ var (
 	ErrSandboxNotFound error
 
 	// ErrUnappliedChanges is returned by Destroy when the sandbox has
-	// unapplied changes and DestroyOptions.Force is false.
+	// unapplied changes and DestroyOptions.SkipApplyCheck is false.
 	ErrUnappliedChanges error
-
-	// ErrNoChanges is returned by Apply when there are no agent commits
-	// (or uncommitted edits, with IncludeUncommitted) to apply.
-	ErrNoChanges error
 
 	// ErrBackendUnavailable is returned by New when the requested or
 	// auto-selected backend is not usable on this host.
@@ -1314,10 +1310,11 @@ const (
 //
 // Q-B.  Error mapping. Which sentinels are stable contract?
 //       **RESOLVED 2026-05-24:** Three-category exhaustive taxonomy.
-//         (1) Five stable sentinels — ErrSandboxExists, ErrSandboxNotFound,
-//             ErrUnappliedChanges, ErrNoChanges, ErrBackendUnavailable.
-//             Promotion rule: add only when a real call site needs to
-//             branch on it.
+//         (1) Four stable sentinels — ErrSandboxExists, ErrSandboxNotFound,
+//             ErrUnappliedChanges, ErrBackendUnavailable. (ErrNoChanges
+//             dropped in Q-P as redundant with ApplyResult.) Promotion
+//             rule: add only when a real call site needs to branch on
+//             it AND the state isn't recoverable from a returned result.
 //         (2) *UsageError — caller did something refused before any work.
 //             Re-exports internal/yoerrors. Detected with errors.As.
 //         (3) *UnrecoverableError — Client started, hit something it
@@ -1772,3 +1769,45 @@ const (
 //       both the git forks and the metadata read — just for a less
 //       dramatic reason than the original docstring implied. Updated
 //       the docstring to name the actual expensive thing.
+//
+// Q-P.  ErrNoChanges sentinel — redundant with ApplyResult?
+//
+//       **RESOLVED 2026-05-25:** Dropped. The five sentinels become four.
+//
+//       The state ErrNoChanges signalled is fully encoded in
+//       ApplyResult.PerDir — every directory processed with no changes
+//       is reported as a PerDirApplyResult with Status ==
+//       ApplyStatusEmpty. The aggregate "nothing applied overall" is
+//       "no PerDir entry has Status == ApplyStatusApplied." So the
+//       sentinel was duplicate signalling: callers had to handle both
+//       errors.Is(err, ErrNoChanges) AND inspect the result, and the
+//       two could in principle disagree.
+//
+//       Beyond redundancy, the pattern is awkward: "no changes to
+//       apply" is a successful no-op, not a failure. Returning an
+//       error for it tangles success with error-path branching:
+//
+//         result, err := wd.Apply(ctx, opts)
+//         if errors.Is(err, ErrNoChanges) {
+//             // success path #1 — masquerading as an error
+//         } else if err != nil {
+//             return err  // real failure
+//         }
+//         // success path #2 — applied something
+//
+//       Without the sentinel, error means failure and the result
+//       describes what happened. Clean.
+//
+//       Audited the other four sentinels — each survives because its
+//       call returns no result struct (Run rejected before producing
+//       Info; Destroy is err-only; New returns nil client on backend
+//       failure). ErrNoChanges was uniquely redundant because Apply
+//       does return a result that already encodes the state.
+//
+//       Codified principle: don't promote a sentinel when the state
+//       is recoverable from the returned result. Sentinels are for
+//       cases where the result is unavailable or absent. Promotion
+//       rule in Q-B updated.
+//
+//       CLI behavior unchanged: the "Nothing to apply" message keys
+//       off inspecting result.PerDir rather than errors.Is.
