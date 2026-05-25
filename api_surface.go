@@ -9,15 +9,24 @@
 // every build — it's read like a header, not compiled.
 //
 // **Structural shape (Shape B, resolved 2026-05-24 / Q-G).** Resource-bound
-// handles, GCS-style: `client.Sandbox(name)` returns a cheap `*Sandbox`
-// handle that wraps `(client, name)`. Sandbox-scoped operations are methods
-// on the handle; sub-groupings (Workdir, Files, Network) are nested handles
-// off the sandbox. Admin sits on a separate `*SystemClient` reachable via
+// handles: `client.Sandbox(ctx, name)` returns a *Sandbox handle bound to
+// (client, name), validated at construction (errors with
+// ErrSandboxNotFound for missing names, *UsageError for syntactic
+// problems). Sub-groupings (Workdir, Files, Network) are nested
+// synchronous handles off the sandbox — pure namespace expansion, no IO,
+// no error. Admin sits on a separate `*SystemClient` reachable via
 // `client.System()`. Cross-sandbox operations (List, Run, Clone, the
 // bug-report primitives) stay on `*Client` directly. The motivation: drop
 // the artificial method prefixes (FilesPut/FilesGet/...) in favor of
 // structural namespacing (Files().Put / Files().Get), and let the type
 // hierarchy match the conceptual hierarchy.
+//
+// (Worth noting we considered the GCS-style lazy-handle pattern, where
+// Sandbox(name) returns immediately and the name is "validated" by the
+// first method call. Rejected because GCS's motivation — defer a network
+// round-trip — doesn't apply locally, and the lazy pattern lands errors
+// downstream of where the name was typed. Strict resource validation
+// fits "parse, don't validate" §4 better.)
 //
 // **Scope.** Every public CLI command in `internal/cli/` is mapped to
 // either a handle method (Sandbox / Workdir / Files / Network /
@@ -222,12 +231,25 @@ func New(ctx context.Context) (*Client, error)                          { panic(
 func NewWithOptions(ctx context.Context, opts Options) (*Client, error) { panic("design-only") }
 func (*Client) Close() error                                            { panic("design-only") }
 
-// Sandbox returns a name-bound handle for sandbox-scoped operations. Cheap
-// — no IO, never errors. The sandbox isn't looked up until you call a
-// method on the handle (Inspect, Diff, etc.), which is where
-// ErrSandboxNotFound surfaces if the name doesn't exist. Matches GCS's
-// Bucket/Object handle convention.
-func (*Client) Sandbox(name string) *Sandbox { panic("design-only") }
+// Sandbox returns a name-bound handle for sandbox-scoped operations.
+// Validates name resolution at construction — returns ErrSandboxNotFound
+// when the sandbox doesn't exist on this host, or *UsageError when name
+// is syntactically invalid (empty, contains illegal characters, etc.).
+//
+// Strict validation places errors at the line where the name is typed
+// rather than in the middle of a downstream workflow. The handle then
+// "proves" the sandbox existed at construction time (parse-don't-validate,
+// §4). Methods on the handle still surface ErrSandboxNotFound when their
+// own filesystem ops fail — the handle isn't a permanent existence
+// guarantee, just a construction-time check (concurrent destroys can
+// invalidate it).
+//
+// (We don't follow GCS's lazy-handle convention here because the
+// motivation doesn't apply: GCS handles defer a network round-trip;
+// yoloai's existence check is a local os.Stat.)
+func (*Client) Sandbox(ctx context.Context, name string) (*Sandbox, error) {
+	panic("design-only")
+}
 
 // System returns the admin sub-client (`yoloai system …` commands).
 func (*Client) System() *SystemClient { panic("design-only") }
@@ -306,13 +328,20 @@ func (*Client) Clone(ctx context.Context, opts CloneOptions) (*Info, error) {
 // Sandbox handle — name-bound; methods for one sandbox
 // =============================================================================
 
-// Sandbox is a cheap name-bound handle. Construct via Client.Sandbox(name).
-// Never errors at construction time; the name is "validated" by the first
-// method call (Inspect, etc.), which returns ErrSandboxNotFound if the
-// sandbox doesn't exist. Matches GCS's BucketHandle convention.
+// Sandbox is a name-bound handle for one sandbox. Construct via
+// Client.Sandbox(ctx, name), which validates that the name resolves
+// before returning the handle — see that method for details.
+//
+// Once you have a *Sandbox, name lookup has succeeded. Methods on the
+// handle do their own per-op IO (Inspect reads metadata, Diff runs git,
+// etc.) but don't re-validate the name. A concurrent destroy can
+// invalidate a handle between method calls; those methods then surface
+// ErrSandboxNotFound from their own IO, just like any other Go object
+// that holds a reference to mutable shared state.
 type Sandbox struct{}
 
-// Name returns the bound sandbox name.
+// Name returns the bound sandbox name. Always valid: Client.Sandbox
+// validated it at construction.
 func (*Sandbox) Name() string { panic("design-only") }
 
 // --- lifecycle + introspection ---
@@ -435,6 +464,10 @@ func (*Sandbox) Logs(ctx context.Context, opts LogOptions, w io.Writer) error {
 func (*Sandbox) ProxyMCP(ctx context.Context, io IOStreams) error { panic("design-only") }
 
 // --- sub-handles ---
+//
+// Workdir / Files / Network are cheap synchronous wrappers — pure
+// namespace expansion off an already-validated *Sandbox. No IO, no
+// errors; their methods do all the work.
 
 // Workdir returns a handle for diff/apply/baseline operations on the
 // sandbox's work tree.
@@ -975,9 +1008,8 @@ const (
 //
 // Q-G.  Admin sub-Client / structural grouping?
 //       **RESOLVED 2026-05-24:** Shape B — name-bound handles + System
-//       sub-client (GCS-style cheap handles). Five conceptual groups
-//       become five structural homes:
-//         Sandbox     (lifecycle + interaction)        client.Sandbox(name)
+//       sub-client. Five conceptual groups become five structural homes:
+//         Sandbox     (lifecycle + interaction)        client.Sandbox(ctx, name)
 //         Workdir     (diff / apply / baseline)        sandbox.Workdir()
 //         Files       (exchange dir)                   sandbox.Files()
 //         Network     (allowlist)                      sandbox.Network()
@@ -987,8 +1019,14 @@ const (
 //       *Info fields (no separate methods). Drops artificial method
 //       prefixes (FilesPut → Files().Put, AllowDomains → Network().Allow)
 //       in favor of structural namespacing.
-//       Research: aligns with cloud.google.com/go/storage's
-//       BucketHandle/ObjectHandle convention. kubernetes-client-go uses
-//       a similar pattern (CoreV1().Pods(ns).Get). go-github and stripe
-//       use sub-clients with IDs-per-call — less idiomatic for yoloai's
-//       repeated-name workflow.
+//
+//       **Handle-validation policy** (refined 2026-05-25 after reviewer
+//       pushback on cheap-handle cargo-culting):
+//       Client.Sandbox(ctx, name) is STRICT — validates name resolution
+//       at construction; returns ErrSandboxNotFound / *UsageError up
+//       front. The handle then proves the sandbox existed at
+//       construction. Considered the GCS lazy-handle pattern; rejected
+//       because GCS's motivation (defer a network round-trip) doesn't
+//       apply locally. Sub-handles (Workdir / Files / Network) are
+//       cheap synchronous wrappers — pure namespace expansion off an
+//       already-validated *Sandbox; no IO at the wrapper level.
