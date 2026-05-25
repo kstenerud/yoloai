@@ -890,13 +890,34 @@ func (*Files) Rm(ctx context.Context, patterns []string) error { panic("design-o
 
 // Network scopes network-allowlist operations on a single sandbox.
 // Constructed via Sandbox.Network(); never errors. Only meaningful when
-// the sandbox was created with NetworkIsolated; otherwise methods return
-// *UsageError.
+// the sandbox was created with NetworkIsolated; otherwise methods
+// return *UsageError.
+//
+// **Allowlist-only model.** The sandbox holds ONE list of permitted
+// outbound domains. Anything not on the list is blocked by iptables +
+// ipset rules inside the sandbox. There is no separate denylist data
+// structure — "denying" a domain means removing it from the allowlist
+// so the implicit drop rule applies.
+//
+//   - Allow(domains)  — add domains to the allowlist
+//   - Remove(domains) — remove domains from the allowlist (the policy
+//     effect is that the domain becomes denied)
+//   - Allowed()       — return the current allowlist
+//
+// The allowlist returned by Allowed() is the merged set of (a) the
+// agent's built-in default allowlist (agentDef.NetworkAllowlist —
+// e.g. api.anthropic.com for Claude), (b) the initial
+// RunOptions.AllowDomains supplied at creation, and (c) any runtime
+// Allow() additions. Callers can't currently distinguish the three
+// sources from each other; if a future use case needs to (e.g. a
+// recovery UI that warns "removing an agent-default would break the
+// agent"), a richer Allowed() variant can be added without breaking
+// the current shape.
 type Network struct{}
 
-func (*Network) Allow(ctx context.Context, domains []string) error { panic("design-only") }
-func (*Network) Deny(ctx context.Context, domains []string) error  { panic("design-only") }
-func (*Network) Allowed(ctx context.Context) ([]string, error)     { panic("design-only") }
+func (*Network) Allow(ctx context.Context, domains []string) error  { panic("design-only") }
+func (*Network) Remove(ctx context.Context, domains []string) error { panic("design-only") }
+func (*Network) Allowed(ctx context.Context) ([]string, error)      { panic("design-only") }
 
 // =============================================================================
 // Client — bug-report primitives
@@ -1479,3 +1500,16 @@ const (
 //       prompts; retries with SkipDirtyRepoCheck=true if confirmed.
 //       Apply has no such state condition — the "confirmation" is
 //       pure "are you sure?" UX with no underlying refusal.
+//
+//       Later refinement (2026-05-25 follow-up #3):
+//         Network.Deny → Network.Remove
+//       The underlying model is allowlist-only — no separate denylist
+//       exists. "Deny" named the policy EFFECT (the domain becomes
+//       denied); "Remove" names the actual OPERATION (remove from
+//       allowlist). Aligns with the "API names the specific effect"
+//       principle from Q-J / Q-K.
+//
+//       The corresponding CLI breaking change lands in W-L8b/d when
+//       the implementation flips: `yoloai sandbox <name> deny` →
+//       `yoloai sandbox <name> remove`. Add to docs/BREAKING-CHANGES.md
+//       when the implementation lands.
