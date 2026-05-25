@@ -436,14 +436,17 @@ func (*Sandbox) Name() string { panic("design-only") }
 
 // --- lifecycle + introspection ---
 
-// Inspect returns the full sandbox snapshot — metadata, lifecycle state,
-// agent status, exchange-dir path, original prompt, baseline SHA, etc.
-// Multiple backend round-trips; not cheap. Use Status for the polling
-// case.
+// Inspect returns the full sandbox snapshot — Meta (creation-time facts),
+// lifecycle status, agent status, HasChanges, exchange-dir path, and
+// original prompt. Cost is dominated by one `git` invocation per
+// :copy/:overlay directory (to compute HasChanges); plus one backend
+// RPC for status detection and one meta.json read. Use Status for the
+// polling case if you only need the lifecycle enum — it skips both the
+// git forks and the metadata read.
 func (*Sandbox) Inspect(ctx context.Context) (*Info, error) { panic("design-only") }
 
-// Status returns just the lifecycle enum. Single cheap check; the polling
-// companion to Inspect.
+// Status returns just the lifecycle enum. One backend RPC + one status
+// file read; the cheap polling companion to Inspect.
 func (*Sandbox) Status(ctx context.Context) (Status, error) { panic("design-only") }
 
 // StartOptions configures Start. No Attach field: "start and attach"
@@ -1140,28 +1143,39 @@ func (*SystemClient) Setup(ctx context.Context, opts SetupOptions) error { panic
 // Status re-exports sandbox.Status.
 type Status = string
 
-// Info bundles sandbox metadata + lifecycle state. Returned by
-// Sandbox.Inspect. Includes ExchangeDir and Prompt fields so embedders
-// don't need separate FilesPath / Prompt methods (collapsed per Q-G
-// resolution).
-type Info = struct {
-	// Identity + metadata
-	Meta any // sandbox.Meta — full metadata struct
+// SandboxMeta is the on-disk sandbox metadata captured at creation time.
+// In the W-L8b implementation this is a Go type alias:
+//
+//	type SandboxMeta = store.Meta
+//
+// pointing at sandbox/store.Meta (or internal/sandbox/store.Meta after
+// W-L12 — type aliases work across internal/ boundaries because the
+// public yoloai package can import from internal/ of the same module).
+// The full field list (~25 fields covering identity, backend, agent/
+// model, workdir + aux dirs, network mode, resource limits, isolation,
+// etc.) lives in sandbox/store/meta.go with stable JSON tags.
+//
+// Sketched here as a placeholder struct for the design checkpoint; the
+// real definition is the alias.
+type SandboxMeta struct { /* alias to sandbox/store.Meta — see meta.go */
+}
 
-	// Lifecycle state
+// Info is the snapshot returned by Sandbox.Inspect: creation-time facts
+// (Meta) plus live state computed at inspection time. Fields that also
+// live on Meta (Backend, ImageRef, Isolation, Workdir.BaselineSHA) are
+// not duplicated at the top level — read them via info.Meta.* (Q-O).
+type Info struct {
+	// Creation-time facts (read from meta.json).
+	Meta SandboxMeta
+
+	// Live state — computed at Inspect time, not stored in Meta.
 	Status      Status
 	AgentStatus string // "active", "idle", "done", etc. (separate from lifecycle)
 	HasChanges  bool   // unapplied agent commits or uncommitted edits
 
-	// Convenience fields lifted to avoid separate methods
+	// Convenience fields not present in Meta.
 	HostExchangeDir string
 	OriginalPrompt  string
-	BaselineSHA     string
-
-	// Backend-side facts
-	Backend   string
-	Image     string
-	Isolation IsolationMode
 }
 
 // DirSpec re-exports sandbox.DirSpec.
@@ -1708,3 +1722,53 @@ const (
 //       a Watch-style handle then — not before. Logs() already returns
 //       (io.ReadCloser, error) which is the right shape for that kind of
 //       stream.
+//
+// Q-O.  Info.Meta `any` → typed re-export; drop field duplicates; Inspect
+//       cost honesty.
+//
+//       **RESOLVED 2026-05-25:** Three related fixes on the Info struct,
+//       plus a docstring correction on Inspect.
+//
+//       1. Info.Meta was typed `any` — same anti-pattern as the earlier
+//          Logger `any`. Replaced with SandboxMeta, a type alias to
+//          sandbox/store.Meta (or internal/sandbox/store.Meta after
+//          W-L12). Type aliases work across internal/ boundaries
+//          because the public yoloai package can import from internal/
+//          of the same module. D3 defers external stability — there's
+//          no API-contract reason to hide a concrete type. Embedders
+//          shouldn't need a type assertion to read sandbox metadata.
+//
+//       2. Four Info fields duplicated fields already in Meta:
+//
+//            Info.BaselineSHA  → Meta.Workdir.BaselineSHA
+//            Info.Backend      → Meta.Backend
+//            Info.Image        → Meta.ImageRef
+//            Info.Isolation    → Meta.Isolation
+//
+//          Dropped. Single source of truth; embedders read these via
+//          info.Meta.*. Drops 4 fields of maintenance overlap.
+//
+//       3. `type Info = struct {...}` (alias to an anonymous struct
+//          literal) → `type Info struct {...}` (named struct). The
+//          alias form was non-idiomatic and would prevent method
+//          definition on Info.
+//
+//       Inspect-docstring correction: original wording claimed
+//       "multiple backend round-trips; not cheap" — imprecise. Actual
+//       cost breakdown:
+//
+//         Status alone:    ~10–50 ms (1 backend RPC + 1 status file read)
+//         Inspect:         ~50–200 ms (adds meta.json read + N git forks
+//                          for HasChanges, where N = :copy/:overlay dirs)
+//
+//       The dominant Inspect cost is the per-:copy/:overlay git
+//       invocation for HasChanges, not the backend RPC. (DirSize would
+//       have been the truly expensive bit — recursive walk on GB-scale
+//       sandbox dirs — but it's not in the proposed Info; if embedders
+//       want it, a separate method that owns its cost is the right
+//       shape.)
+//
+//       The Status / Inspect split is still justified — Status skips
+//       both the git forks and the metadata read — just for a less
+//       dramatic reason than the original docstring implied. Updated
+//       the docstring to name the actual expensive thing.
