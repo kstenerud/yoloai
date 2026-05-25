@@ -845,12 +845,28 @@ type PutOptions struct {
 
 func (*Files) Put(ctx context.Context, opts PutOptions) error { panic("design-only") }
 
-// GetOptions configures Get. Patterns match inside the sandbox exchange
-// dir; Output is a host destination (dir or file).
+// GetOptions configures Get. Patterns are evaluated inside the sandbox
+// exchange dir and may expand to multiple files; OutputPath is the host
+// destination.
+//
+// **OutputPath rules** (enforced by Get; violations return *UsageError):
+//
+//   - Patterns expand to multiple files → OutputPath must exist and be a
+//     directory. Each matched file is written into it using its basename.
+//
+//   - Patterns expand to a single file → OutputPath may be either:
+//     (a) an existing directory (file is written into it with basename), or
+//     (b) a file path (created or overwritten per Overwrite).
+//
+//   - OutputPath is REQUIRED — empty is rejected. The CLI's `-o` flag
+//     defaults to "."; embedders that want CWD pass "." explicitly.
+//
+//   - Without Overwrite=true, an existing destination file at the resolved
+//     final path returns *UsageError. Overwrite=true replaces it.
 type GetOptions struct {
-	Patterns  []string
-	Output    string
-	Overwrite bool // overwrite existing destination files
+	Patterns   []string
+	OutputPath string // REQUIRED; empty rejected. See type doc for the multi-file vs single-file rules.
+	Overwrite  bool   // overwrite existing destination files
 }
 
 // FileEntry describes one file in the exchange directory.
