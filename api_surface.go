@@ -655,13 +655,17 @@ type DiffOptions struct {
 	NameOnly bool     // --name-only
 }
 
-// DiffResult mirrors patch.DiffResult.
+// DiffResult mirrors workspace.DiffResult (re-exported through
+// sandbox/patch). One entry per diffable directory in the sandbox —
+// the workdir plus every aux directory mounted in :copy or :overlay
+// mode. :rw aux dirs do not produce diffs (changes are already live
+// on the host).
 type DiffResult struct {
-	Dir       string
+	Dir       string    // host path to the directory that was diffed
 	Mode      MountMode // MountCopy or MountOverlay (MountRW dirs don't produce diffs)
-	Patch     string
-	Stat      string
-	IsWorkdir bool // true for the primary workdir; false for auxiliary dirs (-d mounts)
+	Output    string    // diff text, OR stat summary when DiffOptions.Stat = true. Single field — only one form is populated per call, depending on opts.
+	Empty     bool      // true when the dir had no changes from baseline; useful for skipping/hiding empty entries in UI
+	IsWorkdir bool      // true for the primary workdir; false for aux (-d) dirs. Precomputed convenience for UI rendering — saves the caller a second Inspect call.
 }
 
 func (*Workdir) Diff(ctx context.Context, opts DiffOptions) ([]*DiffResult, error) {
