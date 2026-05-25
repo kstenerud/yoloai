@@ -953,22 +953,50 @@ func (*Files) Rm(ctx context.Context, patterns []string) error { panic("design-o
 //   - Allow(domains)  — add domains to the allowlist
 //   - Remove(domains) — remove domains from the allowlist (the policy
 //     effect is that the domain becomes denied)
-//   - Allowed()       — return the current allowlist
+//   - Allowed()       — return the current allowlist with per-entry
+//     provenance (AllowedDomain.Source)
 //
 // The allowlist returned by Allowed() is the merged set of (a) the
-// agent's built-in default allowlist (agentDef.NetworkAllowlist —
-// e.g. api.anthropic.com for Claude), (b) the initial
-// RunOptions.AllowDomains supplied at creation, and (c) any runtime
-// Allow() additions. Callers can't currently distinguish the three
-// sources from each other; if a future use case needs to (e.g. a
-// recovery UI that warns "removing an agent-default would break the
-// agent"), a richer Allowed() variant can be added without breaking
-// the current shape.
+// agent's required defaults (agentDef.NetworkAllowlist —
+// e.g. api.anthropic.com for Claude — without which the agent itself
+// can't function) and (b) user additions made at create-time
+// (RunOptions.AllowDomains) or at runtime (Network.Allow). The
+// AllowedDomain.Source field discriminates (a) from (b). Create-time
+// vs runtime user additions aren't distinguished today; the storage
+// flattens them. Add a third Source constant if a use case ever
+// requires that split.
 type Network struct{}
 
-func (*Network) Allow(ctx context.Context, domains []string) error  { panic("design-only") }
-func (*Network) Remove(ctx context.Context, domains []string) error { panic("design-only") }
-func (*Network) Allowed(ctx context.Context) ([]string, error)      { panic("design-only") }
+// AllowedDomainSource categorises where an allowlist entry came from.
+// Open-set typed string: future use cases (e.g. distinguishing
+// create-time from runtime user additions) add new constants without
+// breaking embedders.
+type AllowedDomainSource string
+
+const (
+	// AllowedFromAgentRequirement: the domain is in the bound agent's
+	// default allowlist — i.e. removing it would break the agent
+	// itself (Claude → api.anthropic.com, Gemini → cloudcode-pa
+	// endpoints, etc.).
+	AllowedFromAgentRequirement AllowedDomainSource = "agent-requirement"
+
+	// AllowedFromUser: the domain was added by the user, either at
+	// create time (RunOptions.AllowDomains) or at runtime (Network.Allow).
+	// Today's storage flattens these two; a future Source constant
+	// can split them if needed.
+	AllowedFromUser AllowedDomainSource = "user"
+)
+
+// AllowedDomain pairs a domain with its provenance in the merged
+// allowlist. Returned by Network.Allowed.
+type AllowedDomain struct {
+	Domain string
+	Source AllowedDomainSource
+}
+
+func (*Network) Allow(ctx context.Context, domains []string) error    { panic("design-only") }
+func (*Network) Remove(ctx context.Context, domains []string) error   { panic("design-only") }
+func (*Network) Allowed(ctx context.Context) ([]AllowedDomain, error) { panic("design-only") }
 
 // =============================================================================
 // Client — bug-report primitives
@@ -2120,3 +2148,51 @@ const (
 //       hidden dependencies. When in doubt about a barely-used
 //       feature, cut it; restore from the real-use feedback when
 //       someone shows up with a concrete need.
+//
+// Q-V.  Network.Allowed provenance — flat []string or typed?
+//
+//       **RESOLVED 2026-05-25:** Typed. Allowed() returns
+//       []AllowedDomain with a Source enum.
+//
+//       The previous shape returned []string and flattened away the
+//       provenance of each entry. Two real use cases benefit from
+//       knowing where an entry came from:
+//
+//         1. "Don't silently nuke an agent-required domain." If a UI
+//            or automation calls Network.Remove("api.anthropic.com")
+//            on a Claude sandbox, the embedder should be able to
+//            detect that removal will break the agent itself, not
+//            just enforce a user policy decision.
+//
+//         2. "Show me my additions vs baked-in defaults." A
+//            management UI rendering "Agent requires: X / Your
+//            additions: Y" is a real UX win.
+//
+//       Implementation reality check (sandbox/create_prepare.go:679):
+//       the agent's default allowlist (agentDef.NetworkAllowlist) and
+//       the user's RunOptions.AllowDomains are concatenated into
+//       meta.NetworkAllow at create time. The on-disk storage flattens
+//       them. However, the agent's default list is shipped data
+//       reachable by sandbox.Agent → agentDef.NetworkAllowlist, so
+//       provenance is RECOVERABLE at read time:
+//
+//         agent-required = meta.NetworkAllow ∩ agentDef.NetworkAllowlist
+//         user-added     = meta.NetworkAllow \ agentDef.NetworkAllowlist
+//
+//       Create-time vs runtime user additions can't be distinguished
+//       today — the storage doesn't separate them. We could add that
+//       split later by introducing a third AllowedDomainSource
+//       constant and a storage change; no use case justifies it now.
+//
+//       Naming: AllowedFromAgentRequirement (not just AllowedFromAgent)
+//       names the actual claim — these domains exist because the
+//       agent REQUIRES them to function, not just because the agent's
+//       definition lists them. The name signals to embedders that
+//       removal has consequences for the agent.
+//
+//       Codified principle: API result types preserve the provenance
+//       distinctions the implementation can answer for, even when
+//       storage flattens them — derivation at read time is fine.
+//       Throwing away derivable information at the API boundary is
+//       the same anti-pattern as the Q-Q CLI-UI leak sweep, applied
+//       to data-shape rather than rendering.
