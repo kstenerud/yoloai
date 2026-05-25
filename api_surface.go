@@ -581,7 +581,37 @@ type LogOptions struct {
 // DefaultRunOptions — see that function's doc.
 func DefaultLogOptions() LogOptions { panic("design-only") }
 
-// Logs streams the requested log to w.
+// Logs streams the requested log to w. Behavior depends on
+// LogOptions.Follow:
+//
+//   - Follow=false (default): emit the log up to "now" and return.
+//     Suitable for one-shot snapshots and bug-report inclusion.
+//
+//   - Follow=true: same as above, then keep writing as new entries
+//     arrive. Returns when one of three things happens:
+//     1. ctx is cancelled — caller-driven stop. Returns ctx.Err().
+//     2. The sandbox reaches a terminal status (StatusDone,
+//     StatusFailed, StatusStopped) — no more entries can arrive.
+//     Returns nil.
+//     3. w returns a non-nil error from Write (broken pipe, HTTP
+//     client disconnected, etc.). The wrapped write error is
+//     returned.
+//
+// Non-CLI callers (HTTP server streaming to a client, websocket relay,
+// test harness) typically pass a request-scoped ctx so client
+// disconnect cancels the follow loop:
+//
+//	func handleLogStream(w http.ResponseWriter, r *http.Request) {
+//	    sb, err := client.Sandbox(r.Context(), name)
+//	    if err != nil { http.Error(w, err.Error(), 404); return }
+//	    _ = sb.Logs(r.Context(), yoloai.LogOptions{
+//	        Format: yoloai.LogStructuredRaw, // JSONL — client parses
+//	        Follow: true,
+//	    }, w)
+//	}
+//
+// The method never panics on a cancelled ctx; it observes the
+// cancellation and returns.
 func (*Sandbox) Logs(ctx context.Context, opts LogOptions, w io.Writer) error {
 	panic("design-only")
 }
