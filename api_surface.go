@@ -691,11 +691,45 @@ type ApplyOptions struct {
 }
 
 // ApplyResult bundles per-directory outcomes plus a top-level rollup.
+//
+// Distinction between PerDir and SkippedDirs:
+//   - PerDir lists every directory Apply actually processed. Entries
+//     where the directory had no changes from baseline are reported
+//     here with Applied=false (the diff was empty; nothing to do).
+//   - SkippedDirs lists directories Apply declined to process at all
+//     because of the directory's mount mode or container state. Each
+//     entry carries a Reason so embedders can render or branch without
+//     remembering the dir's mount mode out of band.
 type ApplyResult struct {
 	PerDir      []*PerDirApplyResult
 	Patches     []string // populated only when Mode == ApplyExport
-	SkippedDirs []string // dirs skipped (overlay-and-running-required, :rw, ...)
+	SkippedDirs []SkippedDir
 }
+
+// SkippedDir reports one directory that Apply declined to act on,
+// together with the reason. See SkipReason for the closed-set of
+// reasons known today.
+type SkippedDir struct {
+	Dir    string // host path to the skipped directory
+	Reason SkipReason
+}
+
+// SkipReason categorizes why a directory was skipped by Apply.
+// Open-set typed string (same shape as ExecUser): the named constants
+// document the cases known today; future skip cases add their own
+// constants without breaking existing embedders.
+type SkipReason string
+
+const (
+	// SkipReasonReadWrite: :rw directories don't need applying — the
+	// agent's changes are already live on the host bind-mount.
+	SkipReasonReadWrite SkipReason = "rw"
+
+	// SkipReasonOverlayStopped: :overlay directories need a running
+	// container to compute and apply the in-container diff. When the
+	// container is stopped, Apply reports this rather than failing.
+	SkipReasonOverlayStopped SkipReason = "overlay-stopped"
+)
 
 // PerDirApplyResult lifts patch.ApplyResult.
 type PerDirApplyResult struct {
