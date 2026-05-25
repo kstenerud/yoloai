@@ -377,9 +377,13 @@ func (*Sandbox) Inspect(ctx context.Context) (*Info, error) { panic("design-only
 // companion to Inspect.
 func (*Sandbox) Status(ctx context.Context) (Status, error) { panic("design-only") }
 
-// StartOptions configures Start.
+// StartOptions configures Start. No Attach field: "start and attach"
+// is composition, not a primitive — callers (CLI and embedders alike)
+// call Sandbox.Attach with explicit IOStreams after Start returns. This
+// keeps the os.Stdin/Stdout/Stderr presumption out of the lifecycle
+// surface (same principle as Q-F: Client provides primitives; CLI
+// composes them).
 type StartOptions struct {
-	Attach            bool          // also attach to tmux after start
 	Prompt            string        // optional prompt to inject after relaunch
 	IsolationOverride IsolationMode // change isolation on restart; rebuilds container
 }
@@ -391,10 +395,9 @@ type StopOptions struct{}
 
 func (*Sandbox) Stop(ctx context.Context, opts StopOptions) error { panic("design-only") }
 
-// RestartOptions configures Restart.
-type RestartOptions struct {
-	Attach bool
-}
+// RestartOptions configures Restart. No Attach field; same rationale as
+// StartOptions.
+type RestartOptions struct{}
 
 func (*Sandbox) Restart(ctx context.Context, opts RestartOptions) error { panic("design-only") }
 
@@ -405,13 +408,13 @@ type DestroyOptions struct {
 
 func (*Sandbox) Destroy(ctx context.Context, opts DestroyOptions) error { panic("design-only") }
 
-// ResetOptions configures Reset.
+// ResetOptions configures Reset. No Attach field; same rationale as
+// StartOptions.
 type ResetOptions struct {
 	Restart    bool
 	ClearState bool
 	KeepCache  bool
 	KeepFiles  bool
-	Attach     bool
 	Prompt     string
 }
 
