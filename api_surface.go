@@ -673,15 +673,21 @@ func (*Workdir) Diff(ctx context.Context, opts DiffOptions) ([]*DiffResult, erro
 }
 
 // ApplyOptions configures Apply.
+// ApplyOptions configures Apply.
+//
+// No confirmation-skip field: Apply has no state-bearing refusal to
+// acknowledge. The "are you sure you want to apply N commits?" prompt
+// in today's CLI is pure UX with no underlying Client state; the CLI
+// handles it before calling Apply. Embedders just call Apply; if they
+// want to confirm with their user first, that's their concern.
 type ApplyOptions struct {
-	Mode                  ApplyMode // empty = default behavior; ApplySquash / ApplyExport override
-	ExportDir             string    // required when Mode == ApplyExport
-	Refs                  []string  // specific commits or ranges
-	Paths                 []string  // pathspec filter
-	IncludeUncommitted    bool      // also apply the agent's uncommitted edits (staged + unstaged + untracked) as unstaged changes on the host; default is committed changes only
-	IncludeTags           bool      // also transfer git tags created by the agent; invalid with ApplySquash
-	DryRun                bool      // invalid with ApplyExport
-	SkipApplyConfirmation bool      // proceed without confirming each batch of commits
+	Mode               ApplyMode // empty = default behavior; ApplySquash / ApplyExport override
+	ExportDir          string    // required when Mode == ApplyExport
+	Refs               []string  // specific commits or ranges
+	Paths              []string  // pathspec filter
+	IncludeUncommitted bool      // also apply the agent's uncommitted edits (staged + unstaged + untracked) as unstaged changes on the host; default is committed changes only
+	IncludeTags        bool      // also transfer git tags created by the agent; invalid with ApplySquash
+	DryRun             bool      // invalid with ApplyExport
 }
 
 // ApplyResult bundles per-directory outcomes plus a top-level rollup.
@@ -1300,7 +1306,8 @@ const (
 //
 //         Group 1 — "Yes" → concern-specific (same shape as Q-J):
 //           RunOptions.Yes        → SkipDirtyRepoCheck
-//           ApplyOptions.Yes      → SkipApplyConfirmation
+//           ApplyOptions.Yes      → DROPPED ENTIRELY (see follow-up
+//                                   note below)
 //
 //         Group 2 — vague nouns made specific:
 //           RunOptions.Runtimes        → SimulatorRuntimes
@@ -1341,3 +1348,22 @@ const (
 //       terminology (uncommitted = staged + unstaged + untracked).
 //       Same rename applied to mentions in Info.HasChanges and
 //       SkipApplyCheck / ErrNoChanges doc-comments.
+//
+//       Later refinement (2026-05-25 follow-up #2):
+//         ApplyOptions.SkipApplyConfirmation → DROPPED
+//       Audit of the existing CLI revealed --yes on Apply only gates
+//       sandbox.Confirm() stdin prompts in apply_overlay /
+//       apply_selective / apply_squash — there is NO state-bearing
+//       refusal inside Manager.Apply that the field would bypass.
+//       Per Q-F (Client never prompts; CLI is the UI layer), pure-UX
+//       prompts belong in the CLI, not on the API. Embedders just
+//       call Apply; if they want to confirm with their user first,
+//       that's their concern.
+//
+//       Asymmetry with RunOptions.SkipDirtyRepoCheck is intentional:
+//       the dirty-repo case IS a real state-bearing refusal (host
+//       workdir has uncommitted changes — observable, Client-side).
+//       Per Q-F, Client.Run returns *UsageError; CLI catches and
+//       prompts; retries with SkipDirtyRepoCheck=true if confirmed.
+//       Apply has no such state condition — the "confirmation" is
+//       pure "are you sure?" UX with no underlying refusal.
