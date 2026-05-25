@@ -970,14 +970,14 @@ type SystemClient struct{}
 
 // BackendInfo bundles a BackendDescriptor with its current Probe verdict.
 type BackendInfo struct {
-	Name        string
-	Description string
-	Platforms   []string
-	Requires    string
-	InstallHint string
-	Available   bool
-	Note        string // probe failure reason; "" when available
-	Version     string // VersionString() output; "" when unavailable
+	Name              string
+	Description       string
+	Platforms         []string
+	Requires          string
+	InstallHint       string
+	Available         bool
+	UnavailableReason string // human-readable probe failure reason; empty when Available=true
+	Version           string // VersionString() output; empty when Available=false
 }
 
 // AgentInfo is the public face of `agent.Definition`.
