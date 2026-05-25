@@ -276,6 +276,83 @@ const (
 	PromptModeHeadless    PromptMode = "headless"
 )
 
+// BackendName names a runtime backend. Open-set typed string — the
+// constants document the shipped backends; future backends register
+// their own name (the runtime registry is the source of truth).
+type BackendName string
+
+const (
+	BackendDocker     BackendName = "docker"
+	BackendPodman     BackendName = "podman"
+	BackendTart       BackendName = "tart"
+	BackendSeatbelt   BackendName = "seatbelt"
+	BackendContainerd BackendName = "containerd"
+)
+
+// AgentName names a coding agent. Open-set typed string — the constants
+// document the shipped agents; user-defined or future agents add their
+// own. Empty in Options means "use the configured default."
+type AgentName string
+
+const (
+	AgentClaude   AgentName = "claude"
+	AgentCodex    AgentName = "codex"
+	AgentGemini   AgentName = "gemini"
+	AgentOpenCode AgentName = "opencode"
+	AgentAider    AgentName = "aider"
+	AgentTest     AgentName = "test" // dev/test helper agent
+)
+
+// LogSource names a structured-log stream. Closed set — adding a new
+// source requires both a constant here and a producer in the
+// implementation.
+type LogSource string
+
+const (
+	LogSourceCLI     LogSource = "cli"
+	LogSourceSandbox LogSource = "sandbox"
+	LogSourceMonitor LogSource = "monitor"
+	LogSourceHooks   LogSource = "hooks"
+)
+
+// MountSpec describes a host-to-container bind mount declared in
+// RunOptions.Mounts. Replaces the prior []string of "host:container[:ro]"
+// tokens.
+type MountSpec struct {
+	Host      string // host path
+	Container string // container path
+	ReadOnly  bool
+}
+
+// PortMapping describes a host-to-container port mapping declared in
+// RunOptions.Ports. Replaces the prior []string of "8080:8080[/tcp]"
+// tokens.
+type PortMapping struct {
+	Host      int
+	Container int
+	Protocol  string // empty = "tcp"
+}
+
+// PruneItemKind categorises one removed item in PruneResult. Open-set
+// typed string — additional categories can be added without breaking
+// embedders.
+type PruneItemKind string
+
+const (
+	PruneItemContainer PruneItemKind = "container" // a sandbox container
+	PruneItemImage     PruneItemKind = "image"     // a backend image / VM image
+	PruneItemTempDir   PruneItemKind = "tempdir"   // a stale yoloai temp directory
+	PruneItemVolume    PruneItemKind = "volume"    // a backend-side volume
+)
+
+// PruneItem describes one removed item in PruneResult. Replaces the
+// prior []string of opaque identifiers.
+type PruneItem struct {
+	Kind  PruneItemKind
+	Name  string // identifier (container name, image ref, path, etc.)
+	Bytes int64  // bytes reclaimed by removing this item
+}
+
 // SimulatorPlatform names the Apple simulator platform family.
 // Open-set typed string — named constants document the known platforms;
 // future platforms add their own constants without breaking embedders.
@@ -346,7 +423,7 @@ type Options struct {
 	// configuration) for the rationale and the linter scope.
 	DataDir string
 
-	Backend string       // explicit backend; "" = read from DataDir/config.yaml, auto-detect
+	Backend BackendName  // explicit backend; empty = read from DataDir/config.yaml, auto-detect
 	Logger  *slog.Logger // structured-event sink; nil = slog.Default()
 }
 
@@ -384,10 +461,10 @@ func (*Client) System() *SystemClient { panic("design-only") }
 // List returns sandboxes matching opts. Cross-sandbox; lives directly on
 // Client (a Sandbox handle wouldn't make sense — there's no "name" yet).
 type ListOptions struct {
-	Statuses        []Status // filter to these statuses; empty = all
-	Agents          []string // filter by agent name
-	Profiles        []string // filter by profile ("" for unprofiled)
-	OnlyWithChanges bool     // filter to sandboxes with unapplied changes
+	Statuses        []Status    // filter to these statuses; empty = all
+	Agents          []AgentName // filter by agent name; empty = all
+	Profiles        []string    // filter by profile name; nil = all; []string{""} = only unprofiled sandboxes
+	OnlyWithChanges bool        // filter to sandboxes with unapplied changes
 }
 
 func (*Client) List(ctx context.Context, opts ListOptions) ([]*Info, error) {
@@ -411,10 +488,10 @@ type RunOptions struct {
 
 	AuxDirs []DirSpec // additional `-d <dir>` mounts; read-only by default
 
-	Agent   string // "claude", "gemini", "codex", "opencode", "aider", "test"
-	Model   string // agent-specific model id or alias
-	Profile string // profile name
-	Prompt  string // initial prompt; empty = interactive
+	Agent   AgentName // empty = read from DataDir/config.yaml or profile
+	Model   string    // agent-specific model id or alias
+	Profile string    // profile name
+	Prompt  string    // initial prompt; empty = interactive
 
 	Isolation IsolationMode // REQUIRED; empty rejected. Use DefaultRunOptions() for the current default.
 	OS        HostOS        // REQUIRED; empty rejected
@@ -423,8 +500,8 @@ type RunOptions struct {
 	AllowDomains []string // initial allowlist; only meaningful with NetworkIsolated
 
 	Env       map[string]string
-	Mounts    []string
-	Ports     []string
+	Mounts    []MountSpec
+	Ports     []PortMapping
 	Secrets   []string
 	BuildArgs map[string]string
 
@@ -553,7 +630,8 @@ func (*Sandbox) Stop(ctx context.Context) error { panic("design-only") }
 //	container ↔ container-enhanced       (docker / podman): allowed, but
 //	    refused with *UsageError when :overlay directories hold uncommitted
 //	    state (gVisor doesn't support overlayfs in-container; data would
-//	    be lost). Force=true overrides after the user acknowledges.
+//	    be lost). AcceptOverlayDataLoss=true overrides after the user
+//	    acknowledges.
 //	vm ↔ vm-enhanced                     (containerd): allowed
 //	container* family ↔ vm* family       — REFUSED with *UsageError
 //	    pointing at the destroy + recreate sequence. The backend changes
@@ -680,8 +758,8 @@ func (*Sandbox) Exec(ctx context.Context, opts ExecOptions, io IOStreams) (*Exec
 
 // LogOptions configures Logs.
 type LogOptions struct {
-	Format   LogFormat // REQUIRED; empty rejected. Use DefaultLogOptions() for LogStructured.
-	Sources  []string  // for LogStructured / LogStructuredRaw: cli, sandbox, monitor, hooks
+	Format   LogFormat   // REQUIRED; empty rejected. Use DefaultLogOptions() for LogStructured.
+	Sources  []LogSource // for LogStructured / LogStructuredRaw; empty = all known sources
 	MinLevel LogLevel
 	Since    time.Duration // 0 = no filter
 	Follow   bool          // tail live; returns when sandbox is done
@@ -1078,7 +1156,7 @@ type SystemClient struct{}
 
 // BackendInfo bundles a BackendDescriptor with its current Probe verdict.
 type BackendInfo struct {
-	Name              string
+	Name              BackendName
 	Description       string
 	Platforms         []string
 	Requires          string
@@ -1090,7 +1168,7 @@ type BackendInfo struct {
 
 // AgentInfo is the public face of `agent.Definition`.
 type AgentInfo struct {
-	Name             string
+	Name             AgentName
 	Description      string
 	PromptMode       PromptMode
 	APIKeyEnvVars    []string
@@ -1121,11 +1199,11 @@ type SystemInfo struct {
 
 func (*SystemClient) Info(ctx context.Context) (*SystemInfo, error)       { panic("design-only") }
 func (*SystemClient) Backends(ctx context.Context) ([]BackendInfo, error) { panic("design-only") }
-func (*SystemClient) Backend(ctx context.Context, name string) (*BackendInfo, error) {
+func (*SystemClient) Backend(ctx context.Context, name BackendName) (*BackendInfo, error) {
 	panic("design-only")
 }
-func (*SystemClient) Agents() []AgentInfo                   { panic("design-only") }
-func (*SystemClient) Agent(name string) (*AgentInfo, error) { panic("design-only") }
+func (*SystemClient) Agents() []AgentInfo                      { panic("design-only") }
+func (*SystemClient) Agent(name AgentName) (*AgentInfo, error) { panic("design-only") }
 
 // ProfileInfo is the public face of a yoloai profile. Returned by
 // SystemClient.Profile / Profiles.
@@ -1207,9 +1285,9 @@ func (*SystemClient) ResetConfig(ctx context.Context, key string) error { panic(
 // BuildOptions configures Build.
 type BuildOptions struct {
 	Profile     string
-	Backend     string
-	AllBackends bool // build across every available backend (exclusive with Backend)
-	Rebuild     bool // build even when the checksum says the existing image is current
+	Backend     BackendName // empty = current default; ignored when AllBackends == true
+	AllBackends bool        // build across every available backend; mutually exclusive with a non-empty Backend
+	Rebuild     bool        // build even when the checksum says the existing image is current
 	Secrets     []string
 	OnProgress  func(msg string) // human-readable progress (image build steps); nil = silent
 }
@@ -1237,16 +1315,18 @@ func (*SystemClient) DiskUsage(ctx context.Context) (*DiskUsage, error) { panic(
 
 // DoctorOptions configures Doctor.
 type DoctorOptions struct {
-	BackendFilter   string
+	BackendFilter   BackendName
 	IsolationFilter IsolationMode
 	OnProgress      func(msg string) // human-readable progress (per-check); nil = silent
 }
 
-// DoctorReport is the verdict for one backend+mode pair.
+// DoctorReport is the verdict for one backend+mode pair. Mode is the
+// concrete isolation mode being checked; the "is this the backend's
+// default mode?" question is derivable by comparing Mode to
+// BackendInfo's default — no separate IsDefaultMode flag needed.
 type DoctorReport struct {
-	Backend             string
-	Mode                IsolationMode // "" when IsDefaultMode
-	IsDefaultMode       bool
+	Backend             BackendName
+	Mode                IsolationMode
 	Availability        Availability
 	InitErr             error
 	MissingCapabilities []string
@@ -1266,7 +1346,7 @@ type PruneOptions struct {
 }
 
 type PruneResult struct {
-	RemovedItems []string
+	RemovedItems []PruneItem
 	FreedBytes   int64
 }
 
@@ -1281,8 +1361,8 @@ func (*SystemClient) Prune(ctx context.Context, opts PruneOptions) (*PruneResult
 // directly. Setup never prompts — every answer must be supplied here.
 type SetupOptions struct {
 	TmuxConf TmuxConfMode // required
-	Backend  string       // initial default container_backend; "" = no default set
-	Agent    string       // initial default agent name; "" = no default set
+	Backend  BackendName  // initial default container_backend; empty = no default set
+	Agent    AgentName    // initial default agent name; empty = no default set
 }
 
 func (*SystemClient) Setup(ctx context.Context, opts SetupOptions) error { panic("design-only") }
@@ -1294,8 +1374,19 @@ func (*SystemClient) Setup(ctx context.Context, opts SetupOptions) error { panic
 // W-L8b lands real aliases or re-exports. Listed here so the design
 // type-checks without pulling internal packages.
 
-// Status re-exports sandbox.Status. The full constant set ships with
-// the implementation; named here for the design checkpoint.
+// Status re-exports sandbox.Status — the lifecycle classification
+// yoloai assigns to a sandbox based on container state + agent
+// observations. The full constant set ships with the implementation;
+// named here for the design checkpoint.
+//
+// **String-value overlap with AgentStatus.** StatusActive, StatusIdle,
+// and StatusDone share string values ("active", "idle", "done") with
+// AgentStatusActive, AgentStatusIdle, AgentStatusDone respectively.
+// The two enums are distinct types — Status describes the *combined*
+// sandbox state (container + agent), AgentStatus describes the *agent
+// process* state alone — and embedders should compare each value
+// against its own type, not cross-compare via string. (Go's type
+// system enforces this; the overlap is only visible when serialised.)
 type Status string
 
 const (
@@ -1310,8 +1401,9 @@ const (
 )
 
 // AgentStatus is the agent process's self-reported state, separate from
-// the lifecycle Status (which describes the container). Re-exports
-// sandbox.AgentStatus.
+// the lifecycle Status (which describes the combined sandbox state).
+// Re-exports sandbox.AgentStatus. See Status's docstring for the
+// shared-string-values note.
 type AgentStatus string
 
 const (
@@ -1349,7 +1441,7 @@ type Info struct {
 	// Live state — computed at Inspect time, not stored in Meta.
 	Status        Status
 	AgentStatus   AgentStatus
-	HasChanges    bool // unapplied agent commits or uncommitted edits
+	HasChanges    bool // workdir has unapplied agent commits or uncommitted edits
 	AgentExitCode *int // raw process exit code reported by the agent (nil = not reported). For debug / bug-report logging only; NOT a portable success signal across agents — branch on Status instead.
 
 	// Convenience fields not present in Meta.
@@ -1492,11 +1584,13 @@ const (
 //
 // Q-B.  Error mapping. Which sentinels are stable contract?
 //       **RESOLVED 2026-05-24:** Three-category exhaustive taxonomy.
-//         (1) Four stable sentinels — ErrSandboxExists, ErrSandboxNotFound,
-//             ErrUnappliedChanges, ErrBackendUnavailable. (ErrNoChanges
-//             dropped in Q-P as redundant with ApplyResult.) Promotion
-//             rule: add only when a real call site needs to branch on
-//             it AND the state isn't recoverable from a returned result.
+//         (1) Five stable sentinels — ErrSandboxExists, ErrSandboxNotFound,
+//             ErrUnappliedChanges, ErrBackendUnavailable, ErrProfileNotFound.
+//             (ErrNoChanges dropped in Q-P as redundant with ApplyResult.
+//             ErrProfileNotFound added in Q-W when profile management
+//             joined the API.) Promotion rule: add only when a real
+//             call site needs to branch on it AND the state isn't
+//             recoverable from a returned result.
 //         (2) *UsageError — caller did something refused before any work.
 //             Re-exports internal/yoerrors. Detected with errors.As.
 //         (3) *UnrecoverableError — Client started, hit something it
@@ -1614,8 +1708,8 @@ const (
 //         * The container ↔ container-enhanced transition is further
 //           refused when :overlay directories hold uncommitted state
 //           (gVisor doesn't support in-container overlayfs; the upper
-//           layer would be lost). RestartOptions.Force=true overrides
-//           after the user acknowledges.
+//           layer would be lost). RestartOptions.AcceptOverlayDataLoss
+//           = true overrides after the user acknowledges.
 //
 //       The within-backend rule is checked against
 //       BackendDescriptor.SupportedIsolationModes — already exists; no
@@ -2426,3 +2520,92 @@ const (
 //       taxonomy, that's a taxonomy gap to fix (add a real code) or
 //       a programming bug (panic + caller's recover boundary), not
 //       an "Other / Internal / Bug" bucket.
+//
+// Q-Y.  Round-2 critique sweep — typed-name enums, structured tokens,
+//       small redundancies, stale references.
+//
+//       **RESOLVED 2026-05-25:** Round-2 fresh-eyes pass found one
+//       backlog item (typed-name sweep we'd implicitly endorsed but
+//       not applied), a handful of stale references from earlier
+//       renames, two small structural redundancies, and a few doc
+//       tightenings.
+//
+//       1. Typed-name enum sweep (the backlog item). Added open-set
+//          typed enums BackendName, AgentName, LogSource and applied
+//          them consistently:
+//
+//            Options.Backend          string → BackendName
+//            BuildOptions.Backend     string → BackendName
+//            SetupOptions.Backend     string → BackendName
+//            DoctorOptions.BackendFilter string → BackendName
+//            DoctorReport.Backend     string → BackendName
+//            BackendInfo.Name         string → BackendName
+//            SystemClient.Backend(name string) → (name BackendName)
+//
+//            RunOptions.Agent         string → AgentName
+//            SetupOptions.Agent       string → AgentName
+//            ListOptions.Agents       []string → []AgentName
+//            AgentInfo.Name           string → AgentName
+//            SystemClient.Agent(name string) → (name AgentName)
+//
+//            LogOptions.Sources       []string → []LogSource
+//
+//          Consistent with IsolationMode / HostOS / NetworkMode /
+//          SimulatorPlatform etc. Closes the loop on the §4
+//          parse-don't-validate discipline.
+//
+//       2. Structured tokens — CLI-shape leaks (same shape as the
+//          Q-R SimulatorRuntime fix). Two more []string fields
+//          replaced with structured types:
+//
+//            RunOptions.Mounts  []string → []MountSpec
+//                where MountSpec is { Host, Container string;
+//                                     ReadOnly bool }.
+//            RunOptions.Ports   []string → []PortMapping
+//                where PortMapping is { Host, Container int;
+//                                       Protocol string }.
+//
+//          Embedders no longer format/parse "host:container[:ro]"
+//          and "8080:8080/tcp" tokens; the CLI parses these from
+//          flag values into the typed structs before calling Run.
+//
+//          PruneResult.RemovedItems []string → []PruneItem (with
+//          PruneItemKind open-set typed enum). Tells embedders WHAT
+//          got removed, not just opaque names.
+//
+//       3. Small redundancies fixed:
+//
+//          - DoctorReport: dropped IsDefaultMode bool. Mode == "" was
+//            the empty-as-meaningful pattern Q-H ruled out; the
+//            "is this the default mode?" question is derivable by
+//            comparing Mode to BackendInfo's default. No separate
+//            flag needed.
+//
+//          (BuildOptions.Backend + AllBackends interaction left as-is
+//          — the two-field shape with documented exclusivity matches
+//          the CLI's --backend / --all-backends flag pair and the
+//          mutual-exclusion is checked at the call.)
+//
+//       4. Stale references fixed:
+//
+//          - RestartOptions doc said "Force=true overrides" — pre
+//            Q-J name. Updated to "AcceptOverlayDataLoss=true."
+//          - Q-I body had the same stale reference. Updated.
+//          - Q-B sentinel list said "Four stable sentinels" — Q-W
+//            added ErrProfileNotFound bringing total to five.
+//            Updated.
+//
+//       5. Doc tightenings:
+//
+//          - Info.HasChanges now says "workdir has unapplied agent
+//            commits or uncommitted edits" (post Q-U workdir-only).
+//          - Status and AgentStatus types document the shared-string-
+//            values overlap ("active", "idle", "done") so embedders
+//            don't accidentally cross-compare via string.
+//
+//       Net effect: same architectural shape as after Q-X, but the
+//       file now applies its own typed-enum discipline uniformly
+//       (no stringly Backend/Agent/Source leftovers) and the CLI-
+//       shape token strings are gone from the universal options. The
+//       previous Q-rounds caught the structural questions; this one
+//       was polish.
