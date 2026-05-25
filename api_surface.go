@@ -234,7 +234,6 @@ type Availability string
 
 const (
 	AvailabilityReady       Availability = "ready"
-	AvailabilityWarning     Availability = "warning"
 	AvailabilityUnavailable Availability = "unavailable"
 )
 
@@ -331,7 +330,7 @@ func (*Client) System() *SystemClient { panic("design-only") }
 // List returns sandboxes matching opts. Cross-sandbox; lives directly on
 // Client (a Sandbox handle wouldn't make sense — there's no "name" yet).
 type ListOptions struct {
-	Statuses        []string // "active", "idle", "done", ...; empty = all
+	Statuses        []Status // filter to these statuses; empty = all
 	Agents          []string // filter by agent name
 	Profiles        []string // filter by profile ("" for unprofiled)
 	OnlyWithChanges bool     // filter to sandboxes with unapplied changes
@@ -706,7 +705,6 @@ func (*Workdir) Diff(ctx context.Context, opts DiffOptions) ([]*DiffResult, erro
 }
 
 // ApplyOptions configures Apply.
-// ApplyOptions configures Apply.
 //
 // No confirmation-skip field: Apply has no state-bearing refusal to
 // acknowledge. The "are you sure you want to apply N commits?" prompt
@@ -728,7 +726,8 @@ type ApplyOptions struct {
 // Distinction between PerDir and SkippedDirs:
 //   - PerDir lists every directory Apply actually processed. Entries
 //     where the directory had no changes from baseline are reported
-//     here with Applied=false (the diff was empty; nothing to do).
+//     here with Status == ApplyStatusEmpty (the diff was empty; nothing
+//     to do).
 //   - SkippedDirs lists directories Apply declined to process at all
 //     because of the directory's mount mode or container state. Each
 //     entry carries a Reason so embedders can render or branch without
@@ -740,8 +739,8 @@ type ApplyResult struct {
 }
 
 // SkippedDir reports one directory that Apply declined to act on,
-// together with the reason. See SkipReason for the closed-set of
-// reasons known today.
+// together with the reason. SkipReason is an open-set typed string —
+// see its constants for the cases known today.
 type SkippedDir struct {
 	Dir    string // host path to the skipped directory
 	Reason SkipReason
@@ -1140,8 +1139,32 @@ func (*SystemClient) Setup(ctx context.Context, opts SetupOptions) error { panic
 // W-L8b lands real aliases or re-exports. Listed here so the design
 // type-checks without pulling internal packages.
 
-// Status re-exports sandbox.Status.
-type Status = string
+// Status re-exports sandbox.Status. The full constant set ships with
+// the implementation; named here for the design checkpoint.
+type Status string
+
+const (
+	StatusActive      Status = "active"      // container running, agent actively working
+	StatusIdle        Status = "idle"        // container running, agent alive, awaiting input
+	StatusDone        Status = "done"        // container running, agent exited cleanly (exit 0)
+	StatusFailed      Status = "failed"      // container running, agent exited with error (non-zero)
+	StatusStopped     Status = "stopped"     // container stopped
+	StatusRemoved     Status = "removed"     // container removed but sandbox dir exists
+	StatusBroken      Status = "broken"      // sandbox dir exists but meta.json missing/invalid
+	StatusUnavailable Status = "unavailable" // backend not running (container state unknown)
+)
+
+// AgentStatus is the agent process's self-reported state, separate from
+// the lifecycle Status (which describes the container). Re-exports
+// sandbox.AgentStatus.
+type AgentStatus string
+
+const (
+	AgentStatusUnknown AgentStatus = ""       // status not yet determined
+	AgentStatusActive  AgentStatus = "active" // agent is actively working
+	AgentStatusIdle    AgentStatus = "idle"   // agent is idle, awaiting input
+	AgentStatusDone    AgentStatus = "done"   // agent has completed its task
+)
 
 // SandboxMeta is the on-disk sandbox metadata captured at creation time.
 // In the W-L8b implementation this is a Go type alias:
@@ -1170,8 +1193,8 @@ type Info struct {
 
 	// Live state — computed at Inspect time, not stored in Meta.
 	Status      Status
-	AgentStatus string // "active", "idle", "done", etc. (separate from lifecycle)
-	HasChanges  bool   // unapplied agent commits or uncommitted edits
+	AgentStatus AgentStatus
+	HasChanges  bool // unapplied agent commits or uncommitted edits
 
 	// Convenience fields not present in Meta.
 	HostExchangeDir string
