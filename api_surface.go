@@ -1104,10 +1104,9 @@ func (*SystemClient) Prune(ctx context.Context, opts PruneOptions) (*PruneResult
 // then calls Setup with the populated struct. Embedders set these
 // directly. Setup never prompts — every answer must be supplied here.
 type SetupOptions struct {
-	TmuxConf   TmuxConfMode     // required
-	Backend    string           // initial default container_backend; "" = no default set
-	Agent      string           // initial default agent name; "" = no default set
-	OnProgress func(msg string) // human-readable progress (per-step); nil = silent
+	TmuxConf TmuxConfMode // required
+	Backend  string       // initial default container_backend; "" = no default set
+	Agent    string       // initial default agent name; "" = no default set
 }
 
 func (*SystemClient) Setup(ctx context.Context, opts SetupOptions) error { panic("design-only") }
@@ -1588,3 +1587,40 @@ const (
 //       against actual use cases — not hypothetical ones. YAGNI applies
 //       to API surface as much as to implementation; a 30-second future
 //       feature is preferable to a permanently confusing option set.
+//
+// Q-M.  OnProgress audit — does every Options struct really need one?
+//
+//       **RESOLVED 2026-05-25:** Audited all six OnProgress callbacks.
+//       OnProgress earns its place when the operation has discrete,
+//       observable events AND/OR can run long enough that the caller
+//       benefits from a liveness signal during the blocking call.
+//       Clarification on what OnProgress IS NOT: it does not make the
+//       call async. The call still blocks the caller's goroutine.
+//       Embedders who want concurrency wrap the call in `go func()`.
+//       OnProgress exists for in-call liveness and per-step rendering.
+//
+//         RunOptions       KEEP — multi-minute, many discrete events
+//                                 (image build, container start, mounts,
+//                                  agent launch).
+//         CloneOptions     KEEP — single CopyDir call, but sandboxes
+//                                 routinely reach 1–2 GB per `yoloai ls`;
+//                                 30s+ of silence feels like a hang.
+//                                 Liveness signal, not multi-event.
+//                                 CopyDir may later emit per-file events.
+//         BuildOptions     KEEP — image build, many discrete layer/
+//                                 step events.
+//         DoctorOptions    KEEP — multiple backend×isolation probes;
+//                                 per-check events worth surfacing.
+//         PruneOptions     KEEP — per-item events across potentially
+//                                 many containers/VMs/images.
+//         SetupOptions     DROP — three filesystem writes, milliseconds.
+//                                 No events worth surfacing; CLI handles
+//                                 user-visible output via its pre-Setup
+//                                 wizard.
+//
+//       Codified test for future OnProgress additions: ask "does this
+//       op take long enough that the caller benefits from knowing it's
+//       alive, AND/OR are there ≥2 discrete events worth observing?"
+//       If no to both, drop it. The cost of a missing OnProgress is
+//       low (add it back when needed); the cost of one present without
+//       justification is API noise and embedder confusion.
