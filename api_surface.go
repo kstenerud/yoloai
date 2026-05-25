@@ -208,6 +208,21 @@ const (
 	AvailabilityUnavailable Availability = "unavailable"
 )
 
+// ExecUser identifies the run-as user for Exec. Open-set typed string:
+// the named constants below document yoloai's stock-image conventions
+// for discoverability, but any other value is passed through to the
+// backend untouched as a Unix username or uid[:gid] spec — useful for
+// profile-customized images that define their own users.
+//
+// Empty means "use the container's default user" (typically the yoloai
+// user, uid 1001, in yoloai's stock images).
+type ExecUser string
+
+const (
+	ExecUserRoot   ExecUser = "root"   // run as root inside the container (uid 0)
+	ExecUserYoloai ExecUser = "yoloai" // run as the yoloai user (uid 1001 in stock images; the agent's default)
+)
+
 // PromptMode mirrors `agent.PromptMode` (the existing typed string in the
 // agent package). Synthetic here; W-L8b will replace with a type alias
 // (`type PromptMode = agent.PromptMode`).
@@ -502,8 +517,8 @@ func (*Sandbox) Attach(ctx context.Context, opts AttachOptions, io IOStreams) er
 type ExecOptions struct {
 	Command []string
 	Env     map[string]string
-	WorkDir string
-	User    string
+	Dir     string   // current working directory for the exec'd process (NOT the sandbox's primary workdir); empty = container's default WORKDIR
+	User    ExecUser // run-as user; empty = container default. See ExecUser for known values.
 }
 
 // ExecResult is returned for non-streaming Exec. When io.TTY=true, output
