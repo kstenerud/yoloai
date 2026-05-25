@@ -423,15 +423,15 @@ func (*Sandbox) Stop(ctx context.Context, opts StopOptions) error { panic("desig
 //	    (docker ↔ containerd); the image lives in a different store; the
 //	    network model is different. This is a new sandbox, not a restart.
 type RestartOptions struct {
-	IsolationOverride IsolationMode // empty = keep current isolation. Cross-backend transitions refused.
-	Force             bool          // override safety refusals (e.g. overlay-data-loss on container → container-enhanced)
+	IsolationOverride     IsolationMode // empty = keep current isolation. Cross-backend transitions refused.
+	AcceptOverlayDataLoss bool          // acknowledge that :overlay state will be destroyed on container ↔ container-enhanced transitions. Required when overlay dirs hold uncommitted state for that transition.
 }
 
 func (*Sandbox) Restart(ctx context.Context, opts RestartOptions) error { panic("design-only") }
 
 // DestroyOptions configures Destroy.
 type DestroyOptions struct {
-	Force bool // destroy even when the sandbox has unapplied changes
+	SkipApplyCheck bool // proceed despite the ErrUnappliedChanges refusal (unapplied agent commits / WIP edits)
 }
 
 func (*Sandbox) Destroy(ctx context.Context, opts DestroyOptions) error { panic("design-only") }
@@ -632,8 +632,8 @@ type Files struct{}
 // PutOptions configures Put. Host glob expansion happens at the caller
 // (the CLI does shell globbing); Sources are already-resolved host paths.
 type PutOptions struct {
-	Sources []string
-	Force   bool
+	Sources   []string
+	Overwrite bool // overwrite existing destination files
 }
 
 func (*Files) Put(ctx context.Context, opts PutOptions) error { panic("design-only") }
@@ -641,9 +641,9 @@ func (*Files) Put(ctx context.Context, opts PutOptions) error { panic("design-on
 // GetOptions configures Get. Patterns match inside the sandbox exchange
 // dir; Output is a host destination (dir or file).
 type GetOptions struct {
-	Patterns []string
-	Output   string
-	Force    bool
+	Patterns  []string
+	Output    string
+	Overwrite bool // overwrite existing destination files
 }
 
 // FileEntry describes one file in the exchange directory.
@@ -771,7 +771,7 @@ type BuildOptions struct {
 	Profile    string
 	Backend    string
 	All        bool // build across every available backend (exclusive with Backend)
-	Force      bool
+	Rebuild    bool // build even when the checksum says the existing image is current
 	Secrets    []string
 	OnProgress func(msg string) // human-readable progress (image build steps); nil = silent
 }
@@ -1155,3 +1155,29 @@ const (
 //       upgrades. Cross-backend transitions were always
 //       silently-destructive; refusing them is honesty about the
 //       blast radius rather than a feature loss.
+//
+// Q-J.  "Force" naming audit.
+//       **RESOLVED 2026-05-25:** "Force" is a CLI-UX convenience name
+//       that doesn't carry its meaning into API code. Five `Force bool`
+//       fields renamed to be concern-specific:
+//
+//         RestartOptions.Force      → AcceptOverlayDataLoss
+//         DestroyOptions.Force      → SkipApplyCheck
+//         PutOptions.Force          → Overwrite
+//         GetOptions.Force          → Overwrite
+//         BuildOptions.Force        → Rebuild
+//
+//       Codified principle: API boolean fields are named for the
+//       specific effect, not for the user-facing flag. "Force"
+//       remains an acceptable CLI flag name (familiar Unix idiom),
+//       but the API never has a field literally called Force. Future
+//       overrides each get their own specific name; no field gets to
+//       mean two things.
+//
+//       Reviewer's framing: prevents the at-risk Force fields
+//       (Restart, Destroy) from silently accreting concerns as new
+//       safety checks are added — under the old name, a future
+//       "permit cross-backend transition" or "ignore active agent"
+//       override would naturally land in the same Force field; with
+//       specific names, growth is explicit (a new field) rather than
+//       implicit (broadening an existing field's meaning).
