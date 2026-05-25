@@ -262,6 +262,28 @@ const (
 	PromptModeHeadless    PromptMode = "headless"
 )
 
+// SimulatorPlatform names the Apple simulator platform family.
+// Open-set typed string — named constants document the known platforms;
+// future platforms add their own constants without breaking embedders.
+type SimulatorPlatform string
+
+const (
+	SimulatorIOS      SimulatorPlatform = "ios"
+	SimulatorTVOS     SimulatorPlatform = "tvos"
+	SimulatorWatchOS  SimulatorPlatform = "watchos"
+	SimulatorVisionOS SimulatorPlatform = "visionos"
+)
+
+// SimulatorRuntime identifies one Apple simulator runtime to pre-stage
+// inside a tart VM. Used by RunOptions.SimulatorRuntimes. Backend-
+// specific (tart-only); RunOptions carries it inline rather than in a
+// per-backend sub-struct while it's the only such option (Q-B4 audit;
+// revisit when a second backend-specific option appears).
+type SimulatorRuntime struct {
+	Platform SimulatorPlatform
+	Version  string // optional; empty = latest available
+}
+
 // =============================================================================
 // Client — top-level entry point
 // =============================================================================
@@ -378,7 +400,7 @@ type RunOptions struct {
 	SkipDirtyRepoCheck bool // proceed despite uncommitted changes in the host workdir
 	NoStart            bool // create state but don't start the container yet
 
-	SimulatorRuntimes []string // tart-only: pre-built Apple simulator runtime base ("ios:26.4", "tvos")
+	SimulatorRuntimes []SimulatorRuntime // tart-only: pre-built Apple simulator runtime bases to stage in the VM
 
 	Wait       bool             // block until terminal status
 	OnProgress func(msg string) // called with human-readable progress lines; nil = silent
@@ -465,10 +487,7 @@ type StartOptions struct {
 
 func (*Sandbox) Start(ctx context.Context, opts StartOptions) error { panic("design-only") }
 
-// StopOptions configures Stop. Reserved for future use (e.g. --timeout).
-type StopOptions struct{}
-
-func (*Sandbox) Stop(ctx context.Context, opts StopOptions) error { panic("design-only") }
+func (*Sandbox) Stop(ctx context.Context) error { panic("design-only") }
 
 // RestartOptions configures Restart. Restart is "stop, optionally change
 // isolation, recreate the container, start" — the natural home for an
@@ -536,12 +555,9 @@ func (*Sandbox) Wait(ctx context.Context, opts WaitOptions) (exitCode int, err e
 
 // --- streaming / interactive ---
 
-// AttachOptions configures Attach.
-type AttachOptions struct{}
-
 // Attach blocks until the user detaches or the agent exits. Requires
 // IOStreams.TTY=true; non-TTY attach returns a *UsageError.
-func (*Sandbox) Attach(ctx context.Context, opts AttachOptions, io IOStreams) error {
+func (*Sandbox) Attach(ctx context.Context, io IOStreams) error {
 	panic("design-only")
 }
 
@@ -869,7 +885,20 @@ func (*Workdir) BaselineLog(ctx context.Context) ([]BaselineLogEntry, error) {
 // namespacing.
 //
 // The host path to the exchange dir lives on *Info (returned by
-// Sandbox.Inspect) as Info.ExchangeDir — no separate FilesPath method.
+// Sandbox.Inspect) as Info.HostExchangeDir — no separate FilesPath
+// method.
+//
+// **Partial-completion contract.** Put / Rm / Network.Allow / Network.Remove
+// process a list of items and return just `error`. They commit each
+// item independently; on the first failure they return the error
+// without rolling back the items already processed. Get is similar but
+// returns `written []string` so the caller can tell exactly which
+// destination files exist on disk after the call. Workdir.Apply is the
+// exception — it returns *ApplyResult with per-item Status because
+// apply's per-directory conflict semantics are too rich for the
+// caller to reconstruct from a single error. The asymmetry is
+// deliberate: batch list-mutation ops are retry-on-error; apply needs
+// per-item branching.
 type Files struct{}
 
 // PutOptions configures Put. Host glob expansion happens at the caller
@@ -984,15 +1013,19 @@ func (*Client) BugReport(ctx context.Context, name string, opts BugReportOptions
 
 // BugReportSession is the handle returned by StartBugReportSession. Buffers
 // runtime events until Stop or Discard.
-type BugReportSession interface {
-	Stop() (path string, err error) // flush + write report
-	Discard()                       // throw away buffered events
-}
+type BugReportSession struct{}
+
+// Stop flushes the buffered events to a report file and returns the
+// absolute path of the written report.
+func (*BugReportSession) Stop() (path string, err error) { panic("design-only") }
+
+// Discard throws away buffered events without writing a report.
+func (*BugReportSession) Discard() { panic("design-only") }
 
 // StartBugReportSession begins buffering runtime events. Embedders scope the
 // session however they want (single risky call, fixed duration, program
 // lifetime). The CLI's top-level `--bugreport` flag is a thin wrapper.
-func (*Client) StartBugReportSession(ctx context.Context, opts BugReportOptions) BugReportSession {
+func (*Client) StartBugReportSession(ctx context.Context, opts BugReportOptions) *BugReportSession {
 	panic("design-only")
 }
 
@@ -1881,3 +1914,41 @@ const (
 //       through. The principle is now part of the GO.md "Clarity over
 //       brevity" section — every field type answers "what is this?"
 //       not "how does the CLI render it?".
+//
+// Q-R.  Critique B-series — consistency, empty options, batch results.
+//
+//       **RESOLVED 2026-05-25:** Four smaller fixes applied together.
+//
+//       B2 (partial-completion shape consistency): accept the
+//         asymmetry between Workdir.Apply (rich *ApplyResult) and the
+//         batch list-mutation ops (Files.Put/Get/Rm,
+//         Network.Allow/Remove returning error or []string only).
+//         Apply's per-directory conflict semantics are too rich for
+//         the caller to reconstruct from a single error; the batch
+//         ops are retry-on-error workflows where rich per-item
+//         results would be over-engineered. Documented on the Files
+//         type with the explicit contract.
+//
+//       B3 (empty Options structs): dropped. StopOptions struct{} and
+//         AttachOptions struct{} were placeholders "reserved for
+//         future use." Adding option structs later is a breaking
+//         change, but a small and easy one — and the file gets
+//         cleaner now. Same YAGNI logic as Q-L (drop IncludeStale)
+//         and Q-O (drop duplicated Info fields).
+//
+//       B4 (SimulatorRuntimes typed): []string → []SimulatorRuntime.
+//         The string form "ios:26.4" was a CLI-shaped opaque token
+//         (Q-Q applied: pre-parsed structured value, not data).
+//         Replaced with a struct of (Platform SimulatorPlatform,
+//         Version string). Added the SimulatorPlatform open-set
+//         typed enum (ios / tvos / watchos / visionos).
+//         Backend-specificity: this is the only tart-only field on
+//         the universal RunOptions today. Carrying it inline is
+//         pragmatic; revisit if more backend-specific options
+//         appear and the pattern starts to weigh.
+//
+//       B5 (BugReportSession concrete): interface → struct. The
+//         interface had no plausible alternate implementer and broke
+//         consistency with the rest of the file (every other handle
+//         is a concrete *struct). No reason for the abstraction.
+//         StartBugReportSession now returns *BugReportSession.
