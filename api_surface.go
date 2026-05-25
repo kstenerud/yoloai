@@ -40,6 +40,7 @@ package yoloai
 import (
 	"context"
 	"io"
+	"log/slog"
 	"time"
 )
 
@@ -201,15 +202,20 @@ type Client struct{}
 
 // Options configures a Client.
 //
-// No Input or Output field by design. The Client is non-interactive (Q-F)
-// so it never reads stdin; embedders that need to relay user-facing
-// progress events use the OnProgress callback on each method's Options
-// struct (Q-? cleanup, 2026-05-24). Streaming methods (Attach, Exec,
-// ProxyMCP) take IOStreams per-call; that's the only place an input
-// stream appears in the API.
+// No Input or Output field by design. The Client is non-interactive
+// (resolved Q-F: Client is orchestration, CLI is the UI layer) so it
+// never reads stdin; embedders that need to relay user-facing progress
+// events use the OnProgress callback on each method's Options struct.
+// Streaming methods (Attach, Exec, ProxyMCP) take IOStreams per-call;
+// that's the only place an input stream appears in the API.
+//
+// Logger is *slog.Logger directly rather than an interface — yoloai is
+// internal-grade per D3 and uses slog throughout its own implementation.
+// Embedders on logr / zap / zerolog bridge via the slog handler adapters
+// each of those libraries provides.
 type Options struct {
-	Backend string // explicit backend; "" = read from config, auto-detect
-	Logger  any    // *slog.Logger; nil = slog.Default(). `any` here to avoid pulling slog into design
+	Backend string       // explicit backend; "" = read from config, auto-detect
+	Logger  *slog.Logger // structured-event sink; nil = slog.Default()
 }
 
 func New(ctx context.Context) (*Client, error)                          { panic("design-only") }
