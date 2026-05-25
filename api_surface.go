@@ -449,6 +449,21 @@ func (*Client) Clone(ctx context.Context, opts CloneOptions) (*Info, error) {
 // invalidate a handle between method calls; those methods then surface
 // ErrSandboxNotFound from their own IO, just like any other Go object
 // that holds a reference to mutable shared state.
+//
+// **Concurrency.** Safe for concurrent use by multiple goroutines (and
+// across process boundaries — two `yoloai` invocations cooperate via
+// the same file locks). Write methods (Start, Stop, Restart, Destroy,
+// Reset, Apply, AdvanceBaseline, SetBaseline, Files.Put, Files.Rm,
+// Network.Allow, Network.Remove) acquire a per-sandbox file lock at
+// method entry; concurrent writes serialize. Read methods (Inspect,
+// Status, Diff, Logs, BaselineLog, Files.Ls, Files.Get, Network.Allowed)
+// don't take the lock and run in parallel.
+//
+// Reads concurrent with writes may observe intermediate state — e.g.,
+// a Diff running during an Apply may see the working tree mid-stash-
+// pop. State doesn't corrupt and methods don't crash, but reads
+// aren't transactional. Embedders that need transactional consistency
+// should serialize reads against writes themselves.
 type Sandbox struct{}
 
 // Name returns the bound sandbox name. Always valid: Client.Sandbox
@@ -708,7 +723,8 @@ func (*Sandbox) Network() *Network { panic("design-only") }
 // =============================================================================
 
 // Workdir scopes diff / apply / baseline operations on a single sandbox.
-// Constructed via Sandbox.Workdir(); never errors.
+// Constructed via Sandbox.Workdir(); never errors. Inherits its parent
+// *Sandbox's concurrency contract (see that type's docstring).
 type Workdir struct{}
 
 // DiffOptions configures Diff.
@@ -898,7 +914,7 @@ func (*Workdir) BaselineLog(ctx context.Context) ([]BaselineLogEntry, error) {
 // Files scopes exchange-directory operations on a single sandbox.
 // Constructed via Sandbox.Files(); never errors. Replaces the
 // FilesPut/FilesGet/FilesLs/FilesRm prefix dance with structural
-// namespacing.
+// namespacing. Inherits its parent *Sandbox's concurrency contract.
 //
 // The host path to the exchange dir lives on *Info (returned by
 // Sandbox.Inspect) as Info.HostExchangeDir — no separate FilesPath
@@ -972,7 +988,8 @@ func (*Files) Rm(ctx context.Context, patterns []string) error { panic("design-o
 // Network scopes network-allowlist operations on a single sandbox.
 // Constructed via Sandbox.Network(); never errors. Only meaningful when
 // the sandbox was created with NetworkIsolated; otherwise methods
-// return *UsageError.
+// return *UsageError. Inherits its parent *Sandbox's concurrency
+// contract.
 //
 // **Allowlist-only model.** The sandbox holds ONE list of permitted
 // outbound domains. Anything not on the list is blocked by iptables +
@@ -1051,6 +1068,13 @@ func (*Client) StartBugReportSession(ctx context.Context, opts BugReportOptions)
 
 // SystemClient scopes `yoloai system …` operations. Constructed via
 // Client.System(); never errors at construction.
+//
+// **Concurrency.** Safe for concurrent use by multiple goroutines. The
+// read-only methods (Info, Backends, Backend, Agents, Agent, Doctor,
+// DiskUsage, Check) run in parallel. Write methods (Build, Prune,
+// Setup) acquire global locks (per-profile for Build; cross-backend
+// for Prune; on the config file for Setup) and serialize concurrent
+// callers.
 type SystemClient struct{}
 
 // BackendInfo bundles a BackendDescriptor with its current Probe verdict.
@@ -2018,3 +2042,44 @@ const (
 //       opaque numbers that LOOK actionable but aren't portable.
 //       Numeric values from external processes (exit codes, signals)
 //       belong in debug surfaces, not in success/fail return values.
+//
+// Q-T.  Concurrency safety contract for handles.
+//
+//       **RESOLVED 2026-05-25:** Promote the partial existing safety
+//       (Client + per-sandbox file locks) into an explicit, documented
+//       guarantee on every handle.
+//
+//       The committed contract:
+//         - Client and SystemClient are safe for concurrent use by
+//           multiple goroutines.
+//         - *Sandbox (and its sub-handles *Workdir, *Files, *Network)
+//           are safe for concurrent use across goroutines AND across
+//           process boundaries — concurrent `yoloai` invocations
+//           cooperate through the same per-sandbox file locks.
+//         - Write methods on *Sandbox / sub-handles acquire the
+//           per-sandbox file lock at method entry. Concurrent writes
+//           on the same sandbox serialize.
+//         - Read methods on *Sandbox / sub-handles don't take the
+//           lock and run in parallel with each other.
+//         - Reads concurrent with writes may observe intermediate
+//           state but do not crash or corrupt state.
+//
+//       This matches the database/sql and http.Client conventions:
+//       share the handle freely; concurrent writes serialize; reads
+//       are non-blocking but not transactional.
+//
+//       Implementation discipline for W-L8b:
+//         - Every write method on *Sandbox acquires the per-sandbox
+//           lock at the public entry point, BEFORE any backend RPC
+//           or filesystem op. The lock acquisition is part of the
+//           method's signature, not pushed down into internals.
+//         - The existing acquireMultiLock used by Clone is the
+//           reference implementation; extend it (or compose it)
+//           rather than inventing a parallel locking model.
+//         - Per-sandbox locks must release on all error paths —
+//           defer-unlock at method entry.
+//
+//       Possible follow-on (NOT in scope for W-L8a/b): explicit
+//       sandbox.Lock() / Unlock() APIs for embedders that want to
+//       batch reads with the snapshot of a single write window.
+//       Defer until a concrete use case appears.
