@@ -91,11 +91,15 @@ func SandboxNameFromEnv() string { panic("design-only") }
 // Shared enums (referenced by Options structs throughout)
 // =============================================================================
 
-// IsolationMode selects the OCI / VM isolation level for a sandbox. The
-// zero value means "unspecified" — Client methods canonicalize it to
-// IsolationContainer at the boundary. Every named constant is a real
-// string so debug output, JSON, and stored metadata are always
-// self-describing (no "" → mystery default mapping).
+// IsolationMode selects the OCI / VM isolation level for a sandbox.
+// Required field where used as a "choice" (RunOptions.Isolation) —
+// empty is rejected with *UsageError. Optional where used as a "filter"
+// or "override" (DoctorOptions.Isolation, StartOptions.IsolationOverride)
+// — empty there has its own meaning, documented on each field.
+//
+// Embedders who want the current default without writing it out can use
+// DefaultRunOptions() (and the other Default*() factories); see Q-H
+// resolution.
 type IsolationMode string
 
 const (
@@ -106,8 +110,9 @@ const (
 	IsolationVMEnhanced          IsolationMode = "vm-enhanced"          // Kata + Firecracker
 )
 
-// HostOS selects the operating-system environment the agent runs in. Zero
-// value means "unspecified" — Client methods canonicalize to OSLinux.
+// HostOS selects the operating-system environment the agent runs in.
+// Required where used as a "choice" (RunOptions.OS). Empty is rejected
+// with *UsageError.
 type HostOS string
 
 const (
@@ -117,8 +122,8 @@ const (
 
 // NetworkMode selects a sandbox's outbound network policy. Modeled as one
 // enum field rather than two booleans — the invalid "isolated AND none"
-// combination is unrepresentable. Zero value means "unspecified" — Client
-// methods canonicalize to NetworkOpen.
+// combination is unrepresentable. Required where used as a "choice"
+// (RunOptions.Network). Empty is rejected with *UsageError.
 type NetworkMode string
 
 const (
@@ -151,8 +156,8 @@ const (
 	ApplyExport ApplyMode = "export" // write *.patch files to ExportDir; don't apply
 )
 
-// LogFormat selects which log stream to emit. Zero value means
-// "unspecified" — canonicalized to LogStructured.
+// LogFormat selects which log stream to emit. Required field. Empty is
+// rejected with *UsageError.
 type LogFormat string
 
 const (
@@ -289,11 +294,11 @@ type RunOptions struct {
 	Profile string // profile name
 	Prompt  string // initial prompt; empty = interactive
 
-	Isolation IsolationMode // empty = canonicalized to IsolationContainer
-	OS        HostOS        // empty = canonicalized to OSLinux
+	Isolation IsolationMode // REQUIRED; empty rejected. Use DefaultRunOptions() for the current default.
+	OS        HostOS        // REQUIRED; empty rejected
+	Network   NetworkMode   // REQUIRED; empty rejected
 
-	Network      NetworkMode // outbound policy; empty = canonicalized to NetworkOpen
-	AllowDomains []string    // initial allowlist; only meaningful with NetworkIsolated
+	AllowDomains []string // initial allowlist; only meaningful with NetworkIsolated
 
 	Env       map[string]string
 	Mounts    []string
@@ -310,6 +315,22 @@ type RunOptions struct {
 	Wait       bool             // block until terminal status
 	OnProgress func(msg string) // called with human-readable progress lines; nil = silent
 }
+
+// DefaultRunOptions returns a RunOptions value with the current default
+// choices populated for the required enum fields (Isolation = container,
+// OS = linux, Network = open). Embedders who want the lazy ergonomic
+// without writing those out can use this as a starting point and override
+// what they care about:
+//
+//	opts := yoloai.DefaultRunOptions()
+//	opts.Name = "myproj"
+//	opts.Workdir = yoloai.DirSpec{Path: "/path"}
+//	client.Run(ctx, opts)
+//
+// Tests should NOT use this helper — they should construct RunOptions{}
+// literals with every field explicit, so that a future change to the
+// default isolation/OS/network doesn't silently shift test behavior.
+func DefaultRunOptions() RunOptions { panic("design-only") }
 
 func (*Client) Run(ctx context.Context, opts RunOptions) (*Info, error) { panic("design-only") }
 
@@ -446,12 +467,17 @@ func (*Sandbox) Exec(ctx context.Context, opts ExecOptions, io IOStreams) (*Exec
 
 // LogOptions configures Logs.
 type LogOptions struct {
-	Format   LogFormat     // empty = canonicalized to LogStructured
+	Format   LogFormat     // REQUIRED; empty rejected. Use DefaultLogOptions() for LogStructured.
 	Sources  []string      // for LogStructured / LogStructuredRaw: cli, sandbox, monitor, hooks
 	MinLevel string        // debug | info | warn | error
 	Since    time.Duration // 0 = no filter
 	Follow   bool          // tail live; returns when sandbox is done
 }
+
+// DefaultLogOptions returns a LogOptions value populated with the current
+// default Format (LogStructured). Same opt-in pattern as
+// DefaultRunOptions — see that function's doc.
+func DefaultLogOptions() LogOptions { panic("design-only") }
 
 // Logs streams the requested log to w.
 func (*Sandbox) Logs(ctx context.Context, opts LogOptions, w io.Writer) error {
@@ -624,9 +650,13 @@ func (*Network) Allowed(ctx context.Context) ([]string, error)     { panic("desi
 
 // BugReportOptions configures BugReport and StartBugReporter.
 type BugReportOptions struct {
-	Mode      BugReportMode // empty = canonicalized to BugReportSafe
+	Mode      BugReportMode // REQUIRED; empty rejected. Use DefaultBugReportOptions() for BugReportSafe.
 	OutputDir string        // directory to write the report; "" = CWD
 }
+
+// DefaultBugReportOptions returns a BugReportOptions value with Mode
+// populated as BugReportSafe. Same opt-in pattern as DefaultRunOptions.
+func DefaultBugReportOptions() BugReportOptions { panic("design-only") }
 
 // BugReport captures a one-shot snapshot of a sandbox plus relevant
 // system state to a markdown file. Returns the absolute path of the
@@ -1030,3 +1060,28 @@ const (
 //       apply locally. Sub-handles (Workdir / Files / Network) are
 //       cheap synchronous wrappers — pure namespace expansion off an
 //       already-validated *Sandbox; no IO at the wrapper level.
+//
+// Q-H.  Zero-value semantics for required typed-enum fields?
+//       **RESOLVED 2026-05-25:** Strict (Path B). Required enum fields
+//       (RunOptions.Isolation, .OS, .Network, LogOptions.Format,
+//       BugReportOptions.Mode) reject empty values with *UsageError.
+//       Embedders MUST set every required field explicitly OR use the
+//       Default*() convenience constructors:
+//
+//         opts := yoloai.DefaultRunOptions()  // pre-filled defaults
+//         opts.Name = "myproj"; opts.Workdir = ...
+//         client.Run(ctx, opts)
+//
+//       Filter / override fields (StartOptions.IsolationOverride,
+//       DoctorOptions.Isolation) keep empty-is-meaningful semantics —
+//       they describe absence-of-override, not absence-of-choice.
+//
+//       Cost paid: ~75 test sites updated to set explicit values.
+//       Future-proofing gained: tests and embedders explicitly pin to
+//       the values they chose; default changes don't silently shift
+//       behavior. The Default*() factories are the documented escape
+//       hatch for embedders who want lazy ergonomics; tests must NOT
+//       use them (per their godoc) so that intentional behavior
+//       remains testable against any default change.
+//       Three factories defined: DefaultRunOptions(),
+//       DefaultLogOptions(), DefaultBugReportOptions().
