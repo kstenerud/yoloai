@@ -783,7 +783,7 @@ const (
 	// failed to apply cleanly. The repo was rolled back to its
 	// pre-apply state via `git am --abort`; any host-side stash was
 	// popped back. The user needs to inspect the diff and either fix
-	// it or skip this dir. Recovery field carries the next-step text.
+	// it or skip this dir.
 	ApplyStatusConflict ApplyStatus = "conflict"
 
 	// ApplyStatusAppliedStashConflict: git am succeeded — the agent's
@@ -791,7 +791,6 @@ const (
 	// pop` (restoring the user's pre-apply uncommitted edits) hit a
 	// conflict against the newly-applied commits. The user has the
 	// commits PLUS unresolved merge markers in their working tree.
-	// Recovery carries resolution instructions.
 	ApplyStatusAppliedStashConflict ApplyStatus = "applied-stash-conflict"
 
 	// ApplyStatusDryRun: DryRun=true; the Patch field holds what
@@ -800,12 +799,17 @@ const (
 )
 
 // PerDirApplyResult reports one directory's apply outcome.
+//
+// No Recovery field: the recovery action is fully derivable from Status
+// (ApplyStatusConflict → resolve the conflict; ApplyStatusAppliedStashConflict
+// → resolve stash-merge markers). The CLI renders its own next-step text;
+// programmatic embedders branch on Status. Same pattern as Q-P
+// (ErrNoChanges sentinel was redundant with the result).
 type PerDirApplyResult struct {
-	Dir        string      // host path of the directory
-	Status     ApplyStatus // see ApplyStatus constants
-	Patch      string      // populated only when Status == ApplyStatusDryRun
-	Recovery   string      // human-readable next-step instructions; populated when Status requires user action (Conflict or AppliedStashConflict); empty otherwise
-	ErrMessage string      // non-empty when an unexpected error occurred (not the same as a conflict; for runtime / IO failures)
+	Dir    string      // host path of the directory
+	Status ApplyStatus // see ApplyStatus constants
+	Patch  string      // populated only when Status == ApplyStatusDryRun
+	Err    error       // non-nil when an unexpected error occurred (runtime / IO failure; distinct from ApplyStatusConflict which is the normal "git refused" path)
 }
 
 func (*Workdir) Apply(ctx context.Context, opts ApplyOptions) (*ApplyResult, error) {
@@ -1025,19 +1029,20 @@ type AgentInfo struct {
 // compile-time -ldflags), grouped together since these three fields
 // only make sense as a set.
 type BuildInfo struct {
-	Version string // semver tag or "dev" (yoloai version string)
-	Commit  string // git short SHA the binary was built from
-	Date    string // ISO-8601 build timestamp
+	Version string    // semver tag or "dev" (yoloai version string)
+	Commit  string    // git short SHA the binary was built from
+	Date    time.Time // build timestamp
 }
 
-// SystemInfo bundles paths + disk usage + build metadata.
+// SystemInfo bundles paths + build metadata + per-backend info.
+// Embedders that need total disk usage call SystemClient.DiskUsage()
+// for the structured shape; SystemInfo doesn't carry a rendered total.
 type SystemInfo struct {
 	Build             BuildInfo
 	ConfigPath        string
 	ProfileConfigPath string
 	DataDir           string
 	SandboxesDir      string
-	DiskUsage         string
 	Backends          []BackendInfo
 }
 
@@ -1074,8 +1079,8 @@ type DiskUsage struct {
 type BackendDiskUsage struct {
 	Name   string
 	Bytes  int64
-	Detail string
-	Error  string
+	Detail string // backend-specific extra info (e.g. cache vs. image breakdown); free-form text
+	Err    error  // non-nil when the backend's disk-usage query failed; Bytes is 0 in that case
 }
 
 func (*SystemClient) DiskUsage(ctx context.Context) (*DiskUsage, error) { panic("design-only") }
@@ -1834,3 +1839,45 @@ const (
 //
 //       CLI behavior unchanged: the "Nothing to apply" message keys
 //       off inspecting result.PerDir rather than errors.Is.
+//
+// Q-Q.  Stringly-typed CLI-UI leak sweep.
+//
+//       **RESOLVED 2026-05-25:** Audited every string field against the
+//       principle "fields should not be strings unless they actually
+//       represent string values." Five CLI-UI leaks fixed:
+//
+//         BuildInfo.Date        string → time.Time
+//             Was pre-rendered as "ISO-8601 build timestamp." Embedders
+//             format dates however they want; the API surfaces a
+//             time.Time and lets renderers decide.
+//
+//         SystemInfo.DiskUsage  string → DROPPED
+//             Was a human-rendered total ("1.2 GB"). Collided in name
+//             with the structured DiskUsage type. Embedders who want
+//             total bytes call SystemClient.DiskUsage() for the typed
+//             result.
+//
+//         PerDirApplyResult.Recovery  string → DROPPED
+//             Was "human-readable next-step instructions." The
+//             recovery action is fully derivable from Status —
+//             ApplyStatusConflict means "resolve the conflict,"
+//             ApplyStatusAppliedStashConflict means "resolve stash
+//             merge markers." Embedders switch on Status to render
+//             their own text. Same logic as Q-P (drop redundant
+//             sentinel). HTTP/MCP embedders can localize; programmatic
+//             callers branch on the enum.
+//
+//         PerDirApplyResult.ErrMessage  string → Err error
+//             Flattening a Go error to a string loses errors.Is /
+//             errors.As. Use the typed error.
+//
+//         BackendDiskUsage.Error  string → Err error
+//             Same reason.
+//
+//       Codified principle: API field types name the actual data
+//       shape. Pre-rendered humanizations (dates, byte counts,
+//       descriptions) belong in the embedder's render layer, not in
+//       the Client's snapshot types. Errors stay typed all the way
+//       through. The principle is now part of the GO.md "Clarity over
+//       brevity" section — every field type answers "what is this?"
+//       not "how does the CLI render it?".

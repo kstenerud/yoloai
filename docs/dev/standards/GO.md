@@ -110,7 +110,6 @@ The same "name carries the meaning" rule applies at the struct-field level. For 
 - **Zero-value semantics.** `Timeout time.Duration // 0 = no timeout`
 - **Conditional population.** `Patch string // populated only when Status == ApplyStatusDryRun`
 - **Cross-references.** `NewPrompt string // distinct from RunOptions.Prompt (the original)`
-- **Format reminders for opaque scalars.** `Date string // ISO-8601 build timestamp`
 
 **Comments that are doing the name's job** (rename instead):
 - `Note string // probe failure reason` → `UnavailableReason string`
@@ -123,6 +122,32 @@ The same "name carries the meaning" rule applies at the struct-field level. For 
 The heuristic: read the comment and ask *"could a future-self with no context guess what this field is for from the name alone?"* If yes, the comment is restating; rename. If the comment encodes a rule the name can't carry (a constraint, a side effect, a zero-value semantic), keep it.
 
 A worked example of this audit pass: the W-L8a layering-refactor design checkpoint applied this to the entire proposed `yoloai.Client` surface (`api_surface.go`'s Q-K resolution), producing ~20 renames where the field comment was doing the name's job. The principle generalises: **API field names should be self-describing nouns or verb-objects; comments document things the type system can't encode.**
+
+### Field types: name the data, not its rendering
+
+A close cousin of the comment-vs-rename rule. **Fields should not be `string` unless they actually represent string values.** When a field's type is `string` but its meaning is something else (a date, a byte count, an error, an enum, a structured token), the type is doing the wrong job and the comment is apologizing for it.
+
+**Wrong (CLI-UI shape leaking into the data type):**
+- `Date string // ISO-8601 build timestamp` — pre-rendered date. Embedders that aren't the CLI have to parse a string back to a time.
+- `DiskUsage string // "1.2 GB"` — pre-rendered byte count. HTTP/MCP/test embedders parse "1.2 GB" back to bytes.
+- `ErrMessage string` / `Error string` — flattened Go errors. Loses `errors.Is`/`errors.As`; embedders can't unwrap.
+- `Recovery string // human-readable next-step instructions` — English UI copy in the result. Non-CLI embedders can't localize; programmatic callers can't branch on it.
+- `Status string // "active", "idle", "done", ...` — untyped enum. No compile-time checking; typos at call sites; switches don't get exhaustiveness hints.
+
+**Right:**
+- `Date time.Time`
+- `DiskUsage int64` (bytes) — or drop entirely and expose a structured `DiskUsage` value via a method.
+- `Err error`
+- Drop the field; derive the recovery action from `Status`.
+- `type Status string` with named constants (`StatusActive`, `StatusIdle`, `StatusDone`, ...).
+
+The principle: **the field type names the actual data shape; rendering belongs in the embedder's UI layer, not in the Client's snapshot types.** Three classes to watch for:
+
+1. **Pre-rendered humanizations.** Dates, byte counts, durations formatted as strings. Surface the raw value; let the caller format.
+2. **Stringly-typed enums.** Open-set or closed-set categories typed as `string`. Use a typed string (`type Foo string`) with named constants — the parse-don't-validate idiom.
+3. **String-flattened structured values.** Errors as `string`, structured codes as natural-language sentences, multi-field tokens as colon-separated strings. Use the typed shape.
+
+W-L8a's Q-Q resolution applied this sweep to `api_surface.go`, fixing five leaks (BuildInfo.Date, SystemInfo.DiskUsage, two error-as-string fields, and the Recovery English-copy field). When in doubt about a `string` field, ask: *"if this field's data were 17 megabytes of structured detail, would `string` still be the right type?"* If no, the type is rendering, not data — fix it.
 
 ## Imports
 
