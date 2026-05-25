@@ -163,40 +163,54 @@ const (
 )
 
 // ApplyMode selects an override to Apply's default behavior. The zero
-// value means "no override — do the normal per-directory apply"
-// (git format-patch + am for :copy directories; in-container diff-and-apply
-// for :overlay directories). The two named constants are overrides that
-// change the behavior away from that default; there is no named "default"
-// constant because that would just be the absence of a choice.
+// value means "no override — do the normal workdir apply" (git
+// format-patch + am for :copy workdirs; in-container diff-and-apply
+// for :overlay workdirs). The two named constants are overrides that
+// change the behavior away from that default; there is no named
+// "default" constant because that would just be the absence of a
+// choice.
 type ApplyMode string
 
 const (
 	ApplySquash ApplyMode = "squash" // flatten everything into one unstaged patch
-	ApplyExport ApplyMode = "export" // write *.patch files to ExportDir; don't apply
+	ApplyExport ApplyMode = "export" // write a patch file to ExportDir; don't apply
 )
 
 // MountMode selects how a directory is exposed inside the sandbox.
-// Used by RunOptions / DirSpec when declaring directories, and reported
-// by DiffResult.Mode when listing the per-dir diffs. Required where a
-// directory is declared; empty rejected with *UsageError.
+// Required where a directory is declared; empty rejected with
+// *UsageError.
+//
+// **Per-position restrictions (Q-U):**
+//   - Workdir (RunOptions.Workdir): MountCopy, MountOverlay, or MountRW.
+//   - Auxiliary dirs (RunOptions.AuxDirs): MountRW or MountRO only.
+//     MountCopy and MountOverlay on aux dirs are rejected with
+//     *UsageError.
+//
+// The diff/apply workflow is workdir-only; auxiliary dirs are either
+// live-edit (:rw) or read-only reference (:ro).
 type MountMode string
 
 const (
 	// MountCopy makes a fresh copy of the directory at sandbox-create
 	// time. The agent's changes are isolated; review with diff and
-	// land with apply. Default for the workdir.
+	// land with apply. Workdir-only after Q-U.
 	MountCopy MountMode = "copy"
 
 	// MountOverlay mounts the directory via Linux overlayfs inside the
 	// sandbox. Instant setup; changes accumulate in an upper layer.
 	// Diff/apply work for the changes. Requires CAP_SYS_ADMIN and a
-	// container backend that supports overlayfs.
+	// container backend that supports overlayfs. Workdir-only after Q-U.
 	MountOverlay MountMode = "overlay"
 
 	// MountRW bind-mounts the directory read-write into the sandbox.
-	// Changes are live on the host; no diff/apply step. Use for
-	// directories you want the agent to modify in place.
+	// Changes are live on the host; no diff/apply step. Allowed for
+	// workdir and aux dirs.
 	MountRW MountMode = "rw"
+
+	// MountRO bind-mounts the directory read-only into the sandbox.
+	// Aux-dir reference material (libraries, docs, etc.) the agent
+	// can read but not modify. Aux-only.
+	MountRO MountMode = "ro"
 )
 
 // LogFormat selects which log stream to emit. Required field. Empty is
@@ -735,20 +749,14 @@ type DiffOptions struct {
 	NameOnly bool     // --name-only
 }
 
-// DiffResult mirrors workspace.DiffResult (re-exported through
-// sandbox/patch). One entry per diffable directory in the sandbox —
-// the workdir plus every aux directory mounted in :copy or :overlay
-// mode. :rw aux dirs do not produce diffs (changes are already live
-// on the host).
-type DiffResult struct {
-	Dir       string    // host path to the directory that was diffed
-	Mode      MountMode // MountCopy or MountOverlay (MountRW dirs don't produce diffs)
-	Output    string    // diff text, OR stat summary when DiffOptions.Stat = true. Single field — only one form is populated per call, depending on opts.
-	Empty     bool      // true when the dir had no changes from baseline; useful for skipping/hiding empty entries in UI
-	IsWorkdir bool      // true for the primary workdir; false for aux (-d) dirs. Precomputed convenience for UI rendering — saves the caller a second Inspect call.
-}
-
-func (*Workdir) Diff(ctx context.Context, opts DiffOptions) ([]*DiffResult, error) {
+// Diff returns the workdir's diff against its baseline as a single
+// string. Empty string means no changes. Output form depends on
+// DiffOptions (raw patch by default, stat summary when Stat=true,
+// names only when NameOnly=true).
+//
+// Aux dirs are not diffed: :rw dirs have no diff (changes are live)
+// and :copy/:overlay aux dirs are not supported (Q-U).
+func (*Workdir) Diff(ctx context.Context, opts DiffOptions) (string, error) {
 	panic("design-only")
 }
 
@@ -769,53 +777,18 @@ type ApplyOptions struct {
 	DryRun             bool      // invalid with ApplyExport
 }
 
-// ApplyResult bundles per-directory outcomes plus a top-level rollup.
-//
-// Distinction between PerDir and SkippedDirs:
-//   - PerDir lists every directory Apply actually processed. Entries
-//     where the directory had no changes from baseline are reported
-//     here with Status == ApplyStatusEmpty (the diff was empty; nothing
-//     to do).
-//   - SkippedDirs lists directories Apply declined to process at all
-//     because of the directory's mount mode or container state. Each
-//     entry carries a Reason so embedders can render or branch without
-//     remembering the dir's mount mode out of band.
+// ApplyResult reports the outcome of a single Apply call. Workdir-only
+// after Q-U — there are no per-dir slices because aux dirs don't
+// participate in diff/apply.
 type ApplyResult struct {
-	PerDir      []*PerDirApplyResult
-	Patches     []string // populated only when Mode == ApplyExport
-	SkippedDirs []SkippedDir
+	Status       ApplyStatus // see ApplyStatus constants
+	Patch        string      // populated only when Status == ApplyStatusDryRun
+	ExportedPath string      // populated only when Mode == ApplyExport — the patch file written to ExportDir
+	Err          error       // non-nil when an unexpected error occurred (runtime / IO failure; distinct from ApplyStatusConflict which is the normal "git refused" path)
 }
 
-// SkippedDir reports one directory that Apply declined to act on,
-// together with the reason. SkipReason is an open-set typed string —
-// see its constants for the cases known today.
-type SkippedDir struct {
-	Dir    string // host path to the skipped directory
-	Reason SkipReason
-}
-
-// SkipReason categorizes why a directory was skipped by Apply.
-// Open-set typed string (same shape as ExecUser): the named constants
-// document the cases known today; future skip cases add their own
-// constants without breaking existing embedders.
-type SkipReason string
-
-const (
-	// SkipReasonReadWrite: :rw directories don't need applying — the
-	// agent's changes are already live on the host bind-mount.
-	SkipReasonReadWrite SkipReason = "rw"
-
-	// SkipReasonOverlayStopped: :overlay directories need a running
-	// container to compute and apply the in-container diff. When the
-	// container is stopped, Apply reports this rather than failing.
-	SkipReasonOverlayStopped SkipReason = "overlay-stopped"
-)
-
-// ApplyStatus is the typed outcome of one per-directory apply. Replaces
-// the Applied + Conflicts boolean pair that confused four mutually-
-// exclusive states into two flags. Embedders switch on Status to know
-// what happened and (via Recovery) what — if anything — the user
-// should do next.
+// ApplyStatus is the typed outcome of an Apply call. Embedders switch
+// on Status to know what happened.
 type ApplyStatus string
 
 const (
@@ -823,8 +796,7 @@ const (
 	// (or unstaged diff was written for squash mode).
 	ApplyStatusApplied ApplyStatus = "applied"
 
-	// ApplyStatusEmpty: the dir had no changes to apply. PerDir entry
-	// reports the dir was processed; nothing happened.
+	// ApplyStatusEmpty: the workdir had no changes to apply.
 	ApplyStatusEmpty ApplyStatus = "empty"
 
 	// ApplyStatusConflict: git am (or the analogous overlay path)
@@ -845,20 +817,6 @@ const (
 	// would have been applied. Nothing changed on the host.
 	ApplyStatusDryRun ApplyStatus = "dry-run"
 )
-
-// PerDirApplyResult reports one directory's apply outcome.
-//
-// No Recovery field: the recovery action is fully derivable from Status
-// (ApplyStatusConflict → resolve the conflict; ApplyStatusAppliedStashConflict
-// → resolve stash-merge markers). The CLI renders its own next-step text;
-// programmatic embedders branch on Status. Same pattern as Q-P
-// (ErrNoChanges sentinel was redundant with the result).
-type PerDirApplyResult struct {
-	Dir    string      // host path of the directory
-	Status ApplyStatus // see ApplyStatus constants
-	Patch  string      // populated only when Status == ApplyStatusDryRun
-	Err    error       // non-nil when an unexpected error occurred (runtime / IO failure; distinct from ApplyStatusConflict which is the normal "git refused" path)
-}
 
 func (*Workdir) Apply(ctx context.Context, opts ApplyOptions) (*ApplyResult, error) {
 	panic("design-only")
@@ -925,12 +883,7 @@ func (*Workdir) BaselineLog(ctx context.Context) ([]BaselineLogEntry, error) {
 // item independently; on the first failure they return the error
 // without rolling back the items already processed. Get is similar but
 // returns `written []string` so the caller can tell exactly which
-// destination files exist on disk after the call. Workdir.Apply is the
-// exception — it returns *ApplyResult with per-item Status because
-// apply's per-directory conflict semantics are too rich for the
-// caller to reconstruct from a single error. The asymmetry is
-// deliberate: batch list-mutation ops are retry-on-error; apply needs
-// per-item branching.
+// destination files exist on disk after the call.
 type Files struct{}
 
 // PutOptions configures Put. Host glob expansion happens at the caller
@@ -2083,3 +2036,87 @@ const (
 //       sandbox.Lock() / Unlock() APIs for embedders that want to
 //       batch reads with the snapshot of a single write window.
 //       Defer until a concrete use case appears.
+//
+// Q-U.  Aux :copy / :overlay — remove?
+//
+//       **RESOLVED 2026-05-25:** Remove. After this refactor,
+//       auxiliary directories support :rw and :ro only. The diff/apply
+//       workflow is workdir-only.
+//
+//       Background. The existing implementation does support multi-dir
+//       diff/apply across the workdir and every :copy / :overlay aux
+//       directory (sandbox/patch/apply.go's GenerateMultiPatch;
+//       internal/cli/apply_overlay.go for the overlay path). It's real
+//       working code with tests (TestApplyFormatPatch_Multiple,
+//       TestGenerateFormatPatch_Multiple, etc.). But the user-visible
+//       workflow is intentionally limited:
+//
+//         - All-or-nothing apply (first failure halts the chain)
+//         - No per-dir selection
+//         - No cross-dir conflict resolution
+//         - No "apply :overlay but not :copy" filtering
+//
+//       The API surface this WOULD support if we kept it (per-dir
+//       status matrices, filter options, recovery branching, partial
+//       resume) is significantly more complex than what the
+//       implementation actually does today. We were projecting
+//       sophistication onto a barely-used feature.
+//
+//       Use cases that would justify the projected complexity (monorepo
+//       with sibling repos; project + docs in separate repo; project +
+//       tools repo) are real but rare, and have clean workarounds:
+//         - Make a parent directory the workdir
+//         - Use :rw for the secondary dir (live edit)
+//         - Run separate sandboxes
+//
+//       Project owner verdict: remove the aux :copy / :overlay surface
+//       now while we're in beta and have an active refactor to land
+//       it on. See who complains. If a real use case emerges, restore
+//       with a cleaner API informed by the actual need.
+//
+//       API simplifications cascading from this:
+//
+//         - Sandbox.Workdir() / *Workdir handle: name now accurately
+//           scoped to the single workdir (no aux dirs in this handle).
+//           No rename needed (the C4 misnomer disappears with the
+//           scope shrink).
+//         - Workdir.Diff returns (string, error) instead of
+//           ([]*DiffResult, error). Empty string = no changes.
+//         - DiffResult struct DELETED — was only useful for multi-dir.
+//         - ApplyResult flat: Status, Patch, ExportedPath, Err. No
+//           PerDir slice, no SkippedDirs.
+//         - PerDirApplyResult DELETED — folded into ApplyResult.
+//         - SkippedDir, SkipReason, SkipReasonReadWrite,
+//           SkipReasonOverlayStopped DELETED — nothing to skip when
+//           only the workdir is in scope.
+//         - MountMode: added explicit MountRO ("ro") for aux read-only
+//           reference dirs (was implicit default). Doc updated with
+//           workdir-vs-aux mode restrictions.
+//
+//       Implementation work (W-L8b/c/d):
+//
+//         - parse.go: reject :copy and :overlay suffixes on the -d
+//           flag with *UsageError pointing at the workdir or :rw / :ro
+//           alternatives.
+//         - create_prepare.go: drop the aux :copy/:overlay code paths.
+//         - sandbox/patch/apply.go: delete GenerateMultiPatch and
+//           collapse ApplyAll to a single-dir helper.
+//         - internal/cli/apply_overlay.go: drop the multi-dir
+//           iteration.
+//         - inspect.go: HasChanges check no longer iterates aux dirs.
+//         - Delete multi-dir tests.
+//         - BREAKING-CHANGES.md entry: "Auxiliary :copy and :overlay
+//           are no longer supported. Migration: make the directory the
+//           workdir; or mount as :rw if you want live edits; or run a
+//           separate sandbox. The diff/apply workflow only ever
+//           applied to the workdir + uncommitted aux changes in
+//           practice; this codifies what was already true in
+//           operations."
+//
+//       Codified principle (general): API complexity should match
+//       complexity actually exercised, not anticipated future use.
+//       Removing rarely-used features in beta is far easier than
+//       removing them after they accrete sophistication or pick up
+//       hidden dependencies. When in doubt about a barely-used
+//       feature, cut it; restore from the real-use feedback when
+//       someone shows up with a concrete need.
