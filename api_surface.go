@@ -250,7 +250,7 @@ const (
 //   - Admin operations live on the *SystemClient from client.System().
 //   - Bug-report primitives live on Client (BugReport takes a name
 //     explicitly, since it's often called from error paths without a
-//     handle in scope; StartBugReporter is name-less).
+//     handle in scope; StartBugReportSession is name-less).
 type Client struct{}
 
 // Options configures a Client.
@@ -923,7 +923,7 @@ func (*Network) Allowed(ctx context.Context) ([]string, error)      { panic("des
 // Client — bug-report primitives
 // =============================================================================
 
-// BugReportOptions configures BugReport and StartBugReporter.
+// BugReportOptions configures BugReport and StartBugReportSession.
 type BugReportOptions struct {
 	Mode      BugReportMode // REQUIRED; empty rejected. Use DefaultBugReportOptions() for BugReportSafe.
 	OutputDir string        // directory to write the report; "" = CWD
@@ -935,7 +935,7 @@ func DefaultBugReportOptions() BugReportOptions { panic("design-only") }
 
 // BugReport captures a one-shot snapshot of a sandbox plus relevant
 // system state to a markdown file. Returns the absolute path of the
-// written file. Distinct from StartBugReporter — BugReport gathers state
+// written file. Distinct from StartBugReportSession — BugReport gathers state
 // AT the call moment without buffering events. CLI: `yoloai sandbox
 // <name> bugreport [safe|unsafe]`.
 //
@@ -946,17 +946,17 @@ func (*Client) BugReport(ctx context.Context, name string, opts BugReportOptions
 	panic("design-only")
 }
 
-// BugReportSession is the handle returned by StartBugReporter. Buffers
+// BugReportSession is the handle returned by StartBugReportSession. Buffers
 // runtime events until Stop or Discard.
 type BugReportSession interface {
 	Stop() (path string, err error) // flush + write report
 	Discard()                       // throw away buffered events
 }
 
-// StartBugReporter begins buffering runtime events. Embedders scope the
+// StartBugReportSession begins buffering runtime events. Embedders scope the
 // session however they want (single risky call, fixed duration, program
 // lifetime). The CLI's top-level `--bugreport` flag is a thin wrapper.
-func (*Client) StartBugReporter(ctx context.Context, opts BugReportOptions) BugReportSession {
+func (*Client) StartBugReportSession(ctx context.Context, opts BugReportOptions) BugReportSession {
 	panic("design-only")
 }
 
@@ -1301,7 +1301,7 @@ const (
 //       **RESOLVED 2026-05-24:** Two complementary primitives.
 //         Client.BugReport(ctx, name, opts) — one-shot snapshot at call
 //             time.
-//         Client.StartBugReporter(ctx, opts) BugReportSession — session
+//         Client.StartBugReportSession(ctx, opts) BugReportSession — session
 //             that buffers events until Stop / Discard.
 //       Reframing credit: the flight recorder is a session primitive
 //       (turn on, do stuff, turn off), not a CLI-invocation wrapper.
@@ -1326,7 +1326,7 @@ const (
 //         Files       (exchange dir)                   sandbox.Files()
 //         Network     (allowlist)                      sandbox.Network()
 //         System      (admin)                          client.System()
-//       Cross-sandbox ops (List, Run, Clone, BugReport, StartBugReporter)
+//       Cross-sandbox ops (List, Run, Clone, BugReport, StartBugReportSession)
 //       stay directly on Client. ExchangeDir + Prompt collapse into
 //       *Info fields (no separate methods). Drops artificial method
 //       prefixes (FilesPut → Files().Put, AllowDomains → Network().Allow)
