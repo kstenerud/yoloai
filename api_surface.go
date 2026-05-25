@@ -94,7 +94,7 @@ func SandboxNameFromEnv() string { panic("design-only") }
 // IsolationMode selects the OCI / VM isolation level for a sandbox.
 // Required field where used as a "choice" (RunOptions.Isolation) —
 // empty is rejected with *UsageError. Optional where used as a "filter"
-// or "override" (DoctorOptions.Isolation, StartOptions.IsolationOverride)
+// or "override" (DoctorOptions.Isolation, RestartOptions.IsolationOverride)
 // — empty there has its own meaning, documented on each field.
 //
 // Embedders who want the current default without writing it out can use
@@ -383,9 +383,13 @@ func (*Sandbox) Status(ctx context.Context) (Status, error) { panic("design-only
 // keeps the os.Stdin/Stdout/Stderr presumption out of the lifecycle
 // surface (same principle as Q-F: Client provides primitives; CLI
 // composes them).
+//
+// No isolation-override field either: Start just starts a stopped
+// sandbox with the isolation it was created with. Changing isolation
+// requires a container recreation — that's on Restart (see
+// RestartOptions.IsolationOverride).
 type StartOptions struct {
-	Prompt            string        // optional prompt to inject after relaunch
-	IsolationOverride IsolationMode // change isolation on restart; rebuilds container
+	Prompt string // optional prompt to inject after relaunch
 }
 
 func (*Sandbox) Start(ctx context.Context, opts StartOptions) error { panic("design-only") }
@@ -395,9 +399,33 @@ type StopOptions struct{}
 
 func (*Sandbox) Stop(ctx context.Context, opts StopOptions) error { panic("design-only") }
 
-// RestartOptions configures Restart. No Attach field; same rationale as
-// StartOptions.
-type RestartOptions struct{}
+// RestartOptions configures Restart. Restart is "stop, optionally change
+// isolation, recreate the container, start" — the natural home for an
+// isolation override since changing isolation requires container
+// recreation.
+//
+// No Attach field; same rationale as StartOptions.
+//
+// **Isolation-change policy.** A transition is permitted only when the
+// target mode is in the active backend's SupportedIsolationModes set —
+// i.e., a within-backend transition that recreates the container with a
+// different runtime configuration but keeps the same image, network
+// model, and host-mounted state. Concretely:
+//
+//	container ↔ container-privileged     (docker / podman): allowed
+//	container ↔ container-enhanced       (docker / podman): allowed, but
+//	    refused with *UsageError when :overlay directories hold uncommitted
+//	    state (gVisor doesn't support overlayfs in-container; data would
+//	    be lost). Force=true overrides after the user acknowledges.
+//	vm ↔ vm-enhanced                     (containerd): allowed
+//	container* family ↔ vm* family       — REFUSED with *UsageError
+//	    pointing at the destroy + recreate sequence. The backend changes
+//	    (docker ↔ containerd); the image lives in a different store; the
+//	    network model is different. This is a new sandbox, not a restart.
+type RestartOptions struct {
+	IsolationOverride IsolationMode // empty = keep current isolation. Cross-backend transitions refused.
+	Force             bool          // override safety refusals (e.g. overlay-data-loss on container → container-enhanced)
+}
 
 func (*Sandbox) Restart(ctx context.Context, opts RestartOptions) error { panic("design-only") }
 
@@ -1075,7 +1103,7 @@ const (
 //         opts.Name = "myproj"; opts.Workdir = ...
 //         client.Run(ctx, opts)
 //
-//       Filter / override fields (StartOptions.IsolationOverride,
+//       Filter / override fields (RestartOptions.IsolationOverride,
 //       DoctorOptions.Isolation) keep empty-is-meaningful semantics —
 //       they describe absence-of-override, not absence-of-choice.
 //
@@ -1088,3 +1116,42 @@ const (
 //       remains testable against any default change.
 //       Three factories defined: DefaultRunOptions(),
 //       DefaultLogOptions(), DefaultBugReportOptions().
+//
+// Q-I.  IsolationOverride: where does it live, and what transitions are
+//       safe?
+//       **RESOLVED 2026-05-25:** Move from StartOptions to
+//       RestartOptions (where the user-facing `yoloai restart --isolation`
+//       flag actually lives). Permitted transitions are constrained to
+//       within-backend: target mode must be in the active backend's
+//       SupportedIsolationModes set.
+//
+//         Allowed (clean container recreation, host-mounted state
+//         preserved):
+//           container ↔ container-privileged        (docker / podman)
+//           container ↔ container-enhanced          (docker / podman)*
+//           vm ↔ vm-enhanced                        (containerd)
+//
+//         Refused with *UsageError:
+//           container* family ↔ vm* family — backend change, image
+//             store change, network model change. Not a restart;
+//             requires destroy + recreate. Error message names the
+//             specific sequence (`yoloai apply <name> && yoloai
+//             destroy <name> && yoloai new --isolation X <name> .`).
+//
+//         * The container ↔ container-enhanced transition is further
+//           refused when :overlay directories hold uncommitted state
+//           (gVisor doesn't support in-container overlayfs; the upper
+//           layer would be lost). RestartOptions.Force=true overrides
+//           after the user acknowledges.
+//
+//       The within-backend rule is checked against
+//       BackendDescriptor.SupportedIsolationModes — already exists; no
+//       new metadata needed.
+//
+//       Reviewer's framing on the underlying use case: this exists for
+//       the realistic "oops I need privileged for this" situation
+//       (container → container-privileged). The other realistic case
+//       is container ↔ container-enhanced for ad-hoc isolation
+//       upgrades. Cross-backend transitions were always
+//       silently-destructive; refusing them is honesty about the
+//       blast radius rather than a feature loss.
