@@ -1090,11 +1090,12 @@ type BackendInfo struct {
 
 // AgentInfo is the public face of `agent.Definition`.
 type AgentInfo struct {
-	Name          string
-	Description   string
-	PromptMode    PromptMode
-	APIKeyEnvVars []string
-	ModelAliases  map[string]string
+	Name             string
+	Description      string
+	PromptMode       PromptMode
+	APIKeyEnvVars    []string
+	ModelAliases     map[string]string
+	NetworkAllowlist []string // domains the agent requires for normal operation under NetworkIsolated; surfaced by Network.Allowed as AllowedFromAgentRequirement entries
 }
 
 // BuildInfo carries metadata about the yoloai binary itself (from
@@ -1434,8 +1435,6 @@ const (
 	UnrecoverableBuildFailure   UnrecoverableCode = "build_failure"
 	UnrecoverableStateCorrupted UnrecoverableCode = "state_corrupted"
 	UnrecoverableVMBootFailure  UnrecoverableCode = "vm_boot_failure"
-	UnrecoverableNotImplemented UnrecoverableCode = "not_implemented"
-	UnrecoverableInternal       UnrecoverableCode = "internal"
 )
 
 // =============================================================================
@@ -2374,3 +2373,56 @@ const (
 //       configuration isn't in the contract, it isn't configurable —
 //       and silent defaults that depend on process environment are
 //       configuration the contract pretends doesn't exist.
+//
+// Q-X.  AgentInfo.NetworkAllowlist exposed; Unrecoverable escape
+//       hatches removed.
+//
+//       **RESOLVED 2026-05-25:** Two unrelated cleanups bundled.
+//
+//       1. AgentInfo gains NetworkAllowlist []string. Embedders building
+//          UIs around network policy need to see what defaults a given
+//          agent brings (per Q-V's AllowedFromAgentRequirement source).
+//          Was an obvious omission once Q-V landed.
+//
+//       2. UnrecoverableCode loses two values:
+//            UnrecoverableNotImplemented  → DROPPED
+//            UnrecoverableInternal        → DROPPED
+//
+//          Audited the actual codebase for sites that would surface
+//          either:
+//
+//            - "Unknown agent" (lifecycle.go, 5 places) classifies
+//              cleanly as state_corrupted: a saved sandbox references
+//              an agent definition that no longer exists.
+//            - "Internal error: tart backend type mismatch"
+//              (system_tart.go:169) is a programming-bug type
+//              assertion. Bugs panic; the CLI's existing recover()
+//              at internal/cli/root.go:54 turns panics into graceful
+//              "yoloai crashed; please file a bug" output.
+//            - Registry init-time panics (runtime/registry.go:34,39)
+//              are correct as panics — invariant-violation at startup,
+//              not an operational outcome.
+//
+//          No remaining site genuinely needs an "internal" or
+//          "not implemented" classification. The five remaining
+//          codes (agent_crash, backend_failure, build_failure,
+//          state_corrupted, vm_boot_failure) exhaustively cover
+//          operational failures.
+//
+//          Why drop instead of rename to UnrecoverableBug: keeping a
+//          generic escape hatch creates the temptation to use it
+//          lazily — "I don't know what this is, ship it as Bug" —
+//          which defeats the §7 discipline (act on every return value;
+//          classify every failure). Without the escape hatch, the
+//          only path forward is correct classification (or fix the
+//          bug structurally). Embedders that need to wrap panics into
+//          typed errors (e.g., an HTTP daemon that doesn't want a
+//          panic crashing the process) recover at their own goroutine
+//          boundary — standard Go pattern, not the library's job.
+//
+//       Codified principle (general): API taxonomies stay
+//       exhaustive by removing escape hatches that invite incorrect
+//       classification. If a failure mode can't be named in the
+//       taxonomy, that's a taxonomy gap to fix (add a real code) or
+//       a programming bug (panic + caller's recover boundary), not
+//       an "Other / Internal / Bug" bucket.
