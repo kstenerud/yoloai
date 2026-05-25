@@ -546,10 +546,26 @@ type WaitOptions struct {
 }
 
 // Wait blocks until the sandbox reaches a terminal status (StatusDone,
-// StatusFailed, StatusStopped) or ctx is cancelled. Returns the agent's
-// exit code (0 for clean StatusDone, non-zero otherwise) and a wrapped
-// error on cancel / timeout / inspect failure.
-func (*Sandbox) Wait(ctx context.Context, opts WaitOptions) (exitCode int, err error) {
+// StatusFailed, StatusStopped) or ctx is cancelled. Returns the terminal
+// Status and a wrapped error on cancel / timeout / inspect failure.
+//
+// If the sandbox is already in a terminal status at call time, Wait
+// returns immediately without polling.
+//
+// Status, not exit code: yoloai classifies agent outcomes into the
+// Status enum at the agent-status.json layer; the raw process exit
+// code from the agent itself isn't a portable success signal across
+// agents (Claude, Codex, Gemini, OpenCode, Aider all use different
+// conventions — some return non-zero for "no findings" or "warnings,"
+// some return zero on clean shutdown after a crash). Use Status to
+// branch programmatically. The CLI maps StatusDone → exit 0 and
+// anything else → exit 1, but that mapping is the CLI's contract,
+// not the Client's.
+//
+// The raw agent exit code (when the agent reported one) is available
+// via Info.AgentExitCode for debug logging and bug reports — it must
+// NOT be used as a success signal.
+func (*Sandbox) Wait(ctx context.Context, opts WaitOptions) (Status, error) {
 	panic("design-only")
 }
 
@@ -1230,9 +1246,10 @@ type Info struct {
 	Meta SandboxMeta
 
 	// Live state — computed at Inspect time, not stored in Meta.
-	Status      Status
-	AgentStatus AgentStatus
-	HasChanges  bool // unapplied agent commits or uncommitted edits
+	Status        Status
+	AgentStatus   AgentStatus
+	HasChanges    bool // unapplied agent commits or uncommitted edits
+	AgentExitCode *int // raw process exit code reported by the agent (nil = not reported). For debug / bug-report logging only; NOT a portable success signal across agents — branch on Status instead.
 
 	// Convenience fields not present in Meta.
 	HostExchangeDir string
@@ -1952,3 +1969,52 @@ const (
 //         consistency with the rest of the file (every other handle
 //         is a concrete *struct). No reason for the abstraction.
 //         StartBugReportSession now returns *BugReportSession.
+//
+// Q-S.  Wait return type — exit code or Status?
+//
+//       **RESOLVED 2026-05-25:** Wait now returns (Status, error)
+//       instead of (exitCode int, error).
+//
+//       The previous signature promised "the agent's exit code (0 for
+//       clean StatusDone, non-zero otherwise)." That conflated three
+//       distinct things:
+//
+//         1. Whether the wait completed (cancel / timeout / inspect
+//            failure) — the err return.
+//         2. Whether the agent finished cleanly — yoloai's Status
+//            classification at the agent-status.json layer.
+//         3. The actual numeric exit code the agent's process
+//            reported — agent-specific.
+//
+//       The killer: across the agents we already ship (Claude, Codex,
+//       Gemini, OpenCode, Aider), there is no portable contract for
+//       "0 = success, non-zero = failure." Some return non-zero for
+//       "no findings" (linter-style tools), some return zero after a
+//       clean shutdown that followed a crash. Promising "the agent's
+//       exit code" gives embedders a number that LOOKS like a success
+//       signal but isn't.
+//
+//       What yoloai reliably knows is its own Status classification:
+//       StatusDone (clean) vs StatusFailed (anything else). That's
+//       what callers should branch on.
+//
+//       Terminal-state-at-call-time behavior also documented: Wait
+//       returns immediately if the sandbox is already terminal at
+//       call time, no polling.
+//
+//       Exit code preserved for debug / bug reports: added
+//       Info.AgentExitCode *int. Nil when not reported. The pointer
+//       form makes "unknown" representable; the doc explicitly warns
+//       it must NOT be used as a success signal. Bug reports already
+//       capture the raw agent-status.json (which includes ExitCode)
+//       so the debug data path is intact; the Info field surfaces it
+//       to programmatic embedders that want to log or display it.
+//
+//       CLI behavior unchanged: it maps StatusDone → exit 0 and
+//       anything else → exit 1. That mapping lives at the CLI layer,
+//       not in the Client.
+//
+//       Codified principle: APIs surface honest classifications, not
+//       opaque numbers that LOOK actionable but aren't portable.
+//       Numeric values from external processes (exit codes, signals)
+//       belong in debug surfaces, not in success/fail return values.
