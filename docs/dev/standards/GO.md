@@ -260,6 +260,7 @@ user-facing messages with no upstream cause to wrap.
 - Config parsing isolated in `internal/sandbox/config.go`; rest of code receives typed structs
 - Default values defined in one place, not scattered
 - Environment variable names prefixed with `YOLOAI_` for yoloai-specific vars
+- **No ambient configuration in library code.** `os.UserHomeDir()`, `os.Getenv()`, and `os.Getwd()` are banned outside the single allowlisted CLI entry point (enforced by the W-L10 linter). Library functions take typed parameters; the CLI reads env at startup once and passes values down. See `../principles/development-principles.md §12` for the rule, exceptions (agent API keys read by `agent.Definition`), and enforcement scope.
 
 ## Dependencies
 

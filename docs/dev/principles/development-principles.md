@@ -430,6 +430,46 @@ Global `CLAUDE.md`: "If an approach isn't working or feels overcomplicated, stop
 
 ---
 
+## §12. No ambient configuration
+
+**Principle.** Library boundaries (the `yoloai.Client`, domain functions, server entry points) accept all configuration as explicit arguments. Environment variables, `$HOME`-derived paths, `os.Getwd()`, terminal detection, and other ambient process state are resolved at the OUTERMOST layer — CLI startup, server bootstrap, test setup — and passed down explicitly. Library code never reads ambient process state.
+
+### Pattern
+
+Ambient state is anything not in the function's argument list: environment variables, the working directory, `$HOME`, hostname, the current user's identity, the calling process's PID. Library code refuses to read it. The CLI (or other outermost shell) reads it once at startup, validates it, packs it into typed configuration structs, and passes those down.
+
+Concrete bans (enforced by the W-L10 linter):
+
+- `os.UserHomeDir()` is forbidden outside ONE designated CLI entry point. That single call site is allowlisted; everything else fails the linter.
+- `os.Getenv()` for yoloai's own configuration is forbidden in library code. The CLI may read env vars at startup; everything below takes typed parameters.
+- `os.Getwd()` as a silent default is forbidden. If a caller wants the current working directory, the caller computes it explicitly and passes it in.
+- Other ambient functions (`os.Hostname()`, `os.UserCacheDir()`, etc.) are allowed for *reporting* (bug reports, diagnostics) but never as silent defaults that change behaviour.
+
+The single declared exception: API keys read by individual agents (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, etc.). The agent's contract IS "I read this env var" — it's part of the published interface in `agent.Definition.APIKeyEnvVars`. The CLI reads the values and passes them as part of sandbox creation; agents document the read in their definition.
+
+### Worked examples
+
+- **`Client.Options.DataDir` is required** (Q-W resolution, 2026-05-25; api_surface.go). Client construction rejects empty DataDir. The CLI fills it from `$HOME/.yoloai/` at startup — its single licensed `os.UserHomeDir()` call. HTTP servers pass an explicit per-tenant path. Tests pass `t.TempDir()`. Eliminates the "daemon silently wrote to /root/.yoloai/" failure mode that the previous implicit-home design exposed.
+- **Agents declare env-key dependencies in `agent.Definition.APIKeyEnvVars`** (existing). The library does not call `os.Getenv("ANTHROPIC_API_KEY")` directly; it iterates the agent's declared keys. The dependency is in the agent's published contract, not implicit in deep library code.
+
+### Cost-vs-benefit
+
+Cost: one explicit `DataDir` parameter on Client construction. CLI startup code becomes the gatherer of all environment-derived values, slightly longer. Tests need explicit setup (`t.TempDir()` instead of inheriting `$HOME`).
+
+Damage prevented:
+- "Works on my machine" failures where dev tests pass because `$HOME` is set sensibly and a deployed daemon fails because `$HOME` is `/root/`, `/var/empty`, or unset.
+- Multi-tenant servers accidentally writing all tenants' state to one tenant's directory because the env-resolved path is shared.
+- Test pollution into the developer's real `~/.yoloai/` from a test that forgot to override the home dir.
+- Production daemons that pick up an unexpected env override and silently change behaviour (logging level, default backend, etc.).
+- Refactors that move code between layers and inadvertently widen the new layer's access to ambient state.
+- Hyrum's-law surprises: any observable env-read becomes an unwritten contract that future refactors can't safely remove.
+
+### Sources
+
+The general pattern is "dependency injection" applied to environment / configuration; it's part of the Twelve-Factor App's factor III (config in the environment, but read once and passed explicitly); it's the engineering side of Zen of Python's "explicit is better than implicit." Project decision: Q-W (api_surface.go, 2026-05-25).
+
+---
+
 # Common over-generalisations to avoid
 
 | Over-generalisation                          | Why yoloAI rejects                                                                                                                                                                                                                                          |
@@ -444,6 +484,7 @@ Global `CLAUDE.md`: "If an approach isn't working or feels overcomplicated, stop
 | **Refactor-opportunistically-during-features** | §9 — refactoring during a feature change couples two changes that should be independent. The W-numbered cleanup model exists precisely so refactor commits land alone.                                                                                       |
 | **`make check`-everywhere-no-exceptions**    | §10 — `make check` is the gate for code changes. Docs-only changes (this file) don't strictly need it. The hook system stamps the project when source files are edited; doc edits don't stamp.                                                              |
 | **Iterate-forever**                          | §11 says rethink after three failed attempts, not "keep trying new tactics indefinitely." Sometimes the right answer is to acknowledge the problem is upstream (gVisor on macOS) and stop.                                                                  |
+| **No-env-vars-ever**                         | §12 bans env reads in *library code* as silent defaults. The CLI startup layer reads `YOLOAI_DATA_DIR` and similar; agents declare API-key env vars in their definitions. The rule is "read env once, at the outermost boundary, with the read documented" — not "env vars are forbidden everywhere."                  |
 
 ---
 

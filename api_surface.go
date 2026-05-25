@@ -332,11 +332,29 @@ type Client struct{}
 // Embedders on logr / zap / zerolog bridge via the slog handler adapters
 // each of those libraries provides.
 type Options struct {
-	Backend string       // explicit backend; "" = read from config, auto-detect
+	// DataDir is the root yoloai data directory; all per-Client state
+	// lives below it (sandboxes/, profiles/, config.yaml, state.yaml,
+	// credentials/). REQUIRED — empty is rejected with *UsageError at
+	// Client construction.
+	//
+	// No implicit default. yoloai library code never reads $HOME or
+	// any other ambient process state. The CLI fills DataDir from
+	// $HOME/.yoloai/ at startup — that one os.UserHomeDir() call site
+	// is the entire allowlist for the home-dir lookup. HTTP servers,
+	// daemons, multi-tenant processes, and tests must pass an
+	// explicit path. See development-principles.md §12 (No ambient
+	// configuration) for the rationale and the linter scope.
+	DataDir string
+
+	Backend string       // explicit backend; "" = read from DataDir/config.yaml, auto-detect
 	Logger  *slog.Logger // structured-event sink; nil = slog.Default()
 }
 
-func New(ctx context.Context) (*Client, error)                          { panic("design-only") }
+// New is removed — every caller must supply DataDir explicitly via
+// NewWithOptions. The zero-argument constructor was a convenience that
+// would have to silently default DataDir (the exact anti-pattern §12
+// rules out). Tests use NewWithOptions(ctx, Options{DataDir: t.TempDir()}).
+
 func NewWithOptions(ctx context.Context, opts Options) (*Client, error) { panic("design-only") }
 func (*Client) Close() error                                            { panic("design-only") }
 
@@ -1108,6 +1126,83 @@ func (*SystemClient) Backend(ctx context.Context, name string) (*BackendInfo, er
 func (*SystemClient) Agents() []AgentInfo                   { panic("design-only") }
 func (*SystemClient) Agent(name string) (*AgentInfo, error) { panic("design-only") }
 
+// ProfileInfo is the public face of a yoloai profile. Returned by
+// SystemClient.Profile / Profiles.
+type ProfileInfo struct {
+	Name          string
+	Description   string // optional human-readable description (from profile config.yaml)
+	HasDockerfile bool   // true if the profile carries a custom Dockerfile
+	IsBase        bool   // true for the reserved "base" profile
+}
+
+// CreateProfileOptions configures CreateProfile. Either supply
+// Dockerfile/Config inline, OR set From to copy from an existing
+// profile as a template. From is mutually exclusive with
+// Dockerfile/Config.
+type CreateProfileOptions struct {
+	Name       string // required; profile name (validated; "base" reserved)
+	Dockerfile []byte // optional Dockerfile content
+	Config     []byte // optional config.yaml content
+	From       string // optional template profile name; mutually exclusive with Dockerfile/Config
+}
+
+// Profiles returns every profile in DataDir/profiles/ plus the
+// reserved "base" entry. CLI: `yoloai profile list`.
+func (*SystemClient) Profiles(ctx context.Context) ([]ProfileInfo, error) { panic("design-only") }
+
+// Profile returns one profile's info, or ErrProfileNotFound if the
+// name doesn't resolve. CLI: `yoloai profile info <name>`.
+func (*SystemClient) Profile(ctx context.Context, name string) (*ProfileInfo, error) {
+	panic("design-only")
+}
+
+// CreateProfile creates a new profile directory under
+// DataDir/profiles/<name>/. Returns *UsageError if the name already
+// exists or if From + (Dockerfile or Config) are both set. CLI:
+// `yoloai profile create <name>`.
+func (*SystemClient) CreateProfile(ctx context.Context, opts CreateProfileOptions) error {
+	panic("design-only")
+}
+
+// DeleteProfile removes a profile directory. Refuses to delete the
+// reserved "base" profile. CLI: `yoloai profile delete <name>`.
+func (*SystemClient) DeleteProfile(ctx context.Context, name string) error { panic("design-only") }
+
+// ConfigEntry is one key-value pair from the yoloai config file.
+type ConfigEntry struct {
+	Key   string // dotted key path (e.g. "agent", "tmux_conf")
+	Value string // string representation of the value
+	Scope ConfigScope
+}
+
+// ConfigScope identifies which config file an entry lives in.
+type ConfigScope string
+
+const (
+	ConfigScopeGlobal  ConfigScope = "global"  // DataDir/config.yaml
+	ConfigScopeProfile ConfigScope = "profile" // DataDir/profiles/<active>/config.yaml
+)
+
+// Config returns every config entry across the global and active
+// profile config files. CLI: `yoloai config list`.
+func (*SystemClient) Config(ctx context.Context) ([]ConfigEntry, error) { panic("design-only") }
+
+// GetConfig returns the value for one config key, or *UsageError if
+// the key is unknown. CLI: `yoloai config get <key>`.
+func (*SystemClient) GetConfig(ctx context.Context, key string) (*ConfigEntry, error) {
+	panic("design-only")
+}
+
+// SetConfig sets a config key to a value, writing it to the file
+// determined by IsGlobalKey(key). CLI: `yoloai config set <key> <value>`.
+func (*SystemClient) SetConfig(ctx context.Context, key, value string) error {
+	panic("design-only")
+}
+
+// ResetConfig removes a key from its config file (returning behavior
+// to defaults). CLI: `yoloai config reset <key>`.
+func (*SystemClient) ResetConfig(ctx context.Context, key string) error { panic("design-only") }
+
 // BuildOptions configures Build.
 type BuildOptions struct {
 	Profile     string
@@ -1298,6 +1393,11 @@ var (
 	// ErrBackendUnavailable is returned by New when the requested or
 	// auto-selected backend is not usable on this host.
 	ErrBackendUnavailable error
+
+	// ErrProfileNotFound is returned by SystemClient.Profile when the
+	// named profile does not exist in DataDir/profiles/. Also returned
+	// from Run / Clone if RunOptions.Profile names a missing profile.
+	ErrProfileNotFound error
 )
 
 // UsageError indicates the caller passed something the Client refused
@@ -1350,18 +1450,18 @@ const (
 //
 //   version                       Build-time constants. No state.
 //
-//   config get|set|reset          User-config file edits. CLI calls
-//                                 `internal/config` directly. config/ is a
-//                                 leaf utility package, not an orchestration
-//                                 dependency — W-L8e's import ban targets
-//                                 internal/sandbox and internal/runtime.
+//   config get|set|reset          Promoted to SystemClient methods
+//                                 (Q-W). Operates on DataDir/config.yaml.
+//                                 No longer a CLI-only exception now that
+//                                 DataDir is an explicit Client parameter
+//                                 — HTTP/MCP embedders need this too.
 //
-//   profile create|list|info|delete   Same rationale as `config`:
-//                                 filesystem ops on ~/.yoloai/profiles/.
-//                                 CLI uses config/ and os.RemoveAll
-//                                 directly; the cleanup-hint iteration
-//                                 over descriptors (W-L5) already goes
-//                                 through runtime/.
+//   profile create|list|info|delete   Promoted to SystemClient methods
+//                                 (Q-W). Operates on DataDir/profiles/.
+//                                 Same rationale as config — HTTP/MCP
+//                                 embedders need to manipulate profiles
+//                                 too. See SystemClient.Profiles /
+//                                 CreateProfile / DeleteProfile.
 //
 //   sandbox <name> vscode         Spawns external `code` binary with a
 //                                 sandbox-targeted attach URL. CLI calls
@@ -2196,3 +2296,81 @@ const (
 //       Throwing away derivable information at the API boundary is
 //       the same anti-pattern as the Q-Q CLI-UI leak sweep, applied
 //       to data-shape rather than rendering.
+//
+// Q-W.  DataDir as an explicit Client parameter; profiles/config join
+//       the Client API; no-ambient-configuration principle codified.
+//
+//       **RESOLVED 2026-05-25:** Three coupled changes.
+//
+//       1. Options.DataDir is REQUIRED. Empty = *UsageError at
+//          construction. No implicit $HOME-based default in the
+//          library. The CLI fills DataDir from $HOME/.yoloai/ at
+//          startup; HTTP/MCP/daemon/test embedders pass an explicit
+//          path.
+//
+//          Why required (not "default-with-warning"): WOMM ("works on
+//          my machine") failures from ambient state are precisely
+//          what this prevents. A library that silently lands HTTP-
+//          server state in /root/.yoloai/ because the daemon happened
+//          to run as root, or trashes a developer's real ~/.yoloai/
+//          from a test that forgot t.TempDir(), is the failure mode.
+//          The cost of forcing one extra parameter is small; the
+//          cost of the failure mode is large.
+//
+//          The zero-argument New(ctx) constructor is REMOVED. Every
+//          caller goes through NewWithOptions with DataDir set.
+//
+//       2. SystemClient gains profile and config management methods —
+//          Profiles / Profile / CreateProfile / DeleteProfile and
+//          Config / GetConfig / SetConfig / ResetConfig. They operate
+//          on DataDir/profiles/ and DataDir/config.yaml respectively.
+//          Previously these were listed in the exception block as
+//          "CLI calls config/ and os.RemoveAll directly" — that was
+//          reasoning from the CLI's perspective. HTTP / MCP / SaaS
+//          embedders need the same capabilities, and DataDir being
+//          explicit lets them target the right location. The
+//          exception entries dissolve.
+//
+//          New sentinel: ErrProfileNotFound. Same shape as
+//          ErrSandboxNotFound.
+//
+//       3. Codified principle in development-principles.md §12 (No
+//          ambient configuration): library boundaries take all
+//          configuration as explicit arguments; environment, $HOME,
+//          and other ambient process state are resolved at the
+//          outermost layer (CLI startup, server bootstrap, test
+//          setup) and passed down.
+//
+//          Concrete rules:
+//            - os.UserHomeDir() is BANNED outside one designated CLI
+//              entry point (allowlisted in the W-L10 linter).
+//            - os.Getenv() for yoloai's own config is BANNED in
+//              library code. CLI startup may read env; everything
+//              below takes parameters.
+//            - os.Getwd() as a silent default is BANNED.
+//            - Agent API keys (ANTHROPIC_API_KEY etc.) are an
+//              exception, because the agent's published contract IS
+//              "I read this env var" — that's part of agent.Definition.
+//
+//          Enforcement: W-L10's scope expands to include the
+//          os.UserHomeDir / os.Getenv / os.Getwd bans (one allowlist
+//          per call). Adding a new env-read requires a justification
+//          comment AND a W-L10 allowlist entry, audited at PR time.
+//
+//       Implementation work (W-L8b/c):
+//         - Plumb DataDir through config.LoadConfig, store.* path
+//           helpers, sandbox.* lookups. Every function that today
+//           resolves ~/.yoloai/ via os.UserHomeDir() takes DataDir
+//           (or a derived path) as a parameter.
+//         - CLI startup: one os.UserHomeDir() call site
+//           (cmd/yoloai/main.go or internal/cli/root.go) computes the
+//           default DataDir; can be overridden with --data-dir flag.
+//         - W-L10 linter rule: forbid os.UserHomeDir/Getenv/Getwd
+//           outside allowlist.
+//         - All tests construct Client with t.TempDir() based DataDir.
+//
+//       Codified principle (general): explicit configuration beats
+//       ambient state. The library boundary is the contract; if
+//       configuration isn't in the contract, it isn't configurable —
+//       and silent defaults that depend on process environment are
+//       configuration the contract pretends doesn't exist.
