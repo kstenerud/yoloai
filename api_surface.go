@@ -156,6 +156,30 @@ const (
 	ApplyExport ApplyMode = "export" // write *.patch files to ExportDir; don't apply
 )
 
+// MountMode selects how a directory is exposed inside the sandbox.
+// Used by RunOptions / DirSpec when declaring directories, and reported
+// by DiffResult.Mode when listing the per-dir diffs. Required where a
+// directory is declared; empty rejected with *UsageError.
+type MountMode string
+
+const (
+	// MountCopy makes a fresh copy of the directory at sandbox-create
+	// time. The agent's changes are isolated; review with diff and
+	// land with apply. Default for the workdir.
+	MountCopy MountMode = "copy"
+
+	// MountOverlay mounts the directory via Linux overlayfs inside the
+	// sandbox. Instant setup; changes accumulate in an upper layer.
+	// Diff/apply work for the changes. Requires CAP_SYS_ADMIN and a
+	// container backend that supports overlayfs.
+	MountOverlay MountMode = "overlay"
+
+	// MountRW bind-mounts the directory read-write into the sandbox.
+	// Changes are live on the host; no diff/apply step. Use for
+	// directories you want the agent to modify in place.
+	MountRW MountMode = "rw"
+)
+
 // LogFormat selects which log stream to emit. Required field. Empty is
 // rejected with *UsageError.
 type LogFormat string
@@ -262,10 +286,10 @@ func (*Client) System() *SystemClient { panic("design-only") }
 // List returns sandboxes matching opts. Cross-sandbox; lives directly on
 // Client (a Sandbox handle wouldn't make sense — there's no "name" yet).
 type ListOptions struct {
-	Statuses []string // "active", "idle", "done", ...; empty = all
-	Agents   []string // filter by agent name
-	Profiles []string // filter by profile ("" for unprofiled)
-	Changes  bool     // only sandboxes with unapplied changes
+	Statuses        []string // "active", "idle", "done", ...; empty = all
+	Agents          []string // filter by agent name
+	Profiles        []string // filter by profile ("" for unprofiled)
+	OnlyWithChanges bool     // filter to sandboxes with unapplied changes
 }
 
 func (*Client) List(ctx context.Context, opts ListOptions) ([]*Info, error) {
@@ -306,11 +330,11 @@ type RunOptions struct {
 	Secrets   []string
 	BuildArgs map[string]string
 
-	Replace bool // destroy any existing sandbox with the same name first
-	Yes     bool // skip confirmation prompts (dirty repo warnings etc.)
-	NoStart bool // create state but don't start the container yet
+	Replace            bool // destroy any existing sandbox with the same name first
+	SkipDirtyRepoCheck bool // proceed despite uncommitted changes in the host workdir
+	NoStart            bool // create state but don't start the container yet
 
-	Runtimes []string // tart-only: pre-built Apple simulator runtime base
+	SimulatorRuntimes []string // tart-only: pre-built Apple simulator runtime base ("ios:26.4", "tvos")
 
 	Wait       bool             // block until terminal status
 	OnProgress func(msg string) // called with human-readable progress lines; nil = silent
@@ -389,7 +413,7 @@ func (*Sandbox) Status(ctx context.Context) (Status, error) { panic("design-only
 // requires a container recreation — that's on Restart (see
 // RestartOptions.IsolationOverride).
 type StartOptions struct {
-	Prompt string // optional prompt to inject after relaunch
+	NewPrompt string // optional prompt to inject after relaunch; distinct from RunOptions.Prompt (the original)
 }
 
 func (*Sandbox) Start(ctx context.Context, opts StartOptions) error { panic("design-only") }
@@ -439,11 +463,11 @@ func (*Sandbox) Destroy(ctx context.Context, opts DestroyOptions) error { panic(
 // ResetOptions configures Reset. No Attach field; same rationale as
 // StartOptions.
 type ResetOptions struct {
-	Restart    bool
-	ClearState bool
-	KeepCache  bool
-	KeepFiles  bool
-	Prompt     string
+	RestartContainer bool // also stop+start the container after resetting state (in-place by default)
+	ClearState       bool
+	KeepCache        bool
+	KeepFiles        bool
+	NewPrompt        string // optional prompt to inject after reset; distinct from RunOptions.Prompt
 }
 
 func (*Sandbox) Reset(ctx context.Context, opts ResetOptions) error { panic("design-only") }
@@ -556,11 +580,11 @@ type DiffOptions struct {
 
 // DiffResult mirrors patch.DiffResult.
 type DiffResult struct {
-	Dir    string
-	Mode   string // "copy" or "overlay"
-	Patch  string
-	Stat   string
-	IsBase bool
+	Dir       string
+	Mode      MountMode // MountCopy or MountOverlay (MountRW dirs don't produce diffs)
+	Patch     string
+	Stat      string
+	IsWorkdir bool // true for the primary workdir; false for auxiliary dirs (-d mounts)
 }
 
 func (*Workdir) Diff(ctx context.Context, opts DiffOptions) ([]*DiffResult, error) {
@@ -569,21 +593,21 @@ func (*Workdir) Diff(ctx context.Context, opts DiffOptions) ([]*DiffResult, erro
 
 // ApplyOptions configures Apply.
 type ApplyOptions struct {
-	Mode       ApplyMode // empty = default behavior; ApplySquash / ApplyExport override
-	ExportDir  string    // required when Mode == ApplyExport
-	Refs       []string  // specific commits or ranges
-	Paths      []string  // pathspec filter
-	IncludeWIP bool
-	DryRun     bool // invalid with ApplyExport
-	WithTags   bool // invalid with ApplySquash
-	Yes        bool // skip confirmation prompts
+	Mode                  ApplyMode // empty = default behavior; ApplySquash / ApplyExport override
+	ExportDir             string    // required when Mode == ApplyExport
+	Refs                  []string  // specific commits or ranges
+	Paths                 []string  // pathspec filter
+	IncludeWIP            bool
+	IncludeTags           bool // also transfer git tags created by the agent; invalid with ApplySquash
+	DryRun                bool // invalid with ApplyExport
+	SkipApplyConfirmation bool // proceed without confirming each batch of commits
 }
 
 // ApplyResult bundles per-directory outcomes plus a top-level rollup.
 type ApplyResult struct {
-	Per     []*PerDirApplyResult
-	Patches []string // populated only when Mode == ApplyExport
-	Skipped []string
+	PerDir      []*PerDirApplyResult
+	Patches     []string // populated only when Mode == ApplyExport
+	SkippedDirs []string // dirs skipped (overlay-and-running-required, :rw, ...)
 }
 
 // PerDirApplyResult lifts patch.ApplyResult.
@@ -745,11 +769,18 @@ type AgentInfo struct {
 	ModelAliases  map[string]string
 }
 
-// SystemInfo bundles paths + disk usage + version metadata.
+// BuildInfo carries metadata about the yoloai binary itself (from
+// compile-time -ldflags), grouped together since these three fields
+// only make sense as a set.
+type BuildInfo struct {
+	Version string // semver tag or "dev" (yoloai version string)
+	Commit  string // git short SHA the binary was built from
+	Date    string // ISO-8601 build timestamp
+}
+
+// SystemInfo bundles paths + disk usage + build metadata.
 type SystemInfo struct {
-	Version           string
-	Commit            string
-	Date              string
+	Build             BuildInfo
 	ConfigPath        string
 	ProfileConfigPath string
 	DataDir           string
@@ -768,12 +799,12 @@ func (*SystemClient) Agent(name string) (*AgentInfo, error) { panic("design-only
 
 // BuildOptions configures Build.
 type BuildOptions struct {
-	Profile    string
-	Backend    string
-	All        bool // build across every available backend (exclusive with Backend)
-	Rebuild    bool // build even when the checksum says the existing image is current
-	Secrets    []string
-	OnProgress func(msg string) // human-readable progress (image build steps); nil = silent
+	Profile     string
+	Backend     string
+	AllBackends bool // build across every available backend (exclusive with Backend)
+	Rebuild     bool // build even when the checksum says the existing image is current
+	Secrets     []string
+	OnProgress  func(msg string) // human-readable progress (image build steps); nil = silent
 }
 
 func (*SystemClient) Build(ctx context.Context, opts BuildOptions) error { panic("design-only") }
@@ -806,12 +837,12 @@ type DoctorOptions struct {
 
 // DoctorReport is the verdict for one backend+mode pair.
 type DoctorReport struct {
-	Backend      string
-	Mode         IsolationMode // "" when IsBaseMode
-	IsBaseMode   bool
-	Availability Availability
-	InitErr      error
-	MissingCaps  []string
+	Backend             string
+	Mode                IsolationMode // "" when IsDefaultMode
+	IsDefaultMode       bool
+	Availability        Availability
+	InitErr             error
+	MissingCapabilities []string
 }
 
 func (*SystemClient) Doctor(ctx context.Context, opts DoctorOptions) ([]DoctorReport, error) {
@@ -822,7 +853,7 @@ func (*SystemClient) Doctor(ctx context.Context, opts DoctorOptions) ([]DoctorRe
 type PruneOptions struct {
 	Backend      string // "" = all
 	DryRun       bool
-	Cache        bool // also prune backend caches (forces base rebuild)
+	PruneCache   bool // also prune backend caches (forces base rebuild)
 	IncludeStale bool
 	OnProgress   func(msg string) // human-readable progress (per-item); nil = silent
 }
@@ -887,7 +918,7 @@ type Info = struct {
 // DirSpec re-exports sandbox.DirSpec.
 type DirSpec struct {
 	Path string
-	Mode string // "copy" (default), "overlay", "rw"
+	Mode MountMode // REQUIRED; empty rejected. MountCopy is the typical workdir choice.
 }
 
 // =============================================================================
@@ -1181,3 +1212,45 @@ const (
 //       override would naturally land in the same Force field; with
 //       specific names, growth is explicit (a new field) rather than
 //       implicit (broadening an existing field's meaning).
+//
+// Q-K.  Full name audit — fields whose names don't carry the meaning.
+//       **RESOLVED 2026-05-25:** Sweep across the file for unclear
+//       names. Renames applied:
+//
+//         Group 1 — "Yes" → concern-specific (same shape as Q-J):
+//           RunOptions.Yes        → SkipDirtyRepoCheck
+//           ApplyOptions.Yes      → SkipApplyConfirmation
+//
+//         Group 2 — vague nouns made specific:
+//           RunOptions.Runtimes        → SimulatorRuntimes
+//           ListOptions.Changes        → OnlyWithChanges
+//           DiffResult.IsBase          → IsWorkdir
+//           ApplyResult.Per            → PerDir
+//           ApplyResult.Skipped        → SkippedDirs
+//           BuildOptions.All           → AllBackends
+//           PruneOptions.Cache         → PruneCache
+//           DoctorReport.IsBaseMode    → IsDefaultMode
+//           DoctorReport.MissingCaps   → MissingCapabilities
+//
+//         Group 3 — typed MountMode enum:
+//           Defined MountMode { MountCopy, MountOverlay, MountRW }.
+//           DirSpec.Mode and DiffResult.Mode both use it.
+//
+//         Group 4 — build metadata nested struct:
+//           SystemInfo.Version / Commit / Date → SystemInfo.Build
+//             (BuildInfo{Version, Commit, Date}).
+//
+//         Group 5 — disambiguate Prompt overloading:
+//           StartOptions.Prompt   → NewPrompt (distinguishes from
+//                                   RunOptions.Prompt = original prompt)
+//           ResetOptions.Prompt   → NewPrompt
+//
+//         Group 6 — explicit verbs:
+//           ResetOptions.Restart       → RestartContainer
+//           ApplyOptions.WithTags      → IncludeTags (symmetry with
+//                                         IncludeWIP)
+//
+//       Principle codified: API field names answer "what does setting
+//       this to true do?" with a specific verb or fact, not a CLI
+//       flag's UX shorthand. The Default*() factories and the CLI
+//       parser absorb any verbosity hit at the call sites.
