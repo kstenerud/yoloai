@@ -191,6 +191,17 @@ const (
 	LogAgentRaw      LogFormat = "agent-raw"  // raw agent terminal stream
 )
 
+// LogLevel filters structured log entries by minimum severity (entries
+// at this level and above are emitted). Empty means "no level filter."
+type LogLevel string
+
+const (
+	LogLevelDebug LogLevel = "debug"
+	LogLevelInfo  LogLevel = "info"
+	LogLevelWarn  LogLevel = "warn"
+	LogLevelError LogLevel = "error"
+)
+
 // BugReportMode selects the redaction level for BugReport.
 type BugReportMode string
 
@@ -569,9 +580,9 @@ func (*Sandbox) Exec(ctx context.Context, opts ExecOptions, io IOStreams) (*Exec
 
 // LogOptions configures Logs.
 type LogOptions struct {
-	Format   LogFormat     // REQUIRED; empty rejected. Use DefaultLogOptions() for LogStructured.
-	Sources  []string      // for LogStructured / LogStructuredRaw: cli, sandbox, monitor, hooks
-	MinLevel string        // debug | info | warn | error
+	Format   LogFormat // REQUIRED; empty rejected. Use DefaultLogOptions() for LogStructured.
+	Sources  []string  // for LogStructured / LogStructuredRaw: cli, sandbox, monitor, hooks
+	MinLevel LogLevel
 	Since    time.Duration // 0 = no filter
 	Follow   bool          // tail live; returns when sandbox is done
 }
@@ -1050,9 +1061,9 @@ func (*SystemClient) DiskUsage(ctx context.Context) (*DiskUsage, error) { panic(
 
 // DoctorOptions configures Doctor.
 type DoctorOptions struct {
-	Backend    string           // filter to one backend
-	Isolation  IsolationMode    // filter to one isolation mode
-	OnProgress func(msg string) // human-readable progress (per-check); nil = silent
+	BackendFilter   string
+	IsolationFilter IsolationMode
+	OnProgress      func(msg string) // human-readable progress (per-check); nil = silent
 }
 
 // DoctorReport is the verdict for one backend+mode pair.
@@ -1125,9 +1136,9 @@ type Info = struct {
 	HasChanges  bool   // unapplied agent commits or uncommitted edits
 
 	// Convenience fields lifted to avoid separate methods
-	ExchangeDir string // host path to the sandbox's /yoloai/files/ exchange dir
-	Prompt      string // original prompt the sandbox was created with
-	BaselineSHA string // current baseline ref
+	HostExchangeDir string
+	OriginalPrompt  string
+	BaselineSHA     string
 
 	// Backend-side facts
 	Backend   string
@@ -1183,7 +1194,7 @@ var (
 // <cmd> -h' for help" hint. Re-exports internal/yoerrors.UsageError.
 type UsageError struct {
 	Msg  string
-	Hint string // optional follow-up text
+	Hint string
 }
 
 func (*UsageError) Error() string { panic("design-only") }
@@ -1513,3 +1524,21 @@ const (
 //       the implementation flips: `yoloai sandbox <name> deny` →
 //       `yoloai sandbox <name> remove`. Add to docs/BREAKING-CHANGES.md
 //       when the implementation lands.
+//
+//       Later refinement (2026-05-25 follow-up #4):
+//         "Name carries the meaning" applied at the field level.
+//       Audit each commented field: is the comment doing the name's
+//       job? If yes, rename; if no (invariant, side effect, zero-value
+//       semantic, cross-reference), keep. Applied to:
+//
+//         Info.Prompt              → Info.OriginalPrompt
+//         Info.ExchangeDir         → Info.HostExchangeDir
+//         Info.BaselineSHA         (comment dropped; name self-describes)
+//         LogOptions.MinLevel string → MinLevel LogLevel (new typed enum)
+//         DoctorOptions.Backend    → DoctorOptions.BackendFilter
+//         DoctorOptions.Isolation  → DoctorOptions.IsolationFilter
+//         UsageError.Hint          (comment dropped; name self-describes)
+//
+//       Principle codified in docs/dev/standards/GO.md's "Clarity over
+//       brevity" section with the keep-vs-delete heuristic for field
+//       comments.

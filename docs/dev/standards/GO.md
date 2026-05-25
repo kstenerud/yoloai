@@ -100,6 +100,30 @@ Names must be understandable to someone unfamiliar with the codebase. When you e
 - **A name that needs a comment to explain it is too short or too vague** — rename it instead of adding the comment
 - **Parameters are part of the public interface** — a function signature should read almost like documentation: `CreateSandbox(name string, agent AgentPreset, directories []string)` over `CreateSandbox(n string, a AgentPreset, d []string)`
 
+### Field comments: keep the ones doing real work; rename when the comment is the name's job
+
+The same "name carries the meaning" rule applies at the struct-field level. For every commented field, ask: *is this comment doing the name's job?* If yes, the name is wrong — rename it. If no, the comment is doing real work and should stay.
+
+**Comments that earn their keep** (document things the type system can't):
+- **Invariants and constraints.** `ExportDir string // required when Mode == ApplyExport`
+- **Side effects.** `Replace bool // destroy any existing sandbox with the same name first`
+- **Zero-value semantics.** `Timeout time.Duration // 0 = no timeout`
+- **Conditional population.** `Patch string // populated only when Status == ApplyStatusDryRun`
+- **Cross-references.** `NewPrompt string // distinct from RunOptions.Prompt (the original)`
+- **Format reminders for opaque scalars.** `Date string // ISO-8601 build timestamp`
+
+**Comments that are doing the name's job** (rename instead):
+- `Note string // probe failure reason` → `UnavailableReason string`
+- `Output string // host destination dir or file path` → `OutputPath string`
+- `Per []*Result // per-directory results` → `PerDir []*Result`
+- `Cache bool // also prune backend caches` → `PruneCache bool`
+- `Changes bool // filter to sandboxes with unapplied changes` → `OnlyWithChanges bool`
+- `MissingCaps []string // failed capability checks` → `MissingCapabilities []string`
+
+The heuristic: read the comment and ask *"could a future-self with no context guess what this field is for from the name alone?"* If yes, the comment is restating; rename. If the comment encodes a rule the name can't carry (a constraint, a side effect, a zero-value semantic), keep it.
+
+A worked example of this audit pass: the W-L8a layering-refactor design checkpoint applied this to the entire proposed `yoloai.Client` surface (`api_surface.go`'s Q-K resolution), producing ~20 renames where the field comment was doing the name's job. The principle generalises: **API field names should be self-describing nouns or verb-objects; comments document things the type system can't encode.**
+
 ## Imports
 
 Three groups, separated by blank lines (enforced by `goimports`):
