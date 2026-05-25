@@ -731,13 +731,49 @@ const (
 	SkipReasonOverlayStopped SkipReason = "overlay-stopped"
 )
 
-// PerDirApplyResult lifts patch.ApplyResult.
+// ApplyStatus is the typed outcome of one per-directory apply. Replaces
+// the Applied + Conflicts boolean pair that confused four mutually-
+// exclusive states into two flags. Embedders switch on Status to know
+// what happened and (via Recovery) what — if anything — the user
+// should do next.
+type ApplyStatus string
+
+const (
+	// ApplyStatusApplied: clean apply. Commits landed on the host repo
+	// (or unstaged diff was written for squash mode).
+	ApplyStatusApplied ApplyStatus = "applied"
+
+	// ApplyStatusEmpty: the dir had no changes to apply. PerDir entry
+	// reports the dir was processed; nothing happened.
+	ApplyStatusEmpty ApplyStatus = "empty"
+
+	// ApplyStatusConflict: git am (or the analogous overlay path)
+	// failed to apply cleanly. The repo was rolled back to its
+	// pre-apply state via `git am --abort`; any host-side stash was
+	// popped back. The user needs to inspect the diff and either fix
+	// it or skip this dir. Recovery field carries the next-step text.
+	ApplyStatusConflict ApplyStatus = "conflict"
+
+	// ApplyStatusAppliedStashConflict: git am succeeded — the agent's
+	// commits ARE on the host repo — but the subsequent `git stash
+	// pop` (restoring the user's pre-apply uncommitted edits) hit a
+	// conflict against the newly-applied commits. The user has the
+	// commits PLUS unresolved merge markers in their working tree.
+	// Recovery carries resolution instructions.
+	ApplyStatusAppliedStashConflict ApplyStatus = "applied-stash-conflict"
+
+	// ApplyStatusDryRun: DryRun=true; the Patch field holds what
+	// would have been applied. Nothing changed on the host.
+	ApplyStatusDryRun ApplyStatus = "dry-run"
+)
+
+// PerDirApplyResult reports one directory's apply outcome.
 type PerDirApplyResult struct {
-	Dir        string
-	Applied    bool
-	Conflicts  bool
-	Patch      string // dry-run only
-	ErrMessage string
+	Dir        string      // host path of the directory
+	Status     ApplyStatus // see ApplyStatus constants
+	Patch      string      // populated only when Status == ApplyStatusDryRun
+	Recovery   string      // human-readable next-step instructions; populated when Status requires user action (Conflict or AppliedStashConflict); empty otherwise
+	ErrMessage string      // non-empty when an unexpected error occurred (not the same as a conflict; for runtime / IO failures)
 }
 
 func (*Workdir) Apply(ctx context.Context, opts ApplyOptions) (*ApplyResult, error) {
