@@ -521,8 +521,40 @@ type ExecOptions struct {
 	User    ExecUser // run-as user; empty = container default. See ExecUser for known values.
 }
 
-// ExecResult is returned for non-streaming Exec. When io.TTY=true, output
-// went straight to io.Out/Err and the fields here are empty.
+// ExecResult is returned by Exec. Always non-nil when the underlying
+// process at least started (even on partial completion or cancellation).
+// Fields are populated as far as the run got:
+//
+//   - Process ran to completion (any exit code):
+//     Stdout / Stderr fully captured; ExitCode is the real exit code.
+//     Returned with error == nil.
+//
+//   - Process killed (ctx cancelled, SIGKILL):
+//     Stdout / Stderr contain bytes received before the kill;
+//     ExitCode reflects the kill (-1 or 128+signal depending on backend).
+//     Returned with error wrapping ctx.Err() (or the underlying kill cause).
+//
+//   - IO error mid-stream (broken pipe, read failure):
+//     Stdout / Stderr contain bytes up to the failure; ExitCode may not
+//     be set. Returned with the io error.
+//
+//   - Process never started (binary not found, permission denied, etc.):
+//     Exec returns (nil, err); there is no result to populate.
+//
+//   - IOStreams.TTY=true (streaming): output went straight to io.Out /
+//     io.Err; ExecResult fields are empty by design. ExitCode is still
+//     set when the process completes normally.
+//
+// **Non-zero ExitCode is NOT a Go error.** Exec returns error == nil for
+// any clean process completion regardless of exit code. Tooling-style
+// usage where exit codes carry meaning (linters returning 1 for findings,
+// tests returning 2 for compile failure, grep returning 1 for no match)
+// works without forcing callers to decide "is this an error or just
+// non-zero?". Callers branch on ExitCode explicitly when they care.
+//
+// This contract differs from exec.Cmd.Run(), which returns *ExitError on
+// non-zero exit. The trade-off favors tooling embedders over consumers
+// who treat any non-zero exit as fatal.
 type ExecResult struct {
 	Stdout   string
 	Stderr   string
