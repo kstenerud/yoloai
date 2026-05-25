@@ -470,7 +470,7 @@ func (*Sandbox) Restart(ctx context.Context, opts RestartOptions) error { panic(
 
 // DestroyOptions configures Destroy.
 type DestroyOptions struct {
-	SkipApplyCheck bool // proceed despite the ErrUnappliedChanges refusal (unapplied agent commits / WIP edits)
+	SkipApplyCheck bool // proceed despite the ErrUnappliedChanges refusal (unapplied agent commits / uncommitted edits)
 }
 
 func (*Sandbox) Destroy(ctx context.Context, opts DestroyOptions) error { panic("design-only") }
@@ -678,10 +678,10 @@ type ApplyOptions struct {
 	ExportDir             string    // required when Mode == ApplyExport
 	Refs                  []string  // specific commits or ranges
 	Paths                 []string  // pathspec filter
-	IncludeWIP            bool
-	IncludeTags           bool // also transfer git tags created by the agent; invalid with ApplySquash
-	DryRun                bool // invalid with ApplyExport
-	SkipApplyConfirmation bool // proceed without confirming each batch of commits
+	IncludeUncommitted    bool      // also apply the agent's uncommitted edits (staged + unstaged + untracked) as unstaged changes on the host; default is committed changes only
+	IncludeTags           bool      // also transfer git tags created by the agent; invalid with ApplySquash
+	DryRun                bool      // invalid with ApplyExport
+	SkipApplyConfirmation bool      // proceed without confirming each batch of commits
 }
 
 // ApplyResult bundles per-directory outcomes plus a top-level rollup.
@@ -983,7 +983,7 @@ type Info = struct {
 	// Lifecycle state
 	Status      Status
 	AgentStatus string // "active", "idle", "done", etc. (separate from lifecycle)
-	HasChanges  bool   // unapplied agent commits or WIP edits
+	HasChanges  bool   // unapplied agent commits or uncommitted edits
 
 	// Convenience fields lifted to avoid separate methods
 	ExchangeDir string // host path to the sandbox's /yoloai/files/ exchange dir
@@ -1031,7 +1031,7 @@ var (
 	ErrUnappliedChanges error
 
 	// ErrNoChanges is returned by Apply when there are no agent commits
-	// (or WIP edits) to apply.
+	// (or uncommitted edits, with IncludeUncommitted) to apply.
 	ErrNoChanges error
 
 	// ErrBackendUnavailable is returned by New when the requested or
@@ -1328,10 +1328,16 @@ const (
 //
 //         Group 6 — explicit verbs:
 //           ResetOptions.Restart       → RestartContainer
-//           ApplyOptions.WithTags      → IncludeTags (symmetry with
-//                                         IncludeWIP)
+//           ApplyOptions.WithTags      → IncludeTags
 //
 //       Principle codified: API field names answer "what does setting
 //       this to true do?" with a specific verb or fact, not a CLI
 //       flag's UX shorthand. The Default*() factories and the CLI
 //       parser absorb any verbosity hit at the call sites.
+//
+//       Later refinement (2026-05-25 follow-up):
+//         ApplyOptions.IncludeWIP    → IncludeUncommitted
+//       "WIP" is informal jargon; "uncommitted" matches git's own
+//       terminology (uncommitted = staged + unstaged + untracked).
+//       Same rename applied to mentions in Info.HasChanges and
+//       SkipApplyCheck / ErrNoChanges doc-comments.
