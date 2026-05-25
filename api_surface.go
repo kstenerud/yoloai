@@ -43,6 +43,25 @@
 // **Reviewer audit trail.** All seven W-L8a open questions resolved (Q-A
 // through Q-G). Resolutions live in the "Open questions" section at the
 // tail with **RESOLVED <date>** markers.
+//
+// **Threading model.** Methods on *Client, *Sandbox, the sub-handles
+// (*Workdir, *Files, *Network), and *SystemClient are synchronous and
+// block the calling goroutine until the operation completes. The
+// concurrency boundary sits at the call site, not inside the library:
+//
+//   - Use `context.Context` for cancellation and deadlines.
+//   - Use `go client.Op(...)` if you want the operation to run
+//     concurrently with other work in your program.
+//   - `OnProgress` callbacks are invoked synchronously from the
+//     calling goroutine. They must not block — long work in a
+//     progress callback stalls the operation that produced it.
+//
+// This matches the dominant Go idiom (docker, containerd, aws-sdk-go-v2,
+// go-git, go-getter, and the standard library's io.Copy / http.Client.Do
+// / net.Dial / sql.DB.Query). Channel-returning APIs would leak goroutine
+// lifecycle across the API boundary; embedders who want pub/sub
+// semantics build that on top with their own goroutine + channel. See
+// Q-N for the research.
 
 package yoloai
 
@@ -1624,3 +1643,68 @@ const (
 //       If no to both, drop it. The cost of a missing OnProgress is
 //       low (add it back when needed); the cost of one present without
 //       justification is API noise and embedder confusion.
+//
+// Q-N.  Async support — channels vs blocking + callback?
+//
+//       **RESOLVED 2026-05-25:** Stay with synchronous methods +
+//       OnProgress callback. Do NOT return channels / futures / handles
+//       from operation methods.
+//
+//       Research summary (full survey in commit message + working
+//       notes). Every major Go SDK uses synchronous APIs for bounded
+//       operations:
+//
+//         docker/docker          Sync. ImagePull/Build return io.ReadCloser
+//                                streaming JSON events the caller drains.
+//         containerd/containerd  Sync. Pull blocks; progress polled
+//                                out-of-band by the caller.
+//         aws-sdk-go-v2 S3       Sync. Upload progress via wrapping the
+//                                input io.Reader (counting reader).
+//         go-git                 Sync. CloneOptions.Progress io.Writer
+//                                receives human-readable lines.
+//         hashicorp/go-getter    Sync. ProgressListener interface
+//                                (callback-shaped).
+//         kubernetes client-go   Sync for bounded ops. watch.Interface
+//                                with channel is reserved for unbounded
+//                                streams (the ONLY mainstream channel-
+//                                returning API found).
+//         stdlib                 io.Copy, http.Client.Do, net.Dial,
+//                                sql.DB.Query — all sync. Concurrency
+//                                is the caller's job via `go`.
+//
+//       Why not channels:
+//         1. Channel-returning APIs leak goroutine ownership across the
+//            API boundary. The library spawns; the caller must reason
+//            about its lifetime, leak risk on abandonment, cancellation
+//            plumbing. Dave Cheney's explicit warning ("Channels are
+//            not enough"): "if you return a channel, you've also
+//            implicitly created a goroutine the caller has to reason
+//            about."
+//         2. Terminal events become awkward. Progress + completion +
+//            error all multiplex onto one channel via tagged events,
+//            or you need a separate error channel, or close-semantics
+//            for completion — all inventions the caller learns.
+//         3. Backpressure hazards. Unbuffered = caller stalls producer
+//            silently. Buffered = unbounded memory risk.
+//         4. The caller can already achieve async with `go client.Op(...)
+//            + ctx cancellation`. No value added by moving the goroutine
+//            inside the library.
+//
+//       What we DO commit to:
+//         - Methods are synchronous; context.Context handles cancellation
+//           and deadlines.
+//         - OnProgress callbacks are invoked synchronously and must not
+//           block (documented in the top-of-file threading-model note).
+//         - Concurrency is the caller's job — `go client.Op(...)`.
+//
+//       Possible future refinement (not in scope for W-L8a/b):
+//         BuildOptions could optionally accept an io.Writer for streamed
+//         build output, matching go-git's CloneOptions.Progress pattern.
+//         Defer until we have a concrete embedder need; OnProgress is
+//         sufficient today.
+//
+//       If we ever need genuine pub/sub semantics (multiple subscribers,
+//       unbounded duration like log streaming or a watch loop), introduce
+//       a Watch-style handle then — not before. Logs() already returns
+//       (io.ReadCloser, error) which is the right shape for that kind of
+//       stream.
