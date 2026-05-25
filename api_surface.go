@@ -1080,13 +1080,13 @@ func (*SystemClient) Doctor(ctx context.Context, opts DoctorOptions) ([]DoctorRe
 	panic("design-only")
 }
 
-// PruneOptions configures Prune.
+// PruneOptions configures Prune. Always operates across all installed
+// backends — per-backend pruning was dropped (Q-L) as having no real-world
+// use case.
 type PruneOptions struct {
-	Backend      string // "" = all
-	DryRun       bool
-	PruneCache   bool // also prune backend caches (forces base rebuild)
-	IncludeStale bool
-	OnProgress   func(msg string) // human-readable progress (per-item); nil = silent
+	DryRun           bool
+	IncludeBaseImage bool             // also remove base image (forces rebuild on next sandbox)
+	OnProgress       func(msg string) // human-readable progress (per-item); nil = silent
 }
 
 type PruneResult struct {
@@ -1542,3 +1542,49 @@ const (
 //       Principle codified in docs/dev/standards/GO.md's "Clarity over
 //       brevity" section with the keep-vs-delete heuristic for field
 //       comments.
+//
+// Q-L.  PruneOptions surface — how many knobs does prune really need?
+//
+//       **RESOLVED 2026-05-25:** Project owner identified that the
+//       only modes that matter in practice are (a) "prune everything
+//       except current base image" (common) and (b) "prune everything
+//       including base image" (rare). Per-backend pruning was never
+//       wanted; even the hypothetical "wipe docker but not tart" case
+//       isn't worth the surface area because rebuilding all bases
+//       isn't a big deal.
+//
+//       Old shape (5 fields):
+//         Backend       string  // "" = all
+//         DryRun        bool
+//         PruneCache    bool    // also prune backend caches
+//         IncludeStale  bool
+//         OnProgress    func(string)
+//
+//       New shape (3 fields):
+//         DryRun           bool
+//         IncludeBaseImage bool             // also remove base image
+//         OnProgress       func(string)
+//
+//       Reasoning per field:
+//         Backend          → DROPPED. No use case. Always all backends.
+//         PruneCache       → RENAMED IncludeBaseImage. Names the user-
+//                            visible decision ("preserve my base or not")
+//                            instead of the implementation detail ("which
+//                            caches"). Retained comment documents the
+//                            side effect — keep-vs-delete heuristic case.
+//         IncludeStale     → DROPPED. The CLI never exposed a toggle for
+//                            this; stale yoloai temp dirs are always
+//                            pruned. No real opt-out use case.
+//         DryRun           → KEPT. Universal pattern for destructive ops.
+//         OnProgress       → KEPT. Embedders need progress for a
+//                            potentially long-running operation.
+//
+//       CLI breaking changes (W-L8b/d, add to BREAKING-CHANGES.md):
+//         --backend  removed (always all backends)
+//         --all      removed (always all backends; flag is redundant)
+//         --cache    renamed to --include-base-image
+//
+//       Codified principle: when option fields accumulate, audit each
+//       against actual use cases — not hypothetical ones. YAGNI applies
+//       to API surface as much as to implementation; a 30-second future
+//       feature is preferable to a permanently confusing option set.
