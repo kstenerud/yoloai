@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/kstenerud/yoloai/config"
 	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/sandbox"
 	"github.com/kstenerud/yoloai/sandbox/store"
@@ -20,6 +21,7 @@ import (
 // DiffOptions controls diff generation.
 type DiffOptions struct {
 	Name     string          // sandbox name
+	Layout   config.Layout   // resolves the sandbox state directory
 	Stat     bool            // true for --stat summary only
 	NameOnly bool            // true for --name-only (list changed files)
 	Paths    []string        // optional path filter (relative to workdir)
@@ -36,7 +38,7 @@ type DiffResult = workspace.DiffResult
 // Returns an informational DiffResult (not error) for :rw non-git dirs.
 // Set opts.Stat for a summary, opts.NameOnly for a file list only.
 func GenerateDiff(ctx context.Context, opts DiffOptions) (*DiffResult, error) {
-	workDir, baselineSHA, mode, err := loadDiffContext(opts.Name)
+	workDir, baselineSHA, mode, err := loadDiffContext(opts.Layout, opts.Name)
 	if err != nil {
 		return nil, err
 	}
@@ -82,15 +84,16 @@ func GenerateDiff(ctx context.Context, opts DiffOptions) (*DiffResult, error) {
 
 // CommitDiffOptions controls commit-level diff generation.
 type CommitDiffOptions struct {
-	Name string // sandbox name
-	Ref  string // single SHA or "sha..sha" range
-	Stat bool   // true for --stat summary only
+	Name   string        // sandbox name
+	Layout config.Layout // resolves the sandbox state directory
+	Ref    string        // single SHA or "sha..sha" range
+	Stat   bool          // true for --stat summary only
 }
 
 // GenerateCommitDiff produces a diff for a specific commit or range
 // within the sandbox work copy. Only works for :copy mode sandboxes.
 func GenerateCommitDiff(opts CommitDiffOptions) (*DiffResult, error) {
-	workDir, _, mode, err := loadDiffContext(opts.Name)
+	workDir, _, mode, err := loadDiffContext(opts.Layout, opts.Name)
 	if err != nil {
 		return nil, err
 	}
@@ -141,8 +144,8 @@ type CommitInfoWithStat struct {
 
 // ListCommitsWithStats returns commits beyond baseline with per-commit
 // --stat summaries. Returns an empty slice if HEAD == baseline.
-func ListCommitsWithStats(ctx context.Context, rt runtime.Runtime, name string) ([]CommitInfoWithStat, error) {
-	commits, err := ListCommitsBeyondBaseline(ctx, rt, name)
+func ListCommitsWithStats(ctx context.Context, layout config.Layout, rt runtime.Runtime, name string) ([]CommitInfoWithStat, error) {
+	commits, err := ListCommitsBeyondBaseline(ctx, layout, rt, name)
 	if err != nil {
 		return nil, err
 	}
@@ -150,7 +153,7 @@ func ListCommitsWithStats(ctx context.Context, rt runtime.Runtime, name string) 
 		return nil, nil
 	}
 
-	workDir, _, _, err := loadDiffContext(name)
+	workDir, _, _, err := loadDiffContext(layout, name)
 	if err != nil {
 		return nil, err
 	}
@@ -172,9 +175,9 @@ func ListCommitsWithStats(ctx context.Context, rt runtime.Runtime, name string) 
 }
 
 // loadDiffContext loads the metadata and resolves paths needed for diff.
-func loadDiffContext(name string) (workDir string, baselineSHA string, mode string, err error) {
-	sandboxDir, dirErr := store.RequireSandboxDir(name)
-	if dirErr != nil {
+func loadDiffContext(layout config.Layout, name string) (workDir string, baselineSHA string, mode string, err error) {
+	sandboxDir := layout.SandboxDir(name)
+	if dirErr := store.RequireSandboxDir(sandboxDir); dirErr != nil {
 		return "", "", "", dirErr
 	}
 
@@ -187,7 +190,7 @@ func loadDiffContext(name string) (workDir string, baselineSHA string, mode stri
 
 	switch mode {
 	case "copy":
-		workDir = copyGitWorkDir(name, meta.Workdir.HostPath, meta.Workdir.MountPath)
+		workDir = copyGitWorkDir(sandboxDir, meta.Workdir.HostPath, meta.Workdir.MountPath)
 		baselineSHA = meta.Workdir.BaselineSHA
 		if baselineSHA == "" {
 			return "", "", "", fmt.Errorf("sandbox has no baseline SHA — was it created before diff support?")
@@ -219,9 +222,9 @@ type DiffContext struct {
 
 // LoadAllDiffContexts returns diff contexts for workdir + all aux dirs
 // that have diffable content (:copy, :overlay, or :rw). Read-only dirs are skipped.
-func LoadAllDiffContexts(name string) ([]DiffContext, error) {
-	sandboxDir, err := store.RequireSandboxDir(name)
-	if err != nil {
+func LoadAllDiffContexts(layout config.Layout, name string) ([]DiffContext, error) {
+	sandboxDir := layout.SandboxDir(name)
+	if err := store.RequireSandboxDir(sandboxDir); err != nil {
 		return nil, err
 	}
 
@@ -237,7 +240,7 @@ func LoadAllDiffContexts(name string) ([]DiffContext, error) {
 	case "copy":
 		contexts = append(contexts, DiffContext{
 			HostPath:    meta.Workdir.HostPath,
-			WorkDir:     copyGitWorkDir(name, meta.Workdir.HostPath, meta.Workdir.MountPath),
+			WorkDir:     copyGitWorkDir(sandboxDir, meta.Workdir.HostPath, meta.Workdir.MountPath),
 			BaselineSHA: meta.Workdir.BaselineSHA,
 			Mode:        "copy",
 		})
@@ -266,7 +269,7 @@ func LoadAllDiffContexts(name string) ([]DiffContext, error) {
 		case "copy":
 			contexts = append(contexts, DiffContext{
 				HostPath:    d.HostPath,
-				WorkDir:     copyGitWorkDir(name, d.HostPath, d.MountPath),
+				WorkDir:     copyGitWorkDir(sandboxDir, d.HostPath, d.MountPath),
 				BaselineSHA: d.BaselineSHA,
 				Mode:        "copy",
 			})
@@ -298,7 +301,7 @@ func LoadAllDiffContexts(name string) ([]DiffContext, error) {
 // Uses opts.Stat and opts.Name; opts.Paths and opts.NameOnly are ignored (multi-dir context).
 // NOTE: This does not handle :overlay directories. Use GenerateOverlayDiff for overlay mode.
 func GenerateMultiDiff(opts DiffOptions) ([]*DiffResult, error) {
-	contexts, err := LoadAllDiffContexts(opts.Name)
+	contexts, err := LoadAllDiffContexts(opts.Layout, opts.Name)
 	if err != nil {
 		return nil, err
 	}
@@ -334,21 +337,21 @@ func GenerateMultiDiff(opts DiffOptions) ([]*DiffResult, error) {
 // mountPath, which differs from hostPath. For host-based backends (Docker, Seatbelt),
 // mountPath equals hostPath (Docker) or equals the host staging copy (Seatbelt), so
 // mountPath being distinct from hostPath reliably identifies a VM backend.
-func copyGitWorkDir(sandboxName, hostPath, mountPath string) string {
+func copyGitWorkDir(sandboxDir, hostPath, mountPath string) string {
 	if mountPath != "" && mountPath != hostPath {
 		return mountPath
 	}
-	return store.WorkDir(sandboxName, hostPath)
+	return store.WorkDir(sandboxDir, hostPath)
 }
 
 // ListCommitsBeyondBaselineOverlay returns commits beyond the baseline for
 // overlay-mode directories by executing git log inside the running container.
-func ListCommitsBeyondBaselineOverlay(ctx context.Context, rt runtime.Runtime, name string) ([]CommitInfo, error) {
-	meta, err := store.LoadMeta(store.Dir(name))
+func ListCommitsBeyondBaselineOverlay(ctx context.Context, layout config.Layout, rt runtime.Runtime, name string) ([]CommitInfo, error) {
+	meta, err := store.LoadMeta(layout.SandboxDir(name))
 	if err != nil {
 		return nil, fmt.Errorf("load metadata: %w", err)
 	}
-	contexts, err := LoadAllDiffContexts(name)
+	contexts, err := LoadAllDiffContexts(layout, name)
 	if err != nil {
 		return nil, err
 	}
@@ -360,7 +363,7 @@ func ListCommitsBeyondBaselineOverlay(ctx context.Context, rt runtime.Runtime, n
 			continue
 		}
 
-		baselineSHA, baselineErr := ensureOverlayBaseline(ctx, rt, name, meta, dc)
+		baselineSHA, baselineErr := ensureOverlayBaseline(ctx, layout, rt, name, meta, dc)
 		if baselineErr != nil {
 			return nil, baselineErr
 		}
@@ -393,15 +396,15 @@ func ListCommitsBeyondBaselineOverlay(ctx context.Context, rt runtime.Runtime, n
 // executing git commands inside the running container.
 // Use opts.Stat for a summary, opts.NameOnly for a file list only.
 func GenerateOverlayDiff(ctx context.Context, rt runtime.Runtime, opts DiffOptions) ([]*DiffResult, error) {
-	return generateOverlayDiff(ctx, rt, opts.Name, opts.Stat, opts.NameOnly)
+	return generateOverlayDiff(ctx, opts.Layout, rt, opts.Name, opts.Stat, opts.NameOnly)
 }
 
-func generateOverlayDiff(ctx context.Context, rt runtime.Runtime, name string, stat, nameOnly bool) ([]*DiffResult, error) {
-	meta, err := store.LoadMeta(store.Dir(name))
+func generateOverlayDiff(ctx context.Context, layout config.Layout, rt runtime.Runtime, name string, stat, nameOnly bool) ([]*DiffResult, error) {
+	meta, err := store.LoadMeta(layout.SandboxDir(name))
 	if err != nil {
 		return nil, fmt.Errorf("load metadata: %w", err)
 	}
-	contexts, err := LoadAllDiffContexts(name)
+	contexts, err := LoadAllDiffContexts(layout, name)
 	if err != nil {
 		return nil, err
 	}
@@ -415,7 +418,7 @@ func generateOverlayDiff(ctx context.Context, rt runtime.Runtime, name string, s
 		}
 
 		// Resolve baseline SHA if deferred (creates fresh baseline if git is broken)
-		baselineSHA, baselineErr := ensureOverlayBaseline(ctx, rt, name, meta, dc)
+		baselineSHA, baselineErr := ensureOverlayBaseline(ctx, layout, rt, name, meta, dc)
 		if baselineErr != nil {
 			return nil, baselineErr
 		}

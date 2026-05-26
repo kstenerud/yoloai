@@ -36,12 +36,12 @@ func (m *Manager) Clone(ctx context.Context, opts CloneOptions) error {
 	}
 	defer unlock()
 
-	srcDir, err := store.RequireSandboxDir(opts.Source)
-	if err != nil {
+	srcDir := m.layout.SandboxDir(opts.Source)
+	if err := store.RequireSandboxDir(srcDir); err != nil {
 		return fmt.Errorf("source sandbox %q: %w", opts.Source, err)
 	}
 
-	dstDir := store.Dir(opts.Dest)
+	dstDir := m.layout.SandboxDir(opts.Dest)
 	if _, err := os.Stat(dstDir); err == nil {
 		return fmt.Errorf("destination sandbox %q already exists", opts.Dest)
 	}

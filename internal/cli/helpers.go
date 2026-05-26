@@ -115,7 +115,7 @@ func resolveContainerBackendConfig() string {
 // Falls back to config default if meta.json can't be read.
 // Used by lifecycle commands that operate on an existing sandbox.
 func resolveBackendForSandbox(name string) string {
-	meta, err := store.LoadMeta(store.Dir(name))
+	meta, err := store.LoadMeta(cliLayout().SandboxDir(name))
 	if err == nil && meta.Backend != "" {
 		return meta.Backend
 	}
@@ -203,5 +203,5 @@ func sandboxErrorHint(name string, err error) error {
 	if err == nil || errors.Is(err, sandbox.ErrSandboxNotFound) {
 		return err
 	}
-	return fmt.Errorf("%w\n  sandbox dir: %s\n  to remove: yoloai destroy %s", err, store.Dir(name), name)
+	return fmt.Errorf("%w\n  sandbox dir: %s\n  to remove: yoloai destroy %s", err, cliLayout().SandboxDir(name), name)
 }

@@ -27,10 +27,10 @@ type logSource struct {
 }
 
 var allLogSources = []logSource{
-	{"cli", "cli    ", store.CLIJSONLPath},
-	{"sandbox", "sandbox", store.SandboxJSONLPath},
-	{"monitor", "monitor", store.MonitorJSONLPath},
-	{"hooks", "hooks  ", store.HooksJSONLPath},
+	{"cli", "cli    ", func(name string) string { return store.CLIJSONLPath(cliLayout().SandboxDir(name)) }},
+	{"sandbox", "sandbox", func(name string) string { return store.SandboxJSONLPath(cliLayout().SandboxDir(name)) }},
+	{"monitor", "monitor", func(name string) string { return store.MonitorJSONLPath(cliLayout().SandboxDir(name)) }},
+	{"hooks", "hooks  ", func(name string) string { return store.HooksJSONLPath(cliLayout().SandboxDir(name)) }},
 }
 
 // logRecord is a parsed JSONL log entry.
@@ -379,7 +379,7 @@ func tailFilePoll(
 
 // sandboxIsDone returns true if the sandbox's agent-status.json shows the agent has exited.
 func sandboxIsDone(name string) bool {
-	statusPath := store.AgentStatusFilePath(name)
+	statusPath := store.AgentStatusFilePath(cliLayout().SandboxDir(name))
 	data, err := os.ReadFile(statusPath) //nolint:gosec // G304: statusPath is store.AgentStatusFilePath(name) — yoloAI-owned
 	if err != nil {
 		return false
@@ -447,7 +447,7 @@ func runLogFollow(cmd *cobra.Command, name string, sources []logSource, minLevel
 
 // runLogAgent shows the raw agent terminal output (logs/agent.log).
 func runLogAgent(cmd *cobra.Command, name string, rawMode bool) error {
-	logPath := store.AgentLogPath(name)
+	logPath := store.AgentLogPath(cliLayout().SandboxDir(name))
 	f, err := os.Open(logPath) //nolint:gosec // G304: logPath is store.AgentLogPath(name) — yoloAI-owned
 	if err != nil {
 		if os.IsNotExist(err) {

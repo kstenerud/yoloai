@@ -22,9 +22,10 @@ func runSandboxInfo(cmd *cobra.Command, name string) error {
 	closeSink := openCLIJSONLSink(name, cmd)
 	defer closeSink()
 	slog.Info("collecting sandbox info", "event", "sandbox.info", "sandbox", name) //nolint:gosec // G706: name is an internal sandbox name, not user-injected log data
+	layout := cliLayout()
 	backend := resolveBackendForSandbox(name)
 	return withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
-		info, err := sandbox.InspectSandbox(ctx, rt, name)
+		info, err := sandbox.InspectSandbox(ctx, layout, rt, name)
 		if err != nil {
 			return sandboxErrorHint(name, err)
 		}
@@ -35,10 +36,11 @@ func runSandboxInfo(cmd *cobra.Command, name string) error {
 				ConfigPath    string `json:"config_path"`
 				PromptPreview string `json:"prompt_preview,omitempty"`
 			}
+			sandboxDir := layout.SandboxDir(name)
 			result := infoJSON{
 				Info:          info,
-				ConfigPath:    filepath.Join(store.Dir(name), store.RuntimeConfigFile),
-				PromptPreview: loadPromptPreview(store.Dir(name)),
+				ConfigPath:    filepath.Join(sandboxDir, store.RuntimeConfigFile),
+				PromptPreview: loadPromptPreview(sandboxDir),
 			}
 			return writeJSON(cmd.OutOrStdout(), result)
 		}
@@ -72,7 +74,7 @@ func printSandboxInfo(cmd *cobra.Command, name string, info *sandbox.Info) {
 		fmt.Fprintf(w, "Image:       %s\n", meta.ImageRef) //nolint:errcheck
 	}
 
-	sandboxDir := store.Dir(name)
+	sandboxDir := cliLayout().SandboxDir(name)
 	fmt.Fprintf(w, "Sandbox dir: %s\n", sandboxDir)                                         //nolint:errcheck
 	fmt.Fprintf(w, "Config:      %s\n", filepath.Join(sandboxDir, store.RuntimeConfigFile)) //nolint:errcheck
 

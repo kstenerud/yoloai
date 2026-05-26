@@ -50,7 +50,7 @@ func TestGeneratePatch_CopyMode(t *testing.T) {
 	writeTestFile(t, workDir, "file.txt", "modified content\n")
 
 	rt := getTestRuntime(t)
-	patch, stat, err := GeneratePatch(context.Background(), rt, "test-patch", nil, true)
+	patch, stat, err := GeneratePatch(context.Background(), testLayout(tmpDir), rt, "test-patch", nil, true)
 	require.NoError(t, err)
 	assert.NotEmpty(t, patch)
 	assert.Contains(t, stat, "file.txt")
@@ -66,7 +66,7 @@ func TestGeneratePatch_RWMode_Error(t *testing.T) {
 	createRWSandbox(t, tmpDir, "test-rw-patch", hostDir)
 
 	rt := getTestRuntime(t)
-	_, _, err := GeneratePatch(context.Background(), rt, "test-rw-patch", nil, true)
+	_, _, err := GeneratePatch(context.Background(), testLayout(tmpDir), rt, "test-rw-patch", nil, true)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), ":rw directories")
 }
@@ -80,7 +80,7 @@ func TestGeneratePatch_PathFilter(t *testing.T) {
 	writeTestFile(t, workDir, "other.txt", "also changed\n")
 
 	rt := getTestRuntime(t)
-	patch, stat, err := GeneratePatch(context.Background(), rt, "test-patch-filter", []string{"file.txt"}, true)
+	patch, stat, err := GeneratePatch(context.Background(), testLayout(tmpDir), rt, "test-patch-filter", []string{"file.txt"}, true)
 	require.NoError(t, err)
 	assert.NotEmpty(t, patch)
 	assert.Contains(t, stat, "file.txt")
@@ -95,7 +95,7 @@ func TestGeneratePatch_Empty(t *testing.T) {
 	createCopySandbox(t, tmpDir, "test-patch-empty", "/tmp/project")
 
 	rt := getTestRuntime(t)
-	patch, stat, err := GeneratePatch(context.Background(), rt, "test-patch-empty", nil, true)
+	patch, stat, err := GeneratePatch(context.Background(), testLayout(tmpDir), rt, "test-patch-empty", nil, true)
 	require.NoError(t, err)
 	assert.Empty(t, patch)
 	assert.Empty(t, stat)
@@ -119,7 +119,7 @@ func TestGeneratePatch_IncludeWIPFalse_ExcludesUncommitted(t *testing.T) {
 	writeTestFile(t, workDir, "wip.txt", "wip body\n")
 
 	rt := getTestRuntime(t)
-	patch, _, err := GeneratePatch(context.Background(), rt, "test-wip-excluded", nil, false)
+	patch, _, err := GeneratePatch(context.Background(), testLayout(tmpDir), rt, "test-wip-excluded", nil, false)
 	require.NoError(t, err)
 	assert.Contains(t, string(patch), "committed.txt", "committed change must be in patch")
 	assert.NotContains(t, string(patch), "wip.txt", "uncommitted file must NOT be in patch when includeWIP=false")
@@ -141,7 +141,7 @@ func TestGeneratePatch_IncludeWIPTrue_IncludesUncommitted(t *testing.T) {
 	writeTestFile(t, workDir, "wip.txt", "wip body\n")
 
 	rt := getTestRuntime(t)
-	patch, _, err := GeneratePatch(context.Background(), rt, "test-wip-included", nil, true)
+	patch, _, err := GeneratePatch(context.Background(), testLayout(tmpDir), rt, "test-wip-included", nil, true)
 	require.NoError(t, err)
 	assert.Contains(t, string(patch), "committed.txt")
 	assert.Contains(t, string(patch), "wip.txt", "uncommitted file must be in patch when includeWIP=true")
@@ -157,7 +157,7 @@ func TestApplyPatch_GitTarget(t *testing.T) {
 	writeTestFile(t, workDir, "file.txt", "modified by agent\n")
 
 	rt := getTestRuntime(t)
-	patch, _, err := GeneratePatch(context.Background(), rt, "test-apply-git", nil, true)
+	patch, _, err := GeneratePatch(context.Background(), testLayout(tmpDir), rt, "test-apply-git", nil, true)
 	require.NoError(t, err)
 
 	// Create target git repo with original content
@@ -183,7 +183,7 @@ func TestApplyPatch_NonGitTarget(t *testing.T) {
 	writeTestFile(t, workDir, "file.txt", "modified by agent\n")
 
 	rt := getTestRuntime(t)
-	patch, _, err := GeneratePatch(context.Background(), rt, "test-apply-nongit", nil, true)
+	patch, _, err := GeneratePatch(context.Background(), testLayout(tmpDir), rt, "test-apply-nongit", nil, true)
 	require.NoError(t, err)
 
 	// Create target dir (no git) with original content
@@ -206,7 +206,7 @@ func TestApplyPatch_NewFile(t *testing.T) {
 	writeTestFile(t, workDir, "created.txt", "brand new file\n")
 
 	rt := getTestRuntime(t)
-	patch, _, err := GeneratePatch(context.Background(), rt, "test-apply-new", nil, true)
+	patch, _, err := GeneratePatch(context.Background(), testLayout(tmpDir), rt, "test-apply-new", nil, true)
 	require.NoError(t, err)
 
 	// Target has original file but not the new one
@@ -258,7 +258,7 @@ func TestApplyPatch_DeleteFile(t *testing.T) {
 	require.NoError(t, os.Remove(filepath.Join(workDir, "remove.txt")))
 
 	rt := getTestRuntime(t)
-	patch, _, err := GeneratePatch(context.Background(), rt, name, nil, true)
+	patch, _, err := GeneratePatch(context.Background(), testLayout(tmpDir), rt, name, nil, true)
 	require.NoError(t, err)
 
 	// Target has both files
@@ -286,7 +286,7 @@ func TestCheckPatch_Conflict(t *testing.T) {
 	writeTestFile(t, workDir, "file.txt", "agent version\n")
 
 	rt := getTestRuntime(t)
-	patch, _, err := GeneratePatch(context.Background(), rt, "test-conflict", nil, true)
+	patch, _, err := GeneratePatch(context.Background(), testLayout(tmpDir), rt, "test-conflict", nil, true)
 	require.NoError(t, err)
 
 	// Target has different content than what patch expects
@@ -309,7 +309,7 @@ func TestCheckPatch_Clean(t *testing.T) {
 	writeTestFile(t, workDir, "file.txt", "modified\n")
 
 	rt := getTestRuntime(t)
-	patch, _, err := GeneratePatch(context.Background(), rt, "test-clean", nil, true)
+	patch, _, err := GeneratePatch(context.Background(), testLayout(tmpDir), rt, "test-clean", nil, true)
 	require.NoError(t, err)
 
 	// Target matches original
@@ -352,7 +352,7 @@ func TestListCommitsBeyondBaseline_NoCommits(t *testing.T) {
 	createCopySandbox(t, tmpDir, "test-list-none", "/tmp/project")
 
 	rt := getTestRuntime(t)
-	commits, err := ListCommitsBeyondBaseline(context.Background(), rt, "test-list-none")
+	commits, err := ListCommitsBeyondBaseline(context.Background(), testLayout(tmpDir), rt, "test-list-none")
 	require.NoError(t, err)
 	assert.Empty(t, commits)
 }
@@ -370,7 +370,7 @@ func TestListCommitsBeyondBaseline_Single(t *testing.T) {
 	})
 
 	rt := getTestRuntime(t)
-	commits, err := ListCommitsBeyondBaseline(context.Background(), rt, "test-list-one")
+	commits, err := ListCommitsBeyondBaseline(context.Background(), testLayout(tmpDir), rt, "test-list-one")
 	require.NoError(t, err)
 	require.Len(t, commits, 1)
 	assert.Equal(t, "add feature X", commits[0].Subject)
@@ -392,7 +392,7 @@ func TestListCommitsBeyondBaseline_Multiple(t *testing.T) {
 	})
 
 	rt := getTestRuntime(t)
-	commits, err := ListCommitsBeyondBaseline(context.Background(), rt, "test-list-multi")
+	commits, err := ListCommitsBeyondBaseline(context.Background(), testLayout(tmpDir), rt, "test-list-multi")
 	require.NoError(t, err)
 	require.Len(t, commits, 3)
 	assert.Equal(t, "first commit", commits[0].Subject)
@@ -409,7 +409,7 @@ func TestListCommitsBeyondBaseline_RWError(t *testing.T) {
 	createRWSandbox(t, tmpDir, "test-list-rw", hostDir)
 
 	rt := getTestRuntime(t)
-	_, err := ListCommitsBeyondBaseline(context.Background(), rt, "test-list-rw")
+	_, err := ListCommitsBeyondBaseline(context.Background(), testLayout(tmpDir), rt, "test-list-rw")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), ":rw directories")
 }
@@ -423,7 +423,7 @@ func TestHasUncommittedChanges_Clean(t *testing.T) {
 	createCopySandbox(t, tmpDir, "test-wip-clean", "/tmp/project")
 
 	rt := getTestRuntime(t)
-	has, err := HasUncommittedChanges(context.Background(), rt, "test-wip-clean")
+	has, err := HasUncommittedChanges(context.Background(), testLayout(tmpDir), rt, "test-wip-clean")
 	require.NoError(t, err)
 	assert.False(t, has)
 }
@@ -436,7 +436,7 @@ func TestHasUncommittedChanges_Modified(t *testing.T) {
 	writeTestFile(t, workDir, "file.txt", "modified\n")
 
 	rt := getTestRuntime(t)
-	has, err := HasUncommittedChanges(context.Background(), rt, "test-wip-mod")
+	has, err := HasUncommittedChanges(context.Background(), testLayout(tmpDir), rt, "test-wip-mod")
 	require.NoError(t, err)
 	assert.True(t, has)
 }
@@ -449,7 +449,7 @@ func TestHasUncommittedChanges_NewFile(t *testing.T) {
 	writeTestFile(t, workDir, "brand-new.txt", "new file\n")
 
 	rt := getTestRuntime(t)
-	has, err := HasUncommittedChanges(context.Background(), rt, "test-wip-new")
+	has, err := HasUncommittedChanges(context.Background(), testLayout(tmpDir), rt, "test-wip-new")
 	require.NoError(t, err)
 	assert.True(t, has)
 }
@@ -467,7 +467,7 @@ func TestHasUncommittedChanges_OnlyCommits(t *testing.T) {
 	})
 
 	rt := getTestRuntime(t)
-	has, err := HasUncommittedChanges(context.Background(), rt, "test-wip-committed")
+	has, err := HasUncommittedChanges(context.Background(), testLayout(tmpDir), rt, "test-wip-committed")
 	require.NoError(t, err)
 	assert.False(t, has)
 }
@@ -487,7 +487,7 @@ func TestGenerateFormatPatch_Single(t *testing.T) {
 	})
 
 	rt := getTestRuntime(t)
-	patchDir, files, err := GenerateFormatPatch(context.Background(), rt, "test-fp-one", nil)
+	patchDir, files, err := GenerateFormatPatch(context.Background(), testLayout(tmpDir), rt, "test-fp-one", nil)
 	require.NoError(t, err)
 	defer os.RemoveAll(patchDir) //nolint:errcheck
 
@@ -515,7 +515,7 @@ func TestGenerateFormatPatch_Multiple(t *testing.T) {
 	})
 
 	rt := getTestRuntime(t)
-	patchDir, files, err := GenerateFormatPatch(context.Background(), rt, "test-fp-multi", nil)
+	patchDir, files, err := GenerateFormatPatch(context.Background(), testLayout(tmpDir), rt, "test-fp-multi", nil)
 	require.NoError(t, err)
 	defer os.RemoveAll(patchDir) //nolint:errcheck
 
@@ -535,7 +535,7 @@ func TestGenerateFormatPatch_NoCommits(t *testing.T) {
 	createCopySandbox(t, tmpDir, "test-fp-empty", "/tmp/project")
 
 	rt := getTestRuntime(t)
-	patchDir, files, err := GenerateFormatPatch(context.Background(), rt, "test-fp-empty", nil)
+	patchDir, files, err := GenerateFormatPatch(context.Background(), testLayout(tmpDir), rt, "test-fp-empty", nil)
 	require.NoError(t, err)
 	defer os.RemoveAll(patchDir) //nolint:errcheck
 
@@ -556,7 +556,7 @@ func TestGenerateFormatPatch_PathFilter(t *testing.T) {
 	})
 
 	rt := getTestRuntime(t)
-	patchDir, files, err := GenerateFormatPatch(context.Background(), rt, "test-fp-filter", []string{"a.txt"})
+	patchDir, files, err := GenerateFormatPatch(context.Background(), testLayout(tmpDir), rt, "test-fp-filter", []string{"a.txt"})
 	require.NoError(t, err)
 	defer os.RemoveAll(patchDir) //nolint:errcheck
 
@@ -574,7 +574,7 @@ func TestGenerateWIPDiff_NoChanges(t *testing.T) {
 	createCopySandbox(t, tmpDir, "test-wip-diff-none", "/tmp/project")
 
 	rt := getTestRuntime(t)
-	patch, stat, err := GenerateWIPDiff(context.Background(), rt, "test-wip-diff-none", nil)
+	patch, stat, err := GenerateWIPDiff(context.Background(), testLayout(tmpDir), rt, "test-wip-diff-none", nil)
 	require.NoError(t, err)
 	assert.Empty(t, patch)
 	assert.Empty(t, stat)
@@ -596,7 +596,7 @@ func TestGenerateWIPDiff_Modified(t *testing.T) {
 	writeTestFile(t, workDir, "wip.txt", "work in progress\n")
 
 	rt := getTestRuntime(t)
-	patch, stat, err := GenerateWIPDiff(context.Background(), rt, "test-wip-diff-mod", nil)
+	patch, stat, err := GenerateWIPDiff(context.Background(), testLayout(tmpDir), rt, "test-wip-diff-mod", nil)
 	require.NoError(t, err)
 	assert.NotEmpty(t, patch)
 	assert.Contains(t, stat, "wip.txt")
@@ -614,7 +614,7 @@ func TestGenerateWIPDiff_PathFilter(t *testing.T) {
 	writeTestFile(t, workDir, "other.txt", "also changed\n")
 
 	rt := getTestRuntime(t)
-	patch, stat, err := GenerateWIPDiff(context.Background(), rt, "test-wip-diff-filter", []string{"file.txt"})
+	patch, stat, err := GenerateWIPDiff(context.Background(), testLayout(tmpDir), rt, "test-wip-diff-filter", []string{"file.txt"})
 	require.NoError(t, err)
 	assert.NotEmpty(t, patch)
 	assert.Contains(t, stat, "file.txt")
@@ -636,7 +636,7 @@ func TestApplyFormatPatch_Single(t *testing.T) {
 	})
 
 	rt := getTestRuntime(t)
-	patchDir, files, err := GenerateFormatPatch(context.Background(), rt, "test-am-one", nil)
+	patchDir, files, err := GenerateFormatPatch(context.Background(), testLayout(tmpDir), rt, "test-am-one", nil)
 	require.NoError(t, err)
 	defer os.RemoveAll(patchDir) //nolint:errcheck
 
@@ -670,7 +670,7 @@ func TestApplyFormatPatch_Multiple(t *testing.T) {
 	})
 
 	rt := getTestRuntime(t)
-	patchDir, files, err := GenerateFormatPatch(context.Background(), rt, "test-am-multi", nil)
+	patchDir, files, err := GenerateFormatPatch(context.Background(), testLayout(tmpDir), rt, "test-am-multi", nil)
 	require.NoError(t, err)
 	defer os.RemoveAll(patchDir) //nolint:errcheck
 
@@ -709,7 +709,7 @@ func TestApplyFormatPatch_Conflict(t *testing.T) {
 	})
 
 	rt := getTestRuntime(t)
-	patchDir, files, err := GenerateFormatPatch(context.Background(), rt, "test-am-conflict", nil)
+	patchDir, files, err := GenerateFormatPatch(context.Background(), testLayout(tmpDir), rt, "test-am-conflict", nil)
 	require.NoError(t, err)
 	defer os.RemoveAll(patchDir) //nolint:errcheck
 
@@ -740,7 +740,7 @@ func TestApplyFormatPatch_PreservesAuthorship(t *testing.T) {
 	})
 
 	rt := getTestRuntime(t)
-	patchDir, files, err := GenerateFormatPatch(context.Background(), rt, "test-am-author", nil)
+	patchDir, files, err := GenerateFormatPatch(context.Background(), testLayout(tmpDir), rt, "test-am-author", nil)
 	require.NoError(t, err)
 	defer os.RemoveAll(patchDir) //nolint:errcheck
 
@@ -779,22 +779,22 @@ func TestAdvanceBaseline_UpdatesMeta(t *testing.T) {
 
 	// Before: commits visible
 	rt := getTestRuntime(t)
-	commits, err := ListCommitsBeyondBaseline(context.Background(), rt, name)
+	commits, err := ListCommitsBeyondBaseline(context.Background(), testLayout(tmpDir), rt, name)
 	require.NoError(t, err)
 	require.Len(t, commits, 1)
 
 	// Advance baseline
-	require.NoError(t, AdvanceBaseline(context.Background(), rt, name))
+	require.NoError(t, AdvanceBaseline(context.Background(), testLayout(tmpDir), rt, name))
 
 	// After: no commits beyond baseline
-	commits, err = ListCommitsBeyondBaseline(context.Background(), rt, name)
+	commits, err = ListCommitsBeyondBaseline(context.Background(), testLayout(tmpDir), rt, name)
 	require.NoError(t, err)
 	assert.Empty(t, commits)
 
 	// Verify meta.json has new SHA
-	meta, err := store.LoadMeta(store.Dir(name))
+	meta, err := store.LoadMeta(testLayout(tmpDir).SandboxDir(name))
 	require.NoError(t, err)
-	workDir := store.WorkDir(name, meta.Workdir.HostPath)
+	workDir := store.WorkDir(testLayout(tmpDir).SandboxDir(name), meta.Workdir.HostPath)
 	headSHA := gitHEAD(t, workDir)
 	assert.Equal(t, headSHA, meta.Workdir.BaselineSHA)
 }
@@ -814,15 +814,15 @@ func TestAdvanceBaseline_DiffEmptyAfterAdvance(t *testing.T) {
 
 	// Before: diff is non-empty
 	rt := getTestRuntime(t)
-	patch, _, err := GeneratePatch(context.Background(), rt, name, nil, true)
+	patch, _, err := GeneratePatch(context.Background(), testLayout(tmpDir), rt, name, nil, true)
 	require.NoError(t, err)
 	assert.NotEmpty(t, patch)
 
 	// Advance baseline
-	require.NoError(t, AdvanceBaseline(context.Background(), rt, name))
+	require.NoError(t, AdvanceBaseline(context.Background(), testLayout(tmpDir), rt, name))
 
 	// After: diff is empty
-	patch, stat, err := GeneratePatch(context.Background(), rt, name, nil, true)
+	patch, stat, err := GeneratePatch(context.Background(), testLayout(tmpDir), rt, name, nil, true)
 	require.NoError(t, err)
 	assert.Empty(t, patch)
 	assert.Empty(t, stat)
@@ -838,7 +838,7 @@ func TestAdvanceBaseline_RWNoop(t *testing.T) {
 
 	// Should return nil (no-op)
 	rt := getTestRuntime(t)
-	assert.NoError(t, AdvanceBaseline(context.Background(), rt, "test-advance-rw"))
+	assert.NoError(t, AdvanceBaseline(context.Background(), testLayout(tmpDir), rt, "test-advance-rw"))
 }
 
 func TestAdvanceBaseline_NewCommitsStillVisible(t *testing.T) {
@@ -856,7 +856,7 @@ func TestAdvanceBaseline_NewCommitsStillVisible(t *testing.T) {
 
 	// Advance baseline past old commit
 	rt := getTestRuntime(t)
-	require.NoError(t, AdvanceBaseline(context.Background(), rt, name))
+	require.NoError(t, AdvanceBaseline(context.Background(), testLayout(tmpDir), rt, name))
 
 	// Add a new commit after advancing
 	writeTestFile(t, workDir, "new.txt", "new\n")
@@ -864,7 +864,7 @@ func TestAdvanceBaseline_NewCommitsStillVisible(t *testing.T) {
 	gitCommit(t, workDir, "new commit")
 
 	// Only new commit should be visible
-	commits, err := ListCommitsBeyondBaseline(context.Background(), rt, name)
+	commits, err := ListCommitsBeyondBaseline(context.Background(), testLayout(tmpDir), rt, name)
 	require.NoError(t, err)
 	require.Len(t, commits, 1)
 	assert.Equal(t, "new commit", commits[0].Subject)
@@ -885,11 +885,11 @@ func TestResolveRef_FullSHA(t *testing.T) {
 	})
 
 	rt := getTestRuntime(t)
-	commits, err := ListCommitsBeyondBaseline(context.Background(), rt, "test-resolve-full")
+	commits, err := ListCommitsBeyondBaseline(context.Background(), testLayout(tmpDir), rt, "test-resolve-full")
 	require.NoError(t, err)
 	require.Len(t, commits, 1)
 
-	resolved, err := ResolveRef(context.Background(), rt, "test-resolve-full", commits[0].SHA)
+	resolved, err := ResolveRef(context.Background(), testLayout(tmpDir), rt, "test-resolve-full", commits[0].SHA)
 	require.NoError(t, err)
 	assert.Equal(t, commits[0].SHA, resolved.SHA)
 	assert.Equal(t, "add feature", resolved.Subject)
@@ -908,12 +908,12 @@ func TestResolveRef_ShortSHA(t *testing.T) {
 	})
 
 	rt := getTestRuntime(t)
-	commits, err := ListCommitsBeyondBaseline(context.Background(), rt, "test-resolve-short")
+	commits, err := ListCommitsBeyondBaseline(context.Background(), testLayout(tmpDir), rt, "test-resolve-short")
 	require.NoError(t, err)
 	require.Len(t, commits, 1)
 
 	// Use first 7 chars
-	resolved, err := ResolveRef(context.Background(), rt, "test-resolve-short", commits[0].SHA[:7])
+	resolved, err := ResolveRef(context.Background(), testLayout(tmpDir), rt, "test-resolve-short", commits[0].SHA[:7])
 	require.NoError(t, err)
 	assert.Equal(t, commits[0].SHA, resolved.SHA)
 }
@@ -931,7 +931,7 @@ func TestResolveRef_NotFound(t *testing.T) {
 	})
 
 	rt := getTestRuntime(t)
-	_, err := ResolveRef(context.Background(), rt, "test-resolve-nf", "deadbeef")
+	_, err := ResolveRef(context.Background(), testLayout(tmpDir), rt, "test-resolve-nf", "deadbeef")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "not found")
 }
@@ -952,11 +952,11 @@ func TestResolveRefs_SingleRef(t *testing.T) {
 	})
 
 	rt := getTestRuntime(t)
-	commits, err := ListCommitsBeyondBaseline(context.Background(), rt, "test-resolverefs-single")
+	commits, err := ListCommitsBeyondBaseline(context.Background(), testLayout(tmpDir), rt, "test-resolverefs-single")
 	require.NoError(t, err)
 	require.Len(t, commits, 2)
 
-	resolved, err := ResolveRefs(context.Background(), rt, "test-resolverefs-single", []string{commits[1].SHA[:7]})
+	resolved, err := ResolveRefs(context.Background(), testLayout(tmpDir), rt, "test-resolverefs-single", []string{commits[1].SHA[:7]})
 	require.NoError(t, err)
 	require.Len(t, resolved, 1)
 	assert.Equal(t, commits[1].SHA, resolved[0].SHA)
@@ -977,13 +977,13 @@ func TestResolveRefs_Range(t *testing.T) {
 	})
 
 	rt := getTestRuntime(t)
-	commits, err := ListCommitsBeyondBaseline(context.Background(), rt, "test-resolverefs-range")
+	commits, err := ListCommitsBeyondBaseline(context.Background(), testLayout(tmpDir), rt, "test-resolverefs-range")
 	require.NoError(t, err)
 	require.Len(t, commits, 3)
 
 	// Range first..third = second and third (exclusive start, inclusive end)
 	rangeRef := commits[0].SHA[:7] + ".." + commits[2].SHA[:7]
-	resolved, err := ResolveRefs(context.Background(), rt, "test-resolverefs-range", []string{rangeRef})
+	resolved, err := ResolveRefs(context.Background(), testLayout(tmpDir), rt, "test-resolverefs-range", []string{rangeRef})
 	require.NoError(t, err)
 	require.Len(t, resolved, 2)
 	assert.Equal(t, "second", resolved[0].Subject)
@@ -1003,7 +1003,7 @@ func TestResolveRefs_NotFound(t *testing.T) {
 	})
 
 	rt := getTestRuntime(t)
-	_, err := ResolveRefs(context.Background(), rt, "test-resolverefs-nf", []string{"deadbeef"})
+	_, err := ResolveRefs(context.Background(), testLayout(tmpDir), rt, "test-resolverefs-nf", []string{"deadbeef"})
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "not found")
 }
@@ -1077,12 +1077,12 @@ func TestGenerateFormatPatchForRefs_Single(t *testing.T) {
 	})
 
 	rt := getTestRuntime(t)
-	commits, err := ListCommitsBeyondBaseline(context.Background(), rt, "test-fpref-single")
+	commits, err := ListCommitsBeyondBaseline(context.Background(), testLayout(tmpDir), rt, "test-fpref-single")
 	require.NoError(t, err)
 	require.Len(t, commits, 2)
 
 	// Only generate patch for the second commit
-	patchDir, files, err := GenerateFormatPatchForRefs(context.Background(), rt, "test-fpref-single", []string{commits[1].SHA}, nil)
+	patchDir, files, err := GenerateFormatPatchForRefs(context.Background(), testLayout(tmpDir), rt, "test-fpref-single", []string{commits[1].SHA}, nil)
 	require.NoError(t, err)
 	defer os.RemoveAll(patchDir) //nolint:errcheck
 
@@ -1106,12 +1106,12 @@ func TestGenerateFormatPatchForRefs_Multiple(t *testing.T) {
 	})
 
 	rt := getTestRuntime(t)
-	commits, err := ListCommitsBeyondBaseline(context.Background(), rt, "test-fpref-multi")
+	commits, err := ListCommitsBeyondBaseline(context.Background(), testLayout(tmpDir), rt, "test-fpref-multi")
 	require.NoError(t, err)
 	require.Len(t, commits, 3)
 
 	// Only generate patches for first and third
-	patchDir, files, err := GenerateFormatPatchForRefs(context.Background(), rt, "test-fpref-multi", []string{commits[0].SHA, commits[2].SHA}, nil)
+	patchDir, files, err := GenerateFormatPatchForRefs(context.Background(), testLayout(tmpDir), rt, "test-fpref-multi", []string{commits[0].SHA, commits[2].SHA}, nil)
 	require.NoError(t, err)
 	defer os.RemoveAll(patchDir) //nolint:errcheck
 
@@ -1136,20 +1136,20 @@ func TestAdvanceBaselineTo_UpdatesMeta(t *testing.T) {
 	})
 
 	rt := getTestRuntime(t)
-	commits, err := ListCommitsBeyondBaseline(context.Background(), rt, name)
+	commits, err := ListCommitsBeyondBaseline(context.Background(), testLayout(tmpDir), rt, name)
 	require.NoError(t, err)
 	require.Len(t, commits, 3)
 
 	// Advance to second commit (not HEAD)
-	require.NoError(t, AdvanceBaselineTo(name, commits[1].SHA))
+	require.NoError(t, AdvanceBaselineTo(testLayout(tmpDir), name, commits[1].SHA))
 
 	// Verify meta has the second commit's SHA
-	meta, err := store.LoadMeta(store.Dir(name))
+	meta, err := store.LoadMeta(testLayout(tmpDir).SandboxDir(name))
 	require.NoError(t, err)
 	assert.Equal(t, commits[1].SHA, meta.Workdir.BaselineSHA)
 
 	// Only third commit should remain visible
-	remaining, err := ListCommitsBeyondBaseline(context.Background(), rt, name)
+	remaining, err := ListCommitsBeyondBaseline(context.Background(), testLayout(tmpDir), rt, name)
 	require.NoError(t, err)
 	require.Len(t, remaining, 1)
 	assert.Equal(t, "third", remaining[0].Subject)
@@ -1173,18 +1173,18 @@ func TestSelectiveApplyFlow(t *testing.T) {
 	})
 
 	rt := getTestRuntime(t)
-	commits, err := ListCommitsBeyondBaseline(context.Background(), rt, name)
+	commits, err := ListCommitsBeyondBaseline(context.Background(), testLayout(tmpDir), rt, name)
 	require.NoError(t, err)
 	require.Len(t, commits, 3)
 
 	// Resolve first two commits
-	resolved, err := ResolveRefs(context.Background(), rt, name, []string{commits[0].SHA[:7], commits[1].SHA[:7]})
+	resolved, err := ResolveRefs(context.Background(), testLayout(tmpDir), rt, name, []string{commits[0].SHA[:7], commits[1].SHA[:7]})
 	require.NoError(t, err)
 	require.Len(t, resolved, 2)
 
 	// Generate patches for selected commits
 	shas := []string{resolved[0].SHA, resolved[1].SHA}
-	patchDir, files, err := GenerateFormatPatchForRefs(context.Background(), rt, name, shas, nil)
+	patchDir, files, err := GenerateFormatPatchForRefs(context.Background(), testLayout(tmpDir), rt, name, shas, nil)
 	require.NoError(t, err)
 	defer os.RemoveAll(patchDir) //nolint:errcheck
 
@@ -1214,10 +1214,10 @@ func TestSelectiveApplyFlow(t *testing.T) {
 	assert.Equal(t, 1, prefixEnd) // advances to index 1 (commit B)
 
 	// Advance baseline
-	require.NoError(t, AdvanceBaselineTo(name, commits[prefixEnd].SHA))
+	require.NoError(t, AdvanceBaselineTo(testLayout(tmpDir), name, commits[prefixEnd].SHA))
 
 	// Only C should remain
-	remaining, err := ListCommitsBeyondBaseline(context.Background(), rt, name)
+	remaining, err := ListCommitsBeyondBaseline(context.Background(), testLayout(tmpDir), rt, name)
 	require.NoError(t, err)
 	require.Len(t, remaining, 1)
 	assert.Equal(t, "add C", remaining[0].Subject)
@@ -1240,16 +1240,16 @@ func TestApplyFlow_CommitsOnly(t *testing.T) {
 
 	// Verify state: commits but no WIP
 	rt := getTestRuntime(t)
-	commits, err := ListCommitsBeyondBaseline(context.Background(), rt, "test-flow-commits")
+	commits, err := ListCommitsBeyondBaseline(context.Background(), testLayout(tmpDir), rt, "test-flow-commits")
 	require.NoError(t, err)
 	assert.Len(t, commits, 2)
 
-	hasWIP, err := HasUncommittedChanges(context.Background(), rt, "test-flow-commits")
+	hasWIP, err := HasUncommittedChanges(context.Background(), testLayout(tmpDir), rt, "test-flow-commits")
 	require.NoError(t, err)
 	assert.False(t, hasWIP)
 
 	// Generate and apply
-	patchDir, files, err := GenerateFormatPatch(context.Background(), rt, "test-flow-commits", nil)
+	patchDir, files, err := GenerateFormatPatch(context.Background(), testLayout(tmpDir), rt, "test-flow-commits", nil)
 	require.NoError(t, err)
 	defer os.RemoveAll(patchDir) //nolint:errcheck
 
@@ -1292,16 +1292,16 @@ func TestApplyFlow_CommitsAndWIP(t *testing.T) {
 
 	// Verify state
 	rt := getTestRuntime(t)
-	commits, err := ListCommitsBeyondBaseline(context.Background(), rt, "test-flow-both")
+	commits, err := ListCommitsBeyondBaseline(context.Background(), testLayout(tmpDir), rt, "test-flow-both")
 	require.NoError(t, err)
 	assert.Len(t, commits, 1)
 
-	hasWIP, err := HasUncommittedChanges(context.Background(), rt, "test-flow-both")
+	hasWIP, err := HasUncommittedChanges(context.Background(), testLayout(tmpDir), rt, "test-flow-both")
 	require.NoError(t, err)
 	assert.True(t, hasWIP)
 
 	// Apply commits first
-	patchDir, files, err := GenerateFormatPatch(context.Background(), rt, "test-flow-both", nil)
+	patchDir, files, err := GenerateFormatPatch(context.Background(), testLayout(tmpDir), rt, "test-flow-both", nil)
 	require.NoError(t, err)
 	defer os.RemoveAll(patchDir) //nolint:errcheck
 
@@ -1316,7 +1316,7 @@ func TestApplyFlow_CommitsAndWIP(t *testing.T) {
 	require.NoError(t, err)
 
 	// Then apply WIP
-	wipPatch, _, err := GenerateWIPDiff(context.Background(), rt, "test-flow-both", nil)
+	wipPatch, _, err := GenerateWIPDiff(context.Background(), testLayout(tmpDir), rt, "test-flow-both", nil)
 	require.NoError(t, err)
 	require.NotEmpty(t, wipPatch)
 
@@ -1339,16 +1339,16 @@ func TestApplyFlow_WIPOnly(t *testing.T) {
 
 	// Verify state: no commits, only WIP
 	rt := getTestRuntime(t)
-	commits, err := ListCommitsBeyondBaseline(context.Background(), rt, "test-flow-wip")
+	commits, err := ListCommitsBeyondBaseline(context.Background(), testLayout(tmpDir), rt, "test-flow-wip")
 	require.NoError(t, err)
 	assert.Empty(t, commits)
 
-	hasWIP, err := HasUncommittedChanges(context.Background(), rt, "test-flow-wip")
+	hasWIP, err := HasUncommittedChanges(context.Background(), testLayout(tmpDir), rt, "test-flow-wip")
 	require.NoError(t, err)
 	assert.True(t, hasWIP)
 
 	// Falls back to squash path — use GeneratePatch
-	patch, stat, err := GeneratePatch(context.Background(), rt, "test-flow-wip", nil, true)
+	patch, stat, err := GeneratePatch(context.Background(), testLayout(tmpDir), rt, "test-flow-wip", nil, true)
 	require.NoError(t, err)
 	assert.NotEmpty(t, patch)
 	assert.Contains(t, stat, "file.txt")
@@ -1383,7 +1383,7 @@ func TestApplyFlow_NonGitFallback(t *testing.T) {
 	// The CLI does this, but we test the underlying primitives:
 	// GeneratePatch works for squash fallback
 	rt := getTestRuntime(t)
-	patch, stat, err := GeneratePatch(context.Background(), rt, "test-flow-nongit", nil, true)
+	patch, stat, err := GeneratePatch(context.Background(), testLayout(tmpDir), rt, "test-flow-nongit", nil, true)
 	require.NoError(t, err)
 	assert.NotEmpty(t, patch)
 	assert.Contains(t, stat, "feature.txt")

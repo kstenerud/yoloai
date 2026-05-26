@@ -90,7 +90,7 @@ func TestGenerateDiff_CopyMode_ModifiedFile(t *testing.T) {
 	writeTestFile(t, workDir, "file.txt", "modified content\n")
 
 	rt := getTestRuntime(t)
-	result, err := GenerateDiff(context.Background(), DiffOptions{Name: "test-mod", Runtime: rt})
+	result, err := GenerateDiff(context.Background(), DiffOptions{Name: "test-mod", Layout: testLayout(tmpDir), Runtime: rt})
 	require.NoError(t, err)
 	assert.False(t, result.Empty)
 	assert.Equal(t, "copy", result.Mode)
@@ -106,7 +106,7 @@ func TestGenerateDiff_CopyMode_UntrackedFile(t *testing.T) {
 	writeTestFile(t, workDir, "created.txt", "new file content\n")
 
 	rt := getTestRuntime(t)
-	result, err := GenerateDiff(context.Background(), DiffOptions{Name: "test-new", Runtime: rt})
+	result, err := GenerateDiff(context.Background(), DiffOptions{Name: "test-new", Layout: testLayout(tmpDir), Runtime: rt})
 	require.NoError(t, err)
 	assert.False(t, result.Empty)
 	assert.Contains(t, result.Output, "created.txt")
@@ -126,7 +126,7 @@ func TestGenerateDiff_CopyMode_BinaryFile(t *testing.T) {
 	))
 
 	rt := getTestRuntime(t)
-	result, err := GenerateDiff(context.Background(), DiffOptions{Name: "test-bin", Runtime: rt})
+	result, err := GenerateDiff(context.Background(), DiffOptions{Name: "test-bin", Layout: testLayout(tmpDir), Runtime: rt})
 	require.NoError(t, err)
 	assert.False(t, result.Empty)
 	// --binary produces a GIT binary patch
@@ -141,7 +141,7 @@ func TestGenerateDiff_CopyMode_Empty(t *testing.T) {
 	// No modifications
 
 	rt := getTestRuntime(t)
-	result, err := GenerateDiff(context.Background(), DiffOptions{Name: "test-empty", Runtime: rt})
+	result, err := GenerateDiff(context.Background(), DiffOptions{Name: "test-empty", Layout: testLayout(tmpDir), Runtime: rt})
 	require.NoError(t, err)
 	assert.True(t, result.Empty)
 }
@@ -157,6 +157,7 @@ func TestGenerateDiff_CopyMode_PathFilter(t *testing.T) {
 	rt := getTestRuntime(t)
 	result, err := GenerateDiff(context.Background(), DiffOptions{
 		Name:    "test-filter",
+		Layout:  testLayout(tmpDir),
 		Paths:   []string{"file.txt"},
 		Runtime: rt,
 	})
@@ -184,7 +185,7 @@ func TestGenerateDiff_RWMode_GitRepo(t *testing.T) {
 	writeTestFile(t, hostDir, "file.txt", "modified\n")
 
 	rt := getTestRuntime(t)
-	result, err := GenerateDiff(context.Background(), DiffOptions{Name: "test-rw", Runtime: rt})
+	result, err := GenerateDiff(context.Background(), DiffOptions{Name: "test-rw", Layout: testLayout(tmpDir), Runtime: rt})
 	require.NoError(t, err)
 	assert.False(t, result.Empty)
 	assert.Equal(t, "rw", result.Mode)
@@ -201,7 +202,7 @@ func TestGenerateDiff_RWMode_NotGitRepo(t *testing.T) {
 	createRWSandbox(t, tmpDir, "test-rw-nogit", hostDir)
 
 	rt := getTestRuntime(t)
-	result, err := GenerateDiff(context.Background(), DiffOptions{Name: "test-rw-nogit", Runtime: rt})
+	result, err := GenerateDiff(context.Background(), DiffOptions{Name: "test-rw-nogit", Layout: testLayout(tmpDir), Runtime: rt})
 	require.NoError(t, err)
 	assert.True(t, result.Empty)
 	assert.Contains(t, result.Output, "not a git repository")
@@ -218,7 +219,7 @@ func TestGenerateDiffStat_CopyMode(t *testing.T) {
 	writeTestFile(t, workDir, "new.txt", "added file\n")
 
 	rt := getTestRuntime(t)
-	result, err := GenerateDiff(context.Background(), DiffOptions{Name: "test-stat", Stat: true, Runtime: rt})
+	result, err := GenerateDiff(context.Background(), DiffOptions{Name: "test-stat", Layout: testLayout(tmpDir), Stat: true, Runtime: rt})
 	require.NoError(t, err)
 	assert.False(t, result.Empty)
 	assert.Contains(t, result.Output, "file.txt")
@@ -233,7 +234,7 @@ func TestLoadDiffContext_SandboxNotFound(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
 
-	_, _, _, err := loadDiffContext("nonexistent")
+	_, _, _, err := loadDiffContext(testLayout(tmpDir), "nonexistent")
 	assert.ErrorIs(t, err, sandbox.ErrSandboxNotFound)
 }
 
@@ -254,13 +255,14 @@ func TestGenerateCommitDiff_SingleCommit(t *testing.T) {
 
 	// Get SHA of first commit
 	rt := getTestRuntime(t)
-	commits, err := ListCommitsBeyondBaseline(context.Background(), rt, "test-cdiff-single")
+	commits, err := ListCommitsBeyondBaseline(context.Background(), testLayout(tmpDir), rt, "test-cdiff-single")
 	require.NoError(t, err)
 	require.Len(t, commits, 2)
 
 	result, err := GenerateCommitDiff(CommitDiffOptions{
-		Name: "test-cdiff-single",
-		Ref:  commits[0].SHA,
+		Layout: testLayout(tmpDir),
+		Name:   "test-cdiff-single",
+		Ref:    commits[0].SHA,
 	})
 	require.NoError(t, err)
 	assert.False(t, result.Empty)
@@ -284,15 +286,16 @@ func TestGenerateCommitDiff_Range(t *testing.T) {
 	})
 
 	rt := getTestRuntime(t)
-	commits, err := ListCommitsBeyondBaseline(context.Background(), rt, "test-cdiff-range")
+	commits, err := ListCommitsBeyondBaseline(context.Background(), testLayout(tmpDir), rt, "test-cdiff-range")
 	require.NoError(t, err)
 	require.Len(t, commits, 3)
 
 	// Range: first..third should include second and third
 	ref := commits[0].SHA + ".." + commits[2].SHA
 	result, err := GenerateCommitDiff(CommitDiffOptions{
-		Name: "test-cdiff-range",
-		Ref:  ref,
+		Layout: testLayout(tmpDir),
+		Name:   "test-cdiff-range",
+		Ref:    ref,
 	})
 	require.NoError(t, err)
 	assert.False(t, result.Empty)
@@ -313,14 +316,15 @@ func TestGenerateCommitDiff_Stat(t *testing.T) {
 	})
 
 	rt := getTestRuntime(t)
-	commits, err := ListCommitsBeyondBaseline(context.Background(), rt, "test-cdiff-stat")
+	commits, err := ListCommitsBeyondBaseline(context.Background(), testLayout(tmpDir), rt, "test-cdiff-stat")
 	require.NoError(t, err)
 	require.Len(t, commits, 1)
 
 	result, err := GenerateCommitDiff(CommitDiffOptions{
-		Name: "test-cdiff-stat",
-		Ref:  commits[0].SHA,
-		Stat: true,
+		Layout: testLayout(tmpDir),
+		Name:   "test-cdiff-stat",
+		Ref:    commits[0].SHA,
+		Stat:   true,
 	})
 	require.NoError(t, err)
 	assert.False(t, result.Empty)
@@ -337,8 +341,9 @@ func TestGenerateCommitDiff_RWError(t *testing.T) {
 	createRWSandbox(t, tmpDir, "test-cdiff-rw", hostDir)
 
 	_, err := GenerateCommitDiff(CommitDiffOptions{
-		Name: "test-cdiff-rw",
-		Ref:  "abc123",
+		Layout: testLayout(tmpDir),
+		Name:   "test-cdiff-rw",
+		Ref:    "abc123",
 	})
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), ":rw directories")
@@ -353,7 +358,7 @@ func TestListCommitsWithStats_NoCommits(t *testing.T) {
 	createCopySandbox(t, tmpDir, "test-lcws-none", "/tmp/project")
 
 	rt := getTestRuntime(t)
-	commits, err := ListCommitsWithStats(context.Background(), rt, "test-lcws-none")
+	commits, err := ListCommitsWithStats(context.Background(), testLayout(tmpDir), rt, "test-lcws-none")
 	require.NoError(t, err)
 	assert.Empty(t, commits)
 }
@@ -372,7 +377,7 @@ func TestListCommitsWithStats_HasStats(t *testing.T) {
 	})
 
 	rt := getTestRuntime(t)
-	commits, err := ListCommitsWithStats(context.Background(), rt, "test-lcws-stats")
+	commits, err := ListCommitsWithStats(context.Background(), testLayout(tmpDir), rt, "test-lcws-stats")
 	require.NoError(t, err)
 	require.Len(t, commits, 2)
 	assert.Equal(t, "add feature", commits[0].Subject)
@@ -402,7 +407,7 @@ func TestLoadDiffContext_NoBaseline(t *testing.T) {
 	}
 	require.NoError(t, store.SaveMeta(sandboxDir, meta))
 
-	_, _, _, err := loadDiffContext("no-baseline")
+	_, _, _, err := loadDiffContext(testLayout(tmpDir), "no-baseline")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "no baseline SHA")
 }
@@ -431,11 +436,11 @@ func TestLoadDiffContext_CopyMode(t *testing.T) {
 	}
 	require.NoError(t, store.SaveMeta(sandboxDir, meta))
 
-	workDir, baselineSHA, mode, err := loadDiffContext(name)
+	workDir, baselineSHA, mode, err := loadDiffContext(testLayout(tmpDir), name)
 	require.NoError(t, err)
 	assert.Equal(t, "copy", mode)
 	assert.Equal(t, "abc123", baselineSHA)
-	assert.Equal(t, store.WorkDir(name, hostPath), workDir)
+	assert.Equal(t, store.WorkDir(sandboxDir, hostPath), workDir)
 }
 
 func TestLoadDiffContext_OverlayMode(t *testing.T) {
@@ -459,7 +464,7 @@ func TestLoadDiffContext_OverlayMode(t *testing.T) {
 	}
 	require.NoError(t, store.SaveMeta(sandboxDir, meta))
 
-	workDir, baselineSHA, mode, err := loadDiffContext(name)
+	workDir, baselineSHA, mode, err := loadDiffContext(testLayout(tmpDir), name)
 	require.NoError(t, err)
 	assert.Equal(t, "overlay", mode)
 	assert.Equal(t, "overlay-sha", baselineSHA)
@@ -486,7 +491,7 @@ func TestLoadDiffContext_OverlayMode_FallbackToHostPath(t *testing.T) {
 	}
 	require.NoError(t, store.SaveMeta(sandboxDir, meta))
 
-	workDir, _, mode, err := loadDiffContext(name)
+	workDir, _, mode, err := loadDiffContext(testLayout(tmpDir), name)
 	require.NoError(t, err)
 	assert.Equal(t, "overlay", mode)
 	assert.Equal(t, "/tmp/project", workDir)
@@ -511,7 +516,7 @@ func TestLoadDiffContext_RWMode(t *testing.T) {
 	}
 	require.NoError(t, store.SaveMeta(sandboxDir, meta))
 
-	workDir, baselineSHA, mode, err := loadDiffContext(name)
+	workDir, baselineSHA, mode, err := loadDiffContext(testLayout(tmpDir), name)
 	require.NoError(t, err)
 	assert.Equal(t, "rw", mode)
 	assert.Equal(t, "HEAD", baselineSHA)
@@ -537,7 +542,7 @@ func TestLoadDiffContext_UnsupportedMode(t *testing.T) {
 	}
 	require.NoError(t, store.SaveMeta(sandboxDir, meta))
 
-	_, _, _, err := loadDiffContext(name)
+	_, _, _, err := loadDiffContext(testLayout(tmpDir), name)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "unsupported workdir mode")
 }
@@ -565,7 +570,7 @@ func TestLoadAllDiffContexts_SingleCopyWorkdir(t *testing.T) {
 	}
 	require.NoError(t, store.SaveMeta(sandboxDir, meta))
 
-	contexts, err := LoadAllDiffContexts(name)
+	contexts, err := LoadAllDiffContexts(testLayout(tmpDir), name)
 	require.NoError(t, err)
 	require.Len(t, contexts, 1)
 	assert.Equal(t, "copy", contexts[0].Mode)
@@ -598,7 +603,7 @@ func TestLoadAllDiffContexts_WorkdirAndAuxDirs(t *testing.T) {
 	}
 	require.NoError(t, store.SaveMeta(sandboxDir, meta))
 
-	contexts, err := LoadAllDiffContexts(name)
+	contexts, err := LoadAllDiffContexts(testLayout(tmpDir), name)
 	require.NoError(t, err)
 	// Should have: workdir (copy) + aux1 (copy) + aux2 (rw) = 3
 	// aux3 (ro) is skipped
@@ -639,7 +644,7 @@ func TestLoadAllDiffContexts_OverlayAuxFallsBackToHostPath(t *testing.T) {
 	}
 	require.NoError(t, store.SaveMeta(sandboxDir, meta))
 
-	contexts, err := LoadAllDiffContexts(name)
+	contexts, err := LoadAllDiffContexts(testLayout(tmpDir), name)
 	require.NoError(t, err)
 	require.Len(t, contexts, 2)
 	// Overlay aux dir should fall back to host path
@@ -667,7 +672,7 @@ func TestLoadAllDiffContexts_NoAuxDirs(t *testing.T) {
 	}
 	require.NoError(t, store.SaveMeta(sandboxDir, meta))
 
-	contexts, err := LoadAllDiffContexts(name)
+	contexts, err := LoadAllDiffContexts(testLayout(tmpDir), name)
 	require.NoError(t, err)
 	require.Len(t, contexts, 1)
 	assert.Equal(t, "/tmp/project", contexts[0].HostPath)
@@ -694,7 +699,7 @@ func TestLoadAllDiffContexts_OverlayWorkdirWithMountPath(t *testing.T) {
 	}
 	require.NoError(t, store.SaveMeta(sandboxDir, meta))
 
-	contexts, err := LoadAllDiffContexts(name)
+	contexts, err := LoadAllDiffContexts(testLayout(tmpDir), name)
 	require.NoError(t, err)
 	require.Len(t, contexts, 1)
 	assert.Equal(t, "overlay", contexts[0].Mode)

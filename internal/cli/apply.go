@@ -91,7 +91,7 @@ func runApplyCmd(cmd *cobra.Command, args []string) error {
 		return sandbox.NewUsageError("--squash cannot be used with commit refs — they are mutually exclusive")
 	}
 	// Load metadata for target directory and mode validation
-	meta, err := store.LoadMeta(store.Dir(name))
+	meta, err := store.LoadMeta(cliLayout().SandboxDir(name))
 	if err != nil {
 		return sandboxErrorHint(name, err)
 	}

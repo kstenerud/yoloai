@@ -33,7 +33,7 @@ func runExec(cmd *cobra.Command, args []string) error {
 
 	backend := resolveBackendForSandbox(name)
 	return withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
-		info, err := sandbox.InspectSandbox(ctx, rt, name)
+		info, err := sandbox.InspectSandbox(ctx, cliLayout(), rt, name)
 		if err != nil {
 			return sandboxErrorHint(name, err)
 		}

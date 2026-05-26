@@ -275,7 +275,7 @@ func (s *Server) handleSandboxDiff(_ context.Context, req mcp.CallToolRequest) (
 		return textResult(errorf("name is required")), nil
 	}
 
-	results, err := patch.GenerateMultiDiff(patch.DiffOptions{Name: name, Stat: stat})
+	results, err := patch.GenerateMultiDiff(patch.DiffOptions{Name: name, Layout: s.mgr.Layout(), Stat: stat})
 	if err != nil {
 		return textResult(errorf("diff sandbox %q: %v", name, err)), nil
 	}
@@ -309,6 +309,7 @@ func (s *Server) handleSandboxDiffFile(ctx context.Context, req mcp.CallToolRequ
 	// we pass nil for now. Tracked: docs/dev/plans/TODO.md §MCP Server.
 	result, err := patch.GenerateDiff(ctx, patch.DiffOptions{
 		Name:    name,
+		Layout:  s.mgr.Layout(),
 		Paths:   []string{path},
 		Runtime: nil, // nil means host-side git (Docker backend)
 	})
@@ -336,7 +337,7 @@ func (s *Server) handleSandboxLog(_ context.Context, req mcp.CallToolRequest) (*
 		lines = 100
 	}
 
-	logPath := store.AgentLogPath(name)
+	logPath := store.AgentLogPath(s.mgr.Layout().SandboxDir(name))
 	output, err := tailFile(logPath, lines)
 	if err != nil {
 		return textResult(errorf("read log for sandbox %q: %v", name, err)), nil
@@ -377,7 +378,7 @@ func (s *Server) handleSandboxReset(ctx context.Context, req mcp.CallToolRequest
 
 	// If a new prompt is provided, write it to prompt.txt before resetting.
 	if prompt != "" {
-		promptPath := store.PromptFilePath(name)
+		promptPath := store.PromptFilePath(s.mgr.Layout().SandboxDir(name))
 		if err := fileutil.WriteFile(promptPath, []byte(prompt), 0600); err != nil {
 			return textResult(errorf("write prompt for sandbox %q: %v", name, err)), nil
 		}
@@ -401,7 +402,7 @@ func (s *Server) handleSandboxFilesList(_ context.Context, req mcp.CallToolReque
 		return textResult(errorf("name is required")), nil
 	}
 
-	filesDir := store.FilesDir(name)
+	filesDir := store.FilesDir(s.mgr.Layout().SandboxDir(name))
 	entries, err := os.ReadDir(filesDir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -436,7 +437,7 @@ func (s *Server) handleSandboxFilesRead(_ context.Context, req mcp.CallToolReque
 		return textResult(errorf("%v", err)), nil
 	}
 
-	path := filepath.Join(store.FilesDir(name), filename)
+	path := filepath.Join(store.FilesDir(s.mgr.Layout().SandboxDir(name)), filename)
 	data, err := os.ReadFile(path) //nolint:gosec // path validated by validateFilename
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -463,7 +464,7 @@ func (s *Server) handleSandboxFilesWrite(_ context.Context, req mcp.CallToolRequ
 		return textResult(errorf("%v", err)), nil
 	}
 
-	filesDir := store.FilesDir(name)
+	filesDir := store.FilesDir(s.mgr.Layout().SandboxDir(name))
 	if err := fileutil.MkdirAll(filesDir, 0750); err != nil {
 		return textResult(errorf("create files dir for sandbox %q: %v", name, err)), nil
 	}

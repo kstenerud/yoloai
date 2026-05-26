@@ -36,7 +36,7 @@ func runClone(cmd *cobra.Command, args []string) error {
 
 	// Force-destroy existing destination before cloning.
 	if force {
-		if _, err := os.Stat(store.Dir(dst)); err == nil { //nolint:gosec // G703: dst is validated sandbox name
+		if _, err := os.Stat(cliLayout().SandboxDir(dst)); err == nil { //nolint:gosec // G703: dst is validated sandbox name
 			backend := resolveBackendForSandbox(dst)
 			if err := withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
 				mgr := sandbox.NewManager(rt, slog.Default(), cmd.InOrStdin(), cmd.ErrOrStderr())
@@ -97,7 +97,7 @@ func runCloneStart(cmd *cobra.Command, ctx context.Context, rt runtime.Runtime, 
 		return nil
 	}
 
-	meta, err := store.LoadMeta(store.Dir(dst))
+	meta, err := store.LoadMeta(cliLayout().SandboxDir(dst))
 	if err != nil {
 		return err
 	}

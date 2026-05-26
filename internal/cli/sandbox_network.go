@@ -20,8 +20,8 @@ done`
 // loadIsolatedMeta loads sandbox metadata and validates that the sandbox uses
 // network isolation. Returns the sandbox directory and metadata.
 func loadIsolatedMeta(name string) (string, *store.Meta, error) {
-	sandboxDir, err := store.RequireSandboxDir(name)
-	if err != nil {
+	sandboxDir := cliLayout().SandboxDir(name)
+	if err := store.RequireSandboxDir(sandboxDir); err != nil {
 		return "", nil, err
 	}
 	meta, err := store.LoadMeta(sandboxDir)
@@ -60,7 +60,7 @@ func tryLivePatchNetwork(ctx context.Context, backend, name, script string, scri
 	}
 	defer rt.Close() //nolint:errcheck // best-effort cleanup
 
-	info, err := sandbox.InspectSandbox(ctx, rt, name)
+	info, err := sandbox.InspectSandbox(ctx, cliLayout(), rt, name)
 	if err != nil || (info.Status != sandbox.StatusActive && info.Status != sandbox.StatusIdle) {
 		return false, nil // can't inspect or not running — skip
 	}

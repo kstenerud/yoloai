@@ -77,7 +77,8 @@ func newBaselineSetCmd() *cobra.Command {
 // mode supports baseline management (:copy only), and returns the work copy
 // path on the host. Returns a clear user-facing error for :rw and :overlay.
 func loadBaselineContext(name string) (*store.Meta, string, error) {
-	meta, err := store.LoadMeta(store.Dir(name))
+	sandboxDir := cliLayout().SandboxDir(name)
+	meta, err := store.LoadMeta(sandboxDir)
 	if err != nil {
 		return nil, "", sandboxErrorHint(name, err)
 	}
@@ -89,7 +90,7 @@ func loadBaselineContext(name string) (*store.Meta, string, error) {
 		return nil, "", sandbox.NewUsageError("use git commands inside the container to manage overlay baselines")
 	}
 
-	workDir := store.WorkDir(name, meta.Workdir.HostPath)
+	workDir := store.WorkDir(sandboxDir, meta.Workdir.HostPath)
 	return meta, workDir, nil
 }
 
@@ -97,7 +98,7 @@ func loadBaselineContext(name string) (*store.Meta, string, error) {
 // confirmation line: "Baseline advanced to <short-sha> (<subject>)".
 // If oldSHA is non-empty, it also prints a "Previous baseline" undo hint.
 func advanceBaselineAndPrint(cmd *cobra.Command, name, oldSHA, sha, workDir string) error {
-	if err := patch.AdvanceBaselineTo(name, sha); err != nil {
+	if err := patch.AdvanceBaselineTo(cliLayout(), name, sha); err != nil {
 		return fmt.Errorf("update baseline: %w", err)
 	}
 

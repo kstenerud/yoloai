@@ -27,13 +27,14 @@ func applyOverlay(cmd *cobra.Command, name string, meta *store.Meta, refs, paths
 		return sandbox.NewPlatformError("selective ref apply is not supported for :overlay sandboxes")
 	}
 
+	layout := cliLayout()
 	backend := resolveBackendForSandbox(name)
 	return withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
 		if err := requireOverlayRunning(ctx, rt, name); err != nil {
 			return err
 		}
 
-		patches, err := patch.GenerateOverlayPatch(ctx, rt, name, paths)
+		patches, err := patch.GenerateOverlayPatch(ctx, layout, rt, name, paths)
 		if err != nil {
 			return err
 		}
@@ -125,7 +126,7 @@ func applyOverlayPatches(cmd *cobra.Command, ctx context.Context, rt runtime.Run
 
 	// Advance overlay baseline
 	for _, ps := range patches {
-		if err := patch.UpdateOverlayBaselineToHEAD(ctx, rt, name, ps.HostPath); err != nil {
+		if err := patch.UpdateOverlayBaselineToHEAD(ctx, cliLayout(), rt, name, ps.HostPath); err != nil {
 			return fmt.Errorf("advance overlay baseline: %w", err)
 		}
 	}

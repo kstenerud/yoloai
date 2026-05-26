@@ -10,8 +10,8 @@ import (
 )
 
 func runSandboxAllowed(cmd *cobra.Command, name string) error {
-	sandboxDir, err := store.RequireSandboxDir(name)
-	if err != nil {
+	sandboxDir := cliLayout().SandboxDir(name)
+	if err := store.RequireSandboxDir(sandboxDir); err != nil {
 		return err
 	}
 	meta, err := store.LoadMeta(sandboxDir)

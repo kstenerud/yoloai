@@ -66,7 +66,7 @@ func runDiffCmd(cmd *cobra.Command, args []string) error {
 	logFlag, _ := cmd.Flags().GetBool("log")
 
 	// Load meta early to detect overlay dirs
-	meta, metaErr := store.LoadMeta(store.Dir(name))
+	meta, metaErr := store.LoadMeta(cliLayout().SandboxDir(name))
 	if metaErr != nil {
 		return sandboxErrorHint(name, metaErr)
 	}
@@ -120,11 +120,13 @@ func runDiffCmd(cmd *cobra.Command, args []string) error {
 
 // diffSingle runs a diff for a single (non-overlay, non-multi) directory.
 func diffSingle(cmd *cobra.Command, name string, paths []string, stat, nameOnly bool) error {
+	layout := cliLayout()
 	backend := resolveBackendForSandbox(name)
 	var finalErr error
 	_ = withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error { //nolint:errcheck // error handled via finalErr
 		opts := patch.DiffOptions{
 			Name:     name,
+			Layout:   layout,
 			Paths:    paths,
 			NameOnly: nameOnly,
 			Stat:     stat,
@@ -180,6 +182,7 @@ func requireOverlayRunning(ctx context.Context, rt runtime.Runtime, name string)
 // diffOverlay handles the default diff for sandboxes with overlay dirs.
 // Merges overlay results (from container exec) with non-overlay results.
 func diffOverlay(cmd *cobra.Command, name string, stat, nameOnly bool) error {
+	layout := cliLayout()
 	backend := resolveBackendForSandbox(name)
 	return withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
 		if err := requireOverlayRunning(ctx, rt, name); err != nil {
@@ -187,13 +190,13 @@ func diffOverlay(cmd *cobra.Command, name string, stat, nameOnly bool) error {
 		}
 
 		// Get overlay diffs via container exec
-		overlayResults, err := patch.GenerateOverlayDiff(ctx, rt, patch.DiffOptions{Name: name, Stat: stat, NameOnly: nameOnly})
+		overlayResults, err := patch.GenerateOverlayDiff(ctx, rt, patch.DiffOptions{Name: name, Layout: layout, Stat: stat, NameOnly: nameOnly})
 		if err != nil {
 			return err
 		}
 
 		// Get non-overlay diffs (copy/rw) via host
-		hostResults, err := patch.GenerateMultiDiff(patch.DiffOptions{Name: name, Stat: stat})
+		hostResults, err := patch.GenerateMultiDiff(patch.DiffOptions{Name: name, Layout: layout, Stat: stat})
 		if err != nil {
 			return err
 		}
@@ -283,7 +286,7 @@ func diffLogOverlay(cmd *cobra.Command, name string, stat bool) error {
 			return err
 		}
 
-		commits, err := patch.ListCommitsBeyondBaselineOverlay(ctx, rt, name)
+		commits, err := patch.ListCommitsBeyondBaselineOverlay(ctx, cliLayout(), rt, name)
 		if err != nil {
 			return err
 		}
@@ -368,7 +371,7 @@ func diffLog(cmd *cobra.Command, name string, stat bool) error {
 	out := cmd.OutOrStdout()
 
 	// Fetch tags for inline display (best-effort).
-	tags, _ := sandbox.ListTagsBeyondBaseline(name)
+	tags, _ := sandbox.ListTagsBeyondBaseline(cliLayout(), name)
 	tagsByCommit := buildTagsByCommit(tags)
 
 	if stat {
@@ -387,11 +390,12 @@ func diffLog(cmd *cobra.Command, name string, stat bool) error {
 
 // diffLogWithStat prints commits with file-change statistics.
 func diffLogWithStat(cmd *cobra.Command, name string, out io.Writer, tagsByCommit map[string][]string) error {
+	layout := cliLayout()
 	backend := resolveBackendForSandbox(name)
 	var commits []patch.CommitInfoWithStat
 	err := withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
 		var listErr error
-		commits, listErr = patch.ListCommitsWithStats(ctx, rt, name)
+		commits, listErr = patch.ListCommitsWithStats(ctx, layout, rt, name)
 		return listErr
 	})
 	if err != nil {
@@ -415,11 +419,12 @@ func diffLogWithStat(cmd *cobra.Command, name string, out io.Writer, tagsByCommi
 
 // diffLogBasic prints commits without statistics.
 func diffLogBasic(cmd *cobra.Command, name string, out io.Writer, tagsByCommit map[string][]string) error {
+	layout := cliLayout()
 	backend := resolveBackendForSandbox(name)
 	var commits []patch.CommitInfo
 	err := withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
 		var listErr error
-		commits, listErr = patch.ListCommitsBeyondBaseline(ctx, rt, name)
+		commits, listErr = patch.ListCommitsBeyondBaseline(ctx, layout, rt, name)
 		return listErr
 	})
 	if err != nil {
@@ -446,11 +451,12 @@ func formatCommitLine(n int, sha, subject string, tagsByCommit map[string][]stri
 
 // diffLogWIP appends an uncommitted-changes indicator if WIP is present (best-effort).
 func diffLogWIP(cmd *cobra.Command, name string, out io.Writer) {
+	layout := cliLayout()
 	backend := resolveBackendForSandbox(name)
 	var hasWIP bool
 	err := withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
 		var wipErr error
-		hasWIP, wipErr = patch.HasUncommittedChanges(ctx, rt, name)
+		hasWIP, wipErr = patch.HasUncommittedChanges(ctx, layout, rt, name)
 		return wipErr
 	})
 	if err == nil && hasWIP {
@@ -461,9 +467,10 @@ func diffLogWIP(cmd *cobra.Command, name string, out io.Writer) {
 // diffRef shows the diff for a specific commit or range.
 func diffRef(cmd *cobra.Command, name, ref string, stat bool) error {
 	result, err := patch.GenerateCommitDiff(patch.CommitDiffOptions{
-		Name: name,
-		Ref:  ref,
-		Stat: stat,
+		Name:   name,
+		Layout: cliLayout(),
+		Ref:    ref,
+		Stat:   stat,
 	})
 	if err != nil {
 		return err
@@ -493,7 +500,7 @@ func agentRunningWarning(cmd *cobra.Command, name string) {
 	backend := resolveBackendForSandbox(name)
 	//nolint:errcheck // intentional: best-effort warning, failure here should not affect the diff command
 	_ = withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
-		info, err := sandbox.InspectSandbox(ctx, rt, name)
+		info, err := sandbox.InspectSandbox(ctx, cliLayout(), rt, name)
 		if err != nil {
 			return nil //nolint:nilerr // best-effort warning; inspection failure should not affect the diff command
 		}
@@ -507,7 +514,7 @@ func agentRunningWarning(cmd *cobra.Command, name string) {
 
 // diffMultiDir shows diffs for all diffable directories with per-dir headers.
 func diffMultiDir(cmd *cobra.Command, name string, stat bool) error {
-	results, err := patch.GenerateMultiDiff(patch.DiffOptions{Name: name, Stat: stat})
+	results, err := patch.GenerateMultiDiff(patch.DiffOptions{Name: name, Layout: cliLayout(), Stat: stat})
 	if err != nil {
 		return err
 	}
@@ -547,13 +554,14 @@ func diffMultiDir(cmd *cobra.Command, name string, stat bool) error {
 
 // diffLogJSON outputs commit log as JSON.
 func diffLogJSON(cmd *cobra.Command, name string, stat bool) error {
+	layout := cliLayout()
 	var commits any
 	backend := resolveBackendForSandbox(name)
 	if stat {
 		var c []patch.CommitInfoWithStat
 		err := withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
 			var listErr error
-			c, listErr = patch.ListCommitsWithStats(ctx, rt, name)
+			c, listErr = patch.ListCommitsWithStats(ctx, layout, rt, name)
 			return listErr
 		})
 		if err != nil {
@@ -568,7 +576,7 @@ func diffLogJSON(cmd *cobra.Command, name string, stat bool) error {
 		var c []patch.CommitInfo
 		err := withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
 			var listErr error
-			c, listErr = patch.ListCommitsBeyondBaseline(ctx, rt, name)
+			c, listErr = patch.ListCommitsBeyondBaseline(ctx, layout, rt, name)
 			return listErr
 		})
 		if err != nil {
@@ -583,10 +591,10 @@ func diffLogJSON(cmd *cobra.Command, name string, stat bool) error {
 	backendWIP := resolveBackendForSandbox(name)
 	var hasWIP bool
 	_ = withRuntime(cmd.Context(), backendWIP, func(ctx context.Context, rt runtime.Runtime) error {
-		hasWIP, _ = patch.HasUncommittedChanges(ctx, rt, name)
+		hasWIP, _ = patch.HasUncommittedChanges(ctx, layout, rt, name)
 		return nil
 	})
-	tags, _ := sandbox.ListTagsBeyondBaseline(name)
+	tags, _ := sandbox.ListTagsBeyondBaseline(layout, name)
 	if tags == nil {
 		tags = []sandbox.TagInfo{}
 	}
@@ -606,7 +614,7 @@ func diffLogJSON(cmd *cobra.Command, name string, stat bool) error {
 
 // diffMultiDirJSON outputs multi-directory diffs as JSON.
 func diffMultiDirJSON(cmd *cobra.Command, name string, stat bool) error {
-	results, err := patch.GenerateMultiDiff(patch.DiffOptions{Name: name, Stat: stat})
+	results, err := patch.GenerateMultiDiff(patch.DiffOptions{Name: name, Layout: cliLayout(), Stat: stat})
 	if err != nil {
 		return err
 	}

@@ -22,11 +22,12 @@ import (
 func runApplyFormatPatch(cmd *cobra.Command, name string, paths []string, meta *store.Meta, patchesDir string, yes, dryRun, includeWIP, withTags bool) error {
 	// Query work copy for commits and WIP. WIP is always probed (even when
 	// includeWIP is false) so we can report it to the user as a hint.
+	layout := cliLayout()
 	backend := resolveBackendForSandbox(name)
 	var commits []patch.CommitInfo
 	err := withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
 		var listErr error
-		commits, listErr = patch.ListCommitsBeyondBaseline(ctx, rt, name)
+		commits, listErr = patch.ListCommitsBeyondBaseline(ctx, layout, rt, name)
 		return listErr
 	})
 	if err != nil {
@@ -36,7 +37,7 @@ func runApplyFormatPatch(cmd *cobra.Command, name string, paths []string, meta *
 	var hasWIP bool
 	err = withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
 		var wipErr error
-		hasWIP, wipErr = patch.HasUncommittedChanges(ctx, rt, name)
+		hasWIP, wipErr = patch.HasUncommittedChanges(ctx, layout, rt, name)
 		return wipErr
 	})
 	if err != nil {
@@ -95,7 +96,7 @@ func reportUnappliedTagsHint(cmd *cobra.Command, name string, withTags bool) {
 	if jsonEnabled(cmd) || withTags {
 		return
 	}
-	unappliedTags, _ := sandbox.ListUnappliedTags(name)
+	unappliedTags, _ := sandbox.ListUnappliedTags(cliLayout(), name)
 	if len(unappliedTags) > 0 {
 		fmt.Fprintf(cmd.OutOrStdout(), "\nHint: %d tag(s) available in sandbox but not on host. Run with --tags to transfer them.\n", len(unappliedTags)) //nolint:errcheck
 	}
@@ -119,13 +120,14 @@ func maybeReportNoChanges(cmd *cobra.Command, name string, meta *store.Meta, com
 
 // runApplyNoChanges handles the case where there are no commits or WIP to apply.
 func runApplyNoChanges(cmd *cobra.Command, name string, meta *store.Meta, withTags bool) error {
+	layout := cliLayout()
 	// Check for unapplied tags even when there are no changes
-	unappliedTags, _ := sandbox.ListUnappliedTags(name)
+	unappliedTags, _ := sandbox.ListUnappliedTags(layout, name)
 
 	// If --tags is used, transfer tags even without commits
 	if withTags && len(unappliedTags) > 0 {
 		targetDir := meta.Workdir.HostPath
-		workDir := store.WorkDir(name, meta.Workdir.HostPath)
+		workDir := store.WorkDir(layout.SandboxDir(name), meta.Workdir.HostPath)
 		if !jsonEnabled(cmd) {
 			fmt.Fprintln(cmd.OutOrStdout(), "No changes to apply")                                                  //nolint:errcheck
 			fmt.Fprintf(cmd.OutOrStdout(), "\nTransferring %d tag(s) by matching commits...\n", len(unappliedTags)) //nolint:errcheck
@@ -168,13 +170,14 @@ func runApplyNoChanges(cmd *cobra.Command, name string, meta *store.Meta, withTa
 
 // runApplyCommits applies commits via format-patch/am to the target directory.
 func runApplyCommits(cmd *cobra.Command, name string, paths []string, meta *store.Meta, commits []patch.CommitInfo, hasWIP, yes, dryRun, includeWIP, withTags bool) error {
+	layout := cliLayout()
 	targetDir := meta.Workdir.HostPath
-	sandboxWorkDir := store.WorkDir(name, meta.Workdir.HostPath)
+	sandboxWorkDir := store.WorkDir(layout.SandboxDir(name), meta.Workdir.HostPath)
 	isGit := workspace.IsGitRepo(targetDir)
 	backend := resolveBackendForSandbox(name)
 
 	// Fetch tags beyond baseline (best-effort; errors don't fail the apply).
-	tags, _ := sandbox.ListTagsBeyondBaseline(name)
+	tags, _ := sandbox.ListTagsBeyondBaseline(layout, name)
 	tagsByCommit := buildTagsByCommit(tags)
 
 	printApplyCommitsSummary(cmd, commits, tags, tagsByCommit, hasWIP, includeWIP, withTags)
@@ -205,7 +208,7 @@ func runApplyCommits(cmd *cobra.Command, name string, paths []string, meta *stor
 	// Advance baseline past applied commits (skip for path-filtered applies)
 	if len(paths) == 0 {
 		if err := withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
-			return patch.AdvanceBaseline(ctx, rt, name)
+			return patch.AdvanceBaseline(ctx, layout, rt, name)
 		}); err != nil {
 			return fmt.Errorf("advance baseline: %w", err)
 		}
@@ -263,11 +266,12 @@ func printApplyCommitsSummary(cmd *cobra.Command, commits []patch.CommitInfo, ta
 
 // applyFormatPatchFiles generates a format-patch and applies it, returning stats and any deferred error.
 func applyFormatPatchFiles(cmd *cobra.Command, name string, paths []string, targetDir, backend string) (commitsApplied int, shaMap map[string]string, stashErr, err error) {
+	layout := cliLayout()
 	var patchDir string
 	var files []string
 	if err = withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
 		var genErr error
-		patchDir, files, genErr = patch.GenerateFormatPatch(ctx, rt, name, paths)
+		patchDir, files, genErr = patch.GenerateFormatPatch(ctx, layout, rt, name, paths)
 		return genErr
 	}); err != nil {
 		return 0, nil, nil, err
@@ -297,10 +301,11 @@ func applyWIPChanges(cmd *cobra.Command, name string, paths []string, targetDir 
 	if !hasWIP {
 		return false
 	}
+	layout := cliLayout()
 	var wipPatch []byte
 	wipErr := withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
 		var genErr error
-		wipPatch, _, genErr = patch.GenerateWIPDiff(ctx, rt, name, paths)
+		wipPatch, _, genErr = patch.GenerateWIPDiff(ctx, layout, rt, name, paths)
 		return genErr
 	})
 	if wipErr != nil {

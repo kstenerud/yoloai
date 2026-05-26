@@ -81,7 +81,7 @@ func resolveStopNames(cmd *cobra.Command, ctx context.Context, rt runtime.Runtim
 
 // resolveStopAll collects running sandbox names when --all is set.
 func resolveStopAll(cmd *cobra.Command, ctx context.Context, rt runtime.Runtime) ([]string, error) {
-	infos, err := sandbox.ListSandboxes(ctx, rt)
+	infos, err := sandbox.ListSandboxes(ctx, cliLayout(), rt)
 	if err != nil {
 		return nil, err
 	}

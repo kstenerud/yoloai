@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/kstenerud/yoloai/config"
 	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/sandbox"
 	"github.com/kstenerud/yoloai/sandbox/patch"
@@ -77,7 +78,7 @@ func (p *ProxyServer) ServeStdio(ctx context.Context) error {
 		return err
 	}
 
-	innerCmd, err := expandCmd(p.innerCmd, meta)
+	innerCmd, err := expandCmd(p.innerCmd, p.mgr.Layout(), meta)
 	if err != nil {
 		return fmt.Errorf("expand inner command: %w", err)
 	}
@@ -152,12 +153,13 @@ func (p *ProxyServer) createSandbox(ctx context.Context) (*store.Meta, error) {
 //	{files}    — the file exchange directory (/yoloai/files/)
 //	{cache}    — the cache directory (/yoloai/cache/)
 //	{dir:N}    — meta.Directories[N].MountPath (Nth auxiliary directory, 0-indexed)
-func expandCmd(cmd []string, meta *store.Meta) ([]string, error) {
+func expandCmd(cmd []string, layout config.Layout, meta *store.Meta) ([]string, error) {
 	filesDir := "/yoloai/files/"
 	cacheDir := "/yoloai/cache/"
 	if meta.HostFilesystem {
-		filesDir = store.FilesDir(meta.Name)
-		cacheDir = store.CacheDir(meta.Name)
+		sandboxDir := layout.SandboxDir(meta.Name)
+		filesDir = store.FilesDir(sandboxDir)
+		cacheDir = store.CacheDir(sandboxDir)
 	}
 
 	expanded := make([]string, len(cmd))
@@ -436,7 +438,7 @@ func (p *ProxyServer) tryHandleLocalToolCall(
 func (p *ProxyServer) handleProxyDiff(args map[string]any) map[string]any {
 	stat, _ := args["stat"].(bool)
 
-	results, err := patch.GenerateMultiDiff(patch.DiffOptions{Name: p.sandboxName, Stat: stat})
+	results, err := patch.GenerateMultiDiff(patch.DiffOptions{Name: p.sandboxName, Layout: p.mgr.Layout(), Stat: stat})
 	if err != nil {
 		return mcpTextContent(errorf("diff sandbox %q: %v", p.sandboxName, err))
 	}

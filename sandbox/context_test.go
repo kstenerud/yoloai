@@ -29,7 +29,7 @@ func TestGenerateContext_AllFields(t *testing.T) {
 		Resources:    &config.ResourceLimits{CPUs: "4", Memory: "8g"},
 	}
 
-	result := GenerateContext(meta)
+	result := GenerateContext("/tmp/yoloai-test-sb/test-sb", meta)
 	assertContextContains(t, result)
 }
 
@@ -72,7 +72,7 @@ func TestGenerateContext_MinimalFields(t *testing.T) {
 		},
 	}
 
-	result := GenerateContext(meta)
+	result := GenerateContext("/tmp/yoloai-test-sb/test-sb", meta)
 
 	if !strings.Contains(result, "## Directories") {
 		t.Error("missing Directories section")
@@ -95,7 +95,7 @@ func TestGenerateContext_NetworkNone(t *testing.T) {
 		NetworkMode: "none",
 	}
 
-	result := GenerateContext(meta)
+	result := GenerateContext("/tmp/yoloai-test-sb/test-sb", meta)
 
 	if !strings.Contains(result, "No network access.") {
 		t.Error("missing 'no network' message")
@@ -111,7 +111,7 @@ func TestGenerateContext_WorkdirMountPath(t *testing.T) {
 		},
 	}
 
-	result := GenerateContext(meta)
+	result := GenerateContext("/tmp/yoloai-test-sb/test-sb", meta)
 
 	if !strings.Contains(result, "/container/project → /host/project (copy) ← working directory") {
 		t.Errorf("expected mount path redirect, got:\n%s", result)
@@ -130,16 +130,17 @@ func TestGenerateContext_SeatbeltFilesPath(t *testing.T) {
 		},
 	}
 
-	result := GenerateContext(meta)
+	sandboxDir := "/tmp/yoloai-test-sb/test-sb"
+	result := GenerateContext(sandboxDir, meta)
 
-	expectedFilesPath := filepath.Join(store.Dir("test-sb"), "files") + "/"
+	expectedFilesPath := filepath.Join(sandboxDir, "files") + "/"
 	if !strings.Contains(result, expectedFilesPath) {
 		t.Errorf("expected seatbelt files path %q in context, got:\n%s", expectedFilesPath, result)
 	}
 	if strings.Contains(result, "/yoloai/files/") {
 		t.Error("seatbelt context should not contain /yoloai/files/")
 	}
-	expectedCachePath := filepath.Join(store.Dir("test-sb"), "cache") + "/"
+	expectedCachePath := filepath.Join(sandboxDir, "cache") + "/"
 	if !strings.Contains(result, expectedCachePath) {
 		t.Errorf("expected seatbelt cache path %q in context, got:\n%s", expectedCachePath, result)
 	}
@@ -159,7 +160,7 @@ func TestGenerateContext_DockerFilesPath(t *testing.T) {
 		},
 	}
 
-	result := GenerateContext(meta)
+	result := GenerateContext("/tmp/yoloai-test-sb/test-sb", meta)
 
 	if !strings.Contains(result, "/yoloai/files/") {
 		t.Error("docker context should contain /yoloai/files/")
@@ -180,7 +181,7 @@ func TestGenerateContext_TartFilesPath(t *testing.T) {
 		},
 	}
 
-	result := GenerateContext(meta)
+	result := GenerateContext("/tmp/yoloai-test-sb/test-sb", meta)
 
 	if !strings.Contains(result, "/Users/admin/.yoloai/files/") {
 		t.Errorf("tart context should contain /Users/admin/.yoloai/files/, got:\n%s", result)

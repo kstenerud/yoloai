@@ -106,7 +106,7 @@ func restartInRuntime(cmd *cobra.Command, ctx context.Context, rt runtime.Runtim
 
 // attachAfterRestart waits for tmux and attaches to the sandbox after a restart.
 func attachAfterRestart(cmd *cobra.Command, ctx context.Context, rt runtime.Runtime, name string) error {
-	meta, err := store.LoadMeta(store.Dir(name))
+	meta, err := store.LoadMeta(cliLayout().SandboxDir(name))
 	if err != nil {
 		return err
 	}

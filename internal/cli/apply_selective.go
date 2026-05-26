@@ -71,15 +71,16 @@ func applySelectedCommits(cmd *cobra.Command, name string, refs, paths []string,
 		}
 	}
 
-	return finishSelectiveApply(cmd, name, files, shaMap, stashErr, selectedTags, store.WorkDir(name, targetDir), targetDir, withTags)
+	return finishSelectiveApply(cmd, name, files, shaMap, stashErr, selectedTags, store.WorkDir(cliLayout().SandboxDir(name), targetDir), targetDir, withTags)
 }
 
 // resolveSelectiveRefs resolves the ref arguments to CommitInfo slices.
 func resolveSelectiveRefs(cmd *cobra.Command, name string, refs []string, backend string) ([]patch.CommitInfo, error) {
+	layout := cliLayout()
 	var resolved []patch.CommitInfo
 	if err := withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
 		var resolveErr error
-		resolved, resolveErr = patch.ResolveRefs(ctx, rt, name, refs)
+		resolved, resolveErr = patch.ResolveRefs(ctx, layout, rt, name, refs)
 		return resolveErr
 	}); err != nil {
 		return nil, err
@@ -103,7 +104,7 @@ func finishSelectiveApply(cmd *cobra.Command, name string, files []string, shaMa
 	tagsApplied, tagsSkipped := applyTags(cmd, selectedTags, shaMap, sandboxWorkDir, targetDir, withTags)
 
 	if !jsonEnabled(cmd) && !withTags {
-		unappliedTags, _ := sandbox.ListUnappliedTags(name)
+		unappliedTags, _ := sandbox.ListUnappliedTags(cliLayout(), name)
 		if len(unappliedTags) > 0 {
 			fmt.Fprintf(cmd.OutOrStdout(), "\nHint: %d tag(s) available in sandbox but not on host. Run with --tags to transfer them.\n", len(unappliedTags)) //nolint:errcheck
 		}
@@ -129,10 +130,11 @@ func applyFormatPatchForRefs(cmd *cobra.Command, name string, _ []string, resolv
 		shas[i] = c.SHA
 	}
 
+	layout := cliLayout()
 	var patchDir string
 	if err = withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
 		var genErr error
-		patchDir, files, genErr = patch.GenerateFormatPatchForRefs(ctx, rt, name, shas, paths)
+		patchDir, files, genErr = patch.GenerateFormatPatchForRefs(ctx, layout, rt, name, shas, paths)
 		return genErr
 	}); err != nil {
 		return nil, nil, nil, err
@@ -152,7 +154,7 @@ func applyFormatPatchForRefs(cmd *cobra.Command, name string, _ []string, resolv
 
 // filterTagsForResolved fetches tags beyond baseline and filters to those on the resolved commits.
 func filterTagsForResolved(name string, resolved []patch.CommitInfo) []sandbox.TagInfo {
-	allTags, _ := sandbox.ListTagsBeyondBaseline(name)
+	allTags, _ := sandbox.ListTagsBeyondBaseline(cliLayout(), name)
 	resolvedSet := make(map[string]bool, len(resolved))
 	for _, c := range resolved {
 		resolvedSet[strings.ToLower(c.SHA)] = true
@@ -185,10 +187,11 @@ func printSelectiveApplySummary(cmd *cobra.Command, resolved []patch.CommitInfo,
 
 // advanceSelectiveBaseline advances the baseline using contiguous prefix logic after a selective apply.
 func advanceSelectiveBaseline(cmd *cobra.Command, name, backend string, resolved []patch.CommitInfo) error {
+	layout := cliLayout()
 	var allCommits []patch.CommitInfo
 	err := withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
 		var listErr error
-		allCommits, listErr = patch.ListCommitsBeyondBaseline(ctx, rt, name)
+		allCommits, listErr = patch.ListCommitsBeyondBaseline(ctx, layout, rt, name)
 		return listErr
 	})
 	if err != nil {
@@ -202,7 +205,7 @@ func advanceSelectiveBaseline(cmd *cobra.Command, name, backend string, resolved
 
 	prefixEnd := workspace.ContiguousPrefixEnd(allCommits, appliedSet)
 	if prefixEnd >= 0 {
-		if err := patch.AdvanceBaselineTo(name, allCommits[prefixEnd].SHA); err != nil {
+		if err := patch.AdvanceBaselineTo(layout, name, allCommits[prefixEnd].SHA); err != nil {
 			return fmt.Errorf("advance baseline: %w", err)
 		}
 	}

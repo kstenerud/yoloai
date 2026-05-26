@@ -446,10 +446,10 @@ func (m *Manager) checkDirtyRepos(ctx context.Context, workdir *DirArg, auxDirs 
 // the git baseline. Returns the work copy directory path and baseline SHA.
 // For backends implementing WorkDirSetup (e.g., Tart), baseline creation is
 // deferred until the VM starts, and this function returns empty SHA.
-func setupWorkdir(sandboxName string, workdir *DirArg, rt runtime.Runtime) (string, string, error) {
-	workCopyDir := store.WorkDir(sandboxName, workdir.Path)
+func setupWorkdir(sandboxDir string, workdir *DirArg, rt runtime.Runtime) (string, string, error) {
+	workCopyDir := store.WorkDir(sandboxDir, workdir.Path)
 
-	if err := setupWorkdirDirs(sandboxName, workdir, workCopyDir); err != nil {
+	if err := setupWorkdirDirs(sandboxDir, workdir, workCopyDir); err != nil {
 		return "", "", err
 	}
 
@@ -462,7 +462,7 @@ func setupWorkdir(sandboxName string, workdir *DirArg, rt runtime.Runtime) (stri
 }
 
 // setupWorkdirDirs creates the appropriate directory structure for the workdir mode.
-func setupWorkdirDirs(sandboxName string, workdir *DirArg, workCopyDir string) error {
+func setupWorkdirDirs(sandboxDir string, workdir *DirArg, workCopyDir string) error {
 	switch workdir.Mode {
 	case "copy":
 		if err := workspace.CopyDir(workdir.Path, workCopyDir); err != nil {
@@ -470,10 +470,10 @@ func setupWorkdirDirs(sandboxName string, workdir *DirArg, workCopyDir string) e
 		}
 	case "overlay":
 		for _, d := range []string{
-			store.OverlayUpperDir(sandboxName, workdir.Path),
-			store.OverlayOvlworkDir(sandboxName, workdir.Path),
-			store.OverlayMergedDir(sandboxName, workdir.Path),
-			store.OverlayLowerDir(sandboxName, workdir.Path),
+			store.OverlayUpperDir(sandboxDir, workdir.Path),
+			store.OverlayOvlworkDir(sandboxDir, workdir.Path),
+			store.OverlayMergedDir(sandboxDir, workdir.Path),
+			store.OverlayLowerDir(sandboxDir, workdir.Path),
 		} {
 			if err := fileutil.MkdirAll(d, 0755); err != nil { //nolint:gosec // G301: world-traversable so container yoloai user can access merged/
 				return fmt.Errorf("create overlay dir %s: %w", d, err)
@@ -593,10 +593,10 @@ func executeVMWorkDirSetup(ctx context.Context, rt runtime.Runtime, name, sandbo
 }
 
 // setupAuxDirs copies/overlays each auxiliary directory and creates baselines.
-func setupAuxDirs(sandboxName string, auxDirs []*DirArg) ([]store.DirMeta, error) {
+func setupAuxDirs(sandboxDir string, auxDirs []*DirArg) ([]store.DirMeta, error) {
 	var dirMetas []store.DirMeta
 	for _, ad := range auxDirs {
-		dm, err := setupAuxDir(sandboxName, ad)
+		dm, err := setupAuxDir(sandboxDir, ad)
 		if err != nil {
 			return nil, err
 		}
@@ -607,7 +607,7 @@ func setupAuxDirs(sandboxName string, auxDirs []*DirArg) ([]store.DirMeta, error
 
 // setupAuxDir prepares a single auxiliary directory (copy, overlay, or read-only)
 // and returns its DirMeta.
-func setupAuxDir(sandboxName string, ad *DirArg) (store.DirMeta, error) {
+func setupAuxDir(sandboxDir string, ad *DirArg) (store.DirMeta, error) {
 	mode := ad.Mode
 	if mode == "" {
 		mode = "ro"
@@ -619,13 +619,13 @@ func setupAuxDir(sandboxName string, ad *DirArg) (store.DirMeta, error) {
 	}
 	switch ad.Mode {
 	case "copy":
-		sha, err := setupAuxCopy(sandboxName, ad.Path)
+		sha, err := setupAuxCopy(sandboxDir, ad.Path)
 		if err != nil {
 			return store.DirMeta{}, err
 		}
 		dm.BaselineSHA = sha
 	case "overlay":
-		if err := setupAuxOverlay(sandboxName, ad.Path); err != nil {
+		if err := setupAuxOverlay(sandboxDir, ad.Path); err != nil {
 			return store.DirMeta{}, err
 		}
 	}
@@ -634,8 +634,8 @@ func setupAuxDir(sandboxName string, ad *DirArg) (store.DirMeta, error) {
 
 // setupAuxCopy copies the directory into the sandbox work tree and returns its
 // baseline SHA.
-func setupAuxCopy(sandboxName, path string) (string, error) {
-	auxWorkDir := store.WorkDir(sandboxName, path)
+func setupAuxCopy(sandboxDir, path string) (string, error) {
+	auxWorkDir := store.WorkDir(sandboxDir, path)
 	if err := workspace.CopyDir(path, auxWorkDir); err != nil {
 		return "", fmt.Errorf("copy aux dir %s: %w", path, err)
 	}
@@ -654,12 +654,12 @@ func setupAuxCopy(sandboxName, path string) (string, error) {
 }
 
 // setupAuxOverlay creates the overlay layer directories for an auxiliary directory.
-func setupAuxOverlay(sandboxName, path string) error {
+func setupAuxOverlay(sandboxDir, path string) error {
 	for _, d := range []string{
-		store.OverlayUpperDir(sandboxName, path),
-		store.OverlayOvlworkDir(sandboxName, path),
-		store.OverlayMergedDir(sandboxName, path),
-		store.OverlayLowerDir(sandboxName, path),
+		store.OverlayUpperDir(sandboxDir, path),
+		store.OverlayOvlworkDir(sandboxDir, path),
+		store.OverlayMergedDir(sandboxDir, path),
+		store.OverlayLowerDir(sandboxDir, path),
 	} {
 		if err := fileutil.MkdirAll(d, 0755); err != nil { //nolint:gosec // G301: world-traversable so container yoloai user can access merged/
 			return fmt.Errorf("create overlay dir for aux %s: %w", path, err)

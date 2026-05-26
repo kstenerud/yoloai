@@ -386,8 +386,8 @@ func TestSetupWorkdir_DefersBaselineForWorkDirSetupBackends(t *testing.T) {
 		t.Skip("skipping filesystem test in short mode")
 	}
 
-	sandboxName := "test-sandbox"
 	tempDir := t.TempDir()
+	sandboxDir := filepath.Join(tempDir, "test-sandbox") // setupWorkdir's first arg is sandboxDir post Q-W.4b
 	sourceDir := filepath.Join(tempDir, "source")
 	require.NoError(t, os.MkdirAll(sourceDir, 0755))                                             //nolint:gosec // G301: test directory
 	require.NoError(t, os.WriteFile(filepath.Join(sourceDir, "file.txt"), []byte("test"), 0644)) //nolint:gosec // G306: test file
@@ -400,7 +400,7 @@ func TestSetupWorkdir_DefersBaselineForWorkDirSetupBackends(t *testing.T) {
 	rt := &mockTartRuntime{}
 
 	// setupWorkdir should return empty SHA for WorkDirSetup backends
-	_, baselineSHA, err := setupWorkdir(sandboxName, workdir, rt)
+	_, baselineSHA, err := setupWorkdir(sandboxDir, workdir, rt)
 	require.NoError(t, err)
 	assert.Empty(t, baselineSHA, "baseline SHA should be empty for WorkDirSetup backends (baseline deferred to VM)")
 }
@@ -412,8 +412,8 @@ func TestSetupWorkdir_CreatesBaselineForDockerBackends(t *testing.T) {
 		t.Skip("skipping filesystem test in short mode")
 	}
 
-	sandboxName := "test-sandbox"
 	tempDir := t.TempDir()
+	sandboxDir := filepath.Join(tempDir, "test-sandbox") // setupWorkdir's first arg is sandboxDir post Q-W.4b
 	sourceDir := filepath.Join(tempDir, "source")
 	require.NoError(t, os.MkdirAll(sourceDir, 0755))                                             //nolint:gosec // G301: test directory
 	require.NoError(t, os.WriteFile(filepath.Join(sourceDir, "file.txt"), []byte("test"), 0644)) //nolint:gosec // G306: test file
@@ -426,7 +426,7 @@ func TestSetupWorkdir_CreatesBaselineForDockerBackends(t *testing.T) {
 	rt := &mockDockerRuntime{}
 
 	// setupWorkdir should create baseline and return non-empty SHA for Docker
-	_, baselineSHA, err := setupWorkdir(sandboxName, workdir, rt)
+	_, baselineSHA, err := setupWorkdir(sandboxDir, workdir, rt)
 	require.NoError(t, err)
 	assert.NotEmpty(t, baselineSHA, "baseline SHA should be non-empty for Docker backends (immediate baseline)")
 	assert.Len(t, baselineSHA, 40, "SHA should be 40 characters (git SHA-1)")
@@ -439,8 +439,8 @@ func TestSetupWorkdir_OverlayModeDeferBaseline(t *testing.T) {
 		t.Skip("skipping filesystem test in short mode")
 	}
 
-	sandboxName := "test-sandbox"
 	tempDir := t.TempDir()
+	sandboxDir := filepath.Join(tempDir, "test-sandbox") // setupWorkdir's first arg is sandboxDir post Q-W.4b
 	sourceDir := filepath.Join(tempDir, "source")
 	require.NoError(t, os.MkdirAll(sourceDir, 0755)) //nolint:gosec // G301: test directory
 
@@ -456,7 +456,7 @@ func TestSetupWorkdir_OverlayModeDeferBaseline(t *testing.T) {
 	}
 
 	for _, rt := range runtimes {
-		_, baselineSHA, err := setupWorkdir(sandboxName, workdir, rt)
+		_, baselineSHA, err := setupWorkdir(sandboxDir, workdir, rt)
 		require.NoError(t, err)
 		assert.Empty(t, baselineSHA, "overlay mode should defer baseline for all backends")
 	}

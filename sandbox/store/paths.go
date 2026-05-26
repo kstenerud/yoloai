@@ -1,9 +1,18 @@
-// ABOUTME: All sandbox filesystem path constants and helper functions (Dir, WorkDir,
-// ABOUTME: OverlayUpperDir, FilesDir, etc.) that form the canonical layout under ~/.yoloai/.
+// ABOUTME: Per-sandbox subdirectory path helpers and on-disk file name constants.
+// ABOUTME: All path-construction takes a sandboxDir (from config.Layout.SandboxDir).
 // Package store manages on-disk sandbox state: directory paths, the
 // per-sandbox Meta record, and the SandboxState completion flags. All
 // other sandbox/ subpackages consume types from here; this package
 // imports only the standard library, config, and internal helpers.
+//
+// **Layout discipline (Q-W.4b).** None of the helpers in this file
+// reach back to config.SandboxesDir() or config.YoloaiDir(); they
+// derive subpaths from a sandboxDir argument supplied by the caller.
+// The caller obtains the sandboxDir from a config.Layout
+// (layout.SandboxDir(name)). This satisfies the "all layout info in
+// one authoritative source" rule from §12: Layout is the only thing
+// that knows where the sandbox root lives; store is the only thing
+// that knows the per-sandbox subdirectory structure.
 package store
 
 import (
@@ -104,107 +113,105 @@ func InstanceName(name string) string {
 	return "yoloai-" + name
 }
 
-// Dir returns the host-side state directory for a sandbox.
-//
-//	~/.yoloai/sandboxes/<name>/
-func Dir(name string) string {
-	return filepath.Join(config.SandboxesDir(), name)
+// Per-sandbox subdirectory helpers. Each takes a sandboxDir (typically
+// obtained via layout.SandboxDir(name)) and returns the subpath.
+
+// BackendPath returns the backend-specific directory within a sandbox.
+func BackendPath(sandboxDir string) string {
+	return filepath.Join(sandboxDir, BackendDir)
 }
 
-// Per-sandbox subdirectory helpers.
-
-// BackendPath returns the backend-specific directory for a sandbox.
-func BackendPath(name string) string {
-	return filepath.Join(Dir(name), BackendDir)
+// BinPath returns the executable scripts directory within a sandbox.
+func BinPath(sandboxDir string) string {
+	return filepath.Join(sandboxDir, BinDir)
 }
 
-// BinPath returns the executable scripts directory for a sandbox.
-func BinPath(name string) string {
-	return filepath.Join(Dir(name), BinDir)
+// TmuxPath returns the tmux configuration directory within a sandbox.
+func TmuxPath(sandboxDir string) string {
+	return filepath.Join(sandboxDir, TmuxDir)
 }
 
-// TmuxPath returns the tmux configuration directory for a sandbox.
-func TmuxPath(name string) string {
-	return filepath.Join(Dir(name), TmuxDir)
+// AgentRuntimePath returns the agent-managed state directory within a sandbox.
+func AgentRuntimePath(sandboxDir string) string {
+	return filepath.Join(sandboxDir, AgentRuntimeDir)
 }
 
-// AgentRuntimePath returns the agent-managed state directory for a sandbox.
-func AgentRuntimePath(name string) string {
-	return filepath.Join(Dir(name), AgentRuntimeDir)
-}
-
-// HomeSeedPath returns the home-seed directory for a sandbox.
-func HomeSeedPath(name string) string {
-	return filepath.Join(Dir(name), "home-seed")
+// HomeSeedPath returns the home-seed directory within a sandbox.
+func HomeSeedPath(sandboxDir string) string {
+	return filepath.Join(sandboxDir, "home-seed")
 }
 
 // Per-sandbox file helpers.
 
-// RuntimeConfigFilePath returns the path to runtime-config.json for a sandbox.
-func RuntimeConfigFilePath(name string) string {
-	return filepath.Join(Dir(name), RuntimeConfigFile)
+// RuntimeConfigFilePath returns the path to runtime-config.json within a sandbox.
+func RuntimeConfigFilePath(sandboxDir string) string {
+	return filepath.Join(sandboxDir, RuntimeConfigFile)
 }
 
-// AgentStatusFilePath returns the path to agent-status.json for a sandbox.
-func AgentStatusFilePath(name string) string {
-	return filepath.Join(Dir(name), AgentStatusFile)
+// AgentStatusFilePath returns the path to agent-status.json within a sandbox.
+func AgentStatusFilePath(sandboxDir string) string {
+	return filepath.Join(sandboxDir, AgentStatusFile)
 }
 
-// LogsPath returns the logs/ directory for a sandbox.
-func LogsPath(name string) string {
-	return filepath.Join(Dir(name), LogsDir)
+// LogsPath returns the logs/ directory within a sandbox.
+func LogsPath(sandboxDir string) string {
+	return filepath.Join(sandboxDir, LogsDir)
 }
 
-// CLIJSONLPath returns the path to logs/cli.jsonl for a sandbox.
-func CLIJSONLPath(name string) string {
-	return filepath.Join(Dir(name), CLIJSONLFile)
+// CLIJSONLPath returns the path to logs/cli.jsonl within a sandbox.
+func CLIJSONLPath(sandboxDir string) string {
+	return filepath.Join(sandboxDir, CLIJSONLFile)
 }
 
-// SandboxJSONLPath returns the path to logs/sandbox.jsonl for a sandbox.
-func SandboxJSONLPath(name string) string {
-	return filepath.Join(Dir(name), SandboxJSONLFile)
+// SandboxJSONLPath returns the path to logs/sandbox.jsonl within a sandbox.
+func SandboxJSONLPath(sandboxDir string) string {
+	return filepath.Join(sandboxDir, SandboxJSONLFile)
 }
 
-// MonitorJSONLPath returns the path to logs/monitor.jsonl for a sandbox.
-func MonitorJSONLPath(name string) string {
-	return filepath.Join(Dir(name), MonitorJSONLFile)
+// MonitorJSONLPath returns the path to logs/monitor.jsonl within a sandbox.
+func MonitorJSONLPath(sandboxDir string) string {
+	return filepath.Join(sandboxDir, MonitorJSONLFile)
 }
 
-// HooksJSONLPath returns the path to logs/agent-hooks.jsonl for a sandbox.
-func HooksJSONLPath(name string) string {
-	return filepath.Join(Dir(name), HooksJSONLFile)
+// HooksJSONLPath returns the path to logs/agent-hooks.jsonl within a sandbox.
+func HooksJSONLPath(sandboxDir string) string {
+	return filepath.Join(sandboxDir, HooksJSONLFile)
 }
 
-// AgentLogPath returns the path to logs/agent.log for a sandbox.
-func AgentLogPath(name string) string {
-	return filepath.Join(Dir(name), AgentLogFile)
+// AgentLogPath returns the path to logs/agent.log within a sandbox.
+func AgentLogPath(sandboxDir string) string {
+	return filepath.Join(sandboxDir, AgentLogFile)
 }
 
-// PromptFilePath returns the path to prompt.txt for a sandbox.
-func PromptFilePath(name string) string {
-	return filepath.Join(Dir(name), "prompt.txt")
+// PromptFilePath returns the path to prompt.txt within a sandbox.
+func PromptFilePath(sandboxDir string) string {
+	return filepath.Join(sandboxDir, "prompt.txt")
 }
 
-// MachineIDPath returns the path to the stable machine-id file for a sandbox.
-func MachineIDPath(name string) string {
-	return filepath.Join(Dir(name), MachineIDFile)
+// MachineIDPath returns the path to the stable machine-id file within a sandbox.
+func MachineIDPath(sandboxDir string) string {
+	return filepath.Join(sandboxDir, MachineIDFile)
 }
 
-// RequireSandboxDir returns the sandbox directory path after verifying it exists.
-func RequireSandboxDir(name string) (string, error) {
-	dir := Dir(name)
-	if _, err := os.Stat(dir); err != nil {
-		return "", ErrSandboxNotFound
+// RequireSandboxDir verifies that the given sandbox directory exists on
+// disk. Returns ErrSandboxNotFound when the directory is missing.
+// Other stat errors propagate (returned as-is).
+func RequireSandboxDir(sandboxDir string) error {
+	if _, err := os.Stat(sandboxDir); err != nil {
+		if os.IsNotExist(err) {
+			return ErrSandboxNotFound
+		}
+		return err
 	}
-	return dir, nil
+	return nil
 }
 
 // WorkDir returns the host-side work directory for a specific
 // copy-mode mount within a sandbox.
 //
-//	~/.yoloai/sandboxes/<name>/work/<caret-encoded-path>/
-func WorkDir(name string, hostPath string) string {
-	return filepath.Join(Dir(name), "work", EncodePath(hostPath))
+//	<sandboxDir>/work/<caret-encoded-path>/
+func WorkDir(sandboxDir string, hostPath string) string {
+	return filepath.Join(sandboxDir, "work", EncodePath(hostPath))
 }
 
 // OverlayWorkBaseDir returns the parent directory for all overlay layer
@@ -213,53 +220,53 @@ func WorkDir(name string, hostPath string) string {
 // the same underlying mount — a requirement for overlayfs to work inside
 // a Docker container.
 //
-//	~/.yoloai/sandboxes/<name>/work/<caret-encoded-path>/
-func OverlayWorkBaseDir(name string, hostPath string) string {
-	return filepath.Join(Dir(name), "work", EncodePath(hostPath))
+//	<sandboxDir>/work/<caret-encoded-path>/
+func OverlayWorkBaseDir(sandboxDir string, hostPath string) string {
+	return filepath.Join(sandboxDir, "work", EncodePath(hostPath))
 }
 
 // OverlayUpperDir returns the upper layer directory for an overlay mount.
 //
-//	~/.yoloai/sandboxes/<name>/work/<caret-encoded-path>/upper/
-func OverlayUpperDir(name string, hostPath string) string {
-	return filepath.Join(Dir(name), "work", EncodePath(hostPath), "upper")
+//	<sandboxDir>/work/<caret-encoded-path>/upper/
+func OverlayUpperDir(sandboxDir string, hostPath string) string {
+	return filepath.Join(sandboxDir, "work", EncodePath(hostPath), "upper")
 }
 
 // OverlayOvlworkDir returns the overlayfs workdir for an overlay mount.
 // Named "ovlwork" to avoid collision with the sandbox work/ directory.
 //
-//	~/.yoloai/sandboxes/<name>/work/<caret-encoded-path>/ovlwork/
-func OverlayOvlworkDir(name string, hostPath string) string {
-	return filepath.Join(Dir(name), "work", EncodePath(hostPath), "ovlwork")
+//	<sandboxDir>/work/<caret-encoded-path>/ovlwork/
+func OverlayOvlworkDir(sandboxDir string, hostPath string) string {
+	return filepath.Join(sandboxDir, "work", EncodePath(hostPath), "ovlwork")
 }
 
 // OverlayLowerDir returns the mount-point directory inside OverlayWorkBaseDir
 // where the user's read-only workdir is bind-mounted (nested inside the
 // parent volume so all overlay dirs share the same Docker bind mount).
 //
-//	~/.yoloai/sandboxes/<name>/work/<caret-encoded-path>/lower/
-func OverlayLowerDir(name string, hostPath string) string {
-	return filepath.Join(Dir(name), "work", EncodePath(hostPath), "lower")
+//	<sandboxDir>/work/<caret-encoded-path>/lower/
+func OverlayLowerDir(sandboxDir string, hostPath string) string {
+	return filepath.Join(sandboxDir, "work", EncodePath(hostPath), "lower")
 }
 
 // OverlayMergedDir returns the directory inside OverlayWorkBaseDir that
 // serves as the overlayfs merge target (the unified view of lower+upper).
 //
-//	~/.yoloai/sandboxes/<name>/work/<caret-encoded-path>/merged/
-func OverlayMergedDir(name string, hostPath string) string {
-	return filepath.Join(Dir(name), "work", EncodePath(hostPath), "merged")
+//	<sandboxDir>/work/<caret-encoded-path>/merged/
+func OverlayMergedDir(sandboxDir string, hostPath string) string {
+	return filepath.Join(sandboxDir, "work", EncodePath(hostPath), "merged")
 }
 
-// FilesDir returns the host-side file exchange directory for a sandbox.
+// FilesDir returns the host-side file exchange directory within a sandbox.
 //
-//	~/.yoloai/sandboxes/<name>/files/
-func FilesDir(name string) string {
-	return filepath.Join(Dir(name), "files")
+//	<sandboxDir>/files/
+func FilesDir(sandboxDir string) string {
+	return filepath.Join(sandboxDir, "files")
 }
 
-// CacheDir returns the host-side cache directory for a sandbox.
+// CacheDir returns the host-side cache directory within a sandbox.
 //
-//	~/.yoloai/sandboxes/<name>/cache/
-func CacheDir(name string) string {
-	return filepath.Join(Dir(name), "cache")
+//	<sandboxDir>/cache/
+func CacheDir(sandboxDir string) string {
+	return filepath.Join(sandboxDir, "cache")
 }

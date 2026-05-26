@@ -214,12 +214,12 @@ func (m *Manager) EnsureSetupNonInteractive(ctx context.Context) error {
 
 // List returns info for all sandboxes.
 func (m *Manager) List(ctx context.Context) ([]*Info, error) {
-	return ListSandboxes(ctx, m.runtime)
+	return ListSandboxes(ctx, m.layout, m.runtime)
 }
 
 // Inspect returns combined metadata and live state for a single sandbox.
 func (m *Manager) Inspect(ctx context.Context, name string) (*Info, error) {
-	return InspectSandbox(ctx, m.runtime, name)
+	return InspectSandbox(ctx, m.layout, m.runtime, name)
 }
 
 // Runtime returns the active runtime backend. Exposed so callers (e.g. the MCP
@@ -229,17 +229,17 @@ func (m *Manager) Runtime() runtime.Runtime { return m.runtime }
 
 // Status returns the current lifecycle status of a sandbox.
 func (m *Manager) Status(ctx context.Context, name string) (Status, error) {
-	return DetectStatus(ctx, m.runtime, store.InstanceName(name), store.Dir(name))
+	return DetectStatus(ctx, m.runtime, store.InstanceName(name), m.layout.SandboxDir(name))
 }
 
 // SandboxFiles returns the path to the per-sandbox file exchange directory.
 func (m *Manager) SandboxFiles(name string) string {
-	return store.FilesDir(name)
+	return store.FilesDir(m.layout.SandboxDir(name))
 }
 
 // SandboxCache returns the path to the per-sandbox cache directory.
 func (m *Manager) SandboxCache(name string) string {
-	return store.CacheDir(name)
+	return store.CacheDir(m.layout.SandboxDir(name))
 }
 
 // SendInput sends text to the sandbox agent's terminal via tmux send-keys.

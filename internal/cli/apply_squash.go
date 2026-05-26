@@ -18,6 +18,7 @@ import (
 
 // applySquash implements the squashed-patch apply mode.
 func applySquash(cmd *cobra.Command, name string, paths []string, meta *store.Meta, yes, dryRun, includeWIP bool) error {
+	layout := cliLayout()
 	// Check for aux :copy dirs
 	if len(meta.Directories) > 0 {
 		backend := resolveBackendForSandbox(name)
@@ -31,7 +32,7 @@ func applySquash(cmd *cobra.Command, name string, paths []string, meta *store.Me
 	backend := resolveBackendForSandbox(name)
 	err := withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
 		var genErr error
-		patchBytes, stat, genErr = patch.GeneratePatch(ctx, rt, name, paths, includeWIP)
+		patchBytes, stat, genErr = patch.GeneratePatch(ctx, layout, rt, name, paths, includeWIP)
 		return genErr
 	})
 	if err != nil {
@@ -87,7 +88,7 @@ func warnSquashSkippedWIP(cmd *cobra.Command, name, backend string) {
 	var hasWIP bool
 	_ = withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
 		var wipErr error
-		hasWIP, wipErr = patch.HasUncommittedChanges(ctx, rt, name)
+		hasWIP, wipErr = patch.HasUncommittedChanges(ctx, cliLayout(), rt, name)
 		return wipErr
 	})
 	if hasWIP {
@@ -121,7 +122,7 @@ func applySquashPatch(cmd *cobra.Command, name string, paths []string, targetDir
 	// Advance baseline past applied changes (skip for path-filtered applies)
 	if len(paths) == 0 {
 		err := withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
-			return patch.AdvanceBaseline(ctx, rt, name)
+			return patch.AdvanceBaseline(ctx, cliLayout(), rt, name)
 		})
 		if err != nil {
 			return fmt.Errorf("advance baseline: %w", err)
@@ -142,7 +143,8 @@ func applySquashPatch(cmd *cobra.Command, name string, paths []string, targetDir
 
 // applySquashMulti applies squashed patches for multiple :copy directories.
 func applySquashMulti(cmd *cobra.Command, ctx context.Context, rt runtime.Runtime, name string, paths []string, _ *store.Meta, yes, dryRun, includeWIP bool) error {
-	patches, err := patch.GenerateMultiPatch(ctx, rt, name, paths, includeWIP)
+	layout := cliLayout()
+	patches, err := patch.GenerateMultiPatch(ctx, layout, rt, name, paths, includeWIP)
 	if err != nil {
 		return err
 	}
@@ -185,7 +187,7 @@ func applySquashMulti(cmd *cobra.Command, ctx context.Context, rt runtime.Runtim
 
 	// Advance baseline for workdir
 	if len(paths) == 0 {
-		if err := patch.AdvanceBaseline(ctx, rt, name); err != nil {
+		if err := patch.AdvanceBaseline(ctx, layout, rt, name); err != nil {
 			return fmt.Errorf("advance baseline: %w", err)
 		}
 	}

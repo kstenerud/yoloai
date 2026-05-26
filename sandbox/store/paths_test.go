@@ -1,7 +1,6 @@
 package store
 
 import (
-	"os"
 	"path/filepath"
 	"testing"
 
@@ -240,20 +239,10 @@ func TestValidateName(t *testing.T) {
 	})
 }
 
-func TestDir(t *testing.T) {
-	home, err := os.UserHomeDir()
-	require.NoError(t, err)
-
-	expected := filepath.Join(home, ".yoloai", "sandboxes", "my-sandbox")
-	assert.Equal(t, expected, Dir("my-sandbox"))
-}
-
 func TestWorkDir(t *testing.T) {
-	home, err := os.UserHomeDir()
-	require.NoError(t, err)
-
-	expected := filepath.Join(home, ".yoloai", "sandboxes", "my-sandbox", "work", "^shome^suser^sproject")
-	assert.Equal(t, expected, WorkDir("my-sandbox", "/home/user/project"))
+	sandboxDir := "/data/sandboxes/my-sandbox"
+	expected := filepath.Join(sandboxDir, "work", "^shome^suser^sproject")
+	assert.Equal(t, expected, WorkDir(sandboxDir, "/home/user/project"))
 }
 
 func TestInstanceName(t *testing.T) {
@@ -261,25 +250,19 @@ func TestInstanceName(t *testing.T) {
 }
 
 func TestOverlayUpperDir(t *testing.T) {
-	home, err := os.UserHomeDir()
-	require.NoError(t, err)
-
-	expected := filepath.Join(home, ".yoloai", "sandboxes", "my-sandbox", "work", EncodePath("/home/user/project"), "upper")
-	assert.Equal(t, expected, OverlayUpperDir("my-sandbox", "/home/user/project"))
+	sandboxDir := "/data/sandboxes/my-sandbox"
+	expected := filepath.Join(sandboxDir, "work", EncodePath("/home/user/project"), "upper")
+	assert.Equal(t, expected, OverlayUpperDir(sandboxDir, "/home/user/project"))
 }
 
 func TestOverlayOvlworkDir(t *testing.T) {
-	home, err := os.UserHomeDir()
-	require.NoError(t, err)
-
-	expected := filepath.Join(home, ".yoloai", "sandboxes", "my-sandbox", "work", EncodePath("/home/user/project"), "ovlwork")
-	assert.Equal(t, expected, OverlayOvlworkDir("my-sandbox", "/home/user/project"))
+	sandboxDir := "/data/sandboxes/my-sandbox"
+	expected := filepath.Join(sandboxDir, "work", EncodePath("/home/user/project"), "ovlwork")
+	assert.Equal(t, expected, OverlayOvlworkDir(sandboxDir, "/home/user/project"))
 }
 
 func TestFilesDir(t *testing.T) {
-	home, err := os.UserHomeDir()
-	require.NoError(t, err)
-
-	expected := filepath.Join(home, ".yoloai", "sandboxes", "my-sandbox", "files")
-	assert.Equal(t, expected, FilesDir("my-sandbox"))
+	sandboxDir := "/data/sandboxes/my-sandbox"
+	expected := filepath.Join(sandboxDir, "files")
+	assert.Equal(t, expected, FilesDir(sandboxDir))
 }

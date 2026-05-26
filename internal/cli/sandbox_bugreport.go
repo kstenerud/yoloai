@@ -72,21 +72,23 @@ func writeSandboxSections(ctx context.Context, w io.Writer, rt runtime.Runtime, 
 	// Section 6: Sandbox detail
 	writeBugReportSandboxDetail(ctx, w, rt, name, reportType)
 
+	sandboxDir := cliLayout().SandboxDir(name)
+
 	// Section 7: cli.jsonl
-	writeBugReportJSONLFile(w, "logs/cli.jsonl", store.CLIJSONLPath(name), reportType, nil)
+	writeBugReportJSONLFile(w, "logs/cli.jsonl", store.CLIJSONLPath(sandboxDir), reportType, nil)
 
 	// Section 8: sandbox.jsonl (omit setup_cmd.* and network.allow in safe mode)
 	var omitEvents []string
 	if reportType == "safe" {
 		omitEvents = []string{"setup_cmd.*", "network.allow"}
 	}
-	writeBugReportJSONLFile(w, "logs/sandbox.jsonl", store.SandboxJSONLPath(name), reportType, omitEvents)
+	writeBugReportJSONLFile(w, "logs/sandbox.jsonl", store.SandboxJSONLPath(sandboxDir), reportType, omitEvents)
 
 	// Section 9: monitor.jsonl (full in both modes)
-	writeBugReportJSONLFile(w, "logs/monitor.jsonl", store.MonitorJSONLPath(name), reportType, nil)
+	writeBugReportJSONLFile(w, "logs/monitor.jsonl", store.MonitorJSONLPath(sandboxDir), reportType, nil)
 
 	// Section 10: agent-hooks.jsonl (full in both modes)
-	writeBugReportJSONLFile(w, "logs/agent-hooks.jsonl", store.HooksJSONLPath(name), reportType, nil)
+	writeBugReportJSONLFile(w, "logs/agent-hooks.jsonl", store.HooksJSONLPath(sandboxDir), reportType, nil)
 
 	if reportType == "unsafe" {
 		// Section 11: Agent output (unsafe only)
@@ -111,7 +113,7 @@ func writeBugReportSandboxSectionsForFlag(w io.Writer, name, reportType string) 
 
 // writeBugReportSandboxDetail writes section 6: sandbox-specific detail.
 func writeBugReportSandboxDetail(ctx context.Context, w io.Writer, rt runtime.Runtime, name, reportType string) {
-	info, err := sandbox.InspectSandbox(ctx, rt, name)
+	info, err := sandbox.InspectSandbox(ctx, cliLayout(), rt, name)
 
 	fmt.Fprintln(w, "<details>")                         //nolint:errcheck
 	fmt.Fprintln(w, "<summary>Sandbox detail</summary>") //nolint:errcheck
@@ -129,7 +131,7 @@ func writeBugReportSandboxDetail(ctx context.Context, w io.Writer, rt runtime.Ru
 		fmt.Fprintln(w)                                     //nolint:errcheck
 	}
 
-	sandboxDir := store.Dir(name)
+	sandboxDir := cliLayout().SandboxDir(name)
 
 	// environment.json
 	writeJSONFileSection(w, "environment.json",
@@ -243,7 +245,7 @@ func writeBugReportJSONLFile(w io.Writer, title, path, reportType string, omitEv
 // writeBugReportAgentOutput writes section 11: ANSI-stripped agent output.
 // Only included in unsafe reports.
 func writeBugReportAgentOutput(w io.Writer, name string) {
-	path := store.AgentLogPath(name)
+	path := store.AgentLogPath(cliLayout().SandboxDir(name))
 	f, err := os.Open(path) //nolint:gosec // G304: path is store.AgentLogPath(name) — yoloAI-owned
 	if err != nil {
 		fmt.Fprintln(w, "<details>")                       //nolint:errcheck
@@ -299,7 +301,7 @@ func writeBugReportTmuxCapture(w io.Writer, name string) {
 // for the named sandbox. Returns empty string if the file is missing or has no
 // socket configured.
 func readTmuxSocketFromConfig(name string) string {
-	cfgPath := fmt.Sprintf("%s/%s", store.Dir(name), store.RuntimeConfigFile)
+	cfgPath := fmt.Sprintf("%s/%s", cliLayout().SandboxDir(name), store.RuntimeConfigFile)
 	data, err := os.ReadFile(cfgPath) //nolint:gosec // G304: path derived from trusted sandbox dir
 	if err != nil {
 		return ""

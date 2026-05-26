@@ -16,7 +16,6 @@ import (
 	"github.com/kstenerud/yoloai/agent"
 	"github.com/kstenerud/yoloai/config"
 	"github.com/kstenerud/yoloai/runtime"
-	"github.com/kstenerud/yoloai/sandbox/store"
 	"github.com/kstenerud/yoloai/workspace"
 )
 
@@ -241,15 +240,17 @@ func TestGitBaseline_EmptyGitRepo(t *testing.T) {
 	require.NoError(t, workspace.RunGitCmd(dir, "init"))
 	writeTestFile(t, dir, "file.txt", "hello")
 
-	// setupWorkdir should remove the empty .git and create a fresh baseline
+	// setupWorkdir should remove the empty .git and create a fresh baseline.
+	// Use a TempDir-based sandboxDir to keep the test self-cleaning — the
+	// migration in Q-W.4b changed setupWorkdir's first parameter from a
+	// sandbox name to a sandboxDir, so passing a literal "test-sandbox"
+	// resolves to a relative path under CWD.
+	sandboxDir := filepath.Join(t.TempDir(), "test-sandbox")
 	workdir := &DirArg{Path: dir, Mode: "copy"}
 	rt := &mockRuntime{} // Docker-like backend: creates baseline on host
-	_, sha, err := setupWorkdir("test-sandbox", workdir, rt)
+	_, sha, err := setupWorkdir(sandboxDir, workdir, rt)
 	require.NoError(t, err)
 	assert.Len(t, sha, 40)
-
-	// Clean up the test sandbox directory
-	require.NoError(t, os.RemoveAll(store.WorkDir("test-sandbox", dir)))
 }
 
 // removeGitDirs tests

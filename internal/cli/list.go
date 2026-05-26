@@ -126,7 +126,7 @@ func runList(cmd *cobra.Command, _ []string) error {
 	ctx := cmd.Context()
 
 	// Use multi-backend listing
-	infos, unavailableBackends, err := sandbox.ListSandboxesMultiBackend(ctx, newRuntime)
+	infos, unavailableBackends, err := sandbox.ListSandboxesMultiBackend(ctx, cliLayout(), newRuntime)
 	if err != nil {
 		return err
 	}

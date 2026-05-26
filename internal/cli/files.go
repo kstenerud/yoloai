@@ -98,10 +98,11 @@ func runFilesPut(cmd *cobra.Command, name string, args []string) error {
 		return sandbox.NewUsageError("at least one file is required")
 	}
 
-	if _, err := store.RequireSandboxDir(name); err != nil {
+	sandboxDir := cliLayout().SandboxDir(name)
+	if err := store.RequireSandboxDir(sandboxDir); err != nil {
 		return err
 	}
-	filesDir := store.FilesDir(name)
+	filesDir := store.FilesDir(sandboxDir)
 	if err := fileutil.MkdirAll(filesDir, 0750); err != nil {
 		return fmt.Errorf("create files directory: %w", err)
 	}
@@ -145,10 +146,11 @@ func runFilesGet(cmd *cobra.Command, name string, args []string) error {
 		return sandbox.NewUsageError("file name is required")
 	}
 
-	if _, err := store.RequireSandboxDir(name); err != nil {
+	sandboxDir := cliLayout().SandboxDir(name)
+	if err := store.RequireSandboxDir(sandboxDir); err != nil {
 		return err
 	}
-	filesDir := store.FilesDir(name)
+	filesDir := store.FilesDir(sandboxDir)
 
 	files, err := expandExchangeGlobs(filesDir, args)
 	if err != nil {
@@ -200,10 +202,11 @@ func runFilesGet(cmd *cobra.Command, name string, args []string) error {
 }
 
 func runFilesLs(cmd *cobra.Command, name string, args []string) error {
-	if _, err := store.RequireSandboxDir(name); err != nil {
+	sandboxDir := cliLayout().SandboxDir(name)
+	if err := store.RequireSandboxDir(sandboxDir); err != nil {
 		return err
 	}
-	filesDir := store.FilesDir(name)
+	filesDir := store.FilesDir(sandboxDir)
 
 	patterns := args
 	if len(patterns) == 0 {
@@ -226,10 +229,11 @@ func runFilesRm(cmd *cobra.Command, name string, args []string) error {
 		return sandbox.NewUsageError("glob pattern is required")
 	}
 
-	if _, err := store.RequireSandboxDir(name); err != nil {
+	sandboxDir := cliLayout().SandboxDir(name)
+	if err := store.RequireSandboxDir(sandboxDir); err != nil {
 		return err
 	}
-	filesDir := store.FilesDir(name)
+	filesDir := store.FilesDir(sandboxDir)
 
 	matches, err := expandExchangeGlobs(filesDir, args)
 	if err != nil {
@@ -247,11 +251,12 @@ func runFilesRm(cmd *cobra.Command, name string, args []string) error {
 }
 
 func runFilesPath(cmd *cobra.Command, name string) error {
-	if _, err := store.RequireSandboxDir(name); err != nil {
+	sandboxDir := cliLayout().SandboxDir(name)
+	if err := store.RequireSandboxDir(sandboxDir); err != nil {
 		return err
 	}
 
-	fmt.Fprintln(cmd.OutOrStdout(), store.FilesDir(name)) //nolint:errcheck // best-effort output
+	fmt.Fprintln(cmd.OutOrStdout(), store.FilesDir(sandboxDir)) //nolint:errcheck // best-effort output
 	return nil
 }
 

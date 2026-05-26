@@ -325,9 +325,9 @@ func parseStatusJSON(data []byte) (Status, bool) {
 }
 
 // InspectSandbox loads metadata and queries the runtime for a single sandbox.
-func InspectSandbox(ctx context.Context, rt runtime.Runtime, name string) (*Info, error) {
-	sandboxDir, err := store.RequireSandboxDir(name)
-	if err != nil {
+func InspectSandbox(ctx context.Context, layout config.Layout, rt runtime.Runtime, name string) (*Info, error) {
+	sandboxDir := layout.SandboxDir(name)
+	if err := store.RequireSandboxDir(sandboxDir); err != nil {
 		return nil, err
 	}
 
@@ -343,7 +343,7 @@ func InspectSandbox(ctx context.Context, rt runtime.Runtime, name string) (*Info
 
 	changes := "-"
 	if meta.Workdir.Mode == "copy" || meta.Workdir.Mode == "overlay" {
-		workDir := store.WorkDir(name, meta.Workdir.HostPath)
+		workDir := store.WorkDir(sandboxDir, meta.Workdir.HostPath)
 		if hasUnappliedWork(workDir, meta.Workdir.BaselineSHA) {
 			changes = "yes"
 		} else if detectChanges(workDir) != "-" {
@@ -355,7 +355,7 @@ func InspectSandbox(ctx context.Context, rt runtime.Runtime, name string) (*Info
 	if changes == "no" {
 		for _, d := range meta.Directories {
 			if d.Mode == "copy" || d.Mode == "overlay" {
-				auxWorkDir := store.WorkDir(name, d.HostPath)
+				auxWorkDir := store.WorkDir(sandboxDir, d.HostPath)
 				if hasUnappliedWork(auxWorkDir, d.BaselineSHA) {
 					changes = "yes"
 					break
@@ -378,11 +378,11 @@ func InspectSandbox(ctx context.Context, rt runtime.Runtime, name string) (*Info
 }
 
 // detectWorkdirChanges returns "yes", "no", or "-" for a sandbox's workdir and aux dirs.
-func detectWorkdirChanges(name string, meta *store.Meta) string {
+func detectWorkdirChanges(sandboxDir string, meta *store.Meta) string {
 	if meta.Workdir.Mode != "copy" && meta.Workdir.Mode != "overlay" {
 		return "-"
 	}
-	workDir := store.WorkDir(name, meta.Workdir.HostPath)
+	workDir := store.WorkDir(sandboxDir, meta.Workdir.HostPath)
 	if hasUnappliedWork(workDir, meta.Workdir.BaselineSHA) {
 		return "yes"
 	}
@@ -392,7 +392,7 @@ func detectWorkdirChanges(name string, meta *store.Meta) string {
 	// workdir has no unapplied work — check aux dirs before reporting "no"
 	for _, d := range meta.Directories {
 		if d.Mode == "copy" || d.Mode == "overlay" {
-			auxWorkDir := store.WorkDir(name, d.HostPath)
+			auxWorkDir := store.WorkDir(sandboxDir, d.HostPath)
 			if hasUnappliedWork(auxWorkDir, d.BaselineSHA) {
 				return "yes"
 			}
@@ -404,9 +404,9 @@ func detectWorkdirChanges(name string, meta *store.Meta) string {
 // InspectSandboxWithBackend loads metadata and optionally queries the runtime.
 // If rt is nil, returns basic info (from meta.json and filesystem) with StatusUnavailable.
 // If rt is available, performs full inspection including container state.
-func InspectSandboxWithBackend(ctx context.Context, rt runtime.Runtime, name string) (*Info, error) {
-	sandboxDir, err := store.RequireSandboxDir(name)
-	if err != nil {
+func InspectSandboxWithBackend(ctx context.Context, layout config.Layout, rt runtime.Runtime, name string) (*Info, error) {
+	sandboxDir := layout.SandboxDir(name)
+	if err := store.RequireSandboxDir(sandboxDir); err != nil {
 		return nil, err
 	}
 
@@ -439,15 +439,14 @@ func InspectSandboxWithBackend(ctx context.Context, rt runtime.Runtime, name str
 	return &Info{
 		Meta:       meta,
 		Status:     status,
-		HasChanges: detectWorkdirChanges(name, meta),
+		HasChanges: detectWorkdirChanges(sandboxDir, meta),
 		DiskUsage:  diskUsage,
 	}, nil
 }
 
 // ListSandboxes scans ~/.yoloai/sandboxes/ and returns info for all sandboxes.
-func ListSandboxes(ctx context.Context, rt runtime.Runtime) ([]*Info, error) {
-	home := config.HomeDir()
-	sandboxesDir := filepath.Join(home, ".yoloai", "sandboxes")
+func ListSandboxes(ctx context.Context, layout config.Layout, rt runtime.Runtime) ([]*Info, error) {
+	sandboxesDir := layout.SandboxesDir()
 
 	entries, err := os.ReadDir(sandboxesDir)
 	if err != nil {
@@ -462,7 +461,7 @@ func ListSandboxes(ctx context.Context, rt runtime.Runtime) ([]*Info, error) {
 		if !entry.IsDir() {
 			continue
 		}
-		info, err := InspectSandbox(ctx, rt, entry.Name())
+		info, err := InspectSandbox(ctx, layout, rt, entry.Name())
 		if err != nil {
 			// Include broken sandboxes with minimal info
 			result = append(result, &Info{
@@ -483,9 +482,8 @@ func ListSandboxes(ctx context.Context, rt runtime.Runtime) ([]*Info, error) {
 // Takes a newRuntimeFunc parameter for creating runtimes (enables testing).
 // Returns (infos, unavailableBackends, error).
 // Sandboxes whose backends are unavailable get StatusUnavailable.
-func ListSandboxesMultiBackend(ctx context.Context, newRuntimeFunc func(context.Context, string) (runtime.Runtime, error)) ([]*Info, []string, error) {
-	home := config.HomeDir()
-	sandboxesDir := filepath.Join(home, ".yoloai", "sandboxes")
+func ListSandboxesMultiBackend(ctx context.Context, layout config.Layout, newRuntimeFunc func(context.Context, string) (runtime.Runtime, error)) ([]*Info, []string, error) {
+	sandboxesDir := layout.SandboxesDir()
 
 	entries, err := os.ReadDir(sandboxesDir)
 	if err != nil {
@@ -506,7 +504,7 @@ func ListSandboxesMultiBackend(ctx context.Context, newRuntimeFunc func(context.
 			result = append(result, brokenInfos(names)...)
 			continue
 		}
-		infos, unavail := inspectBackendGroup(ctx, newRuntimeFunc, backend, names, unavailableSet)
+		infos, unavail := inspectBackendGroup(ctx, layout, newRuntimeFunc, backend, names, unavailableSet)
 		result = append(result, infos...)
 		unavailableBackends = append(unavailableBackends, unavail...)
 	}
@@ -553,7 +551,7 @@ func brokenInfos(names []string) []*Info {
 
 // inspectBackendGroup inspects all sandboxes for a single backend, returning
 // their Info entries and any newly discovered unavailable backend names.
-func inspectBackendGroup(ctx context.Context, newRuntimeFunc func(context.Context, string) (runtime.Runtime, error), backend string, names []string, unavailableSet map[string]bool) ([]*Info, []string) {
+func inspectBackendGroup(ctx context.Context, layout config.Layout, newRuntimeFunc func(context.Context, string) (runtime.Runtime, error), backend string, names []string, unavailableSet map[string]bool) ([]*Info, []string) {
 	var unavailableBackends []string
 	rt, err := newRuntimeFunc(ctx, backend)
 	var effectiveRT runtime.Runtime
@@ -567,7 +565,7 @@ func inspectBackendGroup(ctx context.Context, newRuntimeFunc func(context.Contex
 
 	var result []*Info
 	for _, name := range names {
-		info, inspectErr := InspectSandboxWithBackend(ctx, effectiveRT, name)
+		info, inspectErr := InspectSandboxWithBackend(ctx, layout, effectiveRT, name)
 		if inspectErr != nil {
 			result = append(result, &Info{
 				Meta:       &store.Meta{Name: name},

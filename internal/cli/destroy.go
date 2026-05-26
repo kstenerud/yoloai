@@ -24,7 +24,7 @@ func hasWildcard(s string) bool {
 // expandWildcard matches a wildcard pattern against all sandbox names.
 // Returns matching sandbox names, or an error if no matches found.
 func expandWildcard(ctx context.Context, rt runtime.Runtime, pattern string) ([]string, error) {
-	infos, err := sandbox.ListSandboxes(ctx, rt)
+	infos, err := sandbox.ListSandboxes(ctx, cliLayout(), rt)
 	if err != nil {
 		return nil, fmt.Errorf("list sandboxes: %w", err)
 	}
@@ -122,7 +122,7 @@ func resolveDestroyNames(cmd *cobra.Command, ctx context.Context, rt runtime.Run
 
 // resolveDestroyAll resolves names when --all is set, returning nil if none exist.
 func resolveDestroyAll(cmd *cobra.Command, ctx context.Context, rt runtime.Runtime) ([]string, error) {
-	infos, err := sandbox.ListSandboxes(ctx, rt)
+	infos, err := sandbox.ListSandboxes(ctx, cliLayout(), rt)
 	if err != nil {
 		return nil, err
 	}
@@ -167,7 +167,7 @@ func resolveDestroyArgs(ctx context.Context, rt runtime.Runtime, args []string) 
 		if err := store.ValidateName(arg); err != nil {
 			return nil, err
 		}
-		if _, err := store.RequireSandboxDir(arg); err != nil {
+		if err := store.RequireSandboxDir(cliLayout().SandboxDir(arg)); err != nil {
 			return nil, fmt.Errorf("%s: %w", arg, err)
 		}
 		names = append(names, arg)

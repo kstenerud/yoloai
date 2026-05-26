@@ -243,7 +243,7 @@ func (c *Client) Run(ctx context.Context, opts RunOptions) (*sandbox.Info, error
 // Diff returns the diff of agent changes for a sandbox.
 // Equivalent to 'yoloai diff <name>'.
 func (c *Client) Diff(_ context.Context, name string) ([]*patch.DiffResult, error) {
-	return patch.GenerateMultiDiff(patch.DiffOptions{Name: name})
+	return patch.GenerateMultiDiff(patch.DiffOptions{Name: name, Layout: c.layout})
 }
 
 // Apply applies the agent's committed changes back to the original host

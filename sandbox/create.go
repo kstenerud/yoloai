@@ -297,14 +297,14 @@ func (m *Manager) Create(ctx context.Context, opts CreateOptions) (string, error
 // checkUnappliedWork checks if the named sandbox has any unapplied work
 // (uncommitted changes or commits beyond the baseline). Returns an error
 // if work would be lost.
-func checkUnappliedWork(name string) error {
-	meta, err := store.LoadMeta(store.Dir(name))
+func checkUnappliedWork(name string, sandboxDir string) error {
+	meta, err := store.LoadMeta(sandboxDir)
 	if err != nil {
 		return nil //nolint:nilerr // can't load meta — nothing to protect
 	}
 
 	if meta.Workdir.Mode == "copy" || meta.Workdir.Mode == "overlay" {
-		workDir := store.WorkDir(name, meta.Workdir.HostPath)
+		workDir := store.WorkDir(sandboxDir, meta.Workdir.HostPath)
 		if hasUnappliedWork(workDir, meta.Workdir.BaselineSHA) {
 			return fmt.Errorf("sandbox %q has unapplied changes (use --force to replace anyway, or 'yoloai apply' first)", name)
 		}
@@ -312,7 +312,7 @@ func checkUnappliedWork(name string) error {
 
 	for _, d := range meta.Directories {
 		if d.Mode == "copy" || d.Mode == "overlay" {
-			auxWorkDir := store.WorkDir(name, d.HostPath)
+			auxWorkDir := store.WorkDir(sandboxDir, d.HostPath)
 			if hasUnappliedWork(auxWorkDir, d.BaselineSHA) {
 				return fmt.Errorf("sandbox %q has unapplied changes in %s (use --force to replace anyway, or 'yoloai apply' first)", name, d.HostPath)
 			}
@@ -407,7 +407,7 @@ func (m *Manager) resolveProfileAndArchetype(ctx context.Context, opts *CreateOp
 		fmt.Fprintln(m.output, w) //nolint:errcheck // best-effort warning
 	}
 
-	state_onCreateDone := loadOnCreateDone(opts.Name)
+	state_onCreateDone := loadOnCreateDone(m.layout.SandboxDir(opts.Name))
 
 	mergedMounts, err := validateAndExpandMounts(pr.mounts)
 	if err != nil {
@@ -506,7 +506,7 @@ func (m *Manager) validateAndLoadConfig(opts CreateOptions) (*agent.Definition, 
 		opts.Replace = true
 	}
 
-	sandboxDir := store.Dir(opts.Name)
+	sandboxDir := m.layout.SandboxDir(opts.Name)
 	if _, err := os.Stat(sandboxDir); err == nil && !opts.Replace {
 		if _, metaErr := store.LoadMeta(sandboxDir); metaErr != nil {
 			_ = os.RemoveAll(sandboxDir)
@@ -567,8 +567,8 @@ func mergeDcMounts(pr *profileResult, dcMounts []string) {
 }
 
 // loadOnCreateDone returns the on-create-done flag from sandbox state, defaulting to false.
-func loadOnCreateDone(sandboxName string) bool {
-	existingState, err := store.LoadSandboxState(store.Dir(sandboxName))
+func loadOnCreateDone(sandboxDir string) bool {
+	existingState, err := store.LoadSandboxState(sandboxDir)
 	if err != nil {
 		return false
 	}
@@ -584,7 +584,7 @@ func (m *Manager) replaceSandboxIfNeeded(ctx context.Context, opts CreateOptions
 		return nil // nothing to replace
 	}
 	if !opts.Force {
-		if err := checkUnappliedWork(opts.Name); err != nil {
+		if err := checkUnappliedWork(opts.Name, sandboxDir); err != nil {
 			return err
 		}
 	}
@@ -623,7 +623,8 @@ func createSandboxDirs(sandboxDir string, perms IsolationPerms) error {
 // setupAllWorkdirs sets up the workdir and aux dirs, and resolves copy mount paths.
 func (m *Manager) setupAllWorkdirs(opts CreateOptions, workdir *DirArg, auxDirs []*DirArg, resolvedArchetype archetype.Archetype, devcontainerCfg *archetype.DevcontainerConfig) (string, string, []store.DirMeta, error) {
 	slog.Debug("setting up workdir", "event", "sandbox.create.workdir", "mode", string(workdir.Mode))
-	workCopyDir, baselineSHA, err := setupWorkdir(opts.Name, workdir, m.runtime)
+	sandboxDir := m.layout.SandboxDir(opts.Name)
+	workCopyDir, baselineSHA, err := setupWorkdir(sandboxDir, workdir, m.runtime)
 	if err != nil {
 		return "", "", nil, err
 	}
@@ -637,7 +638,7 @@ func (m *Manager) setupAllWorkdirs(opts CreateOptions, workdir *DirArg, auxDirs 
 	}
 
 	slog.Debug("setting up aux dirs", "event", "sandbox.create.aux_dirs", "count", len(auxDirs))
-	dirMetas, err := setupAuxDirs(opts.Name, auxDirs)
+	dirMetas, err := setupAuxDirs(sandboxDir, auxDirs)
 	if err != nil {
 		return "", "", nil, err
 	}
@@ -1338,7 +1339,7 @@ func buildWorkdirMounts(state *sandboxState) []runtime.MountSpec {
 		// the lower/ subdirectory within the same volume.
 		return []runtime.MountSpec{
 			{
-				Source: store.OverlayWorkBaseDir(state.name, state.workdir.Path),
+				Source: store.OverlayWorkBaseDir(state.sandboxDir, state.workdir.Path),
 				Target: "/yoloai/overlay/" + encoded,
 			},
 			{
@@ -1360,25 +1361,25 @@ func buildWorkdirMounts(state *sandboxState) []runtime.MountSpec {
 func buildAuxDirMounts(state *sandboxState) []runtime.MountSpec {
 	var mounts []runtime.MountSpec
 	for _, ad := range state.auxDirs {
-		mounts = append(mounts, buildSingleAuxDirMount(state.name, ad)...)
+		mounts = append(mounts, buildSingleAuxDirMount(state.sandboxDir, ad)...)
 	}
 	return mounts
 }
 
 // buildSingleAuxDirMount returns mount specs for one auxiliary directory.
-func buildSingleAuxDirMount(sandboxName string, ad *DirArg) []runtime.MountSpec {
+func buildSingleAuxDirMount(sandboxDir string, ad *DirArg) []runtime.MountSpec {
 	mountTarget := ad.ResolvedMountPath()
 	switch ad.Mode {
 	case "copy":
 		return []runtime.MountSpec{{
-			Source: store.WorkDir(sandboxName, ad.Path),
+			Source: store.WorkDir(sandboxDir, ad.Path),
 			Target: mountTarget,
 		}}
 	case "overlay":
 		encoded := store.EncodePath(ad.Path)
 		return []runtime.MountSpec{
 			{
-				Source: store.OverlayWorkBaseDir(sandboxName, ad.Path),
+				Source: store.OverlayWorkBaseDir(sandboxDir, ad.Path),
 				Target: "/yoloai/overlay/" + encoded,
 			},
 			{

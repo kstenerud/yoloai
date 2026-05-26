@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/kstenerud/yoloai/config"
 	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/sandbox/store"
 )
@@ -165,8 +166,9 @@ func TestInspectSandbox_NotFound(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
 
+	layout := config.NewLayout(filepath.Join(tmpDir, ".yoloai"))
 	mock := &inspectMockRuntime{}
-	_, err := InspectSandbox(context.Background(), mock, "nonexistent")
+	_, err := InspectSandbox(context.Background(), layout, mock, "nonexistent")
 	assert.ErrorIs(t, err, ErrSandboxNotFound)
 }
 
@@ -195,7 +197,8 @@ func TestInspectSandbox_Removed(t *testing.T) {
 		},
 	}
 
-	info, err := InspectSandbox(context.Background(), mock, name)
+	layout := config.NewLayout(filepath.Join(tmpDir, ".yoloai"))
+	info, err := InspectSandbox(context.Background(), layout, mock, name)
 	require.NoError(t, err)
 	assert.Equal(t, StatusRemoved, info.Status)
 }
@@ -209,8 +212,9 @@ func TestListSandboxes_Empty(t *testing.T) {
 	// Create sandboxes dir but leave it empty
 	require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, ".yoloai", "sandboxes"), 0750))
 
+	layout := config.NewLayout(filepath.Join(tmpDir, ".yoloai"))
 	mock := &inspectMockRuntime{}
-	result, err := ListSandboxes(context.Background(), mock)
+	result, err := ListSandboxes(context.Background(), layout, mock)
 	require.NoError(t, err)
 	assert.Empty(t, result)
 }
@@ -246,7 +250,8 @@ func TestListSandboxes_IncludesBroken(t *testing.T) {
 		},
 	}
 
-	result, err := ListSandboxes(context.Background(), mock)
+	layout := config.NewLayout(filepath.Join(tmpDir, ".yoloai"))
+	result, err := ListSandboxes(context.Background(), layout, mock)
 	require.NoError(t, err)
 	require.Len(t, result, 2)
 

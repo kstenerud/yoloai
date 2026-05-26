@@ -58,7 +58,7 @@ func runAttach(cmd *cobra.Command, args []string, opts *attachOpts) error {
 
 // attachInRuntime resolves sandbox status and attaches to its tmux session.
 func attachInRuntime(cmd *cobra.Command, ctx context.Context, rt runtime.Runtime, name string, opts *attachOpts) error {
-	info, err := sandbox.InspectSandbox(ctx, rt, name)
+	info, err := sandbox.InspectSandbox(ctx, cliLayout(), rt, name)
 	if err != nil {
 		return sandboxErrorHint(name, err)
 	}
@@ -112,7 +112,7 @@ func tmuxExecUser(meta *store.Meta) string {
 // readTmuxSocket returns the tmux socket path configured for a sandbox, or
 // empty string if not set (backend does not use a custom socket).
 func readTmuxSocket(sandboxName string) string {
-	data, err := os.ReadFile(store.RuntimeConfigFilePath(sandboxName)) //nolint:gosec // G304: path from trusted sandbox dir
+	data, err := os.ReadFile(store.RuntimeConfigFilePath(cliLayout().SandboxDir(sandboxName))) //nolint:gosec // G304: path from trusted sandbox dir
 	if err != nil {
 		return ""
 	}
@@ -139,7 +139,7 @@ func readTmuxSocket(sandboxName string) string {
 //  2. docker exec: run "tmux has-session -t main" inside the container.
 //     This is the fallback for backends that don't write sandbox.jsonl.
 func waitForTmux(ctx context.Context, rt runtime.Runtime, containerName, sandboxName string, timeout time.Duration, user string) error {
-	jsonlPath := store.SandboxJSONLPath(sandboxName)
+	jsonlPath := store.SandboxJSONLPath(cliLayout().SandboxDir(sandboxName))
 	tmuxSocket := readTmuxSocket(sandboxName)
 	deadline := time.Now().Add(timeout)
 	var lastExecErr error
@@ -263,7 +263,7 @@ func attachToSandbox(ctx context.Context, rt runtime.Runtime, containerName, san
 	setTerminalTitle(sandboxName)
 	defer setTerminalTitle("")
 
-	meta, err := store.LoadMeta(store.Dir(sandboxName))
+	meta, err := store.LoadMeta(cliLayout().SandboxDir(sandboxName))
 	if err != nil {
 		return fmt.Errorf("load sandbox metadata: %w", err)
 	}

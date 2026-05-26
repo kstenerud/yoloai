@@ -18,7 +18,10 @@ import (
 
 // GenerateContext builds a markdown description of the sandbox environment
 // from Meta fields. Sections are omitted when they have no content.
-func GenerateContext(meta *store.Meta) string {
+// sandboxDir is the per-sandbox state directory (used to compute
+// host-filesystem file/cache paths for backends that don't have a
+// runtime mount).
+func GenerateContext(sandboxDir string, meta *store.Meta) string {
 	var b strings.Builder
 
 	b.WriteString("# Sandbox Environment\n\n")
@@ -50,12 +53,12 @@ func GenerateContext(meta *store.Meta) string {
 
 	// Files section (exchange directory is always available)
 	b.WriteString("\n## Files\n\n")
-	rtDir := runtimeDir(meta)
+	rtDir := runtimeDir(sandboxDir, meta)
 	filesPath := rtDir + "/files/"
 	cachePath := rtDir + "/cache/"
 	if meta.HostFilesystem {
-		filesPath = filepath.Join(store.Dir(meta.Name), "files") + "/"
-		cachePath = filepath.Join(store.Dir(meta.Name), "cache") + "/"
+		filesPath = filepath.Join(sandboxDir, "files") + "/"
+		cachePath = filepath.Join(sandboxDir, "cache") + "/"
 	}
 	fmt.Fprintf(&b, "The **shared files directory** is at `%s`.\n", filesPath)
 	fmt.Fprintf(&b, "Files shared via `yoloai files put` appear here, and anything you write here can be retrieved by the user with `yoloai files get`.\n")
@@ -121,9 +124,9 @@ func GenerateContext(meta *store.Meta) string {
 // Container backends use /yoloai; host-filesystem backends (seatbelt) use the
 // host sandbox dir; VM backends that declare VMRuntimeDir use that path
 // (e.g. Tart uses /Users/admin/.yoloai, the symlinked path with no spaces).
-func runtimeDir(meta *store.Meta) string {
+func runtimeDir(sandboxDir string, meta *store.Meta) string {
 	if meta.HostFilesystem {
-		return store.Dir(meta.Name)
+		return sandboxDir
 	}
 	if desc, ok := runtime.Descriptor(meta.Backend); ok && desc.Capabilities.VMRuntimeDir != "" {
 		return desc.Capabilities.VMRuntimeDir
@@ -154,7 +157,7 @@ func writeDir(b *strings.Builder, mountPath, hostPath, mode string, isWorkdir bo
 // WriteContextFiles writes the sandbox context file and optional per-agent
 // instruction file into the sandbox directory.
 func WriteContextFiles(sandboxDir string, meta *store.Meta, agentDef *agent.Definition) error {
-	content := GenerateContext(meta)
+	content := GenerateContext(sandboxDir, meta)
 
 	// Write context.md at sandbox root (reference copy)
 	contextPath := filepath.Join(sandboxDir, "context.md")
@@ -172,7 +175,7 @@ func WriteContextFiles(sandboxDir string, meta *store.Meta, agentDef *agent.Defi
 		// Append Q&A protocol section to Claude's CLAUDE.md so it knows
 		// how to ask questions through the file exchange directory.
 		if agentDef.ContextFile == "CLAUDE.md" {
-			filesDir := runtimeDir(meta) + "/files"
+			filesDir := runtimeDir(sandboxDir, meta) + "/files"
 			qa := "\n## yoloAI File Exchange Protocol\n\n" +
 				"You are running inside a yoloAI sandbox. A file exchange directory is\n" +
 				"available at `" + filesDir + "/` — readable and writable from both inside\n" +

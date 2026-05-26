@@ -259,7 +259,7 @@ func executeNewCreate(cmd *cobra.Command, ctx context.Context, rt runtime.Runtim
 		if sandboxName == "" {
 			return nil
 		}
-		meta, loadErr := store.LoadMeta(store.Dir(sandboxName))
+		meta, loadErr := store.LoadMeta(cliLayout().SandboxDir(sandboxName))
 		if loadErr != nil {
 			return loadErr
 		}
@@ -270,7 +270,7 @@ func executeNewCreate(cmd *cobra.Command, ctx context.Context, rt runtime.Runtim
 		return nil
 	}
 
-	meta, loadErr := store.LoadMeta(store.Dir(sandboxName))
+	meta, loadErr := store.LoadMeta(cliLayout().SandboxDir(sandboxName))
 	if loadErr != nil {
 		return loadErr
 	}

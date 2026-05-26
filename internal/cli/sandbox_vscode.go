@@ -26,8 +26,8 @@ func newSandboxVscodeCmd() *cobra.Command {
 				return err
 			}
 
-			sandboxDir, err := store.RequireSandboxDir(name)
-			if err != nil {
+			sandboxDir := cliLayout().SandboxDir(name)
+			if err := store.RequireSandboxDir(sandboxDir); err != nil {
 				return sandbox.ErrSandboxNotFound
 			}
 

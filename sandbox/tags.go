@@ -6,15 +6,16 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/kstenerud/yoloai/config"
 	"github.com/kstenerud/yoloai/sandbox/store"
 	"github.com/kstenerud/yoloai/workspace"
 )
 
 // loadDiffContext returns the work directory, baseline SHA, and workdir mode for
 // a sandbox. Used by tags.go to locate commits relative to the baseline.
-func loadDiffContext(name string) (workDir string, baselineSHA string, mode string, err error) {
-	sandboxDir, dirErr := store.RequireSandboxDir(name)
-	if dirErr != nil {
+func loadDiffContext(layout config.Layout, name string) (workDir string, baselineSHA string, mode string, err error) {
+	sandboxDir := layout.SandboxDir(name)
+	if dirErr := store.RequireSandboxDir(sandboxDir); dirErr != nil {
 		return "", "", "", dirErr
 	}
 
@@ -31,7 +32,7 @@ func loadDiffContext(name string) (workDir string, baselineSHA string, mode stri
 		if mountPath != "" && mountPath != meta.Workdir.HostPath {
 			workDir = mountPath
 		} else {
-			workDir = store.WorkDir(name, meta.Workdir.HostPath)
+			workDir = store.WorkDir(sandboxDir, meta.Workdir.HostPath)
 		}
 		baselineSHA = meta.Workdir.BaselineSHA
 		if baselineSHA == "" {
@@ -62,8 +63,8 @@ type TagInfo struct {
 
 // ListTagsBeyondBaseline returns tags whose target commit is beyond the baseline.
 // Returns nil for :rw and :overlay sandboxes (not supported).
-func ListTagsBeyondBaseline(name string) ([]TagInfo, error) {
-	workDir, baselineSHA, mode, err := loadDiffContext(name)
+func ListTagsBeyondBaseline(layout config.Layout, name string) ([]TagInfo, error) {
+	workDir, baselineSHA, mode, err := loadDiffContext(layout, name)
 	if err != nil {
 		return nil, err
 	}
@@ -106,8 +107,9 @@ func ListTagsBeyondBaseline(name string) ([]TagInfo, error) {
 // ListUnappliedTags returns tags that exist in the sandbox but not on the host.
 // This is useful for showing hints about tags that haven't been transferred yet,
 // even if their commits have already been applied.
-func ListUnappliedTags(name string) ([]TagInfo, error) {
-	meta, err := store.LoadMeta(store.Dir(name))
+func ListUnappliedTags(layout config.Layout, name string) ([]TagInfo, error) {
+	sandboxDir := layout.SandboxDir(name)
+	meta, err := store.LoadMeta(sandboxDir)
 	if err != nil {
 		return nil, err
 	}
@@ -116,7 +118,7 @@ func ListUnappliedTags(name string) ([]TagInfo, error) {
 		return nil, nil
 	}
 
-	workDir := store.WorkDir(name, meta.Workdir.HostPath)
+	workDir := store.WorkDir(sandboxDir, meta.Workdir.HostPath)
 	targetDir := meta.Workdir.HostPath
 
 	// Check if target is a git repo

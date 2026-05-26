@@ -99,7 +99,7 @@ func startInRuntime(cmd *cobra.Command, ctx context.Context, rt runtime.Runtime,
 
 // attachAfterStart waits for tmux and attaches to the sandbox after a start.
 func attachAfterStart(cmd *cobra.Command, ctx context.Context, rt runtime.Runtime, name string) error {
-	meta, err := store.LoadMeta(store.Dir(name))
+	meta, err := store.LoadMeta(cliLayout().SandboxDir(name))
 	if err != nil {
 		return err
 	}

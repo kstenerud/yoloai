@@ -49,7 +49,7 @@ func ApplyAll(ctx context.Context, layout config.Layout, rt runtime.Runtime, nam
 	}
 	defer unlock()
 
-	patches, err := GenerateMultiPatch(ctx, rt, name, nil, includeWIP)
+	patches, err := GenerateMultiPatch(ctx, layout, rt, name, nil, includeWIP)
 	if err != nil {
 		return nil, err
 	}
@@ -69,7 +69,7 @@ func ApplyAll(ctx context.Context, layout config.Layout, rt runtime.Runtime, nam
 		})
 	}
 
-	if err := AdvanceBaseline(ctx, rt, name); err != nil {
+	if err := AdvanceBaseline(ctx, layout, rt, name); err != nil {
 		return nil, fmt.Errorf("advance baseline: %w", err)
 	}
 
@@ -92,8 +92,8 @@ type PatchSet = workspace.PatchSet
 // includeWIP=false diffs only baseline → HEAD, so uncommitted/untracked
 // changes the agent left behind are excluded. The CLI default is false; the
 // caller opts in via `yoloai apply --include-wip`.
-func GeneratePatch(ctx context.Context, rt runtime.Runtime, name string, paths []string, includeWIP bool) (patch []byte, stat string, err error) {
-	workDir, baselineSHA, mode, err := loadDiffContext(name)
+func GeneratePatch(ctx context.Context, layout config.Layout, rt runtime.Runtime, name string, paths []string, includeWIP bool) (patch []byte, stat string, err error) {
+	workDir, baselineSHA, mode, err := loadDiffContext(layout, name)
 	if err != nil {
 		return nil, "", err
 	}
@@ -153,7 +153,7 @@ func GeneratePatch(ctx context.Context, rt runtime.Runtime, name string, paths [
 // (e.g. the entrypoint's chown broke git visibility through overlayfs), a fresh
 // git repo is initialised inside the container and used as the baseline.
 // The resolved SHA is persisted to meta.json so subsequent calls are a no-op.
-func ensureOverlayBaseline(ctx context.Context, rt runtime.Runtime, name string, meta *store.Meta, dc DiffContext) (string, error) {
+func ensureOverlayBaseline(ctx context.Context, layout config.Layout, rt runtime.Runtime, name string, meta *store.Meta, dc DiffContext) (string, error) {
 	if dc.BaselineSHA != "" {
 		return dc.BaselineSHA, nil
 	}
@@ -165,7 +165,7 @@ func ensureOverlayBaseline(ctx context.Context, rt runtime.Runtime, name string,
 	if err == nil {
 		sha := strings.TrimSpace(stdout)
 		if len(sha) == 40 {
-			if updateErr := UpdateOverlayBaseline(name, dc.HostPath, sha); updateErr != nil {
+			if updateErr := UpdateOverlayBaseline(layout, name, dc.HostPath, sha); updateErr != nil {
 				return "", updateErr
 			}
 			return sha, nil
@@ -190,16 +190,16 @@ func ensureOverlayBaseline(ctx context.Context, rt runtime.Runtime, name string,
 		return "", fmt.Errorf("resolve baseline SHA after init for %s: %w", dc.HostPath, err)
 	}
 	sha := strings.TrimSpace(stdout)
-	if updateErr := UpdateOverlayBaseline(name, dc.HostPath, sha); updateErr != nil {
+	if updateErr := UpdateOverlayBaseline(layout, name, dc.HostPath, sha); updateErr != nil {
 		return "", updateErr
 	}
 	return sha, nil
 }
 
 // UpdateOverlayBaseline updates the baseline SHA for an overlay directory in meta.json.
-func UpdateOverlayBaseline(name, hostPath, sha string) error {
-	sandboxDir, err := store.RequireSandboxDir(name)
-	if err != nil {
+func UpdateOverlayBaseline(layout config.Layout, name, hostPath, sha string) error {
+	sandboxDir := layout.SandboxDir(name)
+	if err := store.RequireSandboxDir(sandboxDir); err != nil {
 		return err
 	}
 
@@ -230,12 +230,12 @@ func UpdateOverlayBaseline(name, hostPath, sha string) error {
 
 // GenerateOverlayPatch produces a binary patch for overlay-mode directories
 // by executing git commands inside the running container.
-func GenerateOverlayPatch(ctx context.Context, rt runtime.Runtime, name string, paths []string) ([]PatchSet, error) {
-	meta, err := store.LoadMeta(store.Dir(name))
+func GenerateOverlayPatch(ctx context.Context, layout config.Layout, rt runtime.Runtime, name string, paths []string) ([]PatchSet, error) {
+	meta, err := store.LoadMeta(layout.SandboxDir(name))
 	if err != nil {
 		return nil, fmt.Errorf("load metadata: %w", err)
 	}
-	contexts, err := LoadAllDiffContexts(name)
+	contexts, err := LoadAllDiffContexts(layout, name)
 	if err != nil {
 		return nil, err
 	}
@@ -245,7 +245,7 @@ func GenerateOverlayPatch(ctx context.Context, rt runtime.Runtime, name string, 
 		if dc.Mode != "overlay" {
 			continue
 		}
-		ps, err := generateOverlayPatchForContext(ctx, rt, name, meta, dc, paths)
+		ps, err := generateOverlayPatchForContext(ctx, layout, rt, name, meta, dc, paths)
 		if err != nil {
 			return nil, err
 		}
@@ -259,8 +259,8 @@ func GenerateOverlayPatch(ctx context.Context, rt runtime.Runtime, name string, 
 
 // generateOverlayPatchForContext produces a PatchSet for a single overlay diff
 // context. Returns nil if there are no changes.
-func generateOverlayPatchForContext(ctx context.Context, rt runtime.Runtime, name string, meta *store.Meta, dc DiffContext, paths []string) (*PatchSet, error) {
-	baselineSHA, err := ensureOverlayBaseline(ctx, rt, name, meta, dc)
+func generateOverlayPatchForContext(ctx context.Context, layout config.Layout, rt runtime.Runtime, name string, meta *store.Meta, dc DiffContext, paths []string) (*PatchSet, error) {
+	baselineSHA, err := ensureOverlayBaseline(ctx, layout, rt, name, meta, dc)
 	if err != nil {
 		return nil, err
 	}
@@ -313,12 +313,12 @@ func pathFilterArgs(paths []string) []string {
 // UpdateOverlayBaselineToHEAD advances the overlay baseline for a directory
 // to the current HEAD inside the running container. Called after a successful
 // overlay apply to prevent re-applying already-applied changes.
-func UpdateOverlayBaselineToHEAD(ctx context.Context, rt runtime.Runtime, name, hostPath string) error {
-	meta, err := store.LoadMeta(store.Dir(name))
+func UpdateOverlayBaselineToHEAD(ctx context.Context, layout config.Layout, rt runtime.Runtime, name, hostPath string) error {
+	meta, err := store.LoadMeta(layout.SandboxDir(name))
 	if err != nil {
 		return fmt.Errorf("load metadata: %w", err)
 	}
-	contexts, err := LoadAllDiffContexts(name)
+	contexts, err := LoadAllDiffContexts(layout, name)
 	if err != nil {
 		return err
 	}
@@ -333,7 +333,7 @@ func UpdateOverlayBaselineToHEAD(ctx context.Context, rt runtime.Runtime, name, 
 		if err != nil {
 			return fmt.Errorf("get HEAD for %s: %w", hostPath, err)
 		}
-		return UpdateOverlayBaseline(name, hostPath, strings.TrimSpace(stdout))
+		return UpdateOverlayBaseline(layout, name, hostPath, strings.TrimSpace(stdout))
 	}
 
 	return nil
@@ -342,8 +342,8 @@ func UpdateOverlayBaselineToHEAD(ctx context.Context, rt runtime.Runtime, name, 
 // ListCommitsBeyondBaseline returns the commits made in the work copy
 // after the baseline commit, in chronological order (oldest first).
 // Returns an empty slice if HEAD == baseline.
-func ListCommitsBeyondBaseline(ctx context.Context, rt runtime.Runtime, name string) ([]CommitInfo, error) {
-	workDir, baselineSHA, mode, err := loadDiffContext(name)
+func ListCommitsBeyondBaseline(ctx context.Context, layout config.Layout, rt runtime.Runtime, name string) ([]CommitInfo, error) {
+	workDir, baselineSHA, mode, err := loadDiffContext(layout, name)
 	if err != nil {
 		return nil, err
 	}
@@ -376,8 +376,8 @@ func ListCommitsBeyondBaseline(ctx context.Context, rt runtime.Runtime, name str
 
 // HasUncommittedChanges checks whether the work copy has uncommitted
 // changes (staged or unstaged, including untracked files).
-func HasUncommittedChanges(ctx context.Context, rt runtime.Runtime, name string) (bool, error) {
-	workDir, _, mode, err := loadDiffContext(name)
+func HasUncommittedChanges(ctx context.Context, layout config.Layout, rt runtime.Runtime, name string) (bool, error) {
+	workDir, _, mode, err := loadDiffContext(layout, name)
 	if err != nil {
 		return false, err
 	}
@@ -422,8 +422,8 @@ func HasUncommittedChanges(ctx context.Context, rt runtime.Runtime, name string)
 // ResolveRef resolves a short SHA prefix to a full 40-char SHA among
 // commits beyond the baseline. Returns an error if the ref is ambiguous
 // (matches multiple commits) or not found.
-func ResolveRef(ctx context.Context, rt runtime.Runtime, name, ref string) (CommitInfo, error) {
-	commits, err := ListCommitsBeyondBaseline(ctx, rt, name)
+func ResolveRef(ctx context.Context, layout config.Layout, rt runtime.Runtime, name, ref string) (CommitInfo, error) {
+	commits, err := ListCommitsBeyondBaseline(ctx, layout, rt, name)
 	if err != nil {
 		return CommitInfo{}, err
 	}
@@ -474,8 +474,8 @@ func selectRefRange(before, after string, allCommits []CommitInfo, shaIndex map[
 // to an ordered list of CommitInfo. For ranges, all commits between the two
 // endpoints (inclusive of end, exclusive of start) are included.
 // The returned list preserves chronological order within the sandbox.
-func ResolveRefs(ctx context.Context, rt runtime.Runtime, name string, refs []string) ([]CommitInfo, error) {
-	allCommits, err := ListCommitsBeyondBaseline(ctx, rt, name)
+func ResolveRefs(ctx context.Context, layout config.Layout, rt runtime.Runtime, name string, refs []string) ([]CommitInfo, error) {
+	allCommits, err := ListCommitsBeyondBaseline(ctx, layout, rt, name)
 	if err != nil {
 		return nil, err
 	}
@@ -547,8 +547,8 @@ func selectRefs(refs []string, allCommits []CommitInfo, shaIndex map[string]int)
 // within the sandbox work copy. When paths is non-empty, patches are filtered
 // to only include changes in those paths. Returns the temp directory and sorted
 // file list. The caller is responsible for os.RemoveAll(patchDir).
-func GenerateFormatPatchForRefs(ctx context.Context, rt runtime.Runtime, name string, shas, paths []string) (patchDir string, files []string, err error) {
-	workDir, _, mode, loadErr := loadDiffContext(name)
+func GenerateFormatPatchForRefs(ctx context.Context, layout config.Layout, rt runtime.Runtime, name string, shas, paths []string) (patchDir string, files []string, err error) {
+	workDir, _, mode, loadErr := loadDiffContext(layout, name)
 	if loadErr != nil {
 		return "", nil, loadErr
 	}
@@ -594,9 +594,9 @@ func GenerateFormatPatchForRefs(ctx context.Context, rt runtime.Runtime, name st
 // AdvanceBaselineTo updates the sandbox's baseline SHA to the given commit.
 // Unlike AdvanceBaseline (which advances to HEAD), this advances to an
 // arbitrary commit -- used after selective apply.
-func AdvanceBaselineTo(name, sha string) error {
-	sandboxDir, err := store.RequireSandboxDir(name)
-	if err != nil {
+func AdvanceBaselineTo(layout config.Layout, name, sha string) error {
+	sandboxDir := layout.SandboxDir(name)
+	if err := store.RequireSandboxDir(sandboxDir); err != nil {
 		return err
 	}
 
@@ -621,9 +621,9 @@ func AdvanceBaselineTo(name, sha string) error {
 // of its work copy. This should be called after a successful apply so that
 // subsequent diff/apply operations don't re-show already-applied commits.
 // For :rw mode sandboxes, this is a no-op.
-func AdvanceBaseline(ctx context.Context, rt runtime.Runtime, name string) error {
-	sandboxDir, err := store.RequireSandboxDir(name)
-	if err != nil {
+func AdvanceBaseline(ctx context.Context, layout config.Layout, rt runtime.Runtime, name string) error {
+	sandboxDir := layout.SandboxDir(name)
+	if err := store.RequireSandboxDir(sandboxDir); err != nil {
 		return err
 	}
 
@@ -640,7 +640,7 @@ func AdvanceBaseline(ctx context.Context, rt runtime.Runtime, name string) error
 		return nil // baseline managed via UpdateOverlayBaseline
 	}
 
-	workDir := store.WorkDir(name, meta.Workdir.HostPath)
+	workDir := store.WorkDir(sandboxDir, meta.Workdir.HostPath)
 	sha, err := rt.GitExec(ctx, name, workDir, "rev-parse", "HEAD")
 	if err != nil {
 		return fmt.Errorf("git rev-parse: %w", err)
@@ -654,8 +654,8 @@ func AdvanceBaseline(ctx context.Context, rt runtime.Runtime, name string) error
 // beyond the baseline. Returns the temp directory path and sorted list
 // of .patch filenames. The caller is responsible for os.RemoveAll(patchDir).
 // When paths is non-empty, only commits touching those paths are included.
-func GenerateFormatPatch(ctx context.Context, rt runtime.Runtime, name string, paths []string) (patchDir string, files []string, err error) {
-	workDir, baselineSHA, mode, loadErr := loadDiffContext(name)
+func GenerateFormatPatch(ctx context.Context, layout config.Layout, rt runtime.Runtime, name string, paths []string) (patchDir string, files []string, err error) {
+	workDir, baselineSHA, mode, loadErr := loadDiffContext(layout, name)
 	if loadErr != nil {
 		return "", nil, loadErr
 	}
@@ -712,8 +712,8 @@ func GenerateFormatPatch(ctx context.Context, rt runtime.Runtime, name string, p
 // GenerateWIPDiff produces a binary patch of uncommitted changes (against
 // HEAD, not the baseline). This captures only work-in-progress changes
 // that the agent hasn't committed. Returns empty patch if no uncommitted changes.
-func GenerateWIPDiff(ctx context.Context, rt runtime.Runtime, name string, paths []string) (patch []byte, stat string, err error) {
-	workDir, _, mode, loadErr := loadDiffContext(name)
+func GenerateWIPDiff(ctx context.Context, layout config.Layout, rt runtime.Runtime, name string, paths []string) (patch []byte, stat string, err error) {
+	workDir, _, mode, loadErr := loadDiffContext(layout, name)
 	if loadErr != nil {
 		return nil, "", loadErr
 	}
@@ -766,8 +766,8 @@ func GenerateWIPDiff(ctx context.Context, rt runtime.Runtime, name string, paths
 // GenerateMultiPatch produces patches for all :copy directories.
 // :rw dirs are skipped (changes are already live).
 // Uses rt.GitExec to run git commands (works on both Docker and VM backends).
-func GenerateMultiPatch(ctx context.Context, rt runtime.Runtime, name string, paths []string, includeWIP bool) ([]PatchSet, error) {
-	contexts, err := LoadAllDiffContexts(name)
+func GenerateMultiPatch(ctx context.Context, layout config.Layout, rt runtime.Runtime, name string, paths []string, includeWIP bool) ([]PatchSet, error) {
+	contexts, err := LoadAllDiffContexts(layout, name)
 	if err != nil {
 		return nil, err
 	}
