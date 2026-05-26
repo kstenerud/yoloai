@@ -409,8 +409,9 @@ func (r *Runtime) Start(ctx context.Context, name string) error {
 	// asynchronously after task.Start returns Running, so the first agent
 	// packet can race the filter and silently drop (DF8: Kata netns
 	// warm-up race; see backend-idiosyncrasies.md). Best-effort: a
-	// persistent probe failure does not block Start.
-	waitForNetworkReady(ctx, task)
+	// persistent probe failure does not block Start; on timeout it
+	// triggers a network-diagnostic capture (DF9 investigation).
+	waitForNetworkReady(ctx, task, r, name)
 	return nil
 }
 
@@ -481,7 +482,13 @@ exit 1
 // Default policy: probe every 500ms for up to 30s. Happy path is the
 // first probe (~50-100ms); slow path catches the Kata warm-up race
 // (usually a few seconds).
-func waitForNetworkReady(ctx context.Context, task client.Task) {
+//
+// On deadline timeout (DF9-style persistent failure), this also calls
+// captureNetworkDiagnostics to dump in-VM and host-side network state
+// to <sandboxDir>/network-diag.txt so the next failure can be
+// root-caused offline. The capture itself is best-effort and won't
+// block Start either.
+func waitForNetworkReady(ctx context.Context, task client.Task, r *Runtime, name string) {
 	const maxWait = 30 * time.Second
 	const interval = 500 * time.Millisecond
 
@@ -517,6 +524,13 @@ func waitForNetworkReady(ctx context.Context, task client.Task) {
 				"attempts", attempts,
 				"elapsed_ms", time.Since(start).Milliseconds(),
 				"last_err", lastErr.Error())
+			// Capture diagnostics for DF9 investigation. Best-effort:
+			// must not block Start or panic. Use a fresh context so
+			// even if the outer one is near cancellation, the dump
+			// still has time to complete.
+			diagCtx, diagCancel := context.WithTimeout(context.Background(), 60*time.Second)
+			captureNetworkDiagnostics(diagCtx, r, name, task)
+			diagCancel()
 			return
 		}
 
