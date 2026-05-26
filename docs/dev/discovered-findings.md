@@ -153,6 +153,21 @@ Findings that turned up mid-workstream (architecture-remediation, layering-refac
 - **Implication:** the failure is NOT correlated between vm and vmenhanced on a single run, which argues against "host was in a bad state at run start" as the explanation. Each backend independently rolls the dice — consistent with a per-backend race (e.g. Kata netns wiring, QEMU CPU latency variability) rather than a global precondition. Now 2 confirmed failures of vmenhanced, 7 of vm.
 - Still PARKED pending DF3. Confirming with rendered tmux output remains the unblocker for any further diagnosis.
 
+### DF8 (9th data point, 2026-05-26): full diagnostic stack runs clean; agent's "ConnectionRefused" label is misleading
+
+- Log `yoloai-smoketest-20260526-143616.771`. First failure captured with the complete DF3/DF4/DF5 diagnostic stack landed. Failure line:
+  ```
+  agent idle for 9s+ without sentinel 'done'
+    exchange dir: empty; host /: 76% used, 18G free; network: unreachable (curl exit 28)
+  ```
+- `terminal-snapshot.txt` shows the agent's actual error: "Unable to connect to API (ConnectionRefused) · Retrying in 0s · attempt 5/10" — same wording as the 8th data point.
+- `monitor-tail.txt` shows the same `wchan: do_epoll_wait + no connections -> idle` pattern, stability counter climbing 30→35.
+- BUT: curl probe says exit 28 (operation timeout), NOT exit 7 (connection refused). **The agent's error label is misleading.** Claude Code's TUI prints "ConnectionRefused" as a generic "couldn't connect" label regardless of whether the underlying syscall returned ECONNREFUSED or ETIMEDOUT. Curl gives the authoritative diagnosis. Practical implication for diagnosis: trust the `network: ...` curl-exit code over the agent's text. Two distinct sub-modes confirmed inside the DF8 family:
+  - **exit 7 (refused):** TCP RST received. Something at the destination port refuses the connection. Consistent with netns routing to a wrong/local destination.
+  - **exit 28 (timeout):** No response at all. Packets leave the netns but no SYN-ACK comes back. Consistent with packets being silently dropped (broken outbound routing, missing iptables NAT rule, no default route yet).
+- Both modes fit the "Kata netns warm-up race" hypothesis with slightly different downstream effects. Worth probing `runtime/containerd/cni.go` for the precise stage that's racy: address allocation? Route insertion? iptables MASQUERADE setup? Each would produce a distinguishable curl signature.
+- **Diagnostic stack is now feature-complete for this failure family** — no further DF entries needed for "agent idle 9s+" containerd failures. The next step on this family is root-cause investigation in `runtime/containerd/cni.go`, not more diagnostics.
+
 ### DF8 (8th data point, 2026-05-26): **SMOKING GUN — root cause is ConnectionRefused, not idle**
 
 - Log `yoloai-smoketest-20260526-135935.545`. First failure captured with the new DF3 terminal-snapshot patch (after the meta.json → environment.json + tmux socket fixes in `7ea5488`). `stop_start/containerd-vmenhanced` failed attempt 1, passed retry. Rendered transcript shows the agent's actual state when the smoke test gave up:
