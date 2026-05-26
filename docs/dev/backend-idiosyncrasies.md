@@ -106,22 +106,34 @@ showing `unreachable [dns failed | dns=fail route=ok tcp=fail
 https=exit 28]`. Twelve data points (DF8) before the fix landed; retry
 always succeeded because the filter caught up within a few seconds.
 
-**Fix (v2):** after `waitForTaskRunning` reports the task Running, run
-an in-task probe that verifies the **full outbound chain** — DNS
-resolution + TCP connect to `api.anthropic.com:443`. Retry every 500ms
-for up to 30s. Best-effort: on persistent failure it logs a warning and
-proceeds rather than blocking Start, so legitimate offline /
-network-isolated sandboxes are not penalized beyond a 30s wait.
-See `lifecycle.go::waitForNetworkReady`.
+**Fix (v3):** after `waitForTaskRunning` reports the task Running,
+run an in-task probe that verifies the **full outbound chain** —
+default-route presence + DNS resolution + TCP connect to
+`api.anthropic.com:443`. Retry every 500ms for up to 30s.
+Best-effort: on persistent failure it logs a warning and proceeds
+rather than blocking Start. See `lifecycle.go::waitForNetworkReady`.
 
-**Why DNS + external (and not just gateway):** an earlier v1 of the fix
-probed the bridge gateway only. The TC mirred filter installs **before**
-host-side MASQUERADE / forwarding is ready, so a gateway probe returns
-RST ("success") while the agent's API call still times out. Two distinct
-stages were collapsing into one in the probe. Probing the real API
-endpoint covers the same chain the agent will use (TC filter + bridge +
-MASQUERADE + DNS), so probe-success and agent-success have the same
-preconditions.
+**Why this probe shape — three iterations:**
+
+- **V1 (insufficient): gateway:22 RST = success.** The TC mirred
+  filter (eth0 ↔ tap0_kata) installs *before* host-side MASQUERADE
+  is ready, so a gateway probe gets RST early and declares ready
+  while external traffic still drops. Two distinct stages were
+  collapsing into one.
+- **V2 (insufficient): DNS + external TCP, but fast-exit on missing
+  default route.** Right target, wrong policy: `ip route show
+  default` can be empty during a transient setup window before CNI
+  fully wires the netns. V2 treated that as "network=none → ready",
+  so the probe returned in <100ms before the route was even
+  installed. Failures looked identical to V1.
+- **V3 (current): same DNS+TCP target, retry on missing-route too.**
+  Since cni.go::setupCNI is unconditional for the containerd backend,
+  missing-route is always transient. The probe retries until
+  default-route + DNS + TCP all succeed, or the 30s budget exhausts.
+
+If the containerd backend ever honors `NetworkMode == "none"`, the
+probe will loop 30s and warn — acceptable for that edge case, but
+worth revisiting at that point.
 
 ### `/run/kata/<name>/` persists on abnormal exit
 

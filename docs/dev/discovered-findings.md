@@ -153,7 +153,40 @@ Findings that turned up mid-workstream (architecture-remediation, layering-refac
 - **Implication:** the failure is NOT correlated between vm and vmenhanced on a single run, which argues against "host was in a bad state at run start" as the explanation. Each backend independently rolls the dice — consistent with a per-backend race (e.g. Kata netns wiring, QEMU CPU latency variability) rather than a global precondition. Now 2 confirmed failures of vmenhanced, 7 of vm.
 - Still PARKED pending DF3. Confirming with rendered tmux output remains the unblocker for any further diagnosis.
 
-### DF8 FIX V2 LANDED 2026-05-26
+### DF8 FIX V3 LANDED 2026-05-26
+
+V2's external-probe target was right, but V2 also kept a fast-path
+early-exit on missing default route, treating it as "network=none →
+declare ready". The 13th data point (run `161305.478`) proved that
+incorrect: `stop_start/containerd-vm` failed BOTH attempts with the
+DF8 signature (`dns=fail tcp=fail`) and NO probe annotation — the
+probe finished in <200ms (under the log threshold), which can only
+mean it took the fast-exit. The smoke-test diagnostic probe, run
+seconds later, confirmed the network was actually broken.
+
+Root cause of V2's residual flake: `ip route show default` returns
+empty during a transient setup window before CNI fully wires the
+netns. V2 treated that the same as a permanent absent route ("user
+passed --network=none"). But cni.go::setupCNI is unconditional in
+the containerd backend — every sandbox gets a network — so missing
+route here is *always* transient, never a network=none signal.
+
+V3 removes the missing-route early exit. The probe now retries on
+missing-route, DNS failure, OR TCP timeout. The 30s outer budget
+catches whichever stage is racing.
+
+Hypothetical cost: if a future change makes the containerd backend
+honor `NetworkMode == "none"`, V3 will loop 30s and warn on those
+sandboxes. Acceptable; the code comment documents it for that
+hypothetical future caller.
+
+History:
+- V1: gateway:22 RST = success — too lenient, MASQUERADE not tested
+- V2: DNS + external TCP — good target, but missing-route early exit
+       miscategorized transient absence as network=none
+- V3: same target as V2, retry on missing-route too (this version)
+
+### DF8 FIX V2 LANDED 2026-05-26 (superseded by V3)
 
 Initial V1 fix (gateway-only probe) proved insufficient — the 12th data
 point (run `154844.342`) showed three containerd failures still slipping

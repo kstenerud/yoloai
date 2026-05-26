@@ -415,41 +415,48 @@ func (r *Runtime) Start(ctx context.Context, name string) error {
 }
 
 // networkProbeScript is run inside the task to verify the netns can
-// carry outbound traffic *to a real external destination*. An earlier
-// version probed only the bridge gateway, which proved insufficient:
-// the TC mirred filter (Kata bridge ↔ TAP) can install before
-// MASQUERADE / host-side forwarding is ready, so a gateway probe
-// returns RST (declared "success") while the agent's API call still
-// fails. DF8 11th-data-point evidence (network=unreachable with
-// `dns=fail tcp=fail` on a probe that we'd just declared ready)
-// confirmed this — the diagnostic stack and the runtime probe were
-// testing different stages.
+// carry outbound traffic *to a real external destination*. The
+// containerd backend always sets up CNI for every sandbox (see
+// cni.go::setupCNI), so missing network state — including a missing
+// default route — is always transient during the Kata warm-up race
+// (DF8). The probe therefore retries unconditionally; the outer 30s
+// budget in waitForNetworkReady gives the netns time to come up.
 //
-// This probe tests the full chain: DNS resolution + TCP connect to
-// the actual API endpoint. Exits 0 in three cases:
+// Probe exits 0 in two cases:
 //
-//  1. No default route is configured (sandbox is network=none) — the
-//     probe doesn't apply; declare ready.
-//  2. DNS resolves api.anthropic.com AND TCP-connect to it succeeds —
-//     full chain works.
-//  3. Connection refused at api.anthropic.com:443 (improbable but
+//  1. DNS resolves api.anthropic.com AND TCP-connect to it succeeds —
+//     full chain (TC filter + bridge + MASQUERADE + DNS) is working.
+//  2. Connection refused at api.anthropic.com:443 (RST; improbable but
 //     possible during regional outages) — packets are flowing, just no
 //     listener; treat as ready since the network plumbing is verified.
 //
-// Exits non-zero only on DNS lookup failure or TCP timeout — the
-// actual DF8 signature.
+// Exits non-zero on missing default route, DNS lookup failure, or TCP
+// timeout — all of which are the DF8 signature when transient. After
+// the outer retry budget exhausts, waitForNetworkReady warns and
+// proceeds anyway, so a persistent failure does not block Start.
 //
-// For network-isolated sandboxes, if the user has allowed
-// api.anthropic.com (the common case for Claude-backed sandboxes),
-// this passes. If they haven't, this fails — but the agent would also
-// have failed for the same reason, so matching the agent's reality is
-// correct behavior.
+// History:
+//
+//	V1: probed gateway:22 only (gateway-RST treated as success).
+//	    Insufficient — the TC mirred filter installs before MASQUERADE,
+//	    so gateway is reachable while external traffic still drops.
+//	V2: probed DNS+TCP but exited 0 on missing default route, treating
+//	    the transient pre-CNI-wiring state as "network=none".
+//	    Insufficient — would return ready before the route was even
+//	    installed, then the agent would race a half-wired netns.
+//	V3: removed the missing-route early exit (this version). The
+//	    containerd backend always sets up CNI; missing route is always
+//	    transient and worth retrying.
+//
+// Note: the runtime.NetworkMode == "none" CLI flag is not currently
+// honored by the containerd backend (setupCNI is unconditional). If
+// that's ever added, this probe would loop for 30s and warn — which is
+// acceptable but worth revisiting at that time.
 const networkProbeScript = `set +e
-gw=$(ip route show default 2>/dev/null | awk '/^default/ {print $3; exit}')
-if [ -z "$gw" ]; then
-    exit 0
-fi
-# DNS lookup first. Times out at glibc resolver default if unwired
+# Wait for default route. Missing route during transient setup is
+# the V2 bug we're fixing — always retry rather than early-exit.
+ip route show default 2>/dev/null | grep -q '^default ' || exit 1
+# DNS lookup. Times out at the glibc resolver default if unwired
 # (we bound it explicitly).
 timeout 4 getent hosts api.anthropic.com >/dev/null 2>&1
 if [ $? -ne 0 ]; then
