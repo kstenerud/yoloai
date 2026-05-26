@@ -76,6 +76,15 @@ func NewManager(rt runtime.Runtime, logger *slog.Logger, input io.Reader, output
 	for _, opt := range opts {
 		opt(m)
 	}
+	if m.layout.DataDir == "" {
+		// Q-W.5 / §12 invariant: every Manager method that touches disk
+		// derives its path from m.layout. A zero-value Layout silently
+		// produces relative paths under CWD, which test runs were
+		// leaking into the repo. Panic here so missing WithLayout is
+		// caught at construction instead of corrupting the working
+		// directory.
+		panic("sandbox.NewManager: WithLayout is required; pass sandbox.WithLayout(config.NewLayout(...))")
+	}
 	return m
 }
 

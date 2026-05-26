@@ -551,7 +551,7 @@ func TestBuildMounts_IncludesSecrets(t *testing.T) {
 
 func TestPrintCreationOutput_Basic(t *testing.T) {
 	var buf bytes.Buffer
-	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), &buf)
+	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), &buf, WithLayout(config.NewLayout(t.TempDir())))
 
 	agentDef := agent.GetAgent("claude")
 	state := &sandboxState{
@@ -572,7 +572,7 @@ func TestPrintCreationOutput_Basic(t *testing.T) {
 
 func TestPrintCreationOutput_AutoAttach(t *testing.T) {
 	var buf bytes.Buffer
-	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), &buf)
+	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), &buf, WithLayout(config.NewLayout(t.TempDir())))
 
 	state := &sandboxState{
 		name:    "test",
@@ -588,7 +588,7 @@ func TestPrintCreationOutput_AutoAttach(t *testing.T) {
 
 func TestPrintCreationOutput_WithPrompt(t *testing.T) {
 	var buf bytes.Buffer
-	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), &buf)
+	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), &buf, WithLayout(config.NewLayout(t.TempDir())))
 
 	state := &sandboxState{
 		name:      "test",
@@ -604,7 +604,7 @@ func TestPrintCreationOutput_WithPrompt(t *testing.T) {
 
 func TestPrintCreationOutput_NetworkNone(t *testing.T) {
 	var buf bytes.Buffer
-	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), &buf)
+	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), &buf, WithLayout(config.NewLayout(t.TempDir())))
 
 	state := &sandboxState{
 		name:        "test",
@@ -620,7 +620,7 @@ func TestPrintCreationOutput_NetworkNone(t *testing.T) {
 
 func TestPrintCreationOutput_WithPorts(t *testing.T) {
 	var buf bytes.Buffer
-	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), &buf)
+	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), &buf, WithLayout(config.NewLayout(t.TempDir())))
 
 	state := &sandboxState{
 		name:    "test",
@@ -637,7 +637,7 @@ func TestPrintCreationOutput_WithPorts(t *testing.T) {
 
 func TestPrintCreationOutput_NilState(t *testing.T) {
 	var buf bytes.Buffer
-	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), &buf)
+	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), &buf, WithLayout(config.NewLayout(t.TempDir())))
 
 	mgr.printCreationOutput(nil, false)
 
@@ -651,7 +651,7 @@ func TestPrepareSandboxState_MissingName(t *testing.T) {
 	t.Setenv("HOME", tmpDir)
 	t.Setenv("ANTHROPIC_API_KEY", "sk-test")
 
-	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), io.Discard)
+	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), io.Discard, WithLayout(config.NewLayout(t.TempDir())))
 
 	_, err := mgr.prepareSandboxState(context.TODO(), CreateOptions{
 		Name:    "",
@@ -666,7 +666,7 @@ func TestPrepareSandboxState_UnknownAgent(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
 
-	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), io.Discard)
+	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), io.Discard, WithLayout(config.NewLayout(t.TempDir())))
 
 	_, err := mgr.prepareSandboxState(context.TODO(), CreateOptions{
 		Name:    "test",
@@ -978,7 +978,7 @@ func TestPrepareSandboxState_MissingAPIKeyErrorWithAuthFiles(t *testing.T) {
 
 func TestPrintCreationOutput_NetworkIsolated(t *testing.T) {
 	var buf bytes.Buffer
-	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), &buf)
+	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), &buf, WithLayout(config.NewLayout(t.TempDir())))
 
 	state := &sandboxState{
 		name:         "test",
@@ -1030,7 +1030,7 @@ func TestPrepareSandboxState_NetworkIsolatedSetsAllowlist(t *testing.T) {
 // host-side filtering redesign lands (see docs/design/network-isolation.md)
 // this combination must fail loudly.
 func TestBuildInstanceConfig_RejectsNetworkIsolatedWithGvisor(t *testing.T) {
-	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), io.Discard)
+	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), io.Discard, WithLayout(config.NewLayout(t.TempDir())))
 	state := &sandboxState{
 		name:        "test",
 		workdir:     &DirArg{Path: "/project", Mode: "copy"},
@@ -1056,7 +1056,7 @@ func TestBuildInstanceConfig_AllowsNetworkIsolatedOnSupportedModes(t *testing.T)
 	supported := []string{"", "container", "container-privileged", "vm", "vm-enhanced"}
 	for _, isolation := range supported {
 		t.Run("isolation="+isolation, func(t *testing.T) {
-			mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), io.Discard)
+			mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), io.Discard, WithLayout(config.NewLayout(t.TempDir())))
 			state := &sandboxState{
 				name:        "test",
 				workdir:     &DirArg{Path: "/project", Mode: "copy"},

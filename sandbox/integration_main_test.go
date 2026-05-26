@@ -55,7 +55,7 @@ func TestMain(m *testing.M) {
 	}
 	dockerrt.RecordBuildChecksum(integLayout, "")
 
-	mgr := sandbox.NewManager(rt, slog.Default(), strings.NewReader(""), io.Discard)
+	mgr := sandbox.NewManager(rt, slog.Default(), strings.NewReader(""), io.Discard, sandbox.WithLayout(integLayout))
 	if err := mgr.EnsureSetup(ctx); err != nil {
 		fmt.Fprintf(os.Stderr, "EnsureSetup failed: %v\n", err)
 		os.Exit(1)
