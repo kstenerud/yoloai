@@ -153,6 +153,24 @@ Findings that turned up mid-workstream (architecture-remediation, layering-refac
 - **Implication:** the failure is NOT correlated between vm and vmenhanced on a single run, which argues against "host was in a bad state at run start" as the explanation. Each backend independently rolls the dice — consistent with a per-backend race (e.g. Kata netns wiring, QEMU CPU latency variability) rather than a global precondition. Now 2 confirmed failures of vmenhanced, 7 of vm.
 - Still PARKED pending DF3. Confirming with rendered tmux output remains the unblocker for any further diagnosis.
 
+### DF8 (11th data point, 2026-05-26): **SECOND SMOKING GUN — staged probe pinpoints the broken CNI stage**
+
+- Log `yoloai-smoketest-20260526-150145.945`. Two `containerd-vm` failures (full_workflow + stop_start, both first-attempt then passed retry). Both show the identical staged-probe signature:
+  ```
+  network: unreachable [dns failed | dns=fail route=ok tcp=fail https=exit 28]
+  ```
+- **Translation:**
+  - `route=ok` — CNI bridge plugin ran, IPAM assigned an IP, default route inserted into the netns.
+  - `dns=fail` + `tcp=fail` — packets going OUT of the netns silently dropped. UDP query to the nameserver and TCP SYN to `1.1.1.1:443` both produce no response (timeout, not refused).
+  - `https=exit 28` — confirms total outbound dead, same as the TCP probe.
+- **Locating the broken stage:** the netns IS wired, the route IS pointing the right way, but packets aren't actually reaching the upstream. For Kata-VM specifically (which both failures here are), `backend-idiosyncrasies.md` documents the architecture: Kata creates a `tap0_kata` TUN/TAP inside the netns and installs a TC mirred filter that mirrors traffic between `eth0` and `tap0_kata`. The filter is what carries packets between the VM (via TAP) and the bridge (via veth/eth0). If the TC filter isn't fully installed when the agent's first packet fires, packets go in but don't come out — exactly what we see.
+- **Confirmation that this is a race, not a deterministic break:** retries pass within 30s. The TC filter installation completes during the retry window.
+- **Proposed fix location:** `runtime/containerd/cni.go::setupCNI` (or a post-`NewTask()` hook in `lifecycle.go::Create`). Two viable approaches:
+  1. **Connectivity probe after CNI ADD + task.Start**: run a brief in-netns ping/TCP-connect to the gateway or upstream before declaring the sandbox ready. Fail-fast or short retry loop.
+  2. **Post-Start sleep + verify**: short stabilization delay (similar to the existing "Tart exec needs brief stabilization delay after boot" pattern documented in backend-idiosyncrasies.md), then verify connectivity once.
+- Approach (1) is more robust (catches deterministic CNI breakage too). Approach (2) is simpler but doesn't surface the real failure cleanly if connectivity NEVER comes up. Both should add a `backend-idiosyncrasies.md` entry describing the race.
+- **DF8 family is now fully diagnosed.** Closing out further data-collection diagnostic work; the next step on this front is the fix.
+
 ### DF8 (10th data point, 2026-05-26): staged probe hit our outer 20s timeout — likely getent hanging
 
 - Log `yoloai-smoketest-20260526-144807.235`. Three failures in one run (most so far in a single session): `full_workflow/containerd-vmenhanced` failed BOTH attempts (first time persistent for vmenhanced in this session), `stop_start/containerd-vm` failed first attempt then passed retry. All three carry `network: unreachable (subprocess timeout)` — meaning the multi-stage probe didn't complete within the 20s outer subprocess budget. Terminal snapshots still capture (DF3 works); the staged probe output didn't (we lost the per-stage detail to the timeout).
