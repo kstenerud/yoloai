@@ -150,6 +150,22 @@ Findings that turned up mid-workstream (architecture-remediation, layering-refac
 - **Implication:** the failure is NOT correlated between vm and vmenhanced on a single run, which argues against "host was in a bad state at run start" as the explanation. Each backend independently rolls the dice — consistent with a per-backend race (e.g. Kata netns wiring, QEMU CPU latency variability) rather than a global precondition. Now 2 confirmed failures of vmenhanced, 7 of vm.
 - Still PARKED pending DF3. Confirming with rendered tmux output remains the unblocker for any further diagnosis.
 
+### DF8 (8th data point, 2026-05-26): **SMOKING GUN — root cause is ConnectionRefused, not idle**
+
+- Log `yoloai-smoketest-20260526-135935.545`. First failure captured with the new DF3 terminal-snapshot patch (after the meta.json → environment.json + tmux socket fixes in `7ea5488`). `stop_start/containerd-vmenhanced` failed attempt 1, passed retry. Rendered transcript shows the agent's actual state when the smoke test gave up:
+- ```
+  ❯ Run this shell command exactly as written; do not modify it or ask for clarification: touch /yoloai/files/in-progress ...
+    ⎿  Unable to connect to API (ConnectionRefused)
+       Retrying in 23s · attempt 7/10
+  ✻ Contemplating… (1m 36s)
+  ```
+- **The agent is NOT idle.** It received the prompt, parsed it, tried to make the API call, and is on attempt 7 of 10 retries because every connection is being refused. Smoke test classifies this as "idle" because the agent isn't actively writing to the exchange dir — but the agent is busy waiting for an API connection that never lands.
+- **DF2 is now downweighted dramatically.** Hypothesis: "Haiku produced a clarifying question instead of using its tool." Reality: Haiku is doing exactly what it should — calling the API — but the connection is refused. The negative-phrased prompt is fine.
+- **DF8's refined hypothesis "Kata networking warm-up race" is now the strong candidate.** ConnectionRefused (not Unreachable/Timeout) means TCP got to a host but the destination refused. Most likely: the Kata netns wiring hasn't completed when the agent's first API attempt fires, so the packet hits something on localhost that refuses. By the time retries fire, networking is up. Consistent with: failures only on Kata-backed runs (containerd-vm + containerd-vmenhanced); failures always passing on retry (the retry attempt fires after warm-up); first attempt's `wait_for_ready` time doesn't correlate (network warmup is independent of tmux readiness — DF6's hypothesis).
+- **DF5 jumps in priority.** The proposed pre-prompt network probe ("`curl -sS --max-time 5 https://api.anthropic.com/` inside the sandbox before delivering the prompt") would have flagged THIS exact failure as "network unreachable from inside sandbox" rather than letting it masquerade as "agent idle." Recommend implementing DF5 now that we have direct evidence the failure family is network, not agent.
+- **DF7 conclusively eliminated.** Startup latency wasn't the issue — the agent gets to the prompt fine in <30s. The 1m 36s in the snapshot is purely retry waiting.
+- Pointer: `runtime/containerd/cni.go` (CNI netns plumbing), DF5's action item, cross-ref `kata_nerdctl_networking.md` project memory.
+
 ## Policy origin
 
 Established in [architecture-remediation.md](plans/architecture-remediation.md) and inherited by [layering-refactor.md](plans/layering-refactor.md).
