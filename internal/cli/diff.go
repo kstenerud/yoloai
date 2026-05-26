@@ -10,7 +10,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/kstenerud/yoloai/runtime"
+	yoloai "github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/sandbox"
 	"github.com/kstenerud/yoloai/sandbox/patch"
 	"github.com/kstenerud/yoloai/sandbox/store"
@@ -120,38 +120,22 @@ func runDiffCmd(cmd *cobra.Command, args []string) error {
 
 // diffSingle runs a diff for a single (non-overlay, non-multi) directory.
 func diffSingle(cmd *cobra.Command, name string, paths []string, stat, nameOnly bool) error {
-	layout := cliLayout()
 	backend := resolveBackendForSandbox(name)
-	var finalErr error
-	_ = withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error { //nolint:errcheck // error handled via finalErr
-		opts := patch.DiffOptions{
-			Name:     name,
-			Layout:   layout,
-			Paths:    paths,
-			NameOnly: nameOnly,
-			Stat:     stat,
-			Runtime:  rt,
-		}
-
-		result, err := patch.GenerateDiff(ctx, opts)
+	return withClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
+		result, err := c.DiffSingle(ctx, name, paths, stat, nameOnly)
 		if err != nil {
-			finalErr = err
 			return err
 		}
 		if jsonEnabled(cmd) {
-			finalErr = writeJSON(cmd.OutOrStdout(), result)
-			return finalErr
+			return writeJSON(cmd.OutOrStdout(), result)
 		}
 		if result.Empty {
 			_, err = fmt.Fprintln(cmd.OutOrStdout(), "No changes")
-			finalErr = err
 			return err
 		}
 		_, err = fmt.Fprintln(cmd.OutOrStdout(), result.Output)
-		finalErr = err
 		return err
 	})
-	return finalErr
 }
 
 // hasOverlayDirs returns true if any directory in the sandbox uses overlay mode.
@@ -168,12 +152,12 @@ func hasOverlayDirs(meta *store.Meta) bool {
 }
 
 // requireOverlayRunning verifies the sandbox container is running (required for overlay ops).
-func requireOverlayRunning(ctx context.Context, rt runtime.Runtime, name string) error {
-	info, err := rt.Inspect(ctx, store.InstanceName(name))
+func requireOverlayRunning(ctx context.Context, c *yoloai.Client, name string) error {
+	info, err := c.Inspect(ctx, name)
 	if err != nil {
 		return fmt.Errorf(":overlay sandbox %s must be running for this operation — use 'yoloai start %s'", name, name)
 	}
-	if !info.Running {
+	if info.Status != sandbox.StatusActive && info.Status != sandbox.StatusIdle {
 		return fmt.Errorf(":overlay sandbox %s must be running for this operation — use 'yoloai start %s'", name, name)
 	}
 	return nil
@@ -182,21 +166,20 @@ func requireOverlayRunning(ctx context.Context, rt runtime.Runtime, name string)
 // diffOverlay handles the default diff for sandboxes with overlay dirs.
 // Merges overlay results (from container exec) with non-overlay results.
 func diffOverlay(cmd *cobra.Command, name string, stat, nameOnly bool) error {
-	layout := cliLayout()
 	backend := resolveBackendForSandbox(name)
-	return withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
-		if err := requireOverlayRunning(ctx, rt, name); err != nil {
+	return withClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
+		if err := requireOverlayRunning(ctx, c, name); err != nil {
 			return err
 		}
 
 		// Get overlay diffs via container exec
-		overlayResults, err := patch.GenerateOverlayDiff(ctx, rt, patch.DiffOptions{Name: name, Layout: layout, Stat: stat, NameOnly: nameOnly})
+		overlayResults, err := c.DiffOverlay(ctx, name, stat, nameOnly)
 		if err != nil {
 			return err
 		}
 
 		// Get non-overlay diffs (copy/rw) via host
-		hostResults, err := patch.GenerateMultiDiff(patch.DiffOptions{Name: name, Layout: layout, Stat: stat})
+		hostResults, err := c.DiffMultiDir(ctx, name, stat)
 		if err != nil {
 			return err
 		}
@@ -281,12 +264,12 @@ func diffLogOverlay(cmd *cobra.Command, name string, stat bool) error {
 	}
 
 	backend := resolveBackendForSandbox(name)
-	return withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
-		if err := requireOverlayRunning(ctx, rt, name); err != nil {
+	return withClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
+		if err := requireOverlayRunning(ctx, c, name); err != nil {
 			return err
 		}
 
-		commits, err := patch.ListCommitsBeyondBaselineOverlay(ctx, cliLayout(), rt, name)
+		commits, err := c.ListCommitsOverlay(ctx, name)
 		if err != nil {
 			return err
 		}
@@ -390,12 +373,11 @@ func diffLog(cmd *cobra.Command, name string, stat bool) error {
 
 // diffLogWithStat prints commits with file-change statistics.
 func diffLogWithStat(cmd *cobra.Command, name string, out io.Writer, tagsByCommit map[string][]string) error {
-	layout := cliLayout()
 	backend := resolveBackendForSandbox(name)
 	var commits []patch.CommitInfoWithStat
-	err := withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
+	err := withClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
 		var listErr error
-		commits, listErr = patch.ListCommitsWithStats(ctx, layout, rt, name)
+		commits, listErr = c.ListCommitsWithStats(ctx, name)
 		return listErr
 	})
 	if err != nil {
@@ -419,12 +401,11 @@ func diffLogWithStat(cmd *cobra.Command, name string, out io.Writer, tagsByCommi
 
 // diffLogBasic prints commits without statistics.
 func diffLogBasic(cmd *cobra.Command, name string, out io.Writer, tagsByCommit map[string][]string) error {
-	layout := cliLayout()
 	backend := resolveBackendForSandbox(name)
 	var commits []patch.CommitInfo
-	err := withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
+	err := withClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
 		var listErr error
-		commits, listErr = patch.ListCommitsBeyondBaseline(ctx, layout, rt, name)
+		commits, listErr = c.ListCommits(ctx, name)
 		return listErr
 	})
 	if err != nil {
@@ -451,12 +432,11 @@ func formatCommitLine(n int, sha, subject string, tagsByCommit map[string][]stri
 
 // diffLogWIP appends an uncommitted-changes indicator if WIP is present (best-effort).
 func diffLogWIP(cmd *cobra.Command, name string, out io.Writer) {
-	layout := cliLayout()
 	backend := resolveBackendForSandbox(name)
 	var hasWIP bool
-	err := withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
+	err := withClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
 		var wipErr error
-		hasWIP, wipErr = patch.HasUncommittedChanges(ctx, layout, rt, name)
+		hasWIP, wipErr = c.HasUncommittedChanges(ctx, name)
 		return wipErr
 	})
 	if err == nil && hasWIP {
@@ -464,34 +444,29 @@ func diffLogWIP(cmd *cobra.Command, name string, out io.Writer) {
 	}
 }
 
-// diffRef shows the diff for a specific commit or range.
+// diffRef shows the diff for a specific commit or range. Disk-only; no
+// runtime needed, but routed through withClient for symmetry with the
+// other diff handlers.
 func diffRef(cmd *cobra.Command, name, ref string, stat bool) error {
-	result, err := patch.GenerateCommitDiff(patch.CommitDiffOptions{
-		Name:   name,
-		Layout: cliLayout(),
-		Ref:    ref,
-		Stat:   stat,
-	})
-	if err != nil {
-		return err
-	}
+	backend := resolveBackendForSandbox(name)
+	return withClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
+		result, err := c.DiffRef(ctx, name, ref, stat)
+		if err != nil {
+			return err
+		}
 
-	if jsonEnabled(cmd) {
-		return writeJSON(cmd.OutOrStdout(), result)
-	}
+		if jsonEnabled(cmd) {
+			return writeJSON(cmd.OutOrStdout(), result)
+		}
 
-	if result.Empty {
-		_, err = fmt.Fprintln(cmd.OutOrStdout(), "No changes")
-		return err
-	}
+		if result.Empty {
+			_, err = fmt.Fprintln(cmd.OutOrStdout(), "No changes")
+			return err
+		}
 
-	if stat {
 		_, err = fmt.Fprintln(cmd.OutOrStdout(), result.Output)
 		return err
-	}
-
-	_, err = fmt.Fprintln(cmd.OutOrStdout(), result.Output)
-	return err
+	})
 }
 
 // agentRunningWarning prints a warning to stderr if the agent is still running.
@@ -499,8 +474,8 @@ func diffRef(cmd *cobra.Command, name, ref string, stat bool) error {
 func agentRunningWarning(cmd *cobra.Command, name string) {
 	backend := resolveBackendForSandbox(name)
 	//nolint:errcheck // intentional: best-effort warning, failure here should not affect the diff command
-	_ = withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
-		info, err := sandbox.InspectSandbox(ctx, cliLayout(), rt, name)
+	_ = withClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
+		info, err := c.Inspect(ctx, name)
 		if err != nil {
 			return nil //nolint:nilerr // best-effort warning; inspection failure should not affect the diff command
 		}
@@ -513,8 +488,18 @@ func agentRunningWarning(cmd *cobra.Command, name string) {
 }
 
 // diffMultiDir shows diffs for all diffable directories with per-dir headers.
+// Disk-only; no runtime needed, but routed through withClient for symmetry.
 func diffMultiDir(cmd *cobra.Command, name string, stat bool) error {
-	results, err := patch.GenerateMultiDiff(patch.DiffOptions{Name: name, Layout: cliLayout(), Stat: stat})
+	backend := resolveBackendForSandbox(name)
+	return withClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
+		return diffMultiDirInner(cmd, ctx, c, name, stat)
+	})
+}
+
+// diffMultiDirInner is the body of diffMultiDir factored out so the
+// withClient open-and-close lives at the entry point.
+func diffMultiDirInner(cmd *cobra.Command, ctx context.Context, c *yoloai.Client, name string, stat bool) error {
+	results, err := c.DiffMultiDir(ctx, name, stat)
 	if err != nil {
 		return err
 	}
@@ -554,72 +539,61 @@ func diffMultiDir(cmd *cobra.Command, name string, stat bool) error {
 
 // diffLogJSON outputs commit log as JSON.
 func diffLogJSON(cmd *cobra.Command, name string, stat bool) error {
-	layout := cliLayout()
-	var commits any
 	backend := resolveBackendForSandbox(name)
-	if stat {
-		var c []patch.CommitInfoWithStat
-		err := withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
-			var listErr error
-			c, listErr = patch.ListCommitsWithStats(ctx, layout, rt, name)
-			return listErr
-		})
-		if err != nil {
-			return err
+	return withClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
+		var commits any
+		if stat {
+			cs, err := c.ListCommitsWithStats(ctx, name)
+			if err != nil {
+				return err
+			}
+			if cs == nil {
+				cs = []patch.CommitInfoWithStat{}
+			}
+			commits = cs
+		} else {
+			cs, err := c.ListCommits(ctx, name)
+			if err != nil {
+				return err
+			}
+			if cs == nil {
+				cs = []patch.CommitInfo{}
+			}
+			commits = cs
 		}
-		if c == nil {
-			c = []patch.CommitInfoWithStat{}
-		}
-		commits = c
-	} else {
-		backend := resolveBackendForSandbox(name)
-		var c []patch.CommitInfo
-		err := withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
-			var listErr error
-			c, listErr = patch.ListCommitsBeyondBaseline(ctx, layout, rt, name)
-			return listErr
-		})
-		if err != nil {
-			return err
-		}
-		if c == nil {
-			c = []patch.CommitInfo{}
-		}
-		commits = c
-	}
 
-	backendWIP := resolveBackendForSandbox(name)
-	var hasWIP bool
-	_ = withRuntime(cmd.Context(), backendWIP, func(ctx context.Context, rt runtime.Runtime) error {
-		hasWIP, _ = patch.HasUncommittedChanges(ctx, layout, rt, name)
-		return nil
+		hasWIP, _ := c.HasUncommittedChanges(ctx, name)
+		tags, _ := sandbox.ListTagsBeyondBaseline(cliLayout(), name)
+		if tags == nil {
+			tags = []sandbox.TagInfo{}
+		}
+
+		result := struct {
+			Commits               any               `json:"commits"`
+			HasUncommittedChanges bool              `json:"has_uncommitted_changes"`
+			Tags                  []sandbox.TagInfo `json:"tags"`
+		}{
+			Commits:               commits,
+			HasUncommittedChanges: hasWIP,
+			Tags:                  tags,
+		}
+
+		return writeJSON(cmd.OutOrStdout(), result)
 	})
-	tags, _ := sandbox.ListTagsBeyondBaseline(layout, name)
-	if tags == nil {
-		tags = []sandbox.TagInfo{}
-	}
-
-	result := struct {
-		Commits               any               `json:"commits"`
-		HasUncommittedChanges bool              `json:"has_uncommitted_changes"`
-		Tags                  []sandbox.TagInfo `json:"tags"`
-	}{
-		Commits:               commits,
-		HasUncommittedChanges: hasWIP,
-		Tags:                  tags,
-	}
-
-	return writeJSON(cmd.OutOrStdout(), result)
 }
 
 // diffMultiDirJSON outputs multi-directory diffs as JSON.
+// Disk-only, but routed through withClient for symmetry.
 func diffMultiDirJSON(cmd *cobra.Command, name string, stat bool) error {
-	results, err := patch.GenerateMultiDiff(patch.DiffOptions{Name: name, Layout: cliLayout(), Stat: stat})
-	if err != nil {
-		return err
-	}
-	if results == nil {
-		results = []*patch.DiffResult{}
-	}
-	return writeJSON(cmd.OutOrStdout(), results)
+	backend := resolveBackendForSandbox(name)
+	return withClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
+		results, err := c.DiffMultiDir(ctx, name, stat)
+		if err != nil {
+			return err
+		}
+		if results == nil {
+			results = []*patch.DiffResult{}
+		}
+		return writeJSON(cmd.OutOrStdout(), results)
+	})
 }

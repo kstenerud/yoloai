@@ -342,6 +342,93 @@ func (c *Client) ContainerLogs(ctx context.Context, name string, tailLines int) 
 	return c.rt.Logs(ctx, store.InstanceName(name), tailLines)
 }
 
+// DiffSingle generates the working-tree diff for a non-overlay, non-multi
+// sandbox. paths optionally narrows the diff to specific files; stat /
+// nameOnly correspond to `git diff --stat` and `--name-only`.
+// Equivalent to the CLI's plain `yoloai diff <name>` on a :copy workdir.
+func (c *Client) DiffSingle(ctx context.Context, name string, paths []string, stat, nameOnly bool) (*patch.DiffResult, error) {
+	return patch.GenerateDiff(ctx, patch.DiffOptions{
+		Name:     name,
+		Layout:   c.layout,
+		Paths:    paths,
+		NameOnly: nameOnly,
+		Stat:     stat,
+		Runtime:  c.rt,
+	})
+}
+
+// DiffOverlay generates the diff for an :overlay-mode sandbox. Returns
+// one DiffResult per overlay'd directory (workdir and any aux dirs);
+// container must be running because git diff runs inside it.
+func (c *Client) DiffOverlay(ctx context.Context, name string, stat, nameOnly bool) ([]*patch.DiffResult, error) {
+	return patch.GenerateOverlayDiff(ctx, c.rt, patch.DiffOptions{
+		Name:     name,
+		Layout:   c.layout,
+		Stat:     stat,
+		NameOnly: nameOnly,
+	})
+}
+
+// DiffMultiDir generates the diff across all of a sandbox's directories.
+// Disk-only — does not consult the runtime. The CLI uses this for the
+// host-side portion of overlay diffs and for sandboxes with aux dirs.
+func (c *Client) DiffMultiDir(_ context.Context, name string, stat bool) ([]*patch.DiffResult, error) {
+	return patch.GenerateMultiDiff(patch.DiffOptions{Name: name, Layout: c.layout, Stat: stat})
+}
+
+// DiffRef generates the diff for a specific commit (or commit range)
+// inside the sandbox's history. Disk-only.
+func (c *Client) DiffRef(_ context.Context, name, ref string, stat bool) (*patch.DiffResult, error) {
+	return patch.GenerateCommitDiff(patch.CommitDiffOptions{
+		Name:   name,
+		Layout: c.layout,
+		Ref:    ref,
+		Stat:   stat,
+	})
+}
+
+// ListCommits returns the sandbox's commit history beyond baseline (one
+// entry per commit since the work was started). Used by `yoloai diff --log`.
+func (c *Client) ListCommits(ctx context.Context, name string) ([]patch.CommitInfo, error) {
+	return patch.ListCommitsBeyondBaseline(ctx, c.layout, c.rt, name)
+}
+
+// ListCommitsOverlay is the overlay-mode variant of ListCommits — runs
+// git log inside the running container because the overlay'd workdir
+// only exists there.
+func (c *Client) ListCommitsOverlay(ctx context.Context, name string) ([]patch.CommitInfo, error) {
+	return patch.ListCommitsBeyondBaselineOverlay(ctx, c.layout, c.rt, name)
+}
+
+// ListCommitsWithStats returns the same history as ListCommits but with
+// per-commit `git diff --stat` summaries attached. Used by `yoloai diff
+// --log --stat`.
+func (c *Client) ListCommitsWithStats(ctx context.Context, name string) ([]patch.CommitInfoWithStat, error) {
+	return patch.ListCommitsWithStats(ctx, c.layout, c.rt, name)
+}
+
+// HasUncommittedChanges reports whether the sandbox's workdir has any
+// uncommitted (work-in-progress) edits beyond its last commit. Used by
+// `yoloai diff --log` to surface a "*" marker.
+func (c *Client) HasUncommittedChanges(ctx context.Context, name string) (bool, error) {
+	return patch.HasUncommittedChanges(ctx, c.layout, c.rt, name)
+}
+
+// OverlayPatch generates patch sets for an :overlay sandbox's
+// modified directories. Each PatchSet is one overlay'd directory's
+// upper-layer diff, captured by running git diff inside the container.
+// Used by `yoloai apply` for overlay sandboxes.
+func (c *Client) OverlayPatch(ctx context.Context, name string, paths []string) ([]patch.PatchSet, error) {
+	return patch.GenerateOverlayPatch(ctx, c.layout, c.rt, name, paths)
+}
+
+// UpdateOverlayBaseline advances an :overlay sandbox's baseline marker
+// to HEAD for the named host path. Called after a successful apply so
+// the next diff starts from a fresh baseline.
+func (c *Client) UpdateOverlayBaseline(ctx context.Context, name, hostPath string) error {
+	return patch.UpdateOverlayBaselineToHEAD(ctx, c.layout, c.rt, name, hostPath)
+}
+
 // Start launches (or relaunches) the container for an existing sandbox.
 // The sandbox must exist on disk; use Run to create a new sandbox.
 func (c *Client) Start(ctx context.Context, name string, opts sandbox.StartOptions) error {

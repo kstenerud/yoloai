@@ -60,11 +60,7 @@ NOT add a `Client.Runtime()` escape hatch; it would defeat the
 layering.
 
 Still on raw runtime: `exec.go` (interactive non-attach exec — needs
-PTY-aware Exec on the runtime interface) and `diff.go` (uses
-`patch.GenerateDiff` and `patch.GenerateOverlayDiff` directly; both
-take a `runtime.Runtime` to exec git inside the container, so
-migrating requires a richer `Client.Diff` signature or exposing the
-patch helpers through the Client).
+PTY-aware Exec on the runtime interface).
 
 `list.go` does NOT need migration — it calls the library helper
 `sandbox.ListSandboxesMultiBackend` directly, which is the correct

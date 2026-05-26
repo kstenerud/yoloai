@@ -6,16 +6,16 @@ package cli
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 
+	yoloai "github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/internal/fileutil"
-	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/sandbox"
 	"github.com/kstenerud/yoloai/sandbox/patch"
 	"github.com/kstenerud/yoloai/sandbox/store"
 	"github.com/kstenerud/yoloai/workspace"
 	"github.com/spf13/cobra"
-	"os"
 )
 
 // applyOverlay handles apply for sandboxes with overlay directories.
@@ -27,14 +27,13 @@ func applyOverlay(cmd *cobra.Command, name string, meta *store.Meta, refs, paths
 		return sandbox.NewPlatformError("selective ref apply is not supported for :overlay sandboxes")
 	}
 
-	layout := cliLayout()
 	backend := resolveBackendForSandbox(name)
-	return withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
-		if err := requireOverlayRunning(ctx, rt, name); err != nil {
+	return withClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
+		if err := requireOverlayRunning(ctx, c, name); err != nil {
 			return err
 		}
 
-		patches, err := patch.GenerateOverlayPatch(ctx, layout, rt, name, paths)
+		patches, err := c.OverlayPatch(ctx, name, paths)
 		if err != nil {
 			return err
 		}
@@ -55,7 +54,7 @@ func applyOverlay(cmd *cobra.Command, name string, meta *store.Meta, refs, paths
 			return applyOverlayExportPatches(cmd, patches, patchesDir)
 		}
 
-		return applyOverlayPatches(cmd, ctx, rt, name, meta, patches, yes, dryRun)
+		return applyOverlayPatches(cmd, ctx, c, name, meta, patches, yes, dryRun)
 	})
 }
 
@@ -84,7 +83,7 @@ func applyOverlayExportPatches(cmd *cobra.Command, patches []patch.PatchSet, pat
 }
 
 // applyOverlayPatches applies overlay patches to the host and advances baselines.
-func applyOverlayPatches(cmd *cobra.Command, ctx context.Context, rt runtime.Runtime, name string, meta *store.Meta, patches []patch.PatchSet, yes, dryRun bool) error {
+func applyOverlayPatches(cmd *cobra.Command, ctx context.Context, c *yoloai.Client, name string, meta *store.Meta, patches []patch.PatchSet, yes, dryRun bool) error {
 	isJSON := jsonEnabled(cmd)
 	out := cmd.OutOrStdout()
 	if !isJSON {
@@ -126,7 +125,7 @@ func applyOverlayPatches(cmd *cobra.Command, ctx context.Context, rt runtime.Run
 
 	// Advance overlay baseline
 	for _, ps := range patches {
-		if err := patch.UpdateOverlayBaselineToHEAD(ctx, cliLayout(), rt, name, ps.HostPath); err != nil {
+		if err := c.UpdateOverlayBaseline(ctx, name, ps.HostPath); err != nil {
 			return fmt.Errorf("advance overlay baseline: %w", err)
 		}
 	}
