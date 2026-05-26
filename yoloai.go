@@ -333,6 +333,15 @@ func (c *Client) Create(ctx context.Context, opts sandbox.CreateOptions) (string
 	return c.manager.Create(ctx, opts)
 }
 
+// ContainerLogs returns the tail of the named sandbox's container log,
+// limited to roughly tailLines lines. Returns "" when the container is
+// gone or the runtime can't fetch logs. Used by bug-report generation;
+// also useful for embedders that want to surface backend errors without
+// reaching for raw runtime access.
+func (c *Client) ContainerLogs(ctx context.Context, name string, tailLines int) string {
+	return c.rt.Logs(ctx, store.InstanceName(name), tailLines)
+}
+
 // Start launches (or relaunches) the container for an existing sandbox.
 // The sandbox must exist on disk; use Run to create a new sandbox.
 func (c *Client) Start(ctx context.Context, name string, opts sandbox.StartOptions) error {

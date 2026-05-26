@@ -13,8 +13,8 @@ import (
 	"os/exec"
 	"time"
 
+	yoloai "github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/internal/fileutil"
-	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/sandbox"
 	"github.com/kstenerud/yoloai/sandbox/store"
 	"github.com/spf13/cobra"
@@ -60,8 +60,8 @@ func runSandboxBugReport(cmd *cobra.Command, name string, reportType string) err
 
 	// Sections 6-12: Sandbox-specific
 	backend := resolveBackendForSandbox(name)
-	return withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
-		writeSandboxSections(ctx, f, rt, name, reportType)
+	return withClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
+		writeSandboxSections(ctx, f, c, name, reportType)
 		return nil
 	})
 }
@@ -69,9 +69,9 @@ func runSandboxBugReport(cmd *cobra.Command, name string, reportType string) err
 // writeSandboxSections writes sections 6-12 to w for the named sandbox.
 // Called from both runSandboxBugReport (sandbox bugreport command) and
 // writeBugReportSandboxSectionsForFlag (--bugreport global flag on sandbox commands).
-func writeSandboxSections(ctx context.Context, w io.Writer, rt runtime.Runtime, name, reportType string) {
+func writeSandboxSections(ctx context.Context, w io.Writer, c *yoloai.Client, name, reportType string) {
 	// Section 6: Sandbox detail
-	writeBugReportSandboxDetail(ctx, w, rt, name, reportType)
+	writeBugReportSandboxDetail(ctx, w, c, name, reportType)
 
 	sandboxDir := cliLayout().SandboxDir(name)
 
@@ -112,15 +112,22 @@ func writeSandboxSections(ctx context.Context, w io.Writer, rt runtime.Runtime, 
 func writeBugReportSandboxSectionsForFlag(w io.Writer, name, reportType string) {
 	backend := resolveBackendForSandbox(name)
 	ctx := context.Background()
-	_ = withRuntime(ctx, backend, func(ctx context.Context, rt runtime.Runtime) error {
-		writeSandboxSections(ctx, w, rt, name, reportType)
-		return nil
+	c, err := yoloai.NewWithOptions(ctx, yoloai.Options{
+		DataDir: cliLayout().DataDir,
+		Backend: backend,
+		Input:   os.Stdin,
+		Output:  io.Discard, // best-effort path; don't write to the in-progress bug report
 	})
+	if err != nil {
+		return
+	}
+	defer c.Close() //nolint:errcheck // best-effort cleanup
+	writeSandboxSections(ctx, w, c, name, reportType)
 }
 
 // writeBugReportSandboxDetail writes section 6: sandbox-specific detail.
-func writeBugReportSandboxDetail(ctx context.Context, w io.Writer, rt runtime.Runtime, name, reportType string) {
-	info, err := sandbox.InspectSandbox(ctx, cliLayout(), rt, name)
+func writeBugReportSandboxDetail(ctx context.Context, w io.Writer, c *yoloai.Client, name, reportType string) {
+	info, err := c.Inspect(ctx, name)
 
 	fmt.Fprintln(w, "<details>")                         //nolint:errcheck
 	fmt.Fprintln(w, "<summary>Sandbox detail</summary>") //nolint:errcheck
@@ -161,7 +168,7 @@ func writeBugReportSandboxDetail(ctx context.Context, w io.Writer, rt runtime.Ru
 	}
 
 	// Container log
-	writeContainerLog(ctx, w, rt, name)
+	writeContainerLog(ctx, w, c, name)
 
 	fmt.Fprintln(w, "</details>") //nolint:errcheck
 	fmt.Fprintln(w)               //nolint:errcheck
@@ -212,15 +219,15 @@ func writePlainFileSection(w io.Writer, label, path string) {
 	fmt.Fprintln(w)            //nolint:errcheck
 }
 
-// writeContainerLog fetches container logs via Runtime.Logs. Replaces the
-// previous backend-name switch (W10 of the architecture remediation plan).
+// writeContainerLog fetches container logs via Client.ContainerLogs (which
+// wraps the runtime's Logs method).
 const containerLogTailLines = 1000
 
-func writeContainerLog(ctx context.Context, w io.Writer, rt runtime.Runtime, name string) {
+func writeContainerLog(ctx context.Context, w io.Writer, c *yoloai.Client, name string) {
 	fmt.Fprintln(w, "**Container log:**") //nolint:errcheck
 	fmt.Fprintln(w)                       //nolint:errcheck
 
-	logs := rt.Logs(ctx, store.InstanceName(name), containerLogTailLines)
+	logs := c.ContainerLogs(ctx, name, containerLogTailLines)
 	fmt.Fprintln(w, "```") //nolint:errcheck
 	if logs == "" {
 		fmt.Fprintln(w, "*(no logs available)*") //nolint:errcheck

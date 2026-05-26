@@ -60,8 +60,19 @@ NOT add a `Client.Runtime()` escape hatch; it would defeat the
 layering.
 
 Still on raw runtime: `exec.go` (interactive non-attach exec — needs
-`Client.Exec` or PTY-aware Exec on the runtime interface; not started)
-and `diff.go` (low-level `patch.GeneratePatch` paths — needs review).
+PTY-aware Exec on the runtime interface) and `diff.go` (uses
+`patch.GenerateDiff` and `patch.GenerateOverlayDiff` directly; both
+take a `runtime.Runtime` to exec git inside the container, so
+migrating requires a richer `Client.Diff` signature or exposing the
+patch helpers through the Client).
+
+`list.go` does NOT need migration — it calls the library helper
+`sandbox.ListSandboxesMultiBackend` directly, which is the correct
+layered shape for multi-backend ops (single-backend Client by design;
+multi-backend dispatch is the embedder's concern).
+
+`apply.go` does NOT need migration — operates entirely on disk, no
+runtime in the picture.
 
 ## Path resolution: `cliLayout()`
 
