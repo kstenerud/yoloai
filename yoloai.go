@@ -330,6 +330,14 @@ func (c *Client) Start(ctx context.Context, name string, opts sandbox.StartOptio
 	return c.manager.Start(ctx, name, opts)
 }
 
+// Reset re-copies the workdir into the sandbox, resets the diff baseline, and
+// (per opts) optionally restarts the container and wipes agent state. Use
+// for "start over" workflows where the user wants to abandon the agent's
+// current changes and resume from the original workdir.
+func (c *Client) Reset(ctx context.Context, opts sandbox.ResetOptions) error {
+	return c.manager.Reset(ctx, opts)
+}
+
 // IOStreams bundles caller-provided stdio for streaming / interactive
 // methods (currently Attach). Modeled on kubectl's IOStreams. Embedders
 // pass their own streams when bridging to HTTP, MCP, or test harnesses;

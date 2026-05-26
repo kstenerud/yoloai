@@ -6,11 +6,9 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"time"
 
-	"github.com/kstenerud/yoloai/runtime"
+	yoloai "github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/sandbox"
-	"github.com/kstenerud/yoloai/sandbox/store"
 	"github.com/spf13/cobra"
 )
 
@@ -61,58 +59,43 @@ func runReset(cmd *cobra.Command, args []string, opts *resetOpts) error {
 		return sandbox.NewUsageError("--json and --attach are incompatible")
 	}
 
-	backend := resolveBackendForSandbox(name)
-	return withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
-		return resetInRuntime(cmd, ctx, rt, name, opts)
-	})
-}
-
-// resetInRuntime performs the sandbox reset and optional attach inside the runtime context.
-func resetInRuntime(cmd *cobra.Command, ctx context.Context, rt runtime.Runtime, name string, opts *resetOpts) error {
-	mgr := sandbox.NewManager(rt, slog.Default(), cmd.InOrStdin(), cmd.ErrOrStderr(), sandbox.WithLayout(cliLayout()))
-	slog.Info("resetting sandbox", "event", "sandbox.reset", "sandbox", name, "restart", opts.restart, "clear_state", opts.clearState) //nolint:gosec // G706: name is validated by ValidateName
-	if err := mgr.Reset(ctx, sandbox.ResetOptions{
-		Name:       name,
-		Restart:    opts.restart,
-		ClearState: opts.clearState,
-		KeepCache:  opts.keepCache,
-		KeepFiles:  opts.keepFiles,
-		NoPrompt:   opts.noPrompt,
-		Debug:      opts.debug,
-	}); err != nil {
-		return sandboxErrorHint(name, err)
-	}
-	slog.Info("sandbox reset complete", "event", "sandbox.reset.complete", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
-
-	if jsonEnabled(cmd) {
-		return writeJSON(cmd.OutOrStdout(), map[string]string{
-			"name":   name,
-			"action": "reset",
-		})
-	}
-
 	if opts.attach {
-		return attachAfterReset(cmd, ctx, rt, name)
+		setTerminalTitle(name)
+		defer setTerminalTitle("")
 	}
 
-	if opts.restart {
-		_, err := fmt.Fprintf(cmd.OutOrStdout(), "Sandbox %s reset\nRun 'yoloai attach %s' to reconnect\n", name, name)
-		return err
-	}
-	_, err := fmt.Fprintf(cmd.OutOrStdout(), "Sandbox %s reset\n", name)
-	return err
-}
+	backend := resolveBackendForSandbox(name)
+	return withClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
+		slog.Info("resetting sandbox", "event", "sandbox.reset", "sandbox", name, "restart", opts.restart, "clear_state", opts.clearState) //nolint:gosec // G706: name is validated by ValidateName
+		if err := c.Reset(ctx, sandbox.ResetOptions{
+			Name:       name,
+			Restart:    opts.restart,
+			ClearState: opts.clearState,
+			KeepCache:  opts.keepCache,
+			KeepFiles:  opts.keepFiles,
+			NoPrompt:   opts.noPrompt,
+			Debug:      opts.debug,
+		}); err != nil {
+			return sandboxErrorHint(name, err)
+		}
+		slog.Info("sandbox reset complete", "event", "sandbox.reset.complete", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
 
-// attachAfterReset waits for tmux and attaches to the sandbox after a reset.
-func attachAfterReset(cmd *cobra.Command, ctx context.Context, rt runtime.Runtime, name string) error {
-	meta, err := store.LoadMeta(cliLayout().SandboxDir(name))
-	if err != nil {
+		if jsonEnabled(cmd) {
+			return writeJSON(cmd.OutOrStdout(), map[string]string{
+				"name":   name,
+				"action": "reset",
+			})
+		}
+
+		if opts.attach {
+			return c.Attach(ctx, name, cliIOStreams())
+		}
+
+		if opts.restart {
+			_, err := fmt.Fprintf(cmd.OutOrStdout(), "Sandbox %s reset\nRun 'yoloai attach %s' to reconnect\n", name, name)
+			return err
+		}
+		_, err := fmt.Fprintf(cmd.OutOrStdout(), "Sandbox %s reset\n", name)
 		return err
-	}
-	user := tmuxExecUser(meta)
-	containerName := store.InstanceName(name)
-	if err := waitForTmux(ctx, rt, containerName, name, 300*time.Second, user); err != nil {
-		return fmt.Errorf("waiting for tmux session: %w", err)
-	}
-	return attachToSandbox(ctx, rt, containerName, name, user)
+	})
 }

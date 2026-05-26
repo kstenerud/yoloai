@@ -6,11 +6,9 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"time"
 
-	"github.com/kstenerud/yoloai/runtime"
+	yoloai "github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/sandbox"
-	"github.com/kstenerud/yoloai/sandbox/store"
 	"github.com/spf13/cobra"
 )
 
@@ -57,7 +55,6 @@ func runStart(cmd *cobra.Command, args []string, opts *startOpts) error {
 		return sandbox.NewUsageError("--json and --attach are incompatible")
 	}
 
-	// Set terminal title early so it shows the sandbox name during start
 	if opts.attach {
 		setTerminalTitle(name)
 		defer setTerminalTitle("")
@@ -65,48 +62,28 @@ func runStart(cmd *cobra.Command, args []string, opts *startOpts) error {
 
 	slog.Info("starting sandbox", "event", "sandbox.start", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
 	backend := resolveBackendForSandbox(name)
-	return withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
-		return startInRuntime(cmd, ctx, rt, name, opts)
-	})
-}
+	return withClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
+		if err := c.Start(ctx, name, sandbox.StartOptions{
+			Resume:       opts.resume,
+			Prompt:       opts.prompt,
+			PromptFile:   opts.promptFile,
+			VscodeTunnel: opts.vscodeTunnel,
+		}); err != nil {
+			return sandboxErrorHint(name, err)
+		}
+		slog.Info("sandbox started", "event", "sandbox.start.complete", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
 
-// startInRuntime performs the sandbox start and optional attach inside the runtime context.
-func startInRuntime(cmd *cobra.Command, ctx context.Context, rt runtime.Runtime, name string, opts *startOpts) error {
-	mgr := sandbox.NewManager(rt, slog.Default(), cmd.InOrStdin(), cmd.ErrOrStderr(), sandbox.WithLayout(cliLayout()))
-	if err := mgr.Start(ctx, name, sandbox.StartOptions{
-		Resume:       opts.resume,
-		Prompt:       opts.prompt,
-		PromptFile:   opts.promptFile,
-		VscodeTunnel: opts.vscodeTunnel,
-	}); err != nil {
-		return sandboxErrorHint(name, err)
-	}
-	slog.Info("sandbox started", "event", "sandbox.start.complete", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
+		if jsonEnabled(cmd) {
+			return writeJSON(cmd.OutOrStdout(), map[string]string{
+				"name":   name,
+				"action": "started",
+			})
+		}
 
-	if jsonEnabled(cmd) {
-		return writeJSON(cmd.OutOrStdout(), map[string]string{
-			"name":   name,
-			"action": "started",
-		})
-	}
-
-	if !opts.attach {
-		return nil
-	}
-
-	return attachAfterStart(cmd, ctx, rt, name)
-}
-
-// attachAfterStart waits for tmux and attaches to the sandbox after a start.
-func attachAfterStart(cmd *cobra.Command, ctx context.Context, rt runtime.Runtime, name string) error {
-	meta, err := store.LoadMeta(cliLayout().SandboxDir(name))
-	if err != nil {
+		if opts.attach {
+			return c.Attach(ctx, name, cliIOStreams())
+		}
+		_, err := fmt.Fprintf(cmd.OutOrStdout(), "Sandbox %s started\nRun 'yoloai attach %s' to reconnect\n", name, name)
 		return err
-	}
-	user := tmuxExecUser(meta)
-	containerName := store.InstanceName(name)
-	if err := waitForTmux(ctx, rt, containerName, name, 300*time.Second, user); err != nil {
-		return fmt.Errorf("waiting for tmux session: %w", err)
-	}
-	return attachToSandbox(ctx, rt, containerName, name, user)
+	})
 }
