@@ -427,7 +427,7 @@ class Test:
 # without dragging in credentials (agent-state/) or build caches (cache/).
 # work/ is included so the user can inspect the agent's actual diff.
 _PRESERVE_FILES = (
-    "meta.json",
+    "environment.json",  # was "meta.json" pre-Q-W rename
     "sandbox-state.json",
     "agent-status.json",
     "prompt.txt",
@@ -511,15 +511,26 @@ def _terminal_snapshot_cmd(backend: str, container_name: str, ansi: bool) -> Opt
     """Return the subprocess command for capturing tmux output via the given
     backend. Returns None for unsupported backends (tart, seatbelt). The
     container is exec'd as the `yoloai` user since the tmux server runs there.
+
+    NOTE: *backend* is the value from environment.json's "backend" field —
+    "docker", "podman", "containerd" — NOT the smoke-test spec label
+    ("containerd-vm" / "containerd-vmenhanced" / "docker-cenhanced"). Those
+    labels distinguish isolation modes, not backends.
     """
-    tmux_args = ["tmux", "capture-pane", "-p", "-S", "-200", "-t", "main"]
+    # yoloai's sandbox-setup.py launches tmux on a fixed socket at
+    # /tmp/yoloai-tmux.sock (NOT tmux's default per-user socket). The session
+    # name is "main". Verified empirically against a live containerd-vm
+    # sandbox; if the socket path changes upstream, see runtime/monitor/
+    # sandbox-setup.py::setup_tmux_session.
+    tmux_args = ["tmux", "-S", "/tmp/yoloai-tmux.sock",
+                 "capture-pane", "-p", "-S", "-200", "-t", "main"]
     if ansi:
         tmux_args.append("-e")
-    if backend in ("docker", "docker-cenhanced"):
+    if backend == "docker":
         return ["docker", "exec", "-i", "--user", "yoloai", container_name, *tmux_args]
     if backend == "podman":
         return ["podman", "exec", "-i", "--user", "yoloai", container_name, *tmux_args]
-    if backend in ("containerd", "containerd-vm", "containerd-vmenhanced"):
+    if backend == "containerd":
         exec_id = f"snap{int(time.time() * 1000)}"
         # sudo -n: fail rather than prompt if no passwordless sudo.
         # --user yoloai: match the user the agent's tmux server is running as.
@@ -538,11 +549,11 @@ def _capture_terminal_snapshot(
     escape sequences preserved). Returns True if at least one was written.
     Best-effort — failures are logged and swallowed.
     """
-    meta_path = Path.home() / ".yoloai" / "sandboxes" / sandbox_name / "meta.json"
-    if not meta_path.is_file():
+    env_path = Path.home() / ".yoloai" / "sandboxes" / sandbox_name / "environment.json"
+    if not env_path.is_file():
         return False
     try:
-        backend = str(json.loads(meta_path.read_text()).get("backend", ""))
+        backend = str(json.loads(env_path.read_text()).get("backend", ""))
     except (OSError, json.JSONDecodeError):
         return False
     if not backend:
