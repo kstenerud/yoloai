@@ -36,6 +36,7 @@ func TestTopicLookup_Primary(t *testing.T) {
 		{"security", "security.md"},
 		{"flags", "flags.md"},
 		{"topics", "topics.md"},
+		{"cleanup", "cleanup.md"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.keyword, func(t *testing.T) {

@@ -35,6 +35,9 @@ var topicFile = map[string]string{
 	"vscode-tunnel": "vscode-tunnel.md",
 	"tunnel":        "vscode-tunnel.md",
 	"remote":        "vscode-tunnel.md",
+	"cleanup":       "cleanup.md",
+	"stuck":         "cleanup.md",
+	"recovery":      "cleanup.md",
 }
 
 // topicFunc maps a topic keyword to a function that generates content

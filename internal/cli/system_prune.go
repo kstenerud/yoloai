@@ -125,7 +125,8 @@ func reportPruneEarly(cmd *cobra.Command, output interface{ Write([]byte) (int, 
 		if isJSON {
 			_ = writePruneJSON(cmd, scanResult, staleTempDirs, dryRun)
 		} else {
-			fmt.Fprintln(output, "Nothing to prune.") //nolint:errcheck
+			fmt.Fprintln(output, "Nothing to prune.")                                                           //nolint:errcheck
+			fmt.Fprintln(output, "(For stuck containers, leftover netns, or stale state: yoloai help cleanup)") //nolint:errcheck
 		}
 		return true
 	}

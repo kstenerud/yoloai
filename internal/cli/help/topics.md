@@ -8,6 +8,7 @@ AVAILABLE HELP TOPICS
   security      Credentials, network isolation, copy protection
   flags         Key flags reference
   vscode-tunnel VS Code Remote Tunnel: connect from any machine
+  cleanup       Recover from stuck containers, stale state, locks
 
 USAGE
 
@@ -22,5 +23,7 @@ ALIASES
   credentials   Same as 'security'
   tunnel        Same as 'vscode-tunnel'
   remote        Same as 'vscode-tunnel'
+  stuck         Same as 'cleanup'
+  recovery      Same as 'cleanup'
 
 More info: https://github.com/kstenerud/yoloai/blob/main/docs/GUIDE.md
