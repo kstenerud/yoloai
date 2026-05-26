@@ -512,20 +512,42 @@ def _fix_preserved_perms(target: Path) -> None:
 # pay no latency, and we get network state at a known reference moment
 # alongside the terminal-snapshot capture.
 
+# Multi-stage shell probe run inside the sandbox. Each stage maps to one
+# CNI step that might be racy — dns → route → tcp → https. Emits one line
+# per stage as "key=value", so future DF8 data points carry enough info to
+# distinguish "DNS not wired" from "route missing" from "TCP dropped" from
+# "TLS broken". The shell script keeps the probe to a single exec call per
+# sandbox.
+_NETWORK_PROBE_SCRIPT = """
+set +e
+
+# 1. DNS resolution (catches missing /etc/resolv.conf or unreachable resolver).
+getent hosts api.anthropic.com >/dev/null 2>&1
+echo "dns=$([ $? -eq 0 ] && echo ok || echo fail)"
+
+# 2. Default route present (catches CNI not setting up a route).
+ip route show default 2>/dev/null | grep -q default
+echo "route=$([ $? -eq 0 ] && echo ok || echo fail)"
+
+# 3. Raw TCP to a fixed IP, bypassing DNS (catches packets being dropped
+# vs refused — exit code lets curl distinguish later).
+timeout 4 bash -c '</dev/tcp/1.1.1.1/443' 2>/dev/null
+echo "tcp_1111_443=$([ $? -eq 0 ] && echo ok || echo fail)"
+
+# 4. End-to-end HTTPS to the actual API (the original probe).
+curl -sS --connect-timeout 5 --max-time 8 -o /dev/null -w "%{http_code}" \
+  https://api.anthropic.com/ >/tmp/.np_code 2>/tmp/.np_err
+np_exit=$?
+echo "https_exit=$np_exit"
+echo "https_code=$(cat /tmp/.np_code 2>/dev/null)"
+"""
+
+
 def _network_probe_cmd(backend: str, container_name: str) -> Optional[list[str]]:
-    """Subprocess command to probe network reachability inside the sandbox
-    via the given backend. Returns None for unsupported backends.
-    Mirrors _terminal_snapshot_cmd's per-backend dispatch.
+    """Subprocess command to run the multi-stage network probe inside the
+    sandbox. Returns None for unsupported backends.
     """
-    # curl returns 0 only when it successfully gets HTTP headers back.
-    # --connect-timeout caps TCP handshake; --max-time caps total. We don't
-    # care which status code we get — any HTTP response (including 401)
-    # proves the network path to api.anthropic.com works.
-    probe = [
-        "curl", "-sS", "--connect-timeout", "5", "--max-time", "8",
-        "-o", "/dev/null", "-w", "%{http_code}",
-        "https://api.anthropic.com/",
-    ]
+    probe = ["sh", "-c", _NETWORK_PROBE_SCRIPT]
     if backend == "docker":
         return ["docker", "exec", "-i", "--user", "yoloai", container_name, *probe]
     if backend == "podman":
@@ -539,14 +561,52 @@ def _network_probe_cmd(backend: str, container_name: str) -> Optional[list[str]]
     return None
 
 
+def _parse_network_probe(stdout: bytes) -> dict[str, str]:
+    """Parse the key=value lines emitted by _NETWORK_PROBE_SCRIPT."""
+    out: dict[str, str] = {}
+    for line in stdout.decode(errors="replace").splitlines():
+        line = line.strip()
+        if "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        out[key.strip()] = value.strip()
+    return out
+
+
+def _summarize_network_probe(fields: dict[str, str]) -> str:
+    """Boil the staged probe down to one human-readable diagnostic line.
+    The format is intentionally compact so it slots into _sentinel_diag's
+    semicolon-separated parts list without overflowing.
+    """
+    if not fields:
+        return "unreachable (no probe output)"
+    dns = fields.get("dns", "?")
+    route = fields.get("route", "?")
+    tcp = fields.get("tcp_1111_443", "?")
+    https_exit = fields.get("https_exit", "?")
+    https_code = fields.get("https_code", "")
+
+    # Verdict: HTTPS exit 0 with any code means reachable; otherwise call
+    # out the earliest failing stage so the reader knows where CNI broke.
+    if https_exit == "0":
+        return f"reachable [dns={dns} route={route} tcp={tcp} https={https_code}]"
+    earliest = "https"
+    for stage, ok in (("dns", dns), ("route", route), ("tcp", tcp)):
+        if ok != "ok":
+            earliest = stage
+            break
+    return f"unreachable [{earliest} failed | dns={dns} route={route} tcp={tcp} https=exit {https_exit}]"
+
+
 def _probe_network(sandbox_name: str) -> Optional[str]:
     """Returns a one-line diagnostic about network reachability from inside
-    the sandbox, or None if the sandbox / backend isn't probe-able. Output
-    examples:
-        "reachable (HTTP 401)"   — got an HTTP response (any code)
-        "unreachable (curl exit 6)"  — couldn't resolve host
-        "unreachable (curl exit 7)"  — couldn't connect (THE DF8 SIGNATURE)
-        "unreachable (timeout)"
+    the sandbox via a staged probe (DNS → route → TCP → HTTPS), or None if
+    the sandbox / backend isn't probe-able. Examples:
+        "reachable [dns=ok route=ok tcp=ok https=401]"
+        "unreachable [dns failed | dns=fail route=ok tcp=ok https=exit 6]"
+        "unreachable [route failed | dns=ok route=fail tcp=fail https=exit 7]"
+        "unreachable [tcp failed | dns=ok route=ok tcp=fail https=exit 28]"
+        "unreachable [https failed | dns=ok route=ok tcp=ok https=exit 35]"
     """
     env_path = Path.home() / ".yoloai" / "sandboxes" / sandbox_name / "environment.json"
     if not env_path.is_file():
@@ -562,17 +622,12 @@ def _probe_network(sandbox_name: str) -> Optional[str]:
     if cmd is None:
         return None
     try:
-        r = subprocess.run(cmd, capture_output=True, timeout=15)
+        r = subprocess.run(cmd, capture_output=True, timeout=20)
     except subprocess.TimeoutExpired:
         return "unreachable (subprocess timeout)"
     except OSError as e:
         return f"probe error ({e})"
-    if r.returncode == 0:
-        code = r.stdout.decode(errors="replace").strip()
-        if code:
-            return f"reachable (HTTP {code})"
-        return "reachable"
-    return f"unreachable (curl exit {r.returncode})"
+    return _summarize_network_probe(_parse_network_probe(r.stdout))
 
 
 # ---- monitor.jsonl detector-tail diagnostic (DF4) ----------------------------

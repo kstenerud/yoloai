@@ -166,7 +166,7 @@ Findings that turned up mid-workstream (architecture-remediation, layering-refac
   - **exit 7 (refused):** TCP RST received. Something at the destination port refuses the connection. Consistent with netns routing to a wrong/local destination.
   - **exit 28 (timeout):** No response at all. Packets leave the netns but no SYN-ACK comes back. Consistent with packets being silently dropped (broken outbound routing, missing iptables NAT rule, no default route yet).
 - Both modes fit the "Kata netns warm-up race" hypothesis with slightly different downstream effects. Worth probing `runtime/containerd/cni.go` for the precise stage that's racy: address allocation? Route insertion? iptables MASQUERADE setup? Each would produce a distinguishable curl signature.
-- **Diagnostic stack is now feature-complete for this failure family** — no further DF entries needed for "agent idle 9s+" containerd failures. The next step on this family is root-cause investigation in `runtime/containerd/cni.go`, not more diagnostics.
+- **Diagnostic refinement (staged probe added):** the curl-only probe replaced with a multi-stage probe inside `_probe_network` — DNS resolution → default route → raw TCP to 1.1.1.1:443 → HTTPS to api.anthropic.com. The DF5 diagnostic now reads e.g. `unreachable [tcp failed | dns=ok route=ok tcp=fail https=exit 28]`, telling you which CNI stage broke without further investigation. The next data point will land with structural info about the racy step (route absent? NAT missing? packet dropped?). After two-three such data points we should be able to point at the precise CNI step that needs ordering/synchronization in `runtime/containerd/cni.go`.
 
 ### DF8 (8th data point, 2026-05-26): **SMOKING GUN — root cause is ConnectionRefused, not idle**
 
