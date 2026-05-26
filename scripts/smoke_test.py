@@ -395,11 +395,13 @@ class Test:
     def _sentinel_diag(self, sandbox_name: str) -> str:
         """Build a one-line diagnostic for sentinel-wait failures.
 
-        Reports what (if anything) is in the exchange dir plus the host disk
-        state, so "agent idle 9s+" tells you which failure mode you hit:
+        Reports what (if anything) is in the exchange dir, plus host disk
+        state, plus an in-sandbox network probe (DF5), so "agent idle 9s+"
+        tells you which failure mode you hit:
         - in-progress present → agent ran the prompt but didn't finish (often ENOSPC mid-write)
         - exchange dir empty → agent never started the prompt
         - host disk near full → almost certainly ENOSPC; prune containerd
+        - network unreachable → DF8's Kata netns warm-up race; not an agent stall
         """
         parts: list[str] = []
         ls = self.run("files", sandbox_name, "ls", timeout=15)
@@ -414,6 +416,8 @@ class Test:
             parts.append(f"host /: {pct}% used, {usage.free // (1024 ** 3)}G free")
         except OSError:
             pass
+        if probe := _probe_network(sandbox_name):
+            parts.append(f"network: {probe}")
         return "\n      " + "; ".join(parts)
 
 
@@ -484,6 +488,91 @@ def _fix_preserved_perms(target: Path) -> None:
             adjust(os.path.join(root, d), is_dir=True)
         for f in files:
             adjust(os.path.join(root, f), is_dir=False)
+
+
+# ---- network probe diagnostic (DF5) ------------------------------------------
+#
+# Sandboxes on Kata-backed backends (containerd-vm / containerd-vmenhanced)
+# show an "agent idle 9s+" failure family that DF8 traced to TCP
+# ConnectionRefused — the agent receives the prompt, calls the API, and
+# the connection is refused (probably Kata netns warm-up race). The smoke
+# test had no way to distinguish "agent stuck doing nothing" from "agent
+# is actively retrying a refused connection" until DF3's terminal snapshot
+# landed.
+#
+# This probes network reachability from INSIDE the sandbox at the moment
+# the smoke test decides to fail. The result is appended to the failure
+# diagnostic line — every "agent idle 9s+" / "agent terminal" / "sentinel
+# timeout" failure now carries an explicit network classification:
+#
+#   exchange dir: empty; host /: 76% used, 18G free; network: reachable (HTTP 401)
+#   exchange dir: empty; host /: 76% used, 18G free; network: unreachable (curl exit 7)
+#
+# Running at failure-diagnosis time (not pre-prompt) means passing tests
+# pay no latency, and we get network state at a known reference moment
+# alongside the terminal-snapshot capture.
+
+def _network_probe_cmd(backend: str, container_name: str) -> Optional[list[str]]:
+    """Subprocess command to probe network reachability inside the sandbox
+    via the given backend. Returns None for unsupported backends.
+    Mirrors _terminal_snapshot_cmd's per-backend dispatch.
+    """
+    # curl returns 0 only when it successfully gets HTTP headers back.
+    # --connect-timeout caps TCP handshake; --max-time caps total. We don't
+    # care which status code we get — any HTTP response (including 401)
+    # proves the network path to api.anthropic.com works.
+    probe = [
+        "curl", "-sS", "--connect-timeout", "5", "--max-time", "8",
+        "-o", "/dev/null", "-w", "%{http_code}",
+        "https://api.anthropic.com/",
+    ]
+    if backend == "docker":
+        return ["docker", "exec", "-i", "--user", "yoloai", container_name, *probe]
+    if backend == "podman":
+        return ["podman", "exec", "-i", "--user", "yoloai", container_name, *probe]
+    if backend == "containerd":
+        exec_id = f"netprobe{int(time.time() * 1000)}"
+        return [
+            "sudo", "-n", "ctr", "-n", "yoloai", "task", "exec",
+            "--exec-id", exec_id, "--user", "yoloai", container_name, *probe,
+        ]
+    return None
+
+
+def _probe_network(sandbox_name: str) -> Optional[str]:
+    """Returns a one-line diagnostic about network reachability from inside
+    the sandbox, or None if the sandbox / backend isn't probe-able. Output
+    examples:
+        "reachable (HTTP 401)"   — got an HTTP response (any code)
+        "unreachable (curl exit 6)"  — couldn't resolve host
+        "unreachable (curl exit 7)"  — couldn't connect (THE DF8 SIGNATURE)
+        "unreachable (timeout)"
+    """
+    env_path = Path.home() / ".yoloai" / "sandboxes" / sandbox_name / "environment.json"
+    if not env_path.is_file():
+        return None
+    try:
+        backend = str(json.loads(env_path.read_text()).get("backend", ""))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not backend:
+        return None
+    container = f"yoloai-{sandbox_name}"
+    cmd = _network_probe_cmd(backend, container)
+    if cmd is None:
+        return None
+    try:
+        r = subprocess.run(cmd, capture_output=True, timeout=15)
+    except subprocess.TimeoutExpired:
+        return "unreachable (subprocess timeout)"
+    except OSError as e:
+        return f"probe error ({e})"
+    if r.returncode == 0:
+        code = r.stdout.decode(errors="replace").strip()
+        if code:
+            return f"reachable (HTTP {code})"
+        return "reachable"
+    return f"unreachable (curl exit {r.returncode})"
 
 
 # ---- tmux capture-pane diagnostic snapshot (DF3) -----------------------------

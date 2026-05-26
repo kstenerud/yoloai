@@ -60,10 +60,11 @@ Findings that turned up mid-workstream (architecture-remediation, layering-refac
 ### DF5 — Smoke tests should network-probe inside the sandbox before delivering the prompt
 
 - **Discovered:** 2026-05-26 · **Workstream:** observed during W-L8b kickoff (same failure as DF3/DF4)
-- **Severity:** LOW
-- **Disposition:** PARKED
-- **Description:** When a smoke test fails as "agent idle 9s+", one of the candidate explanations is "network unreachable from inside the sandbox" (especially relevant for Kata VMs, where the historical idiosyncrasy is that Docker shimv2 doesn't wire netns and nerdctl is required — see project memory `kata_nerdctl_networking.md`). The current smoke test has no in-sandbox network probe; failures with broken network are indistinguishable from real agent stalls. **Proposed fix:** before delivering the prompt, the smoke test runs `curl -sS --max-time 5 https://api.anthropic.com/ 2>&1` inside the sandbox via `yoloai exec`. A non-2xx / non-401 response (or curl error) becomes its own clear failure mode — "network unreachable from inside <backend> sandbox" — rather than masquerading as an idle agent.
-- **Pointer:** `scripts/smoke_test.py` (between sandbox creation and prompt delivery)
+- **Severity:** LOW (raised after DF8 smoking gun)
+- **Disposition:** LANDED 2026-05-26.
+- **Description:** When a smoke test fails as "agent idle 9s+", one of the candidate explanations is "network unreachable from inside the sandbox" (especially relevant for Kata VMs, where the historical idiosyncrasy is that Docker shimv2 doesn't wire netns and nerdctl is required — see project memory `kata_nerdctl_networking.md`). The current smoke test had no in-sandbox network probe; failures with broken network were indistinguishable from real agent stalls.
+- **Implementation choice:** rather than pre-prompt probe (would add latency to every passing test), the probe runs at failure-diagnosis time inside `_sentinel_diag`. Every stall / terminal / sentinel-timeout failure now carries `network: reachable (HTTP …)` or `network: unreachable (curl exit N)` in its diagnostic. Curl-from-inside-the-sandbox via per-backend dispatch (docker exec / podman exec / `sudo -n ctr task exec`). Best-effort: probe failures append "probe error" rather than masking the underlying test failure. Skipped for tart/seatbelt (unsupported backends).
+- **Pointer:** `scripts/smoke_test.py::_probe_network`. Composes with DF3's terminal-snapshot — both run when a failure is preserved, so the rendered screen + network state appear together. The next "agent idle 9s+" containerd-vm flake should be self-classifying without further investigation.
 
 ### DF6 — Stall detector conflates "never reached READY" with "idle after prompt"
 
