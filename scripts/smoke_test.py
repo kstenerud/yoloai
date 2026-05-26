@@ -440,6 +440,11 @@ _PRESERVE_FILES = (
     "lifecycle-on-create-done",
     "setup.log",
     "xcodebuild-firstlaunch.log",
+    # DF9 root-cause-investigation diagnostic: in-VM + host-side
+    # network state captured when waitForNetworkReady's probe budget
+    # exhausts (containerd backend only, ~30s into Start). Tells us
+    # exactly which network stage failed without re-running.
+    "network-diag.txt",
 )
 _PRESERVE_DIRS = (
     "logs",

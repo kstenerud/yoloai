@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"time"
 
 	yoloai "github.com/kstenerud/yoloai"
@@ -96,6 +97,13 @@ func writeSandboxSections(ctx context.Context, w io.Writer, c *yoloai.Client, na
 
 	// Section 10: agent-hooks.jsonl (full in both modes)
 	writeBugReportJSONLFile(w, "logs/agent-hooks.jsonl", store.HooksJSONLPath(sandboxDir), reportType, nil)
+
+	// Section 10.5: network-diag.txt (DF9). Written only when the
+	// containerd backend's waitForNetworkReady probe exhausts its
+	// 30s budget — captures in-VM and host-side network state at the
+	// moment of failure. Present only on probe-timeout; the section
+	// header is suppressed when the file doesn't exist (typical).
+	writePlainFileSection(w, "network-diag.txt", filepath.Join(sandboxDir, "network-diag.txt"))
 
 	if reportType == "unsafe" {
 		// Section 11: Agent output (unsafe only)
