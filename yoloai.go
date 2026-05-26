@@ -41,6 +41,7 @@ import (
 	_ "github.com/kstenerud/yoloai/runtime/tart"     // register backend
 	"github.com/kstenerud/yoloai/sandbox"
 	"github.com/kstenerud/yoloai/sandbox/patch"
+	"github.com/kstenerud/yoloai/sandbox/store"
 )
 
 // Sentinel errors returned by Client methods.
@@ -327,6 +328,78 @@ func (c *Client) Clone(ctx context.Context, opts sandbox.CloneOptions) error {
 // The sandbox must exist on disk; use Run to create a new sandbox.
 func (c *Client) Start(ctx context.Context, name string, opts sandbox.StartOptions) error {
 	return c.manager.Start(ctx, name, opts)
+}
+
+// IOStreams bundles caller-provided stdio for streaming / interactive
+// methods (currently Attach). Modeled on kubectl's IOStreams. Embedders
+// pass their own streams when bridging to HTTP, MCP, or test harnesses;
+// the CLI passes os.Stdin/Stdout/Stderr.
+//
+// **Current limitation (W-L8d).** Attach honors In/Out/Err nil-fallback to
+// the calling process's stdio but does not yet plumb non-process streams
+// through the runtime layer — the backend's InteractiveExec hardcodes
+// os.Stdin/Stdout/Stderr. A non-CLI embedder passing custom streams will
+// get attached to the calling process anyway. Full IOStreams plumbing
+// requires extending the runtime.Runtime interface, tracked as future
+// work in CONVENTIONS.md's hybrid handlers section.
+type IOStreams struct {
+	In  io.Reader // stdin (must be a TTY for Attach)
+	Out io.Writer // stdout
+	Err io.Writer // stderr
+
+	// TTY signals that In/Out are a terminal. Required true for Attach.
+	TTY bool
+
+	// Rows and Cols are the terminal dimensions when TTY=true; 0 means
+	// "unknown — let the backend pick from the calling stdin's PTY".
+	Rows, Cols int
+}
+
+// Attach connects the supplied IOStreams to the sandbox's tmux session.
+// Blocks until the user detaches (Ctrl-B d) or the agent exits.
+//
+// The sandbox must be running (StatusActive/Idle/Done/Failed). For
+// stopped sandboxes call Start first. Use --resume on Start to relaunch
+// the agent with the resume preamble before attaching.
+//
+// io.TTY=true is required; non-TTY attach returns a *UsageError. nil
+// fields in io default to the calling process's os.Stdin/Stdout/Stderr;
+// see IOStreams godoc for the current plumbing limitation.
+func (c *Client) Attach(ctx context.Context, name string, io IOStreams) error {
+	if !io.TTY {
+		return sandbox.NewUsageError("attach requires TTY=true")
+	}
+
+	info, err := c.manager.Inspect(ctx, name)
+	if err != nil {
+		return err
+	}
+	if err := attachStatusOK(info.Status, name); err != nil {
+		return err
+	}
+
+	containerName := store.InstanceName(name)
+	user := sandbox.ContainerUser(info.Meta)
+
+	if err := sandbox.WaitForAttachReady(ctx, c.rt, c.layout, name, user, 300*time.Second); err != nil {
+		return fmt.Errorf("waiting for tmux session: %w", err)
+	}
+
+	sock := sandbox.ReadTmuxSocket(c.layout, name)
+	cmd := c.rt.AttachCommand(sock, io.Rows, io.Cols, info.Meta.Isolation)
+	return c.rt.InteractiveExec(ctx, containerName, cmd, user, "")
+}
+
+// attachStatusOK returns nil if the sandbox status permits attach,
+// otherwise a typed error suitable for the CLI exit-code mapping.
+func attachStatusOK(status sandbox.Status, name string) error {
+	switch status {
+	case sandbox.StatusActive, sandbox.StatusIdle, sandbox.StatusDone, sandbox.StatusFailed:
+		return nil
+	default:
+		// StatusStopped, StatusRemoved, StatusBroken, StatusUnavailable
+		return fmt.Errorf("sandbox %q: %w", name, sandbox.ErrContainerNotRunning)
+	}
 }
 
 // --- private helpers ---

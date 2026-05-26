@@ -24,18 +24,40 @@ The migration to `withClient` is incremental. A handler that calls
 `withRuntime + sandbox.NewManager` is the old shape; reach for `withClient`
 when touching that handler for any other reason.
 
-### Hybrid handlers (attach path)
+### Attach: `Client.Attach` is now the canonical path
 
-`restart`, `reset`, and similar lifecycle commands have an optional
-`--attach` branch that calls `attachToSandbox(rt, ...)` / `waitForTmux(rt,
-...)` — both take a raw `runtime.Runtime`. The Client does not yet expose
-attach (it's an interactive streaming operation; api_surface.go's
-`Sandbox.Attach(io IOStreams)` design is the eventual home).
+W-L8d added `yoloai.Client.Attach(ctx, name, IOStreams) error` and moved
+the readiness polling (`waitForTmux`) into `sandbox.WaitForAttachReady`.
+Every attach flow should ultimately go through `c.Attach`:
 
-Until the attach surface lands on the Client, these handlers stay on
-`withRuntime + sandbox.NewManager + sandbox.WithLayout(cliLayout())` —
-the old shape, but with the WithLayout invariant satisfied. Do not add
-a `Client.Runtime()` escape hatch; it would defeat the layering.
+- The standalone `yoloai attach` command uses `withClient + c.Attach`
+  directly (see `attach.go`).
+- Lifecycle commands with an `--attach` branch (`clone` today;
+  `restart`/`reset`/`start`/`new` to be migrated) call the shared
+  `attachToSandboxByName(cmd, name)` helper in `helpers.go`, which
+  itself opens a Client and calls `c.Attach`.
+- The terminal-title machinery (`setTerminalTitle`) stays in the CLI —
+  it's UI, not orchestration. `Client.Attach` is library code and
+  doesn't touch the terminal beyond the PTY.
+
+**Limitation to know.** `IOStreams.In/Out/Err` are accepted on the
+public API but not yet fully plumbed: the underlying
+`runtime.Runtime.InteractiveExec` hardcodes `os.Stdin/Stdout/Stderr`,
+so non-CLI embedders (HTTP server, MCP) passing custom streams will
+still see the calling process's stdio. Fully wiring IOStreams through
+requires extending the runtime interface (one method per backend);
+tracked as future work. CLI use is unaffected — terminal stdio IS
+the calling process's stdio.
+
+### Legacy raw-runtime attach (being retired)
+
+`new.go`, `start.go`, `restart.go`, `reset.go` still hold their own
+`attachAfter<Verb>` helpers that call `attachToSandbox(rt, ...)`
+directly. These work but duplicate logic that now lives behind
+`Client.Attach`. Each should migrate to `withClient + c.Attach` (or
+call `attachToSandboxByName` after the lifecycle action) the next
+time the handler is touched. Do NOT add a `Client.Runtime()` escape
+hatch; it would defeat the layering.
 
 ## Path resolution: `cliLayout()`
 
