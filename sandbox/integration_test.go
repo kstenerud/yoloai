@@ -38,7 +38,7 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 	testutil.WaitForActive(ctx, t, mgr.Runtime(), store.InstanceName(sandboxName), 15*time.Second)
 
 	// Verify directory structure
-	sandboxDir := store.Dir(sandboxName)
+	sandboxDir := mgr.Layout().SandboxDir(sandboxName)
 	assert.DirExists(t, sandboxDir)
 
 	meta, err := store.LoadMeta(sandboxDir)
@@ -48,11 +48,11 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 	assert.Equal(t, "copy", meta.Workdir.Mode)
 	assert.NotEmpty(t, meta.Workdir.BaselineSHA)
 
-	workDir := store.WorkDir(sandboxName, meta.Workdir.HostPath)
+	workDir := store.WorkDir(mgr.Layout().SandboxDir(sandboxName), meta.Workdir.HostPath)
 	assert.FileExists(t, filepath.Join(workDir, "main.go"))
 
 	// Verify container is running
-	status, err := sandbox.DetectStatus(ctx, mgr.Runtime(), store.InstanceName(sandboxName), store.Dir(sandboxName))
+	status, err := sandbox.DetectStatus(ctx, mgr.Runtime(), store.InstanceName(sandboxName), mgr.Layout().SandboxDir(sandboxName))
 	require.NoError(t, err)
 	assert.Equal(t, sandbox.StatusActive, status)
 
@@ -77,7 +77,7 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 	// Stop container and verify
 	require.NoError(t, mgr.Stop(ctx, sandboxName))
 
-	status, err = sandbox.DetectStatus(ctx, mgr.Runtime(), store.InstanceName(sandboxName), store.Dir(sandboxName))
+	status, err = sandbox.DetectStatus(ctx, mgr.Runtime(), store.InstanceName(sandboxName), mgr.Layout().SandboxDir(sandboxName))
 	require.NoError(t, err)
 	assert.Equal(t, sandbox.StatusStopped, status)
 
@@ -85,7 +85,7 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 	require.NoError(t, mgr.Start(ctx, sandboxName, sandbox.StartOptions{}))
 	testutil.WaitForActive(ctx, t, mgr.Runtime(), store.InstanceName(sandboxName), 15*time.Second)
 
-	status, err = sandbox.DetectStatus(ctx, mgr.Runtime(), store.InstanceName(sandboxName), store.Dir(sandboxName))
+	status, err = sandbox.DetectStatus(ctx, mgr.Runtime(), store.InstanceName(sandboxName), mgr.Layout().SandboxDir(sandboxName))
 	require.NoError(t, err)
 	assert.Equal(t, sandbox.StatusActive, status)
 
@@ -96,7 +96,7 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 	assert.Equal(t, 0, result.ExitCode)
 
 	// Generate patch and apply to a target directory
-	patchBytes, stat, err := patch.GeneratePatch(ctx, mgr.Runtime(), sandboxName, nil, true)
+	patchBytes, stat, err := patch.GeneratePatch(ctx, mgr.Layout(), mgr.Runtime(), sandboxName, nil, true)
 	require.NoError(t, err)
 	assert.NotEmpty(t, patchBytes)
 	assert.Contains(t, stat, "main.go")
@@ -119,7 +119,7 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 	assert.NoDirExists(t, sandboxDir)
 
 	// Container should be gone
-	status, err = sandbox.DetectStatus(ctx, mgr.Runtime(), store.InstanceName(sandboxName), store.Dir(sandboxName))
+	status, err = sandbox.DetectStatus(ctx, mgr.Runtime(), store.InstanceName(sandboxName), mgr.Layout().SandboxDir(sandboxName))
 	require.NoError(t, err)
 	assert.Equal(t, sandbox.StatusRemoved, status)
 }
@@ -138,7 +138,7 @@ func TestIntegration_CreateNoStart(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { mgr.Destroy(ctx, "nostart") }) //nolint:errcheck // test cleanup
 
-	sandboxDir := store.Dir("nostart")
+	sandboxDir := mgr.Layout().SandboxDir("nostart")
 	assert.DirExists(t, sandboxDir)
 
 	meta, err := store.LoadMeta(sandboxDir)
@@ -149,7 +149,7 @@ func TestIntegration_CreateNoStart(t *testing.T) {
 	assert.NotEmpty(t, meta.Workdir.BaselineSHA)
 
 	// Verify work copy contains our file
-	workDir := store.WorkDir("nostart", meta.Workdir.HostPath)
+	workDir := store.WorkDir(mgr.Layout().SandboxDir("nostart"), meta.Workdir.HostPath)
 	assert.FileExists(t, filepath.Join(workDir, "main.go"))
 
 	// Verify standard subdirs
@@ -172,11 +172,11 @@ func TestIntegration_CopyMode(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { mgr.Destroy(ctx, "copymode") }) //nolint:errcheck // test cleanup
 
-	meta, err := store.LoadMeta(store.Dir("copymode"))
+	meta, err := store.LoadMeta(mgr.Layout().SandboxDir("copymode"))
 	require.NoError(t, err)
 	assert.Equal(t, "copy", meta.Workdir.Mode)
 
-	workDir := store.WorkDir("copymode", meta.Workdir.HostPath)
+	workDir := store.WorkDir(mgr.Layout().SandboxDir("copymode"), meta.Workdir.HostPath)
 
 	// Modify work copy
 	require.NoError(t, os.WriteFile(
@@ -205,7 +205,7 @@ func TestIntegration_RWMode(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { mgr.Destroy(ctx, "rwmode") }) //nolint:errcheck // test cleanup
 
-	meta, err := store.LoadMeta(store.Dir("rwmode"))
+	meta, err := store.LoadMeta(mgr.Layout().SandboxDir("rwmode"))
 	require.NoError(t, err)
 	assert.Equal(t, "rw", meta.Workdir.Mode)
 }
@@ -226,14 +226,14 @@ func TestIntegration_AuxDirCopy(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { mgr.Destroy(ctx, "auxcopy") }) //nolint:errcheck // test cleanup
 
-	meta, err := store.LoadMeta(store.Dir("auxcopy"))
+	meta, err := store.LoadMeta(mgr.Layout().SandboxDir("auxcopy"))
 	require.NoError(t, err)
 	require.Len(t, meta.Directories, 1)
 	assert.Equal(t, "copy", meta.Directories[0].Mode)
 	assert.NotEmpty(t, meta.Directories[0].BaselineSHA)
 
 	// Verify aux work copy has the file
-	auxWorkDir := store.WorkDir("auxcopy", meta.Directories[0].HostPath)
+	auxWorkDir := store.WorkDir(mgr.Layout().SandboxDir("auxcopy"), meta.Directories[0].HostPath)
 	assert.FileExists(t, filepath.Join(auxWorkDir, "data.txt"))
 }
 
@@ -253,7 +253,7 @@ func TestIntegration_AuxDirRO(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { mgr.Destroy(ctx, "auxro") }) //nolint:errcheck // test cleanup
 
-	meta, err := store.LoadMeta(store.Dir("auxro"))
+	meta, err := store.LoadMeta(mgr.Layout().SandboxDir("auxro"))
 	require.NoError(t, err)
 	require.Len(t, meta.Directories, 1)
 	assert.Equal(t, "ro", meta.Directories[0].Mode)
@@ -286,7 +286,7 @@ func TestIntegration_Replace(t *testing.T) {
 	require.NoError(t, err)
 
 	// Should still exist with valid meta
-	meta, err := store.LoadMeta(store.Dir("replaceme"))
+	meta, err := store.LoadMeta(mgr.Layout().SandboxDir("replaceme"))
 	require.NoError(t, err)
 	assert.Equal(t, "replaceme", meta.Name)
 }
@@ -308,9 +308,9 @@ func TestIntegration_Reset(t *testing.T) {
 	// Wait for container to become active
 	testutil.WaitForActive(ctx, t, mgr.Runtime(), store.InstanceName("resettest"), 15*time.Second)
 
-	meta, err := store.LoadMeta(store.Dir("resettest"))
+	meta, err := store.LoadMeta(mgr.Layout().SandboxDir("resettest"))
 	require.NoError(t, err)
-	workDir := store.WorkDir("resettest", meta.Workdir.HostPath)
+	workDir := store.WorkDir(mgr.Layout().SandboxDir("resettest"), meta.Workdir.HostPath)
 
 	// Modify work copy
 	require.NoError(t, os.WriteFile(
@@ -390,9 +390,9 @@ func TestIntegration_DiffWithChanges(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { mgr.Destroy(ctx, "diffchanges") }) //nolint:errcheck // test cleanup
 
-	meta, err := store.LoadMeta(store.Dir("diffchanges"))
+	meta, err := store.LoadMeta(mgr.Layout().SandboxDir("diffchanges"))
 	require.NoError(t, err)
-	workDir := store.WorkDir("diffchanges", meta.Workdir.HostPath)
+	workDir := store.WorkDir(mgr.Layout().SandboxDir("diffchanges"), meta.Workdir.HostPath)
 
 	require.NoError(t, os.WriteFile(
 		filepath.Join(workDir, "main.go"),
@@ -420,9 +420,9 @@ func TestIntegration_ApplyPatch(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { mgr.Destroy(ctx, "applypatch") }) //nolint:errcheck // test cleanup
 
-	meta, err := store.LoadMeta(store.Dir("applypatch"))
+	meta, err := store.LoadMeta(mgr.Layout().SandboxDir("applypatch"))
 	require.NoError(t, err)
-	workDir := store.WorkDir("applypatch", meta.Workdir.HostPath)
+	workDir := store.WorkDir(mgr.Layout().SandboxDir("applypatch"), meta.Workdir.HostPath)
 
 	// Make a change
 	require.NoError(t, os.WriteFile(
@@ -432,7 +432,7 @@ func TestIntegration_ApplyPatch(t *testing.T) {
 	))
 
 	// Generate patch
-	patchBytes, stat, err := patch.GeneratePatch(ctx, mgr.Runtime(), "applypatch", nil, true)
+	patchBytes, stat, err := patch.GeneratePatch(ctx, mgr.Layout(), mgr.Runtime(), "applypatch", nil, true)
 	require.NoError(t, err)
 	assert.NotEmpty(t, patchBytes)
 	assert.Contains(t, stat, "main.go")
@@ -467,7 +467,7 @@ func TestIntegration_Prompt(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { mgr.Destroy(ctx, "prompttest") }) //nolint:errcheck // test cleanup
 
-	sandboxDir := store.Dir("prompttest")
+	sandboxDir := mgr.Layout().SandboxDir("prompttest")
 	meta, err := store.LoadMeta(sandboxDir)
 	require.NoError(t, err)
 	assert.True(t, meta.HasPrompt)
@@ -494,7 +494,7 @@ func TestIntegration_ResourceLimits(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { mgr.Destroy(ctx, "reslimits") }) //nolint:errcheck // test cleanup
 
-	meta, err := store.LoadMeta(store.Dir("reslimits"))
+	meta, err := store.LoadMeta(mgr.Layout().SandboxDir("reslimits"))
 	require.NoError(t, err)
 	require.NotNil(t, meta.Resources)
 	assert.Equal(t, "2", meta.Resources.CPUs)
@@ -516,7 +516,7 @@ func TestIntegration_PortForwarding(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { mgr.Destroy(ctx, "portfwd") }) //nolint:errcheck // test cleanup
 
-	meta, err := store.LoadMeta(store.Dir("portfwd"))
+	meta, err := store.LoadMeta(mgr.Layout().SandboxDir("portfwd"))
 	require.NoError(t, err)
 	assert.Contains(t, meta.Ports, "3000:3000")
 }
@@ -541,11 +541,11 @@ func TestIntegration_MultiSandbox(t *testing.T) {
 	})
 
 	// Both should exist
-	assert.DirExists(t, store.Dir("multi-a"))
-	assert.DirExists(t, store.Dir("multi-b"))
+	assert.DirExists(t, mgr.Layout().SandboxDir("multi-a"))
+	assert.DirExists(t, mgr.Layout().SandboxDir("multi-b"))
 
 	// Both should be in the listing
-	infos, err := sandbox.ListSandboxes(ctx, mgr.Runtime())
+	infos, err := sandbox.ListSandboxes(ctx, mgr.Layout(), mgr.Runtime())
 	require.NoError(t, err)
 
 	names := make(map[string]bool)
@@ -569,14 +569,14 @@ func TestIntegration_DestroyCleanup(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	sandboxDir := store.Dir("destroyme")
+	sandboxDir := mgr.Layout().SandboxDir("destroyme")
 	assert.DirExists(t, sandboxDir)
 
 	require.NoError(t, mgr.Destroy(ctx, "destroyme"))
 	assert.NoDirExists(t, sandboxDir)
 
 	// Container should be removed
-	status, err := sandbox.DetectStatus(ctx, mgr.Runtime(), store.InstanceName("destroyme"), store.Dir("destroyme"))
+	status, err := sandbox.DetectStatus(ctx, mgr.Runtime(), store.InstanceName("destroyme"), mgr.Layout().SandboxDir("destroyme"))
 	require.NoError(t, err)
 	assert.Equal(t, sandbox.StatusRemoved, status)
 }
@@ -601,7 +601,7 @@ func TestIntegration_NetworkIsolation(t *testing.T) {
 
 	// Verify runtime-config.json has network_isolated: true so the test
 	// can't pass vacuously (e.g., if the config field were never written).
-	rcData, err := os.ReadFile(filepath.Join(store.Dir("netisolated"), store.RuntimeConfigFile)) //nolint:gosec // test path
+	rcData, err := os.ReadFile(filepath.Join(mgr.Layout().SandboxDir("netisolated"), store.RuntimeConfigFile)) //nolint:gosec // test path
 	require.NoError(t, err)
 	var rc map[string]any
 	require.NoError(t, json.Unmarshal(rcData, &rc))
@@ -745,9 +745,9 @@ func TestIntegration_AgentStubWorkflow(t *testing.T) {
 	assert.Equal(t, 0, result.ExitCode)
 
 	// Verify the file is visible in the work copy on the host
-	meta, err := store.LoadMeta(store.Dir("stubworkflow"))
+	meta, err := store.LoadMeta(mgr.Layout().SandboxDir("stubworkflow"))
 	require.NoError(t, err)
-	workDir := store.WorkDir("stubworkflow", meta.Workdir.HostPath)
+	workDir := store.WorkDir(mgr.Layout().SandboxDir("stubworkflow"), meta.Workdir.HostPath)
 	assert.FileExists(t, filepath.Join(workDir, "agent-output.txt"))
 
 	// Diff should detect the new file
@@ -757,7 +757,7 @@ func TestIntegration_AgentStubWorkflow(t *testing.T) {
 	assert.Contains(t, diffResult.Output, "agent-output.txt")
 
 	// Generate patch and apply to a fresh copy of the original project
-	patchBytes, stat, err := patch.GeneratePatch(ctx, mgr.Runtime(), "stubworkflow", nil, true)
+	patchBytes, stat, err := patch.GeneratePatch(ctx, mgr.Layout(), mgr.Runtime(), "stubworkflow", nil, true)
 	require.NoError(t, err)
 	assert.NotEmpty(t, patchBytes)
 	assert.Contains(t, stat, "agent-output.txt")
@@ -790,9 +790,9 @@ func TestIntegration_Clone(t *testing.T) {
 	})
 
 	// Seed a change in A's work copy
-	meta, err := store.LoadMeta(store.Dir("clone-a"))
+	meta, err := store.LoadMeta(mgr.Layout().SandboxDir("clone-a"))
 	require.NoError(t, err)
-	workDir := store.WorkDir("clone-a", meta.Workdir.HostPath)
+	workDir := store.WorkDir(mgr.Layout().SandboxDir("clone-a"), meta.Workdir.HostPath)
 	require.NoError(t, os.WriteFile(
 		filepath.Join(workDir, "main.go"),
 		[]byte("package main\n\nimport \"fmt\"\n\nfunc main() { fmt.Println(\"clone-test\") }\n"),
@@ -845,7 +845,7 @@ func TestIntegration_Overlay(t *testing.T) {
 	testutil.WaitForActive(ctx, t, mgr.Runtime(), store.InstanceName("overlay-integ"), 15*time.Second)
 
 	// For overlay mode, MountPath is /yoloai/overlay/<encoded>/merged — not the host path.
-	meta, err := store.LoadMeta(store.Dir("overlay-integ"))
+	meta, err := store.LoadMeta(mgr.Layout().SandboxDir("overlay-integ"))
 	require.NoError(t, err)
 	containerPath := meta.Workdir.MountPath
 
@@ -875,7 +875,7 @@ func TestIntegration_Overlay(t *testing.T) {
 		time.Sleep(500 * time.Millisecond)
 	}
 	require.NotEmpty(t, baselineSHA, "git init + commit inside overlay should produce a valid SHA within 15s")
-	require.NoError(t, patch.UpdateOverlayBaseline("overlay-integ", projectDir, baselineSHA))
+	require.NoError(t, patch.UpdateOverlayBaseline(mgr.Layout(), "overlay-integ", projectDir, baselineSHA))
 
 	// Write a file inside the container (overlay captures it in upper layer)
 	writeResult, err := mgr.Runtime().Exec(ctx, store.InstanceName("overlay-integ"),
@@ -891,7 +891,7 @@ func TestIntegration_Overlay(t *testing.T) {
 	assert.Contains(t, diffResults[0].Output, "output.txt")
 
 	// Apply: must use GenerateOverlayPatch (ApplyAll skips overlay dirs)
-	patches, err := patch.GenerateOverlayPatch(ctx, mgr.Runtime(), "overlay-integ", nil)
+	patches, err := patch.GenerateOverlayPatch(ctx, mgr.Layout(), mgr.Runtime(), "overlay-integ", nil)
 	require.NoError(t, err)
 	require.NotEmpty(t, patches)
 	require.NoError(t, workspace.ApplyPatch(patches[0].Patch, projectDir, false))

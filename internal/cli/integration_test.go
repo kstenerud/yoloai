@@ -142,7 +142,7 @@ func TestCLI_Diff(t *testing.T) {
 	// Modify work copy
 	meta, err := store.LoadMeta(cliLayout().SandboxDir("cli-diff"))
 	require.NoError(t, err)
-	workDir := store.WorkDir("cli-diff", meta.Workdir.HostPath)
+	workDir := store.WorkDir(cliLayout().SandboxDir("cli-diff"), meta.Workdir.HostPath)
 	require.NoError(t, os.WriteFile(
 		filepath.Join(workDir, "main.go"),
 		[]byte("package main\n\nimport \"fmt\"\n\nfunc main() { fmt.Println(\"diff-test\") }\n"),
@@ -183,7 +183,7 @@ func TestCLI_Log(t *testing.T) {
 	logsDir := filepath.Join(sandboxDir, store.LogsDir)
 	require.NoError(t, os.MkdirAll(logsDir, 0700))
 	entry := `{"ts":"2026-03-16T10:00:00.000Z","level":"info","event":"test.event","msg":"test log output"}` + "\n"
-	require.NoError(t, os.WriteFile(store.CLIJSONLPath("cli-log"), []byte(entry), 0600))
+	require.NoError(t, os.WriteFile(store.CLIJSONLPath(cliLayout().SandboxDir("cli-log")), []byte(entry), 0600))
 
 	stdout, _, err := runCLI(t, "log", "cli-log")
 	require.NoError(t, err)
@@ -301,11 +301,11 @@ func TestCLI_BugreportCommand_Unsafe(t *testing.T) {
 	logsDir := filepath.Join(sandboxDir, store.LogsDir)
 	require.NoError(t, os.MkdirAll(logsDir, 0700))
 	entry := `{"ts":"2026-03-16T10:00:00.000Z","level":"info","event":"test.event","msg":"test log message"}` + "\n"
-	require.NoError(t, os.WriteFile(store.CLIJSONLPath("cli-br-unsafe"), []byte(entry), 0600))
-	require.NoError(t, os.WriteFile(store.SandboxJSONLPath("cli-br-unsafe"), []byte(entry), 0600))
-	require.NoError(t, os.WriteFile(store.MonitorJSONLPath("cli-br-unsafe"), []byte(entry), 0600))
-	require.NoError(t, os.WriteFile(store.HooksJSONLPath("cli-br-unsafe"), []byte(entry), 0600))
-	require.NoError(t, os.WriteFile(store.AgentLogPath("cli-br-unsafe"), []byte("agent output line\n"), 0600))
+	require.NoError(t, os.WriteFile(store.CLIJSONLPath(cliLayout().SandboxDir("cli-br-unsafe")), []byte(entry), 0600))
+	require.NoError(t, os.WriteFile(store.SandboxJSONLPath(cliLayout().SandboxDir("cli-br-unsafe")), []byte(entry), 0600))
+	require.NoError(t, os.WriteFile(store.MonitorJSONLPath(cliLayout().SandboxDir("cli-br-unsafe")), []byte(entry), 0600))
+	require.NoError(t, os.WriteFile(store.HooksJSONLPath(cliLayout().SandboxDir("cli-br-unsafe")), []byte(entry), 0600))
+	require.NoError(t, os.WriteFile(store.AgentLogPath(cliLayout().SandboxDir("cli-br-unsafe")), []byte("agent output line\n"), 0600))
 
 	origDir, err := os.Getwd()
 	require.NoError(t, err)
@@ -349,10 +349,10 @@ func TestCLI_BugreportCommand_Safe(t *testing.T) {
 	logsDir := filepath.Join(sandboxDir, store.LogsDir)
 	require.NoError(t, os.MkdirAll(logsDir, 0700))
 	entry := `{"ts":"2026-03-16T10:00:00.000Z","level":"info","event":"test.event","msg":"test log message"}` + "\n"
-	require.NoError(t, os.WriteFile(store.CLIJSONLPath("cli-br-safe"), []byte(entry), 0600))
-	require.NoError(t, os.WriteFile(store.SandboxJSONLPath("cli-br-safe"), []byte(entry), 0600))
-	require.NoError(t, os.WriteFile(store.MonitorJSONLPath("cli-br-safe"), []byte(entry), 0600))
-	require.NoError(t, os.WriteFile(store.HooksJSONLPath("cli-br-safe"), []byte(entry), 0600))
+	require.NoError(t, os.WriteFile(store.CLIJSONLPath(cliLayout().SandboxDir("cli-br-safe")), []byte(entry), 0600))
+	require.NoError(t, os.WriteFile(store.SandboxJSONLPath(cliLayout().SandboxDir("cli-br-safe")), []byte(entry), 0600))
+	require.NoError(t, os.WriteFile(store.MonitorJSONLPath(cliLayout().SandboxDir("cli-br-safe")), []byte(entry), 0600))
+	require.NoError(t, os.WriteFile(store.HooksJSONLPath(cliLayout().SandboxDir("cli-br-safe")), []byte(entry), 0600))
 
 	origDir, err := os.Getwd()
 	require.NoError(t, err)
@@ -451,7 +451,7 @@ func TestCLI_Apply(t *testing.T) {
 	// Seed work copy with a distinctive change
 	meta, err := store.LoadMeta(cliLayout().SandboxDir("cli-apply"))
 	require.NoError(t, err)
-	workDir := store.WorkDir("cli-apply", meta.Workdir.HostPath)
+	workDir := store.WorkDir(cliLayout().SandboxDir("cli-apply"), meta.Workdir.HostPath)
 	require.NoError(t, os.WriteFile(
 		filepath.Join(workDir, "main.go"),
 		[]byte("package main\n\nimport \"fmt\"\n\nfunc main() { fmt.Println(\"apply-test\") }\n"),

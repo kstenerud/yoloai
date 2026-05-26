@@ -88,7 +88,7 @@ func TestIntegrationTart_FullLifecycle(t *testing.T) {
 	testutil.WaitForActive(ctx, t, mgr.Runtime(), store.InstanceName(sandboxName), 30*time.Second)
 
 	// Verify sandbox directory structure
-	sandboxDir := store.Dir(sandboxName)
+	sandboxDir := mgr.Layout().SandboxDir(sandboxName)
 	assert.DirExists(t, sandboxDir)
 
 	meta, err := store.LoadMeta(sandboxDir)
@@ -105,7 +105,7 @@ func TestIntegrationTart_FullLifecycle(t *testing.T) {
 	assert.Equal(t, vmLocalPath, meta.Workdir.MountPath)
 
 	// Verify VM is running
-	status, err := sandbox.DetectStatus(ctx, mgr.Runtime(), store.InstanceName(sandboxName), store.Dir(sandboxName))
+	status, err := sandbox.DetectStatus(ctx, mgr.Runtime(), store.InstanceName(sandboxName), mgr.Layout().SandboxDir(sandboxName))
 	require.NoError(t, err)
 	assert.Equal(t, sandbox.StatusActive, status)
 
@@ -144,7 +144,7 @@ func TestIntegrationTart_FullLifecycle(t *testing.T) {
 	// Stop VM and verify
 	require.NoError(t, mgr.Stop(ctx, sandboxName))
 
-	status, err = sandbox.DetectStatus(ctx, mgr.Runtime(), store.InstanceName(sandboxName), store.Dir(sandboxName))
+	status, err = sandbox.DetectStatus(ctx, mgr.Runtime(), store.InstanceName(sandboxName), mgr.Layout().SandboxDir(sandboxName))
 	require.NoError(t, err)
 	assert.Equal(t, sandbox.StatusStopped, status)
 
@@ -152,7 +152,7 @@ func TestIntegrationTart_FullLifecycle(t *testing.T) {
 	require.NoError(t, mgr.Start(ctx, sandboxName, sandbox.StartOptions{}))
 	testutil.WaitForActive(ctx, t, mgr.Runtime(), store.InstanceName(sandboxName), 30*time.Second)
 
-	status, err = sandbox.DetectStatus(ctx, mgr.Runtime(), store.InstanceName(sandboxName), store.Dir(sandboxName))
+	status, err = sandbox.DetectStatus(ctx, mgr.Runtime(), store.InstanceName(sandboxName), mgr.Layout().SandboxDir(sandboxName))
 	require.NoError(t, err)
 	assert.Equal(t, sandbox.StatusActive, status)
 
@@ -163,7 +163,7 @@ func TestIntegrationTart_FullLifecycle(t *testing.T) {
 	assert.Contains(t, result.Stdout, "main.go", "changes should persist in VM local storage")
 
 	// Generate patch and apply to a target directory
-	patchBytes, stat, err := patch.GeneratePatch(ctx, mgr.Runtime(), sandboxName, nil, true)
+	patchBytes, stat, err := patch.GeneratePatch(ctx, mgr.Layout(), mgr.Runtime(), sandboxName, nil, true)
 	require.NoError(t, err)
 	assert.NotEmpty(t, patchBytes)
 	assert.Contains(t, stat, "main.go")
@@ -198,7 +198,7 @@ func TestIntegrationTart_FullLifecycle(t *testing.T) {
 	assert.NoDirExists(t, sandboxDir)
 
 	// VM should be gone
-	status, err = sandbox.DetectStatus(ctx, mgr.Runtime(), store.InstanceName(sandboxName), store.Dir(sandboxName))
+	status, err = sandbox.DetectStatus(ctx, mgr.Runtime(), store.InstanceName(sandboxName), mgr.Layout().SandboxDir(sandboxName))
 	require.NoError(t, err)
 	assert.Equal(t, sandbox.StatusRemoved, status)
 }
@@ -231,7 +231,7 @@ func TestIntegrationTart_MultipleAuxDirs(t *testing.T) {
 	// Wait for VM to become active
 	testutil.WaitForActive(ctx, t, mgr.Runtime(), store.InstanceName(sandboxName), 30*time.Second)
 
-	meta, err := store.LoadMeta(store.Dir(sandboxName))
+	meta, err := store.LoadMeta(mgr.Layout().SandboxDir(sandboxName))
 	require.NoError(t, err)
 	require.Len(t, meta.Directories, 2, "should have two aux directories")
 
@@ -283,7 +283,7 @@ func TestIntegrationTart_GitCorruption(t *testing.T) {
 
 	testutil.WaitForActive(ctx, t, mgr.Runtime(), store.InstanceName(sandboxName), 30*time.Second)
 
-	meta, err := store.LoadMeta(store.Dir(sandboxName))
+	meta, err := store.LoadMeta(mgr.Layout().SandboxDir(sandboxName))
 	require.NoError(t, err)
 	vmLocalPath := meta.Workdir.MountPath
 
@@ -347,7 +347,7 @@ func TestIntegrationTart_VMLocalStorageVerification(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { mgr.Destroy(ctx, sandboxName) }) //nolint:errcheck // test cleanup
 
-	meta, err := store.LoadMeta(store.Dir(sandboxName))
+	meta, err := store.LoadMeta(mgr.Layout().SandboxDir(sandboxName))
 	require.NoError(t, err)
 
 	// Verify mount path is VM-local, not VirtioFS
