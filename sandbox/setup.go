@@ -426,7 +426,7 @@ func (m *Manager) setTmuxConf(value string) error {
 	// Write defaults/tmux.conf when the baked-in config is in use.
 	// Skip for "host" (user chose their own ~/.tmux.conf) and "none" (no config).
 	if value == "default" || value == "default+host" {
-		destPath := filepath.Join(config.DefaultsDir(), "tmux.conf")
+		destPath := filepath.Join(m.layout.DefaultsDir(), "tmux.conf")
 		if _, err := os.Stat(destPath); os.IsNotExist(err) {
 			if writeErr := fileutil.WriteFile(destPath, tmuxres.Embedded(), 0644); writeErr != nil { //nolint:gosec // G306: tmux.conf contains no secrets; 0644 required so uid 1001 (yoloai in Kata VMs) can read it
 				return fmt.Errorf("write defaults/tmux.conf: %w", writeErr)

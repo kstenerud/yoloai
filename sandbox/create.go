@@ -168,7 +168,8 @@ type sandboxState struct {
 	devcontainer              *archetype.DevcontainerConfig
 	devcontainerMounts        []string
 	devcontainerMountWarnings []string
-	workdirMode               string // resolved workdir mode ("copy", "overlay", "rw")
+	workdirMode               string        // resolved workdir mode ("copy", "overlay", "rw")
+	layout                    config.Layout // Q-W.3: DataDir-rooted Layout propagated from the Manager
 }
 
 // overlayMountConfig describes a single overlay mount for config.json.
@@ -378,7 +379,7 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions, c
 	}
 
 	success = true
-	return buildSandboxStateResult(opts, sandboxDir, workdir, workCopyDir, auxDirs, agentDef, meta, pr, mergedMounts, configData, tmuxConf, resolvedArchetype, pr.archetypeDockerDRequired, devcontainerCfg, dcMounts, dcMountWarnings, credOverrides), nil
+	return buildSandboxStateResult(opts, sandboxDir, workdir, workCopyDir, auxDirs, agentDef, meta, pr, mergedMounts, configData, tmuxConf, resolvedArchetype, pr.archetypeDockerDRequired, devcontainerCfg, dcMounts, dcMountWarnings, credOverrides, m.layout), nil
 }
 
 // resolveProfileAndArchetype resolves profile config, runtime base, archetype, mounts, and lifecycle state.
@@ -452,7 +453,7 @@ func (m *Manager) buildConfigAndMeta(ctx context.Context, opts CreateOptions, pr
 }
 
 // buildSandboxStateResult constructs the sandboxState from all resolved values.
-func buildSandboxStateResult(opts CreateOptions, sandboxDir string, workdir *DirArg, workCopyDir string, auxDirs []*DirArg, agentDef *agent.Definition, meta *store.Meta, pr *profileResult, mergedMounts []string, configData []byte, tmuxConf string, resolvedArchetype archetype.Archetype, archetypeDockerDRequired bool, devcontainerCfg *archetype.DevcontainerConfig, dcMounts []string, dcMountWarnings []string, credOverrides map[string]string) *sandboxState {
+func buildSandboxStateResult(opts CreateOptions, sandboxDir string, workdir *DirArg, workCopyDir string, auxDirs []*DirArg, agentDef *agent.Definition, meta *store.Meta, pr *profileResult, mergedMounts []string, configData []byte, tmuxConf string, resolvedArchetype archetype.Archetype, archetypeDockerDRequired bool, devcontainerCfg *archetype.DevcontainerConfig, dcMounts []string, dcMountWarnings []string, credOverrides map[string]string, layout config.Layout) *sandboxState {
 	return &sandboxState{
 		name:                      opts.Name,
 		sandboxDir:                sandboxDir,
@@ -486,6 +487,7 @@ func buildSandboxStateResult(opts CreateOptions, sandboxDir string, workdir *Dir
 		devcontainerMounts:        dcMounts,
 		devcontainerMountWarnings: dcMountWarnings,
 		workdirMode:               string(workdir.Mode),
+		layout:                    layout,
 	}
 }
 
@@ -1434,7 +1436,7 @@ func buildVscodeMounts(state *sandboxState) []runtime.MountSpec {
 	_ = fileutil.MkdirAll(vscodeSandboxCLIDir, 0750) //nolint:gosec // G301: sandbox dir, private
 
 	// Seed token from global dir if this sandbox hasn't authenticated yet.
-	globalTokenPath := filepath.Join(config.VscodeCLIDir(), "token.json")
+	globalTokenPath := filepath.Join(state.layout.VscodeCLIDir(), "token.json")
 	sandboxTokenPath := filepath.Join(vscodeSandboxCLIDir, "token.json")
 	if _, err := os.Stat(sandboxTokenPath); os.IsNotExist(err) {
 		if data, err2 := os.ReadFile(globalTokenPath); err2 == nil { //nolint:gosec // G304: path is sandbox-controlled
@@ -1556,7 +1558,7 @@ func buildGitAndTmuxMounts(state *sandboxState) []runtime.MountSpec {
 
 	// Defaults tmux config
 	if state.tmuxConf == "default" || state.tmuxConf == "default+host" {
-		defaultsTmuxConf := filepath.Join(config.DefaultsDir(), "tmux.conf")
+		defaultsTmuxConf := filepath.Join(state.layout.DefaultsDir(), "tmux.conf")
 		if _, err := os.Stat(defaultsTmuxConf); err == nil {
 			// Ensure the file is world-readable (0644). It may have been written
 			// with 0600 by older yoloai versions. Inside Kata VMs the file is
