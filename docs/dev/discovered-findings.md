@@ -79,16 +79,30 @@ Findings that turned up mid-workstream (architecture-remediation, layering-refac
 - **Description:** The 120s grace for `containerd-vm` was set against a measured QEMU startup distribution at the time. Two runs in this session failed at the 129s mark with the agent genuinely idle (DF3-6) — suggesting either (a) the agent-behavior issue (DF2) is real and unrelated to grace tuning, or (b) startup has drifted upward and the grace no longer matches reality. The 46s `wait_for_ready` observed in the first failure log was consistent with (b), but DF8 shows the same idle-after-prompt failure also fires with a fast 11s `wait_for_ready` — so startup tuning is at best a partial answer. **Proposed action:** re-measure containerd-vm startup latency (from `entrypoint.start` to `❯` ready pattern) across, say, 30 successful runs; pick the 99th percentile + safety margin as the new `stall_grace_secs`. Do this AFTER DF3/DF6 land — without rendered transcripts and the ready-vs-idle split, the measurement is muddled.
 - **Pointer:** `scripts/smoke_test.py::BackendSpec.stall_grace_secs`, `docs/dev/backend-idiosyncrasies.md#qemu-slow-startup-exceeds-smoke-test-stall-grace-period`
 
-### DF8 — `containerd-vm` "agent idle after prompt" fires even when startup was fast; failure mode is bimodal
+### DF8 — `containerd-vm` "agent idle after prompt" fires across the full range of startup times; root cause is NOT startup-tuning
 
-- **Discovered:** 2026-05-26 · **Workstream:** observed during W-L8b kickoff (second smoke run, log `yoloai-smoketest-20260526-054703.093`)
+- **Discovered:** 2026-05-26 · **Workstream:** observed during W-L8b kickoff
 - **Severity:** LOW
 - **Disposition:** PARKED
-- **Description:** A second `full_workflow/containerd-vm` failure in this session showed the same end-state as the first (DF3-6 source failure) — `do_epoll_wait + no connections -> idle`, agent never made a TCP request — but with a **fast 11s `wait_for_ready`** (vs the previous failure's 46s). This rules out slow-startup-eats-the-grace as the *sole* explanation: the agent reached READY quickly, the prompt was delivered cleanly, then it sat idle for the rest of the budget. Additionally, this run **passed on retry**, where the previous one failed both attempts. Together these two data points imply the failure is bimodal:
-  - **Type A (slow startup):** `wait_for_ready` takes ~30-50s. By the time the agent is ready to receive the prompt, the grace window is mostly consumed. Often fails both attempts. DF7 covers this.
-  - **Type B (post-ready idle):** `wait_for_ready` is normal (~10s). Prompt delivered cleanly. Agent then sits in `do_epoll_wait` without making the API call. Usually transient (retries succeed). DF2's tool-less-response hypothesis is the leading candidate, but unconfirmed without DF3's rendered transcripts.
-  These probably need different fixes. Type A is tuning; Type B is agent-behavior (or possibly a state-machine race in Claude Code's startup-to-prompt handoff specific to slow VMs the *first* time around — note Type B usually passes on retry, suggesting some warming effect even within the same VM image). The current "agent idle 9s+" message conflates them.
-- **Pointer:** `runtime/monitor/` (detector source), `scripts/smoke_test.py::wait_for_sentinel`, cross-ref DF2 / DF6 / DF7
+- **Description:** Three `full_workflow/containerd-vm` failures in the same session, all sharing identical end-state (`do_epoll_wait + no connections -> idle`, agent never made a TCP request after prompt delivery). The `wait_for_ready` durations span the full range:
+
+  | Run | `wait_for_ready` | Retry result | Wchan idle entries |
+  |---|---|---|---|
+  | 1 (050950.470) | 46 s | Failed | 46 |
+  | 2 (054703.093) | 11 s | **Passed** | 46 |
+  | 3 (061232.921) | 24 s | (attempt 1 captured) | 40 |
+
+  Three points across 11s / 24s / 46s startup demonstrate the failure is **not** correlated with startup latency. The agent reaches READY, the prompt is delivered cleanly via paste-buffer, and then the agent sits in `do_epoll_wait` with no TCP socket ever being opened. The earlier bimodal framing (Type A = slow startup, Type B = post-ready idle) collapses: all three are Type B; Type A is uncorroborated and probably doesn't exist as a separate failure mode.
+
+  **Refined hypothesis:** the failure is purely post-prompt agent-behavior on `containerd-vm`. Other backends (docker, podman, docker-cenhanced, containerd-vmenhanced) PASS consistently in the same runs, so the trigger is something specific to the Kata+QEMU environment that the agent process is running in. Plausible candidates:
+
+  - **DF2's tool-less response on Haiku** under QEMU's resource profile (slower CPU → different generation latencies → different model output behavior).
+  - **PTY/tmux paste-buffer delivery edge case under QEMU** where the prompt is partially-delivered or arrives in a state Claude's input loop swallows without firing.
+  - **Kata networking warm-up race** where the network namespace isn't fully wired before the agent's first API attempt; subsequent connections succeed (consistent with retries passing).
+
+  Confirmation requires DF3 (rendered tmux capture-pane snapshot) — without it we cannot tell if the agent saw the prompt, what it printed in response, or whether it tried and failed at the network layer.
+
+- **Pointer:** `runtime/monitor/` (detector source), `scripts/smoke_test.py::wait_for_sentinel`, cross-ref DF2 / DF3 / DF7. DF7 is **further downweighted** — three failures across 11–46s startup conclusively rule out startup-tuning as the fix.
 
 ## Policy origin
 
