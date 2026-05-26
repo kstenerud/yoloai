@@ -61,9 +61,9 @@ func captureNetworkDiagnostics(ctx context.Context, r *Runtime, name string, tas
 	fmt.Fprintf(&buf, "HOST-SIDE state\n")
 	fmt.Fprintf(&buf, "============================================================\n")
 
-	cniStatePath := filepath.Join(sandboxDir, "cni-state.json")
-	fmt.Fprintf(&buf, "\n== cni-state.json (%s) ==\n", cniStatePath)
-	if cniState, err := os.ReadFile(cniStatePath); err != nil { //nolint:gosec // G304: internal path under user's home, fixed layout
+	statePath := cniStatePath(sandboxDir)
+	fmt.Fprintf(&buf, "\n== cni-state.json (%s) ==\n", statePath)
+	if cniState, err := os.ReadFile(statePath); err != nil { //nolint:gosec // G304: internal path under user's home, fixed layout
 		fmt.Fprintf(&buf, "ERROR: %v\n", err)
 	} else {
 		buf.Write(cniState)

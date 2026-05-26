@@ -8,11 +8,15 @@ package containerdrt
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	cni "github.com/containerd/go-cni"
 	"github.com/vishvananda/netns"
@@ -23,6 +27,14 @@ import (
 
 // cniStateFileName is the filename for per-sandbox CNI state.
 const cniStateFileName = "cni-state.json"
+
+// errFirewallRulesMissing is returned by runCNIAdd when n.Setup reports
+// success but the CNI firewall plugin did not actually install CNI-FORWARD
+// ACCEPT rules for the allocated IP. See DF9 in discovered-findings.md and
+// the "Firewall plugin: silent no-op when result.IPs is empty" entry in
+// backend-idiosyncrasies.md. setupCNI uses errors.Is to detect this and
+// retry once with a fresh netns + IPAM allocation.
+var errFirewallRulesMissing = errors.New("CNI firewall rules missing after ADD")
 
 // cniConflistTemplate is the CNI configuration for the yoloai network.
 // Written once to ~/.yoloai/cni/yoloai.conflist on first use.
@@ -190,6 +202,28 @@ func setupCNI(ctx context.Context, layout config.Layout, sandboxDir, containerNa
 	if err := runCNIAdd(ctx, layout, netnsPath, sandboxDir, containerName); err != nil {
 		_ = deleteNetNS(nsName)
 		cleanupStaleIPAMLeases(containerName)
+
+		// DF9: the firewall plugin can silently no-op, leaving the netns wired
+		// at the link layer but with no CNI-FORWARD ACCEPT rules. Self-heal by
+		// retrying ADD once with a fresh netns + IPAM allocation. Any other
+		// failure mode is surfaced directly to the caller.
+		if errors.Is(err, errFirewallRulesMissing) {
+			slog.Warn("CNI firewall rules missing after ADD; retrying once",
+				"event", "sandbox.network.firewall_retry",
+				"container", containerName,
+				"first_err", err.Error())
+			netnsPath, err = createNetNS(nsName)
+			if err != nil {
+				return "", err
+			}
+			if retryErr := runCNIAdd(ctx, layout, netnsPath, sandboxDir, containerName); retryErr != nil {
+				_ = deleteNetNS(nsName)
+				cleanupStaleIPAMLeases(containerName)
+				return "", fmt.Errorf("CNI setup (retry after firewall no-op): %w", retryErr)
+			}
+			return netnsPath, nil
+		}
+
 		return "", fmt.Errorf("CNI setup: %w", err)
 	}
 
@@ -224,17 +258,32 @@ func runCNIAdd(ctx context.Context, layout config.Layout, netnsPath, sandboxDir,
 		return fmt.Errorf("CNI ADD: %w", err)
 	}
 
-	// Extract IP from result for state persistence.
+	// Extract IP from result for state persistence and the post-ADD firewall
+	// rule check. The /32 host form is what the firewall plugin writes into
+	// CNI-FORWARD; the /16 subnet form is what setupCNI persists.
 	ip := ""
 	if iface, ok := result.Interfaces["eth0"]; ok && len(iface.IPConfigs) > 0 {
-		ip = iface.IPConfigs[0].IP.String() + "/16"
+		ip = iface.IPConfigs[0].IP.String()
 	}
 
+	// DF9 verify: n.Setup can return success while the firewall plugin
+	// silently no-ops (see errFirewallRulesMissing). Confirm rules exist
+	// before persisting state; setupCNI handles the retry.
+	if ip != "" {
+		if err := verifyCNIForwardRules(ctx, ip); err != nil {
+			return err
+		}
+	}
+
+	stateIP := ""
+	if ip != "" {
+		stateIP = ip + "/16"
+	}
 	state := cniState{
 		NetnsName: "yoloai-" + containerName,
 		NetnsPath: netnsPath,
 		Interface: "eth0",
-		IP:        ip,
+		IP:        stateIP,
 	}
 
 	stateDir := filepath.Join(sandboxDir, config.BackendDirName)
@@ -311,4 +360,40 @@ func runCNIDel(ctx context.Context, layout config.Layout, state cniState) error 
 	}
 
 	return n.Remove(ctx, containerName, state.NetnsPath)
+}
+
+// verifyCNIForwardRules confirms the CNI firewall plugin actually installed
+// ACCEPT rules for ip in the CNI-FORWARD chain. Returns errFirewallRulesMissing
+// when iptables succeeds but no matching rule is present (the DF9 signature) —
+// callers retry on this. Other failures (iptables binary missing, exec error)
+// are returned wrapped, since they indicate something different.
+//
+// ip must be the bare dotted form (e.g. "10.89.1.90"); the firewall plugin
+// writes rules with the /32 host mask.
+func verifyCNIForwardRules(ctx context.Context, ip string) error {
+	cmdCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(cmdCtx, "iptables", "-t", "filter", "-S", "CNI-FORWARD").CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("iptables -S CNI-FORWARD for %s: %w (output: %s)", ip, err, strings.TrimSpace(string(out)))
+	}
+	if !cniForwardHasIP(string(out), ip) {
+		return fmt.Errorf("%w: ip %s", errFirewallRulesMissing, ip)
+	}
+	return nil
+}
+
+// cniForwardHasIP returns true if the iptables -S CNI-FORWARD dump contains
+// at least one ACCEPT rule referencing ip with the /32 host mask. The CNI
+// firewall plugin writes two rules per container (RELATED,ESTABLISHED inbound
+// and outbound ACCEPT); either being present is sufficient to confirm the
+// plugin ran. Pure function; tested independently of iptables.
+func cniForwardHasIP(chainDump, ip string) bool {
+	needle := ip + "/32"
+	for _, line := range strings.Split(chainDump, "\n") {
+		if strings.Contains(line, needle) && strings.Contains(line, "ACCEPT") {
+			return true
+		}
+	}
+	return false
 }

@@ -31,6 +31,7 @@ row to the index.
 | CNI bridge plugin: "netns and CNI_NETNS should not be the same" | [CNI: netns.NewNamed switches OS thread](#netnsnewnamed-switches-the-os-thread-via-unshare-and-never-restores-it) |
 | `createNetNS` fails with "file exists" (EEXIST) | [CNI: stale netns file](#stale-named-netns-files-at-varrunnetnsname-persist-after-failed-runs) |
 | CNI-FORWARD rules deleted for a running container | [CNI: pre-flight n.Remove deletes live rules](#the-pre-flight-nremove-can-delete-rules-for-running-containers) |
+| CNI ADD succeeds but container has no outbound connectivity (POSTROUTING present, CNI-FORWARD ACCEPT missing) | [CNI: firewall plugin silent no-op (DF9)](#firewall-plugin-silent-no-op-when-resultips-is-empty) |
 | IPAM allocates duplicate IP after replace | [CNI: stale IPAM lease](#cnI-results-cache-lives-at-varlibcniresults) |
 | Two concurrent `yoloai new` with same name corrupts networking | [CNI: concurrent creation race](#two-yoloai-new-invocations-for-the-same-container-name-within-1s-will-corrupt-networking) |
 | `--network-isolated` silently unenforced under `--isolation container-enhanced` | [gVisor netstack ignores iptables](#gvisor-netstack-ignores-in-sandbox-iptables-rules) |
@@ -250,6 +251,27 @@ pre-flight DEL (which passes an empty prevResult when there's no cache). BUT if
 something causes `parseConf` to return an empty result during ADD (e.g., the
 bridge plugin passes no IPs), the firewall plugin silently succeeds without adding
 any CNI-FORWARD rules. No error is returned.
+
+**Confirmed in production 2026-05-26** — see DF9 in `discovered-findings.md`.
+Smoke run `yoloai-smoketest-20260526-175645.907` captured the exact signature
+in `attempt2/.../network-diag.txt`: POSTROUTING masquerade for `10.89.1.90`
+present (bridge plugin ran), CNI-FORWARD ACCEPT rules for `10.89.1.90`
+absent (firewall plugin no-op'd), while sibling `10.89.1.88` from the same
+smoke run had both. `n.Setup` returned success and `cni-state.json` was
+written — the only way to detect the failure is to inspect iptables after
+ADD.
+
+**Mitigation in `cni.go`:** `runCNIAdd` calls `verifyCNIForwardRules(ctx, ip)`
+after `n.Setup` returns. It greps `iptables -S CNI-FORWARD` for `<ip>/32 …
+ACCEPT` and returns the sentinel `errFirewallRulesMissing` when no match.
+`setupCNI` catches the sentinel via `errors.Is`, tears down the netns +
+IPAM lease, and retries CNI ADD **once**. The retry emits
+`sandbox.network.firewall_retry` warn log — grep for it in production logs
+to track upstream-bug recurrence.
+
+If you see the retry warn log AND the subsequent probe still times out,
+the no-op fired on both attempts — surface to upstream investigation, do
+not extend the retry budget without diagnosing first.
 
 ### `SetupIPMasq` creates a **chain jump**, not a bare MASQUERADE
 

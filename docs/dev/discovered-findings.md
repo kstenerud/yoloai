@@ -27,29 +27,48 @@ Findings that turned up mid-workstream (architecture-remediation, layering-refac
 
 - **Discovered:** 2026-05-26 · **Workstream:** containerd backend reliability
 - **Severity:** MEDIUM (smoke-test retry masks; agent users see "Unable to connect to API")
-- **Disposition:** OPEN
+- **Disposition:** ROOT-CAUSED + MITIGATED 2026-05-26. Hypothesis 2 confirmed: CNI **firewall** plugin silently no-ops while `n.Setup` returns success. Self-heal landed in `setupCNI` (post-ADD verify + retry once). Underlying upstream behavior is still untriaged; the verify is the production safeguard, not a fix in the plugin itself.
 
 - **Description:** With DF8 V3 landed (probe verifies DNS + external TCP, retries on failure), one out of four containerd-vm runs still fails first-attempt with `dns=fail tcp=fail`. The smoking gun: V3's probe correctly ran 7 attempts over 31 seconds, every attempt exited 1 (script's "not ready" exit), then the 30s outer budget expired and V3 warned-and-proceeded per its best-effort policy. The agent then launched, attempted API calls, and got `FailedToOpenSocket` for the entire run.
 
   This is **not** the DF8 warm-up race. In DF8, the network comes up within a few seconds of `task.Start` returning; V3 waits and detects it. Here the network never comes up at all — V3's probe never sees DNS or TCP succeed in 30 seconds of polling.
 
-  The retry sandbox (fresh Kata VM) succeeded normally, so the failure is **instance-specific**, not a permanent Kata-on-this-host bug. Hypotheses (untested):
+  The retry sandbox (fresh Kata VM) succeeded normally, so the failure is **instance-specific**, not a permanent Kata-on-this-host bug. Hypotheses (one now confirmed):
 
   1. **CNI IPAM lease contention.** Two sandboxes created in quick succession could collide on the host-local-ipam range; one VM gets a working IP, the other gets a partially-configured netns.
-  2. **CNI plugin transient failure.** `firewall` or `bridge` plugin returns an error that isn't fatal at CNI ADD time but leaves the netns half-wired.
+  2. **CNI plugin transient failure.** `firewall` or `bridge` plugin returns an error that isn't fatal at CNI ADD time but leaves the netns half-wired. **CONFIRMED — see "Smoking gun" below.** Specifically: the `firewall` plugin returns success without installing any `CNI-FORWARD` ACCEPT rules. The bridge plugin runs fine (POSTROUTING MASQUERADE rule, IPAM lease, `eth0` in netns all present).
   3. **Kernel resource exhaustion** (conntrack table, neighbor cache, br_netfilter limits) — affects only some VMs.
   4. **Kata-internal netdev teardown not completing on prior shim crash** — partial state survives.
 
-- **Evidence:** `yoloai-smoketest-20260526-163655.031/full_workflow-containerd-vm.log` contains the `sandbox.network.probe_timeout attempts=7 elapsed_ms=31442 last_err="probe exit 1: "` warning. Preserved attempt dir has terminal-snapshot.txt with agent's `Unable to connect to API (FailedToOpenSocket) Retrying in 32s · attempt 8/10`.
+- **Evidence (initial, 163655.031):** `yoloai-smoketest-20260526-163655.031/full_workflow-containerd-vm.log` contains the `sandbox.network.probe_timeout attempts=7 elapsed_ms=31442 last_err="probe exit 1: "` warning. Preserved attempt dir has terminal-snapshot.txt with agent's `Unable to connect to API (FailedToOpenSocket) Retrying in 32s · attempt 8/10`.
+
+- **Smoking gun (175645.907, with network-diag.txt landed):** `full_workflow/containerd-vmenhanced` attempt2 captured the actual host-side state at probe-timeout time. The failing sandbox is `10.89.1.90`:
+
+  | Layer | State |
+  |---|---|
+  | Netns + `eth0` + default route | present, healthy |
+  | `cni-state.json` written | yes (overall CNI ADD reported success) |
+  | POSTROUTING masquerade for `10.89.1.90` | **PRESENT** (bridge plugin ran) |
+  | CNI-FORWARD ACCEPT rules for `10.89.1.90` | **MISSING** (firewall plugin no-op'd) |
+  | Sibling `10.89.1.88` (same smoke run, vm not vmenhanced) | both rule sets present |
+
+  FORWARD policy is `DROP`, so DNS/TCP from the VM is dropped at the host bridge. Matches the documented "Firewall plugin: silent no-op when `result.IPs` is empty" pathology in [backend-idiosyncrasies.md](backend-idiosyncrasies.md). Why it fires for sibling-but-not-this-IP within a single smoke run is still unknown (upstream firewall plugin internal).
 
 - **Why V3's 30s budget isn't the fix:** extending the budget would just make sandboxes that are permanently broken wait longer before the agent starts failing. V3 is already correctly detecting the broken state; we shouldn't paper over it by waiting more.
 
-- **Proposed remediation (not yet implemented):**
-  - When V3's probe exhausts its budget, treat that as a real failure signal (not just a warning).
-  - In Start(), if `waitForNetworkReady` times out, tear down the task/VM and re-create it once. This is what the smoke-test retry does at the outer level; doing it inside Start would make the user-visible behavior identical to a successful retry.
-  - Alternative: investigate root cause (run CNI debugging tools, check IPAM lease state on the failed attempt) before adding retry-inside-Start. Investigating once may save building a workaround.
+- **Mitigation landed 2026-05-26 (commit pending):**
+  - `runCNIAdd` now calls `verifyCNIForwardRules(ctx, ip)` after `n.Setup` returns success. It shells out to `iptables -S CNI-FORWARD`, looks for an `ACCEPT` line referencing `<ip>/32`, and returns `errFirewallRulesMissing` (sentinel) when no such line exists. `cniForwardHasIP` is a pure helper covered by unit tests.
+  - `setupCNI` detects the sentinel via `errors.Is`, recreates the netns + IPAM lease, retries CNI ADD **once**. A successful retry returns normally; a second failure surfaces as `CNI setup (retry after firewall no-op): …`. The retry emits a `sandbox.network.firewall_retry` warn log so production occurrences can be grepped.
+  - Net effect: the DF9 silent-no-op symptom should no longer reach `waitForNetworkReady`. If it ever does, you'll see the warn log AND the probe-timeout warning together — that's the "retry also failed" case and warrants upstream investigation.
 
-- **Pointer:** `runtime/containerd/lifecycle.go::Start`, `runtime/containerd/cni.go::setupCNI`. Cross-ref DF8 (warm-up race, separate cause).
+- **Diagnostic path bug fixed in the same change:** `network_diag.go` was reading `<sandboxDir>/cni-state.json` while the writer (`cni.go:cniStatePath`) uses `<sandboxDir>/backend/cni-state.json`. The diag now uses the shared `cniStatePath()` helper, so future DF9 captures will actually surface the state file instead of always reporting ENOENT.
+
+- **Open follow-ups (not blocking):**
+  - **Upstream root cause.** Why does the firewall plugin (CNI v1.9.1) sometimes produce an empty `prevResult.IPs` after a successful bridge ADD within a single run? Suspected: a stale `/var/lib/cni/results/yoloai-<containerName>-eth0` cache from a sibling teardown elsewhere — but the existing `cleanupStaleCNIResultsCache` already targets that path. May be CNI-version-result-conversion bug or an interaction with iptables-nft locking. Worth reproducing under instrumentation if it recurs after the mitigation.
+  - **Detection-only mode for prod.** Right now the retry is silent (warn log only). If we ever see the same sandbox fail twice in a row in production, surface a structured event to the user, not just slog.
+  - **Smoke-test signal.** Grep `sandbox.network.firewall_retry` in smoke runs; any occurrence is a free upstream data point even when the run passes.
+
+- **Pointer:** `runtime/containerd/cni.go::setupCNI`, `::runCNIAdd`, `::verifyCNIForwardRules`, `::cniForwardHasIP`, `::errFirewallRulesMissing`. Cross-ref DF8 (warm-up race, separate cause) and [backend-idiosyncrasies.md](backend-idiosyncrasies.md) (the "Firewall plugin: silent no-op" entry + the new "Post-ADD verify" entry pointing back here).
 
 ### DF1 — `--security` flag was never in a tagged release; existing BREAKING-CHANGES entry is misleading
 

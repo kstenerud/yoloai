@@ -63,6 +63,41 @@ func TestTeardownCNI_Idempotent(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+// TestCNIForwardHasIP verifies the pure parsing helper detects ACCEPT rules
+// containing the /32 host form of the IP, and rejects unrelated chain dumps.
+// The realistic positive sample mirrors `iptables -S CNI-FORWARD` output
+// captured during a healthy run; the negative sample mirrors the DF9
+// signature (POSTROUTING masquerade present, CNI-FORWARD ACCEPT absent).
+func TestCNIForwardHasIP(t *testing.T) {
+	healthy := `-N CNI-FORWARD
+-A CNI-FORWARD -j CNI-ADMIN
+-A CNI-FORWARD -d 10.89.1.90/32 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+-A CNI-FORWARD -s 10.89.1.90/32 -j ACCEPT
+-A CNI-FORWARD -d 10.89.1.88/32 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+-A CNI-FORWARD -s 10.89.1.88/32 -j ACCEPT
+`
+	assert.True(t, cniForwardHasIP(healthy, "10.89.1.90"))
+	assert.True(t, cniForwardHasIP(healthy, "10.89.1.88"))
+
+	// Sibling-only chain: 10.89.1.88 present, 10.89.1.90 missing (DF9 case).
+	siblingOnly := `-N CNI-FORWARD
+-A CNI-FORWARD -j CNI-ADMIN
+-A CNI-FORWARD -d 10.89.1.88/32 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+-A CNI-FORWARD -s 10.89.1.88/32 -j ACCEPT
+`
+	assert.False(t, cniForwardHasIP(siblingOnly, "10.89.1.90"))
+
+	// Substring guard: 10.89.1.9 must NOT match 10.89.1.90/32.
+	assert.False(t, cniForwardHasIP(healthy, "10.89.1.9"))
+
+	// Drop rules (no ACCEPT) must not satisfy the check.
+	dropOnly := `-A CNI-FORWARD -s 10.89.1.90/32 -j DROP
+`
+	assert.False(t, cniForwardHasIP(dropOnly, "10.89.1.90"))
+
+	assert.False(t, cniForwardHasIP("", "10.89.1.90"))
+}
+
 // TestEnsureCNIConflist writes the conflist to a temp dir.
 func TestEnsureCNIConflist(t *testing.T) {
 	// Override the CNI conf dir by pointing to a temp dir.
