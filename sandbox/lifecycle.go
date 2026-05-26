@@ -807,6 +807,7 @@ func (m *Manager) recreateContainer(ctx context.Context, name string, meta *stor
 		isolation:    meta.Isolation,
 		vscodeTunnel: meta.VscodeTunnel,
 		configJSON:   configData,
+		layout:       m.layout,
 	}
 
 	if resume {

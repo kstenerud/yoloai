@@ -6,9 +6,11 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/kstenerud/yoloai/config"
 	"github.com/kstenerud/yoloai/internal/testutil"
 	dockerrt "github.com/kstenerud/yoloai/runtime/docker"
 	sandbox "github.com/kstenerud/yoloai/sandbox"
@@ -22,13 +24,14 @@ func integrationSetup(t *testing.T) (*sandbox.Manager, context.Context) {
 	t.Helper()
 	ctx := context.Background()
 
-	testutil.IsolatedHome(t)
+	home := testutil.IsolatedHome(t)
+	layout := config.NewLayout(filepath.Join(home, ".yoloai"))
 
 	rt, err := dockerrt.New(ctx)
 	require.NoError(t, err, "Docker must be running for integration tests")
 	t.Cleanup(func() { rt.Close() }) //nolint:errcheck // test cleanup
 
-	mgr := sandbox.NewManager(rt, slog.Default(), strings.NewReader(""), io.Discard)
+	mgr := sandbox.NewManager(rt, slog.Default(), strings.NewReader(""), io.Discard, sandbox.WithLayout(layout))
 	require.NoError(t, mgr.EnsureSetup(ctx))
 
 	return mgr, ctx
