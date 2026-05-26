@@ -1,0 +1,99 @@
+# `internal/cli/` conventions
+
+Patterns Cobra command handlers in this package follow. These are written
+after each pattern earned its place — read this before writing a new
+command, but don't apply patterns where they don't fit.
+
+## Construction: `withClient` vs `withRuntime`
+
+Two helpers in `helpers.go` open a backend connection, defer the close, and
+hand control to a callback. Pick the smallest one that does the job.
+
+- **`withClient(cmd, backend, fn)`** — opens a `yoloai.Client`. Use for
+  command handlers that only need orchestration-level operations: `Run`,
+  `Stop`, `Destroy`, `List`, `Inspect`, `Diff`, `Apply`. The Client wraps
+  a `runtime.Runtime` plus a `sandbox.Manager` with a §12-clean Layout
+  derived from `cliLayout()`. This is the default for new commands.
+- **`withRuntime(ctx, backend, fn)`** — exposes the raw `runtime.Runtime`.
+  Use only when the handler needs operations not on `yoloai.Client`: image
+  probing, raw `Exec`, container inspect/logs, tmux attach helpers,
+  per-backend availability checks, multi-backend enumeration (e.g.
+  `sandbox list` walks every backend, not one).
+
+The migration to `withClient` is incremental. A handler that calls
+`withRuntime + sandbox.NewManager` is the old shape; reach for `withClient`
+when touching that handler for any other reason.
+
+## Path resolution: `cliLayout()`
+
+Every path under `~/.yoloai/` comes from `cliLayout()` (defined in
+`layout_bridge.go`) — that is the ONE place in the CLI that reads `$HOME`.
+A handler that constructs a `sandbox.NewManager` directly must pass
+`sandbox.WithLayout(cliLayout())`; otherwise the Manager panics at
+construction. `withClient` handles this automatically.
+
+Never call `config.YoloaiDir()`, `config.SandboxesDir()`, etc. — those
+helpers were deleted in Q-W.6. Use the Layout methods instead
+(`cliLayout().SandboxesDir()`, `cliLayout().ProfileDir(name)`).
+
+## Backend selection
+
+Resolution priority for the `--backend` flag, in order:
+
+1. `--backend` flag (if set; not present on all commands).
+2. For lifecycle commands operating on a named sandbox
+   (`stop`/`start`/`destroy`/etc.): `resolveBackendForSandbox(name)`
+   reads the backend from the sandbox's `meta.json`.
+3. `resolveContainerBackendConfig()` for the config default.
+4. `runtime.SelectContainerBackend(ctx, cfg)` picks a platform default.
+
+Pattern: resolve the backend BEFORE calling `withClient`/`withRuntime` —
+the helpers take the resolved name as a string. The `stop.go` handler is
+the canonical example.
+
+## Name resolution: arg, env, `--all`
+
+Lifecycle commands accept one or more sandbox names with these
+precedences (every command supports the same set; share the helpers in
+`envname.go`):
+
+1. Positional args (validate each with `store.ValidateName`).
+2. `$YOLOAI_SANDBOX` (the env-name fallback for `cd`-style workflows).
+3. `--all` (mutually exclusive with positional args; returns a typed
+   `UsageError`).
+
+`resolveStopNames` in `stop.go` is the canonical name-resolution
+function. Other commands have parallel `resolve<Verb>Names`.
+
+## JSON output
+
+Every user-facing command supports `--json`. Pattern:
+
+```go
+if jsonEnabled(cmd) {
+    return writeJSON(cmd.OutOrStdout(), payload)
+}
+// human-readable output
+```
+
+JSON output is for scripting and integration; human output is the
+default. Empty results print "No <thing> to <verb>" in human mode and an
+empty array in JSON mode. JSON-incompatible flags (e.g. `--attach`)
+return a `UsageError` early.
+
+## Logging
+
+`slog.Info("verb sandbox", "event", "sandbox.verb", "sandbox", name)`
+is the standard structured-log shape. Pair every action log with a
+completion log: `"sandbox.verb.complete"`. Tests assert on these
+event keys; new ones should match `sandbox.<verb>(.<phase>)?`.
+
+## Errors
+
+- Validation/usage errors → `sandbox.NewUsageError(...)`. Maps to exit
+  code 2 in `errorExitCode`.
+- Wrapped runtime errors → `fmt.Errorf("connect to runtime: %w", err)`
+  pattern. Preserve sentinel errors with `%w` so `errors.Is/As` keeps
+  working at the call site.
+- For lifecycle commands, run errors through `sandboxErrorHint(name, err)`
+  to add the standard "did you mean..." hint.

@@ -1,4 +1,4 @@
-// ABOUTME: Backend/agent/model/profile resolution helpers and withRuntime/withManager
+// ABOUTME: Backend/agent/model/profile resolution helpers and withRuntime/withClient
 // ABOUTME: wrappers shared by all Cobra command handlers in internal/cli.
 package cli
 
@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 
+	yoloai "github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/config"
 	"github.com/kstenerud/yoloai/runtime"
 	_ "github.com/kstenerud/yoloai/runtime/docker"   // register backend
@@ -129,6 +130,9 @@ func resolveBackendForSandbox(name string) string {
 }
 
 // withRuntime creates a runtime for the given backend, calls fn, and ensures cleanup.
+// Prefer withClient for new code; withRuntime is kept for command handlers that
+// still need direct runtime access (image probing, raw exec, tmux helpers).
+// See internal/cli/CONVENTIONS.md.
 func withRuntime(ctx context.Context, backend string, fn func(ctx context.Context, rt runtime.Runtime) error) error {
 	rt, err := newRuntime(ctx, backend)
 	if err != nil {
@@ -136,6 +140,27 @@ func withRuntime(ctx context.Context, backend string, fn func(ctx context.Contex
 	}
 	defer rt.Close() //nolint:errcheck // best-effort cleanup
 	return fn(ctx, rt)
+}
+
+// withClient constructs a yoloai.Client for the given backend, calls fn, and
+// closes the client. Preferred entry point for command handlers that only need
+// orchestration-level operations (Stop, Destroy, List, Inspect, Diff, Apply,
+// Run). The Client wraps a runtime + sandbox.Manager with §12-clean Layout
+// derived from cliLayout(). See internal/cli/CONVENTIONS.md.
+func withClient(cmd *cobra.Command, backend string, fn func(ctx context.Context, c *yoloai.Client) error) error {
+	ctx := cmd.Context()
+	c, err := yoloai.NewWithOptions(ctx, yoloai.Options{
+		DataDir: cliLayout().DataDir,
+		Backend: backend,
+		Logger:  slog.Default(),
+		Input:   cmd.InOrStdin(),
+		Output:  cmd.ErrOrStderr(),
+	})
+	if err != nil {
+		return fmt.Errorf("connect to runtime: %w", err)
+	}
+	defer c.Close() //nolint:errcheck // best-effort cleanup
+	return fn(ctx, c)
 }
 
 // resolveAgent determines the agent name from --agent flag, then config,

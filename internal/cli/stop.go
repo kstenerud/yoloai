@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 
+	yoloai "github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/sandbox"
 	"github.com/kstenerud/yoloai/sandbox/store"
@@ -35,7 +36,7 @@ func runStopCmd(cmd *cobra.Command, args []string) error {
 		return sandbox.NewUsageError("cannot specify sandbox names with --all")
 	}
 
-	// Resolve backend: from first named sandbox, or config default for --all
+	// Resolve backend: from first named sandbox, or config default for --all.
 	backend, warn := runtime.SelectContainerBackend(cmd.Context(), resolveContainerBackendConfig())
 	if warn != "" {
 		fmt.Fprintln(os.Stderr, warn)
@@ -48,25 +49,22 @@ func runStopCmd(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	return withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
-		mgr := sandbox.NewManager(rt, slog.Default(), cmd.InOrStdin(), cmd.ErrOrStderr(), sandbox.WithLayout(cliLayout()))
-
-		names, err := resolveStopNames(cmd, ctx, rt, args, all)
+	return withClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
+		names, err := resolveStopNames(cmd, ctx, c, args, all)
 		if err != nil {
 			return err
 		}
 		if names == nil {
 			return nil // empty list already handled
 		}
-
-		return executeStop(cmd, ctx, mgr, names)
+		return executeStop(cmd, ctx, c, names)
 	})
 }
 
 // resolveStopNames resolves sandbox names to stop. Returns nil if already handled (empty with output).
-func resolveStopNames(cmd *cobra.Command, ctx context.Context, rt runtime.Runtime, args []string, all bool) ([]string, error) {
+func resolveStopNames(cmd *cobra.Command, ctx context.Context, c *yoloai.Client, args []string, all bool) ([]string, error) {
 	if all {
-		return resolveStopAll(cmd, ctx, rt)
+		return resolveStopAll(cmd, ctx, c)
 	}
 	if len(args) == 0 {
 		return resolveStopFromEnv()
@@ -80,8 +78,8 @@ func resolveStopNames(cmd *cobra.Command, ctx context.Context, rt runtime.Runtim
 }
 
 // resolveStopAll collects running sandbox names when --all is set.
-func resolveStopAll(cmd *cobra.Command, ctx context.Context, rt runtime.Runtime) ([]string, error) {
-	infos, err := sandbox.ListSandboxes(ctx, cliLayout(), rt)
+func resolveStopAll(cmd *cobra.Command, ctx context.Context, c *yoloai.Client) ([]string, error) {
+	infos, err := c.List(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -117,7 +115,7 @@ func resolveStopFromEnv() ([]string, error) {
 }
 
 // executeStop stops sandboxes and returns an error if any fail.
-func executeStop(cmd *cobra.Command, ctx context.Context, mgr *sandbox.Manager, names []string) error {
+func executeStop(cmd *cobra.Command, ctx context.Context, c *yoloai.Client, names []string) error {
 	type stopResult struct {
 		Name   string `json:"name"`
 		Action string `json:"action,omitempty"`
@@ -128,7 +126,7 @@ func executeStop(cmd *cobra.Command, ctx context.Context, mgr *sandbox.Manager, 
 		var results []stopResult
 		for _, name := range names {
 			slog.Info("stopping sandbox", "event", "sandbox.stop", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
-			if err := mgr.Stop(ctx, name); err != nil {
+			if err := c.Stop(ctx, name); err != nil {
 				results = append(results, stopResult{Name: name, Error: err.Error()})
 			} else {
 				slog.Info("sandbox stopped", "event", "sandbox.stop.complete", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
@@ -141,7 +139,7 @@ func executeStop(cmd *cobra.Command, ctx context.Context, mgr *sandbox.Manager, 
 	var errs []error
 	for _, name := range names {
 		slog.Info("stopping sandbox", "event", "sandbox.stop", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
-		if err := mgr.Stop(ctx, name); err != nil {
+		if err := c.Stop(ctx, name); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: stop %s: %v\n", name, sandboxErrorHint(name, err)) //nolint:errcheck // best-effort output
 			errs = append(errs, err)
 		} else {
