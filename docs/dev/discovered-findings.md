@@ -136,6 +136,12 @@ Findings that turned up mid-workstream (architecture-remediation, layering-refac
 
 - **Pointer:** `runtime/monitor/` (detector source), `scripts/smoke_test.py::wait_for_sentinel`, cross-ref DF2 / DF3 / DF7. DF7 is **further downweighted** — three failures across 11–46s startup conclusively rule out startup-tuning as the fix.
 
+### DF8 (6th data point, 2026-05-26): `containerd-vmenhanced` exhibits the same failure mode
+
+- Log `yoloai-smoketest-20260526-120447.993`. First observation of `full_workflow/containerd-vmenhanced` failing the same way `containerd-vm` has been failing: "agent idle 9s+ without sentinel 'done'", passed on retry. Same session: docker / podman / docker-cenhanced / containerd-vm all PASS, only vmenhanced fails first attempt. Host `/` at 76% / 18G free rules out the disk-pressure pattern from `smoke-containerd-disk-pressure` project memory.
+- **Implication:** the failure family is not unique to the `containerd-vm` snapshotter setup — `containerd-vmenhanced` (devmapper snapshotter) reproduces it too. What's common is Kata+QEMU, not the snapshotter. Both candidates in the refined hypothesis (Haiku tool-less response under QEMU CPU profile, or Kata networking warm-up race) remain consistent.
+- Still PARKED pending DF3's rendered tmux capture-pane snapshot. Action item unchanged.
+
 ## Policy origin
 
 Established in [architecture-remediation.md](plans/architecture-remediation.md) and inherited by [layering-refactor.md](plans/layering-refactor.md).

@@ -49,6 +49,22 @@ linters:
           msg: "use fileutil.OpenFile (handles sudo chown on O_CREATE)"
         - pattern: "^os\\.MkdirAll$"
           msg: "use fileutil.MkdirAll (handles sudo chown)"
+
+        # W-L10 / Q-W.6 enforcement of development-principles.md §12 (No
+        # ambient configuration). Library boundaries take all configuration
+        # as explicit arguments; ambient HOME / config / cache / cwd are
+        # resolved only at the outermost layer (CLI startup) and passed
+        # down as a config.Layout. A future regression that calls these
+        # outside the allowlist silently reintroduces the ambient-HOME leak
+        # Q-W.6 just deleted across 85 files.
+        - pattern: "^os\\.UserHomeDir$"
+          msg: "use cliLayout() (CLI) or the config.Layout passed in (library); only internal/cli/layout_bridge.go may call os.UserHomeDir directly — see development-principles.md §12"
+        - pattern: "^os\\.UserConfigDir$"
+          msg: "yoloai does not use the XDG config dir; resolve paths via config.Layout — see development-principles.md §12"
+        - pattern: "^os\\.UserCacheDir$"
+          msg: "yoloai does not use the XDG cache dir; resolve paths via config.Layout.CacheDir() — see development-principles.md §12"
+        - pattern: "^os\\.Getwd$"
+          msg: "no silent CWD-as-default; commands accepting paths must take them explicitly — see development-principles.md §12"
   exclusions:
     rules:
       # The fileutil package itself is allowed to call the stdlib functions it wraps.
@@ -62,6 +78,13 @@ linters:
       - path: "internal/testutil/"
         linters:
           - forbidigo
+      # The licensed CLI startup site that resolves $HOME/.yoloai/ once at
+      # process boot and threads the resulting config.Layout downward. This
+      # is the ONLY production-code allowlist for the §12 ambient-HOME ban.
+      - path: "internal/cli/layout_bridge\\.go"
+        linters:
+          - forbidigo
+        text: "os\\.UserHomeDir"
 
 run:
   timeout: 2m

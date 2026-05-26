@@ -438,12 +438,13 @@ Global `CLAUDE.md`: "If an approach isn't working or feels overcomplicated, stop
 
 Ambient state is anything not in the function's argument list: environment variables, the working directory, `$HOME`, hostname, the current user's identity, the calling process's PID. Library code refuses to read it. The CLI (or other outermost shell) reads it once at startup, validates it, packs it into typed configuration structs, and passes those down.
 
-Concrete bans (enforced by the W-L10 linter):
+Concrete bans (enforced by the W-L10 forbidigo rules in `.golangci.yml`):
 
-- `os.UserHomeDir()` is forbidden outside ONE designated CLI entry point. That single call site is allowlisted; everything else fails the linter.
-- `os.Getenv()` for yoloai's own configuration is forbidden in library code. The CLI may read env vars at startup; everything below takes typed parameters.
-- `os.Getwd()` as a silent default is forbidden. If a caller wants the current working directory, the caller computes it explicitly and passes it in.
-- Other ambient functions (`os.Hostname()`, `os.UserCacheDir()`, etc.) are allowed for *reporting* (bug reports, diagnostics) but never as silent defaults that change behaviour.
+- `os.UserHomeDir()` — enforced. Forbidden outside `internal/cli/layout_bridge.go`. That file resolves `$HOME/.yoloai/` once at CLI startup, packs it into a `config.Layout`, and threads it down. Library code receives the `Layout`; it never reads `$HOME` itself.
+- `os.UserConfigDir()` / `os.UserCacheDir()` — enforced. yoloai does not use the XDG paths; cache and config live under `config.Layout.CacheDir()` / the Layout root.
+- `os.Getwd()` — enforced. No silent CWD-as-default. Commands accepting paths take them explicitly from the caller.
+- `os.Getenv()` for yoloai's own configuration — design rule, not yet linter-enforced. The CLI legitimately reads several env vars at startup (`SUDO_USER` / `SUDO_UID` / `SUDO_GID` for chown-on-sudo, `YOLOAI_SANDBOX` for the sandbox-name convenience, `TMUX` / `COLUMNS` / `TERM` for UI behaviour). Library code below the CLI must not read env directly; the CLI gathers values once and passes typed config down. A future linter pass will codify the exact allowlist.
+- Other ambient functions (`os.Hostname()`, etc.) are allowed for *reporting* (bug reports, diagnostics) but never as silent defaults that change behaviour.
 
 The single declared exception: API keys read by individual agents (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, etc.). The agent's contract IS "I read this env var" — it's part of the published interface in `agent.Definition.APIKeyEnvVars`. The CLI reads the values and passes them as part of sandbox creation; agents document the read in their definition.
 
