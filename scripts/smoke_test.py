@@ -1410,6 +1410,46 @@ def find_yoloai() -> Optional[str]:
     return None
 
 
+class _Tee:
+    """Forward writes to two streams (real stdout + summary file).
+
+    Used so per-test PASS/FAIL/probe annotations and the final summary
+    block — previously printed only to the terminal — land in a file
+    that gets preserved with the run. The per-test yoloai logs already
+    live in <log_dir>/<test>-<backend>.log; this captures the
+    smoke-test's own decisions about those tests.
+    """
+    def __init__(self, *streams: object) -> None:
+        self._streams = streams
+
+    def write(self, data: str) -> int:
+        for s in self._streams:
+            s.write(data)  # type: ignore[attr-defined]
+            s.flush()  # type: ignore[attr-defined]
+        return len(data)
+
+    def flush(self) -> None:
+        for s in self._streams:
+            s.flush()  # type: ignore[attr-defined]
+
+    def isatty(self) -> bool:
+        # Preserve TTY-ness from the underlying terminal stream so
+        # callers that branch on isatty() (e.g. color output) behave
+        # the same as without the tee.
+        try:
+            return self._streams[0].isatty()  # type: ignore[attr-defined]
+        except Exception:
+            return False
+
+
+def _install_stdout_tee(summary_path: Path) -> None:
+    """Redirect sys.stdout to a Tee that writes to both terminal and file."""
+    summary_path.parent.mkdir(parents=True, exist_ok=True)
+    f = open(summary_path, "w", encoding="utf-8", buffering=1)  # line-buffered
+    atexit.register(f.close)
+    sys.stdout = _Tee(sys.stdout, f)  # type: ignore[assignment]
+
+
 def main() -> int:
     args = parse_args()
 
@@ -1477,6 +1517,12 @@ def main() -> int:
     if args.junit:
         ctx.junit = JUnitWriter(args.junit)
     atexit.register(cleanup, ctx)
+
+    # Tee stdout to <log_dir>/summary.txt so the high-level run
+    # transcript (per-test PASS/FAIL lines, probe annotations,
+    # final summary block) is captured alongside the per-test logs.
+    # Stderr is left untouched. Closed at process exit via atexit.
+    _install_stdout_tee(log_dir / "summary.txt")
 
     is_linux = sys.platform.startswith("linux")
     if ctx.full:
