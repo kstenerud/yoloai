@@ -1429,13 +1429,22 @@ class _Tee:
 
     def write(self, data: str) -> int:
         for s in self._streams:
-            s.write(data)  # type: ignore[attr-defined]
-            s.flush()  # type: ignore[attr-defined]
+            try:
+                s.write(data)  # type: ignore[attr-defined]
+                s.flush()  # type: ignore[attr-defined]
+            except ValueError:
+                # Stream was closed (e.g. by another atexit handler during
+                # interpreter shutdown). Skip it — exit code 120 from
+                # Python's "stdout broken at shutdown" path otherwise.
+                pass
         return len(data)
 
     def flush(self) -> None:
         for s in self._streams:
-            s.flush()  # type: ignore[attr-defined]
+            try:
+                s.flush()  # type: ignore[attr-defined]
+            except ValueError:
+                pass
 
     def isatty(self) -> bool:
         # Preserve TTY-ness from the underlying terminal stream so
@@ -1521,13 +1530,17 @@ def main() -> int:
     )
     if args.junit:
         ctx.junit = JUnitWriter(args.junit)
-    atexit.register(cleanup, ctx)
 
     # Tee stdout to <log_dir>/summary.txt so the high-level run
     # transcript (per-test PASS/FAIL lines, probe annotations,
     # final summary block) is captured alongside the per-test logs.
     # Stderr is left untouched. Closed at process exit via atexit.
+    # Install the tee BEFORE registering cleanup: atexit is LIFO, so
+    # cleanup (registered later) runs first, and its prints land in
+    # the summary file before f.close() runs.
     _install_stdout_tee(log_dir / "summary.txt")
+
+    atexit.register(cleanup, ctx)
 
     is_linux = sys.platform.startswith("linux")
     if ctx.full:
