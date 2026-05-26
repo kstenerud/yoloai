@@ -8,11 +8,9 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"time"
 
-	"github.com/kstenerud/yoloai/runtime"
+	yoloai "github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/sandbox"
-	"github.com/kstenerud/yoloai/sandbox/store"
 	"github.com/spf13/cobra"
 )
 
@@ -34,49 +32,50 @@ func runClone(cmd *cobra.Command, args []string) error {
 		defer setTerminalTitle("")
 	}
 
-	// Force-destroy existing destination before cloning.
+	// Force-destroy existing destination before cloning. The existing dst's
+	// backend may differ from src's, so this opens its own Client tied to
+	// dst's current backend.
 	if force {
 		if _, err := os.Stat(cliLayout().SandboxDir(dst)); err == nil { //nolint:gosec // G703: dst is validated sandbox name
-			backend := resolveBackendForSandbox(dst)
-			if err := withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
-				mgr := sandbox.NewManager(rt, slog.Default(), cmd.InOrStdin(), cmd.ErrOrStderr(), sandbox.WithLayout(cliLayout()))
-				return mgr.Destroy(ctx, dst)
+			destBackend := resolveBackendForSandbox(dst)
+			if err := withClient(cmd, destBackend, func(ctx context.Context, c *yoloai.Client) error {
+				return c.Destroy(ctx, dst, true)
 			}); err != nil {
 				return fmt.Errorf("destroy existing destination: %w", err)
 			}
 		}
 	}
 
-	// Clone (no runtime needed).
-	slog.Info("cloning sandbox", "event", "sandbox.clone", "source", src, "dest", dst) //nolint:gosec // G706: src/dst are validated sandbox names
-	mgr := sandbox.NewManager(nil, slog.Default(), cmd.InOrStdin(), cmd.ErrOrStderr(), sandbox.WithLayout(cliLayout()))
-	if err := mgr.Clone(cmd.Context(), sandbox.CloneOptions{Source: src, Dest: dst}); err != nil {
-		return err
-	}
-	slog.Info("clone complete", "event", "sandbox.clone.complete", "source", src, "dest", dst) //nolint:gosec // G706: src/dst are validated sandbox names
-
-	if noStart {
-		if jsonEnabled(cmd) {
-			return writeJSON(cmd.OutOrStdout(), map[string]any{
-				"source": src,
-				"dest":   dst,
-			})
+	// Source's backend governs the rest of the flow: after clone, dst inherits
+	// src's backend (copied via meta.json), so Start needs the same backend.
+	backend := resolveBackendForSandbox(src)
+	return withClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
+		slog.Info("cloning sandbox", "event", "sandbox.clone", "source", src, "dest", dst) //nolint:gosec // G706: src/dst are validated sandbox names
+		if err := c.Clone(ctx, sandbox.CloneOptions{Source: src, Dest: dst}); err != nil {
+			return err
 		}
-		fmt.Fprintf(cmd.OutOrStdout(), "Cloned %s → %s\n", src, dst) //nolint:errcheck
-		return nil
-	}
+		slog.Info("clone complete", "event", "sandbox.clone.complete", "source", src, "dest", dst) //nolint:gosec // G706: src/dst are validated sandbox names
 
-	// Start (and optionally attach) — needs a runtime.
-	backend := resolveBackendForSandbox(dst)
-	return withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
-		return runCloneStart(cmd, ctx, rt, src, dst, prompt, promptFile, attach)
+		if noStart {
+			if jsonEnabled(cmd) {
+				return writeJSON(cmd.OutOrStdout(), map[string]any{
+					"source": src,
+					"dest":   dst,
+				})
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "Cloned %s → %s\n", src, dst) //nolint:errcheck
+			return nil
+		}
+
+		return runCloneStart(cmd, ctx, c, src, dst, prompt, promptFile, attach)
 	})
 }
 
 // runCloneStart starts the cloned sandbox and optionally attaches.
-func runCloneStart(cmd *cobra.Command, ctx context.Context, rt runtime.Runtime, src, dst, prompt, promptFile string, attach bool) error {
-	startMgr := sandbox.NewManager(rt, slog.Default(), cmd.InOrStdin(), cmd.ErrOrStderr(), sandbox.WithLayout(cliLayout()))
-	if err := startMgr.Start(ctx, dst, sandbox.StartOptions{
+// Attach reaches for raw runtime via attachToSandboxByName — Client doesn't
+// yet expose attach (see CONVENTIONS.md "Hybrid handlers").
+func runCloneStart(cmd *cobra.Command, ctx context.Context, c *yoloai.Client, src, dst, prompt, promptFile string, attach bool) error {
+	if err := c.Start(ctx, dst, sandbox.StartOptions{
 		Prompt:     prompt,
 		PromptFile: promptFile,
 	}); err != nil {
@@ -96,17 +95,7 @@ func runCloneStart(cmd *cobra.Command, ctx context.Context, rt runtime.Runtime, 
 	if !attach {
 		return nil
 	}
-
-	meta, err := store.LoadMeta(cliLayout().SandboxDir(dst))
-	if err != nil {
-		return err
-	}
-	user := tmuxExecUser(meta)
-	containerName := store.InstanceName(dst)
-	if err := waitForTmux(ctx, rt, containerName, dst, 300*time.Second, user); err != nil {
-		return fmt.Errorf("waiting for tmux session: %w", err)
-	}
-	return attachToSandbox(ctx, rt, containerName, dst, user)
+	return attachToSandboxByName(cmd, dst)
 }
 
 // addCloneFlags registers the shared flags for clone commands.

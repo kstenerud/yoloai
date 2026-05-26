@@ -314,6 +314,21 @@ func (c *Client) NeedsConfirmation(ctx context.Context, name string) (bool, stri
 	return c.manager.NeedsConfirmation(ctx, name)
 }
 
+// Clone copies an existing sandbox's state into a new sandbox. The runtime
+// is not consulted — clone is a disk-only operation that copies the source
+// sandbox dir under DataDir/sandboxes/. Embedders still construct the Client
+// with a backend because most clone workflows start the destination right
+// after; the wasted connection for pure --no-start clones is acceptable.
+func (c *Client) Clone(ctx context.Context, opts sandbox.CloneOptions) error {
+	return c.manager.Clone(ctx, opts)
+}
+
+// Start launches (or relaunches) the container for an existing sandbox.
+// The sandbox must exist on disk; use Run to create a new sandbox.
+func (c *Client) Start(ctx context.Context, name string, opts sandbox.StartOptions) error {
+	return c.manager.Start(ctx, name, opts)
+}
+
 // --- private helpers ---
 
 // resolveBackendFromConfig picks the container backend for a Client created

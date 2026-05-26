@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"time"
 
 	yoloai "github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/config"
@@ -161,6 +162,30 @@ func withClient(cmd *cobra.Command, backend string, fn func(ctx context.Context,
 	}
 	defer c.Close() //nolint:errcheck // best-effort cleanup
 	return fn(ctx, c)
+}
+
+// attachToSandboxByName waits for tmux and attaches to the named sandbox,
+// opening its own runtime connection. Used by lifecycle commands (clone,
+// reset, restart, new with --attach) that have already performed their
+// lifecycle action via Client and now need to attach. Self-contained so
+// the caller doesn't need to thread a runtime through.
+//
+// CONVENTIONS.md "Hybrid handlers" — this is the canonical bridge until
+// Sandbox.Attach(io IOStreams) lands on the Client.
+func attachToSandboxByName(cmd *cobra.Command, name string) error {
+	backend := resolveBackendForSandbox(name)
+	return withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
+		meta, err := store.LoadMeta(cliLayout().SandboxDir(name))
+		if err != nil {
+			return err
+		}
+		user := tmuxExecUser(meta)
+		containerName := store.InstanceName(name)
+		if err := waitForTmux(ctx, rt, containerName, name, 300*time.Second, user); err != nil {
+			return fmt.Errorf("waiting for tmux session: %w", err)
+		}
+		return attachToSandbox(ctx, rt, containerName, name, user)
+	})
 }
 
 // resolveAgent determines the agent name from --agent flag, then config,
