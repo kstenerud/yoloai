@@ -142,6 +142,12 @@ Findings that turned up mid-workstream (architecture-remediation, layering-refac
 - **Implication:** the failure family is not unique to the `containerd-vm` snapshotter setup — `containerd-vmenhanced` (devmapper snapshotter) reproduces it too. What's common is Kata+QEMU, not the snapshotter. Both candidates in the refined hypothesis (Haiku tool-less response under QEMU CPU profile, or Kata networking warm-up race) remain consistent.
 - Still PARKED pending DF3's rendered tmux capture-pane snapshot. Action item unchanged.
 
+### DF8 (7th data point, 2026-05-26): `containerd-vm` failed BOTH attempts; `containerd-vmenhanced` PASSED same session
+
+- Log `yoloai-smoketest-20260526-125802.053`. `containerd-vm` failed both attempts (the "agent idle 9s+" signature, same as DF8). `containerd-vmenhanced` passed in the same session. The previous run (6th data point, 120447.993) showed the inverse: vmenhanced fails first attempt, vm passes. Two adjacent runs with opposite outcomes between the two containerd snapshotters.
+- **Implication:** the failure is NOT correlated between vm and vmenhanced on a single run, which argues against "host was in a bad state at run start" as the explanation. Each backend independently rolls the dice — consistent with a per-backend race (e.g. Kata netns wiring, QEMU CPU latency variability) rather than a global precondition. Now 2 confirmed failures of vmenhanced, 7 of vm.
+- Still PARKED pending DF3. Confirming with rendered tmux output remains the unblocker for any further diagnosis.
+
 ## Policy origin
 
 Established in [architecture-remediation.md](plans/architecture-remediation.md) and inherited by [layering-refactor.md](plans/layering-refactor.md).

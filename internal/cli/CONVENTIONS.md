@@ -24,6 +24,19 @@ The migration to `withClient` is incremental. A handler that calls
 `withRuntime + sandbox.NewManager` is the old shape; reach for `withClient`
 when touching that handler for any other reason.
 
+### Hybrid handlers (attach path)
+
+`restart`, `reset`, and similar lifecycle commands have an optional
+`--attach` branch that calls `attachToSandbox(rt, ...)` / `waitForTmux(rt,
+...)` — both take a raw `runtime.Runtime`. The Client does not yet expose
+attach (it's an interactive streaming operation; api_surface.go's
+`Sandbox.Attach(io IOStreams)` design is the eventual home).
+
+Until the attach surface lands on the Client, these handlers stay on
+`withRuntime + sandbox.NewManager + sandbox.WithLayout(cliLayout())` —
+the old shape, but with the WithLayout invariant satisfied. Do not add
+a `Client.Runtime()` escape hatch; it would defeat the layering.
+
 ## Path resolution: `cliLayout()`
 
 Every path under `~/.yoloai/` comes from `cliLayout()` (defined in

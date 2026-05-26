@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	yoloai "github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/sandbox"
 	"github.com/kstenerud/yoloai/sandbox/store"
@@ -23,8 +24,8 @@ func hasWildcard(s string) bool {
 
 // expandWildcard matches a wildcard pattern against all sandbox names.
 // Returns matching sandbox names, or an error if no matches found.
-func expandWildcard(ctx context.Context, rt runtime.Runtime, pattern string) ([]string, error) {
-	infos, err := sandbox.ListSandboxes(ctx, cliLayout(), rt)
+func expandWildcard(ctx context.Context, c *yoloai.Client, pattern string) ([]string, error) {
+	infos, err := c.List(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list sandboxes: %w", err)
 	}
@@ -84,10 +85,8 @@ func runDestroyCmd(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	return withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
-		mgr := sandbox.NewManager(rt, slog.Default(), cmd.InOrStdin(), cmd.ErrOrStderr(), sandbox.WithLayout(cliLayout()))
-
-		names, err := resolveDestroyNames(cmd, ctx, rt, args, all)
+	return withClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
+		names, err := resolveDestroyNames(cmd, ctx, c, args, all)
 		if err != nil {
 			return err
 		}
@@ -98,31 +97,31 @@ func runDestroyCmd(cmd *cobra.Command, args []string) error {
 
 		// Smart confirmation (unless --yes)
 		if !yes {
-			if done, confirmErr := confirmDestroy(cmd, ctx, mgr, names); confirmErr != nil {
+			if done, confirmErr := confirmDestroy(cmd, ctx, c, names); confirmErr != nil {
 				return confirmErr
 			} else if done {
 				return nil
 			}
 		}
 
-		return executeDestroy(cmd, ctx, mgr, names)
+		return executeDestroy(cmd, ctx, c, names)
 	})
 }
 
 // resolveDestroyNames resolves sandbox names from args or --all, returning nil if already handled.
-func resolveDestroyNames(cmd *cobra.Command, ctx context.Context, rt runtime.Runtime, args []string, all bool) ([]string, error) {
+func resolveDestroyNames(cmd *cobra.Command, ctx context.Context, c *yoloai.Client, args []string, all bool) ([]string, error) {
 	if all {
-		return resolveDestroyAll(cmd, ctx, rt)
+		return resolveDestroyAll(cmd, ctx, c)
 	}
 	if len(args) == 0 {
 		return resolveDestroyFromEnv()
 	}
-	return resolveDestroyArgs(ctx, rt, args)
+	return resolveDestroyArgs(ctx, c, args)
 }
 
 // resolveDestroyAll resolves names when --all is set, returning nil if none exist.
-func resolveDestroyAll(cmd *cobra.Command, ctx context.Context, rt runtime.Runtime) ([]string, error) {
-	infos, err := sandbox.ListSandboxes(ctx, cliLayout(), rt)
+func resolveDestroyAll(cmd *cobra.Command, ctx context.Context, c *yoloai.Client) ([]string, error) {
+	infos, err := c.List(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -153,11 +152,11 @@ func resolveDestroyFromEnv() ([]string, error) {
 }
 
 // resolveDestroyArgs expands wildcards and validates each named sandbox arg.
-func resolveDestroyArgs(ctx context.Context, rt runtime.Runtime, args []string) ([]string, error) {
+func resolveDestroyArgs(ctx context.Context, c *yoloai.Client, args []string) ([]string, error) {
 	var names []string
 	for _, arg := range args {
 		if hasWildcard(arg) {
-			expanded, err := expandWildcard(ctx, rt, arg)
+			expanded, err := expandWildcard(ctx, c, arg)
 			if err != nil {
 				return nil, err
 			}
@@ -176,10 +175,10 @@ func resolveDestroyArgs(ctx context.Context, rt runtime.Runtime, args []string) 
 }
 
 // confirmDestroy checks for active work and prompts. Returns true if caller should return nil.
-func confirmDestroy(cmd *cobra.Command, ctx context.Context, mgr *sandbox.Manager, names []string) (done bool, err error) {
+func confirmDestroy(cmd *cobra.Command, ctx context.Context, c *yoloai.Client, names []string) (done bool, err error) {
 	var warnings []string
 	for _, name := range names {
-		needs, reason := mgr.NeedsConfirmation(ctx, name)
+		needs, reason := c.NeedsConfirmation(ctx, name)
 		if needs {
 			warnings = append(warnings, fmt.Sprintf("  %s: %s", name, reason))
 		}
@@ -206,7 +205,9 @@ func confirmDestroy(cmd *cobra.Command, ctx context.Context, mgr *sandbox.Manage
 }
 
 // executeDestroy destroys sandboxes and returns an error if any fail.
-func executeDestroy(cmd *cobra.Command, ctx context.Context, mgr *sandbox.Manager, names []string) error {
+// Calls Client.Destroy with force=true because confirmDestroy already
+// performed (or the caller skipped) the active-work check.
+func executeDestroy(cmd *cobra.Command, ctx context.Context, c *yoloai.Client, names []string) error {
 	type destroyResult struct {
 		Name   string `json:"name"`
 		Action string `json:"action,omitempty"`
@@ -217,7 +218,7 @@ func executeDestroy(cmd *cobra.Command, ctx context.Context, mgr *sandbox.Manage
 		var results []destroyResult
 		for _, name := range names {
 			slog.Info("destroying sandbox", "event", "sandbox.destroy", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
-			if err := mgr.Destroy(ctx, name); err != nil {
+			if err := c.Destroy(ctx, name, true); err != nil {
 				results = append(results, destroyResult{Name: name, Error: err.Error()})
 			} else {
 				slog.Info("sandbox destroyed", "event", "sandbox.destroy.complete", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
@@ -230,7 +231,7 @@ func executeDestroy(cmd *cobra.Command, ctx context.Context, mgr *sandbox.Manage
 	var errs []error
 	for _, name := range names {
 		slog.Info("destroying sandbox", "event", "sandbox.destroy", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
-		if err := mgr.Destroy(ctx, name); err != nil {
+		if err := c.Destroy(ctx, name, true); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: destroy %s: %v\n", name, err) //nolint:errcheck // best-effort output
 			errs = append(errs, err)
 		} else {

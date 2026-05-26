@@ -306,6 +306,14 @@ func (c *Client) Destroy(ctx context.Context, name string, force bool) error {
 	return c.manager.Destroy(ctx, name)
 }
 
+// NeedsConfirmation reports whether destroying the named sandbox should prompt
+// the user — sandbox is running, workdir is dirty, or there are unapplied
+// commits. The reason string is suitable for human display. Embedders use
+// this to render their own confirmation UX before calling Destroy(force=true).
+func (c *Client) NeedsConfirmation(ctx context.Context, name string) (bool, string) {
+	return c.manager.NeedsConfirmation(ctx, name)
+}
+
 // --- private helpers ---
 
 // resolveBackendFromConfig picks the container backend for a Client created
