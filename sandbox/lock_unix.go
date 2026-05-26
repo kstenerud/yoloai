@@ -58,6 +58,27 @@ var (
 // is an advisory file and the next call for the same sandbox reuses
 // it. Locks are released automatically if the process exits or
 // crashes (flock semantics).
+//
+// **Lock-acquisition invariant (Q-T).** Every public Manager method
+// that mutates a sandbox's state calls AcquireLock (or
+// acquireMultiLock) at the method entry, before any backend RPC or
+// filesystem op, and releases via defer. The lock acquisition is
+// part of the method's signature, not pushed down into internals.
+// Read methods (List, Inspect, Status, NeedsConfirmation,
+// SandboxFiles, SandboxCache) do NOT acquire the lock and run in
+// parallel.
+//
+// Current writer set (audit point — keep in sync as methods are
+// added):
+//
+//	Create, Stop, Start, Destroy, Reset      → sandbox/{create,lifecycle}.go
+//	Clone                                    → sandbox/clone.go (multi-lock)
+//	SendInput                                → sandbox/manager.go
+//	ApplyAll                                 → sandbox/patch/apply.go
+//
+// The W-L10 layering linter (planned) will verify that new write
+// methods on the future Client surface include AcquireLock at their
+// public entry point.
 func AcquireLock(name string) (func(), error) {
 	if err := fileutil.MkdirAll(config.SandboxesDir(), 0750); err != nil {
 		return nil, fmt.Errorf("create sandboxes dir: %w", err)

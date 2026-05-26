@@ -226,9 +226,21 @@ func (m *Manager) SandboxCache(name string) string {
 // If the agent is running, this interrupts it mid-task. If the agent is idle
 // at its prompt, this sends a follow-up message. The caller should check
 // Manager.Status before calling to know which case applies.
+//
+// Acquires the per-sandbox lock (Q-T): SendInput mutates sandbox state
+// (injects keystrokes into the running agent's tmux session), so it
+// serialises against concurrent Stop / Destroy / Reset / Apply for the
+// same sandbox. Each call is brief (one exec), so the lock-hold time
+// is small even under interactive use.
 func (m *Manager) SendInput(ctx context.Context, name string, text string) error {
+	unlock, err := AcquireLock(name)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+
 	containerName := store.InstanceName(name)
-	_, err := m.runtime.Exec(ctx, containerName,
+	_, err = m.runtime.Exec(ctx, containerName,
 		[]string{"tmux", "send-keys", "-t", "main", text, "Enter"},
 		"yoloai",
 	)

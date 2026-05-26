@@ -79,6 +79,14 @@ Findings that turned up mid-workstream (architecture-remediation, layering-refac
 - **Description:** The 120s grace for `containerd-vm` was set against a measured QEMU startup distribution at the time. Two runs in this session failed at the 129s mark with the agent genuinely idle (DF3-6) — suggesting either (a) the agent-behavior issue (DF2) is real and unrelated to grace tuning, or (b) startup has drifted upward and the grace no longer matches reality. The 46s `wait_for_ready` observed in the first failure log was consistent with (b), but DF8 shows the same idle-after-prompt failure also fires with a fast 11s `wait_for_ready` — so startup tuning is at best a partial answer. **Proposed action:** re-measure containerd-vm startup latency (from `entrypoint.start` to `❯` ready pattern) across, say, 30 successful runs; pick the 99th percentile + safety margin as the new `stall_grace_secs`. Do this AFTER DF3/DF6 land — without rendered transcripts and the ready-vs-idle split, the measurement is muddled.
 - **Pointer:** `scripts/smoke_test.py::BackendSpec.stall_grace_secs`, `docs/dev/backend-idiosyncrasies.md#qemu-slow-startup-exceeds-smoke-test-stall-grace-period`
 
+### DF9 — Smoke test orchestration exceeds macOS concurrent-VM limit on Tart
+
+- **Discovered:** 2026-05-26 · **Workstream:** observed during W-L8b kickoff (macOS smoke run, log `~/yolai/yoloai-smoketest-20260526-061249.117`)
+- **Severity:** LOW
+- **Disposition:** PARKED — covered by **W-L14** (Tart concurrent-VM limit detection / `ErrConcurrentVMLimit`)
+- **Description:** Both `stop_start/tart` attempts failed at `tart run` with `"The number of VMs exceeds the system limit (other running VMs: yoloai-smoke-…-workflow-tart, yoloai-smoke-…-workflow-tart)"`. Apple's `VZError.virtualMachineLimitExceeded` (code 6) — macOS limits concurrent VMs (commonly 2 on base Apple Silicon, more on M-Pro/Max). The smoke test runs `full_workflow/tart` and `stop_start/tart` in parallel; both create their own Tart VMs; the third concurrent VM attempt hits the cap. This is **not** a yoloai regression — it's the documented motivation for W-L14: detect this signal in Tart's stderr (`"The number of VMs exceeds the system limit"`), wrap as a typed `ErrConcurrentVMLimit`, and surface a user-friendly message instead of the raw tart error. Until W-L14 ships, the smoke test orchestration may want to serialize Tart-backed scenarios (run `full_workflow/tart` and `stop_start/tart` sequentially rather than in parallel) — but that's a smoke-test-side change, not a yoloai-product fix.
+- **Pointer:** `docs/dev/plans/layering-refactor.md::W-L14`, `docs/dev/research/tart-limit-detection.md`, `scripts/smoke_test.py` (orchestration)
+
 ### DF8 — `containerd-vm` "agent idle after prompt" fires across the full range of startup times; root cause is NOT startup-tuning
 
 - **Discovered:** 2026-05-26 · **Workstream:** observed during W-L8b kickoff
