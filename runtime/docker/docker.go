@@ -413,9 +413,17 @@ func (r *Runtime) GitExec(ctx context.Context, name, workDir string, args ...str
 }
 
 // InteractiveExec runs an interactive command inside a Docker container
-// by shelling out to `docker exec -it`.
-func (r *Runtime) InteractiveExec(ctx context.Context, name string, cmd []string, user string, workDir string) error {
-	args := []string{"exec", "-it"}
+// by shelling out to `docker exec`. The IOStreams determine PTY allocation
+// (-it vs -i) and where stdio is wired. Caller-supplied non-PTY streams
+// (TTY=false) get plain pipes; TTY=true requires the streams to BE
+// terminals on the host side for the docker -t flag to work end-to-end.
+func (r *Runtime) InteractiveExec(ctx context.Context, name string, cmd []string, user string, workDir string, io runtime.IOStreams) error {
+	args := []string{"exec"}
+	if io.TTY {
+		args = append(args, "-it")
+	} else {
+		args = append(args, "-i")
+	}
 	if user != "" {
 		args = append(args, "-u", user)
 	}
@@ -426,9 +434,9 @@ func (r *Runtime) InteractiveExec(ctx context.Context, name string, cmd []string
 	args = append(args, cmd...)
 
 	c := exec.CommandContext(ctx, r.binaryName, args...) //nolint:gosec // G204: name and cmd are from validated sandbox state
-	c.Stdin = os.Stdin
-	c.Stdout = os.Stdout
-	c.Stderr = os.Stderr
+	c.Stdin = io.In
+	c.Stdout = io.Out
+	c.Stderr = io.Err
 	return c.Run()
 }
 

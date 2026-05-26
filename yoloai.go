@@ -443,30 +443,11 @@ func (c *Client) Reset(ctx context.Context, opts sandbox.ResetOptions) error {
 	return c.manager.Reset(ctx, opts)
 }
 
-// IOStreams bundles caller-provided stdio for streaming / interactive
-// methods (currently Attach). Modeled on kubectl's IOStreams. Embedders
-// pass their own streams when bridging to HTTP, MCP, or test harnesses;
-// the CLI passes os.Stdin/Stdout/Stderr.
-//
-// **Current limitation (W-L8d).** Attach honors In/Out/Err nil-fallback to
-// the calling process's stdio but does not yet plumb non-process streams
-// through the runtime layer — the backend's InteractiveExec hardcodes
-// os.Stdin/Stdout/Stderr. A non-CLI embedder passing custom streams will
-// get attached to the calling process anyway. Full IOStreams plumbing
-// requires extending the runtime.Runtime interface, tracked as future
-// work in CONVENTIONS.md's hybrid handlers section.
-type IOStreams struct {
-	In  io.Reader // stdin (must be a TTY for Attach)
-	Out io.Writer // stdout
-	Err io.Writer // stderr
-
-	// TTY signals that In/Out are a terminal. Required true for Attach.
-	TTY bool
-
-	// Rows and Cols are the terminal dimensions when TTY=true; 0 means
-	// "unknown — let the backend pick from the calling stdin's PTY".
-	Rows, Cols int
-}
+// IOStreams names the stdio handles for interactive Client methods.
+// It's a type alias for runtime.IOStreams so embedders can use the
+// yoloai.IOStreams name without importing runtime directly. See
+// runtime.IOStreams for the field documentation.
+type IOStreams = runtime.IOStreams
 
 // Attach connects the supplied IOStreams to the sandbox's tmux session.
 // Blocks until the user detaches (Ctrl-B d) or the agent exits.
@@ -500,7 +481,7 @@ func (c *Client) Attach(ctx context.Context, name string, io IOStreams) error {
 
 	sock := sandbox.ReadTmuxSocket(c.layout, name)
 	cmd := c.rt.AttachCommand(sock, io.Rows, io.Cols, info.Meta.Isolation)
-	return c.rt.InteractiveExec(ctx, containerName, cmd, user, "")
+	return c.rt.InteractiveExec(ctx, containerName, cmd, user, "", io)
 }
 
 // attachStatusOK returns nil if the sandbox status permits attach,

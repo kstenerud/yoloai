@@ -45,7 +45,7 @@ func runExec(cmd *cobra.Command, args []string) error {
 		containerName := store.InstanceName(name)
 		slog.Debug("exec in container", "event", "sandbox.exec", "container", containerName, "cmd", cmdArgs) //nolint:gosec // G706: values are internal, not user-controlled log injection
 
-		if err := rt.InteractiveExec(ctx, containerName, cmdArgs, tmuxExecUser(info.Meta), info.Meta.Workdir.MountPath); err != nil {
+		if err := rt.InteractiveExec(ctx, containerName, cmdArgs, tmuxExecUser(info.Meta), info.Meta.Workdir.MountPath, cliIOStreams()); err != nil {
 			if exitErr, ok := errors.AsType[*exec.ExitError](err); ok {
 				os.Exit(exitErr.ExitCode())
 			}

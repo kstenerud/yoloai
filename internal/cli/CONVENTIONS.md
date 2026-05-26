@@ -40,14 +40,12 @@ Every attach flow should ultimately go through `c.Attach`:
   it's UI, not orchestration. `Client.Attach` is library code and
   doesn't touch the terminal beyond the PTY.
 
-**Limitation to know.** `IOStreams.In/Out/Err` are accepted on the
-public API but not yet fully plumbed: the underlying
-`runtime.Runtime.InteractiveExec` hardcodes `os.Stdin/Stdout/Stderr`,
-so non-CLI embedders (HTTP server, MCP) passing custom streams will
-still see the calling process's stdio. Fully wiring IOStreams through
-requires extending the runtime interface (one method per backend);
-tracked as future work. CLI use is unaffected — terminal stdio IS
-the calling process's stdio.
+`IOStreams.In/Out/Err` are wired all the way through the runtime
+interface as of `runtime/iostreams.go`. Non-CLI embedders (HTTP, MCP,
+test harnesses) can pass their own streams to `Client.Attach` and
+have them reach the backend faithfully. For TTY=true the streams
+must be terminals (e.g. `*os.File` with a PTY fd); for TTY=false
+plain pipes work and stderr stays separate.
 
 ### Legacy raw-runtime attach — RETIRED
 

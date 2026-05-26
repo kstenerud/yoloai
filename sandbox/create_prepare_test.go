@@ -345,7 +345,7 @@ func (m *mockDockerRuntime) Exec(ctx context.Context, name string, cmd []string,
 func (m *mockDockerRuntime) GitExec(ctx context.Context, name, workDir string, args ...string) (string, error) {
 	return "", nil
 }
-func (m *mockDockerRuntime) InteractiveExec(ctx context.Context, name string, cmd []string, user string, workdir string) error {
+func (m *mockDockerRuntime) InteractiveExec(ctx context.Context, name string, cmd []string, user string, workdir string, io runtime.IOStreams) error {
 	return nil
 }
 func (m *mockDockerRuntime) Prune(ctx context.Context, knownInstances []string, dryRun bool, output io.Writer) (runtime.PruneResult, error) {

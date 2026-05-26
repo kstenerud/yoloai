@@ -256,10 +256,12 @@ type Runtime interface {
 	// uniformly while backends handle their specific execution environments.
 	GitExec(ctx context.Context, name, workDir string, args ...string) (string, error)
 
-	// InteractiveExec runs a command interactively (with TTY) inside an instance.
-	// Stdin/stdout/stderr are connected to the current terminal.
-	// If workDir is non-empty, the command runs in that directory.
-	InteractiveExec(ctx context.Context, name string, cmd []string, user string, workDir string) error
+	// InteractiveExec runs a command interactively inside an instance,
+	// wiring the supplied IOStreams to the remote stdio. The caller
+	// chooses whether to allocate a PTY (io.TTY) and at what size
+	// (io.Rows / io.Cols). If workDir is non-empty, the command runs in
+	// that directory.
+	InteractiveExec(ctx context.Context, name string, cmd []string, user string, workDir string, io IOStreams) error
 
 	// Prune removes orphaned backend resources. knownInstances lists instance
 	// names that have valid sandbox directories; anything else named yoloai-*

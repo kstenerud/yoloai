@@ -69,7 +69,7 @@ func (m *mockRuntime) GitExec(_ context.Context, _ string, _ string, _ ...string
 	return "", errMockNotImplemented
 }
 
-func (m *mockRuntime) InteractiveExec(_ context.Context, _ string, _ []string, _ string, _ string) error {
+func (m *mockRuntime) InteractiveExec(_ context.Context, _ string, _ []string, _ string, _ string, _ runtime.IOStreams) error {
 	return errMockNotImplemented
 }
 

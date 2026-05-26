@@ -437,15 +437,19 @@ func (r *Runtime) GitExec(ctx context.Context, name, workDir string, args ...str
 	return string(output), nil
 }
 
-// InteractiveExec runs a command interactively. For tmux commands, injects
-// the per-sandbox socket. For other commands, runs under sandbox-exec.
-func (r *Runtime) InteractiveExec(_ context.Context, name string, cmd []string, _ string, _ string) error {
+// InteractiveExec runs a command with the supplied IOStreams. For tmux
+// commands, injects the per-sandbox socket. For other commands, runs
+// under sandbox-exec. PTY allocation isn't explicit here: seatbelt is a
+// process-level sandbox (not a container/VM), so io.TTY is honored at
+// the level of the host process inherited stdio — TTY-ness comes from
+// whether io.In is a real terminal at the host.
+func (r *Runtime) InteractiveExec(_ context.Context, name string, cmd []string, _ string, _ string, io runtime.IOStreams) error {
 	sandboxPath := filepath.Join(r.layout.SandboxesDir(), sandboxName(name))
 
 	execCmd := r.buildExecCommand(sandboxPath, cmd)
-	execCmd.Stdin = os.Stdin
-	execCmd.Stdout = os.Stdout
-	execCmd.Stderr = os.Stderr
+	execCmd.Stdin = io.In
+	execCmd.Stdout = io.Out
+	execCmd.Stderr = io.Err
 
 	return execCmd.Run()
 }

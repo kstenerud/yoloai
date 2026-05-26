@@ -478,17 +478,24 @@ func (r *Runtime) GitExec(ctx context.Context, name, workDir string, args ...str
 }
 
 // InteractiveExec runs a command interactively inside the VM by shelling
-// out to tart exec with stdin/stdout/stderr connected and PTY allocated.
-// The user parameter is ignored — tart exec runs as the VM's logged-in user.
-func (r *Runtime) InteractiveExec(ctx context.Context, name string, cmd []string, _ string, _ string) error {
-	// -i attaches stdin, -t allocates a PTY (like docker exec -it)
-	args := []string{"exec", "-i", "-t", name}
+// out to `tart exec`. IOStreams determines whether a PTY is allocated and
+// where stdio is wired. The user and workDir params are ignored — tart
+// exec runs as the VM's logged-in user in its default cwd.
+func (r *Runtime) InteractiveExec(ctx context.Context, name string, cmd []string, _ string, _ string, io runtime.IOStreams) error {
+	args := []string{"exec"}
+	if io.TTY {
+		// -i attaches stdin, -t allocates a PTY (like docker exec -it)
+		args = append(args, "-i", "-t")
+	} else {
+		args = append(args, "-i")
+	}
+	args = append(args, name)
 	args = append(args, cmd...)
 
 	c := exec.CommandContext(ctx, r.tartBin, args...) //nolint:gosec // G204: name and cmd are from validated sandbox state
-	c.Stdin = os.Stdin
-	c.Stdout = os.Stdout
-	c.Stderr = os.Stderr
+	c.Stdin = io.In
+	c.Stdout = io.Out
+	c.Stderr = io.Err
 	return c.Run()
 }
 
