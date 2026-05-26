@@ -12,7 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/kstenerud/yoloai/runtime"
+	yoloai "github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/sandbox"
 	"github.com/kstenerud/yoloai/sandbox/store"
 	"github.com/spf13/cobra"
@@ -22,10 +22,9 @@ func runSandboxInfo(cmd *cobra.Command, name string) error {
 	closeSink := openCLIJSONLSink(name, cmd)
 	defer closeSink()
 	slog.Info("collecting sandbox info", "event", "sandbox.info", "sandbox", name) //nolint:gosec // G706: name is an internal sandbox name, not user-injected log data
-	layout := cliLayout()
 	backend := resolveBackendForSandbox(name)
-	return withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
-		info, err := sandbox.InspectSandbox(ctx, layout, rt, name)
+	return withClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
+		info, err := c.Inspect(ctx, name)
 		if err != nil {
 			return sandboxErrorHint(name, err)
 		}
@@ -36,7 +35,7 @@ func runSandboxInfo(cmd *cobra.Command, name string) error {
 				ConfigPath    string `json:"config_path"`
 				PromptPreview string `json:"prompt_preview,omitempty"`
 			}
-			sandboxDir := layout.SandboxDir(name)
+			sandboxDir := cliLayout().SandboxDir(name)
 			result := infoJSON{
 				Info:          info,
 				ConfigPath:    filepath.Join(sandboxDir, store.RuntimeConfigFile),
