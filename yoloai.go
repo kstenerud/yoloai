@@ -50,9 +50,6 @@ var (
 	// ErrUnappliedChanges is returned by Destroy when the sandbox has unapplied
 	// changes and force is false.
 	ErrUnappliedChanges = errors.New("sandbox has unapplied changes")
-
-	// ErrNoChanges is returned by Apply when there is nothing to apply.
-	ErrNoChanges = sandbox.ErrNoChanges
 )
 
 // Options configures a Client.
@@ -247,7 +244,8 @@ func (c *Client) Diff(_ context.Context, name string) ([]*patch.DiffResult, erro
 // directories. Equivalent to 'yoloai apply <name>'.
 // Uncommitted (work-in-progress) edits the agent left behind are NOT applied;
 // use ApplyWithOptions to opt in.
-// Returns ErrNoChanges if there is nothing to apply.
+// Returns (nil, nil) when there is nothing to apply — branch on
+// len(results) == 0 rather than on a sentinel error (Q-P).
 func (c *Client) Apply(ctx context.Context, name string) ([]*patch.ApplyResult, error) {
 	return patch.ApplyAll(ctx, c.rt, name, false)
 }
@@ -260,8 +258,9 @@ type ApplyOptions struct {
 	IncludeWIP bool
 }
 
-// ApplyWithOptions is Apply with explicit options. Returns ErrNoChanges if
-// there is nothing to apply.
+// ApplyWithOptions is Apply with explicit options. Returns (nil, nil)
+// when there is nothing to apply — branch on len(results) == 0 rather
+// than on a sentinel error (Q-P).
 func (c *Client) ApplyWithOptions(ctx context.Context, name string, opts ApplyOptions) ([]*patch.ApplyResult, error) {
 	return patch.ApplyAll(ctx, c.rt, name, opts.IncludeWIP)
 }

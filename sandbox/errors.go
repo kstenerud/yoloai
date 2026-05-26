@@ -17,7 +17,6 @@ var (
 	ErrSandboxExists       = errors.New("sandbox already exists")
 	ErrMissingAPIKey       = errors.New("required API key not set")
 	ErrContainerNotRunning = errors.New("container is not running")
-	ErrNoChanges           = errors.New("no changes to apply")
 )
 
 // Typed error aliases. The canonical definitions live in internal/yoerrors;

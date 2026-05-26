@@ -33,8 +33,10 @@ type ApplyResult struct {
 // back to their original host paths. It is the programmatic equivalent of
 // 'yoloai apply <name>'.
 //
-// Returns ErrNoChanges if there are no patches to apply.
-// Returns an ApplyResult for each directory patched.
+// Returns an ApplyResult for each directory patched. When there are no
+// patches to apply, returns (nil, nil) — the empty-result + nil-error
+// pair is the no-changes signal. Callers branch on len(results) == 0
+// rather than a sentinel error; see Q-P.
 func ApplyAll(ctx context.Context, rt runtime.Runtime, name string, includeWIP bool) ([]*ApplyResult, error) {
 	unlock, err := sandbox.AcquireLock(name)
 	if err != nil {
@@ -47,7 +49,7 @@ func ApplyAll(ctx context.Context, rt runtime.Runtime, name string, includeWIP b
 		return nil, err
 	}
 	if len(patches) == 0 {
-		return nil, sandbox.ErrNoChanges
+		return nil, nil
 	}
 
 	var results []*ApplyResult
