@@ -169,10 +169,7 @@ func (r *Runtime) Client() *dockerclient.Client {
 // yoloai-base:latest while the first is doing so — producing
 // "AlreadyExists: image already exists" from the Docker daemon.
 // Mirrors runtime/tart/base_lock.go.
-func (r *Runtime) Setup(ctx context.Context, sourceDir string, output io.Writer, logger *slog.Logger, force bool) error {
-	// Bridge: derive Layout from config.YoloaiDir() until Q-W.5 makes
-	// Setup take a Layout explicitly (or the Runtime holds one).
-	layout := config.NewLayout(config.YoloaiDir())
+func (r *Runtime) Setup(ctx context.Context, layout config.Layout, sourceDir string, output io.Writer, logger *slog.Logger, force bool) error {
 	unlock, err := AcquireBaseLock(layout, "yoloai-base")
 	if err != nil {
 		return fmt.Errorf("acquire base lock: %w", err)

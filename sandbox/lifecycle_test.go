@@ -17,6 +17,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/kstenerud/yoloai/config"
 	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/sandbox/store"
 )
@@ -67,8 +68,11 @@ func (m *lifecycleMockRuntime) Exec(ctx context.Context, name string, cmd []stri
 }
 
 // newLifecycleMgr creates a Manager with the given mock runtime and a discard output.
-func newLifecycleMgr(rt *lifecycleMockRuntime) *Manager {
-	return NewManager(rt, slog.Default(), strings.NewReader(""), io.Discard)
+// tmpDir is the test's t.TempDir(); the Manager's Layout is rooted at tmpDir/.yoloai
+// so it operates on the same tree as createTestSandbox writes to.
+func newLifecycleMgr(rt *lifecycleMockRuntime, tmpDir string) *Manager {
+	layout := config.NewLayout(filepath.Join(tmpDir, ".yoloai"))
+	return NewManager(rt, slog.Default(), strings.NewReader(""), io.Discard, WithLayout(layout))
 }
 
 // createTestSandbox creates a sandbox directory with environment.json for lifecycle tests.
@@ -106,7 +110,7 @@ func TestStop_Running(t *testing.T) {
 		},
 	}
 
-	mgr := newLifecycleMgr(mock)
+	mgr := newLifecycleMgr(mock, tmpDir)
 	err := mgr.Stop(context.Background(), "test-stop")
 	require.NoError(t, err)
 	assert.True(t, stopCalled)
@@ -125,7 +129,7 @@ func TestStop_AlreadyStopped(t *testing.T) {
 		},
 	}
 
-	mgr := newLifecycleMgr(mock)
+	mgr := newLifecycleMgr(mock, tmpDir)
 	err := mgr.Stop(context.Background(), "test-stop-already")
 	assert.NoError(t, err) // idempotent
 }
@@ -143,7 +147,7 @@ func TestStop_ContainerRemoved(t *testing.T) {
 		},
 	}
 
-	mgr := newLifecycleMgr(mock)
+	mgr := newLifecycleMgr(mock, tmpDir)
 	err := mgr.Stop(context.Background(), "test-stop-removed")
 	assert.NoError(t, err) // idempotent
 }
@@ -153,7 +157,7 @@ func TestStop_SandboxNotFound(t *testing.T) {
 	t.Setenv("HOME", tmpDir)
 
 	mock := &lifecycleMockRuntime{}
-	mgr := newLifecycleMgr(mock)
+	mgr := newLifecycleMgr(mock, tmpDir)
 	err := mgr.Stop(context.Background(), "nonexistent")
 	assert.ErrorIs(t, err, ErrSandboxNotFound)
 }
@@ -173,7 +177,8 @@ func TestStart_AlreadyRunning(t *testing.T) {
 	}
 
 	var output bytes.Buffer
-	mgr := NewManager(mock, slog.Default(), strings.NewReader(""), &output)
+	layout := config.NewLayout(filepath.Join(tmpDir, ".yoloai"))
+	mgr := NewManager(mock, slog.Default(), strings.NewReader(""), &output, WithLayout(layout))
 
 	// DetectStatus will call Inspect (running=true),
 	// then try Exec for tmux. Since our mock returns errMockNotImplemented
@@ -200,7 +205,7 @@ func TestStart_Stopped(t *testing.T) {
 		},
 	}
 
-	mgr := newLifecycleMgr(mock)
+	mgr := newLifecycleMgr(mock, tmpDir)
 
 	// After remove, Start routes to recreateContainer which fails
 	// (no runtime-config.json) — same pattern as TestStart_Removed.
@@ -215,7 +220,7 @@ func TestStart_SandboxNotFound(t *testing.T) {
 	t.Setenv("HOME", tmpDir)
 
 	mock := &lifecycleMockRuntime{}
-	mgr := newLifecycleMgr(mock)
+	mgr := newLifecycleMgr(mock, tmpDir)
 	err := mgr.Start(context.Background(), "nonexistent", StartOptions{})
 	assert.ErrorIs(t, err, ErrSandboxNotFound)
 }
@@ -232,7 +237,7 @@ func TestStart_Removed(t *testing.T) {
 		},
 	}
 
-	mgr := newLifecycleMgr(mock)
+	mgr := newLifecycleMgr(mock, tmpDir)
 
 	// recreateContainer will fail because there's no runtime-config.json,
 	// but we're testing that Start routes to recreateContainer for StatusRemoved.
@@ -255,7 +260,7 @@ func TestStart_Resume_RequiresPrompt(t *testing.T) {
 		},
 	}
 
-	mgr := newLifecycleMgr(mock)
+	mgr := newLifecycleMgr(mock, tmpDir)
 	err := mgr.Start(context.Background(), "test-resume-noprompt", StartOptions{Resume: true})
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "--resume requires a sandbox created with --prompt")
@@ -318,7 +323,7 @@ func TestStart_Resume_DoneStatus(t *testing.T) {
 		return runtime.ExecResult{ExitCode: 1}, fmt.Errorf("mock error")
 	}
 
-	mgr := newLifecycleMgr(mock)
+	mgr := newLifecycleMgr(mock, tmpDir)
 	_ = mgr.Start(context.Background(), name, StartOptions{Resume: true})
 	// The sendResumePrompt exec might fail but the respawn should have happened
 	// We just check that the respawn used interactive command (no headless prompt)
@@ -381,7 +386,7 @@ func TestStart_Resume_StoppedStatus(t *testing.T) {
 		},
 	}
 
-	mgr := newLifecycleMgr(mock)
+	mgr := newLifecycleMgr(mock, tmpDir)
 
 	// Start with resume will call prepareResumeFiles then recreateContainer.
 	// recreateContainer will fail (no work dir, no secrets etc.) but we can check
@@ -417,7 +422,7 @@ func TestNeedsConfirmation_Running(t *testing.T) {
 		},
 	}
 
-	mgr := newLifecycleMgr(mock)
+	mgr := newLifecycleMgr(mock, tmpDir)
 	needs, reason := mgr.NeedsConfirmation(context.Background(), "test-confirm-running")
 	assert.True(t, needs)
 	assert.Equal(t, "agent is still running", reason)
@@ -461,7 +466,7 @@ func TestNeedsConfirmation_ChangesExist(t *testing.T) {
 		},
 	}
 
-	mgr := newLifecycleMgr(mock)
+	mgr := newLifecycleMgr(mock, tmpDir)
 	needs, reason := mgr.NeedsConfirmation(context.Background(), "test-confirm-changes")
 	assert.True(t, needs)
 	assert.Equal(t, "unapplied changes exist", reason)
@@ -501,7 +506,7 @@ func TestNeedsConfirmation_NoChanges(t *testing.T) {
 		},
 	}
 
-	mgr := newLifecycleMgr(mock)
+	mgr := newLifecycleMgr(mock, tmpDir)
 	needs, reason := mgr.NeedsConfirmation(context.Background(), "test-confirm-clean")
 	assert.False(t, needs)
 	assert.Empty(t, reason)
@@ -516,7 +521,7 @@ func TestDestroy_RemovesDir(t *testing.T) {
 	createTestSandbox(t, tmpDir, "test-destroy", "/tmp/project", "copy")
 
 	mock := &lifecycleMockRuntime{}
-	mgr := newLifecycleMgr(mock)
+	mgr := newLifecycleMgr(mock, tmpDir)
 
 	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", "test-destroy")
 	assert.DirExists(t, sandboxDir)
@@ -531,7 +536,7 @@ func TestDestroy_SandboxNotFound(t *testing.T) {
 	t.Setenv("HOME", tmpDir)
 
 	mock := &lifecycleMockRuntime{}
-	mgr := newLifecycleMgr(mock)
+	mgr := newLifecycleMgr(mock, tmpDir)
 	err := mgr.Destroy(context.Background(), "nonexistent")
 	assert.NoError(t, err)
 }
@@ -596,7 +601,7 @@ func TestReset_RecopiesWorkdir(t *testing.T) {
 		},
 	}
 
-	mgr := newLifecycleMgr(mock)
+	mgr := newLifecycleMgr(mock, tmpDir)
 
 	// Reset will re-copy and re-baseline, then fail at Start (recreateContainer
 	// needs runtime-config.json). That's OK — we verify the re-copy happened.
@@ -666,7 +671,7 @@ func TestReset_State(t *testing.T) {
 		},
 	}
 
-	mgr := newLifecycleMgr(mock)
+	mgr := newLifecycleMgr(mock, tmpDir)
 	// --state implies --restart
 	_ = mgr.Reset(context.Background(), ResetOptions{Name: name, ClearState: true})
 
@@ -691,7 +696,7 @@ func TestReset_RWMode_Error(t *testing.T) {
 	createRWSandbox(t, tmpDir, "test-reset-rw", hostDir)
 
 	mock := &lifecycleMockRuntime{}
-	mgr := newLifecycleMgr(mock)
+	mgr := newLifecycleMgr(mock, tmpDir)
 
 	err := mgr.Reset(context.Background(), ResetOptions{Name: "test-reset-rw"})
 	assert.Error(t, err)
@@ -743,7 +748,7 @@ func TestReset_OriginalMissing(t *testing.T) {
 		},
 	}
 
-	mgr := newLifecycleMgr(mock)
+	mgr := newLifecycleMgr(mock, tmpDir)
 	// Container not running → auto-upgrades to restart
 	err := mgr.Reset(context.Background(), ResetOptions{Name: name})
 	assert.Error(t, err)
@@ -815,7 +820,7 @@ func TestReset_InPlace_SyncsWorkdir(t *testing.T) {
 		},
 	}
 
-	mgr := newLifecycleMgr(mock)
+	mgr := newLifecycleMgr(mock, tmpDir)
 
 	// Default reset (in-place). sendResetNotification will fail (no runtime-config.json
 	// and exec mock not wired), but workspace sync and baseline should succeed.
@@ -898,7 +903,7 @@ func TestReset_InPlace_KeepCache(t *testing.T) {
 		},
 	}
 
-	mgr := newLifecycleMgr(mock)
+	mgr := newLifecycleMgr(mock, tmpDir)
 	_ = mgr.Reset(context.Background(), ResetOptions{Name: name, KeepCache: true})
 
 	// Cache should be preserved
@@ -958,7 +963,7 @@ func TestReset_InPlace_KeepFiles(t *testing.T) {
 		},
 	}
 
-	mgr := newLifecycleMgr(mock)
+	mgr := newLifecycleMgr(mock, tmpDir)
 	_ = mgr.Reset(context.Background(), ResetOptions{Name: name, KeepFiles: true})
 
 	// Cache should be cleared
@@ -1016,7 +1021,8 @@ func TestReset_UpgradesToRestartWhenNotRunning(t *testing.T) {
 	}
 
 	var output bytes.Buffer
-	mgr := NewManager(mock, slog.Default(), strings.NewReader(""), &output)
+	layout := config.NewLayout(filepath.Join(tmpDir, ".yoloai"))
+	mgr := NewManager(mock, slog.Default(), strings.NewReader(""), &output, WithLayout(layout))
 
 	// Default reset; container not running → auto-upgrades to restart.
 	// Restart path will fail at Start (no runtime-config.json), but re-copy should happen.
@@ -1160,7 +1166,7 @@ func TestDestroy_BrokenSandbox(t *testing.T) {
 	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
 
 	mock := &lifecycleMockRuntime{}
-	mgr := newLifecycleMgr(mock)
+	mgr := newLifecycleMgr(mock, tmpDir)
 
 	err := mgr.Destroy(context.Background(), "broken")
 	require.NoError(t, err)
@@ -1192,7 +1198,7 @@ func TestDestroy_ReadOnlyFiles(t *testing.T) {
 	require.NoError(t, store.SaveMeta(sandboxDir, meta))
 
 	mock := &lifecycleMockRuntime{}
-	mgr := newLifecycleMgr(mock)
+	mgr := newLifecycleMgr(mock, tmpDir)
 
 	err := mgr.Destroy(context.Background(), name)
 	require.NoError(t, err)
@@ -1213,7 +1219,7 @@ func TestNeedsConfirmation_InspectError(t *testing.T) {
 		},
 	}
 
-	mgr := newLifecycleMgr(mock)
+	mgr := newLifecycleMgr(mock, tmpDir)
 	needs, reason := mgr.NeedsConfirmation(context.Background(), "test-confirm-err")
 	// When inspect fails, DetectStatus returns an error → NeedsConfirmation returns false
 	assert.False(t, needs)

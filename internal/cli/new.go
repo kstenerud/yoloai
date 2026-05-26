@@ -245,7 +245,7 @@ func executeNewCreate(cmd *cobra.Command, ctx context.Context, rt runtime.Runtim
 	if jsonEnabled(cmd) {
 		mgrOutput = io.Discard
 	}
-	mgr := sandbox.NewManager(rt, slog.Default(), cmd.InOrStdin(), mgrOutput)
+	mgr := sandbox.NewManager(rt, slog.Default(), cmd.InOrStdin(), mgrOutput, sandbox.WithLayout(cliLayout()))
 	sandboxName, err := mgr.Create(ctx, opts)
 	if err != nil {
 		return err

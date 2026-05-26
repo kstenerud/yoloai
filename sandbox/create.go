@@ -543,7 +543,7 @@ func (m *Manager) resolveRuntimeBase(ctx context.Context, opts *CreateOptions, p
 	if !ok {
 		return NewUsageError("--runtime flag is only supported on backends that manage Apple simulator runtimes (currently: tart)")
 	}
-	imageRef, err := asr.PrepareRuntimeBase(ctx, opts.Runtimes)
+	imageRef, err := asr.PrepareRuntimeBase(ctx, m.layout, opts.Runtimes)
 	if err != nil {
 		return err
 	}

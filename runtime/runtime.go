@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 
+	"github.com/kstenerud/yoloai/config"
 	"github.com/kstenerud/yoloai/runtime/caps"
 )
 
@@ -171,8 +172,12 @@ type CopyMountResolver interface {
 // The returned imageRef is the base-image name the caller should use when
 // creating the sandbox. Errors from this method are user-shaped (UsageError
 // when the requested base doesn't exist locally and must be created first).
+//
+// layout is the active config.Layout — implementations use it to derive
+// host paths (e.g. base-image build lock locations). Q-W.5 threads it
+// through so backends never read ambient HOME.
 type AppleSimulatorRuntimes interface {
-	PrepareRuntimeBase(ctx context.Context, runtimeSpecs []string) (imageRef string, err error)
+	PrepareRuntimeBase(ctx context.Context, layout config.Layout, runtimeSpecs []string) (imageRef string, err error)
 }
 
 // ResolveCopyMountFor returns the in-sandbox path for a :copy directory.
@@ -209,7 +214,11 @@ type Runtime interface {
 	// checks prerequisites). sourceDir is the profile directory containing
 	// build instructions (Dockerfile etc.); ignored by backends that don't
 	// build images. force=true rebuilds even if already ready.
-	Setup(ctx context.Context, sourceDir string, output io.Writer, logger *slog.Logger, force bool) error
+	//
+	// layout is the active config.Layout — backends use it to derive
+	// host paths (e.g. base-image build lock locations). Q-W.5 threads
+	// it through the interface so backends never read ambient HOME.
+	Setup(ctx context.Context, layout config.Layout, sourceDir string, output io.Writer, logger *slog.Logger, force bool) error
 
 	// IsReady returns true if the backend is ready to launch agents (image
 	// built, prerequisites present, etc.). Each backend determines readiness

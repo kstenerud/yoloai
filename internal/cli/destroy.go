@@ -85,7 +85,7 @@ func runDestroyCmd(cmd *cobra.Command, args []string) error {
 	}
 
 	return withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
-		mgr := sandbox.NewManager(rt, slog.Default(), cmd.InOrStdin(), cmd.ErrOrStderr())
+		mgr := sandbox.NewManager(rt, slog.Default(), cmd.InOrStdin(), cmd.ErrOrStderr(), sandbox.WithLayout(cliLayout()))
 
 		names, err := resolveDestroyNames(cmd, ctx, rt, args, all)
 		if err != nil {

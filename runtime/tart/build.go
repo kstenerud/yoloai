@@ -79,7 +79,12 @@ var provisionCommands = []string{
 // Setup ensures the provisioned base VM image exists, pulling and provisioning
 // as needed. If imageRef is set in config (tart.image override), it uses that
 // as the base instead of the default.
-func (r *Runtime) Setup(ctx context.Context, sourceDir string, output io.Writer, logger *slog.Logger, force bool) error {
+//
+// The layout parameter is currently unused by the tart Setup path — it's
+// accepted to satisfy the runtime.Runtime interface (Q-W.5) and remains
+// available for any future host-path needs (e.g., lock files) without a
+// further signature change.
+func (r *Runtime) Setup(ctx context.Context, _ config.Layout, sourceDir string, output io.Writer, logger *slog.Logger, force bool) error {
 	baseImage := r.resolveBaseImage(sourceDir)
 
 	if !force {

@@ -39,13 +39,11 @@ func WithProgress(fn func(name, msg string)) ManagerOption {
 	return func(m *Manager) { m.progress = fn }
 }
 
-// WithLayout sets the path-resolution Layout. Embedders that want to
-// run yoloai rooted somewhere other than $HOME/.yoloai/ pass this
-// option at construction. When unset, the Manager defaults to a
-// Layout rooted at config.YoloaiDir() (which reads $HOME via
-// HomeDir()) — that default will be removed in Q-W.4 when the CLI
-// becomes the single os.UserHomeDir() call site and passes Layout
-// explicitly. See development-principles.md §12.
+// WithLayout sets the path-resolution Layout. REQUIRED at
+// construction — Q-W.5 removed the implicit $HOME/.yoloai/ fallback.
+// Embedders construct a Layout from their data directory of choice;
+// the CLI constructs it once from --data-dir or $HOME/.yoloai/ at
+// startup. See development-principles.md §12.
 func WithLayout(layout config.Layout) ManagerOption {
 	return func(m *Manager) { m.layout = layout }
 }
@@ -53,6 +51,15 @@ func WithLayout(layout config.Layout) ManagerOption {
 // NewManager creates a Manager with the given runtime, logger, input reader
 // for interactive prompts, and output writer for user-facing messages.
 // The backend name is read from rt.Descriptor().Name when rt is non-nil.
+//
+// A WithLayout option is REQUIRED — Q-W.5 removed the implicit
+// $HOME/.yoloai/ fallback so library code never reads ambient HOME.
+// Callers that omit WithLayout get a Manager whose Layout.DataDir is
+// "", which produces relative paths at every store helper call
+// site (failures surface quickly). The yoloai.Client adapter and
+// the CLI command handlers always pass WithLayout; only direct
+// test construction needs to remember it (use config.NewLayout
+// with t.TempDir-based DataDir).
 func NewManager(rt runtime.Runtime, logger *slog.Logger, input io.Reader, output io.Writer, opts ...ManagerOption) *Manager {
 	backend := ""
 	if rt != nil {
@@ -65,7 +72,6 @@ func NewManager(rt runtime.Runtime, logger *slog.Logger, input io.Reader, output
 		input:   input,
 		scanner: bufio.NewScanner(input),
 		output:  output,
-		layout:  config.NewLayout(config.YoloaiDir()), // Q-W.2 default; Q-W.4 removes this fallback
 	}
 	for _, opt := range opts {
 		opt(m)
@@ -184,7 +190,7 @@ func (m *Manager) EnsureSetupNonInteractive(ctx context.Context) error {
 
 	// Seed resources and build/rebuild base image as needed
 	baseProfileDir := config.ProfileDirPath("base")
-	if err := m.runtime.Setup(ctx, baseProfileDir, m.output, m.logger, false); err != nil {
+	if err := m.runtime.Setup(ctx, m.layout, baseProfileDir, m.output, m.logger, false); err != nil {
 		return err
 	}
 

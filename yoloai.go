@@ -6,7 +6,9 @@
 //
 // Typical usage:
 //
-//	client, err := yoloai.New(ctx)
+//	client, err := yoloai.NewWithOptions(ctx, yoloai.Options{
+//	    DataDir: filepath.Join(os.Getenv("HOME"), ".yoloai"),
+//	})
 //	if err != nil { log.Fatal(err) }
 //	defer client.Close()
 //
@@ -54,6 +56,17 @@ var (
 
 // Options configures a Client.
 type Options struct {
+	// DataDir is the root yoloai data directory; all per-Client state
+	// lives below it (sandboxes/, profiles/, config.yaml, state.yaml,
+	// credentials/). REQUIRED — empty is rejected at construction.
+	//
+	// No implicit default. yoloai library code never reads $HOME or any
+	// other ambient process state. The CLI fills this from $HOME/.yoloai/
+	// at startup (its single licensed os.UserHomeDir() call). HTTP
+	// servers, daemons, multi-tenant processes, and tests pass an
+	// explicit path. See development-principles.md §12.
+	DataDir string
+
 	// Backend selects the runtime backend: "docker", "tart", or "seatbelt".
 	// Default: read from config.yaml, then "docker".
 	Backend string
@@ -77,15 +90,13 @@ type Client struct {
 	layout  config.Layout // Q-W: DataDir-rooted path resolver propagated to Manager + apply
 }
 
-// New creates a Client with default options. The backend is selected from
-// config.yaml, falling back to "docker". Returns an error if the runtime
-// backend cannot be connected.
-func New(ctx context.Context) (*Client, error) {
-	return NewWithOptions(ctx, Options{})
-}
-
 // NewWithOptions creates a Client with explicit options.
+// Options.DataDir is REQUIRED (Q-W.5); empty is rejected.
 func NewWithOptions(ctx context.Context, opts Options) (*Client, error) {
+	if opts.DataDir == "" {
+		return nil, fmt.Errorf("yoloai: Options.DataDir is required (no implicit $HOME fallback; see development-principles.md §12)")
+	}
+
 	backend := opts.Backend
 	if backend == "" {
 		backend = resolveBackendFromConfig(ctx)
@@ -108,11 +119,7 @@ func NewWithOptions(ctx context.Context, opts Options) (*Client, error) {
 		return nil, fmt.Errorf("connect to %s backend: %w", backend, err)
 	}
 
-	// Default Layout from config.YoloaiDir() — same fallback the Manager
-	// uses today (Q-W.2). Q-W.5 will replace this with an explicit
-	// Options.DataDir; for now Client and Manager share a Layout via
-	// WithLayout so both agree on paths.
-	layout := config.NewLayout(config.YoloaiDir())
+	layout := config.NewLayout(opts.DataDir)
 	mgr := sandbox.NewManager(rt, logger, input, output, sandbox.WithLayout(layout))
 	return &Client{manager: mgr, rt: rt, layout: layout}, nil
 }

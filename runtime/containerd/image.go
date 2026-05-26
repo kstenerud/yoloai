@@ -20,6 +20,7 @@ import (
 	"github.com/containerd/containerd/v2/pkg/labels"
 	"github.com/containerd/containerd/v2/pkg/namespaces"
 	"github.com/containerd/errdefs"
+	"github.com/kstenerud/yoloai/config"
 	dockerrt "github.com/kstenerud/yoloai/runtime/docker"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 )
@@ -41,7 +42,11 @@ const dockerImageRef = "docker.io/library/yoloai-base:latest"
 //
 // Slow path: docker save | ctr images import - is used when Docker is not in
 // containerd-snapshotter mode, or when the fast path fails verification.
-func (r *Runtime) Setup(ctx context.Context, sourceDir string, output io.Writer, logger *slog.Logger, force bool) error {
+//
+// The layout parameter is currently unused by the containerd Setup path —
+// it's accepted to satisfy the runtime.Runtime interface (Q-W.5) and remains
+// available for any future host-path needs without a further signature change.
+func (r *Runtime) Setup(ctx context.Context, _ config.Layout, sourceDir string, output io.Writer, logger *slog.Logger, force bool) error {
 	ctx = r.withNamespace(ctx)
 
 	if r.imageAlreadyReady(ctx, force) {

@@ -83,7 +83,7 @@ func (m *Manager) resolveProfileConfig(ctx context.Context, opts *CreateOptions,
 	pr.imageRef = config.ResolveProfileImage(opts.Profile, chain)
 
 	// Build profile image if needed (Docker only)
-	if err := EnsureProfileImage(ctx, m.runtime, opts.Profile, AutoBuildSecrets(), m.output, m.logger, false); err != nil {
+	if err := EnsureProfileImage(ctx, m.runtime, m.layout, opts.Profile, AutoBuildSecrets(), m.output, m.logger, false); err != nil {
 		return nil, fmt.Errorf("build profile image: %w", err)
 	}
 

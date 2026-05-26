@@ -28,7 +28,11 @@ type ProfileImageBuilder interface {
 // entire inheritance chain are built and up to date. Non-Docker backends
 // are a no-op. If force is true, all images in the chain are rebuilt.
 // secrets are Docker BuildKit --secret specs passed to profile image builds.
-func EnsureProfileImage(ctx context.Context, rt runtime.Runtime, profileName string, secrets []string, output io.Writer, logger *slog.Logger, force bool) error {
+//
+// layout is the DataDir-rooted Layout used to locate the base profile
+// directory and for any host-path needs Setup may have (Q-W.5 threads
+// it through runtime.Runtime.Setup).
+func EnsureProfileImage(ctx context.Context, rt runtime.Runtime, layout config.Layout, profileName string, secrets []string, output io.Writer, logger *slog.Logger, force bool) error {
 	if !rt.Descriptor().Capabilities.CapAdd {
 		return nil
 	}
@@ -44,8 +48,8 @@ func EnsureProfileImage(ctx context.Context, rt runtime.Runtime, profileName str
 	}
 
 	// Ensure base image first
-	baseProfileDir := filepath.Join(config.HomeDir(), ".yoloai", "profiles", "base")
-	if err := rt.Setup(ctx, baseProfileDir, output, logger, force); err != nil {
+	baseProfileDir := filepath.Join(layout.ProfilesDir(), "base")
+	if err := rt.Setup(ctx, layout, baseProfileDir, output, logger, force); err != nil {
 		return fmt.Errorf("ensure base image: %w", err)
 	}
 

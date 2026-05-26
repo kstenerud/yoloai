@@ -72,7 +72,7 @@ func runStart(cmd *cobra.Command, args []string, opts *startOpts) error {
 
 // startInRuntime performs the sandbox start and optional attach inside the runtime context.
 func startInRuntime(cmd *cobra.Command, ctx context.Context, rt runtime.Runtime, name string, opts *startOpts) error {
-	mgr := sandbox.NewManager(rt, slog.Default(), cmd.InOrStdin(), cmd.ErrOrStderr())
+	mgr := sandbox.NewManager(rt, slog.Default(), cmd.InOrStdin(), cmd.ErrOrStderr(), sandbox.WithLayout(cliLayout()))
 	if err := mgr.Start(ctx, name, sandbox.StartOptions{
 		Resume:       opts.resume,
 		Prompt:       opts.prompt,

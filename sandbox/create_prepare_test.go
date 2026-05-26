@@ -324,7 +324,7 @@ func TestApplyConfigDefaults_RecipesFromConfigWhenNoProfile(t *testing.T) {
 // mockDockerRuntime implements runtime.Runtime without WorkDirSetup (Docker-like behavior).
 type mockDockerRuntime struct{}
 
-func (m *mockDockerRuntime) Setup(ctx context.Context, sourceDir string, output io.Writer, logger *slog.Logger, force bool) error {
+func (m *mockDockerRuntime) Setup(ctx context.Context, layout config.Layout, sourceDir string, output io.Writer, logger *slog.Logger, force bool) error {
 	return nil
 }
 func (m *mockDockerRuntime) IsReady(ctx context.Context) (bool, error) { return true, nil }

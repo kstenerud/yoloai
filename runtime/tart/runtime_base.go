@@ -21,7 +21,7 @@ import (
 // Previously lived in sandbox/create.go's resolveRuntimeBase via an explicit
 // type assertion to *tart.Runtime; relocated here as part of W-L7 so that
 // sandbox/ no longer imports runtime/tart.
-func (r *Runtime) PrepareRuntimeBase(ctx context.Context, runtimeSpecs []string) (string, error) {
+func (r *Runtime) PrepareRuntimeBase(ctx context.Context, layout config.Layout, runtimeSpecs []string) (string, error) {
 	resolved, err := ResolveRuntimeVersions(runtimeSpecs)
 	if err != nil {
 		return "", fmt.Errorf("resolve runtimes: %w", err)
@@ -30,10 +30,6 @@ func (r *Runtime) PrepareRuntimeBase(ctx context.Context, runtimeSpecs []string)
 	cacheKey := GenerateCacheKey(resolved)
 	baseName := "yoloai-base-" + cacheKey
 
-	// Bridge: Q-W.5 will replace this with an explicit Layout passed
-	// into Runtime construction; for now use the default rooted at
-	// config.YoloaiDir().
-	layout := config.NewLayout(config.YoloaiDir())
 	release, err := AcquireBaseLock(layout, baseName)
 	if err != nil {
 		return "", fmt.Errorf("acquire base lock: %w", err)

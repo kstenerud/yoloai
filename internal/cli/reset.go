@@ -69,7 +69,7 @@ func runReset(cmd *cobra.Command, args []string, opts *resetOpts) error {
 
 // resetInRuntime performs the sandbox reset and optional attach inside the runtime context.
 func resetInRuntime(cmd *cobra.Command, ctx context.Context, rt runtime.Runtime, name string, opts *resetOpts) error {
-	mgr := sandbox.NewManager(rt, slog.Default(), cmd.InOrStdin(), cmd.ErrOrStderr())
+	mgr := sandbox.NewManager(rt, slog.Default(), cmd.InOrStdin(), cmd.ErrOrStderr(), sandbox.WithLayout(cliLayout()))
 	slog.Info("resetting sandbox", "event", "sandbox.reset", "sandbox", name, "restart", opts.restart, "clear_state", opts.clearState) //nolint:gosec // G706: name is validated by ValidateName
 	if err := mgr.Reset(ctx, sandbox.ResetOptions{
 		Name:       name,

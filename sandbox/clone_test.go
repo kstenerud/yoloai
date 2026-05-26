@@ -13,12 +13,14 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/kstenerud/yoloai/config"
 	"github.com/kstenerud/yoloai/sandbox/store"
 )
 
-func newCloneMgr() *Manager {
+func newCloneMgr(tmpDir string) *Manager {
 	mock := &lifecycleMockRuntime{}
-	return NewManager(mock, slog.Default(), strings.NewReader(""), io.Discard)
+	layout := config.NewLayout(filepath.Join(tmpDir, ".yoloai"))
+	return NewManager(mock, slog.Default(), strings.NewReader(""), io.Discard, WithLayout(layout))
 }
 
 func createCloneSource(t *testing.T, tmpDir, name string) {
@@ -49,7 +51,7 @@ func TestClone_Success(t *testing.T) {
 	t.Setenv("HOME", tmpDir)
 
 	createCloneSource(t, tmpDir, "source")
-	mgr := newCloneMgr()
+	mgr := newCloneMgr(tmpDir)
 
 	err := mgr.Clone(context.Background(), CloneOptions{Source: "source", Dest: "dest"})
 	require.NoError(t, err)
@@ -73,7 +75,7 @@ func TestClone_InvalidDestName(t *testing.T) {
 	t.Setenv("HOME", tmpDir)
 
 	createCloneSource(t, tmpDir, "source2")
-	mgr := newCloneMgr()
+	mgr := newCloneMgr(tmpDir)
 
 	err := mgr.Clone(context.Background(), CloneOptions{Source: "source2", Dest: "INVALID!"})
 	assert.Error(t, err)
@@ -83,7 +85,7 @@ func TestClone_SourceNotFound(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
 
-	mgr := newCloneMgr()
+	mgr := newCloneMgr(tmpDir)
 	err := mgr.Clone(context.Background(), CloneOptions{Source: "nonexistent", Dest: "dest2"})
 	assert.Error(t, err)
 	assert.ErrorIs(t, err, ErrSandboxNotFound)
@@ -98,7 +100,7 @@ func TestClone_DestAlreadyExists(t *testing.T) {
 	dstDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", "dst3")
 	require.NoError(t, os.MkdirAll(dstDir, 0750))
 
-	mgr := newCloneMgr()
+	mgr := newCloneMgr(tmpDir)
 	err := mgr.Clone(context.Background(), CloneOptions{Source: "src3", Dest: "dst3"})
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "already exists")
@@ -109,7 +111,7 @@ func TestClone_MetaNameAndTimestamp(t *testing.T) {
 	t.Setenv("HOME", tmpDir)
 
 	createCloneSource(t, tmpDir, "src4")
-	mgr := newCloneMgr()
+	mgr := newCloneMgr(tmpDir)
 
 	before := time.Now()
 	err := mgr.Clone(context.Background(), CloneOptions{Source: "src4", Dest: "dst4"})
@@ -132,7 +134,7 @@ func TestClone_CleansUpOnMetaLoadFailure(t *testing.T) {
 	// Write invalid JSON as environment.json
 	writeTestFile(t, srcDir, store.EnvironmentFile, "not valid json{{{")
 
-	mgr := newCloneMgr()
+	mgr := newCloneMgr(tmpDir)
 	err := mgr.Clone(context.Background(), CloneOptions{Source: "badsrc", Dest: "baddst"})
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "load cloned meta")

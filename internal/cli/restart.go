@@ -72,7 +72,7 @@ func runRestart(cmd *cobra.Command, args []string, opts *restartOpts) error {
 
 // restartInRuntime performs stop/start and optional attach inside the runtime context.
 func restartInRuntime(cmd *cobra.Command, ctx context.Context, rt runtime.Runtime, name string, opts *restartOpts) error {
-	mgr := sandbox.NewManager(rt, slog.Default(), cmd.InOrStdin(), cmd.ErrOrStderr())
+	mgr := sandbox.NewManager(rt, slog.Default(), cmd.InOrStdin(), cmd.ErrOrStderr(), sandbox.WithLayout(cliLayout()))
 
 	slog.Info("restarting sandbox", "event", "sandbox.restart", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
 	if err := mgr.Stop(ctx, name); err != nil {

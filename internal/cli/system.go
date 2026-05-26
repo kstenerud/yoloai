@@ -113,7 +113,7 @@ func runSystemBuildProfile(cmd *cobra.Command, profileName string, secretFlags [
 		if jsonEnabled(cmd) {
 			buildOut, _ = os.Open(os.DevNull)
 		}
-		if err := sandbox.EnsureProfileImage(ctx, rt, profileName, secrets, buildOut, slog.Default(), force); err != nil {
+		if err := sandbox.EnsureProfileImage(ctx, rt, cliLayout(), profileName, secrets, buildOut, slog.Default(), force); err != nil {
 			return err
 		}
 		if jsonEnabled(cmd) {
@@ -149,7 +149,7 @@ func runSystemBuildBase(cmd *cobra.Command, backend string, force bool) error {
 		if jsonEnabled(cmd) {
 			buildOut, _ = os.Open(os.DevNull)
 		}
-		if err := rt.Setup(ctx, baseProfileDir, buildOut, slog.Default(), force); err != nil {
+		if err := rt.Setup(ctx, cliLayout(), baseProfileDir, buildOut, slog.Default(), force); err != nil {
 			return err
 		}
 		if jsonEnabled(cmd) {

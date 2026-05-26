@@ -49,7 +49,7 @@ func runStopCmd(cmd *cobra.Command, args []string) error {
 	}
 
 	return withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
-		mgr := sandbox.NewManager(rt, slog.Default(), cmd.InOrStdin(), cmd.ErrOrStderr())
+		mgr := sandbox.NewManager(rt, slog.Default(), cmd.InOrStdin(), cmd.ErrOrStderr(), sandbox.WithLayout(cliLayout()))
 
 		names, err := resolveStopNames(cmd, ctx, rt, args, all)
 		if err != nil {

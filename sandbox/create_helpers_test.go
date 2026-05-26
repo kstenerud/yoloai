@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/kstenerud/yoloai/agent"
+	"github.com/kstenerud/yoloai/config"
 	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/runtime/caps"
 	dockerrt "github.com/kstenerud/yoloai/runtime/docker"
@@ -22,6 +23,13 @@ import (
 	tartrt "github.com/kstenerud/yoloai/runtime/tart"
 	"github.com/kstenerud/yoloai/sandbox/store"
 )
+
+// layoutForTmpDir builds a Layout rooted at tmpDir/.yoloai for tests
+// that exercise Manager methods which use m.layout. Mirrors what the
+// CLI does at startup so tests don't depend on ambient HOME.
+func layoutForTmpDir(tmpDir string) config.Layout {
+	return config.NewLayout(filepath.Join(tmpDir, ".yoloai"))
+}
 
 // hasAnyAPIKey tests
 
@@ -675,7 +683,7 @@ func TestPrepareSandboxState_WorkdirMissing(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
 
-	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), io.Discard)
+	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), io.Discard, WithLayout(layoutForTmpDir(tmpDir)))
 
 	_, err := mgr.prepareSandboxState(context.TODO(), CreateOptions{
 		Name:    "test",
@@ -698,7 +706,7 @@ func TestPrepareSandboxState_SandboxExists(t *testing.T) {
 		Agent: "test",
 	}))
 
-	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), io.Discard)
+	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), io.Discard, WithLayout(layoutForTmpDir(tmpDir)))
 
 	_, err := mgr.prepareSandboxState(context.TODO(), CreateOptions{
 		Name:    "existing",
@@ -713,7 +721,7 @@ func TestPrepareSandboxState_ConflictingPromptFlags(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
 
-	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), io.Discard)
+	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), io.Discard, WithLayout(layoutForTmpDir(tmpDir)))
 
 	_, err := mgr.prepareSandboxState(context.TODO(), CreateOptions{
 		Name:       "test",
@@ -732,7 +740,7 @@ func TestPrepareSandboxState_MissingAPIKey(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "")
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
 
-	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), io.Discard)
+	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), io.Discard, WithLayout(layoutForTmpDir(tmpDir)))
 
 	_, err := mgr.prepareSandboxState(context.TODO(), CreateOptions{
 		Name:    "test",
@@ -748,7 +756,7 @@ func TestPrepareSandboxState_DangerousDir(t *testing.T) {
 	t.Setenv("HOME", tmpDir)
 	t.Setenv("ANTHROPIC_API_KEY", "sk-test")
 
-	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), io.Discard)
+	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), io.Discard, WithLayout(layoutForTmpDir(tmpDir)))
 
 	_, err := mgr.prepareSandboxState(context.TODO(), CreateOptions{
 		Name:    "test",
@@ -766,7 +774,7 @@ func TestPrepareSandboxState_DangerousDirForce(t *testing.T) {
 
 	// HOME is classified as dangerous. Use :rw:force to avoid copying.
 	var buf bytes.Buffer
-	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader("y\n"), &buf)
+	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader("y\n"), &buf, WithLayout(layoutForTmpDir(tmpDir)))
 
 	_, err := mgr.prepareSandboxState(context.TODO(), CreateOptions{
 		Name:    "test",
@@ -929,7 +937,7 @@ func TestPrepareSandboxState_MissingAPIKeyErrorNoEmptyParens(t *testing.T) {
 		t.Setenv(key, "")
 	}
 
-	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), io.Discard)
+	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), io.Discard, WithLayout(layoutForTmpDir(tmpDir)))
 
 	_, err := mgr.prepareSandboxState(context.TODO(), CreateOptions{
 		Name:    "test",
@@ -957,7 +965,7 @@ func TestPrepareSandboxState_MissingAPIKeyErrorWithAuthFiles(t *testing.T) {
 	}
 	defer func() { keychainReader = origReader }()
 
-	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), io.Discard)
+	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), io.Discard, WithLayout(layoutForTmpDir(tmpDir)))
 
 	_, err := mgr.prepareSandboxState(context.TODO(), CreateOptions{
 		Name:    "test",
@@ -997,7 +1005,7 @@ func TestPrepareSandboxState_NetworkIsolatedSetsAllowlist(t *testing.T) {
 	workDir := filepath.Join(tmpDir, "project")
 	require.NoError(t, os.MkdirAll(workDir, 0750))
 
-	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader("y\n"), io.Discard)
+	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader("y\n"), io.Discard, WithLayout(layoutForTmpDir(tmpDir)))
 
 	state, err := mgr.prepareSandboxState(context.TODO(), CreateOptions{
 		Name:    "test",
@@ -1096,7 +1104,7 @@ func TestPrepareSandboxState_NetworkAllowAddsExtraDomains(t *testing.T) {
 	workDir := filepath.Join(tmpDir, "project")
 	require.NoError(t, os.MkdirAll(workDir, 0750))
 
-	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader("y\n"), io.Discard)
+	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader("y\n"), io.Discard, WithLayout(layoutForTmpDir(tmpDir)))
 
 	state, err := mgr.prepareSandboxState(context.TODO(), CreateOptions{
 		Name:         "test",

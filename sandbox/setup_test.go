@@ -95,7 +95,7 @@ func setupTestManager(t *testing.T, input string) (*Manager, *bytes.Buffer, stri
 
 	var output bytes.Buffer
 	mock := &mockRuntime{}
-	mgr := NewManager(mock, slog.Default(), strings.NewReader(input), &output)
+	mgr := NewManager(mock, slog.Default(), strings.NewReader(input), &output, WithLayout(config.NewLayout(yoloaiDir)))
 	return mgr, &output, tmpDir
 }
 

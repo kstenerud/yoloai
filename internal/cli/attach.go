@@ -72,7 +72,7 @@ func attachInRuntime(cmd *cobra.Command, ctx context.Context, rt runtime.Runtime
 
 	// --resume: restart agent before attaching
 	if opts.resume && info.Status != sandbox.StatusActive && info.Status != sandbox.StatusIdle {
-		mgr := sandbox.NewManager(rt, slog.Default(), cmd.InOrStdin(), cmd.ErrOrStderr())
+		mgr := sandbox.NewManager(rt, slog.Default(), cmd.InOrStdin(), cmd.ErrOrStderr(), sandbox.WithLayout(cliLayout()))
 		if err := mgr.Start(ctx, name, sandbox.StartOptions{Resume: true}); err != nil {
 			return err
 		}

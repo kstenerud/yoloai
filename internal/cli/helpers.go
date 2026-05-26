@@ -191,7 +191,7 @@ func resolveProfile(cmd *cobra.Command) string {
 // withManager creates a runtime and sandbox manager, calls fn, and ensures cleanup.
 func withManager(cmd *cobra.Command, backend string, fn func(ctx context.Context, mgr *sandbox.Manager) error) error {
 	return withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
-		mgr := sandbox.NewManager(rt, slog.Default(), cmd.InOrStdin(), cmd.ErrOrStderr())
+		mgr := sandbox.NewManager(rt, slog.Default(), cmd.InOrStdin(), cmd.ErrOrStderr(), sandbox.WithLayout(cliLayout()))
 		return fn(ctx, mgr)
 	})
 }

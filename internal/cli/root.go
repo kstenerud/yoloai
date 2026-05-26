@@ -11,6 +11,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/kstenerud/yoloai/config"
 	"github.com/kstenerud/yoloai/extension"
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/sandbox"
@@ -213,6 +214,23 @@ diff and apply what you want to keep.`,
 	rootCmd.PersistentFlags().Bool("json", false, "Output as JSON (machine-readable)")
 	rootCmd.PersistentFlags().Bool("debug", false, "Enable debug-level entries in cli.jsonl")
 	rootCmd.PersistentFlags().String("bugreport", "", "Write bug report (safe|unsafe)")
+	rootCmd.PersistentFlags().String("data-dir", "", "Override the yoloai data directory (default: $HOME/.yoloai/). HTTP/MCP/daemon/test embedders pass explicit paths; see development-principles.md §12.")
+
+	// Persistent pre-run: when --data-dir is supplied, record it as the
+	// process-wide rootLayout. Otherwise leave rootLayout empty so
+	// cliLayout() resolves $HOME/.yoloai/ freshly on each call (important
+	// for tests that t.Setenv("HOME", ...) between cases). The HOME read
+	// goes through homeBasedDataDir(), the W-L10-allowlisted site.
+	prevPersistentPreRunE := rootCmd.PersistentPreRunE
+	rootCmd.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
+		if dataDir, _ := cmd.Flags().GetString("data-dir"); dataDir != "" {
+			SetRootLayout(config.NewLayout(dataDir))
+		}
+		if prevPersistentPreRunE != nil {
+			return prevPersistentPreRunE(cmd, args)
+		}
+		return nil
+	}
 
 	registerCommands(rootCmd, version, commit, date)
 
