@@ -40,9 +40,12 @@
 //      so TTY handling is visible in the signature.
 //   3. Reviewer approval gates W-L8b.
 //
-// **Reviewer audit trail.** All seven W-L8a open questions resolved (Q-A
-// through Q-G). Resolutions live in the "Open questions" section at the
-// tail with **RESOLVED <date>** markers.
+// **Reviewer audit trail.** Twenty-five W-L8a design questions
+// resolved (Q-A through Q-Y) across two critique rounds. Resolutions
+// live in the "Open questions" section at the tail with
+// **RESOLVED <date>** markers; later refinements to earlier
+// resolutions are recorded as follow-up entries in the relevant
+// Q-block.
 //
 // **Threading model.** Methods on *Client, *Sandbox, the sub-handles
 // (*Workdir, *Files, *Network), and *SystemClient are synchronous and
@@ -1483,8 +1486,8 @@ var (
 	// unapplied changes and DestroyOptions.SkipApplyCheck is false.
 	ErrUnappliedChanges error
 
-	// ErrBackendUnavailable is returned by New when the requested or
-	// auto-selected backend is not usable on this host.
+	// ErrBackendUnavailable is returned by NewWithOptions when the
+	// requested or auto-selected backend is not usable on this host.
 	ErrBackendUnavailable error
 
 	// ErrProfileNotFound is returned by SystemClient.Profile when the
@@ -1599,11 +1602,19 @@ const (
 //       No "other" — every Client error fits one of these three.
 //
 // Q-C.  Streaming-vs-buffered for Diff / Apply?
-//       **RESOLVED 2026-05-24:** Defer. Workdir.Diff returns []*DiffResult,
-//       Workdir.Apply returns *ApplyResult. Observed-workflow ceiling
-//       (~50MB across 10 commits × 100 files × 500 lines) is well within
-//       slice-result budget. Adding streaming methods later is non-breaking;
-//       pre-empting the surface now carries dead weight.
+//       **RESOLVED 2026-05-24:** Defer. Workdir.Diff returns
+//       []*DiffResult, Workdir.Apply returns *ApplyResult. Observed-
+//       workflow ceiling (~50MB across 10 commits × 100 files × 500
+//       lines) is well within slice-result budget. Adding streaming
+//       methods later is non-breaking; pre-empting the surface now
+//       carries dead weight.
+//
+//       Later refinement (Q-U, 2026-05-25): with aux :copy/:overlay
+//       removed, Workdir.Diff returns just `(string, error)` (one
+//       workdir, one output) and Workdir.Apply returns the simplified
+//       flat *ApplyResult. The Q-C "buffered is fine" verdict still
+//       holds — the new shapes are even further inside the
+//       slice-result budget.
 //
 // Q-D.  Run(Wait=true) vs separate Wait()?
 //       **RESOLVED 2026-05-24:** Keep both. Client.Run(Wait=true) is the
