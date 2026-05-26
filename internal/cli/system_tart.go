@@ -165,8 +165,16 @@ func openTartRuntime(ctx context.Context) (*tart.Runtime, func(), error) {
 	}
 	tartRuntime, ok := rt.(*tart.Runtime)
 	if !ok {
+		// This is structurally impossible: newRuntime(ctx, "tart") returns a
+		// *tart.Runtime by construction (the registry's factory for "tart"
+		// produces exactly that type). Reaching here means the registry has
+		// been wired with the wrong factory under the "tart" key — a
+		// programming bug, not an operational failure. Panic so the bug
+		// surfaces immediately with a stack trace; root.go's recover() will
+		// finalize the bug report and re-panic for the default Go handler
+		// to render. Q-X principle: programming bugs panic, not returns.
 		_ = rt.Close()
-		return nil, nil, fmt.Errorf("internal error: tart backend type mismatch")
+		panic(fmt.Sprintf("yoloai bug: newRuntime(\"tart\") returned %T, not *tart.Runtime; check runtime/tart registry wiring", rt))
 	}
 	return tartRuntime, func() { _ = rt.Close() }, nil
 }

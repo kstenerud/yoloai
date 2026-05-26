@@ -719,7 +719,7 @@ func resolveEnvForRestart(meta *store.Meta) (map[string]string, error) {
 func (m *Manager) recreateContainer(ctx context.Context, name string, meta *store.Meta, resume bool) error {
 	agentDef := agent.GetAgent(meta.Agent)
 	if agentDef == nil {
-		return fmt.Errorf("unknown agent: %s", meta.Agent)
+		return NewConfigError("unknown agent %q in sandbox state — this sandbox was created with an agent that's not registered in the current yoloai installation; destroy and recreate the sandbox with a registered agent", meta.Agent)
 	}
 
 	sandboxDir := store.Dir(name)
@@ -892,7 +892,7 @@ func (m *Manager) relaunchAgentWithResume(ctx context.Context, name string, meta
 
 	agentDef := agent.GetAgent(meta.Agent)
 	if agentDef == nil {
-		return fmt.Errorf("unknown agent: %s", meta.Agent)
+		return NewConfigError("unknown agent %q in sandbox state — this sandbox was created with an agent that's not registered in the current yoloai installation; destroy and recreate the sandbox with a registered agent", meta.Agent)
 	}
 
 	// Resolve agent_args from config/profile
@@ -983,7 +983,7 @@ func (m *Manager) relaunchAgentWithCustomPrompt(ctx context.Context, name string
 
 	agentDef := agent.GetAgent(meta.Agent)
 	if agentDef == nil {
-		return fmt.Errorf("unknown agent: %s", meta.Agent)
+		return NewConfigError("unknown agent %q in sandbox state — this sandbox was created with an agent that's not registered in the current yoloai installation; destroy and recreate the sandbox with a registered agent", meta.Agent)
 	}
 
 	agentArgs := resolveAgentArgs(meta.Agent, meta.Profile)
@@ -1071,7 +1071,7 @@ func (m *Manager) prepareCustomPromptFiles(name string, meta *store.Meta, prompt
 
 	agentDef := agent.GetAgent(meta.Agent)
 	if agentDef == nil {
-		return fmt.Errorf("unknown agent: %s", meta.Agent)
+		return NewConfigError("unknown agent %q in sandbox state — this sandbox was created with an agent that's not registered in the current yoloai installation; destroy and recreate the sandbox with a registered agent", meta.Agent)
 	}
 
 	agentArgs := resolveAgentArgs(meta.Agent, meta.Profile)
@@ -1120,7 +1120,7 @@ func (m *Manager) prepareResumeFiles(name string, meta *store.Meta) error {
 
 	agentDef := agent.GetAgent(meta.Agent)
 	if agentDef == nil {
-		return fmt.Errorf("unknown agent: %s", meta.Agent)
+		return NewConfigError("unknown agent %q in sandbox state — this sandbox was created with an agent that's not registered in the current yoloai installation; destroy and recreate the sandbox with a registered agent", meta.Agent)
 	}
 
 	agentArgs := resolveAgentArgs(meta.Agent, meta.Profile)
