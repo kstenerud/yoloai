@@ -73,6 +73,15 @@ func runSystemBuild(cmd *cobra.Command, args []string, backend string) error {
 	secretFlags, _ := cmd.Flags().GetStringSlice("secret")
 	force, _ := cmd.Flags().GetBool("force")
 
+	// Courtesy free-space check before pulling/building a multi-GB
+	// base image. The backend's storage dir (e.g. /var/lib/docker) is
+	// where the image actually lives, but enumerating it per-backend
+	// is brittle; check ~/.yoloai/ as a proxy — same machine's free
+	// space typically applies.
+	if !jsonEnabled(cmd) {
+		warnIfLowDisk(cmd.ErrOrStderr(), cliLayout().SandboxesDir())
+	}
+
 	if len(args) > 0 {
 		return runSystemBuildProfile(cmd, args[0], secretFlags, backend, force)
 	}

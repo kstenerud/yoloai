@@ -26,6 +26,13 @@ func runClone(cmd *cobra.Command, args []string) error {
 		return sandbox.NewUsageError("--json and --attach are incompatible")
 	}
 
+	// Courtesy free-space check before duplicating the workdir copy +
+	// overlay. Clone is the heaviest allocate-per-sandbox op aside
+	// from new. Swallow stat errors and non-blocking.
+	if !jsonEnabled(cmd) {
+		warnIfLowDisk(cmd.ErrOrStderr(), cliLayout().SandboxesDir())
+	}
+
 	// Set terminal title early so it shows the sandbox name during clone+start
 	if attach && !noStart {
 		setTerminalTitle(dst)

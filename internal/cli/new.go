@@ -75,6 +75,13 @@ func runNewCmd(cmd *cobra.Command, args []string, version string) error {
 		return err
 	}
 
+	// Courtesy free-space check before allocating ~hundreds of MB
+	// (workdir copy + overlay) and possibly fetching a multi-GB base
+	// image. Stat errors are swallowed; the warning is non-blocking.
+	if !jsonEnabled(cmd) {
+		warnIfLowDisk(cmd.ErrOrStderr(), cliLayout().SandboxesDir())
+	}
+
 	if opts.Attach && !opts.NoStart {
 		setTerminalTitle(name)
 		defer setTerminalTitle("")
