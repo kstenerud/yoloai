@@ -831,6 +831,17 @@ func (*Sandbox) Files() *Files { panic("design-only") }
 // created with NetworkIsolated).
 func (*Sandbox) Network() *Network { panic("design-only") }
 
+// Unlock force-clears the per-sandbox file lock. Recovery API for the
+// rare cases where the lock genuinely is stale (sudden power loss,
+// filesystem went read-only / offline mid-operation, kernel wedge).
+//
+// Refuses with *UsageError when the holder PID is alive — the right
+// recovery is to wait or kill the holder, not to silently break
+// another running operation's invariants.
+//
+// CLI: `yoloai sandbox <name> unlock`. See Q-Z for the rationale.
+func (*Sandbox) Unlock(ctx context.Context) error { panic("design-only") }
+
 // =============================================================================
 // Workdir — diff / apply / baseline (sub-handle off Sandbox)
 // =============================================================================
@@ -1495,6 +1506,33 @@ var (
 	// from Run / Clone if RunOptions.Profile names a missing profile.
 	ErrProfileNotFound error
 )
+
+// SandboxLockedError indicates a write method on a sandbox couldn't
+// acquire the per-sandbox file lock within the brief retry window
+// because another holder is currently using it. Returned as
+// (nil, *SandboxLockedError) — use errors.As to match.
+//
+// Holder identification: the lock-acquire path writes the acquiring
+// process's PID into the lock file content (separate from the flock
+// semantic — the file's bytes are informational, the lock itself is
+// the flock(2) advisory lock). Contention readers parse the PID and
+// classify the holder.
+//
+// HolderAlive=true means another yoloai-shaped process is genuinely
+// using the sandbox; the right user action is "wait, or cancel the
+// other operation." HolderAlive=false means the lock is stale (rare
+// — flock auto-releases on graceful exit AND on crash; staleness
+// requires sudden power loss, the filesystem going read-only or
+// offline mid-operation, or a kernel-level wedge). The right user
+// action is "run `yoloai sandbox <name> unlock` to clear it."
+type SandboxLockedError struct {
+	Name        string // sandbox name
+	HolderPID   int    // PID recorded in the lock file; 0 if unreadable
+	HolderAlive bool   // true if HolderPID names a live process; false if dead or unknown
+	LockPath    string // host path to the lock file; included so the error message can name it
+}
+
+func (*SandboxLockedError) Error() string { panic("design-only") }
 
 // UsageError indicates the caller passed something the Client refused
 // before doing any work. CLI maps to exit code 2 with a "Run 'yoloai
@@ -2620,3 +2658,81 @@ const (
 //       shape token strings are gone from the universal options. The
 //       previous Q-rounds caught the structural questions; this one
 //       was polish.
+//
+// Q-Z.  Stale lock UX — don't leave the user hanging.
+//
+//       **RESOLVED 2026-05-26:** Lock-contention path identifies the
+//       holder and gives the user actionable recovery.
+//
+//       Context. yoloai's per-sandbox lock uses flock(2)
+//       (sandbox/lock_unix.go), which the kernel auto-releases when
+//       the holding process exits — graceful or not. In the common
+//       case (process crash, panic, SIGKILL, OOM) flock cannot become
+//       stale. Q-T builds on this for the concurrency contract.
+//
+//       But: sudden power loss, the filesystem going read-only or
+//       offline mid-operation, or a kernel-level process wedge CAN
+//       leave a lock effectively unrecoverable without manual
+//       intervention. Plus the existing AcquireLock blocks
+//       indefinitely (unix.LOCK_EX, no timeout), so even legitimate
+//       contention surfaces to the user as a silent hang. Either
+//       failure mode leaves the user without information or recourse.
+//
+//       The fix:
+//
+//       1. Lock acquisition becomes a brief non-blocking retry,
+//          not an infinite block. The W-L8b implementation uses
+//          LOCK_EX|LOCK_NB with a few-second retry budget; on
+//          continued failure it returns *SandboxLockedError.
+//
+//       2. The lock file now carries the acquiring process's PID
+//          as its content (previously zero-byte). This is
+//          informational only — the flock(2) advisory lock is still
+//          the source of truth for mutual exclusion; the PID bytes
+//          let contention readers identify and classify the holder.
+//
+//       3. *SandboxLockedError carries Name, HolderPID, HolderAlive,
+//          LockPath. Embedders match with errors.As; the CLI formats
+//          a recovery message:
+//
+//            HolderAlive=true:
+//              "Sandbox \"foo\" is in use by another yoloai process
+//               (PID 12345). Wait for it to finish, or cancel that
+//               process before retrying."
+//
+//            HolderAlive=false:
+//              "Sandbox \"foo\" has a stale lock (PID 12345 no
+//               longer exists). This is rare — usually caused by
+//               sudden power loss or a filesystem failure during a
+//               previous operation. Clear it with:
+//                 yoloai sandbox foo unlock
+//               or manually:
+//                 rm ~/.yoloai/sandboxes/foo.lock"
+//
+//       4. Sandbox.Unlock(ctx) is the API for manual recovery; the
+//          CLI surfaces it as `yoloai sandbox <name> unlock`. Unlock
+//          refuses with *UsageError when HolderAlive=true (the right
+//          recovery for an alive holder is to wait or kill, not to
+//          silently break invariants of a running op). For dead
+//          holders, Unlock removes the lock file and returns nil.
+//
+//       5. PID-aliveness check is `syscall.Kill(pid, 0)` on Unix —
+//          ESRCH means dead, EPERM means alive (but not ours), no
+//          error means alive. Not foolproof (PIDs are reused on
+//          long-uptime systems) but combined with "Unlock refuses
+//          alive holders" the failure mode (refuse to unlock a
+//          reused PID) is safe — user can still rm the file.
+//
+//       Windows. The current sandbox/lock_windows.go is a no-op (the
+//       file's header notes Windows isn't fully supported and that
+//       concurrent operations may error but won't corrupt state).
+//       Q-Z doesn't ship Windows lock support; that's a separate
+//       workstream when Windows-as-host becomes a target. The
+//       *SandboxLockedError surface can be reused if/when Windows
+//       gets real locks.
+//
+//       Codified principle: long-running coordination primitives
+//       (locks, pidfiles, semaphores) need an explicit "what does
+//       the user do when it gets stuck" answer baked into the API
+//       and the CLI. Blocking-forever is not a user-friendly
+//       default; an actionable error with a recovery path is.

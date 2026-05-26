@@ -239,20 +239,40 @@ The structural refactor. CLI commands consume `yoloai.Client` instead of buildin
 
 This sub-workstream adds Client methods *only* — it moves orchestration logic from CLI command files into the Client, but **the CLI continues to call the old direct paths until W-L8c/d migrates each command**. Splitting the "add method" step from the "migrate CLI" step avoids the trap of mixing two concerns in one PR.
 
+W-L8a (the design checkpoint, 25 Q-resolutions in `api_surface.go`) added significant scope beyond "implement each missing method." The Q-resolution-derived work below ships interleaved with the method PRs — each Q has its own implementation footprint and its own BREAKING-CHANGES.md entry where applicable.
+
 **Steps:**
 
-1. Implement each missing Client method identified in W-L8a. Move the orchestration logic from the CLI command into the Client method. The CLI command, for now, can either (a) keep calling its old direct path unchanged, or (b) call the new Client method as a pass-through if that's trivial — but the formal CLI migration is W-L8c/d's job.
+1. Implement each Client method specified in `api_surface.go`. Move the orchestration logic from the CLI command into the Client method. The CLI command, for now, can either (a) keep calling its old direct path unchanged, or (b) call the new Client method as a pass-through if that's trivial — but the formal CLI migration is W-L8c/d's job.
 2. Move tests as the logic moves: orchestration tests (currently in `internal/cli/*_test.go` where they test orchestration rather than presentation) get parallel coverage in `yoloai/` tests.
 3. Ship each method as a separate PR. Each PR: one new Client method + its tests. No `internal/cli/` rewrites in this phase.
+
+**Q-resolution scope folded into W-L8b** (in addition to "implement each method"):
+
+- **Q-W — DataDir threading + no-ambient-config.** Every `config.*` and `store.*` path helper takes DataDir; single `os.UserHomeDir()` call site in CLI startup (with `--data-dir` flag override); all tests construct Client with `t.TempDir()` DataDir. *Largest single sub-task.*
+- **Q-T — per-sandbox file locks.** Every write method on `*Sandbox` / sub-handles acquires the per-sandbox lock at public entry; extend (or compose) the existing `acquireMultiLock` rather than building a parallel model.
+- **Q-Z — stale-lock UX.** Lock-contention path detects holder PID, surfaces `*SandboxLockedError` with recovery instructions, exposes `Sandbox.Unlock` (and `yoloai sandbox <name> unlock` CLI) for manual force-clear. See the Q-Z resolution in `api_surface.go`.
+- **Q-J / Q-K / Q-O / Q-Y — type / name discipline.** Force renames to concrete names; Backend / Agent strings → `BackendName` / `AgentName`; Mounts / Ports → `[]MountSpec` / `[]PortMapping`; `Info` refactor + `SandboxMeta` type alias; `Workdir.Diff` returns `(string, error)`; `ApplyResult` flat.
+- **Q-L — Prune CLI flags.** Remove `--cache` / `--all` / `--backend`; add `--include-base-image`. BREAKING-CHANGES entry.
+- **Q-U — remove aux `:copy` / `:overlay`.** Delete `GenerateMultiPatch`, `apply_overlay.go` multi-dir iteration, multi-dir tests. `parse.go` rejects `:copy` / `:overlay` on `-d` with a usage error directing to alternatives. BREAKING-CHANGES entry.
+- **Q-V — `Network.Allowed` provenance.** Compute `AllowedDomain.Source` (agent-requirement vs user) at read time from the bound agent's `NetworkAllowlist`.
+- **Q-X — drop `UnrecoverableNotImplemented` and `UnrecoverableInternal`.** Programming-bug sites panic + recover at CLI root; existing "unknown agent" classifies as `state_corrupted`.
+- **Q-P — remove `ErrNoChanges` from existing code.** Apply returns the result; the no-changes state is `Status == ApplyStatusEmpty`.
+- **Q-S — Wait return type.** `(exitCode int, err error)` → `(Status, error)`. Add `Info.AgentExitCode *int` for raw exit code surfacing.
 
 **Acceptance per method:**
 - The method exists on `yoloai.Client` and is exported.
 - Orchestration logic that previously lived in the CLI command file is now reachable from (or has moved into) the Client method.
 - Test coverage equals or exceeds the pre-refactor coverage for that orchestration logic.
-- The CLI continues to work; user-visible behavior unchanged.
+- The CLI continues to work; user-visible behavior unchanged (except for the explicitly documented breaking changes above).
 - `make check` passes.
 
-**Size:** L (one method per PR; ~12–15 PRs total) · **Risk:** medium (parallel feature work — coordinate via a moratorium on adding new direct-orchestration logic to CLI commands during this phase) · **Blocks:** W-L8c.
+**Cross-cutting acceptance:**
+- All `os.UserHomeDir()` / `os.Getenv()` / `os.Getwd()` calls in library code removed; single allowlisted CLI call site documented in `internal/cli/root.go` (or wherever `main` runs).
+- Every BREAKING-CHANGES entry (Q-L, Q-U, Q-W's CLI rename for `config get/set/reset` shape if any) lands with the PR that ships the change.
+- The W-L10 enforcement linter (Phase 4) covers the new bans.
+
+**Size:** L (one method per PR plus the cross-cutting Q-resolution sub-tasks; ~20–25 PRs total) · **Risk:** medium (parallel feature work — coordinate via a moratorium on adding new direct-orchestration logic to CLI commands during this phase) · **Blocks:** W-L8c.
 
 #### W-L8c — Migrate first CLI command (proof of concept)
 
@@ -326,19 +346,21 @@ The doc bug fix happened in this same pass. If `--security` was in a tagged rele
 
 ### W-L10 — Enforcement: prevent regression
 
-A test (or linter rule) that fails CI if forbidden imports appear in `internal/cli/` or `sandbox/`.
+A test (or linter rule) that fails CI if forbidden imports or ambient-config calls appear in library code.
 
 **Steps:**
 
 1. Write a Go test (e.g., `internal/cli/layering_test.go`) that uses `go/packages` to enumerate imports of every `internal/cli/` file. Fail if any non-allowlisted file imports `internal/runtime/<concrete>` packages or `internal/sandbox`.
 2. Allowlist: the chokepoint (`helpers.go` or wherever `newRuntime()` lives) for the registration imports; **the flat backend-scoped file `system_tart.go`** by filename (this is the only backend-scoped CLI file at W-L10 time; W-L13 later restructures into `internal/cli/system/tart/` and the allowlist must be updated to be directory-based at that time).
 3. Add similar test for `sandbox/`: must not import any concrete `runtime/<backend>` package.
-4. Optionally implement as a `golangci-lint` custom linter rule if test-based enforcement is awkward.
-5. Add `runtime.Registered()`-iteration enforcement: a test that fails if `info.go`/`setup.go`/`bugreport_writer.go` regrows a hard-coded backend list (heuristic: search for ≥3 backend-name string literals in the same file).
-6. Document the enforcement in `docs/dev/principles/` (which principle file fits best — probably `development.md`).
+4. **Ambient-config ban (Q-W).** Forbid `os.UserHomeDir()`, `os.Getenv()` (when reading yoloai-namespaced vars or as silent default), and `os.Getwd()` outside one allowlisted CLI entry point. The allowlist is documented per call site in code with `// W-L10-allowlist: <reason>` comments; the linter checks both the call site count and the presence of the allowlist comment. See `principles/development-principles.md §12` for the rationale.
+5. Optionally implement as a `golangci-lint` custom linter rule if test-based enforcement is awkward.
+6. Add `runtime.Registered()`-iteration enforcement: a test that fails if `info.go`/`setup.go`/`bugreport_writer.go` regrows a hard-coded backend list (heuristic: search for ≥3 backend-name string literals in the same file).
+7. Document the enforcement in `docs/dev/principles/` (cross-reference §12 from this section).
 
 **Acceptance:**
 - CI fails on a PR that adds a forbidden import to `internal/cli/` (verify with a deliberately bad branch).
+- CI fails on a PR that adds an unallowlisted `os.UserHomeDir()`, `os.Getenv()`, or `os.Getwd()` call to library code.
 - CI fails on a PR that hard-codes a parallel backend table.
 - Principle docs cite the test.
 
