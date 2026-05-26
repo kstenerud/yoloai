@@ -53,9 +53,11 @@ Findings that turned up mid-workstream (architecture-remediation, layering-refac
 
 - **Discovered:** 2026-05-26 · **Workstream:** observed during W-L8b kickoff (same failure as DF3)
 - **Severity:** LOW
-- **Disposition:** PARKED
-- **Description:** The `monitor.jsonl` line `do_epoll_wait + no connections -> idle` was the decisive signal for diagnosing the failed `containerd-vm` run — it ruled out "slow API," "network unreachable," and "agent making retries with backoff" in one observation, leaving "agent is genuinely sitting idle without trying" as the only consistent explanation. This data point currently requires grepping the right JSONL stream manually. **Proposed fix:** when stall detection fires, dump the most recent N detector results (with wchan + connection-count fields) into a top-level diagnostic section of the preserved sandbox dir, and include this in `yoloai sandbox <name> bugreport`. Cross-reference DF3 — together they would make most "agent idle 9s+" failures self-diagnosing.
-- **Pointer:** `runtime/monitor/` (detector source), `scripts/smoke_test.py` (stall handler)
+- **Disposition:** LANDED 2026-05-26.
+- **Description:** The `monitor.jsonl` line `do_epoll_wait + no connections -> idle` was the decisive signal for diagnosing the failed `containerd-vm` run — it ruled out "slow API" and left "agent is genuinely sitting idle" (or, after DF8: "agent is busy waiting for network") as the explanation. Used to require grepping the raw stream.
+- **Implementation:** two surfaces. (1) `scripts/smoke_test.py::_write_monitor_tail` writes `monitor-tail.txt` next to environment.json / terminal-snapshot.* in every preserved attempt dir — last 30 `detector.result` entries as one-per-line plain text. (2) `internal/cli/sandbox_bugreport.go::writeBugReportMonitorTail` adds a "Recent detector decisions" section to every `yoloai sandbox <name> bugreport` output, placed BEFORE the full monitor.jsonl dump so readers see the decisive signal first. Both surfaces use the same N=30 default. Unit tests cover the bug-report path; the smoke-test path was validated empirically against the captured monitor.jsonl from the DF8 smoking-gun run — surfaced 30 lines of `wchan: do_epoll_wait + no connections -> idle` repeating.
+- **Diagnostic stack now complete:** every preserved attempt directory has `environment.json` (sandbox config), `terminal-snapshot.txt` (DF3 — rendered agent screen), `monitor-tail.txt` (DF4 — recent detector decisions), plus the `network: …` field on the failure-message line (DF5). The full `logs/monitor.jsonl` and ANSI `agent.log` are also preserved for deeper investigation.
+- **Pointer:** `scripts/smoke_test.py::_write_monitor_tail`, `internal/cli/sandbox_bugreport.go::writeBugReportMonitorTail`. Cross-ref DF3 / DF5 / DF8.
 
 ### DF5 — Smoke tests should network-probe inside the sandbox before delivering the prompt
 

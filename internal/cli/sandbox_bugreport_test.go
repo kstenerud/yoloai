@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -101,4 +102,67 @@ func TestWriteBugReportJSONLFile_IncludesAll(t *testing.T) {
 	// unsafe mode with no omitEvents → all events included
 	writeBugReportJSONLFile(&buf, "logs/sandbox.jsonl", path, "unsafe", nil)
 	assert.Contains(t, buf.String(), "allowing domain")
+}
+
+// --- writeBugReportMonitorTail (DF4) -----------------------------------------
+
+func TestWriteBugReportMonitorTail_NotFound(t *testing.T) {
+	var buf bytes.Buffer
+	writeBugReportMonitorTail(&buf, "/nonexistent/monitor.jsonl")
+	assert.Contains(t, buf.String(), "Recent detector decisions")
+	assert.Contains(t, buf.String(), "not found")
+}
+
+func TestWriteBugReportMonitorTail_NoDetectorEntries(t *testing.T) {
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "monitor.jsonl")
+	// Only non-detector events.
+	contents := `{"ts":"2026-05-26T14:00:00.000Z","event":"monitor.start","msg":"started"}` + "\n"
+	require.NoError(t, os.WriteFile(path, []byte(contents), 0600))
+
+	var buf bytes.Buffer
+	writeBugReportMonitorTail(&buf, path)
+	assert.Contains(t, buf.String(), "no detector.result entries")
+}
+
+func TestWriteBugReportMonitorTail_SurfacesWchanSignal(t *testing.T) {
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "monitor.jsonl")
+	// Realistic mix: one startup event + several detector.result entries.
+	// The wchan line is the decisive DF8 signal we want surfaced.
+	contents := `{"ts":"2026-05-26T14:00:00.000Z","event":"monitor.start","msg":"started"}
+{"ts":"2026-05-26T14:00:01.000Z","level":"debug","event":"detector.result","msg":"  hook: file says idle (age=2s) but source='monitor', waiting"}
+{"ts":"2026-05-26T14:00:02.000Z","level":"debug","event":"detector.result","msg":"  wchan: do_epoll_wait + no connections -> idle"}
+{"ts":"2026-05-26T14:00:03.000Z","level":"debug","event":"detector.result","msg":"pid=38 [hook=unknown wchan=idle(high 5/1)] -> idle (by wchan)"}
+`
+	require.NoError(t, os.WriteFile(path, []byte(contents), 0600))
+
+	var buf bytes.Buffer
+	writeBugReportMonitorTail(&buf, path)
+	out := buf.String()
+	assert.Contains(t, out, "Recent detector decisions")
+	assert.Contains(t, out, "wchan: do_epoll_wait + no connections -> idle")
+	assert.Contains(t, out, "Last 3 of 3 entries")
+	// monitor.start (non-detector) should NOT appear in the tail.
+	assert.NotContains(t, out, "monitor.start")
+}
+
+func TestWriteBugReportMonitorTail_LimitsToN(t *testing.T) {
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "monitor.jsonl")
+	// Write more entries than the tail limit. monitorTailLines == 30.
+	var sb bytes.Buffer
+	for i := 0; i < monitorTailLines+10; i++ {
+		fmt.Fprintf(&sb, `{"ts":"2026-05-26T14:00:%02d.000Z","event":"detector.result","msg":"entry %d"}`+"\n", i, i)
+	}
+	require.NoError(t, os.WriteFile(path, sb.Bytes(), 0600))
+
+	var buf bytes.Buffer
+	writeBugReportMonitorTail(&buf, path)
+	out := buf.String()
+	// Header records the tail size vs total.
+	assert.Contains(t, out, fmt.Sprintf("Last %d of %d entries", monitorTailLines, monitorTailLines+10))
+	// Most-recent entries are present; earliest entries dropped.
+	assert.Contains(t, out, "entry 39")
+	assert.NotContains(t, out, `"entry 0"`)
 }

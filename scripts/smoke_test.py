@@ -575,6 +575,66 @@ def _probe_network(sandbox_name: str) -> Optional[str]:
     return f"unreachable (curl exit {r.returncode})"
 
 
+# ---- monitor.jsonl detector-tail diagnostic (DF4) ----------------------------
+#
+# logs/monitor.jsonl carries one entry per detector cycle — the wchan
+# detector's "do_epoll_wait + no connections -> idle" line was the decisive
+# signal for diagnosing the DF8 failure family. The whole stream is already
+# preserved under logs/, but finding the relevant entries means grepping
+# through hundreds of lines.
+#
+# This extracts the last N `event: detector.result` entries and writes them
+# as a top-level monitor-tail.txt next to environment.json and the
+# terminal-snapshot files. The preserved attempt dir's first 4-5 files now
+# tell the failure story without the user opening logs/.
+
+_MONITOR_TAIL_LINES = 30
+
+
+def _write_monitor_tail(sandbox_name: str, dest_dir: Path) -> bool:
+    """Extract the last N detector.result entries from logs/monitor.jsonl
+    and write them as a plain-text monitor-tail.txt in *dest_dir*.
+    Best-effort — returns False if monitor.jsonl is missing/empty/malformed,
+    True if anything was written.
+    """
+    src = Path.home() / ".yoloai" / "sandboxes" / sandbox_name / "logs" / "monitor.jsonl"
+    if not src.is_file():
+        return False
+    try:
+        raw = src.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+
+    detector_lines: list[str] = []
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            entry = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if entry.get("event") != "detector.result":
+            continue
+        ts = str(entry.get("ts", "")).removesuffix("Z")
+        msg = str(entry.get("msg", "")).strip()
+        detector_lines.append(f"{ts}  {msg}")
+
+    if not detector_lines:
+        return False
+
+    tail = detector_lines[-_MONITOR_TAIL_LINES:]
+    header = (
+        f"# Last {len(tail)} of {len(detector_lines)} detector.result entries from logs/monitor.jsonl\n"
+        f"# Full stream preserved in logs/monitor.jsonl.\n\n"
+    )
+    try:
+        (dest_dir / "monitor-tail.txt").write_text(header + "\n".join(tail) + "\n")
+        return True
+    except OSError:
+        return False
+
+
 # ---- tmux capture-pane diagnostic snapshot (DF3) -----------------------------
 #
 # When a test fails (especially the "agent idle 9s+" family on containerd-vm /
@@ -705,6 +765,9 @@ def _preserve_sandbox(sandbox_name: str, dest_parent: Path) -> Optional[Path]:
     # still be running for this to work, which is true during _preserve_sandbox
     # (the retry/cleanup destroy happens later). DF3 diagnostic.
     _capture_terminal_snapshot(sandbox_name, target)
+    # Best-effort: top-level summary of the last N detector decisions from
+    # monitor.jsonl. The full stream is also preserved under logs/. DF4.
+    _write_monitor_tail(sandbox_name, target)
     return target
 
 

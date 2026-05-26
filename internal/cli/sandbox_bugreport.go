@@ -4,6 +4,7 @@ package cli
 // ABOUTME: Forensic bug report tool: collects static diagnostic info from a named sandbox.
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -83,6 +84,12 @@ func writeSandboxSections(ctx context.Context, w io.Writer, rt runtime.Runtime, 
 		omitEvents = []string{"setup_cmd.*", "network.allow"}
 	}
 	writeBugReportJSONLFile(w, "logs/sandbox.jsonl", store.SandboxJSONLPath(sandboxDir), reportType, omitEvents)
+
+	// Section 8.5: monitor detector tail (DF4) — last N detector.result
+	// entries from monitor.jsonl, surfaced before the full stream so readers
+	// see the decisive signal (wchan + connection-count) without scrolling
+	// through the raw log.
+	writeBugReportMonitorTail(w, store.MonitorJSONLPath(sandboxDir))
 
 	// Section 9: monitor.jsonl (full in both modes)
 	writeBugReportJSONLFile(w, "logs/monitor.jsonl", store.MonitorJSONLPath(sandboxDir), reportType, nil)
@@ -219,6 +226,75 @@ func writeContainerLog(ctx context.Context, w io.Writer, rt runtime.Runtime, nam
 		fmt.Fprintln(w, "*(no logs available)*") //nolint:errcheck
 	} else {
 		fmt.Fprintln(w, logs) //nolint:errcheck
+	}
+	fmt.Fprintln(w, "```") //nolint:errcheck
+	fmt.Fprintln(w)        //nolint:errcheck
+}
+
+// monitorTailLines is the number of recent detector.result entries surfaced
+// in the bug-report summary section. Same value as the smoke test's
+// _MONITOR_TAIL_LINES — both produce the same shape of summary.
+const monitorTailLines = 30
+
+// writeBugReportMonitorTail extracts the last monitorTailLines detector.result
+// entries from monitor.jsonl and writes them as a compact "Recent detector
+// decisions" section. Surfaces the decisive failure signal (e.g. wchan's
+// "do_epoll_wait + no connections -> idle") without requiring the reader to
+// scroll through the full monitor.jsonl dump that follows. DF4.
+func writeBugReportMonitorTail(w io.Writer, path string) {
+	fmt.Fprintln(w, "**Recent detector decisions:**") //nolint:errcheck
+	fmt.Fprintln(w)                                   //nolint:errcheck
+
+	data, err := os.ReadFile(path) //nolint:gosec // G304: path from trusted sandbox dir
+	if err != nil {
+		fmt.Fprintln(w, "*(monitor.jsonl not found)*") //nolint:errcheck
+		fmt.Fprintln(w)                                //nolint:errcheck
+		return
+	}
+
+	type tailEntry struct {
+		ts, msg string
+	}
+	var entries []tailEntry
+	for _, raw := range bytes.Split(data, []byte("\n")) {
+		line := bytes.TrimSpace(raw)
+		if len(line) == 0 {
+			continue
+		}
+		var entry struct {
+			TS    string `json:"ts"`
+			Event string `json:"event"`
+			Msg   string `json:"msg"`
+		}
+		if jsonErr := json.Unmarshal(line, &entry); jsonErr != nil {
+			continue
+		}
+		if entry.Event != "detector.result" {
+			continue
+		}
+		entries = append(entries, tailEntry{ts: entry.TS, msg: entry.Msg})
+	}
+
+	if len(entries) == 0 {
+		fmt.Fprintln(w, "*(no detector.result entries in monitor.jsonl)*") //nolint:errcheck
+		fmt.Fprintln(w)                                                    //nolint:errcheck
+		return
+	}
+
+	tail := entries
+	if len(tail) > monitorTailLines {
+		tail = tail[len(tail)-monitorTailLines:]
+	}
+
+	fmt.Fprintf(w, "Last %d of %d entries (full stream in monitor.jsonl below).\n\n", len(tail), len(entries)) //nolint:errcheck
+	fmt.Fprintln(w, "```")                                                                                     //nolint:errcheck
+	for _, e := range tail {
+		ts := e.ts
+		// Drop trailing "Z" for readability; full ts still in monitor.jsonl.
+		if len(ts) > 0 && ts[len(ts)-1] == 'Z' {
+			ts = ts[:len(ts)-1]
+		}
+		fmt.Fprintf(w, "%s  %s\n", ts, e.msg) //nolint:errcheck
 	}
 	fmt.Fprintln(w, "```") //nolint:errcheck
 	fmt.Fprintln(w)        //nolint:errcheck
