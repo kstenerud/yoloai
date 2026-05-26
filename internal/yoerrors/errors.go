@@ -90,3 +90,47 @@ func (e *PermissionError) Unwrap() error { return e.Err }
 func NewPermissionError(format string, args ...any) *PermissionError {
 	return &PermissionError{Err: fmt.Errorf(format, args...)}
 }
+
+// SandboxLockedError indicates a write operation couldn't acquire the
+// per-sandbox file lock within the brief retry window because another
+// holder is currently using it (exit code 9).
+//
+// HolderAlive=true means another process is genuinely using the
+// sandbox — the user should wait for it to finish or cancel it.
+// HolderAlive=false means the lock is stale. Staleness shouldn't
+// happen with flock(2) under normal circumstances (the kernel
+// auto-releases locks on process exit, including crashes); it
+// requires sudden power loss, the filesystem going read-only or
+// offline mid-operation, or a kernel-level process wedge. The user
+// can clear it with `yoloai sandbox <name> unlock` or by removing
+// the lock file directly.
+//
+// Unlike the other typed errors in this package, SandboxLockedError
+// carries structured fields (not just a wrapped error) so embedders
+// can branch on HolderAlive and the CLI can format a targeted
+// recovery message. errors.As is the matching idiom.
+type SandboxLockedError struct {
+	Name        string // sandbox name
+	HolderPID   int    // PID recorded in the lock file; 0 if unreadable
+	HolderAlive bool   // true if HolderPID names a live process
+	LockPath    string // host path to the lock file
+}
+
+func (e *SandboxLockedError) Error() string {
+	if e.HolderAlive {
+		return fmt.Sprintf(
+			"sandbox %q is in use by another process (PID %d); wait for it to finish or cancel that process before retrying",
+			e.Name, e.HolderPID,
+		)
+	}
+	if e.HolderPID == 0 {
+		return fmt.Sprintf(
+			"sandbox %q has a stale lock (no holder PID recorded). Clear it with: yoloai sandbox %s unlock (or manually: rm %s)",
+			e.Name, e.Name, e.LockPath,
+		)
+	}
+	return fmt.Sprintf(
+		"sandbox %q has a stale lock (PID %d no longer exists). Clear it with: yoloai sandbox %s unlock (or manually: rm %s)",
+		e.Name, e.HolderPID, e.Name, e.LockPath,
+	)
+}

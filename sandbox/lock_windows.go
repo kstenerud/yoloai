@@ -15,3 +15,10 @@ func AcquireLock(_ string) (func(), error) {
 func acquireMultiLock(_ ...string) (func(), error) {
 	return func() {}, nil
 }
+
+// ForceUnlock is a no-op on Windows — there is no lock file to clear
+// (AcquireLock is itself a no-op on this platform). Always returns
+// (cleared=false, err=nil).
+func ForceUnlock(_ string) (cleared bool, err error) {
+	return false, nil
+}

@@ -172,6 +172,10 @@ func errorExitCode(err error) int {
 		return 8
 	}
 
+	if _, ok := errors.AsType[*sandbox.SandboxLockedError](err); ok {
+		return 9
+	}
+
 	return 1
 }
 

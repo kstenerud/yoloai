@@ -1,6 +1,6 @@
 // ABOUTME: `yoloai sandbox` parent command with name-first dispatch.
 // ABOUTME: `list` is a real Cobra subcommand; everything else dispatched by RunE.
-// ABOUTME: Subcommands: list, info, log, exec, prompt, allow, allowed, deny.
+// ABOUTME: Subcommands: list, info, log, exec, prompt, allow, allowed, deny, bugreport, vscode, unlock.
 package cli
 
 import (
@@ -16,7 +16,7 @@ import (
 var sandboxSubcmds = map[string]bool{
 	"info": true, "log": true, "exec": true, "prompt": true,
 	"allow": true, "allowed": true, "deny": true, "bugreport": true,
-	"vscode": true,
+	"vscode": true, "unlock": true,
 }
 
 func newSandboxCmd() *cobra.Command {
@@ -50,7 +50,8 @@ Commands:
   <name> allowed             Show allowed domains
   <name> deny <domain>...    Remove domains from the allowlist
   <name> bugreport [safe|unsafe]  Write a bug report for the sandbox
-  <name> vscode                   Open sandbox in VS Code (attach-to-container){{if gt (len .Aliases) 0}}
+  <name> vscode                   Open sandbox in VS Code (attach-to-container)
+  <name> unlock                   Force-clear a stale lock file (rare){{if gt (len .Aliases) 0}}
 
 Aliases:
   {{.NameAndAliases}}{{end}}{{if .HasAvailableLocalFlags}}
@@ -80,6 +81,13 @@ func sandboxDispatch(cmd *cobra.Command, args []string) error {
 		bugReportSandboxName = name
 	}
 
+	return runSandboxSubcommand(cmd, subcmd, name, rest)
+}
+
+// runSandboxSubcommand dispatches resolved (subcmd, name, rest) to the
+// matching handler. Split out from sandboxDispatch so the switch's
+// branch count fits the cyclomatic-complexity budget for one function.
+func runSandboxSubcommand(cmd *cobra.Command, subcmd, name string, rest []string) error {
 	switch subcmd {
 	case "info":
 		return runSandboxInfo(cmd, name)
@@ -105,8 +113,10 @@ func sandboxDispatch(cmd *cobra.Command, args []string) error {
 		return runSandboxBugReport(cmd, name, reportType)
 	case "vscode":
 		return newSandboxVscodeCmd().RunE(cmd, append([]string{name}, rest...))
+	case "unlock":
+		return runSandboxUnlock(cmd, name)
 	default:
-		return sandbox.NewUsageError("unknown subcommand %q: valid subcommands are info, log, exec, prompt, allow, allowed, deny, bugreport, vscode", subcmd)
+		return sandbox.NewUsageError("unknown subcommand %q: valid subcommands are info, log, exec, prompt, allow, allowed, deny, bugreport, vscode, unlock", subcmd)
 	}
 }
 
@@ -128,7 +138,7 @@ func resolveSandboxDispatchArgs(args []string) (name, subcmd string, rest []stri
 		return "", "", nil, err
 	}
 	if len(args) < 2 {
-		return "", "", nil, sandbox.NewUsageError("subcommand required: info, log, exec, prompt, allow, allowed, deny")
+		return "", "", nil, sandbox.NewUsageError("subcommand required: info, log, exec, prompt, allow, allowed, deny, bugreport, vscode, unlock")
 	}
 	return args[0], args[1], args[2:], nil
 }

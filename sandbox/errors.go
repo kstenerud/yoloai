@@ -65,3 +65,9 @@ type PermissionError = yoerrors.PermissionError
 
 // NewPermissionError wraps a message as a PermissionError.
 var NewPermissionError = yoerrors.NewPermissionError
+
+// SandboxLockedError is an alias for yoerrors.SandboxLockedError. Surfaced
+// by AcquireLock when the per-sandbox lock can't be obtained within the
+// retry window. Match with errors.As; the typed fields (HolderPID,
+// HolderAlive, LockPath) drive recovery UX.
+type SandboxLockedError = yoerrors.SandboxLockedError
