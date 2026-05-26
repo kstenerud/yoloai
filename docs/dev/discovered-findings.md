@@ -153,6 +153,34 @@ Findings that turned up mid-workstream (architecture-remediation, layering-refac
 - **Implication:** the failure is NOT correlated between vm and vmenhanced on a single run, which argues against "host was in a bad state at run start" as the explanation. Each backend independently rolls the dice — consistent with a per-backend race (e.g. Kata netns wiring, QEMU CPU latency variability) rather than a global precondition. Now 2 confirmed failures of vmenhanced, 7 of vm.
 - Still PARKED pending DF3. Confirming with rendered tmux output remains the unblocker for any further diagnosis.
 
+### DF8 FIX LANDED 2026-05-26
+
+After eleven data points and three diagnostic layers, the fix lives in
+`runtime/containerd/lifecycle.go::waitForNetworkReady`. Approach (1) from
+the DF8 10th-data-point sketch: a TCP probe to the gateway, run via
+`task.Exec` inside the started task, with 500ms × up to 30s retry.
+
+Probe semantics:
+- Exit 0 if no default route exists (network=none — declare ready).
+- Exit 0 if TCP to gateway returns SYN-ACK or RST (TC filter works).
+- Exit non-zero only on packet-drop timeout (the DF8 race signature).
+
+The probe is best-effort: on persistent failure it logs a warning and
+proceeds rather than blocking Start, so network-isolated and offline
+sandboxes are not penalized beyond a single 30s wait at startup.
+
+backend-idiosyncrasies.md updated with a "Kata netns warm-up race" entry
+plus a symptom-index row.
+
+The next containerd-vm/vmenhanced smoke runs should either (a) pass on
+attempt 1 (probe held Start until network was actually ready) or (b)
+log `sandbox.network.ready attempts=N elapsed_ms=...` in cli.jsonl
+when the probe caught the race. A failure with the DF8 signature now
+would indicate the race window exceeds 30s or the probe's TCP-to-gateway
+assumption is invalid for some configuration — worth a new DF entry.
+
+DF8 family CLOSED.
+
 ### DF8 (11th data point, 2026-05-26): **SECOND SMOKING GUN — staged probe pinpoints the broken CNI stage**
 
 - Log `yoloai-smoketest-20260526-150145.945`. Two `containerd-vm` failures (full_workflow + stop_start, both first-attempt then passed retry). Both show the identical staged-probe signature:

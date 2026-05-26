@@ -5,10 +5,12 @@ package containerdrt
 // ABOUTME: Container lifecycle operations — Create, Start, Stop, Remove, Inspect.
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"strconv"
 	"strings"
@@ -398,7 +400,136 @@ func (r *Runtime) Start(ctx context.Context, name string) error {
 		return fmt.Errorf("start task: %w", err)
 	}
 
-	return waitForTaskRunning(ctx, task)
+	if err := waitForTaskRunning(ctx, task); err != nil {
+		return err
+	}
+
+	// Wait for in-sandbox network to actually carry traffic. For Kata-VM
+	// specifically, the eth0 ↔ tap0_kata TC mirred filter is installed
+	// asynchronously after task.Start returns Running, so the first agent
+	// packet can race the filter and silently drop (DF8: Kata netns
+	// warm-up race; see backend-idiosyncrasies.md). Best-effort: a
+	// persistent probe failure does not block Start.
+	waitForNetworkReady(ctx, task)
+	return nil
+}
+
+// networkProbeScript is run inside the task to verify the netns can
+// carry outbound traffic. It exits 0 in three cases:
+//
+//  1. No default route is configured (sandbox is network=none) — the
+//     probe doesn't apply; declare ready.
+//  2. TCP connect to the gateway returns SYN-ACK (port open) — TC mirror
+//     and L2 path work.
+//  3. TCP connect to the gateway returns RST (port closed) — same thing;
+//     a refused connection still proves packets reach the gateway.
+//
+// Exits non-zero (timeout = 124, or 1) only when packets neither reach
+// the gateway nor return — the actual DF8 race signature.
+//
+// /dev/tcp is a bash builtin; the yoloai-base image ships bash, but if
+// bash is somehow absent the probe will exit 127 and waitForNetworkReady
+// will fall back to its hard timeout, treating the sandbox as ready
+// (best-effort).
+const networkProbeScript = `set +e
+gw=$(ip route show default 2>/dev/null | awk '/^default/ {print $3; exit}')
+if [ -z "$gw" ]; then
+    exit 0
+fi
+timeout 2 bash -c "</dev/tcp/$gw/22" 2>/dev/null
+rc=$?
+if [ $rc -eq 0 ] || [ $rc -eq 1 ]; then
+    exit 0
+fi
+exit 1
+`
+
+// waitForNetworkReady runs runNetworkProbe in a polling loop until the
+// probe succeeds or the timeout elapses. Best-effort: emits an INFO log
+// when the network stabilizes and a WARN log if the deadline passes
+// without success, but never blocks Start from returning.
+//
+// Default policy: probe every 500ms for up to 30s. Happy path is the
+// first probe (~50-100ms); slow path catches the Kata warm-up race
+// (usually a few seconds).
+func waitForNetworkReady(ctx context.Context, task client.Task) {
+	const maxWait = 30 * time.Second
+	const interval = 500 * time.Millisecond
+
+	deadline := time.Now().Add(maxWait)
+	start := time.Now()
+	attempts := 0
+	var lastErr error
+
+	for {
+		attempts++
+		probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		err := runNetworkProbe(probeCtx, task)
+		cancel()
+
+		if err == nil {
+			elapsed := time.Since(start)
+			if attempts > 1 || elapsed > 200*time.Millisecond {
+				slog.Info("sandbox network ready",
+					"event", "sandbox.network.ready",
+					"attempts", attempts,
+					"elapsed_ms", elapsed.Milliseconds())
+			}
+			return
+		}
+		lastErr = err
+
+		if time.Now().After(deadline) {
+			slog.Warn("sandbox network probe failed; proceeding anyway",
+				"event", "sandbox.network.probe_timeout",
+				"attempts", attempts,
+				"elapsed_ms", time.Since(start).Milliseconds(),
+				"last_err", lastErr.Error())
+			return
+		}
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(interval):
+		}
+	}
+}
+
+// runNetworkProbe execs networkProbeScript inside the task and returns
+// nil if the probe exited 0 (network OK or not applicable). Any other
+// exit code, exec error, or context cancellation returns an error.
+func runNetworkProbe(ctx context.Context, task client.Task) error {
+	execID := fmt.Sprintf("netprobe-%d", time.Now().UnixNano())
+	spec := &specs.Process{
+		Args: []string{"sh", "-c", networkProbeScript},
+		Cwd:  "/",
+		Env:  []string{"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"},
+	}
+	var stdout, stderr bytes.Buffer
+	process, err := task.Exec(ctx, execID, spec, cio.NewCreator(cio.WithStreams(nil, &stdout, &stderr)))
+	if err != nil {
+		return fmt.Errorf("probe exec create: %w", err)
+	}
+	defer func() { _, _ = process.Delete(ctx) }()
+
+	exitCh, err := process.Wait(ctx)
+	if err != nil {
+		return fmt.Errorf("probe wait: %w", err)
+	}
+	if err := process.Start(ctx); err != nil {
+		return fmt.Errorf("probe start: %w", err)
+	}
+
+	select {
+	case status := <-exitCh:
+		if status.ExitCode() == 0 {
+			return nil
+		}
+		return fmt.Errorf("probe exit %d: %s", status.ExitCode(), strings.TrimSpace(stderr.String()))
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // cleanupStoppedTask checks for an existing task on the container.

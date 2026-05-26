@@ -16,6 +16,7 @@ row to the index.
 |---|---|
 | VM loses network silently; traffic stops | [Kata: tcfilter networking model](#tcfilter-networking-model) |
 | Container starts but has no network after `NewTask()` | [Kata: netns must be configured before NewTask](#kata-shim-startup-netns-must-be-fully-configured-before-newtask) |
+| Agent idle 9s+, route=ok but dns/tcp probe times out (DF8) | [Kata: netns warm-up race](#kata-netns-warm-up-race-tap0_kata-tc-mirred-filter-not-installed-when-taskstart-returns) |
 | `EADDRINUSE` on shim start or `NewTask()` retry | [Kata: /run/kata persists on exit](#runkataname-persists-on-abnormal-exit), [EADDRINUSE on retry](#eaddrinuse-on-newtask-retry), [shim 500ms wait](#after-killing-orphaned-shim-processes-wait-500ms-before-proceeding) |
 | `After 500 attempts` / kata-agent unreachable (Firecracker) | [Kata: Firecracker explicit config breaks boot](#firecracker-runtime-rs-explicit-config-path-breaks-vm-boot) |
 | Bind mount target missing inside Kata VM | [Kata: no auto-create of mount targets](#kata-does-not-auto-create-bind-mount-target-directories) |
@@ -88,6 +89,34 @@ Kata reads `eth0` from the netns at **shim startup time** (during `NewTask()`).
 The Kata shim logs show `veth network interface found: eth0` with its IP and MAC.
 After this point, Kata has committed to using that `eth0`; changes to the netns
 veth are not reflected.
+
+### Kata netns warm-up race: `tap0_kata` TC mirred filter not installed when `task.Start` returns
+
+`task.Start()` returns when the VMM has been told to boot, **not** when the
+in-netns TC mirred filter that bridges `eth0` ↔ `tap0_kata` is fully in
+place. The filter is what carries packets between the host bridge (via
+`eth0`/veth) and the VM (via `tap0_kata`). During the gap between
+`task.Start()` returning and the filter being installed, the netns has a
+default route but outbound packets silently drop — `dns=fail`,
+`tcp=fail`, all timeouts with no RST.
+
+**Symptom in the smoke test:** "agent idle 9s+ without sentinel" on
+`containerd-vm` / `containerd-vmenhanced`, with the DF5 staged probe
+showing `unreachable [dns failed | dns=fail route=ok tcp=fail
+https=exit 28]`. Twelve data points (DF8) before the fix landed; retry
+always succeeded because the filter caught up within a few seconds.
+
+**Fix:** after `waitForTaskRunning` reports the task Running, run an
+in-task TCP probe to the gateway with retry (500ms × up to 30s). The
+probe is best-effort — on persistent failure it logs a warning and
+proceeds rather than blocking Start, so legitimate offline /
+network-isolated sandboxes are not penalized beyond a 30s wait.
+See `lifecycle.go::waitForNetworkReady`.
+
+A connection-refused result (TCP RST from the gateway) is treated as
+success — it proves packets reached the gateway, which is all we need
+to confirm the TC filter is wired. We don't need actual upstream
+reachability; the agent's HTTPS calls will follow separately.
 
 ### `/run/kata/<name>/` persists on abnormal exit
 
