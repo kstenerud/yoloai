@@ -393,6 +393,13 @@ func (c *Client) ListCommits(ctx context.Context, name string) ([]patch.CommitIn
 	return patch.ListCommitsBeyondBaseline(ctx, c.layout, c.rt, name)
 }
 
+// ResolveCommitRefs resolves ref arguments (SHAs, "HEAD", ranges) to the
+// concrete CommitInfo entries inside the sandbox's beyond-baseline
+// history. Used by `yoloai apply <refs...>` for selective application.
+func (c *Client) ResolveCommitRefs(ctx context.Context, name string, refs []string) ([]patch.CommitInfo, error) {
+	return patch.ResolveRefs(ctx, c.layout, c.rt, name, refs)
+}
+
 // ListCommitsOverlay is the overlay-mode variant of ListCommits — runs
 // git log inside the running container because the overlay'd workdir
 // only exists there.
@@ -427,6 +434,52 @@ func (c *Client) OverlayPatch(ctx context.Context, name string, paths []string) 
 // the next diff starts from a fresh baseline.
 func (c *Client) UpdateOverlayBaseline(ctx context.Context, name, hostPath string) error {
 	return patch.UpdateOverlayBaselineToHEAD(ctx, c.layout, c.rt, name, hostPath)
+}
+
+// AdvanceBaseline advances the sandbox's diff baseline past all
+// applied commits. Called after a successful `yoloai apply` so the
+// next diff starts fresh. No-op for path-filtered applies (callers
+// should skip when paths are specified).
+func (c *Client) AdvanceBaseline(ctx context.Context, name string) error {
+	return patch.AdvanceBaseline(ctx, c.layout, c.rt, name)
+}
+
+// GeneratePatch produces a single squashed patch covering all
+// committed (and optionally uncommitted) changes in the workdir.
+// Returns (patchBytes, statSummary, err). Used by `yoloai apply --squash`.
+func (c *Client) GeneratePatch(ctx context.Context, name string, paths []string, includeWIP bool) ([]byte, string, error) {
+	return patch.GeneratePatch(ctx, c.layout, c.rt, name, paths, includeWIP)
+}
+
+// GenerateMultiPatch produces one PatchSet per :copy aux directory
+// when the sandbox has multi-dir workdirs. Workdir-only sandboxes
+// should use GeneratePatch instead. Slated for removal under Q-U
+// (aux :copy / :overlay deprecation).
+func (c *Client) GenerateMultiPatch(ctx context.Context, name string, paths []string, includeWIP bool) ([]patch.PatchSet, error) {
+	return patch.GenerateMultiPatch(ctx, c.layout, c.rt, name, paths, includeWIP)
+}
+
+// GenerateFormatPatch runs `git format-patch` in the sandbox over the
+// beyond-baseline range and returns (patchDir, files, err). Caller is
+// responsible for `os.RemoveAll(patchDir)` after consuming the files.
+// Used by `yoloai apply` and `yoloai apply --patches`.
+func (c *Client) GenerateFormatPatch(ctx context.Context, name string, paths []string) (patchDir string, files []string, err error) {
+	return patch.GenerateFormatPatch(ctx, c.layout, c.rt, name, paths)
+}
+
+// GenerateFormatPatchForRefs is like GenerateFormatPatch but restricts
+// output to the specified commit SHAs (selective apply). Caller must
+// `os.RemoveAll(patchDir)` after use.
+func (c *Client) GenerateFormatPatchForRefs(ctx context.Context, name string, shas, paths []string) (patchDir string, files []string, err error) {
+	return patch.GenerateFormatPatchForRefs(ctx, c.layout, c.rt, name, shas, paths)
+}
+
+// GenerateWIPDiff produces the uncommitted-changes diff (work in
+// progress) from the sandbox's workdir. Returns (patchBytes,
+// statSummary, err). Used by `yoloai apply --include-wip` and
+// `yoloai apply --patches --include-wip`.
+func (c *Client) GenerateWIPDiff(ctx context.Context, name string, paths []string) ([]byte, string, error) {
+	return patch.GenerateWIPDiff(ctx, c.layout, c.rt, name, paths)
 }
 
 // Start launches (or relaunches) the container for an existing sandbox.

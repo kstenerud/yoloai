@@ -9,7 +9,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/kstenerud/yoloai/runtime"
+	"github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/sandbox"
 	"github.com/kstenerud/yoloai/sandbox/patch"
 	"github.com/kstenerud/yoloai/sandbox/store"
@@ -76,11 +76,10 @@ func applySelectedCommits(cmd *cobra.Command, name string, refs, paths []string,
 
 // resolveSelectiveRefs resolves the ref arguments to CommitInfo slices.
 func resolveSelectiveRefs(cmd *cobra.Command, name string, refs []string, backend string) ([]patch.CommitInfo, error) {
-	layout := cliLayout()
 	var resolved []patch.CommitInfo
-	if err := withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
+	if err := withClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
 		var resolveErr error
-		resolved, resolveErr = patch.ResolveRefs(ctx, layout, rt, name, refs)
+		resolved, resolveErr = c.ResolveCommitRefs(ctx, name, refs)
 		return resolveErr
 	}); err != nil {
 		return nil, err
@@ -130,11 +129,10 @@ func applyFormatPatchForRefs(cmd *cobra.Command, name string, _ []string, resolv
 		shas[i] = c.SHA
 	}
 
-	layout := cliLayout()
 	var patchDir string
-	if err = withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
+	if err = withClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
 		var genErr error
-		patchDir, files, genErr = patch.GenerateFormatPatchForRefs(ctx, layout, rt, name, shas, paths)
+		patchDir, files, genErr = c.GenerateFormatPatchForRefs(ctx, name, shas, paths)
 		return genErr
 	}); err != nil {
 		return nil, nil, nil, err
@@ -187,11 +185,10 @@ func printSelectiveApplySummary(cmd *cobra.Command, resolved []patch.CommitInfo,
 
 // advanceSelectiveBaseline advances the baseline using contiguous prefix logic after a selective apply.
 func advanceSelectiveBaseline(cmd *cobra.Command, name, backend string, resolved []patch.CommitInfo) error {
-	layout := cliLayout()
 	var allCommits []patch.CommitInfo
-	err := withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
+	err := withClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
 		var listErr error
-		allCommits, listErr = patch.ListCommitsBeyondBaseline(ctx, layout, rt, name)
+		allCommits, listErr = c.ListCommits(ctx, name)
 		return listErr
 	})
 	if err != nil {
@@ -205,7 +202,7 @@ func advanceSelectiveBaseline(cmd *cobra.Command, name, backend string, resolved
 
 	prefixEnd := workspace.ContiguousPrefixEnd(allCommits, appliedSet)
 	if prefixEnd >= 0 {
-		if err := patch.AdvanceBaselineTo(layout, name, allCommits[prefixEnd].SHA); err != nil {
+		if err := patch.AdvanceBaselineTo(cliLayout(), name, allCommits[prefixEnd].SHA); err != nil {
 			return fmt.Errorf("advance baseline: %w", err)
 		}
 	}

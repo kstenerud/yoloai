@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/kstenerud/yoloai/runtime"
+	"github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/sandbox"
 	"github.com/kstenerud/yoloai/sandbox/patch"
 	"github.com/kstenerud/yoloai/sandbox/store"
@@ -18,21 +18,20 @@ import (
 
 // applySquash implements the squashed-patch apply mode.
 func applySquash(cmd *cobra.Command, name string, paths []string, meta *store.Meta, yes, dryRun, includeWIP bool) error {
-	layout := cliLayout()
 	// Check for aux :copy dirs
 	if len(meta.Directories) > 0 {
 		backend := resolveBackendForSandbox(name)
-		return withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
-			return applySquashMulti(cmd, ctx, rt, name, paths, meta, yes, dryRun, includeWIP)
+		return withClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
+			return applySquashMulti(cmd, ctx, c, name, paths, meta, yes, dryRun, includeWIP)
 		})
 	}
 
 	var patchBytes []byte
 	var stat string
 	backend := resolveBackendForSandbox(name)
-	err := withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
+	err := withClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
 		var genErr error
-		patchBytes, stat, genErr = patch.GeneratePatch(ctx, layout, rt, name, paths, includeWIP)
+		patchBytes, stat, genErr = c.GeneratePatch(ctx, name, paths, includeWIP)
 		return genErr
 	})
 	if err != nil {
@@ -86,9 +85,9 @@ func warnSquashSkippedWIP(cmd *cobra.Command, name, backend string) {
 		return
 	}
 	var hasWIP bool
-	_ = withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
+	_ = withClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
 		var wipErr error
-		hasWIP, wipErr = patch.HasUncommittedChanges(ctx, cliLayout(), rt, name)
+		hasWIP, wipErr = c.HasUncommittedChanges(ctx, name)
 		return wipErr
 	})
 	if hasWIP {
@@ -121,8 +120,8 @@ func applySquashPatch(cmd *cobra.Command, name string, paths []string, targetDir
 
 	// Advance baseline past applied changes (skip for path-filtered applies)
 	if len(paths) == 0 {
-		err := withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
-			return patch.AdvanceBaseline(ctx, cliLayout(), rt, name)
+		err := withClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
+			return c.AdvanceBaseline(ctx, name)
 		})
 		if err != nil {
 			return fmt.Errorf("advance baseline: %w", err)
@@ -142,9 +141,8 @@ func applySquashPatch(cmd *cobra.Command, name string, paths []string, targetDir
 }
 
 // applySquashMulti applies squashed patches for multiple :copy directories.
-func applySquashMulti(cmd *cobra.Command, ctx context.Context, rt runtime.Runtime, name string, paths []string, _ *store.Meta, yes, dryRun, includeWIP bool) error {
-	layout := cliLayout()
-	patches, err := patch.GenerateMultiPatch(ctx, layout, rt, name, paths, includeWIP)
+func applySquashMulti(cmd *cobra.Command, ctx context.Context, c *yoloai.Client, name string, paths []string, _ *store.Meta, yes, dryRun, includeWIP bool) error {
+	patches, err := c.GenerateMultiPatch(ctx, name, paths, includeWIP)
 	if err != nil {
 		return err
 	}
@@ -187,7 +185,7 @@ func applySquashMulti(cmd *cobra.Command, ctx context.Context, rt runtime.Runtim
 
 	// Advance baseline for workdir
 	if len(paths) == 0 {
-		if err := patch.AdvanceBaseline(ctx, layout, rt, name); err != nil {
+		if err := c.AdvanceBaseline(ctx, name); err != nil {
 			return fmt.Errorf("advance baseline: %w", err)
 		}
 	}

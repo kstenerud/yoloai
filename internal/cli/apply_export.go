@@ -10,8 +10,8 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/internal/fileutil"
-	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/sandbox/patch"
 	"github.com/spf13/cobra"
 )
@@ -63,13 +63,12 @@ func exportPatches(cmd *cobra.Command, name string, paths []string, commits []pa
 
 // exportCommitPatches generates format-patch files from sandbox commits and copies them to dir.
 func exportCommitPatches(cmd *cobra.Command, name string, paths []string, dir string, isJSON bool, out io.Writer) error {
-	layout := cliLayout()
 	backend := resolveBackendForSandbox(name)
 	var patchDir string
 	var files []string
-	err := withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
+	err := withClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
 		var genErr error
-		patchDir, files, genErr = patch.GenerateFormatPatch(ctx, layout, rt, name, paths)
+		patchDir, files, genErr = c.GenerateFormatPatch(ctx, name, paths)
 		return genErr
 	})
 	if err != nil {
@@ -96,12 +95,11 @@ func exportCommitPatches(cmd *cobra.Command, name string, paths []string, dir st
 
 // exportWIPDiff generates a wip.diff from uncommitted changes and writes it to dir.
 func exportWIPDiff(cmd *cobra.Command, name string, paths []string, dir string, isJSON bool, out io.Writer) error {
-	layout := cliLayout()
 	backend := resolveBackendForSandbox(name)
 	var wipPatch []byte
-	err := withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
+	err := withClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
 		var genErr error
-		wipPatch, _, genErr = patch.GenerateWIPDiff(ctx, layout, rt, name, paths)
+		wipPatch, _, genErr = c.GenerateWIPDiff(ctx, name, paths)
 		return genErr
 	})
 	if err != nil {
