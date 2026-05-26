@@ -53,6 +53,14 @@ func TartBaseLocksDir() string {
 	return filepath.Join(YoloaiDir(), "tart-base-locks")
 }
 
+// DockerBaseLocksDir returns the directory for Docker base-image build
+// locks. Mirrors TartBaseLocksDir; the Docker backend's Setup acquires
+// a flock here while building / re-tagging yoloai-base to prevent two
+// concurrent `yoloai new` invocations from racing on the image build.
+func DockerBaseLocksDir() string {
+	return filepath.Join(YoloaiDir(), "docker-base-locks")
+}
+
 // VscodeCLIDir returns ~/.yoloai/vscode-cli/, the global VS Code CLI token seed
 // store. It is NOT mounted directly into containers; instead, each sandbox gets
 // its own per-sandbox vscode-cli directory (seeded from this location on first

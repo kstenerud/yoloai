@@ -160,8 +160,24 @@ func (r *Runtime) Client() *dockerclient.Client {
 // Setup builds/rebuilds the yoloai-base image as needed.
 // sourceDir is unused for the Docker backend (build inputs are embedded);
 // it is accepted for interface compatibility with other runtimes.
+//
+// Holds an advisory base-image-build lock across the existence check
+// and the build to serialize concurrent Setup callers. Without this,
+// two `yoloai new` invocations can both observe "image missing,"
+// both call buildBaseImage, and the second one races to re-tag
+// yoloai-base:latest while the first is doing so — producing
+// "AlreadyExists: image already exists" from the Docker daemon.
+// Mirrors runtime/tart/base_lock.go.
 func (r *Runtime) Setup(ctx context.Context, sourceDir string, output io.Writer, logger *slog.Logger, force bool) error {
-	// Check if image exists
+	unlock, err := AcquireBaseLock("yoloai-base")
+	if err != nil {
+		return fmt.Errorf("acquire base lock: %w", err)
+	}
+	defer unlock()
+
+	// Re-check inside the lock — a concurrent process that held the
+	// lock before us may have just finished the build, in which case
+	// we skip rebuilding.
 	exists, err := r.imageExists(ctx, "yoloai-base")
 	if err != nil {
 		return fmt.Errorf("check base image: %w", err)
