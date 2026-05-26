@@ -261,17 +261,33 @@ smoke run had both. `n.Setup` returned success and `cni-state.json` was
 written — the only way to detect the failure is to inspect iptables after
 ADD.
 
-**Mitigation in `cni.go`:** `runCNIAdd` calls `verifyCNIForwardRules(ctx, ip)`
-after `n.Setup` returns. It greps `iptables -S CNI-FORWARD` for `<ip>/32 …
-ACCEPT` and returns the sentinel `errFirewallRulesMissing` when no match.
-`setupCNI` catches the sentinel via `errors.Is`, tears down the netns +
-IPAM lease, and retries CNI ADD **once**. The retry emits
-`sandbox.network.firewall_retry` warn log — grep for it in production logs
-to track upstream-bug recurrence.
+**Mitigation in `cni.go` (revision 2):** `runCNIAdd` catches **two**
+DF9 variants and treats both as the same retry signal
+`errFirewallRulesMissing`:
+1. `result.Interfaces["eth0"].IPConfigs` is empty after `n.Setup` —
+   the same empty-result pathology described above. Bridge still added
+   POSTROUTING + an IPAM lease (visible in raw iptables / lease files),
+   but the Go side can't recover the IP. Treat as no-op.
+2. IPConfigs is populated but `iptables -S CNI-FORWARD` lacks an `ACCEPT`
+   line for `<ip>/32` — `verifyCNIForwardRules` returns the sentinel.
+
+On either, `runCNIAdd` runs `n.Remove` to undo the bridge plugin's
+POSTROUTING and IPAM allocation before returning the sentinel. Without
+this rollback the bridge's POSTROUTING leaks across the retry
+(observable as orphan `-s <oldip>/32 -j CNI-…` lines).
+
+`setupCNI` then catches the sentinel via `errors.Is`, recreates the
+netns, and retries CNI ADD **once**. The retry emits
+`sandbox.network.firewall_retry` warn log — grep for it in production
+logs to track upstream-bug recurrence. A failed n.Remove emits
+`sandbox.network.firewall_rollback_failed` warn.
 
 If you see the retry warn log AND the subsequent probe still times out,
 the no-op fired on both attempts — surface to upstream investigation, do
-not extend the retry budget without diagnosing first.
+not extend the retry budget without diagnosing first. First-encountered
+variant (empty IPConfigs without warn) is the smoking gun from smoke run
+`yoloai-smoketest-20260526-183343.392/stop_start/containerd-vm` —
+preserved diag is in `attempt1/.../network-diag.txt`.
 
 ### `SetupIPMasq` creates a **chain jump**, not a bare MASQUERADE
 

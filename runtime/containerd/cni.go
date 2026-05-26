@@ -267,18 +267,37 @@ func runCNIAdd(ctx context.Context, layout config.Layout, netnsPath, sandboxDir,
 	}
 
 	// DF9 verify: n.Setup can return success while the firewall plugin
-	// silently no-ops (see errFirewallRulesMissing). Confirm rules exist
-	// before persisting state; setupCNI handles the retry.
-	if ip != "" {
-		if err := verifyCNIForwardRules(ctx, ip); err != nil {
-			return err
+	// silently no-ops. Two observed signatures lead to the same retry:
+	//
+	//   1. Empty IPConfigs in the returned result — the same empty-result
+	//      pathology that makes the firewall plugin no-op also makes the
+	//      bridge IP unrecoverable from the Go result. Bridge still added
+	//      POSTROUTING + IPAM lease (we can see them in iptables / lease
+	//      files), but they're unreachable from here, so the only safe
+	//      thing is to undo and retry.
+	//   2. IPConfigs populated but CNI-FORWARD lacks ACCEPT rules for
+	//      <ip>/32 — the documented silent no-op variant.
+	//
+	// Both surface as errFirewallRulesMissing so setupCNI's retry kicks in.
+	// On verify failure we run n.Remove to undo bridge's POSTROUTING + IPAM
+	// allocation; without this the retry leaks an orphan POSTROUTING entry.
+	var verifyErr error
+	if ip == "" {
+		verifyErr = fmt.Errorf("%w: CNI result has no IPConfigs for eth0 (suspected silent firewall no-op)", errFirewallRulesMissing)
+	} else if err := verifyCNIForwardRules(ctx, ip); err != nil {
+		verifyErr = err
+	}
+	if verifyErr != nil {
+		if removeErr := n.Remove(ctx, containerName, netnsPath); removeErr != nil {
+			slog.Warn("CNI rollback after verify failure also failed; possible POSTROUTING leak",
+				"event", "sandbox.network.firewall_rollback_failed",
+				"container", containerName,
+				"remove_err", removeErr.Error())
 		}
+		return verifyErr
 	}
 
-	stateIP := ""
-	if ip != "" {
-		stateIP = ip + "/16"
-	}
+	stateIP := ip + "/16"
 	state := cniState{
 		NetnsName: "yoloai-" + containerName,
 		NetnsPath: netnsPath,
