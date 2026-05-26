@@ -11,10 +11,12 @@ import (
 )
 
 // ExpandPath composes tilde expansion with braced env var expansion.
-func ExpandPath(p string) (string, error) { return config.ExpandPath(p) }
+// homeDir is used for ~ expansion; derive from filepath.Dir(layout.DataDir).
+func ExpandPath(p, homeDir string) (string, error) { return config.ExpandPath(p, homeDir) }
 
 // ExpandTilde replaces a leading ~ with the user's home directory.
-func ExpandTilde(p string) string { return config.ExpandTilde(p) }
+// homeDir is used for ~ expansion; derive from filepath.Dir(layout.DataDir).
+func ExpandTilde(p, homeDir string) string { return config.ExpandTilde(p, homeDir) }
 
 // readJSONMap reads a JSON file into a map, returning an empty map if the file doesn't exist.
 func readJSONMap(path string) (map[string]any, error) {

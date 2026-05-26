@@ -84,9 +84,11 @@ func (e *ExitError) Error() string {
 	return fmt.Sprintf("extension exited with code %d", e.Code)
 }
 
-// ExtensionsDir returns the path to the extensions directory (~/.yoloai/extensions/).
-func ExtensionsDir() string {
-	return config.ExtensionsDir()
+// ExtensionsDir returns the path to the extensions directory (DataDir/extensions/).
+// layout.ExtensionsDir() is preferred for new callers; this function is kept
+// so x.go can call it after Q-W.6 without reaching into Layout directly.
+func ExtensionsDir(layout config.Layout) string {
+	return layout.ExtensionsDir()
 }
 
 // Load parses a single YAML extension file. The extension name is derived
@@ -111,8 +113,8 @@ func Load(path string) (*Extension, error) {
 // LoadAll scans the extensions directory for *.yaml and *.yml files, loads
 // each one, and returns them sorted by name. Returns an empty slice (not error)
 // if the directory doesn't exist.
-func LoadAll() ([]*Extension, error) {
-	dir := ExtensionsDir()
+func LoadAll(layout config.Layout) ([]*Extension, error) {
+	dir := ExtensionsDir(layout)
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {

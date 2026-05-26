@@ -12,10 +12,11 @@ import (
 // seedSandbox copies seed files, agent config files, and seeds the home config.
 // Returns agentFilesInitialized so the caller can persist it to SandboxState.
 // Extracted from prepareSandboxState().
-func (m *Manager) seedSandbox(agentDef *agent.Definition, sandboxDir, isolation string, agentFiles *config.AgentFilesConfig, credOverrides map[string]string) (agentFilesInitialized bool, err error) {
+// homeDir is used for ~ expansion in seed file host paths.
+func (m *Manager) seedSandbox(agentDef *agent.Definition, sandboxDir, isolation string, agentFiles *config.AgentFilesConfig, credOverrides map[string]string, homeDir string) (agentFilesInitialized bool, err error) {
 	// Copy seed files into agent-state (config, OAuth credentials, etc.)
 	hasAPIKey := hasAnyAPIKey(agentDef, credOverrides)
-	copiedAuth, err := copySeedFiles(agentDef, sandboxDir, hasAPIKey)
+	copiedAuth, err := copySeedFiles(agentDef, sandboxDir, hasAPIKey, homeDir)
 	if err != nil {
 		return false, fmt.Errorf("copy seed files: %w", err)
 	}
@@ -35,7 +36,7 @@ func (m *Manager) seedSandbox(agentDef *agent.Definition, sandboxDir, isolation 
 
 	// Copy agent_files (user-configured agent config files)
 	if agentFiles != nil && agentDef.StateDir != "" {
-		if err := copyAgentFiles(agentDef, sandboxDir, agentFiles); err != nil {
+		if err := copyAgentFiles(agentDef, sandboxDir, agentFiles, homeDir); err != nil {
 			return false, fmt.Errorf("copy agent files: %w", err)
 		}
 		agentFilesInitialized = true

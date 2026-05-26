@@ -5,6 +5,7 @@
 package docker
 
 import (
+	"os"
 	"sync"
 	"testing"
 	"time"
@@ -13,12 +14,15 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// testLayout returns a Layout rooted at the test's HOME-derived
-// YoloaiDir. Each test sets t.Setenv("HOME", t.TempDir()) before
-// calling this, so the lock files land in an isolated dir.
+// testLayout returns a Layout rooted at the current test HOME (set via
+// t.Setenv("HOME", ...) by the caller). Lock files land in an isolated dir.
 func testLayout(t *testing.T) config.Layout {
 	t.Helper()
-	return config.NewLayout(config.YoloaiDir())
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal("os.UserHomeDir():", err)
+	}
+	return config.NewLayout(home + "/.yoloai")
 }
 
 // TestAcquireBaseLock_MutualExclusion verifies that a second goroutine

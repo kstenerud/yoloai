@@ -72,7 +72,8 @@ func applyDirSuffix(result *DirArg, suffix, arg string) error {
 // Suffixes (:copy, :rw, :force) can be combined in any order.
 // Default mode (no :copy or :rw) is determined by the caller
 // (workdir defaults to "copy", aux dirs default to "ro").
-func ParseDirArg(arg string) (*DirArg, error) {
+// homeDir is used for ~ expansion; callers derive it from filepath.Dir(layout.DataDir).
+func ParseDirArg(arg, homeDir string) (*DirArg, error) {
 	result := &DirArg{}
 
 	// Strip =<mount-path> first (before suffix parsing), since suffixes
@@ -104,7 +105,7 @@ func ParseDirArg(arg string) (*DirArg, error) {
 		remaining = remaining[:idx]
 	}
 
-	remaining, err := ExpandPath(remaining)
+	remaining, err := ExpandPath(remaining, homeDir)
 	if err != nil {
 		return nil, fmt.Errorf("expand path %q: %w", arg, err)
 	}
@@ -115,7 +116,7 @@ func ParseDirArg(arg string) (*DirArg, error) {
 	result.Path = absPath
 
 	if mountPart != "" {
-		mountPart, err = ExpandPath(mountPart)
+		mountPart, err = ExpandPath(mountPart, homeDir)
 		if err != nil {
 			return nil, fmt.Errorf("expand mount path %q: %w", arg, err)
 		}

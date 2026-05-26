@@ -78,7 +78,7 @@ func TestFilterMounts_DockerSocket(t *testing.T) {
 	dc := &DevcontainerConfig{
 		Mounts: []string{"/var/run/docker.sock:/var/run/docker.sock"},
 	}
-	mounts, warnings := dc.FilterMounts("/workdir")
+	mounts, warnings := dc.FilterMounts("/workdir", "/home/user")
 	assert.Empty(t, mounts)
 	assert.Len(t, warnings, 1)
 	assert.Contains(t, warnings[0], "docker socket")
@@ -88,7 +88,7 @@ func TestFilterMounts_CredentialDir(t *testing.T) {
 	dc := &DevcontainerConfig{
 		Mounts: []string{"/home/user/.claude:/home/yoloai/.claude:ro"},
 	}
-	mounts, warnings := dc.FilterMounts("/workdir")
+	mounts, warnings := dc.FilterMounts("/workdir", "/home/user")
 	assert.Empty(t, mounts)
 	assert.Len(t, warnings, 1)
 	assert.Contains(t, warnings[0], "credential")
@@ -98,7 +98,7 @@ func TestFilterMounts_WorkdirConflict(t *testing.T) {
 	dc := &DevcontainerConfig{
 		Mounts: []string{"/other/path:/workdir/myproject"},
 	}
-	mounts, warnings := dc.FilterMounts("/workdir/myproject")
+	mounts, warnings := dc.FilterMounts("/workdir/myproject", "/home/user")
 	assert.Empty(t, mounts)
 	assert.Len(t, warnings, 1)
 	assert.Contains(t, warnings[0], "workdir")
@@ -109,7 +109,7 @@ func TestFilterMounts_PassThrough(t *testing.T) {
 	dc := &DevcontainerConfig{
 		Mounts: []string{src + ":/home/yoloai/.config/sops:ro"},
 	}
-	mounts, warnings := dc.FilterMounts("/workdir")
+	mounts, warnings := dc.FilterMounts("/workdir", "/home/user")
 	assert.Len(t, mounts, 1)
 	assert.Empty(t, warnings)
 }
@@ -122,7 +122,7 @@ func TestFilterMounts_ExpandLocalEnvHome(t *testing.T) {
 	dc := &DevcontainerConfig{
 		Mounts: []string{"${localEnv:HOME}:/home/user/homedir:ro"},
 	}
-	mounts, _ := dc.FilterMounts("/workdir")
+	mounts, _ := dc.FilterMounts("/workdir", homeDir)
 	require.Len(t, mounts, 1)
 	assert.True(t, strings.HasPrefix(mounts[0], homeDir), "expected expanded home dir in %s", mounts[0])
 }
@@ -131,7 +131,7 @@ func TestFilterMounts_TypeBindFormat(t *testing.T) {
 	dc := &DevcontainerConfig{
 		Mounts: []string{"type=bind,source=/var/run/docker.sock,target=/var/run/docker.sock"},
 	}
-	mounts, warnings := dc.FilterMounts("/workdir")
+	mounts, warnings := dc.FilterMounts("/workdir", "/home/user")
 	assert.Empty(t, mounts)
 	assert.Len(t, warnings, 1)
 	assert.Contains(t, warnings[0], "docker socket")
@@ -141,7 +141,7 @@ func TestFilterMounts_MissingSourcePath(t *testing.T) {
 	dc := &DevcontainerConfig{
 		Mounts: []string{"/nonexistent/path/on/host:/container/path"},
 	}
-	mounts, warnings := dc.FilterMounts("/workdir")
+	mounts, warnings := dc.FilterMounts("/workdir", "/home/user")
 	assert.Empty(t, mounts)
 	require.Len(t, warnings, 1)
 	assert.Contains(t, warnings[0], "source path does not exist")
@@ -153,7 +153,7 @@ func TestFilterMounts_SourceFirstKeyValueFormat(t *testing.T) {
 	dc := &DevcontainerConfig{
 		Mounts: []string{fmt.Sprintf("source=%s,target=/root/.config/sops/age,type=bind,consistency=cached", src)},
 	}
-	mounts, warnings := dc.FilterMounts("/workdir")
+	mounts, warnings := dc.FilterMounts("/workdir", "/home/user")
 	require.Len(t, mounts, 1)
 	assert.Empty(t, warnings)
 	assert.Equal(t, src+":/root/.config/sops/age", mounts[0])
@@ -164,7 +164,7 @@ func TestFilterMounts_KeyValueReadOnly(t *testing.T) {
 	dc := &DevcontainerConfig{
 		Mounts: []string{fmt.Sprintf("source=%s,target=/container/path,type=bind,readonly", src)},
 	}
-	mounts, warnings := dc.FilterMounts("/workdir")
+	mounts, warnings := dc.FilterMounts("/workdir", "/home/user")
 	require.Len(t, mounts, 1)
 	assert.Empty(t, warnings)
 	assert.Equal(t, src+":/container/path:ro", mounts[0])
@@ -176,7 +176,7 @@ func TestFilterMounts_NormalizedOutput(t *testing.T) {
 	dc := &DevcontainerConfig{
 		Mounts: []string{fmt.Sprintf("type=bind,source=%s,target=/container/path", src)},
 	}
-	mounts, warnings := dc.FilterMounts("/workdir")
+	mounts, warnings := dc.FilterMounts("/workdir", "/home/user")
 	require.Len(t, mounts, 1)
 	assert.Empty(t, warnings)
 	assert.Equal(t, src+":/container/path", mounts[0])

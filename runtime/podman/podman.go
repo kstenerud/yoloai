@@ -14,6 +14,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/kstenerud/yoloai/config"
 	"github.com/kstenerud/yoloai/internal/yoerrors"
 	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/runtime/caps"
@@ -64,7 +65,7 @@ func probe(_ context.Context) (bool, string) {
 }
 
 func init() {
-	runtime.Register("podman", func(ctx context.Context) (runtime.Runtime, error) {
+	runtime.Register("podman", func(ctx context.Context, _ config.Layout) (runtime.Runtime, error) {
 		return New(ctx)
 	}, descriptor)
 }

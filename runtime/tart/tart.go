@@ -87,8 +87,8 @@ func probe(_ context.Context) (bool, string) {
 }
 
 func init() {
-	runtime.Register("tart", func(ctx context.Context) (runtime.Runtime, error) {
-		return New(ctx)
+	runtime.Register("tart", func(ctx context.Context, layout config.Layout) (runtime.Runtime, error) {
+		return New(ctx, layout)
 	}, descriptor)
 }
 
@@ -120,9 +120,10 @@ const (
 
 // Runtime implements runtime.Runtime using the Tart CLI.
 type Runtime struct {
-	tartBin           string // path to tart binary
-	sandboxDir        string // ~/.yoloai/sandboxes/ base path
-	baseImageOverride string // custom base image from config (tart.image)
+	tartBin           string        // path to tart binary
+	layout            config.Layout // DataDir-rooted path resolver (Q-W.6)
+	homeDir           string        // host home directory (filepath.Dir(layout.DataDir)); used for ~ expansion
+	baseImageOverride string        // custom base image from config (tart.image)
 }
 
 // Compile-time check.
@@ -136,7 +137,8 @@ func (r *Runtime) Descriptor() runtime.BackendDescriptor {
 
 // ResolveCopyMount returns the local VM path where the copy directory will be
 // stored. The actual directory is first staged via VirtioFS, then copied to local
-// VM storage during SetupWorkDirInVM.
+// VM storage during SetupWorkDirInVM. The path is always a guest VM path
+// (not a host path), so no layout is needed here.
 func (r *Runtime) ResolveCopyMount(sandboxName, hostPath string) string {
 	encoded := config.EncodePath(hostPath)
 	return filepath.Join("/Users/admin/yoloai-work", encoded)
@@ -153,8 +155,9 @@ func (r *Runtime) SetupWorkDirInVM(virtiofsStagingPath, vmLocalPath string) []st
 }
 
 // New creates a Runtime after verifying that tart is installed and the
-// platform is supported (macOS with Apple Silicon).
-func New(_ context.Context) (*Runtime, error) {
+// platform is supported (macOS with Apple Silicon). layout is used for all
+// host-path resolution so the backend never reads ambient HOME.
+func New(_ context.Context, layout config.Layout) (*Runtime, error) {
 	// Platform checks first — no amount of software installation can fix these.
 	if !isMacOS() {
 		return nil, yoerrors.NewPlatformError("tart backend requires macOS with Apple Silicon")
@@ -170,13 +173,14 @@ func New(_ context.Context) (*Runtime, error) {
 
 	// Read config for optional tart.image override
 	var baseImageOverride string
-	if cfg, err := config.LoadConfig(); err == nil && cfg.TartImage != "" {
+	if cfg, err := config.LoadConfig(layout); err == nil && cfg.TartImage != "" {
 		baseImageOverride = cfg.TartImage
 	}
 
 	return &Runtime{
 		tartBin:           tartBin,
-		sandboxDir:        config.SandboxesDir(),
+		layout:            layout,
+		homeDir:           filepath.Dir(layout.DataDir),
 		baseImageOverride: baseImageOverride,
 	}, nil
 }
@@ -202,7 +206,7 @@ func (r *Runtime) Create(ctx context.Context, cfg runtime.InstanceConfig) error 
 	slog.Debug("tart Create: clone succeeded", "name", cfg.Name)
 
 	// Save instance config so Start can read mounts/network/ports
-	sandboxPath := filepath.Join(r.sandboxDir, sandboxName(cfg.Name))
+	sandboxPath := filepath.Join(r.layout.SandboxesDir(), sandboxName(cfg.Name))
 	cfgData, err := json.Marshal(cfg)
 	if err != nil {
 		return fmt.Errorf("marshal instance config: %w", err)
@@ -237,7 +241,7 @@ func (r *Runtime) Create(ctx context.Context, cfg runtime.InstanceConfig) error 
 // Start boots the VM in the background and runs the setup script.
 func (r *Runtime) Start(ctx context.Context, name string) error {
 	slog.Debug("tart Start", "name", name)
-	sandboxPath := filepath.Join(r.sandboxDir, sandboxName(name))
+	sandboxPath := filepath.Join(r.layout.SandboxesDir(), sandboxName(name))
 
 	// Check if already running
 	if r.isRunning(ctx, name) {
@@ -337,7 +341,7 @@ func (r *Runtime) Stop(ctx context.Context, name string) error {
 
 // Remove deletes the VM and cleans up the PID file.
 func (r *Runtime) Remove(ctx context.Context, name string) error {
-	sandboxPath := filepath.Join(r.sandboxDir, sandboxName(name))
+	sandboxPath := filepath.Join(r.layout.SandboxesDir(), sandboxName(name))
 
 	// Stop first if running
 	_ = r.Stop(ctx, name)
@@ -413,11 +417,10 @@ func (r *Runtime) translateWorkDirToVMPath(workDir string) string {
 
 	// Check if this is a host sandbox work path
 	// Pattern: ~/.yoloai/sandboxes/<name>/work/<encoded>
-	sandboxesDir := config.SandboxesDir()
+	sandboxesDir := r.layout.SandboxesDir()
 	// Normalize by resolving ~ if present
 	if strings.HasPrefix(workDir, "~/") {
-		home, _ := os.UserHomeDir()
-		workDir = filepath.Join(home, workDir[2:])
+		workDir = filepath.Join(r.homeDir, workDir[2:])
 	}
 
 	// Check if path starts with sandboxes dir
@@ -500,7 +503,7 @@ func (r *Runtime) Logs(_ context.Context, _ string, _ int) string { return "" }
 
 // DiagHint returns a Tart-specific hint for checking logs.
 func (r *Runtime) DiagHint(instanceName string) string {
-	logPath := filepath.Join(r.sandboxDir, sandboxName(instanceName), backendDir, vmLogFileName)
+	logPath := filepath.Join(r.layout.SandboxesDir(), sandboxName(instanceName), backendDir, vmLogFileName)
 	return fmt.Sprintf("check VM log at %s", logPath)
 }
 

@@ -7,8 +7,10 @@ package seatbelt
 
 import (
 	"context"
+	"path/filepath"
 	"testing"
 
+	"github.com/kstenerud/yoloai/config"
 	"github.com/kstenerud/yoloai/internal/testutil"
 	"github.com/stretchr/testify/require"
 )
@@ -18,10 +20,10 @@ import (
 // ready for use. Cleanup of the sandbox directory is handled by t.TempDir().
 func seatbeltSetup(t *testing.T) (*Runtime, context.Context) {
 	t.Helper()
-	testutil.IsolatedHome(t)
+	home := testutil.IsolatedHome(t)
 	ctx := context.Background()
 
-	rt, err := New(ctx)
+	rt, err := New(ctx, config.NewLayout(filepath.Join(home, ".yoloai")), home)
 	require.NoError(t, err, "seatbelt backend must be available on this platform")
 
 	return rt, ctx

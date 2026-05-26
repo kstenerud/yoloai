@@ -124,3 +124,29 @@ func (l Layout) TartBaseLockPath(baseName string) string {
 func (l Layout) DockerBaseLockPath(baseName string) string {
 	return filepath.Join(l.DockerBaseLocksDir(), baseName+".lock")
 }
+
+// GlobalConfigPath returns DataDir/config.yaml — the user-level
+// yoloai configuration file. Migration target for the package-level
+// GlobalConfigPath() helper.
+func (l Layout) GlobalConfigPath() string {
+	return filepath.Join(l.DataDir, "config.yaml")
+}
+
+// StatePath returns DataDir/state.yaml — the operational state file
+// (setup_complete, etc.). Migration target for the package-level
+// StatePath() helper.
+func (l Layout) StatePath() string {
+	return filepath.Join(l.DataDir, "state.yaml")
+}
+
+// ProfileDir returns DataDir/profiles/<name>/. Migration target for
+// the package-level ProfileDirPath(name) helper.
+func (l Layout) ProfileDir(name string) string {
+	return filepath.Join(l.ProfilesDir(), name)
+}
+
+// CniDir returns DataDir/cni/ — the containerd backend's per-data-dir
+// CNI configuration directory.
+func (l Layout) CniDir() string {
+	return filepath.Join(l.DataDir, "cni")
+}

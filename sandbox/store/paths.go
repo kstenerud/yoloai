@@ -5,10 +5,9 @@
 // other sandbox/ subpackages consume types from here; this package
 // imports only the standard library, config, and internal helpers.
 //
-// **Layout discipline (Q-W.4b).** None of the helpers in this file
-// reach back to config.SandboxesDir() or config.YoloaiDir(); they
-// derive subpaths from a sandboxDir argument supplied by the caller.
-// The caller obtains the sandboxDir from a config.Layout
+// **Layout discipline (Q-W).** None of the helpers in this file read
+// ambient $HOME; they derive subpaths from a sandboxDir argument
+// supplied by the caller, which obtains it from a config.Layout
 // (layout.SandboxDir(name)). This satisfies the "all layout info in
 // one authoritative source" rule from §12: Layout is the only thing
 // that knows where the sandbox root lives; store is the only thing

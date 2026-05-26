@@ -5,8 +5,10 @@ package testutil
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"testing"
 
+	"github.com/kstenerud/yoloai/config"
 	yrt "github.com/kstenerud/yoloai/runtime"
 )
 
@@ -31,7 +33,9 @@ func IntegrationBackendName() string {
 func NewIntegrationRuntime(ctx context.Context, t *testing.T) yrt.Runtime {
 	t.Helper()
 	name := IntegrationBackendName()
-	rt, err := yrt.New(ctx, name)
+	home, _ := os.UserHomeDir()
+	layout := config.NewLayout(filepath.Join(home, ".yoloai"))
+	rt, err := yrt.New(ctx, name, layout)
 	if err != nil {
 		t.Fatalf("create %q runtime: %v", name, err)
 	}

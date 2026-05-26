@@ -6,7 +6,6 @@ package cli
 import (
 	"fmt"
 
-	"github.com/kstenerud/yoloai/config"
 	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/sandbox"
 	"github.com/spf13/cobra"
@@ -28,14 +27,14 @@ func newSystemInfoCmd(version, commit, date string) *cobra.Command {
 			fmt.Fprintf(out, "Commit:      %s\n", commit)  //nolint:errcheck
 			fmt.Fprintf(out, "Built:       %s\n", date)    //nolint:errcheck
 
-			globalConfigPath := config.GlobalConfigPath()
+			globalConfigPath := cliLayout().GlobalConfigPath()
 			fmt.Fprintf(out, "Config:      %s\n", globalConfigPath) //nolint:errcheck
 
-			profileConfigPath := config.ConfigPath()
+			profileConfigPath := cliLayout().DefaultsConfigPath()
 			fmt.Fprintf(out, "Profile:     %s\n", profileConfigPath) //nolint:errcheck
 
-			dataDir := config.YoloaiDir()
-			sandboxesDir := config.SandboxesDir()
+			dataDir := cliLayout().YoloaiDir()
+			sandboxesDir := cliLayout().SandboxesDir()
 
 			fmt.Fprintf(out, "Data dir:    %s\n", dataDir)      //nolint:errcheck
 			fmt.Fprintf(out, "Sandboxes:   %s\n", sandboxesDir) //nolint:errcheck
@@ -69,10 +68,10 @@ func newSystemInfoCmd(version, commit, date string) *cobra.Command {
 
 // writeSystemInfoJSON outputs system info as JSON.
 func writeSystemInfoJSON(cmd *cobra.Command, version, commit, date string) error {
-	globalConfigPath := config.GlobalConfigPath()
-	profileConfigPath := config.ConfigPath()
-	dataDir := config.YoloaiDir()
-	sandboxesDir := config.SandboxesDir()
+	globalConfigPath := cliLayout().GlobalConfigPath()
+	profileConfigPath := cliLayout().DefaultsConfigPath()
+	dataDir := cliLayout().YoloaiDir()
+	sandboxesDir := cliLayout().SandboxesDir()
 
 	diskUsage := ""
 	if size, err := sandbox.DirSize(dataDir); err == nil {

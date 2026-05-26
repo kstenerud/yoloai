@@ -9,9 +9,13 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/kstenerud/yoloai/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// noLayout is a zero-value layout used by tests that don't need a real DataDir.
+var noLayout = config.NewLayout("")
 
 // TestCNIStatePath verifies the CNI state file path is within the backend dir.
 func TestCNIStatePath(t *testing.T) {
@@ -23,7 +27,7 @@ func TestCNIStatePath(t *testing.T) {
 func TestTeardownCNI_MissingState(t *testing.T) {
 	dir := t.TempDir()
 	// No backend/ subdir or cni-state.json — should return nil without error.
-	err := teardownCNI(context.Background(), dir)
+	err := teardownCNI(context.Background(), noLayout, dir)
 	assert.NoError(t, err)
 }
 
@@ -49,13 +53,13 @@ func TestTeardownCNI_Idempotent(t *testing.T) {
 	// (no real netns), but it should still remove the state file.
 	// We verify idempotency by calling twice — both calls should not error on
 	// the missing state file case.
-	_ = teardownCNI(context.Background(), dir) // first call: state exists, CNI ops may fail
+	_ = teardownCNI(context.Background(), noLayout, dir) // first call: state exists, CNI ops may fail
 	// State file should be removed after first call regardless of CNI/netns errors.
 	_, statErr := os.Stat(statePath)
 	assert.True(t, os.IsNotExist(statErr), "state file should be removed after teardown")
 
 	// Second call: no state file — must return nil.
-	err = teardownCNI(context.Background(), dir)
+	err = teardownCNI(context.Background(), noLayout, dir)
 	assert.NoError(t, err)
 }
 

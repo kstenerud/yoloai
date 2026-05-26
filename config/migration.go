@@ -8,11 +8,11 @@ import (
 	"github.com/kstenerud/yoloai/internal/yoerrors"
 )
 
-// CheckDefaultsDir verifies that ~/.yoloai/defaults/ exists. If it doesn't,
+// CheckDefaultsDir verifies that layout.DefaultsDir() exists. If it doesn't,
 // returns a descriptive error telling the user how to resolve it.
 // Only called when setup_complete is true (i.e., this is an upgrade, not a fresh install).
-func CheckDefaultsDir() error {
-	if _, err := os.Stat(DefaultsDir()); err == nil {
+func CheckDefaultsDir(layout Layout) error {
+	if _, err := os.Stat(layout.DefaultsDir()); err == nil {
 		return nil // exists, nothing to do
 	}
 	msg := "~/.yoloai/defaults/ not found\n\n" +

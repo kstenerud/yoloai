@@ -168,11 +168,11 @@ func TestEnsureSetup_SkipsConfigOnSubsequentRun(t *testing.T) {
 	require.NoError(t, os.MkdirAll(defaultsDir, 0750))
 	customContent := []byte("# custom config\n# agent: claude\n")
 	require.NoError(t, os.WriteFile(filepath.Join(defaultsDir, "config.yaml"), customContent, 0600))
-	require.NoError(t, config.SaveState(&config.State{SetupComplete: true}))
+	layout := config.NewLayout(yoloaiDir)
+	require.NoError(t, config.SaveState(layout, &config.State{SetupComplete: true}))
 
 	mock := &mockRuntime{}
 	var output bytes.Buffer
-	layout := config.NewLayout(yoloaiDir)
 	mgr := NewManager(mock, slog.Default(), strings.NewReader(""), &output, WithLayout(layout))
 
 	err := mgr.EnsureSetup(context.Background())
@@ -191,13 +191,11 @@ func TestEnsureSetup_AlwaysCallsSetup(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
 
-	// Simulate a prior successful build by recording the current checksum in defaults/
-	defaultsDir := filepath.Join(tmpDir, ".yoloai", "defaults")
-	require.NoError(t, os.MkdirAll(defaultsDir, 0750))
-	dockerrt.RecordBuildChecksum(defaultsDir)
-
-	mock := &mockRuntime{} // Setup returns nil (success)
+	// Simulate a prior successful build by recording the current checksum.
 	layout := config.NewLayout(filepath.Join(tmpDir, ".yoloai"))
+	require.NoError(t, os.MkdirAll(layout.CacheDir(), 0750))
+	dockerrt.RecordBuildChecksum(layout, "")
+	mock := &mockRuntime{}
 	mgr := NewManager(mock, slog.Default(), strings.NewReader(""), io.Discard, WithLayout(layout))
 
 	err := mgr.EnsureSetup(context.Background())

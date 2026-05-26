@@ -97,9 +97,11 @@ func NewWithOptions(ctx context.Context, opts Options) (*Client, error) {
 		return nil, fmt.Errorf("yoloai: Options.DataDir is required (no implicit $HOME fallback; see development-principles.md §12)")
 	}
 
+	layout := config.NewLayout(opts.DataDir)
+
 	backend := opts.Backend
 	if backend == "" {
-		backend = resolveBackendFromConfig(ctx)
+		backend = resolveBackendFromConfig(ctx, layout)
 	}
 	logger := opts.Logger
 	if logger == nil {
@@ -114,12 +116,11 @@ func NewWithOptions(ctx context.Context, opts Options) (*Client, error) {
 		input = os.Stdin
 	}
 
-	rt, err := newRuntime(ctx, backend)
+	rt, err := newRuntime(ctx, backend, layout)
 	if err != nil {
 		return nil, fmt.Errorf("connect to %s backend: %w", backend, err)
 	}
 
-	layout := config.NewLayout(opts.DataDir)
 	mgr := sandbox.NewManager(rt, logger, input, output, sandbox.WithLayout(layout))
 	return &Client{manager: mgr, rt: rt, layout: layout}, nil
 }
@@ -207,11 +208,11 @@ func (c *Client) Run(ctx context.Context, opts RunOptions) (*sandbox.Info, error
 
 	agent := opts.Agent
 	if agent == "" {
-		agent = resolveAgentFromConfig()
+		agent = resolveAgentFromConfig(c.layout)
 	}
 	model := opts.Model
 	if model == "" {
-		model = resolveModelFromConfig()
+		model = resolveModelFromConfig(c.layout)
 	}
 	profile := opts.Profile
 	if profile == "" {
@@ -314,25 +315,25 @@ func (c *Client) Destroy(ctx context.Context, name string, force bool) error {
 // other registered container backend with a stderr-side warning. The Client
 // emits no warning of its own (embedders may want to suppress it); we
 // silently take the fallback verdict.
-func resolveBackendFromConfig(ctx context.Context) string {
+func resolveBackendFromConfig(ctx context.Context, layout config.Layout) string {
 	var preferred string
-	if cfg, err := config.LoadDefaultsConfig(); err == nil {
+	if cfg, err := config.LoadDefaultsConfig(layout); err == nil {
 		preferred = cfg.ContainerBackend
 	}
 	backend, _ := runtime.SelectContainerBackend(ctx, preferred)
 	return backend
 }
 
-func resolveAgentFromConfig() string {
-	cfg, err := config.LoadDefaultsConfig()
+func resolveAgentFromConfig(layout config.Layout) string {
+	cfg, err := config.LoadDefaultsConfig(layout)
 	if err == nil && cfg.Agent != "" {
 		return cfg.Agent
 	}
 	return "claude"
 }
 
-func resolveModelFromConfig() string {
-	cfg, err := config.LoadDefaultsConfig()
+func resolveModelFromConfig(layout config.Layout) string {
+	cfg, err := config.LoadDefaultsConfig(layout)
 	if err == nil && cfg.Model != "" {
 		return cfg.Model
 	}
@@ -343,9 +344,9 @@ func resolveProfileFromConfig() string {
 	return ""
 }
 
-func newRuntime(ctx context.Context, backend string) (runtime.Runtime, error) {
+func newRuntime(ctx context.Context, backend string, layout config.Layout) (runtime.Runtime, error) {
 	if backend == "" {
 		backend = "docker"
 	}
-	return runtime.New(ctx, backend)
+	return runtime.New(ctx, backend, layout)
 }

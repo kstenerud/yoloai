@@ -56,8 +56,8 @@ type cniState struct {
 }
 
 // cniConfDir returns the path to the yoloai CNI config directory.
-func cniConfDir() string {
-	return filepath.Join(config.YoloaiDir(), "cni")
+func cniConfDir(layout config.Layout) string {
+	return layout.CniDir()
 }
 
 // cniStatePath returns the path to the CNI state file for a sandbox.
@@ -69,8 +69,8 @@ func cniStatePath(sandboxDir string) string {
 // or if the existing file does not match the current template. Overwriting on
 // mismatch ensures subnet changes (e.g. moving from 10.88 to 10.89 to avoid
 // conflicts with Podman) take effect without manual intervention.
-func ensureCNIConflist() error {
-	dir := cniConfDir()
+func ensureCNIConflist(layout config.Layout) error {
+	dir := cniConfDir(layout)
 	if err := fileutil.MkdirAll(dir, 0o750); err != nil { //nolint:gosec // G301: 0750 is appropriate for CNI config dir
 		return fmt.Errorf("create CNI config dir: %w", err)
 	}
@@ -129,6 +129,16 @@ func deleteNetNS(name string) error {
 	return nil
 }
 
+// cleanupStaleCNIResultsCache deletes the libcni results cache file for
+// containerName. The cache lives at /var/lib/cni/results/yoloai-<containerName>-eth0.
+// Without this cleanup, a subsequent CNI ADD would leave a stale cache entry
+// that a NEXT creation's pre-flight would use to incorrectly delete iptables rules.
+// Errors are silently ignored — this is best-effort pre-flight cleanup.
+func cleanupStaleCNIResultsCache(containerName string) {
+	path := fmt.Sprintf("/var/lib/cni/results/yoloai-%s-eth0", containerName)
+	_ = os.Remove(path)
+}
+
 // cleanupStaleIPAMLeases removes any host-local IPAM lease files for
 // containerName left over from a previous failed or replaced sandbox.
 // Lease files live at /var/lib/cni/networks/yoloai/<IP> and contain
@@ -160,8 +170,8 @@ func cleanupStaleIPAMLeases(containerName string) {
 
 // setupCNI creates a network namespace, runs CNI ADD, and persists state.
 // Returns the netns path.
-func setupCNI(ctx context.Context, sandboxDir, containerName string) (string, error) {
-	if err := ensureCNIConflist(); err != nil {
+func setupCNI(ctx context.Context, layout config.Layout, sandboxDir, containerName string) (string, error) {
+	if err := ensureCNIConflist(layout); err != nil {
 		return "", err
 	}
 
@@ -177,7 +187,7 @@ func setupCNI(ctx context.Context, sandboxDir, containerName string) (string, er
 	}
 
 	// If CNI ADD fails, clean up both the netns and any partial IPAM allocation.
-	if err := runCNIAdd(ctx, netnsPath, sandboxDir, containerName); err != nil {
+	if err := runCNIAdd(ctx, layout, netnsPath, sandboxDir, containerName); err != nil {
 		_ = deleteNetNS(nsName)
 		cleanupStaleIPAMLeases(containerName)
 		return "", fmt.Errorf("CNI setup: %w", err)
@@ -187,9 +197,9 @@ func setupCNI(ctx context.Context, sandboxDir, containerName string) (string, er
 }
 
 // runCNIAdd runs CNI ADD for the given netns and persists cni-state.json.
-func runCNIAdd(ctx context.Context, netnsPath, sandboxDir, containerName string) error {
+func runCNIAdd(ctx context.Context, layout config.Layout, netnsPath, sandboxDir, containerName string) error {
 	n, err := cni.New(
-		cni.WithPluginConfDir(cniConfDir()),
+		cni.WithPluginConfDir(cniConfDir(layout)),
 		cni.WithPluginDir([]string{"/opt/cni/bin"}),
 	)
 	if err != nil {
@@ -197,14 +207,17 @@ func runCNIAdd(ctx context.Context, netnsPath, sandboxDir, containerName string)
 	}
 
 	// WithPluginConfDir only sets the dir; WithConfListFile actually loads the file.
-	if err := n.Load(cni.WithConfListFile(filepath.Join(cniConfDir(), "yoloai.conflist"))); err != nil {
+	if err := n.Load(cni.WithConfListFile(filepath.Join(cniConfDir(layout), "yoloai.conflist"))); err != nil {
 		return fmt.Errorf("load CNI config: %w", err)
 	}
 
-	// Pre-flight DEL: release any stale IPAM lease for this container from a
-	// previous failed run. The host-local IPAM plugin identifies leases by
-	// container ID alone, so it can clean up even with a fresh empty netns.
-	_ = n.Remove(ctx, containerName, netnsPath)
+	// Remove any stale libcni results cache so that teardown later reads the
+	// result from THIS ADD, not a leftover from a prior run. IPAM leases are
+	// already cleaned up by cleanupStaleIPAMLeases before this function runs.
+	// We do NOT call n.Remove here because that would also invoke the firewall
+	// plugin's DEL handler, which would delete CNI-FORWARD rules — potentially
+	// for an already-running container that shares the same IP.
+	cleanupStaleCNIResultsCache(containerName)
 
 	result, err := n.Setup(ctx, containerName, netnsPath)
 	if err != nil {
@@ -243,7 +256,7 @@ func runCNIAdd(ctx context.Context, netnsPath, sandboxDir, containerName string)
 
 // teardownCNI reads cni-state.json and runs CNI DEL to release resources.
 // Idempotent: no-op if cni-state.json does not exist.
-func teardownCNI(ctx context.Context, sandboxDir string) error {
+func teardownCNI(ctx context.Context, layout config.Layout, sandboxDir string) error {
 	statePath := cniStatePath(sandboxDir)
 	data, err := os.ReadFile(statePath) //nolint:gosec // G304: path is always a trusted sandbox subpath
 	if err != nil {
@@ -258,7 +271,7 @@ func teardownCNI(ctx context.Context, sandboxDir string) error {
 		return fmt.Errorf("parse CNI state: %w", err)
 	}
 
-	if err := runCNIDel(ctx, state); err != nil {
+	if err := runCNIDel(ctx, layout, state); err != nil {
 		// Log but don't fail — best-effort teardown.
 		_ = err
 	}
@@ -278,16 +291,16 @@ func teardownCNI(ctx context.Context, sandboxDir string) error {
 }
 
 // runCNIDel runs CNI DEL for the given state.
-func runCNIDel(ctx context.Context, state cniState) error {
+func runCNIDel(ctx context.Context, layout config.Layout, state cniState) error {
 	n, err := cni.New(
-		cni.WithPluginConfDir(cniConfDir()),
+		cni.WithPluginConfDir(cniConfDir(layout)),
 		cni.WithPluginDir([]string{"/opt/cni/bin"}),
 	)
 	if err != nil {
 		return fmt.Errorf("create CNI client: %w", err)
 	}
 
-	if err := n.Load(cni.WithConfListFile(filepath.Join(cniConfDir(), "yoloai.conflist"))); err != nil {
+	if err := n.Load(cni.WithConfListFile(filepath.Join(cniConfDir(layout), "yoloai.conflist"))); err != nil {
 		return fmt.Errorf("load CNI config: %w", err)
 	}
 

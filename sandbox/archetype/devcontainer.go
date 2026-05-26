@@ -148,8 +148,8 @@ func (dc *DevcontainerConfig) ExtractPorts() []string {
 // FilterMounts evaluates each devcontainer mount entry, strips dangerous mounts,
 // and returns safe mounts plus warning strings for stripped entries.
 // workdirMountPath is the target path of the sandbox workdir mount.
-func (dc *DevcontainerConfig) FilterMounts(workdirMountPath string) (mounts []string, warnings []string) {
-	homeDir, _ := os.UserHomeDir()
+// homeDir is used for ${localEnv:HOME} expansion; callers derive it from filepath.Dir(layout.DataDir).
+func (dc *DevcontainerConfig) FilterMounts(workdirMountPath, homeDir string) (mounts []string, warnings []string) {
 
 	for _, m := range dc.Mounts {
 		// Expand ${localEnv:HOME}

@@ -170,6 +170,7 @@ type sandboxState struct {
 	devcontainerMountWarnings []string
 	workdirMode               string        // resolved workdir mode ("copy", "overlay", "rw")
 	layout                    config.Layout // Q-W.3: DataDir-rooted Layout propagated from the Manager
+	homeDir                   string        // Q-W.6: host home dir (filepath.Dir(layout.DataDir)); used for ~ expansion
 }
 
 // overlayMountConfig describes a single overlay mount for config.json.
@@ -379,7 +380,7 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions, c
 	}
 
 	success = true
-	return buildSandboxStateResult(opts, sandboxDir, workdir, workCopyDir, auxDirs, agentDef, meta, pr, mergedMounts, configData, tmuxConf, resolvedArchetype, pr.archetypeDockerDRequired, devcontainerCfg, dcMounts, dcMountWarnings, credOverrides, m.layout), nil
+	return buildSandboxStateResult(opts, sandboxDir, workdir, workCopyDir, auxDirs, agentDef, meta, pr, mergedMounts, configData, tmuxConf, resolvedArchetype, pr.archetypeDockerDRequired, devcontainerCfg, dcMounts, dcMountWarnings, credOverrides, m.layout, filepath.Dir(m.layout.DataDir)), nil
 }
 
 // resolveProfileAndArchetype resolves profile config, runtime base, archetype, mounts, and lifecycle state.
@@ -409,7 +410,7 @@ func (m *Manager) resolveProfileAndArchetype(ctx context.Context, opts *CreateOp
 
 	state_onCreateDone := loadOnCreateDone(m.layout.SandboxDir(opts.Name))
 
-	mergedMounts, err := validateAndExpandMounts(pr.mounts)
+	mergedMounts, err := validateAndExpandMounts(pr.mounts, filepath.Dir(m.layout.DataDir))
 	if err != nil {
 		return nil, "", nil, nil, nil, nil, false, err
 	}
@@ -423,14 +424,14 @@ func (m *Manager) createAndSeedSandbox(ctx context.Context, sandboxDir string, a
 	if err := createSandboxDirs(sandboxDir, perms); err != nil {
 		return false, err
 	}
-	return m.seedSandbox(agentDef, sandboxDir, pr.isolation, pr.agentFiles, credOverrides)
+	return m.seedSandbox(agentDef, sandboxDir, pr.isolation, pr.agentFiles, credOverrides, filepath.Dir(m.layout.DataDir))
 }
 
 // buildConfigAndMeta builds the container config and sandbox meta structs.
 // Returns (configData, meta, tmuxConf, promptText, error).
 func (m *Manager) buildConfigAndMeta(ctx context.Context, opts CreateOptions, pr *profileResult, agentDef *agent.Definition, workdir *DirArg, auxDirs []*DirArg, gcfg *config.GlobalConfig, dirMetas []store.DirMeta, baselineSHA string, mergedMounts []string, resolvedArchetype archetype.Archetype, devcontainerCfg *archetype.DevcontainerConfig, state_onCreateDone bool, sandboxDir string) ([]byte, *store.Meta, string, string, error) {
 	_ = ctx // reserved for future use
-	promptText, hasPrompt, model, agentCommand, tmuxConf, err := resolveAgentParams(agentDef, opts, pr, gcfg)
+	promptText, hasPrompt, model, agentCommand, tmuxConf, err := resolveAgentParams(agentDef, opts, pr, gcfg, filepath.Dir(m.layout.DataDir))
 	if err != nil {
 		return nil, nil, "", "", err
 	}
@@ -453,7 +454,7 @@ func (m *Manager) buildConfigAndMeta(ctx context.Context, opts CreateOptions, pr
 }
 
 // buildSandboxStateResult constructs the sandboxState from all resolved values.
-func buildSandboxStateResult(opts CreateOptions, sandboxDir string, workdir *DirArg, workCopyDir string, auxDirs []*DirArg, agentDef *agent.Definition, meta *store.Meta, pr *profileResult, mergedMounts []string, configData []byte, tmuxConf string, resolvedArchetype archetype.Archetype, archetypeDockerDRequired bool, devcontainerCfg *archetype.DevcontainerConfig, dcMounts []string, dcMountWarnings []string, credOverrides map[string]string, layout config.Layout) *sandboxState {
+func buildSandboxStateResult(opts CreateOptions, sandboxDir string, workdir *DirArg, workCopyDir string, auxDirs []*DirArg, agentDef *agent.Definition, meta *store.Meta, pr *profileResult, mergedMounts []string, configData []byte, tmuxConf string, resolvedArchetype archetype.Archetype, archetypeDockerDRequired bool, devcontainerCfg *archetype.DevcontainerConfig, dcMounts []string, dcMountWarnings []string, credOverrides map[string]string, layout config.Layout, homeDir string) *sandboxState {
 	return &sandboxState{
 		name:                      opts.Name,
 		sandboxDir:                sandboxDir,
@@ -488,6 +489,7 @@ func buildSandboxStateResult(opts CreateOptions, sandboxDir string, workdir *Dir
 		devcontainerMountWarnings: dcMountWarnings,
 		workdirMode:               string(workdir.Mode),
 		layout:                    layout,
+		homeDir:                   homeDir,
 	}
 }
 
@@ -519,11 +521,11 @@ func (m *Manager) validateAndLoadConfig(opts CreateOptions) (*agent.Definition, 
 		return nil, "", nil, nil, NewUsageError("--prompt and --prompt-file are mutually exclusive")
 	}
 
-	ycfg, err := config.LoadConfig()
+	ycfg, err := config.LoadConfig(m.layout)
 	if err != nil {
 		return nil, "", nil, nil, fmt.Errorf("load config: %w", err)
 	}
-	gcfg, err := config.LoadGlobalConfig()
+	gcfg, err := config.LoadGlobalConfig(m.layout)
 	if err != nil {
 		return nil, "", nil, nil, fmt.Errorf("load global config: %w", err)
 	}
@@ -658,8 +660,9 @@ func (m *Manager) setupAllWorkdirs(opts CreateOptions, workdir *DirArg, auxDirs 
 }
 
 // resolveAgentParams resolves prompt, model, agent command, and tmux config.
-func resolveAgentParams(agentDef *agent.Definition, opts CreateOptions, pr *profileResult, gcfg *config.GlobalConfig) (string, bool, string, string, string, error) {
-	promptText, err := ReadPrompt(opts.Prompt, opts.PromptFile)
+// homeDir is used to expand leading "~" in the promptFile path.
+func resolveAgentParams(agentDef *agent.Definition, opts CreateOptions, pr *profileResult, gcfg *config.GlobalConfig, homeDir string) (string, bool, string, string, string, error) {
+	promptText, err := ReadPrompt(opts.Prompt, opts.PromptFile, homeDir)
 	if err != nil {
 		return "", false, "", "", "", err
 	}
@@ -815,7 +818,7 @@ func (m *Manager) launchContainer(ctx context.Context, state *sandboxState) erro
 	// Use pre-merged env from state if available, otherwise load from config.
 	envVars := state.env
 	if envVars == nil {
-		cfg, cfgErr := config.LoadConfig()
+		cfg, cfgErr := config.LoadConfig(m.layout)
 		if cfgErr != nil {
 			return fmt.Errorf("load config: %w", cfgErr)
 		}
@@ -1141,7 +1144,8 @@ func lifecycleCmdToJSON(lc archetype.LifecycleCmd) map[string]any {
 }
 
 // ReadPrompt reads the prompt from --prompt, --prompt-file, or stdin ("-").
-func ReadPrompt(prompt, promptFile string) (string, error) {
+// homeDir is used to expand leading "~" in the promptFile path.
+func ReadPrompt(prompt, promptFile, homeDir string) (string, error) {
 	if prompt != "" && promptFile != "" {
 		return "", NewUsageError("--prompt and --prompt-file are mutually exclusive")
 	}
@@ -1167,7 +1171,7 @@ func ReadPrompt(prompt, promptFile string) (string, error) {
 	}
 
 	if promptFile != "" {
-		promptFile, err := ExpandPath(promptFile)
+		promptFile, err := ExpandPath(promptFile, homeDir)
 		if err != nil {
 			return "", fmt.Errorf("expand prompt file path: %w", err)
 		}
@@ -1578,7 +1582,7 @@ func buildGitAndTmuxMounts(state *sandboxState) []runtime.MountSpec {
 
 	// Host tmux config (when tmux_conf is default+host or host)
 	if state.tmuxConf == "default+host" || state.tmuxConf == "host" {
-		tmuxConfPath := ExpandTilde("~/.tmux.conf")
+		tmuxConfPath := ExpandTilde("~/.tmux.conf", state.homeDir)
 		if _, err := os.Stat(tmuxConfPath); err == nil {
 			mounts = append(mounts, runtime.MountSpec{
 				Source:   tmuxConfPath,
@@ -1591,7 +1595,7 @@ func buildGitAndTmuxMounts(state *sandboxState) []runtime.MountSpec {
 	// Git identity: mount ~/.gitconfig and ~/.config/git/ read-only so that
 	// git commands inside the container can resolve user.name / user.email.
 	// Mirrors the symlink-based approach used by the Seatbelt backend.
-	gitconfigPath := ExpandTilde("~/.gitconfig")
+	gitconfigPath := ExpandTilde("~/.gitconfig", state.homeDir)
 	if _, err := os.Stat(gitconfigPath); err == nil {
 		mounts = append(mounts, runtime.MountSpec{
 			Source:   gitconfigPath,
@@ -1599,7 +1603,7 @@ func buildGitAndTmuxMounts(state *sandboxState) []runtime.MountSpec {
 			ReadOnly: true,
 		})
 	}
-	gitConfigDir := ExpandTilde("~/.config/git")
+	gitConfigDir := ExpandTilde("~/.config/git", state.homeDir)
 	if info, err := os.Stat(gitConfigDir); err == nil && info.IsDir() {
 		mounts = append(mounts, runtime.MountSpec{
 			Source:   gitConfigDir,
@@ -1617,7 +1621,7 @@ func buildConfigAndSecretsMounts(state *sandboxState, secretsDir string) []runti
 
 	// Config/profile mounts (host:container[:ro])
 	for _, m := range state.configMounts {
-		spec, err := parseConfigMount(m)
+		spec, err := parseConfigMount(m, state.homeDir)
 		if err != nil {
 			continue // skip unparseable mounts (validated at creation time)
 		}
@@ -1664,10 +1668,11 @@ func hasAnyAPIKey(agentDef *agent.Definition, credOverrides map[string]string) b
 
 // hasAnyAuthFile returns true if any auth-only seed files exist on disk
 // or can be read from the macOS Keychain.
-func hasAnyAuthFile(agentDef *agent.Definition) bool {
+// homeDir is used for ~ expansion in seed file host paths.
+func hasAnyAuthFile(agentDef *agent.Definition, homeDir string) bool {
 	for _, sf := range agentDef.SeedFiles {
 		if sf.AuthOnly {
-			if _, err := os.Stat(ExpandTilde(sf.HostPath)); err == nil {
+			if _, err := os.Stat(ExpandTilde(sf.HostPath, homeDir)); err == nil {
 				return true
 			}
 			if sf.KeychainService != "" {
@@ -1717,7 +1722,8 @@ func describeSeedAuthFiles(agentDef *agent.Definition) string {
 // Files with HomeDir=true go to home-seed/ (mounted at /home/yoloai/);
 // others go to agent-runtime/ (mounted at StateDir).
 // Returns true if any files were copied. Skips files that don't exist on the host.
-func copySeedFiles(agentDef *agent.Definition, sandboxDir string, hasAPIKey bool) (bool, error) {
+// homeDir is used for ~ expansion in seed file host paths.
+func copySeedFiles(agentDef *agent.Definition, sandboxDir string, hasAPIKey bool, homeDir string) (bool, error) {
 	copiedAuth := false
 	agentStateDir := filepath.Join(sandboxDir, store.AgentRuntimeDir)
 	homeSeedDir := filepath.Join(sandboxDir, "home-seed")
@@ -1727,7 +1733,7 @@ func copySeedFiles(agentDef *agent.Definition, sandboxDir string, hasAPIKey bool
 			continue
 		}
 
-		data, ok, err := loadSeedFileData(sf)
+		data, ok, err := loadSeedFileData(sf, homeDir)
 		if err != nil {
 			return copiedAuth, err
 		}
@@ -1774,8 +1780,9 @@ func shouldSkipSeedFile(sf agent.SeedFile, hasAPIKey bool) bool {
 
 // loadSeedFileData reads data from the host file or keychain for a seed file.
 // Returns (data, true, nil) if found, (nil, false, nil) if not found, or (nil, false, err) on error.
-func loadSeedFileData(sf agent.SeedFile) ([]byte, bool, error) {
-	hostPath := ExpandTilde(sf.HostPath)
+// homeDir is used for ~ expansion in seed file host paths.
+func loadSeedFileData(sf agent.SeedFile, homeDir string) ([]byte, bool, error) {
+	hostPath := ExpandTilde(sf.HostPath, homeDir)
 	if _, err := os.Stat(hostPath); err == nil {
 		data, readErr := os.ReadFile(hostPath) //nolint:gosec // G304: path is from agent definition, not user input
 		if readErr != nil {
@@ -1976,13 +1983,14 @@ func hasOverlayDirs(state *sandboxState) bool {
 
 // parseConfigMount parses a "host:container[:ro]" mount string into a MountSpec.
 // The host path is expanded (tilde and ${VAR}).
-func parseConfigMount(s string) (runtime.MountSpec, error) {
+// homeDir is used to expand leading "~" in the host path.
+func parseConfigMount(s, homeDir string) (runtime.MountSpec, error) {
 	parts := strings.SplitN(s, ":", 3)
 	if len(parts) < 2 {
 		return runtime.MountSpec{}, fmt.Errorf("expected host:container[:ro] format")
 	}
 
-	hostPath, err := ExpandPath(parts[0])
+	hostPath, err := ExpandPath(parts[0], homeDir)
 	if err != nil {
 		return runtime.MountSpec{}, fmt.Errorf("expand host path: %w", err)
 	}

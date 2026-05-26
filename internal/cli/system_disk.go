@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"text/tabwriter"
 
-	"github.com/kstenerud/yoloai/config"
 	"github.com/kstenerud/yoloai/runtime"
 	"github.com/spf13/cobra"
 )
@@ -41,8 +40,8 @@ func runSystemDisk(cmd *cobra.Command, _ []string) error {
 	w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(w, "SOURCE\tSIZE\tDETAIL") //nolint:errcheck
 
-	sandboxesSize := dirSize(config.SandboxesDir())
-	fmt.Fprintf(w, "sandboxes\t%s\t%s\n", humanBytes(sandboxesSize), config.SandboxesDir()) //nolint:errcheck
+	sandboxesSize := dirSize(cliLayout().SandboxesDir())
+	fmt.Fprintf(w, "sandboxes\t%s\t%s\n", humanBytes(sandboxesSize), cliLayout().SandboxesDir()) //nolint:errcheck
 
 	for _, desc := range runtime.Descriptors() {
 		available, _ := checkBackend(ctx, desc.Name)
@@ -78,7 +77,7 @@ func backendUsage(ctx context.Context, backend string) (runtime.CacheUsage, erro
 }
 
 func collectDiskJSON(ctx context.Context) map[string]any {
-	sandboxesDir := config.SandboxesDir()
+	sandboxesDir := cliLayout().SandboxesDir()
 	entries := []map[string]any{
 		{"source": "sandboxes", "bytes": dirSize(sandboxesDir), "detail": sandboxesDir},
 	}

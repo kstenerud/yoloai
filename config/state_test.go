@@ -9,19 +9,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestStatePath(t *testing.T) {
-	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
-
-	p := StatePath()
-	assert.Equal(t, filepath.Join(tmpDir, ".yoloai", "state.yaml"), p)
-}
-
 func TestLoadState_Missing(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
+	layout := NewLayout(filepath.Join(tmpDir, ".yoloai"))
 
-	state, err := LoadState()
+	state, err := LoadState(layout)
 	require.NoError(t, err)
 	assert.False(t, state.SetupComplete)
 }
@@ -33,8 +26,9 @@ func TestLoadState_Exists(t *testing.T) {
 	yoloaiDir := filepath.Join(tmpDir, ".yoloai")
 	require.NoError(t, os.MkdirAll(yoloaiDir, 0750))
 	require.NoError(t, os.WriteFile(filepath.Join(yoloaiDir, "state.yaml"), []byte("setup_complete: true\n"), 0600))
+	layout := NewLayout(yoloaiDir)
 
-	state, err := LoadState()
+	state, err := LoadState(layout)
 	require.NoError(t, err)
 	assert.True(t, state.SetupComplete)
 }
@@ -45,10 +39,11 @@ func TestSaveState(t *testing.T) {
 
 	yoloaiDir := filepath.Join(tmpDir, ".yoloai")
 	require.NoError(t, os.MkdirAll(yoloaiDir, 0750))
+	layout := NewLayout(yoloaiDir)
 
-	require.NoError(t, SaveState(&State{SetupComplete: true}))
+	require.NoError(t, SaveState(layout, &State{SetupComplete: true}))
 
-	state, err := LoadState()
+	state, err := LoadState(layout)
 	require.NoError(t, err)
 	assert.True(t, state.SetupComplete)
 }
@@ -59,16 +54,17 @@ func TestSaveState_Roundtrip(t *testing.T) {
 
 	yoloaiDir := filepath.Join(tmpDir, ".yoloai")
 	require.NoError(t, os.MkdirAll(yoloaiDir, 0750))
+	layout := NewLayout(yoloaiDir)
 
 	// Save false, load, verify
-	require.NoError(t, SaveState(&State{SetupComplete: false}))
-	state, err := LoadState()
+	require.NoError(t, SaveState(layout, &State{SetupComplete: false}))
+	state, err := LoadState(layout)
 	require.NoError(t, err)
 	assert.False(t, state.SetupComplete)
 
 	// Save true, load, verify
-	require.NoError(t, SaveState(&State{SetupComplete: true}))
-	state, err = LoadState()
+	require.NoError(t, SaveState(layout, &State{SetupComplete: true}))
+	state, err = LoadState(layout)
 	require.NoError(t, err)
 	assert.True(t, state.SetupComplete)
 }

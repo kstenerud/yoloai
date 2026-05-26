@@ -63,12 +63,8 @@ type setupOption struct {
 // classifyTmuxConfig reads ~/.tmux.conf and returns its classification
 // and content. Returns tmuxConfigNone with empty content if the file
 // doesn't exist.
-func classifyTmuxConfig() (tmuxConfigClass, string) {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return tmuxConfigNone, ""
-	}
-
+// homeDir is the user's home directory; callers derive it from filepath.Dir(layout.DataDir).
+func classifyTmuxConfig(homeDir string) (tmuxConfigClass, string) {
 	data, err := os.ReadFile(filepath.Join(homeDir, ".tmux.conf")) //nolint:gosec // G304: standard config path
 	if err != nil {
 		return tmuxConfigNone, ""
@@ -173,7 +169,7 @@ func (m *Manager) setupTmuxConf(ctx context.Context, opts SetupOptions) error {
 		return m.setTmuxConf(opts.TmuxConf)
 	}
 
-	class, userConfig := classifyTmuxConfig()
+	class, userConfig := classifyTmuxConfig(filepath.Dir(m.layout.DataDir))
 	switch class {
 	case tmuxConfigLarge:
 		// Power user — skip prompt, auto-configure default+host
@@ -231,7 +227,7 @@ func validateTmuxConf(value string) error {
 func (m *Manager) setBackendFromFlag(name string) error {
 	for _, b := range availableBackends() {
 		if b.name == name {
-			return config.UpdateConfigFields(map[string]string{
+			return config.UpdateConfigFields(m.layout, map[string]string{
 				"container_backend": name,
 			})
 		}
@@ -247,7 +243,7 @@ func (m *Manager) setBackendFromFlag(name string) error {
 func (m *Manager) setAgentFromFlag(name string) error {
 	for _, a := range availableAgents() {
 		if a.name == name {
-			return config.UpdateConfigFields(map[string]string{
+			return config.UpdateConfigFields(m.layout, map[string]string{
 				"agent": name,
 			})
 		}
@@ -362,7 +358,7 @@ func (m *Manager) promptBackendSetup(ctx context.Context) error {
 		}
 	}
 
-	return config.UpdateConfigFields(map[string]string{
+	return config.UpdateConfigFields(m.layout, map[string]string{
 		"container_backend": backends[idx].name,
 	})
 }
@@ -407,7 +403,7 @@ func (m *Manager) promptAgentSetup(ctx context.Context) error {
 		}
 	}
 
-	return config.UpdateConfigFields(map[string]string{
+	return config.UpdateConfigFields(m.layout, map[string]string{
 		"agent": agents[idx].name,
 	})
 }
@@ -417,7 +413,7 @@ func (m *Manager) promptAgentSetup(ctx context.Context) error {
 // also writes a copy of the embedded tmux.conf to defaults/tmux.conf so the
 // user can inspect and customize it without rebuilding the image.
 func (m *Manager) setTmuxConf(value string) error {
-	if err := config.UpdateGlobalConfigFields(map[string]string{
+	if err := config.UpdateGlobalConfigFields(m.layout, map[string]string{
 		"tmux_conf": value,
 	}); err != nil {
 		return err
@@ -439,7 +435,7 @@ func (m *Manager) setTmuxConf(value string) error {
 
 // setSetupComplete marks setup as done and prints the completion message.
 func (m *Manager) setSetupComplete() error {
-	if err := config.SaveState(&config.State{SetupComplete: true}); err != nil {
+	if err := config.SaveState(m.layout, &config.State{SetupComplete: true}); err != nil {
 		return err
 	}
 	fmt.Fprintln(m.output, "\nSetup complete. To re-run setup at any time: yoloai system setup") //nolint:errcheck // best-effort output

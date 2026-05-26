@@ -40,40 +40,6 @@ func TestLayout_PathsRootUnderDataDir(t *testing.T) {
 	}
 }
 
-// TestLayout_MatchesPackageHelpersUnderRealHome verifies that for the
-// same DataDir as the package-level helpers' implicit root, the Layout
-// methods produce identical paths. This is the migration-safety check:
-// existing callers using config.SandboxesDir() can be switched to
-// layout.SandboxesDir() without changing on-disk paths.
-func TestLayout_MatchesPackageHelpersUnderRealHome(t *testing.T) {
-	// The package-level helpers root at HomeDir()/.yoloai. Construct
-	// a Layout pointing at the same place and compare.
-	l := NewLayout(YoloaiDir())
-
-	pairs := []struct {
-		name        string
-		fromLayout  string
-		fromPackage string
-	}{
-		{"YoloaiDir", l.YoloaiDir(), YoloaiDir()},
-		{"SandboxesDir", l.SandboxesDir(), SandboxesDir()},
-		{"ProfilesDir", l.ProfilesDir(), ProfilesDir()},
-		{"CacheDir", l.CacheDir(), CacheDir()},
-		{"ExtensionsDir", l.ExtensionsDir(), ExtensionsDir()},
-		{"DefaultsDir", l.DefaultsDir(), DefaultsDir()},
-		{"DefaultsConfigPath", l.DefaultsConfigPath(), DefaultsConfigPath()},
-		{"TartBaseMetadataDir", l.TartBaseMetadataDir(), TartBaseMetadataDir()},
-		{"TartBaseLocksDir", l.TartBaseLocksDir(), TartBaseLocksDir()},
-		{"DockerBaseLocksDir", l.DockerBaseLocksDir(), DockerBaseLocksDir()},
-		{"VscodeCLIDir", l.VscodeCLIDir(), VscodeCLIDir()},
-	}
-	for _, p := range pairs {
-		if p.fromLayout != p.fromPackage {
-			t.Errorf("%s: layout=%q package=%q (paths must match for migration safety)", p.name, p.fromLayout, p.fromPackage)
-		}
-	}
-}
-
 // TestLayout_EmptyDataDirReturnsRelativePaths documents that an empty
 // DataDir is not rejected — the resulting paths are simply unrooted
 // (relative to ""). Embedders are expected to validate DataDir before

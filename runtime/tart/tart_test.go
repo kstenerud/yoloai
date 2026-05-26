@@ -551,9 +551,11 @@ func TestResolveCopyMount(t *testing.T) {
 
 // TestTranslateWorkDirToVMPath tests host-to-VM path translation for GitExec.
 func TestTranslateWorkDirToVMPath(t *testing.T) {
-	r := &Runtime{
-		sandboxDir: config.SandboxesDir(),
-	}
+	// Use a fixed DataDir so test cases can reference stable sandbox paths.
+	const testDataDir = "/home/testuser/.yoloai"
+	layout := config.NewLayout(testDataDir)
+	r := &Runtime{layout: layout}
+	sandboxesDir := layout.SandboxesDir()
 
 	testCases := []struct {
 		name       string
@@ -562,12 +564,12 @@ func TestTranslateWorkDirToVMPath(t *testing.T) {
 	}{
 		{
 			name:       "host sandbox work path",
-			input:      filepath.Join(config.SandboxesDir(), "mybox/work/^sUsers^skarl^sproject"),
+			input:      filepath.Join(sandboxesDir, "mybox/work/^sUsers^skarl^sproject"),
 			expectPath: "/Users/admin/yoloai-work/^sUsers^skarl^sproject",
 		},
 		{
 			name:       "nested encoded path",
-			input:      filepath.Join(config.SandboxesDir(), "test/work/^svar^sfolders^sh8^sp75r4zq95d59q622q33pngzr0000gn^sT^syoloai-smoke-dvrjw0tc^sproject-workflow-tart"),
+			input:      filepath.Join(sandboxesDir, "test/work/^svar^sfolders^sh8^sp75r4zq95d59q622q33pngzr0000gn^sT^syoloai-smoke-dvrjw0tc^sproject-workflow-tart"),
 			expectPath: "/Users/admin/yoloai-work/^svar^sfolders^sh8^sp75r4zq95d59q622q33pngzr0000gn^sT^syoloai-smoke-dvrjw0tc^sproject-workflow-tart",
 		},
 		{
@@ -582,12 +584,12 @@ func TestTranslateWorkDirToVMPath(t *testing.T) {
 		},
 		{
 			name:       "sandbox but not work dir",
-			input:      filepath.Join(config.SandboxesDir(), "mybox/files"),
-			expectPath: filepath.Join(config.SandboxesDir(), "mybox/files"),
+			input:      filepath.Join(sandboxesDir, "mybox/files"),
+			expectPath: filepath.Join(sandboxesDir, "mybox/files"),
 		},
 		{
 			name:       "deeply nested work subdir",
-			input:      filepath.Join(config.SandboxesDir(), "mybox/work/^sUsers^skarl^sproject/subdir/nested"),
+			input:      filepath.Join(sandboxesDir, "mybox/work/^sUsers^skarl^sproject/subdir/nested"),
 			expectPath: "/Users/admin/yoloai-work/^sUsers^skarl^sproject/subdir/nested",
 		},
 	}

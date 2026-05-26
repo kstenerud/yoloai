@@ -1,12 +1,11 @@
 package config
 
-// ABOUTME: Operational state persistence via ~/.yoloai/state.yaml.
+// ABOUTME: Operational state persistence via DataDir/state.yaml.
 // ABOUTME: Separates mutable runtime state from user configuration.
 
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"gopkg.in/yaml.v3"
@@ -17,16 +16,12 @@ type State struct {
 	SetupComplete bool `yaml:"setup_complete"`
 }
 
-// StatePath returns the path to ~/.yoloai/state.yaml.
-func StatePath() string {
-	return filepath.Join(YoloaiDir(), "state.yaml")
-}
+// LoadState reads layout.StatePath() (DataDir/state.yaml).
+// Returns zero-value State if the file is missing.
+func LoadState(layout Layout) (*State, error) {
+	statePath := layout.StatePath()
 
-// LoadState reads ~/.yoloai/state.yaml. Returns zero-value State if missing.
-func LoadState() (*State, error) {
-	statePath := StatePath()
-
-	data, err := os.ReadFile(statePath) //nolint:gosec // G304: path is ~/.yoloai/state.yaml
+	data, err := os.ReadFile(statePath) //nolint:gosec // G304: path is DataDir/state.yaml
 	if err != nil {
 		if os.IsNotExist(err) {
 			return &State{}, nil
@@ -41,9 +36,9 @@ func LoadState() (*State, error) {
 	return &s, nil
 }
 
-// SaveState writes state to ~/.yoloai/state.yaml.
-func SaveState(s *State) error {
-	statePath := StatePath()
+// SaveState writes state to layout.StatePath() (DataDir/state.yaml).
+func SaveState(layout Layout, s *State) error {
+	statePath := layout.StatePath()
 
 	data, err := yaml.Marshal(s)
 	if err != nil {

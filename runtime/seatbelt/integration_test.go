@@ -35,7 +35,7 @@ func TestSeatbelt_New_ReturnsRuntime(t *testing.T) {
 	rt, _ := seatbeltSetup(t)
 	require.NotNil(t, rt)
 	assert.NotEmpty(t, rt.sandboxExecBin, "should have located sandbox-exec")
-	assert.NotEmpty(t, rt.sandboxDir, "should have set sandbox base dir")
+	assert.NotEmpty(t, rt.layout.SandboxesDir(), "should have set sandbox base dir")
 }
 
 func TestSeatbelt_Descriptor_AdvertisesHostFilesystem(t *testing.T) {
@@ -55,7 +55,7 @@ func TestSeatbelt_CreateInspectRemove(t *testing.T) {
 	require.NoError(t, rt.Create(ctx, cfg))
 
 	// The sandbox directory layout should now exist.
-	sandboxPath := filepath.Join(rt.sandboxDir, sandboxName(cfg.Name))
+	sandboxPath := filepath.Join(rt.layout.SandboxesDir(), sandboxName(cfg.Name))
 	require.DirExists(t, sandboxPath, "sandbox directory should be created")
 	require.DirExists(t, filepath.Join(sandboxPath, backendDir),
 		"backend dir should be created")

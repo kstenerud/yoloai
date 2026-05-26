@@ -11,11 +11,11 @@ import (
 func TestIsDangerousDir_Home(t *testing.T) {
 	home, err := os.UserHomeDir()
 	require.NoError(t, err)
-	assert.True(t, IsDangerousDir(home))
+	assert.True(t, IsDangerousDir(home, home))
 }
 
 func TestIsDangerousDir_Root(t *testing.T) {
-	assert.True(t, IsDangerousDir("/"))
+	assert.True(t, IsDangerousDir("/", "/home/user"))
 }
 
 func TestIsDangerousDir_SystemDirs(t *testing.T) {
@@ -24,12 +24,12 @@ func TestIsDangerousDir_SystemDirs(t *testing.T) {
 		"/System", "/Library", "/Applications",
 	}
 	for _, dir := range systemDirs {
-		assert.True(t, IsDangerousDir(dir), "expected %s to be dangerous", dir)
+		assert.True(t, IsDangerousDir(dir, "/home/user"), "expected %s to be dangerous", dir)
 	}
 }
 
 func TestIsDangerousDir_SafeDir(t *testing.T) {
-	assert.False(t, IsDangerousDir("/tmp/myproject"))
+	assert.False(t, IsDangerousDir("/tmp/myproject", "/home/user"))
 }
 
 func TestCheckPathOverlap_NoOverlap(t *testing.T) {

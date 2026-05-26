@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/kstenerud/yoloai/internal/mcpsrv"
 	"github.com/kstenerud/yoloai/runtime"
@@ -139,9 +140,10 @@ func runMCPProxy(cmd *cobra.Command, args []string) error {
 	replace, _ := cmd.Flags().GetBool("replace")
 
 	// Parse workdir if provided
+	homeDir := filepath.Dir(cliLayout().DataDir)
 	var workdirSpec sandbox.DirSpec
 	if rawWorkdir != "" {
-		parsed, err := sandbox.ParseDirArg(rawWorkdir)
+		parsed, err := sandbox.ParseDirArg(rawWorkdir, homeDir)
 		if err != nil {
 			return fmt.Errorf("invalid workdir: %w", err)
 		}
@@ -154,7 +156,7 @@ func runMCPProxy(cmd *cobra.Command, args []string) error {
 	// Parse aux dirs
 	var auxDirSpecs []sandbox.DirSpec
 	for _, rawDir := range rawDirs {
-		parsed, err := sandbox.ParseDirArg(rawDir)
+		parsed, err := sandbox.ParseDirArg(rawDir, homeDir)
 		if err != nil {
 			return fmt.Errorf("invalid directory %q: %w", rawDir, err)
 		}

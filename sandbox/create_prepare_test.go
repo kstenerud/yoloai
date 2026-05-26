@@ -143,19 +143,19 @@ func TestCollectOverlayMounts_CustomMountPath(t *testing.T) {
 // --- validateAndExpandMounts ---
 
 func TestValidateAndExpandMounts_Valid(t *testing.T) {
-	result, err := validateAndExpandMounts([]string{"/tmp/src:/container/dst"})
+	result, err := validateAndExpandMounts([]string{"/tmp/src:/container/dst"}, "/home/user")
 	require.NoError(t, err)
 	assert.Equal(t, []string{"/tmp/src:/container/dst"}, result)
 }
 
 func TestValidateAndExpandMounts_ReadOnly(t *testing.T) {
-	result, err := validateAndExpandMounts([]string{"/tmp/src:/container/dst:ro"})
+	result, err := validateAndExpandMounts([]string{"/tmp/src:/container/dst:ro"}, "/home/user")
 	require.NoError(t, err)
 	assert.Equal(t, []string{"/tmp/src:/container/dst:ro"}, result)
 }
 
 func TestValidateAndExpandMounts_Invalid(t *testing.T) {
-	_, err := validateAndExpandMounts([]string{"no-colon"})
+	_, err := validateAndExpandMounts([]string{"no-colon"}, "/home/user")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid mount")
 }
@@ -164,13 +164,15 @@ func TestValidateAndExpandMounts_Multiple(t *testing.T) {
 	result, err := validateAndExpandMounts([]string{
 		"/a:/b",
 		"/c:/d:ro",
-	})
+	}, "/home/user")
 	require.NoError(t, err)
 	assert.Equal(t, []string{"/a:/b", "/c:/d:ro"}, result)
 }
 
 func TestValidateAndExpandMounts_TildeExpansion(t *testing.T) {
-	result, err := validateAndExpandMounts([]string{"~/.gitconfig:/home/yoloai/.gitconfig:ro"})
+	home, err := os.UserHomeDir()
+	require.NoError(t, err)
+	result, err := validateAndExpandMounts([]string{"~/.gitconfig:/home/yoloai/.gitconfig:ro"}, home)
 	require.NoError(t, err)
 	// Should not start with ~ after expansion
 	assert.NotContains(t, result[0], "~")
@@ -178,7 +180,7 @@ func TestValidateAndExpandMounts_TildeExpansion(t *testing.T) {
 }
 
 func TestValidateAndExpandMounts_Empty(t *testing.T) {
-	result, err := validateAndExpandMounts(nil)
+	result, err := validateAndExpandMounts(nil, "/home/user")
 	require.NoError(t, err)
 	assert.Empty(t, result)
 }

@@ -49,39 +49,37 @@ func TestCountSignificantLines(t *testing.T) {
 
 func TestClassifyTmuxConfig_NoFile(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
 
-	class, content := classifyTmuxConfig()
+	class, content := classifyTmuxConfig(tmpDir)
 	assert.Equal(t, tmuxConfigNone, class)
 	assert.Empty(t, content)
 }
 
 func TestClassifyTmuxConfig_Small(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
 
 	tmuxConf := "set -g mouse on\nset -g base-index 1\n"
 	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, ".tmux.conf"), []byte(tmuxConf), 0600))
 
-	class, content := classifyTmuxConfig()
+	class, content := classifyTmuxConfig(tmpDir)
 	assert.Equal(t, tmuxConfigSmall, class)
 	assert.Equal(t, tmuxConf, content)
 }
 
 func TestClassifyTmuxConfig_Large(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
 
 	tmuxConf := strings.Repeat("set -g option value\n", 15)
 	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, ".tmux.conf"), []byte(tmuxConf), 0600))
 
-	class, _ := classifyTmuxConfig()
+	class, _ := classifyTmuxConfig(tmpDir)
 	assert.Equal(t, tmuxConfigLarge, class)
 }
 
 // setupTestManager creates a Manager with the given input and a temp HOME
-// with defaults/config.yaml, global config.yaml, and state.yaml. Returns the Manager, output buffer, and HOME dir.
-func setupTestManager(t *testing.T, input string) (*Manager, *bytes.Buffer, string) {
+// with defaults/config.yaml, global config.yaml, and state.yaml.
+// Returns the Manager, output buffer, HOME dir, and the Layout for assertions.
+func setupTestManager(t *testing.T, input string) (*Manager, *bytes.Buffer, string, config.Layout) {
 	t.Helper()
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
@@ -91,12 +89,13 @@ func setupTestManager(t *testing.T, input string) (*Manager, *bytes.Buffer, stri
 	require.NoError(t, os.MkdirAll(defaultsDir, 0750))
 	require.NoError(t, os.WriteFile(filepath.Join(defaultsDir, "config.yaml"), []byte(config.DefaultConfigYAML), 0600))
 	require.NoError(t, os.WriteFile(filepath.Join(yoloaiDir, "config.yaml"), []byte(config.DefaultGlobalConfigYAML), 0600))
-	require.NoError(t, config.SaveState(&config.State{}))
+	layout := config.NewLayout(yoloaiDir)
+	require.NoError(t, config.SaveState(layout, &config.State{}))
 
 	var output bytes.Buffer
 	mock := &mockRuntime{}
-	mgr := NewManager(mock, slog.Default(), strings.NewReader(input), &output, WithLayout(config.NewLayout(yoloaiDir)))
-	return mgr, &output, tmpDir
+	mgr := NewManager(mock, slog.Default(), strings.NewReader(input), &output, WithLayout(layout))
+	return mgr, &output, tmpDir, layout
 }
 
 // setLinuxPlatform overrides platform detection to simulate Linux.
@@ -145,7 +144,7 @@ func TestRunNewUserSetup_LargeConfig_AutoConfigures(t *testing.T) {
 	// Large tmux config → auto-configure, no tmux prompt.
 	// Linux → single backend, single-agent prompts also skipped if only 1.
 	// Provide empty line for agent prompt (claude & gemini = 2 agents).
-	mgr, _, tmpDir := setupTestManager(t, "\n")
+	mgr, _, tmpDir, layout := setupTestManager(t, "\n")
 
 	tmuxConf := strings.Repeat("set -g option value\n", 15)
 	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, ".tmux.conf"), []byte(tmuxConf), 0600))
@@ -153,11 +152,11 @@ func TestRunNewUserSetup_LargeConfig_AutoConfigures(t *testing.T) {
 	err := mgr.runNewUserSetup(context.Background(), SetupOptions{})
 	require.NoError(t, err)
 
-	state, err := config.LoadState()
+	state, err := config.LoadState(layout)
 	require.NoError(t, err)
 	assert.True(t, state.SetupComplete)
 
-	gcfg, err := config.LoadGlobalConfig()
+	gcfg, err := config.LoadGlobalConfig(layout)
 	require.NoError(t, err)
 	assert.Equal(t, "default+host", gcfg.TmuxConf)
 }
@@ -165,16 +164,16 @@ func TestRunNewUserSetup_LargeConfig_AutoConfigures(t *testing.T) {
 func TestRunNewUserSetup_NoConfig_AnswerY(t *testing.T) {
 	setLinuxPlatform(t)
 	// tmux=y, agent=default(enter)
-	mgr, output, _ := setupTestManager(t, "y\n\n")
+	mgr, output, _, layout := setupTestManager(t, "y\n\n")
 
 	err := mgr.runNewUserSetup(context.Background(), SetupOptions{})
 	require.NoError(t, err)
 
-	state, err := config.LoadState()
+	state, err := config.LoadState(layout)
 	require.NoError(t, err)
 	assert.True(t, state.SetupComplete)
 
-	gcfg, err := config.LoadGlobalConfig()
+	gcfg, err := config.LoadGlobalConfig(layout)
 	require.NoError(t, err)
 	assert.Equal(t, "default", gcfg.TmuxConf)
 	assert.Contains(t, output.String(), "Setup complete")
@@ -183,16 +182,16 @@ func TestRunNewUserSetup_NoConfig_AnswerY(t *testing.T) {
 func TestRunNewUserSetup_NoConfig_AnswerEmpty(t *testing.T) {
 	setLinuxPlatform(t)
 	// tmux=default(enter), agent=default(enter)
-	mgr, _, _ := setupTestManager(t, "\n\n")
+	mgr, _, _, layout := setupTestManager(t, "\n\n")
 
 	err := mgr.runNewUserSetup(context.Background(), SetupOptions{})
 	require.NoError(t, err)
 
-	state, err := config.LoadState()
+	state, err := config.LoadState(layout)
 	require.NoError(t, err)
 	assert.True(t, state.SetupComplete)
 
-	gcfg, err := config.LoadGlobalConfig()
+	gcfg, err := config.LoadGlobalConfig(layout)
 	require.NoError(t, err)
 	assert.Equal(t, "default", gcfg.TmuxConf)
 }
@@ -200,29 +199,29 @@ func TestRunNewUserSetup_NoConfig_AnswerEmpty(t *testing.T) {
 func TestRunNewUserSetup_NoConfig_AnswerN(t *testing.T) {
 	setLinuxPlatform(t)
 	// tmux=n, agent=default(enter)
-	mgr, _, _ := setupTestManager(t, "n\n\n")
+	mgr, _, _, layout := setupTestManager(t, "n\n\n")
 
 	err := mgr.runNewUserSetup(context.Background(), SetupOptions{})
 	require.NoError(t, err)
 
-	state, err := config.LoadState()
+	state, err := config.LoadState(layout)
 	require.NoError(t, err)
 	assert.True(t, state.SetupComplete)
 
-	gcfg, err := config.LoadGlobalConfig()
+	gcfg, err := config.LoadGlobalConfig(layout)
 	require.NoError(t, err)
 	assert.Equal(t, "none", gcfg.TmuxConf)
 }
 
 func TestRunNewUserSetup_NoConfig_AnswerP(t *testing.T) {
 	setLinuxPlatform(t)
-	mgr, output, _ := setupTestManager(t, "p\n")
+	mgr, output, _, layout := setupTestManager(t, "p\n")
 
 	err := mgr.runNewUserSetup(context.Background(), SetupOptions{})
 	assert.ErrorIs(t, err, errSetupPreview)
 
 	// setup_complete should NOT be set (preview exits early)
-	state, err := config.LoadState()
+	state, err := config.LoadState(layout)
 	require.NoError(t, err)
 	assert.False(t, state.SetupComplete)
 
@@ -232,7 +231,7 @@ func TestRunNewUserSetup_NoConfig_AnswerP(t *testing.T) {
 func TestRunNewUserSetup_SmallConfig_AnswerY(t *testing.T) {
 	setLinuxPlatform(t)
 	// tmux=y, agent=default(enter)
-	mgr, _, tmpDir := setupTestManager(t, "y\n\n")
+	mgr, _, tmpDir, layout := setupTestManager(t, "y\n\n")
 
 	tmuxConf := "set -g mouse on\n"
 	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, ".tmux.conf"), []byte(tmuxConf), 0600))
@@ -240,11 +239,11 @@ func TestRunNewUserSetup_SmallConfig_AnswerY(t *testing.T) {
 	err := mgr.runNewUserSetup(context.Background(), SetupOptions{})
 	require.NoError(t, err)
 
-	state, err := config.LoadState()
+	state, err := config.LoadState(layout)
 	require.NoError(t, err)
 	assert.True(t, state.SetupComplete)
 
-	gcfg, err := config.LoadGlobalConfig()
+	gcfg, err := config.LoadGlobalConfig(layout)
 	require.NoError(t, err)
 	assert.Equal(t, "default+host", gcfg.TmuxConf)
 }
@@ -252,7 +251,7 @@ func TestRunNewUserSetup_SmallConfig_AnswerY(t *testing.T) {
 func TestRunNewUserSetup_SmallConfig_AnswerN(t *testing.T) {
 	setLinuxPlatform(t)
 	// tmux=n, agent=default(enter)
-	mgr, _, tmpDir := setupTestManager(t, "n\n\n")
+	mgr, _, tmpDir, layout := setupTestManager(t, "n\n\n")
 
 	tmuxConf := "set -g mouse on\n"
 	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, ".tmux.conf"), []byte(tmuxConf), 0600))
@@ -260,18 +259,18 @@ func TestRunNewUserSetup_SmallConfig_AnswerN(t *testing.T) {
 	err := mgr.runNewUserSetup(context.Background(), SetupOptions{})
 	require.NoError(t, err)
 
-	state, err := config.LoadState()
+	state, err := config.LoadState(layout)
 	require.NoError(t, err)
 	assert.True(t, state.SetupComplete)
 
-	gcfg, err := config.LoadGlobalConfig()
+	gcfg, err := config.LoadGlobalConfig(layout)
 	require.NoError(t, err)
 	assert.Equal(t, "host", gcfg.TmuxConf)
 }
 
 func TestRunNewUserSetup_SmallConfig_AnswerP(t *testing.T) {
 	setLinuxPlatform(t)
-	mgr, output, tmpDir := setupTestManager(t, "p\n")
+	mgr, output, tmpDir, _ := setupTestManager(t, "p\n")
 
 	tmuxConf := "set -g mouse on\n"
 	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, ".tmux.conf"), []byte(tmuxConf), 0600))
@@ -286,16 +285,16 @@ func TestRunNewUserSetup_SmallConfig_AnswerP(t *testing.T) {
 func TestRunNewUserSetup_EOF_DefaultsToY(t *testing.T) {
 	setLinuxPlatform(t)
 	// Empty reader simulates EOF — all prompts get default
-	mgr, _, _ := setupTestManager(t, "")
+	mgr, _, _, layout := setupTestManager(t, "")
 
 	err := mgr.runNewUserSetup(context.Background(), SetupOptions{})
 	require.NoError(t, err)
 
-	state, err := config.LoadState()
+	state, err := config.LoadState(layout)
 	require.NoError(t, err)
 	assert.True(t, state.SetupComplete)
 
-	gcfg, err := config.LoadGlobalConfig()
+	gcfg, err := config.LoadGlobalConfig(layout)
 	require.NoError(t, err)
 	assert.Equal(t, "default", gcfg.TmuxConf)
 }
@@ -331,7 +330,7 @@ func TestAvailableBackends_MacOSIntel(t *testing.T) {
 
 func TestPromptBackendSetup_ShownOnLinux(t *testing.T) {
 	setLinuxPlatform(t)
-	mgr, output, _ := setupTestManager(t, "\n")
+	mgr, output, _, layout := setupTestManager(t, "\n")
 
 	err := mgr.promptBackendSetup(context.Background())
 	require.NoError(t, err)
@@ -339,7 +338,7 @@ func TestPromptBackendSetup_ShownOnLinux(t *testing.T) {
 	assert.Contains(t, output.String(), "docker")
 	assert.Contains(t, output.String(), "podman")
 
-	cfg, err := config.LoadConfig()
+	cfg, err := config.LoadConfig(layout)
 	require.NoError(t, err)
 	assert.Equal(t, "docker", cfg.ContainerBackend)
 }
@@ -347,7 +346,7 @@ func TestPromptBackendSetup_ShownOnLinux(t *testing.T) {
 func TestPromptBackendSetup_ShownOnMacOS(t *testing.T) {
 	setMacOSARMPlatform(t)
 	// Select default (enter)
-	mgr, output, _ := setupTestManager(t, "\n")
+	mgr, output, _, layout := setupTestManager(t, "\n")
 
 	err := mgr.promptBackendSetup(context.Background())
 	require.NoError(t, err)
@@ -357,43 +356,43 @@ func TestPromptBackendSetup_ShownOnMacOS(t *testing.T) {
 	assert.Contains(t, output.String(), "seatbelt")
 	assert.Contains(t, output.String(), "tart")
 
-	cfg, err := config.LoadConfig()
+	cfg, err := config.LoadConfig(layout)
 	require.NoError(t, err)
 	assert.Equal(t, "docker", cfg.ContainerBackend)
 }
 
 func TestPromptBackendSetup_SelectSeatbelt(t *testing.T) {
 	setMacOSARMPlatform(t)
-	mgr, _, _ := setupTestManager(t, "3\n")
+	mgr, _, _, layout := setupTestManager(t, "3\n")
 
 	err := mgr.promptBackendSetup(context.Background())
 	require.NoError(t, err)
 
-	cfg, err := config.LoadConfig()
+	cfg, err := config.LoadConfig(layout)
 	require.NoError(t, err)
 	assert.Equal(t, "seatbelt", cfg.ContainerBackend)
 }
 
 func TestPromptBackendSetup_SelectTart(t *testing.T) {
 	setMacOSARMPlatform(t)
-	mgr, _, _ := setupTestManager(t, "4\n")
+	mgr, _, _, layout := setupTestManager(t, "4\n")
 
 	err := mgr.promptBackendSetup(context.Background())
 	require.NoError(t, err)
 
-	cfg, err := config.LoadConfig()
+	cfg, err := config.LoadConfig(layout)
 	require.NoError(t, err)
 	assert.Equal(t, "tart", cfg.ContainerBackend)
 }
 
 func TestPromptBackendSetup_InvalidInputDefaultsToFirst(t *testing.T) {
 	setMacOSARMPlatform(t)
-	mgr, _, _ := setupTestManager(t, "xyz\n")
+	mgr, _, _, layout := setupTestManager(t, "xyz\n")
 
 	err := mgr.promptBackendSetup(context.Background())
 	require.NoError(t, err)
 
-	cfg, err := config.LoadConfig()
+	cfg, err := config.LoadConfig(layout)
 	require.NoError(t, err)
 	assert.Equal(t, "docker", cfg.ContainerBackend)
 }
@@ -410,25 +409,25 @@ func TestAvailableAgents_ExcludesTest(t *testing.T) {
 }
 
 func TestPromptAgentSetup_DefaultSelectsClaude(t *testing.T) {
-	mgr, output, _ := setupTestManager(t, "\n")
+	mgr, output, _, layout := setupTestManager(t, "\n")
 
 	err := mgr.promptAgentSetup(context.Background())
 	require.NoError(t, err)
 
 	assert.Contains(t, output.String(), "Default agent")
 
-	cfg, err := config.LoadConfig()
+	cfg, err := config.LoadConfig(layout)
 	require.NoError(t, err)
 	assert.Equal(t, "claude", cfg.Agent)
 }
 
 func TestPromptAgentSetup_SelectFirst(t *testing.T) {
-	mgr, _, _ := setupTestManager(t, "1\n")
+	mgr, _, _, layout := setupTestManager(t, "1\n")
 
 	err := mgr.promptAgentSetup(context.Background())
 	require.NoError(t, err)
 
-	cfg, err := config.LoadConfig()
+	cfg, err := config.LoadConfig(layout)
 	require.NoError(t, err)
 	agents := availableAgents()
 	assert.Equal(t, agents[0].name, cfg.Agent)
@@ -439,20 +438,20 @@ func TestPromptAgentSetup_SelectFirst(t *testing.T) {
 func TestRunNewUserSetup_FullFlow_MacOS(t *testing.T) {
 	setMacOSARMPlatform(t)
 	// tmux=y, backend=3(seatbelt), agent=3(codex)
-	mgr, output, _ := setupTestManager(t, "y\n3\n3\n")
+	mgr, output, _, layout := setupTestManager(t, "y\n3\n3\n")
 
 	err := mgr.runNewUserSetup(context.Background(), SetupOptions{})
 	require.NoError(t, err)
 
-	state, err := config.LoadState()
+	state, err := config.LoadState(layout)
 	require.NoError(t, err)
 	assert.True(t, state.SetupComplete)
 
-	gcfg, err := config.LoadGlobalConfig()
+	gcfg, err := config.LoadGlobalConfig(layout)
 	require.NoError(t, err)
 	assert.Equal(t, "default", gcfg.TmuxConf)
 
-	cfg, err := config.LoadConfig()
+	cfg, err := config.LoadConfig(layout)
 	require.NoError(t, err)
 	assert.Equal(t, "seatbelt", cfg.ContainerBackend)
 	assert.Equal(t, "codex", cfg.Agent)
@@ -462,20 +461,20 @@ func TestRunNewUserSetup_FullFlow_MacOS(t *testing.T) {
 func TestRunNewUserSetup_FullFlow_Linux_ShowsBackend(t *testing.T) {
 	setLinuxPlatform(t)
 	// tmux=y, backend=1(docker), agent=1(aider)
-	mgr, output, _ := setupTestManager(t, "y\n1\n1\n")
+	mgr, output, _, layout := setupTestManager(t, "y\n1\n1\n")
 
 	err := mgr.runNewUserSetup(context.Background(), SetupOptions{})
 	require.NoError(t, err)
 
-	state, err := config.LoadState()
+	state, err := config.LoadState(layout)
 	require.NoError(t, err)
 	assert.True(t, state.SetupComplete)
 
-	gcfg, err := config.LoadGlobalConfig()
+	gcfg, err := config.LoadGlobalConfig(layout)
 	require.NoError(t, err)
 	assert.Equal(t, "default", gcfg.TmuxConf)
 
-	cfg, err := config.LoadConfig()
+	cfg, err := config.LoadConfig(layout)
 	require.NoError(t, err)
 	assert.Equal(t, "docker", cfg.ContainerBackend)
 	assert.Equal(t, "aider", cfg.Agent)
@@ -486,7 +485,7 @@ func TestRunNewUserSetup_FullFlow_Linux_ShowsBackend(t *testing.T) {
 func TestRunNewUserSetup_LargeConfig_StillAsksBackendAndAgent(t *testing.T) {
 	setMacOSARMPlatform(t)
 	// Large tmux → auto-configure, but backend=4(tart), agent=3(codex)
-	mgr, output, tmpDir := setupTestManager(t, "4\n3\n")
+	mgr, output, tmpDir, layout := setupTestManager(t, "4\n3\n")
 
 	tmuxConf := strings.Repeat("set -g option value\n", 15)
 	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, ".tmux.conf"), []byte(tmuxConf), 0600))
@@ -494,15 +493,15 @@ func TestRunNewUserSetup_LargeConfig_StillAsksBackendAndAgent(t *testing.T) {
 	err := mgr.runNewUserSetup(context.Background(), SetupOptions{})
 	require.NoError(t, err)
 
-	state, err := config.LoadState()
+	state, err := config.LoadState(layout)
 	require.NoError(t, err)
 	assert.True(t, state.SetupComplete)
 
-	gcfg, err := config.LoadGlobalConfig()
+	gcfg, err := config.LoadGlobalConfig(layout)
 	require.NoError(t, err)
 	assert.Equal(t, "default+host", gcfg.TmuxConf)
 
-	cfg, err := config.LoadConfig()
+	cfg, err := config.LoadConfig(layout)
 	require.NoError(t, err)
 	assert.Equal(t, "tart", cfg.ContainerBackend)
 	assert.Equal(t, "codex", cfg.Agent)
@@ -515,12 +514,12 @@ func TestRunNewUserSetup_LargeConfig_StillAsksBackendAndAgent(t *testing.T) {
 func TestRunNewUserSetup_WithAgentFlag(t *testing.T) {
 	setLinuxPlatform(t)
 	// tmux prompt needs input, backend skipped on Linux, agent flag skips agent prompt
-	mgr, output, _ := setupTestManager(t, "y\n")
+	mgr, output, _, layout := setupTestManager(t, "y\n")
 
 	err := mgr.runNewUserSetup(context.Background(), SetupOptions{Agent: "claude"})
 	require.NoError(t, err)
 
-	cfg, err := config.LoadConfig()
+	cfg, err := config.LoadConfig(layout)
 	require.NoError(t, err)
 	assert.Equal(t, "claude", cfg.Agent)
 	assert.NotContains(t, output.String(), "Default agent")
@@ -529,12 +528,12 @@ func TestRunNewUserSetup_WithAgentFlag(t *testing.T) {
 func TestRunNewUserSetup_WithBackendFlag(t *testing.T) {
 	setMacOSARMPlatform(t)
 	// tmux prompt needs input, backend flag skips backend prompt, agent prompt needs input
-	mgr, output, _ := setupTestManager(t, "y\n\n")
+	mgr, output, _, layout := setupTestManager(t, "y\n\n")
 
 	err := mgr.runNewUserSetup(context.Background(), SetupOptions{Backend: "seatbelt"})
 	require.NoError(t, err)
 
-	cfg, err := config.LoadConfig()
+	cfg, err := config.LoadConfig(layout)
 	require.NoError(t, err)
 	assert.Equal(t, "seatbelt", cfg.ContainerBackend)
 	assert.NotContains(t, output.String(), "Default runtime backend")
@@ -544,12 +543,12 @@ func TestRunNewUserSetup_WithBackendFlag(t *testing.T) {
 func TestRunNewUserSetup_WithTmuxConfFlag(t *testing.T) {
 	setLinuxPlatform(t)
 	// tmux flag skips tmux prompt, backend skipped on Linux, agent prompt needs input
-	mgr, output, _ := setupTestManager(t, "\n")
+	mgr, output, _, layout := setupTestManager(t, "\n")
 
 	err := mgr.runNewUserSetup(context.Background(), SetupOptions{TmuxConf: "host"})
 	require.NoError(t, err)
 
-	gcfg, err := config.LoadGlobalConfig()
+	gcfg, err := config.LoadGlobalConfig(layout)
 	require.NoError(t, err)
 	assert.Equal(t, "host", gcfg.TmuxConf)
 	assert.NotContains(t, output.String(), "tmux")
@@ -558,7 +557,7 @@ func TestRunNewUserSetup_WithTmuxConfFlag(t *testing.T) {
 func TestRunNewUserSetup_AllFlags_NonInteractive(t *testing.T) {
 	setMacOSARMPlatform(t)
 	// All flags provided — no prompts, empty input
-	mgr, output, _ := setupTestManager(t, "")
+	mgr, output, _, layout := setupTestManager(t, "")
 
 	opts := SetupOptions{
 		Agent:    "gemini",
@@ -568,15 +567,15 @@ func TestRunNewUserSetup_AllFlags_NonInteractive(t *testing.T) {
 	err := mgr.runNewUserSetup(context.Background(), opts)
 	require.NoError(t, err)
 
-	state, err := config.LoadState()
+	state, err := config.LoadState(layout)
 	require.NoError(t, err)
 	assert.True(t, state.SetupComplete)
 
-	gcfg, err := config.LoadGlobalConfig()
+	gcfg, err := config.LoadGlobalConfig(layout)
 	require.NoError(t, err)
 	assert.Equal(t, "default", gcfg.TmuxConf)
 
-	cfg, err := config.LoadConfig()
+	cfg, err := config.LoadConfig(layout)
 	require.NoError(t, err)
 	assert.Equal(t, "docker", cfg.ContainerBackend)
 	assert.Equal(t, "gemini", cfg.Agent)
@@ -585,7 +584,7 @@ func TestRunNewUserSetup_AllFlags_NonInteractive(t *testing.T) {
 
 func TestRunNewUserSetup_InvalidAgent_Error(t *testing.T) {
 	setLinuxPlatform(t)
-	mgr, _, _ := setupTestManager(t, "")
+	mgr, _, _, _ := setupTestManager(t, "")
 
 	err := mgr.runNewUserSetup(context.Background(), SetupOptions{
 		TmuxConf: "default",
@@ -597,7 +596,7 @@ func TestRunNewUserSetup_InvalidAgent_Error(t *testing.T) {
 
 func TestRunNewUserSetup_InvalidBackend_Error(t *testing.T) {
 	setLinuxPlatform(t)
-	mgr, _, _ := setupTestManager(t, "")
+	mgr, _, _, _ := setupTestManager(t, "")
 
 	err := mgr.runNewUserSetup(context.Background(), SetupOptions{
 		TmuxConf: "default",
@@ -609,7 +608,7 @@ func TestRunNewUserSetup_InvalidBackend_Error(t *testing.T) {
 
 func TestRunNewUserSetup_InvalidTmuxConf_Error(t *testing.T) {
 	setLinuxPlatform(t)
-	mgr, _, _ := setupTestManager(t, "")
+	mgr, _, _, _ := setupTestManager(t, "")
 
 	err := mgr.runNewUserSetup(context.Background(), SetupOptions{TmuxConf: "badvalue"})
 	require.Error(t, err)
@@ -619,7 +618,7 @@ func TestRunNewUserSetup_InvalidTmuxConf_Error(t *testing.T) {
 func TestRunNewUserSetup_BackendDockerOnLinux_OK(t *testing.T) {
 	setLinuxPlatform(t)
 	// docker is available on Linux — should succeed
-	mgr, _, _ := setupTestManager(t, "")
+	mgr, _, _, layout := setupTestManager(t, "")
 
 	opts := SetupOptions{
 		TmuxConf: "default",
@@ -629,7 +628,7 @@ func TestRunNewUserSetup_BackendDockerOnLinux_OK(t *testing.T) {
 	err := mgr.runNewUserSetup(context.Background(), opts)
 	require.NoError(t, err)
 
-	cfg, err := config.LoadConfig()
+	cfg, err := config.LoadConfig(layout)
 	require.NoError(t, err)
 	assert.Equal(t, "docker", cfg.ContainerBackend)
 }

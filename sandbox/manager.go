@@ -117,7 +117,7 @@ func (m *Manager) EnsureSetup(ctx context.Context) error {
 	}
 
 	// Run new-user experience if setup_complete is false
-	state, err := config.LoadState()
+	state, err := config.LoadState(m.layout)
 	if err != nil {
 		return fmt.Errorf("load state: %w", err)
 	}
@@ -127,7 +127,7 @@ func (m *Manager) EnsureSetup(ctx context.Context) error {
 			if err := m.setTmuxConf("default+host"); err != nil {
 				return fmt.Errorf("set tmux_conf: %w", err)
 			}
-			if err := config.SaveState(&config.State{SetupComplete: true}); err != nil {
+			if err := config.SaveState(m.layout, &config.State{SetupComplete: true}); err != nil {
 				return fmt.Errorf("save state: %w", err)
 			}
 		} else {
@@ -143,9 +143,9 @@ func (m *Manager) EnsureSetup(ctx context.Context) error {
 }
 
 // ensureDefaultsDir creates DataDir/defaults/ and writes defaults/config.yaml
-// scaffold if it doesn't exist. Method on Manager (was a free function
-// before Q-W.2) so it can use m.layout instead of the package-level
-// config.DefaultsDir() / config.DefaultsConfigPath() helpers.
+// scaffold if it doesn't exist. Method on Manager so it can use m.layout's
+// DefaultsDir() / DefaultsConfigPath() — Q-W requires path resolution
+// through Layout, never via ambient $HOME.
 func (m *Manager) ensureDefaultsDir() error {
 	defaultsDir := m.layout.DefaultsDir()
 	if err := fileutil.MkdirAll(defaultsDir, 0750); err != nil {
@@ -173,12 +173,12 @@ func (m *Manager) EnsureSetupNonInteractive(ctx context.Context) error {
 	}
 
 	// Upgrading user: defaults/ should exist. If it doesn't, they need to migrate.
-	state, err := config.LoadState()
+	state, err := config.LoadState(m.layout)
 	if err != nil {
 		return fmt.Errorf("load state: %w", err)
 	}
 	if state.SetupComplete {
-		if err := config.CheckDefaultsDir(); err != nil {
+		if err := config.CheckDefaultsDir(m.layout); err != nil {
 			return err
 		}
 	}
@@ -189,7 +189,7 @@ func (m *Manager) EnsureSetupNonInteractive(ctx context.Context) error {
 	}
 
 	// Seed resources and build/rebuild base image as needed
-	baseProfileDir := config.ProfileDirPath("base")
+	baseProfileDir := m.layout.ProfileDir("base")
 	if err := m.runtime.Setup(ctx, m.layout, baseProfileDir, m.output, m.logger, false); err != nil {
 		return err
 	}
@@ -200,7 +200,7 @@ func (m *Manager) EnsureSetupNonInteractive(ctx context.Context) error {
 	}
 
 	// Write default global config.yaml if missing
-	globalConfigPath := config.GlobalConfigPath()
+	globalConfigPath := m.layout.GlobalConfigPath()
 	if _, err := os.Stat(globalConfigPath); os.IsNotExist(err) {
 		if err := fileutil.WriteFile(globalConfigPath, []byte(config.DefaultGlobalConfigYAML), 0600); err != nil {
 			return fmt.Errorf("write global config.yaml: %w", err)
@@ -208,9 +208,9 @@ func (m *Manager) EnsureSetupNonInteractive(ctx context.Context) error {
 	}
 
 	// Write default state.yaml if missing
-	statePath := config.StatePath()
+	statePath := m.layout.StatePath()
 	if _, err := os.Stat(statePath); os.IsNotExist(err) {
-		if err := config.SaveState(&config.State{}); err != nil {
+		if err := config.SaveState(m.layout, &config.State{}); err != nil {
 			return fmt.Errorf("write state.yaml: %w", err)
 		}
 	}

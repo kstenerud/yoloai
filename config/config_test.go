@@ -11,93 +11,95 @@ import (
 )
 
 // configDir creates the defaults/ directory structure needed for config tests.
-func configDir(t *testing.T) string {
+// Returns the defaults dir path and a Layout rooted at the temp home.
+func configDir(t *testing.T) (string, Layout) {
 	t.Helper()
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
 	dir := filepath.Join(tmpDir, ".yoloai", "defaults")
 	require.NoError(t, os.MkdirAll(dir, 0750))
-	return dir
+	return dir, NewLayout(filepath.Join(tmpDir, ".yoloai"))
 }
 
 // globalConfigDir creates the ~/.yoloai/ directory structure for global config tests.
-func globalConfigDir(t *testing.T) string {
+// Returns the yoloai dir path and a Layout rooted at the temp home.
+func globalConfigDir(t *testing.T) (string, Layout) {
 	t.Helper()
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
 	dir := filepath.Join(tmpDir, ".yoloai")
 	require.NoError(t, os.MkdirAll(dir, 0750))
-	return dir
+	return dir, NewLayout(dir)
 }
 
 func TestLoadConfig_Default(t *testing.T) {
-	dir := configDir(t)
+	dir, layout := configDir(t)
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(DefaultConfigYAML), 0600))
 
-	cfg, err := LoadConfig()
+	cfg, err := LoadConfig(layout)
 	require.NoError(t, err)
 	assert.Equal(t, "claude", cfg.Agent) // DefaultConfigYAML sets agent: claude
 }
 
 func TestLoadGlobalConfig_WithTmuxConf(t *testing.T) {
-	dir := globalConfigDir(t)
+	dir, layout := globalConfigDir(t)
 
 	content := `tmux_conf: default+host
 `
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
 
-	cfg, err := LoadGlobalConfig()
+	cfg, err := LoadGlobalConfig(layout)
 	require.NoError(t, err)
 	assert.Equal(t, "default+host", cfg.TmuxConf)
 }
 
 func TestLoadConfig_AgentDefault(t *testing.T) {
-	dir := configDir(t)
+	dir, layout := configDir(t)
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(DefaultConfigYAML), 0600))
 
-	cfg, err := LoadConfig()
+	cfg, err := LoadConfig(layout)
 	require.NoError(t, err)
 	assert.Equal(t, "claude", cfg.Agent) // DefaultConfigYAML sets agent: claude
 }
 
 func TestLoadConfig_AgentOverride(t *testing.T) {
-	dir := configDir(t)
+	dir, layout := configDir(t)
 
 	content := "agent: gemini\n"
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
 
-	cfg, err := LoadConfig()
+	cfg, err := LoadConfig(layout)
 	require.NoError(t, err)
 	assert.Equal(t, "gemini", cfg.Agent)
 }
 
 func TestLoadConfig_ModelDefault(t *testing.T) {
-	dir := configDir(t)
+	dir, layout := configDir(t)
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(DefaultConfigYAML), 0600))
 
-	cfg, err := LoadConfig()
+	cfg, err := LoadConfig(layout)
 	require.NoError(t, err)
 	assert.Empty(t, cfg.Model) // Not set in file; empty means agent's default
 }
 
 func TestLoadConfig_ModelOverride(t *testing.T) {
-	dir := configDir(t)
+	dir, layout := configDir(t)
 
 	content := "model: o3\n"
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
 
-	cfg, err := LoadConfig()
+	cfg, err := LoadConfig(layout)
 	require.NoError(t, err)
 	assert.Equal(t, "o3", cfg.Model)
 }
 
 func TestLoadConfig_EnvMap(t *testing.T) {
-	dir := configDir(t)
+	dir, layout := configDir(t)
 
 	content := "env:\n  OLLAMA_API_BASE: http://host.docker.internal:11434\n  CUSTOM_VAR: myvalue\n"
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
 
-	cfg, err := LoadConfig()
+	cfg, err := LoadConfig(layout)
 	require.NoError(t, err)
 	require.Len(t, cfg.Env, 2)
 	assert.Equal(t, "http://host.docker.internal:11434", cfg.Env["OLLAMA_API_BASE"])
@@ -105,46 +107,46 @@ func TestLoadConfig_EnvMap(t *testing.T) {
 }
 
 func TestLoadConfig_EnvExpansion(t *testing.T) {
-	dir := configDir(t)
+	dir, layout := configDir(t)
 	t.Setenv("YOLOAI_TEST_HOST", "localhost")
 
 	content := "env:\n  API_BASE: http://${YOLOAI_TEST_HOST}:11434\n"
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
 
-	cfg, err := LoadConfig()
+	cfg, err := LoadConfig(layout)
 	require.NoError(t, err)
 	require.Len(t, cfg.Env, 1)
 	assert.Equal(t, "http://localhost:11434", cfg.Env["API_BASE"])
 }
 
 func TestLoadConfig_EnvExpansionError(t *testing.T) {
-	dir := configDir(t)
+	dir, layout := configDir(t)
 
 	content := "env:\n  BAD_VAR: ${DEFINITELY_NOT_SET}\n"
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
 
-	_, err := LoadConfig()
+	_, err := LoadConfig(layout)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "env.BAD_VAR")
 }
 
 func TestLoadConfig_EnvEmpty(t *testing.T) {
-	dir := configDir(t)
+	dir, layout := configDir(t)
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(DefaultConfigYAML), 0600))
 
-	cfg, err := LoadConfig()
+	cfg, err := LoadConfig(layout)
 	require.NoError(t, err)
 	// DefaultConfigYAML has env: {} which parses to an empty (non-nil) map
 	assert.Empty(t, cfg.Env)
 }
 
 func TestLoadGlobalConfig_ModelAliases(t *testing.T) {
-	dir := globalConfigDir(t)
+	dir, layout := globalConfigDir(t)
 
 	content := "model_aliases:\n  sonnet: claude-sonnet-4-20250514\n  fast: claude-haiku-4-latest\n"
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
 
-	cfg, err := LoadGlobalConfig()
+	cfg, err := LoadGlobalConfig(layout)
 	require.NoError(t, err)
 	require.Len(t, cfg.ModelAliases, 2)
 	assert.Equal(t, "claude-sonnet-4-20250514", cfg.ModelAliases["sonnet"])
@@ -152,46 +154,46 @@ func TestLoadGlobalConfig_ModelAliases(t *testing.T) {
 }
 
 func TestLoadGlobalConfig_ModelAliasesEmpty(t *testing.T) {
-	dir := globalConfigDir(t)
+	dir, layout := globalConfigDir(t)
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(DefaultGlobalConfigYAML), 0600))
 
-	cfg, err := LoadGlobalConfig()
+	cfg, err := LoadGlobalConfig(layout)
 	require.NoError(t, err)
 	assert.Nil(t, cfg.ModelAliases)
 }
 
 func TestLoadConfig_MissingFile(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
+	layout := NewLayout(filepath.Join(tmpDir, ".yoloai"))
 
-	cfg, err := LoadConfig()
+	cfg, err := LoadConfig(layout)
 	require.NoError(t, err)
 	assert.Empty(t, cfg.Agent)
 }
 
 func TestUpdateGlobalConfigFields_TmuxConf(t *testing.T) {
-	dir := globalConfigDir(t)
+	dir, layout := globalConfigDir(t)
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(DefaultGlobalConfigYAML), 0600))
 
-	err := UpdateGlobalConfigFields(map[string]string{
+	err := UpdateGlobalConfigFields(layout, map[string]string{
 		"tmux_conf": "default+host",
 	})
 	require.NoError(t, err)
 
-	cfg, err := LoadGlobalConfig()
+	cfg, err := LoadGlobalConfig(layout)
 	require.NoError(t, err)
 	assert.Equal(t, "default+host", cfg.TmuxConf)
 }
 
 func TestUpdateConfigFields_PreservesComments(t *testing.T) {
-	dir := configDir(t)
+	dir, layout := configDir(t)
 
 	content := `# yoloai configuration
 agent: claude # my preferred agent
 `
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
 
-	err := UpdateConfigFields(map[string]string{
+	err := UpdateConfigFields(layout, map[string]string{
 		"container_backend": "tart",
 	})
 	require.NoError(t, err)
@@ -203,11 +205,11 @@ agent: claude # my preferred agent
 }
 
 func TestDeleteConfigField_Scalar(t *testing.T) {
-	dir := configDir(t)
+	dir, layout := configDir(t)
 	content := "container_backend: tart\nagent: gemini\n"
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
 
-	require.NoError(t, DeleteConfigField("container_backend"))
+	require.NoError(t, DeleteConfigField(layout, "container_backend"))
 
 	// backend should be gone from file, agent preserved
 	data, err := os.ReadFile(filepath.Join(dir, "config.yaml")) //nolint:gosec // G304: test code
@@ -216,18 +218,18 @@ func TestDeleteConfigField_Scalar(t *testing.T) {
 	assert.Contains(t, string(data), "agent: gemini")
 
 	// GetConfigValue should fall back to default (empty string — auto-detect)
-	val, found, err := GetConfigValue("container_backend")
+	val, found, err := GetConfigValue(layout, "container_backend")
 	require.NoError(t, err)
 	assert.True(t, found)
 	assert.Equal(t, "", val)
 }
 
 func TestDeleteConfigField_MapEntry(t *testing.T) {
-	dir := configDir(t)
+	dir, layout := configDir(t)
 	content := "env:\n  FOO: bar\n  BAZ: qux\n"
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
 
-	require.NoError(t, DeleteConfigField("env.FOO"))
+	require.NoError(t, DeleteConfigField(layout, "env.FOO"))
 
 	data, err := os.ReadFile(filepath.Join(dir, "config.yaml")) //nolint:gosec // G304: test code
 	require.NoError(t, err)
@@ -236,11 +238,11 @@ func TestDeleteConfigField_MapEntry(t *testing.T) {
 }
 
 func TestDeleteConfigField_EntireSection(t *testing.T) {
-	dir := configDir(t)
+	dir, layout := configDir(t)
 	content := "env:\n  FOO: bar\ncontainer_backend: tart\n"
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
 
-	require.NoError(t, DeleteConfigField("env"))
+	require.NoError(t, DeleteConfigField(layout, "env"))
 
 	data, err := os.ReadFile(filepath.Join(dir, "config.yaml")) //nolint:gosec // G304: test code
 	require.NoError(t, err)
@@ -250,68 +252,69 @@ func TestDeleteConfigField_EntireSection(t *testing.T) {
 }
 
 func TestDeleteConfigField_NonexistentKey(t *testing.T) {
-	dir := configDir(t)
+	dir, layout := configDir(t)
 	content := "container_backend: docker\n"
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
 
 	// Should not error on missing key
-	require.NoError(t, DeleteConfigField("nonexistent"))
+	require.NoError(t, DeleteConfigField(layout, "nonexistent"))
 }
 
 func TestDeleteConfigField_MissingFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
+	layout := NewLayout(filepath.Join(tmpDir, ".yoloai"))
 
 	// Should not error when config file doesn't exist
-	require.NoError(t, DeleteConfigField("container_backend"))
+	require.NoError(t, DeleteConfigField(layout, "container_backend"))
 }
 
 func TestLoadConfig_ExpandsEnvVars(t *testing.T) {
-	dir := configDir(t)
+	dir, layout := configDir(t)
 	t.Setenv("YOLOAI_TEST_AGENT", "gemini")
 	t.Setenv("YOLOAI_TEST_BACKEND", "tart")
 
 	content := "agent: ${YOLOAI_TEST_AGENT}\ncontainer_backend: ${YOLOAI_TEST_BACKEND}\n"
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
 
-	cfg, err := LoadConfig()
+	cfg, err := LoadConfig(layout)
 	require.NoError(t, err)
 	assert.Equal(t, "gemini", cfg.Agent)
 	assert.Equal(t, "tart", cfg.ContainerBackend)
 }
 
 func TestLoadConfig_UnsetEnvVarError(t *testing.T) {
-	dir := configDir(t)
+	dir, layout := configDir(t)
 
 	content := "agent: ${YOLOAI_DEFINITELY_NOT_SET}\n"
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
 
-	_, err := LoadConfig()
+	_, err := LoadConfig(layout)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "agent")
 	assert.Contains(t, err.Error(), "YOLOAI_DEFINITELY_NOT_SET")
 }
 
 func TestLoadConfig_UnclosedBraceError(t *testing.T) {
-	dir := configDir(t)
+	dir, layout := configDir(t)
 
 	content := "container_backend: ${UNCLOSED\n"
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
 
-	_, err := LoadConfig()
+	_, err := LoadConfig(layout)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "container_backend")
 	assert.Contains(t, err.Error(), "unclosed")
 }
 
 func TestLoadConfig_BareVarNotExpanded(t *testing.T) {
-	dir := configDir(t)
+	dir, layout := configDir(t)
 	t.Setenv("YOLOAI_TEST_VAR", "should-not-appear")
 
 	content := "agent: $YOLOAI_TEST_VAR\n"
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
 
-	cfg, err := LoadConfig()
+	cfg, err := LoadConfig(layout)
 	require.NoError(t, err)
 	assert.Equal(t, "$YOLOAI_TEST_VAR", cfg.Agent, "bare $VAR must not be expanded")
 }
@@ -322,84 +325,84 @@ func TestSplitDottedPath(t *testing.T) {
 	assert.Equal(t, []string{"tart", "image"}, splitDottedPath("tart.image"))
 }
 
-func TestConfigPath(t *testing.T) {
+func TestDefaultsConfigPath(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
+	layout := NewLayout(filepath.Join(tmpDir, ".yoloai"))
 
-	p := ConfigPath()
+	p := layout.DefaultsConfigPath()
 	assert.Equal(t, filepath.Join(tmpDir, ".yoloai", "defaults", "config.yaml"), p)
 }
 
 func TestReadConfigRaw_MissingFile(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
+	layout := NewLayout(filepath.Join(tmpDir, ".yoloai"))
 
-	data, err := ReadConfigRaw()
+	data, err := ReadConfigRaw(layout)
 	require.NoError(t, err)
 	assert.Nil(t, data)
 }
 
 func TestReadConfigRaw_ExistingFile(t *testing.T) {
-	dir := configDir(t)
+	dir, layout := configDir(t)
 	content := "container_backend: docker\n"
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
 
-	data, err := ReadConfigRaw()
+	data, err := ReadConfigRaw(layout)
 	require.NoError(t, err)
 	assert.Equal(t, content, string(data))
 }
 
 func TestGetConfigValue_Scalar(t *testing.T) {
-	dir := configDir(t)
+	dir, layout := configDir(t)
 	content := "container_backend: seatbelt\n"
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
 
-	val, found, err := GetConfigValue("container_backend")
+	val, found, err := GetConfigValue(layout, "container_backend")
 	require.NoError(t, err)
 	assert.True(t, found)
 	assert.Equal(t, "seatbelt", val)
 }
 
 func TestGetConfigValue_GlobalKey(t *testing.T) {
-	dir := globalConfigDir(t)
+	dir, layout := globalConfigDir(t)
 	content := "tmux_conf: default+host\n"
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
 
-	val, found, err := GetConfigValue("tmux_conf")
+	val, found, err := GetConfigValue(layout, "tmux_conf")
 	require.NoError(t, err)
 	assert.True(t, found)
 	assert.Equal(t, "default+host", val)
 }
 
 func TestGetConfigValue_Mapping(t *testing.T) {
-	dir := configDir(t)
+	dir, layout := configDir(t)
 	content := "tart:\n  image: myimage\n"
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
 
-	val, found, err := GetConfigValue("tart")
+	val, found, err := GetConfigValue(layout, "tart")
 	require.NoError(t, err)
 	assert.True(t, found)
 	assert.Contains(t, val, "image: myimage")
 }
 
 func TestGetConfigValue_NotFound(t *testing.T) {
-	dir := configDir(t)
+	dir, layout := configDir(t)
 	content := "container_backend: docker\n"
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
 
 	// Unknown key: not found
-	_, found, err := GetConfigValue("nonexistent")
+	_, found, err := GetConfigValue(layout, "nonexistent")
 	require.NoError(t, err)
 	assert.False(t, found)
 }
 
 func TestGetConfigValue_FallsBackToDefault(t *testing.T) {
-	dir := configDir(t)
+	dir, layout := configDir(t)
 	content := "agent: claude\n"
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
 
 	// Known key not in file returns its default (empty string for container_backend)
-	val, found, err := GetConfigValue("container_backend")
+	val, found, err := GetConfigValue(layout, "container_backend")
 	require.NoError(t, err)
 	assert.True(t, found)
 	assert.Equal(t, "", val)
@@ -408,14 +411,15 @@ func TestGetConfigValue_FallsBackToDefault(t *testing.T) {
 func TestGetConfigValue_MissingFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
+	layout := NewLayout(filepath.Join(tmpDir, ".yoloai"))
 
 	// Unknown key with no file: not found
-	_, found, err := GetConfigValue("anything")
+	_, found, err := GetConfigValue(layout, "anything")
 	require.NoError(t, err)
 	assert.False(t, found)
 
 	// Known key with no file: returns default (empty string for container_backend)
-	val, found, err := GetConfigValue("container_backend")
+	val, found, err := GetConfigValue(layout, "container_backend")
 	require.NoError(t, err)
 	assert.True(t, found)
 	assert.Equal(t, "", val)
@@ -424,8 +428,9 @@ func TestGetConfigValue_MissingFile(t *testing.T) {
 func TestGetEffectiveConfig_Defaults(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
+	layout := NewLayout(filepath.Join(tmpDir, ".yoloai"))
 
-	out, err := GetEffectiveConfig()
+	out, err := GetEffectiveConfig(layout)
 	require.NoError(t, err)
 	assert.Contains(t, out, "container_backend:")
 	assert.Contains(t, out, "image:")
@@ -436,11 +441,11 @@ func TestGetEffectiveConfig_Defaults(t *testing.T) {
 }
 
 func TestGetEffectiveConfig_WithOverrides(t *testing.T) {
-	dir := configDir(t)
+	dir, layout := configDir(t)
 	content := "container_backend: tart\n"
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
 
-	out, err := GetEffectiveConfig()
+	out, err := GetEffectiveConfig(layout)
 	require.NoError(t, err)
 	assert.Contains(t, out, "container_backend: tart")
 	// Defaults for unset keys still present
@@ -449,11 +454,11 @@ func TestGetEffectiveConfig_WithOverrides(t *testing.T) {
 }
 
 func TestGetEffectiveConfig_ExtraKeys(t *testing.T) {
-	dir := configDir(t)
+	dir, layout := configDir(t)
 	content := "custom_key: myvalue\n"
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
 
-	out, err := GetEffectiveConfig()
+	out, err := GetEffectiveConfig(layout)
 	require.NoError(t, err)
 	// Custom keys from the file should appear too
 	assert.Contains(t, out, "custom_key: myvalue")
@@ -462,12 +467,12 @@ func TestGetEffectiveConfig_ExtraKeys(t *testing.T) {
 }
 
 func TestLoadConfig_Resources(t *testing.T) {
-	dir := configDir(t)
+	dir, layout := configDir(t)
 
 	content := "resources:\n  cpus: \"4\"\n  memory: 8g\n"
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
 
-	cfg, err := LoadConfig()
+	cfg, err := LoadConfig(layout)
 	require.NoError(t, err)
 	require.NotNil(t, cfg.Resources)
 	assert.Equal(t, "4", cfg.Resources.CPUs)
@@ -475,12 +480,12 @@ func TestLoadConfig_Resources(t *testing.T) {
 }
 
 func TestLoadConfig_ResourcesPartial(t *testing.T) {
-	dir := configDir(t)
+	dir, layout := configDir(t)
 
 	content := "resources:\n  memory: 4g\n"
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
 
-	cfg, err := LoadConfig()
+	cfg, err := LoadConfig(layout)
 	require.NoError(t, err)
 	require.NotNil(t, cfg.Resources)
 	assert.Empty(t, cfg.Resources.CPUs)
@@ -488,10 +493,10 @@ func TestLoadConfig_ResourcesPartial(t *testing.T) {
 }
 
 func TestLoadConfig_ResourcesEmpty(t *testing.T) {
-	dir := configDir(t)
+	dir, layout := configDir(t)
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(DefaultConfigYAML), 0600))
 
-	cfg, err := LoadConfig()
+	cfg, err := LoadConfig(layout)
 	require.NoError(t, err)
 	// DefaultConfigYAML has resources block with empty cpus/memory — parses to non-nil struct
 	require.NotNil(t, cfg.Resources)
@@ -499,42 +504,35 @@ func TestLoadConfig_ResourcesEmpty(t *testing.T) {
 	assert.Empty(t, cfg.Resources.Memory)
 }
 
-func TestGlobalConfigPath(t *testing.T) {
-	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
-
-	p := GlobalConfigPath()
-	assert.Equal(t, filepath.Join(tmpDir, ".yoloai", "config.yaml"), p)
-}
-
 func TestLoadGlobalConfig_MissingFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
+	layout := NewLayout(filepath.Join(tmpDir, ".yoloai"))
 
-	cfg, err := LoadGlobalConfig()
+	cfg, err := LoadGlobalConfig(layout)
 	require.NoError(t, err)
 	assert.Empty(t, cfg.TmuxConf)
 	assert.Nil(t, cfg.ModelAliases)
 }
 
 func TestLoadGlobalConfig_Default(t *testing.T) {
-	dir := globalConfigDir(t)
+	dir, layout := globalConfigDir(t)
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(DefaultGlobalConfigYAML), 0600))
 
-	cfg, err := LoadGlobalConfig()
+	cfg, err := LoadGlobalConfig(layout)
 	require.NoError(t, err)
 	assert.Empty(t, cfg.TmuxConf)
 	assert.Nil(t, cfg.ModelAliases)
 }
 
 func TestLoadGlobalConfig_EnvExpansion(t *testing.T) {
-	dir := globalConfigDir(t)
+	dir, layout := globalConfigDir(t)
 	t.Setenv("YOLOAI_TEST_TMUX", "default+host")
 
 	content := "tmux_conf: ${YOLOAI_TEST_TMUX}\n"
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
 
-	cfg, err := LoadGlobalConfig()
+	cfg, err := LoadGlobalConfig(layout)
 	require.NoError(t, err)
 	assert.Equal(t, "default+host", cfg.TmuxConf)
 }
@@ -550,13 +548,13 @@ func TestIsGlobalKey(t *testing.T) {
 }
 
 func TestDeleteGlobalConfigField(t *testing.T) {
-	dir := globalConfigDir(t)
+	dir, layout := globalConfigDir(t)
 	content := "tmux_conf: default\nmodel_aliases:\n  fast: haiku\n"
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
 
-	require.NoError(t, DeleteGlobalConfigField("tmux_conf"))
+	require.NoError(t, DeleteGlobalConfigField(layout, "tmux_conf"))
 
-	cfg, err := LoadGlobalConfig()
+	cfg, err := LoadGlobalConfig(layout)
 	require.NoError(t, err)
 	assert.Empty(t, cfg.TmuxConf)
 	assert.Equal(t, "haiku", cfg.ModelAliases["fast"])
@@ -565,81 +563,99 @@ func TestDeleteGlobalConfigField(t *testing.T) {
 func TestDeleteGlobalConfigField_MissingFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
+	layout := NewLayout(filepath.Join(tmpDir, ".yoloai"))
 
-	require.NoError(t, DeleteGlobalConfigField("tmux_conf"))
+	require.NoError(t, DeleteGlobalConfigField(layout, "tmux_conf"))
 }
 
 func TestReadGlobalConfigRaw_MissingFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
+	layout := NewLayout(filepath.Join(tmpDir, ".yoloai"))
 
-	data, err := ReadGlobalConfigRaw()
+	data, err := ReadGlobalConfigRaw(layout)
 	require.NoError(t, err)
 	assert.Nil(t, data)
 }
 
 func TestReadGlobalConfigRaw_ExistingFile(t *testing.T) {
-	dir := globalConfigDir(t)
+	dir, layout := globalConfigDir(t)
 	content := "tmux_conf: default\n"
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
 
-	data, err := ReadGlobalConfigRaw()
+	data, err := ReadGlobalConfigRaw(layout)
 	require.NoError(t, err)
 	assert.Equal(t, content, string(data))
 }
 
 func TestLoadConfig_AgentFilesString(t *testing.T) {
-	dir := configDir(t)
-	home := filepath.Dir(filepath.Dir(dir)) // strip .yoloai/defaults to get HOME
+	dir, layout := configDir(t)
 
 	content := "agent_files: ~/my-agent-configs\n"
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
 
-	cfg, err := LoadConfig()
+	cfg, err := LoadConfig(layout)
 	require.NoError(t, err)
 	require.NotNil(t, cfg.AgentFiles)
 	assert.True(t, cfg.AgentFiles.IsStringForm())
-	assert.Equal(t, filepath.Join(home, "my-agent-configs"), cfg.AgentFiles.BaseDir)
+	// Paths are stored raw; call ExpandAgentFiles to expand
+	assert.Equal(t, "~/my-agent-configs", cfg.AgentFiles.BaseDir)
 	assert.Nil(t, cfg.AgentFiles.Files)
+
+	// Verify ExpandAgentFiles expands correctly
+	home := filepath.Dir(layout.DataDir)
+	expanded, err := ExpandAgentFiles(cfg.AgentFiles, home)
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(home, "my-agent-configs"), expanded.BaseDir)
 }
 
 func TestLoadConfig_AgentFilesList(t *testing.T) {
-	dir := configDir(t)
-	home := filepath.Dir(filepath.Dir(dir)) // strip .yoloai/defaults to get HOME
+	dir, layout := configDir(t)
 
 	content := "agent_files:\n  - ~/file1.json\n  - ~/file2.json\n"
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
 
-	cfg, err := LoadConfig()
+	cfg, err := LoadConfig(layout)
 	require.NoError(t, err)
 	require.NotNil(t, cfg.AgentFiles)
 	assert.False(t, cfg.AgentFiles.IsStringForm())
 	assert.Empty(t, cfg.AgentFiles.BaseDir)
+	// Paths are stored raw; call ExpandAgentFiles to expand
 	require.Len(t, cfg.AgentFiles.Files, 2)
-	assert.Equal(t, filepath.Join(home, "file1.json"), cfg.AgentFiles.Files[0])
-	assert.Equal(t, filepath.Join(home, "file2.json"), cfg.AgentFiles.Files[1])
+	assert.Equal(t, "~/file1.json", cfg.AgentFiles.Files[0])
+	assert.Equal(t, "~/file2.json", cfg.AgentFiles.Files[1])
+
+	// Verify ExpandAgentFiles expands correctly
+	home := filepath.Dir(layout.DataDir)
+	expanded, err := ExpandAgentFiles(cfg.AgentFiles, home)
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(home, "file1.json"), expanded.Files[0])
+	assert.Equal(t, filepath.Join(home, "file2.json"), expanded.Files[1])
 }
 
 func TestLoadConfig_AgentFilesEnvExpansion(t *testing.T) {
-	dir := configDir(t)
+	dir, layout := configDir(t)
 	t.Setenv("YOLOAI_AGENT_DIR", "/custom/path")
 
 	content := "agent_files: ${YOLOAI_AGENT_DIR}\n"
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
 
-	cfg, err := LoadConfig()
+	cfg, err := LoadConfig(layout)
 	require.NoError(t, err)
 	require.NotNil(t, cfg.AgentFiles)
-	assert.Equal(t, "/custom/path", cfg.AgentFiles.BaseDir)
+	// Env vars are expanded via ExpandAgentFiles
+	expanded, err := ExpandAgentFiles(cfg.AgentFiles, filepath.Dir(layout.DataDir))
+	require.NoError(t, err)
+	assert.Equal(t, "/custom/path", expanded.BaseDir)
 }
 
 func TestLoadConfig_RecipeFields(t *testing.T) {
-	dir := configDir(t)
+	dir, layout := configDir(t)
 
 	content := "cap_add:\n  - NET_ADMIN\n  - SYS_PTRACE\ndevices:\n  - /dev/net/tun\nsetup:\n  - tailscale up --authkey=abc123\n  - echo done\n"
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
 
-	cfg, err := LoadConfig()
+	cfg, err := LoadConfig(layout)
 	require.NoError(t, err)
 	assert.Equal(t, []string{"NET_ADMIN", "SYS_PTRACE"}, cfg.CapAdd)
 	assert.Equal(t, []string{"/dev/net/tun"}, cfg.Devices)
@@ -647,42 +663,42 @@ func TestLoadConfig_RecipeFields(t *testing.T) {
 }
 
 func TestLoadConfig_RecipeFieldsEnvExpansion(t *testing.T) {
-	dir := configDir(t)
+	dir, layout := configDir(t)
 	t.Setenv("YOLOAI_TEST_KEY", "mykey123")
 
 	content := "setup:\n  - tailscale up --authkey=${YOLOAI_TEST_KEY}\n"
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
 
-	cfg, err := LoadConfig()
+	cfg, err := LoadConfig(layout)
 	require.NoError(t, err)
 	assert.Equal(t, []string{"tailscale up --authkey=mykey123"}, cfg.Setup)
 }
 
 func TestLoadConfig_Ports(t *testing.T) {
-	dir := configDir(t)
+	dir, layout := configDir(t)
 
 	content := "ports:\n  - \"8080:8080\"\n  - \"3000:3000\"\n"
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
 
-	cfg, err := LoadConfig()
+	cfg, err := LoadConfig(layout)
 	require.NoError(t, err)
 	assert.Equal(t, []string{"8080:8080", "3000:3000"}, cfg.Ports)
 }
 
 func TestLoadConfig_PortsEmpty(t *testing.T) {
-	dir := configDir(t)
+	dir, layout := configDir(t)
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(DefaultConfigYAML), 0600))
 
-	cfg, err := LoadConfig()
+	cfg, err := LoadConfig(layout)
 	require.NoError(t, err)
 	assert.Nil(t, cfg.Ports)
 }
 
 func TestLoadConfig_RecipeFieldsEmpty(t *testing.T) {
-	dir := configDir(t)
+	dir, layout := configDir(t)
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(DefaultConfigYAML), 0600))
 
-	cfg, err := LoadConfig()
+	cfg, err := LoadConfig(layout)
 	require.NoError(t, err)
 	assert.Nil(t, cfg.CapAdd)
 	assert.Nil(t, cfg.Devices)
@@ -690,43 +706,43 @@ func TestLoadConfig_RecipeFieldsEmpty(t *testing.T) {
 }
 
 func TestLoadConfig_AgentFilesOmitted(t *testing.T) {
-	dir := configDir(t)
+	dir, layout := configDir(t)
 
 	content := "agent: claude\n"
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
 
-	cfg, err := LoadConfig()
+	cfg, err := LoadConfig(layout)
 	require.NoError(t, err)
 	assert.Nil(t, cfg.AgentFiles)
 }
 
 func TestLoadConfig_AutoCommitIntervalDefault(t *testing.T) {
-	dir := configDir(t)
+	dir, layout := configDir(t)
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(DefaultConfigYAML), 0600))
 
-	cfg, err := LoadConfig()
+	cfg, err := LoadConfig(layout)
 	require.NoError(t, err)
 	assert.Equal(t, 0, cfg.AutoCommitInterval)
 }
 
 func TestLoadConfig_AutoCommitIntervalExplicit(t *testing.T) {
-	dir := configDir(t)
+	dir, layout := configDir(t)
 
 	content := "auto_commit_interval: 60\n"
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
 
-	cfg, err := LoadConfig()
+	cfg, err := LoadConfig(layout)
 	require.NoError(t, err)
 	assert.Equal(t, 60, cfg.AutoCommitInterval)
 }
 
 func TestLoadConfig_AutoCommitIntervalInvalid(t *testing.T) {
-	dir := configDir(t)
+	dir, layout := configDir(t)
 
 	content := "auto_commit_interval: abc\n"
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
 
-	_, err := LoadConfig()
+	_, err := LoadConfig(layout)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "auto_commit_interval")
 }
@@ -734,9 +750,10 @@ func TestLoadConfig_AutoCommitIntervalInvalid(t *testing.T) {
 func TestGetConfigValue_AutoCommitInterval(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
+	layout := NewLayout(filepath.Join(tmpDir, ".yoloai"))
 
 	// Known key with no file: returns default "0"
-	val, found, err := GetConfigValue("auto_commit_interval")
+	val, found, err := GetConfigValue(layout, "auto_commit_interval")
 	require.NoError(t, err)
 	assert.True(t, found)
 	assert.Equal(t, "0", val)

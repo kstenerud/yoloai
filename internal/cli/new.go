@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"path/filepath"
 	goruntime "runtime"
 	"strings"
 	"time"
@@ -222,15 +223,16 @@ func parseEnvSlice(envSlice []string) (map[string]string, error) {
 
 // resolveNewDirSpecs parses rawWorkdirArg and rawDirs into DirSpec values.
 func resolveNewDirSpecs(rawWorkdirArg string, rawDirs []string) (workdirSpec sandbox.DirSpec, auxDirSpecs []sandbox.DirSpec, err error) {
+	homeDir := filepath.Dir(cliLayout().DataDir)
 	if rawWorkdirArg != "" {
-		parsed, parseErr := sandbox.ParseDirArg(rawWorkdirArg)
+		parsed, parseErr := sandbox.ParseDirArg(rawWorkdirArg, homeDir)
 		if parseErr != nil {
 			return sandbox.DirSpec{}, nil, sandbox.NewUsageError("invalid workdir: %s", parseErr)
 		}
 		workdirSpec = sandbox.DirArgToSpec(parsed)
 	}
 	for _, rawDir := range rawDirs {
-		parsed, parseErr := sandbox.ParseDirArg(rawDir)
+		parsed, parseErr := sandbox.ParseDirArg(rawDir, homeDir)
 		if parseErr != nil {
 			return sandbox.DirSpec{}, nil, sandbox.NewUsageError("invalid directory %q: %s", rawDir, parseErr)
 		}
@@ -285,7 +287,7 @@ func executeNewCreate(cmd *cobra.Command, ctx context.Context, rt runtime.Runtim
 // resolveNewIsolationOS resolves the --isolation and --os flags with config fallback
 // and validates their combinations, returning an error for unsupported combos.
 func resolveNewIsolationOS(cmd *cobra.Command) (isolation, targetOS string, err error) {
-	cfg, _ := config.LoadDefaultsConfig()
+	cfg, _ := config.LoadDefaultsConfig(cliLayout())
 	var cfgIsolation, cfgOS string
 	if cfg != nil {
 		cfgIsolation = cfg.Isolation

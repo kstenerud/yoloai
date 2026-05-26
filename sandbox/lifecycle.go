@@ -140,7 +140,8 @@ func (m *Manager) applyVscodeTunnelOption(opts StartOptions, sandboxDir, name st
 // preparePromptForStart validates prompt options, reads the custom prompt text
 // if provided, and persists it to prompt.txt + meta. Returns the prompt text
 // and whether a custom prompt is in use.
-func preparePromptForStart(opts StartOptions, sandboxDir string, meta *store.Meta) (promptText string, customPrompt bool, err error) {
+// homeDir is used to expand leading "~" in the promptFile path.
+func preparePromptForStart(opts StartOptions, sandboxDir string, meta *store.Meta, homeDir string) (promptText string, customPrompt bool, err error) {
 	customPrompt = opts.Prompt != "" || opts.PromptFile != ""
 	if opts.Resume && customPrompt {
 		return "", false, fmt.Errorf("--resume and --prompt/--prompt-file are mutually exclusive")
@@ -152,7 +153,7 @@ func preparePromptForStart(opts StartOptions, sandboxDir string, meta *store.Met
 		return "", false, nil
 	}
 
-	promptText, err = ReadPrompt(opts.Prompt, opts.PromptFile)
+	promptText, err = ReadPrompt(opts.Prompt, opts.PromptFile, homeDir)
 	if err != nil {
 		return "", false, err
 	}
@@ -272,7 +273,7 @@ func (m *Manager) start(ctx context.Context, name string, opts StartOptions) err
 	}
 	slog.Debug("container status", "event", "sandbox.start.status", "sandbox", name, "status", string(status)) //nolint:gosec // G706: name is validated by ValidateName
 
-	promptText, customPrompt, err := preparePromptForStart(opts, sandboxDir, meta)
+	promptText, customPrompt, err := preparePromptForStart(opts, sandboxDir, meta, filepath.Dir(m.layout.DataDir))
 	if err != nil {
 		return err
 	}
@@ -655,21 +656,21 @@ func (m *Manager) NeedsConfirmation(ctx context.Context, name string) (bool, str
 // initializeAgentFilesIfNeeded copies agent_files into the sandbox when they
 // have not yet been initialized (e.g., sandbox predates the feature or
 // ClearState was used). No-op if already initialized or no StateDir configured.
-func initializeAgentFilesIfNeeded(agentDef *agent.Definition, sandboxDir string, meta *store.Meta, sbState *store.SandboxState) error {
+func initializeAgentFilesIfNeeded(layout config.Layout, agentDef *agent.Definition, sandboxDir string, meta *store.Meta, sbState *store.SandboxState) error {
 	if sbState.AgentFilesInitialized || agentDef.StateDir == "" {
 		return nil
 	}
-	cfg, err := config.LoadConfig()
+	cfg, err := config.LoadConfig(layout)
 	if err != nil {
 		// Preserves pre-refactor behavior: config load failures must not block
 		// sandbox start. The agent_files copy is a best-effort convenience.
 		return nil //nolint:nilerr // intentional: best-effort, not load-bearing
 	}
-	agentFilesConfig := resolvedAgentFiles(cfg, meta)
+	agentFilesConfig := resolvedAgentFiles(layout, cfg, meta)
 	if agentFilesConfig == nil {
 		return nil
 	}
-	if err := copyAgentFiles(agentDef, sandboxDir, agentFilesConfig); err != nil {
+	if err := copyAgentFiles(agentDef, sandboxDir, agentFilesConfig, filepath.Dir(layout.DataDir)); err != nil {
 		return fmt.Errorf("copy agent files on restart: %w", err)
 	}
 	sbState.AgentFilesInitialized = true
@@ -681,16 +682,16 @@ func initializeAgentFilesIfNeeded(agentDef *agent.Definition, sandboxDir string,
 
 // resolvedAgentFiles returns the effective AgentFiles config after merging the
 // profile chain if a profile is set. Returns nil if no AgentFiles are configured.
-func resolvedAgentFiles(cfg *config.YoloaiConfig, meta *store.Meta) *config.AgentFilesConfig {
+func resolvedAgentFiles(layout config.Layout, cfg *config.YoloaiConfig, meta *store.Meta) *config.AgentFilesConfig {
 	agentFilesConfig := cfg.AgentFiles
 	if meta.Profile == "" {
 		return agentFilesConfig
 	}
-	chain, err := config.ResolveProfileChain(meta.Profile)
+	chain, err := config.ResolveProfileChain(layout, meta.Profile)
 	if err != nil {
 		return agentFilesConfig
 	}
-	merged, err := config.MergeProfileChain(cfg, chain)
+	merged, err := config.MergeProfileChain(layout, cfg, chain)
 	if err != nil || merged.AgentFiles == nil {
 		return agentFilesConfig
 	}
@@ -699,16 +700,16 @@ func resolvedAgentFiles(cfg *config.YoloaiConfig, meta *store.Meta) *config.Agen
 
 // resolveEnvForRestart loads the global config env and merges the profile
 // chain if a profile is set. Returns the resolved environment map.
-func resolveEnvForRestart(meta *store.Meta) (map[string]string, error) {
-	cfg, err := config.LoadConfig()
+func resolveEnvForRestart(layout config.Layout, meta *store.Meta) (map[string]string, error) {
+	cfg, err := config.LoadConfig(layout)
 	if err != nil {
 		return nil, fmt.Errorf("load config: %w", err)
 	}
 	envVars := cfg.Env
 	if meta.Profile != "" {
-		chain, chainErr := config.ResolveProfileChain(meta.Profile)
+		chain, chainErr := config.ResolveProfileChain(layout, meta.Profile)
 		if chainErr == nil {
-			merged, mergeErr := config.MergeProfileChain(cfg, chain)
+			merged, mergeErr := config.MergeProfileChain(layout, cfg, chain)
 			if mergeErr == nil {
 				envVars = merged.Env
 			}
@@ -728,7 +729,7 @@ func (m *Manager) recreateContainer(ctx context.Context, name string, meta *stor
 
 	// Refresh seed files from host (handles OAuth token refresh between restarts)
 	hasAPIKey := hasAnyAPIKey(agentDef, nil)
-	if _, err := copySeedFiles(agentDef, sandboxDir, hasAPIKey); err != nil {
+	if _, err := copySeedFiles(agentDef, sandboxDir, hasAPIKey, filepath.Dir(m.layout.DataDir)); err != nil {
 		return fmt.Errorf("refresh seed files: %w", err)
 	}
 
@@ -745,7 +746,7 @@ func (m *Manager) recreateContainer(ctx context.Context, name string, meta *stor
 	if stateErr != nil {
 		return fmt.Errorf("load sandbox state: %w", stateErr)
 	}
-	if err := initializeAgentFilesIfNeeded(agentDef, sandboxDir, meta, sbState); err != nil {
+	if err := initializeAgentFilesIfNeeded(m.layout, agentDef, sandboxDir, meta, sbState); err != nil {
 		return err
 	}
 
@@ -756,7 +757,7 @@ func (m *Manager) recreateContainer(ctx context.Context, name string, meta *stor
 	}
 
 	// Build sandbox state for container launch
-	workdir, err := ParseDirArg(meta.Workdir.HostPath + ":" + meta.Workdir.Mode)
+	workdir, err := ParseDirArg(meta.Workdir.HostPath+":"+meta.Workdir.Mode, filepath.Dir(m.layout.DataDir))
 	if err != nil {
 		return fmt.Errorf("parse workdir: %w", err)
 	}
@@ -778,7 +779,7 @@ func (m *Manager) recreateContainer(ctx context.Context, name string, meta *stor
 	}
 
 	// Resolve env: load config, then merge profile chain if profile was used.
-	envVars, err := resolveEnvForRestart(meta)
+	envVars, err := resolveEnvForRestart(m.layout, meta)
 	if err != nil {
 		return err
 	}
@@ -808,6 +809,7 @@ func (m *Manager) recreateContainer(ctx context.Context, name string, meta *stor
 		vscodeTunnel: meta.VscodeTunnel,
 		configJSON:   configData,
 		layout:       m.layout,
+		homeDir:      filepath.Dir(m.layout.DataDir),
 	}
 
 	if resume {
@@ -899,7 +901,7 @@ func (m *Manager) relaunchAgentWithResume(ctx context.Context, name string, meta
 	}
 
 	// Resolve agent_args from config/profile
-	agentArgs := resolveAgentArgs(meta.Agent, meta.Profile)
+	agentArgs := resolveAgentArgs(m.layout, meta.Agent, meta.Profile)
 
 	// Build interactive command (no headless prompt baked in)
 	interactiveCmd := buildAgentCommand(agentDef, meta.Model, "", agentArgs, cfg.Passthrough)
@@ -989,7 +991,7 @@ func (m *Manager) relaunchAgentWithCustomPrompt(ctx context.Context, name string
 		return NewConfigError("unknown agent %q in sandbox state — this sandbox was created with an agent that's not registered in the current yoloai installation; destroy and recreate the sandbox with a registered agent", meta.Agent)
 	}
 
-	agentArgs := resolveAgentArgs(meta.Agent, meta.Profile)
+	agentArgs := resolveAgentArgs(m.layout, meta.Agent, meta.Profile)
 	interactiveCmd := buildAgentCommand(agentDef, meta.Model, "", agentArgs, cfg.Passthrough)
 	// Prefer the stored launch prefix (W1a single-source-of-truth) when the gate
 	// is set; fall back to re-invoking PrepareAgentCommand for sandboxes created
@@ -1077,7 +1079,7 @@ func (m *Manager) prepareCustomPromptFiles(name string, meta *store.Meta, prompt
 		return NewConfigError("unknown agent %q in sandbox state — this sandbox was created with an agent that's not registered in the current yoloai installation; destroy and recreate the sandbox with a registered agent", meta.Agent)
 	}
 
-	agentArgs := resolveAgentArgs(meta.Agent, meta.Profile)
+	agentArgs := resolveAgentArgs(m.layout, meta.Agent, meta.Profile)
 	cfg.AgentCommand = buildAgentCommand(agentDef, meta.Model, "", agentArgs, cfg.Passthrough)
 
 	updated, err := json.MarshalIndent(cfg, "", "  ")
@@ -1126,7 +1128,7 @@ func (m *Manager) prepareResumeFiles(name string, meta *store.Meta) error {
 		return NewConfigError("unknown agent %q in sandbox state — this sandbox was created with an agent that's not registered in the current yoloai installation; destroy and recreate the sandbox with a registered agent", meta.Agent)
 	}
 
-	agentArgs := resolveAgentArgs(meta.Agent, meta.Profile)
+	agentArgs := resolveAgentArgs(m.layout, meta.Agent, meta.Profile)
 	cfg.AgentCommand = buildAgentCommand(agentDef, meta.Model, "", agentArgs, cfg.Passthrough)
 
 	updated, err := json.MarshalIndent(cfg, "", "  ")
@@ -1279,15 +1281,15 @@ rm -f /tmp/yoloai-reset.txt`, appendPrompt, cfg.SubmitSequence)
 
 // resolveAgentArgs loads agent_args for the given agent from config and profile.
 // Returns empty string if no args are configured.
-func resolveAgentArgs(agentName, profileName string) string {
-	cfg, err := config.LoadConfig()
+func resolveAgentArgs(layout config.Layout, agentName, profileName string) string {
+	cfg, err := config.LoadConfig(layout)
 	if err != nil {
 		return ""
 	}
 	if profileName != "" {
-		chain, chainErr := config.ResolveProfileChain(profileName)
+		chain, chainErr := config.ResolveProfileChain(layout, profileName)
 		if chainErr == nil {
-			merged, mergeErr := config.MergeProfileChain(cfg, chain)
+			merged, mergeErr := config.MergeProfileChain(layout, cfg, chain)
 			if mergeErr == nil {
 				return merged.AgentArgs[agentName]
 			}

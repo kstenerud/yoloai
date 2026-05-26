@@ -8,10 +8,13 @@ import (
 	"fmt"
 	"sort"
 	"sync"
+
+	"github.com/kstenerud/yoloai/config"
 )
 
-// Factory creates a new Runtime instance.
-type Factory func(context.Context) (Runtime, error)
+// Factory creates a new Runtime instance given a Layout.
+// The Layout provides DataDir-rooted paths so backends never read ambient HOME.
+type Factory func(context.Context, config.Layout) (Runtime, error)
 
 // entry pairs a factory with the backend's static descriptor so callers can
 // look up either side independently — descriptors without paying the cost of
@@ -41,16 +44,16 @@ func Register(name string, factory Factory, descriptor BackendDescriptor) {
 	backends[name] = entry{factory: factory, descriptor: descriptor}
 }
 
-// New creates a Runtime for the given backend name.
+// New creates a Runtime for the given backend name and layout.
 // Returns an error if the backend is not registered (unavailable on this platform).
-func New(ctx context.Context, name string) (Runtime, error) {
+func New(ctx context.Context, name string, layout config.Layout) (Runtime, error) {
 	mu.RLock()
 	e, ok := backends[name]
 	mu.RUnlock()
 	if !ok {
 		return nil, fmt.Errorf("backend %q not available on this platform (available: %v)", name, Available())
 	}
-	return e.factory(ctx)
+	return e.factory(ctx, layout)
 }
 
 // IsAvailable returns true if the named backend is registered.

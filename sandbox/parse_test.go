@@ -35,7 +35,7 @@ func TestParseDirArg_Modes(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := ParseDirArg(tt.input)
+			result, err := ParseDirArg(tt.input, "/home/user")
 			require.NoError(t, err)
 			assert.Equal(t, app, result.Path)
 			assert.Equal(t, tt.expectedMode, result.Mode)
@@ -59,7 +59,7 @@ func TestParseDirArg_ConflictingModes(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			_, err := ParseDirArg(tt.input)
+			_, err := ParseDirArg(tt.input, "/home/user")
 			assert.Error(t, err)
 			assert.Contains(t, err.Error(), tt.errFrag)
 		})
@@ -68,12 +68,12 @@ func TestParseDirArg_ConflictingModes(t *testing.T) {
 
 func TestParseDirArg_AbsolutePath(t *testing.T) {
 	// Absolute path is preserved.
-	result, err := ParseDirArg("/tmp/absolute")
+	result, err := ParseDirArg("/tmp/absolute", "/home/user")
 	require.NoError(t, err)
 	assert.Equal(t, "/tmp/absolute", result.Path)
 
 	// Relative path is resolved to absolute.
-	result, err = ParseDirArg("relative/path")
+	result, err = ParseDirArg("relative/path", "/home/user")
 	require.NoError(t, err)
 	assert.True(t, filepath.IsAbs(result.Path))
 
@@ -86,7 +86,7 @@ func TestParseDirArg_TildeExpansion(t *testing.T) {
 	home, err := os.UserHomeDir()
 	require.NoError(t, err)
 
-	result, err := ParseDirArg("~/somedir:copy")
+	result, err := ParseDirArg("~/somedir:copy", home)
 	require.NoError(t, err)
 	assert.Equal(t, filepath.Join(home, "somedir"), result.Path)
 	assert.Equal(t, "copy", result.Mode)
@@ -96,28 +96,28 @@ func TestParseDirArg_EnvVarExpansion(t *testing.T) {
 	home, err := os.UserHomeDir()
 	require.NoError(t, err)
 
-	result, err := ParseDirArg("${HOME}/somedir:copy")
+	result, err := ParseDirArg("${HOME}/somedir:copy", "/home/user")
 	require.NoError(t, err)
 	assert.Equal(t, filepath.Join(home, "somedir"), result.Path)
 	assert.Equal(t, "copy", result.Mode)
 }
 
 func TestParseDirArg_EnvVarUnset(t *testing.T) {
-	_, err := ParseDirArg("${YOLOAI_TEST_NONEXISTENT}/dir:copy")
+	_, err := ParseDirArg("${YOLOAI_TEST_NONEXISTENT}/dir:copy", "/home/user")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "expand path")
 }
 
 func TestParseDirArg_PathWithColons(t *testing.T) {
 	// Unknown suffixes stay as part of the path.
-	result, err := ParseDirArg("/path/to/file:with:colons")
+	result, err := ParseDirArg("/path/to/file:with:colons", "/home/user")
 	require.NoError(t, err)
 	assert.Equal(t, "/path/to/file:with:colons", result.Path)
 	assert.Equal(t, "", result.Mode)
 	assert.False(t, result.Force)
 
 	// Known suffix after unknown colons.
-	result, err = ParseDirArg("/path/to/file:with:copy")
+	result, err = ParseDirArg("/path/to/file:with:copy", "/home/user")
 	require.NoError(t, err)
 	assert.Equal(t, "/path/to/file:with", result.Path)
 	assert.Equal(t, "copy", result.Mode)
@@ -143,7 +143,7 @@ func TestParseDirArg_MountPath(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := ParseDirArg(tt.input)
+			result, err := ParseDirArg(tt.input, "/home/user")
 			require.NoError(t, err)
 			assert.Equal(t, tt.expectedPath, result.Path)
 			assert.Equal(t, tt.expectedMountPath, result.MountPath)
@@ -156,7 +156,7 @@ func TestParseDirArg_MountPath(t *testing.T) {
 func TestParseDirArg_DoubleColon(t *testing.T) {
 	// Input with trailing "::" — the empty suffix after the last colon is
 	// not a known suffix, so both colons become part of the path.
-	result, err := ParseDirArg("/tmp/test::")
+	result, err := ParseDirArg("/tmp/test::", "/home/user")
 	require.NoError(t, err)
 	assert.Equal(t, "/tmp/test::", result.Path)
 	assert.Equal(t, "", result.Mode)
@@ -166,7 +166,7 @@ func TestParseDirArg_DoubleColon(t *testing.T) {
 func TestParseDirArg_TrailingColon(t *testing.T) {
 	// Input with trailing ":" — the empty suffix is not a known suffix,
 	// so the colon becomes part of the path.
-	result, err := ParseDirArg("/tmp/test:")
+	result, err := ParseDirArg("/tmp/test:", "/home/user")
 	require.NoError(t, err)
 	assert.Equal(t, "/tmp/test:", result.Path)
 	assert.Equal(t, "", result.Mode)

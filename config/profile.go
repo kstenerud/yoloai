@@ -80,13 +80,6 @@ type MergedConfig struct {
 	Isolation          string            `json:"isolation,omitempty"`            // last non-empty wins across chain
 }
 
-// ProfileDirPath returns the host-side directory for a profile.
-//
-//	~/.yoloai/profiles/<name>/
-func ProfileDirPath(name string) string {
-	return filepath.Join(ProfilesDir(), name)
-}
-
 // ValidateProfileName validates a profile name.
 // Rejects empty names and names that look like paths.
 func ValidateProfileName(name string) error {
@@ -106,8 +99,8 @@ func ValidateProfileName(name string) error {
 }
 
 // ProfileExists checks whether a profile directory with a config.yaml exists.
-func ProfileExists(name string) bool {
-	dir := ProfileDirPath(name)
+func ProfileExists(layout Layout, name string) bool {
+	dir := layout.ProfileDir(name)
 	info, err := os.Stat(dir)
 	if err != nil || !info.IsDir() {
 		return false
@@ -117,14 +110,14 @@ func ProfileExists(name string) bool {
 }
 
 // ProfileHasDockerfile checks whether a profile has a Dockerfile.
-func ProfileHasDockerfile(name string) bool {
-	_, err := os.Stat(filepath.Join(ProfileDirPath(name), "Dockerfile"))
+func ProfileHasDockerfile(layout Layout, name string) bool {
+	_, err := os.Stat(filepath.Join(layout.ProfileDir(name), "Dockerfile"))
 	return err == nil
 }
 
 // ListProfiles returns the names of all user profiles.
-func ListProfiles() ([]string, error) {
-	profilesDir := ProfilesDir()
+func ListProfiles(layout Layout) ([]string, error) {
+	profilesDir := layout.ProfilesDir()
 
 	entries, err := os.ReadDir(profilesDir)
 	if err != nil {
@@ -380,8 +373,8 @@ func handleProfileIsolation(cfg *ProfileConfig, val *yaml.Node) error {
 }
 
 // LoadProfile reads and parses a profile's config.yaml file.
-func LoadProfile(name string) (*ProfileConfig, error) {
-	dir := ProfileDirPath(name)
+func LoadProfile(layout Layout, name string) (*ProfileConfig, error) {
+	dir := layout.ProfileDir(name)
 	path := filepath.Join(dir, "config.yaml")
 
 	data, err := os.ReadFile(path) //nolint:gosec // G304: path is from profile directory
@@ -424,15 +417,15 @@ func LoadProfile(name string) (*ProfileConfig, error) {
 }
 
 // LoadProfileConfig loads the effective config for the with-profile path:
-// baked-in defaults merged with ~/.yoloai/profiles/<name>/config.yaml.
+// baked-in defaults merged with DataDir/profiles/<name>/config.yaml.
 // defaults/config.yaml is NOT consulted — profiles are self-contained.
-func LoadProfileConfig(name string) (*YoloaiConfig, error) {
+func LoadProfileConfig(layout Layout, name string) (*YoloaiConfig, error) {
 	base, err := LoadBakedInDefaults()
 	if err != nil {
 		return nil, err
 	}
 
-	profileConfigPath := filepath.Join(ProfilesDir(), name, "config.yaml")
+	profileConfigPath := filepath.Join(layout.ProfileDir(name), "config.yaml")
 	data, err := os.ReadFile(profileConfigPath) //nolint:gosec // G304: path is from profile directory
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -453,14 +446,14 @@ func LoadProfileConfig(name string) (*YoloaiConfig, error) {
 // given profile. Walks the chain from child to root, returning "yoloai-<P>"
 // where P is the most-derived profile that has a Dockerfile. Falls back to
 // "yoloai-base" if none has a Dockerfile.
-func ResolveProfileImage(profileName string, chain []string) string {
+func ResolveProfileImage(layout Layout, profileName string, chain []string) string {
 	// Walk from most-derived (last) to root (first), skip "base"
 	for _, name := range slices.Backward(chain) {
 
 		if name == "base" {
 			continue
 		}
-		if ProfileHasDockerfile(name) {
+		if ProfileHasDockerfile(layout, name) {
 			return "yoloai-" + name
 		}
 	}
@@ -472,7 +465,7 @@ func ResolveProfileImage(profileName string, chain []string) string {
 // Detects cycles and validates that each profile exists.
 // Note: profiles no longer support inheritance chains; extends fields in
 // config.yaml are read for legacy compatibility only.
-func ResolveProfileChain(name string) ([]string, error) {
+func ResolveProfileChain(layout Layout, name string) ([]string, error) {
 	var chain []string
 	visited := map[string]bool{}
 	current := name
@@ -483,14 +476,14 @@ func ResolveProfileChain(name string) ([]string, error) {
 		}
 		visited[current] = true
 
-		if !ProfileExists(current) {
+		if !ProfileExists(layout, current) {
 			return nil, fmt.Errorf("profile %q does not exist", current)
 		}
 
 		chain = append(chain, current)
 
 		// Load profile to check for extends field (legacy support)
-		cfg, err := loadProfileLegacy(current)
+		cfg, err := loadProfileLegacy(layout, current)
 		if err != nil {
 			return nil, err
 		}
@@ -516,8 +509,8 @@ type legacyProfileConfig struct {
 
 // loadProfileLegacy reads the extends field from a profile config.yaml (for legacy chain support).
 // Errors are treated as "no extends field" — the profile defaults to extending "base".
-func loadProfileLegacy(name string) (legacyProfileConfig, error) {
-	path := filepath.Join(ProfileDirPath(name), "config.yaml")
+func loadProfileLegacy(layout Layout, name string) (legacyProfileConfig, error) {
+	path := filepath.Join(layout.ProfileDir(name), "config.yaml")
 	data, err := os.ReadFile(path) //nolint:gosec // G304: path is from profile directory
 	if err != nil {
 		return legacyProfileConfig{extends: "base"}, nil //nolint:nilerr // missing file = default
@@ -680,14 +673,14 @@ func applyProfileMaps(merged *MergedConfig, profile *ProfileConfig) {
 
 // MergeProfileChain merges base config with each profile in the chain.
 // chain is root-first, e.g. ["base", "go-dev", "go-web"].
-func MergeProfileChain(base *YoloaiConfig, chain []string) (*MergedConfig, error) {
+func MergeProfileChain(layout Layout, base *YoloaiConfig, chain []string) (*MergedConfig, error) {
 	merged := mergedConfigFromBase(base)
 
 	for _, name := range chain {
 		if name == "base" {
 			continue
 		}
-		profile, err := LoadProfile(name)
+		profile, err := LoadProfile(layout, name)
 		if err != nil {
 			return nil, err
 		}
@@ -711,9 +704,9 @@ func ValidateProfileBackend(profileBackend, resolvedBackend string) error {
 
 // LoadMergedConfig loads the baked-in defaults and merges the named profile
 // in a single call. If profileName is empty, returns defaults with no profile.
-func LoadMergedConfig(profileName string) (*MergedConfig, error) {
+func LoadMergedConfig(layout Layout, profileName string) (*MergedConfig, error) {
 	if profileName == "" {
-		base, err := LoadDefaultsConfig()
+		base, err := LoadDefaultsConfig(layout)
 		if err != nil {
 			return nil, err
 		}
@@ -732,9 +725,9 @@ func LoadMergedConfig(profileName string) (*MergedConfig, error) {
 	}
 
 	// Use legacy chain resolution for backward compatibility
-	chain, err := ResolveProfileChain(profileName)
+	chain, err := ResolveProfileChain(layout, profileName)
 	if err != nil {
 		return nil, err
 	}
-	return MergeProfileChain(base, chain)
+	return MergeProfileChain(layout, base, chain)
 }

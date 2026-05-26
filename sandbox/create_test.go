@@ -155,7 +155,7 @@ func TestBuildContainerConfig_StateDirName(t *testing.T) {
 }
 
 func TestReadPrompt_DirectText(t *testing.T) {
-	result, err := ReadPrompt("hello", "")
+	result, err := ReadPrompt("hello", "", "/home/user")
 	require.NoError(t, err)
 	assert.Equal(t, "hello", result)
 }
@@ -165,13 +165,13 @@ func TestReadPrompt_File(t *testing.T) {
 	path := filepath.Join(tmpDir, "prompt.txt")
 	require.NoError(t, os.WriteFile(path, []byte("prompt from file\n"), 0600))
 
-	result, err := ReadPrompt("", path)
+	result, err := ReadPrompt("", path, "/home/user")
 	require.NoError(t, err)
 	assert.Equal(t, "prompt from file", result)
 }
 
 func TestReadPrompt_MutualExclusion(t *testing.T) {
-	_, err := ReadPrompt("hello", "/some/file")
+	_, err := ReadPrompt("hello", "/some/file", "/home/user")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "mutually exclusive")
 }
@@ -188,7 +188,7 @@ func TestReadPrompt_StdinDash(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, w.Close())
 
-	result, err := ReadPrompt("-", "")
+	result, err := ReadPrompt("-", "", "/home/user")
 	require.NoError(t, err)
 	assert.Equal(t, "hello from stdin", result)
 }

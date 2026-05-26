@@ -13,8 +13,12 @@ import (
 // Tilde is expanded first, then ${VAR} references are resolved.
 // Bare $VAR is treated as literal text. Unset variables and unclosed
 // ${ produce an error.
-func ExpandPath(path string) (string, error) {
-	path = ExpandTilde(path)
+//
+// homeDir is the user's home directory for ~ expansion; callers derive it
+// from filepath.Dir(layout.DataDir) (the conventional $HOME/.yoloai DataDir)
+// or pass an explicit home for testing.
+func ExpandPath(path, homeDir string) (string, error) {
+	path = ExpandTilde(path, homeDir)
 	return expandEnvBraced(path)
 }
 
@@ -55,10 +59,12 @@ func expandEnvBraced(s string) (string, error) {
 }
 
 // ExpandTilde replaces a leading ~ with the user's home directory.
-// Uses HomeDir() so that sudo invocations resolve to the invoking user's home.
-func ExpandTilde(path string) string {
+// homeDir is the caller-supplied home directory; callers derive it from
+// filepath.Dir(layout.DataDir) (the conventional $HOME/.yoloai DataDir)
+// or pass an explicit home for testing.
+func ExpandTilde(path, homeDir string) string {
 	if !strings.HasPrefix(path, "~") {
 		return path
 	}
-	return filepath.Join(HomeDir(), path[1:])
+	return filepath.Join(homeDir, path[1:])
 }

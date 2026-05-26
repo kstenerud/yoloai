@@ -66,7 +66,6 @@ func TestHasAnyAPIKey_CredOverride(t *testing.T) {
 
 func TestHasAnyAuthFile_Exists(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
 
 	agentDef := agent.GetAgent("claude")
 
@@ -75,20 +74,19 @@ func TestHasAnyAuthFile_Exists(t *testing.T) {
 	require.NoError(t, os.MkdirAll(claudeDir, 0750))
 	require.NoError(t, os.WriteFile(filepath.Join(claudeDir, ".credentials.json"), []byte(`{}`), 0600))
 
-	assert.True(t, hasAnyAuthFile(agentDef))
+	assert.True(t, hasAnyAuthFile(agentDef, tmpDir))
 }
 
 func TestHasAnyAuthFile_Missing(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
 
 	agentDef := agent.GetAgent("claude")
-	assert.False(t, hasAnyAuthFile(agentDef))
+	assert.False(t, hasAnyAuthFile(agentDef, tmpDir))
 }
 
 func TestHasAnyAuthFile_NoAuthFiles(t *testing.T) {
 	agentDef := agent.GetAgent("test")
-	assert.False(t, hasAnyAuthFile(agentDef))
+	assert.False(t, hasAnyAuthFile(agentDef, "/home/user"))
 }
 
 // describeSeedAuthFiles tests
@@ -201,7 +199,7 @@ func TestCopySeedFiles_CopiesExistingFiles(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, "home-seed"), 0750))
 
 	agentDef := agent.GetAgent("claude")
-	copied, err := copySeedFiles(agentDef, sandboxDir, true)
+	copied, err := copySeedFiles(agentDef, sandboxDir, true, tmpDir)
 	require.NoError(t, err)
 	assert.False(t, copied) // copied only tracks auth-only files; settings.json is not auth-only
 
@@ -223,7 +221,7 @@ func TestCopySeedFiles_SkipsAuthWhenAPIKeySet(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, "home-seed"), 0750))
 
 	agentDef := agent.GetAgent("claude")
-	_, err := copySeedFiles(agentDef, sandboxDir, true) // hasAPIKey=true
+	_, err := copySeedFiles(agentDef, sandboxDir, true, tmpDir) // hasAPIKey=true
 	require.NoError(t, err)
 
 	// Auth-only file should NOT be copied when API key is set
@@ -244,7 +242,7 @@ func TestCopySeedFiles_CopiesAuthWhenNoAPIKey(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, "home-seed"), 0750))
 
 	agentDef := agent.GetAgent("claude")
-	copied, err := copySeedFiles(agentDef, sandboxDir, false) // hasAPIKey=false
+	copied, err := copySeedFiles(agentDef, sandboxDir, false, tmpDir) // hasAPIKey=false
 	require.NoError(t, err)
 	assert.True(t, copied)
 
@@ -263,7 +261,7 @@ func TestCopySeedFiles_HomeDirFiles(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, "home-seed"), 0750))
 
 	agentDef := agent.GetAgent("claude")
-	_, err := copySeedFiles(agentDef, sandboxDir, true)
+	_, err := copySeedFiles(agentDef, sandboxDir, true, tmpDir)
 	require.NoError(t, err)
 
 	// HomeDir=true file should go to home-seed/
@@ -279,7 +277,7 @@ func TestCopySeedFiles_SkipsMissingFiles(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, "home-seed"), 0750))
 
 	agentDef := agent.GetAgent("claude")
-	copied, err := copySeedFiles(agentDef, sandboxDir, true)
+	copied, err := copySeedFiles(agentDef, sandboxDir, true, tmpDir)
 	require.NoError(t, err)
 	assert.False(t, copied)
 }
@@ -807,12 +805,11 @@ func TestHasAnyAuthFile_KeychainFallback(t *testing.T) {
 	}
 	defer func() { keychainReader = origReader }()
 
-	assert.True(t, hasAnyAuthFile(agentDef))
+	assert.True(t, hasAnyAuthFile(agentDef, tmpDir))
 }
 
 func TestHasAnyAuthFile_KeychainFallbackFails(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
 
 	agentDef := agent.GetAgent("claude")
 
@@ -823,7 +820,7 @@ func TestHasAnyAuthFile_KeychainFallbackFails(t *testing.T) {
 	}
 	defer func() { keychainReader = origReader }()
 
-	assert.False(t, hasAnyAuthFile(agentDef))
+	assert.False(t, hasAnyAuthFile(agentDef, tmpDir))
 }
 
 func TestCopySeedFiles_KeychainFallback(t *testing.T) {
@@ -846,7 +843,7 @@ func TestCopySeedFiles_KeychainFallback(t *testing.T) {
 	}
 	defer func() { keychainReader = origReader }()
 
-	copied, err := copySeedFiles(agentDef, sandboxDir, false) // hasAPIKey=false
+	copied, err := copySeedFiles(agentDef, sandboxDir, false, tmpDir) // hasAPIKey=false
 	require.NoError(t, err)
 	assert.True(t, copied)
 
@@ -880,7 +877,7 @@ func TestCopySeedFiles_KeychainSkippedWhenFileExists(t *testing.T) {
 	}
 	defer func() { keychainReader = origReader }()
 
-	copied, err := copySeedFiles(agentDef, sandboxDir, false)
+	copied, err := copySeedFiles(agentDef, sandboxDir, false, tmpDir)
 	require.NoError(t, err)
 	assert.True(t, copied)
 	assert.False(t, keychainCalled, "keychainReader should not be called when file exists")

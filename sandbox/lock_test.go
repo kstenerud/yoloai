@@ -35,12 +35,16 @@ func withFastRetry(t *testing.T) {
 	})
 }
 
-// testLayout returns a Layout rooted at the test's HOME-derived
-// YoloaiDir. Each test sets t.Setenv("HOME", t.TempDir()) before
-// calling this, so the lock files land in an isolated dir.
+// testLayout returns a Layout rooted at the test's current HOME.
+// Each test sets t.Setenv("HOME", t.TempDir()) before calling this,
+// so the lock files land in an isolated dir.
 func testLayout(t *testing.T) config.Layout {
 	t.Helper()
-	return config.NewLayout(config.YoloaiDir())
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal("os.UserHomeDir():", err)
+	}
+	return config.NewLayout(filepath.Join(home, ".yoloai"))
 }
 
 // TestAcquireLock_CreatesDir verifies acquireLock succeeds when the sandboxes

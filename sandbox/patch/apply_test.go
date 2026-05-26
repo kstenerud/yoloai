@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/kstenerud/yoloai/config"
 	"github.com/kstenerud/yoloai/internal/yoerrors"
 	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/sandbox/store"
@@ -26,7 +27,8 @@ import (
 func getTestRuntime(t *testing.T) runtime.Runtime {
 	t.Helper()
 	ctx := context.Background()
-	rt, err := runtime.New(ctx, "docker")
+	home, _ := os.UserHomeDir()
+	rt, err := runtime.New(ctx, "docker", config.NewLayout(filepath.Join(home, ".yoloai")))
 	if err != nil {
 		var depErr *yoerrors.DependencyError
 		if errors.As(err, &depErr) {

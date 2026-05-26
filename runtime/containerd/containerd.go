@@ -18,6 +18,7 @@ import (
 	"github.com/containerd/containerd/v2/pkg/namespaces"
 	"github.com/vishvananda/netns"
 
+	"github.com/kstenerud/yoloai/config"
 	"github.com/kstenerud/yoloai/internal/yoerrors"
 	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/runtime/caps"
@@ -64,15 +65,16 @@ func probe(_ context.Context) (bool, string) {
 }
 
 func init() {
-	runtime.Register("containerd", func(ctx context.Context) (runtime.Runtime, error) {
-		return New(ctx)
+	runtime.Register("containerd", func(ctx context.Context, layout config.Layout) (runtime.Runtime, error) {
+		return New(ctx, layout)
 	}, descriptor)
 }
 
 // Runtime implements runtime.Runtime using the containerd API.
 type Runtime struct {
 	client    *client.Client
-	namespace string // always "yoloai"
+	namespace string        // always "yoloai"
+	layout    config.Layout // DataDir-rooted path resolver (Q-W.6)
 
 	// Capability fields — built once in New(), returned by RequiredCapabilities.
 	kataShimV2           caps.HostCapability
@@ -97,9 +99,10 @@ func (r *Runtime) Descriptor() runtime.BackendDescriptor {
 
 const containerdSock = "/run/containerd/containerd.sock"
 
-// New connects to the containerd daemon and returns a Runtime.
+// New connects to the containerd daemon and returns a Runtime. layout is used
+// for all host-path resolution so the backend never reads ambient HOME.
 // It does not validate isolation prerequisites — use RequiredCapabilities for that.
-func New(_ context.Context) (*Runtime, error) {
+func New(_ context.Context, layout config.Layout) (*Runtime, error) {
 	// Fast-fail if the socket file doesn't exist — avoids a slow dial timeout
 	// on systems where containerd is not installed (e.g. macOS).
 	if _, err := os.Stat(containerdSock); err != nil {
@@ -115,7 +118,7 @@ func New(_ context.Context) (*Runtime, error) {
 		}
 		return nil, yoerrors.NewDependencyError("connect to containerd: %w\n  Is containerd running? Try: sudo systemctl start containerd", err)
 	}
-	r := &Runtime{client: c, namespace: "yoloai"}
+	r := &Runtime{client: c, namespace: "yoloai", layout: layout}
 	r.kataShimV2 = buildKataShimV2Cap()
 	r.kataFCShimV2 = buildKataFCShimV2Cap()
 	r.cniBridge = buildCNIBridgeCap()

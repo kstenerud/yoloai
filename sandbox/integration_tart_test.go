@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kstenerud/yoloai/config"
 	"github.com/kstenerud/yoloai/internal/testutil"
 	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/runtime/tart"
@@ -48,9 +49,10 @@ func tartIntegrationSetup(t *testing.T) (*sandbox.Manager, context.Context) {
 
 	ctx := context.Background()
 
-	testutil.IsolatedHome(t)
+	home := testutil.IsolatedHome(t)
+	layout := config.NewLayout(filepath.Join(home, ".yoloai"))
 
-	rt, err := tart.New(ctx)
+	rt, err := tart.New(ctx, layout)
 	if err != nil {
 		t.Skipf("Tart not available: %v", err)
 		return nil, nil

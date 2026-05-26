@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kstenerud/yoloai/config"
 	dockerrt "github.com/kstenerud/yoloai/runtime/docker"
 	sandbox "github.com/kstenerud/yoloai/sandbox"
 )
@@ -47,11 +48,12 @@ func TestMain(m *testing.M) {
 	// the tag and surfaces as "AlreadyExists after deleting the existing one".
 	// See backend-idiosyncrasies.md "Docker daemon races on AlreadyExists when
 	// rebuilding an existing tag with identical content".
-	if err := os.MkdirAll(filepath.Join(tmpHome, ".yoloai", "cache"), 0750); err != nil {
+	integLayout := config.NewLayout(filepath.Join(tmpHome, ".yoloai"))
+	if err := os.MkdirAll(integLayout.CacheDir(), 0750); err != nil {
 		fmt.Fprintf(os.Stderr, "failed to create cache dir: %v\n", err)
 		os.Exit(1)
 	}
-	dockerrt.RecordBuildChecksum("")
+	dockerrt.RecordBuildChecksum(integLayout, "")
 
 	mgr := sandbox.NewManager(rt, slog.Default(), strings.NewReader(""), io.Discard)
 	if err := mgr.EnsureSetup(ctx); err != nil {

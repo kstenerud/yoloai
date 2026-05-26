@@ -22,7 +22,6 @@ import (
 	"github.com/containerd/errdefs"
 	specs "github.com/opencontainers/runtime-spec/specs-go"
 
-	"github.com/kstenerud/yoloai/config"
 	"github.com/kstenerud/yoloai/runtime"
 )
 
@@ -43,10 +42,10 @@ func kataConfigPath(_ string) string {
 }
 
 // sandboxDirForName returns the sandbox directory path for a container name.
-func sandboxDirForName(name string) string {
+func (r *Runtime) sandboxDirForName(name string) string {
 	// Strip the "yoloai-" prefix from the container name to get the sandbox name.
 	sandboxName := strings.TrimPrefix(name, "yoloai-")
-	return config.SandboxesDir() + "/" + sandboxName
+	return r.layout.SandboxesDir() + "/" + sandboxName
 }
 
 // retryDelete calls ctr.Delete with WithSnapshotCleanup, retrying on transient
@@ -176,10 +175,10 @@ func removeKataStateDir(namespace, name string) {
 func (r *Runtime) Create(ctx context.Context, cfg runtime.InstanceConfig) error {
 	ctx = r.withNamespace(ctx)
 
-	sandboxDir := sandboxDirForName(cfg.Name)
+	sandboxDir := r.sandboxDirForName(cfg.Name)
 
 	// Set up network namespace and CNI.
-	netnsPath, err := setupCNI(ctx, sandboxDir, cfg.Name)
+	netnsPath, err := setupCNI(ctx, r.layout, sandboxDir, cfg.Name)
 	if err != nil {
 		return fmt.Errorf("setup CNI: %w", err)
 	}
@@ -188,7 +187,7 @@ func (r *Runtime) Create(ctx context.Context, cfg runtime.InstanceConfig) error 
 	var createErr error
 	defer func() {
 		if createErr != nil {
-			_ = teardownCNI(ctx, sandboxDir)
+			_ = teardownCNI(ctx, r.layout, sandboxDir)
 		}
 	}()
 
@@ -483,7 +482,7 @@ func waitForTaskRunning(ctx context.Context, task client.Task) error {
 func (r *Runtime) Stop(ctx context.Context, name string) error {
 	ctx = r.withNamespace(ctx)
 
-	sandboxDir := sandboxDirForName(name)
+	sandboxDir := r.sandboxDirForName(name)
 
 	ctr, err := r.client.LoadContainer(ctx, name)
 	if err != nil {
@@ -528,7 +527,7 @@ func (r *Runtime) Stop(ctx context.Context, name string) error {
 func (r *Runtime) Remove(ctx context.Context, name string) error {
 	ctx = r.withNamespace(ctx)
 
-	sandboxDir := sandboxDirForName(name)
+	sandboxDir := r.sandboxDirForName(name)
 
 	// Stop first (idempotent).
 	if err := r.Stop(ctx, name); err != nil {
@@ -589,5 +588,5 @@ func (r *Runtime) Inspect(ctx context.Context, name string) (runtime.InstanceInf
 
 // teardownCNIForSandbox is a helper that calls teardownCNI with the non-namespaced ctx.
 func (r *Runtime) teardownCNIForSandbox(ctx context.Context, sandboxDir string) error {
-	return teardownCNI(ctx, sandboxDir)
+	return teardownCNI(ctx, r.layout, sandboxDir)
 }

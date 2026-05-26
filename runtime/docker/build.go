@@ -28,21 +28,20 @@ import (
 // in a profile directory (for profile image staleness detection).
 const lastBuildFile = ".last-build-checksum"
 
-// baseImageChecksumPath returns the fixed path where the base image build
-// checksum is stored. Using the yoloai cache dir avoids any dependency on
-// profiles/base/ or a caller-supplied sourceDir.
-func baseImageChecksumPath() string {
-	return filepath.Join(config.CacheDir(), ".base-image-checksum")
+// baseImageChecksumPath returns the path where the base image build checksum
+// is stored under the given layout's cache directory.
+func baseImageChecksumPath(layout config.Layout) string {
+	return filepath.Join(layout.CacheDir(), ".base-image-checksum")
 }
 
 // NeedsBuild returns true if the Docker image needs to be (re)built because
 // the embedded resource files have changed since the last successful build.
-func NeedsBuild(_ string) bool {
+func NeedsBuild(layout config.Layout, _ string) bool {
 	current := buildInputsChecksum()
 	if current == "" {
 		return true // shouldn't happen with embedded resources, but be safe
 	}
-	last, err := os.ReadFile(baseImageChecksumPath()) //nolint:gosec // G304: path is ~/.yoloai/cache/
+	last, err := os.ReadFile(baseImageChecksumPath(layout)) //nolint:gosec // G304: path is DataDir/cache/
 	if err != nil {
 		return true // no record → need build
 	}
@@ -52,9 +51,9 @@ func NeedsBuild(_ string) bool {
 // RecordBuildChecksum writes the current build inputs checksum to disk.
 // Exported for testing; production code uses buildBaseImage which records
 // automatically on success.
-func RecordBuildChecksum(_ string) {
+func RecordBuildChecksum(layout config.Layout, _ string) {
 	if sum := buildInputsChecksum(); sum != "" {
-		_ = fileutil.WriteFile(baseImageChecksumPath(), []byte(sum), 0600) //nolint:gosec // G304: path is ~/.yoloai/cache/
+		_ = fileutil.WriteFile(baseImageChecksumPath(layout), []byte(sum), 0600) //nolint:gosec // G304: path is DataDir/cache/
 	}
 }
 
@@ -88,7 +87,7 @@ func buildInputsChecksum() string {
 // writer (typically os.Stderr for user-visible progress).
 // On success, records a checksum of the build inputs so NeedsBuild can
 // detect when a rebuild is required.
-func buildBaseImage(ctx context.Context, client *dockerclient.Client, sourceDir string, output io.Writer, logger *slog.Logger) error {
+func buildBaseImage(ctx context.Context, layout config.Layout, client *dockerclient.Client, sourceDir string, output io.Writer, logger *slog.Logger) error {
 	buildCtx, err := createBuildContext()
 	if err != nil {
 		return fmt.Errorf("create build context: %w", err)
@@ -111,7 +110,7 @@ func buildBaseImage(ctx context.Context, client *dockerclient.Client, sourceDir 
 	}
 
 	// Record build inputs checksum so NeedsBuild can detect stale images.
-	RecordBuildChecksum("")
+	RecordBuildChecksum(layout, "")
 
 	return nil
 }

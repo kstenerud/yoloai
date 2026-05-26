@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"maps"
 	"os"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -151,17 +150,6 @@ var knownProfileKeys = map[string]bool{
 	"workdir": true, "directories": true, // profile-only
 	// backend is kept for profile backend constraint (different from container_backend)
 	"backend": true,
-}
-
-// ConfigPath returns the path to ~/.yoloai/defaults/config.yaml.
-// Used by config get/set/reset for non-global settings.
-func ConfigPath() string {
-	return DefaultsConfigPath()
-}
-
-// GlobalConfigPath returns the path to ~/.yoloai/config.yaml.
-func GlobalConfigPath() string {
-	return filepath.Join(YoloaiDir(), "config.yaml")
 }
 
 // yoloaiConfigHandler is a function that handles a single YAML key in a YoloaiConfig.
@@ -412,15 +400,16 @@ func LoadBakedInDefaults() (*YoloaiConfig, error) {
 }
 
 // LoadDefaultsConfig loads the effective config for the no-profile path:
-// baked-in defaults merged with ~/.yoloai/defaults/config.yaml.
+// baked-in defaults merged with DataDir/defaults/config.yaml.
 // Used by sandbox.Create() when no --profile is given.
-func LoadDefaultsConfig() (*YoloaiConfig, error) {
+func LoadDefaultsConfig(layout Layout) (*YoloaiConfig, error) {
 	base, err := LoadBakedInDefaults()
 	if err != nil {
 		return nil, err
 	}
 
-	data, err := os.ReadFile(DefaultsConfigPath()) //nolint:gosec // G304: path is ~/.yoloai/defaults/config.yaml
+	cfgPath := layout.DefaultsConfigPath()
+	data, err := os.ReadFile(cfgPath) //nolint:gosec // G304: path is DataDir/defaults/config.yaml
 	if err != nil {
 		if os.IsNotExist(err) {
 			return base, nil
@@ -428,7 +417,7 @@ func LoadDefaultsConfig() (*YoloaiConfig, error) {
 		return nil, fmt.Errorf("read defaults/config.yaml: %w", err)
 	}
 
-	override, err := parseConfigYAML(data, DefaultsConfigPath(), knownDefaultsKeys)
+	override, err := parseConfigYAML(data, cfgPath, knownDefaultsKeys)
 	if err != nil {
 		return nil, err
 	}
@@ -542,12 +531,11 @@ func mergeConfigs(base, override *YoloaiConfig) *YoloaiConfig {
 	}
 }
 
-// LoadConfig reads ~/.yoloai/defaults/config.yaml and extracts known fields.
-// Kept for backwards compatibility; new code should prefer LoadDefaultsConfig.
-func LoadConfig() (*YoloaiConfig, error) {
-	configPath := ConfigPath()
+// LoadConfig reads DataDir/defaults/config.yaml and extracts known fields.
+func LoadConfig(layout Layout) (*YoloaiConfig, error) {
+	configPath := layout.DefaultsConfigPath()
 
-	data, err := os.ReadFile(configPath) //nolint:gosec // G304: path is ~/.yoloai/defaults/config.yaml
+	data, err := os.ReadFile(configPath) //nolint:gosec // G304: path is DataDir/defaults/config.yaml
 	if err != nil {
 		if os.IsNotExist(err) {
 			return &YoloaiConfig{}, nil
@@ -558,11 +546,11 @@ func LoadConfig() (*YoloaiConfig, error) {
 	return parseConfigYAML(data, configPath, nil)
 }
 
-// LoadGlobalConfig reads ~/.yoloai/config.yaml and extracts global settings.
-func LoadGlobalConfig() (*GlobalConfig, error) {
-	configPath := GlobalConfigPath()
+// LoadGlobalConfig reads DataDir/config.yaml and extracts global settings.
+func LoadGlobalConfig(layout Layout) (*GlobalConfig, error) {
+	configPath := layout.GlobalConfigPath()
 
-	data, err := os.ReadFile(configPath) //nolint:gosec // G304: path is ~/.yoloai/config.yaml
+	data, err := os.ReadFile(configPath) //nolint:gosec // G304: path is DataDir/config.yaml
 	if err != nil {
 		if os.IsNotExist(err) {
 			return &GlobalConfig{}, nil
@@ -631,11 +619,11 @@ func parseModelAliases(val *yaml.Node) (map[string]string, error) {
 	return aliases, nil
 }
 
-// ReadConfigRaw reads the raw bytes of config.yaml. Returns nil, nil if the
+// ReadConfigRaw reads the raw bytes of defaults config.yaml. Returns nil, nil if the
 // file does not exist.
-func ReadConfigRaw() ([]byte, error) {
-	configPath := ConfigPath()
-	data, err := os.ReadFile(configPath) //nolint:gosec // G304: path is ~/.yoloai/defaults/config.yaml
+func ReadConfigRaw(layout Layout) ([]byte, error) {
+	configPath := layout.DefaultsConfigPath()
+	data, err := os.ReadFile(configPath) //nolint:gosec // G304: path is DataDir/defaults/config.yaml
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
@@ -645,11 +633,11 @@ func ReadConfigRaw() ([]byte, error) {
 	return data, nil
 }
 
-// ReadGlobalConfigRaw reads the raw bytes of the global config.yaml.
+// ReadGlobalConfigRaw reads the raw bytes of DataDir/config.yaml.
 // Returns nil, nil if the file does not exist.
-func ReadGlobalConfigRaw() ([]byte, error) {
-	configPath := GlobalConfigPath()
-	data, err := os.ReadFile(configPath) //nolint:gosec // G304: path is ~/.yoloai/config.yaml
+func ReadGlobalConfigRaw(layout Layout) ([]byte, error) {
+	configPath := layout.GlobalConfigPath()
+	data, err := os.ReadFile(configPath) //nolint:gosec // G304: path is DataDir/config.yaml
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
@@ -742,13 +730,13 @@ func mergeRawYAMLInto(root *yaml.Node, data []byte) {
 // GetEffectiveConfig returns YAML showing all known settings with their
 // effective values (file overrides + defaults), plus any extra keys from the
 // files that aren't in the known settings list.
-func GetEffectiveConfig() (string, error) {
+func GetEffectiveConfig(layout Layout) (string, error) {
 	root := buildEffectiveConfigDefaults()
 
-	if err := overlayConfigFile(root, ReadGlobalConfigRaw); err != nil {
+	if err := overlayConfigFile(root, func() ([]byte, error) { return ReadGlobalConfigRaw(layout) }); err != nil {
 		return "", err
 	}
-	if err := overlayConfigFile(root, ReadConfigRaw); err != nil {
+	if err := overlayConfigFile(root, func() ([]byte, error) { return ReadConfigRaw(layout) }); err != nil {
 		return "", err
 	}
 
@@ -794,19 +782,19 @@ func setNodeValue(parent *yaml.Node, key string, val *yaml.Node) {
 
 // GetConfigValue reads a value at the given dotted path from the appropriate
 // config file. Global keys (tmux_conf, model_aliases) are read from
-// ~/.yoloai/config.yaml; profile keys from ~/.yoloai/defaults/config.yaml.
+// layout.GlobalConfigPath(); profile keys from layout.DefaultsConfigPath().
 // Returns the raw string value for scalars, or marshaled YAML for
 // mappings/sequences. Falls back to the default for known settings.
 // The bool return indicates whether the key was found (in file or defaults).
-func GetConfigValue(path string) (string, bool, error) {
+func GetConfigValue(layout Layout, path string) (string, bool, error) {
 	var configPath string
 	var defaults []knownSetting
 
 	if isGlobalKey(path) {
-		configPath = GlobalConfigPath()
+		configPath = layout.GlobalConfigPath()
 		defaults = globalKnownSettings
 	} else {
-		configPath = ConfigPath()
+		configPath = layout.DefaultsConfigPath()
 		defaults = knownSettings
 	}
 
@@ -871,12 +859,12 @@ func knownDefaultFrom(path string, defaults []knownSetting) (string, bool, error
 	return "", false, nil
 }
 
-// UpdateConfigFields updates specific fields in config.yaml using yaml.Node
+// UpdateConfigFields updates specific fields in DataDir/defaults/config.yaml using yaml.Node
 // manipulation to preserve comments and formatting.
-func UpdateConfigFields(fields map[string]string) error {
-	configPath := ConfigPath()
+func UpdateConfigFields(layout Layout, fields map[string]string) error {
+	configPath := layout.DefaultsConfigPath()
 
-	data, err := os.ReadFile(configPath) //nolint:gosec // G304: path is ~/.yoloai/defaults/config.yaml
+	data, err := os.ReadFile(configPath) //nolint:gosec // G304: path is DataDir/defaults/config.yaml
 	if err != nil {
 		return fmt.Errorf("read config.yaml: %w", err)
 	}
@@ -912,12 +900,12 @@ func UpdateConfigFields(fields map[string]string) error {
 	return nil
 }
 
-// DeleteConfigField removes a key at a dotted path from config.yaml.
+// DeleteConfigField removes a key at a dotted path from DataDir/defaults/config.yaml.
 // Returns nil if the file doesn't exist or the key is already absent.
-func DeleteConfigField(path string) error {
-	configPath := ConfigPath()
+func DeleteConfigField(layout Layout, path string) error {
+	configPath := layout.DefaultsConfigPath()
 
-	data, err := os.ReadFile(configPath) //nolint:gosec // G304: path is ~/.yoloai/defaults/config.yaml
+	data, err := os.ReadFile(configPath) //nolint:gosec // G304: path is DataDir/defaults/config.yaml
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil // nothing to delete
@@ -952,12 +940,12 @@ func DeleteConfigField(path string) error {
 	return nil
 }
 
-// UpdateGlobalConfigFields updates specific fields in the global config.yaml
+// UpdateGlobalConfigFields updates specific fields in DataDir/config.yaml
 // using yaml.Node manipulation to preserve comments and formatting.
-func UpdateGlobalConfigFields(fields map[string]string) error {
-	configPath := GlobalConfigPath()
+func UpdateGlobalConfigFields(layout Layout, fields map[string]string) error {
+	configPath := layout.GlobalConfigPath()
 
-	data, err := os.ReadFile(configPath) //nolint:gosec // G304: path is ~/.yoloai/config.yaml
+	data, err := os.ReadFile(configPath) //nolint:gosec // G304: path is DataDir/config.yaml
 	if err != nil {
 		return fmt.Errorf("read global config.yaml: %w", err)
 	}
@@ -991,12 +979,12 @@ func UpdateGlobalConfigFields(fields map[string]string) error {
 	return nil
 }
 
-// DeleteGlobalConfigField removes a key at a dotted path from the global config.yaml.
+// DeleteGlobalConfigField removes a key at a dotted path from DataDir/config.yaml.
 // Returns nil if the file doesn't exist or the key is already absent.
-func DeleteGlobalConfigField(path string) error {
-	configPath := GlobalConfigPath()
+func DeleteGlobalConfigField(layout Layout, path string) error {
+	configPath := layout.GlobalConfigPath()
 
-	data, err := os.ReadFile(configPath) //nolint:gosec // G304: path is ~/.yoloai/config.yaml
+	data, err := os.ReadFile(configPath) //nolint:gosec // G304: path is DataDir/config.yaml
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil
@@ -1148,27 +1136,47 @@ func sortMappingNode(node *yaml.Node) {
 // Supports two forms:
 //   - String (scalar): base directory path, e.g. "~/.claude" or "${HOME}"
 //   - List (sequence): explicit file/dir paths, e.g. ["~/.claude/settings.json"]
+//
+// Paths are stored raw (no tilde/env expansion). Call ExpandAgentFiles to expand
+// before use.
 func parseAgentFilesNode(val *yaml.Node) (*AgentFilesConfig, error) {
 	switch val.Kind {
 	case yaml.ScalarNode:
-		expanded, err := ExpandPath(val.Value)
-		if err != nil {
-			return nil, err
-		}
-		return &AgentFilesConfig{BaseDir: expanded}, nil
+		return &AgentFilesConfig{BaseDir: val.Value}, nil
 	case yaml.SequenceNode:
 		files := make([]string, 0, len(val.Content))
 		for _, item := range val.Content {
-			expanded, err := ExpandPath(item.Value)
-			if err != nil {
-				return nil, err
-			}
-			files = append(files, expanded)
+			files = append(files, item.Value)
 		}
 		return &AgentFilesConfig{Files: files}, nil
 	default:
 		return nil, fmt.Errorf("expected string or list, got %v", val.Kind)
 	}
+}
+
+// ExpandAgentFiles returns a copy of af with all paths expanded (tilde and
+// ${VAR} substitution). homeDir is used to expand leading "~".
+// Returns nil if af is nil.
+func ExpandAgentFiles(af *AgentFilesConfig, homeDir string) (*AgentFilesConfig, error) {
+	if af == nil {
+		return nil, nil
+	}
+	if af.IsStringForm() {
+		expanded, err := ExpandPath(af.BaseDir, homeDir)
+		if err != nil {
+			return nil, err
+		}
+		return &AgentFilesConfig{BaseDir: expanded}, nil
+	}
+	files := make([]string, 0, len(af.Files))
+	for _, f := range af.Files {
+		expanded, err := ExpandPath(f, homeDir)
+		if err != nil {
+			return nil, err
+		}
+		files = append(files, expanded)
+	}
+	return &AgentFilesConfig{Files: files}, nil
 }
 
 // splitDottedPath splits "a.b.c" into ["a", "b", "c"].

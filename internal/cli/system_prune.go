@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/kstenerud/yoloai/config"
 	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/sandbox"
 	"github.com/kstenerud/yoloai/sandbox/store"
@@ -392,7 +391,7 @@ type brokenSandbox struct {
 
 // scanSandboxes reads ~/.yoloai/sandboxes/ and classifies each entry.
 func scanSandboxes() (knownInstances []string, broken []brokenSandbox) {
-	sandboxesDir := config.SandboxesDir()
+	sandboxesDir := cliLayout().SandboxesDir()
 	entries, err := os.ReadDir(sandboxesDir)
 	if err != nil {
 		return nil, nil // directory might not exist yet

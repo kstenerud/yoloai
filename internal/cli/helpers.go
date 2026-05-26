@@ -27,7 +27,7 @@ func newRuntime(ctx context.Context, backend string) (runtime.Runtime, error) {
 	if backend == "" {
 		backend = "docker"
 	}
-	return runtime.New(ctx, backend)
+	return runtime.New(ctx, backend, cliLayout())
 }
 
 // Flag resolution pattern: each resolve* pair follows the same priority:
@@ -61,7 +61,7 @@ func resolveBackend(cmd *cobra.Command) string {
 	}
 
 	// Read isolation and os from flags, falling back to config.
-	cfg, _ := config.LoadDefaultsConfig()
+	cfg, _ := config.LoadDefaultsConfig(cliLayout())
 	var cfgIsolation, cfgOS string
 	if cfg != nil {
 		cfgIsolation = cfg.Isolation
@@ -104,7 +104,7 @@ func flagStr(cmd *cobra.Command, name string) string {
 
 // resolveContainerBackendConfig reads the container_backend config preference.
 func resolveContainerBackendConfig() string {
-	cfg, err := config.LoadDefaultsConfig()
+	cfg, err := config.LoadDefaultsConfig(cliLayout())
 	if err == nil {
 		return cfg.ContainerBackend
 	}
@@ -150,7 +150,7 @@ func resolveAgent(cmd *cobra.Command) string {
 // resolveAgentFromConfig reads the agent from defaults config, falling back
 // to "claude".
 func resolveAgentFromConfig() string {
-	cfg, err := config.LoadDefaultsConfig()
+	cfg, err := config.LoadDefaultsConfig(cliLayout())
 	if err == nil && cfg.Agent != "" {
 		return cfg.Agent
 	}
@@ -169,7 +169,7 @@ func resolveModel(cmd *cobra.Command) string {
 // resolveModelFromConfig reads the model from defaults config, falling back
 // to "" (no default model — agent uses its own).
 func resolveModelFromConfig() string {
-	cfg, err := config.LoadDefaultsConfig()
+	cfg, err := config.LoadDefaultsConfig(cliLayout())
 	if err == nil && cfg.Model != "" {
 		return cfg.Model
 	}

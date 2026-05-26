@@ -57,7 +57,7 @@ func cliLayout() config.Layout {
 //
 // Honors SUDO_USER (when running under sudo and uid 0) so a user who
 // runs "sudo yoloai ..." doesn't lose their existing configuration
-// to /root/.yoloai/. Mirrors config.HomeDir().
+// to /root/.yoloai/.
 func homeBasedDataDir() string {
 	if sudoUser := os.Getenv("SUDO_USER"); sudoUser != "" && os.Getuid() == 0 {
 		u, err := user.Lookup(sudoUser)

@@ -63,11 +63,11 @@ func (m *Manager) resolveProfileConfig(ctx context.Context, opts *CreateOptions,
 	if err := config.ValidateProfileName(opts.Profile); err != nil {
 		return nil, err
 	}
-	chain, err := config.ResolveProfileChain(opts.Profile)
+	chain, err := config.ResolveProfileChain(m.layout, opts.Profile)
 	if err != nil {
 		return nil, err
 	}
-	merged, err := config.MergeProfileChain(ycfg, chain)
+	merged, err := config.MergeProfileChain(m.layout, ycfg, chain)
 	if err != nil {
 		return nil, fmt.Errorf("merge profile chain: %w", err)
 	}
@@ -75,15 +75,16 @@ func (m *Manager) resolveProfileConfig(ctx context.Context, opts *CreateOptions,
 		return nil, err
 	}
 
-	if err := applyMergedProfileToOpts(opts, agentDef, merged, pr, ycfg.Agent); err != nil {
+	homeDir := filepath.Dir(m.layout.DataDir)
+	if err := applyMergedProfileToOpts(opts, agentDef, merged, pr, ycfg.Agent, homeDir); err != nil {
 		return nil, err
 	}
 
 	pr.name = opts.Profile
-	pr.imageRef = config.ResolveProfileImage(opts.Profile, chain)
+	pr.imageRef = config.ResolveProfileImage(m.layout, opts.Profile, chain)
 
 	// Build profile image if needed (Docker only)
-	if err := EnsureProfileImage(ctx, m.runtime, m.layout, opts.Profile, AutoBuildSecrets(), m.output, m.logger, false); err != nil {
+	if err := EnsureProfileImage(ctx, m.runtime, m.layout, opts.Profile, AutoBuildSecrets(filepath.Dir(m.layout.DataDir)), m.output, m.logger, false); err != nil {
 		return nil, fmt.Errorf("build profile image: %w", err)
 	}
 
@@ -91,9 +92,10 @@ func (m *Manager) resolveProfileConfig(ctx context.Context, opts *CreateOptions,
 }
 
 // applyMergedProfileToOpts applies merged profile values to opts and pr.
+// homeDir is used for ~ expansion in profile workdir and directory paths.
 // baseAgent is the agent name from the base config (ycfg.Agent), used to
 // detect whether the CLI override has been applied.
-func applyMergedProfileToOpts(opts *CreateOptions, agentDef **agent.Definition, merged *config.MergedConfig, pr *profileResult, baseAgent string) error {
+func applyMergedProfileToOpts(opts *CreateOptions, agentDef **agent.Definition, merged *config.MergedConfig, pr *profileResult, baseAgent string, homeDir string) error {
 	// Apply merged values where CLI didn't override
 	if opts.Agent == baseAgent && merged.Agent != "" {
 		opts.Agent = merged.Agent
@@ -118,7 +120,7 @@ func applyMergedProfileToOpts(opts *CreateOptions, agentDef **agent.Definition, 
 
 	// Profile workdir: use if CLI didn't provide one
 	if opts.Workdir.Path == "" && merged.Workdir != nil {
-		wdPath, err := ExpandPath(merged.Workdir.Path)
+		wdPath, err := ExpandPath(merged.Workdir.Path, homeDir)
 		if err != nil {
 			return fmt.Errorf("expand profile workdir path: %w", err)
 		}
@@ -130,7 +132,7 @@ func applyMergedProfileToOpts(opts *CreateOptions, agentDef **agent.Definition, 
 	}
 
 	// Profile directories: prepend before CLI aux dirs
-	if err := prependProfileDirs(opts, merged.Directories); err != nil {
+	if err := prependProfileDirs(opts, merged.Directories, homeDir); err != nil {
 		return err
 	}
 
@@ -156,10 +158,11 @@ func applyMergedProfileToOpts(opts *CreateOptions, agentDef **agent.Definition, 
 }
 
 // prependProfileDirs prepends profile directory specs before the CLI aux dirs.
-func prependProfileDirs(opts *CreateOptions, profileDirs []config.ProfileDir) error {
+// homeDir is used for ~ expansion in profile directory paths.
+func prependProfileDirs(opts *CreateOptions, profileDirs []config.ProfileDir, homeDir string) error {
 	var dirs []DirSpec
 	for _, pd := range profileDirs {
-		dirPath, err := ExpandPath(pd.Path)
+		dirPath, err := ExpandPath(pd.Path, homeDir)
 		if err != nil {
 			return fmt.Errorf("expand profile directory path: %w", err)
 		}
@@ -274,7 +277,7 @@ func (m *Manager) parseAndValidateDirs(ctx context.Context, opts CreateOptions, 
 		return nil, nil, err
 	}
 
-	if err := checkDirSafety(workdir, auxDirs, m.output); err != nil {
+	if err := checkDirSafety(workdir, auxDirs, m.output, filepath.Dir(m.layout.DataDir)); err != nil {
 		return nil, nil, err
 	}
 
@@ -296,7 +299,7 @@ func (m *Manager) parseAndValidateDirs(ctx context.Context, opts CreateOptions, 
 // checkAuthAndLocalhostWarnings performs auth checks and localhost URL warnings.
 func (m *Manager) checkAuthAndLocalhostWarnings(agentDef *agent.Definition, mergedEnv map[string]string, cfgModel string, opts CreateOptions, credOverrides map[string]string) error {
 	hasAPIKey := hasAnyAPIKey(agentDef, credOverrides)
-	hasAuth := hasAnyAuthFile(agentDef)
+	hasAuth := hasAnyAuthFile(agentDef, filepath.Dir(m.layout.DataDir))
 	hasAuthHint := hasAnyAuthHint(agentDef, mergedEnv, credOverrides)
 	if err := checkAgentAuth(agentDef, hasAPIKey, hasAuth, hasAuthHint, m.output); err != nil {
 		return err
@@ -367,8 +370,9 @@ func buildAuxDirs(auxSpecs []DirSpec) ([]*DirArg, error) {
 }
 
 // checkDirSafety checks for dangerous directories in workdir and aux dirs.
-func checkDirSafety(workdir *DirArg, auxDirs []*DirArg, output io.Writer) error {
-	if workspace.IsDangerousDir(workdir.Path) {
+// homeDir is used to detect if the user's home directory is being mounted.
+func checkDirSafety(workdir *DirArg, auxDirs []*DirArg, output io.Writer, homeDir string) error {
+	if workspace.IsDangerousDir(workdir.Path, homeDir) {
 		if workdir.Force {
 			fmt.Fprintf(output, "WARNING: mounting dangerous directory %s\n", workdir.Path) //nolint:errcheck // best-effort output
 		} else {
@@ -376,7 +380,7 @@ func checkDirSafety(workdir *DirArg, auxDirs []*DirArg, output io.Writer) error 
 		}
 	}
 	for _, ad := range auxDirs {
-		if workspace.IsDangerousDir(ad.Path) {
+		if workspace.IsDangerousDir(ad.Path, homeDir) {
 			if ad.Force {
 				fmt.Fprintf(output, "WARNING: mounting dangerous directory %s\n", ad.Path) //nolint:errcheck // best-effort output
 			} else {
@@ -745,7 +749,7 @@ func (m *Manager) resolveAndApplyArchetype(ctx context.Context, opts *CreateOpti
 	workdir := opts.Workdir.Path
 
 	// Step 1: Load .yoloai.yaml
-	yamlCfg, _, yamlErr := archetype.LoadYoloAIYaml(workdir)
+	yamlCfg, _, yamlErr := archetype.LoadYoloAIYaml(workdir, filepath.Dir(m.layout.DataDir))
 	if yamlErr != nil {
 		return "", nil, nil, nil, fmt.Errorf("load .yoloai.yaml: %w", yamlErr)
 	}
@@ -913,7 +917,7 @@ func (m *Manager) applyDevcontainerArchetype(ctx context.Context, opts *CreateOp
 	if workdirMountPath == "" {
 		workdirMountPath = opts.Workdir.Path
 	}
-	dcMounts, dcMountWarnings := dc.FilterMounts(workdirMountPath)
+	dcMounts, dcMountWarnings := dc.FilterMounts(workdirMountPath, filepath.Dir(m.layout.DataDir))
 	if len(dcMounts) > 0 {
 		bullets = append(bullets, fmt.Sprintf("%d devcontainer mounts passed through", len(dcMounts)))
 	}
@@ -1082,10 +1086,11 @@ func printArchetypeOutput(output io.Writer, arch archetype.Archetype, source str
 }
 
 // validateAndExpandMounts validates and expands config mount paths.
-func validateAndExpandMounts(mounts []string) ([]string, error) {
+// homeDir is used to expand leading "~" in host paths.
+func validateAndExpandMounts(mounts []string, homeDir string) ([]string, error) {
 	result := make([]string, len(mounts))
 	for i, m := range mounts {
-		spec, err := parseConfigMount(m)
+		spec, err := parseConfigMount(m, homeDir)
 		if err != nil {
 			return nil, fmt.Errorf("invalid mount %q: %w", m, err)
 		}

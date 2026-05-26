@@ -18,7 +18,7 @@ func TestTart_New_ReturnsRuntime(t *testing.T) {
 	rt, _ := tartSetup(t)
 	require.NotNil(t, rt)
 	assert.NotEmpty(t, rt.tartBin, "should have located tart CLI")
-	assert.NotEmpty(t, rt.sandboxDir, "should have set sandbox base dir")
+	assert.NotEmpty(t, rt.layout.SandboxesDir(), "should have set sandbox base dir")
 }
 
 func TestTart_Descriptor_AdvertisesVMCapabilities(t *testing.T) {

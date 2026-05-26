@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kstenerud/yoloai/config"
 	"github.com/kstenerud/yoloai/internal/testutil"
 	dockerrt "github.com/kstenerud/yoloai/runtime/docker"
 )
@@ -94,11 +95,12 @@ func TestMain(m *testing.M) {
 	// See backend-idiosyncrasies.md "Docker daemon races on AlreadyExists when
 	// rebuilding an existing tag with identical content".
 	if testutil.IntegrationBackendName() == "" || testutil.IntegrationBackendName() == "docker" {
-		if err := os.MkdirAll(filepath.Join(tmpHome, ".yoloai", "cache"), 0750); err != nil {
+		integLayout := config.NewLayout(filepath.Join(tmpHome, ".yoloai"))
+		if err := os.MkdirAll(integLayout.CacheDir(), 0750); err != nil {
 			fmt.Fprintf(os.Stderr, "failed to create cache dir: %v\n", err)
 			os.Exit(1)
 		}
-		dockerrt.RecordBuildChecksum("")
+		dockerrt.RecordBuildChecksum(integLayout, "")
 	}
 
 	// Bootstrap: create a throwaway sandbox to trigger EnsureSetup (image build).

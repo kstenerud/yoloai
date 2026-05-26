@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/kstenerud/yoloai/config"
 	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/runtime/caps"
 )
@@ -107,7 +108,8 @@ func TestKataConfigPath(t *testing.T) {
 
 // TestSandboxDirForName verifies the sandbox directory path derivation.
 func TestSandboxDirForName(t *testing.T) {
-	dir := sandboxDirForName("yoloai-mybox")
+	r := &Runtime{layout: config.NewLayout("/home/testuser/.yoloai")}
+	dir := r.sandboxDirForName("yoloai-mybox")
 	assert.Contains(t, dir, "mybox")
 	assert.NotContains(t, dir, "yoloai-mybox") // prefix stripped
 }

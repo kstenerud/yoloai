@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/kstenerud/yoloai/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -109,17 +110,20 @@ func TestStreamBuildOutput_EmptyStream(t *testing.T) {
 }
 
 func TestNeedsBuild_NoChecksum(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	assert.True(t, NeedsBuild(""))
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	layout := config.NewLayout(filepath.Join(tmp, ".yoloai"))
+	assert.True(t, NeedsBuild(layout, ""))
 }
 
 func TestNeedsBuild_AfterRecord(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
+	layout := config.NewLayout(filepath.Join(tmp, ".yoloai"))
 	// Ensure cache dir exists (normally created by EnsureSetup).
 	require.NoError(t, os.MkdirAll(filepath.Join(tmp, ".yoloai", "cache"), 0750))
-	RecordBuildChecksum("")
-	assert.False(t, NeedsBuild(""))
+	RecordBuildChecksum(layout, "")
+	assert.False(t, NeedsBuild(layout, ""))
 }
 
 func TestBuildInputsChecksum_Deterministic(t *testing.T) {

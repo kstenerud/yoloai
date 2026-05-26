@@ -7,10 +7,11 @@ import (
 	"testing"
 )
 
-func setupProfileDir(t *testing.T, name, content string) string {
+// setupProfileDir creates a test profile and returns (home, layout).
+// Layout has DataDir = home/.yoloai.
+func setupProfileDir(t *testing.T, name, content string) (string, Layout) {
 	t.Helper()
 	home := t.TempDir()
-	t.Setenv("HOME", home)
 
 	dir := filepath.Join(home, ".yoloai", "profiles", name)
 	if err := os.MkdirAll(dir, 0750); err != nil {
@@ -19,7 +20,7 @@ func setupProfileDir(t *testing.T, name, content string) string {
 	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600); err != nil {
 		t.Fatal(err)
 	}
-	return home
+	return home, NewLayout(filepath.Join(home, ".yoloai"))
 }
 
 func TestValidateProfileName(t *testing.T) {
@@ -70,9 +71,9 @@ env:
   GO111MODULE: "on"
   GOPATH: /home/yoloai/go
 `
-	setupProfileDir(t, "test-profile", yaml)
+	_, layout := setupProfileDir(t, "test-profile", yaml)
 
-	cfg, err := LoadProfile("test-profile")
+	cfg, err := LoadProfile(layout, "test-profile")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,9 +104,9 @@ func TestLoadProfile_ExtendsIgnored(t *testing.T) {
 	yaml := `extends: go-dev
 agent: claude
 `
-	setupProfileDir(t, "go-web", yaml)
+	_, layout := setupProfileDir(t, "go-web", yaml)
 
-	cfg, err := LoadProfile("go-web")
+	cfg, err := LoadProfile(layout, "go-web")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,9 +123,9 @@ workdir:
   mode: copy
   mount: /opt/myapp
 `
-	setupProfileDir(t, "wd-profile", yaml)
+	_, layout := setupProfileDir(t, "wd-profile", yaml)
 
-	cfg, err := LoadProfile("wd-profile")
+	cfg, err := LoadProfile(layout, "wd-profile")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,9 +152,9 @@ directories:
     mount: /usr/local/lib/shared
   - path: /home/user/types
 `
-	setupProfileDir(t, "dirs-profile", yaml)
+	_, layout := setupProfileDir(t, "dirs-profile", yaml)
 
-	cfg, err := LoadProfile("dirs-profile")
+	cfg, err := LoadProfile(layout, "dirs-profile")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,9 +181,9 @@ func TestLoadProfile_TartImage(t *testing.T) {
 tart:
   image: my-custom-vm
 `
-	setupProfileDir(t, "tart-profile", yaml)
+	_, layout := setupProfileDir(t, "tart-profile", yaml)
 
-	cfg, err := LoadProfile("tart-profile")
+	cfg, err := LoadProfile(layout, "tart-profile")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -198,9 +199,9 @@ func TestLoadProfile_EnvExpansion(t *testing.T) {
 env:
   MY_VAR: "${TEST_VAR}"
 `
-	setupProfileDir(t, "env-profile", yaml)
+	_, layout := setupProfileDir(t, "env-profile", yaml)
 
-	cfg, err := LoadProfile("env-profile")
+	cfg, err := LoadProfile(layout, "env-profile")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -212,18 +213,18 @@ env:
 
 func TestLoadProfile_MissingFile(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	layout := NewLayout(filepath.Join(home, ".yoloai"))
 
-	_, err := LoadProfile("nonexistent")
+	_, err := LoadProfile(layout, "nonexistent")
 	if err == nil {
 		t.Fatal("expected error for missing profile")
 	}
 }
 
 func TestLoadProfile_EmptyFile(t *testing.T) {
-	setupProfileDir(t, "empty-profile", "")
+	_, layout := setupProfileDir(t, "empty-profile", "")
 
-	cfg, err := LoadProfile("empty-profile")
+	cfg, err := LoadProfile(layout, "empty-profile")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -240,9 +241,9 @@ future_field: some_value
 another_unknown:
   nested: true
 `
-	setupProfileDir(t, "unknown-profile", yaml)
+	_, layout := setupProfileDir(t, "unknown-profile", yaml)
 
-	cfg, err := LoadProfile("unknown-profile")
+	cfg, err := LoadProfile(layout, "unknown-profile")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -252,9 +253,9 @@ another_unknown:
 }
 
 func TestResolveProfileChain_SingleProfile(t *testing.T) {
-	setupProfileDir(t, "go-dev", "agent: claude\n")
+	_, layout := setupProfileDir(t, "go-dev", "agent: claude\n")
 
-	chain, err := ResolveProfileChain("go-dev")
+	chain, err := ResolveProfileChain(layout, "go-dev")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -265,7 +266,7 @@ func TestResolveProfileChain_SingleProfile(t *testing.T) {
 }
 
 func TestResolveProfileChain_TwoLevelChain(t *testing.T) {
-	home := setupProfileDir(t, "go-dev", "agent: claude\n")
+	home, layout := setupProfileDir(t, "go-dev", "agent: claude\n")
 
 	// Create go-web extending go-dev
 	goWebDir := filepath.Join(home, ".yoloai", "profiles", "go-web")
@@ -276,7 +277,7 @@ func TestResolveProfileChain_TwoLevelChain(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	chain, err := ResolveProfileChain("go-web")
+	chain, err := ResolveProfileChain(layout, "go-web")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -287,7 +288,7 @@ func TestResolveProfileChain_TwoLevelChain(t *testing.T) {
 }
 
 func TestResolveProfileChain_ThreeLevelChain(t *testing.T) {
-	home := setupProfileDir(t, "level1", "agent: claude\n")
+	home, layout := setupProfileDir(t, "level1", "agent: claude\n")
 
 	for _, pair := range []struct{ name, extends string }{
 		{"level2", "level1"},
@@ -302,7 +303,7 @@ func TestResolveProfileChain_ThreeLevelChain(t *testing.T) {
 		}
 	}
 
-	chain, err := ResolveProfileChain("level3")
+	chain, err := ResolveProfileChain(layout, "level3")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -319,7 +320,7 @@ func TestResolveProfileChain_ThreeLevelChain(t *testing.T) {
 }
 
 func TestResolveProfileChain_CycleDetection(t *testing.T) {
-	home := setupProfileDir(t, "a", "extends: b\n")
+	home, layout := setupProfileDir(t, "a", "extends: b\n")
 	bDir := filepath.Join(home, ".yoloai", "profiles", "b")
 	if err := os.MkdirAll(bDir, 0750); err != nil {
 		t.Fatal(err)
@@ -328,7 +329,7 @@ func TestResolveProfileChain_CycleDetection(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err := ResolveProfileChain("a")
+	_, err := ResolveProfileChain(layout, "a")
 	if err == nil {
 		t.Fatal("expected cycle error")
 	}
@@ -339,14 +340,14 @@ func TestResolveProfileChain_CycleDetection(t *testing.T) {
 
 func TestResolveProfileChain_MissingProfile(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	layout := NewLayout(filepath.Join(home, ".yoloai"))
 
 	// Create profiles dir
 	if err := os.MkdirAll(filepath.Join(home, ".yoloai", "profiles"), 0750); err != nil {
 		t.Fatal(err)
 	}
 
-	_, err := ResolveProfileChain("nonexistent")
+	_, err := ResolveProfileChain(layout, "nonexistent")
 	if err == nil {
 		t.Fatal("expected error for missing profile")
 	}
@@ -357,9 +358,9 @@ func TestResolveProfileChain_MissingProfile(t *testing.T) {
 
 func TestResolveProfileChain_MissingIntermediate(t *testing.T) {
 	// Create profile that extends a non-existent parent
-	setupProfileDir(t, "child", "extends: nonexistent\n")
+	_, layout := setupProfileDir(t, "child", "extends: nonexistent\n")
 
-	_, err := ResolveProfileChain("child")
+	_, err := ResolveProfileChain(layout, "child")
 	if err == nil {
 		t.Fatal("expected error for missing intermediate profile")
 	}
@@ -369,7 +370,7 @@ func TestResolveProfileChain_MissingIntermediate(t *testing.T) {
 }
 
 func TestListProfiles(t *testing.T) {
-	home := setupProfileDir(t, "go-dev", "agent: claude\n")
+	home, layout := setupProfileDir(t, "go-dev", "agent: claude\n")
 
 	// Add another profile
 	dir := filepath.Join(home, ".yoloai", "profiles", "node-dev")
@@ -386,7 +387,7 @@ func TestListProfiles(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	names, err := ListProfiles()
+	names, err := ListProfiles(layout)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -398,14 +399,14 @@ func TestListProfiles(t *testing.T) {
 
 func TestListProfiles_Empty(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	layout := NewLayout(filepath.Join(home, ".yoloai"))
 
 	// Create profiles dir with only base
 	if err := os.MkdirAll(filepath.Join(home, ".yoloai", "profiles", "base"), 0750); err != nil {
 		t.Fatal(err)
 	}
 
-	names, err := ListProfiles()
+	names, err := ListProfiles(layout)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -415,42 +416,42 @@ func TestListProfiles_Empty(t *testing.T) {
 }
 
 func TestProfileExists(t *testing.T) {
-	setupProfileDir(t, "exists-profile", "agent: claude\n")
+	_, layout := setupProfileDir(t, "exists-profile", "agent: claude\n")
 
-	if !ProfileExists("exists-profile") {
+	if !ProfileExists(layout, "exists-profile") {
 		t.Error("ProfileExists returned false for existing profile")
 	}
-	if ProfileExists("nonexistent") {
+	if ProfileExists(layout, "nonexistent") {
 		t.Error("ProfileExists returned true for nonexistent profile")
 	}
 }
 
 func TestProfileHasDockerfile(t *testing.T) {
-	home := setupProfileDir(t, "with-docker", "agent: claude\n")
+	home, layout := setupProfileDir(t, "with-docker", "agent: claude\n")
 	dir := filepath.Join(home, ".yoloai", "profiles", "with-docker")
 	if err := os.WriteFile(filepath.Join(dir, "Dockerfile"), []byte("FROM yoloai-base\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 
-	if !ProfileHasDockerfile("with-docker") {
+	if !ProfileHasDockerfile(layout, "with-docker") {
 		t.Error("ProfileHasDockerfile returned false for profile with Dockerfile")
 	}
 
-	setupProfileDir(t, "without-docker", "agent: claude\n")
-	if ProfileHasDockerfile("without-docker") {
+	_, layout2 := setupProfileDir(t, "without-docker", "agent: claude\n")
+	if ProfileHasDockerfile(layout2, "without-docker") {
 		t.Error("ProfileHasDockerfile returned true for profile without Dockerfile")
 	}
 }
 
 func TestMergeProfileChain_SingleProfile(t *testing.T) {
-	setupProfileDir(t, "simple", "agent: gemini\nmodel: flash\n")
+	_, layout := setupProfileDir(t, "simple", "agent: gemini\nmodel: flash\n")
 
 	base := &YoloaiConfig{
 		Agent: "claude",
 	}
 
 	chain := []string{"base", "simple"}
-	merged, err := MergeProfileChain(base, chain)
+	merged, err := MergeProfileChain(layout, base, chain)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -464,7 +465,7 @@ func TestMergeProfileChain_SingleProfile(t *testing.T) {
 }
 
 func TestMergeProfileChain_ScalarOverrideCascading(t *testing.T) {
-	home := setupProfileDir(t, "parent", "agent: gemini\nmodel: flash\n")
+	home, layout := setupProfileDir(t, "parent", "agent: gemini\nmodel: flash\n")
 
 	childDir := filepath.Join(home, ".yoloai", "profiles", "child")
 	if err := os.MkdirAll(childDir, 0750); err != nil {
@@ -477,7 +478,7 @@ func TestMergeProfileChain_ScalarOverrideCascading(t *testing.T) {
 	base := &YoloaiConfig{Agent: "claude", Model: "sonnet"}
 
 	chain := []string{"base", "parent", "child"}
-	merged, err := MergeProfileChain(base, chain)
+	merged, err := MergeProfileChain(layout, base, chain)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -493,7 +494,7 @@ func TestMergeProfileChain_ScalarOverrideCascading(t *testing.T) {
 }
 
 func TestMergeProfileChain_EnvMerge(t *testing.T) {
-	home := setupProfileDir(t, "env-parent", "env:\n  GO: \"1\"\n  SHARED: parent\n")
+	home, layout := setupProfileDir(t, "env-parent", "env:\n  GO: \"1\"\n  SHARED: parent\n")
 
 	childDir := filepath.Join(home, ".yoloai", "profiles", "env-child")
 	if err := os.MkdirAll(childDir, 0750); err != nil {
@@ -507,7 +508,7 @@ func TestMergeProfileChain_EnvMerge(t *testing.T) {
 	base := &YoloaiConfig{Env: map[string]string{"BASE_VAR": "base"}}
 
 	chain := []string{"base", "env-parent", "env-child"}
-	merged, err := MergeProfileChain(base, chain)
+	merged, err := MergeProfileChain(layout, base, chain)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -527,7 +528,7 @@ func TestMergeProfileChain_EnvMerge(t *testing.T) {
 }
 
 func TestMergeProfileChain_PortsAdditive(t *testing.T) {
-	home := setupProfileDir(t, "ports-parent", "ports:\n  - \"8080:8080\"\n")
+	home, layout := setupProfileDir(t, "ports-parent", "ports:\n  - \"8080:8080\"\n")
 
 	childDir := filepath.Join(home, ".yoloai", "profiles", "ports-child")
 	if err := os.MkdirAll(childDir, 0750); err != nil {
@@ -541,7 +542,7 @@ func TestMergeProfileChain_PortsAdditive(t *testing.T) {
 	base := &YoloaiConfig{}
 
 	chain := []string{"base", "ports-parent", "ports-child"}
-	merged, err := MergeProfileChain(base, chain)
+	merged, err := MergeProfileChain(layout, base, chain)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -555,7 +556,7 @@ func TestMergeProfileChain_PortsAdditive(t *testing.T) {
 }
 
 func TestMergeProfileChain_WorkdirChildWins(t *testing.T) {
-	home := setupProfileDir(t, "wd-parent", "workdir:\n  path: /parent/dir\n  mode: copy\n")
+	home, layout := setupProfileDir(t, "wd-parent", "workdir:\n  path: /parent/dir\n  mode: copy\n")
 
 	childDir := filepath.Join(home, ".yoloai", "profiles", "wd-child")
 	if err := os.MkdirAll(childDir, 0750); err != nil {
@@ -569,7 +570,7 @@ func TestMergeProfileChain_WorkdirChildWins(t *testing.T) {
 	base := &YoloaiConfig{}
 
 	chain := []string{"base", "wd-parent", "wd-child"}
-	merged, err := MergeProfileChain(base, chain)
+	merged, err := MergeProfileChain(layout, base, chain)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -586,7 +587,7 @@ func TestMergeProfileChain_WorkdirChildWins(t *testing.T) {
 }
 
 func TestMergeProfileChain_DirectoriesAdditive(t *testing.T) {
-	home := setupProfileDir(t, "dirs-parent", "directories:\n  - path: /parent/lib\n    mode: rw\n")
+	home, layout := setupProfileDir(t, "dirs-parent", "directories:\n  - path: /parent/lib\n    mode: rw\n")
 
 	childDir := filepath.Join(home, ".yoloai", "profiles", "dirs-child")
 	if err := os.MkdirAll(childDir, 0750); err != nil {
@@ -600,7 +601,7 @@ func TestMergeProfileChain_DirectoriesAdditive(t *testing.T) {
 	base := &YoloaiConfig{}
 
 	chain := []string{"base", "dirs-parent", "dirs-child"}
-	merged, err := MergeProfileChain(base, chain)
+	merged, err := MergeProfileChain(layout, base, chain)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -617,12 +618,12 @@ func TestMergeProfileChain_DirectoriesAdditive(t *testing.T) {
 }
 
 func TestMergeProfileChain_NilEnv(t *testing.T) {
-	setupProfileDir(t, "no-env", "agent: claude\n")
+	_, layout := setupProfileDir(t, "no-env", "agent: claude\n")
 
 	base := &YoloaiConfig{}
 
 	chain := []string{"base", "no-env"}
-	merged, err := MergeProfileChain(base, chain)
+	merged, err := MergeProfileChain(layout, base, chain)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -633,12 +634,12 @@ func TestMergeProfileChain_NilEnv(t *testing.T) {
 }
 
 func TestMergeProfileChain_BackendConstraint(t *testing.T) {
-	setupProfileDir(t, "constrained", "backend: docker\nagent: claude\n")
+	_, layout := setupProfileDir(t, "constrained", "backend: docker\nagent: claude\n")
 
 	base := &YoloaiConfig{}
 
 	chain := []string{"base", "constrained"}
-	merged, err := MergeProfileChain(base, chain)
+	merged, err := MergeProfileChain(layout, base, chain)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -666,14 +667,14 @@ func TestValidateProfileBackend(t *testing.T) {
 }
 
 func TestResolveProfileImage(t *testing.T) {
-	home := setupProfileDir(t, "with-df", "agent: claude\n")
+	home, layout := setupProfileDir(t, "with-df", "agent: claude\n")
 	dir := filepath.Join(home, ".yoloai", "profiles", "with-df")
 	if err := os.WriteFile(filepath.Join(dir, "Dockerfile"), []byte("FROM yoloai-base\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 
 	// Profile with Dockerfile → yoloai-<name>
-	img := ResolveProfileImage("with-df", []string{"base", "with-df"})
+	img := ResolveProfileImage(layout, "with-df", []string{"base", "with-df"})
 	if img != "yoloai-with-df" {
 		t.Errorf("image = %q, want %q", img, "yoloai-with-df")
 	}
@@ -687,14 +688,14 @@ func TestResolveProfileImage(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	img = ResolveProfileImage("no-df", []string{"base", "with-df", "no-df"})
+	img = ResolveProfileImage(layout, "no-df", []string{"base", "with-df", "no-df"})
 	if img != "yoloai-with-df" {
 		t.Errorf("image = %q, want %q (should inherit parent's)", img, "yoloai-with-df")
 	}
 
 	// No Dockerfiles at all → base
-	setupProfileDir(t, "plain", "agent: claude\n")
-	img = ResolveProfileImage("plain", []string{"base", "plain"})
+	_, layout3 := setupProfileDir(t, "plain", "agent: claude\n")
+	img = ResolveProfileImage(layout3, "plain", []string{"base", "plain"})
 	if img != "yoloai-base" {
 		t.Errorf("image = %q, want %q", img, "yoloai-base")
 	}
@@ -706,9 +707,9 @@ resources:
   cpus: "2"
   memory: 4g
 `
-	setupProfileDir(t, "res-profile", yaml)
+	_, layout := setupProfileDir(t, "res-profile", yaml)
 
-	cfg, err := LoadProfile("res-profile")
+	cfg, err := LoadProfile(layout, "res-profile")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -725,7 +726,7 @@ resources:
 }
 
 func TestMergeProfileChain_ResourcesPerFieldOverride(t *testing.T) {
-	home := setupProfileDir(t, "res-parent", "resources:\n  cpus: \"4\"\n  memory: 8g\n")
+	home, layout := setupProfileDir(t, "res-parent", "resources:\n  cpus: \"4\"\n  memory: 8g\n")
 
 	childDir := filepath.Join(home, ".yoloai", "profiles", "res-child")
 	if err := os.MkdirAll(childDir, 0750); err != nil {
@@ -740,7 +741,7 @@ func TestMergeProfileChain_ResourcesPerFieldOverride(t *testing.T) {
 	base := &YoloaiConfig{}
 
 	chain := []string{"base", "res-parent", "res-child"}
-	merged, err := MergeProfileChain(base, chain)
+	merged, err := MergeProfileChain(layout, base, chain)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -757,14 +758,14 @@ func TestMergeProfileChain_ResourcesPerFieldOverride(t *testing.T) {
 }
 
 func TestMergeProfileChain_ResourcesFromBaseConfig(t *testing.T) {
-	setupProfileDir(t, "no-res", "agent: claude\n")
+	_, layout := setupProfileDir(t, "no-res", "agent: claude\n")
 
 	base := &YoloaiConfig{
 		Resources: &ResourceLimits{CPUs: "2", Memory: "4g"},
 	}
 
 	chain := []string{"base", "no-res"}
-	merged, err := MergeProfileChain(base, chain)
+	merged, err := MergeProfileChain(layout, base, chain)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -786,9 +787,9 @@ agent_args:
   aider: "--no-auto-commits --no-pretty"
   claude: "--allowedTools '*'"
 `
-	setupProfileDir(t, "args-profile", yaml)
+	_, layout := setupProfileDir(t, "args-profile", yaml)
 
-	cfg, err := LoadProfile("args-profile")
+	cfg, err := LoadProfile(layout, "args-profile")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -802,7 +803,7 @@ agent_args:
 }
 
 func TestMergeProfileChain_AgentArgsMerge(t *testing.T) {
-	home := setupProfileDir(t, "args-parent", "agent_args:\n  aider: \"--no-auto-commits\"\n  claude: \"--verbose\"\n")
+	home, layout := setupProfileDir(t, "args-parent", "agent_args:\n  aider: \"--no-auto-commits\"\n  claude: \"--verbose\"\n")
 
 	childDir := filepath.Join(home, ".yoloai", "profiles", "args-child")
 	if err := os.MkdirAll(childDir, 0750); err != nil {
@@ -816,7 +817,7 @@ func TestMergeProfileChain_AgentArgsMerge(t *testing.T) {
 	base := &YoloaiConfig{AgentArgs: map[string]string{"aider": "--base-flag"}}
 
 	chain := []string{"base", "args-parent", "args-child"}
-	merged, err := MergeProfileChain(base, chain)
+	merged, err := MergeProfileChain(layout, base, chain)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -836,12 +837,12 @@ func TestMergeProfileChain_AgentArgsMerge(t *testing.T) {
 }
 
 func TestMergeProfileChain_AgentArgsFromBaseOnly(t *testing.T) {
-	setupProfileDir(t, "no-args", "agent: claude\n")
+	_, layout := setupProfileDir(t, "no-args", "agent: claude\n")
 
 	base := &YoloaiConfig{AgentArgs: map[string]string{"aider": "--no-auto-commits"}}
 
 	chain := []string{"base", "no-args"}
-	merged, err := MergeProfileChain(base, chain)
+	merged, err := MergeProfileChain(layout, base, chain)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -853,9 +854,9 @@ func TestMergeProfileChain_AgentArgsFromBaseOnly(t *testing.T) {
 
 func TestLoadProfile_AgentFilesString(t *testing.T) {
 	yaml := "agent_files: /shared/agent-configs\n"
-	setupProfileDir(t, "af-str", yaml)
+	_, layout := setupProfileDir(t, "af-str", yaml)
 
-	cfg, err := LoadProfile("af-str")
+	cfg, err := LoadProfile(layout, "af-str")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -870,9 +871,9 @@ func TestLoadProfile_AgentFilesString(t *testing.T) {
 
 func TestLoadProfile_AgentFilesList(t *testing.T) {
 	yaml := "agent_files:\n  - /path/file1.json\n  - /path/file2.json\n"
-	setupProfileDir(t, "af-list", yaml)
+	_, layout := setupProfileDir(t, "af-list", yaml)
 
-	cfg, err := LoadProfile("af-list")
+	cfg, err := LoadProfile(layout, "af-list")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -889,7 +890,7 @@ func TestLoadProfile_AgentFilesList(t *testing.T) {
 }
 
 func TestMergeProfileChain_AgentFilesChildReplaces(t *testing.T) {
-	home := setupProfileDir(t, "af-parent", "agent_files: /parent/dir\n")
+	home, layout := setupProfileDir(t, "af-parent", "agent_files: /parent/dir\n")
 
 	childDir := filepath.Join(home, ".yoloai", "profiles", "af-child")
 	if err := os.MkdirAll(childDir, 0750); err != nil {
@@ -903,7 +904,7 @@ func TestMergeProfileChain_AgentFilesChildReplaces(t *testing.T) {
 	base := &YoloaiConfig{}
 
 	chain := []string{"base", "af-parent", "af-child"}
-	merged, err := MergeProfileChain(base, chain)
+	merged, err := MergeProfileChain(layout, base, chain)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -921,7 +922,7 @@ func TestMergeProfileChain_AgentFilesChildReplaces(t *testing.T) {
 }
 
 func TestMergeProfileChain_AgentFilesOmittedKeepsParent(t *testing.T) {
-	home := setupProfileDir(t, "af-keep-parent", "agent_files: /parent/dir\n")
+	home, layout := setupProfileDir(t, "af-keep-parent", "agent_files: /parent/dir\n")
 
 	childDir := filepath.Join(home, ".yoloai", "profiles", "af-keep-child")
 	if err := os.MkdirAll(childDir, 0750); err != nil {
@@ -935,7 +936,7 @@ func TestMergeProfileChain_AgentFilesOmittedKeepsParent(t *testing.T) {
 	base := &YoloaiConfig{}
 
 	chain := []string{"base", "af-keep-parent", "af-keep-child"}
-	merged, err := MergeProfileChain(base, chain)
+	merged, err := MergeProfileChain(layout, base, chain)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -958,9 +959,9 @@ setup:
   - tailscale up --authkey=key123
   - echo ready
 `
-	setupProfileDir(t, "recipe-profile", yaml)
+	_, layout := setupProfileDir(t, "recipe-profile", yaml)
 
-	cfg, err := LoadProfile("recipe-profile")
+	cfg, err := LoadProfile(layout, "recipe-profile")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -982,9 +983,9 @@ func TestLoadProfile_RecipeEnvExpansion(t *testing.T) {
 setup:
   - "tailscale up --authkey=${TEST_AUTHKEY}"
 `
-	setupProfileDir(t, "recipe-env", yaml)
+	_, layout := setupProfileDir(t, "recipe-env", yaml)
 
-	cfg, err := LoadProfile("recipe-env")
+	cfg, err := LoadProfile(layout, "recipe-env")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -995,14 +996,14 @@ setup:
 }
 
 func TestMergeProfileChain_PortsFromBaseConfig(t *testing.T) {
-	setupProfileDir(t, "ports-base", "agent: claude\n")
+	_, layout := setupProfileDir(t, "ports-base", "agent: claude\n")
 
 	base := &YoloaiConfig{
 		Ports: []string{"9090:9090"},
 	}
 
 	chain := []string{"base", "ports-base"}
-	merged, err := MergeProfileChain(base, chain)
+	merged, err := MergeProfileChain(layout, base, chain)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1013,14 +1014,14 @@ func TestMergeProfileChain_PortsFromBaseConfig(t *testing.T) {
 }
 
 func TestMergeProfileChain_PortsBaseAndProfile(t *testing.T) {
-	setupProfileDir(t, "ports-both", "ports:\n  - \"3000:3000\"\n")
+	_, layout := setupProfileDir(t, "ports-both", "ports:\n  - \"3000:3000\"\n")
 
 	base := &YoloaiConfig{
 		Ports: []string{"9090:9090"},
 	}
 
 	chain := []string{"base", "ports-both"}
-	merged, err := MergeProfileChain(base, chain)
+	merged, err := MergeProfileChain(layout, base, chain)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1032,7 +1033,7 @@ func TestMergeProfileChain_PortsBaseAndProfile(t *testing.T) {
 }
 
 func TestMergeProfileChain_RecipeAdditive(t *testing.T) {
-	home := setupProfileDir(t, "recipe-parent", "cap_add:\n  - NET_ADMIN\ndevices:\n  - /dev/net/tun\nsetup:\n  - echo parent\n")
+	home, layout := setupProfileDir(t, "recipe-parent", "cap_add:\n  - NET_ADMIN\ndevices:\n  - /dev/net/tun\nsetup:\n  - echo parent\n")
 
 	childDir := filepath.Join(home, ".yoloai", "profiles", "recipe-child")
 	if err := os.MkdirAll(childDir, 0750); err != nil {
@@ -1045,7 +1046,7 @@ func TestMergeProfileChain_RecipeAdditive(t *testing.T) {
 
 	base := &YoloaiConfig{}
 	chain := []string{"base", "recipe-parent", "recipe-child"}
-	merged, err := MergeProfileChain(base, chain)
+	merged, err := MergeProfileChain(layout, base, chain)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1066,7 +1067,7 @@ func TestMergeProfileChain_RecipeAdditive(t *testing.T) {
 }
 
 func TestMergeProfileChain_RecipeBaseOnly(t *testing.T) {
-	setupProfileDir(t, "recipe-none", "agent: claude\n")
+	_, layout := setupProfileDir(t, "recipe-none", "agent: claude\n")
 
 	base := &YoloaiConfig{
 		CapAdd:  []string{"NET_ADMIN"},
@@ -1075,7 +1076,7 @@ func TestMergeProfileChain_RecipeBaseOnly(t *testing.T) {
 	}
 
 	chain := []string{"base", "recipe-none"}
-	merged, err := MergeProfileChain(base, chain)
+	merged, err := MergeProfileChain(layout, base, chain)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1092,11 +1093,11 @@ func TestMergeProfileChain_RecipeBaseOnly(t *testing.T) {
 }
 
 func TestMergeProfileChain_RecipeProfileOnly(t *testing.T) {
-	setupProfileDir(t, "recipe-only", "cap_add:\n  - SYS_ADMIN\nsetup:\n  - echo profile\n")
+	_, layout := setupProfileDir(t, "recipe-only", "cap_add:\n  - SYS_ADMIN\nsetup:\n  - echo profile\n")
 
 	base := &YoloaiConfig{}
 	chain := []string{"base", "recipe-only"}
-	merged, err := MergeProfileChain(base, chain)
+	merged, err := MergeProfileChain(layout, base, chain)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1113,7 +1114,7 @@ func TestMergeProfileChain_RecipeProfileOnly(t *testing.T) {
 }
 
 func TestMergeProfileChain_RecipeThreeLevel(t *testing.T) {
-	home := setupProfileDir(t, "r-level1", "setup:\n  - echo level1\n")
+	home, layout := setupProfileDir(t, "r-level1", "setup:\n  - echo level1\n")
 
 	for _, pair := range []struct{ name, extends, yaml string }{
 		{"r-level2", "r-level1", "extends: r-level1\nsetup:\n  - echo level2\n"},
@@ -1130,7 +1131,7 @@ func TestMergeProfileChain_RecipeThreeLevel(t *testing.T) {
 
 	base := &YoloaiConfig{Setup: []string{"echo base"}}
 	chain := []string{"base", "r-level1", "r-level2", "r-level3"}
-	merged, err := MergeProfileChain(base, chain)
+	merged, err := MergeProfileChain(layout, base, chain)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1147,14 +1148,14 @@ func TestMergeProfileChain_RecipeThreeLevel(t *testing.T) {
 }
 
 func TestMergeProfileChain_AgentFilesFromBaseConfig(t *testing.T) {
-	setupProfileDir(t, "af-base-only", "agent: claude\n")
+	_, layout := setupProfileDir(t, "af-base-only", "agent: claude\n")
 
 	base := &YoloaiConfig{
 		AgentFiles: &AgentFilesConfig{BaseDir: "/base/config/dir"},
 	}
 
 	chain := []string{"base", "af-base-only"}
-	merged, err := MergeProfileChain(base, chain)
+	merged, err := MergeProfileChain(layout, base, chain)
 	if err != nil {
 		t.Fatal(err)
 	}

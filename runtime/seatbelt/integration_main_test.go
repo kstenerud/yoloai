@@ -9,7 +9,10 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"testing"
+
+	"github.com/kstenerud/yoloai/config"
 )
 
 // TestMain verifies macOS + sandbox-exec are available before running
@@ -17,7 +20,9 @@ import (
 // the Docker/Podman pattern); on macOS without sandbox-exec the tests skip
 // with a diagnostic line.
 func TestMain(m *testing.M) {
-	rt, err := New(context.Background())
+	tmp, _ := os.MkdirTemp("", "seatbelt-probe-*")
+	defer os.RemoveAll(tmp) //nolint:errcheck // best-effort cleanup
+	rt, err := New(context.Background(), config.NewLayout(filepath.Join(tmp, ".yoloai")), tmp)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Seatbelt unavailable, skipping integration tests: %v\n", err)
 		os.Exit(0)

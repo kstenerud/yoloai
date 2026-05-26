@@ -100,7 +100,7 @@ func writeBugReportSystem(w io.Writer) {
 	}
 
 	// yoloai data directory and disk usage
-	dataDir := config.YoloaiDir()
+	dataDir := cliLayout().YoloaiDir()
 	fmt.Fprintf(w, "- **Data dir:** `%s`\n", dataDir) //nolint:errcheck
 	if size, err := sandbox.DirSize(dataDir); err == nil {
 		fmt.Fprintf(w, "- **Disk usage:** %s\n", sandbox.FormatSize(size)) //nolint:errcheck
@@ -172,8 +172,8 @@ func writeBugReportConfig(w io.Writer, reportType string) {
 		fmt.Fprintln(w) //nolint:errcheck
 	}
 
-	writeConfigBlock("Global config", config.GlobalConfigPath(), config.ReadGlobalConfigRaw)
-	writeConfigBlock("Profile config", config.ConfigPath(), config.ReadConfigRaw)
+	writeConfigBlock("Global config", cliLayout().GlobalConfigPath(), func() ([]byte, error) { return config.ReadGlobalConfigRaw(cliLayout()) })
+	writeConfigBlock("Profile config", cliLayout().DefaultsConfigPath(), func() ([]byte, error) { return config.ReadConfigRaw(cliLayout()) })
 
 	fmt.Fprintln(w, "</details>") //nolint:errcheck
 	fmt.Fprintln(w)               //nolint:errcheck

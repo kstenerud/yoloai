@@ -55,7 +55,7 @@ func runConfigGet(cmd *cobra.Command, args []string) error {
 
 // configGetAll prints all effective configuration values.
 func configGetAll(cmd *cobra.Command) error {
-	out, err := config.GetEffectiveConfig()
+	out, err := config.GetEffectiveConfig(cliLayout())
 	if err != nil {
 		return err
 	}
@@ -72,7 +72,7 @@ func configGetAll(cmd *cobra.Command) error {
 
 // configGetKey prints a single configuration value by dotted key.
 func configGetKey(cmd *cobra.Command, key string) error {
-	value, found, err := config.GetConfigValue(key)
+	value, found, err := config.GetConfigValue(cliLayout(), key)
 	if err != nil {
 		return err
 	}
@@ -116,14 +116,14 @@ func runConfigSet(cmd *cobra.Command, args []string) error {
 		if err := ensureGlobalConfig(); err != nil {
 			return err
 		}
-		if err := config.UpdateGlobalConfigFields(map[string]string{key: value}); err != nil {
+		if err := config.UpdateGlobalConfigFields(cliLayout(), map[string]string{key: value}); err != nil {
 			return err
 		}
 	} else {
 		if err := ensureProfileConfig(); err != nil {
 			return err
 		}
-		if err := config.UpdateConfigFields(map[string]string{key: value}); err != nil {
+		if err := config.UpdateConfigFields(cliLayout(), map[string]string{key: value}); err != nil {
 			return err
 		}
 	}
@@ -140,7 +140,7 @@ func runConfigSet(cmd *cobra.Command, args []string) error {
 
 // ensureGlobalConfig creates the global config file if it does not exist.
 func ensureGlobalConfig() error {
-	configPath := config.GlobalConfigPath()
+	configPath := cliLayout().GlobalConfigPath()
 	if _, err := os.Stat(configPath); !os.IsNotExist(err) {
 		return nil
 	}
@@ -153,7 +153,7 @@ func ensureGlobalConfig() error {
 
 // ensureProfileConfig creates the profile config file if it does not exist.
 func ensureProfileConfig() error {
-	configPath := config.ConfigPath()
+	configPath := cliLayout().DefaultsConfigPath()
 	if _, err := os.Stat(configPath); !os.IsNotExist(err) {
 		return nil
 	}
@@ -183,9 +183,9 @@ Default settings are stored in ~/.yoloai/defaults/config.yaml.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var err error
 			if config.IsGlobalKey(args[0]) {
-				err = config.DeleteGlobalConfigField(args[0])
+				err = config.DeleteGlobalConfigField(cliLayout(), args[0])
 			} else {
-				err = config.DeleteConfigField(args[0])
+				err = config.DeleteConfigField(cliLayout(), args[0])
 			}
 			if err != nil {
 				return err

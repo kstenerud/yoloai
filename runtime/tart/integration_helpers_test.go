@@ -7,8 +7,10 @@ package tart
 
 import (
 	"context"
+	"path/filepath"
 	"testing"
 
+	"github.com/kstenerud/yoloai/config"
 	"github.com/kstenerud/yoloai/internal/testutil"
 	"github.com/stretchr/testify/require"
 )
@@ -18,10 +20,10 @@ import (
 // returns a *Runtime ready for use.
 func tartSetup(t *testing.T) (*Runtime, context.Context) {
 	t.Helper()
-	testutil.IsolatedHome(t)
+	home := testutil.IsolatedHome(t)
 	ctx := context.Background()
 
-	rt, err := New(ctx)
+	rt, err := New(ctx, config.NewLayout(filepath.Join(home, ".yoloai")))
 	require.NoError(t, err, "tart backend must be available on this platform")
 
 	return rt, ctx

@@ -42,7 +42,7 @@ func EnsureProfileImage(ctx context.Context, rt runtime.Runtime, layout config.L
 		return nil
 	}
 
-	chain, err := config.ResolveProfileChain(profileName)
+	chain, err := config.ResolveProfileChain(layout, profileName)
 	if err != nil {
 		return err
 	}
@@ -60,8 +60,8 @@ func EnsureProfileImage(ctx context.Context, rt runtime.Runtime, layout config.L
 			continue
 		}
 
-		profileDir := config.ProfileDirPath(name)
-		if !config.ProfileHasDockerfile(name) {
+		profileDir := layout.ProfileDir(name)
+		if !config.ProfileHasDockerfile(layout, name) {
 			// No Dockerfile — skip, but pass along prevDir unchanged
 			continue
 		}
@@ -84,8 +84,9 @@ func EnsureProfileImage(ctx context.Context, rt runtime.Runtime, layout config.L
 // AutoBuildSecrets detects well-known credential files on the host and
 // returns Docker BuildKit --secret specs for them. Returns nil if nothing
 // is detected.
-func AutoBuildSecrets() []string {
-	npmrcPath := ExpandTilde("~/.npmrc")
+// homeDir is used for ~ expansion; callers derive it from filepath.Dir(layout.DataDir).
+func AutoBuildSecrets(homeDir string) []string {
+	npmrcPath := ExpandTilde("~/.npmrc", homeDir)
 	if _, err := os.Stat(npmrcPath); err == nil {
 		return []string{"id=npmrc,src=" + npmrcPath}
 	}
@@ -95,7 +96,8 @@ func AutoBuildSecrets() []string {
 // ValidateBuildSecret validates a Docker BuildKit --secret spec string.
 // The expected format is "id=<name>,src=<path>". Tilde expansion is applied
 // to the src= value. Returns the expanded spec or an error.
-func ValidateBuildSecret(spec string) (string, error) {
+// homeDir is used for ~ expansion; callers derive it from filepath.Dir(layout.DataDir).
+func ValidateBuildSecret(spec, homeDir string) (string, error) {
 	parts := strings.Split(spec, ",")
 
 	var id, src string
@@ -115,7 +117,7 @@ func ValidateBuildSecret(spec string) (string, error) {
 		return "", fmt.Errorf("build secret %q: missing src= field", spec)
 	}
 
-	expanded := config.ExpandTilde(src)
+	expanded := config.ExpandTilde(src, homeDir)
 	if _, err := os.Stat(expanded); err != nil {
 		return "", fmt.Errorf("build secret %q: source file not found: %s", spec, expanded)
 	}

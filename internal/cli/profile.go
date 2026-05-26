@@ -49,11 +49,11 @@ func newProfileCreateCmd() *cobra.Command {
 				return err
 			}
 
-			if config.ProfileExists(name) {
+			if config.ProfileExists(cliLayout(), name) {
 				return sandbox.NewUsageError("profile %q already exists", name)
 			}
 
-			dir := config.ProfileDirPath(name)
+			dir := cliLayout().ProfileDir(name)
 			if err := fileutil.MkdirAll(dir, 0750); err != nil {
 				return fmt.Errorf("create profile directory: %w", err)
 			}
@@ -107,7 +107,7 @@ func newProfileListCmd() *cobra.Command {
 		Short: "List profiles",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			names, err := config.ListProfiles()
+			names, err := config.ListProfiles(cliLayout())
 			if err != nil {
 				return err
 			}
@@ -120,13 +120,13 @@ func newProfileListCmd() *cobra.Command {
 			w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
 			fmt.Fprintln(w, "NAME\tIMAGE\tAGENT") //nolint:errcheck
 			for _, name := range names {
-				profile, loadErr := config.LoadProfile(name)
+				profile, loadErr := config.LoadProfile(cliLayout(), name)
 				agent := ""
 				image := "no"
 				if loadErr == nil {
 					agent = profile.Agent
 				}
-				if config.ProfileHasDockerfile(name) {
+				if config.ProfileHasDockerfile(cliLayout(), name) {
 					image = "yes"
 				}
 				fmt.Fprintf(w, "%s\t%s\t%s\n", name, image, agent) //nolint:errcheck
@@ -143,7 +143,7 @@ func newProfileInfoCmd() *cobra.Command {
 		Short: "Show profile configuration",
 		Args:  cobra.ExactArgs(1),
 		ValidArgsFunction: func(_ *cobra.Command, _ []string, _ string) ([]string, cobra.ShellCompDirective) {
-			names, err := config.ListProfiles()
+			names, err := config.ListProfiles(cliLayout())
 			if err != nil {
 				return nil, cobra.ShellCompDirectiveError
 			}
@@ -199,22 +199,22 @@ func resolveProfileInfo(name string) (chain []string, merged *config.MergedConfi
 	if name == "base" {
 		chain = []string{"base"}
 		image = "yoloai-base"
-		hasDockerfile = config.ProfileHasDockerfile("base")
+		hasDockerfile = config.ProfileHasDockerfile(cliLayout(), "base")
 		baseCfg, err := config.LoadBakedInDefaults()
 		if err != nil {
 			return nil, nil, "", false, err
 		}
-		merged, err = config.MergeProfileChain(baseCfg, chain)
+		merged, err = config.MergeProfileChain(cliLayout(), baseCfg, chain)
 		return chain, merged, image, hasDockerfile, err
 	}
 
 	if err = config.ValidateProfileName(name); err != nil {
 		return nil, nil, "", false, err
 	}
-	if !config.ProfileExists(name) {
+	if !config.ProfileExists(cliLayout(), name) {
 		return nil, nil, "", false, sandbox.NewUsageError("profile %q does not exist", name)
 	}
-	chain, err = config.ResolveProfileChain(name)
+	chain, err = config.ResolveProfileChain(cliLayout(), name)
 	if err != nil {
 		return nil, nil, "", false, err
 	}
@@ -222,12 +222,12 @@ func resolveProfileInfo(name string) (chain []string, merged *config.MergedConfi
 	if err != nil {
 		return nil, nil, "", false, err
 	}
-	merged, err = config.MergeProfileChain(baseCfg, chain)
+	merged, err = config.MergeProfileChain(cliLayout(), baseCfg, chain)
 	if err != nil {
 		return nil, nil, "", false, err
 	}
-	image = config.ResolveProfileImage(name, chain)
-	hasDockerfile = config.ProfileHasDockerfile(name)
+	image = config.ResolveProfileImage(cliLayout(), name, chain)
+	hasDockerfile = config.ProfileHasDockerfile(cliLayout(), name)
 	return chain, merged, image, hasDockerfile, nil
 }
 
@@ -242,7 +242,7 @@ func runProfileInfoDiff(cmd *cobra.Command, name string, chain []string, merged 
 		if err != nil {
 			return err
 		}
-		parentMerged, err = config.MergeProfileChain(baseCfg, parentChain)
+		parentMerged, err = config.MergeProfileChain(cliLayout(), baseCfg, parentChain)
 		if err != nil {
 			return err
 		}
@@ -660,7 +660,7 @@ func newProfileDeleteCmd() *cobra.Command {
 				return err
 			}
 
-			if !config.ProfileExists(name) {
+			if !config.ProfileExists(cliLayout(), name) {
 				return sandbox.NewUsageError("profile %q does not exist", name)
 			}
 
@@ -683,7 +683,7 @@ func newProfileDeleteCmd() *cobra.Command {
 				}
 			}
 
-			dir := config.ProfileDirPath(name)
+			dir := cliLayout().ProfileDir(name)
 			if err := os.RemoveAll(dir); err != nil { //nolint:gosec // G703: dir is derived from validated profile name
 				return fmt.Errorf("remove profile directory: %w", err)
 			}
@@ -721,7 +721,7 @@ func writeProfileImageCleanupHints(w io.Writer, image string) {
 
 // findSandboxesWithProfile scans sandbox meta.json files for profile references.
 func findSandboxesWithProfile(profileName string) []string {
-	sandboxesDir := filepath.Join(config.HomeDir(), ".yoloai", "sandboxes")
+	sandboxesDir := cliLayout().SandboxesDir()
 	entries, err := os.ReadDir(sandboxesDir)
 	if err != nil {
 		return nil

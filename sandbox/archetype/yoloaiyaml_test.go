@@ -15,7 +15,7 @@ import (
 
 func TestLoadYoloAIYaml_Missing(t *testing.T) {
 	dir := t.TempDir()
-	cfg, found, err := LoadYoloAIYaml(dir)
+	cfg, found, err := LoadYoloAIYaml(dir, "/home/user")
 	require.NoError(t, err)
 	assert.False(t, found)
 	assert.Nil(t, cfg)
@@ -31,7 +31,7 @@ requires:
 `
 	require.NoError(t, os.WriteFile(filepath.Join(dir, ".yoloai.yaml"), []byte(content), 0600))
 
-	cfg, found, err := LoadYoloAIYaml(dir)
+	cfg, found, err := LoadYoloAIYaml(dir, "/home/user")
 	require.NoError(t, err)
 	assert.True(t, found)
 	require.NotNil(t, cfg)
@@ -45,7 +45,7 @@ func TestLoadYoloAIYaml_UnknownArchetype(t *testing.T) {
 	content := "archetype: invalid-archetype\n"
 	require.NoError(t, os.WriteFile(filepath.Join(dir, ".yoloai.yaml"), []byte(content), 0600))
 
-	cfg, found, err := LoadYoloAIYaml(dir)
+	cfg, found, err := LoadYoloAIYaml(dir, "/home/user")
 	require.Error(t, err)
 	assert.False(t, found)
 	assert.Nil(t, cfg)
@@ -60,7 +60,7 @@ func TestLoadYoloAIYaml_TildeExpansion(t *testing.T) {
 	content := "mounts:\n  - ~/mydata:/container/mydata:ro\n"
 	require.NoError(t, os.WriteFile(filepath.Join(dir, ".yoloai.yaml"), []byte(content), 0600))
 
-	cfg, found, err := LoadYoloAIYaml(dir)
+	cfg, found, err := LoadYoloAIYaml(dir, homeDir)
 	require.NoError(t, err)
 	assert.True(t, found)
 	require.Len(t, cfg.Mounts, 1)
@@ -73,7 +73,7 @@ func TestLoadYoloAIYaml_NoArchetype(t *testing.T) {
 	content := "mounts:\n  - /data:/data:ro\n"
 	require.NoError(t, os.WriteFile(filepath.Join(dir, ".yoloai.yaml"), []byte(content), 0600))
 
-	cfg, found, err := LoadYoloAIYaml(dir)
+	cfg, found, err := LoadYoloAIYaml(dir, "/home/user")
 	require.NoError(t, err)
 	assert.True(t, found)
 	require.NotNil(t, cfg)
@@ -87,7 +87,7 @@ func TestLoadYoloAIYaml_AllValidArchetypes(t *testing.T) {
 			content := "archetype: " + arch + "\n"
 			require.NoError(t, os.WriteFile(filepath.Join(dir, ".yoloai.yaml"), []byte(content), 0600))
 
-			cfg, found, err := LoadYoloAIYaml(dir)
+			cfg, found, err := LoadYoloAIYaml(dir, "/home/user")
 			require.NoError(t, err)
 			assert.True(t, found)
 			require.NotNil(t, cfg)

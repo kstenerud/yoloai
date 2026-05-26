@@ -6,6 +6,7 @@ package cli
 import (
 	"fmt"
 	"log/slog"
+	"path/filepath"
 	"strings"
 
 	"github.com/kstenerud/yoloai/sandbox"
@@ -74,7 +75,7 @@ func runApplyCmd(cmd *cobra.Command, args []string) error {
 	patchesDir, _ := cmd.Flags().GetString("patches")
 	if patchesDir != "" {
 		var expandErr error
-		patchesDir, expandErr = sandbox.ExpandPath(patchesDir)
+		patchesDir, expandErr = sandbox.ExpandPath(patchesDir, filepath.Dir(cliLayout().DataDir))
 		if expandErr != nil {
 			return fmt.Errorf("expand patches path: %w", expandErr)
 		}

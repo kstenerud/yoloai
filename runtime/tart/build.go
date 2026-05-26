@@ -171,9 +171,9 @@ func (r *Runtime) resolveBaseImage(_ string) string {
 }
 
 // tartBaseChecksumPath returns the path where the tart base image build
-// checksum is stored.
-func tartBaseChecksumPath() string {
-	return filepath.Join(config.CacheDir(), ".tart-base-checksum")
+// checksum is stored under the given layout's cache directory.
+func (r *Runtime) tartBaseChecksumPath() string {
+	return filepath.Join(r.layout.CacheDir(), ".tart-base-checksum")
 }
 
 // provisionChecksum computes a SHA-256 of the provision commands and the base
@@ -199,7 +199,7 @@ func (r *Runtime) needsBuild(ctx context.Context, baseImage string) (bool, error
 		return true, nil
 	}
 	current := r.provisionChecksum(baseImage)
-	last, err := os.ReadFile(tartBaseChecksumPath()) //nolint:gosec // G304: path is ~/.yoloai/cache/
+	last, err := os.ReadFile(r.tartBaseChecksumPath()) //nolint:gosec // G304: path is DataDir/cache/
 	if err != nil {
 		return true, nil //nolint:nilerr // no record → rebuild; read error is expected on first run
 	}
@@ -210,7 +210,7 @@ func (r *Runtime) needsBuild(ctx context.Context, baseImage string) (bool, error
 // needsBuild calls can skip an unnecessary rebuild.
 func (r *Runtime) recordBuildChecksum(baseImage string) {
 	sum := r.provisionChecksum(baseImage)
-	_ = fileutil.WriteFile(tartBaseChecksumPath(), []byte(sum), 0600) //nolint:gosec // G304: path is ~/.yoloai/cache/
+	_ = fileutil.WriteFile(r.tartBaseChecksumPath(), []byte(sum), 0600) //nolint:gosec // G304: path is DataDir/cache/
 }
 
 // pullImage pulls a Tart VM image from a registry.

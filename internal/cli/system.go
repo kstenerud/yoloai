@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 
 	"github.com/kstenerud/yoloai/config"
 	"github.com/kstenerud/yoloai/runtime"
@@ -88,7 +89,7 @@ func runSystemBuildProfile(cmd *cobra.Command, profileName string, secretFlags [
 	if err := config.ValidateProfileName(profileName); err != nil {
 		return err
 	}
-	if !config.ProfileExists(profileName) {
+	if !config.ProfileExists(cliLayout(), profileName) {
 		return sandbox.NewUsageError("profile %q does not exist", profileName)
 	}
 	if err := checkProfileHasDockerfile(profileName); err != nil {
@@ -96,9 +97,10 @@ func runSystemBuildProfile(cmd *cobra.Command, profileName string, secretFlags [
 	}
 
 	// Validate user-provided secrets and expand tildes
+	homeDir := filepath.Dir(cliLayout().DataDir)
 	var secrets []string
 	for _, s := range secretFlags {
-		expanded, secretErr := sandbox.ValidateBuildSecret(s)
+		expanded, secretErr := sandbox.ValidateBuildSecret(s, homeDir)
 		if secretErr != nil {
 			return secretErr
 		}
@@ -106,7 +108,7 @@ func runSystemBuildProfile(cmd *cobra.Command, profileName string, secretFlags [
 	}
 
 	// Prepend auto-detected secrets
-	secrets = append(sandbox.AutoBuildSecrets(), secrets...)
+	secrets = append(sandbox.AutoBuildSecrets(homeDir), secrets...)
 
 	return withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
 		buildOut := os.Stderr
@@ -126,15 +128,15 @@ func runSystemBuildProfile(cmd *cobra.Command, profileName string, secretFlags [
 
 // checkProfileHasDockerfile returns an error if the profile and all its ancestors lack a Dockerfile.
 func checkProfileHasDockerfile(profileName string) error {
-	if config.ProfileHasDockerfile(profileName) {
+	if config.ProfileHasDockerfile(cliLayout(), profileName) {
 		return nil
 	}
-	chain, chainErr := config.ResolveProfileChain(profileName)
+	chain, chainErr := config.ResolveProfileChain(cliLayout(), profileName)
 	if chainErr != nil {
 		return chainErr
 	}
 	for _, name := range chain {
-		if name != "base" && config.ProfileHasDockerfile(name) {
+		if name != "base" && config.ProfileHasDockerfile(cliLayout(), name) {
 			return nil
 		}
 	}
@@ -143,7 +145,7 @@ func checkProfileHasDockerfile(profileName string) error {
 
 // runSystemBuildBase builds the base image.
 func runSystemBuildBase(cmd *cobra.Command, backend string, force bool) error {
-	baseProfileDir := config.ProfileDirPath("base")
+	baseProfileDir := cliLayout().ProfileDir("base")
 	return withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
 		buildOut := os.Stderr
 		if jsonEnabled(cmd) {

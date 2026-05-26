@@ -5,11 +5,14 @@ package containerdrt
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/kstenerud/yoloai/config"
+	"github.com/kstenerud/yoloai/internal/testutil"
 	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/runtime/caps"
 )
@@ -20,6 +23,14 @@ func skipIfNotAvailable(t *testing.T) {
 	if _, err := os.Stat("/run/containerd/containerd.sock"); err != nil {
 		t.Skip("containerd not available: /run/containerd/containerd.sock not found")
 	}
+}
+
+// testLayout constructs a Layout rooted at an isolated home for an
+// integration test — Q-W: every runtime.New caller must pass a Layout.
+func testLayout(t *testing.T) config.Layout {
+	t.Helper()
+	home := testutil.IsolatedHome(t)
+	return config.NewLayout(filepath.Join(home, ".yoloai"))
 }
 
 // testSandboxDir creates a temporary directory that acts as a sandbox dir.
@@ -34,7 +45,7 @@ func TestIntegration_New(t *testing.T) {
 	skipIfNotAvailable(t)
 
 	ctx := context.Background()
-	rt, err := New(ctx)
+	rt, err := New(ctx, testLayout(t))
 	require.NoError(t, err)
 	defer rt.Close() //nolint:errcheck // best-effort close
 
@@ -46,7 +57,7 @@ func TestIntegration_IsReady_False(t *testing.T) {
 	skipIfNotAvailable(t)
 
 	ctx := context.Background()
-	rt, err := New(ctx)
+	rt, err := New(ctx, testLayout(t))
 	require.NoError(t, err)
 	defer rt.Close() //nolint:errcheck // best-effort close
 
@@ -63,7 +74,7 @@ func TestIntegration_RequiredCapabilities(t *testing.T) {
 	skipIfNotAvailable(t)
 
 	ctx := context.Background()
-	rt, err := New(ctx)
+	rt, err := New(ctx, testLayout(t))
 	require.NoError(t, err)
 	defer rt.Close() //nolint:errcheck // best-effort close
 
@@ -81,7 +92,7 @@ func TestIntegration_RequiredCapabilities_VmEnhanced(t *testing.T) {
 	skipIfNotAvailable(t)
 
 	ctx := context.Background()
-	rt, err := New(ctx)
+	rt, err := New(ctx, testLayout(t))
 	require.NoError(t, err)
 	defer rt.Close() //nolint:errcheck // best-effort close
 
@@ -99,7 +110,7 @@ func TestIntegration_ContainerLifecycle(t *testing.T) {
 	skipIfNotAvailable(t)
 
 	ctx := context.Background()
-	rt, err := New(ctx)
+	rt, err := New(ctx, testLayout(t))
 	require.NoError(t, err)
 	defer rt.Close() //nolint:errcheck // best-effort close
 
@@ -176,7 +187,7 @@ func TestIntegration_Prune(t *testing.T) {
 	skipIfNotAvailable(t)
 
 	ctx := context.Background()
-	rt, err := New(ctx)
+	rt, err := New(ctx, testLayout(t))
 	require.NoError(t, err)
 	defer rt.Close() //nolint:errcheck // best-effort close
 
@@ -191,7 +202,7 @@ func TestIntegration_Logs(t *testing.T) {
 	skipIfNotAvailable(t)
 
 	ctx := context.Background()
-	rt, err := New(ctx)
+	rt, err := New(ctx, testLayout(t))
 	require.NoError(t, err)
 	defer rt.Close() //nolint:errcheck // best-effort close
 
@@ -205,7 +216,7 @@ func TestIntegration_DiagHint(t *testing.T) {
 	skipIfNotAvailable(t)
 
 	ctx := context.Background()
-	rt, err := New(ctx)
+	rt, err := New(ctx, testLayout(t))
 	require.NoError(t, err)
 	defer rt.Close() //nolint:errcheck // best-effort close
 

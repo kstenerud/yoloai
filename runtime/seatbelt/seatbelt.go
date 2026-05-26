@@ -56,8 +56,11 @@ func probe(_ context.Context) (bool, string) {
 }
 
 func init() {
-	runtime.Register("seatbelt", func(ctx context.Context) (runtime.Runtime, error) {
-		return New(ctx)
+	// The registry factory derives homeDir from layout via the conventional
+	// $HOME/.yoloai DataDir: homeDir = filepath.Dir(layout.DataDir).
+	// Direct callers (CLI, tests) may call New(ctx, layout, homeDir) explicitly.
+	runtime.Register("seatbelt", func(ctx context.Context, layout config.Layout) (runtime.Runtime, error) {
+		return New(ctx, layout, filepath.Dir(layout.DataDir))
 	}, descriptor)
 }
 
@@ -92,8 +95,9 @@ const (
 
 // Runtime implements runtime.Runtime using macOS sandbox-exec.
 type Runtime struct {
-	sandboxExecBin string // path to sandbox-exec binary
-	sandboxDir     string // ~/.yoloai/sandboxes/ base path
+	sandboxExecBin string        // path to sandbox-exec binary
+	layout         config.Layout // DataDir-rooted path resolver (Q-W.6)
+	homeDir        string        // user's real $HOME — needed for SBPL profile generation (not layout.DataDir)
 }
 
 // Compile-time checks.
@@ -109,12 +113,17 @@ func (r *Runtime) Descriptor() runtime.BackendDescriptor {
 // agent directly on the host, so it must read :copy files from their actual
 // sandbox location rather than from a container bind-mount at the original path.
 func (r *Runtime) ResolveCopyMount(sbName, hostPath string) string {
-	return filepath.Join(r.sandboxDir, sbName, "work", config.EncodePath(hostPath))
+	return filepath.Join(r.layout.SandboxesDir(), sbName, "work", config.EncodePath(hostPath))
 }
 
 // New creates a Runtime after verifying that we're on macOS and
-// sandbox-exec is available.
-func New(_ context.Context) (*Runtime, error) {
+// sandbox-exec is available. layout is used for all DataDir-rooted path
+// resolution. homeDir is the user's real $HOME directory, which the SBPL
+// profile generator needs to allow read access to the home tree; it is
+// distinct from layout.DataDir (which is $HOME/.yoloai). Passing them as
+// separate arguments makes the distinction explicit and avoids re-computing
+// $HOME from layout.DataDir via filepath.Dir (fragile if DataDir changes).
+func New(_ context.Context, layout config.Layout, homeDir string) (*Runtime, error) {
 	if !isMacOS() {
 		return nil, yoerrors.NewPlatformError("seatbelt backend requires macOS")
 	}
@@ -126,7 +135,8 @@ func New(_ context.Context) (*Runtime, error) {
 
 	return &Runtime{
 		sandboxExecBin: sandboxExecBin,
-		sandboxDir:     config.SandboxesDir(),
+		layout:         layout,
+		homeDir:        homeDir,
 	}, nil
 }
 
@@ -134,7 +144,7 @@ func New(_ context.Context) (*Runtime, error) {
 // directory, patches working_dir for :copy mode, generates the SBPL
 // profile, and writes the entrypoint script and tmux config.
 func (r *Runtime) Create(_ context.Context, cfg runtime.InstanceConfig) error {
-	sandboxPath := filepath.Join(r.sandboxDir, sandboxName(cfg.Name))
+	sandboxPath := filepath.Join(r.layout.SandboxesDir(), sandboxName(cfg.Name))
 
 	for _, dir := range []string{backendDir, binDir, tmuxDir} {
 		if err := fileutil.MkdirAll(filepath.Join(sandboxPath, dir), 0750); err != nil {
@@ -158,7 +168,7 @@ func (r *Runtime) Create(_ context.Context, cfg runtime.InstanceConfig) error {
 		return fmt.Errorf("patch config working dir: %w", err)
 	}
 
-	profile := GenerateProfile(cfg, sandboxPath, config.HomeDir())
+	profile := GenerateProfile(cfg, sandboxPath, r.homeDir)
 	if err := fileutil.WriteFile(filepath.Join(sandboxPath, backendDir, profileFileName), []byte(profile), 0600); err != nil {
 		return fmt.Errorf("write SBPL profile: %w", err)
 	}
@@ -262,7 +272,7 @@ func writeSandboxScripts(sandboxPath string) error {
 // Start launches the sandboxed process in the background and waits for
 // the tmux session to become available.
 func (r *Runtime) Start(ctx context.Context, name string) error {
-	sandboxPath := filepath.Join(r.sandboxDir, sandboxName(name))
+	sandboxPath := filepath.Join(r.layout.SandboxesDir(), sandboxName(name))
 
 	// Check if already running
 	if r.isRunning(sandboxPath) {
@@ -339,7 +349,7 @@ func (r *Runtime) Start(ctx context.Context, name string) error {
 
 // Stop kills the sandbox-exec process and the tmux server.
 func (r *Runtime) Stop(_ context.Context, name string) error {
-	sandboxPath := filepath.Join(r.sandboxDir, sandboxName(name))
+	sandboxPath := filepath.Join(r.layout.SandboxesDir(), sandboxName(name))
 
 	// Kill tmux server via socket
 	tmuxSock := filepath.Join(sandboxPath, tmuxDir, tmuxSocketName)
@@ -356,7 +366,7 @@ func (r *Runtime) Stop(_ context.Context, name string) error {
 
 // Remove stops the instance and removes all sandbox state from disk.
 func (r *Runtime) Remove(ctx context.Context, name string) error {
-	sandboxPath := filepath.Join(r.sandboxDir, sandboxName(name))
+	sandboxPath := filepath.Join(r.layout.SandboxesDir(), sandboxName(name))
 
 	_ = r.Stop(ctx, name)
 
@@ -380,7 +390,7 @@ func (r *Runtime) Remove(ctx context.Context, name string) error {
 
 // Inspect returns the current state of the sandboxed process.
 func (r *Runtime) Inspect(_ context.Context, name string) (runtime.InstanceInfo, error) {
-	sandboxPath := filepath.Join(r.sandboxDir, sandboxName(name))
+	sandboxPath := filepath.Join(r.layout.SandboxesDir(), sandboxName(name))
 
 	// Use the instance config as the existence marker — it's written by Create,
 	// while the PID file only exists after Start.
@@ -397,7 +407,7 @@ func (r *Runtime) Inspect(_ context.Context, name string) (runtime.InstanceInfo,
 // Exec runs a command inside the sandbox. For tmux commands, injects the
 // per-sandbox socket. For other commands, runs under sandbox-exec.
 func (r *Runtime) Exec(_ context.Context, name string, cmd []string, _ string) (runtime.ExecResult, error) {
-	sandboxPath := filepath.Join(r.sandboxDir, sandboxName(name))
+	sandboxPath := filepath.Join(r.layout.SandboxesDir(), sandboxName(name))
 
 	if !r.isRunning(sandboxPath) {
 		return runtime.ExecResult{}, runtime.ErrNotRunning
@@ -430,7 +440,7 @@ func (r *Runtime) GitExec(ctx context.Context, name, workDir string, args ...str
 // InteractiveExec runs a command interactively. For tmux commands, injects
 // the per-sandbox socket. For other commands, runs under sandbox-exec.
 func (r *Runtime) InteractiveExec(_ context.Context, name string, cmd []string, _ string, _ string) error {
-	sandboxPath := filepath.Join(r.sandboxDir, sandboxName(name))
+	sandboxPath := filepath.Join(r.layout.SandboxesDir(), sandboxName(name))
 
 	execCmd := r.buildExecCommand(sandboxPath, cmd)
 	execCmd.Stdin = os.Stdin
@@ -451,7 +461,7 @@ func (r *Runtime) Logs(_ context.Context, _ string, _ int) string { return "" }
 
 // DiagHint returns a seatbelt-specific hint for checking logs.
 func (r *Runtime) DiagHint(instanceName string) string {
-	logPath := filepath.Join(r.sandboxDir, sandboxName(instanceName), backendDir, processLogFileName)
+	logPath := filepath.Join(r.layout.SandboxesDir(), sandboxName(instanceName), backendDir, processLogFileName)
 	return fmt.Sprintf("check log at %s", logPath)
 }
 

@@ -11,21 +11,19 @@ import (
 
 func TestAutoBuildSecrets_NpmrcExists(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
 
 	npmrcPath := filepath.Join(home, ".npmrc")
 	require.NoError(t, os.WriteFile(npmrcPath, []byte("registry=https://npm.example.com"), 0600))
 
-	secrets := AutoBuildSecrets()
+	secrets := AutoBuildSecrets(home)
 	require.Len(t, secrets, 1)
 	assert.Equal(t, "id=npmrc,src="+npmrcPath, secrets[0])
 }
 
 func TestAutoBuildSecrets_NpmrcMissing(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
 
-	secrets := AutoBuildSecrets()
+	secrets := AutoBuildSecrets(home)
 	assert.Nil(t, secrets)
 }
 
@@ -53,7 +51,7 @@ func TestValidateBuildSecret_Valid(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := ValidateBuildSecret(tt.spec)
+			got, err := ValidateBuildSecret(tt.spec, "/home/user")
 			require.NoError(t, err)
 			assert.Equal(t, tt.want, got)
 		})
@@ -65,28 +63,27 @@ func TestValidateBuildSecret_MissingID(t *testing.T) {
 	srcFile := filepath.Join(dir, "token.txt")
 	require.NoError(t, os.WriteFile(srcFile, []byte("secret"), 0600))
 
-	_, err := ValidateBuildSecret("src=" + srcFile)
+	_, err := ValidateBuildSecret("src="+srcFile, "/home/user")
 	assert.ErrorContains(t, err, "missing id=")
 }
 
 func TestValidateBuildSecret_MissingSrc(t *testing.T) {
-	_, err := ValidateBuildSecret("id=mytoken")
+	_, err := ValidateBuildSecret("id=mytoken", "/home/user")
 	assert.ErrorContains(t, err, "missing src=")
 }
 
 func TestValidateBuildSecret_FileNotFound(t *testing.T) {
-	_, err := ValidateBuildSecret("id=mytoken,src=/nonexistent/path/token.txt")
+	_, err := ValidateBuildSecret("id=mytoken,src=/nonexistent/path/token.txt", "/home/user")
 	assert.ErrorContains(t, err, "source file not found")
 }
 
 func TestValidateBuildSecret_TildeExpansion(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
 
 	npmrcPath := filepath.Join(home, ".npmrc")
 	require.NoError(t, os.WriteFile(npmrcPath, []byte("registry=https://npm.example.com"), 0600))
 
-	got, err := ValidateBuildSecret("id=npmrc,src=~/.npmrc")
+	got, err := ValidateBuildSecret("id=npmrc,src=~/.npmrc", home)
 	require.NoError(t, err)
 	assert.Equal(t, "id=npmrc,src="+npmrcPath, got)
 }

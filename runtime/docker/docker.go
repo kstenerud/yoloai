@@ -82,7 +82,7 @@ func versionString(ctx context.Context) string {
 }
 
 func init() {
-	runtime.Register("docker", func(ctx context.Context) (runtime.Runtime, error) {
+	runtime.Register("docker", func(ctx context.Context, _ config.Layout) (runtime.Runtime, error) {
 		return New(ctx)
 	}, descriptor)
 }
@@ -188,12 +188,12 @@ func (r *Runtime) Setup(ctx context.Context, layout config.Layout, sourceDir str
 		if !exists {
 			fmt.Fprintln(output, "Building base image (first run only, this may take a few minutes)...") //nolint:errcheck // best-effort output
 		}
-		return buildBaseImage(ctx, r.client, sourceDir, output, logger)
+		return buildBaseImage(ctx, layout, r.client, sourceDir, output, logger)
 	}
 
-	if NeedsBuild(sourceDir) {
+	if NeedsBuild(layout, sourceDir) {
 		fmt.Fprintln(output, "Base image resources updated, rebuilding...") //nolint:errcheck // best-effort output
-		return buildBaseImage(ctx, r.client, sourceDir, output, logger)
+		return buildBaseImage(ctx, layout, r.client, sourceDir, output, logger)
 	}
 
 	return nil

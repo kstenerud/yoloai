@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/kstenerud/yoloai/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -117,6 +118,7 @@ func TestLoad_MissingFile(t *testing.T) {
 func TestLoadAll_MultipleSorted(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("HOME", dir)
+	layout := config.NewLayout(filepath.Join(dir, ".yoloai"))
 	extDir := filepath.Join(dir, ".yoloai", "extensions")
 	require.NoError(t, os.MkdirAll(extDir, 0750))
 
@@ -124,7 +126,7 @@ func TestLoadAll_MultipleSorted(t *testing.T) {
 	writeExtension(t, extDir, "alpha.yaml", "action: echo alpha")
 	writeExtension(t, extDir, "gamma.yml", "action: echo gamma")
 
-	exts, err := LoadAll()
+	exts, err := LoadAll(layout)
 	require.NoError(t, err)
 	require.Len(t, exts, 3)
 	assert.Equal(t, "alpha", exts[0].Name)
@@ -135,6 +137,7 @@ func TestLoadAll_MultipleSorted(t *testing.T) {
 func TestLoadAll_SkipsNonYAML(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("HOME", dir)
+	layout := config.NewLayout(filepath.Join(dir, ".yoloai"))
 	extDir := filepath.Join(dir, ".yoloai", "extensions")
 	require.NoError(t, os.MkdirAll(extDir, 0750))
 
@@ -142,7 +145,7 @@ func TestLoadAll_SkipsNonYAML(t *testing.T) {
 	writeExtension(t, extDir, "readme.md", "# not an extension")
 	writeExtension(t, extDir, "notes.txt", "some notes")
 
-	exts, err := LoadAll()
+	exts, err := LoadAll(layout)
 	require.NoError(t, err)
 	require.Len(t, exts, 1)
 	assert.Equal(t, "good", exts[0].Name)
@@ -151,11 +154,12 @@ func TestLoadAll_SkipsNonYAML(t *testing.T) {
 func TestLoadAll_SkipsDirectories(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("HOME", dir)
+	layout := config.NewLayout(filepath.Join(dir, ".yoloai"))
 	extDir := filepath.Join(dir, ".yoloai", "extensions")
 	require.NoError(t, os.MkdirAll(filepath.Join(extDir, "subdir.yaml"), 0750))
 	writeExtension(t, extDir, "real.yaml", "action: echo real")
 
-	exts, err := LoadAll()
+	exts, err := LoadAll(layout)
 	require.NoError(t, err)
 	require.Len(t, exts, 1)
 	assert.Equal(t, "real", exts[0].Name)
@@ -164,8 +168,9 @@ func TestLoadAll_SkipsDirectories(t *testing.T) {
 func TestLoadAll_MissingDirReturnsEmpty(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("HOME", dir)
+	layout := config.NewLayout(filepath.Join(dir, ".yoloai"))
 
-	exts, err := LoadAll()
+	exts, err := LoadAll(layout)
 	require.NoError(t, err)
 	assert.Nil(t, exts)
 }
@@ -173,12 +178,13 @@ func TestLoadAll_MissingDirReturnsEmpty(t *testing.T) {
 func TestLoadAll_ParseErrorReturned(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("HOME", dir)
+	layout := config.NewLayout(filepath.Join(dir, ".yoloai"))
 	extDir := filepath.Join(dir, ".yoloai", "extensions")
 	require.NoError(t, os.MkdirAll(extDir, 0750))
 
 	writeExtension(t, extDir, "bad.yaml", "action: [broken yaml")
 
-	_, err := LoadAll()
+	_, err := LoadAll(layout)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "parse extension")
 }
