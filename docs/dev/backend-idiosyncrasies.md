@@ -106,17 +106,22 @@ showing `unreachable [dns failed | dns=fail route=ok tcp=fail
 https=exit 28]`. Twelve data points (DF8) before the fix landed; retry
 always succeeded because the filter caught up within a few seconds.
 
-**Fix:** after `waitForTaskRunning` reports the task Running, run an
-in-task TCP probe to the gateway with retry (500ms × up to 30s). The
-probe is best-effort — on persistent failure it logs a warning and
+**Fix (v2):** after `waitForTaskRunning` reports the task Running, run
+an in-task probe that verifies the **full outbound chain** — DNS
+resolution + TCP connect to `api.anthropic.com:443`. Retry every 500ms
+for up to 30s. Best-effort: on persistent failure it logs a warning and
 proceeds rather than blocking Start, so legitimate offline /
 network-isolated sandboxes are not penalized beyond a 30s wait.
 See `lifecycle.go::waitForNetworkReady`.
 
-A connection-refused result (TCP RST from the gateway) is treated as
-success — it proves packets reached the gateway, which is all we need
-to confirm the TC filter is wired. We don't need actual upstream
-reachability; the agent's HTTPS calls will follow separately.
+**Why DNS + external (and not just gateway):** an earlier v1 of the fix
+probed the bridge gateway only. The TC mirred filter installs **before**
+host-side MASQUERADE / forwarding is ready, so a gateway probe returns
+RST ("success") while the agent's API call still times out. Two distinct
+stages were collapsing into one in the probe. Probing the real API
+endpoint covers the same chain the agent will use (TC filter + bridge +
+MASQUERADE + DNS), so probe-success and agent-success have the same
+preconditions.
 
 ### `/run/kata/<name>/` persists on abnormal exit
 

@@ -415,28 +415,50 @@ func (r *Runtime) Start(ctx context.Context, name string) error {
 }
 
 // networkProbeScript is run inside the task to verify the netns can
-// carry outbound traffic. It exits 0 in three cases:
+// carry outbound traffic *to a real external destination*. An earlier
+// version probed only the bridge gateway, which proved insufficient:
+// the TC mirred filter (Kata bridge ↔ TAP) can install before
+// MASQUERADE / host-side forwarding is ready, so a gateway probe
+// returns RST (declared "success") while the agent's API call still
+// fails. DF8 11th-data-point evidence (network=unreachable with
+// `dns=fail tcp=fail` on a probe that we'd just declared ready)
+// confirmed this — the diagnostic stack and the runtime probe were
+// testing different stages.
+//
+// This probe tests the full chain: DNS resolution + TCP connect to
+// the actual API endpoint. Exits 0 in three cases:
 //
 //  1. No default route is configured (sandbox is network=none) — the
 //     probe doesn't apply; declare ready.
-//  2. TCP connect to the gateway returns SYN-ACK (port open) — TC mirror
-//     and L2 path work.
-//  3. TCP connect to the gateway returns RST (port closed) — same thing;
-//     a refused connection still proves packets reach the gateway.
+//  2. DNS resolves api.anthropic.com AND TCP-connect to it succeeds —
+//     full chain works.
+//  3. Connection refused at api.anthropic.com:443 (improbable but
+//     possible during regional outages) — packets are flowing, just no
+//     listener; treat as ready since the network plumbing is verified.
 //
-// Exits non-zero (timeout = 124, or 1) only when packets neither reach
-// the gateway nor return — the actual DF8 race signature.
+// Exits non-zero only on DNS lookup failure or TCP timeout — the
+// actual DF8 signature.
 //
-// /dev/tcp is a bash builtin; the yoloai-base image ships bash, but if
-// bash is somehow absent the probe will exit 127 and waitForNetworkReady
-// will fall back to its hard timeout, treating the sandbox as ready
-// (best-effort).
+// For network-isolated sandboxes, if the user has allowed
+// api.anthropic.com (the common case for Claude-backed sandboxes),
+// this passes. If they haven't, this fails — but the agent would also
+// have failed for the same reason, so matching the agent's reality is
+// correct behavior.
 const networkProbeScript = `set +e
 gw=$(ip route show default 2>/dev/null | awk '/^default/ {print $3; exit}')
 if [ -z "$gw" ]; then
     exit 0
 fi
-timeout 2 bash -c "</dev/tcp/$gw/22" 2>/dev/null
+# DNS lookup first. Times out at glibc resolver default if unwired
+# (we bound it explicitly).
+timeout 4 getent hosts api.anthropic.com >/dev/null 2>&1
+if [ $? -ne 0 ]; then
+    exit 1
+fi
+# TCP connect through MASQUERADE to the real destination. Exit 0
+# (SYN-ACK) or 1 (RST) means the chain works; anything else means
+# packets are being silently dropped.
+timeout 3 bash -c '</dev/tcp/api.anthropic.com/443' 2>/dev/null
 rc=$?
 if [ $rc -eq 0 ] || [ $rc -eq 1 ]; then
     exit 0
@@ -463,7 +485,10 @@ func waitForNetworkReady(ctx context.Context, task client.Task) {
 
 	for {
 		attempts++
-		probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		// Script's per-stage timeouts cap at 4s DNS + 3s TCP ≈ 7.5s
+		// including subprocess overhead. Probe context allows 10s
+		// headroom; ctr exec setup variability is the main risk.
+		probeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		err := runNetworkProbe(probeCtx, task)
 		cancel()
 

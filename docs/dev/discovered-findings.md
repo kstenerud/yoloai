@@ -153,33 +153,45 @@ Findings that turned up mid-workstream (architecture-remediation, layering-refac
 - **Implication:** the failure is NOT correlated between vm and vmenhanced on a single run, which argues against "host was in a bad state at run start" as the explanation. Each backend independently rolls the dice — consistent with a per-backend race (e.g. Kata netns wiring, QEMU CPU latency variability) rather than a global precondition. Now 2 confirmed failures of vmenhanced, 7 of vm.
 - Still PARKED pending DF3. Confirming with rendered tmux output remains the unblocker for any further diagnosis.
 
-### DF8 FIX LANDED 2026-05-26
+### DF8 FIX V2 LANDED 2026-05-26
 
-After eleven data points and three diagnostic layers, the fix lives in
-`runtime/containerd/lifecycle.go::waitForNetworkReady`. Approach (1) from
-the DF8 10th-data-point sketch: a TCP probe to the gateway, run via
-`task.Exec` inside the started task, with 500ms × up to 30s retry.
+Initial V1 fix (gateway-only probe) proved insufficient — the 12th data
+point (run `154844.342`) showed three containerd failures still slipping
+through. The smoke-test probe inside the same sandbox reported
+`tcp=fail` to `1.1.1.1:443` while my runtime probe to the gateway had
+just declared "ready". The TC mirred filter (Kata bridge ↔ TAP) installs
+**before** host-side MASQUERADE / forwarding is ready, so a gateway
+probe returns RST ("success") while external traffic still times out.
 
-Probe semantics:
-- Exit 0 if no default route exists (network=none — declare ready).
-- Exit 0 if TCP to gateway returns SYN-ACK or RST (TC filter works).
-- Exit non-zero only on packet-drop timeout (the DF8 race signature).
+The runtime probe and the smoke-test probe were testing different
+stages. V2 fixes that:
 
-The probe is best-effort: on persistent failure it logs a warning and
-proceeds rather than blocking Start, so network-isolated and offline
-sandboxes are not penalized beyond a single 30s wait at startup.
+  V1 (insufficient): TCP to gateway:22 — exits 0 on RST.
+  V2 (current):      DNS lookup api.anthropic.com + TCP-connect.
 
-backend-idiosyncrasies.md updated with a "Kata netns warm-up race" entry
-plus a symptom-index row.
+The full chain (DNS resolution + TC filter + bridge + MASQUERADE +
+host forwarding) is now what the probe verifies, matching the agent's
+actual reality. Per-stage timeouts: 4s DNS + 3s TCP + overhead ≈ 7.5s
+worst-case; per-probe context: 10s. Outer budget unchanged at 30s ×
+500ms intervals.
 
-The next containerd-vm/vmenhanced smoke runs should either (a) pass on
-attempt 1 (probe held Start until network was actually ready) or (b)
-log `sandbox.network.ready attempts=N elapsed_ms=...` in cli.jsonl
-when the probe caught the race. A failure with the DF8 signature now
-would indicate the race window exceeds 30s or the probe's TCP-to-gateway
-assumption is invalid for some configuration — worth a new DF entry.
+For network-isolated sandboxes that allow api.anthropic.com (the
+common case), this passes. For sandboxes that don't allow it, the
+probe fails — but the agent would also have failed, so matching the
+agent's reality is correct.
 
-DF8 family CLOSED.
+DF8 family fix iterating; will check next smoke run for empirical
+confirmation. If V2 still misses, we're looking at a deeper race
+than "MASQUERADE comes up after Start returns" — possibly a kernel
+conntrack delay or sysctl pending settings.
+
+### DF8 FIX V1 (2026-05-26): gateway-only probe — INSUFFICIENT
+
+V1 of the fix used `bash -c '</dev/tcp/$gw/22'` to the bridge gateway.
+12th data point showed this probe declares ready before the agent's
+real path works. Replaced with V2 (DNS + external TCP). Kept here for
+the record because the design logic ("any flow proves wiring") was
+sound — what was wrong was the path tested.
 
 ### DF8 (11th data point, 2026-05-26): **SECOND SMOKING GUN — staged probe pinpoints the broken CNI stage**
 
