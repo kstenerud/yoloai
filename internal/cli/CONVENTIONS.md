@@ -49,15 +49,19 @@ requires extending the runtime interface (one method per backend);
 tracked as future work. CLI use is unaffected — terminal stdio IS
 the calling process's stdio.
 
-### Legacy raw-runtime attach (being retired)
+### Legacy raw-runtime attach — RETIRED
 
-`new.go`, `start.go`, `restart.go`, `reset.go` still hold their own
-`attachAfter<Verb>` helpers that call `attachToSandbox(rt, ...)`
-directly. These work but duplicate logic that now lives behind
-`Client.Attach`. Each should migrate to `withClient + c.Attach` (or
-call `attachToSandboxByName` after the lifecycle action) the next
-time the handler is touched. Do NOT add a `Client.Runtime()` escape
-hatch; it would defeat the layering.
+`new.go`, `start.go`, `restart.go`, `reset.go` previously held their own
+`attachAfter<Verb>` helpers; all have been migrated to `c.Attach`. The
+`attachToSandbox` and `waitForTmux` CLI shims in `attach.go` are gone.
+The library `sandbox.WaitForAttachReady` is the single readiness
+implementation; `Client.Attach` is the single attach entry point. Do
+NOT add a `Client.Runtime()` escape hatch; it would defeat the
+layering.
+
+Still on raw runtime: `exec.go` (interactive non-attach exec — needs
+`Client.Exec` or PTY-aware Exec on the runtime interface; not started)
+and `diff.go` (low-level `patch.GeneratePatch` paths — needs review).
 
 ## Path resolution: `cliLayout()`
 

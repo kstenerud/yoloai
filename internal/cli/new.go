@@ -7,12 +7,11 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log/slog"
 	"path/filepath"
 	goruntime "runtime"
 	"strings"
-	"time"
 
+	yoloai "github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/config"
 	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/sandbox"
@@ -82,9 +81,26 @@ func runNewCmd(cmd *cobra.Command, args []string, version string) error {
 	}
 
 	backend := resolveBackend(cmd)
-	return withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
-		return executeNewCreate(cmd, ctx, rt, opts)
+
+	// new.go's one quirk vs other Client-using commands: in JSON mode we
+	// want the Manager's progress output suppressed so it doesn't pollute
+	// the JSON document on stdout. withClient hardcodes cmd.ErrOrStderr,
+	// so we construct the Client by hand here to override Output.
+	mgrOutput := cmd.ErrOrStderr()
+	if jsonEnabled(cmd) {
+		mgrOutput = io.Discard
+	}
+	c, err := yoloai.NewWithOptions(cmd.Context(), yoloai.Options{
+		DataDir: cliLayout().DataDir,
+		Backend: backend,
+		Input:   cmd.InOrStdin(),
+		Output:  mgrOutput,
 	})
+	if err != nil {
+		return fmt.Errorf("connect to runtime: %w", err)
+	}
+	defer c.Close() //nolint:errcheck // best-effort cleanup
+	return executeNewCreate(cmd, cmd.Context(), c, opts)
 }
 
 // parseNewCmdPositional validates and splits positional args for the new command.
@@ -241,14 +257,10 @@ func resolveNewDirSpecs(rawWorkdirArg string, rawDirs []string) (workdirSpec san
 	return workdirSpec, auxDirSpecs, nil
 }
 
-// executeNewCreate performs the actual sandbox creation and optional attach inside withRuntime.
-func executeNewCreate(cmd *cobra.Command, ctx context.Context, rt runtime.Runtime, opts sandbox.CreateOptions) error {
-	mgrOutput := cmd.ErrOrStderr()
-	if jsonEnabled(cmd) {
-		mgrOutput = io.Discard
-	}
-	mgr := sandbox.NewManager(rt, slog.Default(), cmd.InOrStdin(), mgrOutput, sandbox.WithLayout(cliLayout()))
-	sandboxName, err := mgr.Create(ctx, opts)
+// executeNewCreate creates the sandbox via Client.Create and (when --attach)
+// hands off to Client.Attach for the interactive session.
+func executeNewCreate(cmd *cobra.Command, ctx context.Context, c *yoloai.Client, opts sandbox.CreateOptions) error {
+	sandboxName, err := c.Create(ctx, opts)
 	if err != nil {
 		return err
 	}
@@ -272,16 +284,7 @@ func executeNewCreate(cmd *cobra.Command, ctx context.Context, rt runtime.Runtim
 		return nil
 	}
 
-	meta, loadErr := store.LoadMeta(cliLayout().SandboxDir(sandboxName))
-	if loadErr != nil {
-		return loadErr
-	}
-	user := tmuxExecUser(meta)
-	containerName := store.InstanceName(sandboxName)
-	if err := waitForTmux(ctx, rt, containerName, sandboxName, 300*time.Second, user); err != nil {
-		return fmt.Errorf("waiting for tmux session: %w", err)
-	}
-	return attachToSandbox(ctx, rt, containerName, sandboxName, user)
+	return c.Attach(ctx, sandboxName, cliIOStreams())
 }
 
 // resolveNewIsolationOS resolves the --isolation and --os flags with config fallback

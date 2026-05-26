@@ -324,6 +324,15 @@ func (c *Client) Clone(ctx context.Context, opts sandbox.CloneOptions) error {
 	return c.manager.Clone(ctx, opts)
 }
 
+// Create provisions a new sandbox from CreateOptions and (unless
+// opts.NoStart) starts the container with the agent. Returns the sandbox
+// name on success — currently always opts.Name, since name is required
+// (no auto-generation). Use Run for the higher-level "create + wait for
+// terminal status" convenience.
+func (c *Client) Create(ctx context.Context, opts sandbox.CreateOptions) (string, error) {
+	return c.manager.Create(ctx, opts)
+}
+
 // Start launches (or relaunches) the container for an existing sandbox.
 // The sandbox must exist on disk; use Run to create a new sandbox.
 func (c *Client) Start(ctx context.Context, name string, opts sandbox.StartOptions) error {

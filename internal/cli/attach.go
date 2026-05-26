@@ -8,11 +8,9 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
-	"time"
 
 	"github.com/creack/pty"
 	yoloai "github.com/kstenerud/yoloai"
-	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/sandbox"
 	"github.com/kstenerud/yoloai/sandbox/store"
 	"github.com/spf13/cobra"
@@ -99,19 +97,6 @@ func tmuxExecUser(meta *store.Meta) string {
 	return sandbox.ContainerUser(meta)
 }
 
-// waitForTmux is the CLI-side wrapper around sandbox.WaitForAttachReady.
-// Kept as a thin shim for callers that still hold a raw runtime; new code
-// should construct a Client and call c.Attach which handles readiness
-// polling internally.
-func waitForTmux(ctx context.Context, rt runtime.Runtime, _, sandboxName string, timeout time.Duration, user string) error {
-	return sandbox.WaitForAttachReady(ctx, rt, cliLayout(), sandboxName, user, timeout)
-}
-
-// readTmuxSocket is the CLI-side wrapper around sandbox.ReadTmuxSocket.
-func readTmuxSocket(sandboxName string) string {
-	return sandbox.ReadTmuxSocket(cliLayout(), sandboxName)
-}
-
 // setTerminalTitle sets the terminal title for the host terminal.
 // It emits an OSC 0 escape sequence (works for non-tmux terminals) and,
 // if running inside a host tmux session, also renames the tmux window
@@ -138,26 +123,4 @@ func setTerminalTitle(title string) {
 		exec.Command("tmux", "set-option", "-wu", "automatic-rename").Run() //nolint:errcheck,gosec // best-effort
 		exec.Command("tmux", "set-option", "-wu", "allow-rename").Run()     //nolint:errcheck,gosec // best-effort
 	}
-}
-
-// attachToSandbox attaches to the tmux session in a running container.
-// Kept as a CLI-side shim for handlers that already hold a raw runtime
-// (new.go, start.go, restart.go, reset.go). New code should reach Client.Attach
-// via withClient + cliIOStreams() instead. The terminal-title machinery
-// stays here because Client.Attach is library code and doesn't touch UI.
-func attachToSandbox(ctx context.Context, rt runtime.Runtime, containerName, sandboxName string, user string) error {
-	setTerminalTitle(sandboxName)
-	defer setTerminalTitle("")
-
-	meta, err := store.LoadMeta(cliLayout().SandboxDir(sandboxName))
-	if err != nil {
-		return fmt.Errorf("load sandbox metadata: %w", err)
-	}
-
-	sock := readTmuxSocket(sandboxName)
-	// pty.Getsize returns (rows, cols, err) — named accordingly.
-	rows, cols, _ := pty.Getsize(os.Stdin)
-	cmd := rt.AttachCommand(sock, rows, cols, meta.Isolation)
-
-	return rt.InteractiveExec(ctx, containerName, cmd, user, "")
 }
