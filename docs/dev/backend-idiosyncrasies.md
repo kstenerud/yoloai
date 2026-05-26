@@ -31,7 +31,7 @@ row to the index.
 | CNI bridge plugin: "netns and CNI_NETNS should not be the same" | [CNI: netns.NewNamed switches OS thread](#netnsnewnamed-switches-the-os-thread-via-unshare-and-never-restores-it) |
 | `createNetNS` fails with "file exists" (EEXIST) | [CNI: stale netns file](#stale-named-netns-files-at-varrunnetnsname-persist-after-failed-runs) |
 | CNI-FORWARD rules deleted for a running container | [CNI: pre-flight n.Remove deletes live rules](#the-pre-flight-nremove-can-delete-rules-for-running-containers) |
-| CNI ADD succeeds but container has no outbound connectivity (POSTROUTING present, CNI-FORWARD ACCEPT missing) | [CNI: firewall plugin silent no-op (DF9)](#firewall-plugin-silent-no-op-when-resultips-is-empty) |
+| CNI ADD succeeds but container has no outbound connectivity (POSTROUTING and/or CNI-FORWARD ACCEPT for the IP missing in host iptables) | [Go: netns.NewNamed without LockOSThread (DF10)](#go-os-thread-netns-leak-from-netnsnewnamed--netnsset-without-runtimelockosthread); secondary: [CNI: firewall plugin silent no-op (DF9)](#firewall-plugin-silent-no-op-when-resultips-is-empty) |
 | IPAM allocates duplicate IP after replace | [CNI: stale IPAM lease](#cnI-results-cache-lives-at-varlibcniresults) |
 | Two concurrent `yoloai new` with same name corrupts networking | [CNI: concurrent creation race](#two-yoloai-new-invocations-for-the-same-container-name-within-1s-will-corrupt-networking) |
 | `--network-isolated` silently unenforced under `--isolation container-enhanced` | [gVisor netstack ignores iptables](#gvisor-netstack-ignores-in-sandbox-iptables-rules) |
@@ -252,42 +252,66 @@ something causes `parseConf` to return an empty result during ADD (e.g., the
 bridge plugin passes no IPs), the firewall plugin silently succeeds without adding
 any CNI-FORWARD rules. No error is returned.
 
-**Confirmed in production 2026-05-26** — see DF9 in `discovered-findings.md`.
-Smoke run `yoloai-smoketest-20260526-175645.907` captured the exact signature
-in `attempt2/.../network-diag.txt`: POSTROUTING masquerade for `10.89.1.90`
-present (bridge plugin ran), CNI-FORWARD ACCEPT rules for `10.89.1.90`
-absent (firewall plugin no-op'd), while sibling `10.89.1.88` from the same
-smoke run had both. `n.Setup` returned success and `cni-state.json` was
-written — the only way to detect the failure is to inspect iptables after
-ADD.
+**Production-confirmed signature, mechanism uncertain.** Smoke run
+`yoloai-smoketest-20260526-175645.907` captured POSTROUTING masquerade
+for `10.89.1.90` present (bridge ran), CNI-FORWARD ACCEPT rules absent.
+At the time this was attributed to the upstream `addRules()` no-op. On
+2026-05-26 a different bug — [DF10: Go OS thread netns leak](#go-os-thread-netns-leak-from-netnsnewnamed--netnsset-without-runtimelockosthread)
+— was root-caused in our own code and **also produces exactly this
+signature** (firewall plugin running on a netns-poisoned thread writes
+CNI-FORWARD into the wrong netns). Every observed "DF9" smoke failure
+was equally explainable by DF10, and the symptom disappeared after
+fixing DF10. The upstream pathology described above is a real code path
+but was **not independently confirmed** in our environment; treat it as
+"defense-in-depth scenario" rather than "known active bug" until a
+post-DF10 recurrence is captured.
 
-**Mitigation in `cni.go` (revision 2):** `runCNIAdd` catches **two**
-DF9 variants and treats both as the same retry signal
-`errFirewallRulesMissing`:
-1. `result.Interfaces["eth0"].IPConfigs` is empty after `n.Setup` —
-   the same empty-result pathology described above. Bridge still added
-   POSTROUTING + an IPAM lease (visible in raw iptables / lease files),
-   but the Go side can't recover the IP. Treat as no-op.
+**Mitigation in `cni.go` (revision 2, kept as defense-in-depth):**
+`runCNIAdd` catches **two** variants and treats both as the same retry
+signal `errFirewallRulesMissing`:
+1. `result.Interfaces["eth0"].IPConfigs` is empty after `n.Setup`.
 2. IPConfigs is populated but `iptables -S CNI-FORWARD` lacks an `ACCEPT`
    line for `<ip>/32` — `verifyCNIForwardRules` returns the sentinel.
 
-On either, `runCNIAdd` runs `n.Remove` to undo the bridge plugin's
-POSTROUTING and IPAM allocation before returning the sentinel. Without
-this rollback the bridge's POSTROUTING leaks across the retry
-(observable as orphan `-s <oldip>/32 -j CNI-…` lines).
+On either, `runCNIAdd` runs `n.Remove` to undo any partial bridge state
+before returning the sentinel. `setupCNI` then catches the sentinel via
+`errors.Is`, recreates the netns, and retries CNI ADD **once**. The
+retry emits `sandbox.network.firewall_retry` warn log; a failed
+`n.Remove` emits `sandbox.network.firewall_rollback_failed`. Both are
+defense-in-depth signals — if either fires in production after the DF10
+fix, capture iptables + thread state before destroying the sandbox.
 
-`setupCNI` then catches the sentinel via `errors.Is`, recreates the
-netns, and retries CNI ADD **once**. The retry emits
-`sandbox.network.firewall_retry` warn log — grep for it in production
-logs to track upstream-bug recurrence. A failed n.Remove emits
-`sandbox.network.firewall_rollback_failed` warn.
+### Go OS thread netns leak from `netns.NewNamed` / `netns.Set` without `runtime.LockOSThread`
 
-If you see the retry warn log AND the subsequent probe still times out,
-the no-op fired on both attempts — surface to upstream investigation, do
-not extend the retry budget without diagnosing first. First-encountered
-variant (empty IPConfigs without warn) is the smoking gun from smoke run
-`yoloai-smoketest-20260526-183343.392/stop_start/containerd-vm` —
-preserved diag is in `attempt1/.../network-diag.txt`.
+vishvananda/netns's `NewNamed`, `New`, and `Set` all operate via
+`unshare(CLONE_NEWNET)` or `setns(2)` on the **current OS thread**.
+After the call, only that one thread is in the new netns — the
+goroutine on it inherits the netns, but the rest of the Go runtime's
+threads are unaffected.
+
+If you call any of these without `runtime.LockOSThread()` (and a
+restore-to-origNS before `UnlockOSThread`), the goroutine can be
+scheduled off the modified thread, and the thread goes back to Go's
+pool **still in the wrong netns**. Any later goroutine that lands on
+that thread inherits the wrong netns. This includes `exec.Command`
+forks — the child inherits the netns of the parent thread at fork
+time. libcni's plugin invocation path does exactly that, so the bridge
+or firewall plugin can run in the wrong netns and write iptables rules
+to a namespace the host can't see.
+
+**Root cause of DF10 (fixed 2026-05-26):** `runtime/containerd/containerd.go::canCreateNetNS`
+called `netns.NewNamed` + `DeleteNamed` with no `LockOSThread` and no
+restore. The probe is invoked on every containerd-backend `new`,
+leaking one runtime thread into an anonymous netns each time.
+Reproduction: 20-iteration loop of `yoloai new --agent test
+--isolation vm` failed ~20% pre-fix, 0/20 post-fix.
+
+**Rule of thumb:** every callsite that uses `netns.New`,
+`netns.NewNamed`, or `netns.Set` must look exactly like
+`createNetNS` — Lock, save origNS, do the work, Set(origNS), defer
+Unlock. Grepping `netns\.\(New\|Set\)` in any future containerd
+backend code should turn up nothing except a function that follows
+that pattern.
 
 ### `SetupIPMasq` creates a **chain jump**, not a bare MASQUERADE
 

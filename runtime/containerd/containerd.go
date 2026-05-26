@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	goruntime "runtime"
 	"strings"
 	"syscall"
 
@@ -180,14 +181,35 @@ var (
 // This is more reliable than checking individual capabilities because named
 // netns creation requires CAP_SYS_ADMIN (unshare) + CAP_DAC_OVERRIDE (write
 // to root-owned /var/run/netns/) — easier to test than enumerate.
+//
+// Locks the OS thread for the unshare → restore window so the probe cannot
+// leave a Go runtime thread stuck in the new anonymous netns. Without this,
+// libcni's later plugin exec can land on the poisoned thread and run the
+// bridge/firewall plugin in the wrong netns — POSTROUTING + CNI-FORWARD rules
+// land in an unreachable namespace, breaking outbound NAT for the sandbox.
 func canCreateNetNS() error {
-	probe := "yoloai-netns-probe"
-	// Attempt to create; ignore "already exists" (from a previous failed probe).
-	_, err := netns.NewNamed(probe)
+	goruntime.LockOSThread()
+	defer goruntime.UnlockOSThread()
+
+	origNS, err := netns.Get()
 	if err != nil {
+		return fmt.Errorf("get current netns: %w", err)
+	}
+	defer origNS.Close() //nolint:errcheck // G104: best-effort
+
+	probe := "yoloai-netns-probe"
+	ns, err := netns.NewNamed(probe)
+	if err != nil {
+		// On failure the thread may or may not have switched; restore
+		// defensively before returning so we don't leak a stuck thread.
+		_ = netns.Set(origNS)
 		return err
 	}
+	_ = ns.Close()
 	_ = netns.DeleteNamed(probe)
+	if err := netns.Set(origNS); err != nil {
+		return fmt.Errorf("restore original netns: %w", err)
+	}
 	return nil
 }
 

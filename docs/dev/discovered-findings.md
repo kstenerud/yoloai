@@ -27,7 +27,7 @@ Findings that turned up mid-workstream (architecture-remediation, layering-refac
 
 - **Discovered:** 2026-05-26 · **Workstream:** containerd backend reliability
 - **Severity:** MEDIUM (smoke-test retry masks; agent users see "Unable to connect to API")
-- **Disposition:** ROOT-CAUSED + MITIGATED (revision 2, 2026-05-26). Hypothesis 2 confirmed: CNI **firewall** plugin silently no-ops while `n.Setup` returns success. First mitigation (verify+retry on missing CNI-FORWARD ACCEPT rules) caught the case where IP extraction from the result succeeded — confirmed working by smoke run `yoloai-smoketest-20260526-183343.392` where `full_workflow/containerd-vmenhanced` retried from `10.89.0.10` to `10.89.0.11` and passed. But the same run exposed a second variant: the *result itself* has empty `IPConfigs` (the same pathology that makes the firewall plugin no-op also strips the IP from the Go result), so the original `if ip != ""` guard silently skipped verify and the broken sandbox went to probe-timeout. Revision 2 treats empty-IP-from-result as the DF9 signature too, and adds `n.Remove` rollback before retry so the bridge plugin's POSTROUTING + IPAM lease aren't leaked. Upstream behavior is still untriaged.
+- **Disposition:** SUPERSEDED BY DF10 — see correction below. Originally marked ROOT-CAUSED + MITIGATED (revision 2, 2026-05-26), attributing the failure to an upstream CNI **firewall** plugin no-op. On 2026-05-26 (later same day) DF10 was root-caused: `canCreateNetNS` was leaking Go OS threads into anonymous netns via `netns.NewNamed` without `runtime.LockOSThread`. libcni's plugin execs sometimes landed on a poisoned thread → bridge or firewall plugin ran in the wrong netns → POSTROUTING and/or CNI-FORWARD landed in an unreachable namespace. Every observed "DF9" signature (POSTROUTING present + CNI-FORWARD missing, the inverse, or empty `result.IPConfigs`) is explained by DF10 alone, and the 20-iteration reproducer dropped from 4/20 fail to 0/20 fail after the DF10 fix. The upstream firewall plugin code path described below does exist, but was never independently confirmed in our environment; the DF9 verify+retry mitigation now serves as defense-in-depth, not the primary cause.
 
 - **Description:** With DF8 V3 landed (probe verifies DNS + external TCP, retries on failure), one out of four containerd-vm runs still fails first-attempt with `dns=fail tcp=fail`. The smoking gun: V3's probe correctly ran 7 attempts over 31 seconds, every attempt exited 1 (script's "not ready" exit), then the 30s outer budget expired and V3 warned-and-proceeded per its best-effort policy. The agent then launched, attempted API calls, and got `FailedToOpenSocket` for the entire run.
 
@@ -36,7 +36,7 @@ Findings that turned up mid-workstream (architecture-remediation, layering-refac
   The retry sandbox (fresh Kata VM) succeeded normally, so the failure is **instance-specific**, not a permanent Kata-on-this-host bug. Hypotheses (one now confirmed):
 
   1. **CNI IPAM lease contention.** Two sandboxes created in quick succession could collide on the host-local-ipam range; one VM gets a working IP, the other gets a partially-configured netns.
-  2. **CNI plugin transient failure.** `firewall` or `bridge` plugin returns an error that isn't fatal at CNI ADD time but leaves the netns half-wired. **CONFIRMED — see "Smoking gun" below.** Specifically: the `firewall` plugin returns success without installing any `CNI-FORWARD` ACCEPT rules. The bridge plugin runs fine (POSTROUTING MASQUERADE rule, IPAM lease, `eth0` in netns all present).
+  2. **CNI plugin transient failure.** `firewall` or `bridge` plugin returns an error that isn't fatal at CNI ADD time but leaves the netns half-wired. ~~CONFIRMED~~ — symptom was real but mechanism was misattributed. See DF10 below; the actual cause was our own `canCreateNetNS` netns leak, not an upstream plugin bug. The observed signature (firewall plugin "returns success without installing any CNI-FORWARD ACCEPT rules") is what happens when the firewall plugin runs on a netns-poisoned Go thread.
   3. **Kernel resource exhaustion** (conntrack table, neighbor cache, br_netfilter limits) — affects only some VMs.
   4. **Kata-internal netdev teardown not completing on prior shim crash** — partial state survives.
 
@@ -52,7 +52,7 @@ Findings that turned up mid-workstream (architecture-remediation, layering-refac
   | CNI-FORWARD ACCEPT rules for `10.89.1.90` | **MISSING** (firewall plugin no-op'd) |
   | Sibling `10.89.1.88` (same smoke run, vm not vmenhanced) | both rule sets present |
 
-  FORWARD policy is `DROP`, so DNS/TCP from the VM is dropped at the host bridge. Matches the documented "Firewall plugin: silent no-op when `result.IPs` is empty" pathology in [backend-idiosyncrasies.md](backend-idiosyncrasies.md). Why it fires for sibling-but-not-this-IP within a single smoke run is still unknown (upstream firewall plugin internal).
+  FORWARD policy is `DROP`, so DNS/TCP from the VM is dropped at the host bridge. **Post-DF10 correction:** at the time this was attributed to the upstream "addRules() no-op on empty result.IPs" pathology. With DF10 root-caused later the same day, the more plausible explanation is that the firewall plugin ran on a netns-leaked Go thread and wrote CNI-FORWARD into the wrong namespace; the sibling sandbox got a clean thread. "Why it fires for sibling-but-not-this-IP" is then answered by goroutine scheduling rather than an upstream internal.
 
 - **Why V3's 30s budget isn't the fix:** extending the budget would just make sandboxes that are permanently broken wait longer before the agent starts failing. V3 is already correctly detecting the broken state; we shouldn't paper over it by waiting more.
 
@@ -66,11 +66,33 @@ Findings that turned up mid-workstream (architecture-remediation, layering-refac
 - **Diagnostic path bug fixed in the same change:** `network_diag.go` was reading `<sandboxDir>/cni-state.json` while the writer (`cni.go:cniStatePath`) uses `<sandboxDir>/backend/cni-state.json`. The diag now uses the shared `cniStatePath()` helper, so future DF9 captures will actually surface the state file instead of always reporting ENOENT.
 
 - **Open follow-ups (not blocking):**
-  - **Upstream root cause.** Why does the firewall plugin (CNI v1.9.1) sometimes produce an empty `prevResult.IPs` after a successful bridge ADD within a single run? Suspected: a stale `/var/lib/cni/results/yoloai-<containerName>-eth0` cache from a sibling teardown elsewhere — but the existing `cleanupStaleCNIResultsCache` already targets that path. May be CNI-version-result-conversion bug or an interaction with iptables-nft locking. Worth reproducing under instrumentation if it recurs after the mitigation.
+  - ~~Upstream root cause.~~ Resolved by DF10: there was no upstream firewall plugin bug active in our environment. If `sandbox.network.firewall_retry` ever fires after the DF10 fix lands, capture iptables + `/proc/<pid>/task/*/ns/net` for the yoloai process before destroying — that is the case where an actual upstream pathology or a second netns leak is firing.
   - **Detection-only mode for prod.** Right now the retry is silent (warn log only). If we ever see the same sandbox fail twice in a row in production, surface a structured event to the user, not just slog.
   - **Smoke-test signal.** Grep `sandbox.network.firewall_retry` in smoke runs; any occurrence is a free upstream data point even when the run passes.
 
-- **Pointer:** `runtime/containerd/cni.go::setupCNI`, `::runCNIAdd`, `::verifyCNIForwardRules`, `::cniForwardHasIP`, `::errFirewallRulesMissing`. Cross-ref DF8 (warm-up race, separate cause) and [backend-idiosyncrasies.md](backend-idiosyncrasies.md) (the "Firewall plugin: silent no-op" entry + the new "Post-ADD verify" entry pointing back here).
+- **Pointer:** `runtime/containerd/cni.go::setupCNI`, `::runCNIAdd`, `::verifyCNIForwardRules`, `::cniForwardHasIP`, `::errFirewallRulesMissing`. Cross-ref DF8 (warm-up race, separate cause), DF10 (actual root cause for every observed instance), and [backend-idiosyncrasies.md](backend-idiosyncrasies.md) (the "Firewall plugin: silent no-op" entry + the new "Post-ADD verify" entry pointing back here).
+
+### DF10 — `canCreateNetNS` leaked Go OS thread netns; libcni plugin execs landed in wrong namespace
+
+- **Discovered:** 2026-05-26 · **Workstream:** containerd backend reliability (follow-up to DF9)
+- **Severity:** HIGH (caused every observed "DF9" smoke failure; ~20% per-create failure rate in a tight loop)
+- **Disposition:** ROOT-CAUSED + FIXED (2026-05-26).
+
+- **Description:** `runtime/containerd/containerd.go::canCreateNetNS` (capability probe called on every containerd-backend `new`) called `netns.NewNamed(probe)` and `netns.DeleteNamed(probe)` with no `runtime.LockOSThread` and no `netns.Set(origNS)` restore. `NewNamed` calls `unshare(CLONE_NEWNET)`, which switches **the current OS thread** into a brand-new netns; after `DeleteNamed` removes the bind mount, that thread is in an anonymous netns. Without LockOSThread the goroutine can be scheduled off that thread, leaving it in Go's runtime pool **still in the wrong netns**. Any later goroutine landing on the poisoned thread inherits the netns — including libcni's `exec.Command` for plugin invocations. Bridge or firewall plugin then ran in the wrong netns and wrote iptables rules to a namespace the host can't see.
+
+- **Symptom signatures (all observed):**
+  - POSTROUTING entry for sandbox IP present in host, CNI-FORWARD ACCEPT for same IP missing (firewall on poisoned thread). Originally misattributed to upstream firewall plugin no-op (DF9 v1 evidence in smoke run `175645.907`).
+  - POSTROUTING missing for sandbox IP, CNI-FORWARD present (bridge on poisoned thread). Captured in smoke run `194842.389/stop_start/containerd-vm/attempt1/network-diag.txt`.
+  - `iptables -S CNI-FORWARD` returns `No chain/target/match by that name` even though `n.Setup` reported success (firewall created the chain in the leaked netns; that netns is anonymous so no other process can reach it).
+  - `result.Interfaces["eth0"].IPConfigs` empty after `n.Setup` (libcni's result-build path returning a malformed result when an upstream plugin ran in the wrong netns).
+
+- **Reproduction:** 20-iteration loop of `sudo -E ./yoloai new sb-$i /tmp/dir --agent test --os linux --isolation vm --yes --debug` in a session that has already run containerd `system check`. Pre-fix: 4/20 failures + 6/20 with wrong-netns observed in instrumented `iptables` subprocess. Post-fix: 20/20 success, 0 wrong-netns observed.
+
+- **Fix:** Wrap `canCreateNetNS` in the same pattern `createNetNS` already uses — `goruntime.LockOSThread()` + `defer Unlock`, save `origNS` via `netns.Get()`, run the probe, `netns.Set(origNS)` to restore the thread's netns before unlock. Same single-callsite change.
+
+- **Why DF9's mitigation masked this for a while:** The verify+retry path in `cni.go::setupCNI` sometimes landed on a clean thread on the retry, and the sandbox came up. The retry was attributed to "upstream firewall plugin bug" rather than "we have a thread netns leak". DF9's mitigation now stays as defense-in-depth — if it ever fires post-DF10, there is either (a) an actual upstream bug, (b) a different netns leak we haven't found yet, or (c) genuine iptables-nft transient state — and all three warrant investigation rather than another retry.
+
+- **Pointer:** `runtime/containerd/containerd.go::canCreateNetNS`; entry "Go OS thread netns leak from `netns.NewNamed` / `netns.Set` without `runtime.LockOSThread`" in `backend-idiosyncrasies.md`. Cross-ref DF9 (mitigation kept as defense-in-depth) and DF8 (Kata warm-up race, separate cause).
 
 ### DF1 — `--security` flag was never in a tagged release; existing BREAKING-CHANGES entry is misleading
 
