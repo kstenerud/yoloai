@@ -546,7 +546,7 @@ func teardownCNI(sandboxDir string) error
 **`Create()`:**
 1. `setupCNI(sandboxDir, name)` → get `netnsPath`
 2. Look up image: `r.client.GetImage(ctx, cfg.ImageRef)` — error if not found with message
-   "image not found; run 'yoloai setup' to build it". `Create()` does not pull; image
+   "image not found; run 'yoloai system setup' to build it". `Create()` does not pull; image
    management is owned by `EnsureImage()`.
 3. Select snapshotter from `cfg.Snapshotter` (set by `isolationSnapshotter()` in `sandbox/create.go`); default to `"overlayfs"` if empty:
    ```go

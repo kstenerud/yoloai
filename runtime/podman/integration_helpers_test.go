@@ -25,7 +25,7 @@ func podmanSetup(t *testing.T) (*Runtime, context.Context) {
 
 	exists, err := rt.IsReady(ctx)
 	require.NoError(t, err)
-	require.True(t, exists, "yoloai-base image must exist — run 'make build && ./yoloai setup' first")
+	require.True(t, exists, "yoloai-base image must exist — run 'make build && ./yoloai system setup' first")
 
 	return rt, ctx
 }

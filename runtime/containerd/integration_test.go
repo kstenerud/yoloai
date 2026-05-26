@@ -107,7 +107,7 @@ func TestIntegration_ContainerLifecycle(t *testing.T) {
 	exists, err := rt.IsReady(ctx)
 	require.NoError(t, err)
 	if !exists {
-		t.Skip("yoloai-base image not found in containerd yoloai namespace; run 'yoloai setup' first")
+		t.Skip("yoloai-base image not found in containerd yoloai namespace; run 'yoloai system setup' first")
 	}
 
 	name := "yoloai-integration-test"

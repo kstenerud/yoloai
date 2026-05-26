@@ -107,6 +107,10 @@ Findings that turned up mid-workstream (architecture-remediation, layering-refac
 - This session's fourth `full_workflow/containerd-vm` failure (log `yoloai-smoketest-20260526-062648.461`) followed the same pattern as the second: failed attempt 1 with the documented "agent idle 9s+" signature, passed on the retry. Continues to reinforce DF8's revised hypothesis (no Type A; all failures are post-ready-idle agent behavior, possibly DF2's tool-less-response on Haiku under the QEMU CPU profile).
 - Four-of-four observations is a clear pattern; the action items in DF8 (rendered transcript capture per DF3) remain the next step.
 
+### DF8 (5th data point, 2026-05-26): containerd-vm failed BOTH attempts
+
+- Fifth `full_workflow/containerd-vm` failure (log `yoloai-smoketest-20260526-063648.819`) — first one in this session to fail BOTH attempts. Running totals across the W-L8b-kickoff session: 5 failures, 3 transient (pass on retry), 2 persistent (fail both). Still 100% post-ready-idle shape (same `do_epoll_wait + no connections` signature); the persistent-vs-transient split is along an unknown axis. Whether the "warming effect on retry" hypothesis (DF8 first version) is real or coincidence is still open — the rendered transcripts of DF3 are needed to distinguish "Haiku produced different output on retry" from "VM warmed up I/O cache, second run hit the API window."
+
 ### DF8 — `containerd-vm` "agent idle after prompt" fires across the full range of startup times; root cause is NOT startup-tuning
 
 - **Discovered:** 2026-05-26 · **Workstream:** observed during W-L8b kickoff

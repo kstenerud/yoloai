@@ -28,7 +28,7 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 	if !exists {
-		fmt.Fprintf(os.Stderr, "yoloai-base image not found — run 'make build && ./yoloai setup' first\n")
+		fmt.Fprintf(os.Stderr, "yoloai-base image not found — run 'make build && ./yoloai system setup' first\n")
 		os.Exit(1)
 	}
 
