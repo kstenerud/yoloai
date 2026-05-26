@@ -146,7 +146,7 @@ func (m *Manager) RunSetup(ctx context.Context, opts SetupOptions) error {
 	// Create defaults/ unconditionally so the migration check in
 	// EnsureSetupNonInteractive doesn't block users with setup_complete=true
 	// but no defaults/ yet (the exact scenario this command is meant to fix).
-	if err := ensureDefaultsDir(); err != nil {
+	if err := m.ensureDefaultsDir(); err != nil {
 		return err
 	}
 	if err := m.EnsureSetupNonInteractive(ctx); err != nil {

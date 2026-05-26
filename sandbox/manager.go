@@ -27,6 +27,7 @@ type Manager struct {
 	scanner  *bufio.Scanner // shared scanner for multi-step interactive prompts
 	output   io.Writer
 	progress func(name, msg string) // optional progress callback
+	layout   config.Layout          // DataDir-rooted path resolver (Q-W.2)
 }
 
 // ManagerOption configures a Manager.
@@ -36,6 +37,17 @@ type ManagerOption func(*Manager)
 // during long operations. The callback receives the sandbox name and message.
 func WithProgress(fn func(name, msg string)) ManagerOption {
 	return func(m *Manager) { m.progress = fn }
+}
+
+// WithLayout sets the path-resolution Layout. Embedders that want to
+// run yoloai rooted somewhere other than $HOME/.yoloai/ pass this
+// option at construction. When unset, the Manager defaults to a
+// Layout rooted at config.YoloaiDir() (which reads $HOME via
+// HomeDir()) — that default will be removed in Q-W.4 when the CLI
+// becomes the single os.UserHomeDir() call site and passes Layout
+// explicitly. See development-principles.md §12.
+func WithLayout(layout config.Layout) ManagerOption {
+	return func(m *Manager) { m.layout = layout }
 }
 
 // NewManager creates a Manager with the given runtime, logger, input reader
@@ -53,12 +65,18 @@ func NewManager(rt runtime.Runtime, logger *slog.Logger, input io.Reader, output
 		input:   input,
 		scanner: bufio.NewScanner(input),
 		output:  output,
+		layout:  config.NewLayout(config.YoloaiDir()), // Q-W.2 default; Q-W.4 removes this fallback
 	}
 	for _, opt := range opts {
 		opt(m)
 	}
 	return m
 }
+
+// Layout returns the Manager's path-resolution Layout. Read-only —
+// callers that need a different layout construct a new Manager with
+// WithLayout.
+func (m *Manager) Layout() config.Layout { return m.layout }
 
 // readLine reads a single line from the shared scanner, returning early if ctx
 // is cancelled. On EOF, returns ("", nil) so callers can treat it as a default.
@@ -118,14 +136,16 @@ func (m *Manager) EnsureSetup(ctx context.Context) error {
 	return nil
 }
 
-// ensureDefaultsDir creates ~/.yoloai/defaults/ and writes defaults/config.yaml
-// scaffold if it doesn't exist.
-func ensureDefaultsDir() error {
-	defaultsDir := config.DefaultsDir()
+// ensureDefaultsDir creates DataDir/defaults/ and writes defaults/config.yaml
+// scaffold if it doesn't exist. Method on Manager (was a free function
+// before Q-W.2) so it can use m.layout instead of the package-level
+// config.DefaultsDir() / config.DefaultsConfigPath() helpers.
+func (m *Manager) ensureDefaultsDir() error {
+	defaultsDir := m.layout.DefaultsDir()
 	if err := fileutil.MkdirAll(defaultsDir, 0750); err != nil {
 		return fmt.Errorf("create defaults dir: %w", err)
 	}
-	configPath := config.DefaultsConfigPath()
+	configPath := m.layout.DefaultsConfigPath()
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
 		scaffold := config.GenerateScaffoldConfig(config.DefaultConfigYAML)
 		if err := fileutil.WriteFile(configPath, []byte(scaffold), 0600); err != nil {
@@ -140,7 +160,7 @@ func ensureDefaultsDir() error {
 // and default config writing. Does not run interactive prompts.
 func (m *Manager) EnsureSetupNonInteractive(ctx context.Context) error {
 	// Create directory structure
-	for _, dir := range []string{config.SandboxesDir(), config.ProfilesDir(), config.CacheDir()} {
+	for _, dir := range []string{m.layout.SandboxesDir(), m.layout.ProfilesDir(), m.layout.CacheDir()} {
 		if err := fileutil.MkdirAll(dir, 0750); err != nil {
 			return fmt.Errorf("create %s: %w", dir, err)
 		}
@@ -158,7 +178,7 @@ func (m *Manager) EnsureSetupNonInteractive(ctx context.Context) error {
 	}
 
 	// Fresh install (or after manual migration): create defaults/ scaffold.
-	if err := ensureDefaultsDir(); err != nil {
+	if err := m.ensureDefaultsDir(); err != nil {
 		return err
 	}
 
