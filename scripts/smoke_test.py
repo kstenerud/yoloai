@@ -513,30 +513,33 @@ def _fix_preserved_perms(target: Path) -> None:
 # alongside the terminal-snapshot capture.
 
 # Multi-stage shell probe run inside the sandbox. Each stage maps to one
-# CNI step that might be racy — dns → route → tcp → https. Emits one line
-# per stage as "key=value", so future DF8 data points carry enough info to
-# distinguish "DNS not wired" from "route missing" from "TCP dropped" from
-# "TLS broken". The shell script keeps the probe to a single exec call per
-# sandbox.
+# CNI step that might be racy — dns → route → tcp → https. Every stage is
+# wrapped in `timeout` so a wedged step (glibc resolver hanging on missing
+# DNS, kernel waiting for SYN-ACK) can't blow past the outer subprocess
+# budget. Worst-case total ≈ 5+1+5+9 = 20s; outer subprocess timeout is
+# 30s to give headroom for ctr/exec setup latency. Emits one key=value
+# line per stage so future DF8 data points carry structural CNI info.
 _NETWORK_PROBE_SCRIPT = """
 set +e
 
-# 1. DNS resolution (catches missing /etc/resolv.conf or unreachable resolver).
-getent hosts api.anthropic.com >/dev/null 2>&1
+# 1. DNS resolution. `timeout 5` bounds glibc's resolver wait, which on a
+# broken/missing nameserver can hang 20-30s before giving up.
+timeout 5 getent hosts api.anthropic.com >/dev/null 2>&1
 echo "dns=$([ $? -eq 0 ] && echo ok || echo fail)"
 
-# 2. Default route present (catches CNI not setting up a route).
+# 2. Default route present (instant; catches CNI not setting up a route).
 ip route show default 2>/dev/null | grep -q default
 echo "route=$([ $? -eq 0 ] && echo ok || echo fail)"
 
-# 3. Raw TCP to a fixed IP, bypassing DNS (catches packets being dropped
-# vs refused — exit code lets curl distinguish later).
-timeout 4 bash -c '</dev/tcp/1.1.1.1/443' 2>/dev/null
+# 3. Raw TCP to a fixed IP, bypassing DNS. /dev/tcp is bash-only; if bash
+# is absent the redirect fails fast (exit 127), still bounded by timeout.
+timeout 5 bash -c '</dev/tcp/1.1.1.1/443' 2>/dev/null
 echo "tcp_1111_443=$([ $? -eq 0 ] && echo ok || echo fail)"
 
-# 4. End-to-end HTTPS to the actual API (the original probe).
-curl -sS --connect-timeout 5 --max-time 8 -o /dev/null -w "%{http_code}" \
-  https://api.anthropic.com/ >/tmp/.np_code 2>/tmp/.np_err
+# 4. End-to-end HTTPS to the actual API. curl's own timeouts cap it but
+# wrap in `timeout` as belt-and-suspenders for stalled DNS in --resolve.
+timeout 9 curl -sS --connect-timeout 5 --max-time 8 -o /dev/null \
+  -w "%{http_code}" https://api.anthropic.com/ >/tmp/.np_code 2>/tmp/.np_err
 np_exit=$?
 echo "https_exit=$np_exit"
 echo "https_code=$(cat /tmp/.np_code 2>/dev/null)"
@@ -622,9 +625,17 @@ def _probe_network(sandbox_name: str) -> Optional[str]:
     if cmd is None:
         return None
     try:
-        r = subprocess.run(cmd, capture_output=True, timeout=20)
-    except subprocess.TimeoutExpired:
-        return "unreachable (subprocess timeout)"
+        r = subprocess.run(cmd, capture_output=True, timeout=30)
+    except subprocess.TimeoutExpired as e:
+        # The script's per-stage timeouts cap each step, so this should
+        # only fire on ctr/docker exec setup latency. Include any partial
+        # output so we don't lose the stages that did complete.
+        partial = ""
+        if e.stdout:
+            fields = _parse_network_probe(e.stdout)
+            if fields:
+                partial = f" partial={_summarize_network_probe(fields)}"
+        return f"unreachable (subprocess timeout{partial})"
     except OSError as e:
         return f"probe error ({e})"
     return _summarize_network_probe(_parse_network_probe(r.stdout))

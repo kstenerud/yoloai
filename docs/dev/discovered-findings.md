@@ -153,6 +153,13 @@ Findings that turned up mid-workstream (architecture-remediation, layering-refac
 - **Implication:** the failure is NOT correlated between vm and vmenhanced on a single run, which argues against "host was in a bad state at run start" as the explanation. Each backend independently rolls the dice — consistent with a per-backend race (e.g. Kata netns wiring, QEMU CPU latency variability) rather than a global precondition. Now 2 confirmed failures of vmenhanced, 7 of vm.
 - Still PARKED pending DF3. Confirming with rendered tmux output remains the unblocker for any further diagnosis.
 
+### DF8 (10th data point, 2026-05-26): staged probe hit our outer 20s timeout — likely getent hanging
+
+- Log `yoloai-smoketest-20260526-144807.235`. Three failures in one run (most so far in a single session): `full_workflow/containerd-vmenhanced` failed BOTH attempts (first time persistent for vmenhanced in this session), `stop_start/containerd-vm` failed first attempt then passed retry. All three carry `network: unreachable (subprocess timeout)` — meaning the multi-stage probe didn't complete within the 20s outer subprocess budget. Terminal snapshots still capture (DF3 works); the staged probe output didn't (we lost the per-stage detail to the timeout).
+- **Root cause analysis:** the probe script's most likely hang is `getent hosts api.anthropic.com` when DNS is broken. glibc's resolver, with no nameserver responding, waits the configured timeout * tries — typically 5s × 3 = 15s, sometimes longer. None of the stages had per-step timeouts; the only bound was our outer 20s. So a slow DNS step starves the rest.
+- **Fix landed in same commit batch:** every stage now wrapped in `timeout N` (5s/5s/5s/9s = 24s worst case). Outer subprocess budget raised to 30s for ctr-exec setup overhead. On subprocess timeout we now ALSO parse any partial stdout the script emitted before the timeout fired, so partial information ("dns=ok route=fail tcp=?…") is preserved.
+- **Tentative inference from the loss:** the run that hit our timeout had THREE containerd failures including one persistent. The agent's terminal still showed "ConnectionRefused" — same retry pattern. If `getent` was hanging that's also a signal: DNS inside the sandbox isn't just slow, it's *broken*. The likely earliest CNI stage failure (resolv.conf not wired or nameserver unreachable from inside the netns) is now visible to the next data point.
+
 ### DF8 (9th data point, 2026-05-26): full diagnostic stack runs clean; agent's "ConnectionRefused" label is misleading
 
 - Log `yoloai-smoketest-20260526-143616.771`. First failure captured with the complete DF3/DF4/DF5 diagnostic stack landed. Failure line:
