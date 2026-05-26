@@ -803,6 +803,43 @@ def _capture_terminal_snapshot(
     return wrote
 
 
+def _summarize_network_probe_events(sandbox_name: str) -> Optional[str]:
+    """Extract sandbox.network.ready / sandbox.network.probe_timeout events
+    from the sandbox's cli.jsonl and return a compact summary, or None if
+    no probe events were emitted. DF8 fix observability — passing runs
+    show "probe: 1 attempt 47ms" when the probe ran fast, or
+    "probe: 8 attempts 3500ms" when the probe caught the Kata netns
+    warm-up race. Silent absence means the probe didn't fire at all (e.g.
+    non-containerd backends).
+    """
+    cli_jsonl = Path.home() / ".yoloai" / "sandboxes" / sandbox_name / "logs" / "cli.jsonl"
+    if not cli_jsonl.is_file():
+        return None
+    try:
+        contents = cli_jsonl.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    parts: list[str] = []
+    for line in contents.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            entry = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        event = str(entry.get("event", ""))
+        if event not in ("sandbox.network.ready", "sandbox.network.probe_timeout"):
+            continue
+        label = "ready" if event.endswith("ready") else "TIMEOUT"
+        attempts = entry.get("attempts", "?")
+        elapsed = entry.get("elapsed_ms", "?")
+        parts.append(f"{label} ({attempts} attempt(s), {elapsed}ms)")
+    if not parts:
+        return None
+    return "; ".join(parts)
+
+
 def _preserve_sandbox(sandbox_name: str, dest_parent: Path) -> Optional[Path]:
     """Copy diagnostic state from ~/.yoloai/sandboxes/<sandbox_name>/ to
     dest_parent/<sandbox_name>/. Returns the target dir, or None if the source
@@ -883,7 +920,18 @@ def run_test(
     try:
         fn(t)
         result = TestResult(name=name, passed=True, elapsed_s=time.monotonic() - start)
-        print(" PASS")
+        # DF8 fix observability: surface network-probe events from any
+        # sandbox this test created. Silent when the probe didn't fire
+        # (e.g. non-containerd backends) or wasn't recorded — see
+        # _summarize_network_probe_events.
+        probe_notes: list[str] = []
+        for sb in t.local_sandboxes:
+            if summary := _summarize_network_probe_events(sb):
+                probe_notes.append(f"{sb}: {summary}")
+        if probe_notes:
+            print(f" PASS  [probe: {' | '.join(probe_notes)}]")
+        else:
+            print(" PASS")
     except SkipTest as e:
         result = TestResult(name=name, skipped=True, reason=str(e), elapsed_s=time.monotonic() - start)
         print(f"\n  *** SKIP [{name}]: {e}")
