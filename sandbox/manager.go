@@ -253,7 +253,7 @@ func (m *Manager) SandboxCache(name string) string {
 // same sandbox. Each call is brief (one exec), so the lock-hold time
 // is small even under interactive use.
 func (m *Manager) SendInput(ctx context.Context, name string, text string) error {
-	unlock, err := AcquireLock(name)
+	unlock, err := AcquireLock(m.layout, name)
 	if err != nil {
 		return err
 	}

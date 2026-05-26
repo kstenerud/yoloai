@@ -74,6 +74,7 @@ type Options struct {
 type Client struct {
 	manager *sandbox.Manager
 	rt      runtime.Runtime
+	layout  config.Layout // Q-W: DataDir-rooted path resolver propagated to Manager + apply
 }
 
 // New creates a Client with default options. The backend is selected from
@@ -107,8 +108,13 @@ func NewWithOptions(ctx context.Context, opts Options) (*Client, error) {
 		return nil, fmt.Errorf("connect to %s backend: %w", backend, err)
 	}
 
-	mgr := sandbox.NewManager(rt, logger, input, output)
-	return &Client{manager: mgr, rt: rt}, nil
+	// Default Layout from config.YoloaiDir() — same fallback the Manager
+	// uses today (Q-W.2). Q-W.5 will replace this with an explicit
+	// Options.DataDir; for now Client and Manager share a Layout via
+	// WithLayout so both agree on paths.
+	layout := config.NewLayout(config.YoloaiDir())
+	mgr := sandbox.NewManager(rt, logger, input, output, sandbox.WithLayout(layout))
+	return &Client{manager: mgr, rt: rt, layout: layout}, nil
 }
 
 // Close releases the underlying runtime connection.
@@ -247,7 +253,7 @@ func (c *Client) Diff(_ context.Context, name string) ([]*patch.DiffResult, erro
 // Returns (nil, nil) when there is nothing to apply — branch on
 // len(results) == 0 rather than on a sentinel error (Q-P).
 func (c *Client) Apply(ctx context.Context, name string) ([]*patch.ApplyResult, error) {
-	return patch.ApplyAll(ctx, c.rt, name, false)
+	return patch.ApplyAll(ctx, c.layout, c.rt, name, false)
 }
 
 // ApplyOptions controls Client.ApplyWithOptions.
@@ -262,7 +268,7 @@ type ApplyOptions struct {
 // when there is nothing to apply — branch on len(results) == 0 rather
 // than on a sentinel error (Q-P).
 func (c *Client) ApplyWithOptions(ctx context.Context, name string, opts ApplyOptions) ([]*patch.ApplyResult, error) {
-	return patch.ApplyAll(ctx, c.rt, name, opts.IncludeWIP)
+	return patch.ApplyAll(ctx, c.layout, c.rt, name, opts.IncludeWIP)
 }
 
 // List returns info for all sandboxes.

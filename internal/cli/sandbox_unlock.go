@@ -5,6 +5,7 @@ package cli
 import (
 	"fmt"
 
+	"github.com/kstenerud/yoloai/config"
 	"github.com/kstenerud/yoloai/sandbox"
 	"github.com/spf13/cobra"
 )
@@ -16,7 +17,10 @@ import (
 // command is run defensively (in a recovery script, etc.) and there
 // was nothing actually stale.
 func runSandboxUnlock(cmd *cobra.Command, name string) error {
-	cleared, err := sandbox.ForceUnlock(name)
+	// Bridge: derive Layout from config.YoloaiDir() until Q-W.5 makes
+	// the CLI construct an explicit Layout at startup.
+	layout := config.NewLayout(config.YoloaiDir())
+	cleared, err := sandbox.ForceUnlock(layout, name)
 	if err != nil {
 		return err
 	}

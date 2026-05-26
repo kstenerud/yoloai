@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/kstenerud/yoloai/config"
 	"github.com/kstenerud/yoloai/internal/yoerrors"
 )
 
@@ -29,7 +30,11 @@ func (r *Runtime) PrepareRuntimeBase(ctx context.Context, runtimeSpecs []string)
 	cacheKey := GenerateCacheKey(resolved)
 	baseName := "yoloai-base-" + cacheKey
 
-	release, err := AcquireBaseLock(baseName)
+	// Bridge: Q-W.5 will replace this with an explicit Layout passed
+	// into Runtime construction; for now use the default rooted at
+	// config.YoloaiDir().
+	layout := config.NewLayout(config.YoloaiDir())
+	release, err := AcquireBaseLock(layout, baseName)
 	if err != nil {
 		return "", fmt.Errorf("acquire base lock: %w", err)
 	}

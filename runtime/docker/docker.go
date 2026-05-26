@@ -24,6 +24,7 @@ import (
 	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/docker/go-connections/nat"
 
+	"github.com/kstenerud/yoloai/config"
 	"github.com/kstenerud/yoloai/internal/yoerrors"
 	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/runtime/caps"
@@ -169,7 +170,10 @@ func (r *Runtime) Client() *dockerclient.Client {
 // "AlreadyExists: image already exists" from the Docker daemon.
 // Mirrors runtime/tart/base_lock.go.
 func (r *Runtime) Setup(ctx context.Context, sourceDir string, output io.Writer, logger *slog.Logger, force bool) error {
-	unlock, err := AcquireBaseLock("yoloai-base")
+	// Bridge: derive Layout from config.YoloaiDir() until Q-W.5 makes
+	// Setup take a Layout explicitly (or the Runtime holds one).
+	layout := config.NewLayout(config.YoloaiDir())
+	unlock, err := AcquireBaseLock(layout, "yoloai-base")
 	if err != nil {
 		return fmt.Errorf("acquire base lock: %w", err)
 	}

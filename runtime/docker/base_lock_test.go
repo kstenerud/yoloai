@@ -9,8 +9,17 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kstenerud/yoloai/config"
 	"github.com/stretchr/testify/require"
 )
+
+// testLayout returns a Layout rooted at the test's HOME-derived
+// YoloaiDir. Each test sets t.Setenv("HOME", t.TempDir()) before
+// calling this, so the lock files land in an isolated dir.
+func testLayout(t *testing.T) config.Layout {
+	t.Helper()
+	return config.NewLayout(config.YoloaiDir())
+}
 
 // TestAcquireBaseLock_MutualExclusion verifies that a second goroutine
 // blocks on AcquireBaseLock until the first releases it. This is the
@@ -19,12 +28,12 @@ import (
 func TestAcquireBaseLock_MutualExclusion(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
-	unlock1, err := AcquireBaseLock("yoloai-base")
+	unlock1, err := AcquireBaseLock(testLayout(t), "yoloai-base")
 	require.NoError(t, err)
 
 	acquired := make(chan struct{})
 	go func() {
-		unlock2, err2 := AcquireBaseLock("yoloai-base")
+		unlock2, err2 := AcquireBaseLock(testLayout(t), "yoloai-base")
 		if err2 == nil {
 			close(acquired)
 			unlock2()
@@ -53,11 +62,11 @@ func TestAcquireBaseLock_MutualExclusion(t *testing.T) {
 func TestAcquireBaseLock_IndependentBaseNames(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
-	unlock1, err := AcquireBaseLock("yoloai-base")
+	unlock1, err := AcquireBaseLock(testLayout(t), "yoloai-base")
 	require.NoError(t, err)
 	defer unlock1()
 
-	unlock2, err := AcquireBaseLock("yoloai-base-alt")
+	unlock2, err := AcquireBaseLock(testLayout(t), "yoloai-base-alt")
 	require.NoError(t, err)
 	unlock2()
 }
@@ -68,7 +77,7 @@ func TestAcquireBaseLock_Reacquirable(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
 	for range 3 {
-		unlock, err := AcquireBaseLock("yoloai-base")
+		unlock, err := AcquireBaseLock(testLayout(t), "yoloai-base")
 		require.NoError(t, err)
 		unlock()
 	}
@@ -93,7 +102,7 @@ func TestAcquireBaseLock_ConcurrentCallers(t *testing.T) {
 	for range N {
 		go func() {
 			defer wg.Done()
-			unlock, err := AcquireBaseLock("yoloai-base")
+			unlock, err := AcquireBaseLock(testLayout(t), "yoloai-base")
 			if err != nil {
 				t.Errorf("acquire failed: %v", err)
 				return

@@ -28,6 +28,10 @@ func TestLayout_PathsRootUnderDataDir(t *testing.T) {
 		{"TartBaseLocksDir", l.TartBaseLocksDir(), filepath.Join(dataDir, "tart-base-locks")},
 		{"DockerBaseLocksDir", l.DockerBaseLocksDir(), filepath.Join(dataDir, "docker-base-locks")},
 		{"VscodeCLIDir", l.VscodeCLIDir(), filepath.Join(dataDir, "vscode-cli")},
+		{"SandboxDir(myname)", l.SandboxDir("myname"), filepath.Join(dataDir, "sandboxes", "myname")},
+		{"SandboxLockPath(myname)", l.SandboxLockPath("myname"), filepath.Join(dataDir, "sandboxes", "myname.lock")},
+		{"TartBaseLockPath(macos14)", l.TartBaseLockPath("macos14"), filepath.Join(dataDir, "tart-base-locks", "macos14.lock")},
+		{"DockerBaseLockPath(yoloai-base)", l.DockerBaseLockPath("yoloai-base"), filepath.Join(dataDir, "docker-base-locks", "yoloai-base.lock")},
 	}
 	for _, c := range cases {
 		if c.got != c.want {

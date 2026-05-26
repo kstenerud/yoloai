@@ -6,19 +6,21 @@
 
 package sandbox
 
+import "github.com/kstenerud/yoloai/config"
+
 // AcquireLock is a no-op on Windows.
-func AcquireLock(_ string) (func(), error) {
+func AcquireLock(_ config.Layout, _ string) (func(), error) {
 	return func() {}, nil
 }
 
 // acquireMultiLock is a no-op on Windows.
-func acquireMultiLock(_ ...string) (func(), error) {
+func acquireMultiLock(_ config.Layout, _ ...string) (func(), error) {
 	return func() {}, nil
 }
 
 // ForceUnlock is a no-op on Windows — there is no lock file to clear
 // (AcquireLock is itself a no-op on this platform). Always returns
 // (cleared=false, err=nil).
-func ForceUnlock(_ string) (cleared bool, err error) {
+func ForceUnlock(_ config.Layout, _ string) (cleared bool, err error) {
 	return false, nil
 }

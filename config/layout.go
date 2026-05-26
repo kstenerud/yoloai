@@ -96,3 +96,31 @@ func (l Layout) DockerBaseLocksDir() string {
 func (l Layout) VscodeCLIDir() string {
 	return filepath.Join(l.DataDir, "vscode-cli")
 }
+
+// SandboxDir returns the per-sandbox state directory:
+// DataDir/sandboxes/<name>/. Equivalent to store.Dir(name) under the
+// legacy package-level helpers; the migration target for the 42+
+// store.Dir call sites (Q-W.4b).
+func (l Layout) SandboxDir(name string) string {
+	return filepath.Join(l.SandboxesDir(), name)
+}
+
+// SandboxLockPath returns the per-sandbox advisory lockfile path:
+// DataDir/sandboxes/<name>.lock. The lockfile lives next to the
+// sandbox dir (not inside it) so it works before the sandbox
+// directory is created — e.g. during "yoloai new".
+func (l Layout) SandboxLockPath(name string) string {
+	return filepath.Join(l.SandboxesDir(), name+".lock")
+}
+
+// TartBaseLockPath returns the lockfile path for serializing Tart
+// base VM builds: DataDir/tart-base-locks/<baseName>.lock.
+func (l Layout) TartBaseLockPath(baseName string) string {
+	return filepath.Join(l.TartBaseLocksDir(), baseName+".lock")
+}
+
+// DockerBaseLockPath returns the lockfile path for serializing
+// Docker base image builds: DataDir/docker-base-locks/<baseName>.lock.
+func (l Layout) DockerBaseLockPath(baseName string) string {
+	return filepath.Join(l.DockerBaseLocksDir(), baseName+".lock")
+}

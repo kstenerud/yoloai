@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/kstenerud/yoloai/config"
 	"github.com/kstenerud/yoloai/runtime/tart"
 	"github.com/kstenerud/yoloai/sandbox"
 	"github.com/spf13/cobra"
@@ -130,7 +131,11 @@ func runSystemTartAdd(cmd *cobra.Command, args []string) error {
 
 	fmt.Fprintf(cmd.OutOrStdout(), "\nCreating runtime base: %s\n\n", baseName) //nolint:errcheck
 
-	release, err := tart.AcquireBaseLock(baseName)
+	// Bridge: derive Layout from config.YoloaiDir() until Q-W.5 makes
+	// the CLI construct an explicit Layout at startup and thread it
+	// through every command handler.
+	layout := config.NewLayout(config.YoloaiDir())
+	release, err := tart.AcquireBaseLock(layout, baseName)
 	if err != nil {
 		return fmt.Errorf("acquire base lock: %w", err)
 	}

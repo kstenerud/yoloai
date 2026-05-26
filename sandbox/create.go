@@ -232,7 +232,7 @@ type containerConfig struct {
 // Create creates and optionally starts a new sandbox.
 // Returns the sandbox name on success (empty if user cancelled or no-start).
 func (m *Manager) Create(ctx context.Context, opts CreateOptions) (string, error) {
-	unlock, err := AcquireLock(opts.Name)
+	unlock, err := AcquireLock(m.layout, opts.Name)
 	if err != nil {
 		return "", err
 	}

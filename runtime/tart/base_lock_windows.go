@@ -4,9 +4,13 @@
 // ABOUTME: Keeps the tart package compilable on Windows without build-tag exclusions.
 package tart
 
-import "fmt"
+import (
+	"fmt"
 
-// AcquireBaseLock is not implemented on Windows (Tart is macOS-only)
-func AcquireBaseLock(baseName string) (func(), error) {
+	"github.com/kstenerud/yoloai/config"
+)
+
+// AcquireBaseLock is not implemented on Windows (Tart is macOS-only).
+func AcquireBaseLock(_ config.Layout, baseName string) (func(), error) {
 	return nil, fmt.Errorf("tart runtime not supported on Windows")
 }

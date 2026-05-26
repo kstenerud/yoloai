@@ -7,12 +7,14 @@ package sandbox
 import (
 	"errors"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/kstenerud/yoloai/config"
 	"github.com/kstenerud/yoloai/internal/yoerrors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -33,12 +35,20 @@ func withFastRetry(t *testing.T) {
 	})
 }
 
+// testLayout returns a Layout rooted at the test's HOME-derived
+// YoloaiDir. Each test sets t.Setenv("HOME", t.TempDir()) before
+// calling this, so the lock files land in an isolated dir.
+func testLayout(t *testing.T) config.Layout {
+	t.Helper()
+	return config.NewLayout(config.YoloaiDir())
+}
+
 // TestAcquireLock_CreatesDir verifies acquireLock succeeds when the sandboxes
 // directory does not yet exist (e.g. first run with an empty HOME).
 func TestAcquireLock_CreatesDir(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
-	unlock, err := AcquireLock("mybox")
+	unlock, err := AcquireLock(testLayout(t), "mybox")
 	require.NoError(t, err)
 	unlock()
 }
@@ -47,14 +57,15 @@ func TestAcquireLock_CreatesDir(t *testing.T) {
 // acquireLock until the first releases it.
 func TestAcquireLock_MutualExclusion(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
+	layout := testLayout(t)
 
-	unlock1, err := AcquireLock("mybox")
+	unlock1, err := AcquireLock(layout, "mybox")
 	require.NoError(t, err)
 
 	// Goroutine 2 tries to acquire the same lock — should block.
 	acquired := make(chan struct{})
 	go func() {
-		unlock2, err2 := AcquireLock("mybox")
+		unlock2, err2 := AcquireLock(layout, "mybox")
 		if err2 == nil {
 			close(acquired)
 			unlock2()
@@ -82,12 +93,13 @@ func TestAcquireLock_MutualExclusion(t *testing.T) {
 // do not block each other.
 func TestAcquireLock_IndependentSandboxes(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
+	layout := testLayout(t)
 
-	unlock1, err := AcquireLock("box-a")
+	unlock1, err := AcquireLock(layout, "box-a")
 	require.NoError(t, err)
 	defer unlock1()
 
-	unlock2, err := AcquireLock("box-b")
+	unlock2, err := AcquireLock(layout, "box-b")
 	require.NoError(t, err)
 	unlock2()
 }
@@ -96,9 +108,10 @@ func TestAcquireLock_IndependentSandboxes(t *testing.T) {
 // the release function is called.
 func TestAcquireLock_Reacquirable(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
+	layout := testLayout(t)
 
 	for range 3 {
-		unlock, err := AcquireLock("mybox")
+		unlock, err := AcquireLock(layout, "mybox")
 		require.NoError(t, err)
 		unlock()
 	}
@@ -108,12 +121,13 @@ func TestAcquireLock_Reacquirable(t *testing.T) {
 // release — it is a harmless advisory file that the next caller reuses.
 func TestAcquireLock_LockfileLeftOnDisk(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
+	layout := testLayout(t)
 
-	unlock, err := AcquireLock("mybox")
+	unlock, err := AcquireLock(layout, "mybox")
 	require.NoError(t, err)
 	unlock()
 
-	_, statErr := os.Stat(lockPath("mybox"))
+	_, statErr := os.Stat(layout.SandboxLockPath("mybox"))
 	assert.NoError(t, statErr, "lockfile should remain on disk after release")
 }
 
@@ -122,13 +136,14 @@ func TestAcquireLock_LockfileLeftOnDisk(t *testing.T) {
 // within the timeout because acquireMultiLock sorts names before locking.
 func TestAcquireMultiLock_DeadlockPrevention(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
+	layout := testLayout(t)
 
 	var wg sync.WaitGroup
 	for range 5 {
 		wg.Add(2)
 		go func() {
 			defer wg.Done()
-			unlock, err := acquireMultiLock("sandbox-x", "sandbox-y")
+			unlock, err := acquireMultiLock(layout, "sandbox-x", "sandbox-y")
 			require.NoError(t, err)
 			time.Sleep(time.Millisecond)
 			unlock()
@@ -136,7 +151,7 @@ func TestAcquireMultiLock_DeadlockPrevention(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			// Reverse order — internally sorted so no deadlock.
-			unlock, err := acquireMultiLock("sandbox-y", "sandbox-x")
+			unlock, err := acquireMultiLock(layout, "sandbox-y", "sandbox-x")
 			require.NoError(t, err)
 			time.Sleep(time.Millisecond)
 			unlock()
@@ -160,13 +175,14 @@ func TestAcquireMultiLock_DeadlockPrevention(t *testing.T) {
 // multi-lock can proceed at a time for the same set of names.
 func TestAcquireMultiLock_MutualExclusion(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
+	layout := testLayout(t)
 
-	unlock1, err := acquireMultiLock("alpha", "beta")
+	unlock1, err := acquireMultiLock(layout, "alpha", "beta")
 	require.NoError(t, err)
 
 	acquired := make(chan struct{})
 	go func() {
-		unlock2, err2 := acquireMultiLock("alpha", "beta")
+		unlock2, err2 := acquireMultiLock(layout, "alpha", "beta")
 		if err2 == nil {
 			close(acquired)
 			unlock2()
@@ -192,12 +208,13 @@ func TestAcquireMultiLock_MutualExclusion(t *testing.T) {
 // acquiring process's PID while the lock is held.
 func TestAcquireLock_WritesHolderPID(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
+	layout := testLayout(t)
 
-	unlock, err := AcquireLock("mybox")
+	unlock, err := AcquireLock(layout, "mybox")
 	require.NoError(t, err)
 	defer unlock()
 
-	data, err := os.ReadFile(lockPath("mybox"))
+	data, err := os.ReadFile(layout.SandboxLockPath("mybox"))
 	require.NoError(t, err)
 	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
 	require.NoError(t, err)
@@ -209,12 +226,13 @@ func TestAcquireLock_WritesHolderPID(t *testing.T) {
 // file doesn't see a misleading PID.
 func TestAcquireLock_ClearsHolderPIDOnRelease(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
+	layout := testLayout(t)
 
-	unlock, err := AcquireLock("mybox")
+	unlock, err := AcquireLock(layout, "mybox")
 	require.NoError(t, err)
 	unlock()
 
-	data, err := os.ReadFile(lockPath("mybox"))
+	data, err := os.ReadFile(layout.SandboxLockPath("mybox"))
 	require.NoError(t, err)
 	assert.Empty(t, strings.TrimSpace(string(data)), "lock file content should be cleared on release")
 }
@@ -224,13 +242,14 @@ func TestAcquireLock_ClearsHolderPIDOnRelease(t *testing.T) {
 // with HolderAlive=true and the holder's PID.
 func TestAcquireLock_ContentionReturnsTypedError(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
+	layout := testLayout(t)
 	withFastRetry(t)
 
-	unlock, err := AcquireLock("mybox")
+	unlock, err := AcquireLock(layout, "mybox")
 	require.NoError(t, err)
 	defer unlock()
 
-	_, err = AcquireLock("mybox")
+	_, err = AcquireLock(layout, "mybox")
 	require.Error(t, err)
 
 	var lockedErr *yoerrors.SandboxLockedError
@@ -238,7 +257,7 @@ func TestAcquireLock_ContentionReturnsTypedError(t *testing.T) {
 	assert.Equal(t, "mybox", lockedErr.Name)
 	assert.Equal(t, os.Getpid(), lockedErr.HolderPID)
 	assert.True(t, lockedErr.HolderAlive, "expected HolderAlive=true (the test process is alive)")
-	assert.Equal(t, lockPath("mybox"), lockedErr.LockPath)
+	assert.Equal(t, layout.SandboxLockPath("mybox"), lockedErr.LockPath)
 }
 
 // TestForceUnlock_ClearsStaleLockfile verifies ForceUnlock removes a
@@ -246,19 +265,21 @@ func TestAcquireLock_ContentionReturnsTypedError(t *testing.T) {
 // cleared=true.
 func TestForceUnlock_ClearsStaleLockfile(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
+	layout := testLayout(t)
+	lockPath := layout.SandboxLockPath("mybox")
 
 	// Simulate a stale lock: lock file exists with a definitely-dead
 	// PID. We use a value near PID_MAX that is very unlikely to be
 	// alive on the test host.
-	require.NoError(t, os.MkdirAll(lockPath("mybox")[:strings.LastIndex(lockPath("mybox"), "/")], 0750))
+	require.NoError(t, os.MkdirAll(filepath.Dir(lockPath), 0750))
 	stalePID := 2147483646
-	require.NoError(t, os.WriteFile(lockPath("mybox"), []byte(strconv.Itoa(stalePID)+"\n"), 0600))
+	require.NoError(t, os.WriteFile(lockPath, []byte(strconv.Itoa(stalePID)+"\n"), 0600))
 
-	cleared, err := ForceUnlock("mybox")
+	cleared, err := ForceUnlock(layout, "mybox")
 	require.NoError(t, err)
 	assert.True(t, cleared, "expected cleared=true when a stale lock existed")
 
-	_, statErr := os.Stat(lockPath("mybox"))
+	_, statErr := os.Stat(lockPath)
 	assert.True(t, os.IsNotExist(statErr), "lock file should be removed after ForceUnlock; got err=%v", statErr)
 }
 
@@ -267,20 +288,21 @@ func TestForceUnlock_ClearsStaleLockfile(t *testing.T) {
 // reports cleared=false.
 func TestForceUnlock_RefusesAliveHolder(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
+	layout := testLayout(t)
 
 	// Acquire a real lock so the file has our own (alive) PID.
-	unlock, err := AcquireLock("mybox")
+	unlock, err := AcquireLock(layout, "mybox")
 	require.NoError(t, err)
 	defer unlock()
 
-	cleared, err := ForceUnlock("mybox")
+	cleared, err := ForceUnlock(layout, "mybox")
 	require.Error(t, err)
 	assert.False(t, cleared, "expected cleared=false when ForceUnlock refused")
 	var usageErr *yoerrors.UsageError
 	assert.True(t, errors.As(err, &usageErr), "expected *UsageError when holder is alive, got %T: %v", err, err)
 
 	// Lock file should still be present.
-	_, statErr := os.Stat(lockPath("mybox"))
+	_, statErr := os.Stat(layout.SandboxLockPath("mybox"))
 	assert.NoError(t, statErr, "lock file should remain when ForceUnlock refused")
 }
 
@@ -291,7 +313,7 @@ func TestForceUnlock_RefusesAliveHolder(t *testing.T) {
 func TestForceUnlock_NoLockFileIsNoOp(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
-	cleared, err := ForceUnlock("never-existed")
+	cleared, err := ForceUnlock(testLayout(t), "never-existed")
 	assert.NoError(t, err)
 	assert.False(t, cleared, "expected cleared=false when no lock file existed")
 }

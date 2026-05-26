@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/kstenerud/yoloai/config"
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/sandbox"
@@ -37,8 +38,12 @@ type ApplyResult struct {
 // patches to apply, returns (nil, nil) — the empty-result + nil-error
 // pair is the no-changes signal. Callers branch on len(results) == 0
 // rather than a sentinel error; see Q-P.
-func ApplyAll(ctx context.Context, rt runtime.Runtime, name string, includeWIP bool) ([]*ApplyResult, error) {
-	unlock, err := sandbox.AcquireLock(name)
+//
+// layout determines where the per-sandbox lock file lives (Q-W.4a);
+// callers thread their own Layout in. yoloai.Client supplies its
+// c.layout; the CLI supplies the same Layout it gives Manager.
+func ApplyAll(ctx context.Context, layout config.Layout, rt runtime.Runtime, name string, includeWIP bool) ([]*ApplyResult, error) {
+	unlock, err := sandbox.AcquireLock(layout, name)
 	if err != nil {
 		return nil, err
 	}

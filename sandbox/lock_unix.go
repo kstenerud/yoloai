@@ -1,4 +1,4 @@
-// ABOUTME: Per-sandbox advisory file locking using flock(2) on Unix/Linux/macOS.
+// ABOUTME: Per-sandbox advisory file locking via the locking primitive.
 // ABOUTME: Non-blocking acquire with brief retry; SandboxLockedError on contention.
 
 //go:build !windows
@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -18,17 +17,9 @@ import (
 	"time"
 
 	"github.com/kstenerud/yoloai/config"
-	"github.com/kstenerud/yoloai/internal/fileutil"
+	"github.com/kstenerud/yoloai/internal/locking"
 	"github.com/kstenerud/yoloai/internal/yoerrors"
-	"golang.org/x/sys/unix"
 )
-
-// lockPath returns the path to the per-sandbox advisory lockfile.
-// Lives next to the sandbox dir (not inside it) so it works before
-// the sandbox directory is created (e.g. during "yoloai new").
-func lockPath(name string) string {
-	return filepath.Join(config.SandboxesDir(), name+".lock") //nolint:gosec // name is validated by ValidateName
-}
 
 // Retry tuning. Total budget ≈ lockRetryAttempts × lockRetryInterval =
 // 3 seconds. Long enough to absorb a brief overlap from two
@@ -43,33 +34,24 @@ var (
 	lockRetryInterval = 100 * time.Millisecond
 )
 
-// AcquireLock creates (or opens) the per-sandbox lockfile and acquires
-// an exclusive flock. Non-blocking: tries the flock up to
+// AcquireLock acquires the per-sandbox lock by name, rooted at the
+// given Layout. Non-blocking under the hood: tries the flock up to
 // lockRetryAttempts times with lockRetryInterval between attempts.
 // Returns *SandboxLockedError (with holder PID + aliveness) when the
 // retry budget is exhausted.
 //
-// On success, writes the acquiring process's PID to the file content
-// (informational — the flock(2) advisory lock is still the source of
-// truth for mutual exclusion). The release function clears the PID
-// bytes and releases the flock.
-//
-// The lockfile is left on disk after release; this is harmless — it
-// is an advisory file and the next call for the same sandbox reuses
-// it. Locks are released automatically if the process exits or
-// crashes (flock semantics).
+// On success, writes the acquiring process's PID to the lockfile
+// content (informational — the flock(2) advisory lock is still the
+// source of truth for mutual exclusion). The release function
+// clears the PID bytes and releases the flock.
 //
 // **Lock-acquisition invariant (Q-T).** Every public Manager method
 // that mutates a sandbox's state calls AcquireLock (or
 // acquireMultiLock) at the method entry, before any backend RPC or
-// filesystem op, and releases via defer. The lock acquisition is
-// part of the method's signature, not pushed down into internals.
-// Read methods (List, Inspect, Status, NeedsConfirmation,
-// SandboxFiles, SandboxCache) do NOT acquire the lock and run in
-// parallel.
+// filesystem op, and releases via defer. Read methods do not
+// acquire the lock.
 //
-// Current writer set (audit point — keep in sync as methods are
-// added):
+// Current writer set (keep in sync as methods are added):
 //
 //	Create, Stop, Start, Destroy, Reset      → sandbox/{create,lifecycle}.go
 //	Clone                                    → sandbox/clone.go (multi-lock)
@@ -79,22 +61,69 @@ var (
 // The W-L10 layering linter (planned) will verify that new write
 // methods on the future Client surface include AcquireLock at their
 // public entry point.
-func AcquireLock(name string) (func(), error) {
-	if err := fileutil.MkdirAll(config.SandboxesDir(), 0750); err != nil {
-		return nil, fmt.Errorf("create sandboxes dir: %w", err)
-	}
-	path := lockPath(name)
-	f, err := fileutil.OpenFile(path, os.O_CREATE|os.O_RDWR, 0600) //nolint:gosec // path constructed from validated name
-	if err != nil {
-		return nil, fmt.Errorf("open sandbox lockfile: %w", err)
+func AcquireLock(layout config.Layout, name string) (func(), error) {
+	path := layout.SandboxLockPath(name)
+	return acquireWithRetry(layout, name, path)
+}
+
+// acquireMultiLock acquires exclusive locks on multiple sandbox
+// names atomically (in sorted order to prevent deadlocks). The
+// returned release function releases all locks. Use this when an
+// operation touches two sandboxes (e.g. clone: source + destination).
+//
+// Returns *SandboxLockedError for the first name that fails the
+// retry budget; previously-acquired locks in this call are released
+// before returning.
+func acquireMultiLock(layout config.Layout, names ...string) (func(), error) {
+	sorted := make([]string, len(names))
+	copy(sorted, names)
+	sort.Strings(sorted)
+
+	var releases []func()
+	releaseAll := func() {
+		for _, r := range releases {
+			r()
+		}
 	}
 
-	if err := flockWithRetry(int(f.Fd())); err != nil { //nolint:gosec // file descriptor fits in int
-		_ = f.Close()
-		if errors.Is(err, unix.EWOULDBLOCK) {
-			return nil, newLockedError(name, path)
+	for _, name := range sorted {
+		path := layout.SandboxLockPath(name)
+		release, err := acquireWithRetry(layout, name, path)
+		if err != nil {
+			releaseAll()
+			return nil, err
 		}
-		return nil, fmt.Errorf("acquire sandbox lock for %q: %w", name, err)
+		releases = append(releases, release)
+	}
+
+	return releaseAll, nil
+}
+
+// acquireWithRetry is the shared retry+PID-write helper used by
+// AcquireLock and acquireMultiLock. Returns *SandboxLockedError when
+// the retry budget is exhausted.
+func acquireWithRetry(layout config.Layout, name, path string) (func(), error) {
+	var f *os.File
+	var release func()
+	var lastErr error
+	for i := 0; i < lockRetryAttempts; i++ {
+		var err error
+		f, release, err = locking.AcquireWithFile(path)
+		if err == nil {
+			break
+		}
+		if !errors.Is(err, locking.ErrWouldBlock) {
+			return nil, fmt.Errorf("acquire sandbox lock for %q: %w", name, err)
+		}
+		lastErr = err
+		if i < lockRetryAttempts-1 {
+			time.Sleep(lockRetryInterval)
+		}
+	}
+	if f == nil {
+		// Retry budget exhausted; classify the holder.
+		_ = lastErr
+		return nil, newLockedError(layout, name)
 	}
 
 	// Record our PID for contention readers. Best-effort — the flock
@@ -102,58 +131,12 @@ func AcquireLock(name string) (func(), error) {
 	// lock acquisition.
 	_ = writeHolderPID(f, os.Getpid())
 
+	// Wrap release so we clear the PID bytes before flock-unlocking.
+	innerRelease := release
 	return func() {
 		_ = clearHolderPID(f)
-		_ = unix.Flock(int(f.Fd()), unix.LOCK_UN) //nolint:gosec // same fd
-		_ = f.Close()
+		innerRelease()
 	}, nil
-}
-
-// acquireMultiLock acquires exclusive locks on multiple sandbox names
-// atomically (in sorted order to prevent deadlocks). The returned
-// release function releases all locks. Use this when an operation
-// touches two sandboxes (e.g. clone: source + destination).
-//
-// Returns *SandboxLockedError for the first name that fails the retry
-// budget; previously-acquired locks in this call are released before
-// returning.
-func acquireMultiLock(names ...string) (func(), error) {
-	sorted := make([]string, len(names))
-	copy(sorted, names)
-	sort.Strings(sorted)
-
-	var files []*os.File
-	release := func() {
-		for _, f := range files {
-			_ = clearHolderPID(f)
-			_ = unix.Flock(int(f.Fd()), unix.LOCK_UN) //nolint:gosec // same fd
-			_ = f.Close()
-		}
-	}
-
-	if err := fileutil.MkdirAll(config.SandboxesDir(), 0750); err != nil {
-		return nil, fmt.Errorf("create sandboxes dir: %w", err)
-	}
-	for _, name := range sorted {
-		path := lockPath(name)
-		f, err := fileutil.OpenFile(path, os.O_CREATE|os.O_RDWR, 0600) //nolint:gosec // path constructed from validated name
-		if err != nil {
-			release()
-			return nil, fmt.Errorf("open sandbox lockfile for %q: %w", name, err)
-		}
-		if err := flockWithRetry(int(f.Fd())); err != nil { //nolint:gosec // fd fits in int
-			_ = f.Close()
-			release()
-			if errors.Is(err, unix.EWOULDBLOCK) {
-				return nil, newLockedError(name, path)
-			}
-			return nil, fmt.Errorf("acquire sandbox lock for %q: %w", name, err)
-		}
-		_ = writeHolderPID(f, os.Getpid())
-		files = append(files, f)
-	}
-
-	return release, nil
 }
 
 // ForceUnlock clears a stale per-sandbox lock file. Returns
@@ -170,8 +153,8 @@ func acquireMultiLock(names ...string) (func(), error) {
 //
 // CLI: `yoloai sandbox <name> unlock`. See api_surface.go's Q-Z
 // resolution for the rationale.
-func ForceUnlock(name string) (cleared bool, err error) {
-	path := lockPath(name)
+func ForceUnlock(layout config.Layout, name string) (cleared bool, err error) {
+	path := layout.SandboxLockPath(name)
 
 	if _, statErr := os.Stat(path); errors.Is(statErr, fs.ErrNotExist) {
 		return false, nil
@@ -192,31 +175,10 @@ func ForceUnlock(name string) (cleared bool, err error) {
 	return true, nil
 }
 
-// flockWithRetry attempts LOCK_EX|LOCK_NB up to lockRetryAttempts
-// times, sleeping lockRetryInterval between attempts. Returns the
-// last unix.EWOULDBLOCK if the retry budget is exhausted, or any
-// other error immediately.
-func flockWithRetry(fd int) error {
-	var lastErr error
-	for i := 0; i < lockRetryAttempts; i++ {
-		err := unix.Flock(fd, unix.LOCK_EX|unix.LOCK_NB)
-		if err == nil {
-			return nil
-		}
-		if !errors.Is(err, unix.EWOULDBLOCK) {
-			return err
-		}
-		lastErr = err
-		if i < lockRetryAttempts-1 {
-			time.Sleep(lockRetryInterval)
-		}
-	}
-	return lastErr
-}
-
-// newLockedError reads the lock file's recorded holder PID, classifies
-// aliveness, and returns a *SandboxLockedError.
-func newLockedError(name, path string) error {
+// newLockedError reads the lock file's recorded holder PID,
+// classifies aliveness, and returns a *SandboxLockedError.
+func newLockedError(layout config.Layout, name string) error {
+	path := layout.SandboxLockPath(name)
 	pid, _ := readHolderPID(path) // 0 if unreadable
 	return &yoerrors.SandboxLockedError{
 		Name:        name,
@@ -240,8 +202,8 @@ func writeHolderPID(f *os.File, pid int) error {
 	return err
 }
 
-// clearHolderPID truncates the lock file to zero bytes on release so a
-// future reader of a stale lock file doesn't see a misleading PID.
+// clearHolderPID truncates the lock file to zero bytes on release so
+// a future reader of a stale lock file doesn't see a misleading PID.
 // Best-effort; the flock release is the actual ownership transfer.
 func clearHolderPID(f *os.File) error {
 	if _, err := f.Seek(0, 0); err != nil {
@@ -254,7 +216,7 @@ func clearHolderPID(f *os.File) error {
 // holder PID. Returns 0 if the file is missing, empty, or contains
 // anything other than a decimal integer.
 func readHolderPID(path string) (int, error) {
-	data, err := os.ReadFile(path) //nolint:gosec // path is config-derived
+	data, err := os.ReadFile(path) //nolint:gosec // path is layout-derived
 	if err != nil {
 		return 0, err
 	}
@@ -270,12 +232,9 @@ func readHolderPID(path string) (int, error) {
 }
 
 // isProcessAlive returns true if pid names a live process on this
-// host. Implementation: syscall.Kill(pid, 0) — ESRCH means dead, EPERM
-// means alive (but not owned by us; still counts as alive), no error
-// means alive. PID reuse on long-uptime systems is a real but small
-// risk; combined with "ForceUnlock refuses alive holders" the failure
-// mode (refuse to clear a reused PID) is safe — the user can rm the
-// file manually if needed.
+// host. Implementation: syscall.Kill(pid, 0) — ESRCH means dead,
+// EPERM means alive (but not owned by us; still counts as alive),
+// no error means alive.
 func isProcessAlive(pid int) bool {
 	if pid <= 0 {
 		return false

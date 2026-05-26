@@ -30,7 +30,7 @@ func (m *Manager) Clone(ctx context.Context, opts CloneOptions) error {
 		return err
 	}
 
-	unlock, err := acquireMultiLock(opts.Source, opts.Dest)
+	unlock, err := acquireMultiLock(m.layout, opts.Source, opts.Dest)
 	if err != nil {
 		return err
 	}
