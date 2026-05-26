@@ -24,6 +24,7 @@ import (
 	"github.com/containerd/errdefs"
 	specs "github.com/opencontainers/runtime-spec/specs-go"
 
+	"github.com/kstenerud/yoloai/internal/yoerrors"
 	"github.com/kstenerud/yoloai/runtime"
 )
 
@@ -260,6 +261,13 @@ func ensureImageUnpacked(ctx context.Context, img client.Image, snapshotter stri
 	if err := img.Unpack(ctx, snapshotter); err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return fmt.Errorf("unpack image: %w", err)
+		}
+		// Disk exhaustion is the most common non-cancellation cause of
+		// unpack failure — surface the typed error so the CLI prints
+		// the prune/disk hint at exit code 10. Falls through to the
+		// GC-hint wrapping for other errors.
+		if yoerrors.IsDiskSpaceError(err) {
+			return yoerrors.AsDiskSpaceError("unpack base image", err)
 		}
 		return fmt.Errorf("unpack image: %w\n  Hint: image content may have been removed by containerd GC; run 'yoloai system build --force' to rebuild", err)
 	}

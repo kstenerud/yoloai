@@ -82,6 +82,17 @@ func printRunError(runErr error, rootCmd *cobra.Command, activeCmd *cobra.Comman
 		return
 	}
 	fmt.Fprintf(os.Stderr, "yoloai: %s\n", runErr) //nolint:errcheck // best-effort stderr write
+
+	// If this is a raw ENOSPC that wasn't wrapped at the call site, the
+	// user just saw the underlying error without the recovery hint that
+	// *DiskSpaceError carries. Append the same hint here so the message
+	// is actionable regardless of whether the runtime layer wrapped.
+	if _, alreadyWrapped := errors.AsType[*sandbox.DiskSpaceError](runErr); !alreadyWrapped && sandbox.IsDiskSpaceError(runErr) {
+		fmt.Fprintln(os.Stderr, "Free space and retry:")                                                                //nolint:errcheck
+		fmt.Fprintln(os.Stderr, "  yoloai system disk             # show what yoloai is using")                         //nolint:errcheck
+		fmt.Fprintln(os.Stderr, "  yoloai system prune --cache    # reclaim backend image cache (forces base rebuild)") //nolint:errcheck
+	}
+
 	if activeCmd != nil {
 		fmt.Fprintf(os.Stderr, "Run '%s -h' for help\n", activeCmd.CommandPath()) //nolint:errcheck // best-effort stderr write
 	}
@@ -175,6 +186,17 @@ func errorExitCode(err error) int {
 
 	if _, ok := errors.AsType[*sandbox.SandboxLockedError](err); ok {
 		return 9
+	}
+
+	// DiskSpaceError catches both explicitly-wrapped sites (via
+	// AsDiskSpaceError) and unwrapped ENOSPC errors that flowed up
+	// from runtimes without typing — IsDiskSpaceError sniffs both
+	// syscall.ENOSPC and the common string forms.
+	if _, ok := errors.AsType[*sandbox.DiskSpaceError](err); ok {
+		return 10
+	}
+	if sandbox.IsDiskSpaceError(err) {
+		return 10
 	}
 
 	return 1

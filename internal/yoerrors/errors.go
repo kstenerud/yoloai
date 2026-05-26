@@ -8,7 +8,12 @@ package yoerrors
 // ABOUTME: Error types for usage and configuration problems.
 // ABOUTME: Used by CLI to determine exit codes.
 
-import "fmt"
+import (
+	"errors"
+	"fmt"
+	"strings"
+	"syscall"
+)
 
 // UsageError indicates bad arguments or missing required args (exit code 2).
 type UsageError struct {
@@ -89,6 +94,81 @@ func (e *PermissionError) Unwrap() error { return e.Err }
 // NewPermissionError wraps a message as a PermissionError.
 func NewPermissionError(format string, args ...any) *PermissionError {
 	return &PermissionError{Err: fmt.Errorf(format, args...)}
+}
+
+// DiskSpaceError indicates an operation failed because the host
+// filesystem ran out of space. Fatal to the current operation, but
+// recoverable — the user can free space and retry (exit code 10).
+//
+// Op should describe what was being attempted (e.g. "unpack image",
+// "create snapshot", "write sandbox state"), used to phrase the
+// user-facing message. Err is the original underlying error so
+// errors.Unwrap and errors.Is keep working.
+type DiskSpaceError struct {
+	Op  string
+	Err error
+}
+
+func (e *DiskSpaceError) Error() string {
+	return fmt.Sprintf(
+		"no space left on device while %s: %v\n"+
+			"Free space and retry:\n"+
+			"  yoloai system disk             # show what yoloai is using\n"+
+			"  yoloai system prune --cache    # reclaim backend image cache (forces base rebuild)",
+		e.Op, e.Err,
+	)
+}
+
+func (e *DiskSpaceError) Unwrap() error { return e.Err }
+
+// IsDiskSpaceError reports whether err is — or wraps — a disk-space
+// exhaustion. Detection layers:
+//
+//  1. syscall.ENOSPC via errors.Is (Linux kernel, when callers preserve
+//     the sentinel — Go stdlib usually does).
+//  2. String markers from higher-level libraries (containerd, docker,
+//     podman, tar/snapshotters) that wrap ENOSPC without preserving
+//     the sentinel through their internal error chains.
+//
+// The string fallback is necessary because runtime backends often
+// surface ENOSPC as a free-form string with no typed wrapper.
+func IsDiskSpaceError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, syscall.ENOSPC) {
+		return true
+	}
+	s := err.Error()
+	for _, marker := range []string{
+		"no space left on device",
+		"out of disk space",
+		"ENOSPC",
+	} {
+		if strings.Contains(s, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+// AsDiskSpaceError wraps err as *DiskSpaceError if IsDiskSpaceError
+// matches; otherwise returns err unchanged (including nil). Use at
+// call sites where adding `op` context to the user-facing message
+// helps — for example, in image-unpack or snapshot-create paths.
+func AsDiskSpaceError(op string, err error) error {
+	if !IsDiskSpaceError(err) {
+		return err
+	}
+	return &DiskSpaceError{Op: op, Err: err}
+}
+
+// NewDiskSpaceError constructs a DiskSpaceError directly. Useful when
+// you've already identified the disk-space condition (e.g. statfs
+// returned low free bytes) and want to short-circuit before the
+// kernel would have surfaced ENOSPC.
+func NewDiskSpaceError(op string, err error) *DiskSpaceError {
+	return &DiskSpaceError{Op: op, Err: err}
 }
 
 // SandboxLockedError indicates a write operation couldn't acquire the

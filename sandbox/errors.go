@@ -70,3 +70,24 @@ var NewPermissionError = yoerrors.NewPermissionError
 // retry window. Match with errors.As; the typed fields (HolderPID,
 // HolderAlive, LockPath) drive recovery UX.
 type SandboxLockedError = yoerrors.SandboxLockedError
+
+// DiskSpaceError is an alias for yoerrors.DiskSpaceError. Surfaced
+// when an operation fails because the host filesystem ran out of
+// space — fatal to the current operation but recoverable via
+// `yoloai system prune --cache` or freeing space on the relevant
+// mount.
+type DiskSpaceError = yoerrors.DiskSpaceError
+
+// IsDiskSpaceError forwards to yoerrors.IsDiskSpaceError. Use to
+// branch on ENOSPC without unwrapping the error chain manually.
+var IsDiskSpaceError = yoerrors.IsDiskSpaceError
+
+// AsDiskSpaceError forwards to yoerrors.AsDiskSpaceError. Use at
+// call sites that have meaningful operation context to attach to
+// the user-facing error message.
+var AsDiskSpaceError = yoerrors.AsDiskSpaceError
+
+// NewDiskSpaceError forwards to yoerrors.NewDiskSpaceError. Use when
+// the disk-space condition is detected directly (e.g., from statfs)
+// rather than caught from a syscall error.
+var NewDiskSpaceError = yoerrors.NewDiskSpaceError

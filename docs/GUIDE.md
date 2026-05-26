@@ -335,6 +335,8 @@ Errors are output to stderr as `{"error": "message"}`. Interactive commands (`at
 | 6     | Platform error — operation not possible on this OS/arch (e.g., tart on Linux) |
 | 7     | Auth error — credentials completely absent (e.g., `ANTHROPIC_API_KEY` not set) |
 | 8     | Permission error — access denied by policy (e.g., user not in docker group) |
+| 9     | Sandbox locked — another process holds the per-sandbox lock; `yoloai sandbox <name> unlock` if stale |
+| 10    | Disk space exhausted — host filesystem full; `yoloai system disk` + `yoloai system prune --cache` to recover |
 | 128+N | Terminated by signal N (POSIX convention) |
 | 130   | Interrupted by SIGINT / Ctrl+C |
 
