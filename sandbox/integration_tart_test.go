@@ -136,7 +136,7 @@ func TestIntegrationTart_FullLifecycle(t *testing.T) {
 	assert.Contains(t, result.Stdout, "main.go", "git should detect modified file")
 
 	// Generate diff (should use VM-exec path for Tart)
-	diffResult, err := patch.GenerateDiff(ctx, patch.DiffOptions{Name: sandboxName})
+	diffResult, err := patch.GenerateDiff(ctx, patch.DiffOptions{Name: sandboxName, Layout: mgr.Layout()})
 	require.NoError(t, err)
 	assert.False(t, diffResult.Empty, "diff should not be empty after modification")
 	assert.Contains(t, diffResult.Output, "fmt.Println", "diff should contain modification")
@@ -257,7 +257,7 @@ func TestIntegrationTart_MultipleAuxDirs(t *testing.T) {
 	}
 
 	// Generate diff (should include changes from all directories)
-	diffResult, err := patch.GenerateDiff(ctx, patch.DiffOptions{Name: sandboxName})
+	diffResult, err := patch.GenerateDiff(ctx, patch.DiffOptions{Name: sandboxName, Layout: mgr.Layout()})
 	require.NoError(t, err)
 	assert.False(t, diffResult.Empty, "diff should detect changes in aux directories")
 }
@@ -321,7 +321,7 @@ func TestIntegrationTart_GitCorruption(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 0, result.ExitCode)
 
-	diffResult, err := patch.GenerateDiff(ctx, patch.DiffOptions{Name: sandboxName})
+	diffResult, err := patch.GenerateDiff(ctx, patch.DiffOptions{Name: sandboxName, Layout: mgr.Layout()})
 	require.NoError(t, err)
 	assert.False(t, diffResult.Empty)
 	assert.Contains(t, diffResult.Output, "test.txt")
