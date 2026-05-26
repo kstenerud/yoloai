@@ -486,6 +486,97 @@ def _fix_preserved_perms(target: Path) -> None:
             adjust(os.path.join(root, f), is_dir=False)
 
 
+# ---- tmux capture-pane diagnostic snapshot (DF3) -----------------------------
+#
+# When a test fails (especially the "agent idle 9s+" family on containerd-vm /
+# containerd-vmenhanced), the preserved agent.log is a raw ANSI byte stream that
+# can't be read without piping through a terminal emulator. We need the
+# *rendered* text — what the user would see on screen — to know whether the
+# agent printed a clarifying question (DF2), an API error, or nothing at all.
+#
+# This helper shells out per-backend to capture `tmux capture-pane -p` and
+# writes terminal-snapshot.txt (plain) and terminal-snapshot.ansi (with
+# escapes preserved) alongside the preserved sandbox files. Best-effort: any
+# failure is logged and ignored — the smoke test outcome doesn't change.
+#
+# *** FUTURE WORK (don't lose track): ***
+# The proper home for this is `internal/cli/bugreport_writer.go`. Once the
+# Client surface exposes a non-interactive Exec (or `yoloai sandbox <name>
+# exec --no-tty`), the bug-report bundle should include the snapshot and the
+# smoke test should switch to calling that single yoloai-level capability
+# instead of dispatching per-backend in Python. See discovered-findings.md
+# DF3 for context.
+
+def _terminal_snapshot_cmd(backend: str, container_name: str, ansi: bool) -> Optional[list[str]]:
+    """Return the subprocess command for capturing tmux output via the given
+    backend. Returns None for unsupported backends (tart, seatbelt). The
+    container is exec'd as the `yoloai` user since the tmux server runs there.
+    """
+    tmux_args = ["tmux", "capture-pane", "-p", "-S", "-200", "-t", "main"]
+    if ansi:
+        tmux_args.append("-e")
+    if backend in ("docker", "docker-cenhanced"):
+        return ["docker", "exec", "-i", "--user", "yoloai", container_name, *tmux_args]
+    if backend == "podman":
+        return ["podman", "exec", "-i", "--user", "yoloai", container_name, *tmux_args]
+    if backend in ("containerd", "containerd-vm", "containerd-vmenhanced"):
+        exec_id = f"snap{int(time.time() * 1000)}"
+        # sudo -n: fail rather than prompt if no passwordless sudo.
+        # --user yoloai: match the user the agent's tmux server is running as.
+        return [
+            "sudo", "-n", "ctr", "-n", "yoloai", "task", "exec",
+            "--exec-id", exec_id, "--user", "yoloai", container_name, *tmux_args,
+        ]
+    return None
+
+
+def _capture_terminal_snapshot(
+    sandbox_name: str, dest_dir: Path, log_file: Optional[Path] = None
+) -> bool:
+    """Capture rendered tmux output for *sandbox_name* into *dest_dir*.
+    Writes terminal-snapshot.txt (plain) and terminal-snapshot.ansi (with
+    escape sequences preserved). Returns True if at least one was written.
+    Best-effort — failures are logged and swallowed.
+    """
+    meta_path = Path.home() / ".yoloai" / "sandboxes" / sandbox_name / "meta.json"
+    if not meta_path.is_file():
+        return False
+    try:
+        backend = str(json.loads(meta_path.read_text()).get("backend", ""))
+    except (OSError, json.JSONDecodeError):
+        return False
+    if not backend:
+        return False
+
+    container = f"yoloai-{sandbox_name}"
+    wrote = False
+    for ansi, filename in ((False, "terminal-snapshot.txt"), (True, "terminal-snapshot.ansi")):
+        cmd = _terminal_snapshot_cmd(backend, container, ansi=ansi)
+        if cmd is None:
+            return False  # unsupported backend; don't try the other variant either
+        try:
+            r = subprocess.run(cmd, capture_output=True, timeout=10)
+        except (subprocess.TimeoutExpired, OSError) as e:
+            if log_file is not None:
+                with log_file.open("a") as f:
+                    f.write(f"\nterminal-snapshot capture failed ({backend}, ansi={ansi}): {e}\n")
+            continue
+        if r.returncode != 0:
+            if log_file is not None:
+                with log_file.open("a") as f:
+                    f.write(
+                        f"\nterminal-snapshot capture exit {r.returncode} "
+                        f"({backend}, ansi={ansi}): {r.stderr.decode(errors='replace').strip()}\n"
+                    )
+            continue
+        try:
+            (dest_dir / filename).write_bytes(r.stdout)
+            wrote = True
+        except OSError:
+            pass
+    return wrote
+
+
 def _preserve_sandbox(sandbox_name: str, dest_parent: Path) -> Optional[Path]:
     """Copy diagnostic state from ~/.yoloai/sandboxes/<sandbox_name>/ to
     dest_parent/<sandbox_name>/. Returns the target dir, or None if the source
@@ -510,6 +601,10 @@ def _preserve_sandbox(sandbox_name: str, dest_parent: Path) -> Optional[Path]:
                 shutil.copytree(src_d, target / d, dirs_exist_ok=True)
             except OSError:
                 pass
+    # Best-effort: rendered tmux output for the agent's session. Container must
+    # still be running for this to work, which is true during _preserve_sandbox
+    # (the retry/cleanup destroy happens later). DF3 diagnostic.
+    _capture_terminal_snapshot(sandbox_name, target)
     return target
 
 

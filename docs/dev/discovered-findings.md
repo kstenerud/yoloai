@@ -43,9 +43,11 @@ Findings that turned up mid-workstream (architecture-remediation, layering-refac
 
 - **Discovered:** 2026-05-26 · **Workstream:** observed during W-L8b kickoff (failed `full_workflow/containerd-vm` smoke run, log `yoloai-smoketest-20260526-050950.470`)
 - **Severity:** LOW
-- **Disposition:** PARKED
-- **Description:** When a smoke test fails on a TUI-driven agent (Claude Code), `agent.log` is a stream of raw ANSI control codes and cursor movements — fundamentally unrenderable without piping through a terminal emulator. Diagnosing whether the agent produced a tool-less response (DF2's hypothesis) or genuinely never made an API call requires the rendered text, not the escape sequence stream. **Proposed fix:** add a `terminal-snapshot.txt` artifact captured via `tmux capture-pane -p -e -t main` immediately before stall detection fires and on every smoke-test failure. Include in bug reports too. Lets DF2 be confirmed or disconfirmed conclusively.
-- **Pointer:** `scripts/smoke_test.py::wait_for_sentinel` (stall path)
+- **Disposition:** PARTIAL — smoke-test-side capture landed; bug-report-integrated path remains TODO.
+- **Description:** When a smoke test fails on a TUI-driven agent (Claude Code), `agent.log` is a stream of raw ANSI control codes and cursor movements — fundamentally unrenderable without piping through a terminal emulator. Diagnosing whether the agent produced a tool-less response (DF2's hypothesis) or genuinely never made an API call requires the rendered text, not the escape sequence stream.
+- **Smoke-test fix landed (2026-05-26):** `scripts/smoke_test.py::_capture_terminal_snapshot` shells out per-backend (docker / podman / containerd*) to `tmux capture-pane -p -S -200 -t main` and writes `terminal-snapshot.txt` + `terminal-snapshot.ansi` into the preserved attempt directory. Best-effort: failures don't change the smoke test outcome. Unsupported backends (tart, seatbelt) skip silently. The container is still running when `_preserve_sandbox` runs (retry/cleanup destroy happens later), so `docker exec` / `ctr task exec` succeeds.
+- **TODO (the better fix):** Move the capture into `internal/cli/bugreport_writer.go` so `yoloai sandbox <name> bugreport` includes it for users, not just the smoke test. Blocker: needs a non-interactive `Exec` surface (either `yoloai sandbox <name> exec --no-tty -- tmux ...` or a `--terminal-snapshot` flag on `bugreport` that uses `runtime.Exec` directly — InteractiveExec forces a PTY which corrupts the captured output for scripts). Once available, the smoke test should switch from per-backend Python dispatch to calling the single yoloai-level capability. Tracked here; reference from `bugreport_writer.go`'s TODO when implementing.
+- **Pointer:** `scripts/smoke_test.py::_capture_terminal_snapshot` (current), `internal/cli/bugreport_writer.go` (TODO destination), cross-ref DF2/4/5/6/8.
 
 ### DF4 — `wchan + connections` idle classification is decisive; surface it in bug reports
 
