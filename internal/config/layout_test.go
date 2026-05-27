@@ -40,17 +40,17 @@ func TestLayout_PathsRootUnderDataDir(t *testing.T) {
 	}
 }
 
-// TestLayout_EmptyDataDirReturnsRelativePaths documents that an empty
-// DataDir is not rejected — the resulting paths are simply unrooted
-// (relative to ""). Embedders are expected to validate DataDir before
-// constructing the Layout; the api_surface.go contract is "DataDir
-// REQUIRED; empty rejected at yoloai.NewWithOptions construction."
-func TestLayout_EmptyDataDirReturnsRelativePaths(t *testing.T) {
-	l := NewLayout("")
-	if l.YoloaiDir() != "" {
-		t.Errorf("YoloaiDir() with empty DataDir: got %q, want %q", l.YoloaiDir(), "")
-	}
-	if got, want := l.SandboxesDir(), "sandboxes"; got != want {
-		t.Errorf("SandboxesDir() with empty DataDir: got %q, want %q", got, want)
-	}
+// TestLayout_EmptyDataDirPanics asserts F14's invariant: NewLayout
+// rejects empty DataDir at construction. Public-boundary callers
+// (yoloai.NewWithOptions et al.) pre-validate input and return
+// *UsageError before reaching NewLayout, so this panic only fires
+// on a genuine programming bug — internal code constructing Layout
+// from an unvalidated source.
+func TestLayout_EmptyDataDirPanics(t *testing.T) {
+	defer func() {
+		if r := recover(); r == nil {
+			t.Fatal("NewLayout(\"\") should have panicked")
+		}
+	}()
+	_ = NewLayout("")
 }

@@ -13,7 +13,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
 	"github.com/kstenerud/yoloai/internal/workspace"
 )
@@ -234,7 +233,7 @@ func TestLoadDiffContext_SandboxNotFound(t *testing.T) {
 	t.Setenv("HOME", tmpDir)
 
 	_, _, _, err := loadDiffContext(testLayout(tmpDir), "nonexistent")
-	assert.ErrorIs(t, err, sandbox.ErrSandboxNotFound)
+	assert.ErrorIs(t, err, store.ErrSandboxNotFound)
 }
 
 // GenerateCommitDiff tests

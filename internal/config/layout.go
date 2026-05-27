@@ -3,7 +3,9 @@
 
 package config
 
-import "path/filepath"
+import (
+	"path/filepath"
+)
 
 // Layout names every yoloai data path rooted at a given DataDir.
 // Threading a Layout through library functions — instead of relying on
@@ -23,15 +25,26 @@ type Layout struct {
 	// daemons, multi-tenant processes, and tests pass an explicit
 	// path.
 	//
-	// Empty DataDir is not rejected at Layout construction — the
-	// resulting paths will be unrooted (relative to "") — but
-	// downstream callers (yoloai.NewWithOptions) reject empty
-	// DataDir with *UsageError per Q-W.
+	// Layout existence implies a non-empty DataDir: NewLayout panics
+	// on empty input, and there is no other public constructor.
+	// Public boundaries (yoloai.NewWithOptions) pre-validate user
+	// input and return *UsageError before reaching NewLayout, so the
+	// panic is only reachable from genuinely buggy internal code.
 	DataDir string
 }
 
 // NewLayout constructs a Layout rooted at dataDir.
+//
+// Panics if dataDir is empty. Public-entry callers (yoloai.NewWithOptions
+// et al.) pre-validate against *UsageError before constructing a Layout,
+// so empty here is a programming bug (Q-X: bugs panic, user errors return
+// typed errors). F14: this enforces the "Layout existence ⇒ valid DataDir"
+// invariant at the type-construction boundary instead of duplicating the
+// check in every Manager/Client method.
 func NewLayout(dataDir string) Layout {
+	if dataDir == "" {
+		panic("config.NewLayout: dataDir is required (empty string is invalid; public boundaries must validate input and return *UsageError before reaching this constructor)")
+	}
 	return Layout{DataDir: dataDir}
 }
 

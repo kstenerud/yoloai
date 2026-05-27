@@ -156,23 +156,10 @@ func hasUnappliedWork(workDir, baselineSHA string) bool {
 	return strings.TrimSpace(string(output)) != "0"
 }
 
-// ContainerUser returns the appropriate user string for docker exec operations
-// in the given sandbox. Under container-enhanced (gVisor), docker exec resolves
-// usernames from the OCI image manifest (the placeholder UID used at build time),
-// not the container's live /etc/passwd (updated by the entrypoint's uid-remap step).
-// Use the numeric host UID instead to match the remapped container user.
-func ContainerUser(meta *store.Meta) string {
-	if meta == nil {
-		return "yoloai"
-	}
-	if meta.UsernsMode == "keep-id" {
-		return ""
-	}
-	if meta.Isolation == "container-enhanced" {
-		return fmt.Sprintf("%d", os.Getuid())
-	}
-	return "yoloai"
-}
+// ContainerUser is re-exported from store so existing callers in this
+// package continue to compile. The body lives in store/meta.go now so
+// patch/ can reach it without importing the sandbox parent (F6).
+func ContainerUser(meta *store.Meta) string { return store.ContainerUser(meta) }
 
 // IsolationPerms holds filesystem permission values that vary by isolation mode.
 // Under container-enhanced (gVisor), the entrypoint remaps the container's yoloai
@@ -185,10 +172,6 @@ type IsolationPerms struct {
 	SecretsDir  os.FileMode // ephemeral secrets dir (removed after container mount)
 	SecretsFile os.FileMode // individual secret files (removed after container mount)
 }
-
-// SecurityPerms is an alias for IsolationPerms for backwards compatibility
-// within the sandbox package.
-type SecurityPerms = IsolationPerms
 
 // Perms returns the filesystem permissions appropriate for the given isolation
 // mode. Use this whenever creating host-side files or directories that the

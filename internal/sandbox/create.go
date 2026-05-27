@@ -141,9 +141,9 @@ type CreateOptions struct {
 type sandboxState struct {
 	name              string
 	sandboxDir        string
-	workdir           *DirArg
+	workdir           *DirSpec
 	workCopyDir       string
-	auxDirs           []*DirArg
+	auxDirs           []*DirSpec
 	agent             *agent.Definition
 	model             string
 	profile           string
@@ -237,7 +237,7 @@ type containerConfig struct {
 // Create creates and optionally starts a new sandbox.
 // Returns the sandbox name on success (empty if user cancelled or no-start).
 func (m *Manager) Create(ctx context.Context, opts CreateOptions) (string, error) {
-	unlock, err := AcquireLock(m.layout, opts.Name)
+	unlock, err := store.AcquireLock(m.layout, opts.Name)
 	if err != nil {
 		return "", err
 	}
@@ -433,7 +433,7 @@ func (m *Manager) createAndSeedSandbox(ctx context.Context, sandboxDir string, a
 
 // buildConfigAndMeta builds the container config and sandbox meta structs.
 // Returns (configData, meta, tmuxConf, promptText, error).
-func (m *Manager) buildConfigAndMeta(ctx context.Context, opts CreateOptions, pr *profileResult, agentDef *agent.Definition, workdir *DirArg, auxDirs []*DirArg, gcfg *config.GlobalConfig, dirMetas []store.DirMeta, baselineSHA string, mergedMounts []string, resolvedArchetype archetype.Archetype, devcontainerCfg *archetype.DevcontainerConfig, state_onCreateDone bool, sandboxDir string) ([]byte, *store.Meta, string, string, error) {
+func (m *Manager) buildConfigAndMeta(ctx context.Context, opts CreateOptions, pr *profileResult, agentDef *agent.Definition, workdir *DirSpec, auxDirs []*DirSpec, gcfg *config.GlobalConfig, dirMetas []store.DirMeta, baselineSHA string, mergedMounts []string, resolvedArchetype archetype.Archetype, devcontainerCfg *archetype.DevcontainerConfig, state_onCreateDone bool, sandboxDir string) ([]byte, *store.Meta, string, string, error) {
 	_ = ctx // reserved for future use
 	promptText, hasPrompt, model, agentCommand, tmuxConf, err := resolveAgentParams(agentDef, opts, pr, gcfg, filepath.Dir(m.layout.DataDir))
 	if err != nil {
@@ -458,7 +458,7 @@ func (m *Manager) buildConfigAndMeta(ctx context.Context, opts CreateOptions, pr
 }
 
 // buildSandboxStateResult constructs the sandboxState from all resolved values.
-func buildSandboxStateResult(opts CreateOptions, sandboxDir string, workdir *DirArg, workCopyDir string, auxDirs []*DirArg, agentDef *agent.Definition, meta *store.Meta, pr *profileResult, mergedMounts []string, configData []byte, tmuxConf string, resolvedArchetype archetype.Archetype, archetypeDockerDRequired bool, devcontainerCfg *archetype.DevcontainerConfig, dcMounts []string, dcMountWarnings []string, credOverrides map[string]string, layout config.Layout, homeDir string) *sandboxState {
+func buildSandboxStateResult(opts CreateOptions, sandboxDir string, workdir *DirSpec, workCopyDir string, auxDirs []*DirSpec, agentDef *agent.Definition, meta *store.Meta, pr *profileResult, mergedMounts []string, configData []byte, tmuxConf string, resolvedArchetype archetype.Archetype, archetypeDockerDRequired bool, devcontainerCfg *archetype.DevcontainerConfig, dcMounts []string, dcMountWarnings []string, credOverrides map[string]string, layout config.Layout, homeDir string) *sandboxState {
 	return &sandboxState{
 		name:                      opts.Name,
 		sandboxDir:                sandboxDir,
@@ -627,7 +627,7 @@ func createSandboxDirs(sandboxDir string, perms IsolationPerms) error {
 }
 
 // setupAllWorkdirs sets up the workdir and aux dirs, and resolves copy mount paths.
-func (m *Manager) setupAllWorkdirs(opts CreateOptions, workdir *DirArg, auxDirs []*DirArg, resolvedArchetype archetype.Archetype, devcontainerCfg *archetype.DevcontainerConfig) (string, string, []store.DirMeta, error) {
+func (m *Manager) setupAllWorkdirs(opts CreateOptions, workdir *DirSpec, auxDirs []*DirSpec, resolvedArchetype archetype.Archetype, devcontainerCfg *archetype.DevcontainerConfig) (string, string, []store.DirMeta, error) {
 	slog.Debug("setting up workdir", "event", "sandbox.create.workdir", "mode", string(workdir.Mode))
 	sandboxDir := m.layout.SandboxDir(opts.Name)
 	workCopyDir, baselineSHA, err := setupWorkdir(sandboxDir, workdir, m.runtime)
@@ -716,7 +716,7 @@ func buildLifecycleConfig(resolvedArchetype archetype.Archetype, archetypeDocker
 }
 
 // resolveUsernsMode determines the effective user namespace mode for the runtime.
-func resolveUsernsMode(rt runtime.Runtime, workdir *DirArg, auxDirs []*DirArg, capAdd []string) string {
+func resolveUsernsMode(rt runtime.Runtime, workdir *DirSpec, auxDirs []*DirSpec, capAdd []string) string {
 	up, ok := rt.(runtime.UsernsProvider)
 	if !ok {
 		return ""
@@ -737,7 +737,7 @@ func resolveUsernsMode(rt runtime.Runtime, workdir *DirArg, auxDirs []*DirArg, c
 }
 
 // buildMeta constructs the Meta struct for a new sandbox.
-func buildMeta(opts CreateOptions, pr *profileResult, workdir *DirArg, baselineSHA string, dirMetas []store.DirMeta, hasPrompt bool, networkMode string, networkAllow []string, usernsMode string, hostFilesystem bool, archetypeStr string, backend runtime.BackendName, model string, mergedMounts []string) *store.Meta {
+func buildMeta(opts CreateOptions, pr *profileResult, workdir *DirSpec, baselineSHA string, dirMetas []store.DirMeta, hasPrompt bool, networkMode string, networkAllow []string, usernsMode string, hostFilesystem bool, archetypeStr string, backend runtime.BackendName, model string, mergedMounts []string) *store.Meta {
 	return &store.Meta{
 		YoloaiVersion: opts.Version,
 		Name:          opts.Name,
@@ -750,7 +750,7 @@ func buildMeta(opts CreateOptions, pr *profileResult, workdir *DirArg, baselineS
 		Workdir: store.WorkdirMeta{
 			HostPath:     workdir.Path,
 			MountPath:    overlayOrResolvedMountPath(workdir),
-			Mode:         workdir.Mode,
+			Mode:         string(workdir.Mode),
 			BaselineSHA:  baselineSHA,
 			InceptionSHA: baselineSHA,
 		},
@@ -1383,7 +1383,7 @@ func buildAuxDirMounts(state *sandboxState) []runtime.MountSpec {
 }
 
 // buildSingleAuxDirMount returns mount specs for one auxiliary directory.
-func buildSingleAuxDirMount(sandboxDir string, ad *DirArg) []runtime.MountSpec {
+func buildSingleAuxDirMount(sandboxDir string, ad *DirSpec) []runtime.MountSpec {
 	mountTarget := ad.ResolvedMountPath()
 	switch ad.Mode {
 	case "copy":
@@ -1657,7 +1657,7 @@ func buildConfigAndSecretsMounts(state *sandboxState, secretsDir string) []runti
 
 // overlayOrResolvedMountPath returns the container working directory path for a directory.
 // For overlay mode, this is the bind-mounted merged path; otherwise the resolved mount path.
-func overlayOrResolvedMountPath(d *DirArg) string {
+func overlayOrResolvedMountPath(d *DirSpec) string {
 	if d.Mode == "overlay" {
 		return "/yoloai/overlay/" + store.EncodePath(d.Path) + "/merged"
 	}

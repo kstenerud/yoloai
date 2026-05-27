@@ -78,6 +78,10 @@ func NewManager(rt runtime.Runtime, logger *slog.Logger, input io.Reader, output
 		// leaking into the repo. Panic here so missing WithLayout is
 		// caught at construction instead of corrupting the working
 		// directory.
+		//
+		// F14 / config.NewLayout panics on empty input, so the only
+		// way to reach this branch is a caller that never invoked
+		// WithLayout (m.layout is the zero value).
 		panic("sandbox.NewManager: WithLayout is required; pass sandbox.WithLayout(config.NewLayout(...))")
 	}
 	return m
@@ -247,7 +251,7 @@ func (m *Manager) SandboxCache(name string) string {
 // same sandbox. Each call is brief (one exec), so the lock-hold time
 // is small even under interactive use.
 func (m *Manager) SendInput(ctx context.Context, name string, text string) error {
-	unlock, err := AcquireLock(m.layout, name)
+	unlock, err := store.AcquireLock(m.layout, name)
 	if err != nil {
 		return err
 	}

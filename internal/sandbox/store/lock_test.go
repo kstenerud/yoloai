@@ -2,7 +2,7 @@
 
 //go:build !windows
 
-package sandbox
+package store
 
 import (
 	"errors"
@@ -137,7 +137,7 @@ func TestAcquireLock_LockfileLeftOnDisk(t *testing.T) {
 
 // TestAcquireMultiLock_DeadlockPrevention verifies that two goroutines locking
 // the same pair of names in opposite order do not deadlock. Both complete
-// within the timeout because acquireMultiLock sorts names before locking.
+// within the timeout because AcquireMultiLock sorts names before locking.
 func TestAcquireMultiLock_DeadlockPrevention(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	layout := testLayout(t)
@@ -147,7 +147,7 @@ func TestAcquireMultiLock_DeadlockPrevention(t *testing.T) {
 		wg.Add(2)
 		go func() {
 			defer wg.Done()
-			unlock, err := acquireMultiLock(layout, "sandbox-x", "sandbox-y")
+			unlock, err := AcquireMultiLock(layout, "sandbox-x", "sandbox-y")
 			require.NoError(t, err)
 			time.Sleep(time.Millisecond)
 			unlock()
@@ -155,7 +155,7 @@ func TestAcquireMultiLock_DeadlockPrevention(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			// Reverse order — internally sorted so no deadlock.
-			unlock, err := acquireMultiLock(layout, "sandbox-y", "sandbox-x")
+			unlock, err := AcquireMultiLock(layout, "sandbox-y", "sandbox-x")
 			require.NoError(t, err)
 			time.Sleep(time.Millisecond)
 			unlock()
@@ -181,12 +181,12 @@ func TestAcquireMultiLock_MutualExclusion(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	layout := testLayout(t)
 
-	unlock1, err := acquireMultiLock(layout, "alpha", "beta")
+	unlock1, err := AcquireMultiLock(layout, "alpha", "beta")
 	require.NoError(t, err)
 
 	acquired := make(chan struct{})
 	go func() {
-		unlock2, err2 := acquireMultiLock(layout, "alpha", "beta")
+		unlock2, err2 := AcquireMultiLock(layout, "alpha", "beta")
 		if err2 == nil {
 			close(acquired)
 			unlock2()

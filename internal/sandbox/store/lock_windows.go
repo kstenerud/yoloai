@@ -4,7 +4,7 @@
 
 //go:build windows
 
-package sandbox
+package store
 
 import "github.com/kstenerud/yoloai/internal/config"
 

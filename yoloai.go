@@ -60,11 +60,27 @@ import (
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
 )
 
-// Sentinel errors returned by Client methods.
+// Sentinel errors returned by Client methods. Re-exported from
+// internal/sandbox so embedders can `errors.Is` against them without
+// reaching into internal packages.
 var (
 	// ErrSandboxExists is returned by Run when a sandbox with the given name
 	// already exists and Replace is false.
 	ErrSandboxExists = sandbox.ErrSandboxExists
+
+	// ErrSandboxNotFound is returned by methods that operate on a named
+	// sandbox when no sandbox with that name exists on disk.
+	ErrSandboxNotFound = sandbox.ErrSandboxNotFound
+
+	// ErrContainerNotRunning is returned by methods that require a live
+	// container (Exec, Attach, CaptureTerminal, SendInput, …) when the
+	// sandbox exists but its container is stopped or has not been
+	// recreated since the host last booted.
+	ErrContainerNotRunning = sandbox.ErrContainerNotRunning
+
+	// ErrMissingAPIKey is returned by Run/Create when the selected agent
+	// requires an API key (via Definition.APIKeyEnvVars) but none is set.
+	ErrMissingAPIKey = sandbox.ErrMissingAPIKey
 
 	// ErrUnappliedChanges is returned by Destroy when the sandbox has unapplied
 	// changes and force is false.

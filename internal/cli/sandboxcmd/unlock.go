@@ -7,18 +7,18 @@ import (
 
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
 
-	"github.com/kstenerud/yoloai/internal/sandbox"
+	"github.com/kstenerud/yoloai/internal/sandbox/store"
 	"github.com/spf13/cobra"
 )
 
 // runSandboxUnlock force-clears a stale lock file for the named sandbox.
-// Surfaces sandbox.ForceUnlock's *UsageError verbatim when the holder
+// Surfaces store.ForceUnlock's *UsageError verbatim when the holder
 // is alive. Distinguishes "cleared a stale lock" from "no lock file
 // present" so the user gets an honest report — relevant when the
 // command is run defensively (in a recovery script, etc.) and there
 // was nothing actually stale.
 func runSandboxUnlock(cmd *cobra.Command, name string) error {
-	cleared, err := sandbox.ForceUnlock(cliutil.Layout(), name)
+	cleared, err := store.ForceUnlock(cliutil.Layout(), name)
 	if err != nil {
 		return err
 	}

@@ -67,13 +67,13 @@ func TestBuildNetworkConfig_NoneTakesPriority(t *testing.T) {
 // --- collectCopyDirs ---
 
 func TestCollectCopyDirs_NoCopy(t *testing.T) {
-	workdir := &DirArg{Path: "/home/user/project", Mode: "rw"}
+	workdir := &DirSpec{Path: "/home/user/project", Mode: DirMode("rw")}
 	result := collectCopyDirs(workdir, nil)
 	assert.Empty(t, result)
 }
 
 func TestCollectCopyDirs_WorkdirCopy(t *testing.T) {
-	workdir := &DirArg{Path: "/home/user/project", Mode: "copy"}
+	workdir := &DirSpec{Path: "/home/user/project", Mode: DirMode("copy")}
 	result := collectCopyDirs(workdir, nil)
 	assert.Equal(t, []string{"/home/user/project"}, result)
 }
@@ -83,9 +83,9 @@ func TestCollectCopyDirs_WorkdirCopy(t *testing.T) {
 // parameter is kept for callsite stability). The mixed-modes case
 // reduces to "the workdir's mode decides; aux entries don't count".
 func TestCollectCopyDirs_MixedModes_IgnoresAux(t *testing.T) {
-	workdir := &DirArg{Path: "/home/user/project", Mode: "copy"}
-	auxDirs := []*DirArg{
-		{Path: "/home/user/lib", Mode: "rw"},
+	workdir := &DirSpec{Path: "/home/user/project", Mode: DirMode("copy")}
+	auxDirs := []*DirSpec{
+		{Path: "/home/user/lib", Mode: DirMode("rw")},
 		{Path: "/home/user/data", Mode: "ro"},
 	}
 	result := collectCopyDirs(workdir, auxDirs)
@@ -93,7 +93,7 @@ func TestCollectCopyDirs_MixedModes_IgnoresAux(t *testing.T) {
 }
 
 func TestCollectCopyDirs_CustomMountPath(t *testing.T) {
-	workdir := &DirArg{Path: "/home/user/project", Mode: "copy", MountPath: "/app"}
+	workdir := &DirSpec{Path: "/home/user/project", Mode: DirMode("copy"), MountPath: "/app"}
 	result := collectCopyDirs(workdir, nil)
 	assert.Equal(t, []string{"/app"}, result)
 }
@@ -101,13 +101,13 @@ func TestCollectCopyDirs_CustomMountPath(t *testing.T) {
 // --- collectOverlayMounts ---
 
 func TestCollectOverlayMounts_NoOverlay(t *testing.T) {
-	workdir := &DirArg{Path: "/home/user/project", Mode: "copy"}
+	workdir := &DirSpec{Path: "/home/user/project", Mode: DirMode("copy")}
 	result := collectOverlayMounts(workdir, nil)
 	assert.Empty(t, result)
 }
 
 func TestCollectOverlayMounts_WorkdirOverlay(t *testing.T) {
-	workdir := &DirArg{Path: "/home/user/project", Mode: "overlay"}
+	workdir := &DirSpec{Path: "/home/user/project", Mode: DirMode("overlay")}
 	result := collectOverlayMounts(workdir, nil)
 	require.Len(t, result, 1)
 	assert.Contains(t, result[0].Merged, "merged")
@@ -121,18 +121,18 @@ func TestCollectOverlayMounts_WorkdirOverlay(t *testing.T) {
 // Regress-guards both the "aux :overlay no longer participates" and
 // "workdir-only result has length ≤ 1" invariants.
 func TestCollectOverlayMounts_IgnoresAux(t *testing.T) {
-	workdir := &DirArg{Path: "/home/user/project", Mode: "copy"}
+	workdir := &DirSpec{Path: "/home/user/project", Mode: DirMode("copy")}
 	// aux entries here would have been overlay under the old code path;
 	// after Q-U they're rejected at parse time, but defending against a
-	// stale DirArg constructed in-process is cheap.
-	auxDirs := []*DirArg{{Path: "/home/user/lib", Mode: "rw"}}
+	// stale DirSpec constructed in-process is cheap.
+	auxDirs := []*DirSpec{{Path: "/home/user/lib", Mode: DirMode("rw")}}
 	result := collectOverlayMounts(workdir, auxDirs)
 	assert.Empty(t, result)
 }
 
 func TestCollectOverlayMounts_WorkdirOnly(t *testing.T) {
-	workdir := &DirArg{Path: "/a", Mode: "overlay"}
-	auxDirs := []*DirArg{{Path: "/b", Mode: "rw"}}
+	workdir := &DirSpec{Path: "/a", Mode: DirMode("overlay")}
+	auxDirs := []*DirSpec{{Path: "/b", Mode: DirMode("rw")}}
 	result := collectOverlayMounts(workdir, auxDirs)
 	require.Len(t, result, 1)
 	assert.Contains(t, result[0].Merged, "merged")
@@ -142,7 +142,7 @@ func TestCollectOverlayMounts_WorkdirOnly(t *testing.T) {
 }
 
 func TestCollectOverlayMounts_CustomMountPath(t *testing.T) {
-	workdir := &DirArg{Path: "/home/user/project", Mode: "overlay", MountPath: "/app"}
+	workdir := &DirSpec{Path: "/home/user/project", Mode: DirMode("overlay"), MountPath: "/app"}
 	result := collectOverlayMounts(workdir, nil)
 	require.Len(t, result, 1)
 	assert.Contains(t, result[0].Merged, "merged")
@@ -402,9 +402,9 @@ func TestSetupWorkdir_DefersBaselineForWorkDirSetupBackends(t *testing.T) {
 	require.NoError(t, os.MkdirAll(sourceDir, 0755))                                             //nolint:gosec // G301: test directory
 	require.NoError(t, os.WriteFile(filepath.Join(sourceDir, "file.txt"), []byte("test"), 0644)) //nolint:gosec // G306: test file
 
-	workdir := &DirArg{
+	workdir := &DirSpec{
 		Path: sourceDir,
-		Mode: "copy",
+		Mode: DirMode("copy"),
 	}
 
 	rt := &mockTartRuntime{}
@@ -428,9 +428,9 @@ func TestSetupWorkdir_CreatesBaselineForDockerBackends(t *testing.T) {
 	require.NoError(t, os.MkdirAll(sourceDir, 0755))                                             //nolint:gosec // G301: test directory
 	require.NoError(t, os.WriteFile(filepath.Join(sourceDir, "file.txt"), []byte("test"), 0644)) //nolint:gosec // G306: test file
 
-	workdir := &DirArg{
+	workdir := &DirSpec{
 		Path: sourceDir,
-		Mode: "copy",
+		Mode: DirMode("copy"),
 	}
 
 	rt := &mockDockerRuntime{}
@@ -454,9 +454,9 @@ func TestSetupWorkdir_OverlayModeDeferBaseline(t *testing.T) {
 	sourceDir := filepath.Join(tempDir, "source")
 	require.NoError(t, os.MkdirAll(sourceDir, 0755)) //nolint:gosec // G301: test directory
 
-	workdir := &DirArg{
+	workdir := &DirSpec{
 		Path: sourceDir,
-		Mode: "overlay",
+		Mode: DirMode("overlay"),
 	}
 
 	// Test with both runtime types

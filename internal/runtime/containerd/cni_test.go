@@ -14,8 +14,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// noLayout is a zero-value layout used by tests that don't need a real DataDir.
-var noLayout = config.NewLayout("")
+// noLayout is a placeholder layout used by tests that don't actually
+// invoke any Layout method (the constant exists so test setups compile
+// uniformly). F14: NewLayout panics on empty, so this uses a dummy
+// non-empty path.
+var noLayout = config.NewLayout("/tmp/yoloai-containerd-test")
 
 // TestCNIStatePath verifies the CNI state file path is within the backend dir.
 func TestCNIStatePath(t *testing.T) {

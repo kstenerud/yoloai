@@ -246,7 +246,7 @@ func TestGitBaseline_EmptyGitRepo(t *testing.T) {
 	// sandbox name to a sandboxDir, so passing a literal "test-sandbox"
 	// resolves to a relative path under CWD.
 	sandboxDir := filepath.Join(t.TempDir(), "test-sandbox")
-	workdir := &DirArg{Path: dir, Mode: "copy"}
+	workdir := &DirSpec{Path: dir, Mode: DirMode("copy")}
 	rt := &mockRuntime{} // Docker-like backend: creates baseline on host
 	_, sha, err := setupWorkdir(sandboxDir, workdir, rt)
 	require.NoError(t, err)

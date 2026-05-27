@@ -41,6 +41,7 @@ var descriptor = runtime.BackendDescriptor{
 	Name:                      "tart",
 	Description:               "macOS VMs; native macOS env, strong isolation, heavier",
 	Platforms:                 []string{"darwin"},
+	Architectures:             []string{"arm64"}, // Apple Silicon only
 	Requires:                  "Tart CLI installed, Apple Silicon Mac",
 	InstallHint:               "brew install cirruslabs/cli/tart",
 	BaseModeName:              "vm",

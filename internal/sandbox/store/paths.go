@@ -29,19 +29,19 @@ var ErrSandboxNotFound = errors.New("sandbox not found")
 // Centralized sandbox file and directory names. All code that reads/writes
 // these files should reference these constants rather than using literal strings.
 const (
-	// EnvironmentFile stores sandbox metadata captured at creation time (was "meta.json").
+	// EnvironmentFile stores sandbox metadata captured at creation time.
 	EnvironmentFile = "environment.json"
 
-	// SandboxStateFile stores per-sandbox persistent flags (was "state.json").
+	// SandboxStateFile stores per-sandbox persistent flags.
 	SandboxStateFile = "sandbox-state.json"
 
-	// RuntimeConfigFile stores entrypoint/infrastructure config (was "config.json").
+	// RuntimeConfigFile stores entrypoint/infrastructure config.
 	RuntimeConfigFile = "runtime-config.json"
 
-	// AgentStatusFile stores live agent liveness status (was "status.json").
+	// AgentStatusFile stores live agent liveness status.
 	AgentStatusFile = "agent-status.json"
 
-	// AgentRuntimeDir stores agent-managed state (was "agent-state").
+	// AgentRuntimeDir stores agent-managed state.
 	AgentRuntimeDir = config.AgentRuntimeDirName
 
 	// BinDir holds executable scripts (entrypoint, monitor, diagnose).

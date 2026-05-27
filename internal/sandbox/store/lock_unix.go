@@ -3,7 +3,7 @@
 
 //go:build !windows
 
-package sandbox
+package store
 
 import (
 	"errors"
@@ -47,7 +47,7 @@ var (
 //
 // **Lock-acquisition invariant (Q-T).** Every public Manager method
 // that mutates a sandbox's state calls AcquireLock (or
-// acquireMultiLock) at the method entry, before any backend RPC or
+// AcquireMultiLock) at the method entry, before any backend RPC or
 // filesystem op, and releases via defer. Read methods do not
 // acquire the lock.
 //
@@ -66,7 +66,7 @@ func AcquireLock(layout config.Layout, name string) (func(), error) {
 	return acquireWithRetry(layout, name, path)
 }
 
-// acquireMultiLock acquires exclusive locks on multiple sandbox
+// AcquireMultiLock acquires exclusive locks on multiple sandbox
 // names atomically (in sorted order to prevent deadlocks). The
 // returned release function releases all locks. Use this when an
 // operation touches two sandboxes (e.g. clone: source + destination).
@@ -74,7 +74,7 @@ func AcquireLock(layout config.Layout, name string) (func(), error) {
 // Returns *SandboxLockedError for the first name that fails the
 // retry budget; previously-acquired locks in this call are released
 // before returning.
-func acquireMultiLock(layout config.Layout, names ...string) (func(), error) {
+func AcquireMultiLock(layout config.Layout, names ...string) (func(), error) {
 	sorted := make([]string, len(names))
 	copy(sorted, names)
 	sort.Strings(sorted)
@@ -100,7 +100,7 @@ func acquireMultiLock(layout config.Layout, names ...string) (func(), error) {
 }
 
 // acquireWithRetry is the shared retry+PID-write helper used by
-// AcquireLock and acquireMultiLock. Returns *SandboxLockedError when
+// AcquireLock and AcquireMultiLock. Returns *SandboxLockedError when
 // the retry budget is exhausted.
 func acquireWithRetry(layout config.Layout, name, path string) (func(), error) {
 	var f *os.File

@@ -250,16 +250,17 @@ func applyCLIOverrides(opts *CreateOptions, pr *profileResult) error {
 	return nil
 }
 
-// parseAndValidateDirs converts DirSpec values to DirArg, runs safety checks,
+// parseAndValidateDirs converts DirSpec values to DirSpec, runs safety checks,
 // overlap detection, and dirty repo warnings. Returns nil workdir if the user cancelled.
 // cfgModel is the model from config.yaml (needed for local model server check).
 // credOverrides contains sudo-recovered credential defaults for keys absent from os.Environ.
-func (m *Manager) parseAndValidateDirs(ctx context.Context, opts CreateOptions, agentDef *agent.Definition, mergedEnv map[string]string, cfgModel string, credOverrides map[string]string) (*DirArg, []*DirArg, error) {
-	// Convert workdir DirSpec to DirArg
+func (m *Manager) parseAndValidateDirs(ctx context.Context, opts CreateOptions, agentDef *agent.Definition, mergedEnv map[string]string, cfgModel string, credOverrides map[string]string) (*DirSpec, []*DirSpec, error) {
+	// Convert workdir DirSpec to DirSpec
 	if opts.Workdir.Path == "" {
 		return nil, nil, NewUsageError("no workdir specified and no default workdir in profile")
 	}
-	workdir := dirSpecToDirArg(opts.Workdir)
+	wd := opts.Workdir
+	workdir := &wd
 	if workdir.Mode == "" {
 		workdir.Mode = "copy"
 	}
@@ -356,29 +357,32 @@ func (m *Manager) checkLocalhostURLs(agentDef *agent.Definition, mergedEnv map[s
 	return nil
 }
 
-// buildAuxDirs converts auxiliary DirSpec values to DirArg and checks
+// buildAuxDirs converts auxiliary DirSpec values to DirSpec and checks
 // existence. Also enforces Q-U: aux dirs cannot be :copy or :overlay
 // (diff/apply is workdir-only). The CLI and MCP boundaries already
 // reject these via sandbox.ParseAuxDirArg, but library embedders that
 // construct DirSpec values directly need a Create-time guard so the
 // failure is loud rather than a silent no-op in setupAuxDir.
-func buildAuxDirs(auxSpecs []DirSpec) ([]*DirArg, error) {
-	var auxDirs []*DirArg
+func buildAuxDirs(auxSpecs []DirSpec) ([]*DirSpec, error) {
+	var auxDirs []*DirSpec
 	for _, auxSpec := range auxSpecs {
-		auxDir := dirSpecToDirArg(auxSpec)
+		auxSpec := auxSpec
+		auxDir := &auxSpec
 		switch auxDir.Mode {
-		case "copy":
+		case DirModeCopy:
 			return nil, NewUsageError(
 				"aux directories cannot use :copy (diff/apply is workdir-only).\n"+
 					"  - to track changes, make %q the workdir instead\n"+
 					"  - to edit it live, use :rw\n"+
 					"  - for an isolated copy, run a separate sandbox", auxDir.Path)
-		case "overlay":
+		case DirModeOverlay:
 			return nil, NewUsageError(
 				"aux directories cannot use :overlay (diff/apply is workdir-only).\n"+
 					"  - to track changes, make %q the workdir instead\n"+
 					"  - to edit it live, use :rw\n"+
 					"  - for an isolated copy, run a separate sandbox", auxDir.Path)
+		case DirModeRW, DirModeRO, "":
+			// rw / ro / unset all permitted on aux dirs.
 		}
 		if _, err := os.Stat(auxDir.Path); err != nil {
 			return nil, NewUsageError("directory does not exist: %s", auxDir.Path)
@@ -390,7 +394,7 @@ func buildAuxDirs(auxSpecs []DirSpec) ([]*DirArg, error) {
 
 // checkDirSafety checks for dangerous directories in workdir and aux dirs.
 // homeDir is used to detect if the user's home directory is being mounted.
-func checkDirSafety(workdir *DirArg, auxDirs []*DirArg, output io.Writer, homeDir string) error {
+func checkDirSafety(workdir *DirSpec, auxDirs []*DirSpec, output io.Writer, homeDir string) error {
 	if workspace.IsDangerousDir(workdir.Path, homeDir) {
 		if workdir.Force {
 			fmt.Fprintf(output, "WARNING: mounting dangerous directory %s\n", workdir.Path) //nolint:errcheck // best-effort output
@@ -411,7 +415,7 @@ func checkDirSafety(workdir *DirArg, auxDirs []*DirArg, output io.Writer, homeDi
 }
 
 // checkDirOverlaps checks for path overlaps and duplicate mount paths.
-func checkDirOverlaps(workdir *DirArg, auxDirs []*DirArg) error {
+func checkDirOverlaps(workdir *DirSpec, auxDirs []*DirSpec) error {
 	allPaths := []string{workdir.Path}
 	for _, ad := range auxDirs {
 		allPaths = append(allPaths, ad.Path)
@@ -433,7 +437,7 @@ func checkDirOverlaps(workdir *DirArg, auxDirs []*DirArg) error {
 
 // checkDirtyRepos checks for uncommitted changes in workdir and aux dirs.
 // Returns (cancelled, error): cancelled is true if the user declined to continue.
-func (m *Manager) checkDirtyRepos(ctx context.Context, workdir *DirArg, auxDirs []*DirArg, yes bool) (bool, error) {
+func (m *Manager) checkDirtyRepos(ctx context.Context, workdir *DirSpec, auxDirs []*DirSpec, yes bool) (bool, error) {
 	var dirtyWarnings []string
 	if msg, err := workspace.CheckDirtyRepo(workdir.Path); err != nil {
 		return false, fmt.Errorf("check repo status: %w", err)
@@ -469,7 +473,7 @@ func (m *Manager) checkDirtyRepos(ctx context.Context, workdir *DirArg, auxDirs 
 // the git baseline. Returns the work copy directory path and baseline SHA.
 // For backends implementing WorkDirSetup (e.g., Tart), baseline creation is
 // deferred until the VM starts, and this function returns empty SHA.
-func setupWorkdir(sandboxDir string, workdir *DirArg, rt runtime.Runtime) (string, string, error) {
+func setupWorkdir(sandboxDir string, workdir *DirSpec, rt runtime.Runtime) (string, string, error) {
 	workCopyDir := store.WorkDir(sandboxDir, workdir.Path)
 
 	if err := setupWorkdirDirs(sandboxDir, workdir, workCopyDir); err != nil {
@@ -485,7 +489,7 @@ func setupWorkdir(sandboxDir string, workdir *DirArg, rt runtime.Runtime) (strin
 }
 
 // setupWorkdirDirs creates the appropriate directory structure for the workdir mode.
-func setupWorkdirDirs(sandboxDir string, workdir *DirArg, workCopyDir string) error {
+func setupWorkdirDirs(sandboxDir string, workdir *DirSpec, workCopyDir string) error {
 	switch workdir.Mode {
 	case "copy":
 		if err := workspace.CopyDir(workdir.Path, workCopyDir); err != nil {
@@ -511,7 +515,7 @@ func setupWorkdirDirs(sandboxDir string, workdir *DirArg, workCopyDir string) er
 }
 
 // createWorkdirBaseline creates or resolves the git baseline SHA for the workdir.
-func createWorkdirBaseline(workdir *DirArg, workCopyDir string, rt runtime.Runtime) (string, error) {
+func createWorkdirBaseline(workdir *DirSpec, workCopyDir string, rt runtime.Runtime) (string, error) {
 	switch workdir.Mode {
 	case "copy":
 		return createCopyBaseline(workCopyDir, rt)
@@ -616,7 +620,7 @@ func executeVMWorkDirSetup(ctx context.Context, rt runtime.Runtime, name, sandbo
 }
 
 // setupAuxDirs copies/overlays each auxiliary directory and creates baselines.
-func setupAuxDirs(sandboxDir string, auxDirs []*DirArg) ([]store.DirMeta, error) {
+func setupAuxDirs(sandboxDir string, auxDirs []*DirSpec) ([]store.DirMeta, error) {
 	var dirMetas []store.DirMeta
 	for _, ad := range auxDirs {
 		dm, err := setupAuxDir(sandboxDir, ad)
@@ -634,15 +638,15 @@ func setupAuxDirs(sandboxDir string, auxDirs []*DirArg) ([]store.DirMeta, error)
 // preparation — the function just normalises mode and packs the meta.
 // The CLI / MCP boundary rejects :copy and :overlay via
 // sandbox.ParseAuxDirArg, so they can't reach here.
-func setupAuxDir(_ string, ad *DirArg) (store.DirMeta, error) {
+func setupAuxDir(_ string, ad *DirSpec) (store.DirMeta, error) {
 	mode := ad.Mode
 	if mode == "" {
-		mode = "ro"
+		mode = DirModeRO
 	}
 	return store.DirMeta{
 		HostPath:  ad.Path,
 		MountPath: ad.ResolvedMountPath(),
-		Mode:      mode,
+		Mode:      string(mode),
 	}, nil
 }
 
@@ -662,16 +666,6 @@ func buildNetworkConfig(opts CreateOptions, agentDef *agent.Definition) (string,
 	}
 }
 
-// dirSpecToDirArg converts a DirSpec to a DirArg for internal use.
-func dirSpecToDirArg(s DirSpec) *DirArg {
-	return &DirArg{
-		Path:      s.Path,
-		MountPath: s.MountPath,
-		Mode:      string(s.Mode),
-		Force:     s.Force,
-	}
-}
-
 // collectOverlayMounts builds overlay mount configs for config.json
 // from the workdir. After Q-U aux dirs no longer support :overlay,
 // so this is a workdir-only check — kept as a function (returning a
@@ -681,7 +675,7 @@ func dirSpecToDirArg(s DirSpec) *DirArg {
 // The auxDirs parameter is intentionally still threaded through but
 // unused; removing it would churn every call site, and the field is
 // expected to disappear during the Workdir-only API cascade.
-func collectOverlayMounts(workdir *DirArg, _ []*DirArg) []overlayMountConfig {
+func collectOverlayMounts(workdir *DirSpec, _ []*DirSpec) []overlayMountConfig {
 	if workdir.Mode != "overlay" {
 		return nil
 	}
@@ -699,7 +693,7 @@ func collectOverlayMounts(workdir *DirArg, _ []*DirArg) []overlayMountConfig {
 // workdir-only check. The function shape (returning a slice) is
 // preserved so the entrypoint auto-commit loop config doesn't need
 // to special-case the no-copy and copy cases at every assembly site.
-func collectCopyDirs(workdir *DirArg, _ []*DirArg) []string {
+func collectCopyDirs(workdir *DirSpec, _ []*DirSpec) []string {
 	if workdir.Mode != "copy" {
 		return nil
 	}

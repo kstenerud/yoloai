@@ -424,7 +424,7 @@ func TestBuildMounts_CopyMode(t *testing.T) {
 	agentDef := agent.GetAgent("claude")
 	state := &sandboxState{
 		sandboxDir:  "/home/user/.yoloai/sandboxes/test",
-		workdir:     &DirArg{Path: "/home/user/project", Mode: "copy"},
+		workdir:     &DirSpec{Path: "/home/user/project", Mode: DirMode("copy")},
 		workCopyDir: "/home/user/.yoloai/sandboxes/test/work/project",
 		agent:       agentDef,
 		hasPrompt:   true,
@@ -448,7 +448,7 @@ func TestBuildMounts_RWMode(t *testing.T) {
 	agentDef := agent.GetAgent("test")
 	state := &sandboxState{
 		sandboxDir: "/home/user/.yoloai/sandboxes/test",
-		workdir:    &DirArg{Path: "/home/user/project", Mode: "rw"},
+		workdir:    &DirSpec{Path: "/home/user/project", Mode: DirMode("rw")},
 		agent:      agentDef,
 	}
 
@@ -470,7 +470,7 @@ func TestBuildMounts_IncludesAgentState(t *testing.T) {
 	agentDef := agent.GetAgent("claude")
 	state := &sandboxState{
 		sandboxDir: "/sandbox",
-		workdir:    &DirArg{Path: "/project", Mode: "copy"},
+		workdir:    &DirSpec{Path: "/project", Mode: DirMode("copy")},
 		agent:      agentDef,
 	}
 
@@ -490,7 +490,7 @@ func TestBuildMounts_IncludesPrompt(t *testing.T) {
 	agentDef := agent.GetAgent("test")
 	state := &sandboxState{
 		sandboxDir: "/sandbox",
-		workdir:    &DirArg{Path: "/project", Mode: "copy"},
+		workdir:    &DirSpec{Path: "/project", Mode: DirMode("copy")},
 		agent:      agentDef,
 		hasPrompt:  true,
 	}
@@ -511,7 +511,7 @@ func TestBuildMounts_ExcludesPromptWhenNone(t *testing.T) {
 	agentDef := agent.GetAgent("test")
 	state := &sandboxState{
 		sandboxDir: "/sandbox",
-		workdir:    &DirArg{Path: "/project", Mode: "copy"},
+		workdir:    &DirSpec{Path: "/project", Mode: DirMode("copy")},
 		agent:      agentDef,
 		hasPrompt:  false,
 	}
@@ -527,7 +527,7 @@ func TestBuildMounts_IncludesSecrets(t *testing.T) {
 	agentDef := agent.GetAgent("claude")
 	state := &sandboxState{
 		sandboxDir: "/sandbox",
-		workdir:    &DirArg{Path: "/project", Mode: "copy"},
+		workdir:    &DirSpec{Path: "/project", Mode: DirMode("copy")},
 		agent:      agentDef,
 	}
 
@@ -556,7 +556,7 @@ func TestPrintCreationOutput_Basic(t *testing.T) {
 	agentDef := agent.GetAgent("claude")
 	state := &sandboxState{
 		name:    "test-sandbox",
-		workdir: &DirArg{Path: "/project", Mode: "copy"},
+		workdir: &DirSpec{Path: "/project", Mode: DirMode("copy")},
 		agent:   agentDef,
 	}
 
@@ -576,7 +576,7 @@ func TestPrintCreationOutput_AutoAttach(t *testing.T) {
 
 	state := &sandboxState{
 		name:    "test",
-		workdir: &DirArg{Path: "/project", Mode: "copy"},
+		workdir: &DirSpec{Path: "/project", Mode: DirMode("copy")},
 		agent:   agent.GetAgent("test"),
 	}
 
@@ -592,7 +592,7 @@ func TestPrintCreationOutput_WithPrompt(t *testing.T) {
 
 	state := &sandboxState{
 		name:      "test",
-		workdir:   &DirArg{Path: "/project", Mode: "copy"},
+		workdir:   &DirSpec{Path: "/project", Mode: DirMode("copy")},
 		agent:     agent.GetAgent("test"),
 		hasPrompt: true,
 	}
@@ -608,7 +608,7 @@ func TestPrintCreationOutput_NetworkNone(t *testing.T) {
 
 	state := &sandboxState{
 		name:        "test",
-		workdir:     &DirArg{Path: "/project", Mode: "copy"},
+		workdir:     &DirSpec{Path: "/project", Mode: DirMode("copy")},
 		agent:       agent.GetAgent("test"),
 		networkMode: "none",
 	}
@@ -624,7 +624,7 @@ func TestPrintCreationOutput_WithPorts(t *testing.T) {
 
 	state := &sandboxState{
 		name:    "test",
-		workdir: &DirArg{Path: "/project", Mode: "copy"},
+		workdir: &DirSpec{Path: "/project", Mode: DirMode("copy")},
 		agent:   agent.GetAgent("test"),
 		ports:   []string{"3000:3000", "8080:80"},
 	}
@@ -982,7 +982,7 @@ func TestPrintCreationOutput_NetworkIsolated(t *testing.T) {
 
 	state := &sandboxState{
 		name:         "test",
-		workdir:      &DirArg{Path: "/project", Mode: "copy"},
+		workdir:      &DirSpec{Path: "/project", Mode: DirMode("copy")},
 		agent:        agent.GetAgent("test"),
 		networkMode:  "isolated",
 		networkAllow: []string{"api.anthropic.com", "sentry.io"},
@@ -1033,7 +1033,7 @@ func TestBuildInstanceConfig_RejectsNetworkIsolatedWithGvisor(t *testing.T) {
 	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), io.Discard, WithLayout(config.NewLayout(t.TempDir())))
 	state := &sandboxState{
 		name:        "test",
-		workdir:     &DirArg{Path: "/project", Mode: "copy"},
+		workdir:     &DirSpec{Path: "/project", Mode: DirMode("copy")},
 		agent:       agent.GetAgent("test"),
 		networkMode: "isolated",
 		isolation:   "container-enhanced",
@@ -1059,7 +1059,7 @@ func TestBuildInstanceConfig_AllowsNetworkIsolatedOnSupportedModes(t *testing.T)
 			mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), io.Discard, WithLayout(config.NewLayout(t.TempDir())))
 			state := &sandboxState{
 				name:        "test",
-				workdir:     &DirArg{Path: "/project", Mode: "copy"},
+				workdir:     &DirSpec{Path: "/project", Mode: DirMode("copy")},
 				agent:       agent.GetAgent("test"),
 				networkMode: "isolated",
 				isolation:   isolation,

@@ -149,7 +149,7 @@ func runMCPProxy(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return fmt.Errorf("invalid workdir: %w", err)
 		}
-		workdirSpec = sandbox.DirArgToSpec(parsed)
+		workdirSpec = *parsed
 		if workdirSpec.Mode == "" {
 			workdirSpec.Mode = sandbox.DirModeCopy
 		}
@@ -163,7 +163,7 @@ func runMCPProxy(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return fmt.Errorf("invalid directory %q: %w", rawDir, err)
 		}
-		auxDirSpecs = append(auxDirSpecs, sandbox.DirArgToSpec(parsed))
+		auxDirSpecs = append(auxDirSpecs, *parsed)
 	}
 
 	opts := mcpsrv.ProxyOptions{

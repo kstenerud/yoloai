@@ -1,5 +1,5 @@
 // ABOUTME: ParseDirArg parses "path[:suffix...]=[mount]" directory arguments,
-// ABOUTME: producing DirArg structs consumed by CreateOptions workdir/aux fields.
+// ABOUTME: producing DirSpec values consumed by CreateOptions workdir/aux fields.
 package sandbox
 
 import (
@@ -8,17 +8,9 @@ import (
 	"strings"
 )
 
-// DirArg holds the parsed components of a directory argument.
-type DirArg struct {
-	Path      string // resolved absolute host path
-	MountPath string // container mount path ("" = mirror host path)
-	Mode      string // "copy", "overlay", "rw", or "" (caller applies default)
-	Force     bool   // :force was specified
-}
-
 // ResolvedMountPath returns the container mount path. If MountPath is
 // set, it is returned; otherwise Path (mirroring the host path).
-func (d *DirArg) ResolvedMountPath() string {
+func (d *DirSpec) ResolvedMountPath() string {
 	if d.MountPath != "" {
 		return d.MountPath
 	}
@@ -33,35 +25,25 @@ var knownSuffixes = map[string]bool{
 	"force":   true,
 }
 
-// DirArgToSpec converts a parsed DirArg to a DirSpec for use with CreateOptions.
-func DirArgToSpec(d *DirArg) DirSpec {
-	return DirSpec{
-		Path:      d.Path,
-		Mode:      DirMode(d.Mode),
-		MountPath: d.MountPath,
-		Force:     d.Force,
-	}
-}
-
 // applyDirSuffix applies a single recognized suffix token to result.
 // Returns an error if the suffix conflicts with an already-set mode.
-func applyDirSuffix(result *DirArg, suffix, arg string) error {
+func applyDirSuffix(result *DirSpec, suffix, arg string) error {
 	switch suffix {
 	case "copy":
-		if result.Mode == "rw" || result.Mode == "overlay" {
+		if result.Mode == DirModeRW || result.Mode == DirModeOverlay {
 			return fmt.Errorf("cannot combine :copy and :%s on %q", result.Mode, arg)
 		}
-		result.Mode = "copy"
+		result.Mode = DirModeCopy
 	case "overlay":
-		if result.Mode == "copy" || result.Mode == "rw" {
+		if result.Mode == DirModeCopy || result.Mode == DirModeRW {
 			return fmt.Errorf("cannot combine :overlay and :%s on %q", result.Mode, arg)
 		}
-		result.Mode = "overlay"
+		result.Mode = DirModeOverlay
 	case "rw":
-		if result.Mode == "copy" || result.Mode == "overlay" {
+		if result.Mode == DirModeCopy || result.Mode == DirModeOverlay {
 			return fmt.Errorf("cannot combine :rw and :%s on %q", result.Mode, arg)
 		}
-		result.Mode = "rw"
+		result.Mode = DirModeRW
 	case "force":
 		result.Force = true
 	}
@@ -76,24 +58,27 @@ func applyDirSuffix(result *DirArg, suffix, arg string) error {
 // default `:ro` for read-only). Aux `:copy` and `:overlay` are no
 // longer supported. Returns *UsageError pointing at the workarounds:
 // make the dir the workdir, mount as `:rw`, or run a separate sandbox.
-func ParseAuxDirArg(arg, homeDir string) (*DirArg, error) {
+func ParseAuxDirArg(arg, homeDir string) (*DirSpec, error) {
 	d, err := ParseDirArg(arg, homeDir)
 	if err != nil {
 		return nil, err
 	}
 	switch d.Mode {
-	case "copy":
+	case DirModeCopy:
 		return nil, NewUsageError(
 			"aux directories cannot use :copy (diff/apply is workdir-only).\n"+
 				"  - to track changes, make %q the workdir instead\n"+
 				"  - to edit it live, use :rw\n"+
 				"  - for an isolated copy, run a separate sandbox", arg)
-	case "overlay":
+	case DirModeOverlay:
 		return nil, NewUsageError(
 			"aux directories cannot use :overlay (diff/apply is workdir-only).\n"+
 				"  - to track changes, make %q the workdir instead\n"+
 				"  - to edit it live, use :rw\n"+
 				"  - for an isolated copy, run a separate sandbox", arg)
+	case DirModeRW, DirModeRO, "":
+		// rw / ro / unset all permitted on aux dirs; caller applies the
+		// "" → ro default downstream.
 	}
 	return d, nil
 }
@@ -106,8 +91,8 @@ func ParseAuxDirArg(arg, homeDir string) (*DirArg, error) {
 //
 // Use ParseAuxDirArg for the `-d` flag — it adds the workdir-only
 // validation enforced by Q-U.
-func ParseDirArg(arg, homeDir string) (*DirArg, error) {
-	result := &DirArg{}
+func ParseDirArg(arg, homeDir string) (*DirSpec, error) {
+	result := &DirSpec{}
 
 	// Strip =<mount-path> first (before suffix parsing), since suffixes
 	// like :rw appear between the host path and the = sign.

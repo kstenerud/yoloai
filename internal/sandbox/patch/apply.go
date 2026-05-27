@@ -15,10 +15,20 @@ import (
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/internal/runtime"
-	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
 	"github.com/kstenerud/yoloai/internal/workspace"
 )
+
+// execInSandbox runs cmd inside the sandbox's container and returns
+// stdout. Local helper so this subpackage doesn't import its parent
+// (F6: previously called execInSandbox).
+func execInSandbox(ctx context.Context, rt runtime.Runtime, name string, meta *store.Meta, cmd []string) (string, error) {
+	result, err := rt.Exec(ctx, store.InstanceName(name), cmd, store.ContainerUser(meta))
+	if err != nil {
+		return "", err
+	}
+	return result.Stdout, nil
+}
 
 // ApplyResult describes the outcome of applying a sandbox's changes.
 type ApplyResult struct {
@@ -44,7 +54,7 @@ type ApplyResult struct {
 // callers thread their own Layout in. yoloai.Client supplies its
 // c.layout; the CLI supplies the same Layout it gives Manager.
 func ApplyAll(ctx context.Context, layout config.Layout, rt runtime.Runtime, name string, includeWIP bool) (*ApplyResult, error) {
-	unlock, err := sandbox.AcquireLock(layout, name)
+	unlock, err := store.AcquireLock(layout, name)
 	if err != nil {
 		return nil, err
 	}
@@ -165,7 +175,7 @@ func ensureOverlayBaseline(ctx context.Context, layout config.Layout, rt runtime
 	}
 
 	// Try to resolve existing HEAD.
-	stdout, err := sandbox.ExecInContainer(ctx, rt, name, meta, []string{
+	stdout, err := execInSandbox(ctx, rt, name, meta, []string{
 		"git", "-C", dc.WorkDir, "rev-parse", "HEAD",
 	})
 	if err == nil {
@@ -184,12 +194,12 @@ func ensureOverlayBaseline(ctx context.Context, layout config.Layout, rt runtime
 		"cd %s && git init -b main && git config user.email yoloai@localhost && git config user.name yoloai && git add -A && git commit -q -m baseline",
 		dc.WorkDir,
 	)
-	_, initErr := sandbox.ExecInContainer(ctx, rt, name, meta, []string{"sh", "-c", initCmd})
+	_, initErr := execInSandbox(ctx, rt, name, meta, []string{"sh", "-c", initCmd})
 	if initErr != nil {
 		return "", fmt.Errorf("create overlay baseline for %s: %w (original HEAD error: %w)", dc.HostPath, initErr, err)
 	}
 
-	stdout, err = sandbox.ExecInContainer(ctx, rt, name, meta, []string{
+	stdout, err = execInSandbox(ctx, rt, name, meta, []string{
 		"git", "-C", dc.WorkDir, "rev-parse", "HEAD",
 	})
 	if err != nil {
@@ -271,14 +281,14 @@ func generateOverlayPatchForContext(ctx context.Context, layout config.Layout, r
 		return nil, err
 	}
 
-	if _, err := sandbox.ExecInContainer(ctx, rt, name, meta, []string{
+	if _, err := execInSandbox(ctx, rt, name, meta, []string{
 		"git", "-C", dc.WorkDir, "add", "-A",
 	}); err != nil {
 		return nil, fmt.Errorf("stage untracked in %s: %w", dc.HostPath, err)
 	}
 
 	patchArgs := append([]string{"git", "-c", "core.hooksPath=/dev/null", "-C", dc.WorkDir, "diff", "--binary", baselineSHA}, pathFilterArgs(paths)...)
-	stdout, err := sandbox.ExecInContainer(ctx, rt, name, meta, patchArgs)
+	stdout, err := execInSandbox(ctx, rt, name, meta, patchArgs)
 	if err != nil {
 		return nil, fmt.Errorf("git diff (patch) in %s: %w", dc.HostPath, err)
 	}
@@ -287,7 +297,7 @@ func generateOverlayPatchForContext(ctx context.Context, layout config.Layout, r
 	}
 
 	statArgs := append([]string{"git", "-c", "core.hooksPath=/dev/null", "-C", dc.WorkDir, "diff", "--stat", baselineSHA}, pathFilterArgs(paths)...)
-	statOut, err := sandbox.ExecInContainer(ctx, rt, name, meta, statArgs)
+	statOut, err := execInSandbox(ctx, rt, name, meta, statArgs)
 	if err != nil {
 		return nil, fmt.Errorf("git diff (stat) in %s: %w", dc.HostPath, err)
 	}
@@ -333,7 +343,7 @@ func UpdateOverlayBaselineToHEAD(ctx context.Context, layout config.Layout, rt r
 		if dc.Mode != "overlay" || dc.HostPath != hostPath {
 			continue
 		}
-		stdout, err := sandbox.ExecInContainer(ctx, rt, name, meta, []string{
+		stdout, err := execInSandbox(ctx, rt, name, meta, []string{
 			"git", "-C", dc.WorkDir, "rev-parse", "HEAD",
 		})
 		if err != nil {

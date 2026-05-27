@@ -255,7 +255,7 @@ func resolveNewDirSpecs(rawWorkdirArg string, rawDirs []string) (workdirSpec san
 		if parseErr != nil {
 			return sandbox.DirSpec{}, nil, sandbox.NewUsageError("invalid workdir: %s", parseErr)
 		}
-		workdirSpec = sandbox.DirArgToSpec(parsed)
+		workdirSpec = *parsed
 	}
 	for _, rawDir := range rawDirs {
 		parsed, parseErr := sandbox.ParseAuxDirArg(rawDir, homeDir)
@@ -269,7 +269,7 @@ func resolveNewDirSpecs(rawWorkdirArg string, rawDirs []string) (workdirSpec san
 			}
 			return sandbox.DirSpec{}, nil, sandbox.NewUsageError("invalid directory %q: %s", rawDir, parseErr)
 		}
-		auxDirSpecs = append(auxDirSpecs, sandbox.DirArgToSpec(parsed))
+		auxDirSpecs = append(auxDirSpecs, *parsed)
 	}
 	return workdirSpec, auxDirSpecs, nil
 }

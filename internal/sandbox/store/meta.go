@@ -113,6 +113,25 @@ func SaveMeta(dir string, meta *Meta) error {
 	return nil
 }
 
+// ContainerUser returns the appropriate user string for docker exec
+// operations in the given sandbox. Under container-enhanced (gVisor),
+// docker exec resolves usernames from the OCI image manifest (the
+// placeholder UID used at build time), not the container's live
+// /etc/passwd (updated by the entrypoint's uid-remap step). Use the
+// numeric host UID instead to match the remapped container user.
+func ContainerUser(meta *Meta) string {
+	if meta == nil {
+		return "yoloai"
+	}
+	if meta.UsernsMode == "keep-id" {
+		return ""
+	}
+	if meta.Isolation == "container-enhanced" {
+		return fmt.Sprintf("%d", os.Getuid())
+	}
+	return "yoloai"
+}
+
 // LoadMeta reads environment.json from the given directory path.
 func LoadMeta(dir string) (*Meta, error) {
 	path := filepath.Join(dir, EnvironmentFile)

@@ -13,7 +13,6 @@ import (
 
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/runtime"
-	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
 	"github.com/kstenerud/yoloai/internal/workspace"
 )
@@ -298,7 +297,7 @@ func ListCommitsBeyondBaselineOverlay(ctx context.Context, layout config.Layout,
 		return nil, err
 	}
 
-	stdout, err := sandbox.ExecInContainer(ctx, rt, name, meta, []string{
+	stdout, err := execInSandbox(ctx, rt, name, meta, []string{
 		"git", "-C", dc.WorkDir, "log", "--reverse", "--format=%H %s", baselineSHA + "..HEAD",
 	})
 	if err != nil {
@@ -340,7 +339,7 @@ func GenerateOverlayDiff(ctx context.Context, rt runtime.Runtime, opts DiffOptio
 	}
 
 	// Stage untracked files
-	if _, err := sandbox.ExecInContainer(ctx, rt, opts.Name, meta, []string{
+	if _, err := execInSandbox(ctx, rt, opts.Name, meta, []string{
 		"git", "-C", dc.WorkDir, "add", "-A",
 	}); err != nil {
 		return "", fmt.Errorf("stage untracked in %s: %w", dc.HostPath, err)
@@ -357,7 +356,7 @@ func GenerateOverlayDiff(ctx context.Context, rt runtime.Runtime, opts DiffOptio
 	}
 	args = append(args, baselineSHA)
 
-	stdout, err := sandbox.ExecInContainer(ctx, rt, opts.Name, meta, args)
+	stdout, err := execInSandbox(ctx, rt, opts.Name, meta, args)
 	if err != nil {
 		return "", fmt.Errorf("git diff in %s: %w", dc.HostPath, err)
 	}

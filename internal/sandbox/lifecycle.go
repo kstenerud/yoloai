@@ -40,7 +40,7 @@ type ResetOptions struct {
 // Stop stops a sandbox's instance.
 // Returns nil if the instance is already stopped or removed.
 func (m *Manager) Stop(ctx context.Context, name string) error {
-	unlock, err := AcquireLock(m.layout, name)
+	unlock, err := store.AcquireLock(m.layout, name)
 	if err != nil {
 		return err
 	}
@@ -67,7 +67,7 @@ type StartOptions struct {
 
 // Start ensures a sandbox is running — idempotent.
 func (m *Manager) Start(ctx context.Context, name string, opts StartOptions) error {
-	unlock, err := AcquireLock(m.layout, name)
+	unlock, err := store.AcquireLock(m.layout, name)
 	if err != nil {
 		return err
 	}
@@ -357,7 +357,7 @@ func (m *Manager) start(ctx context.Context, name string, opts StartOptions) err
 // Always succeeds — confirmation logic is handled by the CLI layer via
 // NeedsConfirmation before calling this method.
 func (m *Manager) Destroy(ctx context.Context, name string) error {
-	unlock, err := AcquireLock(m.layout, name)
+	unlock, err := store.AcquireLock(m.layout, name)
 	if err != nil {
 		return err
 	}
@@ -517,7 +517,7 @@ func clearAgentState(sandboxDir string, perms IsolationPerms) error {
 // the git baseline. By default, resets in-place (agent stays running).
 // With --restart, stops and restarts the container.
 func (m *Manager) Reset(ctx context.Context, opts ResetOptions) error {
-	unlock, err := AcquireLock(m.layout, opts.Name)
+	unlock, err := store.AcquireLock(m.layout, opts.Name)
 	if err != nil {
 		return err
 	}
@@ -835,12 +835,12 @@ func (m *Manager) recreateContainer(ctx context.Context, name string, meta *stor
 	}
 
 	// Rebuild aux dir args from meta
-	var auxDirs []*DirArg
+	var auxDirs []*DirSpec
 	for _, d := range meta.Directories {
-		auxDirs = append(auxDirs, &DirArg{
+		auxDirs = append(auxDirs, &DirSpec{
 			Path:      d.HostPath,
 			MountPath: d.MountPath,
-			Mode:      d.Mode,
+			Mode:      DirMode(d.Mode),
 		})
 	}
 

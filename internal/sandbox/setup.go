@@ -150,7 +150,10 @@ func availableBackends() []setupOption {
 		if !slices.Contains(desc.Platforms, hostOS) {
 			continue
 		}
-		if desc.Name == "tart" && hostArch != "arm64" {
+		// Empty Architectures = any arch. F19: Tart declares ["arm64"]
+		// in its descriptor, so the previous hard-coded
+		// `desc.Name == "tart" && hostArch != "arm64"` check is gone.
+		if len(desc.Architectures) > 0 && !slices.Contains(desc.Architectures, hostArch) {
 			continue
 		}
 		opts = append(opts, setupOption{name: string(desc.Name), blurb: desc.Description})
