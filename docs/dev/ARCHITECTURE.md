@@ -63,52 +63,93 @@ Dependency direction (W-L8 + W-L12 shape): `cmd/yoloai` → `internal/cli` → `
 
 ### `internal/cli/`
 
+After W-L13, `internal/cli/` is a slim Cobra entry point. The bulk
+of command code lives in scoped subpackages so the root contains
+only orchestration, error handling, and subcommand registration.
+
+#### Root (`internal/cli/`)
+
 | File | Purpose |
 |------|---------|
-| `root.go` | Root Cobra command, global flags (`-v`, `-q`, `--no-color`, `--json`), `Execute()` with exit code mapping, bug report system. |
-| `commands.go` | `registerCommands()` — registers all subcommands. Also contains `newNewCmd`, `newLsAliasCmd`, `newLogAliasCmd`, `newExecAliasCmd`, `newCompletionCmd`, `newVersionCmd`, and `attachToSandbox`/`waitForTmux` helpers. |
-| `config.go` | `yoloai config get/set/reset` — read, write, and delete config values via dotted paths. Routes global keys (tmux_conf, model_aliases) to `~/.yoloai/config.yaml`, other keys to `~/.yoloai/defaults/config.yaml`. |
-| `files.go` | `yoloai files put/get/ls/rm/path` — bidirectional file exchange between host and sandbox via `~/.yoloai/sandboxes/<name>/files/`. Uses name-first dispatch. |
-| `profile.go` | `yoloai profile create/list/info/delete` — profile management commands. |
-| `restart.go` | `yoloai restart` — stop + start a sandbox, with `--attach` and `--resume` support. |
-| `system.go` | `yoloai system` parent command with `build` and `setup` subcommands. |
-| `system_info.go` | `yoloai system info` — displays version, paths, disk usage, and backend availability. |
-| `system_prune.go` | `yoloai system prune` — remove orphaned backend resources and stale temp files. |
-| `system_check.go` | `yoloai system check` — verifies prerequisites for CI/CD pipelines. Checks backend connectivity, base image, and agent credentials. Exits 1 on failure. |
-| `system_doctor.go` | `yoloai system doctor` — shows what backends and isolation modes are available on the current machine, with fix instructions for missing prerequisites. |
-| `system_mcp.go` | `yoloai mcp serve` — starts the orchestration MCP server on stdio. `yoloai mcp proxy` — proxies an inner MCP server through a sandbox. |
-| `system_tart.go` | `yoloai system tart` — manage Apple simulator runtime base images (pre-create, list, remove). The legacy `yoloai system runtime` name remains as a hidden alias with a deprecation warning. |
-| `help.go` | `yoloai help [topic]` — topic-based help system with embedded markdown content and fuzzy suggestion. |
-| `help/` | Embedded markdown help topic files (quickstart, agents, workflow, config, etc.). |
-| `apply.go` | `yoloai apply` — apply changes back to host. Squash and selective-commit modes, `--export` for `.patch` files. |
-| `attach.go` | `yoloai attach` — attach to sandbox tmux session via `runtime.InteractiveExec`. |
-| `diff.go` | `yoloai diff` — show agent changes. Supports `--stat`, `--log`, commit refs, and ranges. |
-| `destroy.go` | `yoloai destroy` — stop and remove sandbox with confirmation logic. |
-| `sandbox_cmd.go` | `yoloai sandbox` parent command with name-first dispatch. Subcommands: list, info, log, exec, prompt, allow, allowed, deny, bugreport, clone, vscode. |
-| `sandbox_vscode.go` | `yoloai sandbox <name> vscode` — open sandbox in VS Code via attach URI. Builds `vscode-remote://attached-container+<hex-json>/<workdir>` URI and launches `code --folder-uri` or prints instructions. |
-| `sandbox_info.go` | `yoloai sandbox <name> info` — display sandbox config, meta, and status. |
-| `sandbox_clone.go` | `yoloai clone` / `yoloai sandbox clone` — clone a sandbox. |
-| `sandbox_prompt.go` | `yoloai sandbox <name> prompt` — show the prompt text for a sandbox. |
-| `sandbox_bugreport.go` | `yoloai sandbox <name> bugreport` — forensic bug report tool collecting static diagnostics. |
-| `exec.go` | `yoloai sandbox exec` — run commands inside a running sandbox container. |
-| `sandbox_network.go` | Shared helpers for network allowlist management: `loadIsolatedMeta`, `saveNetworkAllowlist`, `tryLivePatchNetwork`. |
-| `sandbox_allow.go` | `yoloai <name> allow <domain>...` — add domains to an isolated sandbox's allowlist at runtime. |
-| `sandbox_allowed.go` | `yoloai <name> allowed` — show the current network allowlist for a sandbox. |
-| `sandbox_deny.go` | `yoloai <name> deny <domain>...` — remove domains from the allowlist. |
-| `list.go` | `yoloai sandbox list` / `yoloai ls` — tabular listing of all sandboxes with status. |
-| `log.go` | `yoloai sandbox log` / `yoloai log` — structured JSONL log display with level/source/since filtering, follow mode, raw JSONL output, and agent terminal output. |
-| `info.go` | Backend and agent info commands (`system backends`, `system agents`), plus shared helpers (`checkBackend`, `knownBackends`). |
-| `json.go` | `--json` flag helpers: `jsonEnabled()`, `writeJSON()`, `writeJSONError()`, `requireYesForJSON()`. Used by all commands for JSON output mode. |
-| `reset.go` | `yoloai reset` — re-copy workdir from host, reset git baseline. |
-| `start.go` | `yoloai start` — start a stopped sandbox (recreates container if removed). |
-| `stop.go` | `yoloai stop` — stop a running sandbox. |
-| `envname.go` | `resolveName()` — resolves sandbox name from args or `YOLOAI_SANDBOX` env var. |
-| `helpers.go` | `withRuntime()`, `withManager()` — create Runtime / Manager for command handlers. `resolveBackend()` reads `--backend` flag (on new/build/setup). `resolveBackendForSandbox()` reads `environment.json`. `resolveBackendFromConfig()` reads config default. |
-| `x.go` | `yoloai x` — extension runner. Loads user-defined extension YAML files, builds Cobra commands dynamically. |
-| `ansi.go` | ANSI escape sequence and control character stripping for readable log output. |
-| `bugreport_writer.go` | Bug report section writers and sanitization helpers. Shared by `--bugreport` flag and sandbox bugreport command. |
-| `logger.go` | Multi-sink slog logger. Fans records to N independent sinks (stderr, cli.jsonl, bugreport temp file). |
-| `runtime_imports_linux.go` | Linux-specific runtime imports (containerd registration). |
+| `root.go` | `Execute()` entry point, `NewRootCmd()` builder (exported so subpackage tests can construct the full CLI tree for integration checks), global flags (`-v`, `-q`, `--json`, `--bugreport`, etc.), error→exit-code mapping, bug-report file open/close orchestration. |
+| `commands.go` | `registerCommands()` — sets up the four help groups and wires each subpackage's exported `NewCmd` constructor onto the root. The only file that imports every command subpackage. |
+| `runtime_imports_linux.go` | Linux-only blank import of `internal/runtime/containerd` so the backend self-registers on Linux builds. |
+| `integration_test.go`, `integration_main_test.go` | Cross-subpackage CLI integration tests that drive Cobra end to end. |
+
+#### Foundation (`internal/cli/cliutil/`)
+
+Helpers shared by every command subpackage. Importing cliutil is
+allowed from anywhere under internal/cli/; nothing in the cli tree
+should import the root cli package back (the few tests that need
+`cli.NewRootCmd` use the external `_test` package convention).
+
+| File | Purpose |
+|------|---------|
+| `client.go` | `NewRuntime`, `WithClient`, `NewSystemClient`, `AttachToSandboxByName`, `ResolveBackend`/`ResolveBackendForSandbox`, `ResolveAgent`, `ResolveModel`, `ResolveProfile`, `Coalesce`, `FlagStr`, `SandboxErrorHint`. The chokepoint that turns CLI flags into a `yoloai.Client` / `SystemClient`. |
+| `layout.go` | `Layout()` / `SetRootLayout` — resolves `$HOME/.yoloai` once at process startup and threads the `config.Layout` downward. The only sanctioned `os.UserHomeDir` call site (allowlisted in `.golangci.yml`). |
+| `name.go` | `ResolveName` and `EnvSandboxName` — sandbox-name resolution from args / `YOLOAI_SANDBOX`. |
+| `json.go` | `--json` flag helpers: `JSONEnabled`, `WriteJSON`, `WriteJSONError`, `EffectiveYes`. |
+| `streams.go`, `terminal.go` | `IOStreams()` (PTY-sized terminal binding for Client.Attach) and `SetTerminalTitle` (OSC-0 + tmux window rename). |
+| `lowdisk.go` | `WarnIfLowDisk`, `HumanBytes` — free-space courtesy check used by new/clone/build/disk. |
+| `groups.go` | Exported help group IDs (`GroupLifecycle`, `GroupWorkflow`, `GroupSandboxTools`, `GroupAdmin`) — referenced by every subpackage that registers a top-level command. |
+| `buildinfo.go` | `SetBuildInfo` + `Version`/`Commit`/`Date` globals — set once in `Execute()` so subpackages (bug-report, version) can read build metadata without threading it through cobra calls. |
+| `check.go` | `CheckBackend` — best-effort backend-availability probe used by `ls`, `system doctor`, `system tart` gating. |
+| `logger.go` | Multi-sink slog logger. Fans records to stderr, `cli.jsonl`, and the bug-report temp file. |
+
+#### Lifecycle (`internal/cli/lifecycle/`)
+
+`new`, `clone`, `start`, `stop`, `restart`, `destroy`, `reset` — all
+sandbox lifecycle commands. Self-contained: no cross-subpackage
+helpers needed; each constructor is exported (`NewNewCmd`,
+`NewCloneCmd`, `NewStartCmd`, `NewStopCmd`, `NewRestartCmd`,
+`NewDestroyCmd`, `NewResetCmd`).
+
+#### Workflow (`internal/cli/workflow/`)
+
+`attach`, `diff`, `apply` (with `apply_export`, `apply_format_patch`,
+`apply_overlay`, `apply_selective`, `apply_squash` backends),
+`baseline`, `files`. The apply family shares package-private
+helpers (`applyResult`, `buildTagsByCommit`, `hasOverlayDirs`,
+`requireOverlayRunning`, `looksLikeRef`) — that's why they belong
+in one subpackage rather than spread across several.
+
+#### Sandbox tools (`internal/cli/sandboxcmd/`)
+
+The `yoloai sandbox …` parent + every subcommand, plus the
+top-level shortcuts that delegate to it (`yoloai ls`, `yoloai log`,
+`yoloai exec`, `yoloai vscode`).
+
+| File | Purpose |
+|------|---------|
+| `sandbox.go` | `yoloai sandbox` parent with name-first dispatch. |
+| `aliases.go` | Top-level shortcut commands (`ls`, `log`, `exec`, `vscode`) that delegate to the corresponding sandbox subcommand impl. |
+| `list.go`, `log.go`, `exec.go` | The actual `sandbox list`/`log`/`exec` implementations. |
+| `info.go`, `prompt.go`, `vscode.go`, `unlock.go`, `bugreport.go` | Other per-sandbox subcommands. `bugreport.go` exports `WriteSandboxSectionsForFlag` so `root.go`'s `--bugreport` finalizer can include sandbox sections. |
+| `allow.go`, `allowed.go`, `deny.go`, `network.go` | Network allowlist commands and their shared helpers (`loadIsolatedMeta`, `saveNetworkAllowlist`, `tryLivePatchNetwork`). |
+| `ansi.go` | `stripANSI` — used by `log.go` and `bugreport.go` for readable terminal output. |
+
+#### Admin (`internal/cli/system/`)
+
+`yoloai system …` parent and every subcommand. Largest cluster
+after sandboxcmd.
+
+| File | Purpose |
+|------|---------|
+| `system.go` | Parent + `build` + `setup` wiring. |
+| `build`/`prune`/`check`/`disk`/`doctor`/`info`/`setup`/`completion` and `backends_agents.go` | Each system subcommand. |
+| `tart/` | Nested subpackage — the one sanctioned importer of `internal/runtime/tart` (depguard `cli-backend-scope` rule). |
+
+#### Single-command subpackages
+
+| Subpackage | Command | Notes |
+|------------|---------|-------|
+| `mcp/` | `yoloai mcp serve|proxy` | MCP server + proxy. |
+| `profile/` | `yoloai profile create/list/info/delete` | Profile management. |
+| `configcmd/` | `yoloai config get/set/reset` | Suffixed to avoid collision with `internal/config`. |
+| `xcmd/` | `yoloai x` | Extension runner (loads user YAML, builds Cobra commands dynamically). |
+| `helpcmd/` | `yoloai help [topic]` | Topic-based help with embedded markdown (`help/*.md`) and Levenshtein suggestions. |
+| `versioncmd/` | `yoloai version` | Build-time version display. |
+| `bugreport/` | (no command) | Bug-report writer library — `WriteHeader`, `WriteSystem`, `WriteBackends`, `WriteConfig`, `WriteLiveLog`, `WriteExit`, `SanitizeJSONLBytes`. Used by `root.go`'s `--bugreport` orchestration and by `sandboxcmd/bugreport.go`. |
 
 ### `internal/fileutil/`
 
@@ -382,58 +423,55 @@ Host context: `IsRoot`, `IsWSL2`, `InContainer`, `KVMGroup`. Detected once per i
 
 | CLI Command | Entry Point | Core Logic |
 |-------------|-------------|------------|
-| `yoloai new` | `cli/commands.go:newNewCmd` | `sandbox.Manager.Create()` in `sandbox/create.go` |
-| `yoloai attach` | `cli/attach.go:newAttachCmd` | `runtime.InteractiveExec` + `tmux attach` via `cli/commands.go:attachToSandbox` |
-| `yoloai diff` | `cli/diff.go:newDiffCmd` | `sandbox.GenerateMultiDiff()` in `sandbox/diff.go` |
-| `yoloai apply` | `cli/apply.go:newApplyCmd` | `sandbox.GeneratePatch()` / `ApplyPatch()` / `ApplyFormatPatch()` in `sandbox/apply.go` |
-| `yoloai start` | `cli/start.go:newStartCmd` | `sandbox.Manager.Start()` in `sandbox/lifecycle.go` |
-| `yoloai stop` | `cli/stop.go:newStopCmd` | `sandbox.Manager.Stop()` in `sandbox/lifecycle.go` |
-| `yoloai destroy` | `cli/destroy.go:newDestroyCmd` | `sandbox.Manager.Destroy()` in `sandbox/lifecycle.go` |
-| `yoloai reset` | `cli/reset.go:newResetCmd` | `sandbox.Manager.Reset()` in `sandbox/lifecycle.go` |
-| `yoloai restart` | `cli/restart.go:newRestartCmd` | `sandbox.Manager.Stop()` + `sandbox.Manager.Start()` in `sandbox/lifecycle.go` |
-| `yoloai clone` | `cli/sandbox_clone.go` | `sandbox.Manager.Clone()` in `sandbox/clone.go` |
-| `yoloai system info` | `cli/system_info.go:newSystemInfoCmd` | Version, paths, disk usage, backend availability |
-| `yoloai system agents` | `cli/info.go:newSystemAgentsCmd` | Lists agent definitions from `agent` package |
-| `yoloai system backends` | `cli/info.go:newSystemBackendsCmd` | Probes each backend via `runtime.New()` |
-| `yoloai system build` | `cli/system.go:newSystemBuildCmd` | `runtime.Setup()` via active backend |
-| `yoloai system setup` | `cli/system.go:newSystemSetupCmd` | `sandbox.Manager.RunSetup()` in `sandbox/setup.go` |
-| `yoloai system check` | `cli/system_check.go:newSystemCheckCmd` | Verifies backend connectivity, base image, agent credentials |
-| `yoloai system doctor` | `cli/system_doctor.go:newSystemDoctorCmd` | `caps.RunChecks()` + `caps.FormatDoctor()` in `runtime/caps/` |
-| `yoloai system prune` | `cli/system_prune.go:newSystemPruneCmd` | `runtime.Prune()` + `sandbox.PruneTempFiles()` |
-| `yoloai system tart` | `cli/system_tart.go` | `tart.RuntimeVersion` / `tart.CopyRuntimeToVM()` / `tart.Runtime.ListVMs` / `tart.Runtime.DeleteVM` |
-| `yoloai mcp serve` | `cli/system_mcp.go` | `mcpsrv.New()` — MCP server on stdio |
-| `yoloai mcp proxy` | `cli/system_mcp.go` | MCP proxy through sandbox |
-| `yoloai sandbox list` | `cli/list.go:newSandboxListCmd` | `sandbox.ListSandboxes()` in `sandbox/inspect.go` |
-| `yoloai sandbox <name> info` | `cli/sandbox_info.go` | `sandbox.InspectSandbox()` in `sandbox/inspect.go` |
-| `yoloai sandbox <name> log` | `cli/log.go:runLog` | Structured JSONL log display with filtering |
-| `yoloai sandbox <name> exec` | `cli/exec.go` | `runtime.InteractiveExec` into running container |
-| `yoloai sandbox <name> prompt` | `cli/sandbox_prompt.go` | Reads `prompt.txt` from sandbox dir |
-| `yoloai sandbox <name> bugreport` | `cli/sandbox_bugreport.go` | Forensic diagnostic collection |
-| `yoloai sandbox <name> allow` | `cli/sandbox_allow.go` | `sandbox.PatchConfigAllowedDomains()` + `tryLivePatchNetwork` ipset update |
-| `yoloai sandbox <name> allowed` | `cli/sandbox_allowed.go` | `sandbox.LoadMeta()` — pure file read |
-| `yoloai sandbox <name> deny` | `cli/sandbox_deny.go` | `sandbox.PatchConfigAllowedDomains()` + `tryLivePatchNetwork` ipset removal |
-| `yoloai sandbox <name> vscode` | `cli/sandbox_vscode.go:newSandboxVscodeCmd` | Builds `vscode-remote://attached-container+<hex>/<path>` URI and launches `code --folder-uri` |
-| `yoloai files` | `cli/files.go:newFilesCmd` | File exchange via `~/.yoloai/sandboxes/<name>/files/` |
-| `yoloai profile` | `cli/profile.go:newProfileCmd` | Profile create/list/info/delete |
-| `yoloai help` | `cli/help.go:newHelpCmd` | Topic-based help with embedded markdown |
-| `yoloai config get` | `cli/config.go:newConfigGetCmd` | `config.GetEffectiveConfig()` / `config.GetConfigValue()` |
-| `yoloai config set` | `cli/config.go:newConfigSetCmd` | `config.UpdateConfigFields()` or `config.UpdateGlobalConfigFields()` via `config.IsGlobalKey()` |
-| `yoloai config reset` | `cli/config.go:newConfigResetCmd` | `config.DeleteConfigField()` or `config.DeleteGlobalConfigField()` via `config.IsGlobalKey()` |
-| `yoloai ls` | `cli/commands.go:newLsAliasCmd` | Shortcut for `sandbox list` |
-| `yoloai log` | `cli/commands.go:newLogAliasCmd` | Shortcut for `sandbox log` |
-| `yoloai exec` | `cli/commands.go:newExecAliasCmd` | Shortcut for `sandbox exec` |
-| `yoloai x` | `cli/x.go:newExtensionCmd` | User-defined extensions from `~/.yoloai/extensions/` |
-| `yoloai completion` | `cli/commands.go:newCompletionCmd` | Cobra's built-in completion generators |
-| `yoloai version` | `cli/commands.go:newVersionCmd` | Prints build-time version info |
+| `yoloai new` | `cli/lifecycle/new.go:NewNewCmd` | `yoloai.Client.Create()` (→ `sandbox.Manager.Create` in `sandbox/create.go`) |
+| `yoloai attach` | `cli/workflow/attach.go:NewAttachCmd` | `yoloai.Client.Attach()` (PTY-sized via `cliutil.IOStreams`) |
+| `yoloai diff` | `cli/workflow/diff.go:NewDiffCmd` | `yoloai.Client.GenerateMultiPatch()` (→ `sandbox.GenerateMultiDiff` in `sandbox/diff.go`) |
+| `yoloai apply` | `cli/workflow/apply.go:NewApplyCmd` | `yoloai.Client.GeneratePatch()` / `ApplyPatch()` / `GenerateFormatPatch()` |
+| `yoloai start` | `cli/lifecycle/start.go:NewStartCmd` | `yoloai.Client.Start()` |
+| `yoloai stop` | `cli/lifecycle/stop.go:NewStopCmd` | `yoloai.Client.Stop()` |
+| `yoloai destroy` | `cli/lifecycle/destroy.go:NewDestroyCmd` | `yoloai.Client.Destroy()` |
+| `yoloai reset` | `cli/lifecycle/reset.go:NewResetCmd` | `yoloai.Client.Reset()` |
+| `yoloai restart` | `cli/lifecycle/restart.go:NewRestartCmd` | `yoloai.Client.Restart()` |
+| `yoloai clone` | `cli/lifecycle/clone.go:NewCloneCmd` | `yoloai.Client.Clone()` |
+| `yoloai system info` | `cli/system/info.go` | Version, paths, disk usage, backend availability |
+| `yoloai system agents` | `cli/system/backends_agents.go` | Lists agent definitions from `agent` package |
+| `yoloai system backends` | `cli/system/backends_agents.go` | Probes each backend via `cliutil.CheckBackend` |
+| `yoloai system build` | `cli/system/system.go` | `yoloai.SystemClient.Build()` |
+| `yoloai system setup` | `cli/system/system.go` + `cli/system/setup.go` (wizard) | `yoloai.SystemClient.Setup()` |
+| `yoloai system check` | `cli/system/check.go` | `yoloai.SystemClient.Check()` |
+| `yoloai system doctor` | `cli/system/doctor.go` | `caps.RunChecks()` + `caps.FormatDoctor()` in `runtime/caps/` |
+| `yoloai system prune` | `cli/system/prune.go` | `yoloai.SystemClient.Prune()` |
+| `yoloai system tart` | `cli/system/tart/tart.go` | `tart.RuntimeVersion` / `tart.CopyRuntimeToVM()` / `tart.Runtime.ListVMs` / `tart.Runtime.DeleteVM` |
+| `yoloai system completion` | `cli/system/completion.go` | Cobra's built-in completion generators |
+| `yoloai mcp serve` | `cli/mcp/mcp.go` | `mcpsrv.New()` — MCP server on stdio |
+| `yoloai mcp proxy` | `cli/mcp/mcp.go` | MCP proxy through sandbox |
+| `yoloai sandbox list` | `cli/sandboxcmd/list.go` | `yoloai.Client.List()` (→ `sandbox.ListSandboxes` in `sandbox/inspect.go`) |
+| `yoloai sandbox <name> info` | `cli/sandboxcmd/info.go` | `yoloai.Client.Inspect()` |
+| `yoloai sandbox <name> log` | `cli/sandboxcmd/log.go` | Structured JSONL log display with filtering |
+| `yoloai sandbox <name> exec` | `cli/sandboxcmd/exec.go` | `yoloai.Client.Exec()` |
+| `yoloai sandbox <name> prompt` | `cli/sandboxcmd/prompt.go` | Reads `prompt.txt` from sandbox dir |
+| `yoloai sandbox <name> bugreport` | `cli/sandboxcmd/bugreport.go` | Forensic diagnostic collection (calls `bugreport.Write*`) |
+| `yoloai sandbox <name> allow` | `cli/sandboxcmd/allow.go` | `sandbox.PatchConfigAllowedDomains()` + `tryLivePatchNetwork` ipset update |
+| `yoloai sandbox <name> allowed` | `cli/sandboxcmd/allowed.go` | `sandbox.LoadMeta()` — pure file read |
+| `yoloai sandbox <name> deny` | `cli/sandboxcmd/deny.go` | `sandbox.PatchConfigAllowedDomains()` + `tryLivePatchNetwork` ipset removal |
+| `yoloai sandbox <name> vscode` | `cli/sandboxcmd/vscode.go` | Builds `vscode-remote://attached-container+<hex>/<path>` URI and launches `code --folder-uri` |
+| `yoloai files` | `cli/workflow/files.go:NewFilesCmd` | File exchange via `~/.yoloai/sandboxes/<name>/files/` |
+| `yoloai baseline` | `cli/workflow/baseline.go:NewBaselineCmd` | `yoloai.Client.AdvanceBaseline()` / `ResolveCommitRefs()` |
+| `yoloai profile` | `cli/profile/profile.go:NewCmd` | Profile create/list/info/delete |
+| `yoloai help` | `cli/helpcmd/help.go:NewCmd` | Topic-based help with embedded markdown |
+| `yoloai config get/set/reset` | `cli/configcmd/config.go:NewCmd` | `config.{Get,Update,Delete}…Config…` routed via `config.IsGlobalKey()` |
+| `yoloai ls` / `log` / `exec` / `vscode` | `cli/sandboxcmd/aliases.go` | Shortcuts that delegate to the matching `sandbox <verb>` impl in the same subpackage |
+| `yoloai x` | `cli/xcmd/x.go:NewCmd` | User-defined extensions from `~/.yoloai/extensions/` |
+| `yoloai version` | `cli/versioncmd/version.go:NewCmd` | Prints build-time version info (reads `cliutil.Version` etc.) |
 
 ## Data Flow
 
 ### Sandbox Creation (`yoloai new`)
 
 ```
-newNewCmd (cli/commands.go)
-  → withRuntime (cli/helpers.go)
-    → Manager.Create (sandbox/create.go)
+NewNewCmd (cli/lifecycle/new.go)
+  → cliutil.WithClient (cli/cliutil/client.go)
+    → yoloai.Client.Create  (wraps sandbox.Manager.Create in sandbox/create.go)
       → EnsureSetup: create dirs, seed resources, build image, write config.yaml
       → prepareSandboxState (sandbox/create_prepare.go):
           resolve profile chain → applyConfigDefaults
@@ -607,9 +645,16 @@ newSystemDoctorCmd (cli/system_doctor.go)
 ## Where to Change
 
 **Add a new CLI command:**
-1. Create `internal/cli/<command>.go` with `newXxxCmd() *cobra.Command`
-2. Register it in `internal/cli/commands.go:registerCommands()` under the appropriate group
-3. If the command needs a Manager, use `withManager()` or `withRuntime()` from `helpers.go`
+1. Put the command code in the right subpackage under `internal/cli/`:
+   - `lifecycle/` for create/start/stop/destroy verbs on a sandbox
+   - `workflow/` for diff/apply/attach/files-style verbs
+   - `sandboxcmd/` for a new `yoloai sandbox <verb>` subcommand (and any matching top-level alias in `sandboxcmd/aliases.go`)
+   - `system/` for a `yoloai system <verb>` subcommand
+   - one of the single-command subpackages (`profile/`, `configcmd/`, `mcp/`, `xcmd/`, `helpcmd/`, `versioncmd/`) if it's a peer of those
+   - a brand-new subpackage if the command isn't a natural fit for any of the above
+2. Add an exported constructor (`NewXxxCmd() *cobra.Command`) on that subpackage and tag the returned command with the appropriate `cliutil.Group<Lifecycle|Workflow|SandboxTools|Admin>` ID.
+3. Wire it into `internal/cli/commands.go:registerCommands()` under its help group.
+4. If the command needs a `yoloai.Client`, use `cliutil.WithClient`; for cross-backend admin work use `cliutil.NewSystemClient()`. Do not construct `sandbox.Manager` or raw `runtime.Runtime` directly — `.golangci.yml` enforces this via depguard / forbidigo.
 
 **Add a new agent:**
 1. Add a new entry to the `agents` map in `agent/agent.go`

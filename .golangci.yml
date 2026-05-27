@@ -88,7 +88,7 @@ linters:
         # outside the allowlist silently reintroduces the ambient-HOME leak
         # Q-W.6 just deleted across 85 files.
         - pattern: "^os\\.UserHomeDir$"
-          msg: "use cliLayout() (CLI) or the config.Layout passed in (library); only internal/cli/layout_bridge.go may call os.UserHomeDir directly — see development-principles.md §12"
+          msg: "use cliutil.Layout() (CLI) or the config.Layout passed in (library); only internal/cli/cliutil/layout.go may call os.UserHomeDir directly — see development-principles.md §12"
         - pattern: "^os\\.UserConfigDir$"
           msg: "yoloai does not use the XDG config dir; resolve paths via config.Layout — see development-principles.md §12"
         - pattern: "^os\\.UserCacheDir$"
@@ -102,11 +102,11 @@ linters:
         # runtime.Runtime. The chokepoint and residual-debt allowlist
         # is below under exclusions.rules.
         - pattern: "^sandbox\\.NewManager$"
-          msg: "use yoloai.NewWithOptions (which wraps the Manager); the CLI calls it via withClient — see internal/cli/CONVENTIONS.md"
+          msg: "use yoloai.NewWithOptions (which wraps the Manager); CLI command handlers call it via cliutil.WithClient — see internal/cli/CONVENTIONS.md"
         - pattern: "^sandbox\\.Manager$"
-          msg: "use yoloai.Client; CLI commands access orchestration via withClient/systemClient — see internal/cli/CONVENTIONS.md"
+          msg: "use yoloai.Client; CLI commands access orchestration via cliutil.WithClient / cliutil.NewSystemClient — see internal/cli/CONVENTIONS.md"
         - pattern: "^runtime\\.New$"
-          msg: "use the newRuntime helper in internal/cli/helpers.go (the documented chokepoint)"
+          msg: "use cliutil.NewRuntime (the documented chokepoint in internal/cli/cliutil/client.go)"
         - pattern: "^runtime\\.Runtime$"
           msg: "depend on yoloai.Client / yoloai.SystemClient instead of the bare backend interface — see internal/cli/CONVENTIONS.md"
   exclusions:
