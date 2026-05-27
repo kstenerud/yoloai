@@ -9,13 +9,13 @@ import (
 	"time"
 )
 
-// TestMainBreadcrumb prints `integration[pkg]: <label> (elapsed)` lines to
-// stderr around blocking steps in TestMain. With `go test -v`, no output
-// reaches the terminal until the first `=== RUN`, so a slow daemon (cold
-// Docker socket, busy host, post-build cache settling) shows up as an
-// opaque gap between `make[1]: Leaving directory` and the first test.
-// Surface it. Returns a "step" function: pass it a label and the work,
-// and it prints start + duration around the call.
+// TestMainBreadcrumb prints `integration[pkg]: <label> (elapsed)` lines
+// around blocking steps in TestMain. With `go test -v`, no output reaches
+// the terminal until the first `=== RUN`, so a slow daemon (cold Docker
+// socket, busy host, post-build cache settling) shows up as an opaque
+// gap between `make[1]: Leaving directory` and the first test. Surface
+// it. Returns a "step" function: pass it a label and the work, and it
+// prints start + duration around the call.
 //
 //	step := TestMainBreadcrumb("sandbox")
 //	step("connecting to docker", func() { rt, _ = dockerrt.New(ctx) })
@@ -23,7 +23,20 @@ import (
 //
 // The pkg label distinguishes which package's TestMain is talking when
 // `go test ./pkgA ./pkgB ./pkgC` is invoked.
+//
+// When invoked under multi-package `go test ./a ./b ./c`, cmd/go captures
+// each child test binary's stdout AND stderr into per-package buffers and
+// emits them in order, so plain Fprintln(os.Stderr, ...) calls from one
+// package can sit invisible behind another's stream for many seconds —
+// long enough to look like a hang. The breadcrumb output therefore goes
+// to /dev/tty when available: that's the controlling terminal device,
+// which the child opens directly and bypasses cmd/go's stdout/stderr
+// capture pipes entirely. Falls back to os.Stderr when /dev/tty isn't
+// reachable (CI runners, nohup, piped output, Windows).
 func TestMainBreadcrumb(pkg string) func(label string, fn func()) {
+	if tty, err := os.OpenFile("/dev/tty", os.O_WRONLY, 0); err == nil {
+		return breadcrumbWriter(pkg, tty)
+	}
 	return breadcrumbWriter(pkg, os.Stderr)
 }
 
