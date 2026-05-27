@@ -13,6 +13,8 @@ import (
 	"runtime"
 	"testing"
 
+	"github.com/kstenerud/yoloai/internal/config"
+	dockerrt "github.com/kstenerud/yoloai/internal/runtime/docker"
 	"github.com/stretchr/testify/require"
 )
 
@@ -84,7 +86,22 @@ func runYoloai(t *testing.T, args ...string) (stdout, stderr string, exitCode in
 // throwaway sandbox. Returns the project directory path.
 func e2eSetup(t *testing.T) string {
 	t.Helper()
-	t.Setenv("HOME", t.TempDir())
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+
+	// Pre-seed the build-inputs checksum in the per-test HOME. Same
+	// rationale as the integration tests (see
+	// internal/sandbox/integration_helpers_test.go and
+	// backend-idiosyncrasies.md "Docker daemon races on AlreadyExists
+	// when rebuilding an existing tag with identical content"). Without
+	// this, the bootstrap `yoloai new` subprocess re-builds the base
+	// image against the daemon's existing one and intermittently hangs
+	// the Docker SDK HTTP transport on the delete-then-recreate race.
+	// The subprocess inherits HOME from this process via t.Setenv, so
+	// writing the checksum here is visible to the binary we'll launch.
+	layout := config.NewLayout(filepath.Join(tmpHome, ".yoloai"))
+	require.NoError(t, os.MkdirAll(layout.CacheDir(), 0750))
+	dockerrt.RecordBuildChecksum(layout, "")
 
 	projectDir := filepath.Join(t.TempDir(), "project")
 	require.NoError(t, os.MkdirAll(projectDir, 0750))
