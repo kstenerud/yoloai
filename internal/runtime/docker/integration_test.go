@@ -118,7 +118,7 @@ func TestDocker_BindMountReadWrite(t *testing.T) {
 	name := createTestContainer(t, rt, ctx, runtime.InstanceConfig{
 		UseInit: true,
 		Mounts: []runtime.MountSpec{
-			{Host: hostDir, Container: "/mnt/test", ReadOnly: false},
+			{HostPath: hostDir, ContainerPath: "/mnt/test", ReadOnly: false},
 		},
 	})
 	require.NoError(t, rt.Start(ctx, name))
@@ -140,7 +140,7 @@ func TestDocker_BindMountReadOnly(t *testing.T) {
 	name := createTestContainer(t, rt, ctx, runtime.InstanceConfig{
 		UseInit: true,
 		Mounts: []runtime.MountSpec{
-			{Host: hostDir, Container: "/mnt/test", ReadOnly: true},
+			{HostPath: hostDir, ContainerPath: "/mnt/test", ReadOnly: true},
 		},
 	})
 	require.NoError(t, rt.Start(ctx, name))

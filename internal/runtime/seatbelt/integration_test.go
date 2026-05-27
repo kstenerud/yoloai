@@ -26,7 +26,7 @@ func minimalInstanceConfig(t *testing.T, name string) runtime.InstanceConfig {
 		Name:       name,
 		WorkingDir: workdir,
 		Mounts: []runtime.MountSpec{
-			{Host: workdir, Container: workdir, ReadOnly: false},
+			{HostPath: workdir, ContainerPath: workdir, ReadOnly: false},
 		},
 	}
 }

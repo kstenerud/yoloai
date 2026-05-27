@@ -553,8 +553,8 @@ func ConvertMounts(specs []runtime.MountSpec) []mount.Mount {
 	for i, s := range specs {
 		mounts[i] = mount.Mount{
 			Type:     mount.TypeBind,
-			Source:   s.Host,
-			Target:   s.Container,
+			Source:   s.HostPath,
+			Target:   s.ContainerPath,
 			ReadOnly: s.ReadOnly,
 		}
 	}

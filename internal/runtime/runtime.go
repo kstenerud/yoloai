@@ -30,15 +30,19 @@ type PruneResult struct {
 }
 
 // MountSpec describes a bind mount from host into the sandbox instance.
-// The Host field is the path on the host filesystem; Container is the
-// path inside the sandbox. Named for the embedder's perspective per
-// Q-Y design: api_surface.go is the source of truth for public types,
-// and renaming Source/Target → Host/Container makes the direction
-// obvious at every call site.
+// HostPath is the path on the host filesystem; ContainerPath is the
+// path inside the sandbox; ReadOnly controls write access.
+//
+// The "Path" suffix is deliberate. Go doesn't surface types at the
+// call site — `for _, m := range mounts { ... m.HostPath ... }` leaves the
+// reader guessing whether m.HostPath is a hostname, an IP, a port encoded
+// as int, or (here) a path. `m.HostPath` is self-documenting. Same
+// shape as PortMapping's HostPort/ContainerPort: the {Host,Container}
+// prefix names the direction, the type-carrying suffix names the kind.
 type MountSpec struct {
-	Host      string
-	Container string
-	ReadOnly  bool
+	HostPath      string
+	ContainerPath string
+	ReadOnly      bool
 }
 
 // PortMapping describes a port forwarding from host to sandbox instance.

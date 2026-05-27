@@ -335,8 +335,8 @@ func buildContainerMounts(mounts []runtime.MountSpec) []specs.Mount {
 		}
 		extraMounts = append(extraMounts, specs.Mount{
 			Type:        "bind",
-			Source:      m.Host,
-			Destination: m.Container,
+			Source:      m.HostPath,
+			Destination: m.ContainerPath,
 			Options:     opts,
 		})
 	}

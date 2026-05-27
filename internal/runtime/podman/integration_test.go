@@ -118,7 +118,7 @@ func TestPodman_BindMountReadWrite(t *testing.T) {
 	name := createTestContainer(t, rt, ctx, yoloairuntime.InstanceConfig{
 		UseInit: true,
 		Mounts: []yoloairuntime.MountSpec{
-			{Host: hostDir, Container: "/mnt/test", ReadOnly: false},
+			{HostPath: hostDir, ContainerPath: "/mnt/test", ReadOnly: false},
 		},
 	})
 	require.NoError(t, rt.Start(ctx, name))
@@ -140,7 +140,7 @@ func TestPodman_BindMountReadOnly(t *testing.T) {
 	name := createTestContainer(t, rt, ctx, yoloairuntime.InstanceConfig{
 		UseInit: true,
 		Mounts: []yoloairuntime.MountSpec{
-			{Host: hostDir, Container: "/mnt/test", ReadOnly: true},
+			{HostPath: hostDir, ContainerPath: "/mnt/test", ReadOnly: true},
 		},
 	})
 	require.NoError(t, rt.Start(ctx, name))

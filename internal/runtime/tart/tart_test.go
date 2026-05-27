@@ -38,11 +38,11 @@ func TestBuildRunArgs(t *testing.T) {
 
 	mounts := []runtime.MountSpec{
 		// External dir — should get its own --dir share
-		{Host: extDir, Container: "/Users/karl/project"},
+		{HostPath: extDir, ContainerPath: "/Users/karl/project"},
 		// Sandbox-internal dir — should be skipped (already in yoloai share)
-		{Host: sandboxPath + "/agent-runtime", Container: "/home/yoloai/.claude/"},
+		{HostPath: sandboxPath + "/agent-runtime", ContainerPath: "/home/yoloai/.claude/"},
 		// File mount — should be skipped (VirtioFS only supports dirs)
-		{Host: sandboxPath + "/runtime-config.json", Container: "/yoloai/runtime-config.json"},
+		{HostPath: sandboxPath + "/runtime-config.json", ContainerPath: "/yoloai/runtime-config.json"},
 	}
 	args := r.buildRunArgs("yoloai-test", sandboxPath, mounts)
 
@@ -107,8 +107,8 @@ func TestBuildNetworkArgs_IsolatedWithPorts(t *testing.T) {
 
 func TestBuildMountSymlinkCmds(t *testing.T) {
 	mounts := []runtime.MountSpec{
-		{Host: "/Users/karl/project", Container: "/Users/karl/project"},
-		{Host: "/Users/karl/.yoloai/sandboxes/test/agent-runtime", Container: "/home/admin/.claude/"},
+		{HostPath: "/Users/karl/project", ContainerPath: "/Users/karl/project"},
+		{HostPath: "/Users/karl/.yoloai/sandboxes/test/agent-runtime", ContainerPath: "/home/admin/.claude/"},
 	}
 	dirNames := map[string]string{
 		"/Users/karl/project":                              "workdir",
@@ -136,7 +136,7 @@ func TestBuildMountSymlinkCmds(t *testing.T) {
 
 func TestBuildMountSymlinkCmds_NoSymlinkNeeded(t *testing.T) {
 	mounts := []runtime.MountSpec{
-		{Host: "/Users/karl/project", Container: "/Volumes/My Shared Files/workdir"},
+		{HostPath: "/Users/karl/project", ContainerPath: "/Volumes/My Shared Files/workdir"},
 	}
 	dirNames := map[string]string{
 		"/Users/karl/project": "workdir",

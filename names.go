@@ -88,18 +88,28 @@ const (
 )
 
 // MountSpec describes a bind mount from the host filesystem into the
-// sandbox. Host and Container are paths; ReadOnly controls write access.
-// Re-exported (type alias) from internal/runtime so embedders constructing
+// sandbox. HostPath is the path on the host, ContainerPath is the path
+// inside the sandbox, ReadOnly controls write access. Re-exported
+// (type alias) from internal/runtime so embedders constructing
 // RunOptions.Mounts (when that field lands) don't need to reach into
-// internal packages. Q-Y. Direction is explicit in the field names —
-// Host is the path on the host, Container is the path inside the
-// sandbox — so the call site reads clearly without consulting docs.
+// internal packages. Q-Y.
+//
+// The "Path" suffix matches PortMapping's "Port" suffix: Go doesn't
+// surface types at the call site, so `m.HostPath` is self-documenting
+// in a way that bare `m.Host` is not (a reader of `m.Host` has to look
+// up the type to know it isn't a hostname / IP / port). Direction is
+// in the prefix (Host vs Container); kind is in the suffix (Path vs
+// Port). Same convention as PortMapping below.
 type MountSpec = runtime.MountSpec
 
 // PortMapping describes a host-to-sandbox port forwarding. HostPort and
 // ContainerPort are integer port numbers; Protocol defaults to "tcp"
 // when empty. Re-exported (type alias) from internal/runtime. Q-Y.
-// The `Port` suffix is deliberate — without it, an int field named
-// "Host" would read ambiguously (hostname? address?) where "HostPort"
-// is self-documenting.
+//
+// Naming mirrors MountSpec above: direction in the prefix (Host /
+// Container), kind in the suffix (Path / Port). Without the type-
+// carrying suffix an int field named "Host" reads ambiguously
+// (hostname? address?) — the suffix makes it self-documenting at any
+// call site, regardless of whether Go has inferred the type into
+// scope.
 type PortMapping = runtime.PortMapping

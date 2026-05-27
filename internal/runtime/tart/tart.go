@@ -627,9 +627,9 @@ func (r *Runtime) buildRunArgs(vmName, sandboxPath string, mounts []runtime.Moun
 	for _, p := range xcodePaths {
 		if info, err := os.Stat(p.host); err == nil && info.IsDir() {
 			mergedMounts[p.host] = runtime.MountSpec{
-				Host:      p.host,
-				Container: filepath.Join(sharedDirVMPath, p.name),
-				ReadOnly:  true,
+				HostPath:      p.host,
+				ContainerPath: filepath.Join(sharedDirVMPath, p.name),
+				ReadOnly:      true,
 			}
 		}
 	}
@@ -637,20 +637,20 @@ func (r *Runtime) buildRunArgs(vmName, sandboxPath string, mounts []runtime.Moun
 	// 2. Add user-specified mounts (override system paths if same Source)
 	for _, m := range mounts {
 		// Skip anything under the sandbox dir (already shared)
-		if strings.HasPrefix(m.Host, sandboxPath+"/") || m.Host == sandboxPath {
+		if strings.HasPrefix(m.HostPath, sandboxPath+"/") || m.HostPath == sandboxPath {
 			continue
 		}
 		// Skip files — VirtioFS only supports directories
-		if info, err := os.Stat(m.Host); err != nil || !info.IsDir() {
+		if info, err := os.Stat(m.HostPath); err != nil || !info.IsDir() {
 			continue
 		}
-		mergedMounts[m.Host] = m // Overwrites system path if duplicate
+		mergedMounts[m.HostPath] = m // Overwrites system path if duplicate
 	}
 
 	// 3. Build --dir arguments from merged list
 	for _, m := range mergedMounts {
-		dirName := mountDirName(m.Host)
-		dirSpec := fmt.Sprintf("%s:%s", dirName, m.Host)
+		dirName := mountDirName(m.HostPath)
+		dirSpec := fmt.Sprintf("%s:%s", dirName, m.HostPath)
 		if m.ReadOnly {
 			dirSpec += ":ro"
 		}
@@ -719,17 +719,17 @@ func portForwardArgs(ports []runtime.PortMapping) []string {
 func BuildMountSymlinkCmds(mounts []runtime.MountSpec, dirNames map[string]string) []string {
 	var cmds []string
 	for _, m := range mounts {
-		dirName, ok := dirNames[m.Host]
+		dirName, ok := dirNames[m.HostPath]
 		if !ok {
 			continue
 		}
 		vfsPath := filepath.Join(sharedDirVMPath, dirName)
-		if vfsPath == m.Container {
+		if vfsPath == m.ContainerPath {
 			continue // no symlink needed
 		}
-		parent := filepath.Dir(m.Container)
+		parent := filepath.Dir(m.ContainerPath)
 		cmds = append(cmds, fmt.Sprintf("sudo mkdir -p %q", parent))
-		cmds = append(cmds, fmt.Sprintf("sudo ln -sf %q %q", vfsPath, m.Container))
+		cmds = append(cmds, fmt.Sprintf("sudo ln -sf %q %q", vfsPath, m.ContainerPath))
 	}
 	return cmds
 }
@@ -925,19 +925,19 @@ func (r *Runtime) runSetupScript(ctx context.Context, vmName, sandboxPath string
 // createVMMountSymlinks creates symlinks in the VM from expected mount targets to VirtioFS paths.
 func (r *Runtime) createVMMountSymlinks(ctx context.Context, vmName, sandboxPath, vmSharedDir string, mounts []runtime.MountSpec) error {
 	for _, m := range mounts {
-		if m.Container == "/run/secrets" || strings.HasPrefix(m.Container, "/run/secrets/") {
+		if m.ContainerPath == "/run/secrets" || strings.HasPrefix(m.ContainerPath, "/run/secrets/") {
 			continue
 		}
 
-		target := remapTargetPath(m.Container)
-		slog.Debug("tart setup: processing mount", "source", m.Host, "target", target)
+		target := remapTargetPath(m.ContainerPath)
+		slog.Debug("tart setup: processing mount", "source", m.HostPath, "target", target)
 
 		if strings.HasPrefix(target, "/Users/admin/yoloai-work/") {
 			slog.Debug("tart setup: skipping copy workdir (handled by executeVMWorkDirSetup)", "target", target)
 			continue
 		}
 
-		vfsPath, ok := resolveMountVFSPath(m.Host, sandboxPath, vmSharedDir)
+		vfsPath, ok := resolveMountVFSPath(m.HostPath, sandboxPath, vmSharedDir)
 		if !ok {
 			continue
 		}
@@ -1427,17 +1427,17 @@ func (r *Runtime) addMountMapToConfig(sandboxPath string, mounts []runtime.Mount
 	mountMap := make(map[string]string)
 	for _, m := range mounts {
 		// Skip mounts under sandbox dir (already accessible via yoloai VirtioFS share)
-		if strings.HasPrefix(m.Host, sandboxPath+"/") || m.Host == sandboxPath {
+		if strings.HasPrefix(m.HostPath, sandboxPath+"/") || m.HostPath == sandboxPath {
 			continue
 		}
 		// Only add directory mounts (VirtioFS doesn't support files)
-		if info, err := os.Stat(m.Host); err != nil || !info.IsDir() {
+		if info, err := os.Stat(m.HostPath); err != nil || !info.IsDir() {
 			continue
 		}
 		// VirtioFS mount appears at /Volumes/My Shared Files/<name>/
-		dirName := mountDirName(m.Host)
+		dirName := mountDirName(m.HostPath)
 		virtiofsMountPoint := filepath.Join(sharedDirVMPath, dirName)
-		mountMap[remapTargetPath(m.Container)] = virtiofsMountPoint
+		mountMap[remapTargetPath(m.ContainerPath)] = virtiofsMountPoint
 	}
 
 	if len(mountMap) == 0 {
@@ -1474,20 +1474,20 @@ func copySecretsToSandbox(sandboxPath string, mounts []runtime.MountSpec) error 
 		return fmt.Errorf("create secrets dir: %w", err)
 	}
 	for _, m := range mounts {
-		if m.Container != "/run/secrets" && !strings.HasPrefix(m.Container, "/run/secrets/") {
+		if m.ContainerPath != "/run/secrets" && !strings.HasPrefix(m.ContainerPath, "/run/secrets/") {
 			continue
 		}
-		if m.Container == "/run/secrets" {
-			if err := copySecretDir(secretsDir, m.Host); err != nil {
+		if m.ContainerPath == "/run/secrets" {
+			if err := copySecretDir(secretsDir, m.HostPath); err != nil {
 				return err
 			}
 			continue
 		}
-		data, err := os.ReadFile(m.Host) //nolint:gosec // G304: source is from validated mount spec
+		data, err := os.ReadFile(m.HostPath) //nolint:gosec // G304: source is from validated mount spec
 		if err != nil {
 			continue
 		}
-		keyName := filepath.Base(m.Container)
+		keyName := filepath.Base(m.ContainerPath)
 		if err := fileutil.WriteFile(filepath.Join(secretsDir, keyName), data, 0600); err != nil { //nolint:gosec // G703: secretsDir is an internal sandbox directory
 			return fmt.Errorf("copy secret %s: %w", keyName, err)
 		}

@@ -198,20 +198,20 @@ func copySecretsToSandbox(sandboxPath string, mounts []runtime.MountSpec) error 
 		return fmt.Errorf("create secrets dir: %w", err)
 	}
 	for _, m := range mounts {
-		if m.Container != "/run/secrets" && !strings.HasPrefix(m.Container, "/run/secrets/") {
+		if m.ContainerPath != "/run/secrets" && !strings.HasPrefix(m.ContainerPath, "/run/secrets/") {
 			continue
 		}
-		if m.Container == "/run/secrets" {
-			if err := copySecretDir(secretsDir, m.Host); err != nil {
+		if m.ContainerPath == "/run/secrets" {
+			if err := copySecretDir(secretsDir, m.HostPath); err != nil {
 				return err
 			}
 			continue
 		}
-		data, err := os.ReadFile(m.Host) //nolint:gosec // G304: source is from validated mount spec
+		data, err := os.ReadFile(m.HostPath) //nolint:gosec // G304: source is from validated mount spec
 		if err != nil {
 			continue
 		}
-		keyName := filepath.Base(m.Container)
+		keyName := filepath.Base(m.ContainerPath)
 		if err := fileutil.WriteFile(filepath.Join(secretsDir, keyName), data, 0600); err != nil { //nolint:gosec // G703: secretsDir is an internal sandbox directory
 			return fmt.Errorf("copy secret %s: %w", keyName, err)
 		}
@@ -499,21 +499,21 @@ func (r *Runtime) AttachCommand(tmuxSocket string, _ int, _ int, _ string) []str
 func mountSymlinks(mounts []runtime.MountSpec) ([]string, error) {
 	var created []string
 	for _, m := range mounts {
-		if m.Host == "" || m.Host == m.Container {
+		if m.HostPath == "" || m.HostPath == m.ContainerPath {
 			continue
 		}
 		// Skip secrets — they're handled separately
-		if strings.HasPrefix(m.Container, "/run/secrets/") {
+		if strings.HasPrefix(m.ContainerPath, "/run/secrets/") {
 			continue
 		}
 		// Only symlink directories, not individual files
-		info, err := os.Stat(m.Host)
+		info, err := os.Stat(m.HostPath)
 		if err != nil || !info.IsDir() {
 			continue
 		}
 		// Skip if target already exists on the host (e.g., copy-mode workdir
 		// where Target is the original host path that still exists).
-		if _, err := os.Lstat(m.Container); err == nil {
+		if _, err := os.Lstat(m.ContainerPath); err == nil {
 			continue
 		}
 		// Create parent directory if needed. Silently skip unreachable paths
@@ -521,13 +521,13 @@ func mountSymlinks(mounts []runtime.MountSpec) ([]string, error) {
 		// and sandbox-exec restrictions can prevent directory creation in
 		// certain locations. The entrypoint script handles these cases internally
 		// by setting up paths within its sandboxed HOME.
-		if err := fileutil.MkdirAll(filepath.Dir(m.Container), 0750); err != nil { //nolint:gosec // G301: parent dirs for mount symlinks
+		if err := fileutil.MkdirAll(filepath.Dir(m.ContainerPath), 0750); err != nil { //nolint:gosec // G301: parent dirs for mount symlinks
 			continue
 		}
-		if err := os.Symlink(m.Host, m.Container); err != nil {
-			return created, fmt.Errorf("create symlink %s -> %s: %w", m.Container, m.Host, err)
+		if err := os.Symlink(m.HostPath, m.ContainerPath); err != nil {
+			return created, fmt.Errorf("create symlink %s -> %s: %w", m.ContainerPath, m.HostPath, err)
 		}
-		created = append(created, m.Container)
+		created = append(created, m.ContainerPath)
 	}
 	return created, nil
 }
@@ -723,8 +723,8 @@ func (r *Runtime) patchConfigWorkingDir(sandboxPath string, mounts []runtime.Mou
 	workPrefix := filepath.Join(sandboxPath, "work") + "/"
 	var copySource string
 	for _, m := range mounts {
-		if !m.ReadOnly && strings.HasPrefix(m.Host, workPrefix) {
-			copySource = m.Host
+		if !m.ReadOnly && strings.HasPrefix(m.HostPath, workPrefix) {
+			copySource = m.HostPath
 			break
 		}
 	}

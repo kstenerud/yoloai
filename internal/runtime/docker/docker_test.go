@@ -23,7 +23,7 @@ func TestConvertMounts_Empty(t *testing.T) {
 
 func TestConvertMounts_SingleRO(t *testing.T) {
 	specs := []runtime.MountSpec{
-		{Host: "/host/path", Container: "/container/path", ReadOnly: true},
+		{HostPath: "/host/path", ContainerPath: "/container/path", ReadOnly: true},
 	}
 	result := ConvertMounts(specs)
 	require.Len(t, result, 1)
@@ -37,9 +37,9 @@ func TestConvertMounts_SingleRO(t *testing.T) {
 
 func TestConvertMounts_MultipleWithRW(t *testing.T) {
 	specs := []runtime.MountSpec{
-		{Host: "/src1", Container: "/dst1", ReadOnly: true},
-		{Host: "/src2", Container: "/dst2", ReadOnly: false},
-		{Host: "/src3", Container: "/dst3", ReadOnly: true},
+		{HostPath: "/src1", ContainerPath: "/dst1", ReadOnly: true},
+		{HostPath: "/src2", ContainerPath: "/dst2", ReadOnly: false},
+		{HostPath: "/src3", ContainerPath: "/dst3", ReadOnly: true},
 	}
 	result := ConvertMounts(specs)
 	require.Len(t, result, 3)

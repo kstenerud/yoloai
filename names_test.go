@@ -170,23 +170,24 @@ func TestLogSource_ShippedConstants(t *testing.T) {
 }
 
 // MountSpec is a type alias of runtime.MountSpec; values flow through
-// both names without explicit conversion. Field names are explicit
-// (Host, Container) so direction is obvious at the call site.
+// both names without explicit conversion. Field names carry the "Path"
+// suffix so the call site reads unambiguously even without type
+// inference in view (Go doesn't surface the type at every reference).
 func TestMountSpec_AliasIdentity(t *testing.T) {
 	// Explicit type annotation pins the alias identity. See
 	// TestBackendName_AliasIdentity for why this isn't redundant.
-	var public MountSpec = MountSpec{Host: "/h", Container: "/c", ReadOnly: true} //nolint:staticcheck // ST1023: type pins alias identity
+	var public MountSpec = MountSpec{HostPath: "/h", ContainerPath: "/c", ReadOnly: true} //nolint:staticcheck // ST1023: type pins alias identity
 	var internal runtime.MountSpec
 	internal = public
-	assert.Equal(t, "/h", internal.Host)
-	assert.Equal(t, "/c", internal.Container)
+	assert.Equal(t, "/h", internal.HostPath)
+	assert.Equal(t, "/c", internal.ContainerPath)
 	assert.True(t, internal.ReadOnly)
 
 	// Reverse direction.
-	internal = runtime.MountSpec{Host: "/x", Container: "/y"}
+	internal = runtime.MountSpec{HostPath: "/x", ContainerPath: "/y"}
 	public = internal
-	assert.Equal(t, "/x", public.Host)
-	assert.Equal(t, "/y", public.Container)
+	assert.Equal(t, "/x", public.HostPath)
+	assert.Equal(t, "/y", public.ContainerPath)
 }
 
 // PortMapping is a type alias of runtime.PortMapping; int ports + the

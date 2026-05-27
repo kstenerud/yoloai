@@ -94,10 +94,10 @@ func writeProfileSandboxDir(b *strings.Builder, sandboxDir string) {
 func writeProfileMountRules(b *strings.Builder, mounts []runtime.MountSpec) {
 	b.WriteString("; Mount-derived filesystem rules\n")
 	for _, m := range mounts {
-		if m.Host == "" {
+		if m.HostPath == "" {
 			continue
 		}
-		for _, src := range resolvePathVariants(m.Host) {
+		for _, src := range resolvePathVariants(m.HostPath) {
 			if m.ReadOnly {
 				fmt.Fprintf(b, "(allow file-read* (subpath %q))\n", src)
 			} else {

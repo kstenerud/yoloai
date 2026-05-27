@@ -321,21 +321,27 @@ const (
 // MountSpec describes a host-to-container bind mount declared in
 // RunOptions.Mounts. Replaces the prior []string of "host:container[:ro]"
 // tokens.
+//
+// Field names carry the "Path" suffix in symmetry with PortMapping's
+// "Port" suffix below. Go doesn't surface types at the call site —
+// `for _, m := range mounts { ... m.HostPath ... }` is self-documenting
+// where bare `m.Host` would leave a reader guessing (hostname? IP?
+// port?). Direction in the prefix (Host vs Container), kind in the
+// suffix (Path vs Port).
 type MountSpec struct {
-	Host      string // host path
-	Container string // container path
-	ReadOnly  bool
+	HostPath      string
+	ContainerPath string
+	ReadOnly      bool
 }
 
 // PortMapping describes a host-to-container port mapping declared in
 // RunOptions.Ports. Replaces the prior []string of "8080:8080[/tcp]"
 // tokens.
 //
-// Field names carry the "Port" suffix deliberately. Without it, "Host
-// int" reads ambiguously — a port number, an IP encoded as int, a
-// hostname hash? The suffix makes it self-documenting. (MountSpec gets
-// away with bare Host/Container because the path-typed fields anchor
-// the meaning visually; integer ports have no such anchor.)
+// Field names carry the "Port" suffix in symmetry with MountSpec's
+// "Path" suffix above. Same rationale: an int field named "Host"
+// reads ambiguously at every call site; "HostPort" is self-documenting.
+// Direction in the prefix, kind in the suffix.
 type PortMapping struct {
 	HostPort      int
 	ContainerPort int
@@ -2614,15 +2620,21 @@ const (
 //          replaced with structured types:
 //
 //            RunOptions.Mounts  []string → []MountSpec
-//                where MountSpec is { Host, Container string;
+//                where MountSpec is { HostPath, ContainerPath string;
 //                                     ReadOnly bool }.
 //            RunOptions.Ports   []string → []PortMapping
 //                where PortMapping is { HostPort, ContainerPort int;
-//                                       Protocol string }. The "Port"
-//                suffix is deliberate — without it an int field named
-//                "Host" would read ambiguously (originally documented
-//                as `Host, Container int` but corrected during the
-//                landing sweep — see names.go for the rationale).
+//                                       Protocol string }.
+//
+//            Direction in the prefix (Host / Container); kind in the
+//            suffix (Path / Port). Without the type-carrying suffix
+//            an int field named "Host" reads ambiguously at every
+//            call site (Go doesn't surface types) — same hazard for
+//            a string field named "Host" that could be a hostname or
+//            a path. The suffix anchors the meaning unconditionally.
+//            (Originally documented with bare Host/Container in
+//            both types; corrected during the landing sweep — see
+//            names.go for the call-site reading argument.)
 //
 //          Embedders no longer format/parse "host:container[:ro]"
 //          and "8080:8080/tcp" tokens; the CLI parses these from

@@ -1343,8 +1343,8 @@ func buildWorkdirMounts(state *sandboxState) []runtime.MountSpec {
 	switch state.workdir.Mode {
 	case "copy":
 		return []runtime.MountSpec{{
-			Host:      state.workCopyDir,
-			Container: state.workdir.ResolvedMountPath(),
+			HostPath:      state.workCopyDir,
+			ContainerPath: state.workdir.ResolvedMountPath(),
 		}}
 	case "overlay":
 		encoded := store.EncodePath(state.workdir.Path)
@@ -1355,20 +1355,20 @@ func buildWorkdirMounts(state *sandboxState) []runtime.MountSpec {
 		// the lower/ subdirectory within the same volume.
 		return []runtime.MountSpec{
 			{
-				Host:      store.OverlayWorkBaseDir(state.sandboxDir, state.workdir.Path),
-				Container: "/yoloai/overlay/" + encoded,
+				HostPath:      store.OverlayWorkBaseDir(state.sandboxDir, state.workdir.Path),
+				ContainerPath: "/yoloai/overlay/" + encoded,
 			},
 			{
-				Host:      state.workdir.Path,
-				Container: "/yoloai/overlay/" + encoded + "/lower",
-				ReadOnly:  true,
+				HostPath:      state.workdir.Path,
+				ContainerPath: "/yoloai/overlay/" + encoded + "/lower",
+				ReadOnly:      true,
 			},
 		}
 	default:
 		return []runtime.MountSpec{{
-			Host:      state.workdir.Path,
-			Container: state.workdir.ResolvedMountPath(),
-			ReadOnly:  state.workdir.Mode != "rw",
+			HostPath:      state.workdir.Path,
+			ContainerPath: state.workdir.ResolvedMountPath(),
+			ReadOnly:      state.workdir.Mode != "rw",
 		}}
 	}
 }
@@ -1388,32 +1388,32 @@ func buildSingleAuxDirMount(sandboxDir string, ad *DirArg) []runtime.MountSpec {
 	switch ad.Mode {
 	case "copy":
 		return []runtime.MountSpec{{
-			Host:      store.WorkDir(sandboxDir, ad.Path),
-			Container: mountTarget,
+			HostPath:      store.WorkDir(sandboxDir, ad.Path),
+			ContainerPath: mountTarget,
 		}}
 	case "overlay":
 		encoded := store.EncodePath(ad.Path)
 		return []runtime.MountSpec{
 			{
-				Host:      store.OverlayWorkBaseDir(sandboxDir, ad.Path),
-				Container: "/yoloai/overlay/" + encoded,
+				HostPath:      store.OverlayWorkBaseDir(sandboxDir, ad.Path),
+				ContainerPath: "/yoloai/overlay/" + encoded,
 			},
 			{
-				Host:      ad.Path,
-				Container: "/yoloai/overlay/" + encoded + "/lower",
-				ReadOnly:  true,
+				HostPath:      ad.Path,
+				ContainerPath: "/yoloai/overlay/" + encoded + "/lower",
+				ReadOnly:      true,
 			},
 		}
 	case "rw":
 		return []runtime.MountSpec{{
-			Host:      ad.Path,
-			Container: mountTarget,
+			HostPath:      ad.Path,
+			ContainerPath: mountTarget,
 		}}
 	default: // read-only (empty mode or explicit "ro")
 		return []runtime.MountSpec{{
-			Host:      ad.Path,
-			Container: mountTarget,
-			ReadOnly:  true,
+			HostPath:      ad.Path,
+			ContainerPath: mountTarget,
+			ReadOnly:      true,
 		}}
 	}
 }
@@ -1425,8 +1425,8 @@ func buildAgentMounts(state *sandboxState) []runtime.MountSpec {
 	// Agent runtime directory (agent's own managed state)
 	if state.agent.StateDir != "" {
 		mounts = append(mounts, runtime.MountSpec{
-			Host:      filepath.Join(state.sandboxDir, store.AgentRuntimeDir),
-			Container: state.agent.StateDir,
+			HostPath:      filepath.Join(state.sandboxDir, store.AgentRuntimeDir),
+			ContainerPath: state.agent.StateDir,
 		})
 	}
 
@@ -1462,8 +1462,8 @@ func buildVscodeMounts(state *sandboxState) []runtime.MountSpec {
 	}
 
 	mounts = append(mounts, runtime.MountSpec{
-		Host:      vscodeSandboxCLIDir,
-		Container: "/home/yoloai/.vscode/cli",
+		HostPath:      vscodeSandboxCLIDir,
+		ContainerPath: "/home/yoloai/.vscode/cli",
 	})
 
 	// Stable machine-id — VS Code CLI ties its token to /etc/machine-id; a
@@ -1471,9 +1471,9 @@ func buildVscodeMounts(state *sandboxState) []runtime.MountSpec {
 	machineIDPath := filepath.Join(state.sandboxDir, store.MachineIDFile)
 	if err := ensureMachineID(machineIDPath); err == nil {
 		mounts = append(mounts, runtime.MountSpec{
-			Host:      machineIDPath,
-			Container: "/etc/machine-id",
-			ReadOnly:  true,
+			HostPath:      machineIDPath,
+			ContainerPath: "/etc/machine-id",
+			ReadOnly:      true,
 		})
 	}
 
@@ -1501,8 +1501,8 @@ func buildHomeSeedMounts(state *sandboxState) []runtime.MountSpec {
 				continue
 			}
 			mounts = append(mounts, runtime.MountSpec{
-				Host:      src,
-				Container: "/home/yoloai/" + topDir,
+				HostPath:      src,
+				ContainerPath: "/home/yoloai/" + topDir,
 			})
 			mountedDirs[topDir] = true
 		} else {
@@ -1511,8 +1511,8 @@ func buildHomeSeedMounts(state *sandboxState) []runtime.MountSpec {
 				continue // skip if not seeded
 			}
 			mounts = append(mounts, runtime.MountSpec{
-				Host:      src,
-				Container: "/home/yoloai/" + sf.TargetPath,
+				HostPath:      src,
+				ContainerPath: "/home/yoloai/" + sf.TargetPath,
 			})
 		}
 	}
@@ -1524,13 +1524,13 @@ func buildSystemMounts(state *sandboxState) []runtime.MountSpec {
 	mounts := []runtime.MountSpec{
 		// Structured log directory
 		{
-			Host:      filepath.Join(state.sandboxDir, store.LogsDir),
-			Container: "/yoloai/" + store.LogsDir,
+			HostPath:      filepath.Join(state.sandboxDir, store.LogsDir),
+			ContainerPath: "/yoloai/" + store.LogsDir,
 		},
 		// Agent status file (for in-container status monitor)
 		{
-			Host:      filepath.Join(state.sandboxDir, store.AgentStatusFile),
-			Container: "/yoloai/" + store.AgentStatusFile,
+			HostPath:      filepath.Join(state.sandboxDir, store.AgentStatusFile),
+			ContainerPath: "/yoloai/" + store.AgentStatusFile,
 		},
 	}
 
@@ -1541,28 +1541,28 @@ func buildSystemMounts(state *sandboxState) []runtime.MountSpec {
 			promptSource = state.promptSourcePath
 		}
 		mounts = append(mounts, runtime.MountSpec{
-			Host:      promptSource,
-			Container: "/yoloai/prompt.txt",
-			ReadOnly:  true,
+			HostPath:      promptSource,
+			ContainerPath: "/yoloai/prompt.txt",
+			ReadOnly:      true,
 		})
 	}
 
 	mounts = append(mounts,
 		// Runtime config file
 		runtime.MountSpec{
-			Host:      filepath.Join(state.sandboxDir, store.RuntimeConfigFile),
-			Container: "/yoloai/" + store.RuntimeConfigFile,
-			ReadOnly:  true,
+			HostPath:      filepath.Join(state.sandboxDir, store.RuntimeConfigFile),
+			ContainerPath: "/yoloai/" + store.RuntimeConfigFile,
+			ReadOnly:      true,
 		},
 		// File exchange directory
 		runtime.MountSpec{
-			Host:      filepath.Join(state.sandboxDir, "files"),
-			Container: "/yoloai/files",
+			HostPath:      filepath.Join(state.sandboxDir, "files"),
+			ContainerPath: "/yoloai/files",
 		},
 		// Cache directory
 		runtime.MountSpec{
-			Host:      filepath.Join(state.sandboxDir, "cache"),
-			Container: "/yoloai/cache",
+			HostPath:      filepath.Join(state.sandboxDir, "cache"),
+			ContainerPath: "/yoloai/cache",
 		},
 	)
 
@@ -1585,9 +1585,9 @@ func buildGitAndTmuxMounts(state *sandboxState) []runtime.MountSpec {
 			// copy-mode — preventing send-keys from reaching the shell.
 			_ = os.Chmod(defaultsTmuxConf, 0644) //nolint:gosec // G302: tmux.conf contains no secrets
 			mounts = append(mounts, runtime.MountSpec{
-				Host:      defaultsTmuxConf,
-				Container: "/yoloai/tmux/tmux.conf",
-				ReadOnly:  true,
+				HostPath:      defaultsTmuxConf,
+				ContainerPath: "/yoloai/tmux/tmux.conf",
+				ReadOnly:      true,
 			})
 		}
 	}
@@ -1597,9 +1597,9 @@ func buildGitAndTmuxMounts(state *sandboxState) []runtime.MountSpec {
 		tmuxConfPath := ExpandTilde("~/.tmux.conf", state.homeDir)
 		if _, err := os.Stat(tmuxConfPath); err == nil {
 			mounts = append(mounts, runtime.MountSpec{
-				Host:      tmuxConfPath,
-				Container: "/home/yoloai/.tmux.conf",
-				ReadOnly:  true,
+				HostPath:      tmuxConfPath,
+				ContainerPath: "/home/yoloai/.tmux.conf",
+				ReadOnly:      true,
 			})
 		}
 	}
@@ -1610,17 +1610,17 @@ func buildGitAndTmuxMounts(state *sandboxState) []runtime.MountSpec {
 	gitconfigPath := ExpandTilde("~/.gitconfig", state.homeDir)
 	if _, err := os.Stat(gitconfigPath); err == nil {
 		mounts = append(mounts, runtime.MountSpec{
-			Host:      gitconfigPath,
-			Container: "/home/yoloai/.gitconfig",
-			ReadOnly:  true,
+			HostPath:      gitconfigPath,
+			ContainerPath: "/home/yoloai/.gitconfig",
+			ReadOnly:      true,
 		})
 	}
 	gitConfigDir := ExpandTilde("~/.config/git", state.homeDir)
 	if info, err := os.Stat(gitConfigDir); err == nil && info.IsDir() {
 		mounts = append(mounts, runtime.MountSpec{
-			Host:      gitConfigDir,
-			Container: "/home/yoloai/.config/git",
-			ReadOnly:  true,
+			HostPath:      gitConfigDir,
+			ContainerPath: "/home/yoloai/.config/git",
+			ReadOnly:      true,
 		})
 	}
 
@@ -1646,9 +1646,9 @@ func buildConfigAndSecretsMounts(state *sandboxState, secretsDir string) []runti
 	// The entrypoint already iterates /run/secrets as a directory.
 	if secretsDir != "" {
 		mounts = append(mounts, runtime.MountSpec{
-			Host:      secretsDir,
-			Container: "/run/secrets",
-			ReadOnly:  true,
+			HostPath:      secretsDir,
+			ContainerPath: "/run/secrets",
+			ReadOnly:      true,
 		})
 	}
 
@@ -2003,8 +2003,8 @@ func parseConfigMount(s, homeDir string) (runtime.MountSpec, error) {
 	}
 
 	spec := runtime.MountSpec{
-		Host:      hostPath,
-		Container: parts[1],
+		HostPath:      hostPath,
+		ContainerPath: parts[1],
 	}
 
 	if len(parts) == 3 {

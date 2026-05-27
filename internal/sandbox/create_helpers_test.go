@@ -435,13 +435,13 @@ func TestBuildMounts_CopyMode(t *testing.T) {
 	// Find workdir mount
 	var workMount *runtime.MountSpec
 	for i := range mounts {
-		if mounts[i].Container == "/home/user/project" {
+		if mounts[i].ContainerPath == "/home/user/project" {
 			workMount = &mounts[i]
 			break
 		}
 	}
 	require.NotNil(t, workMount)
-	assert.Equal(t, state.workCopyDir, workMount.Host)
+	assert.Equal(t, state.workCopyDir, workMount.HostPath)
 }
 
 func TestBuildMounts_RWMode(t *testing.T) {
@@ -457,13 +457,13 @@ func TestBuildMounts_RWMode(t *testing.T) {
 	// In rw mode, source should be the host path itself
 	var workMount *runtime.MountSpec
 	for i := range mounts {
-		if mounts[i].Container == "/home/user/project" {
+		if mounts[i].ContainerPath == "/home/user/project" {
 			workMount = &mounts[i]
 			break
 		}
 	}
 	require.NotNil(t, workMount)
-	assert.Equal(t, "/home/user/project", workMount.Host)
+	assert.Equal(t, "/home/user/project", workMount.HostPath)
 }
 
 func TestBuildMounts_IncludesAgentState(t *testing.T) {
@@ -478,9 +478,9 @@ func TestBuildMounts_IncludesAgentState(t *testing.T) {
 
 	var found bool
 	for _, m := range mounts {
-		if m.Container == agentDef.StateDir {
+		if m.ContainerPath == agentDef.StateDir {
 			found = true
-			assert.Equal(t, "/sandbox/"+store.AgentRuntimeDir, m.Host)
+			assert.Equal(t, "/sandbox/"+store.AgentRuntimeDir, m.HostPath)
 		}
 	}
 	assert.True(t, found, "should include agent runtime mount")
@@ -499,7 +499,7 @@ func TestBuildMounts_IncludesPrompt(t *testing.T) {
 
 	var found bool
 	for _, m := range mounts {
-		if m.Container == "/yoloai/prompt.txt" {
+		if m.ContainerPath == "/yoloai/prompt.txt" {
 			found = true
 			assert.True(t, m.ReadOnly)
 		}
@@ -519,7 +519,7 @@ func TestBuildMounts_ExcludesPromptWhenNone(t *testing.T) {
 	mounts := buildMounts(state, "")
 
 	for _, m := range mounts {
-		assert.NotEqual(t, "/yoloai/prompt.txt", m.Container, "should not include prompt mount")
+		assert.NotEqual(t, "/yoloai/prompt.txt", m.ContainerPath, "should not include prompt mount")
 	}
 }
 
@@ -538,9 +538,9 @@ func TestBuildMounts_IncludesSecrets(t *testing.T) {
 
 	var found bool
 	for _, m := range mounts {
-		if m.Container == "/run/secrets" {
+		if m.ContainerPath == "/run/secrets" {
 			found = true
-			assert.Equal(t, secretsDir, m.Host)
+			assert.Equal(t, secretsDir, m.HostPath)
 			assert.True(t, m.ReadOnly)
 		}
 	}
