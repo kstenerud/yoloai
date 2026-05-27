@@ -4,25 +4,43 @@ Patterns Cobra command handlers in this package follow. These are written
 after each pattern earned its place — read this before writing a new
 command, but don't apply patterns where they don't fit.
 
-## Construction: `withClient` vs `withRuntime`
+## Construction: `withClient`, `systemClient`, `withRuntime`
 
-Two helpers in `helpers.go` open a backend connection, defer the close, and
-hand control to a callback. Pick the smallest one that does the job.
+Three helpers in `helpers.go` give a command handler an orchestration
+entry point. Pick the smallest one that does the job; each successive
+one carries broader scope.
 
-- **`withClient(cmd, backend, fn)`** — opens a `yoloai.Client`. Use for
-  command handlers that only need orchestration-level operations: `Run`,
-  `Stop`, `Destroy`, `List`, `Inspect`, `Diff`, `Apply`. The Client wraps
-  a `runtime.Runtime` plus a `sandbox.Manager` with a §12-clean Layout
-  derived from `cliLayout()`. This is the default for new commands.
-- **`withRuntime(ctx, backend, fn)`** — exposes the raw `runtime.Runtime`.
-  Use only when the handler needs operations not on `yoloai.Client`: image
-  probing, raw `Exec`, container inspect/logs, tmux attach helpers,
-  per-backend availability checks, multi-backend enumeration (e.g.
-  `sandbox list` walks every backend, not one).
+- **`withClient(cmd, backend, fn)`** — opens a `yoloai.Client` for one
+  backend, defers close. The canonical path for sandbox-scoped command
+  handlers: `Run`, `Stop`, `Destroy`, `List`, `Inspect`, `Diff`, `Apply`,
+  `Exec`, `Attach`. Use this for every new command that operates on a
+  single sandbox / single backend.
+- **`systemClient()`** — returns a `*yoloai.SystemClient` (no runtime
+  yet, no close needed). The canonical path for `yoloai system …`
+  handlers that aren't tied to a specific backend: `DiskUsage`, `Prune`,
+  `Build`, `Check`. SystemClient spins up runtimes per backend
+  internally for cross-backend operations.
+- **`withRuntime(ctx, backend, fn)`** — exposes the raw
+  `runtime.Runtime`. As of W-L8e there are **no remaining direct
+  callers in command code**; it survives only as the substrate for
+  `withManager`. Don't add new direct uses — every new requirement
+  belongs on Client or SystemClient.
 
-The migration to `withClient` is incremental. A handler that calls
-`withRuntime + sandbox.NewManager` is the old shape; reach for `withClient`
-when touching that handler for any other reason.
+### The residual `withManager` users
+
+`withManager(cmd, backend, fn)` constructs a `sandbox.Manager` directly
+(via `withRuntime` + `sandbox.NewManager`). Two commands still use it:
+
+- `system_mcp.go` (`yoloai mcp serve`, `yoloai mcp proxy`) — the MCP
+  server exposes Manager methods as tools; migrating to Client would
+  require re-mapping the tool surface, treated as its own workstream.
+- `system.go` (`yoloai system setup`) — the interactive setup wizard
+  calls `mgr.RunSetup`. `SystemClient.Setup` is designed in
+  `api_surface.go` but not yet implemented.
+
+Both are tracked as follow-ups in `docs/dev/plans/layering-refactor.md`.
+Treat them as the only allowed callers; lint enforces it via depguard
+(see `.golangci.yml`).
 
 ### Attach: `Client.Attach` is now the canonical path
 

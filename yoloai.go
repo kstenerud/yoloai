@@ -1,8 +1,24 @@
 // ABOUTME: Public high-level Client API (Run, Apply, Diff, Destroy) for embedding
 // ABOUTME: yoloAI in Go programs without interacting with the CLI or sandbox package.
-// Package yoloai provides a simple, high-level API for running AI coding agents
-// in isolated sandboxes. For advanced use, import the sandbox and config packages
-// directly.
+// Package yoloai is the orchestration layer for yoloAI. Both the CLI
+// (internal/cli) and external embedders use it as the entry point for
+// running AI coding agents in isolated sandboxes.
+//
+// Two clients live here:
+//
+//   - Client — sandbox-scoped operations: Run, Diff, Apply, Stop, Destroy,
+//     List, Inspect, Attach, Exec. Constructed via NewWithOptions; holds
+//     a single backend connection. Use one Client per backend.
+//
+//   - SystemClient — admin/cross-backend operations: DiskUsage, Prune,
+//     Build, Check. Reached via Client.System() or constructed directly
+//     via NewSystemClient (when no backend Client is needed). Decoupled
+//     from a single backend — iterates registered backends internally.
+//
+// Following the W-L8 layering refactor, the CLI is a thin shell over
+// Client + SystemClient; orchestration logic lives here, not in
+// internal/cli. New CLI commands should call Client/SystemClient
+// methods rather than reaching into sandbox/* or runtime/* directly.
 //
 // Typical usage:
 //

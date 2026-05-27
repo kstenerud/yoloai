@@ -5,7 +5,8 @@ Code navigation guide for the yoloAI codebase. Focused on the implemented code, 
 ## Package Map
 
 ```
-yoloai.go                → High-level public Go API (Client, Run, Diff, Apply)
+yoloai.go                → Orchestration spine: Client (Run, Diff, Apply, Stop, Destroy, ...)
+system_client.go         → Orchestration spine: SystemClient (DiskUsage, Prune, Build, Check)
 runtime_imports_linux.go → Linux-specific backend registration (containerd)
 cmd/yoloai/              → Binary entry point
 agent/                   → Agent plugin definitions (Aider, Claude, Codex, Gemini, OpenCode, test, idle)
@@ -31,15 +32,16 @@ workspace/               → Workspace utilities (copy, git, safety checks, tags
 test/e2e/                → End-to-end tests against the compiled binary (build tag: e2e)
 ```
 
-Dependency direction: `cmd/yoloai` → `cli` → `sandbox` + `sandbox/patch` + `sandbox/store` + `runtime`; `sandbox` → `sandbox/archetype` + `sandbox/store` + `runtime` + `agent` + `workspace`; `sandbox/patch` → `sandbox` + `sandbox/store`; `sandbox/store` is a leaf (only imports stdlib, `config`, `internal/*`); `agent` stands alone. Top-level `yoloai.go` → `sandbox` + `sandbox/patch` + `sandbox/store` + `runtime` + `config` (public API for library consumers).
+Dependency direction (W-L8 layered shape): `cmd/yoloai` → `cli` → `yoloai` (Client + SystemClient) → `sandbox` + `sandbox/patch` + `sandbox/store` + `runtime`; `sandbox` → `sandbox/archetype` + `sandbox/store` + `runtime` + `agent` + `workspace`; `sandbox/patch` → `sandbox` + `sandbox/store`; `sandbox/store` is a leaf (only imports stdlib, `config`, `internal/*`); `agent` stands alone. The CLI no longer reaches into `sandbox/*` or `runtime/*` for orchestration — every command goes through `yoloai.Client` or `yoloai.SystemClient`. Two residual exceptions (`system mcp serve` and the interactive `system setup` wizard) still construct `sandbox.Manager` directly via `withManager`; tracked in [layering-refactor.md](plans/layering-refactor.md) as the final W-L8e cleanup. Depguard (`.golangci.yml`) enforces the boundary going forward.
 
 ## File Index
 
-### `yoloai.go` / `runtime_imports_linux.go`
+### `yoloai.go` / `system_client.go` / `runtime_imports_linux.go`
 
 | File | Purpose |
 |------|---------|
-| `yoloai.go` | High-level public Go API: `Client`, `New()`, `Run()`, `Diff()`, `Apply()`, `List()`, `Inspect()`, `Stop()`, `Destroy()`. Registers Docker, Podman, Seatbelt, and Tart backends via blank imports. |
+| `yoloai.go` | Orchestration spine — `Client` and its sandbox-scoped methods (`Run`, `Diff`, `Apply`, `Stop`, `Destroy`, `List`, `Inspect`, `Attach`, `Exec`, `Clone`, `Reset`, `Restart`, `Create`, `Start`, plus the diff/apply variants). Registers Docker, Podman, Seatbelt, and Tart backends via blank imports. |
+| `system_client.go` | Orchestration spine — `SystemClient` for admin/cross-backend operations (`DiskUsage`, `Prune`, `Build`, `Check`). Reached via `Client.System()` or `NewSystemClient(layout)`. Iterates registered backends internally. |
 | `runtime_imports_linux.go` | Linux-only blank import of `runtime/containerd` to register the containerd backend. |
 
 ### `cmd/yoloai/`
