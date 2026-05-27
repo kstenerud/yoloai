@@ -1,4 +1,4 @@
-package cli
+package sandboxcmd
 
 // ABOUTME: Unit tests for `yoloai sandbox <name> deny` command.
 // ABOUTME: Tests domain validation, filtering, and error cases.
@@ -15,7 +15,7 @@ import (
 func TestNetworkRemove_SingleDomain(t *testing.T) {
 	sandboxDir := createNetworkSandbox(t, "nr-single", "isolated", []string{"keep.com", "drop.com"})
 
-	cmd := newSandboxCmd()
+	cmd := NewSandboxCmd()
 	out := new(bytes.Buffer)
 	cmd.SetOut(out)
 	cmd.SetArgs([]string{"nr-single", "deny", "drop.com"})
@@ -31,7 +31,7 @@ func TestNetworkRemove_SingleDomain(t *testing.T) {
 func TestNetworkRemove_MultipleDomains(t *testing.T) {
 	sandboxDir := createNetworkSandbox(t, "nr-multi", "isolated", []string{"a.com", "b.com", "c.com", "d.com"})
 
-	cmd := newSandboxCmd()
+	cmd := NewSandboxCmd()
 	out := new(bytes.Buffer)
 	cmd.SetOut(out)
 	cmd.SetArgs([]string{"nr-multi", "deny", "b.com", "d.com"})
@@ -45,7 +45,7 @@ func TestNetworkRemove_MultipleDomains(t *testing.T) {
 func TestNetworkRemove_AllDomains(t *testing.T) {
 	sandboxDir := createNetworkSandbox(t, "nr-all", "isolated", []string{"only.com"})
 
-	cmd := newSandboxCmd()
+	cmd := NewSandboxCmd()
 	out := new(bytes.Buffer)
 	cmd.SetOut(out)
 	cmd.SetArgs([]string{"nr-all", "deny", "only.com"})
@@ -59,7 +59,7 @@ func TestNetworkRemove_AllDomains(t *testing.T) {
 func TestNetworkRemove_DomainNotInList(t *testing.T) {
 	createNetworkSandbox(t, "nr-missing", "isolated", []string{"exists.com"})
 
-	cmd := newSandboxCmd()
+	cmd := NewSandboxCmd()
 	cmd.SetOut(new(bytes.Buffer))
 	cmd.SetArgs([]string{"nr-missing", "deny", "nope.com"})
 	err := cmd.Execute()
@@ -71,7 +71,7 @@ func TestNetworkRemove_DomainNotInList(t *testing.T) {
 func TestNetworkRemove_NoDomainArg(t *testing.T) {
 	createNetworkSandbox(t, "nr-noarg", "isolated", []string{"x.com"})
 
-	cmd := newSandboxCmd()
+	cmd := NewSandboxCmd()
 	cmd.SetOut(new(bytes.Buffer))
 	cmd.SetArgs([]string{"nr-noarg", "deny"})
 	err := cmd.Execute()
@@ -82,7 +82,7 @@ func TestNetworkRemove_NoDomainArg(t *testing.T) {
 func TestNetworkRemove_NotIsolated(t *testing.T) {
 	createNetworkSandbox(t, "nr-open", "", nil)
 
-	cmd := newSandboxCmd()
+	cmd := NewSandboxCmd()
 	cmd.SetOut(new(bytes.Buffer))
 	cmd.SetArgs([]string{"nr-open", "deny", "x.com"})
 	err := cmd.Execute()
@@ -93,7 +93,7 @@ func TestNetworkRemove_NotIsolated(t *testing.T) {
 func TestNetworkRemove_NetworkNone(t *testing.T) {
 	createNetworkSandbox(t, "nr-none", "none", nil)
 
-	cmd := newSandboxCmd()
+	cmd := NewSandboxCmd()
 	cmd.SetOut(new(bytes.Buffer))
 	cmd.SetArgs([]string{"nr-none", "deny", "x.com"})
 	err := cmd.Execute()
@@ -104,7 +104,7 @@ func TestNetworkRemove_NetworkNone(t *testing.T) {
 func TestNetworkRemove_PreservesOrder(t *testing.T) {
 	sandboxDir := createNetworkSandbox(t, "nr-order", "isolated", []string{"first.com", "middle.com", "last.com"})
 
-	cmd := newSandboxCmd()
+	cmd := NewSandboxCmd()
 	cmd.SetOut(new(bytes.Buffer))
 	cmd.SetArgs([]string{"nr-order", "deny", "middle.com"})
 	require.NoError(t, cmd.Execute())

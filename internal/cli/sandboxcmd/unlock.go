@@ -1,6 +1,6 @@
 // ABOUTME: `yoloai sandbox <name> unlock` — manually clear a stale per-
 // ABOUTME: sandbox lock file. Refuses if the recorded holder PID is alive.
-package cli
+package sandboxcmd
 
 import (
 	"fmt"

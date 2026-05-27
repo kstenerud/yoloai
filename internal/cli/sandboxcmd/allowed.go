@@ -1,6 +1,6 @@
 // ABOUTME: `yoloai sandbox <name> allowed` handler. Shows allowed domains
 // ABOUTME: for a network-isolated sandbox.
-package cli
+package sandboxcmd
 
 import (
 	"fmt"

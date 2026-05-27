@@ -1,7 +1,7 @@
 // ABOUTME: `yoloai sandbox <name> vscode` command — opens a running sandbox in VS Code.
 // ABOUTME: Builds a container attach URI and launches VS Code or prints connection instructions.
 
-package cli
+package sandboxcmd
 
 import (
 	"encoding/hex"

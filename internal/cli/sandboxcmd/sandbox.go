@@ -1,7 +1,7 @@
 // ABOUTME: `yoloai sandbox` parent command with name-first dispatch.
 // ABOUTME: `list` is a real Cobra subcommand; everything else dispatched by RunE.
 // ABOUTME: Subcommands: list, info, log, exec, prompt, allow, allowed, deny, bugreport, vscode, unlock.
-package cli
+package sandboxcmd
 
 import (
 	"os"
@@ -21,7 +21,7 @@ var sandboxSubcmds = map[string]bool{
 	"vscode": true, "unlock": true,
 }
 
-func newSandboxCmd() *cobra.Command {
+func NewSandboxCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "sandbox",
 		Aliases: []string{"sb"},

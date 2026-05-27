@@ -1,4 +1,4 @@
-package cli
+package sandboxcmd
 
 // ABOUTME: `yoloai sandbox <name> bugreport` handler.
 // ABOUTME: Forensic bug report tool: collects static diagnostic info from a named sandbox.
@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/kstenerud/yoloai/internal/cli/bugreport"
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
 
 	yoloai "github.com/kstenerud/yoloai"
@@ -30,12 +31,12 @@ func runSandboxBugReport(cmd *cobra.Command, name string, reportType string) err
 		return sandbox.NewUsageError("bugreport type must be safe or unsafe")
 	}
 
-	filename, err := bugReportFilename(time.Now())
+	filename, err := bugreport.Filename(time.Now())
 	if err != nil {
 		return fmt.Errorf("bugreport: %w", err)
 	}
 
-	f, err := fileutil.OpenFile(filename+".tmp", os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600) //nolint:gosec // G304: filename from bugReportFilename
+	f, err := fileutil.OpenFile(filename+".tmp", os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600) //nolint:gosec // G304: filename from Filename
 	if err != nil {
 		return fmt.Errorf("bugreport: open temp file: %w", err)
 	}
@@ -50,16 +51,16 @@ func runSandboxBugReport(cmd *cobra.Command, name string, reportType string) err
 	}()
 
 	// Section 1: Header
-	writeBugReportHeader(f, cliVersion, cliCommit, cliDate, reportType)
+	bugreport.WriteHeader(f, cliutil.Version, cliutil.Commit, cliutil.Date, reportType)
 
 	// Section 3: System
-	writeBugReportSystem(f)
+	bugreport.WriteSystem(f)
 
 	// Section 4: Backends
-	writeBugReportBackends(cmd.Context(), f)
+	bugreport.WriteBackends(cmd.Context(), f)
 
 	// Section 5: Configuration
-	writeBugReportConfig(f, reportType)
+	bugreport.WriteConfig(f, reportType)
 
 	// Sections 6-12: Sandbox-specific
 	backend := cliutil.ResolveBackendForSandbox(name)
@@ -71,7 +72,7 @@ func runSandboxBugReport(cmd *cobra.Command, name string, reportType string) err
 
 // writeSandboxSections writes sections 6-12 to w for the named sandbox.
 // Called from both runSandboxBugReport (sandbox bugreport command) and
-// writeBugReportSandboxSectionsForFlag (--bugreport global flag on sandbox commands).
+// WriteSandboxSectionsForFlag (--bugreport global flag on sandbox commands).
 func writeSandboxSections(ctx context.Context, w io.Writer, c *yoloai.Client, name, reportType string) {
 	// Section 6: Sandbox detail
 	writeBugReportSandboxDetail(ctx, w, c, name, reportType)
@@ -116,10 +117,10 @@ func writeSandboxSections(ctx context.Context, w io.Writer, c *yoloai.Client, na
 	}
 }
 
-// writeBugReportSandboxSectionsForFlag writes sections 6-12 for the --bugreport flag path.
+// WriteSandboxSectionsForFlag writes sections 6-12 for the --bugreport flag path.
 // Called from the Execute defer when cliutil.BugReportSandboxName is set.
 // Uses context.Background() since the command context may already be done.
-func writeBugReportSandboxSectionsForFlag(w io.Writer, name, reportType string) {
+func WriteSandboxSectionsForFlag(w io.Writer, name, reportType string) {
 	backend := cliutil.ResolveBackendForSandbox(name)
 	ctx := context.Background()
 	c, err := yoloai.NewWithOptions(ctx, yoloai.Options{
@@ -421,5 +422,5 @@ func sanitizeJSONLFile(path, reportType string, omitEvents []string) ([]byte, er
 		return nil, err
 	}
 	_ = reportType // sanitization always applied for consistency
-	return sanitizeJSONLBytes(data, omitEvents), nil
+	return bugreport.SanitizeJSONLBytes(data, omitEvents), nil
 }

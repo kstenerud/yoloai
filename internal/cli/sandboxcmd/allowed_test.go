@@ -1,4 +1,4 @@
-package cli
+package sandboxcmd
 
 // ABOUTME: Unit tests for `yoloai sandbox <name> allowed` command.
 
@@ -15,7 +15,7 @@ import (
 func TestNetworkList_Isolated(t *testing.T) {
 	createNetworkSandbox(t, "nl-iso", "isolated", []string{"api.example.com", "cdn.example.com"})
 
-	cmd := newSandboxCmd()
+	cmd := NewSandboxCmd()
 	out := new(bytes.Buffer)
 	cmd.SetOut(out)
 	cmd.SetArgs([]string{"nl-iso", "allowed"})
@@ -27,7 +27,7 @@ func TestNetworkList_Isolated(t *testing.T) {
 func TestNetworkList_IsolatedEmpty(t *testing.T) {
 	createNetworkSandbox(t, "nl-empty", "isolated", nil)
 
-	cmd := newSandboxCmd()
+	cmd := NewSandboxCmd()
 	out := new(bytes.Buffer)
 	cmd.SetOut(out)
 	cmd.SetArgs([]string{"nl-empty", "allowed"})
@@ -39,7 +39,7 @@ func TestNetworkList_IsolatedEmpty(t *testing.T) {
 func TestNetworkList_None(t *testing.T) {
 	createNetworkSandbox(t, "nl-none", "none", nil)
 
-	cmd := newSandboxCmd()
+	cmd := NewSandboxCmd()
 	out := new(bytes.Buffer)
 	cmd.SetOut(out)
 	cmd.SetArgs([]string{"nl-none", "allowed"})
@@ -51,7 +51,7 @@ func TestNetworkList_None(t *testing.T) {
 func TestNetworkList_Open(t *testing.T) {
 	createNetworkSandbox(t, "nl-open", "", nil)
 
-	cmd := newSandboxCmd()
+	cmd := NewSandboxCmd()
 	out := new(bytes.Buffer)
 	cmd.SetOut(out)
 	cmd.SetArgs([]string{"nl-open", "allowed"})
@@ -67,7 +67,7 @@ func TestNetworkList_JSON(t *testing.T) {
 	root := &cobra.Command{}
 	root.PersistentFlags().Bool("json", false, "")
 	root.AddGroup(&cobra.Group{ID: cliutil.GroupSandboxTools, Title: "Sandbox Tools:"})
-	sb := newSandboxCmd()
+	sb := NewSandboxCmd()
 	root.AddCommand(sb)
 
 	out := new(bytes.Buffer)
@@ -85,7 +85,7 @@ func TestNetworkList_JSONNoDomains(t *testing.T) {
 	root := &cobra.Command{}
 	root.PersistentFlags().Bool("json", false, "")
 	root.AddGroup(&cobra.Group{ID: cliutil.GroupSandboxTools, Title: "Sandbox Tools:"})
-	sb := newSandboxCmd()
+	sb := NewSandboxCmd()
 	root.AddCommand(sb)
 
 	out := new(bytes.Buffer)
@@ -101,7 +101,7 @@ func TestNetworkList_NonexistentSandbox(t *testing.T) {
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
 
-	cmd := newSandboxCmd()
+	cmd := NewSandboxCmd()
 	cmd.SetOut(new(bytes.Buffer))
 	cmd.SetArgs([]string{"does-not-exist", "allowed"})
 	assert.Error(t, cmd.Execute())

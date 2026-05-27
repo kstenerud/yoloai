@@ -1,4 +1,4 @@
-package cli
+package sandboxcmd
 
 // ABOUTME: Unit tests for sandbox network shared helpers: loadIsolatedMeta,
 // ABOUTME: saveNetworkAllowlist.

@@ -1,4 +1,4 @@
-package cli
+package sandboxcmd
 
 // ABOUTME: Sandbox listing logic shared by `yoloai sandbox list` and the
 // ABOUTME: top-level `yoloai ls` shortcut.

@@ -9,6 +9,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/cli/lifecycle"
 	"github.com/kstenerud/yoloai/internal/cli/mcp"
 	"github.com/kstenerud/yoloai/internal/cli/profile"
+	"github.com/kstenerud/yoloai/internal/cli/sandboxcmd"
 	"github.com/kstenerud/yoloai/internal/cli/system"
 	"github.com/kstenerud/yoloai/internal/cli/workflow"
 	"github.com/kstenerud/yoloai/internal/cli/xcmd"
@@ -44,11 +45,11 @@ func registerCommands(root *cobra.Command, version, commit, date string) {
 		xcmd.NewCmd(),
 
 		// Sandbox Tools
-		newSandboxCmd(),
-		newLsAliasCmd(),
-		newLogAliasCmd(),
-		newExecAliasCmd(),
-		newVscodeAliasCmd(),
+		sandboxcmd.NewSandboxCmd(),
+		sandboxcmd.NewLsAliasCmd(),
+		sandboxcmd.NewLogAliasCmd(),
+		sandboxcmd.NewExecAliasCmd(),
+		sandboxcmd.NewVscodeAliasCmd(),
 
 		// Admin
 		system.NewCmd(version, commit, date),

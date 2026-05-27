@@ -1,4 +1,4 @@
-package cli
+package sandboxcmd
 
 // ABOUTME: `yoloai sandbox <name> info` handler. Shows detailed sandbox
 // ABOUTME: configuration and state.

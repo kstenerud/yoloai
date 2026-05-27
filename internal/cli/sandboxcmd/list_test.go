@@ -1,4 +1,4 @@
-package cli
+package sandboxcmd
 
 // ABOUTME: Unit tests for list command filtering and formatting helpers.
 

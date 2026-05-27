@@ -1,4 +1,4 @@
-package cli
+package sandboxcmd
 
 // ABOUTME: ANSI escape sequence and control character stripping for readable log output.
 // ABOUTME: Used by `yoloai log` to clean tmux pipe-pane capture.

@@ -1,4 +1,4 @@
-package cli
+package bugreport
 
 // ABOUTME: Bug report section writers and sanitization helpers.
 // ABOUTME: Shared by --bugreport flag (flight recorder) and sandbox bugreport command.
@@ -23,9 +23,9 @@ import (
 	"github.com/kstenerud/yoloai/internal/sandbox"
 )
 
-// bugReportFilename generates the output filename for a bug report.
+// Filename generates the output filename for a bug report.
 // Returns an error if a file with the same name already exists.
-func bugReportFilename(t time.Time) (string, error) {
+func Filename(t time.Time) (string, error) {
 	name := fmt.Sprintf("yoloai-bugreport-%s.md",
 		t.UTC().Format("20060102-150405.000"))
 	if _, err := os.Stat(name); err == nil {
@@ -34,8 +34,8 @@ func bugReportFilename(t time.Time) (string, error) {
 	return name, nil
 }
 
-// writeBugReportHeader writes section 1: report header.
-func writeBugReportHeader(w io.Writer, version, commit, date, reportType string) {
+// WriteHeader writes section 1: report header.
+func WriteHeader(w io.Writer, version, commit, date, reportType string) {
 	now := time.Now().UTC().Format(time.RFC3339)
 	fmt.Fprintf(w, "## yoloai Bug Report — %s\n\n", now) //nolint:errcheck
 
@@ -53,9 +53,9 @@ func writeBugReportHeader(w io.Writer, version, commit, date, reportType string)
 	fmt.Fprintf(w, "**Type:** %s\n", reportType)                        //nolint:errcheck
 }
 
-// writeBugReportCommandInvocation writes section 2: the full command invocation.
+// WriteCommandInvocation writes section 2: the full command invocation.
 // In safe mode, --prompt / -p values are redacted.
-func writeBugReportCommandInvocation(w io.Writer, reportType string) {
+func WriteCommandInvocation(w io.Writer, reportType string) {
 	args := os.Args
 	if reportType == "safe" {
 		args = redactPromptArgs(args)
@@ -79,8 +79,8 @@ func redactPromptArgs(args []string) []string {
 	return result
 }
 
-// writeBugReportSystem writes section 3: system information.
-func writeBugReportSystem(w io.Writer) {
+// WriteSystem writes section 3: system information.
+func WriteSystem(w io.Writer) {
 	fmt.Fprintln(w, "<details>")                 //nolint:errcheck
 	fmt.Fprintln(w, "<summary>System</summary>") //nolint:errcheck
 	fmt.Fprintln(w)                              //nolint:errcheck
@@ -113,11 +113,11 @@ func writeBugReportSystem(w io.Writer) {
 	fmt.Fprintln(w)               //nolint:errcheck
 }
 
-// writeBugReportBackends writes section 4: backend availability and versions.
+// WriteBackends writes section 4: backend availability and versions.
 // Iterates runtime.Descriptors() so any newly-registered backend appears in
 // bug reports automatically; the version string comes from each descriptor's
 // VersionString hook so per-backend exec invocations no longer live here.
-func writeBugReportBackends(ctx context.Context, w io.Writer) {
+func WriteBackends(ctx context.Context, w io.Writer) {
 	fmt.Fprintln(w, "<details>")                   //nolint:errcheck
 	fmt.Fprintln(w, "<summary>Backends</summary>") //nolint:errcheck
 	fmt.Fprintln(w)                                //nolint:errcheck
@@ -152,8 +152,8 @@ func writeBugReportBackends(ctx context.Context, w io.Writer) {
 	fmt.Fprintln(w)               //nolint:errcheck
 }
 
-// writeBugReportConfig writes section 5: configuration files.
-func writeBugReportConfig(w io.Writer, reportType string) {
+// WriteConfig writes section 5: configuration files.
+func WriteConfig(w io.Writer, reportType string) {
 	fmt.Fprintln(w, "<details>")                        //nolint:errcheck
 	fmt.Fprintln(w, "<summary>Configuration</summary>") //nolint:errcheck
 	fmt.Fprintln(w)                                     //nolint:errcheck
@@ -181,8 +181,8 @@ func writeBugReportConfig(w io.Writer, reportType string) {
 	fmt.Fprintln(w)               //nolint:errcheck
 }
 
-// writeBugReportLiveLog writes section 13: live log captured during the run.
-func writeBugReportLiveLog(w io.Writer, logBytes []byte, reportType string) {
+// WriteLiveLog writes section 13: live log captured during the run.
+func WriteLiveLog(w io.Writer, logBytes []byte, reportType string) {
 	if len(bytes.TrimSpace(logBytes)) == 0 {
 		return
 	}
@@ -192,7 +192,7 @@ func writeBugReportLiveLog(w io.Writer, logBytes []byte, reportType string) {
 	fmt.Fprintln(w, "```")                         //nolint:errcheck
 
 	if reportType == "safe" {
-		sanitized := sanitizeJSONLBytes(logBytes, nil)
+		sanitized := SanitizeJSONLBytes(logBytes, nil)
 		fmt.Fprintf(w, "%s", sanitized) //nolint:errcheck
 	} else {
 		fmt.Fprintf(w, "%s", logBytes) //nolint:errcheck
@@ -204,8 +204,8 @@ func writeBugReportLiveLog(w io.Writer, logBytes []byte, reportType string) {
 	fmt.Fprintln(w)               //nolint:errcheck
 }
 
-// writeBugReportExit writes section 14: exit code and error.
-func writeBugReportExit(w io.Writer, code int, runErr error, panicked bool) {
+// WriteExit writes section 14: exit code and error.
+func WriteExit(w io.Writer, code int, runErr error, panicked bool) {
 	switch {
 	case panicked:
 		fmt.Fprintf(w, "**Exit code:** (panic)\n") //nolint:errcheck
@@ -282,9 +282,9 @@ func sanitizeText(text string) string {
 	return text
 }
 
-// sanitizeJSONLBytes sanitizes JSONL content. If omitEvents is non-nil, lines matching
+// SanitizeJSONLBytes sanitizes JSONL content. If omitEvents is non-nil, lines matching
 // those event patterns are removed. String values are sanitized in all modes.
-func sanitizeJSONLBytes(data []byte, omitEvents []string) []byte {
+func SanitizeJSONLBytes(data []byte, omitEvents []string) []byte {
 	var out bytes.Buffer
 	for line := range bytes.SplitSeq(data, []byte("\n")) {
 		trimmed := bytes.TrimSpace(line)

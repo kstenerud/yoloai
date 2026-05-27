@@ -1,4 +1,4 @@
-package cli
+package sandboxcmd
 
 // ABOUTME: Sandbox log display: pretty-prints structured JSONL from all four log
 // ABOUTME: sources (cli, sandbox, monitor, hooks), with optional follow mode,

@@ -1,5 +1,5 @@
 // ABOUTME: `yoloai sandbox <name> prompt` handler — show the prompt text for a sandbox.
-package cli
+package sandboxcmd
 
 import (
 	"fmt"

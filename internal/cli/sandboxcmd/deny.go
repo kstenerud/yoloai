@@ -1,6 +1,6 @@
 // ABOUTME: `yoloai sandbox <name> deny` handler. Removes domains
 // ABOUTME: from a network-isolated sandbox's allowlist.
-package cli
+package sandboxcmd
 
 import (
 	"fmt"

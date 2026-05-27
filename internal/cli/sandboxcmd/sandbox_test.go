@@ -1,4 +1,4 @@
-package cli
+package sandboxcmd
 
 import (
 	"bytes"
@@ -32,7 +32,7 @@ func setupSandboxCmdTest(t *testing.T, name string) {
 }
 
 func TestSandboxDispatch_NoArgs_ShowsHelp(t *testing.T) {
-	cmd := newSandboxCmd()
+	cmd := NewSandboxCmd()
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
 	cmd.SetArgs([]string{})
@@ -45,7 +45,7 @@ func TestSandboxDispatch_NoArgs_ShowsHelp(t *testing.T) {
 func TestSandboxDispatch_ValidNameAndSubcmd(t *testing.T) {
 	setupSandboxCmdTest(t, "mybox")
 
-	cmd := newSandboxCmd()
+	cmd := NewSandboxCmd()
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
 	cmd.SetErr(buf)
@@ -62,7 +62,7 @@ func TestSandboxDispatch_ValidNameAndSubcmd(t *testing.T) {
 func TestSandboxDispatch_ValidNameMissingSubcmd(t *testing.T) {
 	setupSandboxCmdTest(t, "mybox2")
 
-	cmd := newSandboxCmd()
+	cmd := NewSandboxCmd()
 	cmd.SetArgs([]string{"mybox2"})
 	err := cmd.Execute()
 	require.Error(t, err)
@@ -72,7 +72,7 @@ func TestSandboxDispatch_ValidNameMissingSubcmd(t *testing.T) {
 func TestSandboxDispatch_UnknownSubcmd(t *testing.T) {
 	setupSandboxCmdTest(t, "mybox3")
 
-	cmd := newSandboxCmd()
+	cmd := NewSandboxCmd()
 	cmd.SetArgs([]string{"mybox3", "bogus"})
 	err := cmd.Execute()
 	require.Error(t, err)
@@ -84,7 +84,7 @@ func TestSandboxDispatch_SubcmdFirstWithEnv(t *testing.T) {
 	setupSandboxCmdTest(t, "envbox")
 	t.Setenv(cliutil.EnvSandboxName, "envbox")
 
-	cmd := newSandboxCmd()
+	cmd := NewSandboxCmd()
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
 	cmd.SetErr(buf)
@@ -101,7 +101,7 @@ func TestSandboxDispatch_SubcmdFirstWithoutEnv(t *testing.T) {
 	t.Setenv("HOME", tmpDir)
 	t.Setenv(cliutil.EnvSandboxName, "")
 
-	cmd := newSandboxCmd()
+	cmd := NewSandboxCmd()
 	cmd.SetArgs([]string{"info"})
 	err := cmd.Execute()
 	require.Error(t, err)
@@ -112,7 +112,7 @@ func TestSandboxDispatch_InvalidName(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
 
-	cmd := newSandboxCmd()
+	cmd := NewSandboxCmd()
 	cmd.SetArgs([]string{"INVALID_NAME!", "info"})
 	err := cmd.Execute()
 	require.Error(t, err)

@@ -1,5 +1,5 @@
 // ABOUTME: Shared helpers for network allowlist management: allow, allowed, deny.
-package cli
+package sandboxcmd
 
 import (
 	"context"

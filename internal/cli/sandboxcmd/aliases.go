@@ -1,14 +1,14 @@
 // ABOUTME: Top-level shortcut commands that delegate to longer 'sandbox <verb>'
 // ABOUTME: equivalents (ls, log, exec, vscode). Kept separate so the dispatch
 // ABOUTME: layer in commands.go stays compact.
-package cli
+package sandboxcmd
 
 import (
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
 	"github.com/spf13/cobra"
 )
 
-func newLsAliasCmd() *cobra.Command {
+func NewLsAliasCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "ls",
 		Short:   "List sandboxes (shortcut for 'sandbox list')",
@@ -20,7 +20,7 @@ func newLsAliasCmd() *cobra.Command {
 	return cmd
 }
 
-func newLogAliasCmd() *cobra.Command {
+func NewLogAliasCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "log <name>",
 		Short:   "Show sandbox log (shortcut for 'sandbox log')",
@@ -51,7 +51,7 @@ func addLogFlags(cmd *cobra.Command) {
 	cmd.MarkFlagsMutuallyExclusive("agent-raw", "since")
 }
 
-func newExecAliasCmd() *cobra.Command {
+func NewExecAliasCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:     "exec <name> <command> [args...]",
 		Short:   "Run a command inside a sandbox (shortcut for 'sandbox exec')",
@@ -61,7 +61,7 @@ func newExecAliasCmd() *cobra.Command {
 	}
 }
 
-func newVscodeAliasCmd() *cobra.Command {
+func NewVscodeAliasCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:     "vscode <name>",
 		Short:   "Open a sandbox in VS Code (shortcut for 'sandbox vscode')",
