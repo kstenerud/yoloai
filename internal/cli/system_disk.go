@@ -4,7 +4,6 @@ package cli
 // when it's time to run `yoloai system prune --cache`.
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"os"
@@ -12,7 +11,7 @@ import (
 	"syscall"
 	"text/tabwriter"
 
-	"github.com/kstenerud/yoloai/runtime"
+	"github.com/kstenerud/yoloai"
 	"github.com/spf13/cobra"
 )
 
@@ -35,29 +34,26 @@ func runSystemDisk(cmd *cobra.Command, _ []string) error {
 	ctx := cmd.Context()
 	out := cmd.OutOrStdout()
 
+	du, err := systemClient().DiskUsage(ctx)
+	if err != nil {
+		return err
+	}
+
 	if jsonEnabled(cmd) {
-		return writeJSON(out, collectDiskJSON(ctx))
+		return writeJSON(out, formatDiskJSON(du, cliLayout().SandboxesDir()))
 	}
 
 	w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "SOURCE\tSIZE\tDETAIL") //nolint:errcheck
-
-	sandboxesSize := dirSize(cliLayout().SandboxesDir())
-	fmt.Fprintf(w, "sandboxes\t%s\t%s\n", humanBytes(sandboxesSize), cliLayout().SandboxesDir()) //nolint:errcheck
-
-	for _, desc := range runtime.Descriptors() {
-		available, _ := checkBackend(ctx, desc.Name)
-		if !available {
-			continue
-		}
-		usage, err := backendUsage(ctx, desc.Name)
+	fmt.Fprintln(w, "SOURCE\tSIZE\tDETAIL")                                                     //nolint:errcheck
+	fmt.Fprintf(w, "sandboxes\t%s\t%s\n", humanBytes(du.Sandboxes), cliLayout().SandboxesDir()) //nolint:errcheck
+	for _, b := range du.PerBackend {
 		switch {
-		case err != nil:
-			fmt.Fprintf(w, "%s\t-\t%v\n", desc.Name, err) //nolint:errcheck
-		case usage.BytesUsed < 0:
-			fmt.Fprintf(w, "%s\t?\t%s\n", desc.Name, usage.Detail) //nolint:errcheck
+		case b.Err != nil:
+			fmt.Fprintf(w, "%s\t-\t%v\n", b.Name, b.Err) //nolint:errcheck
+		case b.Bytes < 0:
+			fmt.Fprintf(w, "%s\t?\t%s\n", b.Name, b.Detail) //nolint:errcheck
 		default:
-			fmt.Fprintf(w, "%s\t%s\t%s\n", desc.Name, humanBytes(usage.BytesUsed), usage.Detail) //nolint:errcheck
+			fmt.Fprintf(w, "%s\t%s\t%s\n", b.Name, humanBytes(b.Bytes), b.Detail) //nolint:errcheck
 		}
 	}
 	if err := w.Flush(); err != nil {
@@ -68,57 +64,23 @@ func runSystemDisk(cmd *cobra.Command, _ []string) error {
 	return nil
 }
 
-func backendUsage(ctx context.Context, backend string) (runtime.CacheUsage, error) {
-	var usage runtime.CacheUsage
-	err := withRuntime(ctx, backend, func(ctx context.Context, rt runtime.Runtime) error {
-		var inner error
-		usage, inner = runtime.CacheUsageFor(ctx, rt)
-		return inner
-	})
-	return usage, err
-}
-
-func collectDiskJSON(ctx context.Context) map[string]any {
-	sandboxesDir := cliLayout().SandboxesDir()
+// formatDiskJSON renders a DiskUsage into the existing JSON shape so
+// the public CLI contract is unchanged.
+func formatDiskJSON(du *yoloai.DiskUsage, sandboxesDir string) map[string]any {
 	entries := []map[string]any{
-		{"source": "sandboxes", "bytes": dirSize(sandboxesDir), "detail": sandboxesDir},
+		{"source": "sandboxes", "bytes": du.Sandboxes, "detail": sandboxesDir},
 	}
-	for _, desc := range runtime.Descriptors() {
-		available, _ := checkBackend(ctx, desc.Name)
-		if !available {
-			continue
-		}
-		entry := map[string]any{"source": desc.Name}
-		usage, err := backendUsage(ctx, desc.Name)
-		if err != nil {
-			entry["error"] = err.Error()
+	for _, b := range du.PerBackend {
+		entry := map[string]any{"source": b.Name}
+		if b.Err != nil {
+			entry["error"] = b.Err.Error()
 		} else {
-			entry["bytes"] = usage.BytesUsed
-			entry["detail"] = usage.Detail
+			entry["bytes"] = b.Bytes
+			entry["detail"] = b.Detail
 		}
 		entries = append(entries, entry)
 	}
 	return map[string]any{"entries": entries}
-}
-
-// dirSize sums the size of every regular file under dir. Returns 0 on error
-// (typical: dir doesn't exist yet on first run).
-func dirSize(dir string) int64 {
-	var total int64
-	_ = filepath.WalkDir(dir, func(_ string, d os.DirEntry, err error) error {
-		if err != nil {
-			return nil //nolint:nilerr // dirSize is best-effort; skip unreadable entries
-		}
-		if d.IsDir() {
-			return nil
-		}
-		info, err := d.Info()
-		if err == nil {
-			total += info.Size()
-		}
-		return nil
-	})
-	return total
 }
 
 // lowDiskWarnThresholdBytes is the free-space level below which we

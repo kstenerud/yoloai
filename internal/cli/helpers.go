@@ -163,6 +163,15 @@ func withClient(cmd *cobra.Command, backend string, fn func(ctx context.Context,
 	return fn(ctx, c)
 }
 
+// systemClient constructs a backend-agnostic yoloai.SystemClient from
+// the CLI's layout. Use for `yoloai system …` command handlers that
+// operate across all backends (disk, prune, build --all) or need no
+// runtime at all (info, agents). For commands tied to one backend,
+// use withClient instead.
+func systemClient() *yoloai.SystemClient {
+	return yoloai.NewSystemClient(cliLayout())
+}
+
 // attachToSandboxByName attaches the calling process's terminal to the
 // named sandbox, opening its own Client. Used by lifecycle commands
 // (clone, reset, restart, new with --attach) that have already performed
