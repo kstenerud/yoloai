@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	agentpkg "github.com/kstenerud/yoloai/internal/agent"
 	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
 	"github.com/stretchr/testify/assert"
@@ -15,7 +16,7 @@ func makeInfo(name string, status sandbox.Status, agent, profile, changes string
 	return &sandbox.Info{
 		Meta: &store.Meta{
 			Name:      name,
-			Agent:     agent,
+			Agent:     agentpkg.AgentName(agent),
 			Profile:   profile,
 			CreatedAt: time.Now(),
 			Workdir:   store.WorkdirMeta{HostPath: "/tmp/" + name},

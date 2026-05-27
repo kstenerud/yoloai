@@ -737,7 +737,7 @@ func resolveUsernsMode(rt runtime.Runtime, workdir *DirArg, auxDirs []*DirArg, c
 }
 
 // buildMeta constructs the Meta struct for a new sandbox.
-func buildMeta(opts CreateOptions, pr *profileResult, workdir *DirArg, baselineSHA string, dirMetas []store.DirMeta, hasPrompt bool, networkMode string, networkAllow []string, usernsMode string, hostFilesystem bool, archetypeStr string, backend string, model string, mergedMounts []string) *store.Meta {
+func buildMeta(opts CreateOptions, pr *profileResult, workdir *DirArg, baselineSHA string, dirMetas []store.DirMeta, hasPrompt bool, networkMode string, networkAllow []string, usernsMode string, hostFilesystem bool, archetypeStr string, backend runtime.BackendName, model string, mergedMounts []string) *store.Meta {
 	return &store.Meta{
 		YoloaiVersion: opts.Version,
 		Name:          opts.Name,
@@ -745,7 +745,7 @@ func buildMeta(opts CreateOptions, pr *profileResult, workdir *DirArg, baselineS
 		Backend:       backend,
 		Profile:       pr.name,
 		ImageRef:      pr.imageRef,
-		Agent:         opts.Agent,
+		Agent:         agent.AgentName(opts.Agent),
 		Model:         model,
 		Workdir: store.WorkdirMeta{
 			HostPath:     workdir.Path,

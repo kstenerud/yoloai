@@ -25,10 +25,10 @@ import (
 
 // NewRuntime creates a runtime.Runtime for the given backend name.
 // Returns an error if the backend is not available on this platform.
-func NewRuntime(ctx context.Context, backend string) (runtime.Runtime, error) {
+func NewRuntime(ctx context.Context, backend runtime.BackendName) (runtime.Runtime, error) {
 	// Default to docker if no backend specified
 	if backend == "" {
-		backend = "docker"
+		backend = runtime.BackendDocker
 	}
 	return runtime.New(ctx, backend, Layout())
 }
@@ -57,10 +57,10 @@ func Coalesce(a, b string) string {
 
 // ResolveBackend determines the backend from flags, then isolation/os routing,
 // then config preference, then auto-detection. Used by commands with --backend.
-func ResolveBackend(cmd *cobra.Command) string {
+func ResolveBackend(cmd *cobra.Command) runtime.BackendName {
 	// Explicit --backend always wins.
 	if b, _ := cmd.Flags().GetString("backend"); b != "" {
-		return b
+		return runtime.BackendName(b)
 	}
 
 	// Read isolation and os from flags, falling back to config.
@@ -77,16 +77,16 @@ func ResolveBackend(cmd *cobra.Command) string {
 	// --os mac --isolation vm goes to tart, not containerd).
 	if targetOS == "mac" {
 		if isolation == "vm" {
-			return "tart"
+			return runtime.BackendTart
 		}
-		return "seatbelt"
+		return runtime.BackendSeatbelt
 	}
 
 	// Isolation-based routing: vm/vm-enhanced prefer containerd, but fall back
 	// if not available (e.g., on macOS where containerd is Linux-only).
 	if isolation == "vm" || isolation == "vm-enhanced" {
-		if runtime.IsAvailable("containerd") {
-			return "containerd"
+		if runtime.IsAvailable(runtime.BackendContainerd) {
+			return runtime.BackendContainerd
 		}
 		// Fall through to container backend detection
 	}
@@ -106,10 +106,10 @@ func FlagStr(cmd *cobra.Command, name string) string {
 }
 
 // ResolveContainerBackendConfig reads the container_backend config preference.
-func ResolveContainerBackendConfig() string {
+func ResolveContainerBackendConfig() runtime.BackendName {
 	cfg, err := config.LoadDefaultsConfig(Layout())
 	if err == nil {
-		return cfg.ContainerBackend
+		return runtime.BackendName(cfg.ContainerBackend)
 	}
 	return ""
 }
@@ -117,7 +117,7 @@ func ResolveContainerBackendConfig() string {
 // ResolveBackendForSandbox reads the backend from a sandbox's meta.json.
 // Falls back to config default if meta.json can't be read.
 // Used by lifecycle commands that operate on an existing sandbox.
-func ResolveBackendForSandbox(name string) string {
+func ResolveBackendForSandbox(name string) runtime.BackendName {
 	meta, err := store.LoadMeta(Layout().SandboxDir(name))
 	if err == nil && meta.Backend != "" {
 		return meta.Backend
@@ -136,7 +136,7 @@ func ResolveBackendForSandbox(name string) string {
 // orchestration-level operations (Stop, Destroy, List, Inspect, Diff, Apply,
 // Run). The Client wraps a runtime + sandbox.Manager with §12-clean Layout
 // derived from Layout(). See internal/cli/CONVENTIONS.md.
-func WithClient(cmd *cobra.Command, backend string, fn func(ctx context.Context, c *yoloai.Client) error) error {
+func WithClient(cmd *cobra.Command, backend runtime.BackendName, fn func(ctx context.Context, c *yoloai.Client) error) error {
 	ctx := cmd.Context()
 	c, err := yoloai.NewWithOptions(ctx, yoloai.Options{
 		DataDir: Layout().DataDir,

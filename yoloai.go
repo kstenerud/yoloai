@@ -135,7 +135,7 @@ func NewWithOptions(ctx context.Context, opts Options) (*Client, error) {
 		input = os.Stdin
 	}
 
-	rt, err := newRuntime(ctx, string(backend), layout)
+	rt, err := newRuntime(ctx, backend, layout)
 	if err != nil {
 		return nil, fmt.Errorf("connect to %s backend: %w", backend, err)
 	}
@@ -642,10 +642,10 @@ func (c *Client) SandboxDir(name string) string {
 // other registered container backend with a stderr-side warning. The Client
 // emits no warning of its own (embedders may want to suppress it); we
 // silently take the fallback verdict.
-func resolveBackendFromConfig(ctx context.Context, layout config.Layout) string {
-	var preferred string
+func resolveBackendFromConfig(ctx context.Context, layout config.Layout) runtime.BackendName {
+	var preferred runtime.BackendName
 	if cfg, err := config.LoadDefaultsConfig(layout); err == nil {
-		preferred = cfg.ContainerBackend
+		preferred = runtime.BackendName(cfg.ContainerBackend)
 	}
 	backend, _ := runtime.SelectContainerBackend(ctx, preferred)
 	return backend
@@ -671,9 +671,9 @@ func resolveProfileFromConfig() string {
 	return ""
 }
 
-func newRuntime(ctx context.Context, backend string, layout config.Layout) (runtime.Runtime, error) {
+func newRuntime(ctx context.Context, backend runtime.BackendName, layout config.Layout) (runtime.Runtime, error) {
 	if backend == "" {
-		backend = "docker"
+		backend = runtime.BackendDocker
 	}
 	return runtime.New(ctx, backend, layout)
 }

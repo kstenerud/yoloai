@@ -153,7 +153,7 @@ func availableBackends() []setupOption {
 		if desc.Name == "tart" && hostArch != "arm64" {
 			continue
 		}
-		opts = append(opts, setupOption{name: desc.Name, blurb: desc.Description})
+		opts = append(opts, setupOption{name: string(desc.Name), blurb: desc.Description})
 	}
 	return opts
 }

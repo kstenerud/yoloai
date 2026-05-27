@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
+	"github.com/kstenerud/yoloai/internal/runtime"
 
 	"github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/internal/sandbox"
@@ -77,7 +78,7 @@ func applySelectedCommits(cmd *cobra.Command, name string, refs, paths []string,
 }
 
 // resolveSelectiveRefs resolves the ref arguments to CommitInfo slices.
-func resolveSelectiveRefs(cmd *cobra.Command, name string, refs []string, backend string) ([]patch.CommitInfo, error) {
+func resolveSelectiveRefs(cmd *cobra.Command, name string, refs []string, backend runtime.BackendName) ([]patch.CommitInfo, error) {
 	var resolved []patch.CommitInfo
 	if err := cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
 		var resolveErr error
@@ -125,7 +126,7 @@ func finishSelectiveApply(cmd *cobra.Command, name string, files []string, shaMa
 }
 
 // applyFormatPatchForRefs generates format-patch for specific refs and applies it.
-func applyFormatPatchForRefs(cmd *cobra.Command, name string, _ []string, resolved []patch.CommitInfo, paths []string, targetDir, backend string) (files []string, shaMap map[string]string, stashErr, err error) {
+func applyFormatPatchForRefs(cmd *cobra.Command, name string, _ []string, resolved []patch.CommitInfo, paths []string, targetDir string, backend runtime.BackendName) (files []string, shaMap map[string]string, stashErr, err error) {
 	shas := make([]string, len(resolved))
 	for i, c := range resolved {
 		shas[i] = c.SHA
@@ -186,7 +187,7 @@ func printSelectiveApplySummary(cmd *cobra.Command, resolved []patch.CommitInfo,
 }
 
 // advanceSelectiveBaseline advances the baseline using contiguous prefix logic after a selective apply.
-func advanceSelectiveBaseline(cmd *cobra.Command, name, backend string, resolved []patch.CommitInfo) error {
+func advanceSelectiveBaseline(cmd *cobra.Command, name string, backend runtime.BackendName, resolved []patch.CommitInfo) error {
 	var allCommits []patch.CommitInfo
 	err := cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
 		var listErr error

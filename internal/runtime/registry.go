@@ -26,13 +26,13 @@ type entry struct {
 
 var (
 	mu       sync.RWMutex
-	backends = make(map[string]entry)
+	backends = make(map[BackendName]entry)
 )
 
 // Register adds a backend factory and its static descriptor to the registry.
 // Called by each backend's init() function on supported platforms. Panics if
 // name does not match descriptor.Name or the backend is already registered.
-func Register(name string, factory Factory, descriptor BackendDescriptor) {
+func Register(name BackendName, factory Factory, descriptor BackendDescriptor) {
 	if name != descriptor.Name {
 		panic(fmt.Sprintf("runtime backend register: name %q != descriptor.Name %q", name, descriptor.Name))
 	}
@@ -46,7 +46,7 @@ func Register(name string, factory Factory, descriptor BackendDescriptor) {
 
 // New creates a Runtime for the given backend name and layout.
 // Returns an error if the backend is not registered (unavailable on this platform).
-func New(ctx context.Context, name string, layout config.Layout) (Runtime, error) {
+func New(ctx context.Context, name BackendName, layout config.Layout) (Runtime, error) {
 	mu.RLock()
 	e, ok := backends[name]
 	mu.RUnlock()
@@ -57,7 +57,7 @@ func New(ctx context.Context, name string, layout config.Layout) (Runtime, error
 }
 
 // IsAvailable returns true if the named backend is registered.
-func IsAvailable(name string) bool {
+func IsAvailable(name BackendName) bool {
 	mu.RLock()
 	_, ok := backends[name]
 	mu.RUnlock()
@@ -65,21 +65,21 @@ func IsAvailable(name string) bool {
 }
 
 // Available returns a sorted list of registered backend names.
-func Available() []string {
+func Available() []BackendName {
 	mu.RLock()
 	defer mu.RUnlock()
-	names := make([]string, 0, len(backends))
+	names := make([]BackendName, 0, len(backends))
 	for name := range backends {
 		names = append(names, name)
 	}
-	sort.Strings(names)
+	sort.Slice(names, func(i, j int) bool { return names[i] < names[j] })
 	return names
 }
 
 // Descriptor returns the static descriptor for a registered backend without
 // instantiating it. Returns the zero descriptor and ok=false if the backend
 // is not registered (unavailable on this platform).
-func Descriptor(name string) (BackendDescriptor, bool) {
+func Descriptor(name BackendName) (BackendDescriptor, bool) {
 	mu.RLock()
 	defer mu.RUnlock()
 	e, ok := backends[name]

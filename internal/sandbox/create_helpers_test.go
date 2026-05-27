@@ -1157,7 +1157,7 @@ func TestIsolationContainerRuntime_VMEnhanced(t *testing.T) {
 
 // mustDescriptor returns the registered descriptor for name, failing the test
 // if the backend isn't registered (e.g., test ran on an unsupported platform).
-func mustDescriptor(t *testing.T, name string) runtime.BackendDescriptor {
+func mustDescriptor(t *testing.T, name runtime.BackendName) runtime.BackendDescriptor {
 	t.Helper()
 	desc, ok := runtime.Descriptor(name)
 	require.True(t, ok, "backend %q not registered", name)

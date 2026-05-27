@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
+	"github.com/kstenerud/yoloai/internal/runtime"
 
 	"github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/internal/sandbox"
@@ -266,7 +267,7 @@ func printApplyCommitsSummary(cmd *cobra.Command, commits []patch.CommitInfo, ta
 }
 
 // applyFormatPatchFiles generates a format-patch and applies it, returning stats and any deferred error.
-func applyFormatPatchFiles(cmd *cobra.Command, name string, paths []string, targetDir, backend string) (commitsApplied int, shaMap map[string]string, stashErr, err error) {
+func applyFormatPatchFiles(cmd *cobra.Command, name string, paths []string, targetDir string, backend runtime.BackendName) (commitsApplied int, shaMap map[string]string, stashErr, err error) {
 	var patchDir string
 	var files []string
 	if err = cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
@@ -297,7 +298,7 @@ func applyFormatPatchFiles(cmd *cobra.Command, name string, paths []string, targ
 
 // applyWIPChanges applies uncommitted changes from sandbox to the target directory.
 // Returns true if WIP was applied successfully.
-func applyWIPChanges(cmd *cobra.Command, name string, paths []string, targetDir string, isGit, hasWIP bool, backend string) bool {
+func applyWIPChanges(cmd *cobra.Command, name string, paths []string, targetDir string, isGit, hasWIP bool, backend runtime.BackendName) bool {
 	if !hasWIP {
 		return false
 	}

@@ -71,7 +71,7 @@ func (m *Manager) resolveProfileConfig(ctx context.Context, opts *CreateOptions,
 	if err != nil {
 		return nil, fmt.Errorf("merge profile chain: %w", err)
 	}
-	if err := config.ValidateProfileBackend(merged.Backend, m.backend); err != nil {
+	if err := config.ValidateProfileBackend(merged.Backend, string(m.backend)); err != nil {
 		return nil, err
 	}
 

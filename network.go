@@ -153,7 +153,7 @@ func (n *Network) Deny(ctx context.Context, domains ...string) (*DenyResult, err
 	}
 
 	// Provenance of removed entries — computed before we mutate meta.
-	agentSet := agentDomainSet(meta.Agent)
+	agentSet := agentDomainSet(string(meta.Agent))
 	toRemove := make(map[string]bool, len(domains))
 	removed := make([]AllowedDomain, 0, len(domains))
 	for _, d := range domains {
@@ -292,7 +292,7 @@ func saveNetworkAllowlist(sandboxDir string, meta *store.Meta) error {
 // definition. Order matches meta order; unknown agent name produces
 // all-user entries (no agent → no known requirements).
 func computeAllowedDomains(meta *store.Meta) []AllowedDomain {
-	agentSet := agentDomainSet(meta.Agent)
+	agentSet := agentDomainSet(string(meta.Agent))
 	out := make([]AllowedDomain, 0, len(meta.NetworkAllow))
 	for _, d := range meta.NetworkAllow {
 		source := AllowedFromUser

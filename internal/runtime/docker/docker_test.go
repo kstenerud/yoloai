@@ -173,7 +173,7 @@ func TestRequiredCapabilities_Docker_InfoFails(t *testing.T) {
 func TestDescriptor_Docker(t *testing.T) {
 	r := &Runtime{binaryName: "docker"}
 	d := r.Descriptor()
-	assert.Equal(t, "docker", d.Name)
+	assert.Equal(t, runtime.BackendName("docker"), d.Name)
 	assert.Equal(t, "container", d.BaseModeName)
 	assert.True(t, d.AgentProvisionedByBackend)
 	assert.Contains(t, d.SupportedIsolationModes, "container-enhanced")

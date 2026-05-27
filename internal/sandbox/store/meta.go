@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/kstenerud/yoloai/internal/agent"
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/internal/runtime"
@@ -20,16 +21,16 @@ const metaVersion = 1
 
 // Meta holds sandbox configuration captured at creation time.
 type Meta struct {
-	Version       int       `json:"version"` // schema version; 0 = legacy (pre-versioning)
-	YoloaiVersion string    `json:"yoloai_version"`
-	Name          string    `json:"name"`
-	CreatedAt     time.Time `json:"created_at"`
-	Backend       string    `json:"backend"` // "docker" or "tart"
-	Profile       string    `json:"profile,omitempty"`
-	ImageRef      string    `json:"image_ref,omitempty"`
+	Version       int                 `json:"version"` // schema version; 0 = legacy (pre-versioning)
+	YoloaiVersion string              `json:"yoloai_version"`
+	Name          string              `json:"name"`
+	CreatedAt     time.Time           `json:"created_at"`
+	Backend       runtime.BackendName `json:"backend"` // typed string; serializes as "docker"/"tart"/etc.
+	Profile       string              `json:"profile,omitempty"`
+	ImageRef      string              `json:"image_ref,omitempty"`
 
-	Agent string `json:"agent"`
-	Model string `json:"model,omitempty"`
+	Agent agent.AgentName `json:"agent"`
+	Model string          `json:"model,omitempty"`
 
 	Workdir     WorkdirMeta `json:"workdir"`
 	Directories []DirMeta   `json:"directories,omitempty"`

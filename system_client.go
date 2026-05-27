@@ -69,7 +69,7 @@ type DiskUsage struct {
 // When Err is non-nil, Bytes is 0 and Detail carries any partial
 // progress info from the backend.
 type BackendDiskUsage struct {
-	Name   string
+	Name   BackendName
 	Bytes  int64
 	Detail string
 	Err    error
@@ -171,12 +171,12 @@ func (s *SystemClient) Build(ctx context.Context, opts BuildOptions) error {
 	if backend == "" {
 		backend = BackendName(resolveBackendFromConfig(ctx, s.layout))
 	}
-	return s.buildOne(ctx, string(backend), opts, out)
+	return s.buildOne(ctx, backend, opts, out)
 }
 
 // buildOne runs one backend's build (base or profile) using a freshly
 // constructed runtime that's closed before return.
-func (s *SystemClient) buildOne(ctx context.Context, backend string, opts BuildOptions, out io.Writer) error {
+func (s *SystemClient) buildOne(ctx context.Context, backend BackendName, opts BuildOptions, out io.Writer) error {
 	rt, err := newRuntime(ctx, backend, s.layout)
 	if err != nil {
 		return err
@@ -229,7 +229,7 @@ func (s *SystemClient) Check(ctx context.Context, opts CheckOptions) ([]CheckRes
 	var results []CheckResult
 
 	// 1. Backend connectivity.
-	rt, backendErr := newRuntime(ctx, string(opts.Backend), s.layout)
+	rt, backendErr := newRuntime(ctx, opts.Backend, s.layout)
 	if backendErr != nil {
 		results = append(results,
 			CheckResult{Name: "backend", OK: false, Message: backendErr.Error()},
@@ -397,7 +397,7 @@ func (s *SystemClient) Prune(ctx context.Context, opts PruneOptions) (*PruneResu
 // optional cache reclaim. Returns the items removed (or, under
 // DryRun, that would be removed). Per-backend failures are logged
 // to opts.Output rather than aborting the whole prune.
-func (s *SystemClient) pruneBackend(ctx context.Context, backend string, known []string, opts PruneOptions, out io.Writer) []PruneItem {
+func (s *SystemClient) pruneBackend(ctx context.Context, backend BackendName, known []string, opts PruneOptions, out io.Writer) []PruneItem {
 	rt, err := newRuntime(ctx, backend, s.layout)
 	if err != nil {
 		return nil

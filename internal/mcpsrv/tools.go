@@ -234,7 +234,7 @@ func (s *Server) handleSandboxList(ctx context.Context, _ mcp.CallToolRequest) (
 			Name:        info.Meta.Name,
 			Status:      string(info.Status),
 			AgentStatus: string(info.AgentStatus),
-			Agent:       info.Meta.Agent,
+			Agent:       string(info.Meta.Agent),
 			HasChanges:  info.HasChanges,
 			DiskUsage:   info.DiskUsage,
 		})

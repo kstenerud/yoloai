@@ -67,7 +67,7 @@ func newSystemBackendsCmd() *cobra.Command {
 			descs := runtime.Descriptors()
 			names := make([]string, len(descs))
 			for i, d := range descs {
-				names[i] = d.Name
+				names[i] = string(d.Name)
 			}
 			return names, cobra.ShellCompDirectiveNoFileComp
 		},
@@ -98,7 +98,7 @@ func listBackends(cmd *cobra.Command) error {
 		for _, d := range descs {
 			available, note := cliutil.CheckBackend(ctx, d.Name)
 			items = append(items, backendJSON{
-				Name:        d.Name,
+				Name:        string(d.Name),
 				Description: d.Description,
 				Available:   available,
 				Note:        note,
@@ -126,7 +126,7 @@ func listBackends(cmd *cobra.Command) error {
 // Descriptor fields supply the operational metadata; backendTradeoffs is
 // the CLI-only selling-pitch bullet list (kept separate per round-7 critique).
 func showBackendDetail(cmd *cobra.Command, name string) error {
-	desc, ok := runtime.Descriptor(name)
+	desc, ok := runtime.Descriptor(runtime.BackendName(name))
 	if !ok {
 		return sandbox.NewUsageError("unknown backend %q (valid: %s)", name, strings.Join(backendNames(), ", "))
 	}
@@ -150,7 +150,7 @@ func showBackendDetail(cmd *cobra.Command, name string) error {
 
 	out := cmd.OutOrStdout()
 
-	available, note := cliutil.CheckBackend(ctx, name)
+	available, note := cliutil.CheckBackend(ctx, runtime.BackendName(name))
 	avail := "yes"
 	if !available {
 		avail = "no"
@@ -184,7 +184,7 @@ func backendNames() []string {
 	descs := runtime.Descriptors()
 	names := make([]string, len(descs))
 	for i, d := range descs {
-		names[i] = d.Name
+		names[i] = string(d.Name)
 	}
 	return names
 }

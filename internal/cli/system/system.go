@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
+	"github.com/kstenerud/yoloai/internal/runtime"
 
 	"github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/internal/cli/system/tart"
@@ -70,7 +71,7 @@ func newSystemBuildCmd() *cobra.Command {
 	return cmd
 }
 
-func runSystemBuild(cmd *cobra.Command, args []string, backend string) error {
+func runSystemBuild(cmd *cobra.Command, args []string, backend runtime.BackendName) error {
 	secretFlags, _ := cmd.Flags().GetStringSlice("secret")
 	force, _ := cmd.Flags().GetBool("force")
 

@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/kstenerud/yoloai/internal/agent"
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
 )
@@ -64,7 +65,7 @@ func TestClone_Success(t *testing.T) {
 	meta, err := store.LoadMeta(dstDir)
 	require.NoError(t, err)
 	assert.Equal(t, "dest", meta.Name)
-	assert.Equal(t, "claude", meta.Agent)
+	assert.Equal(t, agent.AgentClaude, meta.Agent)
 	assert.Equal(t, "abc123", meta.Workdir.BaselineSHA)
 	// CreatedAt should be refreshed (newer than source)
 	assert.True(t, meta.CreatedAt.After(time.Now().Add(-time.Minute)))

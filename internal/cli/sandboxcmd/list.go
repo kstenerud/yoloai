@@ -89,7 +89,7 @@ func matchesFilters(info *sandbox.Info, f listFilters) bool {
 		return false
 	}
 	if f.agent != "" {
-		if info.Status == sandbox.StatusBroken || info.Meta.Agent != f.agent {
+		if info.Status == sandbox.StatusBroken || string(info.Meta.Agent) != f.agent {
 			return false
 		}
 	}
@@ -178,7 +178,7 @@ func runList(cmd *cobra.Command, _ []string) error {
 		if info.Status == sandbox.StatusBroken || info.Status == sandbox.StatusUnavailable {
 			backend := "-"
 			if info.Meta.Backend != "" {
-				backend = info.Meta.Backend
+				backend = string(info.Meta.Backend)
 			}
 			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", //nolint:errcheck
 				info.Meta.Name,

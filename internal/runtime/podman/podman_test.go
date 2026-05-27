@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -209,7 +210,7 @@ func TestRequiredCapabilities_Podman_RootWithRunsc(t *testing.T) {
 func TestDescriptor_Podman(t *testing.T) {
 	r := &Runtime{}
 	d := r.Descriptor()
-	assert.Equal(t, "podman", d.Name)
+	assert.Equal(t, runtime.BackendName("podman"), d.Name)
 	assert.Equal(t, "container", d.BaseModeName)
 	assert.Contains(t, d.SupportedIsolationModes, "container-enhanced")
 }

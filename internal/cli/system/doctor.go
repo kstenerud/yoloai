@@ -177,7 +177,7 @@ func collectDoctorReports(ctx context.Context, env caps.Environment, backendFilt
 	var reports []caps.BackendReport
 
 	for _, desc := range runtime.Descriptors() {
-		if backendFilter != "" && desc.Name != backendFilter {
+		if backendFilter != "" && string(desc.Name) != backendFilter {
 			continue
 		}
 
@@ -185,7 +185,7 @@ func collectDoctorReports(ctx context.Context, env caps.Environment, backendFilt
 		if err != nil {
 			if isolationFilter == "" {
 				reports = append(reports, caps.BackendReport{
-					Backend:      desc.Name,
+					Backend:      string(desc.Name),
 					Mode:         "?",
 					IsBaseMode:   true,
 					InitErr:      err,
@@ -197,7 +197,7 @@ func collectDoctorReports(ctx context.Context, env caps.Environment, backendFilt
 
 		if isolationFilter == "" {
 			reports = append(reports, caps.BackendReport{
-				Backend:      desc.Name,
+				Backend:      string(desc.Name),
 				Mode:         rt.Descriptor().BaseModeName,
 				IsBaseMode:   true,
 				Availability: caps.Ready,
@@ -212,7 +212,7 @@ func collectDoctorReports(ctx context.Context, env caps.Environment, backendFilt
 			results := caps.RunChecks(ctx, capList, env)
 			avail := caps.ComputeAvailability(results)
 			reports = append(reports, caps.BackendReport{
-				Backend:      desc.Name,
+				Backend:      string(desc.Name),
 				Mode:         mode,
 				IsBaseMode:   false,
 				Results:      results,

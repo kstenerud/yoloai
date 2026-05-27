@@ -486,7 +486,7 @@ func ListSandboxes(ctx context.Context, layout config.Layout, rt runtime.Runtime
 // Takes a newRuntimeFunc parameter for creating runtimes (enables testing).
 // Returns (infos, unavailableBackends, error).
 // Sandboxes whose backends are unavailable get StatusUnavailable.
-func ListSandboxesMultiBackend(ctx context.Context, layout config.Layout, newRuntimeFunc func(context.Context, string) (runtime.Runtime, error)) ([]*Info, []string, error) {
+func ListSandboxesMultiBackend(ctx context.Context, layout config.Layout, newRuntimeFunc func(context.Context, runtime.BackendName) (runtime.Runtime, error)) ([]*Info, []string, error) {
 	sandboxesDir := layout.SandboxesDir()
 
 	entries, err := os.ReadDir(sandboxesDir)
@@ -501,7 +501,7 @@ func ListSandboxesMultiBackend(ctx context.Context, layout config.Layout, newRun
 
 	var result []*Info
 	var unavailableBackends []string
-	unavailableSet := make(map[string]bool)
+	unavailableSet := make(map[runtime.BackendName]bool)
 
 	for backend, names := range backendSandboxes {
 		if backend == "" {
@@ -518,8 +518,8 @@ func ListSandboxesMultiBackend(ctx context.Context, layout config.Layout, newRun
 
 // groupSandboxesByBackend maps backend name → sandbox names from the sandbox directory entries.
 // Broken sandboxes (unreadable meta) are keyed to "".
-func groupSandboxesByBackend(entries []os.DirEntry, sandboxesDir string) map[string][]string {
-	byBackend := make(map[string][]string)
+func groupSandboxesByBackend(entries []os.DirEntry, sandboxesDir string) map[runtime.BackendName][]string {
+	byBackend := make(map[runtime.BackendName][]string)
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
@@ -555,7 +555,7 @@ func brokenInfos(names []string) []*Info {
 
 // inspectBackendGroup inspects all sandboxes for a single backend, returning
 // their Info entries and any newly discovered unavailable backend names.
-func inspectBackendGroup(ctx context.Context, layout config.Layout, newRuntimeFunc func(context.Context, string) (runtime.Runtime, error), backend string, names []string, unavailableSet map[string]bool) ([]*Info, []string) {
+func inspectBackendGroup(ctx context.Context, layout config.Layout, newRuntimeFunc func(context.Context, runtime.BackendName) (runtime.Runtime, error), backend runtime.BackendName, names []string, unavailableSet map[runtime.BackendName]bool) ([]*Info, []string) {
 	var unavailableBackends []string
 	rt, err := newRuntimeFunc(ctx, backend)
 	var effectiveRT runtime.Runtime
@@ -563,7 +563,7 @@ func inspectBackendGroup(ctx context.Context, layout config.Layout, newRuntimeFu
 		effectiveRT = rt
 		defer rt.Close() //nolint:errcheck,gosec // best-effort cleanup
 	} else if !unavailableSet[backend] {
-		unavailableBackends = append(unavailableBackends, backend)
+		unavailableBackends = append(unavailableBackends, string(backend))
 		unavailableSet[backend] = true
 	}
 

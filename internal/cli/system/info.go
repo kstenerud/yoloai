@@ -91,7 +91,7 @@ func writeSystemInfoJSON(cmd *cobra.Command, version, commit, date string) error
 	for _, desc := range runtime.Descriptors() {
 		available, note := cliutil.CheckBackend(ctx, desc.Name)
 		backends = append(backends, backendStatus{
-			Name:      desc.Name,
+			Name:      string(desc.Name),
 			Available: available,
 			Note:      note,
 		})

@@ -9,6 +9,7 @@ import (
 	"os"
 
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
+	"github.com/kstenerud/yoloai/internal/runtime"
 
 	"github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/internal/sandbox"
@@ -65,7 +66,7 @@ func applySquash(cmd *cobra.Command, name string, paths []string, meta *store.Me
 // warnSquashSkippedWIP prints the --include-wip hint when squash is excluding
 // uncommitted work. Best-effort: a failed WIP check is silently swallowed
 // because squash can still succeed on the committed delta.
-func warnSquashSkippedWIP(cmd *cobra.Command, name, backend string) {
+func warnSquashSkippedWIP(cmd *cobra.Command, name string, backend runtime.BackendName) {
 	if cliutil.JSONEnabled(cmd) {
 		return
 	}
@@ -81,7 +82,7 @@ func warnSquashSkippedWIP(cmd *cobra.Command, name, backend string) {
 }
 
 // applySquashPatch applies a squash patch after confirmation.
-func applySquashPatch(cmd *cobra.Command, name string, paths []string, targetDir string, patchBytes []byte, yes bool, backend string) error {
+func applySquashPatch(cmd *cobra.Command, name string, paths []string, targetDir string, patchBytes []byte, yes bool, backend runtime.BackendName) error {
 	isGit := workspace.IsGitRepo(targetDir)
 
 	if err := workspace.CheckPatch(patchBytes, targetDir, isGit); err != nil {

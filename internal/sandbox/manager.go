@@ -18,7 +18,7 @@ import (
 // Manager is the central orchestrator for sandbox operations.
 type Manager struct {
 	runtime  runtime.Runtime
-	backend  string
+	backend  runtime.BackendName
 	logger   *slog.Logger
 	input    io.Reader
 	output   io.Writer
@@ -57,7 +57,7 @@ func WithLayout(layout config.Layout) ManagerOption {
 // test construction needs to remember it (use config.NewLayout
 // with t.TempDir-based DataDir).
 func NewManager(rt runtime.Runtime, logger *slog.Logger, input io.Reader, output io.Writer, opts ...ManagerOption) *Manager {
-	backend := ""
+	var backend runtime.BackendName
 	if rt != nil {
 		backend = rt.Descriptor().Name
 	}

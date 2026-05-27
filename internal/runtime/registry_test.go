@@ -18,7 +18,7 @@ import (
 func TestDescriptor_Found(t *testing.T) {
 	desc, ok := runtime.Descriptor("docker")
 	require.True(t, ok)
-	assert.Equal(t, "docker", desc.Name)
+	assert.Equal(t, runtime.BackendName("docker"), desc.Name)
 	assert.Equal(t, "container", desc.BaseModeName)
 	assert.True(t, desc.Capabilities.CapAdd)
 }
@@ -35,7 +35,7 @@ func TestDescriptors_SortedByName(t *testing.T) {
 
 	names := make([]string, len(descs))
 	for i, d := range descs {
-		names[i] = d.Name
+		names[i] = string(d.Name)
 	}
 	assert.True(t, sort.StringsAreSorted(names), "descriptors not sorted: %v", names)
 

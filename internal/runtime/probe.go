@@ -17,7 +17,7 @@ import (
 // Distinct from IsAvailable: IsAvailable is static — "compiled in for this
 // platform" — while Probe is dynamic — "the daemon/socket/binary it needs
 // is actually present right now".
-func Probe(ctx context.Context, name string) (available bool, reason string) {
+func Probe(ctx context.Context, name BackendName) (available bool, reason string) {
 	desc, ok := Descriptor(name)
 	if !ok {
 		return false, fmt.Sprintf("backend %q is not available on this platform", name)
@@ -38,7 +38,7 @@ func Probe(ctx context.Context, name string) (available bool, reason string) {
 // at all, the returned name is the preferred one (or the first candidate
 // alphabetically), so the caller fails downstream in `runtime.New` with a
 // clear backend-specific error rather than a generic "no backend" message.
-func SelectContainerBackend(ctx context.Context, preferred string) (backend string, warning string) {
+func SelectContainerBackend(ctx context.Context, preferred BackendName) (backend BackendName, warning string) {
 	candidates := containerBackends()
 	if len(candidates) == 0 {
 		// No container backends registered on this platform (e.g. macOS without
@@ -47,7 +47,7 @@ func SelectContainerBackend(ctx context.Context, preferred string) (backend stri
 		if preferred != "" {
 			return preferred, ""
 		}
-		return "docker", ""
+		return BackendDocker, ""
 	}
 
 	// Move preferred to the front of the candidate list if it's a known
@@ -77,8 +77,8 @@ func SelectContainerBackend(ctx context.Context, preferred string) (backend stri
 
 // containerBackends returns the names of all registered backends whose
 // BaseModeName is "container" (docker, podman; not containerd's vm mode).
-func containerBackends() []string {
-	var out []string
+func containerBackends() []BackendName {
+	var out []BackendName
 	for _, d := range Descriptors() {
 		if d.BaseModeName == "container" {
 			out = append(out, d.Name)
@@ -90,11 +90,11 @@ func containerBackends() []string {
 // orderCandidates returns candidates with preferred moved to the front when
 // it's in the list. candidates is already sorted alphabetically by
 // Descriptors(), preserved for the non-preferred tail.
-func orderCandidates(candidates []string, preferred string) []string {
+func orderCandidates(candidates []BackendName, preferred BackendName) []BackendName {
 	if preferred == "" || !contains(candidates, preferred) {
 		return candidates
 	}
-	out := make([]string, 0, len(candidates))
+	out := make([]BackendName, 0, len(candidates))
 	out = append(out, preferred)
 	for _, c := range candidates {
 		if c != preferred {
@@ -104,7 +104,7 @@ func orderCandidates(candidates []string, preferred string) []string {
 	return out
 }
 
-func contains(s []string, v string) bool {
+func contains(s []BackendName, v BackendName) bool {
 	for _, x := range s {
 		if x == v {
 			return true

@@ -28,7 +28,7 @@ import (
 // to register the command; this subpackage cannot import cli back).
 var (
 	pkgLayout     func() config.Layout
-	pkgNewRuntime func(ctx context.Context, backend string) (rt.Runtime, error)
+	pkgNewRuntime func(ctx context.Context, backend rt.BackendName) (rt.Runtime, error)
 )
 
 // NewCmd defines `yoloai system tart` (formerly `yoloai system runtime`).
@@ -39,7 +39,7 @@ var (
 // internal/cli back (which would create a cycle). NewCmd stores them
 // in package-level vars; subcommand RunE handlers read those vars at
 // invocation time.
-func NewCmd(layoutFn func() config.Layout, newRuntimeFn func(ctx context.Context, backend string) (rt.Runtime, error)) *cobra.Command {
+func NewCmd(layoutFn func() config.Layout, newRuntimeFn func(ctx context.Context, backend rt.BackendName) (rt.Runtime, error)) *cobra.Command {
 	pkgLayout = layoutFn
 	pkgNewRuntime = newRuntimeFn
 	cmd := &cobra.Command{

@@ -5,6 +5,8 @@ package cliutil
 
 import (
 	"context"
+
+	"github.com/kstenerud/yoloai/internal/runtime"
 )
 
 // CheckBackend attempts to create a runtime for the given backend
@@ -13,7 +15,7 @@ import (
 // before invoking it (e.g., `yoloai ls` enumerating all backends,
 // `yoloai system check`, `yoloai system tart` gating itself behind
 // Tart availability).
-func CheckBackend(ctx context.Context, name string) (available bool, note string) {
+func CheckBackend(ctx context.Context, name runtime.BackendName) (available bool, note string) {
 	rt, err := NewRuntime(ctx, name)
 	if err != nil {
 		return false, err.Error()
