@@ -1,6 +1,6 @@
-// ABOUTME: --squash apply workflow — flattens all sandbox changes into one
-// ABOUTME: unstaged patch on the host. Also the fallback for non-git targets
-// ABOUTME: and the multi-:copy-dir aggregate apply path.
+// ABOUTME: --squash apply workflow — flattens all sandbox workdir changes
+// ABOUTME: into one unstaged patch on the host. Also the fallback for non-git
+// ABOUTME: targets.
 package workflow
 
 import (
@@ -12,22 +12,15 @@ import (
 
 	"github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/internal/sandbox"
-	"github.com/kstenerud/yoloai/internal/sandbox/patch"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
 	"github.com/kstenerud/yoloai/internal/workspace"
 	"github.com/spf13/cobra"
 )
 
-// applySquash implements the squashed-patch apply mode.
+// applySquash implements the squashed-patch apply mode. The Q-U
+// resolution (2026-05-25) collapses the diff/apply surface to the
+// workdir only; the previous multi-:copy branch is gone.
 func applySquash(cmd *cobra.Command, name string, paths []string, meta *store.Meta, yes, dryRun, includeWIP bool) error {
-	// Check for aux :copy dirs
-	if len(meta.Directories) > 0 {
-		backend := cliutil.ResolveBackendForSandbox(name)
-		return cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
-			return applySquashMulti(cmd, ctx, c, name, paths, meta, yes, dryRun, includeWIP)
-		})
-	}
-
 	var patchBytes []byte
 	var stat string
 	backend := cliutil.ResolveBackendForSandbox(name)
@@ -67,16 +60,6 @@ func applySquash(cmd *cobra.Command, name string, paths []string, meta *store.Me
 	}
 
 	return applySquashPatch(cmd, name, paths, targetDir, patchBytes, yes, backend)
-}
-
-// reportSquashMultiNoChanges emits the "nothing to do" output for the
-// multi-:copy squash path in either JSON or human mode.
-func reportSquashMultiNoChanges(cmd *cobra.Command) error {
-	if cliutil.JSONEnabled(cmd) {
-		return cliutil.WriteJSON(cmd.OutOrStdout(), applyResult{Target: "multi", Method: "squash"})
-	}
-	_, err := fmt.Fprintln(cmd.OutOrStdout(), "No changes to apply")
-	return err
 }
 
 // warnSquashSkippedWIP prints the --include-wip hint when squash is excluding
@@ -140,83 +123,4 @@ func applySquashPatch(cmd *cobra.Command, name string, paths []string, targetDir
 
 	_, err := fmt.Fprintf(cmd.OutOrStdout(), "Changes applied to %s\n", targetDir)
 	return err
-}
-
-// applySquashMulti applies squashed patches for multiple :copy directories.
-func applySquashMulti(cmd *cobra.Command, ctx context.Context, c *yoloai.Client, name string, paths []string, _ *store.Meta, yes, dryRun, includeWIP bool) error {
-	patches, err := c.GenerateMultiPatch(ctx, name, paths, includeWIP)
-	if err != nil {
-		return err
-	}
-	if !includeWIP {
-		warnSquashSkippedWIP(cmd, name, cliutil.ResolveBackendForSandbox(name))
-	}
-	if len(patches) == 0 {
-		return reportSquashMultiNoChanges(cmd)
-	}
-
-	isJSON := cliutil.JSONEnabled(cmd)
-	out := cmd.OutOrStdout()
-	if !isJSON {
-		for _, ps := range patches {
-			fmt.Fprintf(out, "=== %s (%s) ===\n", ps.HostPath, ps.Mode) //nolint:errcheck
-			fmt.Fprintln(out, ps.Stat)                                  //nolint:errcheck
-		}
-	}
-
-	if dryRun {
-		if !isJSON {
-			fmt.Fprintln(out, "(dry run)") //nolint:errcheck
-		}
-		return nil
-	}
-
-	if !yes {
-		confirmed, confirmErr := sandbox.Confirm(cmd.Context(), "Apply these changes? [y/N] ", os.Stdin, cmd.ErrOrStderr())
-		if confirmErr != nil {
-			return confirmErr
-		}
-		if !confirmed {
-			return nil
-		}
-	}
-
-	if err := applyMultiPatches(cmd, patches, isJSON); err != nil {
-		return err
-	}
-
-	// Advance baseline for workdir
-	if len(paths) == 0 {
-		if err := c.AdvanceBaseline(ctx, name); err != nil {
-			return fmt.Errorf("advance baseline: %w", err)
-		}
-	}
-
-	if isJSON {
-		return cliutil.WriteJSON(out, applyResult{
-			Target:     "multi",
-			WIPApplied: true,
-			Method:     "squash",
-		})
-	}
-
-	return nil
-}
-
-// applyMultiPatches checks and applies a slice of PatchSet values to their host paths.
-func applyMultiPatches(cmd *cobra.Command, patches []patch.PatchSet, isJSON bool) error {
-	out := cmd.OutOrStdout()
-	for _, ps := range patches {
-		isGit := workspace.IsGitRepo(ps.HostPath)
-		if err := workspace.CheckPatch(ps.Patch, ps.HostPath, isGit); err != nil {
-			return fmt.Errorf("%s: %w", ps.HostPath, err)
-		}
-		if err := workspace.ApplyPatch(ps.Patch, ps.HostPath, isGit); err != nil {
-			return fmt.Errorf("%s: %w", ps.HostPath, err)
-		}
-		if !isJSON {
-			fmt.Fprintf(out, "Changes applied to %s\n", ps.HostPath) //nolint:errcheck
-		}
-	}
-	return nil
 }

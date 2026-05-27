@@ -272,12 +272,15 @@ func (c *Client) Diff(_ context.Context, name string) ([]*patch.DiffResult, erro
 }
 
 // Apply applies the agent's committed changes back to the original host
-// directories. Equivalent to 'yoloai apply <name>'.
+// workdir. Equivalent to 'yoloai apply <name>'.
 // Uncommitted (work-in-progress) edits the agent left behind are NOT applied;
 // use ApplyWithOptions to opt in.
 // Returns (nil, nil) when there is nothing to apply — branch on
-// len(results) == 0 rather than on a sentinel error (Q-P).
-func (c *Client) Apply(ctx context.Context, name string) ([]*patch.ApplyResult, error) {
+// result == nil rather than on a sentinel error (Q-P).
+//
+// Q-U: aux :copy / :overlay are no longer supported, so the result
+// describes the single workdir patch (or nil for no-op).
+func (c *Client) Apply(ctx context.Context, name string) (*patch.ApplyResult, error) {
 	return patch.ApplyAll(ctx, c.layout, c.rt, name, false)
 }
 
@@ -290,9 +293,9 @@ type ApplyOptions struct {
 }
 
 // ApplyWithOptions is Apply with explicit options. Returns (nil, nil)
-// when there is nothing to apply — branch on len(results) == 0 rather
+// when there is nothing to apply — branch on result == nil rather
 // than on a sentinel error (Q-P).
-func (c *Client) ApplyWithOptions(ctx context.Context, name string, opts ApplyOptions) ([]*patch.ApplyResult, error) {
+func (c *Client) ApplyWithOptions(ctx context.Context, name string, opts ApplyOptions) (*patch.ApplyResult, error) {
 	return patch.ApplyAll(ctx, c.layout, c.rt, name, opts.IncludeWIP)
 }
 
@@ -465,14 +468,6 @@ func (c *Client) AdvanceBaseline(ctx context.Context, name string) error {
 // Returns (patchBytes, statSummary, err). Used by `yoloai apply --squash`.
 func (c *Client) GeneratePatch(ctx context.Context, name string, paths []string, includeWIP bool) ([]byte, string, error) {
 	return patch.GeneratePatch(ctx, c.layout, c.rt, name, paths, includeWIP)
-}
-
-// GenerateMultiPatch produces one PatchSet per :copy aux directory
-// when the sandbox has multi-dir workdirs. Workdir-only sandboxes
-// should use GeneratePatch instead. Slated for removal under Q-U
-// (aux :copy / :overlay deprecation).
-func (c *Client) GenerateMultiPatch(ctx context.Context, name string, paths []string, includeWIP bool) ([]patch.PatchSet, error) {
-	return patch.GenerateMultiPatch(ctx, c.layout, c.rt, name, paths, includeWIP)
 }
 
 // GenerateFormatPatch runs `git format-patch` in the sandbox over the

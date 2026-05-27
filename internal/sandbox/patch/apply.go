@@ -30,50 +30,56 @@ type ApplyResult struct {
 	Stat string
 }
 
-// ApplyAll applies all pending changes from the sandbox's :copy directories
-// back to their original host paths. It is the programmatic equivalent of
-// 'yoloai apply <name>'.
+// ApplyAll applies the sandbox's pending workdir changes back to the
+// original host path. Programmatic equivalent of 'yoloai apply <name>'.
 //
-// Returns an ApplyResult for each directory patched. When there are no
-// patches to apply, returns (nil, nil) — the empty-result + nil-error
-// pair is the no-changes signal. Callers branch on len(results) == 0
-// rather than a sentinel error; see Q-P.
+// Returns (nil, nil) when there is nothing to apply. Callers branch on
+// result == nil rather than a sentinel error (Q-P).
+//
+// After Q-U (aux :copy/:overlay removed), the diff/apply surface
+// is workdir-only — the name "ApplyAll" is preserved for API
+// stability but the iteration is gone.
 //
 // layout determines where the per-sandbox lock file lives (Q-W.4a);
 // callers thread their own Layout in. yoloai.Client supplies its
 // c.layout; the CLI supplies the same Layout it gives Manager.
-func ApplyAll(ctx context.Context, layout config.Layout, rt runtime.Runtime, name string, includeWIP bool) ([]*ApplyResult, error) {
+func ApplyAll(ctx context.Context, layout config.Layout, rt runtime.Runtime, name string, includeWIP bool) (*ApplyResult, error) {
 	unlock, err := sandbox.AcquireLock(layout, name)
 	if err != nil {
 		return nil, err
 	}
 	defer unlock()
 
-	patches, err := GenerateMultiPatch(ctx, layout, rt, name, nil, includeWIP)
+	meta, err := store.LoadMeta(layout.SandboxDir(name))
 	if err != nil {
 		return nil, err
 	}
-	if len(patches) == 0 {
+	if meta.Workdir.Mode != "copy" {
+		// :rw is live; :overlay uses GenerateOverlayPatch. Neither
+		// belongs in the squash/format-patch apply paths that funnel
+		// through ApplyAll.
 		return nil, nil
 	}
 
-	var results []*ApplyResult
-	for _, ps := range patches {
-		isGit := workspace.IsGitRepo(ps.HostPath)
-		if err := workspace.ApplyPatch(ps.Patch, ps.HostPath, isGit); err != nil {
-			return nil, fmt.Errorf("%s: %w", ps.HostPath, err)
-		}
-		results = append(results, &ApplyResult{
-			Dir:  ps.HostPath,
-			Stat: ps.Stat,
-		})
+	patchBytes, stat, err := GeneratePatch(ctx, layout, rt, name, nil, includeWIP)
+	if err != nil {
+		return nil, err
+	}
+	if len(strings.TrimSpace(string(patchBytes))) == 0 {
+		return nil, nil
+	}
+
+	hostPath := meta.Workdir.HostPath
+	isGit := workspace.IsGitRepo(hostPath)
+	if err := workspace.ApplyPatch(patchBytes, hostPath, isGit); err != nil {
+		return nil, fmt.Errorf("%s: %w", hostPath, err)
 	}
 
 	if err := AdvanceBaseline(ctx, layout, rt, name); err != nil {
 		return nil, fmt.Errorf("advance baseline: %w", err)
 	}
 
-	return results, nil
+	return &ApplyResult{Dir: hostPath, Stat: stat}, nil
 }
 
 // CommitInfo is an alias for workspace.CommitInfo.
@@ -761,65 +767,4 @@ func GenerateWIPDiff(ctx context.Context, layout config.Layout, rt runtime.Runti
 	}
 
 	return []byte(patchOut), strings.TrimRight(statOut, "\n"), nil
-}
-
-// GenerateMultiPatch produces patches for all :copy directories.
-// :rw dirs are skipped (changes are already live).
-// Uses rt.GitExec to run git commands (works on both Docker and VM backends).
-func GenerateMultiPatch(ctx context.Context, layout config.Layout, rt runtime.Runtime, name string, paths []string, includeWIP bool) ([]PatchSet, error) {
-	contexts, err := LoadAllDiffContexts(layout, name)
-	if err != nil {
-		return nil, err
-	}
-
-	var patches []PatchSet
-	for _, dc := range contexts {
-		if dc.Mode != "copy" {
-			continue
-		}
-
-		// See GeneratePatch for the includeWIP semantics. Untracked staging
-		// happens only when the caller asked to include WIP.
-		endpoint := "HEAD"
-		if includeWIP {
-			_, _ = rt.GitExec(ctx, name, dc.WorkDir, "add", "-A")
-			endpoint = ""
-		}
-
-		patchArgs := []string{"diff", "--binary", dc.BaselineSHA}
-		if endpoint != "" {
-			patchArgs = append(patchArgs, endpoint)
-		}
-		if len(paths) > 0 {
-			patchArgs = append(patchArgs, "--")
-			patchArgs = append(patchArgs, paths...)
-		}
-		patchOut, patchErr := rt.GitExec(ctx, name, dc.WorkDir, patchArgs...)
-		if patchErr != nil {
-			return nil, fmt.Errorf("git diff (patch) in %s: %w", dc.HostPath, patchErr)
-		}
-
-		if len(strings.TrimSpace(patchOut)) == 0 {
-			continue
-		}
-
-		statArgs := []string{"diff", "--stat", dc.BaselineSHA}
-		if endpoint != "" {
-			statArgs = append(statArgs, endpoint)
-		}
-		if len(paths) > 0 {
-			statArgs = append(statArgs, "--")
-			statArgs = append(statArgs, paths...)
-		}
-		statOut, _ := rt.GitExec(ctx, name, dc.WorkDir, statArgs...)
-
-		patches = append(patches, PatchSet{
-			HostPath: dc.HostPath,
-			Mode:     dc.Mode,
-			Patch:    []byte(patchOut),
-			Stat:     strings.TrimRight(statOut, "\n"),
-		})
-	}
-
-	return patches, nil
 }
