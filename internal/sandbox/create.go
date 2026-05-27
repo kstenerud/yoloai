@@ -452,7 +452,7 @@ func (m *Manager) buildConfigAndMeta(ctx context.Context, opts CreateOptions, pr
 	archetypeDockerDRequired := pr.archetypeDockerDRequired
 	lifecycleCfg := buildLifecycleConfig(resolvedArchetype, archetypeDockerDRequired, state_onCreateDone, devcontainerCfg)
 
-	configData, err := buildContainerConfig(agentDef, agentCommand, m.runtime.PrepareAgentCommand(""), tmuxConf, overlayOrResolvedMountPath(workdir), opts.Debug, networkMode == "isolated", networkAllow, opts.Passthrough, collectOverlayMounts(workdir, auxDirs), pr.setup, pr.autoCommitInterval, collectCopyDirs(workdir, auxDirs), opts.Name, m.runtime.TmuxSocket(sandboxDir), pr.isolation, opts.VscodeTunnel, sanitizeTunnelName(opts.Name), lifecycleCfg)
+	configData, err := buildContainerConfig(m.layout, agentDef, agentCommand, m.runtime.PrepareAgentCommand(""), tmuxConf, overlayOrResolvedMountPath(workdir), opts.Debug, networkMode == "isolated", networkAllow, opts.Passthrough, collectOverlayMounts(workdir, auxDirs), pr.setup, pr.autoCommitInterval, collectCopyDirs(workdir, auxDirs), opts.Name, m.runtime.TmuxSocket(sandboxDir), pr.isolation, opts.VscodeTunnel, sanitizeTunnelName(opts.Name), lifecycleCfg)
 	if err != nil {
 		return nil, nil, "", "", fmt.Errorf("build %s: %w", store.RuntimeConfigFile, err)
 	}
@@ -1071,32 +1071,12 @@ func resolveDetectors(idle agent.IdleSupport) []string {
 	return detectors
 }
 
-// effectiveUID returns the real host user's UID, accounting for sudo.
-// When running as root via sudo, os.Getuid() returns 0, but the Docker
-// entrypoint uses host_uid to remap the yoloai user — passing 0 causes
-// usermod to fail (uid 0 is already root). sudo sets SUDO_UID in the
-// child's environment so we can recover the original user's uid.
-func effectiveUID() int {
-	if uid := fileutil.SudoUID(); uid != -1 {
-		return uid
-	}
-	return os.Getuid()
-}
-
-// effectiveGID returns the real host user's GID, accounting for sudo.
-func effectiveGID() int {
-	if gid := fileutil.SudoGID(); gid != -1 {
-		return gid
-	}
-	return os.Getgid()
-}
-
 // buildContainerConfig creates the config.json content.
 // agentLaunchPrefix is the backend-specific wrap prefix that PrepareAgentCommand
 // would prepend (e.g. 'PATH="/opt/homebrew/opt/node/bin:$PATH" ' for Tart);
 // computed once by the caller, stored here as single source of truth for the
 // agent-command wrap (W1a of the architecture remediation plan).
-func buildContainerConfig(agentDef *agent.Definition, agentCommand string, agentLaunchPrefix string, tmuxConf string, workingDir string, debug bool, networkIsolated bool, allowedDomains []string, passthrough []string, overlayMounts []overlayMountConfig, setupCommands []string, autoCommitInterval int, copyDirs []string, sandboxName string, tmuxSocket string, isolation runtime.IsolationMode, vscodeTunnel bool, vscodeTunnelName string, lifecycle *lifecycleConfig) ([]byte, error) {
+func buildContainerConfig(layout config.Layout, agentDef *agent.Definition, agentCommand string, agentLaunchPrefix string, tmuxConf string, workingDir string, debug bool, networkIsolated bool, allowedDomains []string, passthrough []string, overlayMounts []overlayMountConfig, setupCommands []string, autoCommitInterval int, copyDirs []string, sandboxName string, tmuxSocket string, isolation runtime.IsolationMode, vscodeTunnel bool, vscodeTunnelName string, lifecycle *lifecycleConfig) ([]byte, error) {
 	var stateDirName string
 	if agentDef.StateDir != "" {
 		stateDirName = filepath.Base(agentDef.StateDir)
@@ -1104,8 +1084,8 @@ func buildContainerConfig(agentDef *agent.Definition, agentCommand string, agent
 
 	cfg := containerConfig{
 		SchemaVersion:      runtimeConfigSchemaVersion,
-		HostUID:            effectiveUID(),
-		HostGID:            effectiveGID(),
+		HostUID:            layout.HostUID,
+		HostGID:            layout.HostGID,
 		AgentCommand:       agentCommand,
 		AgentLaunchPrefix:  agentLaunchPrefix,
 		UseLaunchPrefix:    true,
@@ -1316,7 +1296,7 @@ func createSecretsDir(agentDef *agent.Definition, envVars map[string]string, sec
 // under sudo or if the parent environ cannot be read.
 func sudoParentEnv() map[string]string {
 	result := make(map[string]string)
-	if os.Getuid() != 0 || os.Getenv("SUDO_USER") == "" {
+	if fileutil.SudoUID() == -1 {
 		return result
 	}
 	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/environ", os.Getppid())) //nolint:gosec // G304: reading parent proc environ to recover sudo-stripped env vars

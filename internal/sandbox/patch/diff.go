@@ -301,7 +301,7 @@ func ListCommitsBeyondBaselineOverlay(ctx context.Context, layout config.Layout,
 		return nil, err
 	}
 
-	stdout, err := execInSandbox(ctx, rt, name, meta, []string{
+	stdout, err := execInSandbox(ctx, rt, name, meta, layout.HostUID, []string{
 		"git", "-C", dc.WorkDir, "log", "--reverse", "--format=%H %s", baselineSHA + "..HEAD",
 	})
 	if err != nil {
@@ -343,7 +343,7 @@ func GenerateOverlayDiff(ctx context.Context, rt runtime.Runtime, opts DiffOptio
 	}
 
 	// Stage untracked files
-	if _, err := execInSandbox(ctx, rt, opts.Name, meta, []string{
+	if _, err := execInSandbox(ctx, rt, opts.Name, meta, opts.Layout.HostUID, []string{
 		"git", "-C", dc.WorkDir, "add", "-A",
 	}); err != nil {
 		return "", fmt.Errorf("stage untracked in %s: %w", dc.HostPath, err)
@@ -360,7 +360,7 @@ func GenerateOverlayDiff(ctx context.Context, rt runtime.Runtime, opts DiffOptio
 	}
 	args = append(args, baselineSHA)
 
-	stdout, err := execInSandbox(ctx, rt, opts.Name, meta, args)
+	stdout, err := execInSandbox(ctx, rt, opts.Name, meta, opts.Layout.HostUID, args)
 	if err != nil {
 		return "", fmt.Errorf("git diff in %s: %w", dc.HostPath, err)
 	}

@@ -574,7 +574,7 @@ func (c *Client) Attach(ctx context.Context, name string, io IOStreams) error {
 	}
 
 	containerName := store.InstanceName(name)
-	user := sandbox.ContainerUser(info.Meta)
+	user := sandbox.ContainerUser(info.Meta, c.layout.HostUID)
 
 	if err := sandbox.WaitForAttachReady(ctx, c.rt, c.layout, name, user, 300*time.Second); err != nil {
 		return fmt.Errorf("waiting for tmux session: %w", err)
@@ -600,7 +600,7 @@ func (c *Client) Exec(ctx context.Context, name string, cmd []string, io IOStrea
 		return fmt.Errorf("sandbox %q: %w", name, sandbox.ErrContainerNotRunning)
 	}
 	containerName := store.InstanceName(name)
-	user := sandbox.ContainerUser(info.Meta)
+	user := sandbox.ContainerUser(info.Meta, c.layout.HostUID)
 	return c.rt.InteractiveExec(ctx, containerName, cmd, user, info.Meta.Workdir.MountPath, io)
 }
 

@@ -20,6 +20,7 @@ import (
 	"github.com/vishvananda/netns"
 
 	"github.com/kstenerud/yoloai/internal/config"
+	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/runtime/caps"
 	"github.com/kstenerud/yoloai/internal/yoerrors"
@@ -232,7 +233,7 @@ const (
 // via setcap (file capabilities grant them at exec time regardless of the
 // parent's capability set).
 func canRunCNIBridge() error {
-	if os.Getuid() == 0 {
+	if fileutil.ProcessIsRoot() {
 		return nil // root: subprocess also runs as root
 	}
 	// Check CapEff in case the parent process already has both caps

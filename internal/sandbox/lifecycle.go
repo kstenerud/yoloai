@@ -938,7 +938,7 @@ func (m *Manager) relaunchAgent(ctx context.Context, name string, meta *store.Me
 		return fmt.Errorf("parse runtime-config.json: %w", err)
 	}
 
-	_, err = ExecInContainer(ctx, m.runtime, name, meta,
+	_, err = ExecInContainer(ctx, m.runtime, name, meta, m.layout.HostUID,
 		tmuxCmd(cfg.TmuxSocket, "respawn-pane", "-t", "main", "-k", cfg.AgentCommand),
 	)
 	if err != nil {
@@ -975,7 +975,7 @@ func (m *Manager) relaunchAgentWithResume(ctx context.Context, name string, meta
 	interactiveCmd := buildAgentCommand(agentDef, meta.Model, "", agentArgs, cfg.Passthrough)
 
 	// Respawn with interactive command
-	_, err = ExecInContainer(ctx, m.runtime, name, meta,
+	_, err = ExecInContainer(ctx, m.runtime, name, meta, m.layout.HostUID,
 		tmuxCmd(cfg.TmuxSocket, "respawn-pane", "-t", "main", "-k", interactiveCmd),
 	)
 	if err != nil {
@@ -1033,7 +1033,7 @@ done
 rm -f /tmp/yoloai-resume.txt
 %s`, tmuxShellPrefix(cfg.TmuxSocket), waitCmd, cfg.SubmitSequence, statusWrite)
 
-	_, err = ExecInContainer(ctx, m.runtime, name, meta, []string{
+	_, err = ExecInContainer(ctx, m.runtime, name, meta, m.layout.HostUID, []string{
 		"bash", "-c", "nohup bash -c '" + strings.ReplaceAll(script, "'", "'\"'\"'") + "' _ \"$1\" >/dev/null 2>&1 &", "_", resumeText,
 	})
 	return err
@@ -1069,7 +1069,7 @@ func (m *Manager) relaunchAgentWithCustomPrompt(ctx context.Context, name string
 	} else {
 		interactiveCmd = m.runtime.PrepareAgentCommand(interactiveCmd)
 	}
-	_, err = ExecInContainer(ctx, m.runtime, name, meta,
+	_, err = ExecInContainer(ctx, m.runtime, name, meta, m.layout.HostUID,
 		tmuxCmd(cfg.TmuxSocket, "respawn-pane", "-t", "main", "-k", interactiveCmd),
 	)
 	if err != nil {
@@ -1114,7 +1114,7 @@ done
 rm -f /tmp/yoloai-custom-prompt.txt
 %s`, tmuxShellPrefix(cfg.TmuxSocket), waitCmd, cfg.SubmitSequence, statusWrite)
 
-	_, err := ExecInContainer(ctx, m.runtime, name, meta, []string{
+	_, err := ExecInContainer(ctx, m.runtime, name, meta, m.layout.HostUID, []string{
 		"bash", "-c", "nohup bash -c '" + strings.ReplaceAll(script, "'", "'\"'\"'") + "' _ \"$1\" >/dev/null 2>&1 &", "_", promptText,
 	})
 	return err
@@ -1341,7 +1341,7 @@ for key in %s; do
 done
 rm -f /tmp/yoloai-reset.txt`, appendPrompt, cfg.SubmitSequence)
 
-	_, err = ExecInContainer(ctx, m.runtime, name, meta, []string{
+	_, err = ExecInContainer(ctx, m.runtime, name, meta, m.layout.HostUID, []string{
 		"bash", "-c", script, "_", resetNotification,
 	})
 	return err

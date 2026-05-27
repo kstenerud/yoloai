@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 
 	"github.com/kstenerud/yoloai/internal/config"
+	"github.com/kstenerud/yoloai/internal/fileutil"
 )
 
 // rootLayout is the Layout recorded by SetRootLayout at CLI startup
@@ -67,7 +68,7 @@ func LayoutForDataDir(dataDir string) config.Layout {
 // code (W-L10-allowlist). The Q-W discipline forbids any other
 // library code from reading $HOME directly.
 func resolveHome() string {
-	if sudoUser := os.Getenv("SUDO_USER"); sudoUser != "" && os.Getuid() == 0 {
+	if sudoUser := os.Getenv("SUDO_USER"); sudoUser != "" && fileutil.ProcessIsRoot() {
 		u, err := user.Lookup(sudoUser)
 		if err == nil {
 			return u.HomeDir

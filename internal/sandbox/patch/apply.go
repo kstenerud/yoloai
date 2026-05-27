@@ -21,9 +21,10 @@ import (
 
 // execInSandbox runs cmd inside the sandbox's container and returns
 // stdout. Local helper so this subpackage doesn't import its parent
-// (F6: previously called execInSandbox).
-func execInSandbox(ctx context.Context, rt runtime.Runtime, name string, meta *store.Meta, cmd []string) (string, error) {
-	result, err := rt.Exec(ctx, store.InstanceName(name), cmd, store.ContainerUser(meta))
+// (F6: previously called execInSandbox). hostUID is layout.HostUID
+// at the boundary (F31).
+func execInSandbox(ctx context.Context, rt runtime.Runtime, name string, meta *store.Meta, hostUID int, cmd []string) (string, error) {
+	result, err := rt.Exec(ctx, store.InstanceName(name), cmd, store.ContainerUser(meta, hostUID))
 	if err != nil {
 		return "", err
 	}
@@ -175,7 +176,7 @@ func ensureOverlayBaseline(ctx context.Context, layout config.Layout, rt runtime
 	}
 
 	// Try to resolve existing HEAD.
-	stdout, err := execInSandbox(ctx, rt, name, meta, []string{
+	stdout, err := execInSandbox(ctx, rt, name, meta, layout.HostUID, []string{
 		"git", "-C", dc.WorkDir, "rev-parse", "HEAD",
 	})
 	if err == nil {
@@ -194,12 +195,12 @@ func ensureOverlayBaseline(ctx context.Context, layout config.Layout, rt runtime
 		"cd %s && git init -b main && git config user.email yoloai@localhost && git config user.name yoloai && git add -A && git commit -q -m baseline",
 		dc.WorkDir,
 	)
-	_, initErr := execInSandbox(ctx, rt, name, meta, []string{"sh", "-c", initCmd})
+	_, initErr := execInSandbox(ctx, rt, name, meta, layout.HostUID, []string{"sh", "-c", initCmd})
 	if initErr != nil {
 		return "", fmt.Errorf("create overlay baseline for %s: %w (original HEAD error: %w)", dc.HostPath, initErr, err)
 	}
 
-	stdout, err = execInSandbox(ctx, rt, name, meta, []string{
+	stdout, err = execInSandbox(ctx, rt, name, meta, layout.HostUID, []string{
 		"git", "-C", dc.WorkDir, "rev-parse", "HEAD",
 	})
 	if err != nil {
@@ -281,14 +282,14 @@ func generateOverlayPatchForContext(ctx context.Context, layout config.Layout, r
 		return nil, err
 	}
 
-	if _, err := execInSandbox(ctx, rt, name, meta, []string{
+	if _, err := execInSandbox(ctx, rt, name, meta, layout.HostUID, []string{
 		"git", "-C", dc.WorkDir, "add", "-A",
 	}); err != nil {
 		return nil, fmt.Errorf("stage untracked in %s: %w", dc.HostPath, err)
 	}
 
 	patchArgs := append([]string{"git", "-c", "core.hooksPath=/dev/null", "-C", dc.WorkDir, "diff", "--binary", baselineSHA}, pathFilterArgs(paths)...)
-	stdout, err := execInSandbox(ctx, rt, name, meta, patchArgs)
+	stdout, err := execInSandbox(ctx, rt, name, meta, layout.HostUID, patchArgs)
 	if err != nil {
 		return nil, fmt.Errorf("git diff (patch) in %s: %w", dc.HostPath, err)
 	}
@@ -297,7 +298,7 @@ func generateOverlayPatchForContext(ctx context.Context, layout config.Layout, r
 	}
 
 	statArgs := append([]string{"git", "-c", "core.hooksPath=/dev/null", "-C", dc.WorkDir, "diff", "--stat", baselineSHA}, pathFilterArgs(paths)...)
-	statOut, err := execInSandbox(ctx, rt, name, meta, statArgs)
+	statOut, err := execInSandbox(ctx, rt, name, meta, layout.HostUID, statArgs)
 	if err != nil {
 		return nil, fmt.Errorf("git diff (stat) in %s: %w", dc.HostPath, err)
 	}
@@ -343,7 +344,7 @@ func UpdateOverlayBaselineToHEAD(ctx context.Context, layout config.Layout, rt r
 		if dc.Mode != "overlay" || dc.HostPath != hostPath {
 			continue
 		}
-		stdout, err := execInSandbox(ctx, rt, name, meta, []string{
+		stdout, err := execInSandbox(ctx, rt, name, meta, layout.HostUID, []string{
 			"git", "-C", dc.WorkDir, "rev-parse", "HEAD",
 		})
 		if err != nil {

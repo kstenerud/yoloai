@@ -41,6 +41,38 @@ func SudoGID() int {
 	return -1
 }
 
+// HostUID returns the invoking user's UID, accounting for sudo. Under
+// sudo (uid 0 + SUDO_UID set) it returns the SUDO_UID; otherwise it
+// returns the process uid. This is the F31 chokepoint for "what UID
+// owns the work the user is doing" — every library caller that
+// previously called os.Getuid() directly now reads it from
+// config.Layout.HostUID, which is populated here.
+func HostUID() int {
+	if uid := SudoUID(); uid != -1 {
+		return uid
+	}
+	return os.Getuid()
+}
+
+// HostGID returns the invoking user's primary GID, accounting for sudo.
+// See HostUID for the rationale.
+func HostGID() int {
+	if gid := SudoGID(); gid != -1 {
+		return gid
+	}
+	return os.Getgid()
+}
+
+// ProcessIsRoot reports whether the running process has effective UID 0.
+// Distinct from "is the real invoking user root?" — under sudo this
+// returns true even though the real user (recovered via SUDO_UID) is
+// non-root. Used by code that needs to know whether the process can
+// perform privileged operations (CNI plugin exec, raw socket creation,
+// etc.) rather than whose work is being represented.
+func ProcessIsRoot() bool {
+	return os.Getuid() == 0
+}
+
 // ChownIfSudo calls os.Lchown to transfer ownership of path to the real user
 // when running under sudo. Uses Lchown so symlinks themselves are chowned
 // without following them. No-op when not running under sudo.

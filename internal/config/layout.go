@@ -5,6 +5,8 @@ package config
 
 import (
 	"path/filepath"
+
+	"github.com/kstenerud/yoloai/internal/fileutil"
 )
 
 // Layout names every yoloai data path rooted at a given DataDir.
@@ -46,6 +48,31 @@ type Layout struct {
 	// single os.UserHomeDir() call now feeds HomeDir; library
 	// code uses layout.HomeDir directly.
 	HomeDir string
+
+	// HostUID and HostGID are the invoking user's host-side UID/GID,
+	// honoring sudo (SUDO_UID / SUDO_GID when running under sudo so
+	// "sudo yoloai ..." doesn't reroot to uid 0).
+	//
+	// Library code that previously called os.Getuid() / os.Getgid()
+	// directly (effectiveUID in sandbox/create.go, ContainerUser in
+	// store/meta.go, the uid 0 check in containerd/containerd.go,
+	// the caps registry's IsRoot detection) now reads these. F31
+	// (2026-05-27): same "no ambient state" discipline as HomeDir
+	// — the CLI's single licensed read (via fileutil.HostUID /
+	// HostGID) feeds Layout, library never re-reads.
+	HostUID int
+	HostGID int
+
+	// ProcessIsRoot is true when the running process has effective UID
+	// 0 — distinct from HostUID, which honors SUDO_UID and so reads
+	// the *invoking* user's UID rather than the *process's* EUID.
+	//
+	// Under "sudo yoloai ...", ProcessIsRoot is true but HostUID is
+	// the real user's UID (non-zero). The two are needed for different
+	// reasons: HostUID matches the in-container remap; ProcessIsRoot
+	// answers "does this process have root privileges right now" for
+	// the canRunCNIBridge check and similar.
+	ProcessIsRoot bool
 }
 
 // NewLayout constructs a Layout rooted at dataDir with HomeDir
@@ -62,14 +89,22 @@ func NewLayout(dataDir string) Layout {
 	if dataDir == "" {
 		panic("config.NewLayout: dataDir is required (empty string is invalid; public boundaries must validate input and return *UsageError before reaching this constructor)")
 	}
-	return Layout{DataDir: dataDir, HomeDir: filepath.Dir(dataDir)}
+	return Layout{
+		DataDir:       dataDir,
+		HomeDir:       filepath.Dir(dataDir),
+		HostUID:       fileutil.HostUID(),
+		HostGID:       fileutil.HostGID(),
+		ProcessIsRoot: fileutil.ProcessIsRoot(),
+	}
 }
 
 // NewLayoutFor constructs a Layout with an explicit HomeDir. Used by
 // callers whose DataDir isn't a subdirectory of HomeDir (e.g. system-
 // service installs where DataDir = /var/lib/yoloai but the user's
 // $HOME is elsewhere). Panics on empty input — same Q-X discipline as
-// NewLayout.
+// NewLayout. HostUID / HostGID are populated from fileutil.HostUID /
+// HostGID (the F31 chokepoint); use Layout{} literals when a test
+// needs fully explicit fields.
 func NewLayoutFor(dataDir, homeDir string) Layout {
 	if dataDir == "" {
 		panic("config.NewLayoutFor: dataDir is required")
@@ -77,7 +112,13 @@ func NewLayoutFor(dataDir, homeDir string) Layout {
 	if homeDir == "" {
 		panic("config.NewLayoutFor: homeDir is required")
 	}
-	return Layout{DataDir: dataDir, HomeDir: homeDir}
+	return Layout{
+		DataDir:       dataDir,
+		HomeDir:       homeDir,
+		HostUID:       fileutil.HostUID(),
+		HostGID:       fileutil.HostGID(),
+		ProcessIsRoot: fileutil.ProcessIsRoot(),
+	}
 }
 
 // YoloaiDir returns the root data directory (an alias for DataDir,

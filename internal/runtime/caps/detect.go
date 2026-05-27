@@ -6,6 +6,8 @@ package caps
 import (
 	"os"
 	"strings"
+
+	"github.com/kstenerud/yoloai/internal/fileutil"
 )
 
 // Injectable file path vars for testing.
@@ -28,7 +30,7 @@ func DetectEnvironment() Environment {
 }
 
 func detectIsRoot() bool {
-	return os.Getuid() == 0
+	return fileutil.ProcessIsRoot()
 }
 
 func detectIsWSL2() bool {
@@ -65,7 +67,7 @@ func detectKVMGroup() bool {
 	username := os.Getenv("USER")
 	if username == "" {
 		// Fall back to parsing /etc/passwd by UID.
-		username = usernameFromPasswd(os.Getuid())
+		username = usernameFromPasswd(fileutil.HostUID())
 	}
 	if username == "" {
 		return false

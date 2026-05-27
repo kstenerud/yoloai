@@ -159,7 +159,9 @@ func hasUnappliedWork(workDir, baselineSHA string) bool {
 // ContainerUser is re-exported from store so existing callers in this
 // package continue to compile. The body lives in store/meta.go now so
 // patch/ can reach it without importing the sandbox parent (F6).
-func ContainerUser(meta *store.Meta) string { return store.ContainerUser(meta) }
+func ContainerUser(meta *store.Meta, hostUID int) string {
+	return store.ContainerUser(meta, hostUID)
+}
 
 // IsolationPerms holds filesystem permission values that vary by isolation mode.
 // Under container-enhanced (gVisor), the entrypoint remaps the container's yoloai
@@ -194,8 +196,10 @@ func Perms(isolation runtime.IsolationMode) IsolationPerms {
 }
 
 // ExecInContainer runs a command inside a sandbox instance and returns stdout.
-func ExecInContainer(ctx context.Context, rt runtime.Runtime, sandboxName string, meta *store.Meta, cmd []string) (string, error) {
-	result, err := rt.Exec(ctx, store.InstanceName(sandboxName), cmd, ContainerUser(meta))
+// hostUID is layout.HostUID at the boundary (F31); it precedes cmd so
+// multi-line cmd literals at call sites stay readable.
+func ExecInContainer(ctx context.Context, rt runtime.Runtime, sandboxName string, meta *store.Meta, hostUID int, cmd []string) (string, error) {
+	result, err := rt.Exec(ctx, store.InstanceName(sandboxName), cmd, ContainerUser(meta, hostUID))
 	if err != nil {
 		return "", err
 	}

@@ -119,7 +119,9 @@ func SaveMeta(dir string, meta *Meta) error {
 // placeholder UID used at build time), not the container's live
 // /etc/passwd (updated by the entrypoint's uid-remap step). Use the
 // numeric host UID instead to match the remapped container user.
-func ContainerUser(meta *Meta) string {
+// hostUID is layout.HostUID at the boundary; F31's "library never
+// reads os.Getuid()" discipline.
+func ContainerUser(meta *Meta, hostUID int) string {
 	if meta == nil {
 		return "yoloai"
 	}
@@ -127,7 +129,7 @@ func ContainerUser(meta *Meta) string {
 		return ""
 	}
 	if meta.Isolation == runtime.IsolationModeContainerEnhanced {
-		return fmt.Sprintf("%d", os.Getuid())
+		return fmt.Sprintf("%d", hostUID)
 	}
 	return "yoloai"
 }

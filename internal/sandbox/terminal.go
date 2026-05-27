@@ -47,7 +47,7 @@ func (m *Manager) CaptureTerminal(ctx context.Context, name string, scrollback i
 
 	containerName := store.InstanceName(name)
 	socket := m.runtime.TmuxSocket(m.layout.SandboxDir(name))
-	user := ContainerUser(info.Meta)
+	user := ContainerUser(info.Meta, m.layout.HostUID)
 
 	plain, err = m.capturePane(ctx, containerName, socket, user, scrollback, false)
 	if err != nil {

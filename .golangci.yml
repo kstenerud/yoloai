@@ -106,6 +106,17 @@ linters:
         - pattern: "filepath\\.Dir\\(.*\\.DataDir\\)"
           msg: "use layout.HomeDir; the F13 contract is that config.Layout carries HomeDir as a separate field — see internal/config/layout.go"
 
+        # F31 enforcement: library code never reads the process UID/GID
+        # directly. config.Layout carries HostUID, HostGID, ProcessIsRoot;
+        # the CLI's single licensed read (via fileutil.HostUID /
+        # fileutil.HostGID / fileutil.ProcessIsRoot) feeds Layout. Library
+        # callers read layout.HostUID / layout.HostGID / layout.ProcessIsRoot.
+        # See development-principles.md §12 (No ambient configuration).
+        - pattern: "^os\\.Getuid$"
+          msg: "use layout.HostUID (or fileutil.HostUID at the OS boundary); library code must not read the process UID directly — see internal/config/layout.go"
+        - pattern: "^os\\.Getgid$"
+          msg: "use layout.HostGID (or fileutil.HostGID at the OS boundary); library code must not read the process GID directly — see internal/config/layout.go"
+
         # W-L10 enforcement of the W-L8 spine layering. The CLI must
         # consume orchestration through yoloai.Client / yoloai.SystemClient,
         # not by constructing sandbox.Manager or holding a raw
