@@ -1,4 +1,4 @@
-package cli
+package cliutil_test
 
 import (
 	"errors"

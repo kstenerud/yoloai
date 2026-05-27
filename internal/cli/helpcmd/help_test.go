@@ -1,29 +1,14 @@
 // ABOUTME: Tests for the built-in help/guide system: topic lookup, aliases,
-// ABOUTME: unknown topic suggestions, and content loading.
-package cli
+// ABOUTME: unknown topic suggestions, and content loading. These touch
+// ABOUTME: package-private state so they live in package helpcmd.
+package helpcmd
 
 import (
-	"bytes"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-func TestHelpCmd_NoArgs_ShowsQuickstart(t *testing.T) {
-	cmd := newHelpCmd()
-	// Give it a parent with the group so GroupID validation passes.
-	root := NewRootCmd("test", "abc", "now")
-	root.AddCommand(cmd)
-
-	buf := new(bytes.Buffer)
-	cmd.SetOut(buf)
-	cmd.SetArgs([]string{})
-	require.NoError(t, cmd.Execute())
-
-	// quickstart.md content should contain the basic workflow
-	// (topic resolution tested separately below)
-}
 
 func TestTopicLookup_Primary(t *testing.T) {
 	tests := []struct {
@@ -132,16 +117,4 @@ func TestLevenshtein(t *testing.T) {
 			assert.Equal(t, tt.want, levenshtein(tt.a, tt.b))
 		})
 	}
-}
-
-func TestBareInvocation_ShowsIntro(t *testing.T) {
-	root := NewRootCmd("test", "abc", "now")
-	buf := new(bytes.Buffer)
-	root.SetOut(buf)
-	root.SetArgs([]string{})
-	require.NoError(t, root.Execute())
-
-	out := buf.String()
-	assert.Contains(t, out, "yoloai help")
-	assert.Contains(t, out, "yoloai -h")
 }

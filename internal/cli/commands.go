@@ -6,11 +6,13 @@ package cli
 import (
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
 	"github.com/kstenerud/yoloai/internal/cli/configcmd"
+	"github.com/kstenerud/yoloai/internal/cli/helpcmd"
 	"github.com/kstenerud/yoloai/internal/cli/lifecycle"
 	"github.com/kstenerud/yoloai/internal/cli/mcp"
 	"github.com/kstenerud/yoloai/internal/cli/profile"
 	"github.com/kstenerud/yoloai/internal/cli/sandboxcmd"
 	"github.com/kstenerud/yoloai/internal/cli/system"
+	"github.com/kstenerud/yoloai/internal/cli/versioncmd"
 	"github.com/kstenerud/yoloai/internal/cli/workflow"
 	"github.com/kstenerud/yoloai/internal/cli/xcmd"
 	"github.com/spf13/cobra"
@@ -54,8 +56,8 @@ func registerCommands(root *cobra.Command, version, commit, date string) {
 		// Admin
 		system.NewCmd(version, commit, date),
 		profile.NewCmd(),
-		newHelpCmd(),
+		helpcmd.NewCmd(),
 		configcmd.NewCmd(),
-		newVersionCmd(version, commit, date),
+		versioncmd.NewCmd(version, commit, date),
 	)
 }

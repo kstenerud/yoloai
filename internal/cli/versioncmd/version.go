@@ -1,6 +1,6 @@
 // ABOUTME: 'version' command — prints the build version, commit, and date.
 // ABOUTME: Supports JSON output via the global --json flag.
-package cli
+package versioncmd
 
 import (
 	"fmt"
@@ -10,7 +10,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func newVersionCmd(version, commit, date string) *cobra.Command {
+func NewCmd(version, commit, date string) *cobra.Command {
 	return &cobra.Command{
 		Use:     "version",
 		Short:   "Show version information",

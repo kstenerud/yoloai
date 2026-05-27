@@ -1,4 +1,4 @@
-package cli
+package helpcmd
 
 // ABOUTME: Built-in help/guide system. Provides keyword-based topic guides
 // ABOUTME: via embedded markdown files with fuzzy suggestion for unknown topics.
@@ -49,7 +49,7 @@ var topicFunc = map[string]func() string{
 	"models": generateAgentsTopic,
 }
 
-func newHelpCmd() *cobra.Command {
+func NewCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:     "help [topic]",
 		Short:   "Show help guides (run 'help topics' to list all)",

@@ -1,4 +1,4 @@
-package cli
+package cliutil_test
 
 // ABOUTME: Unit tests for JSON output helper functions.
 
