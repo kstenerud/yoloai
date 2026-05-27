@@ -1,4 +1,4 @@
-package cli
+package lifecycle
 
 // ABOUTME: `yoloai clone` — top-level command to clone a sandbox.
 // ABOUTME: Also available as `yoloai sandbox clone` for backward compatibility.
@@ -119,7 +119,7 @@ func addCloneFlags(cmd *cobra.Command) {
 	cmd.MarkFlagsMutuallyExclusive("prompt", "prompt-file")
 }
 
-func newCloneCmd() *cobra.Command {
+func NewCloneCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "clone <source> <dest>",
 		Short:   "Clone a sandbox",

@@ -6,6 +6,7 @@ package cli
 import (
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
 	"github.com/kstenerud/yoloai/internal/cli/configcmd"
+	"github.com/kstenerud/yoloai/internal/cli/lifecycle"
 	"github.com/kstenerud/yoloai/internal/cli/mcp"
 	"github.com/kstenerud/yoloai/internal/cli/profile"
 	"github.com/kstenerud/yoloai/internal/cli/system"
@@ -25,13 +26,13 @@ func registerCommands(root *cobra.Command, version, commit, date string) {
 
 	root.AddCommand(
 		// Lifecycle
-		newNewCmd(version),
-		newCloneCmd(),
-		newStartCmd(),
-		newStopCmd(),
-		newRestartCmd(),
-		newDestroyCmd(),
-		newResetCmd(),
+		lifecycle.NewNewCmd(version),
+		lifecycle.NewCloneCmd(),
+		lifecycle.NewStartCmd(),
+		lifecycle.NewStopCmd(),
+		lifecycle.NewRestartCmd(),
+		lifecycle.NewDestroyCmd(),
+		lifecycle.NewResetCmd(),
 		mcp.NewCmd(),
 
 		// Workflow

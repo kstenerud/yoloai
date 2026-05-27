@@ -1,7 +1,7 @@
 // ABOUTME: 'new' command — create and start a sandbox in one step. Wires CLI
 // ABOUTME: flags to sandbox.CreateOptions, validates isolation/OS combos, and
 // ABOUTME: handles the optional auto-attach after creation.
-package cli
+package lifecycle
 
 import (
 	"context"
@@ -22,7 +22,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func newNewCmd(version string) *cobra.Command {
+func NewNewCmd(version string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "new [flags] <name> [workdir] [-d <dir>...] [-- <agent-args>...]",
 		Short:   "Create and start a sandbox",

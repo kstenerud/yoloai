@@ -1,6 +1,6 @@
 // ABOUTME: Cobra "reset" command: re-copies workdir into the sandbox and resets
 // ABOUTME: the diff baseline, with optional container restart and auto-attach.
-package cli
+package lifecycle
 
 import (
 	"context"
@@ -24,7 +24,7 @@ type resetOpts struct {
 	debug      bool
 }
 
-func newResetCmd() *cobra.Command {
+func NewResetCmd() *cobra.Command {
 	opts := &resetOpts{}
 	cmd := &cobra.Command{
 		Use:     "reset <name>",

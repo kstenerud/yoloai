@@ -1,6 +1,6 @@
 // ABOUTME: Cobra "stop" command: stops one or more running sandbox containers
 // ABOUTME: while preserving their state for a later restart.
-package cli
+package lifecycle
 
 import (
 	"context"
@@ -17,7 +17,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func newStopCmd() *cobra.Command {
+func NewStopCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "stop <name>...",
 		Short:   "Stop sandboxes (preserving state)",

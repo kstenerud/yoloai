@@ -1,4 +1,4 @@
-package cli
+package lifecycle
 
 import (
 	"testing"
@@ -12,7 +12,7 @@ func TestDestroyCmd_AllWithNames(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
 
-	cmd := newDestroyCmd()
+	cmd := NewDestroyCmd()
 	cmd.SetArgs([]string{"--all", "mybox"})
 	err := cmd.Execute()
 	require.Error(t, err)
@@ -30,7 +30,7 @@ func TestDestroyCmd_NoArgsNoEnv(t *testing.T) {
 	// inside withRuntime's callback. If Docker is unavailable, we get a
 	// connection error instead — which is still an error, so we just verify
 	// the command doesn't succeed silently.
-	cmd := newDestroyCmd()
+	cmd := NewDestroyCmd()
 	cmd.SetArgs([]string{})
 	err := cmd.Execute()
 	assert.Error(t, err)
@@ -42,14 +42,14 @@ func TestDestroyCmd_InvalidName(t *testing.T) {
 
 	// Invalid names fail at ValidateName inside the runtime callback.
 	// Same caveat as above — if Docker is unavailable, we get a different error.
-	cmd := newDestroyCmd()
+	cmd := NewDestroyCmd()
 	cmd.SetArgs([]string{"INVALID_NAME!!"})
 	err := cmd.Execute()
 	assert.Error(t, err)
 }
 
 func TestDestroyCmd_AllFlagRegistered(t *testing.T) {
-	cmd := newDestroyCmd()
+	cmd := NewDestroyCmd()
 	assert.NotNil(t, cmd.Flags().Lookup("all"))
 	assert.NotNil(t, cmd.Flags().Lookup("yes"))
 }
