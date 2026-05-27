@@ -265,10 +265,15 @@ func (c *Client) Run(ctx context.Context, opts RunOptions) (*sandbox.Info, error
 	return c.pollUntilDone(ctx, opts.Name, opts.OnProgress)
 }
 
-// Diff returns the diff of agent changes for a sandbox.
-// Equivalent to 'yoloai diff <name>'.
-func (c *Client) Diff(_ context.Context, name string) ([]*patch.DiffResult, error) {
-	return patch.GenerateMultiDiff(patch.DiffOptions{Name: name, Layout: c.layout})
+// Diff returns the workdir diff of agent changes for a sandbox.
+// Equivalent to 'yoloai diff <name>'. Returns the diff text — an
+// empty string means no changes (Q-U).
+//
+// For :overlay-mode workdirs, callers must use DiffOverlay; this
+// helper short-circuits to "" + patch.ErrOverlayRequiresRuntime
+// because the overlay diff path needs container exec.
+func (c *Client) Diff(ctx context.Context, name string) (string, error) {
+	return patch.GenerateDiff(ctx, patch.DiffOptions{Name: name, Layout: c.layout, Runtime: c.rt})
 }
 
 // Apply applies the agent's committed changes back to the original host
@@ -361,11 +366,14 @@ func (c *Client) ContainerLogs(ctx context.Context, name string, tailLines int) 
 	return c.rt.Logs(ctx, store.InstanceName(name), tailLines)
 }
 
-// DiffSingle generates the working-tree diff for a non-overlay, non-multi
-// sandbox. paths optionally narrows the diff to specific files; stat /
-// nameOnly correspond to `git diff --stat` and `--name-only`.
-// Equivalent to the CLI's plain `yoloai diff <name>` on a :copy workdir.
-func (c *Client) DiffSingle(ctx context.Context, name string, paths []string, stat, nameOnly bool) (*patch.DiffResult, error) {
+// DiffWithOptions generates the workdir diff with explicit filter
+// options. paths narrows the diff to specific files; stat / nameOnly
+// correspond to `git diff --stat` and `--name-only`. Returns the diff
+// text — empty string means no changes (Q-U).
+//
+// :overlay workdirs short-circuit to "" + patch.ErrOverlayRequiresRuntime;
+// use DiffOverlay for those.
+func (c *Client) DiffWithOptions(ctx context.Context, name string, paths []string, stat, nameOnly bool) (string, error) {
 	return patch.GenerateDiff(ctx, patch.DiffOptions{
 		Name:     name,
 		Layout:   c.layout,
@@ -376,10 +384,10 @@ func (c *Client) DiffSingle(ctx context.Context, name string, paths []string, st
 	})
 }
 
-// DiffOverlay generates the diff for an :overlay-mode sandbox. Returns
-// one DiffResult per overlay'd directory (workdir and any aux dirs);
-// container must be running because git diff runs inside it.
-func (c *Client) DiffOverlay(ctx context.Context, name string, stat, nameOnly bool) ([]*patch.DiffResult, error) {
+// DiffOverlay generates the workdir diff for an :overlay-mode
+// sandbox by running git inside the container. Returns the diff text
+// (empty string for no changes). The container must be running.
+func (c *Client) DiffOverlay(ctx context.Context, name string, stat, nameOnly bool) (string, error) {
 	return patch.GenerateOverlayDiff(ctx, c.rt, patch.DiffOptions{
 		Name:     name,
 		Layout:   c.layout,
@@ -388,16 +396,10 @@ func (c *Client) DiffOverlay(ctx context.Context, name string, stat, nameOnly bo
 	})
 }
 
-// DiffMultiDir generates the diff across all of a sandbox's directories.
-// Disk-only — does not consult the runtime. The CLI uses this for the
-// host-side portion of overlay diffs and for sandboxes with aux dirs.
-func (c *Client) DiffMultiDir(_ context.Context, name string, stat bool) ([]*patch.DiffResult, error) {
-	return patch.GenerateMultiDiff(patch.DiffOptions{Name: name, Layout: c.layout, Stat: stat})
-}
-
 // DiffRef generates the diff for a specific commit (or commit range)
-// inside the sandbox's history. Disk-only.
-func (c *Client) DiffRef(_ context.Context, name, ref string, stat bool) (*patch.DiffResult, error) {
+// inside the sandbox's history. Disk-only. Returns the diff text —
+// empty string means no changes.
+func (c *Client) DiffRef(_ context.Context, name, ref string, stat bool) (string, error) {
 	return patch.GenerateCommitDiff(patch.CommitDiffOptions{
 		Name:   name,
 		Layout: c.layout,

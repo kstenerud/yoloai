@@ -105,39 +105,40 @@ func runDiffCmd(cmd *cobra.Command, args []string) error {
 		return diffRef(cmd, name, ref, stat)
 	}
 
-	// Default: monolithic diff
+	// Q-U: diff is workdir-only — overlay routes through container
+	// exec; everything else goes through the single workdir helper.
 	if overlay {
 		return diffOverlay(cmd, name, stat, nameOnly)
 	}
-
-	if len(meta.Directories) > 0 && len(paths) == 0 {
-		if cliutil.JSONEnabled(cmd) {
-			return diffMultiDirJSON(cmd, name, stat)
-		}
-		return diffMultiDir(cmd, name, stat)
-	}
-
 	return diffSingle(cmd, name, paths, stat, nameOnly)
 }
 
-// diffSingle runs a diff for a single (non-overlay, non-multi) directory.
+// diffSingle runs a diff for the sandbox's workdir.
 func diffSingle(cmd *cobra.Command, name string, paths []string, stat, nameOnly bool) error {
 	backend := cliutil.ResolveBackendForSandbox(name)
 	return cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
-		result, err := c.DiffSingle(ctx, name, paths, stat, nameOnly)
+		out, err := c.DiffWithOptions(ctx, name, paths, stat, nameOnly)
 		if err != nil {
 			return err
 		}
-		if cliutil.JSONEnabled(cmd) {
-			return cliutil.WriteJSON(cmd.OutOrStdout(), result)
-		}
-		if result.Empty {
-			_, err = fmt.Fprintln(cmd.OutOrStdout(), "No changes")
-			return err
-		}
-		_, err = fmt.Fprintln(cmd.OutOrStdout(), result.Output)
-		return err
+		return writeDiffOutput(cmd, out)
 	})
+}
+
+// writeDiffOutput emits a diff string to stdout, normalizing the
+// "no changes" case (empty string → "No changes" in human mode, an
+// empty JSON object in --json mode) so every diff entry point handles
+// it the same way.
+func writeDiffOutput(cmd *cobra.Command, out string) error {
+	if cliutil.JSONEnabled(cmd) {
+		return cliutil.WriteJSON(cmd.OutOrStdout(), map[string]string{"diff": out})
+	}
+	if out == "" {
+		_, err := fmt.Fprintln(cmd.OutOrStdout(), "No changes")
+		return err
+	}
+	_, err := fmt.Fprintln(cmd.OutOrStdout(), out)
+	return err
 }
 
 // hasOverlayDirs returns true if any directory in the sandbox uses overlay mode.
@@ -165,98 +166,20 @@ func requireOverlayRunning(ctx context.Context, c *yoloai.Client, name string) e
 	return nil
 }
 
-// diffOverlay handles the default diff for sandboxes with overlay dirs.
-// Merges overlay results (from container exec) with non-overlay results.
+// diffOverlay runs the diff for an :overlay-mode workdir. Routes
+// through container exec since git lives inside the container.
 func diffOverlay(cmd *cobra.Command, name string, stat, nameOnly bool) error {
 	backend := cliutil.ResolveBackendForSandbox(name)
 	return cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
 		if err := requireOverlayRunning(ctx, c, name); err != nil {
 			return err
 		}
-
-		// Get overlay diffs via container exec
-		overlayResults, err := c.DiffOverlay(ctx, name, stat, nameOnly)
+		out, err := c.DiffOverlay(ctx, name, stat, nameOnly)
 		if err != nil {
 			return err
 		}
-
-		// Get non-overlay diffs (copy/rw) via host
-		hostResults, err := c.DiffMultiDir(ctx, name, stat)
-		if err != nil {
-			return err
-		}
-
-		merged := mergeOverlayDiffResults(hostResults, overlayResults)
-
-		if cliutil.JSONEnabled(cmd) {
-			if merged == nil {
-				merged = []*patch.DiffResult{}
-			}
-			return cliutil.WriteJSON(cmd.OutOrStdout(), merged)
-		}
-
-		return printMergedDiffResults(cmd, merged)
+		return writeDiffOutput(cmd, out)
 	})
-}
-
-// mergeOverlayDiffResults merges overlay results into host results.
-func mergeOverlayDiffResults(hostResults, overlayResults []*patch.DiffResult) []*patch.DiffResult {
-	var merged []*patch.DiffResult
-	for _, r := range hostResults {
-		if r.Mode == "overlay" {
-			// Find matching overlay result
-			for _, or := range overlayResults {
-				if or.WorkDir == r.WorkDir {
-					merged = append(merged, or)
-					break
-				}
-			}
-		} else {
-			merged = append(merged, r)
-		}
-	}
-	// Add any overlay results not matched (shouldn't happen, but be safe)
-	matchedOverlay := make(map[string]bool)
-	for _, r := range hostResults {
-		if r.Mode == "overlay" {
-			matchedOverlay[r.WorkDir] = true
-		}
-	}
-	for _, or := range overlayResults {
-		if !matchedOverlay[or.WorkDir] {
-			merged = append(merged, or)
-		}
-	}
-	return merged
-}
-
-// printMergedDiffResults prints multiple diff results to stdout.
-func printMergedDiffResults(cmd *cobra.Command, merged []*patch.DiffResult) error {
-	allEmpty := true
-	for _, r := range merged {
-		if !r.Empty {
-			allEmpty = false
-			break
-		}
-	}
-	if allEmpty {
-		_, err := fmt.Fprintln(cmd.OutOrStdout(), "No changes")
-		return err
-	}
-
-	var sb strings.Builder
-	for _, r := range merged {
-		if r.Empty {
-			continue
-		}
-		fmt.Fprintf(&sb, "=== %s (%s) ===\n", r.WorkDir, r.Mode)
-		sb.WriteString(r.Output)
-		sb.WriteString("\n\n")
-	}
-
-	output := strings.TrimRight(sb.String(), "\n") + "\n"
-	_, err := fmt.Fprint(cmd.OutOrStdout(), output)
-	return err
 }
 
 // diffLogOverlay lists commits for overlay sandboxes by executing git log inside the container.
@@ -452,22 +375,11 @@ func diffLogWIP(cmd *cobra.Command, name string, out io.Writer) {
 func diffRef(cmd *cobra.Command, name, ref string, stat bool) error {
 	backend := cliutil.ResolveBackendForSandbox(name)
 	return cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
-		result, err := c.DiffRef(ctx, name, ref, stat)
+		out, err := c.DiffRef(ctx, name, ref, stat)
 		if err != nil {
 			return err
 		}
-
-		if cliutil.JSONEnabled(cmd) {
-			return cliutil.WriteJSON(cmd.OutOrStdout(), result)
-		}
-
-		if result.Empty {
-			_, err = fmt.Fprintln(cmd.OutOrStdout(), "No changes")
-			return err
-		}
-
-		_, err = fmt.Fprintln(cmd.OutOrStdout(), result.Output)
-		return err
+		return writeDiffOutput(cmd, out)
 	})
 }
 
@@ -487,56 +399,6 @@ func agentRunningWarning(cmd *cobra.Command, name string) {
 		}
 		return nil
 	})
-}
-
-// diffMultiDir shows diffs for all diffable directories with per-dir headers.
-// Disk-only; no runtime needed, but routed through WithClient for symmetry.
-func diffMultiDir(cmd *cobra.Command, name string, stat bool) error {
-	backend := cliutil.ResolveBackendForSandbox(name)
-	return cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
-		return diffMultiDirInner(cmd, ctx, c, name, stat)
-	})
-}
-
-// diffMultiDirInner is the body of diffMultiDir factored out so the
-// WithClient open-and-close lives at the entry point.
-func diffMultiDirInner(cmd *cobra.Command, ctx context.Context, c *yoloai.Client, name string, stat bool) error {
-	results, err := c.DiffMultiDir(ctx, name, stat)
-	if err != nil {
-		return err
-	}
-
-	allEmpty := true
-	for _, r := range results {
-		if !r.Empty {
-			allEmpty = false
-			break
-		}
-	}
-
-	if allEmpty {
-		_, err = fmt.Fprintln(cmd.OutOrStdout(), "No changes")
-		return err
-	}
-
-	var sb strings.Builder
-	for _, r := range results {
-		if r.Empty {
-			continue
-		}
-		fmt.Fprintf(&sb, "=== %s (%s) ===\n", r.WorkDir, r.Mode)
-		sb.WriteString(r.Output)
-		sb.WriteString("\n\n")
-	}
-
-	output := strings.TrimRight(sb.String(), "\n") + "\n"
-	if stat {
-		_, err = fmt.Fprint(cmd.OutOrStdout(), output)
-		return err
-	}
-
-	_, err = fmt.Fprint(cmd.OutOrStdout(), output)
-	return err
 }
 
 // diffLogJSON outputs commit log as JSON.
@@ -581,21 +443,5 @@ func diffLogJSON(cmd *cobra.Command, name string, stat bool) error {
 		}
 
 		return cliutil.WriteJSON(cmd.OutOrStdout(), result)
-	})
-}
-
-// diffMultiDirJSON outputs multi-directory diffs as JSON.
-// Disk-only, but routed through WithClient for symmetry.
-func diffMultiDirJSON(cmd *cobra.Command, name string, stat bool) error {
-	backend := cliutil.ResolveBackendForSandbox(name)
-	return cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
-		results, err := c.DiffMultiDir(ctx, name, stat)
-		if err != nil {
-			return err
-		}
-		if results == nil {
-			results = []*patch.DiffResult{}
-		}
-		return cliutil.WriteJSON(cmd.OutOrStdout(), results)
 	})
 }

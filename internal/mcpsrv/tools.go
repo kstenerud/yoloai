@@ -276,21 +276,15 @@ func (s *Server) handleSandboxDiff(_ context.Context, req mcp.CallToolRequest) (
 		return textResult(errorf("name is required")), nil
 	}
 
-	results, err := s.c.DiffMultiDir(context.Background(), name, stat)
+	diff, err := s.c.DiffWithOptions(context.Background(), name, nil, stat, false)
 	if err != nil {
 		return textResult(errorf("diff sandbox %q: %v", name, err)), nil
 	}
 
-	if len(results) == 0 {
+	if diff == "" {
 		return textResult("[ERROR] no changes to diff"), nil
 	}
-
-	var parts []string
-	for _, r := range results {
-		parts = append(parts, fmt.Sprintf("--- %s ---\n%s", r.WorkDir, r.Output))
-	}
-
-	return textResult(strings.Join(parts, "\n\n")), nil
+	return textResult(diff), nil
 }
 
 func (s *Server) handleSandboxDiffFile(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -304,20 +298,18 @@ func (s *Server) handleSandboxDiffFile(ctx context.Context, req mcp.CallToolRequ
 		return textResult(errorf("path is required")), nil
 	}
 
-	// DiffSingle uses the Client's bound runtime. For Docker/Podman/
-	// containerd that's host-side git (the pre-Client comment about
-	// "nil runtime for Docker" is preserved as a no-op here since the
-	// patch package handles container vs host-side selection itself).
-	result, err := s.c.DiffSingle(ctx, name, []string{path}, false, false)
+	// DiffWithOptions uses the Client's bound runtime. For Docker /
+	// Podman / containerd that's host-side git (the patch package
+	// handles container-vs-host selection internally).
+	diff, err := s.c.DiffWithOptions(ctx, name, []string{path}, false, false)
 	if err != nil {
 		return textResult(errorf("diff file %q in sandbox %q: %v", path, name, err)), nil
 	}
 
-	if result.Empty || result.Output == "" {
+	if diff == "" {
 		return textResult(fmt.Sprintf("No changes in %s", path)), nil
 	}
-
-	return textResult(result.Output), nil
+	return textResult(diff), nil
 }
 
 func (s *Server) handleSandboxLog(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {

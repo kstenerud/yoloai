@@ -71,8 +71,8 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 
 	diffResult, err := patch.GenerateDiff(ctx, patch.DiffOptions{Name: sandboxName, Layout: mgr.Layout(), Runtime: mgr.Runtime()})
 	require.NoError(t, err)
-	assert.False(t, diffResult.Empty)
-	assert.Contains(t, diffResult.Output, "fmt")
+	assert.NotEmpty(t, diffResult)
+	assert.Contains(t, diffResult, "fmt")
 
 	// Stop container and verify
 	require.NoError(t, mgr.Stop(ctx, sandboxName))
@@ -397,7 +397,7 @@ func TestIntegration_DiffClean(t *testing.T) {
 
 	diffResult, err := patch.GenerateDiff(ctx, patch.DiffOptions{Name: "diffclean", Layout: mgr.Layout(), Runtime: mgr.Runtime()})
 	require.NoError(t, err)
-	assert.True(t, diffResult.Empty)
+	assert.Empty(t, diffResult)
 }
 
 func TestIntegration_DiffWithChanges(t *testing.T) {
@@ -426,8 +426,8 @@ func TestIntegration_DiffWithChanges(t *testing.T) {
 
 	diffResult, err := patch.GenerateDiff(ctx, patch.DiffOptions{Name: "diffchanges", Layout: mgr.Layout(), Runtime: mgr.Runtime()})
 	require.NoError(t, err)
-	assert.False(t, diffResult.Empty)
-	assert.Contains(t, diffResult.Output, "fmt")
+	assert.NotEmpty(t, diffResult)
+	assert.Contains(t, diffResult, "fmt")
 }
 
 func TestIntegration_ApplyPatch(t *testing.T) {
@@ -777,8 +777,8 @@ func TestIntegration_AgentStubWorkflow(t *testing.T) {
 	// Diff should detect the new file
 	diffResult, err := patch.GenerateDiff(ctx, patch.DiffOptions{Name: "stubworkflow", Layout: mgr.Layout(), Runtime: mgr.Runtime()})
 	require.NoError(t, err)
-	assert.False(t, diffResult.Empty, "diff should not be empty after agent created a file")
-	assert.Contains(t, diffResult.Output, "agent-output.txt")
+	assert.NotEmpty(t, diffResult, "diff should not be empty after agent created a file")
+	assert.Contains(t, diffResult, "agent-output.txt")
 
 	// Generate patch and apply to a fresh copy of the original project
 	patchBytes, stat, err := patch.GeneratePatch(ctx, mgr.Layout(), mgr.Runtime(), "stubworkflow", nil, true)
@@ -829,8 +829,8 @@ func TestIntegration_Clone(t *testing.T) {
 	// Diff on clone should show the seeded change
 	diffResult, err := patch.GenerateDiff(ctx, patch.DiffOptions{Name: "clone-b", Layout: mgr.Layout(), Runtime: mgr.Runtime()})
 	require.NoError(t, err)
-	assert.False(t, diffResult.Empty, "cloned sandbox should have changes")
-	assert.Contains(t, diffResult.Output, "clone-test")
+	assert.NotEmpty(t, diffResult, "cloned sandbox should have changes")
+	assert.Contains(t, diffResult, "clone-test")
 }
 
 func TestIntegration_Overlay(t *testing.T) {
@@ -907,12 +907,13 @@ func TestIntegration_Overlay(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 0, writeResult.ExitCode)
 
-	// Diff: must use GenerateOverlayDiff (GenerateDiff returns a stub for overlay)
-	diffResults, err := patch.GenerateOverlayDiff(ctx, mgr.Runtime(), patch.DiffOptions{Name: "overlay-integ", Layout: mgr.Layout()})
+	// Diff: must use GenerateOverlayDiff (GenerateDiff returns
+	// ErrOverlayRequiresRuntime for overlay; overlay needs container
+	// exec).
+	overlayDiff, err := patch.GenerateOverlayDiff(ctx, mgr.Runtime(), patch.DiffOptions{Name: "overlay-integ", Layout: mgr.Layout()})
 	require.NoError(t, err)
-	require.NotEmpty(t, diffResults, "overlay diff should return results")
-	assert.False(t, diffResults[0].Empty, "overlay should have changes after exec write")
-	assert.Contains(t, diffResults[0].Output, "output.txt")
+	assert.NotEmpty(t, overlayDiff, "overlay should have changes after exec write")
+	assert.Contains(t, overlayDiff, "output.txt")
 
 	// Apply: must use GenerateOverlayPatch (ApplyAll skips overlay dirs)
 	patches, err := patch.GenerateOverlayPatch(ctx, mgr.Layout(), mgr.Runtime(), "overlay-integ", nil)

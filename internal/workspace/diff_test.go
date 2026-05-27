@@ -17,12 +17,9 @@ func TestCopyDiff_NoChanges(t *testing.T) {
 	gitCommit(t, dir, "initial")
 
 	sha := headSHA(t, dir)
-	result, err := CopyDiff(dir, sha, nil, false, false)
+	out, err := CopyDiff(dir, sha, nil, false, false)
 	require.NoError(t, err)
-	assert.True(t, result.Empty)
-	assert.Equal(t, "", result.Output)
-	assert.Equal(t, "copy", result.Mode)
-	assert.Equal(t, dir, result.WorkDir)
+	assert.Empty(t, out)
 }
 
 func TestCopyDiff_WithChanges(t *testing.T) {
@@ -33,15 +30,11 @@ func TestCopyDiff_WithChanges(t *testing.T) {
 	gitCommit(t, dir, "initial")
 
 	sha := headSHA(t, dir)
-
-	// Make a change
 	writeTestFile(t, dir, "file.txt", "hello world\n")
 
-	result, err := CopyDiff(dir, sha, nil, false, false)
+	out, err := CopyDiff(dir, sha, nil, false, false)
 	require.NoError(t, err)
-	assert.False(t, result.Empty)
-	assert.Contains(t, result.Output, "hello world")
-	assert.Equal(t, "copy", result.Mode)
+	assert.Contains(t, out, "hello world")
 }
 
 func TestCopyDiff_WithStat(t *testing.T) {
@@ -52,15 +45,12 @@ func TestCopyDiff_WithStat(t *testing.T) {
 	gitCommit(t, dir, "initial")
 
 	sha := headSHA(t, dir)
-
 	writeTestFile(t, dir, "file.txt", "hello world\n")
 
-	result, err := CopyDiff(dir, sha, nil, true, false)
+	out, err := CopyDiff(dir, sha, nil, true, false)
 	require.NoError(t, err)
-	assert.False(t, result.Empty)
-	assert.Contains(t, result.Output, "file.txt")
-	// Stat output shows change count
-	assert.Contains(t, result.Output, "1 file changed")
+	assert.Contains(t, out, "file.txt")
+	assert.Contains(t, out, "1 file changed")
 }
 
 func TestCopyDiff_WithPathFilter(t *testing.T) {
@@ -72,16 +62,13 @@ func TestCopyDiff_WithPathFilter(t *testing.T) {
 	gitCommit(t, dir, "initial")
 
 	sha := headSHA(t, dir)
-
 	writeTestFile(t, dir, "a.txt", "aaa\n")
 	writeTestFile(t, dir, "b.txt", "bbb\n")
 
-	// Only show changes to a.txt
-	result, err := CopyDiff(dir, sha, []string{"a.txt"}, false, false)
+	out, err := CopyDiff(dir, sha, []string{"a.txt"}, false, false)
 	require.NoError(t, err)
-	assert.False(t, result.Empty)
-	assert.Contains(t, result.Output, "a.txt")
-	assert.NotContains(t, result.Output, "b.txt")
+	assert.Contains(t, out, "a.txt")
+	assert.NotContains(t, out, "b.txt")
 }
 
 func TestCopyDiff_NewUntrackedFile(t *testing.T) {
@@ -92,26 +79,24 @@ func TestCopyDiff_NewUntrackedFile(t *testing.T) {
 	gitCommit(t, dir, "initial")
 
 	sha := headSHA(t, dir)
-
-	// Add a new file
 	writeTestFile(t, dir, "new.txt", "new content\n")
 
-	result, err := CopyDiff(dir, sha, nil, false, false)
+	out, err := CopyDiff(dir, sha, nil, false, false)
 	require.NoError(t, err)
-	assert.False(t, result.Empty)
-	// StageUntracked should pick up the new file
-	assert.Contains(t, result.Output, "new.txt")
+	// StageUntracked should pick up the new file.
+	assert.Contains(t, out, "new.txt")
 }
 
 // --- RWDiff ---
 
+// :rw pointed at a non-git tree was previously a special
+// "informational" DiffResult. Q-U collapses it to an empty string —
+// callers treat non-git :rw the same as "no changes".
 func TestRWDiff_NotGitRepo(t *testing.T) {
 	dir := t.TempDir()
-	result, err := RWDiff(dir, nil, false, false)
+	out, err := RWDiff(dir, nil, false, false)
 	require.NoError(t, err)
-	assert.True(t, result.Empty)
-	assert.Contains(t, result.Output, "not a git repository")
-	assert.Equal(t, "rw", result.Mode)
+	assert.Empty(t, out)
 }
 
 func TestRWDiff_NoChanges(t *testing.T) {
@@ -121,10 +106,9 @@ func TestRWDiff_NoChanges(t *testing.T) {
 	gitAdd(t, dir, ".")
 	gitCommit(t, dir, "initial")
 
-	result, err := RWDiff(dir, nil, false, false)
+	out, err := RWDiff(dir, nil, false, false)
 	require.NoError(t, err)
-	assert.True(t, result.Empty)
-	assert.Equal(t, "rw", result.Mode)
+	assert.Empty(t, out)
 }
 
 func TestRWDiff_WithChanges(t *testing.T) {
@@ -136,11 +120,9 @@ func TestRWDiff_WithChanges(t *testing.T) {
 
 	writeTestFile(t, dir, "file.txt", "hello world\n")
 
-	result, err := RWDiff(dir, nil, false, false)
+	out, err := RWDiff(dir, nil, false, false)
 	require.NoError(t, err)
-	assert.False(t, result.Empty)
-	assert.Contains(t, result.Output, "hello world")
-	assert.Equal(t, "rw", result.Mode)
+	assert.Contains(t, out, "hello world")
 }
 
 func TestRWDiff_WithStat(t *testing.T) {
@@ -152,10 +134,9 @@ func TestRWDiff_WithStat(t *testing.T) {
 
 	writeTestFile(t, dir, "file.txt", "hello world\n")
 
-	result, err := RWDiff(dir, nil, true, false)
+	out, err := RWDiff(dir, nil, true, false)
 	require.NoError(t, err)
-	assert.False(t, result.Empty)
-	assert.Contains(t, result.Output, "file.txt")
+	assert.Contains(t, out, "file.txt")
 }
 
 func TestRWDiff_WithPathFilter(t *testing.T) {
@@ -169,11 +150,10 @@ func TestRWDiff_WithPathFilter(t *testing.T) {
 	writeTestFile(t, dir, "a.txt", "aaa\n")
 	writeTestFile(t, dir, "b.txt", "bbb\n")
 
-	result, err := RWDiff(dir, []string{"a.txt"}, false, false)
+	out, err := RWDiff(dir, []string{"a.txt"}, false, false)
 	require.NoError(t, err)
-	assert.False(t, result.Empty)
-	assert.Contains(t, result.Output, "a.txt")
-	assert.NotContains(t, result.Output, "b.txt")
+	assert.Contains(t, out, "a.txt")
+	assert.NotContains(t, out, "b.txt")
 }
 
 // headSHA returns the HEAD SHA of a git repo.

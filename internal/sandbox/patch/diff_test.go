@@ -92,10 +92,9 @@ func TestGenerateDiff_CopyMode_ModifiedFile(t *testing.T) {
 	rt := getTestRuntime(t)
 	result, err := GenerateDiff(context.Background(), DiffOptions{Name: "test-mod", Layout: testLayout(tmpDir), Runtime: rt})
 	require.NoError(t, err)
-	assert.False(t, result.Empty)
-	assert.Equal(t, "copy", result.Mode)
-	assert.Contains(t, result.Output, "modified content")
-	assert.Contains(t, result.Output, "original content")
+	assert.NotEmpty(t, result)
+	assert.Contains(t, result, "modified content")
+	assert.Contains(t, result, "original content")
 }
 
 func TestGenerateDiff_CopyMode_UntrackedFile(t *testing.T) {
@@ -108,9 +107,9 @@ func TestGenerateDiff_CopyMode_UntrackedFile(t *testing.T) {
 	rt := getTestRuntime(t)
 	result, err := GenerateDiff(context.Background(), DiffOptions{Name: "test-new", Layout: testLayout(tmpDir), Runtime: rt})
 	require.NoError(t, err)
-	assert.False(t, result.Empty)
-	assert.Contains(t, result.Output, "created.txt")
-	assert.Contains(t, result.Output, "new file content")
+	assert.NotEmpty(t, result)
+	assert.Contains(t, result, "created.txt")
+	assert.Contains(t, result, "new file content")
 }
 
 func TestGenerateDiff_CopyMode_BinaryFile(t *testing.T) {
@@ -128,9 +127,9 @@ func TestGenerateDiff_CopyMode_BinaryFile(t *testing.T) {
 	rt := getTestRuntime(t)
 	result, err := GenerateDiff(context.Background(), DiffOptions{Name: "test-bin", Layout: testLayout(tmpDir), Runtime: rt})
 	require.NoError(t, err)
-	assert.False(t, result.Empty)
+	assert.NotEmpty(t, result)
 	// --binary produces a GIT binary patch
-	assert.Contains(t, result.Output, "GIT binary patch")
+	assert.Contains(t, result, "GIT binary patch")
 }
 
 func TestGenerateDiff_CopyMode_Empty(t *testing.T) {
@@ -143,7 +142,7 @@ func TestGenerateDiff_CopyMode_Empty(t *testing.T) {
 	rt := getTestRuntime(t)
 	result, err := GenerateDiff(context.Background(), DiffOptions{Name: "test-empty", Layout: testLayout(tmpDir), Runtime: rt})
 	require.NoError(t, err)
-	assert.True(t, result.Empty)
+	assert.Empty(t, result)
 }
 
 func TestGenerateDiff_CopyMode_PathFilter(t *testing.T) {
@@ -162,9 +161,9 @@ func TestGenerateDiff_CopyMode_PathFilter(t *testing.T) {
 		Runtime: rt,
 	})
 	require.NoError(t, err)
-	assert.False(t, result.Empty)
-	assert.Contains(t, result.Output, "file.txt")
-	assert.NotContains(t, result.Output, "other.txt")
+	assert.NotEmpty(t, result)
+	assert.Contains(t, result, "file.txt")
+	assert.NotContains(t, result, "other.txt")
 }
 
 func TestGenerateDiff_RWMode_GitRepo(t *testing.T) {
@@ -187,9 +186,8 @@ func TestGenerateDiff_RWMode_GitRepo(t *testing.T) {
 	rt := getTestRuntime(t)
 	result, err := GenerateDiff(context.Background(), DiffOptions{Name: "test-rw", Layout: testLayout(tmpDir), Runtime: rt})
 	require.NoError(t, err)
-	assert.False(t, result.Empty)
-	assert.Equal(t, "rw", result.Mode)
-	assert.Contains(t, result.Output, "modified")
+	assert.NotEmpty(t, result)
+	assert.Contains(t, result, "modified")
 }
 
 func TestGenerateDiff_RWMode_NotGitRepo(t *testing.T) {
@@ -204,8 +202,9 @@ func TestGenerateDiff_RWMode_NotGitRepo(t *testing.T) {
 	rt := getTestRuntime(t)
 	result, err := GenerateDiff(context.Background(), DiffOptions{Name: "test-rw-nogit", Layout: testLayout(tmpDir), Runtime: rt})
 	require.NoError(t, err)
-	assert.True(t, result.Empty)
-	assert.Contains(t, result.Output, "not a git repository")
+	// Q-U: non-git :rw collapses to "no changes" (empty string)
+	// rather than the previous informational message.
+	assert.Empty(t, result)
 }
 
 // GenerateDiffStat tests
@@ -221,11 +220,11 @@ func TestGenerateDiffStat_CopyMode(t *testing.T) {
 	rt := getTestRuntime(t)
 	result, err := GenerateDiff(context.Background(), DiffOptions{Name: "test-stat", Layout: testLayout(tmpDir), Stat: true, Runtime: rt})
 	require.NoError(t, err)
-	assert.False(t, result.Empty)
-	assert.Contains(t, result.Output, "file.txt")
-	assert.Contains(t, result.Output, "new.txt")
+	assert.NotEmpty(t, result)
+	assert.Contains(t, result, "file.txt")
+	assert.Contains(t, result, "new.txt")
 	// Stat output contains insertion/deletion counts
-	assert.Contains(t, result.Output, "insertion")
+	assert.Contains(t, result, "insertion")
 }
 
 // loadDiffContext tests
@@ -265,9 +264,9 @@ func TestGenerateCommitDiff_SingleCommit(t *testing.T) {
 		Ref:    commits[0].SHA,
 	})
 	require.NoError(t, err)
-	assert.False(t, result.Empty)
-	assert.Contains(t, result.Output, "feature.txt")
-	assert.NotContains(t, result.Output, "other.txt")
+	assert.NotEmpty(t, result)
+	assert.Contains(t, result, "feature.txt")
+	assert.NotContains(t, result, "other.txt")
 	_ = workDir
 }
 
@@ -298,9 +297,9 @@ func TestGenerateCommitDiff_Range(t *testing.T) {
 		Ref:    ref,
 	})
 	require.NoError(t, err)
-	assert.False(t, result.Empty)
-	assert.Contains(t, result.Output, "b.txt")
-	assert.Contains(t, result.Output, "c.txt")
+	assert.NotEmpty(t, result)
+	assert.Contains(t, result, "b.txt")
+	assert.Contains(t, result, "c.txt")
 }
 
 func TestGenerateCommitDiff_Stat(t *testing.T) {
@@ -327,9 +326,9 @@ func TestGenerateCommitDiff_Stat(t *testing.T) {
 		Stat:   true,
 	})
 	require.NoError(t, err)
-	assert.False(t, result.Empty)
-	assert.Contains(t, result.Output, "feature.txt")
-	assert.Contains(t, result.Output, "1 file changed")
+	assert.NotEmpty(t, result)
+	assert.Contains(t, result, "feature.txt")
+	assert.Contains(t, result, "1 file changed")
 }
 
 func TestGenerateCommitDiff_RWError(t *testing.T) {

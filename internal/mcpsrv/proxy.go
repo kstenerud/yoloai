@@ -433,21 +433,15 @@ func (p *ProxyServer) tryHandleLocalToolCall(
 func (p *ProxyServer) handleProxyDiff(args map[string]any) map[string]any {
 	stat, _ := args["stat"].(bool)
 
-	results, err := p.c.DiffMultiDir(context.Background(), p.sandboxName, stat)
+	diff, err := p.c.DiffWithOptions(context.Background(), p.sandboxName, nil, stat, false)
 	if err != nil {
 		return mcpTextContent(errorf("diff sandbox %q: %v", p.sandboxName, err))
 	}
 
-	if len(results) == 0 {
+	if diff == "" {
 		return mcpTextContent("[ERROR] no changes to diff")
 	}
-
-	var parts []string
-	for _, r := range results {
-		parts = append(parts, fmt.Sprintf("--- %s ---\n%s", r.WorkDir, r.Output))
-	}
-
-	return mcpTextContent(strings.Join(parts, "\n\n"))
+	return mcpTextContent(diff)
 }
 
 // mcpTextContent returns an MCP tool result with a single text content item.

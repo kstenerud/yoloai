@@ -1,5 +1,5 @@
-// ABOUTME: Diff generation for sandbox work directories across :copy, :overlay, and :rw modes.
-// ABOUTME: Provides context loading, multi-dir diff, overlay diff, and commit-level diff helpers.
+// ABOUTME: Diff generation for sandbox workdirs across :copy, :overlay, and :rw modes.
+// ABOUTME: Provides context loading, workdir diff, overlay diff, and commit-level diff.
 
 // Package patch generates and applies git-format patches between a sandbox's
 // host work directory and its in-sandbox copy. Covers :copy, :overlay, and
@@ -25,46 +25,47 @@ type DiffOptions struct {
 	Stat     bool            // true for --stat summary only
 	NameOnly bool            // true for --name-only (list changed files)
 	Paths    []string        // optional path filter (relative to workdir)
-	Runtime  runtime.Runtime // runtime backend (required for VM-exec diff path)
+	Runtime  runtime.Runtime // runtime backend (required for :copy and :overlay)
 }
 
-// DiffResult is an alias for workspace.DiffResult.
-type DiffResult = workspace.DiffResult
-
-// GenerateDiff produces a diff of agent changes for a sandbox.
-// For :copy mode: stages untracked files, then runs git diff --binary
-// against the baseline SHA stored in meta.json.
-// For :rw mode: runs git diff HEAD on the live host directory.
-// Returns an informational DiffResult (not error) for :rw non-git dirs.
-// Set opts.Stat for a summary, opts.NameOnly for a file list only.
-func GenerateDiff(ctx context.Context, opts DiffOptions) (*DiffResult, error) {
+// GenerateDiff produces the workdir diff for a sandbox.
+//
+// Returns the diff text — empty string means no changes. Q-U
+// collapsed diff to the workdir only, so there is no per-directory
+// metadata to return; the caller already knows which sandbox/workdir
+// they asked about.
+//
+// Mode dispatch:
+//   - :copy: stages untracked files (via opts.Runtime.GitExec), then
+//     `git diff` against baseline.
+//   - :rw: host-side `git diff HEAD`. Non-git :rw returns "" (no
+//     diff available).
+//   - :overlay: returns an empty string and ErrOverlayRequiresRuntime —
+//     overlay diffs need container exec; route through
+//     GenerateOverlayDiff.
+func GenerateDiff(ctx context.Context, opts DiffOptions) (string, error) {
 	workDir, baselineSHA, mode, err := loadDiffContext(opts.Layout, opts.Name)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 
 	switch mode {
 	case "rw":
 		return workspace.RWDiff(workDir, opts.Paths, opts.Stat, opts.NameOnly)
+
 	case "overlay":
-		return &DiffResult{
-			Output: "Diff for :overlay directories requires 'yoloai diff' (runs git inside container)",
-			Mode:   "overlay",
-			Empty:  true,
-		}, nil
+		return "", ErrOverlayRequiresRuntime
+
 	default: // "copy"
-		// Stage untracked files
-		_, err := opts.Runtime.GitExec(ctx, opts.Name, workDir, "add", "-A")
-		if err != nil {
-			return nil, err
+		if _, err := opts.Runtime.GitExec(ctx, opts.Name, workDir, "add", "-A"); err != nil {
+			return "", err
 		}
 
-		// Build git diff command
 		args := []string{"diff", "--binary", baselineSHA}
-		if opts.Stat {
+		switch {
+		case opts.Stat:
 			args = []string{"diff", "--stat", baselineSHA}
-		}
-		if opts.NameOnly {
+		case opts.NameOnly:
 			args = []string{"diff", "--name-only", baselineSHA}
 		}
 		if len(opts.Paths) > 0 {
@@ -73,14 +74,17 @@ func GenerateDiff(ctx context.Context, opts DiffOptions) (*DiffResult, error) {
 		}
 
 		output, err := opts.Runtime.GitExec(ctx, opts.Name, workDir, args...)
-		return &DiffResult{
-			Output:  output,
-			WorkDir: workDir,
-			Mode:    "copy",
-			Empty:   len(strings.TrimSpace(output)) == 0,
-		}, err
+		if err != nil {
+			return "", err
+		}
+		return strings.TrimRight(output, "\n"), nil
 	}
 }
+
+// ErrOverlayRequiresRuntime is returned by GenerateDiff when called
+// on a :overlay-mode sandbox. Overlay diffs run inside the container;
+// route through GenerateOverlayDiff instead.
+var ErrOverlayRequiresRuntime = fmt.Errorf("overlay diff requires runtime exec; use GenerateOverlayDiff")
 
 // CommitDiffOptions controls commit-level diff generation.
 type CommitDiffOptions struct {
@@ -92,18 +96,19 @@ type CommitDiffOptions struct {
 
 // GenerateCommitDiff produces a diff for a specific commit or range
 // within the sandbox work copy. Only works for :copy mode sandboxes.
-func GenerateCommitDiff(opts CommitDiffOptions) (*DiffResult, error) {
+// Returns the diff text (empty string if there are no changes).
+func GenerateCommitDiff(opts CommitDiffOptions) (string, error) {
 	workDir, _, mode, err := loadDiffContext(opts.Layout, opts.Name)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 
 	if mode == "rw" {
-		return nil, fmt.Errorf("commit diff is not available for :rw directories")
+		return "", fmt.Errorf("commit diff is not available for :rw directories")
 	}
 
 	if err := workspace.StageUntracked(workDir); err != nil {
-		return nil, err
+		return "", err
 	}
 
 	args := []string{"diff"}
@@ -124,16 +129,9 @@ func GenerateCommitDiff(opts CommitDiffOptions) (*DiffResult, error) {
 	cmd := workspace.NewGitCmd(workDir, args...)
 	output, err := cmd.Output()
 	if err != nil {
-		return nil, fmt.Errorf("git diff %s: %w", opts.Ref, err)
+		return "", fmt.Errorf("git diff %s: %w", opts.Ref, err)
 	}
-
-	result := strings.TrimRight(string(output), "\n")
-	return &DiffResult{
-		Output:  result,
-		WorkDir: workDir,
-		Mode:    "copy",
-		Empty:   len(result) == 0,
-	}, nil
+	return strings.TrimRight(string(output), "\n"), nil
 }
 
 // CommitInfoWithStat extends CommitInfo with a per-commit stat summary.
@@ -212,7 +210,7 @@ func loadDiffContext(layout config.Layout, name string) (workDir string, baselin
 	return workDir, baselineSHA, mode, nil
 }
 
-// DiffContext holds the resolved paths needed for diff/apply on one directory.
+// DiffContext holds the resolved paths needed for diff/apply on the workdir.
 type DiffContext struct {
 	HostPath    string // original host path (for display)
 	WorkDir     string // path to diff against (work copy for :copy, container path for :overlay, host path for :rw)
@@ -223,8 +221,8 @@ type DiffContext struct {
 // LoadAllDiffContexts returns the diff context for the sandbox's
 // workdir. After Q-U (2026-05-25) the diff/apply surface is
 // workdir-only; aux dirs only support :rw / :ro and aren't
-// diffable. The slice return shape is preserved so existing iterator
-// callers (GenerateMultiDiff, GenerateOverlayPatch,
+// diffable. The slice return shape is preserved so the existing
+// overlay loop callers (GenerateOverlayPatch,
 // UpdateOverlayBaselineToHEAD, ListCommitsBeyondBaselineOverlay)
 // don't need their loop bodies rewritten.
 func LoadAllDiffContexts(layout config.Layout, name string) ([]DiffContext, error) {
@@ -267,41 +265,6 @@ func LoadAllDiffContexts(layout config.Layout, name string) ([]DiffContext, erro
 	return nil, nil
 }
 
-// GenerateMultiDiff produces diffs for all diffable directories in the sandbox.
-// Uses opts.Stat and opts.Name; opts.Paths and opts.NameOnly are ignored (multi-dir context).
-// NOTE: This does not handle :overlay directories. Use GenerateOverlayDiff for overlay mode.
-func GenerateMultiDiff(opts DiffOptions) ([]*DiffResult, error) {
-	contexts, err := LoadAllDiffContexts(opts.Layout, opts.Name)
-	if err != nil {
-		return nil, err
-	}
-
-	var results []*DiffResult
-	for _, dc := range contexts {
-		var result *DiffResult
-		switch dc.Mode {
-		case "rw":
-			result, err = workspace.RWDiff(dc.WorkDir, nil, opts.Stat, false)
-		case "overlay":
-			// Overlay dirs require container exec; skip here
-			result = &DiffResult{
-				Output: "Diff for :overlay directories requires 'yoloai diff' (runs git inside container)",
-				Mode:   "overlay",
-				Empty:  true,
-			}
-		default:
-			result, err = workspace.CopyDiff(dc.WorkDir, dc.BaselineSHA, nil, opts.Stat, false)
-		}
-		if err != nil {
-			return nil, fmt.Errorf("diff %s: %w", dc.HostPath, err)
-		}
-		result.WorkDir = dc.HostPath // use host path for display
-		results = append(results, result)
-	}
-
-	return results, nil
-}
-
 // copyGitWorkDir returns the path where git should run for a copy-mode directory.
 // For VM backends (e.g. Tart), the work copy is copied to a VM-local path stored in
 // mountPath, which differs from hostPath. For host-based backends (Docker, Seatbelt),
@@ -315,117 +278,102 @@ func copyGitWorkDir(sandboxDir, hostPath, mountPath string) string {
 }
 
 // ListCommitsBeyondBaselineOverlay returns commits beyond the baseline for
-// overlay-mode directories by executing git log inside the running container.
+// an overlay-mode workdir by executing git log inside the running container.
 func ListCommitsBeyondBaselineOverlay(ctx context.Context, layout config.Layout, rt runtime.Runtime, name string) ([]CommitInfo, error) {
 	meta, err := store.LoadMeta(layout.SandboxDir(name))
 	if err != nil {
 		return nil, fmt.Errorf("load metadata: %w", err)
 	}
-	contexts, err := LoadAllDiffContexts(layout, name)
+	if meta.Workdir.Mode != "overlay" {
+		return nil, nil
+	}
+
+	dc, err := overlayDiffContext(layout, name)
 	if err != nil {
 		return nil, err
+	}
+
+	baselineSHA, err := ensureOverlayBaseline(ctx, layout, rt, name, meta, dc)
+	if err != nil {
+		return nil, err
+	}
+
+	stdout, err := sandbox.ExecInContainer(ctx, rt, name, meta, []string{
+		"git", "-C", dc.WorkDir, "log", "--reverse", "--format=%H %s", baselineSHA + "..HEAD",
+	})
+	if err != nil {
+		return nil, fmt.Errorf("git log in %s: %w", dc.HostPath, err)
 	}
 
 	var commits []CommitInfo
-
-	for _, dc := range contexts {
-		if dc.Mode != "overlay" {
+	for line := range strings.SplitSeq(strings.TrimSpace(stdout), "\n") {
+		sha, subject, ok := strings.Cut(line, " ")
+		if !ok {
 			continue
 		}
-
-		baselineSHA, baselineErr := ensureOverlayBaseline(ctx, layout, rt, name, meta, dc)
-		if baselineErr != nil {
-			return nil, baselineErr
-		}
-
-		stdout, err := sandbox.ExecInContainer(ctx, rt, name, meta, []string{
-			"git", "-C", dc.WorkDir, "log", "--reverse", "--format=%H %s", baselineSHA + "..HEAD",
-		})
-		if err != nil {
-			return nil, fmt.Errorf("git log in %s: %w", dc.HostPath, err)
-		}
-
-		lines := strings.TrimSpace(stdout)
-		if lines == "" {
-			continue
-		}
-
-		for line := range strings.SplitSeq(lines, "\n") {
-			sha, subject, ok := strings.Cut(line, " ")
-			if !ok {
-				continue
-			}
-			commits = append(commits, CommitInfo{SHA: sha, Subject: subject})
-		}
+		commits = append(commits, CommitInfo{SHA: sha, Subject: subject})
 	}
-
 	return commits, nil
 }
 
-// GenerateOverlayDiff generates a diff for overlay-mode directories by
-// executing git commands inside the running container.
+// GenerateOverlayDiff produces the workdir diff for an :overlay-mode
+// sandbox by executing git commands inside the running container.
 // Use opts.Stat for a summary, opts.NameOnly for a file list only.
-func GenerateOverlayDiff(ctx context.Context, rt runtime.Runtime, opts DiffOptions) ([]*DiffResult, error) {
-	return generateOverlayDiff(ctx, opts.Layout, rt, opts.Name, opts.Stat, opts.NameOnly)
+// Returns the diff text (empty string if there are no changes).
+func GenerateOverlayDiff(ctx context.Context, rt runtime.Runtime, opts DiffOptions) (string, error) {
+	meta, err := store.LoadMeta(opts.Layout.SandboxDir(opts.Name))
+	if err != nil {
+		return "", fmt.Errorf("load metadata: %w", err)
+	}
+	if meta.Workdir.Mode != "overlay" {
+		return "", nil
+	}
+
+	dc, err := overlayDiffContext(opts.Layout, opts.Name)
+	if err != nil {
+		return "", err
+	}
+
+	baselineSHA, err := ensureOverlayBaseline(ctx, opts.Layout, rt, opts.Name, meta, dc)
+	if err != nil {
+		return "", err
+	}
+
+	// Stage untracked files
+	if _, err := sandbox.ExecInContainer(ctx, rt, opts.Name, meta, []string{
+		"git", "-C", dc.WorkDir, "add", "-A",
+	}); err != nil {
+		return "", fmt.Errorf("stage untracked in %s: %w", dc.HostPath, err)
+	}
+
+	args := []string{"git", "-c", "core.hooksPath=/dev/null", "-C", dc.WorkDir, "diff"}
+	switch {
+	case opts.NameOnly:
+		args = append(args, "--name-only")
+	case opts.Stat:
+		args = append(args, "--stat")
+	default:
+		args = append(args, "--binary")
+	}
+	args = append(args, baselineSHA)
+
+	stdout, err := sandbox.ExecInContainer(ctx, rt, opts.Name, meta, args)
+	if err != nil {
+		return "", fmt.Errorf("git diff in %s: %w", dc.HostPath, err)
+	}
+	return strings.TrimRight(stdout, "\n"), nil
 }
 
-func generateOverlayDiff(ctx context.Context, layout config.Layout, rt runtime.Runtime, name string, stat, nameOnly bool) ([]*DiffResult, error) {
-	meta, err := store.LoadMeta(layout.SandboxDir(name))
-	if err != nil {
-		return nil, fmt.Errorf("load metadata: %w", err)
-	}
+// overlayDiffContext returns the workdir's DiffContext, asserting the
+// mode is overlay. Used by GenerateOverlayDiff /
+// ListCommitsBeyondBaselineOverlay as a small typed accessor.
+func overlayDiffContext(layout config.Layout, name string) (DiffContext, error) {
 	contexts, err := LoadAllDiffContexts(layout, name)
 	if err != nil {
-		return nil, err
+		return DiffContext{}, err
 	}
-
-	var results []*DiffResult
-
-	for _, dc := range contexts {
-		if dc.Mode != "overlay" {
-			// Non-overlay dirs handled by GenerateMultiDiff
-			continue
-		}
-
-		// Resolve baseline SHA if deferred (creates fresh baseline if git is broken)
-		baselineSHA, baselineErr := ensureOverlayBaseline(ctx, layout, rt, name, meta, dc)
-		if baselineErr != nil {
-			return nil, baselineErr
-		}
-
-		// Stage untracked files
-		_, err := sandbox.ExecInContainer(ctx, rt, name, meta, []string{
-			"git", "-C", dc.WorkDir, "add", "-A",
-		})
-		if err != nil {
-			return nil, fmt.Errorf("stage untracked in %s: %w", dc.HostPath, err)
-		}
-
-		// Generate diff
-		args := []string{"git", "-c", "core.hooksPath=/dev/null", "-C", dc.WorkDir, "diff"}
-		switch {
-		case nameOnly:
-			args = append(args, "--name-only")
-		case stat:
-			args = append(args, "--stat")
-		default:
-			args = append(args, "--binary")
-		}
-		args = append(args, baselineSHA)
-
-		stdout, err := sandbox.ExecInContainer(ctx, rt, name, meta, args)
-		if err != nil {
-			return nil, fmt.Errorf("git diff in %s: %w", dc.HostPath, err)
-		}
-
-		result := strings.TrimRight(stdout, "\n")
-		results = append(results, &DiffResult{
-			Output:  result,
-			WorkDir: dc.HostPath,
-			Mode:    "overlay",
-			Empty:   len(result) == 0,
-		})
+	if len(contexts) == 0 || contexts[0].Mode != "overlay" {
+		return DiffContext{}, fmt.Errorf("sandbox %s is not in overlay mode", name)
 	}
-
-	return results, nil
+	return contexts[0], nil
 }

@@ -140,8 +140,8 @@ func TestIntegrationTart_FullLifecycle(t *testing.T) {
 	// Generate diff (should use VM-exec path for Tart)
 	diffResult, err := patch.GenerateDiff(ctx, patch.DiffOptions{Name: sandboxName, Layout: mgr.Layout()})
 	require.NoError(t, err)
-	assert.False(t, diffResult.Empty, "diff should not be empty after modification")
-	assert.Contains(t, diffResult.Output, "fmt.Println", "diff should contain modification")
+	assert.NotEmpty(t, diffResult, "diff should not be empty after modification")
+	assert.Contains(t, diffResult, "fmt.Println", "diff should contain modification")
 
 	// Stop VM and verify
 	require.NoError(t, mgr.Stop(ctx, sandboxName))
@@ -325,8 +325,8 @@ func TestIntegrationTart_GitCorruption(t *testing.T) {
 
 	diffResult, err := patch.GenerateDiff(ctx, patch.DiffOptions{Name: sandboxName, Layout: mgr.Layout()})
 	require.NoError(t, err)
-	assert.False(t, diffResult.Empty)
-	assert.Contains(t, diffResult.Output, "test.txt")
+	assert.NotEmpty(t, diffResult)
+	assert.Contains(t, diffResult, "test.txt")
 }
 
 // TestIntegrationTart_VMLocalStorageVerification verifies work directory is on local VM storage, not VirtioFS.
