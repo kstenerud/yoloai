@@ -198,8 +198,8 @@ func TestParsePortBindings_Valid(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, mappings, 2)
 
-	assert.Equal(t, runtime.PortMapping{HostPort: "3000", InstancePort: "3000", Protocol: "tcp"}, mappings[0])
-	assert.Equal(t, runtime.PortMapping{HostPort: "8080", InstancePort: "80", Protocol: "tcp"}, mappings[1])
+	assert.Equal(t, runtime.PortMapping{HostPort: 3000, ContainerPort: 3000, Protocol: "tcp"}, mappings[0])
+	assert.Equal(t, runtime.PortMapping{HostPort: 8080, ContainerPort: 80, Protocol: "tcp"}, mappings[1])
 }
 
 func TestParsePortBindings_Invalid(t *testing.T) {

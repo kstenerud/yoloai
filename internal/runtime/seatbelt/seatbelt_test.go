@@ -33,7 +33,7 @@ func TestGenerateProfile_ReadOnlyMount(t *testing.T) {
 	cfg := runtime.InstanceConfig{
 		Name: "test",
 		Mounts: []runtime.MountSpec{
-			{Source: "/path/to/src", Target: "/path/to/src", ReadOnly: true},
+			{Host: "/path/to/src", Container: "/path/to/src", ReadOnly: true},
 		},
 	}
 	profile := GenerateProfile(cfg, "/tmp/sandbox", "/Users/testuser")
@@ -50,7 +50,7 @@ func TestGenerateProfile_ReadWriteMount(t *testing.T) {
 	cfg := runtime.InstanceConfig{
 		Name: "test",
 		Mounts: []runtime.MountSpec{
-			{Source: "/path/to/work", Target: "/path/to/work", ReadOnly: false},
+			{Host: "/path/to/work", Container: "/path/to/work", ReadOnly: false},
 		},
 	}
 	profile := GenerateProfile(cfg, "/tmp/sandbox", "/Users/testuser")
@@ -64,9 +64,9 @@ func TestGenerateProfile_MultipleMounts(t *testing.T) {
 	cfg := runtime.InstanceConfig{
 		Name: "test",
 		Mounts: []runtime.MountSpec{
-			{Source: "/src/project", Target: "/src/project", ReadOnly: false},
-			{Source: "/etc/config", Target: "/etc/config", ReadOnly: true},
-			{Source: "/data/db", Target: "/data/db", ReadOnly: false},
+			{Host: "/src/project", Container: "/src/project", ReadOnly: false},
+			{Host: "/etc/config", Container: "/etc/config", ReadOnly: true},
+			{Host: "/data/db", Container: "/data/db", ReadOnly: false},
 		},
 	}
 	profile := GenerateProfile(cfg, "/tmp/sandbox", "/Users/testuser")
@@ -154,7 +154,7 @@ func TestGenerateProfile_EmptyMountSourceSkipped(t *testing.T) {
 	cfg := runtime.InstanceConfig{
 		Name: "test",
 		Mounts: []runtime.MountSpec{
-			{Source: "", Target: "/some/path", ReadOnly: false},
+			{Host: "", Container: "/some/path", ReadOnly: false},
 		},
 	}
 	profile := GenerateProfile(cfg, "/tmp/sandbox", "/Users/testuser")
@@ -184,7 +184,7 @@ func TestGenerateProfile_SymlinkResolution(t *testing.T) {
 	cfg := runtime.InstanceConfig{
 		Name: "test",
 		Mounts: []runtime.MountSpec{
-			{Source: symlinkPath, Target: symlinkPath, ReadOnly: false},
+			{Host: symlinkPath, Container: symlinkPath, ReadOnly: false},
 		},
 	}
 	profile := GenerateProfile(cfg, "/tmp/sandbox", "/Users/testuser")
@@ -340,7 +340,7 @@ func TestMountSymlinks(t *testing.T) {
 	targetPath := filepath.Join(targetBase, "nested", "target")
 
 	mounts := []runtime.MountSpec{
-		{Source: srcDir, Target: targetPath, ReadOnly: true},
+		{Host: srcDir, Container: targetPath, ReadOnly: true},
 	}
 
 	created, err := mountSymlinks(mounts)
@@ -374,7 +374,7 @@ func TestMountSymlinks_SkipSecrets(t *testing.T) {
 	srcDir := t.TempDir()
 
 	mounts := []runtime.MountSpec{
-		{Source: srcDir, Target: "/run/secrets/API_KEY", ReadOnly: true},
+		{Host: srcDir, Container: "/run/secrets/API_KEY", ReadOnly: true},
 	}
 
 	created, err := mountSymlinks(mounts)
@@ -388,7 +388,7 @@ func TestMountSymlinks_SkipSecrets(t *testing.T) {
 
 func TestMountSymlinks_SkipSamePath(t *testing.T) {
 	mounts := []runtime.MountSpec{
-		{Source: "/same/path", Target: "/same/path", ReadOnly: true},
+		{Host: "/same/path", Container: "/same/path", ReadOnly: true},
 	}
 
 	created, err := mountSymlinks(mounts)
@@ -412,7 +412,7 @@ func TestMountSymlinks_SkipFiles(t *testing.T) {
 	targetPath := filepath.Join(targetBase, "target-file")
 
 	mounts := []runtime.MountSpec{
-		{Source: srcFile, Target: targetPath, ReadOnly: true},
+		{Host: srcFile, Container: targetPath, ReadOnly: true},
 	}
 
 	created, err := mountSymlinks(mounts)
@@ -426,7 +426,7 @@ func TestMountSymlinks_SkipFiles(t *testing.T) {
 
 func TestMountSymlinks_SkipEmptySource(t *testing.T) {
 	mounts := []runtime.MountSpec{
-		{Source: "", Target: "/some/target", ReadOnly: true},
+		{Host: "", Container: "/some/target", ReadOnly: true},
 	}
 
 	created, err := mountSymlinks(mounts)
@@ -443,7 +443,7 @@ func TestMountSymlinks_SkipExistingTarget(t *testing.T) {
 	targetDir := t.TempDir() // target already exists as a real directory
 
 	mounts := []runtime.MountSpec{
-		{Source: srcDir, Target: targetDir},
+		{Host: srcDir, Container: targetDir},
 	}
 
 	created, err := mountSymlinks(mounts)
@@ -462,7 +462,7 @@ func TestMountSymlinks_SkipUnreachableParent(t *testing.T) {
 	// On macOS /home is managed by auto_master; on all platforms /dev is
 	// not a normal writable directory.
 	mounts := []runtime.MountSpec{
-		{Source: srcDir, Target: "/dev/null/impossible/.state"},
+		{Host: srcDir, Container: "/dev/null/impossible/.state"},
 	}
 
 	created, err := mountSymlinks(mounts)
@@ -494,7 +494,7 @@ func TestPatchConfigWorkingDir_CopyMode(t *testing.T) {
 	}
 
 	mounts := []runtime.MountSpec{
-		{Source: workDir, Target: "/some/target", ReadOnly: false},
+		{Host: workDir, Container: "/some/target", ReadOnly: false},
 	}
 
 	r := &Runtime{}
@@ -529,7 +529,7 @@ func TestPatchConfigWorkingDir_NotCopyMode(t *testing.T) {
 
 	// Mount source is NOT under <sandboxPath>/work/
 	mounts := []runtime.MountSpec{
-		{Source: "/some/other/path", Target: "/target", ReadOnly: false},
+		{Host: "/some/other/path", Container: "/target", ReadOnly: false},
 	}
 
 	r := &Runtime{}
@@ -595,7 +595,7 @@ func TestPatchConfigWorkingDir_AlreadyCorrect(t *testing.T) {
 	}
 
 	mounts := []runtime.MountSpec{
-		{Source: workDir, Target: "/some/target", ReadOnly: false},
+		{Host: workDir, Container: "/some/target", ReadOnly: false},
 	}
 
 	r := &Runtime{}

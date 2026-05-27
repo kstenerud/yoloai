@@ -118,7 +118,7 @@ func TestPodman_BindMountReadWrite(t *testing.T) {
 	name := createTestContainer(t, rt, ctx, yoloairuntime.InstanceConfig{
 		UseInit: true,
 		Mounts: []yoloairuntime.MountSpec{
-			{Source: hostDir, Target: "/mnt/test", ReadOnly: false},
+			{Host: hostDir, Container: "/mnt/test", ReadOnly: false},
 		},
 	})
 	require.NoError(t, rt.Start(ctx, name))
@@ -140,7 +140,7 @@ func TestPodman_BindMountReadOnly(t *testing.T) {
 	name := createTestContainer(t, rt, ctx, yoloairuntime.InstanceConfig{
 		UseInit: true,
 		Mounts: []yoloairuntime.MountSpec{
-			{Source: hostDir, Target: "/mnt/test", ReadOnly: true},
+			{Host: hostDir, Container: "/mnt/test", ReadOnly: true},
 		},
 	})
 	require.NoError(t, rt.Start(ctx, name))
@@ -179,7 +179,7 @@ func TestPodman_PortBinding(t *testing.T) {
 	name := createTestContainer(t, rt, ctx, yoloairuntime.InstanceConfig{
 		UseInit: true,
 		Ports: []yoloairuntime.PortMapping{
-			{HostPort: "0", InstancePort: "8080", Protocol: "tcp"},
+			{HostPort: 0, ContainerPort: 8080, Protocol: "tcp"},
 		},
 	})
 

@@ -38,11 +38,11 @@ func TestBuildRunArgs(t *testing.T) {
 
 	mounts := []runtime.MountSpec{
 		// External dir — should get its own --dir share
-		{Source: extDir, Target: "/Users/karl/project"},
+		{Host: extDir, Container: "/Users/karl/project"},
 		// Sandbox-internal dir — should be skipped (already in yoloai share)
-		{Source: sandboxPath + "/agent-runtime", Target: "/home/yoloai/.claude/"},
+		{Host: sandboxPath + "/agent-runtime", Container: "/home/yoloai/.claude/"},
 		// File mount — should be skipped (VirtioFS only supports dirs)
-		{Source: sandboxPath + "/runtime-config.json", Target: "/yoloai/runtime-config.json"},
+		{Host: sandboxPath + "/runtime-config.json", Container: "/yoloai/runtime-config.json"},
 	}
 	args := r.buildRunArgs("yoloai-test", sandboxPath, mounts)
 
@@ -79,8 +79,8 @@ func TestBuildNetworkArgs_Default(t *testing.T) {
 func TestBuildNetworkArgs_PortForwarding(t *testing.T) {
 	cfg := runtime.InstanceConfig{
 		Ports: []runtime.PortMapping{
-			{HostPort: "8080", InstancePort: "80"},
-			{HostPort: "8443", InstancePort: "443", Protocol: "tcp"},
+			{HostPort: 8080, ContainerPort: 80},
+			{HostPort: 8443, ContainerPort: 443, Protocol: "tcp"},
 		},
 	}
 	args := BuildNetworkArgs(cfg)
@@ -93,7 +93,7 @@ func TestBuildNetworkArgs_IsolatedWithPorts(t *testing.T) {
 	cfg := runtime.InstanceConfig{
 		NetworkMode: "none",
 		Ports: []runtime.PortMapping{
-			{HostPort: "3000", InstancePort: "3000"},
+			{HostPort: 3000, ContainerPort: 3000},
 		},
 	}
 	args := BuildNetworkArgs(cfg)
@@ -107,8 +107,8 @@ func TestBuildNetworkArgs_IsolatedWithPorts(t *testing.T) {
 
 func TestBuildMountSymlinkCmds(t *testing.T) {
 	mounts := []runtime.MountSpec{
-		{Source: "/Users/karl/project", Target: "/Users/karl/project"},
-		{Source: "/Users/karl/.yoloai/sandboxes/test/agent-runtime", Target: "/home/admin/.claude/"},
+		{Host: "/Users/karl/project", Container: "/Users/karl/project"},
+		{Host: "/Users/karl/.yoloai/sandboxes/test/agent-runtime", Container: "/home/admin/.claude/"},
 	}
 	dirNames := map[string]string{
 		"/Users/karl/project":                              "workdir",
@@ -136,7 +136,7 @@ func TestBuildMountSymlinkCmds(t *testing.T) {
 
 func TestBuildMountSymlinkCmds_NoSymlinkNeeded(t *testing.T) {
 	mounts := []runtime.MountSpec{
-		{Source: "/Users/karl/project", Target: "/Volumes/My Shared Files/workdir"},
+		{Host: "/Users/karl/project", Container: "/Volumes/My Shared Files/workdir"},
 	}
 	dirNames := map[string]string{
 		"/Users/karl/project": "workdir",
@@ -221,7 +221,7 @@ func TestCheckVMLimitError_NotDetected(t *testing.T) {
 
 func TestPortForwardArgs(t *testing.T) {
 	ports := []runtime.PortMapping{
-		{HostPort: "8080", InstancePort: "80"},
+		{HostPort: 8080, ContainerPort: 80},
 	}
 	args := portForwardArgs(ports)
 	assert.Equal(t, []string{"--net-softnet-expose=8080:80"}, args)
@@ -234,8 +234,8 @@ func TestPortForwardArgs_Empty(t *testing.T) {
 
 func TestPortForwardArgs_MultipleWithProtocol(t *testing.T) {
 	ports := []runtime.PortMapping{
-		{HostPort: "8080", InstancePort: "80", Protocol: "tcp"},
-		{HostPort: "5353", InstancePort: "53", Protocol: "udp"},
+		{HostPort: 8080, ContainerPort: 80, Protocol: "tcp"},
+		{HostPort: 5353, ContainerPort: 53, Protocol: "udp"},
 	}
 	args := portForwardArgs(ports)
 	assert.Equal(t, []string{"--net-softnet-expose=8080:80,5353:53"}, args)

@@ -23,11 +23,13 @@ func TestConvertMounts_Empty(t *testing.T) {
 
 func TestConvertMounts_SingleRO(t *testing.T) {
 	specs := []runtime.MountSpec{
-		{Source: "/host/path", Target: "/container/path", ReadOnly: true},
+		{Host: "/host/path", Container: "/container/path", ReadOnly: true},
 	}
 	result := ConvertMounts(specs)
 	require.Len(t, result, 1)
 	assert.Equal(t, mount.TypeBind, result[0].Type)
+	// result is []mount.Mount (Docker SDK type) — its fields are Source/Target,
+	// distinct from our MountSpec's Host/Container.
 	assert.Equal(t, "/host/path", result[0].Source)
 	assert.Equal(t, "/container/path", result[0].Target)
 	assert.True(t, result[0].ReadOnly)
@@ -35,9 +37,9 @@ func TestConvertMounts_SingleRO(t *testing.T) {
 
 func TestConvertMounts_MultipleWithRW(t *testing.T) {
 	specs := []runtime.MountSpec{
-		{Source: "/src1", Target: "/dst1", ReadOnly: true},
-		{Source: "/src2", Target: "/dst2", ReadOnly: false},
-		{Source: "/src3", Target: "/dst3", ReadOnly: true},
+		{Host: "/src1", Container: "/dst1", ReadOnly: true},
+		{Host: "/src2", Container: "/dst2", ReadOnly: false},
+		{Host: "/src3", Container: "/dst3", ReadOnly: true},
 	}
 	result := ConvertMounts(specs)
 	require.Len(t, result, 3)
@@ -58,7 +60,7 @@ func TestConvertPorts_Empty(t *testing.T) {
 
 func TestConvertPorts_SingleMapping(t *testing.T) {
 	ports := []runtime.PortMapping{
-		{HostPort: "8080", InstancePort: "80", Protocol: "tcp"},
+		{HostPort: 8080, ContainerPort: 80, Protocol: "tcp"},
 	}
 	portMap, portSet := ConvertPorts(ports)
 	require.Len(t, portMap, 1)
@@ -75,7 +77,7 @@ func TestConvertPorts_SingleMapping(t *testing.T) {
 
 func TestConvertPorts_DefaultProtocol(t *testing.T) {
 	ports := []runtime.PortMapping{
-		{HostPort: "3000", InstancePort: "3000"},
+		{HostPort: 3000, ContainerPort: 3000},
 	}
 	portMap, portSet := ConvertPorts(ports)
 	require.Len(t, portMap, 1)
@@ -88,8 +90,8 @@ func TestConvertPorts_DefaultProtocol(t *testing.T) {
 
 func TestConvertPorts_Multiple(t *testing.T) {
 	ports := []runtime.PortMapping{
-		{HostPort: "8080", InstancePort: "80"},
-		{HostPort: "8443", InstancePort: "443"},
+		{HostPort: 8080, ContainerPort: 80},
+		{HostPort: 8443, ContainerPort: 443},
 	}
 	portMap, portSet := ConvertPorts(ports)
 	require.Len(t, portMap, 2)

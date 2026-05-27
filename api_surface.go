@@ -330,10 +330,16 @@ type MountSpec struct {
 // PortMapping describes a host-to-container port mapping declared in
 // RunOptions.Ports. Replaces the prior []string of "8080:8080[/tcp]"
 // tokens.
+//
+// Field names carry the "Port" suffix deliberately. Without it, "Host
+// int" reads ambiguously — a port number, an IP encoded as int, a
+// hostname hash? The suffix makes it self-documenting. (MountSpec gets
+// away with bare Host/Container because the path-typed fields anchor
+// the meaning visually; integer ports have no such anchor.)
 type PortMapping struct {
-	Host      int
-	Container int
-	Protocol  string // empty = "tcp"
+	HostPort      int
+	ContainerPort int
+	Protocol      string // empty = "tcp"
 }
 
 // PruneItemKind categorises one removed item in PruneResult. Open-set
@@ -2611,8 +2617,12 @@ const (
 //                where MountSpec is { Host, Container string;
 //                                     ReadOnly bool }.
 //            RunOptions.Ports   []string → []PortMapping
-//                where PortMapping is { Host, Container int;
-//                                       Protocol string }.
+//                where PortMapping is { HostPort, ContainerPort int;
+//                                       Protocol string }. The "Port"
+//                suffix is deliberate — without it an int field named
+//                "Host" would read ambiguously (originally documented
+//                as `Host, Container int` but corrected during the
+//                landing sweep — see names.go for the rationale).
 //
 //          Embedders no longer format/parse "host:container[:ro]"
 //          and "8080:8080/tcp" tokens; the CLI parses these from

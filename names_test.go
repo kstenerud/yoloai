@@ -1,6 +1,6 @@
 // ABOUTME: Tests for the Q-Y typed-name aliases at the yoloai root package.
-// ABOUTME: Verifies that BackendName, AgentName, and PruneItemKind preserve
-// ABOUTME: the internal type identity and interoperate cleanly at the boundary.
+// ABOUTME: Verifies that BackendName, AgentName, PruneItemKind, and LogSource
+// ABOUTME: preserve the internal type identity and interoperate cleanly at the boundary.
 
 package yoloai
 
@@ -9,6 +9,7 @@ import (
 
 	"github.com/kstenerud/yoloai/internal/agent"
 	"github.com/kstenerud/yoloai/internal/runtime"
+	"github.com/kstenerud/yoloai/internal/sandbox/store"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -134,4 +135,73 @@ func TestRunOptions_AgentIsTyped(t *testing.T) {
 	default:
 		t.Fatalf("AgentClaude didn't match itself in switch over typed AgentName: %s", opts.Agent)
 	}
+}
+
+// LogSource is a type alias of store.LogSource, parallel to BackendName /
+// AgentName. The same alias-identity test catches a regression where a
+// fresh type slips in.
+func TestLogSource_AliasIdentity(t *testing.T) {
+	// Explicit type annotations are deliberate — they pin the alias
+	// identity. See TestBackendName_AliasIdentity for the rationale.
+	var public LogSource = LogSourceCLI //nolint:staticcheck // ST1023: type pins alias identity
+	var internal store.LogSource        //nolint:staticcheck // ST1023: ditto
+	internal = public
+	assert.Equal(t, "cli", string(internal))
+
+	public = store.LogSourceMonitor
+	assert.Equal(t, LogSourceMonitor, public)
+}
+
+func TestLogSource_ShippedConstants(t *testing.T) {
+	cases := []struct {
+		public LogSource
+		want   string
+	}{
+		{LogSourceCLI, "cli"},
+		{LogSourceSandbox, "sandbox"},
+		{LogSourceMonitor, "monitor"},
+		{LogSourceHooks, "hooks"},
+	}
+	for _, tc := range cases {
+		t.Run(string(tc.public), func(t *testing.T) {
+			assert.Equal(t, tc.want, string(tc.public))
+		})
+	}
+}
+
+// MountSpec is a type alias of runtime.MountSpec; values flow through
+// both names without explicit conversion. Field names are explicit
+// (Host, Container) so direction is obvious at the call site.
+func TestMountSpec_AliasIdentity(t *testing.T) {
+	// Explicit type annotation pins the alias identity. See
+	// TestBackendName_AliasIdentity for why this isn't redundant.
+	var public MountSpec = MountSpec{Host: "/h", Container: "/c", ReadOnly: true} //nolint:staticcheck // ST1023: type pins alias identity
+	var internal runtime.MountSpec
+	internal = public
+	assert.Equal(t, "/h", internal.Host)
+	assert.Equal(t, "/c", internal.Container)
+	assert.True(t, internal.ReadOnly)
+
+	// Reverse direction.
+	internal = runtime.MountSpec{Host: "/x", Container: "/y"}
+	public = internal
+	assert.Equal(t, "/x", public.Host)
+	assert.Equal(t, "/y", public.Container)
+}
+
+// PortMapping is a type alias of runtime.PortMapping; int ports + the
+// Port suffix avoid the ambiguity of "Host int" / "Container int".
+func TestPortMapping_AliasIdentity(t *testing.T) {
+	var public PortMapping = PortMapping{HostPort: 8080, ContainerPort: 80, Protocol: "tcp"} //nolint:staticcheck // ST1023: type pins alias identity
+	var internal runtime.PortMapping
+	internal = public
+	assert.Equal(t, 8080, internal.HostPort)
+	assert.Equal(t, 80, internal.ContainerPort)
+	assert.Equal(t, "tcp", internal.Protocol)
+
+	internal = runtime.PortMapping{HostPort: 5432, ContainerPort: 5432}
+	public = internal
+	assert.Equal(t, 5432, public.HostPort)
+	assert.Equal(t, 5432, public.ContainerPort)
+	assert.Empty(t, public.Protocol, "empty protocol defaults to tcp at the runtime boundary")
 }

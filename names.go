@@ -1,12 +1,13 @@
-// ABOUTME: Public typed-name aliases (Q-Y): BackendName, AgentName, PruneItemKind.
-// ABOUTME: Re-export the internal enum types so embedders importing yoloai don't
-// ABOUTME: need to (and cannot) reach into internal/ packages.
+// ABOUTME: Public typed-name aliases (Q-Y): BackendName, AgentName, PruneItemKind,
+// ABOUTME: LogSource. Re-export the internal enum types so embedders importing yoloai
+// ABOUTME: don't need to (and cannot) reach into internal/ packages.
 
 package yoloai
 
 import (
 	"github.com/kstenerud/yoloai/internal/agent"
 	"github.com/kstenerud/yoloai/internal/runtime"
+	"github.com/kstenerud/yoloai/internal/sandbox/store"
 )
 
 // BackendName names a runtime backend. Open-set typed string —
@@ -68,3 +69,37 @@ const (
 	PruneKindVM        PruneItemKind = "vm"        // tart
 	PruneKindTempDir   PruneItemKind = "temp_dir"  // yoloai-side: stale ~/.yoloai temp dirs
 )
+
+// LogSource names a structured-log stream emitted by one of yoloai's
+// components. Closed set — adding a new source requires both a
+// constant here and a producer in the implementation.
+//
+// Re-exported (type alias) from internal/sandbox/store. Q-Y design
+// promised this exposure at the yoloai root so future LogOptions.Sources
+// callers don't need to reach into internal packages to construct or
+// switch over a typed source list.
+type LogSource = store.LogSource
+
+const (
+	LogSourceCLI     LogSource = store.LogSourceCLI     // CLI's own structured log
+	LogSourceSandbox LogSource = store.LogSourceSandbox // sandbox lifecycle events from the in-container entrypoint
+	LogSourceMonitor LogSource = store.LogSourceMonitor // agent idle/active detector emissions
+	LogSourceHooks   LogSource = store.LogSourceHooks   // hook-emitted events (Claude Code hooks; future agents too)
+)
+
+// MountSpec describes a bind mount from the host filesystem into the
+// sandbox. Host and Container are paths; ReadOnly controls write access.
+// Re-exported (type alias) from internal/runtime so embedders constructing
+// RunOptions.Mounts (when that field lands) don't need to reach into
+// internal packages. Q-Y. Direction is explicit in the field names —
+// Host is the path on the host, Container is the path inside the
+// sandbox — so the call site reads clearly without consulting docs.
+type MountSpec = runtime.MountSpec
+
+// PortMapping describes a host-to-sandbox port forwarding. HostPort and
+// ContainerPort are integer port numbers; Protocol defaults to "tcp"
+// when empty. Re-exported (type alias) from internal/runtime. Q-Y.
+// The `Port` suffix is deliberate — without it, an int field named
+// "Host" would read ambiguously (hostname? address?) where "HostPort"
+// is self-documenting.
+type PortMapping = runtime.PortMapping

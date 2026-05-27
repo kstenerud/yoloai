@@ -1060,7 +1060,7 @@ func validateAndExpandMounts(mounts []string, homeDir string) ([]string, error) 
 		if err != nil {
 			return nil, fmt.Errorf("invalid mount %q: %w", m, err)
 		}
-		result[i] = spec.Source + ":" + spec.Target
+		result[i] = spec.Host + ":" + spec.Container
 		if spec.ReadOnly {
 			result[i] += ":ro"
 		}

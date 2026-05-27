@@ -30,17 +30,32 @@ type PruneResult struct {
 }
 
 // MountSpec describes a bind mount from host into the sandbox instance.
+// The Host field is the path on the host filesystem; Container is the
+// path inside the sandbox. Named for the embedder's perspective per
+// Q-Y design: api_surface.go is the source of truth for public types,
+// and renaming Source/Target → Host/Container makes the direction
+// obvious at every call site.
 type MountSpec struct {
-	Source   string
-	Target   string
-	ReadOnly bool
+	Host      string
+	Container string
+	ReadOnly  bool
 }
 
 // PortMapping describes a port forwarding from host to sandbox instance.
+// HostPort is the port number on the host; ContainerPort is the port
+// number inside the sandbox. The `Port` suffix is deliberate — without
+// it, an `int` field named "Host" reads ambiguously (is it a hostname?
+// an address?), whereas "HostPort" is self-documenting. Naming aligns
+// with MountSpec's Host/Container direction pair (embedders learn one
+// direction convention) but keeps the type-carrying suffix.
+//
+// int ports replace the prior string fields so embedders never
+// hand-format/parse "8080:80" tokens (the CLI parses these at the
+// flag boundary and constructs PortMapping with typed ints). Q-Y.
 type PortMapping struct {
-	HostPort     string
-	InstancePort string
-	Protocol     string // default "tcp"
+	HostPort      int
+	ContainerPort int
+	Protocol      string // default "tcp"
 }
 
 // ResourceLimits holds converted resource constraints for the runtime backend.

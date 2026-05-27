@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"slices"
+	"strconv"
 	"strings"
 
 	goruntime "runtime"
@@ -552,8 +553,8 @@ func ConvertMounts(specs []runtime.MountSpec) []mount.Mount {
 	for i, s := range specs {
 		mounts[i] = mount.Mount{
 			Type:     mount.TypeBind,
-			Source:   s.Source,
-			Target:   s.Target,
+			Source:   s.Host,
+			Target:   s.Container,
 			ReadOnly: s.ReadOnly,
 		}
 	}
@@ -575,12 +576,14 @@ func ConvertPorts(ports []runtime.PortMapping) (nat.PortMap, nat.PortSet) {
 		if proto == "" {
 			proto = "tcp"
 		}
-		port, err := nat.NewPort(proto, p.InstancePort)
+		port, err := nat.NewPort(proto, strconv.Itoa(p.ContainerPort))
 		if err != nil {
 			continue // skip invalid (already validated upstream)
 		}
+		// nat.PortBinding's HostPort field is a string (Docker SDK shape);
+		// our PortMapping.HostPort is the typed int — convert at the boundary.
 		portMap[port] = append(portMap[port], nat.PortBinding{
-			HostPort: p.HostPort,
+			HostPort: strconv.Itoa(p.HostPort),
 		})
 		portSet[port] = struct{}{}
 	}
