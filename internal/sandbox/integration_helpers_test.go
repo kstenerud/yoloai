@@ -6,6 +6,7 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -26,6 +27,19 @@ func integrationSetup(t *testing.T) (*sandbox.Manager, context.Context) {
 
 	home := testutil.IsolatedHome(t)
 	layout := config.NewLayout(filepath.Join(home, ".yoloai"))
+
+	// Pre-seed the build-inputs checksum in the per-test HOME. Same
+	// rationale as the TestMain bootstrap (integration_main_test.go:41):
+	// `make integration` runs `make base-image` before this test
+	// binary starts; every per-test integrationSetup creates a fresh
+	// HOME via testutil.IsolatedHome and so loses the pre-seed unless
+	// we re-apply it here. Without this, EnsureSetup re-builds against
+	// the existing daemon image and intermittently hits the
+	// AlreadyExists race documented in backend-idiosyncrasies.md
+	// "Docker daemon races on AlreadyExists when rebuilding an
+	// existing tag with identical content".
+	require.NoError(t, os.MkdirAll(layout.CacheDir(), 0750))
+	dockerrt.RecordBuildChecksum(layout, "")
 
 	rt, err := dockerrt.New(ctx)
 	require.NoError(t, err, "Docker must be running for integration tests")

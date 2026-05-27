@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
+	"github.com/kstenerud/yoloai/internal/config"
+	dockerrt "github.com/kstenerud/yoloai/internal/runtime/docker"
 
 	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
@@ -27,6 +29,22 @@ func cliSetup(t *testing.T) (projectDir string) {
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
 	require.NoError(t, writeTestBackendConfig(tmpHome))
+
+	// Pre-seed the build-inputs checksum in the per-test HOME. Same
+	// rationale as the TestMain bootstrap (integration_main_test.go:88):
+	// `make integration` builds yoloai-base before this test binary
+	// starts; every per-test cliSetup creates a fresh HOME via
+	// t.TempDir() and so loses the pre-seed unless we re-apply it
+	// here. Without this, EnsureSetup re-builds against the existing
+	// daemon image and intermittently hits the AlreadyExists race
+	// documented in backend-idiosyncrasies.md "Docker daemon races
+	// on AlreadyExists when rebuilding an existing tag with identical
+	// content".
+	if testutil.IntegrationBackendName() == "" || testutil.IntegrationBackendName() == "docker" {
+		layout := config.NewLayout(filepath.Join(tmpHome, ".yoloai"))
+		require.NoError(t, os.MkdirAll(layout.CacheDir(), 0750))
+		dockerrt.RecordBuildChecksum(layout, "")
+	}
 
 	projectDir = filepath.Join(tmpHome, "project")
 	require.NoError(t, os.MkdirAll(projectDir, 0750))

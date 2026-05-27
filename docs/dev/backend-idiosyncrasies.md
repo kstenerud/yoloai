@@ -535,10 +535,17 @@ Re-running the same command without code changes succeeds.
 
 **Fix in test code:** pre-seed the checksum in the per-test HOME immediately after `HOME` is overridden:
 ```go
-os.MkdirAll(filepath.Join(tmpHome, ".yoloai", "cache"), 0750)
-dockerrt.RecordBuildChecksum("")
+os.MkdirAll(layout.CacheDir(), 0750)
+dockerrt.RecordBuildChecksum(layout, "")
 ```
-`RecordBuildChecksum` writes `~/.yoloai/cache/.base-image-checksum` using the binary's current build-inputs hash; on the next `NeedsBuild()` call the existing image is judged fresh and no rebuild is attempted. Applied at `sandbox/integration_main_test.go:TestMain` and `internal/cli/integration_main_test.go:TestMain`.
+`RecordBuildChecksum` writes `~/.yoloai/cache/.base-image-checksum` using the binary's current build-inputs hash; on the next `NeedsBuild()` call the existing image is judged fresh and no rebuild is attempted.
+
+**Apply at EVERY fresh-HOME site, not just `TestMain`.** Each per-test `cliSetup` / `integrationSetup` helper calls `t.TempDir()` for its own isolated HOME — those new HOMEs don't carry the `TestMain` seed, so the first test in the suite re-triggers the rebuild race even when `TestMain` already pre-seeded. Applied at:
+
+- `internal/sandbox/integration_main_test.go:TestMain` (binary bootstrap)
+- `internal/sandbox/integration_helpers_test.go::integrationSetup` (per-test)
+- `internal/cli/integration_main_test.go:TestMain` (binary bootstrap)
+- `internal/cli/integration_test.go::cliSetup` (per-test)
 
 **Workaround for users hitting it interactively:** re-run the command, or delete `~/.yoloai/cache/.base-image-checksum` and let yoloai rebuild from scratch (which produces a fresh SHA when source changed, or trips the race again if not).
 
