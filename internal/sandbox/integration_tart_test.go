@@ -205,7 +205,11 @@ func TestIntegrationTart_FullLifecycle(t *testing.T) {
 	assert.Equal(t, sandbox.StatusRemoved, status)
 }
 
-// TestIntegrationTart_MultipleAuxDirs tests Tart with multiple :copy auxiliary directories.
+// TestIntegrationTart_MultipleAuxDirs verifies Tart with multiple aux
+// directories. Aux :copy is no longer supported (Q-U, 2026-05-25), so
+// this exercises the still-supported :rw mode: two writable aux dirs
+// mounted into the VM, each accessible from inside and writable.
+// Diff/apply remains workdir-only.
 func TestIntegrationTart_MultipleAuxDirs(t *testing.T) {
 	mgr, ctx := tartIntegrationSetup(t)
 	if mgr == nil {
@@ -222,8 +226,8 @@ func TestIntegrationTart_MultipleAuxDirs(t *testing.T) {
 		Workdir: sandbox.DirSpec{Path: projectDir},
 		Agent:   "test",
 		AuxDirs: []sandbox.DirSpec{
-			{Path: auxDir1, Mode: sandbox.DirModeCopy},
-			{Path: auxDir2, Mode: sandbox.DirModeCopy},
+			{Path: auxDir1, Mode: sandbox.DirModeRW},
+			{Path: auxDir2, Mode: sandbox.DirModeRW},
 		},
 		Version: "test",
 	})
@@ -237,10 +241,10 @@ func TestIntegrationTart_MultipleAuxDirs(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, meta.Directories, 2, "should have two aux directories")
 
-	// Verify both aux directories are set up
 	for i, dir := range meta.Directories {
-		assert.Equal(t, "copy", dir.Mode)
-		assert.NotEmpty(t, dir.BaselineSHA, "aux dir %d should have baseline SHA", i)
+		assert.Equal(t, "rw", dir.Mode)
+		// :rw is a live bind-mount; there's no baseline to capture.
+		assert.Empty(t, dir.BaselineSHA, "aux dir %d should have no baseline (rw)", i)
 
 		// Verify aux directory is accessible in VM
 		result, err := mgr.Runtime().Exec(ctx, store.InstanceName(sandboxName),
@@ -249,7 +253,8 @@ func TestIntegrationTart_MultipleAuxDirs(t *testing.T) {
 		assert.Equal(t, 0, result.ExitCode, "aux dir %d should be accessible in VM", i)
 	}
 
-	// Modify both aux directories
+	// Modify both aux dirs from inside the VM — :rw means writes land
+	// on the host directly, so this also exercises the bind-mount.
 	for i, dir := range meta.Directories {
 		modifyCmd := []string{"bash", "-c",
 			"echo 'modified' >> " + filepath.Join(dir.MountPath, "data.txt")}
@@ -257,11 +262,6 @@ func TestIntegrationTart_MultipleAuxDirs(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, 0, result.ExitCode, "should modify aux dir %d", i)
 	}
-
-	// Generate diff (should include changes from all directories)
-	diffResult, err := patch.GenerateDiff(ctx, patch.DiffOptions{Name: sandboxName, Layout: mgr.Layout()})
-	require.NoError(t, err)
-	assert.False(t, diffResult.Empty, "diff should detect changes in aux directories")
 }
 
 // TestIntegrationTart_GitCorruption runs repeated git operations to ensure no corruption.

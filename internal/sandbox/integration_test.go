@@ -210,31 +210,55 @@ func TestIntegration_RWMode(t *testing.T) {
 	assert.Equal(t, "rw", meta.Workdir.Mode)
 }
 
-func TestIntegration_AuxDirCopy(t *testing.T) {
+// Q-U (2026-05-25): aux directories can no longer be :copy or
+// :overlay. The library boundary (buildAuxDirs) returns a
+// *UsageError that mirrors the CLI's ParseAuxDirArg rejection so
+// programmatic embedders get the same loud failure as `yoloai new
+// -d <path>:copy`.
+func TestIntegration_AuxDirCopy_RejectedByLibrary(t *testing.T) {
 	mgr, ctx := integrationSetup(t)
 	projectDir := createProjectDir(t)
 	auxDir := createAuxDir(t, "libs")
 
 	_, err := mgr.Create(ctx, sandbox.CreateOptions{
-		Name:    "auxcopy",
+		Name:    "auxcopy-rejected",
 		Workdir: sandbox.DirSpec{Path: projectDir},
 		Agent:   "test",
 		NoStart: true,
 		AuxDirs: []sandbox.DirSpec{{Path: auxDir, Mode: sandbox.DirModeCopy}},
 		Version: "test",
 	})
-	require.NoError(t, err)
-	t.Cleanup(func() { mgr.Destroy(ctx, "auxcopy") }) //nolint:errcheck // test cleanup
+	require.Error(t, err)
+	var usage *sandbox.UsageError
+	require.ErrorAs(t, err, &usage)
+	assert.Contains(t, err.Error(), "aux directories cannot use :copy")
+	assert.Contains(t, err.Error(), ":rw")
+}
 
-	meta, err := store.LoadMeta(mgr.Layout().SandboxDir("auxcopy"))
+// Aux :rw is the still-supported writable aux mode after Q-U. The
+// kernel-side mount semantics are exercised by TestIntegration_*
+// elsewhere; this test just regress-guards that Create accepts the
+// mode and writes it through to meta.
+func TestIntegration_AuxDirRW(t *testing.T) {
+	mgr, ctx := integrationSetup(t)
+	projectDir := createProjectDir(t)
+	auxDir := createAuxDir(t, "writable-lib")
+
+	_, err := mgr.Create(ctx, sandbox.CreateOptions{
+		Name:    "auxrw",
+		Workdir: sandbox.DirSpec{Path: projectDir},
+		Agent:   "test",
+		NoStart: true,
+		AuxDirs: []sandbox.DirSpec{{Path: auxDir, Mode: sandbox.DirModeRW}},
+		Version: "test",
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { mgr.Destroy(ctx, "auxrw") }) //nolint:errcheck // test cleanup
+
+	meta, err := store.LoadMeta(mgr.Layout().SandboxDir("auxrw"))
 	require.NoError(t, err)
 	require.Len(t, meta.Directories, 1)
-	assert.Equal(t, "copy", meta.Directories[0].Mode)
-	assert.NotEmpty(t, meta.Directories[0].BaselineSHA)
-
-	// Verify aux work copy has the file
-	auxWorkDir := store.WorkDir(mgr.Layout().SandboxDir("auxcopy"), meta.Directories[0].HostPath)
-	assert.FileExists(t, filepath.Join(auxWorkDir, "data.txt"))
+	assert.Equal(t, "rw", meta.Directories[0].Mode)
 }
 
 func TestIntegration_AuxDirRO(t *testing.T) {

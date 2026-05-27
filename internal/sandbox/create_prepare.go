@@ -356,11 +356,30 @@ func (m *Manager) checkLocalhostURLs(agentDef *agent.Definition, mergedEnv map[s
 	return nil
 }
 
-// buildAuxDirs converts auxiliary DirSpec values to DirArg and checks existence.
+// buildAuxDirs converts auxiliary DirSpec values to DirArg and checks
+// existence. Also enforces Q-U: aux dirs cannot be :copy or :overlay
+// (diff/apply is workdir-only). The CLI and MCP boundaries already
+// reject these via sandbox.ParseAuxDirArg, but library embedders that
+// construct DirSpec values directly need a Create-time guard so the
+// failure is loud rather than a silent no-op in setupAuxDir.
 func buildAuxDirs(auxSpecs []DirSpec) ([]*DirArg, error) {
 	var auxDirs []*DirArg
 	for _, auxSpec := range auxSpecs {
 		auxDir := dirSpecToDirArg(auxSpec)
+		switch auxDir.Mode {
+		case "copy":
+			return nil, NewUsageError(
+				"aux directories cannot use :copy (diff/apply is workdir-only).\n"+
+					"  - to track changes, make %q the workdir instead\n"+
+					"  - to edit it live, use :rw\n"+
+					"  - for an isolated copy, run a separate sandbox", auxDir.Path)
+		case "overlay":
+			return nil, NewUsageError(
+				"aux directories cannot use :overlay (diff/apply is workdir-only).\n"+
+					"  - to track changes, make %q the workdir instead\n"+
+					"  - to edit it live, use :rw\n"+
+					"  - for an isolated copy, run a separate sandbox", auxDir.Path)
+		}
 		if _, err := os.Stat(auxDir.Path); err != nil {
 			return nil, NewUsageError("directory does not exist: %s", auxDir.Path)
 		}
