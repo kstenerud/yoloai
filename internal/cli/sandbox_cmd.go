@@ -6,6 +6,8 @@ package cli
 import (
 	"os"
 
+	"github.com/kstenerud/yoloai/internal/cli/cliutil"
+
 	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
 	"github.com/spf13/cobra"
@@ -77,8 +79,8 @@ func sandboxDispatch(cmd *cobra.Command, args []string) error {
 	}
 
 	// Track sandbox name so the --bugreport flag defer can include sandbox sections.
-	if bugReportFile != nil {
-		bugReportSandboxName = name
+	if cliutil.BugReportFile != nil {
+		cliutil.BugReportSandboxName = name
 	}
 
 	return runSandboxSubcommand(cmd, subcmd, name, rest)
@@ -92,10 +94,10 @@ func runSandboxSubcommand(cmd *cobra.Command, subcmd, name string, rest []string
 	case "info":
 		return runSandboxInfo(cmd, name)
 	case "log":
-		// Re-inject name into args so runLog can call resolveName internally
+		// Re-inject name into args so runLog can call ResolveName internally
 		return runLog(cmd, append([]string{name}, rest...))
 	case "exec":
-		// Re-inject name into args so runExec can call resolveName internally
+		// Re-inject name into args so runExec can call ResolveName internally
 		return runExec(cmd, append([]string{name}, rest...))
 	case "prompt":
 		return runSandboxPrompt(cmd, name)
@@ -124,7 +126,7 @@ func runSandboxSubcommand(cmd *cobra.Command, subcmd, name string, rest []string
 func resolveSandboxDispatchArgs(args []string) (name, subcmd string, rest []string, err error) {
 	if sandboxSubcmds[args[0]] {
 		// args[0] is a subcommand — name must come from YOLOAI_SANDBOX
-		envName := os.Getenv(EnvSandboxName)
+		envName := os.Getenv(cliutil.EnvSandboxName)
 		if envName == "" {
 			return "", "", nil, sandbox.NewUsageError("sandbox name required before subcommand (or set YOLOAI_SANDBOX)")
 		}

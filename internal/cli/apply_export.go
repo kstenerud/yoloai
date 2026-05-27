@@ -10,6 +10,8 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/kstenerud/yoloai/internal/cli/cliutil"
+
 	"github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/internal/sandbox/patch"
@@ -24,7 +26,7 @@ func exportPatches(cmd *cobra.Command, name string, paths []string, commits []pa
 		return fmt.Errorf("create patches directory: %w", err)
 	}
 
-	isJSON := jsonEnabled(cmd)
+	isJSON := cliutil.JSONEnabled(cmd)
 	out := cmd.OutOrStdout()
 
 	if len(commits) > 0 {
@@ -42,7 +44,7 @@ func exportPatches(cmd *cobra.Command, name string, paths []string, commits []pa
 	}
 
 	if isJSON {
-		return writeJSON(out, applyResult{
+		return cliutil.WriteJSON(out, applyResult{
 			Target:         dir,
 			CommitsApplied: len(commits),
 			WIPApplied:     wipExported,
@@ -63,10 +65,10 @@ func exportPatches(cmd *cobra.Command, name string, paths []string, commits []pa
 
 // exportCommitPatches generates format-patch files from sandbox commits and copies them to dir.
 func exportCommitPatches(cmd *cobra.Command, name string, paths []string, dir string, isJSON bool, out io.Writer) error {
-	backend := resolveBackendForSandbox(name)
+	backend := cliutil.ResolveBackendForSandbox(name)
 	var patchDir string
 	var files []string
-	err := withClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
+	err := cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
 		var genErr error
 		patchDir, files, genErr = c.GenerateFormatPatch(ctx, name, paths)
 		return genErr
@@ -95,9 +97,9 @@ func exportCommitPatches(cmd *cobra.Command, name string, paths []string, dir st
 
 // exportWIPDiff generates a wip.diff from uncommitted changes and writes it to dir.
 func exportWIPDiff(cmd *cobra.Command, name string, paths []string, dir string, isJSON bool, out io.Writer) error {
-	backend := resolveBackendForSandbox(name)
+	backend := cliutil.ResolveBackendForSandbox(name)
 	var wipPatch []byte
-	err := withClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
+	err := cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
 		var genErr error
 		wipPatch, _, genErr = c.GenerateWIPDiff(ctx, name, paths)
 		return genErr

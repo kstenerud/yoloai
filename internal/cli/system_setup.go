@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/kstenerud/yoloai/internal/cli/cliutil"
+
 	"github.com/kstenerud/yoloai"
 	"github.com/spf13/cobra"
 )
@@ -23,7 +25,7 @@ import (
 // Returns nil and writes nothing if the user chooses [p] at the tmux
 // prompt (preview-then-exit, intentional).
 func runSystemSetup(cmd *cobra.Command) error {
-	sc := systemClient()
+	sc := cliutil.NewSystemClient()
 	ctx := cmd.Context()
 
 	status, err := sc.SetupStatus(ctx)

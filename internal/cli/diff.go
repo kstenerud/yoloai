@@ -10,6 +10,8 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/kstenerud/yoloai/internal/cli/cliutil"
+
 	yoloai "github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/kstenerud/yoloai/internal/sandbox/patch"
@@ -55,26 +57,26 @@ Examples:
 }
 
 func runDiffCmd(cmd *cobra.Command, args []string) error {
-	name, rest, err := resolveName(cmd, args)
+	name, rest, err := cliutil.ResolveName(cmd, args)
 	if err != nil {
 		return err
 	}
-	defer openCLIJSONLSink(name, cmd)()
+	defer cliutil.OpenCLIJSONLSink(name, cmd)()
 
 	stat, _ := cmd.Flags().GetBool("stat")
 	nameOnly, _ := cmd.Flags().GetBool("name-only")
 	logFlag, _ := cmd.Flags().GetBool("log")
 
 	// Load meta early to detect overlay dirs
-	meta, metaErr := store.LoadMeta(cliLayout().SandboxDir(name))
+	meta, metaErr := store.LoadMeta(cliutil.Layout().SandboxDir(name))
 	if metaErr != nil {
-		return sandboxErrorHint(name, metaErr)
+		return cliutil.SandboxErrorHint(name, metaErr)
 	}
 	overlay := hasOverlayDirs(meta)
 	slog.Debug("generating diff", "event", "sandbox.diff", "sandbox", name, "workdir_mode", meta.Workdir.Mode) //nolint:gosec // G706: name is validated by ValidateName
 
 	// Skip agent warning in JSON mode
-	if !jsonEnabled(cmd) {
+	if !cliutil.JSONEnabled(cmd) {
 		agentRunningWarning(cmd, name)
 	}
 
@@ -83,7 +85,7 @@ func runDiffCmd(cmd *cobra.Command, args []string) error {
 		if overlay {
 			return diffLogOverlay(cmd, name, stat)
 		}
-		if jsonEnabled(cmd) {
+		if cliutil.JSONEnabled(cmd) {
 			return diffLogJSON(cmd, name, stat)
 		}
 		return diffLog(cmd, name, stat)
@@ -109,7 +111,7 @@ func runDiffCmd(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(meta.Directories) > 0 && len(paths) == 0 {
-		if jsonEnabled(cmd) {
+		if cliutil.JSONEnabled(cmd) {
 			return diffMultiDirJSON(cmd, name, stat)
 		}
 		return diffMultiDir(cmd, name, stat)
@@ -120,14 +122,14 @@ func runDiffCmd(cmd *cobra.Command, args []string) error {
 
 // diffSingle runs a diff for a single (non-overlay, non-multi) directory.
 func diffSingle(cmd *cobra.Command, name string, paths []string, stat, nameOnly bool) error {
-	backend := resolveBackendForSandbox(name)
-	return withClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
+	backend := cliutil.ResolveBackendForSandbox(name)
+	return cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
 		result, err := c.DiffSingle(ctx, name, paths, stat, nameOnly)
 		if err != nil {
 			return err
 		}
-		if jsonEnabled(cmd) {
-			return writeJSON(cmd.OutOrStdout(), result)
+		if cliutil.JSONEnabled(cmd) {
+			return cliutil.WriteJSON(cmd.OutOrStdout(), result)
 		}
 		if result.Empty {
 			_, err = fmt.Fprintln(cmd.OutOrStdout(), "No changes")
@@ -166,8 +168,8 @@ func requireOverlayRunning(ctx context.Context, c *yoloai.Client, name string) e
 // diffOverlay handles the default diff for sandboxes with overlay dirs.
 // Merges overlay results (from container exec) with non-overlay results.
 func diffOverlay(cmd *cobra.Command, name string, stat, nameOnly bool) error {
-	backend := resolveBackendForSandbox(name)
-	return withClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
+	backend := cliutil.ResolveBackendForSandbox(name)
+	return cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
 		if err := requireOverlayRunning(ctx, c, name); err != nil {
 			return err
 		}
@@ -186,11 +188,11 @@ func diffOverlay(cmd *cobra.Command, name string, stat, nameOnly bool) error {
 
 		merged := mergeOverlayDiffResults(hostResults, overlayResults)
 
-		if jsonEnabled(cmd) {
+		if cliutil.JSONEnabled(cmd) {
 			if merged == nil {
 				merged = []*patch.DiffResult{}
 			}
-			return writeJSON(cmd.OutOrStdout(), merged)
+			return cliutil.WriteJSON(cmd.OutOrStdout(), merged)
 		}
 
 		return printMergedDiffResults(cmd, merged)
@@ -263,8 +265,8 @@ func diffLogOverlay(cmd *cobra.Command, name string, stat bool) error {
 		return sandbox.NewPlatformError("--log --stat is not supported for :overlay sandboxes")
 	}
 
-	backend := resolveBackendForSandbox(name)
-	return withClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
+	backend := cliutil.ResolveBackendForSandbox(name)
+	return cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
 		if err := requireOverlayRunning(ctx, c, name); err != nil {
 			return err
 		}
@@ -274,7 +276,7 @@ func diffLogOverlay(cmd *cobra.Command, name string, stat bool) error {
 			return err
 		}
 
-		if jsonEnabled(cmd) {
+		if cliutil.JSONEnabled(cmd) {
 			if commits == nil {
 				commits = []patch.CommitInfo{}
 			}
@@ -285,7 +287,7 @@ func diffLogOverlay(cmd *cobra.Command, name string, stat bool) error {
 				Commits:               commits,
 				HasUncommittedChanges: false, // can't cheaply detect WIP in overlay
 			}
-			return writeJSON(cmd.OutOrStdout(), result)
+			return cliutil.WriteJSON(cmd.OutOrStdout(), result)
 		}
 
 		out := cmd.OutOrStdout()
@@ -354,7 +356,7 @@ func diffLog(cmd *cobra.Command, name string, stat bool) error {
 	out := cmd.OutOrStdout()
 
 	// Fetch tags for inline display (best-effort).
-	tags, _ := sandbox.ListTagsBeyondBaseline(cliLayout(), name)
+	tags, _ := sandbox.ListTagsBeyondBaseline(cliutil.Layout(), name)
 	tagsByCommit := buildTagsByCommit(tags)
 
 	if stat {
@@ -373,9 +375,9 @@ func diffLog(cmd *cobra.Command, name string, stat bool) error {
 
 // diffLogWithStat prints commits with file-change statistics.
 func diffLogWithStat(cmd *cobra.Command, name string, out io.Writer, tagsByCommit map[string][]string) error {
-	backend := resolveBackendForSandbox(name)
+	backend := cliutil.ResolveBackendForSandbox(name)
 	var commits []patch.CommitInfoWithStat
-	err := withClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
+	err := cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
 		var listErr error
 		commits, listErr = c.ListCommitsWithStats(ctx, name)
 		return listErr
@@ -401,9 +403,9 @@ func diffLogWithStat(cmd *cobra.Command, name string, out io.Writer, tagsByCommi
 
 // diffLogBasic prints commits without statistics.
 func diffLogBasic(cmd *cobra.Command, name string, out io.Writer, tagsByCommit map[string][]string) error {
-	backend := resolveBackendForSandbox(name)
+	backend := cliutil.ResolveBackendForSandbox(name)
 	var commits []patch.CommitInfo
-	err := withClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
+	err := cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
 		var listErr error
 		commits, listErr = c.ListCommits(ctx, name)
 		return listErr
@@ -432,9 +434,9 @@ func formatCommitLine(n int, sha, subject string, tagsByCommit map[string][]stri
 
 // diffLogWIP appends an uncommitted-changes indicator if WIP is present (best-effort).
 func diffLogWIP(cmd *cobra.Command, name string, out io.Writer) {
-	backend := resolveBackendForSandbox(name)
+	backend := cliutil.ResolveBackendForSandbox(name)
 	var hasWIP bool
-	err := withClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
+	err := cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
 		var wipErr error
 		hasWIP, wipErr = c.HasUncommittedChanges(ctx, name)
 		return wipErr
@@ -445,18 +447,18 @@ func diffLogWIP(cmd *cobra.Command, name string, out io.Writer) {
 }
 
 // diffRef shows the diff for a specific commit or range. Disk-only; no
-// runtime needed, but routed through withClient for symmetry with the
+// runtime needed, but routed through WithClient for symmetry with the
 // other diff handlers.
 func diffRef(cmd *cobra.Command, name, ref string, stat bool) error {
-	backend := resolveBackendForSandbox(name)
-	return withClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
+	backend := cliutil.ResolveBackendForSandbox(name)
+	return cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
 		result, err := c.DiffRef(ctx, name, ref, stat)
 		if err != nil {
 			return err
 		}
 
-		if jsonEnabled(cmd) {
-			return writeJSON(cmd.OutOrStdout(), result)
+		if cliutil.JSONEnabled(cmd) {
+			return cliutil.WriteJSON(cmd.OutOrStdout(), result)
 		}
 
 		if result.Empty {
@@ -472,9 +474,9 @@ func diffRef(cmd *cobra.Command, name, ref string, stat bool) error {
 // agentRunningWarning prints a warning to stderr if the agent is still running.
 // Silently skips if Docker is unavailable or inspection fails.
 func agentRunningWarning(cmd *cobra.Command, name string) {
-	backend := resolveBackendForSandbox(name)
+	backend := cliutil.ResolveBackendForSandbox(name)
 	//nolint:errcheck // intentional: best-effort warning, failure here should not affect the diff command
-	_ = withClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
+	_ = cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
 		info, err := c.Inspect(ctx, name)
 		if err != nil {
 			return nil //nolint:nilerr // best-effort warning; inspection failure should not affect the diff command
@@ -488,16 +490,16 @@ func agentRunningWarning(cmd *cobra.Command, name string) {
 }
 
 // diffMultiDir shows diffs for all diffable directories with per-dir headers.
-// Disk-only; no runtime needed, but routed through withClient for symmetry.
+// Disk-only; no runtime needed, but routed through WithClient for symmetry.
 func diffMultiDir(cmd *cobra.Command, name string, stat bool) error {
-	backend := resolveBackendForSandbox(name)
-	return withClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
+	backend := cliutil.ResolveBackendForSandbox(name)
+	return cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
 		return diffMultiDirInner(cmd, ctx, c, name, stat)
 	})
 }
 
 // diffMultiDirInner is the body of diffMultiDir factored out so the
-// withClient open-and-close lives at the entry point.
+// WithClient open-and-close lives at the entry point.
 func diffMultiDirInner(cmd *cobra.Command, ctx context.Context, c *yoloai.Client, name string, stat bool) error {
 	results, err := c.DiffMultiDir(ctx, name, stat)
 	if err != nil {
@@ -539,8 +541,8 @@ func diffMultiDirInner(cmd *cobra.Command, ctx context.Context, c *yoloai.Client
 
 // diffLogJSON outputs commit log as JSON.
 func diffLogJSON(cmd *cobra.Command, name string, stat bool) error {
-	backend := resolveBackendForSandbox(name)
-	return withClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
+	backend := cliutil.ResolveBackendForSandbox(name)
+	return cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
 		var commits any
 		if stat {
 			cs, err := c.ListCommitsWithStats(ctx, name)
@@ -563,7 +565,7 @@ func diffLogJSON(cmd *cobra.Command, name string, stat bool) error {
 		}
 
 		hasWIP, _ := c.HasUncommittedChanges(ctx, name)
-		tags, _ := sandbox.ListTagsBeyondBaseline(cliLayout(), name)
+		tags, _ := sandbox.ListTagsBeyondBaseline(cliutil.Layout(), name)
 		if tags == nil {
 			tags = []sandbox.TagInfo{}
 		}
@@ -578,15 +580,15 @@ func diffLogJSON(cmd *cobra.Command, name string, stat bool) error {
 			Tags:                  tags,
 		}
 
-		return writeJSON(cmd.OutOrStdout(), result)
+		return cliutil.WriteJSON(cmd.OutOrStdout(), result)
 	})
 }
 
 // diffMultiDirJSON outputs multi-directory diffs as JSON.
-// Disk-only, but routed through withClient for symmetry.
+// Disk-only, but routed through WithClient for symmetry.
 func diffMultiDirJSON(cmd *cobra.Command, name string, stat bool) error {
-	backend := resolveBackendForSandbox(name)
-	return withClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
+	backend := cliutil.ResolveBackendForSandbox(name)
+	return cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
 		results, err := c.DiffMultiDir(ctx, name, stat)
 		if err != nil {
 			return err
@@ -594,6 +596,6 @@ func diffMultiDirJSON(cmd *cobra.Command, name string, stat bool) error {
 		if results == nil {
 			results = []*patch.DiffResult{}
 		}
-		return writeJSON(cmd.OutOrStdout(), results)
+		return cliutil.WriteJSON(cmd.OutOrStdout(), results)
 	})
 }

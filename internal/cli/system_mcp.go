@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/kstenerud/yoloai/internal/cli/cliutil"
+
 	"github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/internal/mcpsrv"
 	"github.com/kstenerud/yoloai/internal/runtime"
@@ -56,11 +58,11 @@ Add to ~/.claude.json to use with Claude Desktop:
 }
 
 func runMCPServe(cmd *cobra.Command, _ []string) error {
-	backend, warn := runtime.SelectContainerBackend(cmd.Context(), resolveContainerBackendConfig())
+	backend, warn := runtime.SelectContainerBackend(cmd.Context(), cliutil.ResolveContainerBackendConfig())
 	if warn != "" {
 		fmt.Fprintln(os.Stderr, warn)
 	}
-	return withClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
+	return cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
 		return mcpsrv.New(c).ServeStdio(ctx)
 	})
 }
@@ -134,13 +136,13 @@ func runMCPProxy(cmd *cobra.Command, args []string) error {
 	}
 
 	agentFlag, _ := cmd.Flags().GetString("agent")
-	model := resolveModel(cmd)
-	profile := resolveProfile(cmd)
+	model := cliutil.ResolveModel(cmd)
+	profile := cliutil.ResolveProfile(cmd)
 	rawDirs, _ := cmd.Flags().GetStringSlice("dir")
 	replace, _ := cmd.Flags().GetBool("replace")
 
 	// Parse workdir if provided
-	homeDir := filepath.Dir(cliLayout().DataDir)
+	homeDir := filepath.Dir(cliutil.Layout().DataDir)
 	var workdirSpec sandbox.DirSpec
 	if rawWorkdir != "" {
 		parsed, err := sandbox.ParseDirArg(rawWorkdir, homeDir)
@@ -172,8 +174,8 @@ func runMCPProxy(cmd *cobra.Command, args []string) error {
 		Replace: replace,
 	}
 
-	backend := resolveBackendForSandbox(name)
-	return withClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
+	backend := cliutil.ResolveBackendForSandbox(name)
+	return cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
 		return mcpsrv.NewProxy(c, name, innerCmd, opts).ServeStdio(ctx)
 	})
 }

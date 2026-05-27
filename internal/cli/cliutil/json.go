@@ -1,4 +1,4 @@
-package cli
+package cliutil
 
 // ABOUTME: Helper functions for --json flag support across all CLI commands.
 
@@ -11,8 +11,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// jsonEnabled checks if the --json persistent flag is set on the command.
-func jsonEnabled(cmd *cobra.Command) bool {
+// JSONEnabled checks if the --json persistent flag is set on the command.
+func JSONEnabled(cmd *cobra.Command) bool {
 	// Check persistent flags first (where --json is registered)
 	if f := cmd.PersistentFlags().Lookup("json"); f != nil {
 		v, _ := cmd.PersistentFlags().GetBool("json")
@@ -23,8 +23,8 @@ func jsonEnabled(cmd *cobra.Command) bool {
 	return v
 }
 
-// writeJSON marshals v as indented JSON and writes it to w with a trailing newline.
-func writeJSON(w io.Writer, v any) error {
+// WriteJSON marshals v as indented JSON and writes it to w with a trailing newline.
+func WriteJSON(w io.Writer, v any) error {
 	data, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal JSON: %w", err)
@@ -33,23 +33,23 @@ func writeJSON(w io.Writer, v any) error {
 	return err
 }
 
-// writeJSONError writes a JSON error object to w. Used for stderr error output
+// WriteJSONError writes a JSON error object to w. Used for stderr error output
 // when --json is active.
-func writeJSONError(w io.Writer, err error) {
+func WriteJSONError(w io.Writer, err error) {
 	data, _ := json.Marshal(map[string]string{"error": err.Error()})
 	fmt.Fprintf(w, "%s\n", data) //nolint:errcheck // best-effort stderr write
 }
 
-// effectiveYes returns true if --yes is set or --json is enabled.
+// EffectiveYes returns true if --yes is set or --json is enabled.
 // JSON mode implies --yes because interactive prompts can't work in a
 // machine-readable pipeline.
-func effectiveYes(cmd *cobra.Command) bool {
+func EffectiveYes(cmd *cobra.Command) bool {
 	yes, _ := cmd.Flags().GetBool("yes")
-	return yes || jsonEnabled(cmd)
+	return yes || JSONEnabled(cmd)
 }
 
-// errJSONNotSupported returns an error indicating that --json is not supported
+// ErrJSONNotSupported returns an error indicating that --json is not supported
 // for interactive commands like attach and exec.
-func errJSONNotSupported(name string) error {
+func ErrJSONNotSupported(name string) error {
 	return sandbox.NewUsageError("--json is not supported for interactive command %q", name)
 }

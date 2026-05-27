@@ -4,6 +4,8 @@ package cli
 import (
 	"context"
 
+	"github.com/kstenerud/yoloai/internal/cli/cliutil"
+
 	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
 )
@@ -20,7 +22,7 @@ done`
 // loadIsolatedMeta loads sandbox metadata and validates that the sandbox uses
 // network isolation. Returns the sandbox directory and metadata.
 func loadIsolatedMeta(name string) (string, *store.Meta, error) {
-	sandboxDir := cliLayout().SandboxDir(name)
+	sandboxDir := cliutil.Layout().SandboxDir(name)
 	if err := store.RequireSandboxDir(sandboxDir); err != nil {
 		return "", nil, err
 	}
@@ -54,13 +56,13 @@ func saveNetworkAllowlist(sandboxDir string, meta *store.Meta) error {
 // live is true if the patch was applied successfully, and patchErr is non-nil
 // if the exec failed (runtime unavailable or container not running are not errors).
 func tryLivePatchNetwork(ctx context.Context, backend, name, script string, scriptArgs []string) (bool, error) {
-	rt, err := newRuntime(ctx, backend)
+	rt, err := cliutil.NewRuntime(ctx, backend)
 	if err != nil {
 		return false, nil // Docker unavailable — not an error
 	}
 	defer rt.Close() //nolint:errcheck // best-effort cleanup
 
-	info, err := sandbox.InspectSandbox(ctx, cliLayout(), rt, name)
+	info, err := sandbox.InspectSandbox(ctx, cliutil.Layout(), rt, name)
 	if err != nil || (info.Status != sandbox.StatusActive && info.Status != sandbox.StatusIdle) {
 		return false, nil // can't inspect or not running — skip
 	}

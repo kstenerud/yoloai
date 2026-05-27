@@ -9,6 +9,8 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	"github.com/kstenerud/yoloai/internal/cli/cliutil"
+
 	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/spf13/cobra"
 )
@@ -126,7 +128,7 @@ func runList(cmd *cobra.Command, _ []string) error {
 	ctx := cmd.Context()
 
 	// Use multi-backend listing
-	infos, unavailableBackends, err := sandbox.ListSandboxesMultiBackend(ctx, cliLayout(), newRuntime)
+	infos, unavailableBackends, err := sandbox.ListSandboxesMultiBackend(ctx, cliutil.Layout(), cliutil.NewRuntime)
 	if err != nil {
 		return err
 	}
@@ -150,7 +152,7 @@ func runList(cmd *cobra.Command, _ []string) error {
 		changes: changes,
 	})
 
-	if jsonEnabled(cmd) {
+	if cliutil.JSONEnabled(cmd) {
 		if infos == nil {
 			infos = []*sandbox.Info{}
 		}
@@ -162,7 +164,7 @@ func runList(cmd *cobra.Command, _ []string) error {
 		if unavailableBackends == nil {
 			output["unavailable_backends"] = []string{}
 		}
-		return writeJSON(cmd.OutOrStdout(), output)
+		return cliutil.WriteJSON(cmd.OutOrStdout(), output)
 	}
 
 	if len(infos) == 0 {

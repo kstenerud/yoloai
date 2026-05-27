@@ -1,6 +1,6 @@
 // ABOUTME: Single CLI-side Layout source. The one licensed os.UserHomeDir() call.
 
-package cli
+package cliutil
 
 import (
 	"fmt"
@@ -13,7 +13,7 @@ import (
 
 // rootLayout is the Layout recorded by SetRootLayout at CLI startup
 // from either the --data-dir flag value or $HOME/.yoloai/. Every
-// command handler reads it via cliLayout(). This is the single
+// command handler reads it via Layout(). This is the single
 // licensed place yoloai CLI code touches ambient HOME — every other
 // library path now takes a config.Layout argument.
 //
@@ -25,14 +25,14 @@ var rootLayout config.Layout
 // --data-dir flag (if any) has been parsed.
 //
 // If SetRootLayout is never called (e.g. tests that bypass the root
-// command and call command-handler functions directly), cliLayout()
+// command and call command-handler functions directly), Layout()
 // falls back to a Layout rooted at $HOME/.yoloai/ on each call (so
 // tests that t.Setenv("HOME", ...) see the updated value).
 func SetRootLayout(l config.Layout) {
 	rootLayout = l
 }
 
-// cliLayout returns the CLI's working Layout. Reads the Layout set
+// Layout returns the CLI's working Layout. Reads the Layout set
 // by SetRootLayout at startup, or constructs a fallback from
 // $HOME/.yoloai/ when no SetRootLayout call was made (this happens
 // in tests that exercise command handlers without going through the
@@ -43,7 +43,7 @@ func SetRootLayout(l config.Layout) {
 // os.UserHomeDir() in CLI code (via homeBasedDataDir below). Future
 // CLI handlers reading a Layout must go through here; the W-L10
 // layering linter will eventually verify this.
-func cliLayout() config.Layout {
+func Layout() config.Layout {
 	if rootLayout.DataDir == "" {
 		return config.NewLayout(homeBasedDataDir())
 	}

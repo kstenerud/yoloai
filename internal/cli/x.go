@@ -12,6 +12,8 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	"github.com/kstenerud/yoloai/internal/cli/cliutil"
+
 	"github.com/kstenerud/yoloai/internal/extension"
 	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/spf13/cobra"
@@ -35,7 +37,7 @@ func newXCmd() *cobra.Command {
 // registerExtensionSubcommands loads all extensions and adds them as
 // dynamic subcommands of the parent command.
 func registerExtensionSubcommands(parent *cobra.Command) {
-	exts, err := extension.LoadAll(cliLayout())
+	exts, err := extension.LoadAll(cliutil.Layout())
 	if err != nil {
 		slog.Debug("failed to load extensions", "event", "extension.load_error", "err", err)
 		return
@@ -95,7 +97,7 @@ func runExtension(cmd *cobra.Command, ext *extension.Extension, args []string) e
 	}
 
 	// Resolve and validate agent
-	agentName := resolveAgentFromConfig()
+	agentName := cliutil.ResolveAgentFromConfig()
 	if !ext.SupportsAgent(agentName) {
 		return sandbox.NewUsageError("extension %q does not support agent %q (supports: %s)",
 			ext.Name, agentName, strings.Join(ext.Agent.Names, ", "))
@@ -134,23 +136,23 @@ func runExtension(cmd *cobra.Command, ext *extension.Extension, args []string) e
 
 // runExtensionList prints available extensions as a table or JSON.
 func runExtensionList(cmd *cobra.Command, _ []string) error {
-	exts, err := extension.LoadAll(cliLayout())
+	exts, err := extension.LoadAll(cliutil.Layout())
 	if err != nil {
 		return err
 	}
 
 	if len(exts) == 0 {
-		if jsonEnabled(cmd) {
-			return writeJSON(cmd.OutOrStdout(), []any{})
+		if cliutil.JSONEnabled(cmd) {
+			return cliutil.WriteJSON(cmd.OutOrStdout(), []any{})
 		}
-		fmt.Fprintln(cmd.OutOrStdout(), "No extensions found.")                                                              //nolint:errcheck
-		fmt.Fprintln(cmd.OutOrStdout())                                                                                      //nolint:errcheck
-		fmt.Fprintf(cmd.OutOrStdout(), "Add YAML files to %s to create extensions.\n", extension.ExtensionsDir(cliLayout())) //nolint:errcheck
-		fmt.Fprintln(cmd.OutOrStdout(), "See 'yoloai help extensions' for how to create and install extensions.")            //nolint:errcheck
+		fmt.Fprintln(cmd.OutOrStdout(), "No extensions found.")                                                                   //nolint:errcheck
+		fmt.Fprintln(cmd.OutOrStdout())                                                                                           //nolint:errcheck
+		fmt.Fprintf(cmd.OutOrStdout(), "Add YAML files to %s to create extensions.\n", extension.ExtensionsDir(cliutil.Layout())) //nolint:errcheck
+		fmt.Fprintln(cmd.OutOrStdout(), "See 'yoloai help extensions' for how to create and install extensions.")                 //nolint:errcheck
 		return nil
 	}
 
-	if jsonEnabled(cmd) {
+	if cliutil.JSONEnabled(cmd) {
 		type jsonExt struct {
 			Name        string   `json:"name"`
 			Description string   `json:"description"`
@@ -167,7 +169,7 @@ func runExtensionList(cmd *cobra.Command, _ []string) error {
 			}
 			out = append(out, e)
 		}
-		return writeJSON(cmd.OutOrStdout(), out)
+		return cliutil.WriteJSON(cmd.OutOrStdout(), out)
 	}
 
 	w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 3, ' ', 0)

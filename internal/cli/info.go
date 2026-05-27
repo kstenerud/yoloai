@@ -10,6 +10,8 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	"github.com/kstenerud/yoloai/internal/cli/cliutil"
+
 	"github.com/kstenerud/yoloai/internal/agent"
 	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/sandbox"
@@ -86,7 +88,7 @@ func listBackends(cmd *cobra.Command) error {
 	ctx := cmd.Context()
 	descs := runtime.Descriptors()
 
-	if jsonEnabled(cmd) {
+	if cliutil.JSONEnabled(cmd) {
 		type backendJSON struct {
 			Name        string `json:"name"`
 			Description string `json:"description"`
@@ -103,7 +105,7 @@ func listBackends(cmd *cobra.Command) error {
 				Note:        note,
 			})
 		}
-		return writeJSON(cmd.OutOrStdout(), items)
+		return cliutil.WriteJSON(cmd.OutOrStdout(), items)
 	}
 
 	w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 3, ' ', 0)
@@ -133,9 +135,9 @@ func showBackendDetail(cmd *cobra.Command, name string) error {
 
 	ctx := cmd.Context()
 
-	if jsonEnabled(cmd) {
+	if cliutil.JSONEnabled(cmd) {
 		available, note := checkBackend(ctx, desc.Name)
-		return writeJSON(cmd.OutOrStdout(), map[string]any{
+		return cliutil.WriteJSON(cmd.OutOrStdout(), map[string]any{
 			"name":         desc.Name,
 			"description":  desc.Description,
 			"available":    available,
@@ -191,7 +193,7 @@ func backendNames() []string {
 // checkBackend attempts to create a runtime for the given backend name.
 // Returns availability and a short note on failure.
 func checkBackend(ctx context.Context, name string) (available bool, note string) {
-	rt, err := newRuntime(ctx, name)
+	rt, err := cliutil.NewRuntime(ctx, name)
 	if err != nil {
 		return false, err.Error()
 	}
@@ -218,7 +220,7 @@ func newSystemAgentsCmd() *cobra.Command {
 
 // listAgents displays the summary table of all agents.
 func listAgents(cmd *cobra.Command) error {
-	if jsonEnabled(cmd) {
+	if cliutil.JSONEnabled(cmd) {
 		type agentJSON struct {
 			Name        string `json:"name"`
 			Description string `json:"description"`
@@ -233,7 +235,7 @@ func listAgents(cmd *cobra.Command) error {
 				PromptMode:  string(def.PromptMode),
 			})
 		}
-		return writeJSON(cmd.OutOrStdout(), items)
+		return cliutil.WriteJSON(cmd.OutOrStdout(), items)
 	}
 
 	w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 3, ' ', 0)

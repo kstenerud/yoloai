@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/kstenerud/yoloai/internal/cli/cliutil"
+
 	"github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/internal/cli/system/tart"
 	"github.com/kstenerud/yoloai/internal/sandbox"
@@ -32,7 +34,7 @@ func newSystemCmd(version, commit, date string) *cobra.Command {
 		newSystemDoctorCmd(),
 		newSystemPruneCmd(),
 		newSystemSetupCmd(),
-		tart.NewCmd(cliLayout, newRuntime),
+		tart.NewCmd(cliutil.Layout, cliutil.NewRuntime),
 		newCompletionCmd(),
 	)
 
@@ -56,7 +58,7 @@ func newSystemBuildCmd() *cobra.Command {
 				return runSystemBuildAll(cmd, args)
 			}
 
-			return runSystemBuild(cmd, args, resolveBackend(cmd))
+			return runSystemBuild(cmd, args, cliutil.ResolveBackend(cmd))
 		},
 	}
 
@@ -77,8 +79,8 @@ func runSystemBuild(cmd *cobra.Command, args []string, backend string) error {
 	// where the image actually lives, but enumerating it per-backend
 	// is brittle; check ~/.yoloai/ as a proxy — same machine's free
 	// space typically applies.
-	if !jsonEnabled(cmd) {
-		warnIfLowDisk(cmd.ErrOrStderr(), cliLayout().SandboxesDir())
+	if !cliutil.JSONEnabled(cmd) {
+		warnIfLowDisk(cmd.ErrOrStderr(), cliutil.Layout().SandboxesDir())
 	}
 
 	var profile string
@@ -98,7 +100,7 @@ func runSystemBuild(cmd *cobra.Command, args []string, backend string) error {
 		Secrets: secrets,
 		Output:  buildOutputFor(cmd),
 	}
-	if err := systemClient().Build(cmd.Context(), opts); err != nil {
+	if err := cliutil.NewSystemClient().Build(cmd.Context(), opts); err != nil {
 		return err
 	}
 	return reportBuildOK(cmd, profile)
@@ -114,7 +116,7 @@ func prepareBuildSecrets(secretFlags []string, hasProfile bool) ([]string, error
 	if !hasProfile {
 		return nil, nil
 	}
-	homeDir := filepath.Dir(cliLayout().DataDir)
+	homeDir := filepath.Dir(cliutil.Layout().DataDir)
 	var secrets []string
 	for _, s := range secretFlags {
 		expanded, err := sandbox.ValidateBuildSecret(s, homeDir)
@@ -130,7 +132,7 @@ func prepareBuildSecrets(secretFlags []string, hasProfile bool) ([]string, error
 // noisy; users want to see progress) and io.Discard in --json mode
 // (machine-readable output mustn't be polluted by build stream).
 func buildOutputFor(cmd *cobra.Command) io.Writer {
-	if jsonEnabled(cmd) {
+	if cliutil.JSONEnabled(cmd) {
 		return io.Discard
 	}
 	return os.Stderr
@@ -139,12 +141,12 @@ func buildOutputFor(cmd *cobra.Command) io.Writer {
 // reportBuildOK prints the post-build "Built successfully" line in
 // human mode and the equivalent JSON object in --json mode.
 func reportBuildOK(cmd *cobra.Command, profile string) error {
-	if jsonEnabled(cmd) {
+	if cliutil.JSONEnabled(cmd) {
 		payload := map[string]string{"action": "built"}
 		if profile != "" {
 			payload["profile"] = profile
 		}
-		return writeJSON(cmd.OutOrStdout(), payload)
+		return cliutil.WriteJSON(cmd.OutOrStdout(), payload)
 	}
 	out := cmd.OutOrStdout()
 	if profile != "" {
@@ -156,8 +158,8 @@ func reportBuildOK(cmd *cobra.Command, profile string) error {
 }
 
 func runSystemBuildAll(cmd *cobra.Command, args []string) error {
-	if !jsonEnabled(cmd) {
-		warnIfLowDisk(cmd.ErrOrStderr(), cliLayout().SandboxesDir())
+	if !cliutil.JSONEnabled(cmd) {
+		warnIfLowDisk(cmd.ErrOrStderr(), cliutil.Layout().SandboxesDir())
 	}
 
 	secretFlags, _ := cmd.Flags().GetStringSlice("secret")
@@ -179,13 +181,13 @@ func runSystemBuildAll(cmd *cobra.Command, args []string) error {
 		Secrets:     secrets,
 		Output:      buildOutputFor(cmd),
 	}
-	if err := systemClient().Build(cmd.Context(), opts); err != nil {
+	if err := cliutil.NewSystemClient().Build(cmd.Context(), opts); err != nil {
 		// SystemClient.Build returns "no available backends to build
 		// for" — preserve the original CLI behavior of printing the
 		// message and exiting 0 in that case.
 		if err.Error() == "no available backends to build for" {
-			if jsonEnabled(cmd) {
-				return writeJSON(cmd.OutOrStdout(), map[string]any{"action": "built", "backends": []string{}})
+			if cliutil.JSONEnabled(cmd) {
+				return cliutil.WriteJSON(cmd.OutOrStdout(), map[string]any{"action": "built", "backends": []string{}})
 			}
 			fmt.Fprintln(cmd.OutOrStdout(), "No available backends to build for.") //nolint:errcheck
 			return nil

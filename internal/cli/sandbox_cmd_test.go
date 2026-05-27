@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kstenerud/yoloai/internal/cli/cliutil"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -81,7 +82,7 @@ func TestSandboxDispatch_UnknownSubcmd(t *testing.T) {
 
 func TestSandboxDispatch_SubcmdFirstWithEnv(t *testing.T) {
 	setupSandboxCmdTest(t, "envbox")
-	t.Setenv(EnvSandboxName, "envbox")
+	t.Setenv(cliutil.EnvSandboxName, "envbox")
 
 	cmd := newSandboxCmd()
 	buf := new(bytes.Buffer)
@@ -98,7 +99,7 @@ func TestSandboxDispatch_SubcmdFirstWithEnv(t *testing.T) {
 func TestSandboxDispatch_SubcmdFirstWithoutEnv(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
-	t.Setenv(EnvSandboxName, "")
+	t.Setenv(cliutil.EnvSandboxName, "")
 
 	cmd := newSandboxCmd()
 	cmd.SetArgs([]string{"info"})

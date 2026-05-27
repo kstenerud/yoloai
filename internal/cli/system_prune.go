@@ -6,6 +6,8 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/kstenerud/yoloai/internal/cli/cliutil"
+
 	"github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/spf13/cobra"
@@ -28,7 +30,7 @@ backend's own prune (e.g., 'docker system prune').`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			dryRun, _ := cmd.Flags().GetBool("dry-run")
-			yes := effectiveYes(cmd)
+			yes := cliutil.EffectiveYes(cmd)
 			cache, _ := cmd.Flags().GetBool("cache")
 			return runSystemPrune(cmd, dryRun, yes, cache)
 		},
@@ -44,10 +46,10 @@ backend's own prune (e.g., 'docker system prune').`,
 func runSystemPrune(cmd *cobra.Command, dryRun, yes, cache bool) error {
 	ctx := cmd.Context()
 	output := cmd.OutOrStdout()
-	isJSON := jsonEnabled(cmd)
+	isJSON := cliutil.JSONEnabled(cmd)
 
 	// First, a dry-run scan to find what's there.
-	scanResult, err := systemClient().Prune(ctx, yoloai.PruneOptions{
+	scanResult, err := cliutil.NewSystemClient().Prune(ctx, yoloai.PruneOptions{
 		DryRun:           true,
 		IncludeBaseImage: cache,
 		Output:           output,
@@ -78,7 +80,7 @@ func runSystemPrune(cmd *cobra.Command, dryRun, yes, cache bool) error {
 	}
 
 	// Actual removal. The library does the work; we just report.
-	actualResult, err := systemClient().Prune(ctx, yoloai.PruneOptions{
+	actualResult, err := cliutil.NewSystemClient().Prune(ctx, yoloai.PruneOptions{
 		DryRun:           false,
 		IncludeBaseImage: cache,
 		Output:           output,
@@ -196,7 +198,7 @@ func writePruneJSON(cmd *cobra.Command, result *yoloai.PruneResult, dryRun bool)
 	for _, item := range result.RemovedItems {
 		items = append(items, pruneItem{Kind: item.Kind, Name: item.Name})
 	}
-	return writeJSON(cmd.OutOrStdout(), map[string]any{
+	return cliutil.WriteJSON(cmd.OutOrStdout(), map[string]any{
 		"items":   items,
 		"dry_run": dryRun,
 	})

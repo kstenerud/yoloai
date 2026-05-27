@@ -5,6 +5,8 @@ package cli
 import (
 	"fmt"
 
+	"github.com/kstenerud/yoloai/internal/cli/cliutil"
+
 	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/spf13/cobra"
 )
@@ -16,7 +18,7 @@ import (
 // command is run defensively (in a recovery script, etc.) and there
 // was nothing actually stale.
 func runSandboxUnlock(cmd *cobra.Command, name string) error {
-	cleared, err := sandbox.ForceUnlock(cliLayout(), name)
+	cleared, err := sandbox.ForceUnlock(cliutil.Layout(), name)
 	if err != nil {
 		return err
 	}
@@ -24,8 +26,8 @@ func runSandboxUnlock(cmd *cobra.Command, name string) error {
 	if !cleared {
 		action = "noop"
 	}
-	if jsonEnabled(cmd) {
-		return writeJSON(cmd.OutOrStdout(), map[string]string{
+	if cliutil.JSONEnabled(cmd) {
+		return cliutil.WriteJSON(cmd.OutOrStdout(), map[string]string{
 			"sandbox": name,
 			"action":  action,
 		})

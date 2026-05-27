@@ -10,6 +10,8 @@ import (
 	"os"
 	"strings"
 
+	"github.com/kstenerud/yoloai/internal/cli/cliutil"
+
 	"github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/kstenerud/yoloai/internal/sandbox/patch"
@@ -22,9 +24,9 @@ import (
 func runApplyFormatPatch(cmd *cobra.Command, name string, paths []string, meta *store.Meta, patchesDir string, yes, dryRun, includeWIP, withTags bool) error {
 	// Query work copy for commits and WIP. WIP is always probed (even when
 	// includeWIP is false) so we can report it to the user as a hint.
-	backend := resolveBackendForSandbox(name)
+	backend := cliutil.ResolveBackendForSandbox(name)
 	var commits []patch.CommitInfo
-	err := withClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
+	err := cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
 		var listErr error
 		commits, listErr = c.ListCommits(ctx, name)
 		return listErr
@@ -34,7 +36,7 @@ func runApplyFormatPatch(cmd *cobra.Command, name string, paths []string, meta *
 	}
 
 	var hasWIP bool
-	err = withClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
+	err = cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
 		var wipErr error
 		hasWIP, wipErr = c.HasUncommittedChanges(ctx, name)
 		return wipErr
@@ -84,7 +86,7 @@ func printWIPHint(cmd *cobra.Command, reason string) {
 
 // reportWIPSkipHint prints the WIP-skipped hint after commits land. Human-mode only.
 func reportWIPSkipHint(cmd *cobra.Command, hasWIP, includeWIP bool) {
-	if hasWIP && !includeWIP && !jsonEnabled(cmd) {
+	if hasWIP && !includeWIP && !cliutil.JSONEnabled(cmd) {
 		printWIPHint(cmd, "not applied — commits only")
 	}
 }
@@ -92,10 +94,10 @@ func reportWIPSkipHint(cmd *cobra.Command, hasWIP, includeWIP bool) {
 // reportUnappliedTagsHint suggests --tags when sandbox has tags the user
 // didn't ask to transfer. Human-mode only.
 func reportUnappliedTagsHint(cmd *cobra.Command, name string, withTags bool) {
-	if jsonEnabled(cmd) || withTags {
+	if cliutil.JSONEnabled(cmd) || withTags {
 		return
 	}
-	unappliedTags, _ := sandbox.ListUnappliedTags(cliLayout(), name)
+	unappliedTags, _ := sandbox.ListUnappliedTags(cliutil.Layout(), name)
 	if len(unappliedTags) > 0 {
 		fmt.Fprintf(cmd.OutOrStdout(), "\nHint: %d tag(s) available in sandbox but not on host. Run with --tags to transfer them.\n", len(unappliedTags)) //nolint:errcheck
 	}
@@ -111,7 +113,7 @@ func maybeReportNoChanges(cmd *cobra.Command, name string, meta *store.Meta, com
 	if hasWIP && includeWIP {
 		return false, nil // WIP-only apply will proceed via the squash fallback
 	}
-	if hasWIP && !jsonEnabled(cmd) {
+	if hasWIP && !cliutil.JSONEnabled(cmd) {
 		printWIPHint(cmd, "no committed changes to apply")
 	}
 	return true, runApplyNoChanges(cmd, name, meta, withTags)
@@ -119,7 +121,7 @@ func maybeReportNoChanges(cmd *cobra.Command, name string, meta *store.Meta, com
 
 // runApplyNoChanges handles the case where there are no commits or WIP to apply.
 func runApplyNoChanges(cmd *cobra.Command, name string, meta *store.Meta, withTags bool) error {
-	layout := cliLayout()
+	layout := cliutil.Layout()
 	// Check for unapplied tags even when there are no changes
 	unappliedTags, _ := sandbox.ListUnappliedTags(layout, name)
 
@@ -127,7 +129,7 @@ func runApplyNoChanges(cmd *cobra.Command, name string, meta *store.Meta, withTa
 	if withTags && len(unappliedTags) > 0 {
 		targetDir := meta.Workdir.HostPath
 		workDir := store.WorkDir(layout.SandboxDir(name), meta.Workdir.HostPath)
-		if !jsonEnabled(cmd) {
+		if !cliutil.JSONEnabled(cmd) {
 			fmt.Fprintln(cmd.OutOrStdout(), "No changes to apply")                                                  //nolint:errcheck
 			fmt.Fprintf(cmd.OutOrStdout(), "\nTransferring %d tag(s) by matching commits...\n", len(unappliedTags)) //nolint:errcheck
 		}
@@ -142,8 +144,8 @@ func runApplyNoChanges(cmd *cobra.Command, name string, meta *store.Meta, withTa
 		}
 		// Transfer tags using the SHA map
 		tagsApplied, tagsSkipped := applyTags(cmd, unappliedTags, shaMap, workDir, targetDir, true)
-		if jsonEnabled(cmd) {
-			return writeJSON(cmd.OutOrStdout(), applyResult{
+		if cliutil.JSONEnabled(cmd) {
+			return cliutil.WriteJSON(cmd.OutOrStdout(), applyResult{
 				Target:      meta.Workdir.HostPath,
 				TagsApplied: tagsApplied,
 				TagsSkipped: tagsSkipped,
@@ -153,8 +155,8 @@ func runApplyNoChanges(cmd *cobra.Command, name string, meta *store.Meta, withTa
 		return nil
 	}
 
-	if jsonEnabled(cmd) {
-		return writeJSON(cmd.OutOrStdout(), applyResult{
+	if cliutil.JSONEnabled(cmd) {
+		return cliutil.WriteJSON(cmd.OutOrStdout(), applyResult{
 			Target: meta.Workdir.HostPath,
 			Method: "format-patch",
 		})
@@ -169,11 +171,11 @@ func runApplyNoChanges(cmd *cobra.Command, name string, meta *store.Meta, withTa
 
 // runApplyCommits applies commits via format-patch/am to the target directory.
 func runApplyCommits(cmd *cobra.Command, name string, paths []string, meta *store.Meta, commits []patch.CommitInfo, hasWIP, yes, dryRun, includeWIP, withTags bool) error {
-	layout := cliLayout()
+	layout := cliutil.Layout()
 	targetDir := meta.Workdir.HostPath
 	sandboxWorkDir := store.WorkDir(layout.SandboxDir(name), meta.Workdir.HostPath)
 	isGit := workspace.IsGitRepo(targetDir)
-	backend := resolveBackendForSandbox(name)
+	backend := cliutil.ResolveBackendForSandbox(name)
 
 	// Fetch tags beyond baseline (best-effort; errors don't fail the apply).
 	tags, _ := sandbox.ListTagsBeyondBaseline(layout, name)
@@ -182,7 +184,7 @@ func runApplyCommits(cmd *cobra.Command, name string, paths []string, meta *stor
 	printApplyCommitsSummary(cmd, commits, tags, tagsByCommit, hasWIP, includeWIP, withTags)
 
 	if dryRun {
-		if !jsonEnabled(cmd) {
+		if !cliutil.JSONEnabled(cmd) {
 			fmt.Fprintln(cmd.OutOrStdout(), "(dry run)") //nolint:errcheck
 		}
 		return nil
@@ -206,7 +208,7 @@ func runApplyCommits(cmd *cobra.Command, name string, paths []string, meta *stor
 
 	// Advance baseline past applied commits (skip for path-filtered applies)
 	if len(paths) == 0 {
-		if err := withClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
+		if err := cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
 			return c.AdvanceBaseline(ctx, name)
 		}); err != nil {
 			return fmt.Errorf("advance baseline: %w", err)
@@ -223,8 +225,8 @@ func runApplyCommits(cmd *cobra.Command, name string, paths []string, meta *stor
 	reportUnappliedTagsHint(cmd, name, withTags)
 
 	slog.Info("apply complete", "event", "sandbox.apply.complete", "sandbox", name, "commits_applied", commitsApplied, "wip_applied", wipApplied, "tags_applied", tagsApplied) //nolint:gosec // G706: name is validated by ValidateName
-	if jsonEnabled(cmd) {
-		return writeJSON(cmd.OutOrStdout(), applyResult{
+	if cliutil.JSONEnabled(cmd) {
+		return cliutil.WriteJSON(cmd.OutOrStdout(), applyResult{
 			Target:         targetDir,
 			CommitsApplied: commitsApplied,
 			WIPApplied:     wipApplied,
@@ -239,7 +241,7 @@ func runApplyCommits(cmd *cobra.Command, name string, paths []string, meta *stor
 
 // printApplyCommitsSummary prints the list of commits about to be applied (human-readable only).
 func printApplyCommitsSummary(cmd *cobra.Command, commits []patch.CommitInfo, tags []sandbox.TagInfo, tagsByCommit map[string][]string, hasWIP, includeWIP, withTags bool) {
-	if jsonEnabled(cmd) {
+	if cliutil.JSONEnabled(cmd) {
 		return
 	}
 	out := cmd.OutOrStdout()
@@ -267,7 +269,7 @@ func printApplyCommitsSummary(cmd *cobra.Command, commits []patch.CommitInfo, ta
 func applyFormatPatchFiles(cmd *cobra.Command, name string, paths []string, targetDir, backend string) (commitsApplied int, shaMap map[string]string, stashErr, err error) {
 	var patchDir string
 	var files []string
-	if err = withClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
+	if err = cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
 		var genErr error
 		patchDir, files, genErr = c.GenerateFormatPatch(ctx, name, paths)
 		return genErr
@@ -287,7 +289,7 @@ func applyFormatPatchFiles(cmd *cobra.Command, name string, paths []string, targ
 	}
 	stashErr = err
 	commitsApplied = len(files)
-	if !jsonEnabled(cmd) {
+	if !cliutil.JSONEnabled(cmd) {
 		fmt.Fprintf(cmd.OutOrStdout(), "%d commit(s) applied to %s\n", len(files), targetDir) //nolint:errcheck
 	}
 	return commitsApplied, shaMap, stashErr, nil
@@ -300,13 +302,13 @@ func applyWIPChanges(cmd *cobra.Command, name string, paths []string, targetDir 
 		return false
 	}
 	var wipPatch []byte
-	wipErr := withClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
+	wipErr := cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
 		var genErr error
 		wipPatch, _, genErr = c.GenerateWIPDiff(ctx, name, paths)
 		return genErr
 	})
 	if wipErr != nil {
-		if !jsonEnabled(cmd) {
+		if !cliutil.JSONEnabled(cmd) {
 			fmt.Fprintf(cmd.ErrOrStderr(), "Warning: failed to generate WIP diff: %v\n", wipErr) //nolint:errcheck
 		}
 		return false
@@ -315,14 +317,14 @@ func applyWIPChanges(cmd *cobra.Command, name string, paths []string, targetDir 
 		return false
 	}
 	if err := workspace.ApplyPatch(wipPatch, targetDir, isGit); err != nil {
-		if !jsonEnabled(cmd) {
+		if !cliutil.JSONEnabled(cmd) {
 			fmt.Fprintf(cmd.ErrOrStderr(), //nolint:errcheck // best-effort warning
 				"Warning: failed to apply WIP changes: %v\n"+
 					"Commits were applied successfully. WIP changes need manual application.\n", err)
 		}
 		return false
 	}
-	if !jsonEnabled(cmd) {
+	if !cliutil.JSONEnabled(cmd) {
 		fmt.Fprintln(cmd.OutOrStdout(), "Uncommitted changes applied (unstaged)") //nolint:errcheck
 	}
 	return true

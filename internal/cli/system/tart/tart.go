@@ -35,7 +35,7 @@ var (
 // The old `runtime` name remains a hidden alias that emits a deprecation warning.
 //
 // layoutFn and newRuntimeFn inject the cli root's chokepoint helpers
-// (cliLayout / newRuntime) so this subpackage doesn't need to import
+// (Layout / NewRuntime) so this subpackage doesn't need to import
 // internal/cli back (which would create a cycle). NewCmd stores them
 // in package-level vars; subcommand RunE handlers read those vars at
 // invocation time.

@@ -16,6 +16,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kstenerud/yoloai/internal/cli/cliutil"
+
 	"github.com/kstenerud/yoloai/internal/config"
 	yoloairuntime "github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/sandbox"
@@ -100,7 +102,7 @@ func writeBugReportSystem(w io.Writer) {
 	}
 
 	// yoloai data directory and disk usage
-	dataDir := cliLayout().YoloaiDir()
+	dataDir := cliutil.Layout().YoloaiDir()
 	fmt.Fprintf(w, "- **Data dir:** `%s`\n", dataDir) //nolint:errcheck
 	if size, err := sandbox.DirSize(dataDir); err == nil {
 		fmt.Fprintf(w, "- **Disk usage:** %s\n", sandbox.FormatSize(size)) //nolint:errcheck
@@ -172,8 +174,8 @@ func writeBugReportConfig(w io.Writer, reportType string) {
 		fmt.Fprintln(w) //nolint:errcheck
 	}
 
-	writeConfigBlock("Global config", cliLayout().GlobalConfigPath(), func() ([]byte, error) { return config.ReadGlobalConfigRaw(cliLayout()) })
-	writeConfigBlock("Profile config", cliLayout().DefaultsConfigPath(), func() ([]byte, error) { return config.ReadConfigRaw(cliLayout()) })
+	writeConfigBlock("Global config", cliutil.Layout().GlobalConfigPath(), func() ([]byte, error) { return config.ReadGlobalConfigRaw(cliutil.Layout()) })
+	writeConfigBlock("Profile config", cliutil.Layout().DefaultsConfigPath(), func() ([]byte, error) { return config.ReadConfigRaw(cliutil.Layout()) })
 
 	fmt.Fprintln(w, "</details>") //nolint:errcheck
 	fmt.Fprintln(w)               //nolint:errcheck

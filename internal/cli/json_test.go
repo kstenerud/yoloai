@@ -7,6 +7,8 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/kstenerud/yoloai/internal/cli/cliutil"
+
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -15,19 +17,19 @@ import (
 func TestJsonEnabled_Default(t *testing.T) {
 	cmd := &cobra.Command{}
 	cmd.PersistentFlags().Bool("json", false, "")
-	assert.False(t, jsonEnabled(cmd))
+	assert.False(t, cliutil.JSONEnabled(cmd))
 }
 
 func TestJsonEnabled_Set(t *testing.T) {
 	cmd := &cobra.Command{}
 	cmd.PersistentFlags().Bool("json", false, "")
 	require.NoError(t, cmd.PersistentFlags().Set("json", "true"))
-	assert.True(t, jsonEnabled(cmd))
+	assert.True(t, cliutil.JSONEnabled(cmd))
 }
 
 func TestWriteJSON_SimpleObject(t *testing.T) {
 	var buf bytes.Buffer
-	err := writeJSON(&buf, map[string]string{"key": "value"})
+	err := cliutil.WriteJSON(&buf, map[string]string{"key": "value"})
 	require.NoError(t, err)
 	assert.JSONEq(t, `{"key": "value"}`, buf.String())
 	assert.True(t, buf.Bytes()[buf.Len()-1] == '\n', "should end with newline")
@@ -35,14 +37,14 @@ func TestWriteJSON_SimpleObject(t *testing.T) {
 
 func TestWriteJSON_Array(t *testing.T) {
 	var buf bytes.Buffer
-	err := writeJSON(&buf, []string{"a", "b"})
+	err := cliutil.WriteJSON(&buf, []string{"a", "b"})
 	require.NoError(t, err)
 	assert.JSONEq(t, `["a", "b"]`, buf.String())
 }
 
 func TestWriteJSON_EmptyArray(t *testing.T) {
 	var buf bytes.Buffer
-	err := writeJSON(&buf, []string{})
+	err := cliutil.WriteJSON(&buf, []string{})
 	require.NoError(t, err)
 	assert.Equal(t, "[]\n", buf.String())
 }
@@ -50,7 +52,7 @@ func TestWriteJSON_EmptyArray(t *testing.T) {
 func TestWriteJSON_NilSlice(t *testing.T) {
 	var buf bytes.Buffer
 	var s []string
-	err := writeJSON(&buf, s)
+	err := cliutil.WriteJSON(&buf, s)
 	require.NoError(t, err)
 	// nil slice marshals as "null" in Go
 	assert.Equal(t, "null\n", buf.String())
@@ -58,12 +60,12 @@ func TestWriteJSON_NilSlice(t *testing.T) {
 
 func TestWriteJSONError(t *testing.T) {
 	var buf bytes.Buffer
-	writeJSONError(&buf, errors.New("something broke"))
+	cliutil.WriteJSONError(&buf, errors.New("something broke"))
 	assert.JSONEq(t, `{"error": "something broke"}`, buf.String())
 }
 
 func TestErrJSONNotSupported(t *testing.T) {
-	err := errJSONNotSupported("attach")
+	err := cliutil.ErrJSONNotSupported("attach")
 	assert.Contains(t, err.Error(), "attach")
 	assert.Contains(t, err.Error(), "not supported")
 }
@@ -72,7 +74,7 @@ func TestEffectiveYes_NoFlags(t *testing.T) {
 	cmd := &cobra.Command{}
 	cmd.PersistentFlags().Bool("json", false, "")
 	cmd.Flags().BoolP("yes", "y", false, "")
-	assert.False(t, effectiveYes(cmd))
+	assert.False(t, cliutil.EffectiveYes(cmd))
 }
 
 func TestEffectiveYes_YesOnly(t *testing.T) {
@@ -80,7 +82,7 @@ func TestEffectiveYes_YesOnly(t *testing.T) {
 	cmd.PersistentFlags().Bool("json", false, "")
 	cmd.Flags().BoolP("yes", "y", false, "")
 	require.NoError(t, cmd.Flags().Set("yes", "true"))
-	assert.True(t, effectiveYes(cmd))
+	assert.True(t, cliutil.EffectiveYes(cmd))
 }
 
 func TestEffectiveYes_JSONOnly(t *testing.T) {
@@ -88,7 +90,7 @@ func TestEffectiveYes_JSONOnly(t *testing.T) {
 	cmd.PersistentFlags().Bool("json", false, "")
 	cmd.Flags().BoolP("yes", "y", false, "")
 	require.NoError(t, cmd.PersistentFlags().Set("json", "true"))
-	assert.True(t, effectiveYes(cmd))
+	assert.True(t, cliutil.EffectiveYes(cmd))
 }
 
 func TestEffectiveYes_Both(t *testing.T) {
@@ -97,5 +99,5 @@ func TestEffectiveYes_Both(t *testing.T) {
 	cmd.Flags().BoolP("yes", "y", false, "")
 	require.NoError(t, cmd.PersistentFlags().Set("json", "true"))
 	require.NoError(t, cmd.Flags().Set("yes", "true"))
-	assert.True(t, effectiveYes(cmd))
+	assert.True(t, cliutil.EffectiveYes(cmd))
 }

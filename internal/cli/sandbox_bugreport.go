@@ -14,6 +14,8 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/kstenerud/yoloai/internal/cli/cliutil"
+
 	yoloai "github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/internal/sandbox"
@@ -60,8 +62,8 @@ func runSandboxBugReport(cmd *cobra.Command, name string, reportType string) err
 	writeBugReportConfig(f, reportType)
 
 	// Sections 6-12: Sandbox-specific
-	backend := resolveBackendForSandbox(name)
-	return withClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
+	backend := cliutil.ResolveBackendForSandbox(name)
+	return cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
 		writeSandboxSections(ctx, f, c, name, reportType)
 		return nil
 	})
@@ -74,7 +76,7 @@ func writeSandboxSections(ctx context.Context, w io.Writer, c *yoloai.Client, na
 	// Section 6: Sandbox detail
 	writeBugReportSandboxDetail(ctx, w, c, name, reportType)
 
-	sandboxDir := cliLayout().SandboxDir(name)
+	sandboxDir := cliutil.Layout().SandboxDir(name)
 
 	// Section 7: cli.jsonl
 	writeBugReportJSONLFile(w, "logs/cli.jsonl", store.CLIJSONLPath(sandboxDir), reportType, nil)
@@ -115,13 +117,13 @@ func writeSandboxSections(ctx context.Context, w io.Writer, c *yoloai.Client, na
 }
 
 // writeBugReportSandboxSectionsForFlag writes sections 6-12 for the --bugreport flag path.
-// Called from the Execute defer when bugReportSandboxName is set.
+// Called from the Execute defer when cliutil.BugReportSandboxName is set.
 // Uses context.Background() since the command context may already be done.
 func writeBugReportSandboxSectionsForFlag(w io.Writer, name, reportType string) {
-	backend := resolveBackendForSandbox(name)
+	backend := cliutil.ResolveBackendForSandbox(name)
 	ctx := context.Background()
 	c, err := yoloai.NewWithOptions(ctx, yoloai.Options{
-		DataDir: cliLayout().DataDir,
+		DataDir: cliutil.Layout().DataDir,
 		Backend: backend,
 		Input:   os.Stdin,
 		Output:  io.Discard, // best-effort path; don't write to the in-progress bug report
@@ -153,7 +155,7 @@ func writeBugReportSandboxDetail(ctx context.Context, w io.Writer, c *yoloai.Cli
 		fmt.Fprintln(w)                                     //nolint:errcheck
 	}
 
-	sandboxDir := cliLayout().SandboxDir(name)
+	sandboxDir := cliutil.Layout().SandboxDir(name)
 
 	// environment.json
 	writeJSONFileSection(w, "environment.json",
@@ -336,7 +338,7 @@ func writeBugReportJSONLFile(w io.Writer, title, path, reportType string, omitEv
 // writeBugReportAgentOutput writes section 11: ANSI-stripped agent output.
 // Only included in unsafe reports.
 func writeBugReportAgentOutput(w io.Writer, name string) {
-	path := store.AgentLogPath(cliLayout().SandboxDir(name))
+	path := store.AgentLogPath(cliutil.Layout().SandboxDir(name))
 	f, err := os.Open(path) //nolint:gosec // G304: path is store.AgentLogPath(name) — yoloAI-owned
 	if err != nil {
 		fmt.Fprintln(w, "<details>")                       //nolint:errcheck
@@ -392,7 +394,7 @@ func writeBugReportTmuxCapture(w io.Writer, name string) {
 // for the named sandbox. Returns empty string if the file is missing or has no
 // socket configured.
 func readTmuxSocketFromConfig(name string) string {
-	cfgPath := fmt.Sprintf("%s/%s", cliLayout().SandboxDir(name), store.RuntimeConfigFile)
+	cfgPath := fmt.Sprintf("%s/%s", cliutil.Layout().SandboxDir(name), store.RuntimeConfigFile)
 	data, err := os.ReadFile(cfgPath) //nolint:gosec // G304: path derived from trusted sandbox dir
 	if err != nil {
 		return ""

@@ -6,6 +6,8 @@ package cli
 import (
 	"fmt"
 
+	"github.com/kstenerud/yoloai/internal/cli/cliutil"
+
 	"github.com/kstenerud/yoloai"
 	"github.com/spf13/cobra"
 )
@@ -24,7 +26,7 @@ Checks performed:
   3. agent     — at least one API key is set for the selected agent`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			backend := resolveBackend(cmd)
+			backend := cliutil.ResolveBackend(cmd)
 			agentName, _ := cmd.Flags().GetString("agent")
 			isolation, _ := cmd.Flags().GetString("isolation")
 			return runSystemCheck(cmd, backend, agentName, isolation)
@@ -41,10 +43,10 @@ Checks performed:
 func runSystemCheck(cmd *cobra.Command, backend, agentName, isolation string) error {
 	out := cmd.OutOrStdout()
 	if agentName == "" {
-		agentName = resolveAgent(cmd)
+		agentName = cliutil.ResolveAgent(cmd)
 	}
 
-	results, err := systemClient().Check(cmd.Context(), yoloai.CheckOptions{
+	results, err := cliutil.NewSystemClient().Check(cmd.Context(), yoloai.CheckOptions{
 		Backend:   backend,
 		Agent:     agentName,
 		Isolation: isolation,
@@ -61,7 +63,7 @@ func runSystemCheck(cmd *cobra.Command, backend, agentName, isolation string) er
 		}
 	}
 
-	if jsonEnabled(cmd) {
+	if cliutil.JSONEnabled(cmd) {
 		checkJSON := make([]map[string]any, 0, len(results))
 		for _, r := range results {
 			entry := map[string]any{"name": r.Name, "ok": r.OK}
@@ -70,7 +72,7 @@ func runSystemCheck(cmd *cobra.Command, backend, agentName, isolation string) er
 			}
 			checkJSON = append(checkJSON, entry)
 		}
-		return writeJSON(out, map[string]any{"ok": allOK, "checks": checkJSON})
+		return cliutil.WriteJSON(out, map[string]any{"ok": allOK, "checks": checkJSON})
 	}
 
 	for _, r := range results {

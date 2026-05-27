@@ -3,6 +3,7 @@ package cli
 import (
 	"testing"
 
+	"github.com/kstenerud/yoloai/internal/cli/cliutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -21,7 +22,7 @@ func TestDestroyCmd_AllWithNames(t *testing.T) {
 func TestDestroyCmd_NoArgsNoEnv(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
-	t.Setenv(EnvSandboxName, "")
+	t.Setenv(cliutil.EnvSandboxName, "")
 
 	// Without --all and without args, the command needs a runtime to proceed.
 	// But with no backend specified, it defaults to "docker" which will fail

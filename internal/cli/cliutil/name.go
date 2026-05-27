@@ -1,6 +1,6 @@
-// ABOUTME: EnvSandboxName constant and resolveName() for reading the sandbox
+// ABOUTME: EnvSandboxName constant and ResolveName() for reading the sandbox
 // ABOUTME: name from CLI args or the YOLOAI_SANDBOX environment variable fallback.
-package cli
+package cliutil
 
 import (
 	"os"
@@ -13,11 +13,11 @@ import (
 // EnvSandboxName is the environment variable used as default sandbox name.
 const EnvSandboxName = "YOLOAI_SANDBOX"
 
-// resolveName extracts the sandbox name from positional args, falling back
+// ResolveName extracts the sandbox name from positional args, falling back
 // to YOLOAI_SANDBOX if no name argument was provided.
 // Returns the name and the remaining args (excluding the name).
 // Returns a UsageError if no name is available from either source.
-func resolveName(_ *cobra.Command, args []string) (string, []string, error) {
+func ResolveName(_ *cobra.Command, args []string) (string, []string, error) {
 	if len(args) >= 1 {
 		if err := store.ValidateName(args[0]); err != nil {
 			return "", nil, err

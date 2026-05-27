@@ -1,4 +1,4 @@
-package cli
+package cliutil
 
 // ABOUTME: Multi-sink slog logger for structured CLI logging.
 // ABOUTME: Fans records to N independent sinks (stderr, cli.jsonl, bugreport temp file).
@@ -80,28 +80,28 @@ func (m *multiSinkHandler) WithGroup(name string) slog.Handler {
 // Package-level logger state, initialised in PersistentPreRunE.
 var globalHandler *multiSinkHandler
 
-// liveLogBuf accumulates all JSONL log lines when --bugreport is active.
+// LiveLogBuf accumulates all JSONL log lines when --bugreport is active.
 // Written via AddLogSink. Used to produce section 13 of the bug report.
-var liveLogBuf bytes.Buffer
+var LiveLogBuf bytes.Buffer
 
-// bugReportFile is the open temp file for the current bug report, nil if not active.
-var bugReportFile *os.File
+// BugReportFile is the open temp file for the current bug report, nil if not active.
+var BugReportFile *os.File
 
-// bugReportFinalName is the target filename (without .tmp) for the bug report.
-var bugReportFinalName string
+// BugReportFinalName is the target filename (without .tmp) for the bug report.
+var BugReportFinalName string
 
-// bugReportType is "safe" or "unsafe", set when --bugreport is active.
-var bugReportType string
+// BugReportType is "safe" or "unsafe", set when --bugreport is active.
+var BugReportType string
 
-// bugReportSandboxName is set by sandboxDispatch when --bugreport is active.
+// BugReportSandboxName is set by sandboxDispatch when --bugreport is active.
 // The defer in Execute uses it to write sandbox sections 6-12.
-var bugReportSandboxName string
+var BugReportSandboxName string
 
-// initLogger sets up the global multi-sink slog logger. Called from PersistentPreRunE
+// InitLogger sets up the global multi-sink slog logger. Called from PersistentPreRunE
 // before any subcommand logic runs. Default stderr level is WARN (lifecycle INFO events
 // go to cli.jsonl only). -v raises to DEBUG; -q raises to ERROR. --debug affects
 // cli.jsonl (added later per sandbox subcommand).
-func initLogger(cmd *cobra.Command) {
+func InitLogger(cmd *cobra.Command) {
 	globalHandler = &multiSinkHandler{}
 
 	verboseCount, _ := cmd.Flags().GetCount("verbose")
@@ -122,7 +122,7 @@ func initLogger(cmd *cobra.Command) {
 }
 
 // AddLogSink adds a JSONL-formatted sink to the global logger. Safe to call from
-// RunE after initLogger has been called. Used by sandbox subcommands to register
+// RunE after InitLogger has been called. Used by sandbox subcommands to register
 // their cli.jsonl file.
 func AddLogSink(w io.Writer, minLevel slog.Level) {
 	if globalHandler == nil {
@@ -150,18 +150,18 @@ func newJSONLHandler(w io.Writer, minLevel slog.Level) slog.Handler {
 	})
 }
 
-// openCLIJSONLSink opens logs/cli.jsonl for the named sandbox and registers it
+// OpenCLIJSONLSink opens logs/cli.jsonl for the named sandbox and registers it
 // as a JSONL sink on the global logger. Returns a cleanup func (call with defer).
 // No-op (returns empty func) if the sandbox logs directory doesn't exist yet.
-func openCLIJSONLSink(name string, cmd *cobra.Command) func() {
-	path := store.CLIJSONLPath(cliLayout().SandboxDir(name))
+func OpenCLIJSONLSink(name string, cmd *cobra.Command) func() {
+	path := store.CLIJSONLPath(Layout().SandboxDir(name))
 	f, err := fileutil.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600) //nolint:gosec // G304: path derived from trusted sandbox dir
 	if err != nil {
 		return func() {}
 	}
 	debug, _ := cmd.Flags().GetBool("debug")
 	level := slog.LevelInfo
-	if debug || bugReportFile != nil {
+	if debug || BugReportFile != nil {
 		level = slog.LevelDebug
 	}
 	AddLogSink(f, level)

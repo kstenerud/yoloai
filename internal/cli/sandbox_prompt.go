@@ -6,12 +6,14 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/kstenerud/yoloai/internal/cli/cliutil"
+
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
 	"github.com/spf13/cobra"
 )
 
 func runSandboxPrompt(cmd *cobra.Command, name string) error {
-	sandboxDir := cliLayout().SandboxDir(name)
+	sandboxDir := cliutil.Layout().SandboxDir(name)
 	if err := store.RequireSandboxDir(sandboxDir); err != nil {
 		return err
 	}
@@ -20,8 +22,8 @@ func runSandboxPrompt(cmd *cobra.Command, name string) error {
 	data, err := os.ReadFile(promptPath) //nolint:gosec // path is sandbox-controlled
 	if err != nil {
 		if os.IsNotExist(err) {
-			if jsonEnabled(cmd) {
-				return writeJSON(cmd.OutOrStdout(), map[string]any{
+			if cliutil.JSONEnabled(cmd) {
+				return cliutil.WriteJSON(cmd.OutOrStdout(), map[string]any{
 					"name":   name,
 					"prompt": nil,
 				})
@@ -32,8 +34,8 @@ func runSandboxPrompt(cmd *cobra.Command, name string) error {
 		return fmt.Errorf("read prompt: %w", err)
 	}
 
-	if jsonEnabled(cmd) {
-		return writeJSON(cmd.OutOrStdout(), map[string]any{
+	if cliutil.JSONEnabled(cmd) {
+		return cliutil.WriteJSON(cmd.OutOrStdout(), map[string]any{
 			"name":   name,
 			"prompt": string(data),
 		})

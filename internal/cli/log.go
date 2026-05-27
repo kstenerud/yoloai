@@ -14,6 +14,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kstenerud/yoloai/internal/cli/cliutil"
+
 	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
 	"github.com/spf13/cobra"
@@ -27,10 +29,10 @@ type logSource struct {
 }
 
 var allLogSources = []logSource{
-	{"cli", "cli    ", func(name string) string { return store.CLIJSONLPath(cliLayout().SandboxDir(name)) }},
-	{"sandbox", "sandbox", func(name string) string { return store.SandboxJSONLPath(cliLayout().SandboxDir(name)) }},
-	{"monitor", "monitor", func(name string) string { return store.MonitorJSONLPath(cliLayout().SandboxDir(name)) }},
-	{"hooks", "hooks  ", func(name string) string { return store.HooksJSONLPath(cliLayout().SandboxDir(name)) }},
+	{"cli", "cli    ", func(name string) string { return store.CLIJSONLPath(cliutil.Layout().SandboxDir(name)) }},
+	{"sandbox", "sandbox", func(name string) string { return store.SandboxJSONLPath(cliutil.Layout().SandboxDir(name)) }},
+	{"monitor", "monitor", func(name string) string { return store.MonitorJSONLPath(cliutil.Layout().SandboxDir(name)) }},
+	{"hooks", "hooks  ", func(name string) string { return store.HooksJSONLPath(cliutil.Layout().SandboxDir(name)) }},
 }
 
 // logRecord is a parsed JSONL log entry.
@@ -379,7 +381,7 @@ func tailFilePoll(
 
 // sandboxIsDone returns true if the sandbox's agent-status.json shows the agent has exited.
 func sandboxIsDone(name string) bool {
-	statusPath := store.AgentStatusFilePath(cliLayout().SandboxDir(name))
+	statusPath := store.AgentStatusFilePath(cliutil.Layout().SandboxDir(name))
 	data, err := os.ReadFile(statusPath) //nolint:gosec // G304: statusPath is store.AgentStatusFilePath(name) — yoloAI-owned
 	if err != nil {
 		return false
@@ -447,7 +449,7 @@ func runLogFollow(cmd *cobra.Command, name string, sources []logSource, minLevel
 
 // runLogAgent shows the raw agent terminal output (logs/agent.log).
 func runLogAgent(cmd *cobra.Command, name string, rawMode bool) error {
-	logPath := store.AgentLogPath(cliLayout().SandboxDir(name))
+	logPath := store.AgentLogPath(cliutil.Layout().SandboxDir(name))
 	f, err := os.Open(logPath) //nolint:gosec // G304: logPath is store.AgentLogPath(name) — yoloAI-owned
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -467,7 +469,7 @@ func runLogAgent(cmd *cobra.Command, name string, rawMode bool) error {
 
 // runLog is the shared implementation for `sandbox log` and the `log` alias.
 func runLog(cmd *cobra.Command, args []string) error {
-	name, _, err := resolveName(cmd, args)
+	name, _, err := cliutil.ResolveName(cmd, args)
 	if err != nil {
 		return err
 	}

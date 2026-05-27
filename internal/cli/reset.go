@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/kstenerud/yoloai/internal/cli/cliutil"
+
 	yoloai "github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/spf13/cobra"
@@ -44,28 +46,28 @@ func newResetCmd() *cobra.Command {
 
 // runReset implements the reset command body.
 func runReset(cmd *cobra.Command, args []string, opts *resetOpts) error {
-	name, _, err := resolveName(cmd, args)
+	name, _, err := cliutil.ResolveName(cmd, args)
 	if err != nil {
 		return err
 	}
-	defer openCLIJSONLSink(name, cmd)()
+	defer cliutil.OpenCLIJSONLSink(name, cmd)()
 
 	// --clear-state and --attach imply --restart
 	if opts.clearState || opts.attach {
 		opts.restart = true
 	}
 
-	if jsonEnabled(cmd) && opts.attach {
+	if cliutil.JSONEnabled(cmd) && opts.attach {
 		return sandbox.NewUsageError("--json and --attach are incompatible")
 	}
 
 	if opts.attach {
-		setTerminalTitle(name)
-		defer setTerminalTitle("")
+		cliutil.SetTerminalTitle(name)
+		defer cliutil.SetTerminalTitle("")
 	}
 
-	backend := resolveBackendForSandbox(name)
-	return withClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
+	backend := cliutil.ResolveBackendForSandbox(name)
+	return cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
 		slog.Info("resetting sandbox", "event", "sandbox.reset", "sandbox", name, "restart", opts.restart, "clear_state", opts.clearState) //nolint:gosec // G706: name is validated by ValidateName
 		if err := c.Reset(ctx, sandbox.ResetOptions{
 			Name:       name,
@@ -76,19 +78,19 @@ func runReset(cmd *cobra.Command, args []string, opts *resetOpts) error {
 			NoPrompt:   opts.noPrompt,
 			Debug:      opts.debug,
 		}); err != nil {
-			return sandboxErrorHint(name, err)
+			return cliutil.SandboxErrorHint(name, err)
 		}
 		slog.Info("sandbox reset complete", "event", "sandbox.reset.complete", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
 
-		if jsonEnabled(cmd) {
-			return writeJSON(cmd.OutOrStdout(), map[string]string{
+		if cliutil.JSONEnabled(cmd) {
+			return cliutil.WriteJSON(cmd.OutOrStdout(), map[string]string{
 				"name":   name,
 				"action": "reset",
 			})
 		}
 
 		if opts.attach {
-			return c.Attach(ctx, name, cliIOStreams())
+			return c.Attach(ctx, name, cliutil.IOStreams())
 		}
 
 		if opts.restart {

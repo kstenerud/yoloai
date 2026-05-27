@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/kstenerud/yoloai/internal/cli/cliutil"
+
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/spf13/cobra"
@@ -55,16 +57,16 @@ func runConfigGet(cmd *cobra.Command, args []string) error {
 
 // configGetAll prints all effective configuration values.
 func configGetAll(cmd *cobra.Command) error {
-	out, err := config.GetEffectiveConfig(cliLayout())
+	out, err := config.GetEffectiveConfig(cliutil.Layout())
 	if err != nil {
 		return err
 	}
-	if jsonEnabled(cmd) {
+	if cliutil.JSONEnabled(cmd) {
 		var m map[string]any
 		if err := yaml.Unmarshal([]byte(out), &m); err != nil {
 			return fmt.Errorf("parse config: %w", err)
 		}
-		return writeJSON(cmd.OutOrStdout(), m)
+		return cliutil.WriteJSON(cmd.OutOrStdout(), m)
 	}
 	_, err = fmt.Fprint(cmd.OutOrStdout(), out)
 	return err
@@ -72,18 +74,18 @@ func configGetAll(cmd *cobra.Command) error {
 
 // configGetKey prints a single configuration value by dotted key.
 func configGetKey(cmd *cobra.Command, key string) error {
-	value, found, err := config.GetConfigValue(cliLayout(), key)
+	value, found, err := config.GetConfigValue(cliutil.Layout(), key)
 	if err != nil {
 		return err
 	}
 	if !found {
-		if jsonEnabled(cmd) {
+		if cliutil.JSONEnabled(cmd) {
 			return fmt.Errorf("key %q not found", key)
 		}
 		os.Exit(1)
 	}
-	if jsonEnabled(cmd) {
-		return writeJSON(cmd.OutOrStdout(), map[string]string{
+	if cliutil.JSONEnabled(cmd) {
+		return cliutil.WriteJSON(cmd.OutOrStdout(), map[string]string{
 			"key":   key,
 			"value": value,
 		})
@@ -116,20 +118,20 @@ func runConfigSet(cmd *cobra.Command, args []string) error {
 		if err := ensureGlobalConfig(); err != nil {
 			return err
 		}
-		if err := config.UpdateGlobalConfigFields(cliLayout(), map[string]string{key: value}); err != nil {
+		if err := config.UpdateGlobalConfigFields(cliutil.Layout(), map[string]string{key: value}); err != nil {
 			return err
 		}
 	} else {
 		if err := ensureProfileConfig(); err != nil {
 			return err
 		}
-		if err := config.UpdateConfigFields(cliLayout(), map[string]string{key: value}); err != nil {
+		if err := config.UpdateConfigFields(cliutil.Layout(), map[string]string{key: value}); err != nil {
 			return err
 		}
 	}
 
-	if jsonEnabled(cmd) {
-		return writeJSON(cmd.OutOrStdout(), map[string]string{
+	if cliutil.JSONEnabled(cmd) {
+		return cliutil.WriteJSON(cmd.OutOrStdout(), map[string]string{
 			"key":    key,
 			"value":  value,
 			"action": "set",
@@ -140,7 +142,7 @@ func runConfigSet(cmd *cobra.Command, args []string) error {
 
 // ensureGlobalConfig creates the global config file if it does not exist.
 func ensureGlobalConfig() error {
-	configPath := cliLayout().GlobalConfigPath()
+	configPath := cliutil.Layout().GlobalConfigPath()
 	if _, err := os.Stat(configPath); !os.IsNotExist(err) {
 		return nil
 	}
@@ -153,7 +155,7 @@ func ensureGlobalConfig() error {
 
 // ensureProfileConfig creates the profile config file if it does not exist.
 func ensureProfileConfig() error {
-	configPath := cliLayout().DefaultsConfigPath()
+	configPath := cliutil.Layout().DefaultsConfigPath()
 	if _, err := os.Stat(configPath); !os.IsNotExist(err) {
 		return nil
 	}
@@ -183,15 +185,15 @@ Default settings are stored in ~/.yoloai/defaults/config.yaml.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var err error
 			if config.IsGlobalKey(args[0]) {
-				err = config.DeleteGlobalConfigField(cliLayout(), args[0])
+				err = config.DeleteGlobalConfigField(cliutil.Layout(), args[0])
 			} else {
-				err = config.DeleteConfigField(cliLayout(), args[0])
+				err = config.DeleteConfigField(cliutil.Layout(), args[0])
 			}
 			if err != nil {
 				return err
 			}
-			if jsonEnabled(cmd) {
-				return writeJSON(cmd.OutOrStdout(), map[string]string{
+			if cliutil.JSONEnabled(cmd) {
+				return cliutil.WriteJSON(cmd.OutOrStdout(), map[string]string{
 					"key":    args[0],
 					"action": "reset",
 				})

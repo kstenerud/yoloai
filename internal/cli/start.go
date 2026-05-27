@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/kstenerud/yoloai/internal/cli/cliutil"
+
 	yoloai "github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/spf13/cobra"
@@ -45,43 +47,43 @@ func newStartCmd() *cobra.Command {
 
 // runStart implements the start command body.
 func runStart(cmd *cobra.Command, args []string, opts *startOpts) error {
-	name, _, err := resolveName(cmd, args)
+	name, _, err := cliutil.ResolveName(cmd, args)
 	if err != nil {
 		return err
 	}
-	defer openCLIJSONLSink(name, cmd)()
+	defer cliutil.OpenCLIJSONLSink(name, cmd)()
 
-	if jsonEnabled(cmd) && opts.attach {
+	if cliutil.JSONEnabled(cmd) && opts.attach {
 		return sandbox.NewUsageError("--json and --attach are incompatible")
 	}
 
 	if opts.attach {
-		setTerminalTitle(name)
-		defer setTerminalTitle("")
+		cliutil.SetTerminalTitle(name)
+		defer cliutil.SetTerminalTitle("")
 	}
 
 	slog.Info("starting sandbox", "event", "sandbox.start", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
-	backend := resolveBackendForSandbox(name)
-	return withClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
+	backend := cliutil.ResolveBackendForSandbox(name)
+	return cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
 		if err := c.Start(ctx, name, sandbox.StartOptions{
 			Resume:       opts.resume,
 			Prompt:       opts.prompt,
 			PromptFile:   opts.promptFile,
 			VscodeTunnel: opts.vscodeTunnel,
 		}); err != nil {
-			return sandboxErrorHint(name, err)
+			return cliutil.SandboxErrorHint(name, err)
 		}
 		slog.Info("sandbox started", "event", "sandbox.start.complete", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
 
-		if jsonEnabled(cmd) {
-			return writeJSON(cmd.OutOrStdout(), map[string]string{
+		if cliutil.JSONEnabled(cmd) {
+			return cliutil.WriteJSON(cmd.OutOrStdout(), map[string]string{
 				"name":   name,
 				"action": "started",
 			})
 		}
 
 		if opts.attach {
-			return c.Attach(ctx, name, cliIOStreams())
+			return c.Attach(ctx, name, cliutil.IOStreams())
 		}
 		_, err := fmt.Fprintf(cmd.OutOrStdout(), "Sandbox %s started\nRun 'yoloai attach %s' to reconnect\n", name, name)
 		return err

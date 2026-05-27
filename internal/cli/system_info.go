@@ -6,6 +6,8 @@ package cli
 import (
 	"fmt"
 
+	"github.com/kstenerud/yoloai/internal/cli/cliutil"
+
 	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/spf13/cobra"
@@ -17,7 +19,7 @@ func newSystemInfoCmd(version, commit, date string) *cobra.Command {
 		Short: "Show system information",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			if jsonEnabled(cmd) {
+			if cliutil.JSONEnabled(cmd) {
 				return writeSystemInfoJSON(cmd, version, commit, date)
 			}
 
@@ -27,14 +29,14 @@ func newSystemInfoCmd(version, commit, date string) *cobra.Command {
 			fmt.Fprintf(out, "Commit:      %s\n", commit)  //nolint:errcheck
 			fmt.Fprintf(out, "Built:       %s\n", date)    //nolint:errcheck
 
-			globalConfigPath := cliLayout().GlobalConfigPath()
+			globalConfigPath := cliutil.Layout().GlobalConfigPath()
 			fmt.Fprintf(out, "Config:      %s\n", globalConfigPath) //nolint:errcheck
 
-			profileConfigPath := cliLayout().DefaultsConfigPath()
+			profileConfigPath := cliutil.Layout().DefaultsConfigPath()
 			fmt.Fprintf(out, "Profile:     %s\n", profileConfigPath) //nolint:errcheck
 
-			dataDir := cliLayout().YoloaiDir()
-			sandboxesDir := cliLayout().SandboxesDir()
+			dataDir := cliutil.Layout().YoloaiDir()
+			sandboxesDir := cliutil.Layout().SandboxesDir()
 
 			fmt.Fprintf(out, "Data dir:    %s\n", dataDir)      //nolint:errcheck
 			fmt.Fprintf(out, "Sandboxes:   %s\n", sandboxesDir) //nolint:errcheck
@@ -68,10 +70,10 @@ func newSystemInfoCmd(version, commit, date string) *cobra.Command {
 
 // writeSystemInfoJSON outputs system info as JSON.
 func writeSystemInfoJSON(cmd *cobra.Command, version, commit, date string) error {
-	globalConfigPath := cliLayout().GlobalConfigPath()
-	profileConfigPath := cliLayout().DefaultsConfigPath()
-	dataDir := cliLayout().YoloaiDir()
-	sandboxesDir := cliLayout().SandboxesDir()
+	globalConfigPath := cliutil.Layout().GlobalConfigPath()
+	profileConfigPath := cliutil.Layout().DefaultsConfigPath()
+	dataDir := cliutil.Layout().YoloaiDir()
+	sandboxesDir := cliutil.Layout().SandboxesDir()
 
 	diskUsage := ""
 	if size, err := sandbox.DirSize(dataDir); err == nil {
@@ -117,5 +119,5 @@ func writeSystemInfoJSON(cmd *cobra.Command, version, commit, date string) error
 		Backends:          backends,
 	}
 
-	return writeJSON(cmd.OutOrStdout(), result)
+	return cliutil.WriteJSON(cmd.OutOrStdout(), result)
 }

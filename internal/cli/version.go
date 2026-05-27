@@ -5,6 +5,8 @@ package cli
 import (
 	"fmt"
 
+	"github.com/kstenerud/yoloai/internal/cli/cliutil"
+
 	"github.com/spf13/cobra"
 )
 
@@ -15,8 +17,8 @@ func newVersionCmd(version, commit, date string) *cobra.Command {
 		GroupID: groupAdmin,
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			if jsonEnabled(cmd) {
-				return writeJSON(cmd.OutOrStdout(), map[string]string{
+			if cliutil.JSONEnabled(cmd) {
+				return cliutil.WriteJSON(cmd.OutOrStdout(), map[string]string{
 					"version": version,
 					"commit":  commit,
 					"date":    date,

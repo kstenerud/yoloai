@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kstenerud/yoloai/internal/cli/cliutil"
+
 	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
 	"github.com/kstenerud/yoloai/internal/testutil"
@@ -80,13 +82,13 @@ func TestCLI_NewAndDestroy(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { destroySandbox(t, "cli-new") })
 
-	assert.DirExists(t, cliLayout().SandboxDir("cli-new"))
+	assert.DirExists(t, cliutil.Layout().SandboxDir("cli-new"))
 	assert.Contains(t, stderr, "cli-new") // Manager output goes to stderr
 
 	stdout, _, err := runCLI(t, "destroy", "--yes", "cli-new")
 	require.NoError(t, err)
 	assert.Contains(t, stdout, "Destroyed")
-	assert.NoDirExists(t, cliLayout().SandboxDir("cli-new"))
+	assert.NoDirExists(t, cliutil.Layout().SandboxDir("cli-new"))
 }
 
 func TestCLI_NewWithPrompt(t *testing.T) {
@@ -96,7 +98,7 @@ func TestCLI_NewWithPrompt(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { destroySandbox(t, "cli-prompt") })
 
-	sandboxDir := cliLayout().SandboxDir("cli-prompt")
+	sandboxDir := cliutil.Layout().SandboxDir("cli-prompt")
 	prompt, err := os.ReadFile(filepath.Join(sandboxDir, "prompt.txt")) //nolint:gosec // test path
 	require.NoError(t, err)
 	assert.Equal(t, "echo hi", string(prompt))
@@ -140,9 +142,9 @@ func TestCLI_Diff(t *testing.T) {
 	t.Cleanup(func() { destroySandbox(t, "cli-diff") })
 
 	// Modify work copy
-	meta, err := store.LoadMeta(cliLayout().SandboxDir("cli-diff"))
+	meta, err := store.LoadMeta(cliutil.Layout().SandboxDir("cli-diff"))
 	require.NoError(t, err)
-	workDir := store.WorkDir(cliLayout().SandboxDir("cli-diff"), meta.Workdir.HostPath)
+	workDir := store.WorkDir(cliutil.Layout().SandboxDir("cli-diff"), meta.Workdir.HostPath)
 	require.NoError(t, os.WriteFile(
 		filepath.Join(workDir, "main.go"),
 		[]byte("package main\n\nimport \"fmt\"\n\nfunc main() { fmt.Println(\"diff-test\") }\n"),
@@ -179,11 +181,11 @@ func TestCLI_Log(t *testing.T) {
 	t.Cleanup(func() { destroySandbox(t, "cli-log") })
 
 	// Write a fake JSONL log entry for testing
-	sandboxDir := cliLayout().SandboxDir("cli-log")
+	sandboxDir := cliutil.Layout().SandboxDir("cli-log")
 	logsDir := filepath.Join(sandboxDir, store.LogsDir)
 	require.NoError(t, os.MkdirAll(logsDir, 0700))
 	entry := `{"ts":"2026-03-16T10:00:00.000Z","level":"info","event":"test.event","msg":"test log output"}` + "\n"
-	require.NoError(t, os.WriteFile(store.CLIJSONLPath(cliLayout().SandboxDir("cli-log")), []byte(entry), 0600))
+	require.NoError(t, os.WriteFile(store.CLIJSONLPath(cliutil.Layout().SandboxDir("cli-log")), []byte(entry), 0600))
 
 	stdout, _, err := runCLI(t, "log", "cli-log")
 	require.NoError(t, err)
@@ -218,7 +220,7 @@ func TestCLI_NewReplace(t *testing.T) {
 	_, _, err = runCLI(t, "new", "--agent", "test", "--no-start", "--force", "cli-replace", projectDir)
 	require.NoError(t, err)
 
-	assert.DirExists(t, cliLayout().SandboxDir("cli-replace"))
+	assert.DirExists(t, cliutil.Layout().SandboxDir("cli-replace"))
 }
 
 func TestCLI_NetworkLifecycle(t *testing.T) {
@@ -230,7 +232,7 @@ func TestCLI_NetworkLifecycle(t *testing.T) {
 	t.Cleanup(func() { destroySandbox(t, "cli-net") })
 
 	// Verify meta has network isolation
-	meta, err := store.LoadMeta(cliLayout().SandboxDir("cli-net"))
+	meta, err := store.LoadMeta(cliutil.Layout().SandboxDir("cli-net"))
 	require.NoError(t, err)
 	assert.Equal(t, "isolated", meta.NetworkMode)
 	initialDomains := len(meta.NetworkAllow)
@@ -248,7 +250,7 @@ func TestCLI_NetworkLifecycle(t *testing.T) {
 	assert.Contains(t, stdout, "extra.example.com")
 
 	// Verify persisted
-	meta, err = store.LoadMeta(cliLayout().SandboxDir("cli-net"))
+	meta, err = store.LoadMeta(cliutil.Layout().SandboxDir("cli-net"))
 	require.NoError(t, err)
 	assert.Contains(t, meta.NetworkAllow, "extra.example.com")
 	assert.Contains(t, meta.NetworkAllow, "api.test.com")
@@ -273,7 +275,7 @@ func TestCLI_NetworkLifecycle(t *testing.T) {
 	assert.Contains(t, stdout, "api.test.com")
 
 	// Verify removal persisted
-	meta, err = store.LoadMeta(cliLayout().SandboxDir("cli-net"))
+	meta, err = store.LoadMeta(cliutil.Layout().SandboxDir("cli-net"))
 	require.NoError(t, err)
 	assert.Contains(t, meta.NetworkAllow, "extra.example.com")
 	assert.NotContains(t, meta.NetworkAllow, "api.test.com")
@@ -297,15 +299,15 @@ func TestCLI_BugreportCommand_Unsafe(t *testing.T) {
 	t.Cleanup(func() { destroySandbox(t, "cli-br-unsafe") })
 
 	// Write fake JSONL to all 4 log files and agent.log in the sandbox
-	sandboxDir := cliLayout().SandboxDir("cli-br-unsafe")
+	sandboxDir := cliutil.Layout().SandboxDir("cli-br-unsafe")
 	logsDir := filepath.Join(sandboxDir, store.LogsDir)
 	require.NoError(t, os.MkdirAll(logsDir, 0700))
 	entry := `{"ts":"2026-03-16T10:00:00.000Z","level":"info","event":"test.event","msg":"test log message"}` + "\n"
-	require.NoError(t, os.WriteFile(store.CLIJSONLPath(cliLayout().SandboxDir("cli-br-unsafe")), []byte(entry), 0600))
-	require.NoError(t, os.WriteFile(store.SandboxJSONLPath(cliLayout().SandboxDir("cli-br-unsafe")), []byte(entry), 0600))
-	require.NoError(t, os.WriteFile(store.MonitorJSONLPath(cliLayout().SandboxDir("cli-br-unsafe")), []byte(entry), 0600))
-	require.NoError(t, os.WriteFile(store.HooksJSONLPath(cliLayout().SandboxDir("cli-br-unsafe")), []byte(entry), 0600))
-	require.NoError(t, os.WriteFile(store.AgentLogPath(cliLayout().SandboxDir("cli-br-unsafe")), []byte("agent output line\n"), 0600))
+	require.NoError(t, os.WriteFile(store.CLIJSONLPath(cliutil.Layout().SandboxDir("cli-br-unsafe")), []byte(entry), 0600))
+	require.NoError(t, os.WriteFile(store.SandboxJSONLPath(cliutil.Layout().SandboxDir("cli-br-unsafe")), []byte(entry), 0600))
+	require.NoError(t, os.WriteFile(store.MonitorJSONLPath(cliutil.Layout().SandboxDir("cli-br-unsafe")), []byte(entry), 0600))
+	require.NoError(t, os.WriteFile(store.HooksJSONLPath(cliutil.Layout().SandboxDir("cli-br-unsafe")), []byte(entry), 0600))
+	require.NoError(t, os.WriteFile(store.AgentLogPath(cliutil.Layout().SandboxDir("cli-br-unsafe")), []byte("agent output line\n"), 0600))
 
 	origDir, err := os.Getwd()
 	require.NoError(t, err)
@@ -345,14 +347,14 @@ func TestCLI_BugreportCommand_Safe(t *testing.T) {
 	t.Cleanup(func() { destroySandbox(t, "cli-br-safe") })
 
 	// Write fake JSONL to all 4 log files
-	sandboxDir := cliLayout().SandboxDir("cli-br-safe")
+	sandboxDir := cliutil.Layout().SandboxDir("cli-br-safe")
 	logsDir := filepath.Join(sandboxDir, store.LogsDir)
 	require.NoError(t, os.MkdirAll(logsDir, 0700))
 	entry := `{"ts":"2026-03-16T10:00:00.000Z","level":"info","event":"test.event","msg":"test log message"}` + "\n"
-	require.NoError(t, os.WriteFile(store.CLIJSONLPath(cliLayout().SandboxDir("cli-br-safe")), []byte(entry), 0600))
-	require.NoError(t, os.WriteFile(store.SandboxJSONLPath(cliLayout().SandboxDir("cli-br-safe")), []byte(entry), 0600))
-	require.NoError(t, os.WriteFile(store.MonitorJSONLPath(cliLayout().SandboxDir("cli-br-safe")), []byte(entry), 0600))
-	require.NoError(t, os.WriteFile(store.HooksJSONLPath(cliLayout().SandboxDir("cli-br-safe")), []byte(entry), 0600))
+	require.NoError(t, os.WriteFile(store.CLIJSONLPath(cliutil.Layout().SandboxDir("cli-br-safe")), []byte(entry), 0600))
+	require.NoError(t, os.WriteFile(store.SandboxJSONLPath(cliutil.Layout().SandboxDir("cli-br-safe")), []byte(entry), 0600))
+	require.NoError(t, os.WriteFile(store.MonitorJSONLPath(cliutil.Layout().SandboxDir("cli-br-safe")), []byte(entry), 0600))
+	require.NoError(t, os.WriteFile(store.HooksJSONLPath(cliutil.Layout().SandboxDir("cli-br-safe")), []byte(entry), 0600))
 
 	origDir, err := os.Getwd()
 	require.NoError(t, err)
@@ -391,7 +393,7 @@ func TestCLI_StartAfterDone(t *testing.T) {
 	t.Cleanup(func() {
 		if t.Failed() {
 			// Dump diagnostic logs to help debug flaky failures.
-			sdir := cliLayout().SandboxDir("cli-startdone")
+			sdir := cliutil.Layout().SandboxDir("cli-startdone")
 			for _, rel := range []string{"agent-status.json", "logs/monitor.jsonl", "logs/sandbox.jsonl"} {
 				if data, readErr := os.ReadFile(filepath.Join(sdir, rel)); readErr == nil {
 					t.Logf("=== %s ===\n%s", rel, data)
@@ -405,7 +407,7 @@ func TestCLI_StartAfterDone(t *testing.T) {
 	defer rt.Close() //nolint:errcheck // test cleanup
 
 	testutil.WaitForStatus(context.Background(), t, func(ctx context.Context) (string, error) {
-		s, err := sandbox.DetectStatus(ctx, rt, store.InstanceName("cli-startdone"), cliLayout().SandboxDir("cli-startdone"))
+		s, err := sandbox.DetectStatus(ctx, rt, store.InstanceName("cli-startdone"), cliutil.Layout().SandboxDir("cli-startdone"))
 		return string(s), err
 	}, string(sandbox.StatusDone), 60*time.Second)
 
@@ -449,9 +451,9 @@ func TestCLI_Apply(t *testing.T) {
 	t.Cleanup(func() { destroySandbox(t, "cli-apply") })
 
 	// Seed work copy with a distinctive change
-	meta, err := store.LoadMeta(cliLayout().SandboxDir("cli-apply"))
+	meta, err := store.LoadMeta(cliutil.Layout().SandboxDir("cli-apply"))
 	require.NoError(t, err)
-	workDir := store.WorkDir(cliLayout().SandboxDir("cli-apply"), meta.Workdir.HostPath)
+	workDir := store.WorkDir(cliutil.Layout().SandboxDir("cli-apply"), meta.Workdir.HostPath)
 	require.NoError(t, os.WriteFile(
 		filepath.Join(workDir, "main.go"),
 		[]byte("package main\n\nimport \"fmt\"\n\nfunc main() { fmt.Println(\"apply-test\") }\n"),

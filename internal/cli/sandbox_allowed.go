@@ -5,12 +5,14 @@ package cli
 import (
 	"fmt"
 
+	"github.com/kstenerud/yoloai/internal/cli/cliutil"
+
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
 	"github.com/spf13/cobra"
 )
 
 func runSandboxAllowed(cmd *cobra.Command, name string) error {
-	sandboxDir := cliLayout().SandboxDir(name)
+	sandboxDir := cliutil.Layout().SandboxDir(name)
 	if err := store.RequireSandboxDir(sandboxDir); err != nil {
 		return err
 	}
@@ -19,12 +21,12 @@ func runSandboxAllowed(cmd *cobra.Command, name string) error {
 		return err
 	}
 
-	if jsonEnabled(cmd) {
+	if cliutil.JSONEnabled(cmd) {
 		domains := meta.NetworkAllow
 		if domains == nil {
 			domains = []string{}
 		}
-		return writeJSON(cmd.OutOrStdout(), map[string]any{
+		return cliutil.WriteJSON(cmd.OutOrStdout(), map[string]any{
 			"name":         name,
 			"network_mode": meta.NetworkMode,
 			"domains":      domains,

@@ -8,6 +8,8 @@ import (
 	"log/slog"
 	"os"
 
+	"github.com/kstenerud/yoloai/internal/cli/cliutil"
+
 	yoloai "github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/sandbox"
@@ -37,19 +39,19 @@ func runStopCmd(cmd *cobra.Command, args []string) error {
 	}
 
 	// Resolve backend: from first named sandbox, or config default for --all.
-	backend, warn := runtime.SelectContainerBackend(cmd.Context(), resolveContainerBackendConfig())
+	backend, warn := runtime.SelectContainerBackend(cmd.Context(), cliutil.ResolveContainerBackendConfig())
 	if warn != "" {
 		fmt.Fprintln(os.Stderr, warn)
 	}
 	if !all && len(args) > 0 {
-		backend = resolveBackendForSandbox(args[0])
+		backend = cliutil.ResolveBackendForSandbox(args[0])
 	} else if !all {
-		if envName := os.Getenv(EnvSandboxName); envName != "" {
-			backend = resolveBackendForSandbox(envName)
+		if envName := os.Getenv(cliutil.EnvSandboxName); envName != "" {
+			backend = cliutil.ResolveBackendForSandbox(envName)
 		}
 	}
 
-	return withClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
+	return cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
 		names, err := resolveStopNames(cmd, ctx, c, args, all)
 		if err != nil {
 			return err
@@ -93,8 +95,8 @@ func resolveStopAll(cmd *cobra.Command, ctx context.Context, c *yoloai.Client) (
 		}
 	}
 	if len(names) == 0 {
-		if jsonEnabled(cmd) {
-			return nil, writeJSON(cmd.OutOrStdout(), []struct{}{})
+		if cliutil.JSONEnabled(cmd) {
+			return nil, cliutil.WriteJSON(cmd.OutOrStdout(), []struct{}{})
 		}
 		_, err = fmt.Fprintln(cmd.OutOrStdout(), "No running sandboxes to stop")
 		return nil, err
@@ -104,7 +106,7 @@ func resolveStopAll(cmd *cobra.Command, ctx context.Context, c *yoloai.Client) (
 
 // resolveStopFromEnv resolves the sandbox name from the environment when no args are given.
 func resolveStopFromEnv() ([]string, error) {
-	envName := os.Getenv(EnvSandboxName)
+	envName := os.Getenv(cliutil.EnvSandboxName)
 	if envName == "" {
 		return nil, sandbox.NewUsageError("at least one sandbox name is required (or use --all or set YOLOAI_SANDBOX)")
 	}
@@ -122,7 +124,7 @@ func executeStop(cmd *cobra.Command, ctx context.Context, c *yoloai.Client, name
 		Error  string `json:"error,omitempty"`
 	}
 
-	if jsonEnabled(cmd) {
+	if cliutil.JSONEnabled(cmd) {
 		var results []stopResult
 		for _, name := range names {
 			slog.Info("stopping sandbox", "event", "sandbox.stop", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
@@ -133,14 +135,14 @@ func executeStop(cmd *cobra.Command, ctx context.Context, c *yoloai.Client, name
 				results = append(results, stopResult{Name: name, Action: "stopped"})
 			}
 		}
-		return writeJSON(cmd.OutOrStdout(), results)
+		return cliutil.WriteJSON(cmd.OutOrStdout(), results)
 	}
 
 	var errs []error
 	for _, name := range names {
 		slog.Info("stopping sandbox", "event", "sandbox.stop", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
 		if err := c.Stop(ctx, name); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: stop %s: %v\n", name, sandboxErrorHint(name, err)) //nolint:errcheck // best-effort output
+			fmt.Fprintf(os.Stderr, "Warning: stop %s: %v\n", name, cliutil.SandboxErrorHint(name, err)) //nolint:errcheck // best-effort output
 			errs = append(errs, err)
 		} else {
 			slog.Info("sandbox stopped", "event", "sandbox.stop.complete", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName

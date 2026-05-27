@@ -12,6 +12,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/kstenerud/yoloai/internal/cli/cliutil"
+
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
@@ -55,7 +57,7 @@ func filesDispatch(cmd *cobra.Command, args []string) error {
 
 	if filesSubcmds[args[0]] {
 		// args[0] is a subcommand — name must come from YOLOAI_SANDBOX
-		envName := os.Getenv(EnvSandboxName)
+		envName := os.Getenv(cliutil.EnvSandboxName)
 		if envName == "" {
 			return sandbox.NewUsageError("sandbox name required before subcommand (or set YOLOAI_SANDBOX)")
 		}
@@ -98,7 +100,7 @@ func runFilesPut(cmd *cobra.Command, name string, args []string) error {
 		return sandbox.NewUsageError("at least one file is required")
 	}
 
-	sandboxDir := cliLayout().SandboxDir(name)
+	sandboxDir := cliutil.Layout().SandboxDir(name)
 	if err := store.RequireSandboxDir(sandboxDir); err != nil {
 		return err
 	}
@@ -146,7 +148,7 @@ func runFilesGet(cmd *cobra.Command, name string, args []string) error {
 		return sandbox.NewUsageError("file name is required")
 	}
 
-	sandboxDir := cliLayout().SandboxDir(name)
+	sandboxDir := cliutil.Layout().SandboxDir(name)
 	if err := store.RequireSandboxDir(sandboxDir); err != nil {
 		return err
 	}
@@ -202,7 +204,7 @@ func runFilesGet(cmd *cobra.Command, name string, args []string) error {
 }
 
 func runFilesLs(cmd *cobra.Command, name string, args []string) error {
-	sandboxDir := cliLayout().SandboxDir(name)
+	sandboxDir := cliutil.Layout().SandboxDir(name)
 	if err := store.RequireSandboxDir(sandboxDir); err != nil {
 		return err
 	}
@@ -229,7 +231,7 @@ func runFilesRm(cmd *cobra.Command, name string, args []string) error {
 		return sandbox.NewUsageError("glob pattern is required")
 	}
 
-	sandboxDir := cliLayout().SandboxDir(name)
+	sandboxDir := cliutil.Layout().SandboxDir(name)
 	if err := store.RequireSandboxDir(sandboxDir); err != nil {
 		return err
 	}
@@ -251,7 +253,7 @@ func runFilesRm(cmd *cobra.Command, name string, args []string) error {
 }
 
 func runFilesPath(cmd *cobra.Command, name string) error {
-	sandboxDir := cliLayout().SandboxDir(name)
+	sandboxDir := cliutil.Layout().SandboxDir(name)
 	if err := store.RequireSandboxDir(sandboxDir); err != nil {
 		return err
 	}

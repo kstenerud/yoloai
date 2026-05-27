@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/kstenerud/yoloai/internal/cli/cliutil"
+
 	yoloai "github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/internal/sandbox"
@@ -27,8 +29,8 @@ func applyOverlay(cmd *cobra.Command, name string, meta *store.Meta, refs, paths
 		return sandbox.NewPlatformError("selective ref apply is not supported for :overlay sandboxes")
 	}
 
-	backend := resolveBackendForSandbox(name)
-	return withClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
+	backend := cliutil.ResolveBackendForSandbox(name)
+	return cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
 		if err := requireOverlayRunning(ctx, c, name); err != nil {
 			return err
 		}
@@ -39,8 +41,8 @@ func applyOverlay(cmd *cobra.Command, name string, meta *store.Meta, refs, paths
 		}
 
 		if len(patches) == 0 {
-			if jsonEnabled(cmd) {
-				return writeJSON(cmd.OutOrStdout(), applyResult{
+			if cliutil.JSONEnabled(cmd) {
+				return cliutil.WriteJSON(cmd.OutOrStdout(), applyResult{
 					Target: meta.Workdir.HostPath,
 					Method: "overlay",
 				})
@@ -68,12 +70,12 @@ func applyOverlayExportPatches(cmd *cobra.Command, patches []patch.PatchSet, pat
 		if err := fileutil.WriteFile(dst, ps.Patch, 0600); err != nil { //nolint:gosec // G703: dst is constructed from user-provided --patches flag
 			return fmt.Errorf("write patch: %w", err)
 		}
-		if !jsonEnabled(cmd) {
+		if !cliutil.JSONEnabled(cmd) {
 			fmt.Fprintf(cmd.OutOrStdout(), "  %s\n", dst) //nolint:errcheck
 		}
 	}
-	if jsonEnabled(cmd) {
-		return writeJSON(cmd.OutOrStdout(), applyResult{
+	if cliutil.JSONEnabled(cmd) {
+		return cliutil.WriteJSON(cmd.OutOrStdout(), applyResult{
 			Target:     patchesDir,
 			WIPApplied: true,
 			Method:     "overlay",
@@ -84,7 +86,7 @@ func applyOverlayExportPatches(cmd *cobra.Command, patches []patch.PatchSet, pat
 
 // applyOverlayPatches applies overlay patches to the host and advances baselines.
 func applyOverlayPatches(cmd *cobra.Command, ctx context.Context, c *yoloai.Client, name string, meta *store.Meta, patches []patch.PatchSet, yes, dryRun bool) error {
-	isJSON := jsonEnabled(cmd)
+	isJSON := cliutil.JSONEnabled(cmd)
 	out := cmd.OutOrStdout()
 	if !isJSON {
 		for _, ps := range patches {
@@ -131,7 +133,7 @@ func applyOverlayPatches(cmd *cobra.Command, ctx context.Context, c *yoloai.Clie
 	}
 
 	if isJSON {
-		return writeJSON(out, applyResult{
+		return cliutil.WriteJSON(out, applyResult{
 			Target:     meta.Workdir.HostPath,
 			WIPApplied: true,
 			Method:     "overlay",

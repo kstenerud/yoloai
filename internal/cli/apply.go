@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/kstenerud/yoloai/internal/cli/cliutil"
+
 	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
 	"github.com/kstenerud/yoloai/internal/workspace"
@@ -64,18 +66,18 @@ Use --patches to export .patch files without applying them.`,
 }
 
 func runApplyCmd(cmd *cobra.Command, args []string) error {
-	name, rest, err := resolveName(cmd, args)
+	name, rest, err := cliutil.ResolveName(cmd, args)
 	if err != nil {
 		return err
 	}
-	defer openCLIJSONLSink(name, cmd)()
+	defer cliutil.OpenCLIJSONLSink(name, cmd)()
 
-	yes := effectiveYes(cmd)
+	yes := cliutil.EffectiveYes(cmd)
 	squash, _ := cmd.Flags().GetBool("squash")
 	patchesDir, _ := cmd.Flags().GetString("patches")
 	if patchesDir != "" {
 		var expandErr error
-		patchesDir, expandErr = sandbox.ExpandPath(patchesDir, filepath.Dir(cliLayout().DataDir))
+		patchesDir, expandErr = sandbox.ExpandPath(patchesDir, filepath.Dir(cliutil.Layout().DataDir))
 		if expandErr != nil {
 			return fmt.Errorf("expand patches path: %w", expandErr)
 		}
@@ -92,9 +94,9 @@ func runApplyCmd(cmd *cobra.Command, args []string) error {
 		return sandbox.NewUsageError("--squash cannot be used with commit refs — they are mutually exclusive")
 	}
 	// Load metadata for target directory and mode validation
-	meta, err := store.LoadMeta(cliLayout().SandboxDir(name))
+	meta, err := store.LoadMeta(cliutil.Layout().SandboxDir(name))
 	if err != nil {
-		return sandboxErrorHint(name, err)
+		return cliutil.SandboxErrorHint(name, err)
 	}
 	if meta.Workdir.Mode == "rw" {
 		return sandbox.NewUsageError("apply is not needed for :rw directories — changes are already live")
@@ -105,12 +107,12 @@ func runApplyCmd(cmd *cobra.Command, args []string) error {
 		return applyOverlay(cmd, name, meta, refs, paths, patchesDir, yes, dryRun)
 	}
 
-	if !jsonEnabled(cmd) {
+	if !cliutil.JSONEnabled(cmd) {
 		fmt.Fprintf(cmd.OutOrStdout(), "Target: %s\n\n", meta.Workdir.HostPath) //nolint:errcheck
 	}
 
 	// Best-effort agent-running warning
-	if !jsonEnabled(cmd) {
+	if !cliutil.JSONEnabled(cmd) {
 		agentRunningWarning(cmd, name)
 	}
 
@@ -180,7 +182,7 @@ func applyTags(cmd *cobra.Command, tags []sandbox.TagInfo, shaMap map[string]str
 	if !withTags || len(tags) == 0 {
 		return 0, 0
 	}
-	isJSON := jsonEnabled(cmd)
+	isJSON := cliutil.JSONEnabled(cmd)
 	for _, tag := range tags {
 		hostSHA, ok := shaMap[strings.ToLower(tag.SHA)]
 		if !ok {

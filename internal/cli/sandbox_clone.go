@@ -9,6 +9,8 @@ import (
 	"log/slog"
 	"os"
 
+	"github.com/kstenerud/yoloai/internal/cli/cliutil"
+
 	yoloai "github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/spf13/cobra"
@@ -22,30 +24,30 @@ func runClone(cmd *cobra.Command, args []string) error {
 	prompt, _ := cmd.Flags().GetString("prompt")
 	promptFile, _ := cmd.Flags().GetString("prompt-file")
 
-	if jsonEnabled(cmd) && attach {
+	if cliutil.JSONEnabled(cmd) && attach {
 		return sandbox.NewUsageError("--json and --attach are incompatible")
 	}
 
 	// Courtesy free-space check before duplicating the workdir copy +
 	// overlay. Clone is the heaviest allocate-per-sandbox op aside
 	// from new. Swallow stat errors and non-blocking.
-	if !jsonEnabled(cmd) {
-		warnIfLowDisk(cmd.ErrOrStderr(), cliLayout().SandboxesDir())
+	if !cliutil.JSONEnabled(cmd) {
+		warnIfLowDisk(cmd.ErrOrStderr(), cliutil.Layout().SandboxesDir())
 	}
 
 	// Set terminal title early so it shows the sandbox name during clone+start
 	if attach && !noStart {
-		setTerminalTitle(dst)
-		defer setTerminalTitle("")
+		cliutil.SetTerminalTitle(dst)
+		defer cliutil.SetTerminalTitle("")
 	}
 
 	// Force-destroy existing destination before cloning. The existing dst's
 	// backend may differ from src's, so this opens its own Client tied to
 	// dst's current backend.
 	if force {
-		if _, err := os.Stat(cliLayout().SandboxDir(dst)); err == nil { //nolint:gosec // G703: dst is validated sandbox name
-			destBackend := resolveBackendForSandbox(dst)
-			if err := withClient(cmd, destBackend, func(ctx context.Context, c *yoloai.Client) error {
+		if _, err := os.Stat(cliutil.Layout().SandboxDir(dst)); err == nil { //nolint:gosec // G703: dst is validated sandbox name
+			destBackend := cliutil.ResolveBackendForSandbox(dst)
+			if err := cliutil.WithClient(cmd, destBackend, func(ctx context.Context, c *yoloai.Client) error {
 				return c.Destroy(ctx, dst, true)
 			}); err != nil {
 				return fmt.Errorf("destroy existing destination: %w", err)
@@ -55,8 +57,8 @@ func runClone(cmd *cobra.Command, args []string) error {
 
 	// Source's backend governs the rest of the flow: after clone, dst inherits
 	// src's backend (copied via meta.json), so Start needs the same backend.
-	backend := resolveBackendForSandbox(src)
-	return withClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
+	backend := cliutil.ResolveBackendForSandbox(src)
+	return cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
 		slog.Info("cloning sandbox", "event", "sandbox.clone", "source", src, "dest", dst) //nolint:gosec // G706: src/dst are validated sandbox names
 		if err := c.Clone(ctx, sandbox.CloneOptions{Source: src, Dest: dst}); err != nil {
 			return err
@@ -64,8 +66,8 @@ func runClone(cmd *cobra.Command, args []string) error {
 		slog.Info("clone complete", "event", "sandbox.clone.complete", "source", src, "dest", dst) //nolint:gosec // G706: src/dst are validated sandbox names
 
 		if noStart {
-			if jsonEnabled(cmd) {
-				return writeJSON(cmd.OutOrStdout(), map[string]any{
+			if cliutil.JSONEnabled(cmd) {
+				return cliutil.WriteJSON(cmd.OutOrStdout(), map[string]any{
 					"source": src,
 					"dest":   dst,
 				})
@@ -79,7 +81,7 @@ func runClone(cmd *cobra.Command, args []string) error {
 }
 
 // runCloneStart starts the cloned sandbox and optionally attaches.
-// Attach reaches for raw runtime via attachToSandboxByName — Client doesn't
+// Attach reaches for raw runtime via AttachToSandboxByName — Client doesn't
 // yet expose attach (see CONVENTIONS.md "Hybrid handlers").
 func runCloneStart(cmd *cobra.Command, ctx context.Context, c *yoloai.Client, src, dst, prompt, promptFile string, attach bool) error {
 	if err := c.Start(ctx, dst, sandbox.StartOptions{
@@ -89,8 +91,8 @@ func runCloneStart(cmd *cobra.Command, ctx context.Context, c *yoloai.Client, sr
 		return err
 	}
 
-	if jsonEnabled(cmd) {
-		return writeJSON(cmd.OutOrStdout(), map[string]any{
+	if cliutil.JSONEnabled(cmd) {
+		return cliutil.WriteJSON(cmd.OutOrStdout(), map[string]any{
 			"source": src,
 			"dest":   dst,
 			"action": "started",
@@ -102,7 +104,7 @@ func runCloneStart(cmd *cobra.Command, ctx context.Context, c *yoloai.Client, sr
 	if !attach {
 		return nil
 	}
-	return attachToSandboxByName(cmd, dst)
+	return cliutil.AttachToSandboxByName(cmd, dst)
 }
 
 // addCloneFlags registers the shared flags for clone commands.

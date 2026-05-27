@@ -11,6 +11,8 @@ import (
 	goruntime "runtime"
 	"strings"
 
+	"github.com/kstenerud/yoloai/internal/cli/cliutil"
+
 	yoloai "github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/runtime"
@@ -78,27 +80,27 @@ func runNewCmd(cmd *cobra.Command, args []string, version string) error {
 	// Courtesy free-space check before allocating ~hundreds of MB
 	// (workdir copy + overlay) and possibly fetching a multi-GB base
 	// image. Stat errors are swallowed; the warning is non-blocking.
-	if !jsonEnabled(cmd) {
-		warnIfLowDisk(cmd.ErrOrStderr(), cliLayout().SandboxesDir())
+	if !cliutil.JSONEnabled(cmd) {
+		warnIfLowDisk(cmd.ErrOrStderr(), cliutil.Layout().SandboxesDir())
 	}
 
 	if opts.Attach && !opts.NoStart {
-		setTerminalTitle(name)
-		defer setTerminalTitle("")
+		cliutil.SetTerminalTitle(name)
+		defer cliutil.SetTerminalTitle("")
 	}
 
-	backend := resolveBackend(cmd)
+	backend := cliutil.ResolveBackend(cmd)
 
 	// new.go's one quirk vs other Client-using commands: in JSON mode we
 	// want the Manager's progress output suppressed so it doesn't pollute
-	// the JSON document on stdout. withClient hardcodes cmd.ErrOrStderr,
+	// the JSON document on stdout. WithClient hardcodes cmd.ErrOrStderr,
 	// so we construct the Client by hand here to override Output.
 	mgrOutput := cmd.ErrOrStderr()
-	if jsonEnabled(cmd) {
+	if cliutil.JSONEnabled(cmd) {
 		mgrOutput = io.Discard
 	}
 	c, err := yoloai.NewWithOptions(cmd.Context(), yoloai.Options{
-		DataDir: cliLayout().DataDir,
+		DataDir: cliutil.Layout().DataDir,
 		Backend: backend,
 		Input:   cmd.InOrStdin(),
 		Output:  mgrOutput,
@@ -121,7 +123,7 @@ func parseNewCmdPositional(cmd *cobra.Command, args []string) (name, rawWorkdirA
 		passthrough = args[dashIdx:]
 	}
 
-	profileFlag = resolveProfile(cmd)
+	profileFlag = cliutil.ResolveProfile(cmd)
 
 	if len(positional) < 1 {
 		return "", "", nil, "", sandbox.NewUsageError("sandbox name is required")
@@ -144,8 +146,8 @@ func parseNewCmdPositional(cmd *cobra.Command, args []string) (name, rawWorkdirA
 func resolveNewCmdOptions(cmd *cobra.Command, version, name, rawWorkdirArg string, passthrough []string, profileFlag string) (sandbox.CreateOptions, error) {
 	prompt, _ := cmd.Flags().GetString("prompt")
 	promptFile, _ := cmd.Flags().GetString("prompt-file")
-	model := resolveModel(cmd)
-	agentName := resolveAgent(cmd)
+	model := cliutil.ResolveModel(cmd)
+	agentName := cliutil.ResolveAgent(cmd)
 	networkNone, _ := cmd.Flags().GetBool("network-none")
 	networkIsolated, _ := cmd.Flags().GetBool("network-isolated")
 	networkAllow, _ := cmd.Flags().GetStringSlice("network-allow")
@@ -164,7 +166,7 @@ func resolveNewCmdOptions(cmd *cobra.Command, version, name, rawWorkdirArg strin
 	noStart, _ := cmd.Flags().GetBool("no-start")
 	attach, _ := cmd.Flags().GetBool("attach")
 
-	if jsonEnabled(cmd) && attach {
+	if cliutil.JSONEnabled(cmd) && attach {
 		return sandbox.CreateOptions{}, sandbox.NewUsageError("--json and --attach are incompatible")
 	}
 	if networkNone && len(ports) > 0 {
@@ -217,7 +219,7 @@ func resolveNewCmdOptions(cmd *cobra.Command, version, name, rawWorkdirArg strin
 		Force:        force,
 		NoStart:      noStart,
 		Attach:       attach,
-		Yes:          effectiveYes(cmd),
+		Yes:          cliutil.EffectiveYes(cmd),
 		Passthrough:  passthrough,
 		Version:      version,
 		Debug:        debug,
@@ -246,7 +248,7 @@ func parseEnvSlice(envSlice []string) (map[string]string, error) {
 
 // resolveNewDirSpecs parses rawWorkdirArg and rawDirs into DirSpec values.
 func resolveNewDirSpecs(rawWorkdirArg string, rawDirs []string) (workdirSpec sandbox.DirSpec, auxDirSpecs []sandbox.DirSpec, err error) {
-	homeDir := filepath.Dir(cliLayout().DataDir)
+	homeDir := filepath.Dir(cliutil.Layout().DataDir)
 	if rawWorkdirArg != "" {
 		parsed, parseErr := sandbox.ParseDirArg(rawWorkdirArg, homeDir)
 		if parseErr != nil {
@@ -272,39 +274,39 @@ func executeNewCreate(cmd *cobra.Command, ctx context.Context, c *yoloai.Client,
 		return err
 	}
 
-	if sandboxName != "" && bugReportFile != nil {
-		bugReportSandboxName = sandboxName
+	if sandboxName != "" && cliutil.BugReportFile != nil {
+		cliutil.BugReportSandboxName = sandboxName
 	}
 
-	if jsonEnabled(cmd) {
+	if cliutil.JSONEnabled(cmd) {
 		if sandboxName == "" {
 			return nil
 		}
-		meta, loadErr := store.LoadMeta(cliLayout().SandboxDir(sandboxName))
+		meta, loadErr := store.LoadMeta(cliutil.Layout().SandboxDir(sandboxName))
 		if loadErr != nil {
 			return loadErr
 		}
-		return writeJSON(cmd.OutOrStdout(), meta)
+		return cliutil.WriteJSON(cmd.OutOrStdout(), meta)
 	}
 
 	if sandboxName == "" || !opts.Attach || opts.NoStart {
 		return nil
 	}
 
-	return c.Attach(ctx, sandboxName, cliIOStreams())
+	return c.Attach(ctx, sandboxName, cliutil.IOStreams())
 }
 
 // resolveNewIsolationOS resolves the --isolation and --os flags with config fallback
 // and validates their combinations, returning an error for unsupported combos.
 func resolveNewIsolationOS(cmd *cobra.Command) (isolation, targetOS string, err error) {
-	cfg, _ := config.LoadDefaultsConfig(cliLayout())
+	cfg, _ := config.LoadDefaultsConfig(cliutil.Layout())
 	var cfgIsolation, cfgOS string
 	if cfg != nil {
 		cfgIsolation = cfg.Isolation
 		cfgOS = cfg.OS
 	}
-	isolation = coalesce(flagStr(cmd, "isolation"), cfgIsolation)
-	targetOS = coalesce(flagStr(cmd, "os"), cfgOS)
+	isolation = cliutil.Coalesce(cliutil.FlagStr(cmd, "isolation"), cfgIsolation)
+	targetOS = cliutil.Coalesce(cliutil.FlagStr(cmd, "os"), cfgOS)
 
 	if err := validateIsolationOSCombo(isolation, targetOS); err != nil {
 		return "", "", err

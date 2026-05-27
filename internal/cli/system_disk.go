@@ -11,6 +11,8 @@ import (
 	"syscall"
 	"text/tabwriter"
 
+	"github.com/kstenerud/yoloai/internal/cli/cliutil"
+
 	"github.com/kstenerud/yoloai"
 	"github.com/spf13/cobra"
 )
@@ -34,18 +36,18 @@ func runSystemDisk(cmd *cobra.Command, _ []string) error {
 	ctx := cmd.Context()
 	out := cmd.OutOrStdout()
 
-	du, err := systemClient().DiskUsage(ctx)
+	du, err := cliutil.NewSystemClient().DiskUsage(ctx)
 	if err != nil {
 		return err
 	}
 
-	if jsonEnabled(cmd) {
-		return writeJSON(out, formatDiskJSON(du, cliLayout().SandboxesDir()))
+	if cliutil.JSONEnabled(cmd) {
+		return cliutil.WriteJSON(out, formatDiskJSON(du, cliutil.Layout().SandboxesDir()))
 	}
 
 	w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "SOURCE\tSIZE\tDETAIL")                                                     //nolint:errcheck
-	fmt.Fprintf(w, "sandboxes\t%s\t%s\n", humanBytes(du.Sandboxes), cliLayout().SandboxesDir()) //nolint:errcheck
+	fmt.Fprintln(w, "SOURCE\tSIZE\tDETAIL")                                                          //nolint:errcheck
+	fmt.Fprintf(w, "sandboxes\t%s\t%s\n", humanBytes(du.Sandboxes), cliutil.Layout().SandboxesDir()) //nolint:errcheck
 	for _, b := range du.PerBackend {
 		switch {
 		case b.Err != nil:

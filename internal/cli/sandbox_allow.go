@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/kstenerud/yoloai/internal/cli/cliutil"
+
 	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/spf13/cobra"
 )
@@ -34,8 +36,8 @@ func runSandboxAllow(cmd *cobra.Command, name string, domains []string) error {
 	}
 
 	if len(newDomains) == 0 {
-		if jsonEnabled(cmd) {
-			return writeJSON(cmd.OutOrStdout(), map[string]any{
+		if cliutil.JSONEnabled(cmd) {
+			return cliutil.WriteJSON(cmd.OutOrStdout(), map[string]any{
 				"name":          name,
 				"domains_added": []string{},
 				"live":          false,
@@ -52,12 +54,12 @@ func runSandboxAllow(cmd *cobra.Command, name string, domains []string) error {
 	}
 
 	// Try live-patching (only adds new domain IPs to existing ipset)
-	backend := resolveBackendForSandbox(name)
+	backend := cliutil.ResolveBackendForSandbox(name)
 	live, patchErr := tryLivePatchNetwork(cmd.Context(), backend, name, ipsetResolveDomains, newDomains)
 
 	w := cmd.OutOrStdout()
-	if jsonEnabled(cmd) {
-		return writeJSON(w, map[string]any{
+	if cliutil.JSONEnabled(cmd) {
+		return cliutil.WriteJSON(w, map[string]any{
 			"name":          name,
 			"domains_added": newDomains,
 			"live":          live,

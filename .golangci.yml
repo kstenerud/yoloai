@@ -125,7 +125,9 @@ linters:
       # The licensed CLI startup site that resolves $HOME/.yoloai/ once at
       # process boot and threads the resulting config.Layout downward. This
       # is the ONLY production-code allowlist for the §12 ambient-HOME ban.
-      - path: "internal/cli/layout_bridge\\.go"
+      # (Moved from internal/cli/layout_bridge.go → internal/cli/cliutil/layout.go
+      # during W-L13's cliutil/ extraction.)
+      - path: "internal/cli/cliutil/layout\\.go"
         linters:
           - forbidigo
         text: "os\\.UserHomeDir"
@@ -145,11 +147,13 @@ linters:
           - forbidigo
         text: "sandbox\\.(NewManager|Manager)|runtime\\.(Runtime|New)"
 
-      # newRuntime in helpers.go is the only sanctioned construction
+      # NewRuntime in cliutil/client.go is the only sanctioned construction
       # site for a raw runtime.Runtime in CLI code — used by the few
       # CLI commands that walk all backends for enumeration (list,
-      # system_doctor, info, sandbox_network) and by system_tart.go.
-      - path: "internal/cli/helpers\\.go"
+      # system_doctor, info, sandbox_network) and by system_tart.
+      # (Moved from internal/cli/helpers.go → internal/cli/cliutil/client.go
+      # during W-L13's cliutil/ extraction.)
+      - path: "internal/cli/cliutil/client\\.go"
         linters:
           - forbidigo
         text: "runtime\\.(Runtime|New)"

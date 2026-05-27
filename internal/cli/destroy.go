@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/kstenerud/yoloai/internal/cli/cliutil"
+
 	yoloai "github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/sandbox"
@@ -65,27 +67,27 @@ func newDestroyCmd() *cobra.Command {
 
 func runDestroyCmd(cmd *cobra.Command, args []string) error {
 	all, _ := cmd.Flags().GetBool("all")
-	yes := effectiveYes(cmd)
+	yes := cliutil.EffectiveYes(cmd)
 
 	if all && len(args) > 0 {
 		return sandbox.NewUsageError("cannot specify sandbox names with --all")
 	}
 
 	// Resolve backend: from first named sandbox, or config default for --all/wildcards
-	backend, warn := runtime.SelectContainerBackend(cmd.Context(), resolveContainerBackendConfig())
+	backend, warn := runtime.SelectContainerBackend(cmd.Context(), cliutil.ResolveContainerBackendConfig())
 	if warn != "" {
 		fmt.Fprintln(os.Stderr, warn)
 	}
 	if !all && len(args) > 0 && !hasWildcard(args[0]) {
 		// Only resolve from first arg if it's not a wildcard pattern
-		backend = resolveBackendForSandbox(args[0])
+		backend = cliutil.ResolveBackendForSandbox(args[0])
 	} else if !all && len(args) == 0 {
-		if envName := os.Getenv(EnvSandboxName); envName != "" {
-			backend = resolveBackendForSandbox(envName)
+		if envName := os.Getenv(cliutil.EnvSandboxName); envName != "" {
+			backend = cliutil.ResolveBackendForSandbox(envName)
 		}
 	}
 
-	return withClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
+	return cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
 		names, err := resolveDestroyNames(cmd, ctx, c, args, all)
 		if err != nil {
 			return err
@@ -126,8 +128,8 @@ func resolveDestroyAll(cmd *cobra.Command, ctx context.Context, c *yoloai.Client
 		return nil, err
 	}
 	if len(infos) == 0 {
-		if jsonEnabled(cmd) {
-			return nil, writeJSON(cmd.OutOrStdout(), []struct{}{})
+		if cliutil.JSONEnabled(cmd) {
+			return nil, cliutil.WriteJSON(cmd.OutOrStdout(), []struct{}{})
 		}
 		_, err = fmt.Fprintln(cmd.OutOrStdout(), "No sandboxes to destroy")
 		return nil, err
@@ -141,7 +143,7 @@ func resolveDestroyAll(cmd *cobra.Command, ctx context.Context, c *yoloai.Client
 
 // resolveDestroyFromEnv resolves the sandbox name from the environment when no args are given.
 func resolveDestroyFromEnv() ([]string, error) {
-	envName := os.Getenv(EnvSandboxName)
+	envName := os.Getenv(cliutil.EnvSandboxName)
 	if envName == "" {
 		return nil, sandbox.NewUsageError("at least one sandbox name is required (or use --all or set YOLOAI_SANDBOX)")
 	}
@@ -166,7 +168,7 @@ func resolveDestroyArgs(ctx context.Context, c *yoloai.Client, args []string) ([
 		if err := store.ValidateName(arg); err != nil {
 			return nil, err
 		}
-		if err := store.RequireSandboxDir(cliLayout().SandboxDir(arg)); err != nil {
+		if err := store.RequireSandboxDir(cliutil.Layout().SandboxDir(arg)); err != nil {
 			return nil, fmt.Errorf("%s: %w", arg, err)
 		}
 		names = append(names, arg)
@@ -214,7 +216,7 @@ func executeDestroy(cmd *cobra.Command, ctx context.Context, c *yoloai.Client, n
 		Error  string `json:"error,omitempty"`
 	}
 
-	if jsonEnabled(cmd) {
+	if cliutil.JSONEnabled(cmd) {
 		var results []destroyResult
 		for _, name := range names {
 			slog.Info("destroying sandbox", "event", "sandbox.destroy", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
@@ -225,7 +227,7 @@ func executeDestroy(cmd *cobra.Command, ctx context.Context, c *yoloai.Client, n
 				results = append(results, destroyResult{Name: name, Action: "destroyed"})
 			}
 		}
-		return writeJSON(cmd.OutOrStdout(), results)
+		return cliutil.WriteJSON(cmd.OutOrStdout(), results)
 	}
 
 	var errs []error

@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/kstenerud/yoloai/internal/cli/cliutil"
+
 	"github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/kstenerud/yoloai/internal/sandbox/patch"
@@ -20,16 +22,16 @@ import (
 func applySquash(cmd *cobra.Command, name string, paths []string, meta *store.Meta, yes, dryRun, includeWIP bool) error {
 	// Check for aux :copy dirs
 	if len(meta.Directories) > 0 {
-		backend := resolveBackendForSandbox(name)
-		return withClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
+		backend := cliutil.ResolveBackendForSandbox(name)
+		return cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
 			return applySquashMulti(cmd, ctx, c, name, paths, meta, yes, dryRun, includeWIP)
 		})
 	}
 
 	var patchBytes []byte
 	var stat string
-	backend := resolveBackendForSandbox(name)
-	err := withClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
+	backend := cliutil.ResolveBackendForSandbox(name)
+	err := cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
 		var genErr error
 		patchBytes, stat, genErr = c.GeneratePatch(ctx, name, paths, includeWIP)
 		return genErr
@@ -42,8 +44,8 @@ func applySquash(cmd *cobra.Command, name string, paths []string, meta *store.Me
 		warnSquashSkippedWIP(cmd, name, backend)
 	}
 	if len(patchBytes) == 0 {
-		if jsonEnabled(cmd) {
-			return writeJSON(cmd.OutOrStdout(), applyResult{
+		if cliutil.JSONEnabled(cmd) {
+			return cliutil.WriteJSON(cmd.OutOrStdout(), applyResult{
 				Target: meta.Workdir.HostPath,
 				Method: "squash",
 			})
@@ -53,12 +55,12 @@ func applySquash(cmd *cobra.Command, name string, paths []string, meta *store.Me
 	}
 
 	targetDir := meta.Workdir.HostPath
-	if !jsonEnabled(cmd) {
+	if !cliutil.JSONEnabled(cmd) {
 		fmt.Fprintln(cmd.OutOrStdout(), stat) //nolint:errcheck
 	}
 
 	if dryRun {
-		if !jsonEnabled(cmd) {
+		if !cliutil.JSONEnabled(cmd) {
 			fmt.Fprintln(cmd.OutOrStdout(), "(dry run)") //nolint:errcheck
 		}
 		return nil
@@ -70,8 +72,8 @@ func applySquash(cmd *cobra.Command, name string, paths []string, meta *store.Me
 // reportSquashMultiNoChanges emits the "nothing to do" output for the
 // multi-:copy squash path in either JSON or human mode.
 func reportSquashMultiNoChanges(cmd *cobra.Command) error {
-	if jsonEnabled(cmd) {
-		return writeJSON(cmd.OutOrStdout(), applyResult{Target: "multi", Method: "squash"})
+	if cliutil.JSONEnabled(cmd) {
+		return cliutil.WriteJSON(cmd.OutOrStdout(), applyResult{Target: "multi", Method: "squash"})
 	}
 	_, err := fmt.Fprintln(cmd.OutOrStdout(), "No changes to apply")
 	return err
@@ -81,11 +83,11 @@ func reportSquashMultiNoChanges(cmd *cobra.Command) error {
 // uncommitted work. Best-effort: a failed WIP check is silently swallowed
 // because squash can still succeed on the committed delta.
 func warnSquashSkippedWIP(cmd *cobra.Command, name, backend string) {
-	if jsonEnabled(cmd) {
+	if cliutil.JSONEnabled(cmd) {
 		return
 	}
 	var hasWIP bool
-	_ = withClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
+	_ = cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
 		var wipErr error
 		hasWIP, wipErr = c.HasUncommittedChanges(ctx, name)
 		return wipErr
@@ -120,7 +122,7 @@ func applySquashPatch(cmd *cobra.Command, name string, paths []string, targetDir
 
 	// Advance baseline past applied changes (skip for path-filtered applies)
 	if len(paths) == 0 {
-		err := withClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
+		err := cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
 			return c.AdvanceBaseline(ctx, name)
 		})
 		if err != nil {
@@ -128,8 +130,8 @@ func applySquashPatch(cmd *cobra.Command, name string, paths []string, targetDir
 		}
 	}
 
-	if jsonEnabled(cmd) {
-		return writeJSON(cmd.OutOrStdout(), applyResult{
+	if cliutil.JSONEnabled(cmd) {
+		return cliutil.WriteJSON(cmd.OutOrStdout(), applyResult{
 			Target:     targetDir,
 			WIPApplied: true,
 			Method:     "squash",
@@ -147,13 +149,13 @@ func applySquashMulti(cmd *cobra.Command, ctx context.Context, c *yoloai.Client,
 		return err
 	}
 	if !includeWIP {
-		warnSquashSkippedWIP(cmd, name, resolveBackendForSandbox(name))
+		warnSquashSkippedWIP(cmd, name, cliutil.ResolveBackendForSandbox(name))
 	}
 	if len(patches) == 0 {
 		return reportSquashMultiNoChanges(cmd)
 	}
 
-	isJSON := jsonEnabled(cmd)
+	isJSON := cliutil.JSONEnabled(cmd)
 	out := cmd.OutOrStdout()
 	if !isJSON {
 		for _, ps := range patches {
@@ -191,7 +193,7 @@ func applySquashMulti(cmd *cobra.Command, ctx context.Context, c *yoloai.Client,
 	}
 
 	if isJSON {
-		return writeJSON(out, applyResult{
+		return cliutil.WriteJSON(out, applyResult{
 			Target:     "multi",
 			WIPApplied: true,
 			Method:     "squash",

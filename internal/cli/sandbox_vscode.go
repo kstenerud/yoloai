@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"os/exec"
 
+	"github.com/kstenerud/yoloai/internal/cli/cliutil"
+
 	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
@@ -21,12 +23,12 @@ func newSandboxVscodeCmd() *cobra.Command {
 		Short: "Open a running sandbox in VS Code (attach-to-container)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			name, _, err := resolveName(cmd, args)
+			name, _, err := cliutil.ResolveName(cmd, args)
 			if err != nil {
 				return err
 			}
 
-			sandboxDir := cliLayout().SandboxDir(name)
+			sandboxDir := cliutil.Layout().SandboxDir(name)
 			if err := store.RequireSandboxDir(sandboxDir); err != nil {
 				return sandbox.ErrSandboxNotFound
 			}

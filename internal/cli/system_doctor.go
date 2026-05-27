@@ -7,6 +7,8 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/kstenerud/yoloai/internal/cli/cliutil"
+
 	"github.com/spf13/cobra"
 
 	"github.com/kstenerud/yoloai/internal/runtime"
@@ -50,7 +52,7 @@ Unavailable entries do not affect the exit code.`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			backendFilter, _ := cmd.Flags().GetString("backend")
 			isolationFilter, _ := cmd.Flags().GetString("isolation")
-			isJSON := jsonEnabled(cmd)
+			isJSON := cliutil.JSONEnabled(cmd)
 			return runSystemDoctor(cmd, backendFilter, isolationFilter, isJSON)
 		},
 	}
@@ -69,7 +71,7 @@ func runSystemDoctor(cmd *cobra.Command, backendFilter, isolationFilter string, 
 	reports := collectDoctorReports(ctx, env, backendFilter, isolationFilter)
 
 	if isJSON {
-		return writeJSON(out, convertDoctorReportsToJSON(reports))
+		return cliutil.WriteJSON(out, convertDoctorReportsToJSON(reports))
 	}
 
 	caps.FormatDoctor(out, reports)
@@ -93,7 +95,7 @@ func collectDoctorReports(ctx context.Context, env caps.Environment, backendFilt
 			continue
 		}
 
-		rt, err := newRuntime(ctx, desc.Name)
+		rt, err := cliutil.NewRuntime(ctx, desc.Name)
 		if err != nil {
 			if isolationFilter == "" {
 				reports = append(reports, caps.BackendReport{

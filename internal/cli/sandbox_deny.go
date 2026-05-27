@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/kstenerud/yoloai/internal/cli/cliutil"
+
 	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/spf13/cobra"
 )
@@ -52,12 +54,12 @@ func runSandboxDeny(cmd *cobra.Command, name string, domains []string) error {
 	if len(remaining) > 0 {
 		script += "\n" + ipsetResolveDomains
 	}
-	backend := resolveBackendForSandbox(name)
+	backend := cliutil.ResolveBackendForSandbox(name)
 	live, patchErr := tryLivePatchNetwork(cmd.Context(), backend, name, script, remaining)
 
 	w := cmd.OutOrStdout()
-	if jsonEnabled(cmd) {
-		return writeJSON(w, map[string]any{
+	if cliutil.JSONEnabled(cmd) {
+		return cliutil.WriteJSON(w, map[string]any{
 			"name":            name,
 			"domains_removed": domains,
 			"live":            live,

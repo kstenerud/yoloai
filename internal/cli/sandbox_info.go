@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/kstenerud/yoloai/internal/cli/cliutil"
+
 	yoloai "github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
@@ -19,29 +21,29 @@ import (
 )
 
 func runSandboxInfo(cmd *cobra.Command, name string) error {
-	closeSink := openCLIJSONLSink(name, cmd)
+	closeSink := cliutil.OpenCLIJSONLSink(name, cmd)
 	defer closeSink()
 	slog.Info("collecting sandbox info", "event", "sandbox.info", "sandbox", name) //nolint:gosec // G706: name is an internal sandbox name, not user-injected log data
-	backend := resolveBackendForSandbox(name)
-	return withClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
+	backend := cliutil.ResolveBackendForSandbox(name)
+	return cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
 		info, err := c.Inspect(ctx, name)
 		if err != nil {
-			return sandboxErrorHint(name, err)
+			return cliutil.SandboxErrorHint(name, err)
 		}
 
-		if jsonEnabled(cmd) {
+		if cliutil.JSONEnabled(cmd) {
 			type infoJSON struct {
 				*sandbox.Info
 				ConfigPath    string `json:"config_path"`
 				PromptPreview string `json:"prompt_preview,omitempty"`
 			}
-			sandboxDir := cliLayout().SandboxDir(name)
+			sandboxDir := cliutil.Layout().SandboxDir(name)
 			result := infoJSON{
 				Info:          info,
 				ConfigPath:    filepath.Join(sandboxDir, store.RuntimeConfigFile),
 				PromptPreview: loadPromptPreview(sandboxDir),
 			}
-			return writeJSON(cmd.OutOrStdout(), result)
+			return cliutil.WriteJSON(cmd.OutOrStdout(), result)
 		}
 
 		printSandboxInfo(cmd, name, info)
@@ -73,7 +75,7 @@ func printSandboxInfo(cmd *cobra.Command, name string, info *sandbox.Info) {
 		fmt.Fprintf(w, "Image:       %s\n", meta.ImageRef) //nolint:errcheck
 	}
 
-	sandboxDir := cliLayout().SandboxDir(name)
+	sandboxDir := cliutil.Layout().SandboxDir(name)
 	fmt.Fprintf(w, "Sandbox dir: %s\n", sandboxDir)                                         //nolint:errcheck
 	fmt.Fprintf(w, "Config:      %s\n", filepath.Join(sandboxDir, store.RuntimeConfigFile)) //nolint:errcheck
 
