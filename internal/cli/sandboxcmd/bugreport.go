@@ -112,8 +112,16 @@ func writeSandboxSections(ctx context.Context, w io.Writer, c *yoloai.Client, na
 		// Section 11: Agent output (unsafe only)
 		writeBugReportAgentOutput(w, name)
 
-		// Section 12: tmux screen capture (unsafe only)
+		// Section 12: tmux screen capture (unsafe only).
+		// Two variants: the historical host-side capture (works for
+		// seatbelt where tmux runs on the host) and DF3's container-side
+		// capture (works for docker/podman/containerd/tart where tmux
+		// runs inside the sandbox). Both are best-effort and silently
+		// skipped when not applicable; including both lets one bug
+		// report cover every backend without the writer caring which
+		// one is in use.
 		writeBugReportTmuxCapture(w, name)
+		writeBugReportTerminalSnapshot(ctx, w, c, name)
 	}
 }
 
@@ -249,6 +257,12 @@ func writeContainerLog(ctx context.Context, w io.Writer, c *yoloai.Client, name 
 	fmt.Fprintln(w)        //nolint:errcheck
 }
 
+// terminalSnapshotScrollback is also used by the standalone CLI
+// command in terminal_snapshot.go (same const value, declared once
+// there). Keeping the constant in the same file as its CLI consumer
+// avoids a cross-file dependency for what is essentially one tuning
+// knob.
+
 // monitorTailLines is the number of recent detector.result entries surfaced
 // in the bug-report summary section. Same value as the smoke test's
 // _MONITOR_TAIL_LINES — both produce the same shape of summary.
@@ -359,6 +373,46 @@ func writeBugReportAgentOutput(w io.Writer, name string) {
 	_ = stripANSI(w, f)
 	fmt.Fprintln(w, "```")        //nolint:errcheck
 	fmt.Fprintln(w)               //nolint:errcheck
+	fmt.Fprintln(w, "</details>") //nolint:errcheck
+	fmt.Fprintln(w)               //nolint:errcheck
+}
+
+// writeBugReportTerminalSnapshot writes the DF3 container-side tmux
+// capture as a bug-report section. Best-effort: silently omitted when
+// the sandbox isn't running (typical for post-failure bug reports
+// where the sandbox was already destroyed), or when the runtime
+// doesn't support the capture (current scope: all primary backends).
+// Unsafe-only because the captured pane may contain user prompts,
+// API responses, or other sensitive content the safe report sanitizes.
+func writeBugReportTerminalSnapshot(ctx context.Context, w io.Writer, c *yoloai.Client, name string) {
+	snap, err := c.Sandbox(name).CaptureTerminal(ctx, terminalSnapshotScrollback)
+	if err != nil {
+		// Sandbox not running, runtime error, etc. — silently skip.
+		return
+	}
+	if len(snap.Plain) == 0 && len(snap.ANSI) == 0 {
+		return
+	}
+
+	fmt.Fprintln(w, "<details>")                                  //nolint:errcheck
+	fmt.Fprintln(w, "<summary>Terminal snapshot (DF3)</summary>") //nolint:errcheck
+	fmt.Fprintln(w)                                               //nolint:errcheck
+
+	if len(snap.Plain) > 0 {
+		fmt.Fprintln(w, "**terminal-snapshot.txt (rendered):**") //nolint:errcheck
+		fmt.Fprintln(w, "```")                                   //nolint:errcheck
+		fmt.Fprintf(w, "%s", snap.Plain)                         //nolint:errcheck
+		fmt.Fprintln(w, "```")                                   //nolint:errcheck
+		fmt.Fprintln(w)                                          //nolint:errcheck
+	}
+	if len(snap.ANSI) > 0 {
+		fmt.Fprintln(w, "**terminal-snapshot.ansi (with control sequences):**") //nolint:errcheck
+		fmt.Fprintln(w, "```")                                                  //nolint:errcheck
+		fmt.Fprintf(w, "%s", snap.ANSI)                                         //nolint:errcheck
+		fmt.Fprintln(w, "```")                                                  //nolint:errcheck
+		fmt.Fprintln(w)                                                         //nolint:errcheck
+	}
+
 	fmt.Fprintln(w, "</details>") //nolint:errcheck
 	fmt.Fprintln(w)               //nolint:errcheck
 }

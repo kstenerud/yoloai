@@ -1,6 +1,6 @@
 // ABOUTME: `yoloai sandbox` parent command with name-first dispatch.
 // ABOUTME: `list` is a real Cobra subcommand; everything else dispatched by RunE.
-// ABOUTME: Subcommands: list, info, log, exec, prompt, allow, allowed, deny, bugreport, vscode, unlock.
+// ABOUTME: Subcommands: list, info, log, exec, prompt, allow, allowed, deny, bugreport, vscode, unlock, terminal-snapshot.
 package sandboxcmd
 
 import (
@@ -18,7 +18,7 @@ import (
 var sandboxSubcmds = map[string]bool{
 	"info": true, "log": true, "exec": true, "prompt": true,
 	"allow": true, "allowed": true, "deny": true, "bugreport": true,
-	"vscode": true, "unlock": true,
+	"vscode": true, "unlock": true, "terminal-snapshot": true,
 }
 
 func NewSandboxCmd() *cobra.Command {
@@ -53,7 +53,8 @@ Commands:
   <name> deny <domain>...    Remove domains from the allowlist
   <name> bugreport [safe|unsafe]  Write a bug report for the sandbox
   <name> vscode                   Open sandbox in VS Code (attach-to-container)
-  <name> unlock                   Force-clear a stale lock file (rare){{if gt (len .Aliases) 0}}
+  <name> unlock                   Force-clear a stale lock file (rare)
+  <name> terminal-snapshot [--ansi]  Capture the agent's rendered tmux pane (DF3){{if gt (len .Aliases) 0}}
 
 Aliases:
   {{.NameAndAliases}}{{end}}{{if .HasAvailableLocalFlags}}
@@ -117,8 +118,10 @@ func runSandboxSubcommand(cmd *cobra.Command, subcmd, name string, rest []string
 		return newSandboxVscodeCmd().RunE(cmd, append([]string{name}, rest...))
 	case "unlock":
 		return runSandboxUnlock(cmd, name)
+	case "terminal-snapshot":
+		return runTerminalSnapshot(cmd, name, rest)
 	default:
-		return sandbox.NewUsageError("unknown subcommand %q: valid subcommands are info, log, exec, prompt, allow, allowed, deny, bugreport, vscode, unlock", subcmd)
+		return sandbox.NewUsageError("unknown subcommand %q: valid subcommands are info, log, exec, prompt, allow, allowed, deny, bugreport, vscode, unlock, terminal-snapshot", subcmd)
 	}
 }
 
@@ -140,7 +143,7 @@ func resolveSandboxDispatchArgs(args []string) (name, subcmd string, rest []stri
 		return "", "", nil, err
 	}
 	if len(args) < 2 {
-		return "", "", nil, sandbox.NewUsageError("subcommand required: info, log, exec, prompt, allow, allowed, deny, bugreport, vscode, unlock")
+		return "", "", nil, sandbox.NewUsageError("subcommand required: info, log, exec, prompt, allow, allowed, deny, bugreport, vscode, unlock, terminal-snapshot")
 	}
 	return args[0], args[1], args[2:], nil
 }

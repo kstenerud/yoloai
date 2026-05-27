@@ -753,90 +753,49 @@ def _write_monitor_tail(sandbox_name: str, dest_dir: Path) -> bool:
 # *rendered* text — what the user would see on screen — to know whether the
 # agent printed a clarifying question (DF2), an API error, or nothing at all.
 #
-# This helper shells out per-backend to capture `tmux capture-pane -p` and
-# writes terminal-snapshot.txt (plain) and terminal-snapshot.ansi (with
-# escapes preserved) alongside the preserved sandbox files. Best-effort: any
-# failure is logged and ignored — the smoke test outcome doesn't change.
-#
-# *** FUTURE WORK (don't lose track): ***
-# The proper home for this is `internal/cli/bugreport_writer.go`. Once the
-# Client surface exposes a non-interactive Exec (or `yoloai sandbox <name>
-# exec --no-tty`), the bug-report bundle should include the snapshot and the
-# smoke test should switch to calling that single yoloai-level capability
-# instead of dispatching per-backend in Python. See discovered-findings.md
-# DF3 for context.
-
-def _terminal_snapshot_cmd(backend: str, container_name: str, ansi: bool) -> Optional[list[str]]:
-    """Return the subprocess command for capturing tmux output via the given
-    backend. Returns None for unsupported backends (tart, seatbelt). The
-    container is exec'd as the `yoloai` user since the tmux server runs there.
-
-    NOTE: *backend* is the value from environment.json's "backend" field —
-    "docker", "podman", "containerd" — NOT the smoke-test spec label
-    ("containerd-vm" / "containerd-vmenhanced" / "docker-cenhanced"). Those
-    labels distinguish isolation modes, not backends.
-    """
-    # yoloai's sandbox-setup.py launches tmux on a fixed socket at
-    # /tmp/yoloai-tmux.sock (NOT tmux's default per-user socket). The session
-    # name is "main". Verified empirically against a live containerd-vm
-    # sandbox; if the socket path changes upstream, see runtime/monitor/
-    # sandbox-setup.py::setup_tmux_session.
-    tmux_args = ["tmux", "-S", "/tmp/yoloai-tmux.sock",
-                 "capture-pane", "-p", "-S", "-200", "-t", "main"]
-    if ansi:
-        tmux_args.append("-e")
-    if backend == "docker":
-        return ["docker", "exec", "-i", "--user", "yoloai", container_name, *tmux_args]
-    if backend == "podman":
-        return ["podman", "exec", "-i", "--user", "yoloai", container_name, *tmux_args]
-    if backend == "containerd":
-        exec_id = f"snap{int(time.time() * 1000)}"
-        # sudo -n: fail rather than prompt if no passwordless sudo.
-        # --user yoloai: match the user the agent's tmux server is running as.
-        return [
-            "sudo", "-n", "ctr", "-n", "yoloai", "task", "exec",
-            "--exec-id", exec_id, "--user", "yoloai", container_name, *tmux_args,
-        ]
-    return None
-
+# DF3 phase 2 (2026-05-27): the capture lives in yoloai now —
+# `yoloai sandbox <name> terminal-snapshot [--ansi]` invokes
+# sandbox.Manager.CaptureTerminal via the runtime's non-interactive Exec
+# surface, so the per-backend dispatch (docker exec / podman exec / sudo ctr
+# task exec) is gone from this script. The CLI command is the single source
+# of truth and is also wired into the bug-report writer at
+# internal/cli/sandboxcmd/bugreport.go::writeBugReportTerminalSnapshot, so
+# `yoloai sandbox <name> bugreport unsafe` carries the same snapshot for
+# users who hit the failure outside the smoke test.
 
 def _capture_terminal_snapshot(
-    sandbox_name: str, dest_dir: Path, log_file: Optional[Path] = None
+    yoloai_bin: str, sandbox_name: str, dest_dir: Path, log_file: Optional[Path] = None
 ) -> bool:
     """Capture rendered tmux output for *sandbox_name* into *dest_dir*.
     Writes terminal-snapshot.txt (plain) and terminal-snapshot.ansi (with
     escape sequences preserved). Returns True if at least one was written.
     Best-effort — failures are logged and swallowed.
-    """
-    env_path = Path.home() / ".yoloai" / "sandboxes" / sandbox_name / "environment.json"
-    if not env_path.is_file():
-        return False
-    try:
-        backend = str(json.loads(env_path.read_text()).get("backend", ""))
-    except (OSError, json.JSONDecodeError):
-        return False
-    if not backend:
-        return False
 
-    container = f"yoloai-{sandbox_name}"
+    Delegates to `yoloai sandbox <name> terminal-snapshot` (and the same with
+    --ansi) so all the backend dispatch (docker/podman/containerd/tart/
+    seatbelt) lives in one yoloai-level primitive instead of duplicated
+    Python branches. tart and seatbelt — which the prior per-backend
+    dispatch couldn't reach — now capture too.
+    """
     wrote = False
-    for ansi, filename in ((False, "terminal-snapshot.txt"), (True, "terminal-snapshot.ansi")):
-        cmd = _terminal_snapshot_cmd(backend, container, ansi=ansi)
-        if cmd is None:
-            return False  # unsupported backend; don't try the other variant either
+    for flag_args, filename in (
+        ([], "terminal-snapshot.txt"),
+        (["--ansi"], "terminal-snapshot.ansi"),
+    ):
+        cmd = [yoloai_bin, "sandbox", sandbox_name, "terminal-snapshot", *flag_args]
         try:
             r = subprocess.run(cmd, capture_output=True, timeout=10)
         except (subprocess.TimeoutExpired, OSError) as e:
             if log_file is not None:
                 with log_file.open("a") as f:
-                    f.write(f"\nterminal-snapshot capture failed ({backend}, ansi={ansi}): {e}\n")
+                    f.write(f"\nterminal-snapshot capture failed (flags={flag_args}): {e}\n")
             continue
         if r.returncode != 0:
             if log_file is not None:
                 with log_file.open("a") as f:
                     f.write(
                         f"\nterminal-snapshot capture exit {r.returncode} "
-                        f"({backend}, ansi={ansi}): {r.stderr.decode(errors='replace').strip()}\n"
+                        f"(flags={flag_args}): {r.stderr.decode(errors='replace').strip()}\n"
                     )
             continue
         try:
@@ -884,7 +843,7 @@ def _summarize_network_probe_events(sandbox_name: str) -> Optional[str]:
     return "; ".join(parts)
 
 
-def _preserve_sandbox(sandbox_name: str, dest_parent: Path) -> Optional[Path]:
+def _preserve_sandbox(yoloai_bin: str, sandbox_name: str, dest_parent: Path) -> Optional[Path]:
     """Copy diagnostic state from ~/.yoloai/sandboxes/<sandbox_name>/ to
     dest_parent/<sandbox_name>/. Returns the target dir, or None if the source
     doesn't exist (e.g. the test failed before the sandbox was created).
@@ -911,7 +870,7 @@ def _preserve_sandbox(sandbox_name: str, dest_parent: Path) -> Optional[Path]:
     # Best-effort: rendered tmux output for the agent's session. Container must
     # still be running for this to work, which is true during _preserve_sandbox
     # (the retry/cleanup destroy happens later). DF3 diagnostic.
-    _capture_terminal_snapshot(sandbox_name, target)
+    _capture_terminal_snapshot(yoloai_bin, sandbox_name, target)
     # Best-effort: top-level summary of the last N detector decisions from
     # monitor.jsonl. The full stream is also preserved under logs/. DF4.
     _write_monitor_tail(sandbox_name, target)
@@ -931,7 +890,7 @@ def _preserve_failed_attempt(
     base = ctx.log_dir / "sandboxes" / test_name / f"attempt{attempt}"
     preserved_any = False
     for name in sandbox_names:
-        out = _preserve_sandbox(name, base)
+        out = _preserve_sandbox(ctx.yoloai_bin, name, base)
         if out is not None:
             preserved_any = True
     if preserved_any:
@@ -1100,15 +1059,30 @@ def _prompt(exdir: str, work: str, sentinel: str = SENTINEL) -> str:
     ENOSPC, and the host can tell "agent never started" (neither file present)
     from "agent started but didn't finish" (in-progress lingering).
 
-    The "Run this shell command…" preamble is not cosmetic. Haiku sometimes
-    interprets a bare shell snippet as "what is this code?" and replies with a
-    clarifying question instead of executing it — confirmed by a preserved
-    stop_start failure where agent-status went idle while agent.log showed
-    "Could you clarify what you'd like me to do with it?" The explicit
-    instruction collapses that ambiguity.
+    Prompt iteration history (preserve to avoid regressing):
+
+    v1 — bare shell snippet. Haiku sometimes replied with a clarifying
+         question ("Could you clarify what you'd like me to do with it?")
+         instead of executing it, captured in a preserved stop_start
+         failure transcript.
+
+    v2 — "Run this shell command exactly as written; do not modify it or
+         ask for clarification: <cmd>". Fixed v1's "what is this code?"
+         interpretation, but DF2 (discovered-findings.md) raised the
+         hypothesis that the negation half ("do not ask for clarification")
+         independently primes smaller / faster models to ask exactly that —
+         classic instruction-following failure under negation. Couldn't be
+         empirically verified without a fresh flake transcript.
+
+    v3 (this) — keep the explicit "Run this shell command" wrapper that
+         resolved v1's failure mode, drop the negation, add a positive
+         tool reference. The "using your shell/bash tool" hint signals
+         that a tool call IS expected, reducing the chance the model
+         produces a tool-less narrative reply (which would classify as
+         idle in monitor.py).
     """
     cmd = f"touch {exdir}/{IN_PROGRESS} && {work} && mv {exdir}/{IN_PROGRESS} {exdir}/{sentinel}"
-    return f"Run this shell command exactly as written; do not modify it or ask for clarification:\n{cmd}"
+    return f"Run this shell command exactly as written, using your shell/bash tool:\n{cmd}"
 
 
 def test_full_workflow(t: Test, spec: BackendSpec) -> None:

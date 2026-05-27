@@ -1,5 +1,30 @@
 package sandbox
 
+// ABOUTME: Unit tests for sandbox/setup.go — covers the first-run setup
+// ABOUTME: state machine (tmux config classification, backend/agent discovery,
+// ABOUTME: ApplySetup branching, platform-dependent enumeration).
+//
+// Length justification: this file's length is the cross product of the
+// setup state machine's legitimate branches, not boilerplate. Open
+// question #102 (resolved 2026-05-27) flagged the file as a candidate
+// for splitting; reading it alongside setup.go shows the branches are
+// real and the tests are exhaustive coverage of them:
+//
+//   - 3 host platforms (linux / darwin-arm64 / darwin-amd64) — each
+//     changes which backends `availableBackends()` returns
+//   - 4 tmux-conf modes (default / default+host / host / none) with
+//     side-effects that differ by mode
+//   - per-field validation (required-when-multiple-available,
+//     unknown-name, invalid-mode) producing *UsageError vs other errors
+//   - SetupStatus inspection (3 tmux classifications × 3 platforms)
+//
+// Helpers extracted (`setupTestManager`, `setLinuxPlatform`, etc.) are
+// shared by ~10 callers; collapsing them would inflate the file, not
+// shrink it. Section headers (`// --- SetupStatus tests ---`, etc.)
+// scope the file for readers. If `setup.go` itself grows past its
+// current ~350 lines, revisit splitting both together (one source
+// file → one test file is the simpler invariant to preserve).
+
 import (
 	"bytes"
 	"context"
