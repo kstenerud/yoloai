@@ -187,6 +187,18 @@ Go limits (named in the research file): same-package construction is unrestricte
 
 Cost of applying: more types, more parser functions, more import boundaries. Damage prevented: duplicate validation logic drifting out of sync; "I forgot to validate this path" bugs; the call site that takes `string` because the original author didn't know it should be checked.
 
+### Empty string isn't a free default
+
+A corollary worth calling out: `""` is **not** a valid value for typed-name / config / identity fields unless we can demonstrate a clear benefit to admitting it. The "valid combinations" framing above explicitly includes the empty value — an `Options.Backend BackendName` field with `""` accepted as "use the default" is the same pathology as `(NetworkIsolated bool, NetworkNone bool)` admitting both true.
+
+Concrete failure mode: an embedder constructs `Options{}` and gets *whatever* the library decides "default backend" means today. That decision flows through `runtime.SelectContainerBackend` and ends up depending on which daemons are installed on the host. The caller's Client now silently carries a backend the caller never named. Same shape as ambient HOME (§12): implicit resolution happens in library code, the answer depends on environmental state, the caller can't reason about behavior from inputs alone.
+
+Default rule: **reject empty at the public boundary** (`*UsageError`). The caller picks a value or asks for a sentinel constant. If empty really is meaningful (e.g., "all backends" for a filter), document it explicitly and prefer a typed sentinel (`BackendAll`, `IsolationModeAny`) over the empty string.
+
+Exceptions exist — `Profile == ""` legitimately means "no profile" because there's no other way to say it, and the no-profile case is the common path. The bar is: prove the empty-as-meaningful semantics is the cleanest shape before adopting it. Implicit default behavior tends to become evil — silent fallbacks compound across releases and turn into Hyrum's law magnets.
+
+F4 in `../CRITIQUE.md` is the worked example that motivated this rule.
+
 ### Sources
 
 Alexis King "Parse, don't validate" (lexi-lambda.github.io, 2019); David L. Parnas (1972); project D6 + D10. Full citations: `../research/principles/development-principles-research.md §4`.
