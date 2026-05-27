@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 
 	"github.com/kstenerud/yoloai"
+	"github.com/kstenerud/yoloai/internal/cli/system/tart"
 	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/spf13/cobra"
 )
@@ -31,7 +32,7 @@ func newSystemCmd(version, commit, date string) *cobra.Command {
 		newSystemDoctorCmd(),
 		newSystemPruneCmd(),
 		newSystemSetupCmd(),
-		newSystemTartCmd(),
+		tart.NewCmd(cliLayout, newRuntime),
 		newCompletionCmd(),
 	)
 

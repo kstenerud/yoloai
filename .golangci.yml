@@ -14,6 +14,7 @@ linters:
     - sloglint
     - nilerr
     - forbidigo
+    - depguard
     - durationcheck
     - exhaustive
     - cyclop
@@ -39,6 +40,35 @@ linters:
         # layer — not a collision with Go's stdlib "runtime" in practice.
         - name: redefines-builtin-id
           disabled: true
+    depguard:
+      # W-L13 backend-scope enforcement: only internal/cli/system/tart/
+      # may import internal/runtime/tart. The rest of internal/cli/
+      # must go through yoloai.Client / yoloai.SystemClient.
+      #
+      # Scoping note: the rule's `files` glob targets only internal/cli/
+      # (everything outside it is unaffected — yoloai.go and the runtime
+      # packages naturally aren't matched). Within internal/cli/, the
+      # internal/cli/system/tart/ subpackage is excluded as the one
+      # sanctioned importer.
+      #
+      # Other backend packages (docker, podman, containerd, seatbelt)
+      # don't need analogous rules because they aren't referenced by
+      # CLI command code directly — they're loaded via blank imports
+      # in yoloai.go for backend registration.
+      rules:
+        cli-backend-scope:
+          list-mode: lax
+          files:
+            - "$all"
+            - "!$test"
+            - "!**/system/tart/**"
+            - "!**/runtime/**"
+            - "!**/sandbox/**"
+            - "!**/yoloai.go"
+            - "!**/system_client.go"
+          deny:
+            - pkg: "github.com/kstenerud/yoloai/internal/runtime/tart"
+              desc: "only internal/cli/system/tart/ may import internal/runtime/tart — other CLI code must go through yoloai.Client / SystemClient (W-L13)"
     forbidigo:
       # Ban raw os file-creation calls. Use internal/fileutil wrappers instead
       # so files are chowned to the real user when yoloai runs under sudo.

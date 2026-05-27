@@ -12,10 +12,11 @@ import (
 	yoloai "github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/runtime"
-	_ "github.com/kstenerud/yoloai/internal/runtime/docker"   // register backend
-	_ "github.com/kstenerud/yoloai/internal/runtime/podman"   // register backend
-	_ "github.com/kstenerud/yoloai/internal/runtime/seatbelt" // register backend
-	_ "github.com/kstenerud/yoloai/internal/runtime/tart"     // register backend
+	// Backend registrations live in yoloai.go (the root package);
+	// importing yoloai above pulls in those init() side effects, so
+	// the blank-import block previously here was redundant. W-L13:
+	// removing it lets depguard scope `internal/runtime/tart` to the
+	// internal/cli/system/tart subpackage exclusively.
 	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
 	"github.com/spf13/cobra"
