@@ -1,0 +1,349 @@
+// ABOUTME: Tests for Sandbox.Network() sub-handle. Filesystem-backed reads;
+// ABOUTME: writes/live-patching tested via newTestClient's tempdir layout.
+
+package yoloai
+
+import (
+	"context"
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+
+	"github.com/kstenerud/yoloai/internal/sandbox"
+	"github.com/kstenerud/yoloai/internal/sandbox/store"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+// writeIsolatedSandbox creates a fake :isolated sandbox dir with a
+// meta.json carrying the given allowlist. Avoids spinning up an
+// actual sandbox + runtime, which Network read/derivation tests
+// don't need.
+//
+// Also writes a minimal runtime-config.json so the Allow/Deny
+// PatchConfigAllowedDomains call has a target file to patch.
+func writeIsolatedSandbox(t *testing.T, c *SystemClient, name, agentName string, allow []string) {
+	t.Helper()
+	sandboxDir := c.layout.SandboxDir(name)
+	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
+	meta := &store.Meta{
+		Name:         name,
+		Agent:        agentName,
+		CreatedAt:    time.Now(),
+		NetworkMode:  "isolated",
+		NetworkAllow: allow,
+	}
+	require.NoError(t, store.SaveMeta(sandboxDir, meta))
+
+	// PatchConfigAllowedDomains reads + writes runtime-config.json.
+	// A minimal `{}` is enough — the patch helper inserts the
+	// allowed_domains field.
+	require.NoError(t, os.WriteFile(
+		filepath.Join(sandboxDir, store.RuntimeConfigFile),
+		[]byte("{}\n"), 0600,
+	))
+}
+
+// writeNoNetworkSandbox creates a sandbox dir with NetworkMode:"none"
+// — used to assert UsageError handling.
+func writeNoNetworkSandbox(t *testing.T, c *SystemClient, name string) {
+	t.Helper()
+	sandboxDir := c.layout.SandboxDir(name)
+	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
+	meta := &store.Meta{
+		Name:        name,
+		Agent:       "test",
+		CreatedAt:   time.Now(),
+		NetworkMode: "none",
+	}
+	require.NoError(t, store.SaveMeta(sandboxDir, meta))
+}
+
+// clientWithSandbox returns a yoloai.Client wired up against a
+// tempdir layout. SystemClient and Client share the layout so test
+// fixtures written via SystemClient appear to Client reads.
+func clientWithSandbox(t *testing.T) (*Client, *SystemClient) {
+	t.Helper()
+	sys := newTestClient(t)
+	// Don't construct a real backend runtime — Network.Allowed and
+	// agent-set derivation don't touch it. Allow/Deny tests cover
+	// the live-patch soft-fail path, where a nil runtime would
+	// panic on Exec, so we use a stub there too.
+	c := &Client{
+		layout: sys.layout,
+	}
+	return c, sys
+}
+
+// --- AllowedDomain derivation ---
+
+func TestNetwork_Allowed_NoIsolation_Empty(t *testing.T) {
+	c, sys := clientWithSandbox(t)
+
+	// Sandbox with no network mode at all.
+	sandboxDir := sys.layout.SandboxDir("box")
+	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
+	require.NoError(t, store.SaveMeta(sandboxDir, &store.Meta{
+		Name:      "box",
+		Agent:     "claude",
+		CreatedAt: time.Now(),
+	}))
+
+	allowed, err := c.Sandbox("box").Network().Allowed(context.Background())
+	require.NoError(t, err)
+	assert.NotNil(t, allowed)
+	assert.Empty(t, allowed)
+}
+
+func TestNetwork_Allowed_AgentRequirement_Provenance(t *testing.T) {
+	c, sys := clientWithSandbox(t)
+	// Claude's NetworkAllowlist includes api.anthropic.com.
+	writeIsolatedSandbox(t, sys, "box", "claude", []string{
+		"api.anthropic.com",
+		"example.com",
+	})
+
+	allowed, err := c.Sandbox("box").Network().Allowed(context.Background())
+	require.NoError(t, err)
+	require.Len(t, allowed, 2)
+
+	bySource := map[string]DomainSource{}
+	for _, d := range allowed {
+		bySource[d.Domain] = d.Source
+	}
+	assert.Equal(t, AllowedFromAgentRequirement, bySource["api.anthropic.com"],
+		"claude's baked-in domain must come back tagged as agent-requirement")
+	assert.Equal(t, AllowedFromUser, bySource["example.com"],
+		"a domain absent from the agent definition must come back as user-added")
+}
+
+func TestNetwork_Allowed_UnknownAgent_AllUser(t *testing.T) {
+	c, sys := clientWithSandbox(t)
+	writeIsolatedSandbox(t, sys, "box", "ghost-agent", []string{"a.example", "b.example"})
+
+	allowed, err := c.Sandbox("box").Network().Allowed(context.Background())
+	require.NoError(t, err)
+	require.Len(t, allowed, 2)
+	for _, d := range allowed {
+		assert.Equal(t, AllowedFromUser, d.Source,
+			"unknown agent → no derivable requirements → everything looks user-added")
+	}
+}
+
+func TestNetwork_Allowed_PreservesOrder(t *testing.T) {
+	c, sys := clientWithSandbox(t)
+	writeIsolatedSandbox(t, sys, "box", "claude", []string{
+		"example.com",
+		"api.anthropic.com",
+		"other.example",
+	})
+
+	allowed, err := c.Sandbox("box").Network().Allowed(context.Background())
+	require.NoError(t, err)
+	require.Len(t, allowed, 3)
+	assert.Equal(t, "example.com", allowed[0].Domain, "Allowed() preserves meta-on-disk order")
+	assert.Equal(t, "api.anthropic.com", allowed[1].Domain)
+	assert.Equal(t, "other.example", allowed[2].Domain)
+}
+
+func TestNetwork_Allowed_NotFound(t *testing.T) {
+	c, _ := clientWithSandbox(t)
+	_, err := c.Sandbox("ghost").Network().Allowed(context.Background())
+	assert.ErrorIs(t, err, sandbox.ErrSandboxNotFound)
+}
+
+// --- Allow ---
+
+func TestNetwork_Allow_AddsNewDomains(t *testing.T) {
+	c, sys := clientWithSandbox(t)
+	writeIsolatedSandbox(t, sys, "box", "claude", []string{"api.anthropic.com"})
+
+	result, err := c.Sandbox("box").Network().Allow(context.Background(), "extra.example", "other.example")
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.ElementsMatch(t, []string{"extra.example", "other.example"}, result.Added)
+	// Sandbox isn't running → live-patch soft-fails; persistence
+	// still happened.
+	assert.False(t, result.Live)
+
+	// Re-read via Allowed() to confirm persistence and provenance.
+	allowed, err := c.Sandbox("box").Network().Allowed(context.Background())
+	require.NoError(t, err)
+	require.Len(t, allowed, 3)
+	domains := map[string]DomainSource{}
+	for _, d := range allowed {
+		domains[d.Domain] = d.Source
+	}
+	assert.Equal(t, AllowedFromAgentRequirement, domains["api.anthropic.com"])
+	assert.Equal(t, AllowedFromUser, domains["extra.example"])
+	assert.Equal(t, AllowedFromUser, domains["other.example"])
+}
+
+func TestNetwork_Allow_DedupsAgainstExisting(t *testing.T) {
+	c, sys := clientWithSandbox(t)
+	writeIsolatedSandbox(t, sys, "box", "claude", []string{"a.example", "b.example"})
+
+	result, err := c.Sandbox("box").Network().Allow(context.Background(), "a.example", "c.example", "b.example")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"c.example"}, result.Added,
+		"Allow must drop entries that already exist; only the genuinely new domain is reported")
+}
+
+func TestNetwork_Allow_DedupsWithinInput(t *testing.T) {
+	c, sys := clientWithSandbox(t)
+	writeIsolatedSandbox(t, sys, "box", "claude", nil)
+
+	result, err := c.Sandbox("box").Network().Allow(context.Background(), "x.example", "x.example", "y.example")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"x.example", "y.example"}, result.Added,
+		"Allow must dedupe within the input slice too — duplicates cause one add")
+}
+
+func TestNetwork_Allow_AllExisting_NoAdds(t *testing.T) {
+	c, sys := clientWithSandbox(t)
+	writeIsolatedSandbox(t, sys, "box", "claude", []string{"a.example"})
+
+	result, err := c.Sandbox("box").Network().Allow(context.Background(), "a.example")
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.NotNil(t, result.Added, "Added is non-nil empty slice (JSON renders [])")
+	assert.Empty(t, result.Added)
+	assert.False(t, result.Live)
+}
+
+func TestNetwork_Allow_NoDomains_UsageError(t *testing.T) {
+	c, sys := clientWithSandbox(t)
+	writeIsolatedSandbox(t, sys, "box", "claude", nil)
+
+	_, err := c.Sandbox("box").Network().Allow(context.Background())
+	require.Error(t, err)
+	var usage *sandbox.UsageError
+	assert.ErrorAs(t, err, &usage)
+}
+
+func TestNetwork_Allow_NoneNetworkMode_UsageError(t *testing.T) {
+	c, sys := clientWithSandbox(t)
+	writeNoNetworkSandbox(t, sys, "box")
+
+	_, err := c.Sandbox("box").Network().Allow(context.Background(), "a.example")
+	require.Error(t, err)
+	var usage *sandbox.UsageError
+	require.ErrorAs(t, err, &usage)
+	assert.Contains(t, err.Error(), "--network-none")
+}
+
+func TestNetwork_Allow_NotIsolated_UsageError(t *testing.T) {
+	c, sys := clientWithSandbox(t)
+
+	sandboxDir := sys.layout.SandboxDir("box")
+	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
+	require.NoError(t, store.SaveMeta(sandboxDir, &store.Meta{
+		Name:      "box",
+		Agent:     "claude",
+		CreatedAt: time.Now(),
+		// no NetworkMode set
+	}))
+
+	_, err := c.Sandbox("box").Network().Allow(context.Background(), "a.example")
+	require.Error(t, err)
+	var usage *sandbox.UsageError
+	require.ErrorAs(t, err, &usage)
+	assert.Contains(t, err.Error(), "not using network isolation")
+}
+
+// --- Deny ---
+
+func TestNetwork_Deny_RemovesAndTagsSource(t *testing.T) {
+	c, sys := clientWithSandbox(t)
+	writeIsolatedSandbox(t, sys, "box", "claude", []string{
+		"api.anthropic.com", // agent-required
+		"example.com",       // user
+	})
+
+	result, err := c.Sandbox("box").Network().Deny(context.Background(), "api.anthropic.com", "example.com")
+	require.NoError(t, err)
+	require.Len(t, result.Removed, 2)
+
+	bySource := map[string]DomainSource{}
+	for _, d := range result.Removed {
+		bySource[d.Domain] = d.Source
+	}
+	assert.Equal(t, AllowedFromAgentRequirement, bySource["api.anthropic.com"],
+		"Deny must surface that an agent-required domain was removed so UIs can warn")
+	assert.Equal(t, AllowedFromUser, bySource["example.com"])
+
+	// Allowlist is empty now on disk.
+	meta, err := store.LoadMeta(sys.layout.SandboxDir("box"))
+	require.NoError(t, err)
+	assert.Empty(t, meta.NetworkAllow)
+}
+
+func TestNetwork_Deny_DomainNotInList_UsageError(t *testing.T) {
+	c, sys := clientWithSandbox(t)
+	writeIsolatedSandbox(t, sys, "box", "claude", []string{"a.example"})
+
+	_, err := c.Sandbox("box").Network().Deny(context.Background(), "absent.example")
+	require.Error(t, err)
+	var usage *sandbox.UsageError
+	require.ErrorAs(t, err, &usage)
+	assert.Contains(t, err.Error(), "not in the allowlist")
+}
+
+func TestNetwork_Deny_PartialFailureRollsBack(t *testing.T) {
+	c, sys := clientWithSandbox(t)
+	// Validate-before-remove: if ANY domain is missing, NOTHING is
+	// removed. Locks in the existing UX guarantee against typo
+	// half-commits.
+	writeIsolatedSandbox(t, sys, "box", "claude", []string{"a.example", "b.example"})
+
+	_, err := c.Sandbox("box").Network().Deny(context.Background(), "a.example", "absent.example")
+	require.Error(t, err)
+
+	meta, err := store.LoadMeta(sys.layout.SandboxDir("box"))
+	require.NoError(t, err)
+	assert.Equal(t, []string{"a.example", "b.example"}, meta.NetworkAllow,
+		"validation failure must leave the allowlist untouched")
+}
+
+func TestNetwork_Deny_NoDomains_UsageError(t *testing.T) {
+	c, sys := clientWithSandbox(t)
+	writeIsolatedSandbox(t, sys, "box", "claude", []string{"a.example"})
+
+	_, err := c.Sandbox("box").Network().Deny(context.Background())
+	require.Error(t, err)
+	var usage *sandbox.UsageError
+	assert.ErrorAs(t, err, &usage)
+}
+
+// --- pure helper: computeAllowedDomains ---
+// (Direct unit coverage so future refactors of the storage shape
+// can't break provenance computation without a loud test.)
+
+func TestComputeAllowedDomains_ClaudeAgent(t *testing.T) {
+	meta := &store.Meta{
+		Agent:        "claude",
+		NetworkAllow: []string{"api.anthropic.com", "extra.example"},
+	}
+	out := computeAllowedDomains(meta)
+	require.Len(t, out, 2)
+	assert.Equal(t, "api.anthropic.com", out[0].Domain)
+	assert.Equal(t, AllowedFromAgentRequirement, out[0].Source)
+	assert.Equal(t, "extra.example", out[1].Domain)
+	assert.Equal(t, AllowedFromUser, out[1].Source)
+}
+
+func TestComputeAllowedDomains_EmptyAllow(t *testing.T) {
+	meta := &store.Meta{Agent: "claude"}
+	out := computeAllowedDomains(meta)
+	assert.NotNil(t, out)
+	assert.Empty(t, out)
+}
+
+// Smoke-guard the layout helper used by the suite.
+func TestNetworkTest_Layout(t *testing.T) {
+	c, _ := clientWithSandbox(t)
+	assert.NotEmpty(t, c.layout.SandboxesDir())
+	// Walk up: parent must exist.
+	require.DirExists(t, filepath.Dir(c.layout.SandboxesDir()))
+}

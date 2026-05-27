@@ -76,7 +76,15 @@ func TestNetworkList_JSON(t *testing.T) {
 	require.NoError(t, root.PersistentFlags().Set("json", "true"))
 	require.NoError(t, root.Execute())
 
-	assert.JSONEq(t, `{"name":"nl-json","network_mode":"isolated","domains":["api.example.com"]}`, out.String())
+	// Q-V (2026-05-25) introduced provenance on each domain. JSON
+	// callers now get a structured object per entry. The `test`
+	// agent has no NetworkAllowlist, so api.example.com surfaces
+	// as user-added.
+	assert.JSONEq(t, `{
+		"name": "nl-json",
+		"network_mode": "isolated",
+		"domains": [{"domain": "api.example.com", "source": "user"}]
+	}`, out.String())
 }
 
 func TestNetworkList_JSONNoDomains(t *testing.T) {

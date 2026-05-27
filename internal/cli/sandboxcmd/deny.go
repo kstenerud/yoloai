@@ -3,78 +3,73 @@
 package sandboxcmd
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
+	"github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
 
-	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/spf13/cobra"
 )
 
 func runSandboxDeny(cmd *cobra.Command, name string, domains []string) error {
-	if len(domains) == 0 {
-		return sandbox.NewUsageError("at least one domain is required")
-	}
-
-	sandboxDir, meta, err := loadIsolatedMeta(name)
-	if err != nil {
-		return err
-	}
-
-	// Validate all domains exist in allowlist
-	existing := make(map[string]bool, len(meta.NetworkAllow))
-	for _, d := range meta.NetworkAllow {
-		existing[d] = true
-	}
-	toRemove := make(map[string]bool, len(domains))
-	for _, d := range domains {
-		if !existing[d] {
-			return sandbox.NewUsageError("domain %q is not in the allowlist", d)
-		}
-		toRemove[d] = true
-	}
-
-	// Filter out removed domains
-	var remaining []string
-	for _, d := range meta.NetworkAllow {
-		if !toRemove[d] {
-			remaining = append(remaining, d)
-		}
-	}
-
-	// Persist changes
-	meta.NetworkAllow = remaining
-	if err := saveNetworkAllowlist(sandboxDir, meta); err != nil {
-		return err
-	}
-
-	// Try live-patching (flush ipset and re-add remaining domain IPs)
-	script := "ipset flush allowed-domains 2>/dev/null || true"
-	if len(remaining) > 0 {
-		script += "\n" + ipsetResolveDomains
-	}
 	backend := cliutil.ResolveBackendForSandbox(name)
-	live, patchErr := tryLivePatchNetwork(cmd.Context(), backend, name, script, remaining)
+	return cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
+		result, err := c.Sandbox(name).Network().Deny(ctx, domains...)
+		if err != nil {
+			return err
+		}
 
-	w := cmd.OutOrStdout()
-	if cliutil.JSONEnabled(cmd) {
-		return cliutil.WriteJSON(w, map[string]any{
-			"name":            name,
-			"domains_removed": domains,
-			"live":            live,
-		})
+		w := cmd.OutOrStdout()
+		removedDomains := removedDomainStrings(result)
+
+		if cliutil.JSONEnabled(cmd) {
+			return cliutil.WriteJSON(w, map[string]any{
+				"name":            name,
+				"domains_removed": result.Removed, // typed; carries source
+				"live":            result.Live,
+			})
+		}
+
+		if hint := agentRequirementHint(result); hint != "" {
+			fmt.Fprintln(w, hint) //nolint:errcheck
+		}
+
+		switch {
+		case result.Live:
+			fmt.Fprintf(w, "Removed %s (live)\n", strings.Join(removedDomains, ", ")) //nolint:errcheck
+		default:
+			fmt.Fprintf(w, "Removed %s (will take effect on next start)\n", strings.Join(removedDomains, ", ")) //nolint:errcheck
+		}
+		return nil
+	})
+}
+
+// removedDomainStrings projects DenyResult.Removed back to a flat
+// []string for human-readable output.
+func removedDomainStrings(result *yoloai.DenyResult) []string {
+	out := make([]string, 0, len(result.Removed))
+	for _, d := range result.Removed {
+		out = append(out, d.Domain)
 	}
+	return out
+}
 
-	switch {
-	case live:
-		fmt.Fprintf(w, "Removed %s (live)\n", strings.Join(domains, ", ")) //nolint:errcheck // best-effort output
-	case patchErr != nil:
-		fmt.Fprintf(w, "Warning: failed to update running container: %v\n", patchErr) //nolint:errcheck // best-effort output
-		fmt.Fprintf(w, "Changes saved — will take effect on next start\n")            //nolint:errcheck // best-effort output
-	default:
-		fmt.Fprintf(w, "Removed %s (will take effect on next start)\n", strings.Join(domains, ", ")) //nolint:errcheck // best-effort output
+// agentRequirementHint returns the warning text printed when any of
+// the just-removed domains was an agent requirement, surfacing
+// Q-V's provenance to the user — removing api.anthropic.com from a
+// Claude sandbox isn't a typo, but it'll break the agent. Empty
+// string when nothing agent-required was removed.
+func agentRequirementHint(result *yoloai.DenyResult) string {
+	var hits []string
+	for _, d := range result.Removed {
+		if d.Source == yoloai.AllowedFromAgentRequirement {
+			hits = append(hits, d.Domain)
+		}
 	}
-
-	return nil
+	if len(hits) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("Note: removed agent-required domain(s): %s — the agent may stop working.", strings.Join(hits, ", "))
 }

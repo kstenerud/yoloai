@@ -1,52 +1,77 @@
 // ABOUTME: `yoloai sandbox <name> allowed` handler. Shows allowed domains
-// ABOUTME: for a network-isolated sandbox.
+// ABOUTME: for a network-isolated sandbox with their provenance.
 package sandboxcmd
 
 import (
+	"context"
 	"fmt"
 
+	"github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
 
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
 	"github.com/spf13/cobra"
 )
 
+// runSandboxAllowed prints a sandbox's allowlist with each entry's
+// provenance source (agent-requirement vs user-added). The library's
+// Network.Allowed() does the derivation; this just renders.
 func runSandboxAllowed(cmd *cobra.Command, name string) error {
-	sandboxDir := cliutil.Layout().SandboxDir(name)
-	if err := store.RequireSandboxDir(sandboxDir); err != nil {
-		return err
-	}
-	meta, err := store.LoadMeta(sandboxDir)
+	// Branch on NetworkMode early so the "not isolated" / "none"
+	// cases render their static messages without making the library
+	// load the allowlist. Network.Allowed() doesn't reject those
+	// states (read-only never errors) — we surface them here.
+	meta, err := loadMetaForRead(name)
 	if err != nil {
 		return err
 	}
 
-	if cliutil.JSONEnabled(cmd) {
-		domains := meta.NetworkAllow
-		if domains == nil {
-			domains = []string{}
+	backend := cliutil.ResolveBackendForSandbox(name)
+	return cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
+		allowed, err := c.Sandbox(name).Network().Allowed(ctx)
+		if err != nil {
+			return err
 		}
-		return cliutil.WriteJSON(cmd.OutOrStdout(), map[string]any{
-			"name":         name,
-			"network_mode": meta.NetworkMode,
-			"domains":      domains,
-		})
-	}
 
-	w := cmd.OutOrStdout()
-	switch meta.NetworkMode {
-	case "none":
-		fmt.Fprintln(w, "Network disabled (--network-none)") //nolint:errcheck // best-effort output
-	case "isolated":
-		if len(meta.NetworkAllow) == 0 {
-			fmt.Fprintln(w, "No domains allowed") //nolint:errcheck // best-effort output
-		} else {
-			for _, d := range meta.NetworkAllow {
-				fmt.Fprintln(w, d) //nolint:errcheck // best-effort output
-			}
+		if cliutil.JSONEnabled(cmd) {
+			return cliutil.WriteJSON(cmd.OutOrStdout(), map[string]any{
+				"name":         name,
+				"network_mode": meta.NetworkMode,
+				"domains":      allowed,
+			})
 		}
-	default:
-		fmt.Fprintln(w, "No network isolation") //nolint:errcheck // best-effort output
+
+		w := cmd.OutOrStdout()
+		switch meta.NetworkMode {
+		case "none":
+			fmt.Fprintln(w, "Network disabled (--network-none)") //nolint:errcheck
+		case "isolated":
+			if len(allowed) == 0 {
+				fmt.Fprintln(w, "No domains allowed") //nolint:errcheck
+				return nil
+			}
+			for _, d := range allowed {
+				marker := ""
+				if d.Source == yoloai.AllowedFromAgentRequirement {
+					marker = " (agent requirement)"
+				}
+				fmt.Fprintf(w, "%s%s\n", d.Domain, marker) //nolint:errcheck
+			}
+		default:
+			fmt.Fprintln(w, "No network isolation") //nolint:errcheck
+		}
+		return nil
+	})
+}
+
+// loadMetaForRead resolves the sandbox directory and loads its meta
+// without enforcing the "isolated mode required" precondition. The
+// `allowed` subcommand needs to print specific messages for the
+// other network modes, so it can't go through requireIsolated.
+func loadMetaForRead(name string) (*store.Meta, error) {
+	sandboxDir := cliutil.Layout().SandboxDir(name)
+	if err := store.RequireSandboxDir(sandboxDir); err != nil {
+		return nil, err
 	}
-	return nil
+	return store.LoadMeta(sandboxDir)
 }

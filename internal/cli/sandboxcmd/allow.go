@@ -3,78 +3,44 @@
 package sandboxcmd
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
+	"github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
 
-	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/spf13/cobra"
 )
 
 func runSandboxAllow(cmd *cobra.Command, name string, domains []string) error {
-	if len(domains) == 0 {
-		return sandbox.NewUsageError("at least one domain is required")
-	}
-
-	sandboxDir, meta, err := loadIsolatedMeta(name)
-	if err != nil {
-		return err
-	}
-
-	// Deduplicate new domains against existing allowlist
-	existing := make(map[string]bool, len(meta.NetworkAllow))
-	for _, d := range meta.NetworkAllow {
-		existing[d] = true
-	}
-	var newDomains []string
-	for _, d := range domains {
-		if !existing[d] {
-			newDomains = append(newDomains, d)
-			existing[d] = true // prevent duplicates within the input
+	backend := cliutil.ResolveBackendForSandbox(name)
+	return cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
+		result, err := c.Sandbox(name).Network().Allow(ctx, domains...)
+		if err != nil {
+			return err
 		}
-	}
 
-	if len(newDomains) == 0 {
+		w := cmd.OutOrStdout()
 		if cliutil.JSONEnabled(cmd) {
-			return cliutil.WriteJSON(cmd.OutOrStdout(), map[string]any{
+			return cliutil.WriteJSON(w, map[string]any{
 				"name":          name,
-				"domains_added": []string{},
-				"live":          false,
+				"domains_added": result.Added,
+				"live":          result.Live,
 			})
 		}
-		fmt.Fprintf(cmd.OutOrStdout(), "All domains already allowed\n") //nolint:errcheck // best-effort output
+
+		if len(result.Added) == 0 {
+			fmt.Fprintf(w, "All domains already allowed\n") //nolint:errcheck // best-effort output
+			return nil
+		}
+
+		switch {
+		case result.Live:
+			fmt.Fprintf(w, "Allowed %s (live)\n", strings.Join(result.Added, ", ")) //nolint:errcheck
+		default:
+			fmt.Fprintf(w, "Allowed %s (will take effect on next start)\n", strings.Join(result.Added, ", ")) //nolint:errcheck
+		}
 		return nil
-	}
-
-	// Persist changes
-	meta.NetworkAllow = append(meta.NetworkAllow, newDomains...)
-	if err := saveNetworkAllowlist(sandboxDir, meta); err != nil {
-		return err
-	}
-
-	// Try live-patching (only adds new domain IPs to existing ipset)
-	backend := cliutil.ResolveBackendForSandbox(name)
-	live, patchErr := tryLivePatchNetwork(cmd.Context(), backend, name, ipsetResolveDomains, newDomains)
-
-	w := cmd.OutOrStdout()
-	if cliutil.JSONEnabled(cmd) {
-		return cliutil.WriteJSON(w, map[string]any{
-			"name":          name,
-			"domains_added": newDomains,
-			"live":          live,
-		})
-	}
-
-	switch {
-	case live:
-		fmt.Fprintf(w, "Allowed %s (live)\n", strings.Join(newDomains, ", ")) //nolint:errcheck // best-effort output
-	case patchErr != nil:
-		fmt.Fprintf(w, "Warning: failed to update running container: %v\n", patchErr) //nolint:errcheck // best-effort output
-		fmt.Fprintf(w, "Changes saved — will take effect on next start\n")            //nolint:errcheck // best-effort output
-	default:
-		fmt.Fprintf(w, "Allowed %s (will take effect on next start)\n", strings.Join(newDomains, ", ")) //nolint:errcheck // best-effort output
-	}
-
-	return nil
+	})
 }
