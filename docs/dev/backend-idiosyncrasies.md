@@ -22,6 +22,7 @@ row to the index.
 | Bind mount target missing inside Kata VM | [Kata: no auto-create of mount targets](#kata-does-not-auto-create-bind-mount-target-directories) |
 | `hotplug memory error: ENOENT` in kata-agent logs | [Kata: hotplug ENOENT is normal](#hotplug-memory-error-enoent-is-normal) |
 | `yoloai destroy` hangs; `ctr tasks ls` shows RUNNING but no qemu/firecracker; host CPU 60–80% | [Kata: shim wedge with dead VM](#kata-shim-wedge-with-dead-vm-sigkill-via-containerd-doesnt-release-the-task) |
+| `yoloai destroy` hangs on a Tart sandbox; `tart list` shows VM running but guest unreachable | [Tart: VM process wedge](#tart-vm-process-wedge-tart-stop-and-sigterm-via-pgrep-dont-release-the-host-tart-run) |
 | Task stays in `Created` after `Start()` returns | [Containerd: task.Start returns early](#taskstart-returns-before-the-vm-is-actually-running) |
 | `parent snapshot sha256:... does not exist: not found` | [Containerd: WithNewSnapshot doesn't unpack](#withnewsnapshot-does-not-unpack-image-layers) |
 | `docker save \| ctr import` hangs indefinitely | [Containerd: pipe hang on ctr failure](#docker-save--ctr-import-hangs-if-ctr-fails-early) |
@@ -231,6 +232,42 @@ fix: `yoloai system prune` (which now uses the same escalation), or
 Cross-references: `clearStaleContainerState` uses the same escalation
 so a `yoloai new <name>` against a wedged orphan with the same name
 auto-recovers.
+
+### Tart VM process wedge: `tart stop` and SIGTERM via pgrep don't release the host `tart run`
+
+**Symptom:** `yoloai destroy <name>` against a Tart sandbox hangs;
+`tart list` shows the VM as running but the VM is unreachable (the
+guest OS hung, or Virtualization.framework is wedged). Host `tart run
+<name>` PID is still alive after a normal stop attempt.
+
+**Why:** parallel to the Kata wedge above, with a different intermediary.
+`tart stop` sends a shutdown request through Virtualization.framework
+into the guest — if the guest kernel hangs or the framework call
+blocks on hardware, the shutdown never confirms. The earlier
+`stopVM` fallback also only sent SIGTERM via `pgrep -f "tart run.*<name>"`,
+which a process stuck in a system call may queue but never act on.
+
+**Fix in code:** `tart.go::stopVM` runs a three-step ladder:
+
+  1. `tart stop <name>` bounded by a 10s context timeout
+     (`tartGracefulStopTimeout`). A wedged VM can't hold the caller
+     beyond that.
+  2. SIGTERM to every host PID matching `tart run.*<name>` from pgrep,
+     then `waitForExit` polls `syscall.Kill(pid, 0)` for up to 5s
+     (`tartSigtermWait`).
+  3. Survivors get SIGKILL via `proc.Kill()`. Logged at WARN
+     (`event=tart.stop.escalation`) so the user sees that yoloai had
+     to force-kill a stuck `tart run`.
+
+This applies to both `Stop()` and the `Create()` pre-clear path
+(line 198: `r.stopVM` before `tart delete`), so `yoloai new <name>`
+against a wedged Tart orphan auto-recovers the same way the
+containerd path does.
+
+**Fix for the user:** as with Kata, none required — the library handles
+it. The same `yoloai system prune` / `yoloai system doctor` surface
+applies (Tart's `Prune()` enumerates `yoloai-*` VMs via `tart list`
+and calls `stopVM + delete` per orphan).
 
 ### `hotplug memory error: ENOENT` is normal
 

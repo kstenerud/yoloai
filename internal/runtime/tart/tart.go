@@ -1065,29 +1065,107 @@ func (r *Runtime) patchConfigWorkingDir(sandboxPath string) error {
 	return nil
 }
 
-// stopVM attempts to stop a VM using tart stop, then kills any stale
-// tart run processes for the given VM name. This is the definitive way
-// to ensure no lingering processes hold VM slots.
-func (r *Runtime) stopVM(ctx context.Context, vmName string) {
-	// Try graceful stop first
-	_, _ = r.runTart(ctx, "stop", vmName)
+// Per-call timeouts for the stop ladder. The graceful step is bounded
+// because `tart stop` can hang indefinitely against an unresponsive VM
+// (no kata-agent equivalent, but the Virtualization.framework shutdown
+// path can block on a wedged guest kernel). The SIGTERM wait is bounded
+// so we can escalate to SIGKILL before the user notices the hang.
+const (
+	tartGracefulStopTimeout = 10 * time.Second
+	tartSigtermWait         = 5 * time.Second
+)
 
-	// Kill any stale "tart run" processes matching this VM name.
-	// pgrep -f matches the full command line.
-	pgrepCmd := exec.CommandContext(ctx, "pgrep", "-f", fmt.Sprintf("tart run.*%s", vmName)) //nolint:gosec // G204: vmName is from validated sandbox state
-	out, err := pgrepCmd.Output()
-	if err != nil {
-		return // no matching processes
+// stopVM attempts to stop a VM using tart stop, then kills any stale
+// `tart run` processes for the given VM name. This is the definitive way
+// to ensure no lingering processes hold VM slots.
+//
+// Ladder (mirrors the containerd Kata-shim ladder; same wedge class):
+//
+//  1. Graceful: `tart stop <name>` via Virtualization.framework, bounded
+//     by tartGracefulStopTimeout. Returns silently if it succeeds.
+//  2. Direct SIGTERM to every `tart run.*<name>` host PID. Wait
+//     tartSigtermWait for the process to die.
+//  3. Direct SIGKILL to any survivors. Logged at WARN level so the user
+//     sees that yoloai had to force-kill a stuck VM process.
+func (r *Runtime) stopVM(ctx context.Context, vmName string) {
+	// Step 1: graceful via tart's own shutdown path. Bounded so a
+	// wedged VM can't hold us forever.
+	stopCtx, stopCancel := context.WithTimeout(ctx, tartGracefulStopTimeout)
+	_, _ = r.runTart(stopCtx, "stop", vmName)
+	stopCancel()
+
+	// Steps 2+3: walk the `tart run` host processes for this VM.
+	pids := pgrepTartRun(ctx, vmName)
+	if len(pids) == 0 {
+		return
 	}
-	for line := range strings.SplitSeq(strings.TrimSpace(string(out)), "\n") {
-		pid, err := strconv.Atoi(strings.TrimSpace(line))
-		if err != nil {
-			continue
-		}
-		if proc, findErr := os.FindProcess(pid); findErr == nil {
+
+	// Step 2: SIGTERM.
+	for _, pid := range pids {
+		if proc, err := os.FindProcess(pid); err == nil {
 			_ = proc.Signal(syscall.SIGTERM)
 		}
 	}
+
+	// Wait for the SIGTERM'd processes to actually exit. waitForExit
+	// polls /proc-style via syscall.Kill(0) — checking that the
+	// process is still signal-deliverable. Bounded by tartSigtermWait.
+	survivors := waitForExit(pids, tartSigtermWait)
+	if len(survivors) == 0 {
+		return
+	}
+
+	// Step 3: escalation. SIGTERM didn't take.
+	slog.Warn("tart VM process wedged; escalating to SIGKILL",
+		"event", "tart.stop.escalation",
+		"vm", vmName,
+		"survivors", survivors,
+		"reason", "SIGTERM via pgrep did not release process within timeout",
+		"timeout", tartSigtermWait.String(),
+	)
+	for _, pid := range survivors {
+		if proc, err := os.FindProcess(pid); err == nil {
+			_ = proc.Kill() // SIGKILL
+		}
+	}
+}
+
+// pgrepTartRun returns the PIDs of any `tart run …<vmName>` processes
+// on the host. Empty slice if pgrep finds nothing or fails.
+func pgrepTartRun(ctx context.Context, vmName string) []int {
+	pgrepCmd := exec.CommandContext(ctx, "pgrep", "-f", fmt.Sprintf("tart run.*%s", vmName)) //nolint:gosec // G204: vmName from validated sandbox state
+	out, err := pgrepCmd.Output()
+	if err != nil {
+		return nil
+	}
+	var pids []int
+	for line := range strings.SplitSeq(strings.TrimSpace(string(out)), "\n") {
+		if pid, err := strconv.Atoi(strings.TrimSpace(line)); err == nil {
+			pids = append(pids, pid)
+		}
+	}
+	return pids
+}
+
+// waitForExit polls the given PIDs and returns those still alive after
+// the timeout. Uses syscall.Kill(pid, 0) which returns ESRCH for a
+// dead process — no need to read /proc, which is cheaper.
+func waitForExit(pids []int, timeout time.Duration) []int {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		alive := pids[:0:len(pids)] // reuse backing array
+		for _, pid := range pids {
+			if err := syscall.Kill(pid, 0); err == nil {
+				alive = append(alive, pid)
+			}
+		}
+		if len(alive) == 0 {
+			return nil
+		}
+		pids = alive
+		time.Sleep(100 * time.Millisecond)
+	}
+	return pids
 }
 
 // killByPID reads the PID file and kills the process.
