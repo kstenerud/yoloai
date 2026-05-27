@@ -6,12 +6,11 @@ package cli
 import (
 	"context"
 	"fmt"
-	"log/slog"
+	"io"
 	"os"
 	"path/filepath"
 
-	"github.com/kstenerud/yoloai/config"
-	"github.com/kstenerud/yoloai/runtime"
+	"github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/sandbox"
 	"github.com/spf13/cobra"
 )
@@ -82,120 +81,117 @@ func runSystemBuild(cmd *cobra.Command, args []string, backend string) error {
 		warnIfLowDisk(cmd.ErrOrStderr(), cliLayout().SandboxesDir())
 	}
 
+	var profile string
 	if len(args) > 0 {
-		return runSystemBuildProfile(cmd, args[0], secretFlags, backend, force)
+		profile = args[0]
 	}
 
-	// Build base image only
-	if len(secretFlags) > 0 {
-		return sandbox.NewUsageError("--secret is only supported with profile builds")
+	secrets, err := prepareBuildSecrets(secretFlags, profile != "")
+	if err != nil {
+		return err
 	}
-	return runSystemBuildBase(cmd, backend, force)
+
+	opts := yoloai.BuildOptions{
+		Profile: profile,
+		Backend: backend,
+		Rebuild: force,
+		Secrets: secrets,
+		Output:  buildOutputFor(cmd),
+	}
+	if err := systemClient().Build(cmd.Context(), opts); err != nil {
+		return err
+	}
+	return reportBuildOK(cmd, profile)
 }
 
-// runSystemBuildProfile validates and builds a profile image chain.
-func runSystemBuildProfile(cmd *cobra.Command, profileName string, secretFlags []string, backend string, force bool) error {
-	if err := config.ValidateProfileName(profileName); err != nil {
-		return err
+// prepareBuildSecrets validates --secret flags (tilde-expanding their
+// src paths) and prepends auto-detected secrets. Returns *UsageError
+// if --secret was used without a profile.
+func prepareBuildSecrets(secretFlags []string, hasProfile bool) ([]string, error) {
+	if !hasProfile && len(secretFlags) > 0 {
+		return nil, sandbox.NewUsageError("--secret is only supported with profile builds")
 	}
-	if !config.ProfileExists(cliLayout(), profileName) {
-		return sandbox.NewUsageError("profile %q does not exist", profileName)
+	if !hasProfile {
+		return nil, nil
 	}
-	if err := checkProfileHasDockerfile(profileName); err != nil {
-		return err
-	}
-
-	// Validate user-provided secrets and expand tildes
 	homeDir := filepath.Dir(cliLayout().DataDir)
 	var secrets []string
 	for _, s := range secretFlags {
-		expanded, secretErr := sandbox.ValidateBuildSecret(s, homeDir)
-		if secretErr != nil {
-			return secretErr
+		expanded, err := sandbox.ValidateBuildSecret(s, homeDir)
+		if err != nil {
+			return nil, err
 		}
 		secrets = append(secrets, expanded)
 	}
-
-	// Prepend auto-detected secrets
-	secrets = append(sandbox.AutoBuildSecrets(homeDir), secrets...)
-
-	return withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
-		buildOut := os.Stderr
-		if jsonEnabled(cmd) {
-			buildOut, _ = os.Open(os.DevNull)
-		}
-		if err := sandbox.EnsureProfileImage(ctx, rt, cliLayout(), profileName, secrets, buildOut, slog.Default(), force); err != nil {
-			return err
-		}
-		if jsonEnabled(cmd) {
-			return writeJSON(cmd.OutOrStdout(), map[string]string{"action": "built", "profile": profileName})
-		}
-		_, err := fmt.Fprintf(cmd.OutOrStdout(), "Profile image built successfully\n")
-		return err
-	})
+	return append(sandbox.AutoBuildSecrets(homeDir), secrets...), nil
 }
 
-// checkProfileHasDockerfile returns an error if the profile and all its ancestors lack a Dockerfile.
-func checkProfileHasDockerfile(profileName string) error {
-	if config.ProfileHasDockerfile(cliLayout(), profileName) {
-		return nil
+// buildOutputFor returns stderr for human mode (build stream is
+// noisy; users want to see progress) and io.Discard in --json mode
+// (machine-readable output mustn't be polluted by build stream).
+func buildOutputFor(cmd *cobra.Command) io.Writer {
+	if jsonEnabled(cmd) {
+		return io.Discard
 	}
-	chain, chainErr := config.ResolveProfileChain(cliLayout(), profileName)
-	if chainErr != nil {
-		return chainErr
-	}
-	for _, name := range chain {
-		if name != "base" && config.ProfileHasDockerfile(cliLayout(), name) {
-			return nil
-		}
-	}
-	return sandbox.NewUsageError("profile %q has no Dockerfile (and no ancestor does either)", profileName)
+	return os.Stderr
 }
 
-// runSystemBuildBase builds the base image.
-func runSystemBuildBase(cmd *cobra.Command, backend string, force bool) error {
-	baseProfileDir := cliLayout().ProfileDir("base")
-	return withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
-		buildOut := os.Stderr
-		if jsonEnabled(cmd) {
-			buildOut, _ = os.Open(os.DevNull)
+// reportBuildOK prints the post-build "Built successfully" line in
+// human mode and the equivalent JSON object in --json mode.
+func reportBuildOK(cmd *cobra.Command, profile string) error {
+	if jsonEnabled(cmd) {
+		payload := map[string]string{"action": "built"}
+		if profile != "" {
+			payload["profile"] = profile
 		}
-		if err := rt.Setup(ctx, cliLayout(), baseProfileDir, buildOut, slog.Default(), force); err != nil {
-			return err
-		}
-		if jsonEnabled(cmd) {
-			return writeJSON(cmd.OutOrStdout(), map[string]string{"action": "built"})
-		}
-		_, err := fmt.Fprintln(cmd.OutOrStdout(), "Base image built successfully")
+		return writeJSON(cmd.OutOrStdout(), payload)
+	}
+	out := cmd.OutOrStdout()
+	if profile != "" {
+		_, err := fmt.Fprintln(out, "Profile image built successfully")
 		return err
-	})
+	}
+	_, err := fmt.Fprintln(out, "Base image built successfully")
+	return err
 }
 
 func runSystemBuildAll(cmd *cobra.Command, args []string) error {
-	ctx := cmd.Context()
-	output := cmd.OutOrStdout()
-	isJSON := jsonEnabled(cmd)
-
-	var builtBackends []string
-	for _, desc := range runtime.Descriptors() {
-		available, _ := checkBackend(ctx, desc.Name)
-		if !available {
-			continue
-		}
-		if err := runSystemBuild(cmd, args, desc.Name); err != nil {
-			return fmt.Errorf("build %s: %w", desc.Name, err)
-		}
-		builtBackends = append(builtBackends, desc.Name)
+	if !jsonEnabled(cmd) {
+		warnIfLowDisk(cmd.ErrOrStderr(), cliLayout().SandboxesDir())
 	}
 
-	if len(builtBackends) == 0 {
-		if isJSON {
-			return writeJSON(output, map[string]any{"action": "built", "backends": builtBackends})
-		}
-		fmt.Fprintln(output, "No available backends to build for.") //nolint:errcheck
-		return nil
+	secretFlags, _ := cmd.Flags().GetStringSlice("secret")
+	force, _ := cmd.Flags().GetBool("force")
+
+	var profile string
+	if len(args) > 0 {
+		profile = args[0]
+	}
+	secrets, err := prepareBuildSecrets(secretFlags, profile != "")
+	if err != nil {
+		return err
 	}
 
+	opts := yoloai.BuildOptions{
+		Profile:     profile,
+		AllBackends: true,
+		Rebuild:     force,
+		Secrets:     secrets,
+		Output:      buildOutputFor(cmd),
+	}
+	if err := systemClient().Build(cmd.Context(), opts); err != nil {
+		// SystemClient.Build returns "no available backends to build
+		// for" — preserve the original CLI behavior of printing the
+		// message and exiting 0 in that case.
+		if err.Error() == "no available backends to build for" {
+			if jsonEnabled(cmd) {
+				return writeJSON(cmd.OutOrStdout(), map[string]any{"action": "built", "backends": []string{}})
+			}
+			fmt.Fprintln(cmd.OutOrStdout(), "No available backends to build for.") //nolint:errcheck
+			return nil
+		}
+		return err
+	}
 	return nil
 }
 

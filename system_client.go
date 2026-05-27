@@ -5,11 +5,15 @@ package yoloai
 
 import (
 	"context"
+	"fmt"
+	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 
 	"github.com/kstenerud/yoloai/config"
 	"github.com/kstenerud/yoloai/runtime"
+	"github.com/kstenerud/yoloai/sandbox"
 )
 
 // SystemClient scopes `yoloai system …` operations. Constructed via
@@ -90,6 +94,111 @@ func (s *SystemClient) DiskUsage(ctx context.Context) (*DiskUsage, error) {
 		})
 	}
 	return du, nil
+}
+
+// BuildOptions configures SystemClient.Build.
+type BuildOptions struct {
+	// Profile is the profile name to build. Empty = base image only.
+	// "base" is reserved and rejected (use Profile="" for the base image).
+	Profile string
+	// Backend selects the backend to build for. Empty = default
+	// backend. Ignored when AllBackends is true.
+	Backend string
+	// AllBackends builds across every backend that's currently
+	// available. Mutually exclusive with Backend.
+	AllBackends bool
+	// Rebuild forces a build even when the checksum says the existing
+	// image is current.
+	Rebuild bool
+	// Secrets are pre-validated --secret entries
+	// (`id=<name>,src=<path>` form) to pass through to the build.
+	Secrets []string
+	// Output receives the raw build stream (docker / buildx output).
+	// nil = io.Discard.
+	Output io.Writer
+}
+
+// Build builds the base image (Profile == "") or a profile image
+// (Profile != "") for one backend or all available backends. Returns
+// the first error from any backend; later backends in the iteration
+// are skipped.
+func (s *SystemClient) Build(ctx context.Context, opts BuildOptions) error {
+	if opts.AllBackends && opts.Backend != "" {
+		return sandbox.NewUsageError("Backend and AllBackends are mutually exclusive")
+	}
+	if opts.Profile != "" {
+		if err := config.ValidateProfileName(opts.Profile); err != nil {
+			return err
+		}
+		if !config.ProfileExists(s.layout, opts.Profile) {
+			return sandbox.NewUsageError("profile %q does not exist", opts.Profile)
+		}
+		if err := s.profileHasDockerfile(opts.Profile); err != nil {
+			return err
+		}
+	} else if len(opts.Secrets) > 0 {
+		return sandbox.NewUsageError("Secrets is only supported with a non-empty Profile")
+	}
+
+	out := opts.Output
+	if out == nil {
+		out = io.Discard
+	}
+
+	if opts.AllBackends {
+		var built int
+		for _, desc := range runtime.Descriptors() {
+			if err := s.buildOne(ctx, desc.Name, opts, out); err != nil {
+				// Stop on first failure — matches the CLI's existing
+				// behavior. A more permissive policy can be added if
+				// users want best-effort multi-backend builds.
+				return fmt.Errorf("build %s: %w", desc.Name, err)
+			}
+			built++
+		}
+		if built == 0 {
+			return fmt.Errorf("no available backends to build for")
+		}
+		return nil
+	}
+
+	backend := opts.Backend
+	if backend == "" {
+		backend = resolveBackendFromConfig(ctx, s.layout)
+	}
+	return s.buildOne(ctx, backend, opts, out)
+}
+
+// buildOne runs one backend's build (base or profile) using a freshly
+// constructed runtime that's closed before return.
+func (s *SystemClient) buildOne(ctx context.Context, backend string, opts BuildOptions, out io.Writer) error {
+	rt, err := newRuntime(ctx, backend, s.layout)
+	if err != nil {
+		return err
+	}
+	defer rt.Close() //nolint:errcheck // best-effort
+	if opts.Profile != "" {
+		return sandbox.EnsureProfileImage(ctx, rt, s.layout, opts.Profile, opts.Secrets, out, slog.Default(), opts.Rebuild)
+	}
+	return rt.Setup(ctx, s.layout, s.layout.ProfileDir("base"), out, slog.Default(), opts.Rebuild)
+}
+
+// profileHasDockerfile returns nil if the named profile or any of its
+// ancestors carries a Dockerfile; *UsageError otherwise.
+func (s *SystemClient) profileHasDockerfile(profile string) error {
+	if config.ProfileHasDockerfile(s.layout, profile) {
+		return nil
+	}
+	chain, err := config.ResolveProfileChain(s.layout, profile)
+	if err != nil {
+		return err
+	}
+	for _, name := range chain {
+		if name != "base" && config.ProfileHasDockerfile(s.layout, name) {
+			return nil
+		}
+	}
+	return sandbox.NewUsageError("profile %q has no Dockerfile (and no ancestor does either)", profile)
 }
 
 // dirSize sums every regular file under dir. Returns 0 on any
