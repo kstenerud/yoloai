@@ -6,7 +6,9 @@ package system
 import (
 	"context"
 	"fmt"
+	"io"
 
+	"github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
 
 	"github.com/spf13/cobra"
@@ -33,6 +35,25 @@ type backendReportJSON struct {
 	Availability string            `json:"availability"`
 	InitError    string            `json:"init_error,omitempty"`
 	Checks       []checkResultJSON `json:"checks,omitempty"`
+}
+
+// orphanItemJSON is one orphan entry — a yoloai-prefixed resource
+// (container, image, snapshot, …) for which no matching sandbox dir
+// exists on disk. Surfaced by doctor so users can spot accumulated
+// state from crashed runs without waiting for disk-full / CPU-hot
+// to make the leak visible.
+type orphanItemJSON struct {
+	Backend string `json:"backend"`
+	Kind    string `json:"kind"` // e.g. "container", "image", "snapshot"
+	Name    string `json:"name"`
+}
+
+// doctorReportJSON wraps the backend reports plus the orphan-state
+// section so --json output is a single document rather than two
+// disjoint streams.
+type doctorReportJSON struct {
+	Backends []backendReportJSON `json:"backends"`
+	Orphans  []orphanItemJSON    `json:"orphans"`
 }
 
 func newSystemDoctorCmd() *cobra.Command {
@@ -70,20 +91,85 @@ func runSystemDoctor(cmd *cobra.Command, backendFilter, isolationFilter string, 
 	env := caps.DetectEnvironment()
 	reports := collectDoctorReports(ctx, env, backendFilter, isolationFilter)
 
+	// Orphan state: yoloai-prefixed backend resources with no matching
+	// sandbox dir. A crashed destroy or wedged Kata shim can leave
+	// these behind — typically invisible until disk pressure or
+	// background CPU pulls the user's attention. doctor surfaces them
+	// once so the user can run `yoloai system prune` without first
+	// having to know orphans are a thing.
+	orphans := collectOrphans(cmd)
+
 	if isJSON {
-		return cliutil.WriteJSON(out, convertDoctorReportsToJSON(reports))
+		return cliutil.WriteJSON(out, doctorReportJSON{
+			Backends: convertDoctorReportsToJSON(reports),
+			Orphans:  orphans,
+		})
 	}
 
 	caps.FormatDoctor(out, reports)
+	renderOrphans(out, orphans)
 
 	// Exit 1 if any NeedsSetup entries (user action could unlock them).
 	// Unavailable entries do not cause exit 1 — they are not actionable.
+	// Orphan state does NOT trigger exit 1: it's an advisory, not a
+	// prerequisite blocker.
 	for _, r := range reports {
 		if r.Availability == caps.NeedsSetup {
 			return fmt.Errorf("one or more backends need setup")
 		}
 	}
 	return nil
+}
+
+// collectOrphans runs a dry-run prune across every registered
+// backend and projects the result into the doctor's flat
+// orphan-item shape. Errors from individual backends are silently
+// dropped — doctor is a best-effort diagnostic; an unreachable
+// backend is a different signal and is already surfaced via its
+// BackendReport.InitErr.
+func collectOrphans(cmd *cobra.Command) []orphanItemJSON {
+	sysClient := cliutil.NewSystemClient()
+	result, err := sysClient.Prune(cmd.Context(), yoloai.PruneOptions{DryRun: true})
+	if err != nil || result == nil {
+		return nil
+	}
+	out := make([]orphanItemJSON, 0, len(result.RemovedItems))
+	for _, item := range result.RemovedItems {
+		out = append(out, orphanItemJSON{
+			Backend: item.Backend,
+			Kind:    item.Kind,
+			Name:    item.Name,
+		})
+	}
+	return out
+}
+
+// renderOrphans prints the orphan-state section after the backend
+// reports. Silent when nothing is leaking; loud (with a fix command)
+// when something is.
+func renderOrphans(w io.Writer, orphans []orphanItemJSON) {
+	if len(orphans) == 0 {
+		return
+	}
+	fmt.Fprintln(w)                                                                                            //nolint:errcheck
+	fmt.Fprintln(w, "Orphan state:")                                                                           //nolint:errcheck
+	fmt.Fprintf(w, "  %d resource(s) left over from previous runs (no matching sandbox dir).\n", len(orphans)) //nolint:errcheck
+	// Cap the inline list at 10 entries; the rest collapse to a
+	// count. Doctor output is already verbose — we don't need to
+	// emit dozens of names. `yoloai system prune --dry-run` shows
+	// the full list for users who want it.
+	const previewMax = 10
+	preview := orphans
+	if len(preview) > previewMax {
+		preview = preview[:previewMax]
+	}
+	for _, o := range preview {
+		fmt.Fprintf(w, "    %s/%s: %s\n", o.Backend, o.Kind, o.Name) //nolint:errcheck
+	}
+	if len(orphans) > previewMax {
+		fmt.Fprintf(w, "    ... and %d more (run 'yoloai system prune --dry-run' for the full list)\n", len(orphans)-previewMax) //nolint:errcheck
+	}
+	fmt.Fprintln(w, "  Clean up with: yoloai system prune") //nolint:errcheck
 }
 
 // collectDoctorReports iterates over known backends and builds the full report list.

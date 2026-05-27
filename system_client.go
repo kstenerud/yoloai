@@ -341,9 +341,10 @@ type PruneResult struct {
 
 // PruneItem describes one removed (or removable) item.
 type PruneItem struct {
-	Kind  string // "container", "vm", "image", "temp_dir", etc. (backend-defined)
-	Name  string // identifier
-	Bytes int64  // bytes reclaimed; 0 when backend can't report
+	Backend string // "docker", "containerd", "tart", or "" for temp dirs / non-backend items
+	Kind    string // "container", "vm", "image", "temp_dir", etc. (backend-defined)
+	Name    string // identifier
+	Bytes   int64  // bytes reclaimed; 0 when backend can't report
 }
 
 // BrokenSandbox is an entry in DataDir/sandboxes/ whose meta.json
@@ -410,11 +411,11 @@ func (s *SystemClient) pruneBackend(ctx context.Context, backend string, known [
 			return nil
 		}
 		for _, item := range actual.Items {
-			items = append(items, PruneItem{Kind: item.Kind, Name: item.Name})
+			items = append(items, PruneItem{Backend: backend, Kind: item.Kind, Name: item.Name})
 		}
 	} else {
 		for _, item := range scan.Items {
-			items = append(items, PruneItem{Kind: item.Kind, Name: item.Name})
+			items = append(items, PruneItem{Backend: backend, Kind: item.Kind, Name: item.Name})
 		}
 	}
 

@@ -1320,16 +1320,59 @@ def check_prerequisites(
 def cleanup(ctx: RunContext) -> None:
     """Destroy all tracked sandboxes and remove the scratch tmpdir.
 
-    Logs are written to ctx.log_dir (./yoloai-smoketest-<timestamp>/) and are
-    never deleted here — they persist until the user cleans them up manually.
+    Per-sandbox `yoloai destroy` calls can hang when a Kata shim is wedged
+    (containerd task RUNNING but the VM is dead; see backend-idiosyncrasies.md
+    "Kata shim wedge"). The library now escalates to direct-PID kill, but
+    that ladder still takes up to ~15s per stuck sandbox. We bound each
+    destroy to 60s; if it times out we record the name and fall back to a
+    single `yoloai system prune --yes` pass at the end, which iterates
+    backend state directly and uses the same escalation. Surface both the
+    per-sandbox timeouts and the prune fallback to stderr so failed
+    cleanup is never silent — the previous behavior swallowed
+    TimeoutExpired and left containerd state leaking after each run.
+
+    Logs are written to ctx.log_dir (./yoloai-smoketest-<timestamp>/) and
+    are never deleted here — they persist until the user cleans them up
+    manually.
     """
     if ctx.sandboxes:
         print(f"\nCleaning up {len(ctx.sandboxes)} sandbox(es)...")
+        timed_out: list[str] = []
         for name in ctx.sandboxes:
-            subprocess.run(
-                [ctx.yoloai_bin, "destroy", "--yes", name],
-                capture_output=True, timeout=30,
+            try:
+                subprocess.run(
+                    [ctx.yoloai_bin, "destroy", "--yes", name],
+                    capture_output=True, timeout=60,
+                )
+            except subprocess.TimeoutExpired:
+                timed_out.append(name)
+                print(f"  TIMEOUT  destroy {name} (>60s); will retry via system prune")
+
+        if timed_out:
+            print(
+                f"\n{len(timed_out)} destroy(s) timed out — running 'yoloai system prune' "
+                "as a backend-level fallback."
             )
+            try:
+                result = subprocess.run(
+                    [ctx.yoloai_bin, "system", "prune", "--yes"],
+                    capture_output=True, timeout=180, text=True,
+                )
+                if result.returncode != 0:
+                    print(f"  prune exit {result.returncode}: {result.stderr.strip()}")
+                else:
+                    # The prune output names what was reclaimed; surface it
+                    # so the user can see what would otherwise have leaked.
+                    out = result.stdout.strip()
+                    if out:
+                        for line in out.splitlines():
+                            print(f"  prune: {line}")
+            except subprocess.TimeoutExpired:
+                print(
+                    "  PRUNE TIMEOUT (>180s) — orphan backend state likely remains. "
+                    "Run 'yoloai system doctor' to inspect."
+                )
+
     shutil.rmtree(ctx.tmpdir, ignore_errors=True)
 
 

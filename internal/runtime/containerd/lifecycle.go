@@ -347,8 +347,26 @@ func buildContainerMounts(mounts []runtime.MountSpec) []specs.Mount {
 // state left from a previous failed run.
 func (r *Runtime) clearStaleContainerState(ctx context.Context, name, snapshotter string) error {
 	// Pre-clear any stale container with this name from a previous failed run.
-	// Use retryDelete to handle Kata shim teardown lag (same as in Remove).
+	// The orphan may carry one of three workloads:
+	//   1. No task — pure registry leftover; retryDelete handles it.
+	//   2. Stopped task — task.Delete + retryDelete.
+	//   3. Wedged task (containerd says RUNNING but the VM is dead and the
+	//      shim ignores signals) — needs the same escalation Stop() uses.
+	// Surface the orphan loudly so the user knows yoloai cleaned up after a
+	// previous run that didn't finish: "name already exists" with no context
+	// is the failure mode this branch exists to prevent.
 	if existingCtr, loadErr := r.client.LoadContainer(ctx, name); loadErr == nil {
+		slog.Warn("found orphan containerd container; cleaning up before creating new sandbox",
+			"event", "containerd.create.orphan_cleanup",
+			"sandbox", name,
+		)
+		// If the orphan still has a task, stop+escalate before deleting
+		// the container, otherwise retryDelete will fail with
+		// "container has running task".
+		if existingTask, taskErr := existingCtr.Task(ctx, nil); taskErr == nil {
+			_ = r.stopTaskWithEscalation(ctx, existingTask, name)
+			_, _ = existingTask.Delete(ctx)
+		}
 		if err := retryDelete(ctx, existingCtr); err != nil && !errdefs.IsNotFound(err) {
 			return fmt.Errorf("stale container %q could not be deleted: %w", name, err)
 		}
@@ -686,6 +704,42 @@ func (r *Runtime) Stop(ctx context.Context, name string) error {
 		return fmt.Errorf("load task: %w", err)
 	}
 
+	if err := r.stopTaskWithEscalation(ctx, task, name); err != nil {
+		// stopTaskWithEscalation only returns on a non-recoverable
+		// failure (escalation itself failed); fall through to delete +
+		// CNI so we at least try the rest of cleanup.
+		slog.Warn("kata shim stop escalation failed; continuing teardown anyway",
+			"event", "containerd.stop.escalation_failed",
+			"sandbox", name,
+			"err", err,
+		)
+	}
+
+	_, _ = task.Delete(ctx)
+
+	return r.teardownCNIForSandbox(ctx, sandboxDir)
+}
+
+// shimEscalationTimeout is how long we wait for a SIGKILL'd task to
+// actually exit before escalating to direct-PID shim kill. The Kata
+// shim normally takes <1s to release exitCh on SIGKILL; 5s gives
+// generous slack for a healthy shim while still catching wedges
+// quickly enough that an interactive `yoloai destroy` doesn't feel
+// hung.
+const shimEscalationTimeout = 5 * time.Second
+
+// stopTaskWithEscalation does the graceful → forceful → direct-PID
+// kill ladder for a containerd task. Used by Stop() and Remove() so
+// every yoloai cleanup path is resilient to the wedged-Kata-shim
+// pattern (containerd task reports RUNNING but the underlying VM is
+// dead and the shim is hung in vsock I/O ignoring even SIGKILL —
+// see docs/dev/backend-idiosyncrasies.md "Kata shim wedge").
+//
+// Returns nil on any path that successfully stopped the task. Only
+// returns a non-nil error if the escalation itself failed (couldn't
+// look up the shim PID, the direct kill returned an error). Callers
+// continue with task.Delete + CNI teardown regardless.
+func (r *Runtime) stopTaskWithEscalation(ctx context.Context, task client.Task, name string) error {
 	// Register Wait before Kill to avoid race (shim buffers exit events either way).
 	exitCh, err := task.Wait(ctx)
 	if err != nil {
@@ -693,19 +747,61 @@ func (r *Runtime) Stop(ctx context.Context, name string) error {
 	}
 
 	status, _ := task.Status(ctx)
-	if status.Status != client.Stopped {
-		_ = task.Kill(ctx, syscall.SIGTERM)
-		select {
-		case <-exitCh:
-		case <-time.After(10 * time.Second):
-			_ = task.Kill(ctx, syscall.SIGKILL)
-			<-exitCh
-		}
+	if status.Status == client.Stopped {
+		return nil
 	}
 
-	_, _ = task.Delete(ctx)
+	// Step 1: SIGTERM — graceful, in-VM.
+	_ = task.Kill(ctx, syscall.SIGTERM)
+	select {
+	case <-exitCh:
+		return nil
+	case <-time.After(10 * time.Second):
+	}
 
-	return r.teardownCNIForSandbox(ctx, sandboxDir)
+	// Step 2: SIGKILL — forceful, in-VM. A healthy shim releases
+	// exitCh quickly here.
+	_ = task.Kill(ctx, syscall.SIGKILL)
+	select {
+	case <-exitCh:
+		return nil
+	case <-time.After(shimEscalationTimeout):
+	}
+
+	// Step 3: escalation — the shim is wedged (typically: VM died
+	// underneath it, shim still sleeping in vsock recv ignoring
+	// signals routed through containerd). Kill the shim process
+	// directly via /proc. Surface this loudly so the user knows
+	// yoloai had to forcibly clean up.
+	slog.Warn("kata shim wedged; escalating to direct-PID kill",
+		"event", "containerd.stop.escalation",
+		"sandbox", name,
+		"reason", "SIGKILL via containerd did not release exitCh within timeout",
+		"timeout", shimEscalationTimeout.String(),
+	)
+	r.forciblyKillShim(name)
+	return nil
+}
+
+// forciblyKillShim performs the direct-PID escape hatch for a
+// wedged Kata shim. Walks /proc for containerd-shim-kata processes
+// matching the container name, sends SIGKILL, and removes the
+// /run/kata/<name>/ + TTRPC socket residue so subsequent operations
+// on the same name don't trip EADDRINUSE.
+//
+// Side effect on the caller's exitCh: killing the shim PID causes
+// containerd to detect the dead shim and finally fire the exit
+// event, but we don't wait for it here — the caller has already
+// timed out waiting and the next step (task.Delete) is robust
+// against an absent shim.
+func (r *Runtime) forciblyKillShim(name string) {
+	killed := killStaleKataShims(r.namespace, name)
+	removeKataStateDir(r.namespace, name)
+	slog.Info("kata shim forcibly removed",
+		"event", "containerd.stop.escalation.complete",
+		"sandbox", name,
+		"shim_killed", killed,
+	)
 }
 
 // Remove removes a containerd container. Returns nil if already removed.

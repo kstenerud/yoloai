@@ -21,6 +21,7 @@ row to the index.
 | `After 500 attempts` / kata-agent unreachable (Firecracker) | [Kata: Firecracker explicit config breaks boot](#firecracker-runtime-rs-explicit-config-path-breaks-vm-boot) |
 | Bind mount target missing inside Kata VM | [Kata: no auto-create of mount targets](#kata-does-not-auto-create-bind-mount-target-directories) |
 | `hotplug memory error: ENOENT` in kata-agent logs | [Kata: hotplug ENOENT is normal](#hotplug-memory-error-enoent-is-normal) |
+| `yoloai destroy` hangs; `ctr tasks ls` shows RUNNING but no qemu/firecracker; host CPU 60–80% | [Kata: shim wedge with dead VM](#kata-shim-wedge-with-dead-vm-sigkill-via-containerd-doesnt-release-the-task) |
 | Task stays in `Created` after `Start()` returns | [Containerd: task.Start returns early](#taskstart-returns-before-the-vm-is-actually-running) |
 | `parent snapshot sha256:... does not exist: not found` | [Containerd: WithNewSnapshot doesn't unpack](#withnewsnapshot-does-not-unpack-image-layers) |
 | `docker save \| ctr import` hangs indefinitely | [Containerd: pipe hang on ctr failure](#docker-save--ctr-import-hangs-if-ctr-fails-early) |
@@ -197,6 +198,39 @@ Sending `SIGKILL` to an orphaned `containerd-shim-kata` process does not
 immediately release the TTRPC socket file. The OS needs approximately 500ms.
 Retrying `NewTask()` too quickly still hits `EADDRINUSE`. See
 `lifecycle.go::Create` and `Start`.
+
+### Kata shim wedge with dead VM: SIGKILL via containerd doesn't release the task
+
+**Symptom:** `yoloai destroy <name>` hangs indefinitely; or after a crashed
+run, `sudo ctr --namespace yoloai tasks ls` reports `RUNNING` containerd
+tasks while `ps aux | grep -E "qemu|firecracker"` returns 0 — the VM
+underneath the shim is already dead. Host CPU sits at 60–80% (the wedged
+shims spin on vsock recv calls that never return). The matching shim
+processes are sleeping (`S` state) when inspected via `/proc/<pid>/status`.
+
+**Why:** the Kata shim is stuck inside a vsock read to a kata-agent that
+died with its VM. `task.Kill(SIGKILL)` sends the signal through
+containerd's gRPC API, which the shim still answers — but the shim then
+delivers the signal *into the VM* via vsock, and the VM is gone. The
+shim's own process never receives the signal. `task.Wait()`'s exit
+channel never fires.
+
+**Fix in code:** `lifecycle.go::stopTaskWithEscalation` runs the
+SIGTERM → SIGKILL ladder with bounded timeouts, then escalates to the
+direct-PID escape hatch — `killStaleKataShims` walks `/proc` for the
+matching `containerd-shim-kata-v2 -id <name>` and sends `SIGKILL`
+directly to the shim's host PID. After that, `removeKataStateDir` clears
+the `/run/kata/<name>/` and TTRPC socket residue. Logs a WARN event
+(`event=containerd.stop.escalation`) so the user sees what was forced.
+
+**Fix for the user:** never required for new sandboxes — the library
+handles it automatically. Pre-existing leaks from a build before this
+fix: `yoloai system prune` (which now uses the same escalation), or
+`yoloai system doctor` to enumerate orphan state first.
+
+Cross-references: `clearStaleContainerState` uses the same escalation
+so a `yoloai new <name>` against a wedged orphan with the same name
+auto-recovers.
 
 ### `hotplug memory error: ENOENT` is normal
 
