@@ -1,7 +1,7 @@
 // ABOUTME: Overlay apply workflow — for sandboxes whose workdir uses overlayfs.
 // ABOUTME: Captures the upperdir diff via 'git diff' inside the container, then
 // ABOUTME: replays it on the host and advances the overlay baseline.
-package cli
+package workflow
 
 import (
 	"context"

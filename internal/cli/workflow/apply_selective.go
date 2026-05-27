@@ -1,7 +1,7 @@
 // ABOUTME: Selective apply workflow — cherry-pick specific commits identified
 // ABOUTME: by ref arguments. Uses format-patch under the hood and advances the
 // ABOUTME: baseline only across a contiguous prefix of applied commits.
-package cli
+package workflow
 
 import (
 	"context"

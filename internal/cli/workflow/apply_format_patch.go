@@ -1,7 +1,7 @@
 // ABOUTME: Default apply workflow — git format-patch + git am, preserving
 // ABOUTME: individual commits. WIP changes are applied as unstaged. Falls back
 // ABOUTME: to applySquash for non-git targets or WIP-only sandboxes.
-package cli
+package workflow
 
 import (
 	"context"

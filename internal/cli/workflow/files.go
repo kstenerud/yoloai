@@ -1,4 +1,4 @@
-package cli
+package workflow
 
 // ABOUTME: CLI commands for bidirectional file exchange between host and sandbox.
 // ABOUTME: Implements put, get, ls, rm, and path subcommands for the files dir.
@@ -25,7 +25,7 @@ var filesSubcmds = map[string]bool{
 	"put": true, "get": true, "ls": true, "rm": true, "path": true,
 }
 
-func newFilesCmd() *cobra.Command {
+func NewFilesCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "files <sandbox> <subcommand> [args...]",
 		Short: "Exchange files with a sandbox",

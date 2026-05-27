@@ -1,6 +1,6 @@
 // ABOUTME: Cobra "diff" command: shows agent changes as a unified diff, commit
 // ABOUTME: log, or per-ref diff; handles :copy, :overlay, and multi-directory sandboxes.
-package cli
+package workflow
 
 import (
 	"context"
@@ -25,7 +25,7 @@ var reHexPrefix = regexp.MustCompile(`^[0-9a-fA-F]{4,40}$`)
 // reHexRange matches "hex..hex" range syntax.
 var reHexRange = regexp.MustCompile(`^[0-9a-fA-F]{4,40}\.\.[0-9a-fA-F]{4,40}$`)
 
-func newDiffCmd() *cobra.Command {
+func NewDiffCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "diff <name> [<ref>] [-- <path>...]",
 		Short: "Show changes the agent made",

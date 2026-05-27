@@ -1,6 +1,6 @@
 // ABOUTME: Cobra "attach" command: waits for tmux readiness then attaches the
 // ABOUTME: user's terminal to the running sandbox session.
-package cli
+package workflow
 
 import (
 	"context"
@@ -17,7 +17,7 @@ type attachOpts struct {
 	resume bool
 }
 
-func newAttachCmd() *cobra.Command {
+func NewAttachCmd() *cobra.Command {
 	opts := &attachOpts{}
 	cmd := &cobra.Command{
 		Use:     "attach <name>",

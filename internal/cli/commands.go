@@ -9,6 +9,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/cli/mcp"
 	"github.com/kstenerud/yoloai/internal/cli/profile"
 	"github.com/kstenerud/yoloai/internal/cli/system"
+	"github.com/kstenerud/yoloai/internal/cli/workflow"
 	"github.com/kstenerud/yoloai/internal/cli/xcmd"
 	"github.com/spf13/cobra"
 )
@@ -34,11 +35,11 @@ func registerCommands(root *cobra.Command, version, commit, date string) {
 		mcp.NewCmd(),
 
 		// Workflow
-		newAttachCmd(),
-		newDiffCmd(),
-		newApplyCmd(),
-		newBaselineCmd(),
-		newFilesCmd(),
+		workflow.NewAttachCmd(),
+		workflow.NewDiffCmd(),
+		workflow.NewApplyCmd(),
+		workflow.NewBaselineCmd(),
+		workflow.NewFilesCmd(),
 		xcmd.NewCmd(),
 
 		// Sandbox Tools

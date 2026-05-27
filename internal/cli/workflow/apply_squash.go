@@ -1,7 +1,7 @@
 // ABOUTME: --squash apply workflow — flattens all sandbox changes into one
 // ABOUTME: unstaged patch on the host. Also the fallback for non-git targets
 // ABOUTME: and the multi-:copy-dir aggregate apply path.
-package cli
+package workflow
 
 import (
 	"context"

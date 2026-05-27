@@ -1,7 +1,7 @@
 // ABOUTME: 'apply' command entry — wires CLI flags to the chosen apply
 // ABOUTME: workflow (format-patch, squash, selective, export, overlay) and
 // ABOUTME: holds shared helpers (arg parsing, tag transfer, result type).
-package cli
+package workflow
 
 import (
 	"fmt"
@@ -27,7 +27,7 @@ type applyResult struct {
 	Method         string `json:"method"` // "format-patch", "squash", "selective", "patches-export"
 }
 
-func newApplyCmd() *cobra.Command {
+func NewApplyCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "apply <name> [<ref>...] [-- <path>...]",
 		Short: "Apply agent changes back to original work directory",

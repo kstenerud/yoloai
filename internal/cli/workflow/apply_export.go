@@ -1,7 +1,7 @@
 // ABOUTME: --patches workflow — export .patch files (and an optional wip.diff)
 // ABOUTME: to a directory instead of applying. Lets the user inspect or re-apply
 // ABOUTME: changes manually via git am.
-package cli
+package workflow
 
 import (
 	"context"

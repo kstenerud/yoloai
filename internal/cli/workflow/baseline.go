@@ -1,7 +1,7 @@
 // ABOUTME: Implements the `yoloai baseline` command with `advance`, `set`, and
 // ABOUTME: `log` subcommands for manually correcting stuck sandbox baselines
 // ABOUTME: after stash-pop conflicts or non-contiguous selective applies.
-package cli
+package workflow
 
 import (
 	"fmt"
@@ -16,7 +16,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func newBaselineCmd() *cobra.Command {
+func NewBaselineCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "baseline <subcommand>",
 		Short:   "Manage sandbox baseline SHA",
