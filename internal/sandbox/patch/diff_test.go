@@ -578,11 +578,17 @@ func TestLoadAllDiffContexts_SingleCopyWorkdir(t *testing.T) {
 	assert.Equal(t, "sha1", contexts[0].BaselineSHA)
 }
 
-func TestLoadAllDiffContexts_WorkdirAndAuxDirs(t *testing.T) {
+// Q-U (2026-05-25): the workdir is the only diffable directory.
+// LoadAllDiffContexts ignores meta.Directories entirely — aux dirs
+// are aux mounts, not diff sources. The test regress-guards both
+// "aux entries are not in the result" and "the existing meta on disk
+// is tolerated when aux entries are present" (a real on-disk state
+// for sandboxes created before Q-U landed).
+func TestLoadAllDiffContexts_WorkdirOnly_IgnoresAuxEntries(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
 
-	name := "all-mixed"
+	name := "workdir-only"
 	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
 	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
 
@@ -596,60 +602,20 @@ func TestLoadAllDiffContexts_WorkdirAndAuxDirs(t *testing.T) {
 			BaselineSHA: "sha-main",
 		},
 		Directories: []store.DirMeta{
-			{HostPath: "/tmp/aux1", Mode: "copy", BaselineSHA: "sha-aux1"},
-			{HostPath: "/tmp/aux2", Mode: "rw"},
-			{HostPath: "/tmp/aux3", Mode: "ro"},
+			// Pre-Q-U sandboxes may have these on disk. We must ignore
+			// them rather than fault.
+			{HostPath: "/tmp/aux-rw", Mode: "rw"},
+			{HostPath: "/tmp/aux-ro", Mode: "ro"},
 		},
 	}
 	require.NoError(t, store.SaveMeta(sandboxDir, meta))
 
 	contexts, err := LoadAllDiffContexts(testLayout(tmpDir), name)
 	require.NoError(t, err)
-	// Should have: workdir (copy) + aux1 (copy) + aux2 (rw) = 3
-	// aux3 (ro) is skipped
-	require.Len(t, contexts, 3)
+	require.Len(t, contexts, 1)
 	assert.Equal(t, "copy", contexts[0].Mode)
 	assert.Equal(t, "/tmp/project", contexts[0].HostPath)
-	assert.Equal(t, "copy", contexts[1].Mode)
-	assert.Equal(t, "/tmp/aux1", contexts[1].HostPath)
-	assert.Equal(t, "rw", contexts[2].Mode)
-	assert.Equal(t, "/tmp/aux2", contexts[2].HostPath)
-}
-
-func TestLoadAllDiffContexts_OverlayAuxFallsBackToHostPath(t *testing.T) {
-	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
-
-	name := "all-overlay-fallback"
-	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
-	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
-
-	meta := &store.Meta{
-		Name:      name,
-		Agent:     "test",
-		CreatedAt: time.Now(),
-		Workdir: store.WorkdirMeta{
-			HostPath:    "/tmp/project",
-			Mode:        "copy",
-			BaselineSHA: "sha1",
-		},
-		Directories: []store.DirMeta{
-			{
-				HostPath:    "/tmp/overlay-dir",
-				MountPath:   "", // empty MountPath
-				Mode:        "overlay",
-				BaselineSHA: "sha-ovl",
-			},
-		},
-	}
-	require.NoError(t, store.SaveMeta(sandboxDir, meta))
-
-	contexts, err := LoadAllDiffContexts(testLayout(tmpDir), name)
-	require.NoError(t, err)
-	require.Len(t, contexts, 2)
-	// Overlay aux dir should fall back to host path
-	assert.Equal(t, "overlay", contexts[1].Mode)
-	assert.Equal(t, "/tmp/overlay-dir", contexts[1].WorkDir) // fell back to HostPath
+	assert.Equal(t, "sha-main", contexts[0].BaselineSHA)
 }
 
 func TestLoadAllDiffContexts_NoAuxDirs(t *testing.T) {

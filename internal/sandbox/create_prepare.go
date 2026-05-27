@@ -609,67 +609,22 @@ func setupAuxDirs(sandboxDir string, auxDirs []*DirArg) ([]store.DirMeta, error)
 	return dirMetas, nil
 }
 
-// setupAuxDir prepares a single auxiliary directory (copy, overlay, or read-only)
-// and returns its DirMeta.
-func setupAuxDir(sandboxDir string, ad *DirArg) (store.DirMeta, error) {
+// setupAuxDir prepares a single auxiliary directory and returns its
+// DirMeta. After Q-U (2026-05-25) aux dirs only support :rw and the
+// default :ro, both of which are pure mounts with no host-side
+// preparation — the function just normalises mode and packs the meta.
+// The CLI / MCP boundary rejects :copy and :overlay via
+// sandbox.ParseAuxDirArg, so they can't reach here.
+func setupAuxDir(_ string, ad *DirArg) (store.DirMeta, error) {
 	mode := ad.Mode
 	if mode == "" {
 		mode = "ro"
 	}
-	dm := store.DirMeta{
+	return store.DirMeta{
 		HostPath:  ad.Path,
 		MountPath: ad.ResolvedMountPath(),
 		Mode:      mode,
-	}
-	switch ad.Mode {
-	case "copy":
-		sha, err := setupAuxCopy(sandboxDir, ad.Path)
-		if err != nil {
-			return store.DirMeta{}, err
-		}
-		dm.BaselineSHA = sha
-	case "overlay":
-		if err := setupAuxOverlay(sandboxDir, ad.Path); err != nil {
-			return store.DirMeta{}, err
-		}
-	}
-	return dm, nil
-}
-
-// setupAuxCopy copies the directory into the sandbox work tree and returns its
-// baseline SHA.
-func setupAuxCopy(sandboxDir, path string) (string, error) {
-	auxWorkDir := store.WorkDir(sandboxDir, path)
-	if err := workspace.CopyDir(path, auxWorkDir); err != nil {
-		return "", fmt.Errorf("copy aux dir %s: %w", path, err)
-	}
-	if workspace.IsGitRepo(auxWorkDir) {
-		sha, err := workspace.BaselineUncommittedChanges(auxWorkDir)
-		if err != nil {
-			return "", fmt.Errorf("baseline pre-session state for aux dir %s: %w", path, err)
-		}
-		return sha, nil
-	}
-	sha, err := workspace.Baseline(auxWorkDir)
-	if err != nil {
-		return "", fmt.Errorf("git baseline for aux dir %s: %w", path, err)
-	}
-	return sha, nil
-}
-
-// setupAuxOverlay creates the overlay layer directories for an auxiliary directory.
-func setupAuxOverlay(sandboxDir, path string) error {
-	for _, d := range []string{
-		store.OverlayUpperDir(sandboxDir, path),
-		store.OverlayOvlworkDir(sandboxDir, path),
-		store.OverlayMergedDir(sandboxDir, path),
-		store.OverlayLowerDir(sandboxDir, path),
-	} {
-		if err := fileutil.MkdirAll(d, 0755); err != nil { //nolint:gosec // G301: world-traversable so container yoloai user can access merged/
-			return fmt.Errorf("create overlay dir for aux %s: %w", path, err)
-		}
-	}
-	return nil
+	}, nil
 }
 
 // buildNetworkConfig determines the network mode and allowlist from options
@@ -698,46 +653,38 @@ func dirSpecToDirArg(s DirSpec) *DirArg {
 	}
 }
 
-// collectOverlayMounts builds overlay mount configs for config.json from
-// the workdir and auxiliary directories that use overlay mode.
-func collectOverlayMounts(workdir *DirArg, auxDirs []*DirArg) []overlayMountConfig {
-	var overlayMounts []overlayMountConfig
-	if workdir.Mode == "overlay" {
-		encoded := store.EncodePath(workdir.Path)
-		overlayMounts = append(overlayMounts, overlayMountConfig{
-			Lower:  "/yoloai/overlay/" + encoded + "/lower",
-			Upper:  "/yoloai/overlay/" + encoded + "/upper",
-			Work:   "/yoloai/overlay/" + encoded + "/ovlwork",
-			Merged: "/yoloai/overlay/" + encoded + "/merged",
-		})
+// collectOverlayMounts builds overlay mount configs for config.json
+// from the workdir. After Q-U aux dirs no longer support :overlay,
+// so this is a workdir-only check — kept as a function (returning a
+// slice) so callers don't need to special-case overlay-vs-no-overlay
+// at every config.json assembly site.
+//
+// The auxDirs parameter is intentionally still threaded through but
+// unused; removing it would churn every call site, and the field is
+// expected to disappear during the Workdir-only API cascade.
+func collectOverlayMounts(workdir *DirArg, _ []*DirArg) []overlayMountConfig {
+	if workdir.Mode != "overlay" {
+		return nil
 	}
-	for _, ad := range auxDirs {
-		if ad.Mode == "overlay" {
-			encoded := store.EncodePath(ad.Path)
-			overlayMounts = append(overlayMounts, overlayMountConfig{
-				Lower:  "/yoloai/overlay/" + encoded + "/lower",
-				Upper:  "/yoloai/overlay/" + encoded + "/upper",
-				Work:   "/yoloai/overlay/" + encoded + "/ovlwork",
-				Merged: "/yoloai/overlay/" + encoded + "/merged",
-			})
-		}
-	}
-	return overlayMounts
+	encoded := store.EncodePath(workdir.Path)
+	return []overlayMountConfig{{
+		Lower:  "/yoloai/overlay/" + encoded + "/lower",
+		Upper:  "/yoloai/overlay/" + encoded + "/upper",
+		Work:   "/yoloai/overlay/" + encoded + "/ovlwork",
+		Merged: "/yoloai/overlay/" + encoded + "/merged",
+	}}
 }
 
-// collectCopyDirs returns mount paths of all :copy directories for the
-// auto-commit loop in the container entrypoint.
-func collectCopyDirs(workdir *DirArg, auxDirs []*DirArg) []string {
-	var copyDirs []string
-	if workdir.Mode == "copy" {
-		copyDirs = append(copyDirs, workdir.ResolvedMountPath())
+// collectCopyDirs returns the mount paths of the workdir if it is
+// :copy. After Q-U aux dirs can no longer be :copy, so this is a
+// workdir-only check. The function shape (returning a slice) is
+// preserved so the entrypoint auto-commit loop config doesn't need
+// to special-case the no-copy and copy cases at every assembly site.
+func collectCopyDirs(workdir *DirArg, _ []*DirArg) []string {
+	if workdir.Mode != "copy" {
+		return nil
 	}
-	for _, ad := range auxDirs {
-		if ad.Mode == "copy" {
-			copyDirs = append(copyDirs, ad.ResolvedMountPath())
-		}
-	}
-	return copyDirs
+	return []string{workdir.ResolvedMountPath()}
 }
 
 // resolveAndApplyArchetype loads .yoloai.yaml, resolves the archetype with priority

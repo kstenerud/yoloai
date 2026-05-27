@@ -220,8 +220,13 @@ type DiffContext struct {
 	Mode        string // "copy", "overlay", or "rw"
 }
 
-// LoadAllDiffContexts returns diff contexts for workdir + all aux dirs
-// that have diffable content (:copy, :overlay, or :rw). Read-only dirs are skipped.
+// LoadAllDiffContexts returns the diff context for the sandbox's
+// workdir. After Q-U (2026-05-25) the diff/apply surface is
+// workdir-only; aux dirs only support :rw / :ro and aren't
+// diffable. The slice return shape is preserved so existing iterator
+// callers (GenerateMultiDiff, GenerateOverlayPatch,
+// UpdateOverlayBaselineToHEAD, ListCommitsBeyondBaselineOverlay)
+// don't need their loop bodies rewritten.
 func LoadAllDiffContexts(layout config.Layout, name string) ([]DiffContext, error) {
 	sandboxDir := layout.SandboxDir(name)
 	if err := store.RequireSandboxDir(sandboxDir); err != nil {
@@ -233,68 +238,33 @@ func LoadAllDiffContexts(layout config.Layout, name string) ([]DiffContext, erro
 		return nil, err
 	}
 
-	var contexts []DiffContext
-
-	// Workdir
 	switch meta.Workdir.Mode {
 	case "copy":
-		contexts = append(contexts, DiffContext{
+		return []DiffContext{{
 			HostPath:    meta.Workdir.HostPath,
 			WorkDir:     copyGitWorkDir(sandboxDir, meta.Workdir.HostPath, meta.Workdir.MountPath),
 			BaselineSHA: meta.Workdir.BaselineSHA,
 			Mode:        "copy",
-		})
+		}}, nil
 	case "overlay":
 		mountPath := meta.Workdir.MountPath
 		if mountPath == "" {
 			mountPath = meta.Workdir.HostPath
 		}
-		contexts = append(contexts, DiffContext{
+		return []DiffContext{{
 			HostPath:    meta.Workdir.HostPath,
 			WorkDir:     mountPath,
 			BaselineSHA: meta.Workdir.BaselineSHA,
 			Mode:        "overlay",
-		})
+		}}, nil
 	case "rw":
-		contexts = append(contexts, DiffContext{
+		return []DiffContext{{
 			HostPath: meta.Workdir.HostPath,
 			WorkDir:  meta.Workdir.HostPath,
 			Mode:     "rw",
-		})
+		}}, nil
 	}
-
-	// Aux dirs
-	for _, d := range meta.Directories {
-		switch d.Mode {
-		case "copy":
-			contexts = append(contexts, DiffContext{
-				HostPath:    d.HostPath,
-				WorkDir:     copyGitWorkDir(sandboxDir, d.HostPath, d.MountPath),
-				BaselineSHA: d.BaselineSHA,
-				Mode:        "copy",
-			})
-		case "overlay":
-			mountPath := d.MountPath
-			if mountPath == "" {
-				mountPath = d.HostPath
-			}
-			contexts = append(contexts, DiffContext{
-				HostPath:    d.HostPath,
-				WorkDir:     mountPath,
-				BaselineSHA: d.BaselineSHA,
-				Mode:        "overlay",
-			})
-		case "rw":
-			contexts = append(contexts, DiffContext{
-				HostPath: d.HostPath,
-				WorkDir:  d.HostPath,
-				Mode:     "rw",
-			})
-			// "ro" dirs are skipped
-		}
-	}
-
-	return contexts, nil
+	return nil, nil
 }
 
 // GenerateMultiDiff produces diffs for all diffable directories in the sandbox.

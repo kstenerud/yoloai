@@ -1968,17 +1968,12 @@ func parseMemoryString(s string) (int64, error) {
 	return int64(val * float64(multiplier)), nil
 }
 
-// hasOverlayDirs returns true if any directory in the sandbox state uses overlay mode.
+// hasOverlayDirs returns true if the sandbox's workdir uses overlay
+// mode. Q-U (2026-05-25) collapsed aux :overlay to the workdir only,
+// so this is now a single-field check. Kept as a named predicate for
+// callsite readability.
 func hasOverlayDirs(state *sandboxState) bool {
-	if state.workdir.Mode == "overlay" {
-		return true
-	}
-	for _, ad := range state.auxDirs {
-		if ad.Mode == "overlay" {
-			return true
-		}
-	}
-	return false
+	return state.workdir.Mode == "overlay"
 }
 
 // parseConfigMount parses a "host:container[:ro]" mount string into a MountSpec.

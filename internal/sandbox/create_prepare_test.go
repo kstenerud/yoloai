@@ -78,15 +78,18 @@ func TestCollectCopyDirs_WorkdirCopy(t *testing.T) {
 	assert.Equal(t, []string{"/home/user/project"}, result)
 }
 
-func TestCollectCopyDirs_MixedModes(t *testing.T) {
+// Q-U: aux dirs can no longer be :copy or :overlay, so aux entries
+// passed through here are silently ignored by collectCopyDirs (the
+// parameter is kept for callsite stability). The mixed-modes case
+// reduces to "the workdir's mode decides; aux entries don't count".
+func TestCollectCopyDirs_MixedModes_IgnoresAux(t *testing.T) {
 	workdir := &DirArg{Path: "/home/user/project", Mode: "copy"}
 	auxDirs := []*DirArg{
 		{Path: "/home/user/lib", Mode: "rw"},
-		{Path: "/home/user/data", Mode: "copy"},
-		{Path: "/home/user/overlay", Mode: "overlay"},
+		{Path: "/home/user/data", Mode: "ro"},
 	}
 	result := collectCopyDirs(workdir, auxDirs)
-	assert.Equal(t, []string{"/home/user/project", "/home/user/data"}, result)
+	assert.Equal(t, []string{"/home/user/project"}, result)
 }
 
 func TestCollectCopyDirs_CustomMountPath(t *testing.T) {
@@ -113,24 +116,29 @@ func TestCollectOverlayMounts_WorkdirOverlay(t *testing.T) {
 	assert.Contains(t, result[0].Work, "ovlwork")
 }
 
-func TestCollectOverlayMounts_AuxOverlay(t *testing.T) {
+// Q-U: aux dirs can no longer be :overlay. collectOverlayMounts
+// ignores aux entries entirely; only the workdir's mode matters.
+// Regress-guards both the "aux :overlay no longer participates" and
+// "workdir-only result has length ≤ 1" invariants.
+func TestCollectOverlayMounts_IgnoresAux(t *testing.T) {
 	workdir := &DirArg{Path: "/home/user/project", Mode: "copy"}
-	auxDirs := []*DirArg{
-		{Path: "/home/user/lib", Mode: "overlay"},
-	}
+	// aux entries here would have been overlay under the old code path;
+	// after Q-U they're rejected at parse time, but defending against a
+	// stale DirArg constructed in-process is cheap.
+	auxDirs := []*DirArg{{Path: "/home/user/lib", Mode: "rw"}}
+	result := collectOverlayMounts(workdir, auxDirs)
+	assert.Empty(t, result)
+}
+
+func TestCollectOverlayMounts_WorkdirOnly(t *testing.T) {
+	workdir := &DirArg{Path: "/a", Mode: "overlay"}
+	auxDirs := []*DirArg{{Path: "/b", Mode: "rw"}}
 	result := collectOverlayMounts(workdir, auxDirs)
 	require.Len(t, result, 1)
 	assert.Contains(t, result[0].Merged, "merged")
-}
-
-func TestCollectOverlayMounts_Multiple(t *testing.T) {
-	workdir := &DirArg{Path: "/a", Mode: "overlay"}
-	auxDirs := []*DirArg{
-		{Path: "/b", Mode: "overlay"},
-		{Path: "/c", Mode: "copy"}, // not overlay
-	}
-	result := collectOverlayMounts(workdir, auxDirs)
-	assert.Len(t, result, 2)
+	assert.Contains(t, result[0].Lower, "lower")
+	assert.Contains(t, result[0].Upper, "upper")
+	assert.Contains(t, result[0].Work, "ovlwork")
 }
 
 func TestCollectOverlayMounts_CustomMountPath(t *testing.T) {
