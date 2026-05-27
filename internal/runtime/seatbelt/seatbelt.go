@@ -30,7 +30,7 @@ var descriptor = runtime.BackendDescriptor{
 	Platforms:                 []string{"darwin"},
 	Requires:                  "macOS (sandbox-exec is built-in)",
 	InstallHint:               "",
-	BaseModeName:              "process",
+	BaseModeName:              runtime.IsolationModeProcess,
 	AgentProvisionedByBackend: false,
 	SupportedIsolationModes:   nil,
 	Capabilities: runtime.BackendCaps{
@@ -485,7 +485,7 @@ func (r *Runtime) TmuxSocket(sandboxDir string) string {
 // AttachCommand returns the command to attach to the tmux session for seatbelt.
 // Seatbelt runs commands directly with the caller's terminal; InteractiveExec
 // injects the per-sandbox socket path via buildTmuxCommand.
-func (r *Runtime) AttachCommand(tmuxSocket string, _ int, _ int, _ string) []string {
+func (r *Runtime) AttachCommand(tmuxSocket string, _ int, _ int, _ runtime.IsolationMode) []string {
 	cmd := []string{"tmux"}
 	if tmuxSocket != "" {
 		cmd = append(cmd, "-S", tmuxSocket)

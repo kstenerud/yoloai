@@ -176,8 +176,8 @@ type IsolationPerms struct {
 // Perms returns the filesystem permissions appropriate for the given isolation
 // mode. Use this whenever creating host-side files or directories that the
 // container process will write to.
-func Perms(isolation string) IsolationPerms {
-	if isolation == "container-enhanced" {
+func Perms(isolation runtime.IsolationMode) IsolationPerms {
+	if isolation == runtime.IsolationModeContainerEnhanced {
 		return IsolationPerms{
 			Dir:         0777, //nolint:gosec // G301: world-writable needed for gVisor user-namespace UID remapping
 			File:        0666, //nolint:gosec // G306: world-writable needed for gVisor user-namespace UID remapping

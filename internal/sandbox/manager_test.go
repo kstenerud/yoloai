@@ -86,14 +86,16 @@ func (m *mockRuntime) DiagHint(instanceName string) string {
 	return "check logs for " + instanceName
 }
 
-func (m *mockRuntime) TmuxSocket(_ string) string                          { return "" }
-func (m *mockRuntime) AttachCommand(_ string, _, _ int, _ string) []string { return nil }
-func (m *mockRuntime) PrepareAgentCommand(cmd string) string               { return cmd }
+func (m *mockRuntime) TmuxSocket(_ string) string { return "" }
+func (m *mockRuntime) AttachCommand(_ string, _, _ int, _ runtime.IsolationMode) []string {
+	return nil
+}
+func (m *mockRuntime) PrepareAgentCommand(cmd string) string { return cmd }
 
 func (m *mockRuntime) Descriptor() runtime.BackendDescriptor {
 	return runtime.BackendDescriptor{
 		Name:         "mock",
-		BaseModeName: "container",
+		BaseModeName: runtime.IsolationModeContainer,
 		Capabilities: runtime.BackendCaps{
 			NetworkIsolation: true,
 			OverlayDirs:      true,

@@ -29,9 +29,9 @@ var descriptor = runtime.BackendDescriptor{
 	Platforms:                 []string{"linux", "darwin"},
 	Requires:                  "Podman installed with API socket activated",
 	InstallHint:               "https://podman.io/docs/installation",
-	BaseModeName:              "container",
+	BaseModeName:              runtime.IsolationModeContainer,
 	AgentProvisionedByBackend: true,
-	SupportedIsolationModes:   []string{"container-enhanced", "container-privileged"},
+	SupportedIsolationModes:   []runtime.IsolationMode{runtime.IsolationModeContainerEnhanced, runtime.IsolationModeContainerPrivileged},
 	Capabilities: runtime.BackendCaps{
 		NetworkIsolation: true,
 		OverlayDirs:      true,
@@ -218,9 +218,9 @@ func (r *Runtime) Descriptor() runtime.BackendDescriptor {
 }
 
 // RequiredCapabilities returns the host capabilities needed for the given isolation mode.
-func (r *Runtime) RequiredCapabilities(isolation string) []caps.HostCapability {
+func (r *Runtime) RequiredCapabilities(isolation runtime.IsolationMode) []caps.HostCapability {
 	switch isolation {
-	case "container-enhanced":
+	case runtime.IsolationModeContainerEnhanced:
 		// rootlessCheck first: it's a permanent blocker; surfacing it before
 		// gvisorRunsc avoids a confusing "install runsc" suggestion when the
 		// real answer is "rootless Podman can never run gVisor."

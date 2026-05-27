@@ -33,9 +33,9 @@ var descriptor = runtime.BackendDescriptor{
 	Platforms:                 []string{"linux"},
 	Requires:                  "containerd, Kata Containers shim, CNI plugins, /dev/kvm",
 	InstallHint:               "sudo apt install containerd kata-containers containernetworking-plugins",
-	BaseModeName:              "vm",
+	BaseModeName:              runtime.IsolationModeVM,
 	AgentProvisionedByBackend: true,
-	SupportedIsolationModes:   []string{"vm", "vm-enhanced"},
+	SupportedIsolationModes:   []runtime.IsolationMode{runtime.IsolationModeVM, runtime.IsolationModeVMEnhanced},
 	Capabilities: runtime.BackendCaps{
 		NetworkIsolation: true,
 		OverlayDirs:      false,
@@ -150,7 +150,7 @@ func (r *Runtime) PrepareAgentCommand(cmd string) string { return cmd }
 
 // RequiredCapabilities returns the host capabilities needed for the given isolation mode.
 // containerdSocket is intentionally omitted: New() already verified it.
-func (r *Runtime) RequiredCapabilities(isolation string) []caps.HostCapability {
+func (r *Runtime) RequiredCapabilities(isolation runtime.IsolationMode) []caps.HostCapability {
 	base := []caps.HostCapability{
 		r.kataShimV2,
 		r.cniBridge,
@@ -159,9 +159,9 @@ func (r *Runtime) RequiredCapabilities(isolation string) []caps.HostCapability {
 		r.kvmDevice,
 	}
 	switch isolation {
-	case "vm-enhanced":
+	case runtime.IsolationModeVMEnhanced:
 		return append(base, r.kataFCShimV2, r.devmapperSnapshotter)
-	default: // "vm"
+	default: // "vm" or empty (default)
 		return base
 	}
 }

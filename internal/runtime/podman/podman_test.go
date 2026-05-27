@@ -166,7 +166,7 @@ func buildPodmanTestRuntime(rootless bool, lookPath func(string) (string, error)
 
 func TestRequiredCapabilities_Podman_NonEnhanced(t *testing.T) {
 	r := buildPodmanTestRuntime(false, func(string) (string, error) { return "/sbin/runsc", nil })
-	for _, mode := range []string{"", "container", "vm", "vm-enhanced"} {
+	for _, mode := range []runtime.IsolationMode{"", "container", "vm", "vm-enhanced"} {
 		capList := r.RequiredCapabilities(mode)
 		assert.Nil(t, capList, "mode %q should return nil caps", mode)
 	}
@@ -211,8 +211,8 @@ func TestDescriptor_Podman(t *testing.T) {
 	r := &Runtime{}
 	d := r.Descriptor()
 	assert.Equal(t, runtime.BackendName("podman"), d.Name)
-	assert.Equal(t, "container", d.BaseModeName)
-	assert.Contains(t, d.SupportedIsolationModes, "container-enhanced")
+	assert.Equal(t, runtime.IsolationModeContainer, d.BaseModeName)
+	assert.Contains(t, d.SupportedIsolationModes, runtime.IsolationModeContainerEnhanced)
 }
 
 func TestRequiredCapabilities_Podman_RootlessIsPermanent(t *testing.T) {

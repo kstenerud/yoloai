@@ -102,7 +102,7 @@ func TestConvertPorts_Multiple(t *testing.T) {
 
 func TestRequiredCapabilities_Docker_NonEnhanced(t *testing.T) {
 	r := &Runtime{binaryName: "docker"}
-	for _, mode := range []string{"", "container", "vm", "vm-enhanced"} {
+	for _, mode := range []runtime.IsolationMode{"", "container", "vm", "vm-enhanced"} {
 		capList := r.RequiredCapabilities(mode)
 		assert.Nil(t, capList, "mode %q should return nil caps", mode)
 	}
@@ -174,7 +174,7 @@ func TestDescriptor_Docker(t *testing.T) {
 	r := &Runtime{binaryName: "docker"}
 	d := r.Descriptor()
 	assert.Equal(t, runtime.BackendName("docker"), d.Name)
-	assert.Equal(t, "container", d.BaseModeName)
+	assert.Equal(t, runtime.IsolationModeContainer, d.BaseModeName)
 	assert.True(t, d.AgentProvisionedByBackend)
-	assert.Contains(t, d.SupportedIsolationModes, "container-enhanced")
+	assert.Contains(t, d.SupportedIsolationModes, runtime.IsolationModeContainerEnhanced)
 }

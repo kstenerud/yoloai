@@ -80,7 +80,7 @@ func SelectContainerBackend(ctx context.Context, preferred BackendName) (backend
 func containerBackends() []BackendName {
 	var out []BackendName
 	for _, d := range Descriptors() {
-		if d.BaseModeName == "container" {
+		if d.BaseModeName == IsolationModeContainer {
 			out = append(out, d.Name)
 		}
 	}

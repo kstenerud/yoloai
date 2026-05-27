@@ -16,6 +16,7 @@ import (
 	"testing"
 
 	"github.com/kstenerud/yoloai/internal/config"
+	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/sandbox/archetype"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -106,7 +107,7 @@ func TestResolveArchetype_AutoDetectCompose(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, archetype.ArchetypeCompose, arch)
 	// Should have set container-privileged isolation and dockerd required
-	assert.Equal(t, "container-privileged", opts.Isolation)
+	assert.Equal(t, runtime.IsolationModeContainerPrivileged, opts.Isolation)
 	assert.True(t, pr.archetypeDockerDRequired)
 }
 
@@ -220,7 +221,7 @@ func TestResolveArchetype_DevcontainerPostStartCompose(t *testing.T) {
 
 	_, _, _, _, err := m.resolveAndApplyArchetype(context.Background(), opts, pr)
 	require.NoError(t, err)
-	assert.Equal(t, "container-privileged", opts.Isolation)
+	assert.Equal(t, runtime.IsolationModeContainerPrivileged, opts.Isolation)
 	assert.True(t, pr.archetypeDockerDRequired)
 }
 

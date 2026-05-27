@@ -74,7 +74,7 @@ const (
 
 // checkIsolationPrerequisites validates isolation prerequisites via RequiredCapabilities.
 // Returns nil when all checks pass, or a formatted error listing missing prerequisites.
-func checkIsolationPrerequisites(ctx context.Context, rt runtime.Runtime, isolation string) error {
+func checkIsolationPrerequisites(ctx context.Context, rt runtime.Runtime, isolation runtime.IsolationMode) error {
 	capList := runtime.RequiredCapabilitiesFor(rt, isolation)
 	if len(capList) == 0 {
 		return nil // backend has no requirements for this mode
@@ -116,31 +116,31 @@ type DirSpec struct {
 // CreateOptions holds all parameters for sandbox creation.
 type CreateOptions struct {
 	Name         string
-	Workdir      DirSpec           // primary working directory
-	AuxDirs      []DirSpec         // auxiliary directories
-	Agent        string            // agent name (e.g., "claude", "test")
-	Model        string            // model name or alias (e.g., "sonnet", "claude-sonnet-4-latest")
-	Profile      string            // profile name (from --profile flag)
-	Prompt       string            // prompt text (from --prompt)
-	PromptFile   string            // prompt file path (from --prompt-file)
-	Network      NetworkMode       // network access policy
-	NetworkAllow []string          // --network-allow flags
-	Ports        []string          // --port flags (e.g., ["3000:3000"])
-	Replace      bool              // --replace flag (safe: errors if unapplied work exists)
-	Force        bool              // --force flag (unconditional replace, skips safety check)
-	NoStart      bool              // --no-start flag
-	Yes          bool              // --yes flag (skip confirmations)
-	Passthrough  []string          // args after -- passed to agent
-	Version      string            // yoloAI version for meta.json
-	Attach       bool              // --attach flag (auto-attach after creation)
-	Debug        bool              // --debug flag (enable entrypoint debug logging)
-	CPUs         string            // --cpus flag (e.g., "4", "2.5")
-	Memory       string            // --memory flag (e.g., "8g", "512m")
-	Env          map[string]string // --env flags (KEY=VAL pairs)
-	Isolation    string            // --isolation flag (e.g., "container-enhanced", "vm")
-	Runtimes     []string          // --runtime flags (Apple simulator runtimes, e.g., ["ios", "tvos:26.1"])
-	VscodeTunnel bool              // --vscode-tunnel flag
-	Archetype    string            // --archetype flag (empty = auto-detect)
+	Workdir      DirSpec               // primary working directory
+	AuxDirs      []DirSpec             // auxiliary directories
+	Agent        string                // agent name (e.g., "claude", "test")
+	Model        string                // model name or alias (e.g., "sonnet", "claude-sonnet-4-latest")
+	Profile      string                // profile name (from --profile flag)
+	Prompt       string                // prompt text (from --prompt)
+	PromptFile   string                // prompt file path (from --prompt-file)
+	Network      NetworkMode           // network access policy
+	NetworkAllow []string              // --network-allow flags
+	Ports        []string              // --port flags (e.g., ["3000:3000"])
+	Replace      bool                  // --replace flag (safe: errors if unapplied work exists)
+	Force        bool                  // --force flag (unconditional replace, skips safety check)
+	NoStart      bool                  // --no-start flag
+	Yes          bool                  // --yes flag (skip confirmations)
+	Passthrough  []string              // args after -- passed to agent
+	Version      string                // yoloAI version for meta.json
+	Attach       bool                  // --attach flag (auto-attach after creation)
+	Debug        bool                  // --debug flag (enable entrypoint debug logging)
+	CPUs         string                // --cpus flag (e.g., "4", "2.5")
+	Memory       string                // --memory flag (e.g., "8g", "512m")
+	Env          map[string]string     // --env flags (KEY=VAL pairs)
+	Isolation    runtime.IsolationMode // --isolation flag (e.g., IsolationModeContainerEnhanced, IsolationModeVM)
+	Runtimes     []string              // --runtime flags (Apple simulator runtimes, e.g., ["ios", "tvos:26.1"])
+	VscodeTunnel bool                  // --vscode-tunnel flag
+	Archetype    string                // --archetype flag (empty = auto-detect)
 }
 
 // sandboxState holds resolved state computed during preparation.
@@ -164,12 +164,12 @@ type sandboxState struct {
 	configMounts      []string // extra bind mounts from config/profile (host:container[:ro])
 	tmuxConf          string
 	resources         *config.ResourceLimits
-	capAdd            []string // Linux capabilities from config/profile
-	devices           []string // host devices from config/profile
-	setup             []string // setup commands from config/profile
-	isolation         string   // isolation mode from config/profile
-	isolationExplicit bool     // true when isolation was set via --isolation flag
-	vscodeTunnel      bool     // true when VS Code Remote Tunnel is enabled
+	capAdd            []string              // Linux capabilities from config/profile
+	devices           []string              // host devices from config/profile
+	setup             []string              // setup commands from config/profile
+	isolation         runtime.IsolationMode // isolation mode from config/profile
+	isolationExplicit bool                  // true when isolation was set via --isolation flag
+	vscodeTunnel      bool                  // true when VS Code Remote Tunnel is enabled
 	meta              *store.Meta
 	configJSON        []byte
 	// Archetype fields
@@ -209,35 +209,35 @@ const runtimeConfigSchemaVersion = 1
 
 // containerConfig is the serializable form of runtime-config.json.
 type containerConfig struct {
-	SchemaVersion      int                  `json:"schema_version"`
-	HostUID            int                  `json:"host_uid"`
-	HostGID            int                  `json:"host_gid"`
-	AgentCommand       string               `json:"agent_command"`
-	AgentLaunchPrefix  string               `json:"agent_launch_prefix"`
-	UseLaunchPrefix    bool                 `json:"use_launch_prefix"`
-	StartupDelay       int                  `json:"startup_delay"`
-	ReadyPattern       string               `json:"ready_pattern"`
-	SubmitSequence     string               `json:"submit_sequence"`
-	TmuxConf           string               `json:"tmux_conf"`
-	WorkingDir         string               `json:"working_dir"`
-	StateDirName       string               `json:"state_dir_name"`
-	Debug              bool                 `json:"debug,omitempty"`
-	NetworkIsolated    bool                 `json:"network_isolated,omitempty"`
-	AllowedDomains     []string             `json:"allowed_domains,omitempty"`
-	Passthrough        []string             `json:"passthrough,omitempty"`
-	OverlayMounts      []overlayMountConfig `json:"overlay_mounts,omitempty"`
-	SetupCommands      []string             `json:"setup_commands,omitempty"`
-	AutoCommitInterval int                  `json:"auto_commit_interval,omitempty"`
-	CopyDirs           []string             `json:"copy_dirs,omitempty"`
-	HookIdle           bool                 `json:"hook_idle,omitempty"`
-	Idle               agent.IdleSupport    `json:"idle"`
-	Detectors          []string             `json:"detectors,omitempty"`
-	SandboxName        string               `json:"sandbox_name"`
-	TmuxSocket         string               `json:"tmux_socket,omitempty"`
-	Isolation          string               `json:"isolation,omitempty"`
-	VscodeTunnel       bool                 `json:"vscode_tunnel,omitempty"`
-	VscodeTunnelName   string               `json:"vscode_tunnel_name,omitempty"`
-	Lifecycle          *lifecycleConfig     `json:"lifecycle,omitempty"`
+	SchemaVersion      int                   `json:"schema_version"`
+	HostUID            int                   `json:"host_uid"`
+	HostGID            int                   `json:"host_gid"`
+	AgentCommand       string                `json:"agent_command"`
+	AgentLaunchPrefix  string                `json:"agent_launch_prefix"`
+	UseLaunchPrefix    bool                  `json:"use_launch_prefix"`
+	StartupDelay       int                   `json:"startup_delay"`
+	ReadyPattern       string                `json:"ready_pattern"`
+	SubmitSequence     string                `json:"submit_sequence"`
+	TmuxConf           string                `json:"tmux_conf"`
+	WorkingDir         string                `json:"working_dir"`
+	StateDirName       string                `json:"state_dir_name"`
+	Debug              bool                  `json:"debug,omitempty"`
+	NetworkIsolated    bool                  `json:"network_isolated,omitempty"`
+	AllowedDomains     []string              `json:"allowed_domains,omitempty"`
+	Passthrough        []string              `json:"passthrough,omitempty"`
+	OverlayMounts      []overlayMountConfig  `json:"overlay_mounts,omitempty"`
+	SetupCommands      []string              `json:"setup_commands,omitempty"`
+	AutoCommitInterval int                   `json:"auto_commit_interval,omitempty"`
+	CopyDirs           []string              `json:"copy_dirs,omitempty"`
+	HookIdle           bool                  `json:"hook_idle,omitempty"`
+	Idle               agent.IdleSupport     `json:"idle"`
+	Detectors          []string              `json:"detectors,omitempty"`
+	SandboxName        string                `json:"sandbox_name"`
+	TmuxSocket         string                `json:"tmux_socket,omitempty"`
+	Isolation          runtime.IsolationMode `json:"isolation,omitempty"`
+	VscodeTunnel       bool                  `json:"vscode_tunnel,omitempty"`
+	VscodeTunnelName   string                `json:"vscode_tunnel_name,omitempty"`
+	Lifecycle          *lifecycleConfig      `json:"lifecycle,omitempty"`
 }
 
 // Create creates and optionally starts a new sandbox.
@@ -1096,7 +1096,7 @@ func effectiveGID() int {
 // would prepend (e.g. 'PATH="/opt/homebrew/opt/node/bin:$PATH" ' for Tart);
 // computed once by the caller, stored here as single source of truth for the
 // agent-command wrap (W1a of the architecture remediation plan).
-func buildContainerConfig(agentDef *agent.Definition, agentCommand string, agentLaunchPrefix string, tmuxConf string, workingDir string, debug bool, networkIsolated bool, allowedDomains []string, passthrough []string, overlayMounts []overlayMountConfig, setupCommands []string, autoCommitInterval int, copyDirs []string, sandboxName string, tmuxSocket string, isolation string, vscodeTunnel bool, vscodeTunnelName string, lifecycle *lifecycleConfig) ([]byte, error) {
+func buildContainerConfig(agentDef *agent.Definition, agentCommand string, agentLaunchPrefix string, tmuxConf string, workingDir string, debug bool, networkIsolated bool, allowedDomains []string, passthrough []string, overlayMounts []overlayMountConfig, setupCommands []string, autoCommitInterval int, copyDirs []string, sandboxName string, tmuxSocket string, isolation runtime.IsolationMode, vscodeTunnel bool, vscodeTunnelName string, lifecycle *lifecycleConfig) ([]byte, error) {
 	var stateDirName string
 	if agentDef.StateDir != "" {
 		stateDirName = filepath.Base(agentDef.StateDir)
@@ -1248,7 +1248,7 @@ func parsePortBindings(ports []string) ([]runtime.PortMapping, error) {
 // credOverrides contains sudo-recovered credential defaults for keys absent from
 // os.Environ; they are used as a fallback so that creation under sudo sees credentials.
 // Returns empty string if nothing was written.
-func createSecretsDir(agentDef *agent.Definition, envVars map[string]string, security string, credOverrides map[string]string) (string, error) {
+func createSecretsDir(agentDef *agent.Definition, envVars map[string]string, security runtime.IsolationMode, credOverrides map[string]string) (string, error) {
 	if len(agentDef.APIKeyEnvVars) == 0 && len(agentDef.AuthHintEnvVars) == 0 && len(envVars) == 0 && len(credOverrides) == 0 {
 		return "", nil
 	}
@@ -1821,7 +1821,7 @@ func loadSeedFileData(sf agent.SeedFile, homeDir string) ([]byte, bool, error) {
 // Agent-specific adjustments are driven by each agent's ApplySettings field.
 // Shell agents (SeedsAllAgents=true) apply each real agent's settings into
 // home-seed subdirectories instead.
-func ensureContainerSettings(agentDef *agent.Definition, sandboxDir, isolation string) error {
+func ensureContainerSettings(agentDef *agent.Definition, sandboxDir string, isolation runtime.IsolationMode) error {
 	if agentDef.SeedsAllAgents {
 		return ensureShellContainerSettings(sandboxDir, isolation)
 	}
@@ -1849,7 +1849,7 @@ func ensureContainerSettings(agentDef *agent.Definition, sandboxDir, isolation s
 
 // ensureShellContainerSettings applies each real agent's container settings
 // to its home-seed subdirectory (e.g., home-seed/.claude/settings.json).
-func ensureShellContainerSettings(sandboxDir string, _ string) error {
+func ensureShellContainerSettings(sandboxDir string, _ runtime.IsolationMode) error {
 	for _, name := range agent.RealAgents() {
 		def := agent.GetAgent(name)
 		if def.StateDir == "" || def.ApplySettings == nil {

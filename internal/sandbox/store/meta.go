@@ -47,7 +47,7 @@ type Meta struct {
 	AutoCommitInterval int                    `json:"auto_commit_interval,omitempty"`
 	Debug              bool                   `json:"debug,omitempty"`
 	UsernsMode         string                 `json:"userns_mode,omitempty"`     // "keep-id" for Podman rootless keep-id; "" otherwise
-	Isolation          string                 `json:"isolation,omitempty"`       // isolation mode: container, container-enhanced, vm, vm-enhanced
+	Isolation          runtime.IsolationMode  `json:"isolation,omitempty"`       // isolation mode: container, container-enhanced, vm, vm-enhanced
 	HostFilesystem     bool                   `json:"host_filesystem,omitempty"` // true when sandbox state lives on the host (seatbelt)
 	VscodeTunnel       bool                   `json:"vscode_tunnel,omitempty"`   // true when VS Code Remote Tunnel is enabled
 	Archetype          string                 `json:"archetype,omitempty"`       // resolved environment archetype (simple, compose, devcontainer, apple)
@@ -126,7 +126,7 @@ func ContainerUser(meta *Meta) string {
 	if meta.UsernsMode == "keep-id" {
 		return ""
 	}
-	if meta.Isolation == "container-enhanced" {
+	if meta.Isolation == runtime.IsolationModeContainerEnhanced {
 		return fmt.Sprintf("%d", os.Getuid())
 	}
 	return "yoloai"

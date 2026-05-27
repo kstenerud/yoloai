@@ -39,9 +39,9 @@ var descriptor = runtime.BackendDescriptor{
 	Platforms:                 []string{"linux", "darwin", "windows"},
 	Requires:                  "Docker Engine or Docker Desktop installed and running",
 	InstallHint:               "https://docs.docker.com/get-docker/",
-	BaseModeName:              "container",
+	BaseModeName:              runtime.IsolationModeContainer,
 	AgentProvisionedByBackend: true,
-	SupportedIsolationModes:   []string{"container-enhanced", "container-privileged"},
+	SupportedIsolationModes:   []runtime.IsolationMode{runtime.IsolationModeContainerEnhanced, runtime.IsolationModeContainerPrivileged},
 	Capabilities: runtime.BackendCaps{
 		NetworkIsolation: true,
 		OverlayDirs:      true,
@@ -499,9 +499,9 @@ var dockerInfoOutput = func(ctx context.Context, binaryName string) ([]byte, err
 func (r *Runtime) PrepareAgentCommand(cmd string) string { return cmd }
 
 // RequiredCapabilities returns the host capabilities needed for the given isolation mode.
-func (r *Runtime) RequiredCapabilities(isolation string) []caps.HostCapability {
+func (r *Runtime) RequiredCapabilities(isolation runtime.IsolationMode) []caps.HostCapability {
 	switch isolation {
-	case "container-enhanced":
+	case runtime.IsolationModeContainerEnhanced:
 		// gvisorRunsc first: if the binary isn't present, registration can't work.
 		return []caps.HostCapability{r.gvisorRunsc, r.gvisorRegistered}
 	default:
@@ -519,12 +519,12 @@ func (r *Runtime) TmuxSocket(_ string) string { return "/tmp/yoloai-tmux.sock" }
 // For gVisor on ARM64, setsid is used to work around missing TIOCSCTTY in
 // gVisor's exec path. For all other cases, script creates a fresh PTY and
 // controlling terminal that tmux can use cleanly.
-func (r *Runtime) AttachCommand(tmuxSocket string, _ int, _ int, isolation string) []string {
+func (r *Runtime) AttachCommand(tmuxSocket string, _ int, _ int, isolation runtime.IsolationMode) []string {
 	// gVisor on ARM64: docker exec -it does NOT call TIOCSCTTY, so the exec'd
 	// process has no controlling terminal and tmux exits with EACCES on /dev/tty.
 	// setsid creates a new session with no CTY; /dev/tty returns ENXIO, which
 	// tmux handles by falling back to stdin (the PTY).
-	if isolation == "container-enhanced" && goruntime.GOARCH == "arm64" {
+	if isolation == runtime.IsolationModeContainerEnhanced && goruntime.GOARCH == "arm64" {
 		cmd := []string{"setsid", "tmux"}
 		if tmuxSocket != "" {
 			cmd = append(cmd, "-S", tmuxSocket)

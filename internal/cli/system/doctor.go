@@ -198,14 +198,14 @@ func collectDoctorReports(ctx context.Context, env caps.Environment, backendFilt
 		if isolationFilter == "" {
 			reports = append(reports, caps.BackendReport{
 				Backend:      string(desc.Name),
-				Mode:         rt.Descriptor().BaseModeName,
+				Mode:         string(rt.Descriptor().BaseModeName),
 				IsBaseMode:   true,
 				Availability: caps.Ready,
 			})
 		}
 
 		for _, mode := range rt.Descriptor().SupportedIsolationModes {
-			if isolationFilter != "" && mode != isolationFilter {
+			if isolationFilter != "" && string(mode) != isolationFilter {
 				continue
 			}
 			capList := runtime.RequiredCapabilitiesFor(rt, mode)
@@ -213,7 +213,7 @@ func collectDoctorReports(ctx context.Context, env caps.Environment, backendFilt
 			avail := caps.ComputeAvailability(results)
 			reports = append(reports, caps.BackendReport{
 				Backend:      string(desc.Name),
-				Mode:         mode,
+				Mode:         string(mode),
 				IsBaseMode:   false,
 				Results:      results,
 				Availability: avail,

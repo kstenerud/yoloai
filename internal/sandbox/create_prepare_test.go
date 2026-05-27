@@ -366,13 +366,13 @@ func (m *mockDockerRuntime) Logs(ctx context.Context, name string, lines int) st
 func (m *mockDockerRuntime) DiagHint(name string) string           { return "" }
 func (m *mockDockerRuntime) PrepareAgentCommand(cmd string) string { return cmd }
 func (m *mockDockerRuntime) TmuxSocket(sandboxDir string) string   { return "" }
-func (m *mockDockerRuntime) AttachCommand(tmuxSocket string, rows, cols int, term string) []string {
+func (m *mockDockerRuntime) AttachCommand(tmuxSocket string, rows, cols int, term runtime.IsolationMode) []string {
 	return nil
 }
 func (m *mockDockerRuntime) Descriptor() runtime.BackendDescriptor {
 	return runtime.BackendDescriptor{
 		Name:         "mock",
-		BaseModeName: "container",
+		BaseModeName: runtime.IsolationModeContainer,
 	}
 }
 

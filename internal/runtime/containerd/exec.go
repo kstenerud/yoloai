@@ -38,7 +38,7 @@ func termSizeOf(f *os.File) (rows, cols int) {
 // slave before tmux queries them via TIOCGWINSZ. The kata-agent creates the PTY
 // inside the VM, and the ConsoleSize/Resize RPC may not propagate to the slave
 // before tmux reads the size — stty ensures the dimensions are correct.
-func (r *Runtime) AttachCommand(tmuxSocket string, rows, cols int, _ string) []string {
+func (r *Runtime) AttachCommand(tmuxSocket string, rows, cols int, _ runtime.IsolationMode) []string {
 	var tmuxCmd string
 	if tmuxSocket != "" {
 		tmuxCmd = fmt.Sprintf("exec /usr/bin/tmux -S %s attach -t main", tmuxSocket)

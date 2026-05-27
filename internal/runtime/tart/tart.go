@@ -44,7 +44,7 @@ var descriptor = runtime.BackendDescriptor{
 	Architectures:             []string{"arm64"}, // Apple Silicon only
 	Requires:                  "Tart CLI installed, Apple Silicon Mac",
 	InstallHint:               "brew install cirruslabs/cli/tart",
-	BaseModeName:              "vm",
+	BaseModeName:              runtime.IsolationModeVM,
 	AgentProvisionedByBackend: true,
 	SupportedIsolationModes:   nil,
 	Capabilities: runtime.BackendCaps{
@@ -570,7 +570,7 @@ func (r *Runtime) TmuxSocket(_ string) string { return "/private/tmp/tmux-501/de
 // AttachCommand returns the command to attach to the tmux session in a tart VM.
 // Tart runs commands directly with the caller's terminal; no script wrapper
 // needed (and macOS BSD script does not support the GNU -c flag).
-func (r *Runtime) AttachCommand(tmuxSocket string, _ int, _ int, _ string) []string {
+func (r *Runtime) AttachCommand(tmuxSocket string, _ int, _ int, _ runtime.IsolationMode) []string {
 	cmd := []string{"tmux"}
 	if tmuxSocket != "" {
 		cmd = append(cmd, "-S", tmuxSocket)

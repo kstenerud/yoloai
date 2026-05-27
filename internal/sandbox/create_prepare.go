@@ -36,7 +36,7 @@ type profileResult struct {
 	devices            []string
 	setup              []string
 	autoCommitInterval int
-	isolation          string
+	isolation          runtime.IsolationMode
 	isolationExplicit  bool // true when isolation was set via --isolation flag (not config/profile default)
 	userAliases        map[string]string
 	// Archetype-specific resolved fields
@@ -152,7 +152,7 @@ func applyMergedProfileToOpts(opts *CreateOptions, agentDef **agent.Definition, 
 	pr.devices = merged.Devices
 	pr.setup = merged.Setup
 	pr.autoCommitInterval = merged.AutoCommitInterval
-	pr.isolation = merged.Isolation
+	pr.isolation = runtime.IsolationMode(merged.Isolation)
 
 	return nil
 }
@@ -198,7 +198,7 @@ func applyBaseConfigDefaults(opts *CreateOptions, ycfg *config.YoloaiConfig, pr 
 	pr.capAdd = ycfg.CapAdd
 	pr.devices = ycfg.Devices
 	pr.setup = ycfg.Setup
-	pr.isolation = ycfg.Isolation
+	pr.isolation = runtime.IsolationMode(ycfg.Isolation)
 
 	if ycfg.Network != nil && opts.Network == NetworkModeDefault {
 		if ycfg.Network.Isolated {
@@ -233,7 +233,7 @@ func applyCLIOverrides(opts *CreateOptions, pr *profileResult) error {
 	}
 
 	if opts.Isolation != "" {
-		if err := config.ValidateIsolationMode(opts.Isolation); err != nil {
+		if err := config.ValidateIsolationMode(string(opts.Isolation)); err != nil {
 			return err
 		}
 		pr.isolation = opts.Isolation
@@ -833,9 +833,9 @@ func (m *Manager) expandArchetype(ctx context.Context, opts *CreateOptions, pr *
 // applyComposeArchetype applies compose-specific settings to opts and pr.
 func applyComposeArchetype(opts *CreateOptions, pr *profileResult) []string {
 	var bullets []string
-	if opts.Isolation == "" || opts.Isolation == "container" {
-		opts.Isolation = "container-privileged"
-		pr.isolation = "container-privileged"
+	if opts.Isolation == "" || opts.Isolation == runtime.IsolationModeContainer {
+		opts.Isolation = runtime.IsolationModeContainerPrivileged
+		pr.isolation = runtime.IsolationModeContainerPrivileged
 		bullets = append(bullets, "isolation set to container-privileged (Compose requires nested Docker)")
 	}
 	pr.archetypeDockerDRequired = true
@@ -929,9 +929,9 @@ func applyDevcontainerCompose(dc *archetype.DevcontainerConfig, opts *CreateOpti
 	if !dc.PostStartCommandUsesCompose() {
 		return bullets
 	}
-	if opts.Isolation == "" || opts.Isolation == "container" {
-		opts.Isolation = "container-privileged"
-		pr.isolation = "container-privileged"
+	if opts.Isolation == "" || opts.Isolation == runtime.IsolationModeContainer {
+		opts.Isolation = runtime.IsolationModeContainerPrivileged
+		pr.isolation = runtime.IsolationModeContainerPrivileged
 		bullets = append(bullets, "isolation set to container-privileged (postStartCommand uses docker compose)")
 	}
 	pr.archetypeDockerDRequired = true

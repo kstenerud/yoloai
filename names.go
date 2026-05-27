@@ -113,3 +113,23 @@ type MountSpec = runtime.MountSpec
 // call site, regardless of whether Go has inferred the type into
 // scope.
 type PortMapping = runtime.PortMapping
+
+// IsolationMode names a sandbox isolation mode. Closed set — the
+// constants below are the only valid values. Empty value
+// (IsolationModeDefault) means "use the backend's BaseMode".
+//
+// Re-exported (type alias) from internal/runtime. F11 (2026-05-27)
+// established this typing so public fields like
+// CheckOptions.Isolation and (future) RunOptions.Isolation take a
+// closed-set typed value, exhaustive-checked at every switch.
+type IsolationMode = runtime.IsolationMode
+
+const (
+	IsolationModeDefault             IsolationMode = runtime.IsolationModeDefault
+	IsolationModeContainer           IsolationMode = runtime.IsolationModeContainer
+	IsolationModeContainerEnhanced   IsolationMode = runtime.IsolationModeContainerEnhanced
+	IsolationModeContainerPrivileged IsolationMode = runtime.IsolationModeContainerPrivileged
+	IsolationModeVM                  IsolationMode = runtime.IsolationModeVM
+	IsolationModeVMEnhanced          IsolationMode = runtime.IsolationModeVMEnhanced
+	IsolationModeProcess             IsolationMode = runtime.IsolationModeProcess
+)

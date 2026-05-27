@@ -1053,9 +1053,9 @@ func TestBuildInstanceConfig_RejectsNetworkIsolatedWithGvisor(t *testing.T) {
 // to IsolationEnforcesInSandboxIptables incorrectly excludes a working mode,
 // this test catches the over-rejection.
 func TestBuildInstanceConfig_AllowsNetworkIsolatedOnSupportedModes(t *testing.T) {
-	supported := []string{"", "container", "container-privileged", "vm", "vm-enhanced"}
+	supported := []runtime.IsolationMode{"", "container", "container-privileged", "vm", "vm-enhanced"}
 	for _, isolation := range supported {
-		t.Run("isolation="+isolation, func(t *testing.T) {
+		t.Run("isolation="+string(isolation), func(t *testing.T) {
 			mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), io.Discard, WithLayout(config.NewLayout(t.TempDir())))
 			state := &sandboxState{
 				name:        "test",
@@ -1219,7 +1219,7 @@ type capsRuntime struct {
 	capList []caps.HostCapability
 }
 
-func (c *capsRuntime) RequiredCapabilities(_ string) []caps.HostCapability {
+func (c *capsRuntime) RequiredCapabilities(_ runtime.IsolationMode) []caps.HostCapability {
 	return c.capList
 }
 
@@ -1255,7 +1255,7 @@ func TestCheckIsolationPrerequisites_IsolationModeForwarded(t *testing.T) {
 	rt := &capsRuntime{}
 	// For this test we use the base capsRuntime which returns nil caps.
 	// Just verify that checkIsolationPrerequisites doesn't panic for any mode.
-	for _, mode := range []string{"container", "container-enhanced", "vm", "vm-enhanced", ""} {
+	for _, mode := range []runtime.IsolationMode{"container", "container-enhanced", "vm", "vm-enhanced", ""} {
 		err := checkIsolationPrerequisites(context.Background(), rt, mode)
 		assert.NoError(t, err, "mode %q should not fail with nil caps", mode)
 	}

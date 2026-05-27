@@ -114,16 +114,16 @@ type ExecResult struct {
 // Returned by Runtime.Descriptor(). Values are compile-time constants per
 // backend (verified by the W11 spike, docs/dev/research/runtime-interface-spike.md).
 type BackendDescriptor struct {
-	Name                      BackendName // BackendDocker, BackendPodman, BackendTart, BackendSeatbelt, BackendContainerd
-	Description               string      // one-line user-facing summary ("Linux containers; portable …")
-	Platforms                 []string    // host OSes this backend can run on; GOOS-style ("linux", "darwin", "windows")
-	Architectures             []string    // host architectures this backend supports; GOARCH-style ("amd64", "arm64"). nil/empty = any arch.
-	Requires                  string      // human-readable prerequisites ("Docker Engine installed and running")
-	InstallHint               string      // install URL or shell command; "" when no install is needed
-	BaseModeName              string      // human label for the backend's default (no-isolation) mode
-	AgentProvisionedByBackend bool        // true when the backend's image/VM ships the agent binary
-	SupportedIsolationModes   []string    // non-default isolation modes this backend can support
-	Capabilities              BackendCaps // feature-set flags
+	Name                      BackendName     // BackendDocker, BackendPodman, BackendTart, BackendSeatbelt, BackendContainerd
+	Description               string          // one-line user-facing summary ("Linux containers; portable …")
+	Platforms                 []string        // host OSes this backend can run on; GOOS-style ("linux", "darwin", "windows")
+	Architectures             []string        // host architectures this backend supports; GOARCH-style ("amd64", "arm64"). nil/empty = any arch.
+	Requires                  string          // human-readable prerequisites ("Docker Engine installed and running")
+	InstallHint               string          // install URL or shell command; "" when no install is needed
+	BaseModeName              IsolationMode   // typed label for the backend's default (no-isolation) mode
+	AgentProvisionedByBackend bool            // true when the backend's image/VM ships the agent binary
+	SupportedIsolationModes   []IsolationMode // non-default isolation modes this backend can support
+	Capabilities              BackendCaps     // feature-set flags
 	// Probe reports whether this backend is usable right now and, on failure,
 	// a short user-facing reason ("docker socket not reachable", "tart binary
 	// not found", …). Implementations must be fast and side-effect-free — they
@@ -218,12 +218,12 @@ func ResolveCopyMountFor(rt Runtime, sandboxName, hostPath string) string {
 // features, etc.) for non-default isolation modes. Backends that don't
 // implement it have no isolation-mode prerequisites.
 type IsolationCapabilityProvider interface {
-	RequiredCapabilities(isolation string) []caps.HostCapability
+	RequiredCapabilities(isolation IsolationMode) []caps.HostCapability
 }
 
 // RequiredCapabilitiesFor returns the host capabilities needed for the given
 // isolation mode, or nil when the backend has no requirements for the mode.
-func RequiredCapabilitiesFor(rt Runtime, isolation string) []caps.HostCapability {
+func RequiredCapabilitiesFor(rt Runtime, isolation IsolationMode) []caps.HostCapability {
 	if p, ok := rt.(IsolationCapabilityProvider); ok {
 		return p.RequiredCapabilities(isolation)
 	}
@@ -321,8 +321,8 @@ type Runtime interface {
 	// the tmux session in a running instance. tmuxSocket is the fixed socket
 	// path from runtime-config.json (empty = use default). rows and cols are
 	// the current terminal dimensions (0 = unknown). isolation is the sandbox
-	// isolation mode (e.g. "container-enhanced").
-	AttachCommand(tmuxSocket string, rows, cols int, isolation string) []string
+	// isolation mode (e.g. IsolationModeContainerEnhanced).
+	AttachCommand(tmuxSocket string, rows, cols int, isolation IsolationMode) []string
 
 	// PrepareAgentCommand wraps an agent launch command with backend-specific
 	// environment setup (PATH overrides, shell wrappers, etc.). Mirrors the

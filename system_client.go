@@ -197,7 +197,7 @@ type CheckOptions struct {
 	Agent AgentName
 	// Isolation, when non-empty, triggers an isolation-mode capability
 	// check via runtime.RequiredCapabilitiesFor + caps.RunChecks.
-	Isolation string
+	Isolation IsolationMode
 }
 
 // CheckResult is one row of Check's output.
@@ -297,7 +297,7 @@ func (s *SystemClient) checkAgent(name string) CheckResult {
 // checkIsolation runs the capability checks declared by the backend
 // for the requested isolation mode. Returns OK when the backend has
 // no requirements for the mode.
-func (s *SystemClient) checkIsolation(ctx context.Context, rt runtime.Runtime, isolation string) CheckResult {
+func (s *SystemClient) checkIsolation(ctx context.Context, rt runtime.Runtime, isolation runtime.IsolationMode) CheckResult {
 	if rt == nil {
 		return CheckResult{Name: "isolation", OK: false, Message: "backend unavailable; isolation check skipped"}
 	}

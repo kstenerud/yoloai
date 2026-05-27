@@ -58,11 +58,11 @@ func (m *Manager) stop(ctx context.Context, name string) error {
 
 // StartOptions holds parameters for the start command.
 type StartOptions struct {
-	Resume       bool   // re-feed original prompt with continuation preamble
-	Prompt       string // if set, overwrite prompt.txt and send directly (no preamble)
-	PromptFile   string // if set, read from file, overwrite prompt.txt, send directly
-	Isolation    string // if set, override the isolation mode stored in meta.json
-	VscodeTunnel bool   // if true, enable VS Code Remote Tunnel (persisted to meta)
+	Resume       bool                  // re-feed original prompt with continuation preamble
+	Prompt       string                // if set, overwrite prompt.txt and send directly (no preamble)
+	PromptFile   string                // if set, read from file, overwrite prompt.txt, send directly
+	Isolation    runtime.IsolationMode // if set, override the isolation mode stored in meta.json
+	VscodeTunnel bool                  // if true, enable VS Code Remote Tunnel (persisted to meta)
 }
 
 // Start ensures a sandbox is running — idempotent.
@@ -98,12 +98,12 @@ func (m *Manager) applyIsolationOverride(ctx context.Context, opts StartOptions,
 	if opts.Isolation == "" || opts.Isolation == meta.Isolation {
 		return nil
 	}
-	if err := config.ValidateIsolationMode(opts.Isolation); err != nil {
+	if err := config.ValidateIsolationMode(string(opts.Isolation)); err != nil {
 		return err
 	}
 	desc := m.runtime.Descriptor()
 	supported := desc.SupportedIsolationModes
-	if opts.Isolation != "container" && len(supported) > 0 {
+	if opts.Isolation != runtime.IsolationModeContainer && len(supported) > 0 {
 		ok := slices.Contains(supported, opts.Isolation)
 		if !ok {
 			return NewUsageError("isolation mode %q is not supported by the %s backend", opts.Isolation, desc.Name)

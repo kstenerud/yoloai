@@ -4,14 +4,14 @@ package runtime
 import "testing"
 
 func TestIsolationContainerRuntime(t *testing.T) {
-	cases := map[string]string{
-		"":                     "",
-		"container":            "",
-		"container-privileged": "",
-		"container-enhanced":   "runsc",
-		"vm":                   "io.containerd.kata.v2",
-		"vm-enhanced":          "io.containerd.kata-fc.v2",
-		"unknown":              "",
+	cases := map[IsolationMode]string{
+		IsolationModeDefault:             "",
+		IsolationModeContainer:           "",
+		IsolationModeContainerPrivileged: "",
+		IsolationModeContainerEnhanced:   "runsc",
+		IsolationModeVM:                  "io.containerd.kata.v2",
+		IsolationModeVMEnhanced:          "io.containerd.kata-fc.v2",
+		"unknown":                        "",
 	}
 	for in, want := range cases {
 		if got := IsolationContainerRuntime(in); got != want {
@@ -21,13 +21,13 @@ func TestIsolationContainerRuntime(t *testing.T) {
 }
 
 func TestIsolationSnapshotter(t *testing.T) {
-	cases := map[string]string{
-		"":                     "",
-		"container":            "",
-		"container-privileged": "",
-		"container-enhanced":   "",
-		"vm":                   "",
-		"vm-enhanced":          "devmapper",
+	cases := map[IsolationMode]string{
+		IsolationModeDefault:             "",
+		IsolationModeContainer:           "",
+		IsolationModeContainerPrivileged: "",
+		IsolationModeContainerEnhanced:   "",
+		IsolationModeVM:                  "",
+		IsolationModeVMEnhanced:          "devmapper",
 	}
 	for in, want := range cases {
 		if got := IsolationSnapshotter(in); got != want {
@@ -42,13 +42,13 @@ func TestIsolationSnapshotter(t *testing.T) {
 // false. Everything else must report true so --network-isolated isn't
 // rejected on paths that work.
 func TestIsolationEnforcesInSandboxIptables(t *testing.T) {
-	cases := map[string]bool{
-		"":                     true, // backend default — standard runc, enforces
-		"container":            true,
-		"container-privileged": true,
-		"container-enhanced":   false, // gVisor — does NOT enforce
-		"vm":                   true,  // Kata guest kernel enforces
-		"vm-enhanced":          true,  // Kata + Firecracker — same story
+	cases := map[IsolationMode]bool{
+		IsolationModeDefault:             true, // backend default — standard runc, enforces
+		IsolationModeContainer:           true,
+		IsolationModeContainerPrivileged: true,
+		IsolationModeContainerEnhanced:   false, // gVisor — does NOT enforce
+		IsolationModeVM:                  true,  // Kata guest kernel enforces
+		IsolationModeVMEnhanced:          true,  // Kata + Firecracker — same story
 	}
 	for isolation, want := range cases {
 		if got := IsolationEnforcesInSandboxIptables(isolation); got != want {

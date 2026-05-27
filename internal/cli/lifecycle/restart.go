@@ -74,7 +74,7 @@ func runRestart(cmd *cobra.Command, args []string, opts *restartOpts) error {
 			Resume:       opts.resume,
 			Prompt:       opts.prompt,
 			PromptFile:   opts.promptFile,
-			Isolation:    opts.isolation,
+			Isolation:    yoloai.IsolationMode(opts.isolation),
 			VscodeTunnel: opts.vscodeTunnel,
 		}); err != nil {
 			return err

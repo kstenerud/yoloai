@@ -366,14 +366,14 @@ func TestRequiredCapabilities_DevmapperNotCheckedForVM(t *testing.T) {
 
 func TestDescriptor_BaseModeName(t *testing.T) {
 	r := &Runtime{}
-	assert.Equal(t, "vm", r.Descriptor().BaseModeName)
+	assert.Equal(t, runtime.IsolationModeVM, r.Descriptor().BaseModeName)
 }
 
 func TestDescriptor_SupportedIsolationModes(t *testing.T) {
 	r := &Runtime{}
 	modes := r.Descriptor().SupportedIsolationModes
-	assert.Contains(t, modes, "vm")
-	assert.Contains(t, modes, "vm-enhanced")
+	assert.Contains(t, modes, runtime.IsolationModeVM)
+	assert.Contains(t, modes, runtime.IsolationModeVMEnhanced)
 }
 
 // TmuxSocket test
