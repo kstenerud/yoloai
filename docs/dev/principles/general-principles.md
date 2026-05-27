@@ -202,7 +202,7 @@ For every flag with a safety dimension: pick the safe default. The unsafe option
 
 ### Worked examples
 
-- **All aux dirs read-only by default** (D4). Write access is opt-in per-directory via `:rw` (live) or `:copy` (staged).
+- **All aux dirs read-only by default** (D4). Write access is opt-in per-directory via `:rw` (live bind-mount). `:copy` and `:overlay` are workdir-only (Q-U): the diff/apply workflow operates on the workdir, and the aux multi-dir surface was removed in beta.
 - **Workdir defaults to `:copy`**, not `:rw` (D4). The protected mode is the default. `:rw` requires typing.
 - **`:overlay` requires `CAP_SYS_ADMIN`** and is opt-in. The default (`:copy`) avoids the capability grant entirely.
 - **Sandbox name required, no auto-generation** (`docs/design/README.md` §Design Principles). Anonymous sandboxes lead to sprawl; named sandboxes are findable.

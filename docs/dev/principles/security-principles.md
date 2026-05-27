@@ -245,7 +245,7 @@ Threshold: anywhere the agent might reach for something we didn't anticipate, de
 - **Seatbelt filesystem allowlist**: `~/.local/`, `~/.gitconfig`, `~/.config/git/`. Everything else is denied. The agent can't read `~/.ssh/`, `~/.gnupg/`, `~/.aws/`, `~/.git-credentials`, `~/.npmrc`.
 - **Network isolation `--network-isolated`** (D11): default-deny iptables with an explicit allowlist of domains. The agent reaches Anthropic's API because we allowlisted it; everything else is denied.
 - **Dangerous-directory refusal**: refuses a set of host paths unless `:force`. The list is enumerable; new dangerous paths can be added when discovered.
-- **Mount modes**: `:ro` is the default for aux dirs (D4). Writable access requires explicit `:rw` or `:copy`.
+- **Mount modes**: `:ro` is the default for aux dirs (D4). Writable access requires explicit `:rw`. `:copy` and `:overlay` are workdir-only (Q-U).
 - **Per-agent network allowlist**: each agent definition specifies its required domains (e.g., `api.anthropic.com` for Claude Code). The user can extend via `--network-allow <domain>`. The agent's baseline is the minimum it needs to function.
 
 ### Cost-vs-benefit

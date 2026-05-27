@@ -4,6 +4,29 @@ Tracks breaking changes made during beta. Each entry should be included in relea
 
 ## Unreleased
 
+### Auxiliary `:copy` and `:overlay` are no longer supported
+
+**Previous behavior:** Any directory passed via `-d` (auxiliary mount) could carry the same `:copy` and `:overlay` mode suffixes as the workdir, in which case the directory participated in `yoloai diff` / `yoloai apply` alongside the workdir. The workflow was all-or-nothing: a single multi-directory diff was emitted, apply ran per-directory in sequence, and the first failure halted the chain.
+
+**New behavior:** `-d` arguments accept only `:rw` (live bind-mount) and the default `:ro` (read-only reference). Passing `-d <path>:copy` or `-d <path>:overlay` now errors with a `*UsageError` pointing at the alternatives. `yoloai diff` / `yoloai apply` operate on the workdir only.
+
+**Migration:** Pick whichever fits each use case:
+
+- The aux dir was effectively a second project you wanted to track changes in → make it the workdir of a separate sandbox.
+- The aux dir was sibling code (monorepo cousin, docs in a separate repo, tools repo) where live edits are fine → mount as `:rw` for a live bind.
+- The aux dir was reference material the agent should read but not edit → leave it default (`:ro`); behavior unchanged.
+- If the aux dir was a parent that contained the real project → make the parent the workdir.
+
+**Rationale:** Q-U (`docs/dev/plans/layering-refactor.md` W-L8b; `api_surface.go` Q-U resolution 2026-05-25). The multi-directory diff/apply implementation was real but the user-visible surface was barely used: no per-directory selection, no cross-directory conflict resolution, no `:overlay`-only-not-`:copy` filtering. The API complexity required to do this properly significantly exceeded what the implementation actually did. Removing the surface now while we're in beta keeps `yoloai diff` / `yoloai apply` simple — if a real use case emerges, it can be restored with an API informed by that need.
+
+**Affected Go API (for embedders):**
+
+- `yoloai.Client.GenerateMultiPatch` — removed. The single-dir replacement is `yoloai.Client.GeneratePatch`.
+- `yoloai.Client.Apply` / `Client.ApplyWithOptions` — return shape narrows from `([]*patch.ApplyResult, error)` to `(*patch.ApplyResult, error)`. A `nil` result is the no-op signal.
+- `sandbox/patch.ApplyAll` — same return shape change.
+- `sandbox/patch.GenerateMultiPatch` — removed.
+- `sandbox/patch.LoadAllDiffContexts` — still exists, still returns a slice, but the slice now has at most one entry (the workdir). Loop callers don't need to change.
+
 ### First-run setup is non-interactive when triggered implicitly; `yoloai system setup` is the explicit wizard
 
 **Previous behavior:** On the first `yoloai new` / `yoloai run` of a fresh install (when `setup_complete=false`), if stdin was a TTY the user was dropped into the interactive setup wizard before the sandbox could be created — three prompts (tmux config, default backend on macOS, default agent). When stdin wasn't a TTY, the same code path auto-configured silently with `tmux_conf=default+host`.

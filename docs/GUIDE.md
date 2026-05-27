@@ -159,13 +159,10 @@ These directories are regenerated automatically when the agent runs build comman
 You can mount additional directories alongside your workdir using the `-d` / `--dir` flag (repeatable). Auxiliary directories are read-only by default.
 
 ```bash
-# Read-only auxiliary directories
+# Read-only auxiliary directories (default)
 yoloai new mybox . -d /path/to/lib
 
-# Copy-mode auxiliary directory (isolated, diff/apply available)
-yoloai new mybox . -d /path/to/lib:copy
-
-# Writable bind-mount auxiliary directory
+# Writable bind-mount auxiliary directory (live edits)
 yoloai new mybox . -d /path/to/lib:rw
 
 # Custom mount point for workdir
@@ -179,6 +176,8 @@ yoloai new mybox ./app -d ./shared-lib -d ./common-types
 ```
 
 By default, directories are mounted at their original absolute host paths (mirrored paths). Use `=<path>` to mount at a custom container path instead.
+
+Auxiliary directories accept only `:rw` (live bind) or default `:ro`. `:copy` and `:overlay` are workdir-only — `yoloai diff` and `yoloai apply` operate on the workdir, and the multi-directory diff/apply surface was removed during beta (see [BREAKING-CHANGES](BREAKING-CHANGES.md)). If you need to track changes in a second project, run a separate sandbox for it.
 
 ## Agents and Models
 
