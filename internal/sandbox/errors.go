@@ -91,3 +91,10 @@ var AsDiskSpaceError = yoerrors.AsDiskSpaceError
 // the disk-space condition is detected directly (e.g., from statfs)
 // rather than caught from a syscall error.
 var NewDiskSpaceError = yoerrors.NewDiskSpaceError
+
+// ResourceLimitError is an alias for yoerrors.ResourceLimitError. Surfaced when
+// a host-side resource limit is hit (e.g., the macOS concurrent-VM cap).
+type ResourceLimitError = yoerrors.ResourceLimitError
+
+// NewResourceLimitError forwards to yoerrors.NewResourceLimitError.
+var NewResourceLimitError = yoerrors.NewResourceLimitError

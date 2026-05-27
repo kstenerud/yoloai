@@ -187,6 +187,10 @@ func errorExitCode(err error) int {
 		return 9
 	}
 
+	if _, ok := errors.AsType[*sandbox.ResourceLimitError](err); ok {
+		return 11
+	}
+
 	// DiskSpaceError catches both explicitly-wrapped sites (via
 	// AsDiskSpaceError) and unwrapped ENOSPC errors that flowed up
 	// from runtimes without typing — IsDiskSpaceError sniffs both

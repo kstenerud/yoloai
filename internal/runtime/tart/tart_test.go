@@ -3,6 +3,7 @@ package tart
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/runtime"
+	"github.com/kstenerud/yoloai/internal/yoerrors"
 )
 
 func TestSandboxName(t *testing.T) {
@@ -183,6 +185,38 @@ func TestMapTartError_Unknown(t *testing.T) {
 func TestMapTartError_EmptyStderr(t *testing.T) {
 	err := mapTartError(assert.AnError, "")
 	assert.Equal(t, assert.AnError, err)
+}
+
+func TestCheckVMLimitError_Detected(t *testing.T) {
+	cases := []string{
+		"The number of VMs exceeds the system limit",
+		"The number of VMs exceeds the system limit (other running VMs: vm1, vm2)",
+		"some prefix\nThe number of VMs exceeds the system limit\nsome suffix",
+	}
+	for _, logContent := range cases {
+		end := len(logContent)
+		if end > 50 {
+			end = 50
+		}
+		t.Run(logContent[:end], func(t *testing.T) {
+			err := checkVMLimitError(logContent)
+			require.NotNil(t, err)
+			var limitErr *yoerrors.ResourceLimitError
+			assert.True(t, errors.As(err, &limitErr), "expected *ResourceLimitError")
+		})
+	}
+}
+
+func TestCheckVMLimitError_NotDetected(t *testing.T) {
+	cases := []string{
+		"",
+		"some other error",
+		"VM booted successfully",
+		"tart: error: VM not found",
+	}
+	for _, logContent := range cases {
+		assert.Nil(t, checkVMLimitError(logContent), "should not detect limit error in: %q", logContent)
+	}
 }
 
 func TestPortForwardArgs(t *testing.T) {

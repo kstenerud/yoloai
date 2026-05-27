@@ -171,6 +171,19 @@ func NewDiskSpaceError(op string, err error) *DiskSpaceError {
 	return &DiskSpaceError{Op: op, Err: err}
 }
 
+// ResourceLimitError indicates a host-side resource limit was hit (exit code 11).
+// Currently fired when the macOS concurrent-VM cap (enforced by Apple's
+// Virtualization.framework) is exceeded. Recoverable: stop a running VM and retry.
+type ResourceLimitError struct{ Err error }
+
+func (e *ResourceLimitError) Error() string { return e.Err.Error() }
+func (e *ResourceLimitError) Unwrap() error { return e.Err }
+
+// NewResourceLimitError wraps a message as a ResourceLimitError.
+func NewResourceLimitError(format string, args ...any) *ResourceLimitError {
+	return &ResourceLimitError{Err: fmt.Errorf(format, args...)}
+}
+
 // SandboxLockedError indicates a write operation couldn't acquire the
 // per-sandbox file lock within the brief retry window because another
 // holder is currently using it (exit code 9).

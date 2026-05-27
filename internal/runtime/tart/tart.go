@@ -116,6 +116,11 @@ const (
 
 	// sharedDirVMPath is where VirtioFS shares appear inside the macOS VM.
 	sharedDirVMPath = "/Volumes/My Shared Files"
+
+	// tartVMLimitSubstr is the fixed prefix Tart writes to stderr when Apple's
+	// VZError.virtualMachineLimitExceeded fires. Detection is substring-based
+	// to tolerate the optional "(other running VMs: ...)" suffix.
+	tartVMLimitSubstr = "The number of VMs exceeds the system limit"
 )
 
 // Runtime implements runtime.Runtime using the Tart CLI.
@@ -312,6 +317,9 @@ func (r *Runtime) Start(ctx context.Context, name string) error {
 		// Include log file contents and the command for diagnostics
 		detail := fmt.Sprintf("command: %s %s", r.tartBin, strings.Join(args, " "))
 		if logData, readErr := os.ReadFile(logPath); readErr == nil && len(logData) > 0 { //nolint:gosec // G304: path within sandbox dir
+			if limitErr := checkVMLimitError(string(logData)); limitErr != nil {
+				return limitErr
+			}
 			detail += fmt.Sprintf("\nVM log output:\n%s", strings.TrimSpace(string(logData)))
 		}
 		return fmt.Errorf("wait for VM boot: %w\n%s", err, detail)
@@ -1059,6 +1067,22 @@ func (r *Runtime) killByPID(sandboxPath string) {
 
 	_ = proc.Signal(syscall.SIGTERM)
 	_ = os.Remove(pidPath)
+}
+
+// checkVMLimitError examines vm.log content for the Tart concurrent-VM limit
+// error string. Returns a *yoerrors.ResourceLimitError if matched, nil otherwise.
+func checkVMLimitError(logContent string) error {
+	if !strings.Contains(logContent, tartVMLimitSubstr) {
+		return nil
+	}
+	return yoerrors.NewResourceLimitError(
+		"macOS concurrent VM limit reached — only 2 macOS VMs can run simultaneously.\n"+
+			"Stop a running sandbox first:\n"+
+			"  yoloai sandbox list\n"+
+			"  yoloai sandbox stop <name>\n"+
+			"VM log: %s",
+		strings.TrimSpace(logContent),
+	)
 }
 
 // mapTartError maps tart CLI errors to runtime sentinel errors.

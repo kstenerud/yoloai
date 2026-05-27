@@ -126,3 +126,20 @@ func TestDiskSpaceError_MessageMentionsPruneAndDisk(t *testing.T) {
 func TestDiskSpaceError_ImplementsError(t *testing.T) {
 	var _ error = (*DiskSpaceError)(nil)
 }
+
+func TestNewResourceLimitError_Message(t *testing.T) {
+	err := NewResourceLimitError("macOS concurrent VM limit reached: %s", "vm.log output")
+	require.NotNil(t, err)
+	assert.Contains(t, err.Error(), "macOS concurrent VM limit reached")
+	assert.Contains(t, err.Error(), "vm.log output")
+}
+
+func TestResourceLimitError_Unwrap(t *testing.T) {
+	inner := fmt.Errorf("inner error")
+	e := &ResourceLimitError{Err: fmt.Errorf("wrapped: %w", inner)}
+	assert.True(t, errors.Is(e, inner))
+}
+
+func TestResourceLimitError_ImplementsError(t *testing.T) {
+	var _ error = (*ResourceLimitError)(nil)
+}
