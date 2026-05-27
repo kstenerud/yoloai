@@ -226,16 +226,6 @@ func TestPrintDirAdditions_NewDirs(t *testing.T) {
 	assert.Contains(t, buf.String(), "+ /b (rw)")
 }
 
-// --- joinNames ---
-
-func TestJoinNames_Empty(t *testing.T) {
-	assert.Equal(t, "", joinNames(nil))
-}
-
-func TestJoinNames_Single(t *testing.T) {
-	assert.Equal(t, "alpha", joinNames([]string{"alpha"}))
-}
-
-func TestJoinNames_Multiple(t *testing.T) {
-	assert.Equal(t, "alpha, beta, gamma", joinNames([]string{"alpha", "beta", "gamma"}))
-}
+// (joinNames helper deleted along with the CLI-side refs-scanning
+// logic — Delete now flows through yoloai.ProfileAdmin and the CLI
+// uses strings.Join directly. No test coverage to migrate.)

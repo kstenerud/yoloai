@@ -4,7 +4,6 @@ package profile
 // ABOUTME: Manages reusable environment profiles in ~/.yoloai/profiles/.
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -13,13 +12,11 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	"github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
 
 	"github.com/kstenerud/yoloai/internal/config"
-	"github.com/kstenerud/yoloai/internal/fileutil"
-	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/sandbox"
-	"github.com/kstenerud/yoloai/internal/sandbox/store"
 	"github.com/spf13/cobra"
 )
 
@@ -47,49 +44,10 @@ func newProfileCreateCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
-			if err := config.ValidateProfileName(name); err != nil {
+			if err := cliutil.NewSystemClient().Profiles().Create(cmd.Context(), name); err != nil {
 				return err
 			}
-
-			if config.ProfileExists(cliutil.Layout(), name) {
-				return sandbox.NewUsageError("profile %q already exists", name)
-			}
-
-			dir := cliutil.Layout().ProfileDir(name)
-			if err := fileutil.MkdirAll(dir, 0750); err != nil {
-				return fmt.Errorf("create profile directory: %w", err)
-			}
-
-			scaffold := `# agent: claude
-# model: sonnet
-# backend: docker   # optional backend constraint
-# os: linux         # guest OS: linux, mac
-# tart:
-#   image: my-vm    # Tart backend only
-# ports:
-#   - "8080:8080"
-# env:
-#   MY_VAR: value
-# mounts:                    # extra bind mounts (host:container[:ro])
-#   - ~/.gitconfig:/home/yoloai/.gitconfig:ro
-# network:
-#   isolated: true           # enable network isolation
-#   allow:                   # domains allowed when isolated
-#     - example.com
-# workdir:
-#   path: ~/my-project
-#   mode: copy       # copy or rw
-#   mount: /opt/app  # optional custom mount point
-# directories:
-#   - path: ~/shared-lib
-#     mode: rw
-#     mount: /usr/local/lib/shared
-`
-			yamlPath := filepath.Join(dir, "config.yaml")
-			if err := fileutil.WriteFile(yamlPath, []byte(scaffold), 0600); err != nil {
-				return fmt.Errorf("write config.yaml: %w", err)
-			}
-
+			yamlPath := filepath.Join(cliutil.Layout().ProfileDir(name), "config.yaml")
 			if cliutil.JSONEnabled(cmd) {
 				return cliutil.WriteJSON(cmd.OutOrStdout(), map[string]string{
 					"name":   name,
@@ -109,29 +67,23 @@ func newProfileListCmd() *cobra.Command {
 		Short: "List profiles",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			names, err := config.ListProfiles(cliutil.Layout())
+			summaries, err := cliutil.NewSystemClient().Profiles().List(cmd.Context())
 			if err != nil {
 				return err
 			}
-
-			if len(names) == 0 {
+			if len(summaries) == 0 {
 				fmt.Fprintln(cmd.OutOrStdout(), "No profiles found") //nolint:errcheck
 				return nil
 			}
 
 			w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
 			fmt.Fprintln(w, "NAME\tIMAGE\tAGENT") //nolint:errcheck
-			for _, name := range names {
-				profile, loadErr := config.LoadProfile(cliutil.Layout(), name)
-				agent := ""
+			for _, s := range summaries {
 				image := "no"
-				if loadErr == nil {
-					agent = profile.Agent
-				}
-				if config.ProfileHasDockerfile(cliutil.Layout(), name) {
+				if s.HasDockerfile {
 					image = "yes"
 				}
-				fmt.Fprintf(w, "%s\t%s\t%s\n", name, image, agent) //nolint:errcheck
+				fmt.Fprintf(w, "%s\t%s\t%s\n", s.Name, image, s.Agent) //nolint:errcheck
 			}
 			return w.Flush()
 		},
@@ -162,104 +114,54 @@ func newProfileInfoCmd() *cobra.Command {
 }
 
 func runProfileInfoCmd(cmd *cobra.Command, name string, diffMode bool) error {
-	chain, merged, image, hasDockerfile, err := resolveProfileInfo(name)
+	info, err := cliutil.NewSystemClient().Profiles().Info(cmd.Context(), name)
 	if err != nil {
 		return err
 	}
 
 	if diffMode {
-		return runProfileInfoDiff(cmd, name, chain, merged)
+		return renderProfileInfoDiff(cmd, info)
 	}
 
 	if cliutil.JSONEnabled(cmd) {
 		return cliutil.WriteJSON(cmd.OutOrStdout(), profileInfoJSON{
-			Profile:     name,
-			Chain:       chain,
-			Image:       image,
-			Dockerfile:  hasDockerfile,
-			Agent:       merged.Agent,
-			Model:       merged.Model,
-			Backend:     merged.Backend,
-			TartImage:   merged.TartImage,
-			Isolation:   merged.Isolation,
-			Env:         merged.Env,
-			AgentArgs:   merged.AgentArgs,
-			Ports:       merged.Ports,
-			Workdir:     merged.Workdir,
-			Directories: merged.Directories,
-			Resources:   merged.Resources,
-			Network:     merged.Network,
-			Mounts:      merged.Mounts,
+			Profile:     info.Name,
+			Chain:       info.Chain,
+			Image:       info.Image,
+			Dockerfile:  info.HasDockerfile,
+			Agent:       info.Merged.Agent,
+			Model:       info.Merged.Model,
+			Backend:     info.Merged.Backend,
+			TartImage:   info.Merged.TartImage,
+			Isolation:   info.Merged.Isolation,
+			Env:         info.Merged.Env,
+			AgentArgs:   info.Merged.AgentArgs,
+			Ports:       info.Merged.Ports,
+			Workdir:     info.Merged.Workdir,
+			Directories: info.Merged.Directories,
+			Resources:   info.Merged.Resources,
+			Network:     info.Merged.Network,
+			Mounts:      info.Merged.Mounts,
 		})
 	}
 
-	return printProfileInfo(cmd, name, "", chain, image, hasDockerfile, merged)
+	return printProfileInfo(cmd, info.Name, "", info.Chain, info.Image, info.HasDockerfile, info.Merged)
 }
 
-// resolveProfileInfo loads chain, merged config, image, and dockerfile flag for a profile.
-func resolveProfileInfo(name string) (chain []string, merged *config.MergedConfig, image string, hasDockerfile bool, err error) {
-	if name == "base" {
-		chain = []string{"base"}
-		image = "yoloai-base"
-		hasDockerfile = config.ProfileHasDockerfile(cliutil.Layout(), "base")
-		baseCfg, err := config.LoadBakedInDefaults()
-		if err != nil {
-			return nil, nil, "", false, err
-		}
-		merged, err = config.MergeProfileChain(cliutil.Layout(), baseCfg, chain)
-		return chain, merged, image, hasDockerfile, err
-	}
-
-	if err = config.ValidateProfileName(name); err != nil {
-		return nil, nil, "", false, err
-	}
-	if !config.ProfileExists(cliutil.Layout(), name) {
-		return nil, nil, "", false, sandbox.NewUsageError("profile %q does not exist", name)
-	}
-	chain, err = config.ResolveProfileChain(cliutil.Layout(), name)
-	if err != nil {
-		return nil, nil, "", false, err
-	}
-	baseCfg, err := config.LoadBakedInDefaults()
-	if err != nil {
-		return nil, nil, "", false, err
-	}
-	merged, err = config.MergeProfileChain(cliutil.Layout(), baseCfg, chain)
-	if err != nil {
-		return nil, nil, "", false, err
-	}
-	image = config.ResolveProfileImage(cliutil.Layout(), name, chain)
-	hasDockerfile = config.ProfileHasDockerfile(cliutil.Layout(), name)
-	return chain, merged, image, hasDockerfile, nil
-}
-
-// runProfileInfoDiff handles the --diff mode for profile info.
-func runProfileInfoDiff(cmd *cobra.Command, name string, chain []string, merged *config.MergedConfig) error {
-	var parentMerged *config.MergedConfig
-	if name == "base" {
-		parentMerged = &config.MergedConfig{}
-	} else {
-		parentChain := chain[:len(chain)-1]
-		baseCfg, err := config.LoadBakedInDefaults()
-		if err != nil {
-			return err
-		}
-		parentMerged, err = config.MergeProfileChain(cliutil.Layout(), baseCfg, parentChain)
-		if err != nil {
-			return err
-		}
-	}
-
+// renderProfileInfoDiff renders --diff mode output from a ProfileInfo.
+// The library has already computed both Merged and Parent; this just
+// chooses the output format.
+func renderProfileInfoDiff(cmd *cobra.Command, info *yoloai.ProfileInfo) error {
 	if cliutil.JSONEnabled(cmd) {
 		return cliutil.WriteJSON(cmd.OutOrStdout(), profileDiffJSON{
-			Profile:   name,
-			Chain:     chain,
-			Inherited: parentMerged,
-			Merged:    merged,
+			Profile:   info.Name,
+			Chain:     info.Chain,
+			Inherited: info.Parent,
+			Merged:    info.Merged,
 		})
 	}
 
-	return printProfileDiff(cmd, name, "", chain, parentMerged, merged)
+	return printProfileDiff(cmd, info.Name, "", info.Chain, info.Parent, info.Merged)
 }
 
 // profileInfoJSON is the JSON output structure for `profile info`.
@@ -658,25 +560,26 @@ func newProfileDeleteCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
-			if err := config.ValidateProfileName(name); err != nil {
-				return err
-			}
-
-			if !config.ProfileExists(cliutil.Layout(), name) {
-				return sandbox.NewUsageError("profile %q does not exist", name)
-			}
+			ctx := cmd.Context()
+			sysClient := cliutil.NewSystemClient()
+			profiles := sysClient.Profiles()
 
 			// Profiles no longer support inheritance — no dependency check needed.
 
-			// Check if any sandboxes reference this profile
-			refs := findSandboxesWithProfile(name)
+			// Surface sandboxes that reference this profile before
+			// asking the user to confirm. ReferencingSandboxes returns
+			// an error only for an unreadable sandboxes dir; per-meta
+			// failures are silently dropped (best-effort warning).
+			refs, refsErr := profiles.ReferencingSandboxes(ctx, name)
+			if refsErr != nil {
+				return refsErr
+			}
 			if len(refs) > 0 {
-				fmt.Fprintf(cmd.ErrOrStderr(), "Warning: %d sandbox(es) reference this profile: %s\n", len(refs), joinNames(refs)) //nolint:errcheck
+				fmt.Fprintf(cmd.ErrOrStderr(), "Warning: %d sandbox(es) reference this profile: %s\n", len(refs), strings.Join(refs, ", ")) //nolint:errcheck
 			}
 
-			yes := cliutil.EffectiveYes(cmd)
-			if !yes {
-				confirmed, confirmErr := sandbox.Confirm(cmd.Context(), fmt.Sprintf("Delete profile '%s'? [y/N] ", name), os.Stdin, cmd.ErrOrStderr())
+			if !cliutil.EffectiveYes(cmd) {
+				confirmed, confirmErr := sandbox.Confirm(ctx, fmt.Sprintf("Delete profile '%s'? [y/N] ", name), os.Stdin, cmd.ErrOrStderr())
 				if confirmErr != nil {
 					return confirmErr
 				}
@@ -685,9 +588,9 @@ func newProfileDeleteCmd() *cobra.Command {
 				}
 			}
 
-			dir := cliutil.Layout().ProfileDir(name)
-			if err := os.RemoveAll(dir); err != nil { //nolint:gosec // G703: dir is derived from validated profile name
-				return fmt.Errorf("remove profile directory: %w", err)
+			result, err := profiles.Delete(ctx, name)
+			if err != nil {
+				return err
 			}
 
 			if cliutil.JSONEnabled(cmd) {
@@ -697,7 +600,7 @@ func newProfileDeleteCmd() *cobra.Command {
 				})
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "Deleted profile '%s'\n", name) //nolint:errcheck
-			writeProfileImageCleanupHints(cmd.OutOrStdout(), "yoloai-"+name)
+			renderImageCleanupHints(cmd.OutOrStdout(), result.ImageCleanupHints)
 			return nil
 		},
 	}
@@ -707,56 +610,12 @@ func newProfileDeleteCmd() *cobra.Command {
 	return cmd
 }
 
-// writeProfileImageCleanupHints prints a "yoloai-<profile> may exist on
-// backend X; remove with: …" line for each registered backend that builds
-// per-profile images. Iterates the registry so a new container backend
-// auto-participates by declaring CleanupHint on its descriptor.
-func writeProfileImageCleanupHints(w io.Writer, image string) {
-	for _, desc := range runtime.Descriptors() {
-		if desc.CleanupHint == nil {
-			continue
-		}
-		fmt.Fprintf(w, "Note: if a %s image '%s' exists, remove it with: %s\n", //nolint:errcheck
-			desc.Name, image, desc.CleanupHint(image))
+// renderImageCleanupHints prints the per-backend "image may exist;
+// remove it with: …" suggestions. The data (which backends, what
+// command) comes from the library via DeleteProfileResult; the CLI
+// only formats it.
+func renderImageCleanupHints(w io.Writer, hints []yoloai.ImageCleanupHint) {
+	for _, h := range hints {
+		fmt.Fprintf(w, "Note: if a %s image '%s' exists, remove it with: %s\n", h.Backend, h.Image, h.Command) //nolint:errcheck
 	}
-}
-
-// findSandboxesWithProfile scans sandbox meta.json files for profile references.
-func findSandboxesWithProfile(profileName string) []string {
-	sandboxesDir := cliutil.Layout().SandboxesDir()
-	entries, err := os.ReadDir(sandboxesDir)
-	if err != nil {
-		return nil
-	}
-
-	var refs []string
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		metaPath := filepath.Join(sandboxesDir, e.Name(), store.EnvironmentFile)
-		data, readErr := os.ReadFile(metaPath) //nolint:gosec // G304: path is from sandboxes dir
-		if readErr != nil {
-			continue
-		}
-		var meta struct {
-			Profile string `json:"profile"`
-		}
-		if json.Unmarshal(data, &meta) == nil && meta.Profile == profileName {
-			refs = append(refs, e.Name())
-		}
-	}
-	return refs
-}
-
-// joinNames joins strings with ", ".
-func joinNames(names []string) string {
-	var result strings.Builder
-	for i, name := range names {
-		if i > 0 {
-			result.WriteString(", ")
-		}
-		result.WriteString(name)
-	}
-	return result.String()
 }
