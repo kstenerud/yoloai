@@ -14,7 +14,6 @@ import (
 
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/sandbox"
-	"github.com/kstenerud/yoloai/sandbox/patch"
 	"github.com/kstenerud/yoloai/sandbox/store"
 	"github.com/mark3labs/mcp-go/mcp"
 )
@@ -160,7 +159,7 @@ func (s *Server) handleSandboxCreate(ctx context.Context, req mcp.CallToolReques
 		return textResult(errorf("workdir is required")), nil
 	}
 
-	if err := s.mgr.EnsureSetup(ctx); err != nil {
+	if err := s.c.EnsureSetup(ctx); err != nil {
 		return textResult(errorf("setup: %v", err)), nil
 	}
 
@@ -177,7 +176,7 @@ func (s *Server) handleSandboxCreate(ctx context.Context, req mcp.CallToolReques
 		Yes:     true,
 	}
 
-	if _, err := s.mgr.Create(ctx, opts); err != nil {
+	if _, err := s.c.Create(ctx, opts); err != nil {
 		return textResult(errorf("create sandbox: %v", err)), nil
 	}
 
@@ -190,7 +189,7 @@ func (s *Server) handleSandboxStatus(ctx context.Context, req mcp.CallToolReques
 		return textResult(errorf("name is required")), nil
 	}
 
-	info, err := s.mgr.Inspect(ctx, name)
+	info, err := s.c.Inspect(ctx, name)
 	if err != nil {
 		return textResult(errorf("inspect sandbox %q: %v", name, err)), nil
 	}
@@ -211,7 +210,7 @@ func (s *Server) handleSandboxStatus(ctx context.Context, req mcp.CallToolReques
 }
 
 func (s *Server) handleSandboxList(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	infos, err := s.mgr.List(ctx)
+	infos, err := s.c.List(ctx)
 	if err != nil {
 		return textResult(errorf("list sandboxes: %v", err)), nil
 	}
@@ -254,13 +253,15 @@ func (s *Server) handleSandboxDestroy(ctx context.Context, req mcp.CallToolReque
 	}
 
 	if !force {
-		needs, reason := s.mgr.NeedsConfirmation(ctx, name)
+		needs, reason := s.c.NeedsConfirmation(ctx, name)
 		if needs {
 			return textResult(errorf("sandbox %q has unapplied changes (%s). Use force=true to destroy anyway.", name, reason)), nil
 		}
 	}
 
-	if err := s.mgr.Destroy(ctx, name); err != nil {
+	// force=true: NeedsConfirmation already gate-checked above when
+	// force was false, so Client.Destroy won't re-prompt here.
+	if err := s.c.Destroy(ctx, name, true); err != nil {
 		return textResult(errorf("destroy sandbox %q: %v", name, err)), nil
 	}
 
@@ -275,7 +276,7 @@ func (s *Server) handleSandboxDiff(_ context.Context, req mcp.CallToolRequest) (
 		return textResult(errorf("name is required")), nil
 	}
 
-	results, err := patch.GenerateMultiDiff(patch.DiffOptions{Name: name, Layout: s.mgr.Layout(), Stat: stat})
+	results, err := s.c.DiffMultiDir(context.Background(), name, stat)
 	if err != nil {
 		return textResult(errorf("diff sandbox %q: %v", name, err)), nil
 	}
@@ -303,16 +304,11 @@ func (s *Server) handleSandboxDiffFile(ctx context.Context, req mcp.CallToolRequ
 		return textResult(errorf("path is required")), nil
 	}
 
-	// GenerateDiff can work with nil runtime for Docker (host-side git)
-	// For Tart, we would need the runtime, but MCP server doesn't currently
-	// have access to it. Since MCP is primarily used with Docker backends,
-	// we pass nil for now. Tracked: docs/dev/plans/TODO.md §MCP Server.
-	result, err := patch.GenerateDiff(ctx, patch.DiffOptions{
-		Name:    name,
-		Layout:  s.mgr.Layout(),
-		Paths:   []string{path},
-		Runtime: nil, // nil means host-side git (Docker backend)
-	})
+	// DiffSingle uses the Client's bound runtime. For Docker/Podman/
+	// containerd that's host-side git (the pre-Client comment about
+	// "nil runtime for Docker" is preserved as a no-op here since the
+	// patch package handles container vs host-side selection itself).
+	result, err := s.c.DiffSingle(ctx, name, []string{path}, false, false)
 	if err != nil {
 		return textResult(errorf("diff file %q in sandbox %q: %v", path, name, err)), nil
 	}
@@ -337,7 +333,7 @@ func (s *Server) handleSandboxLog(_ context.Context, req mcp.CallToolRequest) (*
 		lines = 100
 	}
 
-	logPath := store.AgentLogPath(s.mgr.Layout().SandboxDir(name))
+	logPath := store.AgentLogPath(s.c.SandboxDir(name))
 	output, err := tailFile(logPath, lines)
 	if err != nil {
 		return textResult(errorf("read log for sandbox %q: %v", name, err)), nil
@@ -361,7 +357,7 @@ func (s *Server) handleSandboxInput(ctx context.Context, req mcp.CallToolRequest
 		return textResult(errorf("text is required")), nil
 	}
 
-	if err := s.mgr.SendInput(ctx, name, text); err != nil {
+	if err := s.c.SendInput(ctx, name, text); err != nil {
 		return textResult(errorf("send input to sandbox %q: %v", name, err)), nil
 	}
 
@@ -378,7 +374,7 @@ func (s *Server) handleSandboxReset(ctx context.Context, req mcp.CallToolRequest
 
 	// If a new prompt is provided, write it to prompt.txt before resetting.
 	if prompt != "" {
-		promptPath := store.PromptFilePath(s.mgr.Layout().SandboxDir(name))
+		promptPath := store.PromptFilePath(s.c.SandboxDir(name))
 		if err := fileutil.WriteFile(promptPath, []byte(prompt), 0600); err != nil {
 			return textResult(errorf("write prompt for sandbox %q: %v", name, err)), nil
 		}
@@ -389,7 +385,7 @@ func (s *Server) handleSandboxReset(ctx context.Context, req mcp.CallToolRequest
 		Restart: true,
 	}
 
-	if err := s.mgr.Reset(ctx, opts); err != nil {
+	if err := s.c.Reset(ctx, opts); err != nil {
 		return textResult(errorf("reset sandbox %q: %v", name, err)), nil
 	}
 
@@ -402,7 +398,7 @@ func (s *Server) handleSandboxFilesList(_ context.Context, req mcp.CallToolReque
 		return textResult(errorf("name is required")), nil
 	}
 
-	filesDir := store.FilesDir(s.mgr.Layout().SandboxDir(name))
+	filesDir := store.FilesDir(s.c.SandboxDir(name))
 	entries, err := os.ReadDir(filesDir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -437,7 +433,7 @@ func (s *Server) handleSandboxFilesRead(_ context.Context, req mcp.CallToolReque
 		return textResult(errorf("%v", err)), nil
 	}
 
-	path := filepath.Join(store.FilesDir(s.mgr.Layout().SandboxDir(name)), filename)
+	path := filepath.Join(store.FilesDir(s.c.SandboxDir(name)), filename)
 	data, err := os.ReadFile(path) //nolint:gosec // path validated by validateFilename
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -464,7 +460,7 @@ func (s *Server) handleSandboxFilesWrite(_ context.Context, req mcp.CallToolRequ
 		return textResult(errorf("%v", err)), nil
 	}
 
-	filesDir := store.FilesDir(s.mgr.Layout().SandboxDir(name))
+	filesDir := store.FilesDir(s.c.SandboxDir(name))
 	if err := fileutil.MkdirAll(filesDir, 0750); err != nil {
 		return textResult(errorf("create files dir for sandbox %q: %v", name, err)), nil
 	}

@@ -14,10 +14,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/kstenerud/yoloai/config"
-	"github.com/kstenerud/yoloai/runtime"
+	"github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/sandbox"
-	"github.com/kstenerud/yoloai/sandbox/patch"
 	"github.com/kstenerud/yoloai/sandbox/store"
 )
 
@@ -47,19 +45,20 @@ type ProxyOptions struct {
 // ensuring the container is running, and forwarding stdio between the
 // outer agent and the inner MCP process.
 type ProxyServer struct {
-	mgr         *sandbox.Manager
+	c           *yoloai.Client
 	sandboxName string
 	innerCmd    []string
 	opts        ProxyOptions
 }
 
-// NewProxy creates a new proxy server.
-func NewProxy(mgr *sandbox.Manager, sandboxName string, innerCmd []string, opts ProxyOptions) *ProxyServer {
+// NewProxy creates a new proxy server. The Client is the caller's;
+// ServeStdio does not close it.
+func NewProxy(c *yoloai.Client, sandboxName string, innerCmd []string, opts ProxyOptions) *ProxyServer {
 	if opts.Agent == "" {
 		opts.Agent = "idle"
 	}
 	return &ProxyServer{
-		mgr:         mgr,
+		c:           c,
 		sandboxName: sandboxName,
 		innerCmd:    innerCmd,
 		opts:        opts,
@@ -69,7 +68,7 @@ func NewProxy(mgr *sandbox.Manager, sandboxName string, innerCmd []string, opts 
 // ServeStdio ensures the sandbox is running, then proxies stdin/stdout to
 // the inner MCP server for the duration of the connection.
 func (p *ProxyServer) ServeStdio(ctx context.Context) error {
-	if err := p.mgr.EnsureSetup(ctx); err != nil {
+	if err := p.c.EnsureSetup(ctx); err != nil {
 		return fmt.Errorf("setup: %w", err)
 	}
 
@@ -78,7 +77,7 @@ func (p *ProxyServer) ServeStdio(ctx context.Context) error {
 		return err
 	}
 
-	innerCmd, err := expandCmd(p.innerCmd, p.mgr.Layout(), meta)
+	innerCmd, err := expandCmd(p.innerCmd, p.c.SandboxDir(meta.Name), meta)
 	if err != nil {
 		return fmt.Errorf("expand inner command: %w", err)
 	}
@@ -89,7 +88,7 @@ func (p *ProxyServer) ServeStdio(ctx context.Context) error {
 // ensureRunning guarantees the sandbox container is running, creating it if
 // needed. Returns the sandbox metadata for path template expansion.
 func (p *ProxyServer) ensureRunning(ctx context.Context) (*store.Meta, error) {
-	info, err := p.mgr.Inspect(ctx, p.sandboxName)
+	info, err := p.c.Inspect(ctx, p.sandboxName)
 
 	if errors.Is(err, sandbox.ErrSandboxNotFound) {
 		return p.createSandbox(ctx)
@@ -106,7 +105,7 @@ func (p *ProxyServer) ensureRunning(ctx context.Context) (*store.Meta, error) {
 
 	case sandbox.StatusStopped, sandbox.StatusRemoved:
 		// Container stopped or removed — restart it
-		if err := p.mgr.Start(ctx, p.sandboxName, sandbox.StartOptions{}); err != nil {
+		if err := p.c.Start(ctx, p.sandboxName, sandbox.StartOptions{}); err != nil {
 			return nil, fmt.Errorf("start sandbox %q: %w", p.sandboxName, err)
 		}
 		return info.Meta, nil
@@ -133,11 +132,11 @@ func (p *ProxyServer) createSandbox(ctx context.Context) (*store.Meta, error) {
 		Yes:     true,
 	}
 
-	if _, err := p.mgr.Create(ctx, opts); err != nil {
+	if _, err := p.c.Create(ctx, opts); err != nil {
 		return nil, fmt.Errorf("create sandbox %q: %w", p.sandboxName, err)
 	}
 
-	info, err := p.mgr.Inspect(ctx, p.sandboxName)
+	info, err := p.c.Inspect(ctx, p.sandboxName)
 	if err != nil {
 		return nil, fmt.Errorf("inspect sandbox %q after create: %w", p.sandboxName, err)
 	}
@@ -153,11 +152,14 @@ func (p *ProxyServer) createSandbox(ctx context.Context) (*store.Meta, error) {
 //	{files}    — the file exchange directory (/yoloai/files/)
 //	{cache}    — the cache directory (/yoloai/cache/)
 //	{dir:N}    — meta.Directories[N].MountPath (Nth auxiliary directory, 0-indexed)
-func expandCmd(cmd []string, layout config.Layout, meta *store.Meta) ([]string, error) {
+//
+// sandboxDir is the on-host parent directory holding the sandbox's state
+// (obtainable from yoloai.Client.SandboxDir(name)). It is used only when
+// meta.HostFilesystem is true to resolve host-side {files}/{cache}.
+func expandCmd(cmd []string, sandboxDir string, meta *store.Meta) ([]string, error) {
 	filesDir := "/yoloai/files/"
 	cacheDir := "/yoloai/cache/"
 	if meta.HostFilesystem {
-		sandboxDir := layout.SandboxDir(meta.Name)
 		filesDir = store.FilesDir(sandboxDir)
 		cacheDir = store.CacheDir(sandboxDir)
 	}
@@ -225,16 +227,9 @@ var injectedToolDefs = []map[string]any{
 }
 
 func (p *ProxyServer) run(ctx context.Context, in io.Reader, out io.Writer, _ *store.Meta, innerCmd []string) error {
-	// Run the inner MCP server inside the sandbox via the backend's StdioExecer.
-	// Backends that don't implement it (Tart, Seatbelt) are not supported by the
-	// MCP proxy — fail with a clear error. W10 of the architecture remediation
-	// plan: no hardcoded "docker" string here.
-	execer, ok := p.mgr.Runtime().(runtime.StdioExecer)
-	if !ok {
-		return fmt.Errorf("MCP proxy: runtime backend %T does not support stdio exec", p.mgr.Runtime())
-	}
-	containerName := store.InstanceName(p.sandboxName)
-
+	// Run the inner MCP server inside the sandbox via Client.StdioExec.
+	// Backends that don't implement runtime.StdioExecer (Tart, Seatbelt)
+	// surface as a *UsageError from StdioExec.
 	innerInRead, innerIn := io.Pipe()
 	innerOut, innerOutWrite := io.Pipe()
 
@@ -242,7 +237,7 @@ func (p *ProxyServer) run(ctx context.Context, in io.Reader, out io.Writer, _ *s
 	// outer reader and writer loops below see EOF and unwind.
 	execDone := make(chan error, 1)
 	go func() {
-		err := execer.StdioExec(ctx, containerName, innerCmd, innerInRead, innerOutWrite, os.Stderr)
+		err := p.c.StdioExec(ctx, p.sandboxName, innerCmd, innerInRead, innerOutWrite, os.Stderr)
 		_ = innerOutWrite.Close()
 		_ = innerInRead.Close()
 		execDone <- err
@@ -438,7 +433,7 @@ func (p *ProxyServer) tryHandleLocalToolCall(
 func (p *ProxyServer) handleProxyDiff(args map[string]any) map[string]any {
 	stat, _ := args["stat"].(bool)
 
-	results, err := patch.GenerateMultiDiff(patch.DiffOptions{Name: p.sandboxName, Layout: p.mgr.Layout(), Stat: stat})
+	results, err := p.c.DiffMultiDir(context.Background(), p.sandboxName, stat)
 	if err != nil {
 		return mcpTextContent(errorf("diff sandbox %q: %v", p.sandboxName, err))
 	}

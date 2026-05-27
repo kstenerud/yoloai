@@ -101,33 +101,28 @@ linters:
         text: "os\\.UserHomeDir"
 
       # W-L10 spine-layering allowlist. The orchestration spine itself
-      # (yoloai.go, system_client.go), the runtime/sandbox packages, and
-      # the MCP server (which wraps Manager methods as tools) naturally
-      # use these symbols — only the CLI is constrained.
-      - path: "^yoloai\\.go$|^system_client\\.go$|^runtime/|^sandbox/|^internal/mcpsrv/"
+      # (yoloai.go, system_client.go) and the runtime/sandbox packages
+      # naturally use these symbols — only the CLI is constrained.
+      # After W-L8d completed, no internal/cli/ file has callers of
+      # sandbox.Manager / sandbox.NewManager left, including
+      # system_mcp.go (which now uses yoloai.Client) and helpers.go
+      # (which dropped withRuntime / withManager when they became
+      # unused). internal/mcpsrv/ doesn't need an exemption either —
+      # it migrated to *yoloai.Client and references only sandbox
+      # value types (DirSpec, Status constants, CreateOptions).
+      - path: "^yoloai\\.go$|^system_client\\.go$|^runtime/|^sandbox/"
         linters:
           - forbidigo
         text: "sandbox\\.(NewManager|Manager)|runtime\\.(Runtime|New)"
 
-      # The CLI's documented chokepoint — newRuntime / withRuntime /
-      # withManager live here and are the only sanctioned construction
-      # site. Removing this exemption would require either deleting the
-      # chokepoint or moving it to yoloai/.
+      # newRuntime in helpers.go is the only sanctioned construction
+      # site for a raw runtime.Runtime in CLI code — used by the few
+      # CLI commands that walk all backends for enumeration (list,
+      # system_doctor, info, sandbox_network) and by system_tart.go.
       - path: "internal/cli/helpers\\.go"
         linters:
           - forbidigo
-        text: "sandbox\\.(NewManager|Manager)|runtime\\.(Runtime|New)"
-
-      # Residual W-L8d debt: the MCP server (system_mcp.go) maps
-      # Manager methods to MCP tools and still constructs the Manager
-      # directly via withManager. Removing this exemption requires an
-      # MCP-shaped wrapper on Client — its own future workstream.
-      # `system setup` migrated to SystemClient.Setup under Q-F
-      # (the exemption for system.go was dropped at the same time).
-      - path: "internal/cli/system_mcp\\.go"
-        linters:
-          - forbidigo
-        text: "sandbox\\.(NewManager|Manager)"
+        text: "runtime\\.(Runtime|New)"
 
 run:
   timeout: 2m

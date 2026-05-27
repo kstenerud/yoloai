@@ -4,42 +4,30 @@ Patterns Cobra command handlers in this package follow. These are written
 after each pattern earned its place — read this before writing a new
 command, but don't apply patterns where they don't fit.
 
-## Construction: `withClient`, `systemClient`, `withRuntime`
+## Construction: `withClient`, `systemClient`, and `newRuntime`
 
-Three helpers in `helpers.go` give a command handler an orchestration
-entry point. Pick the smallest one that does the job; each successive
-one carries broader scope.
+Two helpers in `helpers.go` give a command handler an orchestration
+entry point. Pick the one that matches the command's scope.
 
 - **`withClient(cmd, backend, fn)`** — opens a `yoloai.Client` for one
   backend, defers close. The canonical path for sandbox-scoped command
   handlers: `Run`, `Stop`, `Destroy`, `List`, `Inspect`, `Diff`, `Apply`,
-  `Exec`, `Attach`. Use this for every new command that operates on a
-  single sandbox / single backend.
+  `Exec`, `Attach`, plus the MCP server's tool handlers. Use this for
+  every new command that operates on a single sandbox / single backend.
 - **`systemClient()`** — returns a `*yoloai.SystemClient` (no runtime
   yet, no close needed). The canonical path for `yoloai system …`
   handlers that aren't tied to a specific backend: `DiskUsage`, `Prune`,
-  `Build`, `Check`. SystemClient spins up runtimes per backend
+  `Build`, `Check`, `Setup`. SystemClient spins up runtimes per backend
   internally for cross-backend operations.
-- **`withRuntime(ctx, backend, fn)`** — exposes the raw
-  `runtime.Runtime`. As of W-L8e there are **no remaining direct
-  callers in command code**; it survives only as the substrate for
-  `withManager`. Don't add new direct uses — every new requirement
-  belongs on Client or SystemClient.
 
-### The residual `withManager` user
-
-`withManager(cmd, backend, fn)` constructs a `sandbox.Manager`
-directly (via `withRuntime` + `sandbox.NewManager`). Only one command
-still uses it:
-
-- `system_mcp.go` (`yoloai mcp serve`, `yoloai mcp proxy`) — the MCP
-  server maps Manager methods to MCP tools; migrating to Client
-  requires re-shaping the tool surface and is treated as its own
-  workstream.
-
-Tracked as a follow-up in `docs/dev/plans/layering-refactor.md`. Treat
-it as the only allowed caller; lint enforces it via depguard (see
-`.golangci.yml`).
+`withRuntime` and `withManager` have been removed (W-L10) — every
+command goes through `yoloai.Client` / `yoloai.SystemClient`. The
+underlying `newRuntime(ctx, backend)` factory still exists for the
+handful of commands that walk every registered backend for
+enumeration (`yoloai ls`, `yoloai sandbox <name> allow`,
+`yoloai system doctor`, `yoloai system info`) and for the
+backend-scoped `system tart` subtree. Don't add new direct calls —
+prefer Client/SystemClient for any new orchestration.
 
 ### Interactive wizards: prompts live in the CLI
 

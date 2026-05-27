@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/internal/mcpsrv"
 	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/sandbox"
@@ -59,9 +60,8 @@ func runMCPServe(cmd *cobra.Command, _ []string) error {
 	if warn != "" {
 		fmt.Fprintln(os.Stderr, warn)
 	}
-	return withManager(cmd, backend, func(ctx context.Context, mgr *sandbox.Manager) error {
-		srv := mcpsrv.New(mgr)
-		return srv.ServeStdio(ctx)
+	return withClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
+		return mcpsrv.New(c).ServeStdio(ctx)
 	})
 }
 
@@ -173,8 +173,7 @@ func runMCPProxy(cmd *cobra.Command, args []string) error {
 	}
 
 	backend := resolveBackendForSandbox(name)
-	return withManager(cmd, backend, func(ctx context.Context, mgr *sandbox.Manager) error {
-		proxy := mcpsrv.NewProxy(mgr, name, innerCmd, opts)
-		return proxy.ServeStdio(ctx)
+	return withClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
+		return mcpsrv.NewProxy(c, name, innerCmd, opts).ServeStdio(ctx)
 	})
 }

@@ -584,6 +584,55 @@ func attachStatusOK(status sandbox.Status, name string) error {
 	}
 }
 
+// EnsureSetup performs idempotent first-run setup: writes safe
+// defaults (tmux_conf=default+host, setup_complete=true) plus the
+// non-interactive layout scaffolding and base image build.
+// Safe to call before any sandbox operation; a no-op once
+// setup_complete is true. The interactive setup wizard is a separate
+// flow — see SystemClient.SetupStatus / SystemClient.Setup.
+func (c *Client) EnsureSetup(ctx context.Context) error {
+	return c.manager.EnsureSetup(ctx)
+}
+
+// SendInput appends text to the running sandbox's tmux session as if
+// the user had typed it. Used by the MCP server's sandbox_input tool
+// to forward outer-agent messages into a running inner agent.
+// Returns ErrContainerNotRunning when the sandbox is stopped.
+func (c *Client) SendInput(ctx context.Context, name, text string) error {
+	return c.manager.SendInput(ctx, name, text)
+}
+
+// StdioExec runs cmd inside the sandbox's container with raw stdio
+// piped to the supplied stdin/stdout/stderr. Used by the MCP proxy
+// to bridge an outer client's stdio to a server running in the
+// sandbox. Returns *UsageError when the active backend doesn't
+// implement runtime.StdioExecer (currently Tart and Seatbelt don't —
+// only Docker, Podman, and containerd do).
+//
+// Unlike Exec/Attach, StdioExec does not allocate a PTY; it's the
+// right shape for piping JSON-RPC or other line-oriented protocols.
+func (c *Client) StdioExec(ctx context.Context, name string, cmd []string, stdin io.Reader, stdout, stderr io.Writer) error {
+	execer, ok := c.rt.(runtime.StdioExecer)
+	if !ok {
+		return sandbox.NewUsageError("backend %s does not support stdio exec", c.rt.Descriptor().Name)
+	}
+	containerName := store.InstanceName(name)
+	return execer.StdioExec(ctx, containerName, cmd, stdin, stdout, stderr)
+}
+
+// SandboxDir returns the on-host directory that holds a sandbox's
+// persisted state (meta.json, work copies, files/, cache/, agent log,
+// prompt, etc.). Used by embedders that need to read or write files
+// in that directory directly — e.g., the MCP server's
+// sandbox_files_* tools resolve file paths under SandboxDir(name).
+//
+// The path is computed from c.layout's DataDir; it exists as soon as
+// the sandbox has been created. Returns the path even for unknown
+// names (callers must do their own existence check).
+func (c *Client) SandboxDir(name string) string {
+	return c.layout.SandboxDir(name)
+}
+
 // --- private helpers ---
 
 // resolveBackendFromConfig picks the container backend for a Client created

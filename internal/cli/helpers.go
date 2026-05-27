@@ -1,4 +1,4 @@
-// ABOUTME: Backend/agent/model/profile resolution helpers and withRuntime/withClient
+// ABOUTME: Backend/agent/model/profile resolution helpers and the withClient /
 // ABOUTME: wrappers shared by all Cobra command handlers in internal/cli.
 package cli
 
@@ -129,19 +129,6 @@ func resolveBackendForSandbox(name string) string {
 	return backend
 }
 
-// withRuntime creates a runtime for the given backend, calls fn, and ensures cleanup.
-// Prefer withClient for new code; withRuntime is kept for command handlers that
-// still need direct runtime access (image probing, raw exec, tmux helpers).
-// See internal/cli/CONVENTIONS.md.
-func withRuntime(ctx context.Context, backend string, fn func(ctx context.Context, rt runtime.Runtime) error) error {
-	rt, err := newRuntime(ctx, backend)
-	if err != nil {
-		return fmt.Errorf("connect to runtime: %w", err)
-	}
-	defer rt.Close() //nolint:errcheck // best-effort cleanup
-	return fn(ctx, rt)
-}
-
 // withClient constructs a yoloai.Client for the given backend, calls fn, and
 // closes the client. Preferred entry point for command handlers that only need
 // orchestration-level operations (Stop, Destroy, List, Inspect, Diff, Apply,
@@ -238,14 +225,6 @@ func resolveProfile(cmd *cobra.Command) string {
 		return p
 	}
 	return ""
-}
-
-// withManager creates a runtime and sandbox manager, calls fn, and ensures cleanup.
-func withManager(cmd *cobra.Command, backend string, fn func(ctx context.Context, mgr *sandbox.Manager) error) error {
-	return withRuntime(cmd.Context(), backend, func(ctx context.Context, rt runtime.Runtime) error {
-		mgr := sandbox.NewManager(rt, slog.Default(), cmd.InOrStdin(), cmd.ErrOrStderr(), sandbox.WithLayout(cliLayout()))
-		return fn(ctx, mgr)
-	})
 }
 
 // sandboxErrorHint wraps an error with the sandbox directory path and a hint

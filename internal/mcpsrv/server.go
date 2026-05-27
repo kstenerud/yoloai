@@ -1,5 +1,6 @@
 // ABOUTME: Server type and ServeStdio entry point for the orchestration MCP server.
 // ABOUTME: Outer agents (Claude Desktop, etc.) call its tools to drive inner sandboxes.
+
 // Package mcpsrv implements the yoloAI MCP server, exposing sandbox
 // operations as tools for outer agents driving the two-layer agentic workflow.
 package mcpsrv
@@ -8,7 +9,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/kstenerud/yoloai/sandbox"
+	"github.com/kstenerud/yoloai"
 	"github.com/mark3labs/mcp-go/server"
 )
 
@@ -16,7 +17,7 @@ import (
 // It exposes sandbox lifecycle, observation, refinement, and file exchange
 // tools for outer agents (Claude Desktop, VS Code Copilot, etc.).
 type Server struct {
-	mgr *sandbox.Manager
+	c   *yoloai.Client
 	srv *server.MCPServer
 }
 
@@ -28,9 +29,10 @@ then inspects and applies the results.
 
 Call yoloai_help for the full workflow guide.`
 
-// New creates a new orchestration MCP server backed by mgr.
-func New(mgr *sandbox.Manager) *Server {
-	s := &Server{mgr: mgr}
+// New creates a new orchestration MCP server backed by c. The Client is the
+// caller's; ServeStdio does not close it.
+func New(c *yoloai.Client) *Server {
+	s := &Server{c: c}
 	s.srv = server.NewMCPServer(
 		"yoloai",
 		"1.0.0",
@@ -42,7 +44,7 @@ func New(mgr *sandbox.Manager) *Server {
 }
 
 // ServeStdio runs the MCP server on stdin/stdout until ctx is cancelled.
-func (s *Server) ServeStdio(ctx context.Context) error {
+func (s *Server) ServeStdio(_ context.Context) error {
 	return server.ServeStdio(s.srv)
 }
 
