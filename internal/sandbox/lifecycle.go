@@ -238,6 +238,59 @@ func (m *Manager) handleStoppedOrRemovedStatus(ctx context.Context, cname, name 
 	return nil
 }
 
+// handleSuspendedResume resumes a suspended VM and starts a fresh agent session.
+// Credentials are refreshed, the VM is resumed via runtime.Start (which kills
+// the stale tmux session and runs the setup script), and executeVMWorkDirSetup
+// is skipped because the work directory is already present from the suspend.
+func (m *Manager) handleSuspendedResume(ctx context.Context, cname, name string, meta *store.Meta, opts StartOptions, promptText string, customPrompt bool) error {
+	slog.Info("resuming suspended sandbox", "event", "sandbox.start.resume", "sandbox", name)
+	sandboxDir := m.layout.SandboxDir(name)
+
+	agentDef := agent.GetAgent(meta.Agent)
+	if agentDef == nil {
+		return NewConfigError("unknown agent %q in sandbox state — this sandbox was created with an agent that's not registered in the current yoloai installation; destroy and recreate the sandbox with a registered agent", meta.Agent)
+	}
+
+	// Refresh credentials and settings from host (handles token refresh between sessions).
+	hasAPIKey := hasAnyAPIKey(agentDef, nil)
+	if _, err := copySeedFiles(agentDef, sandboxDir, hasAPIKey, filepath.Dir(m.layout.DataDir)); err != nil {
+		return fmt.Errorf("refresh seed files: %w", err)
+	}
+	if err := ensureContainerSettings(agentDef, sandboxDir, meta.Isolation); err != nil {
+		return fmt.Errorf("ensure container settings: %w", err)
+	}
+
+	switch {
+	case customPrompt:
+		if err := m.prepareCustomPromptFiles(name, meta, promptText); err != nil {
+			return err
+		}
+		defer m.cleanupResumeFiles(name)
+	case opts.Resume:
+		if err := m.prepareResumeFiles(name, meta); err != nil {
+			return err
+		}
+		defer m.cleanupResumeFiles(name)
+	}
+
+	// Resume the VM: tart run resumes from suspended state, kills the stale
+	// tmux session, and runs the setup script for a fresh agent.
+	if err := m.runtime.Start(ctx, cname); err != nil {
+		// Apple VZ framework cannot restore VMs that had VirtioFS (--dir) mounts
+		// from a suspend snapshot (VZErrorDomain Code=12). Fall back to destroying
+		// the suspended VM and recreating from the host staging area.
+		slog.Warn("suspended VM resume failed, falling back to recreate", "sandbox", name, "err", err)
+		_ = m.runtime.Remove(ctx, cname)
+		return m.handleStoppedOrRemovedStatus(ctx, cname, name, meta, opts, promptText, customPrompt, false, fmt.Sprintf("Sandbox %s recreated and started", name))
+	}
+
+	// Don't call executeVMWorkDirSetup: the work directory is already present
+	// inside the VM from before the suspend.
+
+	fmt.Fprintf(m.output, "Sandbox %s resumed\n", name) //nolint:errcheck // best-effort output
+	return nil
+}
+
 func (m *Manager) start(ctx context.Context, name string, opts StartOptions) error {
 	slog.Info("starting sandbox", "event", "sandbox.start", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
 	sandboxDir := m.layout.SandboxDir(name)
@@ -285,6 +338,9 @@ func (m *Manager) start(ctx context.Context, name string, opts StartOptions) err
 
 	case StatusDone, StatusFailed:
 		return m.handleTerminalStatus(ctx, name, meta, opts, promptText, customPrompt)
+
+	case StatusSuspended:
+		return m.handleSuspendedResume(ctx, cname, name, meta, opts, promptText, customPrompt)
 
 	case StatusStopped:
 		return m.handleStoppedOrRemovedStatus(ctx, cname, name, meta, opts, promptText, customPrompt, true, fmt.Sprintf("Sandbox %s started", name))
@@ -492,6 +548,12 @@ func (m *Manager) Reset(ctx context.Context, opts ResetOptions) error {
 		opts.Restart = true
 	}
 
+	// Auto-upgrade to restart: Tart VMs store the work dir inside the VM,
+	// so in-place reset (host-side file access) is not possible.
+	if _, ok := m.runtime.(runtime.WorkDirSetup); ok {
+		opts.Restart = true
+	}
+
 	// Auto-upgrade to restart: container not running
 	if !opts.Restart {
 		status, err := DetectStatus(ctx, m.runtime, store.InstanceName(opts.Name), sandboxDir)
@@ -564,8 +626,12 @@ func (m *Manager) applyPostResetOptions(opts ResetOptions, sandboxDir string, pe
 // prepareResetRestart performs the full stop → wipe → recopy → start flow for
 // reset --restart. Extracted from Reset to reduce its cyclomatic complexity.
 func (m *Manager) prepareResetRestart(ctx context.Context, opts ResetOptions, sandboxDir string, meta *store.Meta) error {
-	// Stop the container (if running)
-	_ = m.stop(ctx, opts.Name)
+	// Destroy the container so start() sees StatusRemoved and does a clean
+	// recreate. Using Remove (not Stop) avoids suspending a VM we're about
+	// to rebuild — the suspend state would be stale after the host workdir
+	// is re-copied, and handleSuspendedResume would resume the wrong files.
+	cname := store.InstanceName(opts.Name)
+	_ = m.runtime.Remove(ctx, cname)
 
 	perms := Perms(meta.Isolation)
 

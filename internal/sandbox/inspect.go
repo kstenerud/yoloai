@@ -30,6 +30,7 @@ const (
 	StatusDone        Status = "done"        // container running, agent exited cleanly (exit 0)
 	StatusFailed      Status = "failed"      // container running, agent exited with error (non-zero)
 	StatusStopped     Status = "stopped"     // container stopped (docker stop)
+	StatusSuspended   Status = "suspended"   // VM suspended (state on disk, quota slot free; Tart only)
 	StatusRemoved     Status = "removed"     // container removed but sandbox dir exists
 	StatusBroken      Status = "broken"      // sandbox dir exists but meta.json missing/invalid
 	StatusUnavailable Status = "unavailable" // backend not running (container state unknown)
@@ -252,6 +253,9 @@ func DetectStatus(ctx context.Context, rt runtime.Runtime, containerName string,
 	}
 
 	if !info.Running {
+		if info.Suspended {
+			return StatusSuspended, nil
+		}
 		return StatusStopped, nil
 	}
 

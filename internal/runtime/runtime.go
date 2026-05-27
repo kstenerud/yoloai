@@ -78,7 +78,8 @@ type InstanceConfig struct {
 
 // InstanceInfo holds the inspected state of a sandbox instance.
 type InstanceInfo struct {
-	Running bool
+	Running   bool
+	Suspended bool // true if the instance is suspended (state saved to disk, not consuming CPU/RAM)
 }
 
 // ExecResult holds the output of a non-interactive command execution.

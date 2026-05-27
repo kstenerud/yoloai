@@ -244,6 +244,10 @@ func (r *Runtime) Create(ctx context.Context, cfg runtime.InstanceConfig) error 
 }
 
 // Start boots the VM in the background and runs the setup script.
+// If the VM is currently suspended, tart run resumes it rather than doing a
+// fresh boot. The stale tmux session from before suspension is killed so that
+// runSetupScript starts a fresh agent — preserving the work directory while
+// giving the agent a clean process state.
 func (r *Runtime) Start(ctx context.Context, name string) error {
 	slog.Debug("tart Start", "name", name)
 	sandboxPath := filepath.Join(r.layout.SandboxesDir(), sandboxName(name))
@@ -252,6 +256,10 @@ func (r *Runtime) Start(ctx context.Context, name string) error {
 	if r.isRunning(ctx, name) {
 		return nil
 	}
+
+	// Record whether the VM is suspended before tart run resumes it.
+	// Used after boot to decide whether to kill the stale tmux session.
+	wasSuspended := r.vmState(ctx, name) == "suspended"
 
 	// Load instance config saved by Create
 	var cfg runtime.InstanceConfig
@@ -264,8 +272,16 @@ func (r *Runtime) Start(ctx context.Context, name string) error {
 		return fmt.Errorf("parse instance config: %w", err)
 	}
 
-	// Build tart run arguments
-	args := r.buildRunArgs(name, sandboxPath, cfg.Mounts)
+	// Build tart run arguments. When resuming from a suspended state, the VM
+	// snapshot already contains the VirtioFS configuration — passing --dir args
+	// again causes VZErrorDomain Code=12 "permission denied" from the
+	// Virtualization.framework restore path. Use minimal args for resume.
+	var args []string
+	if wasSuspended {
+		args = []string{"run", "--no-graphics", name}
+	} else {
+		args = r.buildRunArgs(name, sandboxPath, cfg.Mounts)
+	}
 
 	// Open log file for stderr capture
 	logPath := filepath.Join(sandboxPath, backendDir, vmLogFileName)
@@ -332,6 +348,14 @@ func (r *Runtime) Start(ctx context.Context, name string) error {
 	time.Sleep(500 * time.Millisecond)
 	slog.Debug("tart Start: checking if VM is still running", "name", name, "isRunning", r.isRunning(ctx, name))
 
+	// When resuming from suspend, kill the stale tmux session so that the setup
+	// script starts a fresh agent. The work directory is preserved by the suspend.
+	if wasSuspended {
+		slog.Debug("tart Start: killing stale tmux session after suspend resume", "name", name)
+		args := execArgs(name, "bash", "-c", "tmux kill-server 2>/dev/null; true")
+		_, _ = r.runTart(ctx, args...)
+	}
+
 	// Deliver setup script via shared directory and run it
 	slog.Debug("tart Start: calling runSetupScript", "name", name)
 	if err := r.runSetupScript(ctx, name, sandboxPath, cfg.Mounts); err != nil {
@@ -341,18 +365,38 @@ func (r *Runtime) Start(ctx context.Context, name string) error {
 	return nil
 }
 
-// Stop stops the VM with a clean shutdown.
+// Stop suspends the VM, preserving its state on disk and freeing the quota slot.
+// tart suspend is asynchronous: the command returns while the VM is still writing
+// its RAM state to disk. We poll until the state reaches "suspended" (or the VM
+// disappears) before returning. Falls back to a hard stop if suspend fails.
 func (r *Runtime) Stop(ctx context.Context, name string) error {
+	if _, err := r.runTart(ctx, "suspend", name); err != nil {
+		r.stopVM(ctx, name)
+		return nil //nolint:nilerr // suspend failed; hard-stop already done, error is not actionable
+	}
+	// Wait for suspension to complete (writing RAM state to disk takes seconds).
+	deadline := time.Now().Add(60 * time.Second)
+	for time.Now().Before(deadline) {
+		state := r.vmState(ctx, name)
+		if state == "suspended" || state == "stopped" || state == "" {
+			return nil
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	// Timed out — fall back to hard stop
+	slog.Warn("tart suspend timed out, falling back to hard stop", "name", name)
 	r.stopVM(ctx, name)
 	return nil
 }
 
 // Remove deletes the VM and cleans up the PID file.
+// Uses a hard stop (not suspend) before deleting — suspending before an
+// immediate delete would waste time writing RAM state to disk.
 func (r *Runtime) Remove(ctx context.Context, name string) error {
 	sandboxPath := filepath.Join(r.layout.SandboxesDir(), sandboxName(name))
 
-	// Stop first if running
-	_ = r.Stop(ctx, name)
+	// Hard stop first (don't suspend — state is about to be deleted)
+	r.stopVM(ctx, name)
 
 	if !r.vmExists(ctx, name) {
 		// Clean up stale PID file
@@ -372,12 +416,13 @@ func (r *Runtime) Remove(ctx context.Context, name string) error {
 
 // Inspect returns the current state of the VM instance.
 func (r *Runtime) Inspect(ctx context.Context, name string) (runtime.InstanceInfo, error) {
-	if !r.vmExists(ctx, name) {
+	state := r.vmState(ctx, name)
+	if state == "" {
 		return runtime.InstanceInfo{}, runtime.ErrNotFound
 	}
-
 	return runtime.InstanceInfo{
-		Running: r.isRunning(ctx, name),
+		Running:   state == "running",
+		Suspended: state == "suspended",
 	}, nil
 }
 
@@ -726,18 +771,31 @@ func (r *Runtime) runTart(ctx context.Context, args ...string) (string, error) {
 	return strings.TrimSpace(stdout.String()), nil
 }
 
-// vmExists checks whether a VM with the given name exists in tart's inventory.
-func (r *Runtime) vmExists(ctx context.Context, vmName string) bool {
-	out, err := r.runTart(ctx, "list", "--quiet")
+// vmState returns the tart state string for the named VM: "running",
+// "suspended", "stopped", or "" if the VM does not exist.
+func (r *Runtime) vmState(ctx context.Context, vmName string) string {
+	out, err := r.runTart(ctx, "list", "--format", "json")
 	if err != nil {
-		return false
+		return ""
 	}
-	for line := range strings.SplitSeq(out, "\n") {
-		if strings.TrimSpace(line) == vmName {
-			return true
+	var entries []struct {
+		Name  string `json:"Name"`
+		State string `json:"State"`
+	}
+	if err := json.Unmarshal([]byte(out), &entries); err != nil {
+		return ""
+	}
+	for _, e := range entries {
+		if e.Name == vmName {
+			return e.State
 		}
 	}
-	return false
+	return ""
+}
+
+// vmExists checks whether a VM with the given name exists in tart's inventory.
+func (r *Runtime) vmExists(ctx context.Context, vmName string) bool {
+	return r.vmState(ctx, vmName) != ""
 }
 
 // isRunning checks if the VM is running by attempting a trivial exec.

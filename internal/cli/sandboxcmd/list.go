@@ -78,7 +78,7 @@ func matchesStatusFilter(info *sandbox.Info, f listFilters) bool {
 	if f.done && info.Status != sandbox.StatusDone && info.Status != sandbox.StatusFailed {
 		return false
 	}
-	if f.stopped && info.Status != sandbox.StatusStopped {
+	if f.stopped && info.Status != sandbox.StatusStopped && info.Status != sandbox.StatusSuspended {
 		return false
 	}
 	return true
