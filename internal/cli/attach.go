@@ -12,7 +12,6 @@ import (
 	"github.com/creack/pty"
 	yoloai "github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/sandbox"
-	"github.com/kstenerud/yoloai/sandbox/store"
 	"github.com/spf13/cobra"
 )
 
@@ -86,15 +85,6 @@ func cliIOStreams() yoloai.IOStreams {
 		Rows: rows,
 		Cols: cols,
 	}
-}
-
-// tmuxExecUser returns the user to use for tmux exec operations.
-// Delegates to sandbox.ContainerUser which handles all cases:
-//   - Podman --userns=keep-id: empty (use container default)
-//   - gVisor: numeric host UID (gVisor resolves usernames from OCI manifest, not /etc/passwd)
-//   - default: "yoloai"
-func tmuxExecUser(meta *store.Meta) string {
-	return sandbox.ContainerUser(meta)
 }
 
 // setTerminalTitle sets the terminal title for the host terminal.

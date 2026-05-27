@@ -537,6 +537,25 @@ func (c *Client) Attach(ctx context.Context, name string, io IOStreams) error {
 	return c.rt.InteractiveExec(ctx, containerName, cmd, user, "", io)
 }
 
+// Exec runs `cmd` inside the named sandbox's container interactively
+// and connects the supplied IOStreams. The sandbox must be running
+// (Active or Idle); other statuses return ErrContainerNotRunning. The
+// user, working directory, and container name are derived from the
+// sandbox's persisted metadata. Non-zero exit from the inner command
+// surfaces as *exec.ExitError so callers can propagate the exit code.
+func (c *Client) Exec(ctx context.Context, name string, cmd []string, io IOStreams) error {
+	info, err := c.manager.Inspect(ctx, name)
+	if err != nil {
+		return err
+	}
+	if info.Status != sandbox.StatusActive && info.Status != sandbox.StatusIdle {
+		return fmt.Errorf("sandbox %q: %w", name, sandbox.ErrContainerNotRunning)
+	}
+	containerName := store.InstanceName(name)
+	user := sandbox.ContainerUser(info.Meta)
+	return c.rt.InteractiveExec(ctx, containerName, cmd, user, info.Meta.Workdir.MountPath, io)
+}
+
 // attachStatusOK returns nil if the sandbox status permits attach,
 // otherwise a typed error suitable for the CLI exit-code mapping.
 func attachStatusOK(status sandbox.Status, name string) error {
