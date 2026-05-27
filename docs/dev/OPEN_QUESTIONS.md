@@ -200,7 +200,9 @@ These were deferred from MVP but might be cheap to add and valuable for dogfoodi
 
 ## Unresolved (prioritize based on user feedback)
 
-93. **MCP server support inside containers** — **Deferred to post-rearchitecture (2026-05-23).** Per [D18](../design/layering.md#7-decisions): no layering impact; the `docker exec`-style leak in `internal/mcpsrv/proxy.go` is already covered by W10 + W-L8b. Park as discovered-finding if surfaced mid-workstream. Original notes: Claude Code's MCP config (`settings.json`, `~/.claude.json`) gets seeded into the container, but MCP servers themselves don't work: stdio servers need their binary/script installed in the container (not available), and network servers reference `localhost` which resolves to the container, not the host. Possible solutions: custom profiles with MCP dependencies installed, or host-network passthrough. MCP-heavy users could build a custom profile.
+93. **MCP server support inside containers** — **RESOLVED 2026-05-27.** Two halves to the original question:
+    - **Architectural concern** (the OQ-tracked half): "did the rearchitecture leave a `docker exec`-style leak in `internal/mcpsrv/proxy.go`?" Verified resolved — `proxy.go:240` now calls `p.c.StdioExec(...)` via the runtime-abstracted Client API, no backend-specific shell-out. W-L8b landed this. Open-question status retired.
+    - **Feature gap** (the deferred half): stdio MCP servers need their binaries baked into the sandbox image, and network MCP servers' `localhost` references resolve to the sandbox, not the host. Today: users with MCP-heavy workflows build a custom profile that installs the binaries and rewrites references to `BackendDescriptor.HostFromContainer`. Open-ended future work — detection + warnings, auto-rewrites, or an `mcp install` helper — tracked in [docs/dev/plans/TODO.md](plans/TODO.md) "MCP servers don't fully work inside sandboxes". No further OPEN_QUESTIONS status needed.
 
 ## macOS Sandbox Backend
 
@@ -215,7 +217,7 @@ These were deferred from MVP but might be cheap to add and valuable for dogfoodi
 
 ## Network Allowlist Audit
 
-97. **Comprehensive network allowlist audit for all agents** — **Deferred to post-rearchitecture (2026-05-23).** Per [D18](../design/layering.md#7-decisions): audit affects values (which domains), not Client API shape — no layering impact. Run in parallel with the rearchitecture, not as part of it. Original notes: Gemini was missing `oauth2.googleapis.com` for OAuth token refresh (tokens expire after ~1 hour, breaking long sessions). Claude likely has the same class of issue. All agents need a systematic audit: capture actual network traffic during full sessions and verify the allowlist covers everything. Especially important for `--network-isolated` mode where missing domains cause silent failures.
+97. **Comprehensive network allowlist audit for all agents** — **RESOLVED 2026-05-27.** The architectural concern (does the rearchitecture affect allowlist *shape*?) was answered "no" at deferral time — allowlists are per-agent values, not Client API surface. The remaining work — capturing actual network traffic during full sessions per agent and adding any missing domains — is empirical data work, not an open architectural question. Tracked in [docs/dev/plans/TODO.md](plans/TODO.md) "Comprehensive network allowlist audit". Re-elevate to OPEN_QUESTIONS only if a missing-domain class is found that suggests a structural fix (e.g. a runtime DNS-passthrough mechanism) rather than just adding more domain strings.
 
 ## Model Version Tracking
 
