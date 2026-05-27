@@ -84,9 +84,11 @@ type Options struct {
 	// explicit path. See development-principles.md §12.
 	DataDir string
 
-	// Backend selects the runtime backend: "docker", "tart", or "seatbelt".
-	// Default: read from config.yaml, then "docker".
-	Backend string
+	// Backend selects the runtime backend (yoloai.BackendDocker,
+	// yoloai.BackendTart, etc.). Default: read from config.yaml, then
+	// yoloai.BackendDocker. Empty BackendName ("") is treated as "use
+	// the default" by every consumer of Options.Backend.
+	Backend BackendName
 
 	// Logger receives structured log output. Default: slog.Default().
 	Logger *slog.Logger
@@ -118,7 +120,7 @@ func NewWithOptions(ctx context.Context, opts Options) (*Client, error) {
 
 	backend := opts.Backend
 	if backend == "" {
-		backend = resolveBackendFromConfig(ctx, layout)
+		backend = BackendName(resolveBackendFromConfig(ctx, layout))
 	}
 	logger := opts.Logger
 	if logger == nil {
@@ -133,7 +135,7 @@ func NewWithOptions(ctx context.Context, opts Options) (*Client, error) {
 		input = os.Stdin
 	}
 
-	rt, err := newRuntime(ctx, backend, layout)
+	rt, err := newRuntime(ctx, string(backend), layout)
 	if err != nil {
 		return nil, fmt.Errorf("connect to %s backend: %w", backend, err)
 	}
@@ -160,9 +162,10 @@ type RunOptions struct {
 	// If empty, the sandbox starts without a prompt (interactive mode).
 	Prompt string
 
-	// Agent selects the AI agent (e.g., "claude", "gemini", "codex").
-	// Default: read from config.yaml, then "claude".
-	Agent string
+	// Agent selects the AI agent (yoloai.AgentClaude, yoloai.AgentGemini,
+	// yoloai.AgentCodex, …). Default: read from config.yaml, then
+	// yoloai.AgentClaude.
+	Agent AgentName
 
 	// Model selects the model. Default: read from config.yaml, then agent default.
 	Model string
@@ -225,7 +228,7 @@ func (c *Client) Run(ctx context.Context, opts RunOptions) (*sandbox.Info, error
 
 	agent := opts.Agent
 	if agent == "" {
-		agent = resolveAgentFromConfig(c.layout)
+		agent = AgentName(resolveAgentFromConfig(c.layout))
 	}
 	model := opts.Model
 	if model == "" {
@@ -242,7 +245,7 @@ func (c *Client) Run(ctx context.Context, opts RunOptions) (*sandbox.Info, error
 			Path: opts.WorkDir,
 			Mode: sandbox.DirModeCopy,
 		},
-		Agent:   agent,
+		Agent:   string(agent),
 		Model:   model,
 		Profile: profile,
 		Prompt:  opts.Prompt,

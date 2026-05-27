@@ -140,7 +140,7 @@ func WithClient(cmd *cobra.Command, backend string, fn func(ctx context.Context,
 	ctx := cmd.Context()
 	c, err := yoloai.NewWithOptions(ctx, yoloai.Options{
 		DataDir: Layout().DataDir,
-		Backend: backend,
+		Backend: yoloai.BackendName(backend),
 		Logger:  slog.Default(),
 		Input:   cmd.InOrStdin(),
 		Output:  cmd.ErrOrStderr(),

@@ -108,7 +108,7 @@ type BuildOptions struct {
 	Profile string
 	// Backend selects the backend to build for. Empty = default
 	// backend. Ignored when AllBackends is true.
-	Backend string
+	Backend BackendName
 	// AllBackends builds across every backend that's currently
 	// available. Mutually exclusive with Backend.
 	AllBackends bool
@@ -169,9 +169,9 @@ func (s *SystemClient) Build(ctx context.Context, opts BuildOptions) error {
 
 	backend := opts.Backend
 	if backend == "" {
-		backend = resolveBackendFromConfig(ctx, s.layout)
+		backend = BackendName(resolveBackendFromConfig(ctx, s.layout))
 	}
-	return s.buildOne(ctx, backend, opts, out)
+	return s.buildOne(ctx, string(backend), opts, out)
 }
 
 // buildOne runs one backend's build (base or profile) using a freshly
@@ -191,10 +191,10 @@ func (s *SystemClient) buildOne(ctx context.Context, backend string, opts BuildO
 // CheckOptions configures SystemClient.Check.
 type CheckOptions struct {
 	// Backend is the backend to verify. Required.
-	Backend string
+	Backend BackendName
 	// Agent is the agent name whose credentials are checked. Required;
 	// caller resolves the default before calling.
-	Agent string
+	Agent AgentName
 	// Isolation, when non-empty, triggers an isolation-mode capability
 	// check via runtime.RequiredCapabilitiesFor + caps.RunChecks.
 	Isolation string
@@ -229,7 +229,7 @@ func (s *SystemClient) Check(ctx context.Context, opts CheckOptions) ([]CheckRes
 	var results []CheckResult
 
 	// 1. Backend connectivity.
-	rt, backendErr := newRuntime(ctx, opts.Backend, s.layout)
+	rt, backendErr := newRuntime(ctx, string(opts.Backend), s.layout)
 	if backendErr != nil {
 		results = append(results,
 			CheckResult{Name: "backend", OK: false, Message: backendErr.Error()},
@@ -238,11 +238,11 @@ func (s *SystemClient) Check(ctx context.Context, opts CheckOptions) ([]CheckRes
 	} else {
 		results = append(results, CheckResult{Name: "backend", OK: true})
 		// 2. Base image exists.
-		results = append(results, s.checkImage(ctx, rt, opts.Backend))
+		results = append(results, s.checkImage(ctx, rt, string(opts.Backend)))
 	}
 
 	// 3. Agent credentials.
-	results = append(results, s.checkAgent(opts.Agent))
+	results = append(results, s.checkAgent(string(opts.Agent)))
 
 	// 4. Isolation prerequisites (only when --isolation is specified).
 	if opts.Isolation != "" {
@@ -341,10 +341,17 @@ type PruneResult struct {
 
 // PruneItem describes one removed (or removable) item.
 type PruneItem struct {
-	Backend string // "docker", "containerd", "tart", or "" for temp dirs / non-backend items
-	Kind    string // "container", "vm", "image", "temp_dir", etc. (backend-defined)
-	Name    string // identifier
-	Bytes   int64  // bytes reclaimed; 0 when backend can't report
+	// Backend is the backend that owns the item, or empty for non-backend
+	// items like temp dirs (Kind == PruneKindTempDir).
+	Backend BackendName
+	// Kind classifies the resource type — see PruneKind* constants for
+	// the shipping set. Open-set: backends can introduce new kinds.
+	Kind PruneItemKind
+	// Name is the resource identifier (e.g. "yoloai-mybox" for a
+	// container, the Tart VM name for a VM, the temp-dir path).
+	Name string
+	// Bytes reclaimed; 0 when the backend can't report.
+	Bytes int64
 }
 
 // BrokenSandbox is an entry in DataDir/sandboxes/ whose meta.json
@@ -411,11 +418,19 @@ func (s *SystemClient) pruneBackend(ctx context.Context, backend string, known [
 			return nil
 		}
 		for _, item := range actual.Items {
-			items = append(items, PruneItem{Backend: backend, Kind: item.Kind, Name: item.Name})
+			items = append(items, PruneItem{
+				Backend: BackendName(backend),
+				Kind:    PruneItemKind(item.Kind),
+				Name:    item.Name,
+			})
 		}
 	} else {
 		for _, item := range scan.Items {
-			items = append(items, PruneItem{Backend: backend, Kind: item.Kind, Name: item.Name})
+			items = append(items, PruneItem{
+				Backend: BackendName(backend),
+				Kind:    PruneItemKind(item.Kind),
+				Name:    item.Name,
+			})
 		}
 	}
 
@@ -436,7 +451,7 @@ func (s *SystemClient) pruneTempFiles(dryRun bool) ([]PruneItem, error) {
 	}
 	items := make([]PruneItem, 0, len(stale))
 	for _, path := range stale {
-		items = append(items, PruneItem{Kind: "temp_dir", Name: path})
+		items = append(items, PruneItem{Kind: PruneKindTempDir, Name: path})
 	}
 	if !dryRun {
 		if _, err := sandbox.PruneTempFiles(false, staleTempFileAge); err != nil {
@@ -454,13 +469,15 @@ type SetupOptions struct {
 	// TmuxConf is the tmux config mode. REQUIRED. One of:
 	// "default", "default+host", "host", "none".
 	TmuxConf string
-	// Backend is the default backend name (e.g. "docker", "tart").
-	// May be empty only when there's exactly one (or zero) available
-	// backends on the platform — Setup auto-picks in that case.
-	Backend string
-	// Agent is the default agent name (e.g. "claude"). May be empty
-	// only when there's exactly one (or zero) available agents.
-	Agent string
+	// Backend is the default backend name (yoloai.BackendDocker,
+	// yoloai.BackendTart, …). May be empty only when there's exactly
+	// one (or zero) available backends on the platform — Setup
+	// auto-picks in that case.
+	Backend BackendName
+	// Agent is the default agent name (yoloai.AgentClaude, …). May
+	// be empty only when there's exactly one (or zero) available
+	// agents.
+	Agent AgentName
 }
 
 // SetupStatus is the host inspection a setup wizard needs to render
@@ -507,8 +524,8 @@ func (s *SystemClient) Setup(ctx context.Context, opts SetupOptions) error {
 	mgr := sandbox.NewManager(nil, slog.Default(), os.Stdin, io.Discard, sandbox.WithLayout(s.layout))
 	return mgr.ApplySetup(ctx, sandbox.SetupOptions{
 		TmuxConf: opts.TmuxConf,
-		Backend:  opts.Backend,
-		Agent:    opts.Agent,
+		Backend:  string(opts.Backend),
+		Agent:    string(opts.Agent),
 	})
 }
 

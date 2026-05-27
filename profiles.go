@@ -89,9 +89,9 @@ func (a *ProfileAdmin) Create(_ context.Context, name string) error {
 
 // ProfileSummary is a row in ProfileAdmin.List output.
 type ProfileSummary struct {
-	Name          string // profile name
-	Agent         string // configured agent, empty if not set
-	HasDockerfile bool   // profile carries its own Dockerfile
+	Name          string    // profile name
+	Agent         AgentName // configured agent, empty if not set
+	HasDockerfile bool      // profile carries its own Dockerfile
 }
 
 // List returns one ProfileSummary per profile under ~/.yoloai/profiles/.
@@ -110,7 +110,7 @@ func (a *ProfileAdmin) List(_ context.Context) ([]ProfileSummary, error) {
 			HasDockerfile: config.ProfileHasDockerfile(a.s.layout, name),
 		}
 		if profile, loadErr := config.LoadProfile(a.s.layout, name); loadErr == nil {
-			summary.Agent = profile.Agent
+			summary.Agent = AgentName(profile.Agent)
 		}
 		out = append(out, summary)
 	}
@@ -243,16 +243,10 @@ func (a *ProfileAdmin) ReferencingSandboxes(_ context.Context, profileName strin
 // ImageCleanupHint describes a per-backend command for removing a
 // profile's built image. Returned by ProfileAdmin.Delete so the CLI
 // can surface them after the profile directory is gone.
-//
-// Backend is a plain string to match the rest of the yoloai.Client
-// surface; internal code uses runtime.BackendName for parse-time
-// safety, but yoloai's exported types haven't been swept yet (Q-Y
-// applied the typed-name discipline only to internal packages so
-// far).
 type ImageCleanupHint struct {
-	Backend string // backend descriptor name (e.g. "docker", "podman")
-	Image   string // e.g. "yoloai-myprofile"
-	Command string // suggested shell command
+	Backend BackendName // backend descriptor name (yoloai.BackendDocker, etc.)
+	Image   string      // e.g. "yoloai-myprofile"
+	Command string      // suggested shell command
 }
 
 // DeleteProfileResult is the structured return from ProfileAdmin.Delete.
@@ -293,7 +287,7 @@ func (a *ProfileAdmin) Delete(_ context.Context, name string) (*DeleteProfileRes
 			continue
 		}
 		hints = append(hints, ImageCleanupHint{
-			Backend: string(desc.Name),
+			Backend: BackendName(desc.Name),
 			Image:   image,
 			Command: desc.CleanupHint(image),
 		})

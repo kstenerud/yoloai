@@ -136,8 +136,8 @@ func collectOrphans(cmd *cobra.Command) []orphanItemJSON {
 	out := make([]orphanItemJSON, 0, len(result.RemovedItems))
 	for _, item := range result.RemovedItems {
 		out = append(out, orphanItemJSON{
-			Backend: item.Backend,
-			Kind:    item.Kind,
+			Backend: string(item.Backend),
+			Kind:    string(item.Kind),
 			Name:    item.Name,
 		})
 	}

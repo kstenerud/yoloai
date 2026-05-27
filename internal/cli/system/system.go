@@ -95,7 +95,7 @@ func runSystemBuild(cmd *cobra.Command, args []string, backend string) error {
 
 	opts := yoloai.BuildOptions{
 		Profile: profile,
-		Backend: backend,
+		Backend: yoloai.BackendName(backend),
 		Rebuild: force,
 		Secrets: secrets,
 		Output:  buildOutputFor(cmd),

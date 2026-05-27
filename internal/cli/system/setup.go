@@ -41,8 +41,8 @@ func runSystemSetup(cmd *cobra.Command) error {
 	out := cmd.ErrOrStderr()
 
 	opts := yoloai.SetupOptions{
-		Agent:    agentFlag,
-		Backend:  backendFlag,
+		Agent:    yoloai.AgentName(agentFlag),
+		Backend:  yoloai.BackendName(backendFlag),
 		TmuxConf: tmuxConfFlag,
 	}
 
@@ -60,17 +60,19 @@ func runSystemSetup(cmd *cobra.Command) error {
 	}
 
 	if opts.Backend == "" && len(status.AvailableBackends) > 1 {
-		opts.Backend, err = wizardChoice(ctx, reader, out, "Default runtime backend:", status.AvailableBackends, defaultBackendIdx(status.AvailableBackends))
+		choice, err := wizardChoice(ctx, reader, out, "Default runtime backend:", status.AvailableBackends, defaultBackendIdx(status.AvailableBackends))
 		if err != nil {
 			return err
 		}
+		opts.Backend = yoloai.BackendName(choice)
 	}
 
 	if opts.Agent == "" && len(status.AvailableAgents) > 1 {
-		opts.Agent, err = wizardChoice(ctx, reader, out, "Default agent:", status.AvailableAgents, defaultAgentIdx(status.AvailableAgents))
+		choice, err := wizardChoice(ctx, reader, out, "Default agent:", status.AvailableAgents, defaultAgentIdx(status.AvailableAgents))
 		if err != nil {
 			return err
 		}
+		opts.Agent = yoloai.AgentName(choice)
 	}
 
 	if err := sc.Setup(ctx, opts); err != nil {

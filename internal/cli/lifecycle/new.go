@@ -102,7 +102,7 @@ func runNewCmd(cmd *cobra.Command, args []string, version string) error {
 	}
 	c, err := yoloai.NewWithOptions(cmd.Context(), yoloai.Options{
 		DataDir: cliutil.Layout().DataDir,
-		Backend: backend,
+		Backend: yoloai.BackendName(backend),
 		Input:   cmd.InOrStdin(),
 		Output:  mgrOutput,
 	})

@@ -196,7 +196,7 @@ func writePruneJSON(cmd *cobra.Command, result *yoloai.PruneResult, dryRun bool)
 	}
 	items := make([]pruneItem, 0, len(result.RemovedItems))
 	for _, item := range result.RemovedItems {
-		items = append(items, pruneItem{Kind: item.Kind, Name: item.Name})
+		items = append(items, pruneItem{Kind: string(item.Kind), Name: item.Name})
 	}
 	return cliutil.WriteJSON(cmd.OutOrStdout(), map[string]any{
 		"items":   items,
