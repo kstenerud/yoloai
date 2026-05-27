@@ -15,8 +15,8 @@ import (
 	"sync"
 
 	"github.com/kstenerud/yoloai"
-	"github.com/kstenerud/yoloai/sandbox"
-	"github.com/kstenerud/yoloai/sandbox/store"
+	"github.com/kstenerud/yoloai/internal/sandbox"
+	"github.com/kstenerud/yoloai/internal/sandbox/store"
 )
 
 // ProxyOptions controls how the proxy server creates or reuses a sandbox.

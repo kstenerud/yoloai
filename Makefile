@@ -5,7 +5,7 @@ DATE    := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 LDFLAGS := -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(DATE)
 
 GOFILES := $(shell find . -name '*.go' -not -path './vendor/*')
-EMBEDFILES := $(shell find runtime internal -type f \( -name 'Dockerfile' -o -name '*.sh' -o -name '*.py' -o -name '*.conf' -o -name '*.md' \) -not -path './vendor/*' -not -path '*/__pycache__/*' -not -path '*/tests/*')
+EMBEDFILES := $(shell find internal -type f \( -name 'Dockerfile' -o -name '*.sh' -o -name '*.py' -o -name '*.conf' -o -name '*.md' \) -not -path './vendor/*' -not -path '*/__pycache__/*' -not -path '*/tests/*')
 
 .PHONY: build test fmt lint tidy-check govulncheck hadolint actionlint check cover integration e2e integration-podman integration-seatbelt integration-tart python-test python-typecheck setup-dev-python smoketest smoketest-full releasetest setcap clean
 
@@ -44,9 +44,9 @@ govulncheck:
 ## CI installs hadolint and treats this target as required.
 hadolint:
 	@if command -v hadolint >/dev/null 2>&1; then \
-		hadolint runtime/docker/resources/Dockerfile; \
+		hadolint internal/runtime/docker/resources/Dockerfile; \
 	elif docker info >/dev/null 2>&1; then \
-		docker run --rm -i hadolint/hadolint < runtime/docker/resources/Dockerfile; \
+		docker run --rm -i hadolint/hadolint < internal/runtime/docker/resources/Dockerfile; \
 	else \
 		echo "hadolint: skipping (install hadolint or start Docker to enable)"; \
 	fi
@@ -57,13 +57,13 @@ actionlint:
 ## check: run all CI checks locally (same as PR checks)
 check: lint tidy-check hadolint actionlint test python-test
 
-## python-test: run pytest on runtime/monitor/tests (skip when pytest absent)
+## python-test: run pytest on internal/runtime/monitor/tests (skip when pytest absent)
 ## Detects pytest availability so fresh clones without dev deps still get a
 ## clean `make check`. CI installs deps via `make setup-dev-python` and
 ## treats this target as required.
 python-test: python-typecheck
 	@if python3 -m pytest --version >/dev/null 2>&1; then \
-		python3 -m pytest runtime/monitor/tests/ -v; \
+		python3 -m pytest internal/runtime/monitor/tests/ -v; \
 	else \
 		echo "Python tests skipped (install pytest + mypy via 'make setup-dev-python' to enable)"; \
 	fi
@@ -71,14 +71,14 @@ python-test: python-typecheck
 ## python-typecheck: run mypy --strict on the typed Python surface
 python-typecheck:
 	@if python3 -m mypy --version >/dev/null 2>&1; then \
-		python3 -m mypy --strict runtime/monitor/setup_helpers.py runtime/monitor/tmux_io.py runtime/monitor/tests/; \
+		python3 -m mypy --strict internal/runtime/monitor/setup_helpers.py internal/runtime/monitor/tmux_io.py internal/runtime/monitor/tests/; \
 	else \
 		echo "Python type-check skipped (install mypy via 'make setup-dev-python' to enable)"; \
 	fi
 
 ## setup-dev-python: install Python dev deps (pytest, mypy) for python-test/python-typecheck
 setup-dev-python:
-	python3 -m pip install -r runtime/monitor/tests/requirements-dev.txt
+	python3 -m pip install -r internal/runtime/monitor/tests/requirements-dev.txt
 
 ## cover: show test coverage per package and total
 cover:
@@ -95,7 +95,7 @@ base-image: build
 integration:
 	@if docker info >/dev/null 2>&1; then \
 		$(MAKE) base-image && \
-		go test -tags=integration -v -count=1 -timeout=10m ./sandbox/ ./runtime/docker/ ./internal/cli/; \
+		go test -tags=integration -v -count=1 -timeout=10m ./internal/sandbox/ ./internal/runtime/docker/ ./internal/cli/; \
 	else \
 		echo "Docker unavailable — skipping Docker integration tests"; \
 	fi
@@ -114,7 +114,7 @@ e2e: build
 ## integration-podman: run Podman integration tests (requires Podman with socket)
 ##
 ## Two suites run under YOLOAI_TEST_BACKEND=podman:
-##   1. ./runtime/podman/                    — backend-internal tests
+##   1. ./internal/runtime/podman/                    — backend-internal tests
 ##   2. ./internal/cli/ launch/lifecycle subset — CLI flow against podman
 ##      Catches sandbox-setup.py regressions that only surface on a non-Docker
 ##      runtime (CI's Docker job won't notice; that's the point of the matrix).
@@ -122,7 +122,7 @@ integration-podman: build
 	@echo "Building base image with Podman..."
 	@./$(BINARY) system build --backend=podman
 	@echo "Running Podman runtime tests..."
-	@go test -tags=integration -v -count=1 -timeout=10m ./runtime/podman/
+	@go test -tags=integration -v -count=1 -timeout=10m ./internal/runtime/podman/
 	@echo "Running CLI lifecycle subset against Podman..."
 	@YOLOAI_TEST_BACKEND=podman go test -tags=integration -v -count=1 -timeout=10m \
 		-run '^TestCLI_(StartStop|StartAfterDone)$$' ./internal/cli/
@@ -131,14 +131,14 @@ integration-podman: build
 ## On non-macOS platforms the tests skip cleanly via TestMain (exit 0).
 ## Pair-runs are encouraged on macOS as part of releasetest on Apple Silicon machines.
 integration-seatbelt:
-	go test -tags=integration -v -count=1 -timeout=5m ./runtime/seatbelt/
+	go test -tags=integration -v -count=1 -timeout=5m ./internal/runtime/seatbelt/
 
 ## integration-tart: run Tart integration tests (requires macOS with Apple Silicon + tart)
 ## On platforms without tart the tests skip cleanly via TestMain (exit 0).
 ## The TestTart_FullVMLifecycle test is gated behind YOLOAI_TEST_TART_VM=1
 ## because it clones the base image (multi-GB, multi-minute).
 integration-tart:
-	go test -tags=integration -v -count=1 -timeout=10m ./runtime/tart/
+	go test -tags=integration -v -count=1 -timeout=10m ./internal/runtime/tart/
 
 ## smoketest: run base-tier smoke tests (docker + containerd-vm / tart)
 ## VM backends require root (CAP_SYS_ADMIN + write to /var/run/netns/).

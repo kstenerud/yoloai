@@ -9,30 +9,34 @@ yoloai.go                → Orchestration spine: Client (Run, Diff, Apply, Stop
 system_client.go         → Orchestration spine: SystemClient (DiskUsage, Prune, Build, Check)
 runtime_imports_linux.go → Linux-specific backend registration (containerd)
 cmd/yoloai/              → Binary entry point
-agent/                   → Agent plugin definitions (Aider, Claude, Codex, Gemini, OpenCode, test, idle)
-config/                  → Configuration loading, profiles, migration, state, path utilities
-extension/               → User-defined custom commands (YAML-based extensions)
+internal/agent/          → Agent plugin definitions (Aider, Claude, Codex, Gemini, OpenCode, test, idle)
 internal/cli/            → Cobra command tree and CLI plumbing
+internal/config/         → Configuration loading, profiles, migration, state, path utilities
+internal/extension/      → User-defined custom commands (YAML-based extensions)
 internal/fileutil/       → os.MkdirAll / os.WriteFile wrappers for sudo ownership fix
+internal/locking/        → Per-sandbox advisory locks (Q-T)
 internal/mcpsrv/         → MCP server exposing sandbox operations as tools for outer agents
-internal/testutil/       → Shared test helpers (git, fixtures, home isolation, container polling) — test use only
-runtime/                 → Pluggable runtime interface, backend registry, isolation mapping, exec helpers
-runtime/caps/            → Capability detection system (host probing, fix instructions, doctor output)
-runtime/docker/          → Docker implementation of runtime.Runtime
-runtime/podman/          → Podman implementation (embeds Docker runtime, overrides socket discovery and rootless support)
-runtime/tart/            → Tart (macOS VM) implementation of runtime.Runtime
-runtime/seatbelt/        → Seatbelt (macOS sandbox-exec) implementation of runtime.Runtime
-runtime/containerd/      → Containerd implementation of runtime.Runtime (Kata Containers VM isolation)
-runtime/monitor/         → Embedded monitoring scripts shared across all backends (sandbox-setup.py, status-monitor.py, diagnose-idle.sh)
-sandbox/                 → Core logic: Manager, create, lifecycle, clone, inspect
-sandbox/archetype/       → Project archetype detection (devcontainer, compose, apple, simple) + .yoloai.yaml + VS Code workspace injection
-sandbox/patch/           → Git-format diff/apply machinery for :copy, :overlay, and :rw modes
-sandbox/store/           → On-disk sandbox state: paths, Meta record, SandboxState completion flags
-workspace/               → Workspace utilities (copy, git, safety checks, tags)
+internal/runtime/        → Pluggable runtime interface, backend registry, isolation mapping, exec helpers
+internal/runtime/caps/   → Capability detection system (host probing, fix instructions, doctor output)
+internal/runtime/docker/      → Docker implementation of runtime.Runtime
+internal/runtime/podman/      → Podman implementation (embeds Docker runtime, overrides socket discovery and rootless support)
+internal/runtime/tart/        → Tart (macOS VM) implementation of runtime.Runtime
+internal/runtime/seatbelt/    → Seatbelt (macOS sandbox-exec) implementation of runtime.Runtime
+internal/runtime/containerd/  → Containerd implementation of runtime.Runtime (Kata Containers VM isolation)
+internal/runtime/monitor/     → Embedded monitoring scripts shared across all backends (sandbox-setup.py, status-monitor.py, diagnose-idle.sh)
+internal/sandbox/             → Core logic: Manager, create, lifecycle, clone, inspect
+internal/sandbox/archetype/   → Project archetype detection (devcontainer, compose, apple, simple) + .yoloai.yaml + VS Code workspace injection
+internal/sandbox/patch/       → Git-format diff/apply machinery for :copy, :overlay, and :rw modes
+internal/sandbox/store/       → On-disk sandbox state: paths, Meta record, SandboxState completion flags
+internal/testutil/            → Shared test helpers (git, fixtures, home isolation, container polling) — test use only
+internal/workspace/           → Workspace utilities (copy, git, safety checks, tags)
+internal/yoerrors/            → Typed error sentinels exported via the yoloai package
 test/e2e/                → End-to-end tests against the compiled binary (build tag: e2e)
 ```
 
-Dependency direction (W-L8 layered shape): `cmd/yoloai` → `cli` → `yoloai` (Client + SystemClient) → `sandbox` + `sandbox/patch` + `sandbox/store` + `runtime`; `sandbox` → `sandbox/archetype` + `sandbox/store` + `runtime` + `agent` + `workspace`; `sandbox/patch` → `sandbox` + `sandbox/store`; `sandbox/store` is a leaf (only imports stdlib, `config`, `internal/*`); `agent` stands alone; `internal/mcpsrv` depends on `yoloai` (not `sandbox.Manager`). The CLI no longer reaches into `sandbox/*` or `runtime/*` for orchestration — every command goes through `yoloai.Client` or `yoloai.SystemClient`. The `withRuntime`/`withManager` helpers were removed in W-L10. A small set of CLI commands still call `newRuntime(ctx, backend)` directly for multi-backend enumeration (`ls`, `system doctor`, `system info`, `sandbox <name> allow`) and for the backend-scoped `system tart` subtree. Depguard (`.golangci.yml`) enforces the boundary going forward.
+Public Go surface is the **`yoloai` package only** (W-L12). Every other Go package lives under `internal/` and is unreachable from external imports by the Go compiler itself. `cmd/yoloai` is the binary entry, not a library.
+
+Dependency direction (W-L8 + W-L12 shape): `cmd/yoloai` → `internal/cli` → `yoloai` (Client + SystemClient) → `internal/sandbox` + `internal/sandbox/patch` + `internal/sandbox/store` + `internal/runtime`; `internal/sandbox` → `internal/sandbox/archetype` + `internal/sandbox/store` + `internal/runtime` + `internal/agent` + `internal/workspace`; `internal/sandbox/patch` → `internal/sandbox` + `internal/sandbox/store`; `internal/sandbox/store` is a leaf (only imports stdlib, `internal/config`, other `internal/*`); `internal/agent` stands alone; `internal/mcpsrv` depends on `yoloai` (not `sandbox.Manager`). The CLI doesn't reach into `internal/sandbox/*` or `internal/runtime/*` for orchestration — every command goes through `yoloai.Client` or `yoloai.SystemClient`. The `withRuntime`/`withManager` helpers were removed in W-L10. A small set of CLI commands still call `newRuntime(ctx, backend)` directly for multi-backend enumeration (`ls`, `system doctor`, `system info`, `sandbox <name> allow`) and for the backend-scoped `system tart` subtree. Depguard (`.golangci.yml`) enforces the boundary going forward.
 
 ## File Index
 

@@ -6,7 +6,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 
-	"github.com/kstenerud/yoloai/sandbox/store"
+	"github.com/kstenerud/yoloai/internal/sandbox/store"
 )
 
 // makeDiffCmd creates a cobra command that properly sets ArgsLenAtDash

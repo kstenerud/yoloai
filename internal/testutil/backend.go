@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/kstenerud/yoloai/config"
-	yrt "github.com/kstenerud/yoloai/runtime"
+	"github.com/kstenerud/yoloai/internal/config"
+	yrt "github.com/kstenerud/yoloai/internal/runtime"
 )
 
 // integrationBackendEnv selects the backend used by parametrized integration

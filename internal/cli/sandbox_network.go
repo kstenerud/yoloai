@@ -4,8 +4,8 @@ package cli
 import (
 	"context"
 
-	"github.com/kstenerud/yoloai/sandbox"
-	"github.com/kstenerud/yoloai/sandbox/store"
+	"github.com/kstenerud/yoloai/internal/sandbox"
+	"github.com/kstenerud/yoloai/internal/sandbox/store"
 )
 
 // ipsetResolveDomains is the shell script fragment that resolves domains to IPs

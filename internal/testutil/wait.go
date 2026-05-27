@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	yrt "github.com/kstenerud/yoloai/runtime"
+	yrt "github.com/kstenerud/yoloai/internal/runtime"
 )
 
 // defaultInspectPoll is how often the runtime-state Wait helpers re-inspect

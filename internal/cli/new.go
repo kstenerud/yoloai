@@ -12,11 +12,11 @@ import (
 	"strings"
 
 	yoloai "github.com/kstenerud/yoloai"
-	"github.com/kstenerud/yoloai/config"
-	"github.com/kstenerud/yoloai/runtime"
-	"github.com/kstenerud/yoloai/sandbox"
-	"github.com/kstenerud/yoloai/sandbox/archetype"
-	"github.com/kstenerud/yoloai/sandbox/store"
+	"github.com/kstenerud/yoloai/internal/config"
+	"github.com/kstenerud/yoloai/internal/runtime"
+	"github.com/kstenerud/yoloai/internal/sandbox"
+	"github.com/kstenerud/yoloai/internal/sandbox/archetype"
+	"github.com/kstenerud/yoloai/internal/sandbox/store"
 	"github.com/spf13/cobra"
 )
 

@@ -16,9 +16,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kstenerud/yoloai/config"
-	yoloairuntime "github.com/kstenerud/yoloai/runtime"
-	"github.com/kstenerud/yoloai/sandbox"
+	"github.com/kstenerud/yoloai/internal/config"
+	yoloairuntime "github.com/kstenerud/yoloai/internal/runtime"
+	"github.com/kstenerud/yoloai/internal/sandbox"
 )
 
 // bugReportFilename generates the output filename for a bug report.

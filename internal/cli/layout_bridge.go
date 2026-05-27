@@ -8,7 +8,7 @@ import (
 	"os/user"
 	"path/filepath"
 
-	"github.com/kstenerud/yoloai/config"
+	"github.com/kstenerud/yoloai/internal/config"
 )
 
 // rootLayout is the Layout recorded by SetRootLayout at CLI startup

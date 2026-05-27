@@ -12,8 +12,8 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	"github.com/kstenerud/yoloai/extension"
-	"github.com/kstenerud/yoloai/sandbox"
+	"github.com/kstenerud/yoloai/internal/extension"
+	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/spf13/cobra"
 )
 

@@ -9,10 +9,10 @@ import (
 	"os"
 
 	"github.com/kstenerud/yoloai"
-	"github.com/kstenerud/yoloai/sandbox"
-	"github.com/kstenerud/yoloai/sandbox/patch"
-	"github.com/kstenerud/yoloai/sandbox/store"
-	"github.com/kstenerud/yoloai/workspace"
+	"github.com/kstenerud/yoloai/internal/sandbox"
+	"github.com/kstenerud/yoloai/internal/sandbox/patch"
+	"github.com/kstenerud/yoloai/internal/sandbox/store"
+	"github.com/kstenerud/yoloai/internal/workspace"
 	"github.com/spf13/cobra"
 )
 

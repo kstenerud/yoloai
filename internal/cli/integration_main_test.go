@@ -12,9 +12,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kstenerud/yoloai/config"
+	"github.com/kstenerud/yoloai/internal/config"
+	dockerrt "github.com/kstenerud/yoloai/internal/runtime/docker"
 	"github.com/kstenerud/yoloai/internal/testutil"
-	dockerrt "github.com/kstenerud/yoloai/runtime/docker"
 )
 
 // writeTestBackendConfig pins the CLI's container-backend selection to the

@@ -9,8 +9,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/kstenerud/yoloai/runtime"
-	"github.com/kstenerud/yoloai/runtime/caps"
+	"github.com/kstenerud/yoloai/internal/runtime"
+	"github.com/kstenerud/yoloai/internal/runtime/caps"
 )
 
 // checkResultJSON is the JSON-serializable form of a single capability check result.

@@ -1,0 +1,1372 @@
+// Package tart implements the runtime.Runtime interface using Tart VMs.
+// ABOUTME: Shells out to the tart CLI for macOS VM lifecycle, exec, and image ops.
+package tart
+
+import (
+	"bytes"
+	"context"
+	"crypto/rand"
+	"encoding/json"
+	"fmt"
+	"log/slog"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"syscall"
+	"time"
+
+	"github.com/kstenerud/yoloai/internal/config"
+	"github.com/kstenerud/yoloai/internal/fileutil"
+	"github.com/kstenerud/yoloai/internal/runtime"
+	"github.com/kstenerud/yoloai/internal/runtime/monitor"
+	"github.com/kstenerud/yoloai/internal/yoerrors"
+)
+
+// getXcodeSelectPath returns the active Xcode developer directory path from xcode-select.
+// Returns empty string if xcode-select is not configured or fails.
+func getXcodeSelectPath() string {
+	cmd := exec.Command("xcode-select", "-p")
+	output, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(output))
+}
+
+// descriptor holds the static facts for the tart backend; shared by the
+// registry registration and the Runtime.Descriptor() method.
+var descriptor = runtime.BackendDescriptor{
+	Name:                      "tart",
+	Description:               "macOS VMs; native macOS env, strong isolation, heavier",
+	Platforms:                 []string{"darwin"},
+	Requires:                  "Tart CLI installed, Apple Silicon Mac",
+	InstallHint:               "brew install cirruslabs/cli/tart",
+	BaseModeName:              "vm",
+	AgentProvisionedByBackend: true,
+	SupportedIsolationModes:   nil,
+	Capabilities: runtime.BackendCaps{
+		NetworkIsolation: false,
+		OverlayDirs:      false,
+		CapAdd:           false,
+		HostFilesystem:   false,
+		// Tart VMs use a VirtioFS share at "/Volumes/My Shared Files/yoloai"
+		// (path contains spaces). The setup script creates a symlink
+		// /Users/admin/.yoloai → /Volumes/My Shared Files/yoloai so that
+		// shell commands inside the VM can reference state without quoting.
+		VMRuntimeDir: "/Users/admin/.yoloai",
+	},
+	Probe:         probe,
+	VersionString: versionString,
+}
+
+// versionString returns tart's CLI version string.
+func versionString(ctx context.Context) string {
+	out, err := exec.CommandContext(ctx, "tart", "--version").Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// probe reports whether Tart is usable. Tart requires macOS on Apple Silicon
+// and the `tart` binary on PATH. We don't run `tart --version` here — that's a
+// fork+exec on every dispatch; LookPath suffices for "is it installed".
+func probe(_ context.Context) (bool, string) {
+	if !isMacOS() {
+		return false, "tart requires macOS"
+	}
+	if !isAppleSilicon() {
+		return false, "tart requires Apple Silicon"
+	}
+	if _, err := exec.LookPath("tart"); err != nil {
+		return false, "tart binary not found (install with: brew install cirruslabs/cli/tart)"
+	}
+	return true, ""
+}
+
+func init() {
+	runtime.Register("tart", func(ctx context.Context, layout config.Layout) (runtime.Runtime, error) {
+		return New(ctx, layout)
+	}, descriptor)
+}
+
+const (
+	// pidFileName stores the tart run process ID.
+	pidFileName = "tart.pid"
+
+	// vmLogFileName captures tart run stderr for debugging.
+	vmLogFileName = "vm.log"
+
+	// tartConfigFileName stores the instance config for Start to use.
+	tartConfigFileName = "instance.json"
+
+	// backendDir holds backend-specific files within the sandbox directory.
+	backendDir = config.BackendDirName
+
+	// binDir holds executable scripts within the sandbox directory.
+	binDir = config.BinDirName
+
+	// tmuxDir holds tmux configuration within the sandbox directory.
+	tmuxDir = config.TmuxDirName
+
+	// sharedDirName is the VirtioFS share name used for yoloai state.
+	sharedDirName = "yoloai"
+
+	// sharedDirVMPath is where VirtioFS shares appear inside the macOS VM.
+	sharedDirVMPath = "/Volumes/My Shared Files"
+)
+
+// Runtime implements runtime.Runtime using the Tart CLI.
+type Runtime struct {
+	tartBin           string        // path to tart binary
+	layout            config.Layout // DataDir-rooted path resolver (Q-W.6)
+	homeDir           string        // host home directory (filepath.Dir(layout.DataDir)); used for ~ expansion
+	baseImageOverride string        // custom base image from config (tart.image)
+}
+
+// Compile-time check.
+var _ runtime.Runtime = (*Runtime)(nil)
+var _ runtime.CopyMountResolver = (*Runtime)(nil)
+
+// Descriptor returns a BackendDescriptor with the static facts for this backend.
+func (r *Runtime) Descriptor() runtime.BackendDescriptor {
+	return descriptor
+}
+
+// ResolveCopyMount returns the local VM path where the copy directory will be
+// stored. The actual directory is first staged via VirtioFS, then copied to local
+// VM storage during SetupWorkDirInVM. The path is always a guest VM path
+// (not a host path), so no layout is needed here.
+func (r *Runtime) ResolveCopyMount(sandboxName, hostPath string) string {
+	encoded := config.EncodePath(hostPath)
+	return filepath.Join("/Users/admin/yoloai-work", encoded)
+}
+
+// SetupWorkDirInVM returns shell commands to copy from VirtioFS staging
+// to local VM storage and create git baseline. Called during Create/Reset.
+func (r *Runtime) SetupWorkDirInVM(virtiofsStagingPath, vmLocalPath string) []string {
+	return []string{
+		fmt.Sprintf("mkdir -p '%s'", filepath.Dir(vmLocalPath)),
+		fmt.Sprintf("rsync -a '%s/' '%s/'", virtiofsStagingPath, vmLocalPath),
+		fmt.Sprintf("cd '%s' && git init && git add -A && git commit --allow-empty -m 'baseline'", vmLocalPath),
+	}
+}
+
+// New creates a Runtime after verifying that tart is installed and the
+// platform is supported (macOS with Apple Silicon). layout is used for all
+// host-path resolution so the backend never reads ambient HOME.
+func New(_ context.Context, layout config.Layout) (*Runtime, error) {
+	// Platform checks first — no amount of software installation can fix these.
+	if !isMacOS() {
+		return nil, yoerrors.NewPlatformError("tart backend requires macOS with Apple Silicon")
+	}
+	if !isAppleSilicon() {
+		return nil, yoerrors.NewPlatformError("tart backend requires Apple Silicon (M1 or later)")
+	}
+
+	tartBin, err := exec.LookPath("tart")
+	if err != nil {
+		return nil, yoerrors.NewDependencyError("tart is not installed. Install it with: brew install cirruslabs/cli/tart")
+	}
+
+	// Read config for optional tart.image override
+	var baseImageOverride string
+	if cfg, err := config.LoadConfig(layout); err == nil && cfg.TartImage != "" {
+		baseImageOverride = cfg.TartImage
+	}
+
+	return &Runtime{
+		tartBin:           tartBin,
+		layout:            layout,
+		homeDir:           filepath.Dir(layout.DataDir),
+		baseImageOverride: baseImageOverride,
+	}, nil
+}
+
+// Create creates a new VM instance by cloning the base image and writing
+// the instance config to the sandbox directory.
+func (r *Runtime) Create(ctx context.Context, cfg runtime.InstanceConfig) error {
+	slog.Debug("tart Create: starting", "name", cfg.Name, "imageRef", cfg.ImageRef)
+	// Stop any stale processes and remove leftover VM (idempotent)
+	r.stopVM(ctx, cfg.Name)
+	if r.vmExists(ctx, cfg.Name) {
+		slog.Debug("tart Create: deleting existing VM", "name", cfg.Name)
+		if _, err := r.runTart(ctx, "delete", cfg.Name); err != nil {
+			return fmt.Errorf("remove existing VM: %w", err)
+		}
+	}
+
+	// Clone the base image to create an instance-specific VM
+	slog.Debug("tart Create: cloning", "image_ref", cfg.ImageRef, "name", cfg.Name)
+	if _, err := r.runTart(ctx, "clone", cfg.ImageRef, cfg.Name); err != nil {
+		return fmt.Errorf("clone VM: %w", err)
+	}
+	slog.Debug("tart Create: clone succeeded", "name", cfg.Name)
+
+	// Save instance config so Start can read mounts/network/ports
+	sandboxPath := filepath.Join(r.layout.SandboxesDir(), sandboxName(cfg.Name))
+	cfgData, err := json.Marshal(cfg)
+	if err != nil {
+		return fmt.Errorf("marshal instance config: %w", err)
+	}
+	// Ensure backend dir exists
+	if err := fileutil.MkdirAll(filepath.Join(sandboxPath, backendDir), 0750); err != nil {
+		return fmt.Errorf("create backend dir: %w", err)
+	}
+	if err := fileutil.WriteFile(filepath.Join(sandboxPath, backendDir, tartConfigFileName), cfgData, 0600); err != nil {
+		return fmt.Errorf("write instance config: %w", err)
+	}
+
+	// Copy secrets from mount spec into the sandbox secrets dir.
+	// VirtioFS only supports directories, not individual files, so the
+	// /run/secrets directory mount created by buildMounts is inaccessible
+	// inside the VM. We copy them into the sandbox directory, which is shared
+	// via the yoloai VirtioFS share, so sandbox-setup.py can read them.
+	if err := copySecretsToSandbox(sandboxPath, cfg.Mounts); err != nil {
+		return err
+	}
+
+	// Add mount_map to runtime-config.json for symlink creation in the guest.
+	// VirtioFS mounts appear at /Volumes/My Shared Files/<name>/, but we need
+	// them at standard system paths (e.g., /Applications/Xcode.app).
+	if err := r.addMountMapToConfig(sandboxPath, cfg.Mounts); err != nil {
+		return fmt.Errorf("add mount map to config: %w", err)
+	}
+
+	return nil
+}
+
+// Start boots the VM in the background and runs the setup script.
+func (r *Runtime) Start(ctx context.Context, name string) error {
+	slog.Debug("tart Start", "name", name)
+	sandboxPath := filepath.Join(r.layout.SandboxesDir(), sandboxName(name))
+
+	// Check if already running
+	if r.isRunning(ctx, name) {
+		return nil
+	}
+
+	// Load instance config saved by Create
+	var cfg runtime.InstanceConfig
+	cfgPath := filepath.Join(sandboxPath, backendDir, tartConfigFileName)
+	cfgData, err := os.ReadFile(cfgPath) //nolint:gosec // G304: path within sandbox dir
+	if err != nil {
+		return fmt.Errorf("read instance config: %w", err)
+	}
+	if err := json.Unmarshal(cfgData, &cfg); err != nil {
+		return fmt.Errorf("parse instance config: %w", err)
+	}
+
+	// Build tart run arguments
+	args := r.buildRunArgs(name, sandboxPath, cfg.Mounts)
+
+	// Open log file for stderr capture
+	logPath := filepath.Join(sandboxPath, backendDir, vmLogFileName)
+	logFile, err := fileutil.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600) //nolint:gosec // G304: sandboxPath is ~/.yoloai/sandboxes/<name>
+	if err != nil {
+		return fmt.Errorf("open VM log: %w", err)
+	}
+
+	// Start tart run as a background process.
+	// Use exec.Command (not CommandContext) because tart run is a long-lived
+	// process that must survive after Start returns. CommandContext would kill
+	// it when the parent's context is cancelled.
+	cmd := exec.Command(r.tartBin, args...) //nolint:gosec // G204: args are constructed from validated config
+	cmd.Stderr = logFile
+	cmd.Stdout = logFile
+	// Detach the process from the parent so it survives
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		Setpgid: true,
+	}
+
+	if err := cmd.Start(); err != nil {
+		logFile.Close() //nolint:errcheck,gosec // best-effort
+		return fmt.Errorf("start VM: %w", err)
+	}
+	slog.Debug("tart run started", "name", name, "pid", cmd.Process.Pid)
+
+	// Write PID file
+	pidPath := filepath.Join(sandboxPath, backendDir, pidFileName)
+	if err := fileutil.WriteFile(pidPath, []byte(strconv.Itoa(cmd.Process.Pid)), 0600); err != nil {
+		// Kill the process we just started if we can't track it
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		logFile.Close() //nolint:errcheck,gosec // best-effort
+		return fmt.Errorf("write PID file: %w", err)
+	}
+
+	// Monitor the tart run process in the background so we can detect
+	// early exits. The channel receives the error (nil on clean exit).
+	procDone := make(chan error, 1)
+	go func() {
+		procDone <- cmd.Wait()
+		logFile.Close() //nolint:errcheck,gosec // best-effort
+	}()
+
+	// Wait for VM to become accessible, or detect early process exit
+	if err := r.waitForBoot(ctx, name, procDone); err != nil {
+		// Attempt cleanup
+		r.killByPID(sandboxPath)
+		// Include log file contents and the command for diagnostics
+		detail := fmt.Sprintf("command: %s %s", r.tartBin, strings.Join(args, " "))
+		if logData, readErr := os.ReadFile(logPath); readErr == nil && len(logData) > 0 { //nolint:gosec // G304: path within sandbox dir
+			detail += fmt.Sprintf("\nVM log output:\n%s", strings.TrimSpace(string(logData)))
+		}
+		return fmt.Errorf("wait for VM boot: %w\n%s", err, detail)
+	}
+	slog.Debug("tart Start: waitForBoot succeeded", "name", name)
+
+	// Brief delay to let the VM fully stabilize after first successful exec.
+	// Tart's guest agent may need a moment to be fully ready for complex commands.
+	slog.Debug("tart Start: sleeping 500ms for stabilization", "name", name)
+	time.Sleep(500 * time.Millisecond)
+	slog.Debug("tart Start: checking if VM is still running", "name", name, "isRunning", r.isRunning(ctx, name))
+
+	// Deliver setup script via shared directory and run it
+	slog.Debug("tart Start: calling runSetupScript", "name", name)
+	if err := r.runSetupScript(ctx, name, sandboxPath, cfg.Mounts); err != nil {
+		return fmt.Errorf("run setup script: %w", err)
+	}
+
+	return nil
+}
+
+// Stop stops the VM with a clean shutdown.
+func (r *Runtime) Stop(ctx context.Context, name string) error {
+	r.stopVM(ctx, name)
+	return nil
+}
+
+// Remove deletes the VM and cleans up the PID file.
+func (r *Runtime) Remove(ctx context.Context, name string) error {
+	sandboxPath := filepath.Join(r.layout.SandboxesDir(), sandboxName(name))
+
+	// Stop first if running
+	_ = r.Stop(ctx, name)
+
+	if !r.vmExists(ctx, name) {
+		// Clean up stale PID file
+		_ = os.Remove(filepath.Join(sandboxPath, backendDir, pidFileName))
+		return nil
+	}
+
+	if _, err := r.runTart(ctx, "delete", name); err != nil {
+		return fmt.Errorf("delete VM: %w", err)
+	}
+
+	_ = os.Remove(filepath.Join(sandboxPath, backendDir, pidFileName))
+	_ = os.RemoveAll(filepath.Join(sandboxPath, "secrets"))
+
+	return nil
+}
+
+// Inspect returns the current state of the VM instance.
+func (r *Runtime) Inspect(ctx context.Context, name string) (runtime.InstanceInfo, error) {
+	if !r.vmExists(ctx, name) {
+		return runtime.InstanceInfo{}, runtime.ErrNotFound
+	}
+
+	return runtime.InstanceInfo{
+		Running: r.isRunning(ctx, name),
+	}, nil
+}
+
+// Exec runs a command inside the VM via tart exec and returns the result.
+// The user parameter is ignored — tart exec runs as the VM's logged-in user.
+func (r *Runtime) Exec(ctx context.Context, name string, cmd []string, _ string) (runtime.ExecResult, error) {
+	if !r.isRunning(ctx, name) {
+		return runtime.ExecResult{}, runtime.ErrNotRunning
+	}
+
+	args := execArgs(name, cmd...)
+
+	slog.Debug("tart Exec", "vm", name, "args", args)
+
+	c := exec.CommandContext(ctx, r.tartBin, args...) //nolint:gosec // G204: vmName and cmd are from validated sandbox state
+
+	return runtime.RunCmdExec(c)
+}
+
+// ExecRaw is like Exec but preserves exact stdout/stderr without trimming
+// whitespace. Use this for commands whose output is whitespace-sensitive.
+func (r *Runtime) ExecRaw(ctx context.Context, name string, cmd []string, _ string) (runtime.ExecResult, error) {
+	if !r.isRunning(ctx, name) {
+		return runtime.ExecResult{}, runtime.ErrNotRunning
+	}
+
+	args := execArgs(name, cmd...)
+
+	slog.Debug("tart ExecRaw", "vm", name, "args", args)
+
+	c := exec.CommandContext(ctx, r.tartBin, args...) //nolint:gosec // G204: vmName and cmd are from validated sandbox state
+
+	return runtime.RunCmdExecRaw(c)
+}
+
+// translateWorkDirToVMPath translates host sandbox work paths to VM paths.
+// Host path pattern: ~/.yoloai/sandboxes/<name>/work/<encoded>/
+// VM path pattern: /Users/admin/yoloai-work/<encoded>/
+// If workDir is already a VM path or not a sandbox work path, returns it unchanged.
+func (r *Runtime) translateWorkDirToVMPath(workDir string) string {
+	// Already a VM path — no translation needed
+	if strings.HasPrefix(workDir, "/Users/admin/yoloai-work/") {
+		return workDir
+	}
+
+	// Check if this is a host sandbox work path
+	// Pattern: ~/.yoloai/sandboxes/<name>/work/<encoded>
+	sandboxesDir := r.layout.SandboxesDir()
+	// Normalize by resolving ~ if present
+	if strings.HasPrefix(workDir, "~/") {
+		workDir = filepath.Join(r.homeDir, workDir[2:])
+	}
+
+	// Check if path starts with sandboxes dir
+	if !strings.HasPrefix(workDir, sandboxesDir+string(filepath.Separator)) {
+		return workDir // Not a sandbox work path
+	}
+
+	// Extract path components after sandboxes dir
+	// Pattern: <sandboxesDir>/<sandboxName>/work/<encodedPath>
+	relPath := strings.TrimPrefix(workDir, sandboxesDir+string(filepath.Separator))
+	parts := strings.Split(relPath, string(filepath.Separator))
+
+	// Need at least 3 parts: <sandboxName>/work/<encodedPath>
+	if len(parts) < 3 || parts[1] != "work" {
+		return workDir // Not a work directory
+	}
+
+	// Extract the encoded path (everything after "work/")
+	encodedPath := filepath.Join(parts[2:]...)
+
+	// Construct VM path
+	return filepath.Join("/Users/admin/yoloai-work", encodedPath)
+}
+
+// GitExec runs a git command inside the VM (Tart uses VM filesystem).
+// workDir may be either a host path (~/.yoloai/sandboxes/<name>/work/<encoded>)
+// or a VM path (/Users/admin/yoloai-work/<encoded>). Host paths are translated
+// to VM paths automatically.
+// name may be a sandbox name or instance name; both are accepted.
+func (r *Runtime) GitExec(ctx context.Context, name, workDir string, args ...string) (string, error) {
+	// Callers in the sandbox package pass the sandbox name (e.g. "mybox").
+	// The Tart VM is named with the instance prefix (e.g. "yoloai-mybox").
+	vmName := instancePrefix + strings.TrimPrefix(name, instancePrefix)
+	if !r.isRunning(ctx, vmName) {
+		return "", runtime.ErrNotRunning
+	}
+
+	// Translate host sandbox work paths to VM paths.
+	// Callers may pass either host paths (~/.yoloai/sandboxes/<name>/work/<encoded>)
+	// or VM paths (/Users/admin/yoloai-work/<encoded>).
+	// Other backends (Docker, Containerd) run git on the host, so they use host paths.
+	// Tart runs git inside the VM, so it needs VM paths.
+	actualWorkDir := r.translateWorkDirToVMPath(workDir)
+
+	// Build git command with -C workDir
+	gitArgs := append([]string{"-c", "core.hooksPath=/dev/null", "-C", actualWorkDir}, args...)
+	cmd := append([]string{"git"}, gitArgs...)
+
+	// Use ExecRaw to preserve exact git output (patches are whitespace-sensitive)
+	result, err := r.ExecRaw(ctx, vmName, cmd, "")
+	if err != nil {
+		return "", err
+	}
+	return result.Stdout, nil
+}
+
+// InteractiveExec runs a command interactively inside the VM by shelling
+// out to `tart exec`. IOStreams determines whether a PTY is allocated and
+// where stdio is wired. The user and workDir params are ignored — tart
+// exec runs as the VM's logged-in user in its default cwd.
+func (r *Runtime) InteractiveExec(ctx context.Context, name string, cmd []string, _ string, _ string, io runtime.IOStreams) error {
+	args := []string{"exec"}
+	if io.TTY {
+		// -i attaches stdin, -t allocates a PTY (like docker exec -it)
+		args = append(args, "-i", "-t")
+	} else {
+		args = append(args, "-i")
+	}
+	args = append(args, name)
+	args = append(args, cmd...)
+
+	c := exec.CommandContext(ctx, r.tartBin, args...) //nolint:gosec // G204: name and cmd are from validated sandbox state
+	c.Stdin = io.In
+	c.Stdout = io.Out
+	c.Stderr = io.Err
+	return c.Run()
+}
+
+// Close is a no-op for Tart (no persistent client connection).
+func (r *Runtime) Close() error {
+	return nil
+}
+
+// Logs returns empty string — Tart VM logs are written to files on disk.
+// Callers can use DiagHint to find the log path.
+func (r *Runtime) Logs(_ context.Context, _ string, _ int) string { return "" }
+
+// DiagHint returns a Tart-specific hint for checking logs.
+func (r *Runtime) DiagHint(instanceName string) string {
+	logPath := filepath.Join(r.layout.SandboxesDir(), sandboxName(instanceName), backendDir, vmLogFileName)
+	return fmt.Sprintf("check VM log at %s", logPath)
+}
+
+// PrepareAgentCommand prepends node 25 to PATH to avoid broken node@24 from
+// the Cirrus base image's .zprofile.
+func (r *Runtime) PrepareAgentCommand(cmd string) string {
+	return fmt.Sprintf(`PATH="/opt/homebrew/opt/node/bin:$PATH" %s`, cmd)
+}
+
+// TmuxSocket returns the explicit tmux socket path for Tart VMs.
+// When tart exec allocates a PTY with -t, the environment changes (TMPDIR)
+// prevent tmux from finding its socket at the default location. We must
+// specify the socket explicitly with -S. The admin user in Tart VMs has
+// UID 501, so the socket is at /private/tmp/tmux-501/default.
+// sandboxDir is ignored (socket is inside the VM, not on host).
+func (r *Runtime) TmuxSocket(_ string) string { return "/private/tmp/tmux-501/default" }
+
+// AttachCommand returns the command to attach to the tmux session in a tart VM.
+// Tart runs commands directly with the caller's terminal; no script wrapper
+// needed (and macOS BSD script does not support the GNU -c flag).
+func (r *Runtime) AttachCommand(tmuxSocket string, _ int, _ int, _ string) []string {
+	cmd := []string{"tmux"}
+	if tmuxSocket != "" {
+		cmd = append(cmd, "-S", tmuxSocket)
+	}
+	return append(cmd, "attach", "-t", "main")
+}
+
+// instancePrefix is prepended to sandbox names by the sandbox package
+// to form instance names. We strip it to recover the sandbox name for
+// constructing file-system paths.
+const instancePrefix = "yoloai-"
+
+// sandboxName strips the instance prefix to recover the sandbox name.
+func sandboxName(instanceName string) string {
+	return strings.TrimPrefix(instanceName, instancePrefix)
+}
+
+// buildRunArgs constructs the arguments for tart run.
+// Only directories outside the sandbox path get their own VirtioFS share;
+// everything under sandboxPath is already accessible via the yoloai share.
+// System paths (Xcode, iOS Simulators) are auto-detected at every start.
+func (r *Runtime) buildRunArgs(vmName, sandboxPath string, mounts []runtime.MountSpec) []string {
+	args := []string{"run", "--no-graphics"}
+
+	// Share the sandbox directory into the VM
+	args = append(args, "--dir", fmt.Sprintf("%s:%s", sharedDirName, sandboxPath))
+
+	// Build merged mount list: Xcode system paths + user-specified mounts
+	// Deduplication: user-specified mounts take precedence over system paths
+	mergedMounts := make(map[string]runtime.MountSpec) // key = Source path
+
+	// 1. Add Xcode system paths (checked at every start)
+	// NOTE: CoreSimulator/Volumes is NOT mounted because CoreSimulator cannot
+	// discover runtimes from VirtioFS mounts. Runtimes must be copied locally.
+	var xcodePaths []struct {
+		host string
+		name string
+	}
+
+	// Detect active Xcode via xcode-select (supports multiple Xcodes, custom paths)
+	if xcodeDevPath := getXcodeSelectPath(); xcodeDevPath != "" {
+		// xcode-select returns: /Applications/Xcode.app/Contents/Developer
+		// We need: /Applications/Xcode.app
+		xcodePath := filepath.Dir(filepath.Dir(xcodeDevPath))
+		mountName := "m-" + filepath.Base(xcodePath)
+		xcodePaths = append(xcodePaths, struct{ host, name string }{xcodePath, mountName})
+
+		// Also mount PrivateFrameworks from the same Xcode installation
+		privateFrameworks := filepath.Join(filepath.Dir(xcodeDevPath), "PrivateFrameworks")
+		if info, err := os.Stat(privateFrameworks); err == nil && info.IsDir() {
+			xcodePaths = append(xcodePaths, struct{ host, name string }{privateFrameworks, "m-PrivateFrameworks"})
+		}
+	}
+
+	for _, p := range xcodePaths {
+		if info, err := os.Stat(p.host); err == nil && info.IsDir() {
+			mergedMounts[p.host] = runtime.MountSpec{
+				Source:   p.host,
+				Target:   filepath.Join(sharedDirVMPath, p.name),
+				ReadOnly: true,
+			}
+		}
+	}
+
+	// 2. Add user-specified mounts (override system paths if same Source)
+	for _, m := range mounts {
+		// Skip anything under the sandbox dir (already shared)
+		if strings.HasPrefix(m.Source, sandboxPath+"/") || m.Source == sandboxPath {
+			continue
+		}
+		// Skip files — VirtioFS only supports directories
+		if info, err := os.Stat(m.Source); err != nil || !info.IsDir() {
+			continue
+		}
+		mergedMounts[m.Source] = m // Overwrites system path if duplicate
+	}
+
+	// 3. Build --dir arguments from merged list
+	for _, m := range mergedMounts {
+		dirName := mountDirName(m.Source)
+		dirSpec := fmt.Sprintf("%s:%s", dirName, m.Source)
+		if m.ReadOnly {
+			dirSpec += ":ro"
+		}
+		args = append(args, "--dir", dirSpec)
+	}
+
+	return append(args, vmName)
+}
+
+// mountDirName generates a VirtioFS share name from a host path.
+func mountDirName(hostPath string) string {
+	// Use the last path component, prefixed to avoid collisions
+	return "m-" + filepath.Base(hostPath)
+}
+
+// BuildNetworkArgs returns network-related arguments for tart run based on
+// the InstanceConfig. Exported for testing.
+func BuildNetworkArgs(cfg runtime.InstanceConfig) []string {
+	var args []string
+
+	switch {
+	case cfg.NetworkMode == "none" && len(cfg.Ports) > 0:
+		// Isolated network with specific port forwarding
+		args = append(args, "--net-softnet")
+		args = append(args, "--net-softnet-block=0.0.0.0/0")
+		args = append(args, "--net-softnet-block=::/0")
+		for _, p := range cfg.Ports {
+			proto := p.Protocol
+			if proto == "" {
+				proto = "tcp"
+			}
+			args = append(args, fmt.Sprintf("--net-softnet-allow=%s/%s", p.InstancePort, proto))
+		}
+		args = append(args, portForwardArgs(cfg.Ports)...)
+
+	case cfg.NetworkMode == "none":
+		// Fully isolated: block all traffic
+		args = append(args, "--net-softnet")
+		args = append(args, "--net-softnet-block=0.0.0.0/0")
+		args = append(args, "--net-softnet-block=::/0")
+
+	case len(cfg.Ports) > 0:
+		// Port forwarding with default networking
+		args = append(args, "--net-softnet")
+		args = append(args, portForwardArgs(cfg.Ports)...)
+	}
+
+	return args
+}
+
+// portForwardArgs builds --net-softnet-expose flags from port mappings.
+func portForwardArgs(ports []runtime.PortMapping) []string {
+	if len(ports) == 0 {
+		return nil
+	}
+
+	var pairs []string
+	for _, p := range ports {
+		pairs = append(pairs, fmt.Sprintf("%s:%s", p.HostPort, p.InstancePort))
+	}
+	return []string{"--net-softnet-expose=" + strings.Join(pairs, ",")}
+}
+
+// BuildMountSymlinkCmds returns shell commands to create symlinks from
+// expected mount targets to their actual VirtioFS paths. Exported for testing.
+func BuildMountSymlinkCmds(mounts []runtime.MountSpec, dirNames map[string]string) []string {
+	var cmds []string
+	for _, m := range mounts {
+		dirName, ok := dirNames[m.Source]
+		if !ok {
+			continue
+		}
+		vfsPath := filepath.Join(sharedDirVMPath, dirName)
+		if vfsPath == m.Target {
+			continue // no symlink needed
+		}
+		parent := filepath.Dir(m.Target)
+		cmds = append(cmds, fmt.Sprintf("sudo mkdir -p %q", parent))
+		cmds = append(cmds, fmt.Sprintf("sudo ln -sf %q %q", vfsPath, m.Target))
+	}
+	return cmds
+}
+
+// execArgs builds the arguments for tart exec.
+// tart exec syntax: tart exec <vm-name> <command> [args...]
+func execArgs(vmName string, cmd ...string) []string {
+	args := []string{"exec", vmName}
+	return append(args, cmd...)
+}
+
+// runTart executes a tart command and returns stdout.
+func (r *Runtime) runTart(ctx context.Context, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, r.tartBin, args...) //nolint:gosec // G204: args are constructed internally
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		stderrStr := strings.TrimSpace(stderr.String())
+		return "", mapTartError(err, stderrStr)
+	}
+
+	return strings.TrimSpace(stdout.String()), nil
+}
+
+// vmExists checks whether a VM with the given name exists in tart's inventory.
+func (r *Runtime) vmExists(ctx context.Context, vmName string) bool {
+	out, err := r.runTart(ctx, "list", "--quiet")
+	if err != nil {
+		return false
+	}
+	for line := range strings.SplitSeq(out, "\n") {
+		if strings.TrimSpace(line) == vmName {
+			return true
+		}
+	}
+	return false
+}
+
+// isRunning checks if the VM is running by attempting a trivial exec.
+func (r *Runtime) isRunning(ctx context.Context, vmName string) bool {
+	args := execArgs(vmName, "true")
+	cmd := exec.CommandContext(ctx, r.tartBin, args...) //nolint:gosec // G204
+	return cmd.Run() == nil
+}
+
+// waitForBoot polls until the VM responds to tart exec or the timeout expires.
+// Returns immediately on fatal errors (VM not found, bad command syntax) or
+// if the tart run process exits early (procDone fires).
+func (r *Runtime) waitForBoot(ctx context.Context, vmName string, procDone <-chan error) error {
+	deadline := time.Now().Add(bootTimeout)
+	var lastErr error
+
+	for {
+		if time.Now().After(deadline) {
+			if lastErr != nil {
+				return fmt.Errorf("vm did not become accessible within %s: %w", bootTimeout, lastErr)
+			}
+			return fmt.Errorf("vm did not become accessible within %s", bootTimeout)
+		}
+
+		// Check if tart run process exited early
+		select {
+		case procErr := <-procDone:
+			if procErr != nil {
+				return fmt.Errorf("tart run exited: %w", procErr)
+			}
+			return fmt.Errorf("tart run exited unexpectedly with no error")
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		// Try a simple command via tart exec
+		args := execArgs(vmName, "true")
+		cmd := exec.CommandContext(ctx, r.tartBin, args...) //nolint:gosec // G204
+		var stderr bytes.Buffer
+		cmd.Stderr = &stderr
+		err := cmd.Run()
+		if err == nil {
+			return nil
+		}
+
+		stderrStr := strings.TrimSpace(stderr.String())
+		lastErr = fmt.Errorf("%w: %s", err, stderrStr)
+
+		// Fail fast on errors that won't resolve by retrying
+		if isFatalExecError(stderrStr) {
+			return fmt.Errorf("tart exec failed: %w", lastErr)
+		}
+
+		// Brief sleep before retry, also watching for process exit
+		select {
+		case procErr := <-procDone:
+			if procErr != nil {
+				return fmt.Errorf("tart run exited: %w", procErr)
+			}
+			return fmt.Errorf("tart run exited unexpectedly with no error")
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-waitTick():
+		}
+	}
+}
+
+// isFatalExecError returns true if the tart exec error indicates a problem
+// that won't resolve by retrying (e.g., bad syntax, VM not found).
+func isFatalExecError(stderr string) bool {
+	lower := strings.ToLower(stderr)
+	fatalPatterns := []string{
+		"unknown option",
+		"executable file not found",
+		"does not exist",
+		"no such",
+		"usage:",
+	}
+	for _, p := range fatalPatterns {
+		if strings.Contains(lower, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// vmHomeDir is the home directory of the default user in Cirrus Labs base images.
+const vmHomeDir = "/Users/admin"
+
+// dockerHomeDir is the home directory used by Docker-based sandboxes.
+const dockerHomeDir = "/home/yoloai"
+
+// remapTargetPath translates Docker/Linux-style mount targets to macOS VM paths.
+// - /home/yoloai/... → /Users/admin/...
+// - /yoloai/... → /Users/admin/.yoloai/... (sandbox control files)
+// - /Users/<host-user>/... → /Users/admin/host/... (host-mirrored workdirs)
+func remapTargetPath(target string) string {
+	if strings.HasPrefix(target, dockerHomeDir+"/") {
+		return vmHomeDir + strings.TrimPrefix(target, dockerHomeDir)
+	}
+	if target == dockerHomeDir {
+		return vmHomeDir
+	}
+	if strings.HasPrefix(target, "/yoloai/") {
+		return vmHomeDir + "/.yoloai" + strings.TrimPrefix(target, "/yoloai")
+	}
+	// Host-mirrored paths (e.g. /Users/karlstenerud/project) — place under admin home
+	if strings.HasPrefix(target, "/Users/") && !strings.HasPrefix(target, vmHomeDir) {
+		return vmHomeDir + "/host" + target
+	}
+	return target
+}
+
+// runSetupScript creates mount symlinks, writes the embedded setup script
+// to the shared directory, and executes it inside the VM.
+func (r *Runtime) runSetupScript(ctx context.Context, vmName, sandboxPath string, mounts []runtime.MountSpec) error {
+	vmSharedDir := filepath.Join(sharedDirVMPath, sharedDirName)
+
+	if err := r.createVMMountSymlinks(ctx, vmName, sandboxPath, vmSharedDir, mounts); err != nil {
+		return err
+	}
+
+	if err := r.patchConfigWorkingDir(sandboxPath); err != nil {
+		return fmt.Errorf("patch config working dir: %w", err)
+	}
+
+	if err := writeVMSetupScripts(sandboxPath); err != nil {
+		return err
+	}
+
+	setupCmd := fmt.Sprintf("nohup python3 '%s/bin/sandbox-setup.py' tart '%s' </dev/null >'%s/setup.log' 2>&1 &",
+		vmSharedDir, vmSharedDir, vmSharedDir)
+	args := execArgs(vmName, "bash", "-c", setupCmd)
+	if _, err := r.runTart(ctx, args...); err != nil {
+		return fmt.Errorf("exec setup script: %w", err)
+	}
+
+	return nil
+}
+
+// createVMMountSymlinks creates symlinks in the VM from expected mount targets to VirtioFS paths.
+func (r *Runtime) createVMMountSymlinks(ctx context.Context, vmName, sandboxPath, vmSharedDir string, mounts []runtime.MountSpec) error {
+	for _, m := range mounts {
+		if m.Target == "/run/secrets" || strings.HasPrefix(m.Target, "/run/secrets/") {
+			continue
+		}
+
+		target := remapTargetPath(m.Target)
+		slog.Debug("tart setup: processing mount", "source", m.Source, "target", target)
+
+		if strings.HasPrefix(target, "/Users/admin/yoloai-work/") {
+			slog.Debug("tart setup: skipping copy workdir (handled by executeVMWorkDirSetup)", "target", target)
+			continue
+		}
+
+		vfsPath, ok := resolveMountVFSPath(m.Source, sandboxPath, vmSharedDir)
+		if !ok {
+			continue
+		}
+
+		target = strings.TrimRight(target, "/")
+		if vfsPath == target {
+			continue
+		}
+
+		if err := r.createSingleVMSymlink(ctx, vmName, target, vfsPath); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// resolveMountVFSPath resolves the VirtioFS path for a mount source.
+// Returns the vfsPath and true if the mount should be symlinked, or ("", false) to skip.
+func resolveMountVFSPath(source, sandboxPath, vmSharedDir string) (string, bool) {
+	if after, ok := strings.CutPrefix(source, sandboxPath+"/"); ok {
+		relPath := after
+		vfsPath := filepath.Join(vmSharedDir, relPath)
+		if stat, err := os.Stat(source); err != nil {
+			slog.Debug("tart setup: mount source does not exist on host!", "source", source, "err", err)
+			return "", false
+		} else {
+			slog.Debug("tart setup: mount under sandbox", "source", source, "relPath", relPath, "vfsPath", vfsPath, "sourceIsDir", stat.IsDir())
+		}
+		return vfsPath, true
+	}
+	if source == sandboxPath {
+		return vmSharedDir, true
+	}
+	if info, err := os.Stat(source); err == nil && info.IsDir() {
+		return filepath.Join(sharedDirVMPath, mountDirName(source)), true
+	}
+	return "", false
+}
+
+// createSingleVMSymlink creates a single symlink in the VM from target to vfsPath.
+func (r *Runtime) createSingleVMSymlink(ctx context.Context, vmName, target, vfsPath string) error {
+	parent := filepath.Dir(target)
+
+	checkCmd := fmt.Sprintf("ls -la '%s' 2>&1 || echo 'PATH_DOES_NOT_EXIST'", filepath.Dir(vfsPath))
+	if out, checkErr := r.runTart(ctx, execArgs(vmName, "bash", "-c", checkCmd)...); checkErr == nil {
+		slog.Debug("tart setup: VirtioFS parent directory listing", "path", filepath.Dir(vfsPath), "output", out)
+	} else {
+		slog.Debug("tart setup: failed to list VirtioFS parent", "path", filepath.Dir(vfsPath), "err", checkErr)
+	}
+
+	mkdirCmd := fmt.Sprintf("(mkdir -p '%s' 2>/dev/null || sudo mkdir -p '%s' 2>/dev/null || true)", parent, parent)
+	if _, mkdirErr := r.runTart(ctx, execArgs(vmName, "bash", "-c", mkdirCmd)...); mkdirErr != nil {
+		return fmt.Errorf("create parent directory %s: %w", parent, mkdirErr)
+	}
+
+	symlinkCmd := fmt.Sprintf(
+		"(rm -rf '%s' && ln -sfn '%s' '%s') 2>/dev/null || (sudo rm -rf '%s' && sudo ln -sfn '%s' '%s')",
+		target, vfsPath, target, target, vfsPath, target,
+	)
+	args := execArgs(vmName, "bash", "-c", symlinkCmd)
+	slog.Debug("tart setup: creating symlink", "vm", vmName, "target", target, "vfsPath", vfsPath, "cmd", symlinkCmd)
+	if _, err := r.runTart(ctx, args...); err != nil {
+		if !r.isRunning(ctx, vmName) {
+			return fmt.Errorf("create mount symlink for %s (VM appears to have crashed): %w", target, err)
+		}
+		return fmt.Errorf("create mount symlink for %s: %w", target, err)
+	}
+	return nil
+}
+
+// writeVMSetupScripts writes setup script, status monitor, and tmux config to the sandbox dir.
+func writeVMSetupScripts(sandboxPath string) error {
+	scriptPath := filepath.Join(sandboxPath, binDir, "sandbox-setup.py")
+	if err := fileutil.WriteFile(scriptPath, monitor.SetupScript(), 0644); err != nil { //nolint:gosec // G306: script content
+		return fmt.Errorf("write sandbox-setup.py: %w", err)
+	}
+	helpersPath := filepath.Join(sandboxPath, binDir, "setup_helpers.py")
+	if err := fileutil.WriteFile(helpersPath, monitor.SetupHelpers(), 0644); err != nil { //nolint:gosec // G306: script content
+		return fmt.Errorf("write setup_helpers.py: %w", err)
+	}
+	tmuxIOPath := filepath.Join(sandboxPath, binDir, "tmux_io.py")
+	if err := fileutil.WriteFile(tmuxIOPath, monitor.TmuxIO(), 0644); err != nil { //nolint:gosec // G306: script content
+		return fmt.Errorf("write tmux_io.py: %w", err)
+	}
+	monitorPath := filepath.Join(sandboxPath, binDir, "status-monitor.py")
+	if err := fileutil.WriteFile(monitorPath, monitor.Script(), 0644); err != nil { //nolint:gosec // G306: script content
+		return fmt.Errorf("write status monitor: %w", err)
+	}
+	diagPath := filepath.Join(sandboxPath, binDir, "diagnose-idle.sh")
+	if err := fileutil.WriteFile(diagPath, monitor.DiagnoseScript(), 0755); err != nil { //nolint:gosec // G306: script needs exec permission
+		return fmt.Errorf("write diagnose script: %w", err)
+	}
+	tmuxConfPath := filepath.Join(sandboxPath, tmuxDir, "tmux.conf")
+	if err := fileutil.WriteFile(tmuxConfPath, embeddedTmuxConf, 0600); err != nil {
+		return fmt.Errorf("write tmux.conf: %w", err)
+	}
+	return nil
+}
+
+// patchConfigWorkingDir reads runtime-config.json, remaps working_dir for macOS, and writes it back.
+func (r *Runtime) patchConfigWorkingDir(sandboxPath string) error {
+	cfgPath := filepath.Join(sandboxPath, "runtime-config.json")
+	data, err := os.ReadFile(cfgPath) //nolint:gosec // G304: path within sandbox dir
+	if err != nil {
+		return err
+	}
+
+	var raw map[string]any
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+
+	if wd, ok := raw["working_dir"].(string); ok {
+		remapped := remapTargetPath(wd)
+		if remapped != wd {
+			raw["working_dir"] = remapped
+			out, err := json.MarshalIndent(raw, "", "  ")
+			if err != nil {
+				return err
+			}
+			return fileutil.WriteFile(cfgPath, out, 0600)
+		}
+	}
+
+	return nil
+}
+
+// stopVM attempts to stop a VM using tart stop, then kills any stale
+// tart run processes for the given VM name. This is the definitive way
+// to ensure no lingering processes hold VM slots.
+func (r *Runtime) stopVM(ctx context.Context, vmName string) {
+	// Try graceful stop first
+	_, _ = r.runTart(ctx, "stop", vmName)
+
+	// Kill any stale "tart run" processes matching this VM name.
+	// pgrep -f matches the full command line.
+	pgrepCmd := exec.CommandContext(ctx, "pgrep", "-f", fmt.Sprintf("tart run.*%s", vmName)) //nolint:gosec // G204: vmName is from validated sandbox state
+	out, err := pgrepCmd.Output()
+	if err != nil {
+		return // no matching processes
+	}
+	for line := range strings.SplitSeq(strings.TrimSpace(string(out)), "\n") {
+		pid, err := strconv.Atoi(strings.TrimSpace(line))
+		if err != nil {
+			continue
+		}
+		if proc, findErr := os.FindProcess(pid); findErr == nil {
+			_ = proc.Signal(syscall.SIGTERM)
+		}
+	}
+}
+
+// killByPID reads the PID file and kills the process.
+func (r *Runtime) killByPID(sandboxPath string) {
+	pidPath := filepath.Join(sandboxPath, backendDir, pidFileName)
+	data, err := os.ReadFile(pidPath) //nolint:gosec // G304: path is within ~/.yoloai/
+	if err != nil {
+		return
+	}
+
+	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil {
+		return
+	}
+
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return
+	}
+
+	_ = proc.Signal(syscall.SIGTERM)
+	_ = os.Remove(pidPath)
+}
+
+// mapTartError maps tart CLI errors to runtime sentinel errors.
+func mapTartError(err error, stderr string) error {
+	lower := strings.ToLower(stderr)
+	switch {
+	case strings.Contains(lower, "does not exist"),
+		strings.Contains(lower, "not found"),
+		strings.Contains(lower, "no such"):
+		return runtime.ErrNotFound
+	case strings.Contains(lower, "not running"),
+		strings.Contains(lower, "is stopped"):
+		return runtime.ErrNotRunning
+	default:
+		if stderr != "" {
+			return fmt.Errorf("%w: %s", err, stderr)
+		}
+		return err
+	}
+}
+
+// isMacOS returns true if running on macOS.
+func isMacOS() bool {
+	return goos() == "darwin"
+}
+
+// isAppleSilicon returns true if running on Apple Silicon.
+func isAppleSilicon() bool {
+	return goarch() == "arm64" && goos() == "darwin"
+}
+
+// BaseExists checks if a base VM exists.
+func (r *Runtime) BaseExists(ctx context.Context, baseName string) (bool, error) {
+	return r.vmExists(ctx, baseName), nil
+}
+
+// CreateBase creates a new runtime base image with specified runtimes.
+func (r *Runtime) CreateBase(ctx context.Context, baseName string, runtimes []RuntimeVersion) error {
+	tempVM := generateTempVMName(baseName)
+	defer r.cleanupTempVM(ctx, tempVM) // Always cleanup temp VM
+
+	// Clone yoloai-base to temp VM
+	if _, err := r.runTart(ctx, "clone", "yoloai-base", tempVM); err != nil {
+		return fmt.Errorf("clone base: %w", err)
+	}
+
+	// Start temp VM for runtime installation
+	if err := r.startTempVM(ctx, tempVM); err != nil {
+		return fmt.Errorf("start temp VM: %w", err)
+	}
+	defer r.stopVM(ctx, tempVM) // Ensure VM stopped before snapshot
+
+	// Configure Xcode in VM (required for xcodebuild)
+	fmt.Printf("Configuring Xcode...\n")
+	if err := r.configureXcodeInVM(ctx, tempVM); err != nil {
+		return fmt.Errorf("configure Xcode: %w", err)
+	}
+
+	// Copy each runtime into the VM
+	for _, rt := range runtimes {
+		fmt.Printf("Copying %s %s runtime (this may take several minutes)...\n", rt.Platform, rt.Version)
+		if err := CopyRuntimeToVM(ctx, tempVM, rt); err != nil {
+			return fmt.Errorf("copy %s %s: %w", rt.Platform, rt.Version, err)
+		}
+	}
+
+	// Stop VM to flush all changes to disk
+	r.stopVM(ctx, tempVM)
+
+	// Wait for VM to fully stop
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		if !r.isRunning(ctx, tempVM) {
+			break
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+
+	// Snapshot temp VM as new base
+	if err := r.snapshotAsBase(ctx, tempVM, baseName); err != nil {
+		return fmt.Errorf("snapshot base: %w", err)
+	}
+
+	return nil
+}
+
+// generateTempVMName generates a unique temporary VM name.
+func generateTempVMName(baseName string) string {
+	// Generate 6 random hex chars
+	b := make([]byte, 3)
+	_, _ = rand.Read(b)
+	random := fmt.Sprintf("%x", b)
+	return fmt.Sprintf("%s-tmp-%s", baseName, random)
+}
+
+// startTempVM starts a temporary VM for runtime installation.
+func (r *Runtime) startTempVM(ctx context.Context, vmName string) error {
+	// Build arguments for tart run
+	args := []string{"run", "--no-graphics"}
+
+	// Mount Xcode (required for xcodebuild to work)
+	if xcodeDevPath := getXcodeSelectPath(); xcodeDevPath != "" {
+		// xcode-select returns: /Applications/Xcode.app/Contents/Developer
+		// We need: /Applications/Xcode.app
+		xcodePath := filepath.Dir(filepath.Dir(xcodeDevPath))
+		mountName := "m-" + filepath.Base(xcodePath)
+		args = append(args, "--dir", fmt.Sprintf("%s:%s:ro", mountName, xcodePath))
+
+		// Also mount PrivateFrameworks from the same Xcode installation
+		privateFrameworks := filepath.Join(filepath.Dir(xcodeDevPath), "PrivateFrameworks")
+		if info, err := os.Stat(privateFrameworks); err == nil && info.IsDir() {
+			args = append(args, "--dir", "m-PrivateFrameworks:"+privateFrameworks+":ro")
+		}
+	}
+
+	// Mount /Library/Developer/CoreSimulator/Volumes/ (not needed for xcodebuild, but kept for consistency)
+	volumesPath := "/Library/Developer/CoreSimulator/Volumes"
+	args = append(args, "--dir", "m-Volumes:"+volumesPath+":ro")
+
+	// Mount /tmp
+	args = append(args, "--dir", "m-tmp:/tmp:ro")
+
+	// Add VM name
+	args = append(args, vmName)
+
+	// Start VM in background
+	cmd := exec.CommandContext(ctx, r.tartBin, args...) //nolint:gosec // G204: args are constructed internally
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("start VM: %w", err)
+	}
+
+	// Wait for boot
+	procDone := make(chan error, 1)
+	go func() { procDone <- cmd.Wait() }()
+
+	return r.waitForBoot(ctx, vmName, procDone)
+}
+
+// configureXcodeInVM sets up Xcode symlinks and configuration inside the VM.
+func (r *Runtime) configureXcodeInVM(ctx context.Context, vmName string) error {
+	// Get active Xcode path on host
+	xcodeDevPath := getXcodeSelectPath()
+	if xcodeDevPath == "" {
+		return fmt.Errorf("no active Xcode found (run xcode-select on host)")
+	}
+
+	// xcode-select returns: /Applications/Xcode.app/Contents/Developer
+	// We need: /Applications/Xcode.app
+	xcodePath := filepath.Dir(filepath.Dir(xcodeDevPath))
+	xcodeName := filepath.Base(xcodePath)
+
+	// VirtioFS mount point inside VM
+	vfsMountPoint := filepath.Join(sharedDirVMPath, "m-"+xcodeName)
+
+	// Create symlink from VirtioFS mount to expected location
+	symlinkCmd := fmt.Sprintf("sudo rm -rf '%s' && sudo ln -sf '%s' '%s'", xcodePath, vfsMountPoint, xcodePath)
+	args := execArgs(vmName, "bash", "-c", symlinkCmd)
+	if _, err := r.runTart(ctx, args...); err != nil {
+		return fmt.Errorf("create Xcode symlink: %w", err)
+	}
+
+	// Also symlink PrivateFrameworks if it's mounted
+	privateFrameworks := filepath.Join(filepath.Dir(xcodeDevPath), "PrivateFrameworks")
+	if info, err := os.Stat(privateFrameworks); err == nil && info.IsDir() {
+		vfsPrivate := filepath.Join(sharedDirVMPath, "m-PrivateFrameworks")
+		symlinkPrivateCmd := fmt.Sprintf("sudo rm -rf '%s' && sudo ln -sf '%s' '%s'", privateFrameworks, vfsPrivate, privateFrameworks)
+		args = execArgs(vmName, "bash", "-c", symlinkPrivateCmd)
+		if _, err := r.runTart(ctx, args...); err != nil {
+			// Non-fatal: PrivateFrameworks might not be critical
+			slog.Debug("failed to symlink PrivateFrameworks", "err", err)
+		}
+	}
+
+	// Set active developer directory
+	xcodeSelectCmd := fmt.Sprintf("sudo xcode-select -s '%s/Contents/Developer'", xcodePath)
+	args = execArgs(vmName, "bash", "-c", xcodeSelectCmd)
+	if _, err := r.runTart(ctx, args...); err != nil {
+		return fmt.Errorf("run xcode-select: %w", err)
+	}
+
+	// Accept Xcode license (non-interactive)
+	acceptLicenseCmd := "sudo xcodebuild -license accept"
+	args = execArgs(vmName, "bash", "-c", acceptLicenseCmd)
+	if _, err := r.runTart(ctx, args...); err != nil {
+		// Non-fatal: license might already be accepted or not required
+		slog.Debug("xcodebuild -license accept failed (might already be accepted)", "err", err)
+	}
+
+	// Run xcodebuild -runFirstLaunch to complete setup
+	firstLaunchCmd := "sudo xcodebuild -runFirstLaunch"
+	args = execArgs(vmName, "bash", "-c", firstLaunchCmd)
+	if _, err := r.runTart(ctx, args...); err != nil {
+		// Non-fatal: might not be needed
+		slog.Debug("xcodebuild -runFirstLaunch failed (might not be needed)", "err", err)
+	}
+
+	return nil
+}
+
+// snapshotAsBase creates a new base image by cloning a temp VM.
+func (r *Runtime) snapshotAsBase(ctx context.Context, tempVM, baseName string) error {
+	// Clone temp VM to new base name
+	if _, err := r.runTart(ctx, "clone", tempVM, baseName); err != nil {
+		// If clone fails and partial base exists, delete it
+		_, _ = r.runTart(ctx, "delete", baseName)
+		return fmt.Errorf("clone to base: %w", err)
+	}
+	return nil
+}
+
+// cleanupTempVM removes a temporary VM (best-effort, never fails).
+func (r *Runtime) cleanupTempVM(ctx context.Context, vmName string) {
+	r.stopVM(ctx, vmName)
+	_, _ = r.runTart(ctx, "delete", vmName)
+}
+
+// addMountMapToConfig adds a mount_map to runtime-config.json that tells
+// sandbox-setup.py where to create symlinks from target paths to VirtioFS mount points.
+func (r *Runtime) addMountMapToConfig(sandboxPath string, mounts []runtime.MountSpec) error {
+	// Build mount map: target path → VirtioFS mount point
+	mountMap := make(map[string]string)
+	for _, m := range mounts {
+		// Skip mounts under sandbox dir (already accessible via yoloai VirtioFS share)
+		if strings.HasPrefix(m.Source, sandboxPath+"/") || m.Source == sandboxPath {
+			continue
+		}
+		// Only add directory mounts (VirtioFS doesn't support files)
+		if info, err := os.Stat(m.Source); err != nil || !info.IsDir() {
+			continue
+		}
+		// VirtioFS mount appears at /Volumes/My Shared Files/<name>/
+		dirName := mountDirName(m.Source)
+		virtiofsMountPoint := filepath.Join(sharedDirVMPath, dirName)
+		mountMap[remapTargetPath(m.Target)] = virtiofsMountPoint
+	}
+
+	if len(mountMap) == 0 {
+		return nil // nothing to add
+	}
+
+	// Read existing runtime-config.json
+	cfgPath := filepath.Join(sandboxPath, "runtime-config.json")
+	data, err := os.ReadFile(cfgPath) //nolint:gosec // G304: path within sandbox dir
+	if err != nil {
+		return err
+	}
+
+	var raw map[string]any
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+
+	// Add mount_map
+	raw["mount_map"] = mountMap
+
+	// Write back
+	out, err := json.MarshalIndent(raw, "", "  ")
+	if err != nil {
+		return err
+	}
+	return fileutil.WriteFile(cfgPath, out, 0600)
+}
+
+// copySecretsToSandbox copies secret files from mount specs into the sandbox secrets directory.
+func copySecretsToSandbox(sandboxPath string, mounts []runtime.MountSpec) error {
+	secretsDir := filepath.Join(sandboxPath, "secrets")
+	if err := fileutil.MkdirAll(secretsDir, 0700); err != nil {
+		return fmt.Errorf("create secrets dir: %w", err)
+	}
+	for _, m := range mounts {
+		if m.Target != "/run/secrets" && !strings.HasPrefix(m.Target, "/run/secrets/") {
+			continue
+		}
+		if m.Target == "/run/secrets" {
+			if err := copySecretDir(secretsDir, m.Source); err != nil {
+				return err
+			}
+			continue
+		}
+		data, err := os.ReadFile(m.Source) //nolint:gosec // G304: source is from validated mount spec
+		if err != nil {
+			continue
+		}
+		keyName := filepath.Base(m.Target)
+		if err := fileutil.WriteFile(filepath.Join(secretsDir, keyName), data, 0600); err != nil { //nolint:gosec // G703: secretsDir is an internal sandbox directory
+			return fmt.Errorf("copy secret %s: %w", keyName, err)
+		}
+	}
+	return nil
+}
+
+// copySecretDir copies all non-directory files from srcDir into destDir.
+func copySecretDir(destDir, srcDir string) error {
+	entries, err := os.ReadDir(srcDir)
+	if err != nil {
+		return nil //nolint:nilerr // intentional: skip if directory read fails
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(srcDir, entry.Name())) //nolint:gosec // G304: source is from validated mount spec
+		if err != nil {
+			continue
+		}
+		if err := fileutil.WriteFile(filepath.Join(destDir, entry.Name()), data, 0600); err != nil { //nolint:gosec // G703: destDir is an internal sandbox directory
+			return fmt.Errorf("copy secret %s: %w", entry.Name(), err)
+		}
+	}
+	return nil
+}

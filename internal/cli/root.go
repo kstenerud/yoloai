@@ -11,10 +11,10 @@ import (
 	"os"
 	"time"
 
-	"github.com/kstenerud/yoloai/config"
-	"github.com/kstenerud/yoloai/extension"
+	"github.com/kstenerud/yoloai/internal/config"
+	"github.com/kstenerud/yoloai/internal/extension"
 	"github.com/kstenerud/yoloai/internal/fileutil"
-	"github.com/kstenerud/yoloai/sandbox"
+	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/spf13/cobra"
 )
 

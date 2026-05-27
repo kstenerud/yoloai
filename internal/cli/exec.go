@@ -10,7 +10,7 @@ import (
 	"os/exec"
 
 	"github.com/kstenerud/yoloai"
-	"github.com/kstenerud/yoloai/sandbox"
+	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/spf13/cobra"
 )
 

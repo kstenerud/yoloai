@@ -10,8 +10,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/kstenerud/yoloai/agent"
-	"github.com/kstenerud/yoloai/runtime"
+	"github.com/kstenerud/yoloai/internal/agent"
+	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/spf13/cobra"
 )
 
