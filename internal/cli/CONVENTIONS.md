@@ -26,21 +26,36 @@ one carries broader scope.
   `withManager`. Don't add new direct uses — every new requirement
   belongs on Client or SystemClient.
 
-### The residual `withManager` users
+### The residual `withManager` user
 
-`withManager(cmd, backend, fn)` constructs a `sandbox.Manager` directly
-(via `withRuntime` + `sandbox.NewManager`). Two commands still use it:
+`withManager(cmd, backend, fn)` constructs a `sandbox.Manager`
+directly (via `withRuntime` + `sandbox.NewManager`). Only one command
+still uses it:
 
 - `system_mcp.go` (`yoloai mcp serve`, `yoloai mcp proxy`) — the MCP
-  server exposes Manager methods as tools; migrating to Client would
-  require re-mapping the tool surface, treated as its own workstream.
-- `system.go` (`yoloai system setup`) — the interactive setup wizard
-  calls `mgr.RunSetup`. `SystemClient.Setup` is designed in
-  `api_surface.go` but not yet implemented.
+  server maps Manager methods to MCP tools; migrating to Client
+  requires re-shaping the tool surface and is treated as its own
+  workstream.
 
-Both are tracked as follow-ups in `docs/dev/plans/layering-refactor.md`.
-Treat them as the only allowed callers; lint enforces it via depguard
-(see `.golangci.yml`).
+Tracked as a follow-up in `docs/dev/plans/layering-refactor.md`. Treat
+it as the only allowed caller; lint enforces it via depguard (see
+`.golangci.yml`).
+
+### Interactive wizards: prompts live in the CLI
+
+Q-F (W-L8b) — library Client/SystemClient methods never do interactive
+IO. `yoloai system setup` follows the established pattern:
+
+1. Call `SystemClient.SetupStatus(ctx)` to inspect the host (classify
+   `~/.tmux.conf`, enumerate available backends/agents).
+2. Render prompts and read user input in the CLI (`system_setup.go`'s
+   `wizardTmuxConf` / `wizardChoice`).
+3. Pass the resulting `SetupOptions` to `SystemClient.Setup(ctx, opts)`
+   for a pure config write.
+
+If a new command needs interactive prompts, follow the same shape:
+library provides "what to ask" (status + available options) and "how
+to apply" (a non-interactive setter); CLI owns the conversation.
 
 ### Attach: `Client.Attach` is now the canonical path
 

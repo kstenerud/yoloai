@@ -4,7 +4,6 @@ package cli
 // ABOUTME: Groups system-level admin operations under a single parent command.
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"os"
@@ -201,21 +200,7 @@ func newSystemSetupCmd() *cobra.Command {
 		Short: "Run interactive setup",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			backend := resolveBackend(cmd)
-
-			agentFlag, _ := cmd.Flags().GetString("agent")
-			tmuxConfFlag, _ := cmd.Flags().GetString("tmux-conf")
-			backendFlag, _ := cmd.Flags().GetString("backend")
-
-			opts := sandbox.SetupOptions{
-				Agent:    agentFlag,
-				Backend:  backendFlag,
-				TmuxConf: tmuxConfFlag,
-			}
-
-			return withManager(cmd, backend, func(ctx context.Context, mgr *sandbox.Manager) error {
-				return mgr.RunSetup(ctx, opts)
-			})
+			return runSystemSetup(cmd)
 		},
 	}
 

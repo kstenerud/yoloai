@@ -3,9 +3,7 @@
 package sandbox
 
 import (
-	"bufio"
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -15,7 +13,6 @@ import (
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/sandbox/store"
-	"golang.org/x/term"
 )
 
 // Manager is the central orchestrator for sandbox operations.
@@ -24,7 +21,6 @@ type Manager struct {
 	backend  string
 	logger   *slog.Logger
 	input    io.Reader
-	scanner  *bufio.Scanner // shared scanner for multi-step interactive prompts
 	output   io.Writer
 	progress func(name, msg string) // optional progress callback
 	layout   config.Layout          // DataDir-rooted path resolver (Q-W.2)
@@ -70,7 +66,6 @@ func NewManager(rt runtime.Runtime, logger *slog.Logger, input io.Reader, output
 		backend: backend,
 		logger:  logger,
 		input:   input,
-		scanner: bufio.NewScanner(input),
 		output:  output,
 	}
 	for _, opt := range opts {
@@ -93,61 +88,34 @@ func NewManager(rt runtime.Runtime, logger *slog.Logger, input io.Reader, output
 // WithLayout.
 func (m *Manager) Layout() config.Layout { return m.layout }
 
-// readLine reads a single line from the shared scanner, returning early if ctx
-// is cancelled. On EOF, returns ("", nil) so callers can treat it as a default.
-//
-// This method uses the Manager's shared bufio.Scanner so that sequential reads
-// in multi-step interactive prompts (e.g., setup wizard) consume successive
-// lines correctly. For one-shot confirmations that create a fresh scanner on
-// each call, see the standalone readLine() in confirm.go.
-func (m *Manager) readLine(ctx context.Context) (string, error) {
-	ch := make(chan string, 1)
-	go func() {
-		if m.scanner.Scan() {
-			ch <- m.scanner.Text()
-		} else {
-			ch <- ""
-		}
-	}()
-
-	select {
-	case <-ctx.Done():
-		return "", ctx.Err()
-	case line := <-ch:
-		return line, nil
-	}
-}
-
 // EnsureSetup performs first-run auto-setup. Idempotent — safe to call
-// before every sandbox operation.
+// before every sandbox operation. Non-interactive: writes safe defaults
+// (tmux_conf=default+host, setup_complete=true) and returns. The
+// interactive wizard for customizing tmux/backend/agent lives in the
+// CLI layer and is invoked explicitly via `yoloai system setup` (which
+// calls Manager.ApplySetup with the user's answers).
+//
+// Pre-Q-F, this method ran the wizard when stdin was a TTY. That
+// coupled prompts to library code and contradicted §12's "no ambient
+// IO" principle. Q-F moves the wizard to the CLI; EnsureSetup now
+// behaves as the old non-interactive branch always behaved.
 func (m *Manager) EnsureSetup(ctx context.Context) error {
 	if err := m.EnsureSetupNonInteractive(ctx); err != nil {
 		return err
 	}
-
-	// Run new-user experience if setup_complete is false
 	state, err := config.LoadState(m.layout)
 	if err != nil {
 		return fmt.Errorf("load state: %w", err)
 	}
-	if !state.SetupComplete {
-		if !m.isInteractive() {
-			// Non-TTY: auto-configure without prompts (power-user behavior)
-			if err := m.setTmuxConf("default+host"); err != nil {
-				return fmt.Errorf("set tmux_conf: %w", err)
-			}
-			if err := config.SaveState(m.layout, &config.State{SetupComplete: true}); err != nil {
-				return fmt.Errorf("save state: %w", err)
-			}
-		} else {
-			if err := m.runNewUserSetup(ctx, SetupOptions{}); err != nil {
-				if !errors.Is(err, errSetupPreview) {
-					return err
-				}
-			}
-		}
+	if state.SetupComplete {
+		return nil
 	}
-
+	if err := m.setTmuxConf("default+host"); err != nil {
+		return fmt.Errorf("set tmux_conf: %w", err)
+	}
+	if err := config.SaveState(m.layout, &config.State{SetupComplete: true}); err != nil {
+		return fmt.Errorf("save state: %w", err)
+	}
 	return nil
 }
 
@@ -170,60 +138,71 @@ func (m *Manager) ensureDefaultsDir() error {
 	return nil
 }
 
-// EnsureSetupNonInteractive performs the non-interactive portion of first-run
-// setup: migration, directory creation, resource seeding, image building,
-// and default config writing. Does not run interactive prompts.
+// EnsureSetupNonInteractive performs the non-interactive portion of
+// first-run setup: layout scaffolding, default config writing, AND
+// base-image build. Requires a non-nil runtime (the image build calls
+// rt.Setup). Called by EnsureSetup, which runs before every sandbox
+// operation.
+//
+// For pure-config setup that does NOT need a runtime (e.g. the
+// `yoloai system setup` wizard's ApplySetup path), use
+// ensureLayoutScaffold instead.
 func (m *Manager) EnsureSetupNonInteractive(ctx context.Context) error {
-	// Create directory structure
-	for _, dir := range []string{m.layout.SandboxesDir(), m.layout.ProfilesDir(), m.layout.CacheDir()} {
-		if err := fileutil.MkdirAll(dir, 0750); err != nil {
-			return fmt.Errorf("create %s: %w", dir, err)
-		}
+	if err := m.ensureLayoutScaffold(); err != nil {
+		return err
 	}
-
-	// Upgrading user: defaults/ should exist. If it doesn't, they need to migrate.
 	state, err := config.LoadState(m.layout)
 	if err != nil {
 		return fmt.Errorf("load state: %w", err)
 	}
-	if state.SetupComplete {
-		if err := config.CheckDefaultsDir(m.layout); err != nil {
-			return err
-		}
-	}
-
-	// Fresh install (or after manual migration): create defaults/ scaffold.
-	if err := m.ensureDefaultsDir(); err != nil {
-		return err
-	}
-
 	// Seed resources and build/rebuild base image as needed
 	baseProfileDir := m.layout.ProfileDir("base")
 	if err := m.runtime.Setup(ctx, m.layout, baseProfileDir, m.output, m.logger, false); err != nil {
 		return err
 	}
-
-	// Write defaults/config.yaml tip message on first run
 	if !state.SetupComplete {
 		fmt.Fprintln(m.output, "Tip: enable shell completions with 'yoloai system completion --help'") //nolint:errcheck // best-effort output
 	}
+	return nil
+}
 
-	// Write default global config.yaml if missing
+// ensureLayoutScaffold creates the DataDir directory structure and
+// writes default global config.yaml / state.yaml / defaults/ if
+// missing. Pure filesystem work — no runtime required. Shared between
+// EnsureSetupNonInteractive (which adds image build on top) and
+// ApplySetup (config-write only).
+func (m *Manager) ensureLayoutScaffold() error {
+	for _, dir := range []string{m.layout.SandboxesDir(), m.layout.ProfilesDir(), m.layout.CacheDir()} {
+		if err := fileutil.MkdirAll(dir, 0750); err != nil {
+			return fmt.Errorf("create %s: %w", dir, err)
+		}
+	}
+	state, err := config.LoadState(m.layout)
+	if err != nil {
+		return fmt.Errorf("load state: %w", err)
+	}
+	// Upgrading user: defaults/ should exist. If it doesn't, surface
+	// the migration error before doing anything else.
+	if state.SetupComplete {
+		if err := config.CheckDefaultsDir(m.layout); err != nil {
+			return err
+		}
+	}
+	if err := m.ensureDefaultsDir(); err != nil {
+		return err
+	}
 	globalConfigPath := m.layout.GlobalConfigPath()
 	if _, err := os.Stat(globalConfigPath); os.IsNotExist(err) {
 		if err := fileutil.WriteFile(globalConfigPath, []byte(config.DefaultGlobalConfigYAML), 0600); err != nil {
 			return fmt.Errorf("write global config.yaml: %w", err)
 		}
 	}
-
-	// Write default state.yaml if missing
 	statePath := m.layout.StatePath()
 	if _, err := os.Stat(statePath); os.IsNotExist(err) {
 		if err := config.SaveState(m.layout, &config.State{}); err != nil {
 			return fmt.Errorf("write state.yaml: %w", err)
 		}
 	}
-
 	return nil
 }
 
@@ -283,12 +262,4 @@ func (m *Manager) SendInput(ctx context.Context, name string, text string) error
 		return fmt.Errorf("send input to sandbox %q: %w", name, err)
 	}
 	return nil
-}
-
-// isInteractive returns true if m.input is a TTY (terminal).
-func (m *Manager) isInteractive() bool {
-	if f, ok := m.input.(*os.File); ok {
-		return term.IsTerminal(int(f.Fd())) //nolint:gosec // file descriptor fits in int on all supported platforms
-	}
-	return false
 }

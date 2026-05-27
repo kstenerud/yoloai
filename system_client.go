@@ -445,6 +445,72 @@ func (s *SystemClient) pruneTempFiles(dryRun bool) ([]PruneItem, error) {
 	return items, nil
 }
 
+// SetupOptions configures SystemClient.Setup. Q-F: pure data — the
+// interactive wizard lives in the CLI and fills these in by prompting
+// the user (or accepting --flag overrides), then calls Setup. Setup
+// itself never prompts.
+type SetupOptions struct {
+	// TmuxConf is the tmux config mode. REQUIRED. One of:
+	// "default", "default+host", "host", "none".
+	TmuxConf string
+	// Backend is the default backend name (e.g. "docker", "tart").
+	// May be empty only when there's exactly one (or zero) available
+	// backends on the platform — Setup auto-picks in that case.
+	Backend string
+	// Agent is the default agent name (e.g. "claude"). May be empty
+	// only when there's exactly one (or zero) available agents.
+	Agent string
+}
+
+// SetupStatus is the host inspection a setup wizard needs to render
+// its prompts. Re-exports sandbox.SetupStatus so CLI/embedder code
+// can stay on the yoloai package boundary.
+type SetupStatus = sandbox.SetupStatus
+
+// SetupChoice is one option in a wizard prompt (backend or agent).
+type SetupChoice = sandbox.SetupChoice
+
+// TmuxConfigClass tells the wizard which prompt copy to use for the
+// tmux question.
+type TmuxConfigClass = sandbox.TmuxConfigClass
+
+// Re-export the TmuxConfigClass constants so wizard code (in the CLI
+// or external embedders) can switch on them without importing sandbox.
+const (
+	TmuxConfigNone  = sandbox.TmuxConfigNone
+	TmuxConfigSmall = sandbox.TmuxConfigSmall
+	TmuxConfigLarge = sandbox.TmuxConfigLarge
+)
+
+// SetupStatus inspects the host (reads ~/.tmux.conf, enumerates
+// backends/agents) and returns the data a setup wizard needs to ask
+// the user. Pure inspection — does not modify any config.
+func (s *SystemClient) SetupStatus(ctx context.Context) (*SetupStatus, error) {
+	_ = ctx
+	mgr := sandbox.NewManager(nil, slog.Default(), os.Stdin, io.Discard, sandbox.WithLayout(s.layout))
+	return mgr.SetupStatus(), nil
+}
+
+// Setup writes the user's setup answers to the config files under
+// DataDir. Non-interactive: callers (CLI wizard or scripted setup)
+// must supply every required answer.
+//
+// Returns *UsageError when:
+//   - opts.TmuxConf is empty or not one of "default" / "default+host" /
+//     "host" / "none".
+//   - opts.Backend is empty when multiple backends are available
+//     (use SetupStatus to discover them and prompt the user).
+//   - opts.Agent is empty when multiple agents are available.
+//   - opts.Backend or opts.Agent names an unknown value.
+func (s *SystemClient) Setup(ctx context.Context, opts SetupOptions) error {
+	mgr := sandbox.NewManager(nil, slog.Default(), os.Stdin, io.Discard, sandbox.WithLayout(s.layout))
+	return mgr.ApplySetup(ctx, sandbox.SetupOptions{
+		TmuxConf: opts.TmuxConf,
+		Backend:  opts.Backend,
+		Agent:    opts.Agent,
+	})
+}
+
 // scanSandboxes reads DataDir/sandboxes/ and classifies entries:
 // loadable meta.json → known instance; load failure → broken sandbox.
 func (s *SystemClient) scanSandboxes() (known []string, broken []BrokenSandbox) {

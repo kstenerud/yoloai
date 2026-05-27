@@ -118,16 +118,13 @@ linters:
           - forbidigo
         text: "sandbox\\.(NewManager|Manager)|runtime\\.(Runtime|New)"
 
-      # Residual W-L8d debt: two command paths still construct a
-      # sandbox.Manager directly via withManager. Removing these
-      # exemptions is the next layering-refactor step:
-      #   - system_mcp.go: the MCP server maps Manager methods to MCP
-      #     tools; needs an MCP-shaped wrapper on Client.
-      #   - system.go: the interactive `system setup` wizard calls
-      #     mgr.RunSetup; needs SystemClient.Setup (designed in
-      #     api_surface.go, not yet implemented).
-      # See docs/dev/plans/layering-refactor.md.
-      - path: "internal/cli/system_mcp\\.go|internal/cli/system\\.go"
+      # Residual W-L8d debt: the MCP server (system_mcp.go) maps
+      # Manager methods to MCP tools and still constructs the Manager
+      # directly via withManager. Removing this exemption requires an
+      # MCP-shaped wrapper on Client — its own future workstream.
+      # `system setup` migrated to SystemClient.Setup under Q-F
+      # (the exemption for system.go was dropped at the same time).
+      - path: "internal/cli/system_mcp\\.go"
         linters:
           - forbidigo
         text: "sandbox\\.(NewManager|Manager)"

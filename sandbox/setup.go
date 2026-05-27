@@ -6,13 +6,11 @@ package sandbox
 import (
 	"bufio"
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
 	"slices"
-	"strconv"
 	"strings"
 
 	"github.com/kstenerud/yoloai/agent"
@@ -22,16 +20,55 @@ import (
 	yoloairuntime "github.com/kstenerud/yoloai/runtime"
 )
 
-// errSetupPreview signals that the user chose [p] to preview the merged
-// tmux config and the setup should exit cleanly without setting setup_complete.
-var errSetupPreview = errors.New("setup preview requested")
-
-// SetupOptions allows callers to pre-answer setup prompts via flags.
-// When a field is non-empty, its corresponding interactive prompt is skipped.
+// SetupOptions carries every answer the first-run setup wizard would
+// have collected from the user. Q-F: this is pure data — all fields
+// are inputs to ApplySetup, which is non-interactive. The interactive
+// wizard lives in the CLI layer (internal/cli/system_setup.go) and
+// fills these in by prompting the user, then calls ApplySetup.
 type SetupOptions struct {
-	Agent    string // skip agent prompt, use this value
-	Backend  string // skip backend prompt, use this value
-	TmuxConf string // skip tmux prompt, use this value
+	// TmuxConf is the tmux config mode. REQUIRED.
+	// One of: "default", "default+host", "host", "none".
+	TmuxConf string
+	// Backend is the default backend name (e.g. "docker", "tart").
+	// May be empty only when there's exactly one (or zero) available
+	// backends on the platform — ApplySetup auto-picks in that case.
+	Backend string
+	// Agent is the default agent name (e.g. "claude"). May be empty
+	// only when there's exactly one (or zero) available agents —
+	// ApplySetup auto-picks in that case.
+	Agent string
+}
+
+// TmuxConfigClass tells the wizard which prompt copy to use.
+type TmuxConfigClass int
+
+const (
+	// TmuxConfigNone — no ~/.tmux.conf on disk.
+	TmuxConfigNone TmuxConfigClass = iota
+	// TmuxConfigSmall — ≤10 significant lines; the wizard asks the
+	// user whether to merge yoloai defaults with their config.
+	TmuxConfigSmall
+	// TmuxConfigLarge — >10 significant lines; treated as
+	// power-user, auto-configured to "default+host" without a prompt.
+	TmuxConfigLarge
+)
+
+// SetupChoice is one option in a wizard prompt (backend or agent).
+type SetupChoice struct {
+	Name  string
+	Blurb string
+}
+
+// SetupStatus is the host inspection a setup wizard needs to render
+// its prompts: classification of the user's ~/.tmux.conf, the
+// embedded yoloai defaults (so a "preview" option can print them),
+// and the lists of backends/agents available on this platform.
+type SetupStatus struct {
+	TmuxClass         TmuxConfigClass
+	UserTmuxConfig    string // contents of ~/.tmux.conf if present; empty otherwise
+	DefaultTmuxConfig string // yoloai's embedded tmux.conf (for the wizard's [p] option)
+	AvailableBackends []SetupChoice
+	AvailableAgents   []SetupChoice
 }
 
 // validTmuxConf lists the accepted values for the --tmux-conf flag.
@@ -134,85 +171,110 @@ func availableAgents() []setupOption {
 	return opts
 }
 
-// RunSetup runs the interactive setup unconditionally, regardless of
-// setup_complete. Used by `yoloai system setup` to let users redo their choices
-// or migrate from old layouts. Always creates defaults/ before proceeding,
-// bypassing the CheckDefaultsDir migration gate (this command IS the migration).
-func (m *Manager) RunSetup(ctx context.Context, opts SetupOptions) error {
-	// Create defaults/ unconditionally so the migration check in
-	// EnsureSetupNonInteractive doesn't block users with setup_complete=true
-	// but no defaults/ yet (the exact scenario this command is meant to fix).
-	if err := m.ensureDefaultsDir(); err != nil {
+// SetupStatus inspects the host and returns the data a wizard needs
+// to render its prompts. Pure host inspection — does not touch the
+// layout or config files. Safe to call from a Manager with a nil
+// runtime (used by yoloai.SystemClient.SetupStatus).
+func (m *Manager) SetupStatus() *SetupStatus {
+	class, userConfig := classifyTmuxConfig(filepath.Dir(m.layout.DataDir))
+	return &SetupStatus{
+		TmuxClass:         TmuxConfigClass(class),
+		UserTmuxConfig:    userConfig,
+		DefaultTmuxConfig: string(tmuxres.Embedded()),
+		AvailableBackends: toSetupChoices(availableBackends()),
+		AvailableAgents:   toSetupChoices(availableAgents()),
+	}
+}
+
+// ApplySetup writes the user's setup answers to the config files
+// under DataDir. Non-interactive: every prompt is the caller's
+// responsibility. Returns *UsageError when a required field is
+// missing or invalid:
+//
+//   - opts.TmuxConf is required and must be one of: "default",
+//     "default+host", "host", "none".
+//   - opts.Backend is required when len(AvailableBackends) > 1;
+//     auto-picks when exactly one is available; ignored when zero.
+//   - opts.Agent follows the same rule.
+//
+// Always creates the defaults/ directory and writes setup_complete=true
+// on success, so calling ApplySetup is the documented way to redo
+// (or repair) setup state.
+func (m *Manager) ApplySetup(_ context.Context, opts SetupOptions) error {
+	if err := validateTmuxConf(opts.TmuxConf); err != nil {
+		return NewUsageError("%v", err)
+	}
+	// Q-F: ApplySetup is config-only; image build is a separate
+	// concern (handled by `yoloai system build` or by EnsureSetup on
+	// first sandbox creation). This is why ApplySetup doesn't need a
+	// runtime: SystemClient.Setup constructs a Manager with rt=nil.
+	if err := m.ensureLayoutScaffold(); err != nil {
 		return err
 	}
-	if err := m.EnsureSetupNonInteractive(ctx); err != nil {
+	if err := m.setTmuxConf(opts.TmuxConf); err != nil {
 		return err
 	}
-	if err := m.runNewUserSetup(ctx, opts); err != nil {
-		if errors.Is(err, errSetupPreview) {
-			return nil
-		}
+	if err := m.applyBackendChoice(opts.Backend); err != nil {
 		return err
+	}
+	if err := m.applyAgentChoice(opts.Agent); err != nil {
+		return err
+	}
+	return m.setSetupComplete()
+}
+
+// applyBackendChoice writes the default backend from the wizard's
+// answer, validating user-supplied values and auto-picking when only
+// one is available. Returns *UsageError for required-but-missing or
+// unknown-backend.
+func (m *Manager) applyBackendChoice(name string) error {
+	backends := availableBackends()
+	switch {
+	case name != "":
+		return m.setBackendFromFlag(name)
+	case len(backends) == 1:
+		return m.setBackendFromFlag(backends[0].name)
+	case len(backends) > 1:
+		return NewUsageError("Backend is required: multiple are available on this host (%s)", joinChoiceNames(backends))
+	}
+	return nil // zero backends — nothing to write
+}
+
+// applyAgentChoice writes the default agent from the wizard's answer,
+// validating user-supplied values and auto-picking when only one is
+// available. Returns *UsageError for required-but-missing or
+// unknown-agent.
+func (m *Manager) applyAgentChoice(name string) error {
+	agents := availableAgents()
+	switch {
+	case name != "":
+		return m.setAgentFromFlag(name)
+	case len(agents) == 1:
+		return m.setAgentFromFlag(agents[0].name)
+	case len(agents) > 1:
+		return NewUsageError("Agent is required: multiple are available on this host (%s)", joinChoiceNames(agents))
 	}
 	return nil
 }
 
-// setupTmuxConf handles step 1 of first-run setup: configure the tmux_conf setting.
-// If opts.TmuxConf is set the flag value is validated and applied directly.
-// Otherwise, the user's existing tmux config is classified and the appropriate
-// interactive prompt (or auto-selection for power users) is used.
-func (m *Manager) setupTmuxConf(ctx context.Context, opts SetupOptions) error {
-	if opts.TmuxConf != "" {
-		if err := validateTmuxConf(opts.TmuxConf); err != nil {
-			return err
-		}
-		return m.setTmuxConf(opts.TmuxConf)
+// toSetupChoices maps the package-internal setupOption slice to the
+// exported SetupChoice shape.
+func toSetupChoices(opts []setupOption) []SetupChoice {
+	choices := make([]SetupChoice, len(opts))
+	for i, o := range opts {
+		choices[i] = SetupChoice{Name: o.name, Blurb: o.blurb}
 	}
-
-	class, userConfig := classifyTmuxConfig(filepath.Dir(m.layout.DataDir))
-	switch class {
-	case tmuxConfigLarge:
-		// Power user — skip prompt, auto-configure default+host
-		return m.setTmuxConf("default+host")
-	case tmuxConfigNone:
-		return m.promptTmuxSetup(ctx, "", true)
-	default: // tmuxConfigSmall
-		return m.promptTmuxSetup(ctx, userConfig, false)
-	}
+	return choices
 }
 
-// runNewUserSetup orchestrates the interactive first-run setup prompts.
-// Steps: tmux config → default backend → default agent → mark complete.
-// Returns errSetupPreview if the user chose [p] in the tmux prompt.
-func (m *Manager) runNewUserSetup(ctx context.Context, opts SetupOptions) error {
-	// Step 1: Tmux config
-	if err := m.setupTmuxConf(ctx, opts); err != nil {
-		return err
+// joinChoiceNames renders a list of options for an error message:
+// "docker, podman, tart".
+func joinChoiceNames(opts []setupOption) string {
+	names := make([]string, len(opts))
+	for i, o := range opts {
+		names[i] = o.name
 	}
-
-	// Step 2: Default backend (skip if only one option)
-	if opts.Backend != "" {
-		if err := m.setBackendFromFlag(opts.Backend); err != nil {
-			return err
-		}
-	} else {
-		if err := m.promptBackendSetup(ctx); err != nil {
-			return err
-		}
-	}
-
-	// Step 3: Default agent (skip if only one option)
-	if opts.Agent != "" {
-		if err := m.setAgentFromFlag(opts.Agent); err != nil {
-			return err
-		}
-	} else {
-		if err := m.promptAgentSetup(ctx); err != nil {
-			return err
-		}
-	}
-
-	return m.setSetupComplete()
+	return strings.Join(names, ", ")
 }
 
 // validateTmuxConf checks that the value is one of the accepted tmux_conf modes.
@@ -253,159 +315,6 @@ func (m *Manager) setAgentFromFlag(name string) error {
 		available = append(available, a.name)
 	}
 	return fmt.Errorf("invalid --agent value %q (available: %s)", name, strings.Join(available, ", "))
-}
-
-// promptTmuxSetup shows the tmux config prompt and handles the user's choice.
-// Sets tmux_conf but does NOT mark setup_complete (caller handles that).
-func (m *Manager) promptTmuxSetup(ctx context.Context, userConfig string, noConfig bool) error {
-	fmt.Fprintln(m.output) //nolint:errcheck // best-effort output
-	if noConfig {
-		fmt.Fprintln(m.output, "yoloai uses tmux in sandboxes. No ~/.tmux.conf found, so we'll")           //nolint:errcheck // best-effort output
-		fmt.Fprintln(m.output, "include sensible defaults (mouse scroll, colors, vim-friendly settings).") //nolint:errcheck // best-effort output
-	} else {
-		fmt.Fprintln(m.output, "yoloai uses tmux in sandboxes. Your tmux config is minimal, so we'll")     //nolint:errcheck // best-effort output
-		fmt.Fprintln(m.output, "include sensible defaults (mouse scroll, colors, vim-friendly settings).") //nolint:errcheck // best-effort output
-		fmt.Fprintln(m.output)                                                                             //nolint:errcheck // best-effort output
-		fmt.Fprintln(m.output, "Your config (~/.tmux.conf):")                                              //nolint:errcheck // best-effort output
-		for line := range strings.SplitSeq(strings.TrimRight(userConfig, "\n"), "\n") {
-			fmt.Fprintf(m.output, "  %s\n", line) //nolint:errcheck // best-effort output
-		}
-	}
-
-	fmt.Fprintln(m.output) //nolint:errcheck // best-effort output
-
-	if noConfig {
-		fmt.Fprintln(m.output, "  [Y] Use yoloai defaults")                                //nolint:errcheck // best-effort output
-		fmt.Fprintln(m.output, "  [n] Use raw tmux (no config)")                           //nolint:errcheck // best-effort output
-		fmt.Fprintln(m.output, "  [p] Print yoloai defaults and exit (for manual review)") //nolint:errcheck // best-effort output
-	} else {
-		fmt.Fprintln(m.output, "  [Y] Use yoloai defaults + your config (yours overrides on conflict)") //nolint:errcheck // best-effort output
-		fmt.Fprintln(m.output, "  [n] Use only your config as-is")                                      //nolint:errcheck // best-effort output
-		fmt.Fprintln(m.output, "  [p] Print merged config and exit (for manual review)")                //nolint:errcheck // best-effort output
-	}
-
-	fmt.Fprint(m.output, "\nChoice [Y/n/p]: ") //nolint:errcheck // best-effort output
-
-	line, err := m.readLine(ctx)
-	if err != nil {
-		return err
-	}
-	answer := strings.TrimSpace(strings.ToLower(line))
-
-	switch answer {
-	case "", "y", "yes":
-		if noConfig {
-			return m.setTmuxConf("default")
-		}
-		return m.setTmuxConf("default+host")
-
-	case "n", "no":
-		if noConfig {
-			return m.setTmuxConf("none")
-		}
-		return m.setTmuxConf("host")
-
-	case "p":
-		fmt.Fprintln(m.output)                            //nolint:errcheck // best-effort output
-		fmt.Fprintln(m.output, "--- yoloai defaults ---") //nolint:errcheck // best-effort output
-		fmt.Fprint(m.output, string(tmuxres.Embedded()))  //nolint:errcheck // best-effort output
-		if !noConfig && userConfig != "" {
-			fmt.Fprintln(m.output)                        //nolint:errcheck // best-effort output
-			fmt.Fprintln(m.output, "--- your config ---") //nolint:errcheck // best-effort output
-			fmt.Fprint(m.output, userConfig)              //nolint:errcheck // best-effort output
-		}
-		fmt.Fprintln(m.output) //nolint:errcheck // best-effort output
-		return errSetupPreview
-
-	default:
-		// Treat unknown input as Y (default)
-		if noConfig {
-			return m.setTmuxConf("default")
-		}
-		return m.setTmuxConf("default+host")
-	}
-}
-
-// promptBackendSetup asks which runtime backend to use as default.
-// Skipped when only one backend is available on the platform (e.g. Linux).
-func (m *Manager) promptBackendSetup(ctx context.Context) error {
-	backends := availableBackends()
-	if len(backends) <= 1 {
-		return nil
-	}
-
-	fmt.Fprintln(m.output)                             //nolint:errcheck // best-effort output
-	fmt.Fprintln(m.output, "Default runtime backend:") //nolint:errcheck // best-effort output
-	fmt.Fprintln(m.output)                             //nolint:errcheck // best-effort output
-
-	for i, b := range backends {
-		fmt.Fprintf(m.output, "  [%d] %-10s %s\n", i+1, b.name, b.blurb) //nolint:errcheck // best-effort output
-	}
-
-	fmt.Fprint(m.output, "\nChoice [1]: ") //nolint:errcheck // best-effort output
-
-	line, err := m.readLine(ctx)
-	if err != nil {
-		return err
-	}
-	answer := strings.TrimSpace(line)
-
-	idx := 0 // default to first option
-	if answer != "" {
-		n, err := strconv.Atoi(answer)
-		if err == nil && n >= 1 && n <= len(backends) {
-			idx = n - 1
-		}
-	}
-
-	return config.UpdateConfigFields(m.layout, map[string]string{
-		"container_backend": backends[idx].name,
-	})
-}
-
-// promptAgentSetup asks which agent to use as default.
-// Skipped when only one non-test agent is available.
-func (m *Manager) promptAgentSetup(ctx context.Context) error {
-	agents := availableAgents()
-	if len(agents) <= 1 {
-		return nil
-	}
-
-	// Default to claude if available, otherwise first option.
-	idx := 0
-	for i, a := range agents {
-		if a.name == "claude" {
-			idx = i
-			break
-		}
-	}
-
-	fmt.Fprintln(m.output)                   //nolint:errcheck // best-effort output
-	fmt.Fprintln(m.output, "Default agent:") //nolint:errcheck // best-effort output
-	fmt.Fprintln(m.output)                   //nolint:errcheck // best-effort output
-
-	for i, a := range agents {
-		fmt.Fprintf(m.output, "  [%d] %-10s %s\n", i+1, a.name, a.blurb) //nolint:errcheck // best-effort output
-	}
-
-	fmt.Fprintf(m.output, "\nChoice [%d]: ", idx+1) //nolint:errcheck // best-effort output
-
-	line, err := m.readLine(ctx)
-	if err != nil {
-		return err
-	}
-	answer := strings.TrimSpace(line)
-
-	if answer != "" {
-		n, err := strconv.Atoi(answer)
-		if err == nil && n >= 1 && n <= len(agents) {
-			idx = n - 1
-		}
-	}
-
-	return config.UpdateConfigFields(m.layout, map[string]string{
-		"agent": agents[idx].name,
-	})
 }
 
 // setTmuxConf writes the tmux_conf setting to the global config.yaml.

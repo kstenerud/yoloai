@@ -4,6 +4,24 @@ Tracks breaking changes made during beta. Each entry should be included in relea
 
 ## Unreleased
 
+### First-run setup is non-interactive when triggered implicitly; `yoloai system setup` is the explicit wizard
+
+**Previous behavior:** On the first `yoloai new` / `yoloai run` of a fresh install (when `setup_complete=false`), if stdin was a TTY the user was dropped into the interactive setup wizard before the sandbox could be created — three prompts (tmux config, default backend on macOS, default agent). When stdin wasn't a TTY, the same code path auto-configured silently with `tmux_conf=default+host`.
+
+**New behavior:** Implicit first-run setup is **always non-interactive**: it writes `tmux_conf=default+host` and marks `setup_complete=true`, then proceeds. The interactive wizard is only run explicitly via `yoloai system setup` (which is also how a user re-runs setup to change their defaults).
+
+**Rationale:** Q-F (`docs/dev/plans/layering-refactor.md` W-L8b) resolved that library entry points must not perform interactive IO — the CLI owns prompts. The previous behavior coupled `sandbox.Manager` to stdin/stdout and made first-run UX unpredictable depending on TTY state. The new shape:
+
+- `yoloai.SystemClient.Setup(ctx, opts)` is a pure write — caller supplies every answer (TmuxConf, Backend, Agent) via SetupOptions.
+- `yoloai.SystemClient.SetupStatus(ctx)` returns host inspection (tmux classification + available backends/agents) so external wizards (CLI, future HTTP/MCP) can render their own prompts.
+- The CLI wizard (`internal/cli/system_setup.go`) reads SetupStatus, prompts the user where flags aren't supplied, and calls Setup.
+
+**Migration:**
+- If you relied on `yoloai new` prompting on first run, run `yoloai system setup` once after install (or before your first `yoloai new`). Subsequent runs are unaffected.
+- CI / scripted installs already running on non-TTY stdin see no behavior change.
+- Embedders calling `Client.Run` before configuring defaults still auto-get `default+host` — no code change needed.
+- Embedders that want the interactive wizard's behavior should call `SystemClient.SetupStatus` + their own prompt UI + `SystemClient.Setup(opts)`.
+
 ### `yoloai system prune` always operates across all backends; `--all` and `--backend` removed
 
 **Previous behavior:** `yoloai system prune` accepted `--backend <name>` to prune only that backend and `--all` to prune across every available backend. Default was the configured default backend.
