@@ -4,6 +4,18 @@ Tracks breaking changes made during beta. Each entry should be included in relea
 
 ## Unreleased
 
+### `yoloai system prune` always operates across all backends; `--all` and `--backend` removed
+
+**Previous behavior:** `yoloai system prune` accepted `--backend <name>` to prune only that backend and `--all` to prune across every available backend. Default was the configured default backend.
+
+**New behavior:** The command always prunes across every backend that's currently available. Both `--all` and `--backend` flags have been removed; passing them now errors.
+
+**Rationale:** Per-backend pruning had no real-world use case — orphan detection is keyed off the sandbox dir on the host, which is shared across all backends. Selecting one backend either matched the same orphan set (if that backend was the only one with state) or missed orphans on other backends (silently). Always-cross-backend matches user expectation and matches the `Client.System().Prune` library shape resolved under Q-L. Tracked in `docs/dev/plans/layering-refactor.md` W-L8b Q-L.
+
+**Migration:**
+- Drop `--all` and `--backend` from scripts and CI invocations.
+- The behavior of bare `yoloai system prune` matches the old `--all` invocation.
+
 ### `yoloai system runtime` renamed to `yoloai system tart`
 
 **Previous behavior:** Apple simulator runtime base images were managed via `yoloai system runtime add|list|remove`. The command name read as generic, but the surface is structurally Tart-only (and is the only CLI subtree that imports `runtime/tart` directly).

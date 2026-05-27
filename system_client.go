@@ -11,12 +11,14 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/kstenerud/yoloai/agent"
 	"github.com/kstenerud/yoloai/config"
 	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/runtime/caps"
 	"github.com/kstenerud/yoloai/sandbox"
+	"github.com/kstenerud/yoloai/sandbox/store"
 )
 
 // SystemClient scopes `yoloai system …` operations. Constructed via
@@ -309,6 +311,161 @@ func (s *SystemClient) checkIsolation(ctx context.Context, rt runtime.Runtime, i
 		return CheckResult{Name: "isolation", OK: false, Message: err.Error()}
 	}
 	return CheckResult{Name: "isolation", OK: true}
+}
+
+// PruneOptions configures SystemClient.Prune. Always operates across
+// every backend that's currently available — per-backend pruning was
+// dropped under Q-L as having no real-world use case.
+type PruneOptions struct {
+	// DryRun reports what would be removed without removing it.
+	DryRun bool
+	// IncludeBaseImage also reclaims the backend's image cache,
+	// snapshots, volumes, and build cache (forces yoloai-base to
+	// rebuild on next sandbox creation).
+	IncludeBaseImage bool
+	// Output receives line-oriented progress from underlying tools.
+	// nil = io.Discard. Backend prune commands can be chatty; route
+	// to stderr in interactive CLI usage.
+	Output io.Writer
+}
+
+// PruneResult is what SystemClient.Prune returns. RemovedItems lists
+// every backend resource and temp dir that was (or, under DryRun,
+// would be) removed. BrokenSandboxes is informational: sandbox dirs
+// that exist but can't load metadata; Prune does not touch them.
+type PruneResult struct {
+	RemovedItems    []PruneItem
+	FreedBytes      int64 // best-effort; 0 when no backend reported byte counts
+	BrokenSandboxes []BrokenSandbox
+}
+
+// PruneItem describes one removed (or removable) item.
+type PruneItem struct {
+	Kind  string // "container", "vm", "image", "temp_dir", etc. (backend-defined)
+	Name  string // identifier
+	Bytes int64  // bytes reclaimed; 0 when backend can't report
+}
+
+// BrokenSandbox is an entry in DataDir/sandboxes/ whose meta.json
+// can't be loaded. Surfaced informationally by Prune so the user can
+// clean it up via `yoloai destroy <name>`.
+type BrokenSandbox struct {
+	Name string
+	Path string
+}
+
+// staleTempFileAge is the threshold for considering yoloai temp dirs
+// stale enough to remove during prune. Matches the CLI's previous
+// behavior.
+const staleTempFileAge = 1 * time.Hour
+
+// Prune removes orphaned backend resources (sandbox containers with no
+// matching sandbox dir on the host) and stale yoloai temp dirs across
+// every available backend. With IncludeBaseImage, also reclaims each
+// backend's image cache + snapshots + build cache (forces yoloai-base
+// to rebuild). DryRun reports what would be removed without removing.
+func (s *SystemClient) Prune(ctx context.Context, opts PruneOptions) (*PruneResult, error) {
+	out := opts.Output
+	if out == nil {
+		out = io.Discard
+	}
+	known, broken := s.scanSandboxes()
+	result := &PruneResult{BrokenSandboxes: broken}
+
+	for _, desc := range runtime.Descriptors() {
+		items := s.pruneBackend(ctx, desc.Name, known, opts, out)
+		result.RemovedItems = append(result.RemovedItems, items...)
+	}
+
+	tempItems, err := s.pruneTempFiles(opts.DryRun)
+	result.RemovedItems = append(result.RemovedItems, tempItems...)
+	if err != nil {
+		return result, err
+	}
+	return result, nil
+}
+
+// pruneBackend handles one backend's scan + (optionally) execute +
+// optional cache reclaim. Returns the items removed (or, under
+// DryRun, that would be removed). Per-backend failures are logged
+// to opts.Output rather than aborting the whole prune.
+func (s *SystemClient) pruneBackend(ctx context.Context, backend string, known []string, opts PruneOptions, out io.Writer) []PruneItem {
+	rt, err := newRuntime(ctx, backend, s.layout)
+	if err != nil {
+		return nil
+	}
+	defer rt.Close() //nolint:errcheck // best-effort
+
+	scan, err := rt.Prune(ctx, known, true, out)
+	if err != nil {
+		fmt.Fprintf(out, "Warning: scan %s failed: %v\n", backend, err) //nolint:errcheck
+		return nil
+	}
+
+	var items []PruneItem
+	if !opts.DryRun && len(scan.Items) > 0 {
+		actual, pruneErr := rt.Prune(ctx, known, false, out)
+		if pruneErr != nil {
+			fmt.Fprintf(out, "Warning: prune %s failed: %v\n", backend, pruneErr) //nolint:errcheck
+			return nil
+		}
+		for _, item := range actual.Items {
+			items = append(items, PruneItem{Kind: item.Kind, Name: item.Name})
+		}
+	} else {
+		for _, item := range scan.Items {
+			items = append(items, PruneItem{Kind: item.Kind, Name: item.Name})
+		}
+	}
+
+	if opts.IncludeBaseImage {
+		if err := runtime.PruneCacheFor(ctx, rt, opts.DryRun, out); err != nil {
+			fmt.Fprintf(out, "Warning: cache prune %s failed: %v\n", backend, err) //nolint:errcheck
+		}
+	}
+	return items
+}
+
+// pruneTempFiles scans (and, when !dryRun, removes) stale yoloai
+// temp dirs. Returns the list of stale dirs as PruneItem entries.
+func (s *SystemClient) pruneTempFiles(dryRun bool) ([]PruneItem, error) {
+	stale, err := sandbox.PruneTempFiles(true, staleTempFileAge)
+	if err != nil {
+		return nil, fmt.Errorf("scan temp files: %w", err)
+	}
+	items := make([]PruneItem, 0, len(stale))
+	for _, path := range stale {
+		items = append(items, PruneItem{Kind: "temp_dir", Name: path})
+	}
+	if !dryRun {
+		if _, err := sandbox.PruneTempFiles(false, staleTempFileAge); err != nil {
+			return items, fmt.Errorf("remove temp files: %w", err)
+		}
+	}
+	return items, nil
+}
+
+// scanSandboxes reads DataDir/sandboxes/ and classifies entries:
+// loadable meta.json → known instance; load failure → broken sandbox.
+func (s *SystemClient) scanSandboxes() (known []string, broken []BrokenSandbox) {
+	dir := s.layout.SandboxesDir()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, nil
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		path := filepath.Join(dir, name)
+		if _, err := store.LoadMeta(path); err != nil {
+			broken = append(broken, BrokenSandbox{Name: name, Path: path})
+		} else {
+			known = append(known, store.InstanceName(name))
+		}
+	}
+	return known, broken
 }
 
 // profileHasDockerfile returns nil if the named profile or any of its
