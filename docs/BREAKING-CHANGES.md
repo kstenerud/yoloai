@@ -197,29 +197,17 @@ The flip applies uniformly across the apply surface:
 - Remove `extends: base` from any profile configs.
 - The profile name `base` is no longer reserved.
 
-### `--security` replaced by `--isolation`; `backend` config key renamed to `container_backend`
+### `backend` config key renamed to `container_backend`
 
-**Previous behavior:** `yoloai new --security <mode>` where modes were `standard`, `gvisor`, `kata`, `kata-firecracker`. The `backend:` key in `config.yaml` configured the container runtime backend. The `security` field in `environment.json` (sandbox metadata) stored the isolation mode.
+**Previous behavior:** The `backend:` key in `~/.yoloai/config.yaml` selected the container runtime (docker, podman, …). Shipped in tags `v0.1.0` and `v0.1.1`.
 
-**New behavior:** `yoloai new --isolation <mode>` where modes are:
-- `container` — standard container isolation (replaces `standard`)
-- `container-enhanced` — gVisor (replaces `gvisor`)
-- `vm` — Kata Containers + QEMU, via containerd backend (replaces `kata`)
-- `vm-enhanced` — Kata Containers + Firecracker, via containerd backend (replaces `kata-firecracker`)
+**New behavior:** The same setting is now `container_backend:`. Shipped in `v0.2.0` and later.
 
-The `container_backend:` key in config replaces `backend:`. The `isolation` field in `environment.json` replaces `security`.
+**Rationale:** The unqualified `backend` name was ambiguous against the broader yoloAI concept of "backend" (which also covers `tart` and `seatbelt` — not all of them are container runtimes). `container_backend` names the actual scope.
 
-`--isolation vm` and `--isolation vm-enhanced` automatically route to the containerd backend — `--backend containerd` is not needed.
+**Migration:** Rename `backend:` to `container_backend:` in any `~/.yoloai/config.yaml` written by v0.1.x. No auto-migration; v0.2+ ignores the old key.
 
-**Rationale:** `--security` implied that gVisor is "more secure" and standard containers are "insecure". `--isolation` describes the actual mechanism (container vs VM), which is a more accurate framing. The `vm`/`vm-enhanced` names make the hardware VM boundary explicit. The `container_backend` rename removes ambiguity with the broader concept of "backend" (which also covers tart and seatbelt).
-
-**Migration:**
-- `--security standard` → omit `--isolation` (container is the default)
-- `--security gvisor` → `--isolation container-enhanced`
-- `--security kata` → `--isolation vm`
-- `--security kata-firecracker` → `--isolation vm-enhanced`
-- `backend: docker` in config → `container_backend: docker` (no auto-migration)
-- Sandboxes created with `--security` store the old value in `environment.json`; they will not work with lifecycle commands that read the isolation field. Destroy and recreate them.
+**History note:** Earlier revisions of this entry described a `--security` → `--isolation` flag rename and a `gvisor`/`kata`/`kata-firecracker` → `container-enhanced`/`vm`/`vm-enhanced` value rename. Verified via `git tag` audit that **none of those names ever appeared in a tagged release** — `--isolation` and the `container`/`vm` value spellings have been the public surface since `v0.2.0`. See `docs/dev/discovered-findings.md` DF1 for the audit. The flag/value text was removed in this revision to avoid misleading migrations.
 
 ### `sandbox <name> log` redesigned around structured JSONL
 

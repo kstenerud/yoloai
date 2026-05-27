@@ -98,9 +98,10 @@ Findings that turned up mid-workstream (architecture-remediation, layering-refac
 
 - **Discovered:** 2026-05-23 · **Workstream:** W-L9
 - **Severity:** LOW
-- **Disposition:** PARKED
-- **Description:** D6 in `layering.md` was conditional: add a BREAKING-CHANGES entry for `--security` → `--isolation` only if `--security` ever shipped in a tagged release. Audit of `git grep '\.Flags().String."security"' v0.1.0..v0.2.6` confirms the CLI flag was never registered in any released tag — `--isolation` has been the public flag name since v0.2.0. The flag existed only on `main` between commit 87956ac and a rename predating v0.2.0. The existing `--security`-related Unreleased entry in `docs/BREAKING-CHANGES.md` is therefore inaccurate for that portion. It does, however, also cover the `backend` → `container_backend` config-key rename, which IS a real v0.1.x → v0.2.x breaking change and should remain documented. W-L9 closes as **N/A**: no new entry needed, and rewording the existing one is scope-creep for W-L9. A future docs pass can correct the conflation.
-- **Pointer:** `docs/BREAKING-CHANGES.md:97`
+- **Disposition:** CLOSED 2026-05-27.
+- **Description:** D6 in `layering.md` was conditional: add a BREAKING-CHANGES entry for `--security` → `--isolation` only if `--security` ever shipped in a tagged release. Audit of `git grep '\.Flags().String."security"' v0.1.0..v0.2.6` confirmed the CLI flag was never registered in any released tag — `--isolation` has been the public flag name since `v0.2.0`. Cross-verified 2026-05-27 by reading every tagged `config/config.go` for `yaml:"backend"` vs `yaml:"container_backend"`: the rename happened between `v0.1.1` and `v0.2.0`. Also verified the `gvisor`/`kata`/`kata-firecracker` isolation value strings never shipped; v0.2.0 already used `container-enhanced`/`vm`/`vm-enhanced`, and v0.1.x had no isolation field at all. The earlier "Unreleased" entry in `BREAKING-CHANGES.md` conflated this fabricated `--security` → `--isolation` flag rename (plus the parallel never-shipped value rename) with the genuine `backend:` → `container_backend:` config-key rename.
+- **Fix:** entry rewritten 2026-05-27 to keep only the real config-key rename. Title became "`backend` config key renamed to `container_backend`". A history note in the entry references this DF for the audit trail.
+- **Pointer:** `docs/BREAKING-CHANGES.md` § "`backend` config key renamed to `container_backend`".
 
 ### DF2 — Smoke test prompt may provoke a clarifying-question idle on Haiku (containerd-vm)
 
@@ -143,9 +144,11 @@ Findings that turned up mid-workstream (architecture-remediation, layering-refac
 
 - **Discovered:** 2026-05-26 · **Workstream:** observed during W-L8b kickoff (same failure as DF3/DF4/DF5)
 - **Severity:** LOW
-- **Disposition:** PARKED
-- **Description:** The failed `containerd-vm` run showed `wait_for_ready(pattern=❯)` taking 46 seconds (sandbox.jsonl, 05:10:39 → 05:11:25) before the prompt was even delivered. That 46s ate over a third of the `stall_grace_secs=120` window — so when stall detection fired, only ~33s of that window covered actual agent work. The smoke-test failure message ("agent idle for 9s+") is identical whether the agent was idle for 9s on top of 46s ready + 33s work, or 9s on top of 5s ready + 74s work. These two cases have very different diagnoses (VM-startup tuning vs. agent-behavior tuning) but no signal distinguishes them in the failure report. **Proposed fix:** distinguish "agent never reached READY" (timer up vs. ready pattern) from "agent reached READY, then went idle after prompt" (idle for 9s after prompt-delivered timestamp). Each gets its own message; the existing 9s threshold applies to the second case only.
-- **Pointer:** `scripts/smoke_test.py::wait_for_sentinel`, `scripts/smoke_test.py::wait_for_ready`
+- **Disposition:** CLOSED 2026-05-27 (partial — see Followup below).
+- **Description:** The failed `containerd-vm` run showed `wait_for_ready(pattern=❯)` taking 46 seconds (sandbox.jsonl, 05:10:39 → 05:11:25) before the prompt was even delivered. That 46s ate over a third of the `stall_grace_secs=120` window — so when stall detection fired, only ~33s of that window covered actual agent work. The smoke-test failure message ("agent idle for 9s+") was identical whether the agent was idle for 9s on top of 46s ready + 33s work, or 9s on top of 5s ready + 74s work. These two cases have very different diagnoses (VM-startup tuning vs. agent-behavior tuning) but no signal distinguished them in the failure report.
+- **Fix landed 2026-05-27:** `scripts/smoke_test.py::wait_for_sentinel` now calls a new `_idle_phase()` helper when the idle-fail fires. The helper reads the exchange dir via `yoloai files ls` and classifies based on whether the smoke prompt's first action (`touch /yoloai/files/in-progress`) has landed: if `IN_PROGRESS` or `SENTINEL` is present → "after the prompt was delivered, no progress past <sentinel>"; if the dir is empty → "before the prompt was even processed; no <sentinel>". The two phases get distinct failure messages slotted into the existing AssertionError. Diagnosis is now self-classifying for any future idle-stall fail.
+- **Followup (deferred, separate workstream):** DF7's "re-measure stall_grace_secs" can now use the phase signal — only "before the prompt was even processed" cases count toward startup-latency tuning; "after the prompt was delivered" cases are agent-behavior.
+- **Pointer:** `scripts/smoke_test.py::wait_for_sentinel`, `scripts/smoke_test.py::Test._idle_phase`.
 
 ### DF7 — `stall_grace_secs=120` for containerd-vm may need re-measuring against current startup latency
 
@@ -159,7 +162,7 @@ Findings that turned up mid-workstream (architecture-remediation, layering-refac
 
 - **Discovered:** 2026-05-26 · **Workstream:** observed during W-L8b kickoff (two macOS smoke runs)
 - **Severity:** LOW
-- **Disposition:** PARKED — W-L14 covers the error-mapping half; the cross-run leak is a separate smoke-test cleanup gap (see below)
+- **Disposition:** CLOSED 2026-05-27. W-L14 landed the error-mapping half (`ResourceLimitError` from `runtime/tart`); the cross-run leak is now handled by a smoke-driver pre-run prune. Commit 3c433b0 added a post-run prune (catches the current run's wedged-shim destroys); 2026-05-27 adds the pre-run prune (catches state from prior runs that exited mid-flight).
 - **Description:** Two failure surfaces, same end-state. Both `stop_start/tart` attempts in two consecutive macOS smoke runs failed at `tart run` with `"The number of VMs exceeds the system limit (other running VMs: …)"`. Apple's `VZError.virtualMachineLimitExceeded` (code 6) — macOS limits concurrent VMs (commonly 2 on base Apple Silicon, more on M-Pro/Max).
 
   **Two distinct contributing factors:**
@@ -172,11 +175,11 @@ Findings that turned up mid-workstream (architecture-remediation, layering-refac
 
      VM `1779775833-workflow-tart` appears in BOTH runs — it's a leaked VM from a prior smoke invocation that wasn't cleaned up. This is a smoke-test infrastructure problem orthogonal to W-L14: even after W-L14 maps the error nicely, the user still can't run smoke tests on the affected host until they manually `tart stop` the leaked VMs.
 
-  Two corresponding fixes needed (track as separate tasks):
-  - **W-L14 (planned):** error mapping for `ErrConcurrentVMLimit`. Fixes user-facing message.
-  - **New smoke-test action item:** add a pre-run cleanup step that enumerates `tart list` for `yoloai-smoke-*` VMs and stops them before starting new scenarios. Or post-run cleanup that ensures every `tart run` is matched by a `tart stop`. The leak source (which failure mode left a VM running on a prior run) is unknown from these logs alone.
+  Two corresponding fixes — both now landed:
+  - **W-L14 (landed, commit 1f9ebed):** error mapping for `ResourceLimitError`. The user-facing message is "macOS concurrent VM limit reached — only 2 macOS VMs can run simultaneously" + a pointer to `yoloai sandbox stop`.
+  - **Smoke-driver pre-run prune (landed 2026-05-27):** `scripts/smoke_test.py::_prerun_prune` runs `yoloai system prune --yes` once before tests start. The underlying prune inherits the wedged-Kata-shim escalation (commit 3c433b0) and the wedged-Tart-VM escalation (commit 0b6d2f9), so it can't hang on the same orphan that caused the leak. The pre-run path catches state left by prior smoke invocations that exited mid-flight (Ctrl-C, OOM, etc.); the existing post-run prune (also in 3c433b0) catches the current run's wedged-destroy timeouts.
 
-- **Pointer:** `docs/dev/plans/layering-refactor.md::W-L14`, `docs/dev/research/tart-limit-detection.md`, `scripts/smoke_test.py` (orchestration + cleanup)
+- **Pointer:** `docs/dev/plans/layering-refactor.md::W-L14`, `docs/dev/research/tart-limit-detection.md`, `scripts/smoke_test.py::_prerun_prune` and `::cleanup`.
 
 ### DF8 (4th data point, 2026-05-26): containerd-vm idle-after-prompt failed once, passed on retry
 

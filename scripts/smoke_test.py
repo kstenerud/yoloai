@@ -378,9 +378,21 @@ class Test:
                 if status == "idle":
                     consecutive_idle += 1
                     if consecutive_idle >= STALL_IDLE_COUNT:
+                        # DF6: distinguish "never reached READY" (agent
+                        # is idle pre-prompt; VM-startup or ready-pattern
+                        # tuning) from "idle after prompt" (agent read
+                        # the prompt and stopped; agent-behavior tuning).
+                        # The smoke prompt's first action is `touch
+                        # /yoloai/files/in-progress`, so if IN_PROGRESS
+                        # is in the exchange dir, the agent processed the
+                        # prompt. If the dir is empty, the agent never
+                        # got that far. Two different diagnoses, two
+                        # different messages.
+                        phase = self._idle_phase(sandbox_name)
                         raise AssertionError(
                             f"agent idle for {consecutive_idle * 3}s+ "
-                            f"without sentinel {sentinel!r}{self._sentinel_diag(sandbox_name)}"
+                            f"({phase} sentinel {sentinel!r})"
+                            f"{self._sentinel_diag(sandbox_name)}"
                         )
                 else:
                     consecutive_idle = 0
@@ -391,6 +403,33 @@ class Test:
             f"sentinel {sentinel!r} not seen in {timeout}s "
             f"(log: {self.log_file}){self._sentinel_diag(sandbox_name)}"
         )
+
+    def _idle_phase(self, sandbox_name: str) -> str:
+        """Classify an idle stall as "post-prompt" or "pre-prompt".
+
+        The smoke prompt's first action is `touch /yoloai/files/in-progress`,
+        so the exchange dir's contents tell us which phase the idle hit:
+
+        - in-progress (or done) present → agent read the prompt and ran
+          at least one tool call before going idle. Diagnosis points at
+          agent behavior (DF2's tool-less response, model-side timeout,
+          ConnectionRefused that recovered after one ack, …).
+        - exchange dir empty → agent never touched in-progress. Diagnosis
+          points at VM-startup / ready-pattern tuning (the `❯` pattern
+          isn't matching, the prompt was never delivered, or the agent
+          got stuck before its first action).
+
+        Returns a phrase to slot into the failure message ("after the
+        prompt was delivered, no progress before" / "before the prompt
+        was even read; never wrote").
+        """
+        ls = self.run("files", sandbox_name, "ls", timeout=15)
+        if ls.returncode != 0:
+            return "phase unknown (ls failed); no"
+        present = {line.strip() for line in ls.stdout.splitlines() if line.strip()}
+        if IN_PROGRESS in present or SENTINEL in present:
+            return "after the prompt was delivered, no progress past"
+        return "before the prompt was even processed; no"
 
     def _sentinel_diag(self, sandbox_name: str) -> str:
         """Build a one-line diagnostic for sentinel-wait failures.
@@ -911,6 +950,64 @@ def _destroy_retry_sandboxes(ctx: RunContext, count_before: int) -> None:
             timeout=30,
         )
     del ctx.sandboxes[count_before:]
+
+
+def _prerun_prune(ctx: RunContext) -> None:
+    """Run `yoloai system prune --yes` once before tests start.
+
+    Addresses DF9's cross-run leak class: a prior smoke invocation
+    that exited mid-run (Ctrl-C, killed by a parent process, OOM, …)
+    can leave backend state behind — Tart VMs, containerd containers,
+    docker containers — that the current run will trip over when it
+    allocates sandbox names or hits a per-host limit (the macOS 2-VM
+    cap is the canonical example).
+
+    `yoloai system prune` enumerates yoloai-prefixed state across all
+    backends and removes anything with no matching sandbox dir. It
+    inherits the wedged-shim / wedged-Tart-VM escalation from commits
+    3c433b0 and 0b6d2f9, so it can't hang on the same orphan that
+    caused the leak in the first place. Bounded to 60s overall;
+    timeouts or non-zero exits are surfaced but don't abort the run
+    (the per-test prereq checks will catch any actual blockage that
+    survived the prune).
+
+    Best-effort: the prune output is parsed for the "Removed …"
+    lines and summarized as "pre-run prune: cleaned N items"; on no
+    leakage, prints "pre-run prune: clean".
+    """
+    try:
+        result = subprocess.run(
+            [ctx.yoloai_bin, "system", "prune", "--yes"],
+            capture_output=True, timeout=60, text=True,
+        )
+    except subprocess.TimeoutExpired:
+        print("pre-run prune: TIMEOUT (>60s); continuing — per-test prereqs will catch real blockers")
+        print()
+        return
+    except FileNotFoundError:
+        # ctx.yoloai_bin doesn't exist; the caller's smoke-binary
+        # check has already failed louder than we will. Stay silent.
+        return
+
+    if result.returncode != 0:
+        print(f"pre-run prune: exit {result.returncode} (continuing)")
+        if result.stderr.strip():
+            for line in result.stderr.strip().splitlines()[:5]:
+                print(f"  {line}")
+        print()
+        return
+
+    removed = [line for line in result.stdout.splitlines() if line.startswith("Removed ")]
+    if not removed:
+        print("pre-run prune: clean")
+    else:
+        print(f"pre-run prune: cleaned {len(removed)} item(s) from prior runs")
+        # Show up to 5 sample lines; long lists collapse to a count.
+        for line in removed[:5]:
+            print(f"  {line}")
+        if len(removed) > 5:
+            print(f"  ... and {len(removed) - 5} more")
+    print()
 
 
 def run_test(
@@ -1648,6 +1745,18 @@ def main() -> int:
         if setup_tip:
             print(setup_tip)
         print()
+
+    # Pre-run prune: clean up any backend state left over from prior smoke
+    # invocations before allocating new sandbox names. DF9 specifically
+    # caught this with Tart on macOS — a VM `1779775833-workflow-tart`
+    # from a previous run was still alive and counted against Apple's
+    # 2-VM concurrent limit, blocking new runs. The containerd backend
+    # has its own variant (orphan container records with no matching
+    # sandbox dir). Now that the underlying `system prune` handles
+    # wedged Kata shims (commit 3c433b0) and wedged Tart VMs
+    # (commit 0b6d2f9), running it pre-flight is safe; we can't hang
+    # on the same wedge that caused the leak in the first place.
+    _prerun_prune(ctx)
 
     # -------------------------------------------------------------------------
     # Helper to check if a test should run based on --test filter
