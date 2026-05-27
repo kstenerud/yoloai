@@ -1,4 +1,4 @@
-package cli
+package mcp
 
 // ABOUTME: `yoloai mcp serve` — starts the yoloAI orchestration MCP server on stdio.
 // ABOUTME: `yoloai mcp proxy` — proxies an inner MCP server through a sandbox.
@@ -18,7 +18,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func newMCPCmd() *cobra.Command {
+func NewCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "mcp",
 		Short:   "MCP server commands (orchestration and proxy)",

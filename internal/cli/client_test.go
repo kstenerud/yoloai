@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
+	"github.com/kstenerud/yoloai/internal/testutil"
 
 	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/sandbox"
@@ -73,7 +74,7 @@ func TestResolveBackend_OsMacIsolationVM(t *testing.T) {
 }
 
 func TestResolveBackend_ConfigOsMacFlagIsolationVM(t *testing.T) {
-	dir := cliConfigDir(t)
+	dir := testutil.CLIConfigDir(t)
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte("os: mac\n"), 0600))
 
 	cmd := &cobra.Command{}
@@ -98,14 +99,14 @@ func TestResolveBackend_FlagEmptyNoConfig(t *testing.T) {
 // --- ResolveContainerBackendConfig ---
 
 func TestResolveContainerBackendConfig_HasBackend(t *testing.T) {
-	dir := cliConfigDir(t)
+	dir := testutil.CLIConfigDir(t)
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte("container_backend: tart\n"), 0600))
 
 	assert.Equal(t, "tart", cliutil.ResolveContainerBackendConfig())
 }
 
 func TestResolveContainerBackendConfig_Empty(t *testing.T) {
-	dir := cliConfigDir(t)
+	dir := testutil.CLIConfigDir(t)
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte("agent: claude\n"), 0600))
 
 	assert.Equal(t, "", cliutil.ResolveContainerBackendConfig())
@@ -178,7 +179,7 @@ func TestResolveAgent_FlagSet(t *testing.T) {
 }
 
 func TestResolveAgent_FlagEmptyWithConfig(t *testing.T) {
-	dir := cliConfigDir(t)
+	dir := testutil.CLIConfigDir(t)
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte("agent: aider\n"), 0600))
 
 	cmd := &cobra.Command{}
@@ -200,7 +201,7 @@ func TestResolveAgent_FlagEmptyNoConfig(t *testing.T) {
 // --- ResolveAgentFromConfig ---
 
 func TestResolveAgentFromConfig_HasAgent(t *testing.T) {
-	dir := cliConfigDir(t)
+	dir := testutil.CLIConfigDir(t)
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte("agent: gemini\n"), 0600))
 
 	assert.Equal(t, "gemini", cliutil.ResolveAgentFromConfig())
@@ -224,7 +225,7 @@ func TestResolveModel_FlagSet(t *testing.T) {
 }
 
 func TestResolveModel_FlagEmptyWithConfig(t *testing.T) {
-	dir := cliConfigDir(t)
+	dir := testutil.CLIConfigDir(t)
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte("model: sonnet\n"), 0600))
 
 	cmd := &cobra.Command{}
@@ -246,7 +247,7 @@ func TestResolveModel_FlagEmptyNoConfig(t *testing.T) {
 // --- ResolveModelFromConfig ---
 
 func TestResolveModelFromConfig_HasModel(t *testing.T) {
-	dir := cliConfigDir(t)
+	dir := testutil.CLIConfigDir(t)
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte("model: opus\n"), 0600))
 
 	assert.Equal(t, "opus", cliutil.ResolveModelFromConfig())

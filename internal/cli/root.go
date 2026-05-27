@@ -31,7 +31,7 @@ var cliVersion, cliCommit, cliDate string
 // Execute runs the root command and returns the exit code.
 func Execute(ctx context.Context, version, commit, date string) (exitCode int) {
 	cliVersion, cliCommit, cliDate = version, commit, date
-	rootCmd := newRootCmd(version, commit, date)
+	rootCmd := NewRootCmd(version, commit, date)
 
 	// Track which command was active when the error occurred so we can
 	// show a context-aware help hint (e.g. "Run 'yoloai system prune -h' for help").
@@ -204,8 +204,8 @@ func errorExitCode(err error) int {
 	return 1
 }
 
-// newRootCmd creates the root Cobra command with all subcommands registered.
-func newRootCmd(version, commit, date string) *cobra.Command {
+// NewRootCmd creates the root Cobra command with all subcommands registered.
+func NewRootCmd(version, commit, date string) *cobra.Command {
 	rootCmd := &cobra.Command{
 		Use:   "yoloai",
 		Short: "Sandboxed AI coding agent runner",

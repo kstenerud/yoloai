@@ -1,4 +1,4 @@
-package cli
+package configcmd
 
 // ABOUTME: Tests for the config get/set/reset CLI commands.
 
@@ -8,19 +8,14 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/kstenerud/yoloai/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-// cliConfigDir creates the defaults/ directory structure for CLI config tests.
-func cliConfigDir(t *testing.T) string {
-	t.Helper()
-	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
-	dir := filepath.Join(tmpDir, ".yoloai", "defaults")
-	require.NoError(t, os.MkdirAll(dir, 0750))
-	return dir
-}
+// cliConfigDir is a thin alias for testutil.CLIConfigDir so the existing
+// per-test call sites stay terse.
+func cliConfigDir(t *testing.T) string { t.Helper(); return testutil.CLIConfigDir(t) }
 
 func TestConfigGet_EffectiveConfig(t *testing.T) {
 	dir := cliConfigDir(t)

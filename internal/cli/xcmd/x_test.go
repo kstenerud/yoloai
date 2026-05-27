@@ -1,4 +1,4 @@
-package cli
+package xcmd_test
 
 // ABOUTME: Tests for the extensions CLI commands (yoloai x).
 
@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kstenerud/yoloai/internal/cli"
+	"github.com/kstenerud/yoloai/internal/cli/xcmd"
 	"github.com/kstenerud/yoloai/internal/extension"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -39,7 +41,7 @@ func writeExt(t *testing.T, dir, name, content string) {
 func TestXList_NoExtensions(t *testing.T) {
 	_ = setupExtTest(t)
 
-	cmd := newXCmd()
+	cmd := xcmd.NewCmd()
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
 	cmd.SetArgs([]string{})
@@ -53,7 +55,7 @@ func TestXList_NoExtensionsDir(t *testing.T) {
 	t.Setenv("HOME", tmpDir)
 	// Don't create extensions dir
 
-	cmd := newXCmd()
+	cmd := xcmd.NewCmd()
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
 	cmd.SetArgs([]string{})
@@ -74,7 +76,7 @@ agent: claude
 action: echo bye
 `)
 
-	cmd := newXCmd()
+	cmd := xcmd.NewCmd()
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
 	cmd.SetArgs([]string{})
@@ -97,7 +99,7 @@ action: echo hello
 `)
 
 	// Need a root command with --json persistent flag
-	root := newRootCmd("test", "test", "test")
+	root := cli.NewRootCmd("test", "test", "test")
 	buf := new(bytes.Buffer)
 	root.SetOut(buf)
 	root.SetArgs([]string{"--json", "x"})
@@ -113,7 +115,7 @@ action: echo hello
 func TestXList_JSONEmpty(t *testing.T) {
 	_ = setupExtTest(t)
 
-	root := newRootCmd("test", "test", "test")
+	root := cli.NewRootCmd("test", "test", "test")
 	buf := new(bytes.Buffer)
 	root.SetOut(buf)
 	root.SetArgs([]string{"--json", "x"})
@@ -136,7 +138,7 @@ args:
 action: echo "Hello ${name}"
 `)
 
-	cmd := newXCmd()
+	cmd := xcmd.NewCmd()
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
 	cmd.SetArgs([]string{"greet", "World"})
@@ -155,7 +157,7 @@ args:
 action: echo "${name}"
 `)
 
-	cmd := newXCmd()
+	cmd := xcmd.NewCmd()
 	cmd.SetOut(new(bytes.Buffer))
 	cmd.SetArgs([]string{"greet"})
 	err := cmd.Execute()
@@ -173,7 +175,7 @@ args:
 action: echo "${name}"
 `)
 
-	cmd := newXCmd()
+	cmd := xcmd.NewCmd()
 	cmd.SetOut(new(bytes.Buffer))
 	cmd.SetArgs([]string{"greet", "one", "two"})
 	err := cmd.Execute()
@@ -193,7 +195,7 @@ flags:
 action: echo "${model}"
 `)
 
-	cmd := newXCmd()
+	cmd := xcmd.NewCmd()
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
 	cmd.SetArgs([]string{"flagtest"})
@@ -214,7 +216,7 @@ flags:
 action: echo "${model}"
 `)
 
-	cmd := newXCmd()
+	cmd := xcmd.NewCmd()
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
 	cmd.SetArgs([]string{"flagtest", "-m", "opus"})
@@ -234,7 +236,7 @@ flags:
 action: echo "${max_turns}"
 `)
 
-	cmd := newXCmd()
+	cmd := xcmd.NewCmd()
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
 	cmd.SetArgs([]string{"hflag", "--max-turns", "5"})
@@ -250,7 +252,7 @@ description: "Agent var test"
 action: echo "${agent}"
 `)
 
-	cmd := newXCmd()
+	cmd := xcmd.NewCmd()
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
 	cmd.SetArgs([]string{"agentvar"})
@@ -268,7 +270,7 @@ agent: codex
 action: echo hi
 `)
 
-	cmd := newXCmd()
+	cmd := xcmd.NewCmd()
 	cmd.SetOut(new(bytes.Buffer))
 	cmd.SetArgs([]string{"codexonly"})
 	err := cmd.Execute()
@@ -283,7 +285,7 @@ description: "Exit with code"
 action: exit 42
 `)
 
-	cmd := newXCmd()
+	cmd := xcmd.NewCmd()
 	cmd.SetOut(new(bytes.Buffer))
 	cmd.SetArgs([]string{"fail"})
 	err := cmd.Execute()
@@ -306,7 +308,7 @@ args:
 action: echo "${first} ${second}"
 `)
 
-	cmd := newXCmd()
+	cmd := xcmd.NewCmd()
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
 	cmd.SetArgs([]string{"multi", "hello", "world"})
@@ -322,7 +324,7 @@ description: "No args"
 action: echo "done"
 `)
 
-	cmd := newXCmd()
+	cmd := xcmd.NewCmd()
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
 	cmd.SetArgs([]string{"noargs"})
@@ -346,7 +348,7 @@ flags:
 action: echo "${target} ${count}"
 `)
 
-	cmd := newXCmd()
+	cmd := xcmd.NewCmd()
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
 	cmd.SetArgs([]string{"combo", "foo", "-c", "3"})
@@ -372,7 +374,7 @@ flags:
 action: echo hi
 `)
 
-	cmd := newXCmd()
+	cmd := xcmd.NewCmd()
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
 	cmd.SetArgs([]string{"documented", "--help"})
@@ -398,7 +400,7 @@ description: "Good"
 action: echo good
 `)
 
-	cmd := newXCmd()
+	cmd := xcmd.NewCmd()
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
 	cmd.SetArgs([]string{})
@@ -422,7 +424,7 @@ agent:
 action: echo "agent is ${agent}"
 `)
 
-	cmd := newXCmd()
+	cmd := xcmd.NewCmd()
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
 	cmd.SetArgs([]string{"multi-agent"})
@@ -442,7 +444,7 @@ description: "Conflict"
 action: echo hi
 `)
 
-	cmd := newXCmd()
+	cmd := xcmd.NewCmd()
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
 	// The conflicting extension is skipped during subcommand registration,
@@ -467,7 +469,7 @@ flags:
 action: echo "${output}"
 `)
 
-	cmd := newXCmd()
+	cmd := xcmd.NewCmd()
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
 	cmd.SetArgs([]string{"longflag", "--output", "json"})
@@ -483,7 +485,7 @@ description: "Stderr test"
 action: echo "err" >&2
 `)
 
-	cmd := newXCmd()
+	cmd := xcmd.NewCmd()
 	stdoutBuf := new(bytes.Buffer)
 	stderrBuf := new(bytes.Buffer)
 	cmd.SetOut(stdoutBuf)
@@ -505,7 +507,7 @@ agent:
 action: echo hi
 `)
 
-	root := newRootCmd("test", "test", "test")
+	root := cli.NewRootCmd("test", "test", "test")
 	buf := new(bytes.Buffer)
 	root.SetOut(buf)
 	root.SetArgs([]string{"--json", "x"})
@@ -537,7 +539,7 @@ action: |
   echo "agent=${agent}"
 `)
 
-	cmd := newXCmd()
+	cmd := xcmd.NewCmd()
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
 	cmd.SetArgs([]string{"envcheck", "test_arg_value"})

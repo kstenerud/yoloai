@@ -13,7 +13,7 @@ import (
 func TestHelpCmd_NoArgs_ShowsQuickstart(t *testing.T) {
 	cmd := newHelpCmd()
 	// Give it a parent with the group so GroupID validation passes.
-	root := newRootCmd("test", "abc", "now")
+	root := NewRootCmd("test", "abc", "now")
 	root.AddCommand(cmd)
 
 	buf := new(bytes.Buffer)
@@ -135,7 +135,7 @@ func TestLevenshtein(t *testing.T) {
 }
 
 func TestBareInvocation_ShowsIntro(t *testing.T) {
-	root := newRootCmd("test", "abc", "now")
+	root := NewRootCmd("test", "abc", "now")
 	buf := new(bytes.Buffer)
 	root.SetOut(buf)
 	root.SetArgs([]string{})

@@ -1,4 +1,4 @@
-package cli
+package xcmd
 
 // ABOUTME: CLI commands for yoloai x (extensions). Loads user-defined extension
 // ABOUTME: YAML files and registers them as dynamic Cobra subcommands.
@@ -19,7 +19,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func newXCmd() *cobra.Command {
+func NewCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "x [extension] [args...] [--flags...]",
 		Short:   "Run a user-defined extension",

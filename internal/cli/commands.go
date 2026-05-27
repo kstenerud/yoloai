@@ -5,7 +5,11 @@ package cli
 
 import (
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
+	"github.com/kstenerud/yoloai/internal/cli/configcmd"
+	"github.com/kstenerud/yoloai/internal/cli/mcp"
+	"github.com/kstenerud/yoloai/internal/cli/profile"
 	"github.com/kstenerud/yoloai/internal/cli/system"
+	"github.com/kstenerud/yoloai/internal/cli/xcmd"
 	"github.com/spf13/cobra"
 )
 
@@ -27,7 +31,7 @@ func registerCommands(root *cobra.Command, version, commit, date string) {
 		newRestartCmd(),
 		newDestroyCmd(),
 		newResetCmd(),
-		newMCPCmd(),
+		mcp.NewCmd(),
 
 		// Workflow
 		newAttachCmd(),
@@ -35,7 +39,7 @@ func registerCommands(root *cobra.Command, version, commit, date string) {
 		newApplyCmd(),
 		newBaselineCmd(),
 		newFilesCmd(),
-		newXCmd(),
+		xcmd.NewCmd(),
 
 		// Sandbox Tools
 		newSandboxCmd(),
@@ -46,9 +50,9 @@ func registerCommands(root *cobra.Command, version, commit, date string) {
 
 		// Admin
 		system.NewCmd(version, commit, date),
-		newProfileCmd(),
+		profile.NewCmd(),
 		newHelpCmd(),
-		newConfigCmd(),
+		configcmd.NewCmd(),
 		newVersionCmd(version, commit, date),
 	)
 }

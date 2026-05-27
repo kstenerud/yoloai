@@ -1,4 +1,4 @@
-package cli
+package profile
 
 // ABOUTME: `yoloai profile` command group: create, list, info, delete.
 // ABOUTME: Manages reusable environment profiles in ~/.yoloai/profiles/.
@@ -23,7 +23,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func newProfileCmd() *cobra.Command {
+func NewCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "profile",
 		Short:   "Manage profiles",

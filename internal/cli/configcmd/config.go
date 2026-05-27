@@ -1,4 +1,4 @@
-package cli
+package configcmd
 
 // ABOUTME: CLI commands for reading and writing yoloai configuration settings.
 // ABOUTME: Routes global keys to ~/.yoloai/config.yaml, others to profile config.
@@ -15,7 +15,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-func newConfigCmd() *cobra.Command {
+func NewCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "config",
 		Short:   "Get or set global configuration values",
