@@ -68,11 +68,44 @@ func applyDirSuffix(result *DirArg, suffix, arg string) error {
 	return nil
 }
 
+// ParseAuxDirArg parses an auxiliary (`-d`) directory argument and
+// rejects modes the diff/apply workflow doesn't support on aux dirs.
+//
+// Q-U (resolved 2026-05-25): the diff/apply workflow operates on the
+// workdir only — aux dirs are reference mounts (`:rw` for live edits,
+// default `:ro` for read-only). Aux `:copy` and `:overlay` are no
+// longer supported. Returns *UsageError pointing at the workarounds:
+// make the dir the workdir, mount as `:rw`, or run a separate sandbox.
+func ParseAuxDirArg(arg, homeDir string) (*DirArg, error) {
+	d, err := ParseDirArg(arg, homeDir)
+	if err != nil {
+		return nil, err
+	}
+	switch d.Mode {
+	case "copy":
+		return nil, NewUsageError(
+			"aux directories cannot use :copy (diff/apply is workdir-only).\n"+
+				"  - to track changes, make %q the workdir instead\n"+
+				"  - to edit it live, use :rw\n"+
+				"  - for an isolated copy, run a separate sandbox", arg)
+	case "overlay":
+		return nil, NewUsageError(
+			"aux directories cannot use :overlay (diff/apply is workdir-only).\n"+
+				"  - to track changes, make %q the workdir instead\n"+
+				"  - to edit it live, use :rw\n"+
+				"  - for an isolated copy, run a separate sandbox", arg)
+	}
+	return d, nil
+}
+
 // ParseDirArg parses a directory argument with optional suffixes.
 // Suffixes (:copy, :rw, :force) can be combined in any order.
 // Default mode (no :copy or :rw) is determined by the caller
 // (workdir defaults to "copy", aux dirs default to "ro").
 // homeDir is used for ~ expansion; callers derive it from filepath.Dir(layout.DataDir).
+//
+// Use ParseAuxDirArg for the `-d` flag — it adds the workdir-only
+// validation enforced by Q-U.
 func ParseDirArg(arg, homeDir string) (*DirArg, error) {
 	result := &DirArg{}
 

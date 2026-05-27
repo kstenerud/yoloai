@@ -5,6 +5,7 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"path/filepath"
@@ -257,8 +258,15 @@ func resolveNewDirSpecs(rawWorkdirArg string, rawDirs []string) (workdirSpec san
 		workdirSpec = sandbox.DirArgToSpec(parsed)
 	}
 	for _, rawDir := range rawDirs {
-		parsed, parseErr := sandbox.ParseDirArg(rawDir, homeDir)
+		parsed, parseErr := sandbox.ParseAuxDirArg(rawDir, homeDir)
 		if parseErr != nil {
+			// ParseAuxDirArg returns *UsageError for the :copy/:overlay
+			// rejection cases (already user-actionable); pass it through.
+			// Other parse errors get the "invalid directory" prefix.
+			var usage *sandbox.UsageError
+			if errors.As(parseErr, &usage) {
+				return sandbox.DirSpec{}, nil, parseErr
+			}
 			return sandbox.DirSpec{}, nil, sandbox.NewUsageError("invalid directory %q: %s", rawDir, parseErr)
 		}
 		auxDirSpecs = append(auxDirSpecs, sandbox.DirArgToSpec(parsed))

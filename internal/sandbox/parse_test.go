@@ -180,3 +180,44 @@ func TestDirArg_ResolvedMountPath(t *testing.T) {
 	d2 := &DirArg{Path: "/host/path"}
 	assert.Equal(t, "/host/path", d2.ResolvedMountPath())
 }
+
+// Q-U: aux dirs no longer support :copy or :overlay; only :rw and the
+// default :ro. ParseAuxDirArg enforces this with a UsageError so the
+// CLI can pass the message through without wrapping.
+func TestParseAuxDirArg_RejectsCopy(t *testing.T) {
+	_, err := ParseAuxDirArg("/tmp/aux:copy", "/home/user")
+	require.Error(t, err)
+	var usage *UsageError
+	require.ErrorAs(t, err, &usage)
+	assert.Contains(t, err.Error(), "aux directories cannot use :copy")
+	assert.Contains(t, err.Error(), "workdir")
+	assert.Contains(t, err.Error(), ":rw")
+}
+
+func TestParseAuxDirArg_RejectsOverlay(t *testing.T) {
+	_, err := ParseAuxDirArg("/tmp/aux:overlay", "/home/user")
+	require.Error(t, err)
+	var usage *UsageError
+	require.ErrorAs(t, err, &usage)
+	assert.Contains(t, err.Error(), "aux directories cannot use :overlay")
+}
+
+func TestParseAuxDirArg_AcceptsRW(t *testing.T) {
+	d, err := ParseAuxDirArg("/tmp/aux:rw", "/home/user")
+	require.NoError(t, err)
+	assert.Equal(t, "rw", d.Mode)
+}
+
+func TestParseAuxDirArg_AcceptsRO_Default(t *testing.T) {
+	// no suffix → empty mode; caller defaults to :ro.
+	d, err := ParseAuxDirArg("/tmp/aux", "/home/user")
+	require.NoError(t, err)
+	assert.Equal(t, "", d.Mode)
+}
+
+func TestParseAuxDirArg_ParseErrorsPassThrough(t *testing.T) {
+	// ParseDirArg surfaces its own non-usage errors (e.g. unset env var
+	// in path); ParseAuxDirArg must propagate those unchanged.
+	_, err := ParseAuxDirArg("${YOLOAI_TEST_NONEXISTENT}/dir", "/home/user")
+	require.Error(t, err)
+}
