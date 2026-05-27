@@ -39,14 +39,14 @@ func cliSetup(t *testing.T) (projectDir string) {
 	// Run EnsureSetup via a quick `new --no-start` then destroy, or just
 	// invoke setup by creating a throwaway sandbox. We use the root command
 	// to trigger EnsureSetup via the Manager.
-	root := newRootCmd("test", "test", "test")
+	root := NewRootCmd("test", "test", "test")
 	root.SetArgs([]string{"new", "--agent", "test", "--no-start", "cli-setup", projectDir})
 	root.SetOut(&bytes.Buffer{})
 	root.SetErr(&bytes.Buffer{})
 	require.NoError(t, root.ExecuteContext(context.Background()))
 
 	// Clean up the setup sandbox
-	root = newRootCmd("test", "test", "test")
+	root = NewRootCmd("test", "test", "test")
 	root.SetArgs([]string{"destroy", "--yes", "cli-setup"})
 	root.SetOut(&bytes.Buffer{})
 	root.SetErr(&bytes.Buffer{})
@@ -59,7 +59,7 @@ func cliSetup(t *testing.T) (projectDir string) {
 // stdout, stderr, and any error.
 func runCLI(t *testing.T, args ...string) (stdout, stderr string, err error) {
 	t.Helper()
-	root := newRootCmd("test", "test", "test")
+	root := NewRootCmd("test", "test", "test")
 	outBuf := new(bytes.Buffer)
 	errBuf := new(bytes.Buffer)
 	root.SetOut(outBuf)

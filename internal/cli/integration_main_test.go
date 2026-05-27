@@ -115,7 +115,7 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 
-	root := newRootCmd("test", "test", "test")
+	root := NewRootCmd("test", "test", "test")
 	root.SetArgs([]string{"new", "--agent", "test", "--no-start", "cli-main-setup", projectDir})
 	root.SetOut(&bytes.Buffer{})
 	root.SetErr(&bytes.Buffer{})
@@ -125,7 +125,7 @@ func TestMain(m *testing.M) {
 	}
 
 	// Clean up the bootstrap sandbox (best-effort).
-	root = newRootCmd("test", "test", "test")
+	root = NewRootCmd("test", "test", "test")
 	root.SetArgs([]string{"destroy", "--yes", "cli-main-setup"})
 	root.SetOut(&bytes.Buffer{})
 	root.SetErr(&bytes.Buffer{})
