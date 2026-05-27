@@ -24,7 +24,7 @@ func newXCmd() *cobra.Command {
 		Use:     "x [extension] [args...] [--flags...]",
 		Short:   "Run a user-defined extension",
 		Long:    "Run user-defined extensions from ~/.yoloai/extensions/.\nRun without arguments to list available extensions.\n\nSee 'yoloai help extensions' for how to create and install extensions.",
-		GroupID: groupWorkflow,
+		GroupID: cliutil.GroupWorkflow,
 		Aliases: []string{"ext"},
 		RunE:    runExtensionList,
 	}

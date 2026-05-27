@@ -4,24 +4,18 @@
 package cli
 
 import (
+	"github.com/kstenerud/yoloai/internal/cli/cliutil"
+	"github.com/kstenerud/yoloai/internal/cli/system"
 	"github.com/spf13/cobra"
-)
-
-// Command group IDs for help output.
-const (
-	groupLifecycle    = "lifecycle"
-	groupWorkflow     = "workflow"
-	groupSandboxTools = "sandbox-tools"
-	groupAdmin        = "admin"
 )
 
 // registerCommands adds all subcommands to the root command.
 func registerCommands(root *cobra.Command, version, commit, date string) {
 	root.AddGroup(
-		&cobra.Group{ID: groupLifecycle, Title: "Lifecycle:"},
-		&cobra.Group{ID: groupWorkflow, Title: "Workflow:"},
-		&cobra.Group{ID: groupSandboxTools, Title: "Sandbox Tools:"},
-		&cobra.Group{ID: groupAdmin, Title: "Admin:"},
+		&cobra.Group{ID: cliutil.GroupLifecycle, Title: "Lifecycle:"},
+		&cobra.Group{ID: cliutil.GroupWorkflow, Title: "Workflow:"},
+		&cobra.Group{ID: cliutil.GroupSandboxTools, Title: "Sandbox Tools:"},
+		&cobra.Group{ID: cliutil.GroupAdmin, Title: "Admin:"},
 	)
 
 	root.AddCommand(
@@ -51,7 +45,7 @@ func registerCommands(root *cobra.Command, version, commit, date string) {
 		newVscodeAliasCmd(),
 
 		// Admin
-		newSystemCmd(version, commit, date),
+		system.NewCmd(version, commit, date),
 		newProfileCmd(),
 		newHelpCmd(),
 		newConfigCmd(),

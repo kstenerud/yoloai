@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/kstenerud/yoloai/internal/agent"
+	"github.com/kstenerud/yoloai/internal/cli/cliutil"
 	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/spf13/cobra"
 )
@@ -52,7 +53,7 @@ func newHelpCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:     "help [topic]",
 		Short:   "Show help guides (run 'help topics' to list all)",
-		GroupID: groupAdmin,
+		GroupID: cliutil.GroupAdmin,
 		Args:    cobra.MaximumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			topic := ""

@@ -1,4 +1,4 @@
-package cli
+package system
 
 // ABOUTME: `yoloai system info` subcommand. Displays version, paths,
 // ABOUTME: disk usage, and backend availability.
@@ -52,7 +52,7 @@ func newSystemInfoCmd(version, commit, date string) *cobra.Command {
 			fmt.Fprintln(out, "Backends:") //nolint:errcheck
 			ctx := cmd.Context()
 			for _, desc := range runtime.Descriptors() {
-				available, note := checkBackend(ctx, desc.Name)
+				available, note := cliutil.CheckBackend(ctx, desc.Name)
 				status := "available"
 				if !available {
 					status = "unavailable"
@@ -89,7 +89,7 @@ func writeSystemInfoJSON(cmd *cobra.Command, version, commit, date string) error
 	var backends []backendStatus
 	ctx := cmd.Context()
 	for _, desc := range runtime.Descriptors() {
-		available, note := checkBackend(ctx, desc.Name)
+		available, note := cliutil.CheckBackend(ctx, desc.Name)
 		backends = append(backends, backendStatus{
 			Name:      desc.Name,
 			Available: available,

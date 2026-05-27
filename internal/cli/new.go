@@ -26,7 +26,7 @@ func newNewCmd(version string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "new [flags] <name> [workdir] [-d <dir>...] [-- <agent-args>...]",
 		Short:   "Create and start a sandbox",
-		GroupID: groupLifecycle,
+		GroupID: cliutil.GroupLifecycle,
 		Args:    cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runNewCmd(cmd, args, version)
@@ -81,7 +81,7 @@ func runNewCmd(cmd *cobra.Command, args []string, version string) error {
 	// (workdir copy + overlay) and possibly fetching a multi-GB base
 	// image. Stat errors are swallowed; the warning is non-blocking.
 	if !cliutil.JSONEnabled(cmd) {
-		warnIfLowDisk(cmd.ErrOrStderr(), cliutil.Layout().SandboxesDir())
+		cliutil.WarnIfLowDisk(cmd.ErrOrStderr(), cliutil.Layout().SandboxesDir())
 	}
 
 	if opts.Attach && !opts.NoStart {

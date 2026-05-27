@@ -27,7 +27,7 @@ func newProfileCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "profile",
 		Short:   "Manage profiles",
-		GroupID: groupAdmin,
+		GroupID: cliutil.GroupAdmin,
 	}
 
 	cmd.AddCommand(

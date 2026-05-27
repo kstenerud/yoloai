@@ -46,7 +46,7 @@ Specific commits can be cherry-picked by providing ref arguments:
 Use --squash to flatten the committed changes into a single unstaged
 patch (combine with --include-wip to include uncommitted edits too).
 Use --patches to export .patch files without applying them.`,
-		GroupID: groupWorkflow,
+		GroupID: cliutil.GroupWorkflow,
 		Args:    cobra.ArbitraryArgs,
 		RunE:    runApplyCmd,
 	}

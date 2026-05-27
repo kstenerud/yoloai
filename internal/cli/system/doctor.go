@@ -1,4 +1,4 @@
-package cli
+package system
 
 // ABOUTME: `yoloai system doctor` command — shows what backends and isolation modes
 // ABOUTME: are available on the current machine, with fix instructions for missing prerequisites.

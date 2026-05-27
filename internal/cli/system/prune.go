@@ -1,4 +1,4 @@
-package cli
+package system
 
 // ABOUTME: `yoloai system prune` removes orphaned backend resources and stale temp files.
 

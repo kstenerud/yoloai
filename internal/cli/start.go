@@ -27,7 +27,7 @@ func newStartCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "start <name>",
 		Short:   "Start a stopped sandbox",
-		GroupID: groupLifecycle,
+		GroupID: cliutil.GroupLifecycle,
 		Args:    cobra.ArbitraryArgs,
 		RunE:    func(cmd *cobra.Command, args []string) error { return runStart(cmd, args, opts) },
 	}

@@ -22,7 +22,7 @@ func newAttachCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "attach <name>",
 		Short:   "Attach to a sandbox's session (tmux)",
-		GroupID: groupWorkflow,
+		GroupID: cliutil.GroupWorkflow,
 		Args:    cobra.ArbitraryArgs,
 		RunE:    func(cmd *cobra.Command, args []string) error { return runAttach(cmd, args, opts) },
 	}

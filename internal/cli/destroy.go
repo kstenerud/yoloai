@@ -54,7 +54,7 @@ func newDestroyCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "destroy <name>...",
 		Short:   "Stop and remove sandboxes",
-		GroupID: groupLifecycle,
+		GroupID: cliutil.GroupLifecycle,
 		Args:    cobra.ArbitraryArgs,
 		RunE:    runDestroyCmd,
 	}

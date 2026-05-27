@@ -21,7 +21,7 @@ func newStopCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "stop <name>...",
 		Short:   "Stop sandboxes (preserving state)",
-		GroupID: groupLifecycle,
+		GroupID: cliutil.GroupLifecycle,
 		Args:    cobra.ArbitraryArgs,
 		RunE:    runStopCmd,
 	}

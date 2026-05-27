@@ -1,6 +1,6 @@
 // ABOUTME: 'completion' command — generates shell completion scripts. Wired
 // ABOUTME: under 'yoloai system completion' rather than at the top level.
-package cli
+package system
 
 import (
 	"github.com/kstenerud/yoloai/internal/sandbox"

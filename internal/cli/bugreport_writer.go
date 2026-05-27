@@ -123,7 +123,7 @@ func writeBugReportBackends(ctx context.Context, w io.Writer) {
 	fmt.Fprintln(w)                                //nolint:errcheck
 
 	for _, desc := range yoloairuntime.Descriptors() {
-		available, note := checkBackend(ctx, desc.Name)
+		available, note := cliutil.CheckBackend(ctx, desc.Name)
 		status := "available"
 		if !available {
 			status = "unavailable"

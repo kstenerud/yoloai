@@ -1,4 +1,4 @@
-package cli
+package cliutil
 
 // ABOUTME: Tests for free-space detection and the low-disk warning helper.
 
@@ -73,7 +73,7 @@ func TestWarnIfLowDisk_DoesNotCrashOnRealPath(t *testing.T) {
 	// machines have more free space so we don't assert on output.
 	// emitLowDiskWarning's tests above cover the message content.
 	var buf bytes.Buffer
-	warnIfLowDisk(&buf, t.TempDir())
+	WarnIfLowDisk(&buf, t.TempDir())
 	// No assertion on buf contents — whether output appears depends
 	// on the host's actual free space, which is uncontrollable here.
 	// What matters is the function didn't panic.
@@ -93,7 +93,7 @@ func TestHumanBytes(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			assert.Equal(t, c.want, humanBytes(c.n))
+			assert.Equal(t, c.want, HumanBytes(c.n))
 		})
 	}
 }
@@ -102,8 +102,8 @@ func TestHumanBytes(t *testing.T) {
 // guards against accidental zero or absurdly-large values from a
 // future refactor.
 func TestLowDiskThreshold_Sanity(t *testing.T) {
-	assert.Greater(t, lowDiskWarnThresholdBytes, int64(100*1024*1024),
+	assert.Greater(t, LowDiskWarnThresholdBytes, int64(100*1024*1024),
 		"threshold should be at least 100 MiB to be meaningful")
-	assert.Less(t, lowDiskWarnThresholdBytes, int64(100*1024*1024*1024),
+	assert.Less(t, LowDiskWarnThresholdBytes, int64(100*1024*1024*1024),
 		"threshold should be under 100 GiB to avoid false positives on most systems")
 }

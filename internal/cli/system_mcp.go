@@ -22,7 +22,7 @@ func newMCPCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "mcp",
 		Short:   "MCP server commands (orchestration and proxy)",
-		GroupID: groupLifecycle,
+		GroupID: cliutil.GroupLifecycle,
 	}
 	cmd.AddCommand(newMCPServeCmd(), newMCPProxyCmd())
 	return cmd

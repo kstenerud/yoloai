@@ -37,7 +37,7 @@ Subcommands:
   ls [glob]...               List files in sandbox exchange directory
   rm <glob>...               Remove files from sandbox exchange directory
   path                       Print host path to sandbox exchange directory`,
-		GroupID:            groupWorkflow,
+		GroupID:            cliutil.GroupWorkflow,
 		Args:               cobra.ArbitraryArgs,
 		DisableFlagParsing: false,
 		RunE:               filesDispatch,

@@ -1,7 +1,7 @@
 // ABOUTME: Tests for the system setup wizard prompts. These exercise the
 // ABOUTME: interactive logic in isolation from yoloai.SystemClient.Setup
 // ABOUTME: (which is itself non-interactive — see sandbox/setup_test.go).
-package cli
+package system
 
 import (
 	"bufio"

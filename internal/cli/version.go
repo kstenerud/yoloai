@@ -14,7 +14,7 @@ func newVersionCmd(version, commit, date string) *cobra.Command {
 	return &cobra.Command{
 		Use:     "version",
 		Short:   "Show version information",
-		GroupID: groupAdmin,
+		GroupID: cliutil.GroupAdmin,
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if cliutil.JSONEnabled(cmd) {

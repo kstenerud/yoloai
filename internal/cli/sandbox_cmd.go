@@ -27,7 +27,7 @@ func newSandboxCmd() *cobra.Command {
 		Aliases: []string{"sb"},
 		Short:   "Sandbox tools",
 		Long:    "Sandbox tools.",
-		GroupID: groupSandboxTools,
+		GroupID: cliutil.GroupSandboxTools,
 		Args:    cobra.ArbitraryArgs,
 		RunE:    sandboxDispatch,
 	}

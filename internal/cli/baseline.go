@@ -20,7 +20,7 @@ func newBaselineCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "baseline <subcommand>",
 		Short:   "Manage sandbox baseline SHA",
-		GroupID: groupWorkflow,
+		GroupID: cliutil.GroupWorkflow,
 	}
 	cmd.AddCommand(newBaselineAdvanceCmd(), newBaselineSetCmd(), newBaselineLogCmd())
 	return cmd

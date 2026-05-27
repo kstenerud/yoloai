@@ -32,7 +32,7 @@ func runClone(cmd *cobra.Command, args []string) error {
 	// overlay. Clone is the heaviest allocate-per-sandbox op aside
 	// from new. Swallow stat errors and non-blocking.
 	if !cliutil.JSONEnabled(cmd) {
-		warnIfLowDisk(cmd.ErrOrStderr(), cliutil.Layout().SandboxesDir())
+		cliutil.WarnIfLowDisk(cmd.ErrOrStderr(), cliutil.Layout().SandboxesDir())
 	}
 
 	// Set terminal title early so it shows the sandbox name during clone+start
@@ -123,7 +123,7 @@ func newCloneCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "clone <source> <dest>",
 		Short:   "Clone a sandbox",
-		GroupID: groupLifecycle,
+		GroupID: cliutil.GroupLifecycle,
 		Args:    cobra.ExactArgs(2),
 		RunE:    runClone,
 	}

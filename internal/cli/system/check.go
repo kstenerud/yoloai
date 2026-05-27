@@ -1,4 +1,4 @@
-package cli
+package system
 
 // ABOUTME: `yoloai system check` command — verifies prereqs for CI/CD pipelines.
 // ABOUTME: Checks backend connectivity, base image, and agent credentials. Exits 1 on failure.

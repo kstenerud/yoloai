@@ -1,4 +1,4 @@
-package cli
+package system
 
 // ABOUTME: `yoloai system` parent command with `build` and `setup` subcommands.
 // ABOUTME: Groups system-level admin operations under a single parent command.
@@ -17,11 +17,11 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func newSystemCmd(version, commit, date string) *cobra.Command {
+func NewCmd(version, commit, date string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "system",
 		Short:   "System information and management",
-		GroupID: groupAdmin,
+		GroupID: cliutil.GroupAdmin,
 	}
 
 	cmd.AddCommand(
@@ -80,7 +80,7 @@ func runSystemBuild(cmd *cobra.Command, args []string, backend string) error {
 	// is brittle; check ~/.yoloai/ as a proxy — same machine's free
 	// space typically applies.
 	if !cliutil.JSONEnabled(cmd) {
-		warnIfLowDisk(cmd.ErrOrStderr(), cliutil.Layout().SandboxesDir())
+		cliutil.WarnIfLowDisk(cmd.ErrOrStderr(), cliutil.Layout().SandboxesDir())
 	}
 
 	var profile string
@@ -159,7 +159,7 @@ func reportBuildOK(cmd *cobra.Command, profile string) error {
 
 func runSystemBuildAll(cmd *cobra.Command, args []string) error {
 	if !cliutil.JSONEnabled(cmd) {
-		warnIfLowDisk(cmd.ErrOrStderr(), cliutil.Layout().SandboxesDir())
+		cliutil.WarnIfLowDisk(cmd.ErrOrStderr(), cliutil.Layout().SandboxesDir())
 	}
 
 	secretFlags, _ := cmd.Flags().GetStringSlice("secret")

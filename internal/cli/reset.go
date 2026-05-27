@@ -29,7 +29,7 @@ func newResetCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "reset <name>",
 		Short:   "Re-copy workdir into sandbox and reset diff baseline",
-		GroupID: groupLifecycle,
+		GroupID: cliutil.GroupLifecycle,
 		Args:    cobra.ArbitraryArgs,
 		RunE:    func(cmd *cobra.Command, args []string) error { return runReset(cmd, args, opts) },
 	}

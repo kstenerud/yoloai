@@ -27,7 +27,7 @@ func newRestartCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "restart <name>",
 		Short:   "Restart the agent in an existing sandbox",
-		GroupID: groupLifecycle,
+		GroupID: cliutil.GroupLifecycle,
 		Args:    cobra.ArbitraryArgs,
 		RunE:    func(cmd *cobra.Command, args []string) error { return runRestart(cmd, args, opts) },
 	}

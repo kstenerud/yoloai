@@ -4,6 +4,7 @@
 package cli
 
 import (
+	"github.com/kstenerud/yoloai/internal/cli/cliutil"
 	"github.com/spf13/cobra"
 )
 
@@ -11,7 +12,7 @@ func newLsAliasCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "ls",
 		Short:   "List sandboxes (shortcut for 'sandbox list')",
-		GroupID: groupSandboxTools,
+		GroupID: cliutil.GroupSandboxTools,
 		Args:    cobra.NoArgs,
 		RunE:    runList,
 	}
@@ -23,7 +24,7 @@ func newLogAliasCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "log <name>",
 		Short:   "Show sandbox log (shortcut for 'sandbox log')",
-		GroupID: groupSandboxTools,
+		GroupID: cliutil.GroupSandboxTools,
 		Args:    cobra.ArbitraryArgs,
 		RunE:    runLog,
 	}
@@ -54,7 +55,7 @@ func newExecAliasCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:     "exec <name> <command> [args...]",
 		Short:   "Run a command inside a sandbox (shortcut for 'sandbox exec')",
-		GroupID: groupSandboxTools,
+		GroupID: cliutil.GroupSandboxTools,
 		Args:    cobra.MinimumNArgs(1),
 		RunE:    runExec,
 	}
@@ -64,7 +65,7 @@ func newVscodeAliasCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:     "vscode <name>",
 		Short:   "Open a sandbox in VS Code (shortcut for 'sandbox vscode')",
-		GroupID: groupSandboxTools,
+		GroupID: cliutil.GroupSandboxTools,
 		Args:    cobra.ExactArgs(1),
 		RunE:    newSandboxVscodeCmd().RunE,
 	}

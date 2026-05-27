@@ -2,7 +2,7 @@
 // ABOUTME: about tmux config / default backend / default agent, then writes
 // ABOUTME: the answers via yoloai.SystemClient.Setup. Q-F: prompts live in
 // ABOUTME: this CLI file so the library Setup is non-interactive.
-package cli
+package system
 
 import (
 	"bufio"

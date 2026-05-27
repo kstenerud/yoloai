@@ -1,11 +1,10 @@
-package cli
+package system
 
 // ABOUTME: Backend and agent info commands, plus the shared probe-based
 // ABOUTME: checkBackend helper. All static facts come from runtime.Descriptors();
 // ABOUTME: only the per-backend tradeoffs (CLI-presentation language) live here.
 
 import (
-	"context"
 	"fmt"
 	"strings"
 	"text/tabwriter"
@@ -97,7 +96,7 @@ func listBackends(cmd *cobra.Command) error {
 		}
 		items := make([]backendJSON, 0, len(descs))
 		for _, d := range descs {
-			available, note := checkBackend(ctx, d.Name)
+			available, note := cliutil.CheckBackend(ctx, d.Name)
 			items = append(items, backendJSON{
 				Name:        d.Name,
 				Description: d.Description,
@@ -112,7 +111,7 @@ func listBackends(cmd *cobra.Command) error {
 	fmt.Fprintln(w, "BACKEND\tDESCRIPTION\tAVAILABLE\tNOTE") //nolint:errcheck // best-effort output
 
 	for _, d := range descs {
-		available, note := checkBackend(ctx, d.Name)
+		available, note := cliutil.CheckBackend(ctx, d.Name)
 		avail := "yes"
 		if !available {
 			avail = "no"
@@ -136,7 +135,7 @@ func showBackendDetail(cmd *cobra.Command, name string) error {
 	ctx := cmd.Context()
 
 	if cliutil.JSONEnabled(cmd) {
-		available, note := checkBackend(ctx, desc.Name)
+		available, note := cliutil.CheckBackend(ctx, desc.Name)
 		return cliutil.WriteJSON(cmd.OutOrStdout(), map[string]any{
 			"name":         desc.Name,
 			"description":  desc.Description,
@@ -151,7 +150,7 @@ func showBackendDetail(cmd *cobra.Command, name string) error {
 
 	out := cmd.OutOrStdout()
 
-	available, note := checkBackend(ctx, name)
+	available, note := cliutil.CheckBackend(ctx, name)
 	avail := "yes"
 	if !available {
 		avail = "no"
@@ -188,17 +187,6 @@ func backendNames() []string {
 		names[i] = d.Name
 	}
 	return names
-}
-
-// checkBackend attempts to create a runtime for the given backend name.
-// Returns availability and a short note on failure.
-func checkBackend(ctx context.Context, name string) (available bool, note string) {
-	rt, err := cliutil.NewRuntime(ctx, name)
-	if err != nil {
-		return false, err.Error()
-	}
-	rt.Close() //nolint:errcheck,gosec // best-effort cleanup
-	return true, ""
 }
 
 func newSystemAgentsCmd() *cobra.Command {

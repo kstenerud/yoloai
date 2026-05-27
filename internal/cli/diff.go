@@ -42,7 +42,7 @@ Examples:
   yoloai diff mybox abc123           # single commit diff
   yoloai diff mybox abc1..def4       # range diff
   yoloai diff mybox -- src/          # full diff filtered to path`,
-		GroupID: groupWorkflow,
+		GroupID: cliutil.GroupWorkflow,
 		Args:    cobra.ArbitraryArgs,
 		RunE:    runDiffCmd,
 	}

@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"testing"
 
+	"github.com/kstenerud/yoloai/internal/cli/cliutil"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -65,7 +66,7 @@ func TestNetworkList_JSON(t *testing.T) {
 	// Build command tree so persistent flags from parent are available
 	root := &cobra.Command{}
 	root.PersistentFlags().Bool("json", false, "")
-	root.AddGroup(&cobra.Group{ID: groupSandboxTools, Title: "Sandbox Tools:"})
+	root.AddGroup(&cobra.Group{ID: cliutil.GroupSandboxTools, Title: "Sandbox Tools:"})
 	sb := newSandboxCmd()
 	root.AddCommand(sb)
 
@@ -83,7 +84,7 @@ func TestNetworkList_JSONNoDomains(t *testing.T) {
 
 	root := &cobra.Command{}
 	root.PersistentFlags().Bool("json", false, "")
-	root.AddGroup(&cobra.Group{ID: groupSandboxTools, Title: "Sandbox Tools:"})
+	root.AddGroup(&cobra.Group{ID: cliutil.GroupSandboxTools, Title: "Sandbox Tools:"})
 	sb := newSandboxCmd()
 	root.AddCommand(sb)
 
