@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kstenerud/yoloai/internal/agent"
 	sandbox "github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/kstenerud/yoloai/internal/sandbox/patch"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
@@ -44,7 +45,7 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 	meta, err := store.LoadMeta(sandboxDir)
 	require.NoError(t, err)
 	assert.Equal(t, sandboxName, meta.Name)
-	assert.Equal(t, "test", meta.Agent)
+	assert.Equal(t, agent.AgentTest, meta.Agent)
 	assert.Equal(t, "copy", meta.Workdir.Mode)
 	assert.NotEmpty(t, meta.Workdir.BaselineSHA)
 
@@ -144,7 +145,7 @@ func TestIntegration_CreateNoStart(t *testing.T) {
 	meta, err := store.LoadMeta(sandboxDir)
 	require.NoError(t, err)
 	assert.Equal(t, "nostart", meta.Name)
-	assert.Equal(t, "test", meta.Agent)
+	assert.Equal(t, agent.AgentTest, meta.Agent)
 	assert.Equal(t, "copy", meta.Workdir.Mode)
 	assert.NotEmpty(t, meta.Workdir.BaselineSHA)
 

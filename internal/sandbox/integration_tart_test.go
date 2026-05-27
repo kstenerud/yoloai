@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kstenerud/yoloai/internal/agent"
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/runtime/tart"
@@ -96,8 +97,8 @@ func TestIntegrationTart_FullLifecycle(t *testing.T) {
 	meta, err := store.LoadMeta(sandboxDir)
 	require.NoError(t, err)
 	assert.Equal(t, sandboxName, meta.Name)
-	assert.Equal(t, "test", meta.Agent)
-	assert.Equal(t, "tart", meta.Backend)
+	assert.Equal(t, agent.AgentTest, meta.Agent)
+	assert.Equal(t, runtime.BackendTart, meta.Backend)
 	assert.Equal(t, "copy", meta.Workdir.Mode)
 	assert.NotEmpty(t, meta.Workdir.BaselineSHA, "baseline SHA should be set after VM work dir setup")
 
