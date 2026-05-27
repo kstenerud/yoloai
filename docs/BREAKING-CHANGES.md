@@ -4,6 +4,44 @@ Tracks breaking changes made during beta. Each entry should be included in relea
 
 ## Unreleased
 
+### `yoloai sandbox <name> allowed --json` carries per-domain provenance
+
+**Previous behavior:** `yoloai sandbox <name> allowed --json` emitted a flat `domains` array of strings:
+
+```json
+{ "name": "mybox", "network_mode": "isolated", "domains": ["api.anthropic.com", "example.com"] }
+```
+
+The same went for the `domains_removed` field of `yoloai sandbox <name> deny --json` and the Go API's `meta.NetworkAllow []string`.
+
+**New behavior:** Each domain is now an object with a `source` field that identifies why it's on the list. The Go API exposes the same shape as `[]yoloai.AllowedDomain`.
+
+```json
+{
+  "name": "mybox",
+  "network_mode": "isolated",
+  "domains": [
+    {"domain": "api.anthropic.com", "source": "agent-requirement"},
+    {"domain": "example.com",       "source": "user"}
+  ]
+}
+```
+
+The two source values:
+
+- `"agent-requirement"` — the bound agent's `agent.Definition.NetworkAllowlist` requires this domain (e.g. `api.anthropic.com` for Claude). Removing it will break the agent itself.
+- `"user"` — added by the user via `--network-allow` at create time or `yoloai sandbox <name> allow` at runtime.
+
+Human-readable output also gains an `" (agent requirement)"` annotation next to each agent-required entry, and `yoloai sandbox <name> deny` now prints a warning when the removal hits an agent-required domain. The library does not block the removal (that's a UI policy decision).
+
+**Migration:**
+
+- Shell pipelines that did `yoloai sandbox <name> allowed --json | jq '.domains[]'` and expected raw strings should switch to `jq '.domains[].domain'`.
+- Embedders using `yoloai.Client.Sandbox(name).Network().Allowed(ctx)` get `[]yoloai.AllowedDomain`; the `Source` field is a `yoloai.DomainSource` enum (`AllowedFromAgentRequirement` / `AllowedFromUser`).
+- The on-disk `environment.json` (`meta.NetworkAllow`) is unchanged — it still stores `[]string`. Provenance is recovered at read time, so existing sandboxes continue to work without migration.
+
+**Rationale:** Q-V (`api_surface.go` Q-V resolution 2026-05-25). Flattening provenance at the API boundary was the same anti-pattern as the Q-Q CLI-UI leak: information the implementation can answer for was being thrown away. Two real use cases motivated the change — "don't silently nuke an agent-required domain" warnings and "show me my additions vs baked-in defaults" management UIs.
+
 ### Auxiliary `:copy` and `:overlay` are no longer supported
 
 **Previous behavior:** Any directory passed via `-d` (auxiliary mount) could carry the same `:copy` and `:overlay` mode suffixes as the workdir, in which case the directory participated in `yoloai diff` / `yoloai apply` alongside the workdir. The workflow was all-or-nothing: a single multi-directory diff was emitted, apply ran per-directory in sequence, and the first failure halted the chain.
