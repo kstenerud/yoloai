@@ -365,26 +365,11 @@ func (r *Runtime) Start(ctx context.Context, name string) error {
 	return nil
 }
 
-// Stop suspends the VM, preserving its state on disk and freeing the quota slot.
-// tart suspend is asynchronous: the command returns while the VM is still writing
-// its RAM state to disk. We poll until the state reaches "suspended" (or the VM
-// disappears) before returning. Falls back to a hard stop if suspend fails.
+// Stop hard-stops the VM. Apple's Virtualization.framework cannot restore VMs
+// that had VirtioFS (--dir) mounts from a suspend snapshot (VZErrorDomain Code=12),
+// so suspend-on-stop provides no benefit: Start always recreates from staging anyway.
+// Using a hard stop keeps Stop fast and avoids a 15-45s penalty per stop call.
 func (r *Runtime) Stop(ctx context.Context, name string) error {
-	if _, err := r.runTart(ctx, "suspend", name); err != nil {
-		r.stopVM(ctx, name)
-		return nil //nolint:nilerr // suspend failed; hard-stop already done, error is not actionable
-	}
-	// Wait for suspension to complete (writing RAM state to disk takes seconds).
-	deadline := time.Now().Add(60 * time.Second)
-	for time.Now().Before(deadline) {
-		state := r.vmState(ctx, name)
-		if state == "suspended" || state == "stopped" || state == "" {
-			return nil
-		}
-		time.Sleep(500 * time.Millisecond)
-	}
-	// Timed out — fall back to hard stop
-	slog.Warn("tart suspend timed out, falling back to hard stop", "name", name)
 	r.stopVM(ctx, name)
 	return nil
 }
