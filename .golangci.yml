@@ -96,6 +96,16 @@ linters:
         - pattern: "^os\\.Getwd$"
           msg: "no silent CWD-as-default; commands accepting paths must take them explicitly — see development-principles.md §12"
 
+        # F13 enforcement: never derive HomeDir from DataDir. config.Layout
+        # carries HomeDir as a separate field; library callers use
+        # layout.HomeDir directly. Pre-F13 every site recomputed
+        # filepath.Dir(layout.DataDir), which baked the "DataDir is always
+        # $HOME/.yoloai" assumption into 35+ call sites and silently broke
+        # for embedders whose DataDir lived elsewhere (system installs,
+        # multi-tenant per-user roots).
+        - pattern: "filepath\\.Dir\\(.*\\.DataDir\\)"
+          msg: "use layout.HomeDir; the F13 contract is that config.Layout carries HomeDir as a separate field — see internal/config/layout.go"
+
         # W-L10 enforcement of the W-L8 spine layering. The CLI must
         # consume orchestration through yoloai.Client / yoloai.SystemClient,
         # not by constructing sandbox.Manager or holding a raw

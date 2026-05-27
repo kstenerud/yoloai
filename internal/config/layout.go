@@ -31,9 +31,26 @@ type Layout struct {
 	// input and return *UsageError before reaching NewLayout, so the
 	// panic is only reachable from genuinely buggy internal code.
 	DataDir string
+
+	// HomeDir is the host user's home directory — used wherever
+	// library code needs to expand "~" in user-supplied paths,
+	// resolve seed files (~/.claude, ~/.codex, ...), or compute
+	// auth-file locations.
+	//
+	// F13 (2026-05-27): previously every site derived this with
+	// filepath.Dir(DataDir), encoding the "DataDir is always
+	// $HOME/.yoloai" assumption into 35+ call sites. Embedders
+	// with a custom DataDir (e.g. /var/lib/yoloai) couldn't tell
+	// library code where the user's $HOME actually was, so seed
+	// lookups silently looked in /var/lib instead. The CLI's
+	// single os.UserHomeDir() call now feeds HomeDir; library
+	// code uses layout.HomeDir directly.
+	HomeDir string
 }
 
-// NewLayout constructs a Layout rooted at dataDir.
+// NewLayout constructs a Layout rooted at dataDir with HomeDir
+// derived as the conventional parent of dataDir. Use NewLayoutFor
+// (below) when DataDir and HomeDir differ.
 //
 // Panics if dataDir is empty. Public-entry callers (yoloai.NewWithOptions
 // et al.) pre-validate against *UsageError before constructing a Layout,
@@ -45,7 +62,22 @@ func NewLayout(dataDir string) Layout {
 	if dataDir == "" {
 		panic("config.NewLayout: dataDir is required (empty string is invalid; public boundaries must validate input and return *UsageError before reaching this constructor)")
 	}
-	return Layout{DataDir: dataDir}
+	return Layout{DataDir: dataDir, HomeDir: filepath.Dir(dataDir)}
+}
+
+// NewLayoutFor constructs a Layout with an explicit HomeDir. Used by
+// callers whose DataDir isn't a subdirectory of HomeDir (e.g. system-
+// service installs where DataDir = /var/lib/yoloai but the user's
+// $HOME is elsewhere). Panics on empty input — same Q-X discipline as
+// NewLayout.
+func NewLayoutFor(dataDir, homeDir string) Layout {
+	if dataDir == "" {
+		panic("config.NewLayoutFor: dataDir is required")
+	}
+	if homeDir == "" {
+		panic("config.NewLayoutFor: homeDir is required")
+	}
+	return Layout{DataDir: dataDir, HomeDir: homeDir}
 }
 
 // YoloaiDir returns the root data directory (an alias for DataDir,

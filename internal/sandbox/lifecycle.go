@@ -253,7 +253,7 @@ func (m *Manager) handleSuspendedResume(ctx context.Context, cname, name string,
 
 	// Refresh credentials and settings from host (handles token refresh between sessions).
 	hasAPIKey := hasAnyAPIKey(agentDef, nil)
-	if _, err := copySeedFiles(agentDef, sandboxDir, hasAPIKey, filepath.Dir(m.layout.DataDir)); err != nil {
+	if _, err := copySeedFiles(agentDef, sandboxDir, hasAPIKey, m.layout.HomeDir); err != nil {
 		return fmt.Errorf("refresh seed files: %w", err)
 	}
 	if err := ensureContainerSettings(agentDef, sandboxDir, meta.Isolation); err != nil {
@@ -326,7 +326,7 @@ func (m *Manager) start(ctx context.Context, name string, opts StartOptions) err
 	}
 	slog.Debug("container status", "event", "sandbox.start.status", "sandbox", name, "status", string(status)) //nolint:gosec // G706: name is validated by ValidateName
 
-	promptText, customPrompt, err := preparePromptForStart(opts, sandboxDir, meta, filepath.Dir(m.layout.DataDir))
+	promptText, customPrompt, err := preparePromptForStart(opts, sandboxDir, meta, m.layout.HomeDir)
 	if err != nil {
 		return err
 	}
@@ -738,7 +738,7 @@ func initializeAgentFilesIfNeeded(layout config.Layout, agentDef *agent.Definiti
 	if agentFilesConfig == nil {
 		return nil
 	}
-	if err := copyAgentFiles(agentDef, sandboxDir, agentFilesConfig, filepath.Dir(layout.DataDir)); err != nil {
+	if err := copyAgentFiles(agentDef, sandboxDir, agentFilesConfig, layout.HomeDir); err != nil {
 		return fmt.Errorf("copy agent files on restart: %w", err)
 	}
 	sbState.AgentFilesInitialized = true
@@ -797,7 +797,7 @@ func (m *Manager) recreateContainer(ctx context.Context, name string, meta *stor
 
 	// Refresh seed files from host (handles OAuth token refresh between restarts)
 	hasAPIKey := hasAnyAPIKey(agentDef, nil)
-	if _, err := copySeedFiles(agentDef, sandboxDir, hasAPIKey, filepath.Dir(m.layout.DataDir)); err != nil {
+	if _, err := copySeedFiles(agentDef, sandboxDir, hasAPIKey, m.layout.HomeDir); err != nil {
 		return fmt.Errorf("refresh seed files: %w", err)
 	}
 
@@ -825,7 +825,7 @@ func (m *Manager) recreateContainer(ctx context.Context, name string, meta *stor
 	}
 
 	// Build sandbox state for container launch
-	workdir, err := ParseDirArg(meta.Workdir.HostPath+":"+string(meta.Workdir.Mode), filepath.Dir(m.layout.DataDir))
+	workdir, err := ParseDirArg(meta.Workdir.HostPath+":"+string(meta.Workdir.Mode), m.layout.HomeDir)
 	if err != nil {
 		return fmt.Errorf("parse workdir: %w", err)
 	}
@@ -877,7 +877,7 @@ func (m *Manager) recreateContainer(ctx context.Context, name string, meta *stor
 		vscodeTunnel: meta.VscodeTunnel,
 		configJSON:   configData,
 		layout:       m.layout,
-		homeDir:      filepath.Dir(m.layout.DataDir),
+		homeDir:      m.layout.HomeDir,
 	}
 
 	if resume {

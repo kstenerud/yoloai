@@ -15,7 +15,7 @@ import (
 // ${ produce an error.
 //
 // homeDir is the user's home directory for ~ expansion; callers derive it
-// from filepath.Dir(layout.DataDir) (the conventional $HOME/.yoloai DataDir)
+// from layout.HomeDir (the conventional $HOME/.yoloai DataDir)
 // or pass an explicit home for testing.
 func ExpandPath(path, homeDir string) (string, error) {
 	path = ExpandTilde(path, homeDir)
@@ -60,7 +60,7 @@ func expandEnvBraced(s string) (string, error) {
 
 // ExpandTilde replaces a leading ~ with the user's home directory.
 // homeDir is the caller-supplied home directory; callers derive it from
-// filepath.Dir(layout.DataDir) (the conventional $HOME/.yoloai DataDir)
+// layout.HomeDir (the conventional $HOME/.yoloai DataDir)
 // or pass an explicit home for testing.
 func ExpandTilde(path, homeDir string) string {
 	if !strings.HasPrefix(path, "~") {

@@ -40,36 +40,43 @@ func SetRootLayout(l config.Layout) {
 // that change HOME between cases see fresh paths.
 //
 // W-L10-allowlist: this function is the single permitted caller of
-// os.UserHomeDir() in CLI code (via homeBasedDataDir below). Future
+// os.UserHomeDir() in CLI code (via resolveHome below). Future
 // CLI handlers reading a Layout must go through here; the W-L10
 // layering linter will eventually verify this.
 func Layout() config.Layout {
 	if rootLayout.DataDir == "" {
-		return config.NewLayout(homeBasedDataDir())
+		home := resolveHome()
+		return config.NewLayoutFor(filepath.Join(home, ".yoloai"), home)
 	}
 	return rootLayout
 }
 
-// homeBasedDataDir returns the conventional $HOME/.yoloai/ path.
-// This is the ONE permitted os.UserHomeDir() call site in the yoloai
-// library code (W-L10-allowlist). The Q-W discipline forbids any
-// other library code from reading $HOME directly.
-//
-// Honors SUDO_USER (when running under sudo and uid 0) so a user who
-// runs "sudo yoloai ..." doesn't lose their existing configuration
-// to /root/.yoloai/.
-func homeBasedDataDir() string {
+// LayoutForDataDir constructs a Layout for an explicit --data-dir
+// value, pairing the supplied dataDir with the user's actual $HOME.
+// Used by the root command's PersistentPreRunE when --data-dir is
+// non-empty — the user's home stays bound to the real $HOME even
+// when DataDir is rerooted (e.g. /var/lib/yoloai under a service
+// install).
+func LayoutForDataDir(dataDir string) config.Layout {
+	return config.NewLayoutFor(dataDir, resolveHome())
+}
+
+// resolveHome returns the user's $HOME, honoring SUDO_USER under
+// sudo so "sudo yoloai ..." doesn't reroot to /root. This is the
+// ONE permitted os.UserHomeDir() call site in the yoloai library
+// code (W-L10-allowlist). The Q-W discipline forbids any other
+// library code from reading $HOME directly.
+func resolveHome() string {
 	if sudoUser := os.Getenv("SUDO_USER"); sudoUser != "" && os.Getuid() == 0 {
 		u, err := user.Lookup(sudoUser)
 		if err == nil {
-			return filepath.Join(u.HomeDir, ".yoloai")
+			return u.HomeDir
 		}
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
-		// Mirrors config.HomeDir's behavior; a CLI context without a
-		// home directory is unrecoverable for our purposes.
+		// A CLI context without a home directory is unrecoverable for our purposes.
 		panic(fmt.Sprintf("yoloai: cannot determine home directory: %v", err))
 	}
-	return filepath.Join(home, ".yoloai")
+	return home
 }

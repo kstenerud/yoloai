@@ -75,7 +75,7 @@ func (m *Manager) resolveProfileConfig(ctx context.Context, opts *CreateOptions,
 		return nil, err
 	}
 
-	homeDir := filepath.Dir(m.layout.DataDir)
+	homeDir := m.layout.HomeDir
 	if err := applyMergedProfileToOpts(opts, agentDef, merged, pr, ycfg.Agent, homeDir); err != nil {
 		return nil, err
 	}
@@ -84,7 +84,7 @@ func (m *Manager) resolveProfileConfig(ctx context.Context, opts *CreateOptions,
 	pr.imageRef = config.ResolveProfileImage(m.layout, opts.Profile, chain)
 
 	// Build profile image if needed (Docker only)
-	if err := EnsureProfileImage(ctx, m.runtime, m.layout, opts.Profile, AutoBuildSecrets(filepath.Dir(m.layout.DataDir)), m.output, m.logger, false); err != nil {
+	if err := EnsureProfileImage(ctx, m.runtime, m.layout, opts.Profile, AutoBuildSecrets(m.layout.HomeDir), m.output, m.logger, false); err != nil {
 		return nil, fmt.Errorf("build profile image: %w", err)
 	}
 
@@ -278,7 +278,7 @@ func (m *Manager) parseAndValidateDirs(ctx context.Context, opts CreateOptions, 
 		return nil, nil, err
 	}
 
-	if err := checkDirSafety(workdir, auxDirs, m.output, filepath.Dir(m.layout.DataDir)); err != nil {
+	if err := checkDirSafety(workdir, auxDirs, m.output, m.layout.HomeDir); err != nil {
 		return nil, nil, err
 	}
 
@@ -300,7 +300,7 @@ func (m *Manager) parseAndValidateDirs(ctx context.Context, opts CreateOptions, 
 // checkAuthAndLocalhostWarnings performs auth checks and localhost URL warnings.
 func (m *Manager) checkAuthAndLocalhostWarnings(agentDef *agent.Definition, mergedEnv map[string]string, cfgModel string, opts CreateOptions, credOverrides map[string]string) error {
 	hasAPIKey := hasAnyAPIKey(agentDef, credOverrides)
-	hasAuth := hasAnyAuthFile(agentDef, filepath.Dir(m.layout.DataDir))
+	hasAuth := hasAnyAuthFile(agentDef, m.layout.HomeDir)
 	hasAuthHint := hasAnyAuthHint(agentDef, mergedEnv, credOverrides)
 	if err := checkAgentAuth(agentDef, hasAPIKey, hasAuth, hasAuthHint, m.output); err != nil {
 		return err
@@ -709,7 +709,7 @@ func (m *Manager) resolveAndApplyArchetype(ctx context.Context, opts *CreateOpti
 	workdir := opts.Workdir.Path
 
 	// Step 1: Load .yoloai.yaml
-	yamlCfg, _, yamlErr := archetype.LoadYoloAIYaml(workdir, filepath.Dir(m.layout.DataDir))
+	yamlCfg, _, yamlErr := archetype.LoadYoloAIYaml(workdir, m.layout.HomeDir)
 	if yamlErr != nil {
 		return "", nil, nil, nil, fmt.Errorf("load .yoloai.yaml: %w", yamlErr)
 	}
@@ -877,7 +877,7 @@ func (m *Manager) applyDevcontainerArchetype(ctx context.Context, opts *CreateOp
 	if workdirMountPath == "" {
 		workdirMountPath = opts.Workdir.Path
 	}
-	dcMounts, dcMountWarnings := dc.FilterMounts(workdirMountPath, filepath.Dir(m.layout.DataDir))
+	dcMounts, dcMountWarnings := dc.FilterMounts(workdirMountPath, m.layout.HomeDir)
 	if len(dcMounts) > 0 {
 		bullets = append(bullets, fmt.Sprintf("%d devcontainer mounts passed through", len(dcMounts)))
 	}

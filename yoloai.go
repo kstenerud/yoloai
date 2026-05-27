@@ -100,6 +100,17 @@ type Options struct {
 	// explicit path. See development-principles.md §12.
 	DataDir string
 
+	// HomeDir is the host user's home directory. Optional — if empty,
+	// the Client derives it as filepath.Dir(DataDir) for the common
+	// case where DataDir lives directly inside $HOME (e.g.
+	// $HOME/.yoloai). Embedders whose DataDir lives elsewhere
+	// (/var/lib/yoloai, multi-tenant per-user roots) must pass this
+	// explicitly — otherwise ~-expansion in user-supplied paths,
+	// seed-file lookups (~/.claude, ~/.codex), and auth-file discovery
+	// resolve to filepath.Dir(DataDir) instead of the user's actual
+	// $HOME. F13 (2026-05-27).
+	HomeDir string
+
 	// Backend selects the runtime backend (yoloai.BackendDocker,
 	// yoloai.BackendTart, etc.). Default: read from config.yaml, then
 	// yoloai.BackendDocker. Empty BackendName ("") is treated as "use
@@ -132,7 +143,12 @@ func NewWithOptions(ctx context.Context, opts Options) (*Client, error) {
 		return nil, fmt.Errorf("yoloai: Options.DataDir is required (no implicit $HOME fallback; see development-principles.md §12)")
 	}
 
-	layout := config.NewLayout(opts.DataDir)
+	var layout config.Layout
+	if opts.HomeDir != "" {
+		layout = config.NewLayoutFor(opts.DataDir, opts.HomeDir)
+	} else {
+		layout = config.NewLayout(opts.DataDir)
+	}
 
 	backend := opts.Backend
 	if backend == "" {

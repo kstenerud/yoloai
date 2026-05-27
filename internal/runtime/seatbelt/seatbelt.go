@@ -57,10 +57,10 @@ func probe(_ context.Context) (bool, string) {
 
 func init() {
 	// The registry factory derives homeDir from layout via the conventional
-	// $HOME/.yoloai DataDir: homeDir = filepath.Dir(layout.DataDir).
+	// $HOME/.yoloai DataDir: homeDir = layout.HomeDir.
 	// Direct callers (CLI, tests) may call New(ctx, layout, homeDir) explicitly.
 	runtime.Register("seatbelt", func(ctx context.Context, layout config.Layout) (runtime.Runtime, error) {
-		return New(ctx, layout, filepath.Dir(layout.DataDir))
+		return New(ctx, layout, layout.HomeDir)
 	}, descriptor)
 }
 

@@ -84,7 +84,7 @@ func EnsureProfileImage(ctx context.Context, rt runtime.Runtime, layout config.L
 // AutoBuildSecrets detects well-known credential files on the host and
 // returns Docker BuildKit --secret specs for them. Returns nil if nothing
 // is detected.
-// homeDir is used for ~ expansion; callers derive it from filepath.Dir(layout.DataDir).
+// homeDir is used for ~ expansion; callers derive it from layout.HomeDir.
 func AutoBuildSecrets(homeDir string) []string {
 	npmrcPath := ExpandTilde("~/.npmrc", homeDir)
 	if _, err := os.Stat(npmrcPath); err == nil {
@@ -96,7 +96,7 @@ func AutoBuildSecrets(homeDir string) []string {
 // ValidateBuildSecret validates a Docker BuildKit --secret spec string.
 // The expected format is "id=<name>,src=<path>". Tilde expansion is applied
 // to the src= value. Returns the expanded spec or an error.
-// homeDir is used for ~ expansion; callers derive it from filepath.Dir(layout.DataDir).
+// homeDir is used for ~ expansion; callers derive it from layout.HomeDir.
 func ValidateBuildSecret(spec, homeDir string) (string, error) {
 	parts := strings.Split(spec, ",")
 

@@ -87,7 +87,7 @@ func ParseAuxDirArg(arg, homeDir string) (*DirSpec, error) {
 // Suffixes (:copy, :rw, :force) can be combined in any order.
 // Default mode (no :copy or :rw) is determined by the caller
 // (workdir defaults to "copy", aux dirs default to "ro").
-// homeDir is used for ~ expansion; callers derive it from filepath.Dir(layout.DataDir).
+// homeDir is used for ~ expansion; callers derive it from layout.HomeDir.
 //
 // Use ParseAuxDirArg for the `-d` flag — it adds the workdir-only
 // validation enforced by Q-U.

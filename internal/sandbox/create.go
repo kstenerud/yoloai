@@ -180,7 +180,7 @@ type sandboxState struct {
 	devcontainerMountWarnings []string
 	workdirMode               string        // resolved workdir mode ("copy", "overlay", "rw")
 	layout                    config.Layout // Q-W.3: DataDir-rooted Layout propagated from the Manager
-	homeDir                   string        // Q-W.6: host home dir (filepath.Dir(layout.DataDir)); used for ~ expansion
+	homeDir                   string        // Q-W.6: host home dir (layout.HomeDir); used for ~ expansion
 }
 
 // overlayMountConfig describes a single overlay mount for config.json.
@@ -390,7 +390,7 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions, c
 	}
 
 	success = true
-	return buildSandboxStateResult(opts, sandboxDir, workdir, workCopyDir, auxDirs, agentDef, meta, pr, mergedMounts, configData, tmuxConf, resolvedArchetype, pr.archetypeDockerDRequired, devcontainerCfg, dcMounts, dcMountWarnings, credOverrides, m.layout, filepath.Dir(m.layout.DataDir)), nil
+	return buildSandboxStateResult(opts, sandboxDir, workdir, workCopyDir, auxDirs, agentDef, meta, pr, mergedMounts, configData, tmuxConf, resolvedArchetype, pr.archetypeDockerDRequired, devcontainerCfg, dcMounts, dcMountWarnings, credOverrides, m.layout, m.layout.HomeDir), nil
 }
 
 // resolveProfileAndArchetype resolves profile config, runtime base, archetype, mounts, and lifecycle state.
@@ -420,7 +420,7 @@ func (m *Manager) resolveProfileAndArchetype(ctx context.Context, opts *CreateOp
 
 	state_onCreateDone := loadOnCreateDone(m.layout.SandboxDir(opts.Name))
 
-	mergedMounts, err := validateAndExpandMounts(pr.mounts, filepath.Dir(m.layout.DataDir))
+	mergedMounts, err := validateAndExpandMounts(pr.mounts, m.layout.HomeDir)
 	if err != nil {
 		return nil, "", nil, nil, nil, nil, false, err
 	}
@@ -434,14 +434,14 @@ func (m *Manager) createAndSeedSandbox(ctx context.Context, sandboxDir string, a
 	if err := createSandboxDirs(sandboxDir, perms); err != nil {
 		return false, err
 	}
-	return m.seedSandbox(agentDef, sandboxDir, pr.isolation, pr.agentFiles, credOverrides, filepath.Dir(m.layout.DataDir))
+	return m.seedSandbox(agentDef, sandboxDir, pr.isolation, pr.agentFiles, credOverrides, m.layout.HomeDir)
 }
 
 // buildConfigAndMeta builds the container config and sandbox meta structs.
 // Returns (configData, meta, tmuxConf, promptText, error).
 func (m *Manager) buildConfigAndMeta(ctx context.Context, opts CreateOptions, pr *profileResult, agentDef *agent.Definition, workdir *DirSpec, auxDirs []*DirSpec, gcfg *config.GlobalConfig, dirMetas []store.DirMeta, baselineSHA string, mergedMounts []string, resolvedArchetype archetype.Archetype, devcontainerCfg *archetype.DevcontainerConfig, state_onCreateDone bool, sandboxDir string) ([]byte, *store.Meta, string, string, error) {
 	_ = ctx // reserved for future use
-	promptText, hasPrompt, model, agentCommand, tmuxConf, err := resolveAgentParams(agentDef, opts, pr, gcfg, filepath.Dir(m.layout.DataDir))
+	promptText, hasPrompt, model, agentCommand, tmuxConf, err := resolveAgentParams(agentDef, opts, pr, gcfg, m.layout.HomeDir)
 	if err != nil {
 		return nil, nil, "", "", err
 	}

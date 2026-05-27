@@ -28,7 +28,7 @@ var dangerousDirs = map[string]bool{
 // IsDangerousDir checks whether the given absolute path is a dangerous
 // mount target. Resolves symlinks before checking. Does not consider
 // :force -- the caller handles downgrading errors to warnings.
-// homeDir is the user's home directory; callers derive it from filepath.Dir(layout.DataDir).
+// homeDir is the user's home directory; callers derive it from layout.HomeDir.
 func IsDangerousDir(absPath, homeDir string) bool {
 	resolved, err := filepath.EvalSymlinks(absPath)
 	if err != nil {

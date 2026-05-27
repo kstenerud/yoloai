@@ -15,7 +15,6 @@ import (
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
 	"github.com/kstenerud/yoloai/internal/cli/sandboxcmd"
 
-	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/extension"
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/internal/sandbox"
@@ -249,7 +248,7 @@ diff and apply what you want to keep.`,
 	prevPersistentPreRunE := rootCmd.PersistentPreRunE
 	rootCmd.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
 		if dataDir, _ := cmd.Flags().GetString("data-dir"); dataDir != "" {
-			cliutil.SetRootLayout(config.NewLayout(dataDir))
+			cliutil.SetRootLayout(cliutil.LayoutForDataDir(dataDir))
 		}
 		if prevPersistentPreRunE != nil {
 			return prevPersistentPreRunE(cmd, args)

@@ -6,7 +6,6 @@ package workflow
 import (
 	"fmt"
 	"log/slog"
-	"path/filepath"
 	"strings"
 
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
@@ -77,7 +76,7 @@ func runApplyCmd(cmd *cobra.Command, args []string) error {
 	patchesDir, _ := cmd.Flags().GetString("patches")
 	if patchesDir != "" {
 		var expandErr error
-		patchesDir, expandErr = sandbox.ExpandPath(patchesDir, filepath.Dir(cliutil.Layout().DataDir))
+		patchesDir, expandErr = sandbox.ExpandPath(patchesDir, cliutil.Layout().HomeDir)
 		if expandErr != nil {
 			return fmt.Errorf("expand patches path: %w", expandErr)
 		}

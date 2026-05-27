@@ -7,7 +7,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
 
@@ -142,7 +141,7 @@ func runMCPProxy(cmd *cobra.Command, args []string) error {
 	replace, _ := cmd.Flags().GetBool("replace")
 
 	// Parse workdir if provided
-	homeDir := filepath.Dir(cliutil.Layout().DataDir)
+	homeDir := cliutil.Layout().HomeDir
 	var workdirSpec sandbox.DirSpec
 	if rawWorkdir != "" {
 		parsed, err := sandbox.ParseDirArg(rawWorkdir, homeDir)

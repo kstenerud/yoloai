@@ -128,7 +128,7 @@ const (
 type Runtime struct {
 	tartBin           string        // path to tart binary
 	layout            config.Layout // DataDir-rooted path resolver (Q-W.6)
-	homeDir           string        // host home directory (filepath.Dir(layout.DataDir)); used for ~ expansion
+	homeDir           string        // host home directory (layout.HomeDir); used for ~ expansion
 	baseImageOverride string        // custom base image from config (tart.image)
 }
 
@@ -186,7 +186,7 @@ func New(_ context.Context, layout config.Layout) (*Runtime, error) {
 	return &Runtime{
 		tartBin:           tartBin,
 		layout:            layout,
-		homeDir:           filepath.Dir(layout.DataDir),
+		homeDir:           layout.HomeDir,
 		baseImageOverride: baseImageOverride,
 	}, nil
 }

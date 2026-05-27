@@ -603,7 +603,7 @@ func TestLoadConfig_AgentFilesString(t *testing.T) {
 	assert.Nil(t, cfg.AgentFiles.Files)
 
 	// Verify ExpandAgentFiles expands correctly
-	home := filepath.Dir(layout.DataDir)
+	home := layout.HomeDir
 	expanded, err := ExpandAgentFiles(cfg.AgentFiles, home)
 	require.NoError(t, err)
 	assert.Equal(t, filepath.Join(home, "my-agent-configs"), expanded.BaseDir)
@@ -626,7 +626,7 @@ func TestLoadConfig_AgentFilesList(t *testing.T) {
 	assert.Equal(t, "~/file2.json", cfg.AgentFiles.Files[1])
 
 	// Verify ExpandAgentFiles expands correctly
-	home := filepath.Dir(layout.DataDir)
+	home := layout.HomeDir
 	expanded, err := ExpandAgentFiles(cfg.AgentFiles, home)
 	require.NoError(t, err)
 	assert.Equal(t, filepath.Join(home, "file1.json"), expanded.Files[0])
@@ -644,7 +644,7 @@ func TestLoadConfig_AgentFilesEnvExpansion(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, cfg.AgentFiles)
 	// Env vars are expanded via ExpandAgentFiles
-	expanded, err := ExpandAgentFiles(cfg.AgentFiles, filepath.Dir(layout.DataDir))
+	expanded, err := ExpandAgentFiles(cfg.AgentFiles, layout.HomeDir)
 	require.NoError(t, err)
 	assert.Equal(t, "/custom/path", expanded.BaseDir)
 }

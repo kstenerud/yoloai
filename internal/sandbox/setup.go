@@ -100,7 +100,7 @@ type setupOption struct {
 // classifyTmuxConfig reads ~/.tmux.conf and returns its classification
 // and content. Returns tmuxConfigNone with empty content if the file
 // doesn't exist.
-// homeDir is the user's home directory; callers derive it from filepath.Dir(layout.DataDir).
+// homeDir is the user's home directory; callers derive it from layout.HomeDir.
 func classifyTmuxConfig(homeDir string) (tmuxConfigClass, string) {
 	data, err := os.ReadFile(filepath.Join(homeDir, ".tmux.conf")) //nolint:gosec // G304: standard config path
 	if err != nil {
@@ -179,7 +179,7 @@ func availableAgents() []setupOption {
 // layout or config files. Safe to call from a Manager with a nil
 // runtime (used by yoloai.SystemClient.SetupStatus).
 func (m *Manager) SetupStatus() *SetupStatus {
-	class, userConfig := classifyTmuxConfig(filepath.Dir(m.layout.DataDir))
+	class, userConfig := classifyTmuxConfig(m.layout.HomeDir)
 	return &SetupStatus{
 		TmuxClass:         TmuxConfigClass(class),
 		UserTmuxConfig:    userConfig,

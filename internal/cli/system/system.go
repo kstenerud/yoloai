@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
 	"github.com/kstenerud/yoloai/internal/runtime"
@@ -117,7 +116,7 @@ func prepareBuildSecrets(secretFlags []string, hasProfile bool) ([]string, error
 	if !hasProfile {
 		return nil, nil
 	}
-	homeDir := filepath.Dir(cliutil.Layout().DataDir)
+	homeDir := cliutil.Layout().HomeDir
 	var secrets []string
 	for _, s := range secretFlags {
 		expanded, err := sandbox.ValidateBuildSecret(s, homeDir)

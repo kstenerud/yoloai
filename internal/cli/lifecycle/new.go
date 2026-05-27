@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"path/filepath"
 	goruntime "runtime"
 	"strings"
 
@@ -249,7 +248,7 @@ func parseEnvSlice(envSlice []string) (map[string]string, error) {
 
 // resolveNewDirSpecs parses rawWorkdirArg and rawDirs into DirSpec values.
 func resolveNewDirSpecs(rawWorkdirArg string, rawDirs []string) (workdirSpec sandbox.DirSpec, auxDirSpecs []sandbox.DirSpec, err error) {
-	homeDir := filepath.Dir(cliutil.Layout().DataDir)
+	homeDir := cliutil.Layout().HomeDir
 	if rawWorkdirArg != "" {
 		parsed, parseErr := sandbox.ParseDirArg(rawWorkdirArg, homeDir)
 		if parseErr != nil {

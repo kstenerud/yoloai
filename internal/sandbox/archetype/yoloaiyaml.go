@@ -24,7 +24,7 @@ type YoloAIProjectConfig struct {
 // Returns (nil, false, nil) if not found.
 // Returns (nil, false, error) on parse failures or unknown archetype.
 // Expands tilde in each Mounts entry via config.ExpandPath.
-// homeDir is used for ~ expansion; callers derive it from filepath.Dir(layout.DataDir).
+// homeDir is used for ~ expansion; callers derive it from layout.HomeDir.
 func LoadYoloAIYaml(workdir, homeDir string) (*YoloAIProjectConfig, bool, error) {
 	path := filepath.Join(workdir, ".yoloai.yaml")
 	data, err := os.ReadFile(path) //nolint:gosec // G304: path is workdir + fixed filename
