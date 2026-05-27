@@ -85,13 +85,17 @@ func checkIsolationPrerequisites(ctx context.Context, rt runtime.Runtime, isolat
 }
 
 // DirMode specifies how a directory is mounted in the sandbox.
+//
+// :copy and :overlay are workdir-only (Q-U, 2026-05-25); aux
+// directories accept only :rw and :ro (with :ro as the default
+// when DirSpec.Mode is left zero).
 type DirMode string
 
 const (
-	DirModeCopy    DirMode = "copy"    // full copy; changes tracked via git
-	DirModeOverlay DirMode = "overlay" // overlayfs; original untouched
+	DirModeCopy    DirMode = "copy"    // full copy; changes tracked via git (workdir only)
+	DirModeOverlay DirMode = "overlay" // overlayfs; original untouched (workdir only)
 	DirModeRW      DirMode = "rw"      // live bind-mount; changes immediate
-	DirModeRO      DirMode = ""        // read-only bind-mount (aux dirs only)
+	DirModeRO      DirMode = "ro"      // read-only bind-mount (aux dirs only)
 )
 
 // DirSpec describes a directory to mount in the sandbox.
