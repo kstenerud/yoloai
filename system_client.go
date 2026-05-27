@@ -10,9 +10,12 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 
+	"github.com/kstenerud/yoloai/agent"
 	"github.com/kstenerud/yoloai/config"
 	"github.com/kstenerud/yoloai/runtime"
+	"github.com/kstenerud/yoloai/runtime/caps"
 	"github.com/kstenerud/yoloai/sandbox"
 )
 
@@ -181,6 +184,131 @@ func (s *SystemClient) buildOne(ctx context.Context, backend string, opts BuildO
 		return sandbox.EnsureProfileImage(ctx, rt, s.layout, opts.Profile, opts.Secrets, out, slog.Default(), opts.Rebuild)
 	}
 	return rt.Setup(ctx, s.layout, s.layout.ProfileDir("base"), out, slog.Default(), opts.Rebuild)
+}
+
+// CheckOptions configures SystemClient.Check.
+type CheckOptions struct {
+	// Backend is the backend to verify. Required.
+	Backend string
+	// Agent is the agent name whose credentials are checked. Required;
+	// caller resolves the default before calling.
+	Agent string
+	// Isolation, when non-empty, triggers an isolation-mode capability
+	// check via runtime.RequiredCapabilitiesFor + caps.RunChecks.
+	Isolation string
+}
+
+// CheckResult is one row of Check's output.
+type CheckResult struct {
+	// Name is the check identifier: "backend", "image", "agent", "isolation".
+	Name string
+	// OK is true when the check passed.
+	OK bool
+	// Message is human-readable extra detail. Empty for trivially-ok results.
+	Message string
+}
+
+// Check verifies that yoloai's prerequisites are satisfied. Runs all
+// configured checks (always returns a result per check) and returns
+// the result list. The error return is non-nil only for system-level
+// failures (e.g. unknown backend); per-check failures are reflected
+// in CheckResult.OK = false.
+//
+// CLI: `yoloai system check`. Distinct from Doctor (full capability
+// report per backend/mode).
+func (s *SystemClient) Check(ctx context.Context, opts CheckOptions) ([]CheckResult, error) {
+	if opts.Backend == "" {
+		return nil, sandbox.NewUsageError("Backend is required")
+	}
+	if opts.Agent == "" {
+		return nil, sandbox.NewUsageError("Agent is required")
+	}
+
+	var results []CheckResult
+
+	// 1. Backend connectivity.
+	rt, backendErr := newRuntime(ctx, opts.Backend, s.layout)
+	if backendErr != nil {
+		results = append(results,
+			CheckResult{Name: "backend", OK: false, Message: backendErr.Error()},
+			// Image check is moot when backend is unreachable; skip.
+		)
+	} else {
+		results = append(results, CheckResult{Name: "backend", OK: true})
+		// 2. Base image exists.
+		results = append(results, s.checkImage(ctx, rt, opts.Backend))
+	}
+
+	// 3. Agent credentials.
+	results = append(results, s.checkAgent(opts.Agent))
+
+	// 4. Isolation prerequisites (only when --isolation is specified).
+	if opts.Isolation != "" {
+		results = append(results, s.checkIsolation(ctx, rt, opts.Isolation))
+	}
+
+	if rt != nil {
+		_ = rt.Close()
+	}
+	return results, nil
+}
+
+// checkImage verifies the yoloai-base image is available on rt.
+func (s *SystemClient) checkImage(ctx context.Context, rt runtime.Runtime, backend string) CheckResult {
+	exists, err := rt.IsReady(ctx)
+	switch {
+	case err != nil:
+		return CheckResult{Name: "image", OK: false, Message: err.Error()}
+	case !exists:
+		return CheckResult{Name: "image", OK: false, Message: fmt.Sprintf("yoloai-base image not found — run 'yoloai system build --backend %s'", backend)}
+	}
+	return CheckResult{Name: "image", OK: true}
+}
+
+// checkAgent verifies that at least one of the agent's API-key env
+// vars is set. Uses os.Getenv on agent.Definition.APIKeyEnvVars —
+// the documented §12 exception (development-principles.md §12).
+func (s *SystemClient) checkAgent(name string) CheckResult {
+	def := agent.GetAgent(name)
+	switch {
+	case def == nil:
+		return CheckResult{Name: "agent", OK: false, Message: fmt.Sprintf("unknown agent %q", name)}
+	case len(def.APIKeyEnvVars) == 0:
+		return CheckResult{Name: "agent", OK: true, Message: fmt.Sprintf("agent %q requires no credentials", name)}
+	}
+	var found []string
+	for _, key := range def.APIKeyEnvVars {
+		if os.Getenv(key) != "" {
+			found = append(found, key)
+		}
+	}
+	if len(found) == 0 {
+		return CheckResult{
+			Name:    "agent",
+			OK:      false,
+			Message: fmt.Sprintf("no credentials set for agent %q (need one of: %s)", name, strings.Join(def.APIKeyEnvVars, ", ")),
+		}
+	}
+	return CheckResult{Name: "agent", OK: true, Message: "found: " + strings.Join(found, ", ")}
+}
+
+// checkIsolation runs the capability checks declared by the backend
+// for the requested isolation mode. Returns OK when the backend has
+// no requirements for the mode.
+func (s *SystemClient) checkIsolation(ctx context.Context, rt runtime.Runtime, isolation string) CheckResult {
+	if rt == nil {
+		return CheckResult{Name: "isolation", OK: false, Message: "backend unavailable; isolation check skipped"}
+	}
+	capList := runtime.RequiredCapabilitiesFor(rt, isolation)
+	if len(capList) == 0 {
+		return CheckResult{Name: "isolation", OK: true}
+	}
+	env := caps.DetectEnvironment()
+	checkResults := caps.RunChecks(ctx, capList, env)
+	if err := caps.FormatError(checkResults); err != nil {
+		return CheckResult{Name: "isolation", OK: false, Message: err.Error()}
+	}
+	return CheckResult{Name: "isolation", OK: true}
 }
 
 // profileHasDockerfile returns nil if the named profile or any of its
