@@ -13,7 +13,7 @@ import (
 
 // loadDiffContext returns the work directory, baseline SHA, and workdir mode for
 // a sandbox. Used by tags.go to locate commits relative to the baseline.
-func loadDiffContext(layout config.Layout, name string) (workDir string, baselineSHA string, mode string, err error) {
+func loadDiffContext(layout config.Layout, name string) (workDir string, baselineSHA string, mode store.DirMode, err error) {
 	sandboxDir := layout.SandboxDir(name)
 	if dirErr := store.RequireSandboxDir(sandboxDir); dirErr != nil {
 		return "", "", "", dirErr
@@ -27,7 +27,7 @@ func loadDiffContext(layout config.Layout, name string) (workDir string, baselin
 	mode = meta.Workdir.Mode
 
 	switch mode {
-	case "copy":
+	case store.DirModeCopy:
 		mountPath := meta.Workdir.MountPath
 		if mountPath != "" && mountPath != meta.Workdir.HostPath {
 			workDir = mountPath
@@ -38,15 +38,17 @@ func loadDiffContext(layout config.Layout, name string) (workDir string, baselin
 		if baselineSHA == "" {
 			return "", "", "", fmt.Errorf("sandbox has no baseline SHA — was it created before diff support?")
 		}
-	case "overlay":
+	case store.DirModeOverlay:
 		workDir = meta.Workdir.MountPath
 		if workDir == "" {
 			workDir = meta.Workdir.HostPath
 		}
 		baselineSHA = meta.Workdir.BaselineSHA
-	case "rw":
+	case store.DirModeRW:
 		workDir = meta.Workdir.HostPath
 		baselineSHA = "HEAD"
+	case store.DirModeRO:
+		return "", "", "", fmt.Errorf("workdir cannot be read-only (mode %s)", mode)
 	default:
 		return "", "", "", fmt.Errorf("unsupported workdir mode: %s", mode)
 	}

@@ -478,17 +478,19 @@ func resetAuxCopyDir(sandboxDir string, d store.DirMeta) (string, error) {
 func resetAuxDirs(sandboxDir string, meta *store.Meta) error {
 	for i, d := range meta.Directories {
 		switch d.Mode {
-		case "copy":
+		case store.DirModeCopy:
 			sha, err := resetAuxCopyDir(sandboxDir, d)
 			if err != nil {
 				return err
 			}
 			meta.Directories[i].BaselineSHA = sha
-		case "overlay":
+		case store.DirModeOverlay:
 			if err := resetOverlayDirs(sandboxDir, d.HostPath); err != nil {
 				return fmt.Errorf("aux overlay %s: %w", d.HostPath, err)
 			}
 			meta.Directories[i].BaselineSHA = ""
+		case store.DirModeRW, store.DirModeRO, "":
+			// rw and ro aux dirs have no baseline to reset
 		}
 	}
 	return nil
@@ -823,7 +825,7 @@ func (m *Manager) recreateContainer(ctx context.Context, name string, meta *stor
 	}
 
 	// Build sandbox state for container launch
-	workdir, err := ParseDirArg(meta.Workdir.HostPath+":"+meta.Workdir.Mode, filepath.Dir(m.layout.DataDir))
+	workdir, err := ParseDirArg(meta.Workdir.HostPath+":"+string(meta.Workdir.Mode), filepath.Dir(m.layout.DataDir))
 	if err != nil {
 		return fmt.Errorf("parse workdir: %w", err)
 	}

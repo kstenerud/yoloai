@@ -76,7 +76,7 @@ func newLifecycleMgr(rt *lifecycleMockRuntime, tmpDir string) *Manager {
 }
 
 // createTestSandbox creates a sandbox directory with environment.json for lifecycle tests.
-func createTestSandbox(t *testing.T, tmpDir, name, hostPath, mode string) {
+func createTestSandbox(t *testing.T, tmpDir, name, hostPath string, mode store.DirMode) {
 	t.Helper()
 	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
 	require.NoError(t, os.MkdirAll(sandboxDir, 0750))

@@ -55,20 +55,20 @@ type Meta struct {
 
 // WorkdirMeta stores the resolved workdir state at creation time.
 type WorkdirMeta struct {
-	HostPath     string `json:"host_path"`
-	MountPath    string `json:"mount_path"`
-	Mode         string `json:"mode"`
-	BaselineSHA  string `json:"baseline_sha,omitempty"`
-	InceptionSHA string `json:"inception_sha,omitempty"`
+	HostPath     string  `json:"host_path"`
+	MountPath    string  `json:"mount_path"`
+	Mode         DirMode `json:"mode"` // typed; serializes as "copy"/"overlay"/"rw"/"ro"
+	BaselineSHA  string  `json:"baseline_sha,omitempty"`
+	InceptionSHA string  `json:"inception_sha,omitempty"`
 }
 
 // DirMeta stores resolved directory state at creation time.
 // Used for both workdir and auxiliary directories.
 type DirMeta struct {
-	HostPath    string `json:"host_path"`
-	MountPath   string `json:"mount_path"`
-	Mode        string `json:"mode"` // "copy", "rw", "ro"
-	BaselineSHA string `json:"baseline_sha,omitempty"`
+	HostPath    string  `json:"host_path"`
+	MountPath   string  `json:"mount_path"`
+	Mode        DirMode `json:"mode"`
+	BaselineSHA string  `json:"baseline_sha,omitempty"`
 }
 
 // migrate applies forward migrations to meta loaded from disk.

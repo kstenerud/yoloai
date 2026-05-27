@@ -172,7 +172,7 @@ func ListCommitsWithStats(ctx context.Context, layout config.Layout, rt runtime.
 }
 
 // loadDiffContext loads the metadata and resolves paths needed for diff.
-func loadDiffContext(layout config.Layout, name string) (workDir string, baselineSHA string, mode string, err error) {
+func loadDiffContext(layout config.Layout, name string) (workDir string, baselineSHA string, mode store.DirMode, err error) {
 	sandboxDir := layout.SandboxDir(name)
 	if dirErr := store.RequireSandboxDir(sandboxDir); dirErr != nil {
 		return "", "", "", dirErr
@@ -186,22 +186,24 @@ func loadDiffContext(layout config.Layout, name string) (workDir string, baselin
 	mode = meta.Workdir.Mode
 
 	switch mode {
-	case "copy":
+	case store.DirModeCopy:
 		workDir = copyGitWorkDir(sandboxDir, meta.Workdir.HostPath, meta.Workdir.MountPath)
 		baselineSHA = meta.Workdir.BaselineSHA
 		if baselineSHA == "" {
 			return "", "", "", fmt.Errorf("sandbox has no baseline SHA — was it created before diff support?")
 		}
-	case "overlay":
+	case store.DirModeOverlay:
 		// Container path for exec
 		workDir = meta.Workdir.MountPath
 		if workDir == "" {
 			workDir = meta.Workdir.HostPath // mirror host path
 		}
 		baselineSHA = meta.Workdir.BaselineSHA // may be empty (deferred)
-	case "rw":
+	case store.DirModeRW:
 		workDir = meta.Workdir.HostPath
 		baselineSHA = "HEAD"
+	case store.DirModeRO:
+		return "", "", "", fmt.Errorf("workdir cannot be read-only (mode %s)", mode)
 	default:
 		return "", "", "", fmt.Errorf("unsupported workdir mode: %s", mode)
 	}
@@ -211,10 +213,10 @@ func loadDiffContext(layout config.Layout, name string) (workDir string, baselin
 
 // DiffContext holds the resolved paths needed for diff/apply on the workdir.
 type DiffContext struct {
-	HostPath    string // original host path (for display)
-	WorkDir     string // path to diff against (work copy for :copy, container path for :overlay, host path for :rw)
-	BaselineSHA string // baseline SHA for :copy and :overlay dirs
-	Mode        string // "copy", "overlay", or "rw"
+	HostPath    string        // original host path (for display)
+	WorkDir     string        // path to diff against (work copy for :copy, container path for :overlay, host path for :rw)
+	BaselineSHA string        // baseline SHA for :copy and :overlay dirs
+	Mode        store.DirMode // "copy", "overlay", or "rw"
 }
 
 // LoadAllDiffContexts returns the diff context for the sandbox's
@@ -236,14 +238,14 @@ func LoadAllDiffContexts(layout config.Layout, name string) ([]DiffContext, erro
 	}
 
 	switch meta.Workdir.Mode {
-	case "copy":
+	case store.DirModeCopy:
 		return []DiffContext{{
 			HostPath:    meta.Workdir.HostPath,
 			WorkDir:     copyGitWorkDir(sandboxDir, meta.Workdir.HostPath, meta.Workdir.MountPath),
 			BaselineSHA: meta.Workdir.BaselineSHA,
-			Mode:        "copy",
+			Mode:        store.DirModeCopy,
 		}}, nil
-	case "overlay":
+	case store.DirModeOverlay:
 		mountPath := meta.Workdir.MountPath
 		if mountPath == "" {
 			mountPath = meta.Workdir.HostPath
@@ -252,14 +254,16 @@ func LoadAllDiffContexts(layout config.Layout, name string) ([]DiffContext, erro
 			HostPath:    meta.Workdir.HostPath,
 			WorkDir:     mountPath,
 			BaselineSHA: meta.Workdir.BaselineSHA,
-			Mode:        "overlay",
+			Mode:        store.DirModeOverlay,
 		}}, nil
-	case "rw":
+	case store.DirModeRW:
 		return []DiffContext{{
 			HostPath: meta.Workdir.HostPath,
 			WorkDir:  meta.Workdir.HostPath,
-			Mode:     "rw",
+			Mode:     store.DirModeRW,
 		}}, nil
+	case store.DirModeRO, "":
+		// not diffable
 	}
 	return nil, nil
 }

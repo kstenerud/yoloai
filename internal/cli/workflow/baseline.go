@@ -86,10 +86,12 @@ func loadBaselineContext(name string) (*store.Meta, string, error) {
 	}
 
 	switch meta.Workdir.Mode {
-	case "rw":
+	case store.DirModeRW:
 		return nil, "", sandbox.NewUsageError("baseline is not tracked for :rw directories")
-	case "overlay":
+	case store.DirModeOverlay:
 		return nil, "", sandbox.NewUsageError("use git commands inside the container to manage overlay baselines")
+	case store.DirModeCopy, store.DirModeRO, "":
+		// fall through to baseline resolution below
 	}
 
 	workDir := store.WorkDir(sandboxDir, meta.Workdir.HostPath)

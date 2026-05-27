@@ -646,7 +646,7 @@ func setupAuxDir(_ string, ad *DirSpec) (store.DirMeta, error) {
 	return store.DirMeta{
 		HostPath:  ad.Path,
 		MountPath: ad.ResolvedMountPath(),
-		Mode:      string(mode),
+		Mode:      mode,
 	}, nil
 }
 

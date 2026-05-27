@@ -84,18 +84,24 @@ func checkIsolationPrerequisites(ctx context.Context, rt runtime.Runtime, isolat
 	return caps.FormatError(results)
 }
 
-// DirMode specifies how a directory is mounted in the sandbox.
+// DirMode is re-exported from store. The canonical type definition
+// lives there because the persisted WorkdirMeta / DirMeta types hold
+// Mode values; keeping the alias here means existing in-package
+// callers (`Mode: DirModeCopy`, `m.Mode == DirModeRW`) continue to
+// work without churn.
 //
 // :copy and :overlay are workdir-only (Q-U, 2026-05-25); aux
 // directories accept only :rw and :ro (with :ro as the default
 // when DirSpec.Mode is left zero).
-type DirMode string
+type DirMode = store.DirMode
 
+// Re-exported DirMode constants. Canonical definitions in
+// internal/sandbox/store/dirmode.go.
 const (
-	DirModeCopy    DirMode = "copy"    // full copy; changes tracked via git (workdir only)
-	DirModeOverlay DirMode = "overlay" // overlayfs; original untouched (workdir only)
-	DirModeRW      DirMode = "rw"      // live bind-mount; changes immediate
-	DirModeRO      DirMode = "ro"      // read-only bind-mount (aux dirs only)
+	DirModeCopy    = store.DirModeCopy
+	DirModeOverlay = store.DirModeOverlay
+	DirModeRW      = store.DirModeRW
+	DirModeRO      = store.DirModeRO
 )
 
 // DirSpec describes a directory to mount in the sandbox.
@@ -750,7 +756,7 @@ func buildMeta(opts CreateOptions, pr *profileResult, workdir *DirSpec, baseline
 		Workdir: store.WorkdirMeta{
 			HostPath:     workdir.Path,
 			MountPath:    overlayOrResolvedMountPath(workdir),
-			Mode:         string(workdir.Mode),
+			Mode:         workdir.Mode,
 			BaselineSHA:  baselineSHA,
 			InceptionSHA: baselineSHA,
 		},

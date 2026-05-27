@@ -135,7 +135,7 @@ func runtimeDir(sandboxDir string, meta *store.Meta) string {
 }
 
 // writeDir writes a single directory line to the builder.
-func writeDir(b *strings.Builder, mountPath, hostPath, mode string, isWorkdir bool) {
+func writeDir(b *strings.Builder, mountPath, hostPath string, mode store.DirMode, isWorkdir bool) {
 	b.WriteString("- ")
 	b.WriteString(mountPath)
 
@@ -144,7 +144,7 @@ func writeDir(b *strings.Builder, mountPath, hostPath, mode string, isWorkdir bo
 	}
 
 	b.WriteString(" (")
-	b.WriteString(mode)
+	b.WriteString(string(mode))
 	b.WriteString(")")
 
 	if isWorkdir {

@@ -436,7 +436,7 @@ func TestLoadDiffContext_CopyMode(t *testing.T) {
 
 	workDir, baselineSHA, mode, err := loadDiffContext(testLayout(tmpDir), name)
 	require.NoError(t, err)
-	assert.Equal(t, "copy", mode)
+	assert.Equal(t, store.DirModeCopy, mode)
 	assert.Equal(t, "abc123", baselineSHA)
 	assert.Equal(t, store.WorkDir(sandboxDir, hostPath), workDir)
 }
@@ -464,7 +464,7 @@ func TestLoadDiffContext_OverlayMode(t *testing.T) {
 
 	workDir, baselineSHA, mode, err := loadDiffContext(testLayout(tmpDir), name)
 	require.NoError(t, err)
-	assert.Equal(t, "overlay", mode)
+	assert.Equal(t, store.DirModeOverlay, mode)
 	assert.Equal(t, "overlay-sha", baselineSHA)
 	assert.Equal(t, "/container/project", workDir)
 }
@@ -491,7 +491,7 @@ func TestLoadDiffContext_OverlayMode_FallbackToHostPath(t *testing.T) {
 
 	workDir, _, mode, err := loadDiffContext(testLayout(tmpDir), name)
 	require.NoError(t, err)
-	assert.Equal(t, "overlay", mode)
+	assert.Equal(t, store.DirModeOverlay, mode)
 	assert.Equal(t, "/tmp/project", workDir)
 }
 
@@ -516,7 +516,7 @@ func TestLoadDiffContext_RWMode(t *testing.T) {
 
 	workDir, baselineSHA, mode, err := loadDiffContext(testLayout(tmpDir), name)
 	require.NoError(t, err)
-	assert.Equal(t, "rw", mode)
+	assert.Equal(t, store.DirModeRW, mode)
 	assert.Equal(t, "HEAD", baselineSHA)
 	assert.Equal(t, "/tmp/project", workDir)
 }
@@ -571,7 +571,7 @@ func TestLoadAllDiffContexts_SingleCopyWorkdir(t *testing.T) {
 	contexts, err := LoadAllDiffContexts(testLayout(tmpDir), name)
 	require.NoError(t, err)
 	require.Len(t, contexts, 1)
-	assert.Equal(t, "copy", contexts[0].Mode)
+	assert.Equal(t, store.DirModeCopy, contexts[0].Mode)
 	assert.Equal(t, "/tmp/project", contexts[0].HostPath)
 	assert.Equal(t, "sha1", contexts[0].BaselineSHA)
 }
@@ -611,7 +611,7 @@ func TestLoadAllDiffContexts_WorkdirOnly_IgnoresAuxEntries(t *testing.T) {
 	contexts, err := LoadAllDiffContexts(testLayout(tmpDir), name)
 	require.NoError(t, err)
 	require.Len(t, contexts, 1)
-	assert.Equal(t, "copy", contexts[0].Mode)
+	assert.Equal(t, store.DirModeCopy, contexts[0].Mode)
 	assert.Equal(t, "/tmp/project", contexts[0].HostPath)
 	assert.Equal(t, "sha-main", contexts[0].BaselineSHA)
 }
@@ -666,7 +666,7 @@ func TestLoadAllDiffContexts_OverlayWorkdirWithMountPath(t *testing.T) {
 	contexts, err := LoadAllDiffContexts(testLayout(tmpDir), name)
 	require.NoError(t, err)
 	require.Len(t, contexts, 1)
-	assert.Equal(t, "overlay", contexts[0].Mode)
+	assert.Equal(t, store.DirModeOverlay, contexts[0].Mode)
 	assert.Equal(t, "/container/project", contexts[0].WorkDir)
 	assert.Equal(t, "/host/project", contexts[0].HostPath)
 }
