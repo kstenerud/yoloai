@@ -67,6 +67,8 @@ func pinPodmanSocket() {
 // still call cliSetup(t) for per-test HOME isolation; subsequent EnsureSetup
 // calls inside cliSetup hit the image cache and return in milliseconds.
 func TestMain(m *testing.M) {
+	step := testutil.TestMainBreadcrumb("cli")
+
 	// Pin CONTAINER_HOST before overriding HOME — podman machine inspect reads
 	// machine state from the real HOME directory.
 	pinPodmanSocket()
@@ -115,17 +117,21 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 
-	root := NewRootCmd("test", "test", "test")
-	root.SetArgs([]string{"new", "--agent", "test", "--no-start", "cli-main-setup", projectDir})
-	root.SetOut(&bytes.Buffer{})
-	root.SetErr(&bytes.Buffer{})
-	if err := root.ExecuteContext(context.Background()); err != nil {
-		fmt.Fprintf(os.Stderr, "bootstrap EnsureSetup failed: %v\n", err)
+	var bootstrapErr error
+	step("bootstrapping cli sandbox (triggers EnsureSetup)", func() {
+		root := NewRootCmd("test", "test", "test")
+		root.SetArgs([]string{"new", "--agent", "test", "--no-start", "cli-main-setup", projectDir})
+		root.SetOut(&bytes.Buffer{})
+		root.SetErr(&bytes.Buffer{})
+		bootstrapErr = root.ExecuteContext(context.Background())
+	})
+	if bootstrapErr != nil {
+		fmt.Fprintf(os.Stderr, "bootstrap EnsureSetup failed: %v\n", bootstrapErr)
 		os.Exit(1)
 	}
 
 	// Clean up the bootstrap sandbox (best-effort).
-	root = NewRootCmd("test", "test", "test")
+	root := NewRootCmd("test", "test", "test")
 	root.SetArgs([]string{"destroy", "--yes", "cli-main-setup"})
 	root.SetOut(&bytes.Buffer{})
 	root.SetErr(&bytes.Buffer{})

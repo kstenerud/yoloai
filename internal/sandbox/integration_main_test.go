@@ -15,6 +15,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/config"
 	dockerrt "github.com/kstenerud/yoloai/internal/runtime/docker"
 	sandbox "github.com/kstenerud/yoloai/internal/sandbox"
+	"github.com/kstenerud/yoloai/internal/testutil"
 )
 
 // TestMain builds the base Docker image once before any integration tests run.
@@ -23,6 +24,7 @@ import (
 // return in milliseconds.
 func TestMain(m *testing.M) {
 	ctx := context.Background()
+	step := testutil.TestMainBreadcrumb("sandbox")
 
 	tmpHome, err := os.MkdirTemp("", "yoloai-setup-*")
 	if err != nil {
@@ -32,9 +34,13 @@ func TestMain(m *testing.M) {
 	defer os.RemoveAll(tmpHome)
 	os.Setenv("HOME", tmpHome) //nolint:errcheck // best-effort env set in test main
 
-	rt, err := dockerrt.New(ctx)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Docker unavailable, skipping integration tests: %v\n", err)
+	var rt *dockerrt.Runtime
+	var dockerErr error
+	step("connecting to docker", func() {
+		rt, dockerErr = dockerrt.New(ctx)
+	})
+	if dockerErr != nil {
+		fmt.Fprintf(os.Stderr, "Docker unavailable, skipping integration tests: %v\n", dockerErr)
 		os.Exit(0)
 	}
 	defer rt.Close() //nolint:errcheck // best-effort close in test main
@@ -56,8 +62,12 @@ func TestMain(m *testing.M) {
 	dockerrt.RecordBuildChecksum(integLayout, "")
 
 	mgr := sandbox.NewManager(rt, slog.Default(), strings.NewReader(""), io.Discard, sandbox.WithLayout(integLayout))
-	if err := mgr.EnsureSetup(ctx); err != nil {
-		fmt.Fprintf(os.Stderr, "EnsureSetup failed: %v\n", err)
+	var setupErr error
+	step("ensuring base image is ready", func() {
+		setupErr = mgr.EnsureSetup(ctx)
+	})
+	if setupErr != nil {
+		fmt.Fprintf(os.Stderr, "EnsureSetup failed: %v\n", setupErr)
 		os.Exit(1)
 	}
 
