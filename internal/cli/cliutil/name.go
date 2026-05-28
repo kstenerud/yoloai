@@ -25,7 +25,7 @@ func ResolveName(_ *cobra.Command, args []string) (string, []string, error) {
 		return args[0], args[1:], nil
 	}
 
-	if envName := os.Getenv(EnvSandboxName); envName != "" {
+	if envName := os.Getenv(EnvSandboxName); envName != "" { //nolint:forbidigo // §12: documented YOLOAI_SANDBOX feature; CLI boundary resolves it to an explicit name
 		if err := store.ValidateName(envName); err != nil {
 			return "", nil, err
 		}

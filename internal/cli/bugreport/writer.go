@@ -96,7 +96,7 @@ func WriteSystem(w io.Writer) {
 	// Relevant environment variables
 	envVars := []string{"DOCKER_HOST", "CONTAINER_HOST", "XDG_RUNTIME_DIR", "YOLOAI_SANDBOX", "HOME", "TMUX"}
 	for _, key := range envVars {
-		if val := os.Getenv(key); val != "" {
+		if val := os.Getenv(key); val != "" { //nolint:forbidigo // §12: CLI bug-report captures an allowlisted set of diagnostic env vars
 			fmt.Fprintf(w, "- **%s:** `%s`\n", key, val) //nolint:errcheck
 		}
 	}

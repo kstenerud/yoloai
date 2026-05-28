@@ -129,7 +129,7 @@ func runSandboxSubcommand(cmd *cobra.Command, subcmd, name string, rest []string
 func resolveSandboxDispatchArgs(args []string) (name, subcmd string, rest []string, err error) {
 	if sandboxSubcmds[args[0]] {
 		// args[0] is a subcommand — name must come from YOLOAI_SANDBOX
-		envName := os.Getenv(cliutil.EnvSandboxName)
+		envName := os.Getenv(cliutil.EnvSandboxName) //nolint:forbidigo // §12: documented YOLOAI_SANDBOX feature; CLI boundary
 		if envName == "" {
 			return "", "", nil, sandbox.NewUsageError("sandbox name required before subcommand (or set YOLOAI_SANDBOX)")
 		}

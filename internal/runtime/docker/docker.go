@@ -60,7 +60,7 @@ var descriptor = runtime.BackendDescriptor{
 // An explicit DOCKER_HOST is treated as a positive signal (caller knows where
 // the daemon is); otherwise the default /var/run/docker.sock must exist.
 func probe(_ context.Context) (bool, string) {
-	if host := os.Getenv("DOCKER_HOST"); host != "" {
+	if host := os.Getenv("DOCKER_HOST"); host != "" { //nolint:forbidigo // §12: standard daemon-socket discovery (the docker client's own convention)
 		return true, ""
 	}
 	if _, err := os.Stat("/var/run/docker.sock"); err == nil {

@@ -57,7 +57,7 @@ func filesDispatch(cmd *cobra.Command, args []string) error {
 
 	if filesSubcmds[args[0]] {
 		// args[0] is a subcommand — name must come from YOLOAI_SANDBOX
-		envName := os.Getenv(cliutil.EnvSandboxName)
+		envName := os.Getenv(cliutil.EnvSandboxName) //nolint:forbidigo // §12: documented YOLOAI_SANDBOX feature; CLI boundary
 		if envName == "" {
 			return sandbox.NewUsageError("sandbox name required before subcommand (or set YOLOAI_SANDBOX)")
 		}

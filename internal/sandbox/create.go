@@ -929,7 +929,7 @@ func applyModelPrefix(agentDef *agent.Definition, model string, configEnv map[st
 		return model
 	}
 	for envVar, prefix := range agentDef.ModelPrefixes {
-		if os.Getenv(envVar) != "" || configEnv[envVar] != "" {
+		if os.Getenv(envVar) != "" || configEnv[envVar] != "" { //nolint:forbidigo // §12: agent credential/env presence check (declared API-key exception)
 			return prefix + model
 		}
 	}
@@ -1135,7 +1135,7 @@ func ReadPrompt(prompt, promptFile, homeDir string) (string, error) {
 	}
 
 	if prompt == "-" {
-		data, err := io.ReadAll(os.Stdin)
+		data, err := io.ReadAll(os.Stdin) //nolint:forbidigo // §12 follow-up (tracked): prompt "-" reads process stdin; should take an io.Reader from the boundary
 		if err != nil {
 			return "", fmt.Errorf("read prompt from stdin: %w", err)
 		}
@@ -1147,7 +1147,7 @@ func ReadPrompt(prompt, promptFile, homeDir string) (string, error) {
 	}
 
 	if promptFile == "-" {
-		data, err := io.ReadAll(os.Stdin)
+		data, err := io.ReadAll(os.Stdin) //nolint:forbidigo // §12 follow-up (tracked): prompt-file "-" reads process stdin; should take an io.Reader from the boundary
 		if err != nil {
 			return "", fmt.Errorf("read prompt from stdin: %w", err)
 		}
@@ -1260,7 +1260,7 @@ func createSecretsDir(agentDef *agent.Definition, envVars map[string]string, sec
 	// Write host env vars for API keys and auth hints (overwrites config env on conflict).
 	// credOverrides provides sudo-recovered values for keys absent from os.Environ.
 	for _, key := range append(agentDef.APIKeyEnvVars, agentDef.AuthHintEnvVars...) {
-		value := os.Getenv(key)
+		value := os.Getenv(key) //nolint:forbidigo // §12: agent API key / auth-hint value (declared exception)
 		if value == "" {
 			value = credOverrides[key]
 		}
@@ -1291,7 +1291,7 @@ func createSecretsDir(agentDef *agent.Definition, envVars map[string]string, sec
 func recoverSudoCredentials() map[string]string {
 	overrides := make(map[string]string)
 	for k, v := range sudoParentEnv() {
-		if os.Getenv(k) == "" {
+		if os.Getenv(k) == "" { //nolint:forbidigo // §12: sudo credential recovery — only override keys absent from the live env
 			overrides[k] = v
 		}
 	}
@@ -1309,7 +1309,7 @@ func sudoParentEnv() map[string]string {
 	if fileutil.SudoUID() == -1 {
 		return result
 	}
-	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/environ", os.Getppid())) //nolint:gosec // G304: reading parent proc environ to recover sudo-stripped env vars
+	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/environ", os.Getppid())) //nolint:gosec,forbidigo // G304 + §12: read parent's environ to recover sudo-stripped credentials
 	if err != nil {
 		return result
 	}
@@ -1667,7 +1667,7 @@ func hasAnyAPIKey(agentDef *agent.Definition, credOverrides map[string]string) b
 		return true // no API key required
 	}
 	for _, key := range agentDef.APIKeyEnvVars {
-		if os.Getenv(key) != "" || credOverrides[key] != "" {
+		if os.Getenv(key) != "" || credOverrides[key] != "" { //nolint:forbidigo // §12: agent API-key presence check (declared exception)
 			return true
 		}
 	}
@@ -1699,7 +1699,7 @@ func hasAnyAuthFile(agentDef *agent.Definition, homeDir string) bool {
 // with local model servers (Ollama, LM Studio) without a cloud API key.
 func hasAnyAuthHint(agentDef *agent.Definition, configEnv map[string]string, credOverrides map[string]string) bool {
 	for _, key := range agentDef.AuthHintEnvVars {
-		if os.Getenv(key) != "" || credOverrides[key] != "" {
+		if os.Getenv(key) != "" || credOverrides[key] != "" { //nolint:forbidigo // §12: agent auth-hint presence check (declared exception)
 			return true
 		}
 		if configEnv[key] != "" {
@@ -1777,7 +1777,7 @@ func shouldSkipSeedFile(sf agent.SeedFile, hasAPIKey bool) bool {
 	if len(sf.OwnerAPIKeys) > 0 {
 		// Per-file API key check (used by shell agent): skip if any key is set
 		for _, key := range sf.OwnerAPIKeys {
-			if os.Getenv(key) != "" {
+			if os.Getenv(key) != "" { //nolint:forbidigo // §12: agent API-key presence check (declared exception)
 				return true
 			}
 		}

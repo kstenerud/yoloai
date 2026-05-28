@@ -164,10 +164,10 @@ func parseSince(s string) (time.Time, error) {
 	}
 	now := time.Now()
 	for _, layout := range []string{"15:04:05", "15:04"} {
-		t, err := time.ParseInLocation(layout, s, time.Local)
+		t, err := time.ParseInLocation(layout, s, time.Local) //nolint:forbidigo // §12: intentionally parse the user-typed log filter time in their local tz
 		if err == nil {
 			return time.Date(now.Year(), now.Month(), now.Day(),
-				t.Hour(), t.Minute(), t.Second(), 0, time.Local).UTC(), nil
+				t.Hour(), t.Minute(), t.Second(), 0, time.Local).UTC(), nil //nolint:forbidigo // §12: same local-tz interpretation of user input, normalized to UTC
 		}
 	}
 	return time.Time{}, sandbox.NewUsageError("unrecognized format: use a duration (e.g. 5m) or local time (e.g. 14:20:00)")
@@ -194,7 +194,7 @@ func filterSources(sourceFlag string) []logSource {
 
 // terminalWidth returns the output width from $COLUMNS or os.Stdout, falling back to 120.
 func terminalWidth() int {
-	if s := os.Getenv("COLUMNS"); s != "" {
+	if s := os.Getenv("COLUMNS"); s != "" { //nolint:forbidigo // §12: CLI terminal-width detection for log output formatting
 		var w int
 		if _, err := fmt.Sscanf(s, "%d", &w); err == nil && w > 0 {
 			return w

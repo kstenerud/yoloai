@@ -30,8 +30,8 @@ func CopyRuntimeToVM(ctx context.Context, vmName string, runtime RuntimeVersion)
 	// Stream stdout and stderr to show download progress
 	// xcodebuild outputs progress updates with carriage returns (\r)
 	// The terminal will handle the updates automatically
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	cmd.Stdout = os.Stdout //nolint:forbidigo // §12: stream the runtime-download subprocess's live progress to the user's terminal
+	cmd.Stderr = os.Stderr //nolint:forbidigo // §12: stream the runtime-download subprocess's live progress to the user's terminal
 
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("download runtime: %w", err)

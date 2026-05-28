@@ -104,7 +104,7 @@ func runExtension(cmd *cobra.Command, ext *extension.Extension, args []string) e
 	}
 
 	// Build environment
-	env := os.Environ()
+	env := os.Environ() //nolint:forbidigo // §12: CLI extension exec inherits the caller's full env plus extension-specific vars
 	env = append(env, "agent="+agentName)
 
 	for i, a := range ext.Args {

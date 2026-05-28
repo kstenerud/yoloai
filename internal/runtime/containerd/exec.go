@@ -251,7 +251,7 @@ func startInteractiveExec(ctx context.Context, task client.Task, ctr client.Cont
 
 	// For interactive PTY execs, TERM must be set so ncurses/tmux can initialize.
 	env := containerEnv(ctx, ctr)
-	termVal := os.Getenv("TERM")
+	termVal := os.Getenv("TERM") //nolint:forbidigo // §12: propagate the controlling terminal's TERM into the interactive exec (UI), defaulted below
 	if termVal == "" {
 		termVal = "xterm-256color"
 	}

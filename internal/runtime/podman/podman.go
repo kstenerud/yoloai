@@ -143,15 +143,15 @@ func (r *Runtime) Create(ctx context.Context, cfg runtime.InstanceConfig) error 
 //  5. macOS: `podman machine inspect` (Podman Machine)
 func discoverSocket() (string, error) {
 	// Check env vars first
-	if host := os.Getenv("CONTAINER_HOST"); host != "" {
+	if host := os.Getenv("CONTAINER_HOST"); host != "" { //nolint:forbidigo // §12: standard podman daemon-socket discovery (podman's own convention)
 		return host, nil
 	}
-	if host := os.Getenv("DOCKER_HOST"); host != "" {
+	if host := os.Getenv("DOCKER_HOST"); host != "" { //nolint:forbidigo // §12: standard daemon-socket discovery fallback
 		return host, nil
 	}
 
 	// Rootless socket via XDG_RUNTIME_DIR
-	if xdg := os.Getenv("XDG_RUNTIME_DIR"); xdg != "" {
+	if xdg := os.Getenv("XDG_RUNTIME_DIR"); xdg != "" { //nolint:forbidigo // §12: rootless podman socket location (XDG convention)
 		sock := filepath.Join(xdg, "podman", "podman.sock")
 		if _, err := os.Stat(sock); err == nil { //nolint:gosec // G703: path is from trusted env var
 			return "unix://" + sock, nil

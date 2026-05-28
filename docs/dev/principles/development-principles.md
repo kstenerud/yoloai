@@ -450,15 +450,22 @@ Global `CLAUDE.md`: "If an approach isn't working or feels overcomplicated, stop
 
 Ambient state is anything not in the function's argument list: environment variables, the working directory, `$HOME`, hostname, the current user's identity, the calling process's PID. Library code refuses to read it. The CLI (or other outermost shell) reads it once at startup, validates it, packs it into typed configuration structs, and passes those down.
 
-Concrete bans (enforced by the W-L10 forbidigo rules in `.golangci.yml`):
+Concrete bans (enforced by the forbidigo rules in `.golangci.yml`, **deny by default** across the whole ambient-config surface):
 
-- `os.UserHomeDir()` — enforced. Forbidden outside `internal/cli/layout_bridge.go`. That file resolves `$HOME/.yoloai/` once at CLI startup, packs it into a `config.Layout`, and threads it down. Library code receives the `Layout`; it never reads `$HOME` itself.
-- `os.UserConfigDir()` / `os.UserCacheDir()` — enforced. yoloai does not use the XDG paths; cache and config live under `config.Layout.CacheDir()` / the Layout root.
-- `os.Getwd()` — enforced. No silent CWD-as-default. Commands accepting paths take them explicitly from the caller.
-- `os.Getenv()` for yoloai's own configuration — design rule, not yet linter-enforced. The CLI legitimately reads several env vars at startup (`SUDO_USER` / `SUDO_UID` / `SUDO_GID` for chown-on-sudo, `YOLOAI_SANDBOX` for the sandbox-name convenience, `TMUX` / `COLUMNS` / `TERM` for UI behaviour). Library code below the CLI must not read env directly; the CLI gathers values once and passes typed config down. A future linter pass will codify the exact allowlist.
-- Other ambient functions (`os.Hostname()`, etc.) are allowed for *reporting* (bug reports, diagnostics) but never as silent defaults that change behaviour.
+- **Environment:** `os.Getenv` / `os.LookupEnv` / `os.Environ` / `os.ExpandEnv`, env mutation (`os.Setenv` / `os.Unsetenv` / `os.Clearenv`), and the `syscall.Getenv` / `Setenv` / `Environ` backdoors below `os`.
+- **Home / XDG / CWD:** `os.UserHomeDir` / `os.UserConfigDir` / `os.UserCacheDir` / `os.Getwd`.
+- **Identity:** `os.Geteuid` / `os.Getegid` / `os.Getgroups` / `os.Getppid`, `os.Hostname`, and `os/user`'s `Current` / `Lookup` / `LookupId`. (`os.Getuid` / `os.Getgid` are already banned by F31 — read `layout.HostUID` / `HostGID`.)
+- **Process I/O:** `os.Stdin` / `os.Stdout` / `os.Stderr` — library code takes an explicit `io.Reader` / `io.Writer` / `IOStreams`.
+- **Timezone:** `time.Local` — only intentional local-time parsing of user input may use it.
 
-The single declared exception: API keys read by individual agents (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, etc.). The agent's contract IS "I read this env var" — it's part of the published interface in `agent.Definition.APIKeyEnvVars`. The CLI reads the values and passes them as part of sandbox creation; agents document the read in their definition.
+Deliberately **not** banned (documented in the lint config so a reader doesn't think they were forgotten): `os.Getpid` (our own PID — self-identity, used for lockfile ownership and unique exec IDs), `os.Getpagesize` (a hardware constant), and `os.Expand` (pure given an explicit mapping — only `ExpandEnv` is ambient).
+
+Enforcement model — every ambient touch is **deliberate and documented**:
+
+1. **Boundary files** whose job IS to resolve ambient state get a scoped path-exclusion in `.golangci.yml`: `internal/cli/cliutil/layout.go` (the single licensed `os.UserHomeDir` / `SUDO_USER` / `user.Lookup` HOME-resolution site), `internal/fileutil/fileutil.go` (the sudo UID/GID/chown wrappers), the `internal/cli/` layer for `os.Stdin/out/err` (the CLI owns process I/O), and `internal/mcpsrv/proxy.go` (the MCP stdio transport).
+2. **Every other legitimate read** carries an inline `//nolint:forbidigo // §12: <reason>` naming why — agent API keys, sudo recovery, `YOLOAI_SANDBOX`, daemon-socket discovery (`DOCKER_HOST` etc.), terminal/UI detection (`TMUX` / `TERM` / `COLUMNS`), or subprocess env passthrough. The justification is right at the call site, so a reviewer sees the intent without leaving the file.
+
+The single standing exception: API keys read by individual agents (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, etc.). The agent's contract IS "I read this env var" — it's part of the published interface in `agent.Definition.APIKeyEnvVars`. The CLI reads the values and passes them as part of sandbox creation; agents document the read in their definition. These sites carry the inline `//nolint` like any other justified read.
 
 ### Worked examples
 

@@ -117,6 +117,61 @@ linters:
         - pattern: "^os\\.Getgid$"
           msg: "use layout.HostGID (or fileutil.HostGID at the OS boundary); library code must not read the process GID directly — see internal/config/layout.go"
 
+        # §12 ambient-configuration hardening (deny by default). Ambient
+        # process state — environment, identity, host, process I/O — must be
+        # resolved at the outermost layer (CLI startup / explicit args) and
+        # threaded down, never read ad-hoc by library code. Every legitimate
+        # touch carries an inline `//nolint:forbidigo // <reason>`, or a
+        # path exclusion below for a file whose job IS to be that boundary.
+        # The one standing exception is agent API keys (published via
+        # agent.Definition.APIKeyEnvVars). NOT banned, deliberately:
+        # os.Getpid (our own PID — self-identity), os.Getpagesize (hardware
+        # constant), os.Expand (pure given an explicit mapping).
+        - pattern: "^os\\.Getenv$"
+          msg: "ambient env: resolve at the CLI boundary and thread the value; agent API keys are the one §12 exception — justify inline if so"
+        - pattern: "^os\\.LookupEnv$"
+          msg: "ambient env — resolve at the boundary and thread it; §12"
+        - pattern: "^os\\.Environ$"
+          msg: "ambient env dump — build an explicit env for the subprocess; §12"
+        - pattern: "^os\\.ExpandEnv$"
+          msg: "ambient env expansion — use os.Expand with an explicit mapping; §12"
+        - pattern: "^os\\.Setenv$"
+          msg: "mutating the process environment is forbidden — thread config explicitly; §12"
+        - pattern: "^os\\.Unsetenv$"
+          msg: "mutating the process environment is forbidden; §12"
+        - pattern: "^os\\.Clearenv$"
+          msg: "mutating the process environment is forbidden; §12"
+        - pattern: "^os\\.Geteuid$"
+          msg: "ambient identity — use layout.HostUID / fileutil; §12"
+        - pattern: "^os\\.Getegid$"
+          msg: "ambient identity — use layout.HostGID / fileutil; §12"
+        - pattern: "^os\\.Getgroups$"
+          msg: "ambient identity — resolve at the boundary; §12"
+        - pattern: "^os\\.Getppid$"
+          msg: "ambient process state — only fileutil's sudo-recovery legitimately reads it; §12"
+        - pattern: "^os\\.Hostname$"
+          msg: "ambient host identity — pass it explicitly; §12"
+        - pattern: "^os\\.Stdin$"
+          msg: "ambient I/O — take an io.Reader / IOStreams; the CLI layer owns process streams; §12"
+        - pattern: "^os\\.Stdout$"
+          msg: "ambient I/O — take an io.Writer / IOStreams; the CLI layer owns process streams; §12"
+        - pattern: "^os\\.Stderr$"
+          msg: "ambient I/O — take an io.Writer / IOStreams; the CLI layer owns process streams; §12"
+        - pattern: "^syscall\\.Getenv$"
+          msg: "ambient env backdoor below os — forbidden; §12"
+        - pattern: "^syscall\\.Setenv$"
+          msg: "mutating the process environment is forbidden; §12"
+        - pattern: "^syscall\\.Environ$"
+          msg: "ambient env backdoor below os — forbidden; §12"
+        - pattern: "^user\\.Current$"
+          msg: "ambient user identity — resolve at the CLI boundary; §12"
+        - pattern: "^user\\.Lookup$"
+          msg: "ambient user lookup — only the CLI HOME-resolution boundary may use it; §12"
+        - pattern: "^user\\.LookupId$"
+          msg: "ambient user lookup — resolve at the boundary; §12"
+        - pattern: "^time\\.Local$"
+          msg: "ambient timezone — only intentional local-time parsing of user input may use it; justify inline; §12"
+
         # W-L10 enforcement of the W-L8 spine layering. The CLI must
         # consume orchestration through yoloai.Client / yoloai.SystemClient,
         # not by constructing sandbox.Manager or holding a raw
@@ -151,7 +206,26 @@ linters:
       - path: "internal/cli/cliutil/layout\\.go"
         linters:
           - forbidigo
-        text: "os\\.UserHomeDir"
+        text: "os\\.UserHomeDir|os\\.Getenv|user\\.Lookup"
+
+      # §12 I/O-stream boundary: the CLI layer owns the process's
+      # stdin/stdout/stderr — it wires them into IOStreams and writes
+      # command output/warnings. Library packages must instead take an
+      # explicit io.Reader/Writer (justified inline where they legitimately
+      # can't). Scoped to the stream symbols so env/identity reads in
+      # cli/ are still individually justified.
+      - path: "^internal/cli/"
+        linters:
+          - forbidigo
+        text: "os\\.(Stdin|Stdout|Stderr)"
+
+      # The MCP stdio proxy is a transport boundary: it bridges the MCP
+      # client's stdin/stdout to the in-sandbox process, so owning the
+      # process streams is precisely its job.
+      - path: "internal/mcpsrv/proxy\\.go"
+        linters:
+          - forbidigo
+        text: "os\\.(Stdin|Stdout|Stderr)"
 
       # W-L10 spine-layering allowlist. The orchestration spine itself
       # (yoloai.go, system_client.go) and the runtime/sandbox packages

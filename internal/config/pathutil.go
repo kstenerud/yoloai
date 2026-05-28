@@ -48,7 +48,7 @@ func expandEnvBraced(s string) (string, error) {
 		varName := s[i : i+end]
 		i += end + 1 // skip past "}"
 
-		val, ok := os.LookupEnv(varName)
+		val, ok := os.LookupEnv(varName) //nolint:forbidigo // §12 follow-up (tracked): user-config ${VAR} expansion reads ambient env; should take an explicit env map
 		if !ok {
 			return "", fmt.Errorf("environment variable %q is not set", varName)
 		}

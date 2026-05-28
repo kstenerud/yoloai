@@ -214,7 +214,7 @@ func (r *Runtime) buildProfileImageCLI(ctx context.Context, sourceDir string, ta
 
 	cmd := exec.CommandContext(ctx, r.binaryName, args...) //nolint:gosec // args are validated by caller
 	cmd.Dir = sourceDir
-	cmd.Env = append(os.Environ(), "DOCKER_BUILDKIT=1")
+	cmd.Env = append(os.Environ(), "DOCKER_BUILDKIT=1") //nolint:forbidigo // §12: the docker-build child inherits the caller's env (DOCKER_HOST, proxies, registry auth) plus BuildKit
 	cmd.Stdout = output
 	cmd.Stderr = output
 

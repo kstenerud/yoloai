@@ -621,7 +621,7 @@ func sandboxEnv() []string {
 		"LC_NUMERIC": true, "LC_TIME": true,
 	}
 	var filtered []string
-	for _, entry := range os.Environ() {
+	for _, entry := range os.Environ() { //nolint:forbidigo // §12: seatbelt runs the agent on the host, so it forwards an allowlisted subset of the caller's env (locale only)
 		if k, _, ok := strings.Cut(entry, "="); ok && allowed[k] {
 			filtered = append(filtered, entry)
 		}

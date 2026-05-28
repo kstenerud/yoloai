@@ -179,7 +179,7 @@ func NewWithOptions(ctx context.Context, opts Options) (*Client, error) {
 	}
 	input := opts.Input
 	if input == nil {
-		input = os.Stdin
+		input = os.Stdin //nolint:forbidigo // §12: documented Options.Input default at the library entry; embedders override, the CLI passes IOStreams
 	}
 
 	rt, err := newRuntime(ctx, backend, layout)

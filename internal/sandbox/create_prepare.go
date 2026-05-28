@@ -342,7 +342,7 @@ func (m *Manager) checkLocalhostURLs(agentDef *agent.Definition, mergedEnv map[s
 		return nil
 	}
 	for _, key := range agentDef.AuthHintEnvVars {
-		for _, val := range []string{os.Getenv(key), mergedEnv[key]} {
+		for _, val := range []string{os.Getenv(key), mergedEnv[key]} { //nolint:forbidigo // §12: agent auth-hint localhost check (declared exception)
 			if val == "" || !containsLocalhost(val) {
 				continue
 			}

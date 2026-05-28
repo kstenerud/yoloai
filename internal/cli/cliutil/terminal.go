@@ -19,7 +19,7 @@ func SetTerminalTitle(title string) {
 	fmt.Fprintf(os.Stdout, "\033]0;%s\007", title) //nolint:errcheck // best-effort terminal title
 
 	// If inside a host tmux session, also set the window name.
-	if os.Getenv("TMUX") == "" {
+	if os.Getenv("TMUX") == "" { //nolint:forbidigo // §12: CLI terminal detection (are we inside a host tmux session?)
 		return
 	}
 	if title != "" {
