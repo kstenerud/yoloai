@@ -385,10 +385,16 @@ func (m *Manager) destroy(ctx context.Context, name string) (*DestroyResult, err
 	_ = m.runtime.Remove(ctx, cname)
 
 	var n notices
+	// Remove the metadata file first so a partial directory removal still frees
+	// the name for reuse: Create keys "already exists" off the metadata, not the
+	// directory, so a leftover (e.g. root-owned overlay/VM state we can't delete)
+	// won't block re-creating with the same name.
+	_ = os.Remove(filepath.Join(sandboxDir, store.EnvironmentFile)) //nolint:errcheck // best-effort; forceRemoveAll removes it too in the common case
+
 	// Remove sandbox directory. Some files (e.g. Go module cache) are
 	// read-only, so make everything writable first.
 	if err := forceRemoveAll(sandboxDir); err != nil {
-		n.warnf("could not fully remove sandbox directory: %v", err)
+		n.warnf("sandbox %s removed, but some files could not be deleted (likely root-owned overlay/VM state from the backend): %v\n  reclaim the leftover disk with: sudo rm -rf %s   (or run 'yoloai system prune')", name, err, sandboxDir)
 	}
 
 	return &DestroyResult{Notices: n.list}, nil
