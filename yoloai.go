@@ -367,22 +367,6 @@ func (c *Client) UpdateOverlayBaseline(ctx context.Context, name, hostPath strin
 	return patch.UpdateOverlayBaselineToHEAD(ctx, c.layout, c.rt, name, hostPath)
 }
 
-// GenerateFormatPatch runs `git format-patch` in the sandbox over the
-// beyond-baseline range and returns (patchDir, files, err). Caller is
-// responsible for `os.RemoveAll(patchDir)` after consuming the files.
-// Used by `yoloai apply` and `yoloai apply --patches`.
-func (c *Client) GenerateFormatPatch(ctx context.Context, name string, paths []string) (patchDir string, files []string, err error) {
-	return patch.GenerateFormatPatch(ctx, c.layout, c.rt, name, paths)
-}
-
-// GenerateUncommittedDiff produces the uncommitted-changes diff from
-// the sandbox's workdir. Returns (patchBytes, statSummary, err). Used
-// by `yoloai apply --include-uncommitted` and
-// `yoloai apply --patches --include-uncommitted`.
-func (c *Client) GenerateUncommittedDiff(ctx context.Context, name string, paths []string) ([]byte, string, error) {
-	return patch.GenerateUncommittedDiff(ctx, c.layout, c.rt, name, paths)
-}
-
 // IOStreams names the stdio handles for interactive Client methods.
 // It's a type alias for runtime.IOStreams so embedders can use the
 // yoloai.IOStreams name without importing runtime directly. See

@@ -1,121 +1,100 @@
-// ABOUTME: --patches workflow — export .patch files (and an optional uncommitted.diff)
-// ABOUTME: to a directory instead of applying. Lets the user inspect or re-apply
-// ABOUTME: changes manually via git am.
+// ABOUTME: --patches workflow — export .patch files (and an optional
+// ABOUTME: uncommitted.diff) to a directory instead of applying. Routes through
+// ABOUTME: Workdir().Export; this file owns the CLI confirmation-free reporting.
 package workflow
 
 import (
 	"context"
 	"fmt"
 	"io"
-	"os"
-	"path/filepath"
+	"strings"
 
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
 
 	"github.com/kstenerud/yoloai"
-	"github.com/kstenerud/yoloai/internal/fileutil"
-	"github.com/kstenerud/yoloai/internal/sandbox/patch"
+	"github.com/kstenerud/yoloai/internal/sandbox/store"
 	"github.com/spf13/cobra"
 )
 
-// exportPatches writes .patch files and optional uncommitted.diff to the given
-// directory. uncommitted.diff is only written when includeUncommitted is true;
-// without it the user gets a hint that uncommitted changes exist and how to bring them in.
-func exportPatches(cmd *cobra.Command, name string, paths []string, commits []patch.CommitInfo, hasUncommitted, includeUncommitted bool, dir string) error {
-	if err := fileutil.MkdirAll(dir, 0750); err != nil {
-		return fmt.Errorf("create patches directory: %w", err)
+// runExport writes the sandbox's changes as patch files to dir instead of
+// applying them. It resolves copy-vs-overlay inside Workdir().Export; the CLI
+// only enforces the overlay running-precondition and prints the result.
+func runExport(cmd *cobra.Command, name string, meta *store.Meta, refs, paths []string, dir string, includeUncommitted bool) error {
+	backend := cliutil.ResolveBackendForSandbox(name)
+	overlay := hasOverlayDirs(meta)
+
+	var result *yoloai.ExportResult
+	var hasUncommitted bool
+	err := cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
+		if overlay {
+			if runErr := requireOverlayRunning(ctx, c, name); runErr != nil {
+				return runErr
+			}
+		} else if !includeUncommitted {
+			// Best-effort: probe so we can hint that uncommitted edits exist but
+			// weren't exported.
+			hasUncommitted, _ = c.HasUncommittedChanges(ctx, name)
+		}
+		var exportErr error
+		result, exportErr = c.Sandbox(name).Workdir().Export(ctx, yoloai.ExportOptions{
+			Dir:                dir,
+			Refs:               refs,
+			Paths:              paths,
+			IncludeUncommitted: includeUncommitted,
+		})
+		return exportErr
+	})
+	if err != nil {
+		return err
 	}
 
-	isJSON := cliutil.JSONEnabled(cmd)
-	out := cmd.OutOrStdout()
+	return reportExport(cmd, result, overlay, hasUncommitted)
+}
 
-	if len(commits) > 0 {
-		if err := exportCommitPatches(cmd, name, paths, dir, isJSON, out); err != nil {
-			return err
+// reportExport prints the exported files and how to apply them (or emits JSON).
+func reportExport(cmd *cobra.Command, result *yoloai.ExportResult, overlay, hasUncommitted bool) error {
+	patchCount := 0
+	for _, f := range result.Files {
+		if strings.HasSuffix(f, ".patch") {
+			patchCount++
 		}
 	}
 
-	uncommittedExported := false
-	if hasUncommitted && includeUncommitted {
-		if err := exportUncommittedDiff(cmd, name, paths, dir, isJSON, out); err != nil {
-			return err
-		}
-		uncommittedExported = true
-	}
-
-	if isJSON {
-		return cliutil.WriteJSON(out, applyResult{
-			Target:             dir,
-			CommitsApplied:     len(commits),
-			UncommittedApplied: uncommittedExported,
+	if cliutil.JSONEnabled(cmd) {
+		return cliutil.WriteJSON(cmd.OutOrStdout(), applyResult{
+			Target:             result.Dir,
+			CommitsApplied:     patchCount,
+			UncommittedApplied: result.UncommittedExported,
 			Method:             "patches-export",
 		})
 	}
 
-	fmt.Fprintln(out)                                                       //nolint:errcheck
-	fmt.Fprintln(out, "To apply commits:  git am --3way <patches>/*.patch") //nolint:errcheck
-	if uncommittedExported {
-		fmt.Fprintln(out, "To apply uncommitted:  git apply uncommitted.diff") //nolint:errcheck
-	} else if hasUncommitted {
-		fmt.Fprintln(out, "Note: sandbox has uncommitted changes (not exported); re-run with --include-uncommitted to write uncommitted.diff.") //nolint:errcheck
-	}
-
-	return nil
-}
-
-// exportCommitPatches generates format-patch files from sandbox commits and copies them to dir.
-func exportCommitPatches(cmd *cobra.Command, name string, paths []string, dir string, isJSON bool, out io.Writer) error {
-	backend := cliutil.ResolveBackendForSandbox(name)
-	var patchDir string
-	var files []string
-	err := cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
-		var genErr error
-		patchDir, files, genErr = c.GenerateFormatPatch(ctx, name, paths)
-		return genErr
-	})
-	if err != nil {
-		return err
-	}
-	defer os.RemoveAll(patchDir) //nolint:errcheck
-
-	for _, f := range files {
-		src := filepath.Join(patchDir, f)
-		dst := filepath.Join(dir, f)
-		data, err := os.ReadFile(src) //nolint:gosec // G304: controlled path
-		if err != nil {
-			return fmt.Errorf("read patch %s: %w", f, err)
-		}
-		if err := fileutil.WriteFile(dst, data, 0600); err != nil { //nolint:gosec // G703: dst is under controlled dir
-			return fmt.Errorf("write patch %s: %w", f, err)
-		}
-		if !isJSON {
-			fmt.Fprintf(out, "  %s\n", dst) //nolint:errcheck
-		}
-	}
-	return nil
-}
-
-// exportUncommittedDiff generates an uncommitted.diff from uncommitted changes and writes it to dir.
-func exportUncommittedDiff(cmd *cobra.Command, name string, paths []string, dir string, isJSON bool, out io.Writer) error {
-	backend := cliutil.ResolveBackendForSandbox(name)
-	var uncommittedPatch []byte
-	err := cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
-		var genErr error
-		uncommittedPatch, _, genErr = c.GenerateUncommittedDiff(ctx, name, paths)
-		return genErr
-	})
-	if err != nil {
-		return err
-	}
-	if len(uncommittedPatch) == 0 {
+	out := cmd.OutOrStdout()
+	if len(result.Files) == 0 {
+		fmt.Fprintln(out, "No changes to export") //nolint:errcheck
 		return nil
 	}
-	dst := filepath.Join(dir, "uncommitted.diff")
-	if err := fileutil.WriteFile(dst, uncommittedPatch, 0600); err != nil {
-		return fmt.Errorf("write uncommitted.diff: %w", err)
+	for _, f := range result.Files {
+		fmt.Fprintf(out, "  %s\n", f) //nolint:errcheck
 	}
-	if !isJSON {
-		fmt.Fprintf(out, "  %s\n", dst) //nolint:errcheck
-	}
+	printExportInstructions(out, result, overlay, patchCount, hasUncommitted)
 	return nil
+}
+
+// printExportInstructions tells the user how to apply the exported files.
+func printExportInstructions(out io.Writer, result *yoloai.ExportResult, overlay bool, patchCount int, hasUncommitted bool) {
+	fmt.Fprintln(out) //nolint:errcheck
+	if overlay {
+		fmt.Fprintln(out, "To apply:  git apply <patches>/overlay-*.diff") //nolint:errcheck
+		return
+	}
+	if patchCount > 0 {
+		fmt.Fprintln(out, "To apply commits:  git am --3way <patches>/*.patch") //nolint:errcheck
+	}
+	switch {
+	case result.UncommittedExported:
+		fmt.Fprintln(out, "To apply uncommitted:  git apply <patches>/uncommitted.diff") //nolint:errcheck
+	case hasUncommitted:
+		fmt.Fprintln(out, "Note: sandbox has uncommitted changes (not exported); re-run with --include-uncommitted to write uncommitted.diff.") //nolint:errcheck
+	}
 }

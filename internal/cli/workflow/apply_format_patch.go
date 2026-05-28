@@ -21,7 +21,7 @@ import (
 )
 
 // runApplyFormatPatch handles the default format-patch apply flow.
-func runApplyFormatPatch(cmd *cobra.Command, name string, paths []string, meta *store.Meta, patchesDir string, yes, dryRun, includeUncommitted, withTags bool) error {
+func runApplyFormatPatch(cmd *cobra.Command, name string, paths []string, meta *store.Meta, yes, dryRun, includeUncommitted, withTags bool) error {
 	// Query work copy for commits and uncommitted changes. Uncommitted changes are
 	// always probed (even when includeUncommitted is false) so we can report them
 	// to the user as a hint.
@@ -52,11 +52,6 @@ func runApplyFormatPatch(cmd *cobra.Command, name string, paths []string, meta *
 	}
 	if done, doneErr := maybeReportNoChanges(cmd, name, meta, commits, hasUncommitted, includeUncommitted, withTags); done {
 		return doneErr
-	}
-
-	// --patches: export patch files to a directory
-	if patchesDir != "" {
-		return exportPatches(cmd, name, paths, commits, hasUncommitted, includeUncommitted, patchesDir)
 	}
 
 	targetDir := meta.Workdir.HostPath

@@ -485,3 +485,37 @@ func TestCLI_Apply(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, string(applied), "apply-test")
 }
+
+// TestCLI_ApplyExport exercises `apply --patches` (the Workdir().Export verb):
+// uncommitted edits in the work copy are written to the export dir as
+// uncommitted.diff rather than applied to the host.
+func TestCLI_ApplyExport(t *testing.T) {
+	projectDir := cliSetup(t)
+
+	_, _, err := runCLI(t, "new", "--agent", "test", "--no-start", "cli-export", projectDir)
+	require.NoError(t, err)
+	t.Cleanup(func() { destroySandbox(t, "cli-export") })
+
+	meta, err := store.LoadMeta(cliutil.Layout().SandboxDir("cli-export"))
+	require.NoError(t, err)
+	workDir := store.WorkDir(cliutil.Layout().SandboxDir("cli-export"), meta.Workdir.HostPath)
+	require.NoError(t, os.WriteFile(
+		filepath.Join(workDir, "main.go"),
+		[]byte("package main\n\nimport \"fmt\"\n\nfunc main() { fmt.Println(\"export-test\") }\n"),
+		0600,
+	))
+
+	outDir := filepath.Join(t.TempDir(), "patches")
+	_, _, err = runCLI(t, "apply", "cli-export", "--patches", outDir, "--include-uncommitted")
+	require.NoError(t, err)
+
+	// No commits beyond baseline → only uncommitted.diff is written, and the
+	// host project is untouched (export never applies).
+	diff, err := os.ReadFile(filepath.Join(outDir, "uncommitted.diff")) //nolint:gosec // test path
+	require.NoError(t, err)
+	assert.Contains(t, string(diff), "export-test")
+
+	hostMain, err := os.ReadFile(filepath.Join(projectDir, "main.go")) //nolint:gosec // test path
+	require.NoError(t, err)
+	assert.NotContains(t, string(hostMain), "export-test", "export must not modify the host workdir")
+}

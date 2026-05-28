@@ -145,8 +145,19 @@ becomes `--no-commit`.
   the DryRun-preview→confirm→apply pattern; removed the dead
   `Client.ResolveCommitRefs` / `Client.GenerateFormatPatchForRefs`. New
   end-to-end tests: `TestApplySeries_{FullReplay,SelectiveRefs,DryRunDoesNotApply}`.
-- **4e:** `ExportDir` (`--patches`) + overlay — fold `apply_export.go` /
-  `apply_overlay.go`. Each green + committable.
+- **4e — LANDED (2026-05-28):** export is its own verb, **not** an apply mode
+  (D29). `Workdir().Export(ExportOptions{Dir,Refs,Paths,IncludeUncommitted})
+  (*ExportResult, error)` in the library (`patch.Export`); resolves copy
+  (format-patch + optional `uncommitted.diff`) vs overlay (upper-layer diffs)
+  internally. CLI `apply --patches` dispatched before the apply paths (fixes
+  `apply <refs> --patches` ignoring `--patches`); `apply_export.go` gutted to a
+  thin `runExport`; `applyOverlayExportPatches` removed. Dead
+  `Client.GenerateFormatPatch`/`GenerateUncommittedDiff` removed. Tests:
+  `TestExport_{CopyAllCommits,CopyWithRefs,IncludeUncommitted,RWRefused,OverlayRefsRefused}`.
+- **4f:** overlay *apply* — fold `apply_overlay.go` into `Workdir().Apply`
+  (overlay → `ApplyModeNoCommit`; `ApplyModeCommits` refused). Remove the
+  top-level `hasOverlayDirs` dispatch and the dead `Client.OverlayPatch` /
+  `UpdateOverlayBaseline`. Green + committable.
 
 - Public `yoloai.ApplyResult` + `ApplyStatus` consts (per api_surface).
 - `Workdir().Apply(ApplyOptions) (*ApplyResult, error)` — folds `Apply`,

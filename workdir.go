@@ -83,6 +83,49 @@ func (w *Workdir) Diff(ctx context.Context, opts DiffOptions) (string, error) {
 	})
 }
 
+// ExportOptions configures Workdir.Export. Dir is required.
+type ExportOptions struct {
+	// Dir is the destination directory for the patch files (created if absent).
+	// Required; empty is rejected with a *UsageError.
+	Dir string
+	// Refs selects a subset of commits/ranges to export (copy-mode only). Empty
+	// exports all beyond-baseline commits. Refs on an overlay workdir is refused
+	// with a *UsageError (overlay changes have no commit history).
+	Refs []string
+	// Paths narrows the export to specific files (relative to the workdir).
+	Paths []string
+	// IncludeUncommitted additionally writes the agent's uncommitted edits as
+	// uncommitted.diff (copy-mode only). Mirrors `yoloai apply --patches
+	// --include-uncommitted`.
+	IncludeUncommitted bool
+}
+
+// ExportResult reports what Export wrote: the destination Dir, the patch/diff
+// Files (absolute paths), and whether an uncommitted.diff was written.
+// Re-exported (type alias) from internal/sandbox/patch.
+type ExportResult = patch.ExportResult
+
+// Export writes the agent's changes as patch files under opts.Dir instead of
+// applying them — the `yoloai apply --patches` flow. It resolves the workdir's
+// mount mode internally: copy-mode writes git format-patch files (the whole
+// beyond-baseline range, or the opts.Refs subset) plus an optional
+// uncommitted.diff; overlay-mode writes the upper-layer diff(s) (which requires
+// the container running). Never applies and never advances the baseline.
+//
+// Comply-or-complain (§2): Dir is required — empty is a *UsageError. Exporting
+// specific Refs from an overlay workdir is likewise refused with a *UsageError.
+func (w *Workdir) Export(ctx context.Context, opts ExportOptions) (*ExportResult, error) {
+	if opts.Dir == "" {
+		return nil, sandbox.NewUsageError("export requires a destination directory: set ExportOptions.Dir")
+	}
+	return patch.Export(ctx, w.s.c.layout, w.s.c.rt, w.s.name, patch.ExportOptions{
+		Dir:                opts.Dir,
+		Refs:               opts.Refs,
+		Paths:              opts.Paths,
+		IncludeUncommitted: opts.IncludeUncommitted,
+	})
+}
+
 // ApplyResult describes the outcome of an Apply: the host directory patched,
 // the replayed Commits (series apply) or a `git diff --stat` (NoCommit), and
 // whether uncommitted changes were applied. Re-exported (type alias) from internal/sandbox/patch.

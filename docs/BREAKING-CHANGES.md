@@ -70,9 +70,22 @@ key `wip_applied` → `uncommitted_applied`; the exported `wip.diff` →
 "uncommitted" matches git's own vocabulary; "WIP" was informal jargon that kept
 drifting back into the code.
 
-**Still pending:** the `--patches` export / overlay variants — whose
-orchestration still lives in the CLI (`apply_export.go`, `apply_overlay.go`) —
-fold into `Workdir().Apply` in sub-step 4e.
+**4e (export becomes its own verb, `Workdir().Export`):** `--patches` export is
+no longer an apply mode — it's a separate verb:
+`c.Sandbox(name).Workdir().Export(ctx, yoloai.ExportOptions{Dir, Refs, Paths,
+IncludeUncommitted}) (*yoloai.ExportResult, error)`. `Dir` is required (empty →
+`*UsageError`); `Refs` on an overlay workdir is refused (`*UsageError`). The verb
+resolves mount mode internally — copy-mode writes `git format-patch` files (+
+`uncommitted.diff` when `IncludeUncommitted`), overlay-mode writes the
+upper-layer diff(s). Export orchestration moved into the library (`patch.Export`);
+the dead `Client.GenerateFormatPatch` and `Client.GenerateUncommittedDiff` are
+removed. CLI: `apply --patches` is now dispatched before the apply paths, so
+`apply <name> <refs...> --patches <dir>` exports the selected commits (previously
+the `--patches` flag was silently ignored when refs were given). See D29.
+
+**Still pending:** overlay *apply* (`apply_overlay.go`) — fold into
+`Workdir().Apply` (overlay → `ApplyModeNoCommit`; `ApplyModeCommits` refused) in
+sub-step 4f.
 
 ### Diff moves under `client.Sandbox(name).Workdir()`
 

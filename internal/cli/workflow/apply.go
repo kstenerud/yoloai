@@ -103,9 +103,15 @@ func runApplyCmd(cmd *cobra.Command, args []string) error {
 		return sandbox.NewUsageError("apply is not needed for :rw directories — changes are already live")
 	}
 
+	// --patches: export patch files instead of applying (handles all mount modes
+	// and ref subsets via Workdir().Export). Dispatched before the apply paths.
+	if patchesDir != "" {
+		return runExport(cmd, name, meta, refs, paths, patchesDir, includeUncommitted)
+	}
+
 	slog.Info("applying changes", "event", "sandbox.apply", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
 	if hasOverlayDirs(meta) {
-		return applyOverlay(cmd, name, meta, refs, paths, patchesDir, yes, dryRun)
+		return applyOverlay(cmd, name, meta, refs, paths, yes, dryRun)
 	}
 
 	if !cliutil.JSONEnabled(cmd) {
@@ -127,7 +133,7 @@ func runApplyCmd(cmd *cobra.Command, args []string) error {
 		return applyNoCommit(cmd, name, paths, meta, yes, dryRun, includeUncommitted)
 	}
 
-	return runApplyFormatPatch(cmd, name, paths, meta, patchesDir, yes, dryRun, includeUncommitted, withTags)
+	return runApplyFormatPatch(cmd, name, paths, meta, yes, dryRun, includeUncommitted, withTags)
 }
 
 // parseApplyArgs separates ref arguments from path arguments.

@@ -606,6 +606,25 @@ must run before get_working_dir`.
 
 ---
 
+## D29 — Export is its own verb (`Workdir().Export`), not an Apply mode
+
+**Date:** 2026-05-28. **Status:** Accepted. **Context:** F2 step 4e folds the CLI's `apply --patches` (and overlay export) into the library. `api_surface.go` had aspired to a third apply mode, `ApplyExport` (+ `ApplyOptions.ExportDir`). The owner was asked to decide between that and a separate verb, and chose a separate verb.
+
+**Decision.** Export is a distinct verb: `Workdir().Export(ctx, ExportOptions{Dir, Refs, Paths, IncludeUncommitted}) (*ExportResult, error)`. It writes patch files and never lands changes or advances the baseline. `Apply` stays purely about *landing* changes (Mode required: Commits | NoCommit). Export resolves mount mode internally (copy → format-patch files + optional `uncommitted.diff`; overlay → upper-layer diffs), mirroring how `Diff`/`Apply` resolve mode. `Dir` required (`*UsageError` if empty); `Refs` on overlay refused (`*UsageError`). Orchestration lives in `patch.Export`.
+
+**Rejected.**
+- *Third `ApplyExport` mode (the api_surface aspiration)* — rejected (§12): export doesn't apply, so a mode that "applies" by not applying strains the required-Mode contract (D26), which is about *how to land*, not *whether to land*. The aspiration's own caveats ("DryRun invalid with export", a result struct half-apply/half-export) signaled the misfit. api_surface.go reconciled: `ApplyExport`/`ExportDir`/`ApplyResult.ExportedPath` removed; `Export` verb added.
+
+**Why.** Principle of least astonishment + a clean Apply contract. One verb per intent.
+
+**Consequences.**
+- `Client.GenerateFormatPatch` and `Client.GenerateUncommittedDiff` removed (their only callers were the now-folded CLI export helpers; `patch.Export` calls the patch-package functions directly). The CLI's `--patches` is dispatched before the apply paths, which also fixes a latent bug where `apply <refs> --patches` ignored `--patches`.
+- Overlay *apply* folding into `Workdir().Apply` is the separate sub-step 4f (was 4e's second half).
+
+**Composition.** Sibling to D26 (required apply Mode) and D27 (comply-or-complain); applies `general-principles.md §12` (aspiration is a hypothesis).
+
+---
+
 # Convention reminders
 
 - New decisions append at the bottom. Don't renumber.

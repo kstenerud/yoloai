@@ -175,13 +175,16 @@ const (
 // value is a *UsageError, and the two real modes are named explicitly —
 // ApplyModeCommits (replay the commit series) and ApplyModeNoCommit (net diff,
 // unstaged; formerly "squash"). The CLI (policy) picks the mode for the user.
-// ApplyExport below is deferred to the export sub-step (4e).
+//
+// The sketch's earlier "ApplyExport" mode is GONE (4e, §12). Export doesn't land
+// changes — folding it into Apply gave us "an Apply mode that doesn't apply",
+// straining the required-Mode contract (which is about *how to land*, not
+// *whether to land*). It is its own verb: Workdir().Export (see below).
 type ApplyMode string
 
 const (
 	ApplyModeCommits  ApplyMode = "commits"   // replay the commit series (git format-patch → git am)
 	ApplyModeNoCommit ApplyMode = "no-commit" // flatten to one unstaged net diff in the working tree
-	ApplyExport       ApplyMode = "export"    // (deferred, 4e) write a patch file to ExportDir; don't apply
 )
 
 // MountMode selects how a directory is exposed inside the sandbox.
@@ -916,23 +919,21 @@ func (*Workdir) Diff(ctx context.Context, opts DiffOptions) (string, error) {
 // handles it before calling Apply. Embedders just call Apply; if they
 // want to confirm with their user first, that's their concern.
 type ApplyOptions struct {
-	Mode               ApplyMode // empty = default behavior; ApplySquash / ApplyExport override
-	ExportDir          string    // required when Mode == ApplyExport
-	Refs               []string  // specific commits or ranges
+	Mode               ApplyMode // REQUIRED — ApplyModeCommits or ApplyModeNoCommit; zero is a *UsageError
+	Refs               []string  // specific commits or ranges (ApplyModeCommits only)
 	Paths              []string  // pathspec filter
 	IncludeUncommitted bool      // also apply the agent's uncommitted edits (staged + unstaged + untracked) as unstaged changes on the host; default is committed changes only
-	IncludeTags        bool      // also transfer git tags created by the agent; invalid with ApplySquash
-	DryRun             bool      // invalid with ApplyExport
+	IncludeTags        bool      // also transfer git tags created by the agent; invalid with ApplyModeNoCommit
+	DryRun             bool      // preview without applying or advancing the baseline
 }
 
 // ApplyResult reports the outcome of a single Apply call. Workdir-only
 // after Q-U — there are no per-dir slices because aux dirs don't
 // participate in diff/apply.
 type ApplyResult struct {
-	Status       ApplyStatus // see ApplyStatus constants
-	Patch        string      // populated only when Status == ApplyStatusDryRun
-	ExportedPath string      // populated only when Mode == ApplyExport — the patch file written to ExportDir
-	Err          error       // non-nil when an unexpected error occurred (runtime / IO failure; distinct from ApplyStatusConflict which is the normal "git refused" path)
+	Status ApplyStatus // see ApplyStatus constants
+	Patch  string      // populated only when Status == ApplyStatusDryRun
+	Err    error       // non-nil when an unexpected error occurred (runtime / IO failure; distinct from ApplyStatusConflict which is the normal "git refused" path)
 }
 
 // ApplyStatus is the typed outcome of an Apply call. Embedders switch
@@ -967,6 +968,32 @@ const (
 )
 
 func (*Workdir) Apply(ctx context.Context, opts ApplyOptions) (*ApplyResult, error) {
+	panic("design-only")
+}
+
+// ExportOptions configures Export. Dir is required.
+type ExportOptions struct {
+	Dir                string   // destination directory for patch files (created if absent); required
+	Refs               []string // specific commits or ranges (copy-mode only); empty = whole beyond-baseline range
+	Paths              []string // pathspec filter
+	IncludeUncommitted bool     // also write uncommitted.diff (copy-mode only)
+}
+
+// ExportResult reports what Export wrote.
+type ExportResult struct {
+	Dir                 string   // destination directory
+	Files               []string // patch/diff files written (absolute paths)
+	UncommittedExported bool     // uncommitted.diff was written
+}
+
+// Export writes the agent's changes as patch files under opts.Dir instead of
+// applying them — the `apply --patches` flow. It is its own verb (NOT an Apply
+// mode): export serializes without landing, so the required-Mode Apply contract
+// doesn't apply. Resolves mount mode internally (copy → format-patch files +
+// optional uncommitted.diff; overlay → upper-layer diffs, container must be
+// running). Dir is required (*UsageError if empty); Refs on overlay is refused
+// (*UsageError). Never advances the baseline.
+func (*Workdir) Export(ctx context.Context, opts ExportOptions) (*ExportResult, error) {
 	panic("design-only")
 }
 

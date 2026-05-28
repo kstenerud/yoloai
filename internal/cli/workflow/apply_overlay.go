@@ -7,12 +7,10 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
 
 	yoloai "github.com/kstenerud/yoloai"
-	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/kstenerud/yoloai/internal/sandbox/patch"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
@@ -24,7 +22,7 @@ import (
 // --include-uncommitted has no effect here: overlay sandboxes have no commit
 // history inside the agent's workspace, so all upper-layer changes are applied
 // as a single patch regardless.
-func applyOverlay(cmd *cobra.Command, name string, meta *store.Meta, refs, paths []string, patchesDir string, yes, dryRun bool) error {
+func applyOverlay(cmd *cobra.Command, name string, meta *store.Meta, refs, paths []string, yes, dryRun bool) error {
 	if len(refs) > 0 {
 		return sandbox.NewPlatformError("selective ref apply is not supported for :overlay sandboxes")
 	}
@@ -51,37 +49,8 @@ func applyOverlay(cmd *cobra.Command, name string, meta *store.Meta, refs, paths
 			return err
 		}
 
-		// --patches: export patch files
-		if patchesDir != "" {
-			return applyOverlayExportPatches(cmd, patches, patchesDir)
-		}
-
 		return applyOverlayPatches(cmd, ctx, c, name, meta, patches, yes, dryRun)
 	})
-}
-
-// applyOverlayExportPatches exports overlay patches to a directory.
-func applyOverlayExportPatches(cmd *cobra.Command, patches []patch.PatchSet, patchesDir string) error {
-	if err := fileutil.MkdirAll(patchesDir, 0750); err != nil {
-		return fmt.Errorf("create patches directory: %w", err)
-	}
-	for i, ps := range patches {
-		dst := filepath.Join(patchesDir, fmt.Sprintf("overlay-%d.diff", i+1))
-		if err := fileutil.WriteFile(dst, ps.Patch, 0600); err != nil { //nolint:gosec // G703: dst is constructed from user-provided --patches flag
-			return fmt.Errorf("write patch: %w", err)
-		}
-		if !cliutil.JSONEnabled(cmd) {
-			fmt.Fprintf(cmd.OutOrStdout(), "  %s\n", dst) //nolint:errcheck
-		}
-	}
-	if cliutil.JSONEnabled(cmd) {
-		return cliutil.WriteJSON(cmd.OutOrStdout(), applyResult{
-			Target:             patchesDir,
-			UncommittedApplied: true,
-			Method:             "overlay",
-		})
-	}
-	return nil
 }
 
 // applyOverlayPatches applies overlay patches to the host and advances baselines.
