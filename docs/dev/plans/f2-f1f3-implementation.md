@@ -93,8 +93,24 @@ where those apply modes live and already consume it.
   folded root methods.
 - **BREAKING-CHANGES:** diff ops move under `Workdir()`; `DiffOverlay` removed.
 
-### Step 4 — `Workdir().Apply` (F2 part 3)
+### Step 4 — `Workdir().Apply` (F2 part 3) — PHASED (4a–4e)
 *Closes leak: `patch.ApplyResult`. Breaking.*
+
+**Scope finding (2026-05-28, §12):** unlike Diff, the apply *orchestration* lives
+in the CLI (`apply_*.go`, ~1000 lines) — the Client only exposes primitives
+(`GeneratePatch`/`GenerateFormatPatch*`/`OverlayPatch`/`AdvanceBaseline`). Folding
+all five variants (default format-patch, `--squash`, selective-refs, `--patches`
+export, overlay) into one `Workdir().Apply` means relocating that orchestration
+into the library — the W-L8 thin-CLI end-state, but large. Done **phased**:
+
+- **4a — LANDED (2026-05-28):** `Workdir().Apply(ApplyOptions{IncludeWIP})` folds
+  `Client.Apply`/`ApplyWithOptions` (the simple full-workdir apply over
+  `patch.ApplyAll`); `ApplyResult` re-exported as `yoloai.ApplyResult` →
+  `patch.ApplyResult` off `f1KnownLeaks`. `ApplyOptions` moved to `workdir.go`.
+- **4b–4e (pending):** move each variant's orchestration into the library and
+  gut the corresponding `apply_*.go` — squash (4b), selective-refs (4c),
+  `--patches` export / format-patch series (4d), overlay (4e). Each green +
+  committable.
 
 - Public `yoloai.ApplyResult` + `ApplyStatus` consts (per api_surface).
 - `Workdir().Apply(ApplyOptions) (*ApplyResult, error)` — folds `Apply`,

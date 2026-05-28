@@ -40,7 +40,7 @@
 //	})
 //	if err != nil { log.Fatal(err) }
 //	if info.Status == yoloai.StatusDone {
-//	    client.Apply(ctx, info.Meta.Name)
+//	    client.Sandbox(info.Meta.Name).Workdir().Apply(ctx, yoloai.ApplyOptions{})
 //	}
 package yoloai
 
@@ -297,34 +297,6 @@ func (c *Client) Run(ctx context.Context, opts RunOptions) (*Info, error) {
 	}
 
 	return c.pollUntilDone(ctx, opts.Name, opts.OnProgress)
-}
-
-// Apply applies the agent's committed changes back to the original host
-// workdir. Equivalent to 'yoloai apply <name>'.
-// Uncommitted (work-in-progress) edits the agent left behind are NOT applied;
-// use ApplyWithOptions to opt in.
-// Returns (nil, nil) when there is nothing to apply — branch on
-// result == nil rather than on a sentinel error (Q-P).
-//
-// Q-U: aux :copy / :overlay are no longer supported, so the result
-// describes the single workdir patch (or nil for no-op).
-func (c *Client) Apply(ctx context.Context, name string) (*patch.ApplyResult, error) {
-	return patch.ApplyAll(ctx, c.layout, c.rt, name, false)
-}
-
-// ApplyOptions controls Client.ApplyWithOptions.
-type ApplyOptions struct {
-	// IncludeWIP, when true, additionally applies the agent's uncommitted
-	// changes as unstaged modifications on the host. Mirrors the CLI's
-	// `yoloai apply --include-wip`.
-	IncludeWIP bool
-}
-
-// ApplyWithOptions is Apply with explicit options. Returns (nil, nil)
-// when there is nothing to apply — branch on result == nil rather
-// than on a sentinel error (Q-P).
-func (c *Client) ApplyWithOptions(ctx context.Context, name string, opts ApplyOptions) (*patch.ApplyResult, error) {
-	return patch.ApplyAll(ctx, c.layout, c.rt, name, opts.IncludeWIP)
 }
 
 // List returns info for all sandboxes.

@@ -4,6 +4,28 @@ Tracks breaking changes made during beta. Each entry should be included in relea
 
 ## Unreleased
 
+### Apply moves under `client.Sandbox(name).Workdir()`
+
+Step 4a of the F2 re-rooting (the first of several apply sub-steps). Go-embedder
+API change; CLI behavior unchanged.
+
+**Previous behavior:** `c.Apply(ctx, name) (*patch.ApplyResult, error)` and
+`c.ApplyWithOptions(ctx, name, ApplyOptions) (*patch.ApplyResult, error)` —
+returning the internal `*patch.ApplyResult`.
+
+**New behavior:** `c.Sandbox(name).Workdir().Apply(ctx, yoloai.ApplyOptions{IncludeWIP})
+(*yoloai.ApplyResult, error)`. `ApplyResult` is now a public root alias (closing
+the F1 fence leak); `ApplyOptions` moved to the root `Workdir` surface.
+
+**Migration:**
+- `c.Apply(ctx, name)` → `c.Sandbox(name).Workdir().Apply(ctx, yoloai.ApplyOptions{})`
+- `c.ApplyWithOptions(ctx, name, opts)` → `c.Sandbox(name).Workdir().Apply(ctx, opts)`
+
+**Note:** this is the simple full-workdir apply. The squash / selective-ref /
+`--patches` export / overlay variants — whose orchestration currently lives in
+the CLI (`apply_*.go`) — fold into `Workdir().Apply` in subsequent sub-steps
+(4b–4e), which relocate that logic into the library.
+
 ### Diff moves under `client.Sandbox(name).Workdir()`
 
 Folds the four `Client` diff methods into one verb on the workdir sub-handle (F2,

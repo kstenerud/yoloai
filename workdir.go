@@ -82,3 +82,26 @@ func (w *Workdir) Diff(ctx context.Context, opts DiffOptions) (string, error) {
 		Runtime:  w.s.c.rt,
 	})
 }
+
+// ApplyResult describes the outcome of an Apply: the host directory patched and
+// a `git diff --stat` summary. Re-exported (type alias) from internal/sandbox/patch.
+type ApplyResult = patch.ApplyResult
+
+// ApplyOptions configures Workdir.Apply.
+type ApplyOptions struct {
+	// IncludeWIP additionally applies the agent's uncommitted (work-in-progress)
+	// edits as unstaged modifications on the host. Mirrors `yoloai apply
+	// --include-wip`.
+	IncludeWIP bool
+}
+
+// Apply applies the agent's committed changes back to the original host workdir
+// (the copy-mode "land it" verb). Returns (nil, nil) when there's nothing to
+// apply — branch on result == nil rather than a sentinel error (Q-P). Advances
+// the diff baseline past the applied commits on success.
+//
+// This is the simple full-workdir apply; the squash / selective-ref / export /
+// overlay variants remain on Client for now (folded in later sub-steps).
+func (w *Workdir) Apply(ctx context.Context, opts ApplyOptions) (*ApplyResult, error) {
+	return patch.ApplyAll(ctx, w.s.c.layout, w.s.c.rt, w.s.name, opts.IncludeWIP)
+}

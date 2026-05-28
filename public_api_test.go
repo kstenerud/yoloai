@@ -228,8 +228,9 @@ var f1KnownLeaks = map[string]struct{}{
 	// CloneOptions (Clone not yet re-rooted) and TmuxConfigClass.
 	"github.com/kstenerud/yoloai/internal/sandbox.CloneOptions":    {},
 	"github.com/kstenerud/yoloai/internal/sandbox.TmuxConfigClass": {},
-	// internal/sandbox/patch types returned by Apply / ListCommitsWithStats.
-	"github.com/kstenerud/yoloai/internal/sandbox/patch.ApplyResult":        {},
+	// internal/sandbox/patch types. ApplyResult CLOSED (Step 4a: re-exported as
+	// yoloai.ApplyResult; Workdir().Apply returns it). CommitInfoWithStat
+	// remains until the commits/baseline re-rooting (Step 5).
 	"github.com/kstenerud/yoloai/internal/sandbox/patch.CommitInfoWithStat": {},
 }
 
