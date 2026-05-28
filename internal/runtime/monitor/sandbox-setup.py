@@ -1231,6 +1231,26 @@ def main():
 
     # Get backend-specific paths
     socket = backend.get_tmux_socket()
+
+    # Read secrets and signal the host BEFORE waiting for the working dir.
+    # For Tart (and Seatbelt), the host's buildAndStart() blocks in
+    # waitForSecretsConsumed() until this marker appears. That call is inside
+    # launchContainer(), which must return before executeVMWorkDirSetup() runs
+    # (the rsync that creates the VM-local working dir). get_working_dir() below
+    # polls for that dir for up to 120 s, and signal_secrets_consumed() used to
+    # come after it — creating a deadlock: host waiting for the VM to signal,
+    # VM waiting for the host to create the dir, host waiting for the VM to
+    # signal … Neither side could proceed. Signalling here, while still in the
+    # setup phase, breaks the cycle: the host unblocks, runs the rsync, the dir
+    # appears, and get_working_dir() returns promptly.
+    # Secrets are safe to read now: copySecretsToSandbox() ran during Create(),
+    # before Start(), so yoloai_dir/secrets/ is already populated via VirtioFS.
+    # The tmux session does not exist yet, so set-environment is skipped for
+    # backends that use a real socket; secrets reach the agent via the explicit
+    # env_exports= prefix in the launch_agent() send-keys command instead.
+    secrets = backend.read_secrets(socket)
+    signal_secrets_consumed(yoloai_dir)
+
     working_dir = backend.get_working_dir()
 
     setup_tmux_session(cfg, yoloai_dir, socket=socket)
@@ -1250,10 +1270,6 @@ def main():
         args=(cfg, yoloai_dir, socket, _log_lifecycle, pane_ready),
         daemon=True,
     ).start()
-
-    # Read secrets and pass to tmux session
-    secrets = backend.read_secrets(socket)
-    signal_secrets_consumed(yoloai_dir)
 
     # Under gVisor on ARM64 the docker exec'd process may see different
     # effective credentials than the container entrypoint, causing EACCES

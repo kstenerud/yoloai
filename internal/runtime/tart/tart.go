@@ -58,14 +58,12 @@ var descriptor = runtime.BackendDescriptor{
 		// shell commands inside the VM can reference state without quoting.
 		VMRuntimeDir: "/Users/admin/.yoloai",
 	},
-	// A macOS VM boot — plus a possible one-time `xcodebuild -runFirstLaunch`
-	// (60-120s+) when an Xcode.app is shared in — routinely takes longer than
-	// the default secrets-consumed wait just to reach the entrypoint that reads
-	// /run/secrets. Wait long enough that the host observes the marker before
-	// removing the secrets dir, rather than removing it mid-boot and relying on
-	// VirtioFS deletion lag to avoid an unauthenticated agent. See
-	// backend-idiosyncrasies.md "Kata: secrets temp dir removed before the
-	// guest reads it" (Tart variant).
+	// Tart VMs boot in ~60s+, then sandbox-setup.py runs xcode-select and
+	// xcodebuild -license accept before signalling secrets consumed. 180s is
+	// a generous safety net; the marker normally appears within a few seconds
+	// of the setup script starting (see sandbox-setup.py main() ordering).
+	// See backend-idiosyncrasies.md for the host/VM deadlock that required
+	// moving signal_secrets_consumed() before get_working_dir().
 	SecretsConsumedTimeout: 180 * time.Second,
 	Probe:                  probe,
 	VersionString:          versionString,

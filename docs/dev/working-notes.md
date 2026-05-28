@@ -508,6 +508,36 @@ Operational state (`setup_complete`) lives in `~/.yoloai/state.yaml`.
 
 ---
 
+---
+
+## D26 — `signal_secrets_consumed` must precede `get_working_dir` in sandbox-setup.py
+
+**Date:** 2026-05-28
+
+**Context.** `yoloai new` on the Tart backend was silently deadlocking: the host
+blocked in `waitForSecretsConsumed(180 s)` inside `buildAndStart()`, which
+prevented `launchContainer()` from returning; `executeVMWorkDirSetup()` (the
+rsync that creates the VM-local copy dir) only runs *after* `launchContainer()`
+returns; the in-VM `get_working_dir()` polled for that dir for 120 s; and
+`signal_secrets_consumed()` came *after* `get_working_dir()`. Neither side
+could proceed. At 30 s timeout the host accidentally escaped by giving up; at
+180 s the smoke test's 120 s command timeout fired first, producing a complete
+failure.
+
+**Decision.** Move `read_secrets()` + `signal_secrets_consumed()` to run
+*before* `get_working_dir()` in `sandbox-setup.py::main()`. Secrets are
+already on the VirtioFS share by the time the setup script runs
+(`copySecretsToSandbox()` is called during `Create()`, before `Start()`). The
+tmux session does not exist yet when `read_secrets` is called at the new
+position, so `tmux set-environment` is a no-op; the agent receives credentials
+via the explicit `export NAME='value'; exec …` prefix injected by
+`launch_agent()` instead.
+
+**Recorded in.** `backend-idiosyncrasies.md §Tart: signal_secrets_consumed
+must run before get_working_dir`.
+
+---
+
 # Convention reminders
 
 - New decisions append at the bottom. Don't renumber.

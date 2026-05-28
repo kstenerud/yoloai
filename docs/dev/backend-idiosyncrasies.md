@@ -59,6 +59,7 @@ row to the index.
 | `xcrun simctl list runtimes` shows no runtimes when mounted via VirtioFS | [Tart: CoreSimulator requires sealed APFS](#coresimulator-cannot-discover-virtiofs-mounted-runtimes) |
 | `Failed to start launchd_sim: could not bind to session` when booting simulator | [Tart: ditto'd runtime is incomplete](#dittod-ios-runtime-is-incomplete-use-xcodebuild--downloadplatform) |
 | `git diff` fails with "unable to read" object / git corruption on Tart VM | [Tart: VirtioFS corrupts git repositories](#virtiofs-corrupts-git-repositories) |
+| `yoloai new` times out / "command timed out" on Tart; sandbox.jsonl stops after xcodebuild firstlaunch; agent never starts | [Tart: signal_secrets_consumed deadlock with get_working_dir](#tart-signal_secrets_consumed-must-run-before-get_working_dir) |
 | Agent silently fails after `yoloai restart` on Tart (node not found) | [Tart: node@24 in .zprofile breaks agent launch](#node24-in-zprofile-breaks-agent-launch-after-restart) |
 | Agent silently fails after `yoloai restart` on Seatbelt (Swift PM sandbox error) | [Seatbelt: swift-wrapper not sourced on restart](#swift-wrapper-not-sourced-on-restart) |
 | VS Code tunnel re-prompts for login on every container restart | [VS Code CLI: hostname-based keychain encryption](#vs-code-cli-file-keychain-uses-hostname-in-encryption-key) |
@@ -1273,3 +1274,39 @@ warn error access singleton, retrying: the process holding the singleton lock fi
 
 ---
 
+### Tart: `signal_secrets_consumed` must run before `get_working_dir`
+
+**Symptom:** `yoloai new` times out ("command timed out") on the Tart backend.
+`sandbox.jsonl` shows setup events up to `tart.xcode.firstlaunch.started` then
+stops; `monitor.jsonl` is empty (agent never launched). The host log shows
+"secrets-consumed marker not observed before timeout".
+
+**Explanation:** A deadlock between the host and the in-VM setup script:
+
+1. `buildAndStart()` (host) calls `waitForSecretsConsumed(timeout)`, blocking
+   `launchContainer()` until the in-VM script writes `logs/.secrets-consumed`.
+2. `executeVMWorkDirSetup()` (rsync that creates the VM-local working dir) runs
+   only *after* `launchContainer()` returns — so the working dir never exists
+   while the host is waiting.
+3. `get_working_dir()` (in-VM) polls for the working dir for up to 120 s.
+4. `signal_secrets_consumed()` (in-VM) was called *after* `get_working_dir()`.
+
+Neither side could proceed: host waiting for the VM marker, VM waiting for the
+host rsync, host waiting for the VM marker …
+
+With a short `SecretsConsumedTimeout` (30 s) the host accidentally broke the
+deadlock by giving up and letting `launchContainer` return. With 180 s the
+smoke test's 120 s command timeout fires first.
+
+**Fix:** `signal_secrets_consumed()` now runs *before* `get_working_dir()` in
+`sandbox-setup.py::main()`. Secrets are available immediately (copied during
+`Create()` via `copySecretsToSandbox()`). The tmux session does not exist yet,
+so `tmux set-environment` is skipped; secrets reach the agent via the explicit
+`env_exports=` prefix in `launch_agent()::send-keys` instead.
+
+**Code:** `internal/runtime/monitor/sandbox-setup.py::main` (ordering of
+`read_secrets` / `signal_secrets_consumed` vs `get_working_dir`);
+`internal/sandbox/create.go` (ordering of `launchContainer` vs
+`executeVMWorkDirSetup`).
+
+---
