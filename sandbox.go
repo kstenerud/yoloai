@@ -91,16 +91,16 @@ func (s *Sandbox) Stop(ctx context.Context) error {
 
 // Start launches (or relaunches) the container for the existing sandbox.
 // The sandbox must exist on disk; use Client.Run/Create for a new one.
-func (s *Sandbox) Start(ctx context.Context, opts StartOptions) error {
+func (s *Sandbox) Start(ctx context.Context, opts StartOptions) (*StartResult, error) {
 	return s.c.manager.Start(ctx, s.name, opts)
 }
 
 // Restart stops then starts the sandbox, applying opts on the way back up
 // (e.g. StartOptions.Isolation to bring it up under a different isolation
 // mode, StartOptions.Resume to re-feed the prompt).
-func (s *Sandbox) Restart(ctx context.Context, opts StartOptions) error {
+func (s *Sandbox) Restart(ctx context.Context, opts StartOptions) (*StartResult, error) {
 	if err := s.c.manager.Stop(ctx, s.name); err != nil {
-		return err
+		return nil, err
 	}
 	return s.c.manager.Start(ctx, s.name, opts)
 }

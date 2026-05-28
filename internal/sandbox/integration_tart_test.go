@@ -173,7 +173,8 @@ func TestIntegrationTart_FullLifecycle(t *testing.T) {
 	// Restart: attempts to resume from suspend, but Apple VZ framework cannot restore
 	// VMs with VirtioFS (--dir) mounts from a snapshot (VZErrorDomain Code=12), so
 	// lifecycle falls back to destroy + recreate from staging. VM is fresh on start.
-	require.NoError(t, mgr.Start(ctx, sandboxName, sandbox.StartOptions{}))
+	_, startErr := mgr.Start(ctx, sandboxName, sandbox.StartOptions{})
+	require.NoError(t, startErr)
 	testutil.WaitForActive(ctx, t, mgr.Runtime(), store.InstanceName(sandboxName), 90*time.Second)
 
 	status, err = sandbox.DetectStatus(ctx, mgr.Runtime(), store.InstanceName(sandboxName), mgr.Layout().SandboxDir(sandboxName))
@@ -364,7 +365,8 @@ func TestIntegrationTart_VMLocalStorageVerification(t *testing.T) {
 		"Tart work dir should not be on VirtioFS")
 
 	// Start VM and verify directory exists on local storage
-	require.NoError(t, mgr.Start(ctx, sandboxName, sandbox.StartOptions{}))
+	_, startErr := mgr.Start(ctx, sandboxName, sandbox.StartOptions{})
+	require.NoError(t, startErr)
 	testutil.WaitForActive(ctx, t, mgr.Runtime(), store.InstanceName(sandboxName), 90*time.Second)
 
 	// Reload meta — Start() populates BaselineSHA (VM work dir setup runs inside VM)

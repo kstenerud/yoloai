@@ -71,14 +71,18 @@ func runRestart(cmd *cobra.Command, args []string, opts *restartOpts) error {
 		if err != nil {
 			return err
 		}
-		if err := sb.Restart(ctx, sandbox.StartOptions{
+		res, restartErr := sb.Restart(ctx, sandbox.StartOptions{
 			Resume:       opts.resume,
 			Prompt:       opts.prompt,
 			PromptFile:   opts.promptFile,
 			Isolation:    yoloai.IsolationMode(opts.isolation),
 			VscodeTunnel: opts.vscodeTunnel,
-		}); err != nil {
-			return err
+		})
+		if res != nil {
+			cliutil.RenderNotices(cmd, res.Notices)
+		}
+		if restartErr != nil {
+			return restartErr
 		}
 		slog.Info("sandbox restarted", "event", "sandbox.restart.complete", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
 

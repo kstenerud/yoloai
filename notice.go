@@ -25,3 +25,8 @@ const (
 // (e.g. a directory that couldn't be fully removed). Re-exported (type alias)
 // from internal/sandbox.
 type DestroyResult = sandbox.DestroyResult
+
+// StartResult reports the outcome of a Start/Restart — the advisory/status
+// notices emitted (e.g. "Sandbox X started"). Re-exported (type alias) from
+// internal/sandbox.
+type StartResult = sandbox.StartResult

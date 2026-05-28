@@ -83,7 +83,9 @@ func runCloneStart(cmd *cobra.Command, ctx context.Context, c *yoloai.Client, sr
 	if err != nil {
 		return err
 	}
-	if err := sb.Start(ctx, sandbox.StartOptions{
+	// Start notices ("Sandbox Y started") are redundant with clone's own
+	// "Cloned X → Y (started)" output below, so they're discarded here.
+	if _, err := sb.Start(ctx, sandbox.StartOptions{
 		Prompt:     prompt,
 		PromptFile: promptFile,
 	}); err != nil {

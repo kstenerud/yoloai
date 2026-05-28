@@ -69,13 +69,17 @@ func runStart(cmd *cobra.Command, args []string, opts *startOpts) error {
 		if err != nil {
 			return cliutil.SandboxErrorHint(name, err)
 		}
-		if err := sb.Start(ctx, sandbox.StartOptions{
+		res, startErr := sb.Start(ctx, sandbox.StartOptions{
 			Resume:       opts.resume,
 			Prompt:       opts.prompt,
 			PromptFile:   opts.promptFile,
 			VscodeTunnel: opts.vscodeTunnel,
-		}); err != nil {
-			return cliutil.SandboxErrorHint(name, err)
+		})
+		if res != nil {
+			cliutil.RenderNotices(cmd, res.Notices)
+		}
+		if startErr != nil {
+			return cliutil.SandboxErrorHint(name, startErr)
 		}
 		slog.Info("sandbox started", "event", "sandbox.start.complete", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
 

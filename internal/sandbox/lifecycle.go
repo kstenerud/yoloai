@@ -67,13 +67,15 @@ type StartOptions struct {
 }
 
 // Start ensures a sandbox is running — idempotent.
-func (m *Manager) Start(ctx context.Context, name string, opts StartOptions) error {
+func (m *Manager) Start(ctx context.Context, name string, opts StartOptions) (*StartResult, error) {
 	unlock, err := store.AcquireLock(m.layout, name)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer unlock()
-	return m.start(ctx, name, opts)
+	var n notices
+	startErr := m.start(ctx, name, opts, &n)
+	return &StartResult{Notices: n.list}, startErr
 }
 
 // syncLifecycleMarker checks for the Python on-create-done marker file and
@@ -95,7 +97,7 @@ func syncLifecycleMarker(sandboxDir string) {
 // applyIsolationOverride applies the isolation mode override from opts to meta
 // if it differs from the current value. Validates mode, checks backend support,
 // and saves meta. No-op when opts.Isolation is empty or unchanged.
-func (m *Manager) applyIsolationOverride(ctx context.Context, opts StartOptions, sandboxDir string, meta *store.Meta) error {
+func (m *Manager) applyIsolationOverride(ctx context.Context, opts StartOptions, sandboxDir string, meta *store.Meta, n *notices) error {
 	if opts.Isolation == "" || opts.Isolation == meta.Isolation {
 		return nil
 	}
@@ -117,13 +119,13 @@ func (m *Manager) applyIsolationOverride(ctx context.Context, opts StartOptions,
 	if err := store.SaveMeta(sandboxDir, meta); err != nil {
 		return fmt.Errorf("save meta: %w", err)
 	}
-	fmt.Fprintf(m.output, "Isolation mode updated to %s\n", opts.Isolation) //nolint:errcheck // best-effort output
+	n.infof("Isolation mode updated to %s", opts.Isolation)
 	return nil
 }
 
 // applyVscodeTunnelOption enables the VS Code Remote Tunnel in meta and
 // runtime-config.json when opts.VscodeTunnel is true and not already enabled.
-func (m *Manager) applyVscodeTunnelOption(opts StartOptions, sandboxDir, name string, meta *store.Meta) error {
+func (m *Manager) applyVscodeTunnelOption(opts StartOptions, sandboxDir, name string, meta *store.Meta, n *notices) error {
 	if !opts.VscodeTunnel || meta.VscodeTunnel {
 		return nil
 	}
@@ -134,7 +136,7 @@ func (m *Manager) applyVscodeTunnelOption(opts StartOptions, sandboxDir, name st
 	if err := patchConfigVscodeTunnel(sandboxDir, name); err != nil {
 		return fmt.Errorf("patch runtime-config.json for vscode-tunnel: %w", err)
 	}
-	fmt.Fprintln(m.output, "VS Code tunnel enabled") //nolint:errcheck // best-effort output
+	n.infof("VS Code tunnel enabled")
 	return nil
 }
 
@@ -182,7 +184,7 @@ func preparePromptForStart(opts StartOptions, sandboxDir string, meta *store.Met
 }
 
 // handleTerminalStatus relaunches the agent after it has exited (Done/Failed).
-func (m *Manager) handleTerminalStatus(ctx context.Context, name string, meta *store.Meta, opts StartOptions, promptText string, customPrompt bool) error {
+func (m *Manager) handleTerminalStatus(ctx context.Context, name string, meta *store.Meta, opts StartOptions, promptText string, customPrompt bool, n *notices) error {
 	slog.Info("relaunching agent", "event", "sandbox.start.agent.relaunch", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
 	switch {
 	case customPrompt:
@@ -198,14 +200,14 @@ func (m *Manager) handleTerminalStatus(ctx context.Context, name string, meta *s
 			return err
 		}
 	}
-	fmt.Fprintf(m.output, "Agent relaunched in sandbox %s\n", name) //nolint:errcheck // best-effort output
+	n.infof("Agent relaunched in sandbox %s", name)
 	return nil
 }
 
 // handleStoppedOrRemovedStatus recreates the container for a sandbox whose
 // container is stopped or removed. removeStopped indicates the container still
 // exists and must be removed first. successMsg is printed on success.
-func (m *Manager) handleStoppedOrRemovedStatus(ctx context.Context, cname, name string, meta *store.Meta, opts StartOptions, promptText string, customPrompt, removeStopped bool, successMsg string) error {
+func (m *Manager) handleStoppedOrRemovedStatus(ctx context.Context, cname, name string, meta *store.Meta, opts StartOptions, promptText string, customPrompt, removeStopped bool, successMsg string, n *notices) error {
 	if removeStopped && !m.runtime.Descriptor().Capabilities.HostFilesystem {
 		// Container backends (Docker, Podman, containerd): the sandbox directory
 		// lives on the host separately from the container, so Remove only deletes
@@ -235,7 +237,7 @@ func (m *Manager) handleStoppedOrRemovedStatus(ctx context.Context, cname, name 
 	if err := m.recreateContainer(ctx, name, meta, opts.Resume); err != nil {
 		return err
 	}
-	fmt.Fprintf(m.output, "%s\n", successMsg) //nolint:errcheck // best-effort output
+	n.infof("%s", successMsg)
 	return nil
 }
 
@@ -243,7 +245,7 @@ func (m *Manager) handleStoppedOrRemovedStatus(ctx context.Context, cname, name 
 // Credentials are refreshed, the VM is resumed via runtime.Start (which kills
 // the stale tmux session and runs the setup script), and executeVMWorkDirSetup
 // is skipped because the work directory is already present from the suspend.
-func (m *Manager) handleSuspendedResume(ctx context.Context, cname, name string, meta *store.Meta, opts StartOptions, promptText string, customPrompt bool) error {
+func (m *Manager) handleSuspendedResume(ctx context.Context, cname, name string, meta *store.Meta, opts StartOptions, promptText string, customPrompt bool, n *notices) error {
 	slog.Info("resuming suspended sandbox", "event", "sandbox.start.resume", "sandbox", name)
 	sandboxDir := m.layout.SandboxDir(name)
 
@@ -282,17 +284,17 @@ func (m *Manager) handleSuspendedResume(ctx context.Context, cname, name string,
 		// the suspended VM and recreating from the host staging area.
 		slog.Warn("suspended VM resume failed, falling back to recreate", "sandbox", name, "err", err)
 		_ = m.runtime.Remove(ctx, cname)
-		return m.handleStoppedOrRemovedStatus(ctx, cname, name, meta, opts, promptText, customPrompt, false, fmt.Sprintf("Sandbox %s recreated and started", name))
+		return m.handleStoppedOrRemovedStatus(ctx, cname, name, meta, opts, promptText, customPrompt, false, fmt.Sprintf("Sandbox %s recreated and started", name), n)
 	}
 
 	// Don't call executeVMWorkDirSetup: the work directory is already present
 	// inside the VM from before the suspend.
 
-	fmt.Fprintf(m.output, "Sandbox %s resumed\n", name) //nolint:errcheck // best-effort output
+	n.infof("Sandbox %s resumed", name)
 	return nil
 }
 
-func (m *Manager) start(ctx context.Context, name string, opts StartOptions) error {
+func (m *Manager) start(ctx context.Context, name string, opts StartOptions, n *notices) error {
 	slog.Info("starting sandbox", "event", "sandbox.start", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
 	sandboxDir := m.layout.SandboxDir(name)
 	if err := store.RequireSandboxDir(sandboxDir); err != nil {
@@ -311,12 +313,12 @@ func (m *Manager) start(ctx context.Context, name string, opts StartOptions) err
 	syncLifecycleMarker(sandboxDir)
 
 	// Apply isolation override before recreating the container.
-	if err := m.applyIsolationOverride(ctx, opts, sandboxDir, meta); err != nil {
+	if err := m.applyIsolationOverride(ctx, opts, sandboxDir, meta, n); err != nil {
 		return err
 	}
 
 	// Enable VS Code Remote Tunnel if requested and not already enabled.
-	if err := m.applyVscodeTunnelOption(opts, sandboxDir, name, meta); err != nil {
+	if err := m.applyVscodeTunnelOption(opts, sandboxDir, name, meta, n); err != nil {
 		return err
 	}
 
@@ -334,20 +336,20 @@ func (m *Manager) start(ctx context.Context, name string, opts StartOptions) err
 
 	switch status {
 	case StatusActive, StatusIdle:
-		fmt.Fprintf(m.output, "Sandbox %s is already running\n", name) //nolint:errcheck // best-effort output
+		n.infof("Sandbox %s is already running", name)
 		return nil
 
 	case StatusDone, StatusFailed:
-		return m.handleTerminalStatus(ctx, name, meta, opts, promptText, customPrompt)
+		return m.handleTerminalStatus(ctx, name, meta, opts, promptText, customPrompt, n)
 
 	case StatusSuspended:
-		return m.handleSuspendedResume(ctx, cname, name, meta, opts, promptText, customPrompt)
+		return m.handleSuspendedResume(ctx, cname, name, meta, opts, promptText, customPrompt, n)
 
 	case StatusStopped:
-		return m.handleStoppedOrRemovedStatus(ctx, cname, name, meta, opts, promptText, customPrompt, true, fmt.Sprintf("Sandbox %s started", name))
+		return m.handleStoppedOrRemovedStatus(ctx, cname, name, meta, opts, promptText, customPrompt, true, fmt.Sprintf("Sandbox %s started", name), n)
 
 	case StatusRemoved:
-		return m.handleStoppedOrRemovedStatus(ctx, cname, name, meta, opts, promptText, customPrompt, false, fmt.Sprintf("Sandbox %s recreated and started", name))
+		return m.handleStoppedOrRemovedStatus(ctx, cname, name, meta, opts, promptText, customPrompt, false, fmt.Sprintf("Sandbox %s recreated and started", name), n)
 
 	default:
 		return fmt.Errorf("unexpected sandbox status: %s", status)
@@ -674,9 +676,14 @@ func (m *Manager) prepareResetRestart(ctx context.Context, opts ResetOptions, sa
 	defer cleanup()
 
 	slog.Info("reset complete", "event", "sandbox.reset.complete", "sandbox", opts.Name)
-	// Start the container
-	if err := m.start(ctx, opts.Name, StartOptions{}); err != nil {
+	// Start the container. Reset still renders to m.output (its own notice
+	// migration is a later F8 phase); bridge the start notices there for now.
+	var startNotices notices
+	if err := m.start(ctx, opts.Name, StartOptions{}, &startNotices); err != nil {
 		return err
+	}
+	for _, sn := range startNotices.list {
+		fmt.Fprintln(m.output, sn.Message) //nolint:errcheck // best-effort output (temporary bridge until Reset's F8 phase)
 	}
 
 	// Execute VM-side work directory setup if baseline was deferred (Tart VMs)

@@ -33,6 +33,11 @@ type notices struct {
 	list []Notice
 }
 
+// infof appends an informational notice.
+func (n *notices) infof(format string, args ...any) {
+	n.list = append(n.list, Notice{Level: NoticeInfo, Message: fmt.Sprintf(format, args...)})
+}
+
 // warnf appends a warning notice.
 func (n *notices) warnf(format string, args ...any) {
 	n.list = append(n.list, Notice{Level: NoticeWarn, Message: fmt.Sprintf(format, args...)})
@@ -41,5 +46,11 @@ func (n *notices) warnf(format string, args ...any) {
 // DestroyResult reports the outcome of a Destroy: any advisory notices emitted
 // (e.g. a directory that couldn't be fully removed).
 type DestroyResult struct {
+	Notices []Notice
+}
+
+// StartResult reports the outcome of a Start: the advisory/status notices
+// emitted (e.g. "Sandbox X started", "VS Code tunnel enabled").
+type StartResult struct {
 	Notices []Notice
 }
