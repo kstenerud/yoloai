@@ -165,18 +165,23 @@ const (
 	TmuxConfNone        TmuxConfMode = "none"         // no config (raw tmux)
 )
 
-// ApplyMode selects an override to Apply's default behavior. The zero
-// value means "no override — do the normal workdir apply" (git
-// format-patch + am for :copy workdirs; in-container diff-and-apply
-// for :overlay workdirs). The two named constants are overrides that
-// change the behavior away from that default; there is no named
-// "default" constant because that would just be the absence of a
-// choice.
+// ApplyMode selects how Apply lands changes.
+//
+// IMPLEMENTATION DIVERGENCE (D26/D27, 2026-05-28). This sketch had a zero-value
+// "no override = default workdir apply" with named overrides (no named default
+// "because that would just be the absence of a choice"). That's exactly the
+// movable-default footgun §4 rejects — and it bit us (a default flip silently
+// changed apply behavior). The landed design makes Mode **required**: the zero
+// value is a *UsageError, and the two real modes are named explicitly —
+// ApplyModeCommits (replay the commit series) and ApplyModeNoCommit (net diff,
+// unstaged; formerly "squash"). The CLI (policy) picks the mode for the user.
+// ApplyExport below is deferred to the export sub-step (4e).
 type ApplyMode string
 
 const (
-	ApplySquash ApplyMode = "squash" // flatten everything into one unstaged patch
-	ApplyExport ApplyMode = "export" // write a patch file to ExportDir; don't apply
+	ApplyModeCommits  ApplyMode = "commits"   // replay the commit series (git format-patch → git am)
+	ApplyModeNoCommit ApplyMode = "no-commit" // flatten to one unstaged net diff in the working tree
+	ApplyExport       ApplyMode = "export"    // (deferred, 4e) write a patch file to ExportDir; don't apply
 )
 
 // MountMode selects how a directory is exposed inside the sandbox.

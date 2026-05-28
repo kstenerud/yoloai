@@ -1,6 +1,6 @@
-// ABOUTME: --squash apply workflow — flattens all sandbox workdir changes
-// ABOUTME: into one unstaged patch on the host. Also the fallback for non-git
-// ABOUTME: targets.
+// ABOUTME: --no-commit apply workflow — lands the net sandbox workdir changes
+// ABOUTME: as one unstaged patch in the host working tree. Also the non-git fallback.
+
 package workflow
 
 import (
@@ -17,12 +17,12 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// applySquash implements the squashed-patch apply mode. The library
+// applyNoCommit implements the net-diff (--no-commit) apply mode. The library
 // (Workdir().Apply) owns generate/validate/apply/advance-baseline; this
 // function owns the CLI preview + confirmation + output. It previews via
 // DryRun (so the stat is exact, matching what the real apply lands), then —
 // after confirmation — applies for real.
-func applySquash(cmd *cobra.Command, name string, paths []string, meta *store.Meta, yes, dryRun, includeWIP bool) error {
+func applyNoCommit(cmd *cobra.Command, name string, paths []string, meta *store.Meta, yes, dryRun, includeWIP bool) error {
 	backend := cliutil.ResolveBackendForSandbox(name)
 
 	var preview *yoloai.ApplyResult
@@ -39,14 +39,14 @@ func applySquash(cmd *cobra.Command, name string, paths []string, meta *store.Me
 
 	// Surface uncommitted changes the user might want to bring along.
 	if !includeWIP {
-		warnSquashSkippedWIP(cmd, name, backend)
+		warnNoCommitSkippedWIP(cmd, name, backend)
 	}
 
 	if preview == nil {
 		if cliutil.JSONEnabled(cmd) {
 			return cliutil.WriteJSON(cmd.OutOrStdout(), applyResult{
 				Target: meta.Workdir.HostPath,
-				Method: "squash",
+				Method: "no-commit",
 			})
 		}
 		_, err = fmt.Fprintln(cmd.OutOrStdout(), "No changes to apply")
@@ -90,17 +90,17 @@ func applySquash(cmd *cobra.Command, name string, paths []string, meta *store.Me
 		return cliutil.WriteJSON(cmd.OutOrStdout(), applyResult{
 			Target:     targetDir,
 			WIPApplied: true,
-			Method:     "squash",
+			Method:     "no-commit",
 		})
 	}
 	_, err = fmt.Fprintf(cmd.OutOrStdout(), "Changes applied to %s\n", targetDir)
 	return err
 }
 
-// warnSquashSkippedWIP prints the --include-wip hint when squash is excluding
+// warnNoCommitSkippedWIP prints the --include-wip hint when --no-commit excludes
 // uncommitted work. Best-effort: a failed WIP check is silently swallowed
-// because squash can still succeed on the committed delta.
-func warnSquashSkippedWIP(cmd *cobra.Command, name string, backend runtime.BackendName) {
+// because the net-diff apply can still succeed on the committed delta.
+func warnNoCommitSkippedWIP(cmd *cobra.Command, name string, backend runtime.BackendName) {
 	if cliutil.JSONEnabled(cmd) {
 		return
 	}
@@ -111,6 +111,6 @@ func warnSquashSkippedWIP(cmd *cobra.Command, name string, backend runtime.Backe
 		return wipErr
 	})
 	if hasWIP {
-		fmt.Fprintln(cmd.OutOrStdout(), "Note: sandbox has uncommitted changes (excluded from squash); re-run with --include-wip to fold them in.") //nolint:errcheck
+		fmt.Fprintln(cmd.OutOrStdout(), "Note: sandbox has uncommitted changes (excluded from --no-commit); re-run with --include-wip to fold them in.") //nolint:errcheck
 	}
 }

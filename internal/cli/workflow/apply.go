@@ -1,5 +1,5 @@
 // ABOUTME: 'apply' command entry — wires CLI flags to the chosen apply
-// ABOUTME: workflow (format-patch, squash, selective, export, overlay) and
+// ABOUTME: workflow (format-patch, no-commit, selective, export, overlay) and
 // ABOUTME: holds shared helpers (arg parsing, tag transfer, result type).
 package workflow
 
@@ -23,7 +23,7 @@ type applyResult struct {
 	WIPApplied     bool   `json:"wip_applied"`
 	TagsApplied    int    `json:"tags_applied"`
 	TagsSkipped    int    `json:"tags_skipped"`
-	Method         string `json:"method"` // "format-patch", "squash", "selective", "patches-export"
+	Method         string `json:"method"` // "format-patch", "no-commit", "selective", "patches-export"
 }
 
 func NewApplyCmd() *cobra.Command {
@@ -42,23 +42,25 @@ Specific commits can be cherry-picked by providing ref arguments:
   yoloai apply mybox abc123..def456      # range
   yoloai apply mybox                     # all commits (default)
 
-Use --squash to flatten the committed changes into a single unstaged
-patch (combine with --include-wip to include uncommitted edits too).
-Use --patches to export .patch files without applying them.`,
+Use --no-commit to land the changes as a single unstaged patch in the
+working tree instead of replaying the commits (combine with --include-wip
+to include uncommitted edits too). It's also used automatically when the
+target isn't a git repository. Use --patches to export .patch files
+without applying them.`,
 		GroupID: cliutil.GroupWorkflow,
 		Args:    cobra.ArbitraryArgs,
 		RunE:    runApplyCmd,
 	}
 
 	cmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
-	cmd.Flags().Bool("squash", false, "Flatten changes into a single unstaged patch")
+	cmd.Flags().Bool("no-commit", false, "Apply changes as a single unstaged patch instead of replaying commits")
 	cmd.Flags().String("patches", "", "Export .patch files to directory instead of applying")
 	cmd.Flags().Bool("include-wip", false, "Also apply uncommitted (work-in-progress) changes; default is commits only")
 	cmd.Flags().Bool("dry-run", false, "Show what would be applied without applying")
 	cmd.Flags().Bool("tags", false, "Transfer git tags created by the agent")
 
-	cmd.MarkFlagsMutuallyExclusive("squash", "patches")
-	cmd.MarkFlagsMutuallyExclusive("squash", "tags")
+	cmd.MarkFlagsMutuallyExclusive("no-commit", "patches")
+	cmd.MarkFlagsMutuallyExclusive("no-commit", "tags")
 	cmd.MarkFlagsMutuallyExclusive("dry-run", "patches")
 
 	return cmd
@@ -72,7 +74,7 @@ func runApplyCmd(cmd *cobra.Command, args []string) error {
 	defer cliutil.OpenCLIJSONLSink(name, cmd)()
 
 	yes := cliutil.EffectiveYes(cmd)
-	squash, _ := cmd.Flags().GetBool("squash")
+	noCommit, _ := cmd.Flags().GetBool("no-commit")
 	patchesDir, _ := cmd.Flags().GetString("patches")
 	if patchesDir != "" {
 		var expandErr error
@@ -89,8 +91,8 @@ func runApplyCmd(cmd *cobra.Command, args []string) error {
 	refs, paths := parseApplyArgs(rest, cmd)
 
 	// Validate mutually exclusive options
-	if len(refs) > 0 && squash {
-		return sandbox.NewUsageError("--squash cannot be used with commit refs — they are mutually exclusive")
+	if len(refs) > 0 && noCommit {
+		return sandbox.NewUsageError("--no-commit cannot be used with commit refs — they are mutually exclusive")
 	}
 	// Load metadata for target directory and mode validation
 	meta, err := store.LoadMeta(cliutil.Layout().SandboxDir(name))
@@ -120,9 +122,9 @@ func runApplyCmd(cmd *cobra.Command, args []string) error {
 		return applySelectedCommits(cmd, name, refs, paths, meta, yes, dryRun, withTags)
 	}
 
-	// --squash: flatten into one unstaged patch (commits only unless --include-wip).
-	if squash {
-		return applySquash(cmd, name, paths, meta, yes, dryRun, includeWIP)
+	// --no-commit: land one unstaged patch (commits only unless --include-wip).
+	if noCommit {
+		return applyNoCommit(cmd, name, paths, meta, yes, dryRun, includeWIP)
 	}
 
 	return runApplyFormatPatch(cmd, name, paths, meta, patchesDir, yes, dryRun, includeWIP, withTags)

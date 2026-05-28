@@ -1,6 +1,6 @@
 // ABOUTME: Default apply workflow — git format-patch + git am, preserving
 // ABOUTME: individual commits. WIP changes are applied as unstaged. Falls back
-// ABOUTME: to applySquash for non-git targets or WIP-only sandboxes.
+// ABOUTME: to applyNoCommit for non-git targets or WIP-only sandboxes.
 package workflow
 
 import (
@@ -11,7 +11,6 @@ import (
 	"strings"
 
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
-	"github.com/kstenerud/yoloai/internal/runtime"
 
 	"github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/internal/sandbox"
@@ -64,16 +63,16 @@ func runApplyFormatPatch(cmd *cobra.Command, name string, paths []string, meta *
 
 	// Non-git fallback: can't use git am on non-git targets
 	if !isGit && len(commits) > 0 {
-		fmt.Fprintln(cmd.ErrOrStderr(), "Note: target is not a git repository — falling back to squashed patch") //nolint:errcheck
-		return applySquash(cmd, name, paths, meta, yes, dryRun, includeWIP)
+		fmt.Fprintln(cmd.ErrOrStderr(), "Note: target is not a git repository — falling back to a single unstaged patch (--no-commit)") //nolint:errcheck
+		return applyNoCommit(cmd, name, paths, meta, yes, dryRun, includeWIP)
 	}
 
-	// No commits, only WIP (user opted in) — use existing squash flow.
+	// No commits, only WIP (user opted in) — use the net-diff (no-commit) flow.
 	if len(commits) == 0 && hasWIP && includeWIP {
 		if withTags {
 			return sandbox.NewUsageError("--tags requires commits — cannot transfer tags with WIP-only changes")
 		}
-		return applySquash(cmd, name, paths, meta, yes, dryRun, includeWIP)
+		return applyNoCommit(cmd, name, paths, meta, yes, dryRun, includeWIP)
 	}
 
 	return runApplyCommits(cmd, name, paths, meta, commits, hasWIP, yes, dryRun, includeWIP, withTags)
@@ -112,7 +111,7 @@ func maybeReportNoChanges(cmd *cobra.Command, name string, meta *store.Meta, com
 		return false, nil
 	}
 	if hasWIP && includeWIP {
-		return false, nil // WIP-only apply will proceed via the squash fallback
+		return false, nil // WIP-only apply will proceed via the no-commit fallback
 	}
 	if hasWIP && !cliutil.JSONEnabled(cmd) {
 		printWIPHint(cmd, "no committed changes to apply")
@@ -170,19 +169,19 @@ func runApplyNoChanges(cmd *cobra.Command, name string, meta *store.Meta, withTa
 	return err
 }
 
-// runApplyCommits applies commits via format-patch/am to the target directory.
+// runApplyCommits replays commits via the library's series apply
+// (Workdir().Apply ApplyModeCommits), then transfers tags using the SHA mapping
+// it returns. The library owns generate / git am / baseline-advance / WIP; this
+// function owns the CLI summary, confirmation, tag transfer, and output.
 func runApplyCommits(cmd *cobra.Command, name string, paths []string, meta *store.Meta, commits []patch.CommitInfo, hasWIP, yes, dryRun, includeWIP, withTags bool) error {
 	layout := cliutil.Layout()
 	targetDir := meta.Workdir.HostPath
 	sandboxWorkDir := store.WorkDir(layout.SandboxDir(name), meta.Workdir.HostPath)
-	isGit := workspace.IsGitRepo(targetDir)
 	backend := cliutil.ResolveBackendForSandbox(name)
 
 	// Fetch tags beyond baseline (best-effort; errors don't fail the apply).
 	tags, _ := sandbox.ListTagsBeyondBaseline(layout, name)
-	tagsByCommit := buildTagsByCommit(tags)
-
-	printApplyCommitsSummary(cmd, commits, tags, tagsByCommit, hasWIP, includeWIP, withTags)
+	printApplyCommitsSummary(cmd, commits, tags, buildTagsByCommit(tags), hasWIP, includeWIP, withTags)
 
 	if dryRun {
 		if !cliutil.JSONEnabled(cmd) {
@@ -202,42 +201,49 @@ func runApplyCommits(cmd *cobra.Command, name string, paths []string, meta *stor
 		}
 	}
 
-	commitsApplied, shaMap, stashErr, err := applyFormatPatchFiles(cmd, name, paths, targetDir, backend)
-	if err != nil {
-		return err
+	var result *yoloai.ApplyResult
+	applyErr := cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
+		var e error
+		result, e = c.Sandbox(name).Workdir().Apply(ctx, yoloai.ApplyOptions{
+			Mode: yoloai.ApplyModeCommits, IncludeWIP: includeWIP, Paths: paths,
+		})
+		return e
+	})
+	// result != nil means the commits landed; a non-nil applyErr alongside it is
+	// a non-fatal follow-on issue (git am stash, or WIP that failed to apply),
+	// surfaced after we report what did land. result == nil is a hard failure.
+	if result == nil {
+		return applyErr
 	}
 
-	// Advance baseline past applied commits (skip for path-filtered applies)
-	if len(paths) == 0 {
-		if err := cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
-			return c.AdvanceBaseline(ctx, name)
-		}); err != nil {
-			return fmt.Errorf("advance baseline: %w", err)
-		}
+	commitsApplied := len(result.Commits)
+	if !cliutil.JSONEnabled(cmd) {
+		fmt.Fprintf(cmd.OutOrStdout(), "%d commit(s) applied to %s\n", commitsApplied, targetDir) //nolint:errcheck
 	}
 
-	if stashErr != nil {
-		return stashErr
+	shaMap := make(map[string]string, len(result.Commits))
+	for _, c := range result.Commits {
+		shaMap[strings.ToLower(c.SourceSHA)] = c.HostSHA
 	}
-
-	wipApplied := applyWIPChanges(cmd, name, paths, targetDir, isGit, hasWIP && includeWIP, backend)
 	reportWIPSkipHint(cmd, hasWIP, includeWIP)
 	tagsApplied, tagsSkipped := applyTags(cmd, tags, shaMap, sandboxWorkDir, targetDir, withTags)
 	reportUnappliedTagsHint(cmd, name, withTags)
 
-	slog.Info("apply complete", "event", "sandbox.apply.complete", "sandbox", name, "commits_applied", commitsApplied, "wip_applied", wipApplied, "tags_applied", tagsApplied) //nolint:gosec // G706: name is validated by ValidateName
+	slog.Info("apply complete", "event", "sandbox.apply.complete", "sandbox", name, "commits_applied", commitsApplied, "wip_applied", result.WIPApplied, "tags_applied", tagsApplied) //nolint:gosec // G706: name is validated by ValidateName
 	if cliutil.JSONEnabled(cmd) {
-		return cliutil.WriteJSON(cmd.OutOrStdout(), applyResult{
+		if writeErr := cliutil.WriteJSON(cmd.OutOrStdout(), applyResult{
 			Target:         targetDir,
 			CommitsApplied: commitsApplied,
-			WIPApplied:     wipApplied,
+			WIPApplied:     result.WIPApplied,
 			TagsApplied:    tagsApplied,
 			TagsSkipped:    tagsSkipped,
 			Method:         "format-patch",
-		})
+		}); writeErr != nil {
+			return writeErr
+		}
 	}
 
-	return nil
+	return applyErr
 }
 
 // printApplyCommitsSummary prints the list of commits about to be applied (human-readable only).
@@ -264,69 +270,4 @@ func printApplyCommitsSummary(cmd *cobra.Command, commits []patch.CommitInfo, ta
 		fmt.Fprintf(out, "\nWARNING: %d tag(s) will NOT be applied (cancel this apply and redo with --tags to include them)\n", len(tags)) //nolint:errcheck
 	}
 	fmt.Fprintln(out) //nolint:errcheck
-}
-
-// applyFormatPatchFiles generates a format-patch and applies it, returning stats and any deferred error.
-func applyFormatPatchFiles(cmd *cobra.Command, name string, paths []string, targetDir string, backend runtime.BackendName) (commitsApplied int, shaMap map[string]string, stashErr, err error) {
-	var patchDir string
-	var files []string
-	if err = cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
-		var genErr error
-		patchDir, files, genErr = c.GenerateFormatPatch(ctx, name, paths)
-		return genErr
-	}); err != nil {
-		return 0, nil, nil, err
-	}
-	defer os.RemoveAll(patchDir) //nolint:errcheck // best-effort cleanup
-
-	if len(files) == 0 {
-		return 0, nil, nil, nil
-	}
-
-	shaMap, err = workspace.ApplyFormatPatch(patchDir, files, targetDir)
-	if err != nil && shaMap == nil {
-		// git am itself failed; nothing was applied.
-		return 0, nil, nil, err
-	}
-	stashErr = err
-	commitsApplied = len(files)
-	if !cliutil.JSONEnabled(cmd) {
-		fmt.Fprintf(cmd.OutOrStdout(), "%d commit(s) applied to %s\n", len(files), targetDir) //nolint:errcheck
-	}
-	return commitsApplied, shaMap, stashErr, nil
-}
-
-// applyWIPChanges applies uncommitted changes from sandbox to the target directory.
-// Returns true if WIP was applied successfully.
-func applyWIPChanges(cmd *cobra.Command, name string, paths []string, targetDir string, isGit, hasWIP bool, backend runtime.BackendName) bool {
-	if !hasWIP {
-		return false
-	}
-	var wipPatch []byte
-	wipErr := cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
-		var genErr error
-		wipPatch, _, genErr = c.GenerateWIPDiff(ctx, name, paths)
-		return genErr
-	})
-	if wipErr != nil {
-		if !cliutil.JSONEnabled(cmd) {
-			fmt.Fprintf(cmd.ErrOrStderr(), "Warning: failed to generate WIP diff: %v\n", wipErr) //nolint:errcheck
-		}
-		return false
-	}
-	if len(wipPatch) == 0 {
-		return false
-	}
-	if err := workspace.ApplyPatch(wipPatch, targetDir, isGit); err != nil {
-		if !cliutil.JSONEnabled(cmd) {
-			fmt.Fprintf(cmd.ErrOrStderr(), //nolint:errcheck // best-effort warning
-				"Warning: failed to apply WIP changes: %v\n"+
-					"Commits were applied successfully. WIP changes need manual application.\n", err)
-		}
-		return false
-	}
-	if !cliutil.JSONEnabled(cmd) {
-		fmt.Fprintln(cmd.OutOrStdout(), "Uncommitted changes applied (unstaged)") //nolint:errcheck
-	}
-	return true
 }

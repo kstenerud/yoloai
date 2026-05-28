@@ -123,13 +123,19 @@ non-git target returns a typed `*UsageError`; the CLI checks `IsGitRepo` and
 picks `NoCommit` (mechanism complies-or-complains; policy decides). And `--squash`
 becomes `--no-commit`.
 
-- **4c (next, the core):** **series replay as the default** `Workdir().Apply` —
-  fold `apply_format_patch.go` (`ListCommits` → `GenerateFormatPatch` → `git am`
-  → contiguous-prefix baseline advance). Add `ApplyOptions.NoCommit` (routes to
-  the 4a/4b net-diff path); non-git default → typed refusal. Reshape `ApplyResult`
-  (`Commits []AppliedCommit{Subject, SourceSHA, HostSHA}`; drop the always-0
-  `FilesChanged`). Rename CLI `--squash` → `--no-commit`; the CLI checks `IsGitRepo`
-  and selects `NoCommit`. Tags stay CLI-side, consuming `result.Commits`.
+- **4c — LANDED (2026-05-28), in two increments:**
+  - *i1:* `patch.ApplySeries` (the series replay: `ListCommitsBeyondBaseline` →
+    `GenerateFormatPatch` → `git am` → contiguous baseline advance → optional WIP)
+    in the library; `Workdir().Apply` default = series, non-git → `*UsageError`.
+    `ApplyResult` reshaped (`Commits []AppliedCommit{Subject,SourceSHA,HostSHA}`;
+    dropped `FilesChanged`). Then made `ApplyOptions.Mode` **required** (D26/§4 —
+    no movable default after the i1 default-flip bug), `ApplyModeCommits` /
+    `ApplyModeNoCommit`.
+  - *i2:* migrated `apply_format_patch.go`'s default path to `Workdir().Apply
+    (ApplyModeCommits)` (gutted `applyFormatPatchFiles`/`applyWIPChanges`; tags
+    stay CLI-side off `result.Commits`); renamed CLI `--squash` → `--no-commit`
+    (`applySquash`→`applyNoCommit`); CLI checks `IsGitRepo` and selects
+    `ApplyModeNoCommit`. Removed the now-dead `Client.AdvanceBaseline`.
 - **4d:** selective `Refs` (subset of the series) — fold `apply_selective.go`.
 - **4e:** `ExportDir` (`--patches`) + overlay — fold `apply_export.go` /
   `apply_overlay.go`. Each green + committable.

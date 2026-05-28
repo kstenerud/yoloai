@@ -31,9 +31,27 @@ preview before confirming). Migration: `c.GeneratePatch(ctx, name, paths, wip)`
 → `c.Sandbox(name).Workdir().Apply(ctx, yoloai.ApplyOptions{Paths: paths,
 IncludeWIP: wip, DryRun: true})` then read `result.Stat` / apply with `DryRun: false`.
 
+**4c (series replay is the default + `--squash`→`--no-commit`):** the CLI flag
+**`--squash` is renamed `--no-commit`** (Type-1.5 break — retrain muscle memory),
+and the JSON `method` value for that mode changes `"squash"` → `"no-commit"`.
+On the Go side, the apply *mode* is now a **required** `ApplyOptions.Mode`
+(`ApplyModeCommits` replays the commit series — the normal flow — or
+`ApplyModeNoCommit` lands a net unstaged diff); the zero value is a `*UsageError`
+(§4 — no movable default, after a default flip silently changed behavior in i1).
+The library refuses `ApplyModeCommits` on a non-git target with a `*UsageError`;
+the CLI checks `IsGitRepo` and picks `ApplyModeNoCommit` itself. The series
+orchestration (`format-patch` → `git am` → baseline advance → WIP) moved into
+the library (`patch.ApplySeries`); `Client.AdvanceBaseline` is removed (no longer
+called — the library advances internally). `ApplyResult` carries
+`Commits []AppliedCommit{Subject,SourceSHA,HostSHA}` (the CLI's tag transfer
+consumes it). Minor: a post-commit follow-on issue (a `git am` stash, or WIP that
+failed to apply) now makes `apply` exit non-zero after reporting what landed,
+where a WIP failure was previously a warning.
+
 **Still pending:** the selective-ref / `--patches` export / overlay variants —
-whose orchestration still lives in the CLI (`apply_*.go`) — fold into
-`Workdir().Apply` in sub-steps 4c–4e.
+whose orchestration still lives in the CLI (`apply_selective.go`,
+`apply_export.go`, `apply_overlay.go`) — fold into `Workdir().Apply` in
+sub-steps 4d–4e.
 
 ### Diff moves under `client.Sandbox(name).Workdir()`
 

@@ -374,14 +374,6 @@ func (c *Client) UpdateOverlayBaseline(ctx context.Context, name, hostPath strin
 	return patch.UpdateOverlayBaselineToHEAD(ctx, c.layout, c.rt, name, hostPath)
 }
 
-// AdvanceBaseline advances the sandbox's diff baseline past all
-// applied commits. Called after a successful `yoloai apply` so the
-// next diff starts fresh. No-op for path-filtered applies (callers
-// should skip when paths are specified).
-func (c *Client) AdvanceBaseline(ctx context.Context, name string) error {
-	return patch.AdvanceBaseline(ctx, c.layout, c.rt, name)
-}
-
 // GenerateFormatPatch runs `git format-patch` in the sandbox over the
 // beyond-baseline range and returns (patchDir, files, err). Caller is
 // responsible for `os.RemoveAll(patchDir)` after consuming the files.

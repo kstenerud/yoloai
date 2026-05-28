@@ -64,8 +64,8 @@ type ApplyAllOptions struct {
 }
 
 // ApplyAll applies the sandbox's pending workdir changes back to the original
-// host path as a single squashed patch. Programmatic equivalent of 'yoloai
-// apply <name> --squash'.
+// host path as a single net diff in the working tree (unstaged). Programmatic
+// equivalent of 'yoloai apply <name> --no-commit'.
 //
 // Returns (nil, nil) when there is nothing to apply. Callers branch on
 // result == nil rather than a sentinel error (Q-P). On opts.DryRun the patch is
