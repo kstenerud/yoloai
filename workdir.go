@@ -85,7 +85,7 @@ func (w *Workdir) Diff(ctx context.Context, opts DiffOptions) (string, error) {
 
 // ApplyResult describes the outcome of an Apply: the host directory patched,
 // the replayed Commits (series apply) or a `git diff --stat` (NoCommit), and
-// whether WIP was applied. Re-exported (type alias) from internal/sandbox/patch.
+// whether uncommitted changes were applied. Re-exported (type alias) from internal/sandbox/patch.
 type ApplyResult = patch.ApplyResult
 
 // AppliedCommit is one commit replayed onto the host by a series apply — its
@@ -122,10 +122,10 @@ type ApplyOptions struct {
 	// Empty replays all beyond-baseline commits. ApplyModeCommits only —
 	// ignored by ApplyModeNoCommit (a net diff isn't per-commit).
 	Refs []string
-	// IncludeWIP additionally applies the agent's uncommitted (work-in-progress)
-	// edits as unstaged modifications on the host. Mirrors `yoloai apply
-	// --include-wip`.
-	IncludeWIP bool
+	// IncludeUncommitted additionally applies the agent's uncommitted edits as
+	// unstaged modifications on the host. Mirrors `yoloai apply
+	// --include-uncommitted`.
+	IncludeUncommitted bool
 	// Paths narrows the apply to specific files (relative to the workdir). When
 	// set, the diff baseline is NOT advanced (the remaining paths still diff
 	// against it).
@@ -147,21 +147,21 @@ type ApplyOptions struct {
 // not a silent default. ApplyModeCommits refuses a non-git host target with a
 // *UsageError rather than degrading to net-diff; that policy call is the
 // caller's. A (*ApplyResult, error) pair means the commits landed but a
-// follow-on step (git am stash, WIP) had a non-fatal issue (see ApplySeries).
+// follow-on step (git am stash, or uncommitted changes) had a non-fatal issue (see ApplySeries).
 func (w *Workdir) Apply(ctx context.Context, opts ApplyOptions) (*ApplyResult, error) {
 	switch opts.Mode {
 	case ApplyModeCommits:
 		return patch.ApplySeries(ctx, w.s.c.layout, w.s.c.rt, w.s.name, patch.ApplySeriesOptions{
-			Refs:       opts.Refs,
-			IncludeWIP: opts.IncludeWIP,
-			Paths:      opts.Paths,
-			DryRun:     opts.DryRun,
+			Refs:               opts.Refs,
+			IncludeUncommitted: opts.IncludeUncommitted,
+			Paths:              opts.Paths,
+			DryRun:             opts.DryRun,
 		})
 	case ApplyModeNoCommit:
 		return patch.ApplyAll(ctx, w.s.c.layout, w.s.c.rt, w.s.name, patch.ApplyAllOptions{
-			IncludeWIP: opts.IncludeWIP,
-			Paths:      opts.Paths,
-			DryRun:     opts.DryRun,
+			IncludeUncommitted: opts.IncludeUncommitted,
+			Paths:              opts.Paths,
+			DryRun:             opts.DryRun,
 		})
 	default:
 		return nil, sandbox.NewUsageError("apply mode is required: set ApplyOptions.Mode to yoloai.ApplyModeCommits or yoloai.ApplyModeNoCommit")

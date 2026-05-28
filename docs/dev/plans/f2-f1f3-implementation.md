@@ -77,7 +77,7 @@ orphaned internal `CreateOptions.Attach`.
 
 **Scope reconciled (2026-05-28, §12 facts-first):** Step 3 is `Workdir().Diff`
 **only**. The mapping paired it with `Workdir().Patch`, but the patch-generation
-methods (`GeneratePatch`, `GenerateWIPDiff`, `OverlayPatch`) turned out to be
+methods (`GeneratePatch`, `GenerateUncommittedDiff`, `OverlayPatch`) turned out to be
 apply-plumbing — consumed solely by `apply_squash`/`apply_export`/
 `apply_format_patch`/`apply_overlay` — and `OverlayPatch` returns `[]PatchSet`
 (per-overlay-dir), a different shape than copy's `[]byte`. A single
@@ -103,7 +103,7 @@ all five variants (default format-patch, `--squash`, selective-refs, `--patches`
 export, overlay) into one `Workdir().Apply` means relocating that orchestration
 into the library — the W-L8 thin-CLI end-state, but large. Done **phased**:
 
-- **4a — LANDED (2026-05-28):** `Workdir().Apply(ApplyOptions{IncludeWIP})` folds
+- **4a — LANDED (2026-05-28):** `Workdir().Apply(ApplyOptions{IncludeUncommitted})` folds
   `Client.Apply`/`ApplyWithOptions` (the simple full-workdir apply over
   `patch.ApplyAll`); `ApplyResult` re-exported as `yoloai.ApplyResult` →
   `patch.ApplyResult` off `f1KnownLeaks`. `ApplyOptions` moved to `workdir.go`.
@@ -125,7 +125,7 @@ becomes `--no-commit`.
 
 - **4c — LANDED (2026-05-28), in two increments:**
   - *i1:* `patch.ApplySeries` (the series replay: `ListCommitsBeyondBaseline` →
-    `GenerateFormatPatch` → `git am` → contiguous baseline advance → optional WIP)
+    `GenerateFormatPatch` → `git am` → contiguous baseline advance → optional uncommitted)
     in the library; `Workdir().Apply` default = series, non-git → `*UsageError`.
     `ApplyResult` reshaped (`Commits []AppliedCommit{Subject,SourceSHA,HostSHA}`;
     dropped `FilesChanged`). Then made `ApplyOptions.Mode` **required** (D26/§4 —

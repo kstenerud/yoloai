@@ -18,12 +18,12 @@ import (
 
 // applyResult holds JSON output for the apply command.
 type applyResult struct {
-	Target         string `json:"target"`
-	CommitsApplied int    `json:"commits_applied"`
-	WIPApplied     bool   `json:"wip_applied"`
-	TagsApplied    int    `json:"tags_applied"`
-	TagsSkipped    int    `json:"tags_skipped"`
-	Method         string `json:"method"` // "format-patch", "no-commit", "selective", "patches-export"
+	Target             string `json:"target"`
+	CommitsApplied     int    `json:"commits_applied"`
+	UncommittedApplied bool   `json:"uncommitted_applied"`
+	TagsApplied        int    `json:"tags_applied"`
+	TagsSkipped        int    `json:"tags_skipped"`
+	Method             string `json:"method"` // "format-patch", "no-commit", "selective", "patches-export"
 }
 
 func NewApplyCmd() *cobra.Command {
@@ -33,9 +33,9 @@ func NewApplyCmd() *cobra.Command {
 		Long: `Apply agent changes back to the original directory.
 
 By default, only committed changes are applied (individual commits via
-git format-patch/am). Uncommitted (WIP) edits the agent left behind are
-detected and reported but NOT applied; pass --include-wip to also bring
-them across as unstaged modifications.
+git format-patch/am). Uncommitted edits the agent left behind are
+detected and reported but NOT applied; pass --include-uncommitted to also
+bring them across as unstaged modifications.
 
 Specific commits can be cherry-picked by providing ref arguments:
   yoloai apply mybox abc123 def456       # specific commits
@@ -43,7 +43,7 @@ Specific commits can be cherry-picked by providing ref arguments:
   yoloai apply mybox                     # all commits (default)
 
 Use --no-commit to land the changes as a single unstaged patch in the
-working tree instead of replaying the commits (combine with --include-wip
+working tree instead of replaying the commits (combine with --include-uncommitted
 to include uncommitted edits too). It's also used automatically when the
 target isn't a git repository. Use --patches to export .patch files
 without applying them.`,
@@ -55,7 +55,7 @@ without applying them.`,
 	cmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
 	cmd.Flags().Bool("no-commit", false, "Apply changes as a single unstaged patch instead of replaying commits")
 	cmd.Flags().String("patches", "", "Export .patch files to directory instead of applying")
-	cmd.Flags().Bool("include-wip", false, "Also apply uncommitted (work-in-progress) changes; default is commits only")
+	cmd.Flags().Bool("include-uncommitted", false, "Also apply uncommitted changes; default is commits only")
 	cmd.Flags().Bool("dry-run", false, "Show what would be applied without applying")
 	cmd.Flags().Bool("tags", false, "Transfer git tags created by the agent")
 
@@ -83,7 +83,7 @@ func runApplyCmd(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("expand patches path: %w", expandErr)
 		}
 	}
-	includeWIP, _ := cmd.Flags().GetBool("include-wip")
+	includeUncommitted, _ := cmd.Flags().GetBool("include-uncommitted")
 	dryRun, _ := cmd.Flags().GetBool("dry-run")
 	withTags, _ := cmd.Flags().GetBool("tags")
 
@@ -122,12 +122,12 @@ func runApplyCmd(cmd *cobra.Command, args []string) error {
 		return applySelectedCommits(cmd, name, refs, paths, meta, yes, dryRun, withTags)
 	}
 
-	// --no-commit: land one unstaged patch (commits only unless --include-wip).
+	// --no-commit: land one unstaged patch (commits only unless --include-uncommitted).
 	if noCommit {
-		return applyNoCommit(cmd, name, paths, meta, yes, dryRun, includeWIP)
+		return applyNoCommit(cmd, name, paths, meta, yes, dryRun, includeUncommitted)
 	}
 
-	return runApplyFormatPatch(cmd, name, paths, meta, patchesDir, yes, dryRun, includeWIP, withTags)
+	return runApplyFormatPatch(cmd, name, paths, meta, patchesDir, yes, dryRun, includeUncommitted, withTags)
 }
 
 // parseApplyArgs separates ref arguments from path arguments.

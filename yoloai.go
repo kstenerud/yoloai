@@ -346,7 +346,7 @@ func (c *Client) ListCommitsWithStats(ctx context.Context, name string) ([]patch
 }
 
 // HasUncommittedChanges reports whether the sandbox's workdir has any
-// uncommitted (work-in-progress) edits beyond its last commit. Used by
+// uncommitted edits beyond its last commit. Used by
 // `yoloai diff --log` to surface a "*" marker.
 func (c *Client) HasUncommittedChanges(ctx context.Context, name string) (bool, error) {
 	return patch.HasUncommittedChanges(ctx, c.layout, c.rt, name)
@@ -375,12 +375,12 @@ func (c *Client) GenerateFormatPatch(ctx context.Context, name string, paths []s
 	return patch.GenerateFormatPatch(ctx, c.layout, c.rt, name, paths)
 }
 
-// GenerateWIPDiff produces the uncommitted-changes diff (work in
-// progress) from the sandbox's workdir. Returns (patchBytes,
-// statSummary, err). Used by `yoloai apply --include-wip` and
-// `yoloai apply --patches --include-wip`.
-func (c *Client) GenerateWIPDiff(ctx context.Context, name string, paths []string) ([]byte, string, error) {
-	return patch.GenerateWIPDiff(ctx, c.layout, c.rt, name, paths)
+// GenerateUncommittedDiff produces the uncommitted-changes diff from
+// the sandbox's workdir. Returns (patchBytes, statSummary, err). Used
+// by `yoloai apply --include-uncommitted` and
+// `yoloai apply --patches --include-uncommitted`.
+func (c *Client) GenerateUncommittedDiff(ctx context.Context, name string, paths []string) ([]byte, string, error) {
+	return patch.GenerateUncommittedDiff(ctx, c.layout, c.rt, name, paths)
 }
 
 // IOStreams names the stdio handles for interactive Client methods.

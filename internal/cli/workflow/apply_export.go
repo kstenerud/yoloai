@@ -1,4 +1,4 @@
-// ABOUTME: --patches workflow — export .patch files (and an optional wip.diff)
+// ABOUTME: --patches workflow — export .patch files (and an optional uncommitted.diff)
 // ABOUTME: to a directory instead of applying. Lets the user inspect or re-apply
 // ABOUTME: changes manually via git am.
 package workflow
@@ -18,10 +18,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// exportPatches writes .patch files and optional wip.diff to the given directory.
-// wip.diff is only written when includeWIP is true; without it the user gets a
-// hint that uncommitted changes exist and how to bring them in.
-func exportPatches(cmd *cobra.Command, name string, paths []string, commits []patch.CommitInfo, hasWIP, includeWIP bool, dir string) error {
+// exportPatches writes .patch files and optional uncommitted.diff to the given
+// directory. uncommitted.diff is only written when includeUncommitted is true;
+// without it the user gets a hint that uncommitted changes exist and how to bring them in.
+func exportPatches(cmd *cobra.Command, name string, paths []string, commits []patch.CommitInfo, hasUncommitted, includeUncommitted bool, dir string) error {
 	if err := fileutil.MkdirAll(dir, 0750); err != nil {
 		return fmt.Errorf("create patches directory: %w", err)
 	}
@@ -35,29 +35,29 @@ func exportPatches(cmd *cobra.Command, name string, paths []string, commits []pa
 		}
 	}
 
-	wipExported := false
-	if hasWIP && includeWIP {
-		if err := exportWIPDiff(cmd, name, paths, dir, isJSON, out); err != nil {
+	uncommittedExported := false
+	if hasUncommitted && includeUncommitted {
+		if err := exportUncommittedDiff(cmd, name, paths, dir, isJSON, out); err != nil {
 			return err
 		}
-		wipExported = true
+		uncommittedExported = true
 	}
 
 	if isJSON {
 		return cliutil.WriteJSON(out, applyResult{
-			Target:         dir,
-			CommitsApplied: len(commits),
-			WIPApplied:     wipExported,
-			Method:         "patches-export",
+			Target:             dir,
+			CommitsApplied:     len(commits),
+			UncommittedApplied: uncommittedExported,
+			Method:             "patches-export",
 		})
 	}
 
 	fmt.Fprintln(out)                                                       //nolint:errcheck
 	fmt.Fprintln(out, "To apply commits:  git am --3way <patches>/*.patch") //nolint:errcheck
-	if wipExported {
-		fmt.Fprintln(out, "To apply WIP:      git apply wip.diff") //nolint:errcheck
-	} else if hasWIP {
-		fmt.Fprintln(out, "Note: sandbox has uncommitted changes (not exported); re-run with --include-wip to write wip.diff.") //nolint:errcheck
+	if uncommittedExported {
+		fmt.Fprintln(out, "To apply uncommitted:  git apply uncommitted.diff") //nolint:errcheck
+	} else if hasUncommitted {
+		fmt.Fprintln(out, "Note: sandbox has uncommitted changes (not exported); re-run with --include-uncommitted to write uncommitted.diff.") //nolint:errcheck
 	}
 
 	return nil
@@ -95,24 +95,24 @@ func exportCommitPatches(cmd *cobra.Command, name string, paths []string, dir st
 	return nil
 }
 
-// exportWIPDiff generates a wip.diff from uncommitted changes and writes it to dir.
-func exportWIPDiff(cmd *cobra.Command, name string, paths []string, dir string, isJSON bool, out io.Writer) error {
+// exportUncommittedDiff generates an uncommitted.diff from uncommitted changes and writes it to dir.
+func exportUncommittedDiff(cmd *cobra.Command, name string, paths []string, dir string, isJSON bool, out io.Writer) error {
 	backend := cliutil.ResolveBackendForSandbox(name)
-	var wipPatch []byte
+	var uncommittedPatch []byte
 	err := cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
 		var genErr error
-		wipPatch, _, genErr = c.GenerateWIPDiff(ctx, name, paths)
+		uncommittedPatch, _, genErr = c.GenerateUncommittedDiff(ctx, name, paths)
 		return genErr
 	})
 	if err != nil {
 		return err
 	}
-	if len(wipPatch) == 0 {
+	if len(uncommittedPatch) == 0 {
 		return nil
 	}
-	dst := filepath.Join(dir, "wip.diff")
-	if err := fileutil.WriteFile(dst, wipPatch, 0600); err != nil {
-		return fmt.Errorf("write wip.diff: %w", err)
+	dst := filepath.Join(dir, "uncommitted.diff")
+	if err := fileutil.WriteFile(dst, uncommittedPatch, 0600); err != nil {
+		return fmt.Errorf("write uncommitted.diff: %w", err)
 	}
 	if !isJSON {
 		fmt.Fprintf(out, "  %s\n", dst) //nolint:errcheck

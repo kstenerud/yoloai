@@ -208,7 +208,7 @@ func diffLogOverlay(cmd *cobra.Command, name string, stat bool) error {
 				HasUncommittedChanges bool `json:"has_uncommitted_changes"`
 			}{
 				Commits:               commits,
-				HasUncommittedChanges: false, // can't cheaply detect WIP in overlay
+				HasUncommittedChanges: false, // can't cheaply detect uncommitted changes in overlay
 			}
 			return cliutil.WriteJSON(cmd.OutOrStdout(), result)
 		}
@@ -292,7 +292,7 @@ func diffLog(cmd *cobra.Command, name string, stat bool) error {
 		}
 	}
 
-	diffLogWIP(cmd, name, out)
+	diffLogUncommitted(cmd, name, out)
 	return nil
 }
 
@@ -355,16 +355,16 @@ func formatCommitLine(n int, sha, subject string, tagsByCommit map[string][]stri
 	return line
 }
 
-// diffLogWIP appends an uncommitted-changes indicator if WIP is present (best-effort).
-func diffLogWIP(cmd *cobra.Command, name string, out io.Writer) {
+// diffLogUncommitted appends an uncommitted-changes indicator when present (best-effort).
+func diffLogUncommitted(cmd *cobra.Command, name string, out io.Writer) {
 	backend := cliutil.ResolveBackendForSandbox(name)
-	var hasWIP bool
+	var hasUncommitted bool
 	err := cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
-		var wipErr error
-		hasWIP, wipErr = c.HasUncommittedChanges(ctx, name)
-		return wipErr
+		var uncommittedErr error
+		hasUncommitted, uncommittedErr = c.HasUncommittedChanges(ctx, name)
+		return uncommittedErr
 	})
-	if err == nil && hasWIP {
+	if err == nil && hasUncommitted {
 		fmt.Fprintln(out, "  *  (uncommitted changes)") //nolint:errcheck
 	}
 }
@@ -426,7 +426,7 @@ func diffLogJSON(cmd *cobra.Command, name string, stat bool) error {
 			commits = cs
 		}
 
-		hasWIP, _ := c.HasUncommittedChanges(ctx, name)
+		hasUncommitted, _ := c.HasUncommittedChanges(ctx, name)
 		tags, _ := sandbox.ListTagsBeyondBaseline(cliutil.Layout(), name)
 		if tags == nil {
 			tags = []sandbox.TagInfo{}
@@ -438,7 +438,7 @@ func diffLogJSON(cmd *cobra.Command, name string, stat bool) error {
 			Tags                  []sandbox.TagInfo `json:"tags"`
 		}{
 			Commits:               commits,
-			HasUncommittedChanges: hasWIP,
+			HasUncommittedChanges: hasUncommitted,
 			Tags:                  tags,
 		}
 

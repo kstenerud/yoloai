@@ -1,6 +1,6 @@
 // ABOUTME: Default apply workflow — git format-patch + git am, preserving
-// ABOUTME: individual commits. WIP changes are applied as unstaged. Falls back
-// ABOUTME: to applyNoCommit for non-git targets or WIP-only sandboxes.
+// ABOUTME: individual commits. Uncommitted changes are applied as unstaged. Falls back
+// ABOUTME: to applyNoCommit for non-git targets or uncommitted-only sandboxes.
 package workflow
 
 import (
@@ -21,9 +21,10 @@ import (
 )
 
 // runApplyFormatPatch handles the default format-patch apply flow.
-func runApplyFormatPatch(cmd *cobra.Command, name string, paths []string, meta *store.Meta, patchesDir string, yes, dryRun, includeWIP, withTags bool) error {
-	// Query work copy for commits and WIP. WIP is always probed (even when
-	// includeWIP is false) so we can report it to the user as a hint.
+func runApplyFormatPatch(cmd *cobra.Command, name string, paths []string, meta *store.Meta, patchesDir string, yes, dryRun, includeUncommitted, withTags bool) error {
+	// Query work copy for commits and uncommitted changes. Uncommitted changes are
+	// always probed (even when includeUncommitted is false) so we can report them
+	// to the user as a hint.
 	backend := cliutil.ResolveBackendForSandbox(name)
 	var commits []patch.CommitInfo
 	err := cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
@@ -35,27 +36,27 @@ func runApplyFormatPatch(cmd *cobra.Command, name string, paths []string, meta *
 		return err
 	}
 
-	var hasWIP bool
+	var hasUncommitted bool
 	err = cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
-		var wipErr error
-		hasWIP, wipErr = c.HasUncommittedChanges(ctx, name)
-		return wipErr
+		var uncommittedErr error
+		hasUncommitted, uncommittedErr = c.HasUncommittedChanges(ctx, name)
+		return uncommittedErr
 	})
 	if err != nil {
 		return err
 	}
 
 	slog.Debug("commits to apply", "event", "sandbox.apply.commits", "sandbox", name, "count", len(commits)) //nolint:gosec // G706: name is validated by ValidateName
-	if hasWIP {
-		slog.Debug("WIP detected", "event", "sandbox.apply.wip", "sandbox", name, "include_wip", includeWIP) //nolint:gosec // G706: name is validated by ValidateName
+	if hasUncommitted {
+		slog.Debug("uncommitted changes detected", "event", "sandbox.apply.uncommitted", "sandbox", name, "include_uncommitted", includeUncommitted) //nolint:gosec // G706: name is validated by ValidateName
 	}
-	if done, doneErr := maybeReportNoChanges(cmd, name, meta, commits, hasWIP, includeWIP, withTags); done {
+	if done, doneErr := maybeReportNoChanges(cmd, name, meta, commits, hasUncommitted, includeUncommitted, withTags); done {
 		return doneErr
 	}
 
 	// --patches: export patch files to a directory
 	if patchesDir != "" {
-		return exportPatches(cmd, name, paths, commits, hasWIP, includeWIP, patchesDir)
+		return exportPatches(cmd, name, paths, commits, hasUncommitted, includeUncommitted, patchesDir)
 	}
 
 	targetDir := meta.Workdir.HostPath
@@ -64,30 +65,30 @@ func runApplyFormatPatch(cmd *cobra.Command, name string, paths []string, meta *
 	// Non-git fallback: can't use git am on non-git targets
 	if !isGit && len(commits) > 0 {
 		fmt.Fprintln(cmd.ErrOrStderr(), "Note: target is not a git repository — falling back to a single unstaged patch (--no-commit)") //nolint:errcheck
-		return applyNoCommit(cmd, name, paths, meta, yes, dryRun, includeWIP)
+		return applyNoCommit(cmd, name, paths, meta, yes, dryRun, includeUncommitted)
 	}
 
-	// No commits, only WIP (user opted in) — use the net-diff (no-commit) flow.
-	if len(commits) == 0 && hasWIP && includeWIP {
+	// No commits, only uncommitted changes (user opted in) — use the net-diff (no-commit) flow.
+	if len(commits) == 0 && hasUncommitted && includeUncommitted {
 		if withTags {
-			return sandbox.NewUsageError("--tags requires commits — cannot transfer tags with WIP-only changes")
+			return sandbox.NewUsageError("--tags requires commits — cannot transfer tags with uncommitted-only changes")
 		}
-		return applyNoCommit(cmd, name, paths, meta, yes, dryRun, includeWIP)
+		return applyNoCommit(cmd, name, paths, meta, yes, dryRun, includeUncommitted)
 	}
 
-	return runApplyCommits(cmd, name, paths, meta, commits, hasWIP, yes, dryRun, includeWIP, withTags)
+	return runApplyCommits(cmd, name, paths, meta, commits, hasUncommitted, yes, dryRun, includeUncommitted, withTags)
 }
 
-// printWIPHint tells the user there are uncommitted edits they could pull in
-// via --include-wip. Human-mode only; JSON output skips it.
-func printWIPHint(cmd *cobra.Command, reason string) {
-	fmt.Fprintf(cmd.OutOrStdout(), "Note: sandbox has uncommitted changes (%s); re-run with --include-wip to apply them.\n", reason) //nolint:errcheck
+// printUncommittedHint tells the user there are uncommitted edits they could
+// pull in via --include-uncommitted. Human-mode only; JSON output skips it.
+func printUncommittedHint(cmd *cobra.Command, reason string) {
+	fmt.Fprintf(cmd.OutOrStdout(), "Note: sandbox has uncommitted changes (%s); re-run with --include-uncommitted to apply them.\n", reason) //nolint:errcheck
 }
 
-// reportWIPSkipHint prints the WIP-skipped hint after commits land. Human-mode only.
-func reportWIPSkipHint(cmd *cobra.Command, hasWIP, includeWIP bool) {
-	if hasWIP && !includeWIP && !cliutil.JSONEnabled(cmd) {
-		printWIPHint(cmd, "not applied — commits only")
+// reportUncommittedSkipHint prints the uncommitted-skipped hint after commits land. Human-mode only.
+func reportUncommittedSkipHint(cmd *cobra.Command, hasUncommitted, includeUncommitted bool) {
+	if hasUncommitted && !includeUncommitted && !cliutil.JSONEnabled(cmd) {
+		printUncommittedHint(cmd, "not applied — commits only")
 	}
 }
 
@@ -106,20 +107,20 @@ func reportUnappliedTagsHint(cmd *cobra.Command, name string, withTags bool) {
 // maybeReportNoChanges handles the "nothing to apply" case at the entry of
 // the format-patch flow. Returns (true, err) when the caller should return;
 // (false, nil) to continue with the normal apply.
-func maybeReportNoChanges(cmd *cobra.Command, name string, meta *store.Meta, commits []patch.CommitInfo, hasWIP, includeWIP, withTags bool) (bool, error) {
+func maybeReportNoChanges(cmd *cobra.Command, name string, meta *store.Meta, commits []patch.CommitInfo, hasUncommitted, includeUncommitted, withTags bool) (bool, error) {
 	if len(commits) > 0 {
 		return false, nil
 	}
-	if hasWIP && includeWIP {
-		return false, nil // WIP-only apply will proceed via the no-commit fallback
+	if hasUncommitted && includeUncommitted {
+		return false, nil // uncommitted-only apply will proceed via the no-commit fallback
 	}
-	if hasWIP && !cliutil.JSONEnabled(cmd) {
-		printWIPHint(cmd, "no committed changes to apply")
+	if hasUncommitted && !cliutil.JSONEnabled(cmd) {
+		printUncommittedHint(cmd, "no committed changes to apply")
 	}
 	return true, runApplyNoChanges(cmd, name, meta, withTags)
 }
 
-// runApplyNoChanges handles the case where there are no commits or WIP to apply.
+// runApplyNoChanges handles the case where there are no commits or uncommitted changes to apply.
 func runApplyNoChanges(cmd *cobra.Command, name string, meta *store.Meta, withTags bool) error {
 	layout := cliutil.Layout()
 	// Check for unapplied tags even when there are no changes
@@ -171,9 +172,9 @@ func runApplyNoChanges(cmd *cobra.Command, name string, meta *store.Meta, withTa
 
 // runApplyCommits replays commits via the library's series apply
 // (Workdir().Apply ApplyModeCommits), then transfers tags using the SHA mapping
-// it returns. The library owns generate / git am / baseline-advance / WIP; this
-// function owns the CLI summary, confirmation, tag transfer, and output.
-func runApplyCommits(cmd *cobra.Command, name string, paths []string, meta *store.Meta, commits []patch.CommitInfo, hasWIP, yes, dryRun, includeWIP, withTags bool) error {
+// it returns. The library owns generate / git am / baseline-advance / uncommitted;
+// this function owns the CLI summary, confirmation, tag transfer, and output.
+func runApplyCommits(cmd *cobra.Command, name string, paths []string, meta *store.Meta, commits []patch.CommitInfo, hasUncommitted, yes, dryRun, includeUncommitted, withTags bool) error {
 	layout := cliutil.Layout()
 	targetDir := meta.Workdir.HostPath
 	sandboxWorkDir := store.WorkDir(layout.SandboxDir(name), meta.Workdir.HostPath)
@@ -181,7 +182,7 @@ func runApplyCommits(cmd *cobra.Command, name string, paths []string, meta *stor
 
 	// Fetch tags beyond baseline (best-effort; errors don't fail the apply).
 	tags, _ := sandbox.ListTagsBeyondBaseline(layout, name)
-	printApplyCommitsSummary(cmd, commits, tags, buildTagsByCommit(tags), hasWIP, includeWIP, withTags)
+	printApplyCommitsSummary(cmd, commits, tags, buildTagsByCommit(tags), hasUncommitted, includeUncommitted, withTags)
 
 	if dryRun {
 		if !cliutil.JSONEnabled(cmd) {
@@ -205,13 +206,13 @@ func runApplyCommits(cmd *cobra.Command, name string, paths []string, meta *stor
 	applyErr := cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
 		var e error
 		result, e = c.Sandbox(name).Workdir().Apply(ctx, yoloai.ApplyOptions{
-			Mode: yoloai.ApplyModeCommits, IncludeWIP: includeWIP, Paths: paths,
+			Mode: yoloai.ApplyModeCommits, IncludeUncommitted: includeUncommitted, Paths: paths,
 		})
 		return e
 	})
 	// result != nil means the commits landed; a non-nil applyErr alongside it is
-	// a non-fatal follow-on issue (git am stash, or WIP that failed to apply),
-	// surfaced after we report what did land. result == nil is a hard failure.
+	// a non-fatal follow-on issue (git am stash, or uncommitted changes that failed
+	// to apply), surfaced after we report what did land. result == nil is a hard failure.
 	if result == nil {
 		return applyErr
 	}
@@ -225,19 +226,19 @@ func runApplyCommits(cmd *cobra.Command, name string, paths []string, meta *stor
 	for _, c := range result.Commits {
 		shaMap[strings.ToLower(c.SourceSHA)] = c.HostSHA
 	}
-	reportWIPSkipHint(cmd, hasWIP, includeWIP)
+	reportUncommittedSkipHint(cmd, hasUncommitted, includeUncommitted)
 	tagsApplied, tagsSkipped := applyTags(cmd, tags, shaMap, sandboxWorkDir, targetDir, withTags)
 	reportUnappliedTagsHint(cmd, name, withTags)
 
-	slog.Info("apply complete", "event", "sandbox.apply.complete", "sandbox", name, "commits_applied", commitsApplied, "wip_applied", result.WIPApplied, "tags_applied", tagsApplied) //nolint:gosec // G706: name is validated by ValidateName
+	slog.Info("apply complete", "event", "sandbox.apply.complete", "sandbox", name, "commits_applied", commitsApplied, "uncommitted_applied", result.UncommittedApplied, "tags_applied", tagsApplied) //nolint:gosec // G706: name is validated by ValidateName
 	if cliutil.JSONEnabled(cmd) {
 		if writeErr := cliutil.WriteJSON(cmd.OutOrStdout(), applyResult{
-			Target:         targetDir,
-			CommitsApplied: commitsApplied,
-			WIPApplied:     result.WIPApplied,
-			TagsApplied:    tagsApplied,
-			TagsSkipped:    tagsSkipped,
-			Method:         "format-patch",
+			Target:             targetDir,
+			CommitsApplied:     commitsApplied,
+			UncommittedApplied: result.UncommittedApplied,
+			TagsApplied:        tagsApplied,
+			TagsSkipped:        tagsSkipped,
+			Method:             "format-patch",
 		}); writeErr != nil {
 			return writeErr
 		}
@@ -247,7 +248,7 @@ func runApplyCommits(cmd *cobra.Command, name string, paths []string, meta *stor
 }
 
 // printApplyCommitsSummary prints the list of commits about to be applied (human-readable only).
-func printApplyCommitsSummary(cmd *cobra.Command, commits []patch.CommitInfo, tags []sandbox.TagInfo, tagsByCommit map[string][]string, hasWIP, includeWIP, withTags bool) {
+func printApplyCommitsSummary(cmd *cobra.Command, commits []patch.CommitInfo, tags []sandbox.TagInfo, tagsByCommit map[string][]string, hasUncommitted, includeUncommitted, withTags bool) {
 	if cliutil.JSONEnabled(cmd) {
 		return
 	}
@@ -261,10 +262,10 @@ func printApplyCommitsSummary(cmd *cobra.Command, commits []patch.CommitInfo, ta
 		fmt.Fprintln(out, line) //nolint:errcheck
 	}
 	switch {
-	case hasWIP && includeWIP:
+	case hasUncommitted && includeUncommitted:
 		fmt.Fprintln(out, "\n+ uncommitted changes (will be applied as unstaged files)") //nolint:errcheck
-	case hasWIP:
-		fmt.Fprintln(out, "\n  (sandbox also has uncommitted changes — not applied; re-run with --include-wip to include)") //nolint:errcheck
+	case hasUncommitted:
+		fmt.Fprintln(out, "\n  (sandbox also has uncommitted changes — not applied; re-run with --include-uncommitted to include)") //nolint:errcheck
 	}
 	if len(tags) > 0 && !withTags {
 		fmt.Fprintf(out, "\nWARNING: %d tag(s) will NOT be applied (cancel this apply and redo with --tags to include them)\n", len(tags)) //nolint:errcheck

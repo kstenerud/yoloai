@@ -13,7 +13,7 @@ API change; CLI behavior unchanged.
 `c.ApplyWithOptions(ctx, name, ApplyOptions) (*patch.ApplyResult, error)` —
 returning the internal `*patch.ApplyResult`.
 
-**New behavior:** `c.Sandbox(name).Workdir().Apply(ctx, yoloai.ApplyOptions{IncludeWIP})
+**New behavior:** `c.Sandbox(name).Workdir().Apply(ctx, yoloai.ApplyOptions{IncludeUncommitted})
 (*yoloai.ApplyResult, error)`. `ApplyResult` is now a public root alias (closing
 the F1 fence leak); `ApplyOptions` moved to the root `Workdir` surface.
 
@@ -29,7 +29,7 @@ apply; baseline not advanced) and `DryRun bool` (generate + validate + return th
 stat, without applying — the library never prompts, so the CLI uses DryRun to
 preview before confirming). Migration: `c.GeneratePatch(ctx, name, paths, wip)`
 → `c.Sandbox(name).Workdir().Apply(ctx, yoloai.ApplyOptions{Paths: paths,
-IncludeWIP: wip, DryRun: true})` then read `result.Stat` / apply with `DryRun: false`.
+IncludeUncommitted: uncommitted, DryRun: true})` then read `result.Stat` / apply with `DryRun: false`.
 
 **4c (series replay is the default + `--squash`→`--no-commit`):** the CLI flag
 **`--squash` is renamed `--no-commit`** (Type-1.5 break — retrain muscle memory),
@@ -40,13 +40,13 @@ On the Go side, the apply *mode* is now a **required** `ApplyOptions.Mode`
 (§4 — no movable default, after a default flip silently changed behavior in i1).
 The library refuses `ApplyModeCommits` on a non-git target with a `*UsageError`;
 the CLI checks `IsGitRepo` and picks `ApplyModeNoCommit` itself. The series
-orchestration (`format-patch` → `git am` → baseline advance → WIP) moved into
+orchestration (`format-patch` → `git am` → baseline advance → uncommitted) moved into
 the library (`patch.ApplySeries`); `Client.AdvanceBaseline` is removed (no longer
 called — the library advances internally). `ApplyResult` carries
 `Commits []AppliedCommit{Subject,SourceSHA,HostSHA}` (the CLI's tag transfer
-consumes it). Minor: a post-commit follow-on issue (a `git am` stash, or WIP that
-failed to apply) now makes `apply` exit non-zero after reporting what landed,
-where a WIP failure was previously a warning.
+consumes it). Minor: a post-commit follow-on issue (a `git am` stash, or uncommitted
+edits that failed to apply) now makes `apply` exit non-zero after reporting what landed,
+where an uncommitted-apply failure was previously a warning.
 
 **4d (selective refs fold into `Workdir().Apply`):** selective apply
 (`yoloai apply <name> <ref>...`) now routes through
@@ -60,6 +60,15 @@ removed (their only callers were the now-folded CLI helpers): `c.ResolveCommitRe
 name, refs)` and `c.GenerateFormatPatchForRefs(ctx, name, shas, paths)`. Migration:
 `c.ResolveCommitRefs(...)` → `c.Sandbox(name).Workdir().Apply(ctx, ApplyOptions{Mode:
 ApplyModeCommits, Refs: refs, DryRun: true})` and read `result.Commits`.
+
+**Terminology (uncommitted, not "WIP"):** the agent's uncommitted edits are now
+called *uncommitted* everywhere — "WIP" is gone. The CLI flag **`--include-wip`
+is renamed `--include-uncommitted`**; the Go field `ApplyOptions.IncludeWIP` →
+`IncludeUncommitted`; `ApplyResult.WIPApplied` → `UncommittedApplied`; the JSON
+key `wip_applied` → `uncommitted_applied`; the exported `wip.diff` →
+`uncommitted.diff`; and `Client.GenerateWIPDiff` → `GenerateUncommittedDiff`.
+"uncommitted" matches git's own vocabulary; "WIP" was informal jargon that kept
+drifting back into the code.
 
 **Still pending:** the `--patches` export / overlay variants — whose
 orchestration still lives in the CLI (`apply_export.go`, `apply_overlay.go`) —
@@ -292,27 +301,27 @@ Human-readable output also gains an `" (agent requirement)"` annotation next to 
 - Replace `yoloai system runtime ...` with `yoloai system tart ...` in scripts, docs, and CI.
 - Until the alias is removed, the old invocation still works but emits a warning.
 
-### `yoloai apply` defaults to commits-only; `--no-wip` removed in favor of `--include-wip`
+### `yoloai apply` defaults to commits-only; `--no-wip` removed in favor of `--include-uncommitted`
 
-**Previous behavior:** `yoloai apply` applied agent commits AND uncommitted work-in-progress edits as unstaged files in the same invocation. `--no-wip` opted out of the WIP application.
+**Previous behavior:** `yoloai apply` applied agent commits AND uncommitted edits as unstaged files in the same invocation. `--no-wip` opted out of applying the uncommitted edits.
 
-**New behavior:** `yoloai apply` defaults to **committed changes only**. Uncommitted edits the agent left in the work copy are detected, reported as a hint, and NOT applied. To bring them across as unstaged modifications (the old default), pass `--include-wip`. The `--no-wip` flag has been removed.
+**New behavior:** `yoloai apply` defaults to **committed changes only**. Uncommitted edits the agent left in the work copy are detected, reported as a hint, and NOT applied. To bring them across as unstaged modifications (the old default), pass `--include-uncommitted`. The `--no-wip` flag has been removed.
 
 The flip applies uniformly across the apply surface:
 
-- Default format-patch path: applies commits; prints `Note: sandbox has uncommitted changes …` when WIP is present and excluded.
-- `--squash`: flattens commits only (`git diff baselineSHA HEAD`). With `--include-wip`, flattens everything including uncommitted (`git diff baselineSHA`, after `git add -A`).
-- `--patches`: writes `*.patch` for commits; writes `wip.diff` only when `--include-wip` is set.
-- `--squash` and `--include-wip` are no longer mutually exclusive — `--squash` controls patch shape, `--include-wip` controls scope.
-- `:overlay` sandboxes have no commit/WIP distinction; the flag has no effect there and is silently accepted (previously `--no-wip` errored on overlay).
+- Default format-patch path: applies commits; prints `Note: sandbox has uncommitted changes …` when uncommitted edits are present and excluded.
+- `--squash`: flattens commits only (`git diff baselineSHA HEAD`). With `--include-uncommitted`, flattens everything including uncommitted (`git diff baselineSHA`, after `git add -A`).
+- `--patches`: writes `*.patch` for commits; writes `uncommitted.diff` only when `--include-uncommitted` is set.
+- `--squash` and `--include-uncommitted` are no longer mutually exclusive — `--squash` controls patch shape, `--include-uncommitted` controls scope.
+- `:overlay` sandboxes have no commit/uncommitted distinction; the flag has no effect there and is silently accepted (previously `--no-wip` errored on overlay).
 
-**Rationale:** "Apply commits the agent made" is what users typically want; uncommitted edits are by definition unsettled work the agent didn't finalize. Defaulting to including them surprised users who weren't expecting the agent's scratch state in their tree. Making `--include-wip` opt-in matches the project's `--X-to-enable-non-default-behavior` CLI convention ([`dev/standards/CLI.md`](dev/standards/CLI.md)) and surfaces the WIP state explicitly so users can choose.
+**Rationale:** "Apply commits the agent made" is what users typically want; uncommitted edits are by definition unsettled work the agent didn't finalize. Defaulting to including them surprised users who weren't expecting the agent's scratch state in their tree. Making `--include-uncommitted` opt-in matches the project's `--X-to-enable-non-default-behavior` CLI convention ([`dev/standards/CLI.md`](dev/standards/CLI.md)) and surfaces the uncommitted state explicitly so users can choose.
 
 **Migration:**
 - Drop `--no-wip` (it was a no-op for the new behavior anyway).
-- If you relied on `yoloai apply` bringing across uncommitted edits, add `--include-wip` to the command.
-- The Go library API `Client.Apply(ctx, name)` is now commits-only; use the new `Client.ApplyWithOptions(ctx, name, ApplyOptions{IncludeWIP: true})` for the old behavior.
-- Internal `patch.GeneratePatch`, `patch.GenerateMultiPatch`, and `patch.ApplyAll` gain an `includeWIP bool` parameter at the end of their signatures.
+- If you relied on `yoloai apply` bringing across uncommitted edits, add `--include-uncommitted` to the command.
+- The Go library API `Client.Apply(ctx, name)` is now commits-only; use the new `Client.ApplyWithOptions(ctx, name, ApplyOptions{IncludeUncommitted: true})` for the old behavior.
+- Internal `patch.GeneratePatch`, `patch.GenerateMultiPatch`, and `patch.ApplyAll` gain an `includeUncommitted bool` parameter at the end of their signatures.
 
 ### Cross-process JSON files gain `schema_version` field with mismatch-fails-loudly policy
 

@@ -685,11 +685,11 @@ git add: git [add -A]: exit status 128: fatal: Unable to create '.git/index.lock
 ```
 when the agent is still running (stop/restart not yet complete, or `apply` called while agent is active).
 
-**Cause:** For `:copy` mode sandboxes, the work directory is a bind-mounted host path shared between host and container. `yoloai apply --include-wip` (and `HasUncommittedChanges`) calls `git add -A` on the host `.git`. The agent inside the container (e.g. Claude Code) independently runs `git add -A` for its status bar `(+2,-0)` display. Both processes race to acquire `index.lock`.
+**Cause:** For `:copy` mode sandboxes, the work directory is a bind-mounted host path shared between host and container. `yoloai apply --include-uncommitted` (and `HasUncommittedChanges`) calls `git add -A` on the host `.git`. The agent inside the container (e.g. Claude Code) independently runs `git add -A` for its status bar `(+2,-0)` display. Both processes race to acquire `index.lock`.
 
 The lock is held for only milliseconds, making this a transient flake rather than a hard failure.
 
-**Fix:** `HasUncommittedChanges` and the WIP staging path in `patch/apply.go` retry `git add -A` up to 5 times with 100 ms delays on `index.lock` errors. `workspace.StageUntracked` (used by `diff.go`) applies the same retry. See `workspace.IsIndexLocked`, `workspace.StageUntracked`, and `patch.gitAddRetry`.
+**Fix:** `HasUncommittedChanges` and the uncommitted-staging path in `patch/apply.go` retry `git add -A` up to 5 times with 100 ms delays on `index.lock` errors. `workspace.StageUntracked` (used by `diff.go`) applies the same retry. See `workspace.IsIndexLocked`, `workspace.StageUntracked`, and `patch.gitAddRetry`.
 
 ---
 

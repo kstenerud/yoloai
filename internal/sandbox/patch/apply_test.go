@@ -1,5 +1,5 @@
 // ABOUTME: Unit tests for patch generation, baseline advancement, format-patch, selective apply,
-// ABOUTME: WIP diff, and commit ref resolution in sandbox/patch.
+// ABOUTME: uncommitted diff, and commit ref resolution in sandbox/patch.
 
 package patch
 
@@ -103,10 +103,10 @@ func TestGeneratePatch_Empty(t *testing.T) {
 	assert.Empty(t, stat)
 }
 
-// TestGeneratePatch_IncludeWIPFalse_ExcludesUncommitted verifies the new
+// TestGeneratePatch_IncludeUncommittedFalse_ExcludesUncommitted verifies the new
 // commits-only default: a sandbox with one committed change + an uncommitted
 // edit produces a patch that contains the commit only.
-func TestGeneratePatch_IncludeWIPFalse_ExcludesUncommitted(t *testing.T) {
+func TestGeneratePatch_IncludeUncommittedFalse_ExcludesUncommitted(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
 
@@ -124,12 +124,12 @@ func TestGeneratePatch_IncludeWIPFalse_ExcludesUncommitted(t *testing.T) {
 	patch, _, err := GeneratePatch(context.Background(), testLayout(tmpDir), rt, "test-wip-excluded", nil, false)
 	require.NoError(t, err)
 	assert.Contains(t, string(patch), "committed.txt", "committed change must be in patch")
-	assert.NotContains(t, string(patch), "wip.txt", "uncommitted file must NOT be in patch when includeWIP=false")
+	assert.NotContains(t, string(patch), "wip.txt", "uncommitted file must NOT be in patch when includeUncommitted=false")
 }
 
-// TestGeneratePatch_IncludeWIPTrue_IncludesUncommitted is the mirror: with
+// TestGeneratePatch_IncludeUncommittedTrue_IncludesUncommitted is the mirror: with
 // the flag on, the same sandbox produces a patch containing both files.
-func TestGeneratePatch_IncludeWIPTrue_IncludesUncommitted(t *testing.T) {
+func TestGeneratePatch_IncludeUncommittedTrue_IncludesUncommitted(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
 
@@ -146,7 +146,7 @@ func TestGeneratePatch_IncludeWIPTrue_IncludesUncommitted(t *testing.T) {
 	patch, _, err := GeneratePatch(context.Background(), testLayout(tmpDir), rt, "test-wip-included", nil, true)
 	require.NoError(t, err)
 	assert.Contains(t, string(patch), "committed.txt")
-	assert.Contains(t, string(patch), "wip.txt", "uncommitted file must be in patch when includeWIP=true")
+	assert.Contains(t, string(patch), "wip.txt", "uncommitted file must be in patch when includeUncommitted=true")
 }
 
 // ApplyPatch tests
@@ -567,22 +567,22 @@ func TestGenerateFormatPatch_PathFilter(t *testing.T) {
 	assert.Contains(t, string(data), "change a")
 }
 
-// GenerateWIPDiff tests
+// GenerateUncommittedDiff tests
 
-func TestGenerateWIPDiff_NoChanges(t *testing.T) {
+func TestGenerateUncommittedDiff_NoChanges(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
 
 	createCopySandbox(t, tmpDir, "test-wip-diff-none", "/tmp/project")
 
 	rt := getTestRuntime(t)
-	patch, stat, err := GenerateWIPDiff(context.Background(), testLayout(tmpDir), rt, "test-wip-diff-none", nil)
+	patch, stat, err := GenerateUncommittedDiff(context.Background(), testLayout(tmpDir), rt, "test-wip-diff-none", nil)
 	require.NoError(t, err)
 	assert.Empty(t, patch)
 	assert.Empty(t, stat)
 }
 
-func TestGenerateWIPDiff_Modified(t *testing.T) {
+func TestGenerateUncommittedDiff_Modified(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
 
@@ -598,7 +598,7 @@ func TestGenerateWIPDiff_Modified(t *testing.T) {
 	writeTestFile(t, workDir, "wip.txt", "work in progress\n")
 
 	rt := getTestRuntime(t)
-	patch, stat, err := GenerateWIPDiff(context.Background(), testLayout(tmpDir), rt, "test-wip-diff-mod", nil)
+	patch, stat, err := GenerateUncommittedDiff(context.Background(), testLayout(tmpDir), rt, "test-wip-diff-mod", nil)
 	require.NoError(t, err)
 	assert.NotEmpty(t, patch)
 	assert.Contains(t, stat, "wip.txt")
@@ -607,7 +607,7 @@ func TestGenerateWIPDiff_Modified(t *testing.T) {
 	assert.NotContains(t, string(patch), "committed.txt")
 }
 
-func TestGenerateWIPDiff_PathFilter(t *testing.T) {
+func TestGenerateUncommittedDiff_PathFilter(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
 
@@ -616,7 +616,7 @@ func TestGenerateWIPDiff_PathFilter(t *testing.T) {
 	writeTestFile(t, workDir, "other.txt", "also changed\n")
 
 	rt := getTestRuntime(t)
-	patch, stat, err := GenerateWIPDiff(context.Background(), testLayout(tmpDir), rt, "test-wip-diff-filter", []string{"file.txt"})
+	patch, stat, err := GenerateUncommittedDiff(context.Background(), testLayout(tmpDir), rt, "test-wip-diff-filter", []string{"file.txt"})
 	require.NoError(t, err)
 	assert.NotEmpty(t, patch)
 	assert.Contains(t, stat, "file.txt")
@@ -1240,15 +1240,15 @@ func TestApplyFlow_CommitsOnly(t *testing.T) {
 		{"add feature B", "b.txt", "feature B\n"},
 	})
 
-	// Verify state: commits but no WIP
+	// Verify state: commits but no uncommitted changes
 	rt := getTestRuntime(t)
 	commits, err := ListCommitsBeyondBaseline(context.Background(), testLayout(tmpDir), rt, "test-flow-commits")
 	require.NoError(t, err)
 	assert.Len(t, commits, 2)
 
-	hasWIP, err := HasUncommittedChanges(context.Background(), testLayout(tmpDir), rt, "test-flow-commits")
+	hasUncommitted, err := HasUncommittedChanges(context.Background(), testLayout(tmpDir), rt, "test-flow-commits")
 	require.NoError(t, err)
-	assert.False(t, hasWIP)
+	assert.False(t, hasUncommitted)
 
 	// Generate and apply
 	patchDir, files, err := GenerateFormatPatch(context.Background(), testLayout(tmpDir), rt, "test-flow-commits", nil)
@@ -1277,7 +1277,7 @@ func TestApplyFlow_CommitsOnly(t *testing.T) {
 	assert.Equal(t, "3", strings.TrimSpace(string(out)))
 }
 
-func TestApplyFlow_CommitsAndWIP(t *testing.T) {
+func TestApplyFlow_CommitsAndUncommitted(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
 
@@ -1289,7 +1289,7 @@ func TestApplyFlow_CommitsAndWIP(t *testing.T) {
 		{"committed feature", "committed.txt", "committed\n"},
 	})
 
-	// Add WIP on top
+	// Add uncommitted changes on top
 	writeTestFile(t, workDir, "wip.txt", "wip content\n")
 
 	// Verify state
@@ -1298,9 +1298,9 @@ func TestApplyFlow_CommitsAndWIP(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, commits, 1)
 
-	hasWIP, err := HasUncommittedChanges(context.Background(), testLayout(tmpDir), rt, "test-flow-both")
+	hasUncommitted, err := HasUncommittedChanges(context.Background(), testLayout(tmpDir), rt, "test-flow-both")
 	require.NoError(t, err)
-	assert.True(t, hasWIP)
+	assert.True(t, hasUncommitted)
 
 	// Apply commits first
 	patchDir, files, err := GenerateFormatPatch(context.Background(), testLayout(tmpDir), rt, "test-flow-both", nil)
@@ -1317,37 +1317,37 @@ func TestApplyFlow_CommitsAndWIP(t *testing.T) {
 	_, err = workspace.ApplyFormatPatch(patchDir, files, targetDir)
 	require.NoError(t, err)
 
-	// Then apply WIP
-	wipPatch, _, err := GenerateWIPDiff(context.Background(), testLayout(tmpDir), rt, "test-flow-both", nil)
+	// Then apply uncommitted changes
+	uncommittedPatch, _, err := GenerateUncommittedDiff(context.Background(), testLayout(tmpDir), rt, "test-flow-both", nil)
 	require.NoError(t, err)
-	require.NotEmpty(t, wipPatch)
+	require.NotEmpty(t, uncommittedPatch)
 
-	require.NoError(t, workspace.ApplyPatch(wipPatch, targetDir, true))
+	require.NoError(t, workspace.ApplyPatch(uncommittedPatch, targetDir, true))
 
 	// Verify committed file exists
 	assert.FileExists(t, filepath.Join(targetDir, "committed.txt"))
-	// Verify WIP file exists
+	// Verify uncommitted file exists
 	assert.FileExists(t, filepath.Join(targetDir, "wip.txt"))
-	wipContent, _ := os.ReadFile(filepath.Join(targetDir, "wip.txt")) //nolint:gosec
-	assert.Equal(t, "wip content\n", string(wipContent))
+	uncommittedContent, _ := os.ReadFile(filepath.Join(targetDir, "wip.txt")) //nolint:gosec
+	assert.Equal(t, "wip content\n", string(uncommittedContent))
 }
 
-func TestApplyFlow_WIPOnly(t *testing.T) {
+func TestApplyFlow_UncommittedOnly(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
 
 	workDir := createCopySandbox(t, tmpDir, "test-flow-wip", "/tmp/project")
 	writeTestFile(t, workDir, "file.txt", "wip changes\n")
 
-	// Verify state: no commits, only WIP
+	// Verify state: no commits, only uncommitted changes
 	rt := getTestRuntime(t)
 	commits, err := ListCommitsBeyondBaseline(context.Background(), testLayout(tmpDir), rt, "test-flow-wip")
 	require.NoError(t, err)
 	assert.Empty(t, commits)
 
-	hasWIP, err := HasUncommittedChanges(context.Background(), testLayout(tmpDir), rt, "test-flow-wip")
+	hasUncommitted, err := HasUncommittedChanges(context.Background(), testLayout(tmpDir), rt, "test-flow-wip")
 	require.NoError(t, err)
-	assert.True(t, hasWIP)
+	assert.True(t, hasUncommitted)
 
 	// Falls back to squash path — use GeneratePatch
 	patch, stat, err := GeneratePatch(context.Background(), testLayout(tmpDir), rt, "test-flow-wip", nil, true)

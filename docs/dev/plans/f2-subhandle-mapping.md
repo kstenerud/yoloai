@@ -68,7 +68,7 @@ family → one `Workdir().Diff(DiffOptions)`), and the overlay-explicit methods
 | `Diff(name)` | `Workdir().Diff(DiffOptions{})` | |
 | `DiffWithOptions(name, paths, stat, nameOnly)` | **fold into** `Workdir().Diff(DiffOptions{...})` | the bools/paths are `DiffOptions` fields |
 | `DiffRef(name, ref, stat)` | **fold into** `Workdir().Diff(DiffOptions{Ref, Stat})` | |
-| `GenerateWIPDiff(name, paths)` | **fold into** `Workdir().Diff(DiffOptions{Paths, IncludeUncommitted})` | ⚑ "WIP" = include uncommitted; an option, not a method |
+| `GenerateUncommittedDiff(name, paths)` | **fold into** `Workdir().Diff(DiffOptions{Paths, IncludeUncommitted})` | ⚑ "uncommitted" (never "WIP") = include uncommitted edits; an option, not a method |
 | `DiffOverlay(name, stat, nameOnly)` | **disappears** → `Workdir().Diff` | ⚑ Overlay-vs-copy resolved internally from `meta.Workdir.Mode`. Confirm we want the overlay-explicit method gone. |
 | `Apply(name)` | `Workdir().Apply(ApplyOptions{})` | |
 | `ApplyWithOptions(name, opts)` | **fold into** `Workdir().Apply(opts)` | |
@@ -128,7 +128,7 @@ Owner reviewed 2026-05-28: **agreed in principle.** Resolved + still-open below.
      `--name-only` / `Ref`). Folds `Diff`, `DiffWithOptions`, `DiffRef`,
      `DiffOverlay`.
    - `Workdir().Patch(PatchOptions)` → **bytes + stat** (the machine artifact;
-     `IncludeUncommitted` option). Folds `GeneratePatch`, `GenerateWIPDiff`,
+     `IncludeUncommitted` option). Folds `GeneratePatch`, `GenerateUncommittedDiff`,
      `OverlayPatch`.
    - `Workdir().Apply(ApplyOptions)` → lands changes; `Mode: ApplyExport` writes
      the `git am`-able format-patch series to `ExportDir`. Folds

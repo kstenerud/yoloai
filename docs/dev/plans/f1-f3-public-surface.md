@@ -92,7 +92,7 @@ it, and `Yes` is replaced by the two typed-refusal acks below.
 manager did, via two `Confirm` calls gated by `Yes`:
 
 - `checkDirtyRepos` — the **host** workdir / aux dirs have uncommitted git changes
-  (data-loss risk: the agent sees/modifies your WIP; on `:copy`, apply later
+  (data-loss risk: the agent sees/modifies your uncommitted changes; on `:copy`, apply later
   conflicts with the still-dirty host). **Real refusal.**
 - `checkRequires` — the project's `.yoloai.yaml` declares `requires:` tool
   versions. **But version verification is unimplemented** — the gate is a

@@ -88,7 +88,7 @@ func applySelectedCommits(cmd *cobra.Command, name string, refs, paths []string,
 // runSeriesApply runs a commit-series apply through the workdir handle — dryRun
 // previews the commits that would land; otherwise it replays them. A non-nil
 // result with a non-nil error means the commits landed but a follow-on step
-// (git am stash, WIP) had a non-fatal issue.
+// (git am stash, uncommitted changes) had a non-fatal issue.
 func runSeriesApply(cmd *cobra.Command, name string, backend runtime.BackendName, refs, paths []string, dryRun bool) (*yoloai.ApplyResult, error) {
 	var result *yoloai.ApplyResult
 	err := cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {

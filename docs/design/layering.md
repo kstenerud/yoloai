@@ -270,7 +270,7 @@ The agent may decide mid-session that work belongs on a feature branch. Inside t
 **Semantics:**
 
 - Branches that exist in the sandbox but not on the host are created on the host pointing at the matching base commit, then their commits are applied via `git format-patch` + `git am`.
-- WIP changes (uncommitted in the sandbox) are applied after committed changes, on the currently-active branch — which, after apply, is the same branch on the host as in the sandbox.
+- Uncommitted changes in the sandbox are applied after committed changes, on the currently-active branch — which, after apply, is the same branch on the host as in the sandbox.
 - **Branch-name conflict with the host: error.** No silent overwrite, no auto-suffix.
 - **Merge conflict during apply: error.** We are not reimplementing git's merge logic.
 - **Branch deletion in the sandbox does not propagate to the host.** Apply is additive.

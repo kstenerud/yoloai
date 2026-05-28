@@ -22,14 +22,14 @@ import (
 // function owns the CLI preview + confirmation + output. It previews via
 // DryRun (so the stat is exact, matching what the real apply lands), then —
 // after confirmation — applies for real.
-func applyNoCommit(cmd *cobra.Command, name string, paths []string, meta *store.Meta, yes, dryRun, includeWIP bool) error {
+func applyNoCommit(cmd *cobra.Command, name string, paths []string, meta *store.Meta, yes, dryRun, includeUncommitted bool) error {
 	backend := cliutil.ResolveBackendForSandbox(name)
 
 	var preview *yoloai.ApplyResult
 	err := cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
 		var e error
 		preview, e = c.Sandbox(name).Workdir().Apply(ctx, yoloai.ApplyOptions{
-			Mode: yoloai.ApplyModeNoCommit, IncludeWIP: includeWIP, Paths: paths, DryRun: true,
+			Mode: yoloai.ApplyModeNoCommit, IncludeUncommitted: includeUncommitted, Paths: paths, DryRun: true,
 		})
 		return e
 	})
@@ -38,8 +38,8 @@ func applyNoCommit(cmd *cobra.Command, name string, paths []string, meta *store.
 	}
 
 	// Surface uncommitted changes the user might want to bring along.
-	if !includeWIP {
-		warnNoCommitSkippedWIP(cmd, name, backend)
+	if !includeUncommitted {
+		warnNoCommitSkippedUncommitted(cmd, name, backend)
 	}
 
 	if preview == nil {
@@ -78,7 +78,7 @@ func applyNoCommit(cmd *cobra.Command, name string, paths []string, meta *store.
 
 	err = cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
 		_, e := c.Sandbox(name).Workdir().Apply(ctx, yoloai.ApplyOptions{
-			Mode: yoloai.ApplyModeNoCommit, IncludeWIP: includeWIP, Paths: paths, DryRun: false,
+			Mode: yoloai.ApplyModeNoCommit, IncludeUncommitted: includeUncommitted, Paths: paths, DryRun: false,
 		})
 		return e
 	})
@@ -88,29 +88,29 @@ func applyNoCommit(cmd *cobra.Command, name string, paths []string, meta *store.
 
 	if cliutil.JSONEnabled(cmd) {
 		return cliutil.WriteJSON(cmd.OutOrStdout(), applyResult{
-			Target:     targetDir,
-			WIPApplied: true,
-			Method:     "no-commit",
+			Target:             targetDir,
+			UncommittedApplied: true,
+			Method:             "no-commit",
 		})
 	}
 	_, err = fmt.Fprintf(cmd.OutOrStdout(), "Changes applied to %s\n", targetDir)
 	return err
 }
 
-// warnNoCommitSkippedWIP prints the --include-wip hint when --no-commit excludes
-// uncommitted work. Best-effort: a failed WIP check is silently swallowed
-// because the net-diff apply can still succeed on the committed delta.
-func warnNoCommitSkippedWIP(cmd *cobra.Command, name string, backend runtime.BackendName) {
+// warnNoCommitSkippedUncommitted prints the --include-uncommitted hint when
+// --no-commit excludes uncommitted work. Best-effort: a failed check is silently
+// swallowed because the net-diff apply can still succeed on the committed delta.
+func warnNoCommitSkippedUncommitted(cmd *cobra.Command, name string, backend runtime.BackendName) {
 	if cliutil.JSONEnabled(cmd) {
 		return
 	}
-	var hasWIP bool
+	var hasUncommitted bool
 	_ = cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
-		var wipErr error
-		hasWIP, wipErr = c.HasUncommittedChanges(ctx, name)
-		return wipErr
+		var uncommittedErr error
+		hasUncommitted, uncommittedErr = c.HasUncommittedChanges(ctx, name)
+		return uncommittedErr
 	})
-	if hasWIP {
-		fmt.Fprintln(cmd.OutOrStdout(), "Note: sandbox has uncommitted changes (excluded from --no-commit); re-run with --include-wip to fold them in.") //nolint:errcheck
+	if hasUncommitted {
+		fmt.Fprintln(cmd.OutOrStdout(), "Note: sandbox has uncommitted changes (excluded from --no-commit); re-run with --include-uncommitted to fold them in.") //nolint:errcheck
 	}
 }

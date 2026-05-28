@@ -1,5 +1,5 @@
 // ABOUTME: Apply operations: patch generation, baseline advancement, overlay apply,
-// ABOUTME: selective ref resolution, format-patch, and WIP diff for sandbox work directories.
+// ABOUTME: selective ref resolution, format-patch, and uncommitted diff for sandbox work directories.
 
 package patch
 
@@ -51,16 +51,15 @@ type ApplyResult struct {
 	// Commits are the commits replayed, in order (series applies); empty for a
 	// NoCommit/net-diff apply. On a DryRun preview, HostSHA is empty.
 	Commits []AppliedCommit
-	// WIPApplied is true when uncommitted (work-in-progress) edits were also
-	// applied as unstaged changes.
-	WIPApplied bool
+	// UncommittedApplied is true when uncommitted edits were also applied as unstaged changes.
+	UncommittedApplied bool
 }
 
 // ApplyAllOptions configures ApplyAll.
 type ApplyAllOptions struct {
-	IncludeWIP bool     // also apply uncommitted edits (baseline → working tree)
-	Paths      []string // optional path filter; when non-empty the baseline is NOT advanced
-	DryRun     bool     // generate + validate but do not apply or advance baseline
+	IncludeUncommitted bool     // also apply uncommitted edits (baseline → working tree)
+	Paths              []string // optional path filter; when non-empty the baseline is NOT advanced
+	DryRun             bool     // generate + validate but do not apply or advance baseline
 }
 
 // ApplyAll applies the sandbox's pending workdir changes back to the original
@@ -94,7 +93,7 @@ func ApplyAll(ctx context.Context, layout config.Layout, rt runtime.Runtime, nam
 		return nil, nil
 	}
 
-	patchBytes, stat, err := GeneratePatch(ctx, layout, rt, name, opts.Paths, opts.IncludeWIP)
+	patchBytes, stat, err := GeneratePatch(ctx, layout, rt, name, opts.Paths, opts.IncludeUncommitted)
 	if err != nil {
 		return nil, err
 	}
@@ -128,10 +127,10 @@ func ApplyAll(ctx context.Context, layout config.Layout, rt runtime.Runtime, nam
 
 // ApplySeriesOptions configures ApplySeries.
 type ApplySeriesOptions struct {
-	Refs       []string // apply only these commits/ranges (a subset, selective); empty = all beyond-baseline commits
-	IncludeWIP bool     // also apply the agent's uncommitted edits as unstaged changes
-	Paths      []string // optional path filter; when non-empty the baseline is NOT advanced
-	DryRun     bool     // list the commits that would apply, without applying
+	Refs               []string // apply only these commits/ranges (a subset, selective); empty = all beyond-baseline commits
+	IncludeUncommitted bool     // also apply the agent's uncommitted edits as unstaged changes
+	Paths              []string // optional path filter; when non-empty the baseline is NOT advanced
+	DryRun             bool     // list the commits that would apply, without applying
 }
 
 // ApplySeries replays the sandbox's beyond-baseline commits onto the host
@@ -141,16 +140,16 @@ type ApplySeriesOptions struct {
 // the contiguous applied prefix; otherwise it replays all and advances to HEAD.
 //
 // Return contract (comply-or-complain, D27):
-//   - (nil, nil): nothing to apply (no beyond-baseline commits). WIP-only changes
-//     are a NoCommit concern — the caller routes there.
+//   - (nil, nil): nothing to apply (no beyond-baseline commits). Uncommitted-only
+//     changes are a NoCommit concern — the caller routes there.
 //   - (nil, err): hard failure, nothing landed — a non-git target (*UsageError;
 //     you can't git am into a non-repo, so the caller picks NoCommit), or
 //     generate / git am failed outright.
 //   - (*ApplyResult, nil): full success (or, on DryRun, the preview).
 //   - (*ApplyResult, err): the commits landed (result lists them) but a
 //     follow-on step had a non-fatal issue — git am left a stash it couldn't
-//     reapply, or WIP failed to apply. The caller reports what landed and
-//     surfaces err (typically as a warning).
+//     reapply, or uncommitted changes failed to apply. The caller reports what
+//     landed and surfaces err (typically as a warning).
 //
 // The library never decides the non-git fallback or prompts; that's policy.
 func ApplySeries(ctx context.Context, layout config.Layout, rt runtime.Runtime, name string, opts ApplySeriesOptions) (*ApplyResult, error) {
@@ -207,9 +206,9 @@ func ApplySeries(ctx context.Context, layout config.Layout, rt runtime.Runtime, 
 }
 
 // finishSeriesApply advances the baseline (unless path-filtered), surfaces a git
-// am stash error (commits already landed), and applies WIP when requested. amErr
-// is the non-nil-but-non-fatal error from ApplyFormatPatch (a stash it couldn't
-// reapply); the commits in result did land.
+// am stash error (commits already landed), and applies uncommitted changes when
+// requested. amErr is the non-nil-but-non-fatal error from ApplyFormatPatch (a
+// stash it couldn't reapply); the commits in result did land.
 func finishSeriesApply(ctx context.Context, layout config.Layout, rt runtime.Runtime, name, hostPath string, opts ApplySeriesOptions, result *ApplyResult, amErr error) (*ApplyResult, error) {
 	// Advance the baseline past the applied commits (skip for path-filtered
 	// applies — the remaining paths still diff against it).
@@ -219,16 +218,16 @@ func finishSeriesApply(ctx context.Context, layout config.Layout, rt runtime.Run
 		}
 	}
 	// A stash git am couldn't reapply (pre-existing host changes). Surface it;
-	// the commits did land. WIP is skipped in this state.
+	// the commits did land. Uncommitted changes are skipped in this state.
 	if amErr != nil {
 		return result, amErr
 	}
-	if opts.IncludeWIP {
-		applied, err := applySeriesWIP(ctx, layout, rt, name, hostPath, opts.Paths)
+	if opts.IncludeUncommitted {
+		applied, err := applySeriesUncommitted(ctx, layout, rt, name, hostPath, opts.Paths)
 		if err != nil {
 			return result, err
 		}
-		result.WIPApplied = applied
+		result.UncommittedApplied = applied
 	}
 	return result, nil
 }
@@ -248,19 +247,19 @@ func seriesResult(hostPath string, commits []CommitInfo, shaMap map[string]strin
 	return result
 }
 
-// applySeriesWIP applies the agent's uncommitted edits as unstaged changes after
-// the commit series has landed. Errors are wrapped to make clear the commits
-// already applied (the caller surfaces them as a warning, not a hard failure).
-func applySeriesWIP(ctx context.Context, layout config.Layout, rt runtime.Runtime, name, hostPath string, paths []string) (bool, error) {
-	wipPatch, _, err := GenerateWIPDiff(ctx, layout, rt, name, paths)
+// applySeriesUncommitted applies the agent's uncommitted edits as unstaged changes
+// after the commit series has landed. Errors are wrapped to make clear the
+// commits already applied (the caller surfaces them as a warning, not a hard failure).
+func applySeriesUncommitted(ctx context.Context, layout config.Layout, rt runtime.Runtime, name, hostPath string, paths []string) (bool, error) {
+	uncommittedPatch, _, err := GenerateUncommittedDiff(ctx, layout, rt, name, paths)
 	if err != nil {
-		return false, fmt.Errorf("generate WIP diff (commits already applied): %w", err)
+		return false, fmt.Errorf("generate uncommitted diff (commits already applied): %w", err)
 	}
-	if len(wipPatch) == 0 {
+	if len(uncommittedPatch) == 0 {
 		return false, nil
 	}
-	if err := workspace.ApplyPatch(wipPatch, hostPath, true); err != nil {
-		return false, fmt.Errorf("apply WIP changes (commits already applied): %w", err)
+	if err := workspace.ApplyPatch(uncommittedPatch, hostPath, true); err != nil {
+		return false, fmt.Errorf("apply uncommitted changes (commits already applied): %w", err)
 	}
 	return true, nil
 }
@@ -317,14 +316,14 @@ type PatchSet = workspace.PatchSet
 // GeneratePatch produces a binary patch from the work copy against the
 // baseline SHA. Optionally filtered to specific paths.
 //
-// includeWIP=true diffs from baseline to the live working tree, including
-// uncommitted edits and untracked files (the historical behavior; first
-// stages untracked via `git add -A`).
+// includeUncommitted=true diffs from baseline to the live working tree,
+// including uncommitted edits and untracked files (first stages untracked
+// via `git add -A`).
 //
-// includeWIP=false diffs only baseline → HEAD, so uncommitted/untracked
+// includeUncommitted=false diffs only baseline → HEAD, so uncommitted/untracked
 // changes the agent left behind are excluded. The CLI default is false; the
-// caller opts in via `yoloai apply --include-wip`.
-func GeneratePatch(ctx context.Context, layout config.Layout, rt runtime.Runtime, name string, paths []string, includeWIP bool) (patch []byte, stat string, err error) {
+// caller opts in via `yoloai apply --include-uncommitted`.
+func GeneratePatch(ctx context.Context, layout config.Layout, rt runtime.Runtime, name string, paths []string, includeUncommitted bool) (patch []byte, stat string, err error) {
 	workDir, baselineSHA, mode, err := loadDiffContext(layout, name)
 	if err != nil {
 		return nil, "", err
@@ -342,7 +341,7 @@ func GeneratePatch(ctx context.Context, layout config.Layout, rt runtime.Runtime
 	// tree entirely; baselineSHA against the working tree (after `git add -A`)
 	// includes them.
 	endpoint := "HEAD"
-	if includeWIP {
+	if includeUncommitted {
 		if addErr := gitAddRetry(ctx, rt, name, workDir); addErr != nil {
 			return nil, "", fmt.Errorf("git add: %w", addErr)
 		}
@@ -940,21 +939,21 @@ func GenerateFormatPatch(ctx context.Context, layout config.Layout, rt runtime.R
 	return patchDir, files, nil
 }
 
-// GenerateWIPDiff produces a binary patch of uncommitted changes (against
-// HEAD, not the baseline). This captures only work-in-progress changes
-// that the agent hasn't committed. Returns empty patch if no uncommitted changes.
-func GenerateWIPDiff(ctx context.Context, layout config.Layout, rt runtime.Runtime, name string, paths []string) (patch []byte, stat string, err error) {
+// GenerateUncommittedDiff produces a binary patch of uncommitted changes (against
+// HEAD, not the baseline). This captures only uncommitted changes that the agent
+// hasn't committed. Returns empty patch if no uncommitted changes.
+func GenerateUncommittedDiff(ctx context.Context, layout config.Layout, rt runtime.Runtime, name string, paths []string) (patch []byte, stat string, err error) {
 	workDir, _, mode, loadErr := loadDiffContext(layout, name)
 	if loadErr != nil {
 		return nil, "", loadErr
 	}
 
 	if mode == "rw" {
-		return nil, "", fmt.Errorf("WIP diff is not available for :rw directories")
+		return nil, "", fmt.Errorf("uncommitted diff is not available for :rw directories")
 	}
 
 	if mode == "overlay" {
-		return nil, "", fmt.Errorf("WIP diff for :overlay directories requires container exec")
+		return nil, "", fmt.Errorf("uncommitted diff for :overlay directories requires container exec")
 	}
 
 	// Stage untracked files
@@ -972,7 +971,7 @@ func GenerateWIPDiff(ctx context.Context, layout config.Layout, rt runtime.Runti
 
 	patchOut, err := rt.GitExec(ctx, name, workDir, patchArgs...)
 	if err != nil {
-		return nil, "", fmt.Errorf("git diff (WIP patch): %w", err)
+		return nil, "", fmt.Errorf("git diff (uncommitted patch): %w", err)
 	}
 
 	if patchOut == "" {
@@ -988,7 +987,7 @@ func GenerateWIPDiff(ctx context.Context, layout config.Layout, rt runtime.Runti
 
 	statOut, err := rt.GitExec(ctx, name, workDir, statArgs...)
 	if err != nil {
-		return nil, "", fmt.Errorf("git diff (WIP stat): %w", err)
+		return nil, "", fmt.Errorf("git diff (uncommitted stat): %w", err)
 	}
 
 	return []byte(patchOut), strings.TrimRight(statOut, "\n"), nil

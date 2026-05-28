@@ -332,7 +332,7 @@ Git-format diff and apply machinery. Imports `sandbox/` (for exec helpers and lo
 | File | Purpose |
 |------|---------|
 | `diff.go` | `GenerateDiff()`, `GenerateMultiDiff()`, `GenerateOverlayDiff()`, `GenerateCommitDiff()`, `ListCommitsWithStats()`, `DiffContext`, `LoadAllDiffContexts()` — diff generation for `:copy`, `:overlay`, and `:rw` modes. |
-| `apply.go` | `ApplyAll()`, `GeneratePatch()`, `GenerateFormatPatch()`, `GenerateMultiPatch()`, `GenerateOverlayPatch()`, `GenerateWIPDiff()`, `UpdateOverlayBaselineToHEAD()`, `UpdateOverlayBaseline()`, `AdvanceBaseline()`, `AdvanceBaselineTo()`, `HasUncommittedChanges()`, `ListCommitsBeyondBaseline()`, `ResolveRef()`, `ResolveRefs()`. |
+| `apply.go` | `ApplyAll()`, `GeneratePatch()`, `GenerateFormatPatch()`, `GenerateMultiPatch()`, `GenerateOverlayPatch()`, `GenerateUncommittedDiff()`, `UpdateOverlayBaselineToHEAD()`, `UpdateOverlayBaseline()`, `AdvanceBaseline()`, `AdvanceBaselineTo()`, `HasUncommittedChanges()`, `ListCommitsBeyondBaseline()`, `ResolveRef()`, `ResolveRefs()`. |
 
 ### `sandbox/store/`
 

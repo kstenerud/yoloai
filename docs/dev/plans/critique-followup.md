@@ -52,7 +52,7 @@ returns a typed `*ActiveWorkError` and `NeedsConfirmation`→`HasActiveWork`
 `Diff`/`DiffWithOptions`/`DiffOverlay`/`DiffRef` into one verb (copy/overlay
 resolved internally from `meta.Workdir.Mode`); the four root methods + the
 overlay-explicit path are deleted. **Reconciled (§12):** Step 3 is Diff *only* —
-the patch-generation methods (`GeneratePatch`/`GenerateWIPDiff`/`OverlayPatch`)
+the patch-generation methods (`GeneratePatch`/`GenerateUncommittedDiff`/`OverlayPatch`)
 proved to be apply-plumbing with a per-dir `[]PatchSet` overlay shape that
 doesn't fit a single `Patch()→bytes`, so they fold into **Step 4 (Apply)**.
 **Remaining F2:** Step 4 (Apply + patch generation), Step 5 (commits/baseline).

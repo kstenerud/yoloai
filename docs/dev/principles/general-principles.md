@@ -143,7 +143,7 @@ Threshold: every irreversible action gets explicit user-initiation + slow-path c
 
 ### Worked examples
 
-- *Type 1 (one-way doors)*: `yoloai destroy <name>` (removes a sandbox's full state, including the agent's work-in-progress); `yoloai system prune --cache` (reclaims every available backend's image cache, forcing a multi-minute yoloai-base rebuild on next `new`); `yoloai apply` itself when the target directory has uncommitted changes. All three require explicit user-initiation; `apply` adds the dirty-repo warning.
+- *Type 1 (one-way doors)*: `yoloai destroy <name>` (removes a sandbox's full state, including the agent's uncommitted work); `yoloai system prune --cache` (reclaims every available backend's image cache, forcing a multi-minute yoloai-base rebuild on next `new`); `yoloai apply` itself when the target directory has uncommitted changes. All three require explicit user-initiation; `apply` adds the dirty-repo warning.
 - *Type 2 (two-way doors)*: flag rename, command grouping, help text rewording, error message refinement. CLI Pass 1–4 (commits `370599a`–`fa3ca8d`, 2026-03-04) shipped these without ceremony. Each was reversible; speed was the right call.
 - *Type 1.5*: CLI surface changes that retrain user muscle memory (`--detach`/`-d` → `--attach`/`-a` flip in commit `94f46c4`); config schema changes (multiple `defaults.*` reorganisations). Treated as Type 1 by recording the breaking change in `docs/BREAKING-CHANGES.md` and surfacing migration guidance.
 - The 12 rounds of pre-implementation critique (D2) were Type 1 process applied to Type 1 decisions (architecture, security model, capability grants). Not Type 1 process applied to flag names.

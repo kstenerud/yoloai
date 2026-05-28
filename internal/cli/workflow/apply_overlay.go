@@ -21,9 +21,9 @@ import (
 )
 
 // applyOverlay handles apply for sandboxes with overlay directories.
-// --include-wip has no effect here: overlay sandboxes have no commit history
-// inside the agent's workspace, so all upper-layer changes are applied as a
-// single patch regardless.
+// --include-uncommitted has no effect here: overlay sandboxes have no commit
+// history inside the agent's workspace, so all upper-layer changes are applied
+// as a single patch regardless.
 func applyOverlay(cmd *cobra.Command, name string, meta *store.Meta, refs, paths []string, patchesDir string, yes, dryRun bool) error {
 	if len(refs) > 0 {
 		return sandbox.NewPlatformError("selective ref apply is not supported for :overlay sandboxes")
@@ -76,9 +76,9 @@ func applyOverlayExportPatches(cmd *cobra.Command, patches []patch.PatchSet, pat
 	}
 	if cliutil.JSONEnabled(cmd) {
 		return cliutil.WriteJSON(cmd.OutOrStdout(), applyResult{
-			Target:     patchesDir,
-			WIPApplied: true,
-			Method:     "overlay",
+			Target:             patchesDir,
+			UncommittedApplied: true,
+			Method:             "overlay",
 		})
 	}
 	return nil
@@ -134,9 +134,9 @@ func applyOverlayPatches(cmd *cobra.Command, ctx context.Context, c *yoloai.Clie
 
 	if isJSON {
 		return cliutil.WriteJSON(out, applyResult{
-			Target:     meta.Workdir.HostPath,
-			WIPApplied: true,
-			Method:     "overlay",
+			Target:             meta.Workdir.HostPath,
+			UncommittedApplied: true,
+			Method:             "overlay",
 		})
 	}
 

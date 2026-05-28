@@ -16,7 +16,7 @@ user can cancel and re-run with `--tags` before the baseline advances.
   it is too late to apply tags.
 - **Tags follow applied commits**: tags whose target commit was not included in the apply
   are skipped with a per-tag warning (e.g. selective apply, path-filtered apply).
-- **Squash + WIP-only incompatible**: `--tags` with `--squash` or WIP-only apply returns
+- **Squash + uncommitted-only incompatible**: `--tags` with `--squash` or uncommitted-only apply returns
   an error — individual commit identity is destroyed, so there is no SHA to map from.
 - **Annotated tags**: preserve the tag message. Tagger identity and timestamp will be
   from the host context (acceptable).
@@ -110,7 +110,7 @@ in order, paired positionally with the N sandbox SHAs from the input list.
 cmd.Flags().Bool("tags", false, "Transfer git tags created by the agent")
 cmd.MarkFlagsMutuallyExclusive("tags", "squash")
 ```
-WIP-only (no commits, only WIP) + `--tags`: return error before applying.
+Uncommitted-only (no commits, only uncommitted edits) + `--tags`: return error before applying.
 
 **JSON output**: add `TagsApplied int` and `TagsSkipped int` to `applyResult`.
 

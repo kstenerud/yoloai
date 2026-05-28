@@ -586,6 +586,26 @@ must run before get_working_dir`.
 
 ---
 
+## D28 — "uncommitted" is the canonical term for the agent's uncommitted edits; "WIP" is banned
+
+**Date:** 2026-05-28. **Status:** Accepted. **Context:** the WIP-vs-uncommitted naming kept resurfacing across sessions. The decision (uncommitted) had been made earlier and recorded in `plans/f2-subhandle-mapping.md` ("WIP = include uncommitted; an option, not a method"), but the code had drifted back to "WIP" (`IncludeWIP`, `--include-wip`, `WIPApplied`, `wip_applied`, `wip.diff`, `GenerateWIPDiff`, …), so it kept getting re-litigated. The owner asked to settle it once and for all.
+
+**Decision.** The agent's uncommitted edits (changes beyond the last commit) are called **"uncommitted"** everywhere — never "WIP" or "work-in-progress". Applies to Go identifiers (`IncludeUncommitted`, `UncommittedApplied`, `GenerateUncommittedDiff`), the CLI flag (**`--include-wip` → `--include-uncommitted`**), JSON keys (`wip_applied` → `uncommitted_applied`), the exported diff filename (`wip.diff` → `uncommitted.diff`), slog fields, comments, and docs. Renamed across all `*.go` and the live/forward-looking docs in one sweep.
+
+**Rejected.**
+- *Keep "WIP" as a terse synonym* — rejected: dual vocabulary is exactly what caused the drift. One term, enforced.
+- *`--uncommitted` (shorter flag)* — rejected in favor of `--include-uncommitted`, which mirrors the Go field `IncludeUncommitted` and reads as "include on top of the commits."
+
+**Why.** "uncommitted" matches git's own vocabulary; "WIP" was informal jargon. A single enforced term stops the recurring re-litigation.
+
+**Consequences.**
+- The `wipe`/`Wipe` family (disk/state wiping) is unrelated and untouched. `HasUncommittedChanges` / `has_uncommitted_changes` were already correct and unchanged.
+- Append-only history (this log's prior entries, `CRITIQUE.md`, `OPEN_QUESTIONS.md` resolved items, `old/`) left as point-in-time records; the deleted `--no-wip` flag keeps its literal name in the BREAKING-CHANGES history entry.
+
+**Composition.** Sibling to `feedback`-level conventions; cited by the F2 apply/diff work (D26, 4a–4e).
+
+---
+
 # Convention reminders
 
 - New decisions append at the bottom. Don't renumber.
