@@ -563,6 +563,28 @@ must run before get_working_dir`.
 
 ---
 
+## D27 — Boundary discipline restated: thin policy layer, comply-or-complain mechanism
+
+**Date:** 2026-05-28. **Status:** Accepted. **Context:** the "comply-or-complain" framing recurred across the public-API work (D24 library-never-prompts, D26 no-auto-fallback, F4 no-ambient-default); the owner asked whether to name it as its own principle or fold it into the existing boundary-discipline principle.
+
+**Decision.** Restructure `development-principles.md §2` from a one-sided statement (the interface layer is thin) into the full two-sided boundary it always implied, and retitle it **"Boundary discipline — thin policy layer, comply-or-complain mechanism."**
+- **Policy layer** (CLI, public-API entry, embedder): decides *what* to do and *how to react* — which operation, whether to prompt, whether to fall back, how to render. Stays thin: parse → call → format.
+- **Mechanism layer** (the domain/library): does exactly what it is asked, or **complains** with a typed error. It never silently does a third thing — no prompting, no reinterpreting intent, no mode-switching or fallback, no UX choices. "Can't comply" always surfaces as a typed refusal the caller handles.
+- Sharpen the old "should this proceed? lives in domain" bullet: the **rule** lives in the mechanism (it refuses an impermissible op with a typed error); the **policy** lives in the caller (override? prompt? fall back?).
+
+**Rejected.**
+- *A separate "comply-or-complain" principle* — rejected: it's the mechanism-side half of the same boundary §2 already governs from the policy side. A separate principle fragments one boundary into two.
+
+**Why.** §2 only stated the policy side ("interface layer is thin"); the mechanism's behavioral contract was implicit and kept getting re-derived per feature. Naming it ("comply-or-complain") makes the contract citable and memorable, and unifies D24 / D26 / F4 under one rule.
+
+**Consequences.**
+- §2 retitled + restructured (mechanism contract added; point 3 sharpened; worked examples gain the typed refusals — `*DirtyWorkdirError`, `*ActiveWorkError`, the non-git apply `*UsageError`, F4's required Backend); README index line updated.
+- Cites D24 (library never prompts), D26 (no auto-fallback; CLI owns policy), F4 (no ambient backend default).
+
+**Composition.** Refines §2 (D7, pluggable runtime / boundary discipline); generalizes D24 and D26; sibling to `general-principles.md §12` (both sharpen how the library behaves at its boundary).
+
+---
+
 # Convention reminders
 
 - New decisions append at the bottom. Don't renumber.

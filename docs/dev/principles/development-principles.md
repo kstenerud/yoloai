@@ -1,6 +1,7 @@
 ABOUTME: Engineering practice for yoloAI. YAGNI/KISS/DRY/SOLID vocabulary,
-ABOUTME: boundary discipline, validate-at-every-layer, parse-don't-validate,
-ABOUTME: fail-fast, warnings-are-signal, justify-every-discard, no-half-finished,
+ABOUTME: boundary discipline (thin policy layer, comply-or-complain mechanism),
+ABOUTME: validate-at-every-layer, parse-don't-validate, fail-fast,
+ABOUTME: warnings-are-signal, justify-every-discard, no-half-finished,
 ABOUTME: plan-then-execute cleanup, make-check gate, iterate-when-first-approach
 ABOUTME: -fails. How to write yoloAI code so future-you can change it safely.
 
@@ -67,9 +68,13 @@ Kent Beck (YAGNI); Robert C. Martin (SOLID, *Clean Code*); Sandi Metz ("The Wron
 
 ---
 
-## §2. Boundary discipline — thin interface layer
+## §2. Boundary discipline — thin policy layer, comply-or-complain mechanism
 
-**Principle.** CLI commands and the (planned) public Go API are thin wrappers around the domain layer. Their allowed code is exactly: parse arguments → call one or two domain methods → format output. No business logic at the interface layer. No backend types past the runtime boundary. The same domain function is invoked from both surfaces, which guarantees behavioural consistency by construction.
+**Principle.** The boundary has two sides under one contract.
+
+The **policy layer** — CLI commands, the public Go API entry points, embedders — decides *what* to do and *how to react*: which domain operation to call, whether to prompt, whether to fall back, how to format output. It stays thin: parse arguments → call one or two domain methods → format output. No business logic; no backend types past the runtime boundary. The same domain function is invoked from every surface, so behaviour is consistent by construction.
+
+The **mechanism layer** — the domain/library — does exactly what it is asked, or **complains** with a typed error. *Comply-or-complain: never a silent third thing.* It does not prompt, reinterpret intent, switch modes, fall back, or make UX choices — those are all policy, owned by the caller. "Can't comply" is always a typed refusal the caller handles; it is never papered over with a guess.
 
 ### Pattern
 
@@ -87,12 +92,21 @@ config/                → (leaf — nothing internal)
 
 No reverse imports. No circular imports. Backend types do not appear outside `runtime/<backend>/`. Backend name strings do not appear in the dispatch (W10). `config/` is depended on by everyone but depends on nothing internal — it carries the leaf types (paths, profile names, mount specs) that compose the rest.
 
-### What does NOT live in the interface layer
+### What does NOT live in the policy (interface) layer
 
 1. Value validation beyond shape (e.g., regex-validating a sandbox name is fine at the CLI; deciding whether the name *means* something is the domain's job).
 2. Backend calls (CLI never calls Docker / Podman / containerd directly).
-3. Conditional business decisions ("should this proceed?" lives in domain).
+3. The permissibility **rule**. Whether an operation is *allowed* (workdir dirty, sandbox has active work, target isn't a git repo) is the mechanism's call — it enforces the rule by refusing with a typed error. The policy layer owns only the *reaction* to that refusal (override, prompt, fall back), not the rule itself.
 4. Cross-domain orchestration (lives in a third domain package that imports both — not in the handler).
+
+### What the mechanism (domain) must NOT do
+
+The flip side — the comply-or-complain contract spelled out:
+
+1. **Prompt.** The library never reads from a terminal to ask "are you sure?". It refuses with a typed error and lets the caller prompt (D24).
+2. **Reinterpret intent / mode-switch / fall back.** Asked to replay a commit series onto a non-git target, it refuses (`*UsageError`) rather than silently switching to a net-diff apply; the CLI decides the fallback (D26). No ambient defaults (F4).
+3. **Make UX / formatting choices.** No human-readable strings, no "(dry run)" banners, no JSON shaping — it returns data + typed errors; the policy layer renders.
+4. The escape hatch is always an **explicit, named option** the caller sets (`AllowDirtyWorkdir`, `NoCommit`, `Force`), never an implicit behavior the library chooses on the caller's behalf.
 
 ### Worked examples
 
@@ -101,15 +115,21 @@ No reverse imports. No circular imports. Backend types do not appear outside `ru
 - W10 (commit `5f91cdf`, 2026-05-20) closed three backend-name leaks — `if backend == "docker"` branches that had crept into CLI / domain code. Replaced with capability checks or registry queries.
 - W11 (commits `3b4a9ae`, `d525d60`, `c00d367`, `1f4457c`, 2026-05-20) introduced `BackendDescriptor` and a `(factory, descriptor)` registry. Adding a backend is now purely additive — register the descriptor, no dispatch edits.
 
+Comply-or-complain (the mechanism side):
+
+- **Create refuses, never prompts** (D24): a dirty workdir → `*DirtyWorkdirError`, unverified `requires:` → a warning, an active sandbox on destroy → `*ActiveWorkError`. The CLI catches each, prompts, and retries with the named ack (`AllowDirtyWorkdir`, `Force`). The library has no terminal.
+- **Apply complains on a non-git target** (D26): `Workdir().Apply` with the default (series replay) on a non-git host path returns a `*UsageError` instead of silently degrading to a net-diff apply; the CLI checks `IsGitRepo` and selects `NoCommit` itself.
+- **No ambient backend default** (F4): empty `Options.Backend` is a `*UsageError`, not a silent docker fallback — backend selection (which probes installed daemons) is policy, resolved at the boundary via the explicit `SelectBackend` helper.
+
 ### Cost-vs-benefit
 
-Cost of applying: discipline at design time + occasional refactor when a boundary leaks. Damage prevented: the boundary-violation tax (every backend change forces edits in unrelated packages); divergent CLI vs. API behaviour (the two surfaces drift unless they share a single code path); tests that have to mock too many things because the layers are tangled.
+Cost of applying: discipline at design time + occasional refactor when a boundary leaks, and resisting the convenience of a silent fallback or an in-library prompt. Damage prevented: the boundary-violation tax (every backend change forces edits in unrelated packages); divergent CLI vs. API behaviour (the two surfaces drift unless they share a single code path); the footgun where a headless caller silently gets a *different* operation than it asked for (the squash-on-non-git / proceed-on-dirty class); tests that have to mock too many things because the layers are tangled.
 
 ### Sources
 
-David L. Parnas "On the Criteria To Be Used in Decomposing Systems Into Modules" (CACM, 1972); Robert C. Martin SOLID (objectmentor.com 1995–2002); Effective Go §Interfaces. Project D7, D12, D13, D19. Full citations: `../research/principles/development-principles-research.md §2`.
+David L. Parnas "On the Criteria To Be Used in Decomposing Systems Into Modules" (CACM, 1972); Robert C. Martin SOLID (objectmentor.com 1995–2002); Effective Go §Interfaces. The comply-or-complain framing echoes Postel-in-reverse (be strict in what you do) and the Unix "do one thing" mechanism/policy split. Project D7, D12, D13, D19, D24, D26, D27. Full citations: `../research/principles/development-principles-research.md §2`.
 
-Originally established alongside D7 (pluggable runtime interface).
+Originally established alongside D7 (pluggable runtime interface); restated two-sided in D27.
 
 ---
 
