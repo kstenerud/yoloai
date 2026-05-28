@@ -1519,6 +1519,15 @@ def parse_args() -> argparse.Namespace:
         metavar="PATH",
         help="Write JUnit XML test results to PATH (crash-resilient via atexit)",
     )
+    parser.add_argument(
+        "--allow-stale",
+        action="store_true",
+        help=(
+            "Skip the check that ./yoloai is newer than the source tree. "
+            "Use only when intentionally testing a hand-built binary; "
+            "`make smoketest` rebuilds so this is rarely needed."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -1527,6 +1536,79 @@ def find_yoloai() -> Optional[str]:
     if Path("./yoloai").is_file():
         return "./yoloai"
     return None
+
+
+# Embedded-resource suffixes that go:embed bakes into the binary — kept in sync
+# with the Makefile's EMBEDFILES glob so the freshness check uses the same
+# definition of "source" that `make build` does.
+_EMBED_SUFFIXES = (".sh", ".py", ".conf", ".md")
+
+
+def _newest_source_mtime() -> tuple[float, str]:
+    """Return (mtime, path) of the newest tracked source file under cwd.
+
+    Mirrors the Makefile: every *.go outside vendor/, plus the embedded
+    resources under internal/ (Dockerfile, *.sh, *.py, *.conf, *.md;
+    excluding tests/), plus go.mod / go.sum. Used to detect a stale ./yoloai
+    before a smoke run. Uses os.walk (like `find`) so an unreadable dir — e.g.
+    a root-owned smoke-log dir from a prior sudo run — is skipped, not fatal.
+    """
+    newest = 0.0
+    newest_path = ""
+
+    def consider(path: str) -> None:
+        nonlocal newest, newest_path
+        try:
+            m = os.stat(path).st_mtime
+        except OSError:
+            return
+        if m > newest:
+            newest, newest_path = m, path
+
+    for dirpath, dirnames, filenames in os.walk("."):
+        # Prune dirs make's globs never look at (and that may be unreadable).
+        dirnames[:] = [d for d in dirnames if d not in ("vendor", ".git", "__pycache__")]
+        parts = set(Path(dirpath).parts)
+        in_internal = "internal" in parts
+        in_tests = "tests" in parts
+        for fn in filenames:
+            full = os.path.join(dirpath, fn)
+            if fn.endswith(".go"):
+                # GOFILES: every *.go outside vendor/ (tests included).
+                consider(full)
+            elif in_internal and not in_tests and (fn == "Dockerfile" or fn.endswith(_EMBED_SUFFIXES)):
+                # EMBEDFILES: embedded resources under internal/, excluding tests/.
+                consider(full)
+
+    for extra in ("go.mod", "go.sum"):
+        consider(extra)
+
+    return newest, newest_path
+
+
+def check_binary_fresh(yoloai_bin: str) -> Optional[str]:
+    """Return an error message if yoloai_bin is older than any tracked source.
+
+    The smoke test always runs the repo-local ./yoloai; a stale binary
+    silently tests old code — Go *or* embedded Python (entrypoint.py,
+    sandbox-setup.py) — which is the most confusing failure mode there is.
+    The `make smoketest` wrapper rebuilds via its `build` dependency, but a
+    direct `python3 scripts/smoke_test.py` invocation does not, so guard it
+    here. Returns None when the binary is current.
+    """
+    try:
+        bin_mtime = Path(yoloai_bin).stat().st_mtime
+    except OSError:
+        return None  # missing binary is reported by the caller's find_yoloai check
+    newest, newest_path = _newest_source_mtime()
+    if newest <= bin_mtime:
+        return None
+    return (
+        f"ERROR: {yoloai_bin} is older than {newest_path} — the binary is stale.\n"
+        "You would be smoke-testing old code (Go or embedded Python). Rebuild first:\n"
+        "  make build                 (or use `make smoketest`, which rebuilds for you)\n"
+        "Override with --allow-stale only when intentionally testing a hand-built binary."
+    )
 
 
 class _Tee:
@@ -1589,6 +1671,15 @@ def main() -> int:
             file=sys.stderr,
         )
         return 1
+
+    # Refuse to run against a stale binary: `make smoketest` rebuilds, but a
+    # direct script invocation does not, and silently testing old code (Go or
+    # embedded Python) wastes a whole run. --allow-stale bypasses intentionally.
+    if not args.allow_stale:
+        stale_msg = check_binary_fresh(yoloai_bin)
+        if stale_msg:
+            print(stale_msg, file=sys.stderr)
+            return 1
 
     # Detect the common mistake of `sudo python3 smoke_test.py` without -E,
     # which strips ANTHROPIC_API_KEY and other credentials from the environment.
