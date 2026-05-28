@@ -1,10 +1,12 @@
 package workspace
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -121,6 +123,46 @@ func TestStageUntracked_DeletedFiles(t *testing.T) {
 	output, err := cmd.Output()
 	require.NoError(t, err)
 	assert.Contains(t, string(output), "a.txt")
+}
+
+func TestStageUntracked_RetriesOnIndexLock(t *testing.T) {
+	dir := t.TempDir()
+	initGitRepo(t, dir)
+	writeTestFile(t, dir, "a.txt", "a")
+	gitAdd(t, dir, ".")
+	gitCommit(t, dir, "initial")
+	writeTestFile(t, dir, "b.txt", "b")
+
+	// Simulate a concurrent process holding index.lock briefly
+	lockPath := filepath.Join(dir, ".git", "index.lock")
+	require.NoError(t, os.WriteFile(lockPath, []byte{}, 0o600))
+	go func() {
+		// Remove the lock after a short delay, within the retry window
+		time.Sleep(150 * time.Millisecond)
+		_ = os.Remove(lockPath)
+	}()
+
+	require.NoError(t, StageUntracked(dir))
+
+	cmd := NewGitCmd(dir, "diff", "--cached", "--name-only")
+	output, err := cmd.Output()
+	require.NoError(t, err)
+	assert.Contains(t, string(output), "b.txt")
+}
+
+// IsIndexLocked tests
+
+func TestIsIndexLocked_DetectsLockError(t *testing.T) {
+	err := fmt.Errorf("git [add -A]: exit status 128: fatal: Unable to create '.git/index.lock': File exists")
+	assert.True(t, IsIndexLocked(err))
+}
+
+func TestIsIndexLocked_NilIsNotLocked(t *testing.T) {
+	assert.False(t, IsIndexLocked(nil))
+}
+
+func TestIsIndexLocked_OtherErrorIsNotLocked(t *testing.T) {
+	assert.False(t, IsIndexLocked(fmt.Errorf("some other git error")))
 }
 
 // BaselineUncommittedChanges tests

@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/fileutil"
@@ -128,7 +129,7 @@ func GeneratePatch(ctx context.Context, layout config.Layout, rt runtime.Runtime
 	// includes them.
 	endpoint := "HEAD"
 	if includeWIP {
-		if _, addErr := rt.GitExec(ctx, name, workDir, "add", "-A"); addErr != nil {
+		if addErr := gitAddRetry(ctx, rt, name, workDir); addErr != nil {
 			return nil, "", fmt.Errorf("git add: %w", addErr)
 		}
 		endpoint = ""
@@ -407,9 +408,8 @@ func HasUncommittedChanges(ctx context.Context, layout config.Layout, rt runtime
 		return false, fmt.Errorf("uncommitted-change check for :overlay directories requires container exec")
 	}
 
-	// Stage untracked files
-	_, err = rt.GitExec(ctx, name, workDir, "add", "-A")
-	if err != nil {
+	// Stage untracked files — retry on index.lock contention from agent activity.
+	if err = gitAddRetry(ctx, rt, name, workDir); err != nil {
 		return false, fmt.Errorf("git add: %w", err)
 	}
 
@@ -778,4 +778,23 @@ func GenerateWIPDiff(ctx context.Context, layout config.Layout, rt runtime.Runti
 	}
 
 	return []byte(patchOut), strings.TrimRight(statOut, "\n"), nil
+}
+
+// gitAddRetry runs `git add -A` via the runtime, retrying on index.lock
+// contention. The agent may hold the lock briefly for status bar updates
+// while sharing the work dir via a bind mount.
+func gitAddRetry(ctx context.Context, rt runtime.Runtime, name, workDir string) error {
+	var err error
+	for range 5 {
+		_, err = rt.GitExec(ctx, name, workDir, "add", "-A")
+		if err == nil || !workspace.IsIndexLocked(err) {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+	return err
 }

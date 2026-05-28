@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"time"
 )
 
 // NewGitCmd builds an exec.Cmd for git with hooks disabled.
@@ -82,8 +83,26 @@ func BaselineUncommittedChanges(workDir string) (string, error) {
 	return HeadSHA(workDir)
 }
 
+// IsIndexLocked reports whether err is a git index.lock contention error.
+// When the agent is running inside a container on a bind-mounted work dir,
+// its internal git operations (e.g. status bar updates) can briefly hold
+// the lock. Callers that need to run git add -A concurrently should retry
+// on this error rather than failing immediately.
+func IsIndexLocked(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "index.lock")
+}
+
 // StageUntracked runs `git add -A` in the work directory to capture
-// files created by the agent that are not yet tracked.
+// files created by the agent that are not yet tracked. Retries on
+// index.lock contention (transient when the agent is active).
 func StageUntracked(workDir string) error {
-	return RunGitCmd(workDir, "add", "-A")
+	var err error
+	for range 5 {
+		err = RunGitCmd(workDir, "add", "-A")
+		if err == nil || !IsIndexLocked(err) {
+			return err
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return err
 }

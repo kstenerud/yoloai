@@ -71,6 +71,7 @@ row to the index.
 | Smoke test: `full_workflow/tart` or `stop_start/tart` fails; exchange dir empty | [Tart: xcodebuild -runFirstLaunch blocks agent startup](#tart-xcodebuild--runfirstlaunch-blocks-agent-startup) |
 | `yoloai new --attach` hangs after "Sandbox created"; Python setup never completes | [Tart: mount_map uses Docker paths, triggering macOS automount](#tart-mount_map-uses-docker-style-paths-triggering-macos-automount-hang) |
 | `FileNotFoundError` at `get_working_dir()` / agent starts in wrong directory | [Tart: workdir setup races Python startup](#tart-vm-workdir-setup-races-python-startup) |
+| `yoloai apply` fails: `git add: git [add -A]: exit status 128: … index.lock: File exists` while agent is running | [Docker/Podman: agent git and apply git race on index.lock](#dockerpodman-agent-git-and-apply-git-race-on-indexlock) |
 
 ---
 
@@ -673,6 +674,22 @@ mounts correctly.
 Workaround: bind-mount the entire secrets directory as one mount
 (`/run/secrets → /run/secrets`) instead of individual per-secret file mounts.
 See commit fefda87.
+
+---
+
+### Docker/Podman: agent git and apply git race on index.lock
+
+**Symptom:** `yoloai apply` (or `yoloai diff`) fails with:
+```
+git add: git [add -A]: exit status 128: fatal: Unable to create '.git/index.lock': File exists.
+```
+when the agent is still running (stop/restart not yet complete, or `apply` called while agent is active).
+
+**Cause:** For `:copy` mode sandboxes, the work directory is a bind-mounted host path shared between host and container. `yoloai apply --include-wip` (and `HasUncommittedChanges`) calls `git add -A` on the host `.git`. The agent inside the container (e.g. Claude Code) independently runs `git add -A` for its status bar `(+2,-0)` display. Both processes race to acquire `index.lock`.
+
+The lock is held for only milliseconds, making this a transient flake rather than a hard failure.
+
+**Fix:** `HasUncommittedChanges` and the WIP staging path in `patch/apply.go` retry `git add -A` up to 5 times with 100 ms delays on `index.lock` errors. `workspace.StageUntracked` (used by `diff.go`) applies the same retry. See `workspace.IsIndexLocked`, `workspace.StageUntracked`, and `patch.gitAddRetry`.
 
 ---
 
