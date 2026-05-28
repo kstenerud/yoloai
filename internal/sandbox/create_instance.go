@@ -53,11 +53,25 @@ func (m *Manager) buildAndStart(ctx context.Context, state *sandboxState, mounts
 	// guard this, but it raced on slow-booting backends (Kata VM via
 	// containerd): the guest could still be booting when the dir was removed,
 	// so it read an empty /run/secrets and the agent came up unauthenticated.
+	// Slow-booting backends (Tart) declare a longer cap via the descriptor so
+	// the host observes the marker before removing the dir, rather than timing
+	// out mid-boot and relying on VirtioFS deletion lag to dodge the race.
 	if hasSecrets {
-		waitForSecretsConsumed(markerPath, secretsConsumedTimeout)
+		waitForSecretsConsumed(markerPath, effectiveSecretsConsumedTimeout(m.runtime.Descriptor()))
 	}
 
 	return m.verifyInstanceRunning(ctx, state, cname)
+}
+
+// effectiveSecretsConsumedTimeout is the host's cap on waiting for the
+// secrets-consumed marker: the backend's declared value when set (slow-booting
+// backends like Tart raise it so the host observes the marker before removing
+// the secrets dir), otherwise the package default.
+func effectiveSecretsConsumedTimeout(desc runtime.BackendDescriptor) time.Duration {
+	if desc.SecretsConsumedTimeout > 0 {
+		return desc.SecretsConsumedTimeout
+	}
+	return secretsConsumedTimeout
 }
 
 // waitForSecretsConsumed blocks until markerPath exists or timeout elapses.

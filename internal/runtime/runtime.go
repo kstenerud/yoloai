@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/runtime/caps"
@@ -124,6 +125,19 @@ type BackendDescriptor struct {
 	AgentProvisionedByBackend bool            // true when the backend's image/VM ships the agent binary
 	SupportedIsolationModes   []IsolationMode // non-default isolation modes this backend can support
 	Capabilities              BackendCaps     // feature-set flags
+
+	// SecretsConsumedTimeout caps how long the host waits for the in-sandbox
+	// "secrets consumed" marker before removing the ephemeral secrets dir
+	// (see internal/sandbox/create_instance.go). Zero means "use the package
+	// default" (a few tens of seconds, fine for fast-booting container
+	// backends). Slow-booting backends — where the guest can take longer than
+	// the default just to reach the entrypoint that reads the secrets — set
+	// this higher so the host does not remove the dir before the guest has
+	// read it. Without this, the read-before-removal invariant the marker
+	// exists to guarantee is violated on slow boots. Tart sets it because a
+	// macOS VM boot (plus a possible one-time `xcodebuild -runFirstLaunch`)
+	// routinely exceeds the default. See backend-idiosyncrasies.md.
+	SecretsConsumedTimeout time.Duration
 	// Probe reports whether this backend is usable right now and, on failure,
 	// a short user-facing reason ("docker socket not reachable", "tart binary
 	// not found", …). Implementations must be fast and side-effect-free — they

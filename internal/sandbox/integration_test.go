@@ -699,6 +699,13 @@ func TestIntegration_CredentialInjection(t *testing.T) {
 	mgr, ctx := integrationSetup(t)
 	projectDir := createProjectDir(t)
 
+	// Snapshot pre-existing yoloai-secrets-* dirs so the cleanup assertion
+	// below flags only one THIS run leaked — not an orphan a previously
+	// killed run (e.g. a timed-out Tart smoke) left in the shared system
+	// temp dir. The defer in launchContainer cleans up on normal return; an
+	// abnormally terminated run elsewhere can leave a dir we didn't create.
+	secretsBefore := existingSecretsDirs(t)
+
 	meta, err := mgr.Create(ctx, sandbox.CreateOptions{
 		Name:    "credinject",
 		Workdir: sandbox.DirSpec{Path: projectDir},
@@ -732,15 +739,29 @@ func TestIntegration_CredentialInjection(t *testing.T) {
 		"credential should be injected via /run/secrets and available in agent env")
 
 	// The host-side temp secrets dir (yoloai-secrets-*) should have been
-	// removed by the defer in launchContainer. Check that no matching dir
-	// remains in the system temp directory.
-	tmpParent := os.TempDir()
-	entries, err := os.ReadDir(tmpParent)
-	require.NoError(t, err)
-	for _, e := range entries {
-		assert.False(t, e.IsDir() && len(e.Name()) > 15 && e.Name()[:15] == "yoloai-secrets-",
-			"host-side secrets temp dir should be cleaned up: %s", e.Name())
+	// removed by the defer in launchContainer. Assert no *new* one survived;
+	// orphans from other/prior runs in the shared temp dir are out of scope.
+	for name := range existingSecretsDirs(t) {
+		if _, preexisting := secretsBefore[name]; !preexisting {
+			assert.Failf(t, "secrets temp dir leaked",
+				"host-side secrets temp dir from this run should be cleaned up: %s", name)
+		}
 	}
+}
+
+// existingSecretsDirs returns the set of yoloai-secrets-* directory names
+// currently present in the system temp dir.
+func existingSecretsDirs(t *testing.T) map[string]struct{} {
+	t.Helper()
+	entries, err := os.ReadDir(os.TempDir())
+	require.NoError(t, err)
+	out := make(map[string]struct{})
+	for _, e := range entries {
+		if e.IsDir() && strings.HasPrefix(e.Name(), "yoloai-secrets-") {
+			out[e.Name()] = struct{}{}
+		}
+	}
+	return out
 }
 
 // TestIntegration_AgentStubWorkflow tests the full agent-does-work → diff → apply pipeline.

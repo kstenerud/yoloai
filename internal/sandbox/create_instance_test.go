@@ -11,7 +11,20 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/kstenerud/yoloai/internal/runtime"
 )
+
+// TestEffectiveSecretsConsumedTimeout verifies the host honors a backend's
+// declared wait budget (slow-booting backends raise it so the secrets dir
+// isn't removed before the guest reads it) and falls back to the package
+// default otherwise.
+func TestEffectiveSecretsConsumedTimeout(t *testing.T) {
+	assert.Equal(t, secretsConsumedTimeout, effectiveSecretsConsumedTimeout(runtime.BackendDescriptor{}),
+		"no backend override → package default")
+	assert.Equal(t, 90*time.Second, effectiveSecretsConsumedTimeout(runtime.BackendDescriptor{SecretsConsumedTimeout: 90 * time.Second}),
+		"backend-declared cap is honored")
+}
 
 // TestWaitForSecretsConsumed_ReturnsWhenMarkerExists verifies the wait
 // completes promptly once the marker the in-sandbox entrypoint writes

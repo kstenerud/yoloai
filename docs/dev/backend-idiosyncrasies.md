@@ -18,6 +18,7 @@ row to the index.
 | Container starts but has no network after `NewTask()` | [Kata: netns must be configured before NewTask](#kata-shim-startup-netns-must-be-fully-configured-before-newtask) |
 | Agent idle 9s+, route=ok but dns/tcp probe times out (DF8) | [Kata: netns warm-up race](#kata-netns-warm-up-race-tap0_kata-tc-mirred-filter-not-installed-when-taskstart-returns) |
 | Agent "Not logged in"/idle after `restart` on containerd-vm; guest log `secrets.skip` | [Kata: secrets dir removed before guest read](#kata-secrets-temp-dir-removed-before-the-guest-reads-it) |
+| Tart: "secrets-consumed marker not observed before timeout" on every run (incl. passing) | [Kata: secrets dir removed before guest read](#kata-secrets-temp-dir-removed-before-the-guest-reads-it) (Tart variant) |
 | `EADDRINUSE` on shim start or `NewTask()` retry | [Kata: /run/kata persists on exit](#runkataname-persists-on-abnormal-exit), [EADDRINUSE on retry](#eaddrinuse-on-newtask-retry), [shim 500ms wait](#after-killing-orphaned-shim-processes-wait-500ms-before-proceeding) |
 | `After 500 attempts` / kata-agent unreachable (Firecracker) | [Kata: Firecracker explicit config breaks boot](#firecracker-runtime-rs-explicit-config-path-breaks-vm-boot) |
 | Bind mount target missing inside Kata VM | [Kata: no auto-create of mount targets](#kata-does-not-auto-create-bind-mount-target-directories) |
@@ -814,6 +815,37 @@ penalty). `logs/` is the right home: it's bind-mounted and propagates guest→ho
 in real time (the smoke harness reads agent-created `/yoloai/files/done` from the
 host side, proving sub-dir propagation is prompt).
 
+**Tart variant — the 30s cap was too short, masking a live race (2026-05-28).**
+"The read strictly precedes the removal — race eliminated" holds only when the
+guest reaches its secrets read within the cap. On Tart it does not: a macOS VM
+boots to the entrypoint's `read_secrets` in ~50s *warm*, and 120s+ on a cold
+first boot that also runs `xcodebuild -runFirstLaunch` (see the Xcode entry
+below). So the marker timed out on **every** Tart run — the smoke log shows the
+"marker not observed before timeout" warning even on a *passing* run — and the
+host removed the secrets dir at 30s while the guest read it ~20s *later*. The
+removal-before-read invariant was violated; it only avoided an unauthenticated
+agent because VirtioFS host→guest deletion propagation lags, so the guest still
+saw the (host-deleted) dir. Correctness was riding on undefined timing.
+
+Fix: the wait cap is now backend-declared. `BackendDescriptor.SecretsConsumedTimeout`
+(0 = the 30s package default) lets a slow-booting backend raise it; Tart sets
+180s so the host actually observes the marker before removing the dir, restoring
+the invariant rather than relying on VirtioFS lag. Trade-off: on a cold
+first-boot `new` blocks until the real read (the marker is the signal that the
+guest is done) instead of bailing at 30s — correctness over latency for an
+ephemeral credential. Code: `runtime.go` (`SecretsConsumedTimeout` field),
+`runtime/tart/tart.go` (180s), `sandbox/create_instance.go::effectiveSecretsConsumedTimeout`.
+
+Orphan cleanup: an abnormally-terminated `new` (killed / timed-out before
+`launchContainer`'s `defer os.RemoveAll`) leaves the `yoloai-secrets-*` dir — a
+plaintext credential — in the system temp dir; the 180s wait widens that window
+on Tart. `yoloai system prune` sweeps stale `yoloai-*` temp dirs
+(`PruneTempFiles`). That sweep previously scanned a hardcoded `/tmp` and so
+**missed macOS entirely** (`os.MkdirTemp("", …)` writes to `os.TempDir()` =
+`/var/folders/.../T`); fixed to scan `os.TempDir()`. The integration test that
+asserted cleanup also now snapshots before/after rather than scanning the whole
+shared temp dir, so a pre-existing orphan no longer fails it.
+
 Related restart asymmetry (independent of the race): `recreateContainer`
 previously omitted the sudo-recovered `credOverrides` that `Create` sets, so
 `sudo yoloai restart` *without* `-E` lost credentials deterministically (the env
@@ -1175,6 +1207,8 @@ Firecracker (`containerd-vmenhanced`) starts faster and completes the task well 
 The pattern of "fails then passes on retry" comes from VirtioFS persistence: `xcodebuild -runFirstLaunch` writes initialization state into the Xcode.app bundle itself (which lives on the host via VirtioFS). Even after the failing VM is destroyed, the initialized state remains in the host-side Xcode.app bundle. Subsequent VMs find xcodebuild already initialized and skip the slow initialization, completing setup in seconds.
 
 **Fix:** `xcodebuild -runFirstLaunch` now runs in the background via `subprocess.Popen(..., start_new_session=True)` with a log file at `{yoloai_dir}/xcodebuild-firstlaunch.log`. The agent starts immediately; xcodebuild completes in the background. Additionally, `stall_grace_secs=120` is set on all tart `BackendSpec` entries in the smoke test as a defensive measure.
+
+**Residual (observed 2026-05-28, run `yoloai-smoketest-20260528-085108.627`):** the fix does not fully eliminate the cold-first-boot transient. `full_workflow/tart` failed with `command timed out` — the harness's **outer per-command wall-clock**, a *different* path than the stall detection that `stall_grace_secs=120` covers — then passed on retry. Even backgrounded, first-launch xcodebuild contends for VM CPU/IO and slows Claude/Haiku enough to blow the per-command timeout; the preserved attempt showed `agent-status.json {}` and Claude parked at the welcome screen (prompt never processed) with `xcodebuild-firstlaunch.log` mid-install. It's one-time per host/Xcode version (state persists in the host Xcode.app bundle), so retry is the practical mitigation. A complete fix would pre-warm `xcodebuild -runFirstLaunch` during base-image build / a one-time host preflight so no test VM pays it. Note this also interacts with the secrets-consumed wait (now 180s on Tart, see the secrets entry above): a cold boot legitimately blocks `new` longer while the guest finishes setup before reading secrets.
 
 **Code:** `runtime/monitor/sandbox-setup.py::TartBackend.setup`, `scripts/smoke_test.py::BASE_MACOS_BACKENDS`
 

@@ -11,23 +11,22 @@ import (
 )
 
 func TestPruneTempFiles(t *testing.T) {
-	// PruneTempFiles operates on /tmp which we can't easily control in a
-	// unit test. Instead, test the logic by creating actual temp dirs with
-	// the yoloai- prefix and using os.Chtimes to age them.
+	// PruneTempFiles scans os.TempDir(), which honors $TMPDIR — point it at a
+	// throwaway dir so the test controls exactly what's present and never
+	// touches (or deletes real orphans in) the shared system temp dir.
+	t.Setenv("TMPDIR", t.TempDir())
 
-	// Create a stale dir (older than maxAge)
-	staleDir, err := os.MkdirTemp("/tmp", "yoloai-stale-test-")
+	// Create a stale dir (older than maxAge) in the isolated temp dir.
+	staleDir, err := os.MkdirTemp("", "yoloai-stale-test-")
 	require.NoError(t, err)
-	defer os.RemoveAll(staleDir) //nolint:errcheck // test cleanup
 
 	// Age it to 2 hours ago
 	past := time.Now().Add(-2 * time.Hour)
 	require.NoError(t, os.Chtimes(staleDir, past, past))
 
 	// Create a fresh dir (within maxAge)
-	freshDir, err := os.MkdirTemp("/tmp", "yoloai-fresh-test-")
+	freshDir, err := os.MkdirTemp("", "yoloai-fresh-test-")
 	require.NoError(t, err)
-	defer os.RemoveAll(freshDir) //nolint:errcheck // test cleanup
 
 	// Dry run: should list stale but not remove
 	pruned, err := PruneTempFiles(true, 1*time.Hour)
@@ -56,11 +55,12 @@ func TestPruneTempFiles(t *testing.T) {
 }
 
 func TestPruneTempFiles_NonDir(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+
 	// Create a file (not dir) with yoloai- prefix — should be skipped
-	f, err := os.CreateTemp("/tmp", "yoloai-file-test-")
+	f, err := os.CreateTemp("", "yoloai-file-test-")
 	require.NoError(t, err)
-	f.Close()                 //nolint:errcheck,gosec // test cleanup
-	defer os.Remove(f.Name()) //nolint:errcheck // test cleanup
+	f.Close() //nolint:errcheck,gosec // test cleanup
 
 	// Age the file
 	past := time.Now().Add(-2 * time.Hour)
