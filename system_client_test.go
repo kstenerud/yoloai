@@ -35,3 +35,13 @@ func TestSystemClient_Info(t *testing.T) {
 		}
 	}
 }
+
+// TestSystemClient_ListAcrossBackends_Empty verifies a fresh install (no sandbox
+// dirs) lists nothing and probes no backends — no enumeration, no error.
+func TestSystemClient_ListAcrossBackends_Empty(t *testing.T) {
+	c := newTestClient(t)
+	infos, unavailable, err := c.ListAcrossBackends(context.Background())
+	require.NoError(t, err)
+	assert.Empty(t, infos)
+	assert.Empty(t, unavailable)
+}

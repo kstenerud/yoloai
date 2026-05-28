@@ -142,6 +142,25 @@ func (s *SystemClient) Backends(ctx context.Context) []BackendStatus {
 	return out
 }
 
+// ListAcrossBackends enumerates sandboxes across every backend that currently
+// has sandbox state, inspecting each via its own backend. Returns the sandbox
+// infos plus the names of backends that have sandbox dirs but couldn't be
+// reached (e.g. their daemon is down) so callers can warn without failing.
+func (s *SystemClient) ListAcrossBackends(ctx context.Context) ([]*Info, []BackendName, error) {
+	infos, unavailable, err := sandbox.ListSandboxesMultiBackend(ctx, s.layout,
+		func(ctx context.Context, backend runtime.BackendName) (runtime.Runtime, error) {
+			return newRuntime(ctx, backend, s.layout)
+		})
+	if err != nil {
+		return nil, nil, err
+	}
+	unavailableNames := make([]BackendName, len(unavailable))
+	for i, name := range unavailable {
+		unavailableNames[i] = BackendName(name)
+	}
+	return infos, unavailableNames, nil
+}
+
 // Info returns the installation's paths and per-backend availability in one
 // call. It never returns an error today (per-backend probe failures are
 // captured in BackendStatus.Note); the error return is kept for forward

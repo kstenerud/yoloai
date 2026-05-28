@@ -128,9 +128,14 @@ func runList(cmd *cobra.Command, _ []string) error {
 	ctx := cmd.Context()
 
 	// Use multi-backend listing
-	infos, unavailableBackends, err := sandbox.ListSandboxesMultiBackend(ctx, cliutil.Layout(), cliutil.NewRuntime)
+	infos, unavailableBackends, err := cliutil.NewSystemClient().ListAcrossBackends(ctx)
 	if err != nil {
 		return err
+	}
+	// Flatten the typed backend names to strings for rendering (JSON + footer).
+	unavailableNames := make([]string, len(unavailableBackends))
+	for i, b := range unavailableBackends {
+		unavailableNames[i] = string(b)
 	}
 
 	// Read filter flags.
@@ -159,10 +164,7 @@ func runList(cmd *cobra.Command, _ []string) error {
 		// Create output structure with unavailable_backends field
 		output := map[string]any{
 			"sandboxes":            infos,
-			"unavailable_backends": unavailableBackends,
-		}
-		if unavailableBackends == nil {
-			output["unavailable_backends"] = []string{}
+			"unavailable_backends": unavailableNames,
 		}
 		return cliutil.WriteJSON(cmd.OutOrStdout(), output)
 	}
@@ -214,10 +216,10 @@ func runList(cmd *cobra.Command, _ []string) error {
 	}
 
 	// Display footer note if any backends are unavailable
-	if len(unavailableBackends) > 0 {
-		fmt.Fprintln(cmd.OutOrStdout(), "")                                                                                           //nolint:errcheck
-		fmt.Fprintf(cmd.OutOrStdout(), "Note: The following backends are unavailable: %s\n", strings.Join(unavailableBackends, ", ")) //nolint:errcheck
-		fmt.Fprintln(cmd.OutOrStdout(), "Sandboxes using these backends show status 'unavailable'.")                                  //nolint:errcheck
+	if len(unavailableNames) > 0 {
+		fmt.Fprintln(cmd.OutOrStdout(), "")                                                                                        //nolint:errcheck
+		fmt.Fprintf(cmd.OutOrStdout(), "Note: The following backends are unavailable: %s\n", strings.Join(unavailableNames, ", ")) //nolint:errcheck
+		fmt.Fprintln(cmd.OutOrStdout(), "Sandboxes using these backends show status 'unavailable'.")                               //nolint:errcheck
 	}
 
 	slog.Debug("list complete", "event", "sandbox.list", "count", len(infos))
