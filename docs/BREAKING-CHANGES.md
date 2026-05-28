@@ -48,10 +48,22 @@ consumes it). Minor: a post-commit follow-on issue (a `git am` stash, or WIP tha
 failed to apply) now makes `apply` exit non-zero after reporting what landed,
 where a WIP failure was previously a warning.
 
-**Still pending:** the selective-ref / `--patches` export / overlay variants —
-whose orchestration still lives in the CLI (`apply_selective.go`,
-`apply_export.go`, `apply_overlay.go`) — fold into `Workdir().Apply` in
-sub-steps 4d–4e.
+**4d (selective refs fold into `Workdir().Apply`):** selective apply
+(`yoloai apply <name> <ref>...`) now routes through
+`c.Sandbox(name).Workdir().Apply(ctx, yoloai.ApplyOptions{Mode: ApplyModeCommits,
+Refs: []string{...}})`. `ApplyOptions` gains `Refs []string` — empty replays all
+beyond-baseline commits, non-empty replays just the named commits/ranges
+(`ApplyModeCommits` only; ignored by `ApplyModeNoCommit`). The library now owns
+ref resolution, format-patch generation, and the contiguous-prefix baseline
+advance for the selective case (previously in the CLI). Two `Client` methods are
+removed (their only callers were the now-folded CLI helpers): `c.ResolveCommitRefs(ctx,
+name, refs)` and `c.GenerateFormatPatchForRefs(ctx, name, shas, paths)`. Migration:
+`c.ResolveCommitRefs(...)` → `c.Sandbox(name).Workdir().Apply(ctx, ApplyOptions{Mode:
+ApplyModeCommits, Refs: refs, DryRun: true})` and read `result.Commits`.
+
+**Still pending:** the `--patches` export / overlay variants — whose
+orchestration still lives in the CLI (`apply_export.go`, `apply_overlay.go`) —
+fold into `Workdir().Apply` in sub-step 4e.
 
 ### Diff moves under `client.Sandbox(name).Workdir()`
 

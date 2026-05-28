@@ -1433,3 +1433,116 @@ func TestApplySeries_NonGitTargetRefuses(t *testing.T) {
 	var ue *yoerrors.UsageError
 	require.ErrorAs(t, err, &ue, "non-git target must yield a *UsageError")
 }
+
+// setupSeriesApplyFixture builds a real git host target plus a copy-mode sandbox
+// whose HostPath points at it, seeded with three add-only commits (A, B, C). The
+// commits only add files, so git am replays them cleanly onto any base.
+func setupSeriesApplyFixture(t *testing.T, tmpDir, name string) (targetDir string) {
+	t.Helper()
+	targetDir = filepath.Join(tmpDir, "host-target")
+	require.NoError(t, os.MkdirAll(targetDir, 0750))
+	initGitRepo(t, targetDir)
+	writeTestFile(t, targetDir, "seed.txt", "seed\n")
+	gitAdd(t, targetDir, ".")
+	gitCommit(t, targetDir, "initial")
+
+	createCopySandboxWithCommits(t, tmpDir, name, targetDir, []struct {
+		subject  string
+		filename string
+		content  string
+	}{
+		{"add A", "a.txt", "a\n"},
+		{"add B", "b.txt", "b\n"},
+		{"add C", "c.txt", "c\n"},
+	})
+	return targetDir
+}
+
+// TestApplySeries_FullReplay drives ApplySeries with no refs: all beyond-baseline
+// commits replay onto the host as a series, each AppliedCommit carries a host
+// SHA, and the baseline advances to HEAD (nothing remains beyond baseline).
+func TestApplySeries_FullReplay(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	name := "series-full"
+	targetDir := setupSeriesApplyFixture(t, tmpDir, name)
+	rt := getTestRuntime(t)
+
+	result, err := ApplySeries(context.Background(), testLayout(tmpDir), rt, name, ApplySeriesOptions{})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Len(t, result.Commits, 3)
+
+	assert.FileExists(t, filepath.Join(targetDir, "a.txt"))
+	assert.FileExists(t, filepath.Join(targetDir, "b.txt"))
+	assert.FileExists(t, filepath.Join(targetDir, "c.txt"))
+	for _, c := range result.Commits {
+		assert.NotEmpty(t, c.SourceSHA, "commit %q should carry its source SHA", c.Subject)
+		assert.NotEmpty(t, c.HostSHA, "commit %q should carry the rewritten host SHA", c.Subject)
+	}
+
+	remaining, err := ListCommitsBeyondBaseline(context.Background(), testLayout(tmpDir), rt, name)
+	require.NoError(t, err)
+	assert.Empty(t, remaining, "baseline should advance to HEAD after a full replay")
+}
+
+// TestApplySeries_SelectiveRefs drives ApplySeries with a Refs subset: only the
+// named commits replay, and the baseline advances across the contiguous applied
+// prefix so the unselected tail commit remains beyond baseline.
+func TestApplySeries_SelectiveRefs(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	name := "series-selective"
+	targetDir := setupSeriesApplyFixture(t, tmpDir, name)
+	rt := getTestRuntime(t)
+
+	commits, err := ListCommitsBeyondBaseline(context.Background(), testLayout(tmpDir), rt, name)
+	require.NoError(t, err)
+	require.Len(t, commits, 3)
+
+	// Apply the contiguous prefix A, B (commits[0], commits[1]); leave C.
+	result, err := ApplySeries(context.Background(), testLayout(tmpDir), rt, name, ApplySeriesOptions{
+		Refs: []string{commits[0].SHA[:7], commits[1].SHA[:7]},
+	})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Len(t, result.Commits, 2)
+
+	assert.FileExists(t, filepath.Join(targetDir, "a.txt"))
+	assert.FileExists(t, filepath.Join(targetDir, "b.txt"))
+	assert.NoFileExists(t, filepath.Join(targetDir, "c.txt"))
+
+	remaining, err := ListCommitsBeyondBaseline(context.Background(), testLayout(tmpDir), rt, name)
+	require.NoError(t, err)
+	require.Len(t, remaining, 1, "baseline should advance across the applied prefix only")
+	assert.Equal(t, "add C", remaining[0].Subject)
+}
+
+// TestApplySeries_DryRunDoesNotApply verifies DryRun reports the commits that
+// would replay without touching the host target or advancing the baseline.
+func TestApplySeries_DryRunDoesNotApply(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	name := "series-dryrun"
+	targetDir := setupSeriesApplyFixture(t, tmpDir, name)
+	rt := getTestRuntime(t)
+
+	result, err := ApplySeries(context.Background(), testLayout(tmpDir), rt, name, ApplySeriesOptions{DryRun: true})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Len(t, result.Commits, 3)
+
+	// Nothing applied to the host, and no host SHAs assigned (no git am ran).
+	assert.NoFileExists(t, filepath.Join(targetDir, "a.txt"))
+	for _, c := range result.Commits {
+		assert.Empty(t, c.HostSHA, "dry run must not rewrite commits onto the host")
+	}
+
+	// Baseline unchanged: all three commits still beyond baseline.
+	remaining, err := ListCommitsBeyondBaseline(context.Background(), testLayout(tmpDir), rt, name)
+	require.NoError(t, err)
+	assert.Len(t, remaining, 3)
+}

@@ -136,7 +136,15 @@ becomes `--no-commit`.
     stay CLI-side off `result.Commits`); renamed CLI `--squash` → `--no-commit`
     (`applySquash`→`applyNoCommit`); CLI checks `IsGitRepo` and selects
     `ApplyModeNoCommit`. Removed the now-dead `Client.AdvanceBaseline`.
-- **4d:** selective `Refs` (subset of the series) — fold `apply_selective.go`.
+- **4d — LANDED (2026-05-28):** `ApplyOptions.Refs []string` (empty = whole
+  series; non-empty = subset; `ApplyModeCommits` only). The library's
+  `ApplySeries` now resolves refs, generates the format-patch for the subset, and
+  advances the baseline across the contiguous applied prefix (helpers
+  `resolveSeriesCommits` / `generateSeriesPatch` / `advanceSeriesBaseline`).
+  `apply_selective.go` migrated to `Workdir().Apply(ApplyModeCommits, Refs)` via
+  the DryRun-preview→confirm→apply pattern; removed the dead
+  `Client.ResolveCommitRefs` / `Client.GenerateFormatPatchForRefs`. New
+  end-to-end tests: `TestApplySeries_{FullReplay,SelectiveRefs,DryRunDoesNotApply}`.
 - **4e:** `ExportDir` (`--patches`) + overlay — fold `apply_export.go` /
   `apply_overlay.go`. Each green + committable.
 

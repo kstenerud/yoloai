@@ -128,6 +128,7 @@ func ApplyAll(ctx context.Context, layout config.Layout, rt runtime.Runtime, nam
 
 // ApplySeriesOptions configures ApplySeries.
 type ApplySeriesOptions struct {
+	Refs       []string // apply only these commits/ranges (a subset, selective); empty = all beyond-baseline commits
 	IncludeWIP bool     // also apply the agent's uncommitted edits as unstaged changes
 	Paths      []string // optional path filter; when non-empty the baseline is NOT advanced
 	DryRun     bool     // list the commits that would apply, without applying
@@ -135,7 +136,9 @@ type ApplySeriesOptions struct {
 
 // ApplySeries replays the sandbox's beyond-baseline commits onto the host
 // workdir as a commit series (git format-patch → git am), preserving each
-// commit's message/author — the normal apply flow (D26).
+// commit's message/author — the normal apply flow (D26). With opts.Refs it
+// replays only that subset (selective apply) and advances the baseline across
+// the contiguous applied prefix; otherwise it replays all and advances to HEAD.
 //
 // Return contract (comply-or-complain, D27):
 //   - (nil, nil): nothing to apply (no beyond-baseline commits). WIP-only changes
@@ -172,7 +175,7 @@ func ApplySeries(ctx context.Context, layout config.Layout, rt runtime.Runtime, 
 			hostPath)
 	}
 
-	commits, err := ListCommitsBeyondBaseline(ctx, layout, rt, name)
+	commits, err := resolveSeriesCommits(ctx, layout, rt, name, opts.Refs)
 	if err != nil {
 		return nil, err
 	}
@@ -184,7 +187,7 @@ func ApplySeries(ctx context.Context, layout config.Layout, rt runtime.Runtime, 
 		return seriesResult(hostPath, commits, nil), nil
 	}
 
-	patchDir, files, err := GenerateFormatPatch(ctx, layout, rt, name, opts.Paths)
+	patchDir, files, err := generateSeriesPatch(ctx, layout, rt, name, commits, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -211,7 +214,7 @@ func finishSeriesApply(ctx context.Context, layout config.Layout, rt runtime.Run
 	// Advance the baseline past the applied commits (skip for path-filtered
 	// applies — the remaining paths still diff against it).
 	if len(opts.Paths) == 0 {
-		if err := AdvanceBaseline(ctx, layout, rt, name); err != nil {
+		if err := advanceSeriesBaseline(ctx, layout, rt, name, opts.Refs, result.Commits); err != nil {
 			return result, fmt.Errorf("advance baseline: %w", err)
 		}
 	}
@@ -260,6 +263,49 @@ func applySeriesWIP(ctx context.Context, layout config.Layout, rt runtime.Runtim
 		return false, fmt.Errorf("apply WIP changes (commits already applied): %w", err)
 	}
 	return true, nil
+}
+
+// resolveSeriesCommits returns the commits to replay: the selected subset when
+// refs are given (selective apply), otherwise all beyond-baseline commits.
+func resolveSeriesCommits(ctx context.Context, layout config.Layout, rt runtime.Runtime, name string, refs []string) ([]CommitInfo, error) {
+	if len(refs) > 0 {
+		return ResolveRefs(ctx, layout, rt, name, refs)
+	}
+	return ListCommitsBeyondBaseline(ctx, layout, rt, name)
+}
+
+// generateSeriesPatch produces the format-patch series for the commits to apply
+// — for the resolved subset when refs are given, otherwise the whole range.
+func generateSeriesPatch(ctx context.Context, layout config.Layout, rt runtime.Runtime, name string, commits []CommitInfo, opts ApplySeriesOptions) (patchDir string, files []string, err error) {
+	if len(opts.Refs) == 0 {
+		return GenerateFormatPatch(ctx, layout, rt, name, opts.Paths)
+	}
+	shas := make([]string, len(commits))
+	for i, c := range commits {
+		shas[i] = c.SHA
+	}
+	return GenerateFormatPatchForRefs(ctx, layout, rt, name, shas, opts.Paths)
+}
+
+// advanceSeriesBaseline moves the diff baseline past the applied commits. A full
+// apply advances to HEAD; a selective apply advances only across the contiguous
+// prefix of applied commits (commits after a skipped one stay beyond baseline).
+func advanceSeriesBaseline(ctx context.Context, layout config.Layout, rt runtime.Runtime, name string, refs []string, applied []AppliedCommit) error {
+	if len(refs) == 0 {
+		return AdvanceBaseline(ctx, layout, rt, name)
+	}
+	all, err := ListCommitsBeyondBaseline(ctx, layout, rt, name)
+	if err != nil {
+		return err
+	}
+	appliedSet := make(map[string]bool, len(applied))
+	for _, c := range applied {
+		appliedSet[c.SourceSHA] = true
+	}
+	if prefixEnd := workspace.ContiguousPrefixEnd(all, appliedSet); prefixEnd >= 0 {
+		return AdvanceBaselineTo(layout, name, all[prefixEnd].SHA)
+	}
+	return nil
 }
 
 // CommitInfo is an alias for workspace.CommitInfo.

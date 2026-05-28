@@ -118,6 +118,10 @@ type ApplyOptions struct {
 	// Mode selects commit-series replay vs. net-diff. Required; the zero value
 	// is rejected with a *UsageError.
 	Mode ApplyMode
+	// Refs selects a subset of commits/ranges to replay (selective apply).
+	// Empty replays all beyond-baseline commits. ApplyModeCommits only —
+	// ignored by ApplyModeNoCommit (a net diff isn't per-commit).
+	Refs []string
 	// IncludeWIP additionally applies the agent's uncommitted (work-in-progress)
 	// edits as unstaged modifications on the host. Mirrors `yoloai apply
 	// --include-wip`.
@@ -148,6 +152,7 @@ func (w *Workdir) Apply(ctx context.Context, opts ApplyOptions) (*ApplyResult, e
 	switch opts.Mode {
 	case ApplyModeCommits:
 		return patch.ApplySeries(ctx, w.s.c.layout, w.s.c.rt, w.s.name, patch.ApplySeriesOptions{
+			Refs:       opts.Refs,
 			IncludeWIP: opts.IncludeWIP,
 			Paths:      opts.Paths,
 			DryRun:     opts.DryRun,

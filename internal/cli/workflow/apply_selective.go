@@ -1,6 +1,6 @@
 // ABOUTME: Selective apply workflow — cherry-pick specific commits identified
-// ABOUTME: by ref arguments. Uses format-patch under the hood and advances the
-// ABOUTME: baseline only across a contiguous prefix of applied commits.
+// ABOUTME: by ref arguments. Routes through Workdir().Apply(ApplyModeCommits) with
+// ABOUTME: Refs; the library replays the series and advances the baseline.
 package workflow
 
 import (
@@ -20,7 +20,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// applySelectedCommits cherry-picks specific commits into the target.
+// applySelectedCommits cherry-picks specific commits into the target. It previews
+// the resolved commits (DryRun) for the summary/confirm, then replays them via
+// Workdir().Apply — the library resolves refs, replays the series, and advances
+// the baseline across the contiguous applied prefix.
 func applySelectedCommits(cmd *cobra.Command, name string, refs, paths []string, meta *store.Meta, yes, dryRun, withTags bool) error {
 	targetDir := meta.Workdir.HostPath
 	if !workspace.IsGitRepo(targetDir) {
@@ -28,12 +31,12 @@ func applySelectedCommits(cmd *cobra.Command, name string, refs, paths []string,
 	}
 
 	backend := cliutil.ResolveBackendForSandbox(name)
-	resolved, err := resolveSelectiveRefs(cmd, name, refs, backend)
+
+	preview, err := runSeriesApply(cmd, name, backend, refs, paths, true)
 	if err != nil {
 		return err
 	}
-
-	if len(resolved) == 0 {
+	if preview == nil || len(preview.Commits) == 0 {
 		if cliutil.JSONEnabled(cmd) {
 			return cliutil.WriteJSON(cmd.OutOrStdout(), applyResult{Target: targetDir, Method: "selective"})
 		}
@@ -41,6 +44,7 @@ func applySelectedCommits(cmd *cobra.Command, name string, refs, paths []string,
 		return err
 	}
 
+	resolved := commitInfosFromApplied(preview.Commits)
 	selectedTags := filterTagsForResolved(name, resolved)
 	tagsByCommit := buildTagsByCommit(selectedTags)
 
@@ -63,31 +67,51 @@ func applySelectedCommits(cmd *cobra.Command, name string, refs, paths []string,
 		return nil
 	}
 
-	files, shaMap, stashErr, err := applyFormatPatchForRefs(cmd, name, refs, resolved, paths, targetDir, backend)
-	if err != nil {
-		return err
+	result, applyErr := runSeriesApply(cmd, name, backend, refs, paths, false)
+	if result == nil {
+		return applyErr
 	}
 
-	if len(paths) == 0 {
-		if err := advanceSelectiveBaseline(cmd, name, backend, resolved); err != nil {
-			return err
-		}
+	if !cliutil.JSONEnabled(cmd) {
+		fmt.Fprintf(cmd.OutOrStdout(), "%d commit(s) applied to %s\n", len(result.Commits), targetDir) //nolint:errcheck
 	}
 
-	return finishSelectiveApply(cmd, name, files, shaMap, stashErr, selectedTags, store.WorkDir(cliutil.Layout().SandboxDir(name), targetDir), targetDir, withTags)
+	shaMap := make(map[string]string, len(result.Commits))
+	for _, c := range result.Commits {
+		shaMap[strings.ToLower(c.SourceSHA)] = c.HostSHA
+	}
+
+	sandboxWorkDir := store.WorkDir(cliutil.Layout().SandboxDir(name), targetDir)
+	return finishSelectiveApply(cmd, name, len(result.Commits), shaMap, applyErr, selectedTags, sandboxWorkDir, targetDir, withTags)
 }
 
-// resolveSelectiveRefs resolves the ref arguments to CommitInfo slices.
-func resolveSelectiveRefs(cmd *cobra.Command, name string, refs []string, backend runtime.BackendName) ([]patch.CommitInfo, error) {
-	var resolved []patch.CommitInfo
-	if err := cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
-		var resolveErr error
-		resolved, resolveErr = c.ResolveCommitRefs(ctx, name, refs)
-		return resolveErr
-	}); err != nil {
-		return nil, err
+// runSeriesApply runs a commit-series apply through the workdir handle — dryRun
+// previews the commits that would land; otherwise it replays them. A non-nil
+// result with a non-nil error means the commits landed but a follow-on step
+// (git am stash, WIP) had a non-fatal issue.
+func runSeriesApply(cmd *cobra.Command, name string, backend runtime.BackendName, refs, paths []string, dryRun bool) (*yoloai.ApplyResult, error) {
+	var result *yoloai.ApplyResult
+	err := cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
+		var applyErr error
+		result, applyErr = c.Sandbox(name).Workdir().Apply(ctx, yoloai.ApplyOptions{
+			Mode:   yoloai.ApplyModeCommits,
+			Refs:   refs,
+			Paths:  paths,
+			DryRun: dryRun,
+		})
+		return applyErr
+	})
+	return result, err
+}
+
+// commitInfosFromApplied converts previewed/applied commits back to the
+// CommitInfo shape used for the summary and tag filtering.
+func commitInfosFromApplied(applied []yoloai.AppliedCommit) []patch.CommitInfo {
+	out := make([]patch.CommitInfo, len(applied))
+	for i, c := range applied {
+		out[i] = patch.CommitInfo{SHA: c.SourceSHA, Subject: c.Subject}
 	}
-	return resolved, nil
+	return out
 }
 
 // confirmSelectiveApply prompts the user if yes is false.
@@ -101,8 +125,8 @@ func confirmSelectiveApply(cmd *cobra.Command, yes bool, targetDir string) (bool
 	return confirmed, confirmErr
 }
 
-// finishSelectiveApply prints results, handles tags, and returns any stash error.
-func finishSelectiveApply(cmd *cobra.Command, name string, files []string, shaMap map[string]string, stashErr error, selectedTags []sandbox.TagInfo, sandboxWorkDir, targetDir string, withTags bool) error {
+// finishSelectiveApply prints results, handles tags, and returns any follow-on error.
+func finishSelectiveApply(cmd *cobra.Command, name string, commitsApplied int, shaMap map[string]string, applyErr error, selectedTags []sandbox.TagInfo, sandboxWorkDir, targetDir string, withTags bool) error {
 	tagsApplied, tagsSkipped := applyTags(cmd, selectedTags, shaMap, sandboxWorkDir, targetDir, withTags)
 
 	if !cliutil.JSONEnabled(cmd) && !withTags {
@@ -115,42 +139,14 @@ func finishSelectiveApply(cmd *cobra.Command, name string, files []string, shaMa
 	if cliutil.JSONEnabled(cmd) {
 		return cliutil.WriteJSON(cmd.OutOrStdout(), applyResult{
 			Target:         targetDir,
-			CommitsApplied: len(files),
+			CommitsApplied: commitsApplied,
 			TagsApplied:    tagsApplied,
 			TagsSkipped:    tagsSkipped,
 			Method:         "selective",
 		})
 	}
 
-	return stashErr
-}
-
-// applyFormatPatchForRefs generates format-patch for specific refs and applies it.
-func applyFormatPatchForRefs(cmd *cobra.Command, name string, _ []string, resolved []patch.CommitInfo, paths []string, targetDir string, backend runtime.BackendName) (files []string, shaMap map[string]string, stashErr, err error) {
-	shas := make([]string, len(resolved))
-	for i, c := range resolved {
-		shas[i] = c.SHA
-	}
-
-	var patchDir string
-	if err = cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
-		var genErr error
-		patchDir, files, genErr = c.GenerateFormatPatchForRefs(ctx, name, shas, paths)
-		return genErr
-	}); err != nil {
-		return nil, nil, nil, err
-	}
-	defer os.RemoveAll(patchDir) //nolint:errcheck
-
-	shaMap, err = workspace.ApplyFormatPatch(patchDir, files, targetDir)
-	if err != nil && shaMap == nil {
-		return nil, nil, nil, err
-	}
-	stashErr = err
-	if !cliutil.JSONEnabled(cmd) {
-		fmt.Fprintf(cmd.OutOrStdout(), "%d commit(s) applied to %s\n", len(files), targetDir) //nolint:errcheck
-	}
-	return files, shaMap, stashErr, nil
+	return applyErr
 }
 
 // filterTagsForResolved fetches tags beyond baseline and filters to those on the resolved commits.
@@ -184,30 +180,4 @@ func printSelectiveApplySummary(cmd *cobra.Command, resolved []patch.CommitInfo,
 		fmt.Fprintf(out, "\nWARNING: %d tag(s) will NOT be applied (cancel this apply and redo with --tags to include them)\n", len(selectedTags)) //nolint:errcheck
 	}
 	fmt.Fprintln(out) //nolint:errcheck
-}
-
-// advanceSelectiveBaseline advances the baseline using contiguous prefix logic after a selective apply.
-func advanceSelectiveBaseline(cmd *cobra.Command, name string, backend runtime.BackendName, resolved []patch.CommitInfo) error {
-	var allCommits []patch.CommitInfo
-	err := cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
-		var listErr error
-		allCommits, listErr = c.ListCommits(ctx, name)
-		return listErr
-	})
-	if err != nil {
-		return fmt.Errorf("advance baseline: %w", err)
-	}
-
-	appliedSet := make(map[string]bool, len(resolved))
-	for _, c := range resolved {
-		appliedSet[c.SHA] = true
-	}
-
-	prefixEnd := workspace.ContiguousPrefixEnd(allCommits, appliedSet)
-	if prefixEnd >= 0 {
-		if err := patch.AdvanceBaselineTo(cliutil.Layout(), name, allCommits[prefixEnd].SHA); err != nil {
-			return fmt.Errorf("advance baseline: %w", err)
-		}
-	}
-	return nil
 }

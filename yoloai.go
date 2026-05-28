@@ -331,13 +331,6 @@ func (c *Client) ListCommits(ctx context.Context, name string) ([]patch.CommitIn
 	return patch.ListCommitsBeyondBaseline(ctx, c.layout, c.rt, name)
 }
 
-// ResolveCommitRefs resolves ref arguments (SHAs, "HEAD", ranges) to the
-// concrete CommitInfo entries inside the sandbox's beyond-baseline
-// history. Used by `yoloai apply <refs...>` for selective application.
-func (c *Client) ResolveCommitRefs(ctx context.Context, name string, refs []string) ([]patch.CommitInfo, error) {
-	return patch.ResolveRefs(ctx, c.layout, c.rt, name, refs)
-}
-
 // ListCommitsOverlay is the overlay-mode variant of ListCommits — runs
 // git log inside the running container because the overlay'd workdir
 // only exists there.
@@ -380,13 +373,6 @@ func (c *Client) UpdateOverlayBaseline(ctx context.Context, name, hostPath strin
 // Used by `yoloai apply` and `yoloai apply --patches`.
 func (c *Client) GenerateFormatPatch(ctx context.Context, name string, paths []string) (patchDir string, files []string, err error) {
 	return patch.GenerateFormatPatch(ctx, c.layout, c.rt, name, paths)
-}
-
-// GenerateFormatPatchForRefs is like GenerateFormatPatch but restricts
-// output to the specified commit SHAs (selective apply). Caller must
-// `os.RemoveAll(patchDir)` after use.
-func (c *Client) GenerateFormatPatchForRefs(ctx context.Context, name string, shas, paths []string) (patchDir string, files []string, err error) {
-	return patch.GenerateFormatPatchForRefs(ctx, c.layout, c.rt, name, shas, paths)
 }
 
 // GenerateWIPDiff produces the uncommitted-changes diff (work in
