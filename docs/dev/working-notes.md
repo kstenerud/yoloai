@@ -448,6 +448,27 @@ Operational state (`setup_complete`) lives in `~/.yoloai/state.yaml`.
 
 ---
 
+## D23 — Tests inject the Layout; env swaps reserved for HOME-reading subprocesses
+
+**Date:** 2026-05-28. **Status:** Accepted.
+
+**Decision.** Unit tests steer yoloAI code via explicit inputs — a `config.Layout` (DataDir, HomeDir, HostUID/GID, Env) passed through `WithLayout`, an injected `io.Reader`/`io.Writer` — not by mutating global process state (`t.Setenv("HOME", …)`, swapping `os.Stdin`). Codified as `testing-principles.md §10`. The §12 no-ambient-configuration work made this possible: library code now reads the Layout it is handed, so a `HOME` swap to steer a yoloAI path is manipulating a global the code no longer reads.
+
+**Rejected.**
+- *Keep the `t.Setenv("HOME")` scaffolding* — rejected: ~130 such swaps are vestigial after §12 (the code reads the explicit Layout), they couple tests to process-global state, and `t.Setenv` silently forbids `t.Parallel`.
+- *Blanket-remove every `HOME` swap* — rejected: ~85 are load-bearing. Tests that spawn real `git` set `HOME` to isolate the subprocess from the developer's `~/.gitconfig`; removing those would let dev config leak in and flake the suite.
+
+**Why.** The seam (Layout + injected readers) makes a test's inputs visible and its failures isolable (§5), removes a class of cross-test interference, and unlocks `t.Parallel`. The git-isolation case is the genuine exception — there the swap shields a HOME-reading *subprocess*, not yoloAI code.
+
+**Consequences.**
+- `testing-principles.md §10` + over-generalisations row added.
+- Vestigial `HOME` swaps removed across ~22 files (serial cleanup), per-file verified. git/cliutil/e2e swaps retained.
+- A later `t.Parallel` pass (gated on a shared-state audit) builds on the decoupling.
+
+**Composition.** Applies `development-principles.md §12` to the test surface; extends D22's testing principles.
+
+---
+
 # Convention reminders
 
 - New decisions append at the bottom. Don't renumber.

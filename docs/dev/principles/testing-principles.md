@@ -280,6 +280,37 @@ Originally established in D21.
 
 ---
 
+## §10. Inject the seam; don't manipulate the process
+
+**Principle.** A unit test steers library behaviour by constructing the explicit inputs the code reads — a `config.Layout` (DataDir, HomeDir, HostUID/GID, Env), an injected `io.Reader` / `io.Writer` — not by mutating global process state (`t.Setenv("HOME", …)`, swapping `os.Stdin`). After the §12 no-ambient-configuration work (`development-principles.md §12`), library code reads its configuration from the `config.Layout` it is handed; a test that sets `HOME` to steer a yoloAI code path is manipulating a global the code no longer reads — dead scaffolding that also forbids `t.Parallel`.
+
+### Pattern
+
+Threshold: if the behaviour under test is yoloAI code, give it explicit inputs:
+
+- Build a `config.Layout` (or the package's `testLayout` / `newTestManager` helper) with explicit fields and pass it via `WithLayout`. The library reads the Layout; no `HOME` is involved.
+- For stdin-driven paths, pass an `io.Reader` (e.g. `strings.NewReader(...)`); do not swap `os.Stdin`.
+- For `${VAR}` expansion, set `layout.Env`; do not `t.Setenv`.
+
+The **one** legitimate `t.Setenv("HOME", …)` is isolating a HOME-reading *subprocess*: `git` reads `$HOME/.gitconfig` and `$HOME/.config/git`, so tests that spawn real git (`internal/workspace/*_test.go`, `internal/sandbox/patch/*_test.go`) set `HOME` to a temp dir to shield the test from the developer's git config. That swap is load-bearing — keep it (equivalently, `GIT_CONFIG_GLOBAL`). The other legitimate case is a test that deliberately exercises the CLI's `cliutil.Layout()` ambient-`$HOME` fallback.
+
+### Worked examples
+
+- `internal/sandbox` unit tests build `config.NewLayout(filepath.Join(t.TempDir(), ".yoloai"))` and pass it through `WithLayout`; the `HOME` swap they once carried is vestigial after §12 and removed in D23's cleanup.
+- `ReadPrompt` takes an `io.Reader`; `TestReadPrompt_StdinDash` supplies `strings.NewReader("…")` instead of swapping the global `os.Stdin`.
+- `${VAR}` config-expansion tests pass an explicit env map / set `layout.Env` (`internal/config/config_test.go`, `pathutil_test.go`) rather than `t.Setenv`.
+- Load-bearing counter-example: `internal/sandbox/patch/apply_test.go` keeps `t.Setenv("HOME", tmpDir)` because it runs real `git`; removing it would let the developer's `.gitconfig` leak into the test.
+
+### Cost-vs-benefit
+
+Cost: construct an explicit Layout/reader instead of one `t.Setenv` line (usually a shared helper). Damage prevented: tests coupled to process-global state; the silent `t.Parallel` lockout that `t.Setenv` imposes; cross-test interference; the misleading signal that a test "needs" `HOME` when the code under test never reads it.
+
+### Sources
+
+`development-principles.md §12` (no ambient configuration); Go `testing` docs (`t.Setenv` forbids `t.Parallel`). D23.
+
+---
+
 # Common over-generalisations to avoid
 
 The cost-vs-benefit discipline rejects testing-principle-shaped statements that don't pay off at yoloAI's scale.
@@ -294,6 +325,7 @@ The cost-vs-benefit discipline rejects testing-principle-shaped statements that 
 | **Test the framework / library / stdlib**    | A test that asserts `len([]int{1,2,3}) == 3` tests Go, not yoloAI. Same for `json.Marshal` round-trip on a struct with no custom marshalling. These tests pass forever and prove nothing about yoloAI. §1 — confidence over coverage.                                                                              |
 | **Integration test as the only test**        | §5 — the ice-cream-cone anti-pattern. Integration tests are slow and bad at diagnosis. They're necessary at the backend boundary; they're not a replacement for unit tests at the unit boundary.                                                                                                                   |
 | **No regression test unless reproducible**   | The test belongs alongside the fix. If the bug isn't deterministically reproducible, that's the test's first job — make it reproducible. §4. Truly non-deterministic failures (timing-sensitive races) get documented in `backend-idiosyncrasies.md` instead, but that's the exception, not the default.            |
+| **Swap `HOME`/env to steer the code under test** | §10 rejects this. Post-§12, library code reads the injected `config.Layout`, not the process env — a `HOME` swap is dead scaffolding that also forbids `t.Parallel`. Env swaps are legitimate *only* to isolate a HOME-reading subprocess (git → `~/.gitconfig`) or to exercise the `cliutil` ambient fallback.              |
 
 ---
 
