@@ -186,7 +186,6 @@ func TestCreateSecretsDir_EmptyBoth(t *testing.T) {
 
 func TestCopySeedFiles_CopiesExistingFiles(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
 
 	// Create seed files on host
 	claudeDir := filepath.Join(tmpDir, ".claude")
@@ -209,7 +208,6 @@ func TestCopySeedFiles_CopiesExistingFiles(t *testing.T) {
 
 func TestCopySeedFiles_SkipsAuthWhenAPIKeySet(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
 
 	// Create auth file
 	claudeDir := filepath.Join(tmpDir, ".claude")
@@ -230,7 +228,6 @@ func TestCopySeedFiles_SkipsAuthWhenAPIKeySet(t *testing.T) {
 
 func TestCopySeedFiles_CopiesAuthWhenNoAPIKey(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
 
 	// Create auth file
 	claudeDir := filepath.Join(tmpDir, ".claude")
@@ -251,7 +248,6 @@ func TestCopySeedFiles_CopiesAuthWhenNoAPIKey(t *testing.T) {
 
 func TestCopySeedFiles_HomeDirFiles(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
 
 	// Create home-dir seed file
 	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, ".claude.json"), []byte(`{"install":"native"}`), 0600))
@@ -270,7 +266,6 @@ func TestCopySeedFiles_HomeDirFiles(t *testing.T) {
 
 func TestCopySeedFiles_SkipsMissingFiles(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
 
 	sandboxDir := filepath.Join(tmpDir, "sandbox")
 	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, store.AgentRuntimeDir), 0750))
@@ -648,7 +643,6 @@ func TestPrintCreationOutput_NilState(t *testing.T) {
 
 func TestPrepareSandboxState_MissingName(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
 	t.Setenv("ANTHROPIC_API_KEY", "sk-test")
 
 	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), io.Discard, WithLayout(config.NewLayout(t.TempDir())))
@@ -664,7 +658,6 @@ func TestPrepareSandboxState_MissingName(t *testing.T) {
 
 func TestPrepareSandboxState_UnknownAgent(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
 
 	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), io.Discard, WithLayout(config.NewLayout(t.TempDir())))
 
@@ -679,7 +672,6 @@ func TestPrepareSandboxState_UnknownAgent(t *testing.T) {
 
 func TestPrepareSandboxState_WorkdirMissing(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
 
 	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), io.Discard, WithLayout(layoutForTmpDir(tmpDir)))
 
@@ -694,7 +686,6 @@ func TestPrepareSandboxState_WorkdirMissing(t *testing.T) {
 
 func TestPrepareSandboxState_SandboxExists(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
 
 	// Create existing sandbox dir with valid environment.json
 	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", "existing")
@@ -717,7 +708,6 @@ func TestPrepareSandboxState_SandboxExists(t *testing.T) {
 
 func TestPrepareSandboxState_ConflictingPromptFlags(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
 
 	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), io.Discard, WithLayout(layoutForTmpDir(tmpDir)))
 
@@ -734,7 +724,6 @@ func TestPrepareSandboxState_ConflictingPromptFlags(t *testing.T) {
 
 func TestPrepareSandboxState_MissingAPIKey(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
 	t.Setenv("ANTHROPIC_API_KEY", "")
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
 
@@ -751,7 +740,6 @@ func TestPrepareSandboxState_MissingAPIKey(t *testing.T) {
 
 func TestPrepareSandboxState_DangerousDir(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
 	t.Setenv("ANTHROPIC_API_KEY", "sk-test")
 
 	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), io.Discard, WithLayout(layoutForTmpDir(tmpDir)))
@@ -767,7 +755,6 @@ func TestPrepareSandboxState_DangerousDir(t *testing.T) {
 
 func TestPrepareSandboxState_DangerousDirForce(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
 	t.Setenv("ANTHROPIC_API_KEY", "sk-test")
 
 	// HOME is classified as dangerous. Use :rw:force to avoid copying.
@@ -790,7 +777,6 @@ func TestPrepareSandboxState_DangerousDirForce(t *testing.T) {
 
 func TestHasAnyAuthFile_KeychainFallback(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
 
 	// No credentials file on disk
 	agentDef := agent.GetAgent("claude")
@@ -825,7 +811,6 @@ func TestHasAnyAuthFile_KeychainFallbackFails(t *testing.T) {
 
 func TestCopySeedFiles_KeychainFallback(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
 
 	sandboxDir := filepath.Join(tmpDir, "sandbox")
 	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, store.AgentRuntimeDir), 0750))
@@ -855,7 +840,6 @@ func TestCopySeedFiles_KeychainFallback(t *testing.T) {
 
 func TestCopySeedFiles_KeychainSkippedWhenFileExists(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
 
 	// Create the credentials file on disk
 	claudeDir := filepath.Join(tmpDir, ".claude")
@@ -922,7 +906,6 @@ func TestHasAnyAuthHint_NeitherSet(t *testing.T) {
 
 func TestPrepareSandboxState_MissingAPIKeyErrorNoEmptyParens(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
 
 	agentDef := agent.GetAgent("aider")
 	// Clear all aider API key env vars
@@ -951,7 +934,6 @@ func TestPrepareSandboxState_MissingAPIKeyErrorNoEmptyParens(t *testing.T) {
 
 func TestPrepareSandboxState_MissingAPIKeyErrorWithAuthFiles(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
 	t.Setenv("ANTHROPIC_API_KEY", "")
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
 
@@ -995,7 +977,6 @@ func TestPrintCreationOutput_NetworkIsolated(t *testing.T) {
 
 func TestPrepareSandboxState_NetworkIsolatedSetsAllowlist(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
 	t.Setenv("ANTHROPIC_API_KEY", "sk-test")
 
 	// Create a workdir subdirectory to avoid dangerous directory detection
@@ -1094,7 +1075,6 @@ func TestContainsLocalhost_ExternalURL(t *testing.T) {
 
 func TestPrepareSandboxState_NetworkAllowAddsExtraDomains(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
 	t.Setenv("ANTHROPIC_API_KEY", "sk-test")
 
 	// Create a workdir subdirectory to avoid dangerous directory detection

@@ -111,14 +111,12 @@ func TestStreamBuildOutput_EmptyStream(t *testing.T) {
 
 func TestNeedsBuild_NoChecksum(t *testing.T) {
 	tmp := t.TempDir()
-	t.Setenv("HOME", tmp)
 	layout := config.NewLayout(filepath.Join(tmp, ".yoloai"))
 	assert.True(t, NeedsBuild(layout, ""))
 }
 
 func TestNeedsBuild_AfterRecord(t *testing.T) {
 	tmp := t.TempDir()
-	t.Setenv("HOME", tmp)
 	layout := config.NewLayout(filepath.Join(tmp, ".yoloai"))
 	// Ensure cache dir exists (normally created by EnsureSetup).
 	require.NoError(t, os.MkdirAll(filepath.Join(tmp, ".yoloai", "cache"), 0750))

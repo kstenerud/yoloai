@@ -164,7 +164,6 @@ func TestHasUnappliedWork_EmptyBaseline(t *testing.T) {
 
 func TestInspectSandbox_NotFound(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
 
 	layout := config.NewLayout(filepath.Join(tmpDir, ".yoloai"))
 	mock := &inspectMockRuntime{}
@@ -174,7 +173,6 @@ func TestInspectSandbox_NotFound(t *testing.T) {
 
 func TestInspectSandbox_Removed(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
 
 	// Create sandbox dir with environment.json
 	name := "test-removed"
@@ -207,7 +205,6 @@ func TestInspectSandbox_Removed(t *testing.T) {
 
 func TestListSandboxes_Empty(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
 
 	// Create sandboxes dir but leave it empty
 	require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, ".yoloai", "sandboxes"), 0750))
@@ -221,7 +218,6 @@ func TestListSandboxes_Empty(t *testing.T) {
 
 func TestListSandboxes_IncludesBroken(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
 
 	sandboxesDir := filepath.Join(tmpDir, ".yoloai", "sandboxes")
 	require.NoError(t, os.MkdirAll(sandboxesDir, 0750))

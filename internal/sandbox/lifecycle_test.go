@@ -98,7 +98,6 @@ func createTestSandbox(t *testing.T, tmpDir, name, hostPath string, mode store.D
 
 func TestStop_Running(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
 
 	createTestSandbox(t, tmpDir, "test-stop", "/tmp/project", "copy")
 
@@ -118,7 +117,6 @@ func TestStop_Running(t *testing.T) {
 
 func TestStop_AlreadyStopped(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
 
 	createTestSandbox(t, tmpDir, "test-stop-already", "/tmp/project", "copy")
 
@@ -136,7 +134,6 @@ func TestStop_AlreadyStopped(t *testing.T) {
 
 func TestStop_ContainerRemoved(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
 
 	createTestSandbox(t, tmpDir, "test-stop-removed", "/tmp/project", "copy")
 
@@ -154,7 +151,6 @@ func TestStop_ContainerRemoved(t *testing.T) {
 
 func TestStop_SandboxNotFound(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
 
 	mock := &lifecycleMockRuntime{}
 	mgr := newLifecycleMgr(mock, tmpDir)
@@ -166,7 +162,6 @@ func TestStop_SandboxNotFound(t *testing.T) {
 
 func TestStart_AlreadyRunning(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
 
 	createTestSandbox(t, tmpDir, "test-start-running", "/tmp/project", "copy")
 
@@ -190,7 +185,6 @@ func TestStart_AlreadyRunning(t *testing.T) {
 
 func TestStart_Stopped(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
 
 	createTestSandbox(t, tmpDir, "test-start-stopped", "/tmp/project", "copy")
 
@@ -217,7 +211,6 @@ func TestStart_Stopped(t *testing.T) {
 
 func TestStart_SandboxNotFound(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
 
 	mock := &lifecycleMockRuntime{}
 	mgr := newLifecycleMgr(mock, tmpDir)
@@ -227,7 +220,6 @@ func TestStart_SandboxNotFound(t *testing.T) {
 
 func TestStart_Removed(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
 
 	createTestSandbox(t, tmpDir, "test-start-removed", "/tmp/project", "copy")
 
@@ -249,7 +241,6 @@ func TestStart_Removed(t *testing.T) {
 
 func TestStart_Resume_RequiresPrompt(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
 
 	// Create sandbox WITHOUT HasPrompt
 	createTestSandbox(t, tmpDir, "test-resume-noprompt", "/tmp/project", "copy")
@@ -268,7 +259,6 @@ func TestStart_Resume_RequiresPrompt(t *testing.T) {
 
 func TestStart_Resume_DoneStatus(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
 
 	name := "test-resume-done"
 	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
@@ -344,7 +334,6 @@ func TestStart_Resume_DoneStatus(t *testing.T) {
 
 func TestStart_Resume_StoppedStatus(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
 
 	name := "test-resume-stopped"
 	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
@@ -412,7 +401,6 @@ func TestStart_Resume_StoppedStatus(t *testing.T) {
 
 func TestNeedsConfirmation_Running(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
 
 	createTestSandbox(t, tmpDir, "test-confirm-running", "/tmp/project", "copy")
 
@@ -430,7 +418,6 @@ func TestNeedsConfirmation_Running(t *testing.T) {
 
 func TestNeedsConfirmation_ChangesExist(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
 
 	// Create sandbox with a work directory that has changes
 	name := "test-confirm-changes"
@@ -474,7 +461,6 @@ func TestNeedsConfirmation_ChangesExist(t *testing.T) {
 
 func TestNeedsConfirmation_NoChanges(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
 
 	// Create sandbox with clean work directory
 	name := "test-confirm-clean"
@@ -516,7 +502,6 @@ func TestNeedsConfirmation_NoChanges(t *testing.T) {
 
 func TestDestroy_RemovesDir(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
 
 	createTestSandbox(t, tmpDir, "test-destroy", "/tmp/project", "copy")
 
@@ -533,7 +518,6 @@ func TestDestroy_RemovesDir(t *testing.T) {
 
 func TestDestroy_SandboxNotFound(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
 
 	mock := &lifecycleMockRuntime{}
 	mgr := newLifecycleMgr(mock, tmpDir)
@@ -545,7 +529,6 @@ func TestDestroy_SandboxNotFound(t *testing.T) {
 
 func TestReset_RecopiesWorkdir(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
 
 	// Create original source directory
 	origDir := filepath.Join(tmpDir, "original")
@@ -627,7 +610,6 @@ func TestReset_RecopiesWorkdir(t *testing.T) {
 
 func TestReset_State(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
 
 	origDir := filepath.Join(tmpDir, "original")
 	require.NoError(t, os.MkdirAll(origDir, 0750))
@@ -689,7 +671,6 @@ func TestReset_State(t *testing.T) {
 
 func TestReset_RWMode_Error(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
 
 	hostDir := filepath.Join(tmpDir, "rw-dir")
 	require.NoError(t, os.MkdirAll(hostDir, 0750))
@@ -705,7 +686,6 @@ func TestReset_RWMode_Error(t *testing.T) {
 
 func TestReset_OriginalMissing(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
 
 	// Create original dir, then delete it
 	origDir := filepath.Join(tmpDir, "vanished")
@@ -763,7 +743,6 @@ func TestReset_InPlace_SyncsWorkdir(t *testing.T) {
 	}
 
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
 
 	// Create original source directory
 	origDir := filepath.Join(tmpDir, "original")
@@ -859,7 +838,6 @@ func TestReset_InPlace_KeepCache(t *testing.T) {
 	}
 
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
 
 	origDir := filepath.Join(tmpDir, "original")
 	require.NoError(t, os.MkdirAll(origDir, 0750))
@@ -919,7 +897,6 @@ func TestReset_InPlace_KeepFiles(t *testing.T) {
 	}
 
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
 
 	origDir := filepath.Join(tmpDir, "original")
 	require.NoError(t, os.MkdirAll(origDir, 0750))
@@ -975,7 +952,6 @@ func TestReset_InPlace_KeepFiles(t *testing.T) {
 
 func TestReset_UpgradesToRestartWhenNotRunning(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
 
 	// Create original source directory
 	origDir := filepath.Join(tmpDir, "original")
@@ -1159,7 +1135,6 @@ func TestPatchConfigAllowedDomains_MissingConfig(t *testing.T) {
 
 func TestDestroy_BrokenSandbox(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
 
 	// Create sandbox dir without environment.json (broken sandbox)
 	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", "broken")
@@ -1175,7 +1150,6 @@ func TestDestroy_BrokenSandbox(t *testing.T) {
 
 func TestDestroy_ReadOnlyFiles(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
 
 	name := "test-destroy-readonly"
 	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
@@ -1209,7 +1183,6 @@ func TestDestroy_ReadOnlyFiles(t *testing.T) {
 
 func TestNeedsConfirmation_InspectError(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
 
 	createTestSandbox(t, tmpDir, "test-confirm-err", "/tmp/project", "copy")
 

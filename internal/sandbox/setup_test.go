@@ -111,7 +111,6 @@ func TestClassifyTmuxConfig_Large(t *testing.T) {
 func setupTestManager(t *testing.T) (*Manager, *bytes.Buffer, string, config.Layout) {
 	t.Helper()
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
 
 	yoloaiDir := filepath.Join(tmpDir, ".yoloai")
 	defaultsDir := filepath.Join(yoloaiDir, "defaults")

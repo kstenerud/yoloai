@@ -15,7 +15,6 @@ import (
 func configDir(t *testing.T) (string, Layout) {
 	t.Helper()
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
 	dir := filepath.Join(tmpDir, ".yoloai", "defaults")
 	require.NoError(t, os.MkdirAll(dir, 0750))
 	return dir, NewLayout(filepath.Join(tmpDir, ".yoloai"))
@@ -26,7 +25,6 @@ func configDir(t *testing.T) (string, Layout) {
 func globalConfigDir(t *testing.T) (string, Layout) {
 	t.Helper()
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
 	dir := filepath.Join(tmpDir, ".yoloai")
 	require.NoError(t, os.MkdirAll(dir, 0750))
 	return dir, NewLayout(dir)
@@ -262,7 +260,6 @@ func TestDeleteConfigField_NonexistentKey(t *testing.T) {
 
 func TestDeleteConfigField_MissingFile(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
 	layout := NewLayout(filepath.Join(tmpDir, ".yoloai"))
 
 	// Should not error when config file doesn't exist
@@ -409,7 +406,6 @@ func TestGetConfigValue_FallsBackToDefault(t *testing.T) {
 
 func TestGetConfigValue_MissingFile(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
 	layout := NewLayout(filepath.Join(tmpDir, ".yoloai"))
 
 	// Unknown key with no file: not found
@@ -426,7 +422,6 @@ func TestGetConfigValue_MissingFile(t *testing.T) {
 
 func TestGetEffectiveConfig_Defaults(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
 	layout := NewLayout(filepath.Join(tmpDir, ".yoloai"))
 
 	out, err := GetEffectiveConfig(layout)
@@ -505,7 +500,6 @@ func TestLoadConfig_ResourcesEmpty(t *testing.T) {
 
 func TestLoadGlobalConfig_MissingFile(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
 	layout := NewLayout(filepath.Join(tmpDir, ".yoloai"))
 
 	cfg, err := LoadGlobalConfig(layout)
@@ -561,7 +555,6 @@ func TestDeleteGlobalConfigField(t *testing.T) {
 
 func TestDeleteGlobalConfigField_MissingFile(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
 	layout := NewLayout(filepath.Join(tmpDir, ".yoloai"))
 
 	require.NoError(t, DeleteGlobalConfigField(layout, "tmux_conf"))
@@ -569,7 +562,6 @@ func TestDeleteGlobalConfigField_MissingFile(t *testing.T) {
 
 func TestReadGlobalConfigRaw_MissingFile(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
 	layout := NewLayout(filepath.Join(tmpDir, ".yoloai"))
 
 	data, err := ReadGlobalConfigRaw(layout)
@@ -748,7 +740,6 @@ func TestLoadConfig_AutoCommitIntervalInvalid(t *testing.T) {
 
 func TestGetConfigValue_AutoCommitInterval(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
 	layout := NewLayout(filepath.Join(tmpDir, ".yoloai"))
 
 	// Known key with no file: returns default "0"

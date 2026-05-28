@@ -51,7 +51,6 @@ func (m *terminalMockRuntime) Inspect(ctx context.Context, name string) (runtime
 
 func TestCaptureTerminal_NotRunning(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
 	createTestSandbox(t, tmpDir, "capt-stopped", "/tmp/project", "copy")
 
 	// Runtime reports the instance isn't running → Status downgrades from
@@ -72,7 +71,6 @@ func TestCaptureTerminal_NotRunning(t *testing.T) {
 
 func TestCaptureTerminal_BuildsTmuxCommand(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
 	createTestSandbox(t, tmpDir, "capt-running", "/tmp/project", "copy")
 
 	mock := &terminalMockRuntime{
@@ -119,7 +117,6 @@ func TestCaptureTerminal_BuildsTmuxCommand(t *testing.T) {
 
 func TestCaptureTerminal_AnsiFailureReturnsPartial(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
 	createTestSandbox(t, tmpDir, "capt-partial", "/tmp/project", "copy")
 
 	mock := &terminalMockRuntime{
@@ -141,7 +138,6 @@ func TestCaptureTerminal_AnsiFailureReturnsPartial(t *testing.T) {
 
 func TestCaptureTerminal_ZeroScrollbackOmitsHistoryFlag(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
 	createTestSandbox(t, tmpDir, "capt-noscroll", "/tmp/project", "copy")
 
 	mock := &terminalMockRuntime{

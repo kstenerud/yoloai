@@ -11,7 +11,6 @@ import (
 
 func TestLoadState_Missing(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
 	layout := NewLayout(filepath.Join(tmpDir, ".yoloai"))
 
 	state, err := LoadState(layout)
@@ -21,7 +20,6 @@ func TestLoadState_Missing(t *testing.T) {
 
 func TestLoadState_Exists(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
 
 	yoloaiDir := filepath.Join(tmpDir, ".yoloai")
 	require.NoError(t, os.MkdirAll(yoloaiDir, 0750))
@@ -35,7 +33,6 @@ func TestLoadState_Exists(t *testing.T) {
 
 func TestSaveState(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
 
 	yoloaiDir := filepath.Join(tmpDir, ".yoloai")
 	require.NoError(t, os.MkdirAll(yoloaiDir, 0750))
@@ -50,7 +47,6 @@ func TestSaveState(t *testing.T) {
 
 func TestSaveState_Roundtrip(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
 
 	yoloaiDir := filepath.Join(tmpDir, ".yoloai")
 	require.NoError(t, os.MkdirAll(yoloaiDir, 0750))

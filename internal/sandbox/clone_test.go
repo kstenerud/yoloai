@@ -49,7 +49,6 @@ func createCloneSource(t *testing.T, tmpDir, name string) {
 
 func TestClone_Success(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
 
 	createCloneSource(t, tmpDir, "source")
 	mgr := newCloneMgr(tmpDir)
@@ -73,7 +72,6 @@ func TestClone_Success(t *testing.T) {
 
 func TestClone_InvalidDestName(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
 
 	createCloneSource(t, tmpDir, "source2")
 	mgr := newCloneMgr(tmpDir)
@@ -84,7 +82,6 @@ func TestClone_InvalidDestName(t *testing.T) {
 
 func TestClone_SourceNotFound(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
 
 	mgr := newCloneMgr(tmpDir)
 	err := mgr.Clone(context.Background(), CloneOptions{Source: "nonexistent", Dest: "dest2"})
@@ -94,7 +91,6 @@ func TestClone_SourceNotFound(t *testing.T) {
 
 func TestClone_DestAlreadyExists(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
 
 	createCloneSource(t, tmpDir, "src3")
 	// Create destination dir
@@ -109,7 +105,6 @@ func TestClone_DestAlreadyExists(t *testing.T) {
 
 func TestClone_MetaNameAndTimestamp(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
 
 	createCloneSource(t, tmpDir, "src4")
 	mgr := newCloneMgr(tmpDir)
@@ -127,7 +122,6 @@ func TestClone_MetaNameAndTimestamp(t *testing.T) {
 
 func TestClone_CleansUpOnMetaLoadFailure(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
 
 	// Create source without valid environment.json (just a dir)
 	srcDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", "badsrc")

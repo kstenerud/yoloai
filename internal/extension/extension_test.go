@@ -117,7 +117,6 @@ func TestLoad_MissingFile(t *testing.T) {
 
 func TestLoadAll_MultipleSorted(t *testing.T) {
 	dir := t.TempDir()
-	t.Setenv("HOME", dir)
 	layout := config.NewLayout(filepath.Join(dir, ".yoloai"))
 	extDir := filepath.Join(dir, ".yoloai", "extensions")
 	require.NoError(t, os.MkdirAll(extDir, 0750))
@@ -136,7 +135,6 @@ func TestLoadAll_MultipleSorted(t *testing.T) {
 
 func TestLoadAll_SkipsNonYAML(t *testing.T) {
 	dir := t.TempDir()
-	t.Setenv("HOME", dir)
 	layout := config.NewLayout(filepath.Join(dir, ".yoloai"))
 	extDir := filepath.Join(dir, ".yoloai", "extensions")
 	require.NoError(t, os.MkdirAll(extDir, 0750))
@@ -153,7 +151,6 @@ func TestLoadAll_SkipsNonYAML(t *testing.T) {
 
 func TestLoadAll_SkipsDirectories(t *testing.T) {
 	dir := t.TempDir()
-	t.Setenv("HOME", dir)
 	layout := config.NewLayout(filepath.Join(dir, ".yoloai"))
 	extDir := filepath.Join(dir, ".yoloai", "extensions")
 	require.NoError(t, os.MkdirAll(filepath.Join(extDir, "subdir.yaml"), 0750))
@@ -167,7 +164,6 @@ func TestLoadAll_SkipsDirectories(t *testing.T) {
 
 func TestLoadAll_MissingDirReturnsEmpty(t *testing.T) {
 	dir := t.TempDir()
-	t.Setenv("HOME", dir)
 	layout := config.NewLayout(filepath.Join(dir, ".yoloai"))
 
 	exts, err := LoadAll(layout)
@@ -177,7 +173,6 @@ func TestLoadAll_MissingDirReturnsEmpty(t *testing.T) {
 
 func TestLoadAll_ParseErrorReturned(t *testing.T) {
 	dir := t.TempDir()
-	t.Setenv("HOME", dir)
 	layout := config.NewLayout(filepath.Join(dir, ".yoloai"))
 	extDir := filepath.Join(dir, ".yoloai", "extensions")
 	require.NoError(t, os.MkdirAll(extDir, 0750))
