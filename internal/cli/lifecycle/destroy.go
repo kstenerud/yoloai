@@ -225,11 +225,7 @@ func executeDestroy(cmd *cobra.Command, ctx context.Context, c *yoloai.Client, n
 		var results []destroyResult
 		for _, name := range names {
 			slog.Info("destroying sandbox", "event", "sandbox.destroy", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
-			sb, err := c.Sandbox(name)
-			if err == nil {
-				err = sb.Destroy(ctx, yoloai.DestroyOptions{Force: true})
-			}
-			if err != nil {
+			if err := destroyOne(cmd, ctx, c, name); err != nil {
 				results = append(results, destroyResult{Name: name, Error: err.Error()})
 			} else {
 				slog.Info("sandbox destroyed", "event", "sandbox.destroy.complete", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
@@ -242,11 +238,7 @@ func executeDestroy(cmd *cobra.Command, ctx context.Context, c *yoloai.Client, n
 	var errs []error
 	for _, name := range names {
 		slog.Info("destroying sandbox", "event", "sandbox.destroy", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
-		sb, err := c.Sandbox(name)
-		if err == nil {
-			err = sb.Destroy(ctx, yoloai.DestroyOptions{Force: true})
-		}
-		if err != nil {
+		if err := destroyOne(cmd, ctx, c, name); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: destroy %s: %v\n", name, err) //nolint:errcheck // best-effort output
 			errs = append(errs, err)
 		} else {
@@ -259,4 +251,19 @@ func executeDestroy(cmd *cobra.Command, ctx context.Context, c *yoloai.Client, n
 		return fmt.Errorf("failed to destroy %d sandbox(es)", len(errs))
 	}
 	return nil
+}
+
+// destroyOne force-destroys a single sandbox and renders any advisory notices
+// (e.g. a directory that couldn't be fully removed). Returns the destroy error,
+// if any.
+func destroyOne(cmd *cobra.Command, ctx context.Context, c *yoloai.Client, name string) error {
+	sb, err := c.Sandbox(name)
+	if err != nil {
+		return err
+	}
+	res, err := sb.Destroy(ctx, yoloai.DestroyOptions{Force: true})
+	if res != nil {
+		cliutil.RenderNotices(cmd, res.Notices)
+	}
+	return err
 }

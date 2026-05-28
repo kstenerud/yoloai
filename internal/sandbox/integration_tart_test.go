@@ -200,7 +200,8 @@ func TestIntegrationTart_FullLifecycle(t *testing.T) {
 	assert.Empty(t, result.Stdout, "work dir should be clean after reset")
 
 	// Destroy
-	require.NoError(t, mgr.Destroy(ctx, sandboxName))
+	_, destroyErr := mgr.Destroy(ctx, sandboxName)
+	require.NoError(t, destroyErr)
 	assert.NoDirExists(t, sandboxDir)
 
 	// VM should be gone

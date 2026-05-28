@@ -357,23 +357,23 @@ func (m *Manager) start(ctx context.Context, name string, opts StartOptions) err
 // Destroy stops the container, removes it, and deletes the sandbox directory.
 // Always succeeds — confirmation logic is handled by the CLI layer via
 // NeedsConfirmation before calling this method.
-func (m *Manager) Destroy(ctx context.Context, name string) error {
+func (m *Manager) Destroy(ctx context.Context, name string) (*DestroyResult, error) {
 	unlock, err := store.AcquireLock(m.layout, name)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer unlock()
 	return m.destroy(ctx, name)
 }
 
-func (m *Manager) destroy(ctx context.Context, name string) error {
+func (m *Manager) destroy(ctx context.Context, name string) (*DestroyResult, error) {
 	slog.Info("destroying sandbox", "event", "sandbox.destroy", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
 	sandboxDir := m.layout.SandboxDir(name)
 	if err := store.RequireSandboxDir(sandboxDir); err != nil {
 		if errors.Is(err, ErrSandboxNotFound) {
-			return nil // nothing to destroy
+			return &DestroyResult{}, nil // nothing to destroy
 		}
-		return err
+		return nil, err
 	}
 
 	cname := store.InstanceName(name)
@@ -384,13 +384,14 @@ func (m *Manager) destroy(ctx context.Context, name string) error {
 	// Remove instance (ignore errors — may not exist)
 	_ = m.runtime.Remove(ctx, cname)
 
+	var n notices
 	// Remove sandbox directory. Some files (e.g. Go module cache) are
 	// read-only, so make everything writable first.
 	if err := forceRemoveAll(sandboxDir); err != nil {
-		fmt.Fprintf(m.output, "Warning: could not fully remove sandbox directory: %v\n", err) //nolint:errcheck // best-effort output
+		n.warnf("could not fully remove sandbox directory: %v", err)
 	}
 
-	return nil
+	return &DestroyResult{Notices: n.list}, nil
 }
 
 // resetOverlayDirs clears the overlay dirs (upper/ovlwork/merged/lower) and

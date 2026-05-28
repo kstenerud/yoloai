@@ -125,10 +125,10 @@ func (s *Sandbox) HasActiveWork(ctx context.Context) (bool, string) {
 // refuses a sandbox that HasActiveWork, returning a typed *ActiveWorkError
 // carrying the reason — the caller prompts and retries with Force true. Atomic:
 // no check-then-act gap.
-func (s *Sandbox) Destroy(ctx context.Context, opts DestroyOptions) error {
+func (s *Sandbox) Destroy(ctx context.Context, opts DestroyOptions) (*DestroyResult, error) {
 	if !opts.Force {
 		if active, reason := s.HasActiveWork(ctx); active {
-			return sandbox.NewActiveWorkError("%s", reason)
+			return nil, sandbox.NewActiveWorkError("%s", reason)
 		}
 	}
 	return s.c.manager.Destroy(ctx, s.name)

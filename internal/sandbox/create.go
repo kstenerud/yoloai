@@ -587,7 +587,7 @@ func (m *Manager) replaceSandboxIfNeeded(ctx context.Context, opts CreateOptions
 			return err
 		}
 	}
-	if err := m.destroy(ctx, opts.Name); err != nil {
+	if _, err := m.destroy(ctx, opts.Name); err != nil {
 		return fmt.Errorf("replace existing sandbox: %w", err)
 	}
 	return nil

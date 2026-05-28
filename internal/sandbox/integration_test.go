@@ -116,7 +116,8 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 	assert.Contains(t, string(applied), "fmt.Println")
 
 	// Destroy
-	require.NoError(t, mgr.Destroy(ctx, sandboxName))
+	_, destroyErr := mgr.Destroy(ctx, sandboxName)
+	require.NoError(t, destroyErr)
 	assert.NoDirExists(t, sandboxDir)
 
 	// Container should be gone
@@ -597,7 +598,8 @@ func TestIntegration_DestroyCleanup(t *testing.T) {
 	sandboxDir := mgr.Layout().SandboxDir("destroyme")
 	assert.DirExists(t, sandboxDir)
 
-	require.NoError(t, mgr.Destroy(ctx, "destroyme"))
+	_, destroyErr := mgr.Destroy(ctx, "destroyme")
+	require.NoError(t, destroyErr)
 	assert.NoDirExists(t, sandboxDir)
 
 	// Container should be removed

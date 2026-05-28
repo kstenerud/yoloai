@@ -118,7 +118,8 @@ func forceDestroyIfExists(cmd *cobra.Command, dst string) error {
 		if err != nil {
 			return err
 		}
-		return sb.Destroy(ctx, yoloai.DestroyOptions{Force: true})
+		_, destroyErr := sb.Destroy(ctx, yoloai.DestroyOptions{Force: true})
+		return destroyErr
 	})
 }
 
