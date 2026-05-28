@@ -107,10 +107,11 @@ const (
 // DirSpec describes a directory to mount in the sandbox.
 // Use this instead of raw ":copy"/":rw" string syntax.
 type DirSpec struct {
-	Path      string  // absolute host path; required
-	Mode      DirMode // mount mode; required for workdir
-	MountPath string  // custom container mount path; empty = mirror host path
-	Force     bool    // skip dirty-repo safety check
+	Path               string  // absolute host path; required
+	Mode               DirMode // mount mode; required for workdir
+	MountPath          string  // custom container mount path; empty = mirror host path
+	AllowDirty         bool    // proceed even if this directory has uncommitted git changes
+	AllowDangerousPath bool    // mount even if this is a dangerous path (e.g. $HOME); the :force suffix
 }
 
 // CreateOptions holds all parameters for sandbox creation.
@@ -129,10 +130,8 @@ type CreateOptions struct {
 	Replace      bool                  // --replace flag (safe: errors if unapplied work exists)
 	Force        bool                  // --force flag (unconditional replace, skips safety check)
 	NoStart      bool                  // --no-start flag
-	Yes          bool                  // --yes flag (skip confirmations)
 	Passthrough  []string              // args after -- passed to agent
 	Version      string                // yoloAI version for meta.json
-	Attach       bool                  // --attach flag (auto-attach after creation)
 	Debug        bool                  // --debug flag (enable entrypoint debug logging)
 	CPUs         string                // --cpus flag (e.g., "4", "2.5")
 	Memory       string                // --memory flag (e.g., "8g", "512m")
@@ -241,7 +240,7 @@ type containerConfig struct {
 }
 
 // Create creates and optionally starts a new sandbox.
-// Returns the sandbox name on success (empty if user cancelled or no-start).
+// Returns the sandbox name on success (empty on no-start).
 func (m *Manager) Create(ctx context.Context, opts CreateOptions) (string, error) {
 	unlock, err := store.AcquireLock(m.layout, opts.Name)
 	if err != nil {
@@ -268,12 +267,9 @@ func (m *Manager) Create(ctx context.Context, opts CreateOptions) (string, error
 	if err != nil {
 		return "", err
 	}
-	if state == nil {
-		return "", nil // user cancelled
-	}
 
 	if opts.NoStart {
-		m.printCreationOutput(state, false)
+		m.printCreationOutput(state)
 		return "", nil
 	}
 
@@ -295,7 +291,7 @@ func (m *Manager) Create(ctx context.Context, opts CreateOptions) (string, error
 	}
 
 	slog.Info("sandbox created", "event", "sandbox.create.complete", "sandbox", state.name)
-	m.printCreationOutput(state, opts.Attach)
+	m.printCreationOutput(state)
 	return state.name, nil
 }
 
@@ -345,12 +341,9 @@ func (m *Manager) prepareSandboxState(ctx context.Context, opts CreateOptions, c
 		return nil, err
 	}
 
-	workdir, auxDirs, err := m.parseAndValidateDirs(ctx, opts, agentDef, pr.env, ycfg.Model, credOverrides)
+	workdir, auxDirs, err := m.parseAndValidateDirs(opts, agentDef, pr.env, ycfg.Model, credOverrides)
 	if err != nil {
 		return nil, err
-	}
-	if workdir == nil {
-		return nil, nil // user cancelled
 	}
 
 	// Phase 2: Create directory structure and seed sandbox.
@@ -849,9 +842,9 @@ func (m *Manager) launchContainer(ctx context.Context, state *sandboxState) erro
 	return m.buildAndStart(ctx, state, mounts, ports, secretsDir != "")
 }
 
-// printCreationOutput prints the context-aware summary.
-// When autoAttach is true, the attach hint is suppressed (we're about to attach).
-func (m *Manager) printCreationOutput(state *sandboxState, autoAttach bool) {
+// printCreationOutput prints the context-aware creation summary plus the
+// next-step hint (attach / diff).
+func (m *Manager) printCreationOutput(state *sandboxState) {
 	if state == nil {
 		return
 	}
@@ -883,10 +876,6 @@ func (m *Manager) printCreationOutput(state *sandboxState, autoAttach bool) {
 		fmt.Fprintf(m.output, "  Ports:    %s\n", strings.Join(state.ports, ", ")) //nolint:errcheck // best-effort output
 	}
 	fmt.Fprintln(m.output) //nolint:errcheck // best-effort output
-
-	if autoAttach {
-		return
-	}
 
 	if state.hasPrompt {
 		fmt.Fprintf(m.output, "Run 'yoloai attach %s' to interact (Ctrl-b d to detach)\n", state.name) //nolint:errcheck // best-effort output

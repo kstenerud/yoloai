@@ -33,6 +33,7 @@ const (
 	ExitSandboxLocked = 9
 	ExitDiskSpace     = 10
 	ExitResourceLimit = 11
+	ExitDirtyWorkdir  = 12
 )
 
 // ExitCoder is implemented by typed errors that map to a specific
@@ -85,6 +86,33 @@ func (e *ActiveWorkError) ExitCode() int { return ExitActiveWork }
 func NewActiveWorkError(format string, args ...any) *ActiveWorkError {
 	return &ActiveWorkError{Err: fmt.Errorf(format, args...)}
 }
+
+// DirtyDir names a host directory with uncommitted git changes and a short
+// human summary of its status (e.g. "3 modified, 1 untracked").
+type DirtyDir struct {
+	Path   string
+	Status string
+}
+
+// DirtyWorkdirError indicates one or more host directories slated for the
+// sandbox have uncommitted git changes (exit code 12). Create refuses by
+// default rather than prompting: the agent would see — and could modify or
+// lose — that uncommitted work, and on :copy a later apply conflicts with the
+// still-dirty host. The caller consciously overrides per-directory via
+// DirSpec.AllowDirty (or CreateOptions.AllowDirtyWorkdir for the workdir).
+type DirtyWorkdirError struct {
+	Dirs []DirtyDir
+}
+
+func (e *DirtyWorkdirError) Error() string {
+	var b strings.Builder
+	b.WriteString("uncommitted changes in:")
+	for _, d := range e.Dirs {
+		fmt.Fprintf(&b, "\n  %s (%s)", d.Path, d.Status)
+	}
+	return b.String()
+}
+func (e *DirtyWorkdirError) ExitCode() int { return ExitDirtyWorkdir }
 
 // DependencyError indicates required software is not installed or not running (exit code 5).
 type DependencyError struct{ Err error }

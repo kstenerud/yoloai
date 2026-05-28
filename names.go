@@ -7,6 +7,7 @@ package yoloai
 import (
 	"github.com/kstenerud/yoloai/internal/agent"
 	"github.com/kstenerud/yoloai/internal/runtime"
+	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
 )
 
@@ -132,4 +133,44 @@ const (
 	IsolationModeVM                  IsolationMode = runtime.IsolationModeVM
 	IsolationModeVMEnhanced          IsolationMode = runtime.IsolationModeVMEnhanced
 	IsolationModeProcess             IsolationMode = runtime.IsolationModeProcess
+)
+
+// DirtyWorkdirError is returned by Create (and Run) when the workdir — or an
+// aux directory — has uncommitted git changes and the caller has not acked it
+// (via CreateOptions.AllowDirtyWorkdir / DirSpec.AllowDirty, or
+// RunOptions.AllowDirtyWorkdir). Catch it with errors.As to render a prompt and
+// retry with the ack set. Re-exported (type alias) from internal/sandbox.
+type DirtyWorkdirError = sandbox.DirtyWorkdirError
+
+// DirtyDir names one uncommitted directory inside a DirtyWorkdirError: its host
+// Path and a short Status summary (e.g. "3 modified, 1 untracked").
+type DirtyDir = sandbox.DirtyDir
+
+// DirSpec describes a directory to mount in the sandbox: host Path, mount
+// Mode, optional container MountPath, and the per-directory safety acks
+// (AllowDirty for uncommitted git changes, AllowDangerousPath for the :force
+// dangerous-path override). Re-exported (type alias) from internal/sandbox so
+// embedders populate CreateOptions.Workdir / AuxDirs without importing
+// internal packages. F1.
+type DirSpec = sandbox.DirSpec
+
+// DirMode names how a directory is mounted into the sandbox. Closed set.
+// Re-exported (type alias) from internal/sandbox.
+type DirMode = sandbox.DirMode
+
+const (
+	DirModeCopy    DirMode = sandbox.DirModeCopy    // full copy; diff/apply workflow (default)
+	DirModeOverlay DirMode = sandbox.DirModeOverlay // overlayfs upper layer; diff/apply (Docker-only)
+	DirModeRW      DirMode = sandbox.DirModeRW      // live read-write bind mount
+	DirModeRO      DirMode = sandbox.DirModeRO      // read-only bind mount
+)
+
+// NetworkMode names a sandbox's network access policy. Closed set.
+// Re-exported (type alias) from internal/sandbox.
+type NetworkMode = sandbox.NetworkMode
+
+const (
+	NetworkModeDefault  NetworkMode = sandbox.NetworkModeDefault  // full network access
+	NetworkModeNone     NetworkMode = sandbox.NetworkModeNone     // no network access
+	NetworkModeIsolated NetworkMode = sandbox.NetworkModeIsolated // allowlist only
 )

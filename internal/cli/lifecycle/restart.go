@@ -67,10 +67,7 @@ func runRestart(cmd *cobra.Command, args []string, opts *restartOpts) error {
 	backend := cliutil.ResolveBackendForSandbox(name)
 	return cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
 		slog.Info("restarting sandbox", "event", "sandbox.restart", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
-		if err := c.Stop(ctx, name); err != nil {
-			return err
-		}
-		if err := c.Start(ctx, name, sandbox.StartOptions{
+		if err := c.Sandbox(name).Restart(ctx, sandbox.StartOptions{
 			Resume:       opts.resume,
 			Prompt:       opts.prompt,
 			PromptFile:   opts.promptFile,
@@ -89,7 +86,7 @@ func runRestart(cmd *cobra.Command, args []string, opts *restartOpts) error {
 		}
 
 		if opts.attach {
-			return c.Attach(ctx, name, cliutil.IOStreams())
+			return c.Sandbox(name).Attach(ctx, cliutil.IOStreams())
 		}
 
 		_, err := fmt.Fprintf(cmd.OutOrStdout(), "Sandbox %s restarted\nRun 'yoloai attach %s' to reconnect\n", name, name)

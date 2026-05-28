@@ -55,18 +55,18 @@ func runAttach(cmd *cobra.Command, args []string, opts *attachOpts) error {
 		// stopped or in a terminal state. Active/Idle sandboxes get an
 		// in-place attach.
 		if opts.resume {
-			info, err := c.Inspect(ctx, name)
+			info, err := c.Sandbox(name).Inspect(ctx)
 			if err != nil {
 				return cliutil.SandboxErrorHint(name, err)
 			}
 			if info.Status != sandbox.StatusActive && info.Status != sandbox.StatusIdle {
-				if err := c.Start(ctx, name, sandbox.StartOptions{Resume: true}); err != nil {
+				if err := c.Sandbox(name).Start(ctx, sandbox.StartOptions{Resume: true}); err != nil {
 					return err
 				}
 			}
 		}
 
 		slog.Debug("attaching to sandbox", "event", "sandbox.attach", "sandbox", name) //nolint:gosec // G706: name is validated
-		return c.Attach(ctx, name, cliutil.IOStreams())
+		return c.Sandbox(name).Attach(ctx, cliutil.IOStreams())
 	})
 }

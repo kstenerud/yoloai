@@ -256,7 +256,7 @@ func applyCLIOverrides(opts *CreateOptions, pr *profileResult) error {
 // overlap detection, and dirty repo warnings. Returns nil workdir if the user cancelled.
 // cfgModel is the model from config.yaml (needed for local model server check).
 // credOverrides contains sudo-recovered credential defaults for keys absent from os.Environ.
-func (m *Manager) parseAndValidateDirs(ctx context.Context, opts CreateOptions, agentDef *agent.Definition, mergedEnv map[string]string, cfgModel string, credOverrides map[string]string) (*DirSpec, []*DirSpec, error) {
+func (m *Manager) parseAndValidateDirs(opts CreateOptions, agentDef *agent.Definition, mergedEnv map[string]string, cfgModel string, credOverrides map[string]string) (*DirSpec, []*DirSpec, error) {
 	// Convert workdir DirSpec to DirSpec
 	if opts.Workdir.Path == "" {
 		return nil, nil, NewUsageError("no workdir specified and no default workdir in profile")
@@ -288,12 +288,8 @@ func (m *Manager) parseAndValidateDirs(ctx context.Context, opts CreateOptions, 
 		return nil, nil, err
 	}
 
-	cancelled, err := m.checkDirtyRepos(ctx, workdir, auxDirs, opts.Yes)
-	if err != nil {
+	if err := checkDirtyRepos(workdir, auxDirs); err != nil {
 		return nil, nil, err
-	}
-	if cancelled {
-		return nil, nil, nil // user cancelled
 	}
 
 	return workdir, auxDirs, nil
@@ -398,7 +394,7 @@ func buildAuxDirs(auxSpecs []DirSpec) ([]*DirSpec, error) {
 // homeDir is used to detect if the user's home directory is being mounted.
 func checkDirSafety(workdir *DirSpec, auxDirs []*DirSpec, output io.Writer, homeDir string) error {
 	if workspace.IsDangerousDir(workdir.Path, homeDir) {
-		if workdir.Force {
+		if workdir.AllowDangerousPath {
 			fmt.Fprintf(output, "WARNING: mounting dangerous directory %s\n", workdir.Path) //nolint:errcheck // best-effort output
 		} else {
 			return NewUsageError("refusing to mount dangerous directory %s (use :force to override)", workdir.Path)
@@ -406,7 +402,7 @@ func checkDirSafety(workdir *DirSpec, auxDirs []*DirSpec, output io.Writer, home
 	}
 	for _, ad := range auxDirs {
 		if workspace.IsDangerousDir(ad.Path, homeDir) {
-			if ad.Force {
+			if ad.AllowDangerousPath {
 				fmt.Fprintf(output, "WARNING: mounting dangerous directory %s\n", ad.Path) //nolint:errcheck // best-effort output
 			} else {
 				return NewUsageError("refusing to mount dangerous directory %s (use :force to override)", ad.Path)
@@ -437,38 +433,40 @@ func checkDirOverlaps(workdir *DirSpec, auxDirs []*DirSpec) error {
 	return nil
 }
 
-// checkDirtyRepos checks for uncommitted changes in workdir and aux dirs.
-// Returns (cancelled, error): cancelled is true if the user declined to continue.
-func (m *Manager) checkDirtyRepos(ctx context.Context, workdir *DirSpec, auxDirs []*DirSpec, yes bool) (bool, error) {
-	var dirtyWarnings []string
-	if msg, err := workspace.CheckDirtyRepo(workdir.Path); err != nil {
-		return false, fmt.Errorf("check repo status: %w", err)
-	} else if msg != "" {
-		dirtyWarnings = append(dirtyWarnings, fmt.Sprintf("%s: %s", workdir.Path, msg))
+// checkDirtyRepos refuses creation when the workdir or any diff/apply aux dir
+// has uncommitted git changes, unless that directory opted in via AllowDirty.
+// It never prompts: a dirty directory the caller has not acked yields a
+// *DirtyWorkdirError the caller must consciously override. The CLI catches it,
+// prompts, and retries with AllowDirty set.
+func checkDirtyRepos(workdir *DirSpec, auxDirs []*DirSpec) error {
+	var dirty []DirtyDir
+	check := func(d *DirSpec) error {
+		if d.AllowDirty {
+			return nil
+		}
+		msg, err := workspace.CheckDirtyRepo(d.Path)
+		if err != nil {
+			return fmt.Errorf("check repo status: %w", err)
+		}
+		if msg != "" {
+			dirty = append(dirty, DirtyDir{Path: d.Path, Status: msg})
+		}
+		return nil
+	}
+	if err := check(workdir); err != nil {
+		return err
 	}
 	for _, ad := range auxDirs {
 		if ad.Mode == "copy" || ad.Mode == "overlay" || ad.Mode == "rw" {
-			if msg, err := workspace.CheckDirtyRepo(ad.Path); err != nil {
-				return false, fmt.Errorf("check repo status: %w", err)
-			} else if msg != "" {
-				dirtyWarnings = append(dirtyWarnings, fmt.Sprintf("%s: %s", ad.Path, msg))
+			if err := check(ad); err != nil {
+				return err
 			}
 		}
 	}
-	if len(dirtyWarnings) > 0 && !yes {
-		for _, w := range dirtyWarnings {
-			fmt.Fprintf(m.output, "WARNING: %s has uncommitted changes (%s)\n", strings.SplitN(w, ": ", 2)[0], strings.SplitN(w, ": ", 2)[1]) //nolint:errcheck // best-effort output
-		}
-		fmt.Fprintln(m.output, "These changes will be visible to the agent and could be modified or lost.") //nolint:errcheck // best-effort output
-		confirmed, err := Confirm(ctx, "Continue? [y/N] ", m.input, m.output)
-		if err != nil {
-			return false, err
-		}
-		if !confirmed {
-			return true, nil // user cancelled
-		}
+	if len(dirty) > 0 {
+		return &DirtyWorkdirError{Dirs: dirty}
 	}
-	return false, nil
+	return nil
 }
 
 // setupWorkdir copies/overlays the workdir, strips git metadata, and creates
@@ -726,10 +724,8 @@ func (m *Manager) resolveAndApplyArchetype(ctx context.Context, opts *CreateOpti
 		return "", nil, nil, nil, err
 	}
 
-	// Step 3: requires: validation
-	if err := checkRequires(ctx, m.input, m.output, yamlCfg, opts.Yes); err != nil {
-		return "", nil, nil, nil, err
-	}
+	// Step 3: requires: validation (warning only — version verification unimplemented)
+	checkRequires(m.output, yamlCfg)
 
 	// Step 4: Archetype expansion
 	devcontainerCfg, dcMounts, dcMountWarnings, bullets, err := m.expandArchetype(ctx, opts, pr, arch, yamlCfg)
@@ -784,25 +780,18 @@ func checkAppleArchetype(output io.Writer, arch archetype.Archetype, cliArchetyp
 	return nil
 }
 
-// checkRequires validates the requires: constraints from .yoloai.yaml.
-func checkRequires(ctx context.Context, input io.Reader, output io.Writer, yamlCfg *archetype.YoloAIProjectConfig, yes bool) error {
+// checkRequires warns about the requires: constraints from .yoloai.yaml.
+// Version verification is not yet implemented, so this is a non-blocking
+// notice — there is nothing to enforce, so proceeding is always correct. When
+// real verification lands it should refuse with a typed *RequirementsNotMetError
+// carrying the offending tool/version, not gate on "unverified".
+func checkRequires(output io.Writer, yamlCfg *archetype.YoloAIProjectConfig) {
 	if yamlCfg == nil || len(yamlCfg.Requires) == 0 {
-		return nil
+		return
 	}
 	for tool, constraint := range yamlCfg.Requires {
 		fmt.Fprintf(output, "Warning: requires: %s %s — version verification not yet implemented; continuing.\n", tool, constraint) //nolint:errcheck // best-effort warning
 	}
-	if yes {
-		return nil
-	}
-	confirmed, err := Confirm(ctx, "Continue anyway? [y/N] ", input, output)
-	if err != nil {
-		return err
-	}
-	if !confirmed {
-		return fmt.Errorf("aborted due to unverified requires: constraints")
-	}
-	return nil
 }
 
 // expandArchetype applies archetype-specific settings to opts and pr.

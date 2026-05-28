@@ -562,6 +562,27 @@ func (*Client) Clone(ctx context.Context, opts CloneOptions) (*Info, error) {
 // =============================================================================
 // Sandbox handle — name-bound; methods for one sandbox
 // =============================================================================
+//
+// IMPLEMENTATION DIVERGENCE (F2 re-rooting, 2026-05-28). This section is the
+// aspiration; the landed handle reconciled it to the facts (see
+// feedback "api_surface aspirational" / working-notes D-entries):
+//   - Status() — DEFERRED. There is no cheap status-only path in the manager
+//     (Inspect does the git forks); a "cheap polling companion" can't be
+//     delivered honestly yet, so it wasn't added.
+//   - Restart — SIMPLIFIED. Implemented as stop+start taking StartOptions
+//     (isolation override already rides StartOptions.Isolation). The elaborate
+//     RestartOptions isolation-transition policy below (cross-backend refusal,
+//     gVisor+overlay AcceptOverlayDataLoss) has no internal basis and is
+//     deferred to its own finding.
+//   - Destroy — DestroyOptions{Force} (not SkipApplyCheck); Force false returns
+//     a typed *ActiveWorkError. NeedsConfirmation is NOT deleted outright: the
+//     batch CLI destroy needs a side-effect-free pre-check, exposed as
+//     Sandbox.HasActiveWork(ctx) (bool, reason).
+//   - Option types — StartOptions/Info/Status are re-exported aliases;
+//     ResetOptions/DestroyOptions/ExecOptions are hand-written public structs.
+//     ResetOptions drops Name (the handle supplies it); Restart→RestartContainer.
+//   - Exec — Exec(ExecOptions{Command, PTY}, IOStreams); PTY=false folds the old
+//     StdioExec (pipes via IOStreams.In/Out/Err). No ExecResult yet (returns error).
 
 // Sandbox is a name-bound handle for one sandbox. Construct via
 // Client.Sandbox(ctx, name), which validates that the name resolves

@@ -1,6 +1,6 @@
 // ABOUTME: 'new' command — create and start a sandbox in one step. Wires CLI
-// ABOUTME: flags to sandbox.CreateOptions, validates isolation/OS combos, and
-// ABOUTME: handles the optional auto-attach after creation.
+// ABOUTME: flags to yoloai.CreateOptions, validates isolation/OS combos, prompts
+// ABOUTME: on a dirty workdir, and handles the optional auto-attach after creation.
 package lifecycle
 
 import (
@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	goruntime "runtime"
+	"strconv"
 	"strings"
 
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
@@ -72,7 +73,7 @@ func runNewCmd(cmd *cobra.Command, args []string, version string) error {
 		return err
 	}
 
-	opts, err := resolveNewCmdOptions(cmd, version, name, rawWorkdirArg, passthrough, profileFlag)
+	opts, attach, err := resolveNewCmdOptions(cmd, name, rawWorkdirArg, passthrough, profileFlag)
 	if err != nil {
 		return err
 	}
@@ -84,7 +85,7 @@ func runNewCmd(cmd *cobra.Command, args []string, version string) error {
 		cliutil.WarnIfLowDisk(cmd.ErrOrStderr(), cliutil.Layout().SandboxesDir())
 	}
 
-	if opts.Attach && !opts.NoStart {
+	if attach && !opts.NoStart {
 		cliutil.SetTerminalTitle(name)
 		defer cliutil.SetTerminalTitle("")
 	}
@@ -104,12 +105,13 @@ func runNewCmd(cmd *cobra.Command, args []string, version string) error {
 		Backend: yoloai.BackendName(backend),
 		Input:   cmd.InOrStdin(),
 		Output:  mgrOutput,
+		Version: version,
 	})
 	if err != nil {
 		return fmt.Errorf("connect to runtime: %w", err)
 	}
 	defer c.Close() //nolint:errcheck // best-effort cleanup
-	return executeNewCreate(cmd, cmd.Context(), c, opts)
+	return executeNewCreate(cmd, cmd.Context(), c, opts, attach)
 }
 
 // parseNewCmdPositional validates and splits positional args for the new command.
@@ -142,8 +144,9 @@ func parseNewCmdPositional(cmd *cobra.Command, args []string) (name, rawWorkdirA
 	return name, rawWorkdirArg, passthrough, profileFlag, nil
 }
 
-// resolveNewCmdOptions reads all flags and builds the sandbox.CreateOptions.
-func resolveNewCmdOptions(cmd *cobra.Command, version, name, rawWorkdirArg string, passthrough []string, profileFlag string) (sandbox.CreateOptions, error) {
+// resolveNewCmdOptions reads all flags and builds the public yoloai.CreateOptions.
+// attach is returned separately — it gates the post-create handoff, not creation.
+func resolveNewCmdOptions(cmd *cobra.Command, name, rawWorkdirArg string, passthrough []string, profileFlag string) (yoloai.CreateOptions, bool, error) {
 	prompt, _ := cmd.Flags().GetString("prompt")
 	promptFile, _ := cmd.Flags().GetString("prompt-file")
 	model := cliutil.ResolveModel(cmd)
@@ -151,7 +154,7 @@ func resolveNewCmdOptions(cmd *cobra.Command, version, name, rawWorkdirArg strin
 	networkNone, _ := cmd.Flags().GetBool("network-none")
 	networkIsolated, _ := cmd.Flags().GetBool("network-isolated")
 	networkAllow, _ := cmd.Flags().GetStringSlice("network-allow")
-	ports, _ := cmd.Flags().GetStringSlice("port")
+	rawPorts, _ := cmd.Flags().GetStringSlice("port")
 	rawDirs, _ := cmd.Flags().GetStringSlice("dir")
 
 	if len(networkAllow) > 0 {
@@ -167,10 +170,15 @@ func resolveNewCmdOptions(cmd *cobra.Command, version, name, rawWorkdirArg strin
 	attach, _ := cmd.Flags().GetBool("attach")
 
 	if cliutil.JSONEnabled(cmd) && attach {
-		return sandbox.CreateOptions{}, sandbox.NewUsageError("--json and --attach are incompatible")
+		return yoloai.CreateOptions{}, false, sandbox.NewUsageError("--json and --attach are incompatible")
 	}
-	if networkNone && len(ports) > 0 {
-		return sandbox.CreateOptions{}, sandbox.NewUsageError("--port is incompatible with --network-none")
+	if networkNone && len(rawPorts) > 0 {
+		return yoloai.CreateOptions{}, false, sandbox.NewUsageError("--port is incompatible with --network-none")
+	}
+
+	ports, err := parsePortFlags(rawPorts)
+	if err != nil {
+		return yoloai.CreateOptions{}, false, err
 	}
 
 	cpus, _ := cmd.Flags().GetString("cpus")
@@ -183,31 +191,31 @@ func resolveNewCmdOptions(cmd *cobra.Command, version, name, rawWorkdirArg strin
 
 	isolation, _, err := resolveNewIsolationOS(cmd)
 	if err != nil {
-		return sandbox.CreateOptions{}, err
+		return yoloai.CreateOptions{}, false, err
 	}
 
 	envMap, err := parseEnvSlice(envSlice)
 	if err != nil {
-		return sandbox.CreateOptions{}, err
+		return yoloai.CreateOptions{}, false, err
 	}
 
 	workdirSpec, auxDirSpecs, err := resolveNewDirSpecs(rawWorkdirArg, rawDirs)
 	if err != nil {
-		return sandbox.CreateOptions{}, err
+		return yoloai.CreateOptions{}, false, err
 	}
 
-	networkMode := sandbox.NetworkModeDefault
+	networkMode := yoloai.NetworkModeDefault
 	if networkNone {
-		networkMode = sandbox.NetworkModeNone
+		networkMode = yoloai.NetworkModeNone
 	} else if networkIsolated {
-		networkMode = sandbox.NetworkModeIsolated
+		networkMode = yoloai.NetworkModeIsolated
 	}
 
-	return sandbox.CreateOptions{
+	return yoloai.CreateOptions{
 		Name:         name,
 		Workdir:      workdirSpec,
 		AuxDirs:      auxDirSpecs,
-		Agent:        agentName,
+		Agent:        yoloai.AgentName(agentName),
 		Model:        model,
 		Profile:      profileFlag,
 		Prompt:       prompt,
@@ -218,10 +226,7 @@ func resolveNewCmdOptions(cmd *cobra.Command, version, name, rawWorkdirArg strin
 		Replace:      replace,
 		Force:        force,
 		NoStart:      noStart,
-		Attach:       attach,
-		Yes:          cliutil.EffectiveYes(cmd),
 		Passthrough:  passthrough,
-		Version:      version,
 		Debug:        debug,
 		CPUs:         cpus,
 		Memory:       memory,
@@ -230,7 +235,36 @@ func resolveNewCmdOptions(cmd *cobra.Command, version, name, rawWorkdirArg strin
 		Runtimes:     runtimes,
 		VscodeTunnel: vscodeTunnel,
 		Archetype:    archetypeFlag,
-	}, nil
+		// --yes pre-acks the dirty-workdir refusal; without it, a dirty workdir
+		// triggers the interactive prompt in executeNewCreate.
+		AllowDirtyWorkdir: cliutil.EffectiveYes(cmd),
+	}, attach, nil
+}
+
+// parsePortFlags parses --port "host:container" strings into typed PortMappings
+// at the CLI boundary (Q-Y: the public surface takes []PortMapping). Protocol
+// is tcp — the only mode the backend pipeline supports today.
+func parsePortFlags(rawPorts []string) ([]yoloai.PortMapping, error) {
+	if len(rawPorts) == 0 {
+		return nil, nil
+	}
+	ports := make([]yoloai.PortMapping, 0, len(rawPorts))
+	for _, p := range rawPorts {
+		host, container, ok := strings.Cut(p, ":")
+		if !ok {
+			return nil, sandbox.NewUsageError("invalid port format %q (expected host:container)", p)
+		}
+		hostPort, err := strconv.Atoi(host)
+		if err != nil {
+			return nil, sandbox.NewUsageError("invalid host port %q in mapping %q", host, p)
+		}
+		containerPort, err := strconv.Atoi(container)
+		if err != nil {
+			return nil, sandbox.NewUsageError("invalid container port %q in mapping %q", container, p)
+		}
+		ports = append(ports, yoloai.PortMapping{HostPort: hostPort, ContainerPort: containerPort, Protocol: "tcp"})
+	}
+	return ports, nil
 }
 
 // parseEnvSlice parses KEY=VAL env flag values into a map.
@@ -274,10 +308,21 @@ func resolveNewDirSpecs(rawWorkdirArg string, rawDirs []string) (workdirSpec san
 	return workdirSpec, auxDirSpecs, nil
 }
 
-// executeNewCreate creates the sandbox via Client.Create and (when --attach)
-// hands off to Client.Attach for the interactive session.
-func executeNewCreate(cmd *cobra.Command, ctx context.Context, c *yoloai.Client, opts sandbox.CreateOptions) error {
+// executeNewCreate creates the sandbox via Client.Create and (when attach)
+// hands off to Sandbox.Attach for the interactive session. If Create refuses a
+// dirty workdir (*DirtyWorkdirError) and we're interactive, it warns, prompts,
+// and retries with the workdir acked — the library never prompts itself.
+func executeNewCreate(cmd *cobra.Command, ctx context.Context, c *yoloai.Client, opts yoloai.CreateOptions, attach bool) error {
 	sandboxName, err := c.Create(ctx, opts)
+
+	var dirty *yoloai.DirtyWorkdirError
+	if errors.As(err, &dirty) && !cliutil.JSONEnabled(cmd) {
+		if !confirmDirtyWorkdir(cmd, dirty) {
+			return nil // user declined — cancel cleanly
+		}
+		opts.AllowDirtyWorkdir = true
+		sandboxName, err = c.Create(ctx, opts)
+	}
 	if err != nil {
 		return err
 	}
@@ -297,11 +342,24 @@ func executeNewCreate(cmd *cobra.Command, ctx context.Context, c *yoloai.Client,
 		return cliutil.WriteJSON(cmd.OutOrStdout(), meta)
 	}
 
-	if sandboxName == "" || !opts.Attach || opts.NoStart {
+	if sandboxName == "" || !attach || opts.NoStart {
 		return nil
 	}
 
-	return c.Attach(ctx, sandboxName, cliutil.IOStreams())
+	return c.Sandbox(sandboxName).Attach(ctx, cliutil.IOStreams())
+}
+
+// confirmDirtyWorkdir renders the uncommitted-changes warning and asks the user
+// whether to proceed. It owns the prompt the manager used to run inline (D24):
+// the library now refuses with a typed error and the CLI decides interactively.
+func confirmDirtyWorkdir(cmd *cobra.Command, dirty *yoloai.DirtyWorkdirError) bool {
+	out := cmd.ErrOrStderr()
+	for _, d := range dirty.Dirs {
+		fmt.Fprintf(out, "WARNING: %s has uncommitted changes (%s)\n", d.Path, d.Status) //nolint:errcheck // best-effort output
+	}
+	fmt.Fprintln(out, "These changes will be visible to the agent and could be modified or lost.") //nolint:errcheck // best-effort output
+	confirmed, err := sandbox.Confirm(cmd.Context(), "Continue? [y/N] ", cmd.InOrStdin(), out)
+	return err == nil && confirmed
 }
 
 // resolveNewIsolationOS resolves the --isolation and --os flags with config fallback

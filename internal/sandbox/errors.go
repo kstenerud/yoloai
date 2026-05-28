@@ -41,6 +41,12 @@ type ActiveWorkError = yoerrors.ActiveWorkError
 // NewActiveWorkError wraps a message as an ActiveWorkError.
 var NewActiveWorkError = yoerrors.NewActiveWorkError
 
+// DirtyWorkdirError is an alias for yoerrors.DirtyWorkdirError.
+type DirtyWorkdirError = yoerrors.DirtyWorkdirError
+
+// DirtyDir is an alias for yoerrors.DirtyDir.
+type DirtyDir = yoerrors.DirtyDir
+
 // DependencyError is an alias for yoerrors.DependencyError.
 type DependencyError = yoerrors.DependencyError
 

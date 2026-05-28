@@ -471,3 +471,38 @@ func TestSetupWorkdir_OverlayModeDeferBaseline(t *testing.T) {
 		assert.Empty(t, baselineSHA, "overlay mode should defer baseline for all backends")
 	}
 }
+
+// --- checkDirtyRepos (typed refusal, never prompts) ---
+
+func TestCheckDirtyRepos_RefusesUntilAcked(t *testing.T) {
+	dir := t.TempDir()
+	initGitRepo(t, dir)
+	writeTestFile(t, dir, "tracked.txt", "hi")
+	gitAdd(t, dir, ".")
+	gitCommit(t, dir, "init")
+	writeTestFile(t, dir, "wip.txt", "uncommitted") // now dirty (untracked)
+
+	wd := &DirSpec{Path: dir, Mode: DirModeCopy}
+
+	// Default: refuse with a typed *DirtyWorkdirError naming the dir — no prompt.
+	err := checkDirtyRepos(wd, nil)
+	var dwe *DirtyWorkdirError
+	require.ErrorAs(t, err, &dwe)
+	require.Len(t, dwe.Dirs, 1)
+	assert.Equal(t, dir, dwe.Dirs[0].Path)
+	assert.NotEmpty(t, dwe.Dirs[0].Status)
+
+	// AllowDirty acks the specific directory → proceeds.
+	wd.AllowDirty = true
+	require.NoError(t, checkDirtyRepos(wd, nil))
+}
+
+func TestCheckDirtyRepos_CleanRepoPasses(t *testing.T) {
+	dir := t.TempDir()
+	initGitRepo(t, dir)
+	writeTestFile(t, dir, "tracked.txt", "hi")
+	gitAdd(t, dir, ".")
+	gitCommit(t, dir, "init")
+
+	require.NoError(t, checkDirtyRepos(&DirSpec{Path: dir, Mode: DirModeCopy}, nil))
+}

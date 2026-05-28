@@ -16,7 +16,12 @@ documented boundary between basic and advanced.
 
 **Designed + signed off (2026-05-28):** `f1-f3-public-surface.md`. Escape
 hatch is `Create(ctx, yoloai.CreateOptions)` (public struct), not `RunRaw`.
-6 decisions resolved there. Implementation lands with the F2 re-rooting.
+6 decisions resolved there.
+
+**CLOSED (2026-05-28).** Public `yoloai.CreateOptions` + re-exported
+`DirSpec`/`DirMode`/`NetworkMode` shipped (`create_options.go`, `names.go`);
+`Create` takes it; `sandbox.CreateOptions` off the `f1KnownLeaks` baseline.
+Implemented ahead of the F2 re-rooting (F2 is now independent follow-up work).
 
 ### F2 — Sub-handle grouping: judge per-method, present for owner approval
 
@@ -27,11 +32,30 @@ the owner before implementation. Owner may overrule any individual
 choice or accept `api_surface.go`'s design verbatim.
 
 **Mapping produced (2026-05-28):** `f2-subhandle-mapping.md` — full
-per-method proposal + the 6 open decisions. Awaiting owner sign-off
-before the re-rooting PR. (Note: api_surface.go designs only
+per-method proposal + the 6 open decisions. (Note: api_surface.go designs only
 `Workdir()`/`Files()`/`Network()` sub-handles; `Logs`/`Exec` are direct
 `Sandbox` methods, so the plan's `…Logs()`/`…Exec()` options are not
 recommended.)
+
+**Step 2 LANDED (2026-05-28):** the lifecycle/interaction re-rooting. All
+per-sandbox ops moved from `Client` onto `client.Sandbox(name)` (Inspect, Status
+deferred, Start, Stop, Restart, Reset, Destroy, Attach, Exec, SendInput,
+ContainerLogs, Dir); `StdioExec` folded into `Exec(ExecOptions{PTY})`; `Destroy`
+returns a typed `*ActiveWorkError` and `NeedsConfirmation`→`HasActiveWork`
+(kept as a pure batch pre-check — facts-first divergence from "delete it");
+`ErrUnappliedChanges` removed. Closed `StartOptions`/`ResetOptions`/`Info` (+
+`CreateOptions` from Step 1) leaks. api_surface divergences (deferred `Status()`
++ Restart isolation-policy) noted inline. **Remaining F2:** Steps 3–5 — the
+`Workdir()` diff/patch/apply/commits sub-handle (still on `Client`).
+
+**Step 3 LANDED (2026-05-28):** `Sandbox(name).Workdir().Diff(DiffOptions)` folds
+`Diff`/`DiffWithOptions`/`DiffOverlay`/`DiffRef` into one verb (copy/overlay
+resolved internally from `meta.Workdir.Mode`); the four root methods + the
+overlay-explicit path are deleted. **Reconciled (§12):** Step 3 is Diff *only* —
+the patch-generation methods (`GeneratePatch`/`GenerateWIPDiff`/`OverlayPatch`)
+proved to be apply-plumbing with a per-dir `[]PatchSet` overlay shape that
+doesn't fit a single `Patch()→bytes`, so they fold into **Step 4 (Apply)**.
+**Remaining F2:** Step 4 (Apply + patch generation), Step 5 (commits/baseline).
 
 ### F3 — Run stays as sugar over Create
 
@@ -42,6 +66,11 @@ path becomes the deep entry.
 **Designed + signed off (2026-05-28):** `f1-f3-public-surface.md` (shared
 with F1). `Run` → `materialize()` → `Create(public CreateOptions)` →
 `toInternal()` → `manager.Create`.
+
+**CLOSED (2026-05-28).** `Run` is now sugar over `Create` via
+`RunOptions.materialize()`; one creation code path. `Run` gained
+`AllowDirtyWorkdir` and refuses a dirty workdir by default (was a silent
+`Yes:true` proceed).
 
 ### F4 — Hard error on `Backend == ""`; broader: forbid `""` unless demonstrably beneficial
 
@@ -56,9 +85,10 @@ this work.
 
 **Status (2026-05-28):** broader principle already landed
 (development-principles.md §4, the "empty string isn't a free default"
-subsection). The `Backend == ""` guard itself is **bundled into the
-F1+F3 implementation** (same `NewWithOptions` surface) — see
-`f1-f3-public-surface.md` decision 5.
+subsection). **CLOSED (2026-05-28):** `NewWithOptions` returns `*UsageError`
+on empty `Backend`; the dead `Options.Isolation`/`OS` routing (F21's collision
+point) was removed in favor of the explicit public `yoloai.SelectBackend`
+helper. See D24 in working-notes for the F4/F21 reconciliation.
 
 ### F5 — Full sandbox/ god-package carve
 

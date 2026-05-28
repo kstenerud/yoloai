@@ -555,7 +555,7 @@ func TestPrintCreationOutput_Basic(t *testing.T) {
 		agent:   agentDef,
 	}
 
-	mgr.printCreationOutput(state, false)
+	mgr.printCreationOutput(state)
 
 	output := buf.String()
 	assert.Contains(t, output, "test-sandbox")
@@ -563,22 +563,6 @@ func TestPrintCreationOutput_Basic(t *testing.T) {
 	assert.Contains(t, output, "/project")
 	assert.Contains(t, output, "copy")
 	assert.Contains(t, output, "attach")
-}
-
-func TestPrintCreationOutput_AutoAttach(t *testing.T) {
-	var buf bytes.Buffer
-	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), &buf, WithLayout(config.NewLayout(t.TempDir())))
-
-	state := &sandboxState{
-		name:    "test",
-		workdir: &DirSpec{Path: "/project", Mode: DirMode("copy")},
-		agent:   agent.GetAgent("test"),
-	}
-
-	mgr.printCreationOutput(state, true)
-
-	// autoAttach=true suppresses the attach hint
-	assert.NotContains(t, buf.String(), "attach")
 }
 
 func TestPrintCreationOutput_WithPrompt(t *testing.T) {
@@ -592,7 +576,7 @@ func TestPrintCreationOutput_WithPrompt(t *testing.T) {
 		hasPrompt: true,
 	}
 
-	mgr.printCreationOutput(state, false)
+	mgr.printCreationOutput(state)
 
 	assert.Contains(t, buf.String(), "diff")
 }
@@ -608,7 +592,7 @@ func TestPrintCreationOutput_NetworkNone(t *testing.T) {
 		networkMode: "none",
 	}
 
-	mgr.printCreationOutput(state, false)
+	mgr.printCreationOutput(state)
 
 	assert.Contains(t, buf.String(), "Network:  none")
 }
@@ -624,7 +608,7 @@ func TestPrintCreationOutput_WithPorts(t *testing.T) {
 		ports:   []string{"3000:3000", "8080:80"},
 	}
 
-	mgr.printCreationOutput(state, false)
+	mgr.printCreationOutput(state)
 
 	assert.Contains(t, buf.String(), "3000:3000")
 	assert.Contains(t, buf.String(), "8080:80")
@@ -634,7 +618,7 @@ func TestPrintCreationOutput_NilState(t *testing.T) {
 	var buf bytes.Buffer
 	mgr := NewManager(&mockRuntime{}, slog.Default(), strings.NewReader(""), &buf, WithLayout(config.NewLayout(t.TempDir())))
 
-	mgr.printCreationOutput(nil, false)
+	mgr.printCreationOutput(nil)
 
 	assert.Empty(t, buf.String())
 }
@@ -763,7 +747,7 @@ func TestPrepareSandboxState_DangerousDirForce(t *testing.T) {
 
 	_, err := mgr.prepareSandboxState(context.TODO(), CreateOptions{
 		Name:    "test",
-		Workdir: DirSpec{Path: tmpDir, Mode: DirModeRW, Force: true},
+		Workdir: DirSpec{Path: tmpDir, Mode: DirModeRW, AllowDangerousPath: true},
 		Agent:   "claude",
 	}, nil)
 	// Should NOT fail on "dangerous directory" — :force bypasses it.
@@ -970,7 +954,7 @@ func TestPrintCreationOutput_NetworkIsolated(t *testing.T) {
 		networkAllow: []string{"api.anthropic.com", "sentry.io"},
 	}
 
-	mgr.printCreationOutput(state, false)
+	mgr.printCreationOutput(state)
 
 	assert.Contains(t, buf.String(), "Network:  isolated (2 allowed domains)")
 }

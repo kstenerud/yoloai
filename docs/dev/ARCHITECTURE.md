@@ -372,7 +372,7 @@ Persisted as `environment.json` (legacy: `meta.json`) in each sandbox dir. Recor
 Per-sandbox runtime state persisted as `sandbox-state.json` (legacy: `state.json`). Tracks mutable state like `agent_files_initialized` (boolean). Separate from `Meta` which is immutable after creation. Lives in `sandbox/store`.
 
 ### `sandbox.CreateOptions` / `sandbox.DirSpec`
-All parameters for `Manager.Create()`. `DirSpec` specifies a directory path and its mount mode (copy/overlay/rw/force). `CreateOptions` includes name, workdir `DirSpec`, auxiliary `DirSpec` list, agent, model, prompt, network, ports, profile, replace, attach, passthrough args.
+Internal parameters for `Manager.Create()`. `DirSpec` specifies a directory path, mount mode (copy/overlay/rw/ro), and per-directory safety acks (`AllowDirty`, `AllowDangerousPath`). `CreateOptions` includes name, workdir `DirSpec`, auxiliary `DirSpec` list, agent, model, prompt, network, ports, profile, replace, passthrough args. The **public** creation surface is `yoloai.CreateOptions` (root `create_options.go`); `Client.Create` maps it onto this internal struct via `toInternal()`. A dirty workdir surfaces as `*yoerrors.DirtyWorkdirError` (never an in-library prompt — D24).
 
 ### `patch.DiffOptions` / `patch.DiffResult`
 Input/output for `patch.GenerateDiff()` / `patch.GenerateMultiDiff()`. Supports path filtering and stat-only mode. `DiffResult` carries the diff text, workdir, mode, and empty flag. Lives in `sandbox/patch`.

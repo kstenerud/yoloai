@@ -222,12 +222,11 @@ var f1KnownLeaks = map[string]struct{}{
 	// internal/config types exposed by SystemClient construction and ProfileInfo.
 	"github.com/kstenerud/yoloai/internal/config.Layout":       {},
 	"github.com/kstenerud/yoloai/internal/config.MergedConfig": {},
-	// internal/sandbox Options + Info types — the bulk of F1.
+	// internal/sandbox Options + Info types. CLOSED in F1+F3+F2: CreateOptions
+	// (Create takes public yoloai.CreateOptions), StartOptions + Info
+	// (re-exported aliases), ResetOptions (hand-written public type). Remaining
+	// CloneOptions (Clone not yet re-rooted) and TmuxConfigClass.
 	"github.com/kstenerud/yoloai/internal/sandbox.CloneOptions":    {},
-	"github.com/kstenerud/yoloai/internal/sandbox.CreateOptions":   {},
-	"github.com/kstenerud/yoloai/internal/sandbox.Info":            {},
-	"github.com/kstenerud/yoloai/internal/sandbox.ResetOptions":    {},
-	"github.com/kstenerud/yoloai/internal/sandbox.StartOptions":    {},
 	"github.com/kstenerud/yoloai/internal/sandbox.TmuxConfigClass": {},
 	// internal/sandbox/patch types returned by Apply / ListCommitsWithStats.
 	"github.com/kstenerud/yoloai/internal/sandbox/patch.ApplyResult":        {},

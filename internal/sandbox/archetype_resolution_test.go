@@ -54,7 +54,6 @@ func TestResolveArchetype_CLIFlagOverridesAll(t *testing.T) {
 	opts := &CreateOptions{
 		Workdir:   DirSpec{Path: dir},
 		Archetype: "simple", // CLI overrides
-		Yes:       true,
 	}
 	pr := &profileResult{}
 
@@ -74,7 +73,6 @@ func TestResolveArchetype_YamlOverridesAutoDetect(t *testing.T) {
 	m := newTestManager(t, nil)
 	opts := &CreateOptions{
 		Workdir: DirSpec{Path: dir},
-		Yes:     true,
 	}
 	pr := &profileResult{}
 
@@ -86,7 +84,7 @@ func TestResolveArchetype_YamlOverridesAutoDetect(t *testing.T) {
 func TestResolveArchetype_AutoDetectSimple(t *testing.T) {
 	dir := makeWorkdir(t)
 	m := newTestManager(t, nil)
-	opts := &CreateOptions{Workdir: DirSpec{Path: dir}, Yes: true}
+	opts := &CreateOptions{Workdir: DirSpec{Path: dir}}
 	pr := &profileResult{}
 
 	arch, _, _, _, err := m.resolveAndApplyArchetype(context.Background(), opts, pr)
@@ -100,7 +98,7 @@ func TestResolveArchetype_AutoDetectCompose(t *testing.T) {
 
 	var buf bytes.Buffer
 	m := newTestManager(t, &buf)
-	opts := &CreateOptions{Workdir: DirSpec{Path: dir}, Yes: true}
+	opts := &CreateOptions{Workdir: DirSpec{Path: dir}}
 	pr := &profileResult{}
 
 	arch, _, _, _, err := m.resolveAndApplyArchetype(context.Background(), opts, pr)
@@ -121,7 +119,7 @@ func TestResolveArchetype_AutoDetectDevcontainer(t *testing.T) {
 	}`), 0600))
 
 	m := newTestManager(t, nil)
-	opts := &CreateOptions{Workdir: DirSpec{Path: dir}, Yes: true}
+	opts := &CreateOptions{Workdir: DirSpec{Path: dir}}
 	pr := &profileResult{}
 
 	arch, dc, _, _, err := m.resolveAndApplyArchetype(context.Background(), opts, pr)
@@ -146,7 +144,6 @@ func TestResolveArchetype_DevcontainerMergesEnv(t *testing.T) {
 	m := newTestManager(t, nil)
 	opts := &CreateOptions{
 		Workdir: DirSpec{Path: dir},
-		Yes:     true,
 	}
 	pr := &profileResult{env: map[string]string{"EXISTING": "user-set"}}
 
@@ -164,7 +161,7 @@ func TestResolveArchetype_DevcontainerWorkspaceFolder(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "devcontainer.json"), []byte(dcContent), 0600))
 
 	m := newTestManager(t, nil)
-	opts := &CreateOptions{Workdir: DirSpec{Path: dir}, Yes: true}
+	opts := &CreateOptions{Workdir: DirSpec{Path: dir}}
 	pr := &profileResult{}
 
 	_, _, _, _, err := m.resolveAndApplyArchetype(context.Background(), opts, pr)
@@ -178,7 +175,7 @@ func TestResolveArchetype_DevcontainerDockerComposeFileErrors(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "devcontainer.json"), []byte(dcContent), 0600))
 
 	m := newTestManager(t, nil)
-	opts := &CreateOptions{Workdir: DirSpec{Path: dir}, Yes: true}
+	opts := &CreateOptions{Workdir: DirSpec{Path: dir}}
 	pr := &profileResult{}
 
 	_, _, _, _, err := m.resolveAndApplyArchetype(context.Background(), opts, pr)
@@ -198,7 +195,7 @@ func TestResolveArchetype_DevcontainerFiltersMounts(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "devcontainer.json"), []byte(dcContent), 0600))
 
 	m := newTestManager(t, nil)
-	opts := &CreateOptions{Workdir: DirSpec{Path: dir}, Yes: true}
+	opts := &CreateOptions{Workdir: DirSpec{Path: dir}}
 	pr := &profileResult{}
 
 	_, _, dcMounts, warnings, err := m.resolveAndApplyArchetype(context.Background(), opts, pr)
@@ -216,7 +213,7 @@ func TestResolveArchetype_DevcontainerPostStartCompose(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "devcontainer.json"), []byte(dcContent), 0600))
 
 	m := newTestManager(t, nil)
-	opts := &CreateOptions{Workdir: DirSpec{Path: dir}, Yes: true}
+	opts := &CreateOptions{Workdir: DirSpec{Path: dir}}
 	pr := &profileResult{}
 
 	_, _, _, _, err := m.resolveAndApplyArchetype(context.Background(), opts, pr)
@@ -231,7 +228,7 @@ func TestResolveArchetype_TransparencyOutput_Simple(t *testing.T) {
 	dir := makeWorkdir(t)
 	var buf bytes.Buffer
 	m := newTestManager(t, &buf)
-	opts := &CreateOptions{Workdir: DirSpec{Path: dir}, Yes: true}
+	opts := &CreateOptions{Workdir: DirSpec{Path: dir}}
 	pr := &profileResult{}
 
 	arch, _, _, _, err := m.resolveAndApplyArchetype(context.Background(), opts, pr)
@@ -248,7 +245,6 @@ func TestResolveArchetype_TransparencyOutput_CLIFlag(t *testing.T) {
 	opts := &CreateOptions{
 		Workdir:   DirSpec{Path: dir},
 		Archetype: "simple",
-		Yes:       true,
 	}
 	pr := &profileResult{}
 
@@ -264,7 +260,7 @@ func TestResolveArchetype_TransparencyOutput_Compose(t *testing.T) {
 
 	var buf bytes.Buffer
 	m := newTestManager(t, &buf)
-	opts := &CreateOptions{Workdir: DirSpec{Path: dir}, Yes: true}
+	opts := &CreateOptions{Workdir: DirSpec{Path: dir}}
 	pr := &profileResult{}
 
 	_, _, _, _, err := m.resolveAndApplyArchetype(context.Background(), opts, pr)
@@ -283,7 +279,7 @@ func TestResolveArchetype_YamlMountsMerged(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, ".yoloai.yaml"), []byte(content), 0600))
 
 	m := newTestManager(t, nil)
-	opts := &CreateOptions{Workdir: DirSpec{Path: dir}, Yes: true}
+	opts := &CreateOptions{Workdir: DirSpec{Path: dir}}
 	pr := &profileResult{}
 
 	_, _, _, _, err := m.resolveAndApplyArchetype(context.Background(), opts, pr)
@@ -297,7 +293,7 @@ func TestResolveArchetype_YamlMountsDeduped(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, ".yoloai.yaml"), []byte(content), 0600))
 
 	m := newTestManager(t, nil)
-	opts := &CreateOptions{Workdir: DirSpec{Path: dir}, Yes: true}
+	opts := &CreateOptions{Workdir: DirSpec{Path: dir}}
 	// Pre-existing mount already in pr.mounts
 	pr := &profileResult{mounts: []string{"/data:/container/data:ro"}}
 
@@ -315,33 +311,21 @@ func TestResolveArchetype_YamlMountsDeduped(t *testing.T) {
 
 // --- requires: validation ---
 
-func TestResolveArchetype_Requires_SkippedWithYes(t *testing.T) {
-	dir := makeWorkdir(t)
-	content := "requires:\n  yoloai: \">=1.0\"\n"
-	require.NoError(t, os.WriteFile(filepath.Join(dir, ".yoloai.yaml"), []byte(content), 0600))
-
-	m := newTestManager(t, nil)
-	opts := &CreateOptions{Workdir: DirSpec{Path: dir}, Yes: true}
-	pr := &profileResult{}
-
-	_, _, _, _, err := m.resolveAndApplyArchetype(context.Background(), opts, pr)
-	require.NoError(t, err) // Yes=true skips the prompt
-}
-
-func TestResolveArchetype_Requires_AbortsOnNo(t *testing.T) {
+func TestResolveArchetype_Requires_WarnsButDoesNotBlock(t *testing.T) {
 	dir := makeWorkdir(t)
 	content := "requires:\n  yoloai: \">=99.0\"\n"
 	require.NoError(t, os.WriteFile(filepath.Join(dir, ".yoloai.yaml"), []byte(content), 0600))
 
-	// Use "n\n" to decline the requires prompt
-	m := NewManager(&mockDockerRuntime{}, slog.Default(), strings.NewReader("n\n"), io.Discard,
-		WithLayout(config.NewLayout(t.TempDir())))
-	opts := &CreateOptions{Workdir: DirSpec{Path: dir}, Yes: false}
+	// requires: version verification is unimplemented, so the constraint is a
+	// non-blocking warning — creation must proceed regardless (no prompt, no error).
+	var buf bytes.Buffer
+	m := newTestManager(t, &buf)
+	opts := &CreateOptions{Workdir: DirSpec{Path: dir}}
 	pr := &profileResult{}
 
 	_, _, _, _, err := m.resolveAndApplyArchetype(context.Background(), opts, pr)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "aborted")
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), "version verification not yet implemented")
 }
 
 // --- RunArgs expansion ---
@@ -352,7 +336,7 @@ func TestResolveArchetype_DevcontainerRunArgs_CPUMemory(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "devcontainer.json"), []byte(dcContent), 0600))
 
 	m := newTestManager(t, nil)
-	opts := &CreateOptions{Workdir: DirSpec{Path: dir}, Yes: true}
+	opts := &CreateOptions{Workdir: DirSpec{Path: dir}}
 	pr := &profileResult{}
 
 	_, _, _, _, err := m.resolveAndApplyArchetype(context.Background(), opts, pr)

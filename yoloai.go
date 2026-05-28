@@ -6,9 +6,12 @@
 //
 // Two clients live here:
 //
-//   - Client — sandbox-scoped operations: Run, Diff, Apply, Stop, Destroy,
-//     List, Inspect, Attach, Exec. Constructed via NewWithOptions; holds
-//     a single backend connection. Use one Client per backend.
+//   - Client — creation and cross-sandbox operations: Run, Create, Clone,
+//     List, plus the per-sandbox handle accessor Sandbox(name). Per-sandbox
+//     operations (Inspect, Start, Stop, Restart, Reset, Destroy, Attach,
+//     Exec, …) live on that *Sandbox handle, not the Client root (F2).
+//     Constructed via NewWithOptions; holds a single backend connection.
+//     Use one Client per backend.
 //
 //   - SystemClient — admin/cross-backend operations: DiskUsage, Prune,
 //     Build, Check. Reached via Client.System() or constructed directly
@@ -24,6 +27,7 @@
 //
 //	client, err := yoloai.NewWithOptions(ctx, yoloai.Options{
 //	    DataDir: filepath.Join(os.Getenv("HOME"), ".yoloai"),
+//	    Backend: yoloai.BackendDocker, // required; or yoloai.SelectBackend(...)
 //	})
 //	if err != nil { log.Fatal(err) }
 //	defer client.Close()
@@ -35,14 +39,13 @@
 //	    Wait:    true,
 //	})
 //	if err != nil { log.Fatal(err) }
-//	if info.Status == sandbox.StatusDone {
+//	if info.Status == yoloai.StatusDone {
 //	    client.Apply(ctx, info.Meta.Name)
 //	}
 package yoloai
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -57,7 +60,6 @@ import (
 	_ "github.com/kstenerud/yoloai/internal/runtime/tart"     // register backend
 	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/kstenerud/yoloai/internal/sandbox/patch"
-	"github.com/kstenerud/yoloai/internal/sandbox/store"
 )
 
 // Sentinel errors returned by Client methods. Re-exported from
@@ -81,10 +83,6 @@ var (
 	// ErrMissingAPIKey is returned by Run/Create when the selected agent
 	// requires an API key (via Definition.APIKeyEnvVars) but none is set.
 	ErrMissingAPIKey = sandbox.ErrMissingAPIKey
-
-	// ErrUnappliedChanges is returned by Destroy when the sandbox has unapplied
-	// changes and force is false.
-	ErrUnappliedChanges = errors.New("sandbox has unapplied changes")
 )
 
 // Options configures a Client.
@@ -112,25 +110,17 @@ type Options struct {
 	HomeDir string
 
 	// Backend selects the runtime backend (yoloai.BackendDocker,
-	// yoloai.BackendTart, etc.). Default: read from config.yaml, then
-	// yoloai.BackendDocker. Empty BackendName ("") is treated as "use
-	// the default" by every consumer of Options.Backend.
+	// yoloai.BackendTart, etc.). REQUIRED — empty is rejected at
+	// construction with a *UsageError (F4).
 	//
-	// When Backend is empty, the Client routes Isolation + OS through
-	// runtime.SelectBackend — the same routing the CLI applies for its
-	// --isolation / --os flags (F21). An explicit Backend always wins
-	// over Isolation/OS routing.
+	// No implicit default. Backend selection is inherently ambient (it
+	// probes which container daemons are installed), so it belongs at the
+	// outermost boundary, not silently inside Client construction (§4 /
+	// §12). The CLI resolves it from its --backend / --isolation / --os
+	// flags via runtime.SelectBackend and passes the concrete result here.
+	// Embedders that want that same auto-detection call the public
+	// yoloai.SelectBackend helper and pass its result.
 	Backend BackendName
-
-	// Isolation and OS are backend-routing preferences honored only when
-	// Backend is empty. They mirror the CLI's --isolation / --os flags:
-	// OS=="mac" routes to seatbelt (or tart for Isolation vm); Isolation
-	// vm / vm-enhanced route to containerd. Both empty (the default)
-	// means plain container-slot selection. Embedders that want the same
-	// backend routing the CLI performs set these instead of
-	// re-implementing it. F21.
-	Isolation IsolationMode
-	OS        string
 
 	// Logger receives structured log output. Default: slog.Default().
 	Logger *slog.Logger
@@ -140,6 +130,12 @@ type Options struct {
 
 	// Input provides interactive input. Default: os.Stdin.
 	Input io.Reader
+
+	// Version is the yoloAI version string stamped into each created
+	// sandbox's meta.json. The CLI fills it from build info; embedders may
+	// leave it empty. Not a per-create input — it lives here so Create
+	// callers don't repeat it.
+	Version string
 }
 
 // Client is the simple entry point for yoloAI operations.
@@ -149,6 +145,7 @@ type Client struct {
 	manager *sandbox.Manager
 	rt      runtime.Runtime
 	layout  config.Layout // Q-W: DataDir-rooted path resolver propagated to Manager + apply
+	version string        // yoloAI version stamped into created sandboxes' meta.json
 }
 
 // NewWithOptions creates a Client with explicit options.
@@ -156,6 +153,9 @@ type Client struct {
 func NewWithOptions(ctx context.Context, opts Options) (*Client, error) {
 	if opts.DataDir == "" {
 		return nil, fmt.Errorf("yoloai: Options.DataDir is required (no implicit $HOME fallback; see development-principles.md §12)")
+	}
+	if opts.Backend == "" {
+		return nil, sandbox.NewUsageError("yoloai: Options.Backend is required — empty is not a valid backend (F4). Resolve it at the boundary before constructing the Client, e.g. yoloai.SelectBackend(ctx, preferred, isolation, os). See development-principles.md §4.")
 	}
 
 	var layout config.Layout
@@ -166,9 +166,6 @@ func NewWithOptions(ctx context.Context, opts Options) (*Client, error) {
 	}
 
 	backend := opts.Backend
-	if backend == "" {
-		backend = resolveBackendFromConfig(ctx, layout, opts.Isolation, opts.OS)
-	}
 	logger := opts.Logger
 	if logger == nil {
 		logger = slog.Default()
@@ -188,7 +185,7 @@ func NewWithOptions(ctx context.Context, opts Options) (*Client, error) {
 	}
 
 	mgr := sandbox.NewManager(rt, logger, input, output, sandbox.WithLayout(layout))
-	return &Client{manager: mgr, rt: rt, layout: layout}, nil
+	return &Client{manager: mgr, rt: rt, layout: layout, version: opts.Version}, nil
 }
 
 // Close releases the underlying runtime connection.
@@ -225,6 +222,13 @@ type RunOptions struct {
 	// a new one. The existing sandbox must have no unapplied changes.
 	Replace bool
 
+	// AllowDirtyWorkdir proceeds even when WorkDir has uncommitted git changes.
+	// Default false: Run refuses with *DirtyWorkdirError rather than letting the
+	// agent see — and possibly clobber — uncommitted work. Set true to
+	// consciously proceed (the non-interactive equivalent of answering the CLI's
+	// dirty-repo prompt).
+	AllowDirtyWorkdir bool
+
 	// Wait blocks until the agent reaches StatusDone, StatusFailed, or
 	// StatusStopped, polling every 5 seconds. Default: false.
 	Wait bool
@@ -242,7 +246,7 @@ type RunOptions struct {
 // final sandbox Info. If opts.Wait is false, Run returns immediately after
 // the agent is launched; the Info reflects the initial state.
 // pollUntilDone polls the sandbox status until it reaches a terminal state.
-func (c *Client) pollUntilDone(ctx context.Context, name string, progress func(string, string)) (*sandbox.Info, error) {
+func (c *Client) pollUntilDone(ctx context.Context, name string, progress func(string, string)) (*Info, error) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -268,39 +272,19 @@ func (c *Client) pollUntilDone(ctx context.Context, name string, progress func(s
 	}
 }
 
-func (c *Client) Run(ctx context.Context, opts RunOptions) (*sandbox.Info, error) {
-	if err := c.manager.EnsureSetup(ctx); err != nil {
-		return nil, fmt.Errorf("setup: %w", err)
+func (c *Client) Run(ctx context.Context, opts RunOptions) (*Info, error) {
+	createOpts := opts.materialize()
+	if createOpts.Agent == "" {
+		createOpts.Agent = AgentName(resolveAgentFromConfig(c.layout))
+	}
+	if createOpts.Model == "" {
+		createOpts.Model = resolveModelFromConfig(c.layout)
+	}
+	if createOpts.Profile == "" {
+		createOpts.Profile = resolveProfileFromConfig()
 	}
 
-	agent := opts.Agent
-	if agent == "" {
-		agent = AgentName(resolveAgentFromConfig(c.layout))
-	}
-	model := opts.Model
-	if model == "" {
-		model = resolveModelFromConfig(c.layout)
-	}
-	profile := opts.Profile
-	if profile == "" {
-		profile = resolveProfileFromConfig()
-	}
-
-	createOpts := sandbox.CreateOptions{
-		Name: opts.Name,
-		Workdir: sandbox.DirSpec{
-			Path: opts.WorkDir,
-			Mode: sandbox.DirModeCopy,
-		},
-		Agent:   string(agent),
-		Model:   model,
-		Profile: profile,
-		Prompt:  opts.Prompt,
-		Replace: opts.Replace,
-		Yes:     true, // non-interactive: don't prompt for confirmation
-	}
-
-	if _, err := c.manager.Create(ctx, createOpts); err != nil {
+	if _, err := c.Create(ctx, createOpts); err != nil {
 		return nil, fmt.Errorf("create sandbox: %w", err)
 	}
 
@@ -313,17 +297,6 @@ func (c *Client) Run(ctx context.Context, opts RunOptions) (*sandbox.Info, error
 	}
 
 	return c.pollUntilDone(ctx, opts.Name, opts.OnProgress)
-}
-
-// Diff returns the workdir diff of agent changes for a sandbox.
-// Equivalent to 'yoloai diff <name>'. Returns the diff text — an
-// empty string means no changes (Q-U).
-//
-// For :overlay-mode workdirs, callers must use DiffOverlay; this
-// helper short-circuits to "" + patch.ErrOverlayRequiresRuntime
-// because the overlay diff path needs container exec.
-func (c *Client) Diff(ctx context.Context, name string) (string, error) {
-	return patch.GenerateDiff(ctx, patch.DiffOptions{Name: name, Layout: c.layout, Runtime: c.rt})
 }
 
 // Apply applies the agent's committed changes back to the original host
@@ -355,38 +328,8 @@ func (c *Client) ApplyWithOptions(ctx context.Context, name string, opts ApplyOp
 }
 
 // List returns info for all sandboxes.
-func (c *Client) List(ctx context.Context) ([]*sandbox.Info, error) {
+func (c *Client) List(ctx context.Context) ([]*Info, error) {
 	return c.manager.List(ctx)
-}
-
-// Inspect returns combined metadata and live state for a single sandbox.
-func (c *Client) Inspect(ctx context.Context, name string) (*sandbox.Info, error) {
-	return c.manager.Inspect(ctx, name)
-}
-
-// Stop stops the running container for a sandbox without destroying it.
-func (c *Client) Stop(ctx context.Context, name string) error {
-	return c.manager.Stop(ctx, name)
-}
-
-// Destroy removes the sandbox and its container.
-// If the sandbox has unapplied changes and force is false, returns ErrUnappliedChanges.
-func (c *Client) Destroy(ctx context.Context, name string, force bool) error {
-	if !force {
-		needs, _ := c.manager.NeedsConfirmation(ctx, name)
-		if needs {
-			return ErrUnappliedChanges
-		}
-	}
-	return c.manager.Destroy(ctx, name)
-}
-
-// NeedsConfirmation reports whether destroying the named sandbox should prompt
-// the user — sandbox is running, workdir is dirty, or there are unapplied
-// commits. The reason string is suitable for human display. Embedders use
-// this to render their own confirmation UX before calling Destroy(force=true).
-func (c *Client) NeedsConfirmation(ctx context.Context, name string) (bool, string) {
-	return c.manager.NeedsConfirmation(ctx, name)
 }
 
 // Clone copies an existing sandbox's state into a new sandbox. The runtime
@@ -403,59 +346,10 @@ func (c *Client) Clone(ctx context.Context, opts sandbox.CloneOptions) error {
 // name on success — currently always opts.Name, since name is required
 // (no auto-generation). Use Run for the higher-level "create + wait for
 // terminal status" convenience.
-func (c *Client) Create(ctx context.Context, opts sandbox.CreateOptions) (string, error) {
-	return c.manager.Create(ctx, opts)
-}
-
-// ContainerLogs returns the tail of the named sandbox's container log,
-// limited to roughly tailLines lines. Returns "" when the container is
-// gone or the runtime can't fetch logs. Used by bug-report generation;
-// also useful for embedders that want to surface backend errors without
-// reaching for raw runtime access.
-func (c *Client) ContainerLogs(ctx context.Context, name string, tailLines int) string {
-	return c.rt.Logs(ctx, store.InstanceName(name), tailLines)
-}
-
-// DiffWithOptions generates the workdir diff with explicit filter
-// options. paths narrows the diff to specific files; stat / nameOnly
-// correspond to `git diff --stat` and `--name-only`. Returns the diff
-// text — empty string means no changes (Q-U).
-//
-// :overlay workdirs short-circuit to "" + patch.ErrOverlayRequiresRuntime;
-// use DiffOverlay for those.
-func (c *Client) DiffWithOptions(ctx context.Context, name string, paths []string, stat, nameOnly bool) (string, error) {
-	return patch.GenerateDiff(ctx, patch.DiffOptions{
-		Name:     name,
-		Layout:   c.layout,
-		Paths:    paths,
-		NameOnly: nameOnly,
-		Stat:     stat,
-		Runtime:  c.rt,
-	})
-}
-
-// DiffOverlay generates the workdir diff for an :overlay-mode
-// sandbox by running git inside the container. Returns the diff text
-// (empty string for no changes). The container must be running.
-func (c *Client) DiffOverlay(ctx context.Context, name string, stat, nameOnly bool) (string, error) {
-	return patch.GenerateOverlayDiff(ctx, c.rt, patch.DiffOptions{
-		Name:     name,
-		Layout:   c.layout,
-		Stat:     stat,
-		NameOnly: nameOnly,
-	})
-}
-
-// DiffRef generates the diff for a specific commit (or commit range)
-// inside the sandbox's history. Disk-only. Returns the diff text —
-// empty string means no changes.
-func (c *Client) DiffRef(_ context.Context, name, ref string, stat bool) (string, error) {
-	return patch.GenerateCommitDiff(patch.CommitDiffOptions{
-		Name:   name,
-		Layout: c.layout,
-		Ref:    ref,
-		Stat:   stat,
-	})
+func (c *Client) Create(ctx context.Context, opts CreateOptions) (string, error) {
+	internal := opts.toInternal()
+	internal.Version = c.version
+	return c.manager.Create(ctx, internal)
 }
 
 // ListCommits returns the sandbox's commit history beyond baseline (one
@@ -545,79 +439,11 @@ func (c *Client) GenerateWIPDiff(ctx context.Context, name string, paths []strin
 	return patch.GenerateWIPDiff(ctx, c.layout, c.rt, name, paths)
 }
 
-// Start launches (or relaunches) the container for an existing sandbox.
-// The sandbox must exist on disk; use Run to create a new sandbox.
-func (c *Client) Start(ctx context.Context, name string, opts sandbox.StartOptions) error {
-	return c.manager.Start(ctx, name, opts)
-}
-
-// Reset re-copies the workdir into the sandbox, resets the diff baseline, and
-// (per opts) optionally restarts the container and wipes agent state. Use
-// for "start over" workflows where the user wants to abandon the agent's
-// current changes and resume from the original workdir.
-func (c *Client) Reset(ctx context.Context, opts sandbox.ResetOptions) error {
-	return c.manager.Reset(ctx, opts)
-}
-
 // IOStreams names the stdio handles for interactive Client methods.
 // It's a type alias for runtime.IOStreams so embedders can use the
 // yoloai.IOStreams name without importing runtime directly. See
 // runtime.IOStreams for the field documentation.
 type IOStreams = runtime.IOStreams
-
-// Attach connects the supplied IOStreams to the sandbox's tmux session.
-// Blocks until the user detaches (Ctrl-B d) or the agent exits.
-//
-// The sandbox must be running (StatusActive/Idle/Done/Failed). For
-// stopped sandboxes call Start first. Use --resume on Start to relaunch
-// the agent with the resume preamble before attaching.
-//
-// io.TTY=true is required; non-TTY attach returns a *UsageError. nil
-// fields in io default to the calling process's os.Stdin/Stdout/Stderr;
-// see IOStreams godoc for the current plumbing limitation.
-func (c *Client) Attach(ctx context.Context, name string, io IOStreams) error {
-	if !io.TTY {
-		return sandbox.NewUsageError("attach requires TTY=true")
-	}
-
-	info, err := c.manager.Inspect(ctx, name)
-	if err != nil {
-		return err
-	}
-	if err := attachStatusOK(info.Status, name); err != nil {
-		return err
-	}
-
-	containerName := store.InstanceName(name)
-	user := sandbox.ContainerUser(info.Meta, c.layout.HostUID)
-
-	if err := sandbox.WaitForAttachReady(ctx, c.rt, c.layout, name, user, 300*time.Second); err != nil {
-		return fmt.Errorf("waiting for tmux session: %w", err)
-	}
-
-	sock := sandbox.ReadTmuxSocket(c.layout, name)
-	cmd := c.rt.AttachCommand(sock, io.Rows, io.Cols, info.Meta.Isolation)
-	return c.rt.InteractiveExec(ctx, containerName, cmd, user, "", io)
-}
-
-// Exec runs `cmd` inside the named sandbox's container interactively
-// and connects the supplied IOStreams. The sandbox must be running
-// (Active or Idle); other statuses return ErrContainerNotRunning. The
-// user, working directory, and container name are derived from the
-// sandbox's persisted metadata. Non-zero exit from the inner command
-// surfaces as *exec.ExitError so callers can propagate the exit code.
-func (c *Client) Exec(ctx context.Context, name string, cmd []string, io IOStreams) error {
-	info, err := c.manager.Inspect(ctx, name)
-	if err != nil {
-		return err
-	}
-	if info.Status != sandbox.StatusActive && info.Status != sandbox.StatusIdle {
-		return fmt.Errorf("sandbox %q: %w", name, sandbox.ErrContainerNotRunning)
-	}
-	containerName := store.InstanceName(name)
-	user := sandbox.ContainerUser(info.Meta, c.layout.HostUID)
-	return c.rt.InteractiveExec(ctx, containerName, cmd, user, info.Meta.Workdir.MountPath, io)
-}
 
 // attachStatusOK returns nil if the sandbox status permits attach,
 // otherwise a typed error suitable for the CLI exit-code mapping.
@@ -641,61 +467,34 @@ func (c *Client) EnsureSetup(ctx context.Context) error {
 	return c.manager.EnsureSetup(ctx)
 }
 
-// SendInput appends text to the running sandbox's tmux session as if
-// the user had typed it. Used by the MCP server's sandbox_input tool
-// to forward outer-agent messages into a running inner agent.
-// Returns ErrContainerNotRunning when the sandbox is stopped.
-func (c *Client) SendInput(ctx context.Context, name, text string) error {
-	return c.manager.SendInput(ctx, name, text)
-}
-
-// StdioExec runs cmd inside the sandbox's container with raw stdio
-// piped to the supplied stdin/stdout/stderr. Used by the MCP proxy
-// to bridge an outer client's stdio to a server running in the
-// sandbox. Returns *UsageError when the active backend doesn't
-// implement runtime.StdioExecer (currently Tart and Seatbelt don't —
-// only Docker, Podman, and containerd do).
-//
-// Unlike Exec/Attach, StdioExec does not allocate a PTY; it's the
-// right shape for piping JSON-RPC or other line-oriented protocols.
-func (c *Client) StdioExec(ctx context.Context, name string, cmd []string, stdin io.Reader, stdout, stderr io.Writer) error {
-	execer, ok := c.rt.(runtime.StdioExecer)
-	if !ok {
-		return sandbox.NewUsageError("backend %s does not support stdio exec", c.rt.Descriptor().Name)
-	}
-	containerName := store.InstanceName(name)
-	return execer.StdioExec(ctx, containerName, cmd, stdin, stdout, stderr)
-}
-
-// SandboxDir returns the on-host directory that holds a sandbox's
-// persisted state (meta.json, work copies, files/, cache/, agent log,
-// prompt, etc.). Used by embedders that need to read or write files
-// in that directory directly — e.g., the MCP server's
-// sandbox_files_* tools resolve file paths under SandboxDir(name).
-//
-// The path is computed from c.layout's DataDir; it exists as soon as
-// the sandbox has been created. Returns the path even for unknown
-// names (callers must do their own existence check).
-func (c *Client) SandboxDir(name string) string {
-	return c.layout.SandboxDir(name)
-}
-
 // --- private helpers ---
 
-// resolveBackendFromConfig picks the backend for a Client created without an
-// explicit Backend in Options. Reads the user's container_backend preference
-// from config and routes it through runtime.SelectBackend along with the
-// caller's isolation/OS preferences — the same routing the CLI applies (F21).
-// If the preferred container backend isn't available, SelectBackend falls back
-// to any other registered container backend; the Client emits no warning of
-// its own (embedders may want to suppress it), so we silently take the
-// fallback verdict.
-func resolveBackendFromConfig(ctx context.Context, layout config.Layout, isolation runtime.IsolationMode, targetOS string) runtime.BackendName {
+// SelectBackend resolves a concrete backend from a preferred backend plus
+// isolation / OS routing preferences, mirroring what the CLI does for its
+// --backend / --isolation / --os flags. It probes which container daemons are
+// installed and falls back accordingly, returning the chosen backend and a
+// human-readable warning ("" when none).
+//
+// Because Options.Backend is required (F4), embedders that want the CLI's
+// auto-detection call this at their boundary and pass the result into
+// NewWithOptions — keeping the ambient probe explicit rather than hidden in
+// Client construction (§4 / §12).
+func SelectBackend(ctx context.Context, preferred BackendName, isolation IsolationMode, targetOS string) (BackendName, string) {
+	return runtime.SelectBackend(ctx, preferred, isolation, targetOS)
+}
+
+// resolveBackendFromConfig picks a default backend for SystemClient admin
+// operations that aren't bound to a specific backend. Reads the user's
+// container_backend preference from config and routes it through
+// runtime.SelectBackend; if that backend isn't available, SelectBackend falls
+// back to any other registered container backend (the warning is discarded —
+// admin callers don't surface it).
+func resolveBackendFromConfig(ctx context.Context, layout config.Layout) runtime.BackendName {
 	var preferred runtime.BackendName
 	if cfg, err := config.LoadDefaultsConfig(layout); err == nil {
 		preferred = runtime.BackendName(cfg.ContainerBackend)
 	}
-	backend, _ := runtime.SelectBackend(ctx, preferred, isolation, targetOS)
+	backend, _ := runtime.SelectBackend(ctx, preferred, "", "")
 	return backend
 }
 

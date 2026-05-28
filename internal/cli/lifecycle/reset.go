@@ -69,14 +69,13 @@ func runReset(cmd *cobra.Command, args []string, opts *resetOpts) error {
 	backend := cliutil.ResolveBackendForSandbox(name)
 	return cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
 		slog.Info("resetting sandbox", "event", "sandbox.reset", "sandbox", name, "restart", opts.restart, "clear_state", opts.clearState) //nolint:gosec // G706: name is validated by ValidateName
-		if err := c.Reset(ctx, sandbox.ResetOptions{
-			Name:       name,
-			Restart:    opts.restart,
-			ClearState: opts.clearState,
-			KeepCache:  opts.keepCache,
-			KeepFiles:  opts.keepFiles,
-			NoPrompt:   opts.noPrompt,
-			Debug:      opts.debug,
+		if err := c.Sandbox(name).Reset(ctx, yoloai.ResetOptions{
+			RestartContainer: opts.restart,
+			ClearState:       opts.clearState,
+			KeepCache:        opts.keepCache,
+			KeepFiles:        opts.keepFiles,
+			NoPrompt:         opts.noPrompt,
+			Debug:            opts.debug,
 		}); err != nil {
 			return cliutil.SandboxErrorHint(name, err)
 		}
@@ -90,7 +89,7 @@ func runReset(cmd *cobra.Command, args []string, opts *resetOpts) error {
 		}
 
 		if opts.attach {
-			return c.Attach(ctx, name, cliutil.IOStreams())
+			return c.Sandbox(name).Attach(ctx, cliutil.IOStreams())
 		}
 
 		if opts.restart {

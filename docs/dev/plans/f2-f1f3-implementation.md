@@ -25,8 +25,18 @@ only — no code yet.**
 
 ## Steps
 
-### Step 1 — Public creation surface (F1 + F3 + F4)
+### Step 1 — Public creation surface (F1 + F3 + F4) ✅ DONE (2026-05-28)
 *Closes leak: `sandbox.CreateOptions`. Additive + in-module migration.*
+
+**Landed.** All bullets below shipped. Two design wrinkles surfaced during
+implementation and were resolved with the owner (see D24 in working-notes):
+(1) `Yes` was **not** dropped silently — the manager actually prompted, so the
+dirty/requires gates became a typed `*DirtyWorkdirError` + `AllowDirtyWorkdir`/
+`DirSpec.AllowDirty` acks (CLI catches→prompts→retries; `requires:` downgraded
+to a non-blocking warning). (2) F4 collided with F21's empty-Backend routing —
+F4 won: `Options.Isolation`/`OS` removed, public `yoloai.SelectBackend` added.
+Also renamed `DirSpec.Force` → `DirSpec.AllowDangerousPath` and dropped the now-
+orphaned internal `CreateOptions.Attach`.
 
 - Re-export at the yoloai root: `DirSpec`, `DirMode` (+ `DirModeCopy/Overlay/RW/RO`),
   `NetworkMode` (+ `NetworkModeNone/Isolated`).
@@ -62,19 +72,26 @@ only — no code yet.**
   the alias.
 - **BREAKING-CHANGES:** per-sandbox ops move from `Client` root to `Sandbox(name)`.
 
-### Step 3 — `Workdir().Diff` + `Workdir().Patch` (F2 part 2)
-*Breaking. Diff returns string (no leak); Patch returns bytes.*
+### Step 3 — `Workdir().Diff` (F2 part 2)
+*Breaking. Diff returns string (no leak).*
+
+**Scope reconciled (2026-05-28, §12 facts-first):** Step 3 is `Workdir().Diff`
+**only**. The mapping paired it with `Workdir().Patch`, but the patch-generation
+methods (`GeneratePatch`, `GenerateWIPDiff`, `OverlayPatch`) turned out to be
+apply-plumbing — consumed solely by `apply_squash`/`apply_export`/
+`apply_format_patch`/`apply_overlay` — and `OverlayPatch` returns `[]PatchSet`
+(per-overlay-dir), a different shape than copy's `[]byte`. A single
+`Patch()→bytes` doesn't fit. So patch generation folds into **Step 4 (Apply)**,
+where those apply modes live and already consume it.
 
 - Add `Sandbox(name).Workdir()` handle.
 - `Workdir().Diff(DiffOptions) (string, error)` — folds `Diff`, `DiffWithOptions`,
-  `DiffRef`, `DiffOverlay`.
-- `Workdir().Patch(PatchOptions) ([]byte, string, error)` — folds `GeneratePatch`,
-  `GenerateWIPDiff`, `OverlayPatch`.
-- Mode (copy/overlay) resolved internally from `meta.Workdir.Mode` — the
-  overlay-explicit methods disappear here.
-- Migrate CLI `diff` + tests; delete the folded root methods.
-- **BREAKING-CHANGES:** diff/patch ops move under `Workdir()`; overlay-explicit
-  methods removed.
+  `DiffRef` (via `DiffOptions.Ref`), `DiffOverlay`. Mode (copy/overlay) resolved
+  internally from `meta.Workdir.Mode`; the overlay-explicit `DiffOverlay`
+  disappears. Ref + overlay stays a typed refusal (commits aren't host-addressable).
+- Migrate CLI `diff` (drops its own overlay branching) + MCP + tests; delete the
+  folded root methods.
+- **BREAKING-CHANGES:** diff ops move under `Workdir()`; `DiffOverlay` removed.
 
 ### Step 4 — `Workdir().Apply` (F2 part 3)
 *Closes leak: `patch.ApplyResult`. Breaking.*

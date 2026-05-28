@@ -1,0 +1,167 @@
+// ABOUTME: Public advanced creation surface (F1/F3): the CreateOptions struct
+// ABOUTME: Client.Create takes, its mapping to the internal struct, and the
+// ABOUTME: RunOptions.materialize sugar that routes Run through Create.
+
+package yoloai
+
+import (
+	"fmt"
+
+	"github.com/kstenerud/yoloai/internal/sandbox"
+)
+
+// CreateOptions is the advanced, public creation surface for Client.Create —
+// the deep entry point mirroring every creation capability the CLI exposes,
+// built from public re-exported types so external embedders can construct it
+// without reaching into internal packages. Run (RunOptions) is the curated
+// convenience that materializes into this. F1/F3.
+//
+// Confirmation is never interactive here: Create does not prompt. A dirty
+// workdir yields *DirtyWorkdirError unless acked via AllowDirtyWorkdir (or the
+// per-directory Workdir.AllowDirty); the CLI catches that, prompts, and retries.
+type CreateOptions struct {
+	// Name is the sandbox identifier. Required (no auto-generation).
+	Name string
+
+	// Workdir is the primary working directory. Path is required; empty Mode
+	// defaults to DirModeCopy (the original is protected via copy/diff/apply).
+	Workdir DirSpec
+
+	// AuxDirs are additional directories mounted alongside the workdir.
+	AuxDirs []DirSpec
+
+	// Agent selects the AI agent. Empty resolves from config, then AgentClaude.
+	Agent AgentName
+
+	// Model selects the model/alias. Empty resolves from config, then the
+	// agent default.
+	Model string
+
+	// Profile applies a named profile (image, env, settings). Empty = none.
+	Profile string
+
+	// Prompt is the task description sent to the agent. Empty = interactive.
+	Prompt string
+
+	// PromptFile reads the prompt from a host file instead of Prompt.
+	PromptFile string
+
+	// Network sets the network access policy. Default = full access.
+	Network NetworkMode
+
+	// NetworkAllow lists allowlisted domains when Network is NetworkModeIsolated.
+	NetworkAllow []string
+
+	// Ports forwards host→container ports. Protocol is tcp (the only mode the
+	// backend pipeline supports today).
+	Ports []PortMapping
+
+	// Replace destroys an existing same-named sandbox first; it must have no
+	// unapplied changes (use Force to override that safety check).
+	Replace bool
+
+	// Force replaces unconditionally, skipping the unapplied-work safety check.
+	Force bool
+
+	// NoStart creates the sandbox without launching the agent.
+	NoStart bool
+
+	// Passthrough are arguments passed to the agent after "--".
+	Passthrough []string
+
+	// Debug enables entrypoint debug logging in the container.
+	Debug bool
+
+	// CPUs / Memory cap container resources (e.g. "4", "8g").
+	CPUs   string
+	Memory string
+
+	// Env injects KEY=VAL environment variables into the sandbox.
+	Env map[string]string
+
+	// Isolation selects the isolation mode (empty = backend default).
+	Isolation IsolationMode
+
+	// Runtimes lists Apple simulator runtimes (e.g. "ios", "tvos:26.1").
+	Runtimes []string
+
+	// VscodeTunnel starts a VS Code tunnel in the sandbox.
+	VscodeTunnel bool
+
+	// Archetype forces a project archetype (empty = auto-detect).
+	Archetype string
+
+	// AllowDirtyWorkdir proceeds even when the workdir has uncommitted git
+	// changes, overriding *DirtyWorkdirError for the workdir. OR'd with
+	// Workdir.AllowDirty. Aux directories are acked individually via their own
+	// DirSpec.AllowDirty.
+	AllowDirtyWorkdir bool
+}
+
+// toInternal maps the public CreateOptions onto the internal sandbox struct.
+// It folds AllowDirtyWorkdir into the workdir's per-directory AllowDirty and
+// defaults an unset workdir Mode to copy. Version and the interactive flags are
+// not caller inputs — Client.Create stamps Version from the Client.
+func (o CreateOptions) toInternal() sandbox.CreateOptions {
+	workdir := o.Workdir
+	if workdir.Mode == "" {
+		workdir.Mode = DirModeCopy
+	}
+	if o.AllowDirtyWorkdir {
+		workdir.AllowDirty = true
+	}
+	return sandbox.CreateOptions{
+		Name:         o.Name,
+		Workdir:      workdir,
+		AuxDirs:      o.AuxDirs,
+		Agent:        string(o.Agent),
+		Model:        o.Model,
+		Profile:      o.Profile,
+		Prompt:       o.Prompt,
+		PromptFile:   o.PromptFile,
+		Network:      o.Network,
+		NetworkAllow: o.NetworkAllow,
+		Ports:        formatPorts(o.Ports),
+		Replace:      o.Replace,
+		Force:        o.Force,
+		NoStart:      o.NoStart,
+		Passthrough:  o.Passthrough,
+		Debug:        o.Debug,
+		CPUs:         o.CPUs,
+		Memory:       o.Memory,
+		Env:          o.Env,
+		Isolation:    o.Isolation,
+		Runtimes:     o.Runtimes,
+		VscodeTunnel: o.VscodeTunnel,
+		Archetype:    o.Archetype,
+	}
+}
+
+// formatPorts renders public PortMappings into the "host:container" strings the
+// internal create path parses (parsePortBindings; tcp-only).
+func formatPorts(ports []PortMapping) []string {
+	if len(ports) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(ports))
+	for _, p := range ports {
+		out = append(out, fmt.Sprintf("%d:%d", p.HostPort, p.ContainerPort))
+	}
+	return out
+}
+
+// materialize expands the curated RunOptions into the advanced CreateOptions
+// (F3: Run is sugar over Create). The run-flow extras (Wait/OnProgress) are not
+// creation params and stay on RunOptions, handled by Run after Create.
+func (o RunOptions) materialize() CreateOptions {
+	return CreateOptions{
+		Name:              o.Name,
+		Workdir:           DirSpec{Path: o.WorkDir, Mode: DirModeCopy},
+		Agent:             o.Agent,
+		Model:             o.Model,
+		Profile:           o.Profile,
+		Prompt:            o.Prompt,
+		Replace:           o.Replace,
+		AllowDirtyWorkdir: o.AllowDirtyWorkdir,
+	}
+}

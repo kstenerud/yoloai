@@ -76,14 +76,60 @@ Re-export at the root (type aliases, same pattern as `PortMapping`/`IsolationMod
 | `Runtimes []string` | | ✓ | | Apple simulator runtimes |
 | `VscodeTunnel` | | ✓ | | |
 | `Archetype` | | ✓ | | |
-| `Yes` | | | ✗ | CLI-UX only — the library never prompts (api_surface: confirmation is the caller's concern) |
+| `Yes` | | (replaced) | ✗ | **Revised (impl finding, 2026-05-28).** `Yes` conflated "skip prompts" with "proceed despite dirty/unverified." Split into typed refusals + named acks — see *Typed creation refusals* below. The flag itself is gone. |
 | `Attach` | | | ✗ | CLI-UX — attach is a separate `Sandbox(name).Attach`; not a creation param |
-| `Version` | | | ✗ | library fills it from build info; not a caller input |
+| `Version` | | | ✗ | library fills it from `Options.Version` (Client construction); not a per-create input |
+| — `AllowDirtyWorkdir` | | ✓ | (new) | ack: override `*DirtyWorkdirError` for the workdir. OR'd with `Workdir.AllowDirty`. |
 | (`Backend`) | — | — | — | stays on `yoloai.Options` (Client construction), not CreateOptions; F4 makes empty → `*UsageError` |
 | `Wait` / `OnProgress` | ✓ | — | | run-flow only; not creation params |
 
-Net: public `CreateOptions` ≈ 21 creation fields; 3 internal fields
-(`Yes`/`Attach`/`Version`) never reach the public surface.
+Net: public `CreateOptions` ≈ 22 creation fields; `Attach`/`Version` never reach
+it, and `Yes` is replaced by the two typed-refusal acks below.
+
+## Typed creation refusals (replaces `Yes`)
+
+**Impl finding (2026-05-28).** `Create` does *not* prompt — but the internal
+manager did, via two `Confirm` calls gated by `Yes`:
+
+- `checkDirtyRepos` — the **host** workdir / aux dirs have uncommitted git changes
+  (data-loss risk: the agent sees/modifies your WIP; on `:copy`, apply later
+  conflicts with the still-dirty host). **Real refusal.**
+- `checkRequires` — the project's `.yoloai.yaml` declares `requires:` tool
+  versions. **But version verification is unimplemented** — the gate is a
+  placeholder prompt for a stub feature.
+
+`Yes=true` skipped both; `Yes=false` prompted. That conflates "non-interactive"
+with "proceed despite the risk," and a headless embedder setting `Yes=true`
+silently disabled the dirty guard — a footgun. The §10 fix: the library **never
+prompts**; for a real risk it **refuses by default** with a typed error the
+caller must consciously override (same shape as `Destroy`→`*ActiveWorkError`).
+
+- **Dirty workdir** → manager returns `*DirtyWorkdirError{Paths []string}`
+  instead of prompting. Public acks (named for the *specific* refusal, verb
+  `Allow`):
+  - `CreateOptions.AllowDirtyWorkdir bool` — overrides the dirty refusal for the
+    workdir. Effective per-dir override is `Workdir.AllowDirty || AllowDirtyWorkdir`.
+  - `DirSpec.AllowDirty bool` — **new** per-directory override (needed because
+    aux dirs are dirty-checked too). Generic name: a `DirSpec` may be the workdir
+    *or* an aux dir.
+- **Requires** → **dropped** (owner, 2026-05-28). No typed refusal, no ack.
+  Gating a stub fails YAGNI, and an `AllowUnverifiedRequires` ack would die the
+  moment real verification lands (the refusal would become "requirement *not
+  met*", not "unverified"). `checkRequires` downgrades to a **non-blocking
+  warning** (print, don't prompt). A real `*RequirementsNotMetError` gets
+  designed when version verification is actually built.
+- A **forgetful** caller gets the *error* (safe), not a silent clobber. To
+  proceed they must name the risk they accept — no blanket "yes."
+- The **CLI** `new` catches `*DirtyWorkdirError` → prints the warning → prompts →
+  retries `Create` with `AllowDirtyWorkdir`. The prompt moves to the CLI; the
+  library is prompt-free.
+
+Adjacent cleanup: `DirSpec.Force` is a misnomer — its comment says "skip
+dirty-repo safety check" but it actually overrides the **dangerous-directory**
+refusal (the `:force` mount suffix). Renamed `DirSpec.Force` →
+`DirSpec.AllowDangerousPath` (+ corrected comment). The user-facing `:force`
+suffix is unchanged. This is a *different* refusal from dirty/replace; `Force`
+(unconditional *replace*) and `Replace` are untouched.
 
 ## Entry points (final shape)
 
@@ -106,16 +152,33 @@ func (c *Client) Create(ctx, CreateOptions) (string, error)
 
 ## Decisions — RESOLVED (owner, 2026-05-28; all recommendations accepted)
 
-1. ✅ **Drop `Yes`, `Attach`, `Version`** from the public creation surface. The
-   library never prompts; create-then-attach is two calls; version is build-info.
+1. ✅ **Drop `Attach`, `Version`; replace `Yes` with typed refusals.** Originally
+   "drop all three." Implementation revealed the manager *did* prompt (gated by
+   `Yes`), so a clean drop would silently disable the dirty/requires guards.
+   Revised (owner, 2026-05-28): `Attach`/`Version` still dropped; `Yes` is
+   replaced by `*DirtyWorkdirError`/`*UnverifiedRequiresError` + the
+   `AllowDirtyWorkdir`/`DirSpec.AllowDirty`/`AllowUnverifiedRequires` acks. The
+   library never prompts; the CLI catches→prompts→retries. See *Typed creation
+   refusals* above.
 2. ✅ **`CreateOptions.Ports` is `[]PortMapping`** (typed, per Q-Y). The CLI
    parses its `--port` flag into `PortMapping` at the boundary.
 3. ✅ **`Create` returns `(string, error)`** (the name). `Run` is the one that
    returns `*Info` (after Wait); Create doesn't wait.
 4. ✅ **`RunOptions.WorkDir` stays `string`** (copy-mode implied). Full `DirSpec`
    (mode / mount-path / `:rw` / `:overlay`) lives only in Tier-2 `CreateOptions`.
-5. ✅ **Bundle F4** — `Options.Backend == "" → *UsageError` lands in this pass
-   (same `NewWithOptions` construction surface; one guard + a test).
+5. ✅ **Bundle F4 — and resolve the F4/F21 collision.** `Options.Backend == "" →
+   *UsageError` lands here. **Impl finding (2026-05-28):** F4 directly conflicts
+   with F21's empty-Backend routing (`Options.Isolation`/`OS` →
+   `resolveBackendFromConfig`) — the same `NewWithOptions` line. Resolution
+   (owner): **F4 wins.** Require `Backend`; **delete `Options.Isolation`/`OS`**
+   (dead — no in-tree caller sets them; the CLI resolves the backend at its own
+   boundary via `ResolveBackend`/`SelectBackend` and passes a concrete `Backend`).
+   Backend selection is inherently ambient (probes installed daemons), so it
+   belongs at the boundary (§12), not silently inside construction. F21's core
+   (the `SelectBackend` routing function) stays. To preserve the auto-detect
+   convenience for external embedders *explicitly*, add a public
+   `yoloai.SelectBackend(ctx, preferred, isolation, os) (BackendName, warning)`
+   they call and pass the result — explicit, not an implicit construction default.
 6. ✅ **`Create(ctx, CreateOptions)`** — keep the name; F1/F3 only swap its
    parameter from the internal struct to the public one. No `RunRaw`.
 

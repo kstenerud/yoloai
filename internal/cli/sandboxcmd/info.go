@@ -26,7 +26,7 @@ func runSandboxInfo(cmd *cobra.Command, name string) error {
 	slog.Info("collecting sandbox info", "event", "sandbox.info", "sandbox", name) //nolint:gosec // G706: name is an internal sandbox name, not user-injected log data
 	backend := cliutil.ResolveBackendForSandbox(name)
 	return cliutil.WithClient(cmd, backend, func(ctx context.Context, c *yoloai.Client) error {
-		info, err := c.Inspect(ctx, name)
+		info, err := c.Sandbox(name).Inspect(ctx)
 		if err != nil {
 			return cliutil.SandboxErrorHint(name, err)
 		}

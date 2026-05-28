@@ -128,7 +128,7 @@ func executeStop(cmd *cobra.Command, ctx context.Context, c *yoloai.Client, name
 		var results []stopResult
 		for _, name := range names {
 			slog.Info("stopping sandbox", "event", "sandbox.stop", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
-			if err := c.Stop(ctx, name); err != nil {
+			if err := c.Sandbox(name).Stop(ctx); err != nil {
 				results = append(results, stopResult{Name: name, Error: err.Error()})
 			} else {
 				slog.Info("sandbox stopped", "event", "sandbox.stop.complete", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
@@ -141,7 +141,7 @@ func executeStop(cmd *cobra.Command, ctx context.Context, c *yoloai.Client, name
 	var errs []error
 	for _, name := range names {
 		slog.Info("stopping sandbox", "event", "sandbox.stop", "sandbox", name) //nolint:gosec // G706: name is validated by ValidateName
-		if err := c.Stop(ctx, name); err != nil {
+		if err := c.Sandbox(name).Stop(ctx); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: stop %s: %v\n", name, cliutil.SandboxErrorHint(name, err)) //nolint:errcheck // best-effort output
 			errs = append(errs, err)
 		} else {

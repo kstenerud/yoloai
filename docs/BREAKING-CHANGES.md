@@ -4,6 +4,130 @@ Tracks breaking changes made during beta. Each entry should be included in relea
 
 ## Unreleased
 
+### Diff moves under `client.Sandbox(name).Workdir()`
+
+Folds the four `Client` diff methods into one verb on the workdir sub-handle (F2,
+Step 3). Go-embedder API change; CLI behavior unchanged.
+
+**Previous behavior:** `c.Diff(ctx, name)`, `c.DiffWithOptions(ctx, name, paths,
+stat, nameOnly)`, `c.DiffOverlay(ctx, name, stat, nameOnly)`, and
+`c.DiffRef(ctx, name, ref, stat)` — four methods, with the caller choosing the
+copy vs. overlay variant.
+
+**New behavior:** `c.Sandbox(name).Workdir().Diff(ctx, yoloai.DiffOptions{Paths,
+Stat, NameOnly, Ref}) (string, error)`. Copy-vs-overlay is resolved internally
+from the workdir's mount mode, so the overlay-explicit `DiffOverlay` is gone;
+`Ref` selects a commit/range (still refused for overlay — commits aren't
+host-addressable). `""` means no changes.
+
+**Migration:**
+- `c.Diff(ctx, name)` → `c.Sandbox(name).Workdir().Diff(ctx, yoloai.DiffOptions{})`
+- `c.DiffWithOptions(ctx, name, paths, stat, nameOnly)` → `…Workdir().Diff(ctx, yoloai.DiffOptions{Paths: paths, Stat: stat, NameOnly: nameOnly})`
+- `c.DiffOverlay(…)` → drop it; `…Workdir().Diff(ctx, yoloai.DiffOptions{Stat, NameOnly})` auto-detects overlay.
+- `c.DiffRef(ctx, name, ref, stat)` → `…Workdir().Diff(ctx, yoloai.DiffOptions{Ref: ref, Stat: stat})`
+
+**Rationale:** F2 / Q-G — diff/apply belong on a `Workdir()` sub-handle, and one
+mode-agnostic verb removes the copy/overlay branching from every caller. (The
+patch-generation methods stay on `Client` for now; they fold into `Apply` in a
+later step, since they're apply-plumbing with an overlay shape that doesn't fit a
+single byte-returning `Patch`.)
+
+### Per-sandbox operations move from `Client` to `client.Sandbox(name)`
+
+Re-roots every per-sandbox Go operation onto the resource-bound `*yoloai.Sandbox`
+handle (F2). CLI behavior is unchanged; this is a Go-embedder API change.
+
+**Previous behavior:** per-sandbox ops were methods on `*Client` taking a `name`
+string — `c.Inspect(ctx, name)`, `c.Stop(ctx, name)`, `c.Start(ctx, name, opts)`,
+`c.Reset(ctx, sandbox.ResetOptions{Name: name, …})`, `c.Destroy(ctx, name, force)`,
+`c.Attach(ctx, name, io)`, `c.Exec(ctx, name, cmd, io)`, `c.StdioExec(…)`,
+`c.SendInput(ctx, name, text)`, `c.ContainerLogs(ctx, name, n)`,
+`c.SandboxDir(name)`, `c.NeedsConfirmation(ctx, name)`.
+
+**New behavior:** call them on the handle `c.Sandbox(name)`, with `name` dropped
+from each signature:
+
+- `c.Sandbox(name).Inspect(ctx)` / `.Stop(ctx)` / `.Start(ctx, opts)` /
+  `.Restart(ctx, opts)` / `.SendInput(ctx, text)` / `.ContainerLogs(ctx, n)`.
+- `.Reset(ctx, yoloai.ResetOptions{…})` — `ResetOptions` is now a public
+  hand-written struct: no `Name` (the handle supplies it), and `Restart` is
+  renamed `RestartContainer`.
+- `.Destroy(ctx, yoloai.DestroyOptions{Force})` — with `Force` false it returns
+  a typed `*ActiveWorkError` (carrying the reason) instead of the removed
+  `ErrUnappliedChanges` sentinel. `Client.NeedsConfirmation` is gone; the pure
+  pre-check is `c.Sandbox(name).HasActiveWork(ctx) (bool, reason)` for batch
+  "check-all-then-prompt" flows.
+- `.Exec(ctx, yoloai.ExecOptions{Command, PTY}, io)` — folds the old `Exec`
+  (now `PTY: true`) and `StdioExec` (`PTY: false`, pipes `io.In/Out/Err`).
+- `.Dir()` replaces `SandboxDir(name)`.
+- New public types: `Info`, `Status` (+ `StatusActive…` consts), `StartOptions`
+  (re-exported aliases); `ResetOptions`, `DestroyOptions`, `ExecOptions`
+  (hand-written). `Client.List`/`Run` now return `*yoloai.Info` (an alias of the
+  previous `*sandbox.Info` — same type).
+
+**Migration:** insert `.Sandbox(name)` and drop the `name` argument; replace
+`Destroy(name, force)` with `Sandbox(name).Destroy(ctx, yoloai.DestroyOptions{Force: force})`;
+switch `errors.Is(err, ErrUnappliedChanges)` to `errors.As(err, &*ActiveWorkError)`;
+move `ResetOptions.Restart` → `RestartContainer` and drop its `Name`.
+
+**Rationale:** F2 / Q-G (Shape B). Name-bound handles group per-sandbox ops behind
+one accessor, drop the repeated `name` argument and the method-prefix sprawl, and
+make `Destroy`'s safety check atomic (typed refusal, no check-then-act gap).
+
+### Public creation surface: `Create` takes `yoloai.CreateOptions`, `Backend` required, dirty workdir refused
+
+This reshapes the Go embedding API for sandbox creation (F1/F3/F4). The CLI is
+unaffected except where noted.
+
+**Previous behavior:**
+
+- `Client.Create(ctx, sandbox.CreateOptions)` took the *internal* struct —
+  uncallable by external embedders (they can't import `internal/sandbox`).
+- `Options.Backend` was optional; empty auto-resolved from config, optionally
+  routed via `Options.Isolation` / `Options.OS`.
+- `Run` (and the MCP create path) silently proceeded when the workdir had
+  uncommitted git changes; the CLI `new` prompted unless `--yes`. The
+  `CreateOptions.Yes` flag conflated "non-interactive" with "proceed on dirty".
+- A `.yoloai.yaml` `requires:` block prompted "Continue anyway?" (version
+  verification was, and is, unimplemented).
+
+**New behavior:**
+
+- `Client.Create(ctx, yoloai.CreateOptions)` takes a **public** struct built
+  from re-exported types (`yoloai.DirSpec`, `DirMode`, `NetworkMode`,
+  `PortMapping`, …), so external embedders can construct it. `Run` is sugar over
+  `Create`. `CreateOptions.Ports` is `[]yoloai.PortMapping` (was `[]string`).
+- `Options.Backend` is **required** — empty returns a `*UsageError` (exit 2).
+  `Options.Isolation` / `Options.OS` are removed. New `yoloai.SelectBackend(ctx,
+  preferred, isolation, os)` does the CLI's auto-detect/routing explicitly;
+  call it and pass the result into `Options.Backend`.
+- A dirty workdir now yields a typed **`*yoloai.DirtyWorkdirError`** (exit 12)
+  rather than a silent proceed or an in-library prompt. Acknowledge it with
+  `CreateOptions.AllowDirtyWorkdir`, the per-directory `DirSpec.AllowDirty`, or
+  `RunOptions.AllowDirtyWorkdir`. The library never prompts; the CLI `new`
+  catches the error, warns, prompts, and retries (`--yes` pre-acks).
+  `CreateOptions.Yes`, `Attach`, and `Version` are gone (`Version` moved to
+  `Options.Version`; attach is a separate post-create step).
+- `requires:` is now a non-blocking warning — no prompt, no error.
+- `DirSpec.Force` (the `:force` dangerous-path override) is renamed
+  `DirSpec.AllowDangerousPath`. The user-facing `:force` mount suffix is unchanged.
+
+**Migration:**
+
+- Embedders calling `Create` with `sandbox.CreateOptions` switch to
+  `yoloai.CreateOptions` (drop `Yes`; set `AllowDirtyWorkdir: true` to keep the
+  old proceed-on-dirty behavior; move `--port`-style strings to `PortMapping`).
+- Construct the `Client` with an explicit `Backend` (e.g. `yoloai.BackendDocker`
+  or `yoloai.SelectBackend(...)`); drop any `Options.Isolation` / `Options.OS`.
+- Handle `*yoloai.DirtyWorkdirError` from `Run`/`Create` (or pre-ack it) where
+  you previously relied on the implicit proceed.
+
+**Rationale:** F1/F3/F4 + the D24 decision. Backend selection is ambient, so it
+belongs at the boundary, not hidden in construction (§4/§12). Proceeding on a
+dirty workdir is a real data-loss risk, so it must be a conscious, *named* ack
+(`AllowDirtyWorkdir`) rather than a blanket `Yes` — a headless caller that set
+`Yes: true` only to silence prompts was silently disabling the dirty guard.
+
 ### `yoloai sandbox <name> allowed --json` carries per-domain provenance
 
 **Previous behavior:** `yoloai sandbox <name> allowed --json` emitted a flat `domains` array of strings:

@@ -48,7 +48,7 @@ func runClone(cmd *cobra.Command, args []string) error {
 		if _, err := os.Stat(cliutil.Layout().SandboxDir(dst)); err == nil { //nolint:gosec // G703: dst is validated sandbox name
 			destBackend := cliutil.ResolveBackendForSandbox(dst)
 			if err := cliutil.WithClient(cmd, destBackend, func(ctx context.Context, c *yoloai.Client) error {
-				return c.Destroy(ctx, dst, true)
+				return c.Sandbox(dst).Destroy(ctx, yoloai.DestroyOptions{Force: true})
 			}); err != nil {
 				return fmt.Errorf("destroy existing destination: %w", err)
 			}
@@ -84,7 +84,7 @@ func runClone(cmd *cobra.Command, args []string) error {
 // Attach reaches for raw runtime via AttachToSandboxByName — Client doesn't
 // yet expose attach (see CONVENTIONS.md "Hybrid handlers").
 func runCloneStart(cmd *cobra.Command, ctx context.Context, c *yoloai.Client, src, dst, prompt, promptFile string, attach bool) error {
-	if err := c.Start(ctx, dst, sandbox.StartOptions{
+	if err := c.Sandbox(dst).Start(ctx, sandbox.StartOptions{
 		Prompt:     prompt,
 		PromptFile: promptFile,
 	}); err != nil {

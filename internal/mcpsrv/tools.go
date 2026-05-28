@@ -12,8 +12,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/internal/fileutil"
-	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
 	"github.com/mark3labs/mcp-go/mcp"
 )
@@ -163,17 +163,18 @@ func (s *Server) handleSandboxCreate(ctx context.Context, req mcp.CallToolReques
 		return textResult(errorf("setup: %v", err)), nil
 	}
 
-	opts := sandbox.CreateOptions{
+	opts := yoloai.CreateOptions{
 		Name: name,
-		Workdir: sandbox.DirSpec{
+		Workdir: yoloai.DirSpec{
 			Path: workdir,
-			Mode: sandbox.DirModeCopy,
+			Mode: yoloai.DirModeCopy,
 		},
-		Agent:   agent,
+		Agent:   yoloai.AgentName(agent),
 		Model:   model,
 		Profile: profile,
 		Prompt:  prompt,
-		Yes:     true,
+		// MCP sandbox_create is non-interactive: proceed on a dirty workdir.
+		AllowDirtyWorkdir: true,
 	}
 
 	if _, err := s.c.Create(ctx, opts); err != nil {
@@ -189,7 +190,7 @@ func (s *Server) handleSandboxStatus(ctx context.Context, req mcp.CallToolReques
 		return textResult(errorf("name is required")), nil
 	}
 
-	info, err := s.c.Inspect(ctx, name)
+	info, err := s.c.Sandbox(name).Inspect(ctx)
 	if err != nil {
 		return textResult(errorf("inspect sandbox %q: %v", name, err)), nil
 	}
@@ -253,15 +254,14 @@ func (s *Server) handleSandboxDestroy(ctx context.Context, req mcp.CallToolReque
 	}
 
 	if !force {
-		needs, reason := s.c.NeedsConfirmation(ctx, name)
-		if needs {
+		if active, reason := s.c.Sandbox(name).HasActiveWork(ctx); active {
 			return textResult(errorf("sandbox %q has unapplied changes (%s). Use force=true to destroy anyway.", name, reason)), nil
 		}
 	}
 
-	// force=true: NeedsConfirmation already gate-checked above when
-	// force was false, so Client.Destroy won't re-prompt here.
-	if err := s.c.Destroy(ctx, name, true); err != nil {
+	// Active-work gate-checked above when force was false; force here skips
+	// the typed *ActiveWorkError refusal.
+	if err := s.c.Sandbox(name).Destroy(ctx, yoloai.DestroyOptions{Force: true}); err != nil {
 		return textResult(errorf("destroy sandbox %q: %v", name, err)), nil
 	}
 
@@ -276,7 +276,7 @@ func (s *Server) handleSandboxDiff(_ context.Context, req mcp.CallToolRequest) (
 		return textResult(errorf("name is required")), nil
 	}
 
-	diff, err := s.c.DiffWithOptions(context.Background(), name, nil, stat, false)
+	diff, err := s.c.Sandbox(name).Workdir().Diff(context.Background(), yoloai.DiffOptions{Stat: stat})
 	if err != nil {
 		return textResult(errorf("diff sandbox %q: %v", name, err)), nil
 	}
@@ -298,10 +298,10 @@ func (s *Server) handleSandboxDiffFile(ctx context.Context, req mcp.CallToolRequ
 		return textResult(errorf("path is required")), nil
 	}
 
-	// DiffWithOptions uses the Client's bound runtime. For Docker /
-	// Podman / containerd that's host-side git (the patch package
-	// handles container-vs-host selection internally).
-	diff, err := s.c.DiffWithOptions(ctx, name, []string{path}, false, false)
+	// Workdir().Diff uses the Client's bound runtime and resolves
+	// copy-vs-overlay internally; for Docker / Podman / containerd that's
+	// host-side git (the patch package handles container-vs-host selection).
+	diff, err := s.c.Sandbox(name).Workdir().Diff(ctx, yoloai.DiffOptions{Paths: []string{path}})
 	if err != nil {
 		return textResult(errorf("diff file %q in sandbox %q: %v", path, name, err)), nil
 	}
@@ -325,7 +325,7 @@ func (s *Server) handleSandboxLog(_ context.Context, req mcp.CallToolRequest) (*
 		lines = 100
 	}
 
-	logPath := store.AgentLogPath(s.c.SandboxDir(name))
+	logPath := store.AgentLogPath(s.c.Sandbox(name).Dir())
 	output, err := tailFile(logPath, lines)
 	if err != nil {
 		return textResult(errorf("read log for sandbox %q: %v", name, err)), nil
@@ -349,7 +349,7 @@ func (s *Server) handleSandboxInput(ctx context.Context, req mcp.CallToolRequest
 		return textResult(errorf("text is required")), nil
 	}
 
-	if err := s.c.SendInput(ctx, name, text); err != nil {
+	if err := s.c.Sandbox(name).SendInput(ctx, text); err != nil {
 		return textResult(errorf("send input to sandbox %q: %v", name, err)), nil
 	}
 
@@ -366,18 +366,13 @@ func (s *Server) handleSandboxReset(ctx context.Context, req mcp.CallToolRequest
 
 	// If a new prompt is provided, write it to prompt.txt before resetting.
 	if prompt != "" {
-		promptPath := store.PromptFilePath(s.c.SandboxDir(name))
+		promptPath := store.PromptFilePath(s.c.Sandbox(name).Dir())
 		if err := fileutil.WriteFile(promptPath, []byte(prompt), 0600); err != nil {
 			return textResult(errorf("write prompt for sandbox %q: %v", name, err)), nil
 		}
 	}
 
-	opts := sandbox.ResetOptions{
-		Name:    name,
-		Restart: true,
-	}
-
-	if err := s.c.Reset(ctx, opts); err != nil {
+	if err := s.c.Sandbox(name).Reset(ctx, yoloai.ResetOptions{RestartContainer: true}); err != nil {
 		return textResult(errorf("reset sandbox %q: %v", name, err)), nil
 	}
 
@@ -390,7 +385,7 @@ func (s *Server) handleSandboxFilesList(_ context.Context, req mcp.CallToolReque
 		return textResult(errorf("name is required")), nil
 	}
 
-	filesDir := store.FilesDir(s.c.SandboxDir(name))
+	filesDir := store.FilesDir(s.c.Sandbox(name).Dir())
 	entries, err := os.ReadDir(filesDir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -425,7 +420,7 @@ func (s *Server) handleSandboxFilesRead(_ context.Context, req mcp.CallToolReque
 		return textResult(errorf("%v", err)), nil
 	}
 
-	path := filepath.Join(store.FilesDir(s.c.SandboxDir(name)), filename)
+	path := filepath.Join(store.FilesDir(s.c.Sandbox(name).Dir()), filename)
 	data, err := os.ReadFile(path) //nolint:gosec // path validated by validateFilename
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -452,7 +447,7 @@ func (s *Server) handleSandboxFilesWrite(_ context.Context, req mcp.CallToolRequ
 		return textResult(errorf("%v", err)), nil
 	}
 
-	filesDir := store.FilesDir(s.c.SandboxDir(name))
+	filesDir := store.FilesDir(s.c.Sandbox(name).Dir())
 	if err := fileutil.MkdirAll(filesDir, 0750); err != nil {
 		return textResult(errorf("create files dir for sandbox %q: %v", name, err)), nil
 	}

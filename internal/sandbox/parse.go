@@ -45,7 +45,7 @@ func applyDirSuffix(result *DirSpec, suffix, arg string) error {
 		}
 		result.Mode = DirModeRW
 	case "force":
-		result.Force = true
+		result.AllowDangerousPath = true
 	}
 	return nil
 }

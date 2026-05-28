@@ -16,10 +16,10 @@ func TestParseDirArg_Modes(t *testing.T) {
 	require.NoError(t, os.MkdirAll(app, 0750))
 
 	tests := []struct {
-		name          string
-		input         string
-		expectedMode  DirMode
-		expectedForce bool
+		name                       string
+		input                      string
+		expectedMode               DirMode
+		expectedAllowDangerousPath bool
 	}{
 		{"bare path", app, "", false},
 		{"copy suffix", app + ":copy", DirModeCopy, false},
@@ -39,7 +39,7 @@ func TestParseDirArg_Modes(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, app, result.Path)
 			assert.Equal(t, tt.expectedMode, result.Mode)
-			assert.Equal(t, tt.expectedForce, result.Force)
+			assert.Equal(t, tt.expectedAllowDangerousPath, result.AllowDangerousPath)
 		})
 	}
 }
@@ -115,7 +115,7 @@ func TestParseDirArg_PathWithColons(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "/path/to/file:with:colons", result.Path)
 	assert.Equal(t, DirMode(""), result.Mode)
-	assert.False(t, result.Force)
+	assert.False(t, result.AllowDangerousPath)
 
 	// Known suffix after unknown colons.
 	result, err = ParseDirArg("/path/to/file:with:copy", "/home/user", nil)
@@ -130,12 +130,12 @@ func TestParseDirArg_MountPath(t *testing.T) {
 	require.NoError(t, os.MkdirAll(app, 0750))
 
 	tests := []struct {
-		name              string
-		input             string
-		expectedPath      string
-		expectedMountPath string
-		expectedMode      DirMode
-		expectedForce     bool
+		name                       string
+		input                      string
+		expectedPath               string
+		expectedMountPath          string
+		expectedMode               DirMode
+		expectedAllowDangerousPath bool
 	}{
 		{"mount path only", app + "=/opt/app", app, "/opt/app", "", false},
 		{"mount path with rw", app + ":rw=/opt/app", app, "/opt/app", DirModeRW, false},
@@ -149,7 +149,7 @@ func TestParseDirArg_MountPath(t *testing.T) {
 			assert.Equal(t, tt.expectedPath, result.Path)
 			assert.Equal(t, tt.expectedMountPath, result.MountPath)
 			assert.Equal(t, tt.expectedMode, result.Mode)
-			assert.Equal(t, tt.expectedForce, result.Force)
+			assert.Equal(t, tt.expectedAllowDangerousPath, result.AllowDangerousPath)
 		})
 	}
 }
@@ -161,7 +161,7 @@ func TestParseDirArg_DoubleColon(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "/tmp/test::", result.Path)
 	assert.Equal(t, DirMode(""), result.Mode)
-	assert.False(t, result.Force)
+	assert.False(t, result.AllowDangerousPath)
 }
 
 func TestParseDirArg_TrailingColon(t *testing.T) {
@@ -171,7 +171,7 @@ func TestParseDirArg_TrailingColon(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "/tmp/test:", result.Path)
 	assert.Equal(t, DirMode(""), result.Mode)
-	assert.False(t, result.Force)
+	assert.False(t, result.AllowDangerousPath)
 }
 
 func TestDirArg_ResolvedMountPath(t *testing.T) {

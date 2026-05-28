@@ -1,9 +1,9 @@
-ABOUTME: Cross-cutting strategic principles for yoloAI. Eleven principles
+ABOUTME: Cross-cutting strategic principles for yoloAI. Twelve principles
 ABOUTME: scoped to a single-author OSS CLI: pragmatism, boring tech, ecosystem
 ABOUTME: composition, reversibility, blast-radius, safe defaults, factual
 ABOUTME: accuracy, document-the-no, surface-failures, cross-platform, default-
-ABOUTME: to-public. Specialised principles (development, testing, security) cite
-ABOUTME: back here.
+ABOUTME: to-public, design-as-hypothesis. Specialised principles (development,
+ABOUTME: testing, security) cite back here.
 
 # General principles
 
@@ -378,6 +378,33 @@ Originally established in D22.
 
 ---
 
+## §12. A design is a hypothesis — aspirational until verified against reality
+
+**Principle.** A design — a design doc, `api_surface.go`, a spec — is a *model*: our best-effort map of reality, not a contract. Because no one is omniscient, parts of any model break down when implementation surfaces facts the model didn't anticipate. A design is therefore **provisional and falsifiable until it has been implemented and verified to work against the real internal capability.** When facts contradict the model, the facts win: revise the model and record *why*. This mirrors the scientific method — design is the hypothesis, implementation the experiment, divergence the analysis, the updated doc the conclusion. The mirror image of §7: §7 requires a design be backed by *research*; §12 requires it also be backed by *implementation* before it is load-bearing.
+
+### Pattern
+
+When implementing against a design, start from the observed facts (what the internal layer actually does), design the cleanest surface for *that*, and where it diverges from the design, **revise the design doc (or mark it superseded), cross-referenced to a D-entry.** Two symmetric failure modes are guarded: (a) slavishly implementing an unverified model — building behaviour the doc described that has no basis in fact; (b) silently diverging without updating the doc — leaving a stale map so the next implementer re-derives the same collision. The obligation on divergence is **revise + log the why**, not "ignore the design." Aspiration informs direction; facts and clean architecture decide.
+
+### Worked examples
+
+- **`api_surface.go` carries `//go:build never`** — it is literally uncompiled. That tag *is* the "unverified hypothesis" marker: read it like a header for direction, never cite it as binding.
+- **F2 re-rooting (D25):** `api_surface.go` designed `Status()` (deferred — no cheap status-only path in the manager), an elaborate Restart isolation-transition policy (deferred — no internal basis), and "delete `NeedsConfirmation`" (kept as `HasActiveWork` — the batch `destroy` command needs a side-effect-free pre-check). Each was a hypothesis that didn't survive the facts; api_surface.go got an inline divergence note rather than a forced implementation.
+- **F4 / F21 (D24):** api_surface's empty-`Backend` isolation/OS routing collided with F4's "require Backend." Resolved by reconciling to the fact that backend selection is ambient (belongs at the boundary), not by preserving the routing.
+- **Contrast with §1 (YAGNI):** §1 is about not building *future* features; §12 is about not building *present design* that the facts can't support. Both reject speculative work; §12 names the design-doc as a specific speculative source.
+
+### Cost-vs-benefit
+
+Cost of applying: the discipline to revise the doc on divergence (~minutes) and to resist both copying the doc verbatim and ignoring it. Damage prevented: speculative validation logic for behaviour with no basis (wasted build + dead public API that must later be removed); stale design docs that mislead the next implementer into re-deriving a known collision. Threshold: any time implementation reveals a design can't be cleanly realised, stop and reconcile the doc to the facts.
+
+### Sources
+
+The scientific method (observation → hypothesis → experiment → analysis → conclusion); Karl Popper on falsifiability; George Box "all models are wrong, some are useful" (1976). Operationalised in this project via the `//go:build never` design-checkpoint convention and the D-entry reconciliation process.
+
+Originally established in D25.
+
+---
+
 # Common over-generalisations to avoid
 
 The cost-vs-benefit discipline (Framing) explicitly rejects principle-shaped statements that don't pay off at yoloAI's scale. The following are documented so future-yoloAI doesn't drift toward them.
@@ -395,6 +422,8 @@ The cost-vs-benefit discipline (Framing) explicitly rejects principle-shaped sta
 | **Type-1/Type-2-as-cover-for-slow-decisions** | §4 explicitly says reversible decisions ship at 70% information. Using "this is Type 1, we need more info" as default cover for indecision is the §4 trap. Type 1 is the exception; Type 2 with fast iteration is the default. Pre-1.0 status widens the Type 2 surface further.                                                                                                                                                                                                                                                 |
 | **Public-by-default-without-curation**       | §11 encourages publishing; it does NOT justify dumping unreviewed working notes into the public docs surface. Public means *intentionally* public — design docs reviewed, research files cited, idiosyncrasies cataloged with code pointers. Unreviewed scratch lives in `docs/dev/old/` or `docs/dev/plans/`.                                                                                                                                                                                                                  |
 | **Cross-platform-by-default-without-test**   | §10 requires per-platform *verification*, not per-platform *aspiration*. Claiming a platform without testing on it is the failure mode §10 prevents. The Windows/WSL "expected to work, not a primary target" stance (`docs/design/README.md`) is honest scoping, not avoidance of §10.                                                                                                                                                                                                                                          |
+| **Design-doc-as-contract**                   | §12 rejects implementing a design (api_surface.go, spec) verbatim before it's verified against the internal facts. The doc is a hypothesis; building what it describes without checking it can be cleanly realised produces speculative behaviour and dead public API (the deferred Restart isolation-policy / `Status()` in F2). Cite a design for *direction*, never as binding.                                                                                                                                                |
+| **Facts-win-as-licence-to-ignore-designs**   | The inverse failure of §12: using "facts beat the model" as cover to skip designs entirely or diverge silently. §12's obligation on divergence is *revise the doc + log the why* (a D-entry), so the map stays honest. Abandoning the design without recording the reconciliation just makes the next implementer re-derive the same collision.                                                                                                                                                                                  |
 
 The pattern: every entry in this list is a true principle's failure mode at the wrong threshold. Future-yoloAI should re-evaluate only if the project's scale or scope materially changes (e.g., yoloAI gets a maintainer team, goes 1.0, takes on paying customers, or pivots away from the CLI-tool model).
 

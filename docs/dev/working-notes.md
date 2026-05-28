@@ -469,6 +469,45 @@ Operational state (`setup_complete`) lives in `~/.yoloai/state.yaml`.
 
 ---
 
+## D24 — Create refuses (typed), never prompts; ambient backend selection stays at the boundary
+
+**Date:** 2026-05-28. **Status:** Accepted. **Context:** discovered while implementing the F1+F3+F4 public creation surface (`f1-f3-public-surface.md`).
+
+**Decision (two coupled findings).**
+
+1. **`Create` is prompt-free; the dirty/requires gates become typed refusals.** The internal manager *did* prompt (two `Confirm` calls in `checkDirtyRepos`/`checkRequires`, gated by `CreateOptions.Yes`). `Yes` conflated "non-interactive" with "proceed despite the risk" — a headless embedder setting `Yes=true` to silence prompts silently disabled the dirty-workdir guard (data-loss footgun). Fix: the library **refuses by default** with `*DirtyWorkdirError{Paths}` / `*UnverifiedRequiresError{Requires}`; the caller overrides via acks named for the *specific* refusal — `CreateOptions.AllowDirtyWorkdir`, `DirSpec.AllowDirty` (renames `DirSpec.Force`'s dirty-skip role), `CreateOptions.AllowUnverifiedRequires`. The CLI `new` catches→warns→prompts→retries with the ack. Same shape as `Destroy`→`*ActiveWorkError`.
+2. **F4 beats F21 at the empty-`Backend` line.** F4 (`Backend=="" → *UsageError`) and F21 (`Backend==""` routes via `Options.Isolation`/`OS`) are the same `NewWithOptions` branch. F4 wins: require `Backend`, **delete `Options.Isolation`/`OS`** (no in-tree caller set them; the CLI already resolves the backend at its boundary and passes a concrete one). A public `yoloai.SelectBackend(ctx, preferred, isolation, os)` preserves auto-detect for embedders *explicitly*.
+
+**Rejected.**
+- *Keep `Yes` as an interactive toggle* — rejected: defensible (caller-controlled, paired with `Input`), but leaves the conflation and the footgun. The owner chose the prompt-free typed-refusal model.
+- *Soften F4 / drop F4* — rejected: backend selection is ambient (probes installed daemons); §12 says resolve ambient state once at the outermost boundary, not implicitly inside library construction.
+
+**Why.** A forgetful caller now gets a *typed error* (safe), not a silent clobber, and must name which risk it accepts. Library stays prompt-free and §12-clean (no ambient backend default). Revises `f1-f3-public-surface.md` decisions 1 and 5.
+
+**Composition.** Extends the api_surface "library never prompts; confirmation is the caller's concern" stance (cf. `Destroy` typed refusal) and `development-principles.md §12`.
+
+---
+
+## D25 — A design is a hypothesis; aspirational until verified against reality
+
+**Date:** 2026-05-28. **Status:** Accepted. **Context:** surfaced during the F2 re-rooting when api_surface.go's designed `RestartOptions` isolation-transition policy turned out to have no internal basis; the owner reframed the design doc as aspiration, not spec.
+
+**Decision.** A design — a design doc, `api_surface.go`, a spec — is a *model*: our best-effort map of reality, not a contract. Because no one is omniscient, parts of any model break down when implementation surfaces facts the model didn't anticipate. So a design is **provisional and falsifiable until it has been implemented and verified to work against the real internal capability.** When facts contradict the model, the facts win: revise the model (update the doc, or mark it superseded) and record *why* — don't bend the implementation to preserve the aspiration, and don't silently abandon the model either. This mirrors the scientific method: design = hypothesis, implementation = experiment, divergence = analysis, the updated doc = conclusion. Codified as `general-principles.md §12`.
+
+**Rejected.**
+- *Design-doc-as-contract* (implement api_surface verbatim) — rejected: it builds speculative behaviour with no basis (e.g. the Restart isolation-transition policy, `Status()` with no cheap internal path) — wasted work and dead API.
+- *Facts-win-as-licence-to-ignore-designs* — rejected: divergence carries an obligation to revise the doc + log the why, so the map stays honest and the next implementer doesn't re-derive the same collision.
+
+**Why.** The `//go:build never` tag on `api_surface.go` is the structural tell — it is literally uncompiled, i.e. unverified. Treating it as binding inverts the relationship: the experiment validates the hypothesis, not the reverse. Mirror image of `general-principles.md §7` (design must be backed by *research*); this adds that design must also be backed by *implementation* before it is load-bearing.
+
+**Consequences.**
+- `general-principles.md` gains §12 (eleven → twelve principles); README index + ABOUTME updated; two over-generalisation rows added (design-as-contract / facts-as-licence-to-ignore).
+- The F2 conclusions (deferred `Status()` + Restart policy, `NeedsConfirmation`→`HasActiveWork`) are recorded as worked examples; api_surface.go carries an inline divergence note.
+
+**Composition.** Extends §7 (factual accuracy / verify before you cite) to the design↔implementation axis; applied in the F1/F2/F4 public-API work (D24).
+
+---
+
 # Convention reminders
 
 - New decisions append at the bottom. Don't renumber.

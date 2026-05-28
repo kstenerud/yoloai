@@ -3,7 +3,15 @@
 
 package yoloai
 
-import "context"
+import (
+	"context"
+	"fmt"
+	"time"
+
+	"github.com/kstenerud/yoloai/internal/runtime"
+	"github.com/kstenerud/yoloai/internal/sandbox"
+	"github.com/kstenerud/yoloai/internal/sandbox/store"
+)
 
 // Sandbox is a name-scoped handle for a single sandbox. Methods on
 // the handle don't pre-validate that the sandbox exists — reads
@@ -53,4 +61,131 @@ type TerminalSnapshot struct {
 func (s *Sandbox) CaptureTerminal(ctx context.Context, scrollback int) (TerminalSnapshot, error) {
 	plain, ansi, err := s.c.manager.CaptureTerminal(ctx, s.name, scrollback)
 	return TerminalSnapshot{Plain: plain, ANSI: ansi}, err
+}
+
+// Inspect returns combined metadata and live state for the sandbox.
+func (s *Sandbox) Inspect(ctx context.Context) (*Info, error) {
+	return s.c.manager.Inspect(ctx, s.name)
+}
+
+// Dir returns the on-host directory holding the sandbox's persisted state
+// (meta.json, work copies, files/, cache/, logs, prompt). Computed from the
+// Client's DataDir; returns a path even for unknown names (caller checks
+// existence). Embedders that read/write sandbox files resolve paths under it.
+func (s *Sandbox) Dir() string {
+	return s.c.layout.SandboxDir(s.name)
+}
+
+// Stop stops the running container without destroying the sandbox.
+func (s *Sandbox) Stop(ctx context.Context) error {
+	return s.c.manager.Stop(ctx, s.name)
+}
+
+// Start launches (or relaunches) the container for the existing sandbox.
+// The sandbox must exist on disk; use Client.Run/Create for a new one.
+func (s *Sandbox) Start(ctx context.Context, opts StartOptions) error {
+	return s.c.manager.Start(ctx, s.name, opts)
+}
+
+// Restart stops then starts the sandbox, applying opts on the way back up
+// (e.g. StartOptions.Isolation to bring it up under a different isolation
+// mode, StartOptions.Resume to re-feed the prompt).
+func (s *Sandbox) Restart(ctx context.Context, opts StartOptions) error {
+	if err := s.c.manager.Stop(ctx, s.name); err != nil {
+		return err
+	}
+	return s.c.manager.Start(ctx, s.name, opts)
+}
+
+// Reset re-copies the workdir into the sandbox, resets the diff baseline, and
+// (per opts) optionally restarts the container and wipes agent state. Use for
+// "start over" workflows that abandon the agent's current changes.
+func (s *Sandbox) Reset(ctx context.Context, opts ResetOptions) error {
+	return s.c.manager.Reset(ctx, opts.toInternal(s.name))
+}
+
+// HasActiveWork reports whether destroying the sandbox would lose work — a
+// running agent, a dirty workdir, or unapplied commits — and a human-readable
+// reason (empty when there's none). It's a pure query with no side effects;
+// use it to pre-flight a batch of sandboxes before prompting once. For the
+// single-sandbox case prefer Destroy's atomic typed refusal.
+func (s *Sandbox) HasActiveWork(ctx context.Context) (bool, string) {
+	return s.c.manager.NeedsConfirmation(ctx, s.name)
+}
+
+// Destroy removes the sandbox and its container. With opts.Force false it
+// refuses a sandbox that HasActiveWork, returning a typed *ActiveWorkError
+// carrying the reason — the caller prompts and retries with Force true. Atomic:
+// no check-then-act gap.
+func (s *Sandbox) Destroy(ctx context.Context, opts DestroyOptions) error {
+	if !opts.Force {
+		if active, reason := s.HasActiveWork(ctx); active {
+			return sandbox.NewActiveWorkError("%s", reason)
+		}
+	}
+	return s.c.manager.Destroy(ctx, s.name)
+}
+
+// SendInput appends text to the running sandbox's tmux session as if the user
+// typed it. Returns ErrContainerNotRunning when the sandbox is stopped.
+func (s *Sandbox) SendInput(ctx context.Context, text string) error {
+	return s.c.manager.SendInput(ctx, s.name, text)
+}
+
+// ContainerLogs returns the tail of the sandbox's raw container log (roughly
+// tailLines lines). Returns "" when the container is gone or logs can't be
+// fetched. This is backend container stdout/stderr for diagnostics — distinct
+// from the structured agent log stream.
+func (s *Sandbox) ContainerLogs(ctx context.Context, tailLines int) string {
+	return s.c.rt.Logs(ctx, store.InstanceName(s.name), tailLines)
+}
+
+// Attach connects the supplied IOStreams to the sandbox's tmux session.
+// Blocks until the user detaches (Ctrl-B d) or the agent exits. The sandbox
+// must be running (Active/Idle/Done/Failed); for stopped sandboxes call Start
+// first. io.TTY=true is required; non-TTY attach returns a *UsageError.
+func (s *Sandbox) Attach(ctx context.Context, io IOStreams) error {
+	if !io.TTY {
+		return sandbox.NewUsageError("attach requires TTY=true")
+	}
+	info, err := s.c.manager.Inspect(ctx, s.name)
+	if err != nil {
+		return err
+	}
+	if err := attachStatusOK(info.Status, s.name); err != nil {
+		return err
+	}
+	containerName := store.InstanceName(s.name)
+	user := sandbox.ContainerUser(info.Meta, s.c.layout.HostUID)
+	if err := sandbox.WaitForAttachReady(ctx, s.c.rt, s.c.layout, s.name, user, 300*time.Second); err != nil {
+		return fmt.Errorf("waiting for tmux session: %w", err)
+	}
+	sock := sandbox.ReadTmuxSocket(s.c.layout, s.name)
+	cmd := s.c.rt.AttachCommand(sock, io.Rows, io.Cols, info.Meta.Isolation)
+	return s.c.rt.InteractiveExec(ctx, containerName, cmd, user, "", io)
+}
+
+// Exec runs opts.Command inside the sandbox's container. With opts.PTY true it
+// allocates an interactive terminal (the sandbox must be Active or Idle);
+// non-zero inner exit surfaces as *exec.ExitError. With opts.PTY false it pipes
+// raw stdio via io.In/Out/Err (no PTY) — the right shape for line-oriented
+// protocols like the MCP proxy's JSON-RPC bridge; returns *UsageError when the
+// backend doesn't implement stdio exec (Tart/Seatbelt don't).
+func (s *Sandbox) Exec(ctx context.Context, opts ExecOptions, io IOStreams) error {
+	if !opts.PTY {
+		execer, ok := s.c.rt.(runtime.StdioExecer)
+		if !ok {
+			return sandbox.NewUsageError("backend %s does not support stdio exec", s.c.rt.Descriptor().Name)
+		}
+		return execer.StdioExec(ctx, store.InstanceName(s.name), opts.Command, io.In, io.Out, io.Err)
+	}
+	info, err := s.c.manager.Inspect(ctx, s.name)
+	if err != nil {
+		return err
+	}
+	if info.Status != sandbox.StatusActive && info.Status != sandbox.StatusIdle {
+		return fmt.Errorf("sandbox %q: %w", s.name, sandbox.ErrContainerNotRunning)
+	}
+	user := sandbox.ContainerUser(info.Meta, s.c.layout.HostUID)
+	return s.c.rt.InteractiveExec(ctx, store.InstanceName(s.name), opts.Command, user, info.Meta.Workdir.MountPath, io)
 }
