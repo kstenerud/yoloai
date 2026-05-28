@@ -143,3 +143,57 @@ func TestResourceLimitError_Unwrap(t *testing.T) {
 func TestResourceLimitError_ImplementsError(t *testing.T) {
 	var _ error = (*ResourceLimitError)(nil)
 }
+
+// ---- ExitCoder (F16) ----
+
+// TestExitCode_PerType locks the typed-error → exit-code table. This is
+// the contract the CLI's top-level handler depends on; if a code changes
+// here it changes the user-observable exit status.
+func TestExitCode_PerType(t *testing.T) {
+	cases := []struct {
+		name string
+		err  ExitCoder
+		want int
+	}{
+		{"usage", NewUsageError("x"), ExitUsage},
+		{"config", NewConfigError("x"), ExitConfig},
+		{"active-work", NewActiveWorkError("x"), ExitActiveWork},
+		{"dependency", NewDependencyError("x"), ExitDependency},
+		{"platform", NewPlatformError("x"), ExitPlatform},
+		{"auth", NewAuthError("x"), ExitAuth},
+		{"permission", NewPermissionError("x"), ExitPermission},
+		{"sandbox-locked", &SandboxLockedError{Name: "s"}, ExitSandboxLocked},
+		{"disk-space", NewDiskSpaceError("op", syscall.ENOSPC), ExitDiskSpace},
+		{"resource-limit", NewResourceLimitError("x"), ExitResourceLimit},
+	}
+	// Exit codes must be distinct — two errors sharing a code would make
+	// the status ambiguous for scripts branching on it.
+	seen := map[int]string{}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, tc.err.ExitCode())
+			if prev, dup := seen[tc.want]; dup {
+				t.Errorf("exit code %d shared by %q and %q", tc.want, prev, tc.name)
+			}
+			seen[tc.want] = tc.name
+		})
+	}
+}
+
+// TestExitCoder_FoundThroughWrap is the property the F16 collapse relies
+// on: errors.AsType[ExitCoder] must locate a typed error even when it's
+// wrapped behind fmt.Errorf("...: %w", ...) layers, because real call
+// sites return wrapped errors up the stack.
+func TestExitCoder_FoundThroughWrap(t *testing.T) {
+	base := NewAuthError("no credentials")
+	wrapped := fmt.Errorf("start sandbox: %w", fmt.Errorf("connect: %w", base))
+
+	coder, ok := errors.AsType[ExitCoder](wrapped)
+	require.True(t, ok, "AsType[ExitCoder] should find the wrapped AuthError")
+	assert.Equal(t, ExitAuth, coder.ExitCode())
+}
+
+func TestExitCoder_NotImplementedByPlainError(t *testing.T) {
+	_, ok := errors.AsType[ExitCoder](errors.New("plain"))
+	assert.False(t, ok, "a plain error must not satisfy ExitCoder")
+}

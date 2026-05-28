@@ -98,3 +98,8 @@ type ResourceLimitError = yoerrors.ResourceLimitError
 
 // NewResourceLimitError forwards to yoerrors.NewResourceLimitError.
 var NewResourceLimitError = yoerrors.NewResourceLimitError
+
+// ExitCoder is an alias for yoerrors.ExitCoder — the interface the CLI's
+// top-level handler matches to translate a typed error into a process
+// exit code (F16).
+type ExitCoder = yoerrors.ExitCoder

@@ -18,6 +18,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/extension"
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/internal/sandbox"
+	"github.com/kstenerud/yoloai/internal/yoerrors"
 	"github.com/spf13/cobra"
 )
 
@@ -149,56 +150,26 @@ func finalizeBugReport(exitCode int, runErr error, panicked bool) {
 }
 
 // errorExitCode maps an error to the appropriate exit code.
+//
+// The typed yoerrors taxonomy carries its own exit code via the
+// ExitCoder interface (F16): a single errors.AsType[ExitCoder] match
+// replaces the former per-type cascade, so adding a new typed error
+// with an ExitCode method participates automatically. extension.ExitError
+// is checked first (it carries an arbitrary child-process code, not one
+// of our fixed codes), and the disk-space string sniff stays as a
+// fallback for unwrapped ENOSPC that flowed up from a backend without
+// typing.
 func errorExitCode(err error) int {
 	if exitErr, ok := errors.AsType[*extension.ExitError](err); ok {
 		return exitErr.Code
 	}
 
-	if _, ok := errors.AsType[*sandbox.UsageError](err); ok {
-		return 2
+	if coder, ok := errors.AsType[sandbox.ExitCoder](err); ok {
+		return coder.ExitCode()
 	}
 
-	if _, ok := errors.AsType[*sandbox.ConfigError](err); ok {
-		return 3
-	}
-
-	if _, ok := errors.AsType[*sandbox.ActiveWorkError](err); ok {
-		return 4
-	}
-
-	if _, ok := errors.AsType[*sandbox.DependencyError](err); ok {
-		return 5
-	}
-
-	if _, ok := errors.AsType[*sandbox.PlatformError](err); ok {
-		return 6
-	}
-
-	if _, ok := errors.AsType[*sandbox.AuthError](err); ok {
-		return 7
-	}
-
-	if _, ok := errors.AsType[*sandbox.PermissionError](err); ok {
-		return 8
-	}
-
-	if _, ok := errors.AsType[*sandbox.SandboxLockedError](err); ok {
-		return 9
-	}
-
-	if _, ok := errors.AsType[*sandbox.ResourceLimitError](err); ok {
-		return 11
-	}
-
-	// DiskSpaceError catches both explicitly-wrapped sites (via
-	// AsDiskSpaceError) and unwrapped ENOSPC errors that flowed up
-	// from runtimes without typing — IsDiskSpaceError sniffs both
-	// syscall.ENOSPC and the common string forms.
-	if _, ok := errors.AsType[*sandbox.DiskSpaceError](err); ok {
-		return 10
-	}
 	if sandbox.IsDiskSpaceError(err) {
-		return 10
+		return yoerrors.ExitDiskSpace
 	}
 
 	return 1

@@ -15,6 +15,37 @@ import (
 	"syscall"
 )
 
+// Exit codes for the typed errors in this package. The CLI's top-level
+// error handler translates a typed error into the matching process
+// exit status via the ExitCoder interface. Keeping the code on the
+// error type (ExitCode methods below) means the "which code" decision
+// lives in one file alongside the type taxonomy, not split across a
+// cascade in cli/root.go (F16). Exit code 1 is the unmapped/generic
+// failure; 0 is success. Codes are contiguous from 2.
+const (
+	ExitUsage         = 2
+	ExitConfig        = 3
+	ExitActiveWork    = 4
+	ExitDependency    = 5
+	ExitPlatform      = 6
+	ExitAuth          = 7
+	ExitPermission    = 8
+	ExitSandboxLocked = 9
+	ExitDiskSpace     = 10
+	ExitResourceLimit = 11
+)
+
+// ExitCoder is implemented by typed errors that map to a specific
+// process exit code. The CLI's top-level handler matches it with
+// errors.AsType[ExitCoder] and returns ExitCode(); the embedded error
+// constraint lets AsType walk the wrap chain. Adding a new typed error
+// with an ExitCode method automatically participates — no edit to the
+// CLI's exit-code logic required (F16).
+type ExitCoder interface {
+	error
+	ExitCode() int
+}
+
 // UsageError indicates bad arguments or missing required args (exit code 2).
 type UsageError struct {
 	Err error
@@ -22,6 +53,7 @@ type UsageError struct {
 
 func (e *UsageError) Error() string { return e.Err.Error() }
 func (e *UsageError) Unwrap() error { return e.Err }
+func (e *UsageError) ExitCode() int { return ExitUsage }
 
 // NewUsageError wraps a message as a UsageError.
 func NewUsageError(format string, args ...any) *UsageError {
@@ -35,6 +67,7 @@ type ConfigError struct {
 
 func (e *ConfigError) Error() string { return e.Err.Error() }
 func (e *ConfigError) Unwrap() error { return e.Err }
+func (e *ConfigError) ExitCode() int { return ExitConfig }
 
 // NewConfigError wraps a message as a ConfigError.
 func NewConfigError(format string, args ...any) *ConfigError {
@@ -46,6 +79,7 @@ type ActiveWorkError struct{ Err error }
 
 func (e *ActiveWorkError) Error() string { return e.Err.Error() }
 func (e *ActiveWorkError) Unwrap() error { return e.Err }
+func (e *ActiveWorkError) ExitCode() int { return ExitActiveWork }
 
 // NewActiveWorkError wraps a message as an ActiveWorkError.
 func NewActiveWorkError(format string, args ...any) *ActiveWorkError {
@@ -57,6 +91,7 @@ type DependencyError struct{ Err error }
 
 func (e *DependencyError) Error() string { return e.Err.Error() }
 func (e *DependencyError) Unwrap() error { return e.Err }
+func (e *DependencyError) ExitCode() int { return ExitDependency }
 
 // NewDependencyError wraps a message as a DependencyError.
 func NewDependencyError(format string, args ...any) *DependencyError {
@@ -68,6 +103,7 @@ type PlatformError struct{ Err error }
 
 func (e *PlatformError) Error() string { return e.Err.Error() }
 func (e *PlatformError) Unwrap() error { return e.Err }
+func (e *PlatformError) ExitCode() int { return ExitPlatform }
 
 // NewPlatformError wraps a message as a PlatformError.
 func NewPlatformError(format string, args ...any) *PlatformError {
@@ -79,6 +115,7 @@ type AuthError struct{ Err error }
 
 func (e *AuthError) Error() string { return e.Err.Error() }
 func (e *AuthError) Unwrap() error { return e.Err }
+func (e *AuthError) ExitCode() int { return ExitAuth }
 
 // NewAuthError wraps a message as an AuthError.
 func NewAuthError(format string, args ...any) *AuthError {
@@ -90,6 +127,7 @@ type PermissionError struct{ Err error }
 
 func (e *PermissionError) Error() string { return e.Err.Error() }
 func (e *PermissionError) Unwrap() error { return e.Err }
+func (e *PermissionError) ExitCode() int { return ExitPermission }
 
 // NewPermissionError wraps a message as a PermissionError.
 func NewPermissionError(format string, args ...any) *PermissionError {
@@ -120,6 +158,7 @@ func (e *DiskSpaceError) Error() string {
 }
 
 func (e *DiskSpaceError) Unwrap() error { return e.Err }
+func (e *DiskSpaceError) ExitCode() int { return ExitDiskSpace }
 
 // IsDiskSpaceError reports whether err is — or wraps — a disk-space
 // exhaustion. Detection layers:
@@ -178,6 +217,7 @@ type ResourceLimitError struct{ Err error }
 
 func (e *ResourceLimitError) Error() string { return e.Err.Error() }
 func (e *ResourceLimitError) Unwrap() error { return e.Err }
+func (e *ResourceLimitError) ExitCode() int { return ExitResourceLimit }
 
 // NewResourceLimitError wraps a message as a ResourceLimitError.
 func NewResourceLimitError(format string, args ...any) *ResourceLimitError {
@@ -227,3 +267,5 @@ func (e *SandboxLockedError) Error() string {
 		e.Name, e.HolderPID, e.Name, e.LockPath,
 	)
 }
+
+func (e *SandboxLockedError) ExitCode() int { return ExitSandboxLocked }
