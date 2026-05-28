@@ -101,6 +101,61 @@ func (s *SystemClient) DiskUsage(ctx context.Context) (*DiskUsage, error) {
 	return du, nil
 }
 
+// BackendStatus reports whether a registered backend is usable in the current
+// environment. Note explains why when Available is false.
+type BackendStatus struct {
+	Name      BackendName
+	Available bool
+	Note      string // failure reason when Available is false; empty otherwise
+}
+
+// SystemInfo describes a yoloai installation: where its state lives and which
+// backends are usable. Build metadata (version/commit/date) is the CLI's
+// concern and is intentionally not included. Disk usage is a separate (slower)
+// call — see DiskUsage.
+type SystemInfo struct {
+	DataDir        string
+	SandboxesDir   string
+	GlobalConfig   string // path to the global config.yaml
+	DefaultsConfig string // path to the defaults config.yaml
+	Backends       []BackendStatus
+}
+
+// Backends probes every registered backend's availability by constructing it
+// and immediately closing it. A backend that fails to construct (missing
+// daemon, unsupported platform, …) is reported Available=false with the reason
+// in Note. Order matches runtime.Descriptors() (registration order).
+func (s *SystemClient) Backends(ctx context.Context) []BackendStatus {
+	descs := runtime.Descriptors()
+	out := make([]BackendStatus, 0, len(descs))
+	for _, desc := range descs {
+		st := BackendStatus{Name: desc.Name, Available: true}
+		rt, err := newRuntime(ctx, desc.Name, s.layout)
+		if err != nil {
+			st.Available = false
+			st.Note = err.Error()
+		} else {
+			_ = rt.Close() //nolint:errcheck // best-effort close after a probe
+		}
+		out = append(out, st)
+	}
+	return out
+}
+
+// Info returns the installation's paths and per-backend availability in one
+// call. It never returns an error today (per-backend probe failures are
+// captured in BackendStatus.Note); the error return is kept for forward
+// compatibility, mirroring DiskUsage.
+func (s *SystemClient) Info(ctx context.Context) (*SystemInfo, error) {
+	return &SystemInfo{
+		DataDir:        s.layout.YoloaiDir(),
+		SandboxesDir:   s.layout.SandboxesDir(),
+		GlobalConfig:   s.layout.GlobalConfigPath(),
+		DefaultsConfig: s.layout.DefaultsConfigPath(),
+		Backends:       s.Backends(ctx),
+	}, nil
+}
+
 // BuildOptions configures SystemClient.Build.
 type BuildOptions struct {
 	// Profile is the profile name to build. Empty = base image only.

@@ -6,9 +6,9 @@ package system
 import (
 	"fmt"
 
+	"github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
 
-	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/sandbox"
 	"github.com/spf13/cobra"
 )
@@ -19,30 +19,24 @@ func newSystemInfoCmd(version, commit, date string) *cobra.Command {
 		Short: "Show system information",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			info, err := cliutil.NewSystemClient().Info(cmd.Context())
+			if err != nil {
+				return err
+			}
 			if cliutil.JSONEnabled(cmd) {
-				return writeSystemInfoJSON(cmd, version, commit, date)
+				return writeSystemInfoJSON(cmd, version, commit, date, info)
 			}
 
 			out := cmd.OutOrStdout()
+			fmt.Fprintf(out, "Version:     %s\n", version)             //nolint:errcheck
+			fmt.Fprintf(out, "Commit:      %s\n", commit)              //nolint:errcheck
+			fmt.Fprintf(out, "Built:       %s\n", date)                //nolint:errcheck
+			fmt.Fprintf(out, "Config:      %s\n", info.GlobalConfig)   //nolint:errcheck
+			fmt.Fprintf(out, "Profile:     %s\n", info.DefaultsConfig) //nolint:errcheck
+			fmt.Fprintf(out, "Data dir:    %s\n", info.DataDir)        //nolint:errcheck
+			fmt.Fprintf(out, "Sandboxes:   %s\n", info.SandboxesDir)   //nolint:errcheck
 
-			fmt.Fprintf(out, "Version:     %s\n", version) //nolint:errcheck
-			fmt.Fprintf(out, "Commit:      %s\n", commit)  //nolint:errcheck
-			fmt.Fprintf(out, "Built:       %s\n", date)    //nolint:errcheck
-
-			globalConfigPath := cliutil.Layout().GlobalConfigPath()
-			fmt.Fprintf(out, "Config:      %s\n", globalConfigPath) //nolint:errcheck
-
-			profileConfigPath := cliutil.Layout().DefaultsConfigPath()
-			fmt.Fprintf(out, "Profile:     %s\n", profileConfigPath) //nolint:errcheck
-
-			dataDir := cliutil.Layout().YoloaiDir()
-			sandboxesDir := cliutil.Layout().SandboxesDir()
-
-			fmt.Fprintf(out, "Data dir:    %s\n", dataDir)      //nolint:errcheck
-			fmt.Fprintf(out, "Sandboxes:   %s\n", sandboxesDir) //nolint:errcheck
-
-			size, err := sandbox.DirSize(dataDir)
-			if err != nil {
+			if size, sizeErr := sandbox.DirSize(info.DataDir); sizeErr != nil {
 				fmt.Fprintf(out, "Disk usage:  (unavailable)\n") //nolint:errcheck
 			} else {
 				fmt.Fprintf(out, "Disk usage:  %s\n", sandbox.FormatSize(size)) //nolint:errcheck
@@ -50,33 +44,25 @@ func newSystemInfoCmd(version, commit, date string) *cobra.Command {
 
 			fmt.Fprintln(out)              //nolint:errcheck
 			fmt.Fprintln(out, "Backends:") //nolint:errcheck
-			ctx := cmd.Context()
-			for _, desc := range runtime.Descriptors() {
-				available, note := cliutil.CheckBackend(ctx, desc.Name)
+			for _, b := range info.Backends {
 				status := "available"
-				if !available {
+				if !b.Available {
 					status = "unavailable"
-					if note != "" {
-						status += " (" + note + ")"
+					if b.Note != "" {
+						status += " (" + b.Note + ")"
 					}
 				}
-				fmt.Fprintf(out, "  %-12s %s\n", desc.Name, status) //nolint:errcheck
+				fmt.Fprintf(out, "  %-12s %s\n", b.Name, status) //nolint:errcheck
 			}
-
 			return nil
 		},
 	}
 }
 
 // writeSystemInfoJSON outputs system info as JSON.
-func writeSystemInfoJSON(cmd *cobra.Command, version, commit, date string) error {
-	globalConfigPath := cliutil.Layout().GlobalConfigPath()
-	profileConfigPath := cliutil.Layout().DefaultsConfigPath()
-	dataDir := cliutil.Layout().YoloaiDir()
-	sandboxesDir := cliutil.Layout().SandboxesDir()
-
+func writeSystemInfoJSON(cmd *cobra.Command, version, commit, date string, info *yoloai.SystemInfo) error {
 	diskUsage := ""
-	if size, err := sandbox.DirSize(dataDir); err == nil {
+	if size, err := sandbox.DirSize(info.DataDir); err == nil {
 		diskUsage = sandbox.FormatSize(size)
 	}
 
@@ -86,14 +72,12 @@ func writeSystemInfoJSON(cmd *cobra.Command, version, commit, date string) error
 		Note      string `json:"note,omitempty"`
 	}
 
-	var backends []backendStatus
-	ctx := cmd.Context()
-	for _, desc := range runtime.Descriptors() {
-		available, note := cliutil.CheckBackend(ctx, desc.Name)
+	backends := make([]backendStatus, 0, len(info.Backends))
+	for _, b := range info.Backends {
 		backends = append(backends, backendStatus{
-			Name:      string(desc.Name),
-			Available: available,
-			Note:      note,
+			Name:      string(b.Name),
+			Available: b.Available,
+			Note:      b.Note,
 		})
 	}
 
@@ -111,10 +95,10 @@ func writeSystemInfoJSON(cmd *cobra.Command, version, commit, date string) error
 		Version:           version,
 		Commit:            commit,
 		Date:              date,
-		ConfigPath:        globalConfigPath,
-		ProfileConfigPath: profileConfigPath,
-		DataDir:           dataDir,
-		SandboxesDir:      sandboxesDir,
+		ConfigPath:        info.GlobalConfig,
+		ProfileConfigPath: info.DefaultsConfig,
+		DataDir:           info.DataDir,
+		SandboxesDir:      info.SandboxesDir,
 		DiskUsage:         diskUsage,
 		Backends:          backends,
 	}
