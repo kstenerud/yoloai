@@ -5,7 +5,6 @@ package docker
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -394,25 +393,6 @@ func (r *Runtime) Exec(ctx context.Context, name string, cmd []string, user stri
 	return result, nil
 }
 
-// GitExec runs a git command on the host filesystem (Docker bind-mounts host paths).
-// For Docker, workDir is a host path and git is executed directly on the host.
-// The name parameter is ignored (needed for VM backends).
-func (r *Runtime) GitExec(ctx context.Context, name, workDir string, args ...string) (string, error) {
-	_ = name // unused for Docker (host-side git)
-	cmdArgs := append([]string{"-c", "core.hooksPath=/dev/null", "-C", workDir}, args...)
-	cmd := exec.CommandContext(ctx, "git", cmdArgs...) //nolint:gosec // G204: workDir from validated sandbox state
-	output, err := cmd.Output()
-	if err != nil {
-		var exitErr *exec.ExitError
-		if ok := errors.As(err, &exitErr); ok {
-			return "", fmt.Errorf("git %v: %w: %s", args, err, strings.TrimSpace(string(exitErr.Stderr)))
-		}
-		return "", fmt.Errorf("git %v: %w", args, err)
-	}
-	// Don't trim output - git patches are whitespace-sensitive
-	return string(output), nil
-}
-
 // InteractiveExec runs an interactive command inside a Docker container
 // by shelling out to `docker exec`. The IOStreams determine PTY allocation
 // (-it vs -i) and where stdio is wired. Caller-supplied non-PTY streams
@@ -494,9 +474,6 @@ func (r *Runtime) Descriptor() runtime.BackendDescriptor {
 var dockerInfoOutput = func(ctx context.Context, binaryName string) ([]byte, error) {
 	return exec.CommandContext(ctx, binaryName, "info", "--format", "{{range $k, $v := .Runtimes}}{{$k}}\n{{end}}").Output() //nolint:gosec // G204: binaryName is "docker" or "podman"
 }
-
-// PrepareAgentCommand returns the command unchanged — Docker needs no prefix.
-func (r *Runtime) PrepareAgentCommand(cmd string) string { return cmd }
 
 // RequiredCapabilities returns the host capabilities needed for the given isolation mode.
 func (r *Runtime) RequiredCapabilities(isolation runtime.IsolationMode) []caps.HostCapability {

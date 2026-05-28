@@ -5,7 +5,6 @@ package seatbelt
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -418,25 +417,6 @@ func (r *Runtime) Exec(_ context.Context, name string, cmd []string, _ string) (
 	return runtime.RunCmdExec(execCmd)
 }
 
-// GitExec runs a git command on the host filesystem (Seatbelt uses host paths).
-// For Seatbelt, workDir is a host path and git is executed directly on the host.
-// The name parameter is ignored (needed for VM backends).
-func (r *Runtime) GitExec(ctx context.Context, name, workDir string, args ...string) (string, error) {
-	_ = name // unused for Seatbelt (host-side git)
-	cmdArgs := append([]string{"-c", "core.hooksPath=/dev/null", "-C", workDir}, args...)
-	cmd := exec.CommandContext(ctx, "git", cmdArgs...) //nolint:gosec // G204: workDir from validated sandbox state
-	output, err := cmd.Output()
-	if err != nil {
-		var exitErr *exec.ExitError
-		if ok := errors.As(err, &exitErr); ok {
-			return "", fmt.Errorf("git %v: %w: %s", args, err, strings.TrimSpace(string(exitErr.Stderr)))
-		}
-		return "", fmt.Errorf("git %v: %w", args, err)
-	}
-	// Don't trim output - git patches are whitespace-sensitive
-	return string(output), nil
-}
-
 // InteractiveExec runs a command with the supplied IOStreams. For tmux
 // commands, injects the per-sandbox socket. For other commands, runs
 // under sandbox-exec. PTY allocation isn't explicit here: seatbelt is a
@@ -458,10 +438,6 @@ func (r *Runtime) InteractiveExec(_ context.Context, name string, cmd []string, 
 func (r *Runtime) Close() error {
 	return nil
 }
-
-// Logs returns empty string — seatbelt logs are written to files on disk.
-// Callers can use DiagHint to find the log path.
-func (r *Runtime) Logs(_ context.Context, _ string, _ int) string { return "" }
 
 // DiagHint returns a seatbelt-specific hint for checking logs.
 func (r *Runtime) DiagHint(instanceName string) string {

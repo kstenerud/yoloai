@@ -1075,7 +1075,7 @@ func (m *Manager) relaunchAgentWithCustomPrompt(ctx context.Context, name string
 	if cfg.UseLaunchPrefix {
 		interactiveCmd = cfg.AgentLaunchPrefix + interactiveCmd
 	} else {
-		interactiveCmd = m.runtime.PrepareAgentCommand(interactiveCmd)
+		interactiveCmd = runtime.PrepareAgentCommandFor(m.runtime, interactiveCmd)
 	}
 	_, err = ExecInContainer(ctx, m.runtime, name, meta, m.layout.HostUID,
 		tmuxCmd(cfg.TmuxSocket, "respawn-pane", "-t", "main", "-k", interactiveCmd),

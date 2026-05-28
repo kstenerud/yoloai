@@ -109,13 +109,18 @@ CLI gains a `RenderNotice` helper. Roughly 30 message sites converted
 across `internal/sandbox/*`. The embedded `m.output io.Writer` goes
 away. Multi-week.
 
-### F18 — Move all five to optional interfaces
+### F18 — Move to optional interfaces — DONE (2026-05-28; moved 3 of 5)
 
-`Logs`, `DiagHint`, `TmuxSocket`, `PrepareAgentCommand`, `GitExec` all
-move to optional interfaces (`LogTailer`, `DiagHinter`,
-`TmuxSocketResolver`, `AgentCommandPreparer`, `GitExecer`). Backends
-drop trivial impls. Callers use the existing helper-function pattern
-(`runtime.LogsFor(rt, ...)` etc.). Strict "core = universal" bar.
+Moved `Logs`→`LogTailer`, `PrepareAgentCommand`→`AgentCommandPreparer`,
+`GitExec`→`GitExecer`, each with a `…For(rt, …)` helper + documented default
+(`""` / passthrough / host-git). **Kept `DiagHint` and `TmuxSocket` core:**
+verification of the actual backend impls showed every backend (docker, containerd,
+tart, seatbelt) implements both non-trivially with no sensible universal default —
+so by F18's own "core = universally non-trivial" bar they ARE core; moving them
+would be churn with no backend dropping them (§12 facts-over-aspiration; owner
+confirmed). The host-git default (`runtime.hostGitExec`) returns `*runtime.ExecError`
+on non-zero exit (the exit-code-aware form `apply.go` relies on); only Tart
+implements `GitExecer` (VM path translation). See working-notes D30.
 
 ### F22 — Strict `Sandbox(name)` validation — DONE (2026-05-28)
 

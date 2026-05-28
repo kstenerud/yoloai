@@ -7,7 +7,6 @@ package containerdrt
 import (
 	"context"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -145,9 +144,6 @@ func (r *Runtime) TmuxSocket(_ string) string { return "/tmp/yoloai-tmux.sock" }
 
 // Close releases the containerd client connection.
 func (r *Runtime) Close() error { return r.client.Close() }
-
-// PrepareAgentCommand returns the command unchanged — containerd needs no prefix.
-func (r *Runtime) PrepareAgentCommand(cmd string) string { return cmd }
 
 // RequiredCapabilities returns the host capabilities needed for the given isolation mode.
 // containerdSocket is intentionally omitted: New() already verified it.
@@ -287,32 +283,6 @@ func bridgeBinaryHasCNICaps(path string) bool {
 	}
 	permitted0 := binary.LittleEndian.Uint32(buf[4:8])
 	return permitted0&cniCapMask == cniCapMask
-}
-
-// GitExec runs a git command on the host filesystem.
-// For containerd (Kata VM) backends, :copy-mode work directories are stored on
-// the host at ~/.yoloai/sandboxes/<name>/work/<encoded>/ and bind-mounted into
-// the VM — the host copy is authoritative for diff/apply operations.
-// workDir is a host path; name is unused (kept for interface compatibility).
-func (r *Runtime) GitExec(ctx context.Context, _ string, workDir string, args ...string) (string, error) {
-	cmdArgs := append([]string{"-c", "core.hooksPath=/dev/null", "-C", workDir}, args...)
-	cmd := exec.CommandContext(ctx, "git", cmdArgs...) //nolint:gosec // G204: workDir from validated sandbox state
-	output, err := cmd.Output()
-	if err != nil {
-		// Return *runtime.ExecError on non-zero exit so callers can match
-		// exit codes via errors.As (e.g. apply.go treats `git diff --quiet`
-		// exit 1 as "diffs present", not as an error).
-		var exitErr *exec.ExitError
-		if ok := errors.As(err, &exitErr); ok {
-			return "", &runtime.ExecError{
-				ExitCode: exitErr.ExitCode(),
-				Stderr:   strings.TrimSpace(string(exitErr.Stderr)),
-			}
-		}
-		return "", fmt.Errorf("git %v: %w", args, err)
-	}
-	// Don't trim output - git patches are whitespace-sensitive
-	return string(output), nil
 }
 
 // isWSL2 returns true if running inside a WSL2 environment.

@@ -357,7 +357,7 @@ func GeneratePatch(ctx context.Context, layout config.Layout, rt runtime.Runtime
 		patchArgs = append(patchArgs, paths...)
 	}
 
-	patchOut, err := rt.GitExec(ctx, name, workDir, patchArgs...)
+	patchOut, err := runtime.GitExecFor(ctx, rt, name, workDir, patchArgs...)
 	if err != nil {
 		return nil, "", fmt.Errorf("git diff (patch): %w", err)
 	}
@@ -371,7 +371,7 @@ func GeneratePatch(ctx context.Context, layout config.Layout, rt runtime.Runtime
 		statArgs = append(statArgs, paths...)
 	}
 
-	statOut, err := rt.GitExec(ctx, name, workDir, statArgs...)
+	statOut, err := runtime.GitExecFor(ctx, rt, name, workDir, statArgs...)
 	if err != nil {
 		return nil, "", fmt.Errorf("git diff (stat): %w", err)
 	}
@@ -583,7 +583,7 @@ func ListCommitsBeyondBaseline(ctx context.Context, layout config.Layout, rt run
 		return nil, fmt.Errorf("commit listing is not available for :rw directories")
 	}
 
-	output, err := rt.GitExec(ctx, name, workDir, "log", "--reverse", "--format=%H %s", baselineSHA+"..HEAD")
+	output, err := runtime.GitExecFor(ctx, rt, name, workDir, "log", "--reverse", "--format=%H %s", baselineSHA+"..HEAD")
 	if err != nil {
 		return nil, fmt.Errorf("git log: %w", err)
 	}
@@ -626,7 +626,7 @@ func HasUncommittedChanges(ctx context.Context, layout config.Layout, rt runtime
 		return false, fmt.Errorf("git add: %w", err)
 	}
 
-	_, err = rt.GitExec(ctx, name, workDir, "diff", "--quiet", "HEAD")
+	_, err = runtime.GitExecFor(ctx, rt, name, workDir, "diff", "--quiet", "HEAD")
 	if err == nil {
 		return false, nil // exit 0 = clean
 	}
@@ -802,7 +802,7 @@ func GenerateFormatPatchForRefs(ctx context.Context, layout config.Layout, rt ru
 			args = append(args, "--")
 			args = append(args, paths...)
 		}
-		output, runErr := rt.GitExec(ctx, name, workDir, args...)
+		output, runErr := runtime.GitExecFor(ctx, rt, name, workDir, args...)
 		if runErr != nil {
 			os.RemoveAll(patchDir) //nolint:errcheck,gosec // best-effort cleanup
 			return "", nil, fmt.Errorf("git format-patch -1 %s: %w", sha, runErr)
@@ -871,7 +871,7 @@ func AdvanceBaseline(ctx context.Context, layout config.Layout, rt runtime.Runti
 	}
 
 	workDir := store.WorkDir(sandboxDir, meta.Workdir.HostPath)
-	sha, err := rt.GitExec(ctx, name, workDir, "rev-parse", "HEAD")
+	sha, err := runtime.GitExecFor(ctx, rt, name, workDir, "rev-parse", "HEAD")
 	if err != nil {
 		return fmt.Errorf("git rev-parse: %w", err)
 	}
@@ -912,7 +912,7 @@ func GenerateFormatPatch(ctx context.Context, layout config.Layout, rt runtime.R
 		revArgs = append(revArgs, "--")
 		revArgs = append(revArgs, paths...)
 	}
-	revOut, revErr := rt.GitExec(ctx, name, workDir, revArgs...)
+	revOut, revErr := runtime.GitExecFor(ctx, rt, name, workDir, revArgs...)
 	if revErr != nil {
 		os.RemoveAll(patchDir) //nolint:errcheck,gosec // best-effort cleanup
 		return "", nil, fmt.Errorf("git rev-list: %w", revErr)
@@ -920,7 +920,7 @@ func GenerateFormatPatch(ctx context.Context, layout config.Layout, rt runtime.R
 
 	shas := strings.Fields(strings.TrimSpace(revOut))
 	for i, sha := range shas {
-		output, runErr := rt.GitExec(ctx, name, workDir, "format-patch", "--stdout", "-1", sha)
+		output, runErr := runtime.GitExecFor(ctx, rt, name, workDir, "format-patch", "--stdout", "-1", sha)
 		if runErr != nil {
 			os.RemoveAll(patchDir) //nolint:errcheck,gosec // best-effort cleanup
 			return "", nil, fmt.Errorf("git format-patch -1 %s: %w", sha, runErr)
@@ -957,7 +957,7 @@ func GenerateUncommittedDiff(ctx context.Context, layout config.Layout, rt runti
 	}
 
 	// Stage untracked files
-	_, err = rt.GitExec(ctx, name, workDir, "add", "-A")
+	_, err = runtime.GitExecFor(ctx, rt, name, workDir, "add", "-A")
 	if err != nil {
 		return nil, "", fmt.Errorf("git add: %w", err)
 	}
@@ -969,7 +969,7 @@ func GenerateUncommittedDiff(ctx context.Context, layout config.Layout, rt runti
 		patchArgs = append(patchArgs, paths...)
 	}
 
-	patchOut, err := rt.GitExec(ctx, name, workDir, patchArgs...)
+	patchOut, err := runtime.GitExecFor(ctx, rt, name, workDir, patchArgs...)
 	if err != nil {
 		return nil, "", fmt.Errorf("git diff (uncommitted patch): %w", err)
 	}
@@ -985,7 +985,7 @@ func GenerateUncommittedDiff(ctx context.Context, layout config.Layout, rt runti
 		statArgs = append(statArgs, paths...)
 	}
 
-	statOut, err := rt.GitExec(ctx, name, workDir, statArgs...)
+	statOut, err := runtime.GitExecFor(ctx, rt, name, workDir, statArgs...)
 	if err != nil {
 		return nil, "", fmt.Errorf("git diff (uncommitted stat): %w", err)
 	}
@@ -999,7 +999,7 @@ func GenerateUncommittedDiff(ctx context.Context, layout config.Layout, rt runti
 func gitAddRetry(ctx context.Context, rt runtime.Runtime, name, workDir string) error {
 	var err error
 	for range 5 {
-		_, err = rt.GitExec(ctx, name, workDir, "add", "-A")
+		_, err = runtime.GitExecFor(ctx, rt, name, workDir, "add", "-A")
 		if err == nil || !workspace.IsIndexLocked(err) {
 			return err
 		}

@@ -389,7 +389,7 @@ Project-archetype detection types. Lives in `sandbox/archetype`.
 Describes an agent's commands (interactive/headless), prompt delivery mode, API key env vars (`APIKeyEnvVars`), auth hint env vars (`AuthHintEnvVars`), `AuthOptional` flag, seed files, state directory, tmux submit sequence, `ReadyPattern`, model flag/aliases/prefixes (`ModelPrefixes`), network allowlist, `ContextFile` (native instruction file for sandbox context injection), `AgentFilesExclude` (glob patterns to skip when copying agent_files), and `IdleSupport`. Built-in: `aider`, `claude`, `codex`, `gemini`, `opencode`, `test`, and `idle`.
 
 ### `runtime.Runtime`
-Pluggable runtime interface for backend abstraction. Core methods: `Setup()`, `IsReady()`, `Create()`, `Start()`, `Stop()`, `Remove()`, `Inspect()`, `Exec()`, `GitExec()`, `InteractiveExec()`, `Prune()`, `Close()`, `Logs()`, `DiagHint()`, `Descriptor()`, `TmuxSocket()`, `AttachCommand()`, `PrepareAgentCommand()`. Static per-backend facts (Name, BaseModeName, AgentProvisionedByBackend, SupportedIsolationModes, Capabilities) are bundled into `BackendDescriptor` returned by `Descriptor()`. Allows swapping container/VM backends.
+Pluggable runtime interface for backend abstraction. Core methods: `Setup()`, `IsReady()`, `Create()`, `Start()`, `Stop()`, `Remove()`, `Inspect()`, `Exec()`, `InteractiveExec()`, `Prune()`, `Close()`, `DiagHint()`, `Descriptor()`, `TmuxSocket()`, `AttachCommand()`. (`Logs`, `PrepareAgentCommand`, `GitExec` are optional interfaces — see below — F18: only methods every backend implements non-trivially are core.) Static per-backend facts (Name, BaseModeName, AgentProvisionedByBackend, SupportedIsolationModes, Capabilities) are bundled into `BackendDescriptor` returned by `Descriptor()`. Allows swapping container/VM backends.
 
 ### `runtime.BackendDescriptor`
 Bundles each backend's static facts: `Name`, `BaseModeName`, `AgentProvisionedByBackend`, `SupportedIsolationModes`, `Capabilities`. Returned by `Runtime.Descriptor()`; values are compile-time constants per backend.
@@ -401,13 +401,16 @@ Declares what features a backend supports: `NetworkIsolation`, `OverlayDirs`, `C
 `Factory` is `func(context.Context) (Runtime, error)`. Backends register `(Factory, BackendDescriptor)` tuples via `runtime.Register(name, factory, descriptor)` in their `init()` functions. `runtime.New(ctx, name)` creates a Runtime by name; `runtime.Descriptor(name)` returns the static descriptor without instantiating; `runtime.Descriptors()` enumerates all registered descriptors. `runtime.Available()` lists registered backend names. Platform-specific backends (containerd on Linux, tart/seatbelt on macOS) only register on their supported platforms.
 
 ### Optional Runtime interfaces
-Five optional interfaces extend the core Runtime with backend-specific capabilities. Callers use type assertion or helper functions (`ResolveCopyMountFor`, `RequiredCapabilitiesFor`) that fall back to documented defaults when the backend doesn't implement them.
+Optional interfaces extend the core Runtime with backend-specific capabilities. Callers use type assertion or helper functions (`ResolveCopyMountFor`, `RequiredCapabilitiesFor`, `LogsFor`, `PrepareAgentCommandFor`, `GitExecFor`, …) that fall back to documented defaults when the backend doesn't implement them.
 
 - `UsernsProvider` — Podman rootless `keep-id` mode.
 - `WorkDirSetup` — Tart VM-local workdir copies.
 - `StdioExecer` — Docker/Podman MCP-proxy stdio bridging.
 - `CopyMountResolver` — Seatbelt and Tart rewrite `:copy` mount paths; container backends use the host path unchanged.
 - `IsolationCapabilityProvider` — Docker/Podman/containerd declare per-isolation prerequisite capabilities; tart/seatbelt have none.
+- `LogTailer` (`LogsFor`, default `""`) — Docker/containerd tail instance logs; VM/process backends (Tart/Seatbelt) write logs to files and don't implement it.
+- `AgentCommandPreparer` (`PrepareAgentCommandFor`, default = passthrough) — Tart (node PATH) and Seatbelt (Swift wrapper) wrap the agent launch command; Docker/containerd need no wrapping.
+- `GitExecer` (`GitExecFor`, default = run git on the host) — Tart runs git inside the VM and translates host work paths; the host-git backends (Docker/Podman/containerd/Seatbelt) use the default.
 
 ### `runtime.InstanceConfig`
 Configuration for `Runtime.Create()`. Describes image, working directory, mounts, ports, network mode, resource limits, capabilities, devices, user namespace mode, and container runtime (OCI/Kata).

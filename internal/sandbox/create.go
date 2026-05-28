@@ -439,7 +439,7 @@ func (m *Manager) buildConfigAndMeta(ctx context.Context, opts CreateOptions, pr
 	archetypeDockerDRequired := pr.archetypeDockerDRequired
 	lifecycleCfg := buildLifecycleConfig(resolvedArchetype, archetypeDockerDRequired, state_onCreateDone, devcontainerCfg)
 
-	configData, err := buildContainerConfig(m.layout, agentDef, agentCommand, m.runtime.PrepareAgentCommand(""), tmuxConf, overlayOrResolvedMountPath(workdir), opts.Debug, networkMode == "isolated", networkAllow, opts.Passthrough, collectOverlayMounts(workdir, auxDirs), pr.setup, pr.autoCommitInterval, collectCopyDirs(workdir, auxDirs), opts.Name, m.runtime.TmuxSocket(sandboxDir), pr.isolation, opts.VscodeTunnel, sanitizeTunnelName(opts.Name), lifecycleCfg)
+	configData, err := buildContainerConfig(m.layout, agentDef, agentCommand, runtime.PrepareAgentCommandFor(m.runtime, ""), tmuxConf, overlayOrResolvedMountPath(workdir), opts.Debug, networkMode == "isolated", networkAllow, opts.Passthrough, collectOverlayMounts(workdir, auxDirs), pr.setup, pr.autoCommitInterval, collectCopyDirs(workdir, auxDirs), opts.Name, m.runtime.TmuxSocket(sandboxDir), pr.isolation, opts.VscodeTunnel, sanitizeTunnelName(opts.Name), lifecycleCfg)
 	if err != nil {
 		return nil, nil, "", "", fmt.Errorf("build %s: %w", store.RuntimeConfigFile, err)
 	}

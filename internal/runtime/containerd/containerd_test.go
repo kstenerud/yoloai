@@ -40,9 +40,10 @@ func TestWithNamespace(t *testing.T) {
 // TestGitExec_ExitOneReturnsExecError verifies that non-zero git exit returns
 // *runtime.ExecError so callers can match exit codes via errors.As. Regression
 // guard: sandbox/patch/apply.go treats `git diff --quiet` exit 1 as "diffs
-// present" via errors.As(&runtime.ExecError); previously containerd's GitExec
-// unwrapped the ExitError into a plain string error and the match silently
-// fell through to "real error", failing `yoloai apply` on every changed sandbox.
+// present" via errors.As(&runtime.ExecError); a plain string error would silently
+// fall through to "real error", failing `yoloai apply` on every changed sandbox.
+// containerd runs git on the host (it doesn't implement runtime.GitExecer), so
+// this exercises runtime.GitExecFor's default host-git path.
 func TestGitExec_ExitOneReturnsExecError(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")
@@ -62,10 +63,10 @@ func TestGitExec_ExitOneReturnsExecError(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "f"), []byte("v2"), 0600))
 
 	r := &Runtime{}
-	_, err := r.GitExec(context.Background(), "", dir, "diff", "--quiet", "HEAD")
+	_, err := runtime.GitExecFor(context.Background(), r, "", dir, "diff", "--quiet", "HEAD")
 	require.Error(t, err)
 	var execErr *runtime.ExecError
-	require.True(t, errors.As(err, &execErr), "GitExec must return *runtime.ExecError on non-zero exit; got %T: %v", err, err)
+	require.True(t, errors.As(err, &execErr), "GitExecFor must return *runtime.ExecError on non-zero exit; got %T: %v", err, err)
 	assert.Equal(t, 1, execErr.ExitCode)
 }
 

@@ -229,7 +229,7 @@ func (m *Manager) verifyInstanceRunning(ctx context.Context, state *sandboxState
 	}
 	// Always append container logs — captures stderr output such as Python
 	// tracebacks that are not written to sandbox.jsonl.
-	if logs := m.runtime.Logs(ctx, cname, 20); logs != "" {
+	if logs := runtime.LogsFor(ctx, m.runtime, cname, 20); logs != "" {
 		parts = append(parts, logs)
 	}
 	if len(parts) > 0 {

@@ -56,7 +56,7 @@ func GenerateDiff(ctx context.Context, opts DiffOptions) (string, error) {
 		return "", ErrOverlayRequiresRuntime
 
 	default: // "copy"
-		if _, err := opts.Runtime.GitExec(ctx, opts.Name, workDir, "add", "-A"); err != nil {
+		if _, err := runtime.GitExecFor(ctx, opts.Runtime, opts.Name, workDir, "add", "-A"); err != nil {
 			return "", err
 		}
 
@@ -72,7 +72,7 @@ func GenerateDiff(ctx context.Context, opts DiffOptions) (string, error) {
 			args = append(args, opts.Paths...)
 		}
 
-		output, err := opts.Runtime.GitExec(ctx, opts.Name, workDir, args...)
+		output, err := runtime.GitExecFor(ctx, opts.Runtime, opts.Name, workDir, args...)
 		if err != nil {
 			return "", err
 		}

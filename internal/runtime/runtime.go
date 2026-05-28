@@ -5,9 +5,11 @@ package runtime //nolint:revive // name chosen for clarity; stdlib runtime is no
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"log/slog"
+	"os/exec"
 	"strings"
 	"syscall"
 	"time"
@@ -282,18 +284,6 @@ type Runtime interface {
 	// Exec runs a command inside a running instance and returns the result.
 	Exec(ctx context.Context, name string, cmd []string, user string) (ExecResult, error)
 
-	// GitExec runs a git command for the given instance. The workDir parameter
-	// should be a host path (e.g., ~/.yoloai/sandboxes/<name>/work/<encoded>)
-	// as provided by the sandbox package helpers (copyGitWorkDir, WorkDir, etc.).
-	//
-	// Backends are responsible for translating paths to their execution context:
-	// - Docker/Podman/Seatbelt/Containerd: git runs on host, use workDir as-is
-	// - Tart: git runs inside VM, translates host paths to VM paths automatically
-	//
-	// Returns stdout on success. This abstraction allows callers to use host paths
-	// uniformly while backends handle their specific execution environments.
-	GitExec(ctx context.Context, name, workDir string, args ...string) (string, error)
-
 	// InteractiveExec runs a command interactively inside an instance,
 	// wiring the supplied IOStreams to the remote stdio. The caller
 	// chooses whether to allocate a PTY (io.TTY) and at what size
@@ -308,11 +298,6 @@ type Runtime interface {
 
 	// Close releases any resources held by the runtime.
 	Close() error
-
-	// Logs returns the last n lines of an instance's log output.
-	// Returns empty string if logs are unavailable (e.g. VM backends).
-	// Used to capture crash output before container removal.
-	Logs(ctx context.Context, name string, tail int) string
 
 	// DiagHint returns a backend-specific hint for how to check logs when
 	// an instance fails to start or crashes. The hint is included in error
@@ -337,11 +322,6 @@ type Runtime interface {
 	// the current terminal dimensions (0 = unknown). isolation is the sandbox
 	// isolation mode (e.g. IsolationModeContainerEnhanced).
 	AttachCommand(tmuxSocket string, rows, cols int, isolation IsolationMode) []string
-
-	// PrepareAgentCommand wraps an agent launch command with backend-specific
-	// environment setup (PATH overrides, shell wrappers, etc.). Mirrors the
-	// Python prepare_launch_command() in sandbox-setup.py.
-	PrepareAgentCommand(cmd string) string
 }
 
 // WorkDirSetup is implemented by backends that store work directories
@@ -408,6 +388,80 @@ func CacheUsageFor(ctx context.Context, rt Runtime) (CacheUsage, error) {
 		return r.CacheUsage(ctx)
 	}
 	return CacheUsage{BytesUsed: -1}, nil
+}
+
+// LogTailer is an optional interface for backends that can return recent
+// instance log output (used to capture crash output before container removal).
+// Backends without docker-style logs (VM/process backends write to files) don't
+// implement it; LogsFor returns "" for them.
+type LogTailer interface {
+	Logs(ctx context.Context, name string, tail int) string
+}
+
+// LogsFor returns the last tail lines of an instance's logs, or "" when the
+// backend doesn't implement LogTailer.
+func LogsFor(ctx context.Context, rt Runtime, name string, tail int) string {
+	if t, ok := rt.(LogTailer); ok {
+		return t.Logs(ctx, name, tail)
+	}
+	return ""
+}
+
+// AgentCommandPreparer is an optional interface for backends that wrap an agent
+// launch command with backend-specific environment setup (PATH overrides, shell
+// wrappers). Backends that need no wrapping don't implement it; PrepareAgentCommandFor
+// returns the command unchanged.
+type AgentCommandPreparer interface {
+	PrepareAgentCommand(cmd string) string
+}
+
+// PrepareAgentCommandFor applies the backend's agent-command wrapping, or
+// returns cmd unchanged when the backend doesn't implement AgentCommandPreparer.
+func PrepareAgentCommandFor(rt Runtime, cmd string) string {
+	if p, ok := rt.(AgentCommandPreparer); ok {
+		return p.PrepareAgentCommand(cmd)
+	}
+	return cmd
+}
+
+// GitExecer is an optional interface for backends whose git execution context
+// differs from "run git on the host" — i.e. backends that run git inside a VM
+// and must translate host work paths (Tart). Backends that run git on the host
+// (Docker, Podman, Containerd, Seatbelt) don't implement it; GitExecFor runs git
+// on the host directly via the package default.
+type GitExecer interface {
+	GitExec(ctx context.Context, name, workDir string, args ...string) (string, error)
+}
+
+// GitExecFor runs a git command for the given instance. workDir is a host path
+// (e.g. ~/.yoloai/sandboxes/<name>/work/<encoded>) from the sandbox package
+// helpers. Backends implementing GitExecer (Tart) translate it to their
+// execution context; otherwise git runs on the host with workDir as-is. Returns
+// stdout on success; a *ExecError carrying the exit code on non-zero exit (so
+// callers can match, e.g., `git diff --quiet` exit 1 as "diffs present").
+func GitExecFor(ctx context.Context, rt Runtime, name, workDir string, args ...string) (string, error) {
+	if g, ok := rt.(GitExecer); ok {
+		return g.GitExec(ctx, name, workDir, args...)
+	}
+	return hostGitExec(ctx, workDir, args...)
+}
+
+// hostGitExec runs git on the host filesystem rooted at workDir — the default
+// for backends that bind-mount host paths. Hooks are disabled (the host's repo
+// hooks must not fire for sandbox-internal git). Output is not trimmed (patches
+// are whitespace-sensitive).
+func hostGitExec(ctx context.Context, workDir string, args ...string) (string, error) {
+	cmdArgs := append([]string{"-c", "core.hooksPath=/dev/null", "-C", workDir}, args...)
+	cmd := exec.CommandContext(ctx, "git", cmdArgs...) //nolint:gosec // G204: workDir from validated sandbox state
+	output, err := cmd.Output()
+	if err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			return "", &ExecError{ExitCode: exitErr.ExitCode(), Stderr: strings.TrimSpace(string(exitErr.Stderr))}
+		}
+		return "", fmt.Errorf("git %v: %w", args, err)
+	}
+	return string(output), nil
 }
 
 // IsPermissionDenied reports whether err represents a "permission denied"

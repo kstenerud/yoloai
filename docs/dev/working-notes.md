@@ -625,6 +625,30 @@ must run before get_working_dir`.
 
 ---
 
+## D30 — F18: 3 of 5 methods moved to optional interfaces; DiagHint/TmuxSocket stay core
+
+**Date:** 2026-05-28. **Status:** Accepted. **Context:** F18 (critique) flagged that `runtime.Runtime`'s core interface carried methods some backends implement trivially, and triaged "move all five" (`Logs`, `DiagHint`, `TmuxSocket`, `PrepareAgentCommand`, `GitExec`) to optional interfaces. Before executing, the actual backend impls were read to verify the premise (critique principle: verify; §12: api_surface/critique are hypotheses).
+
+**Decision.** Move **three**: `Logs`→`LogTailer` (default `""`), `PrepareAgentCommand`→`AgentCommandPreparer` (default passthrough), `GitExec`→`GitExecer` (default `hostGitExec`, run git on the host). Keep **`DiagHint` and `TmuxSocket` core**.
+
+**Why the deviation from "move all five."** F18's own bar is "core = every backend implements non-trivially." Verified impls:
+- `Logs`: docker/containerd real, tart/seatbelt `""` → 2 trivial → move.
+- `PrepareAgentCommand`: docker/containerd passthrough, tart/seatbelt real → 2 trivial → move.
+- `GitExec`: docker/containerd/seatbelt run git on host (a shared default), tart translates to VM → 1 special-case → move (Tart implements `GitExecer`; the rest use the default).
+- `DiagHint`: docker/containerd/tart/seatbelt ALL return distinct, meaningful hints → universal, no default → **keep core**.
+- `TmuxSocket`: all four return a non-empty socket (docker/containerd a shared constant, tart/seatbelt their own) → universal, no sensible default → **keep core**.
+
+Moving DiagHint/TmuxSocket would be pure churn (no backend drops them) and there's no universal default. Owner confirmed "move 3, keep 2" when shown the verification.
+
+**Consequences.**
+- `runtime.hostGitExec` returns `*runtime.ExecError` (exit-code-aware) on non-zero exit — the form `sandbox/patch/apply.go` matches via `errors.As` for `git diff --quiet` exit 1. Previously docker/seatbelt returned a plain wrapped `*exec.ExitError`; unifying on `ExecError` is a minor improvement (caller already handled both). The containerd-specific regression test now exercises `GitExecFor`'s default.
+- LogTailer: docker, containerd. AgentCommandPreparer: tart, seatbelt. GitExecer: tart only.
+- Internal-only change (`internal/runtime`); no public-API / BREAKING-CHANGES impact.
+
+**Composition.** Applies `general-principles.md §12` (verify the hypothesis before acting) and the critique principle "research must be verified." Extends the existing optional-interface idiom (`CopyMountResolver`/`CachePruner`/…).
+
+---
+
 # Convention reminders
 
 - New decisions append at the bottom. Don't renumber.

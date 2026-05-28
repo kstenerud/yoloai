@@ -145,7 +145,7 @@ func (s *Sandbox) SendInput(ctx context.Context, text string) error {
 // fetched. This is backend container stdout/stderr for diagnostics — distinct
 // from the structured agent log stream.
 func (s *Sandbox) ContainerLogs(ctx context.Context, tailLines int) string {
-	return s.c.rt.Logs(ctx, store.InstanceName(s.name), tailLines)
+	return runtime.LogsFor(ctx, s.c.rt, store.InstanceName(s.name), tailLines)
 }
 
 // Attach connects the supplied IOStreams to the sandbox's tmux session.

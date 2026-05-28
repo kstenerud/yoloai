@@ -78,7 +78,7 @@ func WaitForAttachReady(
 	}
 	slog.Debug("WaitForAttachReady: timed out", "event", "sandbox.wait_tmux.timeout", //nolint:gosec // G706: slog uses structured logging
 		"container", containerName, "last_exec_err", lastExecErr)
-	if logs := rt.Logs(ctx, containerName, 50); logs != "" {
+	if logs := runtime.LogsFor(ctx, rt, containerName, 50); logs != "" {
 		return fmt.Errorf("tmux session not ready after %s\n\nContainer logs:\n%s", timeout, logs)
 	}
 	return fmt.Errorf("tmux session not ready after %s", timeout)
