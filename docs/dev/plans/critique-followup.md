@@ -22,6 +22,13 @@ target home (Sandbox root vs `Sandbox(name).Workdir()` vs `…Files()` vs
 the owner before implementation. Owner may overrule any individual
 choice or accept `api_surface.go`'s design verbatim.
 
+**Mapping produced (2026-05-28):** `f2-subhandle-mapping.md` — full
+per-method proposal + the 6 open decisions. Awaiting owner sign-off
+before the re-rooting PR. (Note: api_surface.go designs only
+`Workdir()`/`Files()`/`Network()` sub-handles; `Logs`/`Exec` are direct
+`Sandbox` methods, so the plan's `…Logs()`/`…Exec()` options are not
+recommended.)
+
 ### F3 — Run stays as sugar over Create
 
 Run remains the convenience entry (curated 8-field surface). Internally
