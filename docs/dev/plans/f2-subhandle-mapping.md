@@ -58,7 +58,7 @@ family → one `Workdir().Diff(DiffOptions)`), and the overlay-explicit methods
 | `Exec(name, cmd, io)` | `Sandbox(name).Exec(ExecOptions, io)` | api_surface has one `Exec` taking `ExecOptions` |
 | `StdioExec(name, cmd, stdin, out, err)` | **fold into** `Sandbox(name).Exec` | ⚑ Add a non-PTY/stdio mode to `ExecOptions` rather than a second method. MCP proxy is the only caller. Alt: keep a distinct `Sandbox.StdioExec`. |
 | `ContainerLogs(name, tail)` | `Sandbox(name).ContainerLogs(tail)` | ⚑ Distinct from the designed `Sandbox.Logs` (structured agent/jsonl stream). This is raw backend container stdout/stderr for diagnostics — keep it as its own method, not merged into `Logs`. |
-| `NeedsConfirmation(name)` | `Sandbox(name).NeedsConfirmation()` | ⚑ Or fold into `Destroy`'s flow (CLI does the prompt). Recommend keeping as a handle query — it's a pre-flight the CLI reads before prompting. |
+| `NeedsConfirmation(name)` | **delete; fold into `Destroy`** | ✅ **Owner-reviewed 2026-05-28.** It's the destroy-safety pre-flight: `Destroy(force=false)` refuses when the sandbox is running / dirty / has unapplied commits; `NeedsConfirmation` lets a caller ask "would Destroy refuse, and why?" to render its own prompt before `Destroy(force=true)`. Cleaner: `Destroy` returns a typed refusal (`*ActiveWorkError` with the reason) — atomic, no check-then-act gap, one fewer method. |
 | `SandboxDir(name)` | `Sandbox(name).Dir()` | ⚑ Path accessor. api_surface puts the *exchange* dir on `*Info.HostExchangeDir`; this is the *state* dir. Recommend a `Dir()` accessor on the handle. |
 
 ### Move to `Sandbox(name).Workdir()` — diff / apply / baseline / commits
@@ -86,11 +86,15 @@ family → one `Workdir().Diff(DiffOptions)`), and the overlay-explicit methods
 
 ### `Files()` / `Network()`
 
-- **`Files()`** — no Client-root methods to re-home today; `Put/Get/Ls/Rm` are
-  currently CLI-only (`internal/cli/workflow/files.go` reads the host dir
-  directly). Wiring them onto the Client as `Sandbox(name).Files().*` is a
-  *separate* gap (new surface), not part of F2's re-rooting. Flag for a later
-  finding if we want them on the Client.
+- **`Files()`** — ✅ **Owner decision (2026-05-28): deferred to a follow-up
+  finding.** Today `Put/Get/Ls/Rm` are CLI-only (`internal/cli/workflow/files.go`
+  reads the host exchange dir directly). Wiring them onto the Client is new
+  surface, and the follow-up must first **scope the transport**: a local Client
+  reads the host dir directly, but a *networked* Client (HTTP/daemon, remote
+  embedder) has no host-local exchange dir — `Put` must stream bytes over the
+  connection into the sandbox, `Get` stream back. So `Files()` needs a
+  transport-aware contract (stream-based, not host-path-based), which is a
+  design exercise of its own. Not part of F2's re-rooting.
 - **`Network()`** — **already done** (`network.go`: `Allow`/`Deny`/`Allowed`).
 
 ## Net effect
@@ -100,18 +104,29 @@ family → one `Workdir().Diff(DiffOptions)`), and the overlay-explicit methods
 `Workdir()` (≈7 methods after collapse) + `Files()`/`Network()`. The four
 overlay-explicit methods leave the public surface entirely.
 
-## Decisions needed from the owner
+## Decisions
 
-1. **Overlay-explicit methods disappear** (DiffOverlay, ListCommitsOverlay,
-   OverlayPatch, UpdateOverlayBaseline) — confirm the surface should be
-   mode-agnostic (copy/overlay resolved internally), per api_surface.
-2. **`Diff*` collapse to one `Workdir().Diff(DiffOptions)`** and **`GeneratePatch`/
-   `FormatPatch` route through `Apply` (DryRun / ApplyExport)** vs. keeping
-   distinct `Workdir().Patch` / `.FormatPatch` methods.
-3. **`StdioExec` folds into `Exec`** (ExecOptions mode) vs. stays a distinct method.
-4. **`Commits` family** shape — one `Commits(opts)` vs. separate methods +
-   reuse of `BaselineLog`.
-5. **`ContainerLogs`, `NeedsConfirmation`, `SandboxDir`** stay as distinct
-   `Sandbox` methods (recommended) vs. folded/renamed.
-6. **`Files()` Client wiring** — in scope as a follow-up finding, or leave
-   exchange-dir ops CLI-only.
+Owner reviewed 2026-05-28: **agreed in principle.** Resolved + still-open below.
+
+✅ **Resolved**
+
+- **Mapping accepted in principle** — the re-rooting shape (root-6 / `Sandbox(name)`
+  direct / `Workdir()` collapse / overlay-explicit methods disappear) is approved.
+- **`NeedsConfirmation` → deleted, folded into `Destroy`'s typed refusal** (see
+  its row). `Destroy(force=false)` returns `*ActiveWorkError` carrying the reason.
+- **`Files()` Client wiring → deferred follow-up**, gated on a transport-scoping
+  exercise (local host-dir vs networked stream — see the `Files()` note).
+- **Diff/Apply are independent** — Apply does not consume Diff's output; each
+  computes from baseline internally. Leaning toward three orthogonal verbs:
+  `Workdir().Diff` (view) / `Workdir().Patch` (raw bytes) / `Workdir().Apply`
+  (land), rather than overloading `Apply(DryRun)` to also be "give me the patch."
+
+◻️ **Still open (pre-implementation)**
+
+1. **`GeneratePatch`/`FormatPatch`**: confirm the three-verb split (dedicated
+   `Workdir().Patch(opts)` for raw bytes + `FormatPatch`/`ApplyExport` for the
+   export form) vs. routing everything through `Apply(DryRun/ApplyExport)`.
+2. **`StdioExec` folds into `Exec`** (ExecOptions PTY-vs-stdio mode) vs. stays a
+   distinct `Sandbox.Exec`/`StdioExec` pair. (MCP proxy is the only `StdioExec` caller.)
+3. **`Commits` family** shape — one `Workdir().Commits(opts)` vs. separate
+   methods + reuse of `api_surface`'s `BaselineLog`.
