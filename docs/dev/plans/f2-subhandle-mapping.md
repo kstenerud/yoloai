@@ -121,12 +121,27 @@ Owner reviewed 2026-05-28: **agreed in principle.** Resolved + still-open below.
   `Workdir().Diff` (view) / `Workdir().Patch` (raw bytes) / `Workdir().Apply`
   (land), rather than overloading `Apply(DryRun)` to also be "give me the patch."
 
-◻️ **Still open (pre-implementation)**
+✅ **Resolved (owner: "resolve the 3 opens", 2026-05-28)**
 
-1. **`GeneratePatch`/`FormatPatch`**: confirm the three-verb split (dedicated
-   `Workdir().Patch(opts)` for raw bytes + `FormatPatch`/`ApplyExport` for the
-   export form) vs. routing everything through `Apply(DryRun/ApplyExport)`.
-2. **`StdioExec` folds into `Exec`** (ExecOptions PTY-vs-stdio mode) vs. stays a
-   distinct `Sandbox.Exec`/`StdioExec` pair. (MCP proxy is the only `StdioExec` caller.)
-3. **`Commits` family** shape — one `Workdir().Commits(opts)` vs. separate
-   methods + reuse of `api_surface`'s `BaselineLog`.
+1. **Three orthogonal Workdir verbs — no overloading.**
+   - `Workdir().Diff(DiffOptions)` → **string** (human view; raw / `--stat` /
+     `--name-only` / `Ref`). Folds `Diff`, `DiffWithOptions`, `DiffRef`,
+     `DiffOverlay`.
+   - `Workdir().Patch(PatchOptions)` → **bytes + stat** (the machine artifact;
+     `IncludeUncommitted` option). Folds `GeneratePatch`, `GenerateWIPDiff`,
+     `OverlayPatch`.
+   - `Workdir().Apply(ApplyOptions)` → lands changes; `Mode: ApplyExport` writes
+     the `git am`-able format-patch series to `ExportDir`. Folds
+     `GenerateFormatPatch`, `GenerateFormatPatchForRefs` (via `Refs`).
+   None consumes another's output; each computes from baseline internally.
+2. **`StdioExec` folds into `Sandbox(name).Exec(ExecOptions, io)`** — non-PTY is
+   the default (`ExecOptions.PTY=false`); the MCP proxy passes its pipes via
+   `IOStreams`. One `Exec` method.
+3. **One `Workdir().Commits(CommitOptions{WithStats, Refs})`** for the
+   beyond-baseline list — folds `ListCommits`, `ListCommitsWithStats`,
+   `ListCommitsOverlay`, `ResolveCommitRefs`. Keep `api_surface`'s
+   `Workdir().BaselineLog()` as the separate inception→HEAD recovery query.
+
+**F2 mapping fully signed off.** Implementation (the re-rooting PR) is a future
+workstream; it should land *together with* the F1+F3 public-surface design,
+since both reshape the root `Run`/`Create` entry points.
