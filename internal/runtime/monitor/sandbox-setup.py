@@ -109,13 +109,15 @@ def signal_secrets_consumed(yoloai_dir):
     ephemeral secrets temp dir, so a slow-booting VM backend can't have
     the dir removed before it reads the credentials. For Docker/containerd
     entrypoint.py already writes this earlier; this covers the Tart/Seatbelt
-    path where sandbox-setup.py is the secrets reader. Must match
-    store.SecretsConsumedMarker.
+    path where sandbox-setup.py is the secrets reader.
+
+    Written under logs/ because only /yoloai subdirs are bind-mounted to
+    the host (the /yoloai root is not). Must match store.SecretsConsumedMarker.
     """
-    marker = os.path.join(yoloai_dir, ".secrets-consumed")
+    marker = os.path.join(yoloai_dir, "logs", ".secrets-consumed")
     try:
         with open(marker, "w") as f:
-            f.write("")
+            f.write("1")
     except OSError as e:
         log_info("secrets.consumed_error", f"cannot write secrets-consumed marker: {e}")
 

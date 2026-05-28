@@ -794,14 +794,25 @@ past the 1-second window. The same fixed sleep was harmless on Docker (near-
 instant boot).
 
 Fix: the in-sandbox entrypoint writes a host-visible marker
-(`<sandboxdir>/.secrets-consumed`, `store.SecretsConsumedMarker`) *after* reading
-`/run/secrets`; the host polls for it (30s cap, then removes anyway so the
-ephemeral dir never leaks) before removing the temp dir. The guest's sequential
-code guarantees the read precedes the marker, and the host removal happens only
-after it observes the marker, so the read strictly precedes the removal — race
-eliminated. `entrypoint.py` (docker/containerd) and `sandbox-setup.py`
-(tart/seatbelt) both write the marker; `create_instance.go::buildAndStart` and
-`waitForSecretsConsumed` poll for it.
+(`<sandboxdir>/logs/.secrets-consumed`, `store.SecretsConsumedMarker`) *after*
+reading `/run/secrets`; the host polls for it (30s cap, then removes anyway so
+the ephemeral dir never leaks) before removing the temp dir. The guest's
+sequential code guarantees the read precedes the marker, and the host removal
+happens only after it observes the marker, so the read strictly precedes the
+removal — race eliminated. `entrypoint.py` (docker/containerd) and
+`sandbox-setup.py` (tart/seatbelt) both write the marker;
+`create_instance.go::buildAndStart` and `waitForSecretsConsumed` poll for it.
+
+Gotcha that bit the first cut of this fix: the marker MUST live under a
+bind-mounted `/yoloai` subdir (logs/), not at the `/yoloai` root. The container
+gets individual bind mounts for `/yoloai/logs`, `/yoloai/files`, `/yoloai/cache`,
+etc. (see `buildSystemMounts`), but the `/yoloai` root is **not** mounted — a
+file written there lands on the container's own ephemeral fs and never reaches
+the host, so the host would poll forever and fall back to the 30s timeout on
+every launch (turning a flaky correctness bug into a deterministic 30s latency
+penalty). `logs/` is the right home: it's bind-mounted and propagates guest→host
+in real time (the smoke harness reads agent-created `/yoloai/files/done` from the
+host side, proving sub-dir propagation is prompt).
 
 Related restart asymmetry (independent of the race): `recreateContainer`
 previously omitted the sudo-recovered `credOverrides` that `Create` sets, so

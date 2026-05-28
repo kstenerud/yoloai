@@ -77,14 +77,20 @@ const (
 	AgentLogFile = "logs/agent.log"
 
 	// SecretsConsumedMarker is a host-visible marker the in-sandbox
-	// entrypoint writes (under the sandbox dir, mounted at /yoloai in the
-	// container) after it has read /run/secrets into the agent's
+	// entrypoint writes after it has read /run/secrets into the agent's
 	// environment. The host waits for this marker before removing the
 	// ephemeral secrets temp dir, so a slow-booting backend (Kata VM via
 	// containerd) can't have the dir yanked out from under it before the
-	// guest reads it. The Python writers (entrypoint.py, sandbox-setup.py)
-	// hard-code the same name; keep them in sync.
-	SecretsConsumedMarker = ".secrets-consumed"
+	// guest reads it.
+	//
+	// It lives UNDER logs/ deliberately: the container gets individual
+	// bind mounts for /yoloai subdirs (logs, files, cache, ...) but NOT
+	// for the /yoloai root, so a file written at the root is invisible to
+	// the host. logs/ is bind-mounted and propagates guest→host promptly
+	// (same path the entrypoint's sandbox.jsonl uses). The Python writers
+	// (entrypoint.py, sandbox-setup.py) hard-code the same relative path;
+	// keep them in sync.
+	SecretsConsumedMarker = "logs/.secrets-consumed" //nolint:gosec // G101: a marker filename, not a credential
 )
 
 // EncodePath encodes a host path using the caret encoding spec for use as a

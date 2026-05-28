@@ -136,12 +136,16 @@ def signal_secrets_consumed(yoloai_dir):
     ephemeral secrets temp dir bind-mounted at /run/secrets. Without it,
     a slow-booting backend (Kata VM via containerd) could have the dir
     removed before this entrypoint reads it, leaving the agent
-    unauthenticated. Must match store.SecretsConsumedMarker.
+    unauthenticated.
+
+    Written under logs/ because only /yoloai subdirs are bind-mounted to
+    the host (the /yoloai root is not), and logs/ propagates guest->host
+    promptly. Must match store.SecretsConsumedMarker.
     """
-    marker = os.path.join(yoloai_dir, ".secrets-consumed")
+    marker = os.path.join(yoloai_dir, "logs", ".secrets-consumed")
     try:
         with open(marker, "w") as f:
-            f.write("")
+            f.write("1")
         log_debug("secrets.consumed", "wrote secrets-consumed marker", path=marker)
     except OSError as e:
         log_error("secrets.consumed_error", "cannot write secrets-consumed marker", error=str(e))
