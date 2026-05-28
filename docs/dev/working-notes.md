@@ -649,6 +649,24 @@ Moving DiagHint/TmuxSocket would be pure churn (no backend drops them) and there
 
 ---
 
+## D31 — F23: cross-backend enumeration moves to SystemClient (3 of 4; allow was already done)
+
+**Date:** 2026-05-28. **Status:** Accepted. **Context:** F23 (critique) flagged that `ls`, `system doctor`, `system info`, and `sandbox <name> allow` reach the runtime directly via `cliutil.NewRuntime` / `internal/sandbox` instead of through the Client, and triaged "add four SystemClient methods (ListAcrossBackends, Doctor, Info, AllowDomain)." Verified each before executing.
+
+**Decision.** Add `SystemClient.ListAcrossBackends`, `Doctor`, and `Info` (with `Backends`); the CLI command handlers call these instead of enumerating backends themselves. `Info` returns paths + per-backend availability in one call; disk stays the separate (slower) `DiskUsage` method; build metadata (version/commit/date) stays CLI-only. `DoctorOptions{BackendFilter, IsolationFilter}`; `BackendReport` re-exported as a yoloai alias so `Doctor`'s signature stays off the F1 fence.
+
+**Re-scoped from "all four."**
+- `sandbox <name> allow/deny/allowed` was **already** migrated to `Sandbox().Network()`. The critique's `AllowDomain` on SystemClient would be wrong — network allow/deny is per-sandbox, so it belongs on the sandbox handle, not a cross-backend admin method. Dropped.
+- `system info` had **no** `NewRuntime` leak (it read static `runtime.Descriptors()` + `cliutil.CheckBackend`). Moved it anyway because a consolidated "describe my install" API (`SystemClient.Info`) is genuinely useful for embedders (owner's call), not because it was leaking.
+
+**Consequences.**
+- `cliutil.NewRuntime` stays (now used only by `cliutil.CheckBackend` — the availability-probe chokepoint behind `system info` / `system backends` / bugreport — and the backend-scoped `system tart` subtree). Its `.golangci.yml` allowlist + ARCHITECTURE.md:39 updated to say so; the "four commands bypass via NewRuntime" framing is gone.
+- `sandbox.ListSandboxesMultiBackend` now has a single caller (`SystemClient.ListAcrossBackends`).
+
+**Composition.** Applies `general-principles.md §12` (verify the hypothesis) and the critique principle "research must be verified"; extends the SystemClient cross-backend idiom (DiskUsage/Prune/Build/Check). Sibling to D30 (same verify-before-execute pattern on F18).
+
+---
+
 # Convention reminders
 
 - New decisions append at the bottom. Don't renumber.

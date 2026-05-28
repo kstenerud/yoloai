@@ -134,12 +134,22 @@ surfaces from the op that reads it). ~55 call sites across `internal/` migrated
 to hoist `sb, err := c.Sandbox(name)`; sub-accessors (`Workdir()`/`Network()`)
 stay pure namespace expansion. See BREAKING-CHANGES F22 entry.
 
-### F23 — Migrate all four cross-backend ops into SystemClient
+### F23 — Migrate cross-backend ops into SystemClient — DONE (2026-05-28; 3 of 4)
 
-Add `SystemClient.ListAcrossBackends`, `SystemClient.Doctor`,
-`SystemClient.Info`, `SystemClient.AllowDomain`. Drop the four
-allowlist exceptions in `.golangci.yml`. CLI becomes a thin shell
-again. Each op is roughly a week.
+Added `SystemClient.ListAcrossBackends` (ls), `SystemClient.Doctor` (system
+doctor), and `SystemClient.Info` (system info — paths + per-backend availability;
+disk stays the separate `DiskUsage` call, version/commit stay CLI-only). The
+command handlers no longer call `cliutil.NewRuntime` for enumeration.
+
+**Re-scoped from "all four" after verification (D31; §12):** `sandbox <name>
+allow/deny/allowed` was already migrated to `Sandbox().Network()` — the critique's
+`AllowDomain` SystemClient method would be *wrong* (network is per-sandbox, belongs
+on the handle, not cross-backend). `system info` had no `NewRuntime` leak (it read
+static `runtime.Descriptors()` + `cliutil.CheckBackend`); moved it anyway for a
+tidy "describe my install" API (`SystemClient.Info`/`Backends`). `cliutil.NewRuntime`
+stays (used by `CheckBackend` + `system tart`), so its allowlist remains — F23 just
+removed the command handlers' direct enumeration. `BackendReport` re-exported as a
+yoloai alias to keep `SystemClient.Doctor`'s signature off the F1 fence.
 
 ### F30 — `RunOptions.PollInterval`
 

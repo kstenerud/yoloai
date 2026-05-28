@@ -4,7 +4,6 @@ package system
 // ABOUTME: are available on the current machine, with fix instructions for missing prerequisites.
 
 import (
-	"context"
 	"fmt"
 	"io"
 
@@ -13,7 +12,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/runtime/caps"
 )
 
@@ -88,8 +86,13 @@ func runSystemDoctor(cmd *cobra.Command, backendFilter, isolationFilter string, 
 	ctx := cmd.Context()
 	out := cmd.OutOrStdout()
 
-	env := caps.DetectEnvironment()
-	reports := collectDoctorReports(ctx, env, backendFilter, isolationFilter)
+	reports, err := cliutil.NewSystemClient().Doctor(ctx, yoloai.DoctorOptions{
+		BackendFilter:   backendFilter,
+		IsolationFilter: isolationFilter,
+	})
+	if err != nil {
+		return err
+	}
 
 	// Orphan state: yoloai-prefixed backend resources with no matching
 	// sandbox dir. A crashed destroy or wedged Kata shim can leave
@@ -173,59 +176,6 @@ func renderOrphans(w io.Writer, orphans []orphanItemJSON) {
 }
 
 // collectDoctorReports iterates over known backends and builds the full report list.
-func collectDoctorReports(ctx context.Context, env caps.Environment, backendFilter, isolationFilter string) []caps.BackendReport {
-	var reports []caps.BackendReport
-
-	for _, desc := range runtime.Descriptors() {
-		if backendFilter != "" && string(desc.Name) != backendFilter {
-			continue
-		}
-
-		rt, err := cliutil.NewRuntime(ctx, desc.Name)
-		if err != nil {
-			if isolationFilter == "" {
-				reports = append(reports, caps.BackendReport{
-					Backend:      string(desc.Name),
-					Mode:         "?",
-					IsBaseMode:   true,
-					InitErr:      err,
-					Availability: caps.Unavailable,
-				})
-			}
-			continue
-		}
-
-		if isolationFilter == "" {
-			reports = append(reports, caps.BackendReport{
-				Backend:      string(desc.Name),
-				Mode:         string(rt.Descriptor().BaseModeName),
-				IsBaseMode:   true,
-				Availability: caps.Ready,
-			})
-		}
-
-		for _, mode := range rt.Descriptor().SupportedIsolationModes {
-			if isolationFilter != "" && string(mode) != isolationFilter {
-				continue
-			}
-			capList := runtime.RequiredCapabilitiesFor(rt, mode)
-			results := caps.RunChecks(ctx, capList, env)
-			avail := caps.ComputeAvailability(results)
-			reports = append(reports, caps.BackendReport{
-				Backend:      string(desc.Name),
-				Mode:         string(mode),
-				IsBaseMode:   false,
-				Results:      results,
-				Availability: avail,
-			})
-		}
-
-		_ = rt.Close() //nolint:errcheck,gosec // best-effort cleanup
-	}
-
-	return reports
-}
-
 // convertDoctorReportsToJSON converts BackendReport slice to JSON-serializable form.
 func convertDoctorReportsToJSON(reports []caps.BackendReport) []backendReportJSON {
 	jsonReports := make([]backendReportJSON, 0, len(reports))

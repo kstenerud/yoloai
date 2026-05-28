@@ -175,6 +175,74 @@ func (s *SystemClient) Info(ctx context.Context) (*SystemInfo, error) {
 	}, nil
 }
 
+// BackendReport is one backend's diagnostic report from Doctor — its base-mode
+// availability plus a per-isolation-mode capability check breakdown.
+// Re-exported (type alias) from internal/runtime/caps.
+type BackendReport = caps.BackendReport
+
+// DoctorOptions filters Doctor's per-backend health checks. Empty filters
+// (the zero value) report every backend and every isolation mode.
+type DoctorOptions struct {
+	// BackendFilter limits the report to a single backend by name ("" = all).
+	BackendFilter string
+	// IsolationFilter limits the report to a single isolation mode ("" = all,
+	// and the base-mode availability rows are included). When set, only the
+	// matching per-isolation-mode rows are reported.
+	IsolationFilter string
+}
+
+// Doctor probes each registered backend's health: base-mode availability and,
+// per supported isolation mode, the host capabilities required and whether they
+// are satisfied. It detects the host environment once and constructs an
+// ephemeral runtime per backend (unavailable backends are reported, not fatal).
+func (s *SystemClient) Doctor(ctx context.Context, opts DoctorOptions) ([]BackendReport, error) {
+	env := caps.DetectEnvironment()
+	var reports []BackendReport
+	for _, desc := range runtime.Descriptors() {
+		if opts.BackendFilter != "" && string(desc.Name) != opts.BackendFilter {
+			continue
+		}
+		reports = append(reports, s.backendReports(ctx, desc.Name, env, opts.IsolationFilter)...)
+	}
+	return reports, nil
+}
+
+// backendReports builds the report rows for a single backend: an init-failure
+// row if it can't be constructed, otherwise a base-mode row (unless filtered)
+// plus one row per matching supported isolation mode.
+func (s *SystemClient) backendReports(ctx context.Context, backend BackendName, env caps.Environment, isolationFilter string) []BackendReport {
+	rt, err := newRuntime(ctx, backend, s.layout)
+	if err != nil {
+		if isolationFilter != "" {
+			return nil // an unavailable backend has no isolation-mode rows to filter to
+		}
+		return []BackendReport{{
+			Backend: string(backend), Mode: "?", IsBaseMode: true,
+			InitErr: err, Availability: caps.Unavailable,
+		}}
+	}
+	defer rt.Close() //nolint:errcheck // best-effort close after probing
+
+	var reports []BackendReport
+	if isolationFilter == "" {
+		reports = append(reports, BackendReport{
+			Backend: string(backend), Mode: string(rt.Descriptor().BaseModeName),
+			IsBaseMode: true, Availability: caps.Ready,
+		})
+	}
+	for _, mode := range rt.Descriptor().SupportedIsolationModes {
+		if isolationFilter != "" && string(mode) != isolationFilter {
+			continue
+		}
+		results := caps.RunChecks(ctx, runtime.RequiredCapabilitiesFor(rt, mode), env)
+		reports = append(reports, BackendReport{
+			Backend: string(backend), Mode: string(mode), IsBaseMode: false,
+			Results: results, Availability: caps.ComputeAvailability(results),
+		})
+	}
+	return reports
+}
+
 // BuildOptions configures SystemClient.Build.
 type BuildOptions struct {
 	// Profile is the profile name to build. Empty = base image only.

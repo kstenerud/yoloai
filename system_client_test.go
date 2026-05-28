@@ -45,3 +45,21 @@ func TestSystemClient_ListAcrossBackends_Empty(t *testing.T) {
 	assert.Empty(t, infos)
 	assert.Empty(t, unavailable)
 }
+
+// TestSystemClient_Doctor verifies every registered backend produces at least
+// one report row (base-mode or init-failure), and that a non-matching backend
+// filter yields nothing.
+func TestSystemClient_Doctor(t *testing.T) {
+	c := newTestClient(t)
+
+	reports, err := c.Doctor(context.Background(), DoctorOptions{})
+	require.NoError(t, err)
+	require.NotEmpty(t, reports, "every registered backend produces at least one report row")
+	for _, r := range reports {
+		assert.NotEmpty(t, r.Backend, "each report names its backend")
+	}
+
+	none, err := c.Doctor(context.Background(), DoctorOptions{BackendFilter: "does-not-exist"})
+	require.NoError(t, err)
+	assert.Empty(t, none, "a non-matching backend filter reports nothing")
+}

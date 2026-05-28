@@ -243,9 +243,11 @@ linters:
         text: "sandbox\\.(NewManager|Manager)|runtime\\.(Runtime|New)"
 
       # NewRuntime in cliutil/client.go is the only sanctioned construction
-      # site for a raw runtime.Runtime in CLI code — used by the few
-      # CLI commands that walk all backends for enumeration (list,
-      # system_doctor, info, sandbox_network) and by system_tart.
+      # site for a raw runtime.Runtime in CLI code. After F23 moved
+      # cross-backend enumeration (list, system_doctor, info) onto
+      # yoloai.SystemClient, the remaining callers are cliutil.CheckBackend
+      # (the backend availability-probe chokepoint) and the backend-scoped
+      # system_tart subtree.
       # (Moved from internal/cli/helpers.go → internal/cli/cliutil/client.go
       # during W-L13's cliutil/ extraction.)
       - path: "internal/cli/cliutil/client\\.go"
