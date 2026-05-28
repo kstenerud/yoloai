@@ -17,6 +17,7 @@ row to the index.
 | VM loses network silently; traffic stops | [Kata: tcfilter networking model](#tcfilter-networking-model) |
 | Container starts but has no network after `NewTask()` | [Kata: netns must be configured before NewTask](#kata-shim-startup-netns-must-be-fully-configured-before-newtask) |
 | Agent idle 9s+, route=ok but dns/tcp probe times out (DF8) | [Kata: netns warm-up race](#kata-netns-warm-up-race-tap0_kata-tc-mirred-filter-not-installed-when-taskstart-returns) |
+| Agent "Not logged in"/idle after `restart` on containerd-vm; guest log `secrets.skip` | [Kata: secrets dir removed before guest read](#kata-secrets-temp-dir-removed-before-the-guest-reads-it) |
 | `EADDRINUSE` on shim start or `NewTask()` retry | [Kata: /run/kata persists on exit](#runkataname-persists-on-abnormal-exit), [EADDRINUSE on retry](#eaddrinuse-on-newtask-retry), [shim 500ms wait](#after-killing-orphaned-shim-processes-wait-500ms-before-proceeding) |
 | `After 500 attempts` / kata-agent unreachable (Firecracker) | [Kata: Firecracker explicit config breaks boot](#firecracker-runtime-rs-explicit-config-path-breaks-vm-boot) |
 | Bind mount target missing inside Kata VM | [Kata: no auto-create of mount targets](#kata-does-not-auto-create-bind-mount-target-directories) |
@@ -769,6 +770,44 @@ immediately after `Start()` returns will see `Created`.
 Must poll `task.Status()` until the status is `Running` or `Stopped`. The
 60-second timeout is chosen based on observed Kata boot times (Dragonball ~5s,
 Firecracker ~10s on fast hardware; slow CI can be 30s+). See `lifecycle.go::Start`.
+
+### Kata: secrets temp dir removed before the guest reads it
+
+Symptom: after `yoloai restart` (and intermittently `new`) on `containerd-vm` /
+`containerd-vmenhanced`, the agent launches but reports `Not logged in · Run
+/login` and sits idle; the smoke harness reports "agent idle 9s+". The guest log
+(`logs/sandbox.jsonl`) shows `secrets.skip "no secrets to inject"` and
+`read_secrets.done loaded 0 secrets from /run/secrets` even though the
+credentials are present on the host. Flaky — a retry usually passes. Distinct
+from the DF8 netns warm-up race: the network probe is clean (dns/route/tcp/https
+all ok) and the failure is an *auth* error, not a connection error.
+
+Cause: credentials are written to an ephemeral host temp dir bind-mounted at
+`/run/secrets`. The host removed that dir on a fixed 1-second timer after
+`task.Start` returned — but `task.Start` returns while the Kata VM is still
+booting (see the entry above), so on a slow boot the host deleted the dir before
+the in-VM entrypoint read it. The guest then saw an empty `/run/secrets`, no
+`CLAUDE_CODE_OAUTH_TOKEN` / API key reached the agent's environment, and Claude
+Code came up unauthenticated. Restart is more susceptible than create because
+tearing down the old VM contends with booting the new one, pushing guest boot
+past the 1-second window. The same fixed sleep was harmless on Docker (near-
+instant boot).
+
+Fix: the in-sandbox entrypoint writes a host-visible marker
+(`<sandboxdir>/.secrets-consumed`, `store.SecretsConsumedMarker`) *after* reading
+`/run/secrets`; the host polls for it (30s cap, then removes anyway so the
+ephemeral dir never leaks) before removing the temp dir. The guest's sequential
+code guarantees the read precedes the marker, and the host removal happens only
+after it observes the marker, so the read strictly precedes the removal — race
+eliminated. `entrypoint.py` (docker/containerd) and `sandbox-setup.py`
+(tart/seatbelt) both write the marker; `create_instance.go::buildAndStart` and
+`waitForSecretsConsumed` poll for it.
+
+Related restart asymmetry (independent of the race): `recreateContainer`
+previously omitted the sudo-recovered `credOverrides` that `Create` sets, so
+`sudo yoloai restart` *without* `-E` lost credentials deterministically (the env
+vars are stripped and there was no sudo-recovery fallback) even though `sudo
+yoloai new` worked. Now mirrored in `lifecycle.go::recreateContainer`.
 
 ### `netns.NewNamed()` switches the OS thread via `unshare(CLONE_NEWNET)` and never restores it
 

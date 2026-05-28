@@ -75,6 +75,16 @@ const (
 
 	// AgentLogFile is the relative path to the raw agent terminal output log.
 	AgentLogFile = "logs/agent.log"
+
+	// SecretsConsumedMarker is a host-visible marker the in-sandbox
+	// entrypoint writes (under the sandbox dir, mounted at /yoloai in the
+	// container) after it has read /run/secrets into the agent's
+	// environment. The host waits for this marker before removing the
+	// ephemeral secrets temp dir, so a slow-booting backend (Kata VM via
+	// containerd) can't have the dir yanked out from under it before the
+	// guest reads it. The Python writers (entrypoint.py, sandbox-setup.py)
+	// hard-code the same name; keep them in sync.
+	SecretsConsumedMarker = ".secrets-consumed"
 )
 
 // EncodePath encodes a host path using the caret encoding spec for use as a

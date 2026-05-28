@@ -252,14 +252,8 @@ func (m *Manager) Create(ctx context.Context, opts CreateOptions) (string, error
 	slog.Info("creating sandbox", "event", "sandbox.create", "sandbox", opts.Name, "agent", opts.Agent, "backend", m.backend)
 	// When running as root under sudo, API key env vars (e.g. CLAUDE_CODE_OAUTH_TOKEN)
 	// are stripped by sudo. Recover them from the parent process's environment into a
-	// local map rather than mutating the process environment. Only keys absent from
-	// os.Environ are included so host values always take precedence.
-	credOverrides := make(map[string]string)
-	for k, v := range sudoParentEnv() {
-		if os.Getenv(k) == "" {
-			credOverrides[k] = v
-		}
-	}
+	// local map rather than mutating the process environment.
+	credOverrides := recoverSudoCredentials()
 	// Validate isolation prerequisites before the potentially expensive image build.
 	if opts.Isolation != "" {
 		if err := checkIsolationPrerequisites(ctx, m.runtime, opts.Isolation); err != nil {
@@ -1286,6 +1280,22 @@ func createSecretsDir(agentDef *agent.Definition, envVars map[string]string, sec
 	}
 
 	return tmpDir, nil
+}
+
+// recoverSudoCredentials returns sudo-recovered credential env vars for keys
+// absent from the current process environment. Under `sudo` (without -E) the
+// API-key / OAuth env vars are stripped from os.Environ; recovering them from
+// the parent sudo process lets both `new` (Create) and `restart`
+// (recreateContainer) inject them. Keys present in os.Environ are skipped so a
+// real host value always wins.
+func recoverSudoCredentials() map[string]string {
+	overrides := make(map[string]string)
+	for k, v := range sudoParentEnv() {
+		if os.Getenv(k) == "" {
+			overrides[k] = v
+		}
+	}
+	return overrides
 }
 
 // sudoParentEnv returns env vars from the parent sudo process when yoloai is

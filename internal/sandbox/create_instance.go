@@ -5,6 +5,8 @@ package sandbox
 import (
 	"context"
 	"fmt"
+	"log/slog"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -12,6 +14,12 @@ import (
 	"github.com/kstenerud/yoloai/internal/runtime"
 	"github.com/kstenerud/yoloai/internal/sandbox/store"
 )
+
+// secretsConsumedTimeout bounds how long buildAndStart waits for the
+// in-sandbox entrypoint to signal it has read /run/secrets. Generous
+// enough to cover a cold Kata VM boot + virtio-fs propagation; on
+// timeout the caller removes the secrets dir anyway (we never leak it).
+const secretsConsumedTimeout = 30 * time.Second
 
 // buildAndStart constructs the runtime InstanceConfig from sandboxState and
 // starts the instance. hasSecrets indicates whether secrets were injected via
@@ -24,6 +32,14 @@ func (m *Manager) buildAndStart(ctx context.Context, state *sandboxState, mounts
 		return err
 	}
 
+	// Clear any stale marker from a prior boot so the wait below observes
+	// only this launch's signal (the marker file lives in the persistent
+	// sandbox dir and survives restarts).
+	markerPath := filepath.Join(state.sandboxDir, store.SecretsConsumedMarker)
+	if hasSecrets {
+		_ = os.Remove(markerPath) //nolint:errcheck // best-effort; absent is fine
+	}
+
 	if err := m.runtime.Create(ctx, instanceCfg); err != nil {
 		return err
 	}
@@ -32,12 +48,37 @@ func (m *Manager) buildAndStart(ctx context.Context, state *sandboxState, mounts
 		return fmt.Errorf("start instance: %w", err)
 	}
 
-	// Wait briefly for entrypoint to read secrets before the caller removes them.
+	// Wait for the entrypoint to signal it has read /run/secrets before the
+	// caller removes the host-side secrets temp dir. A fixed sleep used to
+	// guard this, but it raced on slow-booting backends (Kata VM via
+	// containerd): the guest could still be booting when the dir was removed,
+	// so it read an empty /run/secrets and the agent came up unauthenticated.
 	if hasSecrets {
-		time.Sleep(1 * time.Second)
+		waitForSecretsConsumed(markerPath, secretsConsumedTimeout)
 	}
 
 	return m.verifyInstanceRunning(ctx, state, cname)
+}
+
+// waitForSecretsConsumed blocks until markerPath exists or timeout elapses.
+// The in-sandbox entrypoint creates the marker after reading /run/secrets;
+// once it's visible the host can safely remove the secrets temp dir. On
+// timeout it returns without error — the caller removes the dir regardless
+// so the ephemeral credentials never linger, accepting that a pathologically
+// slow boot might still race (far rarer than the previous fixed-1s window).
+func waitForSecretsConsumed(markerPath string, timeout time.Duration) {
+	deadline := time.Now().Add(timeout)
+	for {
+		if _, err := os.Stat(markerPath); err == nil {
+			return
+		}
+		if time.Now().After(deadline) {
+			slog.Warn("secrets-consumed marker not observed before timeout; removing secrets dir anyway",
+				"marker", markerPath, "timeout", timeout)
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
 }
 
 // buildInstanceConfig constructs the runtime.InstanceConfig from sandbox state.

@@ -129,6 +129,24 @@ def read_secrets():
         log_debug("secrets.skip", "no secrets to inject")
 
 
+def signal_secrets_consumed(yoloai_dir):
+    """Touch a host-visible marker after /run/secrets has been read.
+
+    The host (buildAndStart) waits for this marker before removing the
+    ephemeral secrets temp dir bind-mounted at /run/secrets. Without it,
+    a slow-booting backend (Kata VM via containerd) could have the dir
+    removed before this entrypoint reads it, leaving the agent
+    unauthenticated. Must match store.SecretsConsumedMarker.
+    """
+    marker = os.path.join(yoloai_dir, ".secrets-consumed")
+    try:
+        with open(marker, "w") as f:
+            f.write("")
+        log_debug("secrets.consumed", "wrote secrets-consumed marker", path=marker)
+    except OSError as e:
+        log_error("secrets.consumed_error", "cannot write secrets-consumed marker", error=str(e))
+
+
 class NetworkIsolationError(RuntimeError):
     """Raised when network isolation rules cannot be applied.
 
@@ -393,6 +411,7 @@ def main():
 
     remap_uid(cfg, running_as_root)
     read_secrets()
+    signal_secrets_consumed(yoloai_dir)
 
     # Suppress browser-open attempts inside the sandbox.
     os.environ.setdefault("BROWSER", "true")

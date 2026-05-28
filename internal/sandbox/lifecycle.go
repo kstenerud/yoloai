@@ -852,32 +852,39 @@ func (m *Manager) recreateContainer(ctx context.Context, name string, meta *stor
 		return err
 	}
 
+	// Recover sudo-stripped credentials, mirroring Create: under
+	// `sudo yoloai restart` (without -E) the API-key/OAuth env vars are absent
+	// from os.Environ, so without this the restart would relaunch the agent
+	// unauthenticated even though the original `new` worked.
+	credOverrides := recoverSudoCredentials()
+
 	state := &sandboxState{
-		name:         name,
-		sandboxDir:   sandboxDir,
-		workdir:      workdir,
-		workCopyDir:  store.WorkDir(sandboxDir, meta.Workdir.HostPath),
-		auxDirs:      auxDirs,
-		agent:        agentDef,
-		model:        meta.Model,
-		profile:      meta.Profile,
-		imageRef:     meta.ImageRef,
-		env:          envVars,
-		hasPrompt:    meta.HasPrompt,
-		networkMode:  meta.NetworkMode,
-		networkAllow: meta.NetworkAllow,
-		ports:        meta.Ports,
-		configMounts: meta.Mounts,
-		tmuxConf:     cfgJSON.TmuxConf,
-		resources:    meta.Resources,
-		capAdd:       meta.CapAdd,
-		devices:      meta.Devices,
-		setup:        meta.Setup,
-		isolation:    meta.Isolation,
-		vscodeTunnel: meta.VscodeTunnel,
-		configJSON:   configData,
-		layout:       m.layout,
-		homeDir:      m.layout.HomeDir,
+		name:          name,
+		sandboxDir:    sandboxDir,
+		workdir:       workdir,
+		workCopyDir:   store.WorkDir(sandboxDir, meta.Workdir.HostPath),
+		auxDirs:       auxDirs,
+		agent:         agentDef,
+		model:         meta.Model,
+		profile:       meta.Profile,
+		imageRef:      meta.ImageRef,
+		env:           envVars,
+		hasPrompt:     meta.HasPrompt,
+		networkMode:   meta.NetworkMode,
+		networkAllow:  meta.NetworkAllow,
+		ports:         meta.Ports,
+		configMounts:  meta.Mounts,
+		tmuxConf:      cfgJSON.TmuxConf,
+		resources:     meta.Resources,
+		capAdd:        meta.CapAdd,
+		devices:       meta.Devices,
+		setup:         meta.Setup,
+		isolation:     meta.Isolation,
+		vscodeTunnel:  meta.VscodeTunnel,
+		credOverrides: credOverrides,
+		configJSON:    configData,
+		layout:        m.layout,
+		homeDir:       m.layout.HomeDir,
 	}
 
 	if resume {

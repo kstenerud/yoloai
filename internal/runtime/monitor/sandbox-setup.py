@@ -102,6 +102,24 @@ def read_secrets(secrets_dir, socket=None):
     return secrets
 
 
+def signal_secrets_consumed(yoloai_dir):
+    """Touch a host-visible marker after secrets have been read.
+
+    The host (buildAndStart) waits for this marker before removing the
+    ephemeral secrets temp dir, so a slow-booting VM backend can't have
+    the dir removed before it reads the credentials. For Docker/containerd
+    entrypoint.py already writes this earlier; this covers the Tart/Seatbelt
+    path where sandbox-setup.py is the secrets reader. Must match
+    store.SecretsConsumedMarker.
+    """
+    marker = os.path.join(yoloai_dir, ".secrets-consumed")
+    try:
+        with open(marker, "w") as f:
+            f.write("")
+    except OSError as e:
+        log_info("secrets.consumed_error", f"cannot write secrets-consumed marker: {e}")
+
+
 # AGENT_STATUS_SCHEMA_VERSION must equal sandbox.agentStatusSchemaVersion in
 # sandbox/inspect.go. W2 of the architecture remediation plan.
 AGENT_STATUS_SCHEMA_VERSION = 1
@@ -1233,6 +1251,7 @@ def main():
 
     # Read secrets and pass to tmux session
     secrets = backend.read_secrets(socket)
+    signal_secrets_consumed(yoloai_dir)
 
     # Under gVisor on ARM64 the docker exec'd process may see different
     # effective credentials than the container entrypoint, causing EACCES
