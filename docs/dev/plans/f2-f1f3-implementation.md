@@ -113,9 +113,26 @@ into the library — the W-L8 thin-CLI end-state, but large. Done **phased**:
   `--squash` path (`apply_squash.go`) routes through `Workdir().Apply`, previewing
   via DryRun so the library never prompts. Established the **DryRun preview
   pattern** reused by 4c–4e.
-- **4c–4e (pending):** move each variant's orchestration into the library and
-  gut the corresponding `apply_*.go` — selective-refs (4c), `--patches` export /
-  format-patch series (4d), overlay (4e). Each green + committable.
+**Model correction (D26, 2026-05-28):** the default apply was built backwards.
+The *normal* flow **replays the commit series** (`format-patch` → `git am`,
+preserving messages/authors); flattening to a net unstaged diff is the special
+case. So what 4a/4b actually built is the **`NoCommit`** path (net diff,
+unstaged — `git apply`), not the default. The real default (series replay) is the
+core, still to land. Also: the library never auto-switches modes — series on a
+non-git target returns a typed `*UsageError`; the CLI checks `IsGitRepo` and
+picks `NoCommit` (mechanism complies-or-complains; policy decides). And `--squash`
+becomes `--no-commit`.
+
+- **4c (next, the core):** **series replay as the default** `Workdir().Apply` —
+  fold `apply_format_patch.go` (`ListCommits` → `GenerateFormatPatch` → `git am`
+  → contiguous-prefix baseline advance). Add `ApplyOptions.NoCommit` (routes to
+  the 4a/4b net-diff path); non-git default → typed refusal. Reshape `ApplyResult`
+  (`Commits []AppliedCommit{Subject, SourceSHA, HostSHA}`; drop the always-0
+  `FilesChanged`). Rename CLI `--squash` → `--no-commit`; the CLI checks `IsGitRepo`
+  and selects `NoCommit`. Tags stay CLI-side, consuming `result.Commits`.
+- **4d:** selective `Refs` (subset of the series) — fold `apply_selective.go`.
+- **4e:** `ExportDir` (`--patches`) + overlay — fold `apply_export.go` /
+  `apply_overlay.go`. Each green + committable.
 
 - Public `yoloai.ApplyResult` + `ApplyStatus` consts (per api_surface).
 - `Workdir().Apply(ApplyOptions) (*ApplyResult, error)` — folds `Apply`,

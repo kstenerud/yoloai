@@ -538,6 +538,31 @@ must run before get_working_dir`.
 
 ---
 
+## D26 — Apply replays the commit series by default; --no-commit lands net changes unstaged
+
+**Date:** 2026-05-28. **Status:** Accepted. **Context:** surfaced mid-Step-4 (the apply re-rooting) — the owner caught that the default apply had been built backwards.
+
+**Decision.** The normal apply flow **replays the sandbox's commit series onto the host workdir**, preserving each commit's message/author (`git format-patch` → `git am`). That is what `Workdir().Apply(ApplyOptions{})` does with no options. `ApplyOptions{NoCommit: true}` (CLI `--no-commit`, formerly `--squash`) instead applies the **net diff unstaged** into the working tree — equivalent to "replay the series, then `git reset <baseline>`" — collapsing the commits to their net effect and leaving them for the user to commit. `--no-commit` is also the only mode possible against a **non-git** host target (you can't `git am` into a non-repo).
+
+**Mechanism/policy split.** The library does *not* silently switch modes. `Workdir().Apply` with the default (series) against a non-git target returns a typed `*UsageError` — it complies with `ApplyOptions` or complains; it never reinterprets intent. The **CLI owns the policy**: it checks the target (`workspace.IsGitRepo`) and chooses `NoCommit` for non-git itself (with a notice). An embedder gets the same deal — explicit `NoCommit`, or a typed refusal it can handle. `ApplyResult` gains `Commits []AppliedCommit{Subject, SourceSHA, HostSHA}` so the CLI's tag transfer + summary work off the real mapping; tags stay CLI-side.
+
+**Rejected.**
+- *Squash into a single commit (with a generated message)* — rejected: **no one asked for it**, and it forces a message-synthesis decision. The net-diff-unstaged behavior already covers "I'll consolidate and commit myself."
+- *Squash/net-diff as the default* (the 4a/4b shape) — rejected: it inverts the normal flow. The default must mirror how the agent built the work (a commit series); flattening is the special case.
+- *Library auto-falls-back to net-diff on a non-git target* — rejected: the library must not silently change behavior. It does what `ApplyOptions` says or refuses with a typed error; the non-git→`NoCommit` decision is the CLI's policy call.
+- *Name it `--squash`* — rejected: it implies a squash *commit* is created; none is. `--no-commit` names the actual behavior (no commits created; net changes land in the workdir) and contrasts cleanly with the commit-preserving default.
+
+**Why.** The product's core loop is: work + commit inside the sandbox, repeat, then land that history on the host. Mirroring the commits is the expected outcome; collapsing them is occasionally wanted (review-before-commit, or non-git targets).
+
+**Consequences.**
+- `Workdir().Apply(ApplyOptions{})` default flips from net-diff (4a/4b) to series replay; `--squash` → `--no-commit` (Type-1.5 CLI break, tracked in BREAKING-CHANGES).
+- `ApplyResult` reshaped (`Commits []AppliedCommit`; drop the always-zero `FilesChanged`).
+- Step-4 phasing re-centered on the series replay as the core (`apply_format_patch.go` fold), with `NoCommit` / selective `Refs` / `ExportDir` as options.
+
+**Composition.** Applies `general-principles.md §1` (YAGNI — no squash-commit feature) and §12 (the built design didn't match the real workflow; revise it). Continues the F2 apply re-rooting (D-less; tracked in `plans/f2-f1f3-implementation.md`).
+
+---
+
 # Convention reminders
 
 - New decisions append at the bottom. Don't renumber.
