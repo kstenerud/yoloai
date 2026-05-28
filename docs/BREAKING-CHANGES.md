@@ -83,9 +83,17 @@ removed. CLI: `apply --patches` is now dispatched before the apply paths, so
 `apply <name> <refs...> --patches <dir>` exports the selected commits (previously
 the `--patches` flag was silently ignored when refs were given). See D29.
 
-**Still pending:** overlay *apply* (`apply_overlay.go`) — fold into
-`Workdir().Apply` (overlay → `ApplyModeNoCommit`; `ApplyModeCommits` refused) in
-sub-step 4f.
+**4f (overlay apply folds into `Workdir().Apply`):** `Workdir().Apply` now
+resolves mount mode internally (like `Diff`/`Export`). For an `:overlay` workdir
+there is no commit history, so `ApplyModeCommits` is refused with a `*UsageError`
+and `ApplyModeNoCommit` lands the overlay's upper-layer changes. The overlay
+apply orchestration (capture upper-layer diff → apply to host → advance overlay
+baseline) moved into the library (`patch.ApplyOverlay`); the dead
+`Client.OverlayPatch` and `Client.UpdateOverlayBaseline` are removed. The CLI
+keeps a thin overlay branch only to enforce the running-container precondition
+(`requireOverlayRunning`) and pick `ApplyModeNoCommit` — same as it does for
+`Diff`/`Export`. This completes the F2 apply/diff/export re-rooting onto
+`Workdir()`.
 
 ### Diff moves under `client.Sandbox(name).Workdir()`
 

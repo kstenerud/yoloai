@@ -154,10 +154,18 @@ becomes `--no-commit`.
   thin `runExport`; `applyOverlayExportPatches` removed. Dead
   `Client.GenerateFormatPatch`/`GenerateUncommittedDiff` removed. Tests:
   `TestExport_{CopyAllCommits,CopyWithRefs,IncludeUncommitted,RWRefused,OverlayRefsRefused}`.
-- **4f:** overlay *apply* — fold `apply_overlay.go` into `Workdir().Apply`
-  (overlay → `ApplyModeNoCommit`; `ApplyModeCommits` refused). Remove the
-  top-level `hasOverlayDirs` dispatch and the dead `Client.OverlayPatch` /
-  `UpdateOverlayBaseline`. Green + committable.
+- **4f — LANDED (2026-05-28):** overlay *apply* folded into `Workdir().Apply`,
+  which now resolves mount mode internally (overlay → `ApplyModeNoCommit`;
+  `ApplyModeCommits` refused with a `*UsageError`). Orchestration moved to
+  `patch.ApplyOverlay` (capture → apply → advance overlay baseline); dead
+  `Client.OverlayPatch` / `UpdateOverlayBaseline` removed. The top-level
+  `hasOverlayDirs` dispatch stays but is now *thin* — it only enforces
+  `requireOverlayRunning` and picks NoCommit (same precondition pattern as
+  `Diff`/`Export`); `apply_overlay.go` is a DryRun-preview→confirm→apply wrapper.
+  Tests: `TestWorkdir_Apply_OverlayRefusesCommits`,
+  `TestApplyOverlay_NonOverlayNoop`, and `TestIntegration_Overlay` exercises
+  `patch.ApplyOverlay` end-to-end. **Completes the F2 apply/diff/export
+  re-rooting onto `Workdir()`.**
 
 - Public `yoloai.ApplyResult` + `ApplyStatus` consts (per api_surface).
 - `Workdir().Apply(ApplyOptions) (*ApplyResult, error)` — folds `Apply`,

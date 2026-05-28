@@ -191,22 +191,42 @@ type ApplyOptions struct {
 // *UsageError rather than degrading to net-diff; that policy call is the
 // caller's. A (*ApplyResult, error) pair means the commits landed but a
 // follow-on step (git am stash, or uncommitted changes) had a non-fatal issue (see ApplySeries).
+//
+// Mount mode is resolved internally (like Diff). For an :overlay workdir there
+// is no commit history, so ApplyModeCommits is refused with a *UsageError and
+// ApplyModeNoCommit lands the overlay's upper-layer changes (see ApplyOverlay).
 func (w *Workdir) Apply(ctx context.Context, opts ApplyOptions) (*ApplyResult, error) {
-	switch opts.Mode {
-	case ApplyModeCommits:
+	if opts.Mode != ApplyModeCommits && opts.Mode != ApplyModeNoCommit {
+		return nil, sandbox.NewUsageError("apply mode is required: set ApplyOptions.Mode to yoloai.ApplyModeCommits or yoloai.ApplyModeNoCommit")
+	}
+
+	meta, err := store.LoadMeta(w.s.c.layout.SandboxDir(w.s.name))
+	if err != nil {
+		return nil, err
+	}
+	overlay := meta.Workdir.Mode == store.DirModeOverlay
+
+	if opts.Mode == ApplyModeCommits {
+		if overlay {
+			return nil, sandbox.NewUsageError("cannot replay a commit series for an :overlay sandbox — overlay changes have no commit history; apply with ApplyModeNoCommit")
+		}
 		return patch.ApplySeries(ctx, w.s.c.layout, w.s.c.rt, w.s.name, patch.ApplySeriesOptions{
 			Refs:               opts.Refs,
 			IncludeUncommitted: opts.IncludeUncommitted,
 			Paths:              opts.Paths,
 			DryRun:             opts.DryRun,
 		})
-	case ApplyModeNoCommit:
-		return patch.ApplyAll(ctx, w.s.c.layout, w.s.c.rt, w.s.name, patch.ApplyAllOptions{
-			IncludeUncommitted: opts.IncludeUncommitted,
-			Paths:              opts.Paths,
-			DryRun:             opts.DryRun,
-		})
-	default:
-		return nil, sandbox.NewUsageError("apply mode is required: set ApplyOptions.Mode to yoloai.ApplyModeCommits or yoloai.ApplyModeNoCommit")
 	}
+
+	if overlay {
+		return patch.ApplyOverlay(ctx, w.s.c.layout, w.s.c.rt, w.s.name, patch.ApplyOverlayOptions{
+			Paths:  opts.Paths,
+			DryRun: opts.DryRun,
+		})
+	}
+	return patch.ApplyAll(ctx, w.s.c.layout, w.s.c.rt, w.s.name, patch.ApplyAllOptions{
+		IncludeUncommitted: opts.IncludeUncommitted,
+		Paths:              opts.Paths,
+		DryRun:             opts.DryRun,
+	})
 }

@@ -937,13 +937,22 @@ func TestIntegration_Overlay(t *testing.T) {
 	assert.NotEmpty(t, overlayDiff, "overlay should have changes after exec write")
 	assert.Contains(t, overlayDiff, "output.txt")
 
-	// Apply: must use GenerateOverlayPatch (ApplyAll skips overlay dirs)
-	patches, err := patch.GenerateOverlayPatch(ctx, mgr.Layout(), mgr.Runtime(), "overlay-integ", nil)
+	// Apply via the library orchestrator patch.ApplyOverlay (captures the
+	// upper-layer diff, applies it to the host, advances the overlay baseline) —
+	// the same path Workdir().Apply(ApplyModeNoCommit) takes for overlay.
+	result, err := patch.ApplyOverlay(ctx, mgr.Layout(), mgr.Runtime(), "overlay-integ", patch.ApplyOverlayOptions{})
 	require.NoError(t, err)
-	require.NotEmpty(t, patches)
-	require.NoError(t, workspace.ApplyPatch(patches[0].Patch, projectDir, false))
+	require.NotNil(t, result, "overlay apply should report a result when there are changes")
+	assert.True(t, result.UncommittedApplied)
+	assert.Contains(t, result.Stat, "output.txt")
 
 	applied, err := os.ReadFile(filepath.Join(projectDir, "output.txt")) //nolint:gosec // test path
 	require.NoError(t, err)
 	assert.Contains(t, string(applied), "overlay-test")
+
+	// DryRun reports the same stat without re-applying.
+	preview, err := patch.ApplyOverlay(ctx, mgr.Layout(), mgr.Runtime(), "overlay-integ", patch.ApplyOverlayOptions{DryRun: true})
+	require.NoError(t, err)
+	require.NotNil(t, preview)
+	assert.Contains(t, preview.Stat, "output.txt")
 }

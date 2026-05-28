@@ -352,21 +352,6 @@ func (c *Client) HasUncommittedChanges(ctx context.Context, name string) (bool, 
 	return patch.HasUncommittedChanges(ctx, c.layout, c.rt, name)
 }
 
-// OverlayPatch generates patch sets for an :overlay sandbox's
-// modified directories. Each PatchSet is one overlay'd directory's
-// upper-layer diff, captured by running git diff inside the container.
-// Used by `yoloai apply` for overlay sandboxes.
-func (c *Client) OverlayPatch(ctx context.Context, name string, paths []string) ([]patch.PatchSet, error) {
-	return patch.GenerateOverlayPatch(ctx, c.layout, c.rt, name, paths)
-}
-
-// UpdateOverlayBaseline advances an :overlay sandbox's baseline marker
-// to HEAD for the named host path. Called after a successful apply so
-// the next diff starts from a fresh baseline.
-func (c *Client) UpdateOverlayBaseline(ctx context.Context, name, hostPath string) error {
-	return patch.UpdateOverlayBaselineToHEAD(ctx, c.layout, c.rt, name, hostPath)
-}
-
 // IOStreams names the stdio handles for interactive Client methods.
 // It's a type alias for runtime.IOStreams so embedders can use the
 // yoloai.IOStreams name without importing runtime directly. See
