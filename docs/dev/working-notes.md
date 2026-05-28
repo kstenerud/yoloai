@@ -462,8 +462,8 @@ Operational state (`setup_complete`) lives in `~/.yoloai/state.yaml`.
 
 **Consequences.**
 - `testing-principles.md §10` + over-generalisations row added.
-- Vestigial `HOME` swaps removed across ~22 files (serial cleanup), per-file verified. git/cliutil/e2e swaps retained.
-- A later `t.Parallel` pass (gated on a shared-state audit) builds on the decoupling.
+- 82 vestigial `HOME` swaps removed across 10 files (per-file verified). git/cliutil/e2e/lock-helper swaps retained as load-bearing.
+- **`t.Parallel` audit — rejected.** The unit suite was ~2.5s except one test (`tart.TestStopVM_EscalatesToSIGKILL`) at 15.1s. `t.Parallel` overlaps multiple tests; it can't speed up a single slow one, and overlapping the already-fast packages saves <2s against real latent-shared-state flakiness risk (global registries, injectable package vars, remaining `t.Setenv` API-key tests). The real lever was that one test's two hardcoded escalation timeouts — converted `tartGracefulStopTimeout`/`tartSigtermWait` from `const` to `var` and shrunk them to 200ms in the test (the test validates escalation *logic*, not the production durations). Suite wall time 18s → ~5.6s.
 
 **Composition.** Applies `development-principles.md §12` to the test surface; extends D22's testing principles.
 

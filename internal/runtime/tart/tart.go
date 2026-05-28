@@ -1071,7 +1071,13 @@ func (r *Runtime) patchConfigWorkingDir(sandboxPath string) error {
 // (no kata-agent equivalent, but the Virtualization.framework shutdown
 // path can block on a wedged guest kernel). The SIGTERM wait is bounded
 // so we can escalate to SIGKILL before the user notices the hang.
-const (
+// var (not const) so TestStopVM_EscalatesToSIGKILL can shrink them to
+// milliseconds — the test validates the SIGTERM→SIGKILL escalation
+// *logic*, not the production durations, and a real 15s wall-clock wait
+// would dominate the unit suite. Same injectable-package-var pattern
+// tart/containerd already use for test seams (kataShimName,
+// canRunCNIBridgeFunc).
+var (
 	tartGracefulStopTimeout = 10 * time.Second
 	tartSigtermWait         = 5 * time.Second
 )

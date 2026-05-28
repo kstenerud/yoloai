@@ -70,8 +70,15 @@ esac
 	slog.SetDefault(slog.New(slog.NewJSONHandler(&logBuf, nil)))
 	defer slog.SetDefault(origLogger)
 
+	// Shrink the escalation timeouts to milliseconds — this test validates the
+	// SIGTERM→SIGKILL escalation logic, not the production 10s/5s durations, so a
+	// real 15s wall-clock wait would needlessly dominate the unit suite.
+	origGraceful, origSigterm := tartGracefulStopTimeout, tartSigtermWait
+	tartGracefulStopTimeout, tartSigtermWait = 200*time.Millisecond, 200*time.Millisecond
+	defer func() { tartGracefulStopTimeout, tartSigtermWait = origGraceful, origSigterm }()
+
 	// --- invoke stopVM and assert it returns within the bounded timeout ---
-	// tartGracefulStopTimeout (10s) + tartSigtermWait (5s) = 15s; budget = 20s.
+	// shrunk timeouts (200ms + 200ms) well under the 20s budget.
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
