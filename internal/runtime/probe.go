@@ -28,6 +28,56 @@ func Probe(ctx context.Context, name BackendName) (available bool, reason string
 	return desc.Probe(ctx)
 }
 
+// SelectBackend resolves the backend to use from an isolation mode, a
+// target OS, and a container-slot preference. It is the single source of
+// truth for backend routing — both the CLI (which reads --isolation /
+// --os flags + config) and library embedders (via yoloai.Options) call
+// it, so the routing rules live in one place rather than being
+// duplicated across cli/cliutil and the yoloai package (F21).
+//
+// Routing precedence:
+//
+//   - targetOS == "mac": macOS-native backends. isolation vm → tart
+//     (full VM); anything else → seatbelt (lightweight sandbox-exec).
+//     Checked first so "--os mac --isolation vm" picks tart, not
+//     containerd.
+//   - isolation vm / vm-enhanced: Linux VM isolation via containerd
+//     (Kata). Falls through to container-slot selection when containerd
+//     isn't available (e.g. a macOS host where containerd is Linux-only).
+//   - otherwise (container / container-enhanced / default): the
+//     container slot — preferred first, then any available container
+//     backend (see SelectContainerBackend).
+//
+// isolation and targetOS may both be empty, in which case SelectBackend
+// is equivalent to SelectContainerBackend(ctx, preferred): pure
+// container-slot selection with no routing.
+//
+// The warning return mirrors SelectContainerBackend: non-empty when a
+// container-slot preference was named but unavailable. OS/isolation
+// routing itself emits no warning — the CLI validates those combos
+// up-front via IsolationAvailability.
+func SelectBackend(ctx context.Context, preferred BackendName, isolation IsolationMode, targetOS string) (backend BackendName, warning string) {
+	// OS-based routing: macOS-native backends. Checked before isolation
+	// so "--os mac --isolation vm" routes to tart rather than containerd.
+	if targetOS == "mac" {
+		if isolation == IsolationModeVM {
+			return BackendTart, ""
+		}
+		return BackendSeatbelt, ""
+	}
+
+	// Isolation-based routing: vm / vm-enhanced prefer containerd (Kata),
+	// falling through to the container slot when containerd isn't
+	// available on this host.
+	if isolation == IsolationModeVM || isolation == IsolationModeVMEnhanced {
+		if IsAvailable(BackendContainerd) {
+			return BackendContainerd, ""
+		}
+	}
+
+	return SelectContainerBackend(ctx, preferred)
+}
+
 // SelectContainerBackend picks the best available container backend
 // (`BaseModeName == "container"`). It tries `preferred` first when non-empty
 // and registered, then falls back to any other available container backend,

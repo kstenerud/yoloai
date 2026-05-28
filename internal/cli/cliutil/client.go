@@ -57,6 +57,10 @@ func Coalesce(a, b string) string {
 
 // ResolveBackend determines the backend from flags, then isolation/os routing,
 // then config preference, then auto-detection. Used by commands with --backend.
+//
+// The flag/config reads (the CLI's job) stay here; the routing decision itself
+// is delegated to runtime.SelectBackend so the CLI and library embedders share
+// one routing implementation (F21).
 func ResolveBackend(cmd *cobra.Command) runtime.BackendName {
 	// Explicit --backend always wins.
 	if b, _ := cmd.Flags().GetString("backend"); b != "" {
@@ -70,29 +74,10 @@ func ResolveBackend(cmd *cobra.Command) runtime.BackendName {
 		cfgIsolation = cfg.Isolation
 		cfgOS = cfg.OS
 	}
-	isolation := Coalesce(FlagStr(cmd, "isolation"), cfgIsolation)
+	isolation := runtime.IsolationMode(Coalesce(FlagStr(cmd, "isolation"), cfgIsolation))
 	targetOS := Coalesce(FlagStr(cmd, "os"), cfgOS)
 
-	// OS-based routing: --os mac routes to seatbelt/tart (checked first so
-	// --os mac --isolation vm goes to tart, not containerd).
-	if targetOS == "mac" {
-		if isolation == "vm" {
-			return runtime.BackendTart
-		}
-		return runtime.BackendSeatbelt
-	}
-
-	// Isolation-based routing: vm/vm-enhanced prefer containerd, but fall back
-	// if not available (e.g., on macOS where containerd is Linux-only).
-	if isolation == "vm" || isolation == "vm-enhanced" {
-		if runtime.IsAvailable(runtime.BackendContainerd) {
-			return runtime.BackendContainerd
-		}
-		// Fall through to container backend detection
-	}
-
-	// container/container-enhanced: prefer config, then auto-detect.
-	backend, warn := runtime.SelectContainerBackend(cmd.Context(), ResolveContainerBackendConfig())
+	backend, warn := runtime.SelectBackend(cmd.Context(), ResolveContainerBackendConfig(), isolation, targetOS)
 	if warn != "" {
 		fmt.Fprintln(os.Stderr, warn)
 	}

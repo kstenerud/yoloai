@@ -115,7 +115,22 @@ type Options struct {
 	// yoloai.BackendTart, etc.). Default: read from config.yaml, then
 	// yoloai.BackendDocker. Empty BackendName ("") is treated as "use
 	// the default" by every consumer of Options.Backend.
+	//
+	// When Backend is empty, the Client routes Isolation + OS through
+	// runtime.SelectBackend — the same routing the CLI applies for its
+	// --isolation / --os flags (F21). An explicit Backend always wins
+	// over Isolation/OS routing.
 	Backend BackendName
+
+	// Isolation and OS are backend-routing preferences honored only when
+	// Backend is empty. They mirror the CLI's --isolation / --os flags:
+	// OS=="mac" routes to seatbelt (or tart for Isolation vm); Isolation
+	// vm / vm-enhanced route to containerd. Both empty (the default)
+	// means plain container-slot selection. Embedders that want the same
+	// backend routing the CLI performs set these instead of
+	// re-implementing it. F21.
+	Isolation IsolationMode
+	OS        string
 
 	// Logger receives structured log output. Default: slog.Default().
 	Logger *slog.Logger
@@ -152,7 +167,7 @@ func NewWithOptions(ctx context.Context, opts Options) (*Client, error) {
 
 	backend := opts.Backend
 	if backend == "" {
-		backend = BackendName(resolveBackendFromConfig(ctx, layout))
+		backend = resolveBackendFromConfig(ctx, layout, opts.Isolation, opts.OS)
 	}
 	logger := opts.Logger
 	if logger == nil {
@@ -667,19 +682,20 @@ func (c *Client) SandboxDir(name string) string {
 
 // --- private helpers ---
 
-// resolveBackendFromConfig picks the container backend for a Client created
-// without an explicit Backend in Options. Reads the user's container_backend
-// preference from config and lets runtime.SelectContainerBackend probe it —
-// if the preferred backend isn't available, the helper falls back to any
-// other registered container backend with a stderr-side warning. The Client
-// emits no warning of its own (embedders may want to suppress it); we
-// silently take the fallback verdict.
-func resolveBackendFromConfig(ctx context.Context, layout config.Layout) runtime.BackendName {
+// resolveBackendFromConfig picks the backend for a Client created without an
+// explicit Backend in Options. Reads the user's container_backend preference
+// from config and routes it through runtime.SelectBackend along with the
+// caller's isolation/OS preferences — the same routing the CLI applies (F21).
+// If the preferred container backend isn't available, SelectBackend falls back
+// to any other registered container backend; the Client emits no warning of
+// its own (embedders may want to suppress it), so we silently take the
+// fallback verdict.
+func resolveBackendFromConfig(ctx context.Context, layout config.Layout, isolation runtime.IsolationMode, targetOS string) runtime.BackendName {
 	var preferred runtime.BackendName
 	if cfg, err := config.LoadDefaultsConfig(layout); err == nil {
 		preferred = runtime.BackendName(cfg.ContainerBackend)
 	}
-	backend, _ := runtime.SelectContainerBackend(ctx, preferred)
+	backend, _ := runtime.SelectBackend(ctx, preferred, isolation, targetOS)
 	return backend
 }
 

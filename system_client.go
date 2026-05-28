@@ -169,7 +169,8 @@ func (s *SystemClient) Build(ctx context.Context, opts BuildOptions) error {
 
 	backend := opts.Backend
 	if backend == "" {
-		backend = BackendName(resolveBackendFromConfig(ctx, s.layout))
+		// Build targets the container slot — no isolation/OS routing.
+		backend = resolveBackendFromConfig(ctx, s.layout, "", "")
 	}
 	return s.buildOne(ctx, backend, opts, out)
 }
