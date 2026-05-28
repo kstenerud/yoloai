@@ -107,10 +107,15 @@ into the library — the W-L8 thin-CLI end-state, but large. Done **phased**:
   `Client.Apply`/`ApplyWithOptions` (the simple full-workdir apply over
   `patch.ApplyAll`); `ApplyResult` re-exported as `yoloai.ApplyResult` →
   `patch.ApplyResult` off `f1KnownLeaks`. `ApplyOptions` moved to `workdir.go`.
-- **4b–4e (pending):** move each variant's orchestration into the library and
-  gut the corresponding `apply_*.go` — squash (4b), selective-refs (4c),
-  `--patches` export / format-patch series (4d), overlay (4e). Each green +
-  committable.
+- **4b — LANDED (2026-05-28):** squash. `Workdir().Apply` *is* the squash apply;
+  `patch.ApplyAll` extended with `Paths`/`DryRun` (+ CheckPatch validation),
+  `ApplyOptions` gains `Paths`/`DryRun`. `Client.GeneratePatch` removed; the CLI
+  `--squash` path (`apply_squash.go`) routes through `Workdir().Apply`, previewing
+  via DryRun so the library never prompts. Established the **DryRun preview
+  pattern** reused by 4c–4e.
+- **4c–4e (pending):** move each variant's orchestration into the library and
+  gut the corresponding `apply_*.go` — selective-refs (4c), `--patches` export /
+  format-patch series (4d), overlay (4e). Each green + committable.
 
 - Public `yoloai.ApplyResult` + `ApplyStatus` consts (per api_surface).
 - `Workdir().Apply(ApplyOptions) (*ApplyResult, error)` — folds `Apply`,

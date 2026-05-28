@@ -381,13 +381,6 @@ func (c *Client) AdvanceBaseline(ctx context.Context, name string) error {
 	return patch.AdvanceBaseline(ctx, c.layout, c.rt, name)
 }
 
-// GeneratePatch produces a single squashed patch covering all
-// committed (and optionally uncommitted) changes in the workdir.
-// Returns (patchBytes, statSummary, err). Used by `yoloai apply --squash`.
-func (c *Client) GeneratePatch(ctx context.Context, name string, paths []string, includeWIP bool) ([]byte, string, error) {
-	return patch.GeneratePatch(ctx, c.layout, c.rt, name, paths, includeWIP)
-}
-
 // GenerateFormatPatch runs `git format-patch` in the sandbox over the
 // beyond-baseline range and returns (patchDir, files, err). Caller is
 // responsible for `os.RemoveAll(patchDir)` after consuming the files.

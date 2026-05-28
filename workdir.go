@@ -93,15 +93,29 @@ type ApplyOptions struct {
 	// edits as unstaged modifications on the host. Mirrors `yoloai apply
 	// --include-wip`.
 	IncludeWIP bool
+	// Paths narrows the apply to specific files (relative to the workdir). When
+	// set, the diff baseline is NOT advanced (the remaining paths still diff
+	// against it).
+	Paths []string
+	// DryRun generates and validates the patch (so the caller can preview the
+	// returned Stat and confirm) but does not apply it or advance the baseline.
+	// The library never prompts; the CLI uses this to render its confirmation.
+	DryRun bool
 }
 
-// Apply applies the agent's committed changes back to the original host workdir
-// (the copy-mode "land it" verb). Returns (nil, nil) when there's nothing to
-// apply — branch on result == nil rather than a sentinel error (Q-P). Advances
-// the diff baseline past the applied commits on success.
+// Apply lands the agent's changes back on the original host workdir as a single
+// squashed patch (copy-mode). Returns (nil, nil) when there's nothing to apply —
+// branch on result == nil rather than a sentinel error (Q-P). On success (and
+// unless Paths filters the apply) it advances the diff baseline. With
+// opts.DryRun it generates + validates but does not apply, returning what would
+// apply so callers can preview/confirm without the library prompting.
 //
-// This is the simple full-workdir apply; the squash / selective-ref / export /
-// overlay variants remain on Client for now (folded in later sub-steps).
+// This is the squash apply; the selective-ref / export / overlay variants
+// remain on Client for now (folded in later sub-steps).
 func (w *Workdir) Apply(ctx context.Context, opts ApplyOptions) (*ApplyResult, error) {
-	return patch.ApplyAll(ctx, w.s.c.layout, w.s.c.rt, w.s.name, opts.IncludeWIP)
+	return patch.ApplyAll(ctx, w.s.c.layout, w.s.c.rt, w.s.name, patch.ApplyAllOptions{
+		IncludeWIP: opts.IncludeWIP,
+		Paths:      opts.Paths,
+		DryRun:     opts.DryRun,
+	})
 }

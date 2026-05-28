@@ -42,20 +42,28 @@ type ApplyResult struct {
 	Stat string
 }
 
-// ApplyAll applies the sandbox's pending workdir changes back to the
-// original host path. Programmatic equivalent of 'yoloai apply <name>'.
+// ApplyAllOptions configures ApplyAll.
+type ApplyAllOptions struct {
+	IncludeWIP bool     // also apply uncommitted edits (baseline → working tree)
+	Paths      []string // optional path filter; when non-empty the baseline is NOT advanced
+	DryRun     bool     // generate + validate but do not apply or advance baseline
+}
+
+// ApplyAll applies the sandbox's pending workdir changes back to the original
+// host path as a single squashed patch. Programmatic equivalent of 'yoloai
+// apply <name> --squash'.
 //
 // Returns (nil, nil) when there is nothing to apply. Callers branch on
-// result == nil rather than a sentinel error (Q-P).
+// result == nil rather than a sentinel error (Q-P). On opts.DryRun the patch is
+// generated and validated (so the caller can preview the stat and confirm) but
+// not applied — the returned ApplyResult describes what *would* apply.
 //
-// After Q-U (aux :copy/:overlay removed), the diff/apply surface
-// is workdir-only — the name "ApplyAll" is preserved for API
-// stability but the iteration is gone.
+// After Q-U (aux :copy/:overlay removed) the surface is workdir-only — the name
+// "ApplyAll" is preserved for stability but the iteration is gone.
 //
-// layout determines where the per-sandbox lock file lives (Q-W.4a);
-// callers thread their own Layout in. yoloai.Client supplies its
-// c.layout; the CLI supplies the same Layout it gives Manager.
-func ApplyAll(ctx context.Context, layout config.Layout, rt runtime.Runtime, name string, includeWIP bool) (*ApplyResult, error) {
+// layout determines where the per-sandbox lock file lives (Q-W.4a); callers
+// thread their own Layout in (yoloai.Client supplies c.layout).
+func ApplyAll(ctx context.Context, layout config.Layout, rt runtime.Runtime, name string, opts ApplyAllOptions) (*ApplyResult, error) {
 	unlock, err := store.AcquireLock(layout, name)
 	if err != nil {
 		return nil, err
@@ -67,13 +75,12 @@ func ApplyAll(ctx context.Context, layout config.Layout, rt runtime.Runtime, nam
 		return nil, err
 	}
 	if meta.Workdir.Mode != "copy" {
-		// :rw is live; :overlay uses GenerateOverlayPatch. Neither
-		// belongs in the squash/format-patch apply paths that funnel
-		// through ApplyAll.
+		// :rw is live; :overlay uses GenerateOverlayPatch. Neither belongs in
+		// the squash apply path that funnels through ApplyAll.
 		return nil, nil
 	}
 
-	patchBytes, stat, err := GeneratePatch(ctx, layout, rt, name, nil, includeWIP)
+	patchBytes, stat, err := GeneratePatch(ctx, layout, rt, name, opts.Paths, opts.IncludeWIP)
 	if err != nil {
 		return nil, err
 	}
@@ -83,12 +90,23 @@ func ApplyAll(ctx context.Context, layout config.Layout, rt runtime.Runtime, nam
 
 	hostPath := meta.Workdir.HostPath
 	isGit := workspace.IsGitRepo(hostPath)
+	if err := workspace.CheckPatch(patchBytes, hostPath, isGit); err != nil {
+		return nil, err
+	}
+	if opts.DryRun {
+		return &ApplyResult{Dir: hostPath, Stat: stat}, nil
+	}
+
 	if err := workspace.ApplyPatch(patchBytes, hostPath, isGit); err != nil {
 		return nil, fmt.Errorf("%s: %w", hostPath, err)
 	}
 
-	if err := AdvanceBaseline(ctx, layout, rt, name); err != nil {
-		return nil, fmt.Errorf("advance baseline: %w", err)
+	// Path-filtered applies don't advance the baseline (the remaining
+	// unapplied paths still diff against it).
+	if len(opts.Paths) == 0 {
+		if err := AdvanceBaseline(ctx, layout, rt, name); err != nil {
+			return nil, fmt.Errorf("advance baseline: %w", err)
+		}
 	}
 
 	return &ApplyResult{Dir: hostPath, Stat: stat}, nil

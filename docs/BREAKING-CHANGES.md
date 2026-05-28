@@ -21,10 +21,19 @@ the F1 fence leak); `ApplyOptions` moved to the root `Workdir` surface.
 - `c.Apply(ctx, name)` → `c.Sandbox(name).Workdir().Apply(ctx, yoloai.ApplyOptions{})`
 - `c.ApplyWithOptions(ctx, name, opts)` → `c.Sandbox(name).Workdir().Apply(ctx, opts)`
 
-**Note:** this is the simple full-workdir apply. The squash / selective-ref /
-`--patches` export / overlay variants — whose orchestration currently lives in
-the CLI (`apply_*.go`) — fold into `Workdir().Apply` in subsequent sub-steps
-(4b–4e), which relocate that logic into the library.
+**4b (squash):** `Workdir().Apply` *is* the squash apply (single flattened patch).
+`Client.GeneratePatch` is removed — its only caller (the CLI `--squash` path) now
+routes through `Workdir().Apply`, with generate/validate/apply/advance-baseline
+relocated into the library. `ApplyOptions` gains `Paths []string` (path-filtered
+apply; baseline not advanced) and `DryRun bool` (generate + validate + return the
+stat, without applying — the library never prompts, so the CLI uses DryRun to
+preview before confirming). Migration: `c.GeneratePatch(ctx, name, paths, wip)`
+→ `c.Sandbox(name).Workdir().Apply(ctx, yoloai.ApplyOptions{Paths: paths,
+IncludeWIP: wip, DryRun: true})` then read `result.Stat` / apply with `DryRun: false`.
+
+**Still pending:** the selective-ref / `--patches` export / overlay variants —
+whose orchestration still lives in the CLI (`apply_*.go`) — fold into
+`Workdir().Apply` in sub-steps 4c–4e.
 
 ### Diff moves under `client.Sandbox(name).Workdir()`
 
