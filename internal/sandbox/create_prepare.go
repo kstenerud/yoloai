@@ -76,7 +76,7 @@ func (m *Manager) resolveProfileConfig(ctx context.Context, opts *CreateOptions,
 	}
 
 	homeDir := m.layout.HomeDir
-	if err := applyMergedProfileToOpts(opts, agentDef, merged, pr, ycfg.Agent, homeDir); err != nil {
+	if err := applyMergedProfileToOpts(opts, agentDef, merged, pr, ycfg.Agent, homeDir, m.layout.Env); err != nil {
 		return nil, err
 	}
 
@@ -93,9 +93,10 @@ func (m *Manager) resolveProfileConfig(ctx context.Context, opts *CreateOptions,
 
 // applyMergedProfileToOpts applies merged profile values to opts and pr.
 // homeDir is used for ~ expansion in profile workdir and directory paths.
+// env is the environment map for ${VAR} expansion; use layout.Env.
 // baseAgent is the agent name from the base config (ycfg.Agent), used to
 // detect whether the CLI override has been applied.
-func applyMergedProfileToOpts(opts *CreateOptions, agentDef **agent.Definition, merged *config.MergedConfig, pr *profileResult, baseAgent string, homeDir string) error {
+func applyMergedProfileToOpts(opts *CreateOptions, agentDef **agent.Definition, merged *config.MergedConfig, pr *profileResult, baseAgent string, homeDir string, env map[string]string) error {
 	// Apply merged values where CLI didn't override
 	if opts.Agent == baseAgent && merged.Agent != "" {
 		opts.Agent = merged.Agent
@@ -120,7 +121,7 @@ func applyMergedProfileToOpts(opts *CreateOptions, agentDef **agent.Definition, 
 
 	// Profile workdir: use if CLI didn't provide one
 	if opts.Workdir.Path == "" && merged.Workdir != nil {
-		wdPath, err := ExpandPath(merged.Workdir.Path, homeDir)
+		wdPath, err := ExpandPath(merged.Workdir.Path, homeDir, env)
 		if err != nil {
 			return fmt.Errorf("expand profile workdir path: %w", err)
 		}
@@ -132,7 +133,7 @@ func applyMergedProfileToOpts(opts *CreateOptions, agentDef **agent.Definition, 
 	}
 
 	// Profile directories: prepend before CLI aux dirs
-	if err := prependProfileDirs(opts, merged.Directories, homeDir); err != nil {
+	if err := prependProfileDirs(opts, merged.Directories, homeDir, env); err != nil {
 		return err
 	}
 
@@ -159,10 +160,11 @@ func applyMergedProfileToOpts(opts *CreateOptions, agentDef **agent.Definition, 
 
 // prependProfileDirs prepends profile directory specs before the CLI aux dirs.
 // homeDir is used for ~ expansion in profile directory paths.
-func prependProfileDirs(opts *CreateOptions, profileDirs []config.ProfileDir, homeDir string) error {
+// env is the environment map for ${VAR} expansion; use layout.Env.
+func prependProfileDirs(opts *CreateOptions, profileDirs []config.ProfileDir, homeDir string, env map[string]string) error {
 	var dirs []DirSpec
 	for _, pd := range profileDirs {
-		dirPath, err := ExpandPath(pd.Path, homeDir)
+		dirPath, err := ExpandPath(pd.Path, homeDir, env)
 		if err != nil {
 			return fmt.Errorf("expand profile directory path: %w", err)
 		}
@@ -709,7 +711,7 @@ func (m *Manager) resolveAndApplyArchetype(ctx context.Context, opts *CreateOpti
 	workdir := opts.Workdir.Path
 
 	// Step 1: Load .yoloai.yaml
-	yamlCfg, _, yamlErr := archetype.LoadYoloAIYaml(workdir, m.layout.HomeDir)
+	yamlCfg, _, yamlErr := archetype.LoadYoloAIYaml(workdir, m.layout.HomeDir, m.layout.Env)
 	if yamlErr != nil {
 		return "", nil, nil, nil, fmt.Errorf("load .yoloai.yaml: %w", yamlErr)
 	}
@@ -1047,10 +1049,10 @@ func printArchetypeOutput(output io.Writer, arch archetype.Archetype, source str
 
 // validateAndExpandMounts validates and expands config mount paths.
 // homeDir is used to expand leading "~" in host paths.
-func validateAndExpandMounts(mounts []string, homeDir string) ([]string, error) {
+func validateAndExpandMounts(mounts []string, homeDir string, env map[string]string) ([]string, error) {
 	result := make([]string, len(mounts))
 	for i, m := range mounts {
-		spec, err := parseConfigMount(m, homeDir)
+		spec, err := parseConfigMount(m, homeDir, env)
 		if err != nil {
 			return nil, fmt.Errorf("invalid mount %q: %w", m, err)
 		}

@@ -155,7 +155,7 @@ func TestBuildContainerConfig_StateDirName(t *testing.T) {
 }
 
 func TestReadPrompt_DirectText(t *testing.T) {
-	result, err := ReadPrompt("hello", "", "/home/user")
+	result, err := ReadPrompt("hello", "", "/home/user", nil, nil)
 	require.NoError(t, err)
 	assert.Equal(t, "hello", result)
 }
@@ -165,30 +165,21 @@ func TestReadPrompt_File(t *testing.T) {
 	path := filepath.Join(tmpDir, "prompt.txt")
 	require.NoError(t, os.WriteFile(path, []byte("prompt from file\n"), 0600))
 
-	result, err := ReadPrompt("", path, "/home/user")
+	result, err := ReadPrompt("", path, "/home/user", nil, nil)
 	require.NoError(t, err)
 	assert.Equal(t, "prompt from file", result)
 }
 
 func TestReadPrompt_MutualExclusion(t *testing.T) {
-	_, err := ReadPrompt("hello", "/some/file", "/home/user")
+	_, err := ReadPrompt("hello", "/some/file", "/home/user", nil, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "mutually exclusive")
 }
 
 func TestReadPrompt_StdinDash(t *testing.T) {
-	r, w, err := os.Pipe()
-	require.NoError(t, err)
-
-	oldStdin := os.Stdin
-	os.Stdin = r
-	defer func() { os.Stdin = oldStdin }()
-
-	_, err = w.WriteString("hello from stdin\n")
-	require.NoError(t, err)
-	require.NoError(t, w.Close())
-
-	result, err := ReadPrompt("-", "", "/home/user")
+	// stdin is now an explicit reader threaded from the Manager's input,
+	// so the test supplies one directly instead of swapping os.Stdin.
+	result, err := ReadPrompt("-", "", "/home/user", nil, strings.NewReader("hello from stdin\n"))
 	require.NoError(t, err)
 	assert.Equal(t, "hello from stdin", result)
 }

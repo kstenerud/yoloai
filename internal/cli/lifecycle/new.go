@@ -248,16 +248,17 @@ func parseEnvSlice(envSlice []string) (map[string]string, error) {
 
 // resolveNewDirSpecs parses rawWorkdirArg and rawDirs into DirSpec values.
 func resolveNewDirSpecs(rawWorkdirArg string, rawDirs []string) (workdirSpec sandbox.DirSpec, auxDirSpecs []sandbox.DirSpec, err error) {
-	homeDir := cliutil.Layout().HomeDir
+	layout := cliutil.Layout()
+	homeDir := layout.HomeDir
 	if rawWorkdirArg != "" {
-		parsed, parseErr := sandbox.ParseDirArg(rawWorkdirArg, homeDir)
+		parsed, parseErr := sandbox.ParseDirArg(rawWorkdirArg, homeDir, layout.Env)
 		if parseErr != nil {
 			return sandbox.DirSpec{}, nil, sandbox.NewUsageError("invalid workdir: %s", parseErr)
 		}
 		workdirSpec = *parsed
 	}
 	for _, rawDir := range rawDirs {
-		parsed, parseErr := sandbox.ParseAuxDirArg(rawDir, homeDir)
+		parsed, parseErr := sandbox.ParseAuxDirArg(rawDir, homeDir, layout.Env)
 		if parseErr != nil {
 			// ParseAuxDirArg returns *UsageError for the :copy/:overlay
 			// rejection cases (already user-actionable); pass it through.

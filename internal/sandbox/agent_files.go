@@ -27,12 +27,13 @@ import (
 // Files that already exist in agent-runtime are never overwritten (SeedFiles win).
 // Returns nil if agentFiles is nil or the agent has no StateDir.
 // homeDir is used to expand leading "~" in configured paths.
-func copyAgentFiles(agentDef *agent.Definition, sandboxDir string, agentFiles *config.AgentFilesConfig, homeDir string) error {
+// env is the environment map for ${VAR} expansion; use layout.Env.
+func copyAgentFiles(agentDef *agent.Definition, sandboxDir string, agentFiles *config.AgentFilesConfig, homeDir string, env map[string]string) error {
 	if agentFiles == nil {
 		return nil
 	}
 
-	expanded, err := config.ExpandAgentFiles(agentFiles, homeDir)
+	expanded, err := config.ExpandAgentFiles(agentFiles, homeDir, env)
 	if err != nil {
 		return fmt.Errorf("expand agent_files paths: %w", err)
 	}

@@ -153,7 +153,7 @@ var knownProfileKeys = map[string]bool{
 }
 
 // yoloaiConfigHandler is a function that handles a single YAML key in a YoloaiConfig.
-type yoloaiConfigHandler func(cfg *YoloaiConfig, val *yaml.Node) error
+type yoloaiConfigHandler func(cfg *YoloaiConfig, val *yaml.Node, env map[string]string) error
 
 // yoloaiConfigHandlers maps top-level YAML keys to their handler functions.
 var yoloaiConfigHandlers = map[string]yoloaiConfigHandler{
@@ -178,8 +178,8 @@ var yoloaiConfigHandlers = map[string]yoloaiConfigHandler{
 
 // yoloaiScalarHandler returns a handler that expands env vars and stores the result in the field pointed to by ptr.
 func yoloaiScalarHandler(ptr func(*YoloaiConfig) *string) yoloaiConfigHandler {
-	return func(cfg *YoloaiConfig, val *yaml.Node) error {
-		expanded, err := expandEnvBraced(val.Value)
+	return func(cfg *YoloaiConfig, val *yaml.Node, env map[string]string) error {
+		expanded, err := expandEnvBraced(val.Value, env)
 		if err != nil {
 			return err
 		}
@@ -190,12 +190,12 @@ func yoloaiScalarHandler(ptr func(*YoloaiConfig) *string) yoloaiConfigHandler {
 
 // yoloaiExpandedSeqHandler returns a handler that appends expanded sequence items to the slice pointed to by ptr.
 func yoloaiExpandedSeqHandler(ptr func(*YoloaiConfig) *[]string, label string) yoloaiConfigHandler {
-	return func(cfg *YoloaiConfig, val *yaml.Node) error {
+	return func(cfg *YoloaiConfig, val *yaml.Node, env map[string]string) error {
 		if val.Kind != yaml.SequenceNode {
 			return nil
 		}
 		for _, item := range val.Content {
-			expanded, err := expandEnvBraced(item.Value)
+			expanded, err := expandEnvBraced(item.Value, env)
 			if err != nil {
 				return fmt.Errorf("%s: %w", label, err)
 			}
@@ -207,7 +207,7 @@ func yoloaiExpandedSeqHandler(ptr func(*YoloaiConfig) *[]string, label string) y
 
 // yoloaiRawSeqHandler returns a handler that appends raw (unexpanded) sequence items to the slice pointed to by ptr.
 func yoloaiRawSeqHandler(ptr func(*YoloaiConfig) *[]string) yoloaiConfigHandler {
-	return func(cfg *YoloaiConfig, val *yaml.Node) error {
+	return func(cfg *YoloaiConfig, val *yaml.Node, _ map[string]string) error {
 		if val.Kind != yaml.SequenceNode {
 			return nil
 		}
@@ -220,14 +220,14 @@ func yoloaiRawSeqHandler(ptr func(*YoloaiConfig) *[]string) yoloaiConfigHandler 
 
 // yoloaiStringMapHandler returns a handler that populates a map[string]string field with expanded values.
 func yoloaiStringMapHandler(ptr func(*YoloaiConfig) *map[string]string, prefix string) yoloaiConfigHandler {
-	return func(cfg *YoloaiConfig, val *yaml.Node) error {
+	return func(cfg *YoloaiConfig, val *yaml.Node, env map[string]string) error {
 		if val.Kind != yaml.MappingNode {
 			return nil
 		}
 		m := make(map[string]string, len(val.Content)/2)
 		for k := 0; k < len(val.Content)-1; k += 2 {
 			key := val.Content[k].Value
-			expanded, err := expandEnvBraced(val.Content[k+1].Value)
+			expanded, err := expandEnvBraced(val.Content[k+1].Value, env)
 			if err != nil {
 				return fmt.Errorf("%s.%s: %w", prefix, key, err)
 			}
@@ -238,13 +238,13 @@ func yoloaiStringMapHandler(ptr func(*YoloaiConfig) *map[string]string, prefix s
 	}
 }
 
-func handleYoloaiTart(cfg *YoloaiConfig, val *yaml.Node) error {
+func handleYoloaiTart(cfg *YoloaiConfig, val *yaml.Node, env map[string]string) error {
 	if val.Kind != yaml.MappingNode {
 		return nil
 	}
 	for k := 0; k < len(val.Content)-1; k += 2 {
 		subKey := val.Content[k].Value
-		subExpanded, err := expandEnvBraced(val.Content[k+1].Value)
+		subExpanded, err := expandEnvBraced(val.Content[k+1].Value, env)
 		if err != nil {
 			return fmt.Errorf("tart.%s: %w", subKey, err)
 		}
@@ -255,14 +255,14 @@ func handleYoloaiTart(cfg *YoloaiConfig, val *yaml.Node) error {
 	return nil
 }
 
-func handleYoloaiResources(cfg *YoloaiConfig, val *yaml.Node) error {
+func handleYoloaiResources(cfg *YoloaiConfig, val *yaml.Node, env map[string]string) error {
 	if val.Kind != yaml.MappingNode {
 		return nil
 	}
 	cfg.Resources = &ResourceLimits{}
 	for k := 0; k < len(val.Content)-1; k += 2 {
 		subKey := val.Content[k].Value
-		subExpanded, err := expandEnvBraced(val.Content[k+1].Value)
+		subExpanded, err := expandEnvBraced(val.Content[k+1].Value, env)
 		if err != nil {
 			return fmt.Errorf("resources.%s: %w", subKey, err)
 		}
@@ -276,7 +276,7 @@ func handleYoloaiResources(cfg *YoloaiConfig, val *yaml.Node) error {
 	return nil
 }
 
-func handleYoloaiNetwork(cfg *YoloaiConfig, val *yaml.Node) error {
+func handleYoloaiNetwork(cfg *YoloaiConfig, val *yaml.Node, _ map[string]string) error {
 	if val.Kind != yaml.MappingNode {
 		return nil
 	}
@@ -297,7 +297,7 @@ func handleYoloaiNetwork(cfg *YoloaiConfig, val *yaml.Node) error {
 	return nil
 }
 
-func handleYoloaiAgentFiles(cfg *YoloaiConfig, val *yaml.Node) error {
+func handleYoloaiAgentFiles(cfg *YoloaiConfig, val *yaml.Node, _ map[string]string) error {
 	af, err := parseAgentFilesNode(val)
 	if err != nil {
 		return err
@@ -306,7 +306,7 @@ func handleYoloaiAgentFiles(cfg *YoloaiConfig, val *yaml.Node) error {
 	return nil
 }
 
-func handleYoloaiAutoCommitInterval(cfg *YoloaiConfig, val *yaml.Node) error {
+func handleYoloaiAutoCommitInterval(cfg *YoloaiConfig, val *yaml.Node, _ map[string]string) error {
 	n, err := strconv.Atoi(val.Value)
 	if err != nil {
 		return err
@@ -315,8 +315,8 @@ func handleYoloaiAutoCommitInterval(cfg *YoloaiConfig, val *yaml.Node) error {
 	return nil
 }
 
-func handleYoloaiIsolation(cfg *YoloaiConfig, val *yaml.Node) error {
-	expanded, err := expandEnvBraced(val.Value)
+func handleYoloaiIsolation(cfg *YoloaiConfig, val *yaml.Node, env map[string]string) error {
+	expanded, err := expandEnvBraced(val.Value, env)
 	if err != nil {
 		return err
 	}
@@ -330,7 +330,8 @@ func handleYoloaiIsolation(cfg *YoloaiConfig, val *yaml.Node) error {
 // parseConfigYAML parses a config YAML document into a YoloaiConfig.
 // source is used in error messages. knownKeys is the set of allowed top-level keys;
 // if nil, no unknown-key validation is performed.
-func parseConfigYAML(data []byte, source string, knownKeys map[string]bool) (*YoloaiConfig, error) {
+// env is the environment map for ${VAR} expansion; nil means any ${VAR} errors as "not set".
+func parseConfigYAML(data []byte, source string, knownKeys map[string]bool, env map[string]string) (*YoloaiConfig, error) {
 	root, err := parseYAMLRoot(data, source, knownKeys)
 	if err != nil {
 		return nil, err
@@ -347,7 +348,7 @@ func parseConfigYAML(data []byte, source string, knownKeys map[string]bool) (*Yo
 		if !ok {
 			continue
 		}
-		if err := handler(cfg, val); err != nil {
+		if err := handler(cfg, val, env); err != nil {
 			return nil, fmt.Errorf("%s: %s: %w", source, key, err)
 		}
 	}
@@ -396,7 +397,7 @@ func validateKnownKeys(root *yaml.Node, source string, knownKeys map[string]bool
 // LoadBakedInDefaults parses the embedded defaults YAML into a YoloaiConfig.
 // Returns a fully-populated config with every field at its baked-in default.
 func LoadBakedInDefaults() (*YoloaiConfig, error) {
-	return parseConfigYAML([]byte(DefaultConfigYAML), "<baked-in>", knownDefaultsKeys)
+	return parseConfigYAML([]byte(DefaultConfigYAML), "<baked-in>", knownDefaultsKeys, nil)
 }
 
 // LoadDefaultsConfig loads the effective config for the no-profile path:
@@ -417,7 +418,7 @@ func LoadDefaultsConfig(layout Layout) (*YoloaiConfig, error) {
 		return nil, fmt.Errorf("read defaults/config.yaml: %w", err)
 	}
 
-	override, err := parseConfigYAML(data, cfgPath, knownDefaultsKeys)
+	override, err := parseConfigYAML(data, cfgPath, knownDefaultsKeys, layout.Env)
 	if err != nil {
 		return nil, err
 	}
@@ -543,7 +544,7 @@ func LoadConfig(layout Layout) (*YoloaiConfig, error) {
 		return nil, fmt.Errorf("read config.yaml: %w", err)
 	}
 
-	return parseConfigYAML(data, configPath, nil)
+	return parseConfigYAML(data, configPath, nil, layout.Env)
 }
 
 // LoadGlobalConfig reads DataDir/config.yaml and extracts global settings.
@@ -575,7 +576,7 @@ func LoadGlobalConfig(layout Layout) (*GlobalConfig, error) {
 	for i := 0; i < len(root.Content)-1; i += 2 {
 		key := root.Content[i]
 		val := root.Content[i+1]
-		if err := applyGlobalConfigField(cfg, key.Value, val); err != nil {
+		if err := applyGlobalConfigField(cfg, key.Value, val, layout.Env); err != nil {
 			return nil, err
 		}
 	}
@@ -584,10 +585,10 @@ func LoadGlobalConfig(layout Layout) (*GlobalConfig, error) {
 }
 
 // applyGlobalConfigField updates cfg for a single top-level key/value pair.
-func applyGlobalConfigField(cfg *GlobalConfig, key string, val *yaml.Node) error {
+func applyGlobalConfigField(cfg *GlobalConfig, key string, val *yaml.Node, env map[string]string) error {
 	switch key {
 	case "tmux_conf":
-		expanded, err := expandEnvBraced(val.Value)
+		expanded, err := expandEnvBraced(val.Value, env)
 		if err != nil {
 			return fmt.Errorf("tmux_conf: %w", err)
 		}
@@ -596,7 +597,7 @@ func applyGlobalConfigField(cfg *GlobalConfig, key string, val *yaml.Node) error
 		if val.Kind != yaml.MappingNode {
 			return nil
 		}
-		aliases, err := parseModelAliases(val)
+		aliases, err := parseModelAliases(val, env)
 		if err != nil {
 			return err
 		}
@@ -606,11 +607,11 @@ func applyGlobalConfigField(cfg *GlobalConfig, key string, val *yaml.Node) error
 }
 
 // parseModelAliases expands env vars in each alias value and returns the map.
-func parseModelAliases(val *yaml.Node) (map[string]string, error) {
+func parseModelAliases(val *yaml.Node, env map[string]string) (map[string]string, error) {
 	aliases := make(map[string]string, len(val.Content)/2)
 	for k := 0; k < len(val.Content)-1; k += 2 {
 		aliasKey := val.Content[k].Value
-		expanded, err := expandEnvBraced(val.Content[k+1].Value)
+		expanded, err := expandEnvBraced(val.Content[k+1].Value, env)
 		if err != nil {
 			return nil, fmt.Errorf("model_aliases.%s: %w", aliasKey, err)
 		}
@@ -1156,13 +1157,14 @@ func parseAgentFilesNode(val *yaml.Node) (*AgentFilesConfig, error) {
 
 // ExpandAgentFiles returns a copy of af with all paths expanded (tilde and
 // ${VAR} substitution). homeDir is used to expand leading "~".
+// env is the environment map for ${VAR} expansion; use layout.Env.
 // Returns nil if af is nil.
-func ExpandAgentFiles(af *AgentFilesConfig, homeDir string) (*AgentFilesConfig, error) {
+func ExpandAgentFiles(af *AgentFilesConfig, homeDir string, env map[string]string) (*AgentFilesConfig, error) {
 	if af == nil {
 		return nil, nil
 	}
 	if af.IsStringForm() {
-		expanded, err := ExpandPath(af.BaseDir, homeDir)
+		expanded, err := ExpandPath(af.BaseDir, homeDir, env)
 		if err != nil {
 			return nil, err
 		}
@@ -1170,7 +1172,7 @@ func ExpandAgentFiles(af *AgentFilesConfig, homeDir string) (*AgentFilesConfig, 
 	}
 	files := make([]string, 0, len(af.Files))
 	for _, f := range af.Files {
-		expanded, err := ExpandPath(f, homeDir)
+		expanded, err := ExpandPath(f, homeDir, env)
 		if err != nil {
 			return nil, err
 		}

@@ -37,7 +37,7 @@ func (m *Manager) seedSandbox(agentDef *agent.Definition, sandboxDir string, iso
 
 	// Copy agent_files (user-configured agent config files)
 	if agentFiles != nil && agentDef.StateDir != "" {
-		if err := copyAgentFiles(agentDef, sandboxDir, agentFiles, homeDir); err != nil {
+		if err := copyAgentFiles(agentDef, sandboxDir, agentFiles, homeDir, m.layout.Env); err != nil {
 			return false, fmt.Errorf("copy agent files: %w", err)
 		}
 		agentFilesInitialized = true

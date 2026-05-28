@@ -142,7 +142,7 @@ func ListProfiles(layout Layout) ([]string, error) {
 }
 
 // profileConfigHandler is a function that handles a single YAML key in a ProfileConfig.
-type profileConfigHandler func(cfg *ProfileConfig, val *yaml.Node) error
+type profileConfigHandler func(cfg *ProfileConfig, val *yaml.Node, env map[string]string) error
 
 // profileConfigHandlers maps top-level YAML keys to their handler functions.
 var profileConfigHandlers = map[string]profileConfigHandler{
@@ -170,8 +170,8 @@ var profileConfigHandlers = map[string]profileConfigHandler{
 
 // profileScalarHandler returns a handler that expands env vars and stores the result in the field pointed to by ptr.
 func profileScalarHandler(ptr func(*ProfileConfig) *string) profileConfigHandler {
-	return func(cfg *ProfileConfig, val *yaml.Node) error {
-		expanded, err := expandEnvBraced(val.Value)
+	return func(cfg *ProfileConfig, val *yaml.Node, env map[string]string) error {
+		expanded, err := expandEnvBraced(val.Value, env)
 		if err != nil {
 			return err
 		}
@@ -182,12 +182,12 @@ func profileScalarHandler(ptr func(*ProfileConfig) *string) profileConfigHandler
 
 // profileExpandedSeqHandler returns a handler that appends expanded sequence items to the slice pointed to by ptr.
 func profileExpandedSeqHandler(ptr func(*ProfileConfig) *[]string, label string) profileConfigHandler {
-	return func(cfg *ProfileConfig, val *yaml.Node) error {
+	return func(cfg *ProfileConfig, val *yaml.Node, env map[string]string) error {
 		if val.Kind != yaml.SequenceNode {
 			return nil
 		}
 		for _, item := range val.Content {
-			expanded, err := expandEnvBraced(item.Value)
+			expanded, err := expandEnvBraced(item.Value, env)
 			if err != nil {
 				return fmt.Errorf("%s: %w", label, err)
 			}
@@ -199,7 +199,7 @@ func profileExpandedSeqHandler(ptr func(*ProfileConfig) *[]string, label string)
 
 // profileRawSeqHandler returns a handler that appends raw (unexpanded) sequence items to the slice pointed to by ptr.
 func profileRawSeqHandler(ptr func(*ProfileConfig) *[]string) profileConfigHandler {
-	return func(cfg *ProfileConfig, val *yaml.Node) error {
+	return func(cfg *ProfileConfig, val *yaml.Node, _ map[string]string) error {
 		if val.Kind != yaml.SequenceNode {
 			return nil
 		}
@@ -212,14 +212,14 @@ func profileRawSeqHandler(ptr func(*ProfileConfig) *[]string) profileConfigHandl
 
 // profileStringMapHandler returns a handler that populates a map[string]string field with expanded values.
 func profileStringMapHandler(ptr func(*ProfileConfig) *map[string]string, prefix string) profileConfigHandler {
-	return func(cfg *ProfileConfig, val *yaml.Node) error {
+	return func(cfg *ProfileConfig, val *yaml.Node, env map[string]string) error {
 		if val.Kind != yaml.MappingNode {
 			return nil
 		}
 		m := make(map[string]string, len(val.Content)/2)
 		for k := 0; k < len(val.Content)-1; k += 2 {
 			key := val.Content[k].Value
-			expanded, err := expandEnvBraced(val.Content[k+1].Value)
+			expanded, err := expandEnvBraced(val.Content[k+1].Value, env)
 			if err != nil {
 				return fmt.Errorf("%s.%s: %w", prefix, key, err)
 			}
@@ -230,13 +230,13 @@ func profileStringMapHandler(ptr func(*ProfileConfig) *map[string]string, prefix
 	}
 }
 
-func handleProfileTart(cfg *ProfileConfig, val *yaml.Node) error {
+func handleProfileTart(cfg *ProfileConfig, val *yaml.Node, env map[string]string) error {
 	if val.Kind != yaml.MappingNode {
 		return nil
 	}
 	for k := 0; k < len(val.Content)-1; k += 2 {
 		subKey := val.Content[k].Value
-		subExpanded, err := expandEnvBraced(val.Content[k+1].Value)
+		subExpanded, err := expandEnvBraced(val.Content[k+1].Value, env)
 		if err != nil {
 			return fmt.Errorf("tart.%s: %w", subKey, err)
 		}
@@ -247,14 +247,14 @@ func handleProfileTart(cfg *ProfileConfig, val *yaml.Node) error {
 	return nil
 }
 
-func handleProfileResources(cfg *ProfileConfig, val *yaml.Node) error {
+func handleProfileResources(cfg *ProfileConfig, val *yaml.Node, env map[string]string) error {
 	if val.Kind != yaml.MappingNode {
 		return nil
 	}
 	cfg.Resources = &ResourceLimits{}
 	for k := 0; k < len(val.Content)-1; k += 2 {
 		subKey := val.Content[k].Value
-		subExpanded, err := expandEnvBraced(val.Content[k+1].Value)
+		subExpanded, err := expandEnvBraced(val.Content[k+1].Value, env)
 		if err != nil {
 			return fmt.Errorf("resources.%s: %w", subKey, err)
 		}
@@ -268,7 +268,7 @@ func handleProfileResources(cfg *ProfileConfig, val *yaml.Node) error {
 	return nil
 }
 
-func handleProfileNetwork(cfg *ProfileConfig, val *yaml.Node) error {
+func handleProfileNetwork(cfg *ProfileConfig, val *yaml.Node, _ map[string]string) error {
 	if val.Kind != yaml.MappingNode {
 		return nil
 	}
@@ -289,14 +289,14 @@ func handleProfileNetwork(cfg *ProfileConfig, val *yaml.Node) error {
 	return nil
 }
 
-func handleProfileWorkdir(cfg *ProfileConfig, val *yaml.Node) error {
+func handleProfileWorkdir(cfg *ProfileConfig, val *yaml.Node, env map[string]string) error {
 	if val.Kind != yaml.MappingNode {
 		return nil
 	}
 	w := &ProfileWorkdir{}
 	for k := 0; k < len(val.Content)-1; k += 2 {
 		wKey := val.Content[k].Value
-		expanded, err := expandEnvBraced(val.Content[k+1].Value)
+		expanded, err := expandEnvBraced(val.Content[k+1].Value, env)
 		if err != nil {
 			return fmt.Errorf("workdir.%s: %w", wKey, err)
 		}
@@ -313,7 +313,7 @@ func handleProfileWorkdir(cfg *ProfileConfig, val *yaml.Node) error {
 	return nil
 }
 
-func handleProfileDirectories(cfg *ProfileConfig, val *yaml.Node) error {
+func handleProfileDirectories(cfg *ProfileConfig, val *yaml.Node, env map[string]string) error {
 	if val.Kind != yaml.SequenceNode {
 		return nil
 	}
@@ -324,7 +324,7 @@ func handleProfileDirectories(cfg *ProfileConfig, val *yaml.Node) error {
 		d := ProfileDir{}
 		for k := 0; k < len(item.Content)-1; k += 2 {
 			dKey := item.Content[k].Value
-			expanded, err := expandEnvBraced(item.Content[k+1].Value)
+			expanded, err := expandEnvBraced(item.Content[k+1].Value, env)
 			if err != nil {
 				return fmt.Errorf("directories[].%s: %w", dKey, err)
 			}
@@ -342,7 +342,7 @@ func handleProfileDirectories(cfg *ProfileConfig, val *yaml.Node) error {
 	return nil
 }
 
-func handleProfileAgentFiles(cfg *ProfileConfig, val *yaml.Node) error {
+func handleProfileAgentFiles(cfg *ProfileConfig, val *yaml.Node, _ map[string]string) error {
 	af, err := parseAgentFilesNode(val)
 	if err != nil {
 		return fmt.Errorf("agent_files: %w", err)
@@ -351,7 +351,7 @@ func handleProfileAgentFiles(cfg *ProfileConfig, val *yaml.Node) error {
 	return nil
 }
 
-func handleProfileAutoCommitInterval(cfg *ProfileConfig, val *yaml.Node) error {
+func handleProfileAutoCommitInterval(cfg *ProfileConfig, val *yaml.Node, _ map[string]string) error {
 	n, err := strconv.Atoi(val.Value)
 	if err != nil {
 		return fmt.Errorf("auto_commit_interval: %w", err)
@@ -360,8 +360,8 @@ func handleProfileAutoCommitInterval(cfg *ProfileConfig, val *yaml.Node) error {
 	return nil
 }
 
-func handleProfileIsolation(cfg *ProfileConfig, val *yaml.Node) error {
-	expanded, err := expandEnvBraced(val.Value)
+func handleProfileIsolation(cfg *ProfileConfig, val *yaml.Node, env map[string]string) error {
+	expanded, err := expandEnvBraced(val.Value, env)
 	if err != nil {
 		return fmt.Errorf("isolation: %w", err)
 	}
@@ -373,6 +373,7 @@ func handleProfileIsolation(cfg *ProfileConfig, val *yaml.Node) error {
 }
 
 // LoadProfile reads and parses a profile's config.yaml file.
+// layout.Env is used for ${VAR} expansion in config values.
 func LoadProfile(layout Layout, name string) (*ProfileConfig, error) {
 	dir := layout.ProfileDir(name)
 	path := filepath.Join(dir, "config.yaml")
@@ -408,7 +409,7 @@ func LoadProfile(layout Layout, name string) (*ProfileConfig, error) {
 		if !ok {
 			continue // unknown fields are silently ignored
 		}
-		if err := handler(cfg, val); err != nil {
+		if err := handler(cfg, val, layout.Env); err != nil {
 			return nil, err
 		}
 	}
@@ -434,7 +435,7 @@ func LoadProfileConfig(layout Layout, name string) (*YoloaiConfig, error) {
 		return nil, fmt.Errorf("read profile config: %w", err)
 	}
 
-	override, err := parseConfigYAML(data, profileConfigPath, knownProfileKeys)
+	override, err := parseConfigYAML(data, profileConfigPath, knownProfileKeys, layout.Env)
 	if err != nil {
 		return nil, err
 	}
@@ -531,7 +532,7 @@ func loadProfileLegacy(layout Layout, name string) (legacyProfileConfig, error) 
 
 	for i := 0; i < len(root.Content)-1; i += 2 {
 		if root.Content[i].Value == "extends" {
-			expanded, _ := expandEnvBraced(root.Content[i+1].Value)
+			expanded, _ := expandEnvBraced(root.Content[i+1].Value, layout.Env)
 			return legacyProfileConfig{extends: expanded}, nil
 		}
 	}

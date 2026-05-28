@@ -108,7 +108,7 @@ func TestLoadConfig_EnvMap(t *testing.T) {
 
 func TestLoadConfig_EnvExpansion(t *testing.T) {
 	dir, layout := configDir(t)
-	t.Setenv("YOLOAI_TEST_HOST", "localhost")
+	layout.Env = map[string]string{"YOLOAI_TEST_HOST": "localhost"}
 
 	content := "env:\n  API_BASE: http://${YOLOAI_TEST_HOST}:11434\n"
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
@@ -271,8 +271,7 @@ func TestDeleteConfigField_MissingFile(t *testing.T) {
 
 func TestLoadConfig_ExpandsEnvVars(t *testing.T) {
 	dir, layout := configDir(t)
-	t.Setenv("YOLOAI_TEST_AGENT", "gemini")
-	t.Setenv("YOLOAI_TEST_BACKEND", "tart")
+	layout.Env = map[string]string{"YOLOAI_TEST_AGENT": "gemini", "YOLOAI_TEST_BACKEND": "tart"}
 
 	content := "agent: ${YOLOAI_TEST_AGENT}\ncontainer_backend: ${YOLOAI_TEST_BACKEND}\n"
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
@@ -309,7 +308,7 @@ func TestLoadConfig_UnclosedBraceError(t *testing.T) {
 
 func TestLoadConfig_BareVarNotExpanded(t *testing.T) {
 	dir, layout := configDir(t)
-	t.Setenv("YOLOAI_TEST_VAR", "should-not-appear")
+	// bare $VAR is never expanded regardless of env; env map not needed
 
 	content := "agent: $YOLOAI_TEST_VAR\n"
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
@@ -527,7 +526,7 @@ func TestLoadGlobalConfig_Default(t *testing.T) {
 
 func TestLoadGlobalConfig_EnvExpansion(t *testing.T) {
 	dir, layout := globalConfigDir(t)
-	t.Setenv("YOLOAI_TEST_TMUX", "default+host")
+	layout.Env = map[string]string{"YOLOAI_TEST_TMUX": "default+host"}
 
 	content := "tmux_conf: ${YOLOAI_TEST_TMUX}\n"
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
@@ -604,7 +603,7 @@ func TestLoadConfig_AgentFilesString(t *testing.T) {
 
 	// Verify ExpandAgentFiles expands correctly
 	home := layout.HomeDir
-	expanded, err := ExpandAgentFiles(cfg.AgentFiles, home)
+	expanded, err := ExpandAgentFiles(cfg.AgentFiles, home, nil)
 	require.NoError(t, err)
 	assert.Equal(t, filepath.Join(home, "my-agent-configs"), expanded.BaseDir)
 }
@@ -627,7 +626,7 @@ func TestLoadConfig_AgentFilesList(t *testing.T) {
 
 	// Verify ExpandAgentFiles expands correctly
 	home := layout.HomeDir
-	expanded, err := ExpandAgentFiles(cfg.AgentFiles, home)
+	expanded, err := ExpandAgentFiles(cfg.AgentFiles, home, nil)
 	require.NoError(t, err)
 	assert.Equal(t, filepath.Join(home, "file1.json"), expanded.Files[0])
 	assert.Equal(t, filepath.Join(home, "file2.json"), expanded.Files[1])
@@ -635,7 +634,6 @@ func TestLoadConfig_AgentFilesList(t *testing.T) {
 
 func TestLoadConfig_AgentFilesEnvExpansion(t *testing.T) {
 	dir, layout := configDir(t)
-	t.Setenv("YOLOAI_AGENT_DIR", "/custom/path")
 
 	content := "agent_files: ${YOLOAI_AGENT_DIR}\n"
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
@@ -643,8 +641,9 @@ func TestLoadConfig_AgentFilesEnvExpansion(t *testing.T) {
 	cfg, err := LoadConfig(layout)
 	require.NoError(t, err)
 	require.NotNil(t, cfg.AgentFiles)
-	// Env vars are expanded via ExpandAgentFiles
-	expanded, err := ExpandAgentFiles(cfg.AgentFiles, layout.HomeDir)
+	// Env vars are expanded via ExpandAgentFiles; pass explicit env map instead of relying on process env.
+	env := map[string]string{"YOLOAI_AGENT_DIR": "/custom/path"}
+	expanded, err := ExpandAgentFiles(cfg.AgentFiles, layout.HomeDir, env)
 	require.NoError(t, err)
 	assert.Equal(t, "/custom/path", expanded.BaseDir)
 }
@@ -664,7 +663,7 @@ func TestLoadConfig_RecipeFields(t *testing.T) {
 
 func TestLoadConfig_RecipeFieldsEnvExpansion(t *testing.T) {
 	dir, layout := configDir(t)
-	t.Setenv("YOLOAI_TEST_KEY", "mykey123")
+	layout.Env = map[string]string{"YOLOAI_TEST_KEY": "mykey123"}
 
 	content := "setup:\n  - tailscale up --authkey=${YOLOAI_TEST_KEY}\n"
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))

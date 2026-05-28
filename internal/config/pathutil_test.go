@@ -15,89 +15,88 @@ func TestExpandPath_KnownVar(t *testing.T) {
 	home, err := os.UserHomeDir()
 	require.NoError(t, err)
 
-	result, err := ExpandPath("${HOME}/projects", home)
+	env := map[string]string{"HOME": home}
+	result, err := ExpandPath("${HOME}/projects", home, env)
 	require.NoError(t, err)
 	assert.Equal(t, home+"/projects", result)
 }
 
 func TestExpandPath_ChainedVars(t *testing.T) {
-	t.Setenv("VAR1", "/first")
-	t.Setenv("VAR2", "second")
+	env := map[string]string{"VAR1": "/first", "VAR2": "second"}
 
-	result, err := ExpandPath("${VAR1}/${VAR2}", "/home/user")
+	result, err := ExpandPath("${VAR1}/${VAR2}", "/home/user", env)
 	require.NoError(t, err)
 	assert.Equal(t, "/first/second", result)
 }
 
 func TestExpandPath_BareVarLiteral(t *testing.T) {
-	t.Setenv("VAR", "expanded")
+	env := map[string]string{"VAR": "expanded"}
 
-	result, err := ExpandPath("$VAR/path", "/home/user")
+	result, err := ExpandPath("$VAR/path", "/home/user", env)
 	require.NoError(t, err)
 	assert.Equal(t, "$VAR/path", result, "bare $VAR must not be expanded")
 }
 
 func TestExpandPath_UnsetVar(t *testing.T) {
-	_, err := ExpandPath("${YOLOAI_TEST_UNSET_VAR_XYZ}/path", "/home/user")
+	_, err := ExpandPath("${YOLOAI_TEST_UNSET_VAR_XYZ}/path", "/home/user", nil)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "YOLOAI_TEST_UNSET_VAR_XYZ")
 	assert.Contains(t, err.Error(), "not set")
 }
 
 func TestExpandPath_UnclosedBrace(t *testing.T) {
-	_, err := ExpandPath("${UNCLOSED", "/home/user")
+	_, err := ExpandPath("${UNCLOSED", "/home/user", nil)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "unclosed")
 }
 
 func TestExpandPath_TildeAndVar(t *testing.T) {
-	t.Setenv("MYDIR", "projects")
+	env := map[string]string{"MYDIR": "projects"}
 	home, err := os.UserHomeDir()
 	require.NoError(t, err)
 
-	result, err := ExpandPath("~/${MYDIR}/foo", home)
+	result, err := ExpandPath("~/${MYDIR}/foo", home, env)
 	require.NoError(t, err)
 	assert.Equal(t, filepath.Join(home, "projects/foo"), result)
 }
 
 func TestExpandPath_NoVars(t *testing.T) {
-	result, err := ExpandPath("/plain/path", "/home/user")
+	result, err := ExpandPath("/plain/path", "/home/user", nil)
 	require.NoError(t, err)
 	assert.Equal(t, "/plain/path", result)
 }
 
 func TestExpandPath_Empty(t *testing.T) {
-	result, err := ExpandPath("", "/home/user")
+	result, err := ExpandPath("", "/home/user", nil)
 	require.NoError(t, err)
 	assert.Equal(t, "", result)
 }
 
 func TestExpandPath_EmptyVarName(t *testing.T) {
-	_, err := ExpandPath("${}/path", "/home/user")
+	_, err := ExpandPath("${}/path", "/home/user", nil)
 	assert.Error(t, err, "empty var name should error")
 }
 
 func TestExpandPath_SetButEmpty(t *testing.T) {
-	t.Setenv("EMPTY_VAR", "")
+	env := map[string]string{"EMPTY_VAR": ""}
 
-	result, err := ExpandPath("/prefix/${EMPTY_VAR}/suffix", "/home/user")
+	result, err := ExpandPath("/prefix/${EMPTY_VAR}/suffix", "/home/user", env)
 	require.NoError(t, err)
 	assert.Equal(t, "/prefix//suffix", result, "set-but-empty var should expand to empty string")
 }
 
 func TestExpandPath_ValueContainsDollarBrace(t *testing.T) {
-	t.Setenv("TRICKY", "has${NESTED}inside")
+	env := map[string]string{"TRICKY": "has${NESTED}inside"}
 
-	result, err := ExpandPath("/start/${TRICKY}/end", "/home/user")
+	result, err := ExpandPath("/start/${TRICKY}/end", "/home/user", env)
 	require.NoError(t, err)
 	assert.Equal(t, "/start/has${NESTED}inside/end", result, "must not re-expand values")
 }
 
 func TestExpandPath_AdjacentVars(t *testing.T) {
-	t.Setenv("AA", "hello")
-	t.Setenv("BB", "world")
+	env := map[string]string{"AA": "hello", "BB": "world"}
 
-	result, err := ExpandPath("${AA}${BB}", "/home/user")
+	result, err := ExpandPath("${AA}${BB}", "/home/user", env)
 	require.NoError(t, err)
 	assert.Equal(t, "helloworld", result)
 }

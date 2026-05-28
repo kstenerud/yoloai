@@ -414,7 +414,7 @@ func (m *Manager) resolveProfileAndArchetype(ctx context.Context, opts *CreateOp
 
 	state_onCreateDone := loadOnCreateDone(m.layout.SandboxDir(opts.Name))
 
-	mergedMounts, err := validateAndExpandMounts(pr.mounts, m.layout.HomeDir)
+	mergedMounts, err := validateAndExpandMounts(pr.mounts, m.layout.HomeDir, m.layout.Env)
 	if err != nil {
 		return nil, "", nil, nil, nil, nil, false, err
 	}
@@ -435,7 +435,7 @@ func (m *Manager) createAndSeedSandbox(ctx context.Context, sandboxDir string, a
 // Returns (configData, meta, tmuxConf, promptText, error).
 func (m *Manager) buildConfigAndMeta(ctx context.Context, opts CreateOptions, pr *profileResult, agentDef *agent.Definition, workdir *DirSpec, auxDirs []*DirSpec, gcfg *config.GlobalConfig, dirMetas []store.DirMeta, baselineSHA string, mergedMounts []string, resolvedArchetype archetype.Archetype, devcontainerCfg *archetype.DevcontainerConfig, state_onCreateDone bool, sandboxDir string) ([]byte, *store.Meta, string, string, error) {
 	_ = ctx // reserved for future use
-	promptText, hasPrompt, model, agentCommand, tmuxConf, err := resolveAgentParams(agentDef, opts, pr, gcfg, m.layout.HomeDir)
+	promptText, hasPrompt, model, agentCommand, tmuxConf, err := resolveAgentParams(agentDef, opts, pr, gcfg, m.layout.HomeDir, m.layout.Env, m.input)
 	if err != nil {
 		return nil, nil, "", "", err
 	}
@@ -665,8 +665,9 @@ func (m *Manager) setupAllWorkdirs(opts CreateOptions, workdir *DirSpec, auxDirs
 
 // resolveAgentParams resolves prompt, model, agent command, and tmux config.
 // homeDir is used to expand leading "~" in the promptFile path.
-func resolveAgentParams(agentDef *agent.Definition, opts CreateOptions, pr *profileResult, gcfg *config.GlobalConfig, homeDir string) (string, bool, string, string, string, error) {
-	promptText, err := ReadPrompt(opts.Prompt, opts.PromptFile, homeDir)
+// env is the environment map for ${VAR} expansion; use layout.Env.
+func resolveAgentParams(agentDef *agent.Definition, opts CreateOptions, pr *profileResult, gcfg *config.GlobalConfig, homeDir string, env map[string]string, stdin io.Reader) (string, bool, string, string, string, error) {
+	promptText, err := ReadPrompt(opts.Prompt, opts.PromptFile, homeDir, env, stdin)
 	if err != nil {
 		return "", false, "", "", "", err
 	}
@@ -1128,14 +1129,18 @@ func lifecycleCmdToJSON(lc archetype.LifecycleCmd) map[string]any {
 }
 
 // ReadPrompt reads the prompt from --prompt, --prompt-file, or stdin ("-").
-// homeDir is used to expand leading "~" in the promptFile path.
-func ReadPrompt(prompt, promptFile, homeDir string) (string, error) {
+// homeDir is used to expand leading "~" in the promptFile path. stdin is the
+// reader the "-" sentinel pulls from — threaded from the Manager's input
+// (the CLI wires os.Stdin there; embedders supply their own), so the library
+// never reaches for the process's stdin directly (§12).
+// env is the environment map for ${VAR} expansion; use layout.Env.
+func ReadPrompt(prompt, promptFile, homeDir string, env map[string]string, stdin io.Reader) (string, error) {
 	if prompt != "" && promptFile != "" {
 		return "", NewUsageError("--prompt and --prompt-file are mutually exclusive")
 	}
 
 	if prompt == "-" {
-		data, err := io.ReadAll(os.Stdin) //nolint:forbidigo // §12 follow-up (tracked): prompt "-" reads process stdin; should take an io.Reader from the boundary
+		data, err := io.ReadAll(stdin)
 		if err != nil {
 			return "", fmt.Errorf("read prompt from stdin: %w", err)
 		}
@@ -1147,7 +1152,7 @@ func ReadPrompt(prompt, promptFile, homeDir string) (string, error) {
 	}
 
 	if promptFile == "-" {
-		data, err := io.ReadAll(os.Stdin) //nolint:forbidigo // §12 follow-up (tracked): prompt-file "-" reads process stdin; should take an io.Reader from the boundary
+		data, err := io.ReadAll(stdin)
 		if err != nil {
 			return "", fmt.Errorf("read prompt from stdin: %w", err)
 		}
@@ -1155,7 +1160,7 @@ func ReadPrompt(prompt, promptFile, homeDir string) (string, error) {
 	}
 
 	if promptFile != "" {
-		promptFile, err := ExpandPath(promptFile, homeDir)
+		promptFile, err := ExpandPath(promptFile, homeDir, env)
 		if err != nil {
 			return "", fmt.Errorf("expand prompt file path: %w", err)
 		}
@@ -1629,7 +1634,7 @@ func buildConfigAndSecretsMounts(state *sandboxState, secretsDir string) []runti
 
 	// Config/profile mounts (host:container[:ro])
 	for _, m := range state.configMounts {
-		spec, err := parseConfigMount(m, state.homeDir)
+		spec, err := parseConfigMount(m, state.homeDir, state.layout.Env)
 		if err != nil {
 			continue // skip unparseable mounts (validated at creation time)
 		}
@@ -1987,13 +1992,13 @@ func hasOverlayDirs(state *sandboxState) bool {
 // parseConfigMount parses a "host:container[:ro]" mount string into a MountSpec.
 // The host path is expanded (tilde and ${VAR}).
 // homeDir is used to expand leading "~" in the host path.
-func parseConfigMount(s, homeDir string) (runtime.MountSpec, error) {
+func parseConfigMount(s, homeDir string, env map[string]string) (runtime.MountSpec, error) {
 	parts := strings.SplitN(s, ":", 3)
 	if len(parts) < 2 {
 		return runtime.MountSpec{}, fmt.Errorf("expected host:container[:ro] format")
 	}
 
-	hostPath, err := ExpandPath(parts[0], homeDir)
+	hostPath, err := ExpandPath(parts[0], homeDir, env)
 	if err != nil {
 		return runtime.MountSpec{}, fmt.Errorf("expand host path: %w", err)
 	}

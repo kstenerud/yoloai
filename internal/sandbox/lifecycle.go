@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -141,7 +142,7 @@ func (m *Manager) applyVscodeTunnelOption(opts StartOptions, sandboxDir, name st
 // if provided, and persists it to prompt.txt + meta. Returns the prompt text
 // and whether a custom prompt is in use.
 // homeDir is used to expand leading "~" in the promptFile path.
-func preparePromptForStart(opts StartOptions, sandboxDir string, meta *store.Meta, homeDir string) (promptText string, customPrompt bool, err error) {
+func preparePromptForStart(opts StartOptions, sandboxDir string, meta *store.Meta, homeDir string, env map[string]string, stdin io.Reader) (promptText string, customPrompt bool, err error) {
 	customPrompt = opts.Prompt != "" || opts.PromptFile != ""
 	if opts.Resume && customPrompt {
 		return "", false, fmt.Errorf("--resume and --prompt/--prompt-file are mutually exclusive")
@@ -153,7 +154,7 @@ func preparePromptForStart(opts StartOptions, sandboxDir string, meta *store.Met
 		return "", false, nil
 	}
 
-	promptText, err = ReadPrompt(opts.Prompt, opts.PromptFile, homeDir)
+	promptText, err = ReadPrompt(opts.Prompt, opts.PromptFile, homeDir, env, stdin)
 	if err != nil {
 		return "", false, err
 	}
@@ -326,7 +327,7 @@ func (m *Manager) start(ctx context.Context, name string, opts StartOptions) err
 	}
 	slog.Debug("container status", "event", "sandbox.start.status", "sandbox", name, "status", string(status)) //nolint:gosec // G706: name is validated by ValidateName
 
-	promptText, customPrompt, err := preparePromptForStart(opts, sandboxDir, meta, m.layout.HomeDir)
+	promptText, customPrompt, err := preparePromptForStart(opts, sandboxDir, meta, m.layout.HomeDir, m.layout.Env, m.input)
 	if err != nil {
 		return err
 	}
@@ -738,7 +739,7 @@ func initializeAgentFilesIfNeeded(layout config.Layout, agentDef *agent.Definiti
 	if agentFilesConfig == nil {
 		return nil
 	}
-	if err := copyAgentFiles(agentDef, sandboxDir, agentFilesConfig, layout.HomeDir); err != nil {
+	if err := copyAgentFiles(agentDef, sandboxDir, agentFilesConfig, layout.HomeDir, layout.Env); err != nil {
 		return fmt.Errorf("copy agent files on restart: %w", err)
 	}
 	sbState.AgentFilesInitialized = true
@@ -825,7 +826,7 @@ func (m *Manager) recreateContainer(ctx context.Context, name string, meta *stor
 	}
 
 	// Build sandbox state for container launch
-	workdir, err := ParseDirArg(meta.Workdir.HostPath+":"+string(meta.Workdir.Mode), m.layout.HomeDir)
+	workdir, err := ParseDirArg(meta.Workdir.HostPath+":"+string(meta.Workdir.Mode), m.layout.HomeDir, m.layout.Env)
 	if err != nil {
 		return fmt.Errorf("parse workdir: %w", err)
 	}

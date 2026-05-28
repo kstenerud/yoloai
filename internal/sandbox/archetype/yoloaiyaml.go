@@ -25,7 +25,8 @@ type YoloAIProjectConfig struct {
 // Returns (nil, false, error) on parse failures or unknown archetype.
 // Expands tilde in each Mounts entry via config.ExpandPath.
 // homeDir is used for ~ expansion; callers derive it from layout.HomeDir.
-func LoadYoloAIYaml(workdir, homeDir string) (*YoloAIProjectConfig, bool, error) {
+// env is the environment map for ${VAR} expansion; use layout.Env.
+func LoadYoloAIYaml(workdir, homeDir string, env map[string]string) (*YoloAIProjectConfig, bool, error) {
 	path := filepath.Join(workdir, ".yoloai.yaml")
 	data, err := os.ReadFile(path) //nolint:gosec // G304: path is workdir + fixed filename
 	if err != nil {
@@ -50,7 +51,7 @@ func LoadYoloAIYaml(workdir, homeDir string) (*YoloAIProjectConfig, bool, error)
 	// Expand tilde in mounts
 	for i, m := range cfg.Mounts {
 		// Only expand the host part (before the first colon that isn't part of a Windows path)
-		expanded, err := config.ExpandPath(m, homeDir)
+		expanded, err := config.ExpandPath(m, homeDir, env)
 		if err != nil {
 			return nil, false, fmt.Errorf(".yoloai.yaml: expand mount path %q: %w", m, err)
 		}

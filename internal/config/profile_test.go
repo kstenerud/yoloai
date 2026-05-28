@@ -194,12 +194,12 @@ tart:
 }
 
 func TestLoadProfile_EnvExpansion(t *testing.T) {
-	t.Setenv("TEST_VAR", "expanded_value")
 	yaml := `
 env:
   MY_VAR: "${TEST_VAR}"
 `
 	_, layout := setupProfileDir(t, "env-profile", yaml)
+	layout.Env = map[string]string{"TEST_VAR": "expanded_value"}
 
 	cfg, err := LoadProfile(layout, "env-profile")
 	if err != nil {
@@ -978,12 +978,12 @@ setup:
 }
 
 func TestLoadProfile_RecipeEnvExpansion(t *testing.T) {
-	t.Setenv("TEST_AUTHKEY", "secret123")
 	yaml := `
 setup:
   - "tailscale up --authkey=${TEST_AUTHKEY}"
 `
 	_, layout := setupProfileDir(t, "recipe-env", yaml)
+	layout.Env = map[string]string{"TEST_AUTHKEY": "secret123"}
 
 	cfg, err := LoadProfile(layout, "recipe-env")
 	if err != nil {

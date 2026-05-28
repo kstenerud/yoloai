@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"strings"
 
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/fileutil"
@@ -47,7 +48,9 @@ func SetRootLayout(l config.Layout) {
 func Layout() config.Layout {
 	if rootLayout.DataDir == "" {
 		home := resolveHome()
-		return config.NewLayoutFor(filepath.Join(home, ".yoloai"), home)
+		l := config.NewLayoutFor(filepath.Join(home, ".yoloai"), home)
+		l.Env = processEnv()
+		return l
 	}
 	return rootLayout
 }
@@ -59,7 +62,25 @@ func Layout() config.Layout {
 // when DataDir is rerooted (e.g. /var/lib/yoloai under a service
 // install).
 func LayoutForDataDir(dataDir string) config.Layout {
-	return config.NewLayoutFor(dataDir, resolveHome())
+	l := config.NewLayoutFor(dataDir, resolveHome())
+	l.Env = processEnv()
+	return l
+}
+
+// processEnv snapshots the process environment into a map for the
+// Layout. This is the single licensed os.Environ() read — the §12
+// boundary that captures ambient env once so library code can expand
+// user-declared ${VAR} references against threaded data instead of
+// the live process env.
+func processEnv() map[string]string {
+	entries := os.Environ()
+	m := make(map[string]string, len(entries))
+	for _, e := range entries {
+		if k, v, ok := strings.Cut(e, "="); ok {
+			m[k] = v
+		}
+	}
+	return m
 }
 
 // resolveHome returns the user's $HOME, honoring SUDO_USER under

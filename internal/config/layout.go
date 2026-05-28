@@ -73,6 +73,20 @@ type Layout struct {
 	// answers "does this process have root privileges right now" for
 	// the canRunCNIBridge check and similar.
 	ProcessIsRoot bool
+
+	// Env is a snapshot of the process environment, captured once at the
+	// outermost boundary (the CLI's licensed os.Environ() read in
+	// cliutil), used to expand user-declared ${VAR} references in config
+	// values and paths. nil by default — NewLayout / NewLayoutFor leave
+	// it unset so library code never reads the live process env; the CLI
+	// populates it, tests/embedders set it explicitly. expandEnvBraced /
+	// ExpandPath read from this map rather than calling os.LookupEnv, so
+	// ${VAR} expansion happens against threaded data, not ambient state
+	// (the read crosses to the boundary; the user's declared intent to
+	// interpolate env is still honored). A nil/empty map means any
+	// ${VAR} reference is an unset-variable error — fine for the baked-in
+	// default config, which contains none.
+	Env map[string]string
 }
 
 // NewLayout constructs a Layout rooted at dataDir with HomeDir

@@ -58,8 +58,9 @@ func applyDirSuffix(result *DirSpec, suffix, arg string) error {
 // default `:ro` for read-only). Aux `:copy` and `:overlay` are no
 // longer supported. Returns *UsageError pointing at the workarounds:
 // make the dir the workdir, mount as `:rw`, or run a separate sandbox.
-func ParseAuxDirArg(arg, homeDir string) (*DirSpec, error) {
-	d, err := ParseDirArg(arg, homeDir)
+// env is the environment map for ${VAR} expansion; use layout.Env.
+func ParseAuxDirArg(arg, homeDir string, env map[string]string) (*DirSpec, error) {
+	d, err := ParseDirArg(arg, homeDir, env)
 	if err != nil {
 		return nil, err
 	}
@@ -88,10 +89,11 @@ func ParseAuxDirArg(arg, homeDir string) (*DirSpec, error) {
 // Default mode (no :copy or :rw) is determined by the caller
 // (workdir defaults to "copy", aux dirs default to "ro").
 // homeDir is used for ~ expansion; callers derive it from layout.HomeDir.
+// env is the environment map for ${VAR} expansion; use layout.Env.
 //
 // Use ParseAuxDirArg for the `-d` flag — it adds the workdir-only
 // validation enforced by Q-U.
-func ParseDirArg(arg, homeDir string) (*DirSpec, error) {
+func ParseDirArg(arg, homeDir string, env map[string]string) (*DirSpec, error) {
 	result := &DirSpec{}
 
 	// Strip =<mount-path> first (before suffix parsing), since suffixes
@@ -123,7 +125,7 @@ func ParseDirArg(arg, homeDir string) (*DirSpec, error) {
 		remaining = remaining[:idx]
 	}
 
-	remaining, err := ExpandPath(remaining, homeDir)
+	remaining, err := ExpandPath(remaining, homeDir, env)
 	if err != nil {
 		return nil, fmt.Errorf("expand path %q: %w", arg, err)
 	}
@@ -134,7 +136,7 @@ func ParseDirArg(arg, homeDir string) (*DirSpec, error) {
 	result.Path = absPath
 
 	if mountPart != "" {
-		mountPart, err = ExpandPath(mountPart, homeDir)
+		mountPart, err = ExpandPath(mountPart, homeDir, env)
 		if err != nil {
 			return nil, fmt.Errorf("expand mount path %q: %w", arg, err)
 		}

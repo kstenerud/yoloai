@@ -35,7 +35,7 @@ func TestParseDirArg_Modes(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := ParseDirArg(tt.input, "/home/user")
+			result, err := ParseDirArg(tt.input, "/home/user", nil)
 			require.NoError(t, err)
 			assert.Equal(t, app, result.Path)
 			assert.Equal(t, tt.expectedMode, result.Mode)
@@ -59,7 +59,7 @@ func TestParseDirArg_ConflictingModes(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			_, err := ParseDirArg(tt.input, "/home/user")
+			_, err := ParseDirArg(tt.input, "/home/user", nil)
 			assert.Error(t, err)
 			assert.Contains(t, err.Error(), tt.errFrag)
 		})
@@ -68,12 +68,12 @@ func TestParseDirArg_ConflictingModes(t *testing.T) {
 
 func TestParseDirArg_AbsolutePath(t *testing.T) {
 	// Absolute path is preserved.
-	result, err := ParseDirArg("/tmp/absolute", "/home/user")
+	result, err := ParseDirArg("/tmp/absolute", "/home/user", nil)
 	require.NoError(t, err)
 	assert.Equal(t, "/tmp/absolute", result.Path)
 
 	// Relative path is resolved to absolute.
-	result, err = ParseDirArg("relative/path", "/home/user")
+	result, err = ParseDirArg("relative/path", "/home/user", nil)
 	require.NoError(t, err)
 	assert.True(t, filepath.IsAbs(result.Path))
 
@@ -86,7 +86,7 @@ func TestParseDirArg_TildeExpansion(t *testing.T) {
 	home, err := os.UserHomeDir()
 	require.NoError(t, err)
 
-	result, err := ParseDirArg("~/somedir:copy", home)
+	result, err := ParseDirArg("~/somedir:copy", home, nil)
 	require.NoError(t, err)
 	assert.Equal(t, filepath.Join(home, "somedir"), result.Path)
 	assert.Equal(t, DirMode("copy"), result.Mode)
@@ -96,28 +96,29 @@ func TestParseDirArg_EnvVarExpansion(t *testing.T) {
 	home, err := os.UserHomeDir()
 	require.NoError(t, err)
 
-	result, err := ParseDirArg("${HOME}/somedir:copy", "/home/user")
+	env := map[string]string{"HOME": home}
+	result, err := ParseDirArg("${HOME}/somedir:copy", "/home/user", env)
 	require.NoError(t, err)
 	assert.Equal(t, filepath.Join(home, "somedir"), result.Path)
 	assert.Equal(t, DirMode("copy"), result.Mode)
 }
 
 func TestParseDirArg_EnvVarUnset(t *testing.T) {
-	_, err := ParseDirArg("${YOLOAI_TEST_NONEXISTENT}/dir:copy", "/home/user")
+	_, err := ParseDirArg("${YOLOAI_TEST_NONEXISTENT}/dir:copy", "/home/user", nil)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "expand path")
 }
 
 func TestParseDirArg_PathWithColons(t *testing.T) {
 	// Unknown suffixes stay as part of the path.
-	result, err := ParseDirArg("/path/to/file:with:colons", "/home/user")
+	result, err := ParseDirArg("/path/to/file:with:colons", "/home/user", nil)
 	require.NoError(t, err)
 	assert.Equal(t, "/path/to/file:with:colons", result.Path)
 	assert.Equal(t, DirMode(""), result.Mode)
 	assert.False(t, result.Force)
 
 	// Known suffix after unknown colons.
-	result, err = ParseDirArg("/path/to/file:with:copy", "/home/user")
+	result, err = ParseDirArg("/path/to/file:with:copy", "/home/user", nil)
 	require.NoError(t, err)
 	assert.Equal(t, "/path/to/file:with", result.Path)
 	assert.Equal(t, DirMode("copy"), result.Mode)
@@ -143,7 +144,7 @@ func TestParseDirArg_MountPath(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := ParseDirArg(tt.input, "/home/user")
+			result, err := ParseDirArg(tt.input, "/home/user", nil)
 			require.NoError(t, err)
 			assert.Equal(t, tt.expectedPath, result.Path)
 			assert.Equal(t, tt.expectedMountPath, result.MountPath)
@@ -156,7 +157,7 @@ func TestParseDirArg_MountPath(t *testing.T) {
 func TestParseDirArg_DoubleColon(t *testing.T) {
 	// Input with trailing "::" — the empty suffix after the last colon is
 	// not a known suffix, so both colons become part of the path.
-	result, err := ParseDirArg("/tmp/test::", "/home/user")
+	result, err := ParseDirArg("/tmp/test::", "/home/user", nil)
 	require.NoError(t, err)
 	assert.Equal(t, "/tmp/test::", result.Path)
 	assert.Equal(t, DirMode(""), result.Mode)
@@ -166,7 +167,7 @@ func TestParseDirArg_DoubleColon(t *testing.T) {
 func TestParseDirArg_TrailingColon(t *testing.T) {
 	// Input with trailing ":" — the empty suffix is not a known suffix,
 	// so the colon becomes part of the path.
-	result, err := ParseDirArg("/tmp/test:", "/home/user")
+	result, err := ParseDirArg("/tmp/test:", "/home/user", nil)
 	require.NoError(t, err)
 	assert.Equal(t, "/tmp/test:", result.Path)
 	assert.Equal(t, DirMode(""), result.Mode)
@@ -185,7 +186,7 @@ func TestDirArg_ResolvedMountPath(t *testing.T) {
 // default :ro. ParseAuxDirArg enforces this with a UsageError so the
 // CLI can pass the message through without wrapping.
 func TestParseAuxDirArg_RejectsCopy(t *testing.T) {
-	_, err := ParseAuxDirArg("/tmp/aux:copy", "/home/user")
+	_, err := ParseAuxDirArg("/tmp/aux:copy", "/home/user", nil)
 	require.Error(t, err)
 	var usage *UsageError
 	require.ErrorAs(t, err, &usage)
@@ -195,7 +196,7 @@ func TestParseAuxDirArg_RejectsCopy(t *testing.T) {
 }
 
 func TestParseAuxDirArg_RejectsOverlay(t *testing.T) {
-	_, err := ParseAuxDirArg("/tmp/aux:overlay", "/home/user")
+	_, err := ParseAuxDirArg("/tmp/aux:overlay", "/home/user", nil)
 	require.Error(t, err)
 	var usage *UsageError
 	require.ErrorAs(t, err, &usage)
@@ -203,14 +204,14 @@ func TestParseAuxDirArg_RejectsOverlay(t *testing.T) {
 }
 
 func TestParseAuxDirArg_AcceptsRW(t *testing.T) {
-	d, err := ParseAuxDirArg("/tmp/aux:rw", "/home/user")
+	d, err := ParseAuxDirArg("/tmp/aux:rw", "/home/user", nil)
 	require.NoError(t, err)
 	assert.Equal(t, DirMode("rw"), d.Mode)
 }
 
 func TestParseAuxDirArg_AcceptsRO_Default(t *testing.T) {
 	// no suffix → empty mode; caller defaults to :ro.
-	d, err := ParseAuxDirArg("/tmp/aux", "/home/user")
+	d, err := ParseAuxDirArg("/tmp/aux", "/home/user", nil)
 	require.NoError(t, err)
 	assert.Equal(t, DirMode(""), d.Mode)
 }
@@ -218,6 +219,6 @@ func TestParseAuxDirArg_AcceptsRO_Default(t *testing.T) {
 func TestParseAuxDirArg_ParseErrorsPassThrough(t *testing.T) {
 	// ParseDirArg surfaces its own non-usage errors (e.g. unset env var
 	// in path); ParseAuxDirArg must propagate those unchanged.
-	_, err := ParseAuxDirArg("${YOLOAI_TEST_NONEXISTENT}/dir", "/home/user")
+	_, err := ParseAuxDirArg("${YOLOAI_TEST_NONEXISTENT}/dir", "/home/user", nil)
 	require.Error(t, err)
 }

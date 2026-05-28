@@ -12,7 +12,10 @@ import (
 
 // ExpandPath composes tilde expansion with braced env var expansion.
 // homeDir is used for ~ expansion; derive from layout.HomeDir.
-func ExpandPath(p, homeDir string) (string, error) { return config.ExpandPath(p, homeDir) }
+// env is the environment map for ${VAR} expansion; use layout.Env.
+func ExpandPath(p, homeDir string, env map[string]string) (string, error) {
+	return config.ExpandPath(p, homeDir, env)
+}
 
 // ExpandTilde replaces a leading ~ with the user's home directory.
 // homeDir is used for ~ expansion; derive from layout.HomeDir.

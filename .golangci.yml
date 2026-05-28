@@ -206,7 +206,7 @@ linters:
       - path: "internal/cli/cliutil/layout\\.go"
         linters:
           - forbidigo
-        text: "os\\.UserHomeDir|os\\.Getenv|user\\.Lookup"
+        text: "os\\.UserHomeDir|os\\.Getenv|os\\.Environ|user\\.Lookup"
 
       # §12 I/O-stream boundary: the CLI layer owns the process's
       # stdin/stdout/stderr — it wires them into IOStreams and writes

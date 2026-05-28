@@ -4,7 +4,6 @@ package config
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 )
@@ -17,15 +16,18 @@ import (
 // homeDir is the user's home directory for ~ expansion; callers derive it
 // from layout.HomeDir (the conventional $HOME/.yoloai DataDir)
 // or pass an explicit home for testing.
-func ExpandPath(path, homeDir string) (string, error) {
+// env is the environment map used for ${VAR} expansion; use layout.Env.
+// A nil env means any ${VAR} reference is an unset-variable error.
+func ExpandPath(path, homeDir string, env map[string]string) (string, error) {
 	path = ExpandTilde(path, homeDir)
-	return expandEnvBraced(path)
+	return expandEnvBraced(path, env)
 }
 
-// expandEnvBraced expands ${VAR} references in s using os.LookupEnv.
+// expandEnvBraced expands ${VAR} references in s using the provided env map.
 // Bare $VAR (without braces) is left as-is. Returns an error for
 // unset variables or unclosed ${.
-func expandEnvBraced(s string) (string, error) {
+// A nil env map means any ${VAR} reference returns an "not set" error.
+func expandEnvBraced(s string, env map[string]string) (string, error) {
 	var b strings.Builder
 	b.Grow(len(s))
 
@@ -48,7 +50,7 @@ func expandEnvBraced(s string) (string, error) {
 		varName := s[i : i+end]
 		i += end + 1 // skip past "}"
 
-		val, ok := os.LookupEnv(varName) //nolint:forbidigo // §12 follow-up (tracked): user-config ${VAR} expansion reads ambient env; should take an explicit env map
+		val, ok := env[varName]
 		if !ok {
 			return "", fmt.Errorf("environment variable %q is not set", varName)
 		}
